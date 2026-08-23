@@ -5252,6 +5252,89 @@ body {
         display: none;
     }
 
+    /* 세로(포트rait) — 표 가로폭 압축, 한 화면에 더 많은 열 노출 */
+    @media (orientation: portrait) {
+        body.bsa-tab-survey .app-content {
+            padding-left: 0.28rem;
+            padding-right: 0.28rem;
+        }
+
+        #tab-survey .section-header {
+            margin-bottom: 0.4rem;
+        }
+
+        #tab-survey .survey-stats-panel {
+            padding: 0.5rem 0.55rem;
+            margin-bottom: 0.45rem;
+        }
+
+        #tab-survey .survey-chart-wrap {
+            padding: 0.35rem;
+        }
+
+        #tab-survey #surveyChartCanvas {
+            max-height: 88px !important;
+        }
+
+        #tab-survey .table-container {
+            padding: 0.12rem;
+            max-height: min(74dvh, calc(100dvh - 9rem));
+        }
+
+        #tab-survey .survey-table {
+            table-layout: fixed;
+            width: max-content;
+            min-width: min(100%, 28rem);
+            font-size: 0.66rem;
+        }
+
+        #tab-survey .survey-table th,
+        #tab-survey .survey-table td {
+            padding: 0.24rem 0.28rem;
+            line-height: 1.2;
+        }
+
+        #tab-survey .survey-table [data-col="no"] { width: 2.1rem; }
+        #tab-survey .survey-table [data-col="location"] { width: 3rem; }
+        #tab-survey .survey-table [data-col="component"] { width: 2.5rem; }
+        #tab-survey .survey-table [data-col="defectType"] { width: 2.8rem; }
+        #tab-survey .survey-table [data-col="size"] { width: 2.4rem; }
+        #tab-survey .survey-table [data-col="category"] { width: 2.5rem; }
+        #tab-survey .survey-table [data-col="progress"],
+        #tab-survey .survey-table [data-col="leak"] { width: 2.2rem; }
+        #tab-survey .survey-table [data-col="cause"] { width: 2.8rem; }
+        #tab-survey .survey-table [data-col="priorityManage"] { width: 2.2rem; }
+        #tab-survey .survey-table [data-col="remark"] { width: 2.6rem; }
+        #tab-survey .survey-table [data-col="floorGroup"] { width: 2.4rem; }
+        #tab-survey .survey-table [data-col="inspectionContent"] { width: 5.2rem; }
+        #tab-survey .survey-table [data-col="crackWidth"],
+        #tab-survey .survey-table [data-col="crackLength"] { width: 2.2rem; }
+
+        #tab-survey .survey-inline-input,
+        #tab-survey .survey-inline-select {
+            min-width: 0;
+            max-width: 100%;
+            width: 100%;
+            font-size: 0.64rem;
+            padding: 0.14rem 0.18rem;
+            border-radius: 4px;
+        }
+
+        #tab-survey .survey-inline-select {
+            padding-right: 0.12rem;
+        }
+
+        #tab-survey .survey-inline-stack {
+            min-width: 0;
+            gap: 0.12rem;
+        }
+
+        #tab-survey .survey-table .badge {
+            font-size: 0.58rem;
+            padding: 0.08rem 0.22rem;
+        }
+    }
+
     /* --- 비파괴 --- */
     #tab-ndt .section-header {
         flex-direction: column;

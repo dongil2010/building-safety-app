@@ -71,7 +71,8 @@ window.BSA.tabs['tab-survey'] = {
         '표 컬럼 설정 (정밀/제3종)',
         '엑셀 저장 · 외부 엑셀 가져오기',
         '결함 직접 등록 / 행 인라인 수정',
-        '모바일: 조사목록 영역 상하·좌우 스크롤 (헤더 sticky)'
+        '모바일: 조사목록 영역 상하·좌우 스크롤 (헤더 sticky)',
+        '모바일 세로: 표 컬럼·입력 압축, 등록자 열 숨김'
     ],
     ownerHint: 'app.js SURVEY TABLE & ALBUM + Excel 엔진',
     enter: function () {

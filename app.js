@@ -12516,11 +12516,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 return renderScreenSurveyCellHtml(colKey, d, ctx);
             case 'category': {
                 const v = d.category || '구조체';
+                const compact = isSurveyPortraitCompact();
                 return `<select class="survey-inline-select survey-inline-category" ${stop}` +
                     ` onchange="window.updateSurveyInlineField('${id}','category',this.value)">` +
-                    `<option value="구조체"${v === '구조체' ? ' selected' : ''}>구조체 ○</option>` +
-                    `<option value="비구조체"${v === '비구조체' ? ' selected' : ''}>비구조체</option>` +
-                    `<option value="마감재"${v === '마감재' ? ' selected' : ''}>마감재</option>` +
+                    `<option value="구조체"${v === '구조체' ? ' selected' : ''}>${compact ? '구조○' : '구조체 ○'}</option>` +
+                    `<option value="비구조체"${v === '비구조체' ? ' selected' : ''}>${compact ? '비구조' : '비구조체'}</option>` +
+                    `<option value="마감재"${v === '마감재' ? ' selected' : ''}>${compact ? '마감' : '마감재'}</option>` +
                     `</select>`;
             }
             case 'progress':
@@ -12689,11 +12690,42 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    function isSurveyPortraitCompact() {
+        return window.matchMedia('(max-width: 1024px) and (orientation: portrait)').matches;
+    }
+
+    const SURVEY_HEADER_SHORT = {
+        no: '번호',
+        location: '위치',
+        component: '부재',
+        defectType: '내용',
+        size: '크기',
+        category: '구조',
+        progress: '진행',
+        leak: '누수',
+        cause: '원인',
+        priorityManage: '중점',
+        remark: '비고',
+        floorGroup: '구분',
+        inspectionContent: '점검',
+        crackWidth: '폭',
+        crackLength: '길이'
+    };
+
+    function getSurveyColumnHeaderLabel(col) {
+        if (isSurveyPortraitCompact()) {
+            return SURVEY_HEADER_SHORT[col.key] || col.label;
+        }
+        return col.label;
+    }
+
     function renderSurveyTableHeader() {
         const theadEl = document.getElementById('surveyTableHead');
         if (!theadEl) return;
         const columns = getActiveSurveyColumns();
-        theadEl.innerHTML = `<tr>${columns.map(c => `<th>${c.label}</th>`).join('')}<th>등록자</th><th>관리</th></tr>`;
+        const compact = isSurveyPortraitCompact();
+        const inspectorTh = compact ? '' : '<th data-col="inspector">등록자</th>';
+        theadEl.innerHTML = `<tr>${columns.map(c => `<th data-col="${c.key}">${getSurveyColumnHeaderLabel(c)}</th>`).join('')}${inspectorTh}<th data-col="actions">관리</th></tr>`;
     }
 
     // 상태조사표 행: 셀에서 바로 수정. 상세 모달은 "상세" 버튼으로 연다.
@@ -12719,7 +12751,8 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         if (defects.length === 0) {
-            elements.surveyTableBody.innerHTML = `<tr><td colspan="${columns.length + 2}" style="text-align:center; padding: 2.5rem; color:#64748b; font-weight:600;">등록된 결함이 없습니다. 도면 점검 탭에서 결함을 마킹해 보세요.</td></tr>`;
+            const surveyExtraCols = isSurveyPortraitCompact() ? 1 : 2;
+            elements.surveyTableBody.innerHTML = `<tr><td colspan="${columns.length + surveyExtraCols}" style="text-align:center; padding: 2.5rem; color:#64748b; font-weight:600;">등록된 결함이 없습니다. 도면 점검 탭에서 결함을 마킹해 보세요.</td></tr>`;
             return;
         }
 
@@ -12749,11 +12782,12 @@ document.addEventListener('DOMContentLoaded', () => {
             const isGroup = d._groupMemberIds && d._groupMemberIds.length > 1;
             const deleteAction = isGroup ? `window.deleteDefectGroup('${d.groupId}')` : `deleteDefectById('${d.id}')`;
 
+            const compactPortrait = isSurveyPortraitCompact();
             return `
                 <tr>
-                    ${columns.map(c => `<td>${renderInlineSurveyCellHtml(c.key, d, ctx)}</td>`).join('')}
-                    <td><span class="badge badge-info">${d.inspectorName || '-'}</span></td>
-                    <td class="survey-row-actions">
+                    ${columns.map(c => `<td data-col="${c.key}">${renderInlineSurveyCellHtml(c.key, d, ctx)}</td>`).join('')}
+                    ${compactPortrait ? '' : `<td data-col="inspector"><span class="badge badge-info">${d.inspectorName || '-'}</span></td>`}
+                    <td data-col="actions" class="survey-row-actions">
                         <button type="button" class="btn btn-sm btn-outline" onclick="event.stopPropagation(); window.openSurveyRowEditModal('${d.id}')" title="상세 모달">상세</button>
                         <button type="button" class="btn btn-sm btn-danger-outline" onclick="event.stopPropagation(); ${deleteAction}">삭제</button>
                     </td>
@@ -12762,6 +12796,15 @@ document.addEventListener('DOMContentLoaded', () => {
         }).join('');
         if (typeof renderPhotoAlbum === 'function') renderPhotoAlbum();
     }
+
+    (function bindSurveyPortraitCompactRefresh() {
+        const mq = window.matchMedia('(max-width: 1024px) and (orientation: portrait)');
+        const refresh = () => {
+            if (state.currentTab === 'tab-survey') renderSurveyTable();
+        };
+        if (typeof mq.addEventListener === 'function') mq.addEventListener('change', refresh);
+        else if (typeof mq.addListener === 'function') mq.addListener(refresh);
+    })();
 
     // --- 상태조사표 컬럼 설정 모달 ---
     // 종별(1,2종/3종)에 따라 서로 다른 state 슬롯(surveyColumns/surveyColumnsGrade3)을 쓴다 —
