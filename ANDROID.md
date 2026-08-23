@@ -46,12 +46,33 @@ npm run android:build:debug
 1. Android Studio → **Build → Generate Signed Bundle / APK**
 2. 키스토어 생성 후 `release` 빌드
 
+## 앱 내부 업데이트 (사이드로드)
+
+홈 화면 **「앱 업데이트」** 버튼으로 Firestore에 등록된 최신 APK를 내려받아 설치합니다.
+
+### 배포 절차 (관리자)
+
+1. `npm run android:build:debug` (또는 서명된 release APK)로 APK 생성
+2. Firebase Console → Storage에 APK 업로드 (예: `releases/app-v1.1.0.apk`) → **다운로드 URL** 복사
+3. Firestore에 문서 생성/수정:
+   - 경로: `app_meta` / `android_release`
+   - 필드 예:
+     - `versionCode` (number): `android/app/build.gradle`의 `versionCode`와 **같거나 더 큰 값**
+     - `versionName` (string): 예 `"1.1.0"`
+     - `apkUrl` (string): Storage 다운로드 URL
+     - `notes` (string, 선택): 변경 요약
+4. `firestore.rules`의 `app_meta` 규칙을 콘솔에 게시했는지 확인 (로그인 사용자 읽기 허용)
+5. 현장 기기에서 앱 로그인 → **앱 업데이트** → 「알 수 없는 앱 설치」허용 → 설치
+
+웹 수정만 반영할 때는 기존처럼 `npm run android:sync` 후 APK를 다시 빌드·배포하고 `versionCode`를 올리면 됩니다.
+
 ## 앱 정보
 
 | 항목 | 값 |
 |------|-----|
 | 패키지 ID | `kr.buildingsafety.inspection` |
 | 앱 이름 | 스마트 안전점검 |
+| 현재 버전 | versionCode **2** / versionName **1.1.0** |
 | WebView | HTTPS 스킴 (`capacitor.config.json`) |
 
 ## 권한
