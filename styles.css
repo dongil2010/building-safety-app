@@ -2072,6 +2072,83 @@ body {
 .survey-inline-select.survey-inline-category {
     font-weight: 800;
     color: #b91c1c;
+    min-width: 4.6rem;
+    max-width: 5.4rem;
+}
+
+/* 상태조사표 — 짧은 컬럼(번호·구조·진행·누수·중점·비고 등) 폭 축소 */
+#tab-survey .survey-table [data-col="no"],
+#tab-survey .survey-table [data-col="floorGroup"],
+#tab-survey .survey-table [data-col="category"],
+#tab-survey .survey-table [data-col="progress"],
+#tab-survey .survey-table [data-col="leak"],
+#tab-survey .survey-table [data-col="priorityManage"],
+#tab-survey .survey-table [data-col="size"],
+#tab-survey .survey-table [data-col="crackWidth"],
+#tab-survey .survey-table [data-col="crackLength"],
+#tab-survey .survey-table [data-col="remark"] {
+    width: 1%;
+    white-space: nowrap;
+}
+
+#tab-survey .survey-table [data-col="no"] {
+    max-width: 4.5rem;
+}
+
+#tab-survey .survey-table [data-col="category"] .survey-inline-select {
+    min-width: 4.4rem;
+    max-width: 5.2rem;
+    width: auto;
+    padding-left: 0.22rem;
+    padding-right: 0.22rem;
+    font-size: 0.76rem;
+}
+
+#tab-survey .survey-table [data-col="progress"] .survey-inline-select,
+#tab-survey .survey-table [data-col="leak"] .survey-inline-select,
+#tab-survey .survey-table [data-col="priorityManage"] .survey-inline-select {
+    min-width: 2.6rem;
+    max-width: 4.2rem;
+    width: auto;
+    padding-left: 0.2rem;
+    padding-right: 0.2rem;
+    font-size: 0.76rem;
+}
+
+#tab-survey .survey-table [data-col="size"] .survey-inline-input,
+#tab-survey .survey-table [data-col="crackWidth"] .survey-inline-input,
+#tab-survey .survey-table [data-col="crackLength"] .survey-inline-input {
+    min-width: 2.8rem;
+    max-width: 5rem;
+    width: auto;
+}
+
+#tab-survey .survey-table [data-col="remark"] {
+    max-width: 7.5rem;
+}
+
+#tab-survey .survey-table th[data-col="no"],
+#tab-survey .survey-table th[data-col="floorGroup"],
+#tab-survey .survey-table th[data-col="category"],
+#tab-survey .survey-table th[data-col="progress"],
+#tab-survey .survey-table th[data-col="leak"],
+#tab-survey .survey-table th[data-col="priorityManage"],
+#tab-survey .survey-table th[data-col="size"],
+#tab-survey .survey-table th[data-col="crackWidth"],
+#tab-survey .survey-table th[data-col="crackLength"],
+#tab-survey .survey-table th[data-col="remark"],
+#tab-survey .survey-table td[data-col="no"],
+#tab-survey .survey-table td[data-col="floorGroup"],
+#tab-survey .survey-table td[data-col="category"],
+#tab-survey .survey-table td[data-col="progress"],
+#tab-survey .survey-table td[data-col="leak"],
+#tab-survey .survey-table td[data-col="priorityManage"],
+#tab-survey .survey-table td[data-col="size"],
+#tab-survey .survey-table td[data-col="crackWidth"],
+#tab-survey .survey-table td[data-col="crackLength"],
+#tab-survey .survey-table td[data-col="remark"] {
+    padding-left: 0.35rem;
+    padding-right: 0.35rem;
 }
 .survey-inline-select.survey-inline-progress option[value="1"],
 .survey-inline-select.survey-inline-leak option[value="1"] {

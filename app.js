@@ -12539,12 +12539,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 return renderScreenSurveyCellHtml(colKey, d, ctx);
             case 'category': {
                 const v = d.category || '구조체';
-                const compact = isSurveyPortraitCompact();
                 return `<select class="survey-inline-select survey-inline-category" ${stop}` +
                     ` onchange="window.updateSurveyInlineField('${id}','category',this.value)">` +
-                    `<option value="구조체"${v === '구조체' ? ' selected' : ''}>${compact ? '구조○' : '구조체 ○'}</option>` +
-                    `<option value="비구조체"${v === '비구조체' ? ' selected' : ''}>${compact ? '비구조' : '비구조체'}</option>` +
-                    `<option value="마감재"${v === '마감재' ? ' selected' : ''}>${compact ? '마감' : '마감재'}</option>` +
+                    `<option value="구조체"${v === '구조체' ? ' selected' : ''}>구조체</option>` +
+                    `<option value="비구조체"${v === '비구조체' ? ' selected' : ''}>비구조체</option>` +
+                    `<option value="마감재"${v === '마감재' ? ' selected' : ''}>마감재</option>` +
                     `</select>`;
             }
             case 'progress':
