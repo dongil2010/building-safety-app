@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">스마트 안전점검</string>
+    <string name="title_activity_main">스마트 안전점검</string>
+    <string name="package_name">kr.buildingsafety.inspection</string>
+    <string name="custom_url_scheme">kr.buildingsafety.inspection</string>
+</resources>

@@ -1,7 +1,15 @@
-# 로컬 IDE/에이전트 설정
-.claude/
+# Android / Capacitor
+node_modules/
+www/
+.capacitor/
 
-# OS
-.DS_Store
-Thumbs.db
-desktop.ini
+# Android Studio / Gradle
+android/.gradle/
+android/app/build/
+android/build/
+android/local.properties
+android/.idea/
+*.apk
+*.aab
+*.keystore
+!android/app/debug.keystore

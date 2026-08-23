@@ -1,0 +1,67 @@
+# Android 앱 빌드 (Capacitor)
+
+웹 PWA(`index.html`, `app.js` 등)를 **Capacitor WebView**로 감싼 네이티브 Android 앱입니다.  
+앱 로직은 그대로 두고, `www/`에 복사한 뒤 Android 프로젝트에 동기화합니다.
+
+## 필요 환경
+
+- Node.js 18+
+- **JDK 17** (Android Studio에 포함 — Capacitor 6 기준)
+- [Android Studio](https://developer.android.com/studio) + Android SDK
+- Windows에서 프로젝트 경로에 **한글**이 있으면 `android/gradle.properties`의 `android.overridePathCheck=true`가 필요합니다(이미 설정됨).
+
+## 최초 1회
+
+```powershell
+npm install
+npm run android:sync
+```
+
+## 웹 수정 후 Android에 반영
+
+```powershell
+npm run android:sync
+```
+
+`prepare-www.ps1` → `www/` 복사 → `cap sync android` 순서로 실행됩니다.
+
+## Android Studio에서 실행 / APK
+
+```powershell
+npm run android:open
+```
+
+Android Studio에서 **Run** (실기기 또는 에뮬레이터).
+
+### 디버그 APK (명령줄)
+
+```powershell
+npm run android:build:debug
+```
+
+생성 위치: `android/app/build/outputs/apk/debug/app-debug.apk`
+
+### 릴리스 APK/AAB
+
+1. Android Studio → **Build → Generate Signed Bundle / APK**
+2. 키스토어 생성 후 `release` 빌드
+
+## 앱 정보
+
+| 항목 | 값 |
+|------|-----|
+| 패키지 ID | `kr.buildingsafety.inspection` |
+| 앱 이름 | 스마트 안전점검 |
+| WebView | HTTPS 스킴 (`capacitor.config.json`) |
+
+## 권한
+
+- **INTERNET** — Firebase·CDN
+- **CAMERA** — 결함 사진 촬영
+- **READ_MEDIA_IMAGES** — 갤러리에서 사진 선택 (Android 13+)
+
+## 주의
+
+- Firebase 로그인·동기화는 **인터넷 연결**이 필요합니다.
+- Service Worker 오프라인 캐시는 WebView에서도 동작합니다.
+- Play Store 배포 시 `versionCode` / `versionName`을 `android/app/build.gradle`에서 올려 주세요.

@@ -1,0 +1,24 @@
+{
+  "name": "building-safety-app",
+  "version": "1.0.0",
+  "private": true,
+  "description": "스마트 건축물 안전점검 현장점검 — PWA + Android(Capacitor)",
+  "scripts": {
+    "prepare:www": "powershell -ExecutionPolicy Bypass -File ./scripts/prepare-www.ps1",
+    "cap:sync": "npm run prepare:www && npx cap sync android",
+    "cap:open": "npx cap open android",
+    "android:sync": "npm run cap:sync",
+    "android:open": "npm run cap:open",
+    "android:setup": "powershell -ExecutionPolicy Bypass -File ./scripts/android-setup.ps1",
+    "android:build:debug": "npm run android:setup && npm run cap:sync && cd android && .\\gradlew.bat assembleDebug"
+  },
+  "dependencies": {
+    "@capacitor/android": "^6.2.1",
+    "@capacitor/core": "^6.2.1",
+    "@capacitor/splash-screen": "^6.0.3",
+    "@capacitor/status-bar": "^6.0.2"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^6.2.1"
+  }
+}
