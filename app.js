@@ -5387,6 +5387,126 @@ document.addEventListener('DOMContentLoaded', () => {
         };
     }
 
+    // 콘크리트 반발경도 성과표(hwpx 내보내기 전용) — NO. 하나(위치 슬롯 하나)의 반발치 원시값
+    // 5행×4열 그리드, 평균경도(R)·각도보정·Ro, 재령·α, 압축강도(식별 1식/2식/3식)+최종강도,
+    // 막대그래프를 한 장의 캔버스 이미지로 그린다. ±20% 밖이라 제외된 값은 그래프/숫자 모두
+    // 다른 색으로 표시한다.
+    function renderStrengthPerfPointCanvas(seq, item, slot, readings, calc) {
+        const W = 2200, H = 560;
+        const canvas = document.createElement('canvas');
+        canvas.width = W;
+        canvas.height = H;
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, W, H);
+        ctx.strokeStyle = '#333333';
+        ctx.lineWidth = 3;
+        ctx.strokeRect(1.5, 1.5, W - 3, H - 3);
+
+        const colX = [0, 300, 820, 1110, 1340, 1680, W];
+        ctx.lineWidth = 1.5;
+        for (let i = 1; i < colX.length - 1; i++) {
+            ctx.beginPath();
+            ctx.moveTo(colX[i], 0);
+            ctx.lineTo(colX[i], H);
+            ctx.stroke();
+        }
+
+        const rawAvg = calc.rawAvg;
+        const threshold = rawAvg * 0.2;
+        const isOutlier = (v) => Math.abs(v - rawAvg) > threshold;
+
+        // 1) 측정위치
+        ctx.textBaseline = 'middle';
+        ctx.textAlign = 'center';
+        ctx.fillStyle = '#111111';
+        ctx.font = 'bold 34px sans-serif';
+        ctx.fillText(`NO.${String(seq).padStart(2, '0')}`, (colX[0] + colX[1]) / 2, 75);
+        ctx.font = '24px sans-serif';
+        [slot.location || item.location || '', item.component || ''].filter(Boolean).forEach((line, i) => {
+            ctx.fillText(line, (colX[0] + colX[1]) / 2, 140 + i * 34);
+        });
+
+        // 2) 반발치 그리드 (5행 × 4열, ±20% 초과 제외값은 주황색)
+        const gridX0 = colX[1] + 25, gridX1 = colX[2] - 25;
+        const gridCols = 4, gridRows = 5, cellH = 40, gridY0 = 45;
+        const cellW = (gridX1 - gridX0) / gridCols;
+        ctx.font = '24px sans-serif';
+        readings.forEach((v, idx) => {
+            if (idx >= gridCols * gridRows) return;
+            const r = Math.floor(idx / gridCols), c = idx % gridCols;
+            ctx.fillStyle = isOutlier(v) ? '#c2410c' : '#111111';
+            ctx.fillText(String(v), gridX0 + c * cellW + cellW / 2, gridY0 + r * cellH + cellH / 2);
+        });
+        ctx.fillStyle = '#555555';
+        ctx.font = '19px sans-serif';
+        ctx.textAlign = 'left';
+        ctx.fillText(`(총 ${calc.totalCount}개 · ±20% 제외 ${calc.excludedCount}개)`, gridX0, gridY0 + gridRows * cellH + 22);
+
+        // 3) 평균경도(R) · 각도보정 · Ro
+        ctx.textAlign = 'center';
+        const c3x = (colX[2] + colX[3]) / 2;
+        ctx.font = '21px sans-serif'; ctx.fillStyle = '#555555';
+        ctx.fillText('평균경도(R)', c3x, 55);
+        ctx.font = 'bold 42px sans-serif'; ctx.fillStyle = '#111111';
+        ctx.fillText(calc.finalAvg.toFixed(1), c3x, 105);
+        ctx.font = '19px sans-serif'; ctx.fillStyle = '#555555';
+        ctx.fillText(`각도보정 ${calc.correction >= 0 ? '+' : ''}${calc.correction.toFixed(2)}`, c3x, 155);
+        ctx.font = 'bold 32px sans-serif'; ctx.fillStyle = '#0369a1';
+        ctx.fillText(`Ro = ${calc.ro.toFixed(2)}`, c3x, 200);
+
+        // 4) 재령 · α(재령보정계수)
+        const c4x = (colX[3] + colX[4]) / 2;
+        ctx.font = '21px sans-serif'; ctx.fillStyle = '#555555';
+        ctx.fillText('재령(일)', c4x, 55);
+        ctx.font = 'bold 34px sans-serif'; ctx.fillStyle = '#111111';
+        ctx.fillText(calc.ageDays != null ? String(calc.ageDays) : '-', c4x, 100);
+        ctx.font = '19px sans-serif'; ctx.fillStyle = '#555555';
+        ctx.fillText('α(재령보정)', c4x, 150);
+        ctx.font = 'bold 28px sans-serif'; ctx.fillStyle = '#111111';
+        ctx.fillText(calc.alpha != null ? calc.alpha.toFixed(2) : '-', c4x, 185);
+
+        // 5) 압축강도(Fc): 활성화된 추정식만 1식/2식/3식 순서로, 맨 아래 최종 강도(굵게)
+        const c5x0 = colX[4] + 20, c5x1 = colX[5] - 20;
+        ctx.textAlign = 'left'; ctx.font = 'bold 21px sans-serif'; ctx.fillStyle = '#555555';
+        ctx.fillText('압축강도(Fc, MPa)', c5x0, 32);
+        let fy = 75;
+        calc.results.forEach((r, i) => {
+            if (!r.enabled) return;
+            ctx.font = '22px sans-serif'; ctx.fillStyle = '#333333'; ctx.textAlign = 'left';
+            ctx.fillText(`${i + 1}식`, c5x0, fy);
+            ctx.font = 'bold 24px sans-serif'; ctx.fillStyle = '#111111'; ctx.textAlign = 'right';
+            ctx.fillText(r.value.toFixed(1), c5x1, fy);
+            fy += 42;
+        });
+        ctx.strokeStyle = '#94a3b8'; ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.moveTo(c5x0, fy - 10); ctx.lineTo(c5x1, fy - 10); ctx.stroke();
+        ctx.font = 'bold 24px sans-serif'; ctx.fillStyle = '#333333'; ctx.textAlign = 'left';
+        ctx.fillText('강도', c5x0, fy + 24);
+        ctx.font = 'bold 40px sans-serif'; ctx.fillStyle = '#b91c1c'; ctx.textAlign = 'right';
+        ctx.fillText(calc.finalStrength.toFixed(1), c5x1, fy + 24);
+
+        // 6) 막대그래프 — ±20% 제외값은 옅은 빨강, 점선은 평균경도(R) 위치
+        const chX0 = colX[5] + 20, chX1 = colX[6] - 20, chY0 = 35, chY1 = H - 35;
+        const maxV = Math.max(...readings) * 1.15;
+        const barGap = 5;
+        const barW = (chX1 - chX0 - barGap * (readings.length - 1)) / readings.length;
+        ctx.strokeStyle = '#cbd5e1'; ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.moveTo(chX0, chY1); ctx.lineTo(chX1, chY1); ctx.stroke();
+        readings.forEach((v, i) => {
+            const bh = (v / maxV) * (chY1 - chY0);
+            const bx = chX0 + i * (barW + barGap);
+            ctx.fillStyle = isOutlier(v) ? '#fca5a5' : '#93c5fd';
+            ctx.fillRect(bx, chY1 - bh, barW, bh);
+        });
+        const avgY = chY1 - (calc.finalAvg / maxV) * (chY1 - chY0);
+        ctx.strokeStyle = '#ef4444'; ctx.lineWidth = 2; ctx.setLineDash([8, 5]);
+        ctx.beginPath(); ctx.moveTo(chX0, avgY); ctx.lineTo(chX1, avgY); ctx.stroke();
+        ctx.setLineDash([]);
+
+        return canvas;
+    }
+
     window.toggleNdtModalFields = function() {
         const cat = document.getElementById('ndtCategory')?.value || '강도';
         const stdGrp = document.getElementById('groupNdtStandardFields');
@@ -15814,6 +15934,61 @@ document.addEventListener('DOMContentLoaded', () => {
                         if (tbl) fillNdtTable(tbl, STRENGTH_HEADER_ROWS, strengthRows);
                     } else {
                         removeNdtTableById(STRENGTH_TBL_ID);
+                    }
+
+                    // --- 콘크리트 반발경도 성과표(7.1.2.3) — 표본 문서엔 다른 회사의 실측 데이터를
+                    // 찍은 정적 그림(WMF)이 그대로 박혀 있어서, 그동안 어느 건물을 내보내든 항상 그
+                    // 남의 데이터가 그대로 나갔다. 제목 문단 바로 다음에 이어지는 그림 문단들을 전부
+                    // 걷어내고, NO.(위치 슬롯)별로 반발치·보정·압축강도·막대그래프를 캔버스로 그려
+                    // 그 자리에 하나씩 새로 넣는다.
+                    {
+                        const allParasForPerf = secChildren();
+                        const perfHeadingPara = allParasForPerf.find(p => paraText(p).includes('반발경도 성과표'));
+                        if (perfHeadingPara) {
+                            const headingIdx = allParasForPerf.indexOf(perfHeadingPara);
+                            const picParas = [];
+                            for (let i = headingIdx + 1; i < allParasForPerf.length; i++) {
+                                if (allParasForPerf[i].getElementsByTagNameNS(HP_NS, 'pic').length > 0) {
+                                    picParas.push(allParasForPerf[i]);
+                                } else {
+                                    break;
+                                }
+                            }
+                            if (picParas.length > 0) {
+                                const picParaTemplate = picParas[0].cloneNode(true);
+                                const stopNode = allParasForPerf[headingIdx + 1 + picParas.length] || null;
+                                removeParaRange(picParas[0], stopNode);
+
+                                const perfPoints = [];
+                                strengthItemsHwpx.forEach(item => {
+                                    const slots = Array.isArray(item.strengthSlots) && item.strengthSlots.length > 0
+                                        ? item.strengthSlots
+                                        : [{ location: item.location, readings: [] }];
+                                    slots.forEach(slot => perfPoints.push({ item, slot }));
+                                });
+
+                                const perfAgeDays = getConcreteAgeInDays();
+                                const perfEnabledNames = getEnabledStrengthFormulaNames(bldg);
+                                perfPoints.forEach((pt, seq) => {
+                                    const readings = (pt.slot.readings || []).filter(v => v !== '' && v !== null && v !== undefined);
+                                    if (readings.length === 0) return;
+                                    const calc = calcConcreteStrength(readings, parseFloat(pt.item.strengthAngle), perfAgeDays, perfEnabledNames);
+                                    if (!calc) return;
+                                    const canvas = renderStrengthPerfPointCanvas(seq + 1, pt.item, pt.slot, readings, calc);
+                                    const dataUrl = canvas.toDataURL('image/png');
+                                    const { bytes, mime, ext } = dataUrlToBytes(dataUrl);
+                                    imgCounter++;
+                                    const imgId = `strengthPerfAuto${imgCounter}`;
+                                    zip.file(`BinData/${imgId}.${ext}`, bytes);
+                                    manifestAdds.push(`<opf:item id="${imgId}" href="BinData/${imgId}.${ext}" media-type="${mime}" isEmbeded="1"/>`);
+
+                                    const newPara = picParaTemplate.cloneNode(true);
+                                    const pic = newPara.getElementsByTagNameNS(HP_NS, 'pic')[0];
+                                    setPicImage(pic, imgId, canvas.width, canvas.height, 42520, 999999999);
+                                    sec.insertBefore(newPara, stopNode);
+                                });
+                            }
+                        }
                     }
 
                     if (carbItemsHwpx.length > 0) {
