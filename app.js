@@ -7872,11 +7872,68 @@ document.addEventListener('DOMContentLoaded', () => {
         if (mobileRedo) mobileRedo.disabled = !canRedo;
     }
 
+    // 결함목록 스크롤 위치 저장·복원 (DOM 재렌더 시 맨 위로 튀는 현상 방지)
+    function captureDefectListScroll(panel) {
+        if (!panel) return null;
+        const sections = {};
+        panel.querySelectorAll('.defect-list-section').forEach((sec) => {
+            const titleEl = sec.querySelector('.defect-list-section-title');
+            const key = titleEl ? titleEl.textContent.trim() : '';
+            const box = sec.querySelector('.defect-list-section-scroll');
+            if (key && box) sections[key] = box.scrollTop;
+        });
+        return { panelTop: panel.scrollTop, sections };
+    }
+
+    function restoreDefectListScroll(panel, snapshot) {
+        if (!panel || !snapshot) return;
+        requestAnimationFrame(() => {
+            if (typeof snapshot.panelTop === 'number') panel.scrollTop = snapshot.panelTop;
+            panel.querySelectorAll('.defect-list-section').forEach((sec) => {
+                const titleEl = sec.querySelector('.defect-list-section-title');
+                const key = titleEl ? titleEl.textContent.trim() : '';
+                const box = sec.querySelector('.defect-list-section-scroll');
+                if (key && box && snapshot.sections[key] !== undefined) {
+                    box.scrollTop = snapshot.sections[key];
+                }
+            });
+        });
+    }
+
+    function scrollDefectListRowIntoView(row, behavior) {
+        if (!row) return;
+        const scrollBox = row.closest('.defect-list-section-scroll');
+        const panel = document.getElementById('defectListPanel');
+        const scrollBehavior = behavior || 'smooth';
+        if (scrollBox) {
+            const pad = 4;
+            const rowTop = row.offsetTop;
+            const rowBottom = rowTop + row.offsetHeight;
+            const viewTop = scrollBox.scrollTop;
+            const viewBottom = viewTop + scrollBox.clientHeight;
+            let next = null;
+            if (rowTop < viewTop + pad) next = Math.max(0, rowTop - pad);
+            else if (rowBottom > viewBottom - pad) next = rowBottom - scrollBox.clientHeight + pad;
+            if (next !== null) scrollBox.scrollTo({ top: next, behavior: scrollBehavior });
+            return;
+        }
+        if (panel && panel.contains(row)) {
+            const panelRect = panel.getBoundingClientRect();
+            const rowRect = row.getBoundingClientRect();
+            if (rowRect.top < panelRect.top || rowRect.bottom > panelRect.bottom) {
+                row.scrollIntoView({ behavior: scrollBehavior, block: 'nearest' });
+            }
+        }
+    }
+
     // 좌측 사이드바에 표시되는 "현재 층에 등록된 결함" 간단 목록 렌더링
-    function renderDefectListPanel() {
+    function renderDefectListPanel(options = {}) {
         const panel = document.getElementById('defectListPanel');
         const summaryEl = document.getElementById('defectListSummary');
         if (!panel) return;
+
+        const scrollSnapshot = captureDefectListScroll(panel);
+        const scrollToSelection = options.scrollToSelection === true;
 
         if (!state.currentBuildingId) {
             panel.innerHTML = '';
@@ -7995,30 +8052,30 @@ document.addEventListener('DOMContentLoaded', () => {
         const curSection = renderDefectListSection('🆕 금회차 조사항목', currentItems);
         if (curSection) panel.appendChild(curSection);
 
-        // 다중 선택: 상단 묶음으로 스크롤 / 단일 선택: 원래 위치 행으로 스크롤
-        if (pinSelectedToTop) {
+        // 다중 선택: 상단 묶음으로 스크롤 / 단일 선택(도면): 원래 위치 행으로 스크롤
+        if (scrollToSelection && pinSelectedToTop) {
             const clusterKey = selectedCluster.map(d => d.id || d.groupId).join(',');
             if (window._defectListScrollSelectedId !== clusterKey) {
                 window._defectListScrollSelectedId = clusterKey;
                 requestAnimationFrame(() => {
                     const cluster = panel.querySelector('.defect-list-section.is-selected-cluster');
-                    if (cluster && typeof cluster.scrollIntoView === 'function') {
-                        cluster.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                    }
+                    const clusterRow = cluster && cluster.querySelector('.defect-list-item');
+                    if (clusterRow) scrollDefectListRowIntoView(clusterRow);
                 });
             }
-        } else if (selectedCluster.length === 1) {
+        } else if (scrollToSelection && selectedCluster.length === 1) {
             const onlyKey = selectedCluster[0].id || selectedCluster[0].groupId;
             const scrollKey = `single:${onlyKey}`;
             if (window._defectListScrollSelectedId !== scrollKey) {
                 window._defectListScrollSelectedId = scrollKey;
                 requestAnimationFrame(() => {
                     const row = panel.querySelector('.defect-list-item.is-map-selected');
-                    if (row && typeof row.scrollIntoView === 'function') {
-                        row.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-                    }
+                    if (row) scrollDefectListRowIntoView(row);
                 });
             }
+        } else if (!scrollToSelection) {
+            restoreDefectListScroll(panel, scrollSnapshot);
+            if (selectedCluster.length === 0) window._defectListScrollSelectedId = null;
         } else {
             window._defectListScrollSelectedId = null;
         }
@@ -8182,7 +8239,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (set) {
                     set.clear();
                     if (d.id) set.add(d.id);
-                    if (typeof updateMapSelectionBar === 'function') updateMapSelectionBar();
+                    if (typeof updateMapSelectionBar === 'function') updateMapSelectionBar({ scrollToSelection: false });
                     else if (typeof renderDefectListPanel === 'function') renderDefectListPanel();
                 }
             }
@@ -10088,7 +10145,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let selectedDefectIds = new Set();
     window.getSelectedDefectIds = () => selectedDefectIds;
 
-    function updateMapSelectionBar() {
+    function updateMapSelectionBar(options = {}) {
         const bar = document.getElementById('mapSelectionBar');
         const countEl = document.getElementById('mapSelectionCount');
         if (!bar) return;
@@ -10099,8 +10156,10 @@ document.addEventListener('DOMContentLoaded', () => {
             bar.hidden = false;
             if (countEl) countEl.textContent = `${n}개 선택`;
         }
-        // 결함목록: 선택 하이라이트 / 다중 선택 상단 묶음 / 단일 선택은 원위치 스크롤
-        if (typeof renderDefectListPanel === 'function') renderDefectListPanel();
+        // 결함목록: 도면 선택 시만 스크롤 / 목록 클릭·필터 등은 스크롤 위치 유지
+        if (typeof renderDefectListPanel === 'function') {
+            renderDefectListPanel({ scrollToSelection: options.scrollToSelection === true });
+        }
     }
 
     function translateDefectBy(d, dx, dy) {
@@ -10624,7 +10683,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     selectedDefectIds = new Set([id]);
                 }
                 // 이미 다중 선택된 핀을 다시 누르면 선택 유지 → 그룹 드래그용
-                updateMapSelectionBar();
+                updateMapSelectionBar({ scrollToSelection: true });
                 drawCanvas();
             }
             if (isTouch && !mobileQuickDragEnabled) {
@@ -10914,12 +10973,12 @@ document.addEventListener('DOMContentLoaded', () => {
             pendingDragHit = null;
             // Ctrl 토글 클릭이거나 다중 선택 상태면 내용 수정 모달 열지 않음
             if (wasAdditive || selectedDefectIds.size > 1) {
-                updateMapSelectionBar();
+                updateMapSelectionBar({ scrollToSelection: true });
                 drawCanvas();
                 return;
             }
             selectedDefectIds = new Set([d.id]);
-            updateMapSelectionBar();
+            updateMapSelectionBar({ scrollToSelection: true });
             openAddDefectModal(d.x, d.y, d.targetX, d.targetY, d);
             return;
         }
@@ -10990,7 +11049,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 });
             }
             marqueeAdditive = false;
-            updateMapSelectionBar();
+            updateMapSelectionBar({ scrollToSelection: true });
             drawCanvas();
             // PC: 드래그(마퀴)로 정확히 1개만 선택되면 클릭과 같이 결함 수정창 오픈
             if (!endedFromTouch && !tiny && selectedDefectIds.size === 1) {
