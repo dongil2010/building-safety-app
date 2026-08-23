@@ -117,7 +117,7 @@ document.addEventListener('DOMContentLoaded', () => {
     updateOfflineBadge();
     window.addEventListener('online', () => {
         updateOfflineBadge();
-        window.showToast('온라인 상태로 전환되었습니다. 동기화를 진행합니다.', 'success');
+        window.showToast('온라인 상태로 전환되었습니다. 서버 데이터와 병합 후 동기화합니다.', 'success');
         if (typeof syncStateToFirebase === 'function') syncStateToFirebase();
     });
     window.addEventListener('offline', () => {
@@ -127,6 +127,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // --- 4. PERSISTENCE ENGINE (LOCAL STORAGE + INDEXEDDB) ---
     let _localStorageSaveFailedNotified = false;
+    let _suppressSyncOnSave = false;
 
     // 이미 IndexedDB에 저장해둔 이미지는 매번 다시 쓰지 않도록 키를 기억해둔다
     // (saveStateToLocalStorage는 아주 자주 호출되므로, 안 그러면 같은 이미지를 계속 다시 쓰게 된다)
@@ -271,6 +272,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 defects: sanitizedDefects,
                 ndtData: window.state.ndtData || {},
                 ndtDisplacementGroups: window.state.ndtDisplacementGroups || {},
+                deletedDefectIds: window.state.deletedDefectIds || {},
+                deletedNdtIds: window.state.deletedNdtIds || {},
                 buildings: sanitizedBuildings,
                 lastUsedBuildingId: window.state.currentBuildingId || null,
                 customDefectTypes: window.state.customDefectTypes || {},
@@ -298,7 +301,9 @@ document.addEventListener('DOMContentLoaded', () => {
             };
             localStorage.setItem('building_safety_app_state_v2', JSON.stringify(dataToSave));
             _localStorageSaveFailedNotified = false;
-            if (typeof syncStateToFirebase === 'function') {
+            if (!_suppressSyncOnSave && typeof scheduleSyncToFirebase === 'function') {
+                scheduleSyncToFirebase();
+            } else if (!_suppressSyncOnSave && typeof syncStateToFirebase === 'function') {
                 syncStateToFirebase();
             }
         } catch (e) {
@@ -360,6 +365,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
                 if (parsed.ndtDisplacementGroups) {
                     window.state.ndtDisplacementGroups = parsed.ndtDisplacementGroups;
+                }
+                if (parsed.deletedDefectIds) {
+                    window.state.deletedDefectIds = parsed.deletedDefectIds;
+                }
+                if (parsed.deletedNdtIds) {
+                    window.state.deletedNdtIds = parsed.deletedNdtIds;
                 }
                 if (parsed.customDefectTypes) {
                     window.state.customDefectTypes = parsed.customDefectTypes;
@@ -445,6 +456,165 @@ document.addEventListener('DOMContentLoaded', () => {
             console.error('LocalStorage load failed:', e);
             window.state.buildings = getDefaultBuildings();
         }
+    }
+
+    // --- 다기기 동기화: 삭제 추적 + ID 기준 병합 ---
+    function ensureSyncMetaState() {
+        if (!window.state.deletedDefectIds) window.state.deletedDefectIds = {};
+        if (!window.state.deletedNdtIds) window.state.deletedNdtIds = {};
+    }
+
+    function touchDefectUpdatedAt(defect) {
+        if (defect) defect.updatedAt = Date.now();
+    }
+
+    function touchNdtUpdatedAt(item) {
+        if (item) item.updatedAt = Date.now();
+    }
+
+    function getRecordUpdatedAt(rec, kind) {
+        if (!rec) return 0;
+        if (rec.updatedAt) return Number(rec.updatedAt) || 0;
+        const id = rec.id || '';
+        if (kind === 'pin') {
+            const m = /^pin-(\d+)/.exec(id);
+            if (m) return Number(m[1]) || 0;
+        }
+        if (kind === 'ndt') {
+            const m = /^ndt_(\d+)/.exec(id);
+            if (m) return Number(m[1]) || 0;
+        }
+        return 0;
+    }
+
+    function trackDefectDeletion(floorKey, defectId) {
+        if (!floorKey || !defectId) return;
+        ensureSyncMetaState();
+        const set = new Set(window.state.deletedDefectIds[floorKey] || []);
+        set.add(defectId);
+        window.state.deletedDefectIds[floorKey] = Array.from(set);
+    }
+
+    function trackNdtDeletion(floorKey, itemId) {
+        if (!floorKey || !itemId) return;
+        ensureSyncMetaState();
+        const set = new Set(window.state.deletedNdtIds[floorKey] || []);
+        set.add(itemId);
+        window.state.deletedNdtIds[floorKey] = Array.from(set);
+    }
+
+    function mergeDeletedIdsMaps(serverMap, localMap) {
+        const out = { ...(serverMap || {}) };
+        Object.entries(localMap || {}).forEach(([key, ids]) => {
+            const set = new Set([...(out[key] || []), ...(ids || [])]);
+            if (set.size > 0) out[key] = Array.from(set);
+        });
+        return out;
+    }
+
+    function mergePhotoArrays(primaryArr, secondaryArr) {
+        const seen = new Set();
+        const out = [];
+        const add = (p) => {
+            if (!p) return;
+            const key = String(p);
+            if (seen.has(key)) return;
+            seen.add(key);
+            out.push(p);
+        };
+        (primaryArr || []).forEach(add);
+        (secondaryArr || []).forEach(add);
+        return out;
+    }
+
+    function extractInlinePhotos(defect, kind) {
+        if (!defect) return [];
+        if (kind === 'prev') {
+            return (Array.isArray(defect.prevRoundPhotos) ? defect.prevRoundPhotos : []).filter(Boolean);
+        }
+        return (Array.isArray(defect.photos) ? defect.photos : []).filter(Boolean);
+    }
+
+    /** 같은 결함 ID — 텍스트·좌표는 최신쪽, 사진은 서버(먼저 동기화) 우선 + 로컬 추가분 합침 */
+    function mergeDefectRecord(serverRec, localRec) {
+        if (!serverRec) return localRec ? { ...localRec } : null;
+        if (!localRec) return { ...serverRec };
+
+        const serverTs = getRecordUpdatedAt(serverRec, 'pin');
+        const localTs = getRecordUpdatedAt(localRec, 'pin');
+        const newer = localTs >= serverTs ? localRec : serverRec;
+        const merged = { ...newer };
+
+        merged.photos = mergePhotoArrays(
+            extractInlinePhotos(serverRec),
+            extractInlinePhotos(localRec)
+        );
+        merged.prevRoundPhotos = mergePhotoArrays(
+            extractInlinePhotos(serverRec, 'prev'),
+            extractInlinePhotos(localRec, 'prev')
+        );
+        delete merged.photoIds;
+        delete merged.prevRoundPhotoIds;
+        merged.updatedAt = Math.max(serverTs, localTs, Number(merged.updatedAt) || 0);
+        return merged;
+    }
+
+    function mergeIdRecordArrays(serverArr, localArr, deletedIds, kind) {
+        const deleted = new Set(deletedIds || []);
+        const byId = new Map();
+        (serverArr || []).forEach((rec) => {
+            if (rec?.id && !deleted.has(rec.id)) byId.set(rec.id, rec);
+        });
+        (localArr || []).forEach((rec) => {
+            if (!rec?.id || deleted.has(rec.id)) return;
+            const existing = byId.get(rec.id);
+            if (!existing) {
+                byId.set(rec.id, rec);
+            } else if (kind === 'pin') {
+                byId.set(rec.id, mergeDefectRecord(existing, rec));
+            } else if (getRecordUpdatedAt(rec, kind) >= getRecordUpdatedAt(existing, kind)) {
+                byId.set(rec.id, rec);
+            }
+        });
+        return Array.from(byId.values());
+    }
+
+    function mergeDefectsMaps(serverMap, localMap, serverDeleted, localDeleted) {
+        const mergedDeleted = mergeDeletedIdsMaps(serverDeleted, localDeleted);
+        const keys = new Set([
+            ...Object.keys(serverMap || {}),
+            ...Object.keys(localMap || {}),
+            ...Object.keys(mergedDeleted || {})
+        ]);
+        const defects = {};
+        keys.forEach((key) => {
+            defects[key] = mergeIdRecordArrays(
+                serverMap?.[key],
+                localMap?.[key],
+                mergedDeleted[key],
+                'pin'
+            );
+        });
+        return { defects, deletedDefectIds: mergedDeleted };
+    }
+
+    function mergeNdtDataMaps(serverMap, localMap, serverDeleted, localDeleted) {
+        const mergedDeleted = mergeDeletedIdsMaps(serverDeleted, localDeleted);
+        const keys = new Set([
+            ...Object.keys(serverMap || {}),
+            ...Object.keys(localMap || {}),
+            ...Object.keys(mergedDeleted || {})
+        ]);
+        const ndtData = {};
+        keys.forEach((key) => {
+            ndtData[key] = mergeIdRecordArrays(
+                serverMap?.[key],
+                localMap?.[key],
+                mergedDeleted[key],
+                'ndt'
+            );
+        });
+        return { ndtData, deletedNdtIds: mergedDeleted };
     }
 
     // saveStateToLocalStorage에서 IndexedDB로 옮겨 저장한 도면/사진을 다시 불러와
@@ -2167,6 +2337,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (pinIds.length) {
             if (!state.ndtData[key]) state.ndtData[key] = [];
+            pinIds.forEach((id) => trackNdtDeletion(key, id));
             state.ndtData[key] = state.ndtData[key].filter(x => !pinIds.includes(x.id));
         }
         if (dispIds.length) {
@@ -4939,6 +5110,7 @@ document.addEventListener('DOMContentLoaded', () => {
     window.deleteNdtItem = function(id) {
         if (confirm('⚠️ 해당 비파괴 조사 측정 항목을 삭제하시겠습니까?')) {
             const key = `${state.currentBuildingId}_${state.currentFloor}`;
+            trackNdtDeletion(key, id);
             state.ndtData[key] = (state.ndtData[key] || []).filter(x => x.id !== id);
             saveStateToLocalStorage();
             drawNdtCanvas();
@@ -6119,6 +6291,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     ...measureExtra,
                     inspectorName: existing.inspectorName || window.state.userName || ''
                 };
+                touchNdtUpdatedAt(state.ndtData[key][idx]);
                 savedItem = state.ndtData[key][idx];
                 window._pendingNdtExtra = {
                     targetX: liveTargetX,
@@ -6150,6 +6323,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 ...carbExtra,
                 ...measureExtra,
                 inspectorName: window.state.userName || '',
+                updatedAt: Date.now(),
                 x: extra.targetX,
                 y: extra.targetY
             };
@@ -6382,6 +6556,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     window.clearTimeout(window._ndtAutoApplyTimer);
                     window._ndtAutoApplyTimer = null;
                     const key = `${state.currentBuildingId}_${state.currentFloor}`;
+                    trackNdtDeletion(key, pinId);
                     state.ndtData[key] = (state.ndtData[key] || []).filter(x => x.id !== pinId);
                     saveStateToLocalStorage();
                     drawNdtCanvas();
@@ -11477,6 +11652,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (!state.defects[key][idx].inspectorName) {
                     state.defects[key][idx].inspectorName = window.state.userName || '';
                 }
+                touchDefectUpdatedAt(state.defects[key][idx]);
                 savedDefect = state.defects[key][idx];
             }
         } else {
@@ -11503,6 +11679,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 forceArrowDir: forceArrowDir,
                 arrowOctant: arrowOctant,
                 surveyRound: newDefectSurveyRound,
+                updatedAt: Date.now(),
                 photos: photosVal,
                 inspectorName: window.state.userName || '',
                 x: coords.x,
@@ -15712,6 +15889,7 @@ document.addEventListener('DOMContentLoaded', () => {
     function removeSingleDefectRecord(key, id) {
         const target = state.defects[key].find(d => d.id === id);
         if (target) {
+            trackDefectDeletion(key, id);
             deleteAllPhotosForDefect(target).then(failCount => {
                 if (failCount > 0) {
                     window.showToast(`사진 ${failCount}건 삭제에 실패했습니다. 네트워크 상태를 확인해 주세요.`, 'warning', 5000);
@@ -16994,6 +17172,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
     let db = null;
     let isRemoteSyncing = false;
+    let _syncInFlight = false;
+    let _syncPending = false;
+    let _syncDebounceTimer = null;
 
     let auth = null;
     window._justRegistering = false;
@@ -17164,34 +17345,176 @@ document.addEventListener('DOMContentLoaded', () => {
         return result;
     }
 
-    function syncStateToFirebase() {
-        if (!db || isRemoteSyncing || !window.state.companyId) return;
+    function sanitizeDefectsForFirestore(defectsMap) {
+        const sanitizedDefects = {};
+        Object.entries(defectsMap || {}).forEach(([key, arr]) => {
+            sanitizedDefects[key] = (arr || []).map(d => {
+                const { photos, prevRoundPhotos, photoIds, prevRoundPhotoIds, ...rest } = d;
+                const out = { ...rest };
+                if (photos && photos.length > 0) {
+                    out.photoIds = photos.map((_, i) => getPhotoDocId(d.id, i));
+                }
+                if (prevRoundPhotos && prevRoundPhotos.length > 0) {
+                    out.prevRoundPhotoIds = prevRoundPhotos.map((_, i) => getPhotoDocId(d.id, i, 'prev'));
+                }
+                return out;
+            });
+        });
+        return sanitizedDefects;
+    }
+
+    function scheduleSyncToFirebase() {
+        if (!db || isRemoteSyncing || !window.state.companyId || !navigator.onLine) return;
+        if (_syncDebounceTimer) clearTimeout(_syncDebounceTimer);
+        _syncDebounceTimer = setTimeout(() => {
+            _syncDebounceTimer = null;
+            syncStateToFirebase();
+        }, 900);
+    }
+
+    async function applyMergedRemoteData(data) {
+        if (!data) return false;
+        ensureSyncMetaState();
+        let isChanged = false;
+
+        if (data.buildings && Array.isArray(data.buildings) && data.buildings.length > 0) {
+            const prevDrawingsById = {};
+            (window.state.buildings || []).forEach(b => { prevDrawingsById[b.id] = b.floorDrawings || {}; });
+            window.state.buildings = data.buildings.map(b => ({
+                ...b,
+                floorDrawings: prevDrawingsById[b.id] || {}
+            }));
+            isChanged = true;
+        }
+
+        if (data.defects) {
+            const remoteHydrated = await hydrateDefectPhotos(data.defects);
+            const localHydrated = await hydrateDefectPhotos(window.state.defects || {});
+            const defectMerge = mergeDefectsMaps(
+                remoteHydrated,
+                localHydrated,
+                data.deletedDefectIds || {},
+                window.state.deletedDefectIds || {}
+            );
+            window.state.defects = await hydrateDefectPhotos(defectMerge.defects);
+            window.state.deletedDefectIds = defectMerge.deletedDefectIds;
+            isChanged = true;
+        }
+
+        if (data.ndtData) {
+            const ndtMerge = mergeNdtDataMaps(
+                data.ndtData,
+                window.state.ndtData || {},
+                data.deletedNdtIds || {},
+                window.state.deletedNdtIds || {}
+            );
+            window.state.ndtData = ndtMerge.ndtData;
+            window.state.deletedNdtIds = ndtMerge.deletedNdtIds;
+            isChanged = true;
+        }
+
+        if (data.ndtDisplacementGroups) {
+            window.state.ndtDisplacementGroups = data.ndtDisplacementGroups;
+            isChanged = true;
+        }
+        if (data.grids) {
+            window.state.grids = data.grids;
+            isChanged = true;
+        }
+        if (data.styleColors) {
+            window.state.styleColors = data.styleColors;
+            isChanged = true;
+        }
+        if (data.styleSizes) {
+            window.state.styleSizes = data.styleSizes;
+            isChanged = true;
+        }
+        if (data.defectLeaderLineScale !== undefined) {
+            window.state.defectLeaderLineScale = data.defectLeaderLineScale;
+            window.state._globalDefectLeaderLineScaleFallback = data.defectLeaderLineScale;
+            isChanged = true;
+        }
+        if (data.ndtLeaderLineScale !== undefined) {
+            window.state.ndtLeaderLineScale = data.ndtLeaderLineScale;
+            isChanged = true;
+        }
+        if (data.styleSizeBarLockedMap !== undefined) {
+            window.state.styleSizeBarLockedMap = !!data.styleSizeBarLockedMap;
+            isChanged = true;
+        }
+        if (data.styleSizeBarLockedNdt !== undefined) {
+            window.state.styleSizeBarLockedNdt = !!data.styleSizeBarLockedNdt;
+            isChanged = true;
+        }
+        if (data.floorMapStyleSettings) {
+            window.state.floorMapStyleSettings = data.floorMapStyleSettings;
+            isChanged = true;
+        }
+        if (data.styleShapes) {
+            window.state.styleShapes = data.styleShapes;
+            isChanged = true;
+        }
+        if (data.locationMapLegend) {
+            window.state.locationMapLegend = data.locationMapLegend;
+            isChanged = true;
+        }
+        if (data.locationMapLegendBox) {
+            window.state.locationMapLegendBox = data.locationMapLegendBox;
+            isChanged = true;
+        }
+
+        return isChanged;
+    }
+
+    async function syncStateToFirebase() {
+        if (!db || isRemoteSyncing || !window.state.companyId || !navigator.onLine) return;
+        if (_syncInFlight) {
+            _syncPending = true;
+            return;
+        }
+        _syncInFlight = true;
+        ensureSyncMetaState();
         try {
             const docId = getCompanyDocId();
+            const docRef = db.collection('safety_app').doc(docId);
+            const snap = await docRef.get();
+            const serverData = snap.exists ? snap.data() : {};
+
+            const serverDefectsHydrated = await hydrateDefectPhotos(serverData.defects || {});
+            const localDefectsHydrated = await hydrateDefectPhotos(window.state.defects || {});
+            const defectMerge = mergeDefectsMaps(
+                serverDefectsHydrated,
+                localDefectsHydrated,
+                serverData.deletedDefectIds || {},
+                window.state.deletedDefectIds || {}
+            );
+            const ndtMerge = mergeNdtDataMaps(
+                serverData.ndtData || {},
+                window.state.ndtData || {},
+                serverData.deletedNdtIds || {},
+                window.state.deletedNdtIds || {}
+            );
+
+            isRemoteSyncing = true;
+            window.state.defects = await hydrateDefectPhotos(defectMerge.defects);
+            window.state.deletedDefectIds = defectMerge.deletedDefectIds;
+            window.state.ndtData = ndtMerge.ndtData;
+            window.state.deletedNdtIds = ndtMerge.deletedNdtIds;
+
+            _suppressSyncOnSave = true;
+            if (typeof saveStateToLocalStorage === 'function') saveStateToLocalStorage();
+            _suppressSyncOnSave = false;
 
             const sanitizedBuildings = (window.state.buildings || []).map(b => {
                 const { floorDrawings, floorDrawingPdfs, ...rest } = b;
                 return rest;
             });
 
-            const sanitizedDefects = {};
-            Object.entries(window.state.defects || {}).forEach(([key, arr]) => {
-                sanitizedDefects[key] = (arr || []).map(d => {
-                    const { photos, prevRoundPhotos, photoIds, prevRoundPhotoIds, ...rest } = d;
-                    const out = { ...rest };
-                    if (photos && photos.length > 0) {
-                        out.photoIds = photos.map((_, i) => getPhotoDocId(d.id, i));
-                    }
-                    if (prevRoundPhotos && prevRoundPhotos.length > 0) {
-                        out.prevRoundPhotoIds = prevRoundPhotos.map((_, i) => getPhotoDocId(d.id, i, 'prev'));
-                    }
-                    return out;
-                });
-            });
-
             const dataToSync = {
-                defects: sanitizedDefects,
+                defects: sanitizeDefectsForFirestore(window.state.defects),
+                deletedDefectIds: defectMerge.deletedDefectIds,
                 ndtData: window.state.ndtData || {},
+                deletedNdtIds: ndtMerge.deletedNdtIds,
                 ndtDisplacementGroups: window.state.ndtDisplacementGroups || {},
                 grids: window.state.grids || {},
                 buildings: sanitizedBuildings,
@@ -17209,10 +17532,16 @@ document.addEventListener('DOMContentLoaded', () => {
                 companyName: window.state.companyName || localStorage.getItem('building_company_name'),
                 updatedAt: firebase.firestore.FieldValue.serverTimestamp()
             };
-            db.collection('safety_app').doc(docId).set(dataToSync, { merge: true })
-                .catch(err => console.warn('Firebase Sync Error:', err));
+            await docRef.set(dataToSync, { merge: true });
         } catch (e) {
-            console.warn('Firebase Sync exception:', e);
+            console.warn('Firebase Sync Error:', e);
+        } finally {
+            setTimeout(() => { isRemoteSyncing = false; }, 400);
+            _syncInFlight = false;
+            if (_syncPending) {
+                _syncPending = false;
+                syncStateToFirebase();
+            }
         }
     }
 
@@ -17228,93 +17557,27 @@ document.addEventListener('DOMContentLoaded', () => {
             if (doc && doc.exists) {
                 const data = doc.data();
                 if (!data) return;
+                if (_syncInFlight) return;
                 isRemoteSyncing = true;
                 try {
-                    let isChanged = false;
-                    if (data.buildings && Array.isArray(data.buildings) && data.buildings.length > 0) {
-                        // 로컬에 이미 로드된 도면 캐시(floorDrawings)는 유지한 채 메타데이터만 갱신
-                        const prevDrawingsById = {};
-                        (window.state.buildings || []).forEach(b => { prevDrawingsById[b.id] = b.floorDrawings || {}; });
-                        window.state.buildings = data.buildings.map(b => ({
-                            ...b,
-                            floorDrawings: prevDrawingsById[b.id] || {}
-                        }));
-                        isChanged = true;
-                    }
-                    if (data.defects) {
-                        window.state.defects = await hydrateDefectPhotos(data.defects);
-                        isChanged = true;
-                    }
-                    if (data.ndtData) {
-                        window.state.ndtData = data.ndtData;
-                        isChanged = true;
-                    }
-                    if (data.ndtDisplacementGroups) {
-                        window.state.ndtDisplacementGroups = data.ndtDisplacementGroups;
-                        isChanged = true;
-                    }
-                    if (data.grids) {
-                        window.state.grids = data.grids;
-                        isChanged = true;
-                    }
-                    if (data.styleColors) {
-                        window.state.styleColors = data.styleColors;
-                        isChanged = true;
-                    }
-                    if (data.styleSizes) {
-                        window.state.styleSizes = data.styleSizes;
-                        isChanged = true;
-                    }
-                    if (data.defectLeaderLineScale !== undefined) {
-                        window.state.defectLeaderLineScale = data.defectLeaderLineScale;
-                        window.state._globalDefectLeaderLineScaleFallback = data.defectLeaderLineScale;
-                        isChanged = true;
-                    }
-                    if (data.ndtLeaderLineScale !== undefined) {
-                        window.state.ndtLeaderLineScale = data.ndtLeaderLineScale;
-                        isChanged = true;
-                    }
-                    if (data.styleSizeBarLockedMap !== undefined) {
-                        window.state.styleSizeBarLockedMap = !!data.styleSizeBarLockedMap;
-                        isChanged = true;
-                    }
-                    if (data.styleSizeBarLockedNdt !== undefined) {
-                        window.state.styleSizeBarLockedNdt = !!data.styleSizeBarLockedNdt;
-                        isChanged = true;
-                    }
-                    if (data.floorMapStyleSettings) {
-                        window.state.floorMapStyleSettings = data.floorMapStyleSettings;
-                        isChanged = true;
-                    }
-                    if (data.styleShapes) {
-                        window.state.styleShapes = data.styleShapes;
-                        isChanged = true;
-                    }
-                    if (data.locationMapLegend) {
-                        window.state.locationMapLegend = data.locationMapLegend;
-                        isChanged = true;
-                    }
-                    if (data.locationMapLegendBox) {
-                        window.state.locationMapLegendBox = data.locationMapLegendBox;
-                        isChanged = true;
-                    }
+                    const isChanged = await applyMergedRemoteData(data);
 
                     if (isChanged) {
-                        // 로컬 캐시 갱신 (공용 저장 함수 재사용 — customDefectTypes 등 다른 로컬 설정을 덮어쓰지 않도록)
-                        // isRemoteSyncing이 true인 상태라 syncStateToFirebase() 내부 가드에 의해 재동기화는 발생하지 않음
+                        _suppressSyncOnSave = true;
                         if (typeof saveStateToLocalStorage === 'function') saveStateToLocalStorage();
+                        _suppressSyncOnSave = false;
 
                         if (state.currentBuildingId && state.currentFloor) {
                             applyFloorMapStyleSettings(state.currentFloor, state.currentBuildingId);
                         }
 
-                        // 실시간 UI 자동 업데이트
                         if (typeof renderDashboard === 'function') renderDashboard();
                         if (typeof renderBuildingSelector === 'function') renderBuildingSelector();
                         if (typeof renderSurveyTable === 'function') renderSurveyTable();
                         if (typeof drawCanvas === 'function') drawCanvas();
                         if (typeof drawNdtCanvas === 'function') drawNdtCanvas();
                         if (typeof renderNdtSummaryTable === 'function') renderNdtSummaryTable();
+                        if (typeof renderDefectListPanel === 'function') renderDefectListPanel();
                     }
                 } catch (e) {
                     console.error('Remote sync apply error:', e);
