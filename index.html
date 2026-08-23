@@ -126,7 +126,7 @@
                         <button type="button" class="btn btn-outline" id="btnCheckAppUpdate" style="border-color: #38bdf8; color: #7dd3fc; font-weight: 700;" title="새 APK가 있으면 앱 안에서 내려받아 설치">
                             <i class="fa-solid fa-cloud-arrow-down"></i> 앱 업데이트
                         </button>
-                        <button type="button" class="btn btn-outline pc-only-chrome" id="btnPurgeDeletedCodes" style="border-color: #a3a3a3; color: #e5e5e5; font-weight: 700;" title="전원 동기화 확인 후 삭제된 고유코드 재사용 가능하도록 정리">
+                        <button type="button" class="btn btn-outline pc-only-chrome" id="btnPurgeDeletedCodes" style="border-color: #a3a3a3; color: #e5e5e5; font-weight: 700;" title="전원 동기화 확인 후에만 — 삭제 tombstone을 비워 고유코드 재사용">
                             <i class="fa-solid fa-recycle"></i> 삭제 코드 정리
                         </button>
                         <button type="button" class="btn btn-outline" id="btnTriggerPhoneRelay" style="border-color: #facc15; color: #facc15; font-weight: 700;">
@@ -2019,7 +2019,7 @@
     <script src="js/tabs/ndt.js?v=20260822_survey2dScroll"></script>
     <script src="js/shared/report.js?v=20260821_land1"></script>
     <script src="js/shared/auth.js?v=20260821_land1"></script>
-    <script src="app.js?v=20260824_uniqueCodeSync"></script>
+    <script src="app.js?v=20260824_manualCodePurge"></script>
     <script>
         document.addEventListener('DOMContentLoaded', function () {
             const btn = document.getElementById('btnExportVectorPdf');

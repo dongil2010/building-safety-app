@@ -669,17 +669,16 @@ document.addEventListener('DOMContentLoaded', () => {
 
     /**
      * 결함 병합: 서버 순서 유지 → 로컬 전용(신규) 맨 뒤 → NO. 연속 재부여.
-     * 삭제 코드는 양쪽 tombstone 교집합이 연속 2회 확정되면 purge(재사용 가능).
+     * 삭제 tombstone(deletedDefectIds)은 유지한다.
+     * (작업자 다수일 때 동기화 횟수로 자동 재사용하면 꼬이므로, 코드 재사용은 수동 정리만)
      */
     function mergeDefectsMaps(serverMap, localMap, serverDeleted, localDeleted) {
         ensureSyncMetaState();
-        let mergedDeleted = mergeDeletedIdsMaps(serverDeleted, localDeleted);
-        const confirmed = { ...(window.state.confirmedDeletedIds || {}) };
+        const mergedDeleted = mergeDeletedIdsMaps(serverDeleted, localDeleted);
         const keys = new Set([
             ...Object.keys(serverMap || {}),
             ...Object.keys(localMap || {}),
-            ...Object.keys(mergedDeleted || {}),
-            ...Object.keys(confirmed)
+            ...Object.keys(mergedDeleted || {})
         ]);
         const defects = {};
 
@@ -701,79 +700,46 @@ document.addEventListener('DOMContentLoaded', () => {
             renumberFloorDefects(ordered, { preserveOrder: true });
             defects[key] = ordered;
 
-            // 삭제 확정·재사용: 서버·로컬 모두 tombstone에 있고 활성에 없으면 streak++
-            const serverDel = new Set(serverDeleted?.[key] || []);
-            const localDel = new Set(localDeleted?.[key] || []);
+            // 활성에 다시 나타난 id는 tombstone에서 제거(이상 상태 복구)
             const activeIds = new Set(ordered.map((d) => d.id));
-            const floorConfirmed = { ...(confirmed[key] || {}) };
-            const stillDeleted = [];
-
-            (mergedDeleted[key] || []).forEach((id) => {
-                if (activeIds.has(id)) return;
-                const bothSides = serverDel.has(id) && localDel.has(id);
-                if (!bothSides) {
-                    stillDeleted.push(id);
-                    return;
-                }
-                const prev = Number(floorConfirmed[id]) || 0;
-                if (prev >= 1) {
-                    // 연속 2회 확정 → purge (재사용 가능)
-                    delete floorConfirmed[id];
-                } else {
-                    floorConfirmed[id] = 1;
-                    stillDeleted.push(id);
-                }
-            });
-
-            Object.keys(floorConfirmed).forEach((id) => {
-                if (activeIds.has(id) || !stillDeleted.includes(id)) {
-                    if (activeIds.has(id)) delete floorConfirmed[id];
-                }
-            });
-
+            const stillDeleted = (mergedDeleted[key] || []).filter((id) => !activeIds.has(id));
             if (stillDeleted.length > 0) mergedDeleted[key] = stillDeleted;
             else delete mergedDeleted[key];
-
-            if (Object.keys(floorConfirmed).length > 0) confirmed[key] = floorConfirmed;
-            else delete confirmed[key];
         });
 
-        window.state.confirmedDeletedIds = confirmed;
-        return { defects, deletedDefectIds: mergedDeleted, confirmedDeletedIds: confirmed };
+        return { defects, deletedDefectIds: mergedDeleted };
     }
 
-    /** 관리자: 전원 동기화 확인 후 삭제 tombstone 즉시 정리(코드 재사용) */
-    window.purgeConfirmedDeletedDefectCodes = function (opts) {
+    /**
+     * 삭제 고유코드 재사용: 반드시 전원 동기화 확인 후 수동으로만 실행.
+     * tombstone(deletedDefectIds) 중 활성 결함에 없는 코드를 비운다.
+     */
+    window.purgeDeletedDefectCodes = function () {
         ensureSyncMetaState();
-        const aggressive = !!(opts && opts.aggressive);
         let purged = 0;
-        const confirmed = window.state.confirmedDeletedIds || {};
         const deleted = window.state.deletedDefectIds || {};
         Object.keys(deleted).forEach((key) => {
-            const active = new Set((window.state.defects?.[key] || []).map((d) => d.id));
-            const conf = confirmed[key] || {};
+            const active = new Set((window.state.defects?.[key] || []).map((d) => d?.id).filter(Boolean));
             const next = [];
             (deleted[key] || []).forEach((id) => {
                 if (active.has(id)) {
                     next.push(id);
                     return;
                 }
-                if (aggressive || (Number(conf[id]) || 0) >= 1) {
-                    purged += 1;
-                    if (conf[id]) delete conf[id];
-                } else {
-                    next.push(id);
-                }
+                purged += 1;
             });
             if (next.length) deleted[key] = next;
             else delete deleted[key];
-            if (conf && Object.keys(conf).length) confirmed[key] = conf;
-            else delete confirmed[key];
         });
         window.state.deletedDefectIds = deleted;
-        window.state.confirmedDeletedIds = confirmed;
+        // 구버전 자동확정 맵은 더 이상 쓰지 않음
+        window.state.confirmedDeletedIds = {};
         if (typeof saveStateToLocalStorage === 'function') saveStateToLocalStorage();
         return purged;
+    };
+    // 하위 호환 별칭
+    window.purgeConfirmedDeletedDefectCodes = function () {
+        return window.purgeDeletedDefectCodes();
     };
 
     function mergeNdtDataMaps(serverMap, localMap, serverDeleted, localDeleted) {
@@ -16632,11 +16598,13 @@ document.addEventListener('DOMContentLoaded', () => {
     const btnPurgeDeletedCodes = document.getElementById('btnPurgeDeletedCodes');
     if (btnPurgeDeletedCodes) {
         btnPurgeDeletedCodes.addEventListener('click', () => {
-            if (!confirm('전원 동기화가 끝난 뒤에만 실행하세요.\n삭제된 고유코드를 정리하면 이후 신규 마킹에 다시 사용할 수 있습니다. 계속할까요?')) return;
-            const n = typeof window.purgeConfirmedDeletedDefectCodes === 'function'
-                ? window.purgeConfirmedDeletedDefectCodes({ aggressive: true })
-                : 0;
-            window.showToast(n > 0 ? `삭제 코드 ${n}건을 정리했습니다.` : '정리할 삭제 코드가 없습니다.', n > 0 ? 'success' : 'info');
+            if (!confirm('전원(5명 이상 포함)이 온라인 동기화를 끝낸 뒤에만 실행하세요.\n\n아직 동기화하지 않은 기기가 있으면, 정리된 코드로 옛 결함이 다시 살아날 수 있습니다.\n삭제된 고유코드를 비워 재사용 가능하게 할까요?')) return;
+            const n = typeof window.purgeDeletedDefectCodes === 'function'
+                ? window.purgeDeletedDefectCodes()
+                : (typeof window.purgeConfirmedDeletedDefectCodes === 'function'
+                    ? window.purgeConfirmedDeletedDefectCodes()
+                    : 0);
+            window.showToast(n > 0 ? `삭제 코드 ${n}건을 정리했습니다. 이제 재사용 가능합니다.` : '정리할 삭제 코드가 없습니다.', n > 0 ? 'success' : 'info');
         });
     }
 
@@ -18222,19 +18190,6 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         if (data.defects) {
-            if (data.confirmedDeletedIds) {
-                const mergedConf = { ...(window.state.confirmedDeletedIds || {}) };
-                Object.entries(data.confirmedDeletedIds).forEach(([key, map]) => {
-                    mergedConf[key] = { ...(mergedConf[key] || {}), ...(map || {}) };
-                    Object.keys(map || {}).forEach((id) => {
-                        mergedConf[key][id] = Math.max(
-                            Number(mergedConf[key][id]) || 0,
-                            Number(map[id]) || 0
-                        );
-                    });
-                });
-                window.state.confirmedDeletedIds = mergedConf;
-            }
             const remoteHydrated = await hydrateDefectPhotos(data.defects);
             const localHydrated = await hydrateDefectPhotos(window.state.defects || {});
             const defectMerge = mergeDefectsMaps(
@@ -18245,9 +18200,6 @@ document.addEventListener('DOMContentLoaded', () => {
             );
             window.state.defects = await hydrateDefectPhotos(defectMerge.defects);
             window.state.deletedDefectIds = defectMerge.deletedDefectIds;
-            if (defectMerge.confirmedDeletedIds) {
-                window.state.confirmedDeletedIds = defectMerge.confirmedDeletedIds;
-            }
             isChanged = true;
         }
 
@@ -18260,6 +18212,12 @@ document.addEventListener('DOMContentLoaded', () => {
             );
             window.state.ndtData = ndtMerge.ndtData;
             window.state.deletedNdtIds = ndtMerge.deletedNdtIds;
+            isChanged = true;
+        }
+
+        // 구버전 자동확정 맵은 사용하지 않음 (수동 정리만)
+        if (window.state.confirmedDeletedIds && Object.keys(window.state.confirmedDeletedIds).length) {
+            window.state.confirmedDeletedIds = {};
             isChanged = true;
         }
 
@@ -18330,20 +18288,6 @@ document.addEventListener('DOMContentLoaded', () => {
             const snap = await docRef.get();
             const serverData = snap.exists ? snap.data() : {};
 
-            if (serverData.confirmedDeletedIds) {
-                const mergedConf = { ...(window.state.confirmedDeletedIds || {}) };
-                Object.entries(serverData.confirmedDeletedIds).forEach(([key, map]) => {
-                    mergedConf[key] = { ...(mergedConf[key] || {}) };
-                    Object.keys(map || {}).forEach((id) => {
-                        mergedConf[key][id] = Math.max(
-                            Number(mergedConf[key][id]) || 0,
-                            Number(map[id]) || 0
-                        );
-                    });
-                });
-                window.state.confirmedDeletedIds = mergedConf;
-            }
-
             const serverDefectsHydrated = await hydrateDefectPhotos(serverData.defects || {});
             const localDefectsHydrated = await hydrateDefectPhotos(window.state.defects || {});
             const defectMerge = mergeDefectsMaps(
@@ -18362,9 +18306,7 @@ document.addEventListener('DOMContentLoaded', () => {
             isRemoteSyncing = true;
             window.state.defects = await hydrateDefectPhotos(defectMerge.defects);
             window.state.deletedDefectIds = defectMerge.deletedDefectIds;
-            if (defectMerge.confirmedDeletedIds) {
-                window.state.confirmedDeletedIds = defectMerge.confirmedDeletedIds;
-            }
+            window.state.confirmedDeletedIds = {};
             window.state.ndtData = ndtMerge.ndtData;
             window.state.deletedNdtIds = ndtMerge.deletedNdtIds;
 
@@ -18380,7 +18322,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const dataToSync = {
                 defects: sanitizeDefectsForFirestore(window.state.defects),
                 deletedDefectIds: defectMerge.deletedDefectIds,
-                confirmedDeletedIds: window.state.confirmedDeletedIds || {},
+                confirmedDeletedIds: {},
                 ndtData: window.state.ndtData || {},
                 deletedNdtIds: ndtMerge.deletedNdtIds,
                 ndtDisplacementGroups: window.state.ndtDisplacementGroups || {},

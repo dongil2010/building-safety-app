@@ -12,7 +12,7 @@ window.BSA.tabs['tab-home'] = {
         '휴대폰 QR 촬영 연동 시작',
         '사용자 프로필·로그아웃·가입 승인(관리자)',
         '앱 내부 APK 업데이트 확인·설치',
-        '삭제 고유코드 정리(재사용)'
+        '삭제 고유코드 수동 정리(재사용) — 전원 동기화 후'
     ],
     ownerHint: 'app.js BUILDING MANAGEMENT + JSON 백업 + 휴대폰 연동',
     enter: function () {
