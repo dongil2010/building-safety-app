@@ -11,7 +11,7 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <meta name="apple-mobile-web-app-title" content="스마트 안전점검">
-    <link rel="stylesheet" href="styles.css?v=20260823_surveyColNarrow">
+    <link rel="stylesheet" href="styles.css?v=20260824_surveyDefectScroll">
     <!-- FontAwesome icons for clean engineering UI -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <!-- PDF 생성용: 페이지별로 직접 캡처해서 조립(큰 보고서에서 html2pdf 한방 렌더링이 캔버스 높이 한계로
@@ -428,16 +428,16 @@
                 <table class="survey-table">
                     <thead id="surveyTableHead">
                         <tr>
-                            <th>결함번호</th>
+                            <th>번호</th>
                             <th>위치</th>
+                            <th>부재종류</th>
                             <th>조사내용</th>
                             <th>구조체여부</th>
                             <th>결함크기</th>
                             <th>진행여부</th>
                             <th>누수여부</th>
-                            <th>결함원인추정</th>
+                            <th>원인추정</th>
                             <th>비고</th>
-                            <th>등록자</th>
                             <th>관리</th>
                         </tr>
                     </thead>
@@ -2017,7 +2017,7 @@
     <script src="js/tabs/ndt.js?v=20260822_survey2dScroll"></script>
     <script src="js/shared/report.js?v=20260821_land1"></script>
     <script src="js/shared/auth.js?v=20260821_land1"></script>
-    <script src="app.js?v=20260824_strengthPerfBigFont"></script>
+    <script src="app.js?v=20260824_surveyDefectScroll"></script>
     <script>
         document.addEventListener('DOMContentLoaded', function () {
             const btn = document.getElementById('btnExportVectorPdf');

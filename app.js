@@ -7951,7 +7951,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const previousItemsRaw = defects.filter(d => isPreviousRoundDefect(d) && !isDefectMapUnregistered(d));
         const currentItemsRaw = defects.filter(d => !isPreviousRoundDefect(d));
 
-        // 도면에서 선택된 결함 → 목록 하이라이트 / 여러 개면 상단 "선택됨"으로 묶음
+        // 도면에서 선택된 결함 → 목록 하이라이트 / 2개 이상이면 상단 "선택됨"으로 묶음
         const selectedCluster = [];
         const seenSelectedKey = new Set();
         const collectSelected = (list) => {
@@ -7967,7 +7967,7 @@ document.addEventListener('DOMContentLoaded', () => {
         collectSelected(previousItemsRaw);
         collectSelected(currentItemsRaw);
 
-        const pinSelectedToTop = selectedCluster.length >= 1;
+        const pinSelectedToTop = selectedCluster.length >= 2;
         const previousItems = pinSelectedToTop
             ? previousItemsRaw.filter(d => !isDefectListItemSelected(d))
             : previousItemsRaw;
@@ -7979,10 +7979,7 @@ document.addEventListener('DOMContentLoaded', () => {
             : unregisteredItems;
 
         if (pinSelectedToTop) {
-            const selTitle = selectedCluster.length === 1
-                ? '✅ 선택됨'
-                : `✅ 선택됨 (${selectedCluster.length})`;
-            const selSection = renderDefectListSection(selTitle, selectedCluster, { mapSelected: true });
+            const selSection = renderDefectListSection(`✅ 선택됨 (${selectedCluster.length})`, selectedCluster, { mapSelected: true });
             if (selSection) {
                 selSection.classList.add('is-selected-cluster');
                 panel.appendChild(selSection);
@@ -7998,7 +7995,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const curSection = renderDefectListSection('🆕 금회차 조사항목', currentItems);
         if (curSection) panel.appendChild(curSection);
 
-        // 선택 묶음이 바뀌면 목록 맨 위(선택됨)가 보이게
+        // 다중 선택: 상단 묶음으로 스크롤 / 단일 선택: 원래 위치 행으로 스크롤
         if (pinSelectedToTop) {
             const clusterKey = selectedCluster.map(d => d.id || d.groupId).join(',');
             if (window._defectListScrollSelectedId !== clusterKey) {
@@ -8007,6 +8004,18 @@ document.addEventListener('DOMContentLoaded', () => {
                     const cluster = panel.querySelector('.defect-list-section.is-selected-cluster');
                     if (cluster && typeof cluster.scrollIntoView === 'function') {
                         cluster.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                    }
+                });
+            }
+        } else if (selectedCluster.length === 1) {
+            const onlyKey = selectedCluster[0].id || selectedCluster[0].groupId;
+            const scrollKey = `single:${onlyKey}`;
+            if (window._defectListScrollSelectedId !== scrollKey) {
+                window._defectListScrollSelectedId = scrollKey;
+                requestAnimationFrame(() => {
+                    const row = panel.querySelector('.defect-list-item.is-map-selected');
+                    if (row && typeof row.scrollIntoView === 'function') {
+                        row.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
                     }
                 });
             }
@@ -10090,7 +10099,7 @@ document.addEventListener('DOMContentLoaded', () => {
             bar.hidden = false;
             if (countEl) countEl.textContent = `${n}개 선택`;
         }
-        // 결함목록: 선택 하이라이트 / 다중 선택 상단 묶음 / 단일 선택 스크롤
+        // 결함목록: 선택 하이라이트 / 다중 선택 상단 묶음 / 단일 선택은 원위치 스크롤
         if (typeof renderDefectListPanel === 'function') renderDefectListPanel();
     }
 
@@ -12455,15 +12464,15 @@ document.addEventListener('DOMContentLoaded', () => {
     // 상태조사표 컬럼 기본 정의 (화면/PDF/엑셀 공통). size와 crackWidth/crackLength는 상호 배타적으로
     // defectSizeMode에 따라 필터링되어 노출된다.
     const DEFAULT_SURVEY_COLUMNS = [
-        { key: 'no', label: '결함번호' },
+        { key: 'no', label: '번호' },
         { key: 'location', label: '위치' },
         { key: 'component', label: '부재종류' },
         { key: 'defectType', label: '조사내용' },
         { key: 'size', label: '결함크기' },
-        { key: 'category', label: '구조체 여부' },
+        { key: 'category', label: '구조체여부' },
         { key: 'progress', label: '진행여부' },
         { key: 'leak', label: '누수여부' },
-        { key: 'cause', label: '결함원인추정' },
+        { key: 'cause', label: '원인추정' },
         { key: 'priorityManage', label: '중점관리' },
         { key: 'remark', label: '비고' }
     ];
@@ -12473,7 +12482,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const GRADE3_SURVEY_COLUMNS = [
         { key: 'no', label: '번호' },
         { key: 'floorGroup', label: '구분' },
-        { key: 'category', label: '구조체 여부' },
+        { key: 'category', label: '구조체여부' },
         { key: 'inspectionContent', label: '점검내용' },
         { key: 'cause', label: '발생원인' },
         { key: 'remark', label: '비고' }
@@ -12642,6 +12651,13 @@ document.addEventListener('DOMContentLoaded', () => {
             .replace(/>/g, '&gt;');
     }
 
+    function renderSurveyFlagToggle(defectId, field, isOn, onLabel, extraClass) {
+        const stop = 'onclick="event.stopPropagation()" onmousedown="event.stopPropagation()"';
+        const cls = 'survey-toggle-btn' + (isOn ? ' is-on' : '') + (extraClass ? ' ' + extraClass : '');
+        const text = isOn ? onLabel : '-';
+        return `<button type="button" class="${cls}" ${stop} onclick="window.toggleSurveyInlineFlag('${defectId}','${field}')">${text}</button>`;
+    }
+
     // 상태조사표 인라인 편집 셀 (타이핑 / 선택)
     function renderInlineSurveyCellHtml(colKey, d, ctx) {
         const id = d.id;
@@ -12667,23 +12683,11 @@ document.addEventListener('DOMContentLoaded', () => {
                     `</select>`;
             }
             case 'progress':
-                return `<select class="survey-inline-select survey-inline-progress" ${stop}` +
-                    ` onchange="window.updateSurveyInlineField('${id}','progress',this.value)">` +
-                    `<option value="0"${!d.isProgress ? ' selected' : ''}>-</option>` +
-                    `<option value="1"${d.isProgress ? ' selected' : ''}>진행중</option>` +
-                    `</select>`;
+                return renderSurveyFlagToggle(id, 'progress', !!d.isProgress, '진행중');
             case 'leak':
-                return `<select class="survey-inline-select survey-inline-leak" ${stop}` +
-                    ` onchange="window.updateSurveyInlineField('${id}','leak',this.value)">` +
-                    `<option value="0"${!d.isLeak ? ' selected' : ''}>-</option>` +
-                    `<option value="1"${d.isLeak ? ' selected' : ''}>누수중</option>` +
-                    `</select>`;
+                return renderSurveyFlagToggle(id, 'leak', !!d.isLeak, '누수중');
             case 'priorityManage':
-                return `<select class="survey-inline-select" ${stop}` +
-                    ` onchange="window.updateSurveyInlineField('${id}','priorityManage',this.value)">` +
-                    `<option value="0"${!d.isPriorityManage ? ' selected' : ''}>-</option>` +
-                    `<option value="1"${d.isPriorityManage ? ' selected' : ''}>중점관리</option>` +
-                    `</select>`;
+                return renderSurveyFlagToggle(id, 'priorityManage', !!d.isPriorityManage, '중점관리', 'survey-toggle-priority');
             case 'location':
                 return textInput('location', d.location || '', '위치');
             case 'component':
@@ -12724,6 +12728,29 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // 상태조사표 인라인 수정 저장 — 그룹 결함은 동일 필드를 멤버 전체에 반영(위치는 대표만)
+    window.toggleSurveyInlineFlag = function(defectId, field) {
+        if (window.event) window.event.stopPropagation();
+        const key = `${state.currentBuildingId}_${state.currentFloor}`;
+        const list = state.defects[key] || [];
+        const defect = list.find(d => d.id === defectId);
+        if (!defect) return;
+        let next = '0';
+        switch (field) {
+            case 'progress':
+                next = defect.isProgress ? '0' : '1';
+                break;
+            case 'leak':
+                next = defect.isLeak ? '0' : '1';
+                break;
+            case 'priorityManage':
+                next = defect.isPriorityManage ? '0' : '1';
+                break;
+            default:
+                return;
+        }
+        window.updateSurveyInlineField(defectId, field, next);
+    };
+
     window.updateSurveyInlineField = function(defectId, field, rawValue) {
         if (window.event) window.event.stopPropagation();
         const key = `${state.currentBuildingId}_${state.currentFloor}`;
@@ -12811,6 +12838,8 @@ document.addEventListener('DOMContentLoaded', () => {
         // 상태양호로 바꾼 뒤에는 크기/진행/누수 UI를 맞추기 위해 표만 다시 그림
         if (field === 'defectType' && value === '상태양호') {
             renderSurveyTable();
+        } else if (field === 'progress' || field === 'leak' || field === 'priorityManage') {
+            renderSurveyTable();
         }
     };
 
@@ -12854,6 +12883,29 @@ document.addEventListener('DOMContentLoaded', () => {
         crackLength: '길이'
     };
 
+    const SURVEY_HEADER_TWO_LINE = {
+        component: '부재<br>종류',
+        defectType: '조사<br>내용',
+        size: '결함<br>크기',
+        category: '구조<br>체여부',
+        progress: '진행<br>여부',
+        leak: '누수<br>여부',
+        priorityManage: '중점<br>관리',
+        cause: '원인<br>추정',
+        inspectionContent: '점검<br>내용'
+    };
+
+    function formatSurveyHeaderHtml(col) {
+        if (SURVEY_HEADER_TWO_LINE[col.key]) {
+            return SURVEY_HEADER_TWO_LINE[col.key];
+        }
+        const label = getSurveyColumnHeaderLabel(col).replace(/\s/g, '');
+        if (label.length === 4) {
+            return `${label.slice(0, 2)}<br>${label.slice(2)}`;
+        }
+        return getSurveyColumnHeaderLabel(col);
+    }
+
     function getSurveyColumnHeaderLabel(col) {
         if (isSurveyPortraitCompact()) {
             return SURVEY_HEADER_SHORT[col.key] || col.label;
@@ -12865,9 +12917,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const theadEl = document.getElementById('surveyTableHead');
         if (!theadEl) return;
         const columns = getActiveSurveyColumns();
-        const compact = isSurveyPortraitCompact();
-        const inspectorTh = compact ? '' : '<th data-col="inspector">등록자</th>';
-        theadEl.innerHTML = `<tr>${columns.map(c => `<th data-col="${c.key}">${getSurveyColumnHeaderLabel(c)}</th>`).join('')}${inspectorTh}<th data-col="actions">관리</th></tr>`;
+        theadEl.innerHTML = `<tr>${columns.map(c => `<th data-col="${c.key}"><span class="survey-th-label">${formatSurveyHeaderHtml(c)}</span></th>`).join('')}<th data-col="actions">관리</th></tr>`;
     }
 
     // 상태조사표 행: 셀에서 바로 수정. 상세 모달은 "상세" 버튼으로 연다.
@@ -12893,8 +12943,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         if (defects.length === 0) {
-            const surveyExtraCols = isSurveyPortraitCompact() ? 1 : 2;
-            elements.surveyTableBody.innerHTML = `<tr><td colspan="${columns.length + surveyExtraCols}" style="text-align:center; padding: 2.5rem; color:#64748b; font-weight:600;">등록된 결함이 없습니다. 도면 점검 탭에서 결함을 마킹해 보세요.</td></tr>`;
+            elements.surveyTableBody.innerHTML = `<tr><td colspan="${columns.length + 1}" style="text-align:center; padding: 2.5rem; color:#64748b; font-weight:600;">등록된 결함이 없습니다. 도면 점검 탭에서 결함을 마킹해 보세요.</td></tr>`;
             return;
         }
 
@@ -12924,11 +12973,9 @@ document.addEventListener('DOMContentLoaded', () => {
             const isGroup = d._groupMemberIds && d._groupMemberIds.length > 1;
             const deleteAction = isGroup ? `window.deleteDefectGroup('${d.groupId}')` : `deleteDefectById('${d.id}')`;
 
-            const compactPortrait = isSurveyPortraitCompact();
             return `
                 <tr>
                     ${columns.map(c => `<td data-col="${c.key}">${renderInlineSurveyCellHtml(c.key, d, ctx)}</td>`).join('')}
-                    ${compactPortrait ? '' : `<td data-col="inspector"><span class="badge badge-info">${d.inspectorName || '-'}</span></td>`}
                     <td data-col="actions" class="survey-row-actions">
                         <button type="button" class="btn btn-sm btn-outline" onclick="event.stopPropagation(); window.openSurveyRowEditModal('${d.id}')" title="상세 모달">상세</button>
                         <button type="button" class="btn btn-sm btn-danger-outline" onclick="event.stopPropagation(); ${deleteAction}">삭제</button>
@@ -12960,6 +13007,9 @@ document.addEventListener('DOMContentLoaded', () => {
         } else {
             state[stateKey].forEach(c => {
                 if (c.visible === undefined) c.visible = true;
+                if (c.label === '결함번호') c.label = '번호';
+                if (c.label === '구조체 여부') c.label = '구조체여부';
+                if (c.label === '결함원인추정') c.label = '원인추정';
             });
         }
         return state[stateKey];
