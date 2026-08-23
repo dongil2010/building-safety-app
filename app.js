@@ -15617,10 +15617,43 @@ document.addEventListener('DOMContentLoaded', () => {
                         normal: borderStyleByColLocal(normalStyleRow),
                         last: borderStyleByColLocal(lastStyleRow)
                     };
+                    const findCol0 = (row) => Array.from(row.getElementsByTagNameNS(HP_NS, 'tc')).find(tc => {
+                        const addr = tc.getElementsByTagNameNS(HP_NS, 'cellAddr')[0];
+                        return addr && addr.getAttribute('colAddr') === '0';
+                    });
+                    // 강도/탄산화 표는 첫 데이터 행에만 세로 병합(rowSpan)된 숨은 0번 칸(예: 회사명
+                    // 라벨)이 있고 그 아래 행들엔 그 칸이 아예 없다. 예전엔 첫 행까지 통째로 지우고
+                    // normalStyleRow(0번 칸 없음)로만 다시 채워서, 표 전체에 0번 칸이 하나도 안 남는
+                    // "구멍 뚫린" 구조가 됐다 — 한글이 이런 표를 열다가 그대로 죽는 원인이었다. 새로
+                    // 만드는 첫 행에 그 칸을 그대로 옮겨 붙이고 rowSpan만 실제 데이터 행 수에 맞춘다.
+                    const firstCol0 = findCol0(firstStyleRow);
+                    const normalHasCol0 = !!findCol0(normalStyleRow);
+                    // 0번 칸의 원래 높이는 표본 문서의 원래 행 수(예: 16행) 전체를 합친 값이라, rowSpan만
+                    // 실제 행 수로 줄이고 높이를 그대로 두면 남은 행들이 그 큰 높이를 채우려고 줄이 통째로
+                    // 늘어난다. 일반 행 하나의 높이 × 실제 행 수로 다시 계산해서 자연스러운 줄 높이가
+                    // 되게 한다.
+                    const normalRowCellSz = normalStyleRow.getElementsByTagNameNS(HP_NS, 'tc')[0]
+                        ?.getElementsByTagNameNS(HP_NS, 'cellSz')[0];
+                    const normalRowHeight = normalRowCellSz ? parseInt(normalRowCellSz.getAttribute('height'), 10) : null;
                     oldDataRows.forEach(tr => tbl.removeChild(tr));
                     rowsValues.forEach((values, idx) => {
                         const styleMap = idx === 0 ? styleMaps.first : (idx === rowsValues.length - 1 ? styleMaps.last : styleMaps.normal);
                         const newRow = normalStyleRow.cloneNode(true);
+                        if (idx === 0 && firstCol0 && !normalHasCol0) {
+                            const col0Clone = firstCol0.cloneNode(true);
+                            const span = col0Clone.getElementsByTagNameNS(HP_NS, 'cellSpan')[0];
+                            if (span) span.setAttribute('rowSpan', String(rowsValues.length));
+                            const col0Addr = col0Clone.getElementsByTagNameNS(HP_NS, 'cellAddr')[0];
+                            if (col0Addr) col0Addr.setAttribute('rowAddr', String(headerRowCount));
+                            if (normalRowHeight) {
+                                const col0Sz = col0Clone.getElementsByTagNameNS(HP_NS, 'cellSz')[0];
+                                if (col0Sz) col0Sz.setAttribute('height', String(normalRowHeight * rowsValues.length));
+                            }
+                            // 표본 문서에 남아있던 회사명 등 샘플 글자(세로 병합 칸이라 한 글자씩
+                            // 위아래로 쪼개져 나온다) — 우리 데이터로 채우는 칸이 아니라 그대로 지운다.
+                            Array.from(col0Clone.getElementsByTagNameNS(HP_NS, 't')).forEach(t => { t.textContent = ''; });
+                            newRow.insertBefore(col0Clone, newRow.firstChild);
+                        }
                         Array.from(newRow.getElementsByTagNameNS(HP_NS, 'tc')).forEach(tc => {
                             const addr = tc.getElementsByTagNameNS(HP_NS, 'cellAddr')[0];
                             if (!addr) return;
@@ -15714,14 +15747,20 @@ document.addEventListener('DOMContentLoaded', () => {
                             const slots = Array.isArray(item.strengthSlots) && item.strengthSlots.length > 0
                                 ? item.strengthSlots
                                 : [{ location: item.location, finalStrength: item.strengthFinal, ratio: item.strengthRatio, grade: item.strengthGrade }];
+                            // 슬롯 자체에 계산 결과가 없는(예전 형식) 데이터는 항목(item) 최상위에
+                            // 남아있는 첫 슬롯 계산값으로라도 채운다 — 그냥 '-'로 비워두면 실제로는
+                            // 측정값이 있는데도 표에는 아무것도 없는 것처럼 보인다.
                             slots.forEach(slot => {
+                                const finalStrength = typeof slot.finalStrength === 'number' ? slot.finalStrength : item.strengthFinal;
+                                const ratio = slot.ratio != null ? slot.ratio : item.strengthRatio;
+                                const grade = slot.grade != null ? slot.grade : item.strengthGrade;
                                 strengthRows.push([
                                     strengthRows.length + 1,
                                     `${slot.location || item.location || ''}${item.component || ''}`,
                                     item.designStrength != null ? item.designStrength : '-',
-                                    typeof slot.finalStrength === 'number' ? slot.finalStrength.toFixed(1) : (slot.finalStrength || '-'),
-                                    slot.ratio != null ? `${Math.round(slot.ratio)}%` : '-',
-                                    strengthGradeDisplay(slot.grade),
+                                    typeof finalStrength === 'number' ? finalStrength.toFixed(1) : (finalStrength || '-'),
+                                    ratio != null ? `${Math.round(ratio)}%` : '-',
+                                    strengthGradeDisplay(grade),
                                     item.damageStatus === '균열발생' ? '균열발생' : '-'
                                 ]);
                             });
