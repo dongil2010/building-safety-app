@@ -11936,6 +11936,17 @@ document.addEventListener('DOMContentLoaded', () => {
     if (btnCancelAddBuilding) btnCancelAddBuilding.addEventListener('click', () => window.closeAddBuildingModalFunc());
 
     // Floor Select Change
+    function refreshFloorDependentUi() {
+        if (typeof renderSurveyTable === 'function') renderSurveyTable();
+        if (typeof renderPhotoAlbum === 'function') renderPhotoAlbum();
+        if (typeof renderDefectListPanel === 'function') renderDefectListPanel();
+        if (typeof renderNdtSummaryTable === 'function') renderNdtSummaryTable();
+        const ndtFloorTitle = document.getElementById('ndtFloorTitle');
+        if (ndtFloorTitle && window.state.currentFloor) {
+            ndtFloorTitle.textContent = window.state.currentFloor;
+        }
+    }
+
     if (elements.floorSelect) {
         elements.floorSelect.addEventListener('change', (e) => {
             const prevFloor = window.state.currentFloor;
@@ -11945,6 +11956,7 @@ document.addEventListener('DOMContentLoaded', () => {
             window.state.currentFloor = e.target.value;
             applyFloorMapStyleSettings(e.target.value, state.currentBuildingId);
             loadFloorDrawing(e.target.value);
+            refreshFloorDependentUi();
         });
     }
 
@@ -12407,6 +12419,17 @@ document.addEventListener('DOMContentLoaded', () => {
         const cols = (stateCols && stateCols.length) ? stateCols : defaults;
         const mode = state.defectSizeMode || 'combined';
         return cols.filter(c => {
+            if (c.visible === false) return false;
+            if (mode === 'combined' && (c.key === 'crackWidth' || c.key === 'crackLength')) return false;
+            if (mode === 'split' && c.key === 'size') return false;
+            return true;
+        });
+    }
+
+    function getSurveyColumnsForModal() {
+        const cols = ensureSurveyColumnsInitialized();
+        const mode = state.defectSizeMode || 'combined';
+        return cols.filter(c => {
             if (mode === 'combined' && (c.key === 'crackWidth' || c.key === 'crackLength')) return false;
             if (mode === 'split' && c.key === 'size') return false;
             return true;
@@ -12814,7 +12837,11 @@ document.addEventListener('DOMContentLoaded', () => {
         const stateKey = grade3 ? 'surveyColumnsGrade3' : 'surveyColumns';
         const defaults = grade3 ? GRADE3_SURVEY_COLUMNS : DEFAULT_SURVEY_COLUMNS;
         if (!state[stateKey] || !state[stateKey].length) {
-            state[stateKey] = defaults.map(c => ({ key: c.key, label: c.label }));
+            state[stateKey] = defaults.map(c => ({ key: c.key, label: c.label, visible: true }));
+        } else {
+            state[stateKey].forEach(c => {
+                if (c.visible === undefined) c.visible = true;
+            });
         }
         return state[stateKey];
     }
@@ -12829,12 +12856,16 @@ document.addEventListener('DOMContentLoaded', () => {
         if (modeCombinedEl) modeCombinedEl.checked = (mode === 'combined');
         if (modeSplitEl) modeSplitEl.checked = (mode === 'split');
 
-        const columns = getActiveSurveyColumns();
+        const columns = getSurveyColumnsForModal();
         const defaultLabelByKey = {};
         (isGrade3Building() ? GRADE3_SURVEY_COLUMNS : DEFAULT_SURVEY_COLUMNS).forEach(c => { defaultLabelByKey[c.key] = c.label; });
 
         listEl.innerHTML = columns.map((c, idx) => `
-            <div class="style-cat-card" style="display:flex; align-items:center; gap:0.5rem;">
+            <div class="style-cat-card survey-column-row" style="display:flex; align-items:center; gap:0.45rem;${c.visible === false ? ' opacity:0.72;' : ''}">
+                <label class="survey-column-visible" title="표에 표시" style="display:flex; align-items:center; gap:0.25rem; flex-shrink:0; cursor:pointer; user-select:none;">
+                    <input type="checkbox" ${c.visible !== false ? 'checked' : ''} onchange="window.toggleSurveyColumnVisible('${c.key}', this.checked)">
+                    <span style="font-size:0.72rem; font-weight:700; white-space:nowrap;">표시</span>
+                </label>
                 <div style="display:flex; flex-direction:column; gap:0.15rem;">
                     <button type="button" class="btn btn-sm btn-outline" style="padding:0.1rem 0.4rem;" ${idx === 0 ? 'disabled' : ''} onclick="window.moveSurveyColumnOrder('${c.key}', -1)"><i class="fa-solid fa-chevron-up"></i></button>
                     <button type="button" class="btn btn-sm btn-outline" style="padding:0.1rem 0.4rem;" ${idx === columns.length - 1 ? 'disabled' : ''} onclick="window.moveSurveyColumnOrder('${c.key}', 1)"><i class="fa-solid fa-chevron-down"></i></button>
@@ -12889,6 +12920,22 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!trimmed) { renderSurveyColumnModalList(); return; }
         const col = cols.find(c => c.key === key);
         if (col) col.label = trimmed;
+        renderSurveyTable();
+        saveStateToLocalStorage();
+    };
+
+    window.toggleSurveyColumnVisible = function(key, visible) {
+        const cols = ensureSurveyColumnsInitialized();
+        const col = cols.find(c => c.key === key);
+        if (!col) return;
+        col.visible = !!visible;
+        if (getActiveSurveyColumns().length === 0) {
+            col.visible = true;
+            renderSurveyColumnModalList();
+            window.showToast('최소 1개 컬럼은 표시해야 합니다.', 'warning');
+            return;
+        }
+        renderSurveyColumnModalList();
         renderSurveyTable();
         saveStateToLocalStorage();
     };

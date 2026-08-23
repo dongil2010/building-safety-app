@@ -11,7 +11,7 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <meta name="apple-mobile-web-app-title" content="스마트 안전점검">
-    <link rel="stylesheet" href="styles.css?v=20260823_surveyPortraitCompact">
+    <link rel="stylesheet" href="styles.css?v=20260823_surveyColToggle">
     <!-- FontAwesome icons for clean engineering UI -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <!-- PDF 생성용: 페이지별로 직접 캡처해서 조립(큰 보고서에서 html2pdf 한방 렌더링이 캔버스 높이 한계로
@@ -1146,7 +1146,8 @@
                         <input type="radio" name="defectSizeMode" id="defectSizeModeSplit" value="split"> 균열폭·균열길이 분리
                     </label>
                 </div>
-                <div class="style-color-section-title">컬럼 순서 / 이름 (화면·PDF·엑셀 공통)</div>
+                <div class="style-color-section-title">컬럼 표시 / 순서 / 이름 (화면·PDF·엑셀 공통)</div>
+                <p style="font-size:0.78rem; color:#737373; margin:0 0 0.5rem; line-height:1.4;">체크를 해제하면 표·보고서·엑셀에서 해당 열이 숨겨집니다.</p>
                 <div id="surveyColumnListBody"></div>
             </div>
             <div class="modal-footer" style="justify-content: space-between;">
@@ -2014,7 +2015,7 @@
     <script src="js/tabs/ndt.js?v=20260822_survey2dScroll"></script>
     <script src="js/shared/report.js?v=20260821_land1"></script>
     <script src="js/shared/auth.js?v=20260821_land1"></script>
-    <script src="app.js?v=20260823_hwpxRowHeightFix"></script>
+    <script src="app.js?v=20260823_surveyColToggle"></script>
     <script>
         document.addEventListener('DOMContentLoaded', function () {
             const btn = document.getElementById('btnExportVectorPdf');
