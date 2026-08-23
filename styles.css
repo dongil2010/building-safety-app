@@ -2409,6 +2409,21 @@ body {
     white-space: nowrap;
 }
 
+.survey-row-actions .survey-btn-map-view {
+    color: #1d4ed8;
+    border-color: #93c5fd;
+}
+
+.survey-row-actions .survey-btn-map-view:hover {
+    background: #eff6ff;
+    border-color: #3b82f6;
+    color: #1e40af;
+}
+
+.survey-row-actions .survey-btn-map-view i {
+    margin-right: 0.12rem;
+}
+
 .survey-stats-panel {
     background: #2a2a2a;
     padding: 1rem 1.2rem;
@@ -5553,10 +5568,22 @@ body {
         padding: 0.45rem 0.55rem;
         vertical-align: middle;
     }
-    /* 관리(수정/삭제) 열 숨김 */
-    #tab-survey .survey-table th:last-child,
-    #tab-survey .survey-table td:last-child {
-        display: none;
+    /* 관리 열 — 모바일에서도 도면 보기 사용 */
+    #tab-survey .survey-table th[data-col="actions"],
+    #tab-survey .survey-table td[data-col="actions"] {
+        position: sticky;
+        right: 0;
+        z-index: 1;
+        background: #ffffff;
+        box-shadow: -4px 0 8px rgba(0, 0, 0, 0.04);
+    }
+    #tab-survey .survey-table thead th[data-col="actions"] {
+        z-index: 3;
+        background: #fafafa !important;
+    }
+    #tab-survey .survey-row-actions .btn {
+        font-size: 0.68rem;
+        padding: 0.14rem 0.32rem;
     }
 
     /* 세로(포트rait) — 패딩만 줄이고 글자는 잘리지 않게(가로 스크롤 허용) */

@@ -10170,6 +10170,35 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    // 상태조사표 → 결함위치도: 해당 마킹 선택·화면 이동
+    window.viewDefectOnMapFromSurvey = function(defectId) {
+        if (!defectId) return;
+        if (!state.currentBuildingId) {
+            window.showToast?.('건물을 먼저 선택하세요.', 'info');
+            return;
+        }
+        const key = `${state.currentBuildingId}_${state.currentFloor}`;
+        const list = state.defects[key] || [];
+        const consolidated = consolidateDefectGroups(list).find(d =>
+            d.id === defectId || (d._groupMemberIds && d._groupMemberIds.indexOf(defectId) !== -1)
+        );
+        const focusId = consolidated ? consolidated.id : defectId;
+        selectedDefectIds.clear();
+        if (consolidated && consolidated._groupMemberIds && consolidated._groupMemberIds.length > 1) {
+            consolidated._groupMemberIds.forEach(id => selectedDefectIds.add(id));
+        } else if (focusId) {
+            selectedDefectIds.add(focusId);
+        }
+        if (typeof setDrawMode === 'function') setDrawMode('PAN');
+        window.switchTab('tab-map');
+        setTimeout(() => {
+            if (typeof resizeCanvas === 'function') resizeCanvas();
+            if (typeof updateMapSelectionBar === 'function') updateMapSelectionBar({ scrollToSelection: true });
+            if (typeof drawCanvas === 'function') drawCanvas();
+            if (typeof window.focusDefectOnCanvas === 'function') window.focusDefectOnCanvas(focusId);
+        }, 280);
+    };
+
     function translateDefectBy(d, dx, dy) {
         if (!d || (!dx && !dy)) return;
         if (typeof d.x === 'number') d.x += dx;
@@ -13038,14 +13067,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 ctx.floorDisplayLabel = getGrade3FloorDisplayLabel(state.currentFloor);
             }
             const isGroup = d._groupMemberIds && d._groupMemberIds.length > 1;
-            const deleteAction = isGroup ? `window.deleteDefectGroup('${d.groupId}')` : `deleteDefectById('${d.id}')`;
 
             return `
                 <tr>
                     ${columns.map(c => `<td data-col="${c.key}">${renderInlineSurveyCellHtml(c.key, d, ctx)}</td>`).join('')}
                     <td data-col="actions" class="survey-row-actions">
                         <button type="button" class="btn btn-sm btn-outline" onclick="event.stopPropagation(); window.openSurveyRowEditModal('${d.id}')" title="상세 모달">상세</button>
-                        <button type="button" class="btn btn-sm btn-danger-outline" onclick="event.stopPropagation(); ${deleteAction}">삭제</button>
+                        <button type="button" class="btn btn-sm btn-outline survey-btn-map-view" onclick="event.stopPropagation(); window.viewDefectOnMapFromSurvey('${d.id}')" title="결함위치도에서 마킹 선택${isGroup ? ' (그룹 전체)' : ''}"><i class="fa-solid fa-map-location-dot"></i> 도면</button>
                     </td>
                 </tr>
             `;
