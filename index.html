@@ -11,7 +11,7 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <meta name="apple-mobile-web-app-title" content="스마트 안전점검">
-    <link rel="stylesheet" href="styles.css?v=20260824_surveyMainCols">
+    <link rel="stylesheet" href="styles.css?v=20260824_mapToolbarDelete">
     <!-- FontAwesome icons for clean engineering UI -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <!-- PDF 생성용: 페이지별로 직접 캡처해서 조립(큰 보고서에서 html2pdf 한방 렌더링이 캔버스 높이 한계로
@@ -216,14 +216,6 @@
                     <!-- Canvas Viewport -->
                     <div class="canvas-container" id="canvasContainer">
                         <canvas id="planCanvas"></canvas>
-                        <!-- 다중 선택 시: 삭제만 (일괄 내용 수정 불가) -->
-                        <div id="mapSelectionBar" class="map-selection-bar" hidden>
-                            <span id="mapSelectionCount" class="map-selection-count">0개 선택</span>
-                            <button type="button" id="btnDeleteSelectedDefects" class="map-selection-delete" title="선택한 결함 삭제">
-                                <i class="fa-solid fa-trash-can"></i>
-                                <span>삭제</span>
-                            </button>
-                        </div>
                         <aside class="mobile-side-rail" id="mobileMapSideRail" aria-label="마킹 도구">
                             <button type="button" class="mobile-rail-btn active" id="mobileBtnModePan" data-mode="PAN" title="선택">
                                 <i class="fa-regular fa-hand-pointer"></i>
@@ -258,6 +250,10 @@
                             <i class="fa-solid fa-rotate-right"></i>
                             <span>다시 실행</span>
                         </button>
+                        <button type="button" id="btnDeleteSelectedDefects" class="icon-pill-btn icon-pill-danger map-toolbar-delete-selected" title="선택한 결함 삭제" hidden disabled>
+                            <i class="fa-solid fa-trash-can"></i>
+                            <span id="mapSelectionToolbarLabel">선택 삭제</span>
+                        </button>
                         <button type="button" id="btnClearPins" class="icon-pill-btn icon-pill-danger" title="현재 층 핀 전체 초기화">
                             <i class="fa-solid fa-trash-can"></i>
                             <span>전체 초기화</span>
@@ -275,9 +271,9 @@
                                 <i class="fa-solid fa-rotate-right"></i>
                                 <span>다시실행</span>
                             </button>
-                            <button type="button" class="mobile-fab-btn mobile-fab-danger" id="mobileBtnDeleteSelected" title="선택한 결함 삭제">
+                            <button type="button" class="mobile-fab-btn mobile-fab-danger" id="mobileBtnDeleteSelected" title="선택한 결함 삭제" hidden disabled>
                                 <i class="fa-solid fa-trash-can"></i>
-                                <span>삭제</span>
+                                <span id="mobileMapSelectionLabel">선택 삭제</span>
                             </button>
                             <button type="button" class="mobile-fab-btn mobile-fab-toggle" id="mobileBtnToggleSize" aria-expanded="false" title="핀·화살표 크기">
                                 <i class="fa-solid fa-sliders"></i>
@@ -2017,7 +2013,7 @@
     <script src="js/tabs/ndt.js?v=20260822_survey2dScroll"></script>
     <script src="js/shared/report.js?v=20260821_land1"></script>
     <script src="js/shared/auth.js?v=20260821_land1"></script>
-    <script src="app.js?v=20260824_defectListScrollFix"></script>
+    <script src="app.js?v=20260824_mapToolbarDelete"></script>
     <script>
         document.addEventListener('DOMContentLoaded', function () {
             const btn = document.getElementById('btnExportVectorPdf');

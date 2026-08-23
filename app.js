@@ -10146,15 +10146,23 @@ document.addEventListener('DOMContentLoaded', () => {
     window.getSelectedDefectIds = () => selectedDefectIds;
 
     function updateMapSelectionBar(options = {}) {
-        const bar = document.getElementById('mapSelectionBar');
-        const countEl = document.getElementById('mapSelectionCount');
-        if (!bar) return;
         const n = selectedDefectIds.size;
-        if (n === 0) {
-            bar.hidden = true;
-        } else {
-            bar.hidden = false;
-            if (countEl) countEl.textContent = `${n}개 선택`;
+        const label = n > 0 ? `선택 삭제 (${n})` : '선택 삭제';
+        const desktopBtn = document.getElementById('btnDeleteSelectedDefects');
+        const desktopLabel = document.getElementById('mapSelectionToolbarLabel');
+        const mobileBtn = document.getElementById('mobileBtnDeleteSelected');
+        const mobileLabel = document.getElementById('mobileMapSelectionLabel');
+        if (desktopLabel) desktopLabel.textContent = label;
+        if (mobileLabel) mobileLabel.textContent = label;
+        if (desktopBtn) {
+            desktopBtn.hidden = n === 0;
+            desktopBtn.disabled = n === 0;
+            desktopBtn.title = n > 0 ? `선택한 결함 ${n}건 삭제` : '선택한 결함 삭제';
+        }
+        if (mobileBtn) {
+            mobileBtn.hidden = n === 0;
+            mobileBtn.disabled = n === 0;
+            mobileBtn.title = n > 0 ? `선택한 결함 ${n}건 삭제` : '선택한 결함 삭제';
         }
         // 결함목록: 도면 선택 시만 스크롤 / 목록 클릭·필터 등은 스크롤 위치 유지
         if (typeof renderDefectListPanel === 'function') {
@@ -12339,7 +12347,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const mobileBtnDeleteSelected = document.getElementById('mobileBtnDeleteSelected');
     if (mobileBtnDeleteSelected) {
         mobileBtnDeleteSelected.addEventListener('click', () => {
-            document.getElementById('btnDeleteSelectedDefects')?.click();
+            deleteSelectedDefects();
         });
     }
 

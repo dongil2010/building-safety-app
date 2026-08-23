@@ -617,7 +617,12 @@ body {
     background: #fef2f2;
 }
 
-/* 다중 선택 플로팅 바 (삭제만) */
+.icon-pill-btn.map-toolbar-delete-selected:not([hidden]) {
+    border-color: #fca5a5;
+    background: #fef2f2;
+}
+
+/* NDT 등 — 다중 선택 플로팅 바 (결함위치도는 하단 툴바 사용) */
 .map-selection-bar {
     position: absolute;
     left: 50%;
