@@ -2188,6 +2188,10 @@ document.addEventListener('DOMContentLoaded', () => {
     let selectedNdtIds = new Set(); // pin id 또는 disp_<groupId>
     window.getSelectedNdtIds = () => selectedNdtIds;
 
+    function ndtDispSelKey(groupId) {
+        return `disp_${groupId}`;
+    }
+
     function clearPendingNdtLongPress() {
         if (pendingNdtLongPressTimer) {
             clearTimeout(pendingNdtLongPressTimer);
@@ -13827,6 +13831,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 } else if (categoryFilter === '일반비파괴') {
                     ndtItems = ndtItems.filter(item => ['강도', '탄산화'].includes(item.category));
                     displacementGroups = [];
+                } else if (categoryFilter === '강도') {
+                    ndtItems = ndtItems.filter(item => item.category === '강도');
+                    displacementGroups = [];
+                } else if (categoryFilter === '탄산화') {
+                    ndtItems = ndtItems.filter(item => item.category === '탄산화');
+                    displacementGroups = [];
                 }
             }
 
@@ -14182,7 +14192,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 const allDispGroups = state.ndtDisplacementGroups ? (state.ndtDisplacementGroups[ndtKey] || []) : [];
 
                 const measureNdtItems = allNdtItems.filter(item => item.category === '실측');
-                const strengthCarbNdtItems = allNdtItems.filter(item => ['강도', '탄산화'].includes(item.category));
+                const strengthNdtItems = allNdtItems.filter(item => item.category === '강도');
+                const carbNdtItems = allNdtItems.filter(item => item.category === '탄산화');
                 const tiltNdtItems = allNdtItems.filter(item => item.category === '기울기');
                 const settlementGroups = allDispGroups.filter(g => !g.category || g.category === '변위');
                 const memberDispGroups = allDispGroups.filter(g => g.category === '부재변위');
@@ -14281,9 +14292,14 @@ document.addEventListener('DOMContentLoaded', () => {
                     `;
                 }
 
-                // --- 4-1. 🔬 콘크리트 강도·탄산화 결과표 및 측정 위치도 (부재 실측과 별도 도면) ---
-                if (strengthCarbNdtItems.length > 0) {
-                    const stdDrawingUrl = renderNdtFloorPlanCanvasDataUrl(floorCode, '일반비파괴');
+                // --- 4-1. 🔬 콘크리트 강도 결과표 및 측정 위치도 (탄산화와 별도 표·별도 도면) ---
+                // --- 4-2. 🔬 탄산화 결과표 및 측정 위치도 ---
+                [
+                    { items: strengthNdtItems, catLabel: '강도', drawingFilter: '강도', emptyIcon: 'fa-hammer', emptyMsg: '📍 강도 마킹 데이터가 첨부되지 않았습니다.' },
+                    { items: carbNdtItems, catLabel: '탄산화', drawingFilter: '탄산화', emptyIcon: 'fa-microscope', emptyMsg: '📍 탄산화 마킹 데이터가 첨부되지 않았습니다.' }
+                ].forEach(({ items: stdItems, catLabel, drawingFilter, emptyIcon, emptyMsg }) => {
+                    if (stdItems.length === 0) return;
+                    const stdDrawingUrl = renderNdtFloorPlanCanvasDataUrl(floorCode, drawingFilter);
                     const curSecNo1 = sectionNo++;
                     reportPagesHtml += `
                         <div class="report-page-block" style="background:#ffffff; color:#0f172a; padding: 10mm 14mm 10mm 14mm; margin-bottom: 2rem; font-family: sans-serif; font-size:0.9rem; border-radius:4px; box-shadow: 0 4px 20px rgba(0,0,0,0.1); page-break-after: always; break-after: page; page-break-inside: avoid !important; break-inside: avoid !important; box-sizing: border-box; width: 210mm; height: 295mm; max-height: 295mm; overflow: hidden; display: flex; flex-direction: column; position: relative;">
@@ -14292,14 +14308,13 @@ document.addEventListener('DOMContentLoaded', () => {
                             </div>
 
                             <h2 style="font-size:1.02rem; font-weight:800; color:#0f172a; border-left: 4px solid #2a2a2a; padding-left: 0.5rem; margin-bottom: 0.5rem;">
-                                ${curSecNo1}. ${floorDisplayLabel} 비파괴 장비 조사 (강도·탄산화) 결과표
+                                ${curSecNo1}. ${floorDisplayLabel} 비파괴 장비 조사 (${catLabel}) 결과표
                             </h2>
 
                             <table style="width: 100%; border-collapse: collapse; font-size: 0.81rem; text-align: center; margin-bottom: 0.4rem;">
                                 <thead>
                                     <tr style="background: #f8fafc; color: #1e293b; border-bottom: 2px solid #cbd5e1;">
                                         <th style="padding: 0.45rem 0.3rem; border: 1px solid #cbd5e1;">관리번호</th>
-                                        <th style="padding: 0.45rem 0.3rem; border: 1px solid #cbd5e1;">조사항목</th>
                                         <th style="padding: 0.45rem 0.3rem; border: 1px solid #cbd5e1;">측정위치</th>
                                         <th style="padding: 0.45rem 0.3rem; border: 1px solid #cbd5e1;">부재명</th>
                                         <th style="padding: 0.45rem 0.3rem; border: 1px solid #cbd5e1;">측정수치</th>
@@ -14308,19 +14323,16 @@ document.addEventListener('DOMContentLoaded', () => {
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    ${strengthCarbNdtItems.length > 0 ? strengthCarbNdtItems.map(item => `
+                                    ${stdItems.map(item => `
                                         <tr>
                                             <td style="padding:0.4rem 0.3rem; border:1px solid #e2e8f0; font-weight:800; color:#2a2a2a;">${item.no || 'NO.01'}</td>
-                                            <td style="padding:0.4rem 0.3rem; border:1px solid #e2e8f0; font-weight:700;">${item.category}</td>
                                             <td style="padding:0.4rem 0.3rem; border:1px solid #e2e8f0;">${item.location || '위치미지정'}</td>
                                             <td style="padding:0.4rem 0.3rem; border:1px solid #e2e8f0;">${item.component || '기둥'}</td>
                                             <td style="padding:0.4rem 0.3rem; border:1px solid #e2e8f0; font-family:monospace;">${item.valuesText || '-'}</td>
                                             <td style="padding:0.4rem 0.3rem; border:1px solid #e2e8f0; font-weight:800; color:#16a34a;">${item.avgValue || '-'}</td>
                                             <td style="padding:0.4rem 0.3rem; border:1px solid #e2e8f0; font-weight:700;">${item.status || '양호'}</td>
                                         </tr>
-                                    `).join('') : `
-                                        <tr><td colspan="7" style="padding: 2rem; color: #a3a3a3;">등록된 비파괴 조사 측정 데이터가 없습니다.</td></tr>
-                                    `}
+                                    `).join('')}
                                 </tbody>
                             </table>
 
@@ -14339,7 +14351,7 @@ document.addEventListener('DOMContentLoaded', () => {
                             </div>
 
                             <h2 style="font-size:1.02rem; font-weight:800; color:#0f172a; border-left: 4px solid #2a2a2a; padding-left: 0.5rem; margin-bottom: 0.5rem;">
-                                ${curSecNo2}. ${floorDisplayLabel} 비파괴 장비 조사 (강도·탄산화) 위치도
+                                ${curSecNo2}. ${floorDisplayLabel} 비파괴 장비 조사 (${catLabel}) 위치도
                             </h2>
 
                             ${stdDrawingUrl ? `
@@ -14348,8 +14360,8 @@ document.addEventListener('DOMContentLoaded', () => {
                                 </div>
                             ` : `
                                 <div style="width: 100%; height: 222mm; max-height: 222mm; border: 2px dashed #cbd5e1; border-radius: 8px; padding: 4rem 2rem; background: #f8fafc; text-align: center; color: #64748b; font-weight: 700; font-size: 1.05rem; display: flex; flex-direction: column; align-items: center; justify-content: center;">
-                                    <i class="fa-solid fa-microscope" style="font-size: 2.8rem; color: #a3a3a3; margin-bottom: 0.8rem; display: block;"></i>
-                                    📍 강도/탄산화 마킹 데이터가 첨부되지 않았습니다.
+                                    <i class="fa-solid ${emptyIcon}" style="font-size: 2.8rem; color: #a3a3a3; margin-bottom: 0.8rem; display: block;"></i>
+                                    ${emptyMsg}
                                 </div>
                             `}
 
@@ -14359,7 +14371,7 @@ document.addEventListener('DOMContentLoaded', () => {
                             </div>
                         </div>
                     `;
-                }
+                });
 
                 // --- 5. 📐 외벽 기울기 전용 결과표 및 독립 위치도 ---
                 if (tiltNdtItems.length > 0) {
