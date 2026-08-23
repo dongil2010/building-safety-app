@@ -2763,45 +2763,73 @@ body {
         gap: 0.06rem;
         width: 2.45rem;
         min-height: 2.35rem;
-        border: none;
+        border: 1.5px solid #e5e7eb;
         border-radius: 8px;
-        background: transparent;
-        color: #404040;
+        background: #f9fafb;
+        color: #737373;
         font-size: 0.48rem;
         font-weight: 800;
         cursor: pointer;
         padding: 0.12rem 0.05rem;
+        box-sizing: border-box;
         -webkit-tap-highlight-color: transparent;
         line-height: 1.05;
+        transition: border-color 0.15s ease, background 0.15s ease, box-shadow 0.15s ease, color 0.15s ease;
     }
 
     .mobile-rail-btn i {
         font-size: 0.88rem;
-        color: #262626;
+        color: #a3a3a3;
+        transition: color 0.15s ease;
     }
 
+    /* 토글 OFF — 드래그·추가 등 aria-pressed=false */
+    .mobile-rail-btn[aria-pressed="false"] {
+        border-color: #e5e7eb;
+        background: #f3f4f6;
+        color: #9ca3af;
+    }
+
+    .mobile-rail-btn[aria-pressed="false"] i {
+        color: #b0b0b0;
+    }
+
+    /* ON — 파란 테두리·링 (선택·토글 공통) */
     .mobile-rail-btn.active,
-    .mobile-rail-btn[aria-pressed="true"] {
-        background: #f4f4f4;
-        color: #171717;
+    .mobile-rail-btn[aria-pressed="true"],
+    .mobile-rail-btn[aria-expanded="true"] {
+        border: 2px solid #2563eb;
+        background: #eff6ff;
+        color: #1d4ed8;
+        box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.22);
+    }
+
+    .mobile-rail-btn.active i,
+    .mobile-rail-btn[aria-pressed="true"] i,
+    .mobile-rail-btn[aria-expanded="true"] i {
+        color: #2563eb;
     }
 
     .mobile-rail-btn.mobile-fab-mark.active {
+        border-color: #dc2626;
         background: #fee2e2;
         color: #b91c1c;
+        box-shadow: 0 0 0 2px rgba(220, 38, 38, 0.22);
     }
 
     .mobile-rail-btn.mobile-fab-mark.active i {
-        color: #b91c1c;
+        color: #dc2626;
     }
 
     .mobile-rail-btn.mobile-fab-area.active {
+        border-color: #ea580c;
         background: #ffedd5;
         color: #c2410c;
+        box-shadow: 0 0 0 2px rgba(234, 88, 12, 0.22);
     }
 
     .mobile-rail-btn.mobile-fab-area.active i {
-        color: #c2410c;
+        color: #ea580c;
     }
 
     .mobile-map-fab {
@@ -4827,14 +4855,15 @@ body {
         gap: 0.06rem;
         width: 2.45rem;
         min-height: 2.35rem;
-        border: none;
+        border: 1.5px solid #e5e7eb;
         border-radius: 8px;
-        background: transparent;
-        color: #404040;
+        background: #f9fafb;
+        color: #737373;
         font-size: 0.48rem;
         font-weight: 800;
         cursor: pointer;
         padding: 0.12rem 0.05rem;
+        box-sizing: border-box;
         line-height: 1.05;
         -webkit-tap-highlight-color: transparent;
     }
@@ -4842,7 +4871,57 @@ body {
     #tab-map .mobile-rail-btn i,
     #tab-ndt .mobile-rail-btn i {
         font-size: 0.88rem;
-        color: #262626;
+        color: #a3a3a3;
+    }
+
+    #tab-map .mobile-rail-btn[aria-pressed="false"],
+    #tab-ndt .mobile-rail-btn[aria-pressed="false"] {
+        border-color: #e5e7eb;
+        background: #f3f4f6;
+        color: #9ca3af;
+    }
+
+    #tab-map .mobile-rail-btn.active,
+    #tab-map .mobile-rail-btn[aria-pressed="true"],
+    #tab-map .mobile-rail-btn[aria-expanded="true"],
+    #tab-ndt .mobile-rail-btn.active,
+    #tab-ndt .mobile-rail-btn[aria-pressed="true"],
+    #tab-ndt .mobile-rail-btn[aria-expanded="true"] {
+        border: 2px solid #2563eb;
+        background: #eff6ff;
+        color: #1d4ed8;
+        box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.22);
+    }
+
+    #tab-map .mobile-rail-btn.active i,
+    #tab-map .mobile-rail-btn[aria-pressed="true"] i,
+    #tab-ndt .mobile-rail-btn.active i,
+    #tab-ndt .mobile-rail-btn[aria-pressed="true"] i {
+        color: #2563eb;
+    }
+
+    #tab-map .mobile-rail-btn.mobile-fab-mark.active,
+    #tab-ndt .mobile-rail-btn.mobile-fab-mark.active {
+        border-color: #dc2626;
+        background: #fee2e2;
+        color: #b91c1c;
+        box-shadow: 0 0 0 2px rgba(220, 38, 38, 0.22);
+    }
+
+    #tab-map .mobile-rail-btn.mobile-fab-mark.active i,
+    #tab-ndt .mobile-rail-btn.mobile-fab-mark.active i {
+        color: #dc2626;
+    }
+
+    #tab-map .mobile-rail-btn.mobile-fab-area.active {
+        border-color: #ea580c;
+        background: #ffedd5;
+        color: #c2410c;
+        box-shadow: 0 0 0 2px rgba(234, 88, 12, 0.22);
+    }
+
+    #tab-map .mobile-rail-btn.mobile-fab-area.active i {
+        color: #ea580c;
     }
 
     #tab-map .mobile-canvas-dock .mobile-map-fab {
