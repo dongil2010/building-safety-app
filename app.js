@@ -2423,8 +2423,9 @@ document.addEventListener('DOMContentLoaded', () => {
             let boxX = baseBoxX;
             let boxY = baseBoxY;
             if (cat === '기울기' || cat === '변위' || cat === '부재변위') {
-                boxW = 168 * pinScale;
-                boxH = 44 * pinScale;
+                const dims = getNdtTiltCalloutDims(item, cat, pinScale);
+                boxW = dims.boxW;
+                boxH = dims.boxH;
             } else if (cat === '강도' || cat === '탄산화') {
                 const typeLabel = getNdtStrengthCarbTypeLabel(cat);
                 const dims = measureNdtTypeCalloutDimensions(measureCtx, noStr, typeLabel, pinScale);
@@ -3408,6 +3409,41 @@ document.addEventListener('DOMContentLoaded', () => {
         return cat || '';
     }
 
+    // 외벽 기울기 콜아웃 박스 회전 — 도면 좌우 폭이 좁을 때 세로형(90/270)으로 돌려 폭을 줄인다.
+    // 0/180 = 가로형(NO|변위량|변위방향), 90/270 = 세로형(NO / 변위량 / 변위방향), 180·270은 좌우·상하 반전.
+    function getNdtTiltCalloutDims(item, cat, pinScale) {
+        const rot = (cat === '기울기') ? (((item && item.calloutRotation) || 0) % 360 + 360) % 360 : 0;
+        const isVertical = rot === 90 || rot === 270;
+        const isFlipped = rot === 180 || rot === 270;
+        const boxW = isVertical ? 90 * pinScale : 168 * pinScale;
+        const boxH = isVertical ? 106 * pinScale : 44 * pinScale;
+        return { boxW, boxH, isVertical, isFlipped, rot };
+    }
+
+    window.rotateSelectedNdtTiltBoxes = function () {
+        if (!selectedNdtIds.size) {
+            if (typeof window.showToast === 'function') window.showToast('회전할 기울기 항목을 먼저 선택해 주세요.', 'info');
+            return;
+        }
+        const items = getCurrentFloorNdtData();
+        let changed = 0;
+        selectedNdtIds.forEach((id) => {
+            if (String(id).startsWith('disp_')) return;
+            const item = items.find(x => x.id === id);
+            if (item && item.category === '기울기') {
+                item.calloutRotation = (((item.calloutRotation || 0) + 90) % 360 + 360) % 360;
+                changed++;
+            }
+        });
+        if (!changed) {
+            if (typeof window.showToast === 'function') window.showToast('선택 항목 중 외벽 기울기 박스가 없습니다.', 'info');
+            return;
+        }
+        saveStateToLocalStorage();
+        drawNdtCanvas();
+        if (typeof window.showToast === 'function') window.showToast(`기울기 박스 ${changed}개 회전`, 'success', 2000);
+    };
+
     function drawNdtSelectionHalo(ctx, item) {
         const bx = item.boxX !== undefined ? item.boxX : (item.x || 0);
         const by = item.boxY !== undefined ? item.boxY : (item.y || 0);
@@ -3416,8 +3452,9 @@ document.addEventListener('DOMContentLoaded', () => {
         let w = 60 * pinScale;
         let h = 28 * pinScale;
         if (cat === '기울기' || cat === '변위' || cat === '부재변위') {
-            w = 168 * pinScale;
-            h = 44 * pinScale;
+            const dims = getNdtTiltCalloutDims(item, cat, pinScale);
+            w = dims.boxW;
+            h = dims.boxH;
         } else if (cat === '강도' || cat === '탄산화') {
             const dims = measureNdtTypeCalloutDimensions(ctx, item.no || 'NO.01', getNdtStrengthCarbTypeLabel(cat), pinScale);
             w = dims.boxW;
@@ -3522,9 +3559,9 @@ document.addEventListener('DOMContentLoaded', () => {
         const dispDir = normalizeNdtDispDirSymbol(item.dispDirection);
         const amountLabel = (cat === '부재변위') ? '처 짐 량' : '변 위 량';
 
-        // 표 치수 (참고 이미지 비율)
-        const boxW = 168 * pinScale;
-        const boxH = 44 * pinScale;
+        // 표 치수 — 세로형(90/270)은 좌우 폭을 줄이려고 표를 전치(NO/변위량/변위방향을 세로로 쌓음)한다.
+        // 180/270은 좌우(가로형) 또는 상하(세로형) 순서를 반전(NO 위치를 반대쪽으로).
+        const { boxW, boxH, isVertical, isFlipped } = getNdtTiltCalloutDims(item, cat, pinScale);
         const col1W = 52 * pinScale;
         const col2W = 58 * pinScale;
         const col3W = boxW - col1W - col2W;
@@ -3586,35 +3623,72 @@ document.addEventListener('DOMContentLoaded', () => {
         ctx.rect(-boxW / 2, -boxH / 2, boxW, boxH);
         ctx.stroke();
 
-        // 격자: 세로 2줄 + 가로 1줄(오른쪽만)
-        ctx.beginPath();
-        ctx.moveTo(-boxW / 2 + col1W, -boxH / 2);
-        ctx.lineTo(-boxW / 2 + col1W, boxH / 2);
-        ctx.moveTo(-boxW / 2 + col1W + col2W, -boxH / 2);
-        ctx.lineTo(-boxW / 2 + col1W + col2W, boxH / 2);
-        ctx.moveTo(-boxW / 2 + col1W, 0);
-        ctx.lineTo(boxW / 2, 0);
-        ctx.stroke();
-
         ctx.fillStyle = color;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
 
-        // 좌측 NO
-        ctx.font = `bold ${Math.round(15 * pinScale)}px sans-serif`;
-        ctx.fillText(noStr, -boxW / 2 + col1W / 2, 0);
+        if (!isVertical) {
+            // 가로형: NO | 변위량·변위방향(라벨) | 값 — 180이면 mx=-1로 좌우를 통째로 뒤집는다
+            const mx = isFlipped ? -1 : 1;
+            const noX = mx * (-boxW / 2 + col1W / 2);
+            const midX = mx * (-boxW / 2 + col1W + col2W / 2);
+            const rightX = mx * (-boxW / 2 + col1W + col2W + col3W / 2);
+            const div1X = mx * (-boxW / 2 + col1W);
+            const div2X = mx * (-boxW / 2 + col1W + col2W);
 
-        // 중·우 셀
-        const midX = -boxW / 2 + col1W + col2W / 2;
-        const rightX = -boxW / 2 + col1W + col2W + col3W / 2;
-        ctx.font = `bold ${Math.round(10.5 * pinScale)}px sans-serif`;
-        ctx.fillText(amountLabel, midX, -boxH / 4);
-        ctx.fillText('변위방향', midX, boxH / 4);
+            ctx.beginPath();
+            ctx.moveTo(div1X, -boxH / 2);
+            ctx.lineTo(div1X, boxH / 2);
+            ctx.moveTo(div2X, -boxH / 2);
+            ctx.lineTo(div2X, boxH / 2);
+            ctx.moveTo(Math.min(div1X, div2X), 0);
+            ctx.lineTo(Math.max(div1X, div2X), 0);
+            ctx.stroke();
 
-        ctx.font = `bold ${Math.round(12.5 * pinScale)}px sans-serif`;
-        ctx.fillText(tiltVal, rightX, -boxH / 4);
-        ctx.font = `bold ${Math.round(18 * pinScale)}px sans-serif`;
-        ctx.fillText(dispDir, rightX, boxH / 4);
+            ctx.font = `bold ${Math.round(15 * pinScale)}px sans-serif`;
+            ctx.fillText(noStr, noX, 0);
+
+            ctx.font = `bold ${Math.round(10.5 * pinScale)}px sans-serif`;
+            ctx.fillText(amountLabel, midX, -boxH / 4);
+            ctx.fillText('변위방향', midX, boxH / 4);
+
+            ctx.font = `bold ${Math.round(12.5 * pinScale)}px sans-serif`;
+            ctx.fillText(tiltVal, rightX, -boxH / 4);
+            ctx.font = `bold ${Math.round(18 * pinScale)}px sans-serif`;
+            ctx.fillText(dispDir, rightX, boxH / 4);
+        } else {
+            // 세로형: NO(위) / 변위량·값 / 변위방향·값 — 270이면 my=-1로 상하를 통째로 뒤집는다
+            const my = isFlipped ? -1 : 1;
+            const rowNoH = 36 * pinScale;
+            const rowDataH = (boxH - rowNoH) / 2;
+            const noY = my * (-boxH / 2 + rowNoH / 2);
+            const amountY = my * (-boxH / 2 + rowNoH + rowDataH / 2);
+            const dirY = my * (boxH / 2 - rowDataH / 2);
+            const div1Y = my * (-boxH / 2 + rowNoH);
+            const div2Y = my * (-boxH / 2 + rowNoH + rowDataH);
+            const farY = my * (boxH / 2);
+
+            ctx.beginPath();
+            ctx.moveTo(-boxW / 2, div1Y);
+            ctx.lineTo(boxW / 2, div1Y);
+            ctx.moveTo(-boxW / 2, div2Y);
+            ctx.lineTo(boxW / 2, div2Y);
+            ctx.moveTo(0, div1Y);
+            ctx.lineTo(0, farY);
+            ctx.stroke();
+
+            ctx.font = `bold ${Math.round(15 * pinScale)}px sans-serif`;
+            ctx.fillText(noStr, 0, noY);
+
+            ctx.font = `bold ${Math.round(10.5 * pinScale)}px sans-serif`;
+            ctx.fillText(amountLabel, -boxW / 4, amountY);
+            ctx.fillText('변위방향', -boxW / 4, dirY);
+
+            ctx.font = `bold ${Math.round(12.5 * pinScale)}px sans-serif`;
+            ctx.fillText(tiltVal, boxW / 4, amountY);
+            ctx.font = `bold ${Math.round(16 * pinScale)}px sans-serif`;
+            ctx.fillText(dispDir, boxW / 4, dirY);
+        }
 
         ctx.restore();
     }
@@ -4451,6 +4525,16 @@ document.addEventListener('DOMContentLoaded', () => {
                 e.preventDefault();
                 e.stopPropagation();
                 deleteSelectedNdtMarks();
+            });
+        }
+
+        const btnRotateNdtSel = document.getElementById('btnRotateSelectedNdtTilt');
+        if (btnRotateNdtSel && !btnRotateNdtSel.dataset.ndtSelBound) {
+            btnRotateNdtSel.dataset.ndtSelBound = '1';
+            btnRotateNdtSel.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                window.rotateSelectedNdtTiltBoxes();
             });
         }
 
@@ -13831,12 +13915,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 } else if (categoryFilter === '일반비파괴') {
                     ndtItems = ndtItems.filter(item => ['강도', '탄산화'].includes(item.category));
                     displacementGroups = [];
-                } else if (categoryFilter === '강도') {
-                    ndtItems = ndtItems.filter(item => item.category === '강도');
-                    displacementGroups = [];
-                } else if (categoryFilter === '탄산화') {
-                    ndtItems = ndtItems.filter(item => item.category === '탄산화');
-                    displacementGroups = [];
                 }
             }
 
@@ -14292,14 +14370,13 @@ document.addEventListener('DOMContentLoaded', () => {
                     `;
                 }
 
-                // --- 4-1. 🔬 콘크리트 강도 결과표 및 측정 위치도 (탄산화와 별도 표·별도 도면) ---
-                // --- 4-2. 🔬 탄산화 결과표 및 측정 위치도 ---
+                // --- 4-1. 🔬 콘크리트 강도 결과표 (표만 분리, 위치도는 탄산화와 공통) ---
+                // --- 4-2. 🔬 탄산화 결과표 ---
                 [
-                    { items: strengthNdtItems, catLabel: '강도', drawingFilter: '강도', emptyIcon: 'fa-hammer', emptyMsg: '📍 강도 마킹 데이터가 첨부되지 않았습니다.' },
-                    { items: carbNdtItems, catLabel: '탄산화', drawingFilter: '탄산화', emptyIcon: 'fa-microscope', emptyMsg: '📍 탄산화 마킹 데이터가 첨부되지 않았습니다.' }
-                ].forEach(({ items: stdItems, catLabel, drawingFilter, emptyIcon, emptyMsg }) => {
+                    { items: strengthNdtItems, catLabel: '강도' },
+                    { items: carbNdtItems, catLabel: '탄산화' }
+                ].forEach(({ items: stdItems, catLabel }) => {
                     if (stdItems.length === 0) return;
-                    const stdDrawingUrl = renderNdtFloorPlanCanvasDataUrl(floorCode, drawingFilter);
                     const curSecNo1 = sectionNo++;
                     reportPagesHtml += `
                         <div class="report-page-block" style="background:#ffffff; color:#0f172a; padding: 10mm 14mm 10mm 14mm; margin-bottom: 2rem; font-family: sans-serif; font-size:0.9rem; border-radius:4px; box-shadow: 0 4px 20px rgba(0,0,0,0.1); page-break-after: always; break-after: page; page-break-inside: avoid !important; break-inside: avoid !important; box-sizing: border-box; width: 210mm; height: 295mm; max-height: 295mm; overflow: hidden; display: flex; flex-direction: column; position: relative;">
@@ -14342,7 +14419,11 @@ document.addEventListener('DOMContentLoaded', () => {
                             </div>
                         </div>
                     `;
+                });
 
+                // --- 4-3. 🔬 강도·탄산화 공통 측정 위치도 (표만 분리하고 위치도는 하나로 유지) ---
+                if (strengthNdtItems.length > 0 || carbNdtItems.length > 0) {
+                    const stdDrawingUrl = renderNdtFloorPlanCanvasDataUrl(floorCode, '일반비파괴');
                     const curSecNo2 = sectionNo++;
                     reportPagesHtml += `
                         <div class="report-page-block" style="background:#ffffff; color:#0f172a; padding: 10mm 14mm 10mm 14mm; margin-bottom: 2rem; font-family: sans-serif; font-size:0.9rem; border-radius:4px; box-shadow: 0 4px 20px rgba(0,0,0,0.1); page-break-after: always; break-after: page; page-break-inside: avoid !important; break-inside: avoid !important; box-sizing: border-box; width: 210mm; height: 295mm; max-height: 295mm; overflow: hidden; display: flex; flex-direction: column; position: relative;">
@@ -14351,7 +14432,7 @@ document.addEventListener('DOMContentLoaded', () => {
                             </div>
 
                             <h2 style="font-size:1.02rem; font-weight:800; color:#0f172a; border-left: 4px solid #2a2a2a; padding-left: 0.5rem; margin-bottom: 0.5rem;">
-                                ${curSecNo2}. ${floorDisplayLabel} 비파괴 장비 조사 (${catLabel}) 위치도
+                                ${curSecNo2}. ${floorDisplayLabel} 비파괴 장비 조사 (강도·탄산화) 위치도
                             </h2>
 
                             ${stdDrawingUrl ? `
@@ -14360,8 +14441,8 @@ document.addEventListener('DOMContentLoaded', () => {
                                 </div>
                             ` : `
                                 <div style="width: 100%; height: 222mm; max-height: 222mm; border: 2px dashed #cbd5e1; border-radius: 8px; padding: 4rem 2rem; background: #f8fafc; text-align: center; color: #64748b; font-weight: 700; font-size: 1.05rem; display: flex; flex-direction: column; align-items: center; justify-content: center;">
-                                    <i class="fa-solid ${emptyIcon}" style="font-size: 2.8rem; color: #a3a3a3; margin-bottom: 0.8rem; display: block;"></i>
-                                    ${emptyMsg}
+                                    <i class="fa-solid fa-microscope" style="font-size: 2.8rem; color: #a3a3a3; margin-bottom: 0.8rem; display: block;"></i>
+                                    📍 강도/탄산화 마킹 데이터가 첨부되지 않았습니다.
                                 </div>
                             `}
 
@@ -14371,7 +14452,7 @@ document.addEventListener('DOMContentLoaded', () => {
                             </div>
                         </div>
                     `;
-                });
+                }
 
                 // --- 5. 📐 외벽 기울기 전용 결과표 및 독립 위치도 ---
                 if (tiltNdtItems.length > 0) {
