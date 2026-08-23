@@ -2422,10 +2422,11 @@ document.addEventListener('DOMContentLoaded', () => {
             let boxH;
             let boxX = baseBoxX;
             let boxY = baseBoxY;
+            let hitRotation = ndtRotationAngle || 0;
             if (cat === '기울기' || cat === '변위' || cat === '부재변위') {
-                const dims = getNdtTiltCalloutDims(item, cat, pinScale);
-                boxW = dims.boxW;
-                boxH = dims.boxH;
+                boxW = 168 * pinScale;
+                boxH = 44 * pinScale;
+                hitRotation -= getNdtTiltItemRotation(item, cat);
             } else if (cat === '강도' || cat === '탄산화') {
                 const typeLabel = getNdtStrengthCarbTypeLabel(cat);
                 const dims = measureNdtTypeCalloutDimensions(measureCtx, noStr, typeLabel, pinScale);
@@ -2437,7 +2438,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 boxH = boxDim.h;
             }
 
-            if (!bestBox && isPointInsideMarkBox(vx, vy, boxX, boxY, boxW, boxH, ndtRotationAngle || 0)) {
+            if (!bestBox && isPointInsideMarkBox(vx, vy, boxX, boxY, boxW, boxH, hitRotation)) {
                 bestBox = { item, part: 'box' };
             }
         }
@@ -3409,15 +3410,10 @@ document.addEventListener('DOMContentLoaded', () => {
         return cat || '';
     }
 
-    // 외벽 기울기 콜아웃 박스 회전 — 도면 좌우 폭이 좁을 때 세로형(90/270)으로 돌려 폭을 줄인다.
-    // 0/180 = 가로형(NO|변위량|변위방향), 90/270 = 세로형(NO / 변위량 / 변위방향), 180·270은 좌우·상하 반전.
-    function getNdtTiltCalloutDims(item, cat, pinScale) {
-        const rot = (cat === '기울기') ? (((item && item.calloutRotation) || 0) % 360 + 360) % 360 : 0;
-        const isVertical = rot === 90 || rot === 270;
-        const isFlipped = rot === 180 || rot === 270;
-        const boxW = isVertical ? 90 * pinScale : 168 * pinScale;
-        const boxH = isVertical ? 106 * pinScale : 44 * pinScale;
-        return { boxW, boxH, isVertical, isFlipped, rot };
+    // 외벽 기울기 콜아웃 박스 회전 — 박스 모양(직사각형+글씨)을 그대로 90도씩 돌려서
+    // 도면 좌우 폭이 좁을 때 박스가 넘어가지 않게 한다. 글씨도 박스와 같이 회전된다.
+    function getNdtTiltItemRotation(item, cat) {
+        return (cat === '기울기') ? (((item && item.calloutRotation) || 0) % 360 + 360) % 360 : 0;
     }
 
     window.rotateSelectedNdtTiltBoxes = function () {
@@ -3451,10 +3447,11 @@ document.addEventListener('DOMContentLoaded', () => {
         const pinScale = getStyleSize(getNdtStyleKey(cat)).pin;
         let w = 60 * pinScale;
         let h = 28 * pinScale;
+        let itemRot = 0;
         if (cat === '기울기' || cat === '변위' || cat === '부재변위') {
-            const dims = getNdtTiltCalloutDims(item, cat, pinScale);
-            w = dims.boxW;
-            h = dims.boxH;
+            w = 168 * pinScale;
+            h = 44 * pinScale;
+            itemRot = getNdtTiltItemRotation(item, cat);
         } else if (cat === '강도' || cat === '탄산화') {
             const dims = measureNdtTypeCalloutDimensions(ctx, item.no || 'NO.01', getNdtStrengthCarbTypeLabel(cat), pinScale);
             w = dims.boxW;
@@ -3465,6 +3462,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (ndtRotationAngle === 90) ctx.rotate((-90 * Math.PI) / 180);
         else if (ndtRotationAngle === 180) ctx.rotate((-180 * Math.PI) / 180);
         else if (ndtRotationAngle === 270) ctx.rotate((-270 * Math.PI) / 180);
+        if (itemRot) ctx.rotate((itemRot * Math.PI) / 180);
         ctx.strokeStyle = '#6b6b6b';
         ctx.lineWidth = Math.max(2, 2.4 * pinScale);
         ctx.setLineDash([]);
@@ -3559,17 +3557,18 @@ document.addEventListener('DOMContentLoaded', () => {
         const dispDir = normalizeNdtDispDirSymbol(item.dispDirection);
         const amountLabel = (cat === '부재변위') ? '처 짐 량' : '변 위 량';
 
-        // 표 치수 — 세로형(90/270)은 좌우 폭을 줄이려고 표를 전치(NO/변위량/변위방향을 세로로 쌓음)한다.
-        // 180/270은 좌우(가로형) 또는 상하(세로형) 순서를 반전(NO 위치를 반대쪽으로).
-        const { boxW, boxH, isVertical, isFlipped } = getNdtTiltCalloutDims(item, cat, pinScale);
+        // 표 치수 (참고 이미지 비율). 박스 자체의 회전(글씨 포함)은 itemRot으로 별도 적용한다.
+        const boxW = 168 * pinScale;
+        const boxH = 44 * pinScale;
         const col1W = 52 * pinScale;
         const col2W = 58 * pinScale;
         const col3W = boxW - col1W - col2W;
         const lineW = Math.max(1.1, getNdtLeaderLineWidth(pinScale, isBeingDragged, getNdtStyleKey(cat || '기울기')) * 0.85);
         const headLen = (isBeingDragged ? 18 : 15) * arrowScale;
+        const itemRot = getNdtTiltItemRotation(item, cat);
 
         // 지시선: 박스에서 측정점으로 — 가장 가까운 변에서 시작, 끝은 채워진 화살촉
-        const anchor = getPinLeaderBoxEdgeCenterAnchor(boxX, boxY, targetX, targetY, boxW, boxH, rotationAngle || 0);
+        const anchor = getPinLeaderBoxEdgeCenterAnchor(boxX, boxY, targetX, targetY, boxW, boxH, (rotationAngle || 0) - itemRot);
         const ux = targetX - anchor.x;
         const uy = targetY - anchor.y;
         const dist = Math.hypot(ux, uy);
@@ -3606,7 +3605,8 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         ctx.restore();
 
-        // 표
+        // 표 — 도면 전체 회전(counter-rotate)에 이어 박스 자체 회전(itemRot)을 추가로 적용한다.
+        // 글씨도 박스와 같이 돌아간다(전치/반전 없이 그대로 회전).
         ctx.save();
         ctx.translate(boxX, boxY);
         if (rotationAngle === 90) {
@@ -3616,6 +3616,7 @@ document.addEventListener('DOMContentLoaded', () => {
         } else if (rotationAngle === 270) {
             ctx.rotate((-270 * Math.PI) / 180);
         }
+        if (itemRot) ctx.rotate((itemRot * Math.PI) / 180);
 
         ctx.strokeStyle = color;
         ctx.lineWidth = lineW;
@@ -3623,72 +3624,35 @@ document.addEventListener('DOMContentLoaded', () => {
         ctx.rect(-boxW / 2, -boxH / 2, boxW, boxH);
         ctx.stroke();
 
+        // 격자: 세로 2줄 + 가로 1줄(오른쪽만)
+        ctx.beginPath();
+        ctx.moveTo(-boxW / 2 + col1W, -boxH / 2);
+        ctx.lineTo(-boxW / 2 + col1W, boxH / 2);
+        ctx.moveTo(-boxW / 2 + col1W + col2W, -boxH / 2);
+        ctx.lineTo(-boxW / 2 + col1W + col2W, boxH / 2);
+        ctx.moveTo(-boxW / 2 + col1W, 0);
+        ctx.lineTo(boxW / 2, 0);
+        ctx.stroke();
+
         ctx.fillStyle = color;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
 
-        if (!isVertical) {
-            // 가로형: NO | 변위량·변위방향(라벨) | 값 — 180이면 mx=-1로 좌우를 통째로 뒤집는다
-            const mx = isFlipped ? -1 : 1;
-            const noX = mx * (-boxW / 2 + col1W / 2);
-            const midX = mx * (-boxW / 2 + col1W + col2W / 2);
-            const rightX = mx * (-boxW / 2 + col1W + col2W + col3W / 2);
-            const div1X = mx * (-boxW / 2 + col1W);
-            const div2X = mx * (-boxW / 2 + col1W + col2W);
+        // 좌측 NO
+        ctx.font = `bold ${Math.round(15 * pinScale)}px sans-serif`;
+        ctx.fillText(noStr, -boxW / 2 + col1W / 2, 0);
 
-            ctx.beginPath();
-            ctx.moveTo(div1X, -boxH / 2);
-            ctx.lineTo(div1X, boxH / 2);
-            ctx.moveTo(div2X, -boxH / 2);
-            ctx.lineTo(div2X, boxH / 2);
-            ctx.moveTo(Math.min(div1X, div2X), 0);
-            ctx.lineTo(Math.max(div1X, div2X), 0);
-            ctx.stroke();
+        // 중·우 셀
+        const midX = -boxW / 2 + col1W + col2W / 2;
+        const rightX = -boxW / 2 + col1W + col2W + col3W / 2;
+        ctx.font = `bold ${Math.round(10.5 * pinScale)}px sans-serif`;
+        ctx.fillText(amountLabel, midX, -boxH / 4);
+        ctx.fillText('변위방향', midX, boxH / 4);
 
-            ctx.font = `bold ${Math.round(15 * pinScale)}px sans-serif`;
-            ctx.fillText(noStr, noX, 0);
-
-            ctx.font = `bold ${Math.round(10.5 * pinScale)}px sans-serif`;
-            ctx.fillText(amountLabel, midX, -boxH / 4);
-            ctx.fillText('변위방향', midX, boxH / 4);
-
-            ctx.font = `bold ${Math.round(12.5 * pinScale)}px sans-serif`;
-            ctx.fillText(tiltVal, rightX, -boxH / 4);
-            ctx.font = `bold ${Math.round(18 * pinScale)}px sans-serif`;
-            ctx.fillText(dispDir, rightX, boxH / 4);
-        } else {
-            // 세로형: NO(위) / 변위량·값 / 변위방향·값 — 270이면 my=-1로 상하를 통째로 뒤집는다
-            const my = isFlipped ? -1 : 1;
-            const rowNoH = 36 * pinScale;
-            const rowDataH = (boxH - rowNoH) / 2;
-            const noY = my * (-boxH / 2 + rowNoH / 2);
-            const amountY = my * (-boxH / 2 + rowNoH + rowDataH / 2);
-            const dirY = my * (boxH / 2 - rowDataH / 2);
-            const div1Y = my * (-boxH / 2 + rowNoH);
-            const div2Y = my * (-boxH / 2 + rowNoH + rowDataH);
-            const farY = my * (boxH / 2);
-
-            ctx.beginPath();
-            ctx.moveTo(-boxW / 2, div1Y);
-            ctx.lineTo(boxW / 2, div1Y);
-            ctx.moveTo(-boxW / 2, div2Y);
-            ctx.lineTo(boxW / 2, div2Y);
-            ctx.moveTo(0, div1Y);
-            ctx.lineTo(0, farY);
-            ctx.stroke();
-
-            ctx.font = `bold ${Math.round(15 * pinScale)}px sans-serif`;
-            ctx.fillText(noStr, 0, noY);
-
-            ctx.font = `bold ${Math.round(10.5 * pinScale)}px sans-serif`;
-            ctx.fillText(amountLabel, -boxW / 4, amountY);
-            ctx.fillText('변위방향', -boxW / 4, dirY);
-
-            ctx.font = `bold ${Math.round(12.5 * pinScale)}px sans-serif`;
-            ctx.fillText(tiltVal, boxW / 4, amountY);
-            ctx.font = `bold ${Math.round(16 * pinScale)}px sans-serif`;
-            ctx.fillText(dispDir, boxW / 4, dirY);
-        }
+        ctx.font = `bold ${Math.round(12.5 * pinScale)}px sans-serif`;
+        ctx.fillText(tiltVal, rightX, -boxH / 4);
+        ctx.font = `bold ${Math.round(18 * pinScale)}px sans-serif`;
+        ctx.fillText(dispDir, rightX, boxH / 4);
 
         ctx.restore();
     }
