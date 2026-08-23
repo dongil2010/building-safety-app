@@ -73,7 +73,8 @@ window.BSA.tabs['tab-survey'] = {
         '결함 직접 등록 / 행 인라인 수정',
         '모바일: 조사목록 영역 상하·좌우 스크롤 (헤더 sticky)',
         '모바일 세로: 집계 차트 숨김·표 패딩만 축소(글자 미절단)',
-        '표 컬럼 설정: 표시/숨김 체크박스'
+        '표 컬럼 설정: 표시/숨김 체크박스',
+        '데스크탑: 표·사진 앨범 각각 내부 스크롤(동시에 보기)'
     ],
     ownerHint: 'app.js SURVEY TABLE & ALBUM + Excel 엔진',
     enter: function () {

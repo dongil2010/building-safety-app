@@ -11,7 +11,7 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <meta name="apple-mobile-web-app-title" content="스마트 안전점검">
-    <link rel="stylesheet" href="styles.css?v=20260823_surveyColToggle">
+    <link rel="stylesheet" href="styles.css?v=20260823_surveyDesktopSplit">
     <!-- FontAwesome icons for clean engineering UI -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <!-- PDF 생성용: 페이지별로 직접 캡처해서 조립(큰 보고서에서 html2pdf 한방 렌더링이 캔버스 높이 한계로
@@ -423,6 +423,7 @@
                 </div>
             </div>
 
+            <div class="survey-body-split">
             <div class="table-container">
                 <table class="survey-table">
                     <thead id="surveyTableHead">
@@ -445,11 +446,12 @@
             </div>
 
             <!-- Field Defect Photo Album Section -->
-            <div style="margin-top: 1.8rem; background: var(--bg-secondary); border-radius: var(--radius-md); padding: 1.2rem; border: 1px solid var(--border-color);">
-                <h3 style="font-size: 1.05rem; font-weight: 800; color: #6b6b6b; margin-bottom: 1rem; display: flex; align-items: center; gap: 0.5rem;">
+            <div class="survey-album-panel">
+                <h3 class="survey-album-title">
                     <i class="fa-solid fa-images"></i> 📷 <span id="albumFloorTitle">지상 1층 (1F)</span> 현장 결함 사진 앨범
                 </h3>
-                <div id="photoAlbumGrid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 1rem;"></div>
+                <div id="photoAlbumGrid" class="survey-album-grid"></div>
+            </div>
             </div>
         </section>
 
