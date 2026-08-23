@@ -273,6 +273,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 ndtData: window.state.ndtData || {},
                 ndtDisplacementGroups: window.state.ndtDisplacementGroups || {},
                 deletedDefectIds: window.state.deletedDefectIds || {},
+                confirmedDeletedIds: window.state.confirmedDeletedIds || {},
                 deletedNdtIds: window.state.deletedNdtIds || {},
                 buildings: sanitizedBuildings,
                 lastUsedBuildingId: window.state.currentBuildingId || null,
@@ -369,6 +370,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (parsed.deletedDefectIds) {
                     window.state.deletedDefectIds = parsed.deletedDefectIds;
                 }
+                if (parsed.confirmedDeletedIds) {
+                    window.state.confirmedDeletedIds = parsed.confirmedDeletedIds;
+                }
                 if (parsed.deletedNdtIds) {
                     window.state.deletedNdtIds = parsed.deletedNdtIds;
                 }
@@ -458,10 +462,89 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    // --- 다기기 동기화: 삭제 추적 + ID 기준 병합 ---
+    // --- 다기기 동기화: 고유코드(id) 기준 병합 + 표시번호(NO.) 당김 + 삭제코드 재사용 ---
     function ensureSyncMetaState() {
         if (!window.state.deletedDefectIds) window.state.deletedDefectIds = {};
+        if (!window.state.confirmedDeletedIds) window.state.confirmedDeletedIds = {};
         if (!window.state.deletedNdtIds) window.state.deletedNdtIds = {};
+    }
+
+    function formatDefectNoSeq(n) {
+        return `NO.${String(Math.max(1, Number(n) || 1)).padStart(2, '0')}`;
+    }
+
+    function parseDefectSortNoValue(d) {
+        const m = String((d && d.no) || '').match(/\d+/);
+        return m ? parseInt(m[0], 10) : Number.MAX_SAFE_INTEGER;
+    }
+
+    /** 7자리 hex 고유 코드. 활성·삭제 tombstone 코드는 재사용하지 않음 */
+    function generateDefectUniqueId(floorKey) {
+        ensureSyncMetaState();
+        const used = new Set();
+        (window.state.defects?.[floorKey] || []).forEach((d) => {
+            if (d?.id) used.add(String(d.id));
+        });
+        (window.state.deletedDefectIds?.[floorKey] || []).forEach((id) => used.add(String(id)));
+        for (let attempt = 0; attempt < 80; attempt++) {
+            const bytes = new Uint8Array(4);
+            (window.crypto || crypto).getRandomValues(bytes);
+            const hex = Array.from(bytes).map((b) => b.toString(16).padStart(2, '0')).join('').slice(0, 7);
+            if (hex && !used.has(hex)) return hex;
+        }
+        return `x${Date.now().toString(36).slice(-6)}`;
+    }
+
+    /**
+     * 층 결함 표시번호 연속 재부여.
+     * preserveOrder=true 이면 배열 순서 유지(동기화: 서버 순서 + 로컬 신규 뒤).
+     * false 이면 기존 no 기준 정렬 후 당김(로컬 삭제 직후).
+     */
+    function renumberFloorDefects(defects, options) {
+        const preserveOrder = !!(options && options.preserveOrder);
+        if (!Array.isArray(defects)) return defects;
+        const ordered = preserveOrder
+            ? defects.slice()
+            : defects.slice().sort((a, b) => {
+                const na = parseDefectSortNoValue(a);
+                const nb = parseDefectSortNoValue(b);
+                if (na !== nb) return na - nb;
+                return String(a.id || '').localeCompare(String(b.id || ''));
+            });
+
+        let seq = 0;
+        const groupBase = new Map();
+        const groupMemberIdx = new Map();
+
+        ordered.forEach((d) => {
+            if (!d) return;
+            const gid = d.groupId || null;
+            if (gid) {
+                if (!groupBase.has(gid)) {
+                    seq += 1;
+                    groupBase.set(gid, seq);
+                    groupMemberIdx.set(gid, 1);
+                }
+                const base = groupBase.get(gid);
+                const mi = groupMemberIdx.get(gid);
+                d.groupNo = formatDefectNoSeq(base);
+                d.no = `${formatDefectNoSeq(base)}-${mi}`;
+                groupMemberIdx.set(gid, mi + 1);
+            } else {
+                seq += 1;
+                d.no = formatDefectNoSeq(seq);
+                if (d.groupNo) delete d.groupNo;
+            }
+        });
+
+        defects.length = 0;
+        ordered.forEach((d) => { if (d) defects.push(d); });
+        return defects;
+    }
+
+    function renumberDefectsForFloorKey(floorKey) {
+        if (!floorKey || !window.state.defects?.[floorKey]) return;
+        renumberFloorDefects(window.state.defects[floorKey], { preserveOrder: false });
     }
 
     function touchDefectUpdatedAt(defect) {
@@ -535,7 +618,7 @@ document.addEventListener('DOMContentLoaded', () => {
         return (Array.isArray(defect.photos) ? defect.photos : []).filter(Boolean);
     }
 
-    /** 같은 결함 ID — 텍스트·좌표는 최신쪽, 사진은 서버(먼저 동기화) 우선 + 로컬 추가분 합침 */
+    /** 같은 결함 고유코드 — 텍스트·좌표는 최신쪽, 사진은 합침. 표시 no는 이후 renumber */
     function mergeDefectRecord(serverRec, localRec) {
         if (!serverRec) return localRec ? { ...localRec } : null;
         if (!localRec) return { ...serverRec };
@@ -544,6 +627,11 @@ document.addEventListener('DOMContentLoaded', () => {
         const localTs = getRecordUpdatedAt(localRec, 'pin');
         const newer = localTs >= serverTs ? localRec : serverRec;
         const merged = { ...newer };
+
+        // 표시 번호는 서버(먼저 확정된 쪽) 순서를 따르고, 마지막에 일괄 renumber
+        if (serverRec.no) merged.no = serverRec.no;
+        if (serverRec.groupNo) merged.groupNo = serverRec.groupNo;
+        if (serverRec.groupId) merged.groupId = serverRec.groupId;
 
         merged.photos = mergePhotoArrays(
             extractInlinePhotos(serverRec),
@@ -579,24 +667,114 @@ document.addEventListener('DOMContentLoaded', () => {
         return Array.from(byId.values());
     }
 
+    /**
+     * 결함 병합: 서버 순서 유지 → 로컬 전용(신규) 맨 뒤 → NO. 연속 재부여.
+     * 삭제 코드는 양쪽 tombstone 교집합이 연속 2회 확정되면 purge(재사용 가능).
+     */
     function mergeDefectsMaps(serverMap, localMap, serverDeleted, localDeleted) {
-        const mergedDeleted = mergeDeletedIdsMaps(serverDeleted, localDeleted);
+        ensureSyncMetaState();
+        let mergedDeleted = mergeDeletedIdsMaps(serverDeleted, localDeleted);
+        const confirmed = { ...(window.state.confirmedDeletedIds || {}) };
         const keys = new Set([
             ...Object.keys(serverMap || {}),
             ...Object.keys(localMap || {}),
-            ...Object.keys(mergedDeleted || {})
+            ...Object.keys(mergedDeleted || {}),
+            ...Object.keys(confirmed)
         ]);
         const defects = {};
+
         keys.forEach((key) => {
-            defects[key] = mergeIdRecordArrays(
-                serverMap?.[key],
-                localMap?.[key],
-                mergedDeleted[key],
-                'pin'
-            );
+            const deleted = new Set(mergedDeleted[key] || []);
+            const serverArr = (serverMap?.[key] || []).filter((r) => r?.id && !deleted.has(r.id));
+            const localArr = (localMap?.[key] || []).filter((r) => r?.id && !deleted.has(r.id));
+            const serverIds = new Set(serverArr.map((r) => r.id));
+            const localById = new Map(localArr.map((r) => [r.id, r]));
+
+            const ordered = [];
+            serverArr.forEach((sRec) => {
+                const lRec = localById.get(sRec.id);
+                ordered.push(lRec ? mergeDefectRecord(sRec, lRec) : { ...sRec });
+            });
+            localArr.forEach((lRec) => {
+                if (!serverIds.has(lRec.id)) ordered.push({ ...lRec });
+            });
+            renumberFloorDefects(ordered, { preserveOrder: true });
+            defects[key] = ordered;
+
+            // 삭제 확정·재사용: 서버·로컬 모두 tombstone에 있고 활성에 없으면 streak++
+            const serverDel = new Set(serverDeleted?.[key] || []);
+            const localDel = new Set(localDeleted?.[key] || []);
+            const activeIds = new Set(ordered.map((d) => d.id));
+            const floorConfirmed = { ...(confirmed[key] || {}) };
+            const stillDeleted = [];
+
+            (mergedDeleted[key] || []).forEach((id) => {
+                if (activeIds.has(id)) return;
+                const bothSides = serverDel.has(id) && localDel.has(id);
+                if (!bothSides) {
+                    stillDeleted.push(id);
+                    return;
+                }
+                const prev = Number(floorConfirmed[id]) || 0;
+                if (prev >= 1) {
+                    // 연속 2회 확정 → purge (재사용 가능)
+                    delete floorConfirmed[id];
+                } else {
+                    floorConfirmed[id] = 1;
+                    stillDeleted.push(id);
+                }
+            });
+
+            Object.keys(floorConfirmed).forEach((id) => {
+                if (activeIds.has(id) || !stillDeleted.includes(id)) {
+                    if (activeIds.has(id)) delete floorConfirmed[id];
+                }
+            });
+
+            if (stillDeleted.length > 0) mergedDeleted[key] = stillDeleted;
+            else delete mergedDeleted[key];
+
+            if (Object.keys(floorConfirmed).length > 0) confirmed[key] = floorConfirmed;
+            else delete confirmed[key];
         });
-        return { defects, deletedDefectIds: mergedDeleted };
+
+        window.state.confirmedDeletedIds = confirmed;
+        return { defects, deletedDefectIds: mergedDeleted, confirmedDeletedIds: confirmed };
     }
+
+    /** 관리자: 전원 동기화 확인 후 삭제 tombstone 즉시 정리(코드 재사용) */
+    window.purgeConfirmedDeletedDefectCodes = function (opts) {
+        ensureSyncMetaState();
+        const aggressive = !!(opts && opts.aggressive);
+        let purged = 0;
+        const confirmed = window.state.confirmedDeletedIds || {};
+        const deleted = window.state.deletedDefectIds || {};
+        Object.keys(deleted).forEach((key) => {
+            const active = new Set((window.state.defects?.[key] || []).map((d) => d.id));
+            const conf = confirmed[key] || {};
+            const next = [];
+            (deleted[key] || []).forEach((id) => {
+                if (active.has(id)) {
+                    next.push(id);
+                    return;
+                }
+                if (aggressive || (Number(conf[id]) || 0) >= 1) {
+                    purged += 1;
+                    if (conf[id]) delete conf[id];
+                } else {
+                    next.push(id);
+                }
+            });
+            if (next.length) deleted[key] = next;
+            else delete deleted[key];
+            if (conf && Object.keys(conf).length) confirmed[key] = conf;
+            else delete confirmed[key];
+        });
+        window.state.deletedDefectIds = deleted;
+        window.state.confirmedDeletedIds = confirmed;
+        if (typeof saveStateToLocalStorage === 'function') saveStateToLocalStorage();
+        return purged;
+    };
 
     function mergeNdtDataMaps(serverMap, localMap, serverDeleted, localDeleted) {
         const mergedDeleted = mergeDeletedIdsMaps(serverDeleted, localDeleted);
@@ -7902,27 +8080,31 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function scrollDefectListRowIntoView(row, behavior) {
         if (!row) return;
-        const scrollBox = row.closest('.defect-list-section-scroll');
-        const panel = document.getElementById('defectListPanel');
         const scrollBehavior = behavior || 'smooth';
-        if (scrollBox) {
-            const pad = 4;
-            const rowTop = row.offsetTop;
-            const rowBottom = rowTop + row.offsetHeight;
-            const viewTop = scrollBox.scrollTop;
-            const viewBottom = viewTop + scrollBox.clientHeight;
-            let next = null;
-            if (rowTop < viewTop + pad) next = Math.max(0, rowTop - pad);
-            else if (rowBottom > viewBottom - pad) next = rowBottom - scrollBox.clientHeight + pad;
-            if (next !== null) scrollBox.scrollTo({ top: next, behavior: scrollBehavior });
-            return;
-        }
-        if (panel && panel.contains(row)) {
-            const panelRect = panel.getBoundingClientRect();
-            const rowRect = row.getBoundingClientRect();
-            if (rowRect.top < panelRect.top || rowRect.bottom > panelRect.bottom) {
-                row.scrollIntoView({ behavior: scrollBehavior, block: 'nearest' });
+        const pad = 6;
+        const panel = document.getElementById('defectListPanel');
+        let node = row.parentElement;
+        let scrolled = false;
+        while (node) {
+            const style = window.getComputedStyle(node);
+            const canScrollY = (style.overflowY === 'auto' || style.overflowY === 'scroll')
+                && node.scrollHeight > node.clientHeight + 1;
+            if (canScrollY) {
+                const rowRect = row.getBoundingClientRect();
+                const scRect = node.getBoundingClientRect();
+                if (rowRect.top < scRect.top + pad) {
+                    node.scrollBy({ top: rowRect.top - scRect.top - pad, behavior: scrollBehavior });
+                    scrolled = true;
+                } else if (rowRect.bottom > scRect.bottom - pad) {
+                    node.scrollBy({ top: rowRect.bottom - scRect.bottom + pad, behavior: scrollBehavior });
+                    scrolled = true;
+                }
             }
+            if (node === panel) break;
+            node = node.parentElement;
+        }
+        if (!scrolled) {
+            row.scrollIntoView({ behavior: scrollBehavior, block: 'nearest' });
         }
     }
 
@@ -8055,24 +8237,23 @@ document.addEventListener('DOMContentLoaded', () => {
         // 다중 선택: 상단 묶음으로 스크롤 / 단일 선택(도면): 원래 위치 행으로 스크롤
         if (scrollToSelection && pinSelectedToTop) {
             const clusterKey = selectedCluster.map(d => d.id || d.groupId).join(',');
-            if (window._defectListScrollSelectedId !== clusterKey) {
-                window._defectListScrollSelectedId = clusterKey;
+            window._defectListScrollSelectedId = clusterKey;
+            requestAnimationFrame(() => {
                 requestAnimationFrame(() => {
                     const cluster = panel.querySelector('.defect-list-section.is-selected-cluster');
                     const clusterRow = cluster && cluster.querySelector('.defect-list-item');
                     if (clusterRow) scrollDefectListRowIntoView(clusterRow);
                 });
-            }
+            });
         } else if (scrollToSelection && selectedCluster.length === 1) {
             const onlyKey = selectedCluster[0].id || selectedCluster[0].groupId;
-            const scrollKey = `single:${onlyKey}`;
-            if (window._defectListScrollSelectedId !== scrollKey) {
-                window._defectListScrollSelectedId = scrollKey;
+            window._defectListScrollSelectedId = `single:${onlyKey}`;
+            requestAnimationFrame(() => {
                 requestAnimationFrame(() => {
                     const row = panel.querySelector('.defect-list-item.is-map-selected');
                     if (row) scrollDefectListRowIntoView(row);
                 });
-            }
+            });
         } else if (!scrollToSelection) {
             restoreDefectListScroll(panel, scrollSnapshot);
             if (selectedCluster.length === 0) window._defectListScrollSelectedId = null;
@@ -10243,7 +10424,8 @@ document.addEventListener('DOMContentLoaded', () => {
         const key = `${state.currentBuildingId}_${state.currentFloor}`;
         if (!state.defects[key]) return;
         pushDefectHistory();
-        ids.forEach(id => removeSingleDefectRecord(key, id));
+        ids.forEach(id => removeSingleDefectRecord(key, id, { skipRenumber: true }));
+        renumberFloorDefects(state.defects[key], { preserveOrder: false });
         selectedDefectIds.clear();
         updateMapSelectionBar();
         saveStateToLocalStorage();
@@ -11938,7 +12120,7 @@ document.addEventListener('DOMContentLoaded', () => {
             // 새 결함을 등록한 회차는 정의상 "지금까지 중 가장 최신"이므로 최신 회차 기준점을 전진시킨다.
             advanceLatestSurveyRound(window.state.currentBuilding, newDefectSurveyRound);
             const newDefect = {
-                id: 'pin-' + Date.now(),
+                id: generateDefectUniqueId(`${state.currentBuildingId}_${state.currentFloor}`),
                 no: document.getElementById('defectNo')?.value || 'NO.01',
                 category: document.getElementById('defectCategory')?.value || '구조체',
                 component: compVal,
@@ -12565,7 +12747,7 @@ document.addEventListener('DOMContentLoaded', () => {
         { key: 'component', label: '부재종류' },
         { key: 'defectType', label: '조사내용' },
         { key: 'size', label: '결함크기' },
-        { key: 'category', label: '구조체여부' },
+        { key: 'category', label: '구조체 여부' },
         { key: 'progress', label: '진행여부' },
         { key: 'leak', label: '누수여부' },
         { key: 'cause', label: '원인추정' },
@@ -12578,7 +12760,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const GRADE3_SURVEY_COLUMNS = [
         { key: 'no', label: '번호' },
         { key: 'floorGroup', label: '구분' },
-        { key: 'category', label: '구조체여부' },
+        { key: 'category', label: '구조체 여부' },
         { key: 'inspectionContent', label: '점검내용' },
         { key: 'cause', label: '발생원인' },
         { key: 'remark', label: '비고' }
@@ -12748,10 +12930,13 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function renderSurveyFlagToggle(defectId, field, isOn, onLabel, extraClass) {
-        const stop = 'onclick="event.stopPropagation()" onmousedown="event.stopPropagation()"';
         const cls = 'survey-toggle-btn' + (isOn ? ' is-on' : '') + (extraClass ? ' ' + extraClass : '');
         const text = isOn ? onLabel : '-';
-        return `<button type="button" class="${cls}" ${stop} onclick="window.toggleSurveyInlineFlag('${defectId}','${field}')">${text}</button>`;
+        const safeId = escapeSurveyAttr(defectId);
+        const safeField = escapeSurveyAttr(field);
+        return `<button type="button" class="${cls}"` +
+            ` onclick="event.stopPropagation(); window.toggleSurveyInlineFlag('${safeId}','${safeField}')"` +
+            ` onmousedown="event.stopPropagation()">${text}</button>`;
     }
 
     // 상태조사표 인라인 편집 셀 (타이핑 / 선택)
@@ -12983,7 +13168,7 @@ document.addEventListener('DOMContentLoaded', () => {
         component: '부재<br>종류',
         defectType: '조사<br>내용',
         size: '결함<br>크기',
-        category: '구조<br>체여부',
+        category: '구조체<br>여부',
         progress: '진행<br>여부',
         leak: '누수<br>여부',
         priorityManage: '중점<br>관리',
@@ -13103,7 +13288,7 @@ document.addEventListener('DOMContentLoaded', () => {
             state[stateKey].forEach(c => {
                 if (c.visible === undefined) c.visible = true;
                 if (c.label === '결함번호') c.label = '번호';
-                if (c.label === '구조체 여부') c.label = '구조체여부';
+                if (c.label === '구조체여부') c.label = '구조체 여부';
                 if (c.label === '결함원인추정') c.label = '원인추정';
             });
         }
@@ -16391,7 +16576,8 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // 결함 레코드 1건을 사진 삭제 포함해서 제거 (저장/재렌더링은 호출부 책임 — 그룹 일괄삭제 시 중복 저장 방지)
-    function removeSingleDefectRecord(key, id) {
+    function removeSingleDefectRecord(key, id, options) {
+        const skipRenumber = !!(options && options.skipRenumber);
         const target = state.defects[key].find(d => d.id === id);
         if (target) {
             trackDefectDeletion(key, id);
@@ -16402,6 +16588,9 @@ document.addEventListener('DOMContentLoaded', () => {
             });
         }
         state.defects[key] = state.defects[key].filter(d => d.id !== id);
+        if (!skipRenumber) {
+            renumberFloorDefects(state.defects[key], { preserveOrder: false });
+        }
     }
 
     window.deleteDefectById = function(id) {
@@ -16421,7 +16610,8 @@ document.addEventListener('DOMContentLoaded', () => {
         if (state.defects[key]) {
             pushDefectHistory();
             const memberIds = state.defects[key].filter(d => d.groupId === groupId).map(d => d.id);
-            memberIds.forEach(id => removeSingleDefectRecord(key, id));
+            memberIds.forEach(id => removeSingleDefectRecord(key, id, { skipRenumber: true }));
+            renumberFloorDefects(state.defects[key], { preserveOrder: false });
             saveStateToLocalStorage();
             renderSurveyTable();
             drawCanvas();
@@ -16436,6 +16626,24 @@ document.addEventListener('DOMContentLoaded', () => {
             window.state.companyName = val;
             localStorage.setItem('building_company_name', val);
             window.showToast(`점검 수행회사명이 '${val}'(으)로 저장되었습니다.`, 'success');
+        });
+    }
+
+    const btnPurgeDeletedCodes = document.getElementById('btnPurgeDeletedCodes');
+    if (btnPurgeDeletedCodes) {
+        btnPurgeDeletedCodes.addEventListener('click', () => {
+            if (!confirm('전원 동기화가 끝난 뒤에만 실행하세요.\n삭제된 고유코드를 정리하면 이후 신규 마킹에 다시 사용할 수 있습니다. 계속할까요?')) return;
+            const n = typeof window.purgeConfirmedDeletedDefectCodes === 'function'
+                ? window.purgeConfirmedDeletedDefectCodes({ aggressive: true })
+                : 0;
+            window.showToast(n > 0 ? `삭제 코드 ${n}건을 정리했습니다.` : '정리할 삭제 코드가 없습니다.', n > 0 ? 'success' : 'info');
+        });
+    }
+
+    const btnCheckAppUpdate = document.getElementById('btnCheckAppUpdate');
+    if (btnCheckAppUpdate) {
+        btnCheckAppUpdate.addEventListener('click', () => {
+            window.checkAppUpdate?.({ silent: false });
         });
     }
 
@@ -17506,7 +17714,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 const no = noRawTrimmed || `NO.${seqStr}`;
 
                 const newDefect = {
-                    id: 'pin-' + Date.now() + '-' + floorCode + '-' + i,
+                    id: generateDefectUniqueId(`${window.state.currentBuildingId}_${floorCode}`),
                     no,
                     category,
                     component: componentRaw,
@@ -17683,6 +17891,127 @@ document.addEventListener('DOMContentLoaded', () => {
 
     let auth = null;
     window._justRegistering = false;
+
+    // ==========================================================================
+    // 📱 앱 자체 업데이트 (Capacitor AppUpdate 플러그인 + Firestore app_meta)
+    // ==========================================================================
+    // android/app/build.gradle 의 versionCode / versionName 과 맞출 것
+    window.BSA_APP_BUILD = { versionCode: 2, versionName: '1.1.0' };
+
+    function isNativeAndroidApp() {
+        try {
+            return !!(window.Capacitor && typeof window.Capacitor.isNativePlatform === 'function'
+                && window.Capacitor.isNativePlatform()
+                && String(window.Capacitor.getPlatform?.() || '').toLowerCase() === 'android');
+        } catch (_) {
+            return false;
+        }
+    }
+
+    function getAppUpdatePlugin() {
+        try {
+            return window.Capacitor?.Plugins?.AppUpdate || null;
+        } catch (_) {
+            return null;
+        }
+    }
+
+    async function fetchAndroidReleaseMeta() {
+        if (!db) return null;
+        const snap = await db.collection('app_meta').doc('android_release').get();
+        if (!snap.exists) return null;
+        return snap.data() || null;
+    }
+
+    window.checkAppUpdate = async function (opts) {
+        const silent = !!(opts && opts.silent);
+        const build = window.BSA_APP_BUILD || { versionCode: 1, versionName: '1.0' };
+
+        if (!isNativeAndroidApp()) {
+            if (!silent) {
+                window.showToast('웹/PWA는 새로고침으로 최신 웹을 받습니다. APK 업데이트는 Android 앱에서만 가능합니다.', 'info', 4500);
+            }
+            return { updated: false, reason: 'not-native' };
+        }
+
+        const plugin = getAppUpdatePlugin();
+        if (!plugin) {
+            if (!silent) window.showToast('업데이트 플러그인을 찾을 수 없습니다. 앱을 다시 설치해 주세요.', 'error');
+            return { updated: false, reason: 'no-plugin' };
+        }
+
+        let localCode = build.versionCode;
+        let localName = build.versionName;
+        try {
+            const v = await plugin.getVersion();
+            if (v?.versionCode != null) localCode = Number(v.versionCode);
+            if (v?.versionName) localName = String(v.versionName);
+        } catch (e) {
+            console.warn('getVersion failed', e);
+        }
+
+        const badge = document.getElementById('appVersionBadge');
+        if (badge) {
+            badge.innerHTML = `<i class="fa-solid fa-circle-check"></i> v${localName} · 고유코드 동기화 · 앱내 업데이트`;
+        }
+
+        if (!db) {
+            if (!silent) window.showToast('업데이트 정보를 불러오려면 로그인이 필요합니다.', 'warning');
+            return { updated: false, reason: 'no-db' };
+        }
+
+        let meta = null;
+        try {
+            meta = await fetchAndroidReleaseMeta();
+        } catch (e) {
+            console.warn('release meta fetch failed', e);
+            if (!silent) window.showToast('업데이트 정보 조회에 실패했습니다.', 'error');
+            return { updated: false, reason: 'fetch-failed' };
+        }
+
+        if (!meta || !meta.apkUrl) {
+            if (!silent) window.showToast(`현재 v${localName} 사용 중. 등록된 새 버전이 없습니다.`, 'info', 4000);
+            return { updated: false, reason: 'no-release' };
+        }
+
+        const remoteCode = Number(meta.versionCode) || 0;
+        const remoteName = String(meta.versionName || remoteCode);
+        if (remoteCode <= localCode) {
+            if (!silent) window.showToast(`최신 버전입니다 (v${localName}).`, 'success');
+            return { updated: false, reason: 'up-to-date' };
+        }
+
+        const notes = meta.notes ? `\n\n변경사항: ${meta.notes}` : '';
+        if (!confirm(`새 버전 v${remoteName} (code ${remoteCode})이 있습니다.\n지금 다운로드하여 설치할까요?${notes}`)) {
+            return { updated: false, reason: 'cancelled' };
+        }
+
+        try {
+            const perm = await plugin.canRequestPackageInstalls();
+            if (perm && perm.allowed === false) {
+                window.showToast('「알 수 없는 앱 설치」 권한을 허용한 뒤 다시 눌러 주세요.', 'warning', 5000);
+                await plugin.openUnknownSourcesSettings();
+                return { updated: false, reason: 'need-permission' };
+            }
+        } catch (_) { /* ignore */ }
+
+        window.showToast('APK 다운로드 중… 완료되면 설치 화면이 열립니다.', 'info', 5000);
+        try {
+            await plugin.downloadAndInstall({ url: String(meta.apkUrl) });
+            window.showToast('설치 화면을 열었습니다. 안내에 따라 업데이트하세요.', 'success', 5000);
+            return { updated: true };
+        } catch (e) {
+            const msg = String(e?.message || e || '');
+            if (msg.includes('NEED_INSTALL_PERMISSION') || (e && e.code === 'NEED_INSTALL_PERMISSION')) {
+                window.showToast('알 수 없는 앱 설치 권한을 허용해 주세요.', 'warning', 5000);
+                try { await plugin.openUnknownSourcesSettings(); } catch (_) {}
+                return { updated: false, reason: 'need-permission' };
+            }
+            console.error(e);
+            window.showToast('업데이트 다운로드/설치에 실패했습니다.', 'error');
+            return { updated: false, reason: 'install-failed' };
+        }
+    };
 
     function initFirebaseSync() {
         try {
@@ -17893,6 +18222,19 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         if (data.defects) {
+            if (data.confirmedDeletedIds) {
+                const mergedConf = { ...(window.state.confirmedDeletedIds || {}) };
+                Object.entries(data.confirmedDeletedIds).forEach(([key, map]) => {
+                    mergedConf[key] = { ...(mergedConf[key] || {}), ...(map || {}) };
+                    Object.keys(map || {}).forEach((id) => {
+                        mergedConf[key][id] = Math.max(
+                            Number(mergedConf[key][id]) || 0,
+                            Number(map[id]) || 0
+                        );
+                    });
+                });
+                window.state.confirmedDeletedIds = mergedConf;
+            }
             const remoteHydrated = await hydrateDefectPhotos(data.defects);
             const localHydrated = await hydrateDefectPhotos(window.state.defects || {});
             const defectMerge = mergeDefectsMaps(
@@ -17903,6 +18245,9 @@ document.addEventListener('DOMContentLoaded', () => {
             );
             window.state.defects = await hydrateDefectPhotos(defectMerge.defects);
             window.state.deletedDefectIds = defectMerge.deletedDefectIds;
+            if (defectMerge.confirmedDeletedIds) {
+                window.state.confirmedDeletedIds = defectMerge.confirmedDeletedIds;
+            }
             isChanged = true;
         }
 
@@ -17985,6 +18330,20 @@ document.addEventListener('DOMContentLoaded', () => {
             const snap = await docRef.get();
             const serverData = snap.exists ? snap.data() : {};
 
+            if (serverData.confirmedDeletedIds) {
+                const mergedConf = { ...(window.state.confirmedDeletedIds || {}) };
+                Object.entries(serverData.confirmedDeletedIds).forEach(([key, map]) => {
+                    mergedConf[key] = { ...(mergedConf[key] || {}) };
+                    Object.keys(map || {}).forEach((id) => {
+                        mergedConf[key][id] = Math.max(
+                            Number(mergedConf[key][id]) || 0,
+                            Number(map[id]) || 0
+                        );
+                    });
+                });
+                window.state.confirmedDeletedIds = mergedConf;
+            }
+
             const serverDefectsHydrated = await hydrateDefectPhotos(serverData.defects || {});
             const localDefectsHydrated = await hydrateDefectPhotos(window.state.defects || {});
             const defectMerge = mergeDefectsMaps(
@@ -18003,6 +18362,9 @@ document.addEventListener('DOMContentLoaded', () => {
             isRemoteSyncing = true;
             window.state.defects = await hydrateDefectPhotos(defectMerge.defects);
             window.state.deletedDefectIds = defectMerge.deletedDefectIds;
+            if (defectMerge.confirmedDeletedIds) {
+                window.state.confirmedDeletedIds = defectMerge.confirmedDeletedIds;
+            }
             window.state.ndtData = ndtMerge.ndtData;
             window.state.deletedNdtIds = ndtMerge.deletedNdtIds;
 
@@ -18018,6 +18380,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const dataToSync = {
                 defects: sanitizeDefectsForFirestore(window.state.defects),
                 deletedDefectIds: defectMerge.deletedDefectIds,
+                confirmedDeletedIds: window.state.confirmedDeletedIds || {},
                 ndtData: window.state.ndtData || {},
                 deletedNdtIds: ndtMerge.deletedNdtIds,
                 ndtDisplacementGroups: window.state.ndtDisplacementGroups || {},
@@ -18207,6 +18570,11 @@ document.addEventListener('DOMContentLoaded', () => {
         if (typeof listenToRealtimeUpdates === 'function') listenToRealtimeUpdates();
         if (typeof renderDashboard === 'function') renderDashboard();
         window.switchTab('tab-home');
+        setTimeout(() => {
+            if (typeof window.checkAppUpdate === 'function') {
+                window.checkAppUpdate({ silent: true });
+            }
+        }, 2500);
     }
 
     async function handleAuthStateChange(user) {

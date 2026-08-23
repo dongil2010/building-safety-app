@@ -2077,11 +2077,17 @@ body {
 .survey-inline-select.survey-inline-category {
     font-weight: 800;
     color: #b91c1c;
-    min-width: 4.6rem;
-    max-width: 5.4rem;
+    min-width: 4.8rem;
+    max-width: none;
 }
 
-/* 상태조사표 — 보조 컬럼만 폭 최소화 (표시 글자는 잘리지 않게) */
+/* 상태조사표 — 컬럼 폭: 주요 3열 넓게, 보조열은 내용만큼(잘림 방지) */
+#tab-survey .survey-table {
+    table-layout: auto;
+    width: 100%;
+    min-width: 62rem;
+}
+
 #tab-survey .survey-table [data-col="no"],
 #tab-survey .survey-table [data-col="floorGroup"],
 #tab-survey .survey-table [data-col="location"],
@@ -2098,7 +2104,44 @@ body {
     white-space: nowrap;
 }
 
-/* 주요 표시 — 부재종류·조사내용·원인추정 (넓게, 줄바꿈 허용) */
+#tab-survey .survey-table [data-col="no"] {
+    min-width: 2.75rem;
+}
+
+#tab-survey .survey-table [data-col="location"] {
+    min-width: 4.5rem;
+}
+
+#tab-survey .survey-table [data-col="category"] {
+    min-width: 5rem;
+}
+
+#tab-survey .survey-table [data-col="progress"],
+#tab-survey .survey-table [data-col="leak"] {
+    min-width: 3.2rem;
+}
+
+#tab-survey .survey-table [data-col="priorityManage"] {
+    min-width: 4rem;
+}
+
+#tab-survey .survey-table [data-col="size"],
+#tab-survey .survey-table [data-col="crackWidth"],
+#tab-survey .survey-table [data-col="crackLength"] {
+    min-width: 4.5rem;
+}
+
+#tab-survey .survey-table [data-col="remark"] {
+    min-width: 5.5rem;
+    white-space: normal;
+    word-break: break-word;
+}
+
+#tab-survey .survey-table [data-col="actions"] {
+    min-width: 6.5rem;
+}
+
+/* 주요 표시 — 부재종류·조사내용·원인추정 */
 #tab-survey .survey-table [data-col="component"],
 #tab-survey .survey-table [data-col="defectType"],
 #tab-survey .survey-table [data-col="cause"],
@@ -2106,75 +2149,86 @@ body {
     white-space: normal;
     word-break: break-word;
     width: auto;
-    min-width: 6.5rem;
 }
 
 #tab-survey .survey-table [data-col="component"] {
-    min-width: 7.5rem;
+    min-width: 9rem;
+    width: 13%;
 }
 
 #tab-survey .survey-table [data-col="defectType"] {
-    min-width: 9rem;
+    min-width: 11rem;
+    width: 16%;
 }
 
 #tab-survey .survey-table [data-col="cause"] {
-    min-width: 7.5rem;
+    min-width: 9rem;
+    width: 13%;
 }
 
-#tab-survey .survey-table [data-col="no"] {
-    max-width: 3rem;
-}
-
-#tab-survey .survey-table [data-col="location"] {
-    max-width: 5rem;
+#tab-survey .survey-table [data-col="inspectionContent"] {
+    min-width: 14rem;
+    width: 22%;
 }
 
 #tab-survey .survey-table [data-col="location"] .survey-inline-input {
-    min-width: 2.4rem;
-    max-width: 100%;
+    min-width: 3.5rem;
+    max-width: none;
     width: 100%;
-    font-size: 0.76rem;
-    padding: 0.18rem 0.22rem;
+    font-size: 0.78rem;
+    padding: 0.22rem 0.28rem;
 }
 
 #tab-survey .survey-table [data-col="component"] .survey-inline-input,
 #tab-survey .survey-table [data-col="defectType"] .survey-inline-input,
 #tab-survey .survey-table [data-col="cause"] .survey-inline-input {
-    min-width: 5rem;
+    min-width: 100%;
     max-width: none;
     width: 100%;
     font-size: 0.82rem;
     padding: 0.28rem 0.35rem;
     text-align: left;
+    box-sizing: border-box;
 }
 
 #tab-survey .survey-table [data-col="category"] .survey-inline-select {
-    min-width: 3.6rem;
-    max-width: 4.8rem;
-    width: auto;
-    padding-left: 0.12rem;
-    padding-right: 0.12rem;
-    font-size: 0.72rem;
+    min-width: 4.8rem;
+    max-width: none;
+    width: 100%;
+    padding-left: 0.15rem;
+    padding-right: 0.15rem;
+    font-size: 0.74rem;
 }
 
 #tab-survey .survey-table [data-col="progress"] .survey-toggle-btn,
 #tab-survey .survey-table [data-col="leak"] .survey-toggle-btn,
 #tab-survey .survey-table [data-col="priorityManage"] .survey-toggle-btn {
-    min-width: 2rem;
-    max-width: 3.5rem;
-    width: 100%;
+    min-width: 3rem;
+    max-width: none;
+    width: auto;
+    white-space: nowrap;
+    padding-left: 0.22rem;
+    padding-right: 0.22rem;
 }
 
 #tab-survey .survey-table [data-col="size"] .survey-inline-input,
 #tab-survey .survey-table [data-col="crackWidth"] .survey-inline-input,
 #tab-survey .survey-table [data-col="crackLength"] .survey-inline-input {
-    min-width: 2.2rem;
-    max-width: 4rem;
-    width: auto;
+    min-width: 3.2rem;
+    max-width: none;
+    width: 100%;
 }
 
-#tab-survey .survey-table [data-col="remark"] {
-    max-width: 5.5rem;
+#tab-survey .survey-table [data-col="remark"] .survey-inline-input {
+    min-width: 4.5rem;
+    max-width: none;
+    width: 100%;
+    text-align: left;
+}
+
+#tab-survey .survey-inline-input,
+#tab-survey .survey-inline-select {
+    max-width: none;
 }
 
 .survey-th-label {
@@ -2347,20 +2401,20 @@ body {
 
     #tab-survey .survey-table {
         table-layout: auto;
-        width: 100%;
+        width: max-content;
         min-width: 100%;
     }
 
     #tab-survey .survey-table [data-col="component"] {
-        min-width: 8.5rem;
+        min-width: 7rem;
     }
 
     #tab-survey .survey-table [data-col="defectType"] {
-        min-width: 10rem;
+        min-width: 8.5rem;
     }
 
     #tab-survey .survey-table [data-col="cause"] {
-        min-width: 8.5rem;
+        min-width: 7rem;
     }
 
     #tab-survey .survey-table thead th {
@@ -5562,28 +5616,64 @@ body {
     }
     #tab-survey .survey-table th,
     #tab-survey .survey-table td {
-        white-space: nowrap;
         word-break: keep-all;
-        overflow-wrap: normal;
+        overflow-wrap: anywhere;
         padding: 0.45rem 0.55rem;
         vertical-align: middle;
     }
-    /* 관리 열 — 모바일에서도 도면 보기 사용 */
+
+    #tab-survey .survey-table th[data-col="no"],
+    #tab-survey .survey-table td[data-col="no"],
+    #tab-survey .survey-table th[data-col="category"],
+    #tab-survey .survey-table td[data-col="category"],
+    #tab-survey .survey-table th[data-col="progress"],
+    #tab-survey .survey-table td[data-col="progress"],
+    #tab-survey .survey-table th[data-col="leak"],
+    #tab-survey .survey-table td[data-col="leak"],
+    #tab-survey .survey-table th[data-col="priorityManage"],
+    #tab-survey .survey-table td[data-col="priorityManage"],
+    #tab-survey .survey-table th[data-col="size"],
+    #tab-survey .survey-table td[data-col="size"],
+    #tab-survey .survey-table th[data-col="crackWidth"],
+    #tab-survey .survey-table td[data-col="crackWidth"],
+    #tab-survey .survey-table th[data-col="crackLength"],
+    #tab-survey .survey-table td[data-col="crackLength"],
     #tab-survey .survey-table th[data-col="actions"],
     #tab-survey .survey-table td[data-col="actions"] {
-        position: sticky;
-        right: 0;
-        z-index: 1;
-        background: #ffffff;
-        box-shadow: -4px 0 8px rgba(0, 0, 0, 0.04);
+        white-space: nowrap;
     }
-    #tab-survey .survey-table thead th[data-col="actions"] {
-        z-index: 3;
-        background: #fafafa !important;
+
+    #tab-survey .survey-table th[data-col="location"],
+    #tab-survey .survey-table td[data-col="location"],
+    #tab-survey .survey-table th[data-col="component"],
+    #tab-survey .survey-table td[data-col="component"],
+    #tab-survey .survey-table th[data-col="defectType"],
+    #tab-survey .survey-table td[data-col="defectType"],
+    #tab-survey .survey-table th[data-col="cause"],
+    #tab-survey .survey-table td[data-col="cause"],
+    #tab-survey .survey-table th[data-col="remark"],
+    #tab-survey .survey-table td[data-col="remark"],
+    #tab-survey .survey-table th[data-col="inspectionContent"],
+    #tab-survey .survey-table td[data-col="inspectionContent"] {
+        white-space: normal;
+        word-break: break-word;
+    }
+    /* 관리 열 — 가로 스크롤 끝에 자연스럽게 (sticky 고정 제거: 왼쪽 침범 방지) */
+    #tab-survey .survey-table th[data-col="actions"],
+    #tab-survey .survey-table td[data-col="actions"] {
+        min-width: 6.75rem;
+        padding-left: 0.4rem;
+        padding-right: 0.35rem;
+        vertical-align: middle;
+    }
+    #tab-survey .survey-row-actions {
+        justify-content: flex-end;
+        gap: 0.2rem;
     }
     #tab-survey .survey-row-actions .btn {
         font-size: 0.68rem;
         padding: 0.14rem 0.32rem;
+        flex-shrink: 0;
     }
 
     /* 세로(포트rait) — 패딩만 줄이고 글자는 잘리지 않게(가로 스크롤 허용) */
@@ -5618,18 +5708,38 @@ body {
         #tab-survey .survey-table td {
             padding: 0.32rem 0.38rem;
             line-height: 1.25;
-            white-space: nowrap;
             overflow: visible;
             text-overflow: clip;
             max-width: none;
         }
 
+        #tab-survey .survey-table th[data-col="no"],
+        #tab-survey .survey-table td[data-col="no"],
+        #tab-survey .survey-table th[data-col="category"],
+        #tab-survey .survey-table td[data-col="category"],
+        #tab-survey .survey-table th[data-col="progress"],
+        #tab-survey .survey-table td[data-col="progress"],
+        #tab-survey .survey-table th[data-col="leak"],
+        #tab-survey .survey-table td[data-col="leak"],
+        #tab-survey .survey-table th[data-col="priorityManage"],
+        #tab-survey .survey-table td[data-col="priorityManage"],
+        #tab-survey .survey-table th[data-col="size"],
+        #tab-survey .survey-table td[data-col="size"],
+        #tab-survey .survey-table th[data-col="actions"],
+        #tab-survey .survey-table td[data-col="actions"] {
+            white-space: nowrap;
+        }
+
+        #tab-survey .survey-table th[data-col="location"],
+        #tab-survey .survey-table td[data-col="location"],
         #tab-survey .survey-table th[data-col="component"],
         #tab-survey .survey-table td[data-col="component"],
         #tab-survey .survey-table th[data-col="defectType"],
         #tab-survey .survey-table td[data-col="defectType"],
         #tab-survey .survey-table th[data-col="cause"],
         #tab-survey .survey-table td[data-col="cause"],
+        #tab-survey .survey-table th[data-col="remark"],
+        #tab-survey .survey-table td[data-col="remark"],
         #tab-survey .survey-table th[data-col="inspectionContent"],
         #tab-survey .survey-table td[data-col="inspectionContent"] {
             white-space: normal;
@@ -5637,15 +5747,23 @@ body {
         }
 
         #tab-survey .survey-table [data-col="component"] {
-            min-width: 5.5rem;
+            min-width: 6rem;
         }
 
         #tab-survey .survey-table [data-col="defectType"] {
-            min-width: 6.5rem;
+            min-width: 7rem;
         }
 
         #tab-survey .survey-table [data-col="cause"] {
-            min-width: 5.5rem;
+            min-width: 6rem;
+        }
+
+        #tab-survey .survey-table [data-col="location"] {
+            min-width: 4rem;
+        }
+
+        #tab-survey .survey-table [data-col="remark"] {
+            min-width: 5rem;
         }
 
         #tab-survey .survey-inline-input,

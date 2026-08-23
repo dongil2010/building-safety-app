@@ -10,7 +10,9 @@ window.BSA.tabs['tab-home'] = {
         'JSON 전체 백업·복원',
         '점검 수행회사명 저장',
         '휴대폰 QR 촬영 연동 시작',
-        '사용자 프로필·로그아웃·가입 승인(관리자)'
+        '사용자 프로필·로그아웃·가입 승인(관리자)',
+        '앱 내부 APK 업데이트 확인·설치',
+        '삭제 고유코드 정리(재사용)'
     ],
     ownerHint: 'app.js BUILDING MANAGEMENT + JSON 백업 + 휴대폰 연동',
     enter: function () {
