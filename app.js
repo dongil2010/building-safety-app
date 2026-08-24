@@ -10997,7 +10997,9 @@ document.addEventListener('DOMContentLoaded', () => {
             if (typeof resizeCanvas === 'function') resizeCanvas();
             if (typeof updateMapSelectionBar === 'function') updateMapSelectionBar({ scrollToSelection: true });
             if (typeof drawCanvas === 'function') drawCanvas();
-            if (typeof window.focusDefectOnCanvas === 'function') window.focusDefectOnCanvas(focusId);
+            if (typeof window.focusDefectOnCanvas === 'function') {
+                window.focusDefectOnCanvas(focusId, { uncovered: true });
+            }
         }, 280);
     };
 
