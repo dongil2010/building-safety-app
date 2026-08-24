@@ -3256,7 +3256,11 @@ document.addEventListener('DOMContentLoaded', () => {
         return { ratio, code };
     }
 
-    // 그룹(부동침하 또는 부재처짐) 변위량/처짐량 및 안전등급 연산
+    // 그룹(부동침하 또는 부재처짐) 변위량/처짐량 및 안전등급 연산.
+    // group.points[].level은 cm 단위로 입력받는다(화면 입력칸 라벨은 "mm"로 잘못 표시돼 있지만
+    // 실제 현장 입력 관행은 cm) — calcTiltGrade/calcMemberDispGrade는 delta를 mm로 받으므로
+    // 등급 계산 직전에만 ×10으로 mm 환산한다. 반환하는 delta/absDelta 자체는 화면 표시용 원래
+    // cm 값 그대로 둔다(호출부에서 "cm" 단위로 그대로 출력).
     function calcGroupDisplacement(group) {
         const points = group.points || [];
         if (points.length === 0) return { delta: 0, absDelta: 0, tiltRatio: '1/750', grade: 'a등급' };
@@ -3279,14 +3283,14 @@ document.addEventListener('DOMContentLoaded', () => {
                 delta = points[0].level;
             }
             const absDelta = Math.abs(delta);
-            const calc = calcMemberDispGrade(lengthMm, absDelta, group.hasMinorDamage);
+            const calc = calcMemberDispGrade(lengthMm, absDelta * 10, group.hasMinorDamage);
             return { delta, absDelta, tiltRatio: calc.tiltRatio, grade: calc.grade };
         } else {
             const first = points[0];
             const last = points[points.length - 1];
             const delta = (first && last) ? (first.level - last.level) : 0;
             const absDelta = Math.abs(delta);
-            const calc = calcTiltGrade(lengthMm, absDelta);
+            const calc = calcTiltGrade(lengthMm, absDelta * 10);
             return { delta, absDelta, tiltRatio: calc.tiltRatio, grade: calc.grade };
         }
     }
@@ -4074,6 +4078,9 @@ document.addEventListener('DOMContentLoaded', () => {
             const ctx = canvas.getContext('2d');
             ctx.fillStyle = '#ffffff';
             ctx.fillRect(0, 0, cw, ch);
+            ctx.strokeStyle = '#333333';
+            ctx.lineWidth = 2;
+            ctx.strokeRect(1, 1, cw - 2, ch - 2);
 
             const floorLabel = (typeof window.getFloorLabelFromCode === 'function') ? window.getFloorLabelFromCode(floorCode) : (floorCode || '');
             const chartColor = group.color || getStyleColor(group.category === '부재변위' ? 'ndtMemberDisp' : 'ndtSettlement');
@@ -4151,7 +4158,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 ctx.fillStyle = '#0f172a';
                 ctx.font = 'bold 13px sans-serif';
                 ctx.textAlign = 'center';
-                ctx.fillText(`${p.level}mm`, x, y - 14);
+                ctx.fillText(`${p.level}cm`, x, y - 14);
 
                 ctx.fillStyle = '#64748b';
                 ctx.font = '12px sans-serif';
@@ -4169,12 +4176,97 @@ document.addEventListener('DOMContentLoaded', () => {
             ctx.font = 'bold 14px sans-serif';
             ctx.fillText('측정값', marginL, marginT + plotH + 55);
             ctx.font = '13px sans-serif';
-            const listText = points.map((p, idx) => `${formatNdtDisplacementPointLabel(idx + 1)}: ${p.level}mm`).join('    ');
+            const listText = points.map((p, idx) => `${formatNdtDisplacementPointLabel(idx + 1)}: ${p.level}cm`).join('    ');
             wrapCanvasText(ctx, listText, marginL, marginT + plotH + 78, plotW + marginR - 10, 20);
 
             return canvas.toDataURL('image/png');
         } catch (e) {
             console.warn('renderNdtDisplacementChartDataUrl error:', e);
+            return null;
+        }
+    }
+
+    // 숫자 n(1부터 시작)을 동그라미 숫자(①②③…)로 변환. 부동침하/부재변위 요약박스의 "마지막 지점"
+    // 라벨은 그룹마다 실제 측정 지점 개수가 다르므로 고정된 ⑨가 아니라 매번 다시 계산해야 한다 —
+    // 20개를 넘어가는 드문 경우에는 괄호숫자로 대체한다.
+    const CIRCLED_DIGITS = ['①', '②', '③', '④', '⑤', '⑥', '⑦', '⑧', '⑨', '⑩', '⑪', '⑫', '⑬', '⑭', '⑮', '⑯', '⑰', '⑱', '⑲', '⑳'];
+    function formatCircledNumber(n) {
+        return (n >= 1 && n <= CIRCLED_DIGITS.length) ? CIRCLED_DIGITS[n - 1] : `(${n})`;
+    }
+
+    // 부동침하/부재변위 그룹 하나의 요약 박스(값부/처짐량·변위량총합/변위평가)를 캔버스로 그려
+    // PNG dataURL로 반환. HWPX 내보내기에서 결과표 밑에 그룹별로 이 박스 + renderNdtDisplacementChartDataUrl
+    // 그래프를 한 쌍씩 이어붙이는 데 쓴다(다른 점검업체 보고서에서 흔한 "요약 박스 + 꺾은선 그래프" 구성).
+    function renderNdtDisplacementInfoBoxCanvas(group, seqNo) {
+        try {
+            const isMemberDisp = group.category === '부재변위';
+            const points = group.points || [];
+            const first = points[0];
+            const last = points[points.length - 1];
+            const midIdx = Math.floor(points.length / 2);
+            const mid = points[midIdx];
+            const calc = calcGroupDisplacement(group);
+            const deltaAbs = Math.abs(calc.delta);
+            const arrow = calc.delta > 0 ? '↑' : (calc.delta < 0 ? '↓' : '');
+            const lengthMmText = group.measureLength ? `${(group.measureLength * 1000).toLocaleString()}mm` : '-';
+
+            const firstLabel = formatCircledNumber(1);
+            const lastLabel = formatCircledNumber(points.length);
+            const midLabel = formatCircledNumber(midIdx + 1);
+
+            const cols = [{ label: `NO.${seqNo}`, value: group.locationType || '-', wide: true }];
+            if (isMemberDisp) {
+                cols.push({ label: `값부${firstLabel}`, value: first ? `${first.level}cm` : '-' });
+                cols.push({ label: `중앙부${midLabel}`, value: mid ? `${mid.level}cm` : '-' });
+                cols.push({ label: `값부${lastLabel}`, value: last ? `${last.level}cm` : '-' });
+                cols.push({ label: `처짐량총합\n((${firstLabel}+${lastLabel})/2-${midLabel})`, value: `${arrow}${deltaAbs.toFixed(1)}cm` });
+            } else {
+                cols.push({ label: `값부${firstLabel}`, value: first ? `${first.level}cm` : '-' });
+                cols.push({ label: `값부${lastLabel}`, value: last ? `${last.level}cm` : '-' });
+                cols.push({ label: `변위량총합\n(${firstLabel}-${lastLabel})`, value: `${arrow}${deltaAbs.toFixed(1)}cm` });
+            }
+            cols.push({ label: `변위평가\n(L=${lengthMmText})`, value: calc.tiltRatio || '-' });
+
+            const W = 900, H = 130;
+            const canvas = document.createElement('canvas');
+            canvas.width = W;
+            canvas.height = H;
+            const ctx = canvas.getContext('2d');
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(0, 0, W, H);
+            ctx.strokeStyle = '#333333';
+            ctx.lineWidth = 2;
+            ctx.strokeRect(1, 1, W - 2, H - 2);
+
+            const wideW = 220;
+            const restW = (W - wideW) / (cols.length - 1);
+            ctx.textAlign = 'center';
+            ctx.lineWidth = 1.5;
+            ctx.strokeStyle = '#94a3b8';
+            let x = 0;
+            cols.forEach((col, i) => {
+                const w = col.wide ? wideW : restW;
+                if (i > 0) {
+                    ctx.beginPath();
+                    ctx.moveTo(x, 0);
+                    ctx.lineTo(x, H);
+                    ctx.stroke();
+                }
+                const cx = x + w / 2;
+                ctx.fillStyle = '#555555';
+                ctx.font = '15px sans-serif';
+                String(col.label).split('\n').forEach((line, li) => {
+                    ctx.fillText(line, cx, 26 + li * 18);
+                });
+                ctx.fillStyle = '#111111';
+                ctx.font = 'bold 24px sans-serif';
+                ctx.fillText(col.value, cx, H - 32);
+                x += w;
+            });
+
+            return canvas.toDataURL('image/png');
+        } catch (e) {
+            console.warn('renderNdtDisplacementInfoBoxCanvas error:', e);
             return null;
         }
     }
@@ -16713,13 +16805,80 @@ document.addEventListener('DOMContentLoaded', () => {
                     setPicImage(pic, imgId, size.w, size.h, maxW, maxH);
                 };
 
+                // 부동침하/부재변위 결과표 밑에 그룹별 요약박스+그래프 이미지를 순서대로 이어붙이는 도우미.
+                // 문서에 이미 있는 hp:pic 하나(콘크리트 강도/탄산화 위치도용)의 XML을 그대로 문자열
+                // 템플릿으로 써서 매번 새 문단으로 파싱해 넣는다 — 반발경도 성과표 섹션이 기존 그림
+                // 문단을 clone해서 재사용하는 것과 같은 발상이며, id/이미지 참조만 매번 새로 갈아끼운다.
+                const PIC_TEMPLATE_XML = '<hp:pic id="ID_PLACEHOLDER" zOrder="0" numberingType="PICTURE" textWrap="TOP_AND_BOTTOM" textFlow="BOTH_SIDES" lock="0" dropcapstyle="None" thumbnailBinIDRef="" href="" groupLevel="0" instid="0" reverse="0"><hp:offset x="0" y="0"/><hp:orgSz width="685500" height="864780"/><hp:curSz width="41824" height="52763"/><hp:flip horizontal="0" vertical="0"/><hp:rotationInfo angle="0" centerX="20912" centerY="26381" rotateimage="1"/><hp:renderingInfo><hc:transMatrix e1="1" e2="0" e3="0" e4="0" e5="1" e6="0"/><hc:scaMatrix e1="0.061012" e2="0" e3="0" e4="0" e5="0.061013" e6="0"/><hc:rotMatrix e1="1" e2="0" e3="0" e4="0" e5="1" e6="0"/></hp:renderingInfo><hc:img binaryItemIDRef="image6" bright="0" contrast="0" effect="REAL_PIC" alpha="0"/><hp:imgRect><hc:pt0 x="0" y="0"/><hc:pt1 x="685500" y="0"/><hc:pt2 x="685500" y="864780"/><hc:pt3 x="0" y="864780"/></hp:imgRect><hp:imgClip left="0" right="578460" top="0" bottom="729780"/><hp:inMargin left="0" right="0" top="0" bottom="0"/><hp:imgDim dimwidth="578460" dimheight="729780"/><hp:effects/><hp:sz width="41824" widthRelTo="ABSOLUTE" height="52763" heightRelTo="ABSOLUTE" protect="0"/><hp:pos treatAsChar="1" affectLSpacing="0" flowWithText="1" allowOverlap="0" holdAnchorAndSO="0" vertRelTo="PARA" horzRelTo="COLUMN" vertAlign="TOP" horzAlign="LEFT" vertOffset="0" horzOffset="0"/><hp:outMargin left="0" right="0" top="0" bottom="0"/></hp:pic>';
+
+                const insertImageParaAfter = async (afterPara, dataUrl, imgIdPrefix, maxW = 42520, maxH = 999999999) => {
+                    if (!afterPara || !dataUrl) return afterPara;
+                    const { bytes, mime, ext } = dataUrlToBytes(dataUrl);
+                    const size = await loadImageSize(dataUrl);
+                    const seq = imgCounter++;
+                    const imgId = `${imgIdPrefix}${seq}`;
+                    zip.file(`BinData/${imgId}.${ext}`, bytes);
+                    manifestAdds.push(`<opf:item id="${imgId}" href="BinData/${imgId}.${ext}" media-type="${mime}" isEmbeded="1"/>`);
+
+                    const picXml = PIC_TEMPLATE_XML.replace('id="ID_PLACEHOLDER"', `id="${900000000 + seq}"`);
+                    const picDoc = new DOMParser().parseFromString(
+                        `<root xmlns:hp="${HP_NS}" xmlns:hc="${HC_NS}">${picXml}</root>`, 'application/xml');
+                    const picNode = xmlDoc.importNode(picDoc.documentElement.firstChild, true);
+
+                    const newPara = xmlDoc.createElementNS(HP_NS, 'hp:p');
+                    newPara.setAttribute('id', '0');
+                    newPara.setAttribute('paraPrIDRef', '18');
+                    newPara.setAttribute('styleIDRef', '3');
+                    newPara.setAttribute('pageBreak', '0');
+                    newPara.setAttribute('columnBreak', '0');
+                    newPara.setAttribute('merged', '0');
+                    const run = xmlDoc.createElementNS(HP_NS, 'hp:run');
+                    run.setAttribute('charPrIDRef', '37');
+                    run.appendChild(picNode);
+                    newPara.appendChild(run);
+                    const lineseg = xmlDoc.createElementNS(HP_NS, 'hp:linesegarray');
+                    const seg = xmlDoc.createElementNS(HP_NS, 'hp:lineseg');
+                    seg.setAttribute('textpos', '0'); seg.setAttribute('vertpos', '0');
+                    seg.setAttribute('vertsize', '1300'); seg.setAttribute('textheight', '1300');
+                    seg.setAttribute('baseline', '1105'); seg.setAttribute('spacing', '1560');
+                    seg.setAttribute('horzpos', '0'); seg.setAttribute('horzsize', '42520');
+                    seg.setAttribute('flags', '393216');
+                    lineseg.appendChild(seg);
+                    newPara.appendChild(lineseg);
+
+                    afterPara.parentNode.insertBefore(newPara, afterPara.nextSibling);
+                    setPicImage(picNode, imgId, size.w, size.h, maxW, maxH);
+                    return newPara;
+                };
+
+                // 결과표(tbl)가 들어있는 문단 바로 다음 자리부터, 그룹마다 [요약박스, 그래프] 이미지
+                // 문단을 순서대로 이어붙인다. groups는 결과표에 채운 것과 같은 순서(= 같은 번호)여야 한다.
+                // 그래프는 높이를 25500(≈90mm)로 제한해서 요약박스(~22mm)와 합쳐 한 쌍이 ~112mm —
+                // 페이지 하나에 두 쌍이 들어가도록(사용자 요청) 크기를 맞췄다.
+                const GROUP_CHART_MAX_H = 25500;
+                const insertGroupResultImages = async (tbl, groups) => {
+                    if (!tbl) return;
+                    let anchorPara = tbl.parentNode && tbl.parentNode.parentNode; // hp:pic|hp:tbl -> hp:run -> hp:p
+                    if (!anchorPara || anchorPara.localName !== 'p') return;
+                    for (let i = 0; i < groups.length; i++) {
+                        const group = groups[i];
+                        const boxUrl = renderNdtDisplacementInfoBoxCanvas(group, i + 1);
+                        anchorPara = await insertImageParaAfter(anchorPara, boxUrl, 'ndtDispBoxAuto');
+                        const chartUrl = renderNdtDisplacementChartDataUrl(group, floorCode);
+                        anchorPara = await insertImageParaAfter(anchorPara, chartUrl, 'ndtDispChartAuto', 42520, GROUP_CHART_MAX_H);
+                    }
+                };
+
                 const MEASURE_TBL_ID = '2137459237', MEASURE_HEADER_ROWS = 2;
                 const STRENGTH_TBL_ID = '2119329126', STRENGTH_HEADER_ROWS = 1;
                 const CARB_TBL_ID = '2119328135', CARB_HEADER_ROWS = 1;
                 const STRENGTH_CARB_MAP_TBL_ID = '2137459495';
-                const TILT_TBL_ID = '1165079546', TILT_HEADER_ROWS = 2;
+                // 외벽기울기/부동침하/부재변위 결과표 3종 — 2026-08-24 템플릿에 새로 추가.
+                // 표 열 구성이 3개 다 동일: NO. / 위치 / 전회(기존, 항상 '-') / 금회(측정값) / 길이(또는 높이) / 비율 / 등급.
+                const TILT_TBL_ID = '501', TILT_HEADER_ROWS = 2;
                 const TILT_MAP_TBL_ID = '1165079510';
-                const DISP_TBL_ID = '1165079547', DISP_HEADER_ROWS = 2;
+                const SETTLEMENT_TBL_ID = '502', SETTLEMENT_HEADER_ROWS = 2;
+                const MEMBER_DISP_TBL_ID = '503', MEMBER_DISP_HEADER_ROWS = 2;
                 const SETTLEMENT_MAP_TBL_ID = '1165079513';
                 const MEMBER_DISP_MAP_TBL_ID = '1165079516';
 
@@ -16777,7 +16936,9 @@ document.addEventListener('DOMContentLoaded', () => {
                                 ]);
                             });
                         });
-                        if (tbl) fillNdtTable(tbl, STRENGTH_HEADER_ROWS, strengthRows);
+                        // 2026-08-24: 템플릿에 남아있던 다른 병원 이름표 칸(NO. 왼쪽의 빈 병합 칸)을
+                        // 제거해서 이제 NO.가 표의 실제 0번 칸이 됨 — includeCol0=true로 채운다.
+                        if (tbl) fillNdtTable(tbl, STRENGTH_HEADER_ROWS, strengthRows, true);
                     } else {
                         removeNdtTableById(STRENGTH_TBL_ID);
                     }
@@ -16850,7 +17011,7 @@ document.addEventListener('DOMContentLoaded', () => {
                             typeof item.carbRemainingLifeYears === 'number' ? Math.round(item.carbRemainingLifeYears) : '-',
                             item.carbAgeDays != null ? `약 ${Math.round(item.carbAgeDays / 365)}년` : '-',
                             '-'
-                        ]));
+                        ]), true);
                     } else {
                         removeNdtTableById(CARB_TBL_ID);
                     }
@@ -16861,48 +17022,57 @@ document.addEventListener('DOMContentLoaded', () => {
                         removeNdtTableById(STRENGTH_CARB_MAP_TBL_ID);
                     }
 
+                    // 3개 표 모두 열 순서 동일(2026-08-24 사용자 요청으로 재배치):
+                    // NO. / 위치 / 길이·높이 / 전회(항상 '-') / 금회 / 비율 / 등급. 단위는 전부 mm로 통일.
                     if (tiltItemsHwpx.length > 0) {
-                        const tbl = findTblById(TILT_TBL_ID);
+                        const tbl = findTblById(TILT_TBL_ID, ['높   이(H)', '전   회']);
                         if (tbl) fillNdtTable(tbl, TILT_HEADER_ROWS, tiltItemsHwpx.map((item, i) => {
-                            const fmtH = formatHeightValue(item.height) || '-';
-                            const hDigits = (fmtH || '').replace(/[^0-9.]/g, '');
-                            const avgDigits = (item.avgValue || '').replace(/[^0-9.-]/g, '');
-                            const h = parseFloat(hDigits);
-                            const delta = Math.abs(parseFloat(avgDigits) || 0);
-                            const calc = (Number.isFinite(h) && h > 0 && delta > 0)
-                                ? calcTiltGrade(h, delta)
+                            const hDigits = String(item.height || '').replace(/[^0-9.]/g, '');
+                            const hNum = parseFloat(hDigits);
+                            const heightText = Number.isFinite(hNum) ? `${hNum.toLocaleString()}mm` : '-';
+                            const avgDigits = (item.avgValue || '').toString().replace(/[^0-9.-]/g, '');
+                            const avgNum = parseFloat(avgDigits);
+                            const avgText = Number.isFinite(avgNum) ? `${avgNum}mm` : '-';
+                            const delta = Math.abs(avgNum || 0);
+                            const calc = (Number.isFinite(hNum) && hNum > 0 && delta > 0)
+                                ? calcTiltGrade(hNum, delta)
                                 : { tiltRatio: '', grade: '' };
-                            return [item.no || (i + 1), item.location || '-', fmtH, '-', item.avgValue || '-', item.tiltRatio || calc.tiltRatio || '-', item.grade || calc.grade || '-'];
-                        }));
+                            return [item.no || (i + 1), item.location || '-', heightText, '-', avgText, item.tiltRatio || calc.tiltRatio || '-', item.grade || calc.grade || '-'];
+                        }), true);
                         await insertNdtLocationMap(TILT_MAP_TBL_ID, '기울기');
                     } else {
                         removeNdtTableById(TILT_TBL_ID);
                         removeNdtTableById(TILT_MAP_TBL_ID);
                     }
 
-                    // 결과표는 템플릿에 하나뿐이라 부동침하 그룹 먼저, 이어서 부재처짐 그룹 순으로 한
-                    // 표에 담는다. 위치도는 부동침하용/부재처짐용이 템플릿에 각각 따로 있어서 둘 다 채운다.
-                    const combinedDispGroups = [...settlementGroupsHwpx, ...memberDispGroupsHwpx];
-                    if (combinedDispGroups.length > 0) {
-                        const tbl = findTblById(DISP_TBL_ID);
-                        if (tbl) fillNdtTable(tbl, DISP_HEADER_ROWS, combinedDispGroups.map((group, i) => {
-                            const calc = calcGroupDisplacement(group);
-                            const label = `${group.locationType || '-'}(${group.category === '부재변위' ? '처짐' : '부동침하'})`;
-                            return [i + 1, label, group.measureLength || '-', '-', calc.delta.toFixed(1), calc.tiltRatio, calc.grade];
-                        }));
-                    } else {
-                        removeNdtTableById(DISP_TBL_ID);
-                    }
-
+                    // 부동침하/부재변위는 2026-08-24부터 템플릿에 별도 표 2개로 분리 — 이전엔 표가
+                    // 하나뿐이라 두 그룹을 합쳐서 한 표에 담았지만, 이제 각자 자기 표에 채운다.
                     if (settlementGroupsHwpx.length > 0) {
+                        const tbl = findTblById(SETTLEMENT_TBL_ID, ['변  위  량', '기   존']);
+                        if (tbl) fillNdtTable(tbl, SETTLEMENT_HEADER_ROWS, settlementGroupsHwpx.map((group, i) => {
+                            const calc = calcGroupDisplacement(group);
+                            const lengthMmText = group.measureLength ? `${(group.measureLength * 1000).toLocaleString()}mm` : '-';
+                            return [i + 1, group.locationType || '-', lengthMmText, '-', `${calc.delta.toFixed(1)}cm`, calc.tiltRatio, calc.grade];
+                        }), true);
+                        // 2026-08-24: 결과표 밑에 그룹별 요약박스+꺾은선 그래프를 한 쌍씩 이어붙임(사용자 요청).
+                        if (tbl) await insertGroupResultImages(tbl, settlementGroupsHwpx);
                         await insertNdtLocationMap(SETTLEMENT_MAP_TBL_ID, '변위');
                     } else {
+                        removeNdtTableById(SETTLEMENT_TBL_ID);
                         removeNdtTableById(SETTLEMENT_MAP_TBL_ID);
                     }
 
                     if (memberDispGroupsHwpx.length > 0) {
+                        const tbl = findTblById(MEMBER_DISP_TBL_ID, ['처  짐  량', '기   존']);
+                        if (tbl) fillNdtTable(tbl, MEMBER_DISP_HEADER_ROWS, memberDispGroupsHwpx.map((group, i) => {
+                            const calc = calcGroupDisplacement(group);
+                            const lengthMmText = group.measureLength ? `${(group.measureLength * 1000).toLocaleString()}mm` : '-';
+                            return [i + 1, group.locationType || '-', lengthMmText, '-', `${calc.delta.toFixed(1)}cm`, calc.tiltRatio, calc.grade];
+                        }), true);
+                        if (tbl) await insertGroupResultImages(tbl, memberDispGroupsHwpx);
                         await insertNdtLocationMap(MEMBER_DISP_MAP_TBL_ID, '부재변위');
                     } else {
+                        removeNdtTableById(MEMBER_DISP_TBL_ID);
                         removeNdtTableById(MEMBER_DISP_MAP_TBL_ID);
                     }
                 }
