@@ -107,10 +107,10 @@
                 <!-- Hero Header with Add Building Button -->
                 <div class="dashboard-hero">
                     <div class="hero-text">
-                        <span class="hero-badge" id="appVersionBadge" style="background: rgba(255, 255, 255, 0.12); color: #f5f5f5; border: 1px solid rgba(255, 255, 255, 0.28); font-size: 0.85rem; padding: 0.35rem 0.85rem; border-radius: 20px; font-weight: 700;">
+                        <span class="hero-badge" id="appVersionBadge">
                             <i class="fa-solid fa-circle-check"></i> v1.3.0 · 웹뷰 원격 업데이트
                         </span>
-                        <h2 class="hero-title" style="margin-top: 0.4rem; color: #fafafa;">🏢 점검 대상 건축물 목록</h2>
+                        <h2 class="hero-title" style="margin-top: 0.4rem;">🏢 점검 대상 건축물 목록</h2>
                     </div>
                     <div class="hero-actions">
                         <div class="hero-company-row">
@@ -118,24 +118,24 @@
                             <input type="text" id="inputHomeCompanyName" class="form-control hero-company-input" placeholder="(주)한국안전진단기술원" value="(주)한국안전진단기술원">
                             <button type="button" id="btnSaveHomeCompanyName" class="btn btn-sm btn-primary hero-company-save"><i class="fa-solid fa-floppy-disk"></i> 저장</button>
                         </div>
-                        <button type="button" class="btn btn-outline pc-only-chrome" id="btnExportJSON" style="border-color: #4ade80; color: #4ade80; font-weight: 700;">
+                        <button type="button" class="btn btn-outline pc-only-chrome hero-btn-backup" id="btnExportJSON">
                             <i class="fa-solid fa-file-export"></i> 💾 데이터 백업 (.json)
                         </button>
-                        <button type="button" class="btn btn-outline pc-only-chrome" id="btnImportJSON" style="border-color: #e5e5e5; color: #f5f5f5; font-weight: 700;">
+                        <button type="button" class="btn btn-outline pc-only-chrome hero-btn-import" id="btnImportJSON">
                             <i class="fa-solid fa-file-import"></i> 📥 백업 불러오기 (.json)
                         </button>
                         <input type="file" id="inputImportJSON" accept=".json" style="display:none;">
                         <button type="button" class="btn btn-outline btn-hero-refresh" id="btnReloadWebApp" title="서버에서 최신 화면을 다시 불러옵니다">
                             <i class="fa-solid fa-rotate"></i> 새로고침
                         </button>
-                        <button type="button" class="btn btn-outline pc-only-chrome" id="btnPublishOta" style="display: none; border-color: #a78bfa; color: #c4b5fd; font-weight: 700;" title="APK를 Firebase에 올려 현장 기기 OTA 배포">
+                        <button type="button" class="btn btn-outline pc-only-chrome hero-btn-ota" id="btnPublishOta" style="display: none;" title="APK를 Firebase에 올려 현장 기기 OTA 배포">
                             <i class="fa-solid fa-upload"></i> OTA 배포
                         </button>
                         <input type="file" id="inputPublishOtaApk" accept=".apk,application/vnd.android.package-archive" style="display:none;">
-                        <button type="button" class="btn btn-outline pc-only-chrome" id="btnPurgeDeletedCodes" style="border-color: #a3a3a3; color: #e5e5e5; font-weight: 700;" title="전원 동기화 확인 후에만 — 삭제 tombstone을 비워 고유코드 재사용">
+                        <button type="button" class="btn btn-outline pc-only-chrome hero-btn-purge" id="btnPurgeDeletedCodes" title="전원 동기화 확인 후에만 — 삭제 tombstone을 비워 고유코드 재사용">
                             <i class="fa-solid fa-recycle"></i> 삭제 코드 정리
                         </button>
-                        <button type="button" class="btn btn-outline" id="btnTriggerPhoneRelay" style="border-color: #facc15; color: #facc15; font-weight: 700;">
+                        <button type="button" class="btn btn-outline hero-btn-phone" id="btnTriggerPhoneRelay">
                             <i class="fa-solid fa-mobile-screen-button"></i> 📱 휴대폰으로 촬영해서 바로 받기
                         </button>
                         <button type="button" class="btn btn-primary btn-hero-cta" id="btnOpenAddBuildingModal">
@@ -144,13 +144,13 @@
 
                         <!-- User Profile Badge & Logout -->
                         <div id="headerUserProfileGroup" class="hero-user-group">
-                            <span id="userProfileText" style="font-size: 0.83rem; font-weight: 700; color: #e5e5e5;">
+                            <span id="userProfileText" class="hero-user-name">
                                 <i class="fa-solid fa-user-shield"></i> <span id="lblUserCompany">(주)한국안전진단기술원</span> (<span id="lblUserName">홍길동</span>)
                             </span>
-                            <button type="button" id="btnOpenMemberApproval" class="btn btn-sm btn-outline" style="display: none; border-color: #059669; color: #059669; font-size: 0.75rem; padding: 0.15rem 0.55rem;" title="가입 승인 관리">
+                            <button type="button" id="btnOpenMemberApproval" class="btn btn-sm btn-outline hero-btn-approve" style="display: none;" title="가입 승인 관리">
                                 <i class="fa-solid fa-user-check"></i> 가입 승인 관리
                             </button>
-                            <button type="button" id="btnLogout" class="btn btn-sm btn-outline" style="border-color: #ef4444; color: #f87171; font-size: 0.75rem; padding: 0.15rem 0.55rem;" title="로그아웃">
+                            <button type="button" id="btnLogout" class="btn btn-sm btn-outline hero-btn-logout" title="로그아웃">
                                 <i class="fa-solid fa-right-from-bracket"></i> 로그아웃
                             </button>
                         </div>
