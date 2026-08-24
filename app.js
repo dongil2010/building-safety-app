@@ -8614,10 +8614,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 const bits = d.crackMeasures.map(m => {
                     const w = withMm(m.width);
                     const l = String(m.length || '').trim();
-                    if (w && l) return `${w}/${l}m`;
-                    if (w) return w;
-                    if (l) return `${l}m`;
-                    return '';
+                    const n = String(m.count || '').trim();
+                    const segs = [];
+                    if (w) segs.push(w);
+                    if (l) segs.push(`${l}m`);
+                    if (n) segs.push(`${n}개`);
+                    return segs.join('/');
                 }).filter(Boolean);
                 if (bits.length) return bits.join(', ');
             }
@@ -9853,38 +9855,53 @@ document.addEventListener('DOMContentLoaded', () => {
         return Array.from(list.querySelectorAll('.defect-crack-measure-row')).map(row => {
             const w = (row.querySelector('[data-crack-w]')?.value || '').trim();
             const l = (row.querySelector('[data-crack-l]')?.value || '').trim();
-            return { width: w, length: l };
-        }).filter(m => m.width || m.length);
+            const n = (row.querySelector('[data-crack-n]')?.value || '').trim();
+            return { width: w, length: l, count: n };
+        }).filter(m => m.width || m.length || m.count);
+    }
+
+    function readCrackMeasureRowsFromDom() {
+        const list = document.getElementById('defectCrackMeasureList');
+        if (!list) return [];
+        return Array.from(list.querySelectorAll('.defect-crack-measure-row')).map(row => ({
+            width: (row.querySelector('[data-crack-w]')?.value || '').trim(),
+            length: (row.querySelector('[data-crack-l]')?.value || '').trim(),
+            count: (row.querySelector('[data-crack-n]')?.value || '').trim()
+        }));
     }
 
     function syncHiddenCrackFieldsFromMeasures(measures) {
         const rows = measures || getCrackMeasuresFromUi();
         const wEl = document.getElementById('defectCrackWidth');
         const lEl = document.getElementById('defectCrackLength');
+        const nEl = document.getElementById('defectItemCount');
         const widths = rows.map(m => m.width).filter(Boolean);
         const lengths = rows.map(m => m.length).filter(Boolean);
+        const counts = rows.map(m => m.count).filter(Boolean);
         if (wEl) wEl.value = widths.join(' / ');
         if (lEl) lEl.value = lengths.join(' / ');
+        if (nEl) nEl.value = counts.join(' / ');
     }
 
     function composeDefectSizeFromMeasures() {
         const rows = getCrackMeasuresFromUi();
-        const n = (document.getElementById('defectItemCount')?.value || '').trim();
         const parts = [];
         if (rows.length) {
             rows.forEach((m) => {
                 const bit = [];
                 if (m.width) bit.push(`W=${m.width}mm`);
                 if (m.length) bit.push(`L=${m.length}m`);
+                if (m.count) bit.push(`N=${m.count}`);
                 if (bit.length) parts.push(bit.join(' '));
             });
         } else {
             const w = (document.getElementById('defectCrackWidth')?.value || '').trim();
             const l = (document.getElementById('defectCrackLength')?.value || '').trim();
+            const n = (document.getElementById('defectItemCount')?.value || '').trim();
             if (w) parts.push(`W=${w}mm`);
             if (l) parts.push(`L=${l}m`);
+            if (n) parts.push(`N=${n}`);
         }
-        if (n) parts.push(`N=${n}`);
         return parts.join(', ');
     }
 
@@ -9903,8 +9920,12 @@ document.addEventListener('DOMContentLoaded', () => {
         const list = document.getElementById('defectCrackMeasureList');
         if (!list) return;
         const rows = (Array.isArray(measures) && measures.length)
-            ? measures.map(m => ({ width: m.width || m.w || '', length: m.length || m.l || '' }))
-            : [{ width: '', length: '' }];
+            ? measures.map(m => ({
+                width: m.width || m.w || '',
+                length: m.length || m.l || '',
+                count: m.count || m.n || ''
+            }))
+            : [{ width: '', length: '', count: '' }];
         list.innerHTML = rows.map((m, idx) => `
             <div class="defect-crack-measure-row" data-row-idx="${idx}">
                 <label class="defect-measure-btn">
@@ -9916,6 +9937,11 @@ document.addEventListener('DOMContentLoaded', () => {
                     <span class="defect-measure-name">길이</span>
                     <input type="text" data-crack-l inputmode="decimal" placeholder="직접입력" autocomplete="off" value="${String(m.length || '').replace(/"/g, '&quot;')}">
                     <span class="defect-measure-unit">m</span>
+                </label>
+                <label class="defect-measure-btn">
+                    <span class="defect-measure-name">개수</span>
+                    <input type="text" data-crack-n inputmode="numeric" placeholder="직접입력" autocomplete="off" value="${String(m.count || '').replace(/"/g, '&quot;')}">
+                    <span class="defect-measure-unit">개</span>
                 </label>
                 <button type="button" class="defect-crack-measure-del" title="이 행 삭제" ${rows.length <= 1 ? 'disabled' : ''}>
                     <i class="fa-solid fa-trash"></i>
@@ -9930,18 +9956,12 @@ document.addEventListener('DOMContentLoaded', () => {
         });
         list.querySelectorAll('.defect-crack-measure-del').forEach(btn => {
             btn.addEventListener('click', () => {
-                const current = getCrackMeasuresFromUi();
                 const row = btn.closest('.defect-crack-measure-row');
                 const idx = row ? parseInt(row.getAttribute('data-row-idx') || '0', 10) : -1;
-                const next = current.length ? current.slice() : [{ width: '', length: '' }];
-                // 빈 행도 포함해 삭제하려면 DOM 기준으로
-                const allRows = Array.from(list.querySelectorAll('.defect-crack-measure-row')).map(r => ({
-                    width: (r.querySelector('[data-crack-w]')?.value || '').trim(),
-                    length: (r.querySelector('[data-crack-l]')?.value || '').trim()
-                }));
+                const allRows = readCrackMeasureRowsFromDom();
                 if (idx >= 0 && allRows.length > 1) {
                     allRows.splice(idx, 1);
-                    renderCrackMeasureRows(allRows.length ? allRows : [{ width: '', length: '' }]);
+                    renderCrackMeasureRows(allRows.length ? allRows : [{ width: '', length: '', count: '' }]);
                     syncSizeFromMeasureInputs();
                     if (typeof scheduleDefectAutoApply === 'function') scheduleDefectAutoApply();
                 }
@@ -9953,21 +9973,32 @@ document.addEventListener('DOMContentLoaded', () => {
     function setCrackMeasuresToUi(defect) {
         let measures = [];
         if (defect && Array.isArray(defect.crackMeasures) && defect.crackMeasures.length) {
-            measures = defect.crackMeasures.map(m => ({
+            const hasRowCount = defect.crackMeasures.some(m => m && m.count != null && String(m.count).trim() !== '');
+            measures = defect.crackMeasures.map((m, i) => ({
                 width: m.width != null ? String(m.width) : '',
-                length: m.length != null ? String(m.length) : ''
+                length: m.length != null ? String(m.length) : '',
+                count: m.count != null ? String(m.count) : ''
             }));
+            if (!hasRowCount && String(defect.itemCount || '').trim()) {
+                const ns = String(defect.itemCount).split(/\s*\/\s*/).map(s => s.trim()).filter(Boolean);
+                measures.forEach((m, i) => {
+                    m.count = ns[i] || (i === 0 && ns.length === 1 ? ns[0] : '');
+                });
+            }
         } else if (defect) {
             const ws = String(defect.crackWidth || '').split(/\s*\/\s*/).map(s => s.trim()).filter(Boolean);
             const ls = String(defect.crackLength || '').split(/\s*\/\s*/).map(s => s.trim()).filter(Boolean);
-            const n = Math.max(ws.length, ls.length, 0);
+            const ns = String(defect.itemCount || '').split(/\s*\/\s*/).map(s => s.trim()).filter(Boolean);
+            const n = Math.max(ws.length, ls.length, ns.length, 0);
             if (n > 0) {
                 for (let i = 0; i < n; i++) {
-                    measures.push({ width: ws[i] || '', length: ls[i] || '' });
+                    measures.push({ width: ws[i] || '', length: ls[i] || '', count: ns[i] || (i === 0 && ns.length === 1 ? ns[0] : '') });
                 }
+            } else if (String(defect.itemCount || '').trim()) {
+                measures.push({ width: '', length: '', count: String(defect.itemCount).trim() });
             }
         }
-        renderCrackMeasureRows(measures.length ? measures : [{ width: '', length: '' }]);
+        renderCrackMeasureRows(measures.length ? measures : [{ width: '', length: '', count: '' }]);
     }
 
     function bindDefectMeasureInputs() {
@@ -9975,20 +10006,9 @@ document.addEventListener('DOMContentLoaded', () => {
         if (addBtn && !addBtn.dataset.measureBound) {
             addBtn.dataset.measureBound = '1';
             addBtn.addEventListener('click', () => {
-                const rows = Array.from(document.querySelectorAll('#defectCrackMeasureList .defect-crack-measure-row')).map(r => ({
-                    width: (r.querySelector('[data-crack-w]')?.value || '').trim(),
-                    length: (r.querySelector('[data-crack-l]')?.value || '').trim()
-                }));
-                rows.push({ width: '', length: '' });
+                const rows = readCrackMeasureRowsFromDom();
+                rows.push({ width: '', length: '', count: '' });
                 renderCrackMeasureRows(rows);
-                if (typeof scheduleDefectAutoApply === 'function') scheduleDefectAutoApply();
-            });
-        }
-        const countEl = document.getElementById('defectItemCount');
-        if (countEl && !countEl.dataset.measureBound) {
-            countEl.dataset.measureBound = '1';
-            countEl.addEventListener('input', () => {
-                syncSizeFromMeasureInputs();
                 if (typeof scheduleDefectAutoApply === 'function') scheduleDefectAutoApply();
             });
         }
@@ -10002,7 +10022,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!document.getElementById('defectCrackMeasureList')?.dataset.inited) {
             const list = document.getElementById('defectCrackMeasureList');
             if (list) list.dataset.inited = '1';
-            renderCrackMeasureRows([{ width: '', length: '' }]);
+            renderCrackMeasureRows([{ width: '', length: '', count: '' }]);
         }
     }
 
@@ -12648,8 +12668,6 @@ document.addEventListener('DOMContentLoaded', () => {
             if (locEl) locEl.value = extractDefectLocationDetail(existingPin.location || '');
             if (sizeEl) sizeEl.value = existingPin.size || '';
             setCrackMeasuresToUi(existingPin);
-            const itemCountElExisting = document.getElementById('defectItemCount');
-            if (itemCountElExisting) itemCountElExisting.value = (existingPin.itemCount !== undefined && existingPin.itemCount !== null) ? existingPin.itemCount : '';
             if (sizeEl) {
                 const composed = composeDefectSizeFromMeasures();
                 sizeEl.dataset.autoSize = (composed && (existingPin.size || '') === composed) ? '1' : '';
@@ -12717,8 +12735,6 @@ document.addEventListener('DOMContentLoaded', () => {
             if (locEl) locEl.value = tmpl ? extractDefectLocationDetail(tmpl.location || '') : '';
             if (sizeEl) sizeEl.value = (tmpl && tmpl.size) || '';
             setCrackMeasuresToUi(tmpl || null);
-            const itemCountElNew = document.getElementById('defectItemCount');
-            if (itemCountElNew) itemCountElNew.value = (tmpl && tmpl.itemCount) || '';
             if (sizeEl) {
                 const composed = composeDefectSizeFromMeasures();
                 sizeEl.dataset.autoSize = (composed && ((tmpl && tmpl.size) || '') === composed) ? '1' : (composed && !(tmpl && tmpl.size) ? '1' : '');

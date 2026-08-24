@@ -12,7 +12,7 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <meta name="apple-mobile-web-app-title" content="스마트 안전점검">
-    <link rel="stylesheet" href="styles.css?v=20260824_typePin">
+    <link rel="stylesheet" href="styles.css?v=20260824_wlnRow">
     <!-- FontAwesome icons for clean engineering UI -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <!-- PDF 생성용: 페이지별로 직접 캡처해서 조립(큰 보고서에서 html2pdf 한방 렌더링이 캔버스 높이 한계로
@@ -698,19 +698,13 @@
                         <div class="defect-quick-group" id="quickMeasureGroup">
                             <div class="defect-quick-label"><i class="fa-solid fa-ruler-combined"></i> 폭 · 길이 · 개수 (직접 입력)</div>
                             <div class="defect-crack-measure-list" id="defectCrackMeasureList"></div>
-                            <button type="button" class="btn btn-sm btn-outline defect-crack-measure-add" id="btnAddCrackMeasure" title="폭·길이 행 추가">
-                                <i class="fa-solid fa-plus"></i> 폭·길이 추가
+                            <button type="button" class="btn btn-sm btn-outline defect-crack-measure-add" id="btnAddCrackMeasure" title="폭·길이·개수 행 추가">
+                                <i class="fa-solid fa-plus"></i> 폭·길이·개수 추가
                             </button>
-                            <div class="defect-measure-grid defect-measure-count-only">
-                                <label class="defect-measure-btn" for="defectItemCount">
-                                    <span class="defect-measure-name">개수</span>
-                                    <input type="text" id="defectItemCount" inputmode="numeric" placeholder="직접입력" autocomplete="off">
-                                    <span class="defect-measure-unit">개</span>
-                                </label>
-                            </div>
                             <!-- 하위 호환: 단일 값 동기화용(화면 숨김) -->
                             <input type="hidden" id="defectCrackWidth" value="">
                             <input type="hidden" id="defectCrackLength" value="">
+                            <input type="hidden" id="defectItemCount" value="">
                         </div>
                         <div class="defect-quick-group" id="quickCauseGroup">
                             <div class="defect-quick-label"><i class="fa-solid fa-magnifying-glass"></i> 발생 원인 (복수 선택)</div>
@@ -2126,12 +2120,12 @@
     <script src="js/pdf-vector-bridge.js?v=20260821_land1"></script>
     <script src="js/tabs/registry.js?v=20260821_land1"></script>
     <script src="js/tabs/home.js?v=20260824_webview"></script>
-    <script src="js/tabs/map.js?v=20260824_typePin"></script>
+    <script src="js/tabs/map.js?v=20260824_wlnRow"></script>
     <script src="js/tabs/survey.js?v=20260822_surveyInlineEdit"></script>
     <script src="js/tabs/ndt.js?v=20260822_survey2dScroll"></script>
     <script src="js/shared/report.js?v=20260824_hwpxFix"></script>
     <script src="js/shared/auth.js?v=20260821_land1"></script>
-    <script src="app.js?v=20260824_typePin"></script>
+    <script src="app.js?v=20260824_wlnRow"></script>
     <script>
         document.addEventListener('DOMContentLoaded', function () {
             const btn = document.getElementById('btnExportVectorPdf');

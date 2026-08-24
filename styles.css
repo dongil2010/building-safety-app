@@ -4219,11 +4219,6 @@ body {
     grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 0.28rem;
 }
-.defect-measure-grid.defect-measure-count-only {
-    grid-template-columns: minmax(0, 1fr);
-    max-width: 8.5rem;
-    margin-top: 0.28rem;
-}
 
 /* 균열 종류 복수 선택 */
 .defect-crack-kind-grid {
@@ -4266,7 +4261,7 @@ body {
 }
 .defect-crack-measure-row {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 0.85fr) auto;
     gap: 0.28rem;
     align-items: stretch;
 }
