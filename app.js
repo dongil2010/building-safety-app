@@ -4068,11 +4068,115 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // 바닥 수직변위 그룹 하나의 꺾은선 그래프를 캔버스로 그려 PNG dataURL로 반환
+    // 꺾은선 그래프 본체를 ctx에 그린다 — 캔버스 폭은 항상 900을 가정하고, y좌표는 전부 yOffset만큼
+    // 밀어서 그린다. renderNdtDisplacementChartDataUrl(그래프 단독, PDF에서도 씀)과
+    // renderNdtDisplacementCombinedCanvas(요약박스+그래프를 한 장으로, HWPX용) 둘 다 이 함수를 공유해서
+    // 그래프를 그리는 코드가 두 군데로 갈라지지 않게 한다.
+    function drawNdtDisplacementChartBody(ctx, group, floorCode, yOffset) {
+        const cw = 900;
+        const ch = 620;
+        const floorLabel = (typeof window.getFloorLabelFromCode === 'function') ? window.getFloorLabelFromCode(floorCode) : (floorCode || '');
+        const chartColor = group.color || getStyleColor(group.category === '부재변위' ? 'ndtMemberDisp' : 'ndtSettlement');
+        const catLabel = group.category === '부재변위' ? '부재변위(처짐)' : '부동침하 기울기';
+        const title = `${floorLabel} ${group.locationType} ${catLabel} (${group.groupNo})`;
+
+        ctx.fillStyle = '#0f172a';
+        ctx.font = 'bold 24px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText(title, cw / 2, yOffset + 45);
+
+        const points = group.points || [];
+        const marginL = 80, marginR = 60, marginT = 90, marginB = 140;
+        const plotW = cw - marginL - marginR;
+        const plotH = ch - marginT - marginB;
+
+        if (points.length === 0) {
+            ctx.font = '16px sans-serif';
+            ctx.fillStyle = '#a3a3a3';
+            ctx.fillText('측정 지점이 없습니다.', cw / 2, yOffset + ch / 2);
+            return;
+        }
+
+        const levels = points.map(p => p.level);
+        let minL = Math.min(...levels, 0);
+        let maxL = Math.max(...levels, 0);
+        if (minL === maxL) { minL -= 1; maxL += 1; }
+        const pad = (maxL - minL) * 0.15;
+        minL -= pad;
+        maxL += pad;
+
+        const xFor = (idx) => marginL + (points.length === 1 ? plotW / 2 : (idx / (points.length - 1)) * plotW);
+        const yFor = (level) => yOffset + marginT + plotH - ((level - minL) / (maxL - minL)) * plotH;
+
+        ctx.strokeStyle = '#cbd5e1';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.moveTo(marginL, yOffset + marginT);
+        ctx.lineTo(marginL, yOffset + marginT + plotH);
+        ctx.lineTo(marginL + plotW, yOffset + marginT + plotH);
+        ctx.stroke();
+
+        if (minL < 0 && maxL > 0) {
+            const zeroY = yFor(0);
+            ctx.strokeStyle = '#e2e8f0';
+            ctx.setLineDash([4, 4]);
+            ctx.beginPath();
+            ctx.moveTo(marginL, zeroY);
+            ctx.lineTo(marginL + plotW, zeroY);
+            ctx.stroke();
+            ctx.setLineDash([]);
+        }
+
+        ctx.strokeStyle = chartColor;
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        points.forEach((p, idx) => {
+            const x = xFor(idx);
+            const y = yFor(p.level);
+            if (idx === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+        });
+        ctx.stroke();
+
+        points.forEach((p, idx) => {
+            const x = xFor(idx);
+            const y = yFor(p.level);
+            ctx.fillStyle = chartColor;
+            ctx.beginPath();
+            ctx.arc(x, y, 6, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.strokeStyle = '#ffffff';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+
+            ctx.fillStyle = '#0f172a';
+            ctx.font = 'bold 13px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText(`${p.level}cm`, x, y - 14);
+
+            ctx.fillStyle = '#64748b';
+            ctx.font = '12px sans-serif';
+            ctx.fillText(`${idx + 1}`, x, yOffset + marginT + plotH + 20);
+        });
+
+        ctx.fillStyle = '#64748b';
+        ctx.font = '12px sans-serif';
+        ctx.textAlign = 'right';
+        ctx.fillText(`${maxL.toFixed(1)}`, marginL - 10, yOffset + marginT + 4);
+        ctx.fillText(`${minL.toFixed(1)}`, marginL - 10, yOffset + marginT + plotH + 4);
+
+        ctx.textAlign = 'left';
+        ctx.fillStyle = '#334155';
+        ctx.font = 'bold 14px sans-serif';
+        ctx.fillText('측정값', marginL, yOffset + marginT + plotH + 55);
+        ctx.font = '13px sans-serif';
+        const listText = points.map((p, idx) => `${formatNdtDisplacementPointLabel(idx + 1)}: ${p.level}cm`).join('    ');
+        wrapCanvasText(ctx, listText, marginL, yOffset + marginT + plotH + 78, plotW + marginR - 10, 20);
+    }
+
     function renderNdtDisplacementChartDataUrl(group, floorCode) {
         try {
             const canvas = document.createElement('canvas');
-            const cw = 900;
-            const ch = 620;
+            const cw = 900, ch = 620;
             canvas.width = cw;
             canvas.height = ch;
             const ctx = canvas.getContext('2d');
@@ -4082,102 +4186,7 @@ document.addEventListener('DOMContentLoaded', () => {
             ctx.lineWidth = 2;
             ctx.strokeRect(1, 1, cw - 2, ch - 2);
 
-            const floorLabel = (typeof window.getFloorLabelFromCode === 'function') ? window.getFloorLabelFromCode(floorCode) : (floorCode || '');
-            const chartColor = group.color || getStyleColor(group.category === '부재변위' ? 'ndtMemberDisp' : 'ndtSettlement');
-            const catLabel = group.category === '부재변위' ? '부재변위(처짐)' : '부동침하 기울기';
-            const title = `${floorLabel} ${group.locationType} ${catLabel} (${group.groupNo})`;
-
-            ctx.fillStyle = '#0f172a';
-            ctx.font = 'bold 24px sans-serif';
-            ctx.textAlign = 'center';
-            ctx.fillText(title, cw / 2, 45);
-
-            const points = group.points || [];
-            const marginL = 80, marginR = 60, marginT = 90, marginB = 140;
-            const plotW = cw - marginL - marginR;
-            const plotH = ch - marginT - marginB;
-
-            if (points.length === 0) {
-                ctx.font = '16px sans-serif';
-                ctx.fillStyle = '#a3a3a3';
-                ctx.fillText('측정 지점이 없습니다.', cw / 2, ch / 2);
-                return canvas.toDataURL('image/png');
-            }
-
-            const levels = points.map(p => p.level);
-            let minL = Math.min(...levels, 0);
-            let maxL = Math.max(...levels, 0);
-            if (minL === maxL) { minL -= 1; maxL += 1; }
-            const pad = (maxL - minL) * 0.15;
-            minL -= pad;
-            maxL += pad;
-
-            const xFor = (idx) => marginL + (points.length === 1 ? plotW / 2 : (idx / (points.length - 1)) * plotW);
-            const yFor = (level) => marginT + plotH - ((level - minL) / (maxL - minL)) * plotH;
-
-            ctx.strokeStyle = '#cbd5e1';
-            ctx.lineWidth = 1.5;
-            ctx.beginPath();
-            ctx.moveTo(marginL, marginT);
-            ctx.lineTo(marginL, marginT + plotH);
-            ctx.lineTo(marginL + plotW, marginT + plotH);
-            ctx.stroke();
-
-            if (minL < 0 && maxL > 0) {
-                const zeroY = yFor(0);
-                ctx.strokeStyle = '#e2e8f0';
-                ctx.setLineDash([4, 4]);
-                ctx.beginPath();
-                ctx.moveTo(marginL, zeroY);
-                ctx.lineTo(marginL + plotW, zeroY);
-                ctx.stroke();
-                ctx.setLineDash([]);
-            }
-
-            ctx.strokeStyle = chartColor;
-            ctx.lineWidth = 3;
-            ctx.beginPath();
-            points.forEach((p, idx) => {
-                const x = xFor(idx);
-                const y = yFor(p.level);
-                if (idx === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
-            });
-            ctx.stroke();
-
-            points.forEach((p, idx) => {
-                const x = xFor(idx);
-                const y = yFor(p.level);
-                ctx.fillStyle = chartColor;
-                ctx.beginPath();
-                ctx.arc(x, y, 6, 0, Math.PI * 2);
-                ctx.fill();
-                ctx.strokeStyle = '#ffffff';
-                ctx.lineWidth = 2;
-                ctx.stroke();
-
-                ctx.fillStyle = '#0f172a';
-                ctx.font = 'bold 13px sans-serif';
-                ctx.textAlign = 'center';
-                ctx.fillText(`${p.level}cm`, x, y - 14);
-
-                ctx.fillStyle = '#64748b';
-                ctx.font = '12px sans-serif';
-                ctx.fillText(`${idx + 1}`, x, marginT + plotH + 20);
-            });
-
-            ctx.fillStyle = '#64748b';
-            ctx.font = '12px sans-serif';
-            ctx.textAlign = 'right';
-            ctx.fillText(`${maxL.toFixed(1)}`, marginL - 10, marginT + 4);
-            ctx.fillText(`${minL.toFixed(1)}`, marginL - 10, marginT + plotH + 4);
-
-            ctx.textAlign = 'left';
-            ctx.fillStyle = '#334155';
-            ctx.font = 'bold 14px sans-serif';
-            ctx.fillText('측정값', marginL, marginT + plotH + 55);
-            ctx.font = '13px sans-serif';
-            const listText = points.map((p, idx) => `${formatNdtDisplacementPointLabel(idx + 1)}: ${p.level}cm`).join('    ');
-            wrapCanvasText(ctx, listText, marginL, marginT + plotH + 78, plotW + marginR - 10, 20);
+            drawNdtDisplacementChartBody(ctx, group, floorCode, 0);
 
             return canvas.toDataURL('image/png');
         } catch (e) {
@@ -4194,10 +4203,10 @@ document.addEventListener('DOMContentLoaded', () => {
         return (n >= 1 && n <= CIRCLED_DIGITS.length) ? CIRCLED_DIGITS[n - 1] : `(${n})`;
     }
 
-    // 부동침하/부재변위 그룹 하나의 요약 박스(값부/처짐량·변위량총합/변위평가)를 캔버스로 그려
-    // PNG dataURL로 반환. HWPX 내보내기에서 결과표 밑에 그룹별로 이 박스 + renderNdtDisplacementChartDataUrl
-    // 그래프를 한 쌍씩 이어붙이는 데 쓴다(다른 점검업체 보고서에서 흔한 "요약 박스 + 꺾은선 그래프" 구성).
-    function renderNdtDisplacementInfoBoxCanvas(group, seqNo) {
+    // 부동침하/부재변위 그룹 하나의 요약 박스 + 꺾은선 그래프를 캔버스 한 장에 같이 그려 PNG dataURL로
+    // 반환(테두리도 한 번만 둘러서 박스/그래프 선이 서로 어긋나지 않게 함). HWPX 내보내기에서 결과표
+    // 밑에 그룹마다 이 그림 하나씩 이어붙이는 데 쓴다(다른 점검업체 보고서의 "요약 박스 + 그래프" 구성).
+    function renderNdtDisplacementCombinedCanvas(group, floorCode, seqNo) {
         try {
             const isMemberDisp = group.category === '부재변위';
             const points = group.points || [];
@@ -4214,30 +4223,30 @@ document.addEventListener('DOMContentLoaded', () => {
             const lastLabel = formatCircledNumber(points.length);
             const midLabel = formatCircledNumber(midIdx + 1);
 
+            // 라벨은 동그라미 숫자만(값부/중앙부 같은 수식어 없이) — 사용자 요청.
             const cols = [{ label: `NO.${seqNo}`, value: group.locationType || '-', wide: true }];
             if (isMemberDisp) {
-                cols.push({ label: `값부${firstLabel}`, value: first ? `${first.level}cm` : '-' });
-                cols.push({ label: `중앙부${midLabel}`, value: mid ? `${mid.level}cm` : '-' });
-                cols.push({ label: `값부${lastLabel}`, value: last ? `${last.level}cm` : '-' });
+                cols.push({ label: firstLabel, value: first ? `${first.level}cm` : '-' });
+                cols.push({ label: midLabel, value: mid ? `${mid.level}cm` : '-' });
+                cols.push({ label: lastLabel, value: last ? `${last.level}cm` : '-' });
                 cols.push({ label: `처짐량총합\n((${firstLabel}+${lastLabel})/2-${midLabel})`, value: `${arrow}${deltaAbs.toFixed(1)}cm` });
             } else {
-                cols.push({ label: `값부${firstLabel}`, value: first ? `${first.level}cm` : '-' });
-                cols.push({ label: `값부${lastLabel}`, value: last ? `${last.level}cm` : '-' });
+                cols.push({ label: firstLabel, value: first ? `${first.level}cm` : '-' });
+                cols.push({ label: lastLabel, value: last ? `${last.level}cm` : '-' });
                 cols.push({ label: `변위량총합\n(${firstLabel}-${lastLabel})`, value: `${arrow}${deltaAbs.toFixed(1)}cm` });
             }
             cols.push({ label: `변위평가\n(L=${lengthMmText})`, value: calc.tiltRatio || '-' });
 
-            const W = 900, H = 130;
+            const W = 900, BOX_H = 110, CHART_H = 620;
+            const H = BOX_H + CHART_H;
             const canvas = document.createElement('canvas');
             canvas.width = W;
             canvas.height = H;
             const ctx = canvas.getContext('2d');
             ctx.fillStyle = '#ffffff';
             ctx.fillRect(0, 0, W, H);
-            ctx.strokeStyle = '#333333';
-            ctx.lineWidth = 2;
-            ctx.strokeRect(1, 1, W - 2, H - 2);
 
+            // 요약 박스 (위쪽 BOX_H)
             const wideW = 220;
             const restW = (W - wideW) / (cols.length - 1);
             ctx.textAlign = 'center';
@@ -4249,24 +4258,39 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (i > 0) {
                     ctx.beginPath();
                     ctx.moveTo(x, 0);
-                    ctx.lineTo(x, H);
+                    ctx.lineTo(x, BOX_H);
                     ctx.stroke();
                 }
                 const cx = x + w / 2;
                 ctx.fillStyle = '#555555';
                 ctx.font = '15px sans-serif';
                 String(col.label).split('\n').forEach((line, li) => {
-                    ctx.fillText(line, cx, 26 + li * 18);
+                    ctx.fillText(line, cx, 22 + li * 18);
                 });
                 ctx.fillStyle = '#111111';
                 ctx.font = 'bold 24px sans-serif';
-                ctx.fillText(col.value, cx, H - 32);
+                ctx.fillText(col.value, cx, BOX_H - 26);
                 x += w;
             });
 
+            // 박스/그래프 경계선 + 그래프 본체 (아래쪽 CHART_H, 같은 함수로 그래프 단독 이미지와 공유)
+            ctx.strokeStyle = '#94a3b8';
+            ctx.lineWidth = 1.5;
+            ctx.beginPath();
+            ctx.moveTo(0, BOX_H);
+            ctx.lineTo(W, BOX_H);
+            ctx.stroke();
+            drawNdtDisplacementChartBody(ctx, group, floorCode, BOX_H);
+
+            // 박스+그래프 전체를 한 번에 둘러싸는 테두리 — 박스 따로/그래프 따로 선이 어긋나 보이지
+            // 않도록 맨 마지막에 통째로 한 번만 그린다.
+            ctx.strokeStyle = '#333333';
+            ctx.lineWidth = 2;
+            ctx.strokeRect(1, 1, W - 2, H - 2);
+
             return canvas.toDataURL('image/png');
         } catch (e) {
-            console.warn('renderNdtDisplacementInfoBoxCanvas error:', e);
+            console.warn('renderNdtDisplacementCombinedCanvas error:', e);
             return null;
         }
     }
@@ -16980,21 +17004,19 @@ document.addEventListener('DOMContentLoaded', () => {
                     return newPara;
                 };
 
-                // 결과표(tbl)가 들어있는 문단 바로 다음 자리부터, 그룹마다 [요약박스, 그래프] 이미지
-                // 문단을 순서대로 이어붙인다. groups는 결과표에 채운 것과 같은 순서(= 같은 번호)여야 한다.
-                // 그래프는 높이를 25500(≈90mm)로 제한해서 요약박스(~22mm)와 합쳐 한 쌍이 ~112mm —
-                // 페이지 하나에 두 쌍이 들어가도록(사용자 요청) 크기를 맞췄다.
-                const GROUP_CHART_MAX_H = 25500;
+                // 결과표(tbl)가 들어있는 문단 바로 다음 자리부터, 그룹마다 요약박스+그래프를 합친
+                // 그림 한 장씩 이어붙인다. 박스와 그래프를 따로 넣으면 표 중간에서 페이지가 갈릴 때
+                // 각각 다른 페이지로 쪼개질 수 있어서, 한 장(같은 테두리)으로 합쳐 그 문제를 막는다.
+                // 높이를 27000(≈95mm)으로 제한해서 페이지 하나에 두 장이 들어가도록(사용자 요청) 맞췄다.
+                const GROUP_IMG_MAX_H = 27000;
                 const insertGroupResultImages = async (tbl, groups) => {
                     if (!tbl) return;
                     let anchorPara = tbl.parentNode && tbl.parentNode.parentNode; // hp:pic|hp:tbl -> hp:run -> hp:p
                     if (!anchorPara || anchorPara.localName !== 'p') return;
                     for (let i = 0; i < groups.length; i++) {
                         const group = groups[i];
-                        const boxUrl = renderNdtDisplacementInfoBoxCanvas(group, i + 1);
-                        anchorPara = await insertImageParaAfter(anchorPara, boxUrl, 'ndtDispBoxAuto');
-                        const chartUrl = renderNdtDisplacementChartDataUrl(group, floorCode);
-                        anchorPara = await insertImageParaAfter(anchorPara, chartUrl, 'ndtDispChartAuto', 42520, GROUP_CHART_MAX_H);
+                        const combinedUrl = renderNdtDisplacementCombinedCanvas(group, floorCode, i + 1);
+                        anchorPara = await insertImageParaAfter(anchorPara, combinedUrl, 'ndtDispResultAuto', 42520, GROUP_IMG_MAX_H);
                     }
                 };
 
