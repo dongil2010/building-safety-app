@@ -11535,20 +11535,22 @@ document.addEventListener('DOMContentLoaded', () => {
             setDefectArrowOctant(existingPin.arrowOctant);
             syncDefectArrowDirUi();
 
-            window._pendingPhotos = existingPin.photos || [];
+            window._pendingPhotos = Array.isArray(existingPin.photos) ? existingPin.photos.filter(Boolean).slice() : [];
             window._pendingPrevRoundPhotos = Array.isArray(existingPin.prevRoundPhotos)
-                ? existingPin.prevRoundPhotos.slice()
+                ? existingPin.prevRoundPhotos.filter(Boolean).slice()
                 : [];
-            // IndexedDB에만 남은 전차 사진 참조가 있으면 모달 열릴 때 복원
-            if (window._pendingPrevRoundPhotos.length === 0
-                && Array.isArray(existingPin.prevRoundPhotoIds)
-                && existingPin.prevRoundPhotoIds.length > 0
-                && typeof ensureDefectPhotosLoaded === 'function') {
+            const needsPhotoHydrate = (
+                (window._pendingPhotos.length === 0 && existingPin.photoIds && existingPin.photoIds.length > 0)
+                || (window._pendingPrevRoundPhotos.length === 0 && existingPin.prevRoundPhotoIds && existingPin.prevRoundPhotoIds.length > 0)
+            );
+            if (needsPhotoHydrate && typeof ensureDefectPhotosLoaded === 'function') {
+                renderDefectPhotoSection({ loading: true });
                 ensureDefectPhotosLoaded(existingPin).then(() => {
+                    window._pendingPhotos = Array.isArray(existingPin.photos) ? existingPin.photos.filter(Boolean).slice() : [];
                     window._pendingPrevRoundPhotos = Array.isArray(existingPin.prevRoundPhotos)
-                        ? existingPin.prevRoundPhotos.slice()
+                        ? existingPin.prevRoundPhotos.filter(Boolean).slice()
                         : [];
-                    renderPrevRoundPhotoPreviewList();
+                    renderDefectPhotoSection();
                     if (typeof renderDefectListPanel === 'function') renderDefectListPanel();
                 });
             }
@@ -11640,8 +11642,7 @@ document.addEventListener('DOMContentLoaded', () => {
             window._phoneRelayInbox = [];
         }
         if (typeof updatePhoneRelayButtonLabel === 'function') updatePhoneRelayButtonLabel();
-        renderPhotoPreviewList();
-        renderPrevRoundPhotoPreviewList();
+        renderDefectPhotoSection();
 
         const titleEl = document.getElementById('defectModalTitle');
         if (titleEl) {
@@ -11682,6 +11683,80 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (typeof renderDefectListPanel === 'function') renderDefectListPanel();
             });
         }
+    }
+
+    function renderDefectPhotoSection(opts) {
+        const loading = !!(opts && opts.loading);
+        const strip = document.getElementById('defectPhotoCompareStrip');
+        const emptyHint = document.getElementById('defectPhotoEmptyHint');
+        const loadingHint = document.getElementById('defectPhotoLoadingHint');
+        const prev = (window._pendingPrevRoundPhotos || []).filter(Boolean);
+        const curr = (window._pendingPhotos || []).filter(Boolean);
+        const pairCount = Math.max(prev.length, curr.length);
+
+        if (loadingHint) loadingHint.style.display = loading ? 'flex' : 'none';
+
+        if (!strip) {
+            renderPhotoPreviewList();
+            renderPrevRoundPhotoPreviewList();
+            return;
+        }
+
+        if (loading && pairCount === 0) {
+            strip.style.display = 'none';
+            if (emptyHint) emptyHint.style.display = 'none';
+            return;
+        }
+
+        if (pairCount === 0) {
+            strip.innerHTML = '';
+            strip.style.display = 'none';
+            if (emptyHint) emptyHint.style.display = loading ? 'none' : 'block';
+        } else {
+            if (emptyHint) emptyHint.style.display = 'none';
+            strip.style.display = 'block';
+            const hasPrev = prev.length > 0;
+            strip.innerHTML = `
+                <div class="defect-photo-compare-head">
+                    <span class="defect-photo-compare-col-title defect-photo-compare-col-prev">
+                        ${hasPrev ? '<i class="fa-solid fa-clock-rotate-left"></i> 전차' : ''}
+                    </span>
+                    <span class="defect-photo-compare-col-title defect-photo-compare-col-curr">
+                        <i class="fa-solid fa-camera"></i> 현차
+                    </span>
+                </div>
+                ${Array.from({ length: pairCount }, (_, idx) => {
+                    const prevSrc = prev[idx] || '';
+                    const currSrc = curr[idx] || '';
+                    const prevCell = prevSrc
+                        ? `<button type="button" class="defect-photo-compare-thumb-btn" onclick="window.previewPrevRoundPhoto(${idx})" title="전차 ${idx + 1} — 탭하여 확대">
+                            <img class="defect-photo-compare-thumb defect-photo-compare-thumb-prev" src="${prevSrc}" alt="전차 ${idx + 1}">
+                            <span class="defect-photo-compare-badge prev">전차 ${idx + 1}</span>
+                           </button>`
+                        : `<div class="defect-photo-compare-empty">—</div>`;
+                    const currCell = currSrc
+                        ? `<div class="defect-photo-compare-curr-wrap">
+                            <button type="button" class="defect-photo-compare-thumb-btn" onclick="window.annotatePendingPhoto(${idx})" title="현차 ${idx + 1} — 탭하여 확대·마킹">
+                                <img class="defect-photo-compare-thumb defect-photo-compare-thumb-curr" src="${currSrc}" alt="현차 ${idx + 1}">
+                                <span class="defect-photo-compare-badge curr">현차 ${idx + 1}</span>
+                            </button>
+                            <button type="button" class="defect-photo-compare-remove" onclick="window.removePendingPhoto(${idx})" title="현차 ${idx + 1} 삭제">×</button>
+                            <button type="button" class="btn btn-sm btn-outline defect-photo-compare-mark-btn" onclick="window.annotatePendingPhoto(${idx})">
+                                <i class="fa-solid fa-paintbrush"></i> 마킹
+                            </button>
+                           </div>`
+                        : `<div class="defect-photo-compare-empty">—</div>`;
+                    return `<div class="defect-photo-compare-pair">
+                        <div class="defect-photo-compare-cell">${prevCell}</div>
+                        <div class="defect-photo-compare-vs" aria-hidden="true">↔</div>
+                        <div class="defect-photo-compare-cell">${currCell}</div>
+                    </div>`;
+                }).join('')}
+            `;
+        }
+
+        renderPhotoPreviewList();
+        renderPrevRoundPhotoPreviewList();
     }
 
     function renderPhotoPreviewList() {
@@ -11738,7 +11813,7 @@ document.addEventListener('DOMContentLoaded', () => {
             window.openPhotoAnnotationModal(window._pendingPhotos[idx], (annotatedDataUrl) => {
                 window._pendingPhotos[idx] = annotatedDataUrl;
                 window._defectPhotosDirty = true;
-                renderPhotoPreviewList();
+                renderDefectPhotoSection();
                 scheduleDefectAutoApply();
             });
         }
@@ -11748,7 +11823,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (window._pendingPhotos) {
             window._pendingPhotos.splice(idx, 1);
             window._defectPhotosDirty = true;
-            renderPhotoPreviewList();
+            renderDefectPhotoSection();
             scheduleDefectAutoApply();
         }
     };
@@ -11832,7 +11907,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!window._pendingPhotos) window._pendingPhotos = [];
             window._pendingPhotos.push(compressedUrl);
             window._defectPhotosDirty = true;
-            renderPhotoPreviewList();
+            renderDefectPhotoSection();
             scheduleDefectAutoApply();
         });
     }
@@ -11900,7 +11975,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (isDefectModalOpen()) {
             if (!window._pendingPhotos) window._pendingPhotos = [];
             window._pendingPhotos.push(dataUrl);
-            renderPhotoPreviewList();
+            renderDefectPhotoSection();
             window.showToast('휴대폰에서 사진을 받아 결함에 추가했습니다.', 'success');
         } else {
             window._phoneRelayInbox.push(dataUrl);
@@ -17956,7 +18031,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // 📱 OTA 앱 업데이트 (Firestore app_meta + 네이티브 APK 설치)
     // ==========================================================================
     // android/app/build.gradle 의 versionCode / versionName 과 맞출 것
-    window.BSA_APP_BUILD = { versionCode: 4, versionName: '1.2.0' };
+    window.BSA_APP_BUILD = { versionCode: 5, versionName: '1.2.1' };
 
     const OTA_SNOOZE_MS = 6 * 60 * 60 * 1000;
     let _otaReleaseMeta = null;

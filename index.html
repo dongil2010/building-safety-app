@@ -11,7 +11,7 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <meta name="apple-mobile-web-app-title" content="스마트 안전점검">
-    <link rel="stylesheet" href="styles.css?v=20260824_otaAuto">
+    <link rel="stylesheet" href="styles.css?v=20260824_defectPhotoCompare">
     <!-- FontAwesome icons for clean engineering UI -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <!-- PDF 생성용: 페이지별로 직접 캡처해서 조립(큰 보고서에서 html2pdf 한방 렌더링이 캔버스 높이 한계로
@@ -655,6 +655,35 @@
                 <form id="defectForm" class="defect-form-compact">
                     <input type="hidden" id="defectPinId">
 
+                    <div class="form-group defect-photo-block">
+                        <div class="defect-photo-actions">
+                            <button type="button" id="btnTriggerCamera" class="btn defect-photo-btn-primary">
+                                <i class="fa-solid fa-camera"></i> 촬영
+                            </button>
+                            <button type="button" id="btnTriggerGallery" class="btn defect-photo-btn-secondary">
+                                <i class="fa-solid fa-images"></i> 갤러리
+                            </button>
+                        </div>
+                        <div id="phoneRelayStatusBadge" style="display:none; align-items:center; gap: 0.4rem; width: 100%; background: rgba(74,222,128,0.1); color: #4ade80; border: 1px solid rgba(74,222,128,0.35); font-weight: 700; padding: 0.45rem 0.65rem; border-radius: 8px; font-size: 0.78rem; margin-bottom: 0.5rem;">
+                            <i class="fa-solid fa-mobile-screen-button"></i> <span id="phoneRelayStatusText">휴대폰 연동됨 — 촬영 시 자동 추가</span>
+                        </div>
+                        <div id="defectPhotoCompareArea" class="defect-photo-compare-area">
+                            <div id="defectPhotoLoadingHint" class="defect-photo-loading-hint" style="display:none;">
+                                <i class="fa-solid fa-spinner fa-spin"></i> 사진 불러오는 중…
+                            </div>
+                            <div id="defectPhotoCompareStrip" class="defect-photo-compare-strip" style="display:none;"></div>
+                            <div id="defectPhotoEmptyHint" class="defect-photo-empty-hint">사진 없음 — 촬영 또는 갤러리로 추가</div>
+                        </div>
+                        <div class="photo-upload-area" id="photoUploadArea">
+                            <i class="fa-solid fa-images"></i>
+                            <span>터치하여 갤러리에서 선택</span>
+                        </div>
+                        <div id="prevRoundPhotoBlock" class="prev-round-photo-block" style="display:none;" aria-hidden="true">
+                            <div class="photo-preview-list prev-round-photo-list" id="prevRoundPhotoPreviewList"></div>
+                        </div>
+                        <div class="photo-preview-list" id="photoPreviewList" style="display:none;" aria-hidden="true"></div>
+                    </div>
+
                     <div class="form-row">
                         <div class="form-group">
                             <label class="form-label" for="defectNo">결함 번호</label>
@@ -754,33 +783,6 @@
                         <label class="checkbox-chip" style="color:#a3a3a3; border-color:rgba(148,163,184,0.45);"><input type="checkbox" id="defectCarriedOver"> 전회차</label>
                         <label class="checkbox-chip" style="border-color:#facc15; color:#facc15;"><input type="checkbox" id="defectBookmark"> 중요</label>
                         <label class="checkbox-chip" style="border-color:#16a34a; color:#16a34a;"><input type="checkbox" id="defectPriorityManage"> 중점관리</label>
-                    </div>
-
-                    <div class="form-group defect-photo-block">
-                        <div id="prevRoundPhotoBlock" class="prev-round-photo-block" style="display:none;">
-                            <label class="form-label prev-round-photo-label">
-                                <i class="fa-solid fa-clock-rotate-left"></i> 전차 사진
-                                <span class="prev-round-photo-hint">현장 참고용 · 현차 출력에는 미포함</span>
-                            </label>
-                            <div class="photo-preview-list prev-round-photo-list" id="prevRoundPhotoPreviewList"></div>
-                        </div>
-                        <label class="form-label">현장 사진 <span style="font-weight:600; color:#64748b; font-size:0.78rem;">(현차)</span></label>
-                        <div class="defect-photo-actions">
-                            <button type="button" id="btnTriggerCamera" class="btn defect-photo-btn-primary">
-                                <i class="fa-solid fa-camera"></i> 촬영
-                            </button>
-                            <button type="button" id="btnTriggerGallery" class="btn defect-photo-btn-secondary">
-                                <i class="fa-solid fa-images"></i> 갤러리
-                            </button>
-                        </div>
-                        <div id="phoneRelayStatusBadge" style="display:none; align-items:center; gap: 0.4rem; width: 100%; background: rgba(74,222,128,0.1); color: #4ade80; border: 1px solid rgba(74,222,128,0.35); font-weight: 700; padding: 0.45rem 0.65rem; border-radius: 8px; font-size: 0.78rem; margin-bottom: 0.5rem;">
-                            <i class="fa-solid fa-mobile-screen-button"></i> <span id="phoneRelayStatusText">휴대폰 연동됨 — 촬영 시 자동 추가</span>
-                        </div>
-                        <div class="photo-upload-area" id="photoUploadArea">
-                            <i class="fa-solid fa-images"></i>
-                            <span>터치하여 갤러리에서 선택</span>
-                        </div>
-                        <div class="photo-preview-list" id="photoPreviewList"></div>
                     </div>
 
                     <div class="form-group defect-area-style-block" id="defectAreaStyleBlock" style="display:none;">
@@ -2036,7 +2038,7 @@
     <script src="js/tabs/ndt.js?v=20260822_survey2dScroll"></script>
     <script src="js/shared/report.js?v=20260821_land1"></script>
     <script src="js/shared/auth.js?v=20260821_land1"></script>
-    <script src="app.js?v=20260824_otaAuto"></script>
+    <script src="app.js?v=20260824_defectPhotoCompare"></script>
     <script>
         document.addEventListener('DOMContentLoaded', function () {
             const btn = document.getElementById('btnExportVectorPdf');

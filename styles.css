@@ -3522,7 +3522,191 @@ body {
 .defect-photo-actions {
     display: flex;
     gap: 0.45rem;
-    margin-bottom: 0.45rem;
+    margin-bottom: 0.55rem;
+}
+
+.defect-photo-block {
+    margin-bottom: 0.85rem;
+    padding-bottom: 0.35rem;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.defect-photo-compare-area {
+    margin-bottom: 0.55rem;
+}
+
+.defect-photo-loading-hint {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+    font-size: 0.82rem;
+    font-weight: 700;
+    color: var(--text-muted);
+    padding: 0.55rem 0.65rem;
+    border-radius: 8px;
+    background: var(--bg-secondary);
+    border: 1px dashed var(--border-color);
+}
+
+.defect-photo-empty-hint {
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: var(--text-muted);
+    padding: 0.45rem 0.55rem;
+    border-radius: 8px;
+    background: var(--bg-secondary);
+    border: 1px dashed var(--border-color);
+    text-align: center;
+}
+
+.defect-photo-compare-strip {
+    display: flex;
+    flex-direction: column;
+    gap: 0.55rem;
+    padding: 0.55rem;
+    border-radius: 10px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+}
+
+.defect-photo-compare-head {
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    gap: 0.35rem;
+    align-items: center;
+    font-size: 0.76rem;
+    font-weight: 800;
+    color: var(--text-secondary);
+    padding: 0 0.15rem 0.15rem;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.defect-photo-compare-col-prev {
+    color: #92400e;
+    text-align: center;
+}
+
+.defect-photo-compare-col-curr {
+    color: #1e40af;
+    text-align: center;
+}
+
+.defect-photo-compare-pair {
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    gap: 0.35rem;
+    align-items: center;
+}
+
+.defect-photo-compare-cell {
+    min-width: 0;
+    display: flex;
+    justify-content: center;
+}
+
+.defect-photo-compare-vs {
+    font-size: 0.82rem;
+    font-weight: 800;
+    color: var(--text-muted);
+    opacity: 0.65;
+}
+
+.defect-photo-compare-thumb-btn {
+    position: relative;
+    border: none;
+    padding: 0;
+    background: transparent;
+    cursor: pointer;
+    display: inline-block;
+}
+
+.defect-photo-compare-thumb {
+    width: 100%;
+    max-width: 132px;
+    height: 96px;
+    object-fit: cover;
+    border-radius: 8px;
+    display: block;
+}
+
+.defect-photo-compare-thumb-prev {
+    border: 2px solid #d97706;
+    background: #fff7ed;
+}
+
+.defect-photo-compare-thumb-curr {
+    border: 2px solid #2563eb;
+    background: #eff6ff;
+}
+
+.defect-photo-compare-badge {
+    position: absolute;
+    top: -6px;
+    left: -4px;
+    font-size: 0.62rem;
+    font-weight: 800;
+    line-height: 1;
+    padding: 0.18rem 0.32rem;
+    border-radius: 4px;
+    color: #fff;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+}
+
+.defect-photo-compare-badge.prev {
+    background: #d97706;
+}
+
+.defect-photo-compare-badge.curr {
+    background: #2563eb;
+}
+
+.defect-photo-compare-empty {
+    width: 100%;
+    max-width: 132px;
+    height: 96px;
+    border-radius: 8px;
+    border: 1px dashed var(--border-color);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-muted);
+    font-size: 1.1rem;
+    font-weight: 700;
+    background: rgba(255, 255, 255, 0.45);
+}
+
+.defect-photo-compare-curr-wrap {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.25rem;
+}
+
+.defect-photo-compare-remove {
+    position: absolute;
+    top: -8px;
+    right: -8px;
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    border: none;
+    background: #ef4444;
+    color: #fff;
+    font-size: 14px;
+    font-weight: 800;
+    line-height: 22px;
+    cursor: pointer;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
+}
+
+.defect-photo-compare-mark-btn {
+    width: 100%;
+    max-width: 132px;
+    font-size: 0.68rem !important;
+    padding: 0.12rem 0.25rem !important;
+    border-color: #f43f5e !important;
+    color: #fb7185 !important;
 }
 
 .defect-photo-btn-primary {
