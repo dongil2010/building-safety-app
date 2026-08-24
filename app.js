@@ -4778,8 +4778,8 @@ document.addEventListener('DOMContentLoaded', () => {
                         grabY: vy
                     };
                     pendingNdtPinIsTouch = true;
-                    pendingNdtPinArmed = !!ndtQuickDragEnabled;
-                    if (!ndtQuickDragEnabled) {
+                    pendingNdtPinArmed = !!ndtQuickDragEnabled || hitPin.part === 'target';
+                    if (!ndtQuickDragEnabled && hitPin.part !== 'target') {
                         pendingNdtLongPressTimer = setTimeout(() => {
                             if (!pendingNdtPinHit || !pendingNdtPinIsTouch) return;
                             pendingNdtPinArmed = true;
@@ -11185,7 +11185,9 @@ document.addEventListener('DOMContentLoaded', () => {
             pendingDragHit = { hitInfo, imgX, imgY, additive };
             pendingDragIsTouch = isTouch;
             pendingDragHitStartTime = Date.now();
-            pendingDragArmed = !isTouch || mobileQuickDragEnabled; // 마우스·퀵드래그는 즉시, 기본 터치는 길게 누름
+            // 화살표(TIP)·영역 핸들은 집는 순간 의도가 분명하므로 드래그 모드/길게 누르기 없이 바로 이동
+            const immediateDragPart = hitInfo.part === 'TIP' || hitInfo.part === 'AREA_RESIZE';
+            pendingDragArmed = !isTouch || mobileQuickDragEnabled || immediateDragPart;
             if (hitInfo.defect && hitInfo.defect.id) {
                 const id = hitInfo.defect.id;
                 const useAdditive = additive || (isTouch && mobileAddSelectEnabled);
@@ -11199,7 +11201,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 updateMapSelectionBar({ scrollToSelection: true });
                 drawCanvas();
             }
-            if (isTouch && !mobileQuickDragEnabled) {
+            if (isTouch && !mobileQuickDragEnabled && !immediateDragPart) {
                 pendingDragLongPressTimer = setTimeout(() => {
                     if (!pendingDragHit || !pendingDragIsTouch) return;
                     pendingDragArmed = true;
