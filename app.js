@@ -9754,6 +9754,64 @@ document.addEventListener('DOMContentLoaded', () => {
     const RC_BEAM_DEFECTS = ['상태양호', ...BEAM_CRACK_KINDS, ...RC_COMMON_OTHER_DEFECTS];
     const RC_SLAB_DEFECTS = ['상태양호', '균열', ...RC_COMMON_OTHER_DEFECTS];
 
+    // ── 비구조체: 부재별 결함 종류 ──
+    const MASONRY_WALL_DEFECTS = [
+        '상태양호', '균열', '줄눈 손상/탈락', '배부름·전도 징후', '백태/유출', '누수', '파손/결손', '기타'
+    ];
+    const PARTITION_WALL_DEFECTS = [
+        '상태양호', '균열', '이격/파손', '변형·기울음', '마감 손상', '기타'
+    ];
+    const ALC_WALL_DEFECTS = [
+        '상태양호', '균열', '파손/결손', '줄눈 손상', '누수', '백태', '기타'
+    ];
+    const WINDOW_DEFECTS = [
+        '상태양호', '이격/개방불량', '유리 파손·금', '프레임 변형/부식', '실런트·코킹 손상', '누수', '하드웨어 불량', '기타'
+    ];
+    const DOOR_DEFECTS = [
+        '상태양호', '개폐불량', '프레임 변형', '경첩·하드웨어 손상', '파손', '부식', '기타'
+    ];
+    const SHUTTER_DEFECTS = [
+        '상태양호', '작동불량', '레일·가이드 손상', '패널 변형/파손', '부식', '기타'
+    ];
+    const ROOF_PANEL_DEFECTS = [
+        '상태양호', '부식', '파손/천공', '이음부 손상', '들뜸/변형', '누수', '체결부 이완', '기타'
+    ];
+    const PANEL_DEFECTS = [
+        '상태양호', '변형/들뜸', '파손', '이음부 손상', '부식', '누수', '체결부 이완', '기타'
+    ];
+
+    // ── 마감재: 부재별 결함 종류 ──
+    const EXT_TILE_DEFECTS = [
+        '상태양호', '들뜸/탈락', '균열', '줄눈 손상', '백태', '파손', '기타'
+    ];
+    const EXT_STONE_DEFECTS = [
+        '상태양호', '파손/팟칭', '들뜸/탈락', '줄눈 손상', '철물 노출·녹', '변색/오염', '기타'
+    ];
+    const EXT_PAINT_DEFECTS = [
+        '상태양호', '변색/오염', '박리/탈락', '부풀음', '균열', '기타'
+    ];
+    const METAL_PANEL_FINISH_DEFECTS = [
+        '상태양호', '부식', '변형/들뜸', '이음부 손상', '도장 박리', '체결부 이완', '기타'
+    ];
+    const INT_TILE_DEFECTS = [
+        '상태양호', '들뜸/탈락', '균열', '줄눈 손상', '파손', '기타'
+    ];
+    const INTERIOR_FINISH_DEFECTS = [
+        '상태양호', '들뜸/탈락', '파손', '변색/오염', '이격', '기타'
+    ];
+    const INT_PAINT_DEFECTS = [
+        '상태양호', '변색/오염', '박리/탈락', '곰팡이·결로 흔적', '균열', '기타'
+    ];
+    const CEILING_FINISH_DEFECTS = [
+        '상태양호', '들뜸/탈락', '처짐', '오염/변색', '누수 흔적', '파손', '기타'
+    ];
+    const FLOOR_TILE_DEFECTS = [
+        '상태양호', '들뜸/탈락', '균열/파손', '줄눈 손상', '마모', '기타'
+    ];
+    const FLOOR_FINISH_DEFECTS = [
+        '상태양호', '마모/손상', '들뜸', '균열', '오염', '기타'
+    ];
+
     const componentDefectPreset = {
         '철골기둥': STEEL_MEMBER_DEFECTS,
         '철골거더': STEEL_MEMBER_DEFECTS,
@@ -9761,6 +9819,7 @@ document.addEventListener('DOMContentLoaded', () => {
         '데크슬래브': DECK_SLAB_DEFECTS,
         'RC벽체': RC_WALL_DEFECTS,
         '벽체': RC_WALL_DEFECTS,
+        '내력벽': RC_WALL_DEFECTS,
         '기둥': RC_COLUMN_DEFECTS,
         'RC기둥': RC_COLUMN_DEFECTS,
         'SRC기둥': RC_COLUMN_DEFECTS,
@@ -9768,7 +9827,29 @@ document.addEventListener('DOMContentLoaded', () => {
         '작은보': RC_BEAM_DEFECTS,
         '캔틸레버보': RC_BEAM_DEFECTS,
         '슬래브': RC_SLAB_DEFECTS,
-        '계단슬래브': RC_SLAB_DEFECTS
+        '계단슬래브': RC_SLAB_DEFECTS,
+        // ── 비구조체 ──
+        '조적벽체': MASONRY_WALL_DEFECTS,
+        '칸막이벽': PARTITION_WALL_DEFECTS,
+        'ALC벽': ALC_WALL_DEFECTS,
+        '창호': WINDOW_DEFECTS,
+        '문': DOOR_DEFECTS,
+        '셔터': SHUTTER_DEFECTS,
+        '지붕패널': ROOF_PANEL_DEFECTS,
+        '지붕 패널': ROOF_PANEL_DEFECTS,
+        '패널': PANEL_DEFECTS,
+        // ── 마감재 ──
+        '외장타일': EXT_TILE_DEFECTS,
+        '외장석재': EXT_STONE_DEFECTS,
+        '도장': EXT_PAINT_DEFECTS,
+        '금속패널': METAL_PANEL_FINISH_DEFECTS,
+        '내장타일': INT_TILE_DEFECTS,
+        '수장': INTERIOR_FINISH_DEFECTS,
+        '내장도장': INT_PAINT_DEFECTS,
+        '천장마감재': CEILING_FINISH_DEFECTS,
+        '천장 마감재': CEILING_FINISH_DEFECTS,
+        '바닥타일': FLOOR_TILE_DEFECTS,
+        '바닥마감': FLOOR_FINISH_DEFECTS
     };
     function normalizeComponentKey(name) {
         return String(name || '').replace(/\s+/g, '');
@@ -9779,7 +9860,12 @@ document.addEventListener('DOMContentLoaded', () => {
         if (key.includes('데크슬래브')) return null;
         if (key.includes('슬래브')) return null; // 슬래브는 '균열'만
         if (key.includes('철골')) return null;
-        if (key.includes('벽체')) return WALL_CRACK_KINDS.slice();
+        // 비구조체·마감재는 RC 수직/수평균열 칩을 쓰지 않음
+        if (key.includes('조적') || key.includes('ALC') || key.includes('칸막이')) return null;
+        if (key.includes('창호') || key.includes('셔터') || key.includes('패널')) return null;
+        if (key.includes('타일') || key.includes('석재') || key.includes('도장') || key.includes('수장')) return null;
+        if (key.includes('천장') || key.includes('바닥') || key === '문') return null;
+        if (key.includes('벽체') || key === '내력벽') return WALL_CRACK_KINDS.slice();
         if (key.includes('기둥')) return COLUMN_CRACK_KINDS.slice();
         if (key.includes('보') || key.includes('거더') || key.includes('빔')) return BEAM_CRACK_KINDS.slice();
         return null;
@@ -9808,11 +9894,37 @@ document.addEventListener('DOMContentLoaded', () => {
         if (key && componentDefectPreset[key]) return componentDefectPreset[key];
         // 키워드 매칭 (직접 입력 부재명)
         if (key) {
-            if (key.includes('철골')) return STEEL_MEMBER_DEFECTS;
-            if (key.includes('벽체') && !key.includes('조적')) return RC_WALL_DEFECTS;
-            if (key.includes('기둥')) return RC_COLUMN_DEFECTS;
-            if (key.includes('보') || key.includes('거더') || key.includes('빔')) return RC_BEAM_DEFECTS;
-            if (key.includes('슬래브') && !key.includes('데크')) return RC_SLAB_DEFECTS;
+            if (category === '비구조체') {
+                if (key.includes('조적')) return MASONRY_WALL_DEFECTS;
+                if (key.includes('칸막이')) return PARTITION_WALL_DEFECTS;
+                if (key.includes('ALC') || key.includes('alc')) return ALC_WALL_DEFECTS;
+                if (key.includes('창호') || key.includes('유리창') || (key.includes('창') && !key.includes('천장'))) return WINDOW_DEFECTS;
+                if (key.includes('셔터')) return SHUTTER_DEFECTS;
+                if (key.includes('지붕')) return ROOF_PANEL_DEFECTS;
+                if (key.includes('패널')) return PANEL_DEFECTS;
+                if (key.includes('문')) return DOOR_DEFECTS;
+            }
+            if (category === '마감재') {
+                if (key.includes('천장')) return CEILING_FINISH_DEFECTS;
+                if (key.includes('석재')) return EXT_STONE_DEFECTS;
+                if (key.includes('금속') && key.includes('패널')) return METAL_PANEL_FINISH_DEFECTS;
+                if (key.includes('내장') && key.includes('타일')) return INT_TILE_DEFECTS;
+                if (key.includes('내장') && key.includes('도장')) return INT_PAINT_DEFECTS;
+                if (key.includes('외장') && key.includes('타일')) return EXT_TILE_DEFECTS;
+                if (key.includes('바닥') && key.includes('타일')) return FLOOR_TILE_DEFECTS;
+                if (key.includes('바닥')) return FLOOR_FINISH_DEFECTS;
+                if (key.includes('수장')) return INTERIOR_FINISH_DEFECTS;
+                if (key.includes('도장') || key.includes('페인트')) return EXT_PAINT_DEFECTS;
+                if (key.includes('타일')) return EXT_TILE_DEFECTS;
+                if (key.includes('패널')) return METAL_PANEL_FINISH_DEFECTS;
+            }
+            if (category === '구조체' || !category) {
+                if (key.includes('철골')) return STEEL_MEMBER_DEFECTS;
+                if ((key.includes('벽체') || key === '내력벽') && !key.includes('조적')) return RC_WALL_DEFECTS;
+                if (key.includes('기둥')) return RC_COLUMN_DEFECTS;
+                if (key.includes('보') || key.includes('거더') || key.includes('빔')) return RC_BEAM_DEFECTS;
+                if (key.includes('슬래브') && !key.includes('데크')) return RC_SLAB_DEFECTS;
+            }
         }
         return categoryDefectPreset[category] || categoryDefectPreset['구조체'];
     }
@@ -9832,20 +9944,21 @@ document.addEventListener('DOMContentLoaded', () => {
         ],
         '비구조체': [
             '상태양호',
-            '조적벽체 균열',
-            '조인트 이격/파손',
-            '천장재 들뜸/탈락',
-            '설비 배관 누수/손상',
-            '창호/유리 이격',
+            '균열',
+            '이격/파손',
+            '변형',
+            '누수',
+            '부식',
+            '파손',
             '기타'
         ],
         '마감재': [
             '상태양호',
-            '타일 들뜸/탈락',
-            '몰탈 균열',
-            '도장 페인트 변색/탈락',
-            '방수층 손상/들뜸',
-            '석재 팟칭',
+            '들뜸/탈락',
+            '균열',
+            '박리/탈락',
+            '변색/오염',
+            '줄눈 손상',
             '기타'
         ]
     };
@@ -10292,10 +10405,82 @@ document.addEventListener('DOMContentLoaded', () => {
             '신축이음 노후화', '온도변화 수축팽창', '시공 불량', '구조체 변위',
             '지진·진동', '이음재 탈락', '재료분리(골재 노출)', '기타'
         ],
-        // ── 비구조체 결함 ──
+        // ── 비구조체 결함 (구·신 라벨 모두) ──
         '조적벽체 균열': [
             '기초 부등침하', '지진·진동', '과하중', '건조수축', '온도변화',
             '조적 시공불량', '인방·개구부 응력', '몰탈 배합 불량', '기타'
+        ],
+        '줄눈 손상/탈락': [
+            '몰탈 노후화', '온도·수축', '시공 불량', '진동·충격', '누수·동결', '기타'
+        ],
+        '배부름·전도 징후': [
+            '기초 부등침하', '과하중', '지진·진동', '벽체 두께·지지 부족', '누수·동결', '기타'
+        ],
+        '파손/결손': [
+            '충격·외력', '시공 불량', '노후화', '동결융해', '기타'
+        ],
+        '이격/파손': [
+            '구조체 변위', '온도·열팽창', '시공 불량', '지진·진동', '이음 불량', '기타'
+        ],
+        '변형·기울음': [
+            '지지 불량', '과하중', '지진·진동', '시공 오차', '습기 변형', '기타'
+        ],
+        '마감 손상': [
+            '충격', '습기', '시공 불량', '노후화', '기타'
+        ],
+        '줄눈 손상': [
+            '줄눈재 노후화', '온도변화', '시공 불량', '진동', '누수', '기타'
+        ],
+        '백태': [
+            '수분 침투', '염류 용해', '배수 불량', '방수 불량', '기타'
+        ],
+        '이격/개방불량': [
+            '실런트 노후화', '프레임 변형', '시공 불량', '온도·열팽창', '하드웨어 이완', '기타'
+        ],
+        '유리 파손·금': [
+            '충격', '열응력', '시공 응력', '프레임 변형', '풍압', '기타'
+        ],
+        '프레임 변형/부식': [
+            '부식', '과하중', '시공 불량', '습기·결로', '충격', '기타'
+        ],
+        '실런트·코킹 손상': [
+            '실런트 노후화', '자외선', '시공 불량', '이음폭 부족', '온도변화', '기타'
+        ],
+        '하드웨어 불량': [
+            '마모·노후화', '체결 이완', '부식', '시공 불량', '과사용', '기타'
+        ],
+        '개폐불량': [
+            '경첩 이완', '프레임 변형', '처짐', '시공 오차', '부식', '기타'
+        ],
+        '프레임 변형': [
+            '과하중', '충격', '시공 불량', '습기 변형', '기타'
+        ],
+        '경첩·하드웨어 손상': [
+            '마모', '체결 불량', '부식', '충격', '과사용', '기타'
+        ],
+        '작동불량': [
+            '레일 이물질·변형', '모터·스프링 고장', '가이드 손상', '부식', '유지관리 부족', '기타'
+        ],
+        '레일·가이드 손상': [
+            '충격', '부식', '시공 불량', '과하중', '노후화', '기타'
+        ],
+        '패널 변형/파손': [
+            '충격', '풍압', '부식', '시공 불량', '기타'
+        ],
+        '파손/천공': [
+            '충격', '부식 천공', '시공 손상', '낙하물', '기타'
+        ],
+        '이음부 손상': [
+            '실런트·가스켓 노후', '체결 이완', '온도변형', '시공 불량', '누수', '기타'
+        ],
+        '들뜸/변형': [
+            '체결 이완', '풍압', '온도변형', '시공 불량', '부식', '기타'
+        ],
+        '체결부 이완': [
+            '진동', '시공 토크 부족', '부식', '반복 하중', '기타'
+        ],
+        '변형/들뜸': [
+            '체결 이완', '온도·열변형', '풍압', '시공 불량', '부식', '기타'
         ],
         '조인트 이격/파손': [
             '실런트 노후화', '구조체 변위', '온도·열팽창', '시공 불량',
@@ -10314,6 +10499,49 @@ document.addEventListener('DOMContentLoaded', () => {
             '프레임 변형', '지진·진동', '기타'
         ],
         // ── 마감재 결함 ──
+        '들뜸/탈락': [
+            '접착·부착력 저하', '시공 불량(바탕 미흡)', '습기 침투', '온도·열팽창',
+            '진동·충격', '바탕 균열 전달', '동결융해', '기타'
+        ],
+        '파손/팟칭': [
+            '충격', '철물 부식 팽창', '동결융해', '시공 불량', '기타'
+        ],
+        '철물 노출·녹': [
+            '피복·마감 손상', '습기', '부식', '시공 불량', '유지관리 부족', '기타'
+        ],
+        '변색/오염': [
+            '자외선', '대기오염', '습기·결로', '도료·마감 노후', '유지관리 부족', '기타'
+        ],
+        '박리/탈락': [
+            '바탕 처리 불량', '습기', '도료 노후', '자외선', '재도장 주기 초과', '기타'
+        ],
+        '부풀음': [
+            '습기 침투', '바탕 수분', '시공 불량', '결로', '기타'
+        ],
+        '곰팡이·결로 흔적': [
+            '환기 부족', '단열 불량', '누수·습기', '결로', '기타'
+        ],
+        '오염/변색': [
+            '누수', '결로', '오염', '노후화', '기타'
+        ],
+        '누수 흔적': [
+            '상부 누수', '배관 누수', '방수 불량', '결로', '기타'
+        ],
+        '균열/파손': [
+            '충격', '바탕 침하', '과하중', '시공 불량', '동결융해', '기타'
+        ],
+        '마모': [
+            '통행 마모', '유지관리 부족', '재료 내구성', '기타'
+        ],
+        '마모/손상': [
+            '통행 마모', '충격', '유지관리 부족', '재료 노후', '기타'
+        ],
+        '들뜸': [
+            '접착 불량', '습기', '온도변화', '시공 불량', '기타'
+        ],
+        '오염': [
+            '사용·환경 오염', '누수', '유지관리 부족', '기타'
+        ],
         '타일 들뜸/탈락': [
             '접착 모르타르 노후화', '온도·열팽창', '습기 침투', '시공 불량(바탕재 미흡)',
             '진동·충격', '바탕 균열 전달', '동결융해', '기타'
