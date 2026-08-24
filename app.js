@@ -9399,8 +9399,8 @@ document.addEventListener('DOMContentLoaded', () => {
     // --- Dynamic Defect Component(부재 명칭) — 분류별 플랫 프리셋 ---
     const DEFECT_COMPONENT_PRESET = {
         '구조체': ['기둥', 'RC기둥', '철골기둥', 'SRC기둥', '큰보', '작은보', '철골거더', '철골빔', '캔틸레버보', '슬래브', '데크슬래브', 'RC벽체', '내력벽', '계단', '계단참', '계단슬래브', '기초', '독립기초', '매트기초', '기타'],
-        '비구조체': ['조적벽체', '칸막이벽', 'ALC벽', '창호', '문', '셔터', '천장', '반자', '기타'],
-        '마감재': ['외장타일', '외장석재', '도장', '금속패널', '내장타일', '수장', '내장도장', '바닥타일', '바닥마감', '기타']
+        '비구조체': ['조적벽체', '칸막이벽', 'ALC벽', '창호', '문', '셔터', '지붕 패널', '패널', '기타'],
+        '마감재': ['외장타일', '외장석재', '도장', '금속패널', '내장타일', '수장', '내장도장', '천장 마감재', '바닥타일', '바닥마감', '기타']
     };
 
     // 예전 버전(카테고리 구분 없는 배열)으로 저장된 부재 명칭 커스텀/숨김 목록을 카테고리별 객체로 변환
@@ -9626,6 +9626,8 @@ document.addEventListener('DOMContentLoaded', () => {
         '볼트 이완/파손',
         '용접부 균열/불량',
         '도장 박리',
+        '뿜칠 박락',
+        '뿜칠 미시공',
         '접합부 손상',
         '단면 손실',
         '기타'
@@ -9707,9 +9709,10 @@ document.addEventListener('DOMContentLoaded', () => {
         if (key && componentDefectPreset[key]) return componentDefectPreset[key];
         // 키워드 매칭 (직접 입력 부재명)
         if (key) {
+            if (key.includes('철골')) return STEEL_MEMBER_DEFECTS;
             if (key.includes('벽체') && !key.includes('조적')) return RC_WALL_DEFECTS;
-            if (key.includes('기둥') && !key.includes('철골')) return RC_COLUMN_DEFECTS;
-            if ((key.includes('보') || key.includes('거더')) && !key.includes('철골')) return RC_BEAM_DEFECTS;
+            if (key.includes('기둥')) return RC_COLUMN_DEFECTS;
+            if (key.includes('보') || key.includes('거더') || key.includes('빔')) return RC_BEAM_DEFECTS;
             if (key.includes('슬래브') && !key.includes('데크')) return RC_SLAB_DEFECTS;
         }
         return categoryDefectPreset[category] || categoryDefectPreset['구조체'];
@@ -10245,6 +10248,14 @@ document.addEventListener('DOMContentLoaded', () => {
         ],
         '도장 박리': [
             '도장 노후화', '습기', '바탕 처리 불량', '자외선', '기타'
+        ],
+        '뿜칠 박락': [
+            '부착력 저하', '시공 불량', '습기·누수', '진동·충격',
+            '두께 부족', '바탕면 처리 불량', '노후화', '기타'
+        ],
+        '뿜칠 미시공': [
+            '시공 누락', '피복 두께 부족', '부위 미처리', '시공관리 미흡',
+            '접합부·볼트부 미시공', '기타'
         ],
         '접합부 손상': [
             '볼트 이완', '용접 불량', '과하중', '시공 불량', '부식', '기타'
