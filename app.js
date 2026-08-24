@@ -13449,6 +13449,138 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    // 보고서(PDF/HWPX) 상태조사표: "마킹 추가" 그룹(NO.04-1, 04-2)은 한 행으로 합치지 않고
+    // 각각 출력한다. 표는 기본 15행, n-n 추가분이 있으면 최대 17행까지 담고, 가능하면
+    // 본번호가 15·30·45…에서 끝나도록 다음 표로 넘긴다.
+    const SURVEY_REPORT_ROWS_BASE = 15;
+    const SURVEY_REPORT_ROWS_MAX = 17;
+
+    function parseSurveyDefectNo(d) {
+        const raw = String((d && d.no) || '').replace(/^NO\.?\s*/i, '').trim();
+        const m = raw.match(/(\d+)(?:-(\d+))?/);
+        const main = m ? parseInt(m[1], 10) : 0;
+        const suffix = m && m[2] ? parseInt(m[2], 10) : 1;
+        return { main, suffix, extra: suffix >= 2 };
+    }
+
+    function getSurveyRowsForReport(defects) {
+        return (defects || []).slice().sort((a, b) => {
+            const pa = parseSurveyDefectNo(a);
+            const pb = parseSurveyDefectNo(b);
+            if (pa.main !== pb.main) return pa.main - pb.main;
+            if (pa.suffix !== pb.suffix) return pa.suffix - pb.suffix;
+            return String(a.no || '').localeCompare(String(b.no || ''));
+        });
+    }
+
+    function paginateSurveyDefects(list) {
+        const BASE = SURVEY_REPORT_ROWS_BASE;
+        const MAX = SURVEY_REPORT_ROWS_MAX;
+        if (!list || !list.length) return [[]];
+        const pages = [];
+        let i = 0;
+        let closedMultiple = 0;
+        while (i < list.length) {
+            const target = closedMultiple + BASE;
+            let count = 0;
+            for (let k = i; k < list.length; k++) {
+                if (parseSurveyDefectNo(list[k]).main > target) break;
+                count++;
+            }
+            if (count === 0) {
+                closedMultiple = target;
+                continue;
+            }
+            const take = Math.min(count, MAX);
+            pages.push(list.slice(i, i + take));
+            i += take;
+            closedMultiple = target;
+        }
+        return pages;
+    }
+
+    function formatSurveyReportNo(d, isGrade3, floorCode) {
+        const raw = String(d.no || '').replace(/^NO\.?\s*/i, '').trim();
+        const stripped = raw.replace(/^0+(\d)/, '$1');
+        if (isGrade3) return `${getGrade3FloorPrefix(floorCode)}-${stripped || '0'}`;
+        return stripped || '-';
+    }
+
+    function getSurveyStructMarks(d, isGrade3) {
+        const on = isGrade3 ? 'O' : '○';
+        const isStruct = d.category === '구조체';
+        return { struct: isStruct ? on : '-', nonstruct: isStruct ? '-' : on };
+    }
+
+    function getReportSurveyRowValues(d, ctx, isGrade3, colCount) {
+        ctx = ctx || {};
+        const marks = getSurveyStructMarks(d, isGrade3);
+        const markOn = isGrade3 ? 'O' : '○';
+        const progress = d.isProgress ? markOn : '-';
+        const leak = d.isLeak ? markOn : '-';
+        const no = formatSurveyReportNo(d, isGrade3, ctx.floorCode);
+        if (isGrade3) {
+            if (colCount === 6) {
+                return [
+                    no,
+                    ctx.floorDisplayLabel || getSurveyCellText('floorGroup', d, ctx),
+                    getSurveyCellText('category', d, ctx),
+                    getSurveyCellText('inspectionContent', d, ctx),
+                    getSurveyCellText('cause', d, ctx),
+                    getSurveyCellText('remark', d, ctx)
+                ];
+            }
+            return [
+                no,
+                ctx.floorDisplayLabel || getSurveyCellText('floorGroup', d, ctx),
+                marks.struct,
+                marks.nonstruct,
+                getSurveyCellText('inspectionContent', d, ctx),
+                getSurveyCellText('cause', d, ctx),
+                getSurveyCellText('remark', d, ctx)
+            ];
+        }
+        const loc = extractDefectLocationDetail(d.location, ctx.floorCode)
+            || getSurveyCellText('location', d, { floorCode: ctx.floorCode });
+        const content = [getSurveyCellText('component', d), getSurveyCellText('defectType', d)]
+            .map(s => (s || '').trim()).filter(s => s && s !== '-').join(' ') || '-';
+        return [
+            no,
+            loc,
+            content,
+            getSurveyCellText('size', d),
+            marks.struct,
+            marks.nonstruct,
+            progress,
+            leak,
+            getSurveyCellText('cause', d),
+            getSurveyCellText('remark', d, ctx)
+        ];
+    }
+
+    function escapeReportHtml(s) {
+        return String(s == null ? '' : s)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;');
+    }
+
+    function buildReportSurveyTableHtml(sDefects, cellCtxFactory, isGrade3) {
+        const td = (text) => `<td style="padding:0.28rem 0.18rem; border:1px solid #94a3b8; white-space:pre-line;">${escapeReportHtml(text)}</td>`;
+        const th = (text, extra) => `<th style="padding:0.28rem 0.18rem; border:1px solid #64748b; background:#f8fafc; color:#1e293b; font-weight:700;${extra || ''}">${text}</th>`;
+        const head = isGrade3
+            ? `<tr>${th('No.', 'rowspan="2"')}${th('구분', 'rowspan="2"')}${th('부재 분류', 'colspan="2"')}${th('점검내용', 'rowspan="2"')}${th('발생원인', 'rowspan="2"')}${th('비고', 'rowspan="2"')}</tr><tr>${th('구조부재')}${th('비구조부재')}</tr>`
+            : `<tr>${th('구분(NO.)', 'rowspan="2"')}${th('위치', 'rowspan="2"')}${th('조사내용', 'rowspan="2"')}${th('크기(mm/m)(m*m)', 'rowspan="2"')}${th('부재 분류', 'colspan="2"')}${th('진행여부', 'rowspan="2"')}${th('누수여부', 'rowspan="2"')}${th('원인추정', 'rowspan="2"')}${th('비고', 'rowspan="2"')}</tr><tr>${th('구조부재')}${th('비구조부재')}</tr>`;
+        const colSpan = isGrade3 ? 7 : 10;
+        const body = sDefects.length > 0
+            ? sDefects.map((d, dSubIdx) => {
+                const ctx = cellCtxFactory(d, dSubIdx);
+                return `<tr>${getReportSurveyRowValues(d, ctx, isGrade3).map(v => td(v)).join('')}</tr>`;
+            }).join('')
+            : `<tr><td colspan="${colSpan}" style="padding:2rem; color:#a3a3a3;">등록된 결함이 없습니다.</td></tr>`;
+        return `<table style="width:100%; border-collapse:collapse; font-size:0.72rem; text-align:center; margin-bottom:0.4rem;"><thead>${head}</thead><tbody>${body}</tbody></table>`;
+    }
+
     // 화면(스크린) 상태조사표 한 셀의 스타일 있는 HTML을 만든다 (읽기 전용 표시용)
     function renderScreenSurveyCellHtml(colKey, d, ctx) {
         const text = getSurveyCellText(colKey, d, ctx);
@@ -15380,19 +15512,20 @@ document.addEventListener('DOMContentLoaded', () => {
                     });
                 });
 
-                // --- 1. 상태조사표 (한 페이지당 20개씩 배치 — A4 세로 한 장을 거의 꽉 채우면서도
-                //     표 잘림 없이 들어가는 실측값. 모든 페이지에 동일한 개수를 적용해 페이지마다
-                //     밀도가 들쭉날쭉하지 않도록 한다) ---
-                // "마킹 추가" 그룹은 한 행으로 합쳐서 표시 (위치도는 이미 groupId 기준 하나로 그려짐)
-                const SURVEY_ROWS_PER_PAGE = 20;
-                const surveyDefects = consolidateDefectGroups(defects);
-                const surveyPages = [];
-                for (let i = 0; i < surveyDefects.length; i += SURVEY_ROWS_PER_PAGE) {
-                    surveyPages.push(surveyDefects.slice(i, i + SURVEY_ROWS_PER_PAGE));
-                }
-                if (surveyPages.length === 0) surveyPages.push([]);
+                // --- 1. 상태조사표 (신가병원 1·2종 / 칠산타워 3종 서식)
+                //     기본 15행, 마킹추가(n-n)가 있으면 최대 17행. 본번호는 가능하면 15·30·45에서 끝낸다.
+                //     화면 표처럼 그룹을 한 행으로 합치지 않고 4-1, 4-2를 각각 출력한다. ---
+                const grade3Report = isGrade3Building(bldg);
+                const surveyDefects = getSurveyRowsForReport(defects);
+                const surveyPages = paginateSurveyDefects(surveyDefects);
 
                 surveyPages.forEach((sDefects, sPageIdx) => {
+                    const surveyTableHtml = buildReportSurveyTableHtml(sDefects, (d, dSubIdx) => {
+                        const memberIds = d._groupMemberIds || [d.id || ('idx_' + dSubIdx)];
+                        const labels = memberIds.flatMap(mid => defectPhotoLabels[mid] || []);
+                        const pRemark = labels.length > 0 ? labels.join(' ') : '-';
+                        return { floorCode, photoRemark: pRemark, floorDisplayLabel };
+                    }, grade3Report);
                     reportPagesHtml += `
                         <div class="report-page-block" data-role="survey-page" data-floor="${floorCode}" style="background:#ffffff; color:#0f172a; padding: 10mm 14mm 10mm 14mm; margin-bottom: 2rem; font-family: sans-serif; font-size:0.9rem; border-radius:4px; box-shadow: 0 4px 20px rgba(0,0,0,0.1); page-break-after: always; break-after: page; page-break-inside: avoid !important; break-inside: avoid !important; box-sizing: border-box; width: 210mm; height: 295mm; max-height: 295mm; overflow: hidden; display: flex; flex-direction: column; position: relative;">
                             <div style="text-align:center; border-bottom: 1px solid #cbd5e1; padding-bottom: 0.3rem; margin-bottom: 0.6rem;">
@@ -15405,30 +15538,7 @@ document.addEventListener('DOMContentLoaded', () => {
                                 </h2>
                             </div>
 
-                            <table style="width: 100%; border-collapse: collapse; font-size: 0.81rem; text-align: center; margin-bottom: 0.4rem;">
-                                <thead>
-                                    <tr style="background: #f8fafc; color: #1e293b; border-bottom: 2px solid #cbd5e1;">
-                                        ${getActiveSurveyColumns().map(c => `<th style="padding: 0.45rem 0.3rem; border: 1px solid #cbd5e1;">${c.label}</th>`).join('')}
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    ${sDefects.length > 0 ? sDefects.map((d, dSubIdx) => {
-                                        const memberIds = d._groupMemberIds || [d.id || `idx_${dSubIdx}`];
-                                        const labels = memberIds.flatMap(mid => defectPhotoLabels[mid] || []);
-                                        const pRemark = labels.length > 0 ? labels.join(' ') : '-';
-                                        const cellCtx = { floorCode, photoRemark: pRemark };
-                                        if (isGrade3Building(bldg)) {
-                                            cellCtx.gradeNo = `${getGrade3FloorPrefix(floorCode)}-${sPageIdx * SURVEY_ROWS_PER_PAGE + dSubIdx + 1}`;
-                                            cellCtx.floorDisplayLabel = floorDisplayLabel;
-                                        }
-                                        return `
-                                            <tr>
-                                                ${getActiveSurveyColumns().map(c => `<td style="padding:0.4rem 0.3rem; border:1px solid #e2e8f0; white-space:pre-line; ${getSurveyCellColorStyle(c.key, d, cellCtx)}">${getSurveyCellText(c.key, d, cellCtx)}</td>`).join('')}
-                                            </tr>
-                                        `;
-                                    }).join('') : `<tr><td colspan="${getActiveSurveyColumns().length}" style="padding:2rem; color:#a3a3a3;">${floorDisplayLabel}에 등록된 결함이 없습니다.</td></tr>`}
-                                </tbody>
-                            </table>
+                            ${surveyTableHtml}
 
                             <div style="margin-top: auto; padding-top: 0.6rem; border-top: 1px solid #e2e8f0; display: flex; justify-content: space-between; align-items: center; font-size: 0.8rem; color: #475569;">
                                 <span>🏢 점검수행기관: <strong style="color: #1f1f1f; font-weight: 800;">${compName}</strong></span>
@@ -16012,12 +16122,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
             container.innerHTML = `<div id="printableReportArea" style="width:100%; max-width: 210mm; margin: 0 auto; display: flex; flex-direction: column; align-items: center;">${reportPagesHtml}</div>`;
 
-            // 실측 높이를 재려면 실제로 한 번 화면에 그려져야 하므로(레이아웃 계산 이후), 다음
-            // 페인트 프레임까지 기다렸다가 넘치는 페이지를 자연스럽게 다음 페이지로 흘려보낸다.
-            await new Promise(resolve => requestAnimationFrame(() => {
-                try { rebalanceOverflowingSurveyPages(container); } catch (rebalanceErr) { console.error('상태조사표 페이지 재배치 실패:', rebalanceErr); }
-                resolve();
-            }));
+            // 상태조사표는 15/17행·15배수 마감 규칙을 유지한다. 높이 넘침으로 행을 다음 페이지로
+            // 흘리면 끝 번호가 15·30에서 어긋나므로 재배치는 하지 않는다.
         } catch (err) {
             console.error('Error in openReportPreviewModalFunc:', err);
             const modal = document.getElementById('reportPreviewModal');
@@ -16133,7 +16239,7 @@ document.addEventListener('DOMContentLoaded', () => {
         availableFloors.forEach(fc => {
             const key = `${bldgId}_${fc}`;
             const rawDefects = window.state.defects[key] || (window.state.currentFloor === fc ? getCurrentFloorDefects() : []);
-            const defects = consolidateDefectGroups(rawDefects);
+            const defects = getSurveyRowsForReport(rawDefects);
             if (!defects.length) return;
             floorsData.push({ floorCode: fc, pageDefects: defects });
         });
@@ -16149,8 +16255,8 @@ document.addEventListener('DOMContentLoaded', () => {
             // 한글에서 해당 섹션을 다 들어낸 별도 템플릿 파일을 만들어 분리했다.
             const isPreciseInspectionForTemplate = (bldg.inspectionType || '정밀안전점검') === '정밀안전점검';
             const isGrade3 = bldg.facilityGrade === '제3종시설물';
-            // 3종시설물은 표 구성 자체가 다른 전용 서식(번호/구분/구조체 여부/점검내용/발생원인/비고
-            // 6컬럼, 위치도 없음)을 쓰되, 비파괴 장비조사 섹션 유무는 1,2종과 똑같이 정밀/정기 여부로
+            // 3종시설물은 칠산타워 서식(No./구분/부재 분류/점검내용/발생원인/비고, 구조·비구조
+            // 2행 헤더)을 쓰고, 비파괴 장비조사 섹션 유무는 1,2종과 똑같이 정밀/정기 여부로
             // 결정한다(정밀에 체크된 경우에만 비파괴장비조사 포함).
             const templatePath = isGrade3
                 ? (isPreciseInspectionForTemplate
@@ -16276,28 +16382,20 @@ document.addEventListener('DOMContentLoaded', () => {
             // 위치도)로 찾아서, 표본 문서가 조금 바뀌어도 잘 깨지지 않게 한다.
             const floorTitleRe = /^\d+\)\s*.+층/;
             // 표본 문서는 원본 건물의 그 층 결함이 많았으면 상태조사표가 애초에 표 여러 개(이어지는
-            // 페이지)로 나뉘어 있을 수 있다(예: 지하1층이 표본에서부터 3페이지였을 수 있음). 그래서
-            // 사진첩이 나오기 전까지 등장하는 "구분(NO.)"으로 시작하는 표를 전부 statusTbls 배열로
-            // 모은다 — 표가 1개뿐이면 배열도 1개, 표본이 이미 여러 페이지였으면 그만큼 다 모인다.
-            // 템플릿 안에는 (예전에 컬럼 구성을 바꾸기 전에 만들어졌던) 옛 포맷 상태조사표가 폐기물
-            // 처럼 층마다 몇 개씩 남아있는 경우가 있었다. 표 전체 텍스트에 "부재종류"가 있는지로
-            // 판별하면 결함 설명 같은 자유 서술 칸에 우연히 그 단어가 들어간 데이터 때문에 오판할 수
-            // 있어서, 헤더 행의 정확히 3번째 칸(colAddr=2)이 "부재종류"인지만 본다 — 지금 포맷은 항상
-            // 이 칸이 "부재종류"이고, 옛 포맷은 이 칸이 "조사내용"이라 확실히 구분된다. 안 맞으면 우리
-            // 표가 아니라 옛 폐기물로 보고 아예 지운다.
-            // 3종시설물 표는 헤더 구성이 아예 달라(3번째 칸이 '부재종류'가 아니라 '구조체 여부') 판별
-            // 기준 문구만 바꿔서 같은 로직을 재사용한다.
-            const expectedHeaderCol2Text = isGrade3 ? '구조체 여부' : '부재종류';
+            // 페이지)로 나뉘어 있을 수 있다. 사진첩이 나오기 전까지 등장하는 현재 서식 표를
+            // statusTbls로 모은다. 1·2종은 신가병원 서식(조사내용/크기/부재 분류), 3종은 칠산타워
+            // 서식(No./구분/부재 분류/점검내용). 옛 "부재종류" 10칸 표·1·2종 잔여 표는 버린다.
             const isCurrentStatusTable = (tbl) => {
                 const firstRow = tbl.getElementsByTagNameNS(HP_NS, 'tr')[0];
                 if (!firstRow) return false;
-                const tc = Array.from(firstRow.getElementsByTagNameNS(HP_NS, 'tc')).find(c => {
-                    const addr = c.getElementsByTagNameNS(HP_NS, 'cellAddr')[0];
-                    return addr && addr.getAttribute('colAddr') === '2';
-                });
-                if (!tc) return false;
-                const headerText = Array.from(tc.getElementsByTagNameNS(HP_NS, 't')).map(t => t.textContent).join('').trim();
-                return headerText === expectedHeaderCol2Text;
+                const headerJoined = Array.from(firstRow.getElementsByTagNameNS(HP_NS, 't'))
+                    .map(t => t.textContent || '').join('').replace(/\s+/g, '');
+                if (isGrade3) {
+                    return headerJoined.includes('점검내용') && headerJoined.includes('발생원인');
+                }
+                return headerJoined.includes('구분(NO') && headerJoined.includes('조사내용')
+                    && (headerJoined.includes('크기(mm') || headerJoined.includes('크기'))
+                    && !headerJoined.includes('부재종류');
             };
             const discoverFloorSlots = () => {
                 const ps = secChildren();
@@ -16371,28 +16469,8 @@ document.addEventListener('DOMContentLoaded', () => {
             let floorSlots = discoverFloorSlots();
             if (!floorSlots.length) throw new Error('템플릿에서 상태조사표 블록을 찾지 못했습니다.');
 
-            // "조사내용" 칸이 너무 넓고 "결함크기" 칸은 좁다는 피드백에 따라, 상태조사표의 모든 행
-            // (헤더+데이터 템플릿 행, 표본이 이미 여러 페이지였다면 그 페이지 전부)에서 두 칸의
-            // 너비를 맞바꿔 재배분한다(합계를 유지해 표 전체 너비는 그대로). "틀" 블록에만 적용하면
-            // 되는데, 아래 for문에서 이 블록을 그대로 cloneNode(true)로 복제하므로 나머지 층들도
-            // 자동으로 같은 너비를 갖게 된다.
-            // 3종시설물 표는 colAddr=3/4가 "조사내용"/"결함크기"가 아니라 "점검내용"/"발생원인"이라
-            // 이 폭 조정(1,2종 전용 피드백 반영)은 의미가 달라져 건너뛴다.
-            if (!isGrade3) {
-                const WIDTH_SHIFT = 2000; // 조사내용(colAddr=3)에서 결함크기(colAddr=4)로 옮길 폭(HWPUNIT)
-                floorSlots[0].statusTbls.forEach(statusTbl => {
-                    Array.from(statusTbl.getElementsByTagNameNS(HP_NS, 'tr')).forEach(tr => {
-                        Array.from(tr.getElementsByTagNameNS(HP_NS, 'tc')).forEach(tc => {
-                            const addr = tc.getElementsByTagNameNS(HP_NS, 'cellAddr')[0];
-                            const sz = tc.getElementsByTagNameNS(HP_NS, 'cellSz')[0];
-                            if (!addr || !sz) return;
-                            const colAddr = addr.getAttribute('colAddr');
-                            if (colAddr === '3') sz.setAttribute('width', String(parseInt(sz.getAttribute('width'), 10) - WIDTH_SHIFT));
-                            if (colAddr === '4') sz.setAttribute('width', String(parseInt(sz.getAttribute('width'), 10) + WIDTH_SHIFT));
-                        });
-                    });
-                });
-            }
+            // 신가병원/칠산타워 서식은 칸 너비가 이미 맞춰져 있어, 옛 10칸(부재종류/결함크기)용
+            // 폭 재배분은 적용하지 않는다.
 
             // "틀" 블록(첫 번째 층 블록, 제목 문단부터 문서 끝까지)을 실제 층 수만큼 복제한다. 복제한
             // 표/사진 안의 hp:tbl·hp:pic id가 원본과 겹치면 한글이 문서 구조를 제대로 못 읽어 열람 중
@@ -16539,11 +16617,16 @@ document.addEventListener('DOMContentLoaded', () => {
                 // 맞는 페이지 수(15건당 1페이지)와 비교해서 모자라면 복제로 늘리고, 남으면 지운다 —
                 // 표본 페이지를 그대로 남겨두면 실제 데이터 사이에 표본 데이터가 섞여 나온다.
                 const targetTbl = slot.statusTbls[0];
-                const HEADER_ROW_COUNT = 1; // 표 상단 1줄(구분/위치/... 헤더)은 그대로 둔다. 구조체구분은 구조/비구조 하위 2칸을 합쳐 헤더가 1줄로 줄었다
+                const headerRow1Text = (() => {
+                    const trs = Array.from(targetTbl.getElementsByTagNameNS(HP_NS, 'tr')).filter(tr => tr.parentNode === targetTbl);
+                    if (trs.length < 2) return '';
+                    return Array.from(trs[1].getElementsByTagNameNS(HP_NS, 't')).map(t => t.textContent || '').join('');
+                })();
+                const HEADER_ROW_COUNT = (headerRow1Text.includes('구조부재') || headerRow1Text.includes('비구조부재')) ? 2 : 1;
                 const allTrs = Array.from(targetTbl.getElementsByTagNameNS(HP_NS, 'tr')).filter(tr => tr.parentNode === targetTbl);
                 const dataRows = allTrs.slice(HEADER_ROW_COUNT);
-                if (dataRows.length < 3) {
-                    console.error(`${floorCode}: 템플릿 표의 첫/중간/마지막 행 테두리 스타일을 판별할 수 없어 이 층은 건너뜁니다.`);
+                if (dataRows.length < 1) {
+                    console.error(`${floorCode}: 템플릿 표의 데이터 행 스타일을 판별할 수 없어 이 층은 건너뜁니다.`);
                     continue;
                 }
 
@@ -16556,7 +16639,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     return map;
                 };
                 const firstStyleRow = dataRows[0];
-                const normalStyleRow = dataRows[1];
+                const normalStyleRow = dataRows[Math.min(1, dataRows.length - 1)];
                 const styleMaps = {
                     first: borderStyleByCol(firstStyleRow),
                     normal: borderStyleByCol(normalStyleRow),
@@ -16568,23 +16651,20 @@ document.addEventListener('DOMContentLoaded', () => {
                     Array.from(tbl.getElementsByTagNameNS(HP_NS, 'tr')).filter(tr => tr.parentNode === tbl).slice(HEADER_ROW_COUNT).forEach(tr => tbl.removeChild(tr));
                 });
 
-                // 표 하나에 행을 전부 몰아넣으면(수십~수백 건) 한글에서 다음 페이지로 안 넘어가고
-                // 계속 나열되거나 열람 중 멈추는 문제가 있었다. PDF 미리보기처럼 15건마다 표를 따로
-                // 두고 그 앞 문단에 pageBreak="1"을 줘 강제로 다음 페이지에서 시작하게 한다(한글의
-                // 표 자동 페이지분할에 기대지 않고 우리가 직접 페이지를 끊는다).
-                const SURVEY_ROWS_PER_PAGE = 15;
-                const neededPages = Math.max(1, Math.ceil(pageDefects.length / SURVEY_ROWS_PER_PAGE));
+                // 표 하나에 행을 전부 몰아넣으면 한글에서 다음 페이지로 안 넘어가거나 열람 중
+                // 멈추는 문제가 있었다. 15행(최대 17, n-n 추가분)마다 표를 나누고, 가능하면
+                // 본번호가 15·30·45에서 끝나게 한다.
+                const surveyPages = paginateSurveyDefects(pageDefects);
+                const neededPages = Math.max(1, surveyPages.length);
 
                 let pageTbls = slot.statusTbls.slice();
                 if (pageTbls.length > neededPages) {
-                    // 표본에 남는 페이지가 있으면 뒤쪽 것부터 문단째 지운다.
                     pageTbls.slice(neededPages).forEach(tbl => {
                         const p = tbl.parentNode.parentNode;
                         if (p.parentNode) p.parentNode.removeChild(p);
                     });
                     pageTbls = pageTbls.slice(0, neededPages);
                 } else if (pageTbls.length < neededPages) {
-                    // 모자라면 마지막 페이지 문단을 복제해서 뒤에 이어붙인다.
                     let insertAfterNode = pageTbls[pageTbls.length - 1].parentNode.parentNode;
                     for (let n = pageTbls.length; n < neededPages; n++) {
                         const clonedPara = insertAfterNode.cloneNode(true);
@@ -16597,11 +16677,9 @@ document.addEventListener('DOMContentLoaded', () => {
                         pageTbls.push(clonedTbl);
                     }
                 }
-                // 재사용하는 기존 페이지도(2페이지째부터는) 강제 페이지 나눔이 걸리도록 맞춘다.
                 pageTbls.forEach((tbl, i) => {
                     if (i > 0) tbl.parentNode.parentNode.setAttribute('pageBreak', '1');
                 });
-                const continuationTbls = pageTbls.slice(1);
 
                 await Promise.all(pageDefects.map(async (d) => {
                     if ((!d.photos || d.photos.length === 0) && d.photoIds && d.photoIds.length > 0) {
@@ -16623,88 +16701,50 @@ document.addEventListener('DOMContentLoaded', () => {
                         if (filled.length > 0) d.photos = filled;
                     }
                 }));
-                // 표의 "비고" 칸에 사진 번호(사진1, 사진2...)를 적어 넣어야 하므로, 사진 갤러리를 만들기
-                // 전인 지금 미리 번호를 매겨둔다.
                 const photoDefects = pageDefects.filter(d => getDefectOutputPhotos(d).length > 0);
                 const photoLabelByDefect = new Map();
                 photoDefects.forEach((d, i) => photoLabelByDefect.set(d, `사진${i + 1}`));
 
-                // 표가 SURVEY_ROWS_PER_PAGE(15)건마다 나뉘므로, 행은 자기 몫의 표(targetTbl 또는
-                // continuationTbls[n])에 담기고, 첫줄/끝줄 테두리 스타일도 표(페이지)별로 새로 판단한다.
-                const pageRowCounts = new Array(continuationTbls.length + 1).fill(0);
-                pageDefects.forEach((d, idx) => {
-                    const pageIdx = Math.floor(idx / SURVEY_ROWS_PER_PAGE);
-                    const localIdx = idx % SURVEY_ROWS_PER_PAGE;
-                    const isLastOnPage = localIdx === SURVEY_ROWS_PER_PAGE - 1 || idx === pageDefects.length - 1;
-                    const destTbl = pageIdx === 0 ? targetTbl : continuationTbls[pageIdx - 1];
-                    pageRowCounts[pageIdx]++;
+                surveyPages.forEach((pageItems, pageIdx) => {
+                    const destTbl = pageTbls[pageIdx];
+                    pageItems.forEach((d, localIdx) => {
+                        const isLastOnPage = localIdx === pageItems.length - 1;
+                        const rowCtx = {
+                            floorCode,
+                            photoRemark: photoLabelByDefect.get(d) || '-',
+                            floorDisplayLabel: getFloorLabel(floorCode)
+                        };
+                        const colCount = Array.from(normalStyleRow.getElementsByTagNameNS(HP_NS, 'tc')).length;
+                        const values = getReportSurveyRowValues(d, rowCtx, isGrade3, colCount);
+                        const styleMap = localIdx === 0 ? styleMaps.first : (isLastOnPage ? styleMaps.last : styleMaps.normal);
 
-                    // 템플릿 표에서 구조체구분(구조부재/비구조부재) 두 칸을 하나로 합쳐뒀으므로, 마감재까지
-                    // 포함한 실제 구조체 종류(구조체/비구조체/마감재) 문구를 그 한 칸에 그대로 적어 넣는다.
-                    const rowCtx = { floorCode, photoRemark: photoLabelByDefect.get(d) };
-                    const values = isGrade3
-                        ? (() => {
-                            rowCtx.gradeNo = `${getGrade3FloorPrefix(floorCode)}-${idx + 1}`;
-                            rowCtx.floorDisplayLabel = getFloorLabel(floorCode);
-                            return [
-                                getSurveyCellText('no', d, rowCtx),
-                                getSurveyCellText('floorGroup', d, rowCtx),
-                                getSurveyCellText('category', d, rowCtx),
-                                getSurveyCellText('inspectionContent', d, rowCtx),
-                                getSurveyCellText('cause', d, rowCtx),
-                                getSurveyCellText('remark', d, rowCtx)
-                            ];
-                        })()
-                        : [
-                            getSurveyCellText('no', d),
-                            getSurveyCellText('location', d, { floorCode }),
-                            getSurveyCellText('component', d),
-                            getSurveyCellText('defectType', d),
-                            getSurveyCellText('size', d),
-                            getSurveyCellText('category', d),
-                            getSurveyCellText('progress', d),
-                            getSurveyCellText('leak', d),
-                            getSurveyCellText('cause', d),
-                            getSurveyCellText('remark', d, { photoRemark: photoLabelByDefect.get(d) })
-                        ];
-                    const styleMap = localIdx === 0 ? styleMaps.first : (isLastOnPage ? styleMaps.last : styleMaps.normal);
-
-                    const newRow = normalStyleRow.cloneNode(true);
-                    Array.from(newRow.getElementsByTagNameNS(HP_NS, 'tc')).forEach((tc, colIdx) => {
-                        const addr = tc.getElementsByTagNameNS(HP_NS, 'cellAddr')[0];
-                        if (addr) {
-                            addr.setAttribute('rowAddr', String(HEADER_ROW_COUNT + localIdx));
-                            const bf = styleMap[addr.getAttribute('colAddr')];
-                            if (bf !== undefined) tc.setAttribute('borderFillIDRef', bf);
-                        }
-                        // 템플릿 원본 셀이 "0.2/0.6" + "(3EA)"처럼 문단 2개 이상으로 나뉜 값을 갖고
-                        // 있던 경우, 첫 문단 텍스트만 바꾸면 나머지 문단이 옛날 텍스트로 계속 남는다.
-                        // 첫 문단만 남기고 나머지 문단은 통째로 지운다.
-                        const subList = tc.getElementsByTagNameNS(HP_NS, 'subList')[0];
-                        const paras = subList ? Array.from(subList.getElementsByTagNameNS(HP_NS, 'p')).filter(p => p.parentNode === subList) : [];
-                        if (paras.length > 0) {
-                            const rawVal = values[colIdx] !== undefined ? values[colIdx] : '';
-                            // "점검내용"처럼 값 안에 줄바꿈(\n)이 들어있는 경우가 있다 — HWPX 셀에서
-                            // 줄바꿈은 텍스트 안 개행문자가 아니라 문단을 나누는 방식으로 표현되므로,
-                            // 첫 문단은 첫 줄로 채우고 나머지 줄은 첫 문단을 그대로 복제해(같은 서식
-                            // 유지) 이어붙인다.
-                            const lines = String(rawVal).split('\n');
-                            ensureCellTextNode(paras[0]).textContent = lines[0];
-                            for (let i = paras.length - 1; i >= 1; i--) subList.removeChild(paras[i]);
-                            let refNode = paras[0];
-                            for (let i = 1; i < lines.length; i++) {
-                                const clonedPara = paras[0].cloneNode(true);
-                                ensureCellTextNode(clonedPara).textContent = lines[i];
-                                subList.insertBefore(clonedPara, refNode.nextSibling);
-                                refNode = clonedPara;
+                        const newRow = normalStyleRow.cloneNode(true);
+                        Array.from(newRow.getElementsByTagNameNS(HP_NS, 'tc')).forEach((tc, colIdx) => {
+                            const addr = tc.getElementsByTagNameNS(HP_NS, 'cellAddr')[0];
+                            if (addr) {
+                                addr.setAttribute('rowAddr', String(HEADER_ROW_COUNT + localIdx));
+                                const bf = styleMap[addr.getAttribute('colAddr')];
+                                if (bf !== undefined) tc.setAttribute('borderFillIDRef', bf);
                             }
-                        }
+                            const subList = tc.getElementsByTagNameNS(HP_NS, 'subList')[0];
+                            const paras = subList ? Array.from(subList.getElementsByTagNameNS(HP_NS, 'p')).filter(p => p.parentNode === subList) : [];
+                            if (paras.length > 0) {
+                                const rawVal = values[colIdx] !== undefined ? values[colIdx] : '';
+                                const lines = String(rawVal).split('\n');
+                                ensureCellTextNode(paras[0]).textContent = lines[0];
+                                for (let i = paras.length - 1; i >= 1; i--) subList.removeChild(paras[i]);
+                                let refNode = paras[0];
+                                for (let i = 1; i < lines.length; i++) {
+                                    const clonedPara = paras[0].cloneNode(true);
+                                    ensureCellTextNode(clonedPara).textContent = lines[i];
+                                    subList.insertBefore(clonedPara, refNode.nextSibling);
+                                    refNode = clonedPara;
+                                }
+                            }
+                        });
+                        destTbl.appendChild(newRow);
                     });
-                    destTbl.appendChild(newRow);
-                });
-                pageRowCounts.forEach((count, pageIdx) => {
-                    const tbl = pageIdx === 0 ? targetTbl : continuationTbls[pageIdx - 1];
-                    tbl.setAttribute('rowCnt', String(HEADER_ROW_COUNT + count));
+                    destTbl.setAttribute('rowCnt', String(HEADER_ROW_COUNT + pageItems.length));
                 });
 
                 // ---- 결함 사진 갤러리 ----
