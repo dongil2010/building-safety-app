@@ -11539,12 +11539,13 @@ document.addEventListener('DOMContentLoaded', () => {
             window._pendingPrevRoundPhotos = Array.isArray(existingPin.prevRoundPhotos)
                 ? existingPin.prevRoundPhotos.filter(Boolean).slice()
                 : [];
-            const needsPhotoHydrate = (
-                (window._pendingPhotos.length === 0 && existingPin.photoIds && existingPin.photoIds.length > 0)
-                || (window._pendingPrevRoundPhotos.length === 0 && existingPin.prevRoundPhotoIds && existingPin.prevRoundPhotoIds.length > 0)
-            );
-            if (needsPhotoHydrate && typeof ensureDefectPhotosLoaded === 'function') {
-                renderDefectPhotoSection({ loading: true });
+            if (typeof ensureDefectPhotosLoaded === 'function') {
+                const needsPhotoHydrate = (
+                    window._pendingPhotos.length === 0 && existingPin.photoIds && existingPin.photoIds.length > 0
+                ) || (
+                    window._pendingPrevRoundPhotos.length === 0 && existingPin.prevRoundPhotoIds && existingPin.prevRoundPhotoIds.length > 0
+                );
+                if (needsPhotoHydrate) renderDefectPhotoSection({ loading: true });
                 ensureDefectPhotosLoaded(existingPin).then(() => {
                     window._pendingPhotos = Array.isArray(existingPin.photos) ? existingPin.photos.filter(Boolean).slice() : [];
                     window._pendingPrevRoundPhotos = Array.isArray(existingPin.prevRoundPhotos)
@@ -11899,7 +11900,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const btnTriggerCamera = document.getElementById('btnTriggerCamera');
     const btnTriggerGallery = document.getElementById('btnTriggerGallery');
-    const photoUploadArea = document.getElementById('photoUploadArea');
 
     function handleSelectedPhotoFile(file) {
         if (!file) return;
@@ -11924,15 +11924,6 @@ document.addEventListener('DOMContentLoaded', () => {
         btnTriggerGallery.onclick = (e) => {
             e.preventDefault();
             e.stopPropagation();
-            triggerDefectPhotoPick('gallery');
-        };
-    }
-
-    if (photoUploadArea) {
-        photoUploadArea.onclick = (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            // 터치 영역: 촬영 버튼과 별도 — 기본은 갤러리(카메라는 「촬영」 버튼)
             triggerDefectPhotoPick('gallery');
         };
     }
@@ -12127,6 +12118,22 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    function syncDefectPhotoRefs(defect, photosVal, prevVal) {
+        if (!defect) return;
+        const photos = Array.isArray(photosVal) ? photosVal.filter(Boolean) : [];
+        const prev = Array.isArray(prevVal) ? prevVal.filter(Boolean) : [];
+        if (photos.length > 0) {
+            defect.photoIds = photos.map((_, i) => getPhotoDocId(defect.id, i));
+        } else {
+            delete defect.photoIds;
+        }
+        if (prev.length > 0) {
+            defect.prevRoundPhotoIds = prev.map((_, i) => getPhotoDocId(defect.id, i, 'prev'));
+        } else if (prevVal !== undefined) {
+            delete defect.prevRoundPhotoIds;
+        }
+    }
+
     // 결함 모달의 현재 입력값을 저장(신규 생성 또는 기존 결함 수정)하고 저장된 결함 객체를 반환
     async function commitDefectFromForm(options = {}) {
         const opts = (typeof options === 'object' && options) ? options : {};
@@ -12203,6 +12210,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (Array.isArray(window._pendingPrevRoundPhotos)) {
                     state.defects[key][idx].prevRoundPhotos = window._pendingPrevRoundPhotos.slice();
                 }
+                syncDefectPhotoRefs(state.defects[key][idx], photosVal, window._pendingPrevRoundPhotos);
                 if (!state.defects[key][idx].inspectorName) {
                     state.defects[key][idx].inspectorName = window.state.userName || '';
                 }
@@ -12257,6 +12265,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 newDefect.groupNo = window._defectMarkingTemplate.groupNo;
             }
             state.defects[key].push(newDefect);
+            syncDefectPhotoRefs(newDefect, photosVal, window._pendingPrevRoundPhotos);
             savedDefect = newDefect;
         }
 
@@ -18031,7 +18040,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // 📱 OTA 앱 업데이트 (Firestore app_meta + 네이티브 APK 설치)
     // ==========================================================================
     // android/app/build.gradle 의 versionCode / versionName 과 맞출 것
-    window.BSA_APP_BUILD = { versionCode: 5, versionName: '1.2.1' };
+    window.BSA_APP_BUILD = { versionCode: 6, versionName: '1.2.2' };
 
     const OTA_SNOOZE_MS = 6 * 60 * 60 * 1000;
     let _otaReleaseMeta = null;
@@ -18450,9 +18459,10 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     async function hydrateDefectPhotos(defectsMap) {
-        if (!db || !window.state.companyId) return defectsMap;
         if (!window._photoCache) window._photoCache = {};
-        const companyPhotos = db.collection('safety_app').doc(getCompanyDocId()).collection('photos');
+        const companyPhotos = (db && window.state.companyId)
+            ? db.collection('safety_app').doc(getCompanyDocId()).collection('photos')
+            : null;
         const result = {};
         for (const [key, arr] of Object.entries(defectsMap || {})) {
             result[key] = await Promise.all((arr || []).map(async d => {
@@ -18460,6 +18470,12 @@ document.addEventListener('DOMContentLoaded', () => {
                     if (!ids || ids.length === 0) return [];
                     const photos = await Promise.all(ids.map(async pid => {
                         if (window._photoCache[pid]) return window._photoCache[pid];
+                        const fromIdb = await idbGet('photos', pid);
+                        if (fromIdb) {
+                            window._photoCache[pid] = fromIdb;
+                            return fromIdb;
+                        }
+                        if (!companyPhotos) return null;
                         try {
                             const snap = await companyPhotos.doc(pid).get();
                             const url = snap.exists ? snap.data().dataUrl : null;
@@ -18471,8 +18487,10 @@ document.addEventListener('DOMContentLoaded', () => {
                     }));
                     return photos.filter(Boolean);
                 };
-                const photos = await loadIds(d.photoIds);
-                const prevRoundPhotos = await loadIds(d.prevRoundPhotoIds);
+                const loadedPhotos = await loadIds(d.photoIds);
+                const loadedPrev = await loadIds(d.prevRoundPhotoIds);
+                const photos = mergePhotoArrays(loadedPhotos, extractInlinePhotos(d));
+                const prevRoundPhotos = mergePhotoArrays(loadedPrev, extractInlinePhotos(d, 'prev'));
                 return { ...d, photos, prevRoundPhotos };
             }));
         }
