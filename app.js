@@ -4754,6 +4754,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         window.addEventListener('mouseup', (e) => {
             if (ndtActivePointerIsTouch) return;
+            try {
             if (pendingNdtPinHit && !isDraggingNdtPin && !isDraggingNdtPinGroup) {
                 const item = pendingNdtPinHit.item;
                 const wasAdditive = !!pendingNdtPinHit.additive;
@@ -4881,6 +4882,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 isNdtDragging = false;
                 const canvas = document.getElementById('ndtCanvas');
                 if (canvas) canvas.style.cursor = ndtMode === 'MARK' ? 'crosshair' : 'default';
+            }
+            } finally {
+                if (typeof scheduleFlushPendingRemoteSync === 'function') scheduleFlushPendingRemoteSync();
             }
         });
 
@@ -5187,6 +5191,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }, { passive: false });
 
         window.addEventListener('touchend', (e) => {
+            try {
             if (isNdtPinching && e.touches.length < 2) isNdtPinching = false;
             clearPendingNdtLongPress();
             // 합성 mouse(down/up)가 마퀴 선택을 시작하지 않도록 잠시 차단
@@ -5296,6 +5301,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 } else {
                     updateNdtSelectionBar();
                 }
+            }
+            } finally {
+                if (typeof scheduleFlushPendingRemoteSync === 'function') scheduleFlushPendingRemoteSync();
             }
         });
 
@@ -9494,24 +9502,18 @@ document.addEventListener('DOMContentLoaded', () => {
             refreshDefectQuickPickBar();
         });
 
-        const crackKinds = getCrackKindsForComponent(currentComponent) || [];
         const selectedTypeParts = parseDefectTypeList(currentType);
-        const selectedCrackSet = new Set(selectedTypeParts.filter(t => crackKinds.includes(t)));
+        const selectedTypeSet = new Set(selectedTypeParts);
         const typeChipOptions = getPinnedDefectTypeChips(currentCategory, currentComponent);
         const typeContainer = document.getElementById('quickDefectTypeChips');
         if (typeContainer) {
             typeContainer.innerHTML = typeChipOptions.map(value => {
-                const isCrack = crackKinds.includes(value);
-                const active = isCrack
-                    ? selectedCrackSet.has(value)
-                    : (!selectedCrackSet.size && value === currentType);
-                return `<button type="button" class="defect-quick-chip${active ? ' active' : ''}" data-value="${value}" data-crack-toggle="${isCrack ? '1' : '0'}">${value}</button>`;
+                const active = selectedTypeSet.has(value);
+                return `<button type="button" class="defect-quick-chip${active ? ' active' : ''}" data-value="${value}">${value}</button>`;
             }).join('');
             typeContainer.querySelectorAll('.defect-quick-chip').forEach(btn => {
                 btn.addEventListener('click', () => {
-                    const value = btn.dataset.value || '';
-                    if (btn.dataset.crackToggle === '1') toggleCrackKindChip(value);
-                    else applyExclusiveDefectTypeChip(value);
+                    toggleDefectTypeChip(btn.dataset.value || '');
                 });
             });
         }
@@ -9633,6 +9635,8 @@ document.addEventListener('DOMContentLoaded', () => {
         '균열',
         '누수',
         '처짐',
+        '콘크리트 박리',
+        '콘크리트 박락',
         '박리/박락',
         '철근노출',
         '데크플레이트 부식',
@@ -9643,7 +9647,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const WALL_CRACK_KINDS = ['수직균열', '수평균열', '경사균열', '망상균열'];
     const COLUMN_CRACK_KINDS = ['수직균열', '수평균열', '경사균열', '망상균열'];
     const BEAM_CRACK_KINDS = ['수직균열', '수평균열', '경사균열', '망상균열', 'U자형균열'];
-    const RC_COMMON_OTHER_DEFECTS = ['누수', '철근노출', '백태/유출', '박리/박락', '신축이음/재료분리 손상', '기타'];
+    const RC_COMMON_OTHER_DEFECTS = ['누수', '철근노출', '백태/유출', '콘크리트 박리', '콘크리트 박락', '박리/박락', '신축이음/재료분리 손상', '기타'];
     const RC_WALL_DEFECTS = ['상태양호', ...WALL_CRACK_KINDS, ...RC_COMMON_OTHER_DEFECTS];
     const RC_COLUMN_DEFECTS = ['상태양호', ...COLUMN_CRACK_KINDS, ...RC_COMMON_OTHER_DEFECTS];
     const RC_BEAM_DEFECTS = ['상태양호', ...BEAM_CRACK_KINDS, ...RC_COMMON_OTHER_DEFECTS];
@@ -9689,8 +9693,9 @@ document.addEventListener('DOMContentLoaded', () => {
             || t.includes('균열');
     }
     function parseDefectTypeList(raw) {
+        // 콤마만 구분자 — '박리/박락'·'백태/유출' 등 슬래시 라벨은 한 항목으로 유지
         return String(raw == null ? '' : raw)
-            .split(/[,，/·•|]+/)
+            .split(/[,，]+/)
             .map(s => s.trim())
             .filter(Boolean);
     }
@@ -9717,6 +9722,8 @@ document.addEventListener('DOMContentLoaded', () => {
             '누수',
             '철근노출',
             '백태/유출',
+            '콘크리트 박리',
+            '콘크리트 박락',
             '박리/박락',
             '신축이음/재료분리 손상',
             '기타'
@@ -9744,7 +9751,7 @@ document.addEventListener('DOMContentLoaded', () => {
     function isTransientDefectTypeValue(value) {
         const v = String(value || '').trim();
         if (!v) return true;
-        if (/[,，/·]/.test(v) && parseDefectTypeList(v).length > 1) return true;
+        if (/[,，]/.test(v) && parseDefectTypeList(v).length > 1) return true;
         return false;
     }
 
@@ -9849,31 +9856,40 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function toggleCrackKindChip(kind) {
-        const typeSelect = document.getElementById('defectType');
-        const typeInput = document.getElementById('defectTypeInput');
-        const component = getDefectComboValue(
-            document.getElementById('defectComponent'),
-            document.getElementById('defectComponentInput')
-        );
-        const crackKinds = getCrackKindsForComponent(component) || [];
-        const current = new Set(parseDefectTypeList(getDefectComboValue(typeSelect, typeInput)).filter(t => crackKinds.includes(t)));
-        if (current.has(kind)) current.delete(kind);
-        else current.add(kind);
-        const joined = joinDefectTypeList(crackKinds.filter(k => current.has(k)));
-        const typeInputEl = document.getElementById('defectTypeInput');
-        if (typeInputEl) typeInputEl.value = joined;
-        if (typeSelect) typeSelect.value = crackKinds.includes(joined) ? joined : '';
-        updateDefectCauseDropdown(joined || '균열');
-        toggleDefectSizeInputMode();
-        if (typeof scheduleDefectAutoApply === 'function') scheduleDefectAutoApply();
-        refreshDefectQuickPickBar();
+        toggleDefectTypeChip(kind);
     }
 
     function applyExclusiveDefectTypeChip(value) {
+        toggleDefectTypeChip(value);
+    }
+
+    /** 결함 종류 칩 토글 — 균열·비균열 모두 복수 선택, 순서는 처음 고른 순 */
+    function toggleDefectTypeChip(value) {
         const typeSelect = document.getElementById('defectType');
         const typeInput = document.getElementById('defectTypeInput');
-        syncDefectComboFields(typeSelect, typeInput, value);
-        updateDefectCauseDropdown(value);
+        const v = String(value || '').trim();
+        if (!v) return;
+
+        if (v === '상태양호') {
+            const cur = getDefectComboValue(typeSelect, typeInput);
+            const next = cur === '상태양호' ? '' : '상태양호';
+            syncDefectComboFields(typeSelect, typeInput, next);
+            updateDefectCauseDropdown(next || '기타');
+            toggleDefectSizeInputMode();
+            if (typeof scheduleDefectAutoApply === 'function') scheduleDefectAutoApply();
+            refreshDefectQuickPickBar();
+            return;
+        }
+
+        let parts = parseDefectTypeList(getDefectComboValue(typeSelect, typeInput))
+            .filter(t => t && t !== '상태양호');
+        const idx = parts.indexOf(v);
+        if (idx >= 0) parts.splice(idx, 1);
+        else parts.push(v);
+
+        const joined = joinDefectTypeList(parts);
+        syncDefectComboFields(typeSelect, typeInput, joined);
+        updateDefectCauseDropdown(joined || '기타');
         toggleDefectSizeInputMode();
         if (typeof scheduleDefectAutoApply === 'function') scheduleDefectAutoApply();
         refreshDefectQuickPickBar();
@@ -10159,6 +10175,14 @@ document.addEventListener('DOMContentLoaded', () => {
             '배수 불량', '균열부 침투', '지하수 상승', '기타'
         ],
         '박리/박락': [
+            '철근 부식 팽창', '동결융해 반복', '부착력 저하', '시공 불량',
+            '과하중 충격', '중성화', '염해', '화재 손상', '기타'
+        ],
+        '콘크리트 박리': [
+            '철근 부식 팽창', '동결융해 반복', '부착력 저하', '시공 불량',
+            '과하중 충격', '중성화', '염해', '화재 손상', '기타'
+        ],
+        '콘크리트 박락': [
             '철근 부식 팽창', '동결융해 반복', '부착력 저하', '시공 불량',
             '과하중 충격', '중성화', '염해', '화재 손상', '기타'
         ],
@@ -12523,6 +12547,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function handleDragEnd(clientX, clientY) {
+        try {
         clearPendingDragLongPress();
         hideTouchLoupe(MAP_LOUPE_ID);
         // 터치 제스처 종료 여부 — 아래에서 클리어되기 전에 보관 (PC 전용 동작 분기)
@@ -12642,6 +12667,9 @@ document.addEventListener('DOMContentLoaded', () => {
         isDragging = false;
         if (elements.planCanvas) {
             elements.planCanvas.style.cursor = getMapCanvasCursor();
+        }
+        } finally {
+            if (typeof scheduleFlushPendingRemoteSync === 'function') scheduleFlushPendingRemoteSync();
         }
     }
 
@@ -12768,6 +12796,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (isPinching) {
                 if (e.touches.length < 2) {
                     isPinching = false;
+                    if (typeof scheduleFlushPendingRemoteSync === 'function') scheduleFlushPendingRemoteSync();
                 }
             } else {
                 const t = e.changedTouches && e.changedTouches[0];
@@ -12794,6 +12823,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 activePointerIsTouch = false;
                 document.body.classList.remove('dragging-pin');
                 document.body.style.touchAction = '';
+                if (typeof scheduleFlushPendingRemoteSync === 'function') scheduleFlushPendingRemoteSync();
             }, { capture: true, passive: true });
         }
 
@@ -20118,6 +20148,79 @@ document.addEventListener('DOMContentLoaded', () => {
     let _syncInFlight = false;
     let _syncPending = false;
     let _syncDebounceTimer = null;
+    let _pendingRemoteData = null;
+    let _flushRemoteTimer = null;
+
+    /** 핀/영역/NDT 드래그·핀치 등 UI 제스처 중이면 원격 스냅샷 적용을 미룸 (저장 업로드는 그대로) */
+    function isRealtimeUiGestureBusy() {
+        return !!(
+            (typeof isDragging !== 'undefined' && isDragging)
+            || (typeof isMarkingDrag !== 'undefined' && isMarkingDrag)
+            || (typeof isAreaDrag !== 'undefined' && isAreaDrag)
+            || (typeof isDraggingPin !== 'undefined' && isDraggingPin)
+            || (typeof isDraggingPinGroup !== 'undefined' && isDraggingPinGroup)
+            || (typeof isDraggingLegend !== 'undefined' && isDraggingLegend)
+            || (typeof isResizingLegend !== 'undefined' && isResizingLegend)
+            || (typeof isMarqueeSelecting !== 'undefined' && isMarqueeSelecting)
+            || (typeof isPinching !== 'undefined' && isPinching)
+            || (typeof pendingDragHit !== 'undefined' && pendingDragHit)
+            || (typeof isDraggingNdtPin !== 'undefined' && isDraggingNdtPin)
+            || (typeof isDraggingNdtPinGroup !== 'undefined' && isDraggingNdtPinGroup)
+            || (typeof isDraggingNdtDisplacement !== 'undefined' && isDraggingNdtDisplacement)
+            || (typeof isNdtMarqueeSelecting !== 'undefined' && isNdtMarqueeSelecting)
+            || (typeof isNdtMarkingDrag !== 'undefined' && isNdtMarkingDrag)
+            || (typeof isNdtPinching !== 'undefined' && isNdtPinching)
+        );
+    }
+
+    function scheduleFlushPendingRemoteSync() {
+        if (_flushRemoteTimer) clearTimeout(_flushRemoteTimer);
+        _flushRemoteTimer = setTimeout(() => {
+            _flushRemoteTimer = null;
+            flushPendingRemoteSync();
+        }, 40);
+    }
+
+    async function flushPendingRemoteSync() {
+        if (!_pendingRemoteData) return;
+        if (isRealtimeUiGestureBusy() || _syncInFlight) {
+            scheduleFlushPendingRemoteSync();
+            return;
+        }
+        const data = _pendingRemoteData;
+        _pendingRemoteData = null;
+        await applyRemoteSnapshotFromListener(data);
+    }
+
+    async function applyRemoteSnapshotFromListener(data) {
+        if (!data) return;
+        isRemoteSyncing = true;
+        try {
+            const isChanged = await applyMergedRemoteData(data);
+
+            if (isChanged) {
+                _suppressSyncOnSave = true;
+                if (typeof saveStateToLocalStorage === 'function') saveStateToLocalStorage();
+                _suppressSyncOnSave = false;
+
+                if (state.currentBuildingId && state.currentFloor) {
+                    applyFloorMapStyleSettings(state.currentFloor, state.currentBuildingId);
+                }
+
+                if (typeof renderDashboard === 'function') renderDashboard();
+                if (typeof renderBuildingSelector === 'function') renderBuildingSelector();
+                if (typeof renderSurveyTable === 'function') renderSurveyTable();
+                if (typeof drawCanvas === 'function') drawCanvas();
+                if (typeof drawNdtCanvas === 'function') drawNdtCanvas();
+                if (typeof renderNdtSummaryTable === 'function') renderNdtSummaryTable();
+                if (typeof renderDefectListPanel === 'function') renderDefectListPanel();
+            }
+        } catch (e) {
+            console.error('Remote sync apply error:', e);
+        } finally {
+            setTimeout(() => { isRemoteSyncing = false; }, 300);
+        }
+    }
 
     let auth = null;
     window._justRegistering = false;
@@ -20380,7 +20483,7 @@ document.addEventListener('DOMContentLoaded', () => {
         _syncDebounceTimer = setTimeout(() => {
             _syncDebounceTimer = null;
             syncStateToFirebase();
-        }, 900);
+        }, 400);
     }
 
     async function applyMergedRemoteData(data) {
@@ -20560,6 +20663,8 @@ document.addEventListener('DOMContentLoaded', () => {
             if (_syncPending) {
                 _syncPending = false;
                 syncStateToFirebase();
+            } else if (typeof scheduleFlushPendingRemoteSync === 'function') {
+                scheduleFlushPendingRemoteSync();
             }
         }
     }
@@ -20576,33 +20681,15 @@ document.addEventListener('DOMContentLoaded', () => {
             if (doc && doc.exists) {
                 const data = doc.data();
                 if (!data) return;
-                if (_syncInFlight) return;
-                isRemoteSyncing = true;
-                try {
-                    const isChanged = await applyMergedRemoteData(data);
-
-                    if (isChanged) {
-                        _suppressSyncOnSave = true;
-                        if (typeof saveStateToLocalStorage === 'function') saveStateToLocalStorage();
-                        _suppressSyncOnSave = false;
-
-                        if (state.currentBuildingId && state.currentFloor) {
-                            applyFloorMapStyleSettings(state.currentFloor, state.currentBuildingId);
-                        }
-
-                        if (typeof renderDashboard === 'function') renderDashboard();
-                        if (typeof renderBuildingSelector === 'function') renderBuildingSelector();
-                        if (typeof renderSurveyTable === 'function') renderSurveyTable();
-                        if (typeof drawCanvas === 'function') drawCanvas();
-                        if (typeof drawNdtCanvas === 'function') drawNdtCanvas();
-                        if (typeof renderNdtSummaryTable === 'function') renderNdtSummaryTable();
-                        if (typeof renderDefectListPanel === 'function') renderDefectListPanel();
-                    }
-                } catch (e) {
-                    console.error('Remote sync apply error:', e);
-                } finally {
-                    setTimeout(() => { isRemoteSyncing = false; }, 300);
+                if (_syncInFlight) {
+                    _pendingRemoteData = data;
+                    return;
                 }
+                if (isRealtimeUiGestureBusy()) {
+                    _pendingRemoteData = data;
+                    return;
+                }
+                await applyRemoteSnapshotFromListener(data);
             }
         }, (err) => {
             console.warn('Realtime listener warning:', err);
