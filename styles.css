@@ -4189,6 +4189,16 @@ body {
     font-weight: 700;
     color: #64748b;
 }
+.defect-quick-label .btn-option-manage {
+    margin-left: auto;
+}
+.defect-quick-label .defect-quick-hint + .btn-option-manage {
+    margin-left: 0;
+}
+
+.defect-legacy-fields {
+    display: none !important;
+}
 
 /* 공통 격자 */
 .defect-quick-chip-grid {
