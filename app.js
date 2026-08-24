@@ -8610,6 +8610,17 @@ document.addEventListener('DOMContentLoaded', () => {
         };
 
         if (isCrack) {
+            if (Array.isArray(d.crackMeasures) && d.crackMeasures.length) {
+                const bits = d.crackMeasures.map(m => {
+                    const w = withMm(m.width);
+                    const l = String(m.length || '').trim();
+                    if (w && l) return `${w}/${l}m`;
+                    if (w) return w;
+                    if (l) return `${l}m`;
+                    return '';
+                }).filter(Boolean);
+                if (bits.length) return bits.join(', ');
+            }
             const cw = d.crackWidth;
             if (cw !== undefined && cw !== null && String(cw).trim() !== '') {
                 return withMm(cw);
@@ -9420,12 +9431,15 @@ document.addEventListener('DOMContentLoaded', () => {
             refreshDefectQuickPickBar();
         });
 
-        renderQuickPickChipGroup('quickDefectTypeChips', getQuickPickOptionsFromSelect(typeSelect).slice(0, 16), currentType, (value) => {
-            syncDefectComboFields(typeSelect, typeInput, value);
-            updateDefectCauseDropdown(value);
-            toggleDefectSizeInputMode();
-            if (typeof scheduleDefectAutoApply === 'function') scheduleDefectAutoApply();
-            refreshDefectQuickPickBar();
+        const crackKinds = getCrackKindsForComponent(currentComponent) || [];
+        const typeChipOptions = getQuickPickOptionsFromSelect(typeSelect)
+            .filter(t => !crackKinds.includes(t))
+            .slice(0, 16);
+        const typeChipCurrent = crackKinds.some(k => parseDefectTypeList(currentType).includes(k))
+            ? ''
+            : currentType;
+        renderQuickPickChipGroup('quickDefectTypeChips', typeChipOptions, typeChipCurrent, (value) => {
+            applyExclusiveDefectTypeChip(value);
         });
 
         const causeGroup = document.getElementById('quickCauseGroup');
@@ -9548,18 +9562,73 @@ document.addEventListener('DOMContentLoaded', () => {
         '백태/유출',
         '기타'
     ];
+    const WALL_CRACK_KINDS = ['수직균열', '수평균열', '경사균열', '망상균열'];
+    const COLUMN_CRACK_KINDS = ['수직균열', '수평균열', '경사균열', '망상균열'];
+    const BEAM_CRACK_KINDS = ['수직균열', '수평균열', '경사균열', '망상균열', 'U자형균열'];
+    const RC_COMMON_OTHER_DEFECTS = ['누수', '철근노출', '백태/유출', '박리/박락', '신축이음/재료분리 손상', '기타'];
+    const RC_WALL_DEFECTS = ['상태양호', ...WALL_CRACK_KINDS, ...RC_COMMON_OTHER_DEFECTS];
+    const RC_COLUMN_DEFECTS = ['상태양호', ...COLUMN_CRACK_KINDS, ...RC_COMMON_OTHER_DEFECTS];
+    const RC_BEAM_DEFECTS = ['상태양호', ...BEAM_CRACK_KINDS, ...RC_COMMON_OTHER_DEFECTS];
+    const RC_SLAB_DEFECTS = ['상태양호', '균열', ...RC_COMMON_OTHER_DEFECTS];
+
     const componentDefectPreset = {
         '철골기둥': STEEL_MEMBER_DEFECTS,
         '철골거더': STEEL_MEMBER_DEFECTS,
         '철골빔': STEEL_MEMBER_DEFECTS,
-        '데크슬래브': DECK_SLAB_DEFECTS
+        '데크슬래브': DECK_SLAB_DEFECTS,
+        'RC벽체': RC_WALL_DEFECTS,
+        '벽체': RC_WALL_DEFECTS,
+        '기둥': RC_COLUMN_DEFECTS,
+        'RC기둥': RC_COLUMN_DEFECTS,
+        'SRC기둥': RC_COLUMN_DEFECTS,
+        '큰보': RC_BEAM_DEFECTS,
+        '작은보': RC_BEAM_DEFECTS,
+        '캔틸레버보': RC_BEAM_DEFECTS,
+        '슬래브': RC_SLAB_DEFECTS,
+        '계단슬래브': RC_SLAB_DEFECTS
     };
     function normalizeComponentKey(name) {
         return String(name || '').replace(/\s+/g, '');
     }
+    function getCrackKindsForComponent(component) {
+        const key = normalizeComponentKey(component);
+        if (!key) return null;
+        if (key.includes('데크슬래브')) return null;
+        if (key.includes('슬래브')) return null; // 슬래브는 '균열'만
+        if (key.includes('철골')) return null;
+        if (key.includes('벽체')) return WALL_CRACK_KINDS.slice();
+        if (key.includes('기둥')) return COLUMN_CRACK_KINDS.slice();
+        if (key.includes('보') || key.includes('거더') || key.includes('빔')) return BEAM_CRACK_KINDS.slice();
+        return null;
+    }
+    function isCrackKindLabel(label) {
+        const t = String(label || '').trim();
+        if (!t) return false;
+        return WALL_CRACK_KINDS.includes(t)
+            || COLUMN_CRACK_KINDS.includes(t)
+            || BEAM_CRACK_KINDS.includes(t)
+            || t === '균열'
+            || t.includes('균열');
+    }
+    function parseDefectTypeList(raw) {
+        return String(raw == null ? '' : raw)
+            .split(/[,，/·•|]+/)
+            .map(s => s.trim())
+            .filter(Boolean);
+    }
+    function joinDefectTypeList(list) {
+        return (list || []).map(s => String(s || '').trim()).filter(Boolean).join(', ');
+    }
     function getDefectTypePresetFor(category, component) {
         const key = normalizeComponentKey(component);
         if (key && componentDefectPreset[key]) return componentDefectPreset[key];
+        // 키워드 매칭 (직접 입력 부재명)
+        if (key) {
+            if (key.includes('벽체') && !key.includes('조적')) return RC_WALL_DEFECTS;
+            if (key.includes('기둥') && !key.includes('철골')) return RC_COLUMN_DEFECTS;
+            if ((key.includes('보') || key.includes('거더')) && !key.includes('철골')) return RC_BEAM_DEFECTS;
+            if (key.includes('슬래브') && !key.includes('데크')) return RC_SLAB_DEFECTS;
+        }
         return categoryDefectPreset[category] || categoryDefectPreset['구조체'];
     }
 
@@ -9607,18 +9676,28 @@ document.addEventListener('DOMContentLoaded', () => {
             document.getElementById('defectComponent'),
             document.getElementById('defectComponentInput')
         );
+        const crackKinds = getCrackKindsForComponent(component);
         const hidden = window.state.hiddenDefectTypes[category] || [];
-        const presetList = getDefectTypePresetFor(category, component).filter(t => !hidden.includes(t));
+        let presetList = getDefectTypePresetFor(category, component).filter(t => !hidden.includes(t));
+        // 균열 종류 체크박스가 있는 부재: 칩 목록에서는 하위 균열 종류를 빼고(상태양호·기타만), 체크박스로 선택
+        if (crackKinds && crackKinds.length) {
+            presetList = presetList.filter(t => !crackKinds.includes(t));
+            if (!presetList.includes('균열')) {
+                // 칩에 '균열' 요약은 넣지 않음 — 체크박스가 대체
+            }
+        }
         const customList = window.state.customDefectTypes[category] || [];
 
         let html = `<option value="" ${!currentVal ? 'selected' : ''}>—</option>`;
-        presetList.forEach(item => {
+        const allOptions = presetList.slice();
+        if (crackKinds) crackKinds.forEach(k => { if (!allOptions.includes(k)) allOptions.push(k); });
+        allOptions.forEach(item => {
             const sel = (currentVal && currentVal === item) ? 'selected' : '';
             html += `<option value="${item}" ${sel}>${item}</option>`;
         });
 
         customList.forEach(item => {
-            if (!presetList.includes(item)) {
+            if (!allOptions.includes(item)) {
                 const sel = (currentVal && currentVal === item) ? 'selected' : '';
                 html += `<option value="${item}" ${sel}>${item}</option>`;
             }
@@ -9627,7 +9706,8 @@ document.addEventListener('DOMContentLoaded', () => {
         html += `<option value="__ADD_CUSTOM__">➕ [결함 종류 직접 추가...]</option>`;
         select.innerHTML = html;
 
-        if (currentVal && !presetList.includes(currentVal) && !customList.includes(currentVal)) {
+        if (currentVal && !allOptions.includes(currentVal) && !customList.includes(currentVal)
+            && !parseDefectTypeList(currentVal).every(t => allOptions.includes(t) || customList.includes(t))) {
             const customOpt = document.createElement('option');
             customOpt.value = currentVal;
             customOpt.textContent = currentVal;
@@ -9639,6 +9719,7 @@ document.addEventListener('DOMContentLoaded', () => {
             ? currentVal
             : (isDefectComboCustomToken(select.value) ? '' : select.value);
         syncDefectComboFields(select, document.getElementById('defectTypeInput'), resolved);
+        syncCrackKindChecksFromType(resolved, crackKinds);
 
         // Trigger cause update for current defect type
         updateDefectCauseDropdown(resolved);
@@ -9646,14 +9727,82 @@ document.addEventListener('DOMContentLoaded', () => {
         refreshDefectQuickPickBar();
     }
 
+    function getSelectedCrackKindsFromUi() {
+        const box = document.getElementById('defectCrackKindChecks');
+        if (!box) return [];
+        return Array.from(box.querySelectorAll('input[type="checkbox"]:checked'))
+            .map(el => el.value)
+            .filter(Boolean);
+    }
+
+    function syncCrackKindChecksFromType(typeVal, crackKindsOpt) {
+        const group = document.getElementById('quickCrackKindGroup');
+        const box = document.getElementById('defectCrackKindChecks');
+        if (!group || !box) return;
+        const component = getDefectComboValue(
+            document.getElementById('defectComponent'),
+            document.getElementById('defectComponentInput')
+        );
+        const crackKinds = crackKindsOpt || getCrackKindsForComponent(component);
+        if (!crackKinds || !crackKinds.length) {
+            group.style.display = 'none';
+            box.innerHTML = '';
+            return;
+        }
+        group.style.display = '';
+        const selected = new Set(parseDefectTypeList(typeVal).filter(t => crackKinds.includes(t)));
+        box.innerHTML = crackKinds.map(kind => {
+            const id = `crackKind_${kind.replace(/[^a-zA-Z0-9가-힣]/g, '_')}`;
+            const checked = selected.has(kind) ? 'checked' : '';
+            return `<label class="defect-crack-kind-item${checked ? ' is-checked' : ''}" for="${id}">
+                <input type="checkbox" id="${id}" value="${kind}" ${checked}>
+                <span>${kind}</span>
+            </label>`;
+        }).join('');
+        box.querySelectorAll('input[type="checkbox"]').forEach(inp => {
+            inp.addEventListener('change', () => {
+                const kinds = getSelectedCrackKindsFromUi();
+                const typeSelect = document.getElementById('defectType');
+                const typeInput = document.getElementById('defectTypeInput');
+                const joined = joinDefectTypeList(kinds);
+                syncDefectComboFields(typeSelect, typeInput, joined || '');
+                box.querySelectorAll('.defect-crack-kind-item').forEach(lab => {
+                    const c = lab.querySelector('input');
+                    lab.classList.toggle('is-checked', !!(c && c.checked));
+                });
+                updateDefectCauseDropdown(joined || '균열');
+                toggleDefectSizeInputMode();
+                refreshDefectQuickPickBar();
+                if (typeof scheduleDefectAutoApply === 'function') scheduleDefectAutoApply();
+            });
+        });
+    }
+
+    function applyExclusiveDefectTypeChip(value) {
+        const typeSelect = document.getElementById('defectType');
+        const typeInput = document.getElementById('defectTypeInput');
+        syncDefectComboFields(typeSelect, typeInput, value);
+        // 비균열 칩 선택 시 균열 종류 체크 해제
+        const box = document.getElementById('defectCrackKindChecks');
+        if (box && !isCrackKindLabel(value)) {
+            box.querySelectorAll('input[type="checkbox"]').forEach(inp => { inp.checked = false; });
+            box.querySelectorAll('.defect-crack-kind-item').forEach(lab => lab.classList.remove('is-checked'));
+        }
+        updateDefectCauseDropdown(value);
+        toggleDefectSizeInputMode();
+        if (typeof scheduleDefectAutoApply === 'function') scheduleDefectAutoApply();
+        refreshDefectQuickPickBar();
+    }
+
     // 자유텍스트(규모 및 상태) 입력칸은 결함 종류와 상관없이 항상 보이고,
-    // 결함 종류가 '균열'이면 균열폭/균열길이 숫자 입력 2칸을 추가로 보여줘서 둘 중 편한 방식으로 입력 가능.
+    // 균열(하위 종류 포함)이면 폭/길이 입력란을 보여준다.
     // 결함 종류가 '상태양호'면 규모/원인 입력이 의미가 없으므로 두 칸 모두 숨긴다.
     function toggleDefectSizeInputMode() {
         const typeSelect = document.getElementById('defectType');
         const typeInput = document.getElementById('defectTypeInput');
         const dType = getDefectComboValue(typeSelect, typeInput) || '';
-        const isCrack = dType === '균열' || (dType && dType.includes('균열'));
+        const kinds = getSelectedCrackKindsFromUi();
+        const isCrack = isCrackKindLabel(dType) || kinds.length > 0;
         const isGood = dType === '상태양호';
         const crackGroup = document.getElementById('defectCrackSizeGroup');
         const measureGroup = document.getElementById('quickMeasureGroup');
@@ -9673,18 +9822,49 @@ document.addEventListener('DOMContentLoaded', () => {
         if (quickCauseGroup) quickCauseGroup.style.display = isGood ? 'none' : '';
     }
 
+    function getCrackMeasuresFromUi() {
+        const list = document.getElementById('defectCrackMeasureList');
+        if (!list) return [];
+        return Array.from(list.querySelectorAll('.defect-crack-measure-row')).map(row => {
+            const w = (row.querySelector('[data-crack-w]')?.value || '').trim();
+            const l = (row.querySelector('[data-crack-l]')?.value || '').trim();
+            return { width: w, length: l };
+        }).filter(m => m.width || m.length);
+    }
+
+    function syncHiddenCrackFieldsFromMeasures(measures) {
+        const rows = measures || getCrackMeasuresFromUi();
+        const wEl = document.getElementById('defectCrackWidth');
+        const lEl = document.getElementById('defectCrackLength');
+        const widths = rows.map(m => m.width).filter(Boolean);
+        const lengths = rows.map(m => m.length).filter(Boolean);
+        if (wEl) wEl.value = widths.join(' / ');
+        if (lEl) lEl.value = lengths.join(' / ');
+    }
+
     function composeDefectSizeFromMeasures() {
-        const w = (document.getElementById('defectCrackWidth')?.value || '').trim();
-        const l = (document.getElementById('defectCrackLength')?.value || '').trim();
+        const rows = getCrackMeasuresFromUi();
         const n = (document.getElementById('defectItemCount')?.value || '').trim();
         const parts = [];
-        if (w) parts.push(`W=${w}mm`);
-        if (l) parts.push(`L=${l}m`);
+        if (rows.length) {
+            rows.forEach((m) => {
+                const bit = [];
+                if (m.width) bit.push(`W=${m.width}mm`);
+                if (m.length) bit.push(`L=${m.length}m`);
+                if (bit.length) parts.push(bit.join(' '));
+            });
+        } else {
+            const w = (document.getElementById('defectCrackWidth')?.value || '').trim();
+            const l = (document.getElementById('defectCrackLength')?.value || '').trim();
+            if (w) parts.push(`W=${w}mm`);
+            if (l) parts.push(`L=${l}m`);
+        }
         if (n) parts.push(`N=${n}`);
         return parts.join(', ');
     }
 
     function syncSizeFromMeasureInputs() {
+        syncHiddenCrackFieldsFromMeasures();
         const sizeEl = document.getElementById('defectSize');
         if (!sizeEl) return;
         const composed = composeDefectSizeFromMeasures();
@@ -9694,22 +9874,110 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    function bindDefectMeasureInputs() {
-        ['defectCrackWidth', 'defectCrackLength', 'defectItemCount'].forEach((id) => {
-            const el = document.getElementById(id);
-            if (!el || el.dataset.measureBound) return;
-            el.dataset.measureBound = '1';
-            el.addEventListener('input', () => {
+    function renderCrackMeasureRows(measures) {
+        const list = document.getElementById('defectCrackMeasureList');
+        if (!list) return;
+        const rows = (Array.isArray(measures) && measures.length)
+            ? measures.map(m => ({ width: m.width || m.w || '', length: m.length || m.l || '' }))
+            : [{ width: '', length: '' }];
+        list.innerHTML = rows.map((m, idx) => `
+            <div class="defect-crack-measure-row" data-row-idx="${idx}">
+                <label class="defect-measure-btn">
+                    <span class="defect-measure-name">폭</span>
+                    <input type="text" data-crack-w inputmode="decimal" placeholder="직접입력" autocomplete="off" value="${String(m.width || '').replace(/"/g, '&quot;')}">
+                    <span class="defect-measure-unit">mm</span>
+                </label>
+                <label class="defect-measure-btn">
+                    <span class="defect-measure-name">길이</span>
+                    <input type="text" data-crack-l inputmode="decimal" placeholder="직접입력" autocomplete="off" value="${String(m.length || '').replace(/"/g, '&quot;')}">
+                    <span class="defect-measure-unit">m</span>
+                </label>
+                <button type="button" class="defect-crack-measure-del" title="이 행 삭제" ${rows.length <= 1 ? 'disabled' : ''}>
+                    <i class="fa-solid fa-trash"></i>
+                </button>
+            </div>
+        `).join('');
+        list.querySelectorAll('input').forEach(inp => {
+            inp.addEventListener('input', () => {
                 syncSizeFromMeasureInputs();
                 if (typeof scheduleDefectAutoApply === 'function') scheduleDefectAutoApply();
             });
         });
+        list.querySelectorAll('.defect-crack-measure-del').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const current = getCrackMeasuresFromUi();
+                const row = btn.closest('.defect-crack-measure-row');
+                const idx = row ? parseInt(row.getAttribute('data-row-idx') || '0', 10) : -1;
+                const next = current.length ? current.slice() : [{ width: '', length: '' }];
+                // 빈 행도 포함해 삭제하려면 DOM 기준으로
+                const allRows = Array.from(list.querySelectorAll('.defect-crack-measure-row')).map(r => ({
+                    width: (r.querySelector('[data-crack-w]')?.value || '').trim(),
+                    length: (r.querySelector('[data-crack-l]')?.value || '').trim()
+                }));
+                if (idx >= 0 && allRows.length > 1) {
+                    allRows.splice(idx, 1);
+                    renderCrackMeasureRows(allRows.length ? allRows : [{ width: '', length: '' }]);
+                    syncSizeFromMeasureInputs();
+                    if (typeof scheduleDefectAutoApply === 'function') scheduleDefectAutoApply();
+                }
+            });
+        });
+        syncHiddenCrackFieldsFromMeasures(getCrackMeasuresFromUi());
+    }
+
+    function setCrackMeasuresToUi(defect) {
+        let measures = [];
+        if (defect && Array.isArray(defect.crackMeasures) && defect.crackMeasures.length) {
+            measures = defect.crackMeasures.map(m => ({
+                width: m.width != null ? String(m.width) : '',
+                length: m.length != null ? String(m.length) : ''
+            }));
+        } else if (defect) {
+            const ws = String(defect.crackWidth || '').split(/\s*\/\s*/).map(s => s.trim()).filter(Boolean);
+            const ls = String(defect.crackLength || '').split(/\s*\/\s*/).map(s => s.trim()).filter(Boolean);
+            const n = Math.max(ws.length, ls.length, 0);
+            if (n > 0) {
+                for (let i = 0; i < n; i++) {
+                    measures.push({ width: ws[i] || '', length: ls[i] || '' });
+                }
+            }
+        }
+        renderCrackMeasureRows(measures.length ? measures : [{ width: '', length: '' }]);
+    }
+
+    function bindDefectMeasureInputs() {
+        const addBtn = document.getElementById('btnAddCrackMeasure');
+        if (addBtn && !addBtn.dataset.measureBound) {
+            addBtn.dataset.measureBound = '1';
+            addBtn.addEventListener('click', () => {
+                const rows = Array.from(document.querySelectorAll('#defectCrackMeasureList .defect-crack-measure-row')).map(r => ({
+                    width: (r.querySelector('[data-crack-w]')?.value || '').trim(),
+                    length: (r.querySelector('[data-crack-l]')?.value || '').trim()
+                }));
+                rows.push({ width: '', length: '' });
+                renderCrackMeasureRows(rows);
+                if (typeof scheduleDefectAutoApply === 'function') scheduleDefectAutoApply();
+            });
+        }
+        const countEl = document.getElementById('defectItemCount');
+        if (countEl && !countEl.dataset.measureBound) {
+            countEl.dataset.measureBound = '1';
+            countEl.addEventListener('input', () => {
+                syncSizeFromMeasureInputs();
+                if (typeof scheduleDefectAutoApply === 'function') scheduleDefectAutoApply();
+            });
+        }
         const sizeEl = document.getElementById('defectSize');
         if (sizeEl && !sizeEl.dataset.autoSizeBound) {
             sizeEl.dataset.autoSizeBound = '1';
             sizeEl.addEventListener('input', () => {
                 sizeEl.dataset.autoSize = '';
             });
+        }
+        if (!document.getElementById('defectCrackMeasureList')?.dataset.inited) {
+            const list = document.getElementById('defectCrackMeasureList');
+            if (list) list.dataset.inited = '1';
+            renderCrackMeasureRows([{ width: '', length: '' }]);
         }
     }
 
@@ -9752,6 +10020,8 @@ document.addEventListener('DOMContentLoaded', () => {
         const t = defectType.trim();
         // 완전 일치 우선
         if (defectCausePreset[t]) return t;
+        // 수직/수평/경사/망상/U자형 균열 → 일반 균열 원인
+        if (t.includes('균열') && defectCausePreset['균열']) return '균열';
         // 부분 포함 검색 (긴 키 먼저 → 오탐 방지)
         const keys = Object.keys(defectCausePreset).sort((a, b) => b.length - a.length);
         for (const k of keys) {
@@ -12196,19 +12466,16 @@ document.addEventListener('DOMContentLoaded', () => {
             if (pinIdEl) pinIdEl.value = existingPin.id;
             if (noEl) noEl.value = existingPin.no || 'NO.01';
             if (catEl) catEl.value = existingPin.category || '구조체';
-            updateDefectTypeDropdown(existingPin.category || '구조체', existingPin.defectType);
-            updateDefectCauseDropdown(existingPin.defectType || '균열', existingPin.cause);
             const compCatExisting = existingPin.category || '구조체';
             const compDefaultExisting = (DEFECT_COMPONENT_PRESET[compCatExisting] || DEFECT_COMPONENT_PRESET['구조체'])[0];
             populateDefectComponentDropdown(compCatExisting, existingPin.component || compDefaultExisting);
+            updateDefectTypeDropdown(existingPin.category || '구조체', existingPin.defectType);
+            updateDefectCauseDropdown(existingPin.defectType || '균열', existingPin.cause);
             if (carriedOverEl) carriedOverEl.checked = !!existingPin.isCarriedOver;
             if (locEl) locEl.value = extractDefectLocationDetail(existingPin.location || '');
             if (sizeEl) sizeEl.value = existingPin.size || '';
-            const crackWidthElExisting = document.getElementById('defectCrackWidth');
-            const crackLengthElExisting = document.getElementById('defectCrackLength');
+            setCrackMeasuresToUi(existingPin);
             const itemCountElExisting = document.getElementById('defectItemCount');
-            if (crackWidthElExisting) crackWidthElExisting.value = (existingPin.crackWidth !== undefined && existingPin.crackWidth !== null) ? existingPin.crackWidth : '';
-            if (crackLengthElExisting) crackLengthElExisting.value = (existingPin.crackLength !== undefined && existingPin.crackLength !== null) ? existingPin.crackLength : '';
             if (itemCountElExisting) itemCountElExisting.value = (existingPin.itemCount !== undefined && existingPin.itemCount !== null) ? existingPin.itemCount : '';
             if (sizeEl) {
                 const composed = composeDefectSizeFromMeasures();
@@ -12270,17 +12537,14 @@ document.addEventListener('DOMContentLoaded', () => {
             if (noEl) noEl.value = (tmpl && tmpl.groupId) ? `${tmpl.groupNo}-${tmpl.chainIndex}` : defectNoStr;
             const defaultCat = (tmpl && tmpl.category) || '구조체';
             if (catEl) catEl.value = defaultCat;
+            populateDefectComponentDropdown(defaultCat, tmpl ? (tmpl.component || '') : '');
             updateDefectTypeDropdown(defaultCat, tmpl ? (tmpl.defectType || '') : '');
             updateDefectCauseDropdown(tmpl ? (tmpl.defectType || '') : '', tmpl ? (tmpl.cause || '') : '');
-            populateDefectComponentDropdown(defaultCat, tmpl ? (tmpl.component || '') : '');
             if (carriedOverEl) carriedOverEl.checked = false;
             if (locEl) locEl.value = tmpl ? extractDefectLocationDetail(tmpl.location || '') : '';
             if (sizeEl) sizeEl.value = (tmpl && tmpl.size) || '';
-            const crackWidthElNew = document.getElementById('defectCrackWidth');
-            const crackLengthElNew = document.getElementById('defectCrackLength');
+            setCrackMeasuresToUi(tmpl || null);
             const itemCountElNew = document.getElementById('defectItemCount');
-            if (crackWidthElNew) crackWidthElNew.value = (tmpl && tmpl.crackWidth) || '';
-            if (crackLengthElNew) crackLengthElNew.value = (tmpl && tmpl.crackLength) || '';
             if (itemCountElNew) itemCountElNew.value = (tmpl && tmpl.itemCount) || '';
             if (sizeEl) {
                 const composed = composeDefectSizeFromMeasures();
@@ -12905,10 +13169,13 @@ document.addEventListener('DOMContentLoaded', () => {
             document.getElementById('defectComponent'),
             document.getElementById('defectComponentInput')
         ) || '';
-        const dTypeVal = getDefectComboValue(
-            document.getElementById('defectType'),
-            document.getElementById('defectTypeInput')
-        ) || '';
+        const kindsSelected = getSelectedCrackKindsFromUi();
+        let dTypeVal = kindsSelected.length
+            ? joinDefectTypeList(kindsSelected)
+            : (getDefectComboValue(
+                document.getElementById('defectType'),
+                document.getElementById('defectTypeInput')
+            ) || '');
         const causeVal = getDefectComboValue(
             document.getElementById('defectCause'),
             document.getElementById('defectCauseInput')
@@ -12923,6 +13190,8 @@ document.addEventListener('DOMContentLoaded', () => {
         const arrowOctant = ((parseInt(document.getElementById('defectArrowOctant')?.value || '0', 10) % 8) + 8) % 8;
         const photosVal = window._pendingPhotos || [];
         const isGoodType = dTypeVal === '상태양호';
+        syncHiddenCrackFieldsFromMeasures();
+        const crackMeasuresVal = isGoodType ? [] : getCrackMeasuresFromUi();
         const crackWidthVal = isGoodType ? '' : (document.getElementById('defectCrackWidth')?.value || '');
         const crackLengthVal = isGoodType ? '' : (document.getElementById('defectCrackLength')?.value || '');
         const itemCountVal = isGoodType ? '' : (document.getElementById('defectItemCount')?.value || '');
@@ -12946,6 +13215,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 state.defects[key][idx].size = sizeVal;
                 state.defects[key][idx].crackWidth = crackWidthVal;
                 state.defects[key][idx].crackLength = crackLengthVal;
+                state.defects[key][idx].crackMeasures = crackMeasuresVal;
                 state.defects[key][idx].itemCount = itemCountVal;
                 state.defects[key][idx].isProgress = isProgress;
                 state.defects[key][idx].isLeak = isLeak;
@@ -12999,6 +13269,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 size: sizeVal,
                 crackWidth: crackWidthVal,
                 crackLength: crackLengthVal,
+                crackMeasures: crackMeasuresVal,
                 itemCount: itemCountVal,
                 isProgress: isProgress,
                 isLeak: isLeak,

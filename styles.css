@@ -4217,6 +4217,80 @@ body {
     grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 0.28rem;
 }
+.defect-measure-grid.defect-measure-count-only {
+    grid-template-columns: minmax(0, 1fr);
+    max-width: 8.5rem;
+    margin-top: 0.28rem;
+}
+
+/* 균열 종류 복수 선택 */
+.defect-crack-kind-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.28rem;
+}
+.defect-crack-kind-item {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    border: 1.5px solid #e2e8f0;
+    border-radius: 9px;
+    background: #ffffff;
+    padding: 0.38rem 0.45rem;
+    font-size: 0.78rem;
+    font-weight: 800;
+    color: #334155;
+    cursor: pointer;
+    user-select: none;
+}
+.defect-crack-kind-item:has(input:checked),
+.defect-crack-kind-item.is-checked {
+    border-color: #0369a1;
+    background: #f0f9ff;
+    color: #0c4a6e;
+}
+.defect-crack-kind-item input {
+    width: 0.95rem;
+    height: 0.95rem;
+    accent-color: #0369a1;
+    flex-shrink: 0;
+}
+
+.defect-crack-measure-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.28rem;
+    margin-bottom: 0.28rem;
+}
+.defect-crack-measure-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+    gap: 0.28rem;
+    align-items: stretch;
+}
+.defect-crack-measure-row .defect-measure-btn {
+    min-width: 0;
+}
+.defect-crack-measure-del {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 2.2rem;
+    border: 1.5px solid #fecaca;
+    background: #fff1f2;
+    color: #b91c1c;
+    border-radius: 9px;
+    cursor: pointer;
+    padding: 0 0.35rem;
+}
+.defect-crack-measure-del:hover {
+    background: #ffe4e6;
+}
+.defect-crack-measure-add {
+    width: 100%;
+    margin-bottom: 0.2rem;
+    font-weight: 800;
+}
 
 .defect-measure-btn {
     display: flex;

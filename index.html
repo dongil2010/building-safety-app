@@ -12,7 +12,7 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <meta name="apple-mobile-web-app-title" content="스마트 안전점검">
-    <link rel="stylesheet" href="styles.css?v=20260824_surveyQ1">
+    <link rel="stylesheet" href="styles.css?v=20260824_crackKinds">
     <!-- FontAwesome icons for clean engineering UI -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <!-- PDF 생성용: 페이지별로 직접 캡처해서 조립(큰 보고서에서 html2pdf 한방 렌더링이 캔버스 높이 한계로
@@ -695,25 +695,26 @@
                             <input type="text" id="defectTypeInput" class="form-control defect-combo-input defect-quick-direct-input" placeholder="결함 종류 직접 입력" autocomplete="off">
                             <div class="defect-quick-chip-grid dqg-type" id="quickDefectTypeChips"></div>
                         </div>
+                        <div class="defect-quick-group" id="quickCrackKindGroup" style="display:none;">
+                            <div class="defect-quick-label"><i class="fa-solid fa-grip-lines"></i> 균열 종류 (복수 선택)</div>
+                            <div class="defect-crack-kind-grid" id="defectCrackKindChecks"></div>
+                        </div>
                         <div class="defect-quick-group" id="quickMeasureGroup">
                             <div class="defect-quick-label"><i class="fa-solid fa-ruler-combined"></i> 폭 · 길이 · 개수 (직접 입력)</div>
-                            <div class="defect-measure-grid">
-                                <label class="defect-measure-btn" for="defectCrackWidth">
-                                    <span class="defect-measure-name">폭</span>
-                                    <input type="text" id="defectCrackWidth" inputmode="decimal" placeholder="직접입력" autocomplete="off">
-                                    <span class="defect-measure-unit">mm</span>
-                                </label>
-                                <label class="defect-measure-btn" for="defectCrackLength">
-                                    <span class="defect-measure-name">길이</span>
-                                    <input type="text" id="defectCrackLength" inputmode="decimal" placeholder="직접입력" autocomplete="off">
-                                    <span class="defect-measure-unit">m</span>
-                                </label>
+                            <div class="defect-crack-measure-list" id="defectCrackMeasureList"></div>
+                            <button type="button" class="btn btn-sm btn-outline defect-crack-measure-add" id="btnAddCrackMeasure" title="폭·길이 행 추가">
+                                <i class="fa-solid fa-plus"></i> 폭·길이 추가
+                            </button>
+                            <div class="defect-measure-grid defect-measure-count-only">
                                 <label class="defect-measure-btn" for="defectItemCount">
                                     <span class="defect-measure-name">개수</span>
                                     <input type="text" id="defectItemCount" inputmode="numeric" placeholder="직접입력" autocomplete="off">
                                     <span class="defect-measure-unit">개</span>
                                 </label>
                             </div>
+                            <!-- 하위 호환: 단일 값 동기화용(화면 숨김) -->
+                            <input type="hidden" id="defectCrackWidth" value="">
+                            <input type="hidden" id="defectCrackLength" value="">
                         </div>
                         <div class="defect-quick-group" id="quickCauseGroup">
                             <div class="defect-quick-label"><i class="fa-solid fa-magnifying-glass"></i> 발생 원인</div>
@@ -2128,12 +2129,12 @@
     <script src="js/pdf-vector-bridge.js?v=20260821_land1"></script>
     <script src="js/tabs/registry.js?v=20260821_land1"></script>
     <script src="js/tabs/home.js?v=20260824_webview"></script>
-    <script src="js/tabs/map.js?v=20260824_surveyQ1"></script>
+    <script src="js/tabs/map.js?v=20260824_crackKinds"></script>
     <script src="js/tabs/survey.js?v=20260822_surveyInlineEdit"></script>
     <script src="js/tabs/ndt.js?v=20260822_survey2dScroll"></script>
     <script src="js/shared/report.js?v=20260824_hwpxFix"></script>
     <script src="js/shared/auth.js?v=20260821_land1"></script>
-    <script src="app.js?v=20260824_surveyQ1"></script>
+    <script src="app.js?v=20260824_crackKinds"></script>
     <script>
         document.addEventListener('DOMContentLoaded', function () {
             const btn = document.getElementById('btnExportVectorPdf');
