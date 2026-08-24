@@ -2176,9 +2176,8 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!defect || !state.canvas) return false;
         const center = getDefectMarkingImgCenter(defect);
         if (!center) return false;
-        const modalOpen = document.body.classList.contains('defect-modal-open')
-            || (typeof isDefectModalOpen === 'function' && isDefectModalOpen());
-        const useUncovered = options.uncovered === true || modalOpen;
+        // uncovered는 결함표에서 고를 때만 — 도면 클릭은 클릭 위치 유지
+        const useUncovered = options.uncovered === true;
         const cur = state.view.scale || 1;
         const targetScale = options.keepScale
             ? cur
@@ -2210,7 +2209,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // 좌측 결함 목록에서 특정 결함을 클릭했을 때 캔버스를 그 위치로 이동·표시 (과도한 확대는 피함)
-    window.focusDefectOnCanvas = function(defectId) {
+    window.focusDefectOnCanvas = function(defectId, options = {}) {
         const defects = getCurrentFloorDefects();
         const defect = defects.find(d => d.id === defectId);
         if (!defect || !state.canvas) return;
@@ -2219,7 +2218,7 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
-        panCanvasToDefectMarking(defect);
+        panCanvasToDefectMarking(defect, options);
 
         activeDragPin = defect;
         drawCanvas();
@@ -8737,19 +8736,21 @@ document.addEventListener('DOMContentLoaded', () => {
                     else if (typeof renderDefectListPanel === 'function') renderDefectListPanel();
                 }
             }
-            window.focusDefectOnCanvas(d.id);
+            // 결함표에서 고를 때만 상단 1/4로 맞춤 (도면 클릭은 그 위치 유지)
+            window.focusDefectOnCanvas(d.id, { uncovered: true });
             const rep = d._representative || d;
             const modalOpen = document.body.classList.contains('defect-modal-open')
                 || (typeof isDefectModalOpen === 'function' && isDefectModalOpen());
             const mobileField = !!(window.matchMedia && window.matchMedia('(max-width: 1024px)').matches);
             if ((modalOpen || mobileField) && typeof openAddDefectModal === 'function') {
-                openAddDefectModal(rep.x, rep.y, rep.targetX, rep.targetY, rep);
+                openAddDefectModal(rep.x, rep.y, rep.targetX, rep.targetY, rep, null, { revealMarkingAboveDrawer: true });
             }
         });
         editBtn.addEventListener('click', (e) => {
             e.stopPropagation();
             const rep = d._representative || d;
-            openAddDefectModal(rep.x, rep.y, rep.targetX, rep.targetY, rep);
+            if (rep && rep.id) window.focusDefectOnCanvas(rep.id, { uncovered: true });
+            openAddDefectModal(rep.x, rep.y, rep.targetX, rep.targetY, rep, null, { revealMarkingAboveDrawer: true });
         });
         deleteBtn.addEventListener('click', (e) => {
             e.stopPropagation();
@@ -12166,7 +12167,7 @@ document.addEventListener('DOMContentLoaded', () => {
         closeDefectModal();
     }, true);
 
-    function openAddDefectModal(boxX, boxY, targetX, targetY, existingPin = null, areaRect = null) {
+    function openAddDefectModal(boxX, boxY, targetX, targetY, existingPin = null, areaRect = null, options = {}) {
         window._defectFormHydrating = true;
         window.clearTimeout(window._defectAutoApplyTimer);
         window._defectAutoApplyTimer = null;
@@ -12379,7 +12380,10 @@ document.addEventListener('DOMContentLoaded', () => {
                     renderDefectListPanel({ scrollToSelection: true });
                 }
                 scheduleRevealDefectListAboveDrawer();
-                if (existingPin) scheduleRevealMarkingAboveDrawer(existingPin);
+                // 결함표에서 고른 경우만 마킹을 상단 1/4로 — 도면 클릭은 순간이동하지 않음
+                if (existingPin && options && options.revealMarkingAboveDrawer) {
+                    scheduleRevealMarkingAboveDrawer(existingPin);
+                }
             });
         }
     }
