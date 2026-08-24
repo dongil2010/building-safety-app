@@ -283,6 +283,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 hiddenDefectComponents: window.state.hiddenDefectComponents || [],
                 hiddenDefectTypes: window.state.hiddenDefectTypes || {},
                 hiddenDefectCauses: window.state.hiddenDefectCauses || {},
+                defectComponentOrder: window.state.defectComponentOrder || {},
+                defectTypeOrder: window.state.defectTypeOrder || {},
+                defectCauseOrder: window.state.defectCauseOrder || {},
                 styleColors: window.state.styleColors || null,
                 styleSizes: window.state.styleSizes || null,
                 defectLeaderLineScale: (window.state.defectLeaderLineScale !== undefined ? window.state.defectLeaderLineScale : 1.0),
@@ -393,6 +396,15 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
                 if (parsed.hiddenDefectCauses) {
                     window.state.hiddenDefectCauses = parsed.hiddenDefectCauses;
+                }
+                if (parsed.defectComponentOrder) {
+                    window.state.defectComponentOrder = parsed.defectComponentOrder;
+                }
+                if (parsed.defectTypeOrder) {
+                    window.state.defectTypeOrder = parsed.defectTypeOrder;
+                }
+                if (parsed.defectCauseOrder) {
+                    window.state.defectCauseOrder = parsed.defectCauseOrder;
                 }
                 if (parsed.styleColors) {
                     window.state.styleColors = parsed.styleColors;
@@ -9578,25 +9590,22 @@ document.addEventListener('DOMContentLoaded', () => {
         const hidden = window.state.hiddenDefectComponents[cat];
         const presetList = (DEFECT_COMPONENT_PRESET[cat] || DEFECT_COMPONENT_PRESET['구조체']).filter(c => !hidden.includes(c));
         const customList = window.state.customDefectComponents[cat];
+        const ordered = applySavedOptionOrder(
+            presetList.concat(customList.filter(item => !presetList.includes(item))),
+            ensureOptionOrderEntry('defectComponentOrder', cat)
+        );
 
         let html = `<option value="" ${!currentVal ? 'selected' : ''}>—</option>`;
-        presetList.forEach(item => {
+        ordered.forEach(item => {
             const label = item === '기타' ? '기타 부재' : item;
             const sel = (currentVal && currentVal === item) ? 'selected' : '';
             html += `<option value="${item}" ${sel}>${label}</option>`;
         });
 
-        customList.forEach(item => {
-            if (!presetList.includes(item)) {
-                const sel = (currentVal && currentVal === item) ? 'selected' : '';
-                html += `<option value="${item}" ${sel}>${item}</option>`;
-            }
-        });
-
         html += `<option value="__ADD_CUSTOM_COMPONENT__">➕ [부재 직접 추가...]</option>`;
         select.innerHTML = html;
 
-        if (currentVal && !presetList.includes(currentVal) && !customList.includes(currentVal)) {
+        if (currentVal && !ordered.includes(currentVal)) {
             const customOpt = document.createElement('option');
             customOpt.value = currentVal;
             customOpt.textContent = currentVal;
@@ -9761,7 +9770,7 @@ document.addEventListener('DOMContentLoaded', () => {
         crackKinds.forEach(push);
         preset.forEach((t) => { if (!crackKinds.includes(t)) push(t); });
         custom.forEach(push);
-        return out;
+        return applySavedOptionOrder(out, ensureOptionOrderEntry('defectTypeOrder', category));
     }
 
     function updateDefectTypeDropdown(category, currentVal = null) {
@@ -9787,24 +9796,24 @@ document.addEventListener('DOMContentLoaded', () => {
         let html = `<option value="" ${!currentVal ? 'selected' : ''}>—</option>`;
         const allOptions = presetList.slice();
         if (crackKinds) crackKinds.forEach(k => { if (!allOptions.includes(k)) allOptions.push(k); });
-        allOptions.forEach(item => {
+        customList.forEach(item => {
+            if (!allOptions.includes(item)) allOptions.push(item);
+        });
+        const orderedOptions = applySavedOptionOrder(
+            allOptions,
+            ensureOptionOrderEntry('defectTypeOrder', category)
+        );
+        orderedOptions.forEach(item => {
             const sel = (currentVal && currentVal === item) ? 'selected' : '';
             html += `<option value="${item}" ${sel}>${item}</option>`;
-        });
-
-        customList.forEach(item => {
-            if (!allOptions.includes(item)) {
-                const sel = (currentVal && currentVal === item) ? 'selected' : '';
-                html += `<option value="${item}" ${sel}>${item}</option>`;
-            }
         });
 
         html += `<option value="__ADD_CUSTOM__">➕ [결함 종류 직접 추가...]</option>`;
         select.innerHTML = html;
 
-        if (currentVal && !allOptions.includes(currentVal) && !customList.includes(currentVal)
+        if (currentVal && !orderedOptions.includes(currentVal)
             && !isTransientDefectTypeValue(currentVal)
-            && !parseDefectTypeList(currentVal).every(t => allOptions.includes(t) || customList.includes(t))) {
+            && !parseDefectTypeList(currentVal).every(t => orderedOptions.includes(t))) {
             const customOpt = document.createElement('option');
             customOpt.value = currentVal;
             customOpt.textContent = currentVal;
@@ -10289,10 +10298,10 @@ document.addEventListener('DOMContentLoaded', () => {
         const hidden = window.state.hiddenDefectCauses[key] || [];
         const presetList = (defectCausePreset[key] || defectCausePreset['기타']).filter(c => !hidden.includes(c));
         const customList = window.state.customDefectCauses[key] || [];
-        const allOptions = presetList.slice();
-        customList.forEach(item => {
-            if (!allOptions.includes(item)) allOptions.push(item);
-        });
+        const allOptions = applySavedOptionOrder(
+            presetList.concat(customList.filter(item => !presetList.includes(item))),
+            ensureOptionOrderEntry('defectCauseOrder', key)
+        );
 
         let html = `<option value="" ${!currentVal ? 'selected' : ''}>—</option>`;
         allOptions.forEach(item => {
@@ -10361,6 +10370,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     if (!window.state.customDefectComponents[cat]) window.state.customDefectComponents[cat] = [];
                     if (!window.state.customDefectComponents[cat].includes(trimmed)) {
                         window.state.customDefectComponents[cat].push(trimmed);
+                        const order = ensureOptionOrderEntry('defectComponentOrder', cat);
+                        if (!order.includes(trimmed)) order.push(trimmed);
                         saveStateToLocalStorage();
                     }
                     populateDefectComponentDropdown(cat, trimmed);
@@ -10395,6 +10406,8 @@ document.addEventListener('DOMContentLoaded', () => {
                         if (!window.state.customDefectTypes[cat]) window.state.customDefectTypes[cat] = [];
                         if (!window.state.customDefectTypes[cat].includes(trimmed)) {
                             window.state.customDefectTypes[cat].push(trimmed);
+                            const order = ensureOptionOrderEntry('defectTypeOrder', cat);
+                            if (!order.includes(trimmed)) order.push(trimmed);
                             saveStateToLocalStorage();
                         }
                     }
@@ -10430,6 +10443,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     if (!window.state.customDefectCauses[key]) window.state.customDefectCauses[key] = [];
                     if (!window.state.customDefectCauses[key].includes(trimmed)) {
                         window.state.customDefectCauses[key].push(trimmed);
+                        const order = ensureOptionOrderEntry('defectCauseOrder', key);
+                        if (!order.includes(trimmed)) order.push(trimmed);
                         saveStateToLocalStorage();
                     }
                     updateDefectCauseDropdown(dType, trimmed);
@@ -10491,6 +10506,47 @@ document.addEventListener('DOMContentLoaded', () => {
 
     bindDefectArrowOctantGrid();
 
+    function applySavedOptionOrder(items, orderList) {
+        if (!Array.isArray(items) || !items.length) return [];
+        if (!Array.isArray(orderList) || !orderList.length) return items.slice();
+        const remaining = new Set(items);
+        const out = [];
+        orderList.forEach((t) => {
+            if (remaining.has(t)) {
+                out.push(t);
+                remaining.delete(t);
+            }
+        });
+        items.forEach((t) => {
+            if (remaining.has(t)) out.push(t);
+        });
+        return out;
+    }
+
+    function ensureOptionOrderEntry(bucket, key) {
+        if (!window.state[bucket] || typeof window.state[bucket] !== 'object') {
+            window.state[bucket] = {};
+        }
+        if (!Array.isArray(window.state[bucket][key])) {
+            window.state[bucket][key] = [];
+        }
+        return window.state[bucket][key];
+    }
+
+    function getDefaultVisibleOptionTexts(ctx) {
+        const visiblePreset = (ctx.presetList || []).filter(item => !(ctx.hiddenList || []).includes(item));
+        const customs = (ctx.customList || []).filter(item => !visiblePreset.includes(item));
+        return visiblePreset.concat(customs);
+    }
+
+    function getOrderedVisibleOptionItems(ctx) {
+        const texts = applySavedOptionOrder(getDefaultVisibleOptionTexts(ctx), ctx.orderList);
+        return texts.map((text) => ({
+            text,
+            isPreset: (ctx.presetList || []).includes(text) && !(ctx.hiddenList || []).includes(text)
+        }));
+    }
+
     // --- 부재 명칭 / 결함 종류 / 결함 원인 항목 관리(추가·삭제) 모달 ---
     function getOptionManagerContext() {
         const field = window._optionManagerField;
@@ -10507,6 +10563,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 presetList: DEFECT_COMPONENT_PRESET[compCat] || DEFECT_COMPONENT_PRESET['구조체'],
                 hiddenList: window.state.hiddenDefectComponents[compCat],
                 customList: window.state.customDefectComponents[compCat],
+                orderList: ensureOptionOrderEntry('defectComponentOrder', compCat),
                 labelFor: (item) => (item === '기타' ? '기타 부재' : item),
                 refresh: () => populateDefectComponentDropdown(compCat, getDefectComboValue(
                     document.getElementById('defectComponent'),
@@ -10530,6 +10587,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 presetList: getDefectTypePresetFor(cat, component),
                 hiddenList: window.state.hiddenDefectTypes[cat],
                 customList: window.state.customDefectTypes[cat],
+                orderList: ensureOptionOrderEntry('defectTypeOrder', cat),
                 labelFor: (item) => item,
                 refresh: () => updateDefectTypeDropdown(cat, getDefectComboValue(
                     document.getElementById('defectType'),
@@ -10553,6 +10611,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 presetList: defectCausePreset[key] || [],
                 hiddenList: window.state.hiddenDefectCauses[key],
                 customList: window.state.customDefectCauses[key],
+                orderList: ensureOptionOrderEntry('defectCauseOrder', key),
                 labelFor: (item) => item,
                 refresh: () => updateDefectCauseDropdown(dType, getDefectComboValue(
                     document.getElementById('defectCause'),
@@ -10564,6 +10623,61 @@ document.addEventListener('DOMContentLoaded', () => {
         return null;
     }
 
+    function commitOptionManagerOrderFromDom(listEl) {
+        const ctx = getOptionManagerContext();
+        if (!ctx || !ctx.orderList || !listEl) return;
+        const texts = Array.from(listEl.querySelectorAll('.option-manager-item'))
+            .map((row) => row.dataset.value)
+            .filter(Boolean);
+        ctx.orderList.length = 0;
+        texts.forEach((t) => ctx.orderList.push(t));
+        saveStateToLocalStorage();
+        if (typeof ctx.refresh === 'function') ctx.refresh();
+    }
+
+    function bindOptionManagerDrag(listEl) {
+        const handles = listEl.querySelectorAll('.option-manager-item-handle');
+        handles.forEach((handle) => {
+            handle.addEventListener('pointerdown', (e) => {
+                if (e.button != null && e.button !== 0) return;
+                const row = handle.closest('.option-manager-item');
+                if (!row || !listEl.contains(row)) return;
+                e.preventDefault();
+                e.stopPropagation();
+                handle.setPointerCapture(e.pointerId);
+                row.classList.add('is-dragging');
+                listEl.classList.add('is-reordering');
+
+                const onMove = (ev) => {
+                    const el = document.elementFromPoint(ev.clientX, ev.clientY);
+                    const over = el && el.closest('.option-manager-item');
+                    if (!over || over === row || !listEl.contains(over)) return;
+                    const rows = Array.from(listEl.querySelectorAll('.option-manager-item'));
+                    const fromIdx = rows.indexOf(row);
+                    const toIdx = rows.indexOf(over);
+                    if (fromIdx < 0 || toIdx < 0 || fromIdx === toIdx) return;
+                    if (fromIdx < toIdx) listEl.insertBefore(row, over.nextSibling);
+                    else listEl.insertBefore(row, over);
+                    Array.from(listEl.querySelectorAll('.option-manager-item')).forEach((r, i) => {
+                        r.dataset.idx = String(i);
+                    });
+                };
+                const onUp = () => {
+                    try { handle.releasePointerCapture(e.pointerId); } catch (_) {}
+                    row.classList.remove('is-dragging');
+                    listEl.classList.remove('is-reordering');
+                    handle.removeEventListener('pointermove', onMove);
+                    handle.removeEventListener('pointerup', onUp);
+                    handle.removeEventListener('pointercancel', onUp);
+                    commitOptionManagerOrderFromDom(listEl);
+                };
+                handle.addEventListener('pointermove', onMove);
+                handle.addEventListener('pointerup', onUp);
+                handle.addEventListener('pointercancel', onUp);
+            });
+        });
+    }
+
     function renderOptionManagerList() {
         const ctx = getOptionManagerContext();
         const titleEl = document.getElementById('optionManagerTitle');
@@ -10572,9 +10686,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (titleEl) titleEl.innerHTML = `<i class="fa-solid fa-list-check"></i> ${ctx.title}`;
 
-        const visiblePreset = ctx.presetList.filter(item => !ctx.hiddenList.includes(item));
-        const visibleItems = visiblePreset.map(item => ({ text: item, isPreset: true }))
-            .concat(ctx.customList.map(item => ({ text: item, isPreset: false })));
+        const visibleItems = getOrderedVisibleOptionItems(ctx);
 
         listEl.innerHTML = '';
         if (visibleItems.length === 0) {
@@ -10582,11 +10694,22 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
-        visibleItems.forEach(({ text, isPreset }) => {
+        visibleItems.forEach(({ text, isPreset }, idx) => {
             const row = document.createElement('div');
             row.className = 'option-manager-item';
+            row.dataset.value = text;
+            row.dataset.idx = String(idx);
+
+            const handle = document.createElement('button');
+            handle.type = 'button';
+            handle.className = 'option-manager-item-handle';
+            handle.title = '끌어서 순서 변경';
+            handle.setAttribute('aria-label', '끌어서 순서 변경');
+            handle.innerHTML = '<i class="fa-solid fa-grip-vertical"></i>';
+            row.appendChild(handle);
 
             const label = document.createElement('span');
+            label.className = 'option-manager-item-label';
             label.textContent = ctx.labelFor(text);
             row.appendChild(label);
 
@@ -10601,6 +10724,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
             listEl.appendChild(row);
         });
+        bindOptionManagerDrag(listEl);
     }
 
     function deleteOptionItem(item, isPreset) {
@@ -10619,6 +10743,10 @@ document.addEventListener('DOMContentLoaded', () => {
             const idx = ctx.customList.indexOf(item);
             if (idx !== -1) ctx.customList.splice(idx, 1);
         }
+        if (Array.isArray(ctx.orderList)) {
+            const oIdx = ctx.orderList.indexOf(item);
+            if (oIdx !== -1) ctx.orderList.splice(oIdx, 1);
+        }
 
         saveStateToLocalStorage();
         renderOptionManagerList();
@@ -10634,9 +10762,10 @@ document.addEventListener('DOMContentLoaded', () => {
         const ok = confirm('현재 항목(부재/유형/원인) 목록을 기본값으로 완전히 되돌릴까요? (숨김 해제 + 커스텀 삭제)');
         if (!ok) return;
 
-        // 숨김/커스텀 목록을 “싹” 비운다 (기존 선택값이 커스텀이었던 경우 재주입 방지 목적)
+        // 숨김/커스텀/정렬 목록을 “싹” 비운다 (기존 선택값이 커스텀이었던 경우 재주입 방지 목적)
         if (Array.isArray(ctx.hiddenList)) ctx.hiddenList.length = 0;
         if (Array.isArray(ctx.customList)) ctx.customList.length = 0;
+        if (Array.isArray(ctx.orderList)) ctx.orderList.length = 0;
         saveStateToLocalStorage();
 
         // UI 기본값으로 복원(첫 프리셋 선택)
@@ -10678,14 +10807,17 @@ document.addEventListener('DOMContentLoaded', () => {
         migrateDefectComponentStateShape();
         window.state.hiddenDefectComponents = { '구조체': [], '비구조체': [], '마감재': [] };
         window.state.customDefectComponents = { '구조체': [], '비구조체': [], '마감재': [] };
+        window.state.defectComponentOrder = { '구조체': [], '비구조체': [], '마감재': [] };
 
         // type
         window.state.hiddenDefectTypes = { '구조체': [], '비구조체': [], '마감재': [] };
         window.state.customDefectTypes = { '구조체': [], '비구조체': [], '마감재': [] };
+        window.state.defectTypeOrder = { '구조체': [], '비구조체': [], '마감재': [] };
 
         // cause (keyed by defectType->causeKey)
         window.state.hiddenDefectCauses = {};
         window.state.customDefectCauses = {};
+        window.state.defectCauseOrder = {};
 
         saveStateToLocalStorage();
 
@@ -11343,6 +11475,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 ctx.hiddenList.splice(hiddenIdx, 1);
             } else {
                 ctx.customList.push(val);
+            }
+            if (Array.isArray(ctx.orderList) && !ctx.orderList.includes(val)) {
+                ctx.orderList.push(val);
             }
 
             saveStateToLocalStorage();
