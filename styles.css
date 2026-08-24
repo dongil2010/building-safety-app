@@ -4292,6 +4292,41 @@ body {
     font-weight: 800;
 }
 
+/* 발생 원인 복수 선택 */
+.defect-cause-check-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.28rem;
+}
+.defect-cause-check-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.35rem;
+    border: 1.5px solid #e2e8f0;
+    border-radius: 9px;
+    background: #ffffff;
+    padding: 0.38rem 0.45rem;
+    font-size: 0.74rem;
+    font-weight: 800;
+    color: #334155;
+    cursor: pointer;
+    user-select: none;
+    line-height: 1.25;
+}
+.defect-cause-check-item:has(input:checked),
+.defect-cause-check-item.is-checked {
+    border-color: #b45309;
+    background: #fffbeb;
+    color: #92400e;
+}
+.defect-cause-check-item input {
+    width: 0.95rem;
+    height: 0.95rem;
+    accent-color: #b45309;
+    flex-shrink: 0;
+    margin-top: 0.1rem;
+}
+
 .defect-measure-btn {
     display: flex;
     flex-direction: column;

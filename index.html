@@ -12,7 +12,7 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <meta name="apple-mobile-web-app-title" content="스마트 안전점검">
-    <link rel="stylesheet" href="styles.css?v=20260824_crackKinds">
+    <link rel="stylesheet" href="styles.css?v=20260824_causeMulti">
     <!-- FontAwesome icons for clean engineering UI -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <!-- PDF 생성용: 페이지별로 직접 캡처해서 조립(큰 보고서에서 html2pdf 한방 렌더링이 캔버스 높이 한계로
@@ -717,8 +717,9 @@
                             <input type="hidden" id="defectCrackLength" value="">
                         </div>
                         <div class="defect-quick-group" id="quickCauseGroup">
-                            <div class="defect-quick-label"><i class="fa-solid fa-magnifying-glass"></i> 발생 원인</div>
-                            <div class="defect-quick-chip-grid dqg-cause" id="quickCauseChips"></div>
+                            <div class="defect-quick-label"><i class="fa-solid fa-magnifying-glass"></i> 발생 원인 (복수 선택)</div>
+                            <div class="defect-cause-check-grid" id="defectCauseChecks"></div>
+                            <div class="defect-quick-chip-grid dqg-cause" id="quickCauseChips" style="display:none;" aria-hidden="true"></div>
                         </div>
                     </div>
 
@@ -2129,12 +2130,12 @@
     <script src="js/pdf-vector-bridge.js?v=20260821_land1"></script>
     <script src="js/tabs/registry.js?v=20260821_land1"></script>
     <script src="js/tabs/home.js?v=20260824_webview"></script>
-    <script src="js/tabs/map.js?v=20260824_crackKinds"></script>
+    <script src="js/tabs/map.js?v=20260824_causeMulti"></script>
     <script src="js/tabs/survey.js?v=20260822_surveyInlineEdit"></script>
     <script src="js/tabs/ndt.js?v=20260822_survey2dScroll"></script>
     <script src="js/shared/report.js?v=20260824_hwpxFix"></script>
     <script src="js/shared/auth.js?v=20260821_land1"></script>
-    <script src="app.js?v=20260824_crackKinds"></script>
+    <script src="app.js?v=20260824_causeMulti"></script>
     <script>
         document.addEventListener('DOMContentLoaded', function () {
             const btn = document.getElementById('btnExportVectorPdf');

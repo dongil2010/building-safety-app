@@ -9443,13 +9443,13 @@ document.addEventListener('DOMContentLoaded', () => {
         });
 
         const causeGroup = document.getElementById('quickCauseGroup');
-        const causeOptions = getQuickPickOptionsFromSelect(causeSelect).slice(0, 12);
         if (causeGroup) causeGroup.style.display = currentType === '상태양호' ? 'none' : '';
-        renderQuickPickChipGroup('quickCauseChips', causeOptions, currentCause, (value) => {
-            syncDefectComboFields(causeSelect, causeInput, value);
-            if (typeof scheduleDefectAutoApply === 'function') scheduleDefectAutoApply();
-            refreshDefectQuickPickBar();
-        });
+        // 발생 원인은 체크박스 복수 선택 — 칩은 숨김 유지
+        const causeChipHost = document.getElementById('quickCauseChips');
+        if (causeChipHost) {
+            causeChipHost.style.display = 'none';
+            causeChipHost.innerHTML = '';
+        }
     }
 
     function bindDefectComboInputs() {
@@ -9473,7 +9473,14 @@ document.addEventListener('DOMContentLoaded', () => {
                     toggleDefectSizeInputMode();
                 }
             },
-            { selectId: 'defectCause', inputId: 'defectCauseInput' }
+            {
+                selectId: 'defectCause',
+                inputId: 'defectCauseInput',
+                onChange: (v) => {
+                    const opts = getQuickPickOptionsFromSelect(document.getElementById('defectCause'));
+                    syncCauseChecksFromValue(v, opts);
+                }
+            }
         ];
         pairs.forEach(({ selectId, inputId, onChange }) => {
             const select = document.getElementById(selectId);
@@ -9984,51 +9991,189 @@ document.addEventListener('DOMContentLoaded', () => {
     // --- Dynamic Defect Cause Presets & Custom Adding ---
     const defectCausePreset = {
         // ── 구조체 결함 ──
-        '균열':         ['건조수축', '내력 부족', '부등침하', '시공불량', '신축이음 불량', '온도·열응력', '과하중', '지반 침하', '기타'],
-        '누수':         ['방수층 파손', '배관 파손/연결부 누수', '균열부 침투', '지하수 유입', '외벽 조인트 파손', '창호 주변 밀봉 불량', '기타'],
-        '철근노출':     ['피복두께 부족', '콘크리트 중성화', '염해 손상', '시공 다짐 불량', '거푸집 변형', '기타'],
-        '백태/유출':    ['수분 침투 및 염류 용해', '방수층 손상', '콘크리트 투수성 증가', '배수 불량', '기타'],
-        '박리/박락':    ['철근 부식 팽창', '동결융해 반복', '부착력 저하', '시공 불량', '과하중 충격', '기타'],
-        '신축이음/재료분리 손상': ['신축이음 노후화', '온도변화 수축팽창', '시공 불량', '구조체 변위', '지진·진동', '기타'],
+        '균열': [
+            '건조수축', '수화열·온도균열', '온도·열응력', '내력 부족', '배근 부족/피복 부족',
+            '과하중', '집중하중', '시공불량', '다짐·양생 불량', '배합비 불량',
+            '신축이음 불량/미설치', '부등침하', '지반 침하', '기초 변위',
+            '지진·진동', '피로·반복하중', '크리프·장기변형', '동결융해', '알칼리골재반응',
+            '염해', '중성화', '누수·습기 침투', '구조변경·개구부', '설계오류', '기타'
+        ],
+        '누수': [
+            '방수층 파손', '방수층 시공불량', '배관 파손/연결부 누수', '균열부 침투',
+            '지하수 유입', '외벽 조인트 파손', '창호 주변 밀봉 불량', '드레인·배수 불량',
+            '옥상·파라펫 손상', '이음부 실런트 노후', '콘크리트 투수', '기타'
+        ],
+        '철근노출': [
+            '피복두께 부족', '콘크리트 중성화', '염해 손상', '철근 부식 팽창',
+            '시공 다짐 불량', '거푸집 변형', '박리·박락 동반', '누수·습기', '기타'
+        ],
+        '백태/유출': [
+            '수분 침투 및 염류 용해', '방수층 손상', '콘크리트 투수성 증가',
+            '배수 불량', '균열부 침투', '지하수 상승', '기타'
+        ],
+        '박리/박락': [
+            '철근 부식 팽창', '동결융해 반복', '부착력 저하', '시공 불량',
+            '과하중 충격', '중성화', '염해', '화재 손상', '기타'
+        ],
+        '신축이음/재료분리 손상': [
+            '신축이음 노후화', '온도변화 수축팽창', '시공 불량', '구조체 변위',
+            '지진·진동', '이음재 탈락', '재료분리(골재 노출)', '기타'
+        ],
         // ── 비구조체 결함 ──
-        '조적벽체 균열':        ['기초 부등침하', '지진·진동', '과하중', '건조수축', '온도변화', '기타'],
-        '조인트 이격/파손':     ['실런트 노후화', '구조체 변위', '온도·열팽창', '시공 불량', '기타'],
-        '천장재 들뜸/탈락':     ['접착력 저하', '수분 흡수 팽창', '시공 불량', '진동·충격', '노후화', '기타'],
-        '설비 배관 누수/손상':  ['배관 노후화', '연결부 밀봉 불량', '진동·충격', '동파', '시공 불량', '기타'],
-        '창호/유리 이격':       ['실런트 노후화', '시공 불량', '구조체 변위', '온도·열팽창', '기타'],
+        '조적벽체 균열': [
+            '기초 부등침하', '지진·진동', '과하중', '건조수축', '온도변화',
+            '조적 시공불량', '인방·개구부 응력', '몰탈 배합 불량', '기타'
+        ],
+        '조인트 이격/파손': [
+            '실런트 노후화', '구조체 변위', '온도·열팽창', '시공 불량',
+            '이음폭 부족', '지진·진동', '기타'
+        ],
+        '천장재 들뜸/탈락': [
+            '접착력 저하', '수분 흡수 팽창', '시공 불량', '진동·충격',
+            '노후화', '걸이재 이완', '누수', '기타'
+        ],
+        '설비 배관 누수/손상': [
+            '배관 노후화', '연결부 밀봉 불량', '진동·충격', '동파',
+            '시공 불량', '부식', '과압', '기타'
+        ],
+        '창호/유리 이격': [
+            '실런트 노후화', '시공 불량', '구조체 변위', '온도·열팽창',
+            '프레임 변형', '지진·진동', '기타'
+        ],
         // ── 마감재 결함 ──
-        '타일 들뜸/탈락':       ['접착 모르타르 노후화', '온도·열팽창', '습기 침투', '시공 불량(바탕재 미흡)', '진동·충격', '기타'],
-        '몰탈 균열':            ['건조수축', '배합비 불량', '바탕재 부착 불량', '온도변화', '구조체 변위', '기타'],
-        '도장 페인트 변색/탈락':['습기 유입', '자외선 노후화', '바탕면 처리 불량', '도료 품질 불량', '기타'],
-        '방수층 손상/들뜸':     ['방수재 노후화', '바탕재 처리 미흡', '구조체 변형', '온도·열팽창', '시공 불량', '기타'],
-        '석재 팟칭':            ['충격 손상', '철물 부식 팽창', '접착력 저하', '기타'],
-        '부식/녹':              ['도장 손상', '습기·누수', '염해', '유지관리 부족', '기타'],
-        '변형/좌굴':            ['과하중', '좌굴', '시공 불량', '충돌·충격', '기타'],
-        '볼트 이완/파손':       ['체결 불량', '진동', '과하중', '부식', '기타'],
-        '용접부 균열/불량':     ['용접 불량', '피로', '잔류응력', '과하중', '기타'],
-        '도장 박리':            ['도장 노후화', '습기', '바탕 처리 불량', '기타'],
-        '접합부 손상':          ['볼트 이완', '용접 불량', '과하중', '시공 불량', '기타'],
-        '단면 손실':            ['부식', '화재', '충돌', '기타'],
-        '처짐':                 ['과하중', '강성 부족', '시공 불량', '장기 크리프', '기타'],
-        '데크플레이트 부식':    ['습기·누수', '도장 손상', '염해', '기타'],
+        '타일 들뜸/탈락': [
+            '접착 모르타르 노후화', '온도·열팽창', '습기 침투', '시공 불량(바탕재 미흡)',
+            '진동·충격', '바탕 균열 전달', '동결융해', '기타'
+        ],
+        '몰탈 균열': [
+            '건조수축', '배합비 불량', '바탕재 부착 불량', '온도변화',
+            '구조체 변위', '양생 불량', '두께 부족', '기타'
+        ],
+        '도장 페인트 변색/탈락': [
+            '습기 유입', '자외선 노후화', '바탕면 처리 불량', '도료 품질 불량',
+            '염해·오염', '재도장 주기 초과', '기타'
+        ],
+        '방수층 손상/들뜸': [
+            '방수재 노후화', '바탕재 처리 미흡', '구조체 변형', '온도·열팽창',
+            '시공 불량', '배수 불량', '자외선·노출', '기타'
+        ],
+        '석재 팟칭': [
+            '충격 손상', '철물 부식 팽창', '접착력 저하', '동결융해', '기타'
+        ],
+        '부식/녹': [
+            '도장 손상', '습기·누수', '염해', '유지관리 부족', '결로', '기타'
+        ],
+        '변형/좌굴': [
+            '과하중', '좌굴', '시공 불량', '충돌·충격', '온도변형', '기타'
+        ],
+        '볼트 이완/파손': [
+            '체결 불량', '진동', '과하중', '부식', '피로', '기타'
+        ],
+        '용접부 균열/불량': [
+            '용접 불량', '피로', '잔류응력', '과하중', '시공관리 미흡', '기타'
+        ],
+        '도장 박리': [
+            '도장 노후화', '습기', '바탕 처리 불량', '자외선', '기타'
+        ],
+        '접합부 손상': [
+            '볼트 이완', '용접 불량', '과하중', '시공 불량', '부식', '기타'
+        ],
+        '단면 손실': [
+            '부식', '화재', '충돌', '마모', '기타'
+        ],
+        '처짐': [
+            '과하중', '강성 부족', '시공 불량', '장기 크리프', '부등침하', '기타'
+        ],
+        '데크플레이트 부식': [
+            '습기·누수', '도장 손상', '염해', '결로', '기타'
+        ],
         // ── 공통 fallback ──
-        '기타':                 ['노후화', '시공 불량', '외력·충격', '환경 요인', '기타']
+        '기타': [
+            '노후화', '시공 불량', '외력·충격', '환경 요인', '유지관리 부족',
+            '설계·시공 오차', '복합 원인', '기타'
+        ]
     };
+
+    function parseCauseList(raw) {
+        return String(raw == null ? '' : raw)
+            .split(/[,，/·•|]+/)
+            .map(s => s.trim())
+            .filter(Boolean);
+    }
+    function joinCauseList(list) {
+        return (list || []).map(s => String(s || '').trim()).filter(Boolean).join(', ');
+    }
+    function getSelectedCausesFromUi() {
+        const box = document.getElementById('defectCauseChecks');
+        if (!box) return [];
+        return Array.from(box.querySelectorAll('input[type="checkbox"]:checked'))
+            .map(el => el.value)
+            .filter(Boolean);
+    }
 
     function getCauseKey(defectType) {
         if (!defectType) return '기타';
-        const t = defectType.trim();
-        // 완전 일치 우선
+        const parts = parseDefectTypeList(defectType);
+        for (const part of parts) {
+            const t = part.trim();
+            if (defectCausePreset[t]) return t;
+            if (t.includes('균열') && defectCausePreset['균열']) return '균열';
+        }
+        const t = String(defectType).trim();
         if (defectCausePreset[t]) return t;
-        // 수직/수평/경사/망상/U자형 균열 → 일반 균열 원인
         if (t.includes('균열') && defectCausePreset['균열']) return '균열';
-        // 부분 포함 검색 (긴 키 먼저 → 오탐 방지)
         const keys = Object.keys(defectCausePreset).sort((a, b) => b.length - a.length);
         for (const k of keys) {
             if (k === '기타') continue;
             if (t.includes(k) || k.includes(t)) return k;
         }
         return '기타';
+    }
+
+    function syncCauseChecksFromValue(causeVal, optionList) {
+        const box = document.getElementById('defectCauseChecks');
+        const group = document.getElementById('quickCauseGroup');
+        if (!box) return;
+        const options = (optionList || []).filter(Boolean);
+        const selected = new Set(parseCauseList(causeVal));
+        // 목록에 없는 기존 선택값도 유지 표시
+        parseCauseList(causeVal).forEach(c => {
+            if (c && !options.includes(c)) options.push(c);
+        });
+        if (!options.length) {
+            box.innerHTML = '';
+            return;
+        }
+        box.innerHTML = options.map((cause, idx) => {
+            const id = `causeCheck_${idx}_${String(cause).replace(/[^a-zA-Z0-9가-힣]/g, '_')}`;
+            const checked = selected.has(cause) ? 'checked' : '';
+            const safe = String(cause).replace(/"/g, '&quot;');
+            return `<label class="defect-cause-check-item${checked ? ' is-checked' : ''}" for="${id}">
+                <input type="checkbox" id="${id}" value="${safe}" ${checked}>
+                <span>${cause}</span>
+            </label>`;
+        }).join('');
+        box.querySelectorAll('input[type="checkbox"]').forEach(inp => {
+            inp.addEventListener('change', () => {
+                const causes = getSelectedCausesFromUi();
+                const joined = joinCauseList(causes);
+                const causeSelect = document.getElementById('defectCause');
+                const causeInput = document.getElementById('defectCauseInput');
+                syncDefectComboFields(causeSelect, causeInput, joined);
+                box.querySelectorAll('.defect-cause-check-item').forEach(lab => {
+                    const c = lab.querySelector('input');
+                    lab.classList.toggle('is-checked', !!(c && c.checked));
+                });
+                if (typeof scheduleDefectAutoApply === 'function') scheduleDefectAutoApply();
+            });
+        });
+        if (group) {
+            const typeVal = getDefectComboValue(
+                document.getElementById('defectType'),
+                document.getElementById('defectTypeInput')
+            );
+            group.style.display = typeVal === '상태양호' ? 'none' : '';
+        }
     }
 
     function updateDefectCauseDropdown(defectType, currentVal = null) {
@@ -10040,45 +10185,53 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         if (!window.state.hiddenDefectCauses) window.state.hiddenDefectCauses = {};
 
-        if (!defectType || !String(defectType).trim()) {
+        if (!defectType || !String(defectType).trim() || String(defectType).trim() === '상태양호') {
             select.innerHTML = `<option value="" selected>—</option><option value="__ADD_CUSTOM_CAUSE__">➕ [결함 원인 직접 추가...]</option>`;
             syncDefectComboFields(select, document.getElementById('defectCauseInput'), '');
+            syncCauseChecksFromValue('', []);
+            const group = document.getElementById('quickCauseGroup');
+            if (group) group.style.display = 'none';
             return;
         }
 
         const key = getCauseKey(defectType);
         const hidden = window.state.hiddenDefectCauses[key] || [];
-        const presetList = (defectCausePreset[key] || ['건조수축', '내력부족', '건축물 부등침하', '시공불량', '방수층 파손', '자연 노후화', '기타']).filter(c => !hidden.includes(c));
+        const presetList = (defectCausePreset[key] || defectCausePreset['기타']).filter(c => !hidden.includes(c));
         const customList = window.state.customDefectCauses[key] || [];
-
-        let html = `<option value="" ${!currentVal ? 'selected' : ''}>—</option>`;
-        presetList.forEach(item => {
-            const sel = (currentVal && currentVal === item) ? 'selected' : '';
-            html += `<option value="${item}" ${sel}>${item}</option>`;
+        const allOptions = presetList.slice();
+        customList.forEach(item => {
+            if (!allOptions.includes(item)) allOptions.push(item);
         });
 
-        customList.forEach(item => {
-            if (!presetList.includes(item)) {
-                const sel = (currentVal && currentVal === item) ? 'selected' : '';
-                html += `<option value="${item}" ${sel}>${item}</option>`;
-            }
+        let html = `<option value="" ${!currentVal ? 'selected' : ''}>—</option>`;
+        allOptions.forEach(item => {
+            const sel = (currentVal && currentVal === item) ? 'selected' : '';
+            html += `<option value="${item}" ${sel}>${item}</option>`;
         });
 
         html += `<option value="__ADD_CUSTOM_CAUSE__">➕ [결함 원인 직접 추가...]</option>`;
         select.innerHTML = html;
 
-        if (currentVal && !presetList.includes(currentVal) && !customList.includes(currentVal)) {
-            const customOpt = document.createElement('option');
-            customOpt.value = currentVal;
-            customOpt.textContent = currentVal;
-            customOpt.selected = true;
-            select.insertBefore(customOpt, select.lastElementChild);
+        if (currentVal) {
+            const parts = parseCauseList(currentVal);
+            const missing = parts.filter(p => !allOptions.includes(p));
+            missing.forEach(p => {
+                const customOpt = document.createElement('option');
+                customOpt.value = p;
+                customOpt.textContent = p;
+                select.insertBefore(customOpt, select.lastElementChild);
+                allOptions.push(p);
+            });
+            if (parts.length > 1 || (parts.length === 1 && !allOptions.includes(parts[0]))) {
+                ensureDefectComboOption(select, currentVal);
+            }
         }
 
         const resolved = (currentVal !== null && currentVal !== undefined)
             ? currentVal
             : (isDefectComboCustomToken(select.value) ? '' : select.value);
         syncDefectComboFields(select, document.getElementById('defectCauseInput'), resolved);
+        syncCauseChecksFromValue(resolved, allOptions);
         refreshDefectQuickPickBar();
     }
 
@@ -13176,10 +13329,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 document.getElementById('defectType'),
                 document.getElementById('defectTypeInput')
             ) || '');
-        const causeVal = getDefectComboValue(
-            document.getElementById('defectCause'),
-            document.getElementById('defectCauseInput')
-        ) || '';
+        const causesSelected = getSelectedCausesFromUi();
+        let causeVal = causesSelected.length
+            ? joinCauseList(causesSelected)
+            : (getDefectComboValue(
+                document.getElementById('defectCause'),
+                document.getElementById('defectCauseInput')
+            ) || '');
         const locVal = composeDefectLocation(document.getElementById('defectLocation')?.value || '');
         const isProgress = document.getElementById('defectProgressCheck')?.checked || false;
         const isLeak = document.getElementById('defectLeakCheck')?.checked || false;
