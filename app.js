@@ -11614,9 +11614,23 @@ document.addEventListener('DOMContentLoaded', () => {
         }, { passive: false });
     }
 
+    function isMobileDefectDrawerViewport() {
+        return window.matchMedia('(max-width: 768px), (orientation: landscape) and (max-width: 1024px)').matches;
+    }
+
     function syncDefectDrawerToCanvasArea() {
         const overlay = elements.defectModal || document.getElementById('defectModal');
         if (!overlay) return;
+
+        // 모바일 세로 1/2 · 가로 1/3 은 전체 화면 기준이므로 도면 영역에 묶지 않음
+        if (isMobileDefectDrawerViewport()) {
+            overlay.classList.remove('defect-drawer-in-canvas');
+            overlay.style.top = '';
+            overlay.style.left = '';
+            overlay.style.width = '';
+            overlay.style.height = '';
+            return;
+        }
 
         const canvasArea = document.getElementById('canvasContainer');
         const onMapTab = window.state.currentTab === 'tab-map';
@@ -12286,6 +12300,13 @@ document.addEventListener('DOMContentLoaded', () => {
         if (ndtModalEl && ndtModalEl.classList.contains('open')) {
             syncNdtDrawerToCanvasArea();
         }
+    });
+    window.addEventListener('orientationchange', () => {
+        window.setTimeout(() => {
+            if (elements.defectModal && elements.defectModal.classList.contains('open')) {
+                syncDefectDrawerToCanvasArea();
+            }
+        }, 80);
     });
     const appContentEl = document.querySelector('.app-content');
     if (appContentEl) {
