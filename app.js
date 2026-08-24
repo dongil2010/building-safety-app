@@ -2263,10 +2263,8 @@ document.addEventListener('DOMContentLoaded', () => {
             } catch(e) {}
         }
 
-        // 드래그/패닝 중이 아닐 때만 좌측 결함 목록을 갱신 (매 프레임 DOM 재생성 방지)
-        if (!isDragging && !isMarkingDrag && !isDraggingPin && !isDraggingPinGroup && !isAreaDrag && !isMarqueeSelecting && typeof renderDefectListPanel === 'function') {
-            renderDefectListPanel();
-        }
+        // 결함 목록 DOM은 drawCanvas마다 재생성하지 않음 (선택 스크롤·하이라이트가 즉시 undo됨).
+        // 목록 갱신은 updateMapSelectionBar / 필터 / 저장 등 명시적 호출에서만.
     }
 
     // --- 8-B. NON-DESTRUCTIVE TESTING (NDT) FIELD SURVEY ENGINE (v60.0) ---
@@ -8044,33 +8042,53 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    function findDefectListRowForSelection(panel, selectedCluster, pinSelectedToTop) {
+        if (!panel || !selectedCluster || selectedCluster.length === 0) return null;
+        if (pinSelectedToTop) {
+            const sec = panel.querySelector('.defect-list-section.is-selected-cluster');
+            return sec ? sec.querySelector('.defect-list-item') : null;
+        }
+        const d = selectedCluster[0];
+        const id = d && (d.id || d.groupId);
+        if (id) {
+            try {
+                const byId = panel.querySelector(`.defect-list-item[data-defect-id="${CSS.escape(String(id))}"]`);
+                if (byId) return byId;
+            } catch (_e) {
+                const byId = panel.querySelector(`.defect-list-item[data-defect-id="${String(id).replace(/"/g, '\\"')}"]`);
+                if (byId) return byId;
+            }
+        }
+        return panel.querySelector('.defect-list-item.is-map-selected');
+    }
+
     function scrollDefectListRowIntoView(row, behavior) {
         if (!row) return;
         const scrollBehavior = behavior || 'smooth';
-        const pad = 6;
+        const pad = 8;
         const panel = document.getElementById('defectListPanel');
         let node = row.parentElement;
-        let scrolled = false;
+        let anyScrolled = false;
         while (node) {
             const style = window.getComputedStyle(node);
-            const canScrollY = (style.overflowY === 'auto' || style.overflowY === 'scroll')
+            const canScrollY = (style.overflowY === 'auto' || style.overflowY === 'scroll' || style.overflowY === 'overlay')
                 && node.scrollHeight > node.clientHeight + 1;
             if (canScrollY) {
                 const rowRect = row.getBoundingClientRect();
-                const scRect = node.getBoundingClientRect();
-                if (rowRect.top < scRect.top + pad) {
-                    node.scrollBy({ top: rowRect.top - scRect.top - pad, behavior: scrollBehavior });
-                    scrolled = true;
-                } else if (rowRect.bottom > scRect.bottom - pad) {
-                    node.scrollBy({ top: rowRect.bottom - scRect.bottom + pad, behavior: scrollBehavior });
-                    scrolled = true;
+                const nodeRect = node.getBoundingClientRect();
+                if (rowRect.top < nodeRect.top + pad) {
+                    node.scrollTop += rowRect.top - nodeRect.top - pad;
+                    anyScrolled = true;
+                } else if (rowRect.bottom > nodeRect.bottom - pad) {
+                    node.scrollTop += rowRect.bottom - nodeRect.bottom + pad;
+                    anyScrolled = true;
                 }
             }
-            if (node === panel) break;
+            if (panel && node === panel) break;
             node = node.parentElement;
         }
-        if (!scrolled) {
-            row.scrollIntoView({ behavior: scrollBehavior, block: 'nearest' });
+        if (!anyScrolled) {
+            row.scrollIntoView({ behavior: scrollBehavior, block: 'nearest', inline: 'nearest' });
         }
     }
 
@@ -8201,25 +8219,19 @@ document.addEventListener('DOMContentLoaded', () => {
         if (curSection) panel.appendChild(curSection);
 
         // 다중 선택: 상단 묶음으로 스크롤 / 단일 선택(도면): 원래 위치 행으로 스크롤
-        if (scrollToSelection && pinSelectedToTop) {
-            const clusterKey = selectedCluster.map(d => d.id || d.groupId).join(',');
-            window._defectListScrollSelectedId = clusterKey;
+        if (scrollToSelection && selectedCluster.length > 0) {
+            const scrollKey = selectedCluster.length >= 2
+                ? selectedCluster.map(d => d.id || d.groupId).join(',')
+                : `single:${selectedCluster[0].id || selectedCluster[0].groupId}`;
+            window._defectListScrollSelectedId = scrollKey;
+            const doScroll = () => {
+                const targetRow = findDefectListRowForSelection(panel, selectedCluster, pinSelectedToTop);
+                if (targetRow) scrollDefectListRowIntoView(targetRow);
+            };
             requestAnimationFrame(() => {
-                requestAnimationFrame(() => {
-                    const cluster = panel.querySelector('.defect-list-section.is-selected-cluster');
-                    const clusterRow = cluster && cluster.querySelector('.defect-list-item');
-                    if (clusterRow) scrollDefectListRowIntoView(clusterRow);
-                });
+                requestAnimationFrame(doScroll);
             });
-        } else if (scrollToSelection && selectedCluster.length === 1) {
-            const onlyKey = selectedCluster[0].id || selectedCluster[0].groupId;
-            window._defectListScrollSelectedId = `single:${onlyKey}`;
-            requestAnimationFrame(() => {
-                requestAnimationFrame(() => {
-                    const row = panel.querySelector('.defect-list-item.is-map-selected');
-                    if (row) scrollDefectListRowIntoView(row);
-                });
-            });
+            setTimeout(doScroll, 120);
         } else if (!scrollToSelection) {
             restoreDefectListScroll(panel, scrollSnapshot);
             if (selectedCluster.length === 0) window._defectListScrollSelectedId = null;
