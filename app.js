@@ -5862,21 +5862,15 @@ document.addEventListener('DOMContentLoaded', () => {
             el.addEventListener('click', (e) => addRValueToSlot(parseInt(e.currentTarget.dataset.slot, 10), ''));
         });
         container.querySelectorAll('.ndt-strength-slot-scan-btn').forEach(el => {
-            el.addEventListener('click', (e) => {
-                document.getElementById(`ndtStrengthSlotFile-${e.currentTarget.dataset.slot}`)?.click();
+            el.addEventListener('click', async (e) => {
+                const idx = parseInt(e.currentTarget.dataset.slot, 10);
+                const file = await pickImageFromDevice('gallery');
+                if (file) scanRValuesFromImage(file, idx);
             });
         });
         const addBtn = document.getElementById('btnAddStrengthSlot');
         if (addBtn) addBtn.style.display = ndtStrengthSlots.length >= MAX_STRENGTH_SLOTS ? 'none' : '';
         ndtStrengthSlots.forEach((slot, idx) => {
-            const fileEl = document.getElementById(`ndtStrengthSlotFile-${idx}`);
-            if (fileEl) {
-                fileEl.addEventListener('change', (e) => {
-                    const file = e.target.files && e.target.files[0];
-                    if (file) scanRValuesFromImage(file, idx);
-                    e.target.value = '';
-                });
-            }
             wireRValueChipEvents(idx);
         });
     }
@@ -11759,8 +11753,75 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     };
 
-    const inputDefectPhoto = document.getElementById('inputDefectPhoto');
-    const inputDefectCamera = document.getElementById('inputDefectCamera');
+    function dataUrlToJpegFile(dataUrl, name) {
+        if (!dataUrl || typeof dataUrl !== 'string') return null;
+        try {
+            const parts = dataUrl.split(',');
+            const mime = (parts[0].match(/:(.*?);/) || [])[1] || 'image/jpeg';
+            const bin = atob(parts[1] || '');
+            const arr = new Uint8Array(bin.length);
+            for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+            return new File([arr], name || `photo_${Date.now()}.jpg`, { type: mime });
+        } catch (e) {
+            console.warn('dataUrlToJpegFile failed', e);
+            return null;
+        }
+    }
+
+    /** 갤러리/카메라 분리 — Android WebView에서 capture 속성이 섞이지 않게 매번 새 input 사용 */
+    function pickImageFileViaInput(mode) {
+        return new Promise((resolve) => {
+            const input = document.createElement('input');
+            input.type = 'file';
+            input.accept = 'image/jpeg,image/png,image/webp,image/heic,image/*';
+            input.style.cssText = 'position:fixed;left:-9999px;top:-9999px;width:1px;height:1px;opacity:0;';
+            if (mode === 'camera') {
+                input.setAttribute('capture', 'environment');
+            }
+            let done = false;
+            const finish = (file) => {
+                if (done) return;
+                done = true;
+                try { input.remove(); } catch (_e) { /* ignore */ }
+                resolve(file || null);
+            };
+            input.addEventListener('change', () => finish(input.files && input.files[0]), { once: true });
+            document.body.appendChild(input);
+            input.click();
+        });
+    }
+
+    async function pickImageFromDevice(mode) {
+        const wantCamera = mode === 'camera';
+        const Camera = window.Capacitor?.Plugins?.Camera;
+        if (Camera && window.Capacitor?.isNativePlatform?.()) {
+            try {
+                const result = await Camera.getPhoto({
+                    quality: 85,
+                    allowEditing: false,
+                    resultType: 'dataUrl',
+                    source: wantCamera ? 'CAMERA' : 'PHOTOS',
+                    correctOrientation: true,
+                    saveToGallery: false
+                });
+                if (result?.dataUrl) {
+                    return dataUrlToJpegFile(result.dataUrl, `photo_${Date.now()}.jpg`);
+                }
+                return null;
+            } catch (err) {
+                const msg = String(err?.message || err || '');
+                if (/cancel|Cancel|USER_CANCEL|dismiss/i.test(msg)) return null;
+                console.warn('Camera.getPhoto fallback to file input:', err);
+            }
+        }
+        return pickImageFileViaInput(mode);
+    }
+
+    async function triggerDefectPhotoPick(mode) {
+        const file = await pickImageFromDevice(mode);
+        if (file) handleSelectedPhotoFile(file);
+    }
+
     const btnTriggerCamera = document.getElementById('btnTriggerCamera');
     const btnTriggerGallery = document.getElementById('btnTriggerGallery');
     const photoUploadArea = document.getElementById('photoUploadArea');
@@ -11776,47 +11837,28 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    if (btnTriggerCamera && inputDefectCamera) {
+    if (btnTriggerCamera) {
         btnTriggerCamera.onclick = (e) => {
             e.preventDefault();
-            inputDefectCamera.value = '';
-            inputDefectCamera.click();
+            e.stopPropagation();
+            triggerDefectPhotoPick('camera');
         };
     }
 
-    if (btnTriggerGallery && inputDefectPhoto) {
+    if (btnTriggerGallery) {
         btnTriggerGallery.onclick = (e) => {
             e.preventDefault();
-            inputDefectPhoto.value = '';
-            inputDefectPhoto.click();
+            e.stopPropagation();
+            triggerDefectPhotoPick('gallery');
         };
     }
 
     if (photoUploadArea) {
-        photoUploadArea.onclick = () => {
-            if (inputDefectCamera && window.innerWidth <= 768) {
-                inputDefectCamera.value = '';
-                inputDefectCamera.click();
-            } else if (inputDefectPhoto) {
-                inputDefectPhoto.value = '';
-                inputDefectPhoto.click();
-            }
-        };
-    }
-
-    if (inputDefectPhoto) {
-        inputDefectPhoto.onchange = (e) => {
-            if (e.target.files && e.target.files[0]) {
-                handleSelectedPhotoFile(e.target.files[0]);
-            }
-        };
-    }
-
-    if (inputDefectCamera) {
-        inputDefectCamera.onchange = (e) => {
-            if (e.target.files && e.target.files[0]) {
-                handleSelectedPhotoFile(e.target.files[0]);
-            }
+        photoUploadArea.onclick = (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            // 터치 영역: 촬영 버튼과 별도 — 기본은 갤러리(카메라는 「촬영」 버튼)
+            triggerDefectPhotoPick('gallery');
         };
     }
 
@@ -17876,7 +17918,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // 📱 앱 자체 업데이트 (Capacitor AppUpdate 플러그인 + Firestore app_meta)
     // ==========================================================================
     // android/app/build.gradle 의 versionCode / versionName 과 맞출 것
-    window.BSA_APP_BUILD = { versionCode: 2, versionName: '1.1.0' };
+    window.BSA_APP_BUILD = { versionCode: 3, versionName: '1.1.1' };
 
     function isNativeAndroidApp() {
         try {

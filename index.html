@@ -758,10 +758,8 @@
                             <i class="fa-solid fa-mobile-screen-button"></i> <span id="phoneRelayStatusText">휴대폰 연동됨 — 촬영 시 자동 추가</span>
                         </div>
                         <div class="photo-upload-area" id="photoUploadArea">
-                            <i class="fa-solid fa-camera"></i>
-                            <span>터치하여 사진 추가</span>
-                            <input type="file" id="inputDefectPhoto" accept="image/*" style="display:none;">
-                            <input type="file" id="inputDefectCamera" accept="image/*" capture="environment" style="display:none;">
+                            <i class="fa-solid fa-images"></i>
+                            <span>터치하여 갤러리에서 선택</span>
                         </div>
                         <div class="photo-preview-list" id="photoPreviewList"></div>
                     </div>
@@ -2019,7 +2017,7 @@
     <script src="js/tabs/ndt.js?v=20260822_survey2dScroll"></script>
     <script src="js/shared/report.js?v=20260821_land1"></script>
     <script src="js/shared/auth.js?v=20260821_land1"></script>
-    <script src="app.js?v=20260824_defectListScrollFix3"></script>
+    <script src="app.js?v=20260824_galleryCameraFix"></script>
     <script>
         document.addEventListener('DOMContentLoaded', function () {
             const btn = document.getElementById('btnExportVectorPdf');
