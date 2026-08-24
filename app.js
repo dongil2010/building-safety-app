@@ -2178,10 +2178,11 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!center) return false;
         // uncovered는 결함표에서 고를 때만 — 도면 클릭은 클릭 위치 유지
         const useUncovered = options.uncovered === true;
+        // 결함표·조사표·사진 → 도면: 과도한 확대 없이 위치만 알 수 있게 (이전 0.7~1.05의 약 절반)
         const cur = state.view.scale || 1;
         const targetScale = options.keepScale
             ? cur
-            : Math.min(1.05, Math.max(0.7, Math.min(cur * 1.08, 1.05)));
+            : Math.min(0.52, Math.max(0.35, Math.min(cur * 1.04, 0.52)));
         const v = imgToViewCoords(center.x, center.y);
         const cssW = state.canvasCssW || state.canvas.width;
         const cssH = state.canvasCssH || state.canvas.height;
