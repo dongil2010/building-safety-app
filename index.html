@@ -12,7 +12,7 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <meta name="apple-mobile-web-app-title" content="스마트 안전점검">
-    <link rel="stylesheet" href="styles.css?v=20260825_nsFinish">
+    <link rel="stylesheet" href="styles.css?v=20260825_cwArrow">
     <!-- FontAwesome icons for clean engineering UI -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <!-- PDF 생성용: 페이지별로 직접 캡처해서 조립(큰 보고서에서 html2pdf 한방 렌더링이 캔버스 높이 한계로
@@ -825,6 +825,7 @@
                         <label class="checkbox-chip" style="border-color:#6b6b6b; color:#6b6b6b; margin-bottom: 0.45rem;">
                             <input type="checkbox" id="defectForceArrowDir"> 화살표 방향 지정
                         </label>
+                        <div class="arrow-octant-current" id="defectArrowOctantLabel" aria-live="polite">지정 안 함</div>
                         <div class="arrow-octant-grid disabled" id="defectArrowOctantGrid" role="group" aria-label="화살표 지정 방향">
                             <button type="button" class="arrow-octant-btn" data-octant="5" title="북서" aria-label="북서">↖</button>
                             <button type="button" class="arrow-octant-btn" data-octant="6" title="북" aria-label="북">↑</button>

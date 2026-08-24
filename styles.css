@@ -4099,9 +4099,34 @@ body {
     margin-top: 0.15rem;
 }
 
+.arrow-octant-current {
+    font-size: 0.82rem;
+    font-weight: 800;
+    color: #334155;
+    margin: 0.1rem 0 0.35rem;
+    min-height: 1.2em;
+}
+
+.arrow-octant-current.is-forced {
+    color: #0f172a;
+}
+
+.arrow-octant-current.is-off {
+    color: #94a3b8;
+    font-weight: 700;
+}
+
 .arrow-octant-grid.disabled {
-    opacity: 0.45;
+    opacity: 0.55;
     pointer-events: none;
+}
+
+.arrow-octant-grid.disabled .arrow-octant-btn.selected {
+    opacity: 1;
+    background: #1e293b;
+    border-color: #0f172a;
+    color: #fff;
+    box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.35);
 }
 
 .arrow-octant-center {

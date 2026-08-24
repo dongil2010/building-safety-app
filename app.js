@@ -8726,7 +8726,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!size || size === '-') return '';
 
         const patterns = [
-            /(?:W\s*=\s*|폭\s*[:=]?\s*|이격\s*[:=]?\s*|틈\s*[:=]?\s*)(\d+(?:\.\d+)?)\s*(?:mm|㎜)?/i,
+            /(?:W\s*=\s*|폭\s*[:=]?\s*|이격\s*[:=]?\s*|틈\s*[:=]?\s*|Cw\s*[:=]\s*)(\d+(?:\.\d+)?)\s*(?:mm|㎜)?/i,
             /^(\d+(?:\.\d+)?)\s*(?:mm|㎜)\b/i,
             /^(\d+(?:\.\d+)?)\s*\/\s*\d+/
         ];
@@ -10155,19 +10155,22 @@ document.addEventListener('DOMContentLoaded', () => {
         const w = String((m && m.width) || '').trim();
         const l = String((m && m.length) || '').trim();
         const n = String((m && m.count) || '').trim();
+        const eaSuffix = n ? ` -${n}EA` : '';
+
         if (join === 'x') {
-            if (w && l) return n ? `${w}x${l} ${n}개` : `${w}x${l}`;
-            if (w) return n ? `${w}m ${n}개` : `${w}m`;
-            if (l) return n ? `${l}m ${n}개` : `${l}m`;
-            if (n) return `${n}개`;
+            if (w && l) return `${w}x${l}${eaSuffix}`;
+            if (w) return n ? `Cw:${w}${eaSuffix}` : `Cw:${w}`;
+            if (l) return n ? `${l}m -${n}EA` : `${l}m`;
+            if (n) return `${n}EA`;
             return '';
         }
-        if (w && l && !n) return `${w}/${l}`;
-        const parts = [];
-        if (w) parts.push(`${w}mm`);
-        if (l) parts.push(`${l}m`);
-        if (n) parts.push(`${n}개`);
-        return parts.join(' / ');
+
+        // 한글(HWPX) 관례: 길이 없이 폭만(또는 폭+개수)이면 Cw:n.n / Cw:n.n -2EA
+        if (w && !l) return `Cw:${w}${eaSuffix}`;
+        if (w && l) return `${w}/${l}${eaSuffix}`;
+        if (l) return n ? `${l}m -${n}EA` : `${l}m`;
+        if (n) return `${n}EA`;
+        return '';
     }
 
     function getCrackMeasuresFromUi() {
@@ -10859,6 +10862,33 @@ document.addEventListener('DOMContentLoaded', () => {
     bindDefectComboInputs();
     bindDefectMeasureInputs();
 
+    const ARROW_OCTANT_META = {
+        0: { symbol: '→', name: '동' },
+        1: { symbol: '↘', name: '남동' },
+        2: { symbol: '↓', name: '남' },
+        3: { symbol: '↙', name: '남서' },
+        4: { symbol: '←', name: '서' },
+        5: { symbol: '↖', name: '북서' },
+        6: { symbol: '↑', name: '북' },
+        7: { symbol: '↗', name: '북동' }
+    };
+
+    function getArrowOctantLabelText(octant, forced) {
+        const meta = ARROW_OCTANT_META[((parseInt(octant, 10) || 0) % 8 + 8) % 8] || ARROW_OCTANT_META[0];
+        if (!forced) return '지정 안 함';
+        return `지정: ${meta.symbol} ${meta.name}`;
+    }
+
+    function updateDefectArrowOctantLabel() {
+        const label = document.getElementById('defectArrowOctantLabel');
+        if (!label) return;
+        const forced = !!document.getElementById('defectForceArrowDir')?.checked;
+        const octant = document.getElementById('defectArrowOctant')?.value || 0;
+        label.textContent = getArrowOctantLabelText(octant, forced);
+        label.classList.toggle('is-forced', forced);
+        label.classList.toggle('is-off', !forced);
+    }
+
     function setDefectArrowOctant(octant) {
         const v = ((parseInt(octant, 10) || 0) % 8 + 8) % 8;
         const hidden = document.getElementById('defectArrowOctant');
@@ -10867,6 +10897,7 @@ document.addEventListener('DOMContentLoaded', () => {
             btn.classList.toggle('selected', parseInt(btn.dataset.octant, 10) === v);
             btn.setAttribute('aria-pressed', parseInt(btn.dataset.octant, 10) === v ? 'true' : 'false');
         });
+        updateDefectArrowOctantLabel();
         if (typeof scheduleDefectAutoApply === 'function') scheduleDefectAutoApply();
     }
 
@@ -10878,6 +10909,7 @@ document.addEventListener('DOMContentLoaded', () => {
             grid.classList.toggle('disabled', !enabled);
             grid.querySelectorAll('.arrow-octant-btn').forEach(btn => { btn.disabled = !enabled; });
         }
+        updateDefectArrowOctantLabel();
         if (typeof scheduleDefectAutoApply === 'function') scheduleDefectAutoApply();
     }
 
@@ -15356,17 +15388,36 @@ document.addEventListener('DOMContentLoaded', () => {
                     defect.cause = value;
                     break;
                 case 'size': {
-                    if (defect.defectType === '균열') {
-                        const m = value.match(/^([^/]*)\/(.*)$/);
-                        if (m) {
-                            defect.crackWidth = m[1].trim().replace(/mm$/i, '');
-                            defect.crackLength = m[2].trim().replace(/m$/i, '');
-                        } else {
-                            defect.size = value;
-                        }
-                    } else {
+                    // Cw:0.15 / Cw:0.15 -2EA / 0.15/1.5 / 0.15/1.5 -2EA
+                    const cwEa = value.match(/^Cw\s*[:=]\s*([^/\-\s]+)\s*(?:-\s*(\d+)\s*EA)?$/i);
+                    if (cwEa) {
+                        defect.crackWidth = cwEa[1].trim().replace(/mm$/i, '');
+                        defect.crackLength = '';
+                        if (cwEa[2]) defect.itemCount = cwEa[2];
                         defect.size = value;
+                        defect.crackMeasures = [{
+                            width: defect.crackWidth,
+                            length: '',
+                            count: cwEa[2] || '',
+                            join: '/'
+                        }];
+                        break;
                     }
+                    const slashEa = value.match(/^([^/]+)\/([^\-\s]+)\s*(?:-\s*(\d+)\s*EA)?$/);
+                    if (slashEa) {
+                        defect.crackWidth = slashEa[1].trim().replace(/mm$/i, '');
+                        defect.crackLength = slashEa[2].trim().replace(/m$/i, '');
+                        if (slashEa[3]) defect.itemCount = slashEa[3];
+                        defect.size = value;
+                        defect.crackMeasures = [{
+                            width: defect.crackWidth,
+                            length: defect.crackLength,
+                            count: slashEa[3] || '',
+                            join: '/'
+                        }];
+                        break;
+                    }
+                    defect.size = value;
                     break;
                 }
                 case 'crackWidth':
