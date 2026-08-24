@@ -2081,9 +2081,9 @@ body {
     max-width: none;
 }
 
-/* 상태조사표 — 컬럼 폭: 열 최장 글자수(ch) 기준, 10자 초과 시 2줄(띄어쓰기 우선) */
+/* 상태조사표 — 컬럼 폭: 열 최장 글자수(ch) + 여유, 10자 초과 시 2줄 */
 #tab-survey .survey-table {
-    table-layout: fixed;
+    table-layout: auto;
     width: max-content;
     min-width: 100%;
 }
@@ -2091,9 +2091,12 @@ body {
 #tab-survey .survey-table .survey-inline-input,
 #tab-survey .survey-table .survey-inline-textarea,
 #tab-survey .survey-table .survey-inline-select {
-    min-width: 0;
+    min-width: 0 !important;
     max-width: 100%;
     width: 100%;
+    box-sizing: border-box;
+    overflow: visible;
+    text-overflow: clip;
 }
 
 #tab-survey .survey-table [data-col="no"],
@@ -2139,12 +2142,16 @@ body {
     word-break: keep-all;
     overflow-wrap: anywhere;
     vertical-align: middle;
+    overflow: visible;
+    padding-left: 0.4rem;
+    padding-right: 0.4rem;
 }
 
 #tab-survey .survey-table th.survey-col-dynamic {
     white-space: normal;
-    padding-left: 0.35rem;
-    padding-right: 0.35rem;
+    padding-left: 0.4rem;
+    padding-right: 0.4rem;
+    overflow: visible;
 }
 
 #tab-survey .survey-table .survey-col-wrap {
@@ -2153,12 +2160,12 @@ body {
 
 #tab-survey .survey-table .survey-col-dynamic .survey-inline-input,
 #tab-survey .survey-table .survey-col-dynamic .survey-inline-textarea {
-    min-width: 0;
-    max-width: 100%;
-    width: 100%;
+    min-width: 0 !important;
+    max-width: 100% !important;
+    width: 100% !important;
     box-sizing: border-box;
     text-align: center;
-    padding: 0.22rem 0.28rem;
+    padding: 0.28rem 0.45rem;
 }
 
 #tab-survey .survey-table [data-col="component"] .survey-inline-input,
@@ -2463,7 +2470,7 @@ body {
     }
 
     #tab-survey .survey-table {
-        table-layout: fixed;
+        table-layout: auto;
         width: max-content;
         min-width: 100%;
     }
@@ -5828,7 +5835,7 @@ body {
         }
 
         #tab-survey .survey-table {
-            table-layout: fixed;
+            table-layout: auto;
             width: max-content;
             min-width: 100%;
             font-size: 0.72rem;

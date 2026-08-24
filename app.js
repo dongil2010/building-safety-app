@@ -13249,6 +13249,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // 상태조사표 컬럼·셀 폭: 해당 열 최장 글자수 기준(ch). 초과 시 띄어쓰기에서 2줄.
     const SURVEY_INLINE_WRAP_THRESHOLD = 10;
+    const SURVEY_COL_EXTRA_CH = 3; // 패딩·테두리·한글 폭 여유
 
     function surveyCharLen(str) {
         return String(str == null ? '' : str).trim().length;
@@ -13263,6 +13264,10 @@ document.addEventListener('DOMContentLoaded', () => {
         const len = Math.max(maxLen, 2);
         if (len <= SURVEY_INLINE_WRAP_THRESHOLD) return len;
         return SURVEY_INLINE_WRAP_THRESHOLD;
+    }
+
+    function surveyColumnDisplayCh(maxLen) {
+        return surveyColumnWidthCh(maxLen) + SURVEY_COL_EXTRA_CH;
     }
 
     function surveyWrapAtSpace(text, lineLen) {
@@ -13311,10 +13316,11 @@ document.addEventListener('DOMContentLoaded', () => {
             metrics[col.key] = {
                 maxLen,
                 widthCh,
+                displayCh: surveyColumnDisplayCh(maxLen),
                 wrap: maxLen > SURVEY_INLINE_WRAP_THRESHOLD
             };
         });
-        metrics.actions = { maxLen: 4, widthCh: 6, wrap: false };
+        metrics.actions = { maxLen: 4, widthCh: 6, displayCh: 9, wrap: false };
         return metrics;
     }
 
@@ -13334,11 +13340,11 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         const allKeys = columns.map(c => c.key).concat(['actions']);
         cg.innerHTML = allKeys.map(key => {
-            const m = metrics[key] || { widthCh: 6 };
-            const wCh = (m.widthCh || 6) + 1.5;
+            const m = metrics[key] || { displayCh: 9 };
+            const wCh = m.displayCh || surveyColumnDisplayCh(m.maxLen || 6);
             return `<col data-col="${key}" style="width:${wCh}ch">`;
         }).join('');
-        table.style.tableLayout = 'fixed';
+        table.style.tableLayout = 'auto';
     }
 
     function applySurveyColumnMetrics(columns, metrics) {
@@ -13350,14 +13356,19 @@ document.addEventListener('DOMContentLoaded', () => {
         allKeys.forEach(key => {
             const m = metrics[key];
             if (!m) return;
-            const wCh = m.widthCh + 1.5;
-            const wStr = `${wCh}ch`;
+            const isDynamic = SURVEY_DYNAMIC_COL_KEYS.has(key);
+            const displayCh = m.displayCh || surveyColumnDisplayCh(m.maxLen || m.widthCh || 6);
+            const wStr = `${displayCh}ch`;
             table.querySelectorAll(`[data-col="${key}"]`).forEach(el => {
-                el.style.setProperty('width', wStr, 'important');
                 el.style.setProperty('min-width', wStr, 'important');
-                el.style.setProperty('max-width', wStr, 'important');
+                el.style.setProperty('width', wStr, 'important');
+                if (isDynamic) {
+                    el.style.removeProperty('max-width');
+                } else {
+                    el.style.setProperty('max-width', wStr, 'important');
+                }
                 el.classList.toggle('survey-col-wrap', !!m.wrap);
-                el.classList.toggle('survey-col-dynamic', SURVEY_DYNAMIC_COL_KEYS.has(key));
+                el.classList.toggle('survey-col-dynamic', isDynamic);
             });
         });
     }
@@ -13391,9 +13402,14 @@ document.addEventListener('DOMContentLoaded', () => {
                 maxLen = Math.max(maxLen, surveyCharLen(el.textContent));
             });
             const widthCh = surveyColumnWidthCh(maxLen);
-            metrics[col.key] = { maxLen, widthCh, wrap: maxLen > SURVEY_INLINE_WRAP_THRESHOLD };
+            metrics[col.key] = {
+                maxLen,
+                widthCh,
+                displayCh: surveyColumnDisplayCh(maxLen),
+                wrap: maxLen > SURVEY_INLINE_WRAP_THRESHOLD
+            };
         });
-        metrics.actions = { maxLen: 4, widthCh: 6, wrap: false };
+        metrics.actions = { maxLen: 4, widthCh: 6, displayCh: 9, wrap: false };
         applySurveyColumnMetrics(columns, metrics);
     }
 
@@ -18124,7 +18140,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // 📱 OTA 앱 업데이트 (Firestore app_meta + 네이티브 APK 설치)
     // ==========================================================================
     // android/app/build.gradle 의 versionCode / versionName 과 맞출 것
-    window.BSA_APP_BUILD = { versionCode: 6, versionName: '1.2.2' };
+    window.BSA_APP_BUILD = { versionCode: 7, versionName: '1.2.3' };
 
     const OTA_SNOOZE_MS = 6 * 60 * 60 * 1000;
     let _otaReleaseMeta = null;
