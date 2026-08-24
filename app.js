@@ -16428,6 +16428,15 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
                 return t;
             };
+            // 표 칸에 값을 2줄 이상(줄바꿈 \n) 채울 때, 첫 문단을 복제해 다음 줄로 이어붙이는 곳마다
+            // 복제본이 원본과 똑같은 vertpos(보통 0)를 그대로 들고 나가서 여러 줄이 같은 자리에
+            // 겹쳐 보이는 버그가 있었다("변위량" 글자가 사라진 것처럼, 또는 엔터 친 것처럼 보이던 원인).
+            // 문서에서 이미 정상적으로 2줄인 칸들의 규칙(다음 줄 vertpos = 이전 vertpos + vertsize +
+            // spacing)을 그대로 적용해 복제된 줄마다 세로 위치를 다시 계산해준다.
+            const fixClonedParaVertpos = (clonedPara, lineIndex, baseVertsize, baseSpacing) => {
+                const seg = clonedPara.getElementsByTagNameNS(HP_NS, 'lineseg')[0];
+                if (seg) seg.setAttribute('vertpos', String(lineIndex * (baseVertsize + baseSpacing)));
+            };
             const removeParaRange = (fromP, toP) => {
                 const all = secChildren();
                 const start = all.indexOf(fromP);
@@ -16856,6 +16865,9 @@ document.addEventListener('DOMContentLoaded', () => {
                             const paras = subList ? Array.from(subList.getElementsByTagNameNS(HP_NS, 'p')).filter(p => p.parentNode === subList) : [];
                             if (paras.length > 0) {
                                 const rawVal = values[colIdx] !== undefined ? values[colIdx] : '';
+                                const baseSeg = paras[0].getElementsByTagNameNS(HP_NS, 'lineseg')[0];
+                                const baseVertsize = baseSeg ? parseInt(baseSeg.getAttribute('vertsize'), 10) || 0 : 0;
+                                const baseSpacing = baseSeg ? parseInt(baseSeg.getAttribute('spacing'), 10) || 0 : 0;
                                 const lines = String(rawVal).split('\n');
                                 ensureCellTextNode(paras[0]).textContent = lines[0];
                                 for (let i = paras.length - 1; i >= 1; i--) subList.removeChild(paras[i]);
@@ -16863,6 +16875,7 @@ document.addEventListener('DOMContentLoaded', () => {
                                 for (let i = 1; i < lines.length; i++) {
                                     const clonedPara = paras[0].cloneNode(true);
                                     ensureCellTextNode(clonedPara).textContent = lines[i];
+                                    fixClonedParaVertpos(clonedPara, i, baseVertsize, baseSpacing);
                                     subList.insertBefore(clonedPara, refNode.nextSibling);
                                     refNode = clonedPara;
                                 }
@@ -17092,6 +17105,9 @@ document.addEventListener('DOMContentLoaded', () => {
                             if (paras.length > 0 && values[colIdx] !== undefined) {
                                 // 값 안에 줄바꿈(\n)이 있으면(예: 위치+부재명 2줄) 첫 문단은 첫 줄로 채우고
                                 // 나머지 줄은 첫 문단을 복제해(같은 서식 유지) 이어붙인다.
+                                const baseSeg = paras[0].getElementsByTagNameNS(HP_NS, 'lineseg')[0];
+                                const baseVertsize = baseSeg ? parseInt(baseSeg.getAttribute('vertsize'), 10) || 0 : 0;
+                                const baseSpacing = baseSeg ? parseInt(baseSeg.getAttribute('spacing'), 10) || 0 : 0;
                                 const lines = String(values[colIdx]).split('\n');
                                 ensureCellTextNode(paras[0]).textContent = lines[0];
                                 for (let i = paras.length - 1; i >= 1; i--) subList.removeChild(paras[i]);
@@ -17099,6 +17115,7 @@ document.addEventListener('DOMContentLoaded', () => {
                                 for (let i = 1; i < lines.length; i++) {
                                     const clonedPara = paras[0].cloneNode(true);
                                     ensureCellTextNode(clonedPara).textContent = lines[i];
+                                    fixClonedParaVertpos(clonedPara, i, baseVertsize, baseSpacing);
                                     subList.insertBefore(clonedPara, refNode.nextSibling);
                                     refNode = clonedPara;
                                 }
