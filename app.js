@@ -9345,13 +9345,17 @@ document.addEventListener('DOMContentLoaded', () => {
         const typeSelect = document.getElementById('defectType');
         const typeInput = document.getElementById('defectTypeInput');
         const dType = getDefectComboValue(typeSelect, typeInput) || '';
-        const isCrack = dType === '균열';
+        const isCrack = dType === '균열' || (dType && dType.includes('균열'));
         const isGood = dType === '상태양호';
+        const hasType = !!dType && !isGood;
         const crackGroup = document.getElementById('defectCrackSizeGroup');
+        const measureGroup = document.getElementById('quickMeasureGroup');
         const freeLabel = document.getElementById('defectSizeFreeLabel');
         const sizeGroup = document.getElementById('defectSizeFreeGroup');
         const causeGroup = document.getElementById('defectCauseGroup');
+        const quickCauseGroup = document.getElementById('quickCauseGroup');
         if (crackGroup) crackGroup.style.display = (isCrack && !isGood) ? '' : 'none';
+        if (measureGroup) measureGroup.style.display = hasType ? '' : 'none';
         if (freeLabel) {
             freeLabel.textContent = isCrack
                 ? '규모 및 상태 (균열폭/길이도 가능)'
@@ -9359,6 +9363,47 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         if (sizeGroup) sizeGroup.style.display = isGood ? 'none' : '';
         if (causeGroup) causeGroup.style.display = isGood ? 'none' : '';
+        if (quickCauseGroup) quickCauseGroup.style.display = isGood ? 'none' : '';
+    }
+
+    function composeDefectSizeFromMeasures() {
+        const w = (document.getElementById('defectCrackWidth')?.value || '').trim();
+        const l = (document.getElementById('defectCrackLength')?.value || '').trim();
+        const n = (document.getElementById('defectItemCount')?.value || '').trim();
+        const parts = [];
+        if (w) parts.push(`W=${w}mm`);
+        if (l) parts.push(`L=${l}m`);
+        if (n) parts.push(`N=${n}`);
+        return parts.join(', ');
+    }
+
+    function syncSizeFromMeasureInputs() {
+        const sizeEl = document.getElementById('defectSize');
+        if (!sizeEl) return;
+        const composed = composeDefectSizeFromMeasures();
+        if (!sizeEl.value.trim() || sizeEl.dataset.autoSize === '1') {
+            sizeEl.value = composed;
+            sizeEl.dataset.autoSize = composed ? '1' : '';
+        }
+    }
+
+    function bindDefectMeasureInputs() {
+        ['defectCrackWidth', 'defectCrackLength', 'defectItemCount'].forEach((id) => {
+            const el = document.getElementById(id);
+            if (!el || el.dataset.measureBound) return;
+            el.dataset.measureBound = '1';
+            el.addEventListener('input', () => {
+                syncSizeFromMeasureInputs();
+                if (typeof scheduleDefectAutoApply === 'function') scheduleDefectAutoApply();
+            });
+        });
+        const sizeEl = document.getElementById('defectSize');
+        if (sizeEl && !sizeEl.dataset.autoSizeBound) {
+            sizeEl.dataset.autoSizeBound = '1';
+            sizeEl.addEventListener('input', () => {
+                sizeEl.dataset.autoSize = '';
+            });
+        }
     }
 
     // --- Dynamic Defect Cause Presets & Custom Adding ---
@@ -9565,6 +9610,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     bindDefectComboInputs();
+    bindDefectMeasureInputs();
 
     function setDefectArrowOctant(octant) {
         const v = ((parseInt(octant, 10) || 0) % 8 + 8) % 8;
@@ -11829,8 +11875,14 @@ document.addEventListener('DOMContentLoaded', () => {
             if (sizeEl) sizeEl.value = existingPin.size || '';
             const crackWidthElExisting = document.getElementById('defectCrackWidth');
             const crackLengthElExisting = document.getElementById('defectCrackLength');
+            const itemCountElExisting = document.getElementById('defectItemCount');
             if (crackWidthElExisting) crackWidthElExisting.value = (existingPin.crackWidth !== undefined && existingPin.crackWidth !== null) ? existingPin.crackWidth : '';
             if (crackLengthElExisting) crackLengthElExisting.value = (existingPin.crackLength !== undefined && existingPin.crackLength !== null) ? existingPin.crackLength : '';
+            if (itemCountElExisting) itemCountElExisting.value = (existingPin.itemCount !== undefined && existingPin.itemCount !== null) ? existingPin.itemCount : '';
+            if (sizeEl) {
+                const composed = composeDefectSizeFromMeasures();
+                sizeEl.dataset.autoSize = (composed && (existingPin.size || '') === composed) ? '1' : '';
+            }
             if (progCheckEl) progCheckEl.checked = !!existingPin.isProgress;
             if (leakCheckEl) leakCheckEl.checked = !!existingPin.isLeak;
             if (bookmarkEl) bookmarkEl.checked = !!existingPin.isBookmark;
@@ -11892,8 +11944,14 @@ document.addEventListener('DOMContentLoaded', () => {
             if (sizeEl) sizeEl.value = (tmpl && tmpl.size) || '';
             const crackWidthElNew = document.getElementById('defectCrackWidth');
             const crackLengthElNew = document.getElementById('defectCrackLength');
+            const itemCountElNew = document.getElementById('defectItemCount');
             if (crackWidthElNew) crackWidthElNew.value = (tmpl && tmpl.crackWidth) || '';
             if (crackLengthElNew) crackLengthElNew.value = (tmpl && tmpl.crackLength) || '';
+            if (itemCountElNew) itemCountElNew.value = (tmpl && tmpl.itemCount) || '';
+            if (sizeEl) {
+                const composed = composeDefectSizeFromMeasures();
+                sizeEl.dataset.autoSize = (composed && ((tmpl && tmpl.size) || '') === composed) ? '1' : (composed && !(tmpl && tmpl.size) ? '1' : '');
+            }
             if (progCheckEl) progCheckEl.checked = false;
             if (leakCheckEl) leakCheckEl.checked = false;
             if (bookmarkEl) bookmarkEl.checked = false;
@@ -12521,10 +12579,10 @@ document.addEventListener('DOMContentLoaded', () => {
         const forceArrowDir = document.getElementById('defectForceArrowDir')?.checked || false;
         const arrowOctant = ((parseInt(document.getElementById('defectArrowOctant')?.value || '0', 10) % 8) + 8) % 8;
         const photosVal = window._pendingPhotos || [];
-        const isCrackType = dTypeVal === '균열';
         const isGoodType = dTypeVal === '상태양호';
-        const crackWidthVal = isCrackType ? (document.getElementById('defectCrackWidth')?.value || '') : '';
-        const crackLengthVal = isCrackType ? (document.getElementById('defectCrackLength')?.value || '') : '';
+        const crackWidthVal = isGoodType ? '' : (document.getElementById('defectCrackWidth')?.value || '');
+        const crackLengthVal = isGoodType ? '' : (document.getElementById('defectCrackLength')?.value || '');
+        const itemCountVal = isGoodType ? '' : (document.getElementById('defectItemCount')?.value || '');
         const sizeVal = isGoodType ? '' : (document.getElementById('defectSize')?.value || '');
         const causeSaveVal = isGoodType ? '' : causeVal;
         const areaFillVal = getSelectedAreaFillFromUi();
@@ -12545,6 +12603,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 state.defects[key][idx].size = sizeVal;
                 state.defects[key][idx].crackWidth = crackWidthVal;
                 state.defects[key][idx].crackLength = crackLengthVal;
+                state.defects[key][idx].itemCount = itemCountVal;
                 state.defects[key][idx].isProgress = isProgress;
                 state.defects[key][idx].isLeak = isLeak;
                 state.defects[key][idx].isCarriedOver = isCarriedOver;
@@ -12586,6 +12645,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 size: sizeVal,
                 crackWidth: crackWidthVal,
                 crackLength: crackLengthVal,
+                itemCount: itemCountVal,
                 isProgress: isProgress,
                 isLeak: isLeak,
                 isCarriedOver: isCarriedOver,
@@ -13329,13 +13389,17 @@ document.addEventListener('DOMContentLoaded', () => {
             case 'defectType': return d.defectType || '';
             case 'category': return d.category === '구조체' ? '○' : '-';
             case 'size': {
-                // 상태양호는 규모 없음 → 원인(cause)과 같이 '-' 표기
-                // (과거 코드가 빈 size에 'W=0.2mm' 플레이스홀더를 넣어 조사표에 잘못 노출됨)
                 if (isGood) return '-';
-                if (isCrack && (d.crackWidth !== undefined && d.crackWidth !== '' || d.crackLength !== undefined && d.crackLength !== '')) {
-                    const w = (d.crackWidth !== undefined && d.crackWidth !== '') ? d.crackWidth : '-';
-                    const l = (d.crackLength !== undefined && d.crackLength !== '') ? d.crackLength : '-';
-                    return `${w}/${l}`;
+                const w = (d.crackWidth !== undefined && d.crackWidth !== null && String(d.crackWidth).trim() !== '') ? String(d.crackWidth).trim() : '';
+                const l = (d.crackLength !== undefined && d.crackLength !== null && String(d.crackLength).trim() !== '') ? String(d.crackLength).trim() : '';
+                const n = (d.itemCount !== undefined && d.itemCount !== null && String(d.itemCount).trim() !== '') ? String(d.itemCount).trim() : '';
+                if (w || l || n) {
+                    const parts = [];
+                    if (w) parts.push(`${w}mm`);
+                    if (l) parts.push(`${l}m`);
+                    if (n) parts.push(`${n}개`);
+                    if (isCrack && w && l && !n) return `${w}/${l}`;
+                    return parts.join(' / ');
                 }
                 const sizeVal = (d.size != null) ? String(d.size).trim() : '';
                 return sizeVal || '-';

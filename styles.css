@@ -4196,6 +4196,62 @@ body {
     grid-template-columns: repeat(2, 1fr);
 }
 
+.defect-measure-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.28rem;
+}
+
+.defect-measure-btn {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.08rem;
+    border: 1.5px solid #e2e8f0;
+    background: #ffffff;
+    border-radius: 9px;
+    padding: 0.32rem 0.4rem 0.38rem;
+    min-width: 0;
+    cursor: text;
+}
+
+.defect-measure-btn:focus-within {
+    border-color: #0369a1;
+    background: #f0f9ff;
+}
+
+.defect-measure-name {
+    font-size: 0.66rem;
+    font-weight: 800;
+    color: #64748b;
+}
+
+.defect-measure-btn input {
+    width: 100%;
+    min-width: 0;
+    border: none;
+    outline: none;
+    background: transparent;
+    font-size: 0.9rem;
+    font-weight: 800;
+    color: #0f172a;
+    padding: 0.12rem 0;
+    line-height: 1.2;
+}
+
+.defect-measure-btn input::placeholder {
+    color: #cbd5e1;
+    font-weight: 700;
+    font-size: 0.72rem;
+}
+
+.defect-measure-unit {
+    font-size: 0.62rem;
+    font-weight: 700;
+    color: #94a3b8;
+    align-self: flex-end;
+}
+
 .defect-quick-chip {
     border: 1.5px solid #e2e8f0;
     background: #ffffff;

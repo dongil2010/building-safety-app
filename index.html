@@ -708,6 +708,26 @@
                             <div class="defect-quick-label"><i class="fa-solid fa-triangle-exclamation"></i> 결함 종류</div>
                             <div class="defect-quick-chip-grid dqg-type" id="quickDefectTypeChips"></div>
                         </div>
+                        <div class="defect-quick-group" id="quickMeasureGroup" style="display:none;">
+                            <div class="defect-quick-label"><i class="fa-solid fa-ruler-combined"></i> 폭 · 길이 · 개수</div>
+                            <div class="defect-measure-grid">
+                                <label class="defect-measure-btn" for="defectCrackWidth">
+                                    <span class="defect-measure-name">폭</span>
+                                    <input type="text" id="defectCrackWidth" inputmode="decimal" placeholder="직접입력" autocomplete="off">
+                                    <span class="defect-measure-unit">mm</span>
+                                </label>
+                                <label class="defect-measure-btn" for="defectCrackLength">
+                                    <span class="defect-measure-name">길이</span>
+                                    <input type="text" id="defectCrackLength" inputmode="decimal" placeholder="직접입력" autocomplete="off">
+                                    <span class="defect-measure-unit">m</span>
+                                </label>
+                                <label class="defect-measure-btn" for="defectItemCount">
+                                    <span class="defect-measure-name">개수</span>
+                                    <input type="text" id="defectItemCount" inputmode="numeric" placeholder="직접입력" autocomplete="off">
+                                    <span class="defect-measure-unit">개</span>
+                                </label>
+                            </div>
+                        </div>
                         <div class="defect-quick-group" id="quickCauseGroup">
                             <div class="defect-quick-label"><i class="fa-solid fa-magnifying-glass"></i> 발생 원인</div>
                             <div class="defect-quick-chip-grid dqg-cause" id="quickCauseChips"></div>
@@ -785,13 +805,6 @@
                     </div>
 
                     <div class="form-row">
-                        <div class="form-group" id="defectCrackSizeGroup" style="display:none; flex:1;">
-                            <label class="form-label">균열폭(mm) / 길이(m)</label>
-                            <div style="display:flex; gap:0.4rem;">
-                                <input type="number" step="0.01" id="defectCrackWidth" class="form-control" placeholder="폭 0.15">
-                                <input type="number" step="0.01" id="defectCrackLength" class="form-control" placeholder="길이 1.5">
-                            </div>
-                        </div>
                         <div class="form-group" id="defectCauseGroup" style="flex:1;">
                             <div class="form-label" style="display:flex; justify-content:space-between; align-items:center;">
                                 <span>결함 원인 추정</span>
