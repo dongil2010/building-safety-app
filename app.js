@@ -10644,31 +10644,67 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (!row || !listEl.contains(row)) return;
                 e.preventDefault();
                 e.stopPropagation();
-                handle.setPointerCapture(e.pointerId);
+
+                const rowRect = row.getBoundingClientRect();
+                const listRect = listEl.getBoundingClientRect();
+                const offsetY = e.clientY - rowRect.top;
+                const placeholder = document.createElement('div');
+                placeholder.className = 'option-manager-item-placeholder';
+                placeholder.style.height = `${rowRect.height}px`;
+                listEl.insertBefore(placeholder, row.nextSibling);
+
                 row.classList.add('is-dragging');
                 listEl.classList.add('is-reordering');
+                row.style.width = `${rowRect.width}px`;
+                row.style.left = `${rowRect.left}px`;
+                row.style.top = `${rowRect.top}px`;
+                row.style.position = 'fixed';
+                row.style.zIndex = '10050';
+                row.style.pointerEvents = 'none';
+                row.style.margin = '0';
+                document.body.appendChild(row);
+
+                handle.setPointerCapture(e.pointerId);
+
+                const moveRowToY = (clientY) => {
+                    const top = clientY - offsetY;
+                    const minTop = listRect.top - rowRect.height * 0.35;
+                    const maxTop = listRect.bottom - rowRect.height * 0.65;
+                    row.style.top = `${Math.max(minTop, Math.min(maxTop, top))}px`;
+
+                    const probeY = clientY;
+                    const rows = Array.from(listEl.querySelectorAll('.option-manager-item:not(.is-dragging)'));
+                    let inserted = false;
+                    for (const other of rows) {
+                        const r = other.getBoundingClientRect();
+                        const mid = r.top + r.height / 2;
+                        if (probeY < mid) {
+                            listEl.insertBefore(placeholder, other);
+                            inserted = true;
+                            break;
+                        }
+                    }
+                    if (!inserted) listEl.appendChild(placeholder);
+                };
+                moveRowToY(e.clientY);
 
                 const onMove = (ev) => {
-                    const el = document.elementFromPoint(ev.clientX, ev.clientY);
-                    const over = el && el.closest('.option-manager-item');
-                    if (!over || over === row || !listEl.contains(over)) return;
-                    const rows = Array.from(listEl.querySelectorAll('.option-manager-item'));
-                    const fromIdx = rows.indexOf(row);
-                    const toIdx = rows.indexOf(over);
-                    if (fromIdx < 0 || toIdx < 0 || fromIdx === toIdx) return;
-                    if (fromIdx < toIdx) listEl.insertBefore(row, over.nextSibling);
-                    else listEl.insertBefore(row, over);
-                    Array.from(listEl.querySelectorAll('.option-manager-item')).forEach((r, i) => {
-                        r.dataset.idx = String(i);
-                    });
+                    moveRowToY(ev.clientY);
                 };
                 const onUp = () => {
                     try { handle.releasePointerCapture(e.pointerId); } catch (_) {}
-                    row.classList.remove('is-dragging');
-                    listEl.classList.remove('is-reordering');
                     handle.removeEventListener('pointermove', onMove);
                     handle.removeEventListener('pointerup', onUp);
                     handle.removeEventListener('pointercancel', onUp);
+
+                    listEl.insertBefore(row, placeholder);
+                    placeholder.remove();
+                    row.classList.remove('is-dragging');
+                    listEl.classList.remove('is-reordering');
+                    row.style.cssText = '';
+                    Array.from(listEl.querySelectorAll('.option-manager-item')).forEach((r, i) => {
+                        r.dataset.idx = String(i);
+                    });
                     commitOptionManagerOrderFromDom(listEl);
                 };
                 handle.addEventListener('pointermove', onMove);
@@ -10736,6 +10772,9 @@ document.addEventListener('DOMContentLoaded', () => {
             window.showToast('최소 1개는 남아있어야 합니다.', 'warning');
             return;
         }
+
+        const label = ctx.labelFor ? ctx.labelFor(item) : item;
+        if (!confirm(`「${label}」 항목을 삭제할까요?`)) return;
 
         if (isPreset) {
             if (!ctx.hiddenList.includes(item)) ctx.hiddenList.push(item);
