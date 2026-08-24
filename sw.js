@@ -2,7 +2,7 @@
    ???????????????? ?????Service Worker (PWA Offline Engine v61.0)
    ========================================================================== */
 
-const CACHE_NAME = 'building-safety-v69.4';
+const CACHE_NAME = 'building-safety-v70.0';
 const STATIC_ASSETS = [
     './',
     './index.html',
@@ -70,10 +70,15 @@ self.addEventListener('fetch', (event) => {
         return;
     }
 
+    const isVersionCheck = url.includes('web-version.json');
+    const isHtml = event.request.destination === 'document'
+        || event.request.mode === 'navigate'
+        || /(?:\/|\.html)(?:\?|$)/.test(url.split('?')[0]);
+
     event.respondWith(
-        fetch(event.request)
+        fetch(event.request, (isVersionCheck || isHtml) ? { cache: 'no-store' } : undefined)
             .then((networkResponse) => {
-                if (networkResponse && networkResponse.status === 200 && networkResponse.type === 'basic') {
+                if (networkResponse && networkResponse.status === 200 && networkResponse.type === 'basic' && !isVersionCheck) {
                     const responseToCache = networkResponse.clone();
                     caches.open(CACHE_NAME).then((cache) => {
                         cache.put(event.request, responseToCache);

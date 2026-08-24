@@ -57,7 +57,7 @@ if ($stashed) {
 $dirtyAfter = git status --porcelain
 if ($dirtyAfter) {
     Write-Host "`n=== 6. commit ===" -ForegroundColor Cyan
-    git add app.js index.html styles.css sw.js js/ scripts/ CLAUDE.md ANDROID.md firestore.rules storage.rules firebase.json android/app/build.gradle android/app/capacitor.build.gradle android/capacitor.settings.gradle package.json
+    git add app.js index.html styles.css sw.js js/ scripts/ capacitor.config.json web-version.json .github CLAUDE.md ANDROID.md firestore.rules storage.rules firebase.json android/app/build.gradle android/app/capacitor.build.gradle android/capacitor.settings.gradle package.json
     git diff --cached --stat
     git commit -m $Message
     if ($LASTEXITCODE -ne 0) { exit 1 }

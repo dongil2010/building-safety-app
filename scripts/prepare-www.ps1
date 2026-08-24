@@ -14,7 +14,8 @@ $files = @(
     'styles.css',
     'sw.js',
     'manifest.json',
-    'photo-capture.html'
+    'photo-capture.html',
+    'web-version.json'
 )
 foreach ($file in $files) {
     Copy-Item (Join-Path $Root $file) (Join-Path $Www $file) -Force

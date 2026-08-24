@@ -17,3 +17,6 @@ android/.idea/
 # OTA / Firebase CLI token (never commit)
 .firebase-ci-token
 .env.local
+
+# GitHub Pages build output
+_site/

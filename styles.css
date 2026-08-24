@@ -2081,11 +2081,39 @@ body {
     max-width: none;
 }
 
-/* 상태조사표 — 컬럼 폭: 열 최장 글자수(ch) + 여유, 10자 초과 시 2줄 */
+/* 상태조사표 — 열별 rem 최소폭, 가로 스크롤 허용 */
+#tab-survey .table-container {
+    overflow-x: auto;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-x: contain;
+}
+
 #tab-survey .survey-table {
-    table-layout: auto;
+    table-layout: fixed;
     width: max-content;
     min-width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+}
+
+#tab-survey .survey-table th,
+#tab-survey .survey-table td {
+    box-sizing: border-box;
+    overflow: visible;
+    vertical-align: middle;
+    padding: 0.5rem 0.55rem;
+}
+
+#tab-survey .survey-table th {
+    white-space: normal;
+    line-height: 1.3;
+    font-size: 0.76rem;
+}
+
+#tab-survey .survey-table .survey-th-label {
+    display: inline-block;
+    line-height: 1.25;
 }
 
 #tab-survey .survey-table .survey-inline-input,
@@ -2097,45 +2125,25 @@ body {
     box-sizing: border-box;
     overflow: visible;
     text-overflow: clip;
+    font-size: 0.78rem;
 }
 
-#tab-survey .survey-table [data-col="no"],
-#tab-survey .survey-table [data-col="floorGroup"],
-#tab-survey .survey-table [data-col="category"],
+#tab-survey .survey-table [data-col="no"] { min-width: 2.8rem; }
+#tab-survey .survey-table [data-col="floorGroup"] { min-width: 3.4rem; }
+#tab-survey .survey-table [data-col="location"] { min-width: 5.5rem; }
+#tab-survey .survey-table [data-col="component"] { min-width: 7.5rem; }
+#tab-survey .survey-table [data-col="defectType"] { min-width: 10.5rem; }
+#tab-survey .survey-table [data-col="category"] { min-width: 6.2rem; }
+#tab-survey .survey-table [data-col="size"] { min-width: 6rem; }
 #tab-survey .survey-table [data-col="progress"],
-#tab-survey .survey-table [data-col="leak"],
-#tab-survey .survey-table [data-col="priorityManage"],
-#tab-survey .survey-table [data-col="actions"] {
-    width: 1%;
-    white-space: nowrap;
-}
-
-#tab-survey .survey-table [data-col="no"] {
-    min-width: 2.75rem;
-}
-
-#tab-survey .survey-table [data-col="category"] {
-    min-width: 5rem;
-}
-
-#tab-survey .survey-table [data-col="progress"],
-#tab-survey .survey-table [data-col="leak"] {
-    min-width: 3.2rem;
-}
-
-#tab-survey .survey-table [data-col="priorityManage"] {
-    min-width: 4rem;
-}
-
-#tab-survey .survey-table [data-col="remark"] {
-    min-width: 5.5rem;
-    white-space: normal;
-    word-break: break-word;
-}
-
-#tab-survey .survey-table [data-col="actions"] {
-    min-width: 6.5rem;
-}
+#tab-survey .survey-table [data-col="leak"] { min-width: 5.2rem; white-space: nowrap; }
+#tab-survey .survey-table [data-col="cause"] { min-width: 8rem; }
+#tab-survey .survey-table [data-col="crackWidth"],
+#tab-survey .survey-table [data-col="crackLength"] { min-width: 5.2rem; }
+#tab-survey .survey-table [data-col="priorityManage"] { min-width: 5.8rem; white-space: nowrap; }
+#tab-survey .survey-table [data-col="remark"] { min-width: 6.5rem; }
+#tab-survey .survey-table [data-col="actions"] { min-width: 10rem; white-space: nowrap; }
+#tab-survey .survey-table [data-col="inspectionContent"] { min-width: 12rem; }
 
 #tab-survey .survey-table .survey-col-dynamic {
     white-space: normal;
@@ -2470,7 +2478,7 @@ body {
     }
 
     #tab-survey .survey-table {
-        table-layout: auto;
+        table-layout: fixed;
         width: max-content;
         min-width: 100%;
     }
@@ -3967,6 +3975,58 @@ body {
     gap: 0.5rem;
 }
 
+.defect-quick-picks {
+    display: flex;
+    flex-direction: column;
+    gap: 0.65rem;
+    padding: 0.7rem 0.8rem;
+    border: 1px solid rgba(148, 163, 184, 0.28);
+    border-radius: 12px;
+    background: rgba(248, 250, 252, 0.96);
+}
+
+.defect-quick-group {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+}
+
+.defect-quick-label {
+    font-size: 0.76rem;
+    font-weight: 800;
+    color: #334155;
+}
+
+.defect-quick-chip-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+}
+
+.defect-quick-chip {
+    border: 1px solid #cbd5e1;
+    background: #ffffff;
+    color: #0f172a;
+    border-radius: 8px;
+    padding: 0.38rem 0.6rem;
+    font-size: 0.76rem;
+    font-weight: 700;
+    line-height: 1.2;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.defect-quick-chip:hover {
+    border-color: #64748b;
+    background: #f8fafc;
+}
+
+.defect-quick-chip.active {
+    background: #2563eb;
+    border-color: #2563eb;
+    color: #ffffff;
+}
+
 /* Modal Form Styles */
 .form-group {
     margin-bottom: 1rem;
@@ -4392,6 +4452,77 @@ body {
     gap: 1.5rem;
     flex-wrap: wrap;
     box-shadow: var(--shadow-lg);
+    min-width: 0;
+    overflow: hidden;
+}
+
+.hero-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.8rem;
+    align-items: center;
+    min-width: 0;
+    max-width: 100%;
+    flex: 1 1 20rem;
+}
+
+.hero-company-row {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.35rem 0.5rem;
+    background: rgba(255, 255, 255, 0.1);
+    padding: 0.3rem 0.8rem;
+    border-radius: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.22);
+    min-width: 0;
+    max-width: 100%;
+}
+
+.hero-company-label {
+    font-size: 0.85rem;
+    font-weight: 700;
+    color: #f0f0f0;
+    white-space: nowrap;
+}
+
+.hero-company-input {
+    width: min(190px, 100%);
+    height: 32px;
+    font-size: 0.85rem;
+    padding: 0.2rem 0.6rem;
+    background: #ffffff;
+    color: #171717;
+    border: 1px solid #d4d4d4;
+    font-weight: 600;
+    flex: 1 1 8rem;
+    min-width: 0;
+}
+
+.hero-company-save {
+    height: 32px;
+    padding: 0 0.6rem;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+.btn-hero-refresh {
+    border-color: #86efac;
+    color: #86efac;
+    font-weight: 700;
+}
+
+.hero-user-group {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.6rem;
+    background: rgba(255, 255, 255, 0.08);
+    padding: 0.35rem 0.85rem;
+    border-radius: 20px;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    min-width: 0;
+    max-width: 100%;
 }
 
 .hero-badge {
@@ -4746,6 +4877,10 @@ body {
     font-size: 0.95rem;
     cursor: pointer;
     transition: all 0.15s ease;
+}
+
+.icon-btn-label {
+    display: none;
 }
 
 .icon-btn-start {
@@ -5532,6 +5667,96 @@ body {
     /* 홈: 현장용 — 건물 선택만 */
     #tab-home .dashboard-hero {
         padding: 0.55rem 0.65rem;
+        flex-direction: column;
+        align-items: stretch;
+        gap: 0.65rem;
+    }
+
+    #tab-home .hero-text {
+        width: 100%;
+        min-width: 0;
+    }
+
+    #tab-home .hero-actions {
+        width: 100%;
+        gap: 0.45rem;
+    }
+
+    #tab-home .hero-company-row {
+        flex: 1 1 100%;
+        width: 100%;
+    }
+
+    #tab-home .hero-company-input {
+        flex: 1 1 100%;
+        width: 100%;
+    }
+
+    #tab-home .hero-actions > .btn:not(.btn-sm) {
+        flex: 1 1 calc(50% - 0.25rem);
+        min-width: 0;
+        max-width: 100%;
+        justify-content: center;
+        font-size: 0.72rem;
+        padding: 0.45rem 0.5rem;
+        white-space: normal;
+        line-height: 1.25;
+        text-align: center;
+    }
+
+    #tab-home #btnTriggerPhoneRelay,
+    #tab-home #btnOpenAddBuildingModal,
+    #tab-home .hero-user-group {
+        flex: 1 1 100%;
+        width: 100%;
+    }
+
+    #tab-home #btnOpenAddBuildingModal {
+        font-size: 0.88rem;
+        padding: 0.7rem 0.8rem;
+        font-weight: 800;
+    }
+
+    #tab-home .building-row {
+        flex-wrap: wrap;
+        align-items: flex-start;
+    }
+
+    #tab-home .building-row-info {
+        flex: 1 1 calc(100% - 8rem);
+        min-width: 0;
+    }
+
+    #tab-home .building-row-actions {
+        width: 100%;
+        justify-content: stretch;
+        gap: 0.3rem;
+        margin-top: 0.15rem;
+    }
+
+    #tab-home .building-row-actions .icon-btn {
+        flex: 1 1 0;
+        width: auto;
+        height: 2.4rem;
+        gap: 0.28rem;
+        font-size: 0.72rem;
+        font-weight: 700;
+        padding: 0 0.35rem;
+    }
+
+    #tab-home .icon-btn-label {
+        display: inline;
+        white-space: nowrap;
+    }
+
+    #tab-home .hero-user-group {
+        justify-content: center;
+    }
+
+    #tab-home .hero-user-group #userProfileText {
+        flex: 1 1 100%;
+        text-align: center;
+        word-break: break-word;
     }
 
     #tab-home .hero-title {
@@ -5540,6 +5765,75 @@ body {
 
     #tab-home .hero-badge {
         display: none;
+    }
+
+    /* 현장/도면 등록 모달 — 세로 화면에서 폼이 창 밖으로 나가지 않게 */
+    #addBuildingModal .modal-card,
+    #editBuildingModal .modal-card {
+        width: min(96vw, 640px);
+        max-height: calc(100dvh - 1.2rem);
+        margin: 0.4rem auto;
+    }
+
+    #addBuildingModal .modal-header h3,
+    #editBuildingModal .modal-header h3 {
+        font-size: 0.92rem;
+        line-height: 1.3;
+        padding-right: 1.4rem;
+    }
+
+    #addBuildingModal .modal-body,
+    #editBuildingModal .modal-body {
+        max-height: min(62dvh, calc(100dvh - 10rem)) !important;
+        overflow-x: hidden;
+    }
+
+    #addBuildingModal .form-row,
+    #editBuildingModal .form-row {
+        flex-wrap: wrap;
+    }
+
+    #addBuildingModal .form-row > .form-group,
+    #editBuildingModal .form-row > .form-group {
+        flex: 1 1 100%;
+        min-width: 0;
+    }
+
+    #addBuildingModal .modal-footer,
+    #editBuildingModal .modal-footer {
+        flex-wrap: wrap;
+        gap: 0.45rem;
+    }
+
+    #addBuildingModal .modal-footer .btn,
+    #editBuildingModal .modal-footer .btn {
+        flex: 1 1 auto;
+        justify-content: center;
+        white-space: normal;
+        line-height: 1.25;
+        font-size: 0.78rem;
+    }
+
+    .defect-quick-picks {
+        gap: 0.5rem;
+        padding: 0.6rem;
+    }
+
+    .defect-quick-label {
+        font-size: 0.72rem;
+    }
+
+    .defect-quick-chip-grid {
+        gap: 0.28rem;
+    }
+
+    .defect-quick-chip {
+        flex: 1 1 calc(33.333% - 0.24rem);
+        min-width: 4.5rem;
+        justify-content: center;
+        text-align: center;
+        padding: 0.42rem 0.45rem;
+        font-size: 0.72rem;
     }
 }
 
@@ -5725,7 +6019,6 @@ body {
         white-space: nowrap;
     }
 
-    /* 조사목록: 화면 높이 안에서 상하·좌우 모두 스크롤 (표 중간에 걸려도 세로 가능) */
     #tab-survey .table-container {
         max-height: min(70dvh, calc(100dvh - 10.5rem));
         overflow-x: auto;
@@ -5738,15 +6031,10 @@ body {
         margin-bottom: 0.8rem;
     }
 
-    /* 비파괴 도면: 세로 한손가락=페이지 스크롤, 핀치=줌 (가로 팬은 JS) */
-    body.bsa-tab-ndt #ndtCanvasContainer,
-    body.bsa-tab-ndt #ndtCanvas {
-        touch-action: pan-y pinch-zoom;
-    }
     #tab-survey .survey-table {
         width: max-content;
         min-width: 100%;
-        table-layout: auto;
+        table-layout: fixed;
         font-size: 0.78rem;
     }
     #tab-survey .survey-table thead th {
@@ -5755,70 +6043,55 @@ body {
         z-index: 2;
         background: #fafafa !important;
         box-shadow: 0 1px 0 #d0d0d0;
+        font-size: 0.72rem;
+        padding: 0.42rem 0.5rem;
     }
-    #tab-survey .survey-table th,
     #tab-survey .survey-table td {
-        word-break: keep-all;
-        overflow-wrap: anywhere;
-        padding: 0.45rem 0.55rem;
-        vertical-align: middle;
+        padding: 0.42rem 0.5rem;
     }
 
-    #tab-survey .survey-table th[data-col="no"],
-    #tab-survey .survey-table td[data-col="no"],
-    #tab-survey .survey-table th[data-col="category"],
-    #tab-survey .survey-table td[data-col="category"],
-    #tab-survey .survey-table th[data-col="progress"],
-    #tab-survey .survey-table td[data-col="progress"],
-    #tab-survey .survey-table th[data-col="leak"],
-    #tab-survey .survey-table td[data-col="leak"],
-    #tab-survey .survey-table th[data-col="priorityManage"],
-    #tab-survey .survey-table td[data-col="priorityManage"],
-    #tab-survey .survey-table th[data-col="size"],
-    #tab-survey .survey-table td[data-col="size"],
-    #tab-survey .survey-table th[data-col="crackWidth"],
-    #tab-survey .survey-table td[data-col="crackWidth"],
-    #tab-survey .survey-table th[data-col="crackLength"],
-    #tab-survey .survey-table td[data-col="crackLength"],
-    #tab-survey .survey-table th[data-col="actions"],
-    #tab-survey .survey-table td[data-col="actions"] {
-        white-space: nowrap;
-    }
+    #tab-survey .survey-table [data-col="no"] { min-width: 2.6rem; }
+    #tab-survey .survey-table [data-col="component"] { min-width: 7rem; }
+    #tab-survey .survey-table [data-col="defectType"] { min-width: 10rem; }
+    #tab-survey .survey-table [data-col="category"] { min-width: 5.8rem; }
+    #tab-survey .survey-table [data-col="size"] { min-width: 5.8rem; }
+    #tab-survey .survey-table [data-col="progress"],
+    #tab-survey .survey-table [data-col="leak"],
+    #tab-survey .survey-table [data-col="priorityManage"] { min-width: 5rem; }
+    #tab-survey .survey-table [data-col="cause"] { min-width: 7.5rem; }
+    #tab-survey .survey-table [data-col="actions"] { min-width: 9.5rem; }
 
-    #tab-survey .survey-table th[data-col="location"],
-    #tab-survey .survey-table td[data-col="location"],
-    #tab-survey .survey-table th[data-col="component"],
-    #tab-survey .survey-table td[data-col="component"],
-    #tab-survey .survey-table th[data-col="defectType"],
-    #tab-survey .survey-table td[data-col="defectType"],
-    #tab-survey .survey-table th[data-col="cause"],
-    #tab-survey .survey-table td[data-col="cause"],
-    #tab-survey .survey-table th[data-col="remark"],
-    #tab-survey .survey-table td[data-col="remark"],
-    #tab-survey .survey-table th[data-col="inspectionContent"],
-    #tab-survey .survey-table td[data-col="inspectionContent"] {
-        white-space: normal;
-        word-break: break-word;
-    }
-    /* 관리 열 — 가로 스크롤 끝에 자연스럽게 (sticky 고정 제거: 왼쪽 침범 방지) */
-    #tab-survey .survey-table th[data-col="actions"],
-    #tab-survey .survey-table td[data-col="actions"] {
-        min-width: 6.75rem;
-        padding-left: 0.4rem;
-        padding-right: 0.35rem;
-        vertical-align: middle;
-    }
     #tab-survey .survey-row-actions {
-        justify-content: flex-end;
-        gap: 0.2rem;
+        flex-wrap: nowrap;
+        justify-content: center;
+        gap: 0.25rem;
     }
     #tab-survey .survey-row-actions .btn {
         font-size: 0.68rem;
-        padding: 0.14rem 0.32rem;
+        padding: 0.2rem 0.38rem;
         flex-shrink: 0;
+        white-space: nowrap;
     }
 
-    /* 세로(포트rait) — 패딩만 줄이고 글자는 잘리지 않게(가로 스크롤 허용) */
+    #tab-survey .survey-inline-input,
+    #tab-survey .survey-inline-select,
+    #tab-survey .survey-inline-textarea {
+        font-size: 0.74rem;
+        padding: 0.24rem 0.38rem;
+    }
+
+    #tab-survey .survey-toggle-btn {
+        font-size: 0.68rem;
+        padding: 0.22rem 0.35rem;
+        white-space: nowrap;
+    }
+
+    /* 비파괴 도면: 세로 한손가락=페이지 스크롤, 핀치=줌 */
+    body.bsa-tab-ndt #ndtCanvasContainer,
+    body.bsa-tab-ndt #ndtCanvas {
+        touch-action: pan-y pinch-zoom;
+    }
+
     @media (orientation: portrait) {
         body.bsa-tab-survey .app-content {
             padding-left: 0.28rem;
@@ -5829,77 +6102,21 @@ body {
             margin-bottom: 0.4rem;
         }
 
+        #tab-survey .section-header .actions .btn {
+            flex: 1 1 calc(50% - 0.2rem);
+            min-width: 0;
+            white-space: normal;
+            line-height: 1.25;
+        }
+
         #tab-survey .table-container {
             padding: 0.12rem;
             max-height: min(78dvh, calc(100dvh - 7rem));
         }
 
         #tab-survey .survey-table {
-            table-layout: auto;
-            width: max-content;
-            min-width: 100%;
+            table-layout: fixed;
             font-size: 0.72rem;
-        }
-
-        #tab-survey .survey-table th,
-        #tab-survey .survey-table td {
-            padding: 0.32rem 0.38rem;
-            line-height: 1.25;
-            overflow: visible;
-            text-overflow: clip;
-            max-width: none;
-        }
-
-        #tab-survey .survey-table th[data-col="no"],
-        #tab-survey .survey-table td[data-col="no"],
-        #tab-survey .survey-table th[data-col="category"],
-        #tab-survey .survey-table td[data-col="category"],
-        #tab-survey .survey-table th[data-col="progress"],
-        #tab-survey .survey-table td[data-col="progress"],
-        #tab-survey .survey-table th[data-col="leak"],
-        #tab-survey .survey-table td[data-col="leak"],
-        #tab-survey .survey-table th[data-col="priorityManage"],
-        #tab-survey .survey-table td[data-col="priorityManage"],
-        #tab-survey .survey-table th[data-col="size"],
-        #tab-survey .survey-table td[data-col="size"],
-        #tab-survey .survey-table th[data-col="actions"],
-        #tab-survey .survey-table td[data-col="actions"] {
-            white-space: nowrap;
-        }
-
-        #tab-survey .survey-table th[data-col="location"],
-        #tab-survey .survey-table td[data-col="location"],
-        #tab-survey .survey-table th[data-col="component"],
-        #tab-survey .survey-table td[data-col="component"],
-        #tab-survey .survey-table th[data-col="defectType"],
-        #tab-survey .survey-table td[data-col="defectType"],
-        #tab-survey .survey-table th[data-col="cause"],
-        #tab-survey .survey-table td[data-col="cause"],
-        #tab-survey .survey-table th[data-col="remark"],
-        #tab-survey .survey-table td[data-col="remark"],
-        #tab-survey .survey-table th[data-col="inspectionContent"],
-        #tab-survey .survey-table td[data-col="inspectionContent"] {
-            white-space: normal;
-            word-break: break-word;
-        }
-
-        #tab-survey .survey-table .survey-col-dynamic .survey-inline-input,
-        #tab-survey .survey-table .survey-col-dynamic .survey-inline-textarea,
-        #tab-survey .survey-table .survey-col-dynamic .survey-inline-select {
-            min-width: 0 !important;
-            max-width: 100% !important;
-            width: 100% !important;
-        }
-
-        #tab-survey .survey-inline-stack {
-            min-width: 0;
-            gap: 0.14rem;
-        }
-
-        #tab-survey .survey-table .badge {
-            font-size: 0.62rem;
-            padding: 0.1rem 0.24rem;
-            white-space: nowrap;
         }
     }
 
@@ -6051,13 +6268,4 @@ body {
     display: flex;
     gap: 0.5rem;
     flex-wrap: wrap;
-}
-#btnCheckAppUpdate.ota-pending {
-    border-color: #f59e0b !important;
-    color: #fcd34d !important;
-    animation: ota-pulse 1.6s ease-in-out infinite;
-}
-@keyframes ota-pulse {
-    0%, 100% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.35); }
-    50% { box-shadow: 0 0 0 6px rgba(245, 158, 11, 0); }
 }

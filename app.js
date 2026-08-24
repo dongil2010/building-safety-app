@@ -925,12 +925,15 @@ document.addEventListener('DOMContentLoaded', () => {
                     <div class="building-row-actions">
                         <button type="button" class="icon-btn icon-btn-start" title="현장 점검 시작" onclick="window.selectBuildingAndInspect('${bldg.id}')">
                             <i class="fa-solid fa-map-location-dot"></i>
+                            <span class="icon-btn-label">점검</span>
                         </button>
                         <button type="button" class="icon-btn icon-btn-edit" title="건축물 개요 수정" onclick="window.openEditBuildingModalFunc('${bldg.id}', 'info')">
                             <i class="fa-solid fa-pen-to-square"></i>
+                            <span class="icon-btn-label">수정</span>
                         </button>
-                        <button type="button" class="icon-btn icon-btn-drawing" title="도면 수정" onclick="window.openEditBuildingModalFunc('${bldg.id}', 'drawing')">
+                        <button type="button" class="icon-btn icon-btn-drawing" title="도면 추가/교체" onclick="window.openEditBuildingModalFunc('${bldg.id}', 'drawing')">
                             <i class="fa-solid fa-images"></i>
+                            <span class="icon-btn-label">도면</span>
                         </button>
                     </div>
                 </div>
@@ -9019,6 +9022,74 @@ document.addEventListener('DOMContentLoaded', () => {
         return isDefectComboCustomToken(sel) ? '' : sel;
     }
 
+    function getQuickPickOptionsFromSelect(select) {
+        if (!select) return [];
+        return Array.from(select.options || [])
+            .map(opt => String(opt.value || '').trim())
+            .filter(v => v && !isDefectComboCustomToken(v));
+    }
+
+    function renderQuickPickChipGroup(containerId, options, currentValue, onPick) {
+        const container = document.getElementById(containerId);
+        if (!container) return;
+        if (!Array.isArray(options) || options.length === 0) {
+            container.innerHTML = '';
+            return;
+        }
+        container.innerHTML = options.map(value => `
+            <button type="button" class="defect-quick-chip ${value === currentValue ? 'active' : ''}" data-value="${value}">
+                ${value}
+            </button>
+        `).join('');
+        container.querySelectorAll('.defect-quick-chip').forEach(btn => {
+            btn.addEventListener('click', () => onPick(btn.dataset.value || ''));
+        });
+    }
+
+    function refreshDefectQuickPickBar() {
+        const categoryEl = document.getElementById('defectCategory');
+        const componentSelect = document.getElementById('defectComponent');
+        const componentInput = document.getElementById('defectComponentInput');
+        const typeSelect = document.getElementById('defectType');
+        const typeInput = document.getElementById('defectTypeInput');
+        const causeSelect = document.getElementById('defectCause');
+        const causeInput = document.getElementById('defectCauseInput');
+        const currentCategory = categoryEl?.value || '구조체';
+        const currentComponent = getDefectComboValue(componentSelect, componentInput);
+        const currentType = getDefectComboValue(typeSelect, typeInput);
+        const currentCause = getDefectComboValue(causeSelect, causeInput);
+
+        renderQuickPickChipGroup('quickCategoryChips', ['구조체', '비구조체', '마감재'], currentCategory, (value) => {
+            if (!categoryEl) return;
+            categoryEl.value = value;
+            categoryEl.dispatchEvent(new Event('change', { bubbles: true }));
+            if (typeof scheduleDefectAutoApply === 'function') scheduleDefectAutoApply();
+        });
+
+        renderQuickPickChipGroup('quickComponentChips', getQuickPickOptionsFromSelect(componentSelect).slice(0, 12), currentComponent, (value) => {
+            syncDefectComboFields(componentSelect, componentInput, value);
+            if (typeof scheduleDefectAutoApply === 'function') scheduleDefectAutoApply();
+            refreshDefectQuickPickBar();
+        });
+
+        renderQuickPickChipGroup('quickDefectTypeChips', getQuickPickOptionsFromSelect(typeSelect).slice(0, 12), currentType, (value) => {
+            syncDefectComboFields(typeSelect, typeInput, value);
+            updateDefectCauseDropdown(value);
+            toggleDefectSizeInputMode();
+            if (typeof scheduleDefectAutoApply === 'function') scheduleDefectAutoApply();
+            refreshDefectQuickPickBar();
+        });
+
+        const causeGroup = document.getElementById('quickCauseGroup');
+        const causeOptions = getQuickPickOptionsFromSelect(causeSelect).slice(0, 12);
+        if (causeGroup) causeGroup.style.display = currentType === '상태양호' ? 'none' : '';
+        renderQuickPickChipGroup('quickCauseChips', causeOptions, currentCause, (value) => {
+            syncDefectComboFields(causeSelect, causeInput, value);
+            if (typeof scheduleDefectAutoApply === 'function') scheduleDefectAutoApply();
+            refreshDefectQuickPickBar();
+        });
+    }
+
     function bindDefectComboInputs() {
         const pairs = [
             { selectId: 'defectComponent', inputId: 'defectComponentInput' },
@@ -9042,6 +9113,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (!v) return;
                 ensureDefectComboOption(select, v);
                 if (onChange) onChange(v);
+                refreshDefectQuickPickBar();
                 if (typeof scheduleDefectAutoApply === 'function') scheduleDefectAutoApply();
             });
         });
@@ -9091,6 +9163,7 @@ document.addEventListener('DOMContentLoaded', () => {
             ? currentVal
             : (isDefectComboCustomToken(select.value) ? '' : select.value);
         syncDefectComboFields(select, document.getElementById('defectComponentInput'), resolved);
+        refreshDefectQuickPickBar();
     }
 
     // --- Dynamic Defect Type Presets & Custom Adding ---
@@ -9170,6 +9243,7 @@ document.addEventListener('DOMContentLoaded', () => {
         // Trigger cause update for current defect type
         updateDefectCauseDropdown(resolved);
         toggleDefectSizeInputMode();
+        refreshDefectQuickPickBar();
     }
 
     // 자유텍스트(규모 및 상태) 입력칸은 결함 종류와 상관없이 항상 보이고,
@@ -9268,6 +9342,7 @@ document.addEventListener('DOMContentLoaded', () => {
             ? currentVal
             : (isDefectComboCustomToken(select.value) ? '' : select.value);
         syncDefectComboFields(select, document.getElementById('defectCauseInput'), resolved);
+        refreshDefectQuickPickBar();
     }
 
     // Category Change Listener & Custom Option Click
@@ -11455,11 +11530,25 @@ document.addEventListener('DOMContentLoaded', () => {
         overlay.style.height = '';
     }
 
-    function closeDefectModal() {
-        flushDefectAutoApply();
+    function closeDefectModal(options = {}) {
+        const discardPending = !!(options && options.discardPending);
+        if (discardPending) {
+            if (window._defectAutoApplyTimer) {
+                window.clearTimeout(window._defectAutoApplyTimer);
+                window._defectAutoApplyTimer = null;
+            }
+            window._defectEditSessionHistoryPushed = false;
+            window._defectPhotosDirty = false;
+        } else {
+            flushDefectAutoApply();
+        }
         window._defectMarkingTemplate = null;
         window._pendingPinCoords = null;
         window._pendingAreaRect = null;
+        window._pendingPhotos = [];
+        window._pendingPrevRoundPhotos = [];
+        const pinIdEl = document.getElementById('defectPinId');
+        if (pinIdEl) pinIdEl.value = '';
         document.body.classList.remove('defect-modal-open');
         if (elements.defectModal) {
             elements.defectModal.classList.remove('open');
@@ -12764,6 +12853,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             if (!confirm(`현재 층의 결함 ${defects.length}건을 모두 삭제할까요? (되돌리기로 복원 가능)`)) return;
 
+            closeDefectModal({ discardPending: true });
             pushDefectHistory();
             defects.forEach(d => {
                 deleteAllPhotosForDefect(d);
@@ -13247,17 +13337,38 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     };
 
-    // 상태조사표 컬럼·셀 폭: 해당 열 최장 글자수 기준(ch). 초과 시 띄어쓰기에서 2줄.
+    // 상태조사표 컬럼·셀 폭: 열별 최소 rem + 내용 글자수. 가로 스크롤 허용.
     const SURVEY_INLINE_WRAP_THRESHOLD = 10;
-    const SURVEY_COL_EXTRA_CH = 3; // 패딩·테두리·한글 폭 여유
+    const SURVEY_COL_MIN_REM = {
+        no: 2.8,
+        floorGroup: 3.4,
+        location: 5.5,
+        component: 7.5,
+        defectType: 10.5,
+        category: 6.2,
+        size: 6,
+        progress: 5.2,
+        leak: 5.2,
+        cause: 8,
+        crackWidth: 5.2,
+        crackLength: 5.2,
+        priorityManage: 5.8,
+        remark: 6.5,
+        actions: 10,
+        inspectionContent: 12
+    };
+
+    const SURVEY_DYNAMIC_COL_KEYS = new Set([
+        'location', 'component', 'defectType', 'cause', 'size',
+        'crackWidth', 'crackLength', 'inspectionContent'
+    ]);
 
     function surveyCharLen(str) {
         return String(str == null ? '' : str).trim().length;
     }
 
-    function surveyInputWidthCh(value, placeholder, minCh) {
-        const len = Math.max(surveyCharLen(value), surveyCharLen(placeholder), minCh || 2);
-        return Math.min(len + 1, 40);
+    function isSurveyMobileLayout() {
+        return window.matchMedia('(max-width: 1024px)').matches;
     }
 
     function surveyColumnWidthCh(maxLen) {
@@ -13266,8 +13377,11 @@ document.addEventListener('DOMContentLoaded', () => {
         return SURVEY_INLINE_WRAP_THRESHOLD;
     }
 
-    function surveyColumnDisplayCh(maxLen) {
-        return surveyColumnWidthCh(maxLen) + SURVEY_COL_EXTRA_CH;
+    function surveyColumnDisplayRem(colKey, maxLen) {
+        const minRem = SURVEY_COL_MIN_REM[colKey] || 5.5;
+        if (!SURVEY_DYNAMIC_COL_KEYS.has(colKey)) return minRem;
+        const contentRem = maxLen * 0.62 + 2.6;
+        return Math.max(minRem, Math.min(contentRem, 18));
     }
 
     function surveyWrapAtSpace(text, lineLen) {
@@ -13313,21 +13427,17 @@ document.addEventListener('DOMContentLoaded', () => {
                 maxLen = Math.max(maxLen, surveyInlineFieldLen(col.key, d, ctx));
             });
             const widthCh = surveyColumnWidthCh(maxLen);
+            const allowWrap = !isSurveyMobileLayout() && maxLen > SURVEY_INLINE_WRAP_THRESHOLD;
             metrics[col.key] = {
                 maxLen,
                 widthCh,
-                displayCh: surveyColumnDisplayCh(maxLen),
-                wrap: maxLen > SURVEY_INLINE_WRAP_THRESHOLD
+                displayRem: surveyColumnDisplayRem(col.key, maxLen),
+                wrap: allowWrap
             };
         });
-        metrics.actions = { maxLen: 4, widthCh: 6, displayCh: 9, wrap: false };
+        metrics.actions = { maxLen: 4, widthCh: 6, displayRem: SURVEY_COL_MIN_REM.actions, wrap: false };
         return metrics;
     }
-
-    const SURVEY_DYNAMIC_COL_KEYS = new Set([
-        'location', 'component', 'defectType', 'cause', 'size',
-        'crackWidth', 'crackLength', 'inspectionContent'
-    ]);
 
     function syncSurveyTableColgroup(columns, metrics) {
         const table = document.querySelector('#tab-survey .survey-table');
@@ -13340,11 +13450,11 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         const allKeys = columns.map(c => c.key).concat(['actions']);
         cg.innerHTML = allKeys.map(key => {
-            const m = metrics[key] || { displayCh: 9 };
-            const wCh = m.displayCh || surveyColumnDisplayCh(m.maxLen || 6);
-            return `<col data-col="${key}" style="width:${wCh}ch">`;
+            const m = metrics[key] || { displayRem: SURVEY_COL_MIN_REM[key] || 5.5 };
+            const wRem = m.displayRem || surveyColumnDisplayRem(key, m.maxLen || 4);
+            return `<col data-col="${key}" style="width:${wRem}rem">`;
         }).join('');
-        table.style.tableLayout = 'auto';
+        table.style.tableLayout = 'fixed';
     }
 
     function applySurveyColumnMetrics(columns, metrics) {
@@ -13357,16 +13467,13 @@ document.addEventListener('DOMContentLoaded', () => {
             const m = metrics[key];
             if (!m) return;
             const isDynamic = SURVEY_DYNAMIC_COL_KEYS.has(key);
-            const displayCh = m.displayCh || surveyColumnDisplayCh(m.maxLen || m.widthCh || 6);
-            const wStr = `${displayCh}ch`;
+            const displayRem = m.displayRem || surveyColumnDisplayRem(key, m.maxLen || m.widthCh || 4);
+            const wStr = `${displayRem}rem`;
             table.querySelectorAll(`[data-col="${key}"]`).forEach(el => {
+                el.style.setProperty('--survey-col-min', wStr);
                 el.style.setProperty('min-width', wStr, 'important');
                 el.style.setProperty('width', wStr, 'important');
-                if (isDynamic) {
-                    el.style.removeProperty('max-width');
-                } else {
-                    el.style.setProperty('max-width', wStr, 'important');
-                }
+                el.style.removeProperty('max-width');
                 el.classList.toggle('survey-col-wrap', !!m.wrap);
                 el.classList.toggle('survey-col-dynamic', isDynamic);
             });
@@ -13405,11 +13512,11 @@ document.addEventListener('DOMContentLoaded', () => {
             metrics[col.key] = {
                 maxLen,
                 widthCh,
-                displayCh: surveyColumnDisplayCh(maxLen),
-                wrap: maxLen > SURVEY_INLINE_WRAP_THRESHOLD
+                displayRem: surveyColumnDisplayRem(col.key, maxLen),
+                wrap: !isSurveyMobileLayout() && maxLen > SURVEY_INLINE_WRAP_THRESHOLD
             };
         });
-        metrics.actions = { maxLen: 4, widthCh: 6, displayCh: 9, wrap: false };
+        metrics.actions = { maxLen: 4, widthCh: 6, displayRem: SURVEY_COL_MIN_REM.actions, wrap: false };
         applySurveyColumnMetrics(columns, metrics);
     }
 
@@ -16942,10 +17049,10 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    const btnCheckAppUpdate = document.getElementById('btnCheckAppUpdate');
-    if (btnCheckAppUpdate) {
-        btnCheckAppUpdate.addEventListener('click', () => {
-            window.checkAppUpdate?.({ silent: false, force: true });
+    const btnReloadWebApp = document.getElementById('btnReloadWebApp');
+    if (btnReloadWebApp) {
+        btnReloadWebApp.addEventListener('click', () => {
+            window.reloadWebAppFromServer?.();
         });
     }
 
@@ -16965,7 +17072,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             const banner = document.getElementById('otaUpdateBanner');
             if (banner) banner.style.display = 'none';
-            window.showToast('6시간 후 다시 알려드립니다. 홈의 「앱 업데이트」로 언제든 설치할 수 있습니다.', 'info', 4500);
+            window.showToast('6시간 후 다시 알려드립니다. 배너의 「지금 업데이트」로 언제든 설치할 수 있습니다.', 'info', 4500);
         });
     }
 
@@ -18140,7 +18247,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // 📱 OTA 앱 업데이트 (Firestore app_meta + 네이티브 APK 설치)
     // ==========================================================================
     // android/app/build.gradle 의 versionCode / versionName 과 맞출 것
-    window.BSA_APP_BUILD = { versionCode: 7, versionName: '1.2.3' };
+    window.BSA_APP_BUILD = { versionCode: 8, versionName: '1.3.0' };
 
     const OTA_SNOOZE_MS = 6 * 60 * 60 * 1000;
     let _otaReleaseMeta = null;
@@ -18158,6 +18265,41 @@ document.addEventListener('DOMContentLoaded', () => {
             return false;
         }
     }
+
+    window.reloadWebAppFromServer = function () {
+        try { sessionStorage.removeItem('bsa_web_sha'); } catch (_) { /* ignore */ }
+        const url = new URL(window.location.href);
+        url.searchParams.set('_r', String(Date.now()));
+        window.location.replace(url.toString());
+    };
+
+    (function bindRemoteWebRefresh() {
+        const KEY = 'bsa_web_sha';
+        async function fetchWebSha() {
+            const r = await fetch('web-version.json?t=' + Date.now(), { cache: 'no-store' });
+            if (!r.ok) return null;
+            const j = await r.json();
+            return j.sha || j.short || null;
+        }
+        async function checkRemoteWebVersion() {
+            try {
+                const sha = await fetchWebSha();
+                if (!sha || sha === 'local') return;
+                const prev = sessionStorage.getItem(KEY);
+                if (prev && prev !== sha) {
+                    sessionStorage.setItem(KEY, sha);
+                    window.reloadWebAppFromServer();
+                    return;
+                }
+                sessionStorage.setItem(KEY, sha);
+            } catch (_) { /* offline */ }
+        }
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'visible') checkRemoteWebVersion();
+        });
+        window.addEventListener('focus', checkRemoteWebVersion);
+        setTimeout(checkRemoteWebVersion, 800);
+    })();
 
     function getAppUpdatePlugin() {
         try {
@@ -18215,15 +18357,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function applyOtaUiState(evalResult) {
         const banner = document.getElementById('otaUpdateBanner');
-        const btnUpdate = document.getElementById('btnCheckAppUpdate');
         const badge = document.getElementById('appVersionBadge');
         const verEl = document.getElementById('otaBannerVersion');
         const notesEl = document.getElementById('otaBannerNotes');
+        const build = window.BSA_APP_BUILD || { versionName: '1.0' };
 
-        if (badge) {
+        if (badge && isNativeAndroidApp()) {
             badge.innerHTML = evalResult?.needsUpdate
-                ? `<i class="fa-solid fa-circle-up"></i> v${_otaLocalName} → v${evalResult.remoteName} 업데이트 가능`
-                : `<i class="fa-solid fa-circle-check"></i> v${_otaLocalName} · OTA 자동 업데이트`;
+                ? `<i class="fa-solid fa-circle-up"></i> v${_otaLocalName} → v${evalResult.remoteName} APK 업데이트 가능`
+                : `<i class="fa-solid fa-circle-check"></i> v${build.versionName || _otaLocalName} · 웹뷰 원격 업데이트`;
         }
 
         if (evalResult?.needsUpdate) {
@@ -18232,10 +18374,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (verEl) verEl.textContent = `v${evalResult.remoteName}`;
                 if (notesEl) notesEl.textContent = evalResult.meta?.notes ? String(evalResult.meta.notes) : '';
             }
-            if (btnUpdate) btnUpdate.classList.add('ota-pending');
-        } else {
-            if (banner) banner.style.display = 'none';
-            if (btnUpdate) btnUpdate.classList.remove('ota-pending');
+        } else if (banner) {
+            banner.style.display = 'none';
         }
     }
 
