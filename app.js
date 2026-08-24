@@ -2417,6 +2417,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (currentCat === '기울기') return items.filter(item => item.category === currentCat);
         if (currentCat === '변위' || currentCat === '부재변위') return [];
         if (currentCat === '실측') return items.filter(item => item.category === '실측');
+        if (currentCat === '내화피복') return items.filter(item => item.category === '내화피복');
         return items.filter(item => ['강도', '탄산화'].includes(item.category));
     }
 
@@ -2529,7 +2530,7 @@ document.addEventListener('DOMContentLoaded', () => {
         } else if (currentCat === '변위') {
             filtered = items.filter(item => item.category === '변위');
         } else {
-            filtered = items.filter(item => ['실측', '강도', '탄산화'].includes(item.category));
+            filtered = items.filter(item => ['실측', '강도', '탄산화', '내화피복'].includes(item.category));
         }
 
         const measureCtx = state.ctx || null;
@@ -2620,7 +2621,8 @@ document.addEventListener('DOMContentLoaded', () => {
         ndtCarbonation: '#0040c0',      // 탄산화 (파랑)
         ndtTilt: '#b30000',             // 기울기
         ndtSettlement: '#7e22ce',       // 부동침하 기울기
-        ndtMemberDisp: '#15803d'        // 부재변위
+        ndtMemberDisp: '#15803d',       // 부재변위
+        ndtFireproof: '#c2410c'         // 내화피복 두께
     };
 
     function getStyleColor(key) {
@@ -2662,7 +2664,8 @@ document.addEventListener('DOMContentLoaded', () => {
         ndtCarbonation: { pin: 1.0, arrow: 1.0, leader: 1.0 },
         ndtTilt: { pin: 1.0, arrow: 1.0, leader: 1.0 },
         ndtSettlement: { pin: 1.0, arrow: 1.0, leader: 1.0 },
-        ndtMemberDisp: { pin: 1.0, arrow: 1.0, leader: 1.0 }
+        ndtMemberDisp: { pin: 1.0, arrow: 1.0, leader: 1.0 },
+        ndtFireproof: { pin: 1.0, arrow: 1.0, leader: 1.0 }
     };
 
     // 보고서 등 다른 층 렌더 시 해당 층 스타일을 쓰기 위한 임시 컨텍스트
@@ -2690,7 +2693,7 @@ document.addEventListener('DOMContentLoaded', () => {
     ];
     const NDT_STYLE_SIZE_KEYS = [
         'ndtMeasure', 'ndtStrength', 'ndtCarbonation',
-        'ndtTilt', 'ndtSettlement', 'ndtMemberDisp'
+        'ndtTilt', 'ndtSettlement', 'ndtMemberDisp', 'ndtFireproof'
     ];
 
     function cloneStyleSizesSubset(src, keys) {
@@ -2807,7 +2810,8 @@ document.addEventListener('DOMContentLoaded', () => {
         ndtCarbonation: { shape: 'rect', fill: false, numberFormat: 'no' },
         ndtTilt: { shape: 'rect', fill: false, numberFormat: 'no' },
         ndtSettlement: { shape: 'rect', fill: false, numberFormat: 'no' },
-        ndtMemberDisp: { shape: 'rect', fill: false, numberFormat: 'no' }
+        ndtMemberDisp: { shape: 'rect', fill: false, numberFormat: 'no' },
+        ndtFireproof: { shape: 'rect', fill: false, numberFormat: 'no' }
     };
 
     function getStyleShape(key) {
@@ -2894,7 +2898,8 @@ document.addEventListener('DOMContentLoaded', () => {
             '탄산화': '콘크리트 탄산화',
             '기울기': '외벽 기울기',
             '변위': '부동침하 기울기',
-            '부재변위': '부재변위'
+            '부재변위': '부재변위',
+            '내화피복': '내화피복 두께'
         };
         return map[cat] || cat || '비파괴';
     }
@@ -3123,6 +3128,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (cat === '기울기') return 'ndtTilt';
         if (cat === '실측') return 'ndtMeasure';
         if (cat === '탄산화') return 'ndtCarbonation';
+        if (cat === '내화피복') return 'ndtFireproof';
         return 'ndtStrength';
     }
 
@@ -3452,7 +3458,7 @@ document.addEventListener('DOMContentLoaded', () => {
         setActiveNdtDispGroup(null);
         selectedNdtIds.clear();
         updateNdtSelectionBar();
-        const catMap = { '실측': 'Dim', '강도': 'Strength', '탄산화': 'Carb', '기울기': 'Tilt', '변위': 'Vert', '부재변위': 'MemberDisp' };
+        const catMap = { '실측': 'Dim', '강도': 'Strength', '탄산화': 'Carb', '기울기': 'Tilt', '변위': 'Vert', '부재변위': 'MemberDisp', '내화피복': 'Fireproof' };
         Object.values(catMap).forEach(id => {
             const btn = document.getElementById(`btnNdtCat${id}`);
             if (btn) btn.classList.remove('active');
@@ -3509,6 +3515,8 @@ document.addEventListener('DOMContentLoaded', () => {
             ndtItems = [];
         } else if (currentCat === '실측') {
             ndtItems = ndtItems.filter(item => item.category === '실측');
+        } else if (currentCat === '내화피복') {
+            ndtItems = ndtItems.filter(item => item.category === '내화피복');
         } else {
             // 강도 / 탄산화 탭: 같은 도면에 함께 표시 (부재 실측은 별도 도면)
             ndtItems = ndtItems.filter(item => ['강도', '탄산화'].includes(item.category));
@@ -5241,6 +5249,20 @@ document.addEventListener('DOMContentLoaded', () => {
                     <th>관리</th>
                 `;
             }
+        } else if (currentCat === '내화피복') {
+            items = items.filter(x => x.category === '내화피복');
+            if (thead) {
+                thead.innerHTML = `
+                    <th>조사번호</th>
+                    <th>측정위치</th>
+                    <th>부재명</th>
+                    <th>설계치</th>
+                    <th>플렌지 평균(mm)</th>
+                    <th>웨브 평균(mm)</th>
+                    <th>비고</th>
+                    <th>관리</th>
+                `;
+            }
         } else {
             items = items.filter(x => ['강도', '탄산화'].includes(x.category));
             if (thead) {
@@ -5358,6 +5380,27 @@ document.addEventListener('DOMContentLoaded', () => {
                     </td>
                 </tr>
             `).join('');
+        } else if (currentCat === '내화피복') {
+            tbody.innerHTML = items.map((item, idx) => {
+                const flangeText = (item.fpFlange && item.fpFlange.unavailable) ? '측정불가' : ((item.fpFlange && item.fpFlange.avg != null) ? item.fpFlange.avg : '-');
+                const webText = (item.fpWeb && item.fpWeb.unavailable) ? '측정불가' : ((item.fpWeb && item.fpWeb.avg != null) ? item.fpWeb.avg : '-');
+                const note = ((item.fpFlange && item.fpFlange.unavailable) || (item.fpWeb && item.fpWeb.unavailable)) ? '측정불가 있음' : '-';
+                return `
+                <tr>
+                    <td style="font-weight:700; color:#6b6b6b;">${item.no || (idx + 1)}</td>
+                    <td style="font-weight:700;">${item.location || '-'}</td>
+                    <td>${item.component || '-'}</td>
+                    <td style="font-family:monospace; font-size:0.88rem;">${item.fireproofDesign || '-'}</td>
+                    <td style="font-weight:800; color:#4ade80;">${flangeText}</td>
+                    <td style="font-weight:800; color:#4ade80;">${webText}</td>
+                    <td>${note}</td>
+                    <td>
+                        <button class="btn btn-sm btn-outline" style="border-color:#6b6b6b; color:#6b6b6b; padding:0.15rem 0.45rem;" onclick="window.editNdtItem('${item.id}')">수정</button>
+                        <button class="btn btn-sm btn-danger-outline" style="padding:0.15rem 0.45rem;" onclick="window.deleteNdtItem('${item.id}')">삭제</button>
+                    </td>
+                </tr>
+            `;
+            }).join('');
         }
     }
 
@@ -5441,6 +5484,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         let csvContent = "\ufeff";
         const measureItems = items.filter(x => x.category === '실측');
+        const fireproofItems = items.filter(x => x.category === '내화피복');
         const standardItems = items.filter(x => ['강도', '탄산화'].includes(x.category));
         const tiltItems = items.filter(x => ['기울기', '부재변위'].includes(x.category));
 
@@ -5454,15 +5498,25 @@ document.addEventListener('DOMContentLoaded', () => {
                 csvContent += `"${item.no}","${item.location}","${item.component}","${designText}","${measuredText}","${item.finishState || ''}","${ratioText}","${item.sectionGrade || ''}"\n`;
             });
         }
-        if (standardItems.length > 0) {
+        if (fireproofItems.length > 0) {
             if (measureItems.length > 0) csvContent += "\n";
+            csvContent += "조사번호,측정위치,부재명,설계치,플렌지1,플렌지2,플렌지3,플렌지평균,웨브1,웨브2,웨브3,웨브평균\n";
+            fireproofItems.forEach(item => {
+                const fl = item.fpFlange || {}; const web = item.fpWeb || {};
+                const flVals = fl.unavailable ? ['측정불가', '', '', '측정불가'] : [fl.readings?.[0] ?? '', fl.readings?.[1] ?? '', fl.readings?.[2] ?? '', fl.avg ?? ''];
+                const webVals = web.unavailable ? ['측정불가', '', '', '측정불가'] : [web.readings?.[0] ?? '', web.readings?.[1] ?? '', web.readings?.[2] ?? '', web.avg ?? ''];
+                csvContent += `"${item.no}","${item.location}","${item.component}","${item.fireproofDesign || ''}","${flVals[0]}","${flVals[1]}","${flVals[2]}","${flVals[3]}","${webVals[0]}","${webVals[1]}","${webVals[2]}","${webVals[3]}"\n`;
+            });
+        }
+        if (standardItems.length > 0) {
+            if (measureItems.length > 0 || fireproofItems.length > 0) csvContent += "\n";
             csvContent += "조사번호,조사항목,측정위치,부재명,측정수치,평균결과,상태판정\n";
             standardItems.forEach(item => {
                 csvContent += `"${item.no}","${item.category}","${item.location}","${item.component}","${item.valuesText || ''}","${item.avgValue || ''}","${item.status}"\n`;
             });
         }
         if (tiltItems.length > 0) {
-            if (measureItems.length > 0 || standardItems.length > 0) csvContent += "\n";
+            if (measureItems.length > 0 || fireproofItems.length > 0 || standardItems.length > 0) csvContent += "\n";
             csvContent += "조사번호,조사항목,측정위치,높이/길이(H/L),변위/처짐량(mm),비율(1/N),안전등급\n";
             tiltItems.forEach(item => {
                 const fmtH = formatHeightValue(item.height) || '-';
@@ -5779,6 +5833,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const damageStatusGrp = document.getElementById('groupNdtDamageStatus');
         const commonLocationGrp = document.getElementById('ndtLocationFieldWrap');
         const measureGrp = document.getElementById('groupNdtMeasureFields');
+        const fireproofGrp = document.getElementById('groupNdtFireproofFields');
         const measuredDepthGrp = document.getElementById('groupNdtMeasuredDepth');
         const sectionResultGrp = document.getElementById('groupNdtSectionResult');
         const avgValueGrp = document.getElementById('groupNdtAvgValue');
@@ -5796,7 +5851,7 @@ document.addEventListener('DOMContentLoaded', () => {
         // 나머지 항목(실측/기울기/부재변위)은 기존 1~3회 입력 UI를 그대로 쓴다.
         if (strengthGrp) strengthGrp.style.display = (cat === '강도') ? 'flex' : 'none';
         if (carbGrp) carbGrp.style.display = (cat === '탄산화') ? 'flex' : 'none';
-        if (genericValuesGrp) genericValuesGrp.style.display = (cat === '강도' || cat === '탄산화' || cat === '실측') ? 'none' : 'block';
+        if (genericValuesGrp) genericValuesGrp.style.display = (cat === '강도' || cat === '탄산화' || cat === '실측' || cat === '내화피복') ? 'none' : 'block';
         // 강도는 위치를 슬롯별로 따로 입력받으므로, 공용 측정위치 칸은 숨긴다.
         if (commonLocationGrp) commonLocationGrp.style.display = (cat === '강도') ? 'none' : '';
         // 부재 실측 전용 필드(설계치수/마감상태/실측 폭·춤/단면적비율)는 실측일 때만 노출.
@@ -5804,7 +5859,8 @@ document.addEventListener('DOMContentLoaded', () => {
         if (measureGrp) measureGrp.style.display = (cat === '실측') ? 'flex' : 'none';
         if (measuredDepthGrp) measuredDepthGrp.style.display = (cat === '실측') ? 'flex' : 'none';
         if (sectionResultGrp) sectionResultGrp.style.display = (cat === '실측') ? 'block' : 'none';
-        if (avgValueGrp) avgValueGrp.style.display = (cat === '실측') ? 'none' : 'block';
+        if (avgValueGrp) avgValueGrp.style.display = (cat === '실측' || cat === '내화피복') ? 'none' : 'block';
+        if (fireproofGrp) fireproofGrp.style.display = (cat === '내화피복') ? 'flex' : 'none';
         if (cat === '실측' && !document.getElementById('ndtFinishState')?.options.length) populateNdtFinishStateDropdown(NDT_FINISH_STATE_PRESET[0]);
 
         if (cat === '부재변위') {
@@ -5840,6 +5896,10 @@ document.addEventListener('DOMContentLoaded', () => {
             if (v1El) v1El.placeholder = '1회 측정값(mm)';
             if (v2El) v2El.placeholder = '2회 측정값(mm)';
             if (v3El) v3El.placeholder = '3회 측정값(mm)';
+        } else if (cat === '내화피복') {
+            if (stdGrp) stdGrp.style.display = 'flex';
+            if (statusGrp) statusGrp.style.display = 'none';
+            if (tiltGrp) tiltGrp.style.display = 'none';
         } else {
             if (stdGrp) stdGrp.style.display = 'flex';
             if (statusGrp) statusGrp.style.display = 'flex';
@@ -6393,6 +6453,21 @@ document.addEventListener('DOMContentLoaded', () => {
             const sectionGradeElExisting = document.getElementById('ndtSectionGrade');
             if (sectionGradeElExisting) sectionGradeElExisting.value = existingItem.sectionGrade || '';
 
+            const fpDesignElExisting = document.getElementById('ndtFireproofDesign');
+            if (fpDesignElExisting) fpDesignElExisting.value = existingItem.fireproofDesign || '';
+            ['Flange', 'Web'].forEach(part => {
+                const key = part === 'Flange' ? 'fpFlange' : 'fpWeb';
+                const readings = (existingItem[key] && Array.isArray(existingItem[key].readings)) ? existingItem[key].readings : [];
+                [1, 2, 3].forEach((n, i) => {
+                    const el = document.getElementById(`ndtFp${part}${n}`);
+                    if (el) el.value = readings[i] !== undefined && readings[i] !== null ? readings[i] : '';
+                });
+                const avgElExisting = document.getElementById(`ndtFp${part}Avg`);
+                if (avgElExisting) avgElExisting.value = (existingItem[key] && existingItem[key].avg !== undefined && existingItem[key].avg !== null) ? existingItem[key].avg : '';
+                const unavailElExisting = document.getElementById(`ndtFp${part}Unavailable`);
+                if (unavailElExisting) unavailElExisting.checked = !!(existingItem[key] && existingItem[key].unavailable);
+            });
+
             window._pendingNdtExtra = {
                 targetX: existingItem.targetX !== undefined ? existingItem.targetX : existingItem.x,
                 targetY: existingItem.targetY !== undefined ? existingItem.targetY : existingItem.y,
@@ -6442,6 +6517,18 @@ document.addEventListener('DOMContentLoaded', () => {
             if (sectionRatioElNew) sectionRatioElNew.value = '';
             const sectionGradeElNew = document.getElementById('ndtSectionGrade');
             if (sectionGradeElNew) sectionGradeElNew.value = '';
+            const fpDesignElNew = document.getElementById('ndtFireproofDesign');
+            if (fpDesignElNew) fpDesignElNew.value = '';
+            ['Flange', 'Web'].forEach(part => {
+                [1, 2, 3].forEach(n => {
+                    const el = document.getElementById(`ndtFp${part}${n}`);
+                    if (el) el.value = '';
+                });
+                const avgElNew = document.getElementById(`ndtFp${part}Avg`);
+                if (avgElNew) avgElNew.value = '';
+                const unavailElNew = document.getElementById(`ndtFp${part}Unavailable`);
+                if (unavailElNew) unavailElNew.checked = false;
+            });
 
             window._pendingNdtExtra = extraOpts || {
                 targetX: imgX,
@@ -6682,6 +6769,23 @@ document.addEventListener('DOMContentLoaded', () => {
             ? { finishState, designWidth, designDepth, measuredWidth, measuredDepth, sectionRatio, sectionGrade }
             : { finishState: null, designWidth: null, designDepth: null, measuredWidth: null, measuredDepth: null, sectionRatio: null, sectionGrade: null };
 
+        // 내화피복 두께: 부재당 플렌지/웨브 각 3회 실측 + 평균, "측정불가" 체크 시 실측값 없이 표시만.
+        const buildFireproofPart = (part) => {
+            const unavailable = document.getElementById(`ndtFp${part}Unavailable`)?.checked || false;
+            const readings = [1, 2, 3]
+                .map(n => parseFloat(document.getElementById(`ndtFp${part}${n}`)?.value))
+                .filter(v => Number.isFinite(v));
+            const avgStr = document.getElementById(`ndtFp${part}Avg`)?.value || '';
+            return { readings, avg: avgStr !== '' ? parseFloat(avgStr) : null, unavailable };
+        };
+        const fireproofExtra = (cat === '내화피복')
+            ? {
+                fireproofDesign: document.getElementById('ndtFireproofDesign')?.value || '',
+                fpFlange: buildFireproofPart('Flange'),
+                fpWeb: buildFireproofPart('Web')
+            }
+            : { fireproofDesign: null, fpFlange: null, fpWeb: null };
+
         let savedItem = null;
         if (pinId) {
             const idx = state.ndtData[key].findIndex(x => x.id === pinId);
@@ -6716,6 +6820,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     ...strengthExtra,
                     ...carbExtra,
                     ...measureExtra,
+                    ...fireproofExtra,
                     inspectorName: existing.inspectorName || window.state.userName || ''
                 };
                 touchNdtUpdatedAt(state.ndtData[key][idx]);
@@ -6749,6 +6854,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 ...strengthExtra,
                 ...carbExtra,
                 ...measureExtra,
+                ...fireproofExtra,
                 inspectorName: window.state.userName || '',
                 updatedAt: Date.now(),
                 x: extra.targetX,
@@ -6869,6 +6975,17 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         }
 
+        // --- 내화피복 두께: 플렌지/웨브 각 3회 실측값 평균 자동 연산 ---
+        function calcFireproofAuto() {
+            const cat = document.getElementById('ndtCategory')?.value || '강도';
+            if (cat !== '내화피복') return;
+            ['Flange', 'Web'].forEach(part => {
+                const vals = [1, 2, 3].map(n => parseFloat(document.getElementById(`ndtFp${part}${n}`)?.value)).filter(v => Number.isFinite(v));
+                const avgEl2 = document.getElementById(`ndtFp${part}Avg`);
+                if (avgEl2) avgEl2.value = vals.length ? (vals.reduce((a, b) => a + b, 0) / vals.length).toFixed(2) : '';
+            });
+        }
+
         function calcTiltAuto() {
             const cat = document.getElementById('ndtCategory')?.value || '강도';
             if (cat !== '기울기' && cat !== '부재변위') return;
@@ -6907,6 +7024,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 calcNdtAvg();
                 recalcAllStrengthSlots();
                 recalcNdtCarbonation();
+                calcFireproofAuto();
             });
         }
 
@@ -6918,6 +7036,12 @@ document.addEventListener('DOMContentLoaded', () => {
         ['ndtDesignWidth', 'ndtDesignDepth', 'ndtMeasuredWidth', 'ndtMeasuredDepth'].forEach(id => {
             const el = document.getElementById(id);
             if (el) el.addEventListener('input', calcSectionAuto);
+        });
+
+        // --- 내화피복: 실측값 입력 시 평균 자동 재계산 ---
+        ['ndtFpFlange1', 'ndtFpFlange2', 'ndtFpFlange3', 'ndtFpWeb1', 'ndtFpWeb2', 'ndtFpWeb3'].forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.addEventListener('input', calcFireproofAuto);
         });
 
         // --- 부재 실측: 마감상태 직접 추가 ---
@@ -9927,7 +10051,8 @@ document.addEventListener('DOMContentLoaded', () => {
         ['styleColorNdtCarbonation', 'ndtCarbonation'],
         ['styleColorNdtTilt', 'ndtTilt'],
         ['styleColorNdtSettlement', 'ndtSettlement'],
-        ['styleColorNdtMemberDisp', 'ndtMemberDisp']
+        ['styleColorNdtMemberDisp', 'ndtMemberDisp'],
+        ['styleColorNdtFireproof', 'ndtFireproof']
     ];
 
     // [ID 접미사, styleSizes 키] — stylePinSize{suffix}/styleArrowSize{suffix} 슬라이더에 사용
@@ -9945,7 +10070,8 @@ document.addEventListener('DOMContentLoaded', () => {
         ['NdtCarbonation', 'ndtCarbonation'],
         ['NdtTilt', 'ndtTilt'],
         ['NdtSettlement', 'ndtSettlement'],
-        ['NdtMemberDisp', 'ndtMemberDisp']
+        ['NdtMemberDisp', 'ndtMemberDisp'],
+        ['NdtFireproof', 'ndtFireproof']
     ];
     const STYLE_SIZE_FIELDS = DEFECT_STYLE_SIZE_FIELDS.concat(NDT_STYLE_SIZE_FIELDS);
 
@@ -16861,6 +16987,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 const allDispGroupsForHwpx = state.ndtDisplacementGroups ? (state.ndtDisplacementGroups[ndtKey] || []) : [];
 
                 const measureItemsHwpx = allNdtItemsForHwpx.filter(item => item.category === '실측');
+                const fireproofItemsHwpx = allNdtItemsForHwpx.filter(item => item.category === '내화피복');
                 const strengthItemsHwpx = allNdtItemsForHwpx.filter(item => item.category === '강도');
                 const carbItemsHwpx = allNdtItemsForHwpx.filter(item => item.category === '탄산화');
                 const tiltItemsHwpx = allNdtItemsForHwpx.filter(item => item.category === '기울기');
@@ -17060,6 +17187,107 @@ document.addEventListener('DOMContentLoaded', () => {
                     }
                 };
 
+                // 내화피복 두께 결과표(부재당 플렌지/웨브 2행짜리) — 표 열 구성이 단순 1행/항목이
+                // 아니라서(항목 하나 = NO./구분/설계치가 두 행에 걸쳐 세로병합) fillNdtTable을
+                // 그대로 못 쓰고 전용 채움 함수를 따로 둔다. 원본 표는 2026-08-24 신설.
+                const FIREPROOF_TBL_ID = '504', FIREPROOF_HEADER_ROWS = 1;
+                const fillFireproofTable = (tbl, items) => {
+                    const allTrs = Array.from(tbl.getElementsByTagNameNS(HP_NS, 'tr')).filter(tr => tr.parentNode === tbl);
+                    const oldDataRows = allTrs.slice(FIREPROOF_HEADER_ROWS);
+                    if (oldDataRows.length < 2) return;
+
+                    const rowHasCol0 = (tr) => Array.from(tr.getElementsByTagNameNS(HP_NS, 'tc')).some(tc => {
+                        const addr = tc.getElementsByTagNameNS(HP_NS, 'cellAddr')[0];
+                        return addr && addr.getAttribute('colAddr') === '0';
+                    });
+                    const oldPairs = [];
+                    for (let i = 0; i < oldDataRows.length - 1; i++) {
+                        if (rowHasCol0(oldDataRows[i])) oldPairs.push([oldDataRows[i], oldDataRows[i + 1]]);
+                    }
+                    if (oldPairs.length === 0) return;
+                    const firstPair = oldPairs[0];
+                    const normalPair = oldPairs.length > 2 ? oldPairs[1] : oldPairs[0];
+                    const lastPair = oldPairs[oldPairs.length - 1];
+
+                    const borderStyleByColLocal = (row) => {
+                        const map = {};
+                        Array.from(row.getElementsByTagNameNS(HP_NS, 'tc')).forEach(tc => {
+                            const addr = tc.getElementsByTagNameNS(HP_NS, 'cellAddr')[0];
+                            if (addr) map[addr.getAttribute('colAddr')] = tc.getAttribute('borderFillIDRef');
+                        });
+                        return map;
+                    };
+                    const styleMapsA = { first: borderStyleByColLocal(firstPair[0]), normal: borderStyleByColLocal(normalPair[0]), last: borderStyleByColLocal(lastPair[0]) };
+                    const styleMapsB = { first: borderStyleByColLocal(firstPair[1]), normal: borderStyleByColLocal(normalPair[1]), last: borderStyleByColLocal(lastPair[1]) };
+
+                    const setRowAddr = (row, rowAddr) => {
+                        Array.from(row.getElementsByTagNameNS(HP_NS, 'tc')).forEach(tc => {
+                            const addr = tc.getElementsByTagNameNS(HP_NS, 'cellAddr')[0];
+                            if (addr) addr.setAttribute('rowAddr', String(rowAddr));
+                        });
+                    };
+                    const setCellText = (row, colAddr, text) => {
+                        const tc = Array.from(row.getElementsByTagNameNS(HP_NS, 'tc')).find(t => {
+                            const addr = t.getElementsByTagNameNS(HP_NS, 'cellAddr')[0];
+                            return addr && addr.getAttribute('colAddr') === String(colAddr);
+                        });
+                        if (!tc) return;
+                        const subList = tc.getElementsByTagNameNS(HP_NS, 'subList')[0];
+                        const paras = subList ? Array.from(subList.getElementsByTagNameNS(HP_NS, 'p')).filter(p => p.parentNode === subList) : [];
+                        if (paras.length === 0) return;
+                        ensureCellTextNode(paras[0]).textContent = text;
+                        for (let i = paras.length - 1; i >= 1; i--) subList.removeChild(paras[i]);
+                    };
+                    const applyBorder = (row, styleMap) => {
+                        Array.from(row.getElementsByTagNameNS(HP_NS, 'tc')).forEach(tc => {
+                            const addr = tc.getElementsByTagNameNS(HP_NS, 'cellAddr')[0];
+                            if (!addr) return;
+                            const bf = styleMap[addr.getAttribute('colAddr')];
+                            if (bf !== undefined) tc.setAttribute('borderFillIDRef', bf);
+                        });
+                    };
+
+                    oldDataRows.forEach(tr => tbl.removeChild(tr));
+
+                    items.forEach((item, idx) => {
+                        const which = idx === 0 ? 'first' : (idx === items.length - 1 ? 'last' : 'normal');
+                        const [templateA, templateB] = which === 'first' ? firstPair : (which === 'last' ? lastPair : normalPair);
+                        const newA = templateA.cloneNode(true);
+                        const newB = templateB.cloneNode(true);
+                        const rowAddrA = FIREPROOF_HEADER_ROWS + idx * 2;
+                        setRowAddr(newA, rowAddrA);
+                        setRowAddr(newB, rowAddrA + 1);
+                        applyBorder(newA, styleMapsA[which]);
+                        applyBorder(newB, styleMapsB[which]);
+
+                        const fl = item.fpFlange || {};
+                        const web = item.fpWeb || {};
+                        const flVal = (i) => fl.unavailable ? '-' : ((fl.readings && fl.readings[i] !== undefined) ? fl.readings[i] : '-');
+                        const webVal = (i) => web.unavailable ? '-' : ((web.readings && web.readings[i] !== undefined) ? web.readings[i] : '-');
+
+                        setCellText(newA, 0, item.no || String(idx + 1));
+                        setCellText(newA, 1, item.location || '-');
+                        setCellText(newA, 2, '플렌지');
+                        setCellText(newA, 3, item.fireproofDesign || '-');
+                        setCellText(newA, 4, flVal(0));
+                        setCellText(newA, 5, flVal(1));
+                        setCellText(newA, 6, flVal(2));
+                        setCellText(newA, 7, (fl.unavailable || fl.avg === null || fl.avg === undefined) ? '-' : fl.avg);
+                        setCellText(newA, 8, fl.unavailable ? '측정불가' : '-');
+
+                        setCellText(newB, 2, '웨브');
+                        setCellText(newB, 4, webVal(0));
+                        setCellText(newB, 5, webVal(1));
+                        setCellText(newB, 6, webVal(2));
+                        setCellText(newB, 7, (web.unavailable || web.avg === null || web.avg === undefined) ? '-' : web.avg);
+                        setCellText(newB, 8, web.unavailable ? '측정불가' : '-');
+
+                        tbl.appendChild(newA);
+                        tbl.appendChild(newB);
+                    });
+                    tbl.setAttribute('rowCnt', String(FIREPROOF_HEADER_ROWS + items.length * 2));
+                };
+
                 const MEASURE_TBL_ID = '2137459237', MEASURE_HEADER_ROWS = 2;
                 const STRENGTH_TBL_ID = '2119329126', STRENGTH_HEADER_ROWS = 1;
                 const CARB_TBL_ID = '2119328135', CARB_HEADER_ROWS = 1;
@@ -17094,6 +17322,14 @@ document.addEventListener('DOMContentLoaded', () => {
                         }), true);
                     } else {
                         removeNdtTableById(MEASURE_TBL_ID);
+                    }
+
+                    // 내화피복 두께 결과표 — NO./구분/설계치가 플렌지·웨브 두 행에 걸쳐 세로병합.
+                    if (fireproofItemsHwpx.length > 0) {
+                        const tbl = findTblById(FIREPROOF_TBL_ID, ['부  위', '설계치', '검토결과']);
+                        if (tbl) fillFireproofTable(tbl, fireproofItemsHwpx);
+                    } else {
+                        removeNdtTableById(FIREPROOF_TBL_ID);
                     }
 
                     if (strengthItemsHwpx.length > 0) {

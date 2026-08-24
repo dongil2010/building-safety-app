@@ -491,6 +491,7 @@
                     <button type="button" id="btnNdtCatTilt" class="chip" onclick="window.setNdtCategory('기울기')">📐 외벽 기울기</button>
                     <button type="button" id="btnNdtCatVert" class="chip" onclick="window.setNdtCategory('변위')">📉 부동침하 기울기</button>
                     <button type="button" id="btnNdtCatMemberDisp" class="chip" onclick="window.setNdtCategory('부재변위')">🏗️ 부재변위</button>
+                    <button type="button" id="btnNdtCatFireproof" class="chip" onclick="window.setNdtCategory('내화피복')">🧯 내화피복 두께</button>
                 </div>
             </div>
 
@@ -1119,6 +1120,22 @@
                         <select id="styleNumFmtNdtMemberDisp"><option value="no">NO.01</option><option value="plain">01</option></select>
                     </div>
                 </div>
+                <div class="style-cat-card">
+                    <div class="style-color-row">
+                        <span>내화피복</span>
+                        <input type="color" id="styleColorNdtFireproof">
+                    </div>
+                    <div class="style-size-row">
+                        <label>핀 <input type="range" id="stylePinSizeNdtFireproof" min="0.5" max="4.4" step="0.1" value="1.0"> <span id="stylePinSizeNdtFireproofLabel">100%</span></label>
+                        <label>화살표 <input type="range" id="styleArrowSizeNdtFireproof" min="0.5" max="5.0" step="0.1" value="1.0"> <span id="styleArrowSizeNdtFireproofLabel">100%</span></label>
+                        <label>선 굵기 <input type="range" id="styleLeaderSizeNdtFireproof" min="0.5" max="3.0" step="0.1" value="1.0"> <span id="styleLeaderSizeNdtFireproofLabel">100%</span></label>
+                    </div>
+                    <div class="style-shape-row">
+                        <select id="styleShapeNdtFireproof"><option value="rect">직사각형</option><option value="rounded">둥근 사각형</option><option value="circle">원형</option></select>
+                        <label class="style-fill-check"><input type="checkbox" id="styleFillNdtFireproof"> 채우기</label>
+                        <select id="styleNumFmtNdtFireproof"><option value="no">NO.01</option><option value="plain">01</option></select>
+                    </div>
+                </div>
             </div>
             <div class="modal-footer" style="justify-content: space-between;">
                 <button type="button" id="btnResetStyleColors" class="btn btn-outline"><i class="fa-solid fa-rotate-left"></i> 기본값으로 초기화</button>
@@ -1298,6 +1315,7 @@
                             <option value="탄산화">🧪 콘크리트 탄산화 (중성화)</option>
                             <option value="기울기">📐 외벽 기울기</option>
                             <option value="부재변위">🏗️ 부재변위</option>
+                            <option value="내화피복">🧯 내화피복 두께</option>
                         </select>
                     </div>
                 </div>
@@ -1332,6 +1350,42 @@
                         <div class="form-group" style="flex: 1;">
                             <label class="form-label">📐 설계 춤 (mm, 단일치수 부재는 비워두세요)</label>
                             <input type="text" inputmode="decimal" id="ndtDesignDepth" class="form-control" placeholder="예: 600 (폭 칸에 400*600처럼 같이 써도 됨)">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 🧯 내화피복 두께 측정 전용 필드 그룹: 부재당 플렌지/웨브 각 3회 실측 + 평균 -->
+                <div id="groupNdtFireproofFields" style="display: none; flex-direction: column; gap: 0.8rem;">
+                    <div class="form-group">
+                        <label class="form-label">🎨 설계치 (뿜칠 사양) *</label>
+                        <input type="text" id="ndtFireproofDesign" class="form-control" placeholder="예: THK 25 에스코트 뿜칠">
+                    </div>
+                    <div style="background: rgba(40,40,40,0.06); border:1px solid rgba(40,40,40,0.25); border-radius:8px; padding:0.7rem 0.9rem;">
+                        <label class="form-label" style="display:flex; align-items:center; justify-content:space-between;">
+                            <span>플렌지</span>
+                            <span style="display:flex; align-items:center; gap:0.3rem; font-weight:400; font-size:0.82rem;">
+                                <input type="checkbox" id="ndtFpFlangeUnavailable" style="width:auto;"> 측정불가
+                            </span>
+                        </label>
+                        <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+                            <input type="number" step="0.01" id="ndtFpFlange1" class="form-control" placeholder="1회(mm)" style="flex: 1; min-width: 80px;">
+                            <input type="number" step="0.01" id="ndtFpFlange2" class="form-control" placeholder="2회(mm)" style="flex: 1; min-width: 80px;">
+                            <input type="number" step="0.01" id="ndtFpFlange3" class="form-control" placeholder="3회(mm)" style="flex: 1; min-width: 80px;">
+                            <input type="text" id="ndtFpFlangeAvg" class="form-control" readonly placeholder="평균" style="flex: 1; min-width: 80px; font-weight: 800; color: #4ade80;">
+                        </div>
+                    </div>
+                    <div style="background: rgba(40,40,40,0.06); border:1px solid rgba(40,40,40,0.25); border-radius:8px; padding:0.7rem 0.9rem;">
+                        <label class="form-label" style="display:flex; align-items:center; justify-content:space-between;">
+                            <span>웨브</span>
+                            <span style="display:flex; align-items:center; gap:0.3rem; font-weight:400; font-size:0.82rem;">
+                                <input type="checkbox" id="ndtFpWebUnavailable" style="width:auto;"> 측정불가
+                            </span>
+                        </label>
+                        <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+                            <input type="number" step="0.01" id="ndtFpWeb1" class="form-control" placeholder="1회(mm)" style="flex: 1; min-width: 80px;">
+                            <input type="number" step="0.01" id="ndtFpWeb2" class="form-control" placeholder="2회(mm)" style="flex: 1; min-width: 80px;">
+                            <input type="number" step="0.01" id="ndtFpWeb3" class="form-control" placeholder="3회(mm)" style="flex: 1; min-width: 80px;">
+                            <input type="text" id="ndtFpWebAvg" class="form-control" readonly placeholder="평균" style="flex: 1; min-width: 80px; font-weight: 800; color: #4ade80;">
                         </div>
                     </div>
                 </div>
