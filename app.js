@@ -9548,14 +9548,6 @@ document.addEventListener('DOMContentLoaded', () => {
                     updateDefectCauseDropdown(v);
                     toggleDefectSizeInputMode();
                 }
-            },
-            {
-                selectId: 'defectCause',
-                inputId: 'defectCauseInput',
-                onChange: (v) => {
-                    const opts = getQuickPickOptionsFromSelect(document.getElementById('defectCause'));
-                    syncCauseChecksFromValue(v, opts);
-                }
             }
         ];
         pairs.forEach(({ selectId, inputId, onChange }) => {
@@ -9572,6 +9564,82 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (typeof scheduleDefectAutoApply === 'function') scheduleDefectAutoApply();
             });
         });
+        bindDefectCauseDirectInput();
+    }
+
+    function syncCauseComboValue(joined) {
+        const causeSelect = document.getElementById('defectCause');
+        if (!causeSelect) return;
+        const v = String(joined || '').trim();
+        if (!v) {
+            causeSelect.value = '';
+            return;
+        }
+        ensureDefectComboOption(causeSelect, v);
+    }
+
+    /** 발생 원인 직접 입력 → 커스텀 목록·체크 선택에 합침 (선택 순 유지) */
+    function addCustomDefectCause(rawText) {
+        const trimmed = String(rawText || '').trim();
+        if (!trimmed) return false;
+        const dType = getDefectComboValue(
+            document.getElementById('defectType'),
+            document.getElementById('defectTypeInput')
+        ) || '';
+        if (!dType || dType === '상태양호') {
+            if (typeof window.showToast === 'function') {
+                window.showToast('결함 종류를 먼저 선택하세요.', 'info', 2000);
+            }
+            return false;
+        }
+        const key = getCauseKey(dType);
+        if (!window.state.customDefectCauses) window.state.customDefectCauses = {};
+        if (!window.state.customDefectCauses[key]) window.state.customDefectCauses[key] = [];
+        if (!window.state.customDefectCauses[key].includes(trimmed)) {
+            window.state.customDefectCauses[key].push(trimmed);
+            const order = ensureOptionOrderEntry('defectCauseOrder', key);
+            if (!order.includes(trimmed)) order.push(trimmed);
+            if (typeof saveStateToLocalStorage === 'function') saveStateToLocalStorage();
+        }
+        const selected = getSelectedCausesFromUi().filter(c => c && c !== trimmed);
+        selected.push(trimmed);
+        const joined = joinCauseList(selected);
+        updateDefectCauseDropdown(dType, joined);
+        if (typeof scheduleDefectAutoApply === 'function') scheduleDefectAutoApply();
+        return true;
+    }
+
+    function commitDefectCauseDirectInput() {
+        const input = document.getElementById('defectCauseInput');
+        if (!input) return;
+        const parts = parseCauseList(input.value);
+        if (!parts.length) return;
+        let ok = false;
+        parts.forEach((p) => {
+            if (addCustomDefectCause(p)) ok = true;
+        });
+        if (ok) input.value = '';
+    }
+
+    function bindDefectCauseDirectInput() {
+        const input = document.getElementById('defectCauseInput');
+        const btn = document.getElementById('btnAddCustomCause');
+        if (input && !input.dataset.causeDirectBound) {
+            input.dataset.causeDirectBound = '1';
+            input.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    commitDefectCauseDirectInput();
+                }
+            });
+        }
+        if (btn && !btn.dataset.causeDirectBound) {
+            btn.dataset.causeDirectBound = '1';
+            btn.addEventListener('click', (e) => {
+                e.preventDefault();
+                commitDefectCauseDirectInput();
+            });
+        }
     }
 
     function populateDefectComponentDropdown(category, currentVal = null) {
@@ -10339,9 +10407,7 @@ document.addEventListener('DOMContentLoaded', () => {
             inp.addEventListener('change', () => {
                 const causes = getSelectedCausesFromUi();
                 const joined = joinCauseList(causes);
-                const causeSelect = document.getElementById('defectCause');
-                const causeInput = document.getElementById('defectCauseInput');
-                syncDefectComboFields(causeSelect, causeInput, joined);
+                syncCauseComboValue(joined);
                 box.querySelectorAll('.defect-cause-check-item').forEach(lab => {
                     const c = lab.querySelector('input');
                     lab.classList.toggle('is-checked', !!(c && c.checked));
@@ -10369,7 +10435,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (!defectType || !String(defectType).trim() || String(defectType).trim() === '상태양호') {
             select.innerHTML = `<option value="" selected>—</option><option value="__ADD_CUSTOM_CAUSE__">➕ [결함 원인 직접 추가...]</option>`;
-            syncDefectComboFields(select, document.getElementById('defectCauseInput'), '');
+            syncCauseComboValue('');
             syncCauseChecksFromValue('', []);
             const group = document.getElementById('quickCauseGroup');
             if (group) group.style.display = 'none';
@@ -10412,7 +10478,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const resolved = (currentVal !== null && currentVal !== undefined)
             ? currentVal
             : (isDefectComboCustomToken(select.value) ? '' : select.value);
-        syncDefectComboFields(select, document.getElementById('defectCauseInput'), resolved);
+        syncCauseComboValue(resolved);
         syncCauseChecksFromValue(resolved, allOptions);
         refreshDefectQuickPickBar();
     }
@@ -10518,27 +10584,20 @@ document.addEventListener('DOMContentLoaded', () => {
                     document.getElementById('defectType'),
                     document.getElementById('defectTypeInput')
                 ) || '균열';
-                const key = getCauseKey(dType);
                 if (newCause && newCause.trim()) {
-                    const trimmed = newCause.trim();
-                    if (!window.state.customDefectCauses) window.state.customDefectCauses = {};
-                    if (!window.state.customDefectCauses[key]) window.state.customDefectCauses[key] = [];
-                    if (!window.state.customDefectCauses[key].includes(trimmed)) {
-                        window.state.customDefectCauses[key].push(trimmed);
-                        const order = ensureOptionOrderEntry('defectCauseOrder', key);
-                        if (!order.includes(trimmed)) order.push(trimmed);
-                        saveStateToLocalStorage();
-                    }
-                    updateDefectCauseDropdown(dType, trimmed);
+                    addCustomDefectCause(newCause.trim());
                 } else {
-                    updateDefectCauseDropdown(dType);
+                    updateDefectCauseDropdown(dType, joinCauseList(getSelectedCausesFromUi()));
                 }
             } else {
-                syncDefectComboFields(
-                    e.target,
-                    document.getElementById('defectCauseInput'),
-                    e.target.value
-                );
+                const picked = e.target.value;
+                if (!picked || isDefectComboCustomToken(picked)) {
+                    syncCauseComboValue('');
+                    syncCauseChecksFromValue('', getQuickPickOptionsFromSelect(e.target));
+                } else {
+                    // 셀렉트 단일은 기존 선택에 합침
+                    addCustomDefectCause(picked);
+                }
             }
         });
     }

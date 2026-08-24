@@ -12,7 +12,7 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <meta name="apple-mobile-web-app-title" content="스마트 안전점검">
-    <link rel="stylesheet" href="styles.css?v=20260825_compPreset">
+    <link rel="stylesheet" href="styles.css?v=20260825_causeInput">
     <!-- FontAwesome icons for clean engineering UI -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <!-- PDF 생성용: 페이지별로 직접 캡처해서 조립(큰 보고서에서 html2pdf 한방 렌더링이 캔버스 높이 한계로
@@ -715,8 +715,12 @@
                         </div>
                         <div class="defect-quick-group" id="quickCauseGroup">
                             <div class="defect-quick-label">
-                                <i class="fa-solid fa-magnifying-glass"></i> 발생 원인 (복수 선택)
+                                <i class="fa-solid fa-magnifying-glass"></i> 발생 원인 (복수 선택 · 직접 입력)
                                 <button type="button" id="btnManageCause" class="btn-option-manage" title="결함 원인 항목 관리"><i class="fa-solid fa-gear"></i></button>
+                            </div>
+                            <div class="defect-cause-custom-row">
+                                <input type="text" id="defectCauseInput" class="form-control defect-combo-input defect-quick-direct-input" placeholder="발생 원인 직접 입력 후 Enter" autocomplete="off">
+                                <button type="button" id="btnAddCustomCause" class="btn btn-sm btn-outline defect-cause-add-btn" title="입력한 원인 추가">추가</button>
                             </div>
                             <div class="defect-cause-check-grid" id="defectCauseChecks"></div>
                             <div class="defect-quick-chip-grid dqg-cause" id="quickCauseChips" style="display:none;" aria-hidden="true"></div>
@@ -772,7 +776,6 @@
                             <input type="text" id="defectSize" class="form-control" placeholder="예: W=0.2mm, L=1.5m">
                         </div>
                         <div class="form-group" id="defectCauseGroup">
-                            <input type="text" id="defectCauseInput" class="form-control defect-combo-input" placeholder="직접 입력" autocomplete="off">
                             <select id="defectCause" class="form-select defect-combo-select" title="목록에서 선택">
                                 <option value="건조수축">건조수축</option>
                                 <option value="내력부족">내력부족</option>
@@ -2124,7 +2127,7 @@
     <script src="js/tabs/ndt.js?v=20260822_survey2dScroll"></script>
     <script src="js/shared/report.js?v=20260824_hwpxFix"></script>
     <script src="js/shared/auth.js?v=20260821_land1"></script>
-    <script src="app.js?v=20260825_compPreset"></script>
+    <script src="app.js?v=20260825_causeInput"></script>
     <script>
         document.addEventListener('DOMContentLoaded', function () {
             const btn = document.getElementById('btnExportVectorPdf');

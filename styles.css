@@ -3619,6 +3619,25 @@ body {
     font-weight: 700;
 }
 
+.defect-cause-custom-row {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    margin-bottom: 0.35rem;
+}
+
+.defect-cause-custom-row .defect-quick-direct-input {
+    flex: 1;
+    min-width: 0;
+    margin-bottom: 0;
+}
+
+.defect-cause-add-btn {
+    flex-shrink: 0;
+    white-space: nowrap;
+    font-weight: 700;
+}
+
 .defect-combo-select {
     font-size: 0.82rem;
 }
