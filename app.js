@@ -10518,21 +10518,16 @@ document.addEventListener('DOMContentLoaded', () => {
     const defectCategorySelect = document.getElementById('defectCategory');
     if (defectCategorySelect) {
         defectCategorySelect.addEventListener('change', (e) => {
-            // 분류(구조체/비구조체/마감재)만 바꾸는 것이므로, 이미 입력/선택돼 있던 부재명칭·
-            // 결함종류는 최대한 그대로 유지한다. 새 분류 목록에 없는 값이어도(예: 자유입력한
-            // "상부 보") updateDefectTypeDropdown/populateDefectComponentDropdown이 currentVal을
-            // 받으면 그 값을 커스텀 옵션으로 살려서 유지해준다 — currentVal을 안 넘기면 그냥
-            // 새 목록의 첫 항목으로 조용히 리셋돼버려서 기존 입력 내용이 사라지는 버그가 있었다.
-            const currentType = getDefectComboValue(
-                document.getElementById('defectType'),
-                document.getElementById('defectTypeInput')
-            );
-            const currentComponent = getDefectComboValue(
-                document.getElementById('defectComponent'),
-                document.getElementById('defectComponentInput')
-            );
-            updateDefectTypeDropdown(e.target.value, currentType);
-            populateDefectComponentDropdown(e.target.value, currentComponent);
+            // 구조 분류를 바꾸면 부재·종류는 새 분류 목록만 쓰도록 초기화
+            const cat = e.target.value;
+            const compInput = document.getElementById('defectComponentInput');
+            const typeInput = document.getElementById('defectTypeInput');
+            if (compInput) compInput.value = '';
+            if (typeInput) typeInput.value = '';
+            populateDefectComponentDropdown(cat, '');
+            updateDefectTypeDropdown(cat, '');
+            toggleDefectSizeInputMode();
+            if (typeof scheduleDefectAutoApply === 'function') scheduleDefectAutoApply();
         });
     }
 
@@ -20744,6 +20739,8 @@ document.addEventListener('DOMContentLoaded', () => {
             window.state.confirmedDeletedIds = {};
             window.state.ndtData = ndtMerge.ndtData;
             window.state.deletedNdtIds = ndtMerge.deletedNdtIds;
+
+            await uploadInlineDefectPhotosForSync(window.state.defects);
 
             _suppressSyncOnSave = true;
             if (typeof saveStateToLocalStorage === 'function') saveStateToLocalStorage();
