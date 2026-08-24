@@ -47,17 +47,36 @@ function findApk(explicit) {
 }
 
 function loadFirebaseRefreshToken() {
+    const envToken = process.env.FIREBASE_TOKEN || process.env.FIREBASE_REFRESH_TOKEN;
+    if (envToken) return envToken.trim();
+
+    const tokenFile = path.join(ROOT, '.firebase-ci-token');
+    if (fs.existsSync(tokenFile)) {
+        const t = fs.readFileSync(tokenFile, 'utf8').trim();
+        if (t) return t;
+    }
+
     const p = path.join(os.homedir(), '.config', 'configstore', 'firebase-tools.json');
     if (!fs.existsSync(p)) {
-        throw new Error('firebase-tools 로그인이 없습니다. 로컬에서 firebase login 후 다시 시도하세요.');
+        throw new Error(loginHelp());
     }
     const cfg = JSON.parse(fs.readFileSync(p, 'utf8'));
     const token =
         cfg?.tokens?.refresh_token ||
         cfg?.tokens?.tokens?.refresh_token ||
         cfg?.refresh_token;
-    if (!token) throw new Error('firebase-tools.json 에서 refresh_token을 찾지 못했습니다.');
+    if (!token) throw new Error(loginHelp());
     return token;
+}
+
+function loginHelp() {
+    return [
+        'Firebase 로그인이 필요합니다. 로컬 터미널에서 한 번만 실행하세요:',
+        '  npx firebase-tools login',
+        '또는 CI 토큰:',
+        '  npx firebase-tools login:ci',
+        '토큰을 프로젝트 루트 .firebase-ci-token 파일에 저장하거나 FIREBASE_TOKEN 환경변수로 넣으면 이후 git-sync OTA가 자동 배포됩니다.'
+    ].join('\n');
 }
 
 async function refreshAccessToken(refreshToken) {

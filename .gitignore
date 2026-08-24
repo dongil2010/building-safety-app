@@ -13,3 +13,7 @@ android/.idea/
 *.aab
 *.keystore
 !android/app/debug.keystore
+
+# OTA / Firebase CLI token (never commit)
+.firebase-ci-token
+.env.local
