@@ -1,4 +1,5 @@
-# Git 동기화: 원격 커밋 확인 → pull → 로컬 수정 재적용 → commit → pull → push
+# Git 동기화: 원격 커밋 확인 → (뒤처진 경우만) pull 1회 → commit → push
+# 내가 직전에 push했고 behind=0 이면 pull 없이 바로 commit/push
 # 현장 앱은 Capacitor WebView로 GitHub Pages 웹을 로드하므로 APK OTA는 하지 않는다.
 # 사용: .\scripts\git-sync.ps1 -Message "커밋 메시지"
 #       .\scripts\git-sync.ps1 -Message "..." -NoPush
@@ -71,9 +72,7 @@ if ($dirtyAfter) {
 if ($NoPush) {
     Write-Host "`n-NoPush: push 생략." -ForegroundColor Yellow
 } else {
-    Write-Host "`n=== 7. push 직전 pull origin main ===" -ForegroundColor Cyan
-    git pull origin main
-    Write-Host "`n=== 8. git push origin main ===" -ForegroundColor Cyan
+    Write-Host "`n=== 7. git push origin main (재pull 없음) ===" -ForegroundColor Cyan
     git push origin main
     Write-Host "`nGit 동기화 완료. GitHub Pages가 갱신되면 현장 웹뷰가 최신 웹을 받습니다." -ForegroundColor Green
 }
