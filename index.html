@@ -11,7 +11,7 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <meta name="apple-mobile-web-app-title" content="스마트 안전점검">
-    <link rel="stylesheet" href="styles.css?v=20260824_removePhotoUploadArea">
+    <link rel="stylesheet" href="styles.css?v=20260824_albumMapBtn">
     <!-- FontAwesome icons for clean engineering UI -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <!-- PDF 생성용: 페이지별로 직접 캡처해서 조립(큰 보고서에서 html2pdf 한방 렌더링이 캔버스 높이 한계로
@@ -430,17 +430,6 @@
                     <button id="btnImportDefectExcel" class="btn btn-outline btn-sm pc-only-chrome" style="border-color:#2a2a2a; color:#2a2a2a;"><i class="fa-solid fa-file-import"></i> 📥 외부 엑셀 결함표 가져오기</button>
                     <button id="btnDownloadImportTemplate" class="btn btn-outline btn-sm pc-only-chrome" style="border-color:#737373; color:#737373;"><i class="fa-solid fa-file-arrow-down"></i> 📄 가져오기 양식 다운로드</button>
                     <input type="file" id="inputImportDefectExcel" accept=".xlsx,.xls,.csv" style="display:none;">
-                </div>
-            </div>
-
-            <!-- Defect Statistics Chart Section -->
-            <div class="survey-stats-panel">
-                <div class="survey-stats-copy">
-                    <h3><i class="fa-solid fa-chart-pie"></i> 현재 층 결함 손상 유형별 집계</h3>
-                    <p>자동 집계된 손상 유형 비율 차트입니다.</p>
-                </div>
-                <div class="survey-chart-wrap">
-                    <canvas id="surveyChartCanvas" width="450" height="150"></canvas>
                 </div>
             </div>
 
@@ -2034,7 +2023,7 @@
     <script src="js/tabs/ndt.js?v=20260822_survey2dScroll"></script>
     <script src="js/shared/report.js?v=20260821_land1"></script>
     <script src="js/shared/auth.js?v=20260821_land1"></script>
-    <script src="app.js?v=20260824_fixPhotoPersist"></script>
+    <script src="app.js?v=20260824_albumMapBtn"></script>
     <script>
         document.addEventListener('DOMContentLoaded', function () {
             const btn = document.getElementById('btnExportVectorPdf');

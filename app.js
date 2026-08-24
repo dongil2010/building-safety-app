@@ -13044,20 +13044,39 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // 상태조사표 인라인 편집 셀 (타이핑 / 선택)
-    function renderInlineSurveyCellHtml(colKey, d, ctx) {
+    function renderInlineSurveyCellHtml(colKey, d, ctx, colMetricsOverride) {
         const id = d.id;
         const stop = 'onclick="event.stopPropagation()" onmousedown="event.stopPropagation()"';
-        const textInput = (field, value, placeholder, extraClass) =>
-            `<input type="text" class="survey-inline-input${extraClass ? ' ' + extraClass : ''}" ${stop}` +
-            ` value="${escapeSurveyAttr(value)}" placeholder="${escapeSurveyAttr(placeholder || '')}"` +
-            ` onchange="window.updateSurveyInlineField('${id}','${field}',this.value)"` +
-            ` onkeydown="if(event.key==='Enter'){event.preventDefault();this.blur();}">`;
+        const colMetrics = (colMetricsOverride || window._surveyColMetrics || {})[colKey] || {};
+        const colCh = colMetrics.widthCh || 6;
+        const colWrap = !!colMetrics.wrap;
+
+        const textInput = (field, value, placeholder, extraClass) => {
+            const raw = String(value == null ? '' : value);
+            const useTextarea = colWrap;
+            const displayVal = colWrap ? surveyWrapAtSpace(raw, colCh) : raw;
+            const cls = `survey-inline-input${extraClass ? ' ' + extraClass : ''}${useTextarea ? ' survey-inline-textarea survey-inline-multiline' : ''}`;
+            const rows = colWrap && surveyCharLen(raw) > colCh ? 2 : 1;
+            const common = `${stop}` +
+                ` placeholder="${escapeSurveyAttr(placeholder || '')}"` +
+                ` onchange="window.updateSurveyInlineField('${id}','${field}',this.value)"` +
+                ` oninput="window.resizeSurveyInlineInput(this)"` +
+                ` onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();this.blur();}"`;
+            if (useTextarea) {
+                return `<textarea rows="${rows}" class="${cls}" ${common}>${escapeSurveyAttr(displayVal)}</textarea>`;
+            }
+            return `<input type="text" class="${cls}" ${common}` +
+                ` value="${escapeSurveyAttr(displayVal)}">`;
+        };
 
         switch (colKey) {
             case 'no':
             case 'floorGroup':
-            case 'remark':
-                return renderScreenSurveyCellHtml(colKey, d, ctx);
+            case 'remark': {
+                const roText = renderScreenSurveyCellHtml(colKey, d, ctx);
+                const roDisplay = colWrap ? surveyWrapAtSpace(String(roText).replace(/<[^>]+>/g, ''), colCh) : roText;
+                return `<span class="survey-cell-readonly${colWrap ? ' survey-inline-multiline' : ''}">${colWrap ? escapeSurveyAttr(roDisplay).replace(/\n/g, '<br>') : roText}</span>`;
+            }
             case 'category': {
                 const v = d.category || '구조체';
                 return `<select class="survey-inline-select survey-inline-category" ${stop}` +
@@ -13148,7 +13167,7 @@ document.addEventListener('DOMContentLoaded', () => {
             : [defectId];
         const isGroup = memberIds.length > 1;
         const targetIds = (field === 'location' && isGroup) ? [defectId] : memberIds;
-        const value = (rawValue == null) ? '' : String(rawValue);
+        const value = (rawValue == null) ? '' : String(rawValue).replace(/\s*\n+\s*/g, ' ').trim();
 
         targetIds.forEach(id => {
             const defect = list.find(d => d.id === id);
@@ -13214,11 +13233,11 @@ document.addEventListener('DOMContentLoaded', () => {
         saveStateToLocalStorage();
         if (typeof drawCanvas === 'function') drawCanvas();
         if (typeof renderDefectListPanel === 'function') renderDefectListPanel();
-        if (field === 'defectType' || field === 'category' || field === 'size') {
-            const defects = consolidateDefectGroups(getCurrentFloorDefects());
-            if (typeof window.renderDefectStatisticsChart === 'function') {
-                window.renderDefectStatisticsChart('surveyChartCanvas', defects);
-            }
+        if (['location', 'component', 'defectType', 'cause', 'size', 'crackWidth', 'crackLength'].indexOf(field) !== -1) {
+            const prevWrap = !!(window._surveyColMetrics && window._surveyColMetrics[field] && window._surveyColMetrics[field].wrap);
+            refreshSurveyColumnWidthsFromDom();
+            const nextWrap = !!(window._surveyColMetrics && window._surveyColMetrics[field] && window._surveyColMetrics[field].wrap);
+            if (prevWrap !== nextWrap) renderSurveyTable();
         }
         // 상태양호로 바꾼 뒤에는 크기/진행/누수 UI를 맞추기 위해 표만 다시 그림
         if (field === 'defectType' && value === '상태양호') {
@@ -13227,6 +13246,156 @@ document.addEventListener('DOMContentLoaded', () => {
             renderSurveyTable();
         }
     };
+
+    // 상태조사표 컬럼·셀 폭: 해당 열 최장 글자수 기준(ch). 초과 시 띄어쓰기에서 2줄.
+    const SURVEY_INLINE_WRAP_THRESHOLD = 10;
+
+    function surveyCharLen(str) {
+        return String(str == null ? '' : str).trim().length;
+    }
+
+    function surveyInputWidthCh(value, placeholder, minCh) {
+        const len = Math.max(surveyCharLen(value), surveyCharLen(placeholder), minCh || 2);
+        return Math.min(len + 1, 40);
+    }
+
+    function surveyColumnWidthCh(maxLen) {
+        const len = Math.max(maxLen, 2);
+        if (len <= SURVEY_INLINE_WRAP_THRESHOLD) return len;
+        return SURVEY_INLINE_WRAP_THRESHOLD;
+    }
+
+    function surveyWrapAtSpace(text, lineLen) {
+        const s = String(text || '').trim();
+        if (!s || s.length <= lineLen) return s;
+        let idx = s.lastIndexOf(' ', lineLen);
+        if (idx <= 0) idx = lineLen;
+        const line1 = s.slice(0, idx).trimEnd();
+        const line2 = s.slice(idx).trimStart();
+        return line2 ? `${line1}\n${line2}` : line1;
+    }
+
+    function surveyInlineFieldLen(colKey, d, ctx) {
+        switch (colKey) {
+            case 'location': return surveyCharLen(d.location);
+            case 'component': return surveyCharLen(d.component);
+            case 'defectType': return surveyCharLen(d.defectType);
+            case 'cause': return surveyCharLen(d.cause);
+            case 'size': {
+                if (d.defectType === '상태양호') return 0;
+                if (d.defectType === '균열') {
+                    const w = d.crackWidth != null ? String(d.crackWidth) : '';
+                    const l = d.crackLength != null ? String(d.crackLength) : '';
+                    if (w || l) return surveyCharLen(`${w}/${l}`);
+                }
+                return surveyCharLen(d.size);
+            }
+            case 'crackWidth': return d.defectType === '균열' ? surveyCharLen(d.crackWidth) : 0;
+            case 'crackLength': return d.defectType === '균열' ? surveyCharLen(d.crackLength) : 0;
+            case 'inspectionContent':
+                return Math.max(surveyCharLen(d.component), surveyCharLen(d.defectType), surveyCharLen(d.size));
+            default:
+                return surveyCharLen(getSurveyCellText(colKey, d, ctx));
+        }
+    }
+
+    function computeSurveyColumnMetrics(columns, defects, ctxForDefect) {
+        const metrics = {};
+        columns.forEach(col => {
+            let maxLen = surveyCharLen(getSurveyColumnHeaderLabel(col));
+            defects.forEach((d, dIdx) => {
+                const ctx = ctxForDefect(d, dIdx);
+                maxLen = Math.max(maxLen, surveyInlineFieldLen(col.key, d, ctx));
+            });
+            const widthCh = surveyColumnWidthCh(maxLen);
+            metrics[col.key] = {
+                maxLen,
+                widthCh,
+                wrap: maxLen > SURVEY_INLINE_WRAP_THRESHOLD
+            };
+        });
+        metrics.actions = { maxLen: 4, widthCh: 6, wrap: false };
+        return metrics;
+    }
+
+    const SURVEY_DYNAMIC_COL_KEYS = new Set([
+        'location', 'component', 'defectType', 'cause', 'size',
+        'crackWidth', 'crackLength', 'inspectionContent'
+    ]);
+
+    function syncSurveyTableColgroup(columns, metrics) {
+        const table = document.querySelector('#tab-survey .survey-table');
+        if (!table || !metrics) return;
+        let cg = table.querySelector('#surveyTableColgroup');
+        if (!cg) {
+            cg = document.createElement('colgroup');
+            cg.id = 'surveyTableColgroup';
+            table.insertBefore(cg, table.firstChild);
+        }
+        const allKeys = columns.map(c => c.key).concat(['actions']);
+        cg.innerHTML = allKeys.map(key => {
+            const m = metrics[key] || { widthCh: 6 };
+            const wCh = (m.widthCh || 6) + 1.5;
+            return `<col data-col="${key}" style="width:${wCh}ch">`;
+        }).join('');
+        table.style.tableLayout = 'fixed';
+    }
+
+    function applySurveyColumnMetrics(columns, metrics) {
+        const table = document.querySelector('#tab-survey .survey-table');
+        if (!table || !metrics) return;
+        window._surveyColMetrics = metrics;
+        syncSurveyTableColgroup(columns, metrics);
+        const allKeys = columns.map(c => c.key).concat(['actions']);
+        allKeys.forEach(key => {
+            const m = metrics[key];
+            if (!m) return;
+            const wCh = m.widthCh + 1.5;
+            const wStr = `${wCh}ch`;
+            table.querySelectorAll(`[data-col="${key}"]`).forEach(el => {
+                el.style.setProperty('width', wStr, 'important');
+                el.style.setProperty('min-width', wStr, 'important');
+                el.style.setProperty('max-width', wStr, 'important');
+                el.classList.toggle('survey-col-wrap', !!m.wrap);
+                el.classList.toggle('survey-col-dynamic', SURVEY_DYNAMIC_COL_KEYS.has(key));
+            });
+        });
+    }
+
+    window.resizeSurveyInlineInput = function(el) {
+        if (!el) return;
+        const colKey = el.closest('[data-col]')?.getAttribute('data-col');
+        const m = (window._surveyColMetrics || {})[colKey] || {};
+        const len = surveyCharLen(el.value);
+        const shouldWrap = m.wrap && len > (m.widthCh || SURVEY_INLINE_WRAP_THRESHOLD);
+        el.classList.toggle('survey-inline-multiline', shouldWrap);
+        if (shouldWrap && el.tagName !== 'TEXTAREA') {
+            refreshSurveyColumnWidthsFromDom();
+            return;
+        }
+        if (colKey) refreshSurveyColumnWidthsFromDom();
+    };
+
+    function refreshSurveyColumnWidthsFromDom() {
+        const table = document.querySelector('#tab-survey .survey-table');
+        if (!table) return;
+        const columns = getActiveSurveyColumns();
+        const metrics = {};
+        columns.forEach(col => {
+            let maxLen = surveyCharLen(getSurveyColumnHeaderLabel(col));
+            table.querySelectorAll(`td[data-col="${col.key}"] .survey-inline-input, td[data-col="${col.key}"] .survey-inline-select, td[data-col="${col.key}"] .survey-toggle-btn`).forEach(el => {
+                const v = el.tagName === 'SELECT' ? el.options[el.selectedIndex]?.text : (el.value != null ? el.value : el.textContent);
+                maxLen = Math.max(maxLen, surveyCharLen(v));
+            });
+            table.querySelectorAll(`td[data-col="${col.key}"] .survey-cell-readonly`).forEach(el => {
+                maxLen = Math.max(maxLen, surveyCharLen(el.textContent));
+            });
+            const widthCh = surveyColumnWidthCh(maxLen);
+            metrics[col.key] = { maxLen, widthCh, wrap: maxLen > SURVEY_INLINE_WRAP_THRESHOLD };
+        });
+        metrics.actions = { maxLen: 4, widthCh: 6, wrap: false };
+        applySurveyColumnMetrics(columns, metrics);
+    }
 
     // PDF/엑셀 상태조사표 셀의 인라인 색상/굵기 스타일 (텍스트는 getSurveyCellText로 통일, 테두리/여백은 각 출력물에서 처리)
     function getSurveyCellColorStyle(colKey, d, ctx) {
@@ -13322,13 +13491,9 @@ document.addEventListener('DOMContentLoaded', () => {
         renderSurveyTableHeader();
         const columns = getActiveSurveyColumns();
 
-        // 📊 현재 층 결함 통계 차트 자동 업데이트 (그룹은 하나로 합쳐서 집계)
-        if (typeof window.renderDefectStatisticsChart === 'function') {
-            window.renderDefectStatisticsChart('surveyChartCanvas', defects);
-        }
-
         if (defects.length === 0) {
             elements.surveyTableBody.innerHTML = `<tr><td colspan="${columns.length + 1}" style="text-align:center; padding: 2.5rem; color:#64748b; font-weight:600;">등록된 결함이 없습니다. 도면 점검 탭에서 결함을 마킹해 보세요.</td></tr>`;
+            window._surveyColMetrics = {};
             return;
         }
 
@@ -13346,7 +13511,7 @@ document.addEventListener('DOMContentLoaded', () => {
             });
         });
 
-        elements.surveyTableBody.innerHTML = defects.map((d, dIdx) => {
+        const buildRowCtx = (d, dIdx) => {
             const memberIds = d._groupMemberIds || [d.id || `idx_${dIdx}`];
             const labels = memberIds.flatMap(mid => defectPhotoLabels[mid] || []);
             const photoRemark = labels.length > 0 ? labels.join(' ') : '-';
@@ -13355,11 +13520,19 @@ document.addEventListener('DOMContentLoaded', () => {
                 ctx.gradeNo = `${getGrade3FloorPrefix(state.currentFloor)}-${dIdx + 1}`;
                 ctx.floorDisplayLabel = getGrade3FloorDisplayLabel(state.currentFloor);
             }
+            return ctx;
+        };
+
+        const colMetrics = computeSurveyColumnMetrics(columns, defects, buildRowCtx);
+        window._surveyColMetrics = colMetrics;
+
+        elements.surveyTableBody.innerHTML = defects.map((d, dIdx) => {
+            const ctx = buildRowCtx(d, dIdx);
             const isGroup = d._groupMemberIds && d._groupMemberIds.length > 1;
 
             return `
                 <tr>
-                    ${columns.map(c => `<td data-col="${c.key}">${renderInlineSurveyCellHtml(c.key, d, ctx)}</td>`).join('')}
+                    ${columns.map(c => `<td data-col="${c.key}">${renderInlineSurveyCellHtml(c.key, d, ctx, colMetrics)}</td>`).join('')}
                     <td data-col="actions" class="survey-row-actions">
                         <button type="button" class="btn btn-sm btn-outline" onclick="event.stopPropagation(); window.openSurveyRowEditModal('${d.id}')" title="상세 모달">상세</button>
                         <button type="button" class="btn btn-sm btn-outline survey-btn-map-view" onclick="event.stopPropagation(); window.viewDefectOnMapFromSurvey('${d.id}')" title="결함위치도에서 마킹 선택${isGroup ? ' (그룹 전체)' : ''}"><i class="fa-solid fa-map-location-dot"></i> 도면</button>
@@ -13367,6 +13540,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 </tr>
             `;
         }).join('');
+        applySurveyColumnMetrics(columns, colMetrics);
         if (typeof renderPhotoAlbum === 'function') renderPhotoAlbum();
     }
 
@@ -13548,7 +13722,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 photoItems.push({
                     label: photoLabel,
                     title: componentDefectTitle,
-                    src: photoSrc
+                    src: photoSrc,
+                    defectId: d.id
                 });
             });
         });
@@ -13559,12 +13734,17 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         elements.photoAlbumGrid.innerHTML = photoItems.map(p => `
-            <div class="photo-card" style="background: #ffffff; border: 1px solid #cbd5e1; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.06); color: #0f172a;">
-                <div class="photo-card-img-wrap" style="aspect-ratio: 4 / 3; width: 100%; background: #f1f5f9; overflow: hidden; position: relative; display: flex; align-items: center; justify-content: center;">
-                    <img src="${p.src}" style="width:100%; height:100%; object-fit:cover;">
+            <div class="photo-card survey-album-photo-card">
+                <div class="photo-card-img-wrap survey-album-photo-wrap">
+                    <img src="${p.src}" alt="${escapeSurveyAttr(p.label)}" loading="lazy">
+                    <button type="button" class="survey-album-map-btn"
+                        title="결함위치도에서 마킹 위치 보기"
+                        onclick="event.stopPropagation(); window.viewDefectOnMapFromSurvey('${escapeSurveyAttr(p.defectId)}')">
+                        <i class="fa-solid fa-map-location-dot"></i> 도면으로
+                    </button>
                 </div>
-                <div style="padding: 0.8rem; text-align: center;">
-                    <div style="font-size: 1rem; font-weight: 800; color: #1f1f1f;">
+                <div class="survey-album-photo-caption">
+                    <div class="survey-album-photo-label">
                         ${p.label}. ${p.title}
                     </div>
                 </div>
@@ -17239,102 +17419,6 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     initPhotoAnnotationEvents();
-
-    // --- 4. 순수 Canvas 안전점검 결함 통계 차트 생성 엔진 ---
-    window.renderDefectStatisticsChart = function(canvasId, defectsArray) {
-        const canvas = document.getElementById(canvasId);
-        if (!canvas) return;
-        const wrap = canvas.parentElement;
-        // 모바일: 부모 폭에 맞춰 캔버스 해상도 재설정 (450px 고정으로 잘리던 문제)
-        if (wrap && wrap.clientWidth > 40) {
-            const targetW = Math.min(450, Math.floor(wrap.clientWidth));
-            const targetH = Math.max(120, Math.round(targetW * (150 / 450)));
-            if (canvas.width !== targetW || canvas.height !== targetH) {
-                canvas.width = targetW;
-                canvas.height = targetH;
-            }
-        }
-        const ctx = canvas.getContext('2d');
-        const cw = canvas.width;
-        const ch = canvas.height;
-
-        ctx.clearRect(0, 0, cw, ch);
-        ctx.fillStyle = '#1e293b';
-        ctx.fillRect(0, 0, cw, ch);
-
-        if (!defectsArray || defectsArray.length === 0) {
-            ctx.fillStyle = '#a3a3a3';
-            ctx.font = '14px sans-serif';
-            ctx.textAlign = 'center';
-            ctx.fillText('등록된 결함 데이터가 없습니다.', cw / 2, ch / 2);
-            return;
-        }
-
-        const counts = { '균열': 0, '누수': 0, '백태': 0, '철근노출': 0, '박리/박락': 0, '기타': 0 };
-        defectsArray.forEach(d => {
-            const type = d.type || d.defectType || d.cause || '기타';
-            if (type.includes('균열')) counts['균열']++;
-            else if (type.includes('누수')) counts['누수']++;
-            else if (type.includes('백태')) counts['백태']++;
-            else if (type.includes('철근')) counts['철근노출']++;
-            else if (type.includes('박리') || type.includes('박락')) counts['박리/박락']++;
-            else counts['기타']++;
-        });
-
-        const total = defectsArray.length;
-        const colors = {
-            '균열': '#ef4444',
-            '누수': '#525252',
-            '백태': '#cbd5e1',
-            '철근노출': '#f97316',
-            '박리/박락': '#eab308',
-            '기타': '#a855f7'
-        };
-
-        const centerX = cw * 0.32;
-        const centerY = ch * 0.5;
-        const radius = Math.min(cw, ch) * 0.35;
-
-        let startAngle = -Math.PI / 2;
-        Object.keys(counts).forEach(type => {
-            const count = counts[type];
-            if (count === 0) return;
-            const sliceAngle = (count / total) * 2 * Math.PI;
-
-            ctx.beginPath();
-            ctx.moveTo(centerX, centerY);
-            ctx.arc(centerX, centerY, radius, startAngle, startAngle + sliceAngle);
-            ctx.closePath();
-            ctx.fillStyle = colors[type];
-            ctx.fill();
-            ctx.strokeStyle = '#0f172a';
-            ctx.lineWidth = 2;
-            ctx.stroke();
-
-            startAngle += sliceAngle;
-        });
-
-        const legendX = cw * 0.55;
-        let legendY = ch * 0.14;
-        const legendFont = cw < 360 ? 'bold 10px sans-serif' : 'bold 12px sans-serif';
-        const legendStep = cw < 360 ? 18 : 24;
-        const swatch = cw < 360 ? 10 : 14;
-        ctx.textAlign = 'left';
-
-        Object.keys(counts).forEach(type => {
-            const count = counts[type];
-            const pct = total > 0 ? ((count / total) * 100).toFixed(1) : 0;
-
-            ctx.fillStyle = colors[type];
-            ctx.fillRect(legendX, legendY, swatch, swatch);
-
-            ctx.fillStyle = '#f8fafc';
-            ctx.font = legendFont;
-            ctx.fillText(`${type}: ${count}건 (${pct}%)`, legendX + swatch + 6, legendY + swatch - 1);
-
-            legendY += legendStep;
-        });
-    };
 
     // --- 5. 현장 음성 인식 (Speech-to-Text) 이벤트 핸들러 ---
     window.startSpeechRecognition = function(inputId, btnElement) {

@@ -2081,24 +2081,27 @@ body {
     max-width: none;
 }
 
-/* 상태조사표 — 컬럼 폭: 주요 3열 넓게, 보조열은 내용만큼(잘림 방지) */
+/* 상태조사표 — 컬럼 폭: 열 최장 글자수(ch) 기준, 10자 초과 시 2줄(띄어쓰기 우선) */
 #tab-survey .survey-table {
-    table-layout: auto;
+    table-layout: fixed;
+    width: max-content;
+    min-width: 100%;
+}
+
+#tab-survey .survey-table .survey-inline-input,
+#tab-survey .survey-table .survey-inline-textarea,
+#tab-survey .survey-table .survey-inline-select {
+    min-width: 0;
+    max-width: 100%;
     width: 100%;
-    min-width: 62rem;
 }
 
 #tab-survey .survey-table [data-col="no"],
 #tab-survey .survey-table [data-col="floorGroup"],
-#tab-survey .survey-table [data-col="location"],
 #tab-survey .survey-table [data-col="category"],
 #tab-survey .survey-table [data-col="progress"],
 #tab-survey .survey-table [data-col="leak"],
 #tab-survey .survey-table [data-col="priorityManage"],
-#tab-survey .survey-table [data-col="size"],
-#tab-survey .survey-table [data-col="crackWidth"],
-#tab-survey .survey-table [data-col="crackLength"],
-#tab-survey .survey-table [data-col="remark"],
 #tab-survey .survey-table [data-col="actions"] {
     width: 1%;
     white-space: nowrap;
@@ -2106,10 +2109,6 @@ body {
 
 #tab-survey .survey-table [data-col="no"] {
     min-width: 2.75rem;
-}
-
-#tab-survey .survey-table [data-col="location"] {
-    min-width: 4.5rem;
 }
 
 #tab-survey .survey-table [data-col="category"] {
@@ -2125,12 +2124,6 @@ body {
     min-width: 4rem;
 }
 
-#tab-survey .survey-table [data-col="size"],
-#tab-survey .survey-table [data-col="crackWidth"],
-#tab-survey .survey-table [data-col="crackLength"] {
-    min-width: 4.5rem;
-}
-
 #tab-survey .survey-table [data-col="remark"] {
     min-width: 5.5rem;
     white-space: normal;
@@ -2141,54 +2134,55 @@ body {
     min-width: 6.5rem;
 }
 
-/* 주요 표시 — 부재종류·조사내용·원인추정 */
-#tab-survey .survey-table [data-col="component"],
-#tab-survey .survey-table [data-col="defectType"],
-#tab-survey .survey-table [data-col="cause"],
-#tab-survey .survey-table [data-col="inspectionContent"] {
+#tab-survey .survey-table .survey-col-dynamic {
     white-space: normal;
-    word-break: break-word;
-    width: auto;
+    word-break: keep-all;
+    overflow-wrap: anywhere;
+    vertical-align: middle;
 }
 
-#tab-survey .survey-table [data-col="component"] {
-    min-width: 9rem;
-    width: 13%;
+#tab-survey .survey-table th.survey-col-dynamic {
+    white-space: normal;
+    padding-left: 0.35rem;
+    padding-right: 0.35rem;
 }
 
-#tab-survey .survey-table [data-col="defectType"] {
-    min-width: 11rem;
-    width: 16%;
+#tab-survey .survey-table .survey-col-wrap {
+    white-space: normal;
 }
 
-#tab-survey .survey-table [data-col="cause"] {
-    min-width: 9rem;
-    width: 13%;
-}
-
-#tab-survey .survey-table [data-col="inspectionContent"] {
-    min-width: 14rem;
-    width: 22%;
-}
-
-#tab-survey .survey-table [data-col="location"] .survey-inline-input {
-    min-width: 3.5rem;
-    max-width: none;
+#tab-survey .survey-table .survey-col-dynamic .survey-inline-input,
+#tab-survey .survey-table .survey-col-dynamic .survey-inline-textarea {
+    min-width: 0;
+    max-width: 100%;
     width: 100%;
-    font-size: 0.78rem;
+    box-sizing: border-box;
+    text-align: center;
     padding: 0.22rem 0.28rem;
 }
 
 #tab-survey .survey-table [data-col="component"] .survey-inline-input,
 #tab-survey .survey-table [data-col="defectType"] .survey-inline-input,
 #tab-survey .survey-table [data-col="cause"] .survey-inline-input {
-    min-width: 100%;
-    max-width: none;
-    width: 100%;
-    font-size: 0.82rem;
-    padding: 0.28rem 0.35rem;
     text-align: left;
-    box-sizing: border-box;
+}
+
+#tab-survey .survey-table .survey-inline-textarea,
+#tab-survey .survey-table .survey-inline-multiline {
+    white-space: pre-wrap;
+    word-break: keep-all;
+    overflow-wrap: anywhere;
+    resize: none;
+    min-height: 2.4em;
+    line-height: 1.35;
+    field-sizing: content;
+}
+
+#tab-survey .survey-table .survey-cell-readonly.survey-inline-multiline {
+    white-space: pre-wrap;
+    display: inline-block;
+    text-align: center;
+    line-height: 1.35;
 }
 
 #tab-survey .survey-table [data-col="category"] .survey-inline-select {
@@ -2358,6 +2352,76 @@ body {
     gap: 1rem;
 }
 
+.survey-album-photo-card {
+    background: #ffffff;
+    border: 1px solid #cbd5e1;
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06);
+    color: #0f172a;
+}
+
+.survey-album-photo-wrap {
+    aspect-ratio: 4 / 3;
+    width: 100%;
+    background: #f1f5f9;
+    overflow: hidden;
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.survey-album-photo-wrap img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    pointer-events: none;
+}
+
+.survey-album-map-btn {
+    position: absolute;
+    left: 0.45rem;
+    bottom: 0.45rem;
+    z-index: 2;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.28rem;
+    background: rgba(15, 23, 42, 0.82);
+    color: #fff;
+    border: 1px solid rgba(255, 255, 255, 0.22);
+    font-size: 0.72rem;
+    font-weight: 700;
+    line-height: 1;
+    padding: 0.38rem 0.55rem;
+    border-radius: 8px;
+    cursor: pointer;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+}
+
+.survey-album-map-btn:hover,
+.survey-album-map-btn:focus-visible {
+    background: #1d4ed8;
+    border-color: #93c5fd;
+    outline: none;
+}
+
+.survey-album-map-btn:active {
+    transform: scale(0.97);
+}
+
+.survey-album-photo-caption {
+    padding: 0.8rem;
+    text-align: center;
+}
+
+.survey-album-photo-label {
+    font-size: 1rem;
+    font-weight: 800;
+    color: #1f1f1f;
+    line-height: 1.35;
+}
+
 /* 데스크탑: 표·사진 앨범을 화면에 나란히 두고 각각 내부 스크롤 */
 @media (min-width: 1025px) {
     body.bsa-tab-survey .app-content {
@@ -2375,8 +2439,7 @@ body {
         height: 100%;
     }
 
-    #tab-survey .section-header,
-    #tab-survey .survey-stats-panel {
+    #tab-survey .section-header {
         flex-shrink: 0;
     }
 
@@ -2400,21 +2463,9 @@ body {
     }
 
     #tab-survey .survey-table {
-        table-layout: auto;
+        table-layout: fixed;
         width: max-content;
         min-width: 100%;
-    }
-
-    #tab-survey .survey-table [data-col="component"] {
-        min-width: 7rem;
-    }
-
-    #tab-survey .survey-table [data-col="defectType"] {
-        min-width: 8.5rem;
-    }
-
-    #tab-survey .survey-table [data-col="cause"] {
-        min-width: 7rem;
     }
 
     #tab-survey .survey-table thead th {
@@ -2476,47 +2527,6 @@ body {
 
 .survey-row-actions .survey-btn-map-view i {
     margin-right: 0.12rem;
-}
-
-.survey-stats-panel {
-    background: #2a2a2a;
-    padding: 1rem 1.2rem;
-    border-radius: 10px;
-    margin-bottom: 1rem;
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    flex-wrap: wrap;
-    gap: 1rem;
-}
-
-.survey-stats-copy h3 {
-    margin: 0;
-    font-size: 1rem;
-    color: #d4d4d4;
-    font-weight: 800;
-}
-
-.survey-stats-copy p {
-    margin: 0.3rem 0 0 0;
-    font-size: 0.82rem;
-    color: #a3a3a3;
-}
-
-.survey-chart-wrap {
-    background: #171717;
-    padding: 0.5rem;
-    border-radius: 8px;
-    border: 1px solid rgba(255, 255, 255, 0.15);
-    max-width: 100%;
-    overflow: hidden;
-}
-
-#surveyChartCanvas {
-    display: block;
-    max-width: 100%;
-    height: auto;
 }
 
 /* Badges & Tag styling */
@@ -5682,42 +5692,6 @@ body {
 /* ============================================================
    모바일 조사표·비파괴 UI 복구
    ============================================================ */
-.survey-stats-panel {
-    background: #2a2a2a;
-    padding: 1rem 1.2rem;
-    border-radius: 10px;
-    margin-bottom: 1rem;
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    flex-wrap: wrap;
-    gap: 1rem;
-}
-.survey-stats-copy h3 {
-    margin: 0;
-    font-size: 1rem;
-    color: #d4d4d4;
-    font-weight: 800;
-}
-.survey-stats-copy p {
-    margin: 0.3rem 0 0 0;
-    font-size: 0.82rem;
-    color: #a3a3a3;
-}
-.survey-chart-wrap {
-    background: #171717;
-    padding: 0.5rem;
-    border-radius: 8px;
-    border: 1px solid rgba(255, 255, 255, 0.15);
-    max-width: 100%;
-    overflow: hidden;
-}
-#surveyChartCanvas {
-    display: block;
-    max-width: 100%;
-    height: auto;
-}
 
 @media (max-width: 1024px) {
     /* --- 조사표 --- */
@@ -5742,29 +5716,6 @@ body {
         font-size: 0.72rem;
         padding: 0.38rem 0.55rem;
         white-space: nowrap;
-    }
-
-    #tab-survey .survey-stats-panel {
-        flex-direction: column;
-        align-items: stretch;
-        padding: 0.65rem 0.7rem;
-        gap: 0.55rem;
-        margin-bottom: 0.7rem;
-    }
-    #tab-survey .survey-stats-copy h3 {
-        font-size: 0.82rem;
-    }
-    #tab-survey .survey-stats-copy p {
-        font-size: 0.72rem;
-    }
-    #tab-survey .survey-chart-wrap {
-        width: 100%;
-        box-sizing: border-box;
-    }
-    #tab-survey #surveyChartCanvas {
-        width: 100% !important;
-        max-width: 100%;
-        height: auto !important;
     }
 
     /* 조사목록: 화면 높이 안에서 상하·좌우 모두 스크롤 (표 중간에 걸려도 세로 가능) */
@@ -5871,18 +5822,13 @@ body {
             margin-bottom: 0.4rem;
         }
 
-        /* 모바일: 결함 유형 집계 차트는 숨김 — 표 공간 확보 */
-        #tab-survey .survey-stats-panel {
-            display: none !important;
-        }
-
         #tab-survey .table-container {
             padding: 0.12rem;
             max-height: min(78dvh, calc(100dvh - 7rem));
         }
 
         #tab-survey .survey-table {
-            table-layout: auto;
+            table-layout: fixed;
             width: max-content;
             min-width: 100%;
             font-size: 0.72rem;
@@ -5930,34 +5876,12 @@ body {
             word-break: break-word;
         }
 
-        #tab-survey .survey-table [data-col="component"] {
-            min-width: 6rem;
-        }
-
-        #tab-survey .survey-table [data-col="defectType"] {
-            min-width: 7rem;
-        }
-
-        #tab-survey .survey-table [data-col="cause"] {
-            min-width: 6rem;
-        }
-
-        #tab-survey .survey-table [data-col="location"] {
-            min-width: 4rem;
-        }
-
-        #tab-survey .survey-table [data-col="remark"] {
-            min-width: 5rem;
-        }
-
-        #tab-survey .survey-inline-input,
-        #tab-survey .survey-inline-select {
-            min-width: 3rem;
-            max-width: none;
-            width: auto;
-            font-size: 0.7rem;
-            padding: 0.18rem 0.24rem;
-            border-radius: 4px;
+        #tab-survey .survey-table .survey-col-dynamic .survey-inline-input,
+        #tab-survey .survey-table .survey-col-dynamic .survey-inline-textarea,
+        #tab-survey .survey-table .survey-col-dynamic .survey-inline-select {
+            min-width: 0 !important;
+            max-width: 100% !important;
+            width: 100% !important;
         }
 
         #tab-survey .survey-inline-stack {
