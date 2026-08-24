@@ -258,12 +258,14 @@ document.addEventListener('DOMContentLoaded', () => {
                 sanitizedDefects[key] = (arr || []).map(d => {
                     const { photos, prevRoundPhotos, photoIds, prevRoundPhotoIds, ...rest } = d;
                     const out = { ...rest };
-                    if (photos && photos.length > 0) {
-                        out.photoIds = photos.map((_, i) => getPhotoDocId(d.id, i));
-                    }
-                    if (prevRoundPhotos && prevRoundPhotos.length > 0) {
-                        out.prevRoundPhotoIds = prevRoundPhotos.map((_, i) => getPhotoDocId(d.id, i, 'prev'));
-                    }
+                    const curIds = (photos && photos.length > 0)
+                        ? photos.map((_, i) => getPhotoDocId(d.id, i))
+                        : (photoIds && photoIds.length ? photoIds.slice() : null);
+                    const prevIds = (prevRoundPhotos && prevRoundPhotos.length > 0)
+                        ? prevRoundPhotos.map((_, i) => getPhotoDocId(d.id, i, 'prev'))
+                        : (prevRoundPhotoIds && prevRoundPhotoIds.length ? prevRoundPhotoIds.slice() : null);
+                    if (curIds && curIds.length) out.photoIds = curIds;
+                    if (prevIds && prevIds.length) out.prevRoundPhotoIds = prevIds;
                     return out;
                 });
             });
@@ -853,10 +855,39 @@ document.addEventListener('DOMContentLoaded', () => {
             }));
 
             const defectsMap = window.state.defects || {};
+            const companyPhotos = (db && window.state.companyId)
+                ? db.collection('safety_app').doc(getCompanyDocId()).collection('photos')
+                : null;
+            if (!window._photoCache) window._photoCache = {};
+
+            const loadPhotoById = async (pid) => {
+                if (!pid) return null;
+                if (window._photoCache[pid]) return window._photoCache[pid];
+                const fromIdb = await idbGet('photos', pid);
+                if (fromIdb) {
+                    window._photoCache[pid] = fromIdb;
+                    return fromIdb;
+                }
+                if (!companyPhotos) return null;
+                try {
+                    const snap = await companyPhotos.doc(pid).get();
+                    const url = snap.exists ? snap.data().dataUrl : null;
+                    if (url) {
+                        window._photoCache[pid] = url;
+                        idbSet('photos', pid, url).then(ok => {
+                            if (ok) _idbPersistedPhotoKeys.add(pid);
+                        });
+                    }
+                    return url;
+                } catch (e) {
+                    return null;
+                }
+            };
+
             await Promise.all(Object.values(defectsMap).map(arr => Promise.all((arr || []).map(async (d) => {
                 let hydrated = false;
                 if ((!d.photos || d.photos.length === 0) && d.photoIds && d.photoIds.length > 0) {
-                    const photos = await Promise.all(d.photoIds.map(pid => idbGet('photos', pid)));
+                    const photos = await Promise.all(d.photoIds.map(loadPhotoById));
                     const filled = photos.filter(Boolean);
                     if (filled.length > 0) {
                         d.photos = filled;
@@ -864,7 +895,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     }
                 }
                 if ((!d.prevRoundPhotos || d.prevRoundPhotos.length === 0) && d.prevRoundPhotoIds && d.prevRoundPhotoIds.length > 0) {
-                    const prevPhotos = await Promise.all(d.prevRoundPhotoIds.map(pid => idbGet('photos', pid)));
+                    const prevPhotos = await Promise.all(d.prevRoundPhotoIds.map(loadPhotoById));
                     const filledPrev = prevPhotos.filter(Boolean);
                     if (filledPrev.length > 0) {
                         d.prevRoundPhotos = filledPrev;
@@ -20418,15 +20449,34 @@ document.addEventListener('DOMContentLoaded', () => {
     async function uploadDefectPhotos(defectId, photosArray, kind) {
         if (!Array.isArray(photosArray) || photosArray.length === 0) return [];
         if (!window._photoCache) window._photoCache = {};
+        if (!window._cloudSyncedPhotoIds) window._cloudSyncedPhotoIds = new Set();
         const photoIds = photosArray.map((_, i) => getPhotoDocId(defectId, i, kind));
         photosArray.forEach((url, i) => { window._photoCache[photoIds[i]] = url; });
         if (db && window.state.companyId) {
             const companyPhotos = db.collection('safety_app').doc(getCompanyDocId()).collection('photos');
-            await Promise.all(photosArray.map((url, i) =>
-                companyPhotos.doc(photoIds[i]).set({ dataUrl: url }).catch(e => console.warn('사진 업로드 실패:', e))
-            ));
+            await Promise.all(photosArray.map((url, i) => {
+                const pid = photoIds[i];
+                if (!url || window._cloudSyncedPhotoIds.has(pid)) return Promise.resolve();
+                return companyPhotos.doc(pid).set({ dataUrl: url }).then(() => {
+                    window._cloudSyncedPhotoIds.add(pid);
+                }).catch(e => console.warn('사진 업로드 실패:', e));
+            }));
         }
         return photoIds;
+    }
+
+    /** 동기화 시 로컬에만 있는 인라인 사진을 클라우드에 올려 웹↔폰 표시가 맞도록 함 */
+    async function uploadInlineDefectPhotosForSync(defectsMap) {
+        if (!db || !window.state.companyId) return;
+        for (const arr of Object.values(defectsMap || {})) {
+            for (const d of (arr || [])) {
+                if (!d || !d.id) continue;
+                if (d.photos && d.photos.length > 0) await uploadDefectPhotos(d.id, d.photos);
+                if (d.prevRoundPhotos && d.prevRoundPhotos.length > 0) {
+                    await uploadDefectPhotos(d.id, d.prevRoundPhotos, 'prev');
+                }
+            }
+        }
     }
 
     // 반환값: 삭제 실패 건수. 실패해도 예외를 던지지 않지만, 호출부에서 사용자에게 알릴 수 있도록 건수를 반환한다.
@@ -20535,12 +20585,15 @@ document.addEventListener('DOMContentLoaded', () => {
             sanitizedDefects[key] = (arr || []).map(d => {
                 const { photos, prevRoundPhotos, photoIds, prevRoundPhotoIds, ...rest } = d;
                 const out = { ...rest };
-                if (photos && photos.length > 0) {
-                    out.photoIds = photos.map((_, i) => getPhotoDocId(d.id, i));
-                }
-                if (prevRoundPhotos && prevRoundPhotos.length > 0) {
-                    out.prevRoundPhotoIds = prevRoundPhotos.map((_, i) => getPhotoDocId(d.id, i, 'prev'));
-                }
+                // photos가 아직 hydrate 전(빈 배열)이어도 기존 photoIds는 유지 — 다른 기기 사진 참조가 끊기지 않게
+                const curIds = (photos && photos.length > 0)
+                    ? photos.map((_, i) => getPhotoDocId(d.id, i))
+                    : (photoIds && photoIds.length ? photoIds.slice() : null);
+                const prevIds = (prevRoundPhotos && prevRoundPhotos.length > 0)
+                    ? prevRoundPhotos.map((_, i) => getPhotoDocId(d.id, i, 'prev'))
+                    : (prevRoundPhotoIds && prevRoundPhotoIds.length ? prevRoundPhotoIds.slice() : null);
+                if (curIds && curIds.length) out.photoIds = curIds;
+                if (prevIds && prevIds.length) out.prevRoundPhotoIds = prevIds;
                 return out;
             });
         });
