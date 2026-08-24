@@ -3986,56 +3986,115 @@ body {
     gap: 0.5rem;
 }
 
+/* ── 결함 빠른 선택 패널 ── */
 .defect-quick-picks {
     display: flex;
     flex-direction: column;
-    gap: 0.65rem;
-    padding: 0.7rem 0.8rem;
-    border: 1px solid rgba(148, 163, 184, 0.28);
-    border-radius: 12px;
-    background: rgba(248, 250, 252, 0.96);
+    gap: 0.55rem;
+    padding: 0.6rem 0.7rem;
+    border: 1px solid rgba(148, 163, 184, 0.25);
+    border-radius: 14px;
+    background: rgba(248, 250, 252, 0.97);
 }
 
 .defect-quick-group {
     display: flex;
     flex-direction: column;
-    gap: 0.35rem;
+    gap: 0.3rem;
 }
 
 .defect-quick-label {
-    font-size: 0.76rem;
+    font-size: 0.72rem;
     font-weight: 800;
-    color: #334155;
+    color: #64748b;
+    letter-spacing: 0.02em;
+    display: flex;
+    align-items: center;
+    gap: 0.3rem;
+}
+.defect-quick-label i {
+    font-size: 0.7rem;
+    opacity: 0.7;
 }
 
+/* 공통 격자 */
 .defect-quick-chip-grid {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.35rem;
+    display: grid;
+    gap: 0.28rem;
+}
+
+/* 구조 분류: 3칸 */
+.defect-quick-chip-grid.dqg-category {
+    grid-template-columns: repeat(3, 1fr);
+}
+
+/* 부재: 최대 4칸 (넘치면 줄바꿈) */
+.defect-quick-chip-grid.dqg-component {
+    grid-template-columns: repeat(4, 1fr);
+}
+
+/* 결함 종류: 3칸 */
+.defect-quick-chip-grid.dqg-type {
+    grid-template-columns: repeat(3, 1fr);
+}
+
+/* 발생 원인: 2칸 */
+.defect-quick-chip-grid.dqg-cause {
+    grid-template-columns: repeat(2, 1fr);
 }
 
 .defect-quick-chip {
-    border: 1px solid #cbd5e1;
+    border: 1.5px solid #e2e8f0;
     background: #ffffff;
-    color: #0f172a;
-    border-radius: 8px;
-    padding: 0.38rem 0.6rem;
-    font-size: 0.76rem;
+    color: #1e293b;
+    border-radius: 9px;
+    padding: 0.45rem 0.3rem;
+    font-size: 0.73rem;
     font-weight: 700;
-    line-height: 1.2;
+    line-height: 1.25;
     cursor: pointer;
-    transition: all 0.15s ease;
+    text-align: center;
+    transition: background 0.12s, border-color 0.12s, color 0.12s, transform 0.08s;
+    word-break: keep-all;
+    overflow: hidden;
+    white-space: normal;
+}
+
+.defect-quick-chip:active {
+    transform: scale(0.95);
 }
 
 .defect-quick-chip:hover {
-    border-color: #64748b;
-    background: #f8fafc;
+    border-color: #94a3b8;
+    background: #f1f5f9;
 }
 
-.defect-quick-chip.active {
-    background: #2563eb;
-    border-color: #2563eb;
+/* 분류별 활성 컬러 */
+.dqg-category .defect-quick-chip.active {
+    background: #0f172a;
+    border-color: #0f172a;
+    color: #f8fafc;
+}
+.dqg-component .defect-quick-chip.active {
+    background: #1d4ed8;
+    border-color: #1d4ed8;
     color: #ffffff;
+}
+.dqg-type .defect-quick-chip.active {
+    background: #b91c1c;
+    border-color: #b91c1c;
+    color: #ffffff;
+}
+.dqg-cause .defect-quick-chip.active {
+    background: #0369a1;
+    border-color: #0369a1;
+    color: #ffffff;
+}
+
+/* 상태양호는 초록 */
+.dqg-type .defect-quick-chip[data-value="상태양호"].active {
+    background: #15803d;
+    border-color: #15803d;
 }
 
 /* Modal Form Styles */
@@ -5145,6 +5204,13 @@ body {
 
 @media (max-width: 480px) {
     .offline-badge { top: auto; bottom: 0.8rem; right: 0.7rem; left: 0.7rem; justify-content: center; }
+}
+
+/* 세로(좁은) 화면 — 빠른 선택 그리드 열 수 줄임 */
+@media (max-width: 420px) {
+    .defect-quick-chip-grid.dqg-component { grid-template-columns: repeat(3, 1fr); }
+    .defect-quick-chip-grid.dqg-cause     { grid-template-columns: repeat(2, 1fr); }
+    .defect-quick-chip { font-size: 0.69rem; padding: 0.42rem 0.2rem; }
 }
 
 @media (max-width: 1024px) {
