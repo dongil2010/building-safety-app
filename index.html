@@ -12,7 +12,7 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <meta name="apple-mobile-web-app-title" content="스마트 안전점검">
-    <link rel="stylesheet" href="styles.css?v=20260824_wlnRow">
+    <link rel="stylesheet" href="styles.css?v=20260824_nSub">
     <!-- FontAwesome icons for clean engineering UI -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <!-- PDF 생성용: 페이지별로 직접 캡처해서 조립(큰 보고서에서 html2pdf 한방 렌더링이 캔버스 높이 한계로
@@ -847,6 +847,9 @@
             </div>
             <div class="modal-footer defect-drawer-footer defect-drawer-footer-desktop">
                 <button class="btn btn-danger-outline" id="btnDeleteDefect" title="이 결함 삭제"><i class="fa-solid fa-trash"></i></button>
+                <button class="btn btn-outline" id="btnAddSurveyTableRow" title="도면 번호는 그대로 두고 결함표에 N-1, N-2 행 추가">
+                    <i class="fa-solid fa-table"></i> 결함표 추가
+                </button>
                 <button class="btn btn-outline" id="btnAddAnotherMarking" title="같은 정보로 다른 위치에 계속 마킹">
                     <i class="fa-solid fa-location-dot"></i> 계속 마킹
                 </button>
@@ -858,6 +861,10 @@
                 <button type="button" class="defect-mobile-btn danger" id="btnDeleteDefectMobile">
                     <i class="fa-solid fa-trash"></i>
                     <span>삭제</span>
+                </button>
+                <button type="button" class="defect-mobile-btn secondary" id="btnAddSurveyTableRowMobile">
+                    <i class="fa-solid fa-table"></i>
+                    <span>결함표</span>
                 </button>
                 <button type="button" class="defect-mobile-btn secondary" id="btnAddAnotherMarkingMobile">
                     <i class="fa-solid fa-location-dot"></i>
@@ -2120,12 +2127,12 @@
     <script src="js/pdf-vector-bridge.js?v=20260821_land1"></script>
     <script src="js/tabs/registry.js?v=20260821_land1"></script>
     <script src="js/tabs/home.js?v=20260824_webview"></script>
-    <script src="js/tabs/map.js?v=20260824_wlnRow"></script>
-    <script src="js/tabs/survey.js?v=20260822_surveyInlineEdit"></script>
+    <script src="js/tabs/map.js?v=20260824_nSub"></script>
+    <script src="js/tabs/survey.js?v=20260824_nSub"></script>
     <script src="js/tabs/ndt.js?v=20260822_survey2dScroll"></script>
     <script src="js/shared/report.js?v=20260824_hwpxFix"></script>
     <script src="js/shared/auth.js?v=20260821_land1"></script>
-    <script src="app.js?v=20260824_wlnRow"></script>
+    <script src="app.js?v=20260824_nSub"></script>
     <script>
         document.addEventListener('DOMContentLoaded', function () {
             const btn = document.getElementById('btnExportVectorPdf');

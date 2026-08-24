@@ -3035,7 +3035,7 @@ body {
 
     .defect-mobile-actions {
         display: grid;
-        grid-template-columns: 1fr 1.35fr 1fr;
+        grid-template-columns: 0.75fr 1fr 1fr 0.9fr;
         gap: 0.45rem;
         padding: 0.55rem 0.7rem calc(0.55rem + env(safe-area-inset-bottom, 0px));
         border-top: 1px solid var(--border-color);
@@ -3487,7 +3487,7 @@ body {
 
     .defect-mobile-actions {
         display: grid;
-        grid-template-columns: 1fr 1.35fr 1fr;
+        grid-template-columns: 0.75fr 1fr 1fr 0.9fr;
         gap: 0.35rem;
         padding: 0.4rem 0.5rem calc(0.4rem + env(safe-area-inset-bottom, 0px));
         border-top: 1px solid var(--border-color);
@@ -3949,11 +3949,13 @@ body {
     padding-right: 0.7rem;
 }
 
+.defect-drawer-footer #btnAddSurveyTableRow,
 .defect-drawer-footer #btnAddAnotherMarking {
     flex: 1;
     border-color: #2a2a2a;
     color: #2a2a2a;
-    font-size: 0.82rem;
+    font-size: 0.78rem;
+    white-space: nowrap;
 }
 
 .defect-drawer-footer #btnSaveDefect {
