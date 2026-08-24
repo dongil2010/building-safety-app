@@ -9434,20 +9434,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const crackKinds = getCrackKindsForComponent(currentComponent) || [];
         const selectedTypeParts = parseDefectTypeList(currentType);
         const selectedCrackSet = new Set(selectedTypeParts.filter(t => crackKinds.includes(t)));
-        const typeChipOptions = [];
-        const seenTypeChip = new Set();
-        const pushTypeChip = (value) => {
-            const v = String(value || '').trim();
-            if (!v || seenTypeChip.has(v) || v.includes(',')) return;
-            seenTypeChip.add(v);
-            typeChipOptions.push(v);
-        };
-        pushTypeChip('상태양호');
-        crackKinds.forEach(pushTypeChip);
-        getQuickPickOptionsFromSelect(typeSelect).forEach((t) => {
-            if (crackKinds.includes(t)) return;
-            pushTypeChip(t);
-        });
+        const typeChipOptions = getPinnedDefectTypeChips(currentCategory, currentComponent);
         const typeContainer = document.getElementById('quickDefectTypeChips');
         if (typeContainer) {
             typeContainer.innerHTML = typeChipOptions.map(value => {
@@ -9694,6 +9681,34 @@ document.addEventListener('DOMContentLoaded', () => {
         ]
     };
 
+    function isTransientDefectTypeValue(value) {
+        const v = String(value || '').trim();
+        if (!v) return true;
+        if (/[,，/·]/.test(v) && parseDefectTypeList(v).length > 1) return true;
+        return false;
+    }
+
+    function getPinnedDefectTypeChips(category, component) {
+        const hidden = (window.state.hiddenDefectTypes && window.state.hiddenDefectTypes[category]) || [];
+        const crackKinds = getCrackKindsForComponent(component) || [];
+        const preset = (getDefectTypePresetFor(category, component) || []).filter(t => !hidden.includes(t));
+        const custom = ((window.state.customDefectTypes && window.state.customDefectTypes[category]) || [])
+            .filter(t => t && !isTransientDefectTypeValue(t) && !crackKinds.includes(t) && !hidden.includes(t));
+        const out = [];
+        const seen = new Set();
+        const push = (v) => {
+            const t = String(v || '').trim();
+            if (!t || seen.has(t) || isTransientDefectTypeValue(t)) return;
+            seen.add(t);
+            out.push(t);
+        };
+        push('상태양호');
+        crackKinds.forEach(push);
+        preset.forEach((t) => { if (!crackKinds.includes(t)) push(t); });
+        custom.forEach(push);
+        return out;
+    }
+
     function updateDefectTypeDropdown(category, currentVal = null) {
         const select = document.getElementById('defectType');
         if (!select) return;
@@ -9710,7 +9725,9 @@ document.addEventListener('DOMContentLoaded', () => {
         const crackKinds = getCrackKindsForComponent(component);
         const hidden = window.state.hiddenDefectTypes[category] || [];
         const presetList = getDefectTypePresetFor(category, component).filter(t => !hidden.includes(t));
-        const customList = window.state.customDefectTypes[category] || [];
+        const customList = ((window.state.customDefectTypes[category] || []))
+            .filter(item => !isTransientDefectTypeValue(item));
+        window.state.customDefectTypes[category] = customList;
 
         let html = `<option value="" ${!currentVal ? 'selected' : ''}>—</option>`;
         const allOptions = presetList.slice();
@@ -9731,6 +9748,7 @@ document.addEventListener('DOMContentLoaded', () => {
         select.innerHTML = html;
 
         if (currentVal && !allOptions.includes(currentVal) && !customList.includes(currentVal)
+            && !isTransientDefectTypeValue(currentVal)
             && !parseDefectTypeList(currentVal).every(t => allOptions.includes(t) || customList.includes(t))) {
             const customOpt = document.createElement('option');
             customOpt.value = currentVal;
@@ -9742,7 +9760,13 @@ document.addEventListener('DOMContentLoaded', () => {
         const resolved = (currentVal !== null && currentVal !== undefined)
             ? currentVal
             : (isDefectComboCustomToken(select.value) ? '' : select.value);
-        syncDefectComboFields(select, document.getElementById('defectTypeInput'), resolved);
+        const typeInput = document.getElementById('defectTypeInput');
+        if (typeInput) typeInput.value = isDefectComboCustomToken(resolved) ? '' : (resolved || '');
+        if (resolved && !isTransientDefectTypeValue(resolved) && !isDefectComboCustomToken(resolved)) {
+            ensureDefectComboOption(select, resolved);
+        } else if (select && resolved && isTransientDefectTypeValue(resolved)) {
+            select.value = '';
+        }
 
         // Trigger cause update for current defect type
         updateDefectCauseDropdown(resolved);
@@ -9776,7 +9800,9 @@ document.addEventListener('DOMContentLoaded', () => {
         if (current.has(kind)) current.delete(kind);
         else current.add(kind);
         const joined = joinDefectTypeList(crackKinds.filter(k => current.has(k)));
-        syncDefectComboFields(typeSelect, typeInput, joined);
+        const typeInputEl = document.getElementById('defectTypeInput');
+        if (typeInputEl) typeInputEl.value = joined;
+        if (typeSelect) typeSelect.value = crackKinds.includes(joined) ? joined : '';
         updateDefectCauseDropdown(joined || '균열');
         toggleDefectSizeInputMode();
         if (typeof scheduleDefectAutoApply === 'function') scheduleDefectAutoApply();
@@ -10291,11 +10317,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 const cat = document.getElementById('defectCategory')?.value || '구조체';
                 if (newType && newType.trim()) {
                     const trimmed = newType.trim();
-                    if (!window.state.customDefectTypes) window.state.customDefectTypes = { '구조체': [], '비구조체': [], '마감재': [] };
-                    if (!window.state.customDefectTypes[cat]) window.state.customDefectTypes[cat] = [];
-                    if (!window.state.customDefectTypes[cat].includes(trimmed)) {
-                        window.state.customDefectTypes[cat].push(trimmed);
-                        saveStateToLocalStorage();
+                    if (!isTransientDefectTypeValue(trimmed)) {
+                        if (!window.state.customDefectTypes) window.state.customDefectTypes = { '구조체': [], '비구조체': [], '마감재': [] };
+                        if (!window.state.customDefectTypes[cat]) window.state.customDefectTypes[cat] = [];
+                        if (!window.state.customDefectTypes[cat].includes(trimmed)) {
+                            window.state.customDefectTypes[cat].push(trimmed);
+                            saveStateToLocalStorage();
+                        }
                     }
                     updateDefectTypeDropdown(cat, trimmed);
                 } else {
