@@ -10,8 +10,7 @@
     "android:sync": "npm run cap:sync",
     "android:open": "npm run cap:open",
     "android:setup": "powershell -ExecutionPolicy Bypass -File ./scripts/android-setup.ps1",
-    "android:build:debug": "npm run android:setup && npm run cap:sync && cd android && .\\gradlew.bat assembleDebug",
-    "ota:publish": "node ./scripts/publish-ota.mjs"
+    "android:build:debug": "npm run android:setup && npm run cap:sync && cd android && .\\gradlew.bat assembleDebug"
   },
   "dependencies": {
     "@capacitor/android": "^6.2.1",

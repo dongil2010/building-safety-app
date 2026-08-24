@@ -12,7 +12,7 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <meta name="apple-mobile-web-app-title" content="스마트 안전점검">
-    <link rel="stylesheet" href="styles.css?v=20260824_mobileAddSite">
+    <link rel="stylesheet" href="styles.css?v=20260824_listDrawer">
     <!-- FontAwesome icons for clean engineering UI -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <!-- PDF 생성용: 페이지별로 직접 캡처해서 조립(큰 보고서에서 html2pdf 한방 렌더링이 캔버스 높이 한계로
@@ -108,7 +108,7 @@
                 <div class="dashboard-hero">
                     <div class="hero-text">
                         <span class="hero-badge" id="appVersionBadge">
-                            <i class="fa-solid fa-circle-check"></i> v1.3.0 · 웹뷰 원격 업데이트
+                            <i class="fa-solid fa-globe"></i> v1.3.0 · 웹뷰 (GitHub Pages)
                         </span>
                         <h2 class="hero-title" style="margin-top: 0.4rem;">🏢 점검 대상 건축물 목록</h2>
                     </div>
@@ -128,10 +128,6 @@
                         <button type="button" class="btn btn-outline btn-hero-refresh" id="btnReloadWebApp" title="서버에서 최신 화면을 다시 불러옵니다">
                             <i class="fa-solid fa-rotate"></i> 새로고침
                         </button>
-                        <button type="button" class="btn btn-outline pc-only-chrome hero-btn-ota" id="btnPublishOta" style="display: none;" title="APK를 Firebase에 올려 현장 기기 OTA 배포">
-                            <i class="fa-solid fa-upload"></i> OTA 배포
-                        </button>
-                        <input type="file" id="inputPublishOtaApk" accept=".apk,application/vnd.android.package-archive" style="display:none;">
                         <button type="button" class="btn btn-outline pc-only-chrome hero-btn-purge" id="btnPurgeDeletedCodes" title="전원 동기화 확인 후에만 — 삭제 tombstone을 비워 고유코드 재사용">
                             <i class="fa-solid fa-recycle"></i> 삭제 코드 정리
                         </button>
@@ -153,20 +149,6 @@
                             <button type="button" id="btnLogout" class="btn btn-sm btn-outline hero-btn-logout" title="로그아웃">
                                 <i class="fa-solid fa-right-from-bracket"></i> 로그아웃
                             </button>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- OTA 업데이트 배너 (새 APK 감지 시 자동 표시) -->
-                <div id="otaUpdateBanner" class="ota-update-banner" style="display: none;" role="status" aria-live="polite">
-                    <div class="ota-update-banner-inner">
-                        <div class="ota-update-banner-text">
-                            <strong><i class="fa-solid fa-circle-up"></i> 새 버전 <span id="otaBannerVersion">v1.0</span> 사용 가능</strong>
-                            <span id="otaBannerNotes" class="ota-banner-notes"></span>
-                        </div>
-                        <div class="ota-banner-actions">
-                            <button type="button" id="btnOtaInstallNow" class="btn btn-primary btn-sm"><i class="fa-solid fa-download"></i> 지금 업데이트</button>
-                            <button type="button" id="btnOtaLater" class="btn btn-outline btn-sm">나중에</button>
                         </div>
                     </div>
                 </div>
@@ -654,36 +636,38 @@
                             <i class="fa-solid fa-spinner fa-spin"></i> 사진 불러오는 중…
                         </div>
 
-                        <div class="defect-photo-slot defect-photo-slot-prev">
-                            <div class="defect-photo-slot-label"><i class="fa-solid fa-clock-rotate-left"></i> 전차</div>
-                            <div class="defect-photo-slot-main">
-                                <div class="defect-photo-frame" id="defectPrevMainFrame"></div>
-                                <div class="defect-photo-slot-actions">
-                                    <button type="button" id="btnPrevRoundCamera" class="defect-photo-slot-btn">
-                                        <i class="fa-solid fa-camera"></i> 촬영
-                                    </button>
-                                    <button type="button" id="btnPrevRoundGallery" class="defect-photo-slot-btn">
-                                        <i class="fa-solid fa-images"></i> 추가
-                                    </button>
+                        <div class="defect-photo-pair">
+                            <div class="defect-photo-slot defect-photo-slot-prev">
+                                <div class="defect-photo-slot-label"><i class="fa-solid fa-clock-rotate-left"></i> 전차</div>
+                                <div class="defect-photo-slot-main">
+                                    <div class="defect-photo-frame" id="defectPrevMainFrame"></div>
+                                    <div class="defect-photo-extra-row" id="defectPrevExtraRow" style="display:none;"></div>
+                                    <div class="defect-photo-slot-actions">
+                                        <button type="button" id="btnPrevRoundCamera" class="defect-photo-slot-btn">
+                                            <i class="fa-solid fa-camera"></i> 촬영
+                                        </button>
+                                        <button type="button" id="btnPrevRoundGallery" class="defect-photo-slot-btn">
+                                            <i class="fa-solid fa-images"></i> 추가
+                                        </button>
+                                    </div>
                                 </div>
                             </div>
-                            <div class="defect-photo-extra-row" id="defectPrevExtraRow" style="display:none;"></div>
-                        </div>
 
-                        <div class="defect-photo-slot defect-photo-slot-curr">
-                            <div class="defect-photo-slot-label"><i class="fa-solid fa-camera"></i> 현차</div>
-                            <div class="defect-photo-slot-main">
-                                <div class="defect-photo-frame" id="defectCurrMainFrame"></div>
-                                <div class="defect-photo-slot-actions">
-                                    <button type="button" id="btnTriggerCamera" class="defect-photo-slot-btn primary">
-                                        <i class="fa-solid fa-camera"></i> 촬영
-                                    </button>
-                                    <button type="button" id="btnTriggerGallery" class="defect-photo-slot-btn">
-                                        <i class="fa-solid fa-images"></i> 추가
-                                    </button>
+                            <div class="defect-photo-slot defect-photo-slot-curr">
+                                <div class="defect-photo-slot-label"><i class="fa-solid fa-camera"></i> 현차</div>
+                                <div class="defect-photo-slot-main">
+                                    <div class="defect-photo-frame" id="defectCurrMainFrame"></div>
+                                    <div class="defect-photo-extra-row" id="defectCurrExtraRow" style="display:none;"></div>
+                                    <div class="defect-photo-slot-actions">
+                                        <button type="button" id="btnTriggerCamera" class="defect-photo-slot-btn primary">
+                                            <i class="fa-solid fa-camera"></i> 촬영
+                                        </button>
+                                        <button type="button" id="btnTriggerGallery" class="defect-photo-slot-btn">
+                                            <i class="fa-solid fa-images"></i> 추가
+                                        </button>
+                                    </div>
                                 </div>
                             </div>
-                            <div class="defect-photo-extra-row" id="defectCurrExtraRow" style="display:none;"></div>
                         </div>
 
                         <div id="defectPhotoCompareArea" class="defect-photo-compare-area" style="display:none;" aria-hidden="true">
@@ -703,14 +687,16 @@
                         </div>
                         <div class="defect-quick-group">
                             <div class="defect-quick-label"><i class="fa-solid fa-building-columns"></i> 부재 명칭</div>
+                            <input type="text" id="defectComponentInput" class="form-control defect-combo-input defect-quick-direct-input" placeholder="부재 명칭 직접 입력" autocomplete="off">
                             <div class="defect-quick-chip-grid dqg-component" id="quickComponentChips"></div>
                         </div>
                         <div class="defect-quick-group">
                             <div class="defect-quick-label"><i class="fa-solid fa-triangle-exclamation"></i> 결함 종류</div>
+                            <input type="text" id="defectTypeInput" class="form-control defect-combo-input defect-quick-direct-input" placeholder="결함 종류 직접 입력" autocomplete="off">
                             <div class="defect-quick-chip-grid dqg-type" id="quickDefectTypeChips"></div>
                         </div>
-                        <div class="defect-quick-group" id="quickMeasureGroup" style="display:none;">
-                            <div class="defect-quick-label"><i class="fa-solid fa-ruler-combined"></i> 폭 · 길이 · 개수</div>
+                        <div class="defect-quick-group" id="quickMeasureGroup">
+                            <div class="defect-quick-label"><i class="fa-solid fa-ruler-combined"></i> 폭 · 길이 · 개수 (직접 입력)</div>
                             <div class="defect-measure-grid">
                                 <label class="defect-measure-btn" for="defectCrackWidth">
                                     <span class="defect-measure-name">폭</span>
@@ -756,14 +742,16 @@
                                 <span>부재 명칭</span>
                                 <button type="button" id="btnManageComponent" class="btn-option-manage" title="부재 명칭 항목 관리"><i class="fa-solid fa-gear"></i></button>
                             </div>
-                            <input type="text" id="defectComponentInput" class="form-control defect-combo-input" placeholder="직접 입력(선택)" autocomplete="off">
                             <select id="defectComponent" class="form-select defect-combo-select" title="목록에서 선택">
                                 <option value="기둥">기둥</option>
+                                <option value="철골기둥">철골기둥</option>
                                 <option value="큰보">큰보</option>
                                 <option value="작은보">작은보</option>
+                                <option value="철골거더">철골거더</option>
+                                <option value="철골빔">철골빔</option>
                                 <option value="슬래브">슬래브</option>
+                                <option value="데크슬래브">데크슬래브</option>
                                 <option value="RC벽체">RC벽체</option>
-                                <option value="조적벽체">조적벽체</option>
                                 <option value="계단">계단</option>
                                 <option value="기타">기타 부재</option>
                             </select>
@@ -773,7 +761,6 @@
                                 <span>결함 종류</span>
                                 <button type="button" id="btnManageDefectType" class="btn-option-manage" title="결함 종류 항목 관리"><i class="fa-solid fa-gear"></i></button>
                             </div>
-                            <input type="text" id="defectTypeInput" class="form-control defect-combo-input" placeholder="직접 입력" autocomplete="off">
                             <select id="defectType" class="form-select defect-combo-select" title="목록에서 선택">
                                 <option value="균열">균열</option>
                                 <option value="누수">누수</option>
@@ -1328,7 +1315,10 @@
                             <option value="기둥">기둥</option>
                             <option value="큰보">큰보</option>
                             <option value="작은보">작은보</option>
+                            <option value="철골거더">철골거더</option>
+                            <option value="철골빔">철골빔</option>
                             <option value="슬래브">슬래브</option>
+                            <option value="데크슬래브">데크슬래브</option>
                             <option value="RC벽체">RC벽체</option>
                             <option value="조적벽체">조적벽체</option>
                             <option value="기타">기타</option>
@@ -2137,13 +2127,13 @@
     <script src="js/core/state.js?v=20260821_land1"></script>
     <script src="js/pdf-vector-bridge.js?v=20260821_land1"></script>
     <script src="js/tabs/registry.js?v=20260821_land1"></script>
-    <script src="js/tabs/home.js?v=20260821_land1"></script>
-    <script src="js/tabs/map.js?v=20260822_prevPhotoView"></script>
+    <script src="js/tabs/home.js?v=20260824_webview"></script>
+    <script src="js/tabs/map.js?v=20260824_listDrawer"></script>
     <script src="js/tabs/survey.js?v=20260822_surveyInlineEdit"></script>
     <script src="js/tabs/ndt.js?v=20260822_survey2dScroll"></script>
-    <script src="js/shared/report.js?v=20260821_land1"></script>
+    <script src="js/shared/report.js?v=20260824_hwpxFix"></script>
     <script src="js/shared/auth.js?v=20260821_land1"></script>
-    <script src="app.js?v=20260824_surveyLayout"></script>
+    <script src="app.js?v=20260824_listDrawer"></script>
     <script>
         document.addEventListener('DOMContentLoaded', function () {
             const btn = document.getElementById('btnExportVectorPdf');

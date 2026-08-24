@@ -11,8 +11,8 @@ window.BSA.tabs['tab-home'] = {
         '점검 수행회사명 저장',
         '휴대폰 QR 촬영 연동 시작',
         '사용자 프로필·로그아웃·가입 승인(관리자)',
-        '앱 OTA 자동 업데이트 (로그인 시 감지·배너·설치)',
-        'OTA 배포 (otaPublisher 권한 — APK 업로드)',
+        'Android WebView는 GitHub Pages 원격 웹 로드 (APK OTA 없음)',
+        '홈 새로고침 · 앱 재실행 시 최신 웹 수신',
         '삭제 고유코드 수동 정리(재사용) — 전원 동기화 후'
     ],
     ownerHint: 'app.js BUILDING MANAGEMENT + JSON 백업 + 휴대폰 연동',

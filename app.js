@@ -4810,8 +4810,8 @@ document.addEventListener('DOMContentLoaded', () => {
                         grabY: vy
                     };
                     pendingNdtPinIsTouch = true;
-                    pendingNdtPinArmed = !!ndtQuickDragEnabled || hitPin.part === 'target';
-                    if (!ndtQuickDragEnabled && hitPin.part !== 'target') {
+                    pendingNdtPinArmed = !!ndtQuickDragEnabled;
+                    if (!ndtQuickDragEnabled) {
                         pendingNdtLongPressTimer = setTimeout(() => {
                             if (!pendingNdtPinHit || !pendingNdtPinIsTouch) return;
                             pendingNdtPinArmed = true;
@@ -8160,7 +8160,7 @@ document.addEventListener('DOMContentLoaded', () => {
     function getStructuralComponentGroup(component) {
         const comp = component || '';
         const isColumnWall = comp.includes('기둥') || comp.includes('벽체');
-        const isBeamSlab = comp.includes('보') || comp.includes('슬래브');
+        const isBeamSlab = comp.includes('보') || comp.includes('슬래브') || comp.includes('거더') || comp.includes('빔');
         if (isColumnWall && isBeamSlab) return 'both';
         if (isColumnWall) return 'columnWall';
         if (isBeamSlab) return 'beamSlab';
@@ -8327,6 +8327,26 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!anyScrolled) {
             row.scrollIntoView({ behavior: scrollBehavior, block: 'nearest', inline: 'nearest' });
         }
+    }
+
+    function isMobilePortraitDefectDrawer() {
+        return !!(window.matchMedia && window.matchMedia('(max-width: 768px) and (orientation: portrait)').matches);
+    }
+
+    function revealSelectedDefectListAboveDrawer() {
+        const panel = document.getElementById('defectListPanel');
+        const row = panel && panel.querySelector('.defect-list-item.is-map-selected');
+        if (row) scrollDefectListRowIntoView(row, 'auto');
+    }
+
+    function scheduleRevealDefectListAboveDrawer() {
+        if (!isMobilePortraitDefectDrawer()) return;
+        const run = () => revealSelectedDefectListAboveDrawer();
+        requestAnimationFrame(() => {
+            requestAnimationFrame(run);
+        });
+        setTimeout(run, 80);
+        setTimeout(run, 300);
     }
 
     // 좌측 사이드바에 표시되는 "현재 층에 등록된 결함" 간단 목록 렌더링
@@ -9209,7 +9229,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // --- Dynamic Defect Component(부재 명칭) — 분류별 플랫 프리셋 ---
     const DEFECT_COMPONENT_PRESET = {
-        '구조체': ['기둥', 'RC기둥', '철골기둥', 'SRC기둥', '큰보', '작은보', '보', '캔틸레버보', '슬래브', '데크슬래브', 'RC벽체', '내력벽', '계단', '계단참', '계단슬래브', '기초', '독립기초', '매트기초', '기타'],
+        '구조체': ['기둥', 'RC기둥', '철골기둥', 'SRC기둥', '큰보', '작은보', '철골거더', '철골빔', '캔틸레버보', '슬래브', '데크슬래브', 'RC벽체', '내력벽', '계단', '계단참', '계단슬래브', '기초', '독립기초', '매트기초', '기타'],
         '비구조체': ['조적벽체', '칸막이벽', 'ALC벽', '창호', '문', '셔터', '천장', '반자', '기타'],
         '마감재': ['외장타일', '외장석재', '도장', '금속패널', '내장타일', '수장', '내장도장', '바닥타일', '바닥마감', '기타']
     };
@@ -9306,13 +9326,14 @@ document.addEventListener('DOMContentLoaded', () => {
             if (typeof scheduleDefectAutoApply === 'function') scheduleDefectAutoApply();
         });
 
-        renderQuickPickChipGroup('quickComponentChips', getQuickPickOptionsFromSelect(componentSelect).slice(0, 12), currentComponent, (value) => {
+        renderQuickPickChipGroup('quickComponentChips', getQuickPickOptionsFromSelect(componentSelect).slice(0, 16), currentComponent, (value) => {
             syncDefectComboFields(componentSelect, componentInput, value);
+            updateDefectTypeDropdown(currentCategory, getDefectComboValue(typeSelect, typeInput));
             if (typeof scheduleDefectAutoApply === 'function') scheduleDefectAutoApply();
             refreshDefectQuickPickBar();
         });
 
-        renderQuickPickChipGroup('quickDefectTypeChips', getQuickPickOptionsFromSelect(typeSelect).slice(0, 12), currentType, (value) => {
+        renderQuickPickChipGroup('quickDefectTypeChips', getQuickPickOptionsFromSelect(typeSelect).slice(0, 16), currentType, (value) => {
             syncDefectComboFields(typeSelect, typeInput, value);
             updateDefectCauseDropdown(value);
             toggleDefectSizeInputMode();
@@ -9332,7 +9353,17 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function bindDefectComboInputs() {
         const pairs = [
-            { selectId: 'defectComponent', inputId: 'defectComponentInput' },
+            {
+                selectId: 'defectComponent',
+                inputId: 'defectComponentInput',
+                onChange: () => {
+                    const cat = document.getElementById('defectCategory')?.value || '구조체';
+                    updateDefectTypeDropdown(cat, getDefectComboValue(
+                        document.getElementById('defectType'),
+                        document.getElementById('defectTypeInput')
+                    ));
+                }
+            },
             {
                 selectId: 'defectType',
                 inputId: 'defectTypeInput',
@@ -9407,6 +9438,44 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // --- Dynamic Defect Type Presets & Custom Adding ---
+    const STEEL_MEMBER_DEFECTS = [
+        '상태양호',
+        '부식/녹',
+        '변형/좌굴',
+        '볼트 이완/파손',
+        '용접부 균열/불량',
+        '도장 박리',
+        '접합부 손상',
+        '단면 손실',
+        '기타'
+    ];
+    const DECK_SLAB_DEFECTS = [
+        '상태양호',
+        '균열',
+        '누수',
+        '처짐',
+        '박리/박락',
+        '철근노출',
+        '데크플레이트 부식',
+        '접합부 손상',
+        '백태/유출',
+        '기타'
+    ];
+    const componentDefectPreset = {
+        '철골기둥': STEEL_MEMBER_DEFECTS,
+        '철골거더': STEEL_MEMBER_DEFECTS,
+        '철골빔': STEEL_MEMBER_DEFECTS,
+        '데크슬래브': DECK_SLAB_DEFECTS
+    };
+    function normalizeComponentKey(name) {
+        return String(name || '').replace(/\s+/g, '');
+    }
+    function getDefectTypePresetFor(category, component) {
+        const key = normalizeComponentKey(component);
+        if (key && componentDefectPreset[key]) return componentDefectPreset[key];
+        return categoryDefectPreset[category] || categoryDefectPreset['구조체'];
+    }
+
     const categoryDefectPreset = {
         '구조체': [
             '상태양호',
@@ -9447,8 +9516,12 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         if (!window.state.hiddenDefectTypes) window.state.hiddenDefectTypes = {};
 
+        const component = getDefectComboValue(
+            document.getElementById('defectComponent'),
+            document.getElementById('defectComponentInput')
+        );
         const hidden = window.state.hiddenDefectTypes[category] || [];
-        const presetList = (categoryDefectPreset[category] || categoryDefectPreset['구조체']).filter(t => !hidden.includes(t));
+        const presetList = getDefectTypePresetFor(category, component).filter(t => !hidden.includes(t));
         const customList = window.state.customDefectTypes[category] || [];
 
         let html = `<option value="" ${!currentVal ? 'selected' : ''}>—</option>`;
@@ -9495,7 +9568,6 @@ document.addEventListener('DOMContentLoaded', () => {
         const dType = getDefectComboValue(typeSelect, typeInput) || '';
         const isCrack = dType === '균열' || (dType && dType.includes('균열'));
         const isGood = dType === '상태양호';
-        const hasType = !!dType && !isGood;
         const crackGroup = document.getElementById('defectCrackSizeGroup');
         const measureGroup = document.getElementById('quickMeasureGroup');
         const freeLabel = document.getElementById('defectSizeFreeLabel');
@@ -9503,7 +9575,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const causeGroup = document.getElementById('defectCauseGroup');
         const quickCauseGroup = document.getElementById('quickCauseGroup');
         if (crackGroup) crackGroup.style.display = (isCrack && !isGood) ? '' : 'none';
-        if (measureGroup) measureGroup.style.display = hasType ? '' : 'none';
+        if (measureGroup) measureGroup.style.display = isGood ? 'none' : '';
         if (freeLabel) {
             freeLabel.textContent = isCrack
                 ? '규모 및 상태 (균열폭/길이도 가능)'
@@ -9575,6 +9647,15 @@ document.addEventListener('DOMContentLoaded', () => {
         '도장 페인트 변색/탈락':['습기 유입', '자외선 노후화', '바탕면 처리 불량', '도료 품질 불량', '기타'],
         '방수층 손상/들뜸':     ['방수재 노후화', '바탕재 처리 미흡', '구조체 변형', '온도·열팽창', '시공 불량', '기타'],
         '석재 팟칭':            ['충격 손상', '철물 부식 팽창', '접착력 저하', '기타'],
+        '부식/녹':              ['도장 손상', '습기·누수', '염해', '유지관리 부족', '기타'],
+        '변형/좌굴':            ['과하중', '좌굴', '시공 불량', '충돌·충격', '기타'],
+        '볼트 이완/파손':       ['체결 불량', '진동', '과하중', '부식', '기타'],
+        '용접부 균열/불량':     ['용접 불량', '피로', '잔류응력', '과하중', '기타'],
+        '도장 박리':            ['도장 노후화', '습기', '바탕 처리 불량', '기타'],
+        '접합부 손상':          ['볼트 이완', '용접 불량', '과하중', '시공 불량', '기타'],
+        '단면 손실':            ['부식', '화재', '충돌', '기타'],
+        '처짐':                 ['과하중', '강성 부족', '시공 불량', '장기 크리프', '기타'],
+        '데크플레이트 부식':    ['습기·누수', '도장 손상', '염해', '기타'],
         // ── 공통 fallback ──
         '기타':                 ['노후화', '시공 불량', '외력·충격', '환경 요인', '기타']
     };
@@ -9691,6 +9772,11 @@ document.addEventListener('DOMContentLoaded', () => {
                     document.getElementById('defectComponentInput'),
                     e.target.value
                 );
+                const cat = document.getElementById('defectCategory')?.value || '구조체';
+                updateDefectTypeDropdown(cat, getDefectComboValue(
+                    document.getElementById('defectType'),
+                    document.getElementById('defectTypeInput')
+                ));
             }
         });
     }
@@ -9828,13 +9914,17 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (field === 'type') {
             const cat = document.getElementById('defectCategory')?.value || '구조체';
+            const component = getDefectComboValue(
+                document.getElementById('defectComponent'),
+                document.getElementById('defectComponentInput')
+            );
             if (!window.state.customDefectTypes) window.state.customDefectTypes = { '구조체': [], '비구조체': [], '마감재': [] };
             if (!window.state.hiddenDefectTypes) window.state.hiddenDefectTypes = {};
             if (!window.state.hiddenDefectTypes[cat]) window.state.hiddenDefectTypes[cat] = [];
             if (!window.state.customDefectTypes[cat]) window.state.customDefectTypes[cat] = [];
             return {
                 title: `결함 종류 관리 (${cat})`,
-                presetList: categoryDefectPreset[cat] || categoryDefectPreset['구조체'],
+                presetList: getDefectTypePresetFor(cat, component),
                 hiddenList: window.state.hiddenDefectTypes[cat],
                 customList: window.state.customDefectTypes[cat],
                 labelFor: (item) => item,
@@ -11335,9 +11425,8 @@ document.addEventListener('DOMContentLoaded', () => {
             pendingDragHit = { hitInfo, imgX, imgY, additive };
             pendingDragIsTouch = isTouch;
             pendingDragHitStartTime = Date.now();
-            // 화살표(TIP)·영역 핸들은 집는 순간 의도가 분명하므로 드래그 모드/길게 누르기 없이 바로 이동
-            const immediateDragPart = hitInfo.part === 'TIP' || hitInfo.part === 'AREA_RESIZE';
-            pendingDragArmed = !isTouch || mobileQuickDragEnabled || immediateDragPart;
+            // 마우스·드래그 모드는 즉시, 기본 터치는 번호 박스·화살표 모두 0.5초 길게 누른 뒤 이동
+            pendingDragArmed = !isTouch || mobileQuickDragEnabled;
             if (hitInfo.defect && hitInfo.defect.id) {
                 const id = hitInfo.defect.id;
                 const useAdditive = additive || (isTouch && mobileAddSelectEnabled);
@@ -11351,7 +11440,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 updateMapSelectionBar({ scrollToSelection: true });
                 drawCanvas();
             }
-            if (isTouch && !mobileQuickDragEnabled && !immediateDragPart) {
+            if (isTouch && !mobileQuickDragEnabled) {
                 pendingDragLongPressTimer = setTimeout(() => {
                     if (!pendingDragHit || !pendingDragIsTouch) return;
                     pendingDragArmed = true;
@@ -12013,6 +12102,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const priorityManageEl = document.getElementById('defectPriorityManage');
         const forceArrowDirEl = document.getElementById('defectForceArrowDir');
 
+        let photoHydratePromise = Promise.resolve();
         if (existingPin) {
             if (pinIdEl) pinIdEl.value = existingPin.id;
             if (noEl) noEl.value = existingPin.no || 'NO.01';
@@ -12054,14 +12144,17 @@ document.addEventListener('DOMContentLoaded', () => {
                     window._pendingPrevRoundPhotos.length === 0 && existingPin.prevRoundPhotoIds && existingPin.prevRoundPhotoIds.length > 0
                 );
                 if (needsPhotoHydrate) renderDefectPhotoSection({ loading: true });
-                ensureDefectPhotosLoaded(existingPin).then(() => {
-                    window._pendingPhotos = Array.isArray(existingPin.photos) ? existingPin.photos.filter(Boolean).slice() : [];
-                    window._pendingPrevRoundPhotos = Array.isArray(existingPin.prevRoundPhotos)
+                photoHydratePromise = ensureDefectPhotosLoaded(existingPin).then(() => {
+                    const loadedCurr = Array.isArray(existingPin.photos) ? existingPin.photos.filter(Boolean).slice() : [];
+                    const loadedPrev = Array.isArray(existingPin.prevRoundPhotos)
                         ? existingPin.prevRoundPhotos.filter(Boolean).slice()
                         : [];
+                    const keepExtra = (loaded, pending) => (pending || []).filter(p => p && loaded.indexOf(p) < 0);
+                    window._pendingPhotos = loadedCurr.concat(keepExtra(loadedCurr, window._pendingPhotos));
+                    window._pendingPrevRoundPhotos = loadedPrev.concat(keepExtra(loadedPrev, window._pendingPrevRoundPhotos));
                     renderDefectPhotoSection();
                     if (typeof renderDefectListPanel === 'function') renderDefectListPanel();
-                });
+                }).catch(() => {});
             }
             if (existingPin.shapeType === 'area' && existingPin.areaX1 !== undefined) {
                 ensureAreaPinPlacement(existingPin);
@@ -12193,9 +12286,14 @@ document.addEventListener('DOMContentLoaded', () => {
                         window._defectEditSessionHistoryPushed = true;
                     }
                 }
+                await photoHydratePromise;
                 window._defectFormHydrating = false;
+                if (window._defectPhotosDirty) scheduleDefectAutoApply();
                 drawCanvas();
-                if (typeof renderDefectListPanel === 'function') renderDefectListPanel();
+                if (typeof renderDefectListPanel === 'function') {
+                    renderDefectListPanel({ scrollToSelection: true });
+                }
+                scheduleRevealDefectListAboveDrawer();
             });
         }
     }
@@ -12771,10 +12869,21 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
                 invalidatePersistedPhotoCacheForDefect(state.defects[key][idx].id);
                 state.defects[key][idx].photos = photosVal;
-                if (Array.isArray(window._pendingPrevRoundPhotos)) {
-                    state.defects[key][idx].prevRoundPhotos = window._pendingPrevRoundPhotos.slice();
+                const pendingPrev = Array.isArray(window._pendingPrevRoundPhotos)
+                    ? window._pendingPrevRoundPhotos.slice()
+                    : [];
+                const keepExistingPrev = !!(window._defectFormHydrating
+                    && pendingPrev.length === 0
+                    && Array.isArray(state.defects[key][idx].prevRoundPhotos)
+                    && state.defects[key][idx].prevRoundPhotos.length > 0);
+                if (!keepExistingPrev) {
+                    state.defects[key][idx].prevRoundPhotos = pendingPrev;
                 }
-                syncDefectPhotoRefs(state.defects[key][idx], photosVal, window._pendingPrevRoundPhotos);
+                syncDefectPhotoRefs(
+                    state.defects[key][idx],
+                    photosVal,
+                    keepExistingPrev ? state.defects[key][idx].prevRoundPhotos : pendingPrev
+                );
                 if (!state.defects[key][idx].inspectorName) {
                     state.defects[key][idx].inspectorName = window.state.userName || '';
                 }
@@ -12808,6 +12917,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 surveyRound: newDefectSurveyRound,
                 updatedAt: Date.now(),
                 photos: photosVal,
+                prevRoundPhotos: Array.isArray(window._pendingPrevRoundPhotos)
+                    ? window._pendingPrevRoundPhotos.slice()
+                    : [],
                 inspectorName: window.state.userName || '',
                 x: coords.x,
                 y: coords.y,
@@ -12834,8 +12946,12 @@ document.addEventListener('DOMContentLoaded', () => {
             savedDefect = newDefect;
         }
 
-        if (uploadPhotos && savedDefect && photosVal.length > 0 && window._defectPhotosDirty) {
-            await uploadDefectPhotos(savedDefect.id, photosVal);
+        const prevPhotosVal = Array.isArray(window._pendingPrevRoundPhotos)
+            ? window._pendingPrevRoundPhotos.filter(Boolean)
+            : [];
+        if (uploadPhotos && savedDefect && window._defectPhotosDirty) {
+            if (photosVal.length > 0) await uploadDefectPhotos(savedDefect.id, photosVal);
+            if (prevPhotosVal.length > 0) await uploadDefectPhotos(savedDefect.id, prevPhotosVal, 'prev');
             window._defectPhotosDirty = false;
         }
 
@@ -13954,7 +14070,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const SURVEY_COL_MIN_REM = {
         no: 2.8,
         floorGroup: 3.4,
-        location: 5.5,
+        location: 9.5,
         component: 7.5,
         defectType: 10.5,
         category: 6.2,
@@ -13992,8 +14108,8 @@ document.addEventListener('DOMContentLoaded', () => {
     function surveyColumnDisplayRem(colKey, maxLen) {
         const minRem = SURVEY_COL_MIN_REM[colKey] || 5.5;
         if (!SURVEY_DYNAMIC_COL_KEYS.has(colKey)) return minRem;
-        const contentRem = maxLen * 0.62 + 2.6;
-        return Math.max(minRem, Math.min(contentRem, 18));
+        const contentRem = maxLen * 0.72 + 2.8;
+        return Math.max(minRem, Math.min(contentRem, 28));
     }
 
     function surveyWrapAtSpace(text, lineLen) {
@@ -14039,7 +14155,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 maxLen = Math.max(maxLen, surveyInlineFieldLen(col.key, d, ctx));
             });
             const widthCh = surveyColumnWidthCh(maxLen);
-            const allowWrap = !isSurveyMobileLayout() && maxLen > SURVEY_INLINE_WRAP_THRESHOLD;
+            const allowWrap = false;
             metrics[col.key] = {
                 maxLen,
                 widthCh,
@@ -14125,7 +14241,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 maxLen,
                 widthCh,
                 displayRem: surveyColumnDisplayRem(col.key, maxLen),
-                wrap: !isSurveyMobileLayout() && maxLen > SURVEY_INLINE_WRAP_THRESHOLD
+                wrap: false
             };
         });
         metrics.actions = { maxLen: 4, widthCh: 6, displayRem: SURVEY_COL_MIN_REM.actions, wrap: false };
@@ -16437,6 +16553,101 @@ document.addEventListener('DOMContentLoaded', () => {
                 const seg = clonedPara.getElementsByTagNameNS(HP_NS, 'lineseg')[0];
                 if (seg) seg.setAttribute('vertpos', String(lineIndex * (baseVertsize + baseSpacing)));
             };
+            // 한글이 한 줄에 맞추려고 자간을 줄이지 않도록, 띄어쓰기/구분자 근처에서 2줄로 나눈다.
+            const wrapHwpxCellLine = (line) => {
+                const compact = String(line || '').replace(/[ \t]+/g, ' ').trim();
+                if (compact.length <= 16) return compact || String(line || '');
+                const mid = Math.floor(compact.length / 2);
+                let spaceBest = -1;
+                for (let i = 1; i < compact.length - 1; i++) {
+                    if (compact[i] !== ' ') continue;
+                    if (spaceBest < 0 || Math.abs(i - mid) < Math.abs(spaceBest - mid)) spaceBest = i;
+                }
+                let punctBest = -1;
+                for (let i = 1; i < compact.length - 1; i++) {
+                    if (!/[,，、/·•|]/.test(compact[i])) continue;
+                    if (punctBest < 0 || Math.abs(i - mid) < Math.abs(punctBest - mid)) punctBest = i;
+                }
+                const idx = spaceBest >= 0 ? spaceBest : punctBest;
+                if (idx < 0) return compact;
+                const left = compact.slice(0, idx).trimEnd();
+                const right = compact.slice(idx).replace(/^[\s,，、/·•|]+/, '').trim();
+                if (!left || !right) return compact;
+                return `${left}\n${right}`;
+            };
+            const wrapHwpxCellText = (raw) => String(raw == null ? '' : raw)
+                .split('\n')
+                .map(wrapHwpxCellLine)
+                .join('\n');
+            const fillCellParas = (subList, paras, rawVal) => {
+                const lines = wrapHwpxCellText(rawVal).split('\n');
+                const baseSeg = paras[0].getElementsByTagNameNS(HP_NS, 'lineseg')[0];
+                const baseVertsize = baseSeg ? parseInt(baseSeg.getAttribute('vertsize'), 10) || 0 : 0;
+                const baseSpacing = baseSeg ? parseInt(baseSeg.getAttribute('spacing'), 10) || 0 : 0;
+                ensureCellTextNode(paras[0]).textContent = lines[0];
+                for (let i = paras.length - 1; i >= 1; i--) subList.removeChild(paras[i]);
+                let refNode = paras[0];
+                for (let i = 1; i < lines.length; i++) {
+                    const clonedPara = paras[0].cloneNode(true);
+                    ensureCellTextNode(clonedPara).textContent = lines[i];
+                    fixClonedParaVertpos(clonedPara, i, baseVertsize, baseSpacing);
+                    subList.insertBefore(clonedPara, refNode.nextSibling);
+                    refNode = clonedPara;
+                }
+            };
+            const setTcText = (tc, rawVal) => {
+                if (!tc) return;
+                const subList = tc.getElementsByTagNameNS(HP_NS, 'subList')[0];
+                const paras = subList
+                    ? Array.from(subList.getElementsByTagNameNS(HP_NS, 'p')).filter(p => p.parentNode === subList)
+                    : [];
+                if (paras.length > 0) fillCellParas(subList, paras, rawVal);
+                else {
+                    const t = tc.getElementsByTagNameNS(HP_NS, 't')[0];
+                    if (t) t.textContent = wrapHwpxCellText(rawVal).split('\n').join(' ');
+                }
+            };
+            const ensureTblTreatAsChar = (tbl) => {
+                if (!tbl) return;
+                let pos = Array.from(tbl.children).find(c => c.localName === 'pos');
+                if (!pos) {
+                    pos = xmlDoc.createElementNS(HP_NS, 'hp:pos');
+                    const sz = Array.from(tbl.children).find(c => c.localName === 'sz');
+                    if (sz && sz.nextSibling) tbl.insertBefore(pos, sz.nextSibling);
+                    else tbl.appendChild(pos);
+                }
+                pos.setAttribute('treatAsChar', '1');
+                pos.setAttribute('affectLSpacing', '0');
+                pos.setAttribute('flowWithText', '1');
+                pos.setAttribute('allowOverlap', '0');
+                pos.setAttribute('holdAnchorAndSO', '0');
+                pos.setAttribute('vertRelTo', 'PARA');
+                pos.setAttribute('horzRelTo', 'PARA');
+                pos.setAttribute('vertAlign', 'TOP');
+                pos.setAttribute('horzAlign', 'LEFT');
+                pos.setAttribute('vertOffset', '0');
+                pos.setAttribute('horzOffset', '0');
+            };
+            const stripPhotoTblRightHalf = (tbl) => {
+                Array.from(tbl.getElementsByTagNameNS(HP_NS, 'tr')).filter(tr => tr.parentNode === tbl).forEach(tr => {
+                    Array.from(tr.getElementsByTagNameNS(HP_NS, 'tc')).forEach(tc => {
+                        const addr = tc.getElementsByTagNameNS(HP_NS, 'cellAddr')[0];
+                        const col = addr ? parseInt(addr.getAttribute('colAddr') || '0', 10) : 0;
+                        if (col >= 3 && tc.parentNode) tc.parentNode.removeChild(tc);
+                    });
+                });
+                tbl.setAttribute('colCnt', '3');
+                const firstRow = Array.from(tbl.getElementsByTagNameNS(HP_NS, 'tr')).find(tr => tr.parentNode === tbl);
+                let width = 0;
+                if (firstRow) {
+                    Array.from(firstRow.getElementsByTagNameNS(HP_NS, 'tc')).forEach(tc => {
+                        const csz = tc.getElementsByTagNameNS(HP_NS, 'cellSz')[0];
+                        if (csz) width += parseInt(csz.getAttribute('width') || '0', 10) || 0;
+                    });
+                }
+                const sz = Array.from(tbl.children).find(c => c.localName === 'sz');
+                if (sz && width > 0) sz.setAttribute('width', String(width));
+            };
             const removeParaRange = (fromP, toP) => {
                 const all = secChildren();
                 const start = all.indexOf(fromP);
@@ -16864,21 +17075,7 @@ document.addEventListener('DOMContentLoaded', () => {
                             const subList = tc.getElementsByTagNameNS(HP_NS, 'subList')[0];
                             const paras = subList ? Array.from(subList.getElementsByTagNameNS(HP_NS, 'p')).filter(p => p.parentNode === subList) : [];
                             if (paras.length > 0) {
-                                const rawVal = values[colIdx] !== undefined ? values[colIdx] : '';
-                                const baseSeg = paras[0].getElementsByTagNameNS(HP_NS, 'lineseg')[0];
-                                const baseVertsize = baseSeg ? parseInt(baseSeg.getAttribute('vertsize'), 10) || 0 : 0;
-                                const baseSpacing = baseSeg ? parseInt(baseSeg.getAttribute('spacing'), 10) || 0 : 0;
-                                const lines = String(rawVal).split('\n');
-                                ensureCellTextNode(paras[0]).textContent = lines[0];
-                                for (let i = paras.length - 1; i >= 1; i--) subList.removeChild(paras[i]);
-                                let refNode = paras[0];
-                                for (let i = 1; i < lines.length; i++) {
-                                    const clonedPara = paras[0].cloneNode(true);
-                                    ensureCellTextNode(clonedPara).textContent = lines[i];
-                                    fixClonedParaVertpos(clonedPara, i, baseVertsize, baseSpacing);
-                                    subList.insertBefore(clonedPara, refNode.nextSibling);
-                                    refNode = clonedPara;
-                                }
+                                fillCellParas(subList, paras, values[colIdx] !== undefined ? values[colIdx] : '');
                             }
                         });
                         destTbl.appendChild(newRow);
@@ -16897,19 +17094,16 @@ document.addEventListener('DOMContentLoaded', () => {
                     const photoTbl = slot.photoTbl;
                     const photoRun = photoTbl.parentNode; // 사진첩 표 여러 개가 같은 hp:run 안에 나란히 들어있다
                     const existingPhotoTables = Array.from(photoRun.children).filter(c => c.localName === 'tbl');
-                    const trailingNode = Array.from(photoRun.children).find(c => c.localName === 't') || null;
                     existingPhotoTables.forEach(t => photoRun.removeChild(t));
 
                     if (photoDefects.length > 0) {
-                    // 찍은 사진은 장수 제한 없이 전부 반영한다(표를 필요한 만큼 계속 복제해서
-                    // 채우므로 장수 자체에는 구조적 제약이 없다).
                     const items = photoDefects;
+                    const PHOTOS_PER_PAGE = 6;
 
                     const tplPics = photoTbl.getElementsByTagNameNS(HP_NS, 'pic');
                     const maxW = parseInt(tplPics[0].getElementsByTagNameNS(HP_NS, 'curSz')[0].getAttribute('width'), 10);
                     const maxH = parseInt(tplPics[0].getElementsByTagNameNS(HP_NS, 'curSz')[0].getAttribute('height'), 10);
 
-                    // 사진 디코딩(비동기)은 미리 다 끝내둔다
                     const decoded = [];
                     for (const d of items) {
                         const outPhotos = getDefectOutputPhotos(d);
@@ -16920,9 +17114,39 @@ document.addEventListener('DOMContentLoaded', () => {
                         decoded.push({ d, bytes, mime, ext, w: size.w, h: size.h });
                     }
 
+                    let photoPara = photoRun.parentNode;
+                    while (photoPara && photoPara.localName !== 'p') photoPara = photoPara.parentNode;
+                    if (photoPara) photoPara.setAttribute('pageBreak', '1');
+                    const emptyPhotoPara = photoPara ? photoPara.cloneNode(true) : null;
+                    if (emptyPhotoPara) emptyPhotoPara.setAttribute('pageBreak', '1');
+
+                    let insertRun = photoRun;
+                    let insertPara = photoPara;
+                    let photosOnPage = 0;
+
+                    const appendPhotoTbl = (tbl) => {
+                        ensureTblTreatAsChar(tbl);
+                        const trail = Array.from(insertRun.children).find(c => c.localName === 't') || null;
+                        if (trail) insertRun.insertBefore(tbl, trail);
+                        else insertRun.appendChild(tbl);
+                    };
+                    const startNextPhotoPage = () => {
+                        if (!emptyPhotoPara || !insertPara || !insertPara.parentNode) return;
+                        const newPara = emptyPhotoPara.cloneNode(true);
+                        newPara.setAttribute('pageBreak', '1');
+                        insertPara.parentNode.insertBefore(newPara, insertPara.nextSibling);
+                        insertPara = newPara;
+                        insertRun = Array.from(newPara.children).find(c => c.localName === 'run') || newPara.getElementsByTagNameNS(HP_NS, 'run')[0];
+                        photosOnPage = 0;
+                    };
+
                     for (let i = 0; i < decoded.length; i += 2) {
                         const slot1 = decoded[i];
                         const slot2 = decoded[i + 1] || null;
+                        const pairCount = slot2 ? 2 : 1;
+                        if (photosOnPage > 0 && photosOnPage + pairCount > PHOTOS_PER_PAGE) {
+                            startNextPhotoPage();
+                        }
 
                         photoTblCounter++;
                         const newTbl = photoTbl.cloneNode(true);
@@ -16942,29 +17166,25 @@ document.addEventListener('DOMContentLoaded', () => {
                         zip.file(`BinData/${imgId1}.${slot1.ext}`, slot1.bytes);
                         manifestAdds.push(`<opf:item id="${imgId1}" href="BinData/${imgId1}.${slot1.ext}" media-type="${slot1.mime}" isEmbeded="1"/>`);
                         setPicImage(pics[0], imgId1, slot1.w, slot1.h, maxW, maxH);
-                        capTcs[0].getElementsByTagNameNS(HP_NS, 't')[0].textContent = photoLabelByDefect.get(slot1.d);
-                        capTcs[2].getElementsByTagNameNS(HP_NS, 't')[0].textContent = getSurveyCellText('location', slot1.d, { floorCode });
-                        descTcs[1].getElementsByTagNameNS(HP_NS, 't')[0].textContent = getSurveyCellText('defectType', slot1.d);
+                        setTcText(capTcs[0], photoLabelByDefect.get(slot1.d));
+                        setTcText(capTcs[2], getSurveyCellText('location', slot1.d, { floorCode }));
+                        setTcText(descTcs[1], getSurveyCellText('defectType', slot1.d));
 
-                        // 짝이 없는 마지막 홀수 장은 오른쪽 칸에 같은 사진을 다시 앉혀 빈 칸으로 남지 않게 한다
-                        const useSlot2 = slot2 || slot1;
-                        imgCounter++;
-                        const imgId2 = `photoAuto${imgCounter}`;
-                        zip.file(`BinData/${imgId2}.${useSlot2.ext}`, useSlot2.bytes);
-                        manifestAdds.push(`<opf:item id="${imgId2}" href="BinData/${imgId2}.${useSlot2.ext}" media-type="${useSlot2.mime}" isEmbeded="1"/>`);
-                        setPicImage(pics[1], imgId2, useSlot2.w, useSlot2.h, maxW, maxH);
                         if (slot2) {
-                            capTcs[4].getElementsByTagNameNS(HP_NS, 't')[0].textContent = photoLabelByDefect.get(slot2.d);
-                            capTcs[6].getElementsByTagNameNS(HP_NS, 't')[0].textContent = getSurveyCellText('location', slot2.d, { floorCode });
-                            descTcs[3].getElementsByTagNameNS(HP_NS, 't')[0].textContent = getSurveyCellText('defectType', slot2.d);
+                            imgCounter++;
+                            const imgId2 = `photoAuto${imgCounter}`;
+                            zip.file(`BinData/${imgId2}.${slot2.ext}`, slot2.bytes);
+                            manifestAdds.push(`<opf:item id="${imgId2}" href="BinData/${imgId2}.${slot2.ext}" media-type="${slot2.mime}" isEmbeded="1"/>`);
+                            setPicImage(pics[1], imgId2, slot2.w, slot2.h, maxW, maxH);
+                            setTcText(capTcs[4], photoLabelByDefect.get(slot2.d));
+                            setTcText(capTcs[6], getSurveyCellText('location', slot2.d, { floorCode }));
+                            setTcText(descTcs[3], getSurveyCellText('defectType', slot2.d));
                         } else {
-                            capTcs[4].getElementsByTagNameNS(HP_NS, 't')[0].textContent = '';
-                            capTcs[6].getElementsByTagNameNS(HP_NS, 't')[0].textContent = '';
-                            descTcs[3].getElementsByTagNameNS(HP_NS, 't')[0].textContent = '';
+                            stripPhotoTblRightHalf(newTbl);
                         }
 
-                        if (trailingNode) photoRun.insertBefore(newTbl, trailingNode);
-                        else photoRun.appendChild(newTbl);
+                        appendPhotoTbl(newTbl);
+                        photosOnPage += pairCount;
                     }
                     }
                 } catch (photoErr) {
@@ -16976,6 +17196,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 // 3종시설물은 위치도를 층 블록에서 바로 넣지 않고, 모든 층 처리가 끝난 뒤 별도로
                 // 몰아서 넣는다(아래 본 루프 밖의 grade3LocMapStampPara 처리 참고).
                 if (!isGrade3) {
+                    let locPara = slot.locationMapTbl && slot.locationMapTbl.parentNode;
+                    while (locPara && locPara.localName !== 'p') locPara = locPara.parentNode;
+                    if (locPara) locPara.setAttribute('pageBreak', '1');
                     await fillLocationMapForFloor(slot.locationMapTbl, floorCode, slotIdx + 1);
                 }
             }
@@ -17103,22 +17326,7 @@ document.addEventListener('DOMContentLoaded', () => {
                             const subList = tc.getElementsByTagNameNS(HP_NS, 'subList')[0];
                             const paras = subList ? Array.from(subList.getElementsByTagNameNS(HP_NS, 'p')).filter(p => p.parentNode === subList) : [];
                             if (paras.length > 0 && values[colIdx] !== undefined) {
-                                // 값 안에 줄바꿈(\n)이 있으면(예: 위치+부재명 2줄) 첫 문단은 첫 줄로 채우고
-                                // 나머지 줄은 첫 문단을 복제해(같은 서식 유지) 이어붙인다.
-                                const baseSeg = paras[0].getElementsByTagNameNS(HP_NS, 'lineseg')[0];
-                                const baseVertsize = baseSeg ? parseInt(baseSeg.getAttribute('vertsize'), 10) || 0 : 0;
-                                const baseSpacing = baseSeg ? parseInt(baseSeg.getAttribute('spacing'), 10) || 0 : 0;
-                                const lines = String(values[colIdx]).split('\n');
-                                ensureCellTextNode(paras[0]).textContent = lines[0];
-                                for (let i = paras.length - 1; i >= 1; i--) subList.removeChild(paras[i]);
-                                let refNode = paras[0];
-                                for (let i = 1; i < lines.length; i++) {
-                                    const clonedPara = paras[0].cloneNode(true);
-                                    ensureCellTextNode(clonedPara).textContent = lines[i];
-                                    fixClonedParaVertpos(clonedPara, i, baseVertsize, baseSpacing);
-                                    subList.insertBefore(clonedPara, refNode.nextSibling);
-                                    refNode = clonedPara;
-                                }
+                                fillCellParas(subList, paras, values[colIdx]);
                             }
                         });
                         tbl.appendChild(newRow);
@@ -17581,12 +17789,15 @@ document.addEventListener('DOMContentLoaded', () => {
                 for (let i = 0; i < floorsData.length; i++) {
                     const { floorCode } = floorsData[i];
                     const clonedPara = grade3LocMapStampPara.cloneNode(true);
+                    clonedPara.setAttribute('pageBreak', '1');
                     reassignClonedIds([clonedPara]);
                     sec.appendChild(clonedPara);
                     const locationMapTbl = clonedPara.getElementsByTagNameNS(HP_NS, 'tbl')[0];
                     await fillLocationMapForFloor(locationMapTbl, floorCode, i + 1);
                 }
             }
+
+            Array.from(xmlDoc.getElementsByTagNameNS(HP_NS, 'tbl')).forEach(ensureTblTreatAsChar);
 
             if (manifestAdds.length > 0) {
                 let hpfText = await zip.file('Contents/content.hpf').async('string');
@@ -17776,44 +17987,6 @@ document.addEventListener('DOMContentLoaded', () => {
     if (btnReloadWebApp) {
         btnReloadWebApp.addEventListener('click', () => {
             window.reloadWebAppFromServer?.();
-        });
-    }
-
-    const btnOtaInstallNow = document.getElementById('btnOtaInstallNow');
-    if (btnOtaInstallNow) {
-        btnOtaInstallNow.addEventListener('click', () => {
-            window.checkAppUpdate?.({ silent: false, force: true, skipConfirm: true });
-        });
-    }
-    const btnOtaLater = document.getElementById('btnOtaLater');
-    if (btnOtaLater) {
-        btnOtaLater.addEventListener('click', () => {
-            const meta = window._otaReleaseMetaCached;
-            const code = meta?.versionCode != null ? Number(meta.versionCode) : 0;
-            if (code > 0) {
-                try { localStorage.setItem(`bsa_ota_snooze_${code}`, String(Date.now() + 6 * 60 * 60 * 1000)); } catch (_) {}
-            }
-            const banner = document.getElementById('otaUpdateBanner');
-            if (banner) banner.style.display = 'none';
-            window.showToast('6시간 후 다시 알려드립니다. 배너의 「지금 업데이트」로 언제든 설치할 수 있습니다.', 'info', 4500);
-        });
-    }
-
-    const btnPublishOta = document.getElementById('btnPublishOta');
-    const inputPublishOtaApk = document.getElementById('inputPublishOtaApk');
-    if (btnPublishOta && inputPublishOtaApk) {
-        btnPublishOta.addEventListener('click', () => inputPublishOtaApk.click());
-        inputPublishOtaApk.addEventListener('change', async () => {
-            const file = inputPublishOtaApk.files?.[0];
-            inputPublishOtaApk.value = '';
-            if (!file) return;
-            const build = window.BSA_APP_BUILD || { versionCode: 1, versionName: '1.0' };
-            const notes = prompt(
-                `OTA 배포: v${build.versionName} (code ${build.versionCode})\n현장 앱이 자동으로 감지합니다.\n\n변경사항 메모(선택):`,
-                ''
-            );
-            if (notes === null) return;
-            await window.publishAndroidOta?.(file, notes);
         });
     }
 
@@ -18967,17 +19140,9 @@ document.addEventListener('DOMContentLoaded', () => {
     window._justRegistering = false;
 
     // ==========================================================================
-    // 📱 OTA 앱 업데이트 (Firestore app_meta + 네이티브 APK 설치)
+    // 웹뷰 원격 로드 — GitHub Pages 웹이 곧 앱 화면 (APK OTA 없음)
     // ==========================================================================
-    // android/app/build.gradle 의 versionCode / versionName 과 맞출 것
     window.BSA_APP_BUILD = { versionCode: 8, versionName: '1.3.0' };
-
-    const OTA_SNOOZE_MS = 6 * 60 * 60 * 1000;
-    let _otaReleaseMeta = null;
-    let _otaReleaseUnsub = null;
-    let _otaLocalCode = window.BSA_APP_BUILD.versionCode;
-    let _otaLocalName = window.BSA_APP_BUILD.versionName;
-    let storage = null;
 
     function isNativeAndroidApp() {
         try {
@@ -18988,6 +19153,15 @@ document.addEventListener('DOMContentLoaded', () => {
             return false;
         }
     }
+
+    function applyWebViewBadge() {
+        const badge = document.getElementById('appVersionBadge');
+        if (!badge) return;
+        const name = (window.BSA_APP_BUILD && window.BSA_APP_BUILD.versionName) || '1.3.0';
+        const label = isNativeAndroidApp() ? '웹뷰 (GitHub Pages)' : '웹';
+        badge.innerHTML = `<i class="fa-solid fa-globe"></i> v${name} · ${label}`;
+    }
+    applyWebViewBadge();
 
     window.reloadWebAppFromServer = function () {
         try { sessionStorage.removeItem('bsa_web_sha'); } catch (_) { /* ignore */ }
@@ -19024,264 +19198,6 @@ document.addEventListener('DOMContentLoaded', () => {
         setTimeout(checkRemoteWebVersion, 800);
     })();
 
-    function getAppUpdatePlugin() {
-        try {
-            return window.Capacitor?.Plugins?.AppUpdate || null;
-        } catch (_) {
-            return null;
-        }
-    }
-
-    function otaSnoozeKey(code) {
-        return `bsa_ota_snooze_${code}`;
-    }
-
-    function isOtaSnoozed(code) {
-        try {
-            const until = Number(localStorage.getItem(otaSnoozeKey(code)) || 0);
-            return until > Date.now();
-        } catch (_) {
-            return false;
-        }
-    }
-
-    function snoozeOta(code) {
-        try {
-            localStorage.setItem(otaSnoozeKey(code), String(Date.now() + OTA_SNOOZE_MS));
-        } catch (_) { /* ignore */ }
-    }
-
-    function clearOtaSnooze(code) {
-        try { localStorage.removeItem(otaSnoozeKey(code)); } catch (_) { /* ignore */ }
-    }
-
-    async function refreshOtaLocalVersion() {
-        const build = window.BSA_APP_BUILD || { versionCode: 1, versionName: '1.0' };
-        _otaLocalCode = Number(build.versionCode) || 1;
-        _otaLocalName = String(build.versionName || '1.0');
-        const plugin = getAppUpdatePlugin();
-        if (!plugin) return;
-        try {
-            const v = await plugin.getVersion();
-            if (v?.versionCode != null) _otaLocalCode = Number(v.versionCode);
-            if (v?.versionName) _otaLocalName = String(v.versionName);
-        } catch (e) {
-            console.warn('getVersion failed', e);
-        }
-    }
-
-    function evaluateOtaRelease(meta) {
-        if (!meta || !meta.apkUrl) return { needsUpdate: false, meta: null };
-        const remoteCode = Number(meta.versionCode) || 0;
-        const remoteName = String(meta.versionName || remoteCode);
-        if (remoteCode <= _otaLocalCode) return { needsUpdate: false, meta, remoteCode, remoteName };
-        return { needsUpdate: true, meta, remoteCode, remoteName, mandatory: !!meta.mandatory };
-    }
-
-    function applyOtaUiState(evalResult) {
-        const banner = document.getElementById('otaUpdateBanner');
-        const badge = document.getElementById('appVersionBadge');
-        const verEl = document.getElementById('otaBannerVersion');
-        const notesEl = document.getElementById('otaBannerNotes');
-        const build = window.BSA_APP_BUILD || { versionName: '1.0' };
-
-        if (badge && isNativeAndroidApp()) {
-            badge.innerHTML = evalResult?.needsUpdate
-                ? `<i class="fa-solid fa-circle-up"></i> v${_otaLocalName} → v${evalResult.remoteName} APK 업데이트 가능`
-                : `<i class="fa-solid fa-circle-check"></i> v${build.versionName || _otaLocalName} · 웹뷰 원격 업데이트`;
-        }
-
-        if (evalResult?.needsUpdate) {
-            if (banner) {
-                banner.style.display = 'block';
-                if (verEl) verEl.textContent = `v${evalResult.remoteName}`;
-                if (notesEl) notesEl.textContent = evalResult.meta?.notes ? String(evalResult.meta.notes) : '';
-            }
-        } else if (banner) {
-            banner.style.display = 'none';
-        }
-    }
-
-    async function installAppUpdateFromMeta(meta, opts) {
-        const silent = !!(opts && opts.silent);
-        if (!meta || !meta.apkUrl) {
-            if (!silent) window.showToast('등록된 APK URL이 없습니다.', 'warning');
-            return { updated: false, reason: 'no-release' };
-        }
-
-        const plugin = getAppUpdatePlugin();
-        if (!plugin) {
-            if (!silent) window.showToast('업데이트 플러그인을 찾을 수 없습니다. 앱을 다시 설치해 주세요.', 'error');
-            return { updated: false, reason: 'no-plugin' };
-        }
-
-        try {
-            const perm = await plugin.canRequestPackageInstalls();
-            if (perm && perm.allowed === false) {
-                window.showToast('「알 수 없는 앱 설치」 권한을 허용한 뒤 다시 시도해 주세요.', 'warning', 5000);
-                await plugin.openUnknownSourcesSettings();
-                return { updated: false, reason: 'need-permission' };
-            }
-        } catch (_) { /* ignore */ }
-
-        window.showToast('APK 다운로드 중… 완료되면 설치 화면이 열립니다.', 'info', 5000);
-        try {
-            await plugin.downloadAndInstall({ url: String(meta.apkUrl) });
-            clearOtaSnooze(Number(meta.versionCode) || 0);
-            window.showToast('설치 화면을 열었습니다. 안내에 따라 업데이트하세요.', 'success', 5000);
-            return { updated: true };
-        } catch (e) {
-            const msg = String(e?.message || e || '');
-            if (msg.includes('NEED_INSTALL_PERMISSION') || (e && e.code === 'NEED_INSTALL_PERMISSION')) {
-                window.showToast('알 수 없는 앱 설치 권한을 허용해 주세요.', 'warning', 5000);
-                try { await plugin.openUnknownSourcesSettings(); } catch (_) {}
-                return { updated: false, reason: 'need-permission' };
-            }
-            console.error(e);
-            window.showToast('업데이트 다운로드/설치에 실패했습니다.', 'error');
-            return { updated: false, reason: 'install-failed' };
-        }
-    }
-
-    async function promptOtaUpdateIfNeeded(opts) {
-        const silent = !!(opts && opts.silent);
-        const auto = !!(opts && opts.auto);
-        const force = !!(opts && opts.force);
-
-        if (!isNativeAndroidApp()) {
-            if (!silent) {
-                window.showToast('웹/PWA는 새로고침으로 최신 웹을 받습니다. APK OTA는 Android 앱에서만 가능합니다.', 'info', 4500);
-            }
-            return { updated: false, reason: 'not-native' };
-        }
-
-        await refreshOtaLocalVersion();
-
-        if (!db) {
-            if (!silent) window.showToast('업데이트 정보를 불러오려면 로그인이 필요합니다.', 'warning');
-            return { updated: false, reason: 'no-db' };
-        }
-
-        let meta = _otaReleaseMeta;
-        if (!meta) {
-            try {
-                const snap = await db.collection('app_meta').doc('android_release').get();
-                meta = snap.exists ? (snap.data() || null) : null;
-                _otaReleaseMeta = meta;
-            } catch (e) {
-                console.warn('release meta fetch failed', e);
-                if (!silent) window.showToast('업데이트 정보 조회에 실패했습니다.', 'error');
-                return { updated: false, reason: 'fetch-failed' };
-            }
-        }
-
-        const evalResult = evaluateOtaRelease(meta);
-        applyOtaUiState(evalResult);
-
-        if (!evalResult.needsUpdate) {
-            if (!silent) window.showToast(`최신 버전입니다 (v${_otaLocalName}).`, 'success');
-            return { updated: false, reason: meta?.apkUrl ? 'up-to-date' : 'no-release' };
-        }
-
-        const { remoteCode, remoteName, mandatory } = evalResult;
-        if (auto && !force && !mandatory && isOtaSnoozed(remoteCode)) {
-            return { updated: false, reason: 'snoozed' };
-        }
-
-        if (!force && !mandatory && !(opts && opts.skipConfirm)) {
-            const notes = meta.notes ? `\n\n변경사항: ${meta.notes}` : '';
-            if (!confirm(`새 버전 v${remoteName} (code ${remoteCode})이 있습니다.\n앱 안에서 OTA로 다운로드·설치할까요?${notes}`)) {
-                if (auto) snoozeOta(remoteCode);
-                return { updated: false, reason: 'cancelled' };
-            }
-        }
-
-        return installAppUpdateFromMeta(meta, opts);
-    }
-
-    window.checkAppUpdate = promptOtaUpdateIfNeeded;
-
-    function stopOtaReleaseListener() {
-        if (_otaReleaseUnsub) {
-            try { _otaReleaseUnsub(); } catch (_) {}
-            _otaReleaseUnsub = null;
-        }
-        _otaReleaseMeta = null;
-        applyOtaUiState({ needsUpdate: false });
-    }
-
-    function startOtaReleaseListener() {
-        if (!db || !isNativeAndroidApp()) return;
-        stopOtaReleaseListener();
-        _otaReleaseUnsub = db.collection('app_meta').doc('android_release').onSnapshot(async (snap) => {
-            _otaReleaseMeta = snap.exists ? (snap.data() || null) : null;
-            window._otaReleaseMetaCached = _otaReleaseMeta;
-            await refreshOtaLocalVersion();
-            const evalResult = evaluateOtaRelease(_otaReleaseMeta);
-            applyOtaUiState(evalResult);
-            if (evalResult.needsUpdate && (!isOtaSnoozed(evalResult.remoteCode) || evalResult.mandatory)) {
-                promptOtaUpdateIfNeeded({ silent: true, auto: true });
-            }
-        }, (err) => {
-            console.warn('OTA listener error', err);
-        });
-    }
-
-    let _otaVisibilityHooked = false;
-    function hookOtaVisibilityRecheck() {
-        if (_otaVisibilityHooked) return;
-        _otaVisibilityHooked = true;
-        document.addEventListener('visibilitychange', () => {
-            if (document.visibilityState === 'visible' && typeof window.checkAppUpdate === 'function') {
-                window.checkAppUpdate({ silent: true, auto: true });
-            }
-        });
-    }
-
-    window.publishAndroidOta = async function (apkFile, notes) {
-        if (!window.state?.otaPublisher) {
-            window.showToast('OTA 배포 권한이 없습니다. Firebase users 문서에 otaPublisher: true 설정이 필요합니다.', 'error', 6000);
-            return false;
-        }
-        if (!storage || !db) {
-            window.showToast('Firebase Storage가 준비되지 않았습니다.', 'error');
-            return false;
-        }
-        if (!apkFile) {
-            window.showToast('APK 파일을 선택해 주세요.', 'warning');
-            return false;
-        }
-
-        const build = window.BSA_APP_BUILD || { versionCode: 1, versionName: '1.0' };
-        const versionCode = Number(build.versionCode) || 1;
-        const versionName = String(build.versionName || versionCode);
-        const remotePath = `releases/android-${versionCode}.apk`;
-
-        window.showLoading('APK 업로드 중… (현장 OTA 배포)');
-        try {
-            const ref = storage.ref(remotePath);
-            await ref.put(apkFile, { contentType: 'application/vnd.android.package-archive' });
-            const apkUrl = await ref.getDownloadURL();
-            await db.collection('app_meta').doc('android_release').set({
-                versionCode,
-                versionName,
-                apkUrl,
-                notes: String(notes || '').trim(),
-                mandatory: false,
-                publishedAt: firebase.firestore.FieldValue.serverTimestamp(),
-                publishedBy: window.state.uid || null
-            }, { merge: true });
-            window.showToast(`OTA 배포 완료: v${versionName} (code ${versionCode}). 현장 앱이 자동으로 감지합니다.`, 'success', 6000);
-            return true;
-        } catch (e) {
-            console.error(e);
-            window.showToast('OTA 배포 실패: ' + (e?.message || e), 'error', 6000);
-            return false;
-        } finally {
-            window.hideLoading();
-        }
-    };
-
     function initFirebaseSync() {
         try {
             if (typeof firebase !== 'undefined') {
@@ -19289,9 +19205,6 @@ document.addEventListener('DOMContentLoaded', () => {
                     firebase.initializeApp(firebaseConfig);
                 }
                 db = firebase.firestore();
-                if (firebase.storage) {
-                    storage = firebase.storage();
-                }
                 if (firebase.auth) {
                     auth = firebase.auth();
                     auth.onAuthStateChanged(handleAuthStateChange);
@@ -19799,7 +19712,6 @@ document.addEventListener('DOMContentLoaded', () => {
         window.state.companyId = profile.companyId;
         window.state.companyName = profile.companyName;
         window.state.role = profile.role;
-        window.state.otaPublisher = !!profile.otaPublisher;
 
         hideAuthOverlay();
 
@@ -19815,9 +19727,6 @@ document.addEventListener('DOMContentLoaded', () => {
         const btnApproval = document.getElementById('btnOpenMemberApproval');
         if (btnApproval) btnApproval.style.display = (profile.role === 'admin') ? 'inline-flex' : 'none';
 
-        const btnPublishOta = document.getElementById('btnPublishOta');
-        if (btnPublishOta) btnPublishOta.style.display = profile.otaPublisher ? 'inline-flex' : 'none';
-
         if (profile.role === 'admin' && db) {
             try {
                 const companyDoc = await db.collection('companies').doc(profile.companyId).get();
@@ -19829,20 +19738,11 @@ document.addEventListener('DOMContentLoaded', () => {
         if (typeof listenToRealtimeUpdates === 'function') listenToRealtimeUpdates();
         if (typeof renderDashboard === 'function') renderDashboard();
         window.switchTab('tab-home');
-
-        if (typeof startOtaReleaseListener === 'function') startOtaReleaseListener();
-        if (typeof hookOtaVisibilityRecheck === 'function') hookOtaVisibilityRecheck();
-        setTimeout(() => {
-            if (typeof window.checkAppUpdate === 'function') {
-                window.checkAppUpdate({ silent: true, auto: true });
-            }
-        }, 1500);
     }
 
     async function handleAuthStateChange(user) {
         if (!user) {
             if (currentUnsubscribe) { try { currentUnsubscribe(); } catch (e) {} currentUnsubscribe = null; }
-            if (typeof stopOtaReleaseListener === 'function') stopOtaReleaseListener();
             window.state.uid = null;
             window.state.userName = null;
             window.state.companyId = null;
@@ -19875,8 +19775,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     name: data.name,
                     companyId: data.companyId,
                     companyName: data.companyName,
-                    role: status,
-                    otaPublisher: !!data.otaPublisher
+                    role: status
                 });
             } else {
                 showAuthError({ message: '알 수 없는 계정 상태입니다. 회사 대표에게 문의해 주세요.' });
