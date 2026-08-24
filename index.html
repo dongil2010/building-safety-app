@@ -645,6 +645,56 @@
                 <form id="defectForm" class="defect-form-compact">
                     <input type="hidden" id="defectPinId">
 
+                    <div class="form-group defect-photo-block">
+                        <div id="phoneRelayStatusBadge" style="display:none; align-items:center; gap: 0.4rem; width: 100%; background: rgba(74,222,128,0.1); color: #4ade80; border: 1px solid rgba(74,222,128,0.35); font-weight: 700; padding: 0.45rem 0.65rem; border-radius: 8px; font-size: 0.78rem; margin-bottom: 0.5rem;">
+                            <i class="fa-solid fa-mobile-screen-button"></i> <span id="phoneRelayStatusText">휴대폰 연동됨 — 촬영 시 자동 추가</span>
+                        </div>
+                        <div id="defectPhotoLoadingHint" class="defect-photo-loading-hint" style="display:none;">
+                            <i class="fa-solid fa-spinner fa-spin"></i> 사진 불러오는 중…
+                        </div>
+
+                        <div class="defect-photo-slot defect-photo-slot-prev">
+                            <div class="defect-photo-slot-label"><i class="fa-solid fa-clock-rotate-left"></i> 전차</div>
+                            <div class="defect-photo-slot-main">
+                                <div class="defect-photo-frame" id="defectPrevMainFrame"></div>
+                                <div class="defect-photo-slot-actions">
+                                    <button type="button" id="btnPrevRoundCamera" class="defect-photo-slot-btn">
+                                        <i class="fa-solid fa-camera"></i> 촬영
+                                    </button>
+                                    <button type="button" id="btnPrevRoundGallery" class="defect-photo-slot-btn">
+                                        <i class="fa-solid fa-images"></i> 추가
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="defect-photo-extra-row" id="defectPrevExtraRow" style="display:none;"></div>
+                        </div>
+
+                        <div class="defect-photo-slot defect-photo-slot-curr">
+                            <div class="defect-photo-slot-label"><i class="fa-solid fa-camera"></i> 현차</div>
+                            <div class="defect-photo-slot-main">
+                                <div class="defect-photo-frame" id="defectCurrMainFrame"></div>
+                                <div class="defect-photo-slot-actions">
+                                    <button type="button" id="btnTriggerCamera" class="defect-photo-slot-btn primary">
+                                        <i class="fa-solid fa-camera"></i> 촬영
+                                    </button>
+                                    <button type="button" id="btnTriggerGallery" class="defect-photo-slot-btn">
+                                        <i class="fa-solid fa-images"></i> 추가
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="defect-photo-extra-row" id="defectCurrExtraRow" style="display:none;"></div>
+                        </div>
+
+                        <div id="defectPhotoCompareArea" class="defect-photo-compare-area" style="display:none;" aria-hidden="true">
+                            <div id="defectPhotoCompareStrip" class="defect-photo-compare-strip" style="display:none;"></div>
+                            <div id="defectPhotoEmptyHint" class="defect-photo-empty-hint" style="display:none;"></div>
+                        </div>
+                        <div id="prevRoundPhotoBlock" class="prev-round-photo-block" style="display:none;" aria-hidden="true">
+                            <div class="photo-preview-list prev-round-photo-list" id="prevRoundPhotoPreviewList"></div>
+                        </div>
+                        <div class="photo-preview-list" id="photoPreviewList" style="display:none;" aria-hidden="true"></div>
+                    </div>
+
                     <div class="defect-quick-picks" id="defectQuickPicks">
                         <div class="defect-quick-group">
                             <div class="defect-quick-label"><i class="fa-solid fa-layer-group"></i> 구조 분류</div>
@@ -662,31 +712,6 @@
                             <div class="defect-quick-label"><i class="fa-solid fa-magnifying-glass"></i> 발생 원인</div>
                             <div class="defect-quick-chip-grid dqg-cause" id="quickCauseChips"></div>
                         </div>
-                    </div>
-
-                    <div class="form-group defect-photo-block">
-                        <div class="defect-photo-actions">
-                            <button type="button" id="btnTriggerCamera" class="btn defect-photo-btn-primary">
-                                <i class="fa-solid fa-camera"></i> 촬영
-                            </button>
-                            <button type="button" id="btnTriggerGallery" class="btn defect-photo-btn-secondary">
-                                <i class="fa-solid fa-images"></i> 갤러리
-                            </button>
-                        </div>
-                        <div id="phoneRelayStatusBadge" style="display:none; align-items:center; gap: 0.4rem; width: 100%; background: rgba(74,222,128,0.1); color: #4ade80; border: 1px solid rgba(74,222,128,0.35); font-weight: 700; padding: 0.45rem 0.65rem; border-radius: 8px; font-size: 0.78rem; margin-bottom: 0.5rem;">
-                            <i class="fa-solid fa-mobile-screen-button"></i> <span id="phoneRelayStatusText">휴대폰 연동됨 — 촬영 시 자동 추가</span>
-                        </div>
-                        <div id="defectPhotoCompareArea" class="defect-photo-compare-area">
-                            <div id="defectPhotoLoadingHint" class="defect-photo-loading-hint" style="display:none;">
-                                <i class="fa-solid fa-spinner fa-spin"></i> 사진 불러오는 중…
-                            </div>
-                            <div id="defectPhotoCompareStrip" class="defect-photo-compare-strip" style="display:none;"></div>
-                            <div id="defectPhotoEmptyHint" class="defect-photo-empty-hint">사진 없음 — 촬영 또는 갤러리로 추가</div>
-                        </div>
-                        <div id="prevRoundPhotoBlock" class="prev-round-photo-block" style="display:none;" aria-hidden="true">
-                            <div class="photo-preview-list prev-round-photo-list" id="prevRoundPhotoPreviewList"></div>
-                        </div>
-                        <div class="photo-preview-list" id="photoPreviewList" style="display:none;" aria-hidden="true"></div>
                     </div>
 
                     <div class="form-row">

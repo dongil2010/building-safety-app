@@ -11990,78 +11990,87 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    function renderDefectPhotoSlot(kind, photos) {
+        const isPrev = kind === 'prev';
+        const frame = document.getElementById(isPrev ? 'defectPrevMainFrame' : 'defectCurrMainFrame');
+        const extra = document.getElementById(isPrev ? 'defectPrevExtraRow' : 'defectCurrExtraRow');
+        if (!frame) return;
+
+        const openFn = isPrev ? 'previewPrevRoundPhoto' : 'annotatePendingPhoto';
+        const removeFn = isPrev ? 'removePendingPrevRoundPhoto' : 'removePendingPhoto';
+        const addKind = isPrev ? 'prev' : 'curr';
+        const label = isPrev ? '전차' : '현차';
+        const list = (photos || []).filter(Boolean);
+
+        if (list.length === 0) {
+            frame.classList.remove('has-photo');
+            frame.innerHTML = `
+                <button type="button" class="defect-photo-empty-add" data-photo-kind="${addKind}">
+                    <i class="fa-solid fa-image"></i>
+                    사진 추가
+                </button>
+            `;
+            const emptyBtn = frame.querySelector('.defect-photo-empty-add');
+            if (emptyBtn) {
+                emptyBtn.addEventListener('click', () => {
+                    if (typeof window.triggerDefectPhotoPick === 'function') {
+                        window.triggerDefectPhotoPick('gallery', addKind);
+                    }
+                });
+            }
+            if (extra) {
+                extra.innerHTML = '';
+                extra.style.display = 'none';
+            }
+            return;
+        }
+
+        frame.classList.add('has-photo');
+        frame.innerHTML = `
+            <button type="button" class="defect-photo-thumb-btn" onclick="window.${openFn}(0)" title="${label} 대표 — 탭하여 확대">
+                <img src="${list[0]}" alt="${label} 대표">
+            </button>
+            <span class="defect-photo-rep-badge">대표</span>
+            <button type="button" class="defect-photo-frame-remove" onclick="window.${removeFn}(0)" title="${label} 대표 삭제">×</button>
+        `;
+
+        if (!extra) return;
+        if (list.length < 2) {
+            extra.innerHTML = '';
+            extra.style.display = 'none';
+            return;
+        }
+        extra.style.display = 'grid';
+        extra.innerHTML = list.slice(1).map((src, i) => {
+            const idx = i + 1;
+            return `
+                <div class="defect-photo-extra-item">
+                    <button type="button" class="defect-photo-extra-open" onclick="window.${openFn}(${idx})" title="${label} ${idx + 1}">
+                        <img src="${src}" alt="${label} ${idx + 1}">
+                    </button>
+                    <button type="button" class="defect-photo-frame-remove" onclick="window.${removeFn}(${idx})" title="${label} ${idx + 1} 삭제">×</button>
+                </div>
+            `;
+        }).join('');
+    }
+
     function renderDefectPhotoSection(opts) {
         const loading = !!(opts && opts.loading);
-        const strip = document.getElementById('defectPhotoCompareStrip');
-        const emptyHint = document.getElementById('defectPhotoEmptyHint');
         const loadingHint = document.getElementById('defectPhotoLoadingHint');
         const prev = (window._pendingPrevRoundPhotos || []).filter(Boolean);
         const curr = (window._pendingPhotos || []).filter(Boolean);
-        const pairCount = Math.max(prev.length, curr.length);
 
         if (loadingHint) loadingHint.style.display = loading ? 'flex' : 'none';
 
-        if (!strip) {
+        const prevFrame = document.getElementById('defectPrevMainFrame');
+        if (!prevFrame) {
             renderPhotoPreviewList();
             renderPrevRoundPhotoPreviewList();
             return;
         }
 
-        if (loading && pairCount === 0) {
-            strip.style.display = 'none';
-            if (emptyHint) emptyHint.style.display = 'none';
-            return;
-        }
-
-        if (pairCount === 0) {
-            strip.innerHTML = '';
-            strip.style.display = 'none';
-            if (emptyHint) emptyHint.style.display = loading ? 'none' : 'block';
-        } else {
-            if (emptyHint) emptyHint.style.display = 'none';
-            strip.style.display = 'block';
-            const hasPrev = prev.length > 0;
-            strip.innerHTML = `
-                <div class="defect-photo-compare-head">
-                    <span class="defect-photo-compare-col-title defect-photo-compare-col-prev">
-                        ${hasPrev ? '<i class="fa-solid fa-clock-rotate-left"></i> 전차' : ''}
-                    </span>
-                    <span class="defect-photo-compare-col-title defect-photo-compare-col-curr">
-                        <i class="fa-solid fa-camera"></i> 현차
-                    </span>
-                </div>
-                ${Array.from({ length: pairCount }, (_, idx) => {
-                    const prevSrc = prev[idx] || '';
-                    const currSrc = curr[idx] || '';
-                    const prevCell = prevSrc
-                        ? `<button type="button" class="defect-photo-compare-thumb-btn" onclick="window.previewPrevRoundPhoto(${idx})" title="전차 ${idx + 1} — 탭하여 확대">
-                            <img class="defect-photo-compare-thumb defect-photo-compare-thumb-prev" src="${prevSrc}" alt="전차 ${idx + 1}">
-                            <span class="defect-photo-compare-badge prev">전차 ${idx + 1}</span>
-                           </button>`
-                        : `<div class="defect-photo-compare-empty">—</div>`;
-                    const currCell = currSrc
-                        ? `<div class="defect-photo-compare-curr-wrap">
-                            <button type="button" class="defect-photo-compare-thumb-btn" onclick="window.annotatePendingPhoto(${idx})" title="현차 ${idx + 1} — 탭하여 확대·마킹">
-                                <img class="defect-photo-compare-thumb defect-photo-compare-thumb-curr" src="${currSrc}" alt="현차 ${idx + 1}">
-                                <span class="defect-photo-compare-badge curr">현차 ${idx + 1}</span>
-                            </button>
-                            <button type="button" class="defect-photo-compare-remove" onclick="window.removePendingPhoto(${idx})" title="현차 ${idx + 1} 삭제">×</button>
-                            <button type="button" class="btn btn-sm btn-outline defect-photo-compare-mark-btn" onclick="window.annotatePendingPhoto(${idx})">
-                                <i class="fa-solid fa-paintbrush"></i> 마킹
-                            </button>
-                           </div>`
-                        : `<div class="defect-photo-compare-empty">—</div>`;
-                    return `<div class="defect-photo-compare-pair">
-                        <div class="defect-photo-compare-cell">${prevCell}</div>
-                        <div class="defect-photo-compare-vs" aria-hidden="true">↔</div>
-                        <div class="defect-photo-compare-cell">${currCell}</div>
-                    </div>`;
-                }).join('')}
-            `;
-        }
-
-        renderPhotoPreviewList();
-        renderPrevRoundPhotoPreviewList();
+        renderDefectPhotoSlot('prev', prev);
+        renderDefectPhotoSlot('curr', curr);
     }
 
     function renderPhotoPreviewList() {
@@ -12133,6 +12142,15 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     };
 
+    window.removePendingPrevRoundPhoto = function(idx) {
+        if (window._pendingPrevRoundPhotos) {
+            window._pendingPrevRoundPhotos.splice(idx, 1);
+            window._defectPhotosDirty = true;
+            renderDefectPhotoSection();
+            scheduleDefectAutoApply();
+        }
+    };
+
     function dataUrlToJpegFile(dataUrl, name) {
         if (!dataUrl || typeof dataUrl !== 'string') return null;
         try {
@@ -12197,19 +12215,27 @@ document.addEventListener('DOMContentLoaded', () => {
         return pickImageFileViaInput(mode);
     }
 
-    async function triggerDefectPhotoPick(mode) {
+    async function triggerDefectPhotoPick(mode, target = 'curr') {
         const file = await pickImageFromDevice(mode);
-        if (file) handleSelectedPhotoFile(file);
+        if (file) handleSelectedPhotoFile(file, target);
     }
+    window.triggerDefectPhotoPick = triggerDefectPhotoPick;
 
     const btnTriggerCamera = document.getElementById('btnTriggerCamera');
     const btnTriggerGallery = document.getElementById('btnTriggerGallery');
+    const btnPrevRoundCamera = document.getElementById('btnPrevRoundCamera');
+    const btnPrevRoundGallery = document.getElementById('btnPrevRoundGallery');
 
-    function handleSelectedPhotoFile(file) {
+    function handleSelectedPhotoFile(file, target = 'curr') {
         if (!file) return;
         window.compressDefectPhoto43(file, 1000, 0.85).then(compressedUrl => {
-            if (!window._pendingPhotos) window._pendingPhotos = [];
-            window._pendingPhotos.push(compressedUrl);
+            if (target === 'prev') {
+                if (!window._pendingPrevRoundPhotos) window._pendingPrevRoundPhotos = [];
+                window._pendingPrevRoundPhotos.push(compressedUrl);
+            } else {
+                if (!window._pendingPhotos) window._pendingPhotos = [];
+                window._pendingPhotos.push(compressedUrl);
+            }
             window._defectPhotosDirty = true;
             renderDefectPhotoSection();
             scheduleDefectAutoApply();
@@ -12220,7 +12246,7 @@ document.addEventListener('DOMContentLoaded', () => {
         btnTriggerCamera.onclick = (e) => {
             e.preventDefault();
             e.stopPropagation();
-            triggerDefectPhotoPick('camera');
+            triggerDefectPhotoPick('camera', 'curr');
         };
     }
 
@@ -12228,7 +12254,23 @@ document.addEventListener('DOMContentLoaded', () => {
         btnTriggerGallery.onclick = (e) => {
             e.preventDefault();
             e.stopPropagation();
-            triggerDefectPhotoPick('gallery');
+            triggerDefectPhotoPick('gallery', 'curr');
+        };
+    }
+
+    if (btnPrevRoundCamera) {
+        btnPrevRoundCamera.onclick = (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            triggerDefectPhotoPick('camera', 'prev');
+        };
+    }
+
+    if (btnPrevRoundGallery) {
+        btnPrevRoundGallery.onclick = (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            triggerDefectPhotoPick('gallery', 'prev');
         };
     }
 
