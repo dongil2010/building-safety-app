@@ -861,6 +861,14 @@
                 <button type="button" class="modal-close" id="btnCloseOptionManager">&times;</button>
             </div>
             <div class="modal-body">
+                <div class="option-manager-reset-row">
+                    <button type="button" id="btnOptionManagerResetCurrent" class="btn btn-outline btn-sm">
+                        <i class="fa-solid fa-rotate-left"></i> 현재만 싹 정리
+                    </button>
+                    <button type="button" id="btnOptionManagerResetAll" class="btn btn-danger-outline btn-sm">
+                        <i class="fa-solid fa-broom"></i> 전체(부재/유형/원인) 싹 정리
+                    </button>
+                </div>
                 <div style="display:flex; gap:0.5rem; margin-bottom:0.9rem;">
                     <input type="text" id="optionManagerNewInput" class="form-control" placeholder="새 항목 입력...">
                     <button type="button" id="btnOptionManagerAdd" class="btn btn-primary btn-sm" style="white-space:nowrap;"><i class="fa-solid fa-plus"></i> 추가</button>

@@ -9632,6 +9632,91 @@ document.addEventListener('DOMContentLoaded', () => {
         ctx.refresh();
     }
 
+    function resetOptionManagerCurrent() {
+        const field = window._optionManagerField;
+        if (!field) return;
+        const ctx = getOptionManagerContext();
+        if (!ctx) return;
+
+        const ok = confirm('현재 항목(부재/유형/원인) 목록을 기본값으로 완전히 되돌릴까요? (숨김 해제 + 커스텀 삭제)');
+        if (!ok) return;
+
+        // 숨김/커스텀 목록을 “싹” 비운다 (기존 선택값이 커스텀이었던 경우 재주입 방지 목적)
+        if (Array.isArray(ctx.hiddenList)) ctx.hiddenList.length = 0;
+        if (Array.isArray(ctx.customList)) ctx.customList.length = 0;
+        saveStateToLocalStorage();
+
+        // UI 기본값으로 복원(첫 프리셋 선택)
+        if (field === 'component') {
+            const cat = document.getElementById('defectCategory')?.value || '구조체';
+            const defComp = (DEFECT_COMPONENT_PRESET[cat] || DEFECT_COMPONENT_PRESET['구조체'])[0] || '';
+            populateDefectComponentDropdown(cat, defComp);
+        } else if (field === 'type') {
+            const cat = document.getElementById('defectCategory')?.value || '구조체';
+            const presetList = categoryDefectPreset[cat] || categoryDefectPreset['구조체'] || [];
+            const defType = presetList.find(t => t !== '상태양호') || presetList[0] || '';
+            updateDefectTypeDropdown(cat, defType);
+            // 원인도 함께 첫 프리셋으로 초기화
+            if (defType) {
+                const causeKey = getCauseKey(defType);
+                const defCause = (defectCausePreset[causeKey] || [])[0] || '';
+                updateDefectCauseDropdown(defType, defCause);
+            }
+        } else if (field === 'cause') {
+            const typeVal = getDefectComboValue(
+                document.getElementById('defectType'),
+                document.getElementById('defectTypeInput')
+            ) || '균열';
+            const causeKey = getCauseKey(typeVal);
+            const defCause = (defectCausePreset[causeKey] || [])[0] || '';
+            updateDefectCauseDropdown(typeVal, defCause);
+        }
+
+        renderOptionManagerList();
+        if (typeof ctx.refresh === 'function') ctx.refresh();
+        if (typeof refreshDefectQuickPickBar === 'function') refreshDefectQuickPickBar();
+    }
+
+    function resetOptionManagerAll() {
+        const ok = confirm('부재/결함유형/발생원인 “전체”를 기본값으로 완전히 되돌릴까요? (숨김 해제 + 커스텀 전부 삭제)');
+        if (!ok) return;
+
+        // component
+        migrateDefectComponentStateShape();
+        window.state.hiddenDefectComponents = { '구조체': [], '비구조체': [], '마감재': [] };
+        window.state.customDefectComponents = { '구조체': [], '비구조체': [], '마감재': [] };
+
+        // type
+        window.state.hiddenDefectTypes = { '구조체': [], '비구조체': [], '마감재': [] };
+        window.state.customDefectTypes = { '구조체': [], '비구조체': [], '마감재': [] };
+
+        // cause (keyed by defectType->causeKey)
+        window.state.hiddenDefectCauses = {};
+        window.state.customDefectCauses = {};
+
+        saveStateToLocalStorage();
+
+        // 현재 선택된 카테고리 기준으로 UI 기본값 1개씩 다시 세팅
+        const cat = document.getElementById('defectCategory')?.value || '구조체';
+        const defComp = (DEFECT_COMPONENT_PRESET[cat] || DEFECT_COMPONENT_PRESET['구조체'])[0] || '';
+        populateDefectComponentDropdown(cat, defComp);
+
+        const presetList = categoryDefectPreset[cat] || categoryDefectPreset['구조체'] || [];
+        const defType = presetList.find(t => t !== '상태양호') || presetList[0] || '';
+        updateDefectTypeDropdown(cat, defType);
+
+        if (defType) {
+            const causeKey = getCauseKey(defType);
+            const defCause = (defectCausePreset[causeKey] || [])[0] || '';
+            updateDefectCauseDropdown(defType, defCause);
+        }
+
+        renderOptionManagerList();
+        const ctx = getOptionManagerContext();
+        if (ctx && typeof ctx.refresh === 'function') ctx.refresh();
+        if (typeof refreshDefectQuickPickBar === 'function') refreshDefectQuickPickBar();
+    }
+
     window.openOptionManagerModal = function(fieldType) {
         window._optionManagerField = fieldType;
         const modal = document.getElementById('optionManagerModal');
@@ -10270,6 +10355,16 @@ document.addEventListener('DOMContentLoaded', () => {
             renderOptionManagerList();
             ctx.refresh();
         });
+    }
+
+    const btnResetCurrentOptionManager = document.getElementById('btnOptionManagerResetCurrent');
+    if (btnResetCurrentOptionManager) {
+        btnResetCurrentOptionManager.addEventListener('click', () => resetOptionManagerCurrent());
+    }
+
+    const btnResetAllOptionManager = document.getElementById('btnOptionManagerResetAll');
+    if (btnResetAllOptionManager) {
+        btnResetAllOptionManager.addEventListener('click', () => resetOptionManagerAll());
     }
 
     // Canvas Mouse & Touch Event Handlers with Threshold-Based Pin & Arrow Dragging & Multi-Touch Pinch Zoom

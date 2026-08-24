@@ -700,6 +700,17 @@ body {
     overflow-y: auto;
 }
 
+.option-manager-reset-row {
+    display: flex;
+    gap: 0.5rem;
+    margin: 0 0 0.85rem;
+    flex-wrap: wrap;
+}
+
+.option-manager-reset-row .btn {
+    flex: 1 1 auto;
+}
+
 .option-manager-item {
     display: flex;
     align-items: center;
