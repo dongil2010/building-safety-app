@@ -9432,15 +9432,39 @@ document.addEventListener('DOMContentLoaded', () => {
         });
 
         const crackKinds = getCrackKindsForComponent(currentComponent) || [];
-        const typeChipOptions = getQuickPickOptionsFromSelect(typeSelect)
-            .filter(t => !crackKinds.includes(t))
-            .slice(0, 16);
-        const typeChipCurrent = crackKinds.some(k => parseDefectTypeList(currentType).includes(k))
-            ? ''
-            : currentType;
-        renderQuickPickChipGroup('quickDefectTypeChips', typeChipOptions, typeChipCurrent, (value) => {
-            applyExclusiveDefectTypeChip(value);
+        const selectedTypeParts = parseDefectTypeList(currentType);
+        const selectedCrackSet = new Set(selectedTypeParts.filter(t => crackKinds.includes(t)));
+        const typeChipOptions = [];
+        const seenTypeChip = new Set();
+        const pushTypeChip = (value) => {
+            const v = String(value || '').trim();
+            if (!v || seenTypeChip.has(v) || v.includes(',')) return;
+            seenTypeChip.add(v);
+            typeChipOptions.push(v);
+        };
+        pushTypeChip('상태양호');
+        crackKinds.forEach(pushTypeChip);
+        getQuickPickOptionsFromSelect(typeSelect).forEach((t) => {
+            if (crackKinds.includes(t)) return;
+            pushTypeChip(t);
         });
+        const typeContainer = document.getElementById('quickDefectTypeChips');
+        if (typeContainer) {
+            typeContainer.innerHTML = typeChipOptions.map(value => {
+                const isCrack = crackKinds.includes(value);
+                const active = isCrack
+                    ? selectedCrackSet.has(value)
+                    : (!selectedCrackSet.size && value === currentType);
+                return `<button type="button" class="defect-quick-chip${active ? ' active' : ''}" data-value="${value}" data-crack-toggle="${isCrack ? '1' : '0'}">${value}</button>`;
+            }).join('');
+            typeContainer.querySelectorAll('.defect-quick-chip').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const value = btn.dataset.value || '';
+                    if (btn.dataset.crackToggle === '1') toggleCrackKindChip(value);
+                    else applyExclusiveDefectTypeChip(value);
+                });
+            });
+        }
 
         const causeGroup = document.getElementById('quickCauseGroup');
         if (causeGroup) causeGroup.style.display = currentType === '상태양호' ? 'none' : '';
@@ -9685,14 +9709,7 @@ document.addEventListener('DOMContentLoaded', () => {
         );
         const crackKinds = getCrackKindsForComponent(component);
         const hidden = window.state.hiddenDefectTypes[category] || [];
-        let presetList = getDefectTypePresetFor(category, component).filter(t => !hidden.includes(t));
-        // 균열 종류 체크박스가 있는 부재: 칩 목록에서는 하위 균열 종류를 빼고(상태양호·기타만), 체크박스로 선택
-        if (crackKinds && crackKinds.length) {
-            presetList = presetList.filter(t => !crackKinds.includes(t));
-            if (!presetList.includes('균열')) {
-                // 칩에 '균열' 요약은 넣지 않음 — 체크박스가 대체
-            }
-        }
+        const presetList = getDefectTypePresetFor(category, component).filter(t => !hidden.includes(t));
         const customList = window.state.customDefectTypes[category] || [];
 
         let html = `<option value="" ${!currentVal ? 'selected' : ''}>—</option>`;
@@ -9726,7 +9743,6 @@ document.addEventListener('DOMContentLoaded', () => {
             ? currentVal
             : (isDefectComboCustomToken(select.value) ? '' : select.value);
         syncDefectComboFields(select, document.getElementById('defectTypeInput'), resolved);
-        syncCrackKindChecksFromType(resolved, crackKinds);
 
         // Trigger cause update for current defect type
         updateDefectCauseDropdown(resolved);
@@ -9735,66 +9751,42 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function getSelectedCrackKindsFromUi() {
-        const box = document.getElementById('defectCrackKindChecks');
-        if (!box) return [];
-        return Array.from(box.querySelectorAll('input[type="checkbox"]:checked'))
-            .map(el => el.value)
-            .filter(Boolean);
-    }
-
-    function syncCrackKindChecksFromType(typeVal, crackKindsOpt) {
-        const group = document.getElementById('quickCrackKindGroup');
-        const box = document.getElementById('defectCrackKindChecks');
-        if (!group || !box) return;
         const component = getDefectComboValue(
             document.getElementById('defectComponent'),
             document.getElementById('defectComponentInput')
         );
-        const crackKinds = crackKindsOpt || getCrackKindsForComponent(component);
-        if (!crackKinds || !crackKinds.length) {
-            group.style.display = 'none';
-            box.innerHTML = '';
-            return;
-        }
-        group.style.display = '';
-        const selected = new Set(parseDefectTypeList(typeVal).filter(t => crackKinds.includes(t)));
-        box.innerHTML = crackKinds.map(kind => {
-            const id = `crackKind_${kind.replace(/[^a-zA-Z0-9가-힣]/g, '_')}`;
-            const checked = selected.has(kind) ? 'checked' : '';
-            return `<label class="defect-crack-kind-item${checked ? ' is-checked' : ''}" for="${id}">
-                <input type="checkbox" id="${id}" value="${kind}" ${checked}>
-                <span>${kind}</span>
-            </label>`;
-        }).join('');
-        box.querySelectorAll('input[type="checkbox"]').forEach(inp => {
-            inp.addEventListener('change', () => {
-                const kinds = getSelectedCrackKindsFromUi();
-                const typeSelect = document.getElementById('defectType');
-                const typeInput = document.getElementById('defectTypeInput');
-                const joined = joinDefectTypeList(kinds);
-                syncDefectComboFields(typeSelect, typeInput, joined || '');
-                box.querySelectorAll('.defect-crack-kind-item').forEach(lab => {
-                    const c = lab.querySelector('input');
-                    lab.classList.toggle('is-checked', !!(c && c.checked));
-                });
-                updateDefectCauseDropdown(joined || '균열');
-                toggleDefectSizeInputMode();
-                refreshDefectQuickPickBar();
-                if (typeof scheduleDefectAutoApply === 'function') scheduleDefectAutoApply();
-            });
-        });
+        const crackKinds = getCrackKindsForComponent(component) || [];
+        if (!crackKinds.length) return [];
+        const typeVal = getDefectComboValue(
+            document.getElementById('defectType'),
+            document.getElementById('defectTypeInput')
+        );
+        return parseDefectTypeList(typeVal).filter(t => crackKinds.includes(t));
+    }
+
+    function toggleCrackKindChip(kind) {
+        const typeSelect = document.getElementById('defectType');
+        const typeInput = document.getElementById('defectTypeInput');
+        const component = getDefectComboValue(
+            document.getElementById('defectComponent'),
+            document.getElementById('defectComponentInput')
+        );
+        const crackKinds = getCrackKindsForComponent(component) || [];
+        const current = new Set(parseDefectTypeList(getDefectComboValue(typeSelect, typeInput)).filter(t => crackKinds.includes(t)));
+        if (current.has(kind)) current.delete(kind);
+        else current.add(kind);
+        const joined = joinDefectTypeList(crackKinds.filter(k => current.has(k)));
+        syncDefectComboFields(typeSelect, typeInput, joined);
+        updateDefectCauseDropdown(joined || '균열');
+        toggleDefectSizeInputMode();
+        if (typeof scheduleDefectAutoApply === 'function') scheduleDefectAutoApply();
+        refreshDefectQuickPickBar();
     }
 
     function applyExclusiveDefectTypeChip(value) {
         const typeSelect = document.getElementById('defectType');
         const typeInput = document.getElementById('defectTypeInput');
         syncDefectComboFields(typeSelect, typeInput, value);
-        // 비균열 칩 선택 시 균열 종류 체크 해제
-        const box = document.getElementById('defectCrackKindChecks');
-        if (box && !isCrackKindLabel(value)) {
-            box.querySelectorAll('input[type="checkbox"]').forEach(inp => { inp.checked = false; });
-            box.querySelectorAll('.defect-crack-kind-item').forEach(lab => lab.classList.remove('is-checked'));
-        }
         updateDefectCauseDropdown(value);
         toggleDefectSizeInputMode();
         if (typeof scheduleDefectAutoApply === 'function') scheduleDefectAutoApply();

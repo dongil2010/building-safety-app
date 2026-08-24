@@ -4181,9 +4181,11 @@ body {
     align-items: center;
     gap: 0.3rem;
 }
-.defect-quick-label i {
-    font-size: 0.7rem;
-    opacity: 0.7;
+.defect-quick-label .defect-quick-hint {
+    margin-left: auto;
+    font-size: 0.68rem;
+    font-weight: 700;
+    color: #64748b;
 }
 
 /* 공통 격자 */
