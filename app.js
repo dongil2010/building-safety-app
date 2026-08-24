@@ -16665,7 +16665,45 @@ document.addEventListener('DOMContentLoaded', () => {
     const btnCheckAppUpdate = document.getElementById('btnCheckAppUpdate');
     if (btnCheckAppUpdate) {
         btnCheckAppUpdate.addEventListener('click', () => {
-            window.checkAppUpdate?.({ silent: false });
+            window.checkAppUpdate?.({ silent: false, force: true });
+        });
+    }
+
+    const btnOtaInstallNow = document.getElementById('btnOtaInstallNow');
+    if (btnOtaInstallNow) {
+        btnOtaInstallNow.addEventListener('click', () => {
+            window.checkAppUpdate?.({ silent: false, force: true, skipConfirm: true });
+        });
+    }
+    const btnOtaLater = document.getElementById('btnOtaLater');
+    if (btnOtaLater) {
+        btnOtaLater.addEventListener('click', () => {
+            const meta = window._otaReleaseMetaCached;
+            const code = meta?.versionCode != null ? Number(meta.versionCode) : 0;
+            if (code > 0) {
+                try { localStorage.setItem(`bsa_ota_snooze_${code}`, String(Date.now() + 6 * 60 * 60 * 1000)); } catch (_) {}
+            }
+            const banner = document.getElementById('otaUpdateBanner');
+            if (banner) banner.style.display = 'none';
+            window.showToast('6시간 후 다시 알려드립니다. 홈의 「앱 업데이트」로 언제든 설치할 수 있습니다.', 'info', 4500);
+        });
+    }
+
+    const btnPublishOta = document.getElementById('btnPublishOta');
+    const inputPublishOtaApk = document.getElementById('inputPublishOtaApk');
+    if (btnPublishOta && inputPublishOtaApk) {
+        btnPublishOta.addEventListener('click', () => inputPublishOtaApk.click());
+        inputPublishOtaApk.addEventListener('change', async () => {
+            const file = inputPublishOtaApk.files?.[0];
+            inputPublishOtaApk.value = '';
+            if (!file) return;
+            const build = window.BSA_APP_BUILD || { versionCode: 1, versionName: '1.0' };
+            const notes = prompt(
+                `OTA 배포: v${build.versionName} (code ${build.versionCode})\n현장 앱이 자동으로 감지합니다.\n\n변경사항 메모(선택):`,
+                ''
+            );
+            if (notes === null) return;
+            await window.publishAndroidOta?.(file, notes);
         });
     }
 
@@ -17915,10 +17953,17 @@ document.addEventListener('DOMContentLoaded', () => {
     window._justRegistering = false;
 
     // ==========================================================================
-    // 📱 앱 자체 업데이트 (Capacitor AppUpdate 플러그인 + Firestore app_meta)
+    // 📱 OTA 앱 업데이트 (Firestore app_meta + 네이티브 APK 설치)
     // ==========================================================================
     // android/app/build.gradle 의 versionCode / versionName 과 맞출 것
-    window.BSA_APP_BUILD = { versionCode: 3, versionName: '1.1.1' };
+    window.BSA_APP_BUILD = { versionCode: 4, versionName: '1.2.0' };
+
+    const OTA_SNOOZE_MS = 6 * 60 * 60 * 1000;
+    let _otaReleaseMeta = null;
+    let _otaReleaseUnsub = null;
+    let _otaLocalCode = window.BSA_APP_BUILD.versionCode;
+    let _otaLocalName = window.BSA_APP_BUILD.versionName;
+    let storage = null;
 
     function isNativeAndroidApp() {
         try {
@@ -17938,22 +17983,83 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    async function fetchAndroidReleaseMeta() {
-        if (!db) return null;
-        const snap = await db.collection('app_meta').doc('android_release').get();
-        if (!snap.exists) return null;
-        return snap.data() || null;
+    function otaSnoozeKey(code) {
+        return `bsa_ota_snooze_${code}`;
     }
 
-    window.checkAppUpdate = async function (opts) {
-        const silent = !!(opts && opts.silent);
-        const build = window.BSA_APP_BUILD || { versionCode: 1, versionName: '1.0' };
+    function isOtaSnoozed(code) {
+        try {
+            const until = Number(localStorage.getItem(otaSnoozeKey(code)) || 0);
+            return until > Date.now();
+        } catch (_) {
+            return false;
+        }
+    }
 
-        if (!isNativeAndroidApp()) {
-            if (!silent) {
-                window.showToast('웹/PWA는 새로고침으로 최신 웹을 받습니다. APK 업데이트는 Android 앱에서만 가능합니다.', 'info', 4500);
+    function snoozeOta(code) {
+        try {
+            localStorage.setItem(otaSnoozeKey(code), String(Date.now() + OTA_SNOOZE_MS));
+        } catch (_) { /* ignore */ }
+    }
+
+    function clearOtaSnooze(code) {
+        try { localStorage.removeItem(otaSnoozeKey(code)); } catch (_) { /* ignore */ }
+    }
+
+    async function refreshOtaLocalVersion() {
+        const build = window.BSA_APP_BUILD || { versionCode: 1, versionName: '1.0' };
+        _otaLocalCode = Number(build.versionCode) || 1;
+        _otaLocalName = String(build.versionName || '1.0');
+        const plugin = getAppUpdatePlugin();
+        if (!plugin) return;
+        try {
+            const v = await plugin.getVersion();
+            if (v?.versionCode != null) _otaLocalCode = Number(v.versionCode);
+            if (v?.versionName) _otaLocalName = String(v.versionName);
+        } catch (e) {
+            console.warn('getVersion failed', e);
+        }
+    }
+
+    function evaluateOtaRelease(meta) {
+        if (!meta || !meta.apkUrl) return { needsUpdate: false, meta: null };
+        const remoteCode = Number(meta.versionCode) || 0;
+        const remoteName = String(meta.versionName || remoteCode);
+        if (remoteCode <= _otaLocalCode) return { needsUpdate: false, meta, remoteCode, remoteName };
+        return { needsUpdate: true, meta, remoteCode, remoteName, mandatory: !!meta.mandatory };
+    }
+
+    function applyOtaUiState(evalResult) {
+        const banner = document.getElementById('otaUpdateBanner');
+        const btnUpdate = document.getElementById('btnCheckAppUpdate');
+        const badge = document.getElementById('appVersionBadge');
+        const verEl = document.getElementById('otaBannerVersion');
+        const notesEl = document.getElementById('otaBannerNotes');
+
+        if (badge) {
+            badge.innerHTML = evalResult?.needsUpdate
+                ? `<i class="fa-solid fa-circle-up"></i> v${_otaLocalName} → v${evalResult.remoteName} 업데이트 가능`
+                : `<i class="fa-solid fa-circle-check"></i> v${_otaLocalName} · OTA 자동 업데이트`;
+        }
+
+        if (evalResult?.needsUpdate) {
+            if (banner) {
+                banner.style.display = 'block';
+                if (verEl) verEl.textContent = `v${evalResult.remoteName}`;
+                if (notesEl) notesEl.textContent = evalResult.meta?.notes ? String(evalResult.meta.notes) : '';
             }
-            return { updated: false, reason: 'not-native' };
+            if (btnUpdate) btnUpdate.classList.add('ota-pending');
+        } else {
+            if (banner) banner.style.display = 'none';
+            if (btnUpdate) btnUpdate.classList.remove('ota-pending');
+        }
+    }
+
+    async function installAppUpdateFromMeta(meta, opts) {
+        const silent = !!(opts && opts.silent);
+        if (!meta || !meta.apkUrl) {
+            if (!silent) window.showToast('등록된 APK URL이 없습니다.', 'warning');
+            return { updated: false, reason: 'no-release' };
         }
 
         const plugin = getAppUpdatePlugin();
@@ -17962,56 +18068,10 @@ document.addEventListener('DOMContentLoaded', () => {
             return { updated: false, reason: 'no-plugin' };
         }
 
-        let localCode = build.versionCode;
-        let localName = build.versionName;
-        try {
-            const v = await plugin.getVersion();
-            if (v?.versionCode != null) localCode = Number(v.versionCode);
-            if (v?.versionName) localName = String(v.versionName);
-        } catch (e) {
-            console.warn('getVersion failed', e);
-        }
-
-        const badge = document.getElementById('appVersionBadge');
-        if (badge) {
-            badge.innerHTML = `<i class="fa-solid fa-circle-check"></i> v${localName} · 고유코드 동기화 · 앱내 업데이트`;
-        }
-
-        if (!db) {
-            if (!silent) window.showToast('업데이트 정보를 불러오려면 로그인이 필요합니다.', 'warning');
-            return { updated: false, reason: 'no-db' };
-        }
-
-        let meta = null;
-        try {
-            meta = await fetchAndroidReleaseMeta();
-        } catch (e) {
-            console.warn('release meta fetch failed', e);
-            if (!silent) window.showToast('업데이트 정보 조회에 실패했습니다.', 'error');
-            return { updated: false, reason: 'fetch-failed' };
-        }
-
-        if (!meta || !meta.apkUrl) {
-            if (!silent) window.showToast(`현재 v${localName} 사용 중. 등록된 새 버전이 없습니다.`, 'info', 4000);
-            return { updated: false, reason: 'no-release' };
-        }
-
-        const remoteCode = Number(meta.versionCode) || 0;
-        const remoteName = String(meta.versionName || remoteCode);
-        if (remoteCode <= localCode) {
-            if (!silent) window.showToast(`최신 버전입니다 (v${localName}).`, 'success');
-            return { updated: false, reason: 'up-to-date' };
-        }
-
-        const notes = meta.notes ? `\n\n변경사항: ${meta.notes}` : '';
-        if (!confirm(`새 버전 v${remoteName} (code ${remoteCode})이 있습니다.\n지금 다운로드하여 설치할까요?${notes}`)) {
-            return { updated: false, reason: 'cancelled' };
-        }
-
         try {
             const perm = await plugin.canRequestPackageInstalls();
             if (perm && perm.allowed === false) {
-                window.showToast('「알 수 없는 앱 설치」 권한을 허용한 뒤 다시 눌러 주세요.', 'warning', 5000);
+                window.showToast('「알 수 없는 앱 설치」 권한을 허용한 뒤 다시 시도해 주세요.', 'warning', 5000);
                 await plugin.openUnknownSourcesSettings();
                 return { updated: false, reason: 'need-permission' };
             }
@@ -18020,6 +18080,7 @@ document.addEventListener('DOMContentLoaded', () => {
         window.showToast('APK 다운로드 중… 완료되면 설치 화면이 열립니다.', 'info', 5000);
         try {
             await plugin.downloadAndInstall({ url: String(meta.apkUrl) });
+            clearOtaSnooze(Number(meta.versionCode) || 0);
             window.showToast('설치 화면을 열었습니다. 안내에 따라 업데이트하세요.', 'success', 5000);
             return { updated: true };
         } catch (e) {
@@ -18033,6 +18094,145 @@ document.addEventListener('DOMContentLoaded', () => {
             window.showToast('업데이트 다운로드/설치에 실패했습니다.', 'error');
             return { updated: false, reason: 'install-failed' };
         }
+    }
+
+    async function promptOtaUpdateIfNeeded(opts) {
+        const silent = !!(opts && opts.silent);
+        const auto = !!(opts && opts.auto);
+        const force = !!(opts && opts.force);
+
+        if (!isNativeAndroidApp()) {
+            if (!silent) {
+                window.showToast('웹/PWA는 새로고침으로 최신 웹을 받습니다. APK OTA는 Android 앱에서만 가능합니다.', 'info', 4500);
+            }
+            return { updated: false, reason: 'not-native' };
+        }
+
+        await refreshOtaLocalVersion();
+
+        if (!db) {
+            if (!silent) window.showToast('업데이트 정보를 불러오려면 로그인이 필요합니다.', 'warning');
+            return { updated: false, reason: 'no-db' };
+        }
+
+        let meta = _otaReleaseMeta;
+        if (!meta) {
+            try {
+                const snap = await db.collection('app_meta').doc('android_release').get();
+                meta = snap.exists ? (snap.data() || null) : null;
+                _otaReleaseMeta = meta;
+            } catch (e) {
+                console.warn('release meta fetch failed', e);
+                if (!silent) window.showToast('업데이트 정보 조회에 실패했습니다.', 'error');
+                return { updated: false, reason: 'fetch-failed' };
+            }
+        }
+
+        const evalResult = evaluateOtaRelease(meta);
+        applyOtaUiState(evalResult);
+
+        if (!evalResult.needsUpdate) {
+            if (!silent) window.showToast(`최신 버전입니다 (v${_otaLocalName}).`, 'success');
+            return { updated: false, reason: meta?.apkUrl ? 'up-to-date' : 'no-release' };
+        }
+
+        const { remoteCode, remoteName, mandatory } = evalResult;
+        if (auto && !force && !mandatory && isOtaSnoozed(remoteCode)) {
+            return { updated: false, reason: 'snoozed' };
+        }
+
+        if (!force && !mandatory && !(opts && opts.skipConfirm)) {
+            const notes = meta.notes ? `\n\n변경사항: ${meta.notes}` : '';
+            if (!confirm(`새 버전 v${remoteName} (code ${remoteCode})이 있습니다.\n앱 안에서 OTA로 다운로드·설치할까요?${notes}`)) {
+                if (auto) snoozeOta(remoteCode);
+                return { updated: false, reason: 'cancelled' };
+            }
+        }
+
+        return installAppUpdateFromMeta(meta, opts);
+    }
+
+    window.checkAppUpdate = promptOtaUpdateIfNeeded;
+
+    function stopOtaReleaseListener() {
+        if (_otaReleaseUnsub) {
+            try { _otaReleaseUnsub(); } catch (_) {}
+            _otaReleaseUnsub = null;
+        }
+        _otaReleaseMeta = null;
+        applyOtaUiState({ needsUpdate: false });
+    }
+
+    function startOtaReleaseListener() {
+        if (!db || !isNativeAndroidApp()) return;
+        stopOtaReleaseListener();
+        _otaReleaseUnsub = db.collection('app_meta').doc('android_release').onSnapshot(async (snap) => {
+            _otaReleaseMeta = snap.exists ? (snap.data() || null) : null;
+            window._otaReleaseMetaCached = _otaReleaseMeta;
+            await refreshOtaLocalVersion();
+            const evalResult = evaluateOtaRelease(_otaReleaseMeta);
+            applyOtaUiState(evalResult);
+            if (evalResult.needsUpdate && (!isOtaSnoozed(evalResult.remoteCode) || evalResult.mandatory)) {
+                promptOtaUpdateIfNeeded({ silent: true, auto: true });
+            }
+        }, (err) => {
+            console.warn('OTA listener error', err);
+        });
+    }
+
+    let _otaVisibilityHooked = false;
+    function hookOtaVisibilityRecheck() {
+        if (_otaVisibilityHooked) return;
+        _otaVisibilityHooked = true;
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'visible' && typeof window.checkAppUpdate === 'function') {
+                window.checkAppUpdate({ silent: true, auto: true });
+            }
+        });
+    }
+
+    window.publishAndroidOta = async function (apkFile, notes) {
+        if (!window.state?.otaPublisher) {
+            window.showToast('OTA 배포 권한이 없습니다. Firebase users 문서에 otaPublisher: true 설정이 필요합니다.', 'error', 6000);
+            return false;
+        }
+        if (!storage || !db) {
+            window.showToast('Firebase Storage가 준비되지 않았습니다.', 'error');
+            return false;
+        }
+        if (!apkFile) {
+            window.showToast('APK 파일을 선택해 주세요.', 'warning');
+            return false;
+        }
+
+        const build = window.BSA_APP_BUILD || { versionCode: 1, versionName: '1.0' };
+        const versionCode = Number(build.versionCode) || 1;
+        const versionName = String(build.versionName || versionCode);
+        const remotePath = `releases/android-${versionCode}.apk`;
+
+        window.showLoading('APK 업로드 중… (현장 OTA 배포)');
+        try {
+            const ref = storage.ref(remotePath);
+            await ref.put(apkFile, { contentType: 'application/vnd.android.package-archive' });
+            const apkUrl = await ref.getDownloadURL();
+            await db.collection('app_meta').doc('android_release').set({
+                versionCode,
+                versionName,
+                apkUrl,
+                notes: String(notes || '').trim(),
+                mandatory: false,
+                publishedAt: firebase.firestore.FieldValue.serverTimestamp(),
+                publishedBy: window.state.uid || null
+            }, { merge: true });
+            window.showToast(`OTA 배포 완료: v${versionName} (code ${versionCode}). 현장 앱이 자동으로 감지합니다.`, 'success', 6000);
+            return true;
+        } catch (e) {
+            console.error(e);
+            window.showToast('OTA 배포 실패: ' + (e?.message || e), 'error', 6000);
+            return false;
+        } finally {
+            window.hideLoading();
+        }
     };
 
     function initFirebaseSync() {
@@ -18042,6 +18242,9 @@ document.addEventListener('DOMContentLoaded', () => {
                     firebase.initializeApp(firebaseConfig);
                 }
                 db = firebase.firestore();
+                if (firebase.storage) {
+                    storage = firebase.storage();
+                }
                 if (firebase.auth) {
                     auth = firebase.auth();
                     auth.onAuthStateChanged(handleAuthStateChange);
@@ -18540,6 +18743,7 @@ document.addEventListener('DOMContentLoaded', () => {
         window.state.companyId = profile.companyId;
         window.state.companyName = profile.companyName;
         window.state.role = profile.role;
+        window.state.otaPublisher = !!profile.otaPublisher;
 
         hideAuthOverlay();
 
@@ -18555,6 +18759,9 @@ document.addEventListener('DOMContentLoaded', () => {
         const btnApproval = document.getElementById('btnOpenMemberApproval');
         if (btnApproval) btnApproval.style.display = (profile.role === 'admin') ? 'inline-flex' : 'none';
 
+        const btnPublishOta = document.getElementById('btnPublishOta');
+        if (btnPublishOta) btnPublishOta.style.display = profile.otaPublisher ? 'inline-flex' : 'none';
+
         if (profile.role === 'admin' && db) {
             try {
                 const companyDoc = await db.collection('companies').doc(profile.companyId).get();
@@ -18566,16 +18773,20 @@ document.addEventListener('DOMContentLoaded', () => {
         if (typeof listenToRealtimeUpdates === 'function') listenToRealtimeUpdates();
         if (typeof renderDashboard === 'function') renderDashboard();
         window.switchTab('tab-home');
+
+        if (typeof startOtaReleaseListener === 'function') startOtaReleaseListener();
+        if (typeof hookOtaVisibilityRecheck === 'function') hookOtaVisibilityRecheck();
         setTimeout(() => {
             if (typeof window.checkAppUpdate === 'function') {
-                window.checkAppUpdate({ silent: true });
+                window.checkAppUpdate({ silent: true, auto: true });
             }
-        }, 2500);
+        }, 1500);
     }
 
     async function handleAuthStateChange(user) {
         if (!user) {
             if (currentUnsubscribe) { try { currentUnsubscribe(); } catch (e) {} currentUnsubscribe = null; }
+            if (typeof stopOtaReleaseListener === 'function') stopOtaReleaseListener();
             window.state.uid = null;
             window.state.userName = null;
             window.state.companyId = null;
@@ -18603,7 +18814,14 @@ document.addEventListener('DOMContentLoaded', () => {
                 showAuthError({ message: '가입 신청이 거절되었습니다. 회사 대표에게 문의해 주세요.' });
                 await auth.signOut();
             } else if (status === 'admin' || status === 'member') {
-                await enterAppAsUser({ uid: user.uid, name: data.name, companyId: data.companyId, companyName: data.companyName, role: status });
+                await enterAppAsUser({
+                    uid: user.uid,
+                    name: data.name,
+                    companyId: data.companyId,
+                    companyName: data.companyName,
+                    role: status,
+                    otaPublisher: !!data.otaPublisher
+                });
             } else {
                 showAuthError({ message: '알 수 없는 계정 상태입니다. 회사 대표에게 문의해 주세요.' });
                 await auth.signOut();

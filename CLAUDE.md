@@ -14,12 +14,14 @@
 6. 의미 있는 메시지로 `git commit`
 7. **다시 한번 `git pull origin main`** — 커밋하는 동안 직원이 새로 push했을 수 있으니 push 직전에 최신 상태인지 재확인 (fast-forward면 그대로, 충돌 나면 3-4단계처럼 사용자에게 물어봄)
 8. `git push origin main`
+9. **APK OTA**: `app-debug.apk`가 있으면 그걸 쓰고, 없으면 디버그 빌드 후 Firebase Storage + `app_meta/android_release`에 올려 현장 앱이 자동 감지하게 함 (`-NoOta`로 생략)
 
 ### PowerShell 스크립트
 
 ```powershell
 .\scripts\git-sync.ps1 -Message "커밋 메시지"
-.\scripts\git-sync.ps1 -Message "커밋 메시지" -NoPush   # push만 생략
+.\scripts\git-sync.ps1 -Message "커밋 메시지" -NoPush # push만 생략
+.\scripts\git-sync.ps1 -Message "커밋 메시지" -NoOta  # APK OTA만 생략
 ```
 
 ## Cursor 에이전트 동작

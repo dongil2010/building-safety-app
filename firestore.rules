@@ -112,12 +112,18 @@ service cloud.firestore {
       }
     }
 
-    // --- app_meta/android_release: 앱 자체 업데이트 메타 (로그인 사용자 읽기) ---
-    // 문서 필드 예: { versionCode: 2, versionName: "1.1.0", apkUrl: "https://...", notes: "..." }
-    // 쓰기는 Firebase 콘솔/관리자 SDK에서만 (클라이언트 쓰기 금지)
+    // --- app_meta/android_release: OTA 앱 업데이트 메타 ---
+    // 필드 예: { versionCode, versionName, apkUrl, notes?, mandatory? }
+    // 쓰기: users/{uid}.otaPublisher == true 인 계정만
+    function isOtaPublisher() {
+      return request.auth != null &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('otaPublisher', false) == true;
+    }
+
     match /app_meta/{docId} {
       allow read: if request.auth != null;
-      allow write: if false;
+      allow create, update: if docId == 'android_release' && isOtaPublisher();
+      allow delete: if false;
     }
 
     // 그 외 모든 경로는 기본 차단

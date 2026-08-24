@@ -46,25 +46,54 @@ npm run android:build:debug
 1. Android Studio → **Build → Generate Signed Bundle / APK**
 2. 키스토어 생성 후 `release` 빌드
 
-## 앱 내부 업데이트 (사이드로드)
+## OTA 자동 업데이트 (현장 APK 교체 불필요)
 
-홈 화면 **「앱 업데이트」** 버튼으로 Firestore에 등록된 최신 APK를 내려받아 설치합니다.
+현장 기기는 **로그인만 하면** Firestore에 등록된 새 APK를 자동 감지합니다.
 
-### 배포 절차 (관리자)
+### 현장 사용자 (기사)
 
-1. `npm run android:build:debug` (또는 서명된 release APK)로 APK 생성
-2. Firebase Console → Storage에 APK 업로드 (예: `releases/app-v1.1.0.apk`) → **다운로드 URL** 복사
-3. Firestore에 문서 생성/수정:
-   - 경로: `app_meta` / `android_release`
-   - 필드 예:
-     - `versionCode` (number): `android/app/build.gradle`의 `versionCode`와 **같거나 더 큰 값**
-     - `versionName` (string): 예 `"1.1.0"`
-     - `apkUrl` (string): Storage 다운로드 URL
-     - `notes` (string, 선택): 변경 요약
-4. `firestore.rules`의 `app_meta` 규칙을 콘솔에 게시했는지 확인 (로그인 사용자 읽기 허용)
-5. 현장 기기에서 앱 로그인 → **앱 업데이트** → 「알 수 없는 앱 설치」허용 → 설치
+1. 앱 실행 → 로그인
+2. 새 버전이 있으면 **홈 배너** + 확인창 표시
+3. 「지금 업데이트」 → APK 다운로드 → Android 설치 화면
+4. 최초 1회만 「알 수 없는 앱 설치」 허용 필요
+5. 「나중에」 누르면 6시간 후 다시 알림 (「앱 업데이트」 버튼으로 언제든 가능)
 
-웹 수정만 반영할 때는 기존처럼 `npm run android:sync` 후 APK를 다시 빌드·배포하고 `versionCode`를 올리면 됩니다.
+### 관리자 배포 (PC, 1회 설정 + 이후 2클릭)
+
+#### 1) Firebase 규칙 게시 (최초 1회)
+
+- Firestore: `firestore.rules` → 콘sole Rules 탭에 붙여넣고 **게시**
+- Storage: `storage.rules` → Storage Rules 탭에 붙여넣고 **게시**
+
+#### 2) OTA 배포 권한 부여 (최초 1회)
+
+Firebase Console → Firestore → `users/{본인 uid}` 문서에 필드 추가:
+
+```json
+{ "otaPublisher": true }
+```
+
+#### 3) 새 버전 배포 (매 릴리스)
+
+1. `android/app/build.gradle`에서 `versionCode` 올리기 (정수, 이전보다 커야 함)
+2. `app.js`의 `window.BSA_APP_BUILD`도 같은 값으로 맞추기
+3. `npm run android:build:debug` (또는 서명 release APK)
+4. PC 브라우저에서 앱 로그인 → 홈 **「OTA 배포」** → APK 선택 → 변경 메모 입력
+5. 업로드 완료 → **현장 모든 앱이 실시간으로 감지** (앱 재시작 불필요)
+
+Firestore 문서 `app_meta/android_release` 예:
+
+| 필드 | 설명 |
+|------|------|
+| `versionCode` | 설치된 앱보다 **큰** 정수 |
+| `versionName` | 표시용 `"1.2.0"` |
+| `apkUrl` | Storage 다운로드 URL (OTA 배포 버튼이 자동 설정) |
+| `notes` | 변경 요약 (선택) |
+| `mandatory` | `true`면 「나중에」 없이 강제 알림 |
+
+### 최초 APK만 수동 설치
+
+OTA는 **이미 설치된 앱 위에** 동작합니다. 팀에 처음 배포할 때만 `app-debug.apk`를 한 번 설치하면, 이후는 OTA만으로 충분합니다.
 
 ## 앱 정보
 
@@ -72,17 +101,18 @@ npm run android:build:debug
 |------|-----|
 | 패키지 ID | `kr.buildingsafety.inspection` |
 | 앱 이름 | 스마트 안전점검 |
-| 현재 버전 | versionCode **2** / versionName **1.1.0** |
+| 현재 버전 | versionCode **4** / versionName **1.2.0** |
 | WebView | HTTPS 스킴 (`capacitor.config.json`) |
 
 ## 권한
 
-- **INTERNET** — Firebase·CDN
+- **INTERNET** — Firebase·CDN·OTA 다운로드
 - **CAMERA** — 결함 사진 촬영
 - **READ_MEDIA_IMAGES** — 갤러리에서 사진 선택 (Android 13+)
+- **REQUEST_INSTALL_PACKAGES** — OTA APK 설치
 
 ## 주의
 
-- Firebase 로그인·동기화는 **인터넷 연결**이 필요합니다.
+- Firebase 로그인·동기화·OTA는 **인터넷 연결**이 필요합니다.
 - Service Worker 오프라인 캐시는 WebView에서도 동작합니다.
 - Play Store 배포 시 `versionCode` / `versionName`을 `android/app/build.gradle`에서 올려 주세요.

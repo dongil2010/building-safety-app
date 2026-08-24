@@ -1,0 +1,21 @@
+rules_version = '2';
+
+// Firebase Storage — OTA APK 배포용
+// 배포: Firebase 콘솔 → Storage → 규칙 탭에 붙여넣기 후 게시
+
+service firebase.storage {
+  match /b/{bucket}/o {
+    function isOtaPublisher() {
+      return request.auth != null &&
+        firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.get('otaPublisher', false) == true;
+    }
+
+    // OTA APK — 네이티브 앱이 토큰 URL로 무인증 다운로드
+    match /releases/{fileName} {
+      allow read: if true;
+      allow write: if isOtaPublisher()
+        && request.resource.size < 120 * 1024 * 1024
+        && request.resource.contentType == 'application/vnd.android.package-archive';
+    }
+  }
+}

@@ -11,7 +11,7 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <meta name="apple-mobile-web-app-title" content="스마트 안전점검">
-    <link rel="stylesheet" href="styles.css?v=20260824_uniqueCodeSync">
+    <link rel="stylesheet" href="styles.css?v=20260824_otaAuto">
     <!-- FontAwesome icons for clean engineering UI -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <!-- PDF 생성용: 페이지별로 직접 캡처해서 조립(큰 보고서에서 html2pdf 한방 렌더링이 캔버스 높이 한계로
@@ -26,6 +26,7 @@
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-storage-compat.js"></script>
     <!-- 휴대폰 연동 사진촬영용 QR코드 생성 라이브러리 -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
     <!-- 외부(엑셀) 결함표 가져오기 파싱용 SheetJS -->
@@ -123,9 +124,13 @@
                             <i class="fa-solid fa-file-import"></i> 📥 백업 불러오기 (.json)
                         </button>
                         <input type="file" id="inputImportJSON" accept=".json" style="display:none;">
-                        <button type="button" class="btn btn-outline" id="btnCheckAppUpdate" style="border-color: #38bdf8; color: #7dd3fc; font-weight: 700;" title="새 APK가 있으면 앱 안에서 내려받아 설치">
+                        <button type="button" class="btn btn-outline" id="btnCheckAppUpdate" style="border-color: #38bdf8; color: #7dd3fc; font-weight: 700;" title="새 APK가 있으면 앱 안에서 OTA로 내려받아 설치">
                             <i class="fa-solid fa-cloud-arrow-down"></i> 앱 업데이트
                         </button>
+                        <button type="button" class="btn btn-outline pc-only-chrome" id="btnPublishOta" style="display: none; border-color: #a78bfa; color: #c4b5fd; font-weight: 700;" title="APK를 Firebase에 올려 현장 기기 OTA 배포">
+                            <i class="fa-solid fa-upload"></i> OTA 배포
+                        </button>
+                        <input type="file" id="inputPublishOtaApk" accept=".apk,application/vnd.android.package-archive" style="display:none;">
                         <button type="button" class="btn btn-outline pc-only-chrome" id="btnPurgeDeletedCodes" style="border-color: #a3a3a3; color: #e5e5e5; font-weight: 700;" title="전원 동기화 확인 후에만 — 삭제 tombstone을 비워 고유코드 재사용">
                             <i class="fa-solid fa-recycle"></i> 삭제 코드 정리
                         </button>
@@ -147,6 +152,20 @@
                             <button type="button" id="btnLogout" class="btn btn-sm btn-outline" style="border-color: #ef4444; color: #f87171; font-size: 0.75rem; padding: 0.15rem 0.55rem;" title="로그아웃">
                                 <i class="fa-solid fa-right-from-bracket"></i> 로그아웃
                             </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- OTA 업데이트 배너 (새 APK 감지 시 자동 표시) -->
+                <div id="otaUpdateBanner" class="ota-update-banner" style="display: none;" role="status" aria-live="polite">
+                    <div class="ota-update-banner-inner">
+                        <div class="ota-update-banner-text">
+                            <strong><i class="fa-solid fa-circle-up"></i> 새 버전 <span id="otaBannerVersion">v1.0</span> 사용 가능</strong>
+                            <span id="otaBannerNotes" class="ota-banner-notes"></span>
+                        </div>
+                        <div class="ota-banner-actions">
+                            <button type="button" id="btnOtaInstallNow" class="btn btn-primary btn-sm"><i class="fa-solid fa-download"></i> 지금 업데이트</button>
+                            <button type="button" id="btnOtaLater" class="btn btn-outline btn-sm">나중에</button>
                         </div>
                     </div>
                 </div>
@@ -2017,7 +2036,7 @@
     <script src="js/tabs/ndt.js?v=20260822_survey2dScroll"></script>
     <script src="js/shared/report.js?v=20260821_land1"></script>
     <script src="js/shared/auth.js?v=20260821_land1"></script>
-    <script src="app.js?v=20260824_galleryCameraFix"></script>
+    <script src="app.js?v=20260824_otaAuto"></script>
     <script>
         document.addEventListener('DOMContentLoaded', function () {
             const btn = document.getElementById('btnExportVectorPdf');
