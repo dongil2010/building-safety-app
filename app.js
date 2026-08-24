@@ -12784,6 +12784,7 @@ document.addEventListener('DOMContentLoaded', () => {
         } else {
             flushDefectAutoApply();
         }
+        window._defectPhotoHydrateToken = (window._defectPhotoHydrateToken || 0) + 1;
         window._defectMarkingTemplate = null;
         window._pendingPinCoords = null;
         window._pendingAreaRect = null;
@@ -12823,6 +12824,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function openAddDefectModal(boxX, boxY, targetX, targetY, existingPin = null, areaRect = null, options = {}) {
         window._defectFormHydrating = true;
+        window._defectPhotoHydrateToken = (window._defectPhotoHydrateToken || 0) + 1;
         window.clearTimeout(window._defectAutoApplyTimer);
         window._defectAutoApplyTimer = null;
 
@@ -12879,7 +12881,21 @@ document.addEventListener('DOMContentLoaded', () => {
                     window._pendingPrevRoundPhotos.length === 0 && existingPin.prevRoundPhotoIds && existingPin.prevRoundPhotoIds.length > 0
                 );
                 if (needsPhotoHydrate) renderDefectPhotoSection({ loading: true });
+                const hydrateToken = ++window._defectPhotoHydrateToken;
+                const hydratePinId = existingPin.id;
                 photoHydratePromise = ensureDefectPhotosLoaded(existingPin).then(() => {
+                    // 다른 결함으로 바뀌었거나, 사용자가 이미 사진을 지움/추가했으면 덮어쓰지 않음
+                    if (hydrateToken !== window._defectPhotoHydrateToken) return;
+                    const pinIdNow = document.getElementById('defectPinId')?.value;
+                    if (hydratePinId && pinIdNow && pinIdNow !== hydratePinId) return;
+                    if (window._defectPhotosDirty) {
+                        renderDefectPhotoSection();
+                        return;
+                    }
+                    if (!needsPhotoHydrate) {
+                        renderDefectPhotoSection();
+                        return;
+                    }
                     const loadedCurr = Array.isArray(existingPin.photos) ? existingPin.photos.filter(Boolean).slice() : [];
                     const loadedPrev = Array.isArray(existingPin.prevRoundPhotos)
                         ? existingPin.prevRoundPhotos.filter(Boolean).slice()
@@ -13529,6 +13545,29 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    /** 줄인 사진 개수 뒤쪽 슬롯(IndexedDB/클라우드/캐시)을 지운다. 삭제 후 다시 살아나는 원인 차단. */
+    async function pruneExtraDefectPhotos(defectId, keepCount, oldCount, kind) {
+        const keep = Math.max(0, Number(keepCount) || 0);
+        const old = Math.max(0, Number(oldCount) || 0);
+        if (!defectId || old <= keep) return;
+        const companyPhotos = (db && window.state.companyId)
+            ? db.collection('safety_app').doc(getCompanyDocId()).collection('photos')
+            : null;
+        const jobs = [];
+        for (let i = keep; i < old; i++) {
+            const photoDocId = getPhotoDocId(defectId, i, kind);
+            if (window._photoCache) delete window._photoCache[photoDocId];
+            _idbPersistedPhotoKeys.delete(photoDocId);
+            jobs.push(idbDelete('photos', photoDocId));
+            if (companyPhotos) {
+                jobs.push(companyPhotos.doc(photoDocId).delete().catch((e) => {
+                    console.warn(`사진 슬롯 정리 실패 (${photoDocId}):`, e);
+                }));
+            }
+        }
+        await Promise.all(jobs);
+    }
+
     // 결함 모달의 현재 입력값을 저장(신규 생성 또는 기존 결함 수정)하고 저장된 결함 객체를 반환
     async function commitDefectFromForm(options = {}) {
         const opts = (typeof options === 'object' && options) ? options : {};
@@ -13541,6 +13580,20 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const pinId = document.getElementById('defectPinId').value;
         const coords = window._pendingPinCoords || { x: 200, y: 200, targetX: 165, targetY: 235 };
+
+        let oldCurrPhotoCount = 0;
+        let oldPrevPhotoCount = 0;
+        if (pinId) {
+            const existing = (state.defects[key] || []).find(d => d.id === pinId);
+            if (existing) {
+                oldCurrPhotoCount = (Array.isArray(existing.photos) && existing.photos.length)
+                    || (Array.isArray(existing.photoIds) && existing.photoIds.length)
+                    || 0;
+                oldPrevPhotoCount = (Array.isArray(existing.prevRoundPhotos) && existing.prevRoundPhotos.length)
+                    || (Array.isArray(existing.prevRoundPhotoIds) && existing.prevRoundPhotoIds.length)
+                    || 0;
+            }
+        }
 
         const compVal = getDefectComboValue(
             document.getElementById('defectComponent'),
@@ -13693,9 +13746,12 @@ document.addEventListener('DOMContentLoaded', () => {
         const prevPhotosVal = Array.isArray(window._pendingPrevRoundPhotos)
             ? window._pendingPrevRoundPhotos.filter(Boolean)
             : [];
-        if (uploadPhotos && savedDefect && window._defectPhotosDirty) {
+        const photosWereDirty = !!window._defectPhotosDirty;
+        if (uploadPhotos && savedDefect && photosWereDirty) {
             if (photosVal.length > 0) await uploadDefectPhotos(savedDefect.id, photosVal);
             if (prevPhotosVal.length > 0) await uploadDefectPhotos(savedDefect.id, prevPhotosVal, 'prev');
+            await pruneExtraDefectPhotos(savedDefect.id, photosVal.length, oldCurrPhotoCount);
+            await pruneExtraDefectPhotos(savedDefect.id, prevPhotosVal.length, oldPrevPhotoCount, 'prev');
             window._defectPhotosDirty = false;
         }
 
