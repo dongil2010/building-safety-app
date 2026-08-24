@@ -2115,6 +2115,100 @@ document.addEventListener('DOMContentLoaded', () => {
         return { x: imgX, y: imgY };
     }
 
+    function getDefectMarkingImgCenter(defect) {
+        if (!defect) return null;
+        if (defect.shapeType === 'area' && defect.areaX1 !== undefined && defect.areaX2 !== undefined) {
+            return {
+                x: (Number(defect.areaX1) + Number(defect.areaX2)) / 2,
+                y: (Number(defect.areaY1) + Number(defect.areaY2)) / 2
+            };
+        }
+        const x = Number(defect.x);
+        const y = Number(defect.y);
+        if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+        const tx = Number(defect.targetX);
+        const ty = Number(defect.targetY);
+        if (Number.isFinite(tx) && Number.isFinite(ty)) {
+            return { x: (x + tx) / 2, y: (y + ty) / 2 };
+        }
+        return { x, y };
+    }
+
+    // 결함 수정 창이 가리는 영역을 피한 캔버스 포커스 지점
+    // 세로: 화면 상단 1/4 (하단 1/2 드로어 위) · 가로: 좌측 2/3 영역의 중앙
+    function getUncoveredCanvasFocusPoint() {
+        const cssW = state.canvasCssW || 0;
+        const cssH = state.canvasCssH || 0;
+        const fallback = { x: cssW / 2, y: cssH / 2 };
+        const canvas = (typeof elements !== 'undefined' && elements.planCanvas) || state.canvas;
+        if (!canvas || cssW < 8 || cssH < 8) return fallback;
+        const cRect = canvas.getBoundingClientRect();
+        let visL = 0;
+        let visT = 0;
+        let visR = cssW;
+        let visB = cssH;
+
+        if (window.matchMedia('(max-width: 768px) and (orientation: portrait)').matches) {
+            const drawerTop = window.innerHeight * 0.5;
+            visB = Math.max(64, Math.min(cssH, drawerTop - cRect.top - 12));
+            // 세로: 화면 상단 1/4 지점(캔버스 좌표). 드로어에 가려지지 않게 클램프
+            const quarterY = (window.innerHeight * 0.25) - cRect.top;
+            const focusY = Math.max(visT + 24, Math.min(visB - 24, quarterY));
+            return { x: (visL + visR) / 2, y: focusY };
+        }
+        if (window.matchMedia('(orientation: landscape) and (max-width: 1024px)').matches) {
+            const drawerLeft = window.innerWidth * (2 / 3);
+            visR = Math.max(64, Math.min(cssW, drawerLeft - cRect.left - 12));
+        } else {
+            const card = document.querySelector('#defectModal .defect-drawer-card');
+            if (card) {
+                const dRect = card.getBoundingClientRect();
+                if (dRect.width > 40 && dRect.left < cRect.right && dRect.top < cRect.bottom) {
+                    visR = Math.max(64, Math.min(cssW, dRect.left - cRect.left - 12));
+                }
+            }
+        }
+        if (visR - visL < 48 || visB - visT < 48) return fallback;
+        return { x: (visL + visR) / 2, y: (visT + visB) / 2 };
+    }
+
+    function panCanvasToDefectMarking(defect, options = {}) {
+        if (!defect || !state.canvas) return false;
+        const center = getDefectMarkingImgCenter(defect);
+        if (!center) return false;
+        const modalOpen = document.body.classList.contains('defect-modal-open')
+            || (typeof isDefectModalOpen === 'function' && isDefectModalOpen());
+        const useUncovered = options.uncovered === true || modalOpen;
+        const cur = state.view.scale || 1;
+        const targetScale = options.keepScale
+            ? cur
+            : Math.min(1.05, Math.max(0.7, Math.min(cur * 1.08, 1.05)));
+        const v = imgToViewCoords(center.x, center.y);
+        const cssW = state.canvasCssW || state.canvas.width;
+        const cssH = state.canvasCssH || state.canvas.height;
+        const focus = useUncovered
+            ? getUncoveredCanvasFocusPoint()
+            : { x: cssW / 2, y: cssH / 2 };
+        state.view.scale = targetScale;
+        state.view.offsetX = focus.x - v.x * targetScale;
+        state.view.offsetY = focus.y - v.y * targetScale;
+        if (elements.zoomScaleText) elements.zoomScaleText.textContent = `${Math.round(targetScale * 100)}%`;
+        return true;
+    }
+
+    function scheduleRevealMarkingAboveDrawer(defect) {
+        if (!defect) return;
+        const run = () => {
+            panCanvasToDefectMarking(defect, { uncovered: true, keepScale: true });
+            if (typeof drawCanvas === 'function') drawCanvas();
+        };
+        requestAnimationFrame(() => {
+            requestAnimationFrame(run);
+        });
+        setTimeout(run, 80);
+        setTimeout(run, 300);
+    }
+
     // 좌측 결함 목록에서 특정 결함을 클릭했을 때 캔버스를 그 위치로 이동·표시 (과도한 확대는 피함)
     window.focusDefectOnCanvas = function(defectId) {
         const defects = getCurrentFloorDefects();
@@ -2125,23 +2219,7 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
-        const centerImgX = defect.shapeType === 'area'
-            ? (defect.areaX1 + defect.areaX2) / 2
-            : (defect.x || 100);
-        const centerImgY = defect.shapeType === 'area'
-            ? (defect.areaY1 + defect.areaY2) / 2
-            : (defect.y || 100);
-
-        // 기존 1.6배는 너무 커서 위치만 알기 어렵게 확대됨 → 현재 배율 근처에서 살짝만 맞춤
-        const cur = state.view.scale || 1;
-        const targetScale = Math.min(1.05, Math.max(0.7, Math.min(cur * 1.08, 1.05)));
-        const v = imgToViewCoords(centerImgX, centerImgY);
-        const cssW = state.canvasCssW || state.canvas.width;
-        const cssH = state.canvasCssH || state.canvas.height;
-        state.view.scale = targetScale;
-        state.view.offsetX = cssW / 2 - v.x * targetScale;
-        state.view.offsetY = cssH / 2 - v.y * targetScale;
-        if (elements.zoomScaleText) elements.zoomScaleText.textContent = `${Math.round(targetScale * 100)}%`;
+        panCanvasToDefectMarking(defect);
 
         activeDragPin = defect;
         drawCanvas();
@@ -8660,6 +8738,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             }
             window.focusDefectOnCanvas(d.id);
+            const rep = d._representative || d;
+            const modalOpen = document.body.classList.contains('defect-modal-open')
+                || (typeof isDefectModalOpen === 'function' && isDefectModalOpen());
+            const mobileField = !!(window.matchMedia && window.matchMedia('(max-width: 1024px)').matches);
+            if ((modalOpen || mobileField) && typeof openAddDefectModal === 'function') {
+                openAddDefectModal(rep.x, rep.y, rep.targetX, rep.targetY, rep);
+            }
         });
         editBtn.addEventListener('click', (e) => {
             e.stopPropagation();
@@ -12294,6 +12379,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     renderDefectListPanel({ scrollToSelection: true });
                 }
                 scheduleRevealDefectListAboveDrawer();
+                if (existingPin) scheduleRevealMarkingAboveDrawer(existingPin);
             });
         }
     }
