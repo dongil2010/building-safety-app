@@ -8669,16 +8669,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (isCrack) {
             if (Array.isArray(d.crackMeasures) && d.crackMeasures.length) {
-                const bits = d.crackMeasures.map(m => {
-                    const w = withMm(m.width);
-                    const l = String(m.length || '').trim();
-                    const n = String(m.count || '').trim();
-                    const segs = [];
-                    if (w) segs.push(w);
-                    if (l) segs.push(`${l}m`);
-                    if (n) segs.push(`${n}개`);
-                    return segs.join('/');
-                }).filter(Boolean);
+                const bits = d.crackMeasures.map(m => formatCrackMeasurePair({
+                    width: m.width,
+                    length: m.length,
+                    count: m.count,
+                    join: inferMeasureJoin(d, m)
+                })).filter(Boolean);
                 if (bits.length) return bits.join(', ');
             }
             const cw = d.crackWidth;
@@ -9911,6 +9907,38 @@ document.addEventListener('DOMContentLoaded', () => {
         if (quickCauseGroup) quickCauseGroup.style.display = isGood ? 'none' : '';
     }
 
+    function normalizeMeasureJoin(join) {
+        return join === 'x' ? 'x' : '/';
+    }
+
+    function inferMeasureJoin(defect, measure) {
+        if (measure && (measure.join === 'x' || measure.join === '/')) return measure.join;
+        const size = String((defect && defect.size) || '');
+        if (/\d(?:\.\d+)?\s*[x×]\s*\d/i.test(size)) return 'x';
+        if (/W\s*=\s*[\d.]+\s*m\b/i.test(size) && /L\s*=\s*[\d.]+\s*m\b/i.test(size) && !/W\s*=\s*[\d.]+\s*mm\b/i.test(size)) return 'x';
+        return '/';
+    }
+
+    function formatCrackMeasurePair(m) {
+        const join = normalizeMeasureJoin(m && m.join);
+        const w = String((m && m.width) || '').trim();
+        const l = String((m && m.length) || '').trim();
+        const n = String((m && m.count) || '').trim();
+        if (join === 'x') {
+            if (w && l) return n ? `${w}x${l} ${n}개` : `${w}x${l}`;
+            if (w) return n ? `${w}m ${n}개` : `${w}m`;
+            if (l) return n ? `${l}m ${n}개` : `${l}m`;
+            if (n) return `${n}개`;
+            return '';
+        }
+        if (w && l && !n) return `${w}/${l}`;
+        const parts = [];
+        if (w) parts.push(`${w}mm`);
+        if (l) parts.push(`${l}m`);
+        if (n) parts.push(`${n}개`);
+        return parts.join(' / ');
+    }
+
     function getCrackMeasuresFromUi() {
         const list = document.getElementById('defectCrackMeasureList');
         if (!list) return [];
@@ -9918,7 +9946,8 @@ document.addEventListener('DOMContentLoaded', () => {
             const w = (row.querySelector('[data-crack-w]')?.value || '').trim();
             const l = (row.querySelector('[data-crack-l]')?.value || '').trim();
             const n = (row.querySelector('[data-crack-n]')?.value || '').trim();
-            return { width: w, length: l, count: n };
+            const join = normalizeMeasureJoin(row.querySelector('[data-crack-join]')?.dataset.join);
+            return { width: w, length: l, count: n, join };
         }).filter(m => m.width || m.length || m.count);
     }
 
@@ -9928,7 +9957,8 @@ document.addEventListener('DOMContentLoaded', () => {
         return Array.from(list.querySelectorAll('.defect-crack-measure-row')).map(row => ({
             width: (row.querySelector('[data-crack-w]')?.value || '').trim(),
             length: (row.querySelector('[data-crack-l]')?.value || '').trim(),
-            count: (row.querySelector('[data-crack-n]')?.value || '').trim()
+            count: (row.querySelector('[data-crack-n]')?.value || '').trim(),
+            join: normalizeMeasureJoin(row.querySelector('[data-crack-join]')?.dataset.join)
         }));
     }
 
@@ -9947,24 +9977,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function composeDefectSizeFromMeasures() {
         const rows = getCrackMeasuresFromUi();
-        const parts = [];
         if (rows.length) {
-            rows.forEach((m) => {
-                const bit = [];
-                if (m.width) bit.push(`W=${m.width}mm`);
-                if (m.length) bit.push(`L=${m.length}m`);
-                if (m.count) bit.push(`N=${m.count}`);
-                if (bit.length) parts.push(bit.join(' '));
-            });
-        } else {
-            const w = (document.getElementById('defectCrackWidth')?.value || '').trim();
-            const l = (document.getElementById('defectCrackLength')?.value || '').trim();
-            const n = (document.getElementById('defectItemCount')?.value || '').trim();
-            if (w) parts.push(`W=${w}mm`);
-            if (l) parts.push(`L=${l}m`);
-            if (n) parts.push(`N=${n}`);
+            return rows.map(formatCrackMeasurePair).filter(Boolean).join(', ');
         }
-        return parts.join(', ');
+        const w = (document.getElementById('defectCrackWidth')?.value || '').trim();
+        const l = (document.getElementById('defectCrackLength')?.value || '').trim();
+        const n = (document.getElementById('defectItemCount')?.value || '').trim();
+        return formatCrackMeasurePair({ width: w, length: l, count: n, join: '/' });
     }
 
     function syncSizeFromMeasureInputs() {
@@ -9978,6 +9997,21 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    function applyCrackMeasureJoinToRow(row, join) {
+        if (!row) return;
+        const mode = normalizeMeasureJoin(join);
+        const btn = row.querySelector('[data-crack-join]');
+        const wUnit = row.querySelector('[data-crack-w-unit]');
+        if (btn) {
+            btn.dataset.join = mode;
+            btn.textContent = mode;
+            btn.title = mode === 'x'
+                ? 'x 모드(폭·길이 모두 m) — 누르면 / 로 전환'
+                : '/ 모드(폭 mm · 길이 m) — 누르면 x 로 전환';
+        }
+        if (wUnit) wUnit.textContent = mode === 'x' ? 'm' : 'mm';
+    }
+
     function renderCrackMeasureRows(measures) {
         const list = document.getElementById('defectCrackMeasureList');
         if (!list) return;
@@ -9985,16 +10019,18 @@ document.addEventListener('DOMContentLoaded', () => {
             ? measures.map(m => ({
                 width: m.width || m.w || '',
                 length: m.length || m.l || '',
-                count: m.count || m.n || ''
+                count: m.count || m.n || '',
+                join: normalizeMeasureJoin(m.join)
             }))
-            : [{ width: '', length: '', count: '' }];
+            : [{ width: '', length: '', count: '', join: '/' }];
         list.innerHTML = rows.map((m, idx) => `
             <div class="defect-crack-measure-row" data-row-idx="${idx}">
                 <label class="defect-measure-btn">
                     <span class="defect-measure-name">폭</span>
                     <input type="text" data-crack-w inputmode="decimal" placeholder="직접입력" autocomplete="off" value="${String(m.width || '').replace(/"/g, '&quot;')}">
-                    <span class="defect-measure-unit">mm</span>
+                    <span class="defect-measure-unit" data-crack-w-unit>${m.join === 'x' ? 'm' : 'mm'}</span>
                 </label>
+                <button type="button" class="defect-measure-join-toggle" data-crack-join="${m.join}" title="${m.join === 'x' ? 'x 모드(폭·길이 모두 m) — 누르면 / 로 전환' : '/ 모드(폭 mm · 길이 m) — 누르면 x 로 전환'}">${m.join}</button>
                 <label class="defect-measure-btn">
                     <span class="defect-measure-name">길이</span>
                     <input type="text" data-crack-l inputmode="decimal" placeholder="직접입력" autocomplete="off" value="${String(m.length || '').replace(/"/g, '&quot;')}">
@@ -10016,6 +10052,15 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (typeof scheduleDefectAutoApply === 'function') scheduleDefectAutoApply();
             });
         });
+        list.querySelectorAll('[data-crack-join]').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const row = btn.closest('.defect-crack-measure-row');
+                const next = normalizeMeasureJoin(btn.dataset.join) === 'x' ? '/' : 'x';
+                applyCrackMeasureJoinToRow(row, next);
+                syncSizeFromMeasureInputs();
+                if (typeof scheduleDefectAutoApply === 'function') scheduleDefectAutoApply();
+            });
+        });
         list.querySelectorAll('.defect-crack-measure-del').forEach(btn => {
             btn.addEventListener('click', () => {
                 const row = btn.closest('.defect-crack-measure-row');
@@ -10023,7 +10068,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 const allRows = readCrackMeasureRowsFromDom();
                 if (idx >= 0 && allRows.length > 1) {
                     allRows.splice(idx, 1);
-                    renderCrackMeasureRows(allRows.length ? allRows : [{ width: '', length: '', count: '' }]);
+                    renderCrackMeasureRows(allRows.length ? allRows : [{ width: '', length: '', count: '', join: '/' }]);
                     syncSizeFromMeasureInputs();
                     if (typeof scheduleDefectAutoApply === 'function') scheduleDefectAutoApply();
                 }
@@ -10036,10 +10081,11 @@ document.addEventListener('DOMContentLoaded', () => {
         let measures = [];
         if (defect && Array.isArray(defect.crackMeasures) && defect.crackMeasures.length) {
             const hasRowCount = defect.crackMeasures.some(m => m && m.count != null && String(m.count).trim() !== '');
-            measures = defect.crackMeasures.map((m, i) => ({
+            measures = defect.crackMeasures.map((m) => ({
                 width: m.width != null ? String(m.width) : '',
                 length: m.length != null ? String(m.length) : '',
-                count: m.count != null ? String(m.count) : ''
+                count: m.count != null ? String(m.count) : '',
+                join: inferMeasureJoin(defect, m)
             }));
             if (!hasRowCount && String(defect.itemCount || '').trim()) {
                 const ns = String(defect.itemCount).split(/\s*\/\s*/).map(s => s.trim()).filter(Boolean);
@@ -10051,16 +10097,17 @@ document.addEventListener('DOMContentLoaded', () => {
             const ws = String(defect.crackWidth || '').split(/\s*\/\s*/).map(s => s.trim()).filter(Boolean);
             const ls = String(defect.crackLength || '').split(/\s*\/\s*/).map(s => s.trim()).filter(Boolean);
             const ns = String(defect.itemCount || '').split(/\s*\/\s*/).map(s => s.trim()).filter(Boolean);
+            const join = inferMeasureJoin(defect, null);
             const n = Math.max(ws.length, ls.length, ns.length, 0);
             if (n > 0) {
                 for (let i = 0; i < n; i++) {
-                    measures.push({ width: ws[i] || '', length: ls[i] || '', count: ns[i] || (i === 0 && ns.length === 1 ? ns[0] : '') });
+                    measures.push({ width: ws[i] || '', length: ls[i] || '', count: ns[i] || (i === 0 && ns.length === 1 ? ns[0] : ''), join });
                 }
             } else if (String(defect.itemCount || '').trim()) {
-                measures.push({ width: '', length: '', count: String(defect.itemCount).trim() });
+                measures.push({ width: '', length: '', count: String(defect.itemCount).trim(), join });
             }
         }
-        renderCrackMeasureRows(measures.length ? measures : [{ width: '', length: '', count: '' }]);
+        renderCrackMeasureRows(measures.length ? measures : [{ width: '', length: '', count: '', join: '/' }]);
     }
 
     function bindDefectMeasureInputs() {
@@ -10069,7 +10116,7 @@ document.addEventListener('DOMContentLoaded', () => {
             addBtn.dataset.measureBound = '1';
             addBtn.addEventListener('click', () => {
                 const rows = readCrackMeasureRowsFromDom();
-                rows.push({ width: '', length: '', count: '' });
+                rows.push({ width: '', length: '', count: '', join: '/' });
                 renderCrackMeasureRows(rows);
                 if (typeof scheduleDefectAutoApply === 'function') scheduleDefectAutoApply();
             });
@@ -10084,7 +10131,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!document.getElementById('defectCrackMeasureList')?.dataset.inited) {
             const list = document.getElementById('defectCrackMeasureList');
             if (list) list.dataset.inited = '1';
-            renderCrackMeasureRows([{ width: '', length: '', count: '' }]);
+            renderCrackMeasureRows([{ width: '', length: '', count: '', join: '/' }]);
         }
     }
 
@@ -14591,16 +14638,20 @@ document.addEventListener('DOMContentLoaded', () => {
             case 'category': return d.category === '구조체' ? '○' : '-';
             case 'size': {
                 if (isGood) return '-';
+                if (Array.isArray(d.crackMeasures) && d.crackMeasures.length) {
+                    const bits = d.crackMeasures.map(m => formatCrackMeasurePair({
+                        width: m.width,
+                        length: m.length,
+                        count: m.count,
+                        join: inferMeasureJoin(d, m)
+                    })).filter(Boolean);
+                    if (bits.length) return bits.join(', ');
+                }
                 const w = (d.crackWidth !== undefined && d.crackWidth !== null && String(d.crackWidth).trim() !== '') ? String(d.crackWidth).trim() : '';
                 const l = (d.crackLength !== undefined && d.crackLength !== null && String(d.crackLength).trim() !== '') ? String(d.crackLength).trim() : '';
                 const n = (d.itemCount !== undefined && d.itemCount !== null && String(d.itemCount).trim() !== '') ? String(d.itemCount).trim() : '';
                 if (w || l || n) {
-                    const parts = [];
-                    if (w) parts.push(`${w}mm`);
-                    if (l) parts.push(`${l}m`);
-                    if (n) parts.push(`${n}개`);
-                    if (isCrack && w && l && !n) return `${w}/${l}`;
-                    return parts.join(' / ');
+                    return formatCrackMeasurePair({ width: w, length: l, count: n, join: inferMeasureJoin(d, null) }) || '-';
                 }
                 const sizeVal = (d.size != null) ? String(d.size).trim() : '';
                 return sizeVal || '-';
@@ -14851,16 +14902,11 @@ document.addEventListener('DOMContentLoaded', () => {
             case 'cause':
                 return textInput('cause', d.cause || '', '원인');
             case 'size': {
-                const isCrack = d.defectType === '균열';
                 const isGood = d.defectType === '상태양호';
                 if (isGood) return '<span style="color:#a3a3a3;">-</span>';
-                let val = '';
-                if (isCrack && (d.crackWidth !== undefined && d.crackWidth !== '' || d.crackLength !== undefined && d.crackLength !== '')) {
-                    val = `${d.crackWidth !== undefined && d.crackWidth !== '' ? d.crackWidth : '-'}/${d.crackLength !== undefined && d.crackLength !== '' ? d.crackLength : '-'}`;
-                } else {
-                    val = (d.size != null) ? String(d.size) : '';
-                }
-                return textInput('size', val, isCrack ? '폭/길이' : '결함크기');
+                const val = getSurveyCellText('size', d, {}) || '';
+                const display = val === '-' ? '' : val;
+                return textInput('size', display, '규모');
             }
             case 'crackWidth':
                 return (d.defectType === '균열')
@@ -15062,12 +15108,7 @@ document.addEventListener('DOMContentLoaded', () => {
             case 'cause': return surveyCharLen(d.cause);
             case 'size': {
                 if (d.defectType === '상태양호') return 0;
-                if (d.defectType === '균열') {
-                    const w = d.crackWidth != null ? String(d.crackWidth) : '';
-                    const l = d.crackLength != null ? String(d.crackLength) : '';
-                    if (w || l) return surveyCharLen(`${w}/${l}`);
-                }
-                return surveyCharLen(d.size);
+                return surveyCharLen(getSurveyCellText('size', d, ctx));
             }
             case 'crackWidth': return d.defectType === '균열' ? surveyCharLen(d.crackWidth) : 0;
             case 'crackLength': return d.defectType === '균열' ? surveyCharLen(d.crackLength) : 0;

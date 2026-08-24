@@ -4317,12 +4317,33 @@ body {
 }
 .defect-crack-measure-row {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 0.85fr) auto;
-    gap: 0.28rem;
+    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr) minmax(0, 0.8fr) auto;
+    gap: 0.22rem;
     align-items: stretch;
 }
 .defect-crack-measure-row .defect-measure-btn {
     min-width: 0;
+}
+.defect-measure-join-toggle {
+    align-self: stretch;
+    min-width: 2rem;
+    padding: 0 0.2rem;
+    border: 1.5px solid #94a3b8;
+    border-radius: 9px;
+    background: #f8fafc;
+    color: #0f172a;
+    font-size: 0.95rem;
+    font-weight: 900;
+    cursor: pointer;
+    line-height: 1;
+}
+.defect-measure-join-toggle[data-join="x"] {
+    border-color: #0369a1;
+    background: #e0f2fe;
+    color: #0369a1;
+}
+.defect-measure-join-toggle:hover {
+    border-color: #475569;
 }
 .defect-crack-measure-del {
     display: inline-flex;
