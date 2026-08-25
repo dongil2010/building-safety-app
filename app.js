@@ -376,9 +376,140 @@ document.addEventListener('DOMContentLoaded', () => {
         return (state.view.scale || 1) <= fitScale * 1.08;
     }
 
-    function clearFloorDrawingHiPatch() {
-        state.floorDrawingHiPatch = null;
+    function clearFloorDrawingHiPatch(immediate = true) {
         viewportHiPatchToken++;
+        if (!state.floorDrawingHiPatch && !_floorBlend) return;
+        if (immediate) {
+            cancelFloorDrawingBlend();
+            state.floorDrawingHiPatch = null;
+            return;
+        }
+        applyFloorDrawingTarget(undefined, null);
+    }
+
+    const FLOOR_DRAWING_BLEND_MS = 320;
+    let _floorBlendRaf = null;
+    /** @type {{ start:number, duration:number, fromBg:Image|null, toBg:Image|null, fromPatch:object|null, toPatch:object|null, progress:number }|null} */
+    let _floorBlend = null;
+
+    function easeInOutCubic(t) {
+        return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+    }
+
+    function cancelFloorDrawingBlend() {
+        if (_floorBlendRaf) {
+            cancelAnimationFrame(_floorBlendRaf);
+            _floorBlendRaf = null;
+        }
+        _floorBlend = null;
+    }
+
+    function commitFloorBlendNow() {
+        if (!_floorBlend) return;
+        if (_floorBlend.toBg) state.bgImage = _floorBlend.toBg;
+        state.floorDrawingHiPatch = _floorBlend.toPatch;
+        cancelFloorDrawingBlend();
+    }
+
+    function floorImagesEquivalent(a, b) {
+        if (a === b) return true;
+        if (!a || !b) return false;
+        if (a.src && b.src) return a.src === b.src;
+        return false;
+    }
+
+    function floorPatchesEquivalent(a, b) {
+        if (a === b) return true;
+        if (!a || !b) return false;
+        return a.canvas === b.canvas
+            && a.x === b.x && a.y === b.y && a.w === b.w && a.h === b.h;
+    }
+
+    function tickFloorDrawingBlend() {
+        if (!_floorBlend) return;
+        const elapsed = performance.now() - _floorBlend.start;
+        const t = easeInOutCubic(Math.min(1, elapsed / _floorBlend.duration));
+        _floorBlend.progress = t;
+        drawCanvas();
+        if (t >= 1) {
+            if (_floorBlend.toBg) state.bgImage = _floorBlend.toBg;
+            state.floorDrawingHiPatch = _floorBlend.toPatch;
+            cancelFloorDrawingBlend();
+            drawCanvas();
+            return;
+        }
+        _floorBlendRaf = requestAnimationFrame(tickFloorDrawingBlend);
+    }
+
+    function startFloorDrawingBlend(fromBg, toBg, fromPatch, toPatch) {
+        if (_floorBlend) commitFloorBlendNow();
+        _floorBlend = {
+            start: performance.now(),
+            duration: FLOOR_DRAWING_BLEND_MS,
+            fromBg,
+            toBg,
+            fromPatch,
+            toPatch,
+            progress: 0
+        };
+        tickFloorDrawingBlend();
+    }
+
+    /**
+     * 도면 배경·고해상도 패치 교체 — 즉시 점프 대신 크로스페이드
+     * @param {Image|null|undefined} nextBg undefined면 배경 유지
+     * @param {object|null|undefined} nextPatch undefined면 패치 유지, null이면 제거
+     */
+    function applyFloorDrawingTarget(nextBg, nextPatch, opts) {
+        const options = opts || {};
+        const immediate = !!options.immediate;
+        const toBg = nextBg === undefined ? state.bgImage : nextBg;
+        const toPatch = nextPatch === undefined ? state.floorDrawingHiPatch : nextPatch;
+
+        if (immediate || !state.bgImage) {
+            cancelFloorDrawingBlend();
+            if (toBg) state.bgImage = toBg;
+            state.floorDrawingHiPatch = toPatch;
+            drawCanvas();
+            return;
+        }
+
+        const fromBg = state.bgImage;
+        const fromPatch = state.floorDrawingHiPatch;
+        if (floorImagesEquivalent(fromBg, toBg) && floorPatchesEquivalent(fromPatch, toPatch)) return;
+
+        startFloorDrawingBlend(fromBg, toBg, fromPatch, toPatch);
+    }
+
+    function drawFloorPlanLayers(ctx, imgW, imgH) {
+        const drawBg = (img, alpha) => {
+            if (!img || alpha <= 0.001) return;
+            ctx.save();
+            ctx.globalAlpha = alpha;
+            ctx.drawImage(img, 0, 0, imgW, imgH);
+            ctx.restore();
+        };
+        const drawPatch = (patch, alpha) => {
+            if (!patch || !patch.canvas || patch.w <= 0 || patch.h <= 0 || alpha <= 0.001) return;
+            ctx.save();
+            ctx.globalAlpha = alpha;
+            ctx.drawImage(patch.canvas, patch.x, patch.y, patch.w, patch.h);
+            ctx.restore();
+        };
+
+        if (!_floorBlend) {
+            if (state.bgImage) {
+                drawBg(state.bgImage, 1);
+                drawPatch(state.floorDrawingHiPatch, 1);
+            }
+            return;
+        }
+
+        const t = _floorBlend.progress || 0;
+        drawBg(_floorBlend.fromBg, 1 - t);
+        drawBg(_floorBlend.toBg, t);
+        drawPatch(_floorBlend.fromPatch, 1 - t);
+        drawPatch(_floorBlend.toPatch, t);
     }
 
     function floorHasPdfSourceSync(bldg, floorCode) {
@@ -390,12 +521,32 @@ document.addEventListener('DOMContentLoaded', () => {
         return !!(_idbPersistedPdfKeys && _idbPersistedPdfKeys.has(idbKey));
     }
 
+    /** PDF 원본이 있거나 곧 IDB/소스에서 복원될 가능성 (모바일 초기 로드 포함) */
+    function floorMayHavePdfSource(bldg, floorCode) {
+        if (!bldg || !floorCode) return false;
+        if (floorHasPdfSourceSync(bldg, floorCode)) return true;
+        const src = bldg.floorDrawingSources && bldg.floorDrawingSources[floorCode];
+        if (src && typeof window.isPdfDrawingDataUrl === 'function' && window.isPdfDrawingDataUrl(src)) {
+            return true;
+        }
+        const key = `${bldg.id}_${floorCode}`;
+        if (_idbPersistedSourceKeys && _idbPersistedSourceKeys.has(key)) return true;
+        if (_idbPersistedPdfKeys && _idbPersistedPdfKeys.has(key)) return true;
+        return false;
+    }
+
     function shouldUseViewportTilesForCurrentFloor() {
         if (window.BSA_USE_VIEWPORT_TILES === false) return false;
         if (window.BSA_PDF_VECTOR && window.BSA_PDF_VECTOR.useViewportTiles === false) return false;
         const bldg = state.currentBuilding;
         const fc = state.currentFloor;
-        return floorHasPdfSourceSync(bldg, fc);
+        return floorMayHavePdfSource(bldg, fc);
+    }
+
+    function isMobileMapViewport() {
+        const cw = state.canvasCssW || 0;
+        const ch = state.canvasCssH || 0;
+        return Math.min(cw, ch) <= 520 || (window.innerWidth || 0) <= 768;
     }
 
     function canvasCssToImgCoords(cx, cy) {
@@ -439,7 +590,16 @@ document.addEventListener('DOMContentLoaded', () => {
         viewportHiPatchTimer = setTimeout(() => {
             viewportHiPatchTimer = null;
             syncViewportHiPatch();
-        }, 160);
+        }, 220);
+    }
+
+    function flushViewportHiPatchSync() {
+        if (!shouldUseViewportTilesForCurrentFloor()) return;
+        if (viewportHiPatchTimer) {
+            clearTimeout(viewportHiPatchTimer);
+            viewportHiPatchTimer = null;
+        }
+        syncViewportHiPatch();
     }
 
     async function syncViewportHiPatch() {
@@ -456,36 +616,35 @@ document.addEventListener('DOMContentLoaded', () => {
         const cw = state.canvasCssW || 800;
         const ch = state.canvasCssH || 600;
         const dpr = state.canvasDpr || 1;
+        const scale = Math.max(state.view.scale || 1, 0.05);
         const screenLong = Math.max(cw, ch) * dpr;
         const regionLong = Math.max(region.w, region.h, 1);
-        // 화면 1px당 필요한 원본 픽셀 ≈ scale×dpr (줌인할수록 고해상도 패치 필요)
-        const zoomDemand = screenLong / regionLong;
+        // 화면 1px당 원본 픽셀 ≈ scale×dpr (모바일 소형 캔버스에서 region만으로는 demand가 과소 추정될 수 있음)
+        const zoomDemand = Math.max(screenLong / regionLong, scale * dpr);
 
         if (zoomDemand <= 1.08) {
-            if (state.floorDrawingHiPatch) {
-                state.floorDrawingHiPatch = null;
-                drawCanvas();
+            if (state.floorDrawingHiPatch || (_floorBlend && _floorBlend.toPatch)) {
+                applyFloorDrawingTarget(undefined, null);
             }
             return;
         }
 
-        let pdfUrl = (typeof window.getFloorPdfDataUrl === 'function')
-            ? window.getFloorPdfDataUrl(bldg, fc)
-            : null;
-        if (!pdfUrl && typeof idbGet === 'function') {
-            const cachedPdf = await idbGet('floorDrawingPdfs', `${bldg.id}_${fc}`);
-            if (cachedPdf) {
-                if (typeof window.ensureFloorDrawingPdfs === 'function') window.ensureFloorDrawingPdfs(bldg);
-                else if (!bldg.floorDrawingPdfs) bldg.floorDrawingPdfs = {};
-                bldg.floorDrawingPdfs[fc] = cachedPdf;
-                pdfUrl = cachedPdf;
-            }
+        let pdfUrl = null;
+        if (typeof window.resolveFloorPdfDataUrlAsync === 'function') {
+            pdfUrl = await window.resolveFloorPdfDataUrlAsync(bldg, fc);
+        } else if (typeof resolveBuildingFloorPdf === 'function') {
+            pdfUrl = await resolveBuildingFloorPdf(bldg, fc);
+        } else if (typeof window.getFloorPdfDataUrl === 'function') {
+            pdfUrl = window.getFloorPdfDataUrl(bldg, fc);
         }
         if (!pdfUrl) return;
         if (token !== viewportHiPatchToken) return;
         if (state.currentFloor !== fc || state.currentBuildingId !== bldg.id) return;
 
-        const outLong = Math.min(16000, Math.max(1024, Math.ceil(regionLong * zoomDemand * 1.15)));
+        const mobile = isMobileMapViewport();
+        const maxPatchLong = mobile ? 4096 : 16000;
+        const minPatchLong = mobile ? 768 : 1024;
+        let outLong = Math.min(maxPatchLong, Math.max(minPatchLong, Math.ceil(regionLong * zoomDemand * 1.15)));
 
         const aspect = region.w / region.h;
         let outW;
@@ -500,20 +659,40 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (typeof window.renderPdfDataUrlRegion !== 'function') return;
 
-        try {
-            const canvas = await window.renderPdfDataUrlRegion(pdfUrl, ref.w, ref.h, region, outW, outH);
-            if (token !== viewportHiPatchToken) return;
-            if (state.currentFloor !== fc || state.currentBuildingId !== bldg.id) return;
-            state.floorDrawingHiPatch = {
+        const applyPatch = (canvas) => {
+            if (!canvas || token !== viewportHiPatchToken) return false;
+            if (state.currentFloor !== fc || state.currentBuildingId !== bldg.id) return false;
+            applyFloorDrawingTarget(undefined, {
                 canvas,
                 x: region.x,
                 y: region.y,
                 w: region.w,
                 h: region.h,
-            };
-            drawCanvas();
+            });
+            return true;
+        };
+
+        try {
+            const pdfCacheKey = `${bldg.id}_${fc}`;
+            let canvas = await window.renderPdfDataUrlRegion(pdfUrl, ref.w, ref.h, region, outW, outH, pdfCacheKey);
+            if (applyPatch(canvas)) return;
         } catch (e) {
             console.warn('뷰포트 고해상도 패치 실패:', e);
+        }
+
+        // 모바일 GPU 메모리 한도 — 축소 후 1회 재시도
+        if (outLong > 1536) {
+            const shrink = 1536 / outLong;
+            outLong = 1536;
+            outW = Math.max(1, Math.round(outW * shrink));
+            outH = Math.max(1, Math.round(outH * shrink));
+            try {
+                const pdfCacheKey = `${bldg.id}_${fc}`;
+                const canvas = await window.renderPdfDataUrlRegion(pdfUrl, ref.w, ref.h, region, outW, outH, pdfCacheKey);
+                applyPatch(canvas);
+            } catch (e2) {
+                console.warn('뷰포트 고해상도 패치(축소) 실패:', e2);
+            }
         }
     }
 
@@ -3236,7 +3415,9 @@ document.addEventListener('DOMContentLoaded', () => {
         if (typeof window.pickFloorDrawingTierDim !== 'function') return 4000;
         const cw = state.canvasCssW || (state.canvas ? Math.round(state.canvas.width / (state.canvasDpr || 1)) : 800);
         const ch = state.canvasCssH || (state.canvas ? Math.round(state.canvas.height / (state.canvasDpr || 1)) : 600);
-        return window.pickFloorDrawingTierDim(state.view.scale, cw, ch, state.canvasDpr || 1, floorDrawingActiveTierDim);
+        const dims = getFloorPlanDisplayDims();
+        const refLong = Math.max(dims.w || 4000, dims.h || 4000, 4000);
+        return window.pickFloorDrawingTierDim(state.view.scale, cw, ch, state.canvasDpr || 1, floorDrawingActiveTierDim, refLong);
     }
 
     function cacheFloorDrawingTierToDevice(bldg, floorCode, tierDim, dataUrl) {
@@ -3246,6 +3427,17 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!bldg.floorDrawingTiers[floorCode]) bldg.floorDrawingTiers[floorCode] = {};
         bldg.floorDrawingTiers[floorCode][dimKey] = dataUrl;
         const idbKey = `${bldg.id}_${floorCode}`;
+        if (Number(tierDim) <= 4000) {
+            if (!bldg.floorDrawings) bldg.floorDrawings = {};
+            bldg.floorDrawings[floorCode] = dataUrl;
+            if (!_idbPersistedDrawingKeys.has(idbKey) && !_idbPendingDrawingKeys.has(idbKey)) {
+                _idbPendingDrawingKeys.add(idbKey);
+                idbSet('floorDrawings', idbKey, dataUrl).then((ok) => {
+                    _idbPendingDrawingKeys.delete(idbKey);
+                    if (ok) _idbPersistedDrawingKeys.add(idbKey);
+                });
+            }
+        }
         _idbPersistedTierKeys.delete(idbKey);
         idbGet('floorDrawingTiers', idbKey).then((existing) => {
             const merged = { ...(existing || {}), [dimKey]: dataUrl };
@@ -3287,6 +3479,9 @@ document.addEventListener('DOMContentLoaded', () => {
     function clearFloorDrawingTierCacheForFloor(bldgId, floorCode, includeSource = false) {
         if (!bldgId || !floorCode) return;
         const prefix = `${bldgId}_${floorCode}_`;
+        if (typeof window.invalidatePdfPageCache === 'function') {
+            window.invalidatePdfPageCache(`${bldgId}_${floorCode}`);
+        }
         if (state.floorDrawingTierImageCache) {
             Object.keys(state.floorDrawingTierImageCache).forEach((k) => {
                 if (k.startsWith(prefix)) delete state.floorDrawingTierImageCache[k];
@@ -3367,7 +3562,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (pdfUrl && typeof window.renderPdfDataUrlToImage === 'function') {
             try {
-                const rendered = await window.renderPdfDataUrlToImage(pdfUrl, tierDim, 2500000);
+                const pdfCacheKey = `${bldg.id}_${floorCode}`;
+                const rendered = await window.renderPdfDataUrlToImage(pdfUrl, tierDim, 2500000, pdfCacheKey);
                 if (rendered) {
                     cacheFloorDrawingTierToDevice(bldg, floorCode, tierDim, rendered);
                     return rendered;
@@ -3415,7 +3611,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (shouldUseViewportTilesForCurrentFloor()) {
             await syncViewportHiPatch();
-            return;
+            if (state.floorDrawingHiPatch) return;
         }
 
         const wantDim = pickFloorDrawingTierDimForView();
@@ -3430,14 +3626,13 @@ document.addEventListener('DOMContentLoaded', () => {
         const cacheKey = `${bldg.id}_${fc}_${wantDim}`;
         const cached = state.floorDrawingTierImageCache[cacheKey];
         if (cached && cached.complete && (cached.naturalWidth || cached.width) > 0) {
-            state.bgImage = cached;
+            applyFloorDrawingTarget(cached, null);
             floorDrawingActiveTierDim = wantDim;
             const ndtKey = `${state.currentBuildingId}_${fc}`;
             if (ndtBgImage && !(state.ndtImages && state.ndtImages[ndtKey])) {
                 ndtBgImage = cached;
                 drawNdtCanvas();
             }
-            drawCanvas();
             scheduleFloorDrawingTierSync();
             return;
         }
@@ -3447,14 +3642,13 @@ document.addEventListener('DOMContentLoaded', () => {
             if (loadToken !== floorDrawingTierLoadToken) return;
             if (state.currentFloor !== fc || state.currentBuildingId !== bldg.id) return;
             state.floorDrawingTierImageCache[cacheKey] = img;
-            state.bgImage = img;
+            applyFloorDrawingTarget(img, null);
             floorDrawingActiveTierDim = wantDim;
             const ndtKey = `${state.currentBuildingId}_${fc}`;
             if (ndtBgImage && !(state.ndtImages && state.ndtImages[ndtKey])) {
                 ndtBgImage = img;
                 drawNdtCanvas();
             }
-            drawCanvas();
             scheduleFloorDrawingTierSync();
         };
         img.onerror = () => {
@@ -3467,7 +3661,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function finishRegisteredFloorDrawingLoadFailed(floorCode) {
         if (state.currentFloor !== floorCode) return;
+        cancelFloorDrawingBlend();
         state.bgImage = null;
+        state.floorDrawingHiPatch = null;
         resizeCanvas();
         drawCanvas();
         if (typeof window.showToast === 'function') {
@@ -3475,18 +3671,43 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    async function renderPdfFloorWithPreview(bldg, floorCode, pdfUrl, tryLoadImage, loadToken) {
+        if (!pdfUrl || !bldg || !floorCode) return null;
+        const pdfCacheKey = `${bldg.id}_${floorCode}`;
+        const previewDim = window.FLOOR_DRAWING_PREVIEW_DIM || 1600;
+        const has4000 = (bldg.floorDrawingTiers && bldg.floorDrawingTiers[floorCode] && bldg.floorDrawingTiers[floorCode]['4000'])
+            || (bldg.floorDrawings && bldg.floorDrawings[floorCode]);
+        if (!has4000 && typeof window.renderPdfDataUrlToImage === 'function') {
+            try {
+                const preview = await window.renderPdfDataUrlToImage(pdfUrl, previewDim, 900000, pdfCacheKey);
+                if (preview && loadToken === floorDrawingTierLoadToken && state.currentFloor === floorCode) {
+                    tryLoadImage(preview, false);
+                }
+            } catch (e) {
+                console.warn('도면 PDF 미리보기 렌더 실패:', e);
+            }
+        }
+        return resolveFloorDrawingTierDataUrl(bldg, floorCode, 4000);
+    }
+
     function loadFloorDrawing(floorCode, options) {
         const opts = options || {};
         const preserveView = !!opts.preserveView
             || (!opts.forceFit && state.currentFloor === floorCode && !!state.bgImage && !!state.floorPlanRef);
+        const prevBuildingId = state.currentBuildingId;
         state.currentFloor = floorCode;
         if (state.floorPlanRef && state.floorPlanRef.floorCode !== floorCode) {
             state.floorPlanRef = null;
         }
-        state.bgImage = null;
-        clearFloorDrawingHiPatch();
+        // 같은 건물 내 층 전환: 이전 도면을 유지해 빈 화면 시간 최소화
+        if (opts.forceClear || prevBuildingId !== state.currentBuildingId) {
+            cancelFloorDrawingBlend();
+            state.bgImage = null;
+            state.floorDrawingHiPatch = null;
+        }
+        clearFloorDrawingHiPatch(true);
         floorDrawingActiveTierDim = null;
-        floorDrawingTierLoadToken++;
+        const loadToken = ++floorDrawingTierLoadToken;
 
         const bldg = state.currentBuilding;
         let dataUrl = null;
@@ -3502,7 +3723,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const tryLoadImage = (srcUrl, isFallback = false) => {
             const img = new Image();
             img.onload = () => {
-                state.bgImage = img;
+                applyFloorDrawingTarget(img, null, { immediate: !state.bgImage });
                 floorDrawingActiveTierDim = 4000;
                 if (bldg && bldg.id) updateFloorPlanRefFromImage(img, bldg.id, floorCode);
                 if (!state.floorDrawingTierImageCache) state.floorDrawingTierImageCache = {};
@@ -3546,77 +3767,76 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (!dataUrl && hasFloorRegistered) {
             (async () => {
+                if (loadToken !== floorDrawingTierLoadToken || state.currentFloor !== floorCode) return;
                 const idbKey = `${bldg.id}_${floorCode}`;
-                const idbTiers = await idbGet('floorDrawingTiers', idbKey);
+                const companyDrawings = (db && window.state.companyId)
+                    ? db.collection('safety_app').doc(getCompanyDocId()).collection('floorDrawings')
+                    : null;
+
+                const [idbTiers, cachedUrl, cachedPdf, cachedSource, cloudSnap] = await Promise.all([
+                    idbGet('floorDrawingTiers', idbKey),
+                    idbGet('floorDrawings', idbKey),
+                    idbGet('floorDrawingPdfs', idbKey),
+                    idbGet('floorDrawingSources', idbKey),
+                    companyDrawings ? companyDrawings.doc(idbKey).get().catch(() => null) : Promise.resolve(null)
+                ]);
+
+                if (loadToken !== floorDrawingTierLoadToken || state.currentFloor !== floorCode) return;
+
                 if (idbTiers && idbTiers['4000']) {
                     if (!bldg.floorDrawingTiers) bldg.floorDrawingTiers = {};
                     bldg.floorDrawingTiers[floorCode] = { ...idbTiers, ...(bldg.floorDrawingTiers[floorCode] || {}) };
                     _idbPersistedTierKeys.add(idbKey);
-                    if (state.currentFloor === floorCode) tryLoadImage(idbTiers['4000'], false);
+                    tryLoadImage(idbTiers['4000'], false);
                     return;
                 }
 
-                const cachedUrl = await idbGet('floorDrawings', idbKey);
                 if (cachedUrl) {
                     if (!bldg.floorDrawings) bldg.floorDrawings = {};
                     bldg.floorDrawings[floorCode] = cachedUrl;
-                    if (state.currentFloor === floorCode) tryLoadImage(cachedUrl, false);
+                    tryLoadImage(cachedUrl, false);
                     return;
                 }
 
-                const cachedPdf = await idbGet('floorDrawingPdfs', idbKey);
-                if (cachedPdf) {
+                const cloudUrl = (cloudSnap && cloudSnap.exists && cloudSnap.data()) ? cloudSnap.data().dataUrl : null;
+                if (cloudUrl) {
+                    if (!bldg.floorDrawings) bldg.floorDrawings = {};
+                    bldg.floorDrawings[floorCode] = cloudUrl;
+                    idbSet('floorDrawings', idbKey, cloudUrl);
+                    tryLoadImage(cloudUrl, false);
+                    return;
+                }
+
+                let pdfUrl = cachedPdf || null;
+                if (pdfUrl) {
                     if (typeof window.ensureFloorDrawingPdfs === 'function') window.ensureFloorDrawingPdfs(bldg);
                     else if (!bldg.floorDrawingPdfs) bldg.floorDrawingPdfs = {};
-                    bldg.floorDrawingPdfs[floorCode] = cachedPdf;
-                    const rendered = await resolveFloorDrawingTierDataUrl(bldg, floorCode, 4000);
-                    if (rendered && state.currentFloor === floorCode) {
-                        tryLoadImage(rendered, false);
-                        return;
-                    }
+                    bldg.floorDrawingPdfs[floorCode] = pdfUrl;
                 }
 
-                const resolvedPdf = await resolveBuildingFloorPdf(bldg, floorCode);
-                if (resolvedPdf) {
-                    await applyResolvedPdfToBuilding(bldg, floorCode, resolvedPdf);
-                    const rendered = await resolveFloorDrawingTierDataUrl(bldg, floorCode, 4000);
-                    if (rendered && state.currentFloor === floorCode) {
-                        tryLoadImage(rendered, false);
-                        return;
-                    }
+                if (!pdfUrl) {
+                    pdfUrl = await resolveBuildingFloorPdf(bldg, floorCode);
+                    if (pdfUrl) await applyResolvedPdfToBuilding(bldg, floorCode, pdfUrl);
                 }
 
-                const cachedSource = await idbGet('floorDrawingSources', idbKey);
+                if (pdfUrl) {
+                    const rendered = await renderPdfFloorWithPreview(bldg, floorCode, pdfUrl, tryLoadImage, loadToken);
+                    if (rendered && loadToken === floorDrawingTierLoadToken && state.currentFloor === floorCode) {
+                        tryLoadImage(rendered, false);
+                    }
+                    return;
+                }
+
                 if (cachedSource) {
                     cacheFloorDrawingSourceToDevice(bldg, floorCode, cachedSource);
                     const rendered = await resolveFloorDrawingTierDataUrl(bldg, floorCode, 4000);
-                    if (rendered && state.currentFloor === floorCode) {
+                    if (rendered && loadToken === floorDrawingTierLoadToken && state.currentFloor === floorCode) {
                         tryLoadImage(rendered, false);
-                        return;
                     }
+                    return;
                 }
 
-                if (db && window.state.companyId) {
-                    db.collection('safety_app').doc(getCompanyDocId())
-                        .collection('floorDrawings').doc(idbKey).get()
-                        .then(doc => {
-                            const fetchedUrl = doc.exists ? doc.data().dataUrl : null;
-                            if (fetchedUrl) {
-                                if (!bldg.floorDrawings) bldg.floorDrawings = {};
-                                bldg.floorDrawings[floorCode] = fetchedUrl;
-                                idbSet('floorDrawings', idbKey, fetchedUrl);
-                            }
-                            if (state.currentFloor === floorCode) {
-                                if (fetchedUrl) tryLoadImage(fetchedUrl, false);
-                                else finishRegisteredFloorDrawingLoadFailed(floorCode);
-                            }
-                        })
-                        .catch(() => {
-                            if (state.currentFloor === floorCode) {
-                                finishRegisteredFloorDrawingLoadFailed(floorCode);
-                            }
-                        });
-                } else if (state.currentFloor === floorCode) {
+                if (loadToken === floorDrawingTierLoadToken && state.currentFloor === floorCode) {
                     finishRegisteredFloorDrawingLoadFailed(floorCode);
                 }
             })();
@@ -3861,11 +4081,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         if (state.bgImage) {
-            ctx.drawImage(state.bgImage, 0, 0, imgW, imgH);
-            const hiPatch = state.floorDrawingHiPatch;
-            if (hiPatch && hiPatch.canvas && hiPatch.w > 0 && hiPatch.h > 0) {
-                ctx.drawImage(hiPatch.canvas, hiPatch.x, hiPatch.y, hiPatch.w, hiPatch.h);
-            }
+            drawFloorPlanLayers(ctx, imgW, imgH);
         }
 
         // Draw Defect Pins INSIDE the rotated context so pins rotate WITH the drawing!
@@ -4685,6 +4901,27 @@ document.addEventListener('DOMContentLoaded', () => {
         return { x: bestT * dx, y: bestT * dy };
     }
 
+    /** 직사각형 핀: 마킹(ref)과 가장 가까운 꼭짓점 (로컬 좌표) */
+    function getRectCornerAnchorLocal(lx, ly, hw, hh) {
+        const corners = [
+            { x: hw, y: -hh },
+            { x: -hw, y: -hh },
+            { x: hw, y: hh },
+            { x: -hw, y: hh }
+        ];
+        if (Math.hypot(lx, ly) < 1e-6) return corners[0];
+        let best = corners[0];
+        let bestDist = Infinity;
+        corners.forEach((c) => {
+            const d = Math.hypot(lx - c.x, ly - c.y);
+            if (d < bestDist) {
+                bestDist = d;
+                best = c;
+            }
+        });
+        return best;
+    }
+
     function intersectRayWithEllipse(lx, ly, rx, ry) {
         const len = Math.hypot(lx, ly);
         if (len < 1e-6) return { x: 0, y: -ry };
@@ -4772,7 +5009,7 @@ document.addEventListener('DOMContentLoaded', () => {
         } else if (shape === 'rounded') {
             localPt = intersectRayWithRoundedRect(lx, ly, hw, hh, getPinBoxCornerRadius(boxW, boxH, scale));
         } else {
-            localPt = intersectRayWithRect(lx, ly, hw, hh);
+            localPt = getRectCornerAnchorLocal(lx, ly, hw, hh);
         }
 
         return {
@@ -15224,6 +15461,8 @@ document.addEventListener('DOMContentLoaded', () => {
             if (isPinching) {
                 if (e.touches.length < 2) {
                     isPinching = false;
+                    flushViewportHiPatchSync();
+                    scheduleFloorDrawingTierSync();
                     if (typeof scheduleFlushPendingRemoteSync === 'function') scheduleFlushPendingRemoteSync();
                 }
             } else {
@@ -23171,14 +23410,33 @@ document.addEventListener('DOMContentLoaded', () => {
         if (bldg.floorDrawingPdfs && bldg.floorDrawingPdfs[floorCode]) {
             return bldg.floorDrawingPdfs[floorCode];
         }
-        const cached = await idbGet('floorDrawingPdfs', idbKey);
-        if (cached) return cached;
+        let cached = await idbGet('floorDrawingPdfs', idbKey);
+        if (cached) {
+            if (typeof window.ensureFloorDrawingPdfs === 'function') window.ensureFloorDrawingPdfs(bldg);
+            else if (!bldg.floorDrawingPdfs) bldg.floorDrawingPdfs = {};
+            bldg.floorDrawingPdfs[floorCode] = cached;
+            return cached;
+        }
         if (db && window.state.companyId) {
             const cloudPdf = await fetchFloorDrawingPdfFromCloud(bldg.id, floorCode);
-            if (cloudPdf) return cloudPdf;
+            if (cloudPdf) {
+                if (typeof window.ensureFloorDrawingPdfs === 'function') window.ensureFloorDrawingPdfs(bldg);
+                else if (!bldg.floorDrawingPdfs) bldg.floorDrawingPdfs = {};
+                bldg.floorDrawingPdfs[floorCode] = cloudPdf;
+                await idbSet('floorDrawingPdfs', idbKey, cloudPdf);
+                _idbPersistedPdfKeys.add(idbKey);
+                return cloudPdf;
+            }
         }
-        return fetchSiteVaultPdf(normalizeSiteVaultKey(bldg.name), floorCode);
+        const vaultPdf = await fetchSiteVaultPdf(normalizeSiteVaultKey(bldg.name), floorCode);
+        if (vaultPdf) {
+            if (typeof window.ensureFloorDrawingPdfs === 'function') window.ensureFloorDrawingPdfs(bldg);
+            else if (!bldg.floorDrawingPdfs) bldg.floorDrawingPdfs = {};
+            bldg.floorDrawingPdfs[floorCode] = vaultPdf;
+        }
+        return vaultPdf;
     }
+    window.resolveBuildingFloorPdf = resolveBuildingFloorPdf;
 
     async function hydrateBuildingPdfsFromSiteVault(bldg) {
         if (!bldg) return;

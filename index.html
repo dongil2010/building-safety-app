@@ -2286,8 +2286,8 @@
     </div>
 
     <!-- Core → 탭 분류 → 기존 엔진(app.js) -->
-    <script src="js/core/state.js?v=20260825_vptile2"></script>
-    <script src="js/pdf-vector-bridge.js?v=20260825_vptile"></script>
+    <script src="js/core/state.js?v=20260825_drawfast"></script>
+    <script src="js/pdf-vector-bridge.js?v=20260825_mobpatch"></script>
     <script src="js/tabs/registry.js?v=20260821_land1"></script>
     <script src="js/tabs/home.js?v=20260824_webview"></script>
     <script src="js/tabs/map.js?v=20260825_viewkeep"></script>
@@ -2295,9 +2295,9 @@
     <script src="js/tabs/ndt.js?v=20260822_survey2dScroll"></script>
     <script src="js/shared/report.js?v=20260824_hwpxFix"></script>
     <script src="js/shared/auth.js?v=20260821_land1"></script>
-    <script src="app.js?v=20260825_sitevault"></script>
+    <script src="app.js?v=20260825_blend"></script>
     <script>
-        window.BSA_APP_VERSION = '20260825_sitevault';
+        window.BSA_APP_VERSION = '20260825_blend';
         (function () {
             var el = document.getElementById('appVersionText');
             if (el && window.BSA_APP_VERSION) el.textContent = 'v' + window.BSA_APP_VERSION;
@@ -2321,7 +2321,7 @@
                     native = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
                 } catch (e) {}
                 if (native) return;
-                navigator.serviceWorker.register('./sw.js?v=20260825_sitevault')
+                navigator.serviceWorker.register('./sw.js?v=20260825_blend')
                     .then(function(registration) {
                         console.log('✅ ServiceWorker Registered Successfully with scope:', registration.scope);
                     })

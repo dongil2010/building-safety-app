@@ -142,18 +142,74 @@ function isPdfFile(file) {
     return !!file && (file.type === 'application/pdf' || /\.pdf$/i.test(file.name || ''));
 }
 
-// PDF 페이지를 지정 스케일로 캔버스에 렌더링 후 PNG dataURL로 변환
-async function renderPdfPageToDataUrl(page, scale) {
+// PDF 페이지를 지정 스케일로 캔버스에 렌더링 후 dataURL로 변환
+async function renderPdfPageToDataUrl(page, scale, mime = 'image/png', quality = 0.9) {
     const viewport = page.getViewport({ scale });
     const canvas = document.createElement('canvas');
     canvas.width = Math.max(1, Math.round(viewport.width));
     canvas.height = Math.max(1, Math.round(viewport.height));
     const ctx = canvas.getContext('2d');
-    // PDF는 배경이 투명할 수 있어, 흰 배경을 먼저 채워 검게 나오는 것을 방지
     ctx.fillStyle = '#ffffff';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     await page.render({ canvasContext: ctx, viewport }).promise;
+    if (mime === 'image/jpeg') return canvas.toDataURL('image/jpeg', quality);
     return canvas.toDataURL('image/png');
+}
+
+/** 빠른 선표시용 PDF 미리보기 해상도 (긴 변) */
+window.FLOOR_DRAWING_PREVIEW_DIM = 1600;
+
+const _pdfPageCache = new Map();
+const _pdfRenderInflight = new Map();
+const PDF_PAGE_CACHE_MAX = 8;
+
+function pdfBytesFromDataUrl(pdfDataUrl) {
+    if (typeof window.dataUrlToUint8Array === 'function') {
+        return window.dataUrlToUint8Array(pdfDataUrl);
+    }
+    const base64 = String(pdfDataUrl || '').split(',')[1];
+    if (!base64) return null;
+    const bin = atob(base64);
+    const arr = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+    return arr;
+}
+
+async function acquirePdfPageFromDataUrl(pdfDataUrl, cacheKey) {
+    if (cacheKey && _pdfPageCache.has(cacheKey)) {
+        return _pdfPageCache.get(cacheKey);
+    }
+    if (typeof pdfjsLib === 'undefined') {
+        throw new Error('PDF 렌더링 라이브러리를 불러오지 못했습니다.');
+    }
+    const bytes = pdfBytesFromDataUrl(pdfDataUrl);
+    if (!bytes) throw new Error('PDF dataURL 변환 실패');
+    const pdf = await pdfjsLib.getDocument({ data: bytes, verbosity: 0 }).promise;
+    const page = await pdf.getPage(1);
+    const baseViewport = page.getViewport({ scale: 1 });
+    const entry = { pdf, page, baseViewport };
+    if (cacheKey) {
+        if (_pdfPageCache.size >= PDF_PAGE_CACHE_MAX) {
+            const oldest = _pdfPageCache.keys().next().value;
+            _pdfPageCache.delete(oldest);
+        }
+        _pdfPageCache.set(cacheKey, entry);
+    }
+    return entry;
+}
+
+window.invalidatePdfPageCache = function(cacheKey) {
+    if (cacheKey) _pdfPageCache.delete(cacheKey);
+    else _pdfPageCache.clear();
+};
+
+function withPdfRenderDedupe(key, fn) {
+    if (_pdfRenderInflight.has(key)) return _pdfRenderInflight.get(key);
+    const job = Promise.resolve().then(fn).finally(() => {
+        _pdfRenderInflight.delete(key);
+    });
+    _pdfRenderInflight.set(key, job);
+    return job;
 }
 
 /**
@@ -209,46 +265,23 @@ window.buildFloorDrawingTiersFromDataUrl = async function(sourceDataUrl) {
     return tiers;
 };
 
-/** PDF dataURL → 지정 해상도 PNG (업로드 후 줌 LOD용) */
-window.renderPdfDataUrlToImage = function(pdfDataUrl, targetLongSide = 16000, maxDataUrlBytes = 2500000) {
-    return new Promise((resolve, reject) => {
-        if (typeof pdfjsLib === 'undefined') {
-            reject(new Error('PDF 렌더링 라이브러리를 불러오지 못했습니다.'));
-            return;
+/** PDF dataURL → 지정 해상도 PNG/JPEG (업로드 후 줌 LOD용). cacheKey = bldgId_floorCode */
+window.renderPdfDataUrlToImage = function(pdfDataUrl, targetLongSide = 16000, maxDataUrlBytes = 2500000, cacheKey) {
+    const dedupeKey = `img|${cacheKey || 'anon'}|${targetLongSide}`;
+    return withPdfRenderDedupe(dedupeKey, async () => {
+        const { page, baseViewport } = await acquirePdfPageFromDataUrl(pdfDataUrl, cacheKey);
+        let scale = targetLongSide / Math.max(baseViewport.width, baseViewport.height);
+        scale = Math.min(Math.max(scale, 1), 16);
+        const useJpeg = targetLongSide <= (window.FLOOR_DRAWING_PREVIEW_DIM || 1600) + 200;
+        const mime = useJpeg ? 'image/jpeg' : 'image/png';
+        let dataUrl = await renderPdfPageToDataUrl(page, scale, mime, 0.88);
+        let attempts = 0;
+        while (dataUrl && dataUrl.length > maxDataUrlBytes && attempts < 4) {
+            scale *= 0.75;
+            dataUrl = await renderPdfPageToDataUrl(page, scale, mime, 0.85);
+            attempts++;
         }
-        const bytes = (typeof window.dataUrlToUint8Array === 'function')
-            ? window.dataUrlToUint8Array(pdfDataUrl)
-            : (() => {
-                const base64 = String(pdfDataUrl || '').split(',')[1];
-                if (!base64) return null;
-                const bin = atob(base64);
-                const arr = new Uint8Array(bin.length);
-                for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
-                return arr;
-            })();
-        if (!bytes) {
-            reject(new Error('PDF dataURL 변환 실패'));
-            return;
-        }
-        pdfjsLib.getDocument({ data: bytes }).promise.then(async (pdf) => {
-            try {
-                const page = await pdf.getPage(1);
-                const baseViewport = page.getViewport({ scale: 1 });
-                let scale = targetLongSide / Math.max(baseViewport.width, baseViewport.height);
-                scale = Math.min(Math.max(scale, 1), 16);
-
-                let dataUrl = await renderPdfPageToDataUrl(page, scale);
-                let attempts = 0;
-                while (dataUrl && dataUrl.length > maxDataUrlBytes && attempts < 4) {
-                    scale *= 0.75;
-                    dataUrl = await renderPdfPageToDataUrl(page, scale);
-                    attempts++;
-                }
-                resolve(dataUrl);
-            } catch (err) {
-                reject(err);
-            }
-        }).catch(reject);
+        return dataUrl;
     });
 };
 
@@ -257,61 +290,45 @@ window.renderPdfDataUrlToImage = function(pdfDataUrl, targetLongSide = 16000, ma
  * @param {{x:number,y:number,w:number,h:number}} region ref 이미지 픽셀 영역
  * @returns {Promise<HTMLCanvasElement|null>}
  */
-window.renderPdfDataUrlRegion = function(pdfDataUrl, refW, refH, region, outW, outH) {
-    return new Promise((resolve, reject) => {
-        if (typeof pdfjsLib === 'undefined') {
-            reject(new Error('PDF 렌더링 라이브러리를 불러오지 못했습니다.'));
-            return;
-        }
-        const rx = Math.max(0, Number(region?.x) || 0);
-        const ry = Math.max(0, Number(region?.y) || 0);
-        const rw = Math.max(1, Number(region?.w) || 1);
-        const rh = Math.max(1, Number(region?.h) || 1);
-        const targetW = Math.max(1, Math.round(outW || rw));
-        const targetH = Math.max(1, Math.round(outH || rh));
-        const bytes = (typeof window.dataUrlToUint8Array === 'function')
-            ? window.dataUrlToUint8Array(pdfDataUrl)
-            : null;
-        if (!bytes) {
-            reject(new Error('PDF dataURL 변환 실패'));
-            return;
-        }
-        pdfjsLib.getDocument({ data: bytes }).promise.then(async (pdf) => {
-            try {
-                const page = await pdf.getPage(1);
-                const baseViewport = page.getViewport({ scale: 1 });
-                const refScale = Math.max(Number(refW) || 1, Number(refH) || 1)
-                    / Math.max(baseViewport.width, baseViewport.height);
-                const pdfX = rx / refScale;
-                const pdfY = ry / refScale;
-                const pdfW = rw / refScale;
-                const pdfH = rh / refScale;
-                const renderScale = targetW / pdfW;
-                const viewport = page.getViewport({ scale: renderScale });
-                const canvas = document.createElement('canvas');
-                canvas.width = targetW;
-                canvas.height = targetH;
-                const ctx = canvas.getContext('2d');
-                ctx.fillStyle = '#ffffff';
-                ctx.fillRect(0, 0, targetW, targetH);
-                await page.render({
-                    canvasContext: ctx,
-                    viewport,
-                    transform: [1, 0, 0, 1, -pdfX * renderScale, -pdfY * renderScale]
-                }).promise;
-                resolve(canvas);
-            } catch (err) {
-                reject(err);
-            }
-        }).catch(reject);
+window.renderPdfDataUrlRegion = function(pdfDataUrl, refW, refH, region, outW, outH, cacheKey) {
+    const rx = Math.max(0, Number(region?.x) || 0);
+    const ry = Math.max(0, Number(region?.y) || 0);
+    const rw = Math.max(1, Number(region?.w) || 1);
+    const rh = Math.max(1, Number(region?.h) || 1);
+    const targetW = Math.max(1, Math.round(outW || rw));
+    const targetH = Math.max(1, Math.round(outH || rh));
+    const dedupeKey = `reg|${cacheKey || 'anon'}|${targetW}x${targetH}|${Math.round(rx)}_${Math.round(ry)}`;
+    return withPdfRenderDedupe(dedupeKey, async () => {
+        const { page, baseViewport } = await acquirePdfPageFromDataUrl(pdfDataUrl, cacheKey);
+        const refScale = Math.max(Number(refW) || 1, Number(refH) || 1)
+            / Math.max(baseViewport.width, baseViewport.height);
+        const pdfX = rx / refScale;
+        const pdfY = ry / refScale;
+        const pdfW = rw / refScale;
+        const renderScale = targetW / pdfW;
+        const viewport = page.getViewport({ scale: renderScale });
+        const canvas = document.createElement('canvas');
+        canvas.width = targetW;
+        canvas.height = targetH;
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, targetW, targetH);
+        await page.render({
+            canvasContext: ctx,
+            viewport,
+            transform: [1, 0, 0, 1, -pdfX * renderScale, -pdfY * renderScale]
+        }).promise;
+        return canvas;
     });
 };
 
 /**
  * 줌·뷰포트 기준 필요한 도면 티어 선택 (히스테리시스로 잦은 교체 방지)
  */
-window.pickFloorDrawingTierDim = function(viewScale, cssW, cssH, dpr, currentTier) {
-    const demand = Math.max(viewScale || 1, 0.05) * Math.max(cssW || 1, cssH || 1) * (dpr || 1);
+window.pickFloorDrawingTierDim = function(viewScale, cssW, cssH, dpr, currentTier, refLongSide) {
+    // 필요 해상도 ≈ 원본 장변 × 줌(scale) × DPR — css 크기와 무관 (모바일 소형 캔버스 보정)
+    const refLong = Math.max(Number(refLongSide) || 4000, 4000);
+    const demand = refLong * Math.max(viewScale || 1, 0.05) * (dpr || 1);
     const cur = currentTier || 4000;
     if (cur === 4000) {
         if (demand >= 6500) return 8000;

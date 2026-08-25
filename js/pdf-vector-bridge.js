@@ -175,23 +175,28 @@
     });
   }
 
-  /** 메모리에 없으면 IndexedDB에서 PDF 원본을 한 번 더 조회 */
-  async function resolveFloorPdfDataUrl(bldg, floorCode) {
+  /** 메모리 → IndexedDB → (app.js) 클라우드·현장명 보관함 순 PDF 원본 조회 */
+  window.resolveFloorPdfDataUrlAsync = async function (bldg, floorCode) {
     let pdfDataUrl = window.getFloorPdfDataUrl(bldg, floorCode);
     if (pdfDataUrl) return pdfDataUrl;
-    if (!bldg || !floorCode || typeof idbGet !== 'function') return null;
-    try {
-      const cached = await idbGet('floorDrawingPdfs', `${bldg.id}_${floorCode}`);
-      if (cached) {
-        window.ensureFloorDrawingPdfs(bldg);
-        bldg.floorDrawingPdfs[floorCode] = cached;
-        return cached;
+    if (!bldg || !floorCode) return null;
+    if (typeof idbGet === 'function') {
+      try {
+        const cached = await idbGet('floorDrawingPdfs', `${bldg.id}_${floorCode}`);
+        if (cached) {
+          window.ensureFloorDrawingPdfs(bldg);
+          bldg.floorDrawingPdfs[floorCode] = cached;
+          return cached;
+        }
+      } catch (e) {
+        console.warn('[BSA_PDF_VECTOR] IDB PDF lookup failed', e);
       }
-    } catch (e) {
-      console.warn('[BSA_PDF_VECTOR] IDB PDF lookup failed', e);
+    }
+    if (typeof window.resolveBuildingFloorPdf === 'function') {
+      return window.resolveBuildingFloorPdf(bldg, floorCode);
     }
     return null;
-  }
+  };
 
   /** pdf-lib drawSvgPath는 Y축을 한 번 더 뒤집어 화살표가 사라지므로, PDF 연산자로 삼각형을 채운다 */
   function drawFilledTriangle(page, x0, y0, x1, y1, x2, y2, color) {
@@ -607,7 +612,7 @@
     }
     const bldg = state.currentBuilding;
     const floorCode = state.currentFloor;
-    const pdfDataUrl = await resolveFloorPdfDataUrl(bldg, floorCode);
+    const pdfDataUrl = await window.resolveFloorPdfDataUrlAsync(bldg, floorCode);
     if (!pdfDataUrl) {
       if (typeof window.showToast === 'function') {
         window.showToast('이 층에 보관된 PDF 원본이 없습니다. PDF로 도면을 다시 등록해 주세요.', 'warning', 5000);
@@ -651,7 +656,7 @@
     }
     const bldg = state.currentBuilding;
     const floorCode = state.currentFloor;
-    const pdfDataUrl = await resolveFloorPdfDataUrl(bldg, floorCode);
+    const pdfDataUrl = await window.resolveFloorPdfDataUrlAsync(bldg, floorCode);
     if (!pdfDataUrl) {
       if (typeof window.showToast === 'function') {
         window.showToast('이 층에 보관된 PDF 원본이 없습니다. PDF로 도면을 다시 등록해 주세요.', 'warning', 5000);
