@@ -14,6 +14,7 @@ window.BSA.tabs['tab-home'] = {
         '사용자 프로필·로그아웃·가입 승인(관리자)',
         'Android WebView는 GitHub Pages 원격 웹 로드 (APK OTA 없음)',
         '홈 새로고침 · 앱 재실행 시 최신 웹 수신',
+        '도면 PDF 로컬 캐시 지우기 (서버 원본은 유지, 필요 시 재다운로드)',
         '삭제 고유코드 수동 정리(재사용) — 전원 동기화 후'
     ],
     ownerHint: 'app.js BUILDING MANAGEMENT + JSON 백업 + 휴대폰 연동',

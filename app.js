@@ -720,6 +720,10 @@ document.addEventListener('DOMContentLoaded', () => {
         _floorPdfKnown.delete(floorPdfCacheKey(bldgId, floorCode));
     }
 
+    function clearAllFloorPdfKnownState() {
+        _floorPdfKnown.clear();
+    }
+
     function canFetchPdfFromCloudNow() {
         return !!(db && window.state.companyId && navigator.onLine !== false);
     }
@@ -4987,14 +4991,52 @@ document.addEventListener('DOMContentLoaded', () => {
         return headLen * 0.42;
     }
 
+    /** 화살표 한 변/지름 기준 크기(도면 좌표 px) — 터치 박스 지름 = 2 × 이 값 */
+    function getArrowTouchCharacteristicSize(arrowScale) {
+        const s = Math.max(Number(arrowScale) || 1, 0.2);
+        if (state.tipShape === 'circle') {
+            return (4.5 * 2) * s;
+        }
+        return 10 * s;
+    }
+
+    function getMapCanvasViewScale() {
+        const raw = (state.currentTab === 'tab-ndt')
+            ? (typeof ndtView !== 'undefined' && ndtView ? ndtView.scale : 1)
+            : (state.view ? state.view.scale : 1);
+        return Math.max(Number(raw) || 1, 0.05);
+    }
+
+    /** 터치·조작 UI: 화면(CSS) px 기준 최소 지름 — 줌 배율과 무관하게 손가락 크기 확보 */
+    const MAP_TIP_MIN_TOUCH_DIAMETER_CSS = 52;
+
     function getMapTipHitRadius(arrowScale, isTouch) {
         const visualR = getArrowVisualTipRadius(arrowScale, false);
         const coarse = isTouch
             || (window.matchMedia && window.matchMedia('(pointer: coarse)').matches);
         if (!coarse) return visualR + 1;
-        const fingerPadCss = 3;
-        const padImg = fingerPadCss / Math.max(state.view.scale || 1, 0.05);
-        return visualR + padImg;
+        const arrowR = getArrowTouchCharacteristicSize(arrowScale);
+        const viewScale = getMapCanvasViewScale();
+        const minScreenRadiusImg = (MAP_TIP_MIN_TOUCH_DIAMETER_CSS / 2) / viewScale;
+        return Math.max(arrowR, minScreenRadiusImg);
+    }
+
+    /** 삼각 화살촉: 세모 무게중심. 원형 화살촉: target(측정점) 그대로 */
+    function getMapArrowTipHitCenter(targetX, targetY, fromX, fromY, arrowScale) {
+        if (state.tipShape === 'circle') {
+            return { x: targetX, y: targetY };
+        }
+        const s = Math.max(Number(arrowScale) || 1, 0.2);
+        const headLen = 10 * s;
+        const dx = targetX - fromX;
+        const dy = targetY - fromY;
+        const dist = Math.hypot(dx, dy);
+        if (dist < 1e-6) return { x: targetX, y: targetY };
+        const back = headLen / Math.sqrt(3);
+        return {
+            x: targetX - (dx / dist) * back,
+            y: targetY - (dy / dist) * back
+        };
     }
 
     function findNdtPinAt(vx, vy) {
@@ -5033,7 +5075,8 @@ document.addEventListener('DOMContentLoaded', () => {
             const cat = item.category || '강도';
 
             const tipR = getMapTipHitRadius(arrowScale, ndtActivePointerIsTouch);
-            const distTarget = Math.hypot(vx - targetX, vy - targetY);
+            const tipHit = getMapArrowTipHitCenter(targetX, targetY, baseBoxX, baseBoxY, arrowScale);
+            const distTarget = Math.hypot(vx - tipHit.x, vy - tipHit.y);
             if (distTarget <= tipR && (!bestTarget || distTarget < bestTarget.dist)) {
                 bestTarget = { item, dist: distTarget };
             }
@@ -15280,7 +15323,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 const bx = d.x || 100;
                 const by = d.y || 100;
                 if (d.targetX !== undefined && d.targetY !== undefined) {
-                    const distTip = Math.hypot(imgX - d.targetX, imgY - d.targetY);
+                    const tipHit = getMapArrowTipHitCenter(d.targetX, d.targetY, bx, by, arrowScale);
+                    const distTip = Math.hypot(imgX - tipHit.x, imgY - tipHit.y);
                     if (distTip <= tipR && (!bestTip || distTip < bestTip.dist)) {
                         bestTip = { defect: d, dist: distTip, tipR };
                     }
@@ -15306,7 +15350,8 @@ document.addEventListener('DOMContentLoaded', () => {
             const boxDim = getPinBoxDimensions(scale, formatPinNumberLabel(d.groupNo || d.no || 'NO.01', pinStyleKey), state.ctx);
 
             if (d.targetX !== undefined && d.targetY !== undefined) {
-                const distTip = Math.hypot(imgX - d.targetX, imgY - d.targetY);
+                const tipHit = getMapArrowTipHitCenter(d.targetX, d.targetY, bx, by, arrowScale);
+                const distTip = Math.hypot(imgX - tipHit.x, imgY - tipHit.y);
                 if (distTip <= tipR && (!bestTip || distTip < bestTip.dist)) {
                     bestTip = { defect: d, dist: distTip, tipR };
                 }
@@ -23042,6 +23087,36 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    const btnClearPdfCache = document.getElementById('btnClearPdfCache');
+    if (btnClearPdfCache) {
+        btnClearPdfCache.addEventListener('click', async () => {
+            if (!confirm(
+                '기기에 저장된 도면 PDF 원본 캐시를 지울까요?\n\n'
+                + '· 서버(Firestore)에 있는 PDF는 그대로입니다.\n'
+                + '· 화면용 4000px 도면·결함 데이터는 유지됩니다.\n'
+                + '· 확대(HD)·벡터 PDF 등 필요할 때 서버에서 다시 받습니다.'
+            )) return;
+            btnClearPdfCache.disabled = true;
+            try {
+                const n = typeof window.clearLocalFloorPdfCache === 'function'
+                    ? await window.clearLocalFloorPdfCache()
+                    : 0;
+                window.showToast(
+                    n > 0 ? `PDF 캐시 ${n}건을 지웠습니다.` : '지울 PDF 캐시가 없습니다.',
+                    n > 0 ? 'success' : 'info'
+                );
+                if (window.state.currentTab === 'tab-map' && window.state.currentFloor && typeof loadFloorDrawing === 'function') {
+                    loadFloorDrawing(window.state.currentFloor, { preserveView: true });
+                }
+            } catch (e) {
+                console.warn('PDF 캐시 삭제 실패:', e);
+                window.showToast('PDF 캐시 삭제 중 오류가 발생했습니다.', 'error');
+            } finally {
+                btnClearPdfCache.disabled = false;
+            }
+        });
+    }
+
     // Inspection Settings Toolbar Selects Change Handlers
     ['selectInspectionType', 'selectInspectionYear', 'selectInspectionPeriod'].forEach(id => {
         const sel = document.getElementById(id);
@@ -24729,6 +24804,34 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
     window.hydrateAllBuildingPdfsFromCloud = hydrateAllBuildingPdfsFromCloud;
+
+    /** 기기 IndexedDB·메모리의 PDF 원본 캐시만 삭제 (Firestore·화면용 4000px 도면은 유지) */
+    async function clearLocalFloorPdfCache() {
+        const keys = (typeof idbGetAllKeys === 'function')
+            ? await idbGetAllKeys('floorDrawingPdfs')
+            : [];
+        let removed = 0;
+        for (let i = 0; i < keys.length; i++) {
+            const key = keys[i];
+            if (await idbDelete('floorDrawingPdfs', key)) removed++;
+        }
+        (window.state.buildings || []).forEach((b) => {
+            if (b && b.floorDrawingPdfs) b.floorDrawingPdfs = {};
+        });
+        if (window.state.currentBuilding && window.state.currentBuilding.floorDrawingPdfs) {
+            window.state.currentBuilding.floorDrawingPdfs = {};
+        }
+        _idbPersistedPdfKeys.clear();
+        if (window._cloudSyncedPdfKeys) window._cloudSyncedPdfKeys.clear();
+        clearAllFloorPdfKnownState();
+        _pdfPatchWarnedFloors.clear();
+        if (typeof window.invalidatePdfPageCache === 'function') {
+            window.invalidatePdfPageCache();
+        }
+        state.floorDrawingHiPatch = null;
+        return removed;
+    }
+    window.clearLocalFloorPdfCache = clearLocalFloorPdfCache;
 
     async function hydrateBuildingPdfsFromSiteVault(bldg) {
         if (!bldg) return;

@@ -120,6 +120,22 @@ async function idbDelete(storeName, key) {
     }
 }
 
+async function idbGetAllKeys(storeName) {
+    try {
+        const db = await openLocalImageDb();
+        return await new Promise((resolve, reject) => {
+            const tx = db.transaction(storeName, 'readonly');
+            const req = tx.objectStore(storeName).getAllKeys();
+            req.onsuccess = () => resolve(req.result || []);
+            req.onerror = () => reject(req.error);
+        });
+    } catch (e) {
+        console.warn(`IndexedDB 키 목록 조회 실패 (${storeName}):`, e);
+        return [];
+    }
+}
+window.idbGetAllKeys = idbGetAllKeys;
+
 // --- 2. IMAGE COMPRESSION & FLOOR PARSER HELPERS ---
 
 // 사용자/외부 파일에서 온 문자열을 innerHTML에 넣기 전에 이스케이프 (HTML 인젝션 방지)
