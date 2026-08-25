@@ -1,25 +1,14 @@
 /* ==========================================================================
-   ???????????????? ?????Service Worker (PWA Offline Engine v61.0)
+   건축물 안전점검 — Service Worker (PWA)
+   앱 JS/CSS는 네트워크 전용(캐시 fallback 없음) — 모바일 웹 구버전 고착 방지
    ========================================================================== */
 
-const CACHE_NAME = 'building-safety-v79.0';
+const CACHE_NAME = 'building-safety-v80.0';
+
+/** 오프라인 셸·한글 템플릿만 선캐시 (app.js / js/* 는 제외) */
 const STATIC_ASSETS = [
-    './',
-    './index.html',
-    './styles.css',
-    './web-version.json',
-    './js/core/state.js',
-    './js/pdf-vector-bridge.js',
-    './js/tabs/registry.js',
-    './js/tabs/home.js',
-    './js/tabs/map.js',
-    './js/tabs/survey.js',
-    './js/tabs/ndt.js',
-    './js/shared/report.js',
-    './js/shared/hwpx-import.js',
-    './js/shared/auth.js',
-    './app.js',
     './manifest.json',
+    './web-version.json',
     './templates/hwpx_survey_template.hwpx',
     './templates/hwpx_survey_template_regular.hwpx',
     './templates/hwpx_survey_template_grade3.hwpx',
@@ -29,81 +18,85 @@ const STATIC_ASSETS = [
     'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js',
     'https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js',
     'https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js',
-    'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js',
-    'https://cdn.jsdelivr.net/npm/dxf-parser@1.1.2/dist/dxf-parser.js'
+    'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js'
 ];
 
-// Install Event: Cache Core Assets
+function isMutableAppAsset(url) {
+    try {
+        const path = new URL(url).pathname;
+        return /\/(app\.js|styles\.css|sw\.js)$/.test(path) || /\/js\//.test(path);
+    } catch (e) {
+        return false;
+    }
+}
+
 self.addEventListener('install', (event) => {
-    console.log('[ServiceWorker] Installing & Caching Static Assets...');
     event.waitUntil(
         caches.open(CACHE_NAME).then((cache) => {
             return cache.addAll(STATIC_ASSETS).catch((err) => {
-                console.warn('[ServiceWorker] Some assets failed to cache during install:', err);
+                console.warn('[ServiceWorker] precache partial fail:', err);
             });
         }).then(() => self.skipWaiting())
     );
 });
 
-// Activate Event: Cleanup Old Caches
 self.addEventListener('activate', (event) => {
-    console.log('[ServiceWorker] Activating & Cleaning Old Caches...');
     event.waitUntil(
-        caches.keys().then((cacheNames) => {
-            return Promise.all(
-                cacheNames.map((cache) => {
-                    if (cache !== CACHE_NAME) {
-                        console.log('[ServiceWorker] Removing old cache:', cache);
-                        return caches.delete(cache);
-                    }
-                })
-            );
-        }).then(() => self.clients.claim())
+        caches.keys().then((cacheNames) => Promise.all(
+            cacheNames.map((cache) => {
+                if (cache !== CACHE_NAME) return caches.delete(cache);
+            })
+        )).then(() => self.clients.claim())
     );
 });
 
-// Fetch Event: Network-First with Cache Fallback for offline usability
+self.addEventListener('message', (event) => {
+    if (event.data && event.data.type === 'SKIP_WAITING') {
+        self.skipWaiting();
+    }
+});
+
 self.addEventListener('fetch', (event) => {
-    // Only handle GET requests
     if (event.request.method !== 'GET') return;
 
-    // Skip Firebase Firestore real-time WS or POST connections
     const url = event.request.url;
     if (url.includes('firestore.googleapis.com') || url.includes('google.com/recaptcha')) {
         return;
     }
 
     const isVersionCheck = url.includes('web-version.json');
-    const isAppScript = /\.(?:js|css|html)(?:\?|$)/.test(url.split('#')[0]);
     const isHtml = event.request.destination === 'document'
         || event.request.mode === 'navigate'
         || /(?:\/|\.html)(?:\?|$)/.test(url.split('?')[0]);
+    const isAppCode = isMutableAppAsset(url);
+
+    if (isAppCode || isVersionCheck || isHtml) {
+        event.respondWith(
+            fetch(event.request, { cache: 'no-store' }).catch(() => {
+                if (isHtml) {
+                    return caches.match('./index.html').then((r) => r || new Response('오프라인', { status: 503 }));
+                }
+                return new Response('오프라인 — 네트워크 연결 후 새로고침해 주세요.', {
+                    status: 503,
+                    headers: { 'Content-Type': 'text/plain; charset=utf-8' }
+                });
+            })
+        );
+        return;
+    }
 
     event.respondWith(
-        fetch(event.request, (isVersionCheck || isHtml || isAppScript) ? { cache: 'no-store' } : undefined)
+        fetch(event.request)
             .then((networkResponse) => {
-                if (networkResponse && networkResponse.status === 200 && networkResponse.type === 'basic' && !isVersionCheck) {
-                    const responseToCache = networkResponse.clone();
-                    caches.open(CACHE_NAME).then((cache) => {
-                        cache.put(event.request, responseToCache);
-                    });
+                if (networkResponse && networkResponse.status === 200 && networkResponse.type === 'basic') {
+                    const clone = networkResponse.clone();
+                    caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
                 }
                 return networkResponse;
             })
-            .catch(() => {
-                console.log('[ServiceWorker] Network request failed. Serving from Cache:', url);
-                return caches.match(event.request).then((cachedResponse) => {
-                    if (cachedResponse) return cachedResponse;
-                    const accept = event.request.headers.get('accept') || '';
-                    if (accept.includes('text/html')) {
-                        return caches.match('./index.html');
-                    }
-                    return new Response('?????? ?????? ??????? ??????????.', {
-                        status: 503,
-                        statusText: 'Offline',
-                        headers: { 'Content-Type': 'text/plain; charset=utf-8' }
-                    });
-                });
-            })
+            .catch(() => caches.match(event.request).then((cached) => {
+                if (cached) return cached;
+                return new Response('오프라인', { status: 503 });
+            }))
     );
 });

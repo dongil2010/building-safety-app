@@ -863,6 +863,19 @@ document.addEventListener('DOMContentLoaded', () => {
         const maxSteps = getViewportPatchStepCount(refLong);
         const wantLevel = pickViewportPatchLevel(zoomDemand, maxSteps, viewportPatchActiveLevel);
 
+        const fitScale = getMapFitScale();
+        const zoomVsFit = scale / Math.max(fitScale, 0.05);
+        const refArea = Math.max((ref.w || 1) * (ref.h || 1), 1);
+        const regionArea = region.w * region.h;
+        if (zoomVsFit < 1.18 && regionArea > refArea * 0.78) {
+            viewportPatchActiveLevel = 0;
+            lastViewportPatchMeta = null;
+            if (state.floorDrawingHiPatch || (_floorBlend && _floorBlend.toPatch)) {
+                applyFloorDrawingTarget(undefined, null, { immediate: true });
+            }
+            return;
+        }
+
         if (wantLevel <= 0) {
             viewportPatchActiveLevel = 0;
             lastViewportPatchMeta = null;
@@ -4785,6 +4798,16 @@ document.addEventListener('DOMContentLoaded', () => {
         return strVal;
     }
 
+    /** 터치 화살표(TIP) 히트 반경 — 이미지 좌표 px */
+    const MAP_TIP_HIT_R_COARSE = 20;
+    const MAP_TIP_HIT_R_FINE = 16;
+
+    function getMapTipHitRadius(arrowScale, isTouch) {
+        const coarse = isTouch
+            || (window.matchMedia && window.matchMedia('(pointer: coarse)').matches);
+        return (coarse ? MAP_TIP_HIT_R_COARSE : MAP_TIP_HIT_R_FINE) * (arrowScale || 1);
+    }
+
     function findNdtPinAt(vx, vy) {
         const items = getCurrentFloorNdtData();
         const currentCat = currentNdtCategory || '실측';
@@ -4798,8 +4821,6 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         const measureCtx = state.ctx || null;
-        const coarsePointer = !!(ndtActivePointerIsTouch
-            || (window.matchMedia && window.matchMedia('(pointer: coarse)').matches));
         let bestTarget = null; // { item, dist }
         let bestBox = null;
 
@@ -4822,7 +4843,7 @@ document.addEventListener('DOMContentLoaded', () => {
             noStr = formatPinNumberLabel(noStr, ndtStyleKey);
             const cat = item.category || '강도';
 
-            const tipR = (coarsePointer ? 32 : 18) * arrowScale;
+            const tipR = getMapTipHitRadius(arrowScale, ndtActivePointerIsTouch);
             const distTarget = Math.hypot(vx - targetX, vy - targetY);
             if (distTarget <= tipR && (!bestTarget || distTarget < bestTarget.dist)) {
                 bestTarget = { item, dist: distTarget };
@@ -14967,7 +14988,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const dSize = getStyleSize(getDefectStyleKey(d.category, d.defectType));
             const scale = dSize.pin;
             const arrowScale = dSize.arrow;
-            const tipR = (coarsePointer ? 32 : 18) * arrowScale;
+            const tipR = getMapTipHitRadius(arrowScale, activePointerIsTouch);
 
             if (d.shapeType === 'area' && d.areaX1 !== undefined) {
                 ensureAreaPinPlacement(d);

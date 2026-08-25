@@ -2311,9 +2311,9 @@
     <script src="js/shared/report.js?v=20260824_hwpxFix"></script>
     <script src="js/shared/hwpx-import.js?v=20260825_hwpxin"></script>
     <script src="js/shared/auth.js?v=20260821_land1"></script>
-    <script src="app.js?v=20260825_autoupdate"></script>
+    <script src="app.js?v=20260825_webfix"></script>
     <script>
-        window.BSA_APP_VERSION = '20260825_autoupdate';
+        window.BSA_APP_VERSION = '20260825_webfix';
         (function () {
             var el = document.getElementById('appVersionText');
             if (el && window.BSA_APP_VERSION) el.textContent = 'v' + window.BSA_APP_VERSION;
@@ -2337,9 +2337,22 @@
                     native = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
                 } catch (e) {}
                 if (native) return;
-                navigator.serviceWorker.register('./sw.js?v=20260825_mobpatch3')
+                navigator.serviceWorker.register('./sw.js?v=20260825_webfix')
                     .then(function(registration) {
                         console.log('✅ ServiceWorker Registered Successfully with scope:', registration.scope);
+                        registration.update();
+                        if (registration.waiting) {
+                            registration.waiting.postMessage({ type: 'SKIP_WAITING' });
+                        }
+                        registration.addEventListener('updatefound', function() {
+                            const nw = registration.installing;
+                            if (!nw) return;
+                            nw.addEventListener('statechange', function() {
+                                if (nw.state === 'installed' && navigator.serviceWorker.controller) {
+                                    nw.postMessage({ type: 'SKIP_WAITING' });
+                                }
+                            });
+                        });
                     })
                     .catch(function(error) {
                         console.warn('⚠️ ServiceWorker Registration Failed:', error);
