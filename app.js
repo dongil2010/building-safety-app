@@ -28,6 +28,7 @@ document.addEventListener('DOMContentLoaded', () => {
         // Canvas & Viewport
         canvasContainer: document.getElementById('canvasContainer'),
         planCanvas: document.getElementById('planCanvas'),
+        mapZoomOverlay: document.getElementById('mapZoomOverlay'),
         zoomScaleText: document.getElementById('zoomScaleText'),
 
         // Tables & Albums
@@ -356,8 +357,8 @@ document.addEventListener('DOMContentLoaded', () => {
         const cur = currentLevel || 0;
         const d = zoomDemand || 1;
         const top = maxLevel >= 4 ? 4 : 3;
-        const entry = isMobileMapViewport() ? 0.95 : 1.05;
-        const exitLow = isMobileMapViewport() ? 0.82 : 1.02;
+        const entry = isMobileMapViewport() ? 0.78 : 1.05;
+        const exitLow = isMobileMapViewport() ? 0.68 : 1.02;
 
         if (top >= 4) {
             if (cur >= 4) {
@@ -600,8 +601,9 @@ document.addEventListener('DOMContentLoaded', () => {
         const fitScale = getMapFitScale();
         const zoomVsFit = scale / Math.max(fitScale, 0.05);
         // 화면맞춤(zoomVsFit≈1)에서는 패치 끔 — fit 상태에서 흰 패치가 도면 전체를 덮는 문제 방지
-        const beyondFit = Math.max(0, zoomVsFit - 1.15);
-        return Math.max(screenLong / regionLong, scale * dpr, beyondFit * dpr * 2.4);
+        const beyondFit = Math.max(0, zoomVsFit - 1.08);
+        const mobileBoost = isMobileMapViewport() ? 2.9 : 2.4;
+        return Math.max(screenLong / regionLong, scale * dpr, beyondFit * dpr * mobileBoost);
     }
 
     function isViewportPatchCanvasUsable(canvas) {
@@ -867,7 +869,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const zoomVsFit = scale / Math.max(fitScale, 0.05);
         const refArea = Math.max((ref.w || 1) * (ref.h || 1), 1);
         const regionArea = region.w * region.h;
-        if (zoomVsFit < 1.18 && regionArea > refArea * 0.78) {
+        if (zoomVsFit < 1.12 && regionArea > refArea * 0.85) {
             viewportPatchActiveLevel = 0;
             lastViewportPatchMeta = null;
             if (state.floorDrawingHiPatch || (_floorBlend && _floorBlend.toPatch)) {
@@ -925,7 +927,8 @@ document.addEventListener('DOMContentLoaded', () => {
         const maxPatchSide = getViewportPatchMaxSide(mobile);
         const minPatchLong = 1024;
         // 화면 픽셀(zoomDemand)에 맞춰 패치 해상도 산출 — levelMul만 쓰면 확대해도 선명도가 안 오름
-        const demandLong = Math.ceil(regionLong * Math.max(zoomDemand, getViewportPatchLevelMultiplier(wantLevel)) * 1.08);
+        const zoomMargin = mobile ? 1.24 : 1.1;
+        const demandLong = Math.ceil(regionLong * Math.max(zoomDemand, getViewportPatchLevelMultiplier(wantLevel)) * zoomMargin);
         let outLong = Math.min(maxPatchLong, Math.max(minPatchLong, demandLong));
 
         const aspect = region.w / region.h;
@@ -3741,6 +3744,25 @@ document.addEventListener('DOMContentLoaded', () => {
         drawCanvas();
     }
 
+    function getMapZoomVsFitPercent() {
+        const fit = getMapFitScale();
+        const scale = Math.max(state.view.scale || 1, 0.001);
+        return Math.round((scale / Math.max(fit, 0.001)) * 100);
+    }
+
+    function updateMapZoomOverlay() {
+        const el = elements.mapZoomOverlay || document.getElementById('mapZoomOverlay');
+        if (!el) return;
+        const onMap = state.currentTab === 'tab-map';
+        const mobile = isMobileMapViewport();
+        if (!onMap || !mobile) {
+            el.style.display = 'none';
+            return;
+        }
+        el.style.display = 'block';
+        el.textContent = `${getMapZoomVsFitPercent()}%`;
+    }
+
     function fitToScreen() {
         if (!state.canvas) return;
         const cw = state.canvasCssW || state.canvas.width;
@@ -3977,8 +3999,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (shouldUseViewportTilesForCurrentFloor()) {
             await syncViewportHiPatch();
-            // PDF 도면: 보이는 영역 패치만 쓰고 전체 8000/16000 교체는 하지 않음(패치를 지워버리는 충돌 방지)
-            if (hasActiveFloorHiPatch() || viewportPatchActiveLevel > 0) return;
+            if (hasActiveFloorHiPatch()) return;
         }
 
         const wantDim = pickFloorDrawingTierDimForView();
@@ -4545,6 +4566,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // 결함 목록 DOM은 drawCanvas마다 재생성하지 않음 (선택 스크롤·하이라이트가 즉시 undo됨).
         // 목록 갱신은 updateMapSelectionBar / 필터 / 저장 등 명시적 호출에서만.
+        updateMapZoomOverlay();
     }
 
     // --- 8-B. NON-DESTRUCTIVE TESTING (NDT) FIELD SURVEY ENGINE (v60.0) ---
@@ -4798,14 +4820,24 @@ document.addEventListener('DOMContentLoaded', () => {
         return strVal;
     }
 
-    /** 터치 화살표(TIP) 히트 반경 — 이미지 좌표 px */
-    const MAP_TIP_HIT_R_COARSE = 20;
-    const MAP_TIP_HIT_R_FINE = 16;
+    /** 터치 화살표(TIP) 히트 반경 — 그려진 화살표 크기(arrowScale)와 동일 비율 */
+    function getArrowVisualTipRadius(arrowScale, dragged) {
+        const s = Math.max(Number(arrowScale) || 1, 0.2);
+        if (state.tipShape === 'circle') {
+            return (dragged ? 6 : 4.5) * s;
+        }
+        const headLen = (dragged ? 13 : 10) * s;
+        return headLen * 0.42;
+    }
 
     function getMapTipHitRadius(arrowScale, isTouch) {
+        const visualR = getArrowVisualTipRadius(arrowScale, false);
         const coarse = isTouch
             || (window.matchMedia && window.matchMedia('(pointer: coarse)').matches);
-        return (coarse ? MAP_TIP_HIT_R_COARSE : MAP_TIP_HIT_R_FINE) * (arrowScale || 1);
+        if (!coarse) return visualR + 1;
+        const fingerPadCss = 3;
+        const padImg = fingerPadCss / Math.max(state.view.scale || 1, 0.05);
+        return visualR + padImg;
     }
 
     function findNdtPinAt(vx, vy) {
@@ -14978,8 +15010,6 @@ document.addEventListener('DOMContentLoaded', () => {
         const defects = filterMapPlacedDefects(getCurrentFloorDefects());
         // 터치/조밀 배치: 화살표(TIP)가 박스 안·근처에 있어도 TIP을 잡을 수 있게
         // 박스 즉시 return 하지 않고, TIP·BOX 후보를 모은 뒤 TIP을 우선한다.
-        const coarsePointer = !!(activePointerIsTouch
-            || (window.matchMedia && window.matchMedia('(pointer: coarse)').matches));
         let bestTip = null; // { defect, dist, tipR }
         let bestBox = null; // { defect }
 

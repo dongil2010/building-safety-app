@@ -227,6 +227,7 @@
 
                     <!-- Canvas Viewport -->
                     <div class="canvas-container" id="canvasContainer">
+                        <div id="mapZoomOverlay" class="map-zoom-overlay" aria-hidden="true"></div>
                         <canvas id="planCanvas"></canvas>
                         <aside class="mobile-side-rail" id="mobileMapSideRail" aria-label="마킹 도구">
                             <button type="button" class="mobile-rail-btn active" id="mobileBtnModePan" data-mode="PAN" title="선택">
@@ -2311,9 +2312,9 @@
     <script src="js/shared/report.js?v=20260824_hwpxFix"></script>
     <script src="js/shared/hwpx-import.js?v=20260825_hwpxin"></script>
     <script src="js/shared/auth.js?v=20260821_land1"></script>
-    <script src="app.js?v=20260825_webfix"></script>
+    <script src="app.js?v=20260825_mobzoom"></script>
     <script>
-        window.BSA_APP_VERSION = '20260825_webfix';
+        window.BSA_APP_VERSION = '20260825_mobzoom';
         (function () {
             var el = document.getElementById('appVersionText');
             if (el && window.BSA_APP_VERSION) el.textContent = 'v' + window.BSA_APP_VERSION;
@@ -2337,7 +2338,7 @@
                     native = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
                 } catch (e) {}
                 if (native) return;
-                navigator.serviceWorker.register('./sw.js?v=20260825_webfix')
+                navigator.serviceWorker.register('./sw.js?v=20260825_mobzoom')
                     .then(function(registration) {
                         console.log('✅ ServiceWorker Registered Successfully with scope:', registration.scope);
                         registration.update();
