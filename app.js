@@ -350,8 +350,12 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function floorHasPdfSourceSync(bldg, floorCode) {
-        return !!(bldg && floorCode && typeof window.getFloorPdfDataUrl === 'function'
-            && window.getFloorPdfDataUrl(bldg, floorCode));
+        if (!bldg || !floorCode) return false;
+        if (typeof window.getFloorPdfDataUrl === 'function' && window.getFloorPdfDataUrl(bldg, floorCode)) {
+            return true;
+        }
+        const idbKey = `${bldg.id}_${floorCode}`;
+        return !!(_idbPersistedPdfKeys && _idbPersistedPdfKeys.has(idbKey));
     }
 
     function shouldUseViewportTilesForCurrentFloor() {
@@ -410,7 +414,6 @@ document.addEventListener('DOMContentLoaded', () => {
         const bldg = state.currentBuilding;
         const fc = state.currentFloor;
         if (!bldg || !fc || state.currentTab !== 'tab-map' || !state.bgImage) return;
-        if (!shouldUseViewportTilesForCurrentFloor()) return;
 
         const token = ++viewportHiPatchToken;
         const region = getVisibleImageRect();
@@ -421,9 +424,12 @@ document.addEventListener('DOMContentLoaded', () => {
         const cw = state.canvasCssW || 800;
         const ch = state.canvasCssH || 600;
         const dpr = state.canvasDpr || 1;
-        const needed = (Math.max(cw, ch) / Math.max(state.view.scale, 0.05)) * dpr;
+        const screenLong = Math.max(cw, ch) * dpr;
+        const regionLong = Math.max(region.w, region.h, 1);
+        // 화면 1px당 필요한 원본 픽셀 ≈ scale×dpr (줌인할수록 고해상도 패치 필요)
+        const zoomDemand = screenLong / regionLong;
 
-        if (needed < 3400) {
+        if (zoomDemand <= 1.08) {
             if (state.floorDrawingHiPatch) {
                 state.floorDrawingHiPatch = null;
                 drawCanvas();
@@ -431,15 +437,24 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
-        let pdfUrl = window.getFloorPdfDataUrl(bldg, fc);
+        let pdfUrl = (typeof window.getFloorPdfDataUrl === 'function')
+            ? window.getFloorPdfDataUrl(bldg, fc)
+            : null;
         if (!pdfUrl && typeof idbGet === 'function') {
             const cachedPdf = await idbGet('floorDrawingPdfs', `${bldg.id}_${fc}`);
-            if (cachedPdf) pdfUrl = cachedPdf;
+            if (cachedPdf) {
+                if (typeof window.ensureFloorDrawingPdfs === 'function') window.ensureFloorDrawingPdfs(bldg);
+                else if (!bldg.floorDrawingPdfs) bldg.floorDrawingPdfs = {};
+                bldg.floorDrawingPdfs[fc] = cachedPdf;
+                pdfUrl = cachedPdf;
+            }
         }
-        if (!pdfUrl || token !== viewportHiPatchToken) return;
+        if (!pdfUrl) return;
+        if (token !== viewportHiPatchToken) return;
         if (state.currentFloor !== fc || state.currentBuildingId !== bldg.id) return;
 
-        const outLong = Math.min(16000, Math.max(2048, Math.ceil(needed * 1.2)));
+        const outLong = Math.min(16000, Math.max(1024, Math.ceil(regionLong * zoomDemand * 1.15)));
+
         const aspect = region.w / region.h;
         let outW;
         let outH;
@@ -3342,7 +3357,6 @@ document.addEventListener('DOMContentLoaded', () => {
     function scheduleFloorDrawingTierSync() {
         if (shouldUseViewportTilesForCurrentFloor()) {
             scheduleViewportHiPatchSync();
-            return;
         }
         if (floorDrawingTierSyncTimer) clearTimeout(floorDrawingTierSyncTimer);
         floorDrawingTierSyncTimer = setTimeout(() => {
@@ -3352,13 +3366,14 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     async function syncFloorDrawingTierForView() {
+        const bldg = state.currentBuilding;
+        const fc = state.currentFloor;
+        if (!bldg || !fc || state.currentTab !== 'tab-map' || !state.bgImage) return;
+
         if (shouldUseViewportTilesForCurrentFloor()) {
             await syncViewportHiPatch();
             return;
         }
-        const bldg = state.currentBuilding;
-        const fc = state.currentFloor;
-        if (!bldg || !fc || state.currentTab !== 'tab-map' || !state.bgImage) return;
 
         const wantDim = pickFloorDrawingTierDimForView();
         if (wantDim === floorDrawingActiveTierDim) return;

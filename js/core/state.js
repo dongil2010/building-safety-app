@@ -311,19 +311,19 @@ window.renderPdfDataUrlRegion = function(pdfDataUrl, refW, refH, region, outW, o
  * 줌·뷰포트 기준 필요한 도면 티어 선택 (히스테리시스로 잦은 교체 방지)
  */
 window.pickFloorDrawingTierDim = function(viewScale, cssW, cssH, dpr, currentTier) {
-    const needed = (Math.max(cssW || 1, cssH || 1) / Math.max(viewScale || 1, 0.05)) * (dpr || 1);
+    const demand = Math.max(viewScale || 1, 0.05) * Math.max(cssW || 1, cssH || 1) * (dpr || 1);
     const cur = currentTier || 4000;
     if (cur === 4000) {
-        if (needed >= 6500) return 8000;
+        if (demand >= 6500) return 8000;
         return 4000;
     }
     if (cur === 8000) {
-        if (needed >= 13000) return 16000;
-        if (needed < 4500) return 4000;
+        if (demand >= 13000) return 16000;
+        if (demand < 4500) return 4000;
         return 8000;
     }
-    if (needed < 4500) return 4000;
-    if (needed < 9000) return 8000;
+    if (demand < 4500) return 4000;
+    if (demand < 9000) return 8000;
     return 16000;
 };
 
