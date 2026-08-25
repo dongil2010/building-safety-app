@@ -607,10 +607,25 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         const t = _floorBlend.progress || 0;
-        drawBg(_floorBlend.fromBg, 1 - t);
-        drawBg(_floorBlend.toBg, t);
-        drawPatch(_floorBlend.fromPatch, 1 - t);
-        drawPatch(_floorBlend.toPatch, t);
+        const { fromBg, toBg, fromPatch, toPatch } = _floorBlend;
+        const bgSame = floorImagesEquivalent(fromBg, toBg);
+        const patchSame = floorPatchesEquivalent(fromPatch, toPatch);
+
+        // 크로스디졸브(양쪽 fade-out)는 회색 캔버스가 비쳐 도면이 어두워짐 →
+        // 아래 레이어는 항상 100%, 새 해상도만 위에서 페이드인(overlay reveal)
+        const baseBg = fromBg || toBg;
+        if (baseBg) drawBg(baseBg, 1);
+        if (!bgSame && toBg) drawBg(toBg, t);
+
+        if (fromPatch && !patchSame) {
+            if (toPatch) drawPatch(fromPatch, 1);
+            else drawPatch(fromPatch, 1 - t);
+        } else if (fromPatch) {
+            drawPatch(fromPatch, 1);
+        }
+
+        if (toPatch && !patchSame) drawPatch(toPatch, t);
+        else if (toPatch) drawPatch(toPatch, 1);
     }
 
     function floorHasPdfSourceSync(bldg, floorCode) {
