@@ -356,8 +356,8 @@ document.addEventListener('DOMContentLoaded', () => {
         const cur = currentLevel || 0;
         const d = zoomDemand || 1;
         const top = maxLevel >= 4 ? 4 : 3;
-        const entry = isMobileMapViewport() ? 0.72 : 1.05;
-        const exitLow = isMobileMapViewport() ? 0.62 : 1.02;
+        const entry = isMobileMapViewport() ? 0.95 : 1.05;
+        const exitLow = isMobileMapViewport() ? 0.82 : 1.02;
 
         if (top >= 4) {
             if (cur >= 4) {
@@ -598,9 +598,31 @@ document.addEventListener('DOMContentLoaded', () => {
         const screenLong = Math.max(cw, ch) * dpr;
         const regionLong = Math.max(region.w, region.h, 1);
         const fitScale = getMapFitScale();
-        // 모바일은 화면맞춤 배율이 0.1대 — 절대 scale만으로는 패치가 안 켜짐
         const zoomVsFit = scale / Math.max(fitScale, 0.05);
-        return Math.max(screenLong / regionLong, scale * dpr, zoomVsFit * dpr * 0.92);
+        // 화면맞춤(zoomVsFit≈1)에서는 패치 끔 — fit 상태에서 흰 패치가 도면 전체를 덮는 문제 방지
+        const beyondFit = Math.max(0, zoomVsFit - 1.15);
+        return Math.max(screenLong / regionLong, scale * dpr, beyondFit * dpr * 2.4);
+    }
+
+    function isViewportPatchCanvasUsable(canvas) {
+        if (!canvas || canvas.width < 8 || canvas.height < 8) return false;
+        try {
+            const ctx = canvas.getContext('2d', { willReadFrequently: true });
+            if (!ctx) return true;
+            const samples = [
+                [Math.floor(canvas.width * 0.25), Math.floor(canvas.height * 0.25)],
+                [Math.floor(canvas.width * 0.5), Math.floor(canvas.height * 0.5)],
+                [Math.floor(canvas.width * 0.75), Math.floor(canvas.height * 0.75)],
+            ];
+            for (let i = 0; i < samples.length; i++) {
+                const [x, y] = samples[i];
+                const p = ctx.getImageData(x, y, 1, 1).data;
+                if (p[0] < 248 || p[1] < 248 || p[2] < 248) return true;
+            }
+            return false;
+        } catch (e) {
+            return true;
+        }
     }
 
     /**
@@ -720,6 +742,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const bldg = state.currentBuilding;
         const fc = state.currentFloor;
         if (!bldg || !fc) return;
+        if (!floorMayHavePdfSource(bldg, fc) && !floorHasPdfSourceSync(bldg, fc)) return;
         await ensurePdfSourceForFloor(bldg, fc);
         if (state.currentTab === 'tab-map' && state.bgImage && shouldUseViewportTilesForCurrentFloor()) {
             flushViewportHiPatchSync();
@@ -756,13 +779,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const fc = state.currentFloor;
         if (!bldg || !fc) return false;
         if (floorMayHavePdfSource(bldg, fc)) return true;
-        if (_floorPdfKnown.get(`${bldg.id}_${fc}`) === true) return true;
-        // 모바일: Firestore 미리보기만 있어도 IDB/클라우드 PDF async 조회 후 패치
-        if (isMobileMapViewport() && state.bgImage) {
-            const registered = bldg.floorsList && bldg.floorsList.some((f) => f.floorCode === fc);
-            if (registered && !floorPdfKnownUnavailable(bldg.id, fc)) return true;
-        }
-        return false;
+        return _floorPdfKnown.get(`${bldg.id}_${fc}`) === true;
     }
 
     function isMobileMapViewport() {
@@ -850,7 +867,7 @@ document.addEventListener('DOMContentLoaded', () => {
             viewportPatchActiveLevel = 0;
             lastViewportPatchMeta = null;
             if (state.floorDrawingHiPatch || (_floorBlend && _floorBlend.toPatch)) {
-                applyFloorDrawingTarget(undefined, null);
+                applyFloorDrawingTarget(undefined, null, { immediate: true });
             }
             return;
         }
@@ -871,6 +888,11 @@ document.addEventListener('DOMContentLoaded', () => {
             pdfUrl = window.getFloorPdfDataUrl(bldg, fc);
         }
         if (!pdfUrl) {
+            viewportPatchActiveLevel = 0;
+            lastViewportPatchMeta = null;
+            if (state.floorDrawingHiPatch || (_floorBlend && _floorBlend.toPatch)) {
+                applyFloorDrawingTarget(undefined, null, { immediate: true });
+            }
             if (floorMayHavePdfSource(bldg, fc)) {
                 console.warn('뷰포트 고해상도 패치: PDF 원본 없음 — 도면을 PDF로 다시 등록하거나 동기화해 주세요.');
             }
@@ -914,6 +936,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const applyPatch = (canvas) => {
             if (!canvas || token !== viewportHiPatchToken) return false;
             if (state.currentFloor !== fc || state.currentBuildingId !== bldg.id) return false;
+            if (!isViewportPatchCanvasUsable(canvas)) return false;
             applyFloorDrawingTarget(undefined, {
                 canvas,
                 x: region.x,
@@ -4084,7 +4107,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     drawCanvas();
                 }
                 scheduleFloorDrawingTierPrefetch(bldg, floorCode);
-                if (floorMayHavePdfSource(bldg, floorCode) || isMobileMapViewport()) {
+                if (floorMayHavePdfSource(bldg, floorCode)) {
                     ensurePdfSourceForFloor(bldg, floorCode).then(() => {
                         if (state.currentFloor === floorCode && state.currentTab === 'tab-map') {
                             flushViewportHiPatchSync();
