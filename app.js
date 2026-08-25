@@ -95,6 +95,137 @@ document.addEventListener('DOMContentLoaded', () => {
         const overlay = document.getElementById('globalLoadingOverlay');
         if (overlay) overlay.style.display = 'none';
     };
+    window.updateLoadingText = function(text) {
+        const overlay = document.getElementById('globalLoadingOverlay');
+        const el = overlay?.querySelector('.loading-text');
+        if (el && text) el.textContent = text;
+    };
+
+    function getCompanyDefectPresetsPayload() {
+        return {
+            customDefectTypes: window.state.customDefectTypes || {},
+            customDefectCauses: window.state.customDefectCauses || {},
+            customDefectComponents: window.state.customDefectComponents || {},
+            hiddenDefectComponents: window.state.hiddenDefectComponents || {},
+            hiddenDefectTypes: window.state.hiddenDefectTypes || {},
+            hiddenDefectCauses: window.state.hiddenDefectCauses || {},
+            defectComponentOrder: window.state.defectComponentOrder || {},
+            defectTypeOrder: window.state.defectTypeOrder || {},
+            defectCauseOrder: window.state.defectCauseOrder || {}
+        };
+    }
+
+    function applyCompanyDefectPresetsFromRemote(presets) {
+        if (!presets || typeof presets !== 'object') return false;
+        let changed = false;
+        const fields = [
+            'customDefectTypes', 'customDefectCauses', 'customDefectComponents',
+            'hiddenDefectComponents', 'hiddenDefectTypes', 'hiddenDefectCauses',
+            'defectComponentOrder', 'defectTypeOrder', 'defectCauseOrder'
+        ];
+        fields.forEach((f) => {
+            if (presets[f] != null) {
+                window.state[f] = presets[f];
+                changed = true;
+            }
+        });
+        return changed;
+    }
+
+    async function syncAfterImportWithRetry(label) {
+        if (typeof syncStateToFirebase !== 'function') return;
+        try {
+            await syncStateToFirebase();
+        } catch (e) {
+            console.warn('Import sync failed, retrying:', e);
+            window.showToast(`${label || '가져오기'} 후 동기화 재시도 중…`, 'warning', 3500);
+            try {
+                await syncStateToFirebase();
+            } catch (e2) {
+                console.warn('Import sync retry failed:', e2);
+                window.showToast('동기화에 실패했습니다. 네트워크 확인 후 새로고침해 주세요.', 'warning', 5500);
+            }
+        }
+    }
+
+    function findSimilarBuildings(name, address, excludeId) {
+        const norm = (s) => String(s || '').trim().toLowerCase().replace(/^🏢\s*/, '');
+        const n = norm(name);
+        const a = norm(address);
+        return (window.state.buildings || []).filter((b) => {
+            if (excludeId && b.id === excludeId) return false;
+            const bn = norm(b.name);
+            const ba = norm(b.address);
+            if (n && bn && n === bn) return true;
+            if (a && ba && a.length > 6 && a === ba) return true;
+            return false;
+        });
+    }
+
+    function getImportDefectRoundMode(radioName) {
+        const name = radioName || 'importDefectRoundMode';
+        const sel = document.querySelector(`input[name="${name}"]:checked`);
+        const val = sel?.value || 'keep';
+        return ['keep', 'carryOver', 'newRound'].includes(val) ? val : 'keep';
+    }
+
+    function applyDefectRoundModeToClone(copy, mode, targetBldg) {
+        if (!copy || mode === 'keep') return;
+        if (mode === 'carryOver') {
+            copy.isCarriedOver = true;
+            return;
+        }
+        if (mode === 'newRound' && targetBldg) {
+            const year = targetBldg.inspectionYear || '2026년';
+            const period = targetBldg.inspectionPeriod || '하반기';
+            copy.surveyRound = `${year}_${period}`;
+            copy.isCarriedOver = false;
+        }
+    }
+
+    function countBuildingNdtFloors(bldg) {
+        if (!bldg?.id) return 0;
+        const prefix = `${bldg.id}_`;
+        return Object.keys(window.state.ndtData || {}).filter(k => k.startsWith(prefix)).length;
+    }
+
+    function countBuildingMapStyleFloors(bldg) {
+        if (!bldg?.id || !window.state.floorMapStyleSettings) return 0;
+        const prefix = `${bldg.id}_`;
+        return Object.keys(window.state.floorMapStyleSettings).filter(k => k.startsWith(prefix)).length;
+    }
+
+    function buildImportPreviewHtml(sourceBldg, opts) {
+        if (!sourceBldg || !opts) return '';
+        const floorCount = (sourceBldg.floorsList && sourceBldg.floorsList.length)
+            || Object.keys(sourceBldg.floorDrawings || {}).length;
+        const defectCount = countBuildingDefects(sourceBldg);
+        const ndtCount = countBuildingNdtFloors(sourceBldg);
+        const styleCount = countBuildingMapStyleFloors(sourceBldg);
+        const items = [];
+        if (opts.basicInfo) items.push(`<li>기본 정보 — 1건</li>`);
+        if (opts.floorsDrawings) items.push(`<li>층 · 도면 — ${floorCount}개 층</li>`);
+        if (opts.defects) items.push(`<li>결함 · 사진 — ${defectCount}건</li>`);
+        if (opts.ndt) items.push(`<li>비파괴 — ${ndtCount}개 층</li>`);
+        if (opts.mapStyles) items.push(`<li>표시 스타일 — ${styleCount}개 층</li>`);
+        if (!items.length) return '<strong>선택된 항목 없음</strong>';
+        return `<strong>복사 예상</strong><ul>${items.join('')}</ul>`;
+    }
+
+    function updateImportPreviewPanels(sourceBldg, opts, detailId, roundRowId) {
+        const detail = document.getElementById(detailId);
+        const roundRow = document.getElementById(roundRowId);
+        if (detail) {
+            if (sourceBldg && opts) {
+                detail.hidden = false;
+                detail.innerHTML = buildImportPreviewHtml(sourceBldg, opts);
+            } else {
+                detail.hidden = true;
+                detail.innerHTML = '';
+            }
+        }
+        if (roundRow) roundRow.hidden = !(sourceBldg && opts && opts.defects);
+    }
 
     // --- 3.6 오프라인 상태 배지 ---
     function ensureOfflineBadge() {
@@ -1234,12 +1365,21 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('btnAddModeImport')?.classList.toggle('active', isImport);
         document.getElementById('btnAddModeNew')?.setAttribute('aria-selected', !isImport ? 'true' : 'false');
         document.getElementById('btnAddModeImport')?.setAttribute('aria-selected', isImport ? 'true' : 'false');
+        const basicDetails = document.getElementById('addBuildingBasicDetails');
+        const inspectionDetails = document.getElementById('addBuildingInspectionDetails');
+        if (isImport) {
+            if (basicDetails) basicDetails.open = false;
+            if (inspectionDetails) inspectionDetails.open = false;
+        } else {
+            if (basicDetails) basicDetails.open = true;
+            if (inspectionDetails) inspectionDetails.open = true;
+        }
     }
 
-    function populateAddBuildingImportSources() {
-        const sel = document.getElementById('selectImportSourceBuilding');
+    function populateImportSourceSelect(selectId, excludeId) {
+        const sel = document.getElementById(selectId);
         if (!sel) return;
-        const bldgs = window.state.buildings || [];
+        const bldgs = (window.state.buildings || []).filter(b => b.id !== excludeId);
         sel.innerHTML = '<option value="">— 가져올 점검 선택 —</option>' +
             bldgs.map((b) => {
                 const meta = [b.inspectionYear, b.inspectionPeriod, b.inspectionType].filter(Boolean).join(' · ');
@@ -1248,18 +1388,59 @@ document.addEventListener('DOMContentLoaded', () => {
             }).join('');
     }
 
+    function populateAddBuildingImportSources() {
+        populateImportSourceSelect('selectImportSourceBuilding');
+    }
+
+    function populateEditBuildingImportSources(excludeId) {
+        populateImportSourceSelect('selectEditImportSource', excludeId);
+    }
+
     function getAddBuildingImportOptions() {
         return {
             basicInfo: !!document.getElementById('chkImportBasicInfo')?.checked,
             floorsDrawings: !!document.getElementById('chkImportFloorsDrawings')?.checked,
             defects: !!document.getElementById('chkImportDefects')?.checked,
             ndt: !!document.getElementById('chkImportNdt')?.checked,
-            mapStyles: !!document.getElementById('chkImportMapStyles')?.checked
+            mapStyles: !!document.getElementById('chkImportMapStyles')?.checked,
+            defectRoundMode: getImportDefectRoundMode('importDefectRoundMode'),
+            merge: false
         };
     }
 
-    function updateImportSourceSummary(sourceBldg) {
+    function getEditBuildingImportOptions() {
+        return {
+            basicInfo: false,
+            floorsDrawings: !!document.getElementById('chkEditImportFloorsDrawings')?.checked,
+            defects: !!document.getElementById('chkEditImportDefects')?.checked,
+            ndt: !!document.getElementById('chkEditImportNdt')?.checked,
+            mapStyles: !!document.getElementById('chkEditImportMapStyles')?.checked,
+            defectRoundMode: getImportDefectRoundMode('editImportDefectRoundMode'),
+            merge: true
+        };
+    }
+
+    function applyImportPresetDrawingsOnly(prefix) {
+        const isEdit = prefix === 'edit';
+        const set = (id, val) => { const el = document.getElementById(id); if (el) el.checked = val; };
+        if (isEdit) {
+            set('chkEditImportFloorsDrawings', true);
+            set('chkEditImportDefects', false);
+            set('chkEditImportNdt', false);
+            set('chkEditImportMapStyles', false);
+        } else {
+            set('chkImportBasicInfo', false);
+            set('chkImportFloorsDrawings', true);
+            set('chkImportDefects', false);
+            set('chkImportNdt', false);
+            set('chkImportMapStyles', false);
+        }
+    }
+
+    function updateImportSourceSummary(sourceBldg, optsOverride) {
         const box = document.getElementById('importSourceSummary');
+        const opts = optsOverride || getAddBuildingImportOptions();
+        updateImportPreviewPanels(sourceBldg, sourceBldg ? opts : null, 'importPreviewDetail', 'importDefectRoundRow');
         if (!box) return;
         if (!sourceBldg) {
             box.hidden = true;
@@ -1268,12 +1449,17 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         const floorCount = (sourceBldg.floorsList && sourceBldg.floorsList.length) || Object.keys(sourceBldg.floorDrawings || {}).length;
         const defectCount = countBuildingDefects(sourceBldg);
-        const ndtCount = Object.keys(window.state.ndtData || {}).filter(k => k.startsWith(`${sourceBldg.id}_`)).length;
+        const ndtCount = countBuildingNdtFloors(sourceBldg);
         box.hidden = false;
         box.innerHTML =
             `<strong>${escapeHtml((sourceBldg.name || '').replace(/^🏢\s*/, ''))}</strong> · ` +
             `${escapeHtml(sourceBldg.address || '주소 미등록')}<br>` +
-            `층 ${floorCount}개 · 결함 ${defectCount}건 · NDT 층 ${ndtCount}개`;
+            `원본: 층 ${floorCount} · 결함 ${defectCount} · NDT ${ndtCount}`;
+    }
+
+    function updateEditImportPreview(sourceBldg) {
+        const opts = sourceBldg ? getEditBuildingImportOptions() : null;
+        updateImportPreviewPanels(sourceBldg, opts, 'editImportPreviewDetail', 'editImportDefectRoundRow');
     }
 
     function applyImportSourceToForm(sourceId) {
@@ -1325,7 +1511,7 @@ document.addEventListener('DOMContentLoaded', () => {
         return null;
     }
 
-    async function cloneDefectPhotosForNewId(defect, newDefectId) {
+    async function cloneDefectPhotosForNewId(defect, newDefectId, onPhotoProgress) {
         const cloned = {};
         const curPhotos = (defect.photos && defect.photos.length)
             ? defect.photos.slice()
@@ -1336,11 +1522,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const validCur = curPhotos.filter(Boolean);
         const validPrev = prevPhotos.filter(Boolean);
+        const totalPhotos = validCur.length + validPrev.length;
+        let photoIdx = 0;
 
         if (validCur.length > 0) {
             cloned.photos = validCur;
             cloned.photoIds = validCur.map((_, i) => getPhotoDocId(newDefectId, i));
             validCur.forEach((url, i) => {
+                photoIdx++;
+                onPhotoProgress?.(photoIdx, totalPhotos);
                 const pid = cloned.photoIds[i];
                 if (!window._photoCache) window._photoCache = {};
                 window._photoCache[pid] = url;
@@ -1351,6 +1541,8 @@ document.addEventListener('DOMContentLoaded', () => {
             cloned.prevRoundPhotos = validPrev;
             cloned.prevRoundPhotoIds = validPrev.map((_, i) => getPhotoDocId(newDefectId, i, 'prev'));
             validPrev.forEach((url, i) => {
+                photoIdx++;
+                onPhotoProgress?.(photoIdx, totalPhotos);
                 const pid = cloned.prevRoundPhotoIds[i];
                 if (!window._photoCache) window._photoCache = {};
                 window._photoCache[pid] = url;
@@ -1404,18 +1596,38 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    async function cloneBuildingDataFromSource(sourceBldg, targetBldg, options) {
+    async function cloneBuildingDataFromSource(sourceBldg, targetBldg, options, onProgress) {
         if (!sourceBldg || !targetBldg || !options) return;
         const srcPrefix = `${sourceBldg.id}_`;
         const newId = targetBldg.id;
+        const merge = !!options.merge;
+        const roundMode = options.defectRoundMode || 'keep';
 
         if (options.floorsDrawings) {
+            onProgress?.('도면 복사 중…');
             await cloneFloorDrawingsFromSource(sourceBldg, newId, targetBldg);
+            if (merge && sourceBldg.floorsList?.length) {
+                const existing = new Set((targetBldg.floorsList || []).map(f => f.floorCode));
+                sourceBldg.floorsList.forEach((f) => {
+                    if (!existing.has(f.floorCode)) {
+                        if (!targetBldg.floorsList) targetBldg.floorsList = [];
+                        targetBldg.floorsList.push(JSON.parse(JSON.stringify(f)));
+                        existing.add(f.floorCode);
+                    }
+                });
+                targetBldg.floorsList = window.sortFloorsLowToHigh(targetBldg.floorsList);
+            }
         }
 
         if (options.defects) {
             if (!window.state.defects) window.state.defects = {};
             const srcKeys = Object.keys(window.state.defects).filter(k => k.startsWith(srcPrefix));
+            let defectDone = 0;
+            let defectTotal = 0;
+            srcKeys.forEach((k) => {
+                defectTotal += (window.state.defects[k] || []).length;
+            });
+
             for (const srcKey of srcKeys) {
                 const floorCode = srcKey.slice(srcPrefix.length);
                 const newKey = `${newId}_${floorCode}`;
@@ -1423,21 +1635,31 @@ document.addEventListener('DOMContentLoaded', () => {
                 const clonedList = [];
                 for (const d of srcDefects) {
                     if (!d) continue;
+                    defectDone++;
+                    onProgress?.(`결함 복사 ${defectDone}/${defectTotal || defectDone}…`);
                     const copy = JSON.parse(JSON.stringify(d));
                     copy.id = generateDefectUniqueId(newKey);
                     delete copy.photos;
                     delete copy.prevRoundPhotos;
                     delete copy.photoIds;
                     delete copy.prevRoundPhotoIds;
-                    const photoFields = await cloneDefectPhotosForNewId(d, copy.id);
+                    applyDefectRoundModeToClone(copy, roundMode, targetBldg);
+                    const photoFields = await cloneDefectPhotosForNewId(d, copy.id, (pi, pt) => {
+                        onProgress?.(`사진 ${pi}/${pt} (결함 ${defectDone}/${defectTotal})…`);
+                    });
                     Object.assign(copy, photoFields);
                     clonedList.push(copy);
                 }
                 if (clonedList.length > 0) {
-                    window.state.defects[newKey] = clonedList;
+                    if (merge && window.state.defects[newKey]?.length) {
+                        window.state.defects[newKey] = window.state.defects[newKey].concat(clonedList);
+                    } else {
+                        window.state.defects[newKey] = clonedList;
+                    }
                 }
             }
             if (typeof uploadInlineDefectPhotosForSync === 'function') {
+                onProgress?.('사진 동기화 준비…');
                 const subset = {};
                 Object.keys(window.state.defects).filter(k => k.startsWith(`${newId}_`)).forEach(k => {
                     subset[k] = window.state.defects[k];
@@ -1451,14 +1673,26 @@ document.addEventListener('DOMContentLoaded', () => {
             Object.keys(window.state.ndtData).forEach((k) => {
                 if (!k.startsWith(srcPrefix)) return;
                 const floorCode = k.slice(srcPrefix.length);
-                window.state.ndtData[`${newId}_${floorCode}`] = JSON.parse(JSON.stringify(window.state.ndtData[k]));
+                const destKey = `${newId}_${floorCode}`;
+                const cloned = JSON.parse(JSON.stringify(window.state.ndtData[k]));
+                if (merge && window.state.ndtData[destKey]) {
+                    window.state.ndtData[destKey] = { ...window.state.ndtData[destKey], ...cloned };
+                } else {
+                    window.state.ndtData[destKey] = cloned;
+                }
             });
             if (!window.state.ndtDisplacementGroups) window.state.ndtDisplacementGroups = {};
             Object.keys(window.state.ndtDisplacementGroups).forEach((k) => {
                 if (!k.startsWith(srcPrefix)) return;
                 const floorCode = k.slice(srcPrefix.length);
-                window.state.ndtDisplacementGroups[`${newId}_${floorCode}`] =
-                    JSON.parse(JSON.stringify(window.state.ndtDisplacementGroups[k]));
+                const destKey = `${newId}_${floorCode}`;
+                const cloned = JSON.parse(JSON.stringify(window.state.ndtDisplacementGroups[k]));
+                if (merge && window.state.ndtDisplacementGroups[destKey]) {
+                    window.state.ndtDisplacementGroups[destKey] =
+                        (window.state.ndtDisplacementGroups[destKey] || []).concat(cloned);
+                } else {
+                    window.state.ndtDisplacementGroups[destKey] = cloned;
+                }
             });
         }
 
@@ -1467,12 +1701,31 @@ document.addEventListener('DOMContentLoaded', () => {
             Object.keys(window.state.floorMapStyleSettings).forEach((k) => {
                 if (!k.startsWith(srcPrefix)) return;
                 const floorCode = k.slice(srcPrefix.length);
+                const destKey = `${newId}_${floorCode}`;
+                if (merge && window.state.floorMapStyleSettings[destKey]) return;
                 const saved = window.state.floorMapStyleSettings[k];
                 if (!saved) return;
-                window.state.floorMapStyleSettings[`${newId}_${floorCode}`] = {
+                window.state.floorMapStyleSettings[destKey] = {
                     styleSizes: cloneStyleSizesMap(saved.styleSizes)
                 };
             });
+        }
+    }
+
+    async function runBuildingImport(sourceBldg, targetBldg, importOpts, label) {
+        window.showLoading(`${label || '데이터'} 복사 중…`);
+        try {
+            await cloneBuildingDataFromSource(sourceBldg, targetBldg, importOpts, (msg) => {
+                if (typeof window.updateLoadingText === 'function') window.updateLoadingText(msg);
+            });
+            saveStateToLocalStorage();
+            await syncAfterImportWithRetry(label || '가져오기');
+        } catch (err) {
+            console.error('점검 데이터 복사 오류:', err);
+            window.showToast('일부 데이터 복사에 실패했습니다. 내용을 확인해 주세요.', 'warning', 5500);
+            throw err;
+        } finally {
+            window.hideLoading();
         }
     }
 
@@ -1664,10 +1917,39 @@ document.addEventListener('DOMContentLoaded', () => {
     if (btnAddModeNew) btnAddModeNew.addEventListener('click', () => setAddBuildingMode('new'));
     if (btnAddModeImport) btnAddModeImport.addEventListener('click', () => setAddBuildingMode('import'));
 
+    document.getElementById('btnImportPresetDrawingsOnly')?.addEventListener('click', () => {
+        applyImportPresetDrawingsOnly('add');
+        const sourceId = document.getElementById('selectImportSourceBuilding')?.value;
+        if (sourceId) {
+            const bldg = (window.state.buildings || []).find(b => b.id === sourceId);
+            updateImportSourceSummary(bldg || null);
+        }
+    });
+    document.getElementById('btnEditImportPresetDrawingsOnly')?.addEventListener('click', () => {
+        applyImportPresetDrawingsOnly('edit');
+        const sourceId = document.getElementById('selectEditImportSource')?.value;
+        if (sourceId) {
+            const bldg = (window.state.buildings || []).find(b => b.id === sourceId);
+            updateEditImportPreview(bldg || null);
+        }
+    });
+
+    const btnMobileFabAddBuilding = document.getElementById('btnMobileFabAddBuilding');
+    if (btnMobileFabAddBuilding) {
+        btnMobileFabAddBuilding.addEventListener('click', () => window.openAddBuildingModalFunc());
+    }
+
     const selectImportSourceBuilding = document.getElementById('selectImportSourceBuilding');
     if (selectImportSourceBuilding) {
         selectImportSourceBuilding.addEventListener('change', (e) => {
             applyImportSourceToForm(e.target.value);
+        });
+    }
+    const selectEditImportSource = document.getElementById('selectEditImportSource');
+    if (selectEditImportSource) {
+        selectEditImportSource.addEventListener('change', (e) => {
+            const bldg = (window.state.buildings || []).find(b => b.id === e.target.value);
+            updateEditImportPreview(bldg || null);
         });
     }
     ['chkImportBasicInfo', 'chkImportFloorsDrawings', 'chkImportDefects', 'chkImportNdt', 'chkImportMapStyles'].forEach((id) => {
@@ -1678,10 +1960,70 @@ document.addEventListener('DOMContentLoaded', () => {
             if (sourceId && id === 'chkImportBasicInfo' && el.checked) {
                 applyImportSourceToForm(sourceId);
             } else if (sourceId) {
-                updateImportSourceSummary((window.state.buildings || []).find(b => b.id === sourceId));
+                const bldg = (window.state.buildings || []).find(b => b.id === sourceId);
+                updateImportSourceSummary(bldg || null);
             }
         });
     });
+    ['chkEditImportFloorsDrawings', 'chkEditImportDefects', 'chkEditImportNdt', 'chkEditImportMapStyles'].forEach((id) => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.addEventListener('change', () => {
+            const sourceId = document.getElementById('selectEditImportSource')?.value;
+            if (sourceId) {
+                const bldg = (window.state.buildings || []).find(b => b.id === sourceId);
+                updateEditImportPreview(bldg || null);
+            }
+        });
+    });
+    document.querySelectorAll('input[name="importDefectRoundMode"], input[name="editImportDefectRoundMode"]').forEach((el) => {
+        el.addEventListener('change', () => {
+            const addId = document.getElementById('selectImportSourceBuilding')?.value;
+            if (addId && el.name === 'importDefectRoundMode') {
+                updateImportSourceSummary((window.state.buildings || []).find(b => b.id === addId));
+            }
+            const editId = document.getElementById('selectEditImportSource')?.value;
+            if (editId && el.name === 'editImportDefectRoundMode') {
+                updateEditImportPreview((window.state.buildings || []).find(b => b.id === editId));
+            }
+        });
+    });
+
+    const btnEditImportApply = document.getElementById('btnEditImportApply');
+    if (btnEditImportApply) {
+        btnEditImportApply.addEventListener('click', async () => {
+            const targetBldg = window.currentEditingBuilding;
+            if (!targetBldg) return;
+            const sourceId = document.getElementById('selectEditImportSource')?.value || '';
+            const sourceBldg = (window.state.buildings || []).find(b => b.id === sourceId);
+            if (!sourceId || !sourceBldg) {
+                window.showToast('가져올 점검을 선택해 주세요.', 'warning');
+                return;
+            }
+            if (sourceId === targetBldg.id) {
+                window.showToast('같은 점검은 가져올 수 없습니다.', 'warning');
+                return;
+            }
+            const importOpts = getEditBuildingImportOptions();
+            const anyCopy = importOpts.floorsDrawings || importOpts.defects || importOpts.ndt || importOpts.mapStyles;
+            if (!anyCopy) {
+                window.showToast('가져올 항목을 하나 이상 선택해 주세요.', 'warning');
+                return;
+            }
+            if (!confirm(`「${(sourceBldg.name || '').replace(/^🏢\s*/, '')}」에서 선택 항목을 이 건물에 병합할까요?`)) return;
+            try {
+                await runBuildingImport(sourceBldg, targetBldg, importOpts, '가져오기');
+                targetBldg.floorsList = window.getBuildingAvailableFloors(targetBldg);
+                renderEditDrawingPreview();
+                if (window.state.currentBuildingId === targetBldg.id) {
+                    populateFloorSelectDropdown(targetBldg);
+                    if (typeof drawCanvas === 'function') drawCanvas();
+                    if (typeof renderDefectListPanel === 'function') renderDefectListPanel();
+                }
+                window.showToast('선택한 데이터를 가져왔습니다.', 'success');
+            } catch (_e) { /* toast inside runBuildingImport */ }
+        });
+    }
 
     // Save New Building Action
     const btnSaveBuilding = document.getElementById('btnSaveBuilding');
@@ -1702,6 +2044,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 : null;
             const importOpts = isImportMode ? getAddBuildingImportOptions() : null;
 
+            const address = (document.getElementById('inputBuildingAddress')?.value || '').trim() || '서울특별시 강남구 테헤란로 123';
+
             if (isImportMode) {
                 if (!sourceId || !sourceBldg) {
                     window.showToast('가져올 점검을 선택해 주세요.', 'warning');
@@ -1714,7 +2058,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             }
 
-            const address = (document.getElementById('inputBuildingAddress')?.value || '').trim() || '서울특별시 강남구 테헤란로 123';
+            const similar = findSimilarBuildings(name, address);
+            if (similar.length > 0) {
+                const names = similar.map(b => (b.name || '').replace(/^🏢\s*/, '')).join(', ');
+                if (!confirm(`비슷한 건축물이 이미 있습니다 (${names}).\n그래도 새로 등록하시겠습니까?`)) return;
+            }
+
             const date = document.getElementById('inputBuildingDate')?.value || new Date().toISOString().split('T')[0];
             const floors = document.getElementById('inputBuildingFloors')?.value || '지상 10층 ~ 지하 2층';
             const inspectionType = document.getElementById('inputBuildingInspectionType')?.value || '정밀안전점검';
@@ -1795,19 +2144,14 @@ document.addEventListener('DOMContentLoaded', () => {
             window.state.buildings.unshift(newBldg);
 
             if (isImportMode && sourceBldg && importOpts) {
-                window.showLoading('선택한 점검 데이터를 복사하는 중입니다...');
                 try {
-                    await cloneBuildingDataFromSource(sourceBldg, newBldg, importOpts);
-                } catch (err) {
-                    console.error('점검 데이터 복사 오류:', err);
-                    window.showToast('일부 데이터 복사에 실패했습니다. 등록은 완료되었으니 내용을 확인해 주세요.', 'warning', 5500);
-                } finally {
-                    window.hideLoading();
-                }
+                    await runBuildingImport(sourceBldg, newBldg, importOpts, '등록');
+                } catch (_e) { /* handled in runBuildingImport */ }
+            } else {
+                saveStateToLocalStorage();
+                if (typeof syncStateToFirebase === 'function') syncStateToFirebase();
             }
 
-            saveStateToLocalStorage();
-            if (typeof syncStateToFirebase === 'function') syncStateToFirebase();
             window.closeAddBuildingModalFunc();
 
             renderDashboard();
@@ -1871,6 +2215,11 @@ document.addEventListener('DOMContentLoaded', () => {
         if (document.getElementById('inputEditBuildingFacilityGrade')) document.getElementById('inputEditBuildingFacilityGrade').value = bldg.facilityGrade || '';
         if (document.getElementById('inputEditBuildingCompletionDate')) document.getElementById('inputEditBuildingCompletionDate').value = bldg.completionDate || '';
         if (document.getElementById('inputEditBuildingNotes')) document.getElementById('inputEditBuildingNotes').value = bldg.notes || '';
+
+        populateEditBuildingImportSources(bldg.id);
+        const editImportSel = document.getElementById('selectEditImportSource');
+        if (editImportSel) editImportSel.value = '';
+        updateEditImportPreview(null);
 
         const fileInput = document.getElementById('inputEditBuildingDrawings');
         if (fileInput) fileInput.value = '';
@@ -9825,20 +10174,50 @@ document.addEventListener('DOMContentLoaded', () => {
             .filter(v => v && !isDefectComboCustomToken(v));
     }
 
-    function renderQuickPickChipGroup(containerId, options, currentValue, onPick) {
+    function renderQuickPickChipGroup(containerId, options, currentValue, onPick, favKind, favKey) {
         const container = document.getElementById(containerId);
         if (!container) return;
         if (!Array.isArray(options) || options.length === 0) {
             container.innerHTML = '';
             return;
         }
-        container.innerHTML = options.map(value => `
-            <button type="button" class="defect-quick-chip ${value === currentValue ? 'active' : ''}" data-value="${value}">
-                ${value}
-            </button>
-        `).join('');
+        const favorites = (favKind && favKey) ? getDeviceFavoriteList(favKind, favKey) : [];
+        const sorted = (favKind && favKey)
+            ? sortOptionsWithDeviceFavorites(options, favKind, favKey)
+            : options;
+        container.innerHTML = sorted.map(value => {
+            const isFav = favorites.includes(value);
+            return `<button type="button" class="defect-quick-chip ${value === currentValue ? 'active' : ''}${isFav ? ' is-favorite' : ''}" data-value="${escapeHtml(value)}" data-fav-kind="${favKind || ''}" data-fav-key="${escapeHtml(favKey || '')}">
+                ${isFav ? '<i class="fa-solid fa-star fav-star"></i>' : ''}${escapeHtml(value)}
+            </button>`;
+        }).join('');
         container.querySelectorAll('.defect-quick-chip').forEach(btn => {
-            btn.addEventListener('click', () => onPick(btn.dataset.value || ''));
+            let pressTimer = null;
+            const pick = () => onPick(btn.dataset.value || '');
+            btn.addEventListener('click', pick);
+            btn.addEventListener('touchstart', () => {
+                pressTimer = setTimeout(() => {
+                    const kind = btn.dataset.favKind;
+                    const key = btn.dataset.favKey;
+                    const val = btn.dataset.value;
+                    if (!kind || !key || !val) return;
+                    const added = toggleDeviceFavorite(kind, key, val);
+                    window.showToast(added ? '즐겨찾기에 추가했습니다 (이 기기만)' : '즐겨찾기에서 제거했습니다', 'info', 2200);
+                    refreshDefectQuickPickBar();
+                }, 550);
+            }, { passive: true });
+            btn.addEventListener('touchend', () => { if (pressTimer) clearTimeout(pressTimer); });
+            btn.addEventListener('touchmove', () => { if (pressTimer) clearTimeout(pressTimer); });
+            btn.addEventListener('contextmenu', (e) => {
+                e.preventDefault();
+                const kind = btn.dataset.favKind;
+                const key = btn.dataset.favKey;
+                const val = btn.dataset.value;
+                if (!kind || !key || !val) return;
+                const added = toggleDeviceFavorite(kind, key, val);
+                window.showToast(added ? '즐겨찾기에 추가 (이 기기만)' : '즐겨찾기 해제', 'info', 2200);
+                refreshDefectQuickPickBar();
+            });
         });
     }
 
@@ -9860,27 +10239,46 @@ document.addEventListener('DOMContentLoaded', () => {
             categoryEl.value = value;
             categoryEl.dispatchEvent(new Event('change', { bubbles: true }));
             if (typeof scheduleDefectAutoApply === 'function') scheduleDefectAutoApply();
-        });
+        }, null, null);
 
-        renderQuickPickChipGroup('quickComponentChips', getQuickPickOptionsFromSelect(componentSelect).slice(0, 16), currentComponent, (value) => {
+        const componentOptions = getQuickPickOptionsFromSelect(componentSelect).slice(0, 16);
+        renderQuickPickChipGroup('quickComponentChips', componentOptions, currentComponent, (value) => {
             syncDefectComboFields(componentSelect, componentInput, value);
             updateDefectTypeDropdown(currentCategory, getDefectComboValue(typeSelect, typeInput));
             if (typeof scheduleDefectAutoApply === 'function') scheduleDefectAutoApply();
             refreshDefectQuickPickBar();
-        });
+        }, 'component', currentCategory);
 
         const selectedTypeParts = parseDefectTypeList(currentType);
         const selectedTypeSet = new Set(selectedTypeParts);
-        const typeChipOptions = getPinnedDefectTypeChips(currentCategory, currentComponent);
+        const typeChipOptions = sortOptionsWithDeviceFavorites(
+            getPinnedDefectTypeChips(currentCategory, currentComponent),
+            'type',
+            currentCategory
+        );
         const typeContainer = document.getElementById('quickDefectTypeChips');
         if (typeContainer) {
             typeContainer.innerHTML = typeChipOptions.map(value => {
                 const active = selectedTypeSet.has(value);
-                return `<button type="button" class="defect-quick-chip${active ? ' active' : ''}" data-value="${value}">${value}</button>`;
+                const isFav = isDeviceFavorite('type', currentCategory, value);
+                return `<button type="button" class="defect-quick-chip${active ? ' active' : ''}${isFav ? ' is-favorite' : ''}" data-value="${escapeHtml(value)}" data-fav-kind="type" data-fav-key="${escapeHtml(currentCategory)}">${isFav ? '<i class="fa-solid fa-star fav-star"></i>' : ''}${escapeHtml(value)}</button>`;
             }).join('');
             typeContainer.querySelectorAll('.defect-quick-chip').forEach(btn => {
-                btn.addEventListener('click', () => {
-                    toggleDefectTypeChip(btn.dataset.value || '');
+                let pressTimer = null;
+                btn.addEventListener('click', () => toggleDefectTypeChip(btn.dataset.value || ''));
+                btn.addEventListener('touchstart', () => {
+                    pressTimer = setTimeout(() => {
+                        const added = toggleDeviceFavorite('type', currentCategory, btn.dataset.value || '');
+                        window.showToast(added ? '즐겨찾기 추가 (이 기기)' : '즐겨찾기 해제', 'info', 2200);
+                        refreshDefectQuickPickBar();
+                    }, 550);
+                }, { passive: true });
+                btn.addEventListener('touchend', () => { if (pressTimer) clearTimeout(pressTimer); });
+                btn.addEventListener('contextmenu', (e) => {
+                    e.preventDefault();
+                    const added = toggleDeviceFavorite('type', currentCategory, btn.dataset.value || '');
+                    window.showToast(added ? '즐겨찾기 추가 (이 기기)' : '즐겨찾기 해제', 'info', 2200);
+                    refreshDefectQuickPickBar();
                 });
             });
         }
@@ -21315,6 +21713,9 @@ document.addEventListener('DOMContentLoaded', () => {
             window.state.locationMapLegendBox = data.locationMapLegendBox;
             isChanged = true;
         }
+        if (data.companyDefectPresets) {
+            if (applyCompanyDefectPresetsFromRemote(data.companyDefectPresets)) isChanged = true;
+        }
 
         return isChanged;
     }
@@ -21387,6 +21788,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 locationMapLegend: window.state.locationMapLegend || null,
                 locationMapLegendBox: window.state.locationMapLegendBox || null,
                 companyName: window.state.companyName || localStorage.getItem('building_company_name'),
+                companyDefectPresets: getCompanyDefectPresetsPayload(),
                 updatedAt: firebase.firestore.FieldValue.serverTimestamp()
             };
             await docRef.set(dataToSync, { merge: true });

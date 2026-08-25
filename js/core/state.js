@@ -439,3 +439,70 @@ window.buildFloorCodeOptionsHtml = function(selectedCode) {
 window.selectedUploadedDrawings = [];
 window.selectedEditUploadedDrawings = [];
 
+// --- 기기별 즐겨찾기 (localStorage 전용 — Firebase 동기화 안 함) ---
+const DEVICE_FAVORITES_KEY = 'building_safety_device_favorites_v1';
+
+function ensureDeviceDefectFavoritesShape() {
+    if (!window.state.deviceDefectFavorites) {
+        window.state.deviceDefectFavorites = { component: {}, type: {}, cause: {} };
+    }
+    ['component', 'type', 'cause'].forEach((k) => {
+        if (!window.state.deviceDefectFavorites[k] || typeof window.state.deviceDefectFavorites[k] !== 'object') {
+            window.state.deviceDefectFavorites[k] = {};
+        }
+    });
+}
+
+function loadDeviceDefectFavorites() {
+    try {
+        const raw = localStorage.getItem(DEVICE_FAVORITES_KEY);
+        if (raw) window.state.deviceDefectFavorites = JSON.parse(raw);
+    } catch (_e) { /* ignore */ }
+    ensureDeviceDefectFavoritesShape();
+}
+
+function saveDeviceDefectFavorites() {
+    ensureDeviceDefectFavoritesShape();
+    try {
+        localStorage.setItem(DEVICE_FAVORITES_KEY, JSON.stringify(window.state.deviceDefectFavorites));
+    } catch (_e) { /* ignore */ }
+}
+
+function getDeviceFavoriteList(field, key) {
+    loadDeviceDefectFavorites();
+    const bucket = window.state.deviceDefectFavorites[field] || {};
+    if (!Array.isArray(bucket[key])) bucket[key] = [];
+    window.state.deviceDefectFavorites[field][key] = bucket[key];
+    return bucket[key];
+}
+
+function isDeviceFavorite(field, key, value) {
+    const v = String(value || '').trim();
+    if (!v) return false;
+    return getDeviceFavoriteList(field, key).includes(v);
+}
+
+function toggleDeviceFavorite(field, key, value) {
+    const v = String(value || '').trim();
+    if (!v) return false;
+    const list = getDeviceFavoriteList(field, key);
+    const idx = list.indexOf(v);
+    if (idx >= 0) {
+        list.splice(idx, 1);
+    } else {
+        list.push(v);
+    }
+    saveDeviceDefectFavorites();
+    return idx < 0;
+}
+
+function sortOptionsWithDeviceFavorites(options, field, key) {
+    if (!Array.isArray(options) || options.length === 0) return options || [];
+    const favSet = new Set(getDeviceFavoriteList(field, key));
+    const favFirst = options.filter(o => favSet.has(o));
+    const rest = options.filter(o => !favSet.has(o));
+    return favFirst.concat(rest);
+}
+
+loadDeviceDefectFavorites();
+

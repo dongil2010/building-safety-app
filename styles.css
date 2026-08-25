@@ -4615,6 +4615,139 @@ body {
     font-weight: 800;
 }
 
+.add-mode-label-short { display: none; }
+
+.add-import-presets {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.45rem;
+    margin-top: 0.55rem;
+}
+
+.add-import-preview-detail {
+    margin-top: 0.65rem;
+    padding: 0.6rem 0.75rem;
+    border-radius: 8px;
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    font-size: 0.76rem;
+    color: #334155;
+    line-height: 1.55;
+}
+
+.add-import-preview-detail ul {
+    margin: 0.35rem 0 0 1rem;
+    padding: 0;
+}
+
+.add-import-round-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.45rem 0.75rem;
+    margin-top: 0.65rem;
+    padding: 0.55rem 0.65rem;
+    border-radius: 8px;
+    background: #fffbeb;
+    border: 1px solid #fcd34d;
+    font-size: 0.76rem;
+}
+
+.add-import-round-label {
+    font-weight: 800;
+    color: #92400e;
+}
+
+.add-import-round-opt {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    cursor: pointer;
+    color: #78350f;
+}
+
+.add-building-collapsible {
+    border: 1px solid #e2e8f0;
+    border-radius: 12px;
+    background: #ffffff;
+    overflow: hidden;
+}
+
+.add-building-collapsible-summary {
+    padding: 0.75rem 1rem;
+    font-size: 0.88rem;
+    font-weight: 800;
+    color: #0f172a;
+    cursor: pointer;
+    list-style: none;
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+    background: #f8fafc;
+    border-bottom: 1px solid #e2e8f0;
+}
+
+.add-building-collapsible-summary::-webkit-details-marker { display: none; }
+
+.add-building-collapsible-body {
+    border: none;
+    border-radius: 0;
+    box-shadow: none;
+    padding-top: 0.85rem;
+}
+
+.add-section-desc-inline {
+    margin: 0 0 0.75rem;
+}
+
+.edit-import-section {
+    background: linear-gradient(180deg, #eff6ff 0%, #ffffff 55%);
+    border: 1px solid #bfdbfe;
+    border-radius: 12px;
+    padding: 0.95rem 1rem;
+    margin-bottom: 0.5rem;
+}
+
+.home-fab-add-building {
+    display: none;
+    position: fixed;
+    right: 1rem;
+    bottom: calc(4.5rem + env(safe-area-inset-bottom, 0px));
+    width: 3.25rem;
+    height: 3.25rem;
+    border-radius: 50%;
+    border: none;
+    background: linear-gradient(135deg, #1e293b, #0f172a);
+    color: #ffffff;
+    font-size: 1.25rem;
+    box-shadow: 0 8px 24px rgba(15, 23, 42, 0.35);
+    z-index: 90;
+    cursor: pointer;
+    align-items: center;
+    justify-content: center;
+}
+
+.home-fab-add-building:active {
+    transform: scale(0.96);
+}
+
+.defect-quick-chip.is-favorite {
+    border-color: #f59e0b;
+    background: #fffbeb;
+}
+
+.defect-quick-chip .fav-star {
+    font-size: 0.62rem;
+    color: #f59e0b;
+    margin-right: 0.15rem;
+}
+
+.defect-quick-hint-fav {
+    font-size: 0.68rem;
+    color: #64748b;
+    font-weight: 600;
+}
+
 /* ── 결함 빠른 선택 패널 ── */
 .defect-quick-picks {
     display: flex;
@@ -6792,6 +6925,13 @@ body {
     #addBuildingModal .add-building-row-3 > .form-group {
         flex: 1 1 100%;
     }
+
+    #tab-home .home-fab-add-building {
+        display: inline-flex;
+    }
+
+    .add-mode-label-long { display: none; }
+    .add-mode-label-short { display: inline; }
 
     #addBuildingModal .modal-header h3,
     #editBuildingModal .modal-header h3 {
