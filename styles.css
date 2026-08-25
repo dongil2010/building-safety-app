@@ -5073,28 +5073,11 @@ body {
     font-weight: 800;
 }
 
-/* 발생 원인 복수 선택 — 결함 종류별 그룹 */
-.defect-cause-type-block {
-    display: flex;
-    flex-direction: column;
+/* 발생 원인 복수 선택 — 종류별 색상만 구분, 한 그리드에 이어서 배치 */
+.defect-cause-checks-host {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 0.28rem;
-    margin-bottom: 0.45rem;
-}
-.defect-cause-type-block:last-child {
-    margin-bottom: 0;
-}
-.defect-cause-type-label {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.3rem;
-    font-size: 0.68rem;
-    font-weight: 800;
-    color: var(--cause-tone-text, #64748b);
-    padding: 0.15rem 0.35rem;
-    border-radius: 6px;
-    background: var(--cause-tone-bg, #f8fafc);
-    border: 1px solid var(--cause-tone-border, #e2e8f0);
-    width: fit-content;
 }
 .defect-cause-check-grid {
     display: grid;

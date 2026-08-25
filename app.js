@@ -2431,6 +2431,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
             window.state.buildings.unshift(newBldg);
 
+            await persistBuildingDrawingAssetsNow(newBldg);
+
             if (isImportMode && sourceBldg && importOpts) {
                 try {
                     await runBuildingImport(sourceBldg, newBldg, importOpts, '등록');
@@ -2853,6 +2855,7 @@ document.addEventListener('DOMContentLoaded', () => {
             bldg.notes = notes;
 
             // Save state & sync
+            await persistBuildingDrawingAssetsNow(bldg);
             saveStateToLocalStorage();
             if (typeof syncStateToFirebase === 'function') syncStateToFirebase();
 
@@ -3257,6 +3260,16 @@ document.addEventListener('DOMContentLoaded', () => {
         img.src = dataUrl;
     }
 
+    function finishRegisteredFloorDrawingLoadFailed(floorCode) {
+        if (state.currentFloor !== floorCode) return;
+        state.bgImage = null;
+        resizeCanvas();
+        drawCanvas();
+        if (typeof window.showToast === 'function') {
+            window.showToast('등록된 도면을 불러오지 못했습니다. 다시 업로드해 주세요.', 'warning', 4500);
+        }
+    }
+
     function loadFloorDrawing(floorCode) {
         state.currentFloor = floorCode;
         state.bgImage = null;
@@ -3295,8 +3308,12 @@ document.addEventListener('DOMContentLoaded', () => {
             };
             img.onerror = () => {
                 if (!isFallback) {
-                    // Mobile or broken path fallback -> load high-res CAD Blueprint Data-URL
-                    tryLoadImage(getDefaultBlueprintSvgDataUrl(floorCode || '1F'), true);
+                    if (hasFloorRegistered) {
+                        finishRegisteredFloorDrawingLoadFailed(floorCode);
+                    } else {
+                        // 미등록 층만 기본 CAD 도면으로 대체
+                        tryLoadImage(getDefaultBlueprintSvgDataUrl(floorCode || '1F'), true);
+                    }
                 } else {
                     resizeCanvas();
                     drawCanvas();
@@ -3360,16 +3377,17 @@ document.addEventListener('DOMContentLoaded', () => {
                                 idbSet('floorDrawings', idbKey, fetchedUrl);
                             }
                             if (state.currentFloor === floorCode) {
-                                tryLoadImage(fetchedUrl || getDefaultBlueprintSvgDataUrl(floorCode || '1F'), !fetchedUrl);
+                                if (fetchedUrl) tryLoadImage(fetchedUrl, false);
+                                else finishRegisteredFloorDrawingLoadFailed(floorCode);
                             }
                         })
                         .catch(() => {
                             if (state.currentFloor === floorCode) {
-                                tryLoadImage(getDefaultBlueprintSvgDataUrl(floorCode || '1F'), true);
+                                finishRegisteredFloorDrawingLoadFailed(floorCode);
                             }
                         });
                 } else if (state.currentFloor === floorCode) {
-                    tryLoadImage(getDefaultBlueprintSvgDataUrl(floorCode || '1F'), true);
+                    finishRegisteredFloorDrawingLoadFailed(floorCode);
                 }
             })();
         } else if (!dataUrl || (isLocalFileUrl && window.location.protocol !== 'file:')) {
@@ -11004,7 +11022,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         const causeGroup = document.getElementById('quickCauseGroup');
-        if (causeGroup) causeGroup.style.display = currentType === '상태양호' ? 'none' : '';
+        if (causeGroup) causeGroup.style.display = hasActionableDefectType(currentType) ? '' : 'none';
         // 발생 원인은 체크박스 복수 선택 — 칩은 숨김 유지
         const causeChipHost = document.getElementById('quickCauseChips');
         if (causeChipHost) {
@@ -11324,14 +11342,16 @@ document.addEventListener('DOMContentLoaded', () => {
         if (key.includes('보') || key.includes('거더') || key.includes('빔')) return BEAM_CRACK_KINDS.slice();
         return null;
     }
-    function isCrackKindLabel(label) {
+    function isRcStructuralCrackKind(label) {
         const t = String(label || '').trim();
         if (!t) return false;
+        if (t === '균열') return true;
         return WALL_CRACK_KINDS.includes(t)
             || COLUMN_CRACK_KINDS.includes(t)
-            || BEAM_CRACK_KINDS.includes(t)
-            || t === '균열'
-            || t.includes('균열');
+            || BEAM_CRACK_KINDS.includes(t);
+    }
+    function isCrackKindLabel(label) {
+        return isRcStructuralCrackKind(label);
     }
     function parseDefectTypeList(raw) {
         // 콤마만 구분자 — '박리/박락'·'백태/유출' 등 슬래시 라벨은 한 항목으로 유지
@@ -11827,11 +11847,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const defectCausePreset = {
         // ── 구조체 결함 ──
         '균열': [
-            '건조수축', '수화열·온도균열', '온도·열응력', '내력 부족', '배근 부족/피복 부족',
-            '과하중', '집중하중', '시공불량', '다짐·양생 불량', '배합비 불량',
-            '신축이음 불량/미설치', '부등침하', '지반 침하', '기초 변위',
-            '지진·진동', '피로·반복하중', '크리프·장기변형', '동결융해', '알칼리골재반응',
-            '염해', '중성화', '누수·습기 침투', '구조변경·개구부', '설계오류', '기타'
+            '건조수축', '재료적 특성', '수화열·온도균열', '내력부족', '과하중', '집중하중',
+            '배근 부족', '시공불량', '부등침하', '신축이음 불량', '외력·진동', '누수·습기', '기타'
         ],
         '누수': [
             '방수층 파손', '방수층 시공불량', '배관 파손/연결부 누수', '균열부 침투',
@@ -12077,17 +12094,21 @@ document.addEventListener('DOMContentLoaded', () => {
             .filter(Boolean);
     }
 
+    function hasActionableDefectType(defectTypeStr) {
+        return parseDefectTypeList(defectTypeStr).some(t => t && t !== '상태양호');
+    }
+
     function getCauseKey(defectType) {
         if (!defectType) return '기타';
         const parts = parseDefectTypeList(defectType);
         for (const part of parts) {
             const t = part.trim();
             if (defectCausePreset[t]) return t;
-            if (t.includes('균열') && defectCausePreset['균열']) return '균열';
+            if (isRcStructuralCrackKind(t)) return '균열';
         }
         const t = String(defectType).trim();
         if (defectCausePreset[t]) return t;
-        if (t.includes('균열') && defectCausePreset['균열']) return '균열';
+        if (isRcStructuralCrackKind(t)) return '균열';
         const keys = Object.keys(defectCausePreset).sort((a, b) => b.length - a.length);
         for (const k of keys) {
             if (k === '기타') continue;
@@ -12096,16 +12117,16 @@ document.addEventListener('DOMContentLoaded', () => {
         return '기타';
     }
 
-    /** 복수 결함 종류 → 원인 프리셋 그룹(균열 계열은 하나로 합침) */
+    /** 복수 결함 종류 → 원인 프리셋 그룹(RC 균열 계열만 하나로 합침) */
     function getCauseDisplayGroups(defectTypeStr) {
-        const parts = parseDefectTypeList(defectTypeStr);
-        if (!parts.length) return [{ key: '기타', label: '기타', types: [], isCrackGroup: false }];
+        const parts = parseDefectTypeList(defectTypeStr).filter(t => t && t !== '상태양호');
+        if (!parts.length) return [];
         const groups = [];
         let crackGroup = null;
         parts.forEach((part) => {
             const t = String(part || '').trim();
             if (!t || t === '상태양호') return;
-            if (isCrackKindLabel(t)) {
+            if (isRcStructuralCrackKind(t)) {
                 if (!crackGroup) {
                     crackGroup = { key: '균열', label: '균열', types: [t], isCrackGroup: true };
                     groups.push(crackGroup);
@@ -12123,7 +12144,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 g.types.push(t);
             }
         });
-        return groups.length ? groups : [{ key: '기타', label: '기타', types: [], isCrackGroup: false }];
+        return groups;
     }
 
     const CAUSE_GROUP_TONES = [
@@ -12151,45 +12172,51 @@ document.addEventListener('DOMContentLoaded', () => {
         const box = document.getElementById('defectCauseChecks');
         const groupWrap = document.getElementById('quickCauseGroup');
         if (!box) return;
-        const groups = getCauseDisplayGroups(defectTypeStr);
-        const selected = new Set(parseCauseList(causeVal));
-        const multiGroup = groups.length > 1;
-
-        if (!groups.length || (groups.length === 1 && !groups[0].types.length)) {
+        if (!hasActionableDefectType(defectTypeStr)) {
             box.innerHTML = '';
             if (groupWrap) groupWrap.style.display = 'none';
             return;
         }
 
-        box.innerHTML = groups.map((g, gi) => {
+        const groups = getCauseDisplayGroups(defectTypeStr);
+        const selected = new Set(parseCauseList(causeVal));
+
+        if (!groups.length) {
+            box.innerHTML = '';
+            if (groupWrap) groupWrap.style.display = 'none';
+            return;
+        }
+
+        const flatItems = [];
+        const seenCauses = new Set();
+        groups.forEach((g, gi) => {
             const tone = CAUSE_GROUP_TONES[gi % CAUSE_GROUP_TONES.length];
             const options = getCauseOptionsForKey(g.key).slice();
             parseCauseList(causeVal).forEach(c => {
                 if (c && !options.includes(c)) options.push(c);
             });
-            if (!options.length) return '';
-            const labelText = g.isCrackGroup
-                ? (g.types.length > 1 ? `균열 (${g.types.join(', ')})` : '균열')
-                : (g.types.length > 1 ? g.types.join(', ') : g.label);
-            const heading = multiGroup
-                ? `<div class="defect-cause-type-label" style="--cause-tone-border:${tone.border};--cause-tone-bg:${tone.bg};--cause-tone-text:${tone.text};">
-                    <i class="fa-solid fa-tag"></i> ${escapeHtml(labelText)}
-                   </div>`
-                : '';
-            const checks = options.map((cause, idx) => {
-                const id = `causeCheck_${gi}_${idx}_${String(cause).replace(/[^a-zA-Z0-9가-힣]/g, '_')}`;
-                const checked = selected.has(cause) ? 'checked' : '';
-                const safe = String(cause).replace(/"/g, '&quot;');
-                return `<label class="defect-cause-check-item${checked ? ' is-checked' : ''}" for="${id}"
-                    style="--cause-tone-border:${tone.border};--cause-tone-bg:${tone.bg};--cause-tone-text:${tone.text};--cause-tone-accent:${tone.accent};">
-                    <input type="checkbox" id="${id}" value="${safe}" ${checked}>
-                    <span>${cause}</span>
-                </label>`;
-            }).join('');
-            return `<div class="defect-cause-type-block${multiGroup ? ' is-multi' : ''}" data-cause-key="${escapeHtml(g.key)}">
-                ${heading}
-                <div class="defect-cause-check-grid">${checks}</div>
-            </div>`;
+            options.forEach((cause) => {
+                if (!cause || seenCauses.has(cause)) return;
+                seenCauses.add(cause);
+                flatItems.push({ cause, tone });
+            });
+        });
+
+        if (!flatItems.length) {
+            box.innerHTML = '';
+            if (groupWrap) groupWrap.style.display = 'none';
+            return;
+        }
+
+        box.innerHTML = flatItems.map(({ cause, tone }, idx) => {
+            const id = `causeCheck_${idx}_${String(cause).replace(/[^a-zA-Z0-9가-힣]/g, '_')}`;
+            const checked = selected.has(cause) ? 'checked' : '';
+            const safe = String(cause).replace(/"/g, '&quot;');
+            return `<label class="defect-cause-check-item${checked ? ' is-checked' : ''}" for="${id}"
+                style="--cause-tone-border:${tone.border};--cause-tone-bg:${tone.bg};--cause-tone-text:${tone.text};--cause-tone-accent:${tone.accent};">
+                <input type="checkbox" id="${id}" value="${safe}" ${checked}>
+                <span>${cause}</span>
+            </label>`;
         }).join('');
 
         box.querySelectorAll('input[type="checkbox"]').forEach(inp => {
@@ -12226,7 +12253,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         if (!window.state.hiddenDefectCauses) window.state.hiddenDefectCauses = {};
 
-        if (!defectType || !String(defectType).trim() || String(defectType).trim() === '상태양호') {
+        if (!defectType || !hasActionableDefectType(defectType)) {
             select.innerHTML = `<option value="" selected>—</option><option value="__ADD_CUSTOM_CAUSE__">➕ [결함 원인 직접 추가...]</option>`;
             syncCauseComboValue('');
             syncCauseChecksFromValue('', []);
@@ -22416,8 +22443,15 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (typeof saveStateToLocalStorage === 'function') saveStateToLocalStorage();
                 _suppressSyncOnSave = false;
 
-                if (state.currentBuildingId && state.currentFloor) {
-                    applyFloorMapStyleSettings(state.currentFloor, state.currentBuildingId);
+                if (state.currentBuildingId) {
+                    const activeBldg = (window.state.buildings || []).find(b => b.id === state.currentBuildingId);
+                    if (activeBldg) {
+                        state.currentBuilding = activeBldg;
+                        if (state.currentFloor) {
+                            applyFloorMapStyleSettings(state.currentFloor, state.currentBuildingId);
+                            loadFloorDrawing(state.currentFloor);
+                        }
+                    }
                 }
 
                 if (typeof renderDashboard === 'function') renderDashboard();
@@ -22725,19 +22759,71 @@ document.addEventListener('DOMContentLoaded', () => {
         }, 400);
     }
 
+    function captureBuildingDrawingAssetsById(buildings) {
+        const map = {};
+        (buildings || []).forEach((b) => {
+            if (!b || !b.id) return;
+            map[b.id] = {
+                floorDrawings: b.floorDrawings || {},
+                floorDrawingPdfs: b.floorDrawingPdfs || {},
+                floorDrawingTiers: b.floorDrawingTiers || {},
+                floorDrawingSources: b.floorDrawingSources || {}
+            };
+        });
+        return map;
+    }
+
+    function mergeDrawingAssetMaps(localMap, remoteMap) {
+        return { ...(remoteMap || {}), ...(localMap || {}) };
+    }
+
+    function attachPreservedDrawingAssets(building, assets) {
+        if (!building) return building;
+        const prev = assets || {};
+        return {
+            ...building,
+            floorDrawings: mergeDrawingAssetMaps(prev.floorDrawings, building.floorDrawings),
+            floorDrawingPdfs: mergeDrawingAssetMaps(prev.floorDrawingPdfs, building.floorDrawingPdfs),
+            floorDrawingTiers: mergeDrawingAssetMaps(prev.floorDrawingTiers, building.floorDrawingTiers),
+            floorDrawingSources: mergeDrawingAssetMaps(prev.floorDrawingSources, building.floorDrawingSources)
+        };
+    }
+
+    async function persistBuildingDrawingAssetsNow(bldg) {
+        if (!bldg || !bldg.id) return;
+        const tasks = [];
+        const persistEntries = (storeName, map, persistedSet, pendingSet) => {
+            Object.entries(map || {}).forEach(([floorCode, val]) => {
+                if (!val) return;
+                const key = `${bldg.id}_${floorCode}`;
+                if (persistedSet.has(key)) return;
+                pendingSet.add(key);
+                tasks.push(idbSet(storeName, key, val).then((ok) => {
+                    pendingSet.delete(key);
+                    if (ok) persistedSet.add(key);
+                }));
+            });
+        };
+        persistEntries('floorDrawings', bldg.floorDrawings, _idbPersistedDrawingKeys, _idbPendingDrawingKeys);
+        persistEntries('floorDrawingPdfs', bldg.floorDrawingPdfs, _idbPersistedPdfKeys, _idbPendingPdfKeys);
+        persistEntries('floorDrawingTiers', bldg.floorDrawingTiers, _idbPersistedTierKeys, _idbPendingTierKeys);
+        persistEntries('floorDrawingSources', bldg.floorDrawingSources, _idbPersistedSourceKeys, _idbPendingSourceKeys);
+        await Promise.all(tasks);
+    }
+
     async function applyMergedRemoteData(data) {
         if (!data) return false;
         ensureSyncMetaState();
         let isChanged = false;
 
         if (data.buildings && Array.isArray(data.buildings) && data.buildings.length > 0) {
-            const prevDrawingsById = {};
-            (window.state.buildings || []).forEach(b => { prevDrawingsById[b.id] = b.floorDrawings || {}; });
-            window.state.buildings = data.buildings.map(b => ({
-                ...b,
-                floorDrawings: prevDrawingsById[b.id] || {}
-            }));
+            const prevAssets = captureBuildingDrawingAssetsById(window.state.buildings);
+            const remoteIds = new Set(data.buildings.map(b => b.id));
+            const localOnly = (window.state.buildings || []).filter(b => b.id && !remoteIds.has(b.id));
+            const mergedRemote = data.buildings.map(b => attachPreservedDrawingAssets(b, prevAssets[b.id]));
+            window.state.buildings = [...localOnly, ...mergedRemote];
             isChanged = true;
+            await hydrateLocalImagesFromIndexedDb();
         }
 
         if (data.defects) {
