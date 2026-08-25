@@ -1002,6 +1002,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 deletedDefectIds: window.state.deletedDefectIds || {},
                 confirmedDeletedIds: window.state.confirmedDeletedIds || {},
                 deletedNdtIds: window.state.deletedNdtIds || {},
+                deletedBuildingIds: window.state.deletedBuildingIds || [],
                 buildings: sanitizedBuildings,
                 lastUsedBuildingId: window.state.currentBuildingId || null,
                 customDefectTypes: window.state.customDefectTypes || {},
@@ -1080,13 +1081,15 @@ document.addEventListener('DOMContentLoaded', () => {
             const saved = localStorage.getItem('building_safety_app_state_v2');
             if (saved) {
                 const parsed = JSON.parse(saved);
-                if (parsed.buildings && Array.isArray(parsed.buildings) && parsed.buildings.length > 0) {
+                if (parsed.buildings && Array.isArray(parsed.buildings)) {
                     window.state.buildings = parsed.buildings.map(bldg => {
                         if (typeof window.getBuildingAvailableFloors === 'function') {
                             bldg.floorsList = window.getBuildingAvailableFloors(bldg);
                         }
                         return bldg;
                     });
+                } else {
+                    window.state.buildings = [];
                 }
                 if (parsed.defects) {
                     window.state.defects = parsed.defects;
@@ -1105,6 +1108,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
                 if (parsed.deletedNdtIds) {
                     window.state.deletedNdtIds = parsed.deletedNdtIds;
+                }
+                if (parsed.deletedBuildingIds) {
+                    window.state.deletedBuildingIds = parsed.deletedBuildingIds;
                 }
                 if (parsed.customDefectTypes) {
                     window.state.customDefectTypes = parsed.customDefectTypes;
@@ -1183,11 +1189,17 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (parsed.areaBorderStyle) {
                     window.state.areaBorderStyle = parsed.areaBorderStyle;
                 }
-            }
-
-            if (!window.state.buildings || !Array.isArray(window.state.buildings) || window.state.buildings.length === 0) {
+            } else {
                 window.state.buildings = getDefaultBuildings();
             }
+
+            ensureSyncMetaState();
+            window.state.buildings = filterDeletedBuildings(
+                window.state.buildings || [],
+                window.state.deletedBuildingIds
+            );
+
+            if (!window.state.buildings) window.state.buildings = [];
 
             const compInput = document.getElementById('inputHomeCompanyName');
             if (compInput && window.state.companyName) compInput.value = window.state.companyName;
@@ -1206,6 +1218,59 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!window.state.deletedDefectIds) window.state.deletedDefectIds = {};
         if (!window.state.confirmedDeletedIds) window.state.confirmedDeletedIds = {};
         if (!window.state.deletedNdtIds) window.state.deletedNdtIds = {};
+        if (!window.state.deletedBuildingIds) window.state.deletedBuildingIds = [];
+    }
+
+    function mergeDeletedBuildingIds(serverList, localList) {
+        const set = new Set([...(serverList || []), ...(localList || [])].filter(Boolean));
+        return Array.from(set);
+    }
+
+    function filterDeletedBuildings(buildings, deletedIds) {
+        const del = new Set(deletedIds || []);
+        if (!del.size) return buildings || [];
+        return (buildings || []).filter(b => b?.id && !del.has(b.id));
+    }
+
+    function isFloorKeyForDeletedBuilding(floorKey, deletedBuildingIds) {
+        if (!floorKey || !deletedBuildingIds?.length) return false;
+        return deletedBuildingIds.some(id => id && floorKey.startsWith(`${id}_`));
+    }
+
+    function filterMapKeysByDeletedBuildings(obj, deletedBuildingIds) {
+        if (!obj || !deletedBuildingIds?.length) return obj || {};
+        const out = {};
+        Object.entries(obj).forEach(([key, val]) => {
+            if (!isFloorKeyForDeletedBuilding(key, deletedBuildingIds)) out[key] = val;
+        });
+        return out;
+    }
+
+    function recordBuildingDeleted(buildingId) {
+        ensureSyncMetaState();
+        if (!buildingId) return;
+        const set = new Set(window.state.deletedBuildingIds || []);
+        set.add(buildingId);
+        window.state.deletedBuildingIds = Array.from(set);
+    }
+
+    function purgeLocalStateForDeletedBuilding(buildingId) {
+        if (!buildingId) return;
+        Object.keys(window.state.defects || {}).forEach(k => {
+            if (k.startsWith(`${buildingId}_`)) delete window.state.defects[k];
+        });
+        Object.keys(window.state.deletedDefectIds || {}).forEach(k => {
+            if (k.startsWith(`${buildingId}_`)) delete window.state.deletedDefectIds[k];
+        });
+        Object.keys(window.state.ndtData || {}).forEach(k => {
+            if (k.startsWith(`${buildingId}_`)) delete window.state.ndtData[k];
+        });
+        Object.keys(window.state.deletedNdtIds || {}).forEach(k => {
+            if (k.startsWith(`${buildingId}_`)) delete window.state.deletedNdtIds[k];
+        });
+        Object.keys(window.state.ndtDisplacementGroups || {}).forEach(k => {
+            if (k.startsWith(`${buildingId}_`)) delete window.state.ndtDisplacementGroups[k];
+        });
     }
 
     function formatDefectNoSeq(n) {
@@ -1730,12 +1795,11 @@ document.addEventListener('DOMContentLoaded', () => {
         const grid = elements.buildingListGrid || document.getElementById('buildingListGrid');
         if (!grid) return;
 
-        if (!window.state.buildings || !Array.isArray(window.state.buildings) || window.state.buildings.length === 0) {
-            window.state.buildings = getDefaultBuildings();
-            saveStateToLocalStorage();
+        if (!window.state.buildings || !Array.isArray(window.state.buildings)) {
+            window.state.buildings = [];
         }
 
-        const allBldgs = window.state.buildings || [];
+        const allBldgs = filterDeletedBuildings(window.state.buildings, window.state.deletedBuildingIds);
         const term = (window.state.buildingSearchTerm || '').trim().toLowerCase();
         const bldgs = term
             ? allBldgs.filter(b => (b.name || '').toLowerCase().includes(term) || (b.address || '').toLowerCase().includes(term))
@@ -3386,6 +3450,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
             if (!confirm(`🗑️ 정말 건축물 '${bldg.name}' 및 등록된 모든 층별 도면과 결함 데이터를 삭제하시겠습니까?\n이 작업은 되돌릴 수 없습니다.`)) return;
 
+            recordBuildingDeleted(bldg.id);
             window.state.buildings = (window.state.buildings || []).filter(b => b.id !== bldg.id);
 
             // Clear defects and ndtData for this building
@@ -23754,6 +23819,9 @@ document.addEventListener('DOMContentLoaded', () => {
                             applyFloorMapStyleSettings(state.currentFloor, state.currentBuildingId);
                             loadFloorDrawing(state.currentFloor, { preserveView: true });
                         }
+                    } else {
+                        state.currentBuilding = null;
+                        state.currentBuildingId = null;
                     }
                 }
 
@@ -24381,24 +24449,39 @@ document.addEventListener('DOMContentLoaded', () => {
         ensureSyncMetaState();
         let isChanged = false;
 
-        if (data.buildings && Array.isArray(data.buildings) && data.buildings.length > 0) {
+        const mergedDeletedBuildings = mergeDeletedBuildingIds(
+            data.deletedBuildingIds,
+            window.state.deletedBuildingIds
+        );
+        window.state.deletedBuildingIds = mergedDeletedBuildings;
+        mergedDeletedBuildings.forEach(purgeLocalStateForDeletedBuilding);
+
+        if (data.buildings && Array.isArray(data.buildings)) {
             const prevAssets = captureBuildingDrawingAssetsById(window.state.buildings);
-            const remoteIds = new Set(data.buildings.map(b => b.id));
-            const localOnly = (window.state.buildings || []).filter(b => b.id && !remoteIds.has(b.id));
-            const mergedRemote = data.buildings.map(b => attachPreservedDrawingAssets(b, prevAssets[b.id]));
+            const remoteFiltered = filterDeletedBuildings(data.buildings, mergedDeletedBuildings);
+            const remoteIds = new Set(remoteFiltered.map(b => b.id));
+            const localOnly = filterDeletedBuildings(
+                (window.state.buildings || []).filter(b => b.id && !remoteIds.has(b.id)),
+                mergedDeletedBuildings
+            );
+            const mergedRemote = remoteFiltered.map(b => attachPreservedDrawingAssets(b, prevAssets[b.id]));
             window.state.buildings = [...localOnly, ...mergedRemote];
             isChanged = true;
             await hydrateLocalImagesFromIndexedDb();
         }
 
         if (data.defects) {
-            const remoteHydrated = await hydrateDefectPhotos(data.defects);
-            const localHydrated = await hydrateDefectPhotos(window.state.defects || {});
+            const remoteHydrated = await hydrateDefectPhotos(
+                filterMapKeysByDeletedBuildings(data.defects, mergedDeletedBuildings)
+            );
+            const localHydrated = await hydrateDefectPhotos(
+                filterMapKeysByDeletedBuildings(window.state.defects, mergedDeletedBuildings)
+            );
             const defectMerge = mergeDefectsMaps(
                 remoteHydrated,
                 localHydrated,
-                data.deletedDefectIds || {},
-                window.state.deletedDefectIds || {}
+                filterMapKeysByDeletedBuildings(data.deletedDefectIds || {}, mergedDeletedBuildings),
+                filterMapKeysByDeletedBuildings(window.state.deletedDefectIds || {}, mergedDeletedBuildings)
             );
             window.state.defects = await hydrateDefectPhotos(defectMerge.defects);
             window.state.deletedDefectIds = defectMerge.deletedDefectIds;
@@ -24407,10 +24490,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (data.ndtData) {
             const ndtMerge = mergeNdtDataMaps(
-                data.ndtData,
-                window.state.ndtData || {},
-                data.deletedNdtIds || {},
-                window.state.deletedNdtIds || {}
+                filterMapKeysByDeletedBuildings(data.ndtData, mergedDeletedBuildings),
+                filterMapKeysByDeletedBuildings(window.state.ndtData || {}, mergedDeletedBuildings),
+                filterMapKeysByDeletedBuildings(data.deletedNdtIds || {}, mergedDeletedBuildings),
+                filterMapKeysByDeletedBuildings(window.state.deletedNdtIds || {}, mergedDeletedBuildings)
             );
             window.state.ndtData = ndtMerge.ndtData;
             window.state.deletedNdtIds = ndtMerge.deletedNdtIds;
@@ -24424,7 +24507,10 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         if (data.ndtDisplacementGroups) {
-            window.state.ndtDisplacementGroups = data.ndtDisplacementGroups;
+            window.state.ndtDisplacementGroups = filterMapKeysByDeletedBuildings(
+                data.ndtDisplacementGroups,
+                mergedDeletedBuildings
+            );
             isChanged = true;
         }
         if (data.grids) {
@@ -24493,19 +24579,31 @@ document.addEventListener('DOMContentLoaded', () => {
             const snap = await docRef.get();
             const serverData = snap.exists ? snap.data() : {};
 
-            const serverDefectsHydrated = await hydrateDefectPhotos(serverData.defects || {});
-            const localDefectsHydrated = await hydrateDefectPhotos(window.state.defects || {});
+            const mergedDeletedBuildings = mergeDeletedBuildingIds(
+                serverData.deletedBuildingIds,
+                window.state.deletedBuildingIds
+            );
+            window.state.deletedBuildingIds = mergedDeletedBuildings;
+            window.state.buildings = filterDeletedBuildings(window.state.buildings, mergedDeletedBuildings);
+            mergedDeletedBuildings.forEach(purgeLocalStateForDeletedBuilding);
+
+            const serverDefectsHydrated = await hydrateDefectPhotos(
+                filterMapKeysByDeletedBuildings(serverData.defects || {}, mergedDeletedBuildings)
+            );
+            const localDefectsHydrated = await hydrateDefectPhotos(
+                filterMapKeysByDeletedBuildings(window.state.defects || {}, mergedDeletedBuildings)
+            );
             const defectMerge = mergeDefectsMaps(
                 serverDefectsHydrated,
                 localDefectsHydrated,
-                serverData.deletedDefectIds || {},
-                window.state.deletedDefectIds || {}
+                filterMapKeysByDeletedBuildings(serverData.deletedDefectIds || {}, mergedDeletedBuildings),
+                filterMapKeysByDeletedBuildings(window.state.deletedDefectIds || {}, mergedDeletedBuildings)
             );
             const ndtMerge = mergeNdtDataMaps(
-                serverData.ndtData || {},
-                window.state.ndtData || {},
-                serverData.deletedNdtIds || {},
-                window.state.deletedNdtIds || {}
+                filterMapKeysByDeletedBuildings(serverData.ndtData || {}, mergedDeletedBuildings),
+                filterMapKeysByDeletedBuildings(window.state.ndtData || {}, mergedDeletedBuildings),
+                filterMapKeysByDeletedBuildings(serverData.deletedNdtIds || {}, mergedDeletedBuildings),
+                filterMapKeysByDeletedBuildings(window.state.deletedNdtIds || {}, mergedDeletedBuildings)
             );
 
             isRemoteSyncing = true;
@@ -24522,7 +24620,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (typeof saveStateToLocalStorage === 'function') saveStateToLocalStorage();
             _suppressSyncOnSave = false;
 
-            const sanitizedBuildings = (window.state.buildings || []).map(b => {
+            const sanitizedBuildings = filterDeletedBuildings(window.state.buildings || [], mergedDeletedBuildings).map(b => {
                 const { floorDrawings, floorDrawingPdfs, ...rest } = b;
                 return rest;
             });
@@ -24533,6 +24631,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 confirmedDeletedIds: {},
                 ndtData: window.state.ndtData || {},
                 deletedNdtIds: ndtMerge.deletedNdtIds,
+                deletedBuildingIds: mergedDeletedBuildings,
                 ndtDisplacementGroups: window.state.ndtDisplacementGroups || {},
                 grids: window.state.grids || {},
                 buildings: sanitizedBuildings,
