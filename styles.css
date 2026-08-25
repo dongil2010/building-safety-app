@@ -549,6 +549,10 @@ body {
     -webkit-user-select: none;
     letter-spacing: 0.01em;
 }
+.map-zoom-overlay.is-hd {
+    color: rgba(21, 128, 61, 0.92);
+    background: rgba(255, 255, 255, 0.72);
+}
 
 #ndtCanvasContainer {
     background: #d0d0d0;

@@ -607,24 +607,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function isViewportPatchCanvasUsable(canvas) {
-        if (!canvas || canvas.width < 8 || canvas.height < 8) return false;
-        try {
-            const ctx = canvas.getContext('2d', { willReadFrequently: true });
-            if (!ctx) return true;
-            const samples = [
-                [Math.floor(canvas.width * 0.25), Math.floor(canvas.height * 0.25)],
-                [Math.floor(canvas.width * 0.5), Math.floor(canvas.height * 0.5)],
-                [Math.floor(canvas.width * 0.75), Math.floor(canvas.height * 0.75)],
-            ];
-            for (let i = 0; i < samples.length; i++) {
-                const [x, y] = samples[i];
-                const p = ctx.getImageData(x, y, 1, 1).data;
-                if (p[0] < 248 || p[1] < 248 || p[2] < 248) return true;
-            }
-            return false;
-        } catch (e) {
-            return true;
-        }
+        return !!(canvas && canvas.width >= 8 && canvas.height >= 8);
     }
 
     /**
@@ -781,7 +764,23 @@ document.addEventListener('DOMContentLoaded', () => {
         const fc = state.currentFloor;
         if (!bldg || !fc) return false;
         if (floorMayHavePdfSource(bldg, fc)) return true;
-        return _floorPdfKnown.get(`${bldg.id}_${fc}`) === true;
+        if (_floorPdfKnown.get(`${bldg.id}_${fc}`) === true) return true;
+        // 확대 중이면 PDF async 조회·패치 시도 (모바일 Firestore 미리보기만 있는 경우 포함)
+        if (state.currentTab === 'tab-map' && state.bgImage && getMapZoomVsFitPercent() >= 115) {
+            return true;
+        }
+        return false;
+    }
+
+    function forceViewportPatchLevel(zoomDemand, maxLevel, zoomVsFit, picked) {
+        let level = picked || 0;
+        if (zoomVsFit >= 1.08 && level <= 0) level = 1;
+        if (zoomVsFit >= 2.2 && level < 2) level = Math.min(2, maxLevel);
+        if (zoomVsFit >= 5 && level < 3) level = Math.min(3, maxLevel);
+        if (zoomVsFit >= 12 && level < maxLevel) level = maxLevel;
+        if (zoomDemand >= 6 && level < 2) level = Math.min(2, maxLevel);
+        if (zoomDemand >= 14 && level < maxLevel) level = maxLevel;
+        return level;
     }
 
     function isMobileMapViewport() {
@@ -850,7 +849,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const token = ++viewportHiPatchToken;
         const region = getVisibleImageRect();
-        const ref = (typeof window.getFloorPlanRefDimensions === 'function')
+        let ref = (typeof window.getFloorPlanRefDimensions === 'function')
             ? window.getFloorPlanRefDimensions(bldg, fc)
             : { w: region.w, h: region.h };
 
@@ -863,10 +862,11 @@ document.addEventListener('DOMContentLoaded', () => {
         const zoomDemand = getViewportZoomDemand();
         const refLong = Math.max(ref.w || 4000, ref.h || 4000, 4000);
         const maxSteps = getViewportPatchStepCount(refLong);
-        const wantLevel = pickViewportPatchLevel(zoomDemand, maxSteps, viewportPatchActiveLevel);
-
         const fitScale = getMapFitScale();
         const zoomVsFit = scale / Math.max(fitScale, 0.05);
+        let wantLevel = pickViewportPatchLevel(zoomDemand, maxSteps, viewportPatchActiveLevel);
+        wantLevel = forceViewportPatchLevel(zoomDemand, maxSteps, zoomVsFit, wantLevel);
+
         const refArea = Math.max((ref.w || 1) * (ref.h || 1), 1);
         const regionArea = region.w * region.h;
         if (zoomVsFit < 1.12 && regionArea > refArea * 0.85) {
@@ -908,7 +908,10 @@ document.addEventListener('DOMContentLoaded', () => {
             if (state.floorDrawingHiPatch || (_floorBlend && _floorBlend.toPatch)) {
                 applyFloorDrawingTarget(undefined, null, { immediate: true });
             }
-            if (floorMayHavePdfSource(bldg, fc)) {
+            if (zoomVsFit >= 2 && !floorPdfKnownUnavailable(bldg.id, fc)) {
+                markFloorPdfKnown(bldg.id, fc, false);
+            }
+            if (floorMayHavePdfSource(bldg, fc) || zoomVsFit >= 2) {
                 console.warn('뷰포트 고해상도 패치: PDF 원본 없음 — 도면을 PDF로 다시 등록하거나 동기화해 주세요.');
             }
             return;
@@ -925,11 +928,11 @@ document.addEventListener('DOMContentLoaded', () => {
         const mobile = isMobileMapViewport();
         const maxPatchLong = getViewportPatchPixelBudget(mobile);
         const maxPatchSide = getViewportPatchMaxSide(mobile);
-        const minPatchLong = 1024;
-        // 화면 픽셀(zoomDemand)에 맞춰 패치 해상도 산출 — levelMul만 쓰면 확대해도 선명도가 안 오름
+        const minPatchLong = 512;
+        const screenNeedLong = Math.ceil(Math.max(region.w, region.h, 1) * scale * dpr * 1.18);
         const zoomMargin = mobile ? 1.24 : 1.1;
         const demandLong = Math.ceil(regionLong * Math.max(zoomDemand, getViewportPatchLevelMultiplier(wantLevel)) * zoomMargin);
-        let outLong = Math.min(maxPatchLong, Math.max(minPatchLong, demandLong));
+        let outLong = Math.min(maxPatchLong, Math.max(minPatchLong, screenNeedLong, demandLong));
 
         const aspect = region.w / region.h;
         const patchDimsFromLong = (longSide) => {
@@ -3760,7 +3763,21 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
         el.style.display = 'block';
-        el.textContent = `${getMapZoomVsFitPercent()}%`;
+        const pct = getMapZoomVsFitPercent();
+        const hd = hasActiveFloorHiPatch();
+        const bldg = state.currentBuilding;
+        const fc = state.currentFloor;
+        const pdfKnown = bldg && fc && (_floorPdfKnown.get(`${bldg.id}_${fc}`) === true || floorHasPdfSourceSync(bldg, fc));
+        if (hd) {
+            el.textContent = `${pct}% · HD`;
+            el.classList.add('is-hd');
+        } else if (pct >= 200 && !pdfKnown && floorPdfKnownUnavailable(bldg?.id, fc)) {
+            el.textContent = `${pct}% · 4000px`;
+            el.classList.remove('is-hd');
+        } else {
+            el.textContent = `${pct}%`;
+            el.classList.remove('is-hd');
+        }
     }
 
     function fitToScreen() {

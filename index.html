@@ -12,7 +12,7 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <meta name="apple-mobile-web-app-title" content="스마트 안전점검">
-    <link rel="stylesheet" href="styles.css?v=20260825_bulkedit">
+    <link rel="stylesheet" href="styles.css?v=20260825_hdpatch">
     <!-- FontAwesome icons for clean engineering UI -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <!-- PDF 생성용: 페이지별로 직접 캡처해서 조립(큰 보고서에서 html2pdf 한방 렌더링이 캔버스 높이 한계로
@@ -2302,8 +2302,8 @@
     </div>
 
     <!-- Core → 탭 분류 → 기존 엔진(app.js) -->
-    <script src="js/core/state.js?v=20260825_pdfpatch"></script>
-    <script src="js/pdf-vector-bridge.js?v=20260825_pdfpatch"></script>
+    <script src="js/core/state.js?v=20260825_hdpatch"></script>
+    <script src="js/pdf-vector-bridge.js?v=20260825_hdpatch"></script>
     <script src="js/tabs/registry.js?v=20260821_land1"></script>
     <script src="js/tabs/home.js?v=20260824_webview"></script>
     <script src="js/tabs/map.js?v=20260825_mobpatch2"></script>
@@ -2312,9 +2312,9 @@
     <script src="js/shared/report.js?v=20260824_hwpxFix"></script>
     <script src="js/shared/hwpx-import.js?v=20260825_hwpxin"></script>
     <script src="js/shared/auth.js?v=20260821_land1"></script>
-    <script src="app.js?v=20260825_mobzoom"></script>
+    <script src="app.js?v=20260825_hdpatch"></script>
     <script>
-        window.BSA_APP_VERSION = '20260825_mobzoom';
+        window.BSA_APP_VERSION = '20260825_hdpatch';
         (function () {
             var el = document.getElementById('appVersionText');
             if (el && window.BSA_APP_VERSION) el.textContent = 'v' + window.BSA_APP_VERSION;
