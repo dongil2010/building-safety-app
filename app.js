@@ -3756,15 +3756,21 @@ document.addEventListener('DOMContentLoaded', () => {
         return Math.round((scale / Math.max(fit, 0.001)) * 100);
     }
 
-    /** 모바일: 화면맞춤 대비 200% 이상 → 16000px 티어·패치 */
+    /** 모바일: 화면맞춤 대비 400%→4000px, 800%→8000px, 2000%→16000px */
     function getMobileZoomTierDim(activeTier) {
         const pct = getMapZoomVsFitPercent();
         const cur = activeTier || 4000;
         if (cur >= 16000) {
-            if (pct < 180) return 4000;
+            if (pct < 1800) return 8000;
             return 16000;
         }
-        if (pct >= 200) return 16000;
+        if (cur >= 8000) {
+            if (pct >= 2000) return 16000;
+            if (pct < 720) return 4000;
+            return 8000;
+        }
+        if (pct >= 2000) return 16000;
+        if (pct >= 800) return 8000;
         return 4000;
     }
 
@@ -3786,8 +3792,14 @@ document.addEventListener('DOMContentLoaded', () => {
         if (hd) {
             el.textContent = `${pct}% · HD`;
             el.classList.add('is-hd');
-        } else if (pct >= 200) {
+        } else if (pct >= 2000) {
             el.textContent = `${pct}% · 16000px`;
+            el.classList.remove('is-hd');
+        } else if (pct >= 800) {
+            el.textContent = `${pct}% · 8000px`;
+            el.classList.remove('is-hd');
+        } else if (pct >= 400) {
+            el.textContent = `${pct}% · 4000px`;
             el.classList.remove('is-hd');
         } else if (pct >= 115 && !pdfKnown && floorPdfKnownUnavailable(bldg?.id, fc)) {
             el.textContent = `${pct}% · 4000px`;
