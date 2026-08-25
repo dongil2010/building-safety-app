@@ -499,6 +499,27 @@ document.addEventListener('DOMContentLoaded', () => {
         return Math.min((cw - 40) / drawW, (ch - 40) / drawH, 1.2);
     }
 
+    /** 절대 scale 하한(레거시). 상·하한은 fit 대비 비율로 통일 */
+    const VIEW_MIN_SCALE = 0.1;
+    const VIEW_MAX_ZOOM_VS_FIT = 50;
+    const VIEW_MIN_ZOOM_VS_FIT = 0.08;
+
+    function getViewScaleLimits(getFitFn) {
+        const fit = Math.max(getFitFn() || 0.05, 0.05);
+        return {
+            min: Math.max(VIEW_MIN_SCALE, fit * VIEW_MIN_ZOOM_VS_FIT),
+            max: Math.max(fit * VIEW_MAX_ZOOM_VS_FIT, fit * 1.02),
+        };
+    }
+
+    function getMapViewScaleLimits() {
+        return getViewScaleLimits(getMapFitScale);
+    }
+
+    function formatMapZoomLabel() {
+        return `${getMapZoomVsFitPercent()}%`;
+    }
+
     function shouldAutoFitMapView() {
         if (!state.bgImage) return true;
         const fitScale = getMapFitScale();
@@ -3723,6 +3744,20 @@ document.addEventListener('DOMContentLoaded', () => {
         const canvas = state.canvas || document.getElementById('planCanvas');
         if (!canvas) return;
 
+        const prevFit = getMapFitScale();
+        const prevScale = state.view.scale || 1;
+        const prevZoomVsFit = prevFit > 0 ? prevScale / prevFit : 1;
+        const preserveZoom = !!(state.bgImage && prevZoomVsFit > 1.05);
+        const oldScale = prevScale;
+        const oldOffX = state.view.offsetX;
+        const oldOffY = state.view.offsetY;
+        const oldCw = state.canvasCssW || canvas.clientWidth || 800;
+        const oldCh = state.canvasCssH || canvas.clientHeight || 600;
+        const focalX = oldCw / 2;
+        const focalY = oldCh / 2;
+        const imgX = (focalX - oldOffX) / Math.max(oldScale, 0.001);
+        const imgY = (focalY - oldOffY) / Math.max(oldScale, 0.001);
+
         let cssW = container ? (container.clientWidth || container.offsetWidth) : 0;
         let cssH = container ? (container.clientHeight || container.offsetHeight) : 0;
 
@@ -3747,6 +3782,24 @@ document.addEventListener('DOMContentLoaded', () => {
         state.canvasCssW = cssW;
         state.canvasCssH = cssH;
         if (!state.ctx) state.ctx = canvas.getContext('2d');
+
+        if (preserveZoom) {
+            const lim = getMapViewScaleLimits();
+            const fit = getMapFitScale();
+            const newScale = Math.min(Math.max(fit * prevZoomVsFit, lim.min), lim.max);
+            const newCw = cssW;
+            const newCh = cssH;
+            const newFocalX = newCw / 2;
+            const newFocalY = newCh / 2;
+            state.view.scale = newScale;
+            state.view.offsetX = newFocalX - imgX * newScale;
+            state.view.offsetY = newFocalY - imgY * newScale;
+            if (elements.zoomScaleText) {
+                elements.zoomScaleText.textContent = formatMapZoomLabel();
+            }
+            scheduleFloorDrawingTierSync();
+        }
+
         drawCanvas();
     }
 
@@ -3825,15 +3878,17 @@ document.addEventListener('DOMContentLoaded', () => {
         state.view.offsetY = Math.max(20, (ch - drawH * state.view.scale) / 2);
         
         if (elements.zoomScaleText) {
-            elements.zoomScaleText.textContent = `${Math.round(state.view.scale * 100)}%`;
+            elements.zoomScaleText.textContent = formatMapZoomLabel();
         }
         scheduleFloorDrawingTierSync();
     }
 
-    // 마우스(또는 터치) 위치를 기준으로 확대/축소 — 좌상단 고정 줌 방지
-    const VIEW_MIN_SCALE = 0.1; // 10%까지 축소 가능 (기존 30%는 큰 도면에서 부족)
-    const VIEW_MAX_SCALE = 4.0;
-    function applyFocalZoom(view, focalX, focalY, zoomFactor, minScale = VIEW_MIN_SCALE, maxScale = VIEW_MAX_SCALE) {
+    function applyFocalZoom(view, focalX, focalY, zoomFactor, minScale, maxScale, fitScaleFn) {
+        if (minScale === undefined || maxScale === undefined) {
+            const lim = getViewScaleLimits(fitScaleFn || getMapFitScale);
+            if (minScale === undefined) minScale = lim.min;
+            if (maxScale === undefined) maxScale = lim.max;
+        }
         const oldScale = view.scale;
         const newScale = Math.min(Math.max(minScale, oldScale * zoomFactor), maxScale);
         if (Math.abs(newScale - oldScale) < 1e-6) return newScale;
@@ -4182,7 +4237,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 resizeCanvas();
                 if (preserveView) {
                     if (elements.zoomScaleText) {
-                        elements.zoomScaleText.textContent = `${Math.round(state.view.scale * 100)}%`;
+                        elements.zoomScaleText.textContent = formatMapZoomLabel();
                     }
                     drawCanvas();
                     scheduleFloorDrawingTierSync();
@@ -5837,6 +5892,20 @@ document.addEventListener('DOMContentLoaded', () => {
         const canvas = document.getElementById('ndtCanvas');
         if (!canvas || !container) return;
 
+        const prevFit = getNdtFitScale();
+        const prevScale = ndtView.scale || 1;
+        const prevZoomVsFit = prevFit > 0 ? prevScale / prevFit : 1;
+        const preserveZoom = !!(ndtBgImage && prevZoomVsFit > 1.05);
+        const oldScale = prevScale;
+        const oldOffX = ndtView.offsetX;
+        const oldOffY = ndtView.offsetY;
+        const oldCw = window._ndtCanvasCssW || canvas.clientWidth || 800;
+        const oldCh = window._ndtCanvasCssH || canvas.clientHeight || 600;
+        const focalX = oldCw / 2;
+        const focalY = oldCh / 2;
+        const imgX = (focalX - oldOffX) / Math.max(oldScale, 0.001);
+        const imgY = (focalY - oldOffY) / Math.max(oldScale, 0.001);
+
         let cssW = container.clientWidth || container.offsetWidth || (window.innerWidth - 40);
         let cssH = container.clientHeight || container.offsetHeight;
         const isMobile = window.innerWidth <= 768;
@@ -5857,6 +5926,20 @@ document.addEventListener('DOMContentLoaded', () => {
         window._ndtCanvasDpr = dpr;
         window._ndtCanvasCssW = cssW;
         window._ndtCanvasCssH = cssH;
+
+        if (preserveZoom) {
+            const lim = getNdtViewScaleLimits();
+            const fit = getNdtFitScale();
+            const newScale = Math.min(Math.max(fit * prevZoomVsFit, lim.min), lim.max);
+            const newFocalX = cssW / 2;
+            const newFocalY = cssH / 2;
+            ndtView.scale = newScale;
+            ndtView.offsetX = newFocalX - imgX * newScale;
+            ndtView.offsetY = newFocalY - imgY * newScale;
+            const zoomTxt = document.getElementById('ndtZoomScaleText');
+            if (zoomTxt) zoomTxt.textContent = formatNdtZoomLabel();
+        }
+
         drawNdtCanvas();
     }
 
@@ -5901,16 +5984,46 @@ document.addEventListener('DOMContentLoaded', () => {
         const drawW = isRotated ? imgH : imgW;
         const drawH = isRotated ? imgW : imgH;
 
-        const scaleX = (cw - 40) / drawW;
-        const scaleY = (ch - 40) / drawH;
-        ndtView.scale = Math.min(scaleX, scaleY, 1.2);
+        ndtView.scale = getNdtFitScale();
         ndtView.offsetX = Math.max(20, (cw - drawW * ndtView.scale) / 2);
         ndtView.offsetY = Math.max(20, (ch - drawH * ndtView.scale) / 2);
 
         const zoomTxt = document.getElementById('ndtZoomScaleText');
-        if (zoomTxt) zoomTxt.textContent = `${Math.round(ndtView.scale * 100)}%`;
+        if (zoomTxt) zoomTxt.textContent = formatNdtZoomLabel();
         drawNdtCanvas();
     };
+
+    function getNdtFitScale() {
+        const canvas = document.getElementById('ndtCanvas');
+        const cw = window._ndtCanvasCssW || canvas?.clientWidth || canvas?.width || 800;
+        const ch = window._ndtCanvasCssH || canvas?.clientHeight || canvas?.height || 600;
+        let imgW = ndtBgImage ? (ndtBgImage.naturalWidth || ndtBgImage.width || 1200) : 1200;
+        let imgH = ndtBgImage ? (ndtBgImage.naturalHeight || ndtBgImage.height || 700) : 700;
+        const isRotated = (ndtRotationAngle === 90 || ndtRotationAngle === 270);
+        const drawW = isRotated ? imgH : imgW;
+        const drawH = isRotated ? imgW : imgH;
+        if (drawW <= 0 || drawH <= 0) return 1;
+        return Math.min((cw - 40) / drawW, (ch - 40) / drawH, 1.2);
+    }
+
+    function getNdtZoomVsFitPercent() {
+        const fit = getNdtFitScale();
+        const scale = Math.max(ndtView.scale || 1, 0.001);
+        return Math.round((scale / Math.max(fit, 0.001)) * 100);
+    }
+
+    function formatNdtZoomLabel() {
+        return `${getNdtZoomVsFitPercent()}%`;
+    }
+
+    function getNdtViewScaleLimits() {
+        return getViewScaleLimits(getNdtFitScale);
+    }
+
+    function shouldAutoFitNdtView() {
+        const fit = getNdtFitScale();
+        return (ndtView.scale || 1) <= fit * 1.08;
+    }
 
     window.zoomNdtCanvas = function(factor, focalX, focalY) {
         const canvas = document.getElementById('ndtCanvas');
@@ -5921,12 +6034,13 @@ document.addEventListener('DOMContentLoaded', () => {
             fy = (window._ndtCanvasCssH || canvas.clientHeight || canvas.height) / 2;
         }
         if (fx != null && fy != null) {
-            applyFocalZoom(ndtView, fx, fy, factor, VIEW_MIN_SCALE, VIEW_MAX_SCALE);
+            applyFocalZoom(ndtView, fx, fy, factor, undefined, undefined, getNdtFitScale);
         } else {
-            ndtView.scale = Math.min(Math.max(VIEW_MIN_SCALE, ndtView.scale * factor), VIEW_MAX_SCALE);
+            const lim = getNdtViewScaleLimits();
+            ndtView.scale = Math.min(Math.max(lim.min, ndtView.scale * factor), lim.max);
         }
         const zoomTxt = document.getElementById('ndtZoomScaleText');
-        if (zoomTxt) zoomTxt.textContent = `${Math.round(ndtView.scale * 100)}%`;
+        if (zoomTxt) zoomTxt.textContent = formatNdtZoomLabel();
         drawNdtCanvas();
     };
 
@@ -7392,7 +7506,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 const currentDist = getTouchDistance(e.touches[0], e.touches[1]);
                 if (ndtPinchDist > 0) {
                     const scaleFactor = currentDist / ndtPinchDist;
-                    const newScale = Math.min(Math.max(VIEW_MIN_SCALE, ndtPinchScale * scaleFactor), VIEW_MAX_SCALE);
+                    const lim = getNdtViewScaleLimits();
+                    const newScale = Math.min(Math.max(lim.min, ndtPinchScale * scaleFactor), lim.max);
                     const currentMid = getTouchMidpoint(e.touches[0], e.touches[1], rect);
 
                     const imgX = (ndtPinchMidX - ndtPinchOffsetX) / ndtPinchScale;
@@ -15938,7 +16053,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 const currentDist = getTouchDistance(e.touches[0], e.touches[1]);
                 if (initialPinchDist > 0) {
                     const scaleFactor = currentDist / initialPinchDist;
-                    const newScale = Math.min(Math.max(VIEW_MIN_SCALE, initialPinchScale * scaleFactor), VIEW_MAX_SCALE);
+                    const lim = getMapViewScaleLimits();
+                    const newScale = Math.min(Math.max(lim.min, initialPinchScale * scaleFactor), lim.max);
                     const currentMid = getTouchMidpoint(e.touches[0], e.touches[1], rect);
 
                     // Compute focal point zoom offset based on touch midpoint
@@ -15949,7 +16065,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     state.view.offsetX = currentMid.x - imgX * newScale;
                     state.view.offsetY = currentMid.y - imgY * newScale;
 
-                    if (elements.zoomScaleText) elements.zoomScaleText.textContent = `${Math.round(state.view.scale * 100)}%`;
+                    if (elements.zoomScaleText) elements.zoomScaleText.textContent = formatMapZoomLabel();
                     drawCanvas();
                     scheduleFloorDrawingTierSync();
                     if (shouldUseViewportTilesForCurrentFloor()) scheduleViewportHiPatchSync();
@@ -16020,8 +16136,8 @@ document.addEventListener('DOMContentLoaded', () => {
             const mouseX = e.clientX - rect.left;
             const mouseY = e.clientY - rect.top;
             const zoomFactor = e.deltaY < 0 ? 1.1 : 0.9;
-            applyFocalZoom(state.view, mouseX, mouseY, zoomFactor, VIEW_MIN_SCALE, VIEW_MAX_SCALE);
-            if (elements.zoomScaleText) elements.zoomScaleText.textContent = `${Math.round(state.view.scale * 100)}%`;
+            applyFocalZoom(state.view, mouseX, mouseY, zoomFactor, undefined, undefined, getMapFitScale);
+            if (elements.zoomScaleText) elements.zoomScaleText.textContent = formatMapZoomLabel();
             drawCanvas();
             scheduleFloorDrawingTierSync();
         }, { passive: false });
@@ -18118,8 +18234,8 @@ document.addEventListener('DOMContentLoaded', () => {
     if (btnZoomIn) btnZoomIn.addEventListener('click', () => {
         const cx = (state.canvasCssW || state.canvas?.width || 0) / 2;
         const cy = (state.canvasCssH || state.canvas?.height || 0) / 2;
-        applyFocalZoom(state.view, cx, cy, 1.2, VIEW_MIN_SCALE, VIEW_MAX_SCALE);
-        if (elements.zoomScaleText) elements.zoomScaleText.textContent = `${Math.round(state.view.scale * 100)}%`;
+        applyFocalZoom(state.view, cx, cy, 1.2, undefined, undefined, getMapFitScale);
+        if (elements.zoomScaleText) elements.zoomScaleText.textContent = formatMapZoomLabel();
         drawCanvas();
         scheduleFloorDrawingTierSync();
     });
@@ -18128,8 +18244,8 @@ document.addEventListener('DOMContentLoaded', () => {
     if (btnZoomOut) btnZoomOut.addEventListener('click', () => {
         const cx = (state.canvasCssW || state.canvas?.width || 0) / 2;
         const cy = (state.canvasCssH || state.canvas?.height || 0) / 2;
-        applyFocalZoom(state.view, cx, cy, 1 / 1.2, VIEW_MIN_SCALE, VIEW_MAX_SCALE);
-        if (elements.zoomScaleText) elements.zoomScaleText.textContent = `${Math.round(state.view.scale * 100)}%`;
+        applyFocalZoom(state.view, cx, cy, 1 / 1.2, undefined, undefined, getMapFitScale);
+        if (elements.zoomScaleText) elements.zoomScaleText.textContent = formatMapZoomLabel();
         drawCanvas();
         scheduleFloorDrawingTierSync();
     });
@@ -25702,8 +25818,11 @@ document.addEventListener('DOMContentLoaded', () => {
             if (typeof window.closeAllMobileCanvasSheets === 'function') window.closeAllMobileCanvasSheets();
             resizeCanvas();
             if (typeof resizeNdtCanvas === 'function') resizeNdtCanvas();
-            if (window.state.currentTab === 'tab-map' && typeof fitToScreen === 'function') fitToScreen();
-            if (window.state.currentTab === 'tab-ndt' && typeof window.fitNdtCanvas === 'function') window.fitNdtCanvas();
+            if (window.state.currentTab === 'tab-map' && typeof shouldAutoFitMapView === 'function' && shouldAutoFitMapView()) {
+                fitToScreen();
+            } else if (window.state.currentTab === 'tab-ndt' && typeof shouldAutoFitNdtView === 'function' && shouldAutoFitNdtView()) {
+                window.fitNdtCanvas();
+            }
         }, 280);
     });
 });
