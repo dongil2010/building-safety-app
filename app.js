@@ -8637,6 +8637,69 @@ document.addEventListener('DOMContentLoaded', () => {
         return year * 10 + periodRank;
     }
 
+    function formatSurveyRoundLabel(roundKey) {
+        if (!roundKey) return '회차 미지정';
+        const parts = String(roundKey).split('_');
+        if (parts.length >= 2) return `${parts[0]} ${parts[1]}`;
+        return roundKey.replace(/_/g, ' ');
+    }
+
+    function formatDefectMarkingTimestamp(ts) {
+        const n = Number(ts);
+        if (!n || !Number.isFinite(n)) return '';
+        try {
+            const d = new Date(n);
+            if (Number.isNaN(d.getTime())) return '';
+            const y = d.getFullYear();
+            const m = d.getMonth() + 1;
+            const day = d.getDate();
+            const hh = String(d.getHours()).padStart(2, '0');
+            const mm = String(d.getMinutes()).padStart(2, '0');
+            return `${y}. ${m}. ${day}. ${hh}:${mm}`;
+        } catch (_e) {
+            return '';
+        }
+    }
+
+    function getDefectMapMarkedAt(defect) {
+        if (!defect) return 0;
+        if (defect.mapMarkedAt) return Number(defect.mapMarkedAt) || 0;
+        if (!isDefectMapUnregistered(defect)) return getRecordUpdatedAt(defect, 'pin');
+        return 0;
+    }
+
+    function renderDefectMarkingTimeline(defectOrNull) {
+        const el = document.getElementById('defectMarkingTimeline');
+        if (!el) return;
+
+        if (!defectOrNull) {
+            const roundKey = getCurrentSurveyRoundKey();
+            el.innerHTML = `
+                <span class="defect-timeline-chip defect-timeline-round"><i class="fa-solid fa-calendar"></i> ${escapeHtml(formatSurveyRoundLabel(roundKey))}</span>
+                <span class="defect-timeline-sep">·</span>
+                <span class="defect-timeline-chip defect-timeline-mark">신규 마킹</span>
+            `;
+            return;
+        }
+
+        const roundLabel = formatSurveyRoundLabel(defectOrNull.surveyRound || getCurrentSurveyRoundKey());
+        const markedAt = getDefectMapMarkedAt(defectOrNull);
+        const markedLabel = markedAt
+            ? formatDefectMarkingTimestamp(markedAt)
+            : (isDefectMapUnregistered(defectOrNull) ? '도면 미배치' : '마킹 시각 미기록');
+        const roundKind = isPreviousRoundDefect(defectOrNull)
+            ? '<span class="defect-timeline-chip defect-timeline-prev">전회차</span>'
+            : '<span class="defect-timeline-chip defect-timeline-curr">금회차</span>';
+
+        el.innerHTML = `
+            <span class="defect-timeline-chip defect-timeline-round" title="등록 회차"><i class="fa-solid fa-calendar"></i> ${escapeHtml(roundLabel)}</span>
+            <span class="defect-timeline-sep">·</span>
+            <span class="defect-timeline-chip defect-timeline-mark" title="도면 마킹 시각"><i class="fa-solid fa-location-dot"></i> ${escapeHtml(markedLabel)}</span>
+            <span class="defect-timeline-sep">·</span>
+            ${roundKind}
+        `;
+    }
+
     // 다음 정기 회차(상반기→하반기→다음해 상반기). 수시점검은 다음 해 수시로 이동.
     function getNextSurveyRoundParts(yearStr, periodStr) {
         const yearNum = parseInt(String(yearStr || '').replace(/[^\d]/g, ''), 10);
@@ -8925,11 +8988,11 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     /**
-     * 현회차 출력(사진첩·보고서·상태조사표 사진란)에 쓸 사진만 반환.
-     * 전회차 결함의 사진·prevRoundPhotos는 제외한다.
+     * 현회차 출력(사진첩·보고서·상태조사표 사진란)에 쓸 사진 — defect.photos(현차)만.
+     * prevRoundPhotos(전차)는 제외. 전회차 결함도 현차에 새로 넣은 photos는 출력한다.
      */
     function getDefectOutputPhotos(defect) {
-        if (!defect || isPreviousRoundDefect(defect)) return [];
+        if (!defect) return [];
         return (Array.isArray(defect.photos) ? defect.photos : []).filter(Boolean);
     }
 
@@ -9037,11 +9100,6 @@ document.addEventListener('DOMContentLoaded', () => {
         window.showToast(`모든 층 전회차 ${changed}건 → 현회차(${toLabel}) 완료${photoNote}`, 'success', 5500);
     }
     window.promotePreviousRoundToCurrentBulk = promotePreviousRoundToCurrentBulk;
-
-    function setupPromotePreviousRoundToCurrentEvents() {
-        const btn = document.getElementById('btnPromotePrevRoundToCurrent');
-        if (btn) btn.addEventListener('click', promotePreviousRoundToCurrentBulk);
-    }
 
     function clearCarriedOverBulk() {
         const bldg = state.currentBuilding;
@@ -9163,6 +9221,8 @@ document.addEventListener('DOMContentLoaded', () => {
         defect.targetX = targetX;
         defect.targetY = targetY;
         defect.mapUnregistered = false;
+        defect.mapMarkedAt = Date.now();
+        touchDefectUpdatedAt(defect);
         window._pendingMapRegisterDefectId = null;
         saveStateToLocalStorage();
         renderSurveyTable();
@@ -10606,7 +10666,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             return false;
         }
-        const key = getCauseKey(dType);
+        const key = getCauseDisplayGroups(dType)[0]?.key || getCauseKey(dType);
         if (!window.state.customDefectCauses) window.state.customDefectCauses = {};
         if (!window.state.customDefectCauses[key]) window.state.customDefectCauses[key] = [];
         if (!window.state.customDefectCauses[key].includes(trimmed)) {
@@ -11625,29 +11685,102 @@ document.addEventListener('DOMContentLoaded', () => {
         return '기타';
     }
 
-    function syncCauseChecksFromValue(causeVal, optionList) {
-        const box = document.getElementById('defectCauseChecks');
-        const group = document.getElementById('quickCauseGroup');
-        if (!box) return;
-        const options = (optionList || []).filter(Boolean);
-        const selected = new Set(parseCauseList(causeVal));
-        // 목록에 없는 기존 선택값도 유지 표시
-        parseCauseList(causeVal).forEach(c => {
-            if (c && !options.includes(c)) options.push(c);
+    /** 복수 결함 종류 → 원인 프리셋 그룹(균열 계열은 하나로 합침) */
+    function getCauseDisplayGroups(defectTypeStr) {
+        const parts = parseDefectTypeList(defectTypeStr);
+        if (!parts.length) return [{ key: '기타', label: '기타', types: [], isCrackGroup: false }];
+        const groups = [];
+        let crackGroup = null;
+        parts.forEach((part) => {
+            const t = String(part || '').trim();
+            if (!t || t === '상태양호') return;
+            if (isCrackKindLabel(t)) {
+                if (!crackGroup) {
+                    crackGroup = { key: '균열', label: '균열', types: [t], isCrackGroup: true };
+                    groups.push(crackGroup);
+                } else if (!crackGroup.types.includes(t)) {
+                    crackGroup.types.push(t);
+                }
+                return;
+            }
+            const key = getCauseKey(t);
+            let g = groups.find(x => !x.isCrackGroup && x.key === key);
+            if (!g) {
+                g = { key, label: t, types: [t], isCrackGroup: false };
+                groups.push(g);
+            } else if (!g.types.includes(t)) {
+                g.types.push(t);
+            }
         });
-        if (!options.length) {
+        return groups.length ? groups : [{ key: '기타', label: '기타', types: [], isCrackGroup: false }];
+    }
+
+    const CAUSE_GROUP_TONES = [
+        { border: '#b45309', bg: '#fffbeb', text: '#92400e', accent: '#f59e0b' },
+        { border: '#2563eb', bg: '#eff6ff', text: '#1d4ed8', accent: '#3b82f6' },
+        { border: '#16a34a', bg: '#f0fdf4', text: '#15803d', accent: '#22c55e' },
+        { border: '#9333ea', bg: '#faf5ff', text: '#7e22ce', accent: '#a855f7' },
+        { border: '#db2777', bg: '#fdf2f8', text: '#be185d', accent: '#ec4899' },
+        { border: '#0891b2', bg: '#ecfeff', text: '#0e7490', accent: '#06b6d4' }
+    ];
+
+    function getCauseOptionsForKey(key) {
+        if (!window.state.customDefectCauses) window.state.customDefectCauses = {};
+        if (!window.state.hiddenDefectCauses) window.state.hiddenDefectCauses = {};
+        const hidden = window.state.hiddenDefectCauses[key] || [];
+        const presetList = (defectCausePreset[key] || defectCausePreset['기타']).filter(c => !hidden.includes(c));
+        const customList = window.state.customDefectCauses[key] || [];
+        return applySavedOptionOrder(
+            presetList.concat(customList.filter(item => !presetList.includes(item))),
+            ensureOptionOrderEntry('defectCauseOrder', key)
+        );
+    }
+
+    function renderMultiTypeCauseChecks(defectTypeStr, causeVal) {
+        const box = document.getElementById('defectCauseChecks');
+        const groupWrap = document.getElementById('quickCauseGroup');
+        if (!box) return;
+        const groups = getCauseDisplayGroups(defectTypeStr);
+        const selected = new Set(parseCauseList(causeVal));
+        const multiGroup = groups.length > 1;
+
+        if (!groups.length || (groups.length === 1 && !groups[0].types.length)) {
             box.innerHTML = '';
+            if (groupWrap) groupWrap.style.display = 'none';
             return;
         }
-        box.innerHTML = options.map((cause, idx) => {
-            const id = `causeCheck_${idx}_${String(cause).replace(/[^a-zA-Z0-9가-힣]/g, '_')}`;
-            const checked = selected.has(cause) ? 'checked' : '';
-            const safe = String(cause).replace(/"/g, '&quot;');
-            return `<label class="defect-cause-check-item${checked ? ' is-checked' : ''}" for="${id}">
-                <input type="checkbox" id="${id}" value="${safe}" ${checked}>
-                <span>${cause}</span>
-            </label>`;
+
+        box.innerHTML = groups.map((g, gi) => {
+            const tone = CAUSE_GROUP_TONES[gi % CAUSE_GROUP_TONES.length];
+            const options = getCauseOptionsForKey(g.key).slice();
+            parseCauseList(causeVal).forEach(c => {
+                if (c && !options.includes(c)) options.push(c);
+            });
+            if (!options.length) return '';
+            const labelText = g.isCrackGroup
+                ? (g.types.length > 1 ? `균열 (${g.types.join(', ')})` : '균열')
+                : (g.types.length > 1 ? g.types.join(', ') : g.label);
+            const heading = multiGroup
+                ? `<div class="defect-cause-type-label" style="--cause-tone-border:${tone.border};--cause-tone-bg:${tone.bg};--cause-tone-text:${tone.text};">
+                    <i class="fa-solid fa-tag"></i> ${escapeHtml(labelText)}
+                   </div>`
+                : '';
+            const checks = options.map((cause, idx) => {
+                const id = `causeCheck_${gi}_${idx}_${String(cause).replace(/[^a-zA-Z0-9가-힣]/g, '_')}`;
+                const checked = selected.has(cause) ? 'checked' : '';
+                const safe = String(cause).replace(/"/g, '&quot;');
+                return `<label class="defect-cause-check-item${checked ? ' is-checked' : ''}" for="${id}"
+                    style="--cause-tone-border:${tone.border};--cause-tone-bg:${tone.bg};--cause-tone-text:${tone.text};--cause-tone-accent:${tone.accent};">
+                    <input type="checkbox" id="${id}" value="${safe}" ${checked}>
+                    <span>${cause}</span>
+                </label>`;
+            }).join('');
+            return `<div class="defect-cause-type-block${multiGroup ? ' is-multi' : ''}" data-cause-key="${escapeHtml(g.key)}">
+                ${heading}
+                <div class="defect-cause-check-grid">${checks}</div>
+            </div>`;
         }).join('');
+
         box.querySelectorAll('input[type="checkbox"]').forEach(inp => {
             inp.addEventListener('change', () => {
                 const causes = getSelectedCausesFromUi();
@@ -11660,13 +11793,17 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (typeof scheduleDefectAutoApply === 'function') scheduleDefectAutoApply();
             });
         });
-        if (group) {
-            const typeVal = getDefectComboValue(
-                document.getElementById('defectType'),
-                document.getElementById('defectTypeInput')
-            );
-            group.style.display = typeVal === '상태양호' ? 'none' : '';
+        if (groupWrap) {
+            groupWrap.style.display = defectTypeStr && defectTypeStr !== '상태양호' ? '' : 'none';
         }
+    }
+
+    function syncCauseChecksFromValue(causeVal, optionList, defectTypeStr) {
+        const typeVal = defectTypeStr != null ? defectTypeStr : getDefectComboValue(
+            document.getElementById('defectType'),
+            document.getElementById('defectTypeInput')
+        );
+        renderMultiTypeCauseChecks(typeVal, causeVal);
     }
 
     function updateDefectCauseDropdown(defectType, currentVal = null) {
@@ -11688,13 +11825,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         const key = getCauseKey(defectType);
-        const hidden = window.state.hiddenDefectCauses[key] || [];
-        const presetList = (defectCausePreset[key] || defectCausePreset['기타']).filter(c => !hidden.includes(c));
-        const customList = window.state.customDefectCauses[key] || [];
-        const allOptions = applySavedOptionOrder(
-            presetList.concat(customList.filter(item => !presetList.includes(item))),
-            ensureOptionOrderEntry('defectCauseOrder', key)
-        );
+        const allOptions = getCauseOptionsForKey(key);
 
         let html = `<option value="" ${!currentVal ? 'selected' : ''}>—</option>`;
         allOptions.forEach(item => {
@@ -11724,7 +11855,7 @@ document.addEventListener('DOMContentLoaded', () => {
             ? currentVal
             : (isDefectComboCustomToken(select.value) ? '' : select.value);
         syncCauseComboValue(resolved);
-        syncCauseChecksFromValue(resolved, allOptions);
+        syncCauseChecksFromValue(resolved, allOptions, defectType);
         refreshDefectQuickPickBar();
     }
 
@@ -13158,23 +13289,26 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    function getDefectMarqueeAnchor(d) {
+        if (!d) return null;
+        if (d.targetX !== undefined && d.targetY !== undefined) {
+            return { x: d.targetX, y: d.targetY };
+        }
+        if (d.shapeType === 'area' && d.areaX1 !== undefined) {
+            return {
+                x: (Math.min(d.areaX1, d.areaX2) + Math.max(d.areaX1, d.areaX2)) / 2,
+                y: (Math.min(d.areaY1, d.areaY2) + Math.max(d.areaY1, d.areaY2)) / 2
+            };
+        }
+        return { x: d.x || 0, y: d.y || 0 };
+    }
+
     function collectMarqueeHits(x1, y1, x2, y2) {
         const hits = [];
         filterMapPlacedDefects(getCurrentFloorDefects()).forEach(d => {
-            if (d.shapeType === 'area' && d.areaX1 !== undefined) {
-                const ax1 = Math.min(d.areaX1, d.areaX2);
-                const ay1 = Math.min(d.areaY1, d.areaY2);
-                const ax2 = Math.max(d.areaX1, d.areaX2);
-                const ay2 = Math.max(d.areaY1, d.areaY2);
-                const overlaps = !(ax2 < x1 || ax1 > x2 || ay2 < y1 || ay1 > y2);
-                if (overlaps) {
-                    hits.push(d.id);
-                    return;
-                }
-            }
-            const px = d.x;
-            const py = d.y;
-            if (px >= x1 && px <= x2 && py >= y1 && py <= y2) {
+            const anchor = getDefectMarqueeAnchor(d);
+            if (!anchor) return;
+            if (anchor.x >= x1 && anchor.x <= x2 && anchor.y >= y1 && anchor.y <= y2) {
                 hits.push(d.id);
             }
         });
@@ -13652,18 +13786,25 @@ document.addEventListener('DOMContentLoaded', () => {
         // 터치: 즉시 선택만 하고, 약 0.5초 길게 누른 뒤에야 드래그 시작.
         const hitInfo = findHitPinPart(imgX, imgY);
         if (hitInfo) {
-            pendingDragHit = { hitInfo, imgX, imgY, additive };
+            const useAdditive = additive || (isTouch && mobileAddSelectEnabled);
+            pendingDragHit = { hitInfo, imgX, imgY, additive: useAdditive };
             pendingDragIsTouch = isTouch;
             pendingDragHitStartTime = Date.now();
             // 마우스는 즉시, 터치는 번호 박스·화살표 모두 0.5초 길게 누른 뒤 이동
             pendingDragArmed = !isTouch;
             if (hitInfo.defect && hitInfo.defect.id) {
                 const id = hitInfo.defect.id;
-                const useAdditive = additive || (isTouch && mobileAddSelectEnabled);
+                const wasInSelection = selectedDefectIds.has(id);
                 if (useAdditive) {
-                    if (selectedDefectIds.has(id)) selectedDefectIds.delete(id);
-                    else selectedDefectIds.add(id);
-                } else if (!selectedDefectIds.has(id) || selectedDefectIds.size <= 1) {
+                    if (isTouch) {
+                        pendingDragHit.wasInSelection = wasInSelection;
+                        if (!wasInSelection) selectedDefectIds.add(id);
+                    } else if (selectedDefectIds.has(id)) {
+                        selectedDefectIds.delete(id);
+                    } else {
+                        selectedDefectIds.add(id);
+                    }
+                } else if (!wasInSelection || selectedDefectIds.size <= 1) {
                     selectedDefectIds = new Set([id]);
                 }
                 // 이미 다중 선택된 핀을 다시 누르면 선택 유지 → 그룹 드래그용
@@ -13685,7 +13826,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (isDefectModalOpen()) {
             closeDefectModal();
         }
-        if (state.mode === 'PAN' && !additive && selectedDefectIds.size > 0) {
+        if (state.mode === 'PAN' && !additive && !mobileAddSelectEnabled && selectedDefectIds.size > 0) {
             selectedDefectIds.clear();
             updateMapSelectionBar();
             drawCanvas();
@@ -13972,7 +14113,11 @@ document.addEventListener('DOMContentLoaded', () => {
             // 이동임계값을 넘지 않고 그냥 뗐음 = 클릭으로 간주
             const d = pendingDragHit.hitInfo.defect;
             const wasAdditive = !!pendingDragHit.additive;
+            const wasInSelection = !!pendingDragHit.wasInSelection;
             pendingDragHit = null;
+            if (wasAdditive && endedFromTouch && d?.id && wasInSelection) {
+                selectedDefectIds.delete(d.id);
+            }
             // Ctrl 토글 클릭이거나 다중 선택 상태면 내용 수정 모달 열지 않음
             if (wasAdditive || selectedDefectIds.size > 1) {
                 updateMapSelectionBar({ scrollToSelection: true });
@@ -14312,6 +14457,7 @@ document.addEventListener('DOMContentLoaded', () => {
         window._pendingAreaRect = null;
         window._pendingPhotos = [];
         window._pendingPrevRoundPhotos = [];
+        renderDefectMarkingTimeline(null);
         const pinIdEl = document.getElementById('defectPinId');
         if (pinIdEl) pinIdEl.value = '';
         document.body.classList.remove('defect-modal-open');
@@ -14512,6 +14658,8 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         }
 
+        renderDefectMarkingTimeline(existingPin || null);
+
         // 결함 등록화면이 닫혀있는 동안 휴대폰에서 미리 찍어둔 사진(대기함)을 지금 여는 결함에 자동으로 붙임
         if (window._phoneRelayInbox && window._phoneRelayInbox.length) {
             window._pendingPhotos = (window._pendingPhotos || []).concat(window._phoneRelayInbox);
@@ -14577,26 +14725,35 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!frame) return;
 
         const openFn = isPrev ? 'previewPrevRoundPhoto' : 'annotatePendingPhoto';
-        const removeFn = isPrev ? 'removePendingPrevRoundPhoto' : 'removePendingPhoto';
-        const addKind = isPrev ? 'prev' : 'curr';
+        const removeFn = isPrev ? null : 'removePendingPhoto';
+        const addKind = isPrev ? null : 'curr';
         const label = isPrev ? '전차' : '현차';
         const list = (photos || []).filter(Boolean);
 
         if (list.length === 0) {
             frame.classList.remove('has-photo');
-            frame.innerHTML = `
-                <button type="button" class="defect-photo-empty-add" data-photo-kind="${addKind}">
-                    <i class="fa-solid fa-image"></i>
-                    사진 추가
-                </button>
-            `;
-            const emptyBtn = frame.querySelector('.defect-photo-empty-add');
-            if (emptyBtn) {
-                emptyBtn.addEventListener('click', () => {
-                    if (typeof window.triggerDefectPhotoPick === 'function') {
-                        window.triggerDefectPhotoPick('gallery', addKind);
-                    }
-                });
+            if (isPrev) {
+                frame.innerHTML = `
+                    <div class="defect-photo-empty-readonly">
+                        <i class="fa-solid fa-clock-rotate-left"></i>
+                        전회차 사진 없음
+                    </div>
+                `;
+            } else {
+                frame.innerHTML = `
+                    <button type="button" class="defect-photo-empty-add" data-photo-kind="${addKind}">
+                        <i class="fa-solid fa-image"></i>
+                        사진 추가
+                    </button>
+                `;
+                const emptyBtn = frame.querySelector('.defect-photo-empty-add');
+                if (emptyBtn) {
+                    emptyBtn.addEventListener('click', () => {
+                        if (typeof window.triggerDefectPhotoPick === 'function') {
+                            window.triggerDefectPhotoPick('gallery', addKind);
+                        }
+                    });
+                }
             }
             if (extra) {
                 extra.innerHTML = '';
@@ -14606,12 +14763,13 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         frame.classList.add('has-photo');
+        const removeMainBtn = isPrev ? '' : `<button type="button" class="defect-photo-frame-remove" onclick="window.${removeFn}(0)" title="${label} 대표 삭제">×</button>`;
         frame.innerHTML = `
             <button type="button" class="defect-photo-thumb-btn" onclick="window.${openFn}(0)" title="${label} 대표 — 탭하여 확대">
                 <img src="${list[0]}" alt="${label} 대표">
             </button>
             <span class="defect-photo-rep-badge">대표</span>
-            <button type="button" class="defect-photo-frame-remove" onclick="window.${removeFn}(0)" title="${label} 대표 삭제">×</button>
+            ${removeMainBtn}
         `;
 
         if (!extra) return;
@@ -14623,12 +14781,13 @@ document.addEventListener('DOMContentLoaded', () => {
         extra.style.display = 'grid';
         extra.innerHTML = list.slice(1).map((src, i) => {
             const idx = i + 1;
+            const removeExtraBtn = isPrev ? '' : `<button type="button" class="defect-photo-frame-remove" onclick="window.${removeFn}(${idx})" title="${label} ${idx + 1} 삭제">×</button>`;
             return `
                 <div class="defect-photo-extra-item">
                     <button type="button" class="defect-photo-extra-open" onclick="window.${openFn}(${idx})" title="${label} ${idx + 1}">
                         <img src="${src}" alt="${label} ${idx + 1}">
                     </button>
-                    <button type="button" class="defect-photo-frame-remove" onclick="window.${removeFn}(${idx})" title="${label} ${idx + 1} 삭제">×</button>
+                    ${removeExtraBtn}
                 </div>
             `;
         }).join('');
@@ -14722,14 +14881,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     };
 
-    window.removePendingPrevRoundPhoto = function(idx) {
-        if (window._pendingPrevRoundPhotos) {
-            window._pendingPrevRoundPhotos.splice(idx, 1);
-            window._defectPhotosDirty = true;
-            renderDefectPhotoSection();
-            scheduleDefectAutoApply();
-        }
-    };
+    // 전회차 사진은 수동 추가·삭제 불가 (가져오기·차수 전환으로만 설정)
 
     function dataUrlToJpegFile(dataUrl, name) {
         if (!dataUrl || typeof dataUrl !== 'string') return null;
@@ -14803,19 +14955,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const btnTriggerCamera = document.getElementById('btnTriggerCamera');
     const btnTriggerGallery = document.getElementById('btnTriggerGallery');
-    const btnPrevRoundCamera = document.getElementById('btnPrevRoundCamera');
-    const btnPrevRoundGallery = document.getElementById('btnPrevRoundGallery');
 
     function handleSelectedPhotoFile(file, target = 'curr') {
         if (!file) return;
+        if (target === 'prev') return;
         window.compressDefectPhoto43(file, 1000, 0.85).then(compressedUrl => {
-            if (target === 'prev') {
-                if (!window._pendingPrevRoundPhotos) window._pendingPrevRoundPhotos = [];
-                window._pendingPrevRoundPhotos.push(compressedUrl);
-            } else {
-                if (!window._pendingPhotos) window._pendingPhotos = [];
-                window._pendingPhotos.push(compressedUrl);
-            }
+            if (!window._pendingPhotos) window._pendingPhotos = [];
+            window._pendingPhotos.push(compressedUrl);
             window._defectPhotosDirty = true;
             renderDefectPhotoSection();
             scheduleDefectAutoApply();
@@ -14835,22 +14981,6 @@ document.addEventListener('DOMContentLoaded', () => {
             e.preventDefault();
             e.stopPropagation();
             triggerDefectPhotoPick('gallery', 'curr');
-        };
-    }
-
-    if (btnPrevRoundCamera) {
-        btnPrevRoundCamera.onclick = (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            triggerDefectPhotoPick('camera', 'prev');
-        };
-    }
-
-    if (btnPrevRoundGallery) {
-        btnPrevRoundGallery.onclick = (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            triggerDefectPhotoPick('gallery', 'prev');
         };
     }
 
@@ -15234,6 +15364,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 forceArrowDir: forceArrowDir,
                 arrowOctant: arrowOctant,
                 surveyRound: newDefectSurveyRound,
+                mapMarkedAt: Date.now(),
                 updatedAt: Date.now(),
                 photos: photosVal,
                 prevRoundPhotos: Array.isArray(window._pendingPrevRoundPhotos)
@@ -15309,6 +15440,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (saved) {
                 const pinIdEl = document.getElementById('defectPinId');
                 if (pinIdEl && !pinIdEl.value) pinIdEl.value = saved.id;
+                renderDefectMarkingTimeline(saved);
             }
             drawCanvas();
             if (typeof renderDefectListPanel === 'function') renderDefectListPanel();
@@ -18990,32 +19122,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 const seg = clonedPara.getElementsByTagNameNS(HP_NS, 'lineseg')[0];
                 if (seg) seg.setAttribute('vertpos', String(lineIndex * (baseVertsize + baseSpacing)));
             };
-            // 한글이 한 줄에 맞추려고 자간을 줄이지 않도록, 띄어쓰기/구분자 근처에서 2줄로 나눈다.
-            const wrapHwpxCellLine = (line) => {
-                const compact = String(line || '').replace(/[ \t]+/g, ' ').trim();
-                if (compact.length <= 16) return compact || String(line || '');
-                const mid = Math.floor(compact.length / 2);
-                let spaceBest = -1;
-                for (let i = 1; i < compact.length - 1; i++) {
-                    if (compact[i] !== ' ') continue;
-                    if (spaceBest < 0 || Math.abs(i - mid) < Math.abs(spaceBest - mid)) spaceBest = i;
-                }
-                let punctBest = -1;
-                for (let i = 1; i < compact.length - 1; i++) {
-                    if (!/[,，、/·•|]/.test(compact[i])) continue;
-                    if (punctBest < 0 || Math.abs(i - mid) < Math.abs(punctBest - mid)) punctBest = i;
-                }
-                const idx = spaceBest >= 0 ? spaceBest : punctBest;
-                if (idx < 0) return compact;
-                const left = compact.slice(0, idx).trimEnd();
-                const right = compact.slice(idx).replace(/^[\s,，、/·•|]+/, '').trim();
-                if (!left || !right) return compact;
-                return `${left}\n${right}`;
-            };
-            const wrapHwpxCellText = (raw) => String(raw == null ? '' : raw)
-                .split('\n')
-                .map(wrapHwpxCellLine)
-                .join('\n');
+            // 한글 셀: 자간 늘리기/줄이기 없이 고정 — 넘치면 한글이 알아서 줄바꿈
+            const wrapHwpxCellText = (raw) => String(raw == null ? '' : raw);
             const fillCellParas = (subList, paras, rawVal) => {
                 const lines = wrapHwpxCellText(rawVal).split('\n');
                 const baseSeg = paras[0].getElementsByTagNameNS(HP_NS, 'lineseg')[0];
@@ -19064,6 +19172,43 @@ document.addEventListener('DOMContentLoaded', () => {
                 pos.setAttribute('horzAlign', 'LEFT');
                 pos.setAttribute('vertOffset', '0');
                 pos.setAttribute('horzOffset', '0');
+            };
+            const copyRowCellSizesFromTemplate = (row, templateRow) => {
+                if (!row || !templateRow) return;
+                const srcTcs = Array.from(templateRow.getElementsByTagNameNS(HP_NS, 'tc'));
+                const dstTcs = Array.from(row.getElementsByTagNameNS(HP_NS, 'tc'));
+                dstTcs.forEach((tc, i) => {
+                    const srcSz = srcTcs[i]?.getElementsByTagNameNS(HP_NS, 'cellSz')[0];
+                    const dstSz = tc.getElementsByTagNameNS(HP_NS, 'cellSz')[0];
+                    if (srcSz && dstSz) {
+                        const w = srcSz.getAttribute('width');
+                        const h = srcSz.getAttribute('height');
+                        if (w) dstSz.setAttribute('width', w);
+                        if (h) dstSz.setAttribute('height', h);
+                    }
+                });
+            };
+            const syncStatusTblLayoutFromTemplate = (destTbl, srcTbl, headerRowCount, templateDataRow) => {
+                if (!destTbl || !srcTbl) return;
+                const srcTblSz = Array.from(srcTbl.children).find(c => c.localName === 'sz');
+                const destTblSz = Array.from(destTbl.children).find(c => c.localName === 'sz');
+                if (srcTblSz && destTblSz) {
+                    ['width', 'height', 'widthRelTo', 'heightRelTo'].forEach(attr => {
+                        const v = srcTblSz.getAttribute(attr);
+                        if (v != null) destTblSz.setAttribute(attr, v);
+                    });
+                }
+                if (srcTbl.getAttribute('colCnt')) destTbl.setAttribute('colCnt', srcTbl.getAttribute('colCnt'));
+                if (srcTbl.getAttribute('rowCnt')) destTbl.setAttribute('rowCnt', srcTbl.getAttribute('rowCnt'));
+                const srcRows = Array.from(srcTbl.getElementsByTagNameNS(HP_NS, 'tr')).filter(tr => tr.parentNode === srcTbl);
+                const destRows = Array.from(destTbl.getElementsByTagNameNS(HP_NS, 'tr')).filter(tr => tr.parentNode === destTbl);
+                srcRows.forEach((srcRow, i) => {
+                    if (!destRows[i]) return;
+                    copyRowCellSizesFromTemplate(destRows[i], srcRow);
+                });
+                if (templateDataRow) {
+                    destRows.slice(headerRowCount).forEach(row => copyRowCellSizesFromTemplate(row, templateDataRow));
+                }
             };
             const stripPhotoTblRightHalf = (tbl) => {
                 Array.from(tbl.getElementsByTagNameNS(HP_NS, 'tr')).filter(tr => tr.parentNode === tbl).forEach(tr => {
@@ -19458,10 +19603,14 @@ document.addEventListener('DOMContentLoaded', () => {
                         insertAfterNode.parentNode.insertBefore(clonedPara, insertAfterNode.nextSibling);
                         insertAfterNode = clonedPara;
                         pageTbls.push(clonedTbl);
+                        syncStatusTblLayoutFromTemplate(clonedTbl, targetTbl, HEADER_ROW_COUNT, normalStyleRow);
                     }
                 }
                 pageTbls.forEach((tbl, i) => {
-                    if (i > 0) tbl.parentNode.parentNode.setAttribute('pageBreak', '1');
+                    if (i > 0) {
+                        tbl.parentNode.parentNode.setAttribute('pageBreak', '1');
+                        syncStatusTblLayoutFromTemplate(tbl, targetTbl, HEADER_ROW_COUNT, normalStyleRow);
+                    }
                 });
 
                 await Promise.all(pageDefects.map(async (d) => {
@@ -19502,6 +19651,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         const styleMap = localIdx === 0 ? styleMaps.first : (isLastOnPage ? styleMaps.last : styleMaps.normal);
 
                         const newRow = normalStyleRow.cloneNode(true);
+                        copyRowCellSizesFromTemplate(newRow, normalStyleRow);
                         Array.from(newRow.getElementsByTagNameNS(HP_NS, 'tc')).forEach((tc, colIdx) => {
                             const addr = tc.getElementsByTagNameNS(HP_NS, 'cellAddr')[0];
                             if (addr) {
@@ -22759,7 +22909,6 @@ document.addEventListener('DOMContentLoaded', () => {
         if (typeof setupLocationMapLegendModalEvents === 'function') setupLocationMapLegendModalEvents();
         if (typeof setupSurveyRoundReassignModalEvents === 'function') setupSurveyRoundReassignModalEvents();
         if (typeof setupClearCarriedOverBulkEvents === 'function') setupClearCarriedOverBulkEvents();
-        if (typeof setupPromotePreviousRoundToCurrentEvents === 'function') setupPromotePreviousRoundToCurrentEvents();
         if (typeof setupTipShapeEvents === 'function') setupTipShapeEvents();
         if (typeof setupAreaMarkStyleEvents === 'function') setupAreaMarkStyleEvents();
         showLoginOverlay();
