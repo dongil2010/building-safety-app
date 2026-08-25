@@ -18542,6 +18542,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 } else if (categoryFilter === '실측') {
                     ndtItems = ndtItems.filter(item => item.category === '실측');
                     displacementGroups = [];
+                } else if (categoryFilter === '내화피복') {
+                    ndtItems = ndtItems.filter(item => item.category === '내화피복');
+                    displacementGroups = [];
                 } else if (categoryFilter === '일반비파괴') {
                     ndtItems = ndtItems.filter(item => ['강도', '탄산화'].includes(item.category));
                     displacementGroups = [];
@@ -20528,22 +20531,6 @@ document.addEventListener('DOMContentLoaded', () => {
                     tbl.setAttribute('rowCnt', String(headerRowCount + rowsValues.length));
                 };
 
-                const insertNdtLocationMap = async (tblId, category) => {
-                    const tbl = findTblById(tblId);
-                    if (!tbl) return;
-                    const mapDataUrl = renderNdtFloorPlanCanvasDataUrl(floorCode, category);
-                    const pic = tbl.getElementsByTagNameNS(HP_NS, 'pic')[0];
-                    if (!mapDataUrl || !pic) { removeNdtTableById(tblId); return; }
-                    const maxW = parseInt(pic.getElementsByTagNameNS(HP_NS, 'curSz')[0].getAttribute('width'), 10);
-                    const maxH = parseInt(pic.getElementsByTagNameNS(HP_NS, 'curSz')[0].getAttribute('height'), 10);
-                    const { bytes, mime, ext } = dataUrlToBytes(mapDataUrl);
-                    const size = await loadImageSize(mapDataUrl);
-                    const imgId = `ndtMapAuto${tblId}`;
-                    zip.file(`BinData/${imgId}.${ext}`, bytes);
-                    manifestAdds.push(`<opf:item id="${imgId}" href="BinData/${imgId}.${ext}" media-type="${mime}" isEmbeded="1"/>`);
-                    setPicImage(pic, imgId, size.w, size.h, maxW, maxH);
-                };
-
                 // 부동침하/부재변위 결과표 밑에 그룹별 요약박스+그래프 이미지를 순서대로 이어붙이는 도우미.
                 // 문서에 이미 있는 hp:pic 하나(콘크리트 강도/탄산화 위치도용)의 XML을 그대로 문자열
                 // 템플릿으로 써서 매번 새 문단으로 파싱해 넣는다 — 반발경도 성과표 섹션이 기존 그림
@@ -20605,6 +20592,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         anchorPara = await insertImageParaAfter(anchorPara, combinedUrl, 'ndtDispResultAuto', 42520, GROUP_IMG_MAX_H);
                     }
                 };
+
 
                 // 내화피복 두께 결과표(부재당 플렌지/웨브 2행짜리) — 표 열 구성이 단순 1행/항목이
                 // 아니라서(항목 하나 = NO./구분/설계치가 두 행에 걸쳐 세로병합) fillNdtTable을
@@ -20711,15 +20699,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 const MEASURE_TBL_ID = '2137459237', MEASURE_HEADER_ROWS = 2;
                 const STRENGTH_TBL_ID = '2119329126', STRENGTH_HEADER_ROWS = 1;
                 const CARB_TBL_ID = '2119328135', CARB_HEADER_ROWS = 1;
-                const STRENGTH_CARB_MAP_TBL_ID = '2137459495';
                 // 외벽기울기/부동침하/부재변위 결과표 3종 — 2026-08-24 템플릿에 새로 추가.
                 // 표 열 구성이 3개 다 동일: NO. / 위치 / 전회(기존, 항상 '-') / 금회(측정값) / 길이(또는 높이) / 비율 / 등급.
                 const TILT_TBL_ID = '501', TILT_HEADER_ROWS = 2;
-                const TILT_MAP_TBL_ID = '1165079510';
                 const SETTLEMENT_TBL_ID = '502', SETTLEMENT_HEADER_ROWS = 2;
                 const MEMBER_DISP_TBL_ID = '503', MEMBER_DISP_HEADER_ROWS = 2;
-                const SETTLEMENT_MAP_TBL_ID = '1165079513';
-                const MEMBER_DISP_MAP_TBL_ID = '1165079516';
 
                 {
                     // 부재실측(단면 규격) 결과표 — 템플릿 표 열 구성: NO. / 위치(+부재명) / 설계치 / 실측치 / 마감상태 / 평가(c%) / 비고(등급).
@@ -20863,12 +20847,6 @@ document.addEventListener('DOMContentLoaded', () => {
                         removeNdtTableById(CARB_TBL_ID);
                     }
 
-                    if (strengthItemsHwpx.length > 0 || carbItemsHwpx.length > 0) {
-                        await insertNdtLocationMap(STRENGTH_CARB_MAP_TBL_ID, '일반비파괴');
-                    } else {
-                        removeNdtTableById(STRENGTH_CARB_MAP_TBL_ID);
-                    }
-
                     // 3개 표 모두 열 순서 동일(2026-08-24 사용자 요청으로 재배치):
                     // NO. / 위치 / 길이·높이 / 전회(항상 '-') / 금회 / 비율 / 등급. 단위는 전부 mm로 통일.
                     if (tiltItemsHwpx.length > 0) {
@@ -20886,10 +20864,8 @@ document.addEventListener('DOMContentLoaded', () => {
                                 : { tiltRatio: '', grade: '' };
                             return [item.no || (i + 1), item.location || '-', heightText, '-', avgText, item.tiltRatio || calc.tiltRatio || '-', item.grade || calc.grade || '-'];
                         }), true);
-                        await insertNdtLocationMap(TILT_MAP_TBL_ID, '기울기');
                     } else {
                         removeNdtTableById(TILT_TBL_ID);
-                        removeNdtTableById(TILT_MAP_TBL_ID);
                     }
 
                     // 부동침하/부재변위는 2026-08-24부터 템플릿에 별도 표 2개로 분리 — 이전엔 표가
@@ -20903,10 +20879,8 @@ document.addEventListener('DOMContentLoaded', () => {
                         }), true);
                         // 2026-08-24: 결과표 밑에 그룹별 요약박스+꺾은선 그래프를 한 쌍씩 이어붙임(사용자 요청).
                         if (tbl) await insertGroupResultImages(tbl, settlementGroupsHwpx);
-                        await insertNdtLocationMap(SETTLEMENT_MAP_TBL_ID, '변위');
                     } else {
                         removeNdtTableById(SETTLEMENT_TBL_ID);
-                        removeNdtTableById(SETTLEMENT_MAP_TBL_ID);
                     }
 
                     if (memberDispGroupsHwpx.length > 0) {
@@ -20917,10 +20891,83 @@ document.addEventListener('DOMContentLoaded', () => {
                             return [i + 1, group.locationType || '-', lengthMmText, '-', `${calc.delta.toFixed(1)}cm`, calc.tiltRatio, calc.grade];
                         }), true);
                         if (tbl) await insertGroupResultImages(tbl, memberDispGroupsHwpx);
-                        await insertNdtLocationMap(MEMBER_DISP_MAP_TBL_ID, '부재변위');
                     } else {
                         removeNdtTableById(MEMBER_DISP_TBL_ID);
-                        removeNdtTableById(MEMBER_DISP_MAP_TBL_ID);
+                    }
+
+                    // ---- 위치도 일괄 삽입 ----
+                    // "비파괴 장비조사 위치도" 섹션의 표본 내용(다른 병원 위치도, 못 채우던 부재실측/
+                    // 내화피복 위치도 등)을 통째로 비우고, 실제로 채운 위치도만 사용자가 요청한 순서
+                    // (부재실측 → 강도/탄산화 → 내화피복 → 외벽기울기 → 부동침하 → 부재변위)로 모든
+                    // 비파괴조사 결과표가 다 끝난 이 자리에 새로 만들어 넣는다. 2026-08-25부터: 결과표
+                    // 바로 옆(표마다 따로)이 아니라 전부 이렇게 한곳에 모아서 넣는 방식으로 바뀜.
+                    {
+                        // "비파괴 장비조사 위치도"(상위 섹션 제목)와 "비파괴 장비조사 사진첩" 문단은
+                        // 과거 어느 시점(한글 재저장/KS병원 잔재 정리 등)에 이미 삭제되고 없다 —
+                        // 처음에 이 코드는 그 두 문단을 기준으로 구간을 찾으려 했는데 실제로는 항상
+                        // 못 찾아 조용히 아무 일도 안 하고 있었다(위치도가 하나도 안 나오던 원인).
+                        // 대신 실제로 남아있는 걸 직접 확인한 항목들 — 부재실측/내화피복/변위조사
+                        // 소제목 3개, 정체불명의 "부재실측" 단독 문단, 강도·탄산화용 옛 위치도 표
+                        // (id=2137459495, 우리가 더는 안 씀) — 을 문단 참조로 직접 찾아서 지운다.
+                        const all = secChildren();
+                        const findHeading = (text) => all.find(p => paraText(p).trim() === text && p.getElementsByTagNameNS(HP_NS, 'tbl').length === 0);
+                        const measureHeadingPara = findHeading('부재실측 위치도');
+                        const strengthCarbHeadingPara = all.find(p => paraText(p).trim().indexOf('비파괴 장비조사 위치도(') === 0);
+                        const fireproofHeadingPara = findHeading('내화피복 측정 위치도');
+                        const dispHeadingPara = findHeading('변위조사 위치도');
+                        const bareMeasurePara = findHeading('부재실측');
+                        const oldStrengthCarbTbl = findTblById('2137459495');
+                        let oldStrengthCarbTblPara = oldStrengthCarbTbl;
+                        while (oldStrengthCarbTblPara && oldStrengthCarbTblPara.localName !== 'p') oldStrengthCarbTblPara = oldStrengthCarbTblPara.parentNode;
+
+                        // 삽입 지점: 원래 이 소제목들이 있던 바로 그 자리(부재실측 위치도 바로 앞
+                        // 문단)를 그대로 이어받는다 — 지우기 전에 먼저 찾아둬야 한다.
+                        const mapStart = measureHeadingPara ? measureHeadingPara.previousElementSibling : null;
+
+                        [measureHeadingPara, strengthCarbHeadingPara, oldStrengthCarbTblPara, fireproofHeadingPara, dispHeadingPara, bareMeasurePara]
+                            .forEach(p => { if (p && p.parentNode) p.parentNode.removeChild(p); });
+
+                        if (mapStart) {
+                            // 표 캡션([표 7-1] 등)과 같은 스타일(paraPrIDRef=3/styleIDRef=13, charPrIDRef=42
+                            // = 굴림체 좁은 폭 폰트)로 소제목 문단을 새로 만든다 — 원래 이 구간의 소제목들이
+                            // 쓰던 굴림(넓은 폭) 폰트는 텍스트가 길면 두 줄로 밀려서 일부러 피했다.
+                            const makeHeadingPara = (label) => {
+                                const xml = `<hp:p id="0" paraPrIDRef="3" styleIDRef="13" pageBreak="1" columnBreak="0" merged="0"><hp:run charPrIDRef="42"><hp:t>${label}</hp:t></hp:run><hp:linesegarray><hp:lineseg textpos="0" vertpos="0" vertsize="1300" textheight="1300" baseline="1105" spacing="1560" horzpos="0" horzsize="42520" flags="2490368"/></hp:linesegarray></hp:p>`;
+                                const doc = new DOMParser().parseFromString(`<root xmlns:hp="${HP_NS}">${xml}</root>`, 'application/xml');
+                                return xmlDoc.importNode(doc.documentElement.firstChild, true);
+                            };
+
+                            let mapAnchor = mapStart;
+                            const appendLocationMap = async (label, category, imgIdPrefix) => {
+                                const mapDataUrl = renderNdtFloorPlanCanvasDataUrl(floorCode, category);
+                                if (!mapDataUrl) return;
+                                const headingPara = makeHeadingPara(label);
+                                mapAnchor.parentNode.insertBefore(headingPara, mapAnchor.nextSibling);
+                                mapAnchor = headingPara;
+                                // 기존 "비파괴 장비조사 위치도" 그림(강도/탄산화용) placeholder의 curSz(41824 x
+                                // 52763, 거의 페이지 전체 크기)와 같은 크기로 맞춘다.
+                                mapAnchor = await insertImageParaAfter(mapAnchor, mapDataUrl, imgIdPrefix, 41824, 52763);
+                            };
+
+                            if (measureItemsHwpx.length > 0) {
+                                await appendLocationMap('부재실측 위치도', '실측', 'ndtLocMapMeasure');
+                            }
+                            if (strengthItemsHwpx.length > 0 || carbItemsHwpx.length > 0) {
+                                await appendLocationMap('비파괴 장비조사 위치도(콘크리트 강도 측정 및 탄산화 측정)', '일반비파괴', 'ndtLocMapStrengthCarb');
+                            }
+                            if (fireproofItemsHwpx.length > 0) {
+                                await appendLocationMap('내화피복 측정 위치도', '내화피복', 'ndtLocMapFireproof');
+                            }
+                            if (tiltItemsHwpx.length > 0) {
+                                await appendLocationMap('외벽 기울기 측정 위치도', '기울기', 'ndtLocMapTilt');
+                            }
+                            if (settlementGroupsHwpx.length > 0) {
+                                await appendLocationMap('부동침하 기울기 측정 위치도', '변위', 'ndtLocMapSettlement');
+                            }
+                            if (memberDispGroupsHwpx.length > 0) {
+                                await appendLocationMap('부재변위 측정 위치도', '부재변위', 'ndtLocMapMemberDisp');
+                            }
+                        }
                     }
                 }
             } } catch (ndtErr) {
@@ -20939,39 +20986,14 @@ document.addEventListener('DOMContentLoaded', () => {
                 // 1) 실제로 채운 층 블록들 다음에 남은 표본 층 블록(있다면)은 통째로 삭제한다.
                 if (unusedFloorSlotStart) removeParaRange(unusedFloorSlotStart, null);
 
-                // "비파괴 장비조사 사진첩"(표본 NDT 사진, 우리 코드가 다루지 않음) 섹션과
-                // "비파괴 장비조사 위치도" 섹션의 경계를 먼저 찾아둔다(둘 다 뒤에서 쓴다).
+                // "비파괴 장비조사 사진첩"(표본 NDT 사진, 우리 코드가 다루지 않음) 섹션의 경계를
+                // 찾아둔다. "비파괴 장비조사 위치도" 섹션 자체는 NDT try 블록 끝에서 이미 정리·
+                // 재구성했으므로(모든 결과표 뒤에 위치도를 한꺼번에 모아 넣는 단계) 여기서는
+                // 사진첩만 처리한다.
                 const albumStart = secChildren().find(p => /^비파괴 장비조사 사진첩/.test(paraText(p).trim()));
                 const surveyHeading = secChildren().find(p => /^주요 상태조사표, 사진 및 위치도/.test(paraText(p).trim()));
 
-                // 2) "비파괴 장비조사 위치도" 섹션 중 우리가 실제로 채운 지도(강도/탄산화·
-                //    외벽기울기·부동침하·부재처짐)가 들어있는 문단(및 그 캡션)만 남기고,
-                //    우리가 안 다루는 항목(부재실측 위치도, 내화피복 측정 위치도 등)의
-                //    표본 이미지 문단은 지운다. albumStart를 경계로 쓰므로, 이 문단을
-                //    실제로 지우는 다음 단계보다 먼저 실행해야 한다.
-                const HANDLED_MAP_TBL_IDS = ['2137459495', '1165079510', '1165079513', '1165079516'];
-                const mapStart = secChildren().find(p => paraText(p).trim() === '비파괴 장비조사 위치도');
-                if (mapStart && albumStart) {
-                    const all = secChildren();
-                    const s = all.indexOf(mapStart) + 1;
-                    const e = all.indexOf(albumStart);
-                    if (s >= 0 && e > s) {
-                        const keepSet = new Set();
-                        for (let i = s; i < e; i++) {
-                            const tbls = Array.from(all[i].getElementsByTagNameNS(HP_NS, 'tbl')).map(t => t.getAttribute('id'));
-                            if (tbls.some(id => HANDLED_MAP_TBL_IDS.includes(id))) keepSet.add(i);
-                        }
-                        Array.from(keepSet).forEach(i => {
-                            const prev = i - 1;
-                            if (prev >= s && Array.from(all[prev].getElementsByTagNameNS(HP_NS, 'tbl')).length === 0) keepSet.add(prev);
-                        });
-                        for (let i = e - 1; i >= s; i--) {
-                            if (!keepSet.has(i)) sec.removeChild(all[i]);
-                        }
-                    }
-                }
-
-                // 3) "비파괴 장비조사 사진첩" 섹션 전체 삭제 (위 2번보다 반드시 나중에 실행)
+                // 2) "비파괴 장비조사 사진첩" 섹션 전체 삭제
                 if (albumStart) removeParaRange(albumStart, surveyHeading || null);
             } catch (cleanupErr) {
                 console.error('표본 템플릿 잔여 내용 정리 실패(나머지는 유지):', cleanupErr);
