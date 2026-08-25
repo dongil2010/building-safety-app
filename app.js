@@ -415,7 +415,7 @@ document.addEventListener('DOMContentLoaded', () => {
         return getMobileZoomTierDim(floorDrawingActiveTierDim);
     }
 
-    /** 모바일 GPU 캔버스 한 변 상한 — 200% 이상에서 16000 허용 */
+    /** 모바일 GPU 캔버스 한 변 상한 — 400%/800%/2000%에서 4000·8000·16000 허용 */
     function getViewportPatchMaxSide(mobile) {
         if (!mobile) return 16384;
         return Math.max(4096, getMobileZoomTierDim(floorDrawingActiveTierDim));
