@@ -319,12 +319,20 @@ document.addEventListener('DOMContentLoaded', () => {
     const _idbPersistedDrawingKeys = new Set();
     const _idbPersistedPhotoKeys = new Set();
     const _idbPersistedPdfKeys = new Set();
+    const _idbPersistedTierKeys = new Set();
+    const _idbPersistedSourceKeys = new Set();
     // 저장이 아직 끝나지 않은 키(진행 중). 실제 저장이 성공하기 전까지는 "저장됨"으로
     // 표시하지 않아서, 실패 시 다음 saveStateToLocalStorage 호출 때 재시도되게 한다.
     const _idbPendingDrawingKeys = new Set();
     const _idbPendingPhotoKeys = new Set();
     const _idbPendingPdfKeys = new Set();
+    const _idbPendingTierKeys = new Set();
+    const _idbPendingSourceKeys = new Set();
     let _idbSaveFailedNotified = false;
+    let floorDrawingActiveTierDim = 4000;
+    let floorDrawingTierLoadToken = 0;
+    let floorDrawingTierSyncTimer = null;
+    const _floorTierPrefetchInFlight = new Set();
 
     function notifyIndexedDbSaveFailure() {
         if (_idbSaveFailedNotified) return;
@@ -360,6 +368,40 @@ document.addEventListener('DOMContentLoaded', () => {
                     _idbPendingDrawingKeys.delete(key);
                     if (ok) {
                         _idbPersistedDrawingKeys.add(key);
+                        _idbSaveFailedNotified = false;
+                    } else {
+                        notifyIndexedDbSaveFailure();
+                    }
+                });
+            });
+
+            const tierMaps = b.floorDrawingTiers || {};
+            Object.entries(tierMaps).forEach(([floorCode, tiersObj]) => {
+                if (!tiersObj || typeof tiersObj !== 'object') return;
+                const key = `${b.id}_${floorCode}`;
+                if (_idbPersistedTierKeys.has(key) || _idbPendingTierKeys.has(key)) return;
+                _idbPendingTierKeys.add(key);
+                idbSet('floorDrawingTiers', key, tiersObj).then(ok => {
+                    _idbPendingTierKeys.delete(key);
+                    if (ok) {
+                        _idbPersistedTierKeys.add(key);
+                        _idbSaveFailedNotified = false;
+                    } else {
+                        notifyIndexedDbSaveFailure();
+                    }
+                });
+            });
+
+            const sourceMaps = b.floorDrawingSources || {};
+            Object.entries(sourceMaps).forEach(([floorCode, sourceUrl]) => {
+                if (!sourceUrl) return;
+                const key = `${b.id}_${floorCode}`;
+                if (_idbPersistedSourceKeys.has(key) || _idbPendingSourceKeys.has(key)) return;
+                _idbPendingSourceKeys.add(key);
+                idbSet('floorDrawingSources', key, sourceUrl).then(ok => {
+                    _idbPendingSourceKeys.delete(key);
+                    if (ok) {
+                        _idbPersistedSourceKeys.add(key);
                         _idbSaveFailedNotified = false;
                     } else {
                         notifyIndexedDbSaveFailure();
@@ -435,7 +477,7 @@ document.addEventListener('DOMContentLoaded', () => {
             persistLocalImagesToIndexedDb(rawBuildings, rawDefects);
 
             const sanitizedBuildings = rawBuildings.map(b => {
-                const { floorDrawings, floorDrawingPdfs, ...rest } = b;
+                const { floorDrawings, floorDrawingPdfs, floorDrawingTiers, floorDrawingSources, ...rest } = b;
                 return rest;
             });
             const sanitizedDefects = {};
@@ -1019,12 +1061,30 @@ document.addEventListener('DOMContentLoaded', () => {
             await Promise.all(buildings.map(async (b) => {
                 if (!b.floorDrawings) b.floorDrawings = {};
                 if (!b.floorDrawingPdfs) b.floorDrawingPdfs = {};
+                if (!b.floorDrawingTiers) b.floorDrawingTiers = {};
+                if (!b.floorDrawingSources) b.floorDrawingSources = {};
                 const floors = (b.floorsList || []).map(f => f.floorCode);
                 await Promise.all(floors.map(async (floorCode) => {
                     if (!b.floorDrawings[floorCode]) {
                         const cached = await idbGet('floorDrawings', `${b.id}_${floorCode}`);
                         if (cached) {
                             b.floorDrawings[floorCode] = cached;
+                            anyHydrated = true;
+                        }
+                    }
+                    if (!b.floorDrawingTiers[floorCode]) {
+                        const cachedTiers = await idbGet('floorDrawingTiers', `${b.id}_${floorCode}`);
+                        if (cachedTiers) {
+                            b.floorDrawingTiers[floorCode] = cachedTiers;
+                            _idbPersistedTierKeys.add(`${b.id}_${floorCode}`);
+                            anyHydrated = true;
+                        }
+                    }
+                    if (!b.floorDrawingSources[floorCode]) {
+                        const cachedSource = await idbGet('floorDrawingSources', `${b.id}_${floorCode}`);
+                        if (cachedSource) {
+                            b.floorDrawingSources[floorCode] = cachedSource;
+                            _idbPersistedSourceKeys.add(`${b.id}_${floorCode}`);
                             anyHydrated = true;
                         }
                     }
@@ -1758,6 +1818,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (!targetBldg.floorDrawings) targetBldg.floorDrawings = {};
         if (!targetBldg.floorDrawingPdfs) targetBldg.floorDrawingPdfs = {};
+        if (!targetBldg.floorDrawingTiers) targetBldg.floorDrawingTiers = {};
+        if (!targetBldg.floorDrawingSources) targetBldg.floorDrawingSources = {};
 
         await Promise.all(Array.from(floorCodes).map(async (fc) => {
             const oldKey = `${sourceBldg.id}_${fc}`;
@@ -1779,6 +1841,24 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (pdf) {
                     targetBldg.floorDrawingPdfs[fc] = pdf;
                     await idbSet('floorDrawingPdfs', newKey, pdf);
+                }
+            }
+
+            if (!targetBldg.floorDrawingTiers[fc]) {
+                let tiers = (sourceBldg.floorDrawingTiers && sourceBldg.floorDrawingTiers[fc]) || null;
+                if (!tiers) tiers = await idbGet('floorDrawingTiers', oldKey);
+                if (tiers) {
+                    targetBldg.floorDrawingTiers[fc] = tiers;
+                    await idbSet('floorDrawingTiers', newKey, tiers);
+                }
+            }
+
+            if (!targetBldg.floorDrawingSources[fc]) {
+                let src = (sourceBldg.floorDrawingSources && sourceBldg.floorDrawingSources[fc]) || null;
+                if (!src) src = await idbGet('floorDrawingSources', oldKey);
+                if (src) {
+                    targetBldg.floorDrawingSources[fc] = src;
+                    await idbSet('floorDrawingSources', newKey, src);
                 }
             }
         }));
@@ -2286,6 +2366,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
             const floorDrawingsMap = {};
             const floorDrawingPdfsMap = {};
+            const floorDrawingTiersMap = {};
+            const floorDrawingSourcesMap = {};
             const floorsList = [];
 
             if (safeUploadedDrawings.length > 0) {
@@ -2306,6 +2388,12 @@ document.addEventListener('DOMContentLoaded', () => {
                                 if (prepared && prepared.rasterDataUrl) {
                                     floorDrawingsMap[item.floorCode] = prepared.rasterDataUrl;
                                     await uploadFloorDrawing(newBuildingId, item.floorCode, prepared.rasterDataUrl);
+                                }
+                                if (prepared && prepared.tiers) {
+                                    floorDrawingTiersMap[item.floorCode] = prepared.tiers;
+                                }
+                                if (prepared && prepared.sourceDataUrl) {
+                                    floorDrawingSourcesMap[item.floorCode] = prepared.sourceDataUrl;
                                 }
                                 if (prepared && prepared.pdfDataUrl) {
                                     floorDrawingPdfsMap[item.floorCode] = prepared.pdfDataUrl;
@@ -2336,6 +2424,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 floorsList: floorsList.length > 0 ? floorsList : null,
                 floorDrawings: floorDrawingsMap,
                 floorDrawingPdfs: floorDrawingPdfsMap,
+                floorDrawingTiers: floorDrawingTiersMap,
+                floorDrawingSources: floorDrawingSourcesMap,
                 notes: notes
             };
 
@@ -2586,11 +2676,18 @@ document.addEventListener('DOMContentLoaded', () => {
             if (bldg.floorDrawingPdfs && bldg.floorDrawingPdfs[floorCode]) {
                 delete bldg.floorDrawingPdfs[floorCode];
             }
+            if (bldg.floorDrawingTiers && bldg.floorDrawingTiers[floorCode]) {
+                delete bldg.floorDrawingTiers[floorCode];
+            }
+            if (bldg.floorDrawingSources && bldg.floorDrawingSources[floorCode]) {
+                delete bldg.floorDrawingSources[floorCode];
+            }
             // IndexedDB에 저장해둔 예전 도면도 지우고, "이미 저장했다"는 기록도 지워서
             // 나중에 이 층에 새 도면을 올리면 다시 저장되게 한다(안 지우면 새 도면이 안 덮어써짐).
             const drawingKey = `${bldg.id}_${floorCode}`;
             _idbPersistedDrawingKeys.delete(drawingKey);
             _idbPersistedPdfKeys.delete(drawingKey);
+            clearFloorDrawingTierCacheForFloor(bldg.id, floorCode, true);
             idbDelete('floorDrawings', drawingKey);
             idbDelete('floorDrawingPdfs', drawingKey);
             if (bldg.floorsList) {
@@ -2711,10 +2808,23 @@ document.addEventListener('DOMContentLoaded', () => {
                                     bldg.floorDrawings[item.floorCode] = prepared.rasterDataUrl;
                                     await uploadFloorDrawing(bldg.id, item.floorCode, prepared.rasterDataUrl);
                                 }
+                                if (prepared && prepared.tiers) {
+                                    if (!bldg.floorDrawingTiers) bldg.floorDrawingTiers = {};
+                                    bldg.floorDrawingTiers[item.floorCode] = prepared.tiers;
+                                    _idbPersistedTierKeys.delete(`${bldg.id}_${item.floorCode}`);
+                                }
+                                if (prepared && prepared.sourceDataUrl) {
+                                    clearFloorDrawingTierCacheForFloor(bldg.id, item.floorCode);
+                                    cacheFloorDrawingSourceToDevice(bldg, item.floorCode, prepared.sourceDataUrl);
+                                }
                                 if (prepared && prepared.pdfDataUrl) {
                                     if (!bldg.floorDrawingPdfs) bldg.floorDrawingPdfs = {};
                                     bldg.floorDrawingPdfs[item.floorCode] = prepared.pdfDataUrl;
                                     _idbPersistedPdfKeys.delete(`${bldg.id}_${item.floorCode}`);
+                                    if (bldg.floorDrawingTiers && bldg.floorDrawingTiers[item.floorCode]) {
+                                        delete bldg.floorDrawingTiers[item.floorCode];
+                                    }
+                                    clearFloorDrawingTierCacheForFloor(bldg.id, item.floorCode);
                                 }
                             } catch (err) {
                                 console.error('Edit drawing compression error:', err);
@@ -2906,6 +3016,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (elements.zoomScaleText) {
             elements.zoomScaleText.textContent = `${Math.round(state.view.scale * 100)}%`;
         }
+        scheduleFloorDrawingTierSync();
     }
 
     // 마우스(또는 터치) 위치를 기준으로 확대/축소 — 좌상단 고정 줌 방지
@@ -2924,13 +3035,240 @@ document.addEventListener('DOMContentLoaded', () => {
         return newScale;
     }
 
+    function pickFloorDrawingTierDimForView() {
+        if (typeof window.pickFloorDrawingTierDim !== 'function') return 4000;
+        const cw = state.canvasCssW || (state.canvas ? Math.round(state.canvas.width / (state.canvasDpr || 1)) : 800);
+        const ch = state.canvasCssH || (state.canvas ? Math.round(state.canvas.height / (state.canvasDpr || 1)) : 600);
+        return window.pickFloorDrawingTierDim(state.view.scale, cw, ch, state.canvasDpr || 1, floorDrawingActiveTierDim);
+    }
+
+    function cacheFloorDrawingTierToDevice(bldg, floorCode, tierDim, dataUrl) {
+        if (!bldg || !floorCode || !dataUrl || !tierDim) return;
+        const dimKey = String(tierDim);
+        if (!bldg.floorDrawingTiers) bldg.floorDrawingTiers = {};
+        if (!bldg.floorDrawingTiers[floorCode]) bldg.floorDrawingTiers[floorCode] = {};
+        bldg.floorDrawingTiers[floorCode][dimKey] = dataUrl;
+        const idbKey = `${bldg.id}_${floorCode}`;
+        _idbPersistedTierKeys.delete(idbKey);
+        idbGet('floorDrawingTiers', idbKey).then((existing) => {
+            const merged = { ...(existing || {}), [dimKey]: dataUrl };
+            if (bldg.floorDrawingTiers[floorCode]) {
+                Object.assign(merged, bldg.floorDrawingTiers[floorCode]);
+            }
+            return idbSet('floorDrawingTiers', idbKey, merged);
+        }).then((ok) => {
+            if (ok) _idbPersistedTierKeys.add(idbKey);
+        });
+    }
+
+    function cacheFloorDrawingSourceToDevice(bldg, floorCode, sourceDataUrl) {
+        if (!bldg || !floorCode || !sourceDataUrl) return;
+        if (!bldg.floorDrawingSources) bldg.floorDrawingSources = {};
+        bldg.floorDrawingSources[floorCode] = sourceDataUrl;
+        const idbKey = `${bldg.id}_${floorCode}`;
+        _idbPersistedSourceKeys.delete(idbKey);
+        idbSet('floorDrawingSources', idbKey, sourceDataUrl).then((ok) => {
+            if (ok) _idbPersistedSourceKeys.add(idbKey);
+        });
+    }
+
+    async function getFloorDrawingSourceDataUrl(bldg, floorCode) {
+        if (!bldg || !floorCode) return null;
+        if (bldg.floorDrawingSources && bldg.floorDrawingSources[floorCode]) {
+            return bldg.floorDrawingSources[floorCode];
+        }
+        const cached = await idbGet('floorDrawingSources', `${bldg.id}_${floorCode}`);
+        if (cached) {
+            if (!bldg.floorDrawingSources) bldg.floorDrawingSources = {};
+            bldg.floorDrawingSources[floorCode] = cached;
+            _idbPersistedSourceKeys.add(`${bldg.id}_${floorCode}`);
+            return cached;
+        }
+        return null;
+    }
+
+    function clearFloorDrawingTierCacheForFloor(bldgId, floorCode, includeSource = false) {
+        if (!bldgId || !floorCode) return;
+        const prefix = `${bldgId}_${floorCode}_`;
+        if (state.floorDrawingTierImageCache) {
+            Object.keys(state.floorDrawingTierImageCache).forEach((k) => {
+                if (k.startsWith(prefix)) delete state.floorDrawingTierImageCache[k];
+            });
+        }
+        _idbPersistedTierKeys.delete(`${bldgId}_${floorCode}`);
+        idbDelete('floorDrawingTiers', `${bldgId}_${floorCode}`);
+        if (includeSource) {
+            _idbPersistedSourceKeys.delete(`${bldgId}_${floorCode}`);
+            idbDelete('floorDrawingSources', `${bldgId}_${floorCode}`);
+        }
+    }
+
+    function prefetchFloorDrawingTiersForFloor(bldg, floorCode, dims) {
+        if (!bldg || !floorCode || !Array.isArray(dims)) return;
+        dims.forEach((dim) => {
+            const prefetchKey = `${bldg.id}_${floorCode}_${dim}`;
+            if (_floorTierPrefetchInFlight.has(prefetchKey)) return;
+            const tiers = bldg.floorDrawingTiers && bldg.floorDrawingTiers[floorCode];
+            if (tiers && tiers[String(dim)]) return;
+            _floorTierPrefetchInFlight.add(prefetchKey);
+            resolveFloorDrawingTierDataUrl(bldg, floorCode, dim).finally(() => {
+                _floorTierPrefetchInFlight.delete(prefetchKey);
+            });
+        });
+    }
+
+    function scheduleFloorDrawingTierPrefetch(bldg, floorCode) {
+        if (!bldg || !floorCode) return;
+        const dims = (window.FLOOR_DRAWING_TIER_DIMS || [4000, 8000, 16000]).filter((d) => d !== 4000);
+        const run = async () => {
+            const hasPdf = (typeof window.getFloorPdfDataUrl === 'function')
+                ? window.getFloorPdfDataUrl(bldg, floorCode)
+                : null;
+            const hasSource = hasPdf || await getFloorDrawingSourceDataUrl(bldg, floorCode);
+            if (!hasSource) return;
+            prefetchFloorDrawingTiersForFloor(bldg, floorCode, dims);
+        };
+        if (typeof requestIdleCallback === 'function') {
+            requestIdleCallback(run, { timeout: 10000 });
+        } else {
+            setTimeout(run, 2000);
+        }
+    }
+
+    async function resolveFloorDrawingTierDataUrl(bldg, floorCode, tierDim) {
+        if (!bldg || !floorCode || !tierDim) return null;
+        const dimKey = String(tierDim);
+
+        const tiers = bldg.floorDrawingTiers && bldg.floorDrawingTiers[floorCode];
+        if (tiers && tiers[dimKey]) return tiers[dimKey];
+
+        const idbTiers = await idbGet('floorDrawingTiers', `${bldg.id}_${floorCode}`);
+        if (idbTiers && idbTiers[dimKey]) {
+            if (!bldg.floorDrawingTiers) bldg.floorDrawingTiers = {};
+            bldg.floorDrawingTiers[floorCode] = { ...idbTiers, ...(bldg.floorDrawingTiers[floorCode] || {}) };
+            _idbPersistedTierKeys.add(`${bldg.id}_${floorCode}`);
+            return idbTiers[dimKey];
+        }
+
+        if (Number(tierDim) <= 4000 && bldg.floorDrawings && bldg.floorDrawings[floorCode]) {
+            return bldg.floorDrawings[floorCode];
+        }
+
+        let pdfUrl = (typeof window.getFloorPdfDataUrl === 'function')
+            ? window.getFloorPdfDataUrl(bldg, floorCode)
+            : null;
+        if (!pdfUrl && typeof idbGet === 'function') {
+            const cachedPdf = await idbGet('floorDrawingPdfs', `${bldg.id}_${floorCode}`);
+            if (cachedPdf) {
+                if (typeof window.ensureFloorDrawingPdfs === 'function') window.ensureFloorDrawingPdfs(bldg);
+                else if (!bldg.floorDrawingPdfs) bldg.floorDrawingPdfs = {};
+                bldg.floorDrawingPdfs[floorCode] = cachedPdf;
+                pdfUrl = cachedPdf;
+            }
+        }
+
+        if (pdfUrl && typeof window.renderPdfDataUrlToImage === 'function') {
+            try {
+                const rendered = await window.renderPdfDataUrlToImage(pdfUrl, tierDim, 2500000);
+                if (rendered) {
+                    cacheFloorDrawingTierToDevice(bldg, floorCode, tierDim, rendered);
+                    return rendered;
+                }
+            } catch (e) {
+                console.warn('도면 LOD PDF 렌더 실패:', e);
+            }
+        }
+
+        const sourceUrl = await getFloorDrawingSourceDataUrl(bldg, floorCode);
+        if (sourceUrl && typeof window.resizeDataUrlToMaxDim === 'function') {
+            try {
+                const resized = await window.resizeDataUrlToMaxDim(sourceUrl, tierDim);
+                if (resized) {
+                    cacheFloorDrawingTierToDevice(bldg, floorCode, tierDim, resized);
+                    return resized;
+                }
+            } catch (e) {
+                console.warn('도면 LOD 이미지 리사이즈 실패:', e);
+            }
+        }
+
+        const fallbackDims = [16000, 8000, 4000];
+        for (const d of fallbackDims) {
+            if (d <= tierDim && tiers && tiers[String(d)]) return tiers[String(d)];
+        }
+        return (bldg.floorDrawings && bldg.floorDrawings[floorCode]) || null;
+    }
+
+    function scheduleFloorDrawingTierSync() {
+        if (floorDrawingTierSyncTimer) clearTimeout(floorDrawingTierSyncTimer);
+        floorDrawingTierSyncTimer = setTimeout(() => {
+            floorDrawingTierSyncTimer = null;
+            syncFloorDrawingTierForView();
+        }, 120);
+    }
+
+    async function syncFloorDrawingTierForView() {
+        const bldg = state.currentBuilding;
+        const fc = state.currentFloor;
+        if (!bldg || !fc || state.currentTab !== 'tab-map' || !state.bgImage) return;
+
+        const wantDim = pickFloorDrawingTierDimForView();
+        if (wantDim === floorDrawingActiveTierDim) return;
+
+        const loadToken = ++floorDrawingTierLoadToken;
+        const dataUrl = await resolveFloorDrawingTierDataUrl(bldg, fc, wantDim);
+        if (!dataUrl || loadToken !== floorDrawingTierLoadToken) return;
+        if (state.currentFloor !== fc || state.currentBuildingId !== bldg.id) return;
+
+        if (!state.floorDrawingTierImageCache) state.floorDrawingTierImageCache = {};
+        const cacheKey = `${bldg.id}_${fc}_${wantDim}`;
+        const cached = state.floorDrawingTierImageCache[cacheKey];
+        if (cached && cached.complete && (cached.naturalWidth || cached.width) > 0) {
+            state.bgImage = cached;
+            floorDrawingActiveTierDim = wantDim;
+            const ndtKey = `${state.currentBuildingId}_${fc}`;
+            if (ndtBgImage && !(state.ndtImages && state.ndtImages[ndtKey])) {
+                ndtBgImage = cached;
+                drawNdtCanvas();
+            }
+            drawCanvas();
+            return;
+        }
+
+        const img = new Image();
+        img.onload = () => {
+            if (loadToken !== floorDrawingTierLoadToken) return;
+            if (state.currentFloor !== fc || state.currentBuildingId !== bldg.id) return;
+            state.floorDrawingTierImageCache[cacheKey] = img;
+            state.bgImage = img;
+            floorDrawingActiveTierDim = wantDim;
+            const ndtKey = `${state.currentBuildingId}_${fc}`;
+            if (ndtBgImage && !(state.ndtImages && state.ndtImages[ndtKey])) {
+                ndtBgImage = img;
+                drawNdtCanvas();
+            }
+            drawCanvas();
+        };
+        img.onerror = () => {
+            if (loadToken === floorDrawingTierLoadToken) {
+                floorDrawingActiveTierDim = wantDim;
+            }
+        };
+        img.src = dataUrl;
+    }
+
     function loadFloorDrawing(floorCode) {
         state.currentFloor = floorCode;
         state.bgImage = null;
+        floorDrawingActiveTierDim = null;
+        floorDrawingTierLoadToken++;
 
         const bldg = state.currentBuilding;
         let dataUrl = null;
-        if (bldg && bldg.floorDrawings && bldg.floorDrawings[floorCode]) {
+        if (bldg && bldg.floorDrawingTiers && bldg.floorDrawingTiers[floorCode]) {
+            dataUrl = bldg.floorDrawingTiers[floorCode]['4000'] || null;
+        }
+        if (!dataUrl && bldg && bldg.floorDrawings && bldg.floorDrawings[floorCode]) {
             dataUrl = bldg.floorDrawings[floorCode];
         }
 
@@ -2940,6 +3278,11 @@ document.addEventListener('DOMContentLoaded', () => {
             const img = new Image();
             img.onload = () => {
                 state.bgImage = img;
+                floorDrawingActiveTierDim = 4000;
+                if (!state.floorDrawingTierImageCache) state.floorDrawingTierImageCache = {};
+                if (bldg && bldg.id) {
+                    state.floorDrawingTierImageCache[`${bldg.id}_${floorCode}_4000`] = img;
+                }
                 // Auto-detect Portrait drawing and auto-rotate 90° to Landscape for optimal architectural inspection
                 if (img.naturalHeight > img.naturalWidth * 1.15 && (state.rotationAngle === undefined || state.rotationAngle === 0)) {
                     state.rotationAngle = 90;
@@ -2947,6 +3290,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 resizeCanvas();
                 fitToScreen();
                 drawCanvas();
+                scheduleFloorDrawingTierSync();
+                scheduleFloorDrawingTierPrefetch(bldg, floorCode);
             };
             img.onerror = () => {
                 if (!isFallback) {
@@ -2963,23 +3308,56 @@ document.addEventListener('DOMContentLoaded', () => {
         const hasFloorRegistered = bldg && bldg.floorsList && bldg.floorsList.some(f => f.floorCode === floorCode);
 
         if (!dataUrl && hasFloorRegistered) {
-            // 로컬 캐시(메모리)엔 없지만 이 건물에 등록된 층 도면 -> 먼저 IndexedDB에서
-            // 찾아보고(이 기기에 저장해둔 도면), 거기에도 없으면(다른 기기 등) Firestore에서 조회한다.
-            idbGet('floorDrawings', `${bldg.id}_${floorCode}`).then(cachedUrl => {
+            (async () => {
+                const idbKey = `${bldg.id}_${floorCode}`;
+                const idbTiers = await idbGet('floorDrawingTiers', idbKey);
+                if (idbTiers && idbTiers['4000']) {
+                    if (!bldg.floorDrawingTiers) bldg.floorDrawingTiers = {};
+                    bldg.floorDrawingTiers[floorCode] = { ...idbTiers, ...(bldg.floorDrawingTiers[floorCode] || {}) };
+                    _idbPersistedTierKeys.add(idbKey);
+                    if (state.currentFloor === floorCode) tryLoadImage(idbTiers['4000'], false);
+                    return;
+                }
+
+                const cachedUrl = await idbGet('floorDrawings', idbKey);
                 if (cachedUrl) {
                     if (!bldg.floorDrawings) bldg.floorDrawings = {};
                     bldg.floorDrawings[floorCode] = cachedUrl;
                     if (state.currentFloor === floorCode) tryLoadImage(cachedUrl, false);
                     return;
                 }
+
+                const cachedPdf = await idbGet('floorDrawingPdfs', idbKey);
+                if (cachedPdf) {
+                    if (typeof window.ensureFloorDrawingPdfs === 'function') window.ensureFloorDrawingPdfs(bldg);
+                    else if (!bldg.floorDrawingPdfs) bldg.floorDrawingPdfs = {};
+                    bldg.floorDrawingPdfs[floorCode] = cachedPdf;
+                    const rendered = await resolveFloorDrawingTierDataUrl(bldg, floorCode, 4000);
+                    if (rendered && state.currentFloor === floorCode) {
+                        tryLoadImage(rendered, false);
+                        return;
+                    }
+                }
+
+                const cachedSource = await idbGet('floorDrawingSources', idbKey);
+                if (cachedSource) {
+                    cacheFloorDrawingSourceToDevice(bldg, floorCode, cachedSource);
+                    const rendered = await resolveFloorDrawingTierDataUrl(bldg, floorCode, 4000);
+                    if (rendered && state.currentFloor === floorCode) {
+                        tryLoadImage(rendered, false);
+                        return;
+                    }
+                }
+
                 if (db && window.state.companyId) {
                     db.collection('safety_app').doc(getCompanyDocId())
-                        .collection('floorDrawings').doc(`${bldg.id}_${floorCode}`).get()
+                        .collection('floorDrawings').doc(idbKey).get()
                         .then(doc => {
                             const fetchedUrl = doc.exists ? doc.data().dataUrl : null;
                             if (fetchedUrl) {
                                 if (!bldg.floorDrawings) bldg.floorDrawings = {};
                                 bldg.floorDrawings[floorCode] = fetchedUrl;
+                                idbSet('floorDrawings', idbKey, fetchedUrl);
                             }
                             if (state.currentFloor === floorCode) {
                                 tryLoadImage(fetchedUrl || getDefaultBlueprintSvgDataUrl(floorCode || '1F'), !fetchedUrl);
@@ -2993,7 +3371,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 } else if (state.currentFloor === floorCode) {
                     tryLoadImage(getDefaultBlueprintSvgDataUrl(floorCode || '1F'), true);
                 }
-            });
+            })();
         } else if (!dataUrl || (isLocalFileUrl && window.location.protocol !== 'file:')) {
             // Mobile browser or web server accessing local file:/// path -> use high-res CAD SVG immediately
             tryLoadImage(getDefaultBlueprintSvgDataUrl(floorCode || '1F'), true);
@@ -8691,6 +9069,28 @@ document.addEventListener('DOMContentLoaded', () => {
         };
     }
 
+    /** 중점관리 비교표 캡션 — 예: 2025년 하반기 정기안전점검 */
+    function formatSurveyRoundLabelHwpxCompare(roundKey) {
+        if (!roundKey) return '';
+        return `${formatSurveyRoundLabel(roundKey)} 정기안전점검`;
+    }
+
+    function getDefectHwpxCompareRoundLabelsFull(defect, bldg) {
+        const currKey = getBuildingSurveyRoundKey(bldg);
+        let prevKey = defect && defect.prevSurveyRound ? defect.prevSurveyRound : null;
+        if (!prevKey && defect && getDefectPrevOutputPhotos(defect).length > 0) {
+            if (defect.surveyRound && isPreviousRoundDefect(defect)) {
+                prevKey = defect.surveyRound;
+            } else {
+                prevKey = getPreviousSurveyRoundKey(currKey);
+            }
+        }
+        return {
+            prev: prevKey ? formatSurveyRoundLabelHwpxCompare(prevKey) : '',
+            curr: formatSurveyRoundLabelHwpxCompare(currKey)
+        };
+    }
+
     function formatDefectMarkingTimestamp(ts) {
         const n = Number(ts);
         if (!n || !Number.isFinite(n)) return '';
@@ -10428,48 +10828,6 @@ document.addEventListener('DOMContentLoaded', () => {
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         ctx.fillText(pinLabel, 0, 0);
-
-        // 중요 결함(⭐)은 결함위치도(도면)에서만 눈에 띄게 강조 표시.
-        // 보고서(drawPinSafe)는 일부러 그대로 둬서 다른 결함과 똑같이 나오게 한다.
-        if (defect.isBookmark) {
-            const starX = w / 2;
-            const starY = -h / 2;
-            ctx.save();
-            ctx.beginPath();
-            ctx.arc(starX, starY, 8 * scale, 0, Math.PI * 2);
-            ctx.fillStyle = '#facc15';
-            ctx.strokeStyle = '#b45309';
-            ctx.lineWidth = 1.5;
-            ctx.fill();
-            ctx.stroke();
-            ctx.fillStyle = '#7c2d12';
-            ctx.font = `bold ${Math.round(11 * scale)}px sans-serif`;
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'middle';
-            ctx.fillText('★', starX, starY + 0.5);
-            ctx.restore();
-        }
-
-        // 중점관리 대상(◆)은 중요 결함(⭐)과 반대쪽(좌상단)에 다른 색으로 표시.
-        if (defect.isPriorityManage) {
-            const diaX = -w / 2;
-            const diaY = -h / 2;
-            const priorityColor = getStyleColor('priorityManage');
-            ctx.save();
-            ctx.beginPath();
-            ctx.arc(diaX, diaY, 8 * scale, 0, Math.PI * 2);
-            ctx.fillStyle = priorityColor;
-            ctx.strokeStyle = darkenHexColor(priorityColor, 0.25);
-            ctx.lineWidth = 1.5;
-            ctx.fill();
-            ctx.stroke();
-            ctx.fillStyle = '#ffffff';
-            ctx.font = `bold ${Math.round(11 * scale)}px sans-serif`;
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'middle';
-            ctx.fillText('◆', diaX, diaY + 0.5);
-            ctx.restore();
-        }
 
         ctx.restore();
     }
@@ -14393,6 +14751,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
                     if (elements.zoomScaleText) elements.zoomScaleText.textContent = `${Math.round(state.view.scale * 100)}%`;
                     drawCanvas();
+                    scheduleFloorDrawingTierSync();
                 }
             } else if (!isPinching && e.touches.length === 1) {
                 if (isDragging || isMarkingDrag || isAreaDrag || isDraggingPin || isDraggingPinGroup || pendingDragHit || isDraggingLegend || isResizingLegend || isMarqueeSelecting) {
@@ -14458,6 +14817,7 @@ document.addEventListener('DOMContentLoaded', () => {
             applyFocalZoom(state.view, mouseX, mouseY, zoomFactor, VIEW_MIN_SCALE, VIEW_MAX_SCALE);
             if (elements.zoomScaleText) elements.zoomScaleText.textContent = `${Math.round(state.view.scale * 100)}%`;
             drawCanvas();
+            scheduleFloorDrawingTierSync();
         }, { passive: false });
     }
 
@@ -16109,6 +16469,7 @@ document.addEventListener('DOMContentLoaded', () => {
         applyFocalZoom(state.view, cx, cy, 1.2, VIEW_MIN_SCALE, VIEW_MAX_SCALE);
         if (elements.zoomScaleText) elements.zoomScaleText.textContent = `${Math.round(state.view.scale * 100)}%`;
         drawCanvas();
+        scheduleFloorDrawingTierSync();
     });
 
     const btnZoomOut = document.getElementById('btnZoomOut');
@@ -16118,6 +16479,7 @@ document.addEventListener('DOMContentLoaded', () => {
         applyFocalZoom(state.view, cx, cy, 1 / 1.2, VIEW_MIN_SCALE, VIEW_MAX_SCALE);
         if (elements.zoomScaleText) elements.zoomScaleText.textContent = `${Math.round(state.view.scale * 100)}%`;
         drawCanvas();
+        scheduleFloorDrawingTierSync();
     });
 
     const btnZoomFit = document.getElementById('btnZoomFit');
@@ -19159,6 +19521,52 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!sec) throw new Error('템플릿 문서 구조(hs:sec)를 찾지 못했습니다.');
             const paraText = (p) => Array.from(p.getElementsByTagNameNS(HP_NS, 't')).map(t => t.textContent).join('');
             const secChildren = () => Array.from(sec.children).filter(c => c.localName === 'p');
+
+            // 3종 중점관리 전·금회차 비교사진 — 칠산타워 표 양식(templates/hwpx_priority_compare_grade3.hwpx)
+            let grade3CompareTableStamp = null;
+            if (isGrade3) {
+                try {
+                    const cmpResp = await fetch('./templates/hwpx_priority_compare_grade3.hwpx', { cache: 'no-store' });
+                    if (cmpResp.ok) {
+                        const cmpZip = await JSZip.loadAsync(await cmpResp.arrayBuffer());
+                        const cmpSectionPath = cmpZip.file('Contents/section1.xml')
+                            ? 'Contents/section1.xml'
+                            : 'Contents/section0.xml';
+                        const cmpXml = await cmpZip.file(cmpSectionPath).async('string');
+                        const cmpDoc = new DOMParser().parseFromString(cmpXml, 'application/xml');
+                        const cmpSec = cmpDoc.getElementsByTagName('hs:sec')[0];
+                        if (cmpSec) {
+                            const cmpParas = Array.from(cmpSec.children).filter(c => c.localName === 'p');
+                            const cmpParaText = (p) => Array.from(p.getElementsByTagNameNS(HP_NS, 't')).map(t => t.textContent).join('');
+                            cmpParas.forEach((p) => {
+                                const txt = cmpParaText(p).trim();
+                                if (txt.startsWith('※')) {
+                                    if (!grade3CompareTableStamp) grade3CompareTableStamp = {};
+                                    grade3CompareTableStamp.legendPara = p.cloneNode(true);
+                                    return;
+                                }
+                                Array.from(p.getElementsByTagNameNS(HP_NS, 'tbl')).forEach((tbl) => {
+                                    const rowCnt = parseInt(tbl.getAttribute('rowCnt') || '0', 10);
+                                    const colCnt = parseInt(tbl.getAttribute('colCnt') || '0', 10);
+                                    const picCount = tbl.getElementsByTagNameNS(HP_NS, 'pic').length;
+                                    if (rowCnt === 2 && colCnt === 5 && picCount >= 2) {
+                                        if (!grade3CompareTableStamp) grade3CompareTableStamp = {};
+                                        if (!grade3CompareTableStamp.compareTblPara) {
+                                            grade3CompareTableStamp.compareTblPara = p.cloneNode(true);
+                                            grade3CompareTableStamp.compareTbl = tbl.cloneNode(true);
+                                        }
+                                    } else if (rowCnt === 1 && colCnt === 1 && txt.includes('사진')) {
+                                        if (!grade3CompareTableStamp) grade3CompareTableStamp = {};
+                                        grade3CompareTableStamp.titlePara = p.cloneNode(true);
+                                    }
+                                });
+                            });
+                        }
+                    }
+                } catch (cmpLoadErr) {
+                    console.warn('중점관리 비교표 템플릿 로드 실패:', cmpLoadErr);
+                }
+            }
             // 한글에서 표에 새 칸을 추가만 하고 한 번도 안 채운 셀은 문단/run은 있어도 hp:t(실제 글자
             // 요소)가 아예 없는 경우가 있다. 없으면 만들어서 항상 값을 넣을 자리를 보장한다.
             const ensureCellTextNode = (para) => {
@@ -19457,31 +19865,6 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             let floorSlots = discoverFloorSlots();
             if (!floorSlots.length) throw new Error('템플릿에서 상태조사표 블록을 찾지 못했습니다.');
-
-            // 3종 중점관리 전·금회차 비교사진(칠산타워) — 표가 아닌 떠 있는 사진+캡션 문단
-            let grade3CompareFloatingStamp = null;
-            if (isGrade3) {
-                const paras = secChildren();
-                for (let i = 0; i < paras.length; i++) {
-                    const p = paras[i];
-                    if (p.getElementsByTagNameNS(HP_NS, 'tbl').length > 0) continue;
-                    const pics = Array.from(p.getElementsByTagNameNS(HP_NS, 'pic'));
-                    const tallPics = pics.filter(pi => {
-                        const cur = pi.getElementsByTagNameNS(HP_NS, 'curSz')[0];
-                        const h = cur ? parseInt(cur.getAttribute('height') || '0', 10) : 0;
-                        return h > 15000;
-                    });
-                    if (tallPics.length >= 2) {
-                        grade3CompareFloatingStamp = {
-                            titlePara: i > 0 ? paras[i - 1].cloneNode(true) : null,
-                            photoPara: p.cloneNode(true),
-                            labelPara: i + 1 < paras.length && !paras[i + 1].getElementsByTagNameNS(HP_NS, 'pic').length
-                                ? paras[i + 1].cloneNode(true) : null
-                        };
-                        break;
-                    }
-                }
-            }
 
             // 신가병원/칠산타워 서식은 칸 너비가 이미 맞춰져 있어, 옛 10칸(부재종류/결함크기)용
             // 폭 재배분은 적용하지 않는다.
@@ -19893,155 +20276,109 @@ document.addEventListener('DOMContentLoaded', () => {
                     window.showToast(`${getFloorLabel(floorCode)} 사진 삽입 중 오류가 있어 사진은 제외하고 만듭니다.`, 'warning', 5000);
                 }
 
-                // ---- 3종 중점관리: 전·금회차 비교사진 (칠산타워 — 결함번호 + 좌우 사진 + 회차 라벨) ----
+                // ---- 3종 중점관리: 전·금회차 비교사진 (칠산타워 표 양식 — 좌우 사진 + 번호/회차 캡션) ----
                 if (isGrade3 && priorityCompareDefects.length > 0) {
                     try {
-                        const tplPic = slot.photoTbl.getElementsByTagNameNS(HP_NS, 'pic')[0];
-                        const cmpMaxW = parseInt(tplPic.getElementsByTagNameNS(HP_NS, 'curSz')[0].getAttribute('width'), 10);
-                        const cmpMaxH = parseInt(tplPic.getElementsByTagNameNS(HP_NS, 'curSz')[0].getAttribute('height'), 10);
+                        if (!grade3CompareTableStamp || !grade3CompareTableStamp.compareTblPara) {
+                            window.showToast('중점관리 비교사진 양식(templates/hwpx_priority_compare_grade3.hwpx)을 찾지 못했습니다.', 'warning', 6000);
+                        } else {
+                            let compareAnchorPara = slot.photoTbl.parentNode;
+                            while (compareAnchorPara && compareAnchorPara.localName !== 'p') compareAnchorPara = compareAnchorPara.parentNode;
 
-                        let compareAnchorPara = slot.photoTbl.parentNode;
-                        while (compareAnchorPara && compareAnchorPara.localName !== 'p') compareAnchorPara = compareAnchorPara.parentNode;
-
-                        const setParaPlainText = (para, text) => {
-                            if (!para) return para;
-                            const runs = Array.from(para.getElementsByTagNameNS(HP_NS, 'run'));
-                            runs.forEach((run, idx) => {
-                                if (idx > 0 && run.parentNode === para) run.parentNode.removeChild(run);
-                            });
-                            let run = para.getElementsByTagNameNS(HP_NS, 'run')[0];
-                            if (!run) {
-                                run = xmlDoc.createElementNS(HP_NS, 'hp:run');
-                                run.setAttribute('charPrIDRef', '29');
-                                para.insertBefore(run, para.getElementsByTagNameNS(HP_NS, 'linesegarray')[0] || null);
-                            }
-                            Array.from(run.childNodes).forEach(n => {
-                                if (n.localName !== 'linesegarray') run.removeChild(n);
-                            });
-                            const t = xmlDoc.createElementNS(HP_NS, 'hp:t');
-                            t.textContent = text;
-                            run.appendChild(t);
-                            return para;
-                        };
-
-                        const buildComparePhotoPara = () => {
-                            if (grade3CompareFloatingStamp && grade3CompareFloatingStamp.photoPara) {
-                                return grade3CompareFloatingStamp.photoPara.cloneNode(true);
-                            }
-                            const p = xmlDoc.createElementNS(HP_NS, 'hp:p');
-                            p.setAttribute('paraPrIDRef', '1');
-                            p.setAttribute('styleIDRef', '8');
-                            const run = xmlDoc.createElementNS(HP_NS, 'hp:run');
-                            run.appendChild(tplPic.cloneNode(true));
-                            run.appendChild(tplPic.cloneNode(true));
-                            run.appendChild(xmlDoc.createElementNS(HP_NS, 'hp:t'));
-                            p.appendChild(run);
-                            const lsa = xmlDoc.createElementNS(HP_NS, 'hp:linesegarray');
-                            const ls = xmlDoc.createElementNS(HP_NS, 'hp:lineseg');
-                            ls.setAttribute('textpos', '0');
-                            ls.setAttribute('vertpos', '0');
-                            ls.setAttribute('vertsize', '16000');
-                            ls.setAttribute('textheight', '16000');
-                            ls.setAttribute('baseline', '13600');
-                            lsa.appendChild(ls);
-                            p.appendChild(lsa);
-                            return p;
-                        };
-
-                        const buildCompareTitlePara = (text) => {
-                            const proto = (grade3CompareFloatingStamp && grade3CompareFloatingStamp.titlePara)
-                                ? grade3CompareFloatingStamp.titlePara.cloneNode(true)
-                                : slot.titlePara.cloneNode(true);
-                            return setParaPlainText(proto, text);
-                        };
-
-                        const buildCompareLabelPara = (left, right) => {
-                            const gap = Math.max(6, 36 - String(left).length - String(right).length);
-                            const labelText = `${left}${' '.repeat(gap)}${right}`.trim();
-                            if (grade3CompareFloatingStamp && grade3CompareFloatingStamp.labelPara) {
-                                return setParaPlainText(grade3CompareFloatingStamp.labelPara.cloneNode(true), labelText);
-                            }
-                            return setParaPlainText(buildCompareTitlePara(''), labelText);
-                        };
-
-                        const assignComparePicIds = (para) => {
-                            Array.from(para.getElementsByTagNameNS(HP_NS, 'pic')).forEach(pic => {
-                                cloneIdSeq++;
-                                pic.setAttribute('id', String(10200000 + cloneIdSeq));
-                                pic.setAttribute('instid', String(10300000 + cloneIdSeq));
-                            });
-                        };
-
-                        const insertCompareParas = (paras) => {
-                            if (!compareAnchorPara || !compareAnchorPara.parentNode) return;
-                            paras.filter(Boolean).forEach(p => {
-                                compareAnchorPara.parentNode.insertBefore(p, compareAnchorPara.nextSibling);
-                                compareAnchorPara = p;
-                            });
-                        };
-
-                        for (let ci = 0; ci < priorityCompareDefects.length; ci++) {
-                            const d = priorityCompareDefects[ci];
-                            const prevSrc = getDefectPrevOutputPhotos(d)[0];
-                            const currSrc = getDefectOutputPhotos(d)[0];
-                            if (!prevSrc && !currSrc) continue;
-
-                            const rowCtx = {
-                                floorCode,
-                                floorDisplayLabel: getFloorLabel(floorCode)
+                            const reassignCompareParaIds = (para) => {
+                                Array.from(para.getElementsByTagNameNS(HP_NS, 'tbl')).forEach(tbl => {
+                                    cloneIdSeq++;
+                                    tbl.setAttribute('id', String(10400000 + cloneIdSeq));
+                                });
+                                Array.from(para.getElementsByTagNameNS(HP_NS, 'pic')).forEach(pic => {
+                                    cloneIdSeq++;
+                                    pic.setAttribute('id', String(10500000 + cloneIdSeq));
+                                    pic.setAttribute('instid', String(10600000 + cloneIdSeq));
+                                });
                             };
-                            const colCount = Array.from(normalStyleRow.getElementsByTagNameNS(HP_NS, 'tc')).length;
-                            const values = getReportSurveyRowValues(d, rowCtx, isGrade3, colCount);
-                            const defectNo = values[0] || getSurveyCellText('no', d, rowCtx) || (d.no || '').replace(/^NO\.?\s*/i, '');
-                            const roundLabels = getDefectHwpxCompareRoundLabels(d, bldg);
 
-                            const titlePara = buildCompareTitlePara(defectNo);
-                            const photoPara = buildComparePhotoPara();
-                            assignComparePicIds(photoPara);
-                            const pics = Array.from(photoPara.getElementsByTagNameNS(HP_NS, 'pic'));
+                            const insertComparePara = (para) => {
+                                if (!compareAnchorPara || !compareAnchorPara.parentNode || !para) return;
+                                compareAnchorPara.parentNode.insertBefore(para, compareAnchorPara.nextSibling);
+                                compareAnchorPara = para;
+                            };
 
-                            if (prevSrc && currSrc && pics.length >= 2) {
-                                imgCounter++;
-                                const imgIdPrev = `photoAuto${imgCounter}`;
-                                let pack = dataUrlToBytes(prevSrc);
-                                let size = await loadImageSize(prevSrc);
-                                zip.file(`BinData/${imgIdPrev}.${pack.ext}`, pack.bytes);
-                                manifestAdds.push(`<opf:item id="${imgIdPrev}" href="BinData/${imgIdPrev}.${pack.ext}" media-type="${pack.mime}" isEmbeded="1"/>`);
-                                setPicImage(pics[0], imgIdPrev, size.w, size.h, cmpMaxW, cmpMaxH);
+                            const stampPic = grade3CompareTableStamp.compareTbl.getElementsByTagNameNS(HP_NS, 'pic')[0];
+                            const cmpMaxW = parseInt(stampPic.getElementsByTagNameNS(HP_NS, 'curSz')[0].getAttribute('width'), 10);
+                            const cmpMaxH = parseInt(stampPic.getElementsByTagNameNS(HP_NS, 'curSz')[0].getAttribute('height'), 10);
 
-                                imgCounter++;
-                                const imgIdCurr = `photoAuto${imgCounter}`;
-                                pack = dataUrlToBytes(currSrc);
-                                size = await loadImageSize(currSrc);
-                                zip.file(`BinData/${imgIdCurr}.${pack.ext}`, pack.bytes);
-                                manifestAdds.push(`<opf:item id="${imgIdCurr}" href="BinData/${imgIdCurr}.${pack.ext}" media-type="${pack.mime}" isEmbeded="1"/>`);
-                                setPicImage(pics[1], imgIdCurr, size.w, size.h, cmpMaxW, cmpMaxH);
-                            } else if (prevSrc && pics.length >= 1) {
-                                imgCounter++;
-                                const imgIdPrev = `photoAuto${imgCounter}`;
-                                const pack = dataUrlToBytes(prevSrc);
-                                const size = await loadImageSize(prevSrc);
-                                zip.file(`BinData/${imgIdPrev}.${pack.ext}`, pack.bytes);
-                                manifestAdds.push(`<opf:item id="${imgIdPrev}" href="BinData/${imgIdPrev}.${pack.ext}" media-type="${pack.mime}" isEmbeded="1"/>`);
-                                setPicImage(pics[0], imgIdPrev, size.w, size.h, cmpMaxW, cmpMaxH);
-                                if (pics[1] && pics[1].parentNode) pics[1].parentNode.removeChild(pics[1]);
-                            } else if (currSrc && pics.length >= 1) {
-                                imgCounter++;
-                                const imgIdCurr = `photoAuto${imgCounter}`;
-                                const pack = dataUrlToBytes(currSrc);
-                                const size = await loadImageSize(currSrc);
-                                zip.file(`BinData/${imgIdCurr}.${pack.ext}`, pack.bytes);
-                                manifestAdds.push(`<opf:item id="${imgIdCurr}" href="BinData/${imgIdCurr}.${pack.ext}" media-type="${pack.mime}" isEmbeded="1"/>`);
-                                setPicImage(pics[0], imgIdCurr, size.w, size.h, cmpMaxW, cmpMaxH);
-                                if (pics[1] && pics[1].parentNode) pics[1].parentNode.removeChild(pics[1]);
+                            if (grade3CompareTableStamp.titlePara) {
+                                const titleP = grade3CompareTableStamp.titlePara.cloneNode(true);
+                                reassignCompareParaIds(titleP);
+                                titleP.setAttribute('pageBreak', '1');
+                                insertComparePara(titleP);
                             }
 
-                            const leftLabel = roundLabels.prev || roundLabels.curr;
-                            const rightLabel = roundLabels.prev ? roundLabels.curr : '';
-                            const labelPara = buildCompareLabelPara(leftLabel, rightLabel || leftLabel);
+                            for (let ci = 0; ci < priorityCompareDefects.length; ci++) {
+                                const d = priorityCompareDefects[ci];
+                                const prevSrc = getDefectPrevOutputPhotos(d)[0];
+                                const currSrc = getDefectOutputPhotos(d)[0];
+                                if (!prevSrc && !currSrc) continue;
 
-                            if (ci === 0 && titlePara) titlePara.setAttribute('pageBreak', '1');
-                            insertCompareParas([titlePara, photoPara, labelPara]);
+                                const rowCtx = {
+                                    floorCode,
+                                    floorDisplayLabel: getFloorLabel(floorCode)
+                                };
+                                const colCount = Array.from(normalStyleRow.getElementsByTagNameNS(HP_NS, 'tc')).length;
+                                const values = getReportSurveyRowValues(d, rowCtx, isGrade3, colCount);
+                                const defectNo = values[0] || getSurveyCellText('no', d, rowCtx) || (d.no || '').replace(/^NO\.?\s*/i, '');
+                                const roundLabels = getDefectHwpxCompareRoundLabelsFull(d, bldg);
+
+                                const tblPara = grade3CompareTableStamp.compareTblPara.cloneNode(true);
+                                reassignCompareParaIds(tblPara);
+                                const tbl = tblPara.getElementsByTagNameNS(HP_NS, 'tbl')[0];
+                                ensureTblTreatAsChar(tbl);
+                                const pics = Array.from(tbl.getElementsByTagNameNS(HP_NS, 'pic'));
+
+                                if (prevSrc && pics[0]) {
+                                    imgCounter++;
+                                    const imgIdPrev = `photoAuto${imgCounter}`;
+                                    let pack = dataUrlToBytes(prevSrc);
+                                    let size = await loadImageSize(prevSrc);
+                                    zip.file(`BinData/${imgIdPrev}.${pack.ext}`, pack.bytes);
+                                    manifestAdds.push(`<opf:item id="${imgIdPrev}" href="BinData/${imgIdPrev}.${pack.ext}" media-type="${pack.mime}" isEmbeded="1"/>`);
+                                    setPicImage(pics[0], imgIdPrev, size.w, size.h, cmpMaxW, cmpMaxH);
+                                }
+                                if (currSrc && pics[1]) {
+                                    imgCounter++;
+                                    const imgIdCurr = `photoAuto${imgCounter}`;
+                                    const pack = dataUrlToBytes(currSrc);
+                                    const size = await loadImageSize(currSrc);
+                                    zip.file(`BinData/${imgIdCurr}.${pack.ext}`, pack.bytes);
+                                    manifestAdds.push(`<opf:item id="${imgIdCurr}" href="BinData/${imgIdCurr}.${pack.ext}" media-type="${pack.mime}" isEmbeded="1"/>`);
+                                    setPicImage(pics[1], imgIdCurr, size.w, size.h, cmpMaxW, cmpMaxH);
+                                } else if (currSrc && pics[0] && !prevSrc) {
+                                    imgCounter++;
+                                    const imgIdCurr = `photoAuto${imgCounter}`;
+                                    const pack = dataUrlToBytes(currSrc);
+                                    const size = await loadImageSize(currSrc);
+                                    zip.file(`BinData/${imgIdCurr}.${pack.ext}`, pack.bytes);
+                                    manifestAdds.push(`<opf:item id="${imgIdCurr}" href="BinData/${imgIdCurr}.${pack.ext}" media-type="${pack.mime}" isEmbeded="1"/>`);
+                                    setPicImage(pics[0], imgIdCurr, size.w, size.h, cmpMaxW, cmpMaxH);
+                                }
+
+                                const trs = Array.from(tbl.getElementsByTagNameNS(HP_NS, 'tr')).filter(tr => tr.parentNode === tbl);
+                                if (trs.length >= 2) {
+                                    Array.from(trs[1].getElementsByTagNameNS(HP_NS, 'tc')).forEach(tc => {
+                                        const addr = tc.getElementsByTagNameNS(HP_NS, 'cellAddr')[0];
+                                        const col = addr ? addr.getAttribute('colAddr') : '';
+                                        if (col === '0' || col === '3') setTcText(tc, defectNo);
+                                        else if (col === '1') setTcText(tc, roundLabels.prev);
+                                        else if (col === '4') setTcText(tc, roundLabels.curr);
+                                    });
+                                }
+
+                                insertComparePara(tblPara);
+                            }
+
+                            if (grade3CompareTableStamp.legendPara) {
+                                insertComparePara(grade3CompareTableStamp.legendPara.cloneNode(true));
+                            }
                         }
                     } catch (cmpErr) {
                         console.error(`${floorCode} 중점관리 비교사진 삽입 실패:`, cmpErr);
@@ -22278,9 +22615,13 @@ document.addEventListener('DOMContentLoaded', () => {
             const drawingDocId = `${bldg.id}_${fc}`;
             _idbPersistedDrawingKeys.delete(drawingDocId);
             _idbPersistedPdfKeys.delete(drawingDocId);
+            _idbPersistedTierKeys.delete(drawingDocId);
+            _idbPersistedSourceKeys.delete(drawingDocId);
             const jobs = [
                 idbDelete('floorDrawings', drawingDocId),
-                idbDelete('floorDrawingPdfs', drawingDocId)
+                idbDelete('floorDrawingPdfs', drawingDocId),
+                idbDelete('floorDrawingTiers', drawingDocId),
+                idbDelete('floorDrawingSources', drawingDocId)
             ];
             if (companyDrawings) {
                 jobs.push(companyDrawings.doc(drawingDocId).delete().catch(e => {

@@ -9,7 +9,7 @@
 
   window.BSA_PDF_VECTOR = {
     enabled: true,
-    version: 'main-3'
+    version: 'main-6'
   };
 
   function isPdfDataUrl(url) {
@@ -51,12 +51,26 @@
   window.prepareFloorDrawingUpload = async function (file) {
     const isPdf = !!file && (file.type === 'application/pdf' || /\.pdf$/i.test(file.name || ''));
     if (!isPdf) {
-      const raster = await window.compressDrawingImage(file);
-      return { rasterDataUrl: raster, pdfDataUrl: null, isPdf: false };
+      const readFull = () => new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = () => reject(new Error('이미지 파일 읽기 실패'));
+        reader.readAsDataURL(file);
+      });
+      const raw = await readFull();
+      const sourceDataUrl = (typeof window.resizeDataUrlToMaxDim === 'function')
+        ? await window.resizeDataUrlToMaxDim(raw, 16000)
+        : raw;
+      const rasterDataUrl = (typeof window.resizeDataUrlToMaxDim === 'function')
+        ? await window.resizeDataUrlToMaxDim(sourceDataUrl, 4000)
+        : await window.compressDrawingImage(file);
+      // 원본(최대 16000)만 기기 보관 — 4000/8000/16000은 줌 시 리사이즈+캐시
+      return { rasterDataUrl, sourceDataUrl, tiers: null, pdfDataUrl: null, isPdf: false };
     }
     const pdfDataUrl = await window.fileToPdfDataUrl(file);
-    const rasterDataUrl = await window.renderPdfFileToImage(file);
-    return { rasterDataUrl, pdfDataUrl, isPdf: true };
+    // PDF 원본만 보관 — 4000/8000/16000은 줌 시 pdf.js로 실시간 렌더 (비트맵 티어 저장 안 함)
+    const rasterDataUrl = await window.renderPdfFileToImage(file, 4000, 950000);
+    return { rasterDataUrl, tiers: null, pdfDataUrl, isPdf: true };
   };
 
   window.getFloorPdfDataUrl = function (bldg, floorCode) {

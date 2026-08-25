@@ -49,7 +49,7 @@ window.appState = window.state;
 // IndexedDB는 보통 수백MB~수GB까지 쓸 수 있으므로, 무거운 이미지 데이터는 여기로 옮기고
 // localStorage에는 가벼운 텍스트 데이터만 남긴다.
 const LOCAL_IMAGE_DB_NAME = 'building_safety_local_images';
-const LOCAL_IMAGE_DB_VERSION = 2; // v2: floorDrawingPdfs (벡터 PDF 원본 보관)
+const LOCAL_IMAGE_DB_VERSION = 4; // v4: floorDrawingSources (이미지 LOD 원본)
 let _localImageDbPromise = null;
 
 function openLocalImageDb() {
@@ -62,6 +62,8 @@ function openLocalImageDb() {
             if (!db.objectStoreNames.contains('floorDrawings')) db.createObjectStore('floorDrawings');
             if (!db.objectStoreNames.contains('photos')) db.createObjectStore('photos');
             if (!db.objectStoreNames.contains('floorDrawingPdfs')) db.createObjectStore('floorDrawingPdfs');
+            if (!db.objectStoreNames.contains('floorDrawingTiers')) db.createObjectStore('floorDrawingTiers');
+            if (!db.objectStoreNames.contains('floorDrawingSources')) db.createObjectStore('floorDrawingSources');
         };
         req.onsuccess = () => resolve(req.result);
         req.onerror = () => reject(req.error);
@@ -154,6 +156,118 @@ async function renderPdfPageToDataUrl(page, scale) {
  * 캐드(CAD)에서 내보낸 PDF 도면을 pdf.js로 첫 페이지 고해상도 렌더링 (벡터 원본 기반이라 글씨/선이 뭉개지지 않음)
  * Firestore 문서 용량(1MB) 여유를 위해 결과가 너무 크면 스케일을 낮춰 재시도
  */
+/** 도면 LOD 해상도 단계 (긴 변 기준 픽셀) */
+window.FLOOR_DRAWING_TIER_DIMS = [4000, 8000, 16000];
+
+/**
+ * dataURL 이미지를 긴 변 maxDim 이하로 축소 (이미 작으면 원본 유지)
+ */
+window.resizeDataUrlToMaxDim = function(dataUrl, maxDim, quality = 0.88) {
+    return new Promise((resolve) => {
+        if (!dataUrl || !maxDim) return resolve(dataUrl || null);
+        const img = new Image();
+        img.onload = () => {
+            let w = img.width;
+            let h = img.height;
+            const long = Math.max(w, h);
+            if (long <= maxDim) {
+                resolve(dataUrl);
+                return;
+            }
+            if (w > h) {
+                h = Math.round((h * maxDim) / w);
+                w = maxDim;
+            } else {
+                w = Math.round((w * maxDim) / h);
+                h = maxDim;
+            }
+            const canvas = document.createElement('canvas');
+            canvas.width = w;
+            canvas.height = h;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(img, 0, 0, w, h);
+            resolve(canvas.toDataURL('image/jpeg', quality));
+        };
+        img.onerror = () => resolve(dataUrl);
+        img.src = dataUrl;
+    });
+};
+
+/**
+ * 원본 dataURL에서 4000/8000/16000 티어 세트 생성
+ */
+window.buildFloorDrawingTiersFromDataUrl = async function(sourceDataUrl) {
+    const tiers = {};
+    if (!sourceDataUrl) return tiers;
+    for (const dim of window.FLOOR_DRAWING_TIER_DIMS) {
+        tiers[String(dim)] = await window.resizeDataUrlToMaxDim(sourceDataUrl, dim);
+    }
+    return tiers;
+};
+
+/** PDF dataURL → 지정 해상도 PNG (업로드 후 줌 LOD용) */
+window.renderPdfDataUrlToImage = function(pdfDataUrl, targetLongSide = 16000, maxDataUrlBytes = 2500000) {
+    return new Promise((resolve, reject) => {
+        if (typeof pdfjsLib === 'undefined') {
+            reject(new Error('PDF 렌더링 라이브러리를 불러오지 못했습니다.'));
+            return;
+        }
+        const bytes = (typeof window.dataUrlToUint8Array === 'function')
+            ? window.dataUrlToUint8Array(pdfDataUrl)
+            : (() => {
+                const base64 = String(pdfDataUrl || '').split(',')[1];
+                if (!base64) return null;
+                const bin = atob(base64);
+                const arr = new Uint8Array(bin.length);
+                for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+                return arr;
+            })();
+        if (!bytes) {
+            reject(new Error('PDF dataURL 변환 실패'));
+            return;
+        }
+        pdfjsLib.getDocument({ data: bytes }).promise.then(async (pdf) => {
+            try {
+                const page = await pdf.getPage(1);
+                const baseViewport = page.getViewport({ scale: 1 });
+                let scale = targetLongSide / Math.max(baseViewport.width, baseViewport.height);
+                scale = Math.min(Math.max(scale, 1), 16);
+
+                let dataUrl = await renderPdfPageToDataUrl(page, scale);
+                let attempts = 0;
+                while (dataUrl && dataUrl.length > maxDataUrlBytes && attempts < 4) {
+                    scale *= 0.75;
+                    dataUrl = await renderPdfPageToDataUrl(page, scale);
+                    attempts++;
+                }
+                resolve(dataUrl);
+            } catch (err) {
+                reject(err);
+            }
+        }).catch(reject);
+    });
+};
+
+/**
+ * 줌·뷰포트 기준 필요한 도면 티어 선택 (히스테리시스로 잦은 교체 방지)
+ */
+window.pickFloorDrawingTierDim = function(viewScale, cssW, cssH, dpr, currentTier) {
+    const needed = (Math.max(cssW || 1, cssH || 1) / Math.max(viewScale || 1, 0.05)) * (dpr || 1);
+    const cur = currentTier || 4000;
+    if (cur === 4000) {
+        if (needed >= 6500) return 8000;
+        return 4000;
+    }
+    if (cur === 8000) {
+        if (needed >= 13000) return 16000;
+        if (needed < 4500) return 4000;
+        return 8000;
+    }
+    if (needed < 4500) return 4000;
+    if (needed < 9000) return 8000;
+    return 16000;
+};
+
 window.renderPdfFileToImage = function(file, targetLongSide = 4200, maxDataUrlBytes = 950000) {
     return new Promise((resolve, reject) => {
         if (typeof pdfjsLib === 'undefined') {
