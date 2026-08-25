@@ -24159,12 +24159,6 @@ document.addEventListener('DOMContentLoaded', () => {
                     return;
                 }
                 if (!prev) sessionStorage.setItem(KEY, sha);
-                const remoteLabel = meta && meta.label;
-                const localLabel = window.BSA_APP_VERSION || '';
-                if (remoteLabel && localLabel && remoteLabel !== localLabel) {
-                    sessionStorage.setItem(KEY, sha);
-                    window.reloadWebAppFromServer();
-                }
             } catch (_) { /* offline */ }
         }
         document.addEventListener('visibilitychange', () => {
