@@ -5130,9 +5130,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // 밀어서 그린다. renderNdtDisplacementChartDataUrl(그래프 단독, PDF에서도 씀)과
     // renderNdtDisplacementCombinedCanvas(요약박스+그래프를 한 장으로, HWPX용) 둘 다 이 함수를 공유해서
     // 그래프를 그리는 코드가 두 군데로 갈라지지 않게 한다.
-    function drawNdtDisplacementChartBody(ctx, group, floorCode, yOffset) {
-        const cw = 900;
-        const ch = 620;
+    function drawNdtDisplacementChartBody(ctx, group, floorCode, yOffset, cw = 900, ch = 620) {
         const floorLabel = (typeof window.getFloorLabelFromCode === 'function') ? window.getFloorLabelFromCode(floorCode) : (floorCode || '');
         const chartColor = group.color || getStyleColor(group.category === '부재변위' ? 'ndtMemberDisp' : 'ndtSettlement');
         const catLabel = group.category === '부재변위' ? '부재변위(처짐)' : '부동침하 기울기';
@@ -5295,7 +5293,9 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             cols.push({ label: `변위평가\n(L=${lengthMmText})`, value: calc.tiltRatio || '-' });
 
-            const W = 900, BOX_H = 110, CHART_H = 620;
+            // W:H가 보고서에 삽입될 때 쓰는 박스(42520 x 27000, insertGroupResultImages의 maxW/maxH)와
+            // 같은 비율이어야 높이 제한에 걸려 폭이 줄어들지 않고 보고서 폭에 꽉 차게 나온다(사용자 요청).
+            const W = 1150, BOX_H = 110, CHART_H = 620;
             const H = BOX_H + CHART_H;
             const canvas = document.createElement('canvas');
             canvas.width = W;
@@ -5338,7 +5338,7 @@ document.addEventListener('DOMContentLoaded', () => {
             ctx.moveTo(0, BOX_H);
             ctx.lineTo(W, BOX_H);
             ctx.stroke();
-            drawNdtDisplacementChartBody(ctx, group, floorCode, BOX_H);
+            drawNdtDisplacementChartBody(ctx, group, floorCode, BOX_H, W, CHART_H);
 
             // 박스+그래프 전체를 한 번에 둘러싸는 테두리 — 박스 따로/그래프 따로 선이 어긋나 보이지
             // 않도록 맨 마지막에 통째로 한 번만 그린다.
@@ -19881,6 +19881,8 @@ document.addEventListener('DOMContentLoaded', () => {
                             if (addr) addr.setAttribute('rowAddr', String(rowAddr));
                         });
                     };
+                    // 다른 NDT 표(fillNdtTable)와 동일하게 fillCellParas를 써서, 칸이 좁아 글자가 안
+                    // 들어가면 한글이 자간을 줄여 우겨넣는 대신 다음 줄로 내려가게 한다(wrapHwpxCellText).
                     const setCellText = (row, colAddr, text) => {
                         const tc = Array.from(row.getElementsByTagNameNS(HP_NS, 'tc')).find(t => {
                             const addr = t.getElementsByTagNameNS(HP_NS, 'cellAddr')[0];
@@ -19890,8 +19892,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         const subList = tc.getElementsByTagNameNS(HP_NS, 'subList')[0];
                         const paras = subList ? Array.from(subList.getElementsByTagNameNS(HP_NS, 'p')).filter(p => p.parentNode === subList) : [];
                         if (paras.length === 0) return;
-                        ensureCellTextNode(paras[0]).textContent = text;
-                        for (let i = paras.length - 1; i >= 1; i--) subList.removeChild(paras[i]);
+                        fillCellParas(subList, paras, text);
                     };
                     const applyBorder = (row, styleMap) => {
                         Array.from(row.getElementsByTagNameNS(HP_NS, 'tc')).forEach(tc => {
