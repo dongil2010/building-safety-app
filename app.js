@@ -21124,25 +21124,39 @@ document.addEventListener('DOMContentLoaded', () => {
                             .forEach(p => { if (p && p.parentNode) p.parentNode.removeChild(p); });
 
                         if (mapStart) {
-                            // 표 캡션([표 7-1] 등)과 같은 스타일(paraPrIDRef=3/styleIDRef=13, charPrIDRef=42
-                            // = 굴림체 좁은 폭 폰트)로 소제목 문단을 새로 만든다 — 원래 이 구간의 소제목들이
-                            // 쓰던 굴림(넓은 폭) 폰트는 텍스트가 길면 두 줄로 밀려서 일부러 피했다.
-                            const makeHeadingPara = (label) => {
-                                const xml = `<hp:p id="0" paraPrIDRef="3" styleIDRef="13" pageBreak="1" columnBreak="0" merged="0"><hp:run charPrIDRef="42"><hp:t>${label}</hp:t></hp:run><hp:linesegarray><hp:lineseg textpos="0" vertpos="0" vertsize="1300" textheight="1300" baseline="1105" spacing="1560" horzpos="0" horzsize="42520" flags="2490368"/></hp:linesegarray></hp:p>`;
-                                const doc = new DOMParser().parseFromString(`<root xmlns:hp="${HP_NS}">${xml}</root>`, 'application/xml');
-                                return xmlDoc.importNode(doc.documentElement.firstChild, true);
-                            };
+                            // 결함위치도(fillLocationMapForFloor)와 똑같이 표(2행짜리: 위=그림칸,
+                            // 아래=캡션칸) 안에 그림을 넣는다 — 헤딩 문단 따로 + 그림 따로가 아니라
+                            // 표 하나가 그림+캡션을 같이 들고 있어서 테두리가 있고 칸을 꽉 채운다.
+                            // XML은 실제 결함위치도 표(id=1122472099)를 그대로 본떴다.
+                            const LOC_MAP_TBL_PARA_XML = '<hp:p id="0" paraPrIDRef="13" styleIDRef="0" pageBreak="1" columnBreak="0" merged="0"><hp:run charPrIDRef="53"><hp:tbl id="TBL_ID" zOrder="11" numberingType="TABLE" textWrap="TOP_AND_BOTTOM" textFlow="BOTH_SIDES" lock="0" dropcapstyle="None" pageBreak="NONE" repeatHeader="1" rowCnt="2" colCnt="1" cellSpacing="0" borderFillIDRef="5" noAdjust="0"><hp:sz width="41821" widthRelTo="ABSOLUTE" height="64087" heightRelTo="ABSOLUTE" protect="0"/><hp:pos treatAsChar="1" affectLSpacing="0" flowWithText="1" allowOverlap="0" holdAnchorAndSO="0" vertRelTo="PARA" horzRelTo="COLUMN" vertAlign="TOP" horzAlign="LEFT" vertOffset="0" horzOffset="0"/><hp:outMargin left="140" right="140" top="140" bottom="140"/><hp:inMargin left="140" right="140" top="140" bottom="140"/><hp:tr><hp:tc name="" header="0" hasMargin="0" protect="0" editable="0" dirty="0" borderFillIDRef="15"><hp:subList id="" textDirection="HORIZONTAL" lineWrap="BREAK" vertAlign="CENTER" linkListIDRef="0" linkListNextIDRef="0" textWidth="0" textHeight="0" hasTextRef="0" hasNumRef="0"><hp:p id="2147483648" paraPrIDRef="4" styleIDRef="0" pageBreak="0" columnBreak="0" merged="0"><hp:run charPrIDRef="6"><hp:pic id="PIC_ID" zOrder="36" numberingType="PICTURE" textWrap="TOP_AND_BOTTOM" textFlow="BOTH_SIDES" lock="0" dropcapstyle="None" thumbnailBinIDRef="" href="" groupLevel="0" instid="PIC_INSTID" reverse="0"><hp:offset x="0" y="0"/><hp:orgSz width="768540" height="969540"/><hp:curSz width="41541" height="52405"/><hp:flip horizontal="0" vertical="0"/><hp:rotationInfo angle="0" centerX="20770" centerY="26202" rotateimage="1"/><hp:renderingInfo><hc:transMatrix e1="1" e2="0" e3="0" e4="0" e5="1" e6="0"/><hc:scaMatrix e1="0.054052" e2="0" e3="0" e4="0" e5="0.054051" e6="0"/><hc:rotMatrix e1="1" e2="0" e3="0" e4="0" e5="1" e6="0"/></hp:renderingInfo><hc:img binaryItemIDRef="" bright="0" contrast="0" effect="REAL_PIC" alpha="0"/><hp:imgRect><hc:pt0 x="0" y="0"/><hc:pt1 x="768540" y="0"/><hc:pt2 x="768540" y="969540"/><hc:pt3 x="0" y="969540"/></hp:imgRect><hp:imgClip left="0" right="648540" top="0" bottom="818100"/><hp:inMargin left="0" right="0" top="0" bottom="0"/><hp:imgDim dimwidth="648540" dimheight="818100"/><hp:effects/><hp:sz width="41541" widthRelTo="ABSOLUTE" height="52405" heightRelTo="ABSOLUTE" protect="0"/><hp:pos treatAsChar="0" affectLSpacing="0" flowWithText="1" allowOverlap="0" holdAnchorAndSO="0" vertRelTo="PARA" horzRelTo="COLUMN" vertAlign="TOP" horzAlign="LEFT" vertOffset="0" horzOffset="0"/><hp:outMargin left="0" right="0" top="0" bottom="0"/></hp:pic><hp:t/></hp:run><hp:linesegarray><hp:lineseg textpos="0" vertpos="0" vertsize="1100" textheight="1100" baseline="935" spacing="1320" horzpos="0" horzsize="0" flags="393216"/></hp:linesegarray></hp:p></hp:subList><hp:cellAddr colAddr="0" rowAddr="0"/><hp:cellSpan colSpan="1" rowSpan="1"/><hp:cellSz width="41821" height="60813"/><hp:cellMargin left="141" right="141" top="141" bottom="141"/></hp:tc></hp:tr><hp:tr><hp:tc name="" header="0" hasMargin="0" protect="0" editable="0" dirty="0" borderFillIDRef="16"><hp:subList id="" textDirection="HORIZONTAL" lineWrap="BREAK" vertAlign="CENTER" linkListIDRef="0" linkListNextIDRef="0" textWidth="0" textHeight="0" hasTextRef="0" hasNumRef="0"><hp:p id="2147483648" paraPrIDRef="1" styleIDRef="16" pageBreak="0" columnBreak="0" merged="0"><hp:run charPrIDRef="43"><hp:t>CAPTION</hp:t></hp:run><hp:linesegarray><hp:lineseg textpos="0" vertpos="0" vertsize="1000" textheight="1000" baseline="850" spacing="600" horzpos="0" horzsize="41540" flags="393216"/></hp:linesegarray></hp:p></hp:subList><hp:cellAddr colAddr="0" rowAddr="1"/><hp:cellSpan colSpan="1" rowSpan="1"/><hp:cellSz width="41821" height="3274"/><hp:cellMargin left="141" right="141" top="141" bottom="141"/></hp:tc></hp:tr></hp:tbl><hp:t/></hp:run><hp:linesegarray><hp:lineseg textpos="0" vertpos="0" vertsize="64367" textheight="64367" baseline="54712" spacing="960" horzpos="0" horzsize="42520" flags="393216"/></hp:linesegarray></hp:p>';
+                            // 표 칸(cellSz) - 안쪽 여백(cellMargin) = 그림이 실제로 채울 수 있는 최대
+                            // 크기(fillLocationMapForFloor와 동일한 계산, 표를 고정 크기로 새로 만들기
+                            // 때문에 매번 다시 계산할 필요 없이 미리 값을 넣어둠).
+                            const LOC_MAP_MAX_W = 41821 - 141 - 141;
+                            const LOC_MAP_MAX_H = 60813 - 141 - 141;
 
                             let mapAnchor = mapStart;
                             const appendLocationMap = async (label, category, imgIdPrefix) => {
                                 const mapDataUrl = renderNdtFloorPlanCanvasDataUrl(floorCode, category);
                                 if (!mapDataUrl) return;
-                                const headingPara = makeHeadingPara(label);
-                                mapAnchor.parentNode.insertBefore(headingPara, mapAnchor.nextSibling);
-                                mapAnchor = headingPara;
-                                // 기존 "비파괴 장비조사 위치도" 그림(강도/탄산화용) placeholder의 curSz(41824 x
-                                // 52763, 거의 페이지 전체 크기)와 같은 크기로 맞춘다.
-                                mapAnchor = await insertImageParaAfter(mapAnchor, mapDataUrl, imgIdPrefix, 41824, 52763);
+                                imgCounter++;
+                                const xml = LOC_MAP_TBL_PARA_XML
+                                    .replace('TBL_ID', String(8600000 + imgCounter))
+                                    .replace('PIC_ID', String(8700000 + imgCounter))
+                                    .replace('PIC_INSTID', String(8800000 + imgCounter))
+                                    .replace('CAPTION', label);
+                                const doc = new DOMParser().parseFromString(`<root xmlns:hp="${HP_NS}" xmlns:hc="${HC_NS}">${xml}</root>`, 'application/xml');
+                                const newPara = xmlDoc.importNode(doc.documentElement.firstChild, true);
+                                mapAnchor.parentNode.insertBefore(newPara, mapAnchor.nextSibling);
+                                mapAnchor = newPara;
+
+                                const pic = newPara.getElementsByTagNameNS(HP_NS, 'pic')[0];
+                                const { bytes, mime, ext } = dataUrlToBytes(mapDataUrl);
+                                const size = await loadImageSize(mapDataUrl);
+                                const imgId = `${imgIdPrefix}${imgCounter}`;
+                                zip.file(`BinData/${imgId}.${ext}`, bytes);
+                                manifestAdds.push(`<opf:item id="${imgId}" href="BinData/${imgId}.${ext}" media-type="${mime}" isEmbeded="1"/>`);
+                                setPicImage(pic, imgId, size.w, size.h, LOC_MAP_MAX_W, LOC_MAP_MAX_H);
                             };
 
                             if (measureItemsHwpx.length > 0) {
