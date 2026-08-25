@@ -234,8 +234,12 @@ function withPdfRenderDedupe(key, fn) {
  * 캐드(CAD)에서 내보낸 PDF 도면을 pdf.js로 첫 페이지 고해상도 렌더링 (벡터 원본 기반이라 글씨/선이 뭉개지지 않음)
  * Firestore 문서 용량(1MB) 여유를 위해 결과가 너무 크면 스케일을 낮춰 재시도
  */
-/** 도면 LOD 해상도 단계 (긴 변 기준 픽셀) */
-window.FLOOR_DRAWING_TIER_DIMS = [4000, 8000, 16000];
+/** 도면 LOD 해상도 단계 (긴 변 기준 픽셀) — 표시용 3구간 */
+window.FLOOR_DRAWING_TIER_DIMS = [2000, 4000, 8000];
+
+window.getFloorDrawingBaseTierDim = function() {
+    return (window.FLOOR_DRAWING_TIER_DIMS && window.FLOOR_DRAWING_TIER_DIMS[0]) || 2000;
+};
 
 /**
  * 최소~최대 확대 비율(zoomVsFit) 구간을 3등분해 해당 티어 해상도 반환
@@ -248,7 +252,7 @@ window.getFloorDrawingTierDimForZoomVsFit = function(zoomVsFit, opts) {
     const max = Math.max(Number(options.maxZoomVsFit) || 50, min + 0.01);
     const z = Math.max(min, Math.min(max, Number(zoomVsFit) || min));
     const span = max - min;
-    const dims = window.FLOOR_DRAWING_TIER_DIMS || [4000, 8000, 16000];
+    const dims = window.FLOOR_DRAWING_TIER_DIMS || [2000, 4000, 8000];
     if (z < min + span / 3) return dims[0];
     if (z < min + (2 * span) / 3) return dims[1];
     return dims[2];
@@ -381,7 +385,7 @@ window.pickFloorDrawingTierDim = function(viewScale, cssW, cssH, dpr, currentTie
             maxZoomVsFit: range.max
         });
     }
-    return window.FLOOR_DRAWING_TIER_DIMS[0] || 4000;
+    return window.FLOOR_DRAWING_TIER_DIMS[0] || 2000;
 };
 
 window.renderPdfFileToImage = function(file, targetLongSide = 4200, maxDataUrlBytes = 950000) {

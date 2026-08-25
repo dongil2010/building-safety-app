@@ -12,7 +12,7 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <meta name="apple-mobile-web-app-title" content="스마트 안전점검">
-    <link rel="stylesheet" href="styles.css?v=20260826_tier3">
+    <link rel="stylesheet" href="styles.css?v=20260826_halfres">
     <!-- FontAwesome icons for clean engineering UI -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <!-- PDF 생성용: 페이지별로 직접 캡처해서 조립(큰 보고서에서 html2pdf 한방 렌더링이 캔버스 높이 한계로
@@ -230,7 +230,6 @@
                         </label>
                         <label style="display:flex; align-items:center; gap:0.4rem; font-size:0.78rem; white-space:nowrap;">📍 핀(박스) 크기 <input type="range" id="stylePinSizeAll" min="0.5" max="4.4" step="0.1" value="1.0" style="width:110px;" disabled> <span id="stylePinSizeAllLabel" style="font-weight:700; min-width:34px; display:inline-block; text-align:right;">100%</span></label>
                         <label style="display:flex; align-items:center; gap:0.4rem; font-size:0.78rem; white-space:nowrap;">➔ 화살표 크기 <input type="range" id="styleArrowSizeAll" min="0.5" max="5.0" step="0.1" value="1.0" style="width:110px;" disabled> <span id="styleArrowSizeAllLabel" style="font-weight:700; min-width:34px; display:inline-block; text-align:right;">100%</span></label>
-                        <label style="display:flex; align-items:center; gap:0.4rem; font-size:0.78rem; white-space:nowrap;" title="8000/16000px·HD 패치 시 도면·마킹 선이 얇아 보일 때 조절">🔍 HD 선 굵기 <input type="range" id="styleMapHdLineBoost" min="0.5" max="2.5" step="0.05" value="1.0" style="width:110px;" disabled> <span id="styleMapHdLineBoostLabel" style="font-weight:700; min-width:34px; display:inline-block; text-align:right;">100%</span></label>
                         <label style="display:flex; align-items:center; gap:0.4rem; font-size:0.78rem; white-space:nowrap;">〰 연결선·테두리 굵기 <input type="range" id="styleLeaderLineScaleAll" min="0.5" max="5.0" step="0.1" value="1.0" style="width:110px;" disabled> <span id="styleLeaderLineScaleAllLabel" style="font-weight:700; min-width:34px; display:inline-block; text-align:right;">100%</span></label>
                         <button type="button" id="btnApplyMapStyleAllFloors" class="chip map-style-all-floors-btn" title="지금 층의 핀·화살표·연결선 설정을 이 건물 전체 층에 복사">전체층 적용</button>
                     </div>
@@ -1896,96 +1895,116 @@
 
     <!-- MODAL: Building Information Edit & Floor Drawing Re-upload Modal -->
     <div class="modal-overlay" id="editBuildingModal">
-        <div class="modal-card" style="max-width: 640px; width: 94%; background: #ffffff; border: 1px solid #d0d0d0; box-shadow: 0 20px 50px rgba(15,23,42,0.15);">
-            <div class="modal-header" style="background: #fafafa; padding: 1rem 1.5rem; border-bottom: 1px solid #e5e5e5;">
-                <h3 style="color: #2a2a2a; margin:0; font-size: 1.1rem; font-weight: 800;"><i class="fa-solid fa-pen-to-square"></i> ✏️ 건축물 명칭 수정 & 층별 도면 추가/교체</h3>
-                <button type="button" class="modal-close" id="btnCloseEditBuildingModal" style="color: #737373;">&times;</button>
+        <div class="modal-card edit-building-modal">
+            <div class="modal-header edit-building-header">
+                <h3><i class="fa-solid fa-pen-to-square"></i> 건축물 명칭 수정 & 층별 도면 추가/교체</h3>
+                <button type="button" class="modal-close" id="btnCloseEditBuildingModal">&times;</button>
             </div>
-            <div class="modal-body" style="display: flex; flex-direction: column; gap: 1rem; max-height: 75vh; overflow-y: auto; padding: 1.2rem; background: #ffffff;">
+            <div class="modal-body edit-building-body">
                 <input type="hidden" id="inputEditBuildingId">
-                <div class="form-group">
-                    <label class="form-label" style="font-weight: 700; color: #3f3f3f;">🏢 건축물 명칭 *</label>
-                    <input type="text" id="inputEditBuildingName" class="form-control" placeholder="예: 강남 테헤란 타워 A동">
-                </div>
-                <div class="form-group">
-                    <label class="form-label" style="font-weight: 700; color: #3f3f3f;">📍 소재지 주소</label>
-                    <input type="text" id="inputEditBuildingAddress" class="form-control" placeholder="예: 서울특별시 강남구 테헤란로 123">
-                </div>
-                <div class="form-row" style="display:flex; gap:0.8rem;">
-                    <div class="form-group" style="flex:1;">
-                        <label class="form-label" style="font-weight: 700; color: #3f3f3f;">🏢 규모 및 층수</label>
-                        <input type="text" id="inputEditBuildingFloors" class="form-control" placeholder="예: 지상 15층 ~ 지하 3층">
-                    </div>
-                    <div class="form-group" style="flex:1;">
-                        <label class="form-label" style="font-weight: 700; color: #3f3f3f;">📅 점검 일시</label>
-                        <input type="date" id="inputEditBuildingDate" class="form-control">
-                    </div>
-                </div>
-                <div class="form-row" style="display:flex; gap:0.8rem;">
-                    <div class="form-group" style="flex:1;">
-                        <label class="form-label" style="font-weight: 700; color: #3f3f3f;">🏗️ 주구조</label>
-                        <input type="text" id="inputEditBuildingStructureType" class="form-control" list="editStructureTypeOptions" placeholder="예: RC, SRC, 철골구조">
-                        <datalist id="editStructureTypeOptions">
-                            <option value="RC(철근콘크리트조)">
-                            <option value="SRC(철골철근콘크리트조)">
-                            <option value="철골구조(S조)">
-                            <option value="조적조">
-                            <option value="목구조">
-                        </datalist>
-                    </div>
-                    <div class="form-group" style="flex:1;">
-                        <label class="form-label" style="font-weight: 700; color: #3f3f3f;">🏷️ 시설물 종별</label>
-                        <select id="inputEditBuildingFacilityGrade" class="form-control">
-                            <option value="">미지정</option>
-                            <option value="제1종시설물">제1종시설물</option>
-                            <option value="제2종시설물">제2종시설물</option>
-                            <option value="제3종시설물">제3종시설물</option>
-                        </select>
-                    </div>
-                    <div class="form-group" style="flex:1;">
-                        <label class="form-label" style="font-weight: 700; color: #3f3f3f;">🗓️ 준공일 (콘크리트 재령 계산용)</label>
-                        <input type="date" id="inputEditBuildingCompletionDate" class="form-control">
-                    </div>
-                </div>
-                <div class="form-row" style="display:flex; gap:0.8rem;">
-                    <div class="form-group" style="flex:1;">
-                        <label class="form-label" style="font-weight: 700; color: #3f3f3f;">📋 점검 종류</label>
-                        <select id="inputEditBuildingInspectionType" class="form-control">
-                            <option value="정밀안전점검">정밀안전점검</option>
-                            <option value="정기안전점검">정기안전점검</option>
-                            <option value="정밀안전진단">정밀안전진단</option>
-                        </select>
-                    </div>
-                    <div class="form-group" style="flex:1;">
-                        <label class="form-label" style="font-weight: 700; color: #3f3f3f;">📅 점검 년도</label>
-                        <select id="inputEditBuildingInspectionYear" class="form-control">
-                            <option value="2026년">2026년</option>
-                            <option value="2025년">2025년</option>
-                            <option value="2027년">2027년</option>
-                            <option value="2028년">2028년</option>
-                        </select>
-                    </div>
-                    <div class="form-group" style="flex:1;">
-                        <label class="form-label" style="font-weight: 700; color: #3f3f3f;">🗓️ 상/하반기</label>
-                        <select id="inputEditBuildingInspectionPeriod" class="form-control">
-                            <option value="하반기">하반기</option>
-                            <option value="상반기">상반기</option>
-                            <option value="수시점검">수시점검</option>
-                        </select>
-                    </div>
-                </div>
-                <div class="form-group">
-                    <label class="form-label" style="font-weight: 700; color: #3f3f3f;">📝 비고 / 특이사항</label>
-                    <textarea id="inputEditBuildingNotes" class="form-control" rows="2" placeholder="건물 특이사항이나 주요 요청 사항 입력"></textarea>
-                </div>
 
-                <div class="edit-next-round-section" style="background: rgba(59,130,246,0.08); border: 1px solid rgba(59,130,246,0.35); border-radius: 10px; padding: 1rem 1.1rem; margin-bottom: 1rem;">
-                    <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:0.8rem; flex-wrap:wrap;">
+                <section class="add-building-section">
+                    <div class="add-section-head">
+                        <span class="add-section-icon"><i class="fa-solid fa-building"></i></span>
                         <div>
-                            <h4 style="font-size:0.95rem; font-weight:800; color:#1d4ed8; margin:0 0 0.35rem;"><i class="fa-solid fa-forward"></i> 다음 회차 점검 시작</h4>
-                            <p style="font-size:0.78rem; color:#475569; margin:0; line-height:1.45;">새 점검 현장(새 ID)을 만들고 결함을 「전회차」로 넘깁니다. PDF 도면은 현장명 보관함에 남아 같은 이름의 차기 점검에서도 재사용됩니다. 기존 점검 기록은 그대로 유지됩니다.</p>
+                            <h4 class="add-section-title">기본 정보</h4>
+                            <p class="add-section-desc">건축물 식별 정보와 규모를 수정합니다.</p>
                         </div>
-                        <button type="button" class="btn btn-primary btn-sm" id="btnStartNextInspectionRound" style="white-space:nowrap; background: linear-gradient(135deg, #2563eb, #1d4ed8);">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label" for="inputEditBuildingName">건축물 명칭 <span class="req-mark">*</span></label>
+                        <input type="text" id="inputEditBuildingName" class="form-control" placeholder="예: 강남 테헤란 타워 A동">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label" for="inputEditBuildingAddress">소재지 주소</label>
+                        <input type="text" id="inputEditBuildingAddress" class="form-control" placeholder="예: 서울특별시 강남구 테헤란로 123">
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group flex-1">
+                            <label class="form-label" for="inputEditBuildingFloors">규모 및 층수</label>
+                            <input type="text" id="inputEditBuildingFloors" class="form-control" placeholder="예: 지상 15층 ~ 지하 3층">
+                        </div>
+                        <div class="form-group flex-1">
+                            <label class="form-label" for="inputEditBuildingDate">점검 일시</label>
+                            <input type="date" id="inputEditBuildingDate" class="form-control">
+                        </div>
+                    </div>
+                    <div class="form-row add-building-row-3">
+                        <div class="form-group flex-1">
+                            <label class="form-label" for="inputEditBuildingStructureType">주구조</label>
+                            <input type="text" id="inputEditBuildingStructureType" class="form-control" list="editStructureTypeOptions" placeholder="예: RC, SRC, 철골구조">
+                            <datalist id="editStructureTypeOptions">
+                                <option value="RC(철근콘크리트조)">
+                                <option value="SRC(철골철근콘크리트조)">
+                                <option value="철골구조(S조)">
+                                <option value="조적조">
+                                <option value="목구조">
+                            </datalist>
+                        </div>
+                        <div class="form-group flex-1">
+                            <label class="form-label" for="inputEditBuildingFacilityGrade">시설물 종별</label>
+                            <select id="inputEditBuildingFacilityGrade" class="form-control">
+                                <option value="">미지정</option>
+                                <option value="제1종시설물">제1종시설물</option>
+                                <option value="제2종시설물">제2종시설물</option>
+                                <option value="제3종시설물">제3종시설물</option>
+                            </select>
+                        </div>
+                        <div class="form-group flex-1">
+                            <label class="form-label" for="inputEditBuildingCompletionDate">준공일</label>
+                            <input type="date" id="inputEditBuildingCompletionDate" class="form-control" title="콘크리트 재령 계산용">
+                        </div>
+                    </div>
+                </section>
+
+                <section class="add-building-section">
+                    <div class="add-section-head">
+                        <span class="add-section-icon"><i class="fa-solid fa-clipboard-check"></i></span>
+                        <div>
+                            <h4 class="add-section-title">점검 정보</h4>
+                            <p class="add-section-desc">점검 종류·회차와 특이사항을 수정합니다.</p>
+                        </div>
+                    </div>
+                    <div class="form-row add-building-row-3">
+                        <div class="form-group flex-1">
+                            <label class="form-label" for="inputEditBuildingInspectionType">점검 종류</label>
+                            <select id="inputEditBuildingInspectionType" class="form-control">
+                                <option value="정밀안전점검">정밀안전점검</option>
+                                <option value="정기안전점검">정기안전점검</option>
+                                <option value="정밀안전진단">정밀안전진단</option>
+                            </select>
+                        </div>
+                        <div class="form-group flex-1">
+                            <label class="form-label" for="inputEditBuildingInspectionYear">점검 년도</label>
+                            <select id="inputEditBuildingInspectionYear" class="form-control">
+                                <option value="2026년">2026년</option>
+                                <option value="2025년">2025년</option>
+                                <option value="2027년">2027년</option>
+                                <option value="2028년">2028년</option>
+                            </select>
+                        </div>
+                        <div class="form-group flex-1">
+                            <label class="form-label" for="inputEditBuildingInspectionPeriod">상/하반기</label>
+                            <select id="inputEditBuildingInspectionPeriod" class="form-control">
+                                <option value="하반기">하반기</option>
+                                <option value="상반기">상반기</option>
+                                <option value="수시점검">수시점검</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label" for="inputEditBuildingNotes">비고 / 특이사항</label>
+                        <textarea id="inputEditBuildingNotes" class="form-control" rows="2" placeholder="건물 특이사항이나 주요 요청 사항 입력"></textarea>
+                    </div>
+                </section>
+
+                <div class="edit-next-round-section">
+                    <div class="edit-next-round-head">
+                        <div>
+                            <h4 class="edit-next-round-title"><i class="fa-solid fa-forward"></i> 다음 회차 점검 시작</h4>
+                            <p class="edit-next-round-desc">새 점검 현장(새 ID)을 만들고 결함을 「전회차」로 넘깁니다. PDF 도면은 현장명 보관함에 남아 같은 이름의 차기 점검에서도 재사용됩니다. 기존 점검 기록은 그대로 유지됩니다.</p>
+                        </div>
+                        <button type="button" class="btn btn-primary btn-sm edit-next-round-btn" id="btnStartNextInspectionRound">
                             <i class="fa-solid fa-calendar-plus"></i> 다음 회차 시작하기
                         </button>
                     </div>
@@ -2043,30 +2062,34 @@
                 </div>
                 
                 <!-- Floor Drawing Re-upload & Replace Section -->
-                <div class="form-group" style="background: #fafafa; padding: 1.2rem; border-radius: 10px; border: 1px dashed #2a2a2a;">
-                    <label class="form-label" style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 0.6rem;">
-                        <span style="color: #2a2a2a; font-weight: 800; font-size: 0.95rem;"><i class="fa-solid fa-file-arrow-up"></i> 🖼️ 층별 도면 추가 삽입 / 교체 (파일 선택)</span>
-                        <span class="text-muted" style="font-size:0.75rem;">(B2, 1F 등 파일명 자동인식 & 저층➡️고층 자동 정렬)</span>
-                    </label>
-                    <div style="display:flex; gap:0.5rem; flex-wrap:wrap;">
-                        <div style="flex:1; min-width:180px;">
-                            <label for="inputEditBuildingDrawings" class="text-muted" style="font-size:0.72rem; display:block; margin-bottom:0.2rem;">🖼️ 사진/이미지 파일</label>
-                            <input type="file" id="inputEditBuildingDrawings" multiple accept="image/*" class="form-control" style="background:#ffffff; border:1px solid #d0d0d0;">
-                        </div>
-                        <div style="flex:1; min-width:180px;">
-                            <label for="inputEditBuildingDrawingsPdf" class="text-muted" style="font-size:0.72rem; display:block; margin-bottom:0.2rem;">📄 캐드 PDF 파일 (사진 폴더에 안 보이면 여기서 선택)</label>
-                            <input type="file" id="inputEditBuildingDrawingsPdf" multiple accept="application/pdf,.pdf" class="form-control" style="background:#ffffff; border:1px solid #d0d0d0;">
+                <section class="add-building-section add-building-upload-section">
+                    <div class="add-section-head">
+                        <span class="add-section-icon"><i class="fa-solid fa-file-arrow-up"></i></span>
+                        <div>
+                            <h4 class="add-section-title">층별 도면 추가 / 교체</h4>
+                            <p class="add-section-desc">B2, 1F 등 파일명 자동인식 · 저층➡️고층 자동 정렬</p>
                         </div>
                     </div>
-
-                    <div id="editDrawingSortPreview" style="margin-top: 0.8rem; display: flex; flex-direction: column; gap: 0.5rem;"></div>
-                </div>
+                    <div class="add-drawing-dropzone">
+                        <div class="add-drawing-inputs">
+                            <div class="edit-drawing-file-field">
+                                <label for="inputEditBuildingDrawings" class="edit-drawing-file-label">🖼️ 사진/이미지 파일</label>
+                                <input type="file" id="inputEditBuildingDrawings" multiple accept="image/*" class="form-control edit-drawing-file-input">
+                            </div>
+                            <div class="edit-drawing-file-field">
+                                <label for="inputEditBuildingDrawingsPdf" class="edit-drawing-file-label">📄 캐드 PDF 파일</label>
+                                <input type="file" id="inputEditBuildingDrawingsPdf" multiple accept="application/pdf,.pdf" class="form-control edit-drawing-file-input">
+                            </div>
+                        </div>
+                        <div id="editDrawingSortPreview" class="add-drawing-preview"></div>
+                    </div>
+                </section>
             </div>
-            <div class="modal-footer" style="justify-content: space-between; gap: 0.6rem; background: #fafafa; border-top:1px solid #e5e5e5; padding: 1rem 1.2rem;">
-                <button type="button" class="btn btn-outline" id="btnDeleteBuilding" style="border-color: #ef4444; color: #ef4444;"><i class="fa-solid fa-trash"></i> 🗑️ 건물 삭제</button>
-                <div style="display: flex; gap: 0.5rem;">
+            <div class="modal-footer edit-building-footer">
+                <button type="button" class="btn btn-outline btn-delete-building" id="btnDeleteBuilding"><i class="fa-solid fa-trash"></i> 건물 삭제</button>
+                <div class="edit-building-footer-actions">
                     <button type="button" class="btn btn-outline" id="btnCancelEditBuilding">취소</button>
-                    <button type="button" class="btn btn-primary" id="btnSaveEditBuilding" style="background: linear-gradient(135deg, #2a2a2a, #1f1f1f); font-weight: 700;"><i class="fa-solid fa-check"></i> 💾 수정사항 및 도면 저장</button>
+                    <button type="button" class="btn btn-primary" id="btnSaveEditBuilding"><i class="fa-solid fa-check"></i> 수정사항 및 도면 저장</button>
                 </div>
             </div>
         </div>
@@ -2312,7 +2335,7 @@
     </div>
 
     <!-- Core → 탭 분류 → 기존 엔진(app.js) -->
-    <script src="js/core/state.js?v=20260826_tier3"></script>
+    <script src="js/core/state.js?v=20260826_halfres"></script>
     <script src="js/pdf-vector-bridge.js?v=20260826_pdfcloud"></script>
     <script src="js/tabs/registry.js?v=20260821_land1"></script>
     <script src="js/tabs/home.js?v=20260824_webview"></script>
@@ -2322,7 +2345,7 @@
     <script src="js/shared/report.js?v=20260824_hwpxFix"></script>
     <script src="js/shared/hwpx-import.js?v=20260825_hwpxin"></script>
     <script src="js/shared/auth.js?v=20260821_land1"></script>
-    <script src="app.js?v=20260826_tier3"></script>
+    <script src="app.js?v=20260826_halfres"></script>
     <script>
         window.BSA_APP_VERSION = '20260826_pdfcloud';
         (function () {

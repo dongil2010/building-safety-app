@@ -330,7 +330,9 @@ document.addEventListener('DOMContentLoaded', () => {
     const _idbPendingTierKeys = new Set();
     const _idbPendingSourceKeys = new Set();
     let _idbSaveFailedNotified = false;
-    let floorDrawingActiveTierDim = 4000;
+    let floorDrawingActiveTierDim = (typeof window.getFloorDrawingBaseTierDim === 'function')
+        ? window.getFloorDrawingBaseTierDim()
+        : 2000;
     let floorDrawingTierLoadToken = 0;
     let floorDrawingTierSyncTimer = null;
     const _floorTierPrefetchInFlight = new Set();
@@ -412,11 +414,11 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function getViewportPatchPixelBudget(mobile) {
-        if (!mobile) return 16000;
+        if (!mobile) return 8000;
         return getMobileZoomTierDim(floorDrawingActiveTierDim);
     }
 
-    /** 모바일 GPU 캔버스 한 변 상한 — 400%/800%/2000%에서 4000·8000·16000 허용 */
+    /** 모바일 GPU 캔버스 한 변 상한 */
     function getViewportPatchMaxSide(mobile) {
         if (!mobile) return 16384;
         return Math.max(4096, getMobileZoomTierDim(floorDrawingActiveTierDim));
@@ -663,31 +665,19 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function drawFloorPlanLayers(ctx, imgW, imgH) {
-        const drawPlanImageWithLineBoost = (img, x, y, w, h, alpha) => {
+        const drawBg = (img, alpha) => {
             if (!img || alpha <= 0.001) return;
-            const thicken = getMapDrawingLineThickenFactor();
             ctx.save();
             ctx.globalAlpha = alpha;
-            ctx.drawImage(img, x, y, w, h);
-            if (thicken > 1.04) {
-                const px = Math.min(2.4, (thicken - 1) * 1.15);
-                ctx.globalCompositeOperation = 'darken';
-                ctx.globalAlpha = alpha * Math.min(0.52, 0.24 + (thicken - 1) * 0.22);
-                const offsets = [[px, 0], [-px, 0], [0, px], [0, -px], [px * 0.65, px * 0.65], [-px * 0.65, -px * 0.65]];
-                offsets.forEach(([ox, oy]) => {
-                    ctx.drawImage(img, x + ox, y + oy, w, h);
-                });
-            }
+            ctx.drawImage(img, 0, 0, imgW, imgH);
             ctx.restore();
-        };
-        const drawBg = (img, alpha) => {
-            drawPlanImageWithLineBoost(img, 0, 0, imgW, imgH, alpha);
         };
         const drawPatch = (patch, alpha) => {
             if (!patch || !patch.canvas || patch.w <= 0 || patch.h <= 0 || alpha <= 0.001) return;
             ctx.save();
             ctx.imageSmoothingEnabled = false;
-            drawPlanImageWithLineBoost(patch.canvas, patch.x, patch.y, patch.w, patch.h, alpha);
+            ctx.globalAlpha = alpha;
+            ctx.drawImage(patch.canvas, patch.x, patch.y, patch.w, patch.h);
             ctx.restore();
         };
 
@@ -1058,8 +1048,8 @@ document.addEventListener('DOMContentLoaded', () => {
         } catch (e) {
             console.warn('뷰포트 고해상도 패치 실패:', e);
             const fallbacks = mobile
-                ? [16000, 12000, 8192, 6144, 4096, 3072, 2048]
-                : [12000, 8192, 6144, 4096];
+                ? [8000, 6000, 4096, 3072, 2048]
+                : [6000, 4096, 3072];
             for (let fi = 0; fi < fallbacks.length; fi++) {
                 const cap = fallbacks[fi];
                 if (cap >= outLong) continue;
@@ -1265,7 +1255,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 styleColors: window.state.styleColors || null,
                 styleSizes: window.state.styleSizes || null,
                 defectLeaderLineScale: (window.state.defectLeaderLineScale !== undefined ? window.state.defectLeaderLineScale : 1.0),
-                mapHdLineBoost: (window.state.mapHdLineBoost !== undefined ? window.state.mapHdLineBoost : 1.0),
                 ndtLeaderLineScale: (window.state.ndtLeaderLineScale !== undefined ? window.state.ndtLeaderLineScale : 1.0),
                 styleSizeBarLockedMap: window.state.styleSizeBarLockedMap !== false,
                 styleSizeBarLockedNdt: window.state.styleSizeBarLockedNdt !== false,
@@ -1398,10 +1387,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (parsed.defectLeaderLineScale !== undefined) {
                     window.state.defectLeaderLineScale = parsed.defectLeaderLineScale;
                     window.state._globalDefectLeaderLineScaleFallback = parsed.defectLeaderLineScale;
-                }
-                if (parsed.mapHdLineBoost !== undefined) {
-                    window.state.mapHdLineBoost = parsed.mapHdLineBoost;
-                    window.state._globalMapHdLineBoostFallback = parsed.mapHdLineBoost;
                 }
                 if (parsed.ndtLeaderLineScale !== undefined) {
                     window.state.ndtLeaderLineScale = parsed.ndtLeaderLineScale;
@@ -4167,10 +4152,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 maxZoomVsFit: range.max
             });
         }
-        return 4000;
+        return 2000;
     }
 
-    /** 모바일·PC 공통 — 최소~최대 확대 구간 3등분 → 4000/8000/16000px */
+    /** 모바일·PC 공통 — 최소~최대 확대 구간 3등분 → 2000/4000/8000px */
     function getMobileZoomTierDim(activeTier) {
         return pickFloorDrawingTierDimForCurrentView();
     }
@@ -4251,7 +4236,11 @@ document.addEventListener('DOMContentLoaded', () => {
         if (isMobileMapViewport()) {
             return getMobileZoomTierDim(floorDrawingActiveTierDim);
         }
-        if (typeof window.pickFloorDrawingTierDim !== 'function') return 4000;
+        if (typeof window.pickFloorDrawingTierDim !== 'function') {
+            return (typeof window.getFloorDrawingBaseTierDim === 'function')
+                ? window.getFloorDrawingBaseTierDim()
+                : 2000;
+        }
         const cw = state.canvasCssW || (state.canvas ? Math.round(state.canvas.width / (state.canvasDpr || 1)) : 800);
         const ch = state.canvasCssH || (state.canvas ? Math.round(state.canvas.height / (state.canvasDpr || 1)) : 600);
         const dims = getFloorPlanDisplayDims();
@@ -4270,7 +4259,10 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!bldg.floorDrawingTiers[floorCode]) bldg.floorDrawingTiers[floorCode] = {};
         bldg.floorDrawingTiers[floorCode][dimKey] = dataUrl;
         const idbKey = `${bldg.id}_${floorCode}`;
-        if (Number(tierDim) <= 4000) {
+        const baseTier = (typeof window.getFloorDrawingBaseTierDim === 'function')
+            ? window.getFloorDrawingBaseTierDim()
+            : 2000;
+        if (Number(tierDim) <= baseTier) {
             if (!bldg.floorDrawings) bldg.floorDrawings = {};
             bldg.floorDrawings[floorCode] = dataUrl;
             if (!_idbPersistedDrawingKeys.has(idbKey) && !_idbPendingDrawingKeys.has(idbKey)) {
@@ -4355,7 +4347,10 @@ document.addEventListener('DOMContentLoaded', () => {
     function scheduleFloorDrawingTierPrefetch(bldg, floorCode) {
         if (!bldg || !floorCode) return;
         if (floorHasPdfSourceSync(bldg, floorCode)) return;
-        const dims = (window.FLOOR_DRAWING_TIER_DIMS || [4000, 8000, 16000]).filter((d) => d !== 4000);
+        const baseTier = (typeof window.getFloorDrawingBaseTierDim === 'function')
+            ? window.getFloorDrawingBaseTierDim()
+            : 2000;
+        const dims = (window.FLOOR_DRAWING_TIER_DIMS || [2000, 4000, 8000]).filter((d) => d !== baseTier);
         const run = async () => {
             const hasPdf = (typeof window.getFloorPdfDataUrl === 'function')
                 ? window.getFloorPdfDataUrl(bldg, floorCode)
@@ -4374,6 +4369,9 @@ document.addEventListener('DOMContentLoaded', () => {
     async function resolveFloorDrawingTierDataUrl(bldg, floorCode, tierDim) {
         if (!bldg || !floorCode || !tierDim) return null;
         const dimKey = String(tierDim);
+        const baseTier = (typeof window.getFloorDrawingBaseTierDim === 'function')
+            ? window.getFloorDrawingBaseTierDim()
+            : 2000;
 
         const tiers = bldg.floorDrawingTiers && bldg.floorDrawingTiers[floorCode];
         if (tiers && tiers[dimKey]) return tiers[dimKey];
@@ -4386,7 +4384,7 @@ document.addEventListener('DOMContentLoaded', () => {
             return idbTiers[dimKey];
         }
 
-        if (Number(tierDim) <= 4000 && bldg.floorDrawings && bldg.floorDrawings[floorCode]) {
+        if (Number(tierDim) <= baseTier && bldg.floorDrawings && bldg.floorDrawings[floorCode]) {
             return bldg.floorDrawings[floorCode];
         }
 
@@ -4429,7 +4427,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         }
 
-        const fallbackDims = [16000, 8000, 4000];
+        const fallbackDims = [8000, 4000, 2000, 16000];
         for (const d of fallbackDims) {
             if (d <= tierDim && tiers && tiers[String(d)]) return tiers[String(d)];
         }
@@ -4532,7 +4530,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 console.warn('도면 PDF 미리보기 렌더 실패:', e);
             }
         }
-        return resolveFloorDrawingTierDataUrl(bldg, floorCode, 4000);
+        return resolveFloorDrawingTierDataUrl(bldg, floorCode, (typeof window.getFloorDrawingBaseTierDim === 'function')
+            ? window.getFloorDrawingBaseTierDim()
+            : 2000);
     }
 
     function loadFloorDrawing(floorCode, options) {
@@ -4558,9 +4558,15 @@ document.addEventListener('DOMContentLoaded', () => {
         const loadToken = ++floorDrawingTierLoadToken;
 
         const bldg = state.currentBuilding;
+        const baseTier = (typeof window.getFloorDrawingBaseTierDim === 'function')
+            ? window.getFloorDrawingBaseTierDim()
+            : 2000;
+        const baseTierKey = String(baseTier);
         let dataUrl = null;
         if (bldg && bldg.floorDrawingTiers && bldg.floorDrawingTiers[floorCode]) {
-            dataUrl = bldg.floorDrawingTiers[floorCode]['4000'] || null;
+            dataUrl = bldg.floorDrawingTiers[floorCode][baseTierKey]
+                || bldg.floorDrawingTiers[floorCode]['4000']
+                || null;
         }
         if (!dataUrl && bldg && bldg.floorDrawings && bldg.floorDrawings[floorCode]) {
             dataUrl = bldg.floorDrawings[floorCode];
@@ -4572,7 +4578,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const img = new Image();
             img.onload = async () => {
                 applyFloorDrawingTarget(img, null, { immediate: !state.bgImage });
-                floorDrawingActiveTierDim = 4000;
+                floorDrawingActiveTierDim = baseTier;
                 if (bldg && bldg.id) {
                     if (floorMayHavePdfSource(bldg, floorCode)) {
                         await ensureFloorPlanRefForPdf(bldg, floorCode);
@@ -4582,7 +4588,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
                 if (!state.floorDrawingTierImageCache) state.floorDrawingTierImageCache = {};
                 if (bldg && bldg.id) {
-                    state.floorDrawingTierImageCache[`${bldg.id}_${floorCode}_4000`] = img;
+                    state.floorDrawingTierImageCache[`${bldg.id}_${floorCode}_${baseTier}`] = img;
                 }
                 // Auto-detect Portrait drawing and auto-rotate 90° to Landscape for optimal architectural inspection
                 if (img.naturalHeight > img.naturalWidth * 1.15 && (state.rotationAngle === undefined || state.rotationAngle === 0)) {
@@ -4644,11 +4650,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 if (loadToken !== floorDrawingTierLoadToken || state.currentFloor !== floorCode) return;
 
-                if (idbTiers && idbTiers['4000']) {
+                const quickBaseTier = String((typeof window.getFloorDrawingBaseTierDim === 'function')
+                    ? window.getFloorDrawingBaseTierDim()
+                    : 2000);
+                const quickTierUrl = (idbTiers && (idbTiers[quickBaseTier] || idbTiers['4000'])) || null;
+                if (quickTierUrl) {
                     if (!bldg.floorDrawingTiers) bldg.floorDrawingTiers = {};
                     bldg.floorDrawingTiers[floorCode] = { ...idbTiers, ...(bldg.floorDrawingTiers[floorCode] || {}) };
                     _idbPersistedTierKeys.add(idbKey);
-                    tryLoadImage(idbTiers['4000'], false);
+                    tryLoadImage(quickTierUrl, false);
                     return;
                 }
 
@@ -4690,7 +4700,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 if (cachedSource) {
                     cacheFloorDrawingSourceToDevice(bldg, floorCode, cachedSource);
-                    const rendered = await resolveFloorDrawingTierDataUrl(bldg, floorCode, 4000);
+                    const rendered = await resolveFloorDrawingTierDataUrl(bldg, floorCode, (typeof window.getFloorDrawingBaseTierDim === 'function')
+                        ? window.getFloorDrawingBaseTierDim()
+                        : 2000);
                     if (rendered && loadToken === floorDrawingTierLoadToken && state.currentFloor === floorCode) {
                         tryLoadImage(rendered, false);
                     }
@@ -5320,47 +5332,6 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     /** 삼각 화살촉: 세모 무게중심. 원형 화살촉: target(측정점) 그대로 */
-    function getMapHdAutoLineBoost() {
-        let boost = 1;
-        if (hasActiveFloorHiPatch()) {
-            const lvl = viewportPatchActiveLevel || 0;
-            if (lvl >= 2) boost = Math.max(boost, 1.28);
-            else if (lvl >= 1) boost = Math.max(boost, 1.16);
-            else boost = Math.max(boost, 1.08);
-        }
-        const tier = floorDrawingActiveTierDim || 4000;
-        if (tier >= 16000) boost = Math.max(boost, 1.14);
-        else if (tier >= 8000) boost = Math.max(boost, 1.07);
-        const pct = getMapZoomVsFitPercent();
-        if (pct >= 2000) boost = Math.max(boost, 1.1);
-        else if (pct >= 800) boost = Math.max(boost, 1.05);
-        return boost;
-    }
-
-    function getActiveMapHdLineBoost() {
-        if (_mapStyleRenderContext) {
-            const saved = state.floorMapStyleSettings?.[getFloorMapStyleKey(
-                _mapStyleRenderContext.buildingId,
-                _mapStyleRenderContext.floorCode
-            )];
-            if (saved && saved.mapHdLineBoost !== undefined) return saved.mapHdLineBoost;
-        }
-        return state.mapHdLineBoost !== undefined ? state.mapHdLineBoost : 1.0;
-    }
-
-    /** HD·고배율 도면 + 마킹 선 굵기 — 사용자 슬라이더 × 자동 보정 */
-    function getMapHdLineDrawMultiplier() {
-        const user = Math.min(Math.max(parseFloat(getActiveMapHdLineBoost() || 1), 0.5), 2.5);
-        if (_mapStyleRenderContext) return user;
-        if (state.currentTab !== 'tab-map') return 1;
-        return user * getMapHdAutoLineBoost();
-    }
-
-    function getMapDrawingLineThickenFactor() {
-        if (state.currentTab !== 'tab-map') return Math.max(1, getActiveMapHdLineBoost() || 1);
-        return getMapHdLineDrawMultiplier();
-    }
-
     function getMapArrowTipHitCenter(targetX, targetY, fromX, fromY, arrowScale) {
         if (state.tipShape === 'circle') {
             return { x: targetX, y: targetY };
@@ -5574,8 +5545,7 @@ document.addEventListener('DOMContentLoaded', () => {
         return {
             // 층별 스타일은 결함위치도만 — NDT 크기/굵기는 전역으로 별도 유지
             styleSizes: cloneStyleSizesSubset(state.styleSizes, DEFECT_STYLE_SIZE_KEYS),
-            defectLeaderLineScale: state.defectLeaderLineScale !== undefined ? state.defectLeaderLineScale : 1.0,
-            mapHdLineBoost: state.mapHdLineBoost !== undefined ? state.mapHdLineBoost : 1.0
+            defectLeaderLineScale: state.defectLeaderLineScale !== undefined ? state.defectLeaderLineScale : 1.0
         };
     }
 
@@ -5760,8 +5730,7 @@ document.addEventListener('DOMContentLoaded', () => {
             ? leaderScaleOverride
             : getActiveLeaderLineScale();
         const factor = Math.min(Math.max(parseFloat(raw || 1), 0.5), 5.0);
-        const hdMul = getMapHdLineDrawMultiplier();
-        return (isBeingDragged ? 1.5 : 1.1) * (scale || 1) * (roundLineMul || 1) * factor * hdMul;
+        return (isBeingDragged ? 1.5 : 1.1) * (scale || 1) * (roundLineMul || 1) * factor;
     }
 
     function getDefectLeaderLineWidth(scale, roundLineMul, isBeingDragged) {
@@ -14641,12 +14610,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 ndtKept
             );
             state.defectLeaderLineScale = saved.defectLeaderLineScale ?? 1.0;
-            state.mapHdLineBoost = saved.mapHdLineBoost ?? 1.0;
         } else {
             const fallback = cloneStyleSizesMap(state._globalStyleSizesFallback) || null;
             state.styleSizes = mergeStyleSizesSubset(fallback, ndtKept);
             state.defectLeaderLineScale = state._globalDefectLeaderLineScaleFallback ?? 1.0;
-            state.mapHdLineBoost = state._globalMapHdLineBoostFallback ?? 1.0;
         }
         if (typeof window.syncBulkStyleSlidersUi === 'function') window.syncBulkStyleSlidersUi();
     }
@@ -14679,8 +14646,7 @@ document.addEventListener('DOMContentLoaded', () => {
         floorCodes.forEach(fc => {
             state.floorMapStyleSettings[getFloorMapStyleKey(bldgId, fc)] = {
                 styleSizes: cloneStyleSizesMap(snapshot.styleSizes),
-                defectLeaderLineScale: snapshot.defectLeaderLineScale,
-                mapHdLineBoost: snapshot.mapHdLineBoost
+                defectLeaderLineScale: snapshot.defectLeaderLineScale
             };
         });
         saveStateToLocalStorage();
@@ -14702,7 +14668,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (mapToolbar) mapToolbar.classList.toggle('is-size-locked', mapLocked);
         if (ndtToolbar) ndtToolbar.classList.toggle('is-size-locked', ndtLocked);
 
-        ['stylePinSizeAll', 'styleArrowSizeAll', 'styleLeaderLineScaleAll', 'styleMapHdLineBoost'].forEach((id) => {
+        ['stylePinSizeAll', 'styleArrowSizeAll', 'styleLeaderLineScaleAll'].forEach((id) => {
             const el = document.getElementById(id);
             if (el) el.disabled = mapLocked;
         });
@@ -14724,21 +14690,16 @@ document.addEventListener('DOMContentLoaded', () => {
         const arrowAllLabel = document.getElementById('styleArrowSizeAllLabel');
         const leaderLineAllInput = document.getElementById('styleLeaderLineScaleAll');
         const leaderLineAllLabel = document.getElementById('styleLeaderLineScaleAllLabel');
-        const hdLineBoostInput = document.getElementById('styleMapHdLineBoost');
-        const hdLineBoostLabel = document.getElementById('styleMapHdLineBoostLabel');
         const sampleSize = getStyleSize('defectStructural');
         const pinV = sampleSize.pin;
         const arrowV = sampleSize.arrow;
         const lineV = Math.min(Math.max(parseFloat(getActiveLeaderLineScale() || 1), 0.5), 5.0);
-        const hdV = Math.min(Math.max(parseFloat(getActiveMapHdLineBoost() || 1), 0.5), 2.5);
         if (pinAllInput) pinAllInput.value = pinV;
         if (pinAllLabel) pinAllLabel.textContent = `${Math.round(pinV * 100)}%`;
         if (arrowAllInput) arrowAllInput.value = arrowV;
         if (arrowAllLabel) arrowAllLabel.textContent = `${Math.round(arrowV * 100)}%`;
         if (leaderLineAllInput) leaderLineAllInput.value = lineV;
         if (leaderLineAllLabel) leaderLineAllLabel.textContent = `${Math.round(lineV * 100)}%`;
-        if (hdLineBoostInput) hdLineBoostInput.value = hdV;
-        if (hdLineBoostLabel) hdLineBoostLabel.textContent = `${Math.round(hdV * 100)}%`;
 
         const ndtPinAll = document.getElementById('stylePinSizeNdtCurrent');
         const ndtPinLabel = document.getElementById('stylePinSizeNdtCurrentLabel');
@@ -14942,14 +14903,6 @@ document.addEventListener('DOMContentLoaded', () => {
             if (leaderLineAllLabel) leaderLineAllLabel.textContent = `${Math.round(v * 100)}%`;
         };
         syncLeaderLineUi();
-        const hdLineBoostInput = document.getElementById('styleMapHdLineBoost');
-        const hdLineBoostLabel = document.getElementById('styleMapHdLineBoostLabel');
-        const syncHdLineBoostUi = () => {
-            const v = Math.min(Math.max(parseFloat(getActiveMapHdLineBoost() || 1), 0.5), 2.5);
-            if (hdLineBoostInput) hdLineBoostInput.value = v;
-            if (hdLineBoostLabel) hdLineBoostLabel.textContent = `${Math.round(v * 100)}%`;
-        };
-        syncHdLineBoostUi();
         if (typeof window.syncBulkStyleSlidersUi === 'function') window.syncBulkStyleSlidersUi();
         if (leaderLineAllInput) {
             leaderLineAllInput.addEventListener('input', () => {
@@ -14959,18 +14912,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (typeof drawCanvas === 'function') drawCanvas();
             });
             leaderLineAllInput.addEventListener('change', () => {
-                persistCurrentFloorMapStyleFromSliders();
-                saveStateToLocalStorage();
-            });
-        }
-        if (hdLineBoostInput) {
-            hdLineBoostInput.addEventListener('input', () => {
-                const v = Math.min(Math.max(parseFloat(hdLineBoostInput.value || '1'), 0.5), 2.5);
-                state.mapHdLineBoost = v;
-                if (hdLineBoostLabel) hdLineBoostLabel.textContent = `${Math.round(v * 100)}%`;
-                if (typeof drawCanvas === 'function') drawCanvas();
-            });
-            hdLineBoostInput.addEventListener('change', () => {
                 persistCurrentFloorMapStyleFromSliders();
                 saveStateToLocalStorage();
             });
@@ -25610,11 +25551,6 @@ document.addEventListener('DOMContentLoaded', () => {
             window.state._globalDefectLeaderLineScaleFallback = data.defectLeaderLineScale;
             isChanged = true;
         }
-        if (data.mapHdLineBoost !== undefined) {
-            window.state.mapHdLineBoost = data.mapHdLineBoost;
-            window.state._globalMapHdLineBoostFallback = data.mapHdLineBoost;
-            isChanged = true;
-        }
         if (data.ndtLeaderLineScale !== undefined) {
             window.state.ndtLeaderLineScale = data.ndtLeaderLineScale;
             isChanged = true;
@@ -25724,7 +25660,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 styleColors: window.state.styleColors || null,
                 styleSizes: window.state.styleSizes || null,
                 defectLeaderLineScale: (window.state.defectLeaderLineScale !== undefined ? window.state.defectLeaderLineScale : 1.0),
-                mapHdLineBoost: (window.state.mapHdLineBoost !== undefined ? window.state.mapHdLineBoost : 1.0),
                 ndtLeaderLineScale: (window.state.ndtLeaderLineScale !== undefined ? window.state.ndtLeaderLineScale : 1.0),
                 styleSizeBarLockedMap: window.state.styleSizeBarLockedMap !== false,
                 styleSizeBarLockedNdt: window.state.styleSizeBarLockedNdt !== false,
