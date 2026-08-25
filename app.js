@@ -711,28 +711,46 @@ document.addEventListener('DOMContentLoaded', () => {
     const _floorPdfKnown = new Map();
     const _pdfPatchWarnedFloors = new Set();
 
+    function floorPdfCacheKey(bldgId, floorCode) {
+        return `${bldgId}_${floorCode}`;
+    }
+
+    function resetFloorPdfKnownState(bldgId, floorCode) {
+        if (!bldgId || !floorCode) return;
+        _floorPdfKnown.delete(floorPdfCacheKey(bldgId, floorCode));
+    }
+
+    function canFetchPdfFromCloudNow() {
+        return !!(db && window.state.companyId && navigator.onLine !== false);
+    }
+
     function markFloorPdfKnown(bldgId, floorCode, hasPdf) {
         if (!bldgId || !floorCode) return;
         _floorPdfKnown.set(`${bldgId}_${floorCode}`, !!hasPdf);
     }
 
     function floorPdfKnownUnavailable(bldgId, floorCode) {
-        return _floorPdfKnown.get(`${bldgId}_${floorCode}`) === false;
+        return _floorPdfKnown.get(floorPdfCacheKey(bldgId, floorCode)) === false;
     }
 
     async function ensurePdfSourceForFloor(bldg, floorCode) {
         if (!bldg || !floorCode) return null;
-        const key = `${bldg.id}_${floorCode}`;
+        const key = floorPdfCacheKey(bldg.id, floorCode);
         if (floorHasPdfSourceSync(bldg, floorCode)) {
             markFloorPdfKnown(bldg.id, floorCode, true);
             return (typeof window.getFloorPdfDataUrl === 'function')
                 ? window.getFloorPdfDataUrl(bldg, floorCode)
                 : null;
         }
-        if (floorPdfKnownUnavailable(bldg.id, floorCode)) return null;
+        if (floorPdfKnownUnavailable(bldg.id, floorCode) && !canFetchPdfFromCloudNow()) {
+            return null;
+        }
+        if (floorPdfKnownUnavailable(bldg.id, floorCode) && canFetchPdfFromCloudNow()) {
+            resetFloorPdfKnownState(bldg.id, floorCode);
+        }
         if (typeof resolveBuildingFloorPdf !== 'function') return null;
         try {
-            const pdf = await resolveBuildingFloorPdf(bldg, floorCode);
+            const pdf = await resolveBuildingFloorPdf(bldg, floorCode, { forceCloud: true });
             if (pdf) {
                 await applyResolvedPdfToBuilding(bldg, floorCode, pdf);
                 markFloorPdfKnown(bldg.id, floorCode, true);
@@ -741,7 +759,9 @@ document.addEventListener('DOMContentLoaded', () => {
         } catch (e) {
             console.warn('PDF 원본 조회 실패:', e);
         }
-        markFloorPdfKnown(bldg.id, floorCode, false);
+        if (canFetchPdfFromCloudNow()) {
+            markFloorPdfKnown(bldg.id, floorCode, false);
+        }
         return null;
     }
 
@@ -940,16 +960,13 @@ document.addEventListener('DOMContentLoaded', () => {
             if (state.floorDrawingHiPatch || (_floorBlend && _floorBlend.toPatch)) {
                 applyFloorDrawingTarget(undefined, null, { immediate: true });
             }
-            if (zoomVsFit >= 2 && !floorPdfKnownUnavailable(bldg.id, fc)) {
-                markFloorPdfKnown(bldg.id, fc, false);
-            }
             if (floorMayHavePdfSource(bldg, fc) || zoomVsFit >= 2) {
-                console.warn('뷰포트 고해상도 패치: PDF 원본 없음 — 도면을 PDF로 다시 등록하거나 동기화해 주세요.');
-                if (mobile && zoomVsFit >= 8 && typeof window.showToast === 'function') {
+                console.warn('뷰포트 고해상도 패치: PDF 원본 없음 — 서버·동기화·PDF 재등록을 확인해 주세요.');
+                if (mobile && zoomVsFit >= 8 && canFetchPdfFromCloudNow() && typeof window.showToast === 'function') {
                     const warnKey = `${bldg.id}_${fc}`;
                     if (!_pdfPatchWarnedFloors.has(warnKey)) {
                         _pdfPatchWarnedFloors.add(warnKey);
-                        window.showToast('고배율 선명도: PDF 원본이 필요합니다. PC에서 PDF 도면을 다시 등록·동기화해 주세요.', 'warning', 5000);
+                        window.showToast('서버 PDF 원본을 불러오지 못했습니다. 동기화 후 다시 시도하거나 PC에서 PDF를 재등록해 주세요.', 'warning', 5500);
                     }
                 }
             }
@@ -1841,8 +1858,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (!b.floorDrawingPdfs) b.floorDrawingPdfs = {};
                 if (!b.floorDrawingTiers) b.floorDrawingTiers = {};
                 if (!b.floorDrawingSources) b.floorDrawingSources = {};
-                const floors = (b.floorsList || []).map(f => f.floorCode);
-                await Promise.all(floors.map(async (floorCode) => {
+                const floors = new Set([
+                    ...(b.floorsList || []).map((f) => f.floorCode),
+                    ...Object.keys(b.floorDrawings || {}),
+                    ...Object.keys(b.floorDrawingPdfs || {}),
+                    ...Object.keys(b.floorDrawingSources || {}),
+                ]);
+                await Promise.all([...floors].map(async (floorCode) => {
                     if (!b.floorDrawings[floorCode]) {
                         const cached = await idbGet('floorDrawings', `${b.id}_${floorCode}`);
                         if (cached) {
@@ -3865,6 +3887,9 @@ document.addEventListener('DOMContentLoaded', () => {
         if (hd) {
             el.textContent = `${pct}% · HD`;
             el.classList.add('is-hd');
+        } else if (pct >= 800 && floorPdfKnownUnavailable(bldg?.id, fc) && canFetchPdfFromCloudNow()) {
+            el.textContent = `${pct}% · PDF조회중`;
+            el.classList.remove('is-hd');
         } else if (pct >= 800 && floorPdfKnownUnavailable(bldg?.id, fc)) {
             el.textContent = `${pct}% · PDF없음`;
             el.classList.remove('is-hd');
@@ -4209,6 +4234,9 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function loadFloorDrawing(floorCode, options) {
+        resetFloorPdfKnownState(state.currentBuildingId, floorCode);
+        viewportHiPatchToken++;
+        resetViewportPatchState();
         const opts = options || {};
         const preserveView = !!opts.preserveView
             || (!opts.forceFit && state.currentFloor === floorCode && !!state.bgImage && !!state.floorPlanRef);
@@ -24524,13 +24552,23 @@ document.addEventListener('DOMContentLoaded', () => {
         const snap = await docRef.get();
         if (!snap.exists) return null;
         const data = snap.data() || {};
-        if (data.dataUrl) return data.dataUrl;
-        if (data.chunked && data.chunkCount > 0) {
+        if (data.dataUrl && typeof data.dataUrl === 'string' && data.dataUrl.length > 32) {
+            return data.dataUrl;
+        }
+        const chunkCount = Number(data.chunkCount) || 0;
+        if (data.chunked && chunkCount > 0) {
             const partsSnap = await docRef.collection('parts').get();
-            return partsSnap.docs
+            if (partsSnap.empty) {
+                console.warn('[PDF] chunked 문서인데 parts가 비어 있음:', docRef.path);
+                return null;
+            }
+            const joined = partsSnap.docs
                 .sort((a, b) => Number(a.id) - Number(b.id))
                 .map((d) => (d.data() && d.data().data) || '')
                 .join('');
+            if (joined.length > 32) return joined;
+            console.warn('[PDF] parts 조립 결과가 비어 있음:', docRef.path);
+            return null;
         }
         return null;
     }
@@ -24600,44 +24638,97 @@ document.addEventListener('DOMContentLoaded', () => {
         bldg.floorDrawingPdfs[floorCode] = pdf;
         await idbSet('floorDrawingPdfs', idbKey, pdf);
         _idbPersistedPdfKeys.add(idbKey);
+        markFloorPdfKnown(bldg.id, floorCode, true);
         if (!window._cloudSyncedPdfKeys) window._cloudSyncedPdfKeys = new Set();
         window._cloudSyncedPdfKeys.add(idbKey);
         return true;
     }
 
-    async function resolveBuildingFloorPdf(bldg, floorCode) {
+    async function resolveBuildingFloorPdf(bldg, floorCode, opts) {
         if (!bldg || !floorCode) return null;
+        const options = opts || {};
         const idbKey = `${bldg.id}_${floorCode}`;
+        const isPdfUrl = (url) => (
+            typeof url === 'string' && (
+                url.startsWith('data:application/pdf')
+                || (typeof window.isPdfDrawingDataUrl === 'function' && window.isPdfDrawingDataUrl(url))
+            )
+        );
+
         if (bldg.floorDrawingPdfs && bldg.floorDrawingPdfs[floorCode]) {
             return bldg.floorDrawingPdfs[floorCode];
         }
+
+        if (typeof window.getFloorPdfDataUrl === 'function') {
+            const mem = window.getFloorPdfDataUrl(bldg, floorCode);
+            if (mem) return mem;
+        }
+
         let cached = await idbGet('floorDrawingPdfs', idbKey);
         if (cached) {
             if (typeof window.ensureFloorDrawingPdfs === 'function') window.ensureFloorDrawingPdfs(bldg);
             else if (!bldg.floorDrawingPdfs) bldg.floorDrawingPdfs = {};
             bldg.floorDrawingPdfs[floorCode] = cached;
+            _idbPersistedPdfKeys.add(idbKey);
             return cached;
         }
+
+        const src = await getFloorDrawingSourceDataUrl(bldg, floorCode);
+        if (isPdfUrl(src)) {
+            await applyResolvedPdfToBuilding(bldg, floorCode, src);
+            return src;
+        }
+
+        const drawing = bldg.floorDrawings && bldg.floorDrawings[floorCode];
+        if (isPdfUrl(drawing)) {
+            await applyResolvedPdfToBuilding(bldg, floorCode, drawing);
+            return drawing;
+        }
+
         if (db && window.state.companyId) {
-            const cloudPdf = await fetchFloorDrawingPdfFromCloud(bldg.id, floorCode);
-            if (cloudPdf) {
-                if (typeof window.ensureFloorDrawingPdfs === 'function') window.ensureFloorDrawingPdfs(bldg);
-                else if (!bldg.floorDrawingPdfs) bldg.floorDrawingPdfs = {};
-                bldg.floorDrawingPdfs[floorCode] = cloudPdf;
-                await idbSet('floorDrawingPdfs', idbKey, cloudPdf);
-                _idbPersistedPdfKeys.add(idbKey);
-                return cloudPdf;
+            const siteKey = normalizeSiteVaultKey(bldg.name);
+            const [cloudPdf, vaultPdf] = await Promise.all([
+                fetchFloorDrawingPdfFromCloud(bldg.id, floorCode),
+                fetchSiteVaultPdf(siteKey, floorCode),
+            ]);
+            const remotePdf = cloudPdf || vaultPdf;
+            if (remotePdf) {
+                await applyResolvedPdfToBuilding(bldg, floorCode, remotePdf);
+                markFloorPdfKnown(bldg.id, floorCode, true);
+                return remotePdf;
+            }
+            if (options.forceCloud) {
+                console.warn('[PDF] 서버 조회 결과 없음:', idbKey, 'company=', window.state.companyId);
             }
         }
-        const vaultPdf = await fetchSiteVaultPdf(normalizeSiteVaultKey(bldg.name), floorCode);
-        if (vaultPdf) {
-            if (typeof window.ensureFloorDrawingPdfs === 'function') window.ensureFloorDrawingPdfs(bldg);
-            else if (!bldg.floorDrawingPdfs) bldg.floorDrawingPdfs = {};
-            bldg.floorDrawingPdfs[floorCode] = vaultPdf;
-        }
-        return vaultPdf;
+
+        return null;
     }
     window.resolveBuildingFloorPdf = resolveBuildingFloorPdf;
+
+    async function hydrateAllBuildingPdfsFromCloud() {
+        if (!canFetchPdfFromCloudNow()) return;
+        const buildings = window.state.buildings || [];
+        for (let bi = 0; bi < buildings.length; bi++) {
+            const bldg = buildings[bi];
+            if (!bldg || !bldg.id) continue;
+            await hydrateBuildingPdfsFromSiteVault(bldg);
+            const floors = new Set([
+                ...((bldg.floorsList || []).map((f) => f.floorCode)),
+                ...Object.keys(bldg.floorDrawings || {}),
+                ...Object.keys(bldg.floorDrawingPdfs || {}),
+            ]);
+            for (const fc of floors) {
+                if (bldg.floorDrawingPdfs && bldg.floorDrawingPdfs[fc]) continue;
+                const pdf = await resolveBuildingFloorPdf(bldg, fc, { forceCloud: true });
+                if (pdf) markFloorPdfKnown(bldg.id, fc, true);
+            }
+        }
+        if (typeof window.preloadCurrentFloorPdfSource === 'function') {
+            await window.preloadCurrentFloorPdfSource();
+        }
+    }
+    window.hydrateAllBuildingPdfsFromCloud = hydrateAllBuildingPdfsFromCloud;
 
     async function hydrateBuildingPdfsFromSiteVault(bldg) {
         if (!bldg) return;
@@ -24981,6 +25072,9 @@ document.addEventListener('DOMContentLoaded', () => {
             window.state.buildings = [...localOnly, ...mergedRemote];
             isChanged = true;
             await hydrateLocalImagesFromIndexedDb();
+            if (typeof hydrateAllBuildingPdfsFromCloud === 'function') {
+                hydrateAllBuildingPdfsFromCloud().catch((e) => console.warn('동기화 후 PDF 조회 실패:', e));
+            }
         }
 
         if (data.defects) {
@@ -25315,6 +25409,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (typeof loadStateFromLocalStorage === 'function') loadStateFromLocalStorage();
         if (typeof listenToRealtimeUpdates === 'function') listenToRealtimeUpdates();
+        if (typeof hydrateAllBuildingPdfsFromCloud === 'function') {
+            hydrateAllBuildingPdfsFromCloud().catch((e) => console.warn('서버 PDF 일괄 조회 실패:', e));
+        }
         if (typeof renderDashboard === 'function') renderDashboard();
         window.switchTab('tab-home');
     }

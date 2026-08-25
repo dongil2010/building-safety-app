@@ -9,7 +9,7 @@
 
   window.BSA_PDF_VECTOR = {
     enabled: true,
-    version: 'main-7',
+    version: 'main-8',
     /** PDF 도면: 전체 페이지 티어 교체 대신 뷰포트 고해상도 패치 (벡터 PDF 출력은 별도) */
     useViewportTiles: true
   };
@@ -175,11 +175,11 @@
     });
   }
 
-  /** 메모리 → IndexedDB → (app.js) 클라우드·현장명 보관함 순 PDF 원본 조회 */
+  /** 메모리 → IndexedDB → Firestore floorDrawingPdfs·siteDrawingVault 순 PDF 원본 조회 */
   window.resolveFloorPdfDataUrlAsync = async function (bldg, floorCode) {
+    if (!bldg || !floorCode) return null;
     let pdfDataUrl = window.getFloorPdfDataUrl(bldg, floorCode);
     if (pdfDataUrl) return pdfDataUrl;
-    if (!bldg || !floorCode) return null;
     if (typeof idbGet === 'function') {
       try {
         const cached = await idbGet('floorDrawingPdfs', `${bldg.id}_${floorCode}`);
@@ -193,7 +193,7 @@
       }
     }
     if (typeof window.resolveBuildingFloorPdf === 'function') {
-      return window.resolveBuildingFloorPdf(bldg, floorCode);
+      return window.resolveBuildingFloorPdf(bldg, floorCode, { forceCloud: true });
     }
     return null;
   };
@@ -612,10 +612,16 @@
     }
     const bldg = state.currentBuilding;
     const floorCode = state.currentFloor;
-    const pdfDataUrl = await window.resolveFloorPdfDataUrlAsync(bldg, floorCode);
+    if (typeof window.showLoading === 'function') window.showLoading('서버에서 PDF 원본 불러오는 중...');
+    let pdfDataUrl = null;
+    try {
+      pdfDataUrl = await window.resolveFloorPdfDataUrlAsync(bldg, floorCode);
+    } finally {
+      if (typeof window.hideLoading === 'function') window.hideLoading();
+    }
     if (!pdfDataUrl) {
       if (typeof window.showToast === 'function') {
-        window.showToast('이 층에 보관된 PDF 원본이 없습니다. PDF로 도면을 다시 등록해 주세요.', 'warning', 5000);
+        window.showToast('PDF 원본을 서버에서 불러오지 못했습니다. 동기화·로그인 상태를 확인하거나 PC에서 PDF를 다시 등록해 주세요.', 'warning', 6000);
       }
       return;
     }
@@ -656,10 +662,16 @@
     }
     const bldg = state.currentBuilding;
     const floorCode = state.currentFloor;
-    const pdfDataUrl = await window.resolveFloorPdfDataUrlAsync(bldg, floorCode);
+    if (typeof window.showLoading === 'function') window.showLoading('서버에서 PDF 원본 불러오는 중...');
+    let pdfDataUrl = null;
+    try {
+      pdfDataUrl = await window.resolveFloorPdfDataUrlAsync(bldg, floorCode);
+    } finally {
+      if (typeof window.hideLoading === 'function') window.hideLoading();
+    }
     if (!pdfDataUrl) {
       if (typeof window.showToast === 'function') {
-        window.showToast('이 층에 보관된 PDF 원본이 없습니다. PDF로 도면을 다시 등록해 주세요.', 'warning', 5000);
+        window.showToast('PDF 원본을 서버에서 불러오지 못했습니다. 동기화·로그인 상태를 확인하거나 PC에서 PDF를 다시 등록해 주세요.', 'warning', 6000);
       }
       return;
     }
