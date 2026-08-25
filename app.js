@@ -1,4 +1,4 @@
-﻿/* ==========================================================================
+/* ==========================================================================
    스마트 건축물 안전점검 현장점검 시스템 — UI 부트스트랩
    전역 상태·IndexedDB·이미지 헬퍼: js/core/state.js
    탭 진입점: js/tabs/*.js
@@ -3367,7 +3367,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let ndtActivePointerIsTouch = false;
     let ndtMarqueeSelectEnabled = false;
     let ndtAddSelectEnabled = false;
-    const NDT_TOUCH_LONG_PRESS_MS = 500;
+    const NDT_TOUCH_LONG_PRESS_MS = 300;
     let isDraggingNdtPinGroup = false;
     let ndtGroupDragLastX = 0;
     let ndtGroupDragLastY = 0;
@@ -5877,6 +5877,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         pendingNdtPinArmed = true;
                         try { if (navigator.vibrate) navigator.vibrate(12); } catch (_e) { /* ignore */ }
                         drawNdtCanvas();
+                        refreshNdtLoupe(ndtStartMouseX, ndtStartMouseY);
                     }, NDT_TOUCH_LONG_PRESS_MS);
                     return;
                 }
@@ -5980,6 +5981,10 @@ document.addEventListener('DOMContentLoaded', () => {
                             pendingNdtPinHit = null;
                             isNdtDragging = true;
                         }
+                        return;
+                    }
+                    if (dist <= 14) {
+                        refreshNdtLoupe(touch.clientX, touch.clientY);
                         return;
                     }
                     if (dist > 14) {
@@ -8994,6 +8999,12 @@ document.addEventListener('DOMContentLoaded', () => {
     function getDefectOutputPhotos(defect) {
         if (!defect) return [];
         return (Array.isArray(defect.photos) ? defect.photos : []).filter(Boolean);
+    }
+
+    /** 한글·보고서 전·금회차 비교사진(전차) — defect.prevRoundPhotos만 */
+    function getDefectPrevOutputPhotos(defect) {
+        if (!defect) return [];
+        return (Array.isArray(defect.prevRoundPhotos) ? defect.prevRoundPhotos : []).filter(Boolean);
     }
 
     async function ensureDefectPhotosLoaded(d) {
@@ -13089,13 +13100,13 @@ document.addEventListener('DOMContentLoaded', () => {
     let mapTouchStartedOnCanvas = false; // 도면에서 시작한 터치만 스크롤 잠금
     const TOUCH_DRAG_THRESHOLD = 14; // 터치는 손가락 흔들림이 커서 마우스보다 넉넉한 이동임계값 필요
     const MOUSE_DRAG_THRESHOLD = 6;
-    const TOUCH_LONG_PRESS_MS = 500; // 모바일: 선택 후 이만큼 눌러야 핀 이동
+    const TOUCH_LONG_PRESS_MS = 300; // 모바일: 선택 후 이만큼 눌러야 핀 이동
     const MAP_LOUPE_ID = 'mapTouchLoupe';
     const NDT_LOUPE_ID = 'ndtTouchLoupe';
     const TOUCH_LOUPE_SIZE = 168;
     // 1.0 = 손가락 아래를 그대로 위로 옮겨 보여줌 (실제 도면/화면은 확대하지 않음)
     const TOUCH_LOUPE_ZOOM = 1.0;
-    let mobileMarqueeSelectEnabled = false; // 우측 레일 '선택' — 빈 곳 드래그로 마퀴 선택 (핀 이동은 항상 0.5초 길게 누름)
+    let mobileMarqueeSelectEnabled = false; // 우측 레일 '선택' — 빈 곳 드래그로 마퀴 선택 (핀 이동은 0.3초 길게 누름)
     let mobileAddSelectEnabled = false; // 우측 레일 '추가' — 터치마다 선택 토글
     let isDraggingPin = false;
     let isDraggingPinGroup = false;
@@ -13712,7 +13723,8 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function refreshMapLoupe(clientX, clientY) {
-        if (!activePointerIsTouch || !(isDraggingPin || isDraggingPinGroup || isMarkingDrag || isAreaDrag)) {
+        const dragArmedLoupe = pendingDragArmed && pendingDragHit && pendingDragIsTouch;
+        if (!activePointerIsTouch || !(isDraggingPin || isDraggingPinGroup || isMarkingDrag || isAreaDrag || dragArmedLoupe)) {
             hideTouchLoupe(MAP_LOUPE_ID);
             return;
         }
@@ -13720,7 +13732,8 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function refreshNdtLoupe(clientX, clientY) {
-        if (!ndtActivePointerIsTouch || !(isDraggingNdtPin || isDraggingNdtPinGroup || isNdtMarkingDrag || isNdtDisplacementMarking)) {
+        const ndtDragArmedLoupe = pendingNdtPinArmed && pendingNdtPinHit && pendingNdtPinIsTouch;
+        if (!ndtActivePointerIsTouch || !(isDraggingNdtPin || isDraggingNdtPinGroup || isNdtMarkingDrag || isNdtDisplacementMarking || ndtDragArmedLoupe)) {
             hideTouchLoupe(NDT_LOUPE_ID);
             return;
         }
@@ -13783,14 +13796,14 @@ document.addEventListener('DOMContentLoaded', () => {
         initialOffsetY = state.view.offsetY;
 
         // Check if existing pin box, arrowhead tip, or area handle was clicked.
-        // 터치: 즉시 선택만 하고, 약 0.5초 길게 누른 뒤에야 드래그 시작.
+        // 터치: 즉시 선택만 하고, 약 0.3초 길게 누른 뒤에야 드래그 시작.
         const hitInfo = findHitPinPart(imgX, imgY);
         if (hitInfo) {
             const useAdditive = additive || (isTouch && mobileAddSelectEnabled);
             pendingDragHit = { hitInfo, imgX, imgY, additive: useAdditive };
             pendingDragIsTouch = isTouch;
             pendingDragHitStartTime = Date.now();
-            // 마우스는 즉시, 터치는 번호 박스·화살표 모두 0.5초 길게 누른 뒤 이동
+            // 마우스는 즉시, 터치는 번호 박스·화살표 모두 0.3초 길게 누른 뒤 이동
             pendingDragArmed = !isTouch;
             if (hitInfo.defect && hitInfo.defect.id) {
                 const id = hitInfo.defect.id;
@@ -13817,6 +13830,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     pendingDragArmed = true;
                     try { if (navigator.vibrate) navigator.vibrate(12); } catch (_e) { /* ignore */ }
                     drawCanvas();
+                    refreshMapLoupe(startMouseX, startMouseY);
                 }, TOUCH_LONG_PRESS_MS);
             }
             return;
@@ -13924,6 +13938,11 @@ document.addEventListener('DOMContentLoaded', () => {
                     isDragging = true;
                     if (elements.planCanvas) elements.planCanvas.style.cursor = 'grabbing';
                 }
+                return;
+            }
+
+            if (pendingDragIsTouch && pendingDragArmed && dist <= threshold) {
+                refreshMapLoupe(clientX, clientY);
                 return;
             }
 
@@ -15843,7 +15862,7 @@ document.addEventListener('DOMContentLoaded', () => {
             syncMobileToggleBtn(mobileBtnQuickDrag, mobileMarqueeSelectEnabled);
             window.showToast(
                 mobileMarqueeSelectEnabled
-                    ? '선택 모드: 빈 곳 드래그로 결함 선택 (핀 이동은 0.5초 길게 누름)'
+                    ? '선택 모드: 빈 곳 드래그로 결함 선택 (핀 이동은 0.3초 길게 누름)'
                     : '선택 모드 OFF — 빈 곳 드래그는 도면 이동',
                 'info',
                 2600
@@ -15917,7 +15936,7 @@ document.addEventListener('DOMContentLoaded', () => {
             syncMobileToggleBtn(mobileNdtBtnQuickDrag, ndtMarqueeSelectEnabled);
             window.showToast(
                 ndtMarqueeSelectEnabled
-                    ? '선택 모드: 빈 곳 드래그로 항목 선택 (핀 이동은 0.5초 길게 누름)'
+                    ? '선택 모드: 빈 곳 드래그로 항목 선택 (핀 이동은 0.3초 길게 누름)'
                     : '선택 모드 OFF — 빈 곳 드래그는 도면 이동',
                 'info',
                 2600
@@ -19397,6 +19416,24 @@ document.addEventListener('DOMContentLoaded', () => {
             let floorSlots = discoverFloorSlots();
             if (!floorSlots.length) throw new Error('템플릿에서 상태조사표 블록을 찾지 못했습니다.');
 
+            // 3종 중점관리 전·금회차 비교사진 전용 표(칠산타워 서식) — 템플릿에 없으면 일반 사진표로 대체
+            let grade3ComparePhotoTblTemplate = null;
+            let grade3CompareTemplateWarned = false;
+            if (isGrade3) {
+                const compareKeywords = ['전회', '금회', '비교', '직전', '당해', '이번'];
+                outer: for (const p of secChildren()) {
+                    for (const tbl of Array.from(p.getElementsByTagNameNS(HP_NS, 'tbl'))) {
+                        const txt = Array.from(tbl.getElementsByTagNameNS(HP_NS, 't'))
+                            .map(t => t.textContent || '').join('');
+                        if (tbl.getElementsByTagNameNS(HP_NS, 'pic').length >= 2
+                            && compareKeywords.some(kw => txt.includes(kw))) {
+                            grade3ComparePhotoTblTemplate = tbl;
+                            break outer;
+                        }
+                    }
+                }
+            }
+
             // 신가병원/칠산타워 서식은 칸 너비가 이미 맞춰져 있어, 옛 10칸(부재종류/결함크기)용
             // 폭 재배분은 적용하지 않는다.
 
@@ -19614,6 +19651,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 });
 
                 await Promise.all(pageDefects.map(async (d) => {
+                    await ensureDefectPhotosLoaded(d);
                     if ((!d.photos || d.photos.length === 0) && d.photoIds && d.photoIds.length > 0) {
                         const photos = await Promise.all(d.photoIds.map(async pid => {
                             const local = await idbGet('photos', pid);
@@ -19632,8 +19670,35 @@ document.addEventListener('DOMContentLoaded', () => {
                         const filled = photos.filter(Boolean);
                         if (filled.length > 0) d.photos = filled;
                     }
+                    if ((!d.prevRoundPhotos || d.prevRoundPhotos.length === 0) && d.prevRoundPhotoIds && d.prevRoundPhotoIds.length > 0) {
+                        const prevPhotos = await Promise.all(d.prevRoundPhotoIds.map(async pid => {
+                            const local = await idbGet('photos', pid);
+                            if (local) return local;
+                            if (window._photoCache[pid]) return window._photoCache[pid];
+                            if (companyPhotosCol) {
+                                try {
+                                    const snap = await companyPhotosCol.doc(pid).get();
+                                    const url = snap.exists ? snap.data().dataUrl : null;
+                                    if (url) window._photoCache[pid] = url;
+                                    return url;
+                                } catch (e) { return null; }
+                            }
+                            return null;
+                        }));
+                        const filledPrev = prevPhotos.filter(Boolean);
+                        if (filledPrev.length > 0) d.prevRoundPhotos = filledPrev;
+                    }
                 }));
-                const photoDefects = pageDefects.filter(d => getDefectOutputPhotos(d).length > 0);
+                const priorityCompareDefects = isGrade3
+                    ? pageDefects.filter(d => d.isPriorityManage
+                        && (getDefectPrevOutputPhotos(d).length > 0 || getDefectOutputPhotos(d).length > 0))
+                    : [];
+                const regularPhotoDefects = pageDefects.filter(d => {
+                    if (!getDefectOutputPhotos(d).length) return false;
+                    if (isGrade3 && d.isPriorityManage) return false;
+                    return true;
+                });
+                const photoDefects = regularPhotoDefects;
                 const photoLabelByDefect = new Map();
                 photoDefects.forEach((d, i) => photoLabelByDefect.set(d, `사진${i + 1}`));
 
@@ -19777,6 +19842,112 @@ document.addEventListener('DOMContentLoaded', () => {
                 } catch (photoErr) {
                     console.error(`${floorCode} 사진 갤러리 삽입 실패(나머지는 계속 진행):`, photoErr);
                     window.showToast(`${getFloorLabel(floorCode)} 사진 삽입 중 오류가 있어 사진은 제외하고 만듭니다.`, 'warning', 5000);
+                }
+
+                // ---- 3종 중점관리: 전·금회차 비교사진 (일반 사진첩과 분리) ----
+                if (isGrade3 && priorityCompareDefects.length > 0) {
+                    try {
+                        if (!grade3ComparePhotoTblTemplate && !grade3CompareTemplateWarned) {
+                            grade3CompareTemplateWarned = true;
+                            window.showToast(
+                                '3종 중점관리 전·금회차 비교사진 전용 양식을 칠산타워 템플릿에서 찾지 못했습니다. 일반 사진표 레이아웃으로 넣습니다. 비교 양식 hwpx를 보내주시면 서식에 맞춰 드립니다.',
+                                'warning',
+                                9000
+                            );
+                        }
+                        const comparePhotoTbl = grade3ComparePhotoTblTemplate || slot.photoTbl;
+                        const compareRun = comparePhotoTbl.parentNode;
+                        let compareInsertRun = compareRun;
+                        let compareInsertPara = compareRun.parentNode;
+                        while (compareInsertPara && compareInsertPara.localName !== 'p') compareInsertPara = compareInsertPara.parentNode;
+
+                        const tplComparePics = comparePhotoTbl.getElementsByTagNameNS(HP_NS, 'pic');
+                        const cmpMaxW = parseInt(tplComparePics[0].getElementsByTagNameNS(HP_NS, 'curSz')[0].getAttribute('width'), 10);
+                        const cmpMaxH = parseInt(tplComparePics[0].getElementsByTagNameNS(HP_NS, 'curSz')[0].getAttribute('height'), 10);
+
+                        const appendCompareTbl = (tbl) => {
+                            ensureTblTreatAsChar(tbl);
+                            const trail = Array.from(compareInsertRun.children).find(c => c.localName === 't') || null;
+                            if (trail) compareInsertRun.insertBefore(tbl, trail);
+                            else compareInsertRun.appendChild(tbl);
+                        };
+
+                        for (let ci = 0; ci < priorityCompareDefects.length; ci++) {
+                            const d = priorityCompareDefects[ci];
+                            const prevSrc = getDefectPrevOutputPhotos(d)[0];
+                            const currSrc = getDefectOutputPhotos(d)[0];
+                            if (!prevSrc && !currSrc) continue;
+
+                            photoTblCounter++;
+                            const newTbl = comparePhotoTbl.cloneNode(true);
+                            newTbl.setAttribute('id', String(9800000 + photoTblCounter));
+                            const pics = Array.from(newTbl.getElementsByTagNameNS(HP_NS, 'pic'));
+                            pics.forEach((p, pIdx) => {
+                                p.setAttribute('id', String(9900000 + photoTblCounter * 2 + pIdx));
+                                p.setAttribute('instid', String(9950000 + photoTblCounter * 2 + pIdx));
+                            });
+
+                            const trsCmp = Array.from(newTbl.getElementsByTagNameNS(HP_NS, 'tr')).filter(tr => tr.parentNode === newTbl);
+                            const capTcsCmp = trsCmp[1].getElementsByTagNameNS(HP_NS, 'tc');
+                            const descTcsCmp = trsCmp[2].getElementsByTagNameNS(HP_NS, 'tc');
+                            const locText = getSurveyCellText('location', d, { floorCode });
+                            const typeText = getSurveyCellText('defectType', d);
+
+                            if (prevSrc && currSrc) {
+                                imgCounter++;
+                                const imgIdPrev = `photoAuto${imgCounter}`;
+                                let pack = dataUrlToBytes(prevSrc);
+                                let size = await loadImageSize(prevSrc);
+                                zip.file(`BinData/${imgIdPrev}.${pack.ext}`, pack.bytes);
+                                manifestAdds.push(`<opf:item id="${imgIdPrev}" href="BinData/${imgIdPrev}.${pack.ext}" media-type="${pack.mime}" isEmbeded="1"/>`);
+                                setPicImage(pics[0], imgIdPrev, size.w, size.h, cmpMaxW, cmpMaxH);
+
+                                imgCounter++;
+                                const imgIdCurr = `photoAuto${imgCounter}`;
+                                pack = dataUrlToBytes(currSrc);
+                                size = await loadImageSize(currSrc);
+                                zip.file(`BinData/${imgIdCurr}.${pack.ext}`, pack.bytes);
+                                manifestAdds.push(`<opf:item id="${imgIdCurr}" href="BinData/${imgIdCurr}.${pack.ext}" media-type="${pack.mime}" isEmbeded="1"/>`);
+                                setPicImage(pics[1], imgIdCurr, size.w, size.h, cmpMaxW, cmpMaxH);
+
+                                setTcText(capTcsCmp[0], '전회차');
+                                setTcText(capTcsCmp[2], locText);
+                                setTcText(capTcsCmp[4], '금회차');
+                                setTcText(capTcsCmp[6], locText);
+                                setTcText(descTcsCmp[1], typeText);
+                                setTcText(descTcsCmp[3], typeText);
+                            } else if (prevSrc) {
+                                imgCounter++;
+                                const imgIdPrev = `photoAuto${imgCounter}`;
+                                const pack = dataUrlToBytes(prevSrc);
+                                const size = await loadImageSize(prevSrc);
+                                zip.file(`BinData/${imgIdPrev}.${pack.ext}`, pack.bytes);
+                                manifestAdds.push(`<opf:item id="${imgIdPrev}" href="BinData/${imgIdPrev}.${pack.ext}" media-type="${pack.mime}" isEmbeded="1"/>`);
+                                setPicImage(pics[0], imgIdPrev, size.w, size.h, cmpMaxW, cmpMaxH);
+                                stripPhotoTblRightHalf(newTbl);
+                                setTcText(capTcsCmp[0], '전회차');
+                                setTcText(capTcsCmp[2], locText);
+                                setTcText(descTcsCmp[1], typeText);
+                            } else {
+                                imgCounter++;
+                                const imgIdCurr = `photoAuto${imgCounter}`;
+                                const pack = dataUrlToBytes(currSrc);
+                                const size = await loadImageSize(currSrc);
+                                zip.file(`BinData/${imgIdCurr}.${pack.ext}`, pack.bytes);
+                                manifestAdds.push(`<opf:item id="${imgIdCurr}" href="BinData/${imgIdCurr}.${pack.ext}" media-type="${pack.mime}" isEmbeded="1"/>`);
+                                setPicImage(pics[0], imgIdCurr, size.w, size.h, cmpMaxW, cmpMaxH);
+                                stripPhotoTblRightHalf(newTbl);
+                                setTcText(capTcsCmp[0], '금회차');
+                                setTcText(capTcsCmp[2], locText);
+                                setTcText(descTcsCmp[1], typeText);
+                            }
+
+                            appendCompareTbl(newTbl);
+                        }
+                    } catch (cmpErr) {
+                        console.error(`${floorCode} 중점관리 비교사진 삽입 실패:`, cmpErr);
+                        window.showToast(`${getFloorLabel(floorCode)} 중점관리 비교사진 삽입 중 오류가 있어 해당 사진은 제외합니다.`, 'warning', 5000);
+                    }
                 }
 
                 // ---- 결함위치도 ----
