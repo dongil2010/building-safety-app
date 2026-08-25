@@ -8649,6 +8649,48 @@ document.addEventListener('DOMContentLoaded', () => {
         return roundKey.replace(/_/g, ' ');
     }
 
+    /** HWPX 비교사진 캡션 — 예: 2025년_하반기 → 25년 하반기 */
+    function formatSurveyRoundLabelShort(roundKey) {
+        if (!roundKey) return '';
+        const parts = String(roundKey).split('_');
+        const yearRaw = parts[0] || '';
+        const yearNum = parseInt(yearRaw, 10);
+        const shortYear = isNaN(yearNum) ? yearRaw.replace(/년\s*$/, '') : String(yearNum % 100);
+        const period = parts[1] || '';
+        return period ? `${shortYear}년 ${period}` : `${shortYear}년`;
+    }
+
+    function getBuildingSurveyRoundKey(bldg) {
+        const y = (bldg && bldg.inspectionYear) || '2026년';
+        const p = (bldg && bldg.inspectionPeriod) || '하반기';
+        return `${y}_${p}`;
+    }
+
+    function getPreviousSurveyRoundKey(roundKey) {
+        const rank = getSurveyRoundOrderRank(roundKey);
+        if (rank === null) return null;
+        const periodRank = rank % 10;
+        const year = Math.floor(rank / 10);
+        if (periodRank === 1) return `${year}년_상반기`;
+        return `${year - 1}년_하반기`;
+    }
+
+    function getDefectHwpxCompareRoundLabels(defect, bldg) {
+        const currKey = getBuildingSurveyRoundKey(bldg);
+        let prevKey = defect && defect.prevSurveyRound ? defect.prevSurveyRound : null;
+        if (!prevKey && defect && getDefectPrevOutputPhotos(defect).length > 0) {
+            if (defect.surveyRound && isPreviousRoundDefect(defect)) {
+                prevKey = defect.surveyRound;
+            } else {
+                prevKey = getPreviousSurveyRoundKey(currKey);
+            }
+        }
+        return {
+            prev: prevKey ? formatSurveyRoundLabelShort(prevKey) : '',
+            curr: formatSurveyRoundLabelShort(currKey)
+        };
+    }
+
     function formatDefectMarkingTimestamp(ts) {
         const n = Number(ts);
         if (!n || !Number.isFinite(n)) return '';
@@ -19416,20 +19458,27 @@ document.addEventListener('DOMContentLoaded', () => {
             let floorSlots = discoverFloorSlots();
             if (!floorSlots.length) throw new Error('템플릿에서 상태조사표 블록을 찾지 못했습니다.');
 
-            // 3종 중점관리 전·금회차 비교사진 전용 표(칠산타워 서식) — 템플릿에 없으면 일반 사진표로 대체
-            let grade3ComparePhotoTblTemplate = null;
-            let grade3CompareTemplateWarned = false;
+            // 3종 중점관리 전·금회차 비교사진(칠산타워) — 표가 아닌 떠 있는 사진+캡션 문단
+            let grade3CompareFloatingStamp = null;
             if (isGrade3) {
-                const compareKeywords = ['전회', '금회', '비교', '직전', '당해', '이번'];
-                outer: for (const p of secChildren()) {
-                    for (const tbl of Array.from(p.getElementsByTagNameNS(HP_NS, 'tbl'))) {
-                        const txt = Array.from(tbl.getElementsByTagNameNS(HP_NS, 't'))
-                            .map(t => t.textContent || '').join('');
-                        if (tbl.getElementsByTagNameNS(HP_NS, 'pic').length >= 2
-                            && compareKeywords.some(kw => txt.includes(kw))) {
-                            grade3ComparePhotoTblTemplate = tbl;
-                            break outer;
-                        }
+                const paras = secChildren();
+                for (let i = 0; i < paras.length; i++) {
+                    const p = paras[i];
+                    if (p.getElementsByTagNameNS(HP_NS, 'tbl').length > 0) continue;
+                    const pics = Array.from(p.getElementsByTagNameNS(HP_NS, 'pic'));
+                    const tallPics = pics.filter(pi => {
+                        const cur = pi.getElementsByTagNameNS(HP_NS, 'curSz')[0];
+                        const h = cur ? parseInt(cur.getAttribute('height') || '0', 10) : 0;
+                        return h > 15000;
+                    });
+                    if (tallPics.length >= 2) {
+                        grade3CompareFloatingStamp = {
+                            titlePara: i > 0 ? paras[i - 1].cloneNode(true) : null,
+                            photoPara: p.cloneNode(true),
+                            labelPara: i + 1 < paras.length && !paras[i + 1].getElementsByTagNameNS(HP_NS, 'pic').length
+                                ? paras[i + 1].cloneNode(true) : null
+                        };
+                        break;
                     }
                 }
             }
@@ -19844,32 +19893,91 @@ document.addEventListener('DOMContentLoaded', () => {
                     window.showToast(`${getFloorLabel(floorCode)} 사진 삽입 중 오류가 있어 사진은 제외하고 만듭니다.`, 'warning', 5000);
                 }
 
-                // ---- 3종 중점관리: 전·금회차 비교사진 (일반 사진첩과 분리) ----
+                // ---- 3종 중점관리: 전·금회차 비교사진 (칠산타워 — 결함번호 + 좌우 사진 + 회차 라벨) ----
                 if (isGrade3 && priorityCompareDefects.length > 0) {
                     try {
-                        if (!grade3ComparePhotoTblTemplate && !grade3CompareTemplateWarned) {
-                            grade3CompareTemplateWarned = true;
-                            window.showToast(
-                                '3종 중점관리 전·금회차 비교사진 전용 양식을 칠산타워 템플릿에서 찾지 못했습니다. 일반 사진표 레이아웃으로 넣습니다. 비교 양식 hwpx를 보내주시면 서식에 맞춰 드립니다.',
-                                'warning',
-                                9000
-                            );
-                        }
-                        const comparePhotoTbl = grade3ComparePhotoTblTemplate || slot.photoTbl;
-                        const compareRun = comparePhotoTbl.parentNode;
-                        let compareInsertRun = compareRun;
-                        let compareInsertPara = compareRun.parentNode;
-                        while (compareInsertPara && compareInsertPara.localName !== 'p') compareInsertPara = compareInsertPara.parentNode;
+                        const tplPic = slot.photoTbl.getElementsByTagNameNS(HP_NS, 'pic')[0];
+                        const cmpMaxW = parseInt(tplPic.getElementsByTagNameNS(HP_NS, 'curSz')[0].getAttribute('width'), 10);
+                        const cmpMaxH = parseInt(tplPic.getElementsByTagNameNS(HP_NS, 'curSz')[0].getAttribute('height'), 10);
 
-                        const tplComparePics = comparePhotoTbl.getElementsByTagNameNS(HP_NS, 'pic');
-                        const cmpMaxW = parseInt(tplComparePics[0].getElementsByTagNameNS(HP_NS, 'curSz')[0].getAttribute('width'), 10);
-                        const cmpMaxH = parseInt(tplComparePics[0].getElementsByTagNameNS(HP_NS, 'curSz')[0].getAttribute('height'), 10);
+                        let compareAnchorPara = slot.photoTbl.parentNode;
+                        while (compareAnchorPara && compareAnchorPara.localName !== 'p') compareAnchorPara = compareAnchorPara.parentNode;
 
-                        const appendCompareTbl = (tbl) => {
-                            ensureTblTreatAsChar(tbl);
-                            const trail = Array.from(compareInsertRun.children).find(c => c.localName === 't') || null;
-                            if (trail) compareInsertRun.insertBefore(tbl, trail);
-                            else compareInsertRun.appendChild(tbl);
+                        const setParaPlainText = (para, text) => {
+                            if (!para) return para;
+                            const runs = Array.from(para.getElementsByTagNameNS(HP_NS, 'run'));
+                            runs.forEach((run, idx) => {
+                                if (idx > 0 && run.parentNode === para) run.parentNode.removeChild(run);
+                            });
+                            let run = para.getElementsByTagNameNS(HP_NS, 'run')[0];
+                            if (!run) {
+                                run = xmlDoc.createElementNS(HP_NS, 'hp:run');
+                                run.setAttribute('charPrIDRef', '29');
+                                para.insertBefore(run, para.getElementsByTagNameNS(HP_NS, 'linesegarray')[0] || null);
+                            }
+                            Array.from(run.childNodes).forEach(n => {
+                                if (n.localName !== 'linesegarray') run.removeChild(n);
+                            });
+                            const t = xmlDoc.createElementNS(HP_NS, 'hp:t');
+                            t.textContent = text;
+                            run.appendChild(t);
+                            return para;
+                        };
+
+                        const buildComparePhotoPara = () => {
+                            if (grade3CompareFloatingStamp && grade3CompareFloatingStamp.photoPara) {
+                                return grade3CompareFloatingStamp.photoPara.cloneNode(true);
+                            }
+                            const p = xmlDoc.createElementNS(HP_NS, 'hp:p');
+                            p.setAttribute('paraPrIDRef', '1');
+                            p.setAttribute('styleIDRef', '8');
+                            const run = xmlDoc.createElementNS(HP_NS, 'hp:run');
+                            run.appendChild(tplPic.cloneNode(true));
+                            run.appendChild(tplPic.cloneNode(true));
+                            run.appendChild(xmlDoc.createElementNS(HP_NS, 'hp:t'));
+                            p.appendChild(run);
+                            const lsa = xmlDoc.createElementNS(HP_NS, 'hp:linesegarray');
+                            const ls = xmlDoc.createElementNS(HP_NS, 'hp:lineseg');
+                            ls.setAttribute('textpos', '0');
+                            ls.setAttribute('vertpos', '0');
+                            ls.setAttribute('vertsize', '16000');
+                            ls.setAttribute('textheight', '16000');
+                            ls.setAttribute('baseline', '13600');
+                            lsa.appendChild(ls);
+                            p.appendChild(lsa);
+                            return p;
+                        };
+
+                        const buildCompareTitlePara = (text) => {
+                            const proto = (grade3CompareFloatingStamp && grade3CompareFloatingStamp.titlePara)
+                                ? grade3CompareFloatingStamp.titlePara.cloneNode(true)
+                                : slot.titlePara.cloneNode(true);
+                            return setParaPlainText(proto, text);
+                        };
+
+                        const buildCompareLabelPara = (left, right) => {
+                            const gap = Math.max(6, 36 - String(left).length - String(right).length);
+                            const labelText = `${left}${' '.repeat(gap)}${right}`.trim();
+                            if (grade3CompareFloatingStamp && grade3CompareFloatingStamp.labelPara) {
+                                return setParaPlainText(grade3CompareFloatingStamp.labelPara.cloneNode(true), labelText);
+                            }
+                            return setParaPlainText(buildCompareTitlePara(''), labelText);
+                        };
+
+                        const assignComparePicIds = (para) => {
+                            Array.from(para.getElementsByTagNameNS(HP_NS, 'pic')).forEach(pic => {
+                                cloneIdSeq++;
+                                pic.setAttribute('id', String(10200000 + cloneIdSeq));
+                                pic.setAttribute('instid', String(10300000 + cloneIdSeq));
+                            });
+                        };
+
+                        const insertCompareParas = (paras) => {
+                            if (!compareAnchorPara || !compareAnchorPara.parentNode) return;
+                            paras.filter(Boolean).forEach(p => {
+                                compareAnchorPara.parentNode.insertBefore(p, compareAnchorPara.nextSibling);
+                                compareAnchorPara = p;
+                            });
                         };
 
                         for (let ci = 0; ci < priorityCompareDefects.length; ci++) {
@@ -19878,22 +19986,21 @@ document.addEventListener('DOMContentLoaded', () => {
                             const currSrc = getDefectOutputPhotos(d)[0];
                             if (!prevSrc && !currSrc) continue;
 
-                            photoTblCounter++;
-                            const newTbl = comparePhotoTbl.cloneNode(true);
-                            newTbl.setAttribute('id', String(9800000 + photoTblCounter));
-                            const pics = Array.from(newTbl.getElementsByTagNameNS(HP_NS, 'pic'));
-                            pics.forEach((p, pIdx) => {
-                                p.setAttribute('id', String(9900000 + photoTblCounter * 2 + pIdx));
-                                p.setAttribute('instid', String(9950000 + photoTblCounter * 2 + pIdx));
-                            });
+                            const rowCtx = {
+                                floorCode,
+                                floorDisplayLabel: getFloorLabel(floorCode)
+                            };
+                            const colCount = Array.from(normalStyleRow.getElementsByTagNameNS(HP_NS, 'tc')).length;
+                            const values = getReportSurveyRowValues(d, rowCtx, isGrade3, colCount);
+                            const defectNo = values[0] || getSurveyCellText('no', d, rowCtx) || (d.no || '').replace(/^NO\.?\s*/i, '');
+                            const roundLabels = getDefectHwpxCompareRoundLabels(d, bldg);
 
-                            const trsCmp = Array.from(newTbl.getElementsByTagNameNS(HP_NS, 'tr')).filter(tr => tr.parentNode === newTbl);
-                            const capTcsCmp = trsCmp[1].getElementsByTagNameNS(HP_NS, 'tc');
-                            const descTcsCmp = trsCmp[2].getElementsByTagNameNS(HP_NS, 'tc');
-                            const locText = getSurveyCellText('location', d, { floorCode });
-                            const typeText = getSurveyCellText('defectType', d);
+                            const titlePara = buildCompareTitlePara(defectNo);
+                            const photoPara = buildComparePhotoPara();
+                            assignComparePicIds(photoPara);
+                            const pics = Array.from(photoPara.getElementsByTagNameNS(HP_NS, 'pic'));
 
-                            if (prevSrc && currSrc) {
+                            if (prevSrc && currSrc && pics.length >= 2) {
                                 imgCounter++;
                                 const imgIdPrev = `photoAuto${imgCounter}`;
                                 let pack = dataUrlToBytes(prevSrc);
@@ -19909,14 +20016,7 @@ document.addEventListener('DOMContentLoaded', () => {
                                 zip.file(`BinData/${imgIdCurr}.${pack.ext}`, pack.bytes);
                                 manifestAdds.push(`<opf:item id="${imgIdCurr}" href="BinData/${imgIdCurr}.${pack.ext}" media-type="${pack.mime}" isEmbeded="1"/>`);
                                 setPicImage(pics[1], imgIdCurr, size.w, size.h, cmpMaxW, cmpMaxH);
-
-                                setTcText(capTcsCmp[0], '전회차');
-                                setTcText(capTcsCmp[2], locText);
-                                setTcText(capTcsCmp[4], '금회차');
-                                setTcText(capTcsCmp[6], locText);
-                                setTcText(descTcsCmp[1], typeText);
-                                setTcText(descTcsCmp[3], typeText);
-                            } else if (prevSrc) {
+                            } else if (prevSrc && pics.length >= 1) {
                                 imgCounter++;
                                 const imgIdPrev = `photoAuto${imgCounter}`;
                                 const pack = dataUrlToBytes(prevSrc);
@@ -19924,11 +20024,8 @@ document.addEventListener('DOMContentLoaded', () => {
                                 zip.file(`BinData/${imgIdPrev}.${pack.ext}`, pack.bytes);
                                 manifestAdds.push(`<opf:item id="${imgIdPrev}" href="BinData/${imgIdPrev}.${pack.ext}" media-type="${pack.mime}" isEmbeded="1"/>`);
                                 setPicImage(pics[0], imgIdPrev, size.w, size.h, cmpMaxW, cmpMaxH);
-                                stripPhotoTblRightHalf(newTbl);
-                                setTcText(capTcsCmp[0], '전회차');
-                                setTcText(capTcsCmp[2], locText);
-                                setTcText(descTcsCmp[1], typeText);
-                            } else {
+                                if (pics[1] && pics[1].parentNode) pics[1].parentNode.removeChild(pics[1]);
+                            } else if (currSrc && pics.length >= 1) {
                                 imgCounter++;
                                 const imgIdCurr = `photoAuto${imgCounter}`;
                                 const pack = dataUrlToBytes(currSrc);
@@ -19936,13 +20033,15 @@ document.addEventListener('DOMContentLoaded', () => {
                                 zip.file(`BinData/${imgIdCurr}.${pack.ext}`, pack.bytes);
                                 manifestAdds.push(`<opf:item id="${imgIdCurr}" href="BinData/${imgIdCurr}.${pack.ext}" media-type="${pack.mime}" isEmbeded="1"/>`);
                                 setPicImage(pics[0], imgIdCurr, size.w, size.h, cmpMaxW, cmpMaxH);
-                                stripPhotoTblRightHalf(newTbl);
-                                setTcText(capTcsCmp[0], '금회차');
-                                setTcText(capTcsCmp[2], locText);
-                                setTcText(descTcsCmp[1], typeText);
+                                if (pics[1] && pics[1].parentNode) pics[1].parentNode.removeChild(pics[1]);
                             }
 
-                            appendCompareTbl(newTbl);
+                            const leftLabel = roundLabels.prev || roundLabels.curr;
+                            const rightLabel = roundLabels.prev ? roundLabels.curr : '';
+                            const labelPara = buildCompareLabelPara(leftLabel, rightLabel || leftLabel);
+
+                            if (ci === 0 && titlePara) titlePara.setAttribute('pageBreak', '1');
+                            insertCompareParas([titlePara, photoPara, labelPara]);
                         }
                     } catch (cmpErr) {
                         console.error(`${floorCode} 중점관리 비교사진 삽입 실패:`, cmpErr);
