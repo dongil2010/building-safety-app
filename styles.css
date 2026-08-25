@@ -4392,9 +4392,11 @@ body {
     display: flex;
     flex-direction: column;
     max-height: min(92dvh, calc(100dvh - 1.5rem));
+    min-height: 0;
 }
 
 .add-building-header {
+    flex-shrink: 0;
     background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
     border-bottom: none;
     padding: 1.15rem 1.35rem;
@@ -4449,6 +4451,7 @@ body {
     background: #f1f5f9;
     border-bottom: 1px solid #dbe3ef;
     padding: 0.35rem;
+    flex-shrink: 0;
 }
 
 .add-building-mode-btn {
@@ -4489,6 +4492,8 @@ body {
     overflow-y: auto;
     overflow-x: hidden;
     -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+    touch-action: pan-y;
     flex: 1 1 auto;
     min-height: 0;
 }
@@ -4986,9 +4991,13 @@ body {
     border: 1px solid #d8dee8;
     box-shadow: 0 22px 55px rgba(15, 23, 42, 0.18);
     overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
 }
 
 .edit-building-header {
+    flex-shrink: 0;
     background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
     border-bottom: none;
     padding: 1rem 1.25rem;
@@ -7430,15 +7439,34 @@ body {
         display: none;
     }
 
-    /* 현장/도면 등록 모달 — 세로 화면에서 폼이 창 밖으로 나가지 않게 */
+    /* 현장/도면 등록 모달 — 세로 화면에서 폼 스크롤 */
+    #addBuildingModal.modal-overlay,
+    #addBuildingModal.modal-overlay.open,
+    #editBuildingModal.modal-overlay,
+    #editBuildingModal.modal-overlay.open {
+        overflow-x: hidden;
+        overflow-y: auto !important;
+        -webkit-overflow-scrolling: touch;
+        align-items: flex-start;
+        justify-content: center;
+        padding:
+            max(0.5rem, env(safe-area-inset-top, 0px))
+            max(0.5rem, env(safe-area-inset-right, 0px))
+            max(0.75rem, env(safe-area-inset-bottom, 0px))
+            max(0.5rem, env(safe-area-inset-left, 0px));
+        overscroll-behavior: contain;
+    }
+
     #addBuildingModal .modal-card,
     #editBuildingModal .modal-card {
         width: min(96vw, 640px);
-        max-height: calc(100dvh - 1.2rem);
-        margin: 0.4rem auto;
+        max-height: calc(100dvh - 1.2rem - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
+        height: auto;
+        margin: 0 auto 0.5rem;
         display: flex;
         flex-direction: column;
         min-height: 0;
+        flex-shrink: 0;
     }
 
     #addBuildingModal .add-building-body {
@@ -7448,6 +7476,8 @@ body {
         overflow-y: auto !important;
         overflow-x: hidden;
         -webkit-overflow-scrolling: touch;
+        overscroll-behavior: contain;
+        touch-action: pan-y;
         padding: 0.75rem 0.85rem;
     }
 
@@ -7494,6 +7524,8 @@ body {
         overflow-y: auto !important;
         overflow-x: hidden;
         -webkit-overflow-scrolling: touch;
+        overscroll-behavior: contain;
+        touch-action: pan-y;
         flex: 1 1 auto;
         min-height: 0;
     }
