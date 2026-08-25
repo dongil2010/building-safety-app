@@ -183,15 +183,34 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    /** 가져오기「전회차 표시」: 현회차(photos) 사진을 전차(prevRoundPhotos)로 옮기고 현차 슬롯 비움 */
+    /** 가져오기「전회차 표시」: 현회차(photos) 사진으로 전차(prevRoundPhotos)를 교체하고 현차 슬롯 비움 (기존 전차 사진에 추가하지 않음) */
     function applyImportedCarryOverPhotos(d) {
         if (!d?.id) return;
         const current = (Array.isArray(d.photos) ? d.photos : []).filter(Boolean);
         const prev = (Array.isArray(d.prevRoundPhotos) ? d.prevRoundPhotos : []).filter(Boolean);
         const oldCurIdCount = (d.photoIds && d.photoIds.length) || current.length;
+        const oldPrevIdCount = (d.prevRoundPhotoIds && d.prevRoundPhotoIds.length) || prev.length;
+
+        d.photos = [];
+        delete d.photoIds;
+
+        if (oldPrevIdCount > 0) {
+            for (let i = 0; i < oldPrevIdCount; i++) {
+                const pid = getPhotoDocId(d.id, i, 'prev');
+                _idbPersistedPhotoKeys.delete(pid);
+                idbDelete('photos', pid);
+            }
+        }
+        if (oldCurIdCount > 0) {
+            for (let i = 0; i < oldCurIdCount; i++) {
+                const pid = getPhotoDocId(d.id, i);
+                _idbPersistedPhotoKeys.delete(pid);
+                idbDelete('photos', pid);
+            }
+        }
 
         if (current.length > 0) {
-            d.prevRoundPhotos = prev.concat(current);
+            d.prevRoundPhotos = current.slice();
             d.prevRoundPhotoIds = d.prevRoundPhotos.map((_, i) => getPhotoDocId(d.id, i, 'prev'));
             d.prevRoundPhotos.forEach((url, i) => {
                 const pid = d.prevRoundPhotoIds[i];
@@ -202,20 +221,18 @@ document.addEventListener('DOMContentLoaded', () => {
         } else if (prev.length > 0) {
             d.prevRoundPhotos = prev;
             d.prevRoundPhotoIds = prev.map((_, i) => getPhotoDocId(d.id, i, 'prev'));
+            prev.forEach((url, i) => {
+                const pid = d.prevRoundPhotoIds[i];
+                if (!window._photoCache) window._photoCache = {};
+                window._photoCache[pid] = url;
+                idbSet('photos', pid, url);
+            });
         } else {
             delete d.prevRoundPhotos;
             delete d.prevRoundPhotoIds;
         }
 
-        d.photos = [];
-        delete d.photoIds;
-
-        if (oldCurIdCount > 0) {
-            for (let i = 0; i < oldCurIdCount; i++) {
-                const pid = getPhotoDocId(d.id, i);
-                _idbPersistedPhotoKeys.delete(pid);
-                idbDelete('photos', pid);
-            }
+        if (oldCurIdCount > 0 || oldPrevIdCount > 0) {
             invalidatePersistedPhotoCacheForDefect(d.id);
         }
     }
