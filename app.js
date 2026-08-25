@@ -3756,21 +3756,15 @@ document.addEventListener('DOMContentLoaded', () => {
         return Math.round((scale / Math.max(fit, 0.001)) * 100);
     }
 
-    /** 모바일: 화면맞춤 대비 배율로 도면 티어·패치 해상도 (800%→8000px, 1200%→16000px) */
+    /** 모바일: 화면맞춤 대비 200% 이상 → 16000px 티어·패치 */
     function getMobileZoomTierDim(activeTier) {
         const pct = getMapZoomVsFitPercent();
         const cur = activeTier || 4000;
         if (cur >= 16000) {
-            if (pct < 1080) return 8000;
+            if (pct < 180) return 4000;
             return 16000;
         }
-        if (cur >= 8000) {
-            if (pct >= 1200) return 16000;
-            if (pct < 720) return 4000;
-            return 8000;
-        }
-        if (pct >= 1200) return 16000;
-        if (pct >= 800) return 8000;
+        if (pct >= 200) return 16000;
         return 4000;
     }
 
@@ -3792,13 +3786,10 @@ document.addEventListener('DOMContentLoaded', () => {
         if (hd) {
             el.textContent = `${pct}% · HD`;
             el.classList.add('is-hd');
-        } else if (pct >= 1200) {
+        } else if (pct >= 200) {
             el.textContent = `${pct}% · 16000px`;
             el.classList.remove('is-hd');
-        } else if (pct >= 800) {
-            el.textContent = `${pct}% · 8000px`;
-            el.classList.remove('is-hd');
-        } else if (pct >= 200 && !pdfKnown && floorPdfKnownUnavailable(bldg?.id, fc)) {
+        } else if (pct >= 115 && !pdfKnown && floorPdfKnownUnavailable(bldg?.id, fc)) {
             el.textContent = `${pct}% · 4000px`;
             el.classList.remove('is-hd');
         } else {
