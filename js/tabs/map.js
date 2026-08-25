@@ -44,5 +44,8 @@ window.BSA.tabs['tab-map'] = {
         }
         setTimeout(function () { refreshMapCanvas(true); }, 50);
         setTimeout(function () { refreshMapCanvas(false); }, 220);
+        if (typeof window.preloadCurrentFloorPdfSource === 'function') {
+            setTimeout(function () { window.preloadCurrentFloorPdfSource(); }, 280);
+        }
     }
 };

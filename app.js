@@ -356,6 +356,8 @@ document.addEventListener('DOMContentLoaded', () => {
         const cur = currentLevel || 0;
         const d = zoomDemand || 1;
         const top = maxLevel >= 4 ? 4 : 3;
+        const entry = isMobileMapViewport() ? 0.72 : 1.05;
+        const exitLow = isMobileMapViewport() ? 0.62 : 1.02;
 
         if (top >= 4) {
             if (cur >= 4) {
@@ -374,10 +376,10 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             if (cur === 1) {
                 if (d >= 2.05) return 2;
-                if (d < 1.02) return 0;
+                if (d < exitLow) return 0;
                 return 1;
             }
-            if (d >= 1.05) return 1;
+            if (d >= entry) return 1;
             return 0;
         }
 
@@ -393,10 +395,10 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         if (cur === 1) {
             if (d >= 2.05) return 2;
-            if (d < 0.88) return 0;
+            if (d < (isMobileMapViewport() ? 0.55 : 0.88)) return 0;
             return 1;
         }
-        if (d >= 1.05) return 1;
+        if (d >= entry) return 1;
         return 0;
     }
 
@@ -595,7 +597,10 @@ document.addEventListener('DOMContentLoaded', () => {
         const region = getVisibleImageRect();
         const screenLong = Math.max(cw, ch) * dpr;
         const regionLong = Math.max(region.w, region.h, 1);
-        return Math.max(screenLong / regionLong, scale * dpr);
+        const fitScale = getMapFitScale();
+        // 모바일은 화면맞춤 배율이 0.1대 — 절대 scale만으로는 패치가 안 켜짐
+        const zoomVsFit = scale / Math.max(fitScale, 0.05);
+        return Math.max(screenLong / regionLong, scale * dpr, zoomVsFit * dpr * 0.92);
     }
 
     /**
@@ -674,6 +679,53 @@ document.addEventListener('DOMContentLoaded', () => {
         else if (toPatch) drawPatch(toPatch, 1);
     }
 
+    /** @type {Map<string, boolean>} 층별 PDF 유무 (모바일 async 조회 결과) */
+    const _floorPdfKnown = new Map();
+
+    function markFloorPdfKnown(bldgId, floorCode, hasPdf) {
+        if (!bldgId || !floorCode) return;
+        _floorPdfKnown.set(`${bldgId}_${floorCode}`, !!hasPdf);
+    }
+
+    function floorPdfKnownUnavailable(bldgId, floorCode) {
+        return _floorPdfKnown.get(`${bldgId}_${floorCode}`) === false;
+    }
+
+    async function ensurePdfSourceForFloor(bldg, floorCode) {
+        if (!bldg || !floorCode) return null;
+        const key = `${bldg.id}_${floorCode}`;
+        if (floorHasPdfSourceSync(bldg, floorCode)) {
+            markFloorPdfKnown(bldg.id, floorCode, true);
+            return (typeof window.getFloorPdfDataUrl === 'function')
+                ? window.getFloorPdfDataUrl(bldg, floorCode)
+                : null;
+        }
+        if (floorPdfKnownUnavailable(bldg.id, floorCode)) return null;
+        if (typeof resolveBuildingFloorPdf !== 'function') return null;
+        try {
+            const pdf = await resolveBuildingFloorPdf(bldg, floorCode);
+            if (pdf) {
+                await applyResolvedPdfToBuilding(bldg, floorCode, pdf);
+                markFloorPdfKnown(bldg.id, floorCode, true);
+                return pdf;
+            }
+        } catch (e) {
+            console.warn('PDF 원본 조회 실패:', e);
+        }
+        markFloorPdfKnown(bldg.id, floorCode, false);
+        return null;
+    }
+
+    window.preloadCurrentFloorPdfSource = async function preloadCurrentFloorPdfSource() {
+        const bldg = state.currentBuilding;
+        const fc = state.currentFloor;
+        if (!bldg || !fc) return;
+        await ensurePdfSourceForFloor(bldg, fc);
+        if (state.currentTab === 'tab-map' && state.bgImage && shouldUseViewportTilesForCurrentFloor()) {
+            flushViewportHiPatchSync();
+        }
+    };
+
     function floorHasPdfSourceSync(bldg, floorCode) {
         if (!bldg || !floorCode) return false;
         if (typeof window.getFloorPdfDataUrl === 'function' && window.getFloorPdfDataUrl(bldg, floorCode)) {
@@ -702,7 +754,15 @@ document.addEventListener('DOMContentLoaded', () => {
         if (window.BSA_PDF_VECTOR && window.BSA_PDF_VECTOR.useViewportTiles === false) return false;
         const bldg = state.currentBuilding;
         const fc = state.currentFloor;
-        return floorMayHavePdfSource(bldg, fc);
+        if (!bldg || !fc) return false;
+        if (floorMayHavePdfSource(bldg, fc)) return true;
+        if (_floorPdfKnown.get(`${bldg.id}_${fc}`) === true) return true;
+        // 모바일: Firestore 미리보기만 있어도 IDB/클라우드 PDF async 조회 후 패치
+        if (isMobileMapViewport() && state.bgImage) {
+            const registered = bldg.floorsList && bldg.floorsList.some((f) => f.floorCode === fc);
+            if (registered && !floorPdfKnownUnavailable(bldg.id, fc)) return true;
+        }
+        return false;
     }
 
     function isMobileMapViewport() {
@@ -802,6 +862,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         let pdfUrl = null;
+        await ensurePdfSourceForFloor(bldg, fc);
         if (typeof window.resolveFloorPdfDataUrlAsync === 'function') {
             pdfUrl = await window.resolveFloorPdfDataUrlAsync(bldg, fc);
         } else if (typeof resolveBuildingFloorPdf === 'function') {
@@ -810,7 +871,9 @@ document.addEventListener('DOMContentLoaded', () => {
             pdfUrl = window.getFloorPdfDataUrl(bldg, fc);
         }
         if (!pdfUrl) {
-            console.warn('뷰포트 고해상도 패치: PDF 원본 없음 — 도면을 PDF로 다시 등록하거나 동기화해 주세요.');
+            if (floorMayHavePdfSource(bldg, fc)) {
+                console.warn('뷰포트 고해상도 패치: PDF 원본 없음 — 도면을 PDF로 다시 등록하거나 동기화해 주세요.');
+            }
             return;
         }
         if (token !== viewportHiPatchToken) return;
@@ -857,7 +920,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 y: region.y,
                 w: region.w,
                 h: region.h,
-            });
+            }, { immediate: mobile });
             viewportPatchActiveLevel = wantLevel;
             lastViewportPatchMeta = {
                 level: wantLevel,
@@ -4021,6 +4084,13 @@ document.addEventListener('DOMContentLoaded', () => {
                     drawCanvas();
                 }
                 scheduleFloorDrawingTierPrefetch(bldg, floorCode);
+                if (floorMayHavePdfSource(bldg, floorCode) || isMobileMapViewport()) {
+                    ensurePdfSourceForFloor(bldg, floorCode).then(() => {
+                        if (state.currentFloor === floorCode && state.currentTab === 'tab-map') {
+                            flushViewportHiPatchSync();
+                        }
+                    });
+                }
             };
             img.onerror = () => {
                 if (!isFallback) {
@@ -15782,6 +15852,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 const t = e.changedTouches && e.changedTouches[0];
                 if (isDragging || isMarkingDrag || isAreaDrag || isDraggingPin || isDraggingPinGroup || pendingDragHit || isDraggingLegend || isResizingLegend || isMarqueeSelecting) {
                     handleDragEnd(t ? t.clientX : undefined, t ? t.clientY : undefined);
+                }
+                if (shouldUseViewportTilesForCurrentFloor()) {
+                    flushViewportHiPatchSync();
                 }
             }
         });
