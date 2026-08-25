@@ -336,6 +336,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const _floorTierPrefetchInFlight = new Set();
     let viewportHiPatchTimer = null;
     let viewportHiPatchToken = 0;
+    let viewportHiPatchInFlight = 0;
     /** PDF 뷰포트 패치 해상도 단계 (0=끔, 1~3 기본, 4=큰 도면) */
     let viewportPatchActiveLevel = 0;
     let lastViewportPatchMeta = null;
@@ -691,25 +692,24 @@ document.addEventListener('DOMContentLoaded', () => {
         const bgSame = floorImagesEquivalent(fromBg, toBg);
         const patchSame = floorPatchesEquivalent(fromPatch, toPatch);
 
-        // 크로스디졸브(양쪽 fade-out)는 회색 캔버스가 비쳐 도면이 어두워짐 →
-        // 아래 레이어는 항상 100%, 새 해상도만 위에서 페이드인(overlay reveal)
+        // 1) 배경만 (티어 교차페이드) — 패치는 항상 그 다음에 그림
         const baseBg = fromBg || toBg;
         if (baseBg) drawBg(baseBg, 1);
         if (!bgSame && toBg) drawBg(toBg, t);
 
-        if (fromPatch && !patchSame) {
-            if (toPatch) drawPatch(fromPatch, 1);
-            else drawPatch(fromPatch, 1 - t);
-        } else if (fromPatch) {
-            drawPatch(fromPatch, 1);
+        // 2) HD 패치는 항상 최상단 — bg 티어(4000 PNG)가 선명 패치를 덮지 않게
+        if (toPatch && !patchSame && fromPatch) {
+            drawPatch(fromPatch, 1 - t);
+            drawPatch(toPatch, t);
+        } else {
+            const topPatch = toPatch || fromPatch;
+            if (topPatch) drawPatch(topPatch, 1);
         }
-
-        if (toPatch && !patchSame) drawPatch(toPatch, t);
-        else if (toPatch) drawPatch(toPatch, 1);
     }
 
     /** @type {Map<string, boolean>} 층별 PDF 유무 (모바일 async 조회 결과) */
     const _floorPdfKnown = new Map();
+    const _pdfPatchWarnedFloors = new Set();
 
     function markFloorPdfKnown(bldgId, floorCode, hasPdf) {
         if (!bldgId || !floorCode) return;
@@ -864,12 +864,22 @@ document.addEventListener('DOMContentLoaded', () => {
         syncViewportHiPatch();
     }
 
+    function shouldSkipTierBgSwapForZoomedPatch(bldg, fc) {
+        if (!bldg || !fc) return false;
+        if (getMapZoomVsFitPercent() < 400) return false;
+        if (hasActiveFloorHiPatch()) return true;
+        if (viewportHiPatchInFlight) return true;
+        return floorMayHavePdfSource(bldg, fc) || _floorPdfKnown.get(`${bldg.id}_${fc}`) !== false;
+    }
+
     async function syncViewportHiPatch() {
         const bldg = state.currentBuilding;
         const fc = state.currentFloor;
         if (!bldg || !fc || state.currentTab !== 'tab-map' || !state.bgImage) return;
 
         const token = ++viewportHiPatchToken;
+        viewportHiPatchInFlight = token;
+        try {
         const region = getVisibleImageRect();
         let ref = (typeof window.getFloorPlanRefDimensions === 'function')
             ? window.getFloorPlanRefDimensions(bldg, fc)
@@ -935,6 +945,13 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             if (floorMayHavePdfSource(bldg, fc) || zoomVsFit >= 2) {
                 console.warn('뷰포트 고해상도 패치: PDF 원본 없음 — 도면을 PDF로 다시 등록하거나 동기화해 주세요.');
+                if (mobile && zoomVsFit >= 8 && typeof window.showToast === 'function') {
+                    const warnKey = `${bldg.id}_${fc}`;
+                    if (!_pdfPatchWarnedFloors.has(warnKey)) {
+                        _pdfPatchWarnedFloors.add(warnKey);
+                        window.showToast('고배율 선명도: PDF 원본이 필요합니다. PC에서 PDF 도면을 다시 등록·동기화해 주세요.', 'warning', 5000);
+                    }
+                }
             }
             return;
         }
@@ -1024,6 +1041,9 @@ document.addEventListener('DOMContentLoaded', () => {
                     }
                 }
             }
+        }
+        } finally {
+            if (viewportHiPatchInFlight === token) viewportHiPatchInFlight = 0;
         }
     }
 
@@ -3845,6 +3865,9 @@ document.addEventListener('DOMContentLoaded', () => {
         if (hd) {
             el.textContent = `${pct}% · HD`;
             el.classList.add('is-hd');
+        } else if (pct >= 800 && floorPdfKnownUnavailable(bldg?.id, fc)) {
+            el.textContent = `${pct}% · PDF없음`;
+            el.classList.remove('is-hd');
         } else if (pct >= 2000) {
             el.textContent = `${pct}% · 16000px`;
             el.classList.remove('is-hd');
@@ -4105,6 +4128,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (shouldUseViewportTilesForCurrentFloor()) {
             await syncViewportHiPatch();
             if (hasActiveFloorHiPatch()) return;
+            if (shouldSkipTierBgSwapForZoomedPatch(bldg, fc)) return;
         }
 
         const wantDim = pickFloorDrawingTierDimForView();
@@ -4119,7 +4143,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const cacheKey = `${bldg.id}_${fc}_${wantDim}`;
         const cached = state.floorDrawingTierImageCache[cacheKey];
         if (cached && cached.complete && (cached.naturalWidth || cached.width) > 0) {
-            applyFloorDrawingTarget(cached, null);
+            applyFloorDrawingTarget(cached, undefined, { immediate: isMobileMapViewport() });
             floorDrawingActiveTierDim = wantDim;
             const ndtKey = `${state.currentBuildingId}_${fc}`;
             if (ndtBgImage && !(state.ndtImages && state.ndtImages[ndtKey])) {
@@ -4135,7 +4159,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (loadToken !== floorDrawingTierLoadToken) return;
             if (state.currentFloor !== fc || state.currentBuildingId !== bldg.id) return;
             state.floorDrawingTierImageCache[cacheKey] = img;
-            applyFloorDrawingTarget(img, null);
+            applyFloorDrawingTarget(img, undefined, { immediate: isMobileMapViewport() });
             floorDrawingActiveTierDim = wantDim;
             const ndtKey = `${state.currentBuildingId}_${fc}`;
             if (ndtBgImage && !(state.ndtImages && state.ndtImages[ndtKey])) {
@@ -7518,7 +7542,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     ndtView.offsetY = currentMid.y - imgY * newScale;
 
                     const zoomTxt = document.getElementById('ndtZoomScaleText');
-                    if (zoomTxt) zoomTxt.textContent = `${Math.round(ndtView.scale * 100)}%`;
+                    if (zoomTxt) zoomTxt.textContent = formatNdtZoomLabel();
                     drawNdtCanvas();
                 }
             } else if (!isNdtPinching && (pendingNdtPinHit || isDraggingNdtPin) && e.touches.length === 1) {
