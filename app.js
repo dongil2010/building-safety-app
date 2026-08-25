@@ -1177,18 +1177,44 @@ document.addEventListener('DOMContentLoaded', () => {
 
     window.openAddBuildingModalFunc = function() {
         if (elements.addBuildingModal) {
+            window._addBuildingMode = 'new';
+            setAddBuildingMode('new');
+
             const nameInput = document.getElementById('inputBuildingName');
             if (nameInput) nameInput.value = '';
             const addrInput = document.getElementById('inputBuildingAddress');
             if (addrInput) addrInput.value = '';
+            const floorsInput = document.getElementById('inputBuildingFloors');
+            if (floorsInput) floorsInput.value = '';
+            const structureInput = document.getElementById('inputBuildingStructureType');
+            if (structureInput) structureInput.value = '';
+            const facilityInput = document.getElementById('inputBuildingFacilityGrade');
+            if (facilityInput) facilityInput.value = '';
+            const completionInput = document.getElementById('inputBuildingCompletionDate');
+            if (completionInput) completionInput.value = '';
+            const notesInput = document.getElementById('inputBuildingNotes');
+            if (notesInput) notesInput.value = '';
             const dateInput = document.getElementById('inputBuildingDate');
             if (dateInput) dateInput.value = new Date().toISOString().split('T')[0];
+            const typeInput = document.getElementById('inputBuildingInspectionType');
+            if (typeInput) typeInput.value = '정밀안전점검';
+            const yearInput = document.getElementById('inputBuildingInspectionYear');
+            if (yearInput) yearInput.value = '2026년';
+            const periodInput = document.getElementById('inputBuildingInspectionPeriod');
+            if (periodInput) periodInput.value = '하반기';
+
             const preview = document.getElementById('drawingSortPreview');
             if (preview) preview.innerHTML = '';
             window.selectedUploadedDrawings = [];
 
+            populateAddBuildingImportSources();
+            const importSel = document.getElementById('selectImportSourceBuilding');
+            if (importSel) importSel.value = '';
+            updateImportSourceSummary(null);
+
             elements.addBuildingModal.style.display = 'flex';
             elements.addBuildingModal.classList.add('open');
+            if (nameInput) setTimeout(() => nameInput.focus(), 80);
         }
     };
 
@@ -1198,6 +1224,257 @@ document.addEventListener('DOMContentLoaded', () => {
             elements.addBuildingModal.classList.remove('open');
         }
     };
+
+    function setAddBuildingMode(mode) {
+        window._addBuildingMode = mode === 'import' ? 'import' : 'new';
+        const isImport = window._addBuildingMode === 'import';
+        const panel = document.getElementById('addBuildingImportPanel');
+        if (panel) panel.hidden = !isImport;
+        document.getElementById('btnAddModeNew')?.classList.toggle('active', !isImport);
+        document.getElementById('btnAddModeImport')?.classList.toggle('active', isImport);
+        document.getElementById('btnAddModeNew')?.setAttribute('aria-selected', !isImport ? 'true' : 'false');
+        document.getElementById('btnAddModeImport')?.setAttribute('aria-selected', isImport ? 'true' : 'false');
+    }
+
+    function populateAddBuildingImportSources() {
+        const sel = document.getElementById('selectImportSourceBuilding');
+        if (!sel) return;
+        const bldgs = window.state.buildings || [];
+        sel.innerHTML = '<option value="">— 가져올 점검 선택 —</option>' +
+            bldgs.map((b) => {
+                const meta = [b.inspectionYear, b.inspectionPeriod, b.inspectionType].filter(Boolean).join(' · ');
+                const label = `${(b.name || '').replace(/^🏢\s*/, '')}${meta ? ` (${meta})` : ''}`;
+                return `<option value="${escapeHtml(b.id)}">${escapeHtml(label)}</option>`;
+            }).join('');
+    }
+
+    function getAddBuildingImportOptions() {
+        return {
+            basicInfo: !!document.getElementById('chkImportBasicInfo')?.checked,
+            floorsDrawings: !!document.getElementById('chkImportFloorsDrawings')?.checked,
+            defects: !!document.getElementById('chkImportDefects')?.checked,
+            ndt: !!document.getElementById('chkImportNdt')?.checked,
+            mapStyles: !!document.getElementById('chkImportMapStyles')?.checked
+        };
+    }
+
+    function updateImportSourceSummary(sourceBldg) {
+        const box = document.getElementById('importSourceSummary');
+        if (!box) return;
+        if (!sourceBldg) {
+            box.hidden = true;
+            box.innerHTML = '';
+            return;
+        }
+        const floorCount = (sourceBldg.floorsList && sourceBldg.floorsList.length) || Object.keys(sourceBldg.floorDrawings || {}).length;
+        const defectCount = countBuildingDefects(sourceBldg);
+        const ndtCount = Object.keys(window.state.ndtData || {}).filter(k => k.startsWith(`${sourceBldg.id}_`)).length;
+        box.hidden = false;
+        box.innerHTML =
+            `<strong>${escapeHtml((sourceBldg.name || '').replace(/^🏢\s*/, ''))}</strong> · ` +
+            `${escapeHtml(sourceBldg.address || '주소 미등록')}<br>` +
+            `층 ${floorCount}개 · 결함 ${defectCount}건 · NDT 층 ${ndtCount}개`;
+    }
+
+    function applyImportSourceToForm(sourceId) {
+        const bldg = (window.state.buildings || []).find(b => b.id === sourceId);
+        updateImportSourceSummary(bldg || null);
+        if (!bldg) return;
+        const opts = getAddBuildingImportOptions();
+        if (!opts.basicInfo) return;
+
+        const setVal = (id, val) => {
+            const el = document.getElementById(id);
+            if (el && val != null) el.value = val;
+        };
+        setVal('inputBuildingName', (bldg.name || '').replace(/^🏢\s*/, ''));
+        setVal('inputBuildingAddress', bldg.address || '');
+        setVal('inputBuildingFloors', bldg.floors || '');
+        setVal('inputBuildingStructureType', bldg.structureType || '');
+        setVal('inputBuildingFacilityGrade', bldg.facilityGrade || '');
+        setVal('inputBuildingCompletionDate', bldg.completionDate || '');
+        setVal('inputBuildingNotes', bldg.notes || '');
+        setVal('inputBuildingInspectionType', bldg.inspectionType || '정밀안전점검');
+        setVal('inputBuildingInspectionYear', bldg.inspectionYear || '2026년');
+        setVal('inputBuildingInspectionPeriod', bldg.inspectionPeriod || '하반기');
+    }
+
+    async function loadPhotoBlobForClone(pid) {
+        if (!pid) return null;
+        if (window._photoCache && window._photoCache[pid]) return window._photoCache[pid];
+        const fromIdb = await idbGet('photos', pid);
+        if (fromIdb) {
+            if (!window._photoCache) window._photoCache = {};
+            window._photoCache[pid] = fromIdb;
+            return fromIdb;
+        }
+        if (db && window.state.companyId) {
+            try {
+                const snap = await db.collection('safety_app').doc(getCompanyDocId()).collection('photos').doc(pid).get();
+                const url = snap.exists ? snap.data().dataUrl : null;
+                if (url) {
+                    if (!window._photoCache) window._photoCache = {};
+                    window._photoCache[pid] = url;
+                    idbSet('photos', pid, url);
+                }
+                return url;
+            } catch (_e) {
+                return null;
+            }
+        }
+        return null;
+    }
+
+    async function cloneDefectPhotosForNewId(defect, newDefectId) {
+        const cloned = {};
+        const curPhotos = (defect.photos && defect.photos.length)
+            ? defect.photos.slice()
+            : await Promise.all((defect.photoIds || []).map(loadPhotoBlobForClone));
+        const prevPhotos = (defect.prevRoundPhotos && defect.prevRoundPhotos.length)
+            ? defect.prevRoundPhotos.slice()
+            : await Promise.all((defect.prevRoundPhotoIds || []).map(loadPhotoBlobForClone));
+
+        const validCur = curPhotos.filter(Boolean);
+        const validPrev = prevPhotos.filter(Boolean);
+
+        if (validCur.length > 0) {
+            cloned.photos = validCur;
+            cloned.photoIds = validCur.map((_, i) => getPhotoDocId(newDefectId, i));
+            validCur.forEach((url, i) => {
+                const pid = cloned.photoIds[i];
+                if (!window._photoCache) window._photoCache = {};
+                window._photoCache[pid] = url;
+                idbSet('photos', pid, url);
+            });
+        }
+        if (validPrev.length > 0) {
+            cloned.prevRoundPhotos = validPrev;
+            cloned.prevRoundPhotoIds = validPrev.map((_, i) => getPhotoDocId(newDefectId, i, 'prev'));
+            validPrev.forEach((url, i) => {
+                const pid = cloned.prevRoundPhotoIds[i];
+                if (!window._photoCache) window._photoCache = {};
+                window._photoCache[pid] = url;
+                idbSet('photos', pid, url);
+            });
+        }
+        return cloned;
+    }
+
+    async function cloneFloorDrawingsFromSource(sourceBldg, newBuildingId, targetBldg) {
+        const srcDrawings = sourceBldg.floorDrawings || {};
+        const srcPdfs = sourceBldg.floorDrawingPdfs || {};
+        const floorCodes = new Set([
+            ...Object.keys(srcDrawings),
+            ...Object.keys(srcPdfs),
+            ...((sourceBldg.floorsList || []).map(f => f.floorCode))
+        ]);
+
+        if (!targetBldg.floorDrawings) targetBldg.floorDrawings = {};
+        if (!targetBldg.floorDrawingPdfs) targetBldg.floorDrawingPdfs = {};
+
+        await Promise.all(Array.from(floorCodes).map(async (fc) => {
+            const oldKey = `${sourceBldg.id}_${fc}`;
+            const newKey = `${newBuildingId}_${fc}`;
+
+            if (!targetBldg.floorDrawings[fc]) {
+                let raster = srcDrawings[fc];
+                if (!raster) raster = await idbGet('floorDrawings', oldKey);
+                if (raster) {
+                    targetBldg.floorDrawings[fc] = raster;
+                    await idbSet('floorDrawings', newKey, raster);
+                    await uploadFloorDrawing(newBuildingId, fc, raster);
+                }
+            }
+
+            if (!targetBldg.floorDrawingPdfs[fc]) {
+                let pdf = srcPdfs[fc];
+                if (!pdf) pdf = await idbGet('floorDrawingPdfs', oldKey);
+                if (pdf) {
+                    targetBldg.floorDrawingPdfs[fc] = pdf;
+                    await idbSet('floorDrawingPdfs', newKey, pdf);
+                }
+            }
+        }));
+
+        if (!targetBldg.floorsList || targetBldg.floorsList.length === 0) {
+            targetBldg.floorsList = JSON.parse(JSON.stringify(sourceBldg.floorsList || []));
+        }
+        if (!targetBldg.floors && sourceBldg.floors) {
+            targetBldg.floors = sourceBldg.floors;
+        }
+    }
+
+    async function cloneBuildingDataFromSource(sourceBldg, targetBldg, options) {
+        if (!sourceBldg || !targetBldg || !options) return;
+        const srcPrefix = `${sourceBldg.id}_`;
+        const newId = targetBldg.id;
+
+        if (options.floorsDrawings) {
+            await cloneFloorDrawingsFromSource(sourceBldg, newId, targetBldg);
+        }
+
+        if (options.defects) {
+            if (!window.state.defects) window.state.defects = {};
+            const srcKeys = Object.keys(window.state.defects).filter(k => k.startsWith(srcPrefix));
+            for (const srcKey of srcKeys) {
+                const floorCode = srcKey.slice(srcPrefix.length);
+                const newKey = `${newId}_${floorCode}`;
+                const srcDefects = window.state.defects[srcKey] || [];
+                const clonedList = [];
+                for (const d of srcDefects) {
+                    if (!d) continue;
+                    const copy = JSON.parse(JSON.stringify(d));
+                    copy.id = generateDefectUniqueId(newKey);
+                    delete copy.photos;
+                    delete copy.prevRoundPhotos;
+                    delete copy.photoIds;
+                    delete copy.prevRoundPhotoIds;
+                    const photoFields = await cloneDefectPhotosForNewId(d, copy.id);
+                    Object.assign(copy, photoFields);
+                    clonedList.push(copy);
+                }
+                if (clonedList.length > 0) {
+                    window.state.defects[newKey] = clonedList;
+                }
+            }
+            if (typeof uploadInlineDefectPhotosForSync === 'function') {
+                const subset = {};
+                Object.keys(window.state.defects).filter(k => k.startsWith(`${newId}_`)).forEach(k => {
+                    subset[k] = window.state.defects[k];
+                });
+                await uploadInlineDefectPhotosForSync(subset);
+            }
+        }
+
+        if (options.ndt) {
+            if (!window.state.ndtData) window.state.ndtData = {};
+            Object.keys(window.state.ndtData).forEach((k) => {
+                if (!k.startsWith(srcPrefix)) return;
+                const floorCode = k.slice(srcPrefix.length);
+                window.state.ndtData[`${newId}_${floorCode}`] = JSON.parse(JSON.stringify(window.state.ndtData[k]));
+            });
+            if (!window.state.ndtDisplacementGroups) window.state.ndtDisplacementGroups = {};
+            Object.keys(window.state.ndtDisplacementGroups).forEach((k) => {
+                if (!k.startsWith(srcPrefix)) return;
+                const floorCode = k.slice(srcPrefix.length);
+                window.state.ndtDisplacementGroups[`${newId}_${floorCode}`] =
+                    JSON.parse(JSON.stringify(window.state.ndtDisplacementGroups[k]));
+            });
+        }
+
+        if (options.mapStyles && window.state.floorMapStyleSettings) {
+            if (!window.state.floorMapStyleSettings) window.state.floorMapStyleSettings = {};
+            Object.keys(window.state.floorMapStyleSettings).forEach((k) => {
+                if (!k.startsWith(srcPrefix)) return;
+                const floorCode = k.slice(srcPrefix.length);
+                const saved = window.state.floorMapStyleSettings[k];
+                if (!saved) return;
+                window.state.floorMapStyleSettings[`${newId}_${floorCode}`] = {
+                    styleSizes: cloneStyleSizesMap(saved.styleSizes)
+                };
+            });
+        }
+    }
 
     // "지상 3층 (3F)" 같은 라벨에서 뒤에 붙은 층 코드 괄호만 떼어낸다.
     // "필로티층"처럼 사용자가 직접 입력해 괄호/공백이 없는 라벨도 그대로 안전하게 통과시키기 위함
@@ -1266,15 +1543,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
         let warningHtml = '';
         if (hasUnmatched || hasDuplicate) {
-            warningHtml = `<div style="font-size:0.78rem; color:#d97706; background:rgba(217,119,6,0.12); border:1px solid #d97706; border-radius:6px; padding:0.5rem 0.7rem; margin-bottom:0.4rem;">
-                ⚠️ 파일명만으로는 층을 정확히 인식하지 못한 파일이 있습니다 (촬영 사진은 파일명이 자동 생성되어 흔한 경우입니다). 아래에서 각 파일의 층을 직접 확인/선택해 주세요.
+            warningHtml = `<div class="add-drawing-preview-warning">
+                파일명만으로는 층을 정확히 인식하지 못한 파일이 있습니다. 아래에서 각 파일의 층을 직접 확인/선택해 주세요.
                 ${hasDuplicate ? '<br>같은 층으로 묶인 파일은 "이 파일 저장" 버튼으로 고른 파일 하나만 실제로 저장됩니다.' : ''}
             </div>`;
         }
 
         const singleRowHtml = (item, idx) => `
-            <div style="display:flex; justify-content:space-between; align-items:center; gap:0.5rem; background:${item.matched === false ? 'rgba(217,119,6,0.1)' : 'rgba(255,255,255,0.06)'}; border:1px solid ${item.matched === false ? '#d97706' : 'transparent'}; padding:0.4rem 0.7rem; border-radius:6px; font-size:0.8rem;">
-                <span style="color:#a3a3a3; font-size:0.75rem; flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${escapeHtml(item.fileName)}">${escapeHtml(item.fileName)}</span>
+            <div class="add-drawing-preview-row${item.matched === false ? ' is-warning' : ''}">
+                <span class="add-drawing-preview-name" title="${escapeHtml(item.fileName)}">${escapeHtml(item.fileName)}</span>
                 <select class="form-control drawing-floor-select" data-idx="${idx}" style="width:auto; font-size:0.78rem; padding:0.2rem 0.4rem;">
                     ${window.buildFloorCodeOptionsHtml(item.floorCode)}
                 </select>
@@ -1284,17 +1561,16 @@ document.addEventListener('DOMContentLoaded', () => {
             if (g.entries.length === 1) return singleRowHtml(g.entries[0].item, g.entries[0].idx);
             const floorLabel = window.getFloorLabelFromCode(g.floorCode);
             return `
-                <div style="border:1px solid #d97706; background:rgba(217,119,6,0.08); border-radius:8px; padding:0.5rem 0.6rem;">
-                    <div style="font-size:0.78rem; font-weight:800; color:#d97706; margin-bottom:0.3rem;">
-                        🏢 ${floorLabel} — 파일 ${g.entries.length}개가 같은 층으로 인식됨. 저장할 파일 하나를 골라주세요.
-                    </div>
-                    <div style="display:flex; flex-direction:column; gap:0.25rem;">
+                <div class="add-drawing-preview-row is-duplicate-group">
+                    <div style="width:100%;">
+                        <div class="add-drawing-preview-title">${floorLabel} — 파일 ${g.entries.length}개 · 저장할 파일 하나를 선택</div>
+                        <div style="display:flex; flex-direction:column; gap:0.25rem;">
                         ${g.entries.map(({ item, idx }, i) => {
                             const isFinal = i === g.entries.length - 1;
                             return `
-                            <div style="display:flex; justify-content:space-between; align-items:center; gap:0.4rem; padding:0.3rem 0.5rem; ${isFinal ? 'background:rgba(22,163,74,0.12); border-radius:6px;' : ''}">
-                                <span style="flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:0.76rem; color:${isFinal ? '#16a34a' : '#a3a3a3'};" title="${escapeHtml(item.fileName)}">
-                                    ${isFinal ? '✅' : '⬜'} ${escapeHtml(item.fileName)}${isFinal ? ' <b>(저장됨)</b>' : ''}
+                            <div style="display:flex; justify-content:space-between; align-items:center; gap:0.4rem; padding:0.2rem 0;">
+                                <span class="add-drawing-preview-name" style="color:${isFinal ? '#16a34a' : '#64748b'};" title="${escapeHtml(item.fileName)}">
+                                    ${isFinal ? '✅' : '⬜'} ${escapeHtml(item.fileName)}${isFinal ? ' (저장됨)' : ''}
                                 </span>
                                 ${!isFinal ? `<button type="button" class="btn btn-sm btn-outline pick-final-drawing" data-idx="${idx}" style="font-size:0.68rem; padding:0.1rem 0.5rem; flex-shrink:0;">이 파일 저장</button>` : ''}
                                 <select class="form-control drawing-floor-select" data-idx="${idx}" style="width:auto; font-size:0.72rem; padding:0.15rem 0.3rem; flex-shrink:0;">
@@ -1302,14 +1578,13 @@ document.addEventListener('DOMContentLoaded', () => {
                                 </select>
                             </div>`;
                         }).join('')}
+                        </div>
                     </div>
                 </div>`;
         };
 
         preview.innerHTML = `
-            <div style="font-size:0.82rem; font-weight:700; color:#6b6b6b; margin-bottom:0.2rem;">
-                ✅ 총 ${items.length}개 도면 파일이 선택되었습니다. 층을 확인해 주세요:
-            </div>
+            <div class="add-drawing-preview-title">총 ${items.length}개 도면 파일 · 층을 확인해 주세요</div>
             ${warningHtml}
             <div style="display:flex; flex-direction:column; gap:0.4rem;">
                 ${groups.map(groupHtml).join('')}
@@ -1384,6 +1659,30 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    const btnAddModeNew = document.getElementById('btnAddModeNew');
+    const btnAddModeImport = document.getElementById('btnAddModeImport');
+    if (btnAddModeNew) btnAddModeNew.addEventListener('click', () => setAddBuildingMode('new'));
+    if (btnAddModeImport) btnAddModeImport.addEventListener('click', () => setAddBuildingMode('import'));
+
+    const selectImportSourceBuilding = document.getElementById('selectImportSourceBuilding');
+    if (selectImportSourceBuilding) {
+        selectImportSourceBuilding.addEventListener('change', (e) => {
+            applyImportSourceToForm(e.target.value);
+        });
+    }
+    ['chkImportBasicInfo', 'chkImportFloorsDrawings', 'chkImportDefects', 'chkImportNdt', 'chkImportMapStyles'].forEach((id) => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.addEventListener('change', () => {
+            const sourceId = document.getElementById('selectImportSourceBuilding')?.value;
+            if (sourceId && id === 'chkImportBasicInfo' && el.checked) {
+                applyImportSourceToForm(sourceId);
+            } else if (sourceId) {
+                updateImportSourceSummary((window.state.buildings || []).find(b => b.id === sourceId));
+            }
+        });
+    });
+
     // Save New Building Action
     const btnSaveBuilding = document.getElementById('btnSaveBuilding');
     if (btnSaveBuilding) {
@@ -1394,6 +1693,25 @@ document.addEventListener('DOMContentLoaded', () => {
                 window.showToast('건축물 명칭을 입력해 주세요.', 'warning');
                 if (nameInput) nameInput.focus();
                 return;
+            }
+
+            const isImportMode = window._addBuildingMode === 'import';
+            const sourceId = document.getElementById('selectImportSourceBuilding')?.value || '';
+            const sourceBldg = isImportMode
+                ? (window.state.buildings || []).find(b => b.id === sourceId)
+                : null;
+            const importOpts = isImportMode ? getAddBuildingImportOptions() : null;
+
+            if (isImportMode) {
+                if (!sourceId || !sourceBldg) {
+                    window.showToast('가져올 점검을 선택해 주세요.', 'warning');
+                    return;
+                }
+                const anyCopy = importOpts.basicInfo || importOpts.floorsDrawings || importOpts.defects || importOpts.ndt || importOpts.mapStyles;
+                if (!anyCopy) {
+                    window.showToast('가져올 항목을 하나 이상 선택해 주세요.', 'warning');
+                    return;
+                }
             }
 
             const address = (document.getElementById('inputBuildingAddress')?.value || '').trim() || '서울특별시 강남구 테헤란로 123';
@@ -1475,12 +1793,30 @@ document.addEventListener('DOMContentLoaded', () => {
             };
 
             window.state.buildings.unshift(newBldg);
+
+            if (isImportMode && sourceBldg && importOpts) {
+                window.showLoading('선택한 점검 데이터를 복사하는 중입니다...');
+                try {
+                    await cloneBuildingDataFromSource(sourceBldg, newBldg, importOpts);
+                } catch (err) {
+                    console.error('점검 데이터 복사 오류:', err);
+                    window.showToast('일부 데이터 복사에 실패했습니다. 등록은 완료되었으니 내용을 확인해 주세요.', 'warning', 5500);
+                } finally {
+                    window.hideLoading();
+                }
+            }
+
             saveStateToLocalStorage();
+            if (typeof syncStateToFirebase === 'function') syncStateToFirebase();
             window.closeAddBuildingModalFunc();
 
             renderDashboard();
             window.selectBuildingAndInspect(newBldg);
-            window.showToast(`'${name}' 건축물이 등록되었습니다.`, 'success');
+
+            const importNote = (isImportMode && sourceBldg)
+                ? ' · 다른 점검 데이터 반영'
+                : '';
+            window.showToast(`'${name}' 건축물이 등록되었습니다${importNote}.`, 'success');
         });
     }
 

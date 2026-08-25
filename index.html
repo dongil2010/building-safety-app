@@ -12,7 +12,7 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <meta name="apple-mobile-web-app-title" content="스마트 안전점검">
-    <link rel="stylesheet" href="styles.css?v=20260825_cwArrow">
+    <link rel="stylesheet" href="styles.css?v=20260825_addBldg">
     <!-- FontAwesome icons for clean engineering UI -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <!-- PDF 생성용: 페이지별로 직접 캡처해서 조립(큰 보고서에서 html2pdf 한방 렌더링이 캔버스 높이 한계로
@@ -1654,112 +1654,207 @@
 
     <!-- MODAL: Add New Building Modal -->
     <div class="modal-overlay" id="addBuildingModal">
-        <div class="modal-card" style="max-width: 600px; width: 94%;">
-            <div class="modal-header" style="background: linear-gradient(135deg, #2a2a2a, #1f1f1f); border-bottom: 1px solid var(--border-highlight);">
-                <h3><i class="fa-solid fa-building-circle-plus" style="color: #6b6b6b;"></i> 🏢 신규 점검 대상 건축물 등록</h3>
-                <button type="button" class="modal-close" id="btnCloseAddBuildingModal">&times;</button>
+        <div class="modal-card add-building-modal">
+            <div class="modal-header add-building-header">
+                <div class="add-building-header-text">
+                    <span class="add-building-kicker"><i class="fa-solid fa-building-circle-plus"></i> 신규 점검 등록</span>
+                    <h3>건축물 등록</h3>
+                    <p class="add-building-subtitle">새로 등록하거나, 기존 점검 데이터를 복사해 시작할 수 있습니다.</p>
+                </div>
+                <button type="button" class="modal-close" id="btnCloseAddBuildingModal" aria-label="닫기">&times;</button>
             </div>
-            <div class="modal-body" style="display: flex; flex-direction: column; gap: 1rem; max-height: 75vh; overflow-y: auto;">
-                <div class="form-group">
-                    <label class="form-label">🏢 건축물 명칭 *</label>
-                    <input type="text" id="inputBuildingName" class="form-control" placeholder="예: 도휘에드가9차, 강남 서초 타워">
-                </div>
-                <div class="form-group">
-                    <label class="form-label">📍 소재지 주소</label>
-                    <input type="text" id="inputBuildingAddress" class="form-control" placeholder="예: 서울특별시 강남구 테헤란로 123">
-                </div>
-                <div class="form-row" style="display:flex; gap:0.8rem;">
-                    <div class="form-group" style="flex:1;">
-                        <label class="form-label">🏢 규모 및 층수</label>
-                        <input type="text" id="inputBuildingFloors" class="form-control" placeholder="예: 지상 10층 ~ 지하 2층">
-                    </div>
-                    <div class="form-group" style="flex:1;">
-                        <label class="form-label">📅 점검 일시</label>
-                        <input type="date" id="inputBuildingDate" class="form-control">
-                    </div>
-                </div>
-                <div class="form-row" style="display:flex; gap:0.8rem;">
-                    <div class="form-group" style="flex:1;">
-                        <label class="form-label">🏗️ 주구조</label>
-                        <input type="text" id="inputBuildingStructureType" class="form-control" list="structureTypeOptions" placeholder="예: RC, SRC, 철골구조">
-                        <datalist id="structureTypeOptions">
-                            <option value="RC(철근콘크리트조)">
-                            <option value="SRC(철골철근콘크리트조)">
-                            <option value="철골구조(S조)">
-                            <option value="조적조">
-                            <option value="목구조">
-                        </datalist>
-                    </div>
-                    <div class="form-group" style="flex:1;">
-                        <label class="form-label">🏷️ 시설물 종별</label>
-                        <select id="inputBuildingFacilityGrade" class="form-control">
-                            <option value="" selected>미지정</option>
-                            <option value="제1종시설물">제1종시설물</option>
-                            <option value="제2종시설물">제2종시설물</option>
-                            <option value="제3종시설물">제3종시설물</option>
-                        </select>
-                    </div>
-                    <div class="form-group" style="flex:1;">
-                        <label class="form-label">🗓️ 준공일 (콘크리트 재령 계산용)</label>
-                        <input type="date" id="inputBuildingCompletionDate" class="form-control">
-                    </div>
-                </div>
-                <div class="form-row" style="display:flex; gap:0.8rem;">
-                    <div class="form-group" style="flex:1;">
-                        <label class="form-label">📋 점검 종류</label>
-                        <select id="inputBuildingInspectionType" class="form-control">
-                            <option value="정밀안전점검" selected>정밀안전점검</option>
-                            <option value="정기안전점검">정기안전점검</option>
-                            <option value="정밀안전진단">정밀안전진단</option>
-                        </select>
-                    </div>
-                    <div class="form-group" style="flex:1;">
-                        <label class="form-label">📅 점검 년도</label>
-                        <select id="inputBuildingInspectionYear" class="form-control">
-                            <option value="2026년" selected>2026년</option>
-                            <option value="2025년">2025년</option>
-                            <option value="2027년">2027년</option>
-                            <option value="2028년">2028년</option>
-                        </select>
-                    </div>
-                    <div class="form-group" style="flex:1;">
-                        <label class="form-label">🗓️ 상/하반기</label>
-                        <select id="inputBuildingInspectionPeriod" class="form-control">
-                            <option value="하반기" selected>하반기</option>
-                            <option value="상반기">상반기</option>
-                            <option value="수시점검">수시점검</option>
-                        </select>
-                    </div>
-                </div>
-                <div class="form-group">
-                    <label class="form-label">📝 비고 / 특이사항</label>
-                    <textarea id="inputBuildingNotes" class="form-control" rows="2" placeholder="건물 특이사항이나 주요 요청 사항 입력"></textarea>
-                </div>
-                
-                <!-- Multi Drawing File Upload & Floor Auto-Sort Engine -->
-                <div class="form-group" style="background: rgba(255,255,255,0.03); padding: 1rem; border-radius: 8px; border: 1px dashed var(--border-highlight);">
-                    <label class="form-label" style="display:flex; justify-content:space-between; align-items:center;">
-                        <span><i class="fa-solid fa-file-image" style="color: #6b6b6b;"></i> 📁 층별 도면 파일 여러개 일괄 올리기</span>
-                        <span class="text-muted" style="font-size:0.75rem;">(B1, 지하1층, 1F 등 파일명 자동인식 & 아래층 순 자동정렬)</span>
-                    </label>
-                    <div style="display:flex; gap:0.5rem; margin-top:0.4rem; flex-wrap:wrap;">
-                        <div style="flex:1; min-width:180px;">
-                            <label for="inputBuildingDrawings" class="text-muted" style="font-size:0.72rem; display:block; margin-bottom:0.2rem;">🖼️ 사진/이미지 파일</label>
-                            <input type="file" id="inputBuildingDrawings" multiple accept="image/*" class="form-control">
-                        </div>
-                        <div style="flex:1; min-width:180px;">
-                            <label for="inputBuildingDrawingsPdf" class="text-muted" style="font-size:0.72rem; display:block; margin-bottom:0.2rem;">📄 캐드 PDF 파일 (사진 폴더에 안 보이면 여기서 선택)</label>
-                            <input type="file" id="inputBuildingDrawingsPdf" multiple accept="application/pdf,.pdf" class="form-control">
-                        </div>
-                    </div>
 
-                    <!-- Floor Sorting Preview Box -->
-                    <div id="drawingSortPreview" style="margin-top: 0.8rem; display: flex; flex-direction: column; gap: 0.4rem;"></div>
-                </div>
+            <div class="add-building-mode-bar" role="tablist" aria-label="등록 방식">
+                <button type="button" class="add-building-mode-btn active" id="btnAddModeNew" data-mode="new" role="tab" aria-selected="true">
+                    <i class="fa-solid fa-file-circle-plus"></i>
+                    <span>빈 등록</span>
+                </button>
+                <button type="button" class="add-building-mode-btn" id="btnAddModeImport" data-mode="import" role="tab" aria-selected="false">
+                    <i class="fa-solid fa-clone"></i>
+                    <span>다른 점검에서 가져오기</span>
+                </button>
             </div>
-            <div class="modal-footer" style="justify-content: flex-end; gap: 0.6rem;">
+
+            <div class="modal-body add-building-body">
+                <section class="add-building-panel" id="addBuildingImportPanel" hidden>
+                    <div class="add-building-section add-building-section-accent">
+                        <div class="add-section-head">
+                            <span class="add-section-icon"><i class="fa-solid fa-database"></i></span>
+                            <div>
+                                <h4 class="add-section-title">가져올 점검 선택</h4>
+                                <p class="add-section-desc">복사할 기존 건축물·점검 회차를 고른 뒤, 아래에서 항목을 선택하세요.</p>
+                            </div>
+                        </div>
+                        <select id="selectImportSourceBuilding" class="form-control add-building-select">
+                            <option value="">— 가져올 점검 선택 —</option>
+                        </select>
+                        <div class="add-import-options" id="addImportOptionsGrid">
+                            <label class="add-import-option">
+                                <input type="checkbox" id="chkImportBasicInfo" checked>
+                                <span class="add-import-option-body">
+                                    <strong>기본 정보</strong>
+                                    <small>주소, 규모, 주구조, 준공일, 비고</small>
+                                </span>
+                            </label>
+                            <label class="add-import-option">
+                                <input type="checkbox" id="chkImportFloorsDrawings" checked>
+                                <span class="add-import-option-body">
+                                    <strong>층 목록 · 도면</strong>
+                                    <small>층 구성, 이미지/PDF 도면</small>
+                                </span>
+                            </label>
+                            <label class="add-import-option">
+                                <input type="checkbox" id="chkImportDefects">
+                                <span class="add-import-option-body">
+                                    <strong>결함 · 사진</strong>
+                                    <small>결함위치도 마킹, 현장 사진</small>
+                                </span>
+                            </label>
+                            <label class="add-import-option">
+                                <input type="checkbox" id="chkImportNdt">
+                                <span class="add-import-option-body">
+                                    <strong>비파괴 조사</strong>
+                                    <small>강도, 탄산화, 기울기 등</small>
+                                </span>
+                            </label>
+                            <label class="add-import-option">
+                                <input type="checkbox" id="chkImportMapStyles">
+                                <span class="add-import-option-body">
+                                    <strong>도면 표시 스타일</strong>
+                                    <small>핀·화살표 크기 설정</small>
+                                </span>
+                            </label>
+                        </div>
+                        <div id="importSourceSummary" class="add-import-summary" hidden></div>
+                    </div>
+                </section>
+
+                <section class="add-building-section">
+                    <div class="add-section-head">
+                        <span class="add-section-icon"><i class="fa-solid fa-circle-info"></i></span>
+                        <div>
+                            <h4 class="add-section-title">기본 정보</h4>
+                            <p class="add-section-desc">점검 대상 건축물의 식별 정보를 입력합니다.</p>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label" for="inputBuildingName">건축물 명칭 <span class="req-mark">*</span></label>
+                        <input type="text" id="inputBuildingName" class="form-control" placeholder="예: 도휘에드가9차, 강남 서초 타워">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label" for="inputBuildingAddress">소재지 주소</label>
+                        <input type="text" id="inputBuildingAddress" class="form-control" placeholder="예: 서울특별시 강남구 테헤란로 123">
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group flex-1">
+                            <label class="form-label" for="inputBuildingFloors">규모 및 층수</label>
+                            <input type="text" id="inputBuildingFloors" class="form-control" placeholder="예: 지상 10층 ~ 지하 2층">
+                        </div>
+                        <div class="form-group flex-1">
+                            <label class="form-label" for="inputBuildingDate">점검 일시</label>
+                            <input type="date" id="inputBuildingDate" class="form-control">
+                        </div>
+                    </div>
+                    <div class="form-row add-building-row-3">
+                        <div class="form-group flex-1">
+                            <label class="form-label" for="inputBuildingStructureType">주구조</label>
+                            <input type="text" id="inputBuildingStructureType" class="form-control" list="structureTypeOptions" placeholder="예: RC, SRC, 철골구조">
+                            <datalist id="structureTypeOptions">
+                                <option value="RC(철근콘크리트조)">
+                                <option value="SRC(철골철근콘크리트조)">
+                                <option value="철골구조(S조)">
+                                <option value="조적조">
+                                <option value="목구조">
+                            </datalist>
+                        </div>
+                        <div class="form-group flex-1">
+                            <label class="form-label" for="inputBuildingFacilityGrade">시설물 종별</label>
+                            <select id="inputBuildingFacilityGrade" class="form-control">
+                                <option value="" selected>미지정</option>
+                                <option value="제1종시설물">제1종시설물</option>
+                                <option value="제2종시설물">제2종시설물</option>
+                                <option value="제3종시설물">제3종시설물</option>
+                            </select>
+                        </div>
+                        <div class="form-group flex-1">
+                            <label class="form-label" for="inputBuildingCompletionDate">준공일</label>
+                            <input type="date" id="inputBuildingCompletionDate" class="form-control" title="콘크리트 재령 계산용">
+                        </div>
+                    </div>
+                </section>
+
+                <section class="add-building-section">
+                    <div class="add-section-head">
+                        <span class="add-section-icon"><i class="fa-solid fa-clipboard-check"></i></span>
+                        <div>
+                            <h4 class="add-section-title">점검 정보</h4>
+                            <p class="add-section-desc">이번에 수행할 점검 종류와 회차를 지정합니다.</p>
+                        </div>
+                    </div>
+                    <div class="form-row add-building-row-3">
+                        <div class="form-group flex-1">
+                            <label class="form-label" for="inputBuildingInspectionType">점검 종류</label>
+                            <select id="inputBuildingInspectionType" class="form-control">
+                                <option value="정밀안전점검" selected>정밀안전점검</option>
+                                <option value="정기안전점검">정기안전점검</option>
+                                <option value="정밀안전진단">정밀안전진단</option>
+                            </select>
+                        </div>
+                        <div class="form-group flex-1">
+                            <label class="form-label" for="inputBuildingInspectionYear">점검 년도</label>
+                            <select id="inputBuildingInspectionYear" class="form-control">
+                                <option value="2026년" selected>2026년</option>
+                                <option value="2025년">2025년</option>
+                                <option value="2027년">2027년</option>
+                                <option value="2028년">2028년</option>
+                            </select>
+                        </div>
+                        <div class="form-group flex-1">
+                            <label class="form-label" for="inputBuildingInspectionPeriod">상/하반기</label>
+                            <select id="inputBuildingInspectionPeriod" class="form-control">
+                                <option value="하반기" selected>하반기</option>
+                                <option value="상반기">상반기</option>
+                                <option value="수시점검">수시점검</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label" for="inputBuildingNotes">비고 / 특이사항</label>
+                        <textarea id="inputBuildingNotes" class="form-control" rows="2" placeholder="건물 특이사항이나 주요 요청 사항 입력"></textarea>
+                    </div>
+                </section>
+
+                <section class="add-building-section add-building-upload-section">
+                    <div class="add-section-head">
+                        <span class="add-section-icon"><i class="fa-solid fa-layer-group"></i></span>
+                        <div>
+                            <h4 class="add-section-title">층별 도면 업로드</h4>
+                            <p class="add-section-desc">파일명(B1, 1F 등)으로 층을 자동 인식합니다. 가져오기로 도면을 복사한 경우 추가 업로드도 가능합니다.</p>
+                        </div>
+                    </div>
+                    <div class="add-drawing-dropzone">
+                        <div class="add-drawing-inputs">
+                            <label class="add-drawing-file-label" for="inputBuildingDrawings">
+                                <i class="fa-solid fa-image"></i>
+                                <span>사진/이미지</span>
+                                <input type="file" id="inputBuildingDrawings" multiple accept="image/*" class="add-drawing-file-input">
+                            </label>
+                            <label class="add-drawing-file-label add-drawing-file-label-pdf" for="inputBuildingDrawingsPdf">
+                                <i class="fa-solid fa-file-pdf"></i>
+                                <span>캐드 PDF</span>
+                                <input type="file" id="inputBuildingDrawingsPdf" multiple accept="application/pdf,.pdf" class="add-drawing-file-input">
+                            </label>
+                        </div>
+                        <div id="drawingSortPreview" class="add-drawing-preview"></div>
+                    </div>
+                </section>
+            </div>
+
+            <div class="modal-footer add-building-footer">
                 <button type="button" class="btn btn-outline" id="btnCancelAddBuilding">취소</button>
-                <button type="button" class="btn btn-primary" id="btnSaveBuilding"><i class="fa-solid fa-check"></i> 💾 건축물 등록 완료</button>
+                <button type="button" class="btn btn-primary" id="btnSaveBuilding">
+                    <i class="fa-solid fa-check"></i> 건축물 등록 완료
+                </button>
             </div>
         </div>
     </div>
@@ -2128,7 +2223,7 @@
     <script src="js/tabs/ndt.js?v=20260822_survey2dScroll"></script>
     <script src="js/shared/report.js?v=20260824_hwpxFix"></script>
     <script src="js/shared/auth.js?v=20260821_land1"></script>
-    <script src="app.js?v=20260825_nsFinish"></script>
+    <script src="app.js?v=20260825_addBldg"></script>
     <script>
         document.addEventListener('DOMContentLoaded', function () {
             const btn = document.getElementById('btnExportVectorPdf');

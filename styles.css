@@ -4245,6 +4245,376 @@ body {
     gap: 0.5rem;
 }
 
+/* ── 신규 건축물 등록 모달 ── */
+.add-building-modal {
+    max-width: 680px;
+    width: min(96vw, 680px);
+    background: #ffffff;
+    border: 1px solid #d8dee8;
+    box-shadow: 0 22px 55px rgba(15, 23, 42, 0.18);
+    overflow: hidden;
+}
+
+.add-building-header {
+    background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+    border-bottom: none;
+    padding: 1.15rem 1.35rem;
+    align-items: flex-start;
+    gap: 0.8rem;
+}
+
+.add-building-header-text {
+    flex: 1;
+    min-width: 0;
+}
+
+.add-building-kicker {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    font-size: 0.72rem;
+    font-weight: 800;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: #94a3b8;
+    margin-bottom: 0.25rem;
+}
+
+.add-building-header h3 {
+    color: #f8fafc;
+    font-size: 1.2rem;
+    font-weight: 800;
+    margin: 0;
+}
+
+.add-building-subtitle {
+    margin: 0.35rem 0 0;
+    font-size: 0.82rem;
+    color: #cbd5e1;
+    line-height: 1.45;
+}
+
+.add-building-header .modal-close {
+    color: #94a3b8;
+    flex-shrink: 0;
+}
+
+.add-building-header .modal-close:hover {
+    color: #ffffff;
+}
+
+.add-building-mode-bar {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0;
+    background: #f1f5f9;
+    border-bottom: 1px solid #dbe3ef;
+    padding: 0.35rem;
+}
+
+.add-building-mode-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.45rem;
+    border: 1px solid transparent;
+    background: transparent;
+    color: #64748b;
+    font-size: 0.84rem;
+    font-weight: 700;
+    padding: 0.62rem 0.75rem;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.add-building-mode-btn:hover {
+    color: #334155;
+    background: rgba(255, 255, 255, 0.65);
+}
+
+.add-building-mode-btn.active {
+    background: #ffffff;
+    color: #0f172a;
+    border-color: #cbd5e1;
+    box-shadow: 0 2px 8px rgba(15, 23, 42, 0.08);
+}
+
+.add-building-body {
+    display: flex;
+    flex-direction: column;
+    gap: 0.85rem;
+    padding: 1rem 1.2rem 1.1rem;
+    background: #f8fafc;
+    max-height: min(68vh, calc(100dvh - 12rem));
+}
+
+.add-building-section {
+    background: #ffffff;
+    border: 1px solid #e2e8f0;
+    border-radius: 12px;
+    padding: 0.95rem 1rem;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+
+.add-building-section-accent {
+    border-color: #bfdbfe;
+    background: linear-gradient(180deg, #eff6ff 0%, #ffffff 55%);
+}
+
+.add-section-head {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.65rem;
+    margin-bottom: 0.75rem;
+}
+
+.add-section-icon {
+    width: 2rem;
+    height: 2rem;
+    border-radius: 8px;
+    background: #eef2ff;
+    color: #3730a3;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    font-size: 0.85rem;
+}
+
+.add-building-section-accent .add-section-icon {
+    background: #dbeafe;
+    color: #1d4ed8;
+}
+
+.add-section-title {
+    font-size: 0.92rem;
+    font-weight: 800;
+    color: #0f172a;
+    margin: 0;
+}
+
+.add-section-desc {
+    margin: 0.15rem 0 0;
+    font-size: 0.76rem;
+    color: #64748b;
+    line-height: 1.4;
+}
+
+.add-building-section .form-group {
+    margin-bottom: 0.75rem;
+}
+
+.add-building-section .form-group:last-child {
+    margin-bottom: 0;
+}
+
+.add-building-section .form-label {
+    font-size: 0.78rem;
+    font-weight: 700;
+    color: #475569;
+}
+
+.req-mark {
+    color: #dc2626;
+}
+
+.add-building-row-3 {
+    flex-wrap: wrap;
+}
+
+.add-building-row-3 > .form-group {
+    flex: 1 1 calc(33.333% - 0.6rem);
+    min-width: 9rem;
+}
+
+.add-building-select {
+    font-weight: 600;
+}
+
+.add-import-options {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.45rem;
+    margin-top: 0.75rem;
+}
+
+.add-import-option {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.55rem;
+    padding: 0.55rem 0.65rem;
+    border: 1px solid #dbeafe;
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.85);
+    cursor: pointer;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.add-import-option:hover {
+    border-color: #93c5fd;
+    box-shadow: 0 2px 8px rgba(37, 99, 235, 0.08);
+}
+
+.add-import-option input {
+    margin-top: 0.15rem;
+    accent-color: #2563eb;
+    flex-shrink: 0;
+}
+
+.add-import-option-body {
+    display: flex;
+    flex-direction: column;
+    gap: 0.1rem;
+    min-width: 0;
+}
+
+.add-import-option-body strong {
+    font-size: 0.8rem;
+    color: #0f172a;
+}
+
+.add-import-option-body small {
+    font-size: 0.72rem;
+    color: #64748b;
+    line-height: 1.35;
+}
+
+.add-import-summary {
+    margin-top: 0.75rem;
+    padding: 0.65rem 0.75rem;
+    border-radius: 8px;
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    font-size: 0.78rem;
+    color: #334155;
+    line-height: 1.55;
+}
+
+.add-import-summary strong {
+    color: #0f172a;
+}
+
+.add-drawing-dropzone {
+    border: 1px dashed #cbd5e1;
+    border-radius: 10px;
+    background: #f8fafc;
+    padding: 0.75rem;
+}
+
+.add-drawing-inputs {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.55rem;
+}
+
+.add-drawing-file-label {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.35rem;
+    min-height: 4.5rem;
+    padding: 0.65rem;
+    border: 1px solid #dbe3ef;
+    border-radius: 10px;
+    background: #ffffff;
+    color: #334155;
+    font-size: 0.8rem;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.add-drawing-file-label:hover {
+    border-color: #64748b;
+    background: #f1f5f9;
+}
+
+.add-drawing-file-label i {
+    font-size: 1.15rem;
+    color: #475569;
+}
+
+.add-drawing-file-label-pdf i {
+    color: #b91c1c;
+}
+
+.add-drawing-file-input {
+    position: absolute;
+    width: 0;
+    height: 0;
+    opacity: 0;
+    pointer-events: none;
+}
+
+.add-drawing-preview {
+    margin-top: 0.75rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+}
+
+.add-drawing-preview-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 0.5rem;
+    background: #ffffff;
+    border: 1px solid #e2e8f0;
+    padding: 0.4rem 0.65rem;
+    border-radius: 8px;
+    font-size: 0.8rem;
+}
+
+.add-drawing-preview-row.is-warning {
+    border-color: #f59e0b;
+    background: #fffbeb;
+}
+
+.add-drawing-preview-row.is-duplicate-group {
+    border-color: #f59e0b;
+    background: #fffbeb;
+    padding: 0.55rem 0.65rem;
+}
+
+.add-drawing-preview-name {
+    color: #64748b;
+    font-size: 0.75rem;
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.add-drawing-preview-title {
+    font-size: 0.82rem;
+    font-weight: 700;
+    color: #334155;
+    margin-bottom: 0.2rem;
+}
+
+.add-drawing-preview-warning {
+    font-size: 0.78rem;
+    color: #b45309;
+    background: #fffbeb;
+    border: 1px solid #fcd34d;
+    border-radius: 8px;
+    padding: 0.5rem 0.7rem;
+    margin-bottom: 0.4rem;
+    line-height: 1.45;
+}
+
+.add-building-footer {
+    background: #ffffff;
+    border-top: 1px solid #e2e8f0;
+    padding: 0.85rem 1.2rem;
+}
+
+.add-building-footer .btn-primary {
+    font-weight: 800;
+}
+
 /* ── 결함 빠른 선택 패널 ── */
 .defect-quick-picks {
     display: flex;
@@ -6387,6 +6757,40 @@ body {
         width: min(96vw, 640px);
         max-height: calc(100dvh - 1.2rem);
         margin: 0.4rem auto;
+    }
+
+    #addBuildingModal .add-building-body {
+        max-height: min(58dvh, calc(100dvh - 11rem)) !important;
+        padding: 0.75rem 0.85rem;
+    }
+
+    #addBuildingModal .add-building-header {
+        padding: 0.85rem 1rem;
+    }
+
+    #addBuildingModal .add-building-header h3 {
+        font-size: 1rem;
+    }
+
+    #addBuildingModal .add-building-subtitle {
+        font-size: 0.76rem;
+    }
+
+    #addBuildingModal .add-building-mode-btn {
+        font-size: 0.76rem;
+        padding: 0.52rem 0.45rem;
+    }
+
+    #addBuildingModal .add-import-options {
+        grid-template-columns: 1fr;
+    }
+
+    #addBuildingModal .add-drawing-inputs {
+        grid-template-columns: 1fr;
+    }
+
+    #addBuildingModal .add-building-row-3 > .form-group {
+        flex: 1 1 100%;
     }
 
     #addBuildingModal .modal-header h3,
