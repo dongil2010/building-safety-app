@@ -36,16 +36,13 @@ window.BSA.tabs['tab-map'] = {
     ],
     ownerHint: 'app.js DRAWING CANVAS ENGINE + 결함 모달',
     enter: function () {
-        setTimeout(function () {
+        function refreshMapCanvas(allowFit) {
             if (typeof window.resizeCanvas === 'function') window.resizeCanvas();
-            if (typeof window.fitToScreen === 'function') window.fitToScreen();
-            if (typeof window.drawCanvas === 'function') window.drawCanvas();
-        }, 50);
-        // 세로/가로 전환·플렉스 높이 확정 후 한 번 더 맞춤 (380px 잘림·회색 여백 방지)
-        setTimeout(function () {
-            if (typeof window.resizeCanvas === 'function') window.resizeCanvas();
-            if (typeof window.fitToScreen === 'function') window.fitToScreen();
-            if (typeof window.drawCanvas === 'function') window.drawCanvas();
-        }, 220);
+            const autoFit = allowFit && (typeof window.shouldAutoFitMapView !== 'function' || window.shouldAutoFitMapView());
+            if (autoFit && typeof window.fitToScreen === 'function') window.fitToScreen();
+            else if (typeof window.drawCanvas === 'function') window.drawCanvas();
+        }
+        setTimeout(function () { refreshMapCanvas(true); }, 50);
+        setTimeout(function () { refreshMapCanvas(false); }, 220);
     }
 };

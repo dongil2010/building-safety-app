@@ -344,6 +344,38 @@ document.addEventListener('DOMContentLoaded', () => {
         state.floorPlanRef = { w, h, bldgId, floorCode };
     }
 
+    /** 핀·줌·패치 공통 좌표계 — bgImage LOD 교체와 무관하게 4000px 기준 유지 */
+    function getFloorPlanDisplayDims() {
+        const bldg = state.currentBuilding;
+        const fc = state.currentFloor;
+        if (typeof window.getFloorPlanRefDimensions === 'function' && bldg && fc) {
+            const ref = window.getFloorPlanRefDimensions(bldg, fc);
+            if (ref.w > 0 && ref.h > 0) return ref;
+        }
+        const img = state.bgImage;
+        return {
+            w: img ? (img.naturalWidth || img.width || 1200) : 1200,
+            h: img ? (img.naturalHeight || img.height || 700) : 700,
+        };
+    }
+
+    function getMapFitScale() {
+        const cw = state.canvasCssW || (state.canvas ? Math.round(state.canvas.width / (state.canvasDpr || 1)) : 800);
+        const ch = state.canvasCssH || (state.canvas ? Math.round(state.canvas.height / (state.canvasDpr || 1)) : 600);
+        const dims = getFloorPlanDisplayDims();
+        const isRotated = (state.rotationAngle === 90 || state.rotationAngle === 270);
+        const drawW = isRotated ? dims.h : dims.w;
+        const drawH = isRotated ? dims.w : dims.h;
+        if (drawW <= 0 || drawH <= 0) return 1;
+        return Math.min((cw - 40) / drawW, (ch - 40) / drawH, 1.2);
+    }
+
+    function shouldAutoFitMapView() {
+        if (!state.bgImage) return true;
+        const fitScale = getMapFitScale();
+        return (state.view.scale || 1) <= fitScale * 1.08;
+    }
+
     function clearFloorDrawingHiPatch() {
         state.floorDrawingHiPatch = null;
         viewportHiPatchToken++;
@@ -1240,10 +1272,9 @@ document.addEventListener('DOMContentLoaded', () => {
                         }
                     }
                     if (!b.floorDrawingPdfs[floorCode]) {
-                        const cachedPdf = await idbGet('floorDrawingPdfs', `${b.id}_${floorCode}`);
-                        if (cachedPdf) {
-                            b.floorDrawingPdfs[floorCode] = cachedPdf;
-                            _idbPersistedPdfKeys.add(`${b.id}_${floorCode}`);
+                        const resolvedPdf = await resolveBuildingFloorPdf(b, floorCode);
+                        if (resolvedPdf) {
+                            await applyResolvedPdfToBuilding(b, floorCode, resolvedPdf);
                             anyHydrated = true;
                         }
                     }
@@ -1992,6 +2023,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (pdf) {
                     targetBldg.floorDrawingPdfs[fc] = pdf;
                     await idbSet('floorDrawingPdfs', newKey, pdf);
+                    await uploadFloorDrawingPdf(newBuildingId, fc, pdf);
                 }
             }
 
@@ -2548,6 +2580,7 @@ document.addEventListener('DOMContentLoaded', () => {
                                 }
                                 if (prepared && prepared.pdfDataUrl) {
                                     floorDrawingPdfsMap[item.floorCode] = prepared.pdfDataUrl;
+                                    await uploadFloorDrawingPdf(newBuildingId, item.floorCode, prepared.pdfDataUrl);
                                 }
                             } catch (err) {
                                 console.error('Drawing compression error:', err);
@@ -2577,12 +2610,14 @@ document.addEventListener('DOMContentLoaded', () => {
                 floorDrawingPdfs: floorDrawingPdfsMap,
                 floorDrawingTiers: floorDrawingTiersMap,
                 floorDrawingSources: floorDrawingSourcesMap,
+                siteVaultKey: siteVaultDocId(normalizeSiteVaultKey(name)),
                 notes: notes
             };
 
             window.state.buildings.unshift(newBldg);
 
             await persistBuildingDrawingAssetsNow(newBldg);
+            await hydrateBuildingPdfsFromSiteVault(newBldg);
 
             if (isImportMode && sourceBldg && importOpts) {
                 try {
@@ -2843,6 +2878,8 @@ document.addEventListener('DOMContentLoaded', () => {
             clearFloorDrawingTierCacheForFloor(bldg.id, floorCode, true);
             idbDelete('floorDrawings', drawingKey);
             idbDelete('floorDrawingPdfs', drawingKey);
+            deleteFloorDrawingPdfFromCloud(bldg.id, floorCode);
+            if (window._cloudSyncedPdfKeys) window._cloudSyncedPdfKeys.delete(drawingKey);
             if (bldg.floorsList) {
                 bldg.floorsList = bldg.floorsList.filter(f => f.floorCode !== floorCode);
             }
@@ -2974,6 +3011,8 @@ document.addEventListener('DOMContentLoaded', () => {
                                     if (!bldg.floorDrawingPdfs) bldg.floorDrawingPdfs = {};
                                     bldg.floorDrawingPdfs[item.floorCode] = prepared.pdfDataUrl;
                                     _idbPersistedPdfKeys.delete(`${bldg.id}_${item.floorCode}`);
+                                    if (window._cloudSyncedPdfKeys) window._cloudSyncedPdfKeys.delete(`${bldg.id}_${item.floorCode}`);
+                                    await uploadFloorDrawingPdf(bldg.id, item.floorCode, prepared.pdfDataUrl);
                                     if (bldg.floorDrawingTiers && bldg.floorDrawingTiers[item.floorCode]) {
                                         delete bldg.floorDrawingTiers[item.floorCode];
                                     }
@@ -3065,13 +3104,25 @@ document.addEventListener('DOMContentLoaded', () => {
             renderDashboard();
             window.showToast(`'${bldg.name}' 건축물이 삭제되었습니다.`, 'success');
 
-            // 클라우드 첨부파일(도면/사진) 삭제는 백그라운드에서 진행하고, 실패 건이 있으면 사후 안내
-            Promise.all([deleteFloorDrawingsForBuilding(bldg), ...photoDeleteJobs]).then(results => {
+            // 클라우드 첨부파일(도면/사진) 삭제 — PDF 원본은 현장명 보관함에 먼저 보관
+            Promise.all([
+                archiveBuildingPdfsToSiteVault(bldg).then(() => deleteFloorDrawingsForBuilding(bldg)),
+                ...photoDeleteJobs
+            ]).then(results => {
                 const totalFail = results.reduce((sum, n) => sum + (n || 0), 0);
                 if (totalFail > 0) {
                     window.showToast(`클라우드에서 일부 첨부파일(${totalFail}건) 삭제에 실패했습니다. 네트워크 상태를 확인해 주세요.`, 'warning', 5000);
                 }
             });
+        });
+    }
+
+    const btnStartNextInspectionRound = document.getElementById('btnStartNextInspectionRound');
+    if (btnStartNextInspectionRound) {
+        btnStartNextInspectionRound.addEventListener('click', () => {
+            if (typeof window.startNextInspectionRoundFromEdit === 'function') {
+                window.startNextInspectionRoundFromEdit();
+            }
         });
     }
 
@@ -3150,20 +3201,12 @@ document.addEventListener('DOMContentLoaded', () => {
         const cw = state.canvasCssW || state.canvas.width;
         const ch = state.canvasCssH || state.canvas.height;
 
-        let imgW = 1200;
-        let imgH = 700;
-        if (state.bgImage) {
-            imgW = state.bgImage.naturalWidth || state.bgImage.width || 1200;
-            imgH = state.bgImage.naturalHeight || state.bgImage.height || 700;
-        }
-
+        const dims = getFloorPlanDisplayDims();
         const isRotated = (state.rotationAngle === 90 || state.rotationAngle === 270);
-        const drawW = isRotated ? imgH : imgW;
-        const drawH = isRotated ? imgW : imgH;
+        const drawW = isRotated ? dims.h : dims.w;
+        const drawH = isRotated ? dims.w : dims.h;
 
-        const scaleX = (cw - 40) / drawW;
-        const scaleY = (ch - 40) / drawH;
-        state.view.scale = Math.min(scaleX, scaleY, 1.2);
+        state.view.scale = getMapFitScale();
         state.view.offsetX = Math.max(20, (cw - drawW * state.view.scale) / 2);
         state.view.offsetY = Math.max(20, (ch - drawH * state.view.scale) / 2);
         
@@ -3395,6 +3438,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 drawNdtCanvas();
             }
             drawCanvas();
+            scheduleFloorDrawingTierSync();
             return;
         }
 
@@ -3411,6 +3455,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 drawNdtCanvas();
             }
             drawCanvas();
+            scheduleFloorDrawingTierSync();
         };
         img.onerror = () => {
             if (loadToken === floorDrawingTierLoadToken) {
@@ -3430,8 +3475,14 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    function loadFloorDrawing(floorCode) {
+    function loadFloorDrawing(floorCode, options) {
+        const opts = options || {};
+        const preserveView = !!opts.preserveView
+            || (!opts.forceFit && state.currentFloor === floorCode && !!state.bgImage && !!state.floorPlanRef);
         state.currentFloor = floorCode;
+        if (state.floorPlanRef && state.floorPlanRef.floorCode !== floorCode) {
+            state.floorPlanRef = null;
+        }
         state.bgImage = null;
         clearFloorDrawingHiPatch();
         floorDrawingActiveTierDim = null;
@@ -3463,9 +3514,16 @@ document.addEventListener('DOMContentLoaded', () => {
                     state.rotationAngle = 90;
                 }
                 resizeCanvas();
-                fitToScreen();
-                drawCanvas();
-                scheduleFloorDrawingTierSync();
+                if (preserveView) {
+                    if (elements.zoomScaleText) {
+                        elements.zoomScaleText.textContent = `${Math.round(state.view.scale * 100)}%`;
+                    }
+                    drawCanvas();
+                    scheduleFloorDrawingTierSync();
+                } else {
+                    fitToScreen();
+                    drawCanvas();
+                }
                 scheduleFloorDrawingTierPrefetch(bldg, floorCode);
             };
             img.onerror = () => {
@@ -3511,6 +3569,16 @@ document.addEventListener('DOMContentLoaded', () => {
                     if (typeof window.ensureFloorDrawingPdfs === 'function') window.ensureFloorDrawingPdfs(bldg);
                     else if (!bldg.floorDrawingPdfs) bldg.floorDrawingPdfs = {};
                     bldg.floorDrawingPdfs[floorCode] = cachedPdf;
+                    const rendered = await resolveFloorDrawingTierDataUrl(bldg, floorCode, 4000);
+                    if (rendered && state.currentFloor === floorCode) {
+                        tryLoadImage(rendered, false);
+                        return;
+                    }
+                }
+
+                const resolvedPdf = await resolveBuildingFloorPdf(bldg, floorCode);
+                if (resolvedPdf) {
+                    await applyResolvedPdfToBuilding(bldg, floorCode, resolvedPdf);
                     const rendered = await resolveFloorDrawingTierDataUrl(bldg, floorCode, 4000);
                     if (rendered && state.currentFloor === floorCode) {
                         tryLoadImage(rendered, false);
@@ -3614,9 +3682,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function viewToImgCoords(vx, vy) {
         const angle = state.rotationAngle || 0;
-        const img = state.bgImage;
-        const imgW = img ? (img.naturalWidth || img.width || 1200) : 1200;
-        const imgH = img ? (img.naturalHeight || img.height || 700) : 700;
+        const dims = getFloorPlanDisplayDims();
+        const imgW = dims.w;
+        const imgH = dims.h;
 
         if (angle === 90) {
             return { x: vy, y: imgH - vx };
@@ -3631,9 +3699,9 @@ document.addEventListener('DOMContentLoaded', () => {
     // viewToImgCoords()의 역변환: 이미지 좌표 -> 회전 반영된 view 좌표
     function imgToViewCoords(imgX, imgY) {
         const angle = state.rotationAngle || 0;
-        const img = state.bgImage;
-        const imgW = img ? (img.naturalWidth || img.width || 1200) : 1200;
-        const imgH = img ? (img.naturalHeight || img.height || 700) : 700;
+        const dims = getFloorPlanDisplayDims();
+        const imgW = dims.w;
+        const imgH = dims.h;
 
         if (angle === 90) {
             return { x: imgH - imgY, y: imgX };
@@ -3776,9 +3844,9 @@ document.addEventListener('DOMContentLoaded', () => {
         ctx.scale(state.view.scale, state.view.scale);
 
         const angle = state.rotationAngle || 0;
-        const img = state.bgImage;
-        const imgW = img ? (img.naturalWidth || img.width || 1200) : 1200;
-        const imgH = img ? (img.naturalHeight || img.height || 700) : 700;
+        const dims = getFloorPlanDisplayDims();
+        const imgW = dims.w;
+        const imgH = dims.h;
 
         ctx.save();
         if (angle === 90) {
@@ -3793,7 +3861,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         if (state.bgImage) {
-            ctx.drawImage(state.bgImage, 0, 0);
+            ctx.drawImage(state.bgImage, 0, 0, imgW, imgH);
             const hiPatch = state.floorDrawingHiPatch;
             if (hiPatch && hiPatch.canvas && hiPatch.w > 0 && hiPatch.h > 0) {
                 ctx.drawImage(hiPatch.canvas, hiPatch.x, hiPatch.y, hiPatch.w, hiPatch.h);
@@ -4451,7 +4519,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // 핀 박스: fill=false면 투명 내부+색상 테두리, fill=true면 기존 채우기 방식
     function paintPinBox(ctx, w, h, shapeCfg, activeColor, scale, roundLineMul, isBeingDragged, leaderScaleOverride) {
         const borderColor = isBeingDragged ? '#facc15' : activeColor;
-        const cornerR = Math.min(3 * scale, w / 4, h / 4);
+        const cornerR = getPinBoxCornerRadius(w, h, scale);
         traceStyledBoxPath(ctx, w, h, shapeCfg.shape, cornerR);
         if (shapeCfg.fill) {
             ctx.fillStyle = borderColor;
@@ -4600,8 +4668,90 @@ document.addEventListener('DOMContentLoaded', () => {
         };
     }
 
-    // 지시선이 ref 지점과 가장 가까운 박스 **모서리**에서 시작
-    function getPinLeaderBoxAnchorFromPoint(boxX, boxY, refX, refY, boxW, boxH, rotationDeg) {
+    function getPinBoxCornerRadius(w, h, scale) {
+        return Math.min(3 * (scale || 1), w / 4, h / 4);
+    }
+
+    function intersectRayWithRect(lx, ly, hw, hh) {
+        const len = Math.hypot(lx, ly);
+        if (len < 1e-6) return { x: 0, y: -hh };
+        const dx = lx / len;
+        const dy = ly / len;
+        let bestT = Infinity;
+        if (dx > 1e-9) bestT = Math.min(bestT, hw / dx);
+        if (dx < -1e-9) bestT = Math.min(bestT, -hw / dx);
+        if (dy > 1e-9) bestT = Math.min(bestT, hh / dy);
+        if (dy < -1e-9) bestT = Math.min(bestT, -hh / dy);
+        return { x: bestT * dx, y: bestT * dy };
+    }
+
+    function intersectRayWithEllipse(lx, ly, rx, ry) {
+        const len = Math.hypot(lx, ly);
+        if (len < 1e-6) return { x: 0, y: -ry };
+        const dx = lx / len;
+        const dy = ly / len;
+        const denom = Math.sqrt((dx * dx) / (rx * rx) + (dy * dy) / (ry * ry));
+        const t = 1 / Math.max(denom, 1e-9);
+        return { x: t * dx, y: t * dy };
+    }
+
+    /** 박스 중심→ref 방향 광선과 둥근사각형 테두리 교차점 (로컬 좌표) */
+    function intersectRayWithRoundedRect(lx, ly, hw, hh, r) {
+        r = Math.max(0, Math.min(r, hw, hh));
+        if (r < 1e-6) return intersectRayWithRect(lx, ly, hw, hh);
+
+        const len = Math.hypot(lx, ly);
+        if (len < 1e-6) return { x: 0, y: -hh };
+        const dx = lx / len;
+        const dy = ly / len;
+        let bestT = Infinity;
+
+        const tryEdge = (t, onEdge) => {
+            if (t > 1e-6 && onEdge) bestT = Math.min(bestT, t);
+        };
+
+        if (Math.abs(dx) > 1e-9) {
+            const tR = hw / dx;
+            tryEdge(tR, Math.abs(tR * dy) <= hh - r + 1e-6);
+            const tL = -hw / dx;
+            tryEdge(tL, Math.abs(tL * dy) <= hh - r + 1e-6);
+        }
+        if (Math.abs(dy) > 1e-9) {
+            const tB = hh / dy;
+            tryEdge(tB, Math.abs(tB * dx) <= hw - r + 1e-6);
+            const tT = -hh / dy;
+            tryEdge(tT, Math.abs(tT * dx) <= hw - r + 1e-6);
+        }
+
+        const corners = [
+            { cx: hw - r, cy: -hh + r, inArc: (px, py) => px >= hw - r - 1e-6 && py <= -hh + r + 1e-6 },
+            { cx: hw - r, cy: hh - r, inArc: (px, py) => px >= hw - r - 1e-6 && py >= hh - r - 1e-6 },
+            { cx: -hw + r, cy: hh - r, inArc: (px, py) => px <= -hw + r + 1e-6 && py >= hh - r - 1e-6 },
+            { cx: -hw + r, cy: -hh + r, inArc: (px, py) => px <= -hw + r + 1e-6 && py <= -hh + r + 1e-6 },
+        ];
+
+        corners.forEach(({ cx, cy, inArc }) => {
+            const b = -(dx * cx + dy * cy);
+            const c = cx * cx + cy * cy - r * r;
+            const disc = b * b - c;
+            if (disc < 0) return;
+            const sqrtD = Math.sqrt(disc);
+            [b - sqrtD, b + sqrtD].forEach((t) => {
+                if (t <= 1e-6) return;
+                const px = t * dx;
+                const py = t * dy;
+                if (inArc(px, py) && Math.abs(Math.hypot(px - cx, py - cy) - r) < 0.08) {
+                    bestT = Math.min(bestT, t);
+                }
+            });
+        });
+
+        if (!Number.isFinite(bestT)) return intersectRayWithRect(lx, ly, hw, hh);
+        return { x: bestT * dx, y: bestT * dy };
+    }
+
+    // 지시선이 ref 지점과 가장 가까운 박스 **테두리**에서 시작 (둥근/원형 포함)
+    function getPinLeaderBoxAnchorFromPoint(boxX, boxY, refX, refY, boxW, boxH, rotationDeg, shapeOpts) {
         const hw = boxW / 2;
         const hh = boxH / 2;
         const rad = ((rotationDeg || 0) * Math.PI) / 180;
@@ -4614,26 +4764,20 @@ document.addEventListener('DOMContentLoaded', () => {
         const lx = dx * cos - dy * sin;
         const ly = dx * sin + dy * cos;
 
-        const corners = [
-            { x: -hw, y: -hh },
-            { x: hw, y: -hh },
-            { x: hw, y: hh },
-            { x: -hw, y: hh }
-        ];
-
-        let best = corners[0];
-        let bestDist = Infinity;
-        corners.forEach(c => {
-            const d = Math.hypot(lx - c.x, ly - c.y);
-            if (d < bestDist) {
-                bestDist = d;
-                best = c;
-            }
-        });
+        const shape = (shapeOpts && shapeOpts.shape) || 'rect';
+        const scale = (shapeOpts && shapeOpts.scale) || 1;
+        let localPt;
+        if (shape === 'circle') {
+            localPt = intersectRayWithEllipse(lx, ly, hw, hh);
+        } else if (shape === 'rounded') {
+            localPt = intersectRayWithRoundedRect(lx, ly, hw, hh, getPinBoxCornerRadius(boxW, boxH, scale));
+        } else {
+            localPt = intersectRayWithRect(lx, ly, hw, hh);
+        }
 
         return {
-            x: boxX + best.x * cos + best.y * sin,
-            y: boxY - best.x * sin + best.y * cos
+            x: boxX + localPt.x * cos + localPt.y * sin,
+            y: boxY - localPt.x * sin + localPt.y * cos
         };
     }
 
@@ -4674,8 +4818,8 @@ document.addEventListener('DOMContentLoaded', () => {
         };
     }
 
-    function getPinLeaderBoxAnchor(boxX, boxY, targetX, targetY, boxW, boxH, rotationDeg) {
-        return getPinLeaderBoxAnchorFromPoint(boxX, boxY, targetX, targetY, boxW, boxH, rotationDeg);
+    function getPinLeaderBoxAnchor(boxX, boxY, targetX, targetY, boxW, boxH, rotationDeg, shapeOpts) {
+        return getPinLeaderBoxAnchorFromPoint(boxX, boxY, targetX, targetY, boxW, boxH, rotationDeg, shapeOpts);
     }
 
     function getArrowOctantUnitVector(octant) {
@@ -4715,7 +4859,7 @@ document.addEventListener('DOMContentLoaded', () => {
         };
     }
 
-    function buildForcedLeaderRoute(target, boxX, boxY, boxW, boxH, pinScale, arrowScale, octant, stemInset, headLen, rotationDeg) {
+    function buildForcedLeaderRoute(target, boxX, boxY, boxW, boxH, pinScale, arrowScale, octant, stemInset, headLen, rotationDeg, shapeOpts) {
         const unit = getArrowOctantUnitVector(octant);
         const pullBack = Math.max(3 * (arrowScale || 1), headLen * 0.45);
         const stemEnd = getArrowStemEndPoint(target.x, target.y, unit.x, unit.y, stemInset);
@@ -4725,9 +4869,9 @@ document.addEventListener('DOMContentLoaded', () => {
         };
         const dotToBox = (boxX - target.x) * unit.x + (boxY - target.y) * unit.y;
 
-        // 화살표 반대편: tail(튀어나온 선)에서 가장 가까운 박스 모서리로 직결
+        // 화살표 반대편: tail(튀어나온 선)에서 가장 가까운 박스 테두리로 직결
         if (dotToBox <= 0) {
-            const anchor = getPinLeaderBoxAnchorFromPoint(boxX, boxY, tail.x, tail.y, boxW, boxH, rotationDeg);
+            const anchor = getPinLeaderBoxAnchorFromPoint(boxX, boxY, tail.x, tail.y, boxW, boxH, rotationDeg, shapeOpts);
             return { route: compactRoutePoints([anchor, tail, stemEnd]), ux: unit.x, uy: unit.y };
         }
 
@@ -4741,7 +4885,7 @@ document.addEventListener('DOMContentLoaded', () => {
             x: tail.x + perp.x * detourLen * side,
             y: tail.y + perp.y * detourLen * side
         };
-        const anchor = getPinLeaderBoxAnchorFromPoint(boxX, boxY, bend.x, bend.y, boxW, boxH, rotationDeg);
+        const anchor = getPinLeaderBoxAnchorFromPoint(boxX, boxY, bend.x, bend.y, boxW, boxH, rotationDeg, shapeOpts);
         return { route: compactRoutePoints([anchor, bend, tail, stemEnd]), ux: unit.x, uy: unit.y };
     }
 
@@ -5570,7 +5714,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const color = isBeingDragged ? '#facc15' : getStyleColor(ndtStyleKey);
         const { w, h } = measurePinBoxDimensions(ctx, noStr, pinScale, 1);
 
-        const anchor = getPinLeaderBoxAnchor(boxX, boxY, targetX, targetY, w, h, ndtRotationAngle || 0);
+        const anchor = getPinLeaderBoxAnchor(boxX, boxY, targetX, targetY, w, h, ndtRotationAngle || 0, { shape: ndtShapeCfg.shape, scale: pinScale });
         const headLen = (isBeingDragged ? 13 : 10) * arrowScale;
         const stemInset = useCircleTip
             ? (isBeingDragged ? 6 : 4.5) * arrowScale
@@ -9456,6 +9600,102 @@ document.addEventListener('DOMContentLoaded', () => {
         );
     };
 
+    /**
+     * 수정창「다음 회차 시작하기」— 새 건물 ID로 차기 점검 현장을 만들고
+     * 결함·도면·NDT를 복제하되 결함은 전회차로 넘긴다. PDF는 현장명 보관함에 유지.
+     */
+    window.startNextInspectionRoundFromEdit = async function() {
+        const sourceBldg = window.currentEditingBuilding;
+        if (!sourceBldg) {
+            window.showToast('수정 중인 건축물 정보를 찾을 수 없습니다.', 'warning');
+            return;
+        }
+
+        const curYear = sourceBldg.inspectionYear || '2026년';
+        const curPeriod = sourceBldg.inspectionPeriod || '하반기';
+        const next = getNextSurveyRoundParts(curYear, curPeriod);
+        const toKey = `${next.year}_${next.period}`;
+        const defectCount = countBuildingDefects(sourceBldg);
+        const siteLabel = normalizeSiteVaultKey(sourceBldg.name);
+
+        if (!window.confirm(
+            `다음 회차 점검 현장을 새로 만들까요?\n\n` +
+            `· 현재: ${curYear} ${curPeriod} (${sourceBldg.name || '현장'})\n` +
+            `· 새 현장: ${next.year} ${next.period}\n\n` +
+            `· 새 점검 기록(새 ID)이 생성됩니다. 기존 점검은 그대로 남습니다.\n` +
+            `· 결함 ${defectCount}건 → 전회차로 이전, 층·도면·NDT 복사\n` +
+            `· PDF 도면은 「${siteLabel}」 현장명 보관함에 유지·재사용`
+        )) return;
+
+        window.showLoading('다음 회차 현장 생성 중…');
+        try {
+            await archiveBuildingPdfsToSiteVault(sourceBldg);
+
+            const newBuildingId = 'bldg-' + Date.now();
+            const rawName = (sourceBldg.name || '').replace(/^🏢\s*/, '').trim();
+            const newBldg = {
+                id: newBuildingId,
+                name: rawName.startsWith('🏢') ? rawName : `🏢 ${rawName}`,
+                address: sourceBldg.address || '',
+                inspector: window.state.userName || sourceBldg.inspector || '점검자',
+                date: new Date().toISOString().split('T')[0],
+                floors: sourceBldg.floors || '',
+                inspectionType: sourceBldg.inspectionType || '정밀안전점검',
+                inspectionYear: next.year,
+                inspectionPeriod: next.period,
+                latestSurveyRoundKey: toKey,
+                siteVaultKey: siteVaultDocId(siteLabel),
+                structureType: sourceBldg.structureType || '',
+                facilityGrade: sourceBldg.facilityGrade || '',
+                completionDate: sourceBldg.completionDate || '',
+                notes: sourceBldg.notes || '',
+                floorsList: JSON.parse(JSON.stringify(sourceBldg.floorsList || [])),
+                floorDrawings: {},
+                floorDrawingPdfs: {},
+                floorDrawingTiers: {},
+                floorDrawingSources: {},
+                locationMapLegend: sourceBldg.locationMapLegend
+                    ? JSON.parse(JSON.stringify(sourceBldg.locationMapLegend))
+                    : undefined
+            };
+
+            await cloneBuildingDataFromSource(sourceBldg, newBldg, {
+                floorsDrawings: true,
+                defects: true,
+                defectRoundMode: 'carryOver',
+                ndt: true,
+                mapStyles: true,
+                merge: false
+            }, (msg) => {
+                if (typeof window.updateLoadingText === 'function') window.updateLoadingText(msg);
+            });
+
+            await hydrateBuildingPdfsFromSiteVault(newBldg);
+            await persistBuildingDrawingAssetsNow(newBldg);
+
+            if (!window.state.buildings) window.state.buildings = [];
+            window.state.buildings.unshift(newBldg);
+
+            saveStateToLocalStorage();
+            if (typeof syncStateToFirebase === 'function') syncStateToFirebase();
+
+            window.closeEditBuildingModalFunc();
+            renderDashboard();
+            window.selectBuildingAndInspect(newBldg);
+
+            window.showToast(
+                `${next.year} ${next.period} 새 점검 생성 · 전회차 결함 ${defectCount}건 · PDF는 「${siteLabel}」 보관함`,
+                'success',
+                6500
+            );
+        } catch (err) {
+            console.error('다음 회차 현장 생성 오류:', err);
+            window.showToast('다음 회차 생성 중 오류가 발생했습니다.', 'error', 5000);
+        } finally {
+            window.hideLoading();
+        }
+    };
+
     // 건물별 "최신 회차"를 앞으로만 전진시킨다. 상단 "점검 설정" 드롭다운을 보고서
     // 미리보기 등으로 잠깐 과거 회차로 바꿔도 이 값은 되돌아가지 않으므로, 이미
     // 전회차로 분류된 결함이 드롭다운 변경만으로 다시 금회차로 돌아오지 않는다.
@@ -10946,7 +11186,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 targetX = attach.x;
                 targetY = attach.y;
             }
-            const anchor = getPinLeaderBoxAnchor(boxX, boxY, targetX, targetY, w, h, state.rotationAngle || 0);
+            const leaderAnchorOpts = { shape: shapeCfg.shape, scale };
+            const anchor = getPinLeaderBoxAnchor(boxX, boxY, targetX, targetY, w, h, state.rotationAngle || 0, leaderAnchorOpts);
             const headLen = (isBeingDragged ? 13 : 10) * arrowScale;
             const stemInset = useCircleTip
                 ? (isBeingDragged ? 6 : 4.5) * arrowScale
@@ -10964,7 +11205,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     forcedDir.octant,
                     stemInset,
                     headLen,
-                    state.rotationAngle || 0
+                    state.rotationAngle || 0,
+                    leaderAnchorOpts
                 )
                 : (() => {
                     const ux = targetX - anchor.x;
@@ -17851,7 +18093,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     tipX = attach.x;
                     tipY = attach.y;
                 }
-                const anchor = getPinLeaderBoxAnchor(boxX, boxY, tipX, tipY, safeBoxW, safeBoxH, 0);
+                const leaderAnchorOpts = { shape: safeShapeCfg.shape, scale: safeScale };
+                const anchor = getPinLeaderBoxAnchor(boxX, boxY, tipX, tipY, safeBoxW, safeBoxH, 0, leaderAnchorOpts);
                 const safeHeadLen = 11 * safeArrowScale;
                 const forcedDir = isAreaDefectSafe ? { enabled: false } : resolveForcedArrowDirection(t, defect);
                 const stemInset = useCircleTipSafe
@@ -17869,7 +18112,8 @@ document.addEventListener('DOMContentLoaded', () => {
                         forcedDir.octant,
                         stemInset,
                         safeHeadLen,
-                        0
+                        0,
+                        leaderAnchorOpts
                     )
                     : (() => {
                         const ux = tipX - anchor.x;
@@ -17970,7 +18214,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 tipX = attach.x;
                 tipY = attach.y;
             }
-            const anchor = getPinLeaderBoxAnchor(boxX, boxY, tipX, tipY, boxDim.w, boxDim.h, 0);
+            const leaderAnchorOpts = { shape: shapeCfg.shape, scale: pinScale };
+            const anchor = getPinLeaderBoxAnchor(boxX, boxY, tipX, tipY, boxDim.w, boxDim.h, 0, leaderAnchorOpts);
             const headLen = 11 * arrowScale;
             const forcedDir = isAreaDefect ? { enabled: false } : resolveForcedArrowDirection(t, defect);
             const stemInset = useCircleTip
@@ -17981,7 +18226,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     { x: tipX, y: tipY },
                     boxX, boxY, boxDim.w, boxDim.h,
                     pinScale, arrowScale, forcedDir.octant,
-                    stemInset, headLen, 0
+                    stemInset, headLen, 0,
+                    leaderAnchorOpts
                 )
                 : (() => {
                     const ux = tipX - anchor.x;
@@ -18079,7 +18325,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (targetX !== undefined && targetY !== undefined) {
             const anchor = isTiltCallout
                 ? { x: boxX, y: boxY }
-                : getPinLeaderBoxAnchor(boxX, boxY, targetX, targetY, boxDim.w, boxDim.h, 0);
+                : getPinLeaderBoxAnchor(boxX, boxY, targetX, targetY, boxDim.w, boxDim.h, 0, { shape: shapeCfg.shape, scale: pinScale });
             const headLen = 11 * arrowScale;
             const stemInset = useCircleTip ? 4.5 * arrowScale : headLen * Math.cos(Math.PI / 6);
             const ux = targetX - anchor.x;
@@ -22647,7 +22893,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         state.currentBuilding = activeBldg;
                         if (state.currentFloor) {
                             applyFloorMapStyleSettings(state.currentFloor, state.currentBuildingId);
-                            loadFloorDrawing(state.currentFloor);
+                            loadFloorDrawing(state.currentFloor, { preserveView: true });
                         }
                     }
                 }
@@ -22790,6 +23036,248 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    /** Firestore 1MB 한도 — 큰 PDF는 parts 서브컬렉션으로 분할 저장 */
+    const PDF_CLOUD_CHUNK_CHARS = 850000;
+
+    /** 현장명(건물명에서 연도·반기 접미사 제거) — 같은 현장의 반기별 점검에서 PDF 도면 공유 */
+    function normalizeSiteVaultKey(buildingName) {
+        let s = String(buildingName || '').replace(/^🏢\s*/, '').trim();
+        s = s.replace(/\s+/g, ' ');
+        s = s.replace(/\s*20\d{2}\s*년?\s*(상반기|하반기|수시점검)?\s*$/i, '').trim();
+        return s || 'unnamed';
+    }
+
+    function siteVaultDocId(siteKey) {
+        const id = String(siteKey || 'unnamed')
+            .replace(/[\\/:*?"<>|#\s]+/g, '_')
+            .replace(/_+/g, '_')
+            .slice(0, 120);
+        return id || 'unnamed';
+    }
+
+    function getSiteVaultKeyFromBuilding(bldg) {
+        if (!bldg) return 'unnamed';
+        if (bldg.siteVaultKey) return bldg.siteVaultKey;
+        return siteVaultDocId(normalizeSiteVaultKey(bldg.name));
+    }
+
+    async function writeChunkedPdfToDocRef(docRef, pdfDataUrl, extraFields) {
+        const payload = String(pdfDataUrl);
+        const base = { ...(extraFields || {}), updatedAt: firebase.firestore.FieldValue.serverTimestamp() };
+        if (payload.length <= PDF_CLOUD_CHUNK_CHARS) {
+            await docRef.set({ ...base, dataUrl: payload, chunked: false });
+            return;
+        }
+        const parts = [];
+        for (let i = 0; i < payload.length; i += PDF_CLOUD_CHUNK_CHARS) {
+            parts.push(payload.slice(i, i + PDF_CLOUD_CHUNK_CHARS));
+        }
+        const batch = db.batch();
+        batch.set(docRef, { ...base, chunked: true, chunkCount: parts.length });
+        parts.forEach((part, i) => {
+            batch.set(docRef.collection('parts').doc(String(i)), { data: part });
+        });
+        await batch.commit();
+    }
+
+    async function readChunkedPdfFromDocRef(docRef) {
+        const snap = await docRef.get();
+        if (!snap.exists) return null;
+        const data = snap.data() || {};
+        if (data.dataUrl) return data.dataUrl;
+        if (data.chunked && data.chunkCount > 0) {
+            const partsSnap = await docRef.collection('parts').get();
+            return partsSnap.docs
+                .sort((a, b) => Number(a.id) - Number(b.id))
+                .map((d) => (d.data() && d.data().data) || '')
+                .join('');
+        }
+        return null;
+    }
+
+    async function uploadSiteVaultPdf(siteKey, floorCode, pdfDataUrl) {
+        if (!db || !window.state.companyId || !siteKey || !floorCode || !pdfDataUrl) return false;
+        const siteId = siteVaultDocId(siteKey);
+        const rootRef = db.collection('safety_app').doc(getCompanyDocId())
+            .collection('siteDrawingVault').doc(siteId);
+        const floorRef = rootRef.collection('floors').doc(floorCode);
+        try {
+            await rootRef.set({
+                siteName: siteKey,
+                updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+            }, { merge: true });
+            await writeChunkedPdfToDocRef(floorRef, pdfDataUrl);
+            const vaultIdbKey = `vault_${siteId}_${floorCode}`;
+            await idbSet('floorDrawingPdfs', vaultIdbKey, pdfDataUrl);
+            return true;
+        } catch (e) {
+            console.warn('현장명 PDF 보관함 저장 실패:', e);
+            return false;
+        }
+    }
+
+    async function fetchSiteVaultPdf(siteKey, floorCode) {
+        if (!siteKey || !floorCode) return null;
+        const siteId = siteVaultDocId(siteKey);
+        const vaultIdbKey = `vault_${siteId}_${floorCode}`;
+        const cached = await idbGet('floorDrawingPdfs', vaultIdbKey);
+        if (cached) return cached;
+        if (!db || !window.state.companyId) return null;
+        try {
+            const floorRef = db.collection('safety_app').doc(getCompanyDocId())
+                .collection('siteDrawingVault').doc(siteId).collection('floors').doc(floorCode);
+            const pdf = await readChunkedPdfFromDocRef(floorRef);
+            if (pdf) await idbSet('floorDrawingPdfs', vaultIdbKey, pdf);
+            return pdf;
+        } catch (e) {
+            console.warn('현장명 PDF 보관함 조회 실패:', e);
+            return null;
+        }
+    }
+
+    async function archiveBuildingPdfsToSiteVault(bldg) {
+        if (!bldg || !bldg.id) return;
+        const siteKey = normalizeSiteVaultKey(bldg.name);
+        bldg.siteVaultKey = siteVaultDocId(siteKey);
+        const floors = (bldg.floorsList && bldg.floorsList.length > 0)
+            ? bldg.floorsList.map(f => f.floorCode)
+            : Object.keys(bldg.floorDrawingPdfs || bldg.floorDrawings || {});
+        for (const fc of floors) {
+            let pdf = (bldg.floorDrawingPdfs && bldg.floorDrawingPdfs[fc]) || null;
+            if (!pdf) pdf = await idbGet('floorDrawingPdfs', `${bldg.id}_${fc}`);
+            if (!pdf && db && window.state.companyId) {
+                pdf = await fetchFloorDrawingPdfFromCloud(bldg.id, fc);
+            }
+            if (pdf) await uploadSiteVaultPdf(siteKey, fc, pdf);
+        }
+    }
+
+    async function applyResolvedPdfToBuilding(bldg, floorCode, pdf) {
+        if (!bldg || !floorCode || !pdf) return false;
+        const idbKey = `${bldg.id}_${floorCode}`;
+        if (typeof window.ensureFloorDrawingPdfs === 'function') window.ensureFloorDrawingPdfs(bldg);
+        else if (!bldg.floorDrawingPdfs) bldg.floorDrawingPdfs = {};
+        bldg.floorDrawingPdfs[floorCode] = pdf;
+        await idbSet('floorDrawingPdfs', idbKey, pdf);
+        _idbPersistedPdfKeys.add(idbKey);
+        if (!window._cloudSyncedPdfKeys) window._cloudSyncedPdfKeys = new Set();
+        window._cloudSyncedPdfKeys.add(idbKey);
+        return true;
+    }
+
+    async function resolveBuildingFloorPdf(bldg, floorCode) {
+        if (!bldg || !floorCode) return null;
+        const idbKey = `${bldg.id}_${floorCode}`;
+        if (bldg.floorDrawingPdfs && bldg.floorDrawingPdfs[floorCode]) {
+            return bldg.floorDrawingPdfs[floorCode];
+        }
+        const cached = await idbGet('floorDrawingPdfs', idbKey);
+        if (cached) return cached;
+        if (db && window.state.companyId) {
+            const cloudPdf = await fetchFloorDrawingPdfFromCloud(bldg.id, floorCode);
+            if (cloudPdf) return cloudPdf;
+        }
+        return fetchSiteVaultPdf(normalizeSiteVaultKey(bldg.name), floorCode);
+    }
+
+    async function hydrateBuildingPdfsFromSiteVault(bldg) {
+        if (!bldg) return;
+        const siteKey = normalizeSiteVaultKey(bldg.name);
+        bldg.siteVaultKey = siteVaultDocId(siteKey);
+        const floors = (bldg.floorsList && bldg.floorsList.length > 0)
+            ? bldg.floorsList.map(f => f.floorCode)
+            : Object.keys(bldg.floorDrawings || bldg.floorDrawingPdfs || {});
+        for (const fc of floors) {
+            if (bldg.floorDrawingPdfs && bldg.floorDrawingPdfs[fc]) continue;
+            const pdf = await resolveBuildingFloorPdf(bldg, fc);
+            if (pdf) {
+                await applyResolvedPdfToBuilding(bldg, fc, pdf);
+                if (db && window.state.companyId) {
+                    await uploadFloorDrawingPdf(bldg.id, fc, pdf);
+                }
+            }
+        }
+    }
+
+    async function uploadFloorDrawingPdf(buildingId, floorCode, pdfDataUrl) {
+        if (!db || !window.state.companyId || !pdfDataUrl) return false;
+        const docId = `${buildingId}_${floorCode}`;
+        const docRef = db.collection('safety_app').doc(getCompanyDocId()).collection('floorDrawingPdfs').doc(docId);
+        try {
+            await writeChunkedPdfToDocRef(docRef, pdfDataUrl);
+            if (!window._cloudSyncedPdfKeys) window._cloudSyncedPdfKeys = new Set();
+            window._cloudSyncedPdfKeys.add(docId);
+            const bldg = (window.state.buildings || []).find(b => b.id === buildingId);
+            if (bldg) {
+                const siteKey = normalizeSiteVaultKey(bldg.name);
+                bldg.siteVaultKey = siteVaultDocId(siteKey);
+                await uploadSiteVaultPdf(siteKey, floorCode, pdfDataUrl);
+            }
+            return true;
+        } catch (e) {
+            console.warn('PDF 원본 서버 업로드 실패:', e);
+            return false;
+        }
+    }
+
+    async function fetchFloorDrawingPdfFromCloud(buildingId, floorCode) {
+        if (!db || !window.state.companyId) return null;
+        const docId = `${buildingId}_${floorCode}`;
+        try {
+            const docRef = db.collection('safety_app').doc(getCompanyDocId())
+                .collection('floorDrawingPdfs').doc(docId);
+            return await readChunkedPdfFromDocRef(docRef);
+        } catch (e) {
+            console.warn('PDF 원본 서버 조회 실패:', e);
+            return null;
+        }
+    }
+
+    async function deleteFloorDrawingPdfFromCloud(buildingId, floorCode) {
+        if (!db || !window.state.companyId) return;
+        const docId = `${buildingId}_${floorCode}`;
+        try {
+            const docRef = db.collection('safety_app').doc(getCompanyDocId())
+                .collection('floorDrawingPdfs').doc(docId);
+            const partsSnap = await docRef.collection('parts').get();
+            if (!partsSnap.empty) {
+                const batch = db.batch();
+                partsSnap.forEach((d) => batch.delete(d.ref));
+                batch.delete(docRef);
+                await batch.commit();
+            } else {
+                await docRef.delete();
+            }
+            if (window._cloudSyncedPdfKeys) window._cloudSyncedPdfKeys.delete(docId);
+        } catch (e) {
+            console.warn(`PDF 원본 서버 삭제 실패 (${docId}):`, e);
+        }
+    }
+
+    /** 동기화 시 로컬 PDF 원본을 Firestore에 올려 기기 간 벡터 출력·고해상도 줌 유지 */
+    async function uploadFloorDrawingPdfsForSync(buildings) {
+        if (!db || !window.state.companyId) return;
+        if (!window._cloudSyncedPdfKeys) window._cloudSyncedPdfKeys = new Set();
+        for (const b of (buildings || [])) {
+            if (!b || !b.id) continue;
+            const pdfs = b.floorDrawingPdfs || {};
+            const floorCodes = new Set([
+                ...Object.keys(pdfs),
+                ...((b.floorsList || []).map((f) => f.floorCode))
+            ]);
+            for (const floorCode of floorCodes) {
+                const docId = `${b.id}_${floorCode}`;
+                if (window._cloudSyncedPdfKeys.has(docId)) continue;
+                let pdfDataUrl = pdfs[floorCode];
+                if (!pdfDataUrl) pdfDataUrl = await idbGet('floorDrawingPdfs', docId);
+                if (!pdfDataUrl) continue;
+                if (!b.floorDrawingPdfs) b.floorDrawingPdfs = {};
+                b.floorDrawingPdfs[floorCode] = pdfDataUrl;
+                await uploadFloorDrawingPdf(b.id, floorCode, pdfDataUrl);
+            }
+        }
+    }
+
     async function uploadDefectPhotos(defectId, photosArray, kind) {
         if (!Array.isArray(photosArray) || photosArray.length === 0) return [];
         if (!window._photoCache) window._photoCache = {};
@@ -22883,6 +23371,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     console.warn(`도면 삭제 실패 (${drawingDocId}):`, e);
                 }));
             }
+            jobs.push(deleteFloorDrawingPdfFromCloud(bldg.id, fc).catch(() => {}));
             return Promise.all(jobs);
         }));
         return failCount;
@@ -23149,6 +23638,7 @@ document.addEventListener('DOMContentLoaded', () => {
             window.state.deletedNdtIds = ndtMerge.deletedNdtIds;
 
             await uploadInlineDefectPhotosForSync(window.state.defects);
+            await uploadFloorDrawingPdfsForSync(window.state.buildings);
 
             _suppressSyncOnSave = true;
             if (typeof saveStateToLocalStorage === 'function') saveStateToLocalStorage();
@@ -23807,6 +24297,7 @@ document.addEventListener('DOMContentLoaded', () => {
         window.setupCanvas = setupCanvas;
         window.resizeCanvas = resizeCanvas;
         window.fitToScreen = fitToScreen;
+        window.shouldAutoFitMapView = shouldAutoFitMapView;
         window.drawCanvas = drawCanvas;
         window.setupNdtCanvas = setupNdtCanvas;
         window.resizeNdtCanvas = resizeNdtCanvas;

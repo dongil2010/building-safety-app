@@ -1,6 +1,6 @@
 /**
  * PDF 벡터 브리지
- * - 업로드 시 PDF 원본(dataURL)을 floorDrawingPdfs에 보관
+ * - 업로드 시 PDF 원본(dataURL)을 floorDrawingPdfs + Firestore floorDrawingPdfs에 보관
  * - 화면/핀은 기존처럼 래스터(bgImage) 좌표계 사용
  * - 내보내기는 drawPinSafe와 동일한 비율/지시선/화살표/방향지정으로 벡터 합성
  */

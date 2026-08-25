@@ -11,6 +11,8 @@ rules_version = '2';
 //   joinCodes/{code}                            → 가입 코드 → companyId 조회용 (가입 전 미인증 상태에서 조회됨)
 //   safety_app/{companyId}                      → 회사별 건물/결함 메타데이터 (실시간 동기화 대상)
 //   safety_app/{companyId}/floorDrawings/{id}   → 층별 도면 이미지(dataUrl)
+//   safety_app/{companyId}/floorDrawingPdfs/{id} → 층별 PDF 원본(dataUrl 또는 parts 서브컬렉션)
+//   safety_app/{companyId}/siteDrawingVault/{siteKey}/floors/{floorCode} → 현장명 기준 PDF 보관함(건물 삭제 후에도 유지)
 //   safety_app/{companyId}/photos/{id}          → 결함 사진(dataUrl)
 //
 // 배포 방법: Firebase 콘솔 → Firestore Database → 규칙(Rules) 탭에 이 파일 내용을 붙여넣고 게시(Publish).
@@ -94,8 +96,28 @@ service cloud.firestore {
         allow read, write: if isCompanyMember(companyId);
       }
 
+      match /floorDrawingPdfs/{docId} {
+        allow read, write: if isCompanyMember(companyId);
+
+        match /parts/{partId} {
+          allow read, write: if isCompanyMember(companyId);
+        }
+      }
+
       match /photos/{docId} {
         allow read, write: if isCompanyMember(companyId);
+      }
+
+      match /siteDrawingVault/{siteKey} {
+        allow read, write: if isCompanyMember(companyId);
+
+        match /floors/{floorCode} {
+          allow read, write: if isCompanyMember(companyId);
+
+          match /parts/{partId} {
+            allow read, write: if isCompanyMember(companyId);
+          }
+        }
       }
     }
 

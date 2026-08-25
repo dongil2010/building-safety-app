@@ -1953,6 +1953,18 @@
                     <textarea id="inputEditBuildingNotes" class="form-control" rows="2" placeholder="건물 특이사항이나 주요 요청 사항 입력"></textarea>
                 </div>
 
+                <div class="edit-next-round-section" style="background: rgba(59,130,246,0.08); border: 1px solid rgba(59,130,246,0.35); border-radius: 10px; padding: 1rem 1.1rem; margin-bottom: 1rem;">
+                    <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:0.8rem; flex-wrap:wrap;">
+                        <div>
+                            <h4 style="font-size:0.95rem; font-weight:800; color:#1d4ed8; margin:0 0 0.35rem;"><i class="fa-solid fa-forward"></i> 다음 회차 점검 시작</h4>
+                            <p style="font-size:0.78rem; color:#475569; margin:0; line-height:1.45;">새 점검 현장(새 ID)을 만들고 결함을 「전회차」로 넘깁니다. PDF 도면은 현장명 보관함에 남아 같은 이름의 차기 점검에서도 재사용됩니다. 기존 점검 기록은 그대로 유지됩니다.</p>
+                        </div>
+                        <button type="button" class="btn btn-primary btn-sm" id="btnStartNextInspectionRound" style="white-space:nowrap; background: linear-gradient(135deg, #2563eb, #1d4ed8);">
+                            <i class="fa-solid fa-calendar-plus"></i> 다음 회차 시작하기
+                        </button>
+                    </div>
+                </div>
+
                 <div class="edit-import-section">
                     <div class="add-section-head">
                         <span class="add-section-icon"><i class="fa-solid fa-clone"></i></span>
@@ -2278,14 +2290,14 @@
     <script src="js/pdf-vector-bridge.js?v=20260825_vptile"></script>
     <script src="js/tabs/registry.js?v=20260821_land1"></script>
     <script src="js/tabs/home.js?v=20260824_webview"></script>
-    <script src="js/tabs/map.js?v=20260825_wxJoin"></script>
+    <script src="js/tabs/map.js?v=20260825_viewkeep"></script>
     <script src="js/tabs/survey.js?v=20260824_nSub"></script>
     <script src="js/tabs/ndt.js?v=20260822_survey2dScroll"></script>
     <script src="js/shared/report.js?v=20260824_hwpxFix"></script>
     <script src="js/shared/auth.js?v=20260821_land1"></script>
-    <script src="app.js?v=20260825_vptile2"></script>
+    <script src="app.js?v=20260825_sitevault"></script>
     <script>
-        window.BSA_APP_VERSION = '20260825_vptile2';
+        window.BSA_APP_VERSION = '20260825_sitevault';
         (function () {
             var el = document.getElementById('appVersionText');
             if (el && window.BSA_APP_VERSION) el.textContent = 'v' + window.BSA_APP_VERSION;
@@ -2309,7 +2321,7 @@
                     native = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
                 } catch (e) {}
                 if (native) return;
-                navigator.serviceWorker.register('./sw.js?v=20260825_nobadge')
+                navigator.serviceWorker.register('./sw.js?v=20260825_sitevault')
                     .then(function(registration) {
                         console.log('✅ ServiceWorker Registered Successfully with scope:', registration.scope);
                     })
