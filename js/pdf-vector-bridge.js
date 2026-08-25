@@ -85,7 +85,7 @@
     }
     const pdfDataUrl = await window.fileToPdfDataUrl(file);
     // PDF 원본만 보관 — 4000/8000/16000은 줌 시 pdf.js로 실시간 렌더 (비트맵 티어 저장 안 함)
-    const rasterDataUrl = await window.renderPdfFileToImage(file, 4000, 950000);
+    const rasterDataUrl = await window.renderPdfFileToImage(file, 4000, 1400000);
     return { rasterDataUrl, tiers: null, pdfDataUrl, isPdf: true };
   };
 

@@ -377,7 +377,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (d < 1.02) return 0;
                 return 1;
             }
-            if (d >= 1.28) return 1;
+            if (d >= 1.05) return 1;
             return 0;
         }
 
@@ -393,19 +393,64 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         if (cur === 1) {
             if (d >= 2.05) return 2;
-            if (d < 1.02) return 0;
+            if (d < 0.88) return 0;
             return 1;
         }
-        if (d >= 1.28) return 1;
+        if (d >= 1.05) return 1;
         return 0;
     }
 
-    function getViewportPatchLevelMultiplier(level, mobile) {
+    /** PC·모바일 공통 — 실제 선명도는 zoomDemand로 outLong 계산, levelMul은 단계 히스테리시스용 */
+    function getViewportPatchLevelMultiplier(level) {
         if (level <= 0) return 0;
-        const desktop = [0, 1.45, 2.25, 3.55, 5.2];
-        const phone = [0, 1.35, 2.05, 2.85, 3.65];
-        const table = mobile ? phone : desktop;
+        const table = [0, 1.45, 2.25, 3.55, 5.2];
         return table[Math.min(level, table.length - 1)] || table[table.length - 1];
+    }
+
+    function getViewportPatchPixelBudget(mobile) {
+        if (!mobile) return 16000;
+        return 4096;
+    }
+
+    /** 모바일 GPU 캔버스 한 변 상한 — 초과 시 pdf.js 렌더 실패 후 저해상도 fallback */
+    function getViewportPatchMaxSide(mobile) {
+        return mobile ? 4096 : 16384;
+    }
+
+    function clampPatchOutputDims(outW, outH, maxLong, maxSide) {
+        let w = Math.max(1, Math.round(outW));
+        let h = Math.max(1, Math.round(outH));
+        const long0 = Math.max(w, h);
+        if (long0 > maxLong) {
+            const s = maxLong / long0;
+            w = Math.max(1, Math.round(w * s));
+            h = Math.max(1, Math.round(h * s));
+        }
+        const side = Math.max(w, h);
+        if (side > maxSide) {
+            const s = maxSide / side;
+            w = Math.max(1, Math.round(w * s));
+            h = Math.max(1, Math.round(h * s));
+        }
+        return { w, h };
+    }
+
+    async function ensureFloorPlanRefForPdf(bldg, floorCode) {
+        if (!bldg || !floorCode) return;
+        let pdfUrl = (typeof window.getFloorPdfDataUrl === 'function')
+            ? window.getFloorPdfDataUrl(bldg, floorCode)
+            : null;
+        if (!pdfUrl && typeof window.resolveFloorPdfDataUrlAsync === 'function') {
+            pdfUrl = await window.resolveFloorPdfDataUrlAsync(bldg, floorCode);
+        }
+        if (!pdfUrl || typeof window.getPdfRefPixelSize !== 'function') return;
+        try {
+            const refDim = window.FLOOR_DRAWING_PDF_PREVIEW_DIM || 4000;
+            const ref = await window.getPdfRefPixelSize(pdfUrl, refDim, `${bldg.id}_${floorCode}`);
+            state.floorPlanRef = { w: ref.w, h: ref.h, bldgId: bldg.id, floorCode };
+        } catch (e) {
+            console.warn('PDF ref 좌표계 설정 실패:', e);
+        }
     }
 
     function shouldUpdateViewportPatchRegion(region, meta) {
@@ -594,6 +639,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!patch || !patch.canvas || patch.w <= 0 || patch.h <= 0 || alpha <= 0.001) return;
             ctx.save();
             ctx.globalAlpha = alpha;
+            ctx.imageSmoothingEnabled = false;
             ctx.drawImage(patch.canvas, patch.x, patch.y, patch.w, patch.h);
             ctx.restore();
         };
@@ -706,7 +752,7 @@ document.addEventListener('DOMContentLoaded', () => {
         viewportHiPatchTimer = setTimeout(() => {
             viewportHiPatchTimer = null;
             syncViewportHiPatch();
-        }, 380);
+        }, 180);
     }
 
     function flushViewportHiPatchSync() {
@@ -770,22 +816,35 @@ document.addEventListener('DOMContentLoaded', () => {
         if (token !== viewportHiPatchToken) return;
         if (state.currentFloor !== fc || state.currentBuildingId !== bldg.id) return;
 
+        await ensureFloorPlanRefForPdf(bldg, fc);
+        if (token !== viewportHiPatchToken) return;
+        ref = (typeof window.getFloorPlanRefDimensions === 'function')
+            ? window.getFloorPlanRefDimensions(bldg, fc)
+            : ref;
+
         const mobile = isMobileMapViewport();
-        const maxPatchLong = mobile ? 4096 : 16000;
-        const minPatchLong = mobile ? 768 : 1024;
-        const levelMul = getViewportPatchLevelMultiplier(wantLevel, mobile);
-        let outLong = Math.min(maxPatchLong, Math.max(minPatchLong, Math.ceil(regionLong * levelMul)));
+        const maxPatchLong = getViewportPatchPixelBudget(mobile);
+        const maxPatchSide = getViewportPatchMaxSide(mobile);
+        const minPatchLong = 1024;
+        // 화면 픽셀(zoomDemand)에 맞춰 패치 해상도 산출 — levelMul만 쓰면 확대해도 선명도가 안 오름
+        const demandLong = Math.ceil(regionLong * Math.max(zoomDemand, getViewportPatchLevelMultiplier(wantLevel)) * 1.08);
+        let outLong = Math.min(maxPatchLong, Math.max(minPatchLong, demandLong));
 
         const aspect = region.w / region.h;
-        let outW;
-        let outH;
-        if (aspect >= 1) {
-            outW = outLong;
-            outH = Math.max(1, Math.round(outLong / aspect));
-        } else {
-            outH = outLong;
-            outW = Math.max(1, Math.round(outLong * aspect));
-        }
+        const patchDimsFromLong = (longSide) => {
+            let w;
+            let h;
+            if (aspect >= 1) {
+                w = longSide;
+                h = Math.max(1, Math.round(longSide / aspect));
+            } else {
+                w = Math.max(1, Math.round(longSide * aspect));
+                h = longSide;
+            }
+            return clampPatchOutputDims(w, h, maxPatchLong, maxPatchSide);
+        };
+        let { w: outW, h: outH } = patchDimsFromLong(outLong);
+        outLong = Math.max(outW, outH);
 
         if (typeof window.renderPdfDataUrlRegion !== 'function') return;
 
@@ -808,26 +867,33 @@ document.addEventListener('DOMContentLoaded', () => {
             return true;
         };
 
+        const pdfCacheKey = `${bldg.id}_${fc}`;
+        const renderAtLong = async (longSide) => {
+            const dims = patchDimsFromLong(longSide);
+            return window.renderPdfDataUrlRegion(pdfUrl, ref.w, ref.h, region, dims.w, dims.h, pdfCacheKey);
+        };
+
         try {
-            const pdfCacheKey = `${bldg.id}_${fc}`;
-            let canvas = await window.renderPdfDataUrlRegion(pdfUrl, ref.w, ref.h, region, outW, outH, pdfCacheKey);
+            const canvas = await renderAtLong(outLong);
             if (applyPatch(canvas)) return;
+            if (token !== viewportHiPatchToken) return;
+            if (!canvas) throw new Error('뷰포트 패치 캔버스 생성 실패');
         } catch (e) {
             console.warn('뷰포트 고해상도 패치 실패:', e);
-        }
-
-        // 모바일 GPU 메모리 한도 — 축소 후 1회 재시도
-        if (outLong > 1536) {
-            const shrink = 1536 / outLong;
-            outLong = 1536;
-            outW = Math.max(1, Math.round(outW * shrink));
-            outH = Math.max(1, Math.round(outH * shrink));
-            try {
-                const pdfCacheKey = `${bldg.id}_${fc}`;
-                const canvas = await window.renderPdfDataUrlRegion(pdfUrl, ref.w, ref.h, region, outW, outH, pdfCacheKey);
-                applyPatch(canvas);
-            } catch (e2) {
-                console.warn('뷰포트 고해상도 패치(축소) 실패:', e2);
+            const fallbacks = mobile ? [6144, 4096, 3072, 2048] : [12000, 8192, 6144, 4096];
+            for (let fi = 0; fi < fallbacks.length; fi++) {
+                const cap = fallbacks[fi];
+                if (cap >= outLong) continue;
+                if (token !== viewportHiPatchToken) return;
+                try {
+                    const canvas = await renderAtLong(cap);
+                    if (applyPatch(canvas)) return;
+                    return;
+                } catch (e2) {
+                    if (fi === fallbacks.length - 1) {
+                        console.warn('뷰포트 고해상도 패치(축소) 실패:', e2);
+                    }
+                }
             }
         }
     }
@@ -3875,8 +3941,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
     async function renderPdfFloorWithPreview(bldg, floorCode, pdfUrl, tryLoadImage, loadToken) {
         if (!pdfUrl || !bldg || !floorCode) return null;
+        await ensureFloorPlanRefForPdf(bldg, floorCode);
         const pdfCacheKey = `${bldg.id}_${floorCode}`;
-        const previewDim = window.FLOOR_DRAWING_PREVIEW_DIM || 1600;
+        const previewDim = window.FLOOR_DRAWING_PDF_PREVIEW_DIM || 4000;
         const has4000 = (bldg.floorDrawingTiers && bldg.floorDrawingTiers[floorCode] && bldg.floorDrawingTiers[floorCode]['4000'])
             || (bldg.floorDrawings && bldg.floorDrawings[floorCode]);
         if (!has4000 && typeof window.renderPdfDataUrlToImage === 'function') {
@@ -3924,10 +3991,16 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const tryLoadImage = (srcUrl, isFallback = false) => {
             const img = new Image();
-            img.onload = () => {
+            img.onload = async () => {
                 applyFloorDrawingTarget(img, null, { immediate: !state.bgImage });
                 floorDrawingActiveTierDim = 4000;
-                if (bldg && bldg.id) updateFloorPlanRefFromImage(img, bldg.id, floorCode);
+                if (bldg && bldg.id) {
+                    if (floorMayHavePdfSource(bldg, floorCode)) {
+                        await ensureFloorPlanRefForPdf(bldg, floorCode);
+                    } else {
+                        updateFloorPlanRefFromImage(img, bldg.id, floorCode);
+                    }
+                }
                 if (!state.floorDrawingTierImageCache) state.floorDrawingTierImageCache = {};
                 if (bldg && bldg.id) {
                     state.floorDrawingTierImageCache[`${bldg.id}_${floorCode}_4000`] = img;
@@ -15685,6 +15758,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     if (elements.zoomScaleText) elements.zoomScaleText.textContent = `${Math.round(state.view.scale * 100)}%`;
                     drawCanvas();
                     scheduleFloorDrawingTierSync();
+                    if (shouldUseViewportTilesForCurrentFloor()) scheduleViewportHiPatchSync();
                 }
             } else if (!isPinching && e.touches.length === 1) {
                 if (isDragging || isMarkingDrag || isAreaDrag || isDraggingPin || isDraggingPinGroup || pendingDragHit || isDraggingLegend || isResizingLegend || isMarqueeSelecting) {
@@ -23343,9 +23417,28 @@ document.addEventListener('DOMContentLoaded', () => {
         const floors = window._importExcelFloors || [];
         const refHeaders = (sheets[0] && sheets[0].headers) || [];
         const totalRows = sheets.reduce((sum, s) => sum + s.rows.length, 0);
+        const fromHwpx = !!window._importFromHwpx;
+
+        const titleEl = document.getElementById('importDefectExcelModalTitle');
+        if (titleEl) {
+            titleEl.innerHTML = fromHwpx
+                ? '<i class="fa-solid fa-file-lines"></i> 📥 한글(HWPX) 상태조사표 가져오기'
+                : '<i class="fa-solid fa-file-import"></i> 📥 외부 엑셀 결함표 가져오기';
+        }
 
         const summaryEl = document.getElementById('importDefectExcelSummary');
-        if (summaryEl) summaryEl.textContent = `시트 ${sheets.length}개, 데이터 ${totalRows}행 감지됨.`;
+        if (summaryEl) {
+            summaryEl.textContent = fromHwpx
+                ? `한글 문서 ${sheets.length}개 층 블록, 결함 ${totalRows}건 감지됨 (${window._importHwpxGradeLabel || '상태조사표'}).`
+                : `시트 ${sheets.length}개, 데이터 ${totalRows}행 감지됨.`;
+        }
+
+        const sheetMapTitle = document.getElementById('importDefectExcelSheetMapTitle');
+        if (sheetMapTitle) {
+            sheetMapTitle.textContent = fromHwpx
+                ? '한글 문서 층 블록 ↔ 점검 층 배정 (층 이름으로 자동 추정, 다르면 직접 선택하세요)'
+                : '시트 ↔ 층 배정 (시트 이름으로 자동 추정, 다르면 직접 선택하세요)';
+        }
 
         const sheetMapBody = document.getElementById('importDefectExcelSheetMapBody');
         if (sheetMapBody) {
@@ -23367,8 +23460,11 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         }
 
+        const mappingTitle = document.getElementById('importDefectExcelMappingTitle');
         const mappingBody = document.getElementById('importDefectExcelMappingBody');
+        if (mappingTitle) mappingTitle.style.display = fromHwpx ? 'none' : '';
         if (mappingBody) {
+            mappingBody.style.display = fromHwpx ? 'none' : '';
             mappingBody.innerHTML = IMPORT_DEFECT_FIELD_DEFS.map(field => {
                 const guessIdx = guessImportColumnForField(refHeaders, field.aliases);
                 const options = ['<option value="-1">(사용 안 함)</option>']
@@ -23380,6 +23476,14 @@ document.addEventListener('DOMContentLoaded', () => {
                     </div>
                 `;
             }).join('');
+            if (fromHwpx) {
+                const HWPX_FIELD_COL = { no: 0, component: 1, category: 2, defectType: 3, location: 4, size: 5, crackWidth: 6, crackLength: 7, progress: 8, leak: 9, cause: 10 };
+                mappingBody.querySelectorAll('.import-defect-field-map').forEach((sel) => {
+                    const idx = HWPX_FIELD_COL[sel.dataset.field];
+                    if (idx !== undefined) sel.value = String(idx);
+                    sel.disabled = true;
+                });
+            }
         }
 
         const previewTable = document.getElementById('importDefectExcelPreviewTable');
@@ -23405,9 +23509,69 @@ document.addEventListener('DOMContentLoaded', () => {
             modal.style.display = 'none';
             modal.classList.remove('open');
         }
+        document.querySelectorAll('.import-defect-field-map').forEach((sel) => { sel.disabled = false; });
         window._importExcelSheets = null;
         window._importExcelFloors = null;
+        window._importFromHwpx = false;
+        window._importHwpxGradeLabel = null;
     }
+
+    window.handleImportDefectHwpxFile = async function (event) {
+        const file = event.target.files && event.target.files[0];
+        if (!file) return;
+        event.target.value = '';
+
+        if (typeof window.parseHwpxSurveyImport !== 'function') {
+            window.showToast('한글 가져오기 모듈을 불러오지 못했습니다. 새로고침 후 다시 시도해 주세요.', 'error', 5000);
+            return;
+        }
+        if (!state.currentBuildingId) {
+            window.showToast('가져올 건축물이 선택되지 않았습니다.', 'warning');
+            return;
+        }
+
+        try {
+            if (typeof window.showLoading === 'function') window.showLoading('한글(HWPX) 상태조사표 분석 중...');
+            const buffer = await file.arrayBuffer();
+            const parsed = await window.parseHwpxSurveyImport(buffer, {
+                facilityGrade: state.currentBuilding && state.currentBuilding.facilityGrade
+            });
+            const floors = state.currentBuilding ? window.getBuildingAvailableFloors(state.currentBuilding) : [];
+            const bldgGrade3 = isGrade3Building();
+            if (parsed.grade3 !== bldgGrade3) {
+                window.showToast(
+                    `파일은 ${parsed.grade3 ? '3종(칠산타워)' : '1·2종(신가병원)'} 서식, 선택 건물은 ${bldgGrade3 ? '3종' : '1·2종'}입니다. 내용은 그대로 가져오되 표 컬럼은 건물 종별에 맞게 표시됩니다.`,
+                    'warning',
+                    7000
+                );
+            }
+            const headers = window.HWPX_IMPORT_HEADERS || ['번호', '부재', '구분', '조사내용', '위치', '크기', '균열폭', '균열길이', '진행', '누수', '원인'];
+            const sheetInfos = parsed.floors.map((f) => ({
+                sheetName: f.floorLabel,
+                headers,
+                rows: (typeof window.hwpxDefectsToImportRows === 'function')
+                    ? window.hwpxDefectsToImportRows(f.defects)
+                    : [],
+                guessedFloorCode: guessFloorForSheetName(f.floorLabel, floors)
+            })).filter((s) => s.rows.length > 0);
+
+            if (sheetInfos.length === 0) {
+                window.showToast('한글 파일에서 가져올 결함 행을 찾지 못했습니다.', 'warning', 5000);
+                return;
+            }
+
+            window._importFromHwpx = true;
+            window._importHwpxGradeLabel = parsed.grade3 ? '3종 칠산타워' : '1·2종 신가병원';
+            window._importExcelSheets = sheetInfos;
+            window._importExcelFloors = floors;
+            openImportDefectExcelModal();
+        } catch (err) {
+            console.error('HWPX 가져오기 실패:', err);
+            window.showToast('한글 파일을 읽는 중 오류: ' + err.message, 'error', 6000);
+        } finally {
+            if (typeof window.hideLoading === 'function') window.hideLoading();
+        }
+    };
 
     // 구조체여부만 ○/-로 표기된 표는 비구조체/마감재 세부구분이 불가능해 '-'는 비구조체로 간주
     // 마감재 오타·약어(마감제/마김제/마감ㅈ 등)도 마감재로 인식
@@ -23648,6 +23812,12 @@ document.addEventListener('DOMContentLoaded', () => {
     if (btnImportDefectExcel && inputImportDefectExcel) {
         btnImportDefectExcel.addEventListener('click', () => inputImportDefectExcel.click());
         inputImportDefectExcel.addEventListener('change', window.handleImportDefectExcelFile);
+    }
+    const btnImportDefectHwpx = document.getElementById('btnImportDefectHwpx');
+    const inputImportDefectHwpx = document.getElementById('inputImportDefectHwpx');
+    if (btnImportDefectHwpx && inputImportDefectHwpx) {
+        btnImportDefectHwpx.addEventListener('click', () => inputImportDefectHwpx.click());
+        inputImportDefectHwpx.addEventListener('change', window.handleImportDefectHwpxFile);
     }
     const btnCloseImportDefectExcelModal = document.getElementById('btnCloseImportDefectExcelModal');
     if (btnCloseImportDefectExcelModal) btnCloseImportDefectExcelModal.addEventListener('click', closeImportDefectExcelModal);

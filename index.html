@@ -422,8 +422,10 @@
                     <button id="btnOpenReportPreview" class="btn btn-primary btn-sm pc-only-chrome" onclick="window.openReportPreviewModalFunc()" style="background:#2a2a2a; border-color:#2a2a2a;"><i class="fa-solid fa-file-contract"></i> 📋 6개 사진배치 보고서 출력/미리보기</button>
                     <button id="btnExportExcel" class="btn btn-sm pc-only-chrome" style="background: #15803d; color: #ffffff; border: 1px solid #22c55e; font-weight: 700;"><i class="fa-solid fa-file-excel"></i> 🟢 엑셀 저장 (.xls)</button>
                     <button id="btnImportDefectExcel" class="btn btn-outline btn-sm pc-only-chrome" style="border-color:#2a2a2a; color:#2a2a2a;"><i class="fa-solid fa-file-import"></i> 📥 외부 엑셀 결함표 가져오기</button>
+                    <button id="btnImportDefectHwpx" class="btn btn-outline btn-sm pc-only-chrome" style="border-color:#2563eb; color:#2563eb;"><i class="fa-solid fa-file-lines"></i> 📥 한글(HWPX) 상태조사표 가져오기</button>
                     <button id="btnDownloadImportTemplate" class="btn btn-outline btn-sm pc-only-chrome" style="border-color:#737373; color:#737373;"><i class="fa-solid fa-file-arrow-down"></i> 📄 가져오기 양식 다운로드</button>
                     <input type="file" id="inputImportDefectExcel" accept=".xlsx,.xls,.csv" style="display:none;">
+                    <input type="file" id="inputImportDefectHwpx" accept=".hwpx" style="display:none;">
                 </div>
             </div>
 
@@ -1244,7 +1246,7 @@
     <div class="modal-overlay" id="importDefectExcelModal">
         <div class="modal-card" style="max-width: 720px; width: 94%;">
             <div class="modal-header">
-                <h3><i class="fa-solid fa-file-import"></i> 📥 외부 엑셀 결함표 가져오기</h3>
+                <h3 id="importDefectExcelModalTitle"><i class="fa-solid fa-file-import"></i> 📥 외부 엑셀 결함표 가져오기</h3>
                 <button type="button" class="modal-close" id="btnCloseImportDefectExcelModal">&times;</button>
             </div>
             <div class="modal-body" style="max-height: 70vh; overflow-y: auto;">
@@ -1266,9 +1268,9 @@
                         체크 해제하면 전차 조사내용으로 등록하되, 도면 좌측 상단에 임시 배치합니다.
                     </span>
                 </label>
-                <div class="style-color-section-title">시트 ↔ 층 배정 (시트 이름으로 자동 추정, 다르면 직접 선택하세요)</div>
+                <div class="style-color-section-title" id="importDefectExcelSheetMapTitle">시트 ↔ 층 배정 (시트 이름으로 자동 추정, 다르면 직접 선택하세요)</div>
                 <div id="importDefectExcelSheetMapBody" style="display:flex; flex-direction:column; gap:0.4rem; margin-bottom:0.9rem;"></div>
-                <div class="style-color-section-title">엑셀 컬럼 ↔ 결함 항목 매칭 (모든 시트에 공통 적용)</div>
+                <div class="style-color-section-title" id="importDefectExcelMappingTitle">엑셀 컬럼 ↔ 결함 항목 매칭 (모든 시트에 공통 적용)</div>
                 <div id="importDefectExcelMappingBody" style="display:flex; flex-direction:column; gap:0.4rem; margin-bottom:0.9rem;"></div>
                 <div class="style-color-section-title">미리보기 (첫 번째 시트, 처음 5행)</div>
                 <div style="overflow-x:auto; border:1px solid var(--border-color); border-radius:8px;">
@@ -2299,16 +2301,17 @@
     </div>
 
     <!-- Core → 탭 분류 → 기존 엔진(app.js) -->
-    <script src="js/core/state.js?v=20260825_zoomsteps"></script>
-    <script src="js/pdf-vector-bridge.js?v=20260825_mobpatch"></script>
+    <script src="js/core/state.js?v=20260825_pdfpatch"></script>
+    <script src="js/pdf-vector-bridge.js?v=20260825_pdfpatch"></script>
     <script src="js/tabs/registry.js?v=20260821_land1"></script>
     <script src="js/tabs/home.js?v=20260824_webview"></script>
     <script src="js/tabs/map.js?v=20260825_viewkeep"></script>
     <script src="js/tabs/survey.js?v=20260824_nSub"></script>
     <script src="js/tabs/ndt.js?v=20260822_survey2dScroll"></script>
     <script src="js/shared/report.js?v=20260824_hwpxFix"></script>
+    <script src="js/shared/hwpx-import.js?v=20260825_hwpxin"></script>
     <script src="js/shared/auth.js?v=20260821_land1"></script>
-    <script src="app.js?v=20260825_bldgdel"></script>
+    <script src="app.js?v=20260825_pdfpatch"></script>
     <script>
         window.BSA_APP_VERSION = '20260825_bldgdel';
         (function () {

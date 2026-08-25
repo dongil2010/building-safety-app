@@ -156,8 +156,10 @@ async function renderPdfPageToDataUrl(page, scale, mime = 'image/png', quality =
     return canvas.toDataURL('image/png');
 }
 
-/** 빠른 선표시용 PDF 미리보기 해상도 (긴 변) */
+/** PNG/JPEG 등 래스터 도면 빠른 미리보기 (긴 변) */
 window.FLOOR_DRAWING_PREVIEW_DIM = 1600;
+/** PDF 벡터 도면 기본 좌표계·미리보기 (긴 변) — 핀/패치와 동일 4000px 기준 */
+window.FLOOR_DRAWING_PDF_PREVIEW_DIM = 4000;
 
 const _pdfPageCache = new Map();
 const _pdfRenderInflight = new Map();
@@ -266,6 +268,17 @@ window.buildFloorDrawingTiersFromDataUrl = async function(sourceDataUrl) {
 };
 
 /** PDF dataURL → 지정 해상도 PNG/JPEG (업로드 후 줌 LOD용). cacheKey = bldgId_floorCode */
+/** PDF dataURL → 4000px 기준 ref 좌표 크기 (뷰포트 패치·핀 좌표계) */
+window.getPdfRefPixelSize = async function(pdfDataUrl, targetLongSide = 4000, cacheKey) {
+    const { baseViewport } = await acquirePdfPageFromDataUrl(pdfDataUrl, cacheKey);
+    const long = Math.max(baseViewport.width, baseViewport.height, 1);
+    const scale = targetLongSide / long;
+    return {
+        w: Math.max(1, Math.round(baseViewport.width * scale)),
+        h: Math.max(1, Math.round(baseViewport.height * scale)),
+    };
+};
+
 window.renderPdfDataUrlToImage = function(pdfDataUrl, targetLongSide = 16000, maxDataUrlBytes = 2500000, cacheKey) {
     const dedupeKey = `img|${cacheKey || 'anon'}|${targetLongSide}`;
     return withPdfRenderDedupe(dedupeKey, async () => {
