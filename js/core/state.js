@@ -251,10 +251,10 @@ window.getFloorDrawingTierDimForZoomVsFit = function(zoomVsFit, opts) {
     const z = Math.max(Number(zoomVsFit) || 1, 0.05);
     const dims = window.FLOOR_DRAWING_TIER_DIMS || [4000, 8000, 16000];
     const cur = Number(options.currentTier) || dims[0];
-    const TO_MID = 2.8;    // 280%+ → 8000px
-    const TO_HI = 10;      // 1000%+ → 16000px
-    const BACK_LO = 2.2;   // 히스테리시스 하한
-    const BACK_MID = 8;
+    const TO_MID = 2.0;    // 200%+ → 8000px
+    const TO_HI = 8;       // 800%+ → 16000px
+    const BACK_LO = 1.6;
+    const BACK_MID = 6.5;
 
     if (cur >= dims[2]) {
         if (z < BACK_MID) return dims[1];
