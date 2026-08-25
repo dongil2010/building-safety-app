@@ -24142,15 +24142,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
     (function bindRemoteWebRefresh() {
         const KEY = 'bsa_web_sha';
-        async function fetchWebSha() {
+        async function fetchWebVersionMeta() {
             const r = await fetch('web-version.json?t=' + Date.now(), { cache: 'no-store' });
             if (!r.ok) return null;
-            const j = await r.json();
-            return j.sha || j.short || null;
+            return r.json();
         }
         async function checkRemoteWebVersion() {
             try {
-                const sha = await fetchWebSha();
+                const meta = await fetchWebVersionMeta();
+                const sha = meta && (meta.sha || meta.short);
                 if (!sha || sha === 'local') return;
                 const prev = sessionStorage.getItem(KEY);
                 if (prev && prev !== sha) {
@@ -24158,14 +24158,26 @@ document.addEventListener('DOMContentLoaded', () => {
                     window.reloadWebAppFromServer();
                     return;
                 }
-                sessionStorage.setItem(KEY, sha);
+                if (!prev) sessionStorage.setItem(KEY, sha);
+                const remoteLabel = meta && meta.label;
+                const localLabel = window.BSA_APP_VERSION || '';
+                if (remoteLabel && localLabel && remoteLabel !== localLabel) {
+                    sessionStorage.setItem(KEY, sha);
+                    window.reloadWebAppFromServer();
+                }
             } catch (_) { /* offline */ }
         }
         document.addEventListener('visibilitychange', () => {
             if (document.visibilityState === 'visible') checkRemoteWebVersion();
         });
         window.addEventListener('focus', checkRemoteWebVersion);
+        window.addEventListener('pageshow', (e) => {
+            if (e.persisted) checkRemoteWebVersion();
+        });
         setTimeout(checkRemoteWebVersion, 800);
+        if (isNativeAndroidApp()) {
+            setInterval(checkRemoteWebVersion, 45000);
+        }
     })();
 
     function initFirebaseSync() {

@@ -2,18 +2,21 @@
    ???????????????? ?????Service Worker (PWA Offline Engine v61.0)
    ========================================================================== */
 
-const CACHE_NAME = 'building-safety-v78.9';
+const CACHE_NAME = 'building-safety-v79.0';
 const STATIC_ASSETS = [
     './',
     './index.html',
     './styles.css',
+    './web-version.json',
     './js/core/state.js',
+    './js/pdf-vector-bridge.js',
     './js/tabs/registry.js',
     './js/tabs/home.js',
     './js/tabs/map.js',
     './js/tabs/survey.js',
     './js/tabs/ndt.js',
     './js/shared/report.js',
+    './js/shared/hwpx-import.js',
     './js/shared/auth.js',
     './app.js',
     './manifest.json',
@@ -71,12 +74,13 @@ self.addEventListener('fetch', (event) => {
     }
 
     const isVersionCheck = url.includes('web-version.json');
+    const isAppScript = /\.(?:js|css|html)(?:\?|$)/.test(url.split('#')[0]);
     const isHtml = event.request.destination === 'document'
         || event.request.mode === 'navigate'
         || /(?:\/|\.html)(?:\?|$)/.test(url.split('?')[0]);
 
     event.respondWith(
-        fetch(event.request, (isVersionCheck || isHtml) ? { cache: 'no-store' } : undefined)
+        fetch(event.request, (isVersionCheck || isHtml || isAppScript) ? { cache: 'no-store' } : undefined)
             .then((networkResponse) => {
                 if (networkResponse && networkResponse.status === 200 && networkResponse.type === 'basic' && !isVersionCheck) {
                     const responseToCache = networkResponse.clone();
