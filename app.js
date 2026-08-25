@@ -183,6 +183,43 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    /** 가져오기「전회차 표시」: 현회차(photos) 사진을 전차(prevRoundPhotos)로 옮기고 현차 슬롯 비움 */
+    function applyImportedCarryOverPhotos(d) {
+        if (!d?.id) return;
+        const current = (Array.isArray(d.photos) ? d.photos : []).filter(Boolean);
+        const prev = (Array.isArray(d.prevRoundPhotos) ? d.prevRoundPhotos : []).filter(Boolean);
+        const oldCurIdCount = (d.photoIds && d.photoIds.length) || current.length;
+
+        if (current.length > 0) {
+            d.prevRoundPhotos = prev.concat(current);
+            d.prevRoundPhotoIds = d.prevRoundPhotos.map((_, i) => getPhotoDocId(d.id, i, 'prev'));
+            d.prevRoundPhotos.forEach((url, i) => {
+                const pid = d.prevRoundPhotoIds[i];
+                if (!window._photoCache) window._photoCache = {};
+                window._photoCache[pid] = url;
+                idbSet('photos', pid, url);
+            });
+        } else if (prev.length > 0) {
+            d.prevRoundPhotos = prev;
+            d.prevRoundPhotoIds = prev.map((_, i) => getPhotoDocId(d.id, i, 'prev'));
+        } else {
+            delete d.prevRoundPhotos;
+            delete d.prevRoundPhotoIds;
+        }
+
+        d.photos = [];
+        delete d.photoIds;
+
+        if (oldCurIdCount > 0) {
+            for (let i = 0; i < oldCurIdCount; i++) {
+                const pid = getPhotoDocId(d.id, i);
+                _idbPersistedPhotoKeys.delete(pid);
+                idbDelete('photos', pid);
+            }
+            invalidatePersistedPhotoCacheForDefect(d.id);
+        }
+    }
+
     function countBuildingNdtFloors(bldg) {
         if (!bldg?.id) return 0;
         const prefix = `${bldg.id}_`;
@@ -1339,8 +1376,7 @@ document.addEventListener('DOMContentLoaded', () => {
             window.selectedUploadedDrawings = [];
 
             populateAddBuildingImportSources();
-            const importSel = document.getElementById('selectImportSourceBuilding');
-            if (importSel) importSel.value = '';
+            setImportSourcePickerValue('selectImportSourceBuilding', '', { silent: true });
             updateImportSourceSummary(null);
 
             elements.addBuildingModal.style.display = 'flex';
@@ -1370,22 +1406,164 @@ document.addEventListener('DOMContentLoaded', () => {
         if (isImport) {
             if (basicDetails) basicDetails.open = false;
             if (inspectionDetails) inspectionDetails.open = false;
+            populateAddBuildingImportSources();
+            setTimeout(() => document.getElementById('inputImportSourceBuildingSearch')?.focus(), 80);
         } else {
             if (basicDetails) basicDetails.open = true;
             if (inspectionDetails) inspectionDetails.open = true;
         }
     }
 
+    function formatImportSourceBuildingLabel(b) {
+        const meta = [b.inspectionYear, b.inspectionPeriod, b.inspectionType].filter(Boolean).join(' · ');
+        return `${(b.name || '').replace(/^🏢\s*/, '')}${meta ? ` (${meta})` : ''}`;
+    }
+
+    function getImportSourceBuildingSearchText(b) {
+        return [
+            (b.name || '').replace(/^🏢\s*/, ''),
+            b.address,
+            b.inspectionYear,
+            b.inspectionPeriod,
+            b.inspectionType,
+            b.notes
+        ].filter(Boolean).join(' ').toLowerCase();
+    }
+
+    const _importSourcePickerCache = {};
+
+    function getImportSourcePickerEls(hiddenId) {
+        const hidden = document.getElementById(hiddenId);
+        const wrap = hidden?.closest('.import-source-picker');
+        if (!hidden || !wrap) return null;
+        return {
+            hidden,
+            wrap,
+            input: wrap.querySelector('.import-source-picker-input'),
+            list: wrap.querySelector('.import-source-picker-list')
+        };
+    }
+
+    function filterImportSourcePickerEntries(entries, query) {
+        const q = String(query || '').trim().toLowerCase();
+        if (!q) return entries;
+        const tokens = q.split(/\s+/).filter(Boolean);
+        return entries.filter(e => tokens.every(t => e.searchText.includes(t)));
+    }
+
+    function renderImportSourcePickerList(hiddenId, query) {
+        const els = getImportSourcePickerEls(hiddenId);
+        if (!els?.list) return;
+        const cache = _importSourcePickerCache[hiddenId] || { entries: [] };
+        const filtered = filterImportSourcePickerEntries(cache.entries, query);
+        if (!filtered.length) {
+            els.list.innerHTML = `<li class="import-source-picker-empty">${query.trim() ? '검색 결과 없음' : '가져올 점검이 없습니다'}</li>`;
+            els.list.hidden = false;
+            return;
+        }
+        els.list.innerHTML = filtered.map(e => (
+            `<li><button type="button" class="import-source-picker-item" role="option" data-id="${escapeHtml(e.id)}">` +
+            `<strong>${escapeHtml(e.label)}</strong>` +
+            `<small>${escapeHtml(e.sub)}</small>` +
+            `</button></li>`
+        )).join('');
+        els.list.hidden = false;
+    }
+
+    function closeImportSourcePickerList(hiddenId) {
+        const els = getImportSourcePickerEls(hiddenId);
+        if (els?.list) els.list.hidden = true;
+    }
+
+    function setImportSourcePickerValue(hiddenId, buildingId, options = {}) {
+        const els = getImportSourcePickerEls(hiddenId);
+        if (!els) return;
+        const { silent = false } = options;
+        const bldg = buildingId
+            ? (window.state.buildings || []).find(b => b.id === buildingId)
+            : null;
+        els.hidden.value = bldg ? bldg.id : '';
+        if (els.input) {
+            els.input.value = bldg ? formatImportSourceBuildingLabel(bldg) : '';
+        }
+        closeImportSourcePickerList(hiddenId);
+        if (!silent) {
+            els.hidden.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+    }
+
+    function refreshImportSourcePickerEntries(hiddenId, excludeId) {
+        const entries = (window.state.buildings || [])
+            .filter(b => b.id !== excludeId)
+            .map(b => ({
+                id: b.id,
+                label: formatImportSourceBuildingLabel(b),
+                sub: b.address || '주소 미등록',
+                searchText: getImportSourceBuildingSearchText(b)
+            }));
+        _importSourcePickerCache[hiddenId] = { entries, excludeId };
+        const els = getImportSourcePickerEls(hiddenId);
+        if (els?.hidden?.value && els.hidden.value === excludeId) {
+            setImportSourcePickerValue(hiddenId, '', { silent: true });
+        }
+    }
+
+    function initImportSourceSearchPicker(hiddenId) {
+        const els = getImportSourcePickerEls(hiddenId);
+        if (!els?.input || els.input.dataset.pickerInit) return;
+        els.input.dataset.pickerInit = '1';
+
+        const pickById = (id) => setImportSourcePickerValue(hiddenId, id);
+
+        els.input.addEventListener('focus', () => {
+            renderImportSourcePickerList(hiddenId, els.input.value);
+        });
+
+        els.input.addEventListener('input', () => {
+            const typed = els.input.value;
+            if (els.hidden.value) {
+                const selected = (window.state.buildings || []).find(b => b.id === els.hidden.value);
+                const selectedLabel = selected ? formatImportSourceBuildingLabel(selected) : '';
+                if (typed !== selectedLabel) {
+                    els.hidden.value = '';
+                }
+            }
+            renderImportSourcePickerList(hiddenId, typed);
+        });
+
+        els.input.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') {
+                closeImportSourcePickerList(hiddenId);
+                els.input.blur();
+                return;
+            }
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                const first = els.list?.querySelector('.import-source-picker-item[data-id]');
+                if (first) pickById(first.getAttribute('data-id'));
+            }
+        });
+
+        els.list?.addEventListener('mousedown', (e) => {
+            const btn = e.target.closest('.import-source-picker-item[data-id]');
+            if (!btn) return;
+            e.preventDefault();
+            pickById(btn.getAttribute('data-id'));
+        });
+
+        els.input.addEventListener('blur', () => {
+            setTimeout(() => closeImportSourcePickerList(hiddenId), 140);
+        });
+    }
+
     function populateImportSourceSelect(selectId, excludeId) {
-        const sel = document.getElementById(selectId);
-        if (!sel) return;
-        const bldgs = (window.state.buildings || []).filter(b => b.id !== excludeId);
-        sel.innerHTML = '<option value="">— 가져올 점검 선택 —</option>' +
-            bldgs.map((b) => {
-                const meta = [b.inspectionYear, b.inspectionPeriod, b.inspectionType].filter(Boolean).join(' · ');
-                const label = `${(b.name || '').replace(/^🏢\s*/, '')}${meta ? ` (${meta})` : ''}`;
-                return `<option value="${escapeHtml(b.id)}">${escapeHtml(label)}</option>`;
-            }).join('');
+        initImportSourceSearchPicker(selectId);
+        refreshImportSourcePickerEntries(selectId, excludeId);
+    }
+
+    function initAllImportSourceSearchPickers() {
+        initImportSourceSearchPicker('selectImportSourceBuilding');
+        initImportSourceSearchPicker('selectEditImportSource');
     }
 
     function populateAddBuildingImportSources() {
@@ -1648,6 +1826,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         onProgress?.(`사진 ${pi}/${pt} (결함 ${defectDone}/${defectTotal})…`);
                     });
                     Object.assign(copy, photoFields);
+                    if (roundMode === 'carryOver') applyImportedCarryOverPhotos(copy);
                     clonedList.push(copy);
                 }
                 if (clonedList.length > 0) {
@@ -1939,6 +2118,8 @@ document.addEventListener('DOMContentLoaded', () => {
         btnMobileFabAddBuilding.addEventListener('click', () => window.openAddBuildingModalFunc());
     }
 
+    initAllImportSourceSearchPickers();
+
     const selectImportSourceBuilding = document.getElementById('selectImportSourceBuilding');
     if (selectImportSourceBuilding) {
         selectImportSourceBuilding.addEventListener('change', (e) => {
@@ -2217,8 +2398,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (document.getElementById('inputEditBuildingNotes')) document.getElementById('inputEditBuildingNotes').value = bldg.notes || '';
 
         populateEditBuildingImportSources(bldg.id);
-        const editImportSel = document.getElementById('selectEditImportSource');
-        if (editImportSel) editImportSel.value = '';
+        setImportSourcePickerValue('selectEditImportSource', '', { silent: true });
         updateEditImportPreview(null);
 
         const fileInput = document.getElementById('inputEditBuildingDrawings');
@@ -3168,7 +3348,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let pendingNdtPinIsTouch = false;
     let pendingNdtLongPressTimer = null;
     let ndtActivePointerIsTouch = false;
-    let ndtQuickDragEnabled = false;
+    let ndtMarqueeSelectEnabled = false;
     let ndtAddSelectEnabled = false;
     const NDT_TOUCH_LONG_PRESS_MS = 500;
     let isDraggingNdtPinGroup = false;
@@ -5667,15 +5847,13 @@ document.addEventListener('DOMContentLoaded', () => {
                         grabY: vy
                     };
                     pendingNdtPinIsTouch = true;
-                    pendingNdtPinArmed = !!ndtQuickDragEnabled;
-                    if (!ndtQuickDragEnabled) {
-                        pendingNdtLongPressTimer = setTimeout(() => {
-                            if (!pendingNdtPinHit || !pendingNdtPinIsTouch) return;
-                            pendingNdtPinArmed = true;
-                            try { if (navigator.vibrate) navigator.vibrate(12); } catch (_e) { /* ignore */ }
-                            drawNdtCanvas();
-                        }, NDT_TOUCH_LONG_PRESS_MS);
-                    }
+                    pendingNdtPinArmed = false;
+                    pendingNdtLongPressTimer = setTimeout(() => {
+                        if (!pendingNdtPinHit || !pendingNdtPinIsTouch) return;
+                        pendingNdtPinArmed = true;
+                        try { if (navigator.vibrate) navigator.vibrate(12); } catch (_e) { /* ignore */ }
+                        drawNdtCanvas();
+                    }, NDT_TOUCH_LONG_PRESS_MS);
                     return;
                 }
 
@@ -5699,6 +5877,18 @@ document.addEventListener('DOMContentLoaded', () => {
                     isNdtMarkingDrag = true;
                     window._ndtMarkStartCoords = { x: vx, y: vy };
                     window._ndtMarkCurrentCoords = { x: vx, y: vy };
+                } else if (ndtMarqueeSelectEnabled && ndtMode === 'PAN') {
+                    if (e.cancelable) e.preventDefault();
+                    isNdtMarqueeSelecting = true;
+                    ndtMarqueeAdditive = ndtAddSelectEnabled;
+                    ndtMarqueeStartX = vx;
+                    ndtMarqueeStartY = vy;
+                    ndtMarqueeCurX = vx;
+                    ndtMarqueeCurY = vy;
+                    ndtMarqueeStartClientX = touch.clientX;
+                    ndtMarqueeStartClientY = touch.clientY;
+                    canvas.style.cursor = 'crosshair';
+                    drawNdtCanvas();
                 } else if (window.innerWidth <= 1024) {
                     // 모바일 PAN: 한손가락은 즉시 페이지 스크롤 (도면 팬은 가로 확정 후에만)
                     ndtTouchMayPageScroll = true;
@@ -5760,7 +5950,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     const dy = touch.clientY - ndtStartMouseY;
                     const dist = Math.hypot(dx, dy);
                     if (!pendingNdtPinArmed) {
-                        if (dist > 14) {
+                        const pendingPart = pendingNdtPinHit?.part;
+                        if (pendingPart !== 'target' && dist > 14) {
                             clearPendingNdtLongPress();
                             pendingNdtPinHit = null;
                             isNdtDragging = true;
@@ -5876,6 +6067,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 window._ndtDispMarkCoords = { x: pt.x, y: pt.y };
                 drawNdtCanvas();
                 refreshNdtLoupe(touch.clientX, touch.clientY);
+            } else if (!isNdtPinching && isNdtMarqueeSelecting && e.touches.length === 1) {
+                if (e.cancelable) e.preventDefault();
+                const touch = e.touches[0];
+                const pt = ndtClientToImg(touch.clientX, touch.clientY);
+                ndtMarqueeCurX = pt.x;
+                ndtMarqueeCurY = pt.y;
+                drawNdtCanvas();
             } else if (!isNdtPinching && isNdtDragging && e.touches.length === 1) {
                 const touch = e.touches[0];
                 const dx = touch.clientX - ndtStartMouseX;
@@ -6005,6 +6203,33 @@ document.addEventListener('DOMContentLoaded', () => {
                     boxY,
                     dispDirection: autoDir
                 });
+            }
+            if (isNdtMarqueeSelecting) {
+                isNdtMarqueeSelecting = false;
+                const x1 = Math.min(ndtMarqueeStartX, ndtMarqueeCurX);
+                const y1 = Math.min(ndtMarqueeStartY, ndtMarqueeCurY);
+                const x2 = Math.max(ndtMarqueeStartX, ndtMarqueeCurX);
+                const y2 = Math.max(ndtMarqueeStartY, ndtMarqueeCurY);
+                const screenDist = t
+                    ? Math.hypot(t.clientX - ndtMarqueeStartClientX, t.clientY - ndtMarqueeStartClientY)
+                    : 99;
+                const tiny = screenDist < 10;
+                if (!ndtMarqueeAdditive) selectedNdtIds.clear();
+                if (!tiny) {
+                    collectNdtMarqueeHits(x1, y1, x2, y2).forEach((id) => {
+                        if (ndtMarqueeAdditive) {
+                            if (selectedNdtIds.has(id)) selectedNdtIds.delete(id);
+                            else selectedNdtIds.add(id);
+                        } else {
+                            selectedNdtIds.add(id);
+                        }
+                    });
+                }
+                ndtMarqueeAdditive = false;
+                updateNdtSelectionBar();
+                const canvas = document.getElementById('ndtCanvas');
+                if (canvas) canvas.style.cursor = ndtMode === 'MARK' ? 'crosshair' : 'default';
+                drawNdtCanvas();
             }
             isNdtDragging = false;
 
@@ -12709,13 +12934,13 @@ document.addEventListener('DOMContentLoaded', () => {
     let mapTouchStartedOnCanvas = false; // 도면에서 시작한 터치만 스크롤 잠금
     const TOUCH_DRAG_THRESHOLD = 14; // 터치는 손가락 흔들림이 커서 마우스보다 넉넉한 이동임계값 필요
     const MOUSE_DRAG_THRESHOLD = 6;
-    const TOUCH_LONG_PRESS_MS = 500; // 모바일: 선택 후 이만큼 눌러야 핀 이동 가능 (드래그 모드 ON이면 생략)
+    const TOUCH_LONG_PRESS_MS = 500; // 모바일: 선택 후 이만큼 눌러야 핀 이동
     const MAP_LOUPE_ID = 'mapTouchLoupe';
     const NDT_LOUPE_ID = 'ndtTouchLoupe';
     const TOUCH_LOUPE_SIZE = 168;
     // 1.0 = 손가락 아래를 그대로 위로 옮겨 보여줌 (실제 도면/화면은 확대하지 않음)
     const TOUCH_LOUPE_ZOOM = 1.0;
-    let mobileQuickDragEnabled = false; // 우측 레일 '드래그' — 길게 누르기 없이 이동
+    let mobileMarqueeSelectEnabled = false; // 우측 레일 '선택' — 빈 곳 드래그로 마퀴 선택 (핀 이동은 항상 0.5초 길게 누름)
     let mobileAddSelectEnabled = false; // 우측 레일 '추가' — 터치마다 선택 토글
     let isDraggingPin = false;
     let isDraggingPinGroup = false;
@@ -12728,6 +12953,47 @@ document.addEventListener('DOMContentLoaded', () => {
     // 박스/팁 드래그: 클릭 지점 → 중심 오프셋 (순간 중앙 스냅 방지)
     let pinDragOffsetX = 0;
     let pinDragOffsetY = 0;
+
+    /** 원격 merge로 defects 배열 객체가 바뀌어도 드래그 중인 결함 참조·좌표를 유지 */
+    function rebindActiveDragPinFromState() {
+        if (!activeDragPin?.id || !state.currentBuildingId || !state.currentFloor) return activeDragPin;
+        const key = `${state.currentBuildingId}_${state.currentFloor}`;
+        const arr = state.defects?.[key];
+        if (!Array.isArray(arr)) return activeDragPin;
+        const fresh = arr.find(d => d.id === activeDragPin.id);
+        if (!fresh || fresh === activeDragPin) return activeDragPin;
+        if (activeDragPart === 'TIP') {
+            if (activeDragPin.targetX !== undefined) fresh.targetX = activeDragPin.targetX;
+            if (activeDragPin.targetY !== undefined) fresh.targetY = activeDragPin.targetY;
+        } else if (activeDragPart === 'AREA_MOVE') {
+            fresh.areaX1 = activeDragPin.areaX1;
+            fresh.areaY1 = activeDragPin.areaY1;
+            fresh.areaX2 = activeDragPin.areaX2;
+            fresh.areaY2 = activeDragPin.areaY2;
+            fresh.x = activeDragPin.x;
+            fresh.y = activeDragPin.y;
+            if (activeDragPin.targetX !== undefined) fresh.targetX = activeDragPin.targetX;
+            if (activeDragPin.targetY !== undefined) fresh.targetY = activeDragPin.targetY;
+        } else if (activeDragPart === 'AREA_RESIZE') {
+            fresh.areaX1 = activeDragPin.areaX1;
+            fresh.areaY1 = activeDragPin.areaY1;
+            fresh.areaX2 = activeDragPin.areaX2;
+            fresh.areaY2 = activeDragPin.areaY2;
+        } else {
+            fresh.x = activeDragPin.x;
+            fresh.y = activeDragPin.y;
+            if (activeDragPin.groupId) {
+                arr.forEach(d => {
+                    if (d.groupId === activeDragPin.groupId && d.id !== activeDragPin.id) {
+                        d.x = activeDragPin.x;
+                        d.y = activeDragPin.y;
+                    }
+                });
+            }
+        }
+        activeDragPin = fresh;
+        return fresh;
+    }
 
     // 결함위치도 범례 박스 드래그 이동/크기조절 상태
     let isDraggingLegend = false;
@@ -13365,8 +13631,8 @@ document.addEventListener('DOMContentLoaded', () => {
             pendingDragHit = { hitInfo, imgX, imgY, additive };
             pendingDragIsTouch = isTouch;
             pendingDragHitStartTime = Date.now();
-            // 마우스·드래그 모드는 즉시, 기본 터치는 번호 박스·화살표 모두 0.5초 길게 누른 뒤 이동
-            pendingDragArmed = !isTouch || mobileQuickDragEnabled;
+            // 마우스는 즉시, 터치는 번호 박스·화살표 모두 0.5초 길게 누른 뒤 이동
+            pendingDragArmed = !isTouch;
             if (hitInfo.defect && hitInfo.defect.id) {
                 const id = hitInfo.defect.id;
                 const useAdditive = additive || (isTouch && mobileAddSelectEnabled);
@@ -13380,7 +13646,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 updateMapSelectionBar({ scrollToSelection: true });
                 drawCanvas();
             }
-            if (isTouch && !mobileQuickDragEnabled) {
+            if (isTouch) {
                 pendingDragLongPressTimer = setTimeout(() => {
                     if (!pendingDragHit || !pendingDragIsTouch) return;
                     pendingDragArmed = true;
@@ -13420,9 +13686,20 @@ document.addEventListener('DOMContentLoaded', () => {
             areaCurImgY = areaCoords.y;
             drawCanvas();
         } else if (isTouch) {
-            // 터치(태블릿): 한 손가락으로 도면 이동 유지
-            isDragging = true;
-            elements.planCanvas.style.cursor = 'grabbing';
+            if (mobileMarqueeSelectEnabled && state.mode === 'PAN') {
+                isMarqueeSelecting = true;
+                marqueeAdditive = additive || mobileAddSelectEnabled;
+                marqueeStartImgX = imgX;
+                marqueeStartImgY = imgY;
+                marqueeCurImgX = imgX;
+                marqueeCurImgY = imgY;
+                if (elements.planCanvas) elements.planCanvas.style.cursor = 'crosshair';
+                drawCanvas();
+            } else {
+                // 터치(태블릿): 한 손가락으로 도면 이동
+                isDragging = true;
+                if (elements.planCanvas) elements.planCanvas.style.cursor = 'grabbing';
+            }
         } else {
             // 마우스 좌클릭: 빈 곳 드래그 = 마퀴 선택 (Ctrl = 추가 선택, 이동은 휠클릭)
             isMarqueeSelecting = true;
@@ -13473,8 +13750,10 @@ document.addEventListener('DOMContentLoaded', () => {
             const threshold = pendingDragIsTouch ? TOUCH_DRAG_THRESHOLD : MOUSE_DRAG_THRESHOLD;
 
             // 모바일: 길게 누르기 전에는 핀을 움직이지 않음. 그 사이 손가락이 많이 움직이면 화면 팬으로 전환.
+            // 화살표(TIP)는 길게 누르는 동안 팬으로 빼앗기지 않음 — 미세 이동에도 드래그가 씹히던 문제.
             if (pendingDragIsTouch && !pendingDragArmed) {
-                if (dist > threshold) {
+                const pendingPart = pendingDragHit?.hitInfo?.part;
+                if (pendingPart !== 'TIP' && dist > threshold) {
                     clearPendingDragLongPress();
                     pendingDragHit = null;
                     isDragging = true;
@@ -13494,6 +13773,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 const grabX = pendingDragHit.imgX;
                 const grabY = pendingDragHit.imgY;
                 clearPendingDragLongPress();
+
+                discardStalePendingRemoteAfterLocalPinEdit();
 
                 if (multiGroup) {
                     isDraggingPinGroup = true;
@@ -13554,6 +13835,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 refreshMapLoupe(clientX, clientY);
             }
         } else if (isDraggingPin && activeDragPin) {
+            rebindActiveDragPinFromState();
             const coords = clientToImgCoords(clientX, clientY);
             const currentImgX = coords.x;
             const currentImgY = coords.y;
@@ -13637,6 +13919,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function handleDragEnd(clientX, clientY) {
+        let hadPinDragSave = false;
         try {
         clearPendingDragLongPress();
         hideTouchLoupe(MAP_LOUPE_ID);
@@ -13680,12 +13963,20 @@ document.addEventListener('DOMContentLoaded', () => {
         pendingDragHit = null;
 
         if (isDraggingPin || isDraggingPinGroup) {
+            rebindActiveDragPinFromState();
+            if (activeDragPin) touchDefectUpdatedAt(activeDragPin);
+            if (isDraggingPinGroup) {
+                filterMapPlacedDefects(getCurrentFloorDefects()).forEach(d => {
+                    if (selectedDefectIds.has(d.id)) touchDefectUpdatedAt(d);
+                });
+            }
             isDraggingPin = false;
             isDraggingPinGroup = false;
             activeDragPin = null;
             activeResizeXField = null;
             activeResizeYField = null;
             saveStateToLocalStorage();
+            hadPinDragSave = true;
             updateMapSelectionBar();
             drawCanvas();
         }
@@ -13759,6 +14050,7 @@ document.addEventListener('DOMContentLoaded', () => {
             elements.planCanvas.style.cursor = getMapCanvasCursor();
         }
         } finally {
+            if (hadPinDragSave) discardStalePendingRemoteAfterLocalPinEdit();
             if (typeof scheduleFlushPendingRemoteSync === 'function') scheduleFlushPendingRemoteSync();
         }
     }
@@ -15391,12 +15683,14 @@ document.addEventListener('DOMContentLoaded', () => {
     const mobileBtnQuickDrag = document.getElementById('mobileBtnQuickDrag');
     if (mobileBtnQuickDrag) {
         mobileBtnQuickDrag.addEventListener('click', () => {
-            mobileQuickDragEnabled = !mobileQuickDragEnabled;
-            syncMobileToggleBtn(mobileBtnQuickDrag, mobileQuickDragEnabled);
+            mobileMarqueeSelectEnabled = !mobileMarqueeSelectEnabled;
+            syncMobileToggleBtn(mobileBtnQuickDrag, mobileMarqueeSelectEnabled);
             window.showToast(
-                mobileQuickDragEnabled ? '드래그 모드: 바로 이동' : '드래그 모드: 0.5초 길게 눌러 이동',
+                mobileMarqueeSelectEnabled
+                    ? '선택 모드: 빈 곳 드래그로 결함 선택 (핀 이동은 0.5초 길게 누름)'
+                    : '선택 모드 OFF — 빈 곳 드래그는 도면 이동',
                 'info',
-                2200
+                2600
             );
         });
     }
@@ -15463,12 +15757,14 @@ document.addEventListener('DOMContentLoaded', () => {
     const mobileNdtBtnQuickDrag = document.getElementById('mobileNdtBtnQuickDrag');
     if (mobileNdtBtnQuickDrag) {
         mobileNdtBtnQuickDrag.addEventListener('click', () => {
-            ndtQuickDragEnabled = !ndtQuickDragEnabled;
-            syncMobileToggleBtn(mobileNdtBtnQuickDrag, ndtQuickDragEnabled);
+            ndtMarqueeSelectEnabled = !ndtMarqueeSelectEnabled;
+            syncMobileToggleBtn(mobileNdtBtnQuickDrag, ndtMarqueeSelectEnabled);
             window.showToast(
-                ndtQuickDragEnabled ? '드래그 모드: 바로 이동' : '드래그 모드: 0.5초 길게 눌러 이동',
+                ndtMarqueeSelectEnabled
+                    ? '선택 모드: 빈 곳 드래그로 항목 선택 (핀 이동은 0.5초 길게 누름)'
+                    : '선택 모드 OFF — 빈 곳 드래그는 도면 이동',
                 'info',
-                2200
+                2600
             );
         });
     }
@@ -21259,6 +21555,10 @@ document.addEventListener('DOMContentLoaded', () => {
     let _syncDebounceTimer = null;
     let _pendingRemoteData = null;
     let _flushRemoteTimer = null;
+
+    function discardStalePendingRemoteAfterLocalPinEdit() {
+        _pendingRemoteData = null;
+    }
 
     /** 핀/영역/NDT 드래그·핀치 등 UI 제스처 중이면 원격 스냅샷 적용을 미룸 (저장 업로드는 그대로) */
     function isRealtimeUiGestureBusy() {
