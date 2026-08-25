@@ -1489,7 +1489,28 @@ document.addEventListener('DOMContentLoaded', () => {
             deletedIds
         );
         const assets = prevAssetsById || captureBuildingDrawingAssetsById(localBuildings);
-        const mergedRemote = remoteFiltered.map((b) => attachPreservedDrawingAssets(b, assets[b.id]));
+        const mergedRemote = remoteFiltered.map((b) => {
+            const localMatch = (localBuildings || []).find((lb) => lb.id === b.id);
+            const bundle = {
+                floorDrawings: mergeDrawingAssetMaps(
+                    mergeDrawingAssetMaps(assets[b.id]?.floorDrawings, localMatch?.floorDrawings),
+                    b.floorDrawings
+                ),
+                floorDrawingPdfs: mergeDrawingAssetMaps(
+                    mergeDrawingAssetMaps(assets[b.id]?.floorDrawingPdfs, localMatch?.floorDrawingPdfs),
+                    b.floorDrawingPdfs
+                ),
+                floorDrawingTiers: mergeDrawingAssetMaps(
+                    mergeDrawingAssetMaps(assets[b.id]?.floorDrawingTiers, localMatch?.floorDrawingTiers),
+                    b.floorDrawingTiers
+                ),
+                floorDrawingSources: mergeDrawingAssetMaps(
+                    mergeDrawingAssetMaps(assets[b.id]?.floorDrawingSources, localMatch?.floorDrawingSources),
+                    b.floorDrawingSources
+                )
+            };
+            return attachPreservedDrawingAssets(b, bundle);
+        });
         return [...localOnly, ...mergedRemote];
     }
 
@@ -1500,6 +1521,14 @@ document.addEventListener('DOMContentLoaded', () => {
             _pendingCloudSync, ...rest
         } = b;
         return rest;
+    }
+
+    /** state.buildings 병합 후 currentBuilding 참조·도면 메모리 갱신 */
+    function refreshCurrentBuildingFromState() {
+        if (!state.currentBuildingId) return null;
+        const fresh = (window.state.buildings || []).find((b) => b.id === state.currentBuildingId);
+        if (fresh) state.currentBuilding = fresh;
+        return fresh || null;
     }
 
     function isFloorKeyForDeletedBuilding(floorKey, deletedBuildingIds) {
@@ -1907,6 +1936,14 @@ document.addEventListener('DOMContentLoaded', () => {
                         const cached = await idbGet('floorDrawings', `${b.id}_${floorCode}`);
                         if (cached) {
                             b.floorDrawings[floorCode] = cached;
+                            anyHydrated = true;
+                        }
+                    }
+                    if (!b.floorDrawings[floorCode] && typeof fetchCloudFloorDrawingDataUrl === 'function') {
+                        const cloudRaster = await fetchCloudFloorDrawingDataUrl(b.id, floorCode);
+                        if (cloudRaster) {
+                            b.floorDrawings[floorCode] = cloudRaster;
+                            idbSet('floorDrawings', `${b.id}_${floorCode}`, cloudRaster);
                             anyHydrated = true;
                         }
                     }
@@ -4545,6 +4582,15 @@ document.addEventListener('DOMContentLoaded', () => {
             : 2000);
     }
 
+    function pickFirstTierUrl(tiers, preferredKeys) {
+        if (!tiers || typeof tiers !== 'object') return null;
+        for (const k of (preferredKeys || [])) {
+            if (tiers[k]) return tiers[k];
+        }
+        const vals = Object.values(tiers).filter(Boolean);
+        return vals.length ? vals[0] : null;
+    }
+
     function loadFloorDrawing(floorCode, options) {
         resetFloorPdfKnownState(state.currentBuildingId, floorCode);
         viewportHiPatchToken++;
@@ -4567,17 +4613,13 @@ document.addEventListener('DOMContentLoaded', () => {
         floorDrawingActiveTierDim = null;
         const loadToken = ++floorDrawingTierLoadToken;
 
-        const bldg = state.currentBuilding;
+        const bldg = refreshCurrentBuildingFromState() || state.currentBuilding;
         const baseTier = (typeof window.getFloorDrawingBaseTierDim === 'function')
             ? window.getFloorDrawingBaseTierDim()
-            : 2000;
+            : 4000;
         const baseTierKey = String(baseTier);
-        let dataUrl = null;
-        if (bldg && bldg.floorDrawingTiers && bldg.floorDrawingTiers[floorCode]) {
-            dataUrl = bldg.floorDrawingTiers[floorCode][baseTierKey]
-                || bldg.floorDrawingTiers[floorCode]['4000']
-                || null;
-        }
+        const tierLookupKeys = [baseTierKey, '4000', '2000', '8000', '16000'];
+        let dataUrl = pickFirstTierUrl(bldg && bldg.floorDrawingTiers && bldg.floorDrawingTiers[floorCode], tierLookupKeys);
         if (!dataUrl && bldg && bldg.floorDrawings && bldg.floorDrawings[floorCode]) {
             dataUrl = bldg.floorDrawings[floorCode];
         }
@@ -4663,8 +4705,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 const quickBaseTier = String((typeof window.getFloorDrawingBaseTierDim === 'function')
                     ? window.getFloorDrawingBaseTierDim()
-                    : 2000);
-                const quickTierUrl = (idbTiers && (idbTiers[quickBaseTier] || idbTiers['4000'])) || null;
+                    : 4000);
+                const quickTierUrl = pickFirstTierUrl(idbTiers, [quickBaseTier, '4000', '2000', '8000', '16000']);
                 if (quickTierUrl) {
                     if (!bldg.floorDrawingTiers) bldg.floorDrawingTiers = {};
                     bldg.floorDrawingTiers[floorCode] = { ...idbTiers, ...(bldg.floorDrawingTiers[floorCode] || {}) };
@@ -4689,6 +4731,17 @@ document.addEventListener('DOMContentLoaded', () => {
                     return;
                 }
 
+                if (typeof fetchCloudFloorDrawingDataUrl === 'function') {
+                    const remoteRaster = await fetchCloudFloorDrawingDataUrl(bldg.id, floorCode);
+                    if (remoteRaster && loadToken === floorDrawingTierLoadToken && state.currentFloor === floorCode) {
+                        if (!bldg.floorDrawings) bldg.floorDrawings = {};
+                        bldg.floorDrawings[floorCode] = remoteRaster;
+                        idbSet('floorDrawings', idbKey, remoteRaster);
+                        tryLoadImage(remoteRaster, false);
+                        return;
+                    }
+                }
+
                 let pdfUrl = cachedPdf || null;
                 if (pdfUrl) {
                     if (typeof window.ensureFloorDrawingPdfs === 'function') window.ensureFloorDrawingPdfs(bldg);
@@ -4697,7 +4750,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
 
                 if (!pdfUrl) {
-                    pdfUrl = await resolveBuildingFloorPdf(bldg, floorCode);
+                    pdfUrl = await resolveBuildingFloorPdf(bldg, floorCode, { forceCloud: true });
                     if (pdfUrl) await applyResolvedPdfToBuilding(bldg, floorCode, pdfUrl);
                 }
 
@@ -24902,6 +24955,19 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    async function fetchCloudFloorDrawingDataUrl(buildingId, floorCode) {
+        if (!db || !window.state.companyId || !buildingId || !floorCode) return null;
+        try {
+            const snap = await db.collection('safety_app').doc(getCompanyDocId())
+                .collection('floorDrawings').doc(`${buildingId}_${floorCode}`).get();
+            const url = (snap.exists && snap.data()) ? snap.data().dataUrl : null;
+            return (typeof url === 'string' && url.length > 32) ? url : null;
+        } catch (e) {
+            console.warn('Firestore 도면 조회 실패:', buildingId, floorCode, e);
+            return null;
+        }
+    }
+
     /** Firestore 1MB 한도 — 큰 PDF는 parts 서브컬렉션으로 분할 저장 */
     const PDF_CLOUD_CHUNK_CHARS = 850000;
 
@@ -25696,6 +25762,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
             await uploadInlineDefectPhotosForSync(window.state.defects);
             await uploadFloorDrawingPdfsForSync(window.state.buildings);
+            await hydrateLocalImagesFromIndexedDb();
+            refreshCurrentBuildingFromState();
 
             _suppressSyncOnSave = true;
             if (typeof saveStateToLocalStorage === 'function') saveStateToLocalStorage();
@@ -25733,6 +25801,12 @@ document.addEventListener('DOMContentLoaded', () => {
             (window.state.buildings || []).forEach((b) => {
                 if (b && b._pendingCloudSync) delete b._pendingCloudSync;
             });
+            if (state.currentTab === 'tab-map' && state.currentBuildingId && state.currentFloor) {
+                refreshCurrentBuildingFromState();
+                if (typeof loadFloorDrawing === 'function') {
+                    loadFloorDrawing(state.currentFloor, { preserveView: true });
+                }
+            }
         } catch (e) {
             console.warn('Firebase Sync Error:', e);
         } finally {
