@@ -2872,6 +2872,44 @@ body {
     -webkit-overflow-scrolling: touch;
 }
 
+.defect-bulk-edit-banner {
+    margin: 0 0.85rem 0.65rem;
+    padding: 0.55rem 0.65rem;
+    border-radius: 8px;
+    border: 1px solid #fbbf24;
+    background: #fffbeb;
+    color: #78350f;
+    font-size: 0.78rem;
+    line-height: 1.45;
+}
+
+.defect-bulk-edit-banner strong {
+    display: block;
+    font-size: 0.82rem;
+    margin-bottom: 0.25rem;
+    color: #92400e;
+}
+
+.defect-bulk-edit-banner p {
+    margin: 0;
+}
+
+.defect-bulk-edit-mixed {
+    margin-top: 0.35rem !important;
+    font-weight: 600;
+    color: #b45309;
+}
+
+.defect-form-compact.is-bulk-edit .defect-photo-block,
+.defect-form-compact.is-bulk-edit .defect-arrow-block {
+    display: none !important;
+}
+
+.map-toolbar-bulk-edit:not([hidden]) {
+    color: #1d4ed8;
+    border-color: #93c5fd;
+}
+
 .defect-marking-timeline {
     display: flex;
     flex-wrap: wrap;

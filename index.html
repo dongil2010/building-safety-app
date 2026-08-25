@@ -12,7 +12,7 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <meta name="apple-mobile-web-app-title" content="스마트 안전점검">
-    <link rel="stylesheet" href="styles.css?v=20260825_enh">
+    <link rel="stylesheet" href="styles.css?v=20260825_bulkedit">
     <!-- FontAwesome icons for clean engineering UI -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <!-- PDF 생성용: 페이지별로 직접 캡처해서 조립(큰 보고서에서 html2pdf 한방 렌더링이 캔버스 높이 한계로
@@ -262,6 +262,10 @@
                             <i class="fa-solid fa-rotate-right"></i>
                             <span>다시 실행</span>
                         </button>
+                        <button type="button" id="btnBulkEditSelectedDefects" class="icon-pill-btn map-toolbar-bulk-edit" title="선택한 결함 일괄 수정" hidden disabled>
+                            <i class="fa-solid fa-pen-to-square"></i>
+                            <span id="mapBulkEditToolbarLabel">일괄 수정</span>
+                        </button>
                         <button type="button" id="btnDeleteSelectedDefects" class="icon-pill-btn icon-pill-danger map-toolbar-delete-selected" title="선택한 결함 삭제" hidden disabled>
                             <i class="fa-solid fa-trash-can"></i>
                             <span id="mapSelectionToolbarLabel">선택 삭제</span>
@@ -282,6 +286,10 @@
                             <button type="button" class="mobile-fab-btn" id="mobileBtnRedo" title="다시 실행">
                                 <i class="fa-solid fa-rotate-right"></i>
                                 <span>다시실행</span>
+                            </button>
+                            <button type="button" class="mobile-fab-btn" id="mobileBtnBulkEditSelected" title="선택한 결함 일괄 수정" hidden disabled>
+                                <i class="fa-solid fa-pen-to-square"></i>
+                                <span id="mobileMapBulkEditLabel">일괄 수정</span>
                             </button>
                             <button type="button" class="mobile-fab-btn mobile-fab-danger" id="mobileBtnDeleteSelected" title="선택한 결함 삭제" hidden disabled>
                                 <i class="fa-solid fa-trash-can"></i>
@@ -628,6 +636,11 @@
                 <button class="modal-close" id="btnCloseDefectModal" title="닫기">&times;</button>
             </div>
             <div class="modal-body defect-drawer-body">
+                <div id="defectBulkEditBanner" class="defect-bulk-edit-banner" hidden>
+                    <strong id="defectBulkEditBannerTitle">일괄 수정</strong>
+                    <p id="defectBulkEditBannerHint">바꾸는 항목만 선택한 결함에 적용됩니다. 건드리지 않은 항목은 각 핀의 기존 값이 유지됩니다.</p>
+                    <p id="defectBulkEditMixedHint" class="defect-bulk-edit-mixed" hidden></p>
+                </div>
                 <form id="defectForm" class="defect-form-compact">
                     <input type="hidden" id="defectPinId">
 
@@ -2295,9 +2308,9 @@
     <script src="js/tabs/ndt.js?v=20260822_survey2dScroll"></script>
     <script src="js/shared/report.js?v=20260824_hwpxFix"></script>
     <script src="js/shared/auth.js?v=20260821_land1"></script>
-    <script src="app.js?v=20260825_zoomsteps"></script>
+    <script src="app.js?v=20260825_bulkedit"></script>
     <script>
-        window.BSA_APP_VERSION = '20260825_zoomsteps';
+        window.BSA_APP_VERSION = '20260825_bulkedit';
         (function () {
             var el = document.getElementById('appVersionText');
             if (el && window.BSA_APP_VERSION) el.textContent = 'v' + window.BSA_APP_VERSION;
@@ -2321,7 +2334,7 @@
                     native = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
                 } catch (e) {}
                 if (native) return;
-                navigator.serviceWorker.register('./sw.js?v=20260825_zoomsteps')
+                navigator.serviceWorker.register('./sw.js?v=20260825_bulkedit')
                     .then(function(registration) {
                         console.log('✅ ServiceWorker Registered Successfully with scope:', registration.scope);
                     })

@@ -11765,6 +11765,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         renderQuickPickChipGroup('quickCategoryChips', ['구조체', '비구조체', '마감재'], currentCategory, (value) => {
             if (!categoryEl) return;
+            if (isDefectBulkEditMode()) markDefectBulkFieldChanged('category');
             categoryEl.value = value;
             categoryEl.dispatchEvent(new Event('change', { bubbles: true }));
             if (typeof scheduleDefectAutoApply === 'function') scheduleDefectAutoApply();
@@ -11772,6 +11773,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const componentOptions = getQuickPickOptionsFromSelect(componentSelect).slice(0, 16);
         renderQuickPickChipGroup('quickComponentChips', componentOptions, currentComponent, (value) => {
+            if (isDefectBulkEditMode()) markDefectBulkFieldChanged('component');
             syncDefectComboFields(componentSelect, componentInput, value);
             updateDefectTypeDropdown(currentCategory, getDefectComboValue(typeSelect, typeInput));
             if (typeof scheduleDefectAutoApply === 'function') scheduleDefectAutoApply();
@@ -12349,6 +12351,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const typeInput = document.getElementById('defectTypeInput');
         const v = String(value || '').trim();
         if (!v) return;
+        if (isDefectBulkEditMode()) markDefectBulkFieldChanged('defectType');
 
         if (v === '상태양호') {
             const cur = getDefectComboValue(typeSelect, typeInput);
@@ -12547,12 +12550,14 @@ document.addEventListener('DOMContentLoaded', () => {
         `).join('');
         list.querySelectorAll('input').forEach(inp => {
             inp.addEventListener('input', () => {
+                if (isDefectBulkEditMode()) markDefectBulkFieldChanged('crackMeasures');
                 syncSizeFromMeasureInputs();
                 if (typeof scheduleDefectAutoApply === 'function') scheduleDefectAutoApply();
             });
         });
         list.querySelectorAll('[data-crack-join]').forEach(btn => {
             btn.addEventListener('click', () => {
+                if (isDefectBulkEditMode()) markDefectBulkFieldChanged('crackMeasures');
                 const row = btn.closest('.defect-crack-measure-row');
                 const next = normalizeMeasureJoin(btn.dataset.join) === 'x' ? '/' : 'x';
                 applyCrackMeasureJoinToRow(row, next);
@@ -12562,6 +12567,7 @@ document.addEventListener('DOMContentLoaded', () => {
         });
         list.querySelectorAll('.defect-crack-measure-del').forEach(btn => {
             btn.addEventListener('click', () => {
+                if (isDefectBulkEditMode()) markDefectBulkFieldChanged('crackMeasures');
                 const row = btn.closest('.defect-crack-measure-row');
                 const idx = row ? parseInt(row.getAttribute('data-row-idx') || '0', 10) : -1;
                 const allRows = readCrackMeasureRowsFromDom();
@@ -12614,6 +12620,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (addBtn && !addBtn.dataset.measureBound) {
             addBtn.dataset.measureBound = '1';
             addBtn.addEventListener('click', () => {
+                if (isDefectBulkEditMode()) markDefectBulkFieldChanged('crackMeasures');
                 const rows = readCrackMeasureRowsFromDom();
                 rows.push({ width: '', length: '', count: '', join: '/' });
                 renderCrackMeasureRows(rows);
@@ -13009,6 +13016,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         box.querySelectorAll('input[type="checkbox"]').forEach(inp => {
             inp.addEventListener('change', () => {
+                if (isDefectBulkEditMode()) markDefectBulkFieldChanged('cause');
                 const causes = getSelectedCausesFromUi();
                 const joined = joinCauseList(causes);
                 syncCauseComboValue(joined);
@@ -14234,6 +14242,7 @@ document.addEventListener('DOMContentLoaded', () => {
         Object.keys(fillBtns).forEach(k => {
             if (!fillBtns[k]) return;
             fillBtns[k].addEventListener('click', () => {
+                if (isDefectBulkEditMode()) markDefectBulkFieldChanged('areaFillStyle');
                 syncDefectAreaStyleUi(k, getSelectedAreaBorderFromUi());
                 if (typeof scheduleDefectAutoApply === 'function') scheduleDefectAutoApply();
             });
@@ -14241,6 +14250,7 @@ document.addEventListener('DOMContentLoaded', () => {
         Object.keys(borderBtns).forEach(k => {
             if (!borderBtns[k]) return;
             borderBtns[k].addEventListener('click', () => {
+                if (isDefectBulkEditMode()) markDefectBulkFieldChanged('areaBorderStyle');
                 syncDefectAreaStyleUi(getSelectedAreaFillFromUi(), k);
                 if (typeof scheduleDefectAutoApply === 'function') scheduleDefectAutoApply();
             });
@@ -14448,21 +14458,38 @@ document.addEventListener('DOMContentLoaded', () => {
     function updateMapSelectionBar(options = {}) {
         const n = selectedDefectIds.size;
         const label = n > 0 ? `선택 삭제 (${n})` : '선택 삭제';
+        const bulkLabel = n > 1 ? `일괄 수정 (${n})` : '일괄 수정';
         const desktopBtn = document.getElementById('btnDeleteSelectedDefects');
         const desktopLabel = document.getElementById('mapSelectionToolbarLabel');
+        const bulkDesktopBtn = document.getElementById('btnBulkEditSelectedDefects');
+        const bulkDesktopLabel = document.getElementById('mapBulkEditToolbarLabel');
         const mobileBtn = document.getElementById('mobileBtnDeleteSelected');
         const mobileLabel = document.getElementById('mobileMapSelectionLabel');
+        const bulkMobileBtn = document.getElementById('mobileBtnBulkEditSelected');
+        const bulkMobileLabel = document.getElementById('mobileMapBulkEditLabel');
         if (desktopLabel) desktopLabel.textContent = label;
         if (mobileLabel) mobileLabel.textContent = label;
+        if (bulkDesktopLabel) bulkDesktopLabel.textContent = bulkLabel;
+        if (bulkMobileLabel) bulkMobileLabel.textContent = bulkLabel;
         if (desktopBtn) {
             desktopBtn.hidden = n === 0;
             desktopBtn.disabled = n === 0;
             desktopBtn.title = n > 0 ? `선택한 결함 ${n}건 삭제` : '선택한 결함 삭제';
         }
+        if (bulkDesktopBtn) {
+            bulkDesktopBtn.hidden = n < 2;
+            bulkDesktopBtn.disabled = n < 2;
+            bulkDesktopBtn.title = n > 1 ? `선택한 결함 ${n}건 일괄 수정` : '2개 이상 선택 시 일괄 수정';
+        }
         if (mobileBtn) {
             mobileBtn.hidden = n === 0;
             mobileBtn.disabled = n === 0;
             mobileBtn.title = n > 0 ? `선택한 결함 ${n}건 삭제` : '선택한 결함 삭제';
+        }
+        if (bulkMobileBtn) {
+            bulkMobileBtn.hidden = n < 2;
+            bulkMobileBtn.disabled = n < 2;
+            bulkMobileBtn.title = n > 1 ? `선택한 결함 ${n}건 일괄 수정` : '2개 이상 선택 시 일괄 수정';
         }
         // 결함목록: 도면 선택 시만 스크롤 / 목록 클릭·필터 등은 스크롤 위치 유지
         if (typeof renderDefectListPanel === 'function') {
@@ -14611,6 +14638,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function isNewDefectModalSession() {
+        if (isDefectBulkEditMode()) return false;
         return !document.getElementById('defectPinId')?.value;
     }
 
@@ -15352,8 +15380,17 @@ document.addEventListener('DOMContentLoaded', () => {
             if (wasAdditive && endedFromTouch && d?.id && wasInSelection) {
                 selectedDefectIds.delete(d.id);
             }
-            // Ctrl 토글 클릭이거나 다중 선택 상태면 내용 수정 모달 열지 않음
-            if (wasAdditive || selectedDefectIds.size > 1) {
+            // Ctrl 토글 클릭이면 내용 수정 모달 열지 않음
+            if (wasAdditive) {
+                updateMapSelectionBar({ scrollToSelection: true });
+                drawCanvas();
+                return;
+            }
+            // 다중 선택 상태에서 핀 클릭 → 일괄 수정창
+            if (selectedDefectIds.size > 1) {
+                if (d?.id && selectedDefectIds.has(d.id)) {
+                    openBulkDefectEditModal();
+                }
                 updateMapSelectionBar({ scrollToSelection: true });
                 drawCanvas();
                 return;
@@ -15678,6 +15715,331 @@ document.addEventListener('DOMContentLoaded', () => {
         overlay.style.height = '';
     }
 
+    function isDefectBulkEditMode() {
+        return Array.isArray(window._defectBulkEditIds) && window._defectBulkEditIds.length > 1;
+    }
+
+    function clearDefectBulkEditState() {
+        window._defectBulkEditIds = null;
+        window._defectBulkChangedFields = null;
+    }
+
+    function markDefectBulkFieldChanged(fieldKey) {
+        if (!isDefectBulkEditMode() || !fieldKey) return;
+        if (!window._defectBulkChangedFields) window._defectBulkChangedFields = new Set();
+        window._defectBulkChangedFields.add(fieldKey);
+        updateDefectBulkEditBanner();
+    }
+
+    function defectFieldKeyFromTarget(el) {
+        if (!el || !el.id) {
+            if (el && el.closest && el.closest('#defectCauseChecks')) return 'cause';
+            if (el && el.closest && el.closest('#defectCrackMeasureList')) return 'crackMeasures';
+            return null;
+        }
+        const map = {
+            defectCategory: 'category',
+            defectComponent: 'component',
+            defectComponentInput: 'component',
+            defectType: 'defectType',
+            defectTypeInput: 'defectType',
+            defectLocation: 'location',
+            defectSize: 'size',
+            defectCause: 'cause',
+            defectCauseInput: 'cause',
+            defectProgressCheck: 'isProgress',
+            defectLeakCheck: 'isLeak',
+            defectCarriedOver: 'isCarriedOver',
+            defectBookmark: 'isBookmark',
+            defectPriorityManage: 'isPriorityManage',
+            defectForceArrowDir: 'forceArrowDir',
+        };
+        return map[el.id] || null;
+    }
+
+    function bulkFieldConsensus(defects, getter, normalize) {
+        if (!defects.length) return { mixed: false, value: undefined };
+        const norm = normalize || (v => v);
+        const vals = defects.map(d => norm(getter(d)));
+        const first = vals[0];
+        const mixed = !vals.every(v => v === first);
+        return { mixed, value: mixed ? undefined : first };
+    }
+
+    function bulkBoolConsensus(defects, getter) {
+        const r = bulkFieldConsensus(defects, getter, v => !!v);
+        if (r.mixed) return { mixed: true, value: null };
+        return { mixed: false, value: !!r.value };
+    }
+
+    function getDefectCrackMeasureSignature(d) {
+        if (!d) return '';
+        let measures = [];
+        if (Array.isArray(d.crackMeasures) && d.crackMeasures.length) {
+            measures = d.crackMeasures.map(m => ({
+                w: String(m?.width ?? m?.w ?? '').trim(),
+                l: String(m?.length ?? m?.l ?? '').trim(),
+                n: String(m?.count ?? m?.n ?? '').trim(),
+                j: normalizeMeasureJoin(m?.join),
+            }));
+        } else {
+            const ws = String(d.crackWidth || '').split(/\s*\/\s*/).map(s => s.trim()).filter(Boolean);
+            const ls = String(d.crackLength || '').split(/\s*\/\s*/).map(s => s.trim()).filter(Boolean);
+            const ns = String(d.itemCount || '').split(/\s*\/\s*/).map(s => s.trim()).filter(Boolean);
+            const join = inferMeasureJoin(d, null);
+            const n = Math.max(ws.length, ls.length, ns.length, 0);
+            for (let i = 0; i < n; i++) {
+                measures.push({
+                    w: ws[i] || '',
+                    l: ls[i] || '',
+                    n: ns[i] || (i === 0 && ns.length === 1 ? ns[0] : ''),
+                    j: join,
+                });
+            }
+            if (!measures.length && String(d.itemCount || '').trim()) {
+                measures.push({ w: '', l: '', n: String(d.itemCount).trim(), j: join });
+            }
+        }
+        return JSON.stringify({ measures, size: String(d.size || '').trim() });
+    }
+
+    function getDefectsForBulkEdit() {
+        if (!isDefectBulkEditMode() || !state.currentBuildingId) return [];
+        const key = `${state.currentBuildingId}_${state.currentFloor}`;
+        const list = state.defects[key] || [];
+        return window._defectBulkEditIds
+            .map(id => list.find(d => d.id === id))
+            .filter(Boolean);
+    }
+
+    function setBulkMixedPlaceholder(input, mixed, placeholder) {
+        if (!input) return;
+        if (mixed) {
+            input.value = '';
+            input.placeholder = placeholder || '(선택마다 다름 — 변경 시 전체 적용)';
+            input.dataset.bulkMixed = '1';
+        } else {
+            delete input.dataset.bulkMixed;
+        }
+    }
+
+    function applyBulkBoolCheckbox(el, consensus) {
+        if (!el) return;
+        if (consensus.mixed) {
+            el.checked = false;
+            el.indeterminate = true;
+            el.dataset.bulkMixed = '1';
+        } else {
+            el.indeterminate = false;
+            el.checked = !!consensus.value;
+            delete el.dataset.bulkMixed;
+        }
+    }
+
+    function getBulkMixedFieldLabels(defects) {
+        const labels = [];
+        if (bulkFieldConsensus(defects, d => d.category || '구조체').mixed) labels.push('구조 분류');
+        if (bulkFieldConsensus(defects, d => d.component || '').mixed) labels.push('부재 명칭');
+        if (bulkFieldConsensus(defects, d => d.defectType || '').mixed) labels.push('결함 종류');
+        if (bulkFieldConsensus(defects, d => d.cause || '').mixed) labels.push('발생 원인');
+        if (bulkFieldConsensus(defects, d => extractDefectLocationDetail(d.location || '')).mixed) labels.push('상세 위치');
+        if (bulkFieldConsensus(defects, d => d.size || '').mixed) labels.push('규모 및 상태');
+        if (bulkFieldConsensus(defects, d => getDefectCrackMeasureSignature(d)).mixed) labels.push('폭·길이·개수');
+        if (bulkBoolConsensus(defects, d => d.isProgress).mixed) labels.push('진행중');
+        if (bulkBoolConsensus(defects, d => d.isLeak).mixed) labels.push('누수');
+        if (bulkBoolConsensus(defects, d => d.isCarriedOver).mixed) labels.push('전회차');
+        if (bulkBoolConsensus(defects, d => d.isBookmark).mixed) labels.push('중요');
+        if (bulkBoolConsensus(defects, d => d.isPriorityManage).mixed) labels.push('중점관리');
+        return labels;
+    }
+
+    function updateDefectBulkEditBanner() {
+        const banner = document.getElementById('defectBulkEditBanner');
+        const mixedHint = document.getElementById('defectBulkEditMixedHint');
+        if (!banner) return;
+        if (!isDefectBulkEditMode()) {
+            banner.hidden = true;
+            if (mixedHint) mixedHint.hidden = true;
+            return;
+        }
+        const defects = getDefectsForBulkEdit();
+        const n = defects.length;
+        const title = document.getElementById('defectBulkEditBannerTitle');
+        if (title) title.textContent = `일괄 수정 (${n}건)`;
+        banner.hidden = false;
+        if (mixedHint) {
+            const mixedLabels = getBulkMixedFieldLabels(defects);
+            const changed = window._defectBulkChangedFields ? [...window._defectBulkChangedFields] : [];
+            const parts = [];
+            if (mixedLabels.length) parts.push(`항목마다 다름: ${mixedLabels.join(', ')}`);
+            if (changed.length) parts.push(`적용 예정: ${changed.length}개 항목`);
+            if (parts.length) {
+                mixedHint.textContent = parts.join(' · ');
+                mixedHint.hidden = false;
+            } else {
+                mixedHint.hidden = true;
+            }
+        }
+    }
+
+    function syncDefectBulkEditChrome(isBulk) {
+        const form = document.getElementById('defectForm');
+        if (form) form.classList.toggle('is-bulk-edit', !!isBulk);
+        const banner = document.getElementById('defectBulkEditBanner');
+        if (banner && !isBulk) banner.hidden = true;
+        const badge = document.getElementById('defectAutosaveBadge');
+        if (badge) badge.textContent = isBulk ? '변경 항목만 적용' : '자동 적용';
+        [
+            'btnDeleteDefect', 'btnAddSurveyTableRow', 'btnAddAnotherMarking',
+            'btnDeleteDefectMobile', 'btnAddSurveyTableRowMobile', 'btnAddAnotherMarkingMobile',
+        ].forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.style.display = isBulk ? 'none' : '';
+        });
+        if (isBulk) updateDefectBulkEditBanner();
+    }
+
+    function hydrateBulkDefectForm(defects) {
+        const rep = defects[0];
+        const pinIdEl = document.getElementById('defectPinId');
+        const noEl = document.getElementById('defectNo');
+        const catEl = document.getElementById('defectCategory');
+        const locEl = document.getElementById('defectLocation');
+        const sizeEl = document.getElementById('defectSize');
+        const progCheckEl = document.getElementById('defectProgressCheck');
+        const leakCheckEl = document.getElementById('defectLeakCheck');
+        const carriedOverEl = document.getElementById('defectCarriedOver');
+        const bookmarkEl = document.getElementById('defectBookmark');
+        const priorityManageEl = document.getElementById('defectPriorityManage');
+        const forceArrowDirEl = document.getElementById('defectForceArrowDir');
+        const componentInput = document.getElementById('defectComponentInput');
+        const typeInput = document.getElementById('defectTypeInput');
+        const causeInput = document.getElementById('defectCauseInput');
+
+        if (pinIdEl) pinIdEl.value = '';
+        if (noEl) noEl.value = `선택 ${defects.length}건`;
+
+        const cat = bulkFieldConsensus(defects, d => d.category || '구조체');
+        const comp = bulkFieldConsensus(defects, d => d.component || '');
+        const type = bulkFieldConsensus(defects, d => d.defectType || '');
+        const cause = bulkFieldConsensus(defects, d => d.cause || '');
+        const loc = bulkFieldConsensus(defects, d => extractDefectLocationDetail(d.location || ''));
+        const size = bulkFieldConsensus(defects, d => d.size || '');
+        const measureSig = bulkFieldConsensus(defects, d => getDefectCrackMeasureSignature(d));
+
+        const uiCategory = cat.mixed ? (rep.category || '구조체') : (cat.value || '구조체');
+        if (catEl) catEl.value = uiCategory;
+        populateDefectComponentDropdown(uiCategory, comp.mixed ? '' : (comp.value || ''));
+        updateDefectTypeDropdown(uiCategory, type.mixed ? '' : (type.value || ''));
+        updateDefectCauseDropdown(type.mixed ? '' : (type.value || ''), cause.mixed ? '' : (cause.value || ''));
+
+        setBulkMixedPlaceholder(componentInput, comp.mixed);
+        setBulkMixedPlaceholder(typeInput, type.mixed);
+        setBulkMixedPlaceholder(causeInput, cause.mixed);
+        if (locEl) {
+            if (loc.mixed) {
+                locEl.value = '';
+                locEl.placeholder = '비우면 각 핀의 기존 위치 유지 · 입력 시 선택 전체에 동일 적용';
+                locEl.dataset.bulkMixed = '1';
+            } else {
+                locEl.value = loc.value || '';
+                locEl.placeholder = '비우면 층수만 · 입력 예: 기둥 C1 하부 → 지상1층 기둥 C1 하부';
+                delete locEl.dataset.bulkMixed;
+            }
+        }
+        if (sizeEl) {
+            if (size.mixed) {
+                sizeEl.value = '';
+                sizeEl.placeholder = '(선택마다 다름 — 변경 시 전체 적용)';
+                sizeEl.dataset.bulkMixed = '1';
+                sizeEl.dataset.autoSize = '';
+            } else {
+                sizeEl.value = size.value || '';
+                sizeEl.placeholder = '';
+                delete sizeEl.dataset.bulkMixed;
+            }
+        }
+
+        if (measureSig.mixed) {
+            renderCrackMeasureRows([{ width: '', length: '', count: '', join: '/' }]);
+        } else {
+            setCrackMeasuresToUi(rep);
+        }
+
+        applyBulkBoolCheckbox(progCheckEl, bulkBoolConsensus(defects, d => d.isProgress));
+        applyBulkBoolCheckbox(leakCheckEl, bulkBoolConsensus(defects, d => d.isLeak));
+        applyBulkBoolCheckbox(carriedOverEl, bulkBoolConsensus(defects, d => d.isCarriedOver));
+        applyBulkBoolCheckbox(bookmarkEl, bulkBoolConsensus(defects, d => d.isBookmark));
+        applyBulkBoolCheckbox(priorityManageEl, bulkBoolConsensus(defects, d => d.isPriorityManage));
+        if (forceArrowDirEl) {
+            forceArrowDirEl.checked = false;
+            forceArrowDirEl.indeterminate = false;
+            forceArrowDirEl.disabled = true;
+        }
+
+        const allArea = defects.every(d => d.shapeType === 'area' && d.areaX1 !== undefined);
+        if (allArea) {
+            const fill = bulkFieldConsensus(defects, d => d.areaFillStyle || 'solid');
+            const border = bulkFieldConsensus(defects, d => d.areaBorderStyle || 'solid');
+            syncDefectAreaStyleUi(
+                fill.mixed ? (rep.areaFillStyle || 'solid') : (fill.value || 'solid'),
+                border.mixed ? (rep.areaBorderStyle || 'solid') : (border.value || 'solid')
+            );
+        }
+
+        window._pendingPhotos = [];
+        window._pendingPrevRoundPhotos = [];
+        window._pendingPinCoords = null;
+        window._pendingAreaRect = null;
+        refreshDefectQuickPickBar();
+        toggleDefectSizeInputMode();
+        renderDefectPhotoSection();
+        updateDefectBulkEditBanner();
+    }
+
+    function openBulkDefectEditModal() {
+        const ids = [...selectedDefectIds];
+        if (ids.length < 2 || !state.currentBuildingId) return;
+        const key = `${state.currentBuildingId}_${state.currentFloor}`;
+        const defects = ids.map(id => (state.defects[key] || []).find(d => d.id === id)).filter(Boolean);
+        if (defects.length < 2) return;
+
+        window._defectFormHydrating = true;
+        window.clearTimeout(window._defectAutoApplyTimer);
+        window._defectAutoApplyTimer = null;
+        window._defectBulkEditIds = ids.slice();
+        window._defectBulkChangedFields = new Set();
+        window._defectMarkingTemplate = null;
+
+        hydrateBulkDefectForm(defects);
+        renderDefectMarkingTimeline(null);
+
+        const titleEl = document.getElementById('defectModalTitle');
+        if (titleEl) titleEl.textContent = `📍 결함 핀 일괄 수정 (${defects.length}건)`;
+
+        setDefectAreaStylePanelVisible(defects.every(d => d.shapeType === 'area' && d.areaX1 !== undefined));
+
+        window._defectPhotosDirty = false;
+        window._defectEditSessionHistoryPushed = false;
+        syncDefectBulkEditChrome(true);
+
+        if (elements.defectModal) {
+            syncDefectDrawerToCanvasArea();
+            elements.defectModal.style.display = 'flex';
+            document.body.classList.add('defect-modal-open');
+            window.requestAnimationFrame(() => {
+                syncDefectDrawerToCanvasArea();
+                if (elements.defectModal) elements.defectModal.classList.add('open');
+                window._defectFormHydrating = false;
+                drawCanvas();
+                if (typeof renderDefectListPanel === 'function') {
+                    renderDefectListPanel({ scrollToSelection: true });
+                }
+            });
+        }
+    }
+    window.openBulkDefectEditModal = openBulkDefectEditModal;
+
     function closeDefectModal(options = {}) {
         const discardPending = !!(options && options.discardPending);
         if (discardPending) {
@@ -15697,6 +16059,8 @@ document.addEventListener('DOMContentLoaded', () => {
         window._pendingPhotos = [];
         window._pendingPrevRoundPhotos = [];
         renderDefectMarkingTimeline(null);
+        clearDefectBulkEditState();
+        syncDefectBulkEditChrome(false);
         const pinIdEl = document.getElementById('defectPinId');
         if (pinIdEl) pinIdEl.value = '';
         document.body.classList.remove('defect-modal-open');
@@ -15730,6 +16094,8 @@ document.addEventListener('DOMContentLoaded', () => {
     }, true);
 
     function openAddDefectModal(boxX, boxY, targetX, targetY, existingPin = null, areaRect = null, options = {}) {
+        clearDefectBulkEditState();
+        syncDefectBulkEditChrome(false);
         window._defectFormHydrating = true;
         window._defectPhotoHydrateToken = (window._defectPhotoHydrateToken || 0) + 1;
         window.clearTimeout(window._defectAutoApplyTimer);
@@ -15750,6 +16116,8 @@ document.addEventListener('DOMContentLoaded', () => {
         const bookmarkEl = document.getElementById('defectBookmark');
         const priorityManageEl = document.getElementById('defectPriorityManage');
         const forceArrowDirEl = document.getElementById('defectForceArrowDir');
+
+        if (forceArrowDirEl) forceArrowDirEl.disabled = false;
 
         let photoHydratePromise = Promise.resolve();
         if (existingPin) {
@@ -16460,8 +16828,97 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // 결함 모달의 현재 입력값을 저장(신규 생성 또는 기존 결함 수정)하고 저장된 결함 객체를 반환
+    async function commitBulkDefectFromForm(options = {}) {
+        const opts = (typeof options === 'object' && options) ? options : {};
+        const pushHistory = opts.pushHistory !== false;
+        const changed = window._defectBulkChangedFields;
+        if (!changed || !changed.size) return getDefectsForBulkEdit()[0] || null;
+
+        const defects = getDefectsForBulkEdit();
+        if (!defects.length) return null;
+        if (pushHistory) pushDefectHistory();
+
+        const compVal = getDefectComboValue(
+            document.getElementById('defectComponent'),
+            document.getElementById('defectComponentInput')
+        ) || '';
+        const kindsSelected = getSelectedCrackKindsFromUi();
+        let dTypeVal = kindsSelected.length
+            ? joinDefectTypeList(kindsSelected)
+            : (getDefectComboValue(
+                document.getElementById('defectType'),
+                document.getElementById('defectTypeInput')
+            ) || '');
+        const causesSelected = getSelectedCausesFromUi();
+        let causeVal = causesSelected.length
+            ? joinCauseList(causesSelected)
+            : (getDefectComboValue(
+                document.getElementById('defectCause'),
+                document.getElementById('defectCauseInput')
+            ) || '');
+        const locVal = composeDefectLocation(document.getElementById('defectLocation')?.value || '');
+        const isProgress = document.getElementById('defectProgressCheck')?.checked || false;
+        const isLeak = document.getElementById('defectLeakCheck')?.checked || false;
+        const isCarriedOver = document.getElementById('defectCarriedOver')?.checked || false;
+        const isBookmark = document.getElementById('defectBookmark')?.checked || false;
+        const isPriorityManage = document.getElementById('defectPriorityManage')?.checked || false;
+        const isGoodType = dTypeVal === '상태양호';
+        syncHiddenCrackFieldsFromMeasures();
+        const crackMeasuresVal = isGoodType ? [] : getCrackMeasuresFromUi();
+        const crackWidthVal = isGoodType ? '' : (document.getElementById('defectCrackWidth')?.value || '');
+        const crackLengthVal = isGoodType ? '' : (document.getElementById('defectCrackLength')?.value || '');
+        const itemCountVal = isGoodType ? '' : (document.getElementById('defectItemCount')?.value || '');
+        const sizeVal = isGoodType ? '' : (document.getElementById('defectSize')?.value || '');
+        const causeSaveVal = isGoodType ? '' : causeVal;
+        const areaFillVal = getSelectedAreaFillFromUi();
+        const areaBorderVal = getSelectedAreaBorderFromUi();
+        const categoryVal = document.getElementById('defectCategory')?.value || '구조체';
+
+        defects.forEach((d) => {
+            if (changed.has('category')) d.category = categoryVal;
+            if (changed.has('component')) d.component = compVal;
+            if (changed.has('defectType')) {
+                d.defectType = dTypeVal;
+                if (isGoodType) {
+                    d.cause = '';
+                    d.size = '';
+                    d.crackWidth = '';
+                    d.crackLength = '';
+                    d.crackMeasures = [];
+                    d.itemCount = '';
+                }
+            }
+            if (changed.has('cause') && !isGoodType) d.cause = causeSaveVal;
+            if (changed.has('location')) d.location = locVal;
+            if (changed.has('size') && !isGoodType) d.size = sizeVal;
+            if (changed.has('crackMeasures') && !isGoodType) {
+                d.crackMeasures = crackMeasuresVal;
+                d.crackWidth = crackWidthVal;
+                d.crackLength = crackLengthVal;
+                d.itemCount = itemCountVal;
+                d.size = sizeVal;
+            }
+            if (changed.has('isProgress')) d.isProgress = isProgress;
+            if (changed.has('isLeak')) d.isLeak = isLeak;
+            if (changed.has('isCarriedOver')) d.isCarriedOver = isCarriedOver;
+            if (changed.has('isBookmark')) d.isBookmark = isBookmark;
+            if (changed.has('isPriorityManage')) d.isPriorityManage = isPriorityManage;
+            if (d.shapeType === 'area') {
+                if (changed.has('areaFillStyle')) d.areaFillStyle = areaFillVal;
+                if (changed.has('areaBorderStyle')) d.areaBorderStyle = areaBorderVal;
+            }
+            touchDefectUpdatedAt(d);
+        });
+
+        saveStateToLocalStorage();
+        return defects[0];
+    }
+
     async function commitDefectFromForm(options = {}) {
         const opts = (typeof options === 'object' && options) ? options : {};
+        if (isDefectBulkEditMode()) {
+            return commitBulkDefectFromForm(opts);
+        }
         const pushHistory = opts.pushHistory !== false;
         const uploadPhotos = opts.uploadPhotos !== false;
         if (!state.currentBuildingId) return null;
@@ -16678,8 +17135,8 @@ document.addEventListener('DOMContentLoaded', () => {
             });
             if (saved) {
                 const pinIdEl = document.getElementById('defectPinId');
-                if (pinIdEl && !pinIdEl.value) pinIdEl.value = saved.id;
-                renderDefectMarkingTimeline(saved);
+                if (pinIdEl && !pinIdEl.value && !isDefectBulkEditMode()) pinIdEl.value = saved.id;
+                if (!isDefectBulkEditMode()) renderDefectMarkingTimeline(saved);
             }
             drawCanvas();
             if (typeof renderDefectListPanel === 'function') renderDefectListPanel();
@@ -16713,9 +17170,21 @@ document.addEventListener('DOMContentLoaded', () => {
         form.dataset.autoApplyBound = '1';
         form.addEventListener('input', (e) => {
             if (!e.target || e.target.closest?.('#defectArrowOctantGrid')) return;
+            const bulkKey = defectFieldKeyFromTarget(e.target);
+            if (bulkKey) markDefectBulkFieldChanged(bulkKey);
             scheduleDefectAutoApply();
         });
-        form.addEventListener('change', () => scheduleDefectAutoApply());
+        form.addEventListener('change', (e) => {
+            const bulkKey = defectFieldKeyFromTarget(e.target);
+            if (bulkKey) {
+                if (e.target && e.target.type === 'checkbox') {
+                    e.target.indeterminate = false;
+                    delete e.target.dataset.bulkMixed;
+                }
+                markDefectBulkFieldChanged(bulkKey);
+            }
+            scheduleDefectAutoApply();
+        });
     }
 
     bindDefectFormAutoApply();
@@ -17257,6 +17726,20 @@ document.addEventListener('DOMContentLoaded', () => {
             e.preventDefault();
             e.stopPropagation();
             deleteSelectedDefects();
+        });
+    }
+    const btnBulkEditSelectedEl = document.getElementById('btnBulkEditSelectedDefects');
+    if (btnBulkEditSelectedEl) {
+        btnBulkEditSelectedEl.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            openBulkDefectEditModal();
+        });
+    }
+    const mobileBtnBulkEditSelected = document.getElementById('mobileBtnBulkEditSelected');
+    if (mobileBtnBulkEditSelected) {
+        mobileBtnBulkEditSelected.addEventListener('click', () => {
+            openBulkDefectEditModal();
         });
     }
 
