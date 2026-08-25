@@ -242,20 +242,32 @@ window.getFloorDrawingBaseTierDim = function() {
 };
 
 /**
- * 최소~최대 확대 비율(zoomVsFit) 구간을 3등분해 해당 티어 해상도 반환
- * @param {number} zoomVsFit 현재 scale / fitScale
- * @param {{ minZoomVsFit?: number, maxZoomVsFit?: number }} [opts]
+ * 확대 구간별 고정 해상도 (2000 / 4000 / 8000px) — 히스테리시스로 경계에서 깜빡임 방지
+ * @param {number} zoomVsFit scale / fitScale (1 = 100%)
+ * @param {{ currentTier?: number }} [opts]
  */
 window.getFloorDrawingTierDimForZoomVsFit = function(zoomVsFit, opts) {
     const options = opts || {};
-    const min = Math.max(Number(options.minZoomVsFit) || 0.08, 0.01);
-    const max = Math.max(Number(options.maxZoomVsFit) || 50, min + 0.01);
-    const z = Math.max(min, Math.min(max, Number(zoomVsFit) || min));
-    const span = max - min;
+    const z = Math.max(Number(zoomVsFit) || 1, 0.05);
     const dims = window.FLOOR_DRAWING_TIER_DIMS || [2000, 4000, 8000];
-    if (z < min + span / 3) return dims[0];
-    if (z < min + (2 * span) / 3) return dims[1];
-    return dims[2];
+    const cur = Number(options.currentTier) || dims[0];
+    // 절반 해상도에 맞춘 구간 (구 화면 400% / 800% / 2000% 기준을 약간 당김)
+    const TO_MID = 2.8;    // 280%+ → 4000px
+    const TO_HI = 10;      // 1000%+ → 8000px
+    const BACK_LO = 2.2;   // 히스테리시스 하한
+    const BACK_MID = 8;
+
+    if (cur >= dims[2]) {
+        if (z < BACK_MID) return dims[1];
+        return dims[2];
+    }
+    if (cur >= dims[1]) {
+        if (z >= TO_HI) return dims[2];
+        if (z < BACK_LO) return dims[0];
+        return dims[1];
+    }
+    if (z >= TO_MID) return dims[1];
+    return dims[0];
 };
 
 /**
@@ -378,11 +390,9 @@ window.renderPdfDataUrlRegion = function(pdfDataUrl, refW, refH, region, outW, o
 window.pickFloorDrawingTierDim = function(viewScale, cssW, cssH, dpr, currentTier, refLongSide, fitScale, zoomRange) {
     const fit = Math.max(Number(fitScale) || 0.05, 0.05);
     const zoomVsFit = Math.max(Number(viewScale) || 1, 0.001) / fit;
-    const range = zoomRange || {};
     if (typeof window.getFloorDrawingTierDimForZoomVsFit === 'function') {
         return window.getFloorDrawingTierDimForZoomVsFit(zoomVsFit, {
-            minZoomVsFit: range.min,
-            maxZoomVsFit: range.max
+            currentTier: currentTier
         });
     }
     return window.FLOOR_DRAWING_TIER_DIMS[0] || 2000;
