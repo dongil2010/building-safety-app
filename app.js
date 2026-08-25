@@ -663,19 +663,31 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function drawFloorPlanLayers(ctx, imgW, imgH) {
-        const drawBg = (img, alpha) => {
+        const drawPlanImageWithLineBoost = (img, x, y, w, h, alpha) => {
             if (!img || alpha <= 0.001) return;
+            const thicken = getMapDrawingLineThickenFactor();
             ctx.save();
             ctx.globalAlpha = alpha;
-            ctx.drawImage(img, 0, 0, imgW, imgH);
+            ctx.drawImage(img, x, y, w, h);
+            if (thicken > 1.04) {
+                const px = Math.min(2.4, (thicken - 1) * 1.15);
+                ctx.globalCompositeOperation = 'darken';
+                ctx.globalAlpha = alpha * Math.min(0.52, 0.24 + (thicken - 1) * 0.22);
+                const offsets = [[px, 0], [-px, 0], [0, px], [0, -px], [px * 0.65, px * 0.65], [-px * 0.65, -px * 0.65]];
+                offsets.forEach(([ox, oy]) => {
+                    ctx.drawImage(img, x + ox, y + oy, w, h);
+                });
+            }
             ctx.restore();
+        };
+        const drawBg = (img, alpha) => {
+            drawPlanImageWithLineBoost(img, 0, 0, imgW, imgH, alpha);
         };
         const drawPatch = (patch, alpha) => {
             if (!patch || !patch.canvas || patch.w <= 0 || patch.h <= 0 || alpha <= 0.001) return;
             ctx.save();
-            ctx.globalAlpha = alpha;
             ctx.imageSmoothingEnabled = false;
-            ctx.drawImage(patch.canvas, patch.x, patch.y, patch.w, patch.h);
+            drawPlanImageWithLineBoost(patch.canvas, patch.x, patch.y, patch.w, patch.h, alpha);
             ctx.restore();
         };
 
@@ -1253,6 +1265,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 styleColors: window.state.styleColors || null,
                 styleSizes: window.state.styleSizes || null,
                 defectLeaderLineScale: (window.state.defectLeaderLineScale !== undefined ? window.state.defectLeaderLineScale : 1.0),
+                mapHdLineBoost: (window.state.mapHdLineBoost !== undefined ? window.state.mapHdLineBoost : 1.0),
                 ndtLeaderLineScale: (window.state.ndtLeaderLineScale !== undefined ? window.state.ndtLeaderLineScale : 1.0),
                 styleSizeBarLockedMap: window.state.styleSizeBarLockedMap !== false,
                 styleSizeBarLockedNdt: window.state.styleSizeBarLockedNdt !== false,
@@ -1385,6 +1398,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (parsed.defectLeaderLineScale !== undefined) {
                     window.state.defectLeaderLineScale = parsed.defectLeaderLineScale;
                     window.state._globalDefectLeaderLineScaleFallback = parsed.defectLeaderLineScale;
+                }
+                if (parsed.mapHdLineBoost !== undefined) {
+                    window.state.mapHdLineBoost = parsed.mapHdLineBoost;
+                    window.state._globalMapHdLineBoostFallback = parsed.mapHdLineBoost;
                 }
                 if (parsed.ndtLeaderLineScale !== undefined) {
                     window.state.ndtLeaderLineScale = parsed.ndtLeaderLineScale;
@@ -2042,40 +2059,162 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const allBldgs = filterDeletedBuildings(window.state.buildings, window.state.deletedBuildingIds);
         const term = (window.state.buildingSearchTerm || '').trim().toLowerCase();
-        const bldgs = term
-            ? allBldgs.filter(b => (b.name || '').toLowerCase().includes(term) || (b.address || '').toLowerCase().includes(term))
-            : allBldgs;
+        const siteNav = document.getElementById('dashboardSiteNav');
+        const siteNavTitle = document.getElementById('dashboardSiteNavTitle');
+        const heroTitle = document.querySelector('#tab-home .hero-title');
 
-        if (bldgs.length === 0) {
-            grid.innerHTML = `<div class="building-list-empty">${term ? '🔍 검색 결과가 없습니다.' : '등록된 건축물이 없습니다. 우측 상단 "신규 건축물 등록" 버튼을 눌러 시작하세요.'}</div>`;
-            return;
+        const filterBldgByTerm = (b) => {
+            if (!term) return true;
+            const name = (b.name || '').toLowerCase();
+            const addr = (b.address || '').toLowerCase();
+            const site = normalizeSiteVaultKey(b.name).toLowerCase();
+            const round = formatSurveyRoundLabel(getBuildingSurveyRoundKey(b)).toLowerCase();
+            return name.includes(term) || addr.includes(term) || site.includes(term) || round.includes(term);
+        };
+
+        const filtered = term ? allBldgs.filter(filterBldgByTerm) : allBldgs;
+
+        const groupBuildingsBySite = (list) => {
+            const map = new Map();
+            list.forEach((b) => {
+                const key = normalizeSiteVaultKey(b.name);
+                if (!map.has(key)) map.set(key, []);
+                map.get(key).push(b);
+            });
+            map.forEach((rounds) => {
+                rounds.sort((a, b) => {
+                    const ra = getSurveyRoundOrderRank(getBuildingSurveyRoundKey(a));
+                    const rb = getSurveyRoundOrderRank(getBuildingSurveyRoundKey(b));
+                    if (ra != null && rb != null && ra !== rb) return rb - ra;
+                    if (ra != null && rb == null) return -1;
+                    if (ra == null && rb != null) return 1;
+                    return String(b.name || '').localeCompare(String(a.name || ''), 'ko');
+                });
+            });
+            return map;
+        };
+
+        const selectedSiteKey = window.state.dashboardSiteKey || null;
+
+        if (selectedSiteKey) {
+            const siteRounds = filtered.filter((b) => normalizeSiteVaultKey(b.name) === selectedSiteKey);
+            if (siteNav) siteNav.hidden = false;
+            if (siteNavTitle) siteNavTitle.textContent = selectedSiteKey;
+            if (heroTitle) heroTitle.textContent = '📅 점검 회차 선택';
+
+            if (siteRounds.length === 0) {
+                grid.innerHTML = `<div class="building-list-empty">${term ? '🔍 검색 결과가 없습니다.' : '이 현장에 등록된 회차가 없습니다.'} <button type="button" class="btn btn-sm btn-outline dashboard-back-sites-inline" style="margin-top:0.6rem;">현장 목록으로</button></div>`;
+                grid.querySelector('.dashboard-back-sites-inline')?.addEventListener('click', () => window.closeDashboardSiteRounds());
+                return;
+            }
+
+            grid.innerHTML = siteRounds.map((bldg) => {
+                const floorCount = (bldg.floorsList && bldg.floorsList.length > 0)
+                    ? `📐 도면 ${bldg.floorsList.length}개 층`
+                    : '📐 도면 미등록';
+                const roundLabel = formatSurveyRoundLabel(getBuildingSurveyRoundKey(bldg));
+                const typeLabel = bldg.inspectionType || '점검';
+                const safeId = escapeHtml(bldg.id);
+                return `
+                    <div class="building-row building-row-round" data-id="${safeId}">
+                        <div class="building-row-info" data-action="inspect" data-bldg-id="${safeId}">
+                            <span class="building-row-name">${escapeHtml(roundLabel)} · ${escapeHtml(typeLabel)}</span>
+                            <span class="building-row-meta">${escapeHtml(bldg.name || '')} · ${escapeHtml(bldg.address || '주소 미등록')} · ${floorCount}</span>
+                        </div>
+                        <div class="building-row-actions">
+                            <button type="button" class="icon-btn icon-btn-start" title="이 회차 점검 시작" data-action="inspect" data-bldg-id="${safeId}">
+                                <i class="fa-solid fa-map-location-dot"></i>
+                                <span class="icon-btn-label">점검</span>
+                            </button>
+                            <button type="button" class="icon-btn icon-btn-edit" title="건축물 개요 수정" data-action="edit" data-bldg-id="${safeId}">
+                                <i class="fa-solid fa-pen-to-square"></i>
+                                <span class="icon-btn-label">수정</span>
+                            </button>
+                            <button type="button" class="icon-btn icon-btn-drawing" title="도면 추가/교체" data-action="drawing" data-bldg-id="${safeId}">
+                                <i class="fa-solid fa-images"></i>
+                                <span class="icon-btn-label">도면</span>
+                            </button>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        } else {
+            if (siteNav) siteNav.hidden = true;
+            if (heroTitle) heroTitle.textContent = '🏢 점검 대상 건축물 목록';
+
+            const siteMap = groupBuildingsBySite(filtered);
+            const siteKeys = [...siteMap.keys()].sort((a, b) => a.localeCompare(b, 'ko'));
+
+            if (siteKeys.length === 0) {
+                grid.innerHTML = `<div class="building-list-empty">${term ? '🔍 검색 결과가 없습니다.' : '등록된 건축물이 없습니다. 우측 상단 "신규 건축물 등록" 버튼을 눌러 시작하세요.'}</div>`;
+                return;
+            }
+
+            grid.innerHTML = siteKeys.map((siteKey) => {
+                const rounds = siteMap.get(siteKey) || [];
+                const latest = rounds[0];
+                const addr = (latest && latest.address) || '주소 미등록';
+                const roundCount = rounds.length;
+                const roundHint = roundCount === 1
+                    ? formatSurveyRoundLabel(getBuildingSurveyRoundKey(latest))
+                    : `회차 ${roundCount}건`;
+                const safeSite = escapeHtml(siteKey);
+                return `
+                    <div class="building-row building-row-site" data-site-key="${safeSite}">
+                        <div class="building-row-info" data-action="open-site" data-site-key="${safeSite}">
+                            <span class="building-row-name"><i class="fa-solid fa-building flag-icon-muted"></i> ${safeSite}</span>
+                            <span class="building-row-meta">${escapeHtml(addr)} · ${escapeHtml(roundHint)}</span>
+                        </div>
+                        <div class="building-row-actions">
+                            <button type="button" class="icon-btn icon-btn-start" title="회차 선택" data-action="open-site" data-site-key="${safeSite}">
+                                <i class="fa-solid fa-calendar-days"></i>
+                                <span class="icon-btn-label">회차</span>
+                            </button>
+                        </div>
+                    </div>
+                `;
+            }).join('');
         }
 
-        grid.innerHTML = bldgs.map(bldg => {
-            const floorCount = (bldg.floorsList && bldg.floorsList.length > 0) ? `📐 도면 ${bldg.floorsList.length}개 층` : '📐 도면 미등록';
-            return `
-                <div class="building-row" data-id="${bldg.id}">
-                    <div class="building-row-info" onclick="window.selectBuildingAndInspect('${bldg.id}')">
-                        <span class="building-row-name">${bldg.name}</span>
-                        <span class="building-row-meta">${bldg.address || '주소 미등록'} · ${floorCount}</span>
-                    </div>
-                    <div class="building-row-actions">
-                        <button type="button" class="icon-btn icon-btn-start" title="현장 점검 시작" onclick="window.selectBuildingAndInspect('${bldg.id}')">
-                            <i class="fa-solid fa-map-location-dot"></i>
-                            <span class="icon-btn-label">점검</span>
-                        </button>
-                        <button type="button" class="icon-btn icon-btn-edit" title="건축물 개요 수정" onclick="window.openEditBuildingModalFunc('${bldg.id}', 'info')">
-                            <i class="fa-solid fa-pen-to-square"></i>
-                            <span class="icon-btn-label">수정</span>
-                        </button>
-                        <button type="button" class="icon-btn icon-btn-drawing" title="도면 추가/교체" onclick="window.openEditBuildingModalFunc('${bldg.id}', 'drawing')">
-                            <i class="fa-solid fa-images"></i>
-                            <span class="icon-btn-label">도면</span>
-                        </button>
-                    </div>
-                </div>
-            `;
-        }).join('');
+        grid.querySelectorAll('[data-action="open-site"]').forEach((el) => {
+            el.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const key = el.getAttribute('data-site-key');
+                if (key) window.openDashboardSiteRounds(key);
+            });
+        });
+        grid.querySelectorAll('[data-action="inspect"]').forEach((el) => {
+            el.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const id = el.getAttribute('data-bldg-id');
+                if (id) window.selectBuildingAndInspect(id);
+            });
+        });
+        grid.querySelectorAll('[data-action="edit"]').forEach((el) => {
+            el.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const id = el.getAttribute('data-bldg-id');
+                if (id) window.openEditBuildingModalFunc(id, 'info');
+            });
+        });
+        grid.querySelectorAll('[data-action="drawing"]').forEach((el) => {
+            el.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const id = el.getAttribute('data-bldg-id');
+                if (id) window.openEditBuildingModalFunc(id, 'drawing');
+            });
+        });
+    };
+
+    window.openDashboardSiteRounds = function(siteKey) {
+        if (!siteKey) return;
+        window.state.dashboardSiteKey = siteKey;
+        window.renderDashboard();
+    };
+
+    window.closeDashboardSiteRounds = function() {
+        window.state.dashboardSiteKey = null;
+        window.renderDashboard();
     };
 
     const buildingSearchInput = document.getElementById('buildingSearchInput');
@@ -2084,6 +2223,11 @@ document.addEventListener('DOMContentLoaded', () => {
             window.state.buildingSearchTerm = e.target.value;
             window.renderDashboard();
         });
+    }
+
+    const btnDashboardBackSites = document.getElementById('btnDashboardBackSites');
+    if (btnDashboardBackSites) {
+        btnDashboardBackSites.addEventListener('click', () => window.closeDashboardSiteRounds());
     }
 
     window.selectBuildingAndInspect = function(bldgOrId) {
@@ -2253,6 +2397,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const preview = document.getElementById('drawingSortPreview');
             if (preview) preview.innerHTML = '';
             window.selectedUploadedDrawings = [];
+            window.drawingPreviewManualOrder = false;
 
             populateAddBuildingImportSources();
             setImportSourcePickerValue('selectImportSourceBuilding', '', { silent: true });
@@ -2860,8 +3005,115 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             map[item.floorCode].push({ item, idx });
         });
-        order.sort((a, b) => window.getFloorRankFromCode(a) - window.getFloorRankFromCode(b));
         return order.map(code => ({ floorCode: code, entries: map[code] }));
+    }
+
+    function reorderDrawingItemsByFloorOrder(items, floorCodesInOrder) {
+        const byFloor = {};
+        items.forEach((item) => {
+            if (!byFloor[item.floorCode]) byFloor[item.floorCode] = [];
+            byFloor[item.floorCode].push(item);
+        });
+        const result = [];
+        floorCodesInOrder.forEach((code) => {
+            (byFloor[code] || []).forEach((item) => result.push(item));
+        });
+        Object.keys(byFloor).forEach((code) => {
+            if (!floorCodesInOrder.includes(code)) {
+                byFloor[code].forEach((item) => result.push(item));
+            }
+        });
+        return result;
+    }
+
+    function bindDrawingPreviewListDrag(listEl, rowSelector, onCommitOrder) {
+        if (!listEl || typeof onCommitOrder !== 'function') return;
+        const handles = listEl.querySelectorAll('.add-drawing-drag-handle');
+        handles.forEach((handle) => {
+            handle.addEventListener('pointerdown', (e) => {
+                if (e.button != null && e.button !== 0) return;
+                const row = handle.closest(rowSelector);
+                if (!row || !listEl.contains(row)) return;
+                e.preventDefault();
+                e.stopPropagation();
+
+                const rowRect = row.getBoundingClientRect();
+                const listRect = listEl.getBoundingClientRect();
+                const offsetY = e.clientY - rowRect.top;
+                const placeholder = document.createElement('div');
+                placeholder.className = 'add-drawing-preview-placeholder';
+                placeholder.style.height = `${rowRect.height}px`;
+                listEl.insertBefore(placeholder, row.nextSibling);
+
+                row.classList.add('is-dragging');
+                listEl.classList.add('is-reordering');
+                row.style.width = `${rowRect.width}px`;
+                row.style.left = `${rowRect.left}px`;
+                row.style.top = `${rowRect.top}px`;
+                row.style.position = 'fixed';
+                row.style.zIndex = '10050';
+                row.style.pointerEvents = 'none';
+                row.style.margin = '0';
+                document.body.appendChild(row);
+
+                handle.setPointerCapture(e.pointerId);
+
+                const moveRowToY = (clientY) => {
+                    const top = clientY - offsetY;
+                    const minTop = listRect.top - rowRect.height * 0.35;
+                    const maxTop = listRect.bottom - rowRect.height * 0.65;
+                    row.style.top = `${Math.max(minTop, Math.min(maxTop, top))}px`;
+
+                    const probeY = clientY;
+                    const rows = Array.from(listEl.querySelectorAll(`${rowSelector}:not(.is-dragging)`));
+                    rows.forEach((other) => other.classList.remove('is-drop-target'));
+                    let inserted = false;
+                    for (const other of rows) {
+                        const r = other.getBoundingClientRect();
+                        const mid = r.top + r.height / 2;
+                        if (probeY < mid) {
+                            listEl.insertBefore(placeholder, other);
+                            other.classList.add('is-drop-target');
+                            inserted = true;
+                            break;
+                        }
+                    }
+                    if (!inserted) listEl.appendChild(placeholder);
+                };
+                moveRowToY(e.clientY);
+
+                const onMove = (ev) => moveRowToY(ev.clientY);
+                const onUp = () => {
+                    try { handle.releasePointerCapture(e.pointerId); } catch (_) {}
+                    handle.removeEventListener('pointermove', onMove);
+                    handle.removeEventListener('pointerup', onUp);
+                    handle.removeEventListener('pointercancel', onUp);
+
+                    listEl.insertBefore(row, placeholder);
+                    placeholder.remove();
+                    row.classList.remove('is-dragging');
+                    listEl.classList.remove('is-reordering');
+                    row.style.cssText = '';
+                    listEl.querySelectorAll(`${rowSelector}.is-drop-target`).forEach((r) => r.classList.remove('is-drop-target'));
+
+                    const floorCodes = Array.from(listEl.querySelectorAll(rowSelector))
+                        .map((r) => r.dataset.floorCode)
+                        .filter(Boolean);
+                    onCommitOrder(floorCodes);
+                };
+                handle.addEventListener('pointermove', onMove);
+                handle.addEventListener('pointerup', onUp);
+                handle.addEventListener('pointercancel', onUp);
+            });
+        });
+    }
+
+    function drawingPreviewDragHandleHtml(floorCode) {
+        const label = window.getFloorLabelFromCode(floorCode);
+        return `<button type="button" class="add-drawing-drag-handle" aria-label="드래그하여 ${escapeHtml(label)} 순서 변경" title="드래그하여 순서 변경">
+            <i class="fa-solid fa-grip-vertical"></i>
+        </button>
+        <span class="add-drawing-preview-floor">${escapeHtml(label)}</span>`;
     }
 
     function renderNewBuildingDrawingPreview() {
@@ -2881,8 +3133,9 @@ document.addEventListener('DOMContentLoaded', () => {
             </div>`;
         }
 
-        const singleRowHtml = (item, idx) => `
-            <div class="add-drawing-preview-row${item.matched === false ? ' is-warning' : ''}">
+        const singleRowHtml = (item, idx, floorCode) => `
+            <div class="add-drawing-preview-row is-draggable${item.matched === false ? ' is-warning' : ''}" data-floor-code="${escapeHtml(floorCode)}">
+                ${drawingPreviewDragHandleHtml(floorCode)}
                 <span class="add-drawing-preview-name" title="${escapeHtml(item.fileName)}">${escapeHtml(item.fileName)}</span>
                 <select class="form-control drawing-floor-select" data-idx="${idx}" style="width:auto; font-size:0.78rem; padding:0.2rem 0.4rem;">
                     ${window.buildFloorCodeOptionsHtml(item.floorCode)}
@@ -2890,11 +3143,12 @@ document.addEventListener('DOMContentLoaded', () => {
             </div>`;
 
         const groupHtml = (g) => {
-            if (g.entries.length === 1) return singleRowHtml(g.entries[0].item, g.entries[0].idx);
+            if (g.entries.length === 1) return singleRowHtml(g.entries[0].item, g.entries[0].idx, g.floorCode);
             const floorLabel = window.getFloorLabelFromCode(g.floorCode);
             return `
-                <div class="add-drawing-preview-row is-duplicate-group">
-                    <div style="width:100%;">
+                <div class="add-drawing-preview-row is-duplicate-group is-draggable" data-floor-code="${escapeHtml(g.floorCode)}">
+                    ${drawingPreviewDragHandleHtml(g.floorCode)}
+                    <div style="width:100%; min-width:0;">
                         <div class="add-drawing-preview-title">${floorLabel} — 파일 ${g.entries.length}개 · 저장할 파일 하나를 선택</div>
                         <div style="display:flex; flex-direction:column; gap:0.25rem;">
                         ${g.entries.map(({ item, idx }, i) => {
@@ -2916,12 +3170,25 @@ document.addEventListener('DOMContentLoaded', () => {
         };
 
         preview.innerHTML = `
-            <div class="add-drawing-preview-title">총 ${items.length}개 도면 파일 · 층을 확인해 주세요</div>
+            <div class="add-drawing-preview-title">총 ${items.length}개 도면 파일 · 층을 확인해 주세요${groups.length > 1 ? ' · <span class="add-drawing-preview-drag-hint">⠿ 드래그로 순서 변경</span>' : ''}</div>
             ${warningHtml}
-            <div style="display:flex; flex-direction:column; gap:0.4rem;">
+            <div class="add-drawing-preview-list">
                 ${groups.map(groupHtml).join('')}
             </div>
         `;
+
+        if (groups.length > 1) {
+            const listEl = preview.querySelector('.add-drawing-preview-list');
+            bindDrawingPreviewListDrag(listEl, '.add-drawing-preview-row.is-draggable', (floorCodes) => {
+                window.selectedUploadedDrawings = reorderDrawingItemsByFloorOrder(
+                    window.selectedUploadedDrawings || [],
+                    floorCodes
+                );
+                window.drawingPreviewManualOrder = true;
+                updateNewBuildingFloorsSummary();
+                renderNewBuildingDrawingPreview();
+            });
+        }
 
         preview.querySelectorAll('.drawing-floor-select').forEach(sel => {
             sel.addEventListener('change', (ev) => {
@@ -2963,8 +3230,10 @@ document.addEventListener('DOMContentLoaded', () => {
         });
 
         window.selectedUploadedDrawings = (window.selectedUploadedDrawings || [])
-            .concat(newItems)
-            .sort((a, b) => a.rank - b.rank);
+            .concat(newItems);
+        if (!window.drawingPreviewManualOrder) {
+            window.selectedUploadedDrawings.sort((a, b) => a.rank - b.rank);
+        }
 
         renderNewBuildingDrawingPreview();
         updateNewBuildingFloorsSummary();
@@ -3296,6 +3565,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         window.currentEditingBuilding = bldg;
         window.selectedEditUploadedDrawings = [];
+        window.editDrawingPreviewManualOrder = false;
 
         // Bind building info to edit modal form inputs
         document.getElementById('inputEditBuildingId').value = bldg.id;
@@ -3363,6 +3633,7 @@ document.addEventListener('DOMContentLoaded', () => {
         existingFloors = window.sortFloorsLowToHigh(existingFloors);
 
         const newFiles = Array.isArray(window.selectedEditUploadedDrawings) ? window.selectedEditUploadedDrawings : [];
+        const editGroups = groupDrawingItemsByFloor(newFiles);
 
         let html = `
             <div style="font-size:0.85rem; font-weight:800; color:#2a2a2a; margin-bottom:0.4rem; display:flex; justify-content:space-between; align-items:center;">
@@ -3393,7 +3664,6 @@ document.addEventListener('DOMContentLoaded', () => {
             });
 
             // 신규추가 파일 중 같은 층으로 지정된 파일 검사 (저장 시 나중 파일이 이전 파일을 덮어씀)
-            const editGroups = groupDrawingItemsByFloor(newFiles);
             const hasUnmatched = newFiles.some(it => it.matched === false);
             const hasDuplicate = editGroups.some(g => g.entries.length > 1);
             if (hasUnmatched || hasDuplicate) {
@@ -3403,16 +3673,21 @@ document.addEventListener('DOMContentLoaded', () => {
                 </div>`;
             }
 
+            if (editGroups.length > 0) {
+                html += `<div class="add-drawing-preview-title" style="margin-top:0.35rem;">신규 도면 ${newFiles.length}개${editGroups.length > 1 ? ' · <span class="add-drawing-preview-drag-hint">⠿ 드래그로 순서 변경</span>' : ''}</div>`;
+                html += `<div class="add-drawing-preview-list edit-drawing-new-list">`;
+            }
+
             // Render Newly Added Drawings — 같은 층으로 인식된 파일은 한 그룹으로 묶어서 표시
             editGroups.forEach(g => {
                 if (g.entries.length === 1) {
                     const { item, idx } = g.entries[0];
                     const flagged = item.matched === false;
                     html += `
-                        <div style="display:flex; justify-content:space-between; align-items:center; gap:0.5rem; background:${flagged ? 'rgba(217,119,6,0.1)' : '#e0f2fe'}; border:1px solid ${flagged ? '#d97706' : '#2a2a2a'}; padding:0.4rem 0.8rem; border-radius:6px; font-size:0.82rem;">
-                            <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
-                                <strong style="color:#1f1f1f;">[신규추가]</strong>
-                                <span style="color:#64748b; font-size:0.75rem; margin-left:0.4rem;">${escapeHtml(item.fileName)}</span>
+                        <div class="add-drawing-preview-row is-draggable${flagged ? ' is-warning' : ''}" data-floor-code="${escapeHtml(g.floorCode)}" style="background:${flagged ? '#fffbeb' : '#e0f2fe'}; border-color:${flagged ? '#f59e0b' : '#2a2a2a'};">
+                            ${drawingPreviewDragHandleHtml(g.floorCode)}
+                            <span class="add-drawing-preview-name" title="${escapeHtml(item.fileName)}">
+                                <strong style="color:#1f1f1f;">[신규]</strong> ${escapeHtml(item.fileName)}
                             </span>
                             <select class="form-control edit-drawing-floor-select" data-idx="${idx}" style="width:auto; font-size:0.78rem; padding:0.2rem 0.4rem; flex-shrink:0;">
                                 ${window.buildFloorCodeOptionsHtml(item.floorCode)}
@@ -3422,17 +3697,17 @@ document.addEventListener('DOMContentLoaded', () => {
                 } else {
                     const floorLabel = window.getFloorLabelFromCode(g.floorCode);
                     html += `
-                        <div style="border:1px solid #d97706; background:rgba(217,119,6,0.08); border-radius:8px; padding:0.5rem 0.6rem;">
-                            <div style="font-size:0.78rem; font-weight:800; color:#d97706; margin-bottom:0.3rem;">
-                                🏢 [신규추가] ${floorLabel} — 파일 ${g.entries.length}개가 같은 층으로 인식됨. 저장할 파일 하나를 골라주세요.
-                            </div>
-                            <div style="display:flex; flex-direction:column; gap:0.25rem;">
+                        <div class="add-drawing-preview-row is-duplicate-group is-draggable" data-floor-code="${escapeHtml(g.floorCode)}">
+                            ${drawingPreviewDragHandleHtml(g.floorCode)}
+                            <div style="width:100%; min-width:0;">
+                                <div class="add-drawing-preview-title">[신규] ${floorLabel} — 파일 ${g.entries.length}개 · 저장할 파일 하나를 선택</div>
+                                <div style="display:flex; flex-direction:column; gap:0.25rem;">
                                 ${g.entries.map(({ item, idx }, i) => {
                                     const isFinal = i === g.entries.length - 1;
                                     return `
-                                    <div style="display:flex; justify-content:space-between; align-items:center; gap:0.4rem; padding:0.3rem 0.5rem; ${isFinal ? 'background:rgba(22,163,74,0.12); border-radius:6px;' : ''}">
-                                        <span style="flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:0.76rem; color:${isFinal ? '#16a34a' : '#a3a3a3'};" title="${escapeHtml(item.fileName)}">
-                                            ${isFinal ? '✅' : '⬜'} ${escapeHtml(item.fileName)}${isFinal ? ' <b>(저장됨)</b>' : ''}
+                                    <div style="display:flex; justify-content:space-between; align-items:center; gap:0.4rem; padding:0.2rem 0;">
+                                        <span class="add-drawing-preview-name" style="color:${isFinal ? '#16a34a' : '#64748b'};" title="${escapeHtml(item.fileName)}">
+                                            ${isFinal ? '✅' : '⬜'} ${escapeHtml(item.fileName)}${isFinal ? ' (저장됨)' : ''}
                                         </span>
                                         ${!isFinal ? `<button type="button" class="btn btn-sm btn-outline pick-final-edit-drawing" data-idx="${idx}" style="font-size:0.68rem; padding:0.1rem 0.5rem; flex-shrink:0;">이 파일 저장</button>` : ''}
                                         <select class="form-control edit-drawing-floor-select" data-idx="${idx}" style="width:auto; font-size:0.72rem; padding:0.15rem 0.3rem; flex-shrink:0;">
@@ -3440,16 +3715,32 @@ document.addEventListener('DOMContentLoaded', () => {
                                         </select>
                                     </div>`;
                                 }).join('')}
+                                </div>
                             </div>
-                        </div>
-                    `;
+                        </div>`;
                 }
             });
+
+            if (editGroups.length > 0) {
+                html += `</div>`;
+            }
 
             html += `</div>`;
         }
 
         preview.innerHTML = html;
+
+        const editNewList = preview.querySelector('.edit-drawing-new-list');
+        if (editNewList && editGroups.length > 1) {
+            bindDrawingPreviewListDrag(editNewList, '.add-drawing-preview-row.is-draggable', (floorCodes) => {
+                window.selectedEditUploadedDrawings = reorderDrawingItemsByFloorOrder(
+                    window.selectedEditUploadedDrawings || [],
+                    floorCodes
+                );
+                window.editDrawingPreviewManualOrder = true;
+                renderEditDrawingPreview();
+            });
+        }
 
         preview.querySelectorAll('.edit-drawing-floor-select').forEach(sel => {
             sel.addEventListener('change', (ev) => {
@@ -3524,9 +3815,10 @@ document.addEventListener('DOMContentLoaded', () => {
             };
         });
 
-        window.selectedEditUploadedDrawings = window.sortFloorsLowToHigh(
-            (window.selectedEditUploadedDrawings || []).concat(parsedItems)
-        );
+        window.selectedEditUploadedDrawings = (window.selectedEditUploadedDrawings || []).concat(parsedItems);
+        if (!window.editDrawingPreviewManualOrder) {
+            window.selectedEditUploadedDrawings = window.sortFloorsLowToHigh(window.selectedEditUploadedDrawings);
+        }
         renderEditDrawingPreview();
 
         const unmatchedCount = parsedItems.filter(it => it.matched === false).length;
@@ -3855,22 +4147,32 @@ document.addEventListener('DOMContentLoaded', () => {
         return Math.round((scale / Math.max(fit, 0.001)) * 100);
     }
 
-    /** 모바일: 화면맞춤 대비 400%→4000px, 800%→8000px, 2000%→16000px */
-    function getMobileZoomTierDim(activeTier) {
-        const pct = getMapZoomVsFitPercent();
-        const cur = activeTier || 4000;
-        if (cur >= 16000) {
-            if (pct < 1800) return 8000;
-            return 16000;
+    function getMapZoomVsFitRange() {
+        const lim = getMapViewScaleLimits();
+        const fit = Math.max(getMapFitScale(), 0.05);
+        return { min: lim.min / fit, max: lim.max / fit };
+    }
+
+    function getMapZoomVsFit() {
+        const fit = Math.max(getMapFitScale(), 0.05);
+        return Math.max(state.view.scale || 1, 0.001) / fit;
+    }
+
+    function pickFloorDrawingTierDimForCurrentView() {
+        const range = getMapZoomVsFitRange();
+        const zoomVsFit = getMapZoomVsFit();
+        if (typeof window.getFloorDrawingTierDimForZoomVsFit === 'function') {
+            return window.getFloorDrawingTierDimForZoomVsFit(zoomVsFit, {
+                minZoomVsFit: range.min,
+                maxZoomVsFit: range.max
+            });
         }
-        if (cur >= 8000) {
-            if (pct >= 2000) return 16000;
-            if (pct < 720) return 4000;
-            return 8000;
-        }
-        if (pct >= 2000) return 16000;
-        if (pct >= 800) return 8000;
         return 4000;
+    }
+
+    /** 모바일·PC 공통 — 최소~최대 확대 구간 3등분 → 4000/8000/16000px */
+    function getMobileZoomTierDim(activeTier) {
+        return pickFloorDrawingTierDimForCurrentView();
     }
 
     function updateMapZoomOverlay() {
@@ -3888,6 +4190,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const bldg = state.currentBuilding;
         const fc = state.currentFloor;
         const pdfKnown = bldg && fc && (_floorPdfKnown.get(`${bldg.id}_${fc}`) === true || floorHasPdfSourceSync(bldg, fc));
+        const tierDim = pickFloorDrawingTierDimForCurrentView();
         if (hd) {
             el.textContent = `${pct}% · HD`;
             el.classList.add('is-hd');
@@ -3897,20 +4200,11 @@ document.addEventListener('DOMContentLoaded', () => {
         } else if (pct >= 800 && floorPdfKnownUnavailable(bldg?.id, fc)) {
             el.textContent = `${pct}% · PDF없음`;
             el.classList.remove('is-hd');
-        } else if (pct >= 2000) {
-            el.textContent = `${pct}% · 16000px`;
-            el.classList.remove('is-hd');
-        } else if (pct >= 800) {
-            el.textContent = `${pct}% · 8000px`;
-            el.classList.remove('is-hd');
-        } else if (pct >= 400) {
-            el.textContent = `${pct}% · 4000px`;
-            el.classList.remove('is-hd');
         } else if (pct >= 115 && !pdfKnown && floorPdfKnownUnavailable(bldg?.id, fc)) {
-            el.textContent = `${pct}% · 4000px`;
+            el.textContent = `${pct}% · ${tierDim}px`;
             el.classList.remove('is-hd');
         } else {
-            el.textContent = `${pct}%`;
+            el.textContent = `${pct}% · ${tierDim}px`;
             el.classList.remove('is-hd');
         }
     }
@@ -3962,7 +4256,11 @@ document.addEventListener('DOMContentLoaded', () => {
         const ch = state.canvasCssH || (state.canvas ? Math.round(state.canvas.height / (state.canvasDpr || 1)) : 600);
         const dims = getFloorPlanDisplayDims();
         const refLong = Math.max(dims.w || 4000, dims.h || 4000, 4000);
-        return window.pickFloorDrawingTierDim(state.view.scale, cw, ch, state.canvasDpr || 1, floorDrawingActiveTierDim, refLong);
+        const range = getMapZoomVsFitRange();
+        return window.pickFloorDrawingTierDim(
+            state.view.scale, cw, ch, state.canvasDpr || 1,
+            floorDrawingActiveTierDim, refLong, getMapFitScale(), range
+        );
     }
 
     function cacheFloorDrawingTierToDevice(bldg, floorCode, tierDim, dataUrl) {
@@ -5022,6 +5320,47 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     /** 삼각 화살촉: 세모 무게중심. 원형 화살촉: target(측정점) 그대로 */
+    function getMapHdAutoLineBoost() {
+        let boost = 1;
+        if (hasActiveFloorHiPatch()) {
+            const lvl = viewportPatchActiveLevel || 0;
+            if (lvl >= 2) boost = Math.max(boost, 1.28);
+            else if (lvl >= 1) boost = Math.max(boost, 1.16);
+            else boost = Math.max(boost, 1.08);
+        }
+        const tier = floorDrawingActiveTierDim || 4000;
+        if (tier >= 16000) boost = Math.max(boost, 1.14);
+        else if (tier >= 8000) boost = Math.max(boost, 1.07);
+        const pct = getMapZoomVsFitPercent();
+        if (pct >= 2000) boost = Math.max(boost, 1.1);
+        else if (pct >= 800) boost = Math.max(boost, 1.05);
+        return boost;
+    }
+
+    function getActiveMapHdLineBoost() {
+        if (_mapStyleRenderContext) {
+            const saved = state.floorMapStyleSettings?.[getFloorMapStyleKey(
+                _mapStyleRenderContext.buildingId,
+                _mapStyleRenderContext.floorCode
+            )];
+            if (saved && saved.mapHdLineBoost !== undefined) return saved.mapHdLineBoost;
+        }
+        return state.mapHdLineBoost !== undefined ? state.mapHdLineBoost : 1.0;
+    }
+
+    /** HD·고배율 도면 + 마킹 선 굵기 — 사용자 슬라이더 × 자동 보정 */
+    function getMapHdLineDrawMultiplier() {
+        const user = Math.min(Math.max(parseFloat(getActiveMapHdLineBoost() || 1), 0.5), 2.5);
+        if (_mapStyleRenderContext) return user;
+        if (state.currentTab !== 'tab-map') return 1;
+        return user * getMapHdAutoLineBoost();
+    }
+
+    function getMapDrawingLineThickenFactor() {
+        if (state.currentTab !== 'tab-map') return Math.max(1, getActiveMapHdLineBoost() || 1);
+        return getMapHdLineDrawMultiplier();
+    }
+
     function getMapArrowTipHitCenter(targetX, targetY, fromX, fromY, arrowScale) {
         if (state.tipShape === 'circle') {
             return { x: targetX, y: targetY };
@@ -5235,7 +5574,8 @@ document.addEventListener('DOMContentLoaded', () => {
         return {
             // 층별 스타일은 결함위치도만 — NDT 크기/굵기는 전역으로 별도 유지
             styleSizes: cloneStyleSizesSubset(state.styleSizes, DEFECT_STYLE_SIZE_KEYS),
-            defectLeaderLineScale: state.defectLeaderLineScale !== undefined ? state.defectLeaderLineScale : 1.0
+            defectLeaderLineScale: state.defectLeaderLineScale !== undefined ? state.defectLeaderLineScale : 1.0,
+            mapHdLineBoost: state.mapHdLineBoost !== undefined ? state.mapHdLineBoost : 1.0
         };
     }
 
@@ -5419,8 +5759,9 @@ document.addEventListener('DOMContentLoaded', () => {
         const raw = leaderScaleOverride !== undefined && leaderScaleOverride !== null
             ? leaderScaleOverride
             : getActiveLeaderLineScale();
-        const factor = Math.min(Math.max(parseFloat(raw || 1), 0.5), 3.0);
-        return (isBeingDragged ? 1.5 : 1.1) * (scale || 1) * (roundLineMul || 1) * factor;
+        const factor = Math.min(Math.max(parseFloat(raw || 1), 0.5), 5.0);
+        const hdMul = getMapHdLineDrawMultiplier();
+        return (isBeingDragged ? 1.5 : 1.1) * (scale || 1) * (roundLineMul || 1) * factor * hdMul;
     }
 
     function getDefectLeaderLineWidth(scale, roundLineMul, isBeingDragged) {
@@ -11809,8 +12150,9 @@ document.addEventListener('DOMContentLoaded', () => {
         ctx.save();
         paintAreaInterior(ctx, x1, y1, x2, y2, activeColor, fillStyle);
         ctx.strokeStyle = activeColor;
-        // 영역 테두리는 얇게 — 지시선이 꼽히는 윤곽만 보이게
-        ctx.lineWidth = (isBeingDragged ? 1.6 : 1.1) * roundLineMul;
+        // 영역 테두리 — HD·고배율에서도 연결선 슬라이더·HD 보정 적용
+        const areaPinScale = getStyleSize(getDefectStyleKey(defect.category, defect.defectType)).pin;
+        ctx.lineWidth = getDefectLeaderLineWidth(areaPinScale, roundLineMul, isBeingDragged);
         if (isPreview || borderStyle === 'dashed') ctx.setLineDash([5, 4]);
         else ctx.setLineDash([]);
         ctx.strokeRect(x1, y1, x2 - x1, y2 - y1);
@@ -14299,10 +14641,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 ndtKept
             );
             state.defectLeaderLineScale = saved.defectLeaderLineScale ?? 1.0;
+            state.mapHdLineBoost = saved.mapHdLineBoost ?? 1.0;
         } else {
             const fallback = cloneStyleSizesMap(state._globalStyleSizesFallback) || null;
             state.styleSizes = mergeStyleSizesSubset(fallback, ndtKept);
             state.defectLeaderLineScale = state._globalDefectLeaderLineScaleFallback ?? 1.0;
+            state.mapHdLineBoost = state._globalMapHdLineBoostFallback ?? 1.0;
         }
         if (typeof window.syncBulkStyleSlidersUi === 'function') window.syncBulkStyleSlidersUi();
     }
@@ -14335,7 +14679,8 @@ document.addEventListener('DOMContentLoaded', () => {
         floorCodes.forEach(fc => {
             state.floorMapStyleSettings[getFloorMapStyleKey(bldgId, fc)] = {
                 styleSizes: cloneStyleSizesMap(snapshot.styleSizes),
-                defectLeaderLineScale: snapshot.defectLeaderLineScale
+                defectLeaderLineScale: snapshot.defectLeaderLineScale,
+                mapHdLineBoost: snapshot.mapHdLineBoost
             };
         });
         saveStateToLocalStorage();
@@ -14357,7 +14702,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (mapToolbar) mapToolbar.classList.toggle('is-size-locked', mapLocked);
         if (ndtToolbar) ndtToolbar.classList.toggle('is-size-locked', ndtLocked);
 
-        ['stylePinSizeAll', 'styleArrowSizeAll', 'styleLeaderLineScaleAll'].forEach((id) => {
+        ['stylePinSizeAll', 'styleArrowSizeAll', 'styleLeaderLineScaleAll', 'styleMapHdLineBoost'].forEach((id) => {
             const el = document.getElementById(id);
             if (el) el.disabled = mapLocked;
         });
@@ -14379,16 +14724,21 @@ document.addEventListener('DOMContentLoaded', () => {
         const arrowAllLabel = document.getElementById('styleArrowSizeAllLabel');
         const leaderLineAllInput = document.getElementById('styleLeaderLineScaleAll');
         const leaderLineAllLabel = document.getElementById('styleLeaderLineScaleAllLabel');
+        const hdLineBoostInput = document.getElementById('styleMapHdLineBoost');
+        const hdLineBoostLabel = document.getElementById('styleMapHdLineBoostLabel');
         const sampleSize = getStyleSize('defectStructural');
         const pinV = sampleSize.pin;
         const arrowV = sampleSize.arrow;
-        const lineV = Math.min(Math.max(parseFloat(getActiveLeaderLineScale() || 1), 0.5), 3.0);
+        const lineV = Math.min(Math.max(parseFloat(getActiveLeaderLineScale() || 1), 0.5), 5.0);
+        const hdV = Math.min(Math.max(parseFloat(getActiveMapHdLineBoost() || 1), 0.5), 2.5);
         if (pinAllInput) pinAllInput.value = pinV;
         if (pinAllLabel) pinAllLabel.textContent = `${Math.round(pinV * 100)}%`;
         if (arrowAllInput) arrowAllInput.value = arrowV;
         if (arrowAllLabel) arrowAllLabel.textContent = `${Math.round(arrowV * 100)}%`;
         if (leaderLineAllInput) leaderLineAllInput.value = lineV;
         if (leaderLineAllLabel) leaderLineAllLabel.textContent = `${Math.round(lineV * 100)}%`;
+        if (hdLineBoostInput) hdLineBoostInput.value = hdV;
+        if (hdLineBoostLabel) hdLineBoostLabel.textContent = `${Math.round(hdV * 100)}%`;
 
         const ndtPinAll = document.getElementById('stylePinSizeNdtCurrent');
         const ndtPinLabel = document.getElementById('stylePinSizeNdtCurrentLabel');
@@ -14587,20 +14937,40 @@ document.addEventListener('DOMContentLoaded', () => {
         const leaderLineAllInput = document.getElementById('styleLeaderLineScaleAll');
         const leaderLineAllLabel = document.getElementById('styleLeaderLineScaleAllLabel');
         const syncLeaderLineUi = () => {
-            const v = Math.min(Math.max(parseFloat(getActiveLeaderLineScale() || 1), 0.5), 3.0);
+            const v = Math.min(Math.max(parseFloat(getActiveLeaderLineScale() || 1), 0.5), 5.0);
             if (leaderLineAllInput) leaderLineAllInput.value = v;
             if (leaderLineAllLabel) leaderLineAllLabel.textContent = `${Math.round(v * 100)}%`;
         };
         syncLeaderLineUi();
+        const hdLineBoostInput = document.getElementById('styleMapHdLineBoost');
+        const hdLineBoostLabel = document.getElementById('styleMapHdLineBoostLabel');
+        const syncHdLineBoostUi = () => {
+            const v = Math.min(Math.max(parseFloat(getActiveMapHdLineBoost() || 1), 0.5), 2.5);
+            if (hdLineBoostInput) hdLineBoostInput.value = v;
+            if (hdLineBoostLabel) hdLineBoostLabel.textContent = `${Math.round(v * 100)}%`;
+        };
+        syncHdLineBoostUi();
         if (typeof window.syncBulkStyleSlidersUi === 'function') window.syncBulkStyleSlidersUi();
         if (leaderLineAllInput) {
             leaderLineAllInput.addEventListener('input', () => {
-                const v = Math.min(Math.max(parseFloat(leaderLineAllInput.value || '1'), 0.5), 3.0);
+                const v = Math.min(Math.max(parseFloat(leaderLineAllInput.value || '1'), 0.5), 5.0);
                 state.defectLeaderLineScale = v;
                 if (leaderLineAllLabel) leaderLineAllLabel.textContent = `${Math.round(v * 100)}%`;
                 if (typeof drawCanvas === 'function') drawCanvas();
             });
             leaderLineAllInput.addEventListener('change', () => {
+                persistCurrentFloorMapStyleFromSliders();
+                saveStateToLocalStorage();
+            });
+        }
+        if (hdLineBoostInput) {
+            hdLineBoostInput.addEventListener('input', () => {
+                const v = Math.min(Math.max(parseFloat(hdLineBoostInput.value || '1'), 0.5), 2.5);
+                state.mapHdLineBoost = v;
+                if (hdLineBoostLabel) hdLineBoostLabel.textContent = `${Math.round(v * 100)}%`;
+                if (typeof drawCanvas === 'function') drawCanvas();
+            });
+            hdLineBoostInput.addEventListener('change', () => {
                 persistCurrentFloorMapStyleFromSliders();
                 saveStateToLocalStorage();
             });
@@ -25240,6 +25610,11 @@ document.addEventListener('DOMContentLoaded', () => {
             window.state._globalDefectLeaderLineScaleFallback = data.defectLeaderLineScale;
             isChanged = true;
         }
+        if (data.mapHdLineBoost !== undefined) {
+            window.state.mapHdLineBoost = data.mapHdLineBoost;
+            window.state._globalMapHdLineBoostFallback = data.mapHdLineBoost;
+            isChanged = true;
+        }
         if (data.ndtLeaderLineScale !== undefined) {
             window.state.ndtLeaderLineScale = data.ndtLeaderLineScale;
             isChanged = true;
@@ -25349,6 +25724,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 styleColors: window.state.styleColors || null,
                 styleSizes: window.state.styleSizes || null,
                 defectLeaderLineScale: (window.state.defectLeaderLineScale !== undefined ? window.state.defectLeaderLineScale : 1.0),
+                mapHdLineBoost: (window.state.mapHdLineBoost !== undefined ? window.state.mapHdLineBoost : 1.0),
                 ndtLeaderLineScale: (window.state.ndtLeaderLineScale !== undefined ? window.state.ndtLeaderLineScale : 1.0),
                 styleSizeBarLockedMap: window.state.styleSizeBarLockedMap !== false,
                 styleSizeBarLockedNdt: window.state.styleSizeBarLockedNdt !== false,
