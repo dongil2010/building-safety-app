@@ -9,7 +9,23 @@
 
   window.BSA_PDF_VECTOR = {
     enabled: true,
-    version: 'main-6'
+    version: 'main-7',
+    /** PDF 도면: 전체 페이지 티어 교체 대신 뷰포트 고해상도 패치 (벡터 PDF 출력은 별도) */
+    useViewportTiles: true
+  };
+
+  /** 핀·벡터 PDF 출력용 고정 좌표계 (4000px 미리보기 기준, 표시 타일과 분리) */
+  window.getFloorPlanRefDimensions = function (bldg, floorCode) {
+    const st = window.state;
+    const ref = st && st.floorPlanRef;
+    if (ref && bldg && ref.bldgId === bldg.id && ref.floorCode === floorCode && ref.w > 0 && ref.h > 0) {
+      return { w: ref.w, h: ref.h };
+    }
+    const img = st && st.bgImage;
+    return {
+      w: img ? (img.naturalWidth || img.width || 1) : 1,
+      h: img ? (img.naturalHeight || img.height || 1) : 1
+    };
   };
 
   function isPdfDataUrl(url) {
@@ -601,9 +617,7 @@
 
     const key = `${state.currentBuildingId}_${floorCode}`;
     const defects = (state.defects && state.defects[key]) || [];
-    const img = state.bgImage;
-    const imgW = img ? (img.naturalWidth || img.width || 1) : 1;
-    const imgH = img ? (img.naturalHeight || img.height || 1) : 1;
+    const { w: imgW, h: imgH } = window.getFloorPlanRefDimensions(bldg, floorCode);
 
     if (typeof window.showLoading === 'function') window.showLoading('벡터 PDF 합성 중...');
     try {
@@ -659,9 +673,7 @@
       .map((item) => window.buildVectorNdtPinDrawPlan(item, measureCtx, items))
       .filter(Boolean);
 
-    const img = state.bgImage;
-    const imgW = img ? (img.naturalWidth || img.width || 1) : 1;
-    const imgH = img ? (img.naturalHeight || img.height || 1) : 1;
+    const { w: imgW, h: imgH } = window.getFloorPlanRefDimensions(bldg, floorCode);
 
     if (typeof window.showLoading === 'function') window.showLoading('NDT 벡터 PDF 합성 중...');
     try {

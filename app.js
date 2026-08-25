@@ -333,6 +333,142 @@ document.addEventListener('DOMContentLoaded', () => {
     let floorDrawingTierLoadToken = 0;
     let floorDrawingTierSyncTimer = null;
     const _floorTierPrefetchInFlight = new Set();
+    let viewportHiPatchTimer = null;
+    let viewportHiPatchToken = 0;
+
+    function updateFloorPlanRefFromImage(img, bldgId, floorCode) {
+        if (!img || !bldgId || !floorCode) return;
+        const w = img.naturalWidth || img.width || 0;
+        const h = img.naturalHeight || img.height || 0;
+        if (w <= 0 || h <= 0) return;
+        state.floorPlanRef = { w, h, bldgId, floorCode };
+    }
+
+    function clearFloorDrawingHiPatch() {
+        state.floorDrawingHiPatch = null;
+        viewportHiPatchToken++;
+    }
+
+    function floorHasPdfSourceSync(bldg, floorCode) {
+        return !!(bldg && floorCode && typeof window.getFloorPdfDataUrl === 'function'
+            && window.getFloorPdfDataUrl(bldg, floorCode));
+    }
+
+    function shouldUseViewportTilesForCurrentFloor() {
+        if (window.BSA_USE_VIEWPORT_TILES === false) return false;
+        if (window.BSA_PDF_VECTOR && window.BSA_PDF_VECTOR.useViewportTiles === false) return false;
+        const bldg = state.currentBuilding;
+        const fc = state.currentFloor;
+        return floorHasPdfSourceSync(bldg, fc);
+    }
+
+    function canvasCssToImgCoords(cx, cy) {
+        const vx = (cx - state.view.offsetX) / state.view.scale;
+        const vy = (cy - state.view.offsetY) / state.view.scale;
+        return viewToImgCoords(vx, vy);
+    }
+
+    function getVisibleImageRect() {
+        const cw = state.canvasCssW || 800;
+        const ch = state.canvasCssH || 600;
+        const corners = [
+            canvasCssToImgCoords(0, 0),
+            canvasCssToImgCoords(cw, 0),
+            canvasCssToImgCoords(0, ch),
+            canvasCssToImgCoords(cw, ch),
+        ];
+        const dims = (typeof window.getFloorPlanRefDimensions === 'function')
+            ? window.getFloorPlanRefDimensions(state.currentBuilding, state.currentFloor)
+            : { w: state.bgImage?.naturalWidth || 1, h: state.bgImage?.naturalHeight || 1 };
+        const pad = 48;
+        let x1 = Math.min(...corners.map((c) => c.x));
+        let y1 = Math.min(...corners.map((c) => c.y));
+        let x2 = Math.max(...corners.map((c) => c.x));
+        let y2 = Math.max(...corners.map((c) => c.y));
+        x1 = Math.max(0, x1 - pad);
+        y1 = Math.max(0, y1 - pad);
+        x2 = Math.min(dims.w, x2 + pad);
+        y2 = Math.min(dims.h, y2 + pad);
+        return {
+            x: x1,
+            y: y1,
+            w: Math.max(1, x2 - x1),
+            h: Math.max(1, y2 - y1),
+        };
+    }
+
+    function scheduleViewportHiPatchSync() {
+        if (!shouldUseViewportTilesForCurrentFloor()) return;
+        if (viewportHiPatchTimer) clearTimeout(viewportHiPatchTimer);
+        viewportHiPatchTimer = setTimeout(() => {
+            viewportHiPatchTimer = null;
+            syncViewportHiPatch();
+        }, 160);
+    }
+
+    async function syncViewportHiPatch() {
+        const bldg = state.currentBuilding;
+        const fc = state.currentFloor;
+        if (!bldg || !fc || state.currentTab !== 'tab-map' || !state.bgImage) return;
+        if (!shouldUseViewportTilesForCurrentFloor()) return;
+
+        const token = ++viewportHiPatchToken;
+        const region = getVisibleImageRect();
+        const ref = (typeof window.getFloorPlanRefDimensions === 'function')
+            ? window.getFloorPlanRefDimensions(bldg, fc)
+            : { w: region.w, h: region.h };
+
+        const cw = state.canvasCssW || 800;
+        const ch = state.canvasCssH || 600;
+        const dpr = state.canvasDpr || 1;
+        const needed = (Math.max(cw, ch) / Math.max(state.view.scale, 0.05)) * dpr;
+
+        if (needed < 3400) {
+            if (state.floorDrawingHiPatch) {
+                state.floorDrawingHiPatch = null;
+                drawCanvas();
+            }
+            return;
+        }
+
+        let pdfUrl = window.getFloorPdfDataUrl(bldg, fc);
+        if (!pdfUrl && typeof idbGet === 'function') {
+            const cachedPdf = await idbGet('floorDrawingPdfs', `${bldg.id}_${fc}`);
+            if (cachedPdf) pdfUrl = cachedPdf;
+        }
+        if (!pdfUrl || token !== viewportHiPatchToken) return;
+        if (state.currentFloor !== fc || state.currentBuildingId !== bldg.id) return;
+
+        const outLong = Math.min(16000, Math.max(2048, Math.ceil(needed * 1.2)));
+        const aspect = region.w / region.h;
+        let outW;
+        let outH;
+        if (aspect >= 1) {
+            outW = outLong;
+            outH = Math.max(1, Math.round(outLong / aspect));
+        } else {
+            outH = outLong;
+            outW = Math.max(1, Math.round(outLong * aspect));
+        }
+
+        if (typeof window.renderPdfDataUrlRegion !== 'function') return;
+
+        try {
+            const canvas = await window.renderPdfDataUrlRegion(pdfUrl, ref.w, ref.h, region, outW, outH);
+            if (token !== viewportHiPatchToken) return;
+            if (state.currentFloor !== fc || state.currentBuildingId !== bldg.id) return;
+            state.floorDrawingHiPatch = {
+                canvas,
+                x: region.x,
+                y: region.y,
+                w: region.w,
+                h: region.h,
+            };
+            drawCanvas();
+        } catch (e) {
+            console.warn('뷰포트 고해상도 패치 실패:', e);
+        }
+    }
 
     function notifyIndexedDbSaveFailure() {
         if (_idbSaveFailedNotified) return;
@@ -3122,6 +3258,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function scheduleFloorDrawingTierPrefetch(bldg, floorCode) {
         if (!bldg || !floorCode) return;
+        if (floorHasPdfSourceSync(bldg, floorCode)) return;
         const dims = (window.FLOOR_DRAWING_TIER_DIMS || [4000, 8000, 16000]).filter((d) => d !== 4000);
         const run = async () => {
             const hasPdf = (typeof window.getFloorPdfDataUrl === 'function')
@@ -3203,6 +3340,10 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function scheduleFloorDrawingTierSync() {
+        if (shouldUseViewportTilesForCurrentFloor()) {
+            scheduleViewportHiPatchSync();
+            return;
+        }
         if (floorDrawingTierSyncTimer) clearTimeout(floorDrawingTierSyncTimer);
         floorDrawingTierSyncTimer = setTimeout(() => {
             floorDrawingTierSyncTimer = null;
@@ -3211,6 +3352,10 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     async function syncFloorDrawingTierForView() {
+        if (shouldUseViewportTilesForCurrentFloor()) {
+            await syncViewportHiPatch();
+            return;
+        }
         const bldg = state.currentBuilding;
         const fc = state.currentFloor;
         if (!bldg || !fc || state.currentTab !== 'tab-map' || !state.bgImage) return;
@@ -3273,6 +3418,7 @@ document.addEventListener('DOMContentLoaded', () => {
     function loadFloorDrawing(floorCode) {
         state.currentFloor = floorCode;
         state.bgImage = null;
+        clearFloorDrawingHiPatch();
         floorDrawingActiveTierDim = null;
         floorDrawingTierLoadToken++;
 
@@ -3292,6 +3438,7 @@ document.addEventListener('DOMContentLoaded', () => {
             img.onload = () => {
                 state.bgImage = img;
                 floorDrawingActiveTierDim = 4000;
+                if (bldg && bldg.id) updateFloorPlanRefFromImage(img, bldg.id, floorCode);
                 if (!state.floorDrawingTierImageCache) state.floorDrawingTierImageCache = {};
                 if (bldg && bldg.id) {
                     state.floorDrawingTierImageCache[`${bldg.id}_${floorCode}_4000`] = img;
@@ -3632,6 +3779,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (state.bgImage) {
             ctx.drawImage(state.bgImage, 0, 0);
+            const hiPatch = state.floorDrawingHiPatch;
+            if (hiPatch && hiPatch.canvas && hiPatch.w > 0 && hiPatch.h > 0) {
+                ctx.drawImage(hiPatch.canvas, hiPatch.x, hiPatch.y, hiPatch.w, hiPatch.h);
+            }
         }
 
         // Draw Defect Pins INSIDE the rotated context so pins rotate WITH the drawing!
@@ -4299,6 +4450,38 @@ document.addEventListener('DOMContentLoaded', () => {
     function getPinBoxTextColor(activeColor, shapeCfg, isBeingDragged) {
         if (isBeingDragged) return activeColor;
         return shapeCfg.fill ? '#ffffff' : activeColor;
+    }
+
+    /** 번호 박스 글자 — 얇은 흰 외곽선으로 도면 위 가독성 확보 */
+    function drawOutlinedPinText(ctx, text, x, y, fillColor, fontCss, outlineColor) {
+        const label = String(text || '');
+        if (!label) return;
+        ctx.font = fontCss;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.lineJoin = 'round';
+        ctx.miterLimit = 2;
+        const fontSizeMatch = String(fontCss).match(/(\d+(?:\.\d+)?)px/);
+        const fontSize = fontSizeMatch ? parseFloat(fontSizeMatch[1]) : 11;
+        ctx.strokeStyle = outlineColor || '#ffffff';
+        ctx.lineWidth = Math.max(0.75, Math.min(1.75, fontSize * 0.13));
+        ctx.strokeText(label, x, y);
+        ctx.fillStyle = fillColor;
+        ctx.fillText(label, x, y);
+    }
+
+    function drawPinBoxLabel(ctx, text, fillColor, scale, shapeCfg) {
+        const lightText = String(fillColor).toLowerCase() === '#ffffff' || String(fillColor).toLowerCase() === '#fff';
+        const outline = (shapeCfg && shapeCfg.fill && lightText) ? 'rgba(0,0,0,0.45)' : '#ffffff';
+        drawOutlinedPinText(
+            ctx,
+            text,
+            0,
+            0,
+            fillColor,
+            `bold ${getPinBoxFontSize(scale)}px sans-serif`,
+            outline
+        );
     }
 
     // 결함 핀 번호 박스 — 글자 실측 기준, 테두리가 글자에 거의 닿도록 최소 여백
@@ -5425,11 +5608,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // 비파괴 실측: 투명 배경 + 색 테두리/글자 (결함위치도와 동일)
         paintPinBox(ctx, w, h, ndtShapeCfg, color, pinScale, 1, isBeingDragged, getNdtLeaderLineScale(ndtStyleKey));
-        ctx.fillStyle = getPinBoxTextColor(color, ndtShapeCfg, isBeingDragged);
-        ctx.font = `bold ${getPinBoxFontSize(pinScale)}px sans-serif`;
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText(noStr, 0, 0);
+        drawPinBoxLabel(ctx, noStr, getPinBoxTextColor(color, ndtShapeCfg, isBeingDragged), pinScale, ndtShapeCfg);
         ctx.restore();
     }
 
@@ -10841,11 +11020,7 @@ document.addEventListener('DOMContentLoaded', () => {
             ctx.restore();
         }
 
-        ctx.fillStyle = getPinBoxTextColor(activeColor, shapeCfg, isBeingDragged);
-        ctx.font = `bold ${getPinBoxFontSize(scale)}px sans-serif`;
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText(pinLabel, 0, 0);
+        drawPinBoxLabel(ctx, pinLabel, getPinBoxTextColor(activeColor, shapeCfg, isBeingDragged), scale, shapeCfg);
 
         ctx.restore();
     }
@@ -11844,12 +12019,12 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // --- Dynamic Defect Cause Presets & Custom Adding ---
+    const CORE_CRACK_CAUSE_PRESET = [
+        '건조수축', '재료적 특성', '수화열·온도균열', '내력부족', '과하중'
+    ];
     const defectCausePreset = {
-        // ── 구조체 결함 ──
-        '균열': [
-            '건조수축', '재료적 특성', '수화열·온도균열', '내력부족', '과하중', '집중하중',
-            '배근 부족', '시공불량', '부등침하', '신축이음 불량', '외력·진동', '누수·습기', '기타'
-        ],
+        // ── 구조체·조적벽체 균열 공통 (5종) ──
+        '균열': CORE_CRACK_CAUSE_PRESET.slice(),
         '누수': [
             '방수층 파손', '방수층 시공불량', '배관 파손/연결부 누수', '균열부 침투',
             '지하수 유입', '외벽 조인트 파손', '창호 주변 밀봉 불량', '드레인·배수 불량',
@@ -11880,10 +12055,7 @@ document.addEventListener('DOMContentLoaded', () => {
             '지진·진동', '이음재 탈락', '재료분리(골재 노출)', '기타'
         ],
         // ── 비구조체 결함 (구·신 라벨 모두) ──
-        '조적벽체 균열': [
-            '기초 부등침하', '지진·진동', '과하중', '건조수축', '온도변화',
-            '조적 시공불량', '인방·개구부 응력', '몰탈 배합 불량', '기타'
-        ],
+        '조적벽체 균열': CORE_CRACK_CAUSE_PRESET.slice(),
         '줄눈 손상/탈락': [
             '몰탈 노후화', '온도·수축', '시공 불량', '진동·충격', '누수·동결', '기타'
         ],
@@ -14664,6 +14836,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (elements.planCanvas) {
             elements.planCanvas.style.cursor = getMapCanvasCursor();
         }
+        scheduleFloorDrawingTierSync();
         } finally {
             if (hadPinDragSave) discardStalePendingRemoteAfterLocalPinEdit();
             if (typeof scheduleFlushPendingRemoteSync === 'function') scheduleFlushPendingRemoteSync();
@@ -17731,11 +17904,7 @@ document.addEventListener('DOMContentLoaded', () => {
             ctx.translate(boxX, boxY);
             paintPinBox(ctx, safeBoxW, safeBoxH, safeShapeCfg, color, safeScale, 1, false);
 
-            ctx.fillStyle = getPinBoxTextColor(color, safeShapeCfg, false);
-            ctx.font = `bold ${getPinBoxFontSize(safeScale)}px sans-serif`;
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'middle';
-            ctx.fillText(safeLabel, 0, 0);
+            drawPinBoxLabel(ctx, safeLabel, getPinBoxTextColor(color, safeShapeCfg, false), safeScale, safeShapeCfg);
             ctx.restore();
         } catch(e) {
             console.warn('drawPinSafe error:', e);

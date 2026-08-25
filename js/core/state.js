@@ -29,6 +29,10 @@ if (!window.state) {
         locationMapLegendBox: null, // 결함위치도 범례 박스 위치/크기 커스터마이징 {x, y, scale} - x/y는 결함 핀과 동일한 도면 원본 픽셀 좌표(미지정 시 좌하단 기본 위치·크기 사용)
         defectSizeMode: 'combined', // 'combined' | 'split' - 결함크기(균열폭/균열길이) 표시 방식
         bgImage: null,
+        /** PDF 도면 4000px 미리보기 좌표계 — 핀·벡터 PDF 출력 기준 (표시 타일과 분리) */
+        floorPlanRef: null,
+        /** PDF 뷰포트 고해상도 패치 { canvas, x, y, w, h } */
+        floorDrawingHiPatch: null,
         canvas: null,
         ctx: null,
         floorSnapshots: {},
@@ -241,6 +245,61 @@ window.renderPdfDataUrlToImage = function(pdfDataUrl, targetLongSide = 16000, ma
                     attempts++;
                 }
                 resolve(dataUrl);
+            } catch (err) {
+                reject(err);
+            }
+        }).catch(reject);
+    });
+};
+
+/**
+ * PDF dataURL → ref 좌표계(region)만 고해상도로 렌더 (뷰포트 타일용)
+ * @param {{x:number,y:number,w:number,h:number}} region ref 이미지 픽셀 영역
+ * @returns {Promise<HTMLCanvasElement|null>}
+ */
+window.renderPdfDataUrlRegion = function(pdfDataUrl, refW, refH, region, outW, outH) {
+    return new Promise((resolve, reject) => {
+        if (typeof pdfjsLib === 'undefined') {
+            reject(new Error('PDF 렌더링 라이브러리를 불러오지 못했습니다.'));
+            return;
+        }
+        const rx = Math.max(0, Number(region?.x) || 0);
+        const ry = Math.max(0, Number(region?.y) || 0);
+        const rw = Math.max(1, Number(region?.w) || 1);
+        const rh = Math.max(1, Number(region?.h) || 1);
+        const targetW = Math.max(1, Math.round(outW || rw));
+        const targetH = Math.max(1, Math.round(outH || rh));
+        const bytes = (typeof window.dataUrlToUint8Array === 'function')
+            ? window.dataUrlToUint8Array(pdfDataUrl)
+            : null;
+        if (!bytes) {
+            reject(new Error('PDF dataURL 변환 실패'));
+            return;
+        }
+        pdfjsLib.getDocument({ data: bytes }).promise.then(async (pdf) => {
+            try {
+                const page = await pdf.getPage(1);
+                const baseViewport = page.getViewport({ scale: 1 });
+                const refScale = Math.max(Number(refW) || 1, Number(refH) || 1)
+                    / Math.max(baseViewport.width, baseViewport.height);
+                const pdfX = rx / refScale;
+                const pdfY = ry / refScale;
+                const pdfW = rw / refScale;
+                const pdfH = rh / refScale;
+                const renderScale = targetW / pdfW;
+                const viewport = page.getViewport({ scale: renderScale });
+                const canvas = document.createElement('canvas');
+                canvas.width = targetW;
+                canvas.height = targetH;
+                const ctx = canvas.getContext('2d');
+                ctx.fillStyle = '#ffffff';
+                ctx.fillRect(0, 0, targetW, targetH);
+                await page.render({
+                    canvasContext: ctx,
+                    viewport,
+                    transform: [1, 0, 0, 1, -pdfX * renderScale, -pdfY * renderScale]
+                }).promise;
+                resolve(canvas);
             } catch (err) {
                 reject(err);
             }
