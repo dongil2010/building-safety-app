@@ -330,17 +330,18 @@ window.pickFloorDrawingTierDim = function(viewScale, cssW, cssH, dpr, currentTie
     const refLong = Math.max(Number(refLongSide) || 4000, 4000);
     const demand = refLong * Math.max(viewScale || 1, 0.05) * (dpr || 1);
     const cur = currentTier || 4000;
+    // 3단계(4000/8000/16000) — 히스테리시스 넓혀 줌 미세 조정마다 교체하지 않음
     if (cur === 4000) {
-        if (demand >= 6500) return 8000;
+        if (demand >= 7800) return 8000;
         return 4000;
     }
     if (cur === 8000) {
-        if (demand >= 13000) return 16000;
-        if (demand < 4500) return 4000;
+        if (demand >= 15500) return 16000;
+        if (demand < 5200) return 4000;
         return 8000;
     }
-    if (demand < 4500) return 4000;
-    if (demand < 9000) return 8000;
+    if (demand < 5200) return 4000;
+    if (demand < 10500) return 8000;
     return 16000;
 };
 

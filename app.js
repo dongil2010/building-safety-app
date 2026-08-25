@@ -335,6 +335,86 @@ document.addEventListener('DOMContentLoaded', () => {
     const _floorTierPrefetchInFlight = new Set();
     let viewportHiPatchTimer = null;
     let viewportHiPatchToken = 0;
+    /** PDF 뷰포트 패치 해상도 단계 (0=끔, 1~3 기본, 4=큰 도면) */
+    let viewportPatchActiveLevel = 0;
+    let lastViewportPatchMeta = null;
+
+    function resetViewportPatchState() {
+        viewportPatchActiveLevel = 0;
+        lastViewportPatchMeta = null;
+    }
+
+    function getViewportPatchStepCount(refLong) {
+        return (refLong >= 5500) ? 4 : 3;
+    }
+
+    /**
+     * 확대 배율을 3~4단계로 양자화 (히스테리시스 — 조금 움직일 때마다 재렌더 방지)
+     * @returns {number} 0=패치 없음, 1~maxLevel
+     */
+    function pickViewportPatchLevel(zoomDemand, maxLevel, currentLevel) {
+        const cur = currentLevel || 0;
+        const d = zoomDemand || 1;
+        const top = maxLevel >= 4 ? 4 : 3;
+
+        if (top >= 4) {
+            if (cur >= 4) {
+                if (d < 4.4) return 3;
+                return 4;
+            }
+            if (cur === 3) {
+                if (d >= 5.2) return 4;
+                if (d < 2.65) return 2;
+                return 3;
+            }
+            if (cur === 2) {
+                if (d >= 3.35) return 3;
+                if (d < 1.5) return 1;
+                return 2;
+            }
+            if (cur === 1) {
+                if (d >= 2.05) return 2;
+                if (d < 1.02) return 0;
+                return 1;
+            }
+            if (d >= 1.28) return 1;
+            return 0;
+        }
+
+        // 3단계 (level 3 = 최고)
+        if (cur >= 3) {
+            if (d < 2.75) return 2;
+            return 3;
+        }
+        if (cur === 2) {
+            if (d >= 3.3) return 3;
+            if (d < 1.5) return 1;
+            return 2;
+        }
+        if (cur === 1) {
+            if (d >= 2.05) return 2;
+            if (d < 1.02) return 0;
+            return 1;
+        }
+        if (d >= 1.28) return 1;
+        return 0;
+    }
+
+    function getViewportPatchLevelMultiplier(level, mobile) {
+        if (level <= 0) return 0;
+        const desktop = [0, 1.45, 2.25, 3.55, 5.2];
+        const phone = [0, 1.35, 2.05, 2.85, 3.65];
+        const table = mobile ? phone : desktop;
+        return table[Math.min(level, table.length - 1)] || table[table.length - 1];
+    }
+
+    function shouldUpdateViewportPatchRegion(region, meta) {
+        if (!meta || meta.cx == null) return true;
+        const cx = region.x + region.w / 2;
+        const cy = region.y + region.h / 2;
+        const thresh = Math.min(region.w, region.h) * 0.38;
+        return Math.abs(cx - meta.cx) > thresh || Math.abs(cy - meta.cy) > thresh;
+    }
 
     function updateFloorPlanRefFromImage(img, bldgId, floorCode) {
         if (!img || !bldgId || !floorCode) return;
@@ -378,6 +458,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function clearFloorDrawingHiPatch(immediate = true) {
         viewportHiPatchToken++;
+        resetViewportPatchState();
         if (!state.floorDrawingHiPatch && !_floorBlend) return;
         if (immediate) {
             cancelFloorDrawingBlend();
@@ -610,7 +691,7 @@ document.addEventListener('DOMContentLoaded', () => {
         viewportHiPatchTimer = setTimeout(() => {
             viewportHiPatchTimer = null;
             syncViewportHiPatch();
-        }, 220);
+        }, 380);
     }
 
     function flushViewportHiPatchSync() {
@@ -640,11 +721,22 @@ document.addEventListener('DOMContentLoaded', () => {
         const screenLong = Math.max(cw, ch) * dpr;
         const regionLong = Math.max(region.w, region.h, 1);
         const zoomDemand = getViewportZoomDemand();
+        const refLong = Math.max(ref.w || 4000, ref.h || 4000, 4000);
+        const maxSteps = getViewportPatchStepCount(refLong);
+        const wantLevel = pickViewportPatchLevel(zoomDemand, maxSteps, viewportPatchActiveLevel);
 
-        if (zoomDemand <= 1.08) {
+        if (wantLevel <= 0) {
+            viewportPatchActiveLevel = 0;
+            lastViewportPatchMeta = null;
             if (state.floorDrawingHiPatch || (_floorBlend && _floorBlend.toPatch)) {
                 applyFloorDrawingTarget(undefined, null);
             }
+            return;
+        }
+
+        const sameLevel = wantLevel === viewportPatchActiveLevel;
+        const regionMoved = shouldUpdateViewportPatchRegion(region, lastViewportPatchMeta);
+        if (sameLevel && !regionMoved && hasActiveFloorHiPatch()) {
             return;
         }
 
@@ -666,7 +758,8 @@ document.addEventListener('DOMContentLoaded', () => {
         const mobile = isMobileMapViewport();
         const maxPatchLong = mobile ? 4096 : 16000;
         const minPatchLong = mobile ? 768 : 1024;
-        let outLong = Math.min(maxPatchLong, Math.max(minPatchLong, Math.ceil(regionLong * zoomDemand * 1.15)));
+        const levelMul = getViewportPatchLevelMultiplier(wantLevel, mobile);
+        let outLong = Math.min(maxPatchLong, Math.max(minPatchLong, Math.ceil(regionLong * levelMul)));
 
         const aspect = region.w / region.h;
         let outW;
@@ -691,6 +784,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 w: region.w,
                 h: region.h,
             });
+            viewportPatchActiveLevel = wantLevel;
+            lastViewportPatchMeta = {
+                level: wantLevel,
+                cx: region.x + region.w / 2,
+                cy: region.y + region.h / 2,
+            };
             return true;
         };
 
@@ -3634,7 +3733,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (shouldUseViewportTilesForCurrentFloor()) {
             await syncViewportHiPatch();
             // PDF 도면: 보이는 영역 패치만 쓰고 전체 8000/16000 교체는 하지 않음(패치를 지워버리는 충돌 방지)
-            if (hasActiveFloorHiPatch() || getViewportZoomDemand() > 1.08) return;
+            if (hasActiveFloorHiPatch() || viewportPatchActiveLevel > 0) return;
         }
 
         const wantDim = pickFloorDrawingTierDimForView();
