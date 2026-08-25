@@ -412,12 +412,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function getViewportPatchPixelBudget(mobile) {
         if (!mobile) return 16000;
-        return 4096;
+        return getMobileZoomTierDim(floorDrawingActiveTierDim);
     }
 
-    /** 모바일 GPU 캔버스 한 변 상한 — 초과 시 pdf.js 렌더 실패 후 저해상도 fallback */
+    /** 모바일 GPU 캔버스 한 변 상한 — 고배율(800%/1200%)에서는 8000·16000 허용 */
     function getViewportPatchMaxSide(mobile) {
-        return mobile ? 4096 : 16384;
+        if (!mobile) return 16384;
+        return Math.max(4096, getMobileZoomTierDim(floorDrawingActiveTierDim));
     }
 
     function clampPatchOutputDims(outW, outH, maxLong, maxSide) {
@@ -985,7 +986,9 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!canvas) throw new Error('뷰포트 패치 캔버스 생성 실패');
         } catch (e) {
             console.warn('뷰포트 고해상도 패치 실패:', e);
-            const fallbacks = mobile ? [6144, 4096, 3072, 2048] : [12000, 8192, 6144, 4096];
+            const fallbacks = mobile
+                ? [16000, 12000, 8192, 6144, 4096, 3072, 2048]
+                : [12000, 8192, 6144, 4096];
             for (let fi = 0; fi < fallbacks.length; fi++) {
                 const cap = fallbacks[fi];
                 if (cap >= outLong) continue;
@@ -3753,6 +3756,24 @@ document.addEventListener('DOMContentLoaded', () => {
         return Math.round((scale / Math.max(fit, 0.001)) * 100);
     }
 
+    /** 모바일: 화면맞춤 대비 배율로 도면 티어·패치 해상도 (800%→8000px, 1200%→16000px) */
+    function getMobileZoomTierDim(activeTier) {
+        const pct = getMapZoomVsFitPercent();
+        const cur = activeTier || 4000;
+        if (cur >= 16000) {
+            if (pct < 1080) return 8000;
+            return 16000;
+        }
+        if (cur >= 8000) {
+            if (pct >= 1200) return 16000;
+            if (pct < 720) return 4000;
+            return 8000;
+        }
+        if (pct >= 1200) return 16000;
+        if (pct >= 800) return 8000;
+        return 4000;
+    }
+
     function updateMapZoomOverlay() {
         const el = elements.mapZoomOverlay || document.getElementById('mapZoomOverlay');
         if (!el) return;
@@ -3771,6 +3792,12 @@ document.addEventListener('DOMContentLoaded', () => {
         if (hd) {
             el.textContent = `${pct}% · HD`;
             el.classList.add('is-hd');
+        } else if (pct >= 1200) {
+            el.textContent = `${pct}% · 16000px`;
+            el.classList.remove('is-hd');
+        } else if (pct >= 800) {
+            el.textContent = `${pct}% · 8000px`;
+            el.classList.remove('is-hd');
         } else if (pct >= 200 && !pdfKnown && floorPdfKnownUnavailable(bldg?.id, fc)) {
             el.textContent = `${pct}% · 4000px`;
             el.classList.remove('is-hd');
@@ -3817,6 +3844,9 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function pickFloorDrawingTierDimForView() {
+        if (isMobileMapViewport()) {
+            return getMobileZoomTierDim(floorDrawingActiveTierDim);
+        }
         if (typeof window.pickFloorDrawingTierDim !== 'function') return 4000;
         const cw = state.canvasCssW || (state.canvas ? Math.round(state.canvas.width / (state.canvasDpr || 1)) : 800);
         const ch = state.canvasCssH || (state.canvas ? Math.round(state.canvas.height / (state.canvasDpr || 1)) : 600);
