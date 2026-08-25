@@ -1469,6 +1469,39 @@ document.addEventListener('DOMContentLoaded', () => {
         return (buildings || []).filter(b => b?.id && !del.has(b.id));
     }
 
+    /** 현장(정규화 명칭) 기준 남은 활성 회차 수 */
+    function countActiveBuildingsForSiteKey(siteKey, buildings, deletedIds) {
+        const key = String(siteKey || '').trim();
+        if (!key) return 0;
+        return filterDeletedBuildings(buildings || [], deletedIds)
+            .filter((b) => normalizeSiteVaultKey(b.name) === key).length;
+    }
+
+    /**
+     * 서버·로컬 건물 목록 병합 — 서버에 없는 로컬-only는 업로드 대기(_pendingCloudSync)일 때만 유지.
+     * (다른 기기에서 삭제된 고아 레코드가 모바일에 4개·PC 2개처럼 남는 현상 방지)
+     */
+    function mergeBuildingsForSync(serverBuildings, localBuildings, deletedIds, prevAssetsById) {
+        const remoteFiltered = filterDeletedBuildings(serverBuildings || [], deletedIds);
+        const remoteIds = new Set(remoteFiltered.map((b) => b.id));
+        const localOnly = filterDeletedBuildings(
+            (localBuildings || []).filter((b) => b?.id && !remoteIds.has(b.id) && b._pendingCloudSync === true),
+            deletedIds
+        );
+        const assets = prevAssetsById || captureBuildingDrawingAssetsById(localBuildings);
+        const mergedRemote = remoteFiltered.map((b) => attachPreservedDrawingAssets(b, assets[b.id]));
+        return [...localOnly, ...mergedRemote];
+    }
+
+    function sanitizeBuildingMetaForFirestore(b) {
+        if (!b) return b;
+        const {
+            floorDrawings, floorDrawingPdfs, floorDrawingTiers, floorDrawingSources,
+            _pendingCloudSync, ...rest
+        } = b;
+        return rest;
+    }
+
     function isFloorKeyForDeletedBuilding(floorKey, deletedBuildingIds) {
         if (!floorKey || !deletedBuildingIds?.length) return false;
         return deletedBuildingIds.some(id => id && floorKey.startsWith(`${id}_`));
@@ -3467,6 +3500,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
             const newBldg = {
                 id: newBuildingId,
+                _pendingCloudSync: true,
                 name: name.startsWith('🏢') ? name : '🏢 ' + name,
                 address: address,
                 inspector: window.state.userName || '점검자',
@@ -3967,8 +4001,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
             if (!confirm(`🗑️ 정말 건축물 '${bldg.name}' 및 등록된 모든 층별 도면과 결함 데이터를 삭제하시겠습니까?\n이 작업은 되돌릴 수 없습니다.`)) return;
 
+            const siteKey = normalizeSiteVaultKey(bldg.name);
             recordBuildingDeleted(bldg.id);
             window.state.buildings = (window.state.buildings || []).filter(b => b.id !== bldg.id);
+            const purgeSiteDrawingsFromCloud = countActiveBuildingsForSiteKey(
+                siteKey,
+                window.state.buildings,
+                window.state.deletedBuildingIds
+            ) === 0;
 
             // Clear defects and ndtData for this building
             const photoDeleteJobs = [];
@@ -4001,9 +4041,10 @@ document.addEventListener('DOMContentLoaded', () => {
             renderDashboard();
             window.showToast(`'${bldg.name}' 건축물이 삭제되었습니다.`, 'success');
 
-            // 클라우드 첨부파일(도면/사진) 삭제 — PDF 원본은 현장명 보관함에 먼저 보관
+            // 도면: 같은 현장에 회차가 남아 있으면 서버(vault·Firestore) 유지, 마지막 회차 삭제 시에만 서버에서 제거
             Promise.all([
-                archiveBuildingPdfsToSiteVault(bldg).then(() => deleteFloorDrawingsForBuilding(bldg)),
+                archiveBuildingPdfsToSiteVault(bldg).then(() => deleteFloorDrawingsForBuilding(bldg, { purgeCloud: purgeSiteDrawingsFromCloud })),
+                purgeSiteDrawingsFromCloud ? deleteSiteVaultCompletely(siteKey) : Promise.resolve(0),
                 ...photoDeleteJobs
             ]).then(results => {
                 const totalFail = results.reduce((sum, n) => sum + (n || 0), 0);
@@ -10833,6 +10874,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const rawName = (sourceBldg.name || '').replace(/^🏢\s*/, '').trim();
             const newBldg = {
                 id: newBuildingId,
+                _pendingCloudSync: true,
                 name: rawName.startsWith('🏢') ? rawName : `🏢 ${rawName}`,
                 address: sourceBldg.address || '',
                 inspector: window.state.userName || sourceBldg.inspector || '점검자',
@@ -24969,6 +25011,45 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    /** 현장 전체(모든 회차) 삭제 시 siteDrawingVault·로컬 vault 캐시 제거 */
+    async function deleteSiteVaultCompletely(siteKey) {
+        if (!siteKey) return 0;
+        const siteId = siteVaultDocId(siteKey);
+        let fail = 0;
+        try {
+            if (db && window.state.companyId) {
+                const rootRef = db.collection('safety_app').doc(getCompanyDocId())
+                    .collection('siteDrawingVault').doc(siteId);
+                const floorsSnap = await rootRef.collection('floors').get();
+                if (!floorsSnap.empty) {
+                    const batch = db.batch();
+                    floorsSnap.forEach((d) => {
+                        batch.delete(d.ref);
+                    });
+                    batch.delete(rootRef);
+                    await batch.commit();
+                } else {
+                    await rootRef.delete().catch(() => { fail++; });
+                }
+            }
+        } catch (e) {
+            fail++;
+            console.warn('현장명 PDF 보관함 삭제 실패:', siteKey, e);
+        }
+        try {
+            const prefix = `vault_${siteId}_`;
+            const keys = (typeof idbGetAllKeys === 'function')
+                ? await idbGetAllKeys('floorDrawingPdfs')
+                : [];
+            for (const key of keys) {
+                if (String(key).startsWith(prefix)) await idbDelete('floorDrawingPdfs', key);
+            }
+        } catch (e) {
+            console.warn('vault IDB 캐시 삭제 실패:', e);
+        }
+        return fail;
+    }
+
     async function archiveBuildingPdfsToSiteVault(bldg) {
         if (!bldg || !bldg.id) return;
         const siteKey = normalizeSiteVaultKey(bldg.name);
@@ -25279,8 +25360,10 @@ document.addEventListener('DOMContentLoaded', () => {
         return fail;
     }
 
-    async function deleteFloorDrawingsForBuilding(bldg) {
+    async function deleteFloorDrawingsForBuilding(bldg, opts) {
         if (!bldg) return 0;
+        const options = opts || {};
+        const purgeCloud = options.purgeCloud !== false;
         const floors = (bldg.floorsList && bldg.floorsList.length > 0)
             ? bldg.floorsList.map(f => f.floorCode)
             : Object.keys(bldg.floorDrawings || {});
@@ -25300,13 +25383,15 @@ document.addEventListener('DOMContentLoaded', () => {
                 idbDelete('floorDrawingTiers', drawingDocId),
                 idbDelete('floorDrawingSources', drawingDocId)
             ];
-            if (companyDrawings) {
-                jobs.push(companyDrawings.doc(drawingDocId).delete().catch(e => {
-                    failCount++;
-                    console.warn(`도면 삭제 실패 (${drawingDocId}):`, e);
-                }));
+            if (purgeCloud) {
+                if (companyDrawings) {
+                    jobs.push(companyDrawings.doc(drawingDocId).delete().catch(e => {
+                        failCount++;
+                        console.warn(`도면 삭제 실패 (${drawingDocId}):`, e);
+                    }));
+                }
+                jobs.push(deleteFloorDrawingPdfFromCloud(bldg.id, fc).catch(() => {}));
             }
-            jobs.push(deleteFloorDrawingPdfFromCloud(bldg.id, fc).catch(() => {}));
             return Promise.all(jobs);
         }));
         return failCount;
@@ -25447,14 +25532,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (data.buildings && Array.isArray(data.buildings)) {
             const prevAssets = captureBuildingDrawingAssetsById(window.state.buildings);
-            const remoteFiltered = filterDeletedBuildings(data.buildings, mergedDeletedBuildings);
-            const remoteIds = new Set(remoteFiltered.map(b => b.id));
-            const localOnly = filterDeletedBuildings(
-                (window.state.buildings || []).filter(b => b.id && !remoteIds.has(b.id)),
-                mergedDeletedBuildings
+            window.state.buildings = mergeBuildingsForSync(
+                data.buildings,
+                window.state.buildings,
+                mergedDeletedBuildings,
+                prevAssets
             );
-            const mergedRemote = remoteFiltered.map(b => attachPreservedDrawingAssets(b, prevAssets[b.id]));
-            window.state.buildings = [...localOnly, ...mergedRemote];
             isChanged = true;
             await hydrateLocalImagesFromIndexedDb();
             if (typeof hydrateAllBuildingPdfsFromCloud === 'function') {
@@ -25576,7 +25659,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 window.state.deletedBuildingIds
             );
             window.state.deletedBuildingIds = mergedDeletedBuildings;
-            window.state.buildings = filterDeletedBuildings(window.state.buildings, mergedDeletedBuildings);
+            const prevAssets = captureBuildingDrawingAssetsById(window.state.buildings);
+            window.state.buildings = mergeBuildingsForSync(
+                serverData.buildings,
+                window.state.buildings,
+                mergedDeletedBuildings,
+                prevAssets
+            );
             mergedDeletedBuildings.forEach(purgeLocalStateForDeletedBuilding);
 
             const serverDefectsHydrated = await hydrateDefectPhotos(
@@ -25612,10 +25701,8 @@ document.addEventListener('DOMContentLoaded', () => {
             if (typeof saveStateToLocalStorage === 'function') saveStateToLocalStorage();
             _suppressSyncOnSave = false;
 
-            const sanitizedBuildings = filterDeletedBuildings(window.state.buildings || [], mergedDeletedBuildings).map(b => {
-                const { floorDrawings, floorDrawingPdfs, ...rest } = b;
-                return rest;
-            });
+            const sanitizedBuildings = filterDeletedBuildings(window.state.buildings || [], mergedDeletedBuildings)
+                .map(sanitizeBuildingMetaForFirestore);
 
             const dataToSync = {
                 defects: sanitizeDefectsForFirestore(window.state.defects),
@@ -25643,6 +25730,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 updatedAt: firebase.firestore.FieldValue.serverTimestamp()
             };
             await docRef.set(dataToSync, { merge: true });
+            (window.state.buildings || []).forEach((b) => {
+                if (b && b._pendingCloudSync) delete b._pendingCloudSync;
+            });
         } catch (e) {
             console.warn('Firebase Sync Error:', e);
         } finally {
