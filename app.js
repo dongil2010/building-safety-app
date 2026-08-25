@@ -455,6 +455,23 @@ document.addEventListener('DOMContentLoaded', () => {
         tickFloorDrawingBlend();
     }
 
+    function hasActiveFloorHiPatch() {
+        if (state.floorDrawingHiPatch) return true;
+        if (_floorBlend && (_floorBlend.toPatch || _floorBlend.fromPatch)) return true;
+        return false;
+    }
+
+    function getViewportZoomDemand() {
+        const cw = state.canvasCssW || 800;
+        const ch = state.canvasCssH || 600;
+        const dpr = state.canvasDpr || 1;
+        const scale = Math.max(state.view.scale || 1, 0.05);
+        const region = getVisibleImageRect();
+        const screenLong = Math.max(cw, ch) * dpr;
+        const regionLong = Math.max(region.w, region.h, 1);
+        return Math.max(screenLong / regionLong, scale * dpr);
+    }
+
     /**
      * 도면 배경·고해상도 패치 교체 — 즉시 점프 대신 크로스페이드
      * @param {Image|null|undefined} nextBg undefined면 배경 유지
@@ -478,6 +495,9 @@ document.addEventListener('DOMContentLoaded', () => {
         const fromPatch = state.floorDrawingHiPatch;
         if (floorImagesEquivalent(fromBg, toBg) && floorPatchesEquivalent(fromPatch, toPatch)) return;
 
+        // 동기화 로직(줌 패치 재요청 방지)용으로는 즉시 반영, 화면만 크로스페이드
+        if (toBg) state.bgImage = toBg;
+        state.floorDrawingHiPatch = toPatch;
         startFloorDrawingBlend(fromBg, toBg, fromPatch, toPatch);
     }
 
@@ -619,8 +639,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const scale = Math.max(state.view.scale || 1, 0.05);
         const screenLong = Math.max(cw, ch) * dpr;
         const regionLong = Math.max(region.w, region.h, 1);
-        // 화면 1px당 원본 픽셀 ≈ scale×dpr (모바일 소형 캔버스에서 region만으로는 demand가 과소 추정될 수 있음)
-        const zoomDemand = Math.max(screenLong / regionLong, scale * dpr);
+        const zoomDemand = getViewportZoomDemand();
 
         if (zoomDemand <= 1.08) {
             if (state.floorDrawingHiPatch || (_floorBlend && _floorBlend.toPatch)) {
@@ -637,7 +656,10 @@ document.addEventListener('DOMContentLoaded', () => {
         } else if (typeof window.getFloorPdfDataUrl === 'function') {
             pdfUrl = window.getFloorPdfDataUrl(bldg, fc);
         }
-        if (!pdfUrl) return;
+        if (!pdfUrl) {
+            console.warn('뷰포트 고해상도 패치: PDF 원본 없음 — 도면을 PDF로 다시 등록하거나 동기화해 주세요.');
+            return;
+        }
         if (token !== viewportHiPatchToken) return;
         if (state.currentFloor !== fc || state.currentBuildingId !== bldg.id) return;
 
@@ -3611,7 +3633,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (shouldUseViewportTilesForCurrentFloor()) {
             await syncViewportHiPatch();
-            if (state.floorDrawingHiPatch) return;
+            // PDF 도면: 보이는 영역 패치만 쓰고 전체 8000/16000 교체는 하지 않음(패치를 지워버리는 충돌 방지)
+            if (hasActiveFloorHiPatch() || getViewportZoomDemand() > 1.08) return;
         }
 
         const wantDim = pickFloorDrawingTierDimForView();

@@ -2295,9 +2295,9 @@
     <script src="js/tabs/ndt.js?v=20260822_survey2dScroll"></script>
     <script src="js/shared/report.js?v=20260824_hwpxFix"></script>
     <script src="js/shared/auth.js?v=20260821_land1"></script>
-    <script src="app.js?v=20260825_blend"></script>
+    <script src="app.js?v=20260825_vpatchfix"></script>
     <script>
-        window.BSA_APP_VERSION = '20260825_blend';
+        window.BSA_APP_VERSION = '20260825_vpatchfix';
         (function () {
             var el = document.getElementById('appVersionText');
             if (el && window.BSA_APP_VERSION) el.textContent = 'v' + window.BSA_APP_VERSION;
@@ -2321,7 +2321,7 @@
                     native = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
                 } catch (e) {}
                 if (native) return;
-                navigator.serviceWorker.register('./sw.js?v=20260825_blend')
+                navigator.serviceWorker.register('./sw.js?v=20260825_vpatchfix')
                     .then(function(registration) {
                         console.log('✅ ServiceWorker Registered Successfully with scope:', registration.scope);
                     })
