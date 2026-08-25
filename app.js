@@ -815,7 +815,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function shouldUseViewportTilesForCurrentFloor() {
-        // 티어 LOD(2000/4000/8000)만 사용 — 뷰포트 패치는 확대마다 영역 재렌더·선 얇아짐 유발
+        // 티어 LOD(4000/8000/16000)만 사용 — 뷰포트 패치는 확대마다 영역 재렌더·선 얇아짐 유발
         return false;
     }
 
@@ -4149,10 +4149,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 currentTier: floorDrawingActiveTierDim
             });
         }
-        return 2000;
+        return 4000;
     }
 
-    /** 모바일·PC 공통 — 최소~최대 확대 구간 3등분 → 2000/4000/8000px */
+    /** 모바일·PC 공통 — 확대 구간 3단 → 4000/8000/16000px */
     function getMobileZoomTierDim(activeTier) {
         return pickFloorDrawingTierDimForCurrentView();
     }
@@ -4323,7 +4323,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const baseTier = (typeof window.getFloorDrawingBaseTierDim === 'function')
             ? window.getFloorDrawingBaseTierDim()
             : 2000;
-        const dims = (window.FLOOR_DRAWING_TIER_DIMS || [2000, 4000, 8000]).filter((d) => d !== baseTier);
+        const dims = (window.FLOOR_DRAWING_TIER_DIMS || [4000, 8000, 16000]).filter((d) => d !== baseTier);
         const run = async () => {
             const hasPdf = (typeof window.getFloorPdfDataUrl === 'function')
                 ? window.getFloorPdfDataUrl(bldg, floorCode)

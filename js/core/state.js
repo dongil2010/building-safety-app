@@ -235,25 +235,24 @@ function withPdfRenderDedupe(key, fn) {
  * Firestore 문서 용량(1MB) 여유를 위해 결과가 너무 크면 스케일을 낮춰 재시도
  */
 /** 도면 LOD 해상도 단계 (긴 변 기준 픽셀) — 표시용 3구간 */
-window.FLOOR_DRAWING_TIER_DIMS = [2000, 4000, 8000];
+window.FLOOR_DRAWING_TIER_DIMS = [4000, 8000, 16000];
 
 window.getFloorDrawingBaseTierDim = function() {
-    return (window.FLOOR_DRAWING_TIER_DIMS && window.FLOOR_DRAWING_TIER_DIMS[0]) || 2000;
+    return (window.FLOOR_DRAWING_TIER_DIMS && window.FLOOR_DRAWING_TIER_DIMS[0]) || 4000;
 };
 
 /**
- * 확대 구간별 고정 해상도 (2000 / 4000 / 8000px) — 히스테리시스로 경계에서 깜빡임 방지
+ * 확대 구간별 고정 해상도 (4000 / 8000 / 16000px) — 히스테리시스로 경계에서 깜빡임 방지
  * @param {number} zoomVsFit scale / fitScale (1 = 100%)
  * @param {{ currentTier?: number }} [opts]
  */
 window.getFloorDrawingTierDimForZoomVsFit = function(zoomVsFit, opts) {
     const options = opts || {};
     const z = Math.max(Number(zoomVsFit) || 1, 0.05);
-    const dims = window.FLOOR_DRAWING_TIER_DIMS || [2000, 4000, 8000];
+    const dims = window.FLOOR_DRAWING_TIER_DIMS || [4000, 8000, 16000];
     const cur = Number(options.currentTier) || dims[0];
-    // 절반 해상도에 맞춘 구간 (구 화면 400% / 800% / 2000% 기준을 약간 당김)
-    const TO_MID = 2.8;    // 280%+ → 4000px
-    const TO_HI = 10;      // 1000%+ → 8000px
+    const TO_MID = 2.8;    // 280%+ → 8000px
+    const TO_HI = 10;      // 1000%+ → 16000px
     const BACK_LO = 2.2;   // 히스테리시스 하한
     const BACK_MID = 8;
 
@@ -395,7 +394,7 @@ window.pickFloorDrawingTierDim = function(viewScale, cssW, cssH, dpr, currentTie
             currentTier: currentTier
         });
     }
-    return window.FLOOR_DRAWING_TIER_DIMS[0] || 2000;
+    return window.FLOOR_DRAWING_TIER_DIMS[0] || 4000;
 };
 
 window.renderPdfFileToImage = function(file, targetLongSide = 4200, maxDataUrlBytes = 950000) {
