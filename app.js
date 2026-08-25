@@ -5161,8 +5161,15 @@ document.addEventListener('DOMContentLoaded', () => {
         minL -= pad;
         maxL += pad;
 
+        // 바닥 측정과 보/슬래브(상부) 측정은 침하 방향이 반대로 읽힌다(천장·보 밑면은 레벨 막대를
+        // 거꾸로 대고 측정하므로) — 값·등급판정은 그대로 두고, 그래프 선의 위아래 모양만 뒤집는다.
+        // 바닥: 값이 작을수록 위로 / 보·슬래브(기본값): 값이 작을수록 아래로.
+        const flipY = (group.locationType === '바닥');
         const xFor = (idx) => marginL + (points.length === 1 ? plotW / 2 : (idx / (points.length - 1)) * plotW);
-        const yFor = (level) => yOffset + marginT + plotH - ((level - minL) / (maxL - minL)) * plotH;
+        const yFor = (level) => {
+            const frac = (level - minL) / (maxL - minL);
+            return yOffset + marginT + (flipY ? frac : (1 - frac)) * plotH;
+        };
 
         ctx.strokeStyle = '#cbd5e1';
         ctx.lineWidth = 1.5;
@@ -5217,8 +5224,8 @@ document.addEventListener('DOMContentLoaded', () => {
         ctx.fillStyle = '#64748b';
         ctx.font = '12px sans-serif';
         ctx.textAlign = 'right';
-        ctx.fillText(`${maxL.toFixed(1)}`, marginL - 10, yOffset + marginT + 4);
-        ctx.fillText(`${minL.toFixed(1)}`, marginL - 10, yOffset + marginT + plotH + 4);
+        ctx.fillText(`${(flipY ? minL : maxL).toFixed(1)}`, marginL - 10, yOffset + marginT + 4);
+        ctx.fillText(`${(flipY ? maxL : minL).toFixed(1)}`, marginL - 10, yOffset + marginT + plotH + 4);
 
         ctx.textAlign = 'left';
         ctx.fillStyle = '#334155';
