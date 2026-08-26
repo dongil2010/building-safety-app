@@ -7264,6 +7264,18 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // 긴 한 줄 텍스트를 지정된 폭에 맞춰 여러 줄로 나눠 그림 (공백 기준)
+    // 둥근 사각형 path만 구성(칠하기/선긋기는 호출부에서) — 배지·값 라벨 칩·플롯 배경 패널 등에 공용.
+    function roundRectPath(ctx, x, y, w, h, r) {
+        const rr = Math.min(r, w / 2, h / 2);
+        ctx.beginPath();
+        ctx.moveTo(x + rr, y);
+        ctx.arcTo(x + w, y, x + w, y + h, rr);
+        ctx.arcTo(x + w, y + h, x, y + h, rr);
+        ctx.arcTo(x, y + h, x, y, rr);
+        ctx.arcTo(x, y, x + w, y, rr);
+        ctx.closePath();
+    }
+
     function wrapCanvasText(ctx, text, x, y, maxWidth, lineHeight) {
         const words = text.split(' ');
         let line = '';
@@ -7286,23 +7298,54 @@ document.addEventListener('DOMContentLoaded', () => {
     // 밀어서 그린다. renderNdtDisplacementChartDataUrl(그래프 단독, PDF에서도 씀)과
     // renderNdtDisplacementCombinedCanvas(요약박스+그래프를 한 장으로, HWPX용) 둘 다 이 함수를 공유해서
     // 그래프를 그리는 코드가 두 군데로 갈라지지 않게 한다.
+    // 16진 색상 문자열에 알파를 입혀 rgba()로 반환 — 영역 채우기 그라데이션/은은한 배경 등에 사용.
+    function hexColorWithAlpha(hex, alpha) {
+        const m = /^#?([0-9a-f]{6})$/i.exec(String(hex || '').trim());
+        if (!m) return `rgba(100,116,139,${alpha})`;
+        const n = parseInt(m[1], 16);
+        return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${alpha})`;
+    }
+
     function drawNdtDisplacementChartBody(ctx, group, floorCode, yOffset, cw = 900, ch = 620) {
         const floorLabel = (typeof window.getFloorLabelFromCode === 'function') ? window.getFloorLabelFromCode(floorCode) : (floorCode || '');
         const chartColor = group.color || getStyleColor(group.category === '부재변위' ? 'ndtMemberDisp' : 'ndtSettlement');
         const catLabel = group.category === '부재변위' ? '부재변위(처짐)' : '부동침하 기울기';
-        const title = `${floorLabel} ${group.locationType} ${catLabel} (${group.groupNo})`;
+        const calc = calcGroupDisplacement(group);
+        const gradeColors = { a등급: '#16a34a', b등급: '#2563eb', c등급: '#ca8a04', d등급: '#ea580c', e등급: '#dc2626' };
+        const gradeColor = gradeColors[calc.grade] || '#64748b';
 
+        // 상단 타이틀 바 — 왼쪽 색 액센트 + 제목, 오른쪽에 등급 배지(다른 조사표와 동일한 느낌).
+        ctx.textAlign = 'left';
+        ctx.fillStyle = chartColor;
+        ctx.fillRect(0, yOffset + 18, 6, 30);
         ctx.fillStyle = '#0f172a';
-        ctx.font = 'bold 24px sans-serif';
-        ctx.textAlign = 'center';
-        ctx.fillText(title, cw / 2, yOffset + 45);
+        ctx.font = 'bold 22px sans-serif';
+        ctx.fillText(`${floorLabel} ${group.locationType} ${catLabel} (${group.groupNo})`, 18, yOffset + 40);
+
+        if (calc.grade) {
+            ctx.font = 'bold 15px sans-serif';
+            const badgeText = `${calc.grade}  ${calc.tiltRatio || ''}`.trim();
+            const badgeW = ctx.measureText(badgeText).width + 26;
+            const badgeX = cw - 20 - badgeW, badgeY = yOffset + 14;
+            ctx.fillStyle = hexColorWithAlpha(gradeColor, 0.12);
+            roundRectPath(ctx, badgeX, badgeY, badgeW, 30, 15);
+            ctx.fill();
+            ctx.strokeStyle = hexColorWithAlpha(gradeColor, 0.5);
+            ctx.lineWidth = 1.2;
+            roundRectPath(ctx, badgeX, badgeY, badgeW, 30, 15);
+            ctx.stroke();
+            ctx.fillStyle = gradeColor;
+            ctx.textAlign = 'center';
+            ctx.fillText(badgeText, badgeX + badgeW / 2, badgeY + 21);
+        }
 
         const points = group.points || [];
-        const marginL = 80, marginR = 60, marginT = 90, marginB = 140;
+        const marginL = 84, marginR = 60, marginT = 90, marginB = 140;
         const plotW = cw - marginL - marginR;
         const plotH = ch - marginT - marginB;
 
         if (points.length === 0) {
+            ctx.textAlign = 'center';
             ctx.font = '16px sans-serif';
             ctx.fillStyle = '#a3a3a3';
             ctx.fillText('측정 지점이 없습니다.', cw / 2, yOffset + ch / 2);
@@ -7327,18 +7370,36 @@ document.addEventListener('DOMContentLoaded', () => {
             return yOffset + marginT + (flipY ? frac : (1 - frac)) * plotH;
         };
 
-        ctx.strokeStyle = '#cbd5e1';
-        ctx.lineWidth = 1.5;
-        ctx.beginPath();
-        ctx.moveTo(marginL, yOffset + marginT);
-        ctx.lineTo(marginL, yOffset + marginT + plotH);
-        ctx.lineTo(marginL + plotW, yOffset + marginT + plotH);
+        // 플롯 영역 배경 패널(은은한 카드 느낌) + 가로 그리드라인 4단.
+        roundRectPath(ctx, marginL, yOffset + marginT, plotW, plotH, 8);
+        ctx.fillStyle = '#f8fafc';
+        ctx.fill();
+        ctx.strokeStyle = '#e2e8f0';
+        ctx.lineWidth = 1;
+        roundRectPath(ctx, marginL, yOffset + marginT, plotW, plotH, 8);
         ctx.stroke();
+
+        const gridSteps = 4;
+        ctx.font = '12px sans-serif';
+        ctx.textAlign = 'right';
+        for (let i = 0; i <= gridSteps; i++) {
+            const gy = yOffset + marginT + (plotH * i) / gridSteps;
+            ctx.strokeStyle = '#e8edf3';
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(marginL, gy);
+            ctx.lineTo(marginL + plotW, gy);
+            ctx.stroke();
+            const gLevel = flipY ? (minL + ((maxL - minL) * i) / gridSteps) : (maxL - ((maxL - minL) * i) / gridSteps);
+            ctx.fillStyle = '#94a3b8';
+            ctx.fillText(gLevel.toFixed(1), marginL - 10, gy + 4);
+        }
 
         if (minL < 0 && maxL > 0) {
             const zeroY = yFor(0);
-            ctx.strokeStyle = '#e2e8f0';
+            ctx.strokeStyle = '#cbd5e1';
             ctx.setLineDash([4, 4]);
+            ctx.lineWidth = 1.2;
             ctx.beginPath();
             ctx.moveTo(marginL, zeroY);
             ctx.lineTo(marginL + plotW, zeroY);
@@ -7346,8 +7407,36 @@ document.addEventListener('DOMContentLoaded', () => {
             ctx.setLineDash([]);
         }
 
+        // 선을 기준으로 그라데이션 영역을 채운다 — 바닥은 선 아래(바닥에 깔린 느낌), 보/슬래브는
+        // 선 위(천장·보 밑면에 매달린 느낌)로 채워야 실제 측정 방향과 시각적으로 맞는다(사용자 요청).
+        const plotTop = yOffset + marginT;
+        const plotBottom = yOffset + marginT + plotH;
+        const fillEdge = flipY ? plotBottom : plotTop;
+        const areaGrad = flipY
+            ? ctx.createLinearGradient(0, plotTop, 0, plotBottom)
+            : ctx.createLinearGradient(0, plotBottom, 0, plotTop);
+        areaGrad.addColorStop(0, hexColorWithAlpha(chartColor, 0.28));
+        areaGrad.addColorStop(1, hexColorWithAlpha(chartColor, 0.02));
+        ctx.beginPath();
+        points.forEach((p, idx) => {
+            const x = xFor(idx), y = yFor(p.level);
+            if (idx === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+        });
+        ctx.lineTo(xFor(points.length - 1), fillEdge);
+        ctx.lineTo(xFor(0), fillEdge);
+        ctx.closePath();
+        ctx.fillStyle = areaGrad;
+        ctx.fill();
+
+        // 꺾은선 — 은은한 그림자로 입체감.
+        ctx.save();
+        ctx.shadowColor = hexColorWithAlpha(chartColor, 0.35);
+        ctx.shadowBlur = 6;
+        ctx.shadowOffsetY = 2;
         ctx.strokeStyle = chartColor;
-        ctx.lineWidth = 3;
+        ctx.lineWidth = 3.5;
+        ctx.lineJoin = 'round';
+        ctx.lineCap = 'round';
         ctx.beginPath();
         points.forEach((p, idx) => {
             const x = xFor(idx);
@@ -7355,39 +7444,51 @@ document.addEventListener('DOMContentLoaded', () => {
             if (idx === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
         });
         ctx.stroke();
+        ctx.restore();
 
         points.forEach((p, idx) => {
             const x = xFor(idx);
             const y = yFor(p.level);
+
+            ctx.save();
+            ctx.shadowColor = 'rgba(15,23,42,0.25)';
+            ctx.shadowBlur = 4;
+            ctx.fillStyle = '#ffffff';
+            ctx.beginPath();
+            ctx.arc(x, y, 7.5, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.restore();
             ctx.fillStyle = chartColor;
             ctx.beginPath();
-            ctx.arc(x, y, 6, 0, Math.PI * 2);
+            ctx.arc(x, y, 5.5, 0, Math.PI * 2);
             ctx.fill();
             ctx.strokeStyle = '#ffffff';
-            ctx.lineWidth = 2;
+            ctx.lineWidth = 1.5;
             ctx.stroke();
 
-            ctx.fillStyle = '#0f172a';
+            // 값 라벨은 흰 배경 칩 위에 올려 그래프 선과 겹쳐도 읽기 쉽게 한다.
+            const labelText = `${p.level}cm`;
             ctx.font = 'bold 13px sans-serif';
             ctx.textAlign = 'center';
-            ctx.fillText(`${p.level}cm`, x, y - 14);
+            const labelW = ctx.measureText(labelText).width + 12;
+            const labelY = y - 15;
+            ctx.fillStyle = 'rgba(255,255,255,0.92)';
+            roundRectPath(ctx, x - labelW / 2, labelY - 15, labelW, 19, 5);
+            ctx.fill();
+            ctx.fillStyle = '#0f172a';
+            ctx.fillText(labelText, x, labelY);
 
             ctx.fillStyle = '#64748b';
             ctx.font = '12px sans-serif';
             ctx.fillText(`${idx + 1}`, x, yOffset + marginT + plotH + 20);
         });
 
-        ctx.fillStyle = '#64748b';
-        ctx.font = '12px sans-serif';
-        ctx.textAlign = 'right';
-        ctx.fillText(`${(flipY ? minL : maxL).toFixed(1)}`, marginL - 10, yOffset + marginT + 4);
-        ctx.fillText(`${(flipY ? maxL : minL).toFixed(1)}`, marginL - 10, yOffset + marginT + plotH + 4);
-
         ctx.textAlign = 'left';
         ctx.fillStyle = '#334155';
         ctx.font = 'bold 14px sans-serif';
         ctx.fillText('측정값', marginL, yOffset + marginT + plotH + 55);
         ctx.font = '13px sans-serif';
+        ctx.fillStyle = '#475569';
         const listText = points.map((p, idx) => `${formatNdtDisplacementPointLabel(idx + 1)}: ${p.level}cm`).join('    ');
         wrapCanvasText(ctx, listText, marginL, yOffset + marginT + plotH + 78, plotW + marginR - 10, 20);
     }
@@ -22009,12 +22110,16 @@ document.addEventListener('DOMContentLoaded', () => {
             };
             // 한글 셀: 자간 늘리기/줄이기 없이 고정 — 넘치면 한글이 알아서 줄바꿈
             const wrapHwpxCellText = (raw) => String(raw == null ? '' : raw);
+            // rawVal의 실제 줄 수(lines.length)를 반환한다 — 호출부에서 행 높이를 실제 줄 수에
+            // 맞춰 다시 계산하는 데 쓴다(표본 행이 다른 칸의 샘플 2줄 데이터 기준 키를 물려받아,
+            // 1줄로 줄어든 칸의 글자가 위로 뜬 것처럼 보이던 문제 — 한글에서 직접 확인됨).
             const fillCellParas = (subList, paras, rawVal) => {
                 const lines = wrapHwpxCellText(rawVal).split('\n');
                 const baseSeg = paras[0].getElementsByTagNameNS(HP_NS, 'lineseg')[0];
                 const baseVertsize = baseSeg ? parseInt(baseSeg.getAttribute('vertsize'), 10) || 0 : 0;
                 const baseSpacing = baseSeg ? parseInt(baseSeg.getAttribute('spacing'), 10) || 0 : 0;
                 ensureCellTextNode(paras[0]).textContent = lines[0];
+                if (baseSeg) baseSeg.setAttribute('vertpos', '0');
                 for (let i = paras.length - 1; i >= 1; i--) subList.removeChild(paras[i]);
                 let refNode = paras[0];
                 for (let i = 1; i < lines.length; i++) {
@@ -22024,6 +22129,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     subList.insertBefore(clonedPara, refNode.nextSibling);
                     refNode = clonedPara;
                 }
+                return { lineCount: lines.length, vertsize: baseVertsize, spacing: baseSpacing };
             };
             const setTcText = (tc, rawVal) => {
                 if (!tc) return;
@@ -22924,6 +23030,8 @@ document.addEventListener('DOMContentLoaded', () => {
                             Array.from(col0Clone.getElementsByTagNameNS(HP_NS, 't')).forEach(t => { t.textContent = ''; });
                             newRow.insertBefore(col0Clone, newRow.firstChild);
                         }
+                        let rowMaxLines = 1;
+                        let rowLineMetric = null;
                         Array.from(newRow.getElementsByTagNameNS(HP_NS, 'tc')).forEach(tc => {
                             const addr = tc.getElementsByTagNameNS(HP_NS, 'cellAddr')[0];
                             if (!addr) return;
@@ -22936,9 +23044,31 @@ document.addEventListener('DOMContentLoaded', () => {
                             const subList = tc.getElementsByTagNameNS(HP_NS, 'subList')[0];
                             const paras = subList ? Array.from(subList.getElementsByTagNameNS(HP_NS, 'p')).filter(p => p.parentNode === subList) : [];
                             if (paras.length > 0 && values[colIdx] !== undefined) {
-                                fillCellParas(subList, paras, values[colIdx]);
+                                const fillInfo = fillCellParas(subList, paras, values[colIdx]);
+                                if (fillInfo.lineCount > rowMaxLines) rowMaxLines = fillInfo.lineCount;
+                                if (!rowLineMetric && fillInfo.vertsize) {
+                                    const marginEl = tc.getElementsByTagNameNS(HP_NS, 'cellMargin')[0];
+                                    const marginV = marginEl ? (parseInt(marginEl.getAttribute('top'), 10) || 0) + (parseInt(marginEl.getAttribute('bottom'), 10) || 0) : 282;
+                                    rowLineMetric = { vertsize: fillInfo.vertsize, spacing: fillInfo.spacing, marginV };
+                                }
                             }
                         });
+                        // 실제 줄 수에 맞춰 행 높이를 다시 계산한다 — 표본 행(normalStyleRow)이 다른
+                        // 칸(예: 위치)에 남아있던 샘플용 2줄 데이터 기준 키를 그대로 물려받는 바람에,
+                        // 정작 한 줄로 줄어든 칸(예: 높이/변위량)의 글자가 위로 뜬 것처럼 보이던 문제
+                        // (한글에서 직접 확인됨)를 막는다. 세로 병합(rowSpan>1)된 칸은 여러 행에 걸친
+                        // 높이라 건드리지 않는다.
+                        if (rowLineMetric) {
+                            const neededHeight = rowLineMetric.marginV + rowLineMetric.vertsize
+                                + (rowMaxLines - 1) * (rowLineMetric.vertsize + rowLineMetric.spacing)
+                                + Math.round(rowLineMetric.vertsize * 0.35);
+                            Array.from(newRow.getElementsByTagNameNS(HP_NS, 'tc')).forEach(tc => {
+                                const span = tc.getElementsByTagNameNS(HP_NS, 'cellSpan')[0];
+                                if (span && parseInt(span.getAttribute('rowSpan'), 10) > 1) return;
+                                const sz = tc.getElementsByTagNameNS(HP_NS, 'cellSz')[0];
+                                if (sz && neededHeight > 0) sz.setAttribute('height', String(neededHeight));
+                            });
+                        }
                         tbl.appendChild(newRow);
                     });
                     tbl.setAttribute('rowCnt', String(headerRowCount + rowsValues.length));
