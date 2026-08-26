@@ -2161,25 +2161,8 @@ document.addEventListener('DOMContentLoaded', () => {
             _idbPersistedDrawingKeys.add(idbKey);
             return true;
         }
-        if (typeof isNativeAndroidApp === 'function' && isNativeAndroidApp()) return false;
-        let pdfUrl = (bldg.floorDrawingPdfs && bldg.floorDrawingPdfs[floorCode]) || null;
-        if (!pdfUrl) pdfUrl = await idbGet('floorDrawingPdfs', idbKey);
-        if (!pdfUrl || typeof window.renderPdfDataUrlToImage !== 'function') return false;
-        try {
-            const mobile = typeof isMobileMapViewport === 'function' && isMobileMapViewport();
-            const previewDim = mobile ? 2200 : 4000;
-            const maxBytes = mobile ? 620000 : 900000;
-            const preview = await window.renderPdfDataUrlToImage(pdfUrl, previewDim, maxBytes, idbKey);
-            if (!isUsableRasterDrawingUrl(preview)) return false;
-            if (!bldg.floorDrawings) bldg.floorDrawings = {};
-            bldg.floorDrawings[floorCode] = preview;
-            await idbSet('floorDrawings', idbKey, preview);
-            _idbPersistedDrawingKeys.add(idbKey);
-            return true;
-        } catch (e) {
-            console.warn('오프라인용 도면 미리보기 생성 실패:', idbKey, e);
-            return false;
-        }
+        // 화면 표시는 레스터만 사용. PDF→JPEG 변환은 최초 등록·동기화(ensureRasterTiersForSync)에서만.
+        return false;
     }
 
     /** 점검 진입 시 서버→로컬(IDB) 일괄 내려받기 — 층 전환은 로컬만 사용 */
@@ -4843,8 +4826,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const baseTier = (typeof window.getFloorDrawingBaseTierDim === 'function')
             ? window.getFloorDrawingBaseTierDim()
             : 2000;
-        const fieldRasterOnly = typeof isNativeAndroidApp === 'function' && isNativeAndroidApp();
-
+        // PC·모바일 공통: 화면 LOD는 서버/로컬 레스터만. PDF 렌더는 최초 등록·벡터 출력만.
         const tiers = bldg.floorDrawingTiers && bldg.floorDrawingTiers[floorCode];
         if (tiers && tiers[dimKey]) return tiers[dimKey];
 
@@ -4865,37 +4847,6 @@ document.addEventListener('DOMContentLoaded', () => {
         if (typeof fetchAndCacheCloudFloorDrawingTier === 'function' && navigator.onLine !== false) {
             const cloudTier = await fetchAndCacheCloudFloorDrawingTier(bldg, floorCode, tierDim);
             if (cloudTier) return cloudTier;
-        }
-
-        if (!fieldRasterOnly) {
-            let pdfUrl = (typeof window.getFloorPdfDataUrl === 'function')
-                ? window.getFloorPdfDataUrl(bldg, floorCode)
-                : null;
-            if (!pdfUrl && typeof idbGet === 'function') {
-                const cachedPdf = await idbGet('floorDrawingPdfs', `${bldg.id}_${floorCode}`);
-                if (cachedPdf) {
-                    if (typeof window.ensureFloorDrawingPdfs === 'function') window.ensureFloorDrawingPdfs(bldg);
-                    else if (!bldg.floorDrawingPdfs) bldg.floorDrawingPdfs = {};
-                    bldg.floorDrawingPdfs[floorCode] = cachedPdf;
-                    pdfUrl = cachedPdf;
-                }
-            }
-            if (!pdfUrl && Number(tierDim) > baseTier && typeof resolveBuildingFloorPdf === 'function') {
-                pdfUrl = await resolveBuildingFloorPdf(bldg, floorCode, { localOnly: true });
-            }
-
-            if (pdfUrl && typeof window.renderPdfDataUrlToImage === 'function') {
-                try {
-                    const pdfCacheKey = `${bldg.id}_${floorCode}`;
-                    const rendered = await window.renderPdfDataUrlToImage(pdfUrl, tierDim, 2500000, pdfCacheKey, { forceJpeg: true });
-                    if (rendered) {
-                        cacheFloorDrawingTierToDevice(bldg, floorCode, tierDim, rendered);
-                        return rendered;
-                    }
-                } catch (e) {
-                    console.warn('도면 LOD PDF 렌더 실패:', e);
-                }
-            }
         }
 
         const sourceUrl = await getBestRasterSourceDataUrl(bldg, floorCode);
@@ -5069,17 +5020,37 @@ document.addEventListener('DOMContentLoaded', () => {
         const mayHaveDrawing = floorHasDrawingData(bldg, floorCode) || floorMayHavePdfSource(bldg, floorCode);
         const canUseDataUrl = isUsableRasterDrawingUrl(dataUrl);
 
-        const tryLoadImage = (srcUrl, retryOpts) => {
-            const optsLocal = retryOpts || {};
+        const tryLoadCloudRasterThenFinish = async () => {
+            if (loadToken !== floorDrawingTierLoadToken || state.currentFloor !== floorCode) return false;
+            if (typeof fetchAndCacheCloudFloorDrawingTier === 'function' && navigator.onLine !== false) {
+                const cloud4000 = await fetchAndCacheCloudFloorDrawingTier(bldg, floorCode, 4000);
+                if (loadToken !== floorDrawingTierLoadToken || state.currentFloor !== floorCode) return false;
+                if (isUsableRasterDrawingUrl(cloud4000)) {
+                    tryLoadImage(cloud4000);
+                    return true;
+                }
+            }
+            if (typeof fetchCloudFloorDrawingDataUrl === 'function' && navigator.onLine !== false) {
+                const cloudRaster = await fetchCloudFloorDrawingDataUrl(bldg.id, floorCode);
+                if (loadToken !== floorDrawingTierLoadToken || state.currentFloor !== floorCode) return false;
+                if (isUsableRasterDrawingUrl(cloudRaster) && !isPdfDrawingUrl(cloudRaster)) {
+                    if (!bldg.floorDrawings) bldg.floorDrawings = {};
+                    bldg.floorDrawings[floorCode] = cloudRaster;
+                    tryLoadImage(cloudRaster);
+                    return true;
+                }
+            }
+            return false;
+        };
+
+        const tryLoadImage = (srcUrl) => {
             if (!isRasterDrawingUrl(srcUrl)) {
-                if (mayHaveDrawing && !optsLocal.skipPdfFallback) {
-                    loadPdfDrawingForFloor(bldg, floorCode, tryLoadImage, loadToken).then((ok) => {
+                if (mayHaveDrawing) {
+                    tryLoadCloudRasterThenFinish().then((ok) => {
                         if (!ok && loadToken === floorDrawingTierLoadToken && state.currentFloor === floorCode) {
                             finishRegisteredFloorDrawingLoadFailed(floorCode);
                         }
                     });
-                } else if (mayHaveDrawing) {
-                    finishRegisteredFloorDrawingLoadFailed(floorCode);
                 } else {
                     showFloorDrawingEmptyState(floorCode);
                 }
@@ -5121,29 +5092,19 @@ document.addEventListener('DOMContentLoaded', () => {
             img.onerror = () => {
                 if (loadToken !== floorDrawingTierLoadToken || state.currentFloor !== floorCode) return;
                 clearBrokenRasterDrawingCache(bldg, floorCode);
-                if (mayHaveDrawing && !optsLocal.skipPdfFallback) {
-                    loadPdfDrawingForFloor(bldg, floorCode, tryLoadImage, loadToken).then((ok) => {
+                if (mayHaveDrawing) {
+                    tryLoadCloudRasterThenFinish().then((ok) => {
                         if (!ok) finishRegisteredFloorDrawingLoadFailed(floorCode);
                     });
                     return;
                 }
-                if (mayHaveDrawing) finishRegisteredFloorDrawingLoadFailed(floorCode);
-                else showFloorDrawingEmptyState(floorCode);
+                showFloorDrawingEmptyState(floorCode);
             };
             img.src = srcUrl;
         };
 
         if (canUseDataUrl) {
             tryLoadImage(dataUrl);
-        } else if (rawDrawing && isPdfDrawingUrl(rawDrawing)) {
-            (async () => {
-                if (loadToken !== floorDrawingTierLoadToken || state.currentFloor !== floorCode) return;
-                await applyResolvedPdfToBuilding(bldg, floorCode, rawDrawing);
-                const ok = await loadPdfDrawingForFloor(bldg, floorCode, tryLoadImage, loadToken);
-                if (!ok && loadToken === floorDrawingTierLoadToken && state.currentFloor === floorCode) {
-                    finishRegisteredFloorDrawingLoadFailed(floorCode);
-                }
-            })();
         } else if (mayHaveDrawing) {
             (async () => {
                 if (loadToken !== floorDrawingTierLoadToken || state.currentFloor !== floorCode) return;
@@ -5177,10 +5138,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     clearBrokenRasterDrawingCache(bldg, floorCode);
                 }
 
-                const pdfUrl = await resolveBuildingFloorPdf(bldg, floorCode, { localOnly: true });
-                if (pdfUrl && await loadPdfDrawingForFloor(bldg, floorCode, tryLoadImage, loadToken)) {
-                    return;
-                }
+                // PDF 폴백 없음 — 클라우드 레스터만 시도 (PDF는 등록·벡터 출력 전용)
+                if (await tryLoadCloudRasterThenFinish()) return;
 
                 if (loadToken === floorDrawingTierLoadToken && state.currentFloor === floorCode) {
                     const offlineHint = (typeof navigator !== 'undefined' && navigator.onLine === false)

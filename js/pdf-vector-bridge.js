@@ -1,7 +1,7 @@
 /**
  * PDF 벡터 브리지
  * - 업로드 시 PDF 원본은 floorDrawingPdfs에 보관하고, 표시용은 일반(4000)·고해상도(8000)·초고해상도(16000) JPEG로 미리 렌더
- * - 현장은 그 레스터만 받아 확대 구간별로 사용 (PDF 원본 자동 다운로드 없음)
+ * - PC·현장 화면 표시는 그 레스터만 사용 (PDF 원본은 벡터 내보내기·재등록 시에만 로드)
  * - 화면/핀은 래스터(bgImage) 좌표계 사용
  * - 내보내기는 drawPinSafe와 동일한 비율/지시선/화살표/방향지정으로 벡터 합성
  */
@@ -10,7 +10,7 @@
 
   window.BSA_PDF_VECTOR = {
     enabled: true,
-    version: 'main-8',
+    version: 'main-9',
     /** PDF 도면: 전체 페이지 티어 교체 대신 뷰포트 고해상도 패치 (벡터 PDF 출력은 별도) */
     useViewportTiles: true
   };
