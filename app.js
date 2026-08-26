@@ -845,14 +845,50 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     /** 로컬 캐시는 없지만 Firestore·현장 보관함에 도면이 있을 수 있는 경우 */
+    function collectKnownFloorCodesForBuilding(bldg) {
+        const codes = new Set();
+        if (!bldg || !bldg.id) return codes;
+        (bldg.floorsList || []).forEach((f) => { if (f && f.floorCode) codes.add(f.floorCode); });
+        Object.keys(bldg.floorDrawings || {}).forEach((c) => codes.add(c));
+        Object.keys(bldg.floorDrawingPdfs || {}).forEach((c) => codes.add(c));
+        Object.keys(bldg.floorDrawingSources || {}).forEach((c) => codes.add(c));
+        Object.keys(bldg.floorDrawingTiers || {}).forEach((c) => codes.add(c));
+        const prefix = `${bldg.id}_`;
+        Object.keys(window.state.defects || {}).forEach((k) => {
+            if (k.startsWith(prefix)) codes.add(k.slice(prefix.length));
+        });
+        Object.keys(window.state.ndtData || {}).forEach((k) => {
+            if (k.startsWith(prefix)) codes.add(k.slice(prefix.length));
+        });
+        if (window.state.currentBuildingId === bldg.id && window.state.currentFloor) {
+            codes.add(window.state.currentFloor);
+        }
+        return codes;
+    }
+
+    function mergeDiscoveredFloorsIntoBuilding(bldg, floorCodes) {
+        if (!bldg || !floorCodes || floorCodes.size === 0) return;
+        if (!bldg.floorsList) bldg.floorsList = [];
+        const existing = new Set(bldg.floorsList.map((f) => f.floorCode));
+        floorCodes.forEach((fc) => {
+            if (!existing.has(fc)) {
+                bldg.floorsList.push({
+                    floorCode: fc,
+                    floorLabel: window.getFloorLabelFromCode(fc)
+                });
+            }
+        });
+        if (typeof window.sortFloorsLowToHigh === 'function') {
+            bldg.floorsList = window.sortFloorsLowToHigh(bldg.floorsList);
+        }
+    }
+
     function floorMayExistOnCloud(bldg, floorCode) {
         if (!bldg || !floorCode || !db || !window.state.companyId) return false;
         if (typeof navigator !== 'undefined' && navigator.onLine === false) return false;
-        if (floorPdfKnownUnavailable(bldg.id, floorCode)) return false;
-        if (bldg.floorsList && bldg.floorsList.some((f) => f && f.floorCode === floorCode)) return true;
-        const defectKey = `${bldg.id}_${floorCode}`;
-        const defects = (window.state.defects || {})[defectKey];
-        if (defects && defects.length > 0) return true;
+        if (collectKnownFloorCodesForBuilding(bldg).has(floorCode)) return true;
+        // floorsList가 비어 있어도 등록된 건물이면 Firestore·현장 보관함 조회
+        if (bldg.id) return true;
         return false;
     }
 
@@ -2005,12 +2041,19 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!bldg.floorDrawingPdfs) bldg.floorDrawingPdfs = {};
         if (!bldg.floorDrawingTiers) bldg.floorDrawingTiers = {};
         if (!bldg.floorDrawingSources) bldg.floorDrawingSources = {};
-        const floors = new Set([
-            ...(bldg.floorsList || []).map((f) => f.floorCode),
-            ...Object.keys(bldg.floorDrawings || {}),
-            ...Object.keys(bldg.floorDrawingPdfs || {}),
-            ...Object.keys(bldg.floorDrawingSources || {}),
-        ]);
+        const floors = collectKnownFloorCodesForBuilding(bldg);
+        if (typeof discoverCloudDrawingFloorCodes === 'function') {
+            try {
+                const discovered = await discoverCloudDrawingFloorCodes(bldg);
+                discovered.forEach((fc) => floors.add(fc));
+            } catch (e) {
+                console.warn('서버 도면 층 탐색 실패:', bldg.id, e);
+            }
+        }
+        if (floors.size === 0) {
+            floors.add(window.state.currentFloor || '1F');
+        }
+        mergeDiscoveredFloorsIntoBuilding(bldg, floors);
         await Promise.all([...floors].map(async (floorCode) => {
             if (!bldg.floorDrawings[floorCode]) {
                 const cached = await idbGet('floorDrawings', `${bldg.id}_${floorCode}`);
@@ -2432,6 +2475,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (typeof hydrateSingleBuildingDrawings === 'function') {
                 await hydrateSingleBuildingDrawings(bldg);
             }
+            populateFloorSelectDropdown(bldg);
         } catch (e) {
             console.warn('점검 진입 전 도면 동기화 실패:', e);
         } finally {
@@ -25128,6 +25172,48 @@ document.addEventListener('DOMContentLoaded', () => {
             return null;
         }
     }
+
+    /** Firestore·현장 보관함에 실제로 올라간 층 코드 목록 (floorsList 없을 때 사용) */
+    async function discoverCloudDrawingFloorCodes(bldg) {
+        const codes = new Set();
+        if (!bldg || !bldg.id || !db || !window.state.companyId) return codes;
+        const companyRef = db.collection('safety_app').doc(getCompanyDocId());
+        const docPrefix = `${bldg.id}_`;
+        const parseDocFloors = (snap) => {
+            if (!snap) return;
+            snap.forEach((doc) => {
+                if (!doc.id.startsWith(docPrefix)) return;
+                const fc = doc.id.slice(docPrefix.length);
+                if (fc) codes.add(fc);
+            });
+        };
+        try {
+            const docIdField = firebase.firestore.FieldPath.documentId();
+            const [rasterSnap, pdfSnap] = await Promise.all([
+                companyRef.collection('floorDrawings')
+                    .orderBy(docIdField).startAt(docPrefix).endAt(docPrefix + '\uf8ff')
+                    .get().catch(() => null),
+                companyRef.collection('floorDrawingPdfs')
+                    .orderBy(docIdField).startAt(docPrefix).endAt(docPrefix + '\uf8ff')
+                    .get().catch(() => null),
+            ]);
+            parseDocFloors(rasterSnap);
+            parseDocFloors(pdfSnap);
+        } catch (e) {
+            console.warn('Firestore 도면 층 목록 조회 실패:', bldg.id, e);
+        }
+        try {
+            const siteKey = normalizeSiteVaultKey(bldg.name);
+            const siteId = siteVaultDocId(siteKey);
+            const vaultSnap = await companyRef.collection('siteDrawingVault')
+                .doc(siteId).collection('floors').get();
+            vaultSnap.forEach((doc) => { if (doc.id) codes.add(doc.id); });
+        } catch (e) {
+            console.warn('현장 보관함 층 목록 조회 실패:', bldg.name, e);
+        }
+        return codes;
+    }
+    window.discoverCloudDrawingFloorCodes = discoverCloudDrawingFloorCodes;
 
     /** Firestore 1MB 한도 — 큰 PDF는 parts 서브컬렉션으로 분할 저장 */
     const PDF_CLOUD_CHUNK_CHARS = 850000;
