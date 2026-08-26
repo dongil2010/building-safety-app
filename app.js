@@ -23057,11 +23057,17 @@ document.addEventListener('DOMContentLoaded', () => {
                         // 칸(예: 위치)에 남아있던 샘플용 2줄 데이터 기준 키를 그대로 물려받는 바람에,
                         // 정작 한 줄로 줄어든 칸(예: 높이/변위량)의 글자가 위로 뜬 것처럼 보이던 문제
                         // (한글에서 직접 확인됨)를 막는다. 세로 병합(rowSpan>1)된 칸은 여러 행에 걸친
-                        // 높이라 건드리지 않는다.
+                        // 높이라 건드리지 않는다. 다만 글자만 딱 맞는 높이는 인쇄용 표로 쓰기엔 너무
+                        // 빽빽해 보이므로(사용자 요청), 한 페이지에 15~20줄이 들어오는 정도의 여유
+                        // 있는 최소 높이(MIN_ROW_HEIGHT)를 바닥으로 깔고 그보다 계산값이 크면(2줄 이상
+                        // 등) 그 값을 쓴다.
                         if (rowLineMetric) {
-                            const neededHeight = rowLineMetric.marginV + rowLineMetric.vertsize
+                            const MIN_ROW_HEIGHT = 3200; // A4 표 영역 기준 페이지당 약 15~20줄
+                            const contentHeight = rowLineMetric.marginV + rowLineMetric.vertsize
                                 + (rowMaxLines - 1) * (rowLineMetric.vertsize + rowLineMetric.spacing)
                                 + Math.round(rowLineMetric.vertsize * 0.35);
+                            const comfortableHeight = MIN_ROW_HEIGHT + (rowMaxLines - 1) * (rowLineMetric.vertsize + rowLineMetric.spacing);
+                            const neededHeight = Math.max(contentHeight, comfortableHeight);
                             Array.from(newRow.getElementsByTagNameNS(HP_NS, 'tc')).forEach(tc => {
                                 const span = tc.getElementsByTagNameNS(HP_NS, 'cellSpan')[0];
                                 if (span && parseInt(span.getAttribute('rowSpan'), 10) > 1) return;
