@@ -6,7 +6,7 @@ window.BSA.tabs['tab-map'] = {
     title: '결함위치도 작성',
     features: [
         '도면 PAN/ZOOM/회전',
-        'PDF·일반 이미지 공통 LOD — 기기 캐시·백그라운드 프리로드',
+        '현장은 서버가 만든 일반·고해상도·초고해상도 레스터만 표시 (PDF 원본 자동 다운로드 없음)',
         '핀 마킹 / 영역 마킹',
         'Ctrl+드래그·클릭 추가/해제 다중 선택 · 그룹 이동 · 선택 삭제',
         '벡터 PDF 내보내기 (원본 PDF + 마킹 벡터)',
@@ -44,8 +44,5 @@ window.BSA.tabs['tab-map'] = {
         }
         setTimeout(function () { refreshMapCanvas(true); }, 50);
         setTimeout(function () { refreshMapCanvas(false); }, 220);
-        if (typeof window.preloadCurrentFloorPdfSource === 'function') {
-            setTimeout(function () { window.preloadCurrentFloorPdfSource(); }, 280);
-        }
     }
 };

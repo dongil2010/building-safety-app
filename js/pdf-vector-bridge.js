@@ -1,7 +1,8 @@
 /**
  * PDF 벡터 브리지
- * - 업로드 시 PDF 원본(dataURL)을 floorDrawingPdfs + Firestore floorDrawingPdfs에 보관
- * - 화면/핀은 기존처럼 래스터(bgImage) 좌표계 사용
+ * - 업로드 시 PDF 원본은 floorDrawingPdfs에 보관하고, 표시용은 일반(4000)·고해상도(8000)·초고해상도(16000) JPEG로 미리 렌더
+ * - 현장은 그 레스터만 받아 확대 구간별로 사용 (PDF 원본 자동 다운로드 없음)
+ * - 화면/핀은 래스터(bgImage) 좌표계 사용
  * - 내보내기는 drawPinSafe와 동일한 비율/지시선/화살표/방향지정으로 벡터 합성
  */
 (function () {
@@ -77,16 +78,23 @@
       const sourceDataUrl = (typeof window.resizeDataUrlToMaxDim === 'function')
         ? await window.resizeDataUrlToMaxDim(raw, 16000)
         : raw;
-      const rasterDataUrl = (typeof window.resizeDataUrlToMaxDim === 'function')
-        ? await window.resizeDataUrlToMaxDim(sourceDataUrl, 4000)
-        : await window.compressDrawingImage(file);
-      // 원본(최대 16000)만 기기 보관 — 4000/8000/16000은 줌 시 리사이즈+캐시
-      return { rasterDataUrl, sourceDataUrl, tiers: null, pdfDataUrl: null, isPdf: false };
+      const tiers = (typeof window.buildFloorDrawingTiersFromDataUrl === 'function')
+        ? await window.buildFloorDrawingTiersFromDataUrl(sourceDataUrl)
+        : null;
+      const rasterDataUrl = (tiers && tiers['4000'])
+        || ((typeof window.resizeDataUrlToMaxDim === 'function')
+          ? await window.resizeDataUrlToMaxDim(sourceDataUrl, 4000)
+          : await window.compressDrawingImage(file));
+      return { rasterDataUrl, sourceDataUrl, tiers, pdfDataUrl: null, isPdf: false };
     }
     const pdfDataUrl = await window.fileToPdfDataUrl(file);
-    // PDF 원본만 보관 — 4000/8000/16000은 줌 시 pdf.js로 실시간 렌더 (비트맵 티어 저장 안 함)
-    const rasterDataUrl = await window.renderPdfFileToImage(file, 4000, 1400000);
-    return { rasterDataUrl, tiers: null, pdfDataUrl, isPdf: true };
+    const cacheKey = file && file.name ? String(file.name) : 'upload-pdf';
+    const tiers = (typeof window.buildFloorDrawingTiersFromPdf === 'function')
+      ? await window.buildFloorDrawingTiersFromPdf(pdfDataUrl, cacheKey)
+      : null;
+    const rasterDataUrl = (tiers && tiers['4000'])
+      || await window.renderPdfFileToImage(file, 4000, 1400000);
+    return { rasterDataUrl, tiers, pdfDataUrl, isPdf: true };
   };
 
   window.getFloorPdfDataUrl = function (bldg, floorCode) {

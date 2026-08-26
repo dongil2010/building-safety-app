@@ -236,13 +236,32 @@ function withPdfRenderDedupe(key, fn) {
  */
 /** 도면 LOD 해상도 단계 (긴 변 기준 픽셀) — 표시용 3구간 */
 window.FLOOR_DRAWING_TIER_DIMS = [4000, 8000, 16000];
+window.FLOOR_DRAWING_TIER_LABELS = {
+    4000: '일반',
+    8000: '고해상도',
+    16000: '초고해상도'
+};
+/** 맞춤 대비 확대 배율 구간 — 일반 / 고해상도 / 초고해상도 */
+window.FLOOR_DRAWING_TIER_ZOOM = {
+    TO_MID: 2.0,
+    TO_HI: 8.0,
+    BACK_LO: 1.6,
+    BACK_MID: 6.5
+};
 
 window.getFloorDrawingBaseTierDim = function() {
     return (window.FLOOR_DRAWING_TIER_DIMS && window.FLOOR_DRAWING_TIER_DIMS[0]) || 4000;
 };
 
+window.getFloorDrawingTierLabel = function(dim) {
+    const labels = window.FLOOR_DRAWING_TIER_LABELS || {};
+    const n = Number(dim);
+    return labels[n] || labels[String(dim)] || (n ? `${n}px` : '');
+};
+
 /**
- * 확대 구간별 고정 해상도 (4000 / 8000 / 16000px) — 히스테리시스로 경계에서 깜빡임 방지
+ * 확대 구간별 고정 해상도 — 일반(<200%) / 고해상도(200~800%) / 초고해상도(800%+)
+ * 히스테리시스로 경계에서 깜빡임 방지
  * @param {number} zoomVsFit scale / fitScale (1 = 100%)
  * @param {{ currentTier?: number }} [opts]
  */
@@ -251,10 +270,11 @@ window.getFloorDrawingTierDimForZoomVsFit = function(zoomVsFit, opts) {
     const z = Math.max(Number(zoomVsFit) || 1, 0.05);
     const dims = window.FLOOR_DRAWING_TIER_DIMS || [4000, 8000, 16000];
     const cur = Number(options.currentTier) || dims[0];
-    const TO_MID = 2.0;    // 200%+ → 8000px
-    const TO_HI = 8;       // 800%+ → 16000px
-    const BACK_LO = 1.6;
-    const BACK_MID = 6.5;
+    const zoom = window.FLOOR_DRAWING_TIER_ZOOM || {};
+    const TO_MID = zoom.TO_MID || 2.0;
+    const TO_HI = zoom.TO_HI || 8;
+    const BACK_LO = zoom.BACK_LO || 1.6;
+    const BACK_MID = zoom.BACK_MID || 6.5;
 
     if (cur >= dims[2]) {
         if (z < BACK_MID) return dims[1];
@@ -309,8 +329,47 @@ window.resizeDataUrlToMaxDim = function(dataUrl, maxDim, quality = 0.88) {
 window.buildFloorDrawingTiersFromDataUrl = async function(sourceDataUrl) {
     const tiers = {};
     if (!sourceDataUrl) return tiers;
+    const quality = { 4000: 0.85, 8000: 0.82, 16000: 0.78 };
     for (const dim of window.FLOOR_DRAWING_TIER_DIMS) {
-        tiers[String(dim)] = await window.resizeDataUrlToMaxDim(sourceDataUrl, dim);
+        tiers[String(dim)] = await window.resizeDataUrlToMaxDim(sourceDataUrl, dim, quality[dim] || 0.85);
+    }
+    return tiers;
+};
+
+/**
+ * PDF 벡터를 일반(4000)·고해상도(8000)·초고해상도(16000) JPEG로 미리 렌더.
+ * 초고해상도 한 장을 만든 뒤 축소해 나머지를 채운다 (현장은 이 레스터만 사용).
+ */
+window.buildFloorDrawingTiersFromPdf = async function(pdfDataUrl, cacheKey) {
+    const tiers = {};
+    if (!pdfDataUrl || typeof window.renderPdfDataUrlToImage !== 'function') return tiers;
+    const dims = window.FLOOR_DRAWING_TIER_DIMS || [4000, 8000, 16000];
+    const maxBytes = { 4000: 950000, 8000: 2200000, 16000: 3800000 };
+    const quality = { 4000: 0.85, 8000: 0.82, 16000: 0.78 };
+    const renderAt = async (dim) => window.renderPdfDataUrlToImage(
+        pdfDataUrl,
+        dim,
+        maxBytes[dim] || 2500000,
+        cacheKey,
+        { forceJpeg: true, quality: quality[dim] || 0.82 }
+    );
+    let source = null;
+    for (let i = dims.length - 1; i >= 0; i--) {
+        try {
+            source = await renderAt(dims[i]);
+        } catch (e) {
+            console.warn('PDF 도면 티어 렌더 실패:', dims[i], e);
+            source = null;
+        }
+        if (source) break;
+    }
+    if (!source) return tiers;
+    if (typeof window.resizeDataUrlToMaxDim !== 'function') {
+        dims.forEach((dim) => { tiers[String(dim)] = source; });
+        return tiers;
+    }
+    for (const dim of dims) {
+        tiers[String(dim)] = await window.resizeDataUrlToMaxDim(source, dim, quality[dim] || 0.85);
     }
     return tiers;
 };
@@ -327,19 +386,20 @@ window.getPdfRefPixelSize = async function(pdfDataUrl, targetLongSide = 4000, ca
     };
 };
 
-window.renderPdfDataUrlToImage = function(pdfDataUrl, targetLongSide = 16000, maxDataUrlBytes = 2500000, cacheKey) {
-    const dedupeKey = `img|${cacheKey || 'anon'}|${targetLongSide}`;
+window.renderPdfDataUrlToImage = function(pdfDataUrl, targetLongSide = 16000, maxDataUrlBytes = 2500000, cacheKey, opts) {
+    const options = opts || {};
+    const quality = Number(options.quality) > 0 ? Number(options.quality) : 0.85;
+    const mime = (options.forceJpeg === false) ? 'image/png' : 'image/jpeg';
+    const dedupeKey = `img|${cacheKey || 'anon'}|${targetLongSide}|${mime}`;
     return withPdfRenderDedupe(dedupeKey, async () => {
         const { page, baseViewport } = await acquirePdfPageFromDataUrl(pdfDataUrl, cacheKey);
         let scale = targetLongSide / Math.max(baseViewport.width, baseViewport.height);
         scale = Math.min(Math.max(scale, 1), 16);
-        const useJpeg = targetLongSide <= (window.FLOOR_DRAWING_PREVIEW_DIM || 1600) + 200;
-        const mime = useJpeg ? 'image/jpeg' : 'image/png';
-        let dataUrl = await renderPdfPageToDataUrl(page, scale, mime, 0.88);
+        let dataUrl = await renderPdfPageToDataUrl(page, scale, mime, quality);
         let attempts = 0;
         while (dataUrl && dataUrl.length > maxDataUrlBytes && attempts < 4) {
             scale *= 0.75;
-            dataUrl = await renderPdfPageToDataUrl(page, scale, mime, 0.85);
+            dataUrl = await renderPdfPageToDataUrl(page, scale, mime, Math.max(0.7, quality - 0.05));
             attempts++;
         }
         return dataUrl;
