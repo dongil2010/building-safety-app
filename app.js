@@ -100,7 +100,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
     let _loadingDepth = 0;
     window.showLoading = function(text = '처리 중입니다...') {
-        _loadingDepth++;
         let overlay = document.getElementById('globalLoadingOverlay');
         if (!overlay) {
             overlay = document.createElement('div');
@@ -109,6 +108,11 @@ document.addEventListener('DOMContentLoaded', () => {
             overlay.innerHTML = '<div class="loading-box"><div class="loading-spinner"></div><div class="loading-text"></div></div>';
             document.body.appendChild(overlay);
         }
+        const alreadyVisible = overlay.style.display === 'flex';
+        // 진행 문구마다 showLoading을 다시 부르면 depth가 쌓여 hideLoading 한 번으로는
+        // 오버레이가 영영 안 닫힌다(도면 추가 저장 버그). 이미 보이면 텍스트만 갱신.
+        if (!alreadyVisible) _loadingDepth++;
+        if (_loadingDepth < 1) _loadingDepth = 1;
         overlay.querySelector('.loading-text').textContent = text;
         overlay.style.display = 'flex';
     };
@@ -3956,7 +3960,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         }
                         if (item.file) {
                             try {
-                                window.showLoading(`도면 ${i + 1}/${safeUploadedDrawings.length} 변환 중... (${item.floorCode || ''})`);
+                                window.updateLoadingText(`도면 ${i + 1}/${safeUploadedDrawings.length} 변환 중... (${item.floorCode || ''})`);
                                 const preparePromise = (typeof window.prepareFloorDrawingUpload === 'function')
                                     ? window.prepareFloorDrawingUpload(item.file)
                                     : window.compressDrawingImage(item.file).then((rasterDataUrl) => ({ rasterDataUrl, pdfDataUrl: null }));
@@ -4011,7 +4015,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
             window.state.buildings.unshift(newBldg);
 
-            window.showLoading('도면 로컬 저장 중...');
+            window.showLoading('도면 저장 중...');
             try {
                 await persistBuildingDrawingAssetsNow(newBldg);
                 await hydrateBuildingPdfsFromSiteVault(newBldg);
