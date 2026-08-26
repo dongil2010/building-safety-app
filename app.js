@@ -2487,10 +2487,33 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (key.startsWith(currentId + '_')) subset[key] = arr;
             });
             if (!Object.keys(subset).length) return;
-            const loaded = await hydrateDefectPhotos(subset, { buildingId: currentId });
-            Object.assign(window.state.defects, loaded);
+
+            // 도면 로드(hydrateSingleBuildingDrawings)와 같은 이유로 현재 층만 먼저 기다린다 —
+            // 예전엔 건물의 모든 층 사진을 한 번에(층마다 순차) 복원하고 나서야 상태조사표를
+            // 그려서, 층이 많은 건물에서 사진이 "한참 늦게" 뜨는 원인이었다(사용자가 실제로
+            // 겪음). 지금 보고 있는 층만 먼저 복원해 즉시 그리고, 나머지 층은 백그라운드로.
+            const currentFloorKey = `${currentId}_${window.state.currentFloor}`;
+            const currentFloorSubset = {};
+            const restSubset = {};
+            Object.entries(subset).forEach(([key, arr]) => {
+                if (key === currentFloorKey) currentFloorSubset[key] = arr;
+                else restSubset[key] = arr;
+            });
+
+            if (Object.keys(currentFloorSubset).length) {
+                const loaded = await hydrateDefectPhotos(currentFloorSubset, { buildingId: currentId });
+                Object.assign(window.state.defects, loaded);
+            }
             if (typeof renderSurveyTable === 'function' && window.state.currentTab === 'tab-survey') renderSurveyTable();
             if (typeof renderDefectListPanel === 'function') renderDefectListPanel();
+
+            if (Object.keys(restSubset).length) {
+                hydrateDefectPhotos(restSubset, { buildingId: currentId }).then((loaded) => {
+                    Object.assign(window.state.defects, loaded);
+                    if (typeof renderSurveyTable === 'function' && window.state.currentTab === 'tab-survey') renderSurveyTable();
+                    if (typeof renderDefectListPanel === 'function') renderDefectListPanel();
+                }).catch((e) => console.warn('나머지 층 사진 백그라운드 복원 실패:', e));
+            }
         } catch (e) {
             console.warn('IndexedDB 이미지 복원 실패:', e);
         }
@@ -2831,6 +2854,13 @@ document.addEventListener('DOMContentLoaded', () => {
                         if (window.state.currentBuildingId !== entryBuildingId) return;
                         Object.assign(window.state.defects, loaded);
                     }
+                    // 사진 로딩이 도면 로딩보다 오래 걸리는 경우, 사용자가 이미 상태조사표 탭으로
+                    // 넘어가 있을 수 있다 — 화면을 다시 그려주지 않으면 메모리에는 사진이 다
+                    // 들어왔는데도 화면엔 계속 빈 채로 남아있었다(사용자가 실제로 겪음: 결함을 새로
+                    // 등록해 다른 이유로 화면이 다시 그려질 때까지 안 보이던 문제). 도면 재로딩
+                    // 여부와 무관하게 항상 다시 그린다.
+                    if (typeof renderSurveyTable === 'function' && window.state.currentTab === 'tab-survey') renderSurveyTable();
+                    if (typeof renderDefectListPanel === 'function') renderDefectListPanel();
                 }
                 populateFloorSelectDropdown(bldg);
                 const curFloor = window.state.currentFloor;
@@ -11980,22 +12010,43 @@ document.addEventListener('DOMContentLoaded', () => {
         return (Array.isArray(defect.prevRoundPhotos) ? defect.prevRoundPhotos : []).filter(Boolean);
     }
 
+    // 사진 하나를 IDB → 메모리 캐시 → (그래도 없으면) 클라우드 순으로 찾는다. hydrateDefectPhotos의
+    // loadIds와 같은 순서 — 여기 클라우드 폴백이 빠져 있었던 게 실제 버그였다: 건물 전환 직후처럼
+    // 백그라운드 사진 로딩(hydrateDefectPhotos)이 아직 안 끝난 사이에 한글 내보내기를 누르면,
+    // IDB·캐시 둘 다 아직 없어서(클라우드 재조회 없이) 사진이 "안 찍은 것처럼" 빠진 채로 나갔다
+    // (사용자가 실제로 겪음).
+    async function loadPhotoByIdWithCloudFallback(pid) {
+        if (!pid) return null;
+        if (window._photoCache && window._photoCache[pid]) return window._photoCache[pid];
+        const fromIdb = await idbGet('photos', pid);
+        if (fromIdb) {
+            if (!window._photoCache) window._photoCache = {};
+            window._photoCache[pid] = fromIdb;
+            return fromIdb;
+        }
+        if (!db || !window.state.companyId) return null;
+        try {
+            const snap = await db.collection('safety_app').doc(getCompanyDocId()).collection('photos').doc(pid).get();
+            const url = snap.exists ? snap.data().dataUrl : null;
+            if (url) {
+                if (!window._photoCache) window._photoCache = {};
+                window._photoCache[pid] = url;
+                idbSet('photos', pid, url).then(ok => { if (ok && _idbPersistedPhotoKeys) _idbPersistedPhotoKeys.add(pid); });
+            }
+            return url;
+        } catch (e) {
+            return null;
+        }
+    }
+
     async function ensureDefectPhotosLoaded(d) {
         if (!d) return;
         if ((!d.photos || d.photos.length === 0) && d.photoIds && d.photoIds.length > 0) {
-            const fromIdb = await Promise.all(d.photoIds.map(pid => idbGet('photos', pid)));
-            let filled = fromIdb.filter(Boolean);
-            if (filled.length === 0 && window._photoCache) {
-                filled = d.photoIds.map(pid => window._photoCache[pid]).filter(Boolean);
-            }
+            const filled = (await Promise.all(d.photoIds.map(loadPhotoByIdWithCloudFallback))).filter(Boolean);
             if (filled.length > 0) d.photos = filled;
         }
         if ((!d.prevRoundPhotos || d.prevRoundPhotos.length === 0) && d.prevRoundPhotoIds && d.prevRoundPhotoIds.length > 0) {
-            const fromIdb = await Promise.all(d.prevRoundPhotoIds.map(pid => idbGet('photos', pid)));
-            let filled = fromIdb.filter(Boolean);
-            if (filled.length === 0 && window._photoCache) {
-                filled = d.prevRoundPhotoIds.map(pid => window._photoCache[pid]).filter(Boolean);
-            }
+            const filled = (await Promise.all(d.prevRoundPhotoIds.map(loadPhotoByIdWithCloudFallback))).filter(Boolean);
             if (filled.length > 0) d.prevRoundPhotos = filled;
         }
     }
