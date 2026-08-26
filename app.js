@@ -18709,12 +18709,6 @@ document.addEventListener('DOMContentLoaded', () => {
             document.getElementById('btnZoomFit')?.click();
         });
     }
-    const mobileBtnRotate = document.getElementById('mobileBtnRotate');
-    if (mobileBtnRotate) {
-        mobileBtnRotate.addEventListener('click', () => {
-            document.getElementById('btnRotateDrawing')?.click();
-        });
-    }
     const mobileBtnUndo = document.getElementById('mobileBtnUndo');
     if (mobileBtnUndo) {
         mobileBtnUndo.addEventListener('click', () => undoDefectChange());
@@ -18783,12 +18777,6 @@ document.addEventListener('DOMContentLoaded', () => {
     if (mobileNdtBtnZoomFit) {
         mobileNdtBtnZoomFit.addEventListener('click', () => {
             if (typeof window.fitNdtCanvas === 'function') window.fitNdtCanvas();
-        });
-    }
-    const mobileNdtBtnRotate = document.getElementById('mobileNdtBtnRotate');
-    if (mobileNdtBtnRotate) {
-        mobileNdtBtnRotate.addEventListener('click', () => {
-            if (typeof window.rotateNdtDrawing === 'function') window.rotateNdtDrawing();
         });
     }
     const mobileNdtBtnDeleteSelected = document.getElementById('mobileNdtBtnDeleteSelected');
