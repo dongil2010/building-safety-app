@@ -3967,18 +3967,19 @@ document.addEventListener('DOMContentLoaded', () => {
                                 const prepared = await withTimeout(preparePromise, 120000, 'prepare-drawing');
                                 if (prepared && prepared.rasterDataUrl) {
                                     floorDrawingsMap[item.floorCode] = prepared.rasterDataUrl;
+                                    await uploadFloorDrawing(newBuildingId, item.floorCode, prepared.rasterDataUrl);
                                 }
                                 if (prepared && prepared.tiers) {
                                     floorDrawingTiersMap[item.floorCode] = prepared.tiers;
+                                    await uploadFloorDrawingTiers(newBuildingId, item.floorCode, prepared.tiers);
                                 }
                                 if (prepared && prepared.sourceDataUrl) {
                                     floorDrawingSourcesMap[item.floorCode] = prepared.sourceDataUrl;
                                 }
                                 if (prepared && prepared.pdfDataUrl) {
                                     floorDrawingPdfsMap[item.floorCode] = prepared.pdfDataUrl;
+                                    await uploadFloorDrawingPdf(newBuildingId, item.floorCode, prepared.pdfDataUrl);
                                 }
-                                // 클라우드 업로드는 UI를 막지 않도록 백그라운드 큐로 처리
-                                enqueueFloorDrawingCloudUpload(newBuildingId, item.floorCode, prepared || {});
                             } catch (err) {
                                 console.error('Drawing compression error:', err);
                                 window.showToast(`도면 ${item.floorCode || (i + 1)} 변환 실패 — 다음 도면으로 진행합니다`, 'warning');
@@ -4020,7 +4021,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 await persistBuildingDrawingAssetsNow(newBldg);
                 await hydrateBuildingPdfsFromSiteVault(newBldg);
             } finally {
-                window.hideLoading();
+                window.resetLoadingOverlay();
             }
 
             if (isImportMode && sourceBldg && importOpts) {
@@ -4040,7 +4041,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const importNote = (isImportMode && sourceBldg)
                 ? ' · 다른 점검 데이터 반영'
                 : '';
-            window.showToast(`'${name}' 건축물이 등록되었습니다${importNote}. 서버 도면 동기화는 백그라운드에서 이어집니다.`, 'success');
+            window.showToast(`'${name}' 건축물이 등록되었습니다${importNote}.`, 'success');
         });
     }
 
@@ -4417,7 +4418,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         }
                         if (item.file) {
                             try {
-                                window.showLoading(`도면 ${i + 1}/${newFiles.length} 변환 중... (${item.floorCode || ''})`);
+                                window.updateLoadingText(`도면 ${i + 1}/${newFiles.length} 변환 중... (${item.floorCode || ''})`);
                                 const preparePromise = (typeof window.prepareFloorDrawingUpload === 'function')
                                     ? window.prepareFloorDrawingUpload(item.file)
                                     : window.compressDrawingImage(item.file).then((rasterDataUrl) => ({ rasterDataUrl, pdfDataUrl: null }));
@@ -4432,11 +4433,13 @@ document.addEventListener('DOMContentLoaded', () => {
                                 }
                                 if (prepared && prepared.rasterDataUrl) {
                                     bldg.floorDrawings[item.floorCode] = prepared.rasterDataUrl;
+                                    await uploadFloorDrawing(bldg.id, item.floorCode, prepared.rasterDataUrl);
                                 }
                                 if (prepared && prepared.tiers) {
                                     if (!bldg.floorDrawingTiers) bldg.floorDrawingTiers = {};
                                     bldg.floorDrawingTiers[item.floorCode] = prepared.tiers;
                                     clearFloorTierPersistedFlags(bldg.id, item.floorCode);
+                                    await uploadFloorDrawingTiers(bldg.id, item.floorCode, prepared.tiers);
                                 }
                                 if (prepared && prepared.sourceDataUrl) {
                                     cacheFloorDrawingSourceToDevice(bldg, item.floorCode, prepared.sourceDataUrl);
@@ -4446,8 +4449,8 @@ document.addEventListener('DOMContentLoaded', () => {
                                     bldg.floorDrawingPdfs[item.floorCode] = prepared.pdfDataUrl;
                                     _idbPersistedPdfKeys.delete(`${bldg.id}_${item.floorCode}`);
                                     if (window._cloudSyncedPdfKeys) window._cloudSyncedPdfKeys.delete(`${bldg.id}_${item.floorCode}`);
+                                    await uploadFloorDrawingPdf(bldg.id, item.floorCode, prepared.pdfDataUrl);
                                 }
-                                enqueueFloorDrawingCloudUpload(bldg.id, item.floorCode, prepared || {});
                             } catch (err) {
                                 console.error('Edit drawing compression error:', err);
                                 window.showToast(`도면 ${item.floorCode || (i + 1)} 변환 실패 — 다음 도면으로 진행합니다`, 'warning');
@@ -4480,7 +4483,7 @@ document.addEventListener('DOMContentLoaded', () => {
             try {
                 await persistBuildingDrawingAssetsNow(bldg);
             } finally {
-                window.hideLoading();
+                window.resetLoadingOverlay();
             }
             saveStateToLocalStorage();
             if (typeof syncStateToFirebase === 'function') syncStateToFirebase();
@@ -4494,7 +4497,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 window.selectBuildingAndInspect(bldg);
             }
 
-            window.showToast(`'${bldg.name}' 저장 완료 (총 ${bldg.floorsList.length}개 층). 서버 도면 동기화는 백그라운드에서 이어집니다.`, 'success');
+            window.showToast(`'${bldg.name}' 명칭 및 도면 저장이 완료되었습니다. (총 ${bldg.floorsList.length}개 층)`, 'success');
         });
     }
 
@@ -25887,58 +25890,6 @@ document.addEventListener('DOMContentLoaded', () => {
         return ok;
     }
 
-    /** 등록/수정 UI를 막지 않도록 대용량 도면 클라우드 업로드를 큐에 넣음 */
-    const _pendingFloorCloudUploads = [];
-    let _floorCloudUploadRunning = false;
-
-    function enqueueFloorDrawingCloudUpload(buildingId, floorCode, payload) {
-        if (!buildingId || !floorCode || !payload) return;
-        _pendingFloorCloudUploads.push({
-            buildingId,
-            floorCode,
-            rasterDataUrl: payload.rasterDataUrl || null,
-            tiers: payload.tiers || null,
-            pdfDataUrl: payload.pdfDataUrl || null
-        });
-        drainFloorDrawingCloudUploads();
-    }
-
-    async function drainFloorDrawingCloudUploads() {
-        if (_floorCloudUploadRunning) return;
-        _floorCloudUploadRunning = true;
-        try {
-            while (_pendingFloorCloudUploads.length) {
-                const job = _pendingFloorCloudUploads.shift();
-                try {
-                    if (job.rasterDataUrl) {
-                        await withTimeout(
-                            uploadFloorDrawing(job.buildingId, job.floorCode, job.rasterDataUrl),
-                            45000,
-                            'raster-upload'
-                        );
-                    }
-                    if (job.tiers) {
-                        await uploadFloorDrawingTiers(job.buildingId, job.floorCode, job.tiers);
-                    }
-                    if (job.pdfDataUrl) {
-                        await withTimeout(
-                            uploadFloorDrawingPdf(job.buildingId, job.floorCode, job.pdfDataUrl),
-                            120000,
-                            'pdf-upload'
-                        );
-                    }
-                } catch (e) {
-                    console.warn('도면 클라우드 백그라운드 업로드 실패:', job.buildingId, job.floorCode, e);
-                }
-            }
-        } finally {
-            _floorCloudUploadRunning = false;
-            if (_pendingFloorCloudUploads.length) {
-                drainFloorDrawingCloudUploads();
-            }
-        }
-    }
-
     async function cloudFloorDrawingTierExists(buildingId, floorCode, dim) {
         const docId = floorDrawingTierCloudDocId(buildingId, floorCode, dim);
         if (window._cloudSyncedTierKeys && window._cloudSyncedTierKeys.has(docId)) return true;
@@ -26987,137 +26938,40 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    /** 표시에 당장 필요한 4000 도면만 먼저 IDB에 쓴다 (대용량 때문에 UI가 멈추지 않게). */
-    async function persistBuildingDrawingAssetsEssential(bldg) {
-        if (!bldg || !bldg.id) return;
-        const tasks = [];
-        Object.entries(bldg.floorDrawings || {}).forEach(([floorCode, val]) => {
-            if (!val) return;
-            const key = `${bldg.id}_${floorCode}`;
-            if (_idbPersistedDrawingKeys.has(key) || _idbPendingDrawingKeys.has(key)) return;
-            _idbPendingDrawingKeys.add(key);
-            tasks.push(idbSet('floorDrawings', key, val).then((ok) => {
-                _idbPendingDrawingKeys.delete(key);
-                if (ok) _idbPersistedDrawingKeys.add(key);
-            }));
-        });
-        Object.entries(bldg.floorDrawingTiers || {}).forEach(([floorCode, tiersObj]) => {
-            if (!tiersObj || typeof tiersObj !== 'object') return;
-            const url = tiersObj['4000'] || tiersObj[4000];
-            if (typeof url !== 'string' || url.length < 32) return;
-            const key = floorDrawingTierIdbKey(bldg.id, floorCode, 4000);
-            if (_idbPersistedTierKeys.has(key) || _idbPendingTierKeys.has(key)) return;
-            _idbPendingTierKeys.add(key);
-            tasks.push(idbSet('floorDrawingTiers', key, url).then((ok) => {
-                _idbPendingTierKeys.delete(key);
-                if (ok) _idbPersistedTierKeys.add(key);
-            }));
-        });
-        if (!tasks.length) return;
-        try {
-            await withTimeout(Promise.all(tasks), 20000, 'idb-essential');
-        } catch (e) {
-            console.warn('도면 필수(4000) 로컬 저장 시간 초과/실패 — 백그라운드에서 이어갑니다:', e);
-        }
-    }
-
-    const _pendingHeavyIdbPersists = [];
-    let _heavyIdbPersistRunning = false;
-
-    function captureHeavyDrawingAssetsForIdb(bldg) {
-        const snap = { buildingId: bldg && bldg.id, rasters: {}, pdfs: {}, sources: {}, tiers: {} };
-        if (!bldg || !bldg.id) return snap;
-        Object.entries(bldg.floorDrawings || {}).forEach(([fc, url]) => {
-            // 필수 저장이 아직 안 끝난 4000도 백그라운드에서 재시도
-            if (typeof url === 'string' && url.length > 32
-                && !_idbPersistedDrawingKeys.has(`${bldg.id}_${fc}`)) {
-                snap.rasters[fc] = url;
-            }
-        });
-        Object.entries(bldg.floorDrawingPdfs || {}).forEach(([fc, url]) => {
-            if (typeof url === 'string' && url.length > 32) snap.pdfs[fc] = url;
-        });
-        Object.entries(bldg.floorDrawingSources || {}).forEach(([fc, url]) => {
-            if (typeof url === 'string' && url.length > 32) snap.sources[fc] = url;
-        });
-        Object.entries(bldg.floorDrawingTiers || {}).forEach(([fc, tiersObj]) => {
-            if (!tiersObj || typeof tiersObj !== 'object') return;
-            const filtered = {};
-            Object.entries(tiersObj).forEach(([dim, url]) => {
-                if (typeof url !== 'string' || url.length < 32) return;
-                const key = floorDrawingTierIdbKey(bldg.id, fc, dim);
-                if (_idbPersistedTierKeys.has(key)) return;
-                filtered[String(dim)] = url;
-            });
-            if (Object.keys(filtered).length) snap.tiers[fc] = filtered;
-        });
-        return snap;
-    }
-
-    function enqueueHeavyDrawingIdbPersist(snap) {
-        if (!snap || !snap.buildingId) return;
-        const hasWork = Object.keys(snap.rasters || {}).length
-            || Object.keys(snap.pdfs || {}).length
-            || Object.keys(snap.sources || {}).length
-            || Object.keys(snap.tiers || {}).length;
-        if (!hasWork) return;
-        _pendingHeavyIdbPersists.push(snap);
-        drainHeavyDrawingIdbPersist();
-    }
-
-    async function drainHeavyDrawingIdbPersist() {
-        if (_heavyIdbPersistRunning) return;
-        _heavyIdbPersistRunning = true;
-        try {
-            while (_pendingHeavyIdbPersists.length) {
-                const snap = _pendingHeavyIdbPersists.shift();
-                const bid = snap.buildingId;
-                const writeOne = async (store, key, val, persistedSet, pendingSet) => {
-                    if (!val || persistedSet.has(key)) return;
-                    if (pendingSet) pendingSet.add(key);
-                    try {
-                        const ok = await withTimeout(idbSet(store, key, val), 45000, `idb-${store}`);
-                        if (ok) persistedSet.add(key);
-                    } catch (e) {
-                        console.warn('도면 대용량 IDB 저장 실패:', store, key, e);
-                    } finally {
-                        if (pendingSet) pendingSet.delete(key);
-                    }
-                    // 메인 스레드에 숨 돌릴 틈
-                    await new Promise((r) => setTimeout(r, 0));
-                };
-                for (const [fc, url] of Object.entries(snap.rasters || {})) {
-                    await writeOne('floorDrawings', `${bid}_${fc}`, url, _idbPersistedDrawingKeys, _idbPendingDrawingKeys);
-                }
-                for (const [fc, url] of Object.entries(snap.pdfs || {})) {
-                    await writeOne('floorDrawingPdfs', `${bid}_${fc}`, url, _idbPersistedPdfKeys, _idbPendingPdfKeys);
-                }
-                for (const [fc, url] of Object.entries(snap.sources || {})) {
-                    await writeOne('floorDrawingSources', `${bid}_${fc}`, url, _idbPersistedSourceKeys, _idbPendingSourceKeys);
-                }
-                for (const [fc, tiersObj] of Object.entries(snap.tiers || {})) {
-                    for (const [dim, url] of Object.entries(tiersObj || {})) {
-                        const key = floorDrawingTierIdbKey(bid, fc, dim);
-                        await writeOne('floorDrawingTiers', key, url, _idbPersistedTierKeys, _idbPendingTierKeys);
-                    }
-                }
-            }
-        } finally {
-            _heavyIdbPersistRunning = false;
-            if (_pendingHeavyIdbPersists.length) drainHeavyDrawingIdbPersist();
-        }
-    }
-
-    /**
-     * 등록/수정 UI용: 4000만 기다린 뒤 바로 반환. PDF·8000·16000은 스냅샷 후 백그라운드 IDB 저장.
-     */
     async function persistBuildingDrawingAssetsNow(bldg) {
         if (!bldg || !bldg.id) return;
-        await persistBuildingDrawingAssetsEssential(bldg);
-        const heavySnap = captureHeavyDrawingAssetsForIdb(bldg);
+        const tasks = [];
+        const persistEntries = (storeName, map, persistedSet, pendingSet) => {
+            Object.entries(map || {}).forEach(([floorCode, val]) => {
+                if (!val) return;
+                const key = `${bldg.id}_${floorCode}`;
+                if (persistedSet.has(key)) return;
+                pendingSet.add(key);
+                tasks.push(idbSet(storeName, key, val).then((ok) => {
+                    pendingSet.delete(key);
+                    if (ok) persistedSet.add(key);
+                }));
+            });
+        };
+        persistEntries('floorDrawings', bldg.floorDrawings, _idbPersistedDrawingKeys, _idbPendingDrawingKeys);
+        persistEntries('floorDrawingPdfs', bldg.floorDrawingPdfs, _idbPersistedPdfKeys, _idbPendingPdfKeys);
+        persistEntries('floorDrawingSources', bldg.floorDrawingSources, _idbPersistedSourceKeys, _idbPendingSourceKeys);
+        Object.entries(bldg.floorDrawingTiers || {}).forEach(([floorCode, tiersObj]) => {
+            if (!tiersObj || typeof tiersObj !== 'object') return;
+            Object.entries(tiersObj).forEach(([dim, url]) => {
+                if (typeof url !== 'string' || url.length < 32) return;
+                const key = floorDrawingTierIdbKey(bldg.id, floorCode, dim);
+                if (_idbPersistedTierKeys.has(key) || _idbPendingTierKeys.has(key)) return;
+                _idbPendingTierKeys.add(key);
+                tasks.push(idbSet('floorDrawingTiers', key, url).then((ok) => {
+                    _idbPendingTierKeys.delete(key);
+                    if (ok) _idbPersistedTierKeys.add(key);
+                }));
+            });
+        });
+        await Promise.all(tasks);
         const keepFloor = (window.state.currentBuildingId === bldg.id) ? window.state.currentFloor : null;
         releaseHeavyDrawingMemory(bldg, { keepFloor, keepDim: 4000 });
-        enqueueHeavyDrawingIdbPersist(heavySnap);
     }
 
     async function applyMergedRemoteData(data) {
