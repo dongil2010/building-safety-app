@@ -2181,7 +2181,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 hydrated = true;
             }
         }
-        if (!bldg.floorDrawingPdfs[floorCode]) {
+        const hasRaster = isUsableRasterDrawingUrl(bldg.floorDrawings[floorCode]);
+        // 미리보기 JPEG가 이미 있으면 점검 진입을 PDF 원본 다운로드에 묶지 않는다.
+        // (확대 시 ensurePdfSourceForFloor가 필요할 때 따로 받는다)
+        if (!bldg.floorDrawingPdfs[floorCode] && (options.needPdf || !hasRaster)) {
             const resolvedPdf = await resolveBuildingFloorPdf(
                 bldg,
                 floorCode,
@@ -2195,15 +2198,41 @@ document.addEventListener('DOMContentLoaded', () => {
         return hydrated;
     }
 
+    function withTimeout(promise, ms, label) {
+        let timer = 0;
+        const timeout = new Promise((_, reject) => {
+            timer = setTimeout(() => reject(new Error(label || 'timeout')), ms);
+        });
+        return Promise.race([Promise.resolve(promise), timeout]).finally(() => clearTimeout(timer));
+    }
+
+    async function runPool(items, limit, worker) {
+        const queue = (items || []).slice();
+        if (queue.length === 0) return;
+        const n = Math.max(1, Math.min(limit || 2, queue.length));
+        await Promise.all(Array.from({ length: n }, async () => {
+            while (queue.length) {
+                const item = queue.shift();
+                try {
+                    await worker(item);
+                } catch (e) {
+                    console.warn('도면 처리 실패:', item, e);
+                }
+            }
+        }));
+    }
+
     async function hydrateSingleBuildingDrawings(bldg, opts) {
         if (!bldg || !bldg.id) return false;
         const options = opts || {};
         if (!bldg.floorDrawings) bldg.floorDrawings = {};
         if (!bldg.floorDrawingPdfs) bldg.floorDrawingPdfs = {};
         const floors = collectKnownFloorCodesForBuilding(bldg);
-        if (!options.localOnly && typeof discoverCloudDrawingFloorCodes === 'function') {
+        // floorsList가 있으면 그 층만 받는다. 현장 보관함의 다른 회차 층까지 붙이면
+        // 없는 층 PDF 조회가 끝나지 않은 채 로딩이 멈춘다.
+        if (!options.localOnly && floors.size === 0 && typeof discoverCloudDrawingFloorCodes === 'function') {
             try {
-                const discovered = await discoverCloudDrawingFloorCodes(bldg);
+                const discovered = await withTimeout(discoverCloudDrawingFloorCodes(bldg), 8000, '도면 층 탐색 시간 초과');
                 discovered.forEach((fc) => floors.add(fc));
             } catch (e) {
                 console.warn('서버 도면 층 탐색 실패:', bldg.id, e);
@@ -2213,27 +2242,53 @@ document.addEventListener('DOMContentLoaded', () => {
             floors.add(window.state.currentFloor || '1F');
         }
         mergeDiscoveredFloorsIntoBuilding(bldg, floors);
-        const floorList = [...floors];
+        const priority = options.priorityFloor && floors.has(options.priorityFloor)
+            ? options.priorityFloor
+            : null;
+        const floorList = priority
+            ? [priority, ...[...floors].filter((fc) => fc !== priority)]
+            : [...floors];
         let done = 0;
-        const reportProgress = () => {
+        const reportProgress = (floorCode) => {
             if (!options.onProgress || floorList.length === 0) return;
-            options.onProgress(done, floorList.length, floorList[done - 1] || '');
+            options.onProgress(done, floorList.length, floorCode || '');
         };
-        reportProgress();
-        // 1) 전 층 도면·PDF — 온라인이면 서버에서, 오프라인이면 IDB만
-        await Promise.all(floorList.map(async (floorCode) => {
-            await hydrateFloorDrawingFromCloud(bldg, floorCode, options);
+        reportProgress(floorList[0] || '');
+
+        const hydrateOne = async (floorCode, extra) => {
+            const floorOpts = extra ? { ...options, ...extra } : options;
+            await withTimeout(hydrateFloorDrawingFromCloud(bldg, floorCode, floorOpts), 15000, '도면 내려받기 시간 초과');
+            await withTimeout(ensureOfflineRasterForFloor(bldg, floorCode), 12000, '도면 미리보기 생성 시간 초과');
             done += 1;
-            reportProgress();
-        }));
-        // 2) PDF-only 층 — 오프라인 표시용 JPEG 미리보기 생성·IDB 저장
-        done = 0;
-        for (const floorCode of floorList) {
-            await ensureOfflineRasterForFloor(bldg, floorCode);
-            done += 1;
-            reportProgress();
+            reportProgress(floorCode);
+        };
+
+        if (priority) {
+            try {
+                await withTimeout(hydrateOne(priority, { needPdf: false }), 10000, '현재 층 도면 시간 초과');
+            } catch (e) {
+                console.warn('현재 층 도면 로드 실패:', priority, e);
+            }
+        } else if (options.backgroundRest && floorList[0]) {
+            try {
+                await withTimeout(hydrateOne(floorList[0], { needPdf: false }), 10000, '현재 층 도면 시간 초과');
+            } catch (e) {
+                console.warn('첫 층 도면 로드 실패:', floorList[0], e);
+            }
         }
-        await persistBuildingDrawingAssetsNow(bldg);
+
+        const skipFirst = (!priority && options.backgroundRest && floorList[0]) ? floorList[0] : priority;
+        const rest = skipFirst ? floorList.filter((fc) => fc !== skipFirst) : floorList;
+        const restWork = (async () => {
+            await runPool(rest, 2, (floorCode) => hydrateOne(floorCode));
+            await persistBuildingDrawingAssetsNow(bldg);
+        })();
+
+        if (options.backgroundRest) {
+            restWork.catch((e) => console.warn('나머지 층 도면 백그라운드 로드 실패:', bldg.id, e));
+            return floorList.length > 0;
+        }
+        await restWork;
         return floorList.length > 0;
     }
     window.hydrateSingleBuildingDrawings = hydrateSingleBuildingDrawings;
@@ -2244,7 +2299,8 @@ document.addEventListener('DOMContentLoaded', () => {
             let anyHydrated = false;
 
             await Promise.all(buildings.map(async (b) => {
-                if (await hydrateSingleBuildingDrawings(b)) anyHydrated = true;
+                // IDB 복원만 — 여기서 서버 전 층 다운로드를 타면 로그인/동기화가 멈춘 것처럼 보인다
+                if (await hydrateSingleBuildingDrawings(b, { localOnly: true })) anyHydrated = true;
             }));
 
             const defectsMap = window.state.defects || {};
@@ -2607,21 +2663,22 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const targetFloor = window.state.currentFloor || '1F';
         const canFetchDrawings = typeof navigator === 'undefined' || navigator.onLine !== false;
-        if (canFetchDrawings && typeof window.showLoading === 'function') {
-            window.showLoading('서버에서 전 층 도면을 내려받는 중…');
+        if (typeof window.showLoading === 'function') {
+            window.showLoading('도면을 불러오는 중…');
         }
         try {
-            if (canFetchDrawings && typeof hydrateSingleBuildingDrawings === 'function') {
+            if (typeof hydrateSingleBuildingDrawings === 'function') {
                 await hydrateSingleBuildingDrawings(bldg, {
+                    localOnly: !canFetchDrawings,
+                    priorityFloor: targetFloor,
+                    backgroundRest: true,
                     onProgress: (done, total, floorCode) => {
-                        if (typeof window.showLoading === 'function' && total > 0) {
-                            window.showLoading(`전 층 도면 내려받는 중… (${done}/${total}${floorCode ? ' · ' + floorCode : ''})`);
+                        if (typeof window.showLoading !== 'function' || total <= 0) return;
+                        if (floorCode === targetFloor || done <= 1) {
+                            window.showLoading(`도면을 불러오는 중…${floorCode ? ' · ' + floorCode : ''}`);
                         }
                     }
                 });
-            } else if (typeof hydrateSingleBuildingDrawings === 'function') {
-                // 오프라인: 서버 조회 없이 IDB·메모리만 복원
-                await hydrateSingleBuildingDrawings(bldg, { localOnly: true });
             }
             populateFloorSelectDropdown(bldg);
         } catch (e) {
