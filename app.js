@@ -2098,16 +2098,40 @@ document.addEventListener('DOMContentLoaded', () => {
         if (serverRec.groupId) merged.groupId = serverRec.groupId;
         if (serverRec.surveyExtra || localRec.surveyExtra) merged.surveyExtra = true;
 
-        merged.photos = mergePhotoArrays(
-            extractInlinePhotos(serverRec),
-            extractInlinePhotos(localRec)
-        );
-        merged.prevRoundPhotos = mergePhotoArrays(
-            extractInlinePhotos(serverRec, 'prev'),
-            extractInlinePhotos(localRec, 'prev')
-        );
-        delete merged.photoIds;
-        delete merged.prevRoundPhotoIds;
+        // 사진은 대부분 인라인(photos)이 아니라 IndexedDB 참조(photoIds)로 저장돼 있다 — 저장
+        // 시점에 무거운 사진은 IndexedDB로 옮기고 photos는 비운다(persistLocalImagesToIndexedDb/
+        // saveStateToLocalStorage 참고). 그런데 이 함수가 항상 photoIds를 지우고 인라인 photos만
+        // 합쳐서 다시 채웠기 때문에, 서버·로컬 둘 다 인라인 사진이 없는(=정상적으로 photoIds만
+        // 갖고 있는) 흔한 경우 병합 결과가 photos=[] · photoIds 없음이 되어 사진 참조가 통째로
+        // 사라졌다 — 동기화할 때마다 결함 사진이 없어지던 실제 원인(사용자가 실제로 겪음, 콘솔로
+        // 확인: 결함 37개 전부 photoIds:0, photos:0). 어느 한쪽이든 photoIds가 있으면 더 많은
+        // 쪽(= 최소한 있던 참조는 안 잃는 쪽)을 그대로 쓰고, 둘 다 없을 때만 인라인 사진을 합친다.
+        const serverPhotoIds = Array.isArray(serverRec.photoIds) ? serverRec.photoIds : [];
+        const localPhotoIds = Array.isArray(localRec.photoIds) ? localRec.photoIds : [];
+        if (serverPhotoIds.length || localPhotoIds.length) {
+            merged.photoIds = (localPhotoIds.length >= serverPhotoIds.length) ? localPhotoIds.slice() : serverPhotoIds.slice();
+            delete merged.photos;
+        } else {
+            merged.photos = mergePhotoArrays(
+                extractInlinePhotos(serverRec),
+                extractInlinePhotos(localRec)
+            );
+            delete merged.photoIds;
+        }
+
+        const serverPrevPhotoIds = Array.isArray(serverRec.prevRoundPhotoIds) ? serverRec.prevRoundPhotoIds : [];
+        const localPrevPhotoIds = Array.isArray(localRec.prevRoundPhotoIds) ? localRec.prevRoundPhotoIds : [];
+        if (serverPrevPhotoIds.length || localPrevPhotoIds.length) {
+            merged.prevRoundPhotoIds = (localPrevPhotoIds.length >= serverPrevPhotoIds.length) ? localPrevPhotoIds.slice() : serverPrevPhotoIds.slice();
+            delete merged.prevRoundPhotos;
+        } else {
+            merged.prevRoundPhotos = mergePhotoArrays(
+                extractInlinePhotos(serverRec, 'prev'),
+                extractInlinePhotos(localRec, 'prev')
+            );
+            delete merged.prevRoundPhotoIds;
+        }
+
         merged.updatedAt = Math.max(serverTs, localTs, Number(merged.updatedAt) || 0);
         return merged;
     }
@@ -12080,6 +12104,66 @@ document.addEventListener('DOMContentLoaded', () => {
             if (filled.length > 0) d.prevRoundPhotos = filled;
         }
     }
+
+    // 사진 문서 id는 `${결함id}_${순번}` 형식으로 정해져 있다(getPhotoDocId) — mergeDefectRecord의
+    // 예전 버그로 photoIds 참조 자체가 지워진 결함이라도, 사진 원본은 클라우드(Firestore 'photos'
+    // 컬렉션)에 그 id로 그대로 남아있을 가능성이 높다. photoIds가 비어있는 결함마다 0번부터 순서대로
+    // 존재 여부를 확인해서, 실제로 남아있는 사진을 찾으면 photoIds를 복구해준다.
+    async function probePhotoDocExists(pid) {
+        if (!db || !window.state.companyId) return false;
+        try {
+            const snap = await db.collection('safety_app').doc(getCompanyDocId()).collection('photos').doc(pid).get();
+            return !!(snap.exists && snap.data() && snap.data().dataUrl);
+        } catch (e) {
+            return false;
+        }
+    }
+
+    window.repairMissingPhotoIds = async function (opts) {
+        const options = opts || {};
+        const maxProbe = options.maxProbe || 30;
+        const buildingId = options.buildingId || window.state.currentBuildingId;
+        if (!buildingId) { window.showToast('건물을 먼저 선택하세요.', 'warning'); return { checked: 0, recovered: 0 }; }
+        const keys = Object.keys(window.state.defects || {}).filter((k) => k.startsWith(`${buildingId}_`));
+        let checked = 0;
+        let recovered = 0;
+        for (const key of keys) {
+            const arr = window.state.defects[key] || [];
+            for (const d of arr) {
+                if (!d || !d.id) continue;
+                const needCur = (!d.photoIds || d.photoIds.length === 0) && (!d.photos || d.photos.length === 0);
+                const needPrev = (!d.prevRoundPhotoIds || d.prevRoundPhotoIds.length === 0) && (!d.prevRoundPhotos || d.prevRoundPhotos.length === 0);
+                if (!needCur && !needPrev) continue;
+                checked++;
+                if (needCur) {
+                    const foundIds = [];
+                    for (let i = 0; i < maxProbe; i++) {
+                        const pid = getPhotoDocId(d.id, i);
+                        if (await probePhotoDocExists(pid)) foundIds.push(pid);
+                        else if (foundIds.length > 0 || i > 2) break; // 몇 번 연속 없으면 그만 찾음(사진 없는 결함일 뿐)
+                    }
+                    if (foundIds.length > 0) { d.photoIds = foundIds; recovered++; }
+                }
+                if (needPrev) {
+                    const foundPrevIds = [];
+                    for (let i = 0; i < maxProbe; i++) {
+                        const pid = getPhotoDocId(d.id, i, 'prev');
+                        if (await probePhotoDocExists(pid)) foundPrevIds.push(pid);
+                        else if (foundPrevIds.length > 0 || i > 2) break;
+                    }
+                    if (foundPrevIds.length > 0) { d.prevRoundPhotoIds = foundPrevIds; recovered++; }
+                }
+            }
+        }
+        if (recovered > 0) {
+            if (typeof saveStateToLocalStorage === 'function') saveStateToLocalStorage();
+            if (typeof scheduleSyncToFirebase === 'function') scheduleSyncToFirebase();
+            if (typeof renderSurveyTable === 'function' && window.state.currentTab === 'tab-survey') renderSurveyTable();
+            if (typeof renderDefectListPanel === 'function') renderDefectListPanel();
+        }
+        window.showToast(`사진 참조 없는 결함 ${checked}건 확인, ${recovered}건 복구됨.`, recovered > 0 ? 'success' : 'info', 5000);
+        return { checked, recovered };
+    };
 
     /** 현회차 photos를 prevRoundPhotos로 옮기고 현회차 사진 슬롯을 비운다. 보관 장수 반환. */
     async function archiveDefectPhotosToPrevRound(d) {
