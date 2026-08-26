@@ -24,7 +24,7 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <meta name="apple-mobile-web-app-title" content="스마트 안전점검">
-    <link rel="stylesheet" href="styles.css?v=20260826_pccompact">
+    <link rel="stylesheet" href="styles.css?v=20260826_authgate">
     <!-- FontAwesome icons for clean engineering UI -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <!-- PDF 생성용: 페이지별로 직접 캡처해서 조립(큰 보고서에서 html2pdf 한방 렌더링이 캔버스 높이 한계로
@@ -49,7 +49,7 @@
     <!-- 한글(HWPX) 상태조사표 내보내기용 zip 조립 -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 </head>
-<body class="theme-light">
+<body class="theme-light auth-gate-active">
 
     <!-- Main Navigation Tabs (홈 탭 + 사용자프로필/로그아웃은 항상 표시, 나머지는 건물 선택 시에만 표시) -->
     <nav class="main-tabs" id="mainNavTabs">
@@ -2238,6 +2238,7 @@
                 </div>
                 <h2 style="font-size: 1.45rem; font-weight: 800; color: #171717; margin: 0; letter-spacing: -0.5px;">스마트 건축물 안전점검</h2>
                 <p style="font-size: 0.83rem; color: #737373; margin: 0.35rem 0 0 0; font-weight: 500;">점검 수행회사 전용 실시간 안전점검 시스템</p>
+                <p style="font-size: 0.78rem; color: #525252; margin: 0.65rem 0 0 0; font-weight: 600; line-height: 1.45;">아래에서 로그인하면 건축물 등록·점검 화면을 사용할 수 있습니다.</p>
             </div>
 
             <!-- Login / Register Tab Selector -->
@@ -2360,10 +2361,10 @@
     </div>
 
     <!-- Core → 탭 분류 → 기존 엔진(app.js) -->
-    <script src="js/core/state.js?v=20260826_pccompact"></script>
+    <script src="js/core/state.js?v=20260826_authgate"></script>
+    <script src="js/tabs/registry.js?v=20260826_bsafix"></script>
     <script src="js/pdf-vector-bridge.js?v=20260826_pdfcloud"></script>
-    <script src="js/core/layout-mode.js?v=20260826_pccompact"></script>
-    <script src="js/tabs/registry.js?v=20260821_land1"></script>
+    <script src="js/core/layout-mode.js?v=20260826_bsafix"></script>
     <script src="js/tabs/home.js?v=20260824_webview"></script>
     <script src="js/tabs/map.js?v=20260825_mobpatch2"></script>
     <script src="js/tabs/survey.js?v=20260824_nSub"></script>
@@ -2371,9 +2372,9 @@
     <script src="js/shared/report.js?v=20260824_hwpxFix"></script>
     <script src="js/shared/hwpx-import.js?v=20260825_hwpxin"></script>
     <script src="js/shared/auth.js?v=20260821_land1"></script>
-    <script src="app.js?v=20260826_loginfix"></script>
+    <script src="app.js?v=20260826_bsafix"></script>
     <script>
-        window.BSA_APP_VERSION = '20260826_loginfix';
+        window.BSA_APP_VERSION = '20260826_bsafix';
         (function () {
             var el = document.getElementById('appVersionText');
             if (el && window.BSA_APP_VERSION) el.textContent = 'v' + window.BSA_APP_VERSION;
@@ -2397,7 +2398,7 @@
                     native = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
                 } catch (e) {}
                 if (native) return;
-                navigator.serviceWorker.register('./sw.js?v=20260825_mobzoom')
+                navigator.serviceWorker.register('./sw.js?v=20260826_authgate')
                     .then(function(registration) {
                         console.log('✅ ServiceWorker Registered Successfully with scope:', registration.scope);
                         registration.update();

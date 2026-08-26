@@ -118,6 +118,11 @@ document.addEventListener('DOMContentLoaded', () => {
         const overlay = document.getElementById('globalLoadingOverlay');
         if (overlay) overlay.style.display = 'none';
     };
+    window.resetLoadingOverlay = function() {
+        _loadingDepth = 0;
+        const overlay = document.getElementById('globalLoadingOverlay');
+        if (overlay) overlay.style.display = 'none';
+    };
     window.updateLoadingText = function(text) {
         const overlay = document.getElementById('globalLoadingOverlay');
         const el = overlay?.querySelector('.loading-text');
@@ -24968,11 +24973,19 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     function isLoginOverlayOpen() {
+        if (document.body && document.body.classList.contains('auth-gate-active')) return true;
         const overlay = document.getElementById('loginOverlay');
         if (!overlay) return false;
         const css = overlay.style.cssText || '';
         if (/display:\s*none/i.test(css)) return false;
-        return overlay.style.display !== 'none';
+        if (overlay.style.display === 'none') return false;
+        const computed = window.getComputedStyle ? window.getComputedStyle(overlay).display : '';
+        return computed !== 'none';
+    }
+
+    function setAuthGateActive(on) {
+        if (!document.body) return;
+        document.body.classList.toggle('auth-gate-active', !!on);
     }
 
     (function bindRemoteWebRefresh() {
@@ -25007,7 +25020,7 @@ document.addEventListener('DOMContentLoaded', () => {
         window.addEventListener('pageshow', (e) => {
             if (e.persisted) checkRemoteWebVersion();
         });
-        setTimeout(checkRemoteWebVersion, 3500);
+        // 첫 로드 직후 자동 reload는 로그인·초기화와 겹치므로 생략 (탭 복귀·포커스 시만 확인)
         if (isNativeAndroidApp()) {
             setInterval(checkRemoteWebVersion, 45000);
         }
@@ -26017,10 +26030,11 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function showLoginOverlay() {
+        setAuthGateActive(true);
         const overlay = document.getElementById('loginOverlay');
         const loginCard = overlay ? overlay.querySelector('.modal-card') : null;
         const pendingCard = document.getElementById('pendingApprovalCard');
-        if (overlay) overlay.style.cssText = 'display: flex !important; opacity: 1 !important; pointer-events: auto !important; visibility: visible !important;';
+        if (overlay) overlay.style.cssText = 'display: flex !important; opacity: 1 !important; pointer-events: auto !important; visibility: visible !important; z-index: 9999;';
         if (loginCard) loginCard.style.display = 'flex';
         if (pendingCard) pendingCard.style.display = 'none';
         const headerProfile = document.getElementById('headerUserProfileGroup');
@@ -26029,10 +26043,11 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function showPendingApproval(companyName) {
+        setAuthGateActive(true);
         const overlay = document.getElementById('loginOverlay');
         const loginCard = overlay ? overlay.querySelector('.modal-card') : null;
         const pendingCard = document.getElementById('pendingApprovalCard');
-        if (overlay) overlay.style.cssText = 'display: flex !important; opacity: 1 !important; pointer-events: auto !important; visibility: visible !important;';
+        if (overlay) overlay.style.cssText = 'display: flex !important; opacity: 1 !important; pointer-events: auto !important; visibility: visible !important; z-index: 9999;';
         if (loginCard) loginCard.style.display = 'none';
         if (pendingCard) pendingCard.style.display = 'block';
         const lbl = document.getElementById('pendingCompanyName');
@@ -26042,11 +26057,14 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function hideAuthOverlay() {
+        setAuthGateActive(false);
         const overlay = document.getElementById('loginOverlay');
         if (overlay) {
             overlay.style.cssText = 'display: none !important; opacity: 0 !important; pointer-events: none !important; visibility: hidden !important;';
             overlay.classList.remove('open');
         }
+        if (typeof window.resetLoadingOverlay === 'function') window.resetLoadingOverlay();
+        else if (typeof window.hideLoading === 'function') window.hideLoading();
     }
 
     async function enterAppAsUser(profile) {
@@ -26148,15 +26166,30 @@ document.addEventListener('DOMContentLoaded', () => {
         return 'unknown';
     }
 
+    function ensureFirebaseAuthReady() {
+        if (auth) return auth;
+        try {
+            initFirebaseSync();
+        } catch (e) {
+            console.error('Firebase 재초기화 오류:', e);
+        }
+        return auth;
+    }
+
     window.submitLogin = async function() {
         clearAuthError();
         const email = (document.getElementById('authEmail')?.value || '').trim();
         const password = document.getElementById('authPassword')?.value || '';
         if (!email || !password) { showAuthError({ message: '이메일과 비밀번호를 입력해 주세요.' }); return; }
+        const authClient = ensureFirebaseAuthReady();
+        if (!authClient) {
+            showAuthError({ message: '인증 서버에 연결할 수 없습니다. 인터넷 연결 후 새로고침해 주세요.' });
+            return;
+        }
         window._authSubmitInFlight = true;
         window.showLoading('로그인 중입니다...');
         try {
-            await auth.signInWithEmailAndPassword(email, password);
+            await authClient.signInWithEmailAndPassword(email, password);
         } catch (err) {
             showAuthError(err);
         } finally {
@@ -26572,12 +26605,18 @@ document.addEventListener('DOMContentLoaded', () => {
         window.renderNdtSummaryTable = renderNdtSummaryTable;
         window.renderSurveyTable = renderSurveyTable;
 
-        loadStateFromLocalStorage();
-        setupCanvas();
-        renderDashboard();
-        window.switchTab('tab-home');
         initFirebaseSync();
         initAuthEvents();
+
+        try {
+            loadStateFromLocalStorage();
+            setupCanvas();
+            renderDashboard();
+            window.switchTab('tab-home');
+        } catch (bootErr) {
+            console.error('앱 UI 초기화 오류:', bootErr);
+            try { renderDashboard(); } catch (_e) { /* ignore */ }
+        }
         if (typeof setupNdtModalEvents === 'function') setupNdtModalEvents();
         if (typeof setupNdtDisplacementModalEvents === 'function') setupNdtDisplacementModalEvents();
         if (typeof setupStyleColorModalEvents === 'function') setupStyleColorModalEvents();
@@ -26587,7 +26626,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (typeof setupClearCarriedOverBulkEvents === 'function') setupClearCarriedOverBulkEvents();
         if (typeof setupTipShapeEvents === 'function') setupTipShapeEvents();
         if (typeof setupAreaMarkStyleEvents === 'function') setupAreaMarkStyleEvents();
-        if (!auth || !auth.currentUser) showLoginOverlay();
+        // 로그인 오버레이는 onAuthStateChanged → handleAuthStateChange 가 전담
     }
 
     init();

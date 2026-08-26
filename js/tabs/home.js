@@ -1,5 +1,7 @@
 /* 탭: 홈 — 건물 목록 / 등록·수정 / JSON 백업 / 회사명 / 휴대폰 촬영 연동 */
-window.BSA = window.BSA || { tabs: {}, shared: {} };
+window.BSA = window.BSA || {};
+if (!window.BSA.tabs) window.BSA.tabs = {};
+if (!window.BSA.shared) window.BSA.shared = {};
 
 window.BSA.tabs['tab-home'] = {
     id: 'tab-home',

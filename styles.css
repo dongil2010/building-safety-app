@@ -3020,6 +3020,17 @@ body {
 }
 
 /* Modals System */
+/* 로그인 게이트 — 미로그인 시 홈·탭 클릭 불가(오버레이 뒤 버튼 혼동 방지) */
+body.auth-gate-active #mainNavTabs,
+body.auth-gate-active .app-content {
+    pointer-events: none !important;
+    user-select: none;
+}
+
+body.auth-gate-active #loginOverlay {
+    pointer-events: auto !important;
+}
+
 .modal-overlay {
     position: fixed;
     top: 0;

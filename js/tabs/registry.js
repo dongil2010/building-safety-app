@@ -5,7 +5,9 @@
    기존 구현 본체는 당분간 app.js (DOMContentLoaded) 에 그대로 둡니다.
    ========================================================================== */
 
-window.BSA = window.BSA || { tabs: {}, shared: {} };
+window.BSA = window.BSA || {};
+if (!window.BSA.tabs) window.BSA.tabs = {};
+if (!window.BSA.shared) window.BSA.shared = {};
 
 window.BSA.applyTabChrome = function (tabId) {
     const isHome = tabId === 'tab-home';
@@ -31,6 +33,8 @@ window.BSA.applyTabChrome = function (tabId) {
 };
 
 window.BSA.enterTab = function (tabId) {
-    const tab = window.BSA.tabs[tabId];
+    const tabs = window.BSA && window.BSA.tabs;
+    if (!tabs) return;
+    const tab = tabs[tabId];
     if (tab && typeof tab.enter === 'function') tab.enter();
 };

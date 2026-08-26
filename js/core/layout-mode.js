@@ -1,6 +1,8 @@
 /* 모바일 브라우저 "데스크톱 사이트" 요청 시 PC 레이아웃 유지 */
 (function () {
     window.BSA = window.BSA || {};
+    if (!window.BSA.tabs) window.BSA.tabs = {};
+    if (!window.BSA.shared) window.BSA.shared = {};
 
     var DESKTOP_LAYOUT_WIDTH = 1280;
 
