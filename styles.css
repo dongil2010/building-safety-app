@@ -554,6 +554,45 @@ body {
     background: rgba(255, 255, 255, 0.72);
 }
 
+.map-drawing-empty {
+    position: absolute;
+    inset: 0;
+    z-index: 10;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    pointer-events: none;
+    padding: 1.25rem;
+    text-align: center;
+    background: rgba(226, 232, 240, 0.88);
+}
+
+.map-drawing-empty-inner {
+    max-width: 22rem;
+    color: #475569;
+}
+
+.map-drawing-empty-inner > i {
+    font-size: 2rem;
+    color: #94a3b8;
+    margin-bottom: 0.65rem;
+}
+
+.map-drawing-empty-msg {
+    margin: 0 0 0.45rem;
+    font-size: 0.92rem;
+    font-weight: 700;
+    color: #334155;
+    line-height: 1.45;
+}
+
+.map-drawing-empty-hint {
+    margin: 0;
+    font-size: 0.76rem;
+    color: #64748b;
+    line-height: 1.5;
+}
+
 #ndtCanvasContainer {
     background: #d0d0d0;
     border-color: var(--border-highlight);
@@ -8034,4 +8073,128 @@ body {
     display: flex;
     gap: 0.5rem;
     flex-wrap: wrap;
+}
+
+/* ============================================================
+   모바일 브라우저 "데스크톱 사이트" — PC 레이아웃 (뷰포트 1280px + UA 감지)
+   @media (max-width)가 좁은 기기 폭으로仍 적용될 때 CSS 폴백
+   ============================================================ */
+html.layout-desktop .pc-only-chrome,
+html.layout-desktop .map-unregistered-section {
+    display: revert !important;
+}
+
+html.layout-desktop .header-actions.pc-only-chrome {
+    display: flex !important;
+}
+
+html.layout-desktop .tab-label-long {
+    display: inline !important;
+}
+
+html.layout-desktop .tab-label-short {
+    display: none !important;
+}
+
+html.layout-desktop .nav-building-name {
+    display: inline !important;
+}
+
+html.layout-desktop .mobile-canvas-dock,
+html.layout-desktop .mobile-side-rail,
+html.layout-desktop .mobile-map-fab,
+html.layout-desktop .mobile-ndt-fab {
+    display: none !important;
+}
+
+html.layout-desktop #tab-map .canvas-top-toolbar,
+html.layout-desktop #tab-ndt .canvas-top-toolbar,
+html.layout-desktop #tab-map .canvas-bottom-toolbar {
+    display: flex !important;
+}
+
+html.layout-desktop #mapStyleSizeToolbar,
+html.layout-desktop #ndtStyleSizeToolbar {
+    display: flex !important;
+    position: static !important;
+    left: auto !important;
+    right: auto !important;
+    bottom: auto !important;
+    z-index: auto !important;
+    max-height: none !important;
+    overflow: visible !important;
+    box-shadow: none !important;
+    margin-bottom: 0.5rem !important;
+}
+
+html.layout-desktop .defect-mobile-actions {
+    display: none !important;
+}
+
+html.layout-desktop .defect-drawer-footer-desktop {
+    display: flex !important;
+}
+
+html.layout-desktop body {
+    height: 100vh;
+    overflow: hidden;
+}
+
+html.layout-desktop .app-content {
+    min-height: 0;
+    overflow-y: auto;
+}
+
+html.layout-desktop #tab-map .inspect-layout {
+    flex-direction: row !important;
+    align-items: stretch !important;
+}
+
+html.layout-desktop #tab-map .inspect-sidebar-left,
+html.layout-desktop #tab-map .inspect-sidebar-right {
+    width: auto !important;
+    max-width: none !important;
+}
+
+html.layout-desktop #tab-map .defect-list-panel {
+    flex-direction: column !important;
+    overflow-x: hidden !important;
+    overflow-y: auto !important;
+}
+
+html.layout-desktop #defectModal .defect-drawer-card,
+html.layout-desktop #defectModal.defect-drawer-in-canvas .defect-drawer-card {
+    width: min(420px, 38vw) !important;
+    max-width: min(480px, 42vw) !important;
+    height: 100% !important;
+    max-height: none !important;
+    min-height: 0 !important;
+    margin: 0 !important;
+    border-radius: 0 14px 14px 0 !important;
+    transform: none !important;
+}
+
+html.layout-desktop #defectModal.modal-drawer-overlay {
+    align-items: stretch !important;
+    justify-content: flex-start !important;
+    padding: 0 !important;
+}
+
+html.layout-desktop #ndtModal .ndt-drawer-card {
+    width: min(420px, 38vw) !important;
+    max-width: min(480px, 42vw) !important;
+    height: 100% !important;
+    max-height: none !important;
+    border-radius: 0 14px 14px 0 !important;
+    transform: none !important;
+}
+
+html.layout-desktop .toast-container {
+    top: 4.5rem;
+    bottom: auto;
+}
+
+html.layout-desktop #ndtCanvasHintText,
+html.layout-desktop #tab-ndt .canvas-hint {
+    display: block !important;
 }

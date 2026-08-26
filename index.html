@@ -2,7 +2,8 @@
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" id="viewportMeta">
+    <script src="js/core/layout-mode.js?v=20260826_desktop"></script>
     <title>스마트 건축물 안전점검 현장점검 시스템</title>
     <!-- PWA Offline & Mobile App Meta -->
     <link rel="manifest" href="manifest.json">
@@ -12,7 +13,7 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <meta name="apple-mobile-web-app-title" content="스마트 안전점검">
-    <link rel="stylesheet" href="styles.css?v=20260826_addonly">
+    <link rel="stylesheet" href="styles.css?v=20260826_desktop">
     <!-- FontAwesome icons for clean engineering UI -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <!-- PDF 생성용: 페이지별로 직접 캡처해서 조립(큰 보고서에서 html2pdf 한방 렌더링이 캔버스 높이 한계로
@@ -237,6 +238,13 @@
                     <!-- Canvas Viewport -->
                     <div class="canvas-container" id="canvasContainer">
                         <div id="mapZoomOverlay" class="map-zoom-overlay" aria-hidden="true"></div>
+                        <div id="mapDrawingEmpty" class="map-drawing-empty" aria-live="polite" style="display:none;">
+                            <div class="map-drawing-empty-inner">
+                                <i class="fa-regular fa-image" aria-hidden="true"></i>
+                                <p class="map-drawing-empty-msg">이 층에 등록된 도면이 없습니다.</p>
+                                <p class="map-drawing-empty-hint">홈 탭에서 건물 등록·수정 시 층별 도면(PDF·이미지)을 업로드해 주세요.</p>
+                            </div>
+                        </div>
                         <canvas id="planCanvas"></canvas>
                         <aside class="mobile-side-rail" id="mobileMapSideRail" aria-label="마킹 도구">
                             <button type="button" class="mobile-rail-btn active" id="mobileBtnModePan" data-mode="PAN" title="선택">
@@ -2347,7 +2355,7 @@
     <script src="js/shared/auth.js?v=20260821_land1"></script>
     <script src="app.js?v=20260826_tierlod"></script>
     <script>
-        window.BSA_APP_VERSION = '20260826_addonly';
+        window.BSA_APP_VERSION = '20260826_desktop';
         (function () {
             var el = document.getElementById('appVersionText');
             if (el && window.BSA_APP_VERSION) el.textContent = 'v' + window.BSA_APP_VERSION;

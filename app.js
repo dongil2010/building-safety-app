@@ -29,6 +29,7 @@ document.addEventListener('DOMContentLoaded', () => {
         canvasContainer: document.getElementById('canvasContainer'),
         planCanvas: document.getElementById('planCanvas'),
         mapZoomOverlay: document.getElementById('mapZoomOverlay'),
+        mapDrawingEmpty: document.getElementById('mapDrawingEmpty'),
         zoomScaleText: document.getElementById('zoomScaleText'),
 
         // Tables & Albums
@@ -37,6 +38,27 @@ document.addEventListener('DOMContentLoaded', () => {
         surveyFloorTitle: document.getElementById('surveyFloorTitle'),
         albumFloorTitle: document.getElementById('albumFloorTitle')
     };
+
+    /** 모바일 브라우저 "데스크톱 사이트" — PC 레이아웃 강제 */
+    function isDesktopSiteLayout() {
+        return !!(window.BSA && typeof window.BSA.isDesktopSiteMode === 'function' && window.BSA.isDesktopSiteMode());
+    }
+    function layoutIsMobileWidth() {
+        if (isDesktopSiteLayout()) return false;
+        return (window.innerWidth || document.documentElement.clientWidth || 0) <= 768;
+    }
+    function layoutIsCompactWidth() {
+        if (isDesktopSiteLayout()) return false;
+        return (window.innerWidth || document.documentElement.clientWidth || 0) <= 1024;
+    }
+    function layoutMediaMobilePortrait() {
+        if (isDesktopSiteLayout()) return false;
+        return !!(window.matchMedia && window.matchMedia('(max-width: 768px) and (orientation: portrait)').matches);
+    }
+    function layoutMediaMobileDefectDrawer() {
+        if (isDesktopSiteLayout()) return false;
+        return !!(window.matchMedia && window.matchMedia('(max-width: 768px), (orientation: landscape) and (max-width: 1024px)').matches);
+    }
 
     // --- 3.5 UI 알림 / 로딩 유틸 (토스트 & 전역 로딩 오버레이) ---
     function ensureToastContainer() {
@@ -800,6 +822,48 @@ document.addEventListener('DOMContentLoaded', () => {
         return !!(_idbPersistedPdfKeys && _idbPersistedPdfKeys.has(idbKey));
     }
 
+    /** 층 목록 등록과 별도 — 실제 도면·PDF·소스·IDB 캐시가 있는지 */
+    function floorHasDrawingData(bldg, floorCode) {
+        if (!bldg || !floorCode) return false;
+        const tiers = bldg.floorDrawingTiers && bldg.floorDrawingTiers[floorCode];
+        if (tiers && Object.values(tiers).some(Boolean)) return true;
+        if (bldg.floorDrawings && bldg.floorDrawings[floorCode]) return true;
+        if (floorHasPdfSourceSync(bldg, floorCode)) return true;
+        const src = bldg.floorDrawingSources && bldg.floorDrawingSources[floorCode];
+        if (src) return true;
+        const key = `${bldg.id}_${floorCode}`;
+        if (_idbPersistedTierKeys && _idbPersistedTierKeys.has(key)) return true;
+        if (_idbPersistedPdfKeys && _idbPersistedPdfKeys.has(key)) return true;
+        if (_idbPersistedSourceKeys && _idbPersistedSourceKeys.has(key)) return true;
+        return false;
+    }
+
+    function updateFloorDrawingEmptyOverlay(message) {
+        const el = elements.mapDrawingEmpty || document.getElementById('mapDrawingEmpty');
+        if (!el) return;
+        const onMap = state.currentTab === 'tab-map';
+        const show = onMap && !!state.currentBuilding && !!state.currentFloor && !state.bgImage;
+        if (!show) {
+            el.style.display = 'none';
+            return;
+        }
+        const msgEl = el.querySelector('.map-drawing-empty-msg');
+        if (msgEl && message) msgEl.textContent = message;
+        el.style.display = 'flex';
+    }
+
+    function showFloorDrawingEmptyState(floorCode, message) {
+        if (state.currentFloor !== floorCode) return;
+        cancelFloorDrawingBlend();
+        state.bgImage = null;
+        state.floorDrawingHiPatch = null;
+        state.floorPlanRef = null;
+        if (elements.zoomScaleText) elements.zoomScaleText.textContent = '—';
+        resizeCanvas();
+        drawCanvas();
+        updateFloorDrawingEmptyOverlay(message || '이 층에 등록된 도면이 없습니다.');
+    }
+
     /** PDF 원본이 있거나 곧 IDB/소스에서 복원될 가능성 (모바일 초기 로드 포함) */
     function floorMayHavePdfSource(bldg, floorCode) {
         if (!bldg || !floorCode) return false;
@@ -831,9 +895,10 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function isMobileMapViewport() {
+        if (isDesktopSiteLayout()) return false;
         const cw = state.canvasCssW || 0;
         const ch = state.canvasCssH || 0;
-        return Math.min(cw, ch) <= 520 || (window.innerWidth || 0) <= 768;
+        return Math.min(cw, ch) <= 520 || layoutIsMobileWidth();
     }
 
     function canvasCssToImgCoords(cx, cy) {
@@ -4590,11 +4655,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function finishRegisteredFloorDrawingLoadFailed(floorCode) {
         if (state.currentFloor !== floorCode) return;
-        cancelFloorDrawingBlend();
-        state.bgImage = null;
-        state.floorDrawingHiPatch = null;
-        resizeCanvas();
-        drawCanvas();
+        showFloorDrawingEmptyState(floorCode, '등록된 도면을 불러오지 못했습니다.');
         if (typeof window.showToast === 'function') {
             window.showToast('등록된 도면을 불러오지 못했습니다. 다시 업로드해 주세요.', 'warning', 4500);
         }
@@ -4611,7 +4672,7 @@ document.addEventListener('DOMContentLoaded', () => {
             try {
                 const preview = await window.renderPdfDataUrlToImage(pdfUrl, previewDim, 900000, pdfCacheKey);
                 if (preview && loadToken === floorDrawingTierLoadToken && state.currentFloor === floorCode) {
-                    tryLoadImage(preview, false);
+                    tryLoadImage(preview);
                 }
             } catch (e) {
                 console.warn('도면 PDF 미리보기 렌더 실패:', e);
@@ -4666,10 +4727,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const isLocalFileUrl = (typeof dataUrl === 'string' && dataUrl.startsWith('file:///'));
 
-        const tryLoadImage = (srcUrl, isFallback = false) => {
+        const tryLoadImage = (srcUrl) => {
             const img = new Image();
             img.onload = async () => {
                 applyFloorDrawingTarget(img, null, { immediate: !state.bgImage });
+                updateFloorDrawingEmptyOverlay(null);
                 floorDrawingActiveTierDim = baseTier;
                 if (bldg && bldg.id) {
                     if (floorMayHavePdfSource(bldg, floorCode)) {
@@ -4708,24 +4770,21 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             };
             img.onerror = () => {
-                if (!isFallback) {
-                    if (hasFloorRegistered) {
-                        finishRegisteredFloorDrawingLoadFailed(floorCode);
-                    } else {
-                        // 미등록 층만 기본 CAD 도면으로 대체
-                        tryLoadImage(getDefaultBlueprintSvgDataUrl(floorCode || '1F'), true);
-                    }
+                if (mayHaveDrawing) {
+                    finishRegisteredFloorDrawingLoadFailed(floorCode);
                 } else {
-                    resizeCanvas();
-                    drawCanvas();
+                    showFloorDrawingEmptyState(floorCode);
                 }
             };
             img.src = srcUrl;
         };
 
-        const hasFloorRegistered = bldg && bldg.floorsList && bldg.floorsList.some(f => f.floorCode === floorCode);
+        const mayHaveDrawing = floorHasDrawingData(bldg, floorCode) || floorMayHavePdfSource(bldg, floorCode);
+        const canUseDataUrl = dataUrl && !(isLocalFileUrl && window.location.protocol !== 'file:');
 
-        if (!dataUrl && hasFloorRegistered) {
+        if (canUseDataUrl) {
+            tryLoadImage(dataUrl);
+        } else if (mayHaveDrawing) {
             (async () => {
                 if (loadToken !== floorDrawingTierLoadToken || state.currentFloor !== floorCode) return;
                 const idbKey = `${bldg.id}_${floorCode}`;
@@ -4751,14 +4810,14 @@ document.addEventListener('DOMContentLoaded', () => {
                     if (!bldg.floorDrawingTiers) bldg.floorDrawingTiers = {};
                     bldg.floorDrawingTiers[floorCode] = { ...idbTiers, ...(bldg.floorDrawingTiers[floorCode] || {}) };
                     _idbPersistedTierKeys.add(idbKey);
-                    tryLoadImage(quickTierUrl, false);
+                    tryLoadImage(quickTierUrl);
                     return;
                 }
 
                 if (cachedUrl) {
                     if (!bldg.floorDrawings) bldg.floorDrawings = {};
                     bldg.floorDrawings[floorCode] = cachedUrl;
-                    tryLoadImage(cachedUrl, false);
+                    tryLoadImage(cachedUrl);
                     return;
                 }
 
@@ -4767,7 +4826,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     if (!bldg.floorDrawings) bldg.floorDrawings = {};
                     bldg.floorDrawings[floorCode] = cloudUrl;
                     idbSet('floorDrawings', idbKey, cloudUrl);
-                    tryLoadImage(cloudUrl, false);
+                    tryLoadImage(cloudUrl);
                     return;
                 }
 
@@ -4777,7 +4836,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         if (!bldg.floorDrawings) bldg.floorDrawings = {};
                         bldg.floorDrawings[floorCode] = remoteRaster;
                         idbSet('floorDrawings', idbKey, remoteRaster);
-                        tryLoadImage(remoteRaster, false);
+                        tryLoadImage(remoteRaster);
                         return;
                     }
                 }
@@ -4797,7 +4856,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (pdfUrl) {
                     const rendered = await renderPdfFloorWithPreview(bldg, floorCode, pdfUrl, tryLoadImage, loadToken);
                     if (rendered && loadToken === floorDrawingTierLoadToken && state.currentFloor === floorCode) {
-                        tryLoadImage(rendered, false);
+                        tryLoadImage(rendered);
                     }
                     return;
                 }
@@ -4808,7 +4867,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         ? window.getFloorDrawingBaseTierDim()
                         : 2000);
                     if (rendered && loadToken === floorDrawingTierLoadToken && state.currentFloor === floorCode) {
-                        tryLoadImage(rendered, false);
+                        tryLoadImage(rendered);
                     }
                     return;
                 }
@@ -4817,64 +4876,9 @@ document.addEventListener('DOMContentLoaded', () => {
                     finishRegisteredFloorDrawingLoadFailed(floorCode);
                 }
             })();
-        } else if (!dataUrl || (isLocalFileUrl && window.location.protocol !== 'file:')) {
-            // Mobile browser or web server accessing local file:/// path -> use high-res CAD SVG immediately
-            tryLoadImage(getDefaultBlueprintSvgDataUrl(floorCode || '1F'), true);
         } else {
-            tryLoadImage(dataUrl, false);
+            showFloorDrawingEmptyState(floorCode);
         }
-    }
-
-    function getDefaultBlueprintSvgDataUrl(floorName) {
-        const svg = `
-            <svg xmlns="http://www.w3.org/2000/svg" width="1400" height="850" viewBox="0 0 1400 850">
-                <rect width="1400" height="850" fill="#0b1329"/>
-                <!-- CAD Grid Lines -->
-                <g stroke="rgba(56, 189, 248, 0.12)" stroke-width="1">
-                    ${Array.from({length: 35}).map((_, i) => `<line x1="${i*40}" y1="0" x2="${i*40}" y2="850"/>`).join('')}
-                    ${Array.from({length: 22}).map((_, i) => `<line x1="0" y1="${i*40}" x2="1400" y2="${i*40}"/>`).join('')}
-                </g>
-                <!-- Building Outer Boundary & Walls -->
-                <rect x="120" y="90" width="1160" height="670" fill="none" stroke="#6b6b6b" stroke-width="5"/>
-                <rect x="135" y="105" width="1130" height="640" fill="none" stroke="rgba(56, 189, 248, 0.4)" stroke-width="2" stroke-dasharray="8 4"/>
-                
-                <!-- Internal Structural Rooms & Walls -->
-                <rect x="150" y="120" width="340" height="280" fill="rgba(30, 41, 59, 0.5)" stroke="#6b6b6b" stroke-width="3"/>
-                <rect x="520" y="120" width="360" height="280" fill="rgba(30, 41, 59, 0.5)" stroke="#6b6b6b" stroke-width="3"/>
-                <rect x="910" y="120" width="340" height="280" fill="rgba(30, 41, 59, 0.5)" stroke="#6b6b6b" stroke-width="3"/>
-                
-                <rect x="150" y="430" width="530" height="300" fill="rgba(30, 41, 59, 0.5)" stroke="#6b6b6b" stroke-width="3"/>
-                <rect x="710" y="430" width="540" height="300" fill="rgba(30, 41, 59, 0.5)" stroke="#6b6b6b" stroke-width="3"/>
-
-                <!-- Structural Columns (C1, C2, C3) -->
-                ${[[150,120],[490,120],[520,120],[880,120],[910,120],[1250,120],
-                   [150,400],[490,400],[520,400],[880,400],[910,400],[1250,400],
-                   [150,430],[680,430],[710,430],[1250,430],
-                   [150,730],[680,730],[710,730],[1250,730]].map(([cx, cy]) => `
-                    <rect x="${cx-10}" y="${cy-10}" width="20" height="20" fill="#f43f5e" stroke="#fff" stroke-width="1.5"/>
-                `).join('')}
-
-                <!-- Dimension Lines -->
-                <line x1="120" y1="55" x2="1280" y2="55" stroke="#f59e0b" stroke-width="2"/>
-                <text x="700" y="45" fill="#f59e0b" font-size="16" font-weight="bold" text-anchor="middle">X-AXIS DIMENSION: 28,400 mm</text>
-                
-                <line x1="55" y1="90" x2="55" y2="760" stroke="#f59e0b" stroke-width="2"/>
-                <text x="45" y="435" fill="#f59e0b" font-size="16" font-weight="bold" text-anchor="middle" transform="rotate(-90 45 435)">Y-AXIS DIMENSION: 16,800 mm</text>
-
-                <!-- Zone Labels -->
-                <text x="320" y="270" fill="#e2e8f0" font-size="22" font-weight="bold" text-anchor="middle">ZONE A (${floorName})</text>
-                <text x="700" y="270" fill="#e2e8f0" font-size="22" font-weight="bold" text-anchor="middle">코어 및 계단실 (CORE)</text>
-                <text x="1080" y="270" fill="#e2e8f0" font-size="22" font-weight="bold" text-anchor="middle">ZONE B (${floorName})</text>
-                <text x="415" y="590" fill="#a3a3a3" font-size="20" text-anchor="middle">주차장 / 로비 구역</text>
-                <text x="980" y="590" fill="#a3a3a3" font-size="20" text-anchor="middle">기계실 / 전기실 구역</text>
-
-                <!-- Architectural Title Block -->
-                <rect x="850" y="650" width="390" height="70" fill="rgba(15, 23, 42, 0.9)" stroke="#6b6b6b" stroke-width="2"/>
-                <text x="865" y="678" fill="#6b6b6b" font-size="16" font-weight="bold">도휘에드가9차 현장점검 CAD 평면도 [${floorName}]</text>
-                <text x="865" y="704" fill="#a3a3a3" font-size="13">스마트 건축물 안전점검 시스템 | SCALE 1:100</text>
-            </svg>
-        `;
-        return 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
     }
 
     function viewToImgCoords(vx, vy) {
@@ -4943,7 +4947,7 @@ document.addEventListener('DOMContentLoaded', () => {
         let visR = cssW;
         let visB = cssH;
 
-        if (window.matchMedia('(max-width: 768px) and (orientation: portrait)').matches) {
+        if (layoutMediaMobilePortrait()) {
             const drawerTop = window.innerHeight * 0.5;
             visB = Math.max(64, Math.min(cssH, drawerTop - cRect.top - 12));
             // 세로: 화면 상단 1/4 지점(캔버스 좌표). 드로어에 가려지지 않게 클램프
@@ -4951,7 +4955,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const focusY = Math.max(visT + 24, Math.min(visB - 24, quarterY));
             return { x: (visL + visR) / 2, y: focusY };
         }
-        if (window.matchMedia('(orientation: landscape) and (max-width: 1024px)').matches) {
+        if (window.matchMedia('(orientation: landscape) and (max-width: 1024px)').matches && !isDesktopSiteLayout()) {
             const drawerLeft = window.innerWidth * (2 / 3);
             visR = Math.max(64, Math.min(cssW, drawerLeft - cRect.left - 12));
         } else {
@@ -5059,17 +5063,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (state.bgImage) {
             drawFloorPlanLayers(ctx, imgW, imgH);
-        }
 
-        // Draw Defect Pins INSIDE the rotated context so pins rotate WITH the drawing!
-        const currentDefects = getCurrentFloorMapPlacedDefects();
-        renderDefectsGrouped(ctx, currentDefects, drawPin);
+            const currentDefects = getCurrentFloorMapPlacedDefects();
+            renderDefectsGrouped(ctx, currentDefects, drawPin);
 
-        // 범례도 결함 핀처럼 도면 좌표계 안에서 그려서 팬/줌/회전 시 도면에 붙어서 같이 움직이게 한다.
-        if (typeof drawLocationMapLegend === 'function') drawLocationMapLegend(ctx, imgW, imgH, true);
+            if (typeof drawLocationMapLegend === 'function') drawLocationMapLegend(ctx, imgW, imgH, true);
 
-        // Draw Live Marking Drag Preview (드래그 중 — 클릭만 해도 위치 표시)
-        if (isMarkingDrag) {
+            // Draw Live Marking Drag Preview (드래그 중 — 클릭만 해도 위치 표시)
+            if (isMarkingDrag) {
             const previewMeta = getLiveMarkPinPreviewMeta();
             const pendingDefect = previewMeta.defect;
             const nextSeq = (currentDefects.length + 1);
@@ -5084,13 +5085,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 targetX: markPreviewTargetX,
                 targetY: markPreviewTargetY
             });
-        }
+            }
 
-        // Draw Pending Defect Preview (모달 열린 상태에서 저장 전 신규 마킹 유지)
-        drawPendingDefectPreview(ctx, currentDefects);
+            drawPendingDefectPreview(ctx, currentDefects);
 
-        // Draw Live Area(면적) Marking Drag Preview
-        if (isAreaDrag) {
+            if (isAreaDrag) {
             drawAreaRect(ctx, {
                 areaX1: areaStartImgX,
                 areaY1: areaStartImgY,
@@ -5099,10 +5098,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 category: document.getElementById('defectCategory')?.value || '구조체',
                 no: ''
             }, true);
-        }
+            }
 
-        // 좌클릭 드래그 선택 박스
-        if (isMarqueeSelecting) {
+            if (isMarqueeSelecting) {
             const x1 = Math.min(marqueeStartImgX, marqueeCurImgX);
             const y1 = Math.min(marqueeStartImgY, marqueeCurImgY);
             const x2 = Math.max(marqueeStartImgX, marqueeCurImgX);
@@ -5114,7 +5112,8 @@ document.addEventListener('DOMContentLoaded', () => {
             ctx.setLineDash([6 / Math.max(state.view.scale || 1, 0.01), 4 / Math.max(state.view.scale || 1, 0.01)]);
             ctx.fillRect(x1, y1, x2 - x1, y2 - y1);
             ctx.strokeRect(x1, y1, x2 - x1, y2 - y1);
-            ctx.restore();
+                ctx.restore();
+            }
         }
 
         ctx.restore(); // Restore drawing rotation matrix
@@ -5142,6 +5141,7 @@ document.addEventListener('DOMContentLoaded', () => {
         // 결함 목록 DOM은 drawCanvas마다 재생성하지 않음 (선택 스크롤·하이라이트가 즉시 undo됨).
         // 목록 갱신은 updateMapSelectionBar / 필터 / 저장 등 명시적 호출에서만.
         updateMapZoomOverlay();
+        updateFloorDrawingEmptyOverlay();
     }
 
     // --- 8-B. NON-DESTRUCTIVE TESTING (NDT) FIELD SURVEY ENGINE (v60.0) ---
@@ -6417,7 +6417,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         let cssW = container.clientWidth || container.offsetWidth || (window.innerWidth - 40);
         let cssH = container.clientHeight || container.offsetHeight;
-        const isMobile = window.innerWidth <= 768;
+        const isMobile = layoutIsMobileWidth();
         if (cssH <= 50) cssH = isMobile ? 360 : 420;
 
         cssW = Math.max(1, Math.floor(cssW));
@@ -7979,7 +7979,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     ndtMarqueeStartClientY = touch.clientY;
                     canvas.style.cursor = 'crosshair';
                     drawNdtCanvas();
-                } else if (window.innerWidth <= 1024) {
+                } else if (layoutIsCompactWidth()) {
                     // 모바일 PAN: 한손가락은 즉시 페이지 스크롤 (도면 팬은 가로 확정 후에만)
                     ndtTouchMayPageScroll = true;
                     isNdtDragging = false;
@@ -11738,7 +11738,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function isMobilePortraitDefectDrawer() {
-        return !!(window.matchMedia && window.matchMedia('(max-width: 768px) and (orientation: portrait)').matches);
+        return layoutMediaMobilePortrait();
     }
 
     function revealSelectedDefectListAboveDrawer() {
@@ -11824,7 +11824,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         // 전차(전회차) 미등록 마킹은 PC에서만 — 모바일은 현장 금회차 점검에 집중
-        const showPrevRoundRegister = !(window.matchMedia && window.matchMedia('(max-width: 1024px)').matches);
+        const showPrevRoundRegister = !layoutIsCompactWidth();
 
         if (defects.length === 0 && (!showPrevRoundRegister || unregisteredItems.length === 0)) {
             if (allFloorDefects.length > 0) {
@@ -12080,7 +12080,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const rep = d._representative || d;
             const modalOpen = document.body.classList.contains('defect-modal-open')
                 || (typeof isDefectModalOpen === 'function' && isDefectModalOpen());
-            const mobileField = !!(window.matchMedia && window.matchMedia('(max-width: 1024px)').matches);
+            const mobileField = layoutIsCompactWidth();
             if ((modalOpen || mobileField) && typeof openAddDefectModal === 'function') {
                 openAddDefectModal(rep.x, rep.y, rep.targetX, rep.targetY, rep, null, { revealMarkingAboveDrawer: true });
             }
@@ -16657,7 +16657,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function isMobileDefectDrawerViewport() {
-        return window.matchMedia('(max-width: 768px), (orientation: landscape) and (max-width: 1024px)').matches;
+        return layoutMediaMobileDefectDrawer();
     }
 
     function syncDefectDrawerToCanvasArea() {
@@ -19369,7 +19369,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function isSurveyMobileLayout() {
-        return window.matchMedia('(max-width: 1024px)').matches;
+        return layoutIsCompactWidth();
     }
 
     function surveyColumnWidthCh(maxLen) {
@@ -19535,6 +19535,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function isSurveyPortraitCompact() {
+        if (isDesktopSiteLayout()) return false;
         return window.matchMedia('(max-width: 1024px) and (orientation: portrait)').matches;
     }
 
