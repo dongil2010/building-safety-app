@@ -1734,6 +1734,39 @@ document.addEventListener('DOMContentLoaded', () => {
      * 서버·로컬 건물 목록 병합 — 서버에 없는 로컬-only는 업로드 대기(_pendingCloudSync)일 때만 유지.
      * (다른 기기에서 삭제된 고아 레코드가 모바일에 4개·PC 2개처럼 남는 현상 방지)
      */
+    function mergeFloorMetaLists(localList, remoteList) {
+        const map = {};
+        const add = (f) => {
+            if (!f || !f.floorCode) return;
+            const code = String(f.floorCode);
+            if (!map[code]) {
+                map[code] = {
+                    floorCode: code,
+                    floorLabel: f.floorLabel || (typeof window.getFloorLabelFromCode === 'function'
+                        ? window.getFloorLabelFromCode(code)
+                        : code)
+                };
+            }
+        };
+        (remoteList || []).forEach(add);
+        (localList || []).forEach(add); // 로컬이 더 많은 층을 갖고 있으면 유지
+        const list = Object.values(map);
+        return (typeof window.sortFloorsLowToHigh === 'function')
+            ? window.sortFloorsLowToHigh(list)
+            : list;
+    }
+
+    function mergeDrawingFloorCodeLists(localCodes, remoteCodes, floorsList, assetMaps) {
+        const set = new Set();
+        (remoteCodes || []).forEach((c) => { if (c) set.add(String(c)); });
+        (localCodes || []).forEach((c) => { if (c) set.add(String(c)); });
+        (floorsList || []).forEach((f) => { if (f && f.floorCode) set.add(String(f.floorCode)); });
+        (assetMaps || []).forEach((m) => {
+            Object.keys(m || {}).forEach((c) => { if (c) set.add(String(c)); });
+        });
+        return Array.from(set);
+    }
+
     function mergeBuildingsForSync(serverBuildings, localBuildings, deletedIds, prevAssetsById) {
         const remoteFiltered = filterDeletedBuildings(serverBuildings || [], deletedIds);
         const remoteIds = new Set(remoteFiltered.map((b) => b.id));
@@ -1762,7 +1795,22 @@ document.addEventListener('DOMContentLoaded', () => {
                     b.floorDrawingSources
                 )
             };
-            return attachPreservedDrawingAssets(b, bundle);
+            const merged = attachPreservedDrawingAssets(b, bundle);
+            // 원격이 옛 floorsList(1층만)를 갖고 와도, 로컬에서 추가한 층이 사라지지 않게 합친다
+            merged.floorsList = mergeFloorMetaLists(localMatch?.floorsList, b.floorsList);
+            merged.drawingFloorCodes = mergeDrawingFloorCodeLists(
+                localMatch?.drawingFloorCodes,
+                b.drawingFloorCodes,
+                merged.floorsList,
+                [merged.floorDrawings, merged.floorDrawingPdfs, merged.floorDrawingTiers, merged.floorDrawingSources]
+            );
+            if (merged.drawingFloorCodes.length) {
+                mergeDiscoveredFloorsIntoBuilding(merged, new Set(merged.drawingFloorCodes));
+            }
+            if (typeof window.getBuildingAvailableFloors === 'function') {
+                merged.floorsList = window.getBuildingAvailableFloors(merged);
+            }
+            return merged;
         });
         return [...localOnly, ...mergedRemote];
     }
@@ -4085,6 +4133,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 facilityGrade: facilityGrade,
                 completionDate: completionDate,
                 floorsList: floorsList.length > 0 ? floorsList : null,
+                drawingFloorCodes: floorsList.map((f) => f.floorCode).filter(Boolean),
                 floorDrawings: floorDrawingsMap,
                 floorDrawingPdfs: floorDrawingPdfsMap,
                 floorDrawingTiers: floorDrawingTiersMap,
@@ -4492,9 +4541,13 @@ document.addEventListener('DOMContentLoaded', () => {
                         if (existingIdx < 0) {
                             bldg.floorsList.push({
                                 floorCode: item.floorCode,
-                                floorLabel: item.floorLabel
+                                floorLabel: item.floorLabel || window.getFloorLabelFromCode(item.floorCode)
                             });
                         }
+                        // 변환 전에 층 목록부터 고정·저장 — 중간에 새로고침해도 점검층이 안 사라지게
+                        syncBuildingDrawingFloorCodes(bldg);
+                        saveStateToLocalStorage();
+
                         if (item.file) {
                             try {
                                 window.updateLoadingText(`도면 ${i + 1}/${newFiles.length} 변환 중... (${item.floorCode || ''})`);
@@ -4530,6 +4583,9 @@ document.addEventListener('DOMContentLoaded', () => {
                                     if (window._cloudSyncedPdfKeys) window._cloudSyncedPdfKeys.delete(`${bldg.id}_${item.floorCode}`);
                                     await uploadFloorDrawingPdf(bldg.id, item.floorCode, prepared.pdfDataUrl);
                                 }
+                                await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
+                                syncBuildingDrawingFloorCodes(bldg);
+                                saveStateToLocalStorage();
                             } catch (err) {
                                 console.error('Edit drawing compression error:', err);
                                 window.showToast(`도면 ${item.floorCode || (i + 1)} 변환 실패 — 다음 도면으로 진행합니다`, 'warning');
@@ -4542,7 +4598,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
 
             // Always rebuild and sort floorsList in LOW-TO-HIGH order (B2F -> B1F -> 1F -> 2F -> ROOF)
-            bldg.floorsList = window.getBuildingAvailableFloors(bldg);
+            syncBuildingDrawingFloorCodes(bldg);
 
             // Update building metadata
             bldg.name = name.startsWith('🏢') ? name : '🏢 ' + name;
@@ -4564,6 +4620,7 @@ document.addEventListener('DOMContentLoaded', () => {
             } finally {
                 window.resetLoadingOverlay();
             }
+            window.selectedEditUploadedDrawings = [];
             saveStateToLocalStorage();
             if (typeof syncStateToFirebase === 'function') syncStateToFirebase();
 
