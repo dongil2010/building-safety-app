@@ -840,6 +840,19 @@ document.addEventListener('DOMContentLoaded', () => {
         if (_idbPersistedTierKeys && _idbPersistedTierKeys.has(key)) return true;
         if (_idbPersistedPdfKeys && _idbPersistedPdfKeys.has(key)) return true;
         if (_idbPersistedSourceKeys && _idbPersistedSourceKeys.has(key)) return true;
+        if (_idbPersistedDrawingKeys && _idbPersistedDrawingKeys.has(key)) return true;
+        return false;
+    }
+
+    /** 로컬 캐시는 없지만 Firestore·현장 보관함에 도면이 있을 수 있는 경우 */
+    function floorMayExistOnCloud(bldg, floorCode) {
+        if (!bldg || !floorCode || !db || !window.state.companyId) return false;
+        if (typeof navigator !== 'undefined' && navigator.onLine === false) return false;
+        if (floorPdfKnownUnavailable(bldg.id, floorCode)) return false;
+        if (bldg.floorsList && bldg.floorsList.some((f) => f && f.floorCode === floorCode)) return true;
+        const defectKey = `${bldg.id}_${floorCode}`;
+        const defects = (window.state.defects || {})[defectKey];
+        if (defects && defects.length > 0) return true;
         return false;
     }
 
@@ -1985,62 +1998,72 @@ document.addEventListener('DOMContentLoaded', () => {
     // state.buildings[].floorDrawings / state.defects[].photos를 채운다.
     // (구버전 데이터가 이미 photos/floorDrawings를 그대로 갖고 있으면 건드리지 않고 그대로 둔다 —
     // 다음 저장 때 자연스럽게 IndexedDB로 옮겨진다.)
+    async function hydrateSingleBuildingDrawings(bldg) {
+        if (!bldg || !bldg.id) return false;
+        let hydrated = false;
+        if (!bldg.floorDrawings) bldg.floorDrawings = {};
+        if (!bldg.floorDrawingPdfs) bldg.floorDrawingPdfs = {};
+        if (!bldg.floorDrawingTiers) bldg.floorDrawingTiers = {};
+        if (!bldg.floorDrawingSources) bldg.floorDrawingSources = {};
+        const floors = new Set([
+            ...(bldg.floorsList || []).map((f) => f.floorCode),
+            ...Object.keys(bldg.floorDrawings || {}),
+            ...Object.keys(bldg.floorDrawingPdfs || {}),
+            ...Object.keys(bldg.floorDrawingSources || {}),
+        ]);
+        await Promise.all([...floors].map(async (floorCode) => {
+            if (!bldg.floorDrawings[floorCode]) {
+                const cached = await idbGet('floorDrawings', `${bldg.id}_${floorCode}`);
+                if (cached) {
+                    bldg.floorDrawings[floorCode] = cached;
+                    _idbPersistedDrawingKeys.add(`${bldg.id}_${floorCode}`);
+                    hydrated = true;
+                }
+            }
+            if (!bldg.floorDrawings[floorCode] && typeof fetchCloudFloorDrawingDataUrl === 'function') {
+                const cloudRaster = await fetchCloudFloorDrawingDataUrl(bldg.id, floorCode);
+                if (cloudRaster) {
+                    bldg.floorDrawings[floorCode] = cloudRaster;
+                    idbSet('floorDrawings', `${bldg.id}_${floorCode}`, cloudRaster);
+                    _idbPersistedDrawingKeys.add(`${bldg.id}_${floorCode}`);
+                    hydrated = true;
+                }
+            }
+            if (!bldg.floorDrawingTiers[floorCode]) {
+                const cachedTiers = await idbGet('floorDrawingTiers', `${bldg.id}_${floorCode}`);
+                if (cachedTiers) {
+                    bldg.floorDrawingTiers[floorCode] = cachedTiers;
+                    _idbPersistedTierKeys.add(`${bldg.id}_${floorCode}`);
+                    hydrated = true;
+                }
+            }
+            if (!bldg.floorDrawingSources[floorCode]) {
+                const cachedSource = await idbGet('floorDrawingSources', `${bldg.id}_${floorCode}`);
+                if (cachedSource) {
+                    bldg.floorDrawingSources[floorCode] = cachedSource;
+                    _idbPersistedSourceKeys.add(`${bldg.id}_${floorCode}`);
+                    hydrated = true;
+                }
+            }
+            if (!bldg.floorDrawingPdfs[floorCode]) {
+                const resolvedPdf = await resolveBuildingFloorPdf(bldg, floorCode, { forceCloud: true });
+                if (resolvedPdf) {
+                    await applyResolvedPdfToBuilding(bldg, floorCode, resolvedPdf);
+                    hydrated = true;
+                }
+            }
+        }));
+        return hydrated;
+    }
+    window.hydrateSingleBuildingDrawings = hydrateSingleBuildingDrawings;
+
     async function hydrateLocalImagesFromIndexedDb() {
         try {
             const buildings = window.state.buildings || [];
             let anyHydrated = false;
 
             await Promise.all(buildings.map(async (b) => {
-                if (!b.floorDrawings) b.floorDrawings = {};
-                if (!b.floorDrawingPdfs) b.floorDrawingPdfs = {};
-                if (!b.floorDrawingTiers) b.floorDrawingTiers = {};
-                if (!b.floorDrawingSources) b.floorDrawingSources = {};
-                const floors = new Set([
-                    ...(b.floorsList || []).map((f) => f.floorCode),
-                    ...Object.keys(b.floorDrawings || {}),
-                    ...Object.keys(b.floorDrawingPdfs || {}),
-                    ...Object.keys(b.floorDrawingSources || {}),
-                ]);
-                await Promise.all([...floors].map(async (floorCode) => {
-                    if (!b.floorDrawings[floorCode]) {
-                        const cached = await idbGet('floorDrawings', `${b.id}_${floorCode}`);
-                        if (cached) {
-                            b.floorDrawings[floorCode] = cached;
-                            anyHydrated = true;
-                        }
-                    }
-                    if (!b.floorDrawings[floorCode] && typeof fetchCloudFloorDrawingDataUrl === 'function') {
-                        const cloudRaster = await fetchCloudFloorDrawingDataUrl(b.id, floorCode);
-                        if (cloudRaster) {
-                            b.floorDrawings[floorCode] = cloudRaster;
-                            idbSet('floorDrawings', `${b.id}_${floorCode}`, cloudRaster);
-                            anyHydrated = true;
-                        }
-                    }
-                    if (!b.floorDrawingTiers[floorCode]) {
-                        const cachedTiers = await idbGet('floorDrawingTiers', `${b.id}_${floorCode}`);
-                        if (cachedTiers) {
-                            b.floorDrawingTiers[floorCode] = cachedTiers;
-                            _idbPersistedTierKeys.add(`${b.id}_${floorCode}`);
-                            anyHydrated = true;
-                        }
-                    }
-                    if (!b.floorDrawingSources[floorCode]) {
-                        const cachedSource = await idbGet('floorDrawingSources', `${b.id}_${floorCode}`);
-                        if (cachedSource) {
-                            b.floorDrawingSources[floorCode] = cachedSource;
-                            _idbPersistedSourceKeys.add(`${b.id}_${floorCode}`);
-                            anyHydrated = true;
-                        }
-                    }
-                    if (!b.floorDrawingPdfs[floorCode]) {
-                        const resolvedPdf = await resolveBuildingFloorPdf(b, floorCode);
-                        if (resolvedPdf) {
-                            await applyResolvedPdfToBuilding(b, floorCode, resolvedPdf);
-                            anyHydrated = true;
-                        }
-                    }
-                }));
+                if (await hydrateSingleBuildingDrawings(b)) anyHydrated = true;
             }));
 
             const defectsMap = window.state.defects || {};
@@ -2099,6 +2122,14 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (typeof renderDashboard === 'function' && window.state.currentTab === 'tab-home') renderDashboard();
                 if (typeof renderSurveyTable === 'function') renderSurveyTable();
                 if (typeof renderDefectListPanel === 'function') renderDefectListPanel();
+                if (state.currentTab === 'tab-map' && state.currentBuildingId && state.currentFloor
+                    && typeof loadFloorDrawing === 'function') {
+                    const activeBldg = (window.state.buildings || []).find((b) => b.id === state.currentBuildingId);
+                    if (activeBldg) {
+                        state.currentBuilding = activeBldg;
+                        loadFloorDrawing(state.currentFloor, { preserveView: true });
+                    }
+                }
             }
         } catch (e) {
             console.warn('IndexedDB 이미지 복원 실패:', e);
@@ -2354,7 +2385,7 @@ document.addEventListener('DOMContentLoaded', () => {
         btnDashboardBackSites.addEventListener('click', () => window.closeDashboardSiteRounds());
     }
 
-    window.selectBuildingAndInspect = function(bldgOrId) {
+    window.selectBuildingAndInspect = async function(bldgOrId) {
         if (!window.state.buildings) window.state.buildings = [];
 
         let bldg = null;
@@ -2384,24 +2415,30 @@ document.addEventListener('DOMContentLoaded', () => {
         if (bldg.inspectionType && document.getElementById('selectInspectionType')) document.getElementById('selectInspectionType').value = bldg.inspectionType;
         if (bldg.inspectionYear && document.getElementById('selectInspectionYear')) document.getElementById('selectInspectionYear').value = bldg.inspectionYear;
         if (bldg.inspectionPeriod && document.getElementById('selectInspectionPeriod')) document.getElementById('selectInspectionPeriod').value = bldg.inspectionPeriod;
-        // 이 건물의 "최신 회차" 기준점이 아직 한 번도 설정된 적 없으면(기존 데이터) 최초 1회만
-        // 부트스트랩한다 — 실제 등록된 결함들의 회차 중 최신값을 우선 쓰고, 결함이 하나도
-        // 없는 신규 건물이면 그때만 현재 점검설정 값으로 초기화한다. 이미 설정된 뒤에는
-        // 건물을 다시 열 때마다 재계산하지 않는다(드롭다운을 잠깐 미리보기 등으로 건드린
-        // 이력이 남아있어도 그걸로 다시 전진시키지 않기 위함 — 전진은 오직 실제 결함 등록
-        // 시점에만 일어난다).
         if (!bldg.latestSurveyRoundKey) {
             const maxDefectRoundKey = getMaxSurveyRoundKeyForBuilding(bldg);
             advanceLatestSurveyRound(bldg, maxDefectRoundKey || `${bldg.inspectionYear || '2026년'}_${bldg.inspectionPeriod || '하반기'}`);
         }
 
-        // Populate Header Selectors
         populateFloorSelectDropdown(bldg);
 
         applyFloorMapStyleSettings(window.state.currentFloor || '1F', bldg.id);
 
-        // Switch to Map Tab & Load Drawing
-        loadFloorDrawing(window.state.currentFloor || '1F');
+        const targetFloor = window.state.currentFloor || '1F';
+        if (floorMayExistOnCloud(bldg, targetFloor) && typeof window.showLoading === 'function') {
+            window.showLoading('서버에서 도면·점검 데이터를 불러오는 중…');
+        }
+        try {
+            if (typeof hydrateSingleBuildingDrawings === 'function') {
+                await hydrateSingleBuildingDrawings(bldg);
+            }
+        } catch (e) {
+            console.warn('점검 진입 전 도면 동기화 실패:', e);
+        } finally {
+            if (typeof window.hideLoading === 'function') window.hideLoading();
+        }
+
+        loadFloorDrawing(targetFloor);
         window.switchTab('tab-map');
     };
 
@@ -4784,12 +4821,17 @@ document.addEventListener('DOMContentLoaded', () => {
             img.src = srcUrl;
         };
 
-        const mayHaveDrawing = floorHasDrawingData(bldg, floorCode) || floorMayHavePdfSource(bldg, floorCode);
+        const mayHaveDrawing = floorHasDrawingData(bldg, floorCode)
+            || floorMayHavePdfSource(bldg, floorCode)
+            || floorMayExistOnCloud(bldg, floorCode);
         const canUseDataUrl = dataUrl && !(isLocalFileUrl && window.location.protocol !== 'file:');
 
         if (canUseDataUrl) {
             tryLoadImage(dataUrl);
         } else if (mayHaveDrawing) {
+            if (floorMayExistOnCloud(bldg, floorCode) && !floorHasDrawingData(bldg, floorCode) && !canUseDataUrl) {
+                updateFloorDrawingEmptyOverlay('서버에서 도면을 불러오는 중…');
+            }
             (async () => {
                 if (loadToken !== floorDrawingTierLoadToken || state.currentFloor !== floorCode) return;
                 const idbKey = `${bldg.id}_${floorCode}`;
