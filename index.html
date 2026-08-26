@@ -3,7 +3,18 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0" id="viewportMeta">
-    <script src="js/core/layout-mode.js?v=20260826_desktop"></script>
+    <script>
+    (function () {
+        var ua = navigator.userAgent || '';
+        var desktopSite = (/(Macintosh/i.test(ua) && navigator.maxTouchPoints > 1)
+            || (/Android/i.test(ua) && !/Mobile/i.test(ua))
+            || (/Linux x86_64|CrOS/i.test(ua) && navigator.maxTouchPoints > 0));
+        if (!desktopSite) return;
+        document.documentElement.classList.add('layout-desktop');
+        var vp = document.getElementById('viewportMeta');
+        if (vp) vp.setAttribute('content', 'width=1280, initial-scale=1.0, minimum-scale=0.25, maximum-scale=5.0, user-scalable=yes');
+    })();
+    </script>
     <title>스마트 건축물 안전점검 현장점검 시스템</title>
     <!-- PWA Offline & Mobile App Meta -->
     <link rel="manifest" href="manifest.json">
@@ -13,7 +24,7 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <meta name="apple-mobile-web-app-title" content="스마트 안전점검">
-    <link rel="stylesheet" href="styles.css?v=20260826_desktop">
+    <link rel="stylesheet" href="styles.css?v=20260826_pccompact">
     <!-- FontAwesome icons for clean engineering UI -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <!-- PDF 생성용: 페이지별로 직접 캡처해서 조립(큰 보고서에서 html2pdf 한방 렌더링이 캔버스 높이 한계로
@@ -207,6 +218,9 @@
                         </div>
 
                         <div class="toolbar-action-group">
+                            <button type="button" id="btnToggleMapStyleSize" class="mode-btn toolbar-size-toggle pc-only-chrome" title="핀·화살표·연결선 크기 조절 패널 표시" aria-pressed="false">
+                                <i class="fa-solid fa-sliders"></i> 크기 <span class="toolbar-toggle-state">OFF</span>
+                            </button>
                             <button type="button" id="btnRotateDrawing" class="btn-rotate-hero" title="세로 도면 가로로 90도 회전">
                                 <i class="fa-solid fa-rotate-right"></i> 🔄 회전
                             </button>
@@ -223,7 +237,7 @@
                     </div>
 
                     <!-- 핀/화살표 크기 일괄 조정 (결함위치도 전용 — NDT와 별도) -->
-                    <div class="map-style-toolbar" id="mapStyleSizeToolbar" style="display:flex; gap:1rem; align-items:center; flex-wrap:wrap; padding:0.4rem 0.7rem; background:var(--bg-secondary); border:1px solid var(--border-color); border-radius:8px; margin-bottom:0.5rem;">
+                    <div class="map-style-toolbar map-style-size-panel" id="mapStyleSizeToolbar">
                         <span class="map-style-floor-hint" style="font-size:0.72rem; color:var(--text-muted); white-space:nowrap;">결함위치도 · 현재 층</span>
                         <label class="style-size-lock-label" title="체크 시 슬라이더 조작 불가">
                             <input type="checkbox" id="styleSizeLockMap" checked>
@@ -520,6 +534,9 @@
                 </div>
 
                 <div class="toolbar-action-group">
+                    <button type="button" id="btnToggleNdtStyleSize" class="mode-btn toolbar-size-toggle pc-only-chrome" title="핀·화살표·연결선 크기 조절 패널 표시" aria-pressed="false">
+                        <i class="fa-solid fa-sliders"></i> 크기 <span class="toolbar-toggle-state">OFF</span>
+                    </button>
                     <div class="filter-group">
                         <button type="button" id="btnOpenStyleColorModalNdt" class="chip"><i class="fa-solid fa-palette"></i> 스타일 설정</button>
                         <button type="button" class="chip" onclick="window.exportCurrentFloorNdtVectorPdf && window.exportCurrentFloorNdtVectorPdf()" title="PDF 원본 + NDT 마킹 벡터"><i class="fa-solid fa-file-pdf"></i> 벡터 PDF</button>
@@ -537,7 +554,7 @@
             </div>
 
             <!-- NDT 핀/화살표/선 굵기 — 현재 선택한 조사 항목만 조절 -->
-            <div class="map-style-toolbar" id="ndtStyleSizeToolbar" style="display:flex; gap:1rem; align-items:center; flex-wrap:wrap; padding:0.4rem 0.7rem; background:var(--bg-secondary); border:1px solid var(--border-color); border-radius:8px; margin-bottom:0.5rem;">
+            <div class="map-style-toolbar map-style-size-panel" id="ndtStyleSizeToolbar">
                 <span style="font-size:0.72rem; color:var(--text-muted); white-space:nowrap;">비파괴 · <strong id="ndtStyleCatLabel" style="color:var(--text-primary);">부재 실측</strong></span>
                 <label class="style-size-lock-label" title="체크 시 슬라이더 조작 불가">
                     <input type="checkbox" id="styleSizeLockNdt" checked>
@@ -2343,8 +2360,9 @@
     </div>
 
     <!-- Core → 탭 분류 → 기존 엔진(app.js) -->
-    <script src="js/core/state.js?v=20260826_tierlod"></script>
+    <script src="js/core/state.js?v=20260826_pccompact"></script>
     <script src="js/pdf-vector-bridge.js?v=20260826_pdfcloud"></script>
+    <script src="js/core/layout-mode.js?v=20260826_pccompact"></script>
     <script src="js/tabs/registry.js?v=20260821_land1"></script>
     <script src="js/tabs/home.js?v=20260824_webview"></script>
     <script src="js/tabs/map.js?v=20260825_mobpatch2"></script>
@@ -2353,9 +2371,9 @@
     <script src="js/shared/report.js?v=20260824_hwpxFix"></script>
     <script src="js/shared/hwpx-import.js?v=20260825_hwpxin"></script>
     <script src="js/shared/auth.js?v=20260821_land1"></script>
-    <script src="app.js?v=20260826_tierlod"></script>
+    <script src="app.js?v=20260826_pccompact"></script>
     <script>
-        window.BSA_APP_VERSION = '20260826_desktop';
+        window.BSA_APP_VERSION = '20260826_pccompact';
         (function () {
             var el = document.getElementById('appVersionText');
             if (el && window.BSA_APP_VERSION) el.textContent = 'v' + window.BSA_APP_VERSION;

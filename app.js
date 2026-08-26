@@ -14788,6 +14788,41 @@ document.addEventListener('DOMContentLoaded', () => {
         if (ndtIcon) ndtIcon.className = ndtLocked ? 'fa-solid fa-lock' : 'fa-solid fa-lock-open';
     };
 
+    function syncPcSizeToggleBtn(btn, on) {
+        if (!btn) return;
+        btn.classList.toggle('is-on', on);
+        btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+        const stateEl = btn.querySelector('.toolbar-toggle-state');
+        if (stateEl) stateEl.textContent = on ? 'ON' : 'OFF';
+    }
+
+    window.applyStyleSizePanelUi = function () {
+        if (window.state.styleSizePanelOpenMap === undefined) window.state.styleSizePanelOpenMap = false;
+        if (window.state.styleSizePanelOpenNdt === undefined) window.state.styleSizePanelOpenNdt = false;
+        const mapOpen = !!window.state.styleSizePanelOpenMap;
+        const ndtOpen = !!window.state.styleSizePanelOpenNdt;
+        const mapBar = document.getElementById('mapStyleSizeToolbar');
+        const ndtBar = document.getElementById('ndtStyleSizeToolbar');
+        const pcLayout = !layoutIsCompactWidth();
+        if (mapBar) mapBar.classList.toggle('is-pc-size-panel-open', pcLayout && mapOpen);
+        if (ndtBar) ndtBar.classList.toggle('is-pc-size-panel-open', pcLayout && ndtOpen);
+        syncPcSizeToggleBtn(document.getElementById('btnToggleMapStyleSize'), mapOpen);
+        syncPcSizeToggleBtn(document.getElementById('btnToggleNdtStyleSize'), ndtOpen);
+    };
+
+    function refreshCanvasAfterStylePanelToggle() {
+        requestAnimationFrame(() => {
+            if (state.currentTab === 'tab-map' && typeof resizeCanvas === 'function') {
+                resizeCanvas();
+                if (typeof drawCanvas === 'function') drawCanvas();
+            }
+            if (state.currentTab === 'tab-ndt' && typeof resizeNdtCanvas === 'function') {
+                resizeNdtCanvas();
+                if (typeof drawNdtCanvas === 'function') drawNdtCanvas();
+            }
+        });
+    }
+
     window.syncBulkStyleSlidersUi = function() {
         const pinAllInput = document.getElementById('stylePinSizeAll');
         const pinAllLabel = document.getElementById('stylePinSizeAllLabel');
@@ -14831,6 +14866,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (ndtLineAll) ndtLineAll.value = ndtLineV;
         if (ndtLineLabel) ndtLineLabel.textContent = `${Math.round(ndtLineV * 100)}%`;
         if (typeof window.applyStyleSizeBarLockUi === 'function') window.applyStyleSizeBarLockUi();
+        if (typeof window.applyStyleSizePanelUi === 'function') window.applyStyleSizePanelUi();
     };
 
     function persistCurrentFloorMapStyleFromSliders() {
@@ -15106,6 +15142,7 @@ document.addEventListener('DOMContentLoaded', () => {
             });
         }
         if (typeof window.applyStyleSizeBarLockUi === 'function') window.applyStyleSizeBarLockUi();
+        if (typeof window.applyStyleSizePanelUi === 'function') window.applyStyleSizePanelUi();
 
         STYLE_SHAPE_FIELDS.forEach(([suffix, key]) => {
             const shapeInput = document.getElementById(`styleShape${suffix}`);
@@ -18506,6 +18543,34 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!btn) return;
         btn.classList.toggle('active', on);
         btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+    }
+
+    const btnToggleMapStyleSize = document.getElementById('btnToggleMapStyleSize');
+    if (btnToggleMapStyleSize && !btnToggleMapStyleSize.dataset.pcToggleBound) {
+        btnToggleMapStyleSize.dataset.pcToggleBound = '1';
+        btnToggleMapStyleSize.addEventListener('click', () => {
+            window.state.styleSizePanelOpenMap = !window.state.styleSizePanelOpenMap;
+            if (window.state.styleSizePanelOpenMap) {
+                window.state.styleSizeBarLockedMap = false;
+                if (typeof window.applyStyleSizeBarLockUi === 'function') window.applyStyleSizeBarLockUi();
+            }
+            if (typeof window.applyStyleSizePanelUi === 'function') window.applyStyleSizePanelUi();
+            refreshCanvasAfterStylePanelToggle();
+        });
+    }
+
+    const btnToggleNdtStyleSize = document.getElementById('btnToggleNdtStyleSize');
+    if (btnToggleNdtStyleSize && !btnToggleNdtStyleSize.dataset.pcToggleBound) {
+        btnToggleNdtStyleSize.dataset.pcToggleBound = '1';
+        btnToggleNdtStyleSize.addEventListener('click', () => {
+            window.state.styleSizePanelOpenNdt = !window.state.styleSizePanelOpenNdt;
+            if (window.state.styleSizePanelOpenNdt) {
+                window.state.styleSizeBarLockedNdt = false;
+                if (typeof window.applyStyleSizeBarLockUi === 'function') window.applyStyleSizeBarLockUi();
+            }
+            if (typeof window.applyStyleSizePanelUi === 'function') window.applyStyleSizePanelUi();
+            refreshCanvasAfterStylePanelToggle();
+        });
     }
 
     const mobileBtnToggleSize = document.getElementById('mobileBtnToggleSize');

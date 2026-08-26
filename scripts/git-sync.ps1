@@ -18,7 +18,9 @@ function Write-WebVersionFile {
         label   = $label
         builtAt = $builtAt
     } | ConvertTo-Json -Depth 3
-    Set-Content -Path (Join-Path $repoRoot "web-version.json") -Value $payload -Encoding UTF8
+    $path = Join-Path $repoRoot "web-version.json"
+    $utf8NoBom = New-Object System.Text.UTF8Encoding $false
+    [System.IO.File]::WriteAllText($path, $payload, $utf8NoBom)
     Write-Host "web-version.json -> $Sha ($label)"
 }
 
