@@ -2303,6 +2303,8 @@ document.addEventListener('DOMContentLoaded', () => {
         });
         return Promise.race([Promise.resolve(promise), timeout]).finally(() => clearTimeout(timer));
     }
+    /** 탭/브릿지 모듈에서도 쓰는 공개 타임아웃 */
+    window.withTimeoutMs = withTimeout;
 
     async function runPool(items, limit, worker) {
         const queue = (items || []).slice();
@@ -3942,7 +3944,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const floorsList = [];
 
             if (safeUploadedDrawings.length > 0) {
-                window.showLoading(`도면 ${safeUploadedDrawings.length}개 처리 중... PDF는 일반·고해상도·초고해상도 이미지로 변환합니다`);
+                window.showLoading(`도면 ${safeUploadedDrawings.length}개 변환 중...`);
                 try {
                     for (let i = 0; i < safeUploadedDrawings.length; i++) {
                         const item = safeUploadedDrawings[i];
@@ -3954,27 +3956,28 @@ document.addEventListener('DOMContentLoaded', () => {
                         }
                         if (item.file) {
                             try {
-                                window.showLoading(`도면 ${i + 1}/${safeUploadedDrawings.length} 처리 중... (${item.floorCode || ''} 일반·고해상도·초고해상도)`);
-                                const prepared = (typeof window.prepareFloorDrawingUpload === 'function')
-                                    ? await window.prepareFloorDrawingUpload(item.file)
-                                    : { rasterDataUrl: await window.compressDrawingImage(item.file), pdfDataUrl: null };
+                                window.showLoading(`도면 ${i + 1}/${safeUploadedDrawings.length} 변환 중... (${item.floorCode || ''})`);
+                                const preparePromise = (typeof window.prepareFloorDrawingUpload === 'function')
+                                    ? window.prepareFloorDrawingUpload(item.file)
+                                    : window.compressDrawingImage(item.file).then((rasterDataUrl) => ({ rasterDataUrl, pdfDataUrl: null }));
+                                const prepared = await withTimeout(preparePromise, 120000, 'prepare-drawing');
                                 if (prepared && prepared.rasterDataUrl) {
                                     floorDrawingsMap[item.floorCode] = prepared.rasterDataUrl;
-                                    await uploadFloorDrawing(newBuildingId, item.floorCode, prepared.rasterDataUrl);
                                 }
                                 if (prepared && prepared.tiers) {
                                     floorDrawingTiersMap[item.floorCode] = prepared.tiers;
-                                    await uploadFloorDrawingTiers(newBuildingId, item.floorCode, prepared.tiers);
                                 }
                                 if (prepared && prepared.sourceDataUrl) {
                                     floorDrawingSourcesMap[item.floorCode] = prepared.sourceDataUrl;
                                 }
                                 if (prepared && prepared.pdfDataUrl) {
                                     floorDrawingPdfsMap[item.floorCode] = prepared.pdfDataUrl;
-                                    await uploadFloorDrawingPdf(newBuildingId, item.floorCode, prepared.pdfDataUrl);
                                 }
+                                // 클라우드 업로드는 UI를 막지 않도록 백그라운드 큐로 처리
+                                enqueueFloorDrawingCloudUpload(newBuildingId, item.floorCode, prepared || {});
                             } catch (err) {
                                 console.error('Drawing compression error:', err);
+                                window.showToast(`도면 ${item.floorCode || (i + 1)} 변환 실패 — 다음 도면으로 진행합니다`, 'warning');
                             }
                         }
                     }
@@ -4008,8 +4011,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
             window.state.buildings.unshift(newBldg);
 
-            await persistBuildingDrawingAssetsNow(newBldg);
-            await hydrateBuildingPdfsFromSiteVault(newBldg);
+            window.showLoading('도면 로컬 저장 중...');
+            try {
+                await persistBuildingDrawingAssetsNow(newBldg);
+                await hydrateBuildingPdfsFromSiteVault(newBldg);
+            } finally {
+                window.hideLoading();
+            }
 
             if (isImportMode && sourceBldg && importOpts) {
                 try {
@@ -4028,7 +4036,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const importNote = (isImportMode && sourceBldg)
                 ? ' · 다른 점검 데이터 반영'
                 : '';
-            window.showToast(`'${name}' 건축물이 등록되었습니다${importNote}.`, 'success');
+            window.showToast(`'${name}' 건축물이 등록되었습니다${importNote}. 서버 도면 동기화는 백그라운드에서 이어집니다.`, 'success');
         });
     }
 
@@ -4391,7 +4399,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
 
             if (newFiles.length > 0) {
-                window.showLoading(`도면 ${newFiles.length}개 처리 중... PDF는 일반·고해상도·초고해상도 이미지로 변환합니다`);
+                window.showLoading(`도면 ${newFiles.length}개 변환 중...`);
                 try {
                     for (let i = 0; i < newFiles.length; i++) {
                         const item = newFiles[i];
@@ -4405,10 +4413,11 @@ document.addEventListener('DOMContentLoaded', () => {
                         }
                         if (item.file) {
                             try {
-                                window.showLoading(`도면 ${i + 1}/${newFiles.length} 처리 중... (${item.floorCode || ''} 일반·고해상도·초고해상도)`);
-                                const prepared = (typeof window.prepareFloorDrawingUpload === 'function')
-                                    ? await window.prepareFloorDrawingUpload(item.file)
-                                    : { rasterDataUrl: await window.compressDrawingImage(item.file), pdfDataUrl: null };
+                                window.showLoading(`도면 ${i + 1}/${newFiles.length} 변환 중... (${item.floorCode || ''})`);
+                                const preparePromise = (typeof window.prepareFloorDrawingUpload === 'function')
+                                    ? window.prepareFloorDrawingUpload(item.file)
+                                    : window.compressDrawingImage(item.file).then((rasterDataUrl) => ({ rasterDataUrl, pdfDataUrl: null }));
+                                const prepared = await withTimeout(preparePromise, 120000, 'prepare-drawing');
                                 _idbPersistedDrawingKeys.delete(`${bldg.id}_${item.floorCode}`);
                                 if (window._cloudSyncedDrawingKeys) window._cloudSyncedDrawingKeys.delete(`${bldg.id}_${item.floorCode}`);
                                 clearFloorDrawingTierCacheForFloor(bldg.id, item.floorCode);
@@ -4419,13 +4428,11 @@ document.addEventListener('DOMContentLoaded', () => {
                                 }
                                 if (prepared && prepared.rasterDataUrl) {
                                     bldg.floorDrawings[item.floorCode] = prepared.rasterDataUrl;
-                                    await uploadFloorDrawing(bldg.id, item.floorCode, prepared.rasterDataUrl);
                                 }
                                 if (prepared && prepared.tiers) {
                                     if (!bldg.floorDrawingTiers) bldg.floorDrawingTiers = {};
                                     bldg.floorDrawingTiers[item.floorCode] = prepared.tiers;
                                     _idbPersistedTierKeys.delete(`${bldg.id}_${item.floorCode}`);
-                                    await uploadFloorDrawingTiers(bldg.id, item.floorCode, prepared.tiers);
                                 }
                                 if (prepared && prepared.sourceDataUrl) {
                                     cacheFloorDrawingSourceToDevice(bldg, item.floorCode, prepared.sourceDataUrl);
@@ -4435,10 +4442,11 @@ document.addEventListener('DOMContentLoaded', () => {
                                     bldg.floorDrawingPdfs[item.floorCode] = prepared.pdfDataUrl;
                                     _idbPersistedPdfKeys.delete(`${bldg.id}_${item.floorCode}`);
                                     if (window._cloudSyncedPdfKeys) window._cloudSyncedPdfKeys.delete(`${bldg.id}_${item.floorCode}`);
-                                    await uploadFloorDrawingPdf(bldg.id, item.floorCode, prepared.pdfDataUrl);
                                 }
+                                enqueueFloorDrawingCloudUpload(bldg.id, item.floorCode, prepared || {});
                             } catch (err) {
                                 console.error('Edit drawing compression error:', err);
+                                window.showToast(`도면 ${item.floorCode || (i + 1)} 변환 실패 — 다음 도면으로 진행합니다`, 'warning');
                             }
                         }
                     }
@@ -4464,7 +4472,12 @@ document.addEventListener('DOMContentLoaded', () => {
             bldg.notes = notes;
 
             // Save state & sync
-            await persistBuildingDrawingAssetsNow(bldg);
+            window.showLoading('도면 로컬 저장 중...');
+            try {
+                await persistBuildingDrawingAssetsNow(bldg);
+            } finally {
+                window.hideLoading();
+            }
             saveStateToLocalStorage();
             if (typeof syncStateToFirebase === 'function') syncStateToFirebase();
 
@@ -4477,7 +4490,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 window.selectBuildingAndInspect(bldg);
             }
 
-            window.showToast(`'${bldg.name}' 명칭 및 도면 저장이 완료되었습니다. (총 ${bldg.floorsList.length}개 층)`, 'success');
+            window.showToast(`'${bldg.name}' 저장 완료 (총 ${bldg.floorsList.length}개 층). 서버 도면 동기화는 백그라운드에서 이어집니다.`, 'success');
         });
     }
 
@@ -25789,11 +25802,15 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!url || !isUsableRasterDrawingUrl(url)) continue;
             const docId = floorDrawingTierCloudDocId(buildingId, floorCode, dim);
             try {
-                await writeChunkedPdfToDocRef(col.doc(docId), url, {
-                    dim,
-                    floorCode,
-                    buildingId
-                });
+                await withTimeout(
+                    writeChunkedPdfToDocRef(col.doc(docId), url, {
+                        dim,
+                        floorCode,
+                        buildingId
+                    }),
+                    dim >= 16000 ? 90000 : 60000,
+                    `tier-upload-${dim}`
+                );
                 window._cloudSyncedTierKeys.add(docId);
             } catch (e) {
                 console.warn('도면 티어 업로드 실패:', docId, e);
@@ -25801,6 +25818,58 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         }
         return ok;
+    }
+
+    /** 등록/수정 UI를 막지 않도록 대용량 도면 클라우드 업로드를 큐에 넣음 */
+    const _pendingFloorCloudUploads = [];
+    let _floorCloudUploadRunning = false;
+
+    function enqueueFloorDrawingCloudUpload(buildingId, floorCode, payload) {
+        if (!buildingId || !floorCode || !payload) return;
+        _pendingFloorCloudUploads.push({
+            buildingId,
+            floorCode,
+            rasterDataUrl: payload.rasterDataUrl || null,
+            tiers: payload.tiers || null,
+            pdfDataUrl: payload.pdfDataUrl || null
+        });
+        drainFloorDrawingCloudUploads();
+    }
+
+    async function drainFloorDrawingCloudUploads() {
+        if (_floorCloudUploadRunning) return;
+        _floorCloudUploadRunning = true;
+        try {
+            while (_pendingFloorCloudUploads.length) {
+                const job = _pendingFloorCloudUploads.shift();
+                try {
+                    if (job.rasterDataUrl) {
+                        await withTimeout(
+                            uploadFloorDrawing(job.buildingId, job.floorCode, job.rasterDataUrl),
+                            45000,
+                            'raster-upload'
+                        );
+                    }
+                    if (job.tiers) {
+                        await uploadFloorDrawingTiers(job.buildingId, job.floorCode, job.tiers);
+                    }
+                    if (job.pdfDataUrl) {
+                        await withTimeout(
+                            uploadFloorDrawingPdf(job.buildingId, job.floorCode, job.pdfDataUrl),
+                            120000,
+                            'pdf-upload'
+                        );
+                    }
+                } catch (e) {
+                    console.warn('도면 클라우드 백그라운드 업로드 실패:', job.buildingId, job.floorCode, e);
+                }
+            }
+        } finally {
+            _floorCloudUploadRunning = false;
+            if (_pendingFloorCloudUploads.length) {
+                drainFloorDrawingCloudUploads();
+            }
+        }
     }
 
     async function cloudFloorDrawingTierExists(buildingId, floorCode, dim) {
@@ -25949,19 +26018,44 @@ document.addEventListener('DOMContentLoaded', () => {
         const payload = String(pdfDataUrl);
         const base = { ...(extraFields || {}), updatedAt: firebase.firestore.FieldValue.serverTimestamp() };
         if (payload.length <= PDF_CLOUD_CHUNK_CHARS) {
-            await docRef.set({ ...base, dataUrl: payload, chunked: false });
+            await docRef.set({ ...base, dataUrl: payload, chunked: false, chunkCount: 0 });
             return;
         }
         const parts = [];
         for (let i = 0; i < payload.length; i += PDF_CLOUD_CHUNK_CHARS) {
             parts.push(payload.slice(i, i + PDF_CLOUD_CHUNK_CHARS));
         }
-        const batch = db.batch();
-        batch.set(docRef, { ...base, chunked: true, chunkCount: parts.length });
-        parts.forEach((part, i) => {
-            batch.set(docRef.collection('parts').doc(String(i)), { data: part });
-        });
-        await batch.commit();
+        // 이전 조각 정리 (청크 수가 줄었을 때 잔여 parts 방지)
+        try {
+            const oldParts = await docRef.collection('parts').get();
+            if (!oldParts.empty) {
+                let delBatch = db.batch();
+                let delCount = 0;
+                for (const d of oldParts.docs) {
+                    delBatch.delete(d.ref);
+                    delCount++;
+                    if (delCount >= 400) {
+                        await delBatch.commit();
+                        delBatch = db.batch();
+                        delCount = 0;
+                    }
+                }
+                if (delCount > 0) await delBatch.commit();
+            }
+        } catch (e) {
+            console.warn('청크 parts 정리 실패:', docRef.path, e);
+        }
+        await docRef.set({ ...base, chunked: true, chunkCount: parts.length });
+        // Firestore batch 10MB 한도 — 조각을 나눠 커밋 (한 번에 몰아넣으면 대용량 도면에서 hang)
+        const PARTS_PER_BATCH = 6;
+        for (let start = 0; start < parts.length; start += PARTS_PER_BATCH) {
+            const batch = db.batch();
+            const end = Math.min(start + PARTS_PER_BATCH, parts.length);
+            for (let i = start; i < end; i++) {
+                batch.set(docRef.collection('parts').doc(String(i)), { data: parts[i] });
+            }
+            await batch.commit();
+        }
     }
 
     async function readChunkedPdfFromDocRef(docRef) {

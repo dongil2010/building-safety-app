@@ -158,12 +158,25 @@ function isPdfFile(file) {
     return !!file && (file.type === 'application/pdf' || /\.pdf$/i.test(file.name || ''));
 }
 
+/** 브라우저가 멈추지 않도록 캔버스 픽셀 상한 (~9800²). 초과 시 scale 자동 축소 */
+const PDF_RENDER_MAX_PIXELS = 96e6;
+
 // PDF 페이지를 지정 스케일로 캔버스에 렌더링 후 dataURL로 변환
 async function renderPdfPageToDataUrl(page, scale, mime = 'image/png', quality = 0.9) {
-    const viewport = page.getViewport({ scale });
+    let safeScale = Math.max(0.1, Number(scale) || 1);
+    let viewport = page.getViewport({ scale: safeScale });
+    let w = Math.max(1, Math.round(viewport.width));
+    let h = Math.max(1, Math.round(viewport.height));
+    const pixels = w * h;
+    if (pixels > PDF_RENDER_MAX_PIXELS) {
+        safeScale *= Math.sqrt(PDF_RENDER_MAX_PIXELS / pixels);
+        viewport = page.getViewport({ scale: safeScale });
+        w = Math.max(1, Math.round(viewport.width));
+        h = Math.max(1, Math.round(viewport.height));
+    }
     const canvas = document.createElement('canvas');
-    canvas.width = Math.max(1, Math.round(viewport.width));
-    canvas.height = Math.max(1, Math.round(viewport.height));
+    canvas.width = w;
+    canvas.height = h;
     const ctx = canvas.getContext('2d');
     ctx.fillStyle = '#ffffff';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -338,14 +351,24 @@ window.buildFloorDrawingTiersFromDataUrl = async function(sourceDataUrl) {
     return tiers;
 };
 
+function withPdfTierTimeout(promise, ms, label) {
+    if (typeof window.withTimeoutMs === 'function') {
+        return window.withTimeoutMs(promise, ms, label || 'pdf-tier');
+    }
+    let timer = 0;
+    const timeout = new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error(label || 'pdf-tier-timeout')), ms);
+    });
+    return Promise.race([Promise.resolve(promise), timeout]).finally(() => clearTimeout(timer));
+}
+
 /**
- * PDF 벡터를 일반(4000)·고해상도(8000)·초고해상도(16000) JPEG로 미리 렌더.
- * 초고해상도 한 장을 만든 뒤 축소해 나머지를 채운다 (현장은 이 레스터만 사용).
+ * PDF 벡터 → 일반(4000)·고해상도(8000)·초고해상도(16000) JPEG.
+ * 8000을 먼저 만들어 UI가 멈추지 않게 하고, 16000은 제한 시간 안에만 시도한다.
  */
 window.buildFloorDrawingTiersFromPdf = async function(pdfDataUrl, cacheKey) {
     const tiers = {};
     if (!pdfDataUrl || typeof window.renderPdfDataUrlToImage !== 'function') return tiers;
-    const dims = window.FLOOR_DRAWING_TIER_DIMS || [4000, 8000, 16000];
     const maxBytes = { 4000: 950000, 8000: 2200000, 16000: 3800000 };
     const quality = { 4000: 0.85, 8000: 0.82, 16000: 0.78 };
     const renderAt = async (dim) => window.renderPdfDataUrlToImage(
@@ -355,23 +378,45 @@ window.buildFloorDrawingTiersFromPdf = async function(pdfDataUrl, cacheKey) {
         cacheKey,
         { forceJpeg: true, quality: quality[dim] || 0.82 }
     );
-    let source = null;
-    for (let i = dims.length - 1; i >= 0; i--) {
+
+    let mid = null;
+    try {
+        mid = await withPdfTierTimeout(renderAt(8000), 45000, 'pdf-render-8000');
+    } catch (e) {
+        console.warn('PDF 고해상도(8000) 렌더 실패/타임아웃:', e);
+        mid = null;
+    }
+    if (!mid) {
         try {
-            source = await renderAt(dims[i]);
+            mid = await withPdfTierTimeout(renderAt(4000), 30000, 'pdf-render-4000');
         } catch (e) {
-            console.warn('PDF 도면 티어 렌더 실패:', dims[i], e);
-            source = null;
+            console.warn('PDF 일반(4000) 렌더 실패/타임아웃:', e);
+            return tiers;
         }
-        if (source) break;
     }
-    if (!source) return tiers;
-    if (typeof window.resizeDataUrlToMaxDim !== 'function') {
-        dims.forEach((dim) => { tiers[String(dim)] = source; });
-        return tiers;
+    if (!mid) return tiers;
+
+    if (typeof window.resizeDataUrlToMaxDim === 'function') {
+        tiers['8000'] = await window.resizeDataUrlToMaxDim(mid, 8000, quality[8000]);
+        tiers['4000'] = await window.resizeDataUrlToMaxDim(mid, 4000, quality[4000]);
+    } else {
+        tiers['8000'] = mid;
+        tiers['4000'] = mid;
     }
-    for (const dim of dims) {
-        tiers[String(dim)] = await window.resizeDataUrlToMaxDim(source, dim, quality[dim] || 0.85);
+
+    let hi = null;
+    try {
+        hi = await withPdfTierTimeout(renderAt(16000), 35000, 'pdf-render-16000');
+    } catch (e) {
+        console.warn('PDF 초고해상도(16000) 렌더 스킵(타임아웃/실패):', e);
+    }
+    if (hi && typeof window.resizeDataUrlToMaxDim === 'function') {
+        tiers['16000'] = await window.resizeDataUrlToMaxDim(hi, 16000, quality[16000]);
+    } else if (hi) {
+        tiers['16000'] = hi;
+    } else {
+        // 초고해상도 실패 시에도 LOD 키가 비지 않게 고해상도로 채움 (추후 재생성 가능)
+        tiers['16000'] = tiers['8000'];
     }
     return tiers;
 };
