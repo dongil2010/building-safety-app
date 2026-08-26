@@ -371,9 +371,12 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function getMaxDisplayDrawingTierDim() {
-        if (typeof isNativeAndroidApp === 'function' && isNativeAndroidApp()) return 8000;
-        if (typeof isMobileMapViewport === 'function' && isMobileMapViewport()) return 8000;
-        return 16000;
+        const zoomVsFit = getMapZoomVsFit();
+        const mobile = (typeof isMobileMapViewport === 'function' && isMobileMapViewport())
+            || (typeof isNativeAndroidApp === 'function' && isNativeAndroidApp());
+        const z = window.FLOOR_DRAWING_TIER_ZOOM || {};
+        const toHi = mobile ? (z.TO_HI_MOBILE || 20) : (z.TO_HI || 12);
+        return zoomVsFit >= toHi ? 16000 : 8000;
     }
 
     async function idbGetFloorDrawingTier(bldgId, floorCode, dim) {
@@ -392,23 +395,19 @@ document.addEventListener('DOMContentLoaded', () => {
         return null;
     }
 
-    /** 지금 안 쓰는 도면·PDF·원본은 RAM에서 내린다. IndexedDB에는 그대로 둔다. */
+    /** 지금 안 쓰는 도면·PDF·원본은 RAM에서 내린다. IndexedDB에는 persist 후 그대로 둔다. */
     function releaseHeavyDrawingMemory(bldg, opts) {
         if (!bldg) return;
         const keepFloor = opts && opts.keepFloor;
         const keepDim = opts && opts.keepDim != null ? String(opts.keepDim) : null;
-        const id = bldg.id;
         Object.keys(bldg.floorDrawingPdfs || {}).forEach((fc) => {
-            if (id) _idbPersistedPdfKeys.add(`${id}_${fc}`);
             delete bldg.floorDrawingPdfs[fc];
         });
         Object.keys(bldg.floorDrawingSources || {}).forEach((fc) => {
-            if (id) _idbPersistedSourceKeys.add(`${id}_${fc}`);
             delete bldg.floorDrawingSources[fc];
         });
         Object.keys(bldg.floorDrawings || {}).forEach((fc) => {
             if (keepFloor && fc === keepFloor) return;
-            if (id) _idbPersistedDrawingKeys.add(`${id}_${fc}`);
             delete bldg.floorDrawings[fc];
         });
         Object.keys(bldg.floorDrawingTiers || {}).forEach((fc) => {
@@ -1017,6 +1016,15 @@ document.addEventListener('DOMContentLoaded', () => {
         // floorsList가 비어 있어도 등록된 건물이면 Firestore·현장 보관함 조회
         if (bldg.id) return true;
         return false;
+    }
+
+    /** 층 목록에 있거나 서버에 있을 수 있으면 IDB·클라우드 조회 시도 */
+    function shouldAttemptFloorDrawingLoad(bldg, floorCode) {
+        if (!bldg || !floorCode) return false;
+        if (floorHasDrawingData(bldg, floorCode) || floorMayHavePdfSource(bldg, floorCode)) return true;
+        if ((bldg.floorsList || []).some((f) => f && f.floorCode === floorCode)) return true;
+        if ((bldg.drawingFloorCodes || []).includes(floorCode)) return true;
+        return floorMayExistOnCloud(bldg, floorCode);
     }
 
     function updateFloorDrawingEmptyOverlay(message) {
@@ -2165,7 +2173,40 @@ document.addEventListener('DOMContentLoaded', () => {
         return false;
     }
 
-    /** 점검 진입 시 서버→로컬(IDB) 일괄 내려받기 — 층 전환은 로컬만 사용 */
+    /** 층별 8000·16000 티어 — 온라인: 서버→IDB, 오프라인: IDB만 (확대 3티어 오프라인 대비) */
+    async function hydrateFloorDrawingTiersForFloor(bldg, floorCode, opts) {
+        const options = opts || {};
+        if (!bldg || !bldg.id || !floorCode) return false;
+        const extraDims = (window.FLOOR_DRAWING_TIER_DIMS || [4000, 8000, 16000]).filter((d) => d > 4000);
+        if (!bldg.floorDrawingTiers) bldg.floorDrawingTiers = {};
+        if (!bldg.floorDrawingTiers[floorCode]) bldg.floorDrawingTiers[floorCode] = {};
+        let gotAny = false;
+
+        await Promise.all(extraDims.map(async (dim) => {
+            const dimKey = String(dim);
+            if (isUsableRasterDrawingUrl(bldg.floorDrawingTiers[floorCode][dimKey])) {
+                gotAny = true;
+                return;
+            }
+            const cached = await idbGetFloorDrawingTier(bldg.id, floorCode, dim);
+            if (isUsableRasterDrawingUrl(cached)) {
+                bldg.floorDrawingTiers[floorCode][dimKey] = cached;
+                _idbPersistedTierKeys.add(floorDrawingTierIdbKey(bldg.id, floorCode, dim));
+                gotAny = true;
+                return;
+            }
+            if (!options.localOnly && typeof navigator !== 'undefined' && navigator.onLine !== false) {
+                const cloud = await fetchAndCacheCloudFloorDrawingTier(bldg, floorCode, dim);
+                if (isUsableRasterDrawingUrl(cloud)) {
+                    bldg.floorDrawingTiers[floorCode][dimKey] = cloud;
+                    gotAny = true;
+                }
+            }
+        }));
+        return gotAny;
+    }
+
+    /** 점검 진입 시 서버→로컬(IDB) 일괄 내려받기 — 층 전환·오프라인은 IDB 3티어 사용 */
     async function hydrateFloorDrawingFromCloud(bldg, floorCode, opts) {
         const options = opts || {};
         if (!bldg || !bldg.id || !floorCode) return false;
@@ -2235,6 +2276,15 @@ document.addEventListener('DOMContentLoaded', () => {
                 hydrated = true;
             }
         }
+
+        if (await hydrateFloorDrawingTiersForFloor(bldg, floorCode, options)) {
+            hydrated = true;
+        }
+        if (isUsableRasterDrawingUrl(bldg.floorDrawings[floorCode])
+            && bldg.floorDrawingTiers[floorCode]
+            && !bldg.floorDrawingTiers[floorCode]['4000']) {
+            bldg.floorDrawingTiers[floorCode]['4000'] = bldg.floorDrawings[floorCode];
+        }
         return hydrated;
     }
 
@@ -2297,25 +2347,33 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const hydrateOne = async (floorCode, extra) => {
             const floorOpts = extra ? { ...options, ...extra } : options;
-            await withTimeout(hydrateFloorDrawingFromCloud(bldg, floorCode, floorOpts), 15000, '도면 내려받기 시간 초과');
-            await withTimeout(ensureOfflineRasterForFloor(bldg, floorCode), 12000, '도면 미리보기 생성 시간 초과');
+            await withTimeout(hydrateFloorDrawingFromCloud(bldg, floorCode, floorOpts), 30000, '도면 내려받기 시간 초과');
+            await withTimeout(ensureOfflineRasterForFloor(bldg, floorCode), 5000, '도면 미리보기 생성 시간 초과');
+            await persistFloorDrawingAssetsForFloor(bldg, floorCode);
             const keepFloor = options.priorityFloor || window.state.currentFloor;
             if (floorCode !== keepFloor) {
                 releaseHeavyDrawingMemory(bldg, { keepFloor, keepDim: 4000 });
             }
             done += 1;
             reportProgress(floorCode);
+            if (window.state.currentBuildingId === bldg.id
+                && window.state.currentFloor === floorCode
+                && window.state.currentTab === 'tab-map'
+                && !window.state.bgImage
+                && typeof loadFloorDrawing === 'function') {
+                loadFloorDrawing(floorCode);
+            }
         };
 
         if (priority) {
             try {
-                await withTimeout(hydrateOne(priority, { needPdf: false }), 10000, '현재 층 도면 시간 초과');
+                await withTimeout(hydrateOne(priority, { needPdf: false }), 35000, '현재 층 도면 시간 초과');
             } catch (e) {
                 console.warn('현재 층 도면 로드 실패:', priority, e);
             }
         } else if (options.backgroundRest && floorList[0]) {
             try {
-                await withTimeout(hydrateOne(floorList[0], { needPdf: false }), 10000, '현재 층 도면 시간 초과');
+                await withTimeout(hydrateOne(floorList[0], { needPdf: false }), 35000, '현재 층 도면 시간 초과');
             } catch (e) {
                 console.warn('첫 층 도면 로드 실패:', floorList[0], e);
             }
@@ -2689,12 +2747,14 @@ document.addEventListener('DOMContentLoaded', () => {
                     }
                 }
                 populateFloorSelectDropdown(bldg);
-                // hydrate 후 현재 층이 비어 있으면 다시 그림 (이미 보이면 유지)
+                const curFloor = window.state.currentFloor;
+                const refMismatch = window.state.floorPlanRef
+                    && window.state.floorPlanRef.floorCode !== curFloor;
                 if (window.state.currentBuildingId === entryBuildingId
-                    && window.state.currentFloor === targetFloor
-                    && !window.state.bgImage
+                    && curFloor
+                    && (!window.state.bgImage || refMismatch)
                     && typeof loadFloorDrawing === 'function') {
-                    loadFloorDrawing(targetFloor, { preserveView: true });
+                    loadFloorDrawing(curFloor);
                 } else if (typeof renderDefectListPanel === 'function') {
                     renderDefectListPanel();
                 }
@@ -4601,10 +4661,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function pickFloorDrawingTierDimForCurrentView() {
         const zoomVsFit = getMapZoomVsFit();
+        const mobile = (typeof isMobileMapViewport === 'function' && isMobileMapViewport())
+            || (typeof isNativeAndroidApp === 'function' && isNativeAndroidApp());
         let dim = 4000;
         if (typeof window.getFloorDrawingTierDimForZoomVsFit === 'function') {
             dim = window.getFloorDrawingTierDimForZoomVsFit(zoomVsFit, {
-                currentTier: floorDrawingActiveTierDim
+                currentTier: floorDrawingActiveTierDim,
+                mobile
             });
         }
         return Math.min(Number(dim) || 4000, getMaxDisplayDrawingTierDim());
@@ -4748,7 +4811,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (direct) return direct;
         const memTiers = bldg.floorDrawingTiers && bldg.floorDrawingTiers[floorCode];
         if (memTiers && typeof memTiers === 'object') {
-            for (const d of [8000, 4000, 2000]) {
+            for (const d of [16000, 8000, 4000, 2000]) {
                 if (memTiers[String(d)]) return memTiers[String(d)];
             }
         }
@@ -4859,6 +4922,18 @@ document.addEventListener('DOMContentLoaded', () => {
             if (cloudTier) return cloudTier;
         }
 
+        // 오프라인·서버 미스: IDB에만 있는 고해상도 티어 재조회
+        if (Number(tierDim) > baseTier) {
+            const idbRetry = await idbGetFloorDrawingTier(bldg.id, floorCode, tierDim);
+            if (idbRetry) {
+                if (!bldg.floorDrawingTiers) bldg.floorDrawingTiers = {};
+                if (!bldg.floorDrawingTiers[floorCode]) bldg.floorDrawingTiers[floorCode] = {};
+                bldg.floorDrawingTiers[floorCode][dimKey] = idbRetry;
+                _idbPersistedTierKeys.add(floorDrawingTierIdbKey(bldg.id, floorCode, tierDim));
+                return idbRetry;
+            }
+        }
+
         const sourceUrl = await getBestRasterSourceDataUrl(bldg, floorCode);
         if (sourceUrl && typeof window.resizeDataUrlToMaxDim === 'function') {
             try {
@@ -4876,7 +4951,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         }
 
-        const fallbackDims = [8000, 4000, 2000];
+        const fallbackDims = [16000, 8000, 4000, 2000];
         const liveTiers = (bldg.floorDrawingTiers && bldg.floorDrawingTiers[floorCode]) || tiers;
         for (const d of fallbackDims) {
             if (d <= tierDim && liveTiers && liveTiers[String(d)]) return liveTiers[String(d)];
@@ -4998,19 +5073,21 @@ document.addEventListener('DOMContentLoaded', () => {
         viewportHiPatchToken++;
         resetViewportPatchState();
         const opts = options || {};
-        const preserveView = !!opts.preserveView
-            || (!opts.forceFit && state.currentFloor === floorCode && !!state.bgImage && !!state.floorPlanRef);
         const prevBuildingId = state.currentBuildingId;
+        const prevFloor = state.currentFloor;
         state.currentFloor = floorCode;
         if (state.floorPlanRef && state.floorPlanRef.floorCode !== floorCode) {
             state.floorPlanRef = null;
         }
-        // 같은 건물 내 층 전환: 이전 도면을 유지해 빈 화면 시간 최소화
-        if (opts.forceClear || prevBuildingId !== state.currentBuildingId) {
+        // 건물·층이 바뀌면 이전 도면을 지우고 새 층을 그린다
+        if (opts.forceClear || prevBuildingId !== state.currentBuildingId || prevFloor !== floorCode) {
             cancelFloorDrawingBlend();
             state.bgImage = null;
             state.floorDrawingHiPatch = null;
         }
+        const preserveView = !!opts.preserveView
+            || (!opts.forceFit && prevFloor === floorCode && !!state.bgImage
+                && state.floorPlanRef && state.floorPlanRef.floorCode === floorCode);
         clearFloorDrawingHiPatch(true);
         floorDrawingActiveTierDim = null;
         const loadToken = ++floorDrawingTierLoadToken;
@@ -5027,7 +5104,7 @@ document.addEventListener('DOMContentLoaded', () => {
             dataUrl = rawDrawing;
         }
 
-        const mayHaveDrawing = floorHasDrawingData(bldg, floorCode) || floorMayHavePdfSource(bldg, floorCode);
+        const shouldLoadDrawing = shouldAttemptFloorDrawingLoad(bldg, floorCode);
         const canUseDataUrl = isUsableRasterDrawingUrl(dataUrl);
 
         const tryLoadCloudRasterThenFinish = async () => {
@@ -5055,7 +5132,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const tryLoadImage = (srcUrl) => {
             if (!isRasterDrawingUrl(srcUrl)) {
-                if (mayHaveDrawing) {
+                if (shouldLoadDrawing) {
                     tryLoadCloudRasterThenFinish().then((ok) => {
                         if (!ok && loadToken === floorDrawingTierLoadToken && state.currentFloor === floorCode) {
                             finishRegisteredFloorDrawingLoadFailed(floorCode);
@@ -5102,7 +5179,7 @@ document.addEventListener('DOMContentLoaded', () => {
             img.onerror = () => {
                 if (loadToken !== floorDrawingTierLoadToken || state.currentFloor !== floorCode) return;
                 clearBrokenRasterDrawingCache(bldg, floorCode);
-                if (mayHaveDrawing) {
+                if (shouldLoadDrawing) {
                     tryLoadCloudRasterThenFinish().then((ok) => {
                         if (!ok) finishRegisteredFloorDrawingLoadFailed(floorCode);
                     });
@@ -5115,7 +5192,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (canUseDataUrl) {
             tryLoadImage(dataUrl);
-        } else if (mayHaveDrawing) {
+        } else if (shouldLoadDrawing) {
             (async () => {
                 if (loadToken !== floorDrawingTierLoadToken || state.currentFloor !== floorCode) return;
                 const idbKey = `${bldg.id}_${floorCode}`;
@@ -25686,18 +25763,33 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (fc) codes.add(fc);
             });
         };
+        const parseTierDocFloors = (snap) => {
+            if (!snap) return;
+            const prefix = `${bldg.id}_`;
+            snap.forEach((doc) => {
+                if (!doc.id.startsWith(prefix)) return;
+                const rest = doc.id.slice(prefix.length);
+                const m = rest.match(/^(.+)_(\d+)$/);
+                if (m && m[1]) codes.add(m[1]);
+            });
+        };
         try {
             const docIdField = firebase.firestore.FieldPath.documentId();
-            const [rasterSnap, pdfSnap] = await Promise.all([
+            const tierPrefix = `${bldg.id}_`;
+            const [rasterSnap, pdfSnap, tierSnap] = await Promise.all([
                 companyRef.collection('floorDrawings')
                     .orderBy(docIdField).startAt(docPrefix).endAt(docPrefix + '\uf8ff')
                     .get().catch(() => null),
                 companyRef.collection('floorDrawingPdfs')
                     .orderBy(docIdField).startAt(docPrefix).endAt(docPrefix + '\uf8ff')
                     .get().catch(() => null),
+                companyRef.collection('floorDrawingTiers')
+                    .orderBy(docIdField).startAt(tierPrefix).endAt(tierPrefix + '\uf8ff')
+                    .get().catch(() => null),
             ]);
             parseDocFloors(rasterSnap);
             parseDocFloors(pdfSnap);
+            parseTierDocFloors(tierSnap);
         } catch (e) {
             console.warn('Firestore 도면 층 목록 조회 실패:', bldg.id, e);
         }
@@ -26396,6 +26488,30 @@ document.addEventListener('DOMContentLoaded', () => {
             floorDrawingTiers: mergeDrawingAssetMaps(prev.floorDrawingTiers, building.floorDrawingTiers),
             floorDrawingSources: mergeDrawingAssetMaps(prev.floorDrawingSources, building.floorDrawingSources)
         };
+    }
+
+    async function persistFloorDrawingAssetsForFloor(bldg, floorCode) {
+        if (!bldg || !bldg.id || !floorCode) return;
+        const tasks = [];
+        const key = `${bldg.id}_${floorCode}`;
+        const raster = bldg.floorDrawings && bldg.floorDrawings[floorCode];
+        if (isUsableRasterDrawingUrl(raster) && !_idbPersistedDrawingKeys.has(key)) {
+            tasks.push(idbSet('floorDrawings', key, raster).then((ok) => {
+                if (ok) _idbPersistedDrawingKeys.add(key);
+            }));
+        }
+        const tiers = bldg.floorDrawingTiers && bldg.floorDrawingTiers[floorCode];
+        if (tiers && typeof tiers === 'object') {
+            Object.entries(tiers).forEach(([dim, url]) => {
+                if (typeof url !== 'string' || url.length < 32) return;
+                const tierKey = floorDrawingTierIdbKey(bldg.id, floorCode, dim);
+                if (_idbPersistedTierKeys.has(tierKey)) return;
+                tasks.push(idbSet('floorDrawingTiers', tierKey, url).then((ok) => {
+                    if (ok) _idbPersistedTierKeys.add(tierKey);
+                }));
+            });
+        }
+        await Promise.all(tasks);
     }
 
     async function persistBuildingDrawingAssetsNow(bldg) {

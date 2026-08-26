@@ -244,9 +244,11 @@ window.FLOOR_DRAWING_TIER_LABELS = {
 /** 맞춤 대비 확대 배율 구간 — 일반 / 고해상도 / 초고해상도 */
 window.FLOOR_DRAWING_TIER_ZOOM = {
     TO_MID: 2.0,
-    TO_HI: 8.0,
+    TO_HI: 12.0,
+    TO_HI_MOBILE: 20.0,
     BACK_LO: 1.6,
-    BACK_MID: 6.5
+    BACK_MID: 10.0,
+    BACK_MID_MOBILE: 18.0
 };
 
 window.getFloorDrawingBaseTierDim = function() {
@@ -260,10 +262,9 @@ window.getFloorDrawingTierLabel = function(dim) {
 };
 
 /**
- * 확대 구간별 고정 해상도 — 일반(<200%) / 고해상도(200~800%) / 초고해상도(800%+)
- * 히스테리시스로 경계에서 깜빡임 방지
+ * 확대 구간별 고정 해상도 — 일반(<200%) / 고해상도(200%~) / 초고해상도(PC 1200%+·모바일 2000%+)
  * @param {number} zoomVsFit scale / fitScale (1 = 100%)
- * @param {{ currentTier?: number }} [opts]
+ * @param {{ currentTier?: number, mobile?: boolean }} [opts]
  */
 window.getFloorDrawingTierDimForZoomVsFit = function(zoomVsFit, opts) {
     const options = opts || {};
@@ -271,10 +272,11 @@ window.getFloorDrawingTierDimForZoomVsFit = function(zoomVsFit, opts) {
     const dims = window.FLOOR_DRAWING_TIER_DIMS || [4000, 8000, 16000];
     const cur = Number(options.currentTier) || dims[0];
     const zoom = window.FLOOR_DRAWING_TIER_ZOOM || {};
+    const mobile = !!options.mobile;
     const TO_MID = zoom.TO_MID || 2.0;
-    const TO_HI = zoom.TO_HI || 8;
+    const TO_HI = mobile ? (zoom.TO_HI_MOBILE || 20) : (zoom.TO_HI || 12);
     const BACK_LO = zoom.BACK_LO || 1.6;
-    const BACK_MID = zoom.BACK_MID || 6.5;
+    const BACK_MID = mobile ? (zoom.BACK_MID_MOBILE || 18) : (zoom.BACK_MID || 10);
 
     if (cur >= dims[2]) {
         if (z < BACK_MID) return dims[1];
