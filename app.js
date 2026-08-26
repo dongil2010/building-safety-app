@@ -22420,6 +22420,37 @@ document.addEventListener('DOMContentLoaded', () => {
                 });
                 return neededHeight;
             };
+            // 한글은 subList의 vertAlign="CENTER"만으로 셀 안 글자를 자동으로 세로 가운데 정렬해
+            // 주지 않는다 — 저장된 vertpos를 셀 위쪽 여백부터의 절대 오프셋으로 그대로 쓴다. 그래서
+            // 지금까지 vertpos=0으로만 채워온 칸들은 셀 높이가 넉넉할수록 글자가 위로 붙어 보였다
+            // (사용자가 결과표 헤더에서 직접 확인). 셀의 최종 높이가 정해진 뒤 이 함수로 한 번 더
+            // 훑어서, 실제 줄 수만큼의 콘텐츠 높이를 셀 안에서 정확히 가운데로 오는 vertpos로
+            // 다시 계산해 넣는다.
+            const centerCellContent = (tc) => {
+                if (!tc) return;
+                const sz = tc.getElementsByTagNameNS(HP_NS, 'cellSz')[0];
+                const cellHeight = sz ? parseInt(sz.getAttribute('height'), 10) : 0;
+                if (!cellHeight) return;
+                const subList = tc.getElementsByTagNameNS(HP_NS, 'subList')[0];
+                if (!subList) return;
+                const paras = Array.from(subList.getElementsByTagNameNS(HP_NS, 'p')).filter(p => p.parentNode === subList);
+                if (paras.length === 0) return;
+                const marginEl = tc.getElementsByTagNameNS(HP_NS, 'cellMargin')[0];
+                const marginTop = marginEl ? (parseInt(marginEl.getAttribute('top'), 10) || 0) : 141;
+                const marginBottom = marginEl ? (parseInt(marginEl.getAttribute('bottom'), 10) || 0) : 141;
+                const firstSeg = paras[0].getElementsByTagNameNS(HP_NS, 'lineseg')[0];
+                if (!firstSeg) return;
+                const vertsize = parseInt(firstSeg.getAttribute('vertsize'), 10) || 0;
+                const spacing = parseInt(firstSeg.getAttribute('spacing'), 10) || 0;
+                if (!vertsize) return;
+                const contentHeight = vertsize + (paras.length - 1) * (vertsize + spacing);
+                const available = cellHeight - marginTop - marginBottom;
+                const offset = Math.max(0, Math.round((available - contentHeight) / 2));
+                paras.forEach((p, i) => {
+                    const seg = p.getElementsByTagNameNS(HP_NS, 'lineseg')[0];
+                    if (seg) seg.setAttribute('vertpos', String(offset + i * (vertsize + spacing)));
+                });
+            };
             const setTcText = (tc, rawVal) => {
                 if (!tc) return;
                 const subList = tc.getElementsByTagNameNS(HP_NS, 'subList')[0];
@@ -23343,6 +23374,7 @@ document.addEventListener('DOMContentLoaded', () => {
                             }
                         });
                         applyRowHeightFromLines(newRow, rowMaxLines, rowLineMetric);
+                        Array.from(newRow.getElementsByTagNameNS(HP_NS, 'tc')).forEach(centerCellContent);
                         tbl.appendChild(newRow);
                     });
                     tbl.setAttribute('rowCnt', String(headerRowCount + rowsValues.length));
@@ -23541,6 +23573,9 @@ document.addEventListener('DOMContentLoaded', () => {
                                 if (sz) sz.setAttribute('height', String(mergedHeight));
                             });
                         }
+
+                        Array.from(newA.getElementsByTagNameNS(HP_NS, 'tc')).forEach(centerCellContent);
+                        Array.from(newB.getElementsByTagNameNS(HP_NS, 'tc')).forEach(centerCellContent);
 
                         tbl.appendChild(newA);
                         tbl.appendChild(newB);
