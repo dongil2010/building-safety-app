@@ -22296,6 +22296,27 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
                 return { lineCount: lines.length, vertsize: baseVertsize, spacing: baseSpacing };
             };
+            // 표본 행이 물려받은 샘플용 여러 줄 높이를 실제 채워지는 줄 수 기준으로 다시 계산해
+            // 적용한다 — NDT 표(fillNdtTable)와 내화피복 표(fillFireproofTable)가 공용으로 쓴다.
+            // 세로 병합(rowSpan>1)된 칸은 여러 행에 걸친 높이라 건드리지 않는다. 글자만 딱 맞는
+            // 높이는 인쇄용 표로 쓰기엔 너무 빽빽해 보이므로, 한 페이지에 15~20줄이 들어오는 정도의
+            // 여유 있는 최소 높이(MIN_ROW_HEIGHT)를 바닥으로 깐다.
+            const applyRowHeightFromLines = (row, rowMaxLines, rowLineMetric) => {
+                if (!rowLineMetric) return 0;
+                const MIN_ROW_HEIGHT = 3200; // A4 표 영역 기준 페이지당 약 15~20줄
+                const contentHeight = rowLineMetric.marginV + rowLineMetric.vertsize
+                    + (rowMaxLines - 1) * (rowLineMetric.vertsize + rowLineMetric.spacing)
+                    + Math.round(rowLineMetric.vertsize * 0.35);
+                const comfortableHeight = MIN_ROW_HEIGHT + (rowMaxLines - 1) * (rowLineMetric.vertsize + rowLineMetric.spacing);
+                const neededHeight = Math.max(contentHeight, comfortableHeight);
+                Array.from(row.getElementsByTagNameNS(HP_NS, 'tc')).forEach(tc => {
+                    const span = tc.getElementsByTagNameNS(HP_NS, 'cellSpan')[0];
+                    if (span && parseInt(span.getAttribute('rowSpan'), 10) > 1) return;
+                    const sz = tc.getElementsByTagNameNS(HP_NS, 'cellSz')[0];
+                    if (sz && neededHeight > 0) sz.setAttribute('height', String(neededHeight));
+                });
+                return neededHeight;
+            };
             const setTcText = (tc, rawVal) => {
                 if (!tc) return;
                 const subList = tc.getElementsByTagNameNS(HP_NS, 'subList')[0];
@@ -23218,28 +23239,7 @@ document.addEventListener('DOMContentLoaded', () => {
                                 }
                             }
                         });
-                        // 실제 줄 수에 맞춰 행 높이를 다시 계산한다 — 표본 행(normalStyleRow)이 다른
-                        // 칸(예: 위치)에 남아있던 샘플용 2줄 데이터 기준 키를 그대로 물려받는 바람에,
-                        // 정작 한 줄로 줄어든 칸(예: 높이/변위량)의 글자가 위로 뜬 것처럼 보이던 문제
-                        // (한글에서 직접 확인됨)를 막는다. 세로 병합(rowSpan>1)된 칸은 여러 행에 걸친
-                        // 높이라 건드리지 않는다. 다만 글자만 딱 맞는 높이는 인쇄용 표로 쓰기엔 너무
-                        // 빽빽해 보이므로(사용자 요청), 한 페이지에 15~20줄이 들어오는 정도의 여유
-                        // 있는 최소 높이(MIN_ROW_HEIGHT)를 바닥으로 깔고 그보다 계산값이 크면(2줄 이상
-                        // 등) 그 값을 쓴다.
-                        if (rowLineMetric) {
-                            const MIN_ROW_HEIGHT = 3200; // A4 표 영역 기준 페이지당 약 15~20줄
-                            const contentHeight = rowLineMetric.marginV + rowLineMetric.vertsize
-                                + (rowMaxLines - 1) * (rowLineMetric.vertsize + rowLineMetric.spacing)
-                                + Math.round(rowLineMetric.vertsize * 0.35);
-                            const comfortableHeight = MIN_ROW_HEIGHT + (rowMaxLines - 1) * (rowLineMetric.vertsize + rowLineMetric.spacing);
-                            const neededHeight = Math.max(contentHeight, comfortableHeight);
-                            Array.from(newRow.getElementsByTagNameNS(HP_NS, 'tc')).forEach(tc => {
-                                const span = tc.getElementsByTagNameNS(HP_NS, 'cellSpan')[0];
-                                if (span && parseInt(span.getAttribute('rowSpan'), 10) > 1) return;
-                                const sz = tc.getElementsByTagNameNS(HP_NS, 'cellSz')[0];
-                                if (sz && neededHeight > 0) sz.setAttribute('height', String(neededHeight));
-                            });
-                        }
+                        applyRowHeightFromLines(newRow, rowMaxLines, rowLineMetric);
                         tbl.appendChild(newRow);
                     });
                     tbl.setAttribute('rowCnt', String(headerRowCount + rowsValues.length));
@@ -23354,11 +23354,29 @@ document.addEventListener('DOMContentLoaded', () => {
                             const addr = t.getElementsByTagNameNS(HP_NS, 'cellAddr')[0];
                             return addr && addr.getAttribute('colAddr') === String(colAddr);
                         });
-                        if (!tc) return;
+                        if (!tc) return null;
                         const subList = tc.getElementsByTagNameNS(HP_NS, 'subList')[0];
                         const paras = subList ? Array.from(subList.getElementsByTagNameNS(HP_NS, 'p')).filter(p => p.parentNode === subList) : [];
-                        if (paras.length === 0) return;
-                        fillCellParas(subList, paras, text);
+                        if (paras.length === 0) return null;
+                        const fillInfo = fillCellParas(subList, paras, text);
+                        return { fillInfo, tc };
+                    };
+                    // 플렌지/웨브 행(newA/newB)도 다른 NDT 표와 마찬가지로, 표본 행이 물려받은 샘플용
+                    // 높이 대신 실제 채워지는 줄 수 기준으로 다시 계산한다(내화피복 표도 같은 문제 보고됨).
+                    const fillRowCells = (row, entries) => {
+                        let rowMaxLines = 1, rowLineMetric = null;
+                        entries.forEach(([colAddr, text]) => {
+                            const result = setCellText(row, colAddr, text);
+                            if (!result) return;
+                            const { fillInfo, tc } = result;
+                            if (fillInfo.lineCount > rowMaxLines) rowMaxLines = fillInfo.lineCount;
+                            if (!rowLineMetric && fillInfo.vertsize) {
+                                const marginEl = tc.getElementsByTagNameNS(HP_NS, 'cellMargin')[0];
+                                const marginV = marginEl ? (parseInt(marginEl.getAttribute('top'), 10) || 0) + (parseInt(marginEl.getAttribute('bottom'), 10) || 0) : 282;
+                                rowLineMetric = { vertsize: fillInfo.vertsize, spacing: fillInfo.spacing, marginV };
+                            }
+                        });
+                        return applyRowHeightFromLines(row, rowMaxLines, rowLineMetric);
                     };
                     const applyBorder = (row, styleMap) => {
                         Array.from(row.getElementsByTagNameNS(HP_NS, 'tc')).forEach(tc => {
@@ -23387,22 +23405,39 @@ document.addEventListener('DOMContentLoaded', () => {
                         const flVal = (i) => fl.unavailable ? '-' : ((fl.readings && fl.readings[i] !== undefined) ? fl.readings[i] : '-');
                         const webVal = (i) => web.unavailable ? '-' : ((web.readings && web.readings[i] !== undefined) ? web.readings[i] : '-');
 
-                        setCellText(newA, 0, item.no || String(idx + 1));
-                        setCellText(newA, 1, item.location || '-');
-                        setCellText(newA, 2, '플렌지');
-                        setCellText(newA, 3, item.fireproofDesign || '-');
-                        setCellText(newA, 4, flVal(0));
-                        setCellText(newA, 5, flVal(1));
-                        setCellText(newA, 6, flVal(2));
-                        setCellText(newA, 7, (fl.unavailable || fl.avg === null || fl.avg === undefined) ? '-' : fl.avg);
-                        setCellText(newA, 8, fl.unavailable ? '측정불가' : '-');
+                        const heightA = fillRowCells(newA, [
+                            [0, item.no || String(idx + 1)],
+                            [1, item.location || '-'],
+                            [2, '플렌지'],
+                            [3, item.fireproofDesign || '-'],
+                            [4, flVal(0)],
+                            [5, flVal(1)],
+                            [6, flVal(2)],
+                            [7, (fl.unavailable || fl.avg === null || fl.avg === undefined) ? '-' : fl.avg],
+                            [8, fl.unavailable ? '측정불가' : '-']
+                        ]);
 
-                        setCellText(newB, 2, '웨브');
-                        setCellText(newB, 4, webVal(0));
-                        setCellText(newB, 5, webVal(1));
-                        setCellText(newB, 6, webVal(2));
-                        setCellText(newB, 7, (web.unavailable || web.avg === null || web.avg === undefined) ? '-' : web.avg);
-                        setCellText(newB, 8, web.unavailable ? '측정불가' : '-');
+                        const heightB = fillRowCells(newB, [
+                            [2, '웨브'],
+                            [4, webVal(0)],
+                            [5, webVal(1)],
+                            [6, webVal(2)],
+                            [7, (web.unavailable || web.avg === null || web.avg === undefined) ? '-' : web.avg],
+                            [8, web.unavailable ? '측정불가' : '-']
+                        ]);
+
+                        // NO./위치/설계치 칸은 플렌지·웨브 두 행에 걸쳐 세로 병합(rowSpan=2)돼 있어
+                        // applyRowHeightFromLines가 건드리지 않는다 — 두 행 높이를 합친 값으로 따로
+                        // 맞춰줘야 병합 칸만 예전 높이 그대로 남아 두 행을 도로 벌리는 걸 막는다.
+                        const mergedHeight = (heightA || 0) + (heightB || 0);
+                        if (mergedHeight > 0) {
+                            Array.from(newA.getElementsByTagNameNS(HP_NS, 'tc')).forEach(tc => {
+                                const span = tc.getElementsByTagNameNS(HP_NS, 'cellSpan')[0];
+                                if (!span || parseInt(span.getAttribute('rowSpan'), 10) <= 1) return;
+                                const sz = tc.getElementsByTagNameNS(HP_NS, 'cellSz')[0];
+                                if (sz) sz.setAttribute('height', String(mergedHeight));
+                            });
+                        }
 
                         tbl.appendChild(newA);
                         tbl.appendChild(newB);
@@ -23630,6 +23665,13 @@ document.addEventListener('DOMContentLoaded', () => {
                         const fireproofHeadingPara = findHeading('내화피복 측정 위치도');
                         const dispHeadingPara = findHeading('변위조사 위치도');
                         const bareMeasurePara = findHeading('부재실측');
+                        // "내화피복 측정 위치도"/"변위조사 위치도" 바로 뒤에, 옛 문서 구조에서 쓰던
+                        // "콘크리트 강도측정"/"콘크리트 탄산화 시험"/"변위측정" 소제목 3개가 내용 없이
+                        // 문단만 그대로 남아있었다(사용자가 실제 한글에서 열어 확인) — 위 5개와 같은
+                        // 방식으로 찾아서 같이 지운다.
+                        const strengthBareHeadingPara = findHeading('콘크리트 강도측정');
+                        const carbBareHeadingPara = findHeading('콘크리트 탄산화 시험');
+                        const dispBareHeadingPara = findHeading('변위측정');
                         const oldStrengthCarbTbl = findTblById('2137459495');
                         let oldStrengthCarbTblPara = oldStrengthCarbTbl;
                         while (oldStrengthCarbTblPara && oldStrengthCarbTblPara.localName !== 'p') oldStrengthCarbTblPara = oldStrengthCarbTblPara.parentNode;
@@ -23638,7 +23680,8 @@ document.addEventListener('DOMContentLoaded', () => {
                         // 문단)를 그대로 이어받는다 — 지우기 전에 먼저 찾아둬야 한다.
                         const mapStart = measureHeadingPara ? measureHeadingPara.previousElementSibling : null;
 
-                        [measureHeadingPara, strengthCarbHeadingPara, oldStrengthCarbTblPara, fireproofHeadingPara, dispHeadingPara, bareMeasurePara]
+                        [measureHeadingPara, strengthCarbHeadingPara, oldStrengthCarbTblPara, fireproofHeadingPara, dispHeadingPara, bareMeasurePara,
+                            strengthBareHeadingPara, carbBareHeadingPara, dispBareHeadingPara]
                             .forEach(p => { if (p && p.parentNode) p.parentNode.removeChild(p); });
 
                         if (mapStart) {
