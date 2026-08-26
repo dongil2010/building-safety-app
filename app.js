@@ -11960,6 +11960,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     location: locations.length > 0 ? locations.join(' / ') : d.location,
                     isProgress: members.some(m => m.isProgress),
                     isLeak: members.some(m => m.isLeak),
+                    isOpeningCrack: members.some(m => m.isOpeningCrack),
                     isCarriedOver: members.some(m => m.isCarriedOver),
                     mapUnregistered: members.some(m => m.mapUnregistered),
                     isPriorityManage: members.some(m => m.isPriorityManage),
@@ -12000,6 +12001,10 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         if (window.state.priorityManageOnlyFilter) {
             list = list.filter(d => !!d.isPriorityManage);
+        }
+        // 개구부 균열 목록/도면 표시 토글 (기본 ON)
+        if (window.state.showOpeningCracks === false) {
+            list = list.filter(d => !d.isOpeningCrack);
         }
         const catFilter = window.state.categoryFilter;
         if (catFilter) {
@@ -12273,6 +12278,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
                 // 계단·기타 등은 양쪽이 켜져야 보이며, 건수 배지에는 넣지 않음
             });
+            const openingCrackCount = allFloorDefects.filter(d => !!d.isOpeningCrack).length;
             const catMeta = [
                 { label: '기둥·벽체', key: 'columnWall', className: 'cat-structural', count: counts.columnWall },
                 { label: '보·슬래브', key: 'beamSlab', className: 'cat-structural-beam', count: counts.beamSlab },
@@ -12285,11 +12291,23 @@ document.addEventListener('DOMContentLoaded', () => {
                 const offClass = on ? '' : ' is-off';
                 html += `<button type="button" class="defect-summary-badge ${meta.className}${offClass}" data-cat-filter="${meta.key}" title="${meta.label} 도면 표시 ${on ? '끄기' : '켜기'}">${meta.label} ${meta.count}건</button>`;
             });
+            {
+                const openOn = window.state.showOpeningCracks !== false;
+                const openOff = openOn ? '' : ' is-off';
+                html += `<button type="button" class="defect-summary-badge cat-opening-crack${openOff}" data-opening-crack-filter="1" title="개구부 균열 표시 ${openOn ? '끄기' : '켜기'}">개구부 균열 ${openingCrackCount}건</button>`;
+            }
             summaryEl.innerHTML = html;
             summaryEl.querySelectorAll('[data-cat-filter]').forEach(btn => {
                 btn.addEventListener('click', () => {
                     const key = btn.getAttribute('data-cat-filter');
                     setCategoryFilterOn(key, !isCategoryFilterOn(key));
+                    if (typeof drawCanvas === 'function') drawCanvas();
+                    renderDefectListPanel();
+                });
+            });
+            summaryEl.querySelectorAll('[data-opening-crack-filter]').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    window.state.showOpeningCracks = !(window.state.showOpeningCracks !== false);
                     if (typeof drawCanvas === 'function') drawCanvas();
                     renderDefectListPanel();
                 });
@@ -13603,6 +13621,19 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     function joinDefectTypeList(list) {
         return (list || []).map(s => String(s || '').trim()).filter(Boolean).join(', ');
+    }
+
+    /** 개구부 균열이면 조사내용에 "개구부 주위 수직균열" 형태로 표기 */
+    function formatOpeningAwareDefectType(d) {
+        const raw = (d && d.defectType) ? String(d.defectType) : '';
+        if (!d || !d.isOpeningCrack) return raw;
+        const parts = parseDefectTypeList(raw);
+        if (!parts.length) return '개구부 주위 균열';
+        return joinDefectTypeList(parts.map((t) => {
+            if (!t || t === '상태양호') return t;
+            if (/^개구부\s*주위/.test(t)) return t;
+            return `개구부 주위 ${t}`;
+        }));
     }
     function getDefectTypePresetFor(category, component) {
         const key = normalizeComponentKey(component);
@@ -17239,6 +17270,7 @@ document.addEventListener('DOMContentLoaded', () => {
             defectCauseInput: 'cause',
             defectProgressCheck: 'isProgress',
             defectLeakCheck: 'isLeak',
+            defectOpeningCrackCheck: 'isOpeningCrack',
             defectCarriedOver: 'isCarriedOver',
             defectBookmark: 'isBookmark',
             defectPriorityManage: 'isPriorityManage',
@@ -17337,6 +17369,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (bulkFieldConsensus(defects, d => getDefectCrackMeasureSignature(d)).mixed) labels.push('폭·길이·개수');
         if (bulkBoolConsensus(defects, d => d.isProgress).mixed) labels.push('진행중');
         if (bulkBoolConsensus(defects, d => d.isLeak).mixed) labels.push('누수');
+        if (bulkBoolConsensus(defects, d => d.isOpeningCrack).mixed) labels.push('개구부 균열');
         if (bulkBoolConsensus(defects, d => d.isCarriedOver).mixed) labels.push('전회차');
         if (bulkBoolConsensus(defects, d => d.isBookmark).mixed) labels.push('중요');
         if (bulkBoolConsensus(defects, d => d.isPriorityManage).mixed) labels.push('중점관리');
@@ -17398,6 +17431,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const sizeEl = document.getElementById('defectSize');
         const progCheckEl = document.getElementById('defectProgressCheck');
         const leakCheckEl = document.getElementById('defectLeakCheck');
+        const openingCrackCheckEl = document.getElementById('defectOpeningCrackCheck');
         const carriedOverEl = document.getElementById('defectCarriedOver');
         const bookmarkEl = document.getElementById('defectBookmark');
         const priorityManageEl = document.getElementById('defectPriorityManage');
@@ -17458,6 +17492,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         applyBulkBoolCheckbox(progCheckEl, bulkBoolConsensus(defects, d => d.isProgress));
         applyBulkBoolCheckbox(leakCheckEl, bulkBoolConsensus(defects, d => d.isLeak));
+        applyBulkBoolCheckbox(openingCrackCheckEl, bulkBoolConsensus(defects, d => d.isOpeningCrack));
         applyBulkBoolCheckbox(carriedOverEl, bulkBoolConsensus(defects, d => d.isCarriedOver));
         applyBulkBoolCheckbox(bookmarkEl, bulkBoolConsensus(defects, d => d.isBookmark));
         applyBulkBoolCheckbox(priorityManageEl, bulkBoolConsensus(defects, d => d.isPriorityManage));
@@ -17602,6 +17637,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const sizeEl = document.getElementById('defectSize');
         const progCheckEl = document.getElementById('defectProgressCheck');
         const leakCheckEl = document.getElementById('defectLeakCheck');
+        const openingCrackCheckEl = document.getElementById('defectOpeningCrackCheck');
         const carriedOverEl = document.getElementById('defectCarriedOver');
         const bookmarkEl = document.getElementById('defectBookmark');
         const priorityManageEl = document.getElementById('defectPriorityManage');
@@ -17629,6 +17665,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             if (progCheckEl) progCheckEl.checked = !!existingPin.isProgress;
             if (leakCheckEl) leakCheckEl.checked = !!existingPin.isLeak;
+            if (openingCrackCheckEl) openingCrackCheckEl.checked = !!existingPin.isOpeningCrack;
             if (bookmarkEl) bookmarkEl.checked = !!existingPin.isBookmark;
             if (priorityManageEl) priorityManageEl.checked = !!existingPin.isPriorityManage;
             if (forceArrowDirEl) forceArrowDirEl.checked = !!existingPin.forceArrowDir;
@@ -17710,6 +17747,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             if (progCheckEl) progCheckEl.checked = false;
             if (leakCheckEl) leakCheckEl.checked = false;
+            if (openingCrackCheckEl) openingCrackCheckEl.checked = false;
             if (bookmarkEl) bookmarkEl.checked = false;
             if (priorityManageEl) priorityManageEl.checked = false;
             if (forceArrowDirEl) forceArrowDirEl.checked = !!(tmpl && tmpl.forceArrowDir);
@@ -18349,6 +18387,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const locVal = composeDefectLocation(document.getElementById('defectLocation')?.value || '');
         const isProgress = document.getElementById('defectProgressCheck')?.checked || false;
         const isLeak = document.getElementById('defectLeakCheck')?.checked || false;
+        const isOpeningCrack = document.getElementById('defectOpeningCrackCheck')?.checked || false;
         const isCarriedOver = document.getElementById('defectCarriedOver')?.checked || false;
         const isBookmark = document.getElementById('defectBookmark')?.checked || false;
         const isPriorityManage = document.getElementById('defectPriorityManage')?.checked || false;
@@ -18390,6 +18429,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             if (changed.has('isProgress')) d.isProgress = isProgress;
             if (changed.has('isLeak')) d.isLeak = isLeak;
+            if (changed.has('isOpeningCrack')) d.isOpeningCrack = isOpeningCrack;
             if (changed.has('isCarriedOver')) d.isCarriedOver = isCarriedOver;
             if (changed.has('isBookmark')) d.isBookmark = isBookmark;
             if (changed.has('isPriorityManage')) d.isPriorityManage = isPriorityManage;
@@ -18454,6 +18494,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const locVal = composeDefectLocation(document.getElementById('defectLocation')?.value || '');
         const isProgress = document.getElementById('defectProgressCheck')?.checked || false;
         const isLeak = document.getElementById('defectLeakCheck')?.checked || false;
+        const isOpeningCrack = document.getElementById('defectOpeningCrackCheck')?.checked || false;
         const isCarriedOver = document.getElementById('defectCarriedOver')?.checked || false;
         const isBookmark = document.getElementById('defectBookmark')?.checked || false;
         const isPriorityManage = document.getElementById('defectPriorityManage')?.checked || false;
@@ -18490,6 +18531,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 state.defects[key][idx].itemCount = itemCountVal;
                 state.defects[key][idx].isProgress = isProgress;
                 state.defects[key][idx].isLeak = isLeak;
+                state.defects[key][idx].isOpeningCrack = isOpeningCrack;
                 state.defects[key][idx].isCarriedOver = isCarriedOver;
                 state.defects[key][idx].isBookmark = isBookmark;
                 state.defects[key][idx].isPriorityManage = isPriorityManage;
@@ -18544,6 +18586,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 itemCount: itemCountVal,
                 isProgress: isProgress,
                 isLeak: isLeak,
+                isOpeningCrack: isOpeningCrack,
                 isCarriedOver: isCarriedOver,
                 isBookmark: isBookmark,
                 isPriorityManage: isPriorityManage,
@@ -18725,6 +18768,7 @@ document.addEventListener('DOMContentLoaded', () => {
             itemCount: src.itemCount,
             isProgress: !!src.isProgress,
             isLeak: !!src.isLeak,
+            isOpeningCrack: !!src.isOpeningCrack,
             isCarriedOver: !!src.isCarriedOver,
             isBookmark: !!src.isBookmark,
             isPriorityManage: !!src.isPriorityManage,
@@ -19303,6 +19347,7 @@ document.addEventListener('DOMContentLoaded', () => {
         { key: 'defectType', label: '조사내용' },
         { key: 'size', label: '결함크기' },
         { key: 'category', label: '구조체 여부' },
+        { key: 'openingCrack', label: '개구부 결함유무' },
         { key: 'progress', label: '진행여부' },
         { key: 'leak', label: '누수여부' },
         { key: 'cause', label: '원인추정' },
@@ -19423,8 +19468,9 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             case 'location': return d.location || ((ctx.floorCode || state.currentFloor) + ' ' + (d.component || '기둥'));
             case 'component': return d.component || '기둥';
-            case 'defectType': return d.defectType || '';
+            case 'defectType': return formatOpeningAwareDefectType(d) || '';
             case 'category': return d.category === '구조체' ? '○' : '-';
+            case 'openingCrack': return d.isOpeningCrack ? '○' : '-';
             case 'size': {
                 if (isGood) return '-';
                 if (Array.isArray(d.crackMeasures) && d.crackMeasures.length) {
@@ -19605,6 +19651,7 @@ document.addEventListener('DOMContentLoaded', () => {
             case 'defectType': return `<span style="font-weight:700; color:#1f1f1f;">${text}</span>`;
             case 'inspectionContent': return `<span style="font-weight:700; color:#1e293b; white-space:pre-line;">${text}</span>`;
             case 'category': return `<span style="font-weight:800; font-size:1.15rem; color:${text === '○' ? '#ef4444' : '#a3a3a3'};">${text}</span>`;
+            case 'openingCrack': return `<span style="font-weight:800; font-size:1.15rem; color:${text === '○' ? '#0d9488' : '#a3a3a3'};">${text}</span>`;
             case 'size': case 'crackWidth': case 'crackLength': return text;
             case 'progress': return `<span style="font-weight:800; font-size:0.92rem; color:${text === '진행중' ? '#dc2626' : '#a3a3a3'};">${text}</span>`;
             case 'leak': return `<span style="font-weight:800; font-size:0.92rem; color:${text === '누수중' ? '#2a2a2a' : '#a3a3a3'};">${text}</span>`;
@@ -19678,6 +19725,8 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             case 'progress':
                 return renderSurveyFlagToggle(id, 'progress', !!d.isProgress, '진행중');
+            case 'openingCrack':
+                return renderSurveyFlagToggle(id, 'openingCrack', !!d.isOpeningCrack, '개구부', 'survey-toggle-opening');
             case 'leak':
                 return renderSurveyFlagToggle(id, 'leak', !!d.isLeak, '누수중');
             case 'priorityManage':
@@ -19728,6 +19777,9 @@ document.addEventListener('DOMContentLoaded', () => {
             case 'progress':
                 next = defect.isProgress ? '0' : '1';
                 break;
+            case 'openingCrack':
+                next = defect.isOpeningCrack ? '0' : '1';
+                break;
             case 'leak':
                 next = defect.isLeak ? '0' : '1';
                 break;
@@ -19763,6 +19815,9 @@ document.addEventListener('DOMContentLoaded', () => {
                     break;
                 case 'progress':
                     defect.isProgress = value === '1' || value === '진행중';
+                    break;
+                case 'openingCrack':
+                    defect.isOpeningCrack = value === '1' || value === '개구부' || value === '○';
                     break;
                 case 'leak':
                     defect.isLeak = value === '1' || value === '누수중';
@@ -19860,6 +19915,7 @@ document.addEventListener('DOMContentLoaded', () => {
         component: 7.5,
         defectType: 10.5,
         category: 6.2,
+        openingCrack: 5.8,
         size: 6,
         progress: 5.2,
         leak: 5.2,
@@ -20059,6 +20115,7 @@ document.addEventListener('DOMContentLoaded', () => {
         defectType: '내용',
         size: '크기',
         category: '구조',
+        openingCrack: '개구부',
         progress: '진행',
         leak: '누수',
         cause: '원인',
@@ -20075,6 +20132,7 @@ document.addEventListener('DOMContentLoaded', () => {
         defectType: '조사<br>내용',
         size: '결함<br>크기',
         category: '구조체<br>여부',
+        openingCrack: '개구부<br>결함유무',
         progress: '진행<br>여부',
         leak: '누수<br>여부',
         priorityManage: '중점<br>관리',
@@ -20207,6 +20265,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (c.label === '구조체여부') c.label = '구조체 여부';
                 if (c.label === '결함원인추정') c.label = '원인추정';
             });
+            // 기존 저장된 컬럼 목록에 개구부 결함유무가 없으면 구조체 여부와 진행여부 사이에 삽입
+            if (!grade3 && !state[stateKey].some(c => c.key === 'openingCrack')) {
+                const catIdx = state[stateKey].findIndex(c => c.key === 'category');
+                const progIdx = state[stateKey].findIndex(c => c.key === 'progress');
+                const insertAt = catIdx >= 0 ? catIdx + 1 : (progIdx >= 0 ? progIdx : state[stateKey].length);
+                state[stateKey].splice(insertAt, 0, { key: 'openingCrack', label: '개구부 결함유무', visible: true });
+            }
         }
         return state[stateKey];
     }
@@ -24356,6 +24421,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // --- 2-2. 부재 분류(기둥·벽체/보·슬래브/비구조체/마감재) 필터 ---
     window.state.categoryFilter = { columnWall: true, beamSlab: true, nonStructural: true, finishing: true };
+    if (window.state.showOpeningCracks === undefined) window.state.showOpeningCracks = true;
     const catFilterMap = [
         ['filterCatColumnWall', 'columnWall'],
         ['filterCatBeamSlab', 'beamSlab'],

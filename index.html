@@ -24,7 +24,7 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <meta name="apple-mobile-web-app-title" content="스마트 안전점검">
-    <link rel="stylesheet" href="styles.css?v=20260826_authgate">
+    <link rel="stylesheet" href="styles.css?v=20260826_opening">
     <!-- FontAwesome icons for clean engineering UI -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <!-- PDF 생성용: 페이지별로 직접 캡처해서 조립(큰 보고서에서 html2pdf 한방 렌더링이 캔버스 높이 한계로
@@ -836,6 +836,7 @@
                     <div class="defect-flag-grid">
                         <label class="checkbox-chip"><input type="checkbox" id="defectProgressCheck"> 진행중</label>
                         <label class="checkbox-chip" style="color:#6b6b6b; border-color:rgba(100,100,100,0.45);"><input type="checkbox" id="defectLeakCheck"> 누수</label>
+                        <label class="checkbox-chip" style="border-color:#0d9488; color:#0d9488;"><input type="checkbox" id="defectOpeningCrackCheck"> 개구부 균열</label>
                         <label class="checkbox-chip" style="color:#a3a3a3; border-color:rgba(148,163,184,0.45);"><input type="checkbox" id="defectCarriedOver"> 전회차</label>
                         <label class="checkbox-chip" style="border-color:#facc15; color:#facc15;"><input type="checkbox" id="defectBookmark"> 중요</label>
                         <label class="checkbox-chip" style="border-color:#16a34a; color:#16a34a;"><input type="checkbox" id="defectPriorityManage"> 중점관리</label>
@@ -2364,7 +2365,7 @@
     <script src="js/shared/report.js?v=20260824_hwpxFix"></script>
     <script src="js/shared/hwpx-import.js?v=20260825_hwpxin"></script>
     <script src="js/shared/auth.js?v=20260821_land1"></script>
-    <script src="app.js?v=20260826_idb24h"></script>
+    <script src="app.js?v=20260826_opening"></script>
     <script>
         window.BSA_APP_VERSION = '20260826_mem1';
         (function () {

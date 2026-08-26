@@ -1272,6 +1272,7 @@ body {
 .defect-summary-badge.cat-structural-beam::before { background: #f87171; }
 .defect-summary-badge.cat-nonstructural::before { background: #525252; }
 .defect-summary-badge.cat-finishing::before { background: #f97316; }
+.defect-summary-badge.cat-opening-crack::before { background: #0d9488; }
 
 .defect-list-panel {
     background: var(--bg-secondary);
@@ -2577,12 +2578,19 @@ body {
     background: #fff7ed;
 }
 
+.survey-toggle-btn.survey-toggle-opening.is-on {
+    color: #0f766e;
+    border-color: #5eead4;
+    background: #f0fdfa;
+}
+
 #tab-survey .survey-table th[data-col="no"],
 #tab-survey .survey-table th[data-col="floorGroup"],
 #tab-survey .survey-table th[data-col="location"],
 #tab-survey .survey-table th[data-col="component"],
 #tab-survey .survey-table th[data-col="defectType"],
 #tab-survey .survey-table th[data-col="category"],
+#tab-survey .survey-table th[data-col="openingCrack"],
 #tab-survey .survey-table th[data-col="progress"],
 #tab-survey .survey-table th[data-col="leak"],
 #tab-survey .survey-table th[data-col="priorityManage"],
@@ -2596,6 +2604,7 @@ body {
 #tab-survey .survey-table td[data-col="component"],
 #tab-survey .survey-table td[data-col="defectType"],
 #tab-survey .survey-table td[data-col="category"],
+#tab-survey .survey-table td[data-col="openingCrack"],
 #tab-survey .survey-table td[data-col="progress"],
 #tab-survey .survey-table td[data-col="leak"],
 #tab-survey .survey-table td[data-col="priorityManage"],
