@@ -2736,6 +2736,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
         (async () => {
             try {
+                // IndexedDB에만 남아 있는 층도 점검층 목록에 복구
+                const enriched = await enrichFloorsListFromIndexedDb(bldg);
+                if (enriched) populateFloorSelectDropdown(bldg);
+
                 if (typeof hydrateSingleBuildingDrawings === 'function') {
                     await hydrateSingleBuildingDrawings(bldg, {
                         localOnly: !canFetchDrawings,
@@ -2801,23 +2805,44 @@ document.addEventListener('DOMContentLoaded', () => {
     window.getBuildingAvailableFloors = function(bldg) {
         if (!bldg) return [];
         const floorMap = {};
+        const addFloor = (code, label) => {
+            if (!code) return;
+            const c = String(code);
+            if (!floorMap[c]) {
+                floorMap[c] = label || window.getFloorLabelFromCode(c);
+            }
+        };
 
-        // 1. Collect from bldg.floorsList
+        // 1. 기존 층 목록 (RAM에서 도면을 내려도 유지되어야 함)
         if (bldg.floorsList && Array.isArray(bldg.floorsList)) {
-            bldg.floorsList.forEach(f => {
-                if (f && f.floorCode) {
-                    floorMap[f.floorCode] = f.floorLabel || window.getFloorLabelFromCode(f.floorCode);
-                }
+            bldg.floorsList.forEach((f) => {
+                if (f && f.floorCode) addFloor(f.floorCode, f.floorLabel);
             });
         }
 
-        // 2. Collect from bldg.floorDrawings (전수 자동 수집)
-        if (bldg.floorDrawings && typeof bldg.floorDrawings === 'object') {
-            Object.keys(bldg.floorDrawings).forEach(code => {
-                if (code && !floorMap[code]) {
-                    floorMap[code] = window.getFloorLabelFromCode(code);
-                }
-            });
+        // 2. 등록 시 기억해 둔 도면 층 코드 (releaseHeavyDrawingMemory 이후 복구용)
+        (bldg.drawingFloorCodes || []).forEach((c) => addFloor(c));
+
+        // 3. RAM에 남아 있는 도면/PDF/티어/원본
+        Object.keys(bldg.floorDrawings || {}).forEach((c) => addFloor(c));
+        Object.keys(bldg.floorDrawingPdfs || {}).forEach((c) => addFloor(c));
+        Object.keys(bldg.floorDrawingSources || {}).forEach((c) => addFloor(c));
+        Object.keys(bldg.floorDrawingTiers || {}).forEach((c) => addFloor(c));
+
+        // 4. IndexedDB에 이미 쓴 키 (세션 중 persist 플래그)
+        if (bldg.id) {
+            const prefix = `${bldg.id}_`;
+            const addFromPersistedKey = (key) => {
+                if (!key || !String(key).startsWith(prefix)) return;
+                const rest = String(key).slice(prefix.length);
+                if (!rest) return;
+                const tierSuffix = rest.match(/^(.*)_(4000|8000|16000)$/);
+                addFloor(tierSuffix ? tierSuffix[1] : rest);
+            };
+            if (_idbPersistedDrawingKeys) _idbPersistedDrawingKeys.forEach(addFromPersistedKey);
+            if (_idbPersistedPdfKeys) _idbPersistedPdfKeys.forEach(addFromPersistedKey);
+            if (_idbPersistedSourceKeys) _idbPersistedSourceKeys.forEach(addFromPersistedKey);
+            if (_idbPersistedTierKeys) _idbPersistedTierKeys.forEach(addFromPersistedKey);
         }
 
         const list = Object.entries(floorMap).map(([code, label]) => ({
@@ -2825,12 +2850,66 @@ document.addEventListener('DOMContentLoaded', () => {
             floorLabel: label
         }));
 
-        // 3. Always sort low to high (B2F -> B1F -> 1F -> 2F -> 3F -> ROOF)
         if (typeof window.sortFloorsLowToHigh === 'function') {
             return window.sortFloorsLowToHigh(list);
         }
         return list;
     };
+
+    /** 도면 저장/메모리 해제 전에 층 코드를 meta에 고정 — 점검층 드롭다운이 비지 않게 */
+    function syncBuildingDrawingFloorCodes(bldg) {
+        if (!bldg || !bldg.id) return;
+        const codes = collectKnownFloorCodesForBuilding(bldg);
+        // floorsList에 이미 있는 코드도 포함
+        (bldg.floorsList || []).forEach((f) => { if (f && f.floorCode) codes.add(f.floorCode); });
+        (bldg.drawingFloorCodes || []).forEach((c) => { if (c) codes.add(c); });
+        bldg.drawingFloorCodes = Array.from(codes);
+        mergeDiscoveredFloorsIntoBuilding(bldg, codes);
+        // floorsList를 최신 집합으로 정렬 유지
+        if (typeof window.getBuildingAvailableFloors === 'function') {
+            bldg.floorsList = window.getBuildingAvailableFloors(bldg);
+        }
+    }
+
+    /** IDB에 남아 있는 이 건물 도면 키로 층 목록 보강 (새로고침 후 복구) */
+    async function enrichFloorsListFromIndexedDb(bldg) {
+        if (!bldg || !bldg.id || typeof idbGetAllKeys !== 'function') return false;
+        const prefix = `${bldg.id}_`;
+        const found = new Set();
+        const takeKeys = (keys) => {
+            (keys || []).forEach((key) => {
+                if (!key || !String(key).startsWith(prefix)) return;
+                const rest = String(key).slice(prefix.length);
+                if (!rest) return;
+                const tierSuffix = rest.match(/^(.*)_(4000|8000|16000)$/);
+                found.add(tierSuffix ? tierSuffix[1] : rest);
+            });
+        };
+        try {
+            const [drawKeys, pdfKeys, srcKeys, tierKeys] = await Promise.all([
+                idbGetAllKeys('floorDrawings'),
+                idbGetAllKeys('floorDrawingPdfs'),
+                idbGetAllKeys('floorDrawingSources'),
+                idbGetAllKeys('floorDrawingTiers')
+            ]);
+            takeKeys(drawKeys);
+            takeKeys(pdfKeys);
+            takeKeys(srcKeys);
+            takeKeys(tierKeys);
+        } catch (e) {
+            console.warn('IDB 층 목록 보강 실패:', bldg.id, e);
+            return false;
+        }
+        if (found.size === 0) return false;
+        const before = (bldg.floorsList || []).length;
+        mergeDiscoveredFloorsIntoBuilding(bldg, found);
+        if (!bldg.drawingFloorCodes) bldg.drawingFloorCodes = [];
+        const codeSet = new Set(bldg.drawingFloorCodes);
+        found.forEach((c) => codeSet.add(c));
+        bldg.drawingFloorCodes = Array.from(codeSet);
+        bldg.floorsList = window.getBuildingAvailableFloors(bldg);
+        return (bldg.floorsList || []).length > before;
+    }
 
     function populateFloorSelectDropdown(bldg) {
         if (!elements.floorSelect) return;
@@ -26940,6 +27019,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
     async function persistBuildingDrawingAssetsNow(bldg) {
         if (!bldg || !bldg.id) return;
+        // RAM 비우기 전에 층 목록을 drawingFloorCodes/floorsList에 고정
+        syncBuildingDrawingFloorCodes(bldg);
         const tasks = [];
         const persistEntries = (storeName, map, persistedSet, pendingSet) => {
             Object.entries(map || {}).forEach(([floorCode, val]) => {
