@@ -2459,6 +2459,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
             elements.addBuildingModal.style.display = 'flex';
             elements.addBuildingModal.classList.add('open');
+            const addBodyEl = elements.addBuildingModal.querySelector('.add-building-body');
+            if (addBodyEl) addBodyEl.scrollTop = 0;
             if (nameInput) setTimeout(() => nameInput.focus(), 80);
         }
     };
