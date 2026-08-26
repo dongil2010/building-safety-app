@@ -396,7 +396,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const mobile = (typeof isMobileMapViewport === 'function' && isMobileMapViewport())
             || (typeof isNativeAndroidApp === 'function' && isNativeAndroidApp());
         const z = window.FLOOR_DRAWING_TIER_ZOOM || {};
-        const toHi = mobile ? (z.TO_HI_MOBILE || 20) : (z.TO_HI || 12);
+        const toHi = mobile ? (z.TO_HI_MOBILE || z.TO_HI || 12) : (z.TO_HI || 12);
         return zoomVsFit >= toHi ? 16000 : 8000;
     }
 
@@ -2256,18 +2256,19 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!bldg.floorDrawingTiers[floorCode]) bldg.floorDrawingTiers[floorCode] = {};
         let gotAny = false;
 
-        await Promise.all(extraDims.map(async (dim) => {
+        // 8000 먼저 → 16000 (병렬 시 캐시가 서로를 덮어 모바일 LOD가 비는 경우 방지)
+        for (const dim of extraDims) {
             const dimKey = String(dim);
             if (isUsableRasterDrawingUrl(bldg.floorDrawingTiers[floorCode][dimKey])) {
                 gotAny = true;
-                return;
+                continue;
             }
             const cached = await idbGetFloorDrawingTier(bldg.id, floorCode, dim);
             if (isUsableRasterDrawingUrl(cached)) {
                 bldg.floorDrawingTiers[floorCode][dimKey] = cached;
                 _idbPersistedTierKeys.add(floorDrawingTierIdbKey(bldg.id, floorCode, dim));
                 gotAny = true;
-                return;
+                continue;
             }
             if (!options.localOnly && typeof navigator !== 'undefined' && navigator.onLine !== false) {
                 const cloud = await fetchAndCacheCloudFloorDrawingTier(bldg, floorCode, dim);
@@ -2276,7 +2277,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     gotAny = true;
                 }
             }
-        }));
+        }
         return gotAny;
     }
 
@@ -2423,7 +2424,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const hydrateOne = async (floorCode, extra) => {
             const floorOpts = extra ? { ...options, ...extra } : options;
-            await withTimeout(hydrateFloorDrawingFromCloud(bldg, floorCode, floorOpts), 30000, '도면 내려받기 시간 초과');
+            await withTimeout(hydrateFloorDrawingFromCloud(bldg, floorCode, floorOpts), 55000, '도면 내려받기 시간 초과');
             await withTimeout(ensureOfflineRasterForFloor(bldg, floorCode), 5000, '도면 미리보기 생성 시간 초과');
             await persistFloorDrawingAssetsForFloor(bldg, floorCode);
             const keepFloor = options.priorityFloor || window.state.currentFloor;
@@ -4865,7 +4866,8 @@ document.addEventListener('DOMContentLoaded', () => {
         const el = elements.mapZoomOverlay || document.getElementById('mapZoomOverlay');
         if (!el) return;
         const onMap = state.currentTab === 'tab-map';
-        const mobile = isMobileMapViewport();
+        const mobile = (typeof isMobileMapViewport === 'function' && isMobileMapViewport())
+            || (typeof isNativeAndroidApp === 'function' && isNativeAndroidApp());
         if (!onMap || !mobile) {
             el.style.display = 'none';
             return;
@@ -4875,12 +4877,17 @@ document.addEventListener('DOMContentLoaded', () => {
         const bldg = state.currentBuilding;
         const fc = state.currentFloor;
         const tierDim = pickFloorDrawingTierDimForCurrentView();
+        const active = Number(floorDrawingActiveTierDim) || 4000;
         const label = (typeof window.getFloorDrawingTierLabel === 'function')
             ? window.getFloorDrawingTierLabel(tierDim)
             : `${tierDim}px`;
         const fetchingKey = (bldg && fc) ? `${bldg.id}_${fc}_${tierDim}` : '';
         const fetching = fetchingKey && _floorTierCloudFetchInFlight.has(fetchingKey);
-        el.textContent = fetching ? `${pct}% · ${label} 받는중` : `${pct}% · ${label}`;
+        const pendingUpgrade = Number(tierDim) > active && !fetching;
+        let text = `${pct}% · ${label}`;
+        if (fetching) text = `${pct}% · ${label} 받는중`;
+        else if (pendingUpgrade) text = `${pct}% · ${label} 적용중`;
+        el.textContent = text;
         if (Number(tierDim) > 4000 || fetching) el.classList.add('is-hd');
         else el.classList.remove('is-hd');
     }
@@ -4957,9 +4964,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (ok) _idbPersistedTierKeys.add(tierKey);
             });
         }
-        Object.keys(bldg.floorDrawingTiers[floorCode] || {}).forEach((d) => {
-            if (d !== dimKey && d !== '4000') delete bldg.floorDrawingTiers[floorCode][d];
-        });
+        // 다른 티어(8000/16000)는 RAM에 유지 — 병행 hydrate·줌 LOD가 서로 지우면 모바일에서 고해상도 전환이 실패함
     }
 
     function cacheFloorDrawingSourceToDevice(bldg, floorCode, sourceDataUrl) {
@@ -5016,15 +5021,25 @@ document.addEventListener('DOMContentLoaded', () => {
             : 4000;
         const newLong = getImageLongSide(img);
         const curLong = getImageLongSide(state.bgImage);
-        if (wantDim > baseTier && newLong > 0 && curLong > 0 && newLong <= curLong * 1.04) {
+        // 요청 티어보다 확연히 작으면(잘못된 fallback) 적용하지 않음
+        if (wantDim > baseTier && newLong > 0 && newLong < wantDim * 0.72) {
             return false;
+        }
+        if (wantDim > baseTier && newLong > 0 && curLong > 0 && newLong <= curLong * 1.04) {
+            // 이미 동급 이상이면 active만 맞추고 재시도 루프 종료
+            floorDrawingActiveTierDim = wantDim;
+            updateMapZoomOverlay();
+            return true;
         }
         if (!state.floorDrawingTierImageCache) state.floorDrawingTierImageCache = {};
         state.floorDrawingTierImageCache[`${bldg.id}_${fc}_${wantDim}`] = img;
-        applyFloorDrawingTarget(img, undefined, { immediate: isMobileMapViewport() });
+        const useImmediate = (typeof isMobileMapViewport === 'function' && isMobileMapViewport())
+            || (typeof isNativeAndroidApp === 'function' && isNativeAndroidApp());
+        applyFloorDrawingTarget(img, undefined, { immediate: useImmediate });
         floorDrawingActiveTierDim = wantDim;
         updateMapZoomOverlay();
         pruneFloorDrawingDecodedCache(bldg.id, fc, wantDim);
+        // 현재+하위기(4000)만 RAM 유지 — 상위 티어는 IDB/클라우드에서 다시 읽음
         releaseHeavyDrawingMemory(bldg, { keepFloor: fc, keepDim: wantDim });
         const ndtKey = `${state.currentBuildingId}_${fc}`;
         if (ndtBgImage && !(state.ndtImages && state.ndtImages[ndtKey])) {
@@ -5073,7 +5088,79 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function scheduleFloorDrawingTierPrefetch(bldg, floorCode) {
-        return;
+        if (!bldg || !floorCode) return;
+        const dims = [8000];
+        try {
+            if (getMapZoomVsFit() >= 1.6) dims.push(16000);
+        } catch (_) { /* zoom optional */ }
+        prefetchFloorDrawingTiersForFloor(bldg, floorCode, dims);
+    }
+
+    /** 모바일 WebView는 큰 data: URL Image 로드가 자주 실패 → Blob URL로 우회 */
+    function dataUrlToObjectUrl(dataUrl) {
+        if (typeof dataUrl !== 'string' || !dataUrl.startsWith('data:')) return null;
+        const comma = dataUrl.indexOf(',');
+        if (comma < 0) return null;
+        const header = dataUrl.slice(0, comma);
+        const body = dataUrl.slice(comma + 1);
+        const mimeMatch = /^data:([^;,]+)/i.exec(header);
+        const mime = (mimeMatch && mimeMatch[1]) || 'image/jpeg';
+        try {
+            let bytes;
+            if (/;base64/i.test(header)) {
+                const bin = atob(body);
+                bytes = new Uint8Array(bin.length);
+                for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+            } else {
+                bytes = new TextEncoder().encode(decodeURIComponent(body));
+            }
+            return URL.createObjectURL(new Blob([bytes], { type: mime }));
+        } catch (e) {
+            console.warn('도면 dataURL→Blob 변환 실패:', e);
+            return null;
+        }
+    }
+
+    function loadRasterImageElement(dataUrl) {
+        return new Promise((resolve, reject) => {
+            if (!dataUrl) {
+                reject(new Error('empty-image'));
+                return;
+            }
+            const img = new Image();
+            const preferBlob = (typeof isMobileMapViewport === 'function' && isMobileMapViewport())
+                || (typeof isNativeAndroidApp === 'function' && isNativeAndroidApp());
+            let objectUrl = null;
+            const cleanup = () => {
+                if (objectUrl) {
+                    try { URL.revokeObjectURL(objectUrl); } catch (_) { /* ignore */ }
+                    objectUrl = null;
+                }
+            };
+            img.onload = () => {
+                // 디코드 완료 후 Blob URL 해제 (즉시 revoke 시 일부 WebView에서 깨짐)
+                if (objectUrl) {
+                    const toRevoke = objectUrl;
+                    objectUrl = null;
+                    setTimeout(() => {
+                        try { URL.revokeObjectURL(toRevoke); } catch (_) { /* ignore */ }
+                    }, 60000);
+                }
+                resolve(img);
+            };
+            img.onerror = () => {
+                cleanup();
+                reject(new Error('image-load-failed'));
+            };
+            if (preferBlob && typeof dataUrl === 'string' && dataUrl.startsWith('data:')) {
+                objectUrl = dataUrlToObjectUrl(dataUrl);
+                if (objectUrl) {
+                    img.src = objectUrl;
+                    return;
+                }
+            }
+            img.src = dataUrl;
+        });
     }
 
     async function resolveFloorDrawingTierDataUrl(bldg, floorCode, tierDim) {
@@ -5134,19 +5221,28 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         }
 
-        const fallbackDims = [16000, 8000, 4000, 2000];
+        // 고해상도 요청에 저해상도를 넣으면 applyTierImageIfSharper가 조용히 실패함 (모바일에서 LOD 멈춤)
+        if (Number(tierDim) > baseTier) return null;
+
+        const fallbackDims = [4000, 2000];
         const liveTiers = (bldg.floorDrawingTiers && bldg.floorDrawingTiers[floorCode]) || tiers;
         for (const d of fallbackDims) {
             if (d <= tierDim && liveTiers && liveTiers[String(d)]) return liveTiers[String(d)];
         }
-        if (Number(tierDim) <= baseTier) {
-            return (bldg.floorDrawings && bldg.floorDrawings[floorCode]) || null;
-        }
-        return null;
+        return (bldg.floorDrawings && bldg.floorDrawings[floorCode]) || null;
     }
 
     function scheduleFloorDrawingTierSync() {
         if (floorDrawingTierSyncTimer) clearTimeout(floorDrawingTierSyncTimer);
+        try {
+            const bldg = state.currentBuilding;
+            const fc = state.currentFloor;
+            if (bldg && fc) {
+                const want = pickFloorDrawingTierDimForCurrentView();
+                const active = Number(floorDrawingActiveTierDim) || 4000;
+                if (want > active) prefetchFloorDrawingTiersForFloor(bldg, fc, [want]);
+            }
+        } catch (_) { /* prefetch optional */ }
         floorDrawingTierSyncTimer = setTimeout(() => {
             floorDrawingTierSyncTimer = null;
             syncFloorDrawingTierForView();
@@ -5167,8 +5263,13 @@ document.addEventListener('DOMContentLoaded', () => {
         if (wantDim === floorDrawingActiveTierDim) return;
 
         const loadToken = ++floorDrawingTierLoadToken;
+        updateMapZoomOverlay();
         const dataUrl = await resolveFloorDrawingTierDataUrl(bldg, fc, wantDim);
-        if (!dataUrl || loadToken !== floorDrawingTierLoadToken) return;
+        if (loadToken !== floorDrawingTierLoadToken) return;
+        if (!dataUrl) {
+            updateMapZoomOverlay();
+            return;
+        }
         if (state.currentFloor !== fc || state.currentBuildingId !== bldg.id) return;
 
         const cacheKey = `${bldg.id}_${fc}_${wantDim}`;
@@ -5178,16 +5279,15 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
-        const img = new Image();
-        img.onload = () => {
+        try {
+            const img = await loadRasterImageElement(dataUrl);
             applyTierImageIfSharper(img, wantDim, fc, bldg, loadToken);
-        };
-        img.onerror = () => {
+        } catch (e) {
             if (loadToken === floorDrawingTierLoadToken) {
-                console.warn('도면 LOD 이미지 로드 실패:', fc, wantDim);
+                console.warn('도면 LOD 이미지 로드 실패:', fc, wantDim, e);
+                updateMapZoomOverlay();
             }
-        };
-        img.src = dataUrl;
+        }
     }
 
     function finishRegisteredFloorDrawingLoadFailed(floorCode) {
