@@ -22467,13 +22467,65 @@ document.addEventListener('DOMContentLoaded', () => {
                 const seg = clonedPara.getElementsByTagNameNS(HP_NS, 'lineseg')[0];
                 if (seg) seg.setAttribute('vertpos', String(lineIndex * (baseVertsize + baseSpacing)));
             };
-            // 한글 셀: 자간 늘리기/줄이기 없이 고정 — 넘치면 한글이 알아서 줄바꿈
-            const wrapHwpxCellText = (raw) => String(raw == null ? '' : raw);
+            // 한글 셀: 자간(글자 사이 간격)은 절대 손대지 않는다. 텍스트는 그대로 두고,
+            // 칸 너비를 넘길 때만 강제 줄바꿈(\n → 문단 복제)으로 두 줄 처리한다.
+            // (한 줄로 우겨넣으면 한글이 자간을 줄여 압축하는 부작용이 난다.)
+            const estimateHwpxCellMaxChars = (tc, paras) => {
+                const DEFAULT_MAX = 16;
+                if (!tc) return DEFAULT_MAX;
+                const sz = tc.getElementsByTagNameNS(HP_NS, 'cellSz')[0];
+                const cellW = sz ? parseInt(sz.getAttribute('width'), 10) || 0 : 0;
+                if (!cellW) return DEFAULT_MAX;
+                const marginEl = tc.getElementsByTagNameNS(HP_NS, 'cellMargin')[0];
+                const ml = marginEl ? (parseInt(marginEl.getAttribute('left'), 10) || 0) : 141;
+                const mr = marginEl ? (parseInt(marginEl.getAttribute('right'), 10) || 0) : 141;
+                const seg = paras && paras[0] ? paras[0].getElementsByTagNameNS(HP_NS, 'lineseg')[0] : null;
+                const vertsize = seg ? (parseInt(seg.getAttribute('vertsize'), 10) || 1000) : 1000;
+                // 전각 한글 폭 ≈ 글자 높이. 여유 없이 꽉 채우지 않도록 0.95 배율.
+                const charW = Math.max(700, Math.round(vertsize * 0.95));
+                const usable = Math.max(charW, cellW - ml - mr);
+                return Math.max(4, Math.floor(usable / charW));
+            };
+            const wrapHwpxCellLine = (line, maxChars = 16) => {
+                const s = String(line == null ? '' : line);
+                const chars = Array.from(s);
+                if (chars.length <= maxChars) return s;
+                const mid = Math.floor(chars.length / 2);
+                let spaceBest = -1;
+                let punctBest = -1;
+                for (let i = 1; i < chars.length - 1; i++) {
+                    const ch = chars[i];
+                    if (ch === ' ' || ch === '\t') {
+                        if (spaceBest < 0 || Math.abs(i - mid) < Math.abs(spaceBest - mid)) spaceBest = i;
+                    } else if (/[,./|·、，]/.test(ch)) {
+                        if (punctBest < 0 || Math.abs(i - mid) < Math.abs(punctBest - mid)) punctBest = i;
+                    }
+                }
+                let left;
+                let right;
+                if (spaceBest >= 0) {
+                    left = chars.slice(0, spaceBest).join('');
+                    right = chars.slice(spaceBest + 1).join('');
+                } else if (punctBest >= 0) {
+                    left = chars.slice(0, punctBest + 1).join('');
+                    right = chars.slice(punctBest + 1).join('');
+                } else {
+                    left = chars.slice(0, mid).join('');
+                    right = chars.slice(mid).join('');
+                }
+                if (!left || !right) return s;
+                return `${left}\n${right}`;
+            };
+            const wrapHwpxCellText = (raw, maxChars = 16) => String(raw == null ? '' : raw)
+                .split('\n')
+                .map((line) => wrapHwpxCellLine(line, maxChars))
+                .join('\n');
             // rawVal의 실제 줄 수(lines.length)를 반환한다 — 호출부에서 행 높이를 실제 줄 수에
             // 맞춰 다시 계산하는 데 쓴다(표본 행이 다른 칸의 샘플 2줄 데이터 기준 키를 물려받아,
             // 1줄로 줄어든 칸의 글자가 위로 뜬 것처럼 보이던 문제 — 한글에서 직접 확인됨).
-            const fillCellParas = (subList, paras, rawVal) => {
-                const lines = wrapHwpxCellText(rawVal).split('\n');
+            const fillCellParas = (subList, paras, rawVal, tc) => {
+                const maxChars = estimateHwpxCellMaxChars(tc, paras);
+                const lines = wrapHwpxCellText(rawVal, maxChars).split('\n');
                 const baseSeg = paras[0].getElementsByTagNameNS(HP_NS, 'lineseg')[0];
                 const baseVertsize = baseSeg ? parseInt(baseSeg.getAttribute('vertsize'), 10) || 0 : 0;
                 const baseSpacing = baseSeg ? parseInt(baseSeg.getAttribute('spacing'), 10) || 0 : 0;
@@ -22548,7 +22600,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 const paras = subList
                     ? Array.from(subList.getElementsByTagNameNS(HP_NS, 'p')).filter(p => p.parentNode === subList)
                     : [];
-                if (paras.length > 0) fillCellParas(subList, paras, rawVal);
+                if (paras.length > 0) fillCellParas(subList, paras, rawVal, tc);
                 else {
                     const t = tc.getElementsByTagNameNS(HP_NS, 't')[0];
                     if (t) t.textContent = wrapHwpxCellText(rawVal).split('\n').join(' ');
@@ -23082,6 +23134,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
                         const newRow = normalStyleRow.cloneNode(true);
                         copyRowCellSizesFromTemplate(newRow, normalStyleRow);
+                        let rowMaxLines = 1;
+                        let rowLineMetric = null;
                         Array.from(newRow.getElementsByTagNameNS(HP_NS, 'tc')).forEach((tc, colIdx) => {
                             const addr = tc.getElementsByTagNameNS(HP_NS, 'cellAddr')[0];
                             if (addr) {
@@ -23092,9 +23146,19 @@ document.addEventListener('DOMContentLoaded', () => {
                             const subList = tc.getElementsByTagNameNS(HP_NS, 'subList')[0];
                             const paras = subList ? Array.from(subList.getElementsByTagNameNS(HP_NS, 'p')).filter(p => p.parentNode === subList) : [];
                             if (paras.length > 0) {
-                                fillCellParas(subList, paras, values[colIdx] !== undefined ? values[colIdx] : '');
+                                const fillInfo = fillCellParas(subList, paras, values[colIdx] !== undefined ? values[colIdx] : '', tc);
+                                if (fillInfo.lineCount > rowMaxLines) rowMaxLines = fillInfo.lineCount;
+                                if (!rowLineMetric && fillInfo.vertsize) {
+                                    const marginEl = tc.getElementsByTagNameNS(HP_NS, 'cellMargin')[0];
+                                    const marginV = marginEl
+                                        ? (parseInt(marginEl.getAttribute('top'), 10) || 0) + (parseInt(marginEl.getAttribute('bottom'), 10) || 0)
+                                        : 282;
+                                    rowLineMetric = { vertsize: fillInfo.vertsize, spacing: fillInfo.spacing, marginV };
+                                }
                             }
                         });
+                        applyRowHeightFromLines(newRow, rowMaxLines, rowLineMetric);
+                        Array.from(newRow.getElementsByTagNameNS(HP_NS, 'tc')).forEach(centerCellContent);
                         destTbl.appendChild(newRow);
                     });
                     destTbl.setAttribute('rowCnt', String(HEADER_ROW_COUNT + pageItems.length));
@@ -23455,7 +23519,7 @@ document.addEventListener('DOMContentLoaded', () => {
                             const subList = tc.getElementsByTagNameNS(HP_NS, 'subList')[0];
                             const paras = subList ? Array.from(subList.getElementsByTagNameNS(HP_NS, 'p')).filter(p => p.parentNode === subList) : [];
                             if (paras.length > 0 && values[colIdx] !== undefined) {
-                                const fillInfo = fillCellParas(subList, paras, values[colIdx]);
+                                const fillInfo = fillCellParas(subList, paras, values[colIdx], tc);
                                 if (fillInfo.lineCount > rowMaxLines) rowMaxLines = fillInfo.lineCount;
                                 if (!rowLineMetric && fillInfo.vertsize) {
                                     const marginEl = tc.getElementsByTagNameNS(HP_NS, 'cellMargin')[0];
@@ -23573,8 +23637,7 @@ document.addEventListener('DOMContentLoaded', () => {
                             if (addr) addr.setAttribute('rowAddr', String(rowAddr));
                         });
                     };
-                    // 다른 NDT 표(fillNdtTable)와 동일하게 fillCellParas를 써서, 칸이 좁아 글자가 안
-                    // 들어가면 한글이 자간을 줄여 우겨넣는 대신 다음 줄로 내려가게 한다(wrapHwpxCellText).
+                    // 칸이 좁아 넘치면 자간을 줄이지 않고 강제 줄바꿈(두 줄)으로 넣는다.
                     const setCellText = (row, colAddr, text) => {
                         const tc = Array.from(row.getElementsByTagNameNS(HP_NS, 'tc')).find(t => {
                             const addr = t.getElementsByTagNameNS(HP_NS, 'cellAddr')[0];
@@ -23584,7 +23647,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         const subList = tc.getElementsByTagNameNS(HP_NS, 'subList')[0];
                         const paras = subList ? Array.from(subList.getElementsByTagNameNS(HP_NS, 'p')).filter(p => p.parentNode === subList) : [];
                         if (paras.length === 0) return null;
-                        const fillInfo = fillCellParas(subList, paras, text);
+                        const fillInfo = fillCellParas(subList, paras, text, tc);
                         return { fillInfo, tc };
                     };
                     // 플렌지/웨브 행(newA/newB)도 다른 NDT 표와 마찬가지로, 표본 행이 물려받은 샘플용
