@@ -22973,9 +22973,13 @@ document.addEventListener('DOMContentLoaded', () => {
             // 세로 병합(rowSpan>1)된 칸은 여러 행에 걸친 높이라 건드리지 않는다. 글자만 딱 맞는
             // 높이는 인쇄용 표로 쓰기엔 너무 빽빽해 보이므로, 한 페이지에 15~20줄이 들어오는 정도의
             // 여유 있는 최소 높이(MIN_ROW_HEIGHT)를 바닥으로 깐다.
-            const applyRowHeightFromLines = (row, rowMaxLines, rowLineMetric) => {
+            const applyRowHeightFromLines = (row, rowMaxLines, rowLineMetric, minRowHeight) => {
                 if (!rowLineMetric) return 0;
-                const MIN_ROW_HEIGHT = 3200; // A4 표 영역 기준 페이지당 약 15~20줄
+                // NDT/내화피복 표는 한 페이지에 15~20줄 정도로 여유 있게(기본값 3200). 상태조사표는
+                // 페이지당 정확히 15건이 들어가야 하는 고정 페이지네이션이라(paginateSurveyDefects),
+                // 이 기본값을 그대로 쓰면 2줄로 줄바꿈되는 칸이 많아질 때 15줄 합이 여백까지 넘쳤다
+                // (사용자가 실제로 겪음) — 호출부에서 더 촘촘한 값을 넘겨 쓸 수 있게 한다.
+                const MIN_ROW_HEIGHT = minRowHeight || 3200;
                 const contentHeight = rowLineMetric.marginV + rowLineMetric.vertsize
                     + (rowMaxLines - 1) * (rowLineMetric.vertsize + rowLineMetric.spacing)
                     + Math.round(rowLineMetric.vertsize * 0.35);
@@ -23583,7 +23587,11 @@ document.addEventListener('DOMContentLoaded', () => {
                                 }
                             }
                         });
-                        applyRowHeightFromLines(newRow, rowMaxLines, rowLineMetric);
+                        // 상태조사표는 페이지당 정확히 15건이 들어가야 한다(paginateSurveyDefects) —
+                        // NDT 표 기본값(3200, 15~20줄 여유용)을 그대로 쓰면 2줄로 줄바꿈되는 칸이
+                        // 몇 개만 있어도 15줄 합이 페이지 여백까지 넘쳤다(사용자가 실제로 겪음).
+                        // 1줄 칸을 더 촘촘하게 잡아서 2줄 칸이 필요한 만큼 자랄 여유를 만든다.
+                        applyRowHeightFromLines(newRow, rowMaxLines, rowLineMetric, 1600);
                         Array.from(newRow.getElementsByTagNameNS(HP_NS, 'tc')).forEach(centerCellContent);
                         destTbl.appendChild(newRow);
                     });
