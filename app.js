@@ -332,6 +332,9 @@ document.addEventListener('DOMContentLoaded', () => {
         updateOfflineBadge();
         window.showToast('온라인 상태로 전환되었습니다. 서버 데이터와 병합 후 동기화합니다.', 'success');
         if (typeof syncStateToFirebase === 'function') syncStateToFirebase();
+        if (typeof pruneStaleIndexedDbInspectionData === 'function') {
+            pruneStaleIndexedDbInspectionData().catch(() => {});
+        }
     });
     window.addEventListener('offline', () => {
         updateOfflineBadge();
@@ -1447,6 +1450,11 @@ document.addEventListener('DOMContentLoaded', () => {
         try {
             const rawBuildings = window.state.buildings || [];
             const rawDefects = window.state.defects || {};
+
+            // 현재 점검 중이면 접근 시각 갱신 → 오프라인 장시간 작업도 6시간 TTL에 안 걸림
+            if (window.state.currentBuildingId && typeof touchBuildingAccess === 'function') {
+                touchBuildingAccess(window.state.currentBuildingId);
+            }
 
             // 무거운 이미지(도면/사진)는 IndexedDB로 옮겨서 저장하고,
             // localStorage에는 가벼운 참조(photoIds)와 텍스트 데이터만 남긴다.
@@ -2690,6 +2698,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         window.state.currentBuilding = bldg;
         window.state.currentBuildingId = bldg.id;
+        if (typeof touchBuildingAccess === 'function') touchBuildingAccess(bldg.id);
 
         // Nav 건물명 표시 업데이트
         const cleanName = bldg.name ? bldg.name.replace(/^🏢\s*/, '') : '건축물';
@@ -2714,6 +2723,10 @@ document.addEventListener('DOMContentLoaded', () => {
         // 로딩 오버레이 없이 즉시 맵 진입. 로컬 캐시로 먼저 그리고, 없으면 백그라운드 hydrate.
         loadFloorDrawing(targetFloor);
         window.switchTab('tab-map');
+
+        if (canFetchDrawings && typeof pruneStaleIndexedDbInspectionData === 'function') {
+            pruneStaleIndexedDbInspectionData().catch(() => {});
+        }
 
         (async () => {
             try {
@@ -26083,6 +26096,193 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     window.clearLocalFloorPdfCache = clearLocalFloorPdfCache;
 
+    /** 점검(건물) 마지막 진입 시각 — IndexedDB 대용량 자산 TTL (6시간) */
+    const BUILDING_ACCESS_LS_KEY = 'bsa_building_access_v1';
+    const BUILDING_ACCESS_TTL_MS = 6 * 60 * 60 * 1000;
+    let _idbInspectionPruneInFlight = null;
+
+    function readBuildingAccessMap() {
+        try {
+            const raw = localStorage.getItem(BUILDING_ACCESS_LS_KEY);
+            const parsed = raw ? JSON.parse(raw) : {};
+            return (parsed && typeof parsed === 'object') ? parsed : {};
+        } catch (_) {
+            return {};
+        }
+    }
+
+    function writeBuildingAccessMap(map) {
+        try {
+            localStorage.setItem(BUILDING_ACCESS_LS_KEY, JSON.stringify(map || {}));
+        } catch (e) {
+            console.warn('점검 접근 시각 저장 실패:', e);
+        }
+    }
+
+    function touchBuildingAccess(buildingId) {
+        if (!buildingId) return;
+        const map = readBuildingAccessMap();
+        map[buildingId] = Date.now();
+        writeBuildingAccessMap(map);
+    }
+
+    /** 기존 설치분은 즉시 삭제되지 않도록 현재 시각으로 시드 */
+    function ensureBuildingAccessSeeded() {
+        const map = readBuildingAccessMap();
+        const now = Date.now();
+        let changed = false;
+        (window.state.buildings || []).forEach((b) => {
+            if (b && b.id && map[b.id] == null) {
+                map[b.id] = now;
+                changed = true;
+            }
+        });
+        if (window.state.currentBuildingId && map[window.state.currentBuildingId] == null) {
+            map[window.state.currentBuildingId] = now;
+            changed = true;
+        }
+        if (changed) writeBuildingAccessMap(map);
+        return map;
+    }
+
+    function clearPersistedKeyPrefix(set, prefix) {
+        if (!set || !prefix) return;
+        Array.from(set).forEach((k) => {
+            if (String(k).startsWith(prefix)) set.delete(k);
+        });
+    }
+
+    async function deleteIdbKeysWithBuildingPrefix(storeName, buildingId) {
+        if (!buildingId || typeof idbGetAllKeys !== 'function') return 0;
+        const prefix = `${buildingId}_`;
+        const keys = await idbGetAllKeys(storeName);
+        let removed = 0;
+        for (let i = 0; i < keys.length; i++) {
+            const key = keys[i];
+            if (!String(key).startsWith(prefix)) continue;
+            if (await idbDelete(storeName, key)) removed++;
+        }
+        return removed;
+    }
+
+    async function purgeBuildingIndexedDbAssets(buildingId) {
+        if (!buildingId) return 0;
+        const prefix = `${buildingId}_`;
+        let removed = 0;
+        removed += await deleteIdbKeysWithBuildingPrefix('floorDrawings', buildingId);
+        removed += await deleteIdbKeysWithBuildingPrefix('floorDrawingTiers', buildingId);
+        removed += await deleteIdbKeysWithBuildingPrefix('floorDrawingPdfs', buildingId);
+        removed += await deleteIdbKeysWithBuildingPrefix('floorDrawingSources', buildingId);
+
+        const photoKeysToDelete = new Set();
+        Object.entries(window.state.defects || {}).forEach(([mapKey, arr]) => {
+            if (!String(mapKey).startsWith(prefix)) return;
+            (arr || []).forEach((d) => {
+                if (!d) return;
+                (d.photoIds || []).forEach((pid) => { if (pid) photoKeysToDelete.add(pid); });
+                (d.prevRoundPhotoIds || []).forEach((pid) => { if (pid) photoKeysToDelete.add(pid); });
+                if (d.id) {
+                    const photoLen = Math.max(
+                        (d.photos && d.photos.length) || 0,
+                        (d.photoIds && d.photoIds.length) || 0,
+                        24
+                    );
+                    const prevLen = Math.max(
+                        (d.prevRoundPhotos && d.prevRoundPhotos.length) || 0,
+                        (d.prevRoundPhotoIds && d.prevRoundPhotoIds.length) || 0,
+                        24
+                    );
+                    for (let i = 0; i < photoLen; i++) photoKeysToDelete.add(getPhotoDocId(d.id, i));
+                    for (let i = 0; i < prevLen; i++) photoKeysToDelete.add(getPhotoDocId(d.id, i, 'prev'));
+                }
+                if (d.photos) delete d.photos;
+                if (d.prevRoundPhotos) delete d.prevRoundPhotos;
+            });
+        });
+        for (const pid of photoKeysToDelete) {
+            if (await idbDelete('photos', pid)) removed++;
+            if (_idbPersistedPhotoKeys) _idbPersistedPhotoKeys.delete(pid);
+            if (window._photoCache && window._photoCache[pid]) delete window._photoCache[pid];
+        }
+
+        clearPersistedKeyPrefix(_idbPersistedDrawingKeys, prefix);
+        clearPersistedKeyPrefix(_idbPersistedTierKeys, prefix);
+        clearPersistedKeyPrefix(_idbPersistedPdfKeys, prefix);
+        clearPersistedKeyPrefix(_idbPersistedSourceKeys, prefix);
+        if (window._cloudSyncedDrawingKeys) clearPersistedKeyPrefix(window._cloudSyncedDrawingKeys, prefix);
+        if (window._cloudSyncedTierKeys) clearPersistedKeyPrefix(window._cloudSyncedTierKeys, prefix);
+        if (window._cloudSyncedPdfKeys) clearPersistedKeyPrefix(window._cloudSyncedPdfKeys, prefix);
+
+        if (state.floorDrawingTierImageCache) {
+            Object.keys(state.floorDrawingTierImageCache).forEach((k) => {
+                if (String(k).startsWith(prefix)) delete state.floorDrawingTierImageCache[k];
+            });
+        }
+        if (state.floorImageCache) {
+            Object.keys(state.floorImageCache).forEach((k) => {
+                if (String(k).startsWith(prefix)) delete state.floorImageCache[k];
+            });
+        }
+
+        const bldg = (window.state.buildings || []).find((b) => b && b.id === buildingId);
+        if (bldg) {
+            bldg.floorDrawings = {};
+            bldg.floorDrawingTiers = {};
+            bldg.floorDrawingPdfs = {};
+            bldg.floorDrawingSources = {};
+        }
+        return removed;
+    }
+
+    /**
+     * 6시간 이상 들어가지 않은 점검의 IndexedDB 대용량(도면 3티어·사진·PDF)만 정리.
+     * - 오프라인이면 절대 삭제하지 않음 (현장 오프라인 점검 보호)
+     * - 지금 들어가 있는 점검은 유지
+     * - 저장/진입할 때마다 접근 시각이 갱신되므로 장시간 오프라인 작업도 안전
+     */
+    async function pruneStaleIndexedDbInspectionData(opts) {
+        const options = opts || {};
+        if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+            return { skipped: 'offline', removedBuildings: 0 };
+        }
+        if (_idbInspectionPruneInFlight) return _idbInspectionPruneInFlight;
+        _idbInspectionPruneInFlight = (async () => {
+            const map = ensureBuildingAccessSeeded();
+            const now = Date.now();
+            const keepId = window.state.currentBuildingId || null;
+            if (keepId) {
+                map[keepId] = now;
+                writeBuildingAccessMap(map);
+            }
+            const staleIds = Object.keys(map).filter((id) => {
+                if (!id || id === keepId) return false;
+                const ts = Number(map[id] || 0);
+                return !ts || (now - ts) >= BUILDING_ACCESS_TTL_MS;
+            });
+            let removedBuildings = 0;
+            let removedKeys = 0;
+            for (let i = 0; i < staleIds.length; i++) {
+                const id = staleIds[i];
+                removedKeys += await purgeBuildingIndexedDbAssets(id);
+                delete map[id];
+                removedBuildings++;
+            }
+            writeBuildingAccessMap(map);
+            if (removedBuildings > 0 && options.notify && typeof window.showToast === 'function') {
+                window.showToast(`오래된 점검 캐시 ${removedBuildings}건을 기기에서 정리했습니다.`, 'info', 3500);
+            }
+            return { removedBuildings, removedKeys };
+        })().catch((e) => {
+            console.warn('IndexedDB 점검 캐시 정리 실패:', e);
+            return { removedBuildings: 0, error: e };
+        }).finally(() => {
+            _idbInspectionPruneInFlight = null;
+        });
+        return _idbInspectionPruneInFlight;
+    }
+    window.pruneStaleIndexedDbInspectionData = pruneStaleIndexedDbInspectionData;
+    window.touchBuildingAccess = touchBuildingAccess;
+
     async function hydrateBuildingPdfsFromSiteVault(bldg) {
         if (!bldg) return;
         const siteKey = normalizeSiteVaultKey(bldg.name);
@@ -26939,6 +27139,13 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         if (typeof loadStateFromLocalStorage === 'function') loadStateFromLocalStorage();
+        if (typeof ensureBuildingAccessSeeded === 'function') ensureBuildingAccessSeeded();
+        else if (typeof touchBuildingAccess === 'function' && window.state.currentBuildingId) {
+            touchBuildingAccess(window.state.currentBuildingId);
+        }
+        if (typeof pruneStaleIndexedDbInspectionData === 'function' && navigator.onLine !== false) {
+            pruneStaleIndexedDbInspectionData().catch(() => {});
+        }
         if (typeof listenToRealtimeUpdates === 'function') listenToRealtimeUpdates();
         if (typeof hydrateAllBuildingPdfsFromCloud === 'function') {
             hydrateAllBuildingPdfsFromCloud().catch((e) => console.warn('서버 PDF 일괄 조회 실패:', e));
