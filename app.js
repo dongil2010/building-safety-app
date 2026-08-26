@@ -2826,15 +2826,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 const enriched = await enrichFloorsListFromIndexedDb(bldg);
                 if (enriched) populateFloorSelectDropdown(bldg);
 
-                if (typeof hydrateSingleBuildingDrawings === 'function') {
-                    await hydrateSingleBuildingDrawings(bldg, {
-                        localOnly: !canFetchDrawings,
-                        priorityFloor: targetFloor,
-                        backgroundRest: true
-                    });
-                }
-                if (window.state.currentBuildingId !== entryBuildingId) return;
-
+                // 도면(현재 층)과 사진(현재 층)을 동시에 불러온다 — 예전엔 도면을 다 기다린
+                // 뒤에야 사진 로딩을 시작해서(그것도 건물 전체 층을 층마다 순서대로) 사진이
+                // 뜨기까지 오래 걸렸다(사용자가 실제로 겪음: 최대 1분 가까이 빈 채로 있다가,
+                // 결함을 새로 등록하는 등 다른 이유로 화면이 다시 그려질 때만 나타남). 지금 층
+                // 사진만 도면과 나란히 기다리고, 나머지 층 사진은 백그라운드로 미룬다.
                 if (typeof hydrateDefectPhotos === 'function') {
                     persistLocalImagesToIndexedDb(window.state.buildings, window.state.defects);
                     Object.entries(window.state.defects || {}).forEach(([key, arr]) => {
@@ -2845,23 +2841,46 @@ document.addEventListener('DOMContentLoaded', () => {
                         });
                     });
                     window._photoCache = {};
-                    const subset = {};
-                    Object.entries(window.state.defects || {}).forEach(([key, arr]) => {
-                        if (key.startsWith(bldg.id + '_')) subset[key] = arr;
-                    });
-                    if (Object.keys(subset).length) {
-                        const loaded = await hydrateDefectPhotos(subset, { buildingId: bldg.id });
+                }
+                const photoSubset = {};
+                Object.entries(window.state.defects || {}).forEach(([key, arr]) => {
+                    if (key.startsWith(bldg.id + '_')) photoSubset[key] = arr;
+                });
+                const currentFloorPhotoKey = `${bldg.id}_${targetFloor}`;
+                const currentFloorPhotoSubset = {};
+                const restPhotoSubset = {};
+                Object.entries(photoSubset).forEach(([key, arr]) => {
+                    if (key === currentFloorPhotoKey) currentFloorPhotoSubset[key] = arr;
+                    else restPhotoSubset[key] = arr;
+                });
+
+                const drawingsPromise = (typeof hydrateSingleBuildingDrawings === 'function')
+                    ? hydrateSingleBuildingDrawings(bldg, {
+                        localOnly: !canFetchDrawings,
+                        priorityFloor: targetFloor,
+                        backgroundRest: true
+                    })
+                    : Promise.resolve();
+                const currentFloorPhotosPromise = (typeof hydrateDefectPhotos === 'function' && Object.keys(currentFloorPhotoSubset).length)
+                    ? hydrateDefectPhotos(currentFloorPhotoSubset, { buildingId: bldg.id })
+                    : Promise.resolve(null);
+
+                const [, currentFloorPhotosLoaded] = await Promise.all([drawingsPromise, currentFloorPhotosPromise]);
+                if (window.state.currentBuildingId !== entryBuildingId) return;
+
+                if (currentFloorPhotosLoaded) Object.assign(window.state.defects, currentFloorPhotosLoaded);
+                if (typeof renderSurveyTable === 'function' && window.state.currentTab === 'tab-survey') renderSurveyTable();
+                if (typeof renderDefectListPanel === 'function') renderDefectListPanel();
+
+                if (typeof hydrateDefectPhotos === 'function' && Object.keys(restPhotoSubset).length) {
+                    hydrateDefectPhotos(restPhotoSubset, { buildingId: bldg.id }).then((loaded) => {
                         if (window.state.currentBuildingId !== entryBuildingId) return;
                         Object.assign(window.state.defects, loaded);
-                    }
-                    // 사진 로딩이 도면 로딩보다 오래 걸리는 경우, 사용자가 이미 상태조사표 탭으로
-                    // 넘어가 있을 수 있다 — 화면을 다시 그려주지 않으면 메모리에는 사진이 다
-                    // 들어왔는데도 화면엔 계속 빈 채로 남아있었다(사용자가 실제로 겪음: 결함을 새로
-                    // 등록해 다른 이유로 화면이 다시 그려질 때까지 안 보이던 문제). 도면 재로딩
-                    // 여부와 무관하게 항상 다시 그린다.
-                    if (typeof renderSurveyTable === 'function' && window.state.currentTab === 'tab-survey') renderSurveyTable();
-                    if (typeof renderDefectListPanel === 'function') renderDefectListPanel();
+                        if (typeof renderSurveyTable === 'function' && window.state.currentTab === 'tab-survey') renderSurveyTable();
+                        if (typeof renderDefectListPanel === 'function') renderDefectListPanel();
+                    }).catch((e) => console.warn('나머지 층 사진 백그라운드 복원 실패:', e));
                 }
+
                 populateFloorSelectDropdown(bldg);
                 const curFloor = window.state.currentFloor;
                 const refMismatch = window.state.floorPlanRef
@@ -27118,14 +27137,14 @@ document.addEventListener('DOMContentLoaded', () => {
         const companyPhotos = (db && window.state.companyId)
             ? db.collection('safety_app').doc(getCompanyDocId()).collection('photos')
             : null;
-        const result = {};
-        for (const [key, arr] of Object.entries(defectsMap || {})) {
+        // 층(키)마다 순서대로(sequential) 기다리면 층이 많은 건물에서 사진 복원이 아주 오래
+        // 걸렸다(사용자가 실제로 겪음 — 상태조사표 사진 앨범이 1분 가까이 비어 있다가 뜸).
+        // 층 사이엔 서로 의존 관계가 없으니 전부 한꺼번에(Promise.all) 돌린다.
+        const entries = Object.entries(defectsMap || {});
+        const resultEntries = await Promise.all(entries.map(async ([key, arr]) => {
             const loadThis = !!options.loadAll || (!!buildingId && key.startsWith(`${buildingId}_`));
-            if (!loadThis) {
-                result[key] = arr || [];
-                continue;
-            }
-            result[key] = await Promise.all((arr || []).map(async d => {
+            if (!loadThis) return [key, arr || []];
+            const hydratedArr = await Promise.all((arr || []).map(async d => {
                 const loadIds = async (ids) => {
                     if (!ids || ids.length === 0) return [];
                     const photos = await Promise.all(ids.map(async pid => {
@@ -27153,7 +27172,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 const prevRoundPhotos = mergePhotoArrays(loadedPrev, extractInlinePhotos(d, 'prev'));
                 return { ...d, photos, prevRoundPhotos };
             }));
-        }
+            return [key, hydratedArr];
+        }));
+        const result = {};
+        resultEntries.forEach(([key, arr]) => { result[key] = arr; });
         return result;
     }
 
