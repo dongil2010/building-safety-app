@@ -23591,7 +23591,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         // NDT 표 기본값(3200, 15~20줄 여유용)을 그대로 쓰면 2줄로 줄바꿈되는 칸이
                         // 몇 개만 있어도 15줄 합이 페이지 여백까지 넘쳤다(사용자가 실제로 겪음).
                         // 1줄 칸을 더 촘촘하게 잡아서 2줄 칸이 필요한 만큼 자랄 여유를 만든다.
-                        applyRowHeightFromLines(newRow, rowMaxLines, rowLineMetric, 1600);
+                        applyRowHeightFromLines(newRow, rowMaxLines, rowLineMetric, 2800);
                         Array.from(newRow.getElementsByTagNameNS(HP_NS, 'tc')).forEach(centerCellContent);
                         destTbl.appendChild(newRow);
                     });
