@@ -18555,11 +18555,8 @@ document.addEventListener('DOMContentLoaded', () => {
         btnToggleMapStyleSize.dataset.pcToggleBound = '1';
         btnToggleMapStyleSize.addEventListener('click', () => {
             window.state.styleSizePanelOpenMap = !window.state.styleSizePanelOpenMap;
-            if (window.state.styleSizePanelOpenMap) {
-                window.state.styleSizeBarLockedMap = false;
-                if (typeof window.applyStyleSizeBarLockUi === 'function') window.applyStyleSizeBarLockUi();
-            }
             if (typeof window.applyStyleSizePanelUi === 'function') window.applyStyleSizePanelUi();
+            if (typeof window.applyStyleSizeBarLockUi === 'function') window.applyStyleSizeBarLockUi();
             refreshCanvasAfterStylePanelToggle();
         });
     }
@@ -18569,11 +18566,8 @@ document.addEventListener('DOMContentLoaded', () => {
         btnToggleNdtStyleSize.dataset.pcToggleBound = '1';
         btnToggleNdtStyleSize.addEventListener('click', () => {
             window.state.styleSizePanelOpenNdt = !window.state.styleSizePanelOpenNdt;
-            if (window.state.styleSizePanelOpenNdt) {
-                window.state.styleSizeBarLockedNdt = false;
-                if (typeof window.applyStyleSizeBarLockUi === 'function') window.applyStyleSizeBarLockUi();
-            }
             if (typeof window.applyStyleSizePanelUi === 'function') window.applyStyleSizePanelUi();
+            if (typeof window.applyStyleSizeBarLockUi === 'function') window.applyStyleSizeBarLockUi();
             refreshCanvasAfterStylePanelToggle();
         });
     }
@@ -18586,11 +18580,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (bar) bar.classList.toggle('is-mobile-sheet-open', willOpen);
             mobileBtnToggleSize.classList.toggle('active', willOpen);
             mobileBtnToggleSize.setAttribute('aria-expanded', willOpen ? 'true' : 'false');
-            if (willOpen) {
-                // 모바일에서 열면 바로 조절 가능하도록 잠금 해제
-                window.state.styleSizeBarLockedMap = false;
-                if (typeof window.applyStyleSizeBarLockUi === 'function') window.applyStyleSizeBarLockUi();
-            }
+            if (typeof window.applyStyleSizeBarLockUi === 'function') window.applyStyleSizeBarLockUi();
         });
     }
 
@@ -18662,10 +18652,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (bar) bar.classList.toggle('is-mobile-sheet-open', willOpen);
             mobileNdtBtnToggleSize.classList.toggle('active', willOpen);
             mobileNdtBtnToggleSize.setAttribute('aria-expanded', willOpen ? 'true' : 'false');
-            if (willOpen) {
-                window.state.styleSizeBarLockedNdt = false;
-                if (typeof window.applyStyleSizeBarLockUi === 'function') window.applyStyleSizeBarLockUi();
-            }
+            if (typeof window.applyStyleSizeBarLockUi === 'function') window.applyStyleSizeBarLockUi();
         });
     }
     const mobileNdtBtnQuickDrag = document.getElementById('mobileNdtBtnQuickDrag');
