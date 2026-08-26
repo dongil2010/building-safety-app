@@ -24960,20 +24960,33 @@ document.addEventListener('DOMContentLoaded', () => {
     applyWebViewBadge();
 
     window.reloadWebAppFromServer = function () {
+        if (window._authSubmitInFlight || window._justRegistering) return;
         try { sessionStorage.removeItem('bsa_web_sha'); } catch (_) { /* ignore */ }
         const url = new URL(window.location.href);
         url.searchParams.set('_r', String(Date.now()));
         window.location.replace(url.toString());
     };
 
+    function isLoginOverlayOpen() {
+        const overlay = document.getElementById('loginOverlay');
+        if (!overlay) return false;
+        const css = overlay.style.cssText || '';
+        if (/display:\s*none/i.test(css)) return false;
+        return overlay.style.display !== 'none';
+    }
+
     (function bindRemoteWebRefresh() {
         const KEY = 'bsa_web_sha';
         async function fetchWebVersionMeta() {
             const r = await fetch('web-version.json?t=' + Date.now(), { cache: 'no-store' });
             if (!r.ok) return null;
-            return r.json();
+            const text = await r.text();
+            const cleaned = text.replace(/^\uFEFF/, '').trim();
+            if (!cleaned) return null;
+            return JSON.parse(cleaned);
         }
         async function checkRemoteWebVersion() {
+            if (window._authSubmitInFlight || window._justRegistering || isLoginOverlayOpen()) return;
             try {
                 const meta = await fetchWebVersionMeta();
                 const sha = meta && (meta.sha || meta.short);
@@ -24994,7 +25007,7 @@ document.addEventListener('DOMContentLoaded', () => {
         window.addEventListener('pageshow', (e) => {
             if (e.persisted) checkRemoteWebVersion();
         });
-        setTimeout(checkRemoteWebVersion, 800);
+        setTimeout(checkRemoteWebVersion, 3500);
         if (isNativeAndroidApp()) {
             setInterval(checkRemoteWebVersion, 45000);
         }
@@ -26140,12 +26153,14 @@ document.addEventListener('DOMContentLoaded', () => {
         const email = (document.getElementById('authEmail')?.value || '').trim();
         const password = document.getElementById('authPassword')?.value || '';
         if (!email || !password) { showAuthError({ message: '이메일과 비밀번호를 입력해 주세요.' }); return; }
+        window._authSubmitInFlight = true;
         window.showLoading('로그인 중입니다...');
         try {
             await auth.signInWithEmailAndPassword(email, password);
         } catch (err) {
             showAuthError(err);
         } finally {
+            window._authSubmitInFlight = false;
             window.hideLoading();
         }
     };
@@ -26411,6 +26426,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         async function handleSubmit(e) {
             if (e && typeof e.preventDefault === 'function') e.preventDefault();
+            if (e && typeof e.stopPropagation === 'function') e.stopPropagation();
             if (currentAuthTab === 'login') {
                 await window.submitLogin();
             } else if (currentRegMode === 'admin') {
@@ -26421,8 +26437,16 @@ document.addEventListener('DOMContentLoaded', () => {
             return false;
         }
 
-        if (formLogin) formLogin.addEventListener('submit', handleSubmit);
-        if (btnSubmit) btnSubmit.addEventListener('click', handleSubmit);
+        if (formLogin) {
+            formLogin.addEventListener('submit', handleSubmit);
+            formLogin.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter' && e.target && e.target.closest('#formLogin')) {
+                    e.preventDefault();
+                    handleSubmit(e);
+                }
+            });
+        }
+        if (btnSubmit) btnSubmit.addEventListener('click', (e) => handleSubmit(e));
 
         if (btnLogout) btnLogout.addEventListener('click', window.logout);
 
@@ -26563,7 +26587,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (typeof setupClearCarriedOverBulkEvents === 'function') setupClearCarriedOverBulkEvents();
         if (typeof setupTipShapeEvents === 'function') setupTipShapeEvents();
         if (typeof setupAreaMarkStyleEvents === 'function') setupAreaMarkStyleEvents();
-        showLoginOverlay();
+        if (!auth || !auth.currentUser) showLoginOverlay();
     }
 
     init();
