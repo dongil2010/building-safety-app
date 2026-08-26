@@ -2176,6 +2176,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const idbKey = `${bldg.id}_${floorCode}`;
         let hydrated = false;
 
+        // 1) 로컬 레스터 먼저 (네트워크 전에 IDB 티어·미리보기)
         if (!isUsableRasterDrawingUrl(bldg.floorDrawings[floorCode])) {
             if (bldg.floorDrawings[floorCode]) delete bldg.floorDrawings[floorCode];
             const cached = await idbGet('floorDrawings', idbKey);
@@ -2189,22 +2190,6 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         }
 
-        if (!options.localOnly && !isUsableRasterDrawingUrl(bldg.floorDrawings[floorCode]) && typeof fetchCloudFloorDrawingDataUrl === 'function') {
-            const cloudRaster = await fetchCloudFloorDrawingDataUrl(bldg.id, floorCode);
-            if (cloudRaster) {
-                if (isPdfDrawingUrl(cloudRaster)) {
-                    await applyResolvedPdfToBuilding(bldg, floorCode, cloudRaster);
-                } else if (isUsableRasterDrawingUrl(cloudRaster)) {
-                    bldg.floorDrawings[floorCode] = cloudRaster;
-                    idbSet('floorDrawings', idbKey, cloudRaster);
-                    _idbPersistedDrawingKeys.add(idbKey);
-                } else {
-                    console.warn('서버 도면 미리보기가 손상됨:', idbKey);
-                }
-                hydrated = true;
-            }
-        }
-
         if (!isUsableRasterDrawingUrl(bldg.floorDrawings[floorCode])) {
             const t4000 = await idbGetFloorDrawingTier(bldg.id, floorCode, 4000);
             if (isUsableRasterDrawingUrl(t4000)) {
@@ -2214,16 +2199,31 @@ document.addEventListener('DOMContentLoaded', () => {
                 bldg.floorDrawings[floorCode] = t4000;
                 _idbPersistedTierKeys.add(floorDrawingTierIdbKey(bldg.id, floorCode, 4000));
                 hydrated = true;
-            } else if (!options.localOnly) {
-                const cloud4000 = await fetchAndCacheCloudFloorDrawingTier(bldg, floorCode, 4000);
-                if (isUsableRasterDrawingUrl(cloud4000)) {
-                    bldg.floorDrawings[floorCode] = cloud4000;
+            }
+        }
+
+        // 2) 로컬에 없을 때만 클라우드 일반(4000) 티어 1장
+        if (!isUsableRasterDrawingUrl(bldg.floorDrawings[floorCode]) && !options.localOnly) {
+            const cloud4000 = await fetchAndCacheCloudFloorDrawingTier(bldg, floorCode, 4000);
+            if (isUsableRasterDrawingUrl(cloud4000)) {
+                bldg.floorDrawings[floorCode] = cloud4000;
+                hydrated = true;
+            } else if (typeof fetchCloudFloorDrawingDataUrl === 'function') {
+                const cloudRaster = await fetchCloudFloorDrawingDataUrl(bldg.id, floorCode);
+                if (cloudRaster && isUsableRasterDrawingUrl(cloudRaster) && !isPdfDrawingUrl(cloudRaster)) {
+                    bldg.floorDrawings[floorCode] = cloudRaster;
+                    idbSet('floorDrawings', idbKey, cloudRaster);
+                    _idbPersistedDrawingKeys.add(idbKey);
                     hydrated = true;
+                } else if (cloudRaster && isPdfDrawingUrl(cloudRaster)) {
+                    // 표시용 아님 — 벡터/재등록용으로만 보관
+                    await applyResolvedPdfToBuilding(bldg, floorCode, cloudRaster);
                 }
             }
         }
+
         const hasRaster = isUsableRasterDrawingUrl(bldg.floorDrawings[floorCode]);
-        // 현장 표시는 JPEG 미리보기만. PDF·원본·고해상도는 필요할 때만 받는다.
+        // PDF 원본은 벡터 내보내기 등 needPdf일 때만
         if (!hasRaster && !bldg.floorDrawingPdfs[floorCode] && options.needPdf) {
             const resolvedPdf = await resolveBuildingFloorPdf(
                 bldg,
@@ -2324,7 +2324,11 @@ document.addEventListener('DOMContentLoaded', () => {
         const skipFirst = (!priority && options.backgroundRest && floorList[0]) ? floorList[0] : priority;
         const rest = skipFirst ? floorList.filter((fc) => fc !== skipFirst) : floorList;
         const restWork = (async () => {
-            await runPool(rest, 2, (floorCode) => hydrateOne(floorCode));
+            // 현재 층 표시·네트워크를 먼저 쓰게 잠깐 양보
+            if (options.backgroundRest && rest.length) {
+                await new Promise((r) => setTimeout(r, 400));
+            }
+            await runPool(rest, 1, (floorCode) => hydrateOne(floorCode, { needPdf: false }));
             await persistBuildingDrawingAssetsNow(bldg);
         })();
 
@@ -2647,51 +2651,57 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const targetFloor = window.state.currentFloor || '1F';
         const canFetchDrawings = typeof navigator === 'undefined' || navigator.onLine !== false;
-        if (typeof window.showLoading === 'function') {
-            window.showLoading('도면을 불러오는 중…');
-        }
-        try {
-            if (typeof hydrateSingleBuildingDrawings === 'function') {
-                await hydrateSingleBuildingDrawings(bldg, {
-                    localOnly: !canFetchDrawings,
-                    priorityFloor: targetFloor,
-                    backgroundRest: true,
-                    onProgress: (done, total, floorCode) => {
-                        if (typeof window.showLoading !== 'function' || total <= 0) return;
-                        if (floorCode === targetFloor || done <= 1) {
-                            window.showLoading(`도면을 불러오는 중…${floorCode ? ' · ' + floorCode : ''}`);
-                        }
-                    }
-                });
-            }
-            if (typeof hydrateDefectPhotos === 'function') {
-                persistLocalImagesToIndexedDb(window.state.buildings, window.state.defects);
-                Object.entries(window.state.defects || {}).forEach(([key, arr]) => {
-                    if (key.startsWith(bldg.id + '_')) return;
-                    (arr || []).forEach((d) => {
-                        if (d.photos) delete d.photos;
-                        if (d.prevRoundPhotos) delete d.prevRoundPhotos;
-                    });
-                });
-                window._photoCache = {};
-                const subset = {};
-                Object.entries(window.state.defects || {}).forEach(([key, arr]) => {
-                    if (key.startsWith(bldg.id + '_')) subset[key] = arr;
-                });
-                if (Object.keys(subset).length) {
-                    const loaded = await hydrateDefectPhotos(subset, { buildingId: bldg.id });
-                    Object.assign(window.state.defects, loaded);
-                }
-            }
-            populateFloorSelectDropdown(bldg);
-        } catch (e) {
-            console.warn('점검 진입 전 도면 동기화 실패:', e);
-        } finally {
-            if (typeof window.hideLoading === 'function') window.hideLoading();
-        }
+        const entryBuildingId = bldg.id;
 
+        // 로딩 오버레이 없이 즉시 맵 진입. 로컬 캐시로 먼저 그리고, 없으면 백그라운드 hydrate.
         loadFloorDrawing(targetFloor);
         window.switchTab('tab-map');
+
+        (async () => {
+            try {
+                if (typeof hydrateSingleBuildingDrawings === 'function') {
+                    await hydrateSingleBuildingDrawings(bldg, {
+                        localOnly: !canFetchDrawings,
+                        priorityFloor: targetFloor,
+                        backgroundRest: true
+                    });
+                }
+                if (window.state.currentBuildingId !== entryBuildingId) return;
+
+                if (typeof hydrateDefectPhotos === 'function') {
+                    persistLocalImagesToIndexedDb(window.state.buildings, window.state.defects);
+                    Object.entries(window.state.defects || {}).forEach(([key, arr]) => {
+                        if (key.startsWith(bldg.id + '_')) return;
+                        (arr || []).forEach((d) => {
+                            if (d.photos) delete d.photos;
+                            if (d.prevRoundPhotos) delete d.prevRoundPhotos;
+                        });
+                    });
+                    window._photoCache = {};
+                    const subset = {};
+                    Object.entries(window.state.defects || {}).forEach(([key, arr]) => {
+                        if (key.startsWith(bldg.id + '_')) subset[key] = arr;
+                    });
+                    if (Object.keys(subset).length) {
+                        const loaded = await hydrateDefectPhotos(subset, { buildingId: bldg.id });
+                        if (window.state.currentBuildingId !== entryBuildingId) return;
+                        Object.assign(window.state.defects, loaded);
+                    }
+                }
+                populateFloorSelectDropdown(bldg);
+                // hydrate 후 현재 층이 비어 있으면 다시 그림 (이미 보이면 유지)
+                if (window.state.currentBuildingId === entryBuildingId
+                    && window.state.currentFloor === targetFloor
+                    && !window.state.bgImage
+                    && typeof loadFloorDrawing === 'function') {
+                    loadFloorDrawing(targetFloor, { preserveView: true });
+                } else if (typeof renderDefectListPanel === 'function') {
+                    renderDefectListPanel();
+                }
+            } catch (e) {
+                console.warn('점검 진입 후 도면 동기화 실패:', e);
+            }
+        })();
     };
 
     window.getFloorLabelFromCode = function(code) {
