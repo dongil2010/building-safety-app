@@ -7439,11 +7439,9 @@ body {
         display: none;
     }
 
-    /* 현장/도면 등록 모달 — 카드 고정 높이 + 본문 내부 스크롤 */
+    /* 신규 건축물 등록 모달만 — 카드 고정 높이 + 본문 내부 스크롤 */
     #addBuildingModal.modal-overlay,
-    #addBuildingModal.modal-overlay.open,
-    #editBuildingModal.modal-overlay,
-    #editBuildingModal.modal-overlay.open {
+    #addBuildingModal.modal-overlay.open {
         overflow: hidden;
         align-items: center;
         justify-content: center;
@@ -7454,8 +7452,7 @@ body {
             max(0.35rem, env(safe-area-inset-left, 0px));
     }
 
-    #addBuildingModal .modal-card.add-building-modal,
-    #editBuildingModal .modal-card.edit-building-modal {
+    #addBuildingModal .modal-card.add-building-modal {
         width: min(96vw, 640px);
         height: calc(100dvh - 0.7rem - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
         max-height: calc(100dvh - 0.7rem - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
@@ -7469,16 +7466,12 @@ body {
 
     #addBuildingModal .add-building-header,
     #addBuildingModal .add-building-mode-bar,
-    #addBuildingModal .add-building-footer,
-    #editBuildingModal .edit-building-header,
-    #editBuildingModal .modal-footer {
+    #addBuildingModal .add-building-footer {
         flex-shrink: 0;
     }
 
     #addBuildingModal .add-building-body,
-    #addBuildingModal .modal-body.add-building-body,
-    #editBuildingModal .modal-body,
-    #editBuildingModal .edit-building-body {
+    #addBuildingModal .modal-body.add-building-body {
         flex: 1 1 0 !important;
         min-height: 0 !important;
         max-height: none !important;
@@ -7490,9 +7483,29 @@ body {
         padding: 0.75rem 0.85rem;
     }
 
-    #addBuildingModal .add-building-collapsible,
-    #editBuildingModal .add-building-collapsible {
+    #addBuildingModal .add-building-collapsible {
         overflow: visible;
+    }
+
+    /* 수정 모달 — 기존 레이아웃 유지 */
+    #editBuildingModal .modal-card {
+        width: min(96vw, 640px);
+        max-height: calc(100dvh - 1.2rem);
+        margin: 0.4rem auto;
+        display: flex;
+        flex-direction: column;
+        min-height: 0;
+    }
+
+    #editBuildingModal .modal-body,
+    #editBuildingModal .edit-building-body {
+        max-height: none !important;
+        overflow-y: auto !important;
+        overflow-x: hidden;
+        -webkit-overflow-scrolling: touch;
+        flex: 1 1 auto;
+        min-height: 0;
+        padding: 0.75rem 0.85rem;
     }
 
     #addBuildingModal .add-building-header {
