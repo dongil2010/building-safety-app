@@ -2854,32 +2854,43 @@ document.addEventListener('DOMContentLoaded', () => {
                     else restPhotoSubset[key] = arr;
                 });
 
+                // 도면 로딩(hydrateSingleBuildingDrawings)은 클라우드 문제(예: Firestore 권한
+                // 오류)가 있으면 자체 재시도·타임아웃(최대 35초)까지 기다린 뒤에야 끝난다 —
+                // 사진 로딩을 여기 Promise.all로 묶어 "같이 기다리게" 했더니, 도면이 오래
+                // 걸리는 상황에서 사진도 덩달아 그만큼 늦게(최대 35초~1분) 나타났다(사용자가
+                // 실제로 겪음). 도면과 사진을 서로 기다리지 않는 완전히 독립된 작업으로
+                // 분리한다 — 사진이 먼저 끝나면 도면과 무관하게 바로 화면에 반영한다.
                 const drawingsPromise = (typeof hydrateSingleBuildingDrawings === 'function')
                     ? hydrateSingleBuildingDrawings(bldg, {
                         localOnly: !canFetchDrawings,
                         priorityFloor: targetFloor,
                         backgroundRest: true
-                    })
+                    }).catch((e) => console.warn('현재 층 도면 로드 실패:', e))
                     : Promise.resolve();
-                const currentFloorPhotosPromise = (typeof hydrateDefectPhotos === 'function' && Object.keys(currentFloorPhotoSubset).length)
-                    ? hydrateDefectPhotos(currentFloorPhotoSubset, { buildingId: bldg.id })
-                    : Promise.resolve(null);
 
-                const [, currentFloorPhotosLoaded] = await Promise.all([drawingsPromise, currentFloorPhotosPromise]);
-                if (window.state.currentBuildingId !== entryBuildingId) return;
-
-                if (currentFloorPhotosLoaded) Object.assign(window.state.defects, currentFloorPhotosLoaded);
-                if (typeof renderSurveyTable === 'function' && window.state.currentTab === 'tab-survey') renderSurveyTable();
-                if (typeof renderDefectListPanel === 'function') renderDefectListPanel();
-
-                if (typeof hydrateDefectPhotos === 'function' && Object.keys(restPhotoSubset).length) {
-                    hydrateDefectPhotos(restPhotoSubset, { buildingId: bldg.id }).then((loaded) => {
+                const photosPromise = (async () => {
+                    if (typeof hydrateDefectPhotos !== 'function') return;
+                    if (Object.keys(currentFloorPhotoSubset).length) {
+                        const loaded = await hydrateDefectPhotos(currentFloorPhotoSubset, { buildingId: bldg.id });
                         if (window.state.currentBuildingId !== entryBuildingId) return;
                         Object.assign(window.state.defects, loaded);
-                        if (typeof renderSurveyTable === 'function' && window.state.currentTab === 'tab-survey') renderSurveyTable();
-                        if (typeof renderDefectListPanel === 'function') renderDefectListPanel();
-                    }).catch((e) => console.warn('나머지 층 사진 백그라운드 복원 실패:', e));
-                }
+                    }
+                    if (window.state.currentBuildingId !== entryBuildingId) return;
+                    if (typeof renderSurveyTable === 'function' && window.state.currentTab === 'tab-survey') renderSurveyTable();
+                    if (typeof renderDefectListPanel === 'function') renderDefectListPanel();
+
+                    if (Object.keys(restPhotoSubset).length) {
+                        hydrateDefectPhotos(restPhotoSubset, { buildingId: bldg.id }).then((loaded) => {
+                            if (window.state.currentBuildingId !== entryBuildingId) return;
+                            Object.assign(window.state.defects, loaded);
+                            if (typeof renderSurveyTable === 'function' && window.state.currentTab === 'tab-survey') renderSurveyTable();
+                            if (typeof renderDefectListPanel === 'function') renderDefectListPanel();
+                        }).catch((e) => console.warn('나머지 층 사진 백그라운드 복원 실패:', e));
+                    }
+                })().catch((e) => console.warn('현재 층 사진 로드 실패:', e));
+
+                await Promise.all([drawingsPromise, photosPromise]);
+                if (window.state.currentBuildingId !== entryBuildingId) return;
 
                 populateFloorSelectDropdown(bldg);
                 const curFloor = window.state.currentFloor;
@@ -19321,7 +19332,7 @@ document.addEventListener('DOMContentLoaded', () => {
     window.addEventListener('keydown', (e) => {
         const tag = (e.target && e.target.tagName) ? e.target.tagName.toLowerCase() : '';
         const typing = (tag === 'input' || tag === 'textarea' || tag === 'select' || e.target?.isContentEditable);
-        const k = e.key.toLowerCase();
+        const k = e.key ? e.key.toLowerCase() : '';
 
         if (window.state.currentTab === 'tab-ndt') {
             if (k === 'escape') {
