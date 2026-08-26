@@ -396,7 +396,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const mobile = (typeof isMobileMapViewport === 'function' && isMobileMapViewport())
             || (typeof isNativeAndroidApp === 'function' && isNativeAndroidApp());
         const z = window.FLOOR_DRAWING_TIER_ZOOM || {};
-        const toHi = mobile ? (z.TO_HI_MOBILE || z.TO_HI || 12) : (z.TO_HI || 12);
+        const toHi = mobile ? (z.TO_HI_MOBILE || 20.0) : (z.TO_HI || 12.0);
         return zoomVsFit >= toHi ? 16000 : 8000;
     }
 
@@ -5091,7 +5091,10 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!bldg || !floorCode) return;
         const dims = [8000];
         try {
-            if (getMapZoomVsFit() >= 1.6) dims.push(16000);
+            const mobile = (typeof isMobileMapViewport === 'function' && isMobileMapViewport())
+                || (typeof isNativeAndroidApp === 'function' && isNativeAndroidApp());
+            const hiPrefetchThreshold = mobile ? 10.0 : 1.6;
+            if (getMapZoomVsFit() >= hiPrefetchThreshold) dims.push(16000);
         } catch (_) { /* zoom optional */ }
         prefetchFloorDrawingTiersForFloor(bldg, floorCode, dims);
     }
@@ -17391,6 +17394,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
                     if (elements.zoomScaleText) elements.zoomScaleText.textContent = formatMapZoomLabel();
                     drawCanvas();
+                    if (typeof updateMapZoomOverlay === 'function') updateMapZoomOverlay();
                     scheduleFloorDrawingTierSync();
                     if (shouldUseViewportTilesForCurrentFloor()) scheduleViewportHiPatchSync();
                 }
