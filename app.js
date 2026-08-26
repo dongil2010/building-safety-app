@@ -1451,7 +1451,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const rawBuildings = window.state.buildings || [];
             const rawDefects = window.state.defects || {};
 
-            // 현재 점검 중이면 접근 시각 갱신 → 오프라인 장시간 작업도 6시간 TTL에 안 걸림
+            // 현재 점검 중이면 접근 시각 갱신 → 오프라인 장시간 작업도 24시간 TTL에 안 걸림
             if (window.state.currentBuildingId && typeof touchBuildingAccess === 'function') {
                 touchBuildingAccess(window.state.currentBuildingId);
             }
@@ -26131,9 +26131,9 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     window.clearLocalFloorPdfCache = clearLocalFloorPdfCache;
 
-    /** 점검(건물) 마지막 진입 시각 — IndexedDB 대용량 자산 TTL (6시간) */
+    /** 점검(건물) 마지막 진입 시각 — IndexedDB 대용량 자산 TTL (24시간) */
     const BUILDING_ACCESS_LS_KEY = 'bsa_building_access_v1';
-    const BUILDING_ACCESS_TTL_MS = 6 * 60 * 60 * 1000;
+    const BUILDING_ACCESS_TTL_MS = 24 * 60 * 60 * 1000;
     let _idbInspectionPruneInFlight = null;
 
     function readBuildingAccessMap() {
@@ -26270,7 +26270,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     /**
-     * 6시간 이상 들어가지 않은 점검의 IndexedDB 대용량(도면 3티어·사진·PDF)만 정리.
+     * 24시간 이상 들어가지 않은 점검의 IndexedDB 대용량(도면 3티어·사진·PDF)만 정리.
      * - 오프라인이면 절대 삭제하지 않음 (현장 오프라인 점검 보호)
      * - 지금 들어가 있는 점검은 유지
      * - 저장/진입할 때마다 접근 시각이 갱신되므로 장시간 오프라인 작업도 안전
