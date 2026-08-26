@@ -334,15 +334,29 @@ document.addEventListener('DOMContentLoaded', () => {
     updateOfflineBadge();
     window.addEventListener('online', () => {
         updateOfflineBadge();
+        if (typeof updateOnlineBadge === 'function') updateOnlineBadge(true);
         window.showToast('온라인 상태로 전환되었습니다. 서버 데이터와 병합 후 동기화합니다.', 'success');
-        if (typeof syncStateToFirebase === 'function') syncStateToFirebase();
+        if (typeof reconnectFirestoreSync === 'function') reconnectFirestoreSync('online');
         if (typeof pruneStaleIndexedDbInspectionData === 'function') {
             pruneStaleIndexedDbInspectionData().catch(() => {});
         }
     });
     window.addEventListener('offline', () => {
         updateOfflineBadge();
+        if (typeof updateOnlineBadge === 'function') updateOnlineBadge(false);
         window.showToast('오프라인 상태입니다. 변경사항은 이 기기에 저장되며, 인터넷 연결 시 자동 동기화됩니다.', 'warning', 5000);
+    });
+    // 앱/탭 복귀 시에도 동기화 (비행기모드 해제 후 online 이벤트가 안 뜨는 WebView 대비)
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState !== 'visible') return;
+        if (navigator.onLine && typeof reconnectFirestoreSync === 'function') {
+            reconnectFirestoreSync('visible');
+        }
+    });
+    window.addEventListener('focus', () => {
+        if (navigator.onLine && typeof reconnectFirestoreSync === 'function') {
+            reconnectFirestoreSync('focus');
+        }
     });
 
     // --- 4. PERSISTENCE ENGINE (LOCAL STORAGE + INDEXEDDB) ---
@@ -25774,7 +25788,16 @@ document.addEventListener('DOMContentLoaded', () => {
         } catch (e) {
             console.error('Remote sync apply error:', e);
         } finally {
-            setTimeout(() => { isRemoteSyncing = false; }, 300);
+            setTimeout(() => {
+                isRemoteSyncing = false;
+                // 원격 적용 중에 막혔던 로컬 업로드 재시도
+                if (_syncPending) {
+                    _syncPending = false;
+                    if (typeof syncStateToFirebase === 'function') syncStateToFirebase();
+                } else if (typeof scheduleFlushPendingRemoteSync === 'function') {
+                    scheduleFlushPendingRemoteSync();
+                }
+            }, 300);
         }
     }
 
@@ -27001,13 +27024,45 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function scheduleSyncToFirebase() {
-        if (!db || isRemoteSyncing || !window.state.companyId || !navigator.onLine) return;
+        if (!db || !window.state.companyId || !navigator.onLine) return;
+        // 원격 적용/업로드 중이면 버리지 말고 끝나면 한 번 더 돌린다
+        if (isRemoteSyncing || _syncInFlight) {
+            _syncPending = true;
+            return;
+        }
         if (_syncDebounceTimer) clearTimeout(_syncDebounceTimer);
         _syncDebounceTimer = setTimeout(() => {
             _syncDebounceTimer = null;
             syncStateToFirebase();
         }, 400);
     }
+
+    /** 온라인 복귀·앱 포그라운드: 실시간 리스너 재구독 + 서버 기준 병합 동기화 */
+    let _reconnectSyncTimer = null;
+    let _reconnectRetryTimer = null;
+    function reconnectFirestoreSync(reason) {
+        if (!db || !window.state.companyId) return;
+        if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
+        if (typeof listenToRealtimeUpdates === 'function') {
+            listenToRealtimeUpdates();
+        }
+        if (typeof updateOnlineBadge === 'function') updateOnlineBadge(true);
+        const delay = (reason === 'online') ? 700 : 120;
+        if (_reconnectSyncTimer) clearTimeout(_reconnectSyncTimer);
+        _reconnectSyncTimer = setTimeout(() => {
+            _reconnectSyncTimer = null;
+            if (!navigator.onLine) return;
+            scheduleSyncToFirebase();
+            // 네트워크 스택이 늦게 붙는 기기: 한 번 더
+            if (_reconnectRetryTimer) clearTimeout(_reconnectRetryTimer);
+            _reconnectRetryTimer = setTimeout(() => {
+                _reconnectRetryTimer = null;
+                if (!navigator.onLine) return;
+                if (typeof syncStateToFirebase === 'function') syncStateToFirebase();
+            }, (reason === 'online') ? 2500 : 1200);
+        }, delay);
+    }
+    window.reconnectFirestoreSync = reconnectFirestoreSync;
 
     function captureBuildingDrawingAssetsById(buildings) {
         const map = {};
@@ -27234,9 +27289,21 @@ document.addEventListener('DOMContentLoaded', () => {
         return isChanged;
     }
 
+    async function fetchCompanyDocSnap(docRef) {
+        // 온라인일 때는 캐시가 아닌 서버 문서를 읽어, 다른 기기 작업을 덮어쓰지 않게 한다
+        if (typeof navigator === 'undefined' || navigator.onLine !== false) {
+            try {
+                return await docRef.get({ source: 'server' });
+            } catch (e) {
+                console.warn('서버 문서 조회 실패, 캐시/기본 조회로 재시도:', e);
+            }
+        }
+        return await docRef.get();
+    }
+
     async function syncStateToFirebase() {
-        if (!db || isRemoteSyncing || !window.state.companyId || !navigator.onLine) return;
-        if (_syncInFlight) {
+        if (!db || !window.state.companyId || !navigator.onLine) return;
+        if (isRemoteSyncing || _syncInFlight) {
             _syncPending = true;
             return;
         }
@@ -27245,7 +27312,7 @@ document.addEventListener('DOMContentLoaded', () => {
         try {
             const docId = getCompanyDocId();
             const docRef = db.collection('safety_app').doc(docId);
-            const snap = await docRef.get();
+            const snap = await fetchCompanyDocSnap(docRef);
             const serverData = snap.exists ? snap.data() : {};
 
             const mergedDeletedBuildings = mergeDeletedBuildingIds(
@@ -27346,8 +27413,22 @@ document.addEventListener('DOMContentLoaded', () => {
                     loadFloorDrawing(state.currentFloor, { preserveView: true });
                 }
             }
+            // 동기화로 받은 서버 결함·NDT 반영 UI
+            if (typeof renderDefectListPanel === 'function') renderDefectListPanel();
+            if (typeof drawCanvas === 'function') drawCanvas();
+            if (typeof drawNdtCanvas === 'function') drawNdtCanvas();
+            if (typeof renderSurveyTable === 'function') renderSurveyTable();
+            if (typeof renderDashboard === 'function') renderDashboard();
         } catch (e) {
             console.warn('Firebase Sync Error:', e);
+            // 네트워크 순간 단절: 곧 재시도
+            _syncPending = true;
+            setTimeout(() => {
+                if (navigator.onLine && _syncPending) {
+                    _syncPending = false;
+                    syncStateToFirebase();
+                }
+            }, 2000);
         } finally {
             setTimeout(() => { isRemoteSyncing = false; }, 400);
             _syncInFlight = false;
@@ -27361,14 +27442,18 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     let currentUnsubscribe = null;
+    let _listenerNeedsResubscribe = false;
 
     function listenToRealtimeUpdates() {
         if (!db || !window.state.companyId) return;
         if (currentUnsubscribe) {
             try { currentUnsubscribe(); } catch(e) {}
+            currentUnsubscribe = null;
         }
         const docId = getCompanyDocId();
+        _listenerNeedsResubscribe = false;
         currentUnsubscribe = db.collection('safety_app').doc(docId).onSnapshot(async (doc) => {
+            if (typeof updateOnlineBadge === 'function') updateOnlineBadge(true);
             if (doc && doc.exists) {
                 const data = doc.data();
                 if (!data) return;
@@ -27384,7 +27469,16 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         }, (err) => {
             console.warn('Realtime listener warning:', err);
-            updateOnlineBadge(false);
+            _listenerNeedsResubscribe = true;
+            if (typeof updateOnlineBadge === 'function') updateOnlineBadge(false);
+            // 끊긴 리스너는 온라인 복귀 시 reconnectFirestoreSync가 다시 붙인다
+            if (navigator.onLine) {
+                setTimeout(() => {
+                    if (_listenerNeedsResubscribe && typeof reconnectFirestoreSync === 'function') {
+                        reconnectFirestoreSync('listener-error');
+                    }
+                }, 1500);
+            }
         });
     }
 
