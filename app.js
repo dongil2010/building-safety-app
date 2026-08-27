@@ -264,6 +264,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function resetDefectPinPresetsToDefaults() {
+        // 로그아웃 시 메모리만 비움 — 실제 “앱 기본 세팅” 복원은 resetOptionManagerAll / applyBuiltInDefectPinDefaults
         window.state.customDefectTypes = { '구조체': [], '비구조체': [], '마감재': [] };
         window.state.customDefectCauses = {};
         window.state.customDefectComponents = { '구조체': [], '비구조체': [], '마감재': [] };
@@ -15572,26 +15573,32 @@ document.addEventListener('DOMContentLoaded', () => {
         const ctx = getOptionManagerContext();
         if (!ctx) return;
 
-        const ok = confirm('현재 항목(부재/유형/원인) 목록을 기본값으로 완전히 되돌릴까요? (숨김 해제 + 커스텀 삭제)');
+        const ok = confirm('현재 항목을 앱 기본 세팅으로 되돌릴까요?\n(숨긴 항목 복원 · 직접 추가한 항목 삭제 · 순서는 기본 순서)');
         if (!ok) return;
 
-        // 숨김/커스텀/정렬 목록을 “싹” 비운다 (기존 선택값이 커스텀이었던 경우 재주입 방지 목적)
         if (Array.isArray(ctx.hiddenList)) ctx.hiddenList.length = 0;
         if (Array.isArray(ctx.customList)) ctx.customList.length = 0;
-        if (Array.isArray(ctx.orderList)) ctx.orderList.length = 0;
+        if (Array.isArray(ctx.orderList)) {
+            ctx.orderList.length = 0;
+            (ctx.presetList || []).forEach((t) => ctx.orderList.push(t));
+        }
         saveStateToLocalStorage();
+        _lastSyncedUserDefectPinJson = '';
+        scheduleSyncUserDefectPinPresets();
 
-        // UI 기본값으로 복원(첫 프리셋 선택)
         if (field === 'component') {
             const cat = document.getElementById('defectCategory')?.value || '구조체';
             const defComp = (DEFECT_COMPONENT_PRESET[cat] || DEFECT_COMPONENT_PRESET['구조체'])[0] || '';
             populateDefectComponentDropdown(cat, defComp);
         } else if (field === 'type') {
             const cat = document.getElementById('defectCategory')?.value || '구조체';
-            const presetList = categoryDefectPreset[cat] || categoryDefectPreset['구조체'] || [];
+            const component = getDefectComboValue(
+                document.getElementById('defectComponent'),
+                document.getElementById('defectComponentInput')
+            );
+            const presetList = getDefectTypePresetFor(cat, component) || categoryDefectPreset[cat] || [];
             const defType = presetList.find(t => t !== '상태양호') || presetList[0] || '';
             updateDefectTypeDropdown(cat, defType);
-            // 원인도 함께 첫 프리셋으로 초기화
             if (defType) {
                 const causeKey = getCauseKey(defType);
                 const defCause = (defectCausePreset[causeKey] || [])[0] || '';
@@ -15610,36 +15617,51 @@ document.addEventListener('DOMContentLoaded', () => {
         renderOptionManagerList();
         if (typeof ctx.refresh === 'function') ctx.refresh();
         if (typeof refreshDefectQuickPickBar === 'function') refreshDefectQuickPickBar();
+        window.showToast('앱 기본 세팅으로 복원했습니다.', 'success', 2800);
     }
 
-    function resetOptionManagerAll() {
-        const ok = confirm('부재/결함유형/발생원인 “전체”를 기본값으로 완전히 되돌릴까요? (숨김 해제 + 커스텀 전부 삭제)');
-        if (!ok) return;
-
-        // component
+    /** 코드에 정의된 부재·결함종류·원인 프리셋 = 앱 기본 세팅 */
+    function applyBuiltInDefectPinDefaults() {
         migrateDefectComponentStateShape();
         window.state.hiddenDefectComponents = { '구조체': [], '비구조체': [], '마감재': [] };
         window.state.customDefectComponents = { '구조체': [], '비구조체': [], '마감재': [] };
-        window.state.defectComponentOrder = { '구조체': [], '비구조체': [], '마감재': [] };
+        window.state.defectComponentOrder = {
+            '구조체': (DEFECT_COMPONENT_PRESET['구조체'] || []).slice(),
+            '비구조체': (DEFECT_COMPONENT_PRESET['비구조체'] || []).slice(),
+            '마감재': (DEFECT_COMPONENT_PRESET['마감재'] || []).slice()
+        };
 
-        // type
         window.state.hiddenDefectTypes = { '구조체': [], '비구조체': [], '마감재': [] };
         window.state.customDefectTypes = { '구조체': [], '비구조체': [], '마감재': [] };
-        window.state.defectTypeOrder = { '구조체': [], '비구조체': [], '마감재': [] };
+        window.state.defectTypeOrder = {
+            '구조체': (categoryDefectPreset['구조체'] || []).slice(),
+            '비구조체': (categoryDefectPreset['비구조체'] || []).slice(),
+            '마감재': (categoryDefectPreset['마감재'] || []).slice()
+        };
 
-        // cause (keyed by defectType->causeKey)
         window.state.hiddenDefectCauses = {};
         window.state.customDefectCauses = {};
         window.state.defectCauseOrder = {};
+    }
 
+    function resetOptionManagerAll() {
+        const ok = confirm('부재·결함종류·발생원인 전체를 앱 기본 세팅으로 되돌릴까요?\n(숨긴 항목 복원 · 직접 추가 전부 삭제 · 순서는 기본 순서)');
+        if (!ok) return;
+
+        applyBuiltInDefectPinDefaults();
         saveStateToLocalStorage();
+        _lastSyncedUserDefectPinJson = '';
+        scheduleSyncUserDefectPinPresets();
 
-        // 현재 선택된 카테고리 기준으로 UI 기본값 1개씩 다시 세팅
         const cat = document.getElementById('defectCategory')?.value || '구조체';
         const defComp = (DEFECT_COMPONENT_PRESET[cat] || DEFECT_COMPONENT_PRESET['구조체'])[0] || '';
         populateDefectComponentDropdown(cat, defComp);
 
-        const presetList = categoryDefectPreset[cat] || categoryDefectPreset['구조체'] || [];
+        const component = getDefectComboValue(
+            document.getElementById('defectComponent'),
+            document.getElementById('defectComponentInput')
+        ) || defComp;
+        const presetList = getDefectTypePresetFor(cat, component) || categoryDefectPreset[cat] || [];
         const defType = presetList.find(t => t !== '상태양호') || presetList[0] || '';
         updateDefectTypeDropdown(cat, defType);
 
@@ -15653,6 +15675,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const ctx = getOptionManagerContext();
         if (ctx && typeof ctx.refresh === 'function') ctx.refresh();
         if (typeof refreshDefectQuickPickBar === 'function') refreshDefectQuickPickBar();
+        window.showToast('앱 기본 세팅으로 복원했습니다.', 'success', 2800);
     }
 
     window.openOptionManagerModal = function(fieldType) {
