@@ -3552,21 +3552,36 @@ document.addEventListener('DOMContentLoaded', () => {
             }
 
             const multiDong = isSiteMultiDong(selectedSiteKey);
-            grid.innerHTML = dongs.map((bldg) => {
-                const floorCount = (bldg.floorsList && bldg.floorsList.length > 0)
-                    ? `📐 도면 ${bldg.floorsList.length}개 층`
-                    : '📐 도면 미등록';
-                const typeLabel = bldg.inspectionType || '점검';
-                const title = multiDong
-                    ? `<i class="fa-solid fa-door-open flag-icon-muted"></i> ${escapeHtml(formatDongRowLabel(bldg))}`
-                    : `<i class="fa-solid fa-building flag-icon-muted"></i> ${escapeHtml(getBuildingSiteName(bldg))}`;
-                return renderBuildingActionRow(
-                    bldg,
-                    title,
-                    `${escapeHtml(typeLabel)} · ${escapeHtml(bldg.address || '주소 미등록')} · ${floorCount}`,
-                    multiDong ? 'building-row-dong' : 'building-row-dong building-row-single'
-                );
-            }).join('');
+            if (multiDong) {
+                // 동 선택: 행 클릭 = 바로 점검 (수정은 현장 목록「수정」)
+                grid.innerHTML = dongs.map((bldg) => {
+                    const safeId = escapeHtml(bldg.id);
+                    const floorCount = (bldg.floorsList && bldg.floorsList.length > 0)
+                        ? `도면 ${bldg.floorsList.length}개 층`
+                        : '도면 미등록';
+                    return `
+                        <div class="building-row building-row-dong" data-id="${safeId}">
+                            <div class="building-row-info" data-action="inspect" data-bldg-id="${safeId}">
+                                <span class="building-row-name"><i class="fa-solid fa-door-open flag-icon-muted"></i> ${escapeHtml(formatDongRowLabel(bldg))}</span>
+                                <span class="building-row-meta">${escapeHtml(bldg.inspectionType || '점검')} · ${escapeHtml(floorCount)}</span>
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+            } else {
+                grid.innerHTML = dongs.map((bldg) => {
+                    const floorCount = (bldg.floorsList && bldg.floorsList.length > 0)
+                        ? `📐 도면 ${bldg.floorsList.length}개 층`
+                        : '📐 도면 미등록';
+                    const typeLabel = bldg.inspectionType || '점검';
+                    return renderBuildingActionRow(
+                        bldg,
+                        `<i class="fa-solid fa-building flag-icon-muted"></i> ${escapeHtml(getBuildingSiteName(bldg))}`,
+                        `${escapeHtml(typeLabel)} · ${escapeHtml(bldg.address || '주소 미등록')} · ${floorCount}`,
+                        'building-row-dong building-row-single'
+                    );
+                }).join('');
+            }
             bindBuildingRowActions();
             if (typeof window.updateHomeFabForDashboardMode === 'function') window.updateHomeFabForDashboardMode();
             return;
@@ -3724,9 +3739,20 @@ document.addEventListener('DOMContentLoaded', () => {
 
     window.openDashboardRoundDongs = function(siteKey, roundKey) {
         if (!siteKey || !roundKey) return;
-        // 회차 → 점검/수정/도면 버튼이 있는 화면으로 진입 (단일 건물도 바로 점검 점프하지 않음)
         window.state.dashboardSiteKey = siteKey;
         window.state.dashboardRoundKey = roundKey;
+        // 단일 건물: 회차 클릭 = 바로 점검. 여러 동: 동 선택 화면.
+        if (!isSiteMultiDong(siteKey)) {
+            const active = filterActiveBuildings(window.state.buildings || [], window.state.deletedBuildingIds);
+            const bldg = active.find((b) =>
+                getBuildingSiteName(b) === siteKey
+                && getBuildingSurveyRoundKey(b) === roundKey
+            );
+            if (bldg) {
+                window.selectBuildingAndInspect(bldg.id);
+                return;
+            }
+        }
         window.renderDashboard();
     };
 
@@ -13781,47 +13807,86 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // 손상 유형·분류 필터가 적용된 현재 층 결함 중, 도면에 실제로 그릴 항목만 반환
-    // 조사항목 창 OFF + 선택 있음 → 목록에서 하이라이트하던 그 항목(그룹 포함)만 표시
-    function collectSoloDrawDefectIds() {
-        const sel = (typeof window.getSelectedDefectIds === 'function')
-            ? window.getSelectedDefectIds()
-            : null;
-        if (!sel || sel.size === 0) return null;
-        const ids = new Set();
-        sel.forEach((id) => { if (id) ids.add(id); });
-        const all = getCurrentFloorDefects() || [];
-        const groupIds = new Set();
-        all.forEach((d) => {
-            if (d && d.id && ids.has(d.id) && d.groupId) groupIds.add(d.groupId);
-        });
-        if (groupIds.size) {
-            all.forEach((d) => {
-                if (d && d.id && d.groupId && groupIds.has(d.groupId)) ids.add(d.id);
-            });
-        }
-        return ids;
-    }
-
-    function getCurrentFloorMapPlacedDefects(opts) {
-        opts = opts || {};
-        let list = filterMapPlacedDefects(getCurrentFloorFilteredDefects());
-        const forDraw = opts.forDraw !== false;
-        if (forDraw && !isMapDefectListOpen()) {
-            const soloIds = collectSoloDrawDefectIds();
-            if (soloIds && soloIds.size > 0) {
-                list = list.filter((d) => d && d.id && soloIds.has(d.id));
-            }
-        }
-        return list;
-    }
-
-    /** 목록 창이 켜져 있을 때만 선택 테두리(하이라이트) 표시. 창 OFF면 해당 마킹만 단독 표시 */
-    function shouldDrawMapSelectionChrome() {
-        return isMapDefectListOpen();
+    function getCurrentFloorMapPlacedDefects() {
+        return filterMapPlacedDefects(getCurrentFloorFilteredDefects());
     }
 
     function isMapDefectListOpen() {
         return window.state.mapDefectListOpen !== false;
+    }
+
+    /** 목록 ON: 기존처럼 선택 테두리. 목록 OFF: 좌상단 팝업으로 내용 표시 */
+    function shouldDrawMapSelectionChrome() {
+        return isMapDefectListOpen();
+    }
+
+    function getSelectedDefectForPopup() {
+        const sel = (typeof window.getSelectedDefectIds === 'function')
+            ? window.getSelectedDefectIds()
+            : null;
+        if (!sel || sel.size === 0) return null;
+        const consolidated = consolidateDefectGroups(getCurrentFloorDefects() || []);
+        const hit = consolidated.find((d) => {
+            if (!d) return false;
+            if (d.id && sel.has(d.id)) return true;
+            if (d._groupMemberIds && d._groupMemberIds.some((id) => sel.has(id))) return true;
+            return false;
+        });
+        if (hit) return hit;
+        return (getCurrentFloorDefects() || []).find((d) => d && d.id && sel.has(d.id)) || null;
+    }
+
+    function updateMapSelectedDefectPopup() {
+        const popup = document.getElementById('mapSelectedDefectPopup');
+        if (!popup) return;
+        const show = !isMapDefectListOpen();
+        const d = show ? getSelectedDefectForPopup() : null;
+        if (!d) {
+            popup.hidden = true;
+            popup.innerHTML = '';
+            return;
+        }
+        const numMatch = (d.no || '').match(/\d+/);
+        const badgeNo = numMatch ? numMatch[0] : '?';
+        const shapeIcon = d.shapeType === 'area' ? '🟧 ' : '';
+        const isGood = d.defectType === '상태양호';
+        const measureText = typeof formatDefectListMeasure === 'function' ? formatDefectListMeasure(d) : '';
+        const sizeFallback = String(d.size || '').trim();
+        const measureDisplay = measureText
+            || ((sizeFallback && sizeFallback !== '-') ? sizeFallback : '');
+        const catClass = d.category === '비구조체' ? 'cat-nonstructural'
+            : (d.category === '마감재' ? 'cat-finishing' : '');
+        let measureHtml = '';
+        if (!isGood && measureDisplay) {
+            measureHtml = '<span class="map-sel-popup-measure">'
+                + escapeHtml(measureDisplay).replace(/\n/g, '<br>')
+                + '</span>';
+        }
+        const comp = (shapeIcon + (d.component || '')).trim();
+        popup.className = ('map-selected-defect-popup ' + catClass).trim();
+        popup.innerHTML =
+            '<span class="map-sel-popup-badge">' + escapeHtml(badgeNo) + '</span>' +
+            '<div class="map-sel-popup-lines">' +
+            '<span class="map-sel-popup-comp">' + escapeHtml(comp) + '</span>' +
+            '<span class="map-sel-popup-type">' + escapeHtml(d.defectType || '') + '</span>' +
+            measureHtml +
+            '</div>' +
+            '<button type="button" class="map-sel-popup-edit" title="결함 수정"><i class="fa-solid fa-pen"></i></button>';
+        popup.hidden = false;
+        const editBtn = popup.querySelector('.map-sel-popup-edit');
+        const openDetail = () => {
+            const rep = d._representative || d;
+            if (typeof openAddDefectModal === 'function') {
+                openAddDefectModal(rep.x, rep.y, rep.targetX, rep.targetY, rep, null, { revealMarkingAboveDrawer: true });
+            }
+        };
+        if (editBtn) {
+            editBtn.onclick = (e) => { e.stopPropagation(); openDetail(); };
+        }
+        popup.onclick = (e) => {
+            if (editBtn && editBtn.contains(e.target)) return;
+            openDetail();
+        };
     }
 
     function applyMapDefectListChrome() {
@@ -13836,11 +13901,12 @@ document.addEventListener('DOMContentLoaded', () => {
             const stateEl = btn.querySelector('.toolbar-toggle-state');
             if (stateEl) stateEl.textContent = open ? 'ON' : 'OFF';
             btn.title = open
-                ? '좌측 조사항목 창 끄기 (끄면 선택 마킹만 도면에 표시)'
-                : '좌측 조사항목 창 켜기 (켜면 전체 마킹·기존 하이라이트)';
+                ? '좌측 조사항목 창 끄기 (끄면 선택 결함을 도면 좌상단 팝업으로 표시)'
+                : '좌측 조사항목 창 켜기';
         };
         syncBtn(document.getElementById('btnToggleDefectList'));
         syncBtn(document.getElementById('mobileBtnToggleDefectList'));
+        if (typeof updateMapSelectedDefectPopup === 'function') updateMapSelectedDefectPopup();
     }
 
     window.setMapDefectListOpen = function(open) {
@@ -13850,17 +13916,9 @@ document.addEventListener('DOMContentLoaded', () => {
         } catch (_e) { /* ignore */ }
         applyMapDefectListChrome();
         if (typeof resizeCanvas === 'function') resizeCanvas();
-        // 끄면 현재 선택된(하이라이트) 마킹만 남기고, 켜면 전체+하이라이트로 복귀
         if (typeof drawCanvas === 'function') drawCanvas();
         if (typeof renderDefectListPanel === 'function') renderDefectListPanel();
-        if (!open) {
-            const n = (typeof window.getSelectedDefectIds === 'function' && window.getSelectedDefectIds())
-                ? window.getSelectedDefectIds().size
-                : 0;
-            if (n > 0) {
-                window.showToast('선택 마킹만 표시 중 · 빈 곳 탭하면 전체 다시 표시', 'info', 2800);
-            }
-        }
+        if (typeof updateMapSelectedDefectPopup === 'function') updateMapSelectedDefectPopup();
     };
 
     window.toggleMapDefectList = function() {
@@ -14581,7 +14639,6 @@ document.addEventListener('DOMContentLoaded', () => {
                     }
                     if (typeof updateMapSelectionBar === 'function') updateMapSelectionBar({ scrollToSelection: false });
                     else if (typeof renderDefectListPanel === 'function') renderDefectListPanel();
-                    if (!isMapDefectListOpen() && typeof drawCanvas === 'function') drawCanvas();
                 }
             }
             // 결함표에서 고를 때만 상단 1/4로 맞춤 (도면 클릭은 그 위치 유지)
@@ -18891,8 +18948,8 @@ document.addEventListener('DOMContentLoaded', () => {
             renderDefectListPanel({ scrollToSelection: options.scrollToSelection === true });
         }
         if (typeof syncAreaToolPanelUi === 'function') syncAreaToolPanelUi();
-        // 조사항목 창 OFF 시 선택 변경 = 도면에 보이는 마킹이 바뀌므로 즉시 다시 그림
-        if (!isMapDefectListOpen() && typeof drawCanvas === 'function') drawCanvas();
+        // 조사항목 창 OFF: 좌상단 팝업으로 선택 결함 내용·폭 표시
+        if (typeof updateMapSelectedDefectPopup === 'function') updateMapSelectedDefectPopup();
     }
 
     // 상태조사표 → 결함위치도: 해당 마킹 선택·화면 이동
@@ -19012,7 +19069,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 return { label, scale, defect: pendingDefect };
             }
         }
-        const currentDefects = getCurrentFloorMapPlacedDefects({ forDraw: false });
+        const currentDefects = getCurrentFloorMapPlacedDefects();
         const nextSeq = currentDefects.length + 1;
         const nextSeqStr = nextSeq < 10 ? `0${nextSeq}` : `${nextSeq}`;
         const label = `NO.${nextSeqStr}`;
