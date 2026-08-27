@@ -14102,6 +14102,10 @@ document.addEventListener('DOMContentLoaded', () => {
         const { cx, cy } = getAreaAabb(defect);
         const old = getAreaAngleDeg(defect);
         const delta = newAngleDeg - old;
+        if (!delta) {
+            if (getAreaShape(defect) !== 'polygon') defect.areaAngle = newAngleDeg;
+            return;
+        }
         const rot = (p) => rotateImgPoint(p.x, p.y, cx, cy, delta);
         if (getAreaShape(defect) === 'polygon' && Array.isArray(defect.areaPoints)) {
             defect.areaPoints = defect.areaPoints.map((p) => rot(p));
@@ -14118,6 +14122,82 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!st.points) return;
             st.points = st.points.map((p) => rot(p));
         });
+    }
+
+    /** 회전 드래그: 시작 스냅샷 기준으로 누적 각만 적용 (다각형 AABB 중심 드리프트 방지) */
+    function beginAreaRotateSession(defect, imgX, imgY) {
+        if (!defect) return;
+        const { cx, cy } = getAreaAabb(defect);
+        areaRotatePivot = { cx, cy };
+        areaRotateStartMouse = Math.atan2(imgY - cy, imgX - cx);
+        areaRotateBaseAngle = getAreaAngleDeg(defect);
+        areaRotateSnapshot = {
+            areaX1: defect.areaX1,
+            areaY1: defect.areaY1,
+            areaX2: defect.areaX2,
+            areaY2: defect.areaY2,
+            areaAngle: defect.areaAngle,
+            areaPoints: Array.isArray(defect.areaPoints)
+                ? defect.areaPoints.map((p) => ({ x: Number(p.x), y: Number(p.y) }))
+                : null,
+            areaDrawings: Array.isArray(defect.areaDrawings)
+                ? defect.areaDrawings.map((st) => ({
+                    type: st.type,
+                    points: (st.points || []).map((p) => ({ x: Number(p.x), y: Number(p.y) }))
+                }))
+                : [],
+            targetX: defect.targetX,
+            targetY: defect.targetY
+        };
+    }
+
+    function applyAreaRotateSession(defect, imgX, imgY) {
+        if (!defect || !areaRotatePivot || !areaRotateSnapshot) return;
+        const mouse = Math.atan2(imgY - areaRotatePivot.cy, imgX - areaRotatePivot.cx);
+        let deltaDeg = ((mouse - areaRotateStartMouse) * 180) / Math.PI;
+        // -180~180 래핑 (드래그 중 점프 방지)
+        while (deltaDeg > 180) deltaDeg -= 360;
+        while (deltaDeg < -180) deltaDeg += 360;
+        const { cx, cy } = areaRotatePivot;
+        const rot = (p) => rotateImgPoint(p.x, p.y, cx, cy, deltaDeg);
+
+        if (getAreaShape(defect) === 'polygon' && areaRotateSnapshot.areaPoints) {
+            defect.areaPoints = areaRotateSnapshot.areaPoints.map((p) => rot(p));
+            syncAreaBboxFromPoints(defect);
+            defect.areaAngle = 0;
+        } else {
+            defect.areaX1 = areaRotateSnapshot.areaX1;
+            defect.areaY1 = areaRotateSnapshot.areaY1;
+            defect.areaX2 = areaRotateSnapshot.areaX2;
+            defect.areaY2 = areaRotateSnapshot.areaY2;
+            defect.areaAngle = areaRotateBaseAngle + deltaDeg;
+        }
+
+        defect.areaDrawings = (areaRotateSnapshot.areaDrawings || []).map((st) => ({
+            type: st.type,
+            points: (st.points || []).map((p) => rot(p))
+        }));
+
+        if (typeof areaRotateSnapshot.targetX === 'number' && typeof areaRotateSnapshot.targetY === 'number') {
+            const t = rot({ x: areaRotateSnapshot.targetX, y: areaRotateSnapshot.targetY });
+            defect.targetX = t.x;
+            defect.targetY = t.y;
+        }
+    }
+
+    function endAreaRotateSession() {
+        areaRotatePivot = null;
+        areaRotateSnapshot = null;
+        areaRotateStartMouse = 0;
+        areaRotateBaseAngle = 0;
+    }
+
+    function applyAreaVertexMove(defect, vertexIndex, imgX, imgY) {
+        if (!defect || !Array.isArray(defect.areaPoints)) return;
+        const i = Number(vertexIndex);
+        if (!Number.isInteger(i) || i < 0 || i >= defect.areaPoints.length) return;
+        defect.areaPoints[i] = { x: imgX, y: imgY };
+        syncAreaBboxFromPoints(defect);
     }
 
     /** 영역 리사이즈. 반대편을 넘기면 잡은 핸들이 반대 점으로 넘어감. 반환: 다음 프레임용 필드 */
@@ -14315,7 +14395,10 @@ document.addEventListener('DOMContentLoaded', () => {
             ctx.fillStyle = '#1e293b';
             ctx.strokeStyle = '#f8fafc';
             ctx.lineWidth = 1.4;
-            getAreaWorldCorners(defect).forEach((c) => {
+            const handlePts = (getAreaShape(defect) === 'polygon')
+                ? getAreaPolyPoints(defect)
+                : getAreaWorldCorners(defect);
+            handlePts.forEach((c) => {
                 ctx.beginPath();
                 ctx.arc(c.x, c.y, 5, 0, Math.PI * 2);
                 ctx.fill();
@@ -17815,7 +17898,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let groupDragLastImgX = 0;
     let groupDragLastImgY = 0;
     let activeDragPin = null;
-    let activeDragPart = 'BOX'; // 'BOX', 'TIP', 'AREA_MOVE', or 'AREA_RESIZE'
+    let activeDragPart = 'BOX'; // BOX | TIP | AREA_MOVE | AREA_RESIZE | AREA_ROTATE | AREA_VERTEX
     let activeResizeXField = null; // 'areaX1' | 'areaX2' | null
     let activeResizeYField = null; // 'areaY1' | 'areaY2' | null
     // 박스/팁 드래그: 클릭 지점 → 중심 오프셋 (순간 중앙 스냅 방지)
@@ -17933,7 +18016,12 @@ document.addEventListener('DOMContentLoaded', () => {
     let isAreaInkDrag = false;
     let areaInkStroke = null;
     let pendingInkPoly = null; // 내부 다각형 그리기 점들
-    let areaRotateStartAngle = 0;
+    let areaRotateStartAngle = 0; // legacy
+    let areaRotatePivot = null;
+    let areaRotateStartMouse = 0;
+    let areaRotateBaseAngle = 0;
+    let areaRotateSnapshot = null;
+    let activeVertexIndex = -1;
 
     // 선택 모드: 좌클릭 드래그로 마퀴 선택 (휠클릭은 도면 이동)
     // Ctrl/Meta + 마퀴 = 기존 선택에 추가(여러 번 가능)
@@ -18228,26 +18316,43 @@ document.addEventListener('DOMContentLoaded', () => {
                     return { defect: d, part: 'AREA_ROTATE' };
                 }
 
-                const cornerR = 14;
-                const hw = aabb.w / 2;
-                const hh = aabb.h / 2;
-                const cornerDefs = [
-                    { lx: -hw, ly: -hh, xField: minXField, yField: minYField },
-                    { lx: hw, ly: -hh, xField: maxXField, yField: minYField },
-                    { lx: -hw, ly: hh, xField: minXField, yField: maxYField },
-                    { lx: hw, ly: hh, xField: maxXField, yField: maxYField }
-                ];
-                for (let ci = 0; ci < cornerDefs.length; ci++) {
-                    const cdef = cornerDefs[ci];
-                    const c = areaLocalToImg(d, cdef.lx, cdef.ly);
-                    if (Math.hypot(imgX - c.x, imgY - c.y) <= cornerR) {
-                        return { defect: d, part: 'AREA_RESIZE', resizeXField: cdef.xField, resizeYField: cdef.yField };
+                // 다각형: 꼭짓점 핸들 (AABB 모서리 리사이즈 대신)
+                if (getAreaShape(d) === 'polygon') {
+                    const pts = getAreaPolyPoints(d);
+                    const vertR = 14;
+                    for (let vi = 0; vi < pts.length; vi++) {
+                        if (Math.hypot(imgX - pts[vi].x, imgY - pts[vi].y) <= vertR) {
+                            return { defect: d, part: 'AREA_VERTEX', vertexIndex: vi };
+                        }
                     }
-                }
+                    const edgeTol = 10;
+                    for (let ei = 0; ei < pts.length; ei++) {
+                        const a = pts[ei];
+                        const b = pts[(ei + 1) % pts.length];
+                        if (distPointToSegment(imgX, imgY, a.x, a.y, b.x, b.y) <= edgeTol) {
+                            return { defect: d, part: 'AREA_MOVE' };
+                        }
+                    }
+                } else {
+                    const cornerR = 14;
+                    const hw = aabb.w / 2;
+                    const hh = aabb.h / 2;
+                    const cornerDefs = [
+                        { lx: -hw, ly: -hh, xField: minXField, yField: minYField },
+                        { lx: hw, ly: -hh, xField: maxXField, yField: minYField },
+                        { lx: -hw, ly: hh, xField: minXField, yField: maxYField },
+                        { lx: hw, ly: hh, xField: maxXField, yField: maxYField }
+                    ];
+                    for (let ci = 0; ci < cornerDefs.length; ci++) {
+                        const cdef = cornerDefs[ci];
+                        const c = areaLocalToImg(d, cdef.lx, cdef.ly);
+                        if (Math.hypot(imgX - c.x, imgY - c.y) <= cornerR) {
+                            return { defect: d, part: 'AREA_RESIZE', resizeXField: cdef.xField, resizeYField: cdef.yField };
+                        }
+                    }
 
-                const edgeTol = 10;
-                const loc = areaImgToLocal(d, imgX, imgY);
-                if (getAreaShape(d) !== 'polygon') {
+                    const edgeTol = 10;
+                    const loc = areaImgToLocal(d, imgX, imgY);
                     if (Math.abs(loc.y + hh) <= edgeTol && loc.x >= -hw + cornerR && loc.x <= hw - cornerR) {
                         return { defect: d, part: 'AREA_RESIZE', resizeXField: null, resizeYField: minYField };
                     }
@@ -18259,15 +18364,6 @@ document.addEventListener('DOMContentLoaded', () => {
                     }
                     if (Math.abs(loc.x - hw) <= edgeTol && loc.y >= -hh + cornerR && loc.y <= hh - cornerR) {
                         return { defect: d, part: 'AREA_RESIZE', resizeXField: maxXField, resizeYField: null };
-                    }
-                } else {
-                    const pts = getAreaPolyPoints(d);
-                    for (let ei = 0; ei < pts.length; ei++) {
-                        const a = pts[ei];
-                        const b = pts[(ei + 1) % pts.length];
-                        if (distPointToSegment(imgX, imgY, a.x, a.y, b.x, b.y) <= edgeTol) {
-                            return { defect: d, part: 'AREA_MOVE' };
-                        }
                     }
                 }
 
@@ -18333,6 +18429,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (rx && !ry) return 'ew-resize';
             return 'nwse-resize';
         }
+        if (hit.part === 'AREA_VERTEX') return 'move';
         if (hit.part === 'AREA_ROTATE') return 'grab';
         // BOX / TIP / AREA_MOVE — 드래그로 위치 이동
         return 'move';
@@ -18744,7 +18841,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     && selectedDefectIds.size > 1
                     && selectedDefectIds.has(hitDefect.id)
                     && hitPart !== 'AREA_RESIZE'
-                    && hitPart !== 'AREA_ROTATE';
+                    && hitPart !== 'AREA_ROTATE'
+                    && hitPart !== 'AREA_VERTEX';
                 const grabX = pendingDragHit.imgX;
                 const grabY = pendingDragHit.imgY;
                 clearPendingDragLongPress();
@@ -18766,6 +18864,9 @@ document.addEventListener('DOMContentLoaded', () => {
                     activeDragPart = hitPart;
                     activeResizeXField = pendingDragHit.hitInfo.resizeXField || null;
                     activeResizeYField = pendingDragHit.hitInfo.resizeYField || null;
+                    activeVertexIndex = (hitPart === 'AREA_VERTEX' && Number.isInteger(pendingDragHit.hitInfo.vertexIndex))
+                        ? pendingDragHit.hitInfo.vertexIndex
+                        : -1;
                     if (hitPart === 'TIP') {
                         pinDragOffsetX = grabX - (hitDefect.targetX !== undefined ? hitDefect.targetX : hitDefect.x);
                         pinDragOffsetY = grabY - (hitDefect.targetY !== undefined ? hitDefect.targetY : hitDefect.y);
@@ -18779,6 +18880,9 @@ document.addEventListener('DOMContentLoaded', () => {
                     if (activeDragPart === 'AREA_MOVE') {
                         areaMoveLastImgX = grabX;
                         areaMoveLastImgY = grabY;
+                    }
+                    if (activeDragPart === 'AREA_ROTATE') {
+                        beginAreaRotateSession(hitDefect, grabX, grabY);
                     }
                     pendingDragHit = null;
                     if (elements.planCanvas) {
@@ -18838,9 +18942,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 areaMoveLastImgX = currentImgX;
                 areaMoveLastImgY = currentImgY;
             } else if (activeDragPart === 'AREA_ROTATE') {
-                const { cx, cy } = getAreaAabb(activeDragPin);
-                const ang = (Math.atan2(currentImgY - cy, currentImgX - cx) * 180) / Math.PI + 90;
-                rotateAreaDefect(activeDragPin, ang);
+                applyAreaRotateSession(activeDragPin, currentImgX, currentImgY);
                 if (typeof activeDragPin.x === 'number' && typeof activeDragPin.y === 'number') {
                     const attachLive = getAreaCenterBorderAttachDefect(activeDragPin.x, activeDragPin.y, activeDragPin);
                     activeDragPin.targetX = attachLive.x;
@@ -18849,7 +18951,22 @@ document.addEventListener('DOMContentLoaded', () => {
                 const angElLive = document.getElementById('defectAreaAngle');
                 const pinIdLive = document.getElementById('defectPinId')?.value;
                 if (angElLive && pinIdLive && String(pinIdLive) === String(activeDragPin.id)) {
-                    angElLive.value = String(Math.round(getAreaAngleDeg(activeDragPin)));
+                    let shown = Math.round(getAreaAngleDeg(activeDragPin));
+                    if (getAreaShape(activeDragPin) === 'polygon' && areaRotatePivot) {
+                        const mouse = Math.atan2(currentImgY - areaRotatePivot.cy, currentImgX - areaRotatePivot.cx);
+                        let d = ((mouse - areaRotateStartMouse) * 180) / Math.PI;
+                        while (d > 180) d -= 360;
+                        while (d < -180) d += 360;
+                        shown = Math.round(d);
+                    }
+                    angElLive.value = String(shown);
+                }
+            } else if (activeDragPart === 'AREA_VERTEX') {
+                applyAreaVertexMove(activeDragPin, activeVertexIndex, currentImgX, currentImgY);
+                if (typeof activeDragPin.x === 'number' && typeof activeDragPin.y === 'number') {
+                    const attachLive = getAreaCenterBorderAttachDefect(activeDragPin.x, activeDragPin.y, activeDragPin);
+                    activeDragPin.targetX = attachLive.x;
+                    activeDragPin.targetY = attachLive.y;
                 }
             } else if (activeDragPart === 'AREA_RESIZE') {
                 const nextFields = applyAreaResizeLocal(
@@ -19008,6 +19125,8 @@ document.addEventListener('DOMContentLoaded', () => {
             activeDragPin = null;
             activeResizeXField = null;
             activeResizeYField = null;
+            activeVertexIndex = -1;
+            endAreaRotateSession();
             saveStateToLocalStorage();
             hadPinDragSave = true;
             updateMapSelectionBar();
@@ -21316,13 +21435,16 @@ document.addEventListener('DOMContentLoaded', () => {
         if (window.state.currentTab !== 'tab-map') return;
         if (k === 'escape') {
             e.preventDefault();
+            // 다각형 그리는 중: 전체 삭제가 아니라 마지막 점만 취소
             if (pendingAreaPoly && pendingAreaPoly.length) {
-                pendingAreaPoly = null;
+                pendingAreaPoly.pop();
+                if (!pendingAreaPoly.length) pendingAreaPoly = null;
                 drawCanvas();
                 return;
             }
-            if (pendingInkPoly) {
-                pendingInkPoly = null;
+            if (pendingInkPoly && pendingInkPoly.points && pendingInkPoly.points.length) {
+                pendingInkPoly.points.pop();
+                if (!pendingInkPoly.points.length) pendingInkPoly = null;
                 drawCanvas();
                 return;
             }
