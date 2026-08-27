@@ -8275,9 +8275,10 @@ body.auth-gate-active #loginOverlay {
 }
 
 /* ============================================================
-   모바일 브라우저 "데스크톱 사이트" — PC 레이아웃 (뷰포트 1280px + UA 감지)
+   모바일 브라우저 "데스크톱 사이트" · 태블릿 — PC 레이아웃 (뷰포트 1280px + UA/화면 감지)
    @media (max-width)가 좁은 기기 폭으로仍 적용될 때 CSS 폴백
    ============================================================ */
+html.layout-desktop.layout-tablet .pc-only-chrome,
 html.layout-desktop .pc-only-chrome,
 html.layout-desktop .map-unregistered-section {
     display: revert !important;

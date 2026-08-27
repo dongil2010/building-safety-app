@@ -43,20 +43,24 @@ document.addEventListener('DOMContentLoaded', () => {
     function isDesktopSiteLayout() {
         return !!(window.BSA && typeof window.BSA.isDesktopSiteMode === 'function' && window.BSA.isDesktopSiteMode());
     }
+    /** 데스크톱 사이트 · 태블릿 — PC와 동일 레이아웃·LOD */
+    function layoutIsPcLike() {
+        return !!(window.BSA && typeof window.BSA.isPcLikeLayout === 'function' && window.BSA.isPcLikeLayout());
+    }
     function layoutIsMobileWidth() {
-        if (isDesktopSiteLayout()) return false;
+        if (layoutIsPcLike()) return false;
         return (window.innerWidth || document.documentElement.clientWidth || 0) <= 768;
     }
     function layoutIsCompactWidth() {
-        if (isDesktopSiteLayout()) return false;
+        if (layoutIsPcLike()) return false;
         return (window.innerWidth || document.documentElement.clientWidth || 0) <= 1024;
     }
     function layoutMediaMobilePortrait() {
-        if (isDesktopSiteLayout()) return false;
+        if (layoutIsPcLike()) return false;
         return !!(window.matchMedia && window.matchMedia('(max-width: 768px) and (orientation: portrait)').matches);
     }
     function layoutMediaMobileDefectDrawer() {
-        if (isDesktopSiteLayout()) return false;
+        if (layoutIsPcLike()) return false;
         return !!(window.matchMedia && window.matchMedia('(max-width: 768px), (orientation: landscape) and (max-width: 1024px)').matches);
     }
 
@@ -505,8 +509,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function getMaxDisplayDrawingTierDim() {
         const zoomVsFit = getMapZoomVsFit();
-        const mobile = (typeof isMobileMapViewport === 'function' && isMobileMapViewport())
-            || (typeof isNativeAndroidApp === 'function' && isNativeAndroidApp());
+        const mobile = isMobileDrawingContext();
         const z = window.FLOOR_DRAWING_TIER_ZOOM || {};
         const toHi = mobile ? (z.TO_HI_MOBILE || 20.0) : (z.TO_HI || 12.0);
         return zoomVsFit >= toHi ? 16000 : 8000;
@@ -1217,10 +1220,17 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function isMobileMapViewport() {
-        if (isDesktopSiteLayout()) return false;
+        if (layoutIsPcLike()) return false;
         const cw = state.canvasCssW || 0;
         const ch = state.canvasCssH || 0;
         return Math.min(cw, ch) <= 520 || layoutIsMobileWidth();
+    }
+
+    /** 폰·소형 현장앱만 모바일 LOD·미리보기 — 태블릿은 PC(1200% 초고해상도) */
+    function isMobileDrawingContext() {
+        if (layoutIsPcLike()) return false;
+        return isMobileMapViewport()
+            || (typeof isNativeAndroidApp === 'function' && isNativeAndroidApp());
     }
 
     function canvasCssToImgCoords(cx, cy) {
@@ -5043,8 +5053,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function pickFloorDrawingTierDimForCurrentView() {
         const zoomVsFit = getMapZoomVsFit();
-        const mobile = (typeof isMobileMapViewport === 'function' && isMobileMapViewport())
-            || (typeof isNativeAndroidApp === 'function' && isNativeAndroidApp());
+        const mobile = isMobileDrawingContext();
         let dim = 4000;
         if (typeof window.getFloorDrawingTierDimForZoomVsFit === 'function') {
             dim = window.getFloorDrawingTierDimForZoomVsFit(zoomVsFit, {
@@ -5064,8 +5073,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const el = elements.mapZoomOverlay || document.getElementById('mapZoomOverlay');
         if (!el) return;
         const onMap = state.currentTab === 'tab-map';
-        const mobile = (typeof isMobileMapViewport === 'function' && isMobileMapViewport())
-            || (typeof isNativeAndroidApp === 'function' && isNativeAndroidApp());
+        const mobile = isMobileDrawingContext();
         if (!onMap || !mobile) {
             el.style.display = 'none';
             return;
@@ -5231,8 +5239,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         if (!state.floorDrawingTierImageCache) state.floorDrawingTierImageCache = {};
         state.floorDrawingTierImageCache[`${bldg.id}_${fc}_${wantDim}`] = img;
-        const useImmediate = (typeof isMobileMapViewport === 'function' && isMobileMapViewport())
-            || (typeof isNativeAndroidApp === 'function' && isNativeAndroidApp());
+        const useImmediate = isMobileDrawingContext();
         applyFloorDrawingTarget(img, undefined, { immediate: useImmediate });
         floorDrawingActiveTierDim = wantDim;
         updateMapZoomOverlay();
@@ -5289,8 +5296,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!bldg || !floorCode) return;
         const dims = [8000];
         try {
-            const mobile = (typeof isMobileMapViewport === 'function' && isMobileMapViewport())
-                || (typeof isNativeAndroidApp === 'function' && isNativeAndroidApp());
+            const mobile = isMobileDrawingContext();
             const hiPrefetchThreshold = mobile ? 10.0 : 1.6;
             if (getMapZoomVsFit() >= hiPrefetchThreshold) dims.push(16000);
         } catch (_) { /* zoom optional */ }
@@ -5329,8 +5335,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 return;
             }
             const img = new Image();
-            const preferBlob = (typeof isMobileMapViewport === 'function' && isMobileMapViewport())
-                || (typeof isNativeAndroidApp === 'function' && isNativeAndroidApp());
+            const preferBlob = isMobileDrawingContext();
             let objectUrl = null;
             const cleanup = () => {
                 if (objectUrl) {
@@ -5506,10 +5511,10 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!pdfUrl || !bldg || !floorCode) return null;
         await ensureFloorPlanRefForPdf(bldg, floorCode);
         const pdfCacheKey = `${bldg.id}_${floorCode}`;
-        const previewDim = (typeof isMobileMapViewport === 'function' && isMobileMapViewport())
+        const previewDim = isMobileDrawingContext()
             ? 2800
             : (window.FLOOR_DRAWING_PDF_PREVIEW_DIM || 4000);
-        const maxPreviewBytes = (typeof isMobileMapViewport === 'function' && isMobileMapViewport())
+        const maxPreviewBytes = isMobileDrawingContext()
             ? 650000
             : 900000;
         const has4000 = (bldg.floorDrawingTiers && bldg.floorDrawingTiers[floorCode] && bldg.floorDrawingTiers[floorCode]['4000'])
@@ -5798,7 +5803,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const focusY = Math.max(visT + 24, Math.min(visB - 24, quarterY));
             return { x: (visL + visR) / 2, y: focusY };
         }
-        if (window.matchMedia('(orientation: landscape) and (max-width: 1024px)').matches && !isDesktopSiteLayout()) {
+        if (window.matchMedia('(orientation: landscape) and (max-width: 1024px)').matches && !layoutIsPcLike()) {
             const drawerLeft = window.innerWidth * (2 / 3);
             visR = Math.max(64, Math.min(cssW, drawerLeft - cRect.left - 12));
         } else {
@@ -20785,7 +20790,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function isSurveyPortraitCompact() {
-        if (isDesktopSiteLayout()) return false;
+        if (layoutIsPcLike()) return false;
         return window.matchMedia('(max-width: 1024px) and (orientation: portrait)').matches;
     }
 
@@ -27276,7 +27281,7 @@ document.addEventListener('DOMContentLoaded', () => {
     /** PDF만 있는 층 — PC에서 일반·고해상도·초고해상도 JPEG를 만들어 Firestore에 올림 (현장은 이 레스터만 받음) */
     async function ensureRasterTiersForSync(buildings) {
         if (!db || !window.state.companyId) return;
-        if (typeof isNativeAndroidApp === 'function' && isNativeAndroidApp()) return;
+        if (typeof isNativeAndroidApp === 'function' && isNativeAndroidApp() && !layoutIsPcLike()) return;
         const dims = window.FLOOR_DRAWING_TIER_DIMS || [4000, 8000, 16000];
         for (const b of (buildings || [])) {
             if (!b || !b.id) continue;
@@ -27876,7 +27881,7 @@ document.addEventListener('DOMContentLoaded', () => {
             window.state.deletedNdtIds = ndtMerge.deletedNdtIds;
 
             await uploadInlineDefectPhotosForSync(window.state.defects);
-            const fieldRasterOnly = typeof isNativeAndroidApp === 'function' && isNativeAndroidApp();
+            const fieldRasterOnly = typeof isNativeAndroidApp === 'function' && isNativeAndroidApp() && !layoutIsPcLike();
             if (!fieldRasterOnly) {
                 await uploadFloorDrawingPdfsForSync(window.state.buildings);
                 await ensureRasterTiersForSync(window.state.buildings);
