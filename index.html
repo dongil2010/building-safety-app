@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
@@ -32,7 +32,7 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <meta name="apple-mobile-web-app-title" content="스마트 안전점검">
-    <link rel="stylesheet" href="styles.css?v=20260827_round_fab">
+    <link rel="stylesheet" href="styles.css?v=20260827_select_sheet">
     <!-- FontAwesome icons for clean engineering UI -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <!-- PDF 생성용: 페이지별로 직접 캡처해서 조립(큰 보고서에서 html2pdf 한방 렌더링이 캔버스 높이 한계로
@@ -2472,6 +2472,22 @@
         </div>
     </div>
 
+    <!-- 모바일 커스텀 select 시트 (네이티브 안드로이드 피커 대체) -->
+    <div class="modal-overlay bsa-select-sheet" id="bsaSelectSheet" aria-hidden="true">
+        <div class="bsa-select-sheet-card" role="dialog" aria-modal="true" aria-labelledby="bsaSelectSheetTitle">
+            <div class="bsa-select-sheet-handle" aria-hidden="true"></div>
+            <div class="bsa-select-sheet-header">
+                <h3 id="bsaSelectSheetTitle">선택</h3>
+                <button type="button" class="modal-close" id="btnCloseBsaSelectSheet" aria-label="닫기">&times;</button>
+            </div>
+            <div class="bsa-select-sheet-search" id="bsaSelectSheetSearchWrap" hidden>
+                <i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i>
+                <input type="search" id="bsaSelectSheetSearch" placeholder="옵션 검색…" autocomplete="off" spellcheck="false">
+            </div>
+            <ul class="bsa-select-sheet-list" id="bsaSelectSheetList" role="listbox"></ul>
+        </div>
+    </div>
+
     <!-- Core → 탭 분류 → 기존 엔진(app.js) -->
     <script src="js/core/state.js?v=20260827_area_ink"></script>
     <script src="js/tabs/registry.js?v=20260826_bsafix"></script>
@@ -2484,7 +2500,7 @@
     <script src="js/shared/report.js?v=20260827_overview"></script>
     <script src="js/shared/hwpx-import.js?v=20260825_hwpxin"></script>
     <script src="js/shared/auth.js?v=20260821_land1"></script>
-    <script src="app.js?v=20260827_round_fab"></script>
+    <script src="app.js?v=20260827_select_sheet"></script>
     <script>
         window.BSA_APP_VERSION = '20260826_mem1';
         (function () {

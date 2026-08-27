@@ -64,6 +64,188 @@ document.addEventListener('DOMContentLoaded', () => {
         return !!(window.matchMedia && window.matchMedia('(max-width: 768px), (orientation: landscape) and (max-width: 1024px)').matches);
     }
 
+    /** 모바일·터치: 네이티브 select 대신 앱 톤 바텀시트 */
+    function shouldUseBsaSelectSheet() {
+        if (typeof layoutIsPcLike === 'function' && layoutIsPcLike()) return false;
+        const coarse = !!(window.matchMedia && window.matchMedia('(pointer: coarse)').matches);
+        const narrow = (window.innerWidth || 0) <= 1024;
+        return coarse || narrow || layoutIsCompactWidth();
+    }
+
+    function getBsaSelectSheetTitle(selectEl) {
+        if (!selectEl) return '선택';
+        if (selectEl.getAttribute('aria-label')) return selectEl.getAttribute('aria-label');
+        if (selectEl.title) return selectEl.title;
+        const id = selectEl.id;
+        if (id) {
+            const safeId = (typeof CSS !== 'undefined' && CSS.escape) ? CSS.escape(id) : String(id).replace(/"/g, '\\"');
+            const lab = document.querySelector(`label[for="${safeId}"]`);
+            if (lab) return (lab.textContent || '').replace(/\s+/g, ' ').trim() || '선택';
+        }
+        const wrapLab = selectEl.closest('.form-group, .selector-group')?.querySelector('.form-label, label');
+        if (wrapLab) return (wrapLab.textContent || '').replace(/\s+/g, ' ').trim() || '선택';
+        return '선택';
+    }
+
+    function closeBsaSelectSheet() {
+        const sheet = document.getElementById('bsaSelectSheet');
+        if (!sheet) return;
+        sheet.classList.remove('open');
+        sheet.setAttribute('aria-hidden', 'true');
+        document.body.classList.remove('bsa-select-sheet-open');
+        window._bsaSelectTarget = null;
+        window._bsaSelectIgnoreUntil = 0;
+        const search = document.getElementById('bsaSelectSheetSearch');
+        if (search) search.value = '';
+    }
+
+    function renderBsaSelectSheetList(filterText) {
+        const list = document.getElementById('bsaSelectSheetList');
+        const selectEl = window._bsaSelectTarget;
+        if (!list || !selectEl) return;
+        const q = String(filterText || '').trim().toLowerCase();
+        const cur = selectEl.value;
+        const parts = [];
+        let shown = 0;
+        let lastGroup = null;
+        const pushOption = (opt, groupLabel) => {
+            if (!opt || opt.hidden) return;
+            const label = (opt.textContent || opt.label || opt.value || '').trim();
+            const val = opt.value;
+            if (q && !label.toLowerCase().includes(q) && !String(val).toLowerCase().includes(q)) return;
+            if (groupLabel && groupLabel !== lastGroup) {
+                parts.push({ type: 'group', label: groupLabel });
+                lastGroup = groupLabel;
+            }
+            parts.push({
+                type: 'option',
+                label,
+                value: val,
+                disabled: !!opt.disabled,
+                selected: val === cur
+            });
+            shown += 1;
+        };
+        Array.from(selectEl.children).forEach((node) => {
+            if (node.tagName === 'OPTGROUP') {
+                Array.from(node.children).forEach((opt) => {
+                    if (opt.tagName === 'OPTION') pushOption(opt, node.label || '');
+                });
+            } else if (node.tagName === 'OPTION') {
+                pushOption(node, '');
+            }
+        });
+        if (!shown) {
+            list.innerHTML = '<li class="bsa-select-sheet-empty">검색 결과가 없습니다</li>';
+            return;
+        }
+        list.innerHTML = parts.map((p) => {
+            if (p.type === 'group') {
+                return `<li class="bsa-select-sheet-group">${escapeHtml(p.label)}</li>`;
+            }
+            return `<li>` +
+                `<button type="button" class="bsa-select-sheet-item${p.selected ? ' is-selected' : ''}${p.disabled ? ' is-disabled' : ''}"` +
+                ` role="option" data-value="${escapeHtml(p.value)}" ${p.disabled ? 'disabled' : ''} aria-selected="${p.selected ? 'true' : 'false'}">` +
+                `<span>${escapeHtml(p.label || '(빈 값)')}</span>` +
+                `<i class="fa-solid fa-check bsa-select-check" aria-hidden="true"></i>` +
+                `</button></li>`;
+        }).join('');
+        const selectedBtn = list.querySelector('.bsa-select-sheet-item.is-selected');
+        if (selectedBtn) {
+            requestAnimationFrame(() => {
+                selectedBtn.scrollIntoView({ block: 'nearest' });
+            });
+        }
+    }
+
+    function openBsaSelectSheet(selectEl) {
+        if (!selectEl || selectEl.disabled || selectEl.multiple) return;
+        const sheet = document.getElementById('bsaSelectSheet');
+        const titleEl = document.getElementById('bsaSelectSheetTitle');
+        const searchWrap = document.getElementById('bsaSelectSheetSearchWrap');
+        const search = document.getElementById('bsaSelectSheetSearch');
+        if (!sheet) return;
+        // 같은 select로 이미 열려 있으면 중복 오픈 스킵
+        if (sheet.classList.contains('open') && window._bsaSelectTarget === selectEl) return;
+        window._bsaSelectTarget = selectEl;
+        window._bsaSelectIgnoreUntil = Date.now() + 320;
+        if (titleEl) titleEl.textContent = getBsaSelectSheetTitle(selectEl);
+        const optCount = selectEl.options ? selectEl.options.length : 0;
+        if (searchWrap) searchWrap.hidden = optCount < 10;
+        if (search) search.value = '';
+        renderBsaSelectSheetList('');
+        sheet.classList.add('open');
+        sheet.setAttribute('aria-hidden', 'false');
+        document.body.classList.add('bsa-select-sheet-open');
+        if (!searchWrap?.hidden && search) {
+            setTimeout(() => {
+                try { search.focus(); } catch (_err) { /* ignore */ }
+            }, 180);
+        }
+    }
+
+    function bindBsaSelectSheet() {
+        const sheet = document.getElementById('bsaSelectSheet');
+        if (!sheet || sheet.dataset.bound === '1') return;
+        sheet.dataset.bound = '1';
+
+        const intercept = (e) => {
+            if (!shouldUseBsaSelectSheet()) return;
+            const sel = e.target && e.target.closest ? e.target.closest('select') : null;
+            if (!sel || sel.disabled || sel.multiple) return;
+            if (sel.dataset.nativeSelect === '1') return;
+            if (sel.closest('#bsaSelectSheet')) return;
+            e.preventDefault();
+            e.stopPropagation();
+            try { sel.blur(); } catch (_err) { /* ignore */ }
+            openBsaSelectSheet(sel);
+        };
+
+        // 안드로이드 네이티브 피커가 뜨기 전에 차단
+        document.addEventListener('touchstart', intercept, { capture: true, passive: false });
+        document.addEventListener('mousedown', intercept, true);
+        document.addEventListener('click', intercept, true);
+        document.addEventListener('focusin', (e) => {
+            if (!shouldUseBsaSelectSheet()) return;
+            const sel = e.target && e.target.tagName === 'SELECT' ? e.target : null;
+            if (!sel || sel.disabled || sel.multiple || sel.dataset.nativeSelect === '1') return;
+            e.preventDefault();
+            try { sel.blur(); } catch (_err) { /* ignore */ }
+            openBsaSelectSheet(sel);
+        }, true);
+
+        document.addEventListener('keydown', (e) => {
+            if (e.key !== 'Escape') return;
+            const openSheet = document.getElementById('bsaSelectSheet');
+            if (openSheet && openSheet.classList.contains('open')) closeBsaSelectSheet();
+        });
+
+        document.getElementById('btnCloseBsaSelectSheet')?.addEventListener('click', closeBsaSelectSheet);
+        sheet.addEventListener('click', (e) => {
+            if (e.target === sheet) closeBsaSelectSheet();
+        });
+
+        const list = document.getElementById('bsaSelectSheetList');
+        list?.addEventListener('click', (e) => {
+            if (Date.now() < (window._bsaSelectIgnoreUntil || 0)) return;
+            const btn = e.target.closest('.bsa-select-sheet-item');
+            if (!btn || btn.disabled || btn.classList.contains('is-disabled')) return;
+            const selectEl = window._bsaSelectTarget;
+            if (!selectEl) return;
+            const val = btn.getAttribute('data-value');
+            selectEl.value = val;
+            selectEl.dispatchEvent(new Event('input', { bubbles: true }));
+            selectEl.dispatchEvent(new Event('change', { bubbles: true }));
+            closeBsaSelectSheet();
+        });
+
+        document.getElementById('bsaSelectSheetSearch')?.addEventListener('input', (e) => {
+            renderBsaSelectSheetList(e.target.value);
+        });
+    }
+
+    bindBsaSelectSheet();
+
     // --- 3.5 UI 알림 / 로딩 유틸 (토스트 & 전역 로딩 오버레이) ---
     function ensureToastContainer() {
         let box = document.getElementById('toastContainer');
@@ -12392,12 +12574,12 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         window._addSurveyRoundSourceId = latest.id;
         const modal = document.getElementById('addSurveyRoundModal');
-        if (modal) modal.classList.add('active');
+        if (modal) modal.classList.add('open');
     };
 
     window.closeAddSurveyRoundModal = function() {
         const modal = document.getElementById('addSurveyRoundModal');
-        if (modal) modal.classList.remove('active');
+        if (modal) modal.classList.remove('open');
         window._addSurveyRoundSourceId = null;
     };
 
