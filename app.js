@@ -12444,6 +12444,39 @@ document.addEventListener('DOMContentLoaded', () => {
         return { year: `${y + 1}년`, period: '수시점검' };
     }
 
+    function parseSurveyYearNum(yearStr) {
+        const n = parseInt(String(yearStr || '').replace(/[^\d]/g, ''), 10);
+        return Number.isFinite(n) ? n : new Date().getFullYear();
+    }
+
+    /** 회차 추가 년도 셀렉트: 기준(마지막) 회차에서 5년 전부터 앞쪽까지 넉넉히 채움 */
+    function fillAddSurveyRoundYearOptions(yearEl, baseYearStr, selectedYearStr) {
+        if (!yearEl) return;
+        const baseY = parseSurveyYearNum(baseYearStr);
+        const selY = parseSurveyYearNum(selectedYearStr);
+        const nowY = new Date().getFullYear();
+        const fromY = baseY - 5;
+        const toY = Math.max(baseY + 5, selY, nowY + 2);
+        const selectedVal = selectedYearStr && String(selectedYearStr).includes('년')
+            ? String(selectedYearStr)
+            : `${selY}년`;
+        yearEl.innerHTML = '';
+        for (let y = fromY; y <= toY; y++) {
+            const opt = document.createElement('option');
+            opt.value = `${y}년`;
+            opt.textContent = `${y}년`;
+            yearEl.appendChild(opt);
+        }
+        yearEl.value = selectedVal;
+        if (yearEl.value !== selectedVal) {
+            const opt = document.createElement('option');
+            opt.value = selectedVal;
+            opt.textContent = selectedVal;
+            yearEl.appendChild(opt);
+            yearEl.value = selectedVal;
+        }
+    }
+
     function ensureSurveyRoundSelectOption(selectId, value) {
         const sel = document.getElementById(selectId);
         if (!sel || !value) return;
@@ -12720,18 +12753,11 @@ document.addEventListener('DOMContentLoaded', () => {
         if (baseEl) {
             baseEl.textContent = `${formatSurveyRoundLabel(getBuildingSurveyRoundKey(latest))} · ${latest.inspectionType || '점검'}`;
         }
-        if (yearEl) {
-            if (![...yearEl.options].some((o) => o.value === next.year)) {
-                const opt = document.createElement('option');
-                opt.value = next.year;
-                opt.textContent = next.year;
-                yearEl.appendChild(opt);
-            }
-            yearEl.value = next.year;
-        }
+        if (yearEl) fillAddSurveyRoundYearOptions(yearEl, curYear, next.year);
         if (periodEl) periodEl.value = next.period;
         if (hintEl) {
-            hintEl.textContent = `기본값: 다음 회차 ${next.year} ${next.period} (직접 변경 가능)`;
+            const fromY = parseSurveyYearNum(curYear) - 5;
+            hintEl.textContent = `기본값: 다음 회차 ${next.year} ${next.period} · 년도는 ${fromY}년부터 선택 가능`;
         }
         window._addSurveyRoundSourceId = latest.id;
         const modal = document.getElementById('addSurveyRoundModal');
