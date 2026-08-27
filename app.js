@@ -3421,8 +3421,11 @@ document.addEventListener('DOMContentLoaded', () => {
             const site = getBuildingSiteName(b).toLowerCase();
             const dong = getBuildingDongLabel(b).toLowerCase();
             const round = formatSurveyRoundLabel(getBuildingSurveyRoundKey(b)).toLowerCase();
+            const inspector = (b.inspector || '').toLowerCase();
+            const phone = (b.contactPhone || '').toLowerCase();
             return name.includes(term) || addr.includes(term) || site.includes(term)
-                || dong.includes(term) || round.includes(term);
+                || dong.includes(term) || round.includes(term)
+                || inspector.includes(term) || phone.includes(term);
         };
 
         const filtered = term ? allBldgs.filter(filterBldgByTerm) : allBldgs;
@@ -3649,12 +3652,31 @@ document.addEventListener('DOMContentLoaded', () => {
             } else {
                 layoutHint = ' · 단일 건물';
             }
+            const pickField = (fn) => {
+                for (const b of members) {
+                    const v = String(fn(b) || '').trim();
+                    if (v) return v;
+                }
+                return '';
+            };
+            const addr = pickField((b) => b.address);
+            const inspector = pickField((b) => b.inspector);
+            const phone = pickField((b) => b.contactPhone);
+            const contactBits = [];
+            if (inspector) contactBits.push(inspector);
+            if (phone) contactBits.push(phone);
+            const contactLine = contactBits.length
+                ? `담당 ${contactBits.join(' · ')}`
+                : '담당자·연락처 미등록';
+            const addrLine = addr || '주소 미등록';
             const safeSite = escapeHtml(siteKey);
             return `
                 <div class="building-row building-row-site" data-site-key="${safeSite}">
                     <div class="building-row-info" data-action="open-site" data-site-key="${safeSite}">
                         <span class="building-row-name"><i class="fa-solid fa-building flag-icon-muted"></i> ${safeSite}</span>
                         <span class="building-row-meta building-row-rounds">${escapeHtml(roundHint)}${escapeHtml(layoutHint)}</span>
+                        <span class="building-row-meta building-row-site-addr">${escapeHtml(addrLine)}</span>
+                        <span class="building-row-meta building-row-site-contact">${escapeHtml(contactLine)}</span>
                     </div>
                 </div>
             `;
@@ -4066,6 +4088,10 @@ document.addEventListener('DOMContentLoaded', () => {
             syncAddBuildingDongFieldVisibility();
             const addrInput = document.getElementById('inputBuildingAddress');
             if (addrInput) addrInput.value = '';
+            const inspectorInput = document.getElementById('inputBuildingInspector');
+            if (inspectorInput) inspectorInput.value = window.state.userName || '';
+            const contactInput = document.getElementById('inputBuildingContactPhone');
+            if (contactInput) contactInput.value = '';
             const floorsInput = document.getElementById('inputBuildingFloors');
             if (floorsInput) floorsInput.value = '';
             const structureInput = document.getElementById('inputBuildingStructureType');
@@ -4381,6 +4407,8 @@ document.addEventListener('DOMContentLoaded', () => {
         setVal('inputBuildingDong', getBuildingDongLabel(bldg));
         setVal('inputBuildingName', composeBuildingDisplayName(getBuildingSiteName(bldg), getBuildingDongLabel(bldg)));
         setVal('inputBuildingAddress', bldg.address || '');
+        setVal('inputBuildingInspector', bldg.inspector || window.state.userName || '');
+        setVal('inputBuildingContactPhone', bldg.contactPhone || '');
         setVal('inputBuildingFloors', bldg.floors || '');
         setVal('inputBuildingStructureType', bldg.structureType || '');
         setVal('inputBuildingFacilityGrade', bldg.facilityGrade || '');
@@ -5152,6 +5180,9 @@ document.addEventListener('DOMContentLoaded', () => {
             const importOpts = isImportMode ? getAddBuildingImportOptions() : null;
 
             const address = (document.getElementById('inputBuildingAddress')?.value || '').trim() || '서울특별시 강남구 테헤란로 123';
+            const inspector = (document.getElementById('inputBuildingInspector')?.value || '').trim()
+                || window.state.userName || '점검자';
+            const contactPhone = (document.getElementById('inputBuildingContactPhone')?.value || '').trim();
 
             if (isImportMode) {
                 if (!sourceId || !sourceBldg) {
@@ -5251,7 +5282,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 multiDong: !!multiDong,
                 name: composeBuildingStorageName(siteName, dong),
                 address: address,
-                inspector: window.state.userName || '점검자',
+                inspector: inspector,
+                contactPhone: contactPhone,
                 date: date,
                 floors: floors,
                 inspectionType: inspectionType,
@@ -5353,6 +5385,10 @@ document.addEventListener('DOMContentLoaded', () => {
         setSiteLayoutRadio('editBuildingSiteLayout', isSiteMultiDong(getBuildingSiteName(bldg)));
         syncEditBuildingDongFieldVisibility();
         document.getElementById('inputEditBuildingAddress').value = bldg.address || '';
+        const editInspector = document.getElementById('inputEditBuildingInspector');
+        if (editInspector) editInspector.value = bldg.inspector || window.state.userName || '';
+        const editContact = document.getElementById('inputEditBuildingContactPhone');
+        if (editContact) editContact.value = bldg.contactPhone || '';
         document.getElementById('inputEditBuildingFloors').value = bldg.floors || '';
         document.getElementById('inputEditBuildingDate').value = bldg.date || new Date().toISOString().split('T')[0];
         
@@ -5648,6 +5684,9 @@ document.addEventListener('DOMContentLoaded', () => {
             if (nameInput) nameInput.value = name;
 
             const address = (document.getElementById('inputEditBuildingAddress')?.value || '').trim() || bldg.address;
+            const inspector = (document.getElementById('inputEditBuildingInspector')?.value || '').trim()
+                || bldg.inspector || window.state.userName || '';
+            const contactPhone = (document.getElementById('inputEditBuildingContactPhone')?.value || '').trim();
             const floors = (document.getElementById('inputEditBuildingFloors')?.value || '').trim() || bldg.floors;
             const date = document.getElementById('inputEditBuildingDate')?.value || bldg.date;
             const inspectionType = document.getElementById('inputEditBuildingInspectionType')?.value || bldg.inspectionType || '정밀안전점검';
@@ -5752,6 +5791,8 @@ document.addEventListener('DOMContentLoaded', () => {
             bldg.name = composeBuildingStorageName(siteName, dong);
             bldg.siteVaultKey = siteVaultDocId(siteName);
             bldg.address = address;
+            bldg.inspector = inspector;
+            bldg.contactPhone = contactPhone;
             bldg.floors = floors;
             bldg.date = date;
             bldg.inspectionType = inspectionType;
@@ -12925,7 +12966,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 multiDong: sourceBldg.multiDong === true || isSiteMultiDong(siteName),
                 name: composeBuildingStorageName(siteName, dong),
                 address: sourceBldg.address || '',
-                inspector: window.state.userName || sourceBldg.inspector || '점검자',
+                inspector: sourceBldg.inspector || window.state.userName || '점검자',
+                contactPhone: sourceBldg.contactPhone || '',
                 date: new Date().toISOString().split('T')[0],
                 floors: sourceBldg.floors || '',
                 inspectionType: sourceBldg.inspectionType || '정밀안전점검',
@@ -13148,7 +13190,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 multiDong: true,
                 name: composeBuildingStorageName(siteKey, dong),
                 address: sourceBldg.address || '',
-                inspector: window.state.userName || sourceBldg.inspector || '점검자',
+                inspector: sourceBldg.inspector || window.state.userName || '점검자',
+                contactPhone: sourceBldg.contactPhone || '',
                 date: new Date().toISOString().split('T')[0],
                 floors: sourceBldg.floors || '',
                 inspectionType: sourceBldg.inspectionType || '정밀안전점검',

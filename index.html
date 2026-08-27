@@ -32,7 +32,7 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <meta name="apple-mobile-web-app-title" content="스마트 안전점검">
-    <link rel="stylesheet" href="styles.css?v=20260827_list_toggle">
+    <link rel="stylesheet" href="styles.css?v=20260827_site_contact">
     <!-- FontAwesome icons for clean engineering UI -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <!-- PDF 생성용: 페이지별로 직접 캡처해서 조립(큰 보고서에서 html2pdf 한방 렌더링이 캔버스 높이 한계로
@@ -197,7 +197,7 @@
                     </div>
                     <div class="building-search-bar">
                         <i class="fa-solid fa-magnifying-glass"></i>
-                        <input type="text" id="buildingSearchInput" placeholder="건물명 또는 주소로 검색...">
+                        <input type="text" id="buildingSearchInput" placeholder="현장명·주소·담당자·연락처 검색...">
                     </div>
                     <div class="building-list" id="buildingListGrid"></div>
                 </div>
@@ -2019,6 +2019,16 @@
                     </div>
                     <div class="form-row">
                         <div class="form-group flex-1">
+                            <label class="form-label" for="inputBuildingInspector">담당자</label>
+                            <input type="text" id="inputBuildingInspector" class="form-control" placeholder="예: 홍길동" autocomplete="name">
+                        </div>
+                        <div class="form-group flex-1">
+                            <label class="form-label" for="inputBuildingContactPhone">연락처</label>
+                            <input type="tel" id="inputBuildingContactPhone" class="form-control" placeholder="예: 010-1234-5678" autocomplete="tel">
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group flex-1">
                             <label class="form-label" for="inputBuildingFloors">규모 및 층수</label>
                             <input type="text" id="inputBuildingFloors" class="form-control" placeholder="예: 지상 10층 ~ 지하 2층">
                         </div>
@@ -2181,6 +2191,16 @@
                     <div class="form-group">
                         <label class="form-label" for="inputEditBuildingAddress">소재지 주소</label>
                         <input type="text" id="inputEditBuildingAddress" class="form-control" placeholder="예: 서울특별시 강남구 테헤란로 123">
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group flex-1">
+                            <label class="form-label" for="inputEditBuildingInspector">담당자</label>
+                            <input type="text" id="inputEditBuildingInspector" class="form-control" placeholder="예: 홍길동" autocomplete="name">
+                        </div>
+                        <div class="form-group flex-1">
+                            <label class="form-label" for="inputEditBuildingContactPhone">연락처</label>
+                            <input type="tel" id="inputEditBuildingContactPhone" class="form-control" placeholder="예: 010-1234-5678" autocomplete="tel">
+                        </div>
                     </div>
                     <div class="form-row">
                         <div class="form-group flex-1">
@@ -2619,14 +2639,14 @@
     <script src="js/tabs/registry.js?v=20260826_bsafix"></script>
     <script src="js/pdf-vector-bridge.js?v=20260827_multi_tip"></script>
     <script src="js/core/layout-mode.js?v=20260827_tablet"></script>
-    <script src="js/tabs/home.js?v=20260827_site_layout"></script>
-    <script src="js/tabs/map.js?v=20260826_mem1"></script>
+    <script src="js/tabs/home.js?v=20260827_site_contact"></script>
+    <script src="js/tabs/map.js?v=20260827_list_toggle"></script>
     <script src="js/tabs/survey.js?v=20260824_nSub"></script>
     <script src="js/tabs/ndt.js?v=20260822_survey2dScroll"></script>
     <script src="js/shared/report.js?v=20260827_overview"></script>
     <script src="js/shared/hwpx-import.js?v=20260825_hwpxin"></script>
     <script src="js/shared/auth.js?v=20260821_land1"></script>
-    <script src="app.js?v=20260827_site_layout"></script>
+    <script src="app.js?v=20260827_list_toggle"></script>
     <script>
         window.BSA_APP_VERSION = '20260826_mem1';
         (function () {

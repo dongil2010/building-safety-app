@@ -7305,6 +7305,22 @@ body:not(.bsa-tab-home) .home-fab-add-building {
     font-weight: 600;
 }
 
+.building-row-site .building-row-site-addr,
+.building-row-site .building-row-site-contact {
+    display: block;
+    margin-top: 0.12rem;
+    color: #64748b;
+    font-weight: 500;
+    white-space: normal;
+    overflow: visible;
+    text-overflow: unset;
+    line-height: 1.35;
+}
+
+.building-row-site .building-row-site-contact {
+    color: #475569;
+}
+
 .building-row-round .building-row-name {
     color: #1e40af;
 }
