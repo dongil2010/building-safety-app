@@ -13256,6 +13256,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // 좌측 결함목록용: 균열폭·이격 등 정도를 한눈에 볼 수치 문자열
+    // 여러 건이면 "값,\n값" 형태(콤마+다음 줄) — 3개면 3줄
     function formatDefectListMeasure(d) {
         const type = String(d.defectType || '');
         const isCrack = type.includes('균열');
@@ -13269,6 +13270,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (/^\d+(\.\d+)?$/.test(n)) return `${n}mm`;
             return n;
         };
+        const joinMultiLine = (parts) => parts.filter(Boolean).join(',\n');
 
         if (isCrack) {
             if (Array.isArray(d.crackMeasures) && d.crackMeasures.length) {
@@ -13278,16 +13280,23 @@ document.addEventListener('DOMContentLoaded', () => {
                     count: m.count,
                     join: inferMeasureJoin(d, m)
                 })).filter(Boolean);
-                if (bits.length) return bits.join(', ');
+                if (bits.length) return joinMultiLine(bits);
             }
             const cw = d.crackWidth;
             if (cw !== undefined && cw !== null && String(cw).trim() !== '') {
+                const parts = String(cw).split(/\s*[\/,]\s*/).map(s => s.trim()).filter(Boolean);
+                if (parts.length > 1) return joinMultiLine(parts.map(withMm));
                 return withMm(cw);
             }
         }
 
         const size = String(d.size || '').trim();
         if (!size || size === '-') return '';
+
+        // 규모에 이미 ", "로 여러 건이 들어 있으면 목록에서도 줄바꿈
+        if (size.includes(', ')) {
+            return size.split(/\s*,\s*/).map(s => s.trim()).filter(Boolean).join(',\n');
+        }
 
         const patterns = [
             /(?:W\s*=\s*|폭\s*[:=]?\s*|이격\s*[:=]?\s*|틈\s*[:=]?\s*|Cw\s*[:=]\s*)(\d+(?:\.\d+)?)\s*(?:mm|㎜)?/i,
@@ -13302,6 +13311,39 @@ document.addEventListener('DOMContentLoaded', () => {
         // 짧은 규모 텍스트는 그대로 노출 (예: "약 5mm")
         if (size.length <= 16) return size;
         return `${size.slice(0, 14)}…`;
+    }
+
+    /** 균열폭 값만 추출 (여러 행·숨김 필드 `/` 구분 포함) */
+    function getDefectCrackWidthParts(d) {
+        if (!d) return [];
+        if (Array.isArray(d.crackMeasures) && d.crackMeasures.length) {
+            return d.crackMeasures.map(m => String(m && m.width != null ? m.width : '').trim()).filter(Boolean);
+        }
+        const raw = String(d.crackWidth != null ? d.crackWidth : '').trim();
+        if (!raw) return [];
+        return raw.split(/\s*[\/,]\s*/).map(s => s.trim()).filter(Boolean);
+    }
+
+    /** 보고서/한글용: 균열폭을 "0.15mm, 0.20mm" 처럼 콤마+공백으로 연결 */
+    function formatDefectCrackWidthsForReport(d) {
+        const parts = getDefectCrackWidthParts(d);
+        if (!parts.length) return '';
+        return parts.map((w) => (/mm|㎜/i.test(w) ? w.replace(/㎜/g, 'mm') : `${w}mm`)).join(', ');
+    }
+
+    /** 규모(상태조사표 size) — crackMeasures는 ", "로 연결 (한글 출력 동일) */
+    function formatDefectSizeMeasuresJoined(d) {
+        if (!d) return '';
+        if (Array.isArray(d.crackMeasures) && d.crackMeasures.length) {
+            const bits = d.crackMeasures.map(m => formatCrackMeasurePair({
+                width: m.width,
+                length: m.length,
+                count: m.count,
+                join: inferMeasureJoin(d, m)
+            })).filter(Boolean);
+            if (bits.length) return bits.join(', ');
+        }
+        return '';
     }
 
     // 결함 1건의 목록 카드(DOM row) 생성 — renderDefectListSection에서 재사용
@@ -21160,19 +21202,30 @@ document.addEventListener('DOMContentLoaded', () => {
             case 'openingCrack': return d.isOpeningCrack ? '○' : '-';
             case 'size': {
                 if (isGood) return '-';
-                if (Array.isArray(d.crackMeasures) && d.crackMeasures.length) {
-                    const bits = d.crackMeasures.map(m => formatCrackMeasurePair({
-                        width: m.width,
-                        length: m.length,
-                        count: m.count,
-                        join: inferMeasureJoin(d, m)
-                    })).filter(Boolean);
-                    if (bits.length) return bits.join(', ');
-                }
+                const joinedMeasures = formatDefectSizeMeasuresJoined(d);
+                if (joinedMeasures) return joinedMeasures;
                 const w = (d.crackWidth !== undefined && d.crackWidth !== null && String(d.crackWidth).trim() !== '') ? String(d.crackWidth).trim() : '';
                 const l = (d.crackLength !== undefined && d.crackLength !== null && String(d.crackLength).trim() !== '') ? String(d.crackLength).trim() : '';
                 const n = (d.itemCount !== undefined && d.itemCount !== null && String(d.itemCount).trim() !== '') ? String(d.itemCount).trim() : '';
                 if (w || l || n) {
+                    // 숨김 필드에 "0.15 / 0.20"처럼 여러 폭이 있으면 ", "로 풀어 출력
+                    const wParts = String(w).split(/\s*[\/,]\s*/).map(s => s.trim()).filter(Boolean);
+                    const lParts = String(l).split(/\s*[\/,]\s*/).map(s => s.trim()).filter(Boolean);
+                    const nParts = String(n).split(/\s*[\/,]\s*/).map(s => s.trim()).filter(Boolean);
+                    const maxN = Math.max(wParts.length, lParts.length, nParts.length, 1);
+                    if (maxN > 1) {
+                        const bits = [];
+                        for (let i = 0; i < maxN; i++) {
+                            const bit = formatCrackMeasurePair({
+                                width: wParts[i] || '',
+                                length: lParts[i] || '',
+                                count: nParts[i] || '',
+                                join: inferMeasureJoin(d, null)
+                            });
+                            if (bit) bits.push(bit);
+                        }
+                        if (bits.length) return bits.join(', ');
+                    }
                     return formatCrackMeasurePair({ width: w, length: l, count: n, join: inferMeasureJoin(d, null) }) || '-';
                 }
                 const sizeVal = (d.size != null) ? String(d.size).trim() : '';
@@ -21180,7 +21233,8 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             case 'crackWidth': {
                 if (!isCrack) return '-';
-                if (d.crackWidth !== undefined && d.crackWidth !== '') return `${d.crackWidth}mm`;
+                const widthsJoined = formatDefectCrackWidthsForReport(d);
+                if (widthsJoined) return widthsJoined;
                 // 균열폭/길이 분리 입력 이전에 자유텍스트(size)로 저장된 구버전 데이터: 값이 사라지지 않도록 그대로 표시
                 return d.size || '-';
             }

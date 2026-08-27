@@ -1479,9 +1479,9 @@ body {
     border: 1px solid rgba(234, 88, 12, 0.35);
     border-radius: 4px;
     padding: 0 0.22rem;
-    line-height: 1.2;
+    line-height: 1.25;
     font-size: 0.66rem;
-    white-space: normal;
+    white-space: pre-line;
     overflow: visible;
     text-overflow: unset;
     word-break: keep-all;
@@ -7413,8 +7413,7 @@ body.auth-gate-active #loginOverlay {
     }
 
     #tab-map .defect-list-item-component,
-    #tab-map .defect-list-item-type,
-    #tab-map .defect-list-item-measure {
+    #tab-map .defect-list-item-type {
         white-space: normal !important;
         overflow: visible !important;
         text-overflow: unset !important;
@@ -7422,6 +7421,16 @@ body.auth-gate-active #loginOverlay {
         overflow-wrap: anywhere;
         max-width: 100%;
         line-height: 1.22;
+    }
+
+    #tab-map .defect-list-item-measure {
+        white-space: pre-line !important;
+        overflow: visible !important;
+        text-overflow: unset !important;
+        word-break: keep-all;
+        overflow-wrap: anywhere;
+        max-width: 100%;
+        line-height: 1.25;
     }
 
     #tab-map .defect-list-item-component {
