@@ -3512,20 +3512,20 @@ document.addEventListener('DOMContentLoaded', () => {
                             <i class="fa-solid fa-map-location-dot"></i>
                             <span class="icon-btn-label">점검</span>
                         </button>
-                        <button type="button" class="icon-btn icon-btn-edit" title="현장 정보 수정" data-action="edit" data-bldg-id="${safeId}" aria-label="수정">
-                            <i class="fa-solid fa-pen-to-square"></i>
-                            <span class="icon-btn-label">수정</span>
-                        </button>
                         <button type="button" class="icon-btn icon-btn-drawing" title="도면 추가/교체" data-action="drawing" data-bldg-id="${safeId}" aria-label="도면">
                             <i class="fa-solid fa-images"></i>
                             <span class="icon-btn-label">도면</span>
+                        </button>
+                        <button type="button" class="icon-btn icon-btn-overview" title="전경사진" data-action="overview" data-bldg-id="${safeId}" aria-label="전경">
+                            <i class="fa-solid fa-panorama"></i>
+                            <span class="icon-btn-label">전경</span>
                         </button>
                     </div>
                 </div>
             `;
         };
 
-        // ── 3단: 현장 → 회차 → 건축물(점검/수정/도면) ──
+        // ── 3단: 현장 → 회차 → (여러 동만) 동 ──
         if (selectedSiteKey && window.state.dashboardRoundKey) {
             const roundKey = window.state.dashboardRoundKey;
             const dongs = filtered.filter((b) =>
@@ -3537,9 +3537,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (siteNavTitle) {
                 siteNavTitle.textContent = `${selectedSiteKey} · ${formatSurveyRoundLabel(roundKey)}`;
             }
-            if (heroTitle) {
-                heroTitle.textContent = isSiteMultiDong(selectedSiteKey) ? '🏢 동 선택' : '🏢 건축물 선택';
-            }
+            if (heroTitle) heroTitle.textContent = '🏢 동 선택';
 
             if (dongs.length === 0) {
                 grid.innerHTML = `<div class="building-list-empty">${term ? '🔍 검색 결과가 없습니다.' : '이 회차에 등록된 동이 없습니다.'} <button type="button" class="btn btn-sm btn-outline dashboard-back-rounds-inline" style="margin-top:0.6rem;">회차 목록으로</button></div>`;
@@ -3547,20 +3545,16 @@ document.addEventListener('DOMContentLoaded', () => {
                 return;
             }
 
-            const multiDong = isSiteMultiDong(selectedSiteKey);
+            // 여러 동: 동별 점검·도면·전경 (동마다 도면이 다름)
             grid.innerHTML = dongs.map((bldg) => {
                 const floorCount = (bldg.floorsList && bldg.floorsList.length > 0)
                     ? `도면 ${bldg.floorsList.length}개 층`
                     : '도면 미등록';
-                const typeLabel = bldg.inspectionType || '점검';
-                const title = multiDong
-                    ? `<i class="fa-solid fa-door-open flag-icon-muted"></i> ${escapeHtml(formatDongRowLabel(bldg))}`
-                    : `<i class="fa-solid fa-building flag-icon-muted"></i> ${escapeHtml(getBuildingSiteName(bldg))}`;
                 return renderBuildingActionRow(
                     bldg,
-                    title,
-                    `${escapeHtml(typeLabel)} · ${escapeHtml(bldg.address || '주소 미등록')} · ${escapeHtml(floorCount)}`,
-                    multiDong ? 'building-row-dong' : 'building-row-dong building-row-single'
+                    `<i class="fa-solid fa-door-open flag-icon-muted"></i> ${escapeHtml(formatDongRowLabel(bldg))}`,
+                    `${escapeHtml(bldg.inspectionType || '점검')} · ${escapeHtml(floorCount)}`,
+                    'building-row-dong'
                 );
             }).join('');
             bindBuildingRowActions();
@@ -3595,11 +3589,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 return String(b).localeCompare(String(a), 'ko');
             });
 
+            const multiDong = isSiteMultiDong(selectedSiteKey);
             grid.innerHTML = roundKeys.map((rk) => {
                 const members = byRound.get(rk) || [];
                 const roundLabel = rk === '_none' ? '회차 미지정' : formatSurveyRoundLabel(rk);
                 const typeLabel = members[0]?.inspectionType || '점검';
-                const multiDong = isSiteMultiDong(selectedSiteKey);
                 let metaHint;
                 if (multiDong) {
                     const dongNames = members.map(formatDongRowLabel);
@@ -3615,11 +3609,39 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
                 const safeSite = escapeHtml(selectedSiteKey);
                 const safeRound = escapeHtml(rk);
+                // 단일: 회차 = 점검 시작 + 도면·전경. 여러 동: 회차 = 동 선택으로 진입
+                if (multiDong) {
+                    return `
+                        <div class="building-row building-row-round" data-round-key="${safeRound}">
+                            <div class="building-row-info" data-action="open-round" data-site-key="${safeSite}" data-round-key="${safeRound}">
+                                <span class="building-row-name">${escapeHtml(roundLabel)} · ${escapeHtml(typeLabel)}</span>
+                                <span class="building-row-meta">${escapeHtml(metaHint)} · 동 선택</span>
+                            </div>
+                        </div>
+                    `;
+                }
+                const b0 = members[0];
+                if (!b0) return '';
+                const safeId = escapeHtml(b0.id);
                 return `
-                    <div class="building-row building-row-round" data-round-key="${safeRound}">
-                        <div class="building-row-info" data-action="open-round" data-site-key="${safeSite}" data-round-key="${safeRound}">
+                    <div class="building-row building-row-round building-row-round-single" data-round-key="${safeRound}" data-id="${safeId}">
+                        <div class="building-row-info" data-action="inspect" data-bldg-id="${safeId}">
                             <span class="building-row-name">${escapeHtml(roundLabel)} · ${escapeHtml(typeLabel)}</span>
                             <span class="building-row-meta">${escapeHtml(metaHint)}</span>
+                        </div>
+                        <div class="building-row-actions building-row-actions-compact">
+                            <button type="button" class="icon-btn icon-btn-start" title="점검 시작" data-action="inspect" data-bldg-id="${safeId}" aria-label="점검">
+                                <i class="fa-solid fa-map-location-dot"></i>
+                                <span class="icon-btn-label">점검</span>
+                            </button>
+                            <button type="button" class="icon-btn icon-btn-drawing" title="도면 추가/교체" data-action="drawing" data-bldg-id="${safeId}" aria-label="도면">
+                                <i class="fa-solid fa-images"></i>
+                                <span class="icon-btn-label">도면</span>
+                            </button>
+                            <button type="button" class="icon-btn icon-btn-overview" title="전경사진" data-action="overview" data-bldg-id="${safeId}" aria-label="전경">
+                                <i class="fa-solid fa-panorama"></i>
+                                <span class="icon-btn-label">전경</span>
+                            </button>
                         </div>
                     </div>
                 `;
@@ -3719,8 +3741,21 @@ document.addEventListener('DOMContentLoaded', () => {
 
     window.openDashboardRoundDongs = function(siteKey, roundKey) {
         if (!siteKey || !roundKey) return;
-        // 회차 → 건축물 선택(점검/수정/도면) 화면
         window.state.dashboardSiteKey = siteKey;
+        // 단일 건물은 회차 행에서 바로 점검하므로 여기로 오지 않음.
+        // 여러 동만 동 선택 화면으로 진입.
+        if (!isSiteMultiDong(siteKey)) {
+            window.state.dashboardRoundKey = null;
+            const active = filterActiveBuildings(window.state.buildings || [], window.state.deletedBuildingIds);
+            const bldg = active.find((b) =>
+                getBuildingSiteName(b) === siteKey
+                && getBuildingSurveyRoundKey(b) === roundKey
+            );
+            if (bldg) {
+                window.selectBuildingAndInspect(bldg.id);
+                return;
+            }
+        }
         window.state.dashboardRoundKey = roundKey;
         window.renderDashboard();
     };
