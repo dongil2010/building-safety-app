@@ -3867,6 +3867,18 @@ document.addEventListener('DOMContentLoaded', () => {
         const targetFloor = window.state.currentFloor || '1F';
         const canFetchDrawings = typeof navigator === 'undefined' || navigator.onLine !== false;
         const entryBuildingId = bldg.id;
+        const reentrySameBuilding = window.state.currentTab === 'tab-home'
+            && window.state.currentBuildingId === entryBuildingId;
+
+        // 홈 탭에서 점검 재진입: 앱 내 탭 전환만으로는 online/visibility 이벤트가 없어 서버 병합이 안 돌 수 있음
+        if (canFetchDrawings && window.state.companyId
+            && typeof reconnectFirestoreSync === 'function'
+            && window.state.currentTab === 'tab-home') {
+            if (reentrySameBuilding) {
+                window.showToast('최신 점검 데이터 동기화 중…', 'info', 2200);
+            }
+            reconnectFirestoreSync(reentrySameBuilding ? 'inspect-reentry' : 'inspect-entry');
+        }
 
         // 로딩 오버레이 없이 즉시 맵 진입. 로컬 캐시로 먼저 그리고, 없으면 백그라운드 hydrate.
         loadFloorDrawing(targetFloor);
