@@ -13548,7 +13548,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // --- Dynamic Defect Component(부재 명칭) — 분류별 플랫 프리셋 ---
     const DEFECT_COMPONENT_PRESET = {
         '구조체': ['기둥', 'RC기둥', '철골기둥', 'SRC기둥', '큰보', '작은보', '철골거더', '철골빔', '캔틸레버보', '슬래브', '데크슬래브', 'RC벽체', '내력벽', '계단', '계단참', '계단슬래브', '기초', '독립기초', '매트기초', '기타'],
-        '비구조체': ['조적벽체', '칸막이벽', 'ALC벽', '창호', '문', '셔터', '지붕 패널', '패널', '기타'],
+        '비구조체': ['조적벽체', '칸막이벽', 'ALC벽', '창호', '문', '셔터', '난간', '지붕 패널', '패널', '기타'],
         '마감재': ['외장타일', '외장석재', '도장', '금속패널', '내장타일', '수장', '내장도장', '천장 마감재', '바닥타일', '바닥마감', '기타']
     };
 
@@ -13925,7 +13925,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // ── 비구조체: 부재별 결함 종류 ──
     const MASONRY_WALL_DEFECTS = [
-        '상태양호', '균열', '줄눈 손상/탈락', '배부름·전도 징후', '백태/유출', '누수', '파손/결손', '기타'
+        '상태양호', ...WALL_CRACK_KINDS, '이격', '줄눈 손상/탈락', '배부름·전도 징후', '백태/유출', '누수', '파손/결손', '기타'
     ];
     const PARTITION_WALL_DEFECTS = [
         '상태양호', '균열', '이격/파손', '변형·기울음', '마감 손상', '기타'
@@ -13947,6 +13947,10 @@ document.addEventListener('DOMContentLoaded', () => {
     ];
     const PANEL_DEFECTS = [
         '상태양호', '변형/들뜸', '파손', '이음부 손상', '부식', '누수', '체결부 이완', '기타'
+    ];
+    const RAILING_DEFECTS = [
+        '상태양호', '부식/녹', '변형·기울음', '파손/결손', '이격/흔들림',
+        '체결부 이완', '낙하·탈락 위험', '높이·간격 불량', '마감 손상', '기타'
     ];
 
     // ── 마감재: 부재별 결함 종류 ──
@@ -14004,6 +14008,7 @@ document.addEventListener('DOMContentLoaded', () => {
         '창호': WINDOW_DEFECTS,
         '문': DOOR_DEFECTS,
         '셔터': SHUTTER_DEFECTS,
+        '난간': RAILING_DEFECTS,
         '지붕패널': ROOF_PANEL_DEFECTS,
         '지붕 패널': ROOF_PANEL_DEFECTS,
         '패널': PANEL_DEFECTS,
@@ -14029,9 +14034,10 @@ document.addEventListener('DOMContentLoaded', () => {
         if (key.includes('데크슬래브')) return null;
         if (key.includes('슬래브')) return null; // 슬래브는 '균열'만
         if (key.includes('철골')) return null;
-        // 비구조체·마감재는 RC 수직/수평균열 칩을 쓰지 않음
-        if (key.includes('조적') || key.includes('ALC') || key.includes('칸막이')) return null;
-        if (key.includes('창호') || key.includes('셔터') || key.includes('패널')) return null;
+        // 비구조체·마감재는 RC 수직/수평균열 칩을 쓰지 않음 (조적벽체는 수직·수평·경사·망상균열 사용)
+        if (key.includes('조적')) return WALL_CRACK_KINDS.slice();
+        if (key.includes('ALC') || key.includes('칸막이')) return null;
+        if (key.includes('창호') || key.includes('셔터') || key.includes('패널') || key.includes('난간')) return null;
         if (key.includes('타일') || key.includes('석재') || key.includes('도장') || key.includes('수장')) return null;
         if (key.includes('천장') || key.includes('바닥') || key === '문') return null;
         if (key.includes('벽체') || key === '내력벽') return WALL_CRACK_KINDS.slice();
@@ -14084,6 +14090,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (key.includes('ALC') || key.includes('alc')) return ALC_WALL_DEFECTS;
                 if (key.includes('창호') || key.includes('유리창') || (key.includes('창') && !key.includes('천장'))) return WINDOW_DEFECTS;
                 if (key.includes('셔터')) return SHUTTER_DEFECTS;
+                if (key.includes('난간') || key.includes('난간대') || key.includes('손잡이')) return RAILING_DEFECTS;
                 if (key.includes('지붕')) return ROOF_PANEL_DEFECTS;
                 if (key.includes('패널')) return PANEL_DEFECTS;
                 if (key.includes('문')) return DOOR_DEFECTS;
@@ -14596,6 +14603,10 @@ document.addEventListener('DOMContentLoaded', () => {
         ],
         // ── 비구조체 결함 (구·신 라벨 모두) ──
         '조적벽체 균열': CORE_CRACK_CAUSE_PRESET.slice(),
+        '이격': [
+            '구조체 변위', '부등침하', '온도·열팽창', '시공미흡', '이음 불량',
+            '외력·충격', '지진·진동', '기타'
+        ],
         '줄눈 손상/탈락': [
             '몰탈 노후화', '온도·수축', '시공 불량', '진동·충격', '누수·동결', '기타'
         ],
@@ -14664,6 +14675,16 @@ document.addEventListener('DOMContentLoaded', () => {
         ],
         '체결부 이완': [
             '진동', '시공 토크 부족', '부식', '반복 하중', '기타'
+        ],
+        // ── 난간 ──
+        '이격/흔들림': [
+            '시공미흡', '체결 이완', '사용자 부주의', '외력·충격', '부식', '노후화', '기타'
+        ],
+        '낙하·탈락 위험': [
+            '시공미흡', '체결 이완', '부식', '외력·충격', '과하중', '사용자 부주의', '노후화', '기타'
+        ],
+        '높이·간격 불량': [
+            '시공미흡', '설계·시공 오차', '개조·임의 변경', '유지관리 부족', '기타'
         ],
         '변형/들뜸': [
             '체결 이완', '온도·열변형', '풍압', '시공 불량', '부식', '기타'
