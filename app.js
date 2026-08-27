@@ -14595,17 +14595,33 @@ document.addEventListener('DOMContentLoaded', () => {
             beginAreaShapePath(ctx, defect);
             ctx.fill();
         } else {
-            const { x1, y1, x2, y2, w, h } = getAreaAabb(defect);
+            // 해치는 도형 로컬 좌표계에서 그림 (회전·리사이즈 후에도 클립 안을 빈틈없이 채움)
+            const shape = getAreaShape(defect);
+            const step = 9;
             ctx.strokeStyle = color;
             ctx.globalAlpha = 0.7;
             ctx.lineWidth = 1.2;
             ctx.setLineDash([]);
-            const step = 9;
-            for (let i = -h; i <= w + h; i += step) {
-                ctx.beginPath();
-                ctx.moveTo(x1 + i, y1);
-                ctx.lineTo(x1 + i + h, y2);
-                ctx.stroke();
+            if (shape === 'polygon') {
+                const { x1, y1, x2, y2, w, h } = getAreaAabb(defect);
+                for (let i = -h; i <= w + h; i += step) {
+                    ctx.beginPath();
+                    ctx.moveTo(x1 + i, y1);
+                    ctx.lineTo(x1 + i + h, y2);
+                    ctx.stroke();
+                }
+            } else {
+                const { cx, cy, w, h } = getAreaAabb(defect);
+                const hw = w / 2;
+                const hh = h / 2;
+                ctx.translate(cx, cy);
+                ctx.rotate((getAreaAngleDeg(defect) * Math.PI) / 180);
+                for (let i = -h; i <= w + h; i += step) {
+                    ctx.beginPath();
+                    ctx.moveTo(-hw + i, -hh);
+                    ctx.lineTo(-hw + i + h, hh);
+                    ctx.stroke();
+                }
             }
         }
         ctx.restore();
