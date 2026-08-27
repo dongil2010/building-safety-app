@@ -27235,6 +27235,21 @@ document.addEventListener('DOMContentLoaded', () => {
         return v !== '' && !IMPORT_NEGATIVE_FLAG_VALUES.includes(v);
     }
 
+    /** 엑셀/한글 가져오기: 문상부·창하부·창측면 등 개구부 위치·내용이면 개구부 균열 체크 */
+    function detectImportOpeningCrack(fields) {
+        if (!fields || fields.isGood) return false;
+        const compact = [fields.location, fields.defectType, fields.component, fields.size]
+            .map((s) => String(s || ''))
+            .join(' ')
+            .replace(/\s+/g, '');
+        if (!compact) return false;
+        if (/개구부/.test(compact)) return true;
+        // 문상부, 창하부, 창측면, 문측면, 창좌측 등
+        if (/(?:문|창)(?:상부|하부|측면|좌측|우측|주위|틀)/.test(compact)) return true;
+        if (/(?:문|창)측/.test(compact)) return true;
+        return false;
+    }
+
     // 결함 변경 직전 특정 층 키의 되돌리기 스냅샷을 저장 (pushDefectHistory는 항상 현재 층 기준이라
     // 현재 화면에 없는 다른 층으로 가져올 때를 위해 층을 직접 지정해서 저장)
     function pushDefectHistoryForKey(key) {
@@ -27362,6 +27377,15 @@ document.addEventListener('DOMContentLoaded', () => {
                     }
                     existing.isProgress = isGood ? false : resolveImportFlag(progressRaw);
                     existing.isLeak = isGood ? false : resolveImportFlag(leakRaw);
+                    existing.isOpeningCrack = isGood
+                        ? false
+                        : detectImportOpeningCrack({
+                            location: locationRaw || existing.location,
+                            defectType,
+                            component: componentRaw,
+                            size: sizeRaw,
+                            isGood
+                        });
                     // 엑셀 가져오기는 항상 전차(전회차) 조사내용으로 분류
                     existing.isCarriedOver = true;
                     if (importPrevRound) {
