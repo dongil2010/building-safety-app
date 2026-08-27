@@ -13,11 +13,13 @@ if (!window.state) {
         defects: {}, // { 'bldg-id_1F': [ ...defects ] }
         grids: {},   // { 'bldg-id_1F': { enabled: true, xPrefix: 'X', xCount: 6, yPrefix: 'Y', yCount: 4, xStart: 0.08, xEnd: 0.92, yStart: 0.08, yEnd: 0.92 } } (구버전 백업 호환용, 더 이상 사용 안 함)
         view: { offsetX: 0, offsetY: 0, scale: 1.0 },
-        mode: 'PAN', // 'PAN' | 'MARK'
+        mode: 'PAN', // 'PAN' | 'MARK' | 'AREA'
         rotationAngle: 0,
         tipShape: 'arrow',  // 'arrow' | 'circle'
         areaFillStyle: 'solid',   // 'solid' | 'hatch' | 'none' — 영역 마킹 채우기
         areaBorderStyle: 'solid', // 'solid' | 'dashed' — 영역 마킹 테두리
+        areaCreateShape: 'rect',  // 'rect' | 'ellipse' | 'polygon'
+        areaInkTool: null,        // null | 'line' | 'rect' | 'polygon' | 'ellipse' | 'path'
         styleColors: null, // 카테고리별 사용자 지정 색상 (미지정 시 DEFAULT_STYLE_COLORS 사용)
         styleSizes: null,  // 카테고리별 사용자 지정 핀/화살표 크기 (미지정 시 DEFAULT_STYLE_SIZES 사용)
         defectLeaderLineScale: 1.0, // 결함위치도: 박스↔화살표 연결선 두께 배율 (박스 테두리 기준)

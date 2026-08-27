@@ -32,7 +32,7 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <meta name="apple-mobile-web-app-title" content="스마트 안전점검">
-    <link rel="stylesheet" href="styles.css?v=20260827_overview">
+    <link rel="stylesheet" href="styles.css?v=20260827_area_ink">
     <!-- FontAwesome icons for clean engineering UI -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <!-- PDF 생성용: 페이지별로 직접 캡처해서 조립(큰 보고서에서 html2pdf 한방 렌더링이 캔버스 높이 한계로
@@ -227,6 +227,19 @@
                                 <i class="fa-solid fa-draw-square"></i> 🟧 영역 마킹 <span class="mode-shortcut">A</span>
                             </button>
                         </div>
+                        <div class="area-tool-panel" id="areaToolPanel" hidden>
+                            <span class="area-tool-kicker">영역 모양</span>
+                            <button type="button" class="area-tool-btn active" id="btnAreaCreateRect" data-area-create="rect" title="박스">박스</button>
+                            <button type="button" class="area-tool-btn" id="btnAreaCreateEllipse" data-area-create="ellipse" title="타원">타원</button>
+                            <button type="button" class="area-tool-btn" id="btnAreaCreatePolygon" data-area-create="polygon" title="다각형 — 점 찍고 더블클릭 또는 첫 점에 가깝게 클릭해서 닫기">다각형</button>
+                            <span class="area-tool-kicker">내부 그리기</span>
+                            <button type="button" class="area-tool-btn" id="btnAreaInkLine" data-area-ink="line" title="선택한 영역 안에 선">선</button>
+                            <button type="button" class="area-tool-btn" id="btnAreaInkRect" data-area-ink="rect" title="선택한 영역 안에 박스">박스</button>
+                            <button type="button" class="area-tool-btn" id="btnAreaInkPoly" data-area-ink="polygon" title="선택한 영역 안에 다각형">다각형</button>
+                            <button type="button" class="area-tool-btn" id="btnAreaInkEllipse" data-area-ink="ellipse" title="선택한 영역 안에 타원">타원</button>
+                            <button type="button" class="area-tool-btn" id="btnAreaInkPath" data-area-ink="path" title="선택한 영역 안에 자유선">자유선</button>
+                            <button type="button" class="area-tool-btn area-tool-btn-undo" id="btnAreaInkUndo" title="마지막 내부 그리기 지우기">그리기 취소</button>
+                        </div>
 
                         <div class="toolbar-action-group">
                             <button type="button" id="btnToggleMapStyleSize" class="mode-btn toolbar-size-toggle pc-only-chrome" title="핀·화살표·연결선 크기 조절 패널 표시" aria-pressed="false">
@@ -283,6 +296,10 @@
                             <button type="button" class="mobile-rail-btn mobile-fab-area" id="mobileBtnModeArea" data-mode="AREA" title="영역 마킹">
                                 <i class="fa-solid fa-vector-square"></i>
                                 <span>영역</span>
+                            </button>
+                            <button type="button" class="mobile-rail-btn" id="mobileBtnAreaInk" title="영역 내부 그리기 (영역을 선택한 뒤 사용)">
+                                <i class="fa-solid fa-pen"></i>
+                                <span>그리기</span>
                             </button>
                             <button type="button" class="mobile-rail-btn" id="mobileBtnQuickDrag" title="켜면 빈 곳 드래그로 결함 다중 선택 (핀·화살표 이동은 0.3초 길게 누름)" aria-pressed="false">
                                 <i class="fa-solid fa-square-dashed"></i>
@@ -899,6 +916,11 @@
                                 <button type="button" class="defect-area-style-btn active" id="btnAreaBorderSolid" data-area-border="solid">실선</button>
                                 <button type="button" class="defect-area-style-btn" id="btnAreaBorderDashed" data-area-border="dashed">점선</button>
                             </div>
+                        </div>
+                        <div class="defect-area-style-row">
+                            <span class="defect-area-style-label">영역 각도:</span>
+                            <input type="number" id="defectAreaAngle" class="form-control defect-area-angle-input" min="-180" max="180" step="1" value="0" title="영역 회전 각도 (도)">
+                            <span class="defect-area-angle-unit">°</span>
                         </div>
                     </div>
 
@@ -2396,9 +2418,9 @@
     </div>
 
     <!-- Core → 탭 분류 → 기존 엔진(app.js) -->
-    <script src="js/core/state.js?v=20260827_userpin"></script>
+    <script src="js/core/state.js?v=20260827_area_ink"></script>
     <script src="js/tabs/registry.js?v=20260826_bsafix"></script>
-    <script src="js/pdf-vector-bridge.js?v=20260826_fastmap"></script>
+    <script src="js/pdf-vector-bridge.js?v=20260827_area_ink"></script>
     <script src="js/core/layout-mode.js?v=20260827_tablet"></script>
     <script src="js/tabs/home.js?v=20260827_overview"></script>
     <script src="js/tabs/map.js?v=20260826_mem1"></script>
@@ -2407,7 +2429,7 @@
     <script src="js/shared/report.js?v=20260827_overview"></script>
     <script src="js/shared/hwpx-import.js?v=20260825_hwpxin"></script>
     <script src="js/shared/auth.js?v=20260821_land1"></script>
-    <script src="app.js?v=20260827_overview"></script>
+    <script src="app.js?v=20260827_area_ink"></script>
     <script>
         window.BSA_APP_VERSION = '20260826_mem1';
         (function () {

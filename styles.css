@@ -1625,6 +1625,49 @@ body {
     box-shadow: 0 0 15px rgba(249, 115, 22, 0.6) !important;
 }
 
+.area-tool-panel {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.28rem 0.4rem;
+    padding: 0.2rem 0.35rem;
+    border: 1px solid var(--border-highlight, #e2e8f0);
+    border-radius: 8px;
+    background: rgba(255,255,255,0.92);
+}
+.area-tool-panel[hidden] { display: none !important; }
+.area-tool-kicker {
+    font-size: 0.72rem;
+    font-weight: 800;
+    color: #64748b;
+    margin-left: 0.2rem;
+}
+.area-tool-btn {
+    border: 1px solid #cbd5e1;
+    background: #fff;
+    color: #334155;
+    font-size: 0.75rem;
+    font-weight: 700;
+    padding: 0.22rem 0.5rem;
+    border-radius: 6px;
+    cursor: pointer;
+}
+.area-tool-btn.active {
+    background: #1e293b;
+    color: #fff;
+    border-color: #1e293b;
+}
+.area-tool-btn-undo { color: #b45309; }
+.defect-area-angle-input {
+    width: 5.2rem;
+    display: inline-block;
+}
+.defect-area-angle-unit {
+    font-size: 0.85rem;
+    font-weight: 700;
+    color: #64748b;
+}
+
 @media (max-width: 768px) {
     .inspect-layout {
         flex-direction: column;

@@ -319,43 +319,146 @@
     };
   }
 
-  function drawVectorAreaMark(page, area, color, imgToPdf, sx, sy, pageH, sAvg) {
-    if (!area) return;
+  function pdfPtsFromImg(points, imgToPdf) {
+    return (points || []).map((p) => imgToPdf(p.x, p.y));
+  }
+
+  function ellipsePolyImg(cx, cy, rx, ry, angleDeg, segments) {
+    const n = Math.max(16, segments || 48);
+    const rad = ((Number(angleDeg) || 0) * Math.PI) / 180;
+    const c = Math.cos(rad);
+    const s = Math.sin(rad);
+    const pts = [];
+    for (let i = 0; i < n; i++) {
+      const t = (i / n) * Math.PI * 2;
+      const lx = Math.cos(t) * rx;
+      const ly = Math.sin(t) * ry;
+      pts.push({ x: cx + lx * c - ly * s, y: cy + lx * s + ly * c });
+    }
+    return pts;
+  }
+
+  function areaOutlineImgPoints(area) {
+    const shape = area.shape === 'ellipse' || area.shape === 'polygon' ? area.shape : 'rect';
     const ix1 = Math.min(area.x1, area.x2);
     const iy1 = Math.min(area.y1, area.y2);
     const ix2 = Math.max(area.x1, area.x2);
     const iy2 = Math.max(area.y1, area.y2);
-    const tl = imgToPdf(ix1, iy1);
-    const br = imgToPdf(ix2, iy2);
-    const rx = Math.min(tl.x, br.x);
-    const ry = Math.min(tl.y, br.y);
-    const rw = Math.abs(br.x - tl.x);
-    const rh = Math.abs(br.y - tl.y);
-    if (rw < 0.5 || rh < 0.5) return;
+    const cx = (ix1 + ix2) / 2;
+    const cy = (iy1 + iy2) / 2;
+    const hw = (ix2 - ix1) / 2;
+    const hh = (iy2 - iy1) / 2;
+    const ang = Number(area.angle) || 0;
+    if (shape === 'ellipse') {
+      return ellipsePolyImg(cx, cy, Math.max(hw, 0.5), Math.max(hh, 0.5), ang, 56);
+    }
+    if (Array.isArray(area.points) && area.points.length >= 3) {
+      return area.points.map((p) => ({ x: Number(p.x), y: Number(p.y) }));
+    }
+    const rad = (ang * Math.PI) / 180;
+    const c = Math.cos(rad);
+    const s = Math.sin(rad);
+    return [
+      { x: -hw, y: -hh }, { x: hw, y: -hh }, { x: hw, y: hh }, { x: -hw, y: hh }
+    ].map((p) => ({
+      x: cx + p.x * c - p.y * s,
+      y: cy + p.x * s + p.y * c
+    }));
+  }
+
+  function drawFilledPolygonPdf(page, pdfPts, color) {
+    if (!pdfPts || pdfPts.length < 3) return;
+    const {
+      pushGraphicsState,
+      popGraphicsState,
+      setFillingColor,
+      moveTo,
+      lineTo,
+      closePath,
+      fill
+    } = PDFLib;
+    if (typeof page.pushOperators !== 'function' || !moveTo || !fill || !setFillingColor) return;
+    page.pushOperators(
+      pushGraphicsState(),
+      setFillingColor(color),
+      moveTo(pdfPts[0].x, pdfPts[0].y),
+      ...pdfPts.slice(1).map((p) => lineTo(p.x, p.y)),
+      closePath(),
+      fill(),
+      popGraphicsState()
+    );
+  }
+
+  function drawStrokedPolygonPdf(page, pdfPts, thickness, color, dashed) {
+    if (!pdfPts || pdfPts.length < 2) return;
+    const thick = Math.max(0.2, thickness || 1);
+    const {
+      pushGraphicsState,
+      popGraphicsState,
+      setStrokingColor,
+      setLineWidth,
+      setDashPattern,
+      moveTo,
+      lineTo,
+      closePath,
+      stroke
+    } = PDFLib;
+    if (typeof page.pushOperators === 'function' && moveTo && stroke) {
+      const ops = [
+        pushGraphicsState(),
+        setStrokingColor(color),
+        setLineWidth(thick)
+      ];
+      if (dashed && typeof setDashPattern === 'function') {
+        ops.push(setDashPattern([Math.max(2, 5 * thick), Math.max(1.5, 4 * thick)], 0));
+      }
+      ops.push(moveTo(pdfPts[0].x, pdfPts[0].y));
+      for (let i = 1; i < pdfPts.length; i++) ops.push(lineTo(pdfPts[i].x, pdfPts[i].y));
+      ops.push(closePath(), stroke(), popGraphicsState());
+      page.pushOperators(...ops);
+      return;
+    }
+    drawStrokedPolyline(page, pdfPts.concat([pdfPts[0]]), thick, color);
+  }
+
+  function drawVectorAreaMark(page, area, color, imgToPdf, sx, sy, pageH, sAvg) {
+    if (!area) return;
+    const outlineImg = areaOutlineImgPoints(area);
+    const outlinePdf = pdfPtsFromImg(outlineImg, imgToPdf);
+    if (outlinePdf.length < 3) return;
 
     const fillStyle = area.fillStyle === 'hatch' || area.fillStyle === 'none' ? area.fillStyle : 'solid';
     const borderStyle = area.borderStyle === 'dashed' ? 'dashed' : 'solid';
     const borderW = Math.max(0.35, 1.1 * sAvg);
 
+    let minX = outlinePdf[0].x, maxX = outlinePdf[0].x, minY = outlinePdf[0].y, maxY = outlinePdf[0].y;
+    outlinePdf.forEach((p) => {
+      minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x);
+      minY = Math.min(minY, p.y); maxY = Math.max(maxY, p.y);
+    });
+    const rw = maxX - minX;
+    const rh = maxY - minY;
+    const shape = area.shape || 'rect';
+    const ang = Math.abs(Number(area.angle) || 0);
+    const axisAlignedRect = shape === 'rect' && ang < 0.01;
+
     if (fillStyle === 'solid') {
-      page.drawRectangle({
-        x: rx,
-        y: ry,
-        width: rw,
-        height: rh,
-        color,
-        opacity: 0.28,
-        borderWidth: 0
-      });
+      if (axisAlignedRect) {
+        page.drawRectangle({
+          x: minX, y: minY, width: rw, height: rh,
+          color, opacity: 0.28, borderWidth: 0
+        });
+      } else {
+        drawFilledPolygonPdf(page, outlinePdf, color);
+      }
     } else if (fillStyle === 'hatch') {
       const step = Math.max(4, 9 * sAvg);
       const hatchW = Math.max(0.35, 0.9 * sAvg);
-      // PDF y↑ : 이미지에서 ↘ 빗금 → PDF에서도 대각선
       for (let i = -rh; i <= rw + rh; i += step) {
         const seg = clipLineToRect(
-          rx + i, ry + rh,
-          rx + i + rh, ry,
-          rx, ry, rx + rw, ry + rh
+          minX + i, minY + rh,
+          minX + i + rh, minY,
+          minX, minY, maxX, maxY
         );
         if (!seg) continue;
         page.drawLine({
@@ -368,18 +471,48 @@
       }
     }
 
-    const borderOpts = {
-      x: rx,
-      y: ry,
-      width: rw,
-      height: rh,
-      borderColor: color,
-      borderWidth: borderW
-    };
-    if (borderStyle === 'dashed') {
-      borderOpts.borderDashArray = [Math.max(2, 5 * sAvg), Math.max(1.5, 4 * sAvg)];
+    if (axisAlignedRect) {
+      const borderOpts = {
+        x: minX, y: minY, width: rw, height: rh,
+        borderColor: color, borderWidth: borderW
+      };
+      if (borderStyle === 'dashed') {
+        borderOpts.borderDashArray = [Math.max(2, 5 * sAvg), Math.max(1.5, 4 * sAvg)];
+      }
+      page.drawRectangle(borderOpts);
+    } else {
+      drawStrokedPolygonPdf(page, outlinePdf, borderW, color, borderStyle === 'dashed');
     }
-    page.drawRectangle(borderOpts);
+
+    const drawings = Array.isArray(area.drawings) ? area.drawings : [];
+    const inkW = Math.max(0.4, 1.5 * sAvg);
+    drawings.forEach((st) => {
+      const pts = st.points || [];
+      if (pts.length < 1) return;
+      const type = st.type || 'path';
+      if (type === 'rect' && pts.length >= 2) {
+        const x1 = Math.min(pts[0].x, pts[1].x);
+        const y1 = Math.min(pts[0].y, pts[1].y);
+        const x2 = Math.max(pts[0].x, pts[1].x);
+        const y2 = Math.max(pts[0].y, pts[1].y);
+        drawStrokedPolygonPdf(page, pdfPtsFromImg([
+          { x: x1, y: y1 }, { x: x2, y: y1 }, { x: x2, y: y2 }, { x: x1, y: y2 }
+        ], imgToPdf), inkW, color, false);
+      } else if (type === 'ellipse' && pts.length >= 2) {
+        const x1 = Math.min(pts[0].x, pts[1].x);
+        const y1 = Math.min(pts[0].y, pts[1].y);
+        const x2 = Math.max(pts[0].x, pts[1].x);
+        const y2 = Math.max(pts[0].y, pts[1].y);
+        drawStrokedPolygonPdf(page, pdfPtsFromImg(
+          ellipsePolyImg((x1 + x2) / 2, (y1 + y2) / 2, Math.max((x2 - x1) / 2, 0.5), Math.max((y2 - y1) / 2, 0.5), 0, 40),
+          imgToPdf
+        ), inkW, color, false);
+      } else {
+        const pPdf = pdfPtsFromImg(pts, imgToPdf);
+        if (type === 'polygon' && pPdf.length >= 3) drawStrokedPolygonPdf(page, pPdf, inkW, color, false);
+        else drawStrokedPolyline(page, pPdf, inkW, color);
+      }
+    });
   }
 
   /**

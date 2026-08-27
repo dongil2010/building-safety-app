@@ -6161,9 +6161,67 @@ document.addEventListener('DOMContentLoaded', () => {
                 areaY1: areaStartImgY,
                 areaX2: areaCurImgX,
                 areaY2: areaCurImgY,
+                areaShape: (state.areaCreateShape === 'ellipse') ? 'ellipse' : 'rect',
+                areaAngle: 0,
                 category: document.getElementById('defectCategory')?.value || '구조체',
                 no: ''
             }, true);
+            }
+            if (pendingAreaPoly && pendingAreaPoly.length) {
+                ctx.save();
+                ctx.strokeStyle = '#ea580c';
+                ctx.fillStyle = 'rgba(234,88,12,0.15)';
+                ctx.lineWidth = 2 / Math.max(state.view.scale || 1, 0.01);
+                ctx.beginPath();
+                pendingAreaPoly.forEach((p, i) => {
+                    if (i === 0) ctx.moveTo(p.x, p.y);
+                    else ctx.lineTo(p.x, p.y);
+                });
+                if (pendingAreaPoly.length >= 3) {
+                    ctx.closePath();
+                    ctx.fill();
+                }
+                ctx.stroke();
+                pendingAreaPoly.forEach((p) => {
+                    ctx.beginPath();
+                    ctx.arc(p.x, p.y, 4 / Math.max(state.view.scale || 1, 0.01), 0, Math.PI * 2);
+                    ctx.fillStyle = '#ea580c';
+                    ctx.fill();
+                });
+                ctx.restore();
+            }
+            if (areaInkStroke && areaInkStroke.points && areaInkStroke.points.length) {
+                // preview stroke without clip — draw raw
+                ctx.save();
+                ctx.strokeStyle = '#0f172a';
+                ctx.lineWidth = 2.2 / Math.max(state.view.scale || 1, 0.01);
+                ctx.beginPath();
+                const pts = areaInkStroke.points;
+                if ((areaInkStroke.type === 'rect' || areaInkStroke.type === 'ellipse') && pts.length >= 2) {
+                    const x1 = Math.min(pts[0].x, pts[1].x);
+                    const y1 = Math.min(pts[0].y, pts[1].y);
+                    const x2 = Math.max(pts[0].x, pts[1].x);
+                    const y2 = Math.max(pts[0].y, pts[1].y);
+                    if (areaInkStroke.type === 'ellipse') {
+                        ctx.ellipse((x1 + x2) / 2, (y1 + y2) / 2, Math.max((x2 - x1) / 2, 0.5), Math.max((y2 - y1) / 2, 0.5), 0, 0, Math.PI * 2);
+                    } else ctx.rect(x1, y1, x2 - x1, y2 - y1);
+                } else {
+                    pts.forEach((p, i) => { if (i === 0) ctx.moveTo(p.x, p.y); else ctx.lineTo(p.x, p.y); });
+                }
+                ctx.stroke();
+                ctx.restore();
+            }
+            if (pendingInkPoly && pendingInkPoly.points && pendingInkPoly.points.length) {
+                ctx.save();
+                ctx.strokeStyle = '#0f172a';
+                ctx.lineWidth = 2 / Math.max(state.view.scale || 1, 0.01);
+                ctx.beginPath();
+                pendingInkPoly.points.forEach((p, i) => {
+                    if (i === 0) ctx.moveTo(p.x, p.y);
+                    else ctx.lineTo(p.x, p.y);
+                });
+                ctx.stroke();
+                ctx.restore();
             }
 
             if (isMarqueeSelecting) {
@@ -13459,7 +13517,6 @@ document.addEventListener('DOMContentLoaded', () => {
             ctx.globalAlpha = 1;
             return;
         }
-        // hatch
         ctx.save();
         ctx.beginPath();
         ctx.rect(x1, y1, w, h);
@@ -13478,30 +13535,358 @@ document.addEventListener('DOMContentLoaded', () => {
         ctx.restore();
     }
 
-    function drawAreaRect(ctx, defect, isPreview, forReport) {
-        const x1 = Math.min(defect.areaX1, defect.areaX2);
-        const y1 = Math.min(defect.areaY1, defect.areaY2);
-        const x2 = Math.max(defect.areaX1, defect.areaX2);
-        const y2 = Math.max(defect.areaY1, defect.areaY2);
-        const isBeingDragged = (!isPreview && typeof activeDragPin !== 'undefined' && activeDragPin && activeDragPin.id === defect.id);
+    function normalizeAreaShape(v) {
+        return (v === 'ellipse' || v === 'polygon') ? v : 'rect';
+    }
 
-        // 전회차(과거 조사) 결함은 도면에서 더 두껍고 진하게 표시 — 보고서(forReport)는 구분 없이 그대로 둠
+    function getAreaShape(defect) {
+        return normalizeAreaShape(defect && defect.areaShape);
+    }
+
+    function getAreaAngleDeg(defect) {
+        const n = Number(defect && defect.areaAngle);
+        return Number.isFinite(n) ? n : 0;
+    }
+
+    function getAreaAabb(defect) {
+        const x1 = Math.min(Number(defect.areaX1) || 0, Number(defect.areaX2) || 0);
+        const y1 = Math.min(Number(defect.areaY1) || 0, Number(defect.areaY2) || 0);
+        const x2 = Math.max(Number(defect.areaX1) || 0, Number(defect.areaX2) || 0);
+        const y2 = Math.max(Number(defect.areaY1) || 0, Number(defect.areaY2) || 0);
+        return { x1, y1, x2, y2, w: x2 - x1, h: y2 - y1, cx: (x1 + x2) / 2, cy: (y1 + y2) / 2 };
+    }
+
+    function rotateImgPoint(x, y, cx, cy, deg) {
+        const rad = (deg * Math.PI) / 180;
+        const c = Math.cos(rad);
+        const s = Math.sin(rad);
+        const dx = x - cx;
+        const dy = y - cy;
+        return { x: cx + dx * c - dy * s, y: cy + dx * s + dy * c };
+    }
+
+    function areaLocalToImg(defect, lx, ly) {
+        const { cx, cy } = getAreaAabb(defect);
+        return rotateImgPoint(cx + lx, cy + ly, cx, cy, getAreaAngleDeg(defect));
+    }
+
+    function areaImgToLocal(defect, x, y) {
+        const { cx, cy } = getAreaAabb(defect);
+        const rad = (getAreaAngleDeg(defect) * Math.PI) / 180;
+        const c = Math.cos(rad);
+        const s = Math.sin(rad);
+        const dx = x - cx;
+        const dy = y - cy;
+        return { x: dx * c + dy * s, y: -dx * s + dy * c };
+    }
+
+    function getAreaWorldCorners(defect) {
+        const { w, h } = getAreaAabb(defect);
+        const hw = w / 2;
+        const hh = h / 2;
+        return [
+            areaLocalToImg(defect, -hw, -hh),
+            areaLocalToImg(defect, hw, -hh),
+            areaLocalToImg(defect, hw, hh),
+            areaLocalToImg(defect, -hw, hh)
+        ];
+    }
+
+    function getAreaPolyPoints(defect) {
+        if (getAreaShape(defect) === 'polygon' && Array.isArray(defect.areaPoints) && defect.areaPoints.length >= 3) {
+            return defect.areaPoints.map((p) => ({ x: Number(p.x), y: Number(p.y) }));
+        }
+        return getAreaWorldCorners(defect);
+    }
+
+    function syncAreaBboxFromPoints(defect) {
+        const pts = getAreaPolyPoints(defect);
+        if (!pts.length) return;
+        let x1 = pts[0].x, y1 = pts[0].y, x2 = pts[0].x, y2 = pts[0].y;
+        pts.forEach((p) => {
+            x1 = Math.min(x1, p.x); y1 = Math.min(y1, p.y);
+            x2 = Math.max(x2, p.x); y2 = Math.max(y2, p.y);
+        });
+        defect.areaX1 = x1; defect.areaY1 = y1; defect.areaX2 = x2; defect.areaY2 = y2;
+    }
+
+    function pointInPolygonPts(pts, x, y) {
+        let inside = false;
+        for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+            const xi = pts[i].x, yi = pts[i].y, xj = pts[j].x, yj = pts[j].y;
+            const intersect = ((yi > y) !== (yj > y)) && (x < ((xj - xi) * (y - yi)) / ((yj - yi) || 1e-12) + xi);
+            if (intersect) inside = !inside;
+        }
+        return inside;
+    }
+
+    function distPointToSegment(px, py, ax, ay, bx, by) {
+        const dx = bx - ax;
+        const dy = by - ay;
+        const l2 = dx * dx + dy * dy || 1e-12;
+        let t = ((px - ax) * dx + (py - ay) * dy) / l2;
+        t = Math.max(0, Math.min(1, t));
+        return Math.hypot(px - (ax + t * dx), py - (ay + t * dy));
+    }
+
+    function isPointInAreaMark(defect, x, y, pad) {
+        if (!defect || defect.areaX1 === undefined) return false;
+        const p = pad || 0;
+        const shape = getAreaShape(defect);
+        if (shape === 'polygon') {
+            const pts = getAreaPolyPoints(defect);
+            if (pointInPolygonPts(pts, x, y)) return true;
+            if (p > 0) {
+                for (let i = 0; i < pts.length; i++) {
+                    const a = pts[i];
+                    const b = pts[(i + 1) % pts.length];
+                    if (distPointToSegment(x, y, a.x, a.y, b.x, b.y) <= p) return true;
+                }
+            }
+            return false;
+        }
+        const loc = areaImgToLocal(defect, x, y);
+        const { w, h } = getAreaAabb(defect);
+        const hw = w / 2 + p;
+        const hh = h / 2 + p;
+        if (shape === 'ellipse') {
+            if (hw <= 0 || hh <= 0) return false;
+            return (loc.x * loc.x) / (hw * hw) + (loc.y * loc.y) / (hh * hh) <= 1;
+        }
+        return loc.x >= -hw && loc.x <= hw && loc.y >= -hh && loc.y <= hh;
+    }
+
+    function getAreaRotateHandle(defect) {
+        const { h } = getAreaAabb(defect);
+        return areaLocalToImg(defect, 0, -h / 2 - 28);
+    }
+
+    function getAreaOrientedEdgeCenters(defect) {
+        const { w, h } = getAreaAabb(defect);
+        return [
+            areaLocalToImg(defect, 0, -h / 2),
+            areaLocalToImg(defect, w / 2, 0),
+            areaLocalToImg(defect, 0, h / 2),
+            areaLocalToImg(defect, -w / 2, 0)
+        ];
+    }
+
+    function translateAreaDrawings(defect, dx, dy) {
+        if (!defect || (!dx && !dy)) return;
+        (defect.areaDrawings || []).forEach((st) => {
+            (st.points || []).forEach((p) => {
+                p.x += dx; p.y += dy;
+            });
+        });
+        (defect.areaPoints || []).forEach((p) => {
+            p.x += dx; p.y += dy;
+        });
+    }
+
+    function rotateAreaDefect(defect, newAngleDeg) {
+        if (!defect) return;
+        const { cx, cy } = getAreaAabb(defect);
+        const old = getAreaAngleDeg(defect);
+        const delta = newAngleDeg - old;
+        const rot = (p) => rotateImgPoint(p.x, p.y, cx, cy, delta);
+        if (getAreaShape(defect) === 'polygon' && Array.isArray(defect.areaPoints)) {
+            defect.areaPoints = defect.areaPoints.map((p) => rot(p));
+            syncAreaBboxFromPoints(defect);
+            defect.areaAngle = 0;
+        } else {
+            defect.areaAngle = newAngleDeg;
+        }
+        if (typeof defect.targetX === 'number' && typeof defect.targetY === 'number') {
+            const r = rot({ x: defect.targetX, y: defect.targetY });
+            defect.targetX = r.x; defect.targetY = r.y;
+        }
+        (defect.areaDrawings || []).forEach((st) => {
+            if (!st.points) return;
+            st.points = st.points.map((p) => rot(p));
+        });
+    }
+
+    function applyAreaResizeLocal(defect, imgX, imgY, xField, yField) {
+        if (!defect) return;
+        const aabb = getAreaAabb(defect);
+        const loc = areaImgToLocal(defect, imgX, imgY);
+        let lx1 = -aabb.w / 2;
+        let ly1 = -aabb.h / 2;
+        let lx2 = aabb.w / 2;
+        let ly2 = aabb.h / 2;
+        const minXF = defect.areaX1 <= defect.areaX2 ? 'areaX1' : 'areaX2';
+        const maxXF = defect.areaX1 <= defect.areaX2 ? 'areaX2' : 'areaX1';
+        const minYF = defect.areaY1 <= defect.areaY2 ? 'areaY1' : 'areaY2';
+        const maxYF = defect.areaY1 <= defect.areaY2 ? 'areaY2' : 'areaY1';
+        if (xField === minXF) lx1 = loc.x;
+        if (xField === maxXF) lx2 = loc.x;
+        if (yField === minYF) ly1 = loc.y;
+        if (yField === maxYF) ly2 = loc.y;
+        if (lx2 - lx1 < 12) {
+            if (xField === minXF) lx1 = lx2 - 12;
+            else lx2 = lx1 + 12;
+        }
+        if (ly2 - ly1 < 12) {
+            if (yField === minYF) ly1 = ly2 - 12;
+            else ly2 = ly1 + 12;
+        }
+        const nlx1 = Math.min(lx1, lx2);
+        const nly1 = Math.min(ly1, ly2);
+        const nlx2 = Math.max(lx1, lx2);
+        const nly2 = Math.max(ly1, ly2);
+        const mid = areaLocalToImg(defect, (nlx1 + nlx2) / 2, (nly1 + nly2) / 2);
+        const nw = nlx2 - nlx1;
+        const nh = nly2 - nly1;
+        defect.areaX1 = mid.x - nw / 2;
+        defect.areaY1 = mid.y - nh / 2;
+        defect.areaX2 = mid.x + nw / 2;
+        defect.areaY2 = mid.y + nh / 2;
+    }
+
+    function beginAreaShapePath(ctx, defect) {
+        const shape = getAreaShape(defect);
+        ctx.beginPath();
+        if (shape === 'ellipse') {
+            const { cx, cy, w, h } = getAreaAabb(defect);
+            ctx.ellipse(cx, cy, Math.max(w / 2, 0.5), Math.max(h / 2, 0.5), (getAreaAngleDeg(defect) * Math.PI) / 180, 0, Math.PI * 2);
+            return;
+        }
+        const pts = (shape === 'polygon') ? getAreaPolyPoints(defect) : getAreaWorldCorners(defect);
+        pts.forEach((p, i) => {
+            if (i === 0) ctx.moveTo(p.x, p.y);
+            else ctx.lineTo(p.x, p.y);
+        });
+        ctx.closePath();
+    }
+
+    function paintAreaShapeInterior(ctx, defect, color, fillStyle) {
+        if (fillStyle === 'none') return;
+        ctx.save();
+        beginAreaShapePath(ctx, defect);
+        ctx.clip();
+        if (fillStyle === 'solid') {
+            ctx.globalAlpha = 0.28;
+            ctx.fillStyle = color;
+            beginAreaShapePath(ctx, defect);
+            ctx.fill();
+        } else {
+            const { x1, y1, x2, y2, w, h } = getAreaAabb(defect);
+            ctx.strokeStyle = color;
+            ctx.globalAlpha = 0.7;
+            ctx.lineWidth = 1.2;
+            ctx.setLineDash([]);
+            const step = 9;
+            for (let i = -h; i <= w + h; i += step) {
+                ctx.beginPath();
+                ctx.moveTo(x1 + i, y1);
+                ctx.lineTo(x1 + i + h, y2);
+                ctx.stroke();
+            }
+        }
+        ctx.restore();
+    }
+
+    function strokeAreaShape(ctx, defect) {
+        beginAreaShapePath(ctx, defect);
+        ctx.stroke();
+    }
+
+    function clipAreaShape(ctx, defect) {
+        beginAreaShapePath(ctx, defect);
+        ctx.clip();
+    }
+
+    function drawAreaInkStrokes(ctx, defect, color) {
+        const strokes = defect.areaDrawings;
+        if (!Array.isArray(strokes) || !strokes.length) return;
+        ctx.save();
+        clipAreaShape(ctx, defect);
+        ctx.strokeStyle = color;
+        ctx.fillStyle = color;
+        ctx.globalAlpha = 0.92;
+        ctx.lineWidth = 2.2;
+        ctx.lineJoin = 'round';
+        ctx.lineCap = 'round';
+        ctx.setLineDash([]);
+        strokes.forEach((st) => {
+            const pts = st.points || [];
+            if (pts.length < 1) return;
+            const type = st.type || 'path';
+            ctx.beginPath();
+            if (type === 'rect' && pts.length >= 2) {
+                const x1 = Math.min(pts[0].x, pts[1].x);
+                const y1 = Math.min(pts[0].y, pts[1].y);
+                const x2 = Math.max(pts[0].x, pts[1].x);
+                const y2 = Math.max(pts[0].y, pts[1].y);
+                ctx.rect(x1, y1, x2 - x1, y2 - y1);
+                ctx.stroke();
+            } else if (type === 'ellipse' && pts.length >= 2) {
+                const x1 = Math.min(pts[0].x, pts[1].x);
+                const y1 = Math.min(pts[0].y, pts[1].y);
+                const x2 = Math.max(pts[0].x, pts[1].x);
+                const y2 = Math.max(pts[0].y, pts[1].y);
+                ctx.ellipse((x1 + x2) / 2, (y1 + y2) / 2, Math.max((x2 - x1) / 2, 0.5), Math.max((y2 - y1) / 2, 0.5), 0, 0, Math.PI * 2);
+                ctx.stroke();
+            } else {
+                pts.forEach((p, i) => {
+                    if (i === 0) ctx.moveTo(p.x, p.y);
+                    else ctx.lineTo(p.x, p.y);
+                });
+                if (type === 'polygon' && pts.length >= 3) ctx.closePath();
+                ctx.stroke();
+            }
+        });
+        ctx.restore();
+    }
+
+    function drawAreaRect(ctx, defect, isPreview, forReport) {
+        if (!defect || defect.areaX1 === undefined) return;
+        const isBeingDragged = (!isPreview && typeof activeDragPin !== 'undefined' && activeDragPin && activeDragPin.id === defect.id);
         const isPrevRoundDefect = !forReport && isPreviousRoundDefect(defect);
         const roundLineMul = isPrevRoundDefect ? 1.35 : 1.0;
         const mainColor = getDefectColor(defect);
         const activeColor = isBeingDragged ? '#facc15' : mainColor;
         const fillStyle = getAreaFillStyle(defect);
         const borderStyle = getAreaBorderStyle(defect);
+        const areaPinScale = getStyleSize(getDefectStyleKey(defect.category, defect.defectType)).pin;
 
         ctx.save();
-        paintAreaInterior(ctx, x1, y1, x2, y2, activeColor, fillStyle);
+        paintAreaShapeInterior(ctx, defect, activeColor, fillStyle);
+        drawAreaInkStrokes(ctx, defect, activeColor);
         ctx.strokeStyle = activeColor;
-        // 영역 테두리 — HD·고배율에서도 연결선 슬라이더·HD 보정 적용
-        const areaPinScale = getStyleSize(getDefectStyleKey(defect.category, defect.defectType)).pin;
         ctx.lineWidth = getDefectLeaderLineWidth(areaPinScale, roundLineMul, isBeingDragged);
         if (isPreview || borderStyle === 'dashed') ctx.setLineDash([5, 4]);
         else ctx.setLineDash([]);
-        ctx.strokeRect(x1, y1, x2 - x1, y2 - y1);
+        strokeAreaShape(ctx, defect);
+
+        const selected = !isPreview && !forReport && defect.id
+            && typeof selectedDefectIds !== 'undefined' && selectedDefectIds.has(defect.id);
+        if (selected) {
+            ctx.setLineDash([]);
+            ctx.fillStyle = '#1e293b';
+            ctx.strokeStyle = '#f8fafc';
+            ctx.lineWidth = 1.4;
+            getAreaWorldCorners(defect).forEach((c) => {
+                ctx.beginPath();
+                ctx.arc(c.x, c.y, 5, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.stroke();
+            });
+            const handle = getAreaRotateHandle(defect);
+            const { cx, cy } = getAreaAabb(defect);
+            ctx.beginPath();
+            ctx.moveTo(cx, cy);
+            ctx.lineTo(handle.x, handle.y);
+            ctx.strokeStyle = '#0f172a';
+            ctx.lineWidth = 1.2;
+            ctx.stroke();
+            ctx.beginPath();
+            ctx.arc(handle.x, handle.y, 7, 0, Math.PI * 2);
+            ctx.fillStyle = '#f59e0b';
+            ctx.fill();
+            ctx.strokeStyle = '#fff';
+            ctx.stroke();
+        }
         ctx.restore();
     }
 
@@ -13592,6 +13977,34 @@ document.addEventListener('DOMContentLoaded', () => {
         return dy < 0 ? { x: cx, y: y1 } : { x: cx, y: y2 };
     }
 
+    function getAreaEdgeMidpoints(defect) {
+        if (getAreaShape(defect) === 'polygon') {
+            const pts = getAreaPolyPoints(defect);
+            return pts.map((p, i) => {
+                const n = pts[(i + 1) % pts.length];
+                return { x: (p.x + n.x) / 2, y: (p.y + n.y) / 2 };
+            });
+        }
+        return getAreaOrientedEdgeCenters(defect);
+    }
+
+    function getAreaCenterBorderAttachDefect(fromX, fromY, defect) {
+        const { cx, cy } = getAreaAabb(defect);
+        const cands = getAreaEdgeMidpoints(defect);
+        if (!cands.length) return getAreaCenterBorderAttach(fromX, fromY, defect.areaX1, defect.areaY1, defect.areaX2, defect.areaY2);
+        let best = cands[0];
+        let bestDot = -Infinity;
+        const vx = fromX - cx;
+        const vy = fromY - cy;
+        cands.forEach((c) => {
+            const dx = c.x - cx;
+            const dy = c.y - cy;
+            const dot = dx * vx + dy * vy;
+            if (dot > bestDot) { bestDot = dot; best = c; }
+        });
+        return best;
+    }
+
     // 선분이 영역 내부(테두리 제외)를 지나는지 검사 — 지시선이 면적 안을 침범하지 않게
     function segmentCrossesOpenRect(xa, ya, xb, yb, rx1, ry1, rx2, ry2) {
         const eps = 1e-6;
@@ -13653,6 +14066,20 @@ document.addEventListener('DOMContentLoaded', () => {
         return best;
     }
 
+    function projectPointToAreaEdgeCenterDefect(px, py, defect) {
+        const candidates = getAreaEdgeMidpoints(defect);
+        if (!candidates.length) {
+            return projectPointToAreaEdgeCenter(px, py, defect.areaX1, defect.areaY1, defect.areaX2, defect.areaY2);
+        }
+        let best = candidates[0];
+        let bestD = Infinity;
+        candidates.forEach((c) => {
+            const d = (c.x - px) ** 2 + (c.y - py) ** 2;
+            if (d < bestD) { bestD = d; best = c; }
+        });
+        return best;
+    }
+
     function projectPointToRectBorder(px, py, areaX1, areaY1, areaX2, areaY2) {
         const x1 = Math.min(areaX1, areaX2);
         const y1 = Math.min(areaY1, areaY2);
@@ -13698,14 +14125,14 @@ document.addEventListener('DOMContentLoaded', () => {
             || ((needsTip || atLegacyCenter) && atLegacyCorner);
 
         if (needsBox) {
-            const attachProv = getAreaCenterBorderAttach(defect.x ?? cx, defect.y ?? y1 - 40, x1, y1, x2, y2);
+            const attachProv = getAreaCenterBorderAttachDefect(defect.x ?? cx, defect.y ?? y1 - 40, defect);
             const pos = computePinBoxAboveTarget(attachProv.x, attachProv.y, label, scale, state.ctx, 1);
             defect.x = pos.boxX;
             defect.y = pos.boxY;
         }
 
         if (needsTip || atLegacyCenter || needsBox) {
-            const attach = getAreaCenterBorderAttach(defect.x, defect.y, x1, y1, x2, y2);
+            const attach = getAreaCenterBorderAttachDefect(defect.x, defect.y, defect);
             defect.targetX = attach.x;
             defect.targetY = attach.y;
         }
@@ -16780,15 +17207,24 @@ document.addEventListener('DOMContentLoaded', () => {
             fresh.areaY1 = activeDragPin.areaY1;
             fresh.areaX2 = activeDragPin.areaX2;
             fresh.areaY2 = activeDragPin.areaY2;
+            fresh.areaAngle = activeDragPin.areaAngle;
+            fresh.areaShape = activeDragPin.areaShape;
+            fresh.areaPoints = activeDragPin.areaPoints;
+            fresh.areaDrawings = activeDragPin.areaDrawings;
             fresh.x = activeDragPin.x;
             fresh.y = activeDragPin.y;
             if (activeDragPin.targetX !== undefined) fresh.targetX = activeDragPin.targetX;
             if (activeDragPin.targetY !== undefined) fresh.targetY = activeDragPin.targetY;
-        } else if (activeDragPart === 'AREA_RESIZE') {
+        } else if (activeDragPart === 'AREA_RESIZE' || activeDragPart === 'AREA_ROTATE') {
             fresh.areaX1 = activeDragPin.areaX1;
             fresh.areaY1 = activeDragPin.areaY1;
             fresh.areaX2 = activeDragPin.areaX2;
             fresh.areaY2 = activeDragPin.areaY2;
+            fresh.areaAngle = activeDragPin.areaAngle;
+            fresh.areaPoints = activeDragPin.areaPoints;
+            fresh.areaDrawings = activeDragPin.areaDrawings;
+            if (activeDragPin.targetX !== undefined) fresh.targetX = activeDragPin.targetX;
+            if (activeDragPin.targetY !== undefined) fresh.targetY = activeDragPin.targetY;
         } else {
             fresh.x = activeDragPin.x;
             fresh.y = activeDragPin.y;
@@ -16862,6 +17298,11 @@ document.addEventListener('DOMContentLoaded', () => {
     let areaCurImgY = 0;
     let areaMoveLastImgX = 0;
     let areaMoveLastImgY = 0;
+    let pendingAreaPoly = null; // 다각형 영역 생성 중 점들
+    let isAreaInkDrag = false;
+    let areaInkStroke = null;
+    let pendingInkPoly = null; // 내부 다각형 그리기 점들
+    let areaRotateStartAngle = 0;
 
     // 선택 모드: 좌클릭 드래그로 마퀴 선택 (휠클릭은 도면 이동)
     // Ctrl/Meta + 마퀴 = 기존 선택에 추가(여러 번 가능)
@@ -16914,6 +17355,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (typeof renderDefectListPanel === 'function') {
             renderDefectListPanel({ scrollToSelection: options.scrollToSelection === true });
         }
+        if (typeof syncAreaToolPanelUi === 'function') syncAreaToolPanelUi();
     }
 
     // 상태조사표 → 결함위치도: 해당 마킹 선택·화면 이동
@@ -16958,6 +17400,7 @@ document.addEventListener('DOMContentLoaded', () => {
             d.areaY1 += dy;
             d.areaX2 += dx;
             d.areaY2 += dy;
+            translateAreaDrawings(d, dx, dy);
         }
     }
 
@@ -17143,39 +17586,58 @@ document.addEventListener('DOMContentLoaded', () => {
             if (d.shapeType === 'area' && d.areaX1 !== undefined) {
                 ensureAreaPinPlacement(d);
                 const pad = 10;
-                const x1 = Math.min(d.areaX1, d.areaX2);
-                const x2 = Math.max(d.areaX1, d.areaX2);
-                const y1 = Math.min(d.areaY1, d.areaY2);
-                const y2 = Math.max(d.areaY1, d.areaY2);
+                const aabb = getAreaAabb(d);
                 const minXField = d.areaX1 <= d.areaX2 ? 'areaX1' : 'areaX2';
                 const maxXField = d.areaX1 <= d.areaX2 ? 'areaX2' : 'areaX1';
                 const minYField = d.areaY1 <= d.areaY2 ? 'areaY1' : 'areaY2';
                 const maxYField = d.areaY1 <= d.areaY2 ? 'areaY2' : 'areaY1';
 
+                const rotHandle = getAreaRotateHandle(d);
+                if (Math.hypot(imgX - rotHandle.x, imgY - rotHandle.y) <= 14) {
+                    return { defect: d, part: 'AREA_ROTATE' };
+                }
+
                 const cornerR = 14;
-                const corners = [
-                    { x: x1, y: y1, xField: minXField, yField: minYField },
-                    { x: x2, y: y1, xField: maxXField, yField: minYField },
-                    { x: x1, y: y2, xField: minXField, yField: maxYField },
-                    { x: x2, y: y2, xField: maxXField, yField: maxYField }
+                const hw = aabb.w / 2;
+                const hh = aabb.h / 2;
+                const cornerDefs = [
+                    { lx: -hw, ly: -hh, xField: minXField, yField: minYField },
+                    { lx: hw, ly: -hh, xField: maxXField, yField: minYField },
+                    { lx: -hw, ly: hh, xField: minXField, yField: maxYField },
+                    { lx: hw, ly: hh, xField: maxXField, yField: maxYField }
                 ];
-                const hitCorner = corners.find(c => Math.hypot(imgX - c.x, imgY - c.y) <= cornerR);
-                if (hitCorner) {
-                    return { defect: d, part: 'AREA_RESIZE', resizeXField: hitCorner.xField, resizeYField: hitCorner.yField };
+                for (let ci = 0; ci < cornerDefs.length; ci++) {
+                    const cdef = cornerDefs[ci];
+                    const c = areaLocalToImg(d, cdef.lx, cdef.ly);
+                    if (Math.hypot(imgX - c.x, imgY - c.y) <= cornerR) {
+                        return { defect: d, part: 'AREA_RESIZE', resizeXField: cdef.xField, resizeYField: cdef.yField };
+                    }
                 }
 
                 const edgeTol = 10;
-                if (Math.abs(imgY - y1) <= edgeTol && imgX >= x1 + cornerR && imgX <= x2 - cornerR) {
-                    return { defect: d, part: 'AREA_RESIZE', resizeXField: null, resizeYField: minYField };
-                }
-                if (Math.abs(imgY - y2) <= edgeTol && imgX >= x1 + cornerR && imgX <= x2 - cornerR) {
-                    return { defect: d, part: 'AREA_RESIZE', resizeXField: null, resizeYField: maxYField };
-                }
-                if (Math.abs(imgX - x1) <= edgeTol && imgY >= y1 + cornerR && imgY <= y2 - cornerR) {
-                    return { defect: d, part: 'AREA_RESIZE', resizeXField: minXField, resizeYField: null };
-                }
-                if (Math.abs(imgX - x2) <= edgeTol && imgY >= y1 + cornerR && imgY <= y2 - cornerR) {
-                    return { defect: d, part: 'AREA_RESIZE', resizeXField: maxXField, resizeYField: null };
+                const loc = areaImgToLocal(d, imgX, imgY);
+                if (getAreaShape(d) !== 'polygon') {
+                    if (Math.abs(loc.y + hh) <= edgeTol && loc.x >= -hw + cornerR && loc.x <= hw - cornerR) {
+                        return { defect: d, part: 'AREA_RESIZE', resizeXField: null, resizeYField: minYField };
+                    }
+                    if (Math.abs(loc.y - hh) <= edgeTol && loc.x >= -hw + cornerR && loc.x <= hw - cornerR) {
+                        return { defect: d, part: 'AREA_RESIZE', resizeXField: null, resizeYField: maxYField };
+                    }
+                    if (Math.abs(loc.x + hw) <= edgeTol && loc.y >= -hh + cornerR && loc.y <= hh - cornerR) {
+                        return { defect: d, part: 'AREA_RESIZE', resizeXField: minXField, resizeYField: null };
+                    }
+                    if (Math.abs(loc.x - hw) <= edgeTol && loc.y >= -hh + cornerR && loc.y <= hh - cornerR) {
+                        return { defect: d, part: 'AREA_RESIZE', resizeXField: maxXField, resizeYField: null };
+                    }
+                } else {
+                    const pts = getAreaPolyPoints(d);
+                    for (let ei = 0; ei < pts.length; ei++) {
+                        const a = pts[ei];
+                        const b = pts[(ei + 1) % pts.length];
+                        if (distPointToSegment(imgX, imgY, a.x, a.y, b.x, b.y) <= edgeTol) {
+                            return { defect: d, part: 'AREA_MOVE' };
+                        }
+                    }
                 }
 
                 const pinStyleKey = getDefectStyleKey(d.category, d.defectType);
@@ -17193,12 +17655,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     bestBox = { defect: d, part: 'BOX' };
                 }
 
-                const rx1 = x1 - pad;
-                const rx2 = x2 + pad;
-                const ry1 = y1 - pad;
-                const ry2 = y2 + pad;
-                const inRect = imgX >= rx1 && imgX <= rx2 && imgY >= ry1 && imgY <= ry2;
-                if (inRect && !bestBox) {
+                if (isPointInAreaMark(d, imgX, imgY, pad) && !bestBox) {
                     bestBox = { defect: d, part: 'AREA_MOVE' };
                 }
                 continue;
@@ -17239,13 +17696,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 const minYField = d.areaY1 <= d.areaY2 ? 'areaY1' : 'areaY2';
                 const isMinX = rx === minXField;
                 const isMinY = ry === minYField;
-                // 좌상·우하 → ↘↖ / 우상·좌하 → ↙↗
                 return (isMinX === isMinY) ? 'nwse-resize' : 'nesw-resize';
             }
-            if (ry && !rx) return 'ns-resize';   // 상·하 변
-            if (rx && !ry) return 'ew-resize';   // 좌·우 변
+            if (ry && !rx) return 'ns-resize';
+            if (rx && !ry) return 'ew-resize';
             return 'nwse-resize';
         }
+        if (hit.part === 'AREA_ROTATE') return 'grab';
         // BOX / TIP / AREA_MOVE — 드래그로 위치 이동
         return 'move';
     }
@@ -17460,6 +17917,34 @@ document.addEventListener('DOMContentLoaded', () => {
         // Check if existing pin box, arrowhead tip, or area handle was clicked.
         // 터치: 즉시 선택만 하고, 약 0.3초 길게 누른 뒤에야 드래그 시작.
         const hitInfo = findHitPinPart(imgX, imgY);
+        if (hitInfo && state.areaInkTool && hitInfo.defect && hitInfo.defect.shapeType === 'area'
+            && (hitInfo.part === 'AREA_MOVE' || hitInfo.part === 'BOX')) {
+            selectedDefectIds = new Set([hitInfo.defect.id]);
+            updateMapSelectionBar({ scrollToSelection: true });
+            const tool = state.areaInkTool;
+            const target = hitInfo.defect;
+            if (tool === 'polygon') {
+                if (!pendingInkPoly || pendingInkPoly.defectId !== target.id) {
+                    pendingInkPoly = { defectId: target.id, points: [] };
+                }
+                const pts = pendingInkPoly.points;
+                if (pts.length >= 3 && Math.hypot(imgX - pts[0].x, imgY - pts[0].y) < 14) {
+                    if (typeof pushDefectHistory === 'function') pushDefectHistory();
+                    if (!Array.isArray(target.areaDrawings)) target.areaDrawings = [];
+                    target.areaDrawings.push({ type: 'polygon', points: pts.map((p) => ({ x: p.x, y: p.y })) });
+                    pendingInkPoly = null;
+                    saveStateToLocalStorage();
+                } else {
+                    pts.push({ x: imgX, y: imgY });
+                }
+                drawCanvas();
+                return;
+            }
+            isAreaInkDrag = true;
+            areaInkStroke = { defectId: target.id, type: tool, points: [{ x: imgX, y: imgY }] };
+            drawCanvas();
+            return;
+        }
         if (hitInfo) {
             const useAdditive = additive || (isTouch && mobileAddSelectEnabled);
             pendingDragHit = { hitInfo, imgX, imgY, additive: useAdditive };
@@ -17519,8 +18004,20 @@ document.addEventListener('DOMContentLoaded', () => {
             syncLiveMarkBoxAboveTarget(markCoords.x, markCoords.y);
             drawCanvas();
         } else if (state.mode === 'AREA') {
-            isAreaDrag = true;
+            const createShape = state.areaCreateShape || 'rect';
             const areaCoords = clientToImgCoords(clientX, clientY);
+            if (createShape === 'polygon') {
+                if (!pendingAreaPoly) pendingAreaPoly = [];
+                if (pendingAreaPoly.length >= 3
+                    && Math.hypot(areaCoords.x - pendingAreaPoly[0].x, areaCoords.y - pendingAreaPoly[0].y) < 16) {
+                    finishPendingAreaPolygon();
+                    return;
+                }
+                pendingAreaPoly.push({ x: areaCoords.x, y: areaCoords.y });
+                drawCanvas();
+                return;
+            }
+            isAreaDrag = true;
             areaStartImgX = areaCoords.x;
             areaStartImgY = areaCoords.y;
             areaCurImgX = areaCoords.x;
@@ -17615,7 +18112,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 const multiGroup = hitDefect && hitDefect.id
                     && selectedDefectIds.size > 1
                     && selectedDefectIds.has(hitDefect.id)
-                    && hitPart !== 'AREA_RESIZE';
+                    && hitPart !== 'AREA_RESIZE'
+                    && hitPart !== 'AREA_ROTATE';
                 const grabX = pendingDragHit.imgX;
                 const grabY = pendingDragHit.imgY;
                 clearPendingDragLongPress();
@@ -17688,10 +18186,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
             if (activeDragPart === 'TIP') {
                 if (activeDragPin.shapeType === 'area' && activeDragPin.areaX1 !== undefined) {
-                    const snapped = projectPointToAreaEdgeCenter(
+                    const snapped = projectPointToAreaEdgeCenterDefect(
                         currentImgX - pinDragOffsetX, currentImgY - pinDragOffsetY,
-                        activeDragPin.areaX1, activeDragPin.areaY1,
-                        activeDragPin.areaX2, activeDragPin.areaY2
+                        activeDragPin
                     );
                     activeDragPin.targetX = snapped.x;
                     activeDragPin.targetY = snapped.y;
@@ -17706,11 +18203,20 @@ document.addEventListener('DOMContentLoaded', () => {
                 activeDragPin.areaY1 += dy;
                 activeDragPin.areaX2 += dx;
                 activeDragPin.areaY2 += dy;
+                translateAreaDrawings(activeDragPin, dx, dy);
                 areaMoveLastImgX = currentImgX;
                 areaMoveLastImgY = currentImgY;
+            } else if (activeDragPart === 'AREA_ROTATE') {
+                const { cx, cy } = getAreaAabb(activeDragPin);
+                const ang = (Math.atan2(currentImgY - cy, currentImgX - cx) * 180) / Math.PI + 90;
+                rotateAreaDefect(activeDragPin, ang);
+                const angElLive = document.getElementById('defectAreaAngle');
+                const pinIdLive = document.getElementById('defectPinId')?.value;
+                if (angElLive && pinIdLive && String(pinIdLive) === String(activeDragPin.id)) {
+                    angElLive.value = String(Math.round(getAreaAngleDeg(activeDragPin)));
+                }
             } else if (activeDragPart === 'AREA_RESIZE') {
-                if (activeResizeXField) activeDragPin[activeResizeXField] = currentImgX;
-                if (activeResizeYField) activeDragPin[activeResizeYField] = currentImgY;
+                applyAreaResizeLocal(activeDragPin, currentImgX, currentImgY, activeResizeXField, activeResizeYField);
             } else {
                 const newX = currentImgX - pinDragOffsetX;
                 const newY = currentImgY - pinDragOffsetY;
@@ -17732,6 +18238,21 @@ document.addEventListener('DOMContentLoaded', () => {
             markingHasMoved = true;
             const coords = clientToImgCoords(clientX, clientY);
             syncLiveMarkBoxAboveTarget(coords.x, coords.y);
+            drawCanvas();
+            refreshMapLoupe(clientX, clientY);
+        } else if (isAreaInkDrag && areaInkStroke) {
+            const coords = clientToImgCoords(clientX, clientY);
+            const pts = areaInkStroke.points;
+            if (areaInkStroke.type === 'path') {
+                const last = pts[pts.length - 1];
+                if (!last || Math.hypot(coords.x - last.x, coords.y - last.y) >= 2) {
+                    pts.push({ x: coords.x, y: coords.y });
+                }
+            } else if (pts.length === 1) {
+                pts.push({ x: coords.x, y: coords.y });
+            } else {
+                pts[1] = { x: coords.x, y: coords.y };
+            }
             drawCanvas();
             refreshMapLoupe(clientX, clientY);
         } else if (isAreaDrag) {
@@ -17858,6 +18379,23 @@ document.addEventListener('DOMContentLoaded', () => {
             drawCanvas();
         }
 
+        if (isAreaInkDrag && areaInkStroke) {
+            isAreaInkDrag = false;
+            const stroke = areaInkStroke;
+            areaInkStroke = null;
+            const target = getCurrentFloorDefects().find((d) => d.id === stroke.defectId);
+            if (target && stroke.points && stroke.points.length >= 2) {
+                if (typeof pushDefectHistory === 'function') pushDefectHistory();
+                if (!Array.isArray(target.areaDrawings)) target.areaDrawings = [];
+                target.areaDrawings.push({
+                    type: stroke.type || 'path',
+                    points: stroke.points.map((p) => ({ x: p.x, y: p.y }))
+                });
+                saveStateToLocalStorage();
+            }
+            drawCanvas();
+        }
+
         if (isAreaDrag) {
             isAreaDrag = false;
             const x1 = Math.min(areaStartImgX, areaCurImgX);
@@ -17865,11 +18403,15 @@ document.addEventListener('DOMContentLoaded', () => {
             const x2 = Math.max(areaStartImgX, areaCurImgX);
             const y2 = Math.max(areaStartImgY, areaCurImgY);
             if (Math.hypot(x2 - x1, y2 - y1) < 15) {
-                // 너무 작게 그려짐(단순 클릭) - 무시하고 취소
                 setDrawMode('PAN');
                 drawCanvas();
             } else {
-                openAddDefectModal(x1, y1, undefined, undefined, null, { x1, y1, x2, y2 });
+                const shape = state.areaCreateShape || 'rect';
+                openAddDefectModal(x1, y1, undefined, undefined, null, {
+                    x1, y1, x2, y2,
+                    areaShape: shape === 'ellipse' ? 'ellipse' : 'rect',
+                    areaAngle: 0
+                });
                 setDrawMode('PAN');
                 drawCanvas();
             }
@@ -17916,7 +18458,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function getMapCanvasCursor() {
-        if (state.mode === 'MARK' || state.mode === 'AREA') return 'crosshair';
+        if (state.mode === 'MARK' || state.mode === 'AREA' || state.areaInkTool) return 'crosshair';
         return 'default';
     }
 
@@ -17944,25 +18486,48 @@ document.addEventListener('DOMContentLoaded', () => {
 
         window.addEventListener('mousemove', (e) => {
             if (activePointerIsTouch) return;
-            if (isDragging || isMarkingDrag || isAreaDrag || isDraggingPin || isDraggingPinGroup || pendingDragHit || isDraggingLegend || isResizingLegend || isMarqueeSelecting) {
+            if (isDragging || isMarkingDrag || isAreaDrag || isAreaInkDrag || isDraggingPin || isDraggingPinGroup || pendingDragHit || isDraggingLegend || isResizingLegend || isMarqueeSelecting) {
                 handleDragMove(e.clientX, e.clientY);
             }
         });
 
         elements.planCanvas.addEventListener('mousemove', (e) => {
             if (activePointerIsTouch) return;
-            if (isDragging || isMarkingDrag || isAreaDrag || isDraggingPin || isDraggingPinGroup || pendingDragHit || isDraggingLegend || isResizingLegend || isMarqueeSelecting) return;
+            if (isDragging || isMarkingDrag || isAreaDrag || isAreaInkDrag || isDraggingPin || isDraggingPinGroup || pendingDragHit || isDraggingLegend || isResizingLegend || isMarqueeSelecting) return;
             updateMapHoverCursor(e.clientX, e.clientY);
         });
 
         elements.planCanvas.addEventListener('mouseleave', () => {
-            if (isDragging || isMarkingDrag || isAreaDrag || isDraggingPin || isDraggingPinGroup || pendingDragHit || isDraggingLegend || isResizingLegend || isMarqueeSelecting) return;
+            if (isDragging || isMarkingDrag || isAreaDrag || isAreaInkDrag || isDraggingPin || isDraggingPinGroup || pendingDragHit || isDraggingLegend || isResizingLegend || isMarqueeSelecting) return;
             elements.planCanvas.style.cursor = getMapCanvasCursor();
         });
 
         window.addEventListener('mouseup', (e) => {
             if (activePointerIsTouch) return;
-            if (isDragging || isMarkingDrag || isAreaDrag || isDraggingPin || isDraggingPinGroup || pendingDragHit || isDraggingLegend || isResizingLegend || isMarqueeSelecting) handleDragEnd(e.clientX, e.clientY);
+            if (isDragging || isMarkingDrag || isAreaDrag || isAreaInkDrag || isDraggingPin || isDraggingPinGroup || pendingDragHit || isDraggingLegend || isResizingLegend || isMarqueeSelecting) handleDragEnd(e.clientX, e.clientY);
+        });
+
+        elements.planCanvas.addEventListener('dblclick', (e) => {
+            if (activePointerIsTouch) return;
+            e.preventDefault();
+            if (pendingAreaPoly && pendingAreaPoly.length >= 3) {
+                finishPendingAreaPolygon();
+                return;
+            }
+            if (pendingInkPoly && pendingInkPoly.points && pendingInkPoly.points.length >= 3) {
+                const target = getCurrentFloorDefects().find((d) => d.id === pendingInkPoly.defectId);
+                if (target) {
+                    if (typeof pushDefectHistory === 'function') pushDefectHistory();
+                    if (!Array.isArray(target.areaDrawings)) target.areaDrawings = [];
+                    target.areaDrawings.push({
+                        type: 'polygon',
+                        points: pendingInkPoly.points.map((p) => ({ x: p.x, y: p.y }))
+                    });
+                    pendingInkPoly = null;
+                    saveStateToLocalStorage();
+                    drawCanvas();
+                }
+            }
         });
 
         // Touch Events (Galaxy Tab & Smartphone Support with Multi-Touch Pinch Zoom & Pan)
@@ -17982,6 +18547,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 isDraggingPin = false;
                 isDraggingPinGroup = false;
                 isAreaDrag = false;
+                isAreaInkDrag = false;
+                areaInkStroke = null;
                 isMarqueeSelecting = false;
                 activeDragPin = null;
                 isDraggingLegend = false;
@@ -18029,7 +18596,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     if (shouldUseViewportTilesForCurrentFloor()) scheduleViewportHiPatchSync();
                 }
             } else if (!isPinching && e.touches.length === 1) {
-                if (isDragging || isMarkingDrag || isAreaDrag || isDraggingPin || isDraggingPinGroup || pendingDragHit || isDraggingLegend || isResizingLegend || isMarqueeSelecting) {
+                if (isDragging || isMarkingDrag || isAreaDrag || isAreaInkDrag || isDraggingPin || isDraggingPinGroup || pendingDragHit || isDraggingLegend || isResizingLegend || isMarqueeSelecting) {
                     // 브라우저가 스크롤/제스처로 터치 드래그를 가로채 끊지 않게
                     if (e.cancelable) e.preventDefault();
                     handleDragMove(e.touches[0].clientX, e.touches[0].clientY);
@@ -18048,7 +18615,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             } else {
                 const t = e.changedTouches && e.changedTouches[0];
-                if (isDragging || isMarkingDrag || isAreaDrag || isDraggingPin || isDraggingPinGroup || pendingDragHit || isDraggingLegend || isResizingLegend || isMarqueeSelecting) {
+                if (isDragging || isMarkingDrag || isAreaDrag || isAreaInkDrag || isDraggingPin || isDraggingPinGroup || pendingDragHit || isDraggingLegend || isResizingLegend || isMarqueeSelecting) {
                     handleDragEnd(t ? t.clientX : undefined, t ? t.clientY : undefined);
                 }
                 if (shouldUseViewportTilesForCurrentFloor()) {
@@ -18068,6 +18635,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 isDragging = false;
                 isMarkingDrag = false;
                 isAreaDrag = false;
+                isAreaInkDrag = false;
+                areaInkStroke = null;
                 isPinching = false;
                 pendingDragHit = null;
                 isMarqueeSelecting = false;
@@ -18081,7 +18650,7 @@ document.addEventListener('DOMContentLoaded', () => {
         window.addEventListener('touchcancel', (e) => {
             isPinching = false;
             const t = e.changedTouches && e.changedTouches[0];
-            if (isDragging || isMarkingDrag || isAreaDrag || isDraggingPin || isDraggingPinGroup || pendingDragHit || isDraggingLegend || isResizingLegend || isMarqueeSelecting) {
+            if (isDragging || isMarkingDrag || isAreaDrag || isAreaInkDrag || isDraggingPin || isDraggingPinGroup || pendingDragHit || isDraggingLegend || isResizingLegend || isMarqueeSelecting) {
                 handleDragEnd(t ? t.clientX : undefined, t ? t.clientY : undefined);
             }
         });
@@ -18615,13 +19184,21 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             if (existingPin.shapeType === 'area' && existingPin.areaX1 !== undefined) {
                 ensureAreaPinPlacement(existingPin);
-                window._pendingAreaRect = { x1: existingPin.areaX1, y1: existingPin.areaY1, x2: existingPin.areaX2, y2: existingPin.areaY2 };
+                window._pendingAreaRect = {
+                    x1: existingPin.areaX1, y1: existingPin.areaY1,
+                    x2: existingPin.areaX2, y2: existingPin.areaY2,
+                    areaShape: existingPin.areaShape || 'rect',
+                    areaAngle: existingPin.areaAngle || 0,
+                    areaPoints: existingPin.areaPoints
+                };
                 window._pendingPinCoords = {
                     x: existingPin.x,
                     y: existingPin.y,
                     targetX: existingPin.targetX,
                     targetY: existingPin.targetY
                 };
+                const angEl = document.getElementById('defectAreaAngle');
+                if (angEl) angEl.value = String(Math.round(Number(existingPin.areaAngle) || 0));
             } else {
                 window._pendingAreaRect = null;
                 window._pendingPinCoords = { x: existingPin.x, y: existingPin.y, targetX: existingPin.targetX, targetY: existingPin.targetY };
@@ -18676,9 +19253,21 @@ document.addEventListener('DOMContentLoaded', () => {
                 const areaScale = getStyleSize(areaStyleKey).pin;
                 const areaLabel = formatDefectPinLabel({ no: areaNo, defectType: tmpl ? tmpl.defectType : '' }, areaStyleKey);
                 const boxPos = computePinBoxAboveTarget(cx, ay1, areaLabel, areaScale, state.ctx, 1);
-                const attach = getAreaCenterBorderAttach(boxPos.boxX, boxPos.boxY, ax1, ay1, ax2, ay2);
-                window._pendingAreaRect = { x1: ax1, y1: ay1, x2: ax2, y2: ay2 };
+                window._pendingAreaRect = {
+                    x1: ax1, y1: ay1, x2: ax2, y2: ay2,
+                    areaShape: areaRect.areaShape || 'rect',
+                    areaAngle: areaRect.areaAngle || 0,
+                    areaPoints: areaRect.areaPoints || null
+                };
+                const attach = getAreaCenterBorderAttachDefect(boxPos.boxX, boxPos.boxY, {
+                    areaX1: ax1, areaY1: ay1, areaX2: ax2, areaY2: ay2,
+                    areaShape: window._pendingAreaRect.areaShape,
+                    areaAngle: window._pendingAreaRect.areaAngle,
+                    areaPoints: window._pendingAreaRect.areaPoints
+                });
                 window._pendingPinCoords = { x: boxPos.boxX, y: boxPos.boxY, targetX: attach.x, targetY: attach.y };
+                const angElNew = document.getElementById('defectAreaAngle');
+                if (angElNew) angElNew.value = String(Math.round(Number(areaRect.areaAngle) || 0));
             } else {
                 const tX = targetX !== undefined ? targetX : (boxX - 35);
                 const tY = targetY !== undefined ? targetY : (boxY + 35);
@@ -19466,6 +20055,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (state.defects[key][idx].shapeType === 'area') {
                     state.defects[key][idx].areaFillStyle = areaFillVal;
                     state.defects[key][idx].areaBorderStyle = areaBorderVal;
+                    const angRaw = Number(document.getElementById('defectAreaAngle')?.value);
+                    if (Number.isFinite(angRaw)) {
+                        rotateAreaDefect(state.defects[key][idx], angRaw);
+                    }
                     state.areaFillStyle = areaFillVal;
                     state.areaBorderStyle = areaBorderVal;
                 }
@@ -19537,10 +20130,20 @@ document.addEventListener('DOMContentLoaded', () => {
                 newDefect.areaY1 = window._pendingAreaRect.y1;
                 newDefect.areaX2 = window._pendingAreaRect.x2;
                 newDefect.areaY2 = window._pendingAreaRect.y2;
+                newDefect.areaShape = normalizeAreaShape(window._pendingAreaRect.areaShape);
+                newDefect.areaAngle = Number(window._pendingAreaRect.areaAngle) || 0;
+                if (Array.isArray(window._pendingAreaRect.areaPoints)) {
+                    newDefect.areaPoints = window._pendingAreaRect.areaPoints.map((p) => ({ x: p.x, y: p.y }));
+                }
+                newDefect.areaDrawings = [];
                 newDefect.areaFillStyle = areaFillVal;
                 newDefect.areaBorderStyle = areaBorderVal;
                 state.areaFillStyle = areaFillVal;
                 state.areaBorderStyle = areaBorderVal;
+                const angRawNew = Number(document.getElementById('defectAreaAngle')?.value);
+                if (Number.isFinite(angRawNew) && Math.abs(angRawNew) > 0.01) {
+                    rotateAreaDefect(newDefect, angRawNew);
+                }
             } else if (window._defectMarkingTemplate && window._defectMarkingTemplate.groupId) {
                 // "마킹 추가" 체인의 연속 마킹 — 같은 그룹으로 묶어서 도면에는 화살표만 늘어나도록 표시
                 newDefect.groupId = window._defectMarkingTemplate.groupId;
@@ -19873,6 +20476,15 @@ document.addEventListener('DOMContentLoaded', () => {
             window._pendingMapRegisterDefectId = null;
             if (typeof renderDefectListPanel === 'function') renderDefectListPanel();
         }
+        if (mode !== 'AREA') {
+            pendingAreaPoly = null;
+        }
+        if (mode === 'MARK' || mode === 'AREA') {
+            state.areaInkTool = null;
+            pendingInkPoly = null;
+            isAreaInkDrag = false;
+            areaInkStroke = null;
+        }
         state.mode = mode;
         const pan = document.getElementById('btnModePan');
         const mark = document.getElementById('btnModeMark');
@@ -19880,13 +20492,122 @@ document.addEventListener('DOMContentLoaded', () => {
         if (pan) pan.classList.toggle('active', mode === 'PAN');
         if (mark) mark.classList.toggle('active', mode === 'MARK');
         if (area) area.classList.toggle('active', mode === 'AREA');
-        // 모바일 우측 레일 모드 버튼 동기화
         document.querySelectorAll('#mobileMapSideRail .mobile-rail-btn[data-mode]').forEach(btn => {
             btn.classList.toggle('active', btn.dataset.mode === mode);
         });
         if (elements.planCanvas) {
             elements.planCanvas.style.cursor = getMapCanvasCursor();
         }
+        syncAreaToolPanelUi();
+    }
+
+    function getSelectedAreaForInk() {
+        const ids = [...selectedDefectIds];
+        if (!ids.length) return null;
+        return getCurrentFloorDefects().find((d) => ids.includes(d.id) && d.shapeType === 'area' && d.areaX1 !== undefined) || null;
+    }
+
+    function finishPendingAreaPolygon() {
+        if (!pendingAreaPoly || pendingAreaPoly.length < 3) {
+            pendingAreaPoly = null;
+            drawCanvas();
+            return;
+        }
+        const pts = pendingAreaPoly.map((p) => ({ x: p.x, y: p.y }));
+        pendingAreaPoly = null;
+        let x1 = pts[0].x, y1 = pts[0].y, x2 = pts[0].x, y2 = pts[0].y;
+        pts.forEach((p) => {
+            x1 = Math.min(x1, p.x); y1 = Math.min(y1, p.y);
+            x2 = Math.max(x2, p.x); y2 = Math.max(y2, p.y);
+        });
+        openAddDefectModal(x1, y1, undefined, undefined, null, {
+            x1, y1, x2, y2,
+            areaShape: 'polygon',
+            areaAngle: 0,
+            areaPoints: pts
+        });
+        setDrawMode('PAN');
+        drawCanvas();
+    }
+
+    function syncAreaToolPanelUi() {
+        const panel = document.getElementById('areaToolPanel');
+        if (panel) {
+            const show = state.mode === 'AREA' || !!state.areaInkTool || !!getSelectedAreaForInk();
+            panel.hidden = !show;
+        }
+        const create = state.areaCreateShape || 'rect';
+        document.querySelectorAll('[data-area-create]').forEach((btn) => {
+            btn.classList.toggle('active', btn.getAttribute('data-area-create') === create);
+        });
+        const ink = state.areaInkTool || '';
+        document.querySelectorAll('[data-area-ink]').forEach((btn) => {
+            btn.classList.toggle('active', btn.getAttribute('data-area-ink') === ink);
+        });
+        const mobInk = document.getElementById('mobileBtnAreaInk');
+        if (mobInk) mobInk.classList.toggle('active', !!state.areaInkTool);
+    }
+
+    function setAreaCreateShape(shape) {
+        state.areaCreateShape = normalizeAreaShape(shape === 'ellipse' || shape === 'polygon' ? shape : 'rect');
+        state.areaInkTool = null;
+        pendingInkPoly = null;
+        if (state.mode !== 'AREA') setDrawMode('AREA');
+        else syncAreaToolPanelUi();
+    }
+
+    function setAreaInkTool(tool) {
+        const next = (tool === 'line' || tool === 'rect' || tool === 'polygon' || tool === 'ellipse' || tool === 'path') ? tool : null;
+        if (next && !getSelectedAreaForInk()) {
+            window.showToast?.('내부 그리기 전에 영역을 선택하세요.', 'info', 2500);
+            return;
+        }
+        state.areaInkTool = next;
+        pendingInkPoly = null;
+        if (next) state.mode = 'PAN';
+        syncAreaToolPanelUi();
+        if (elements.planCanvas) elements.planCanvas.style.cursor = next ? 'crosshair' : getMapCanvasCursor();
+    }
+
+    function undoLastAreaInk() {
+        const target = getSelectedAreaForInk();
+        if (!target || !Array.isArray(target.areaDrawings) || !target.areaDrawings.length) {
+            window.showToast?.('지울 내부 그리기가 없습니다.', 'info');
+            return;
+        }
+        if (typeof pushDefectHistory === 'function') pushDefectHistory();
+        target.areaDrawings.pop();
+        saveStateToLocalStorage();
+        drawCanvas();
+    }
+
+    function setupAreaToolPanelEvents() {
+        document.querySelectorAll('[data-area-create]').forEach((btn) => {
+            btn.addEventListener('click', () => setAreaCreateShape(btn.getAttribute('data-area-create')));
+        });
+        document.querySelectorAll('[data-area-ink]').forEach((btn) => {
+            btn.addEventListener('click', () => {
+                const t = btn.getAttribute('data-area-ink');
+                setAreaInkTool(state.areaInkTool === t ? null : t);
+            });
+        });
+        const undoBtn = document.getElementById('btnAreaInkUndo');
+        if (undoBtn) undoBtn.addEventListener('click', undoLastAreaInk);
+        const mobInk = document.getElementById('mobileBtnAreaInk');
+        if (mobInk) {
+            mobInk.addEventListener('click', () => {
+                if (state.areaInkTool) setAreaInkTool(null);
+                else setAreaInkTool('path');
+            });
+        }
+        const angEl = document.getElementById('defectAreaAngle');
+        if (angEl) {
+            angEl.addEventListener('change', () => {
+                if (isDefectBulkEditMode()) markDefectBulkFieldChanged('areaAngle');
+                if (typeof scheduleDefectAutoApply === 'function') scheduleDefectAutoApply();
+            });
+        }
+        syncAreaToolPanelUi();
     }
 
     const btnModePan = document.getElementById('btnModePan');
@@ -19897,6 +20618,7 @@ document.addEventListener('DOMContentLoaded', () => {
         btnModeMark.addEventListener('click', () => setDrawMode('MARK'));
         if (btnModeArea) btnModeArea.addEventListener('click', () => setDrawMode('AREA'));
     }
+    setupAreaToolPanelEvents();
 
     // 도면 탭 단축키: D=핀 마킹, A=영역 마킹, Esc=수정창 닫기+선택모드
     // 비파괴 탭: D=NDT 마킹, Esc=등록창 닫기+이동모드
@@ -19941,6 +20663,20 @@ document.addEventListener('DOMContentLoaded', () => {
         if (window.state.currentTab !== 'tab-map') return;
         if (k === 'escape') {
             e.preventDefault();
+            if (pendingAreaPoly && pendingAreaPoly.length) {
+                pendingAreaPoly = null;
+                drawCanvas();
+                return;
+            }
+            if (pendingInkPoly) {
+                pendingInkPoly = null;
+                drawCanvas();
+                return;
+            }
+            if (state.areaInkTool) {
+                setAreaInkTool(null);
+                return;
+            }
             if (typeof isDefectModalOpen === 'function' && isDefectModalOpen()) {
                 closeDefectModal();
             }
@@ -19949,6 +20685,29 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         if (typing) return;
         if (e.ctrlKey || e.metaKey || e.altKey) return;
+        if (k === 'enter') {
+            if (pendingAreaPoly && pendingAreaPoly.length >= 3) {
+                e.preventDefault();
+                finishPendingAreaPolygon();
+                return;
+            }
+            if (pendingInkPoly && pendingInkPoly.points && pendingInkPoly.points.length >= 3) {
+                e.preventDefault();
+                const target = getCurrentFloorDefects().find((d) => d.id === pendingInkPoly.defectId);
+                if (target) {
+                    if (typeof pushDefectHistory === 'function') pushDefectHistory();
+                    if (!Array.isArray(target.areaDrawings)) target.areaDrawings = [];
+                    target.areaDrawings.push({
+                        type: 'polygon',
+                        points: pendingInkPoly.points.map((p) => ({ x: p.x, y: p.y }))
+                    });
+                    pendingInkPoly = null;
+                    saveStateToLocalStorage();
+                    drawCanvas();
+                }
+                return;
+            }
+        }
         if (k === 'd') {
             e.preventDefault();
             setDrawMode('MARK');
@@ -21536,9 +22295,8 @@ document.addEventListener('DOMContentLoaded', () => {
             let tipX = t.targetX;
             let tipY = t.targetY;
             if (isAreaDefect) {
-                const attach = getAreaCenterBorderAttach(
-                    boxX, boxY,
-                    defect.areaX1, defect.areaY1, defect.areaX2, defect.areaY2
+                const attach = getAreaCenterBorderAttachDefect(
+                    boxX, boxY, defect
                 );
                 tipX = attach.x;
                 tipY = attach.y;
@@ -21600,6 +22358,17 @@ document.addEventListener('DOMContentLoaded', () => {
                 y1: Math.min(defect.areaY1, defect.areaY2),
                 x2: Math.max(defect.areaX1, defect.areaX2),
                 y2: Math.max(defect.areaY1, defect.areaY2),
+                shape: getAreaShape(defect),
+                angle: getAreaAngleDeg(defect),
+                points: (getAreaShape(defect) === 'polygon')
+                    ? getAreaPolyPoints(defect)
+                    : getAreaWorldCorners(defect),
+                drawings: Array.isArray(defect.areaDrawings)
+                    ? defect.areaDrawings.map((st) => ({
+                        type: st.type || 'path',
+                        points: (st.points || []).map((p) => ({ x: p.x, y: p.y }))
+                    }))
+                    : [],
                 fillStyle: getAreaFillStyle(defect),
                 borderStyle: getAreaBorderStyle(defect)
             } : null
