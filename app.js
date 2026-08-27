@@ -14672,6 +14672,18 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // defects를 groupId 기준으로 묶어서 그룹당 한 번만 drawFn(ctx, 대표결함, arrows)을 호출한다.
     // (drawPin/drawPinSafe 양쪽에서 재사용 — 화면 캔버스와 보고서 캔버스 모두 동일하게 "박스 하나 + 화살표 여러 개"로 그리기 위함)
+    function pickDefectGroupRepresentative(members) {
+        const list = (members || []).filter((m) => m && !m.surveyExtra);
+        if (!list.length) return (members && members[0]) || null;
+        const scored = list.slice().sort((a, b) => {
+            const pa = parseDefectNoParts(a);
+            const pb = parseDefectNoParts(b);
+            if (pa.main !== pb.main) return pa.main - pb.main;
+            return pa.suffix - pb.suffix;
+        });
+        return scored[0];
+    }
+
     function renderDefectsGrouped(ctx, defects, drawFn) {
         const renderedGroups = new Set();
         defects.forEach(defect => {
@@ -14680,22 +14692,24 @@ document.addEventListener('DOMContentLoaded', () => {
                 const groupMembers = defects.filter(d => d.groupId === defect.groupId);
                 if (groupMembers.length > 1) {
                     renderedGroups.add(defect.groupId);
+                    const representative = pickDefectGroupRepresentative(groupMembers) || defect;
                     const seenArrow = new Set();
                     const arrows = [];
                     groupMembers.forEach((m) => {
                         if (m.surveyExtra) return;
                         if (m.targetX === undefined || m.targetY === undefined) return;
-                        const akey = `${Math.round(m.targetX)}|${Math.round(m.targetY)}|${m.arrowOctant || 0}`;
+                        const akey = `${Math.round(m.targetX)}|${Math.round(m.targetY)}|${m.arrowOctant || 0}|${m.id || ''}`;
                         if (seenArrow.has(akey)) return;
                         seenArrow.add(akey);
                         arrows.push({
                             targetX: m.targetX,
                             targetY: m.targetY,
                             forceArrowDir: !!m.forceArrowDir,
-                            arrowOctant: (m.arrowOctant !== undefined ? m.arrowOctant : 0)
+                            arrowOctant: (m.arrowOctant !== undefined ? m.arrowOctant : 0),
+                            areaSource: (m.shapeType === 'area' && m.areaX1 !== undefined) ? m : null
                         });
                     });
-                    drawFn(ctx, defect, arrows);
+                    drawFn(ctx, representative, arrows);
                     return;
                 }
             }
@@ -14705,7 +14719,22 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // arrows: "마킹 추가"로 묶인 그룹을 하나의 박스+여러 화살표로 그릴 때 전달하는 {targetX,targetY}[] (없으면 defect 자신의 화살표 1개만 그림, 기존과 동일)
     function drawPin(ctx, defect, arrows) {
-        if (defect.shapeType === 'area' && defect.areaX1 !== undefined) {
+        const groupAreaSources = [];
+        if (arrows && arrows.length) {
+            arrows.forEach((a) => {
+                if (a && a.areaSource && a.areaSource.areaX1 !== undefined) groupAreaSources.push(a.areaSource);
+            });
+        }
+        if (groupAreaSources.length) {
+            const seen = new Set();
+            groupAreaSources.forEach((a) => {
+                const key = a.id || a;
+                if (seen.has(key)) return;
+                seen.add(key);
+                drawAreaRect(ctx, a, false);
+            });
+            ensureAreaPinPlacement(defect);
+        } else if (defect.shapeType === 'area' && defect.areaX1 !== undefined) {
             drawAreaRect(ctx, defect, false);
             ensureAreaPinPlacement(defect);
             // 번호칸·지시선은 아래 일반 핀 로직으로 이어서 그림
@@ -14743,9 +14772,13 @@ document.addEventListener('DOMContentLoaded', () => {
             if (t.targetX === undefined || t.targetY === undefined) return;
             let targetX = t.targetX;
             let targetY = t.targetY;
-            if (isAreaDefect) {
+            const areaSrc = (t.areaSource && t.areaSource.areaX1 !== undefined)
+                ? t.areaSource
+                : (isAreaDefect ? defect : null);
+            const tipIsArea = !!areaSrc;
+            if (areaSrc) {
                 // 회전·타원·다각형: 실제 도형 변 중점에 꽂음 (AABB 고정점 금지)
-                const attach = getAreaCenterBorderAttachDefect(boxX, boxY, defect);
+                const attach = getAreaCenterBorderAttachDefect(boxX, boxY, areaSrc);
                 targetX = attach.x;
                 targetY = attach.y;
             }
@@ -14755,7 +14788,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const stemInset = useCircleTip
                 ? (isBeingDragged ? 6 : 4.5) * arrowScale
                 : headLen * Math.cos(Math.PI / 6);
-            const forcedDir = isAreaDefect ? { enabled: false } : resolveForcedArrowDirection(t, defect);
+            const forcedDir = tipIsArea ? { enabled: false } : resolveForcedArrowDirection(t, defect);
             const leader = forcedDir.enabled
                 ? buildForcedLeaderRoute(
                     { x: targetX, y: targetY },
@@ -14775,7 +14808,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     const ux = targetX - anchor.x;
                     const uy = targetY - anchor.y;
                     // 영역은 화살촉 inset 없이 테두리까지 직선으로 꽂음 (L자 꺾임 없음)
-                    const tipBack = isAreaDefect ? 0 : stemInset;
+                    const tipBack = tipIsArea ? 0 : stemInset;
                     const stemEnd = tipBack > 0
                         ? getArrowStemEndPoint(targetX, targetY, ux, uy, tipBack)
                         : { x: targetX, y: targetY };
@@ -14793,7 +14826,7 @@ document.addEventListener('DOMContentLoaded', () => {
             ctx.stroke();
 
             // 영역 마킹은 화살표 머리 없이 테두리에 선만 꽂음
-            if (!isAreaDefect) {
+            if (!tipIsArea) {
                 ctx.fillStyle = activeColor;
                 if (useCircleTip) {
                     ctx.beginPath();
@@ -17929,7 +17962,7 @@ document.addEventListener('DOMContentLoaded', () => {
             fresh.y = activeDragPin.y;
             if (activeDragPin.targetX !== undefined) fresh.targetX = activeDragPin.targetX;
             if (activeDragPin.targetY !== undefined) fresh.targetY = activeDragPin.targetY;
-        } else if (activeDragPart === 'AREA_RESIZE' || activeDragPart === 'AREA_ROTATE') {
+        } else if (activeDragPart === 'AREA_RESIZE' || activeDragPart === 'AREA_ROTATE' || activeDragPart === 'AREA_VERTEX') {
             fresh.areaX1 = activeDragPin.areaX1;
             fresh.areaY1 = activeDragPin.areaY1;
             fresh.areaX2 = activeDragPin.areaX2;
@@ -20031,13 +20064,16 @@ document.addEventListener('DOMContentLoaded', () => {
                     areaAngle: areaRect.areaAngle || 0,
                     areaPoints: areaRect.areaPoints || null
                 };
-                const attach = getAreaCenterBorderAttachDefect(boxPos.boxX, boxPos.boxY, {
+                const useGroupBox = !!(tmpl && tmpl.groupId && Number.isFinite(tmpl.boxX) && Number.isFinite(tmpl.boxY));
+                const boxXUse = useGroupBox ? tmpl.boxX : boxPos.boxX;
+                const boxYUse = useGroupBox ? tmpl.boxY : boxPos.boxY;
+                const attach = getAreaCenterBorderAttachDefect(boxXUse, boxYUse, {
                     areaX1: ax1, areaY1: ay1, areaX2: ax2, areaY2: ay2,
                     areaShape: window._pendingAreaRect.areaShape,
                     areaAngle: window._pendingAreaRect.areaAngle,
                     areaPoints: window._pendingAreaRect.areaPoints
                 });
-                window._pendingPinCoords = { x: boxPos.boxX, y: boxPos.boxY, targetX: attach.x, targetY: attach.y };
+                window._pendingPinCoords = { x: boxXUse, y: boxYUse, targetX: attach.x, targetY: attach.y };
                 const angElNew = document.getElementById('defectAreaAngle');
                 if (angElNew) angElNew.value = String(Math.round(Number(areaRect.areaAngle) || 0));
             } else {
@@ -20916,6 +20952,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (Number.isFinite(angRawNew) && Math.abs(angRawNew) > 0.01) {
                     rotateAreaDefect(newDefect, angRawNew);
                 }
+                // 같은 번호에 영역 추가(계속 마킹): 번호칸은 공유, 영역·연결선만 추가
+                if (window._defectMarkingTemplate && window._defectMarkingTemplate.groupId) {
+                    newDefect.groupId = window._defectMarkingTemplate.groupId;
+                    newDefect.groupNo = window._defectMarkingTemplate.groupNo;
+                    if (Number.isFinite(window._defectMarkingTemplate.boxX)) newDefect.x = window._defectMarkingTemplate.boxX;
+                    if (Number.isFinite(window._defectMarkingTemplate.boxY)) newDefect.y = window._defectMarkingTemplate.boxY;
+                }
             } else if (window._defectMarkingTemplate && window._defectMarkingTemplate.groupId) {
                 // "마킹 추가" 체인의 연속 마킹 — 같은 그룹으로 묶어서 도면에는 화살표만 늘어나도록 표시
                 newDefect.groupId = window._defectMarkingTemplate.groupId;
@@ -21150,25 +21193,22 @@ document.addEventListener('DOMContentLoaded', () => {
             window._defectEditSessionHistoryPushed = true;
             closeDefectModal();
             if (saved) {
-                const isArea = saved.shapeType === 'area';
+                // 핀·영역 공통: 같은 번호칸에 화살표/영역 연결을 추가할 수 있게 그룹화
                 let nextChainIndex = 2;
-                if (!isArea) {
-                    // 이 결함이 체인의 첫 시작이면(아직 groupId가 없으면) 대표번호를 부여하고
-                    // 자기 자신의 결함번호를 "NO.03-1" 형태의 첫 서브번호로 바꾼다.
-                    if (!saved.groupId) {
-                        saved.groupId = saved.id;
-                        saved.groupNo = saved.no;
-                        saved.no = `${saved.no}-1`;
-                        nextChainIndex = 2;
-                    } else {
-                        const key = `${state.currentBuildingId}_${state.currentFloor}`;
-                        const memberCount = (state.defects[key] || []).filter(d => d.groupId === saved.groupId).length;
-                        nextChainIndex = memberCount + 1;
-                    }
-                    saveStateToLocalStorage();
+                if (!saved.groupId) {
+                    saved.groupId = saved.id;
+                    saved.groupNo = saved.no;
+                    saved.no = `${saved.no}-1`;
+                    nextChainIndex = 2;
+                } else {
+                    const key = `${state.currentBuildingId}_${state.currentFloor}`;
+                    const memberCount = (state.defects[key] || []).filter(d => d.groupId === saved.groupId).length;
+                    nextChainIndex = memberCount + 1;
                 }
+                saveStateToLocalStorage();
                 drawCanvas();
 
+                const isArea = saved.shapeType === 'area';
                 window._defectMarkingTemplate = {
                     category: saved.category,
                     component: saved.component,
@@ -21181,14 +21221,20 @@ document.addEventListener('DOMContentLoaded', () => {
                     arrowOctant: ((parseInt(saved.arrowOctant, 10) || 0) % 8 + 8) % 8,
                     areaFillStyle: saved.areaFillStyle || getAreaFillStyle(saved),
                     areaBorderStyle: saved.areaBorderStyle || getAreaBorderStyle(saved),
-                    groupId: isArea ? null : saved.groupId,
-                    groupNo: isArea ? null : saved.groupNo,
+                    groupId: saved.groupId,
+                    groupNo: saved.groupNo,
                     boxX: saved.x,
                     boxY: saved.y,
                     chainIndex: nextChainIndex
                 };
                 setDrawMode(isArea ? 'AREA' : 'MARK');
-                window.showToast('같은 결함 정보를 유지했습니다. 도면에서 다음 위치를 클릭해 표시하세요.', 'info', 3500);
+                window.showToast(
+                    isArea
+                        ? '같은 번호에 영역을 추가합니다. 도면에서 다음 영역을 그려 주세요.'
+                        : '같은 번호에 화살표를 추가합니다. 도면에서 다음 위치를 클릭해 주세요.',
+                    'info',
+                    3500
+                );
             } else {
                 drawCanvas();
             }
@@ -22936,7 +22982,22 @@ document.addEventListener('DOMContentLoaded', () => {
     // arrows: 그룹(마킹 추가로 묶인 결함들)을 한 박스+여러 화살표로 그릴 때 전달하는 {targetX,targetY}[]
     function drawPinSafe(ctx, defect, arrows) {
         try {
-            if (defect.shapeType === 'area' && defect.areaX1 !== undefined) {
+            const groupAreaSources = [];
+            if (arrows && arrows.length) {
+                arrows.forEach((a) => {
+                    if (a && a.areaSource && a.areaSource.areaX1 !== undefined) groupAreaSources.push(a.areaSource);
+                });
+            }
+            if (groupAreaSources.length) {
+                const seen = new Set();
+                groupAreaSources.forEach((a) => {
+                    const key = a.id || a;
+                    if (seen.has(key)) return;
+                    seen.add(key);
+                    drawAreaRect(ctx, a, false, true);
+                });
+                ensureAreaPinPlacement(defect);
+            } else if (defect.shapeType === 'area' && defect.areaX1 !== undefined) {
                 drawAreaRect(ctx, defect, false, true);
                 ensureAreaPinPlacement(defect);
                 // 번호칸·지시선은 아래 일반 핀 로직으로 이어서 그림
@@ -22966,15 +23027,19 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (t.targetX === undefined || t.targetY === undefined) return;
                 let tipX = t.targetX;
                 let tipY = t.targetY;
-                if (isAreaDefectSafe) {
-                    const attach = getAreaCenterBorderAttachDefect(boxX, boxY, defect);
+                const areaSrc = (t.areaSource && t.areaSource.areaX1 !== undefined)
+                    ? t.areaSource
+                    : (isAreaDefectSafe ? defect : null);
+                const tipIsArea = !!areaSrc;
+                if (areaSrc) {
+                    const attach = getAreaCenterBorderAttachDefect(boxX, boxY, areaSrc);
                     tipX = attach.x;
                     tipY = attach.y;
                 }
                 const leaderAnchorOpts = { shape: safeShapeCfg.shape, scale: safeScale };
                 const anchor = getPinLeaderBoxAnchor(boxX, boxY, tipX, tipY, safeBoxW, safeBoxH, 0, leaderAnchorOpts);
                 const safeHeadLen = 11 * safeArrowScale;
-                const forcedDir = isAreaDefectSafe ? { enabled: false } : resolveForcedArrowDirection(t, defect);
+                const forcedDir = tipIsArea ? { enabled: false } : resolveForcedArrowDirection(t, defect);
                 const stemInset = useCircleTipSafe
                     ? 4.5 * safeArrowScale
                     : safeHeadLen * Math.cos(Math.PI / 6);
@@ -22997,7 +23062,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         const ux = tipX - anchor.x;
                         const uy = tipY - anchor.y;
                         // 영역은 테두리까지 직선 (L자 꺾임 없음)
-                        const tipBack = isAreaDefectSafe
+                        const tipBack = tipIsArea
                             ? 0
                             : (useCircleTipSafe ? stemInset : safeHeadLen * Math.cos(Math.PI / 6));
                         const stemEnd = tipBack <= 0
@@ -23015,7 +23080,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 ctx.setLineDash([]);
                 ctx.stroke();
 
-                if (!isAreaDefectSafe) {
+                if (!tipIsArea) {
                     ctx.fillStyle = color;
                     if (useCircleTipSafe) {
                         ctx.beginPath();
@@ -23080,21 +23145,51 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const isAreaDefect = defect.shapeType === 'area' && defect.areaX1 !== undefined;
         const leaders = [];
+        const areaPayloads = [];
+        const seenAreaIds = new Set();
+        const pushAreaPayload = (src) => {
+            if (!src || src.areaX1 === undefined) return;
+            const id = src.id || `${src.areaX1}_${src.areaY1}_${src.areaX2}_${src.areaY2}`;
+            if (seenAreaIds.has(id)) return;
+            seenAreaIds.add(id);
+            areaPayloads.push({
+                x1: Math.min(src.areaX1, src.areaX2),
+                y1: Math.min(src.areaY1, src.areaY2),
+                x2: Math.max(src.areaX1, src.areaX2),
+                y2: Math.max(src.areaY1, src.areaY2),
+                shape: getAreaShape(src),
+                angle: getAreaAngleDeg(src),
+                points: (getAreaShape(src) === 'polygon')
+                    ? getAreaPolyPoints(src)
+                    : getAreaWorldCorners(src),
+                drawings: Array.isArray(src.areaDrawings)
+                    ? src.areaDrawings.map((st) => ({
+                        type: st.type || 'path',
+                        points: (st.points || []).map((p) => ({ x: p.x, y: p.y }))
+                    }))
+                    : [],
+                fillStyle: getAreaFillStyle(src),
+                borderStyle: getAreaBorderStyle(src)
+            });
+        };
         targets.forEach(t => {
             if (t.targetX === undefined || t.targetY === undefined) return;
             let tipX = t.targetX;
             let tipY = t.targetY;
-            if (isAreaDefect) {
-                const attach = getAreaCenterBorderAttachDefect(
-                    boxX, boxY, defect
-                );
+            const areaSrc = (t.areaSource && t.areaSource.areaX1 !== undefined)
+                ? t.areaSource
+                : (isAreaDefect ? defect : null);
+            const tipIsArea = !!areaSrc;
+            if (areaSrc) {
+                pushAreaPayload(areaSrc);
+                const attach = getAreaCenterBorderAttachDefect(boxX, boxY, areaSrc);
                 tipX = attach.x;
                 tipY = attach.y;
             }
             const leaderAnchorOpts = { shape: shapeCfg.shape, scale: pinScale };
             const anchor = getPinLeaderBoxAnchor(boxX, boxY, tipX, tipY, boxDim.w, boxDim.h, 0, leaderAnchorOpts);
             const headLen = 11 * arrowScale;
-            const forcedDir = isAreaDefect ? { enabled: false } : resolveForcedArrowDirection(t, defect);
+            const forcedDir = tipIsArea ? { enabled: false } : resolveForcedArrowDirection(t, defect);
             const stemInset = useCircleTip
                 ? 4.5 * arrowScale
                 : headLen * Math.cos(Math.PI / 6);
@@ -23110,7 +23205,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     const ux = tipX - anchor.x;
                     const uy = tipY - anchor.y;
                     // 영역은 테두리까지 직선 (L자 꺾임 없음)
-                    const tipBack = isAreaDefect
+                    const tipBack = tipIsArea
                         ? 0
                         : (useCircleTip ? stemInset : headLen * Math.cos(Math.PI / 6));
                     const stemEnd = tipBack <= 0
@@ -23127,9 +23222,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 uy: leader.uy,
                 headLen,
                 useCircleTip,
-                skipArrowHead: isAreaDefect
+                skipArrowHead: tipIsArea
             });
         });
+        if (!areaPayloads.length && isAreaDefect) pushAreaPayload(defect);
 
         return {
             color,
@@ -23143,25 +23239,8 @@ document.addEventListener('DOMContentLoaded', () => {
             lineW,
             fill: !!shapeCfg.fill,
             leaders,
-            area: isAreaDefect ? {
-                x1: Math.min(defect.areaX1, defect.areaX2),
-                y1: Math.min(defect.areaY1, defect.areaY2),
-                x2: Math.max(defect.areaX1, defect.areaX2),
-                y2: Math.max(defect.areaY1, defect.areaY2),
-                shape: getAreaShape(defect),
-                angle: getAreaAngleDeg(defect),
-                points: (getAreaShape(defect) === 'polygon')
-                    ? getAreaPolyPoints(defect)
-                    : getAreaWorldCorners(defect),
-                drawings: Array.isArray(defect.areaDrawings)
-                    ? defect.areaDrawings.map((st) => ({
-                        type: st.type || 'path',
-                        points: (st.points || []).map((p) => ({ x: p.x, y: p.y }))
-                    }))
-                    : [],
-                fillStyle: getAreaFillStyle(defect),
-                borderStyle: getAreaBorderStyle(defect)
-            } : null
+            area: areaPayloads[0] || null,
+            areas: areaPayloads
         };
     };
 

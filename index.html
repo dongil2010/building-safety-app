@@ -32,7 +32,7 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <meta name="apple-mobile-web-app-title" content="스마트 안전점검">
-    <link rel="stylesheet" href="styles.css?v=20260827_poly_edit">
+    <link rel="stylesheet" href="styles.css?v=20260827_multi_tip">
     <!-- FontAwesome icons for clean engineering UI -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <!-- PDF 생성용: 페이지별로 직접 캡처해서 조립(큰 보고서에서 html2pdf 한방 렌더링이 캔버스 높이 한계로
@@ -955,8 +955,8 @@
                 <button class="btn btn-outline" id="btnAddSurveyTableRow" title="도면 번호는 그대로 두고 결함표에 N-1, N-2 행 추가">
                     <i class="fa-solid fa-table"></i> 결함표 추가
                 </button>
-                <button class="btn btn-outline" id="btnAddAnotherMarking" title="같은 정보로 다른 위치에 계속 마킹">
-                    <i class="fa-solid fa-location-dot"></i> 계속 마킹
+                <button class="btn btn-outline" id="btnAddAnotherMarking" title="같은 번호칸에서 화살표(핀) 또는 영역을 추가합니다">
+                    <i class="fa-solid fa-diagram-project"></i> 위치 추가
                 </button>
                 <button class="btn btn-primary" id="btnSaveDefect"><i class="fa-solid fa-check"></i> 닫기</button>
                 <button class="btn btn-outline" id="btnCancelDefect" style="display:none;">취소</button>
@@ -972,8 +972,8 @@
                     <span>결함표</span>
                 </button>
                 <button type="button" class="defect-mobile-btn secondary" id="btnAddAnotherMarkingMobile">
-                    <i class="fa-solid fa-location-dot"></i>
-                    <span>계속 마킹</span>
+                    <i class="fa-solid fa-diagram-project"></i>
+                    <span>위치 추가</span>
                 </button>
                 <button type="button" class="defect-mobile-btn primary" id="btnSaveDefectMobile">
                     <i class="fa-solid fa-check"></i>
@@ -2491,7 +2491,7 @@
     <!-- Core → 탭 분류 → 기존 엔진(app.js) -->
     <script src="js/core/state.js?v=20260827_area_ink"></script>
     <script src="js/tabs/registry.js?v=20260826_bsafix"></script>
-    <script src="js/pdf-vector-bridge.js?v=20260827_area_ink"></script>
+    <script src="js/pdf-vector-bridge.js?v=20260827_multi_tip"></script>
     <script src="js/core/layout-mode.js?v=20260827_tablet"></script>
     <script src="js/tabs/home.js?v=20260827_round_fab"></script>
     <script src="js/tabs/map.js?v=20260826_mem1"></script>
@@ -2500,7 +2500,7 @@
     <script src="js/shared/report.js?v=20260827_overview"></script>
     <script src="js/shared/hwpx-import.js?v=20260825_hwpxin"></script>
     <script src="js/shared/auth.js?v=20260821_land1"></script>
-    <script src="app.js?v=20260827_poly_edit"></script>
+    <script src="app.js?v=20260827_multi_tip"></script>
     <script>
         window.BSA_APP_VERSION = '20260826_mem1';
         (function () {

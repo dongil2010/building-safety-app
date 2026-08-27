@@ -560,16 +560,22 @@
         if (d.groupId) {
           if (seenGroup.has(d.groupId)) return;
           seenGroup.add(d.groupId);
-          const members = list.filter(m => m.groupId === d.groupId);
+          const members = list.filter(m => m.groupId === d.groupId && !m.surveyExtra);
           const arrows = members
             .filter(m => m.targetX !== undefined && m.targetY !== undefined)
             .map(m => ({
               targetX: m.targetX,
               targetY: m.targetY,
               forceArrowDir: m.forceArrowDir,
-              arrowOctant: m.arrowOctant
+              arrowOctant: m.arrowOctant,
+              areaSource: (m.shapeType === 'area' && m.areaX1 !== undefined) ? m : null
             }));
-          const plan = window.buildVectorPinDrawPlan(members[0], arrows, measureCtx);
+          const representative = members.slice().sort((a, b) => {
+            const sa = String(a.no || '');
+            const sb = String(b.no || '');
+            return sa.localeCompare(sb, undefined, { numeric: true });
+          })[0] || d;
+          const plan = window.buildVectorPinDrawPlan(representative, arrows, measureCtx);
           if (plan) plans.push(plan);
           return;
         }
@@ -587,10 +593,13 @@
       const boxH = p.boxH * sy;
       const box = imgToPdf(p.boxX, p.boxY);
 
-      // 영역 마킹(면적) — 번호칸/지시선보다 먼저 그려 아래에 깔림
-      if (p.area) {
-        drawVectorAreaMark(page, p.area, color, imgToPdf, sx, sy, height, sAvg);
-      }
+      // 영역 마킹(면적) — 번호칸/지시선보다 먼저 그려 아래에 깔림 (그룹이면 여러 영역)
+      const areaList = (Array.isArray(p.areas) && p.areas.length)
+        ? p.areas
+        : (p.area ? [p.area] : []);
+      areaList.forEach((areaMark) => {
+        drawVectorAreaMark(page, areaMark, color, imgToPdf, sx, sy, height, sAvg);
+      });
 
       (p.leaders || []).forEach((L) => {
         const routePdf = (L.route || []).map(pt => imgToPdf(pt.x, pt.y));
