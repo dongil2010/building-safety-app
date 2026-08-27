@@ -10142,9 +10142,7 @@ html.layout-tablet body.ndt-modal-open .mobile-side-rail {
 
 /* 건축물 등록·수정 모달 — 화면 정중앙 (하위 규칙 최종 우선) */
 @media (min-width: 769px) {
-    #addBuildingModal.modal-overlay,
     #addBuildingModal.modal-overlay.open,
-    #editBuildingModal.modal-overlay,
     #editBuildingModal.modal-overlay.open {
         display: grid !important;
         place-items: center !important;
@@ -10160,10 +10158,6 @@ html.layout-tablet body.ndt-modal-open .mobile-side-rail {
         justify-self: center !important;
         align-self: center !important;
         margin: 0 !important;
-    }
-}
-
-      margin: 0 !important;
     }
 }
 
