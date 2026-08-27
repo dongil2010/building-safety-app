@@ -6803,6 +6803,73 @@ body:not(.bsa-tab-home) .home-fab-add-building {
     color: #1c1917;
 }
 
+.home-settings-panel .hero-btn-trash {
+    background: #fff7ed;
+    border-color: #c2410c;
+    color: #9a3412;
+}
+
+.building-trash-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 1.15rem;
+    height: 1.15rem;
+    padding: 0 0.28rem;
+    margin-left: 0.2rem;
+    border-radius: 999px;
+    background: #ea580c;
+    color: #fff;
+    font-size: 0.68rem;
+    font-weight: 800;
+    line-height: 1;
+}
+
+.building-trash-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.55rem;
+    max-height: min(52vh, 420px);
+    overflow: auto;
+}
+
+.building-trash-item {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 0.65rem;
+    padding: 0.65rem 0.75rem;
+    border: 1px solid #e2e8f0;
+    border-radius: 10px;
+    background: #f8fafc;
+}
+
+.building-trash-item-title {
+    font-weight: 800;
+    color: #0f172a;
+    font-size: 0.92rem;
+}
+
+.building-trash-item-meta {
+    margin-top: 0.2rem;
+    font-size: 0.75rem;
+    color: #64748b;
+}
+
+.building-trash-item-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+    flex-shrink: 0;
+}
+
+.building-trash-empty {
+    text-align: center;
+    color: #94a3b8;
+    font-size: 0.88rem;
+    padding: 1.2rem 0.5rem;
+}
+
 .home-settings-panel .hero-btn-phone {
     background: #fefce8;
     border-color: #a16207;

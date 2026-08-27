@@ -2041,6 +2041,10 @@ document.addEventListener('DOMContentLoaded', () => {
             // 도면/사진은 localStorage가 아니라 IndexedDB에서 비동기로 복원한다(위 저장 로직과 짝).
             // 화면은 먼저 그리고, 이미지는 도착하는 대로 다시 그려서 채워넣는다.
             hydrateLocalImagesFromIndexedDb();
+            if (typeof window.purgeExpiredBuildingTrash === 'function') {
+                window.purgeExpiredBuildingTrash().catch(() => {});
+            }
+            if (typeof window.updateBuildingTrashBadge === 'function') window.updateBuildingTrashBadge();
         } catch (e) {
             console.error('LocalStorage load failed:', e);
             window.state.buildings = getDefaultBuildings();
@@ -2066,11 +2070,65 @@ document.addEventListener('DOMContentLoaded', () => {
         return (buildings || []).filter(b => b?.id && !del.has(b.id));
     }
 
+    /** 건물 휴지통 보관 기간 (약 30일) */
+    const BUILDING_TRASH_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
+
+    function isBuildingTrashed(bldg) {
+        return !!(bldg && bldg.trashedAt);
+    }
+
+    function filterActiveBuildings(buildings, deletedIds) {
+        return filterDeletedBuildings(buildings || [], deletedIds).filter((b) => !isBuildingTrashed(b));
+    }
+
+    function listTrashedBuildings() {
+        return filterDeletedBuildings(window.state.buildings || [], window.state.deletedBuildingIds)
+            .filter(isBuildingTrashed)
+            .sort((a, b) => Date.parse(String(b.trashedAt)) - Date.parse(String(a.trashedAt)));
+    }
+
+    function getBuildingTrashRemainingMs(bldg) {
+        const t = Date.parse(String(bldg && bldg.trashedAt));
+        if (!Number.isFinite(t)) return 0;
+        return (t + BUILDING_TRASH_RETENTION_MS) - Date.now();
+    }
+
+    function formatBuildingTrashRemaining(bldg) {
+        const ms = getBuildingTrashRemainingMs(bldg);
+        if (ms <= 0) return '만료(곧 삭제)';
+        const days = Math.ceil(ms / (24 * 60 * 60 * 1000));
+        if (days >= 1) return `${days}일 남음`;
+        const hours = Math.max(1, Math.ceil(ms / (60 * 60 * 1000)));
+        return `${hours}시간 남음`;
+    }
+
+    function mergeBuildingTrashState(merged, localMatch, remoteB) {
+        if (!merged) return;
+        const localTrashed = localMatch && localMatch.trashedAt ? String(localMatch.trashedAt) : '';
+        const remoteTrashed = remoteB && remoteB.trashedAt ? String(remoteB.trashedAt) : '';
+        const localRestoredAt = localMatch && localMatch._trashRestoredAt
+            ? Date.parse(String(localMatch._trashRestoredAt))
+            : 0;
+        const remoteTrashAt = remoteTrashed ? Date.parse(remoteTrashed) : 0;
+        if (localRestoredAt && (!remoteTrashAt || localRestoredAt >= remoteTrashAt)) {
+            delete merged.trashedAt;
+            delete merged._trashRestoredAt;
+            return;
+        }
+        if (localTrashed || remoteTrashed) {
+            const times = [localTrashed, remoteTrashed].filter(Boolean).sort();
+            merged.trashedAt = times[times.length - 1];
+        } else {
+            delete merged.trashedAt;
+        }
+        delete merged._trashRestoredAt;
+    }
+
     /** 현장(정규화 명칭) 기준 남은 활성 점검(동×회차) 수 */
     function countActiveBuildingsForSiteKey(siteKey, buildings, deletedIds) {
         const key = String(siteKey || '').trim();
         if (!key) return 0;
-        return filterDeletedBuildings(buildings || [], deletedIds)
+        return filterActiveBuildings(buildings || [], deletedIds)
             .filter((b) => getBuildingSiteName(b) === key).length;
     }
 
@@ -2155,6 +2213,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 merged.floorsList = window.getBuildingAvailableFloors(merged);
             }
             merged.overviewPhotos = mergeOverviewPhotoLists(localMatch?.overviewPhotos, b.overviewPhotos);
+            mergeBuildingTrashState(merged, localMatch, b);
+            if (localMatch && localMatch._pendingCloudSync) merged._pendingCloudSync = true;
             return merged;
         });
         return [...localOnly, ...mergedRemote];
@@ -2204,7 +2264,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!b) return b;
         const {
             floorDrawings, floorDrawingPdfs, floorDrawingTiers, floorDrawingSources,
-            _pendingCloudSync, ...rest
+            _pendingCloudSync, _trashRestoredAt, ...rest
         } = b;
         if (Array.isArray(rest.overviewPhotos)) {
             rest.overviewPhotos = rest.overviewPhotos.map((p) => ({
@@ -2212,6 +2272,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 caption: (p && p.caption != null) ? String(p.caption) : ''
             })).filter((p) => p.id);
         }
+        if (!rest.trashedAt) delete rest.trashedAt;
         return rest;
     }
 
@@ -2244,6 +2305,221 @@ document.addEventListener('DOMContentLoaded', () => {
         set.add(buildingId);
         window.state.deletedBuildingIds = Array.from(set);
     }
+
+    function unrecordBuildingDeleted(buildingId) {
+        ensureSyncMetaState();
+        if (!buildingId) return;
+        window.state.deletedBuildingIds = (window.state.deletedBuildingIds || []).filter((id) => id !== buildingId);
+    }
+
+    /** 건물을 휴지통으로 이동 (약 30일 보관 후 자동 영구 삭제) */
+    window.moveBuildingToTrash = function(bldg) {
+        if (!bldg || !bldg.id) return false;
+        bldg.trashedAt = new Date().toISOString();
+        delete bldg._trashRestoredAt;
+        bldg._pendingCloudSync = true;
+
+        if (window.currentEditingBuilding && window.currentEditingBuilding.id === bldg.id) {
+            if (typeof window.closeEditBuildingModalFunc === 'function') window.closeEditBuildingModalFunc();
+        }
+        if (window.state.currentBuildingId === bldg.id) {
+            window.state.currentBuilding = null;
+            window.state.currentBuildingId = null;
+            if (typeof window.switchTab === 'function') window.switchTab('tab-home');
+        }
+
+        saveStateToLocalStorage();
+        if (typeof syncStateToFirebase === 'function') syncStateToFirebase();
+        if (typeof renderDashboard === 'function') renderDashboard();
+        if (typeof window.updateBuildingTrashBadge === 'function') window.updateBuildingTrashBadge();
+        return true;
+    };
+
+    /** 휴지통에서 건물 복원 */
+    window.restoreBuildingFromTrash = function(buildingId) {
+        const bldg = (window.state.buildings || []).find((b) => b && b.id === buildingId);
+        if (!bldg || !isBuildingTrashed(bldg)) {
+            window.showToast('복원할 건물을 찾을 수 없습니다.', 'warning');
+            return false;
+        }
+        delete bldg.trashedAt;
+        bldg._trashRestoredAt = new Date().toISOString();
+        bldg._pendingCloudSync = true;
+        unrecordBuildingDeleted(bldg.id);
+
+        saveStateToLocalStorage();
+        if (typeof syncStateToFirebase === 'function') syncStateToFirebase();
+        if (typeof renderDashboard === 'function') renderDashboard();
+        if (typeof window.renderBuildingTrashModal === 'function') window.renderBuildingTrashModal();
+        if (typeof window.updateBuildingTrashBadge === 'function') window.updateBuildingTrashBadge();
+        window.showToast(`'${bldg.name || '건물'}'을(를) 복원했습니다.`, 'success');
+        return true;
+    };
+
+    /**
+     * 건물 영구 삭제 — 휴지통 만료·수동 비우기용.
+     * 도면·결함·클라우드 첨부를 제거하고 deletedBuildingIds에 기록한다.
+     */
+    window.permanentlyDeleteBuilding = async function(bldg, opts) {
+        opts = opts || {};
+        if (!bldg || !bldg.id) return false;
+        const siteKey = normalizeSiteVaultKey(bldg.name);
+        recordBuildingDeleted(bldg.id);
+        window.state.buildings = (window.state.buildings || []).filter((b) => b.id !== bldg.id);
+        const purgeSiteDrawingsFromCloud = countActiveBuildingsForSiteKey(
+            siteKey,
+            window.state.buildings,
+            window.state.deletedBuildingIds
+        ) === 0;
+
+        const photoDeleteJobs = [];
+        Object.keys(window.state.defects || {}).forEach((k) => {
+            if (k.startsWith(bldg.id + '_')) {
+                (window.state.defects[k] || []).forEach((d) => {
+                    photoDeleteJobs.push(deleteAllPhotosForDefect(d));
+                });
+                delete window.state.defects[k];
+            }
+        });
+        Object.keys(window.state.ndtData || {}).forEach((k) => {
+            if (k.startsWith(bldg.id + '_')) delete window.state.ndtData[k];
+        });
+        Object.keys(window.state.ndtDisplacementGroups || {}).forEach((k) => {
+            if (k.startsWith(bldg.id + '_')) delete window.state.ndtDisplacementGroups[k];
+        });
+        (bldg.overviewPhotos || []).forEach((p) => {
+            if (p && p.id) photoDeleteJobs.push(deleteOverviewPhotoStorage(bldg.id, p.id));
+        });
+        purgeLocalStateForDeletedBuilding(bldg.id);
+
+        if (window.currentEditingBuilding && window.currentEditingBuilding.id === bldg.id) {
+            if (typeof window.closeEditBuildingModalFunc === 'function') window.closeEditBuildingModalFunc();
+        }
+        if (window.state.currentBuildingId === bldg.id) {
+            window.state.currentBuilding = null;
+            window.state.currentBuildingId = null;
+            if (typeof window.switchTab === 'function') window.switchTab('tab-home');
+        }
+
+        saveStateToLocalStorage();
+        if (typeof syncStateToFirebase === 'function') syncStateToFirebase();
+        if (typeof renderDashboard === 'function') renderDashboard();
+        if (typeof window.updateBuildingTrashBadge === 'function') window.updateBuildingTrashBadge();
+        if (!opts.silent) {
+            window.showToast(`'${bldg.name || '건물'}'을(를) 영구 삭제했습니다.`, 'success');
+        }
+
+        Promise.all([
+            archiveBuildingPdfsToSiteVault(bldg).then(() => deleteFloorDrawingsForBuilding(bldg, { purgeCloud: purgeSiteDrawingsFromCloud })),
+            purgeSiteDrawingsFromCloud ? deleteSiteVaultCompletely(siteKey) : Promise.resolve(0),
+            ...photoDeleteJobs
+        ]).then((results) => {
+            const totalFail = results.reduce((sum, n) => sum + (n || 0), 0);
+            if (totalFail > 0 && !opts.silent) {
+                window.showToast(`클라우드에서 일부 첨부파일(${totalFail}건) 삭제에 실패했습니다. 네트워크 상태를 확인해 주세요.`, 'warning', 5000);
+            }
+        });
+        return true;
+    };
+
+    /** 보관 기간이 지난 휴지통 건물 영구 삭제 */
+    window.purgeExpiredBuildingTrash = async function() {
+        const expired = listTrashedBuildings().filter((b) => getBuildingTrashRemainingMs(b) <= 0);
+        if (!expired.length) return 0;
+        for (const b of expired) {
+            await window.permanentlyDeleteBuilding(b, { silent: true });
+        }
+        if (expired.length) {
+            window.showToast(`휴지통 만료 건물 ${expired.length}건을 영구 삭제했습니다.`, 'info', 4500);
+            if (typeof window.renderBuildingTrashModal === 'function') window.renderBuildingTrashModal();
+        }
+        return expired.length;
+    };
+
+    window.updateBuildingTrashBadge = function() {
+        const badge = document.getElementById('buildingTrashBadge');
+        const n = listTrashedBuildings().length;
+        if (!badge) return;
+        if (n > 0) {
+            badge.textContent = String(n);
+            badge.hidden = false;
+        } else {
+            badge.textContent = '';
+            badge.hidden = true;
+        }
+    };
+
+    window.renderBuildingTrashModal = function() {
+        const listEl = document.getElementById('buildingTrashList');
+        const emptyEl = document.getElementById('buildingTrashEmpty');
+        if (!listEl) return;
+        const items = listTrashedBuildings();
+        if (typeof window.updateBuildingTrashBadge === 'function') window.updateBuildingTrashBadge();
+        if (!items.length) {
+            listEl.innerHTML = '';
+            if (emptyEl) emptyEl.hidden = false;
+            return;
+        }
+        if (emptyEl) emptyEl.hidden = true;
+        listEl.innerHTML = items.map((b) => {
+            const name = escapeHtml((b.name || '건물').replace(/^🏢\s*/, ''));
+            const site = escapeHtml(getBuildingSiteName(b));
+            const round = escapeHtml(formatSurveyRoundLabel(getBuildingSurveyRoundKey(b)));
+            const when = escapeHtml(String(b.trashedAt || '').slice(0, 10));
+            const remain = escapeHtml(formatBuildingTrashRemaining(b));
+            const id = escapeHtml(b.id);
+            return `<div class="building-trash-item" data-id="${id}">
+                <div class="building-trash-item-main">
+                    <div class="building-trash-item-title">${name}</div>
+                    <div class="building-trash-item-meta">${site} · ${round} · 삭제 ${when} · ${remain}</div>
+                </div>
+                <div class="building-trash-item-actions">
+                    <button type="button" class="btn btn-sm btn-primary" data-trash-action="restore" data-id="${id}">
+                        <i class="fa-solid fa-rotate-left"></i> 복원
+                    </button>
+                    <button type="button" class="btn btn-sm btn-danger-outline" data-trash-action="purge" data-id="${id}">
+                        <i class="fa-solid fa-trash"></i> 영구 삭제
+                    </button>
+                </div>
+            </div>`;
+        }).join('');
+        listEl.querySelectorAll('[data-trash-action]').forEach((btn) => {
+            btn.addEventListener('click', async () => {
+                const id = btn.getAttribute('data-id');
+                const action = btn.getAttribute('data-trash-action');
+                const bldg = (window.state.buildings || []).find((b) => b && b.id === id);
+                if (!bldg) return;
+                if (action === 'restore') {
+                    window.restoreBuildingFromTrash(id);
+                    return;
+                }
+                if (action === 'purge') {
+                    if (!confirm(`'${bldg.name}'을(를) 영구 삭제할까요?\n도면·결함·첨부파일이 삭제되며 복구할 수 없습니다.`)) return;
+                    await window.permanentlyDeleteBuilding(bldg);
+                    window.renderBuildingTrashModal();
+                }
+            });
+        });
+    };
+
+    window.openBuildingTrashModal = function() {
+        if (typeof window.purgeExpiredBuildingTrash === 'function') {
+            window.purgeExpiredBuildingTrash().finally(() => {
+                window.renderBuildingTrashModal();
+                const modal = document.getElementById('buildingTrashModal');
+                if (modal) modal.classList.add('open');
+            });
+            return;
+        }
+        window.renderBuildingTrashModal();
+        const modal = document.getElementById('buildingTrashModal');
+        if (modal) modal.classList.add('open');
+    };
+
+    window.closeBuildingTrashModal = function() {
+        const modal = document.getElementById('buildingTrashModal');
+        if (modal) modal.classList.remove('open');
+    };
 
     function purgeLocalStateForDeletedBuilding(buildingId) {
         if (!buildingId) return;
@@ -3048,7 +3324,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 window.closeAddBuildingModalFunc();
                 return true;
             }
-            const plainIds = ['optionManagerModal', 'reportPreviewModal', 'mobileQrModal'];
+            const plainIds = ['optionManagerModal', 'reportPreviewModal', 'mobileQrModal', 'buildingTrashModal'];
             for (let j = 0; j < plainIds.length; j++) {
                 const m = document.getElementById(plainIds[j]);
                 if (isModalElOpen(m)) {
@@ -3129,7 +3405,9 @@ document.addEventListener('DOMContentLoaded', () => {
             window.state.buildings = [];
         }
 
-        const allBldgs = filterDeletedBuildings(window.state.buildings, window.state.deletedBuildingIds);
+        if (typeof window.updateBuildingTrashBadge === 'function') window.updateBuildingTrashBadge();
+
+        const allBldgs = filterActiveBuildings(window.state.buildings, window.state.deletedBuildingIds);
         allBldgs.forEach(ensureBuildingSiteFields);
         const term = (window.state.buildingSearchTerm || '').trim().toLowerCase();
         const siteNav = document.getElementById('dashboardSiteNav');
@@ -3449,6 +3727,12 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         if (!bldg) return;
+
+        if (isBuildingTrashed(bldg)) {
+            window.showToast('휴지통에 있는 건물입니다. 설정 → 휴지통에서 복원한 뒤 열어 주세요.', 'warning', 5000);
+            if (typeof window.openBuildingTrashModal === 'function') window.openBuildingTrashModal();
+            return;
+        }
 
         if (window.state.currentBuildingId && window.state.currentFloor) {
             saveFloorMapStyleSettings(window.state.currentFloor, window.state.currentBuildingId);
@@ -5449,69 +5733,22 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // Delete Building Action
+    // Delete Building Action → 휴지통(약 30일) 후 영구 삭제
     const btnDeleteBuilding = document.getElementById('btnDeleteBuilding');
     if (btnDeleteBuilding) {
         btnDeleteBuilding.addEventListener('click', () => {
             const bldg = window.currentEditingBuilding;
             if (!bldg) return;
 
-            if (!confirm(`🗑️ 정말 건축물 '${bldg.name}' 및 등록된 모든 층별 도면과 결함 데이터를 삭제하시겠습니까?\n이 작업은 되돌릴 수 없습니다.`)) return;
+            if (!confirm(
+                `건축물 '${bldg.name}'을(를) 휴지통으로 보낼까요?\n\n` +
+                `· 약 30일간 보관되며 그 안에 복원할 수 있습니다.\n` +
+                `· 30일이 지나면 도면·결함과 함께 영구 삭제됩니다.`
+            )) return;
 
-            const siteKey = normalizeSiteVaultKey(bldg.name);
-            recordBuildingDeleted(bldg.id);
-            window.state.buildings = (window.state.buildings || []).filter(b => b.id !== bldg.id);
-            const purgeSiteDrawingsFromCloud = countActiveBuildingsForSiteKey(
-                siteKey,
-                window.state.buildings,
-                window.state.deletedBuildingIds
-            ) === 0;
-
-            // Clear defects and ndtData for this building
-            const photoDeleteJobs = [];
-            Object.keys(window.state.defects || {}).forEach(k => {
-                if (k.startsWith(bldg.id + '_')) {
-                    (window.state.defects[k] || []).forEach(d => {
-                        photoDeleteJobs.push(deleteAllPhotosForDefect(d));
-                    });
-                    delete window.state.defects[k];
-                }
-            });
-            Object.keys(window.state.ndtData || {}).forEach(k => {
-                if (k.startsWith(bldg.id + '_')) delete window.state.ndtData[k];
-            });
-            Object.keys(window.state.ndtDisplacementGroups || {}).forEach(k => {
-                if (k.startsWith(bldg.id + '_')) delete window.state.ndtDisplacementGroups[k];
-            });
-            (bldg.overviewPhotos || []).forEach((p) => {
-                if (p && p.id) photoDeleteJobs.push(deleteOverviewPhotoStorage(bldg.id, p.id));
-            });
-
-            saveStateToLocalStorage();
-            if (typeof syncStateToFirebase === 'function') syncStateToFirebase();
-
-            window.closeEditBuildingModalFunc();
-
-            if (window.state.currentBuildingId === bldg.id) {
-                window.state.currentBuilding = null;
-                window.state.currentBuildingId = null;
-                window.switchTab('tab-home');
+            if (window.moveBuildingToTrash(bldg)) {
+                window.showToast(`'${bldg.name}'을(를) 휴지통으로 옮겼습니다. 30일 내 복원 가능`, 'success', 5000);
             }
-
-            renderDashboard();
-            window.showToast(`'${bldg.name}' 건축물이 삭제되었습니다.`, 'success');
-
-            // 도면: 같은 현장에 회차가 남아 있으면 서버(vault·Firestore) 유지, 마지막 회차 삭제 시에만 서버에서 제거
-            Promise.all([
-                archiveBuildingPdfsToSiteVault(bldg).then(() => deleteFloorDrawingsForBuilding(bldg, { purgeCloud: purgeSiteDrawingsFromCloud })),
-                purgeSiteDrawingsFromCloud ? deleteSiteVaultCompletely(siteKey) : Promise.resolve(0),
-                ...photoDeleteJobs
-            ]).then(results => {
-                const totalFail = results.reduce((sum, n) => sum + (n || 0), 0);
-                if (totalFail > 0) {
-                    window.showToast(`클라우드에서 일부 첨부파일(${totalFail}건) 삭제에 실패했습니다. 네트워크 상태를 확인해 주세요.`, 'warning', 5000);
-                }
-            });
         });
     }
 
@@ -12688,7 +12925,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function getSiteBuildingsSorted(siteKey) {
-        const all = filterDeletedBuildings(window.state.buildings || [], window.state.deletedBuildingIds);
+        const all = filterActiveBuildings(window.state.buildings || [], window.state.deletedBuildingIds);
         const list = all.filter((b) => getBuildingSiteName(b) === siteKey);
         list.sort((a, b) => {
             const ra = getSurveyRoundOrderRank(getBuildingSurveyRoundKey(a));
@@ -27286,6 +27523,27 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    const btnOpenBuildingTrash = document.getElementById('btnOpenBuildingTrash');
+    if (btnOpenBuildingTrash) {
+        btnOpenBuildingTrash.addEventListener('click', () => {
+            if (typeof window.openBuildingTrashModal === 'function') window.openBuildingTrashModal();
+        });
+    }
+    const btnCloseBuildingTrashModal = document.getElementById('btnCloseBuildingTrashModal');
+    if (btnCloseBuildingTrashModal) {
+        btnCloseBuildingTrashModal.addEventListener('click', () => window.closeBuildingTrashModal?.());
+    }
+    const btnCloseBuildingTrashFooter = document.getElementById('btnCloseBuildingTrashFooter');
+    if (btnCloseBuildingTrashFooter) {
+        btnCloseBuildingTrashFooter.addEventListener('click', () => window.closeBuildingTrashModal?.());
+    }
+    const buildingTrashModal = document.getElementById('buildingTrashModal');
+    if (buildingTrashModal) {
+        buildingTrashModal.addEventListener('click', (e) => {
+            if (e.target === buildingTrashModal) window.closeBuildingTrashModal?.();
+        });
+    }
+
     const btnReloadWebApp = document.getElementById('btnReloadWebApp');
     if (btnReloadWebApp) {
         btnReloadWebApp.addEventListener('click', () => {
@@ -30712,6 +30970,9 @@ document.addEventListener('DOMContentLoaded', () => {
             if (typeof drawNdtCanvas === 'function') drawNdtCanvas();
             if (typeof renderSurveyTable === 'function') renderSurveyTable();
             if (typeof renderDashboard === 'function') renderDashboard();
+            if (typeof window.purgeExpiredBuildingTrash === 'function') {
+                window.purgeExpiredBuildingTrash().catch(() => {});
+            }
         } catch (e) {
             console.warn('Firebase Sync Error:', e);
             // 네트워크 순간 단절: 곧 재시도
