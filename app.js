@@ -3508,24 +3508,24 @@ document.addEventListener('DOMContentLoaded', () => {
                         <span class="building-row-meta">${metaHtml}</span>
                     </div>
                     <div class="building-row-actions building-row-actions-compact">
-                        <button type="button" class="icon-btn icon-btn-start" title="이 동 점검 시작" data-action="inspect" data-bldg-id="${safeId}" aria-label="점검">
+                        <button type="button" class="icon-btn icon-btn-start" title="점검 시작" data-action="inspect" data-bldg-id="${safeId}" aria-label="점검">
                             <i class="fa-solid fa-map-location-dot"></i>
+                            <span class="icon-btn-label">점검</span>
                         </button>
-                        <button type="button" class="icon-btn icon-btn-edit" title="건축물 개요 수정" data-action="edit" data-bldg-id="${safeId}" aria-label="수정">
+                        <button type="button" class="icon-btn icon-btn-edit" title="현장 정보 수정" data-action="edit" data-bldg-id="${safeId}" aria-label="수정">
                             <i class="fa-solid fa-pen-to-square"></i>
+                            <span class="icon-btn-label">수정</span>
                         </button>
                         <button type="button" class="icon-btn icon-btn-drawing" title="도면 추가/교체" data-action="drawing" data-bldg-id="${safeId}" aria-label="도면">
                             <i class="fa-solid fa-images"></i>
-                        </button>
-                        <button type="button" class="icon-btn icon-btn-overview" title="전경사진" data-action="overview" data-bldg-id="${safeId}" aria-label="전경">
-                            <i class="fa-solid fa-panorama"></i>
+                            <span class="icon-btn-label">도면</span>
                         </button>
                     </div>
                 </div>
             `;
         };
 
-        // ── 3단: 현장 → 회차 → 동 ──
+        // ── 3단: 현장 → 회차 → 건축물(점검/수정/도면) ──
         if (selectedSiteKey && window.state.dashboardRoundKey) {
             const roundKey = window.state.dashboardRoundKey;
             const dongs = filtered.filter((b) =>
@@ -3538,7 +3538,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 siteNavTitle.textContent = `${selectedSiteKey} · ${formatSurveyRoundLabel(roundKey)}`;
             }
             if (heroTitle) {
-                heroTitle.textContent = isSiteMultiDong(selectedSiteKey) ? '🏢 동 선택' : '🏢 점검 선택';
+                heroTitle.textContent = isSiteMultiDong(selectedSiteKey) ? '🏢 동 선택' : '🏢 건축물 선택';
             }
 
             if (dongs.length === 0) {
@@ -3548,36 +3548,21 @@ document.addEventListener('DOMContentLoaded', () => {
             }
 
             const multiDong = isSiteMultiDong(selectedSiteKey);
-            if (multiDong) {
-                // 동 선택: 행 클릭 = 바로 점검 (수정은 현장 목록「수정」)
-                grid.innerHTML = dongs.map((bldg) => {
-                    const safeId = escapeHtml(bldg.id);
-                    const floorCount = (bldg.floorsList && bldg.floorsList.length > 0)
-                        ? `도면 ${bldg.floorsList.length}개 층`
-                        : '도면 미등록';
-                    return `
-                        <div class="building-row building-row-dong" data-id="${safeId}">
-                            <div class="building-row-info" data-action="inspect" data-bldg-id="${safeId}">
-                                <span class="building-row-name"><i class="fa-solid fa-door-open flag-icon-muted"></i> ${escapeHtml(formatDongRowLabel(bldg))}</span>
-                                <span class="building-row-meta">${escapeHtml(bldg.inspectionType || '점검')} · ${escapeHtml(floorCount)}</span>
-                            </div>
-                        </div>
-                    `;
-                }).join('');
-            } else {
-                grid.innerHTML = dongs.map((bldg) => {
-                    const floorCount = (bldg.floorsList && bldg.floorsList.length > 0)
-                        ? `📐 도면 ${bldg.floorsList.length}개 층`
-                        : '📐 도면 미등록';
-                    const typeLabel = bldg.inspectionType || '점검';
-                    return renderBuildingActionRow(
-                        bldg,
-                        `<i class="fa-solid fa-building flag-icon-muted"></i> ${escapeHtml(getBuildingSiteName(bldg))}`,
-                        `${escapeHtml(typeLabel)} · ${escapeHtml(bldg.address || '주소 미등록')} · ${floorCount}`,
-                        'building-row-dong building-row-single'
-                    );
-                }).join('');
-            }
+            grid.innerHTML = dongs.map((bldg) => {
+                const floorCount = (bldg.floorsList && bldg.floorsList.length > 0)
+                    ? `도면 ${bldg.floorsList.length}개 층`
+                    : '도면 미등록';
+                const typeLabel = bldg.inspectionType || '점검';
+                const title = multiDong
+                    ? `<i class="fa-solid fa-door-open flag-icon-muted"></i> ${escapeHtml(formatDongRowLabel(bldg))}`
+                    : `<i class="fa-solid fa-building flag-icon-muted"></i> ${escapeHtml(getBuildingSiteName(bldg))}`;
+                return renderBuildingActionRow(
+                    bldg,
+                    title,
+                    `${escapeHtml(typeLabel)} · ${escapeHtml(bldg.address || '주소 미등록')} · ${escapeHtml(floorCount)}`,
+                    multiDong ? 'building-row-dong' : 'building-row-dong building-row-single'
+                );
+            }).join('');
             bindBuildingRowActions();
             if (typeof window.updateHomeFabForDashboardMode === 'function') window.updateHomeFabForDashboardMode();
             return;
@@ -3734,20 +3719,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
     window.openDashboardRoundDongs = function(siteKey, roundKey) {
         if (!siteKey || !roundKey) return;
+        // 회차 → 건축물 선택(점검/수정/도면) 화면
         window.state.dashboardSiteKey = siteKey;
         window.state.dashboardRoundKey = roundKey;
-        // 단일 건물: 회차 클릭 = 바로 점검. 여러 동: 동 선택 화면.
-        if (!isSiteMultiDong(siteKey)) {
-            const active = filterActiveBuildings(window.state.buildings || [], window.state.deletedBuildingIds);
-            const bldg = active.find((b) =>
-                getBuildingSiteName(b) === siteKey
-                && getBuildingSurveyRoundKey(b) === roundKey
-            );
-            if (bldg) {
-                window.selectBuildingAndInspect(bldg.id);
-                return;
-            }
-        }
         window.renderDashboard();
     };
 
