@@ -8478,68 +8478,52 @@ body:not(.bsa-tab-home) .home-fab-add-building {
     }
 
     #tab-home .building-row {
-        flex-wrap: wrap;
-        align-items: flex-start;
+        flex-wrap: nowrap !important;
+        align-items: center;
+        gap: 0.45rem;
     }
 
     #tab-home .building-row-info {
-        flex: 1 1 calc(100% - 8rem);
-        min-width: 0;
-    }
-
-    #tab-home .building-row-actions {
-        width: 100%;
-        justify-content: stretch;
-        gap: 0.3rem;
-        margin-top: 0.15rem;
-    }
-
-    #tab-home .building-row-actions .icon-btn {
-        flex: 1 1 0;
-        width: auto;
-        height: 2.4rem;
-        gap: 0.28rem;
-        font-size: 0.72rem;
-        font-weight: 700;
-        padding: 0 0.35rem;
-    }
-
-    #tab-home .icon-btn-label {
-        display: inline;
-        white-space: nowrap;
-    }
-
-    /* 현장 목록: 수정은 우측 작은 네모만 (한 줄로 늘리지 않음) */
-    #tab-home .building-row-site {
-        flex-wrap: nowrap !important;
-        align-items: center;
-    }
-
-    #tab-home .building-row-site .building-row-info {
         flex: 1 1 auto !important;
         min-width: 0;
     }
 
-    #tab-home .building-row-site .building-row-actions,
-    #tab-home .building-row-actions-compact {
+    /* 건축물 목록: 수정 등 버튼은 우측 작은 네모 (한 줄 늘림 금지) */
+    #tab-home .building-row-actions,
+    #tab-home .building-row-actions-compact,
+    #tab-home .building-row-site .building-row-actions {
         width: auto !important;
         flex: 0 0 auto !important;
         margin-top: 0 !important;
         justify-content: flex-end !important;
+        gap: 0.22rem !important;
+        align-self: center;
     }
 
-    #tab-home .building-row-site .building-row-actions .icon-btn,
-    #tab-home .building-row-actions-compact .icon-btn {
+    #tab-home .building-row-actions .icon-btn,
+    #tab-home .building-row-actions-compact .icon-btn,
+    #tab-home .building-row-site .building-row-actions .icon-btn {
         flex: none !important;
-        width: 2.35rem !important;
-        height: 2.35rem !important;
-        min-width: 2.35rem !important;
+        width: 2rem !important;
+        height: 2rem !important;
+        min-width: 2rem !important;
+        max-width: 2rem !important;
         padding: 0 !important;
+        font-size: 0.82rem !important;
+        border-radius: 8px !important;
+        gap: 0 !important;
     }
 
+    #tab-home .icon-btn-label,
     #tab-home .building-row-site .icon-btn-label,
     #tab-home .building-row-actions-compact .icon-btn-label {
         display: none !important;
+    }
+
+    /* 현장 목록: 수정은 우측 작은 네모만 */
+    #tab-home .building-row-site {
+        flex-wrap: nowrap !important;
+        align-items: center;
     }
 
     #tab-home .hero-user-group {
@@ -9594,10 +9578,13 @@ html.layout-tablet .icon-btn {
 }
 
 html.layout-tablet .building-row-site .building-row-actions .icon-btn,
-html.layout-tablet .building-row-actions-compact .icon-btn {
-    width: 2.65rem !important;
-    height: 2.65rem !important;
-    min-width: 2.65rem !important;
+html.layout-tablet .building-row-actions-compact .icon-btn,
+html.layout-tablet #tab-home .building-row-actions .icon-btn {
+    width: 2.15rem !important;
+    height: 2.15rem !important;
+    min-width: 2.15rem !important;
+    max-width: 2.15rem !important;
+    font-size: 0.88rem !important;
 }
 
 html.layout-tablet #tab-map .inspect-sidebar-left {
