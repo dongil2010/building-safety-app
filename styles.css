@@ -5476,23 +5476,6 @@ body.auth-gate-active #loginOverlay {
     transform: scale(0.96);
 }
 
-.defect-quick-chip.is-favorite {
-    border-color: #f59e0b;
-    background: #fffbeb;
-}
-
-.defect-quick-chip .fav-star {
-    font-size: 0.62rem;
-    color: #f59e0b;
-    margin-right: 0.15rem;
-}
-
-.defect-quick-hint-fav {
-    font-size: 0.68rem;
-    color: #64748b;
-    font-weight: 600;
-}
-
 /* ── 결함 빠른 선택 패널 ── */
 .defect-quick-picks {
     display: flex;

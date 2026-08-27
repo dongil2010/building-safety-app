@@ -133,7 +133,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (el && text) el.textContent = text;
     };
 
-    function getCompanyDefectPresetsPayload() {
+    function getUserDefectPinPresetsPayload() {
         return {
             customDefectTypes: window.state.customDefectTypes || {},
             customDefectCauses: window.state.customDefectCauses || {},
@@ -147,21 +147,132 @@ document.addEventListener('DOMContentLoaded', () => {
         };
     }
 
-    function applyCompanyDefectPresetsFromRemote(presets) {
+    /** @deprecated 회사 공용 → 계정당 설정으로 이전. 호환용 별칭 */
+    function getCompanyDefectPresetsPayload() {
+        return getUserDefectPinPresetsPayload();
+    }
+
+    const DEFECT_PIN_PRESET_FIELDS = [
+        'customDefectTypes', 'customDefectCauses', 'customDefectComponents',
+        'hiddenDefectComponents', 'hiddenDefectTypes', 'hiddenDefectCauses',
+        'defectComponentOrder', 'defectTypeOrder', 'defectCauseOrder'
+    ];
+
+    function applyDefectPinPresets(presets) {
         if (!presets || typeof presets !== 'object') return false;
         let changed = false;
-        const fields = [
-            'customDefectTypes', 'customDefectCauses', 'customDefectComponents',
-            'hiddenDefectComponents', 'hiddenDefectTypes', 'hiddenDefectCauses',
-            'defectComponentOrder', 'defectTypeOrder', 'defectCauseOrder'
-        ];
-        fields.forEach((f) => {
+        DEFECT_PIN_PRESET_FIELDS.forEach((f) => {
             if (presets[f] != null) {
                 window.state[f] = presets[f];
                 changed = true;
             }
         });
         return changed;
+    }
+
+    function applyCompanyDefectPresetsFromRemote(presets) {
+        return applyDefectPinPresets(presets);
+    }
+
+    function userDefectPinLocalKey(uid) {
+        return `building_safety_user_defect_pin_v1_${uid || 'anon'}`;
+    }
+
+    function persistUserDefectPinPresetsLocal(uid) {
+        const id = uid || window.state.uid;
+        if (!id) return;
+        try {
+            localStorage.setItem(userDefectPinLocalKey(id), JSON.stringify({
+                updatedAt: Date.now(),
+                presets: getUserDefectPinPresetsPayload()
+            }));
+        } catch (e) {
+            console.warn('계정 결함 핀 설정 로컬 저장 실패:', e);
+        }
+    }
+
+    let _userDefectPinSyncTimer = null;
+    let _lastSyncedUserDefectPinJson = '';
+    function scheduleSyncUserDefectPinPresets() {
+        if (!window.state.uid) return;
+        persistUserDefectPinPresetsLocal(window.state.uid);
+        if (_userDefectPinSyncTimer) clearTimeout(_userDefectPinSyncTimer);
+        _userDefectPinSyncTimer = setTimeout(() => {
+            _userDefectPinSyncTimer = null;
+            syncUserDefectPinPresetsToCloud().catch((e) => {
+                console.warn('계정 결함 핀 설정 동기화 실패:', e);
+            });
+        }, 700);
+    }
+
+    async function syncUserDefectPinPresetsToCloud() {
+        const uid = window.state.uid;
+        if (!uid || !db || navigator.onLine === false) return;
+        const payload = getUserDefectPinPresetsPayload();
+        const json = JSON.stringify(payload);
+        if (json === _lastSyncedUserDefectPinJson) return;
+        await db.collection('users').doc(uid).set({
+            defectPinPresets: payload,
+            defectPinPresetsUpdatedAt: firebase.firestore.FieldValue.serverTimestamp()
+        }, { merge: true });
+        _lastSyncedUserDefectPinJson = json;
+    }
+
+    async function loadAndApplyUserDefectPinPresets(uid) {
+        if (!uid) return;
+        let localWrap = null;
+        try {
+            const raw = localStorage.getItem(userDefectPinLocalKey(uid));
+            if (raw) localWrap = JSON.parse(raw);
+        } catch (_) { /* ignore */ }
+
+        let cloudPresets = null;
+        let cloudUpdatedAt = 0;
+        if (db && navigator.onLine !== false) {
+            try {
+                const snap = await db.collection('users').doc(uid).get();
+                if (snap.exists) {
+                    const d = snap.data() || {};
+                    if (d.defectPinPresets && typeof d.defectPinPresets === 'object') {
+                        cloudPresets = d.defectPinPresets;
+                    }
+                    const ts = d.defectPinPresetsUpdatedAt;
+                    if (ts && typeof ts.toMillis === 'function') cloudUpdatedAt = ts.toMillis();
+                    else if (typeof ts === 'number') cloudUpdatedAt = ts;
+                }
+            } catch (e) {
+                console.warn('계정 결함 핀 설정 조회 실패:', e);
+            }
+        }
+
+        const localUpdatedAt = Number(localWrap && localWrap.updatedAt) || 0;
+        const localPresets = localWrap && localWrap.presets;
+        if (cloudPresets && cloudUpdatedAt >= localUpdatedAt) {
+            applyDefectPinPresets(cloudPresets);
+        } else if (localPresets) {
+            applyDefectPinPresets(localPresets);
+        }
+        // 둘 다 없으면 loadStateFromLocalStorage로 이미 올라온 값(또는 기본값)을 이 계정 소유로 이전
+        persistUserDefectPinPresetsLocal(uid);
+        if (cloudPresets && cloudUpdatedAt >= localUpdatedAt) {
+            _lastSyncedUserDefectPinJson = JSON.stringify(getUserDefectPinPresetsPayload());
+        } else if (navigator.onLine !== false) {
+            _lastSyncedUserDefectPinJson = ''; // 로컬만 있으면 클라우드에 1회 반영
+            scheduleSyncUserDefectPinPresets();
+        }
+        if (typeof migrateDefectComponentStateShape === 'function') migrateDefectComponentStateShape();
+    }
+
+    function resetDefectPinPresetsToDefaults() {
+        window.state.customDefectTypes = { '구조체': [], '비구조체': [], '마감재': [] };
+        window.state.customDefectCauses = {};
+        window.state.customDefectComponents = { '구조체': [], '비구조체': [], '마감재': [] };
+        window.state.hiddenDefectComponents = { '구조체': [], '비구조체': [], '마감재': [] };
+        window.state.hiddenDefectTypes = { '구조체': [], '비구조체': [], '마감재': [] };
+        window.state.hiddenDefectCauses = {};
+        window.state.defectComponentOrder = {};
+        window.state.defectTypeOrder = {};
+        window.state.defectCauseOrder = {};
     }
 
     async function syncAfterImportWithRetry(label) {
@@ -1537,11 +1648,13 @@ document.addEventListener('DOMContentLoaded', () => {
             };
             localStorage.setItem('building_safety_app_state_v2', JSON.stringify(dataToSave));
             _localStorageSaveFailedNotified = false;
+            if (window.state.uid) persistUserDefectPinPresetsLocal(window.state.uid);
             if (!_suppressSyncOnSave && typeof scheduleSyncToFirebase === 'function') {
                 scheduleSyncToFirebase();
             } else if (!_suppressSyncOnSave && typeof syncStateToFirebase === 'function') {
                 syncStateToFirebase();
             }
+            if (!_suppressSyncOnSave && window.state.uid) scheduleSyncUserDefectPinPresets();
         } catch (e) {
             console.warn('LocalStorage save warning:', e);
             if (!_localStorageSaveFailedNotified) {
@@ -13607,50 +13720,18 @@ document.addEventListener('DOMContentLoaded', () => {
             .filter(v => v && !isDefectComboCustomToken(v));
     }
 
-    function renderQuickPickChipGroup(containerId, options, currentValue, onPick, favKind, favKey) {
+    function renderQuickPickChipGroup(containerId, options, currentValue, onPick) {
         const container = document.getElementById(containerId);
         if (!container) return;
         if (!Array.isArray(options) || options.length === 0) {
             container.innerHTML = '';
             return;
         }
-        const favorites = (favKind && favKey) ? getDeviceFavoriteList(favKind, favKey) : [];
-        const sorted = (favKind && favKey)
-            ? sortOptionsWithDeviceFavorites(options, favKind, favKey)
-            : options;
-        container.innerHTML = sorted.map(value => {
-            const isFav = favorites.includes(value);
-            return `<button type="button" class="defect-quick-chip ${value === currentValue ? 'active' : ''}${isFav ? ' is-favorite' : ''}" data-value="${escapeHtml(value)}" data-fav-kind="${favKind || ''}" data-fav-key="${escapeHtml(favKey || '')}">
-                ${isFav ? '<i class="fa-solid fa-star fav-star"></i>' : ''}${escapeHtml(value)}
-            </button>`;
+        container.innerHTML = options.map(value => {
+            return `<button type="button" class="defect-quick-chip ${value === currentValue ? 'active' : ''}" data-value="${escapeHtml(value)}">${escapeHtml(value)}</button>`;
         }).join('');
         container.querySelectorAll('.defect-quick-chip').forEach(btn => {
-            let pressTimer = null;
-            const pick = () => onPick(btn.dataset.value || '');
-            btn.addEventListener('click', pick);
-            btn.addEventListener('touchstart', () => {
-                pressTimer = setTimeout(() => {
-                    const kind = btn.dataset.favKind;
-                    const key = btn.dataset.favKey;
-                    const val = btn.dataset.value;
-                    if (!kind || !key || !val) return;
-                    const added = toggleDeviceFavorite(kind, key, val);
-                    window.showToast(added ? '즐겨찾기에 추가했습니다 (이 기기만)' : '즐겨찾기에서 제거했습니다', 'info', 2200);
-                    refreshDefectQuickPickBar();
-                }, 550);
-            }, { passive: true });
-            btn.addEventListener('touchend', () => { if (pressTimer) clearTimeout(pressTimer); });
-            btn.addEventListener('touchmove', () => { if (pressTimer) clearTimeout(pressTimer); });
-            btn.addEventListener('contextmenu', (e) => {
-                e.preventDefault();
-                const kind = btn.dataset.favKind;
-                const key = btn.dataset.favKey;
-                const val = btn.dataset.value;
-                if (!kind || !key || !val) return;
-                const added = toggleDeviceFavorite(kind, key, val);
-                window.showToast(added ? '즐겨찾기에 추가 (이 기기만)' : '즐겨찾기 해제', 'info', 2200);
-                refreshDefectQuickPickBar();
-            });
+            btn.addEventListener('click', () => onPick(btn.dataset.value || ''));
         });
     }
 
@@ -13673,7 +13754,7 @@ document.addEventListener('DOMContentLoaded', () => {
             categoryEl.value = value;
             categoryEl.dispatchEvent(new Event('change', { bubbles: true }));
             if (typeof scheduleDefectAutoApply === 'function') scheduleDefectAutoApply();
-        }, null, null);
+        });
 
         const componentOptions = getQuickPickOptionsFromSelect(componentSelect).slice(0, 16);
         renderQuickPickChipGroup('quickComponentChips', componentOptions, currentComponent, (value) => {
@@ -13682,39 +13763,19 @@ document.addEventListener('DOMContentLoaded', () => {
             updateDefectTypeDropdown(currentCategory, getDefectComboValue(typeSelect, typeInput));
             if (typeof scheduleDefectAutoApply === 'function') scheduleDefectAutoApply();
             refreshDefectQuickPickBar();
-        }, 'component', currentCategory);
+        });
 
         const selectedTypeParts = parseDefectTypeList(currentType);
         const selectedTypeSet = new Set(selectedTypeParts);
-        const typeChipOptions = sortOptionsWithDeviceFavorites(
-            getPinnedDefectTypeChips(currentCategory, currentComponent),
-            'type',
-            currentCategory
-        );
+        const typeChipOptions = getPinnedDefectTypeChips(currentCategory, currentComponent);
         const typeContainer = document.getElementById('quickDefectTypeChips');
         if (typeContainer) {
             typeContainer.innerHTML = typeChipOptions.map(value => {
                 const active = selectedTypeSet.has(value);
-                const isFav = isDeviceFavorite('type', currentCategory, value);
-                return `<button type="button" class="defect-quick-chip${active ? ' active' : ''}${isFav ? ' is-favorite' : ''}" data-value="${escapeHtml(value)}" data-fav-kind="type" data-fav-key="${escapeHtml(currentCategory)}">${isFav ? '<i class="fa-solid fa-star fav-star"></i>' : ''}${escapeHtml(value)}</button>`;
+                return `<button type="button" class="defect-quick-chip${active ? ' active' : ''}" data-value="${escapeHtml(value)}">${escapeHtml(value)}</button>`;
             }).join('');
             typeContainer.querySelectorAll('.defect-quick-chip').forEach(btn => {
-                let pressTimer = null;
                 btn.addEventListener('click', () => toggleDefectTypeChip(btn.dataset.value || ''));
-                btn.addEventListener('touchstart', () => {
-                    pressTimer = setTimeout(() => {
-                        const added = toggleDeviceFavorite('type', currentCategory, btn.dataset.value || '');
-                        window.showToast(added ? '즐겨찾기 추가 (이 기기)' : '즐겨찾기 해제', 'info', 2200);
-                        refreshDefectQuickPickBar();
-                    }, 550);
-                }, { passive: true });
-                btn.addEventListener('touchend', () => { if (pressTimer) clearTimeout(pressTimer); });
-                btn.addEventListener('contextmenu', (e) => {
-                    e.preventDefault();
-                    const added = toggleDeviceFavorite('type', currentCategory, btn.dataset.value || '');
-                    window.showToast(added ? '즐겨찾기 추가 (이 기기)' : '즐겨찾기 해제', 'info', 2200);
-                    refreshDefectQuickPickBar();
-                });
             });
         }
 
@@ -27583,9 +27644,7 @@ document.addEventListener('DOMContentLoaded', () => {
             window.state.locationMapLegendBox = data.locationMapLegendBox;
             isChanged = true;
         }
-        if (data.companyDefectPresets) {
-            if (applyCompanyDefectPresetsFromRemote(data.companyDefectPresets)) isChanged = true;
-        }
+        // companyDefectPresets는 더 이상 회사 공용이 아님 — 계정당 users/{uid}.defectPinPresets 사용
 
         return isChanged;
     }
@@ -27699,7 +27758,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 locationMapLegend: window.state.locationMapLegend || null,
                 locationMapLegendBox: window.state.locationMapLegendBox || null,
                 companyName: window.state.companyName || localStorage.getItem('building_company_name'),
-                companyDefectPresets: getCompanyDefectPresetsPayload(),
                 updatedAt: firebase.firestore.FieldValue.serverTimestamp()
             };
             await docRef.set(dataToSync, { merge: true });
@@ -27896,6 +27954,9 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         if (typeof loadStateFromLocalStorage === 'function') loadStateFromLocalStorage();
+        if (typeof loadAndApplyUserDefectPinPresets === 'function') {
+            await loadAndApplyUserDefectPinPresets(profile.uid);
+        }
         if (typeof ensureBuildingAccessSeeded === 'function') ensureBuildingAccessSeeded();
         else if (typeof touchBuildingAccess === 'function' && window.state.currentBuildingId) {
             touchBuildingAccess(window.state.currentBuildingId);
@@ -27919,6 +27980,7 @@ document.addEventListener('DOMContentLoaded', () => {
             window.state.companyId = null;
             window.state.companyName = null;
             window.state.role = null;
+            if (typeof resetDefectPinPresetsToDefaults === 'function') resetDefectPinPresetsToDefaults();
             showLoginOverlay();
             return;
         }

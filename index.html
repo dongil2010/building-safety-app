@@ -24,7 +24,7 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <meta name="apple-mobile-web-app-title" content="스마트 안전점검">
-    <link rel="stylesheet" href="styles.css?v=20260826_opening">
+    <link rel="stylesheet" href="styles.css?v=20260827_userpin">
     <!-- FontAwesome icons for clean engineering UI -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <!-- PDF 생성용: 페이지별로 직접 캡처해서 조립(큰 보고서에서 html2pdf 한방 렌더링이 캔버스 높이 한계로
@@ -725,7 +725,7 @@
                         <div class="defect-quick-group">
                             <div class="defect-quick-label">
                                 <i class="fa-solid fa-building-columns"></i> 부재 명칭
-                                <span class="defect-quick-hint defect-quick-hint-fav">길게 누르면 즐겨찾기(이 기기)</span>
+                                <span class="defect-quick-hint">⚙ 으로 순서·항목 편집 (계정별 저장)</span>
                                 <button type="button" id="btnManageComponent" class="btn-option-manage" title="부재 명칭 항목 관리"><i class="fa-solid fa-gear"></i></button>
                             </div>
                             <input type="text" id="defectComponentInput" class="form-control defect-combo-input defect-quick-direct-input" placeholder="부재 명칭 직접 입력" autocomplete="off">
@@ -734,7 +734,7 @@
                         <div class="defect-quick-group">
                             <div class="defect-quick-label">
                                 <i class="fa-solid fa-triangle-exclamation"></i> 결함 종류
-                                <span class="defect-quick-hint">눌러서 여러 개 선택 (선택 순) · 길게 누르면 즐겨찾기</span>
+                                <span class="defect-quick-hint">눌러서 여러 개 선택 (선택 순) · ⚙ 계정별 편집</span>
                                 <button type="button" id="btnManageDefectType" class="btn-option-manage" title="결함 종류 항목 관리"><i class="fa-solid fa-gear"></i></button>
                             </div>
                             <input type="text" id="defectTypeInput" class="form-control defect-combo-input defect-quick-direct-input" placeholder="결함 종류 직접 입력" autocomplete="off">
@@ -2354,7 +2354,7 @@
     </div>
 
     <!-- Core → 탭 분류 → 기존 엔진(app.js) -->
-    <script src="js/core/state.js?v=20260826_mobile2000"></script>
+    <script src="js/core/state.js?v=20260827_userpin"></script>
     <script src="js/tabs/registry.js?v=20260826_bsafix"></script>
     <script src="js/pdf-vector-bridge.js?v=20260826_fastmap"></script>
     <script src="js/core/layout-mode.js?v=20260826_bsafix"></script>
@@ -2365,7 +2365,7 @@
     <script src="js/shared/report.js?v=20260824_hwpxFix"></script>
     <script src="js/shared/hwpx-import.js?v=20260825_hwpxin"></script>
     <script src="js/shared/auth.js?v=20260821_land1"></script>
-    <script src="app.js?v=20260827_masonry"></script>
+    <script src="app.js?v=20260827_userpin"></script>
     <script>
         window.BSA_APP_VERSION = '20260826_mem1';
         (function () {
