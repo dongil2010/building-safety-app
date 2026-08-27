@@ -13265,11 +13265,9 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!isCrack && !isGap) return '';
 
         const withMm = (raw) => {
-            const n = String(raw ?? '').trim();
+            const n = normalizeCrackDecimalText(String(raw ?? '').trim().replace(/mm|㎜/ig, '').trim());
             if (!n || n === '-') return '';
-            if (/mm|㎜/i.test(n)) return n.replace(/㎜/g, 'mm');
-            if (/^\d+(\.\d+)?$/.test(n)) return `${n}mm`;
-            return n;
+            return `${n}mm`;
         };
         const joinMultiLine = (parts) => parts.filter(Boolean).join(',\n');
 
@@ -13329,7 +13327,11 @@ document.addEventListener('DOMContentLoaded', () => {
     function formatDefectCrackWidthsForReport(d) {
         const parts = getDefectCrackWidthParts(d);
         if (!parts.length) return '';
-        return parts.map((w) => (/mm|㎜/i.test(w) ? w.replace(/㎜/g, 'mm') : `${w}mm`)).join(', ');
+        return parts.map((w) => {
+            const n = normalizeCrackDecimalText(String(w).replace(/mm|㎜/ig, '').trim());
+            if (!n) return '';
+            return /mm|㎜/i.test(w) ? `${n}mm` : `${n}mm`;
+        }).filter(Boolean).join(', ');
     }
 
     /** 규모(상태조사표 size) — crackMeasures는 ", "로 연결 (한글 출력 동일) */
@@ -15236,10 +15238,19 @@ document.addEventListener('DOMContentLoaded', () => {
         return '/';
     }
 
+    /** 폭·길이: 0.3 처럼 소수 있으면 유지, 2·5·4 처럼 정수만이면 .0 붙임 */
+    function normalizeCrackDecimalText(raw) {
+        const s = String(raw == null ? '' : raw).trim();
+        if (!s) return '';
+        if (/^\d+\.\d+$/.test(s)) return s;
+        if (/^\d+$/.test(s)) return `${s}.0`;
+        return s;
+    }
+
     function formatCrackMeasurePair(m) {
         const join = normalizeMeasureJoin(m && m.join);
-        const w = String((m && m.width) || '').trim();
-        const l = String((m && m.length) || '').trim();
+        const w = normalizeCrackDecimalText((m && m.width) || '');
+        const l = normalizeCrackDecimalText((m && m.length) || '');
         const n = String((m && m.count) || '').trim();
         const eaSuffix = n ? ` -${n}EA` : '';
 
@@ -15263,8 +15274,8 @@ document.addEventListener('DOMContentLoaded', () => {
         const list = document.getElementById('defectCrackMeasureList');
         if (!list) return [];
         return Array.from(list.querySelectorAll('.defect-crack-measure-row')).map(row => {
-            const w = (row.querySelector('[data-crack-w]')?.value || '').trim();
-            const l = (row.querySelector('[data-crack-l]')?.value || '').trim();
+            const w = normalizeCrackDecimalText(row.querySelector('[data-crack-w]')?.value || '');
+            const l = normalizeCrackDecimalText(row.querySelector('[data-crack-l]')?.value || '');
             const n = (row.querySelector('[data-crack-n]')?.value || '').trim();
             const join = normalizeMeasureJoin(row.querySelector('[data-crack-join]')?.dataset.join);
             return { width: w, length: l, count: n, join };
@@ -15372,6 +15383,16 @@ document.addEventListener('DOMContentLoaded', () => {
                 syncSizeFromMeasureInputs();
                 if (typeof scheduleDefectAutoApply === 'function') scheduleDefectAutoApply();
             });
+            // 폭·길이: 정수만 입력하면 포커스 아웃 시 .0 표시
+            if (inp.hasAttribute('data-crack-w') || inp.hasAttribute('data-crack-l')) {
+                inp.addEventListener('blur', () => {
+                    const next = normalizeCrackDecimalText(inp.value);
+                    if (next !== inp.value) inp.value = next;
+                    if (isDefectBulkEditMode()) markDefectBulkFieldChanged('crackMeasures');
+                    syncSizeFromMeasureInputs();
+                    if (typeof scheduleDefectAutoApply === 'function') scheduleDefectAutoApply();
+                });
+            }
         });
         list.querySelectorAll('[data-crack-join]').forEach(btn => {
             btn.addEventListener('click', () => {
@@ -29172,6 +29193,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     async function applyMergedRemoteData(data) {
         if (!data) return false;
+        if (typeof flushOverviewCaptionsFromDom === 'function') flushOverviewCaptionsFromDom();
         ensureSyncMetaState();
         let isChanged = false;
 
@@ -29308,6 +29330,7 @@ document.addEventListener('DOMContentLoaded', () => {
             _syncPending = true;
             return;
         }
+        if (typeof flushOverviewCaptionsFromDom === 'function') flushOverviewCaptionsFromDom();
         _syncInFlight = true;
         ensureSyncMetaState();
         try {
