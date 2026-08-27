@@ -3474,7 +3474,9 @@ document.addEventListener('DOMContentLoaded', () => {
             elements.addBuildingModal.classList.add('open');
             const addBodyEl = elements.addBuildingModal.querySelector('.add-building-body');
             if (addBodyEl) addBodyEl.scrollTop = 0;
-            if (nameInput) setTimeout(() => nameInput.focus(), 80);
+            // 터치(모바일/태블릿): 자동 포커스로 키보드가 뜨면 기본정보가 가려지므로 PC만 포커스
+            const isTouchUi = (navigator.maxTouchPoints > 0) || ('ontouchstart' in window);
+            if (nameInput && !isTouchUi) setTimeout(() => nameInput.focus(), 80);
         }
     };
 

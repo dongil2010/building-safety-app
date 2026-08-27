@@ -4662,6 +4662,24 @@ body.auth-gate-active #loginOverlay {
     min-height: 0;
 }
 
+/* 카드 안에서만 스크롤 — 헤더/모드바/푸터는 고정, 본문 flex 수축 */
+#addBuildingModal.modal-overlay,
+#addBuildingModal.modal-overlay.open {
+    overflow-x: hidden;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+    align-items: safe center;
+    justify-content: center;
+}
+
+#addBuildingModal .modal-card.add-building-modal {
+    flex-shrink: 0;
+    width: min(96vw, 680px);
+    max-height: min(92dvh, calc(100dvh - 1.25rem - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px)));
+    min-height: 0;
+}
+
 .add-building-header {
     flex-shrink: 0;
     background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
@@ -4755,14 +4773,15 @@ body.auth-gate-active #loginOverlay {
     gap: 0.85rem;
     padding: 1rem 1.2rem 1.1rem;
     background: #f8fafc;
-    max-height: min(68vh, calc(100dvh - 12rem));
+    /* 68vh 고정 max-height는 카드 남는 높이보다 커서 overflow:hidden에 잘림 → 본문만 스크롤 */
+    flex: 1 1 0;
+    min-height: 0;
+    max-height: none;
     overflow-y: auto;
     overflow-x: hidden;
     -webkit-overflow-scrolling: touch;
     overscroll-behavior: contain;
     touch-action: pan-y;
-    flex: 1 1 auto;
-    min-height: 0;
 }
 
 .add-building-section {
@@ -7720,11 +7739,13 @@ body.auth-gate-active #loginOverlay {
         display: none;
     }
 
-    /* 신규 건축물 등록 모달만 — 카드 고정 높이 + 본문 내부 스크롤 */
+    /* 신규 건축물 등록 모달 — 카드 고정 높이 + 본문 내부 스크롤 */
     #addBuildingModal.modal-overlay,
     #addBuildingModal.modal-overlay.open {
-        overflow: hidden;
-        align-items: center;
+        overflow-x: hidden;
+        overflow-y: auto;
+        -webkit-overflow-scrolling: touch;
+        align-items: flex-start;
         justify-content: center;
         padding:
             max(0.35rem, env(safe-area-inset-top, 0px))
@@ -7742,7 +7763,7 @@ body.auth-gate-active #loginOverlay {
         flex-direction: column;
         min-height: 0;
         overflow: hidden;
-        flex-shrink: 1;
+        flex-shrink: 0;
     }
 
     #addBuildingModal .add-building-header,
@@ -8391,6 +8412,54 @@ html.layout-desktop body {
 html.layout-desktop .app-content {
     min-height: 0;
     overflow-y: auto;
+}
+
+/* 태블릿·데스크톱사이트(뷰포트 1280): 모바일 @media 미적용 시에도 등록 모달 스크롤 보장 */
+html.layout-desktop #addBuildingModal.modal-overlay.open {
+    overflow-x: hidden;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    align-items: safe center;
+    justify-content: center;
+    padding: max(0.5rem, env(safe-area-inset-top, 0px)) 0.75rem max(0.5rem, env(safe-area-inset-bottom, 0px));
+}
+
+html.layout-desktop #addBuildingModal .modal-card.add-building-modal {
+    width: min(96vw, 680px);
+    max-height: calc(100dvh - 1.25rem - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
+    height: auto;
+    min-height: 0;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+}
+
+html.layout-desktop #addBuildingModal .add-building-body,
+html.layout-desktop #addBuildingModal .modal-body.add-building-body {
+    flex: 1 1 0 !important;
+    min-height: 0 !important;
+    max-height: none !important;
+    overflow-y: auto !important;
+    overflow-x: hidden !important;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+    touch-action: pan-y;
+}
+
+html.layout-desktop #editBuildingModal .modal-card {
+    max-height: calc(100dvh - 1.25rem - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
+    min-height: 0;
+    overflow: hidden;
+}
+
+html.layout-desktop #editBuildingModal .modal-body,
+html.layout-desktop #editBuildingModal .edit-building-body {
+    flex: 1 1 0 !important;
+    min-height: 0 !important;
+    max-height: none !important;
+    overflow-y: auto !important;
+    -webkit-overflow-scrolling: touch;
+    touch-action: pan-y;
 }
 
 html.layout-desktop #tab-map .inspect-layout {
