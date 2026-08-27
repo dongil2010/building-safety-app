@@ -15247,25 +15247,35 @@ document.addEventListener('DOMContentLoaded', () => {
         return s;
     }
 
+    /**
+     * 규모 문자열의 -nEA 앞을 한 칸 띄움 (0.3/2.0-2EA → 0.3/2.0 -2EA).
+     * 강제 줄바꿈(\n)·문단끝은 넣지 않는다 — 한글이 공백에서 자연 줄바꿈하도록.
+     */
+    function normalizeEaSpacingInText(raw) {
+        return String(raw == null ? '' : raw)
+            .replace(/([^\s\n])[ \t]*-(\d+)\s*EA\b/gi, '$1 -$2EA');
+    }
+
     function formatCrackMeasurePair(m) {
         const join = normalizeMeasureJoin(m && m.join);
         const w = normalizeCrackDecimalText((m && m.width) || '');
         const l = normalizeCrackDecimalText((m && m.length) || '');
         const n = String((m && m.count) || '').trim();
+        // 한 칸 띄움: 한글에서 폭/길이 · Cw 다음 줄에 -nEA 로 자연 줄바꿈
         const eaSuffix = n ? ` -${n}EA` : '';
 
         if (join === 'x') {
-            if (w && l) return `${w}x${l}${eaSuffix}`;
-            if (w) return n ? `Cw:${w}${eaSuffix}` : `Cw:${w}`;
-            if (l) return n ? `${l}m -${n}EA` : `${l}m`;
+            if (w && l) return normalizeEaSpacingInText(`${w}x${l}${eaSuffix}`);
+            if (w) return normalizeEaSpacingInText(n ? `Cw:${w}${eaSuffix}` : `Cw:${w}`);
+            if (l) return normalizeEaSpacingInText(n ? `${l}m -${n}EA` : `${l}m`);
             if (n) return `${n}EA`;
             return '';
         }
 
         // 한글(HWPX) 관례: 길이 없이 폭만(또는 폭+개수)이면 Cw:n.n / Cw:n.n -2EA
-        if (w && !l) return `Cw:${w}${eaSuffix}`;
-        if (w && l) return `${w}/${l}${eaSuffix}`;
-        if (l) return n ? `${l}m -${n}EA` : `${l}m`;
+        if (w && !l) return normalizeEaSpacingInText(`Cw:${w}${eaSuffix}`);
+        if (w && l) return normalizeEaSpacingInText(`${w}/${l}${eaSuffix}`);
+        if (l) return normalizeEaSpacingInText(n ? `${l}m -${n}EA` : `${l}m`);
         if (n) return `${n}EA`;
         return '';
     }
@@ -21251,7 +21261,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     return formatCrackMeasurePair({ width: w, length: l, count: n, join: inferMeasureJoin(d, null) }) || '-';
                 }
                 const sizeVal = (d.size != null) ? String(d.size).trim() : '';
-                return sizeVal || '-';
+                return normalizeEaSpacingInText(sizeVal) || '-';
             }
             case 'crackWidth': {
                 if (!isCrack) return '-';
@@ -24272,8 +24282,15 @@ document.addEventListener('DOMContentLoaded', () => {
                         if (units + w > maxUnits && end > i) break;
                         units += w;
                         end++;
-                        if (ch === ' ' || ch === '\t') lastBreak = end; // 공백 뒤에서 끊기(공백 제외)
-                        else if (/[,./|·、，]/.test(ch)) lastBreak = end; // 문장부호 뒤에서 끊기
+                        if (ch === ' ' || ch === '\t') {
+                            // 폭/길이 -2EA · Cw:0.3 -2EA 앞 공백은 강제 줄바꿈(문단끝)하지 않음.
+                            // 공백만 두고 한글 자동 줄바꿈에 맡긴다.
+                            const after = chars.slice(end).join('');
+                            if (!/^-\d+\s*EA\b/i.test(after)) lastBreak = end;
+                        } else if (/[,|·、，]/.test(ch)) {
+                            // . / 는 규모(0.15/1.5) 중간이라 끊지 않음. 여러 건 구분자(콤마)만.
+                            lastBreak = end;
+                        }
                     }
                     if (end >= chars.length) {
                         lines.push(chars.slice(i).join(''));
@@ -24292,7 +24309,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
                 return lines.length ? lines.join('\n') : s;
             };
-            const wrapHwpxCellText = (raw, maxChars = 16) => String(raw == null ? '' : raw)
+            const wrapHwpxCellText = (raw, maxChars = 16) => String(normalizeEaSpacingInText(raw == null ? '' : raw))
                 .split('\n')
                 .map((line) => wrapHwpxCellLine(line, maxChars))
                 .join('\n');
