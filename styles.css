@@ -4987,8 +4987,12 @@ html:not(.layout-desktop) .survey-inline-select {
     overflow-y: auto;
     -webkit-overflow-scrolling: touch;
     overscroll-behavior: contain;
-    align-items: safe center;
-    justify-content: center;
+    display: grid !important;
+    place-items: center;
+    align-content: center;
+    justify-items: center;
+    padding: 1rem;
+    box-sizing: border-box;
 }
 
 #addBuildingModal .modal-card.add-building-modal {
@@ -4996,6 +5000,8 @@ html:not(.layout-desktop) .survey-inline-select {
     width: min(96vw, 680px);
     max-height: min(92dvh, calc(100dvh - 1.25rem - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px)));
     min-height: 0;
+    margin: 0;
+    justify-self: center;
 }
 
 .add-building-header {
@@ -5091,8 +5097,8 @@ html:not(.layout-desktop) .survey-inline-select {
     gap: 0.85rem;
     padding: 1rem 1.2rem 1.1rem;
     background: #f8fafc;
-    /* 68vh 고정 max-height는 카드 남는 높이보다 커서 overflow:hidden에 잘림 → 본문만 스크롤 */
-    flex: 1 1 0;
+    /* PC: flex-basis 0이면 카드 높이 미지정 시 본문이 0으로 수축 → auto */
+    flex: 1 1 auto;
     min-height: 0;
     max-height: none;
     overflow-y: auto;
@@ -5634,12 +5640,15 @@ html:not(.layout-desktop) .survey-inline-select {
     flex-shrink: 0;
 }
 
-/* 현장 수정: 작게 · 좌측 배치 */
+/* 현장 수정 모달 */
 #editBuildingModal.modal-overlay,
 #editBuildingModal.modal-overlay.open {
-    align-items: flex-start;
-    justify-content: flex-start;
-    padding: 0.65rem 0.65rem 0.65rem 0.55rem;
+    display: grid !important;
+    place-items: center;
+    align-content: center;
+    justify-items: center;
+    padding: 1rem;
+    box-sizing: border-box;
 }
 
 #editBuildingModal .modal-card {
@@ -5648,6 +5657,7 @@ html:not(.layout-desktop) .survey-inline-select {
     max-height: min(86dvh, calc(100dvh - 1.2rem));
     min-height: 0;
     margin: 0;
+    justify-self: center;
 }
 
 .edit-building-modal {
@@ -5800,6 +5810,61 @@ html:not(.layout-desktop) .survey-inline-select {
 #editBuildingModal.edit-mode-drawing .edit-building-footer,
 #editBuildingModal[data-edit-mode="drawing"] .edit-building-footer {
     justify-content: flex-end;
+}
+
+/* PC(>1024px): 등록·수정 모달 본문 높이 보장 — flex-basis 0 수축 방지 */
+@media (min-width: 1025px) {
+    #addBuildingModal.modal-overlay,
+    #addBuildingModal.modal-overlay.open,
+    #editBuildingModal.modal-overlay,
+    #editBuildingModal.modal-overlay.open {
+        display: grid !important;
+        place-items: center;
+        align-content: center;
+        justify-items: center;
+        padding: 1rem;
+    }
+
+    #addBuildingModal .modal-card.add-building-modal {
+        width: min(96vw, 680px);
+        max-height: min(92vh, calc(100vh - 2rem));
+        height: auto;
+        margin: 0;
+        justify-self: center;
+    }
+
+    #addBuildingModal .add-building-body,
+    #addBuildingModal .modal-body.add-building-body {
+        flex: 1 1 auto;
+        min-height: 14rem;
+        max-height: calc(92vh - 12.5rem);
+        overflow-y: auto;
+    }
+
+    #editBuildingModal.modal-overlay,
+    #editBuildingModal.modal-overlay.open {
+        display: grid !important;
+        place-items: center;
+        align-content: center;
+        justify-items: center;
+        padding: 1rem;
+    }
+
+    #editBuildingModal .modal-card.edit-building-modal {
+        max-width: 480px;
+        width: min(92vw, 480px);
+        max-height: min(88vh, calc(100vh - 2rem));
+        margin: 0;
+        justify-self: center;
+    }
+
+    #editBuildingModal .modal-body,
+    #editBuildingModal .edit-building-body {
+        flex: 1 1 auto;
+        min-height: 12rem;
+        max-height: calc(88vh - 9rem);
+        overflow-y: auto;
+    }
 }
 
 .edit-floor-drawing-row {
@@ -8550,20 +8615,24 @@ body:not(.bsa-tab-home) .home-fab-add-building {
         overflow-x: hidden;
         overflow-y: auto;
         -webkit-overflow-scrolling: touch;
-        align-items: flex-start;
-        justify-content: center;
+        display: grid !important;
+        place-items: center;
+        align-content: center;
+        justify-items: center;
         padding:
             max(0.35rem, env(safe-area-inset-top, 0px))
             max(0.35rem, env(safe-area-inset-right, 0px))
             max(0.35rem, env(safe-area-inset-bottom, 0px))
             max(0.35rem, env(safe-area-inset-left, 0px));
+        box-sizing: border-box;
     }
 
     #addBuildingModal .modal-card.add-building-modal {
         width: min(96vw, 640px);
         height: calc(100dvh - 0.7rem - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
         max-height: calc(100dvh - 0.7rem - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
-        margin: 0 auto;
+        margin: 0;
+        justify-self: center;
         display: flex;
         flex-direction: column;
         min-height: 0;
@@ -8594,18 +8663,22 @@ body:not(.bsa-tab-home) .home-fab-add-building {
         overflow: visible;
     }
 
-    /* 수정 모달 — 좌측 소형 */
+    /* 수정 모달 */
     #editBuildingModal.modal-overlay,
     #editBuildingModal.modal-overlay.open {
-        align-items: flex-start;
-        justify-content: flex-start;
-        padding: 0.45rem 0.45rem 0.45rem 0.35rem;
+        display: grid !important;
+        place-items: center;
+        align-content: center;
+        justify-items: center;
+        padding: 0.75rem;
+        box-sizing: border-box;
     }
 
     #editBuildingModal .modal-card {
         width: min(86vw, 360px);
         max-height: calc(100dvh - 0.9rem);
         margin: 0;
+        justify-self: center;
         display: flex;
         flex-direction: column;
         min-height: 0;
@@ -9232,9 +9305,12 @@ html.layout-desktop #addBuildingModal.modal-overlay.open {
     overflow-x: hidden;
     overflow-y: auto;
     -webkit-overflow-scrolling: touch;
-    align-items: safe center;
-    justify-content: center;
+    display: grid !important;
+    place-items: center;
+    align-content: center;
+    justify-items: center;
     padding: max(0.5rem, env(safe-area-inset-top, 0px)) 0.75rem max(0.5rem, env(safe-area-inset-bottom, 0px));
+    box-sizing: border-box;
 }
 
 html.layout-desktop #addBuildingModal .modal-card.add-building-modal {
@@ -9245,13 +9321,15 @@ html.layout-desktop #addBuildingModal .modal-card.add-building-modal {
     overflow: hidden;
     display: flex;
     flex-direction: column;
+    margin: 0;
+    justify-self: center;
 }
 
 html.layout-desktop #addBuildingModal .add-building-body,
 html.layout-desktop #addBuildingModal .modal-body.add-building-body {
-    flex: 1 1 0 !important;
+    flex: 1 1 auto !important;
     min-height: 0 !important;
-    max-height: none !important;
+    max-height: calc(92dvh - 12.5rem) !important;
     overflow-y: auto !important;
     overflow-x: hidden !important;
     -webkit-overflow-scrolling: touch;
@@ -9260,8 +9338,12 @@ html.layout-desktop #addBuildingModal .modal-body.add-building-body {
 }
 
 html.layout-desktop #editBuildingModal.modal-overlay.open {
-    align-items: flex-start;
-    justify-content: flex-start;
+    display: grid !important;
+    place-items: center;
+    align-content: center;
+    justify-items: center;
+    padding: 1rem;
+    box-sizing: border-box;
 }
 
 html.layout-desktop #editBuildingModal .modal-card {
@@ -9270,13 +9352,15 @@ html.layout-desktop #editBuildingModal .modal-card {
     max-height: calc(100dvh - 1.25rem - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
     min-height: 0;
     overflow: hidden;
+    margin: 0;
+    justify-self: center;
 }
 
 html.layout-desktop #editBuildingModal .modal-body,
 html.layout-desktop #editBuildingModal .edit-building-body {
-    flex: 1 1 0 !important;
+    flex: 1 1 auto !important;
     min-height: 0 !important;
-    max-height: none !important;
+    max-height: calc(88dvh - 9rem) !important;
     overflow-y: auto !important;
     -webkit-overflow-scrolling: touch;
     touch-action: pan-y;
@@ -10069,5 +10153,28 @@ html.layout-tablet body.ndt-modal-open .mobile-canvas-dock,
 html.layout-tablet body.defect-modal-open .mobile-side-rail,
 html.layout-tablet body.ndt-modal-open .mobile-side-rail {
     display: none !important;
+}
+
+/* 건축물 등록·수정 모달 — 화면 정중앙 (하위 규칙 최종 우선) */
+@media (min-width: 769px) {
+    #addBuildingModal.modal-overlay,
+    #addBuildingModal.modal-overlay.open,
+    #editBuildingModal.modal-overlay,
+    #editBuildingModal.modal-overlay.open {
+        display: grid !important;
+        place-items: center !important;
+        align-content: center !important;
+        justify-items: center !important;
+        padding: 1rem !important;
+        box-sizing: border-box;
+    }
+
+    #addBuildingModal .modal-card.add-building-modal,
+    #editBuildingModal .modal-card,
+    #editBuildingModal .modal-card.edit-building-modal {
+        justify-self: center !important;
+        align-self: center !important;
+        margin: 0 !important;
+    }
 }
 

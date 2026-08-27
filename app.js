@@ -3832,6 +3832,19 @@ document.addEventListener('DOMContentLoaded', () => {
         window.state.currentBuildingId = bldg.id;
         if (typeof touchBuildingAccess === 'function') touchBuildingAccess(bldg.id);
 
+        // 홈 복귀 시: 단일은 회차 목록, 여러 동은 동 선택 화면 유지
+        try {
+            if (typeof ensureBuildingSiteFields === 'function') ensureBuildingSiteFields(bldg);
+            const siteName = typeof getBuildingSiteName === 'function' ? getBuildingSiteName(bldg) : (bldg.siteName || bldg.name);
+            if (siteName) window.state.dashboardSiteKey = siteName;
+            if (typeof isSiteMultiDong === 'function' && isSiteMultiDong(siteName)) {
+                const rk = typeof getBuildingSurveyRoundKey === 'function' ? getBuildingSurveyRoundKey(bldg) : null;
+                window.state.dashboardRoundKey = rk || window.state.dashboardRoundKey || null;
+            } else {
+                window.state.dashboardRoundKey = null;
+            }
+        } catch (_e) { /* ignore */ }
+
         // Nav 건물명 표시 업데이트
         const cleanName = bldg.name ? bldg.name.replace(/^🏢\s*/, '') : '건축물';
         if (elements.appTitle) elements.appTitle.textContent = cleanName;
