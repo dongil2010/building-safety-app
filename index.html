@@ -32,7 +32,7 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <meta name="apple-mobile-web-app-title" content="스마트 안전점검">
-    <link rel="stylesheet" href="styles.css?v=20260827_tablet">
+    <link rel="stylesheet" href="styles.css?v=20260827_overview">
     <!-- FontAwesome icons for clean engineering UI -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <!-- PDF 생성용: 페이지별로 직접 캡처해서 조립(큰 보고서에서 html2pdf 한방 렌더링이 캔버스 높이 한계로
@@ -95,6 +95,9 @@
                 <label class="floor-select-label"><i class="fa-solid fa-layer-group"></i> <span class="floor-select-label-text">점검 층:</span></label>
                 <select id="floorSelect" class="styled-select" aria-label="점검 층"></select>
             </div>
+            <button type="button" class="btn btn-sm btn-outline header-overview-btn" id="btnOpenOverviewPhotos" title="건축물 전경사진 (결함 조사와 별도)">
+                <i class="fa-solid fa-panorama"></i> <span class="header-overview-btn-label">전경사진</span>
+            </button>
         </div>
 
         <!-- Action Controls (Displayed ONLY when a building is selected) — PC 전용 보고서 도구 -->
@@ -661,6 +664,27 @@
         </section>
 
     </main>
+
+    <!-- MODAL: 건축물 전경사진 (결함 조사와 별도 저장) -->
+    <div class="modal-overlay" id="overviewPhotosModal">
+        <div class="modal-card overview-photos-card">
+            <div class="modal-header">
+                <h3 id="overviewPhotosModalTitle"><i class="fa-solid fa-panorama"></i> 전경사진</h3>
+                <button type="button" class="modal-close" id="btnCloseOverviewPhotosModal" title="닫기">&times;</button>
+            </div>
+            <div class="modal-body overview-photos-body">
+                <p class="overview-photos-hint">결함 조사 사진과 별도로 건축물·현장 전경을 저장합니다. 사진 아래에 무슨 전경인지 한 줄로 적어 주세요. 한글(HWPX) 내보내기 시 문서 <b>맨 마지막</b>에 출력됩니다.</p>
+                <div class="overview-photos-toolbar">
+                    <button type="button" class="btn btn-primary btn-sm" id="btnOverviewCamera"><i class="fa-solid fa-camera"></i> 촬영</button>
+                    <button type="button" class="btn btn-outline btn-sm" id="btnOverviewGallery"><i class="fa-solid fa-images"></i> 갤러리</button>
+                </div>
+                <div id="overviewPhotosList" class="overview-photos-list"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline" id="btnCloseOverviewPhotosModal2">닫기</button>
+            </div>
+        </div>
+    </div>
 
     <!-- MODAL: Add Defect Pin Details Modal (우측 드로어 — 입력 즉시 적용) -->
     <div class="modal-overlay modal-drawer-overlay" id="defectModal">
@@ -2376,14 +2400,14 @@
     <script src="js/tabs/registry.js?v=20260826_bsafix"></script>
     <script src="js/pdf-vector-bridge.js?v=20260826_fastmap"></script>
     <script src="js/core/layout-mode.js?v=20260827_tablet"></script>
-    <script src="js/tabs/home.js?v=20260826_mem1"></script>
+    <script src="js/tabs/home.js?v=20260827_overview"></script>
     <script src="js/tabs/map.js?v=20260826_mem1"></script>
     <script src="js/tabs/survey.js?v=20260824_nSub"></script>
     <script src="js/tabs/ndt.js?v=20260822_survey2dScroll"></script>
-    <script src="js/shared/report.js?v=20260824_hwpxFix"></script>
+    <script src="js/shared/report.js?v=20260827_overview"></script>
     <script src="js/shared/hwpx-import.js?v=20260825_hwpxin"></script>
     <script src="js/shared/auth.js?v=20260821_land1"></script>
-    <script src="app.js?v=20260827_back"></script>
+    <script src="app.js?v=20260827_overview"></script>
     <script>
         window.BSA_APP_VERSION = '20260826_mem1';
         (function () {

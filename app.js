@@ -1584,6 +1584,24 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             });
         });
+        (buildings || []).forEach((b) => {
+            if (!b || !b.id || !Array.isArray(b.overviewPhotos)) return;
+            b.overviewPhotos.forEach((p) => {
+                if (!p || !p.id || !p.dataUrl) return;
+                const key = getOverviewPhotoDocId(b.id, p.id);
+                if (_idbPersistedPhotoKeys.has(key) || _idbPendingPhotoKeys.has(key)) return;
+                _idbPendingPhotoKeys.add(key);
+                idbSet('photos', key, p.dataUrl).then((ok) => {
+                    _idbPendingPhotoKeys.delete(key);
+                    if (ok) {
+                        _idbPersistedPhotoKeys.add(key);
+                        _idbSaveFailedNotified = false;
+                    } else {
+                        notifyIndexedDbSaveFailure();
+                    }
+                });
+            });
+        });
     }
 
     function saveStateToLocalStorage() {
@@ -1602,6 +1620,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
             const sanitizedBuildings = rawBuildings.map(b => {
                 const { floorDrawings, floorDrawingPdfs, floorDrawingTiers, floorDrawingSources, ...rest } = b;
+                if (Array.isArray(rest.overviewPhotos)) {
+                    rest.overviewPhotos = rest.overviewPhotos.map((p) => ({
+                        id: p.id,
+                        caption: (p && p.caption != null) ? String(p.caption) : ''
+                    })).filter((p) => p.id);
+                }
                 return rest;
             });
             const sanitizedDefects = {};
@@ -1948,9 +1972,50 @@ document.addEventListener('DOMContentLoaded', () => {
             if (typeof window.getBuildingAvailableFloors === 'function') {
                 merged.floorsList = window.getBuildingAvailableFloors(merged);
             }
+            merged.overviewPhotos = mergeOverviewPhotoLists(localMatch?.overviewPhotos, b.overviewPhotos);
             return merged;
         });
         return [...localOnly, ...mergedRemote];
+    }
+
+    function mergeOverviewPhotoLists(localList, remoteList) {
+        const byId = new Map();
+        (remoteList || []).forEach((p) => {
+            if (!p || !p.id) return;
+            byId.set(p.id, {
+                id: p.id,
+                caption: p.caption != null ? String(p.caption) : '',
+                ...(p.dataUrl ? { dataUrl: p.dataUrl } : {})
+            });
+        });
+        (localList || []).forEach((p) => {
+            if (!p || !p.id) return;
+            const prev = byId.get(p.id) || { id: p.id, caption: '' };
+            byId.set(p.id, {
+                id: p.id,
+                caption: (p.caption != null && String(p.caption).trim() !== '')
+                    ? String(p.caption)
+                    : (prev.caption || ''),
+                dataUrl: p.dataUrl || prev.dataUrl || undefined
+            });
+        });
+        const ordered = [];
+        const seen = new Set();
+        (localList || []).forEach((p) => {
+            if (!p?.id || seen.has(p.id) || !byId.has(p.id)) return;
+            ordered.push(byId.get(p.id));
+            seen.add(p.id);
+        });
+        (remoteList || []).forEach((p) => {
+            if (!p?.id || seen.has(p.id) || !byId.has(p.id)) return;
+            ordered.push(byId.get(p.id));
+            seen.add(p.id);
+        });
+        return ordered.map((p) => {
+            const out = { id: p.id, caption: p.caption || '' };
+            if (p.dataUrl) out.dataUrl = p.dataUrl;
+            return out;
+        });
     }
 
     function sanitizeBuildingMetaForFirestore(b) {
@@ -1959,6 +2024,12 @@ document.addEventListener('DOMContentLoaded', () => {
             floorDrawings, floorDrawingPdfs, floorDrawingTiers, floorDrawingSources,
             _pendingCloudSync, ...rest
         } = b;
+        if (Array.isArray(rest.overviewPhotos)) {
+            rest.overviewPhotos = rest.overviewPhotos.map((p) => ({
+                id: p.id,
+                caption: (p && p.caption != null) ? String(p.caption) : ''
+            })).filter((p) => p.id);
+        }
         return rest;
     }
 
@@ -2634,6 +2705,10 @@ document.addEventListener('DOMContentLoaded', () => {
             Object.entries(defectsMap).forEach(([key, arr]) => {
                 if (key.startsWith(currentId + '_')) subset[key] = arr;
             });
+            const curBldgEarly = (window.state.buildings || []).find((b) => b.id === currentId);
+            if (curBldgEarly && typeof hydrateBuildingOverviewPhotos === 'function') {
+                hydrateBuildingOverviewPhotos(curBldgEarly).catch((e) => console.warn('전경사진 복원 실패:', e));
+            }
             if (!Object.keys(subset).length) return;
 
             // 도면 로드(hydrateSingleBuildingDrawings)와 같은 이유로 현재 층만 먼저 기다린다 —
@@ -2673,6 +2748,10 @@ document.addEventListener('DOMContentLoaded', () => {
         try {
             if (typeof isDefectModalOpen === 'function' && isDefectModalOpen() && typeof closeDefectModal === 'function') {
                 closeDefectModal();
+            }
+            if (typeof isOverviewPhotosModalOpen === 'function' && isOverviewPhotosModalOpen()
+                && typeof closeOverviewPhotosModal === 'function') {
+                closeOverviewPhotosModal();
             }
             if (typeof isNdtModalOpen === 'function' && isNdtModalOpen() && typeof closeNdtModal === 'function') {
                 closeNdtModal();
@@ -2756,6 +2835,11 @@ document.addEventListener('DOMContentLoaded', () => {
         try {
             if (typeof isDefectModalOpen === 'function' && isDefectModalOpen() && typeof closeDefectModal === 'function') {
                 closeDefectModal();
+                return true;
+            }
+            if (typeof isOverviewPhotosModalOpen === 'function' && isOverviewPhotosModalOpen()
+                && typeof closeOverviewPhotosModal === 'function') {
+                closeOverviewPhotosModal();
                 return true;
             }
             if (typeof isNdtModalOpen === 'function' && isNdtModalOpen() && typeof closeNdtModal === 'function') {
@@ -2940,6 +3024,10 @@ document.addEventListener('DOMContentLoaded', () => {
                                 <i class="fa-solid fa-images"></i>
                                 <span class="icon-btn-label">도면</span>
                             </button>
+                            <button type="button" class="icon-btn icon-btn-overview" title="전경사진" data-action="overview" data-bldg-id="${safeId}">
+                                <i class="fa-solid fa-panorama"></i>
+                                <span class="icon-btn-label">전경</span>
+                            </button>
                         </div>
                     </div>
                 `;
@@ -3008,6 +3096,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 e.stopPropagation();
                 const id = el.getAttribute('data-bldg-id');
                 if (id) window.openEditBuildingModalFunc(id, 'drawing');
+            });
+        });
+        grid.querySelectorAll('[data-action="overview"]').forEach((el) => {
+            el.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const id = el.getAttribute('data-bldg-id');
+                if (id && typeof window.openOverviewPhotosModal === 'function') window.openOverviewPhotosModal(id);
             });
         });
     };
@@ -5013,6 +5108,9 @@ document.addEventListener('DOMContentLoaded', () => {
             });
             Object.keys(window.state.ndtDisplacementGroups || {}).forEach(k => {
                 if (k.startsWith(bldg.id + '_')) delete window.state.ndtDisplacementGroups[k];
+            });
+            (bldg.overviewPhotos || []).forEach((p) => {
+                if (p && p.id) photoDeleteJobs.push(deleteOverviewPhotoStorage(bldg.id, p.id));
             });
 
             saveStateToLocalStorage();
@@ -18960,6 +19058,28 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function receivePhoneRelayPhoto(dataUrl) {
+        if (typeof isOverviewPhotosModalOpen === 'function' && isOverviewPhotosModalOpen()) {
+            const bldgId = window._overviewPhotosBuildingId || window.state.currentBuildingId;
+            const bldg = (window.state.buildings || []).find((b) => b.id === bldgId);
+            if (bldg && dataUrl) {
+                const item = {
+                    id: (typeof createOverviewPhotoId === 'function') ? createOverviewPhotoId() : `p${Date.now()}`,
+                    caption: '',
+                    dataUrl
+                };
+                if (typeof getBuildingOverviewPhotos === 'function') getBuildingOverviewPhotos(bldg).push(item);
+                else {
+                    if (!Array.isArray(bldg.overviewPhotos)) bldg.overviewPhotos = [];
+                    bldg.overviewPhotos.push(item);
+                }
+                if (typeof saveStateToLocalStorage === 'function') saveStateToLocalStorage();
+                if (typeof uploadOverviewPhotos === 'function') uploadOverviewPhotos(bldg);
+                if (typeof renderOverviewPhotosList === 'function') renderOverviewPhotosList();
+                window.showToast('휴대폰에서 사진을 받아 전경사진에 추가했습니다.', 'success');
+                updatePhoneRelayButtonLabel();
+                return;
+            }
+        }
         if (isDefectModalOpen()) {
             if (!window._pendingPhotos) window._pendingPhotos = [];
             window._pendingPhotos.push(dataUrl);
@@ -24878,6 +24998,67 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             }
 
+            // ---- 전경사진 (문서 맨 마지막) ----
+            try {
+                await hydrateBuildingOverviewPhotos(bldg);
+                const overviewList = (getBuildingOverviewPhotos(bldg) || []).filter((p) => p && (p.dataUrl || p.id));
+                const overviewReady = [];
+                for (const p of overviewList) {
+                    let src = p.dataUrl;
+                    if (!src && p.id) src = await loadOverviewPhotoDataUrl(bldg.id, p.id);
+                    if (!src) continue;
+                    overviewReady.push({
+                        caption: (p.caption != null && String(p.caption).trim()) ? String(p.caption).trim() : '전경사진',
+                        dataUrl: src
+                    });
+                }
+                if (overviewReady.length > 0) {
+                    const OV_HEADING_XML = `<hp:p id="0" paraPrIDRef="13" styleIDRef="0" pageBreak="1" columnBreak="0" merged="0"><hp:run charPrIDRef="53"><hp:t>전경사진</hp:t></hp:run><hp:linesegarray><hp:lineseg textpos="0" vertpos="0" vertsize="1100" textheight="1100" baseline="935" spacing="600" horzpos="0" horzsize="41540" flags="393216"/></hp:linesegarray></hp:p>`;
+                    const OV_PHOTO_TBL_PARA_XML = '<hp:p id="0" paraPrIDRef="13" styleIDRef="0" pageBreak="1" columnBreak="0" merged="0"><hp:run charPrIDRef="53"><hp:tbl id="TBL_ID" zOrder="11" numberingType="TABLE" textWrap="TOP_AND_BOTTOM" textFlow="BOTH_SIDES" lock="0" dropcapstyle="None" pageBreak="NONE" repeatHeader="1" rowCnt="2" colCnt="1" cellSpacing="0" borderFillIDRef="5" noAdjust="0"><hp:sz width="41821" widthRelTo="ABSOLUTE" height="64087" heightRelTo="ABSOLUTE" protect="0"/><hp:pos treatAsChar="1" affectLSpacing="0" flowWithText="1" allowOverlap="0" holdAnchorAndSO="0" vertRelTo="PARA" horzRelTo="COLUMN" vertAlign="TOP" horzAlign="LEFT" vertOffset="0" horzOffset="0"/><hp:outMargin left="140" right="140" top="140" bottom="140"/><hp:inMargin left="140" right="140" top="140" bottom="140"/><hp:tr><hp:tc name="" header="0" hasMargin="0" protect="0" editable="0" dirty="0" borderFillIDRef="15"><hp:subList id="" textDirection="HORIZONTAL" lineWrap="BREAK" vertAlign="CENTER" linkListIDRef="0" linkListNextIDRef="0" textWidth="0" textHeight="0" hasTextRef="0" hasNumRef="0"><hp:p id="2147483648" paraPrIDRef="4" styleIDRef="0" pageBreak="0" columnBreak="0" merged="0"><hp:run charPrIDRef="6"><hp:pic id="PIC_ID" zOrder="36" numberingType="PICTURE" textWrap="TOP_AND_BOTTOM" textFlow="BOTH_SIDES" lock="0" dropcapstyle="None" thumbnailBinIDRef="" href="" groupLevel="0" instid="PIC_INSTID" reverse="0"><hp:offset x="0" y="0"/><hp:orgSz width="768540" height="969540"/><hp:curSz width="41541" height="52405"/><hp:flip horizontal="0" vertical="0"/><hp:rotationInfo angle="0" centerX="20770" centerY="26202" rotateimage="1"/><hp:renderingInfo><hc:transMatrix e1="1" e2="0" e3="0" e4="0" e5="1" e6="0"/><hc:scaMatrix e1="0.054052" e2="0" e3="0" e4="0" e5="0.054051" e6="0"/><hc:rotMatrix e1="1" e2="0" e3="0" e4="0" e5="1" e6="0"/></hp:renderingInfo><hc:img binaryItemIDRef="" bright="0" contrast="0" effect="REAL_PIC" alpha="0"/><hp:imgRect><hc:pt0 x="0" y="0"/><hc:pt1 x="768540" y="0"/><hc:pt2 x="768540" y="969540"/><hc:pt3 x="0" y="969540"/></hp:imgRect><hp:imgClip left="0" right="648540" top="0" bottom="818100"/><hp:inMargin left="0" right="0" top="0" bottom="0"/><hp:imgDim dimwidth="648540" dimheight="818100"/><hp:effects/><hp:sz width="41541" widthRelTo="ABSOLUTE" height="52405" heightRelTo="ABSOLUTE" protect="0"/><hp:pos treatAsChar="0" affectLSpacing="0" flowWithText="1" allowOverlap="0" holdAnchorAndSO="0" vertRelTo="PARA" horzRelTo="COLUMN" vertAlign="TOP" horzAlign="LEFT" vertOffset="0" horzOffset="0"/><hp:outMargin left="0" right="0" top="0" bottom="0"/></hp:pic><hp:t/></hp:run><hp:linesegarray><hp:lineseg textpos="0" vertpos="0" vertsize="1100" textheight="1100" baseline="935" spacing="1320" horzpos="0" horzsize="0" flags="393216"/></hp:linesegarray></hp:p></hp:subList><hp:cellAddr colAddr="0" rowAddr="0"/><hp:cellSpan colSpan="1" rowSpan="1"/><hp:cellSz width="41821" height="60813"/><hp:cellMargin left="141" right="141" top="141" bottom="141"/></hp:tc></hp:tr><hp:tr><hp:tc name="" header="0" hasMargin="0" protect="0" editable="0" dirty="0" borderFillIDRef="16"><hp:subList id="" textDirection="HORIZONTAL" lineWrap="BREAK" vertAlign="CENTER" linkListIDRef="0" linkListNextIDRef="0" textWidth="0" textHeight="0" hasTextRef="0" hasNumRef="0"><hp:p id="2147483648" paraPrIDRef="1" styleIDRef="16" pageBreak="0" columnBreak="0" merged="0"><hp:run charPrIDRef="43"><hp:t>CAPTION</hp:t></hp:run><hp:linesegarray><hp:lineseg textpos="0" vertpos="0" vertsize="1000" textheight="1000" baseline="850" spacing="600" horzpos="0" horzsize="41540" flags="393216"/></hp:linesegarray></hp:p></hp:subList><hp:cellAddr colAddr="0" rowAddr="1"/><hp:cellSpan colSpan="1" rowSpan="1"/><hp:cellSz width="41821" height="3274"/><hp:cellMargin left="141" right="141" top="141" bottom="141"/></hp:tc></hp:tr></hp:tbl><hp:t/></hp:run><hp:linesegarray><hp:lineseg textpos="0" vertpos="0" vertsize="64367" textheight="64367" baseline="54712" spacing="960" horzpos="0" horzsize="42520" flags="393216"/></hp:linesegarray></hp:p>';
+                    const OV_MAX_W = 41821 - 141 - 141;
+                    const OV_MAX_H = 60813 - 141 - 141;
+                    const escapeXmlText = (s) => String(s || '')
+                        .replace(/&/g, '&amp;')
+                        .replace(/</g, '&lt;')
+                        .replace(/>/g, '&gt;')
+                        .replace(/"/g, '&quot;');
+
+                    const headingDoc = new DOMParser().parseFromString(
+                        `<root xmlns:hp="${HP_NS}" xmlns:hc="${HC_NS}">${OV_HEADING_XML}</root>`,
+                        'application/xml'
+                    );
+                    sec.appendChild(xmlDoc.importNode(headingDoc.documentElement.firstChild, true));
+
+                    for (let oi = 0; oi < overviewReady.length; oi++) {
+                        const item = overviewReady[oi];
+                        imgCounter++;
+                        const xml = OV_PHOTO_TBL_PARA_XML
+                            .replace('TBL_ID', String(8900000 + imgCounter))
+                            .replace('PIC_ID', String(8910000 + imgCounter))
+                            .replace('PIC_INSTID', String(8920000 + imgCounter))
+                            .replace('CAPTION', escapeXmlText(item.caption));
+                        const docOv = new DOMParser().parseFromString(
+                            `<root xmlns:hp="${HP_NS}" xmlns:hc="${HC_NS}">${xml}</root>`,
+                            'application/xml'
+                        );
+                        const newPara = xmlDoc.importNode(docOv.documentElement.firstChild, true);
+                        if (oi === 0) newPara.setAttribute('pageBreak', '0');
+                        else newPara.setAttribute('pageBreak', '1');
+                        sec.appendChild(newPara);
+                        const pic = newPara.getElementsByTagNameNS(HP_NS, 'pic')[0];
+                        const { bytes, mime, ext } = dataUrlToBytes(item.dataUrl);
+                        const size = await loadImageSize(item.dataUrl);
+                        const imgId = `overviewPhoto${imgCounter}`;
+                        zip.file(`BinData/${imgId}.${ext}`, bytes);
+                        manifestAdds.push(`<opf:item id="${imgId}" href="BinData/${imgId}.${ext}" media-type="${mime}" isEmbeded="1"/>`);
+                        setPicImage(pic, imgId, size.w, size.h, OV_MAX_W, OV_MAX_H);
+                        ensureTblTreatAsChar(newPara.getElementsByTagNameNS(HP_NS, 'tbl')[0]);
+                    }
+                }
+            } catch (ovErr) {
+                console.error('전경사진 HWPX 삽입 실패(나머지는 유지):', ovErr);
+            }
+
             Array.from(xmlDoc.getElementsByTagNameNS(HP_NS, 'tbl')).forEach(ensureTblTreatAsChar);
 
             if (manifestAdds.length > 0) {
@@ -26585,6 +26766,256 @@ document.addEventListener('DOMContentLoaded', () => {
         return `${defectId}_${index}`;
     }
 
+    function getOverviewPhotoDocId(buildingId, photoId) {
+        return `ov_${buildingId}_${photoId}`;
+    }
+
+    function createOverviewPhotoId() {
+        return `p${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+    }
+
+    function getBuildingOverviewPhotos(bldg) {
+        if (!bldg) return [];
+        if (!Array.isArray(bldg.overviewPhotos)) bldg.overviewPhotos = [];
+        return bldg.overviewPhotos;
+    }
+
+    function isOverviewPhotosModalOpen() {
+        const modal = document.getElementById('overviewPhotosModal');
+        return !!(modal && (modal.classList.contains('open') || modal.style.display === 'flex'));
+    }
+
+    function closeOverviewPhotosModal() {
+        const modal = document.getElementById('overviewPhotosModal');
+        if (!modal) return;
+        modal.classList.remove('open');
+        modal.style.display = 'none';
+        window._overviewPhotosBuildingId = null;
+    }
+
+    async function loadOverviewPhotoDataUrl(bldgId, photoId) {
+        if (!bldgId || !photoId) return null;
+        const key = getOverviewPhotoDocId(bldgId, photoId);
+        if (window._photoCache && window._photoCache[key]) return window._photoCache[key];
+        try {
+            const local = await idbGet('photos', key);
+            if (typeof local === 'string' && local.length > 32) {
+                if (!window._photoCache) window._photoCache = {};
+                window._photoCache[key] = local;
+                return local;
+            }
+        } catch (_) { /* ignore */ }
+        if (db && window.state.companyId) {
+            try {
+                const snap = await db.collection('safety_app').doc(getCompanyDocId())
+                    .collection('photos').doc(key).get();
+                const url = snap.exists ? snap.data()?.dataUrl : null;
+                if (typeof url === 'string' && url.length > 32) {
+                    if (!window._photoCache) window._photoCache = {};
+                    window._photoCache[key] = url;
+                    idbSet('photos', key, url).then((ok) => {
+                        if (ok) _idbPersistedPhotoKeys.add(key);
+                    });
+                    return url;
+                }
+            } catch (e) {
+                console.warn('전경사진 클라우드 조회 실패:', key, e);
+            }
+        }
+        return null;
+    }
+
+    async function hydrateBuildingOverviewPhotos(bldg) {
+        if (!bldg || !bldg.id) return [];
+        const list = getBuildingOverviewPhotos(bldg);
+        await Promise.all(list.map(async (p) => {
+            if (!p || !p.id) return;
+            if (p.dataUrl) {
+                const key = getOverviewPhotoDocId(bldg.id, p.id);
+                if (!window._photoCache) window._photoCache = {};
+                window._photoCache[key] = p.dataUrl;
+                return;
+            }
+            const url = await loadOverviewPhotoDataUrl(bldg.id, p.id);
+            if (url) p.dataUrl = url;
+        }));
+        return list;
+    }
+
+    async function uploadOverviewPhotos(bldg) {
+        if (!bldg || !bldg.id || !Array.isArray(bldg.overviewPhotos)) return;
+        if (!window._photoCache) window._photoCache = {};
+        if (!window._cloudSyncedPhotoIds) window._cloudSyncedPhotoIds = new Set();
+        const companyPhotos = (db && window.state.companyId)
+            ? db.collection('safety_app').doc(getCompanyDocId()).collection('photos')
+            : null;
+        await Promise.all(bldg.overviewPhotos.map(async (p) => {
+            if (!p || !p.id || !p.dataUrl) return;
+            const key = getOverviewPhotoDocId(bldg.id, p.id);
+            window._photoCache[key] = p.dataUrl;
+            if (!companyPhotos || window._cloudSyncedPhotoIds.has(key)) return;
+            try {
+                await companyPhotos.doc(key).set({ dataUrl: p.dataUrl });
+                window._cloudSyncedPhotoIds.add(key);
+            } catch (e) {
+                console.warn('전경사진 업로드 실패:', key, e);
+            }
+        }));
+    }
+
+    async function deleteOverviewPhotoStorage(bldgId, photoId) {
+        if (!bldgId || !photoId) return;
+        const key = getOverviewPhotoDocId(bldgId, photoId);
+        _idbPersistedPhotoKeys.delete(key);
+        if (window._photoCache) delete window._photoCache[key];
+        if (window._cloudSyncedPhotoIds) window._cloudSyncedPhotoIds.delete(key);
+        await idbDelete('photos', key);
+        if (db && window.state.companyId) {
+            try {
+                await db.collection('safety_app').doc(getCompanyDocId()).collection('photos').doc(key).delete();
+            } catch (e) {
+                console.warn('전경사진 클라우드 삭제 실패:', key, e);
+            }
+        }
+    }
+
+    function renderOverviewPhotosList() {
+        const listEl = document.getElementById('overviewPhotosList');
+        if (!listEl) return;
+        const bldgId = window._overviewPhotosBuildingId;
+        const bldg = (window.state.buildings || []).find((b) => b.id === bldgId);
+        const titleEl = document.getElementById('overviewPhotosModalTitle');
+        if (titleEl) {
+            const name = bldg && bldg.name ? String(bldg.name).replace(/^🏢\s*/, '') : '';
+            titleEl.innerHTML = `<i class="fa-solid fa-panorama"></i> 전경사진${name ? ` · ${escapeHtml(name)}` : ''}`;
+        }
+        const list = bldg ? getBuildingOverviewPhotos(bldg) : [];
+        if (!list.length) {
+            listEl.innerHTML = '<div class="overview-photos-empty"><i class="fa-solid fa-camera" style="display:block;font-size:1.8rem;margin-bottom:0.5rem;color:#cbd5e1;"></i>등록된 전경사진이 없습니다.<br>촬영 또는 갤러리에서 추가하세요.</div>';
+            return;
+        }
+        listEl.innerHTML = list.map((p, idx) => {
+            const src = p.dataUrl || (window._photoCache && window._photoCache[getOverviewPhotoDocId(bldgId, p.id)]) || '';
+            const cap = escapeHtml(p.caption || '');
+            return `
+                <div class="overview-photo-item" data-overview-id="${escapeHtml(p.id)}">
+                    <div class="overview-photo-thumb-wrap">
+                        ${src ? `<img src="${src}" alt="전경사진 ${idx + 1}">` : '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:#94a3b8;">불러오는 중…</div>'}
+                        <button type="button" class="overview-photo-delete" data-action="delete-overview" data-overview-id="${escapeHtml(p.id)}" title="삭제"><i class="fa-solid fa-trash"></i></button>
+                    </div>
+                    <input type="text" class="overview-photo-caption" maxlength="120" placeholder="무슨 전경인지 한 줄로 입력 (예: 건물 정면, 옥상 전경)" value="${cap}" data-overview-id="${escapeHtml(p.id)}">
+                </div>
+            `;
+        }).join('');
+
+        listEl.querySelectorAll('.overview-photo-caption').forEach((input) => {
+            input.addEventListener('input', () => {
+                const id = input.getAttribute('data-overview-id');
+                const item = list.find((x) => x.id === id);
+                if (!item) return;
+                item.caption = input.value;
+                if (typeof saveStateToLocalStorage === 'function') saveStateToLocalStorage();
+            });
+            input.addEventListener('change', () => {
+                if (typeof saveStateToLocalStorage === 'function') saveStateToLocalStorage();
+                if (bldg) uploadOverviewPhotos(bldg);
+            });
+        });
+        listEl.querySelectorAll('[data-action="delete-overview"]').forEach((btn) => {
+            btn.addEventListener('click', async () => {
+                const id = btn.getAttribute('data-overview-id');
+                if (!id || !bldg) return;
+                if (!confirm('이 전경사진을 삭제할까요?')) return;
+                bldg.overviewPhotos = getBuildingOverviewPhotos(bldg).filter((p) => p.id !== id);
+                await deleteOverviewPhotoStorage(bldg.id, id);
+                if (typeof saveStateToLocalStorage === 'function') saveStateToLocalStorage();
+                renderOverviewPhotosList();
+                if (typeof window.showToast === 'function') window.showToast('전경사진을 삭제했습니다.', 'info');
+            });
+        });
+    }
+
+    async function openOverviewPhotosModal(bldgOrId) {
+        let bldg = null;
+        if (typeof bldgOrId === 'string') {
+            bldg = (window.state.buildings || []).find((b) => b.id === bldgOrId);
+        } else if (bldgOrId && typeof bldgOrId === 'object') {
+            bldg = bldgOrId;
+        } else if (window.state.currentBuildingId) {
+            bldg = (window.state.buildings || []).find((b) => b.id === window.state.currentBuildingId)
+                || window.state.currentBuilding;
+        }
+        if (!bldg || !bldg.id) {
+            if (typeof window.showToast === 'function') window.showToast('먼저 건축물을 선택하세요.', 'info');
+            return;
+        }
+        window._overviewPhotosBuildingId = bldg.id;
+        const modal = document.getElementById('overviewPhotosModal');
+        if (!modal) return;
+        modal.style.display = 'flex';
+        modal.classList.add('open');
+        renderOverviewPhotosList();
+        await hydrateBuildingOverviewPhotos(bldg);
+        renderOverviewPhotosList();
+    }
+    window.openOverviewPhotosModal = openOverviewPhotosModal;
+    window.closeOverviewPhotosModal = closeOverviewPhotosModal;
+
+    async function addOverviewPhotoFromFile(file) {
+        if (!file) return;
+        const bldgId = window._overviewPhotosBuildingId || window.state.currentBuildingId;
+        const bldg = (window.state.buildings || []).find((b) => b.id === bldgId);
+        if (!bldg) {
+            if (typeof window.showToast === 'function') window.showToast('건축물을 찾을 수 없습니다.', 'error');
+            return;
+        }
+        const compress = (typeof window.compressDefectPhoto43 === 'function')
+            ? window.compressDefectPhoto43
+            : null;
+        const dataUrl = compress
+            ? await compress(file, 1200, 0.85)
+            : await new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = () => resolve(reader.result);
+                reader.onerror = reject;
+                reader.readAsDataURL(file);
+            });
+        if (!dataUrl) return;
+        const item = { id: createOverviewPhotoId(), caption: '', dataUrl };
+        getBuildingOverviewPhotos(bldg).push(item);
+        const key = getOverviewPhotoDocId(bldg.id, item.id);
+        if (!window._photoCache) window._photoCache = {};
+        window._photoCache[key] = dataUrl;
+        if (typeof saveStateToLocalStorage === 'function') saveStateToLocalStorage();
+        uploadOverviewPhotos(bldg);
+        renderOverviewPhotosList();
+        if (typeof window.showToast === 'function') window.showToast('전경사진을 추가했습니다. 아래에 설명을 입력하세요.', 'success');
+    }
+
+    async function triggerOverviewPhotoPick(mode) {
+        const file = await pickImageFromDevice(mode);
+        if (file) await addOverviewPhotoFromFile(file);
+    }
+
+    (function bindOverviewPhotosUi() {
+        const btnOpen = document.getElementById('btnOpenOverviewPhotos');
+        if (btnOpen) btnOpen.addEventListener('click', () => openOverviewPhotosModal());
+        const btnClose = document.getElementById('btnCloseOverviewPhotosModal');
+        const btnClose2 = document.getElementById('btnCloseOverviewPhotosModal2');
+        if (btnClose) btnClose.addEventListener('click', closeOverviewPhotosModal);
+        if (btnClose2) btnClose2.addEventListener('click', closeOverviewPhotosModal);
+        const modal = document.getElementById('overviewPhotosModal');
+        if (modal) {
+            modal.addEventListener('click', (e) => {
+                if (e.target === modal) closeOverviewPhotosModal();
+            });
+        }
+        const btnCam = document.getElementById('btnOverviewCamera');
+        const btnGal = document.getElementById('btnOverviewGallery');
+        if (btnCam) btnCam.addEventListener('click', () => triggerOverviewPhotoPick('camera'));
+        if (btnGal) btnGal.addEventListener('click', () => triggerOverviewPhotoPick('gallery'));
+    })();
+
     async function uploadFloorDrawing(buildingId, floorCode, dataUrl) {
         if (!db || !window.state.companyId || !dataUrl) return false;
         if (isPdfDrawingUrl(dataUrl)) return false;
@@ -27527,6 +27958,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (d.prevRoundPhotos && d.prevRoundPhotos.length > 0) {
                     await uploadDefectPhotos(d.id, d.prevRoundPhotos, 'prev');
                 }
+            }
+        }
+        for (const b of (window.state.buildings || [])) {
+            if (b && Array.isArray(b.overviewPhotos) && b.overviewPhotos.length) {
+                await uploadOverviewPhotos(b);
             }
         }
     }

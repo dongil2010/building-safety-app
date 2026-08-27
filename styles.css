@@ -8403,3 +8403,93 @@ html.layout-desktop #ndtCanvasHintText,
 html.layout-desktop #tab-ndt .canvas-hint {
     display: block !important;
 }
+
+/* ============================================================
+   전경사진 모달 (결함 조사와 별도)
+   ============================================================ */
+.header-overview-btn {
+    margin-left: 0.45rem;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+.overview-photos-card {
+    max-width: 720px;
+    width: 94%;
+    max-height: 90vh;
+    display: flex;
+    flex-direction: column;
+}
+.overview-photos-body {
+    display: flex;
+    flex-direction: column;
+    gap: 0.85rem;
+    overflow-y: auto;
+    max-height: min(70vh, 640px);
+}
+.overview-photos-hint {
+    margin: 0;
+    font-size: 0.86rem;
+    color: var(--text-secondary, #64748b);
+    line-height: 1.45;
+}
+.overview-photos-toolbar {
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+}
+.overview-photos-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.9rem;
+}
+.overview-photo-item {
+    display: flex;
+    flex-direction: column;
+    gap: 0.45rem;
+    padding: 0.65rem;
+    border: 1px solid #e2e8f0;
+    border-radius: 10px;
+    background: #fafafa;
+}
+.overview-photo-thumb-wrap {
+    position: relative;
+    width: 100%;
+    background: #e2e8f0;
+    border-radius: 8px;
+    overflow: hidden;
+    aspect-ratio: 4 / 3;
+}
+.overview-photo-thumb-wrap img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+.overview-photo-delete {
+    position: absolute;
+    top: 0.4rem;
+    right: 0.4rem;
+    border: none;
+    background: rgba(15, 23, 42, 0.72);
+    color: #fff;
+    width: 2rem;
+    height: 2rem;
+    border-radius: 999px;
+    cursor: pointer;
+}
+.overview-photo-caption {
+    width: 100%;
+    font-size: 0.92rem;
+    padding: 0.55rem 0.7rem;
+    border: 1px solid #cbd5e1;
+    border-radius: 8px;
+}
+.overview-photos-empty {
+    text-align: center;
+    color: #94a3b8;
+    padding: 2rem 1rem;
+    font-weight: 600;
+}
+@media (max-width: 768px) {
+    .header-overview-btn-label { display: none; }
+}
