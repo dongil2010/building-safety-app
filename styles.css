@@ -4981,7 +4981,6 @@ html:not(.layout-desktop) .survey-inline-select {
 }
 
 /* 카드 안에서만 스크롤 — 헤더/모드바/푸터는 고정, 본문 flex 수축 */
-#addBuildingModal.modal-overlay,
 #addBuildingModal.modal-overlay.open {
     overflow-x: hidden;
     overflow-y: auto;
@@ -5641,7 +5640,6 @@ html:not(.layout-desktop) .survey-inline-select {
 }
 
 /* 현장 수정 모달 */
-#editBuildingModal.modal-overlay,
 #editBuildingModal.modal-overlay.open {
     display: grid !important;
     place-items: center;
@@ -5814,9 +5812,7 @@ html:not(.layout-desktop) .survey-inline-select {
 
 /* PC(>1024px): 등록·수정 모달 본문 높이 보장 — flex-basis 0 수축 방지 */
 @media (min-width: 1025px) {
-    #addBuildingModal.modal-overlay,
     #addBuildingModal.modal-overlay.open,
-    #editBuildingModal.modal-overlay,
     #editBuildingModal.modal-overlay.open {
         display: grid !important;
         place-items: center;
@@ -5839,15 +5835,6 @@ html:not(.layout-desktop) .survey-inline-select {
         min-height: 14rem;
         max-height: calc(92vh - 12.5rem);
         overflow-y: auto;
-    }
-
-    #editBuildingModal.modal-overlay,
-    #editBuildingModal.modal-overlay.open {
-        display: grid !important;
-        place-items: center;
-        align-content: center;
-        justify-items: center;
-        padding: 1rem;
     }
 
     #editBuildingModal .modal-card.edit-building-modal {
@@ -8610,7 +8597,6 @@ body:not(.bsa-tab-home) .home-fab-add-building {
     }
 
     /* 신규 건축물 등록 모달 — 카드 고정 높이 + 본문 내부 스크롤 */
-    #addBuildingModal.modal-overlay,
     #addBuildingModal.modal-overlay.open {
         overflow-x: hidden;
         overflow-y: auto;
@@ -8664,7 +8650,6 @@ body:not(.bsa-tab-home) .home-fab-add-building {
     }
 
     /* 수정 모달 */
-    #editBuildingModal.modal-overlay,
     #editBuildingModal.modal-overlay.open {
         display: grid !important;
         place-items: center;
@@ -10176,5 +10161,138 @@ html.layout-tablet body.ndt-modal-open .mobile-side-rail {
         align-self: center !important;
         margin: 0 !important;
     }
+}
+
+      margin: 0 !important;
+    }
+}
+
+/* ── 모바일 소프트 키보드: 입력란 들어올림 + 드래그 조정 (PC 미적용) ── */
+@media (max-width: 1024px) {
+    html:not(.layout-desktop) body.bsa-keyboard-open {
+        --bsa-kb-lift: 0px;
+        --bsa-kb-height: 0px;
+    }
+
+    html:not(.layout-desktop) .bsa-kb-drag-handle {
+        display: none;
+        align-items: center;
+        justify-content: center;
+        gap: 0.45rem;
+        padding: 0.38rem 0.65rem 0.42rem;
+        background: linear-gradient(180deg, #f1f5f9 0%, #ffffff 100%);
+        border-bottom: 1px solid #e2e8f0;
+        cursor: grab;
+        touch-action: none;
+        user-select: none;
+        flex-shrink: 0;
+    }
+
+    html:not(.layout-desktop) .bsa-kb-drag-handle.is-active {
+        display: flex;
+    }
+
+    html:not(.layout-desktop) .bsa-kb-drag-handle.is-dragging {
+        cursor: grabbing;
+        background: #e2e8f0;
+    }
+
+    html:not(.layout-desktop) .bsa-kb-drag-grip {
+        width: 2.15rem;
+        height: 0.28rem;
+        border-radius: 999px;
+        background: #94a3b8;
+        flex-shrink: 0;
+    }
+
+    html:not(.layout-desktop) .bsa-kb-drag-hint {
+        font-size: 0.68rem;
+        font-weight: 700;
+        color: #64748b;
+        letter-spacing: -0.01em;
+        white-space: nowrap;
+    }
+
+    html:not(.layout-desktop) .modal-card.bsa-kb-lifted,
+    html:not(.layout-desktop) .bsa-select-sheet-card.bsa-kb-lifted {
+        transform: translateY(calc(-1 * var(--bsa-kb-lift, 0px)));
+        transition: transform 0.22s ease;
+        will-change: transform;
+    }
+
+    html:not(.layout-desktop) #defectModal.open .defect-drawer-card.bsa-kb-lifted,
+    html:not(.layout-desktop) #ndtModal.open .ndt-drawer-card.bsa-kb-lifted {
+        transform: translateY(calc(-1 * var(--bsa-kb-lift, 0px))) !important;
+        transition: transform 0.22s ease;
+        will-change: transform;
+    }
+
+    html:not(.layout-desktop) body.bsa-keyboard-open .app-content {
+        scroll-padding-bottom: calc(var(--bsa-kb-height, 0px) + 1rem);
+    }
+
+    html:not(.layout-desktop) body.bsa-keyboard-open .modal-body,
+    html:not(.layout-desktop) body.bsa-keyboard-open .defect-drawer-body,
+    html:not(.layout-desktop) body.bsa-keyboard-open .add-building-body,
+    html:not(.layout-desktop) body.bsa-keyboard-open .edit-building-body {
+        scroll-padding-bottom: calc(var(--bsa-kb-height, 0px) + 0.75rem);
+    }
+}
+
+/* 태블릿(가로 1024px+)도 동일 키보드 들어올림 */
+html.layout-tablet .bsa-kb-drag-handle {
+    display: none;
+    align-items: center;
+    justify-content: center;
+    gap: 0.45rem;
+    padding: 0.38rem 0.65rem 0.42rem;
+    background: linear-gradient(180deg, #f1f5f9 0%, #ffffff 100%);
+    border-bottom: 1px solid #e2e8f0;
+    cursor: grab;
+    touch-action: none;
+    user-select: none;
+    flex-shrink: 0;
+}
+
+html.layout-tablet .bsa-kb-drag-handle.is-active {
+    display: flex;
+}
+
+html.layout-tablet .bsa-kb-drag-handle.is-dragging {
+    cursor: grabbing;
+    background: #e2e8f0;
+}
+
+html.layout-tablet .bsa-kb-drag-grip {
+    width: 2.15rem;
+    height: 0.28rem;
+    border-radius: 999px;
+    background: #94a3b8;
+}
+
+html.layout-tablet .bsa-kb-drag-hint {
+    font-size: 0.68rem;
+    font-weight: 700;
+    color: #64748b;
+}
+
+html.layout-tablet .modal-card.bsa-kb-lifted,
+html.layout-tablet .bsa-select-sheet-card.bsa-kb-lifted {
+    transform: translateY(calc(-1 * var(--bsa-kb-lift, 0px)));
+    transition: transform 0.22s ease;
+}
+
+html.layout-tablet #defectModal.open .defect-drawer-card.bsa-kb-lifted,
+html.layout-tablet #ndtModal.open .ndt-drawer-card.bsa-kb-lifted {
+    transform: translateY(calc(-1 * var(--bsa-kb-lift, 0px))) !important;
+    transition: transform 0.22s ease;
+}
+
+html.layout-tablet body.bsa-keyboard-open .app-content,
+html.layout-tablet body.bsa-keyboard-open .modal-body,
+html.layout-tablet body.bsa-keyboard-open .defect-drawer-body,
+html.layout-tablet body.bsa-keyboard-open .add-building-body,
+html.layout-tablet body.bsa-keyboard-open .edit-building-body {
+    scroll-padding-bottom: calc(var(--bsa-kb-height, 0px) + 1rem);
 }
 
