@@ -3713,9 +3713,9 @@ html:not(.layout-desktop) .survey-inline-select {
 }
 
 @media (max-width: 768px) {
-    /* 세로: 전체화면 하단에서 화면의 1/2까지 */
-    #defectModal.modal-drawer-overlay,
-    #defectModal.modal-drawer-overlay.defect-drawer-in-canvas {
+    /* 세로: 전체화면 하단에서 화면의 1/2까지 (태블릿·데스크톱사이트 제외) */
+    html:not(.layout-desktop) #defectModal.modal-drawer-overlay,
+    html:not(.layout-desktop) #defectModal.modal-drawer-overlay.defect-drawer-in-canvas {
         position: fixed;
         inset: 0 !important;
         top: 0 !important;
@@ -3729,13 +3729,13 @@ html:not(.layout-desktop) .survey-inline-select {
         box-sizing: border-box;
     }
 
-    #defectModal.modal-drawer-overlay.open,
-    #defectModal.modal-drawer-overlay.open.defect-drawer-in-canvas {
+    html:not(.layout-desktop) #defectModal.modal-drawer-overlay.open,
+    html:not(.layout-desktop) #defectModal.modal-drawer-overlay.open.defect-drawer-in-canvas {
         display: flex !important;
     }
 
-    #defectModal .defect-drawer-card,
-    #defectModal.defect-drawer-in-canvas .defect-drawer-card {
+    html:not(.layout-desktop) #defectModal .defect-drawer-card,
+    html:not(.layout-desktop) #defectModal.defect-drawer-in-canvas .defect-drawer-card {
         width: 100%;
         max-width: 100%;
         height: 50vh;
@@ -3753,7 +3753,7 @@ html:not(.layout-desktop) .survey-inline-select {
         flex-direction: column;
     }
 
-    #defectModal .defect-drawer-body {
+    html:not(.layout-desktop) #defectModal .defect-drawer-body {
         overflow-y: auto;
         -webkit-overflow-scrolling: touch;
         flex: 1 1 auto;
@@ -3761,16 +3761,16 @@ html:not(.layout-desktop) .survey-inline-select {
         padding: 0.55rem 0.7rem !important;
     }
 
-    #defectModal.open .defect-drawer-card,
-    #defectModal.open.defect-drawer-in-canvas .defect-drawer-card {
+    html:not(.layout-desktop) #defectModal.open .defect-drawer-card,
+    html:not(.layout-desktop) #defectModal.open.defect-drawer-in-canvas .defect-drawer-card {
         transform: translateY(0);
     }
 
-    .defect-drawer-footer-desktop {
+    html:not(.layout-desktop) .defect-drawer-footer-desktop {
         display: none !important;
     }
 
-    .defect-mobile-actions {
+    html:not(.layout-desktop) .defect-mobile-actions {
         display: grid;
         grid-template-columns: 0.75fr 1fr 1fr 0.9fr;
         gap: 0.45rem;
@@ -4168,10 +4168,10 @@ html:not(.layout-desktop) .survey-inline-select {
     }
 }
 
-/* 가로 모바일: 우측에서 화면의 1/3까지 */
+/* 가로 모바일: 우측에서 화면의 1/3까지 (태블릿·데스크톱사이트 제외) */
 @media (orientation: landscape) and (max-width: 1024px) {
-    #defectModal.modal-drawer-overlay,
-    #defectModal.modal-drawer-overlay.defect-drawer-in-canvas {
+    html:not(.layout-desktop) #defectModal.modal-drawer-overlay,
+    html:not(.layout-desktop) #defectModal.modal-drawer-overlay.defect-drawer-in-canvas {
         position: fixed;
         inset: 0 !important;
         top: 0 !important;
@@ -4185,13 +4185,13 @@ html:not(.layout-desktop) .survey-inline-select {
         box-sizing: border-box;
     }
 
-    #defectModal.modal-drawer-overlay.open,
-    #defectModal.modal-drawer-overlay.open.defect-drawer-in-canvas {
+    html:not(.layout-desktop) #defectModal.modal-drawer-overlay.open,
+    html:not(.layout-desktop) #defectModal.modal-drawer-overlay.open.defect-drawer-in-canvas {
         display: flex !important;
     }
 
-    #defectModal .defect-drawer-card,
-    #defectModal.defect-drawer-in-canvas .defect-drawer-card {
+    html:not(.layout-desktop) #defectModal .defect-drawer-card,
+    html:not(.layout-desktop) #defectModal.defect-drawer-in-canvas .defect-drawer-card {
         width: 33.333vw;
         max-width: 33.333vw;
         min-width: 33.333vw;
@@ -4205,12 +4205,12 @@ html:not(.layout-desktop) .survey-inline-select {
         flex-direction: column;
     }
 
-    #defectModal.open .defect-drawer-card,
-    #defectModal.open.defect-drawer-in-canvas .defect-drawer-card {
+    html:not(.layout-desktop) #defectModal.open .defect-drawer-card,
+    html:not(.layout-desktop) #defectModal.open.defect-drawer-in-canvas .defect-drawer-card {
         transform: translateX(0);
     }
 
-    #defectModal .defect-drawer-body {
+    html:not(.layout-desktop) #defectModal .defect-drawer-body {
         overflow-y: auto;
         -webkit-overflow-scrolling: touch;
         flex: 1 1 auto;
@@ -4218,11 +4218,11 @@ html:not(.layout-desktop) .survey-inline-select {
         padding: 0.45rem 0.55rem !important;
     }
 
-    .defect-drawer-footer-desktop {
+    html:not(.layout-desktop) .defect-drawer-footer-desktop {
         display: none !important;
     }
 
-    .defect-mobile-actions {
+    html:not(.layout-desktop) .defect-mobile-actions {
         display: grid;
         grid-template-columns: 0.75fr 1fr 1fr 0.9fr;
         gap: 0.35rem;
@@ -7971,7 +7971,7 @@ body:not(.bsa-tab-home) .home-fab-add-building {
 
     /* 세로: 하단 결함 창(50dvh)이 목록 하이라이트를 가리지 않도록 목록을 그만큼 줄임 */
     @media (orientation: portrait) and (max-width: 768px) {
-        body.defect-modal-open #tab-map .inspect-sidebar-left {
+        html:not(.layout-desktop) body.defect-modal-open #tab-map .inspect-sidebar-left {
             padding-bottom: 50dvh;
         }
     }
@@ -9099,48 +9099,150 @@ html.layout-desktop #editBuildingModal .edit-building-body {
     touch-action: pan-y;
 }
 
-html.layout-desktop #tab-map .inspect-layout {
-    flex-direction: row !important;
-    align-items: stretch !important;
+/* 태블릿·데스크톱사이트: 위치도 높이 체인 + 현차/전차 구역 독립 스크롤 (겹침 방지) */
+html.layout-desktop body.bsa-tab-map .app-content {
+    overflow: hidden !important;
+    display: flex !important;
+    flex-direction: column !important;
+    min-height: 0 !important;
 }
 
-html.layout-desktop #tab-map .inspect-sidebar-left,
+html.layout-desktop #tab-map.tab-content.active {
+    display: flex !important;
+    flex: 1 1 auto !important;
+    min-height: 0 !important;
+    overflow: hidden !important;
+    flex-direction: column !important;
+}
+
+html.layout-desktop #tab-map .inspect-layout {
+    flex: 1 1 auto !important;
+    min-height: 0 !important;
+    height: 100% !important;
+    flex-direction: row !important;
+    align-items: stretch !important;
+    overflow: hidden !important;
+}
+
+html.layout-desktop #tab-map .inspect-sidebar-left {
+    width: 230px !important;
+    max-width: 260px !important;
+    flex: 0 0 230px !important;
+    min-width: 0 !important;
+    min-height: 0 !important;
+    overflow: hidden !important;
+    display: flex !important;
+    flex-direction: column !important;
+}
+
 html.layout-desktop #tab-map .inspect-sidebar-right {
-    width: auto !important;
-    max-width: none !important;
+    width: 230px !important;
+    max-width: 260px !important;
+    flex: 0 0 230px !important;
+    min-height: 0 !important;
+    overflow: hidden !important;
 }
 
 html.layout-desktop #tab-map .defect-list-panel {
+    flex: 1 1 auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
+    display: flex !important;
     flex-direction: column !important;
+    overflow: hidden !important; /* 패널 자체는 스크롤 금지 → 구역별 스크롤 */
+    gap: 0.35rem !important;
+}
+
+html.layout-desktop #tab-map .defect-list-section {
+    flex: 1 1 0 !important;
+    min-height: 0 !important;
+    display: flex !important;
+    flex-direction: column !important;
+    overflow: hidden !important;
+}
+
+html.layout-desktop #tab-map .defect-list-section-scroll {
+    flex: 1 1 auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
     overflow-x: hidden !important;
     overflow-y: auto !important;
+    -webkit-overflow-scrolling: touch;
+}
+
+html.layout-desktop #tab-map .defect-list-section.is-selected-cluster {
+    flex: 0 1 auto !important;
+    max-height: 55% !important;
+    min-height: 0 !important;
+}
+
+html.layout-desktop #tab-map .defect-list-section.is-selected-cluster .defect-list-section-scroll {
+    flex: 1 1 auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
+    overflow-y: auto !important;
+    overflow-x: hidden !important;
+}
+
+/* 태블릿·PC 동일: 결함 수정창은 도면(캔버스) 오른쪽에서 슬라이드 */
+html.layout-desktop #defectModal.modal-drawer-overlay,
+html.layout-desktop #defectModal.modal-drawer-overlay.defect-drawer-in-canvas {
+    display: none;
+    flex-direction: row !important;
+    align-items: stretch !important;
+    justify-content: flex-end !important;
+    padding: 10px !important;
+    box-sizing: border-box !important;
+}
+
+html.layout-desktop #defectModal.modal-drawer-overlay.open,
+html.layout-desktop #defectModal.modal-drawer-overlay.open.defect-drawer-in-canvas {
+    display: flex !important;
 }
 
 html.layout-desktop #defectModal .defect-drawer-card,
 html.layout-desktop #defectModal.defect-drawer-in-canvas .defect-drawer-card {
-    width: min(420px, 38vw) !important;
-    max-width: min(480px, 42vw) !important;
+    width: min(400px, calc(100% - 20px)) !important;
+    max-width: min(420px, 42vw) !important;
+    min-width: 0 !important;
     height: 100% !important;
-    max-height: none !important;
+    max-height: 100% !important;
     min-height: 0 !important;
     margin: 0 !important;
-    border-radius: 0 14px 14px 0 !important;
-    transform: none !important;
+    margin-top: 0 !important;
+    align-self: stretch !important;
+    border-radius: 14px !important;
+    transform: translateX(calc(100% + 28px)) !important;
+    transition: transform 0.28s cubic-bezier(0.16, 1, 0.3, 1) !important;
 }
 
-html.layout-desktop #defectModal.modal-drawer-overlay {
-    align-items: stretch !important;
-    justify-content: flex-start !important;
-    padding: 0 !important;
+html.layout-desktop #defectModal.open .defect-drawer-card,
+html.layout-desktop #defectModal.open.defect-drawer-in-canvas .defect-drawer-card {
+    transform: translateX(0) !important;
 }
 
-html.layout-desktop #ndtModal .ndt-drawer-card {
-    width: min(420px, 38vw) !important;
-    max-width: min(480px, 42vw) !important;
+html.layout-desktop #defectModal .defect-drawer-body {
+    flex: 1 1 auto !important;
+    min-height: 0 !important;
+    overflow-y: auto !important;
+    -webkit-overflow-scrolling: touch;
+}
+
+html.layout-desktop #ndtModal .ndt-drawer-card,
+html.layout-desktop #ndtModal.ndt-drawer-in-canvas .ndt-drawer-card {
+    width: min(420px, calc(100% - 20px)) !important;
+    max-width: min(420px, 42vw) !important;
     height: 100% !important;
-    max-height: none !important;
-    border-radius: 0 14px 14px 0 !important;
-    transform: none !important;
+    max-height: 100% !important;
+    min-height: 0 !important;
+    margin: 0 !important;
+    border-radius: 14px !important;
+    transform: translateX(calc(100% + 28px)) !important;
+}
+
+html.layout-desktop #ndtModal.open .ndt-drawer-card,
+html.layout-desktop #ndtModal.open.ndt-drawer-in-canvas .ndt-drawer-card {
+    transform: translateX(0) !important;
 }
 
 html.layout-desktop .toast-container {
