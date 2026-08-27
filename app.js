@@ -24151,9 +24151,15 @@ document.addEventListener('DOMContentLoaded', () => {
                 const seg = clonedPara.getElementsByTagNameNS(HP_NS, 'lineseg')[0];
                 if (seg) seg.setAttribute('vertpos', String(lineIndex * (baseVertsize + baseSpacing)));
             };
-            // 한글 셀: 자간(글자 사이 간격)은 절대 손대지 않는다. 텍스트는 그대로 두고,
-            // 칸 너비를 넘길 때만 강제 줄바꿈(\n → 문단 복제)으로 두 줄 처리한다.
-            // (한 줄로 우겨넣으면 한글이 자간을 줄여 압축하는 부작용이 난다.)
+            // 한글 셀: 자간은 절대 손대지 않는다. 가운데 쪼개기(줄나눔)도 하지 않는다.
+            // 칸 너비를 넘는 지점부터 다음 줄로 넘기고(띄어쓰기 있으면 그 앞, 없으면 글자 단위),
+            // 행 높이는 템플릿을 유지하다가 4줄 이상일 때만 내용에 맞게 확장한다.
+            const HWPX_CELL_EXPAND_FROM_LINES = 4;
+            const hwpxCharWidthUnits = (ch) => {
+                // 반각·ASCII는 대략 절반 폭으로 잡아 넘어가는 위치를 맞춤
+                if (/[\u0020-\u007E\uFF61-\uFF9F]/.test(ch)) return 0.55;
+                return 1;
+            };
             const estimateHwpxCellMaxChars = (tc, paras) => {
                 const DEFAULT_MAX = 16;
                 if (!tc) return DEFAULT_MAX;
@@ -24170,35 +24176,45 @@ document.addEventListener('DOMContentLoaded', () => {
                 const usable = Math.max(charW, cellW - ml - mr);
                 return Math.max(4, Math.floor(usable / charW));
             };
+            /** 칸을 넘는 위치부터 순차 줄바꿈. 가운데 분할(줄나눔) 없음. */
             const wrapHwpxCellLine = (line, maxChars = 16) => {
                 const s = String(line == null ? '' : line);
                 const chars = Array.from(s);
-                if (chars.length <= maxChars) return s;
-                const mid = Math.floor(chars.length / 2);
-                let spaceBest = -1;
-                let punctBest = -1;
-                for (let i = 1; i < chars.length - 1; i++) {
-                    const ch = chars[i];
-                    if (ch === ' ' || ch === '\t') {
-                        if (spaceBest < 0 || Math.abs(i - mid) < Math.abs(spaceBest - mid)) spaceBest = i;
-                    } else if (/[,./|·、，]/.test(ch)) {
-                        if (punctBest < 0 || Math.abs(i - mid) < Math.abs(punctBest - mid)) punctBest = i;
+                if (!chars.length) return '';
+                const maxUnits = Math.max(4, Number(maxChars) || 16);
+                const lines = [];
+                let i = 0;
+                while (i < chars.length) {
+                    while (i < chars.length && (chars[i] === ' ' || chars[i] === '\t')) i++;
+                    if (i >= chars.length) break;
+                    let units = 0;
+                    let end = i;
+                    let lastBreak = -1; // 끊을 위치(이 인덱스부터 다음 줄)
+                    while (end < chars.length) {
+                        const ch = chars[end];
+                        const w = hwpxCharWidthUnits(ch);
+                        if (units + w > maxUnits && end > i) break;
+                        units += w;
+                        end++;
+                        if (ch === ' ' || ch === '\t') lastBreak = end; // 공백 뒤에서 끊기(공백 제외)
+                        else if (/[,./|·、，]/.test(ch)) lastBreak = end; // 문장부호 뒤에서 끊기
                     }
+                    if (end >= chars.length) {
+                        lines.push(chars.slice(i).join(''));
+                        break;
+                    }
+                    let cut = (lastBreak > i) ? lastBreak : end;
+                    // lastBreak가 공백을 가리키면 공백은 다음 줄 선두에서 제거됨
+                    if (cut > i && (chars[cut - 1] === ' ' || chars[cut - 1] === '\t')) {
+                        lines.push(chars.slice(i, cut - 1).join(''));
+                        i = cut;
+                    } else {
+                        lines.push(chars.slice(i, cut).join(''));
+                        i = cut;
+                    }
+                    if (!lines[lines.length - 1]) lines.pop();
                 }
-                let left;
-                let right;
-                if (spaceBest >= 0) {
-                    left = chars.slice(0, spaceBest).join('');
-                    right = chars.slice(spaceBest + 1).join('');
-                } else if (punctBest >= 0) {
-                    left = chars.slice(0, punctBest + 1).join('');
-                    right = chars.slice(punctBest + 1).join('');
-                } else {
-                    left = chars.slice(0, mid).join('');
-                    right = chars.slice(mid).join('');
-                }
-                if (!left || !right) return s;
-                return `${left}\n${right}`;
+                return lines.length ? lines.join('\n') : s;
             };
             const wrapHwpxCellText = (raw, maxChars = 16) => String(raw == null ? '' : raw)
                 .split('\n')
@@ -24226,30 +24242,41 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
                 return { lineCount: lines.length, vertsize: baseVertsize, spacing: baseSpacing };
             };
-            // 표본 행이 물려받은 샘플용 여러 줄 높이를 실제 채워지는 줄 수 기준으로 다시 계산해
-            // 적용한다 — NDT 표(fillNdtTable)와 내화피복 표(fillFireproofTable)가 공용으로 쓴다.
-            // 세로 병합(rowSpan>1)된 칸은 여러 행에 걸친 높이라 건드리지 않는다. 글자만 딱 맞는
-            // 높이는 인쇄용 표로 쓰기엔 너무 빽빽해 보이므로, 한 페이지에 15~20줄이 들어오는 정도의
-            // 여유 있는 최소 높이(MIN_ROW_HEIGHT)를 바닥으로 깐다.
+            // 템플릿 행 높이를 기본으로 유지한다. 줄이거나 미리 키우지 않고,
+            // 4줄 이상으로 넘어갈 때만 해당 행(칸들)을 내용 높이에 맞게 확장한다.
+            // 세로 병합(rowSpan>1) 칸은 여러 행에 걸친 높이라 건드리지 않는다.
             const applyRowHeightFromLines = (row, rowMaxLines, rowLineMetric, minRowHeight) => {
-                if (!rowLineMetric) return 0;
-                // NDT/내화피복 표는 한 페이지에 15~20줄 정도로 여유 있게(기본값 3200). 상태조사표는
-                // 페이지당 정확히 15건이 들어가야 하는 고정 페이지네이션이라(paginateSurveyDefects),
-                // 이 기본값을 그대로 쓰면 2줄로 줄바꿈되는 칸이 많아질 때 15줄 합이 여백까지 넘쳤다
-                // (사용자가 실제로 겪음) — 호출부에서 더 촘촘한 값을 넘겨 쓸 수 있게 한다.
-                const MIN_ROW_HEIGHT = minRowHeight || 3200;
-                const contentHeight = rowLineMetric.marginV + rowLineMetric.vertsize
-                    + (rowMaxLines - 1) * (rowLineMetric.vertsize + rowLineMetric.spacing)
-                    + Math.round(rowLineMetric.vertsize * 0.35);
-                const comfortableHeight = MIN_ROW_HEIGHT + (rowMaxLines - 1) * (rowLineMetric.vertsize + rowLineMetric.spacing);
-                const neededHeight = Math.max(contentHeight, comfortableHeight);
-                Array.from(row.getElementsByTagNameNS(HP_NS, 'tc')).forEach(tc => {
+                if (!row || !rowLineMetric) return 0;
+                let templateHeight = 0;
+                Array.from(row.getElementsByTagNameNS(HP_NS, 'tc')).forEach((tc) => {
                     const span = tc.getElementsByTagNameNS(HP_NS, 'cellSpan')[0];
                     if (span && parseInt(span.getAttribute('rowSpan'), 10) > 1) return;
                     const sz = tc.getElementsByTagNameNS(HP_NS, 'cellSz')[0];
-                    if (sz && neededHeight > 0) sz.setAttribute('height', String(neededHeight));
+                    const h = sz ? parseInt(sz.getAttribute('height'), 10) || 0 : 0;
+                    if (h > templateHeight) templateHeight = h;
                 });
-                return neededHeight;
+                const contentHeight = rowLineMetric.marginV + rowLineMetric.vertsize
+                    + (rowMaxLines - 1) * (rowLineMetric.vertsize + rowLineMetric.spacing)
+                    + Math.round(rowLineMetric.vertsize * 0.2);
+                let neededHeight = templateHeight;
+                if (rowMaxLines >= HWPX_CELL_EXPAND_FROM_LINES) {
+                    neededHeight = Math.max(templateHeight, contentHeight);
+                    if (minRowHeight) {
+                        const floorH = minRowHeight
+                            + (rowMaxLines - 1) * (rowLineMetric.vertsize + rowLineMetric.spacing);
+                        neededHeight = Math.max(neededHeight, floorH);
+                    }
+                }
+                // 템플릿보다 줄이지 않음. 확장할 때만 기록.
+                if (neededHeight > templateHeight) {
+                    Array.from(row.getElementsByTagNameNS(HP_NS, 'tc')).forEach((tc) => {
+                        const span = tc.getElementsByTagNameNS(HP_NS, 'cellSpan')[0];
+                        if (span && parseInt(span.getAttribute('rowSpan'), 10) > 1) return;
+                        const sz = tc.getElementsByTagNameNS(HP_NS, 'cellSz')[0];
+                        if (sz) sz.setAttribute('height', String(neededHeight));
+                    });
+                }
+                return neededHeight || templateHeight;
             };
             // 한글은 subList의 vertAlign="CENTER"만으로 셀 안 글자를 자동으로 세로 가운데 정렬해
             // 주지 않는다 — 저장된 vertpos를 셀 위쪽 여백부터의 절대 오프셋으로 그대로 쓴다. 그래서
@@ -24845,10 +24872,7 @@ document.addEventListener('DOMContentLoaded', () => {
                                 }
                             }
                         });
-                        // 상태조사표는 페이지당 정확히 15건이 들어가야 한다(paginateSurveyDefects) —
-                        // NDT 표 기본값(3200, 15~20줄 여유용)을 그대로 쓰면 2줄로 줄바꿈되는 칸이
-                        // 몇 개만 있어도 15줄 합이 페이지 여백까지 넘쳤다(사용자가 실제로 겪음).
-                        // 1줄 칸을 더 촘촘하게 잡아서 2줄 칸이 필요한 만큼 자랄 여유를 만든다.
+                        // 템플릿 행 높이 유지. 4줄 이상일 때만 확장(자간·줄나눔·상하 강제 축소/확대 없음).
                         applyRowHeightFromLines(newRow, rowMaxLines, rowLineMetric, 2800);
                         Array.from(newRow.getElementsByTagNameNS(HP_NS, 'tc')).forEach(centerCellContent);
                         destTbl.appendChild(newRow);
@@ -25329,7 +25353,7 @@ document.addEventListener('DOMContentLoaded', () => {
                             if (addr) addr.setAttribute('rowAddr', String(rowAddr));
                         });
                     };
-                    // 칸이 좁아 넘치면 자간을 줄이지 않고 강제 줄바꿈(두 줄)으로 넣는다.
+                    // 칸이 좁아 넘치면 자간을 줄이지 않고, 넘어가는 위치부터 다음 줄로 넘긴다.
                     const setCellText = (row, colAddr, text) => {
                         const tc = Array.from(row.getElementsByTagNameNS(HP_NS, 'tc')).find(t => {
                             const addr = t.getElementsByTagNameNS(HP_NS, 'cellAddr')[0];
