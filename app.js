@@ -2731,7 +2731,127 @@ document.addEventListener('DOMContentLoaded', () => {
         } else if (targetTabId === 'tab-home' && typeof window.renderDashboard === 'function') {
             window.renderDashboard();
         }
+        if (typeof syncMobileBackHistoryGuard === 'function') syncMobileBackHistoryGuard();
     };
+
+    /** 모바일·Android 앱 뒤로가기 인터셉트 대상 */
+    function shouldHandleAppBack() {
+        try {
+            if (typeof isNativeAndroidApp === 'function' && isNativeAndroidApp()) return true;
+        } catch (_) { /* ignore */ }
+        if (typeof layoutIsCompactWidth === 'function' && layoutIsCompactWidth()) return true;
+        if (typeof layoutIsMobileWidth === 'function' && layoutIsMobileWidth()) return true;
+        return false;
+    }
+
+    function isModalElOpen(el) {
+        if (!el) return false;
+        if (el.classList.contains('open')) return true;
+        const d = el.style && el.style.display;
+        return d === 'flex' || d === 'block';
+    }
+
+    /** 뒤로가기: 열린 창/시트만 닫고 홈으로 나가지 않음 */
+    function tryCloseTopOverlayForBack() {
+        try {
+            if (typeof isDefectModalOpen === 'function' && isDefectModalOpen() && typeof closeDefectModal === 'function') {
+                closeDefectModal();
+                return true;
+            }
+            if (typeof isNdtModalOpen === 'function' && isNdtModalOpen() && typeof closeNdtModal === 'function') {
+                closeNdtModal();
+                return true;
+            }
+            const named = [
+                ['ndtDisplacementModal', 'closeNdtDisplacementModal'],
+                ['ndtDisplacementGroupEditModal', 'closeNdtDisplacementGroupEditModal'],
+                ['ndtDisplacementChartModal', 'closeNdtDisplacementChartModal']
+            ];
+            for (let i = 0; i < named.length; i++) {
+                const el = document.getElementById(named[i][0]);
+                if (isModalElOpen(el) && typeof window[named[i][1]] === 'function') {
+                    window[named[i][1]]();
+                    return true;
+                }
+            }
+            if (typeof window.closeEditBuildingModalFunc === 'function' && isModalElOpen(document.getElementById('editBuildingModal'))) {
+                window.closeEditBuildingModalFunc();
+                return true;
+            }
+            if (typeof window.closeAddBuildingModalFunc === 'function' && isModalElOpen(document.getElementById('addBuildingModal'))) {
+                window.closeAddBuildingModalFunc();
+                return true;
+            }
+            const plainIds = ['optionManagerModal', 'reportPreviewModal', 'mobileQrModal'];
+            for (let j = 0; j < plainIds.length; j++) {
+                const m = document.getElementById(plainIds[j]);
+                if (isModalElOpen(m)) {
+                    m.classList.remove('open');
+                    m.style.display = 'none';
+                    return true;
+                }
+            }
+            if (typeof window.closeAllMobileCanvasSheets === 'function'
+                && document.querySelector('.is-mobile-sheet-open, .is-pc-size-panel-open')) {
+                window.closeAllMobileCanvasSheets();
+                document.querySelectorAll('.is-pc-size-panel-open').forEach((n) => n.classList.remove('is-pc-size-panel-open'));
+                return true;
+            }
+        } catch (_e) { /* ignore */ }
+        return false;
+    }
+
+    /**
+     * @returns {boolean} true면 시스템이 앱 종료/이전 페이지로 가지 않음
+     */
+    function handleAppBackPress() {
+        if (!shouldHandleAppBack()) return false;
+        if (tryCloseTopOverlayForBack()) return true;
+        const tab = (window.state && window.state.currentTab) || 'tab-home';
+        if (tab !== 'tab-home') {
+            if (window.confirm('홈으로 나가시겠습니까?')) {
+                if (typeof window.switchTab === 'function') window.switchTab('tab-home');
+            }
+            return true;
+        }
+        return false;
+    }
+
+    function syncMobileBackHistoryGuard() {
+        if (!shouldHandleAppBack()) return;
+        const onHome = ((window.state && window.state.currentTab) || 'tab-home') === 'tab-home';
+        if (onHome) return;
+        try {
+            if (!history.state || !history.state.bsaBackGuard) {
+                history.pushState({ bsaBackGuard: 1 }, '');
+            }
+        } catch (_e) { /* ignore */ }
+    }
+
+    function initMobileBackButton() {
+        if (window._bsaBackButtonInited) return;
+        window._bsaBackButtonInited = true;
+
+        window.addEventListener('popstate', () => {
+            if (!shouldHandleAppBack()) return;
+            const tab = (window.state && window.state.currentTab) || 'tab-home';
+            if (tab === 'tab-home') return;
+            try { history.pushState({ bsaBackGuard: 1 }, ''); } catch (_e) { /* ignore */ }
+            handleAppBackPress();
+        });
+
+        syncMobileBackHistoryGuard();
+
+        try {
+            const CapApp = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.App;
+            if (CapApp && typeof CapApp.addListener === 'function') {
+                CapApp.addListener('backButton', () => {
+                    if (handleAppBackPress()) return;
+                    if (typeof CapApp.exitApp === 'function') CapApp.exitApp();
+                });
+            }
+        } catch (_e) { /* ignore */ }
+    }
 
     // --- 6. BUILDING MANAGEMENT ENGINE ---
 
@@ -26412,6 +26532,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (isNativeAndroidApp()) {
             setInterval(checkRemoteWebVersion, 45000);
         }
+        if (typeof initMobileBackButton === 'function') initMobileBackButton();
     })();
 
     function initFirebaseSync() {
