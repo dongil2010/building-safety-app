@@ -14120,8 +14120,9 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    /** 영역 리사이즈. 반대편을 넘기면 잡은 핸들이 반대 점으로 넘어감. 반환: 다음 프레임용 필드 */
     function applyAreaResizeLocal(defect, imgX, imgY, xField, yField) {
-        if (!defect) return;
+        if (!defect) return { xField: xField || null, yField: yField || null };
         const aabb = getAreaAabb(defect);
         const loc = areaImgToLocal(defect, imgX, imgY);
         let lx1 = -aabb.w / 2;
@@ -14132,29 +14133,63 @@ document.addEventListener('DOMContentLoaded', () => {
         const maxXF = defect.areaX1 <= defect.areaX2 ? 'areaX2' : 'areaX1';
         const minYF = defect.areaY1 <= defect.areaY2 ? 'areaY1' : 'areaY2';
         const maxYF = defect.areaY1 <= defect.areaY2 ? 'areaY2' : 'areaY1';
-        if (xField === minXF) lx1 = loc.x;
-        if (xField === maxXF) lx2 = loc.x;
-        if (yField === minYF) ly1 = loc.y;
-        if (yField === maxYF) ly2 = loc.y;
+
+        let dragMinX = xField === minXF;
+        let dragMaxX = xField === maxXF;
+        let dragMinY = yField === minYF;
+        let dragMaxY = yField === maxYF;
+
+        if (dragMinX) lx1 = loc.x;
+        if (dragMaxX) lx2 = loc.x;
+        if (dragMinY) ly1 = loc.y;
+        if (dragMaxY) ly2 = loc.y;
+
+        // 반대 변을 넘어가면 잡은 점을 반대쪽으로 넘김 (기존 UX)
+        if (dragMinX && lx1 > lx2) {
+            const t = lx1; lx1 = lx2; lx2 = t;
+            dragMinX = false; dragMaxX = true;
+        } else if (dragMaxX && lx2 < lx1) {
+            const t = lx1; lx1 = lx2; lx2 = t;
+            dragMaxX = false; dragMinX = true;
+        }
+        if (dragMinY && ly1 > ly2) {
+            const t = ly1; ly1 = ly2; ly2 = t;
+            dragMinY = false; dragMaxY = true;
+        } else if (dragMaxY && ly2 < ly1) {
+            const t = ly1; ly1 = ly2; ly2 = t;
+            dragMaxY = false; dragMinY = true;
+        }
+
         if (lx2 - lx1 < 12) {
-            if (xField === minXF) lx1 = lx2 - 12;
-            else lx2 = lx1 + 12;
+            if (dragMinX) lx1 = lx2 - 12;
+            else if (dragMaxX) lx2 = lx1 + 12;
+            else {
+                const m = (lx1 + lx2) / 2;
+                lx1 = m - 6; lx2 = m + 6;
+            }
         }
         if (ly2 - ly1 < 12) {
-            if (yField === minYF) ly1 = ly2 - 12;
-            else ly2 = ly1 + 12;
+            if (dragMinY) ly1 = ly2 - 12;
+            else if (dragMaxY) ly2 = ly1 + 12;
+            else {
+                const m = (ly1 + ly2) / 2;
+                ly1 = m - 6; ly2 = m + 6;
+            }
         }
-        const nlx1 = Math.min(lx1, lx2);
-        const nly1 = Math.min(ly1, ly2);
-        const nlx2 = Math.max(lx1, lx2);
-        const nly2 = Math.max(ly1, ly2);
-        const mid = areaLocalToImg(defect, (nlx1 + nlx2) / 2, (nly1 + nly2) / 2);
-        const nw = nlx2 - nlx1;
-        const nh = nly2 - nly1;
+
+        const mid = areaLocalToImg(defect, (lx1 + lx2) / 2, (ly1 + ly2) / 2);
+        const nw = lx2 - lx1;
+        const nh = ly2 - ly1;
+        // 저장 AABB는 항상 areaX1≤areaX2, areaY1≤areaY2
         defect.areaX1 = mid.x - nw / 2;
         defect.areaY1 = mid.y - nh / 2;
         defect.areaX2 = mid.x + nw / 2;
         defect.areaY2 = mid.y + nh / 2;
+
+        return {
+            xField: dragMinX ? 'areaX1' : (dragMaxX ? 'areaX2' : null),
+            yField: dragMinY ? 'areaY1' : (dragMaxY ? 'areaY2' : null)
+        };
     }
 
     function beginAreaShapePath(ctx, defect) {
@@ -14626,10 +14661,8 @@ document.addEventListener('DOMContentLoaded', () => {
             let targetX = t.targetX;
             let targetY = t.targetY;
             if (isAreaDefect) {
-                const attach = getAreaCenterBorderAttach(
-                    boxX, boxY,
-                    defect.areaX1, defect.areaY1, defect.areaX2, defect.areaY2
-                );
+                // 회전·타원·다각형: 실제 도형 변 중점에 꽂음 (AABB 고정점 금지)
+                const attach = getAreaCenterBorderAttachDefect(boxX, boxY, defect);
                 targetX = attach.x;
                 targetY = attach.y;
             }
@@ -18808,13 +18841,35 @@ document.addEventListener('DOMContentLoaded', () => {
                 const { cx, cy } = getAreaAabb(activeDragPin);
                 const ang = (Math.atan2(currentImgY - cy, currentImgX - cx) * 180) / Math.PI + 90;
                 rotateAreaDefect(activeDragPin, ang);
+                if (typeof activeDragPin.x === 'number' && typeof activeDragPin.y === 'number') {
+                    const attachLive = getAreaCenterBorderAttachDefect(activeDragPin.x, activeDragPin.y, activeDragPin);
+                    activeDragPin.targetX = attachLive.x;
+                    activeDragPin.targetY = attachLive.y;
+                }
                 const angElLive = document.getElementById('defectAreaAngle');
                 const pinIdLive = document.getElementById('defectPinId')?.value;
                 if (angElLive && pinIdLive && String(pinIdLive) === String(activeDragPin.id)) {
                     angElLive.value = String(Math.round(getAreaAngleDeg(activeDragPin)));
                 }
             } else if (activeDragPart === 'AREA_RESIZE') {
-                applyAreaResizeLocal(activeDragPin, currentImgX, currentImgY, activeResizeXField, activeResizeYField);
+                const nextFields = applyAreaResizeLocal(
+                    activeDragPin, currentImgX, currentImgY, activeResizeXField, activeResizeYField
+                );
+                activeResizeXField = nextFields.xField;
+                activeResizeYField = nextFields.yField;
+                if (typeof activeDragPin.x === 'number' && typeof activeDragPin.y === 'number') {
+                    const attachLive = getAreaCenterBorderAttachDefect(activeDragPin.x, activeDragPin.y, activeDragPin);
+                    activeDragPin.targetX = attachLive.x;
+                    activeDragPin.targetY = attachLive.y;
+                }
+                if (elements.planCanvas) {
+                    elements.planCanvas.style.cursor = getCursorForHitInfo({
+                        defect: activeDragPin,
+                        part: 'AREA_RESIZE',
+                        resizeXField: activeResizeXField,
+                        resizeYField: activeResizeYField
+                    }) || 'nwse-resize';
+                }
             } else {
                 const newX = currentImgX - pinDragOffsetX;
                 const newY = currentImgY - pinDragOffsetY;
@@ -22790,10 +22845,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 let tipX = t.targetX;
                 let tipY = t.targetY;
                 if (isAreaDefectSafe) {
-                    const attach = getAreaCenterBorderAttach(
-                        boxX, boxY,
-                        defect.areaX1, defect.areaY1, defect.areaX2, defect.areaY2
-                    );
+                    const attach = getAreaCenterBorderAttachDefect(boxX, boxY, defect);
                     tipX = attach.x;
                     tipY = attach.y;
                 }
