@@ -32,7 +32,7 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <meta name="apple-mobile-web-app-title" content="스마트 안전점검">
-    <link rel="stylesheet" href="styles.css?v=20260827_fab_exp">
+    <link rel="stylesheet" href="styles.css?v=20260827_round_fab">
     <!-- FontAwesome icons for clean engineering UI -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <!-- PDF 생성용: 페이지별로 직접 캡처해서 조립(큰 보고서에서 html2pdf 한방 렌더링이 캔버스 높이 한계로
@@ -1761,6 +1761,56 @@
         </div>
     </div>
 
+    <!-- MODAL: 회차 추가 (현장 내 새 점검 회차) -->
+    <div class="modal-overlay" id="addSurveyRoundModal">
+        <div class="modal-card" style="max-width: 440px; width: 92%;">
+            <div class="modal-header">
+                <h3><i class="fa-solid fa-calendar-plus"></i> 회차 추가</h3>
+                <button type="button" class="modal-close" id="btnCloseAddSurveyRoundModal">&times;</button>
+            </div>
+            <div class="modal-body" style="display:flex; flex-direction:column; gap:0.75rem;">
+                <p style="font-size:0.8rem; color:#64748b; margin:0;">
+                    마지막 회차를 기준으로 다음 회차를 만듭니다. 다른 회사가 중간 회차를 진행한 경우 등에는 연도·상하반기를 직접 지정할 수 있습니다.
+                </p>
+                <div>
+                    <div class="form-label">현장</div>
+                    <div id="addSurveyRoundSiteLabel" style="font-weight:800; color:#0f172a;"></div>
+                </div>
+                <div>
+                    <div class="form-label">기준(마지막) 회차</div>
+                    <div id="addSurveyRoundBaseLabel" style="font-size:0.9rem; color:#334155;"></div>
+                </div>
+                <div style="display:flex; gap:0.5rem;">
+                    <div class="form-group" style="flex:1; margin:0;">
+                        <label class="form-label" for="addSurveyRoundYear">점검 년도</label>
+                        <select id="addSurveyRoundYear" class="form-control">
+                            <option value="2025년">2025년</option>
+                            <option value="2026년" selected>2026년</option>
+                            <option value="2027년">2027년</option>
+                            <option value="2028년">2028년</option>
+                            <option value="2029년">2029년</option>
+                        </select>
+                    </div>
+                    <div class="form-group" style="flex:1; margin:0;">
+                        <label class="form-label" for="addSurveyRoundPeriod">상/하반기</label>
+                        <select id="addSurveyRoundPeriod" class="form-control">
+                            <option value="상반기">상반기</option>
+                            <option value="하반기" selected>하반기</option>
+                            <option value="수시점검">수시점검</option>
+                        </select>
+                    </div>
+                </div>
+                <p id="addSurveyRoundHint" style="font-size:0.78rem; color:#166534; margin:0;"></p>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline" id="btnCancelAddSurveyRound">취소</button>
+                <button type="button" class="btn btn-primary" id="btnConfirmAddSurveyRound">
+                    <i class="fa-solid fa-plus"></i> 회차 만들기
+                </button>
+            </div>
+        </div>
+    </div>
+
     <!-- MODAL: Add New Building Modal -->
     <div class="modal-overlay" id="addBuildingModal">
         <div class="modal-card add-building-modal">
@@ -2427,14 +2477,14 @@
     <script src="js/tabs/registry.js?v=20260826_bsafix"></script>
     <script src="js/pdf-vector-bridge.js?v=20260827_area_ink"></script>
     <script src="js/core/layout-mode.js?v=20260827_tablet"></script>
-    <script src="js/tabs/home.js?v=20260827_home_gear"></script>
+    <script src="js/tabs/home.js?v=20260827_round_fab"></script>
     <script src="js/tabs/map.js?v=20260826_mem1"></script>
     <script src="js/tabs/survey.js?v=20260824_nSub"></script>
     <script src="js/tabs/ndt.js?v=20260822_survey2dScroll"></script>
     <script src="js/shared/report.js?v=20260827_overview"></script>
     <script src="js/shared/hwpx-import.js?v=20260825_hwpxin"></script>
     <script src="js/shared/auth.js?v=20260821_land1"></script>
-    <script src="app.js?v=20260827_home_gear"></script>
+    <script src="app.js?v=20260827_round_fab"></script>
     <script>
         window.BSA_APP_VERSION = '20260826_mem1';
         (function () {

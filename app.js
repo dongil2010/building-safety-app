@@ -2985,6 +2985,9 @@ document.addEventListener('DOMContentLoaded', () => {
         };
 
         const selectedSiteKey = window.state.dashboardSiteKey || null;
+        if (typeof window.updateHomeFabForDashboardMode === 'function') {
+            window.updateHomeFabForDashboardMode();
+        }
 
         if (selectedSiteKey) {
             const siteRounds = filtered.filter((b) => normalizeSiteVaultKey(b.name) === selectedSiteKey);
@@ -3040,7 +3043,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const siteKeys = [...siteMap.keys()].sort((a, b) => a.localeCompare(b, 'ko'));
 
             if (siteKeys.length === 0) {
-                grid.innerHTML = `<div class="building-list-empty">${term ? '🔍 검색 결과가 없습니다.' : '등록된 건축물이 없습니다. 우측 상단 "신규 건축물 등록" 버튼을 눌러 시작하세요.'}</div>`;
+                grid.innerHTML = `<div class="building-list-empty">${term ? '🔍 검색 결과가 없습니다.' : '등록된 건축물이 없습니다. 하단 + 버튼으로 현장을 추가하세요.'}</div>`;
                 return;
             }
 
@@ -3099,6 +3102,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (id && typeof window.openOverviewPhotosModal === 'function') window.openOverviewPhotosModal(id);
             });
         });
+        if (typeof window.updateHomeFabForDashboardMode === 'function') {
+            window.updateHomeFabForDashboardMode();
+        }
     };
 
     window.openDashboardSiteRounds = function(siteKey) {
@@ -4371,7 +4377,28 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const btnMobileFabAddBuilding = document.getElementById('btnMobileFabAddBuilding');
     if (btnMobileFabAddBuilding) {
-        btnMobileFabAddBuilding.addEventListener('click', () => window.openAddBuildingModalFunc());
+        btnMobileFabAddBuilding.addEventListener('click', () => {
+            if (window.state.dashboardSiteKey) {
+                if (typeof window.openAddSurveyRoundModal === 'function') window.openAddSurveyRoundModal();
+            } else if (typeof window.openAddBuildingModalFunc === 'function') {
+                window.openAddBuildingModalFunc();
+            }
+        });
+    }
+
+    ['btnCloseAddSurveyRoundModal', 'btnCancelAddSurveyRound'].forEach((id) => {
+        const el = document.getElementById(id);
+        if (el) el.addEventListener('click', () => window.closeAddSurveyRoundModal());
+    });
+    const btnConfirmAddSurveyRound = document.getElementById('btnConfirmAddSurveyRound');
+    if (btnConfirmAddSurveyRound) {
+        btnConfirmAddSurveyRound.addEventListener('click', () => window.confirmAddSurveyRoundFromHome());
+    }
+    const addSurveyRoundModal = document.getElementById('addSurveyRoundModal');
+    if (addSurveyRoundModal) {
+        addSurveyRoundModal.addEventListener('click', (e) => {
+            if (e.target === addSurveyRoundModal) window.closeAddSurveyRoundModal();
+        });
     }
 
     initAllImportSourceSearchPickers();
@@ -12188,7 +12215,6 @@ document.addEventListener('DOMContentLoaded', () => {
         const curYear = sourceBldg.inspectionYear || '2026년';
         const curPeriod = sourceBldg.inspectionPeriod || '하반기';
         const next = getNextSurveyRoundParts(curYear, curPeriod);
-        const toKey = `${next.year}_${next.period}`;
         const defectCount = countBuildingDefects(sourceBldg);
         const siteLabel = normalizeSiteVaultKey(sourceBldg.name);
 
@@ -12201,7 +12227,33 @@ document.addEventListener('DOMContentLoaded', () => {
             `· PDF 도면은 「${siteLabel}」 현장명 보관함에 유지·재사용`
         )) return;
 
-        window.showLoading('다음 회차 현장 생성 중…');
+        const created = await createSurveyRoundBuildingFromSource(sourceBldg, next.year, next.period, {
+            closeEditModal: true,
+            selectAfter: true
+        });
+        if (created) {
+            window.showToast(
+                `${next.year} ${next.period} 새 점검 생성 · 전회차 결함 ${defectCount}건 · PDF는 「${siteLabel}」 보관함`,
+                'success',
+                6500
+            );
+        }
+    };
+
+    /** 기준 건물(보통 마지막 회차)을 복제해 지정 연도·기간의 새 회차 점검을 만든다. */
+    async function createSurveyRoundBuildingFromSource(sourceBldg, year, period, opts) {
+        opts = opts || {};
+        if (!sourceBldg) {
+            window.showToast('기준이 될 회차 점검을 찾을 수 없습니다.', 'warning');
+            return null;
+        }
+        const nextYear = year || '2026년';
+        const nextPeriod = period || '하반기';
+        const toKey = `${nextYear}_${nextPeriod}`;
+        const siteLabel = normalizeSiteVaultKey(sourceBldg.name);
+        const defectCount = countBuildingDefects(sourceBldg);
+
+        window.showLoading('회차 현장 생성 중…');
         try {
             await archiveBuildingPdfsToSiteVault(sourceBldg);
 
@@ -12216,8 +12268,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 date: new Date().toISOString().split('T')[0],
                 floors: sourceBldg.floors || '',
                 inspectionType: sourceBldg.inspectionType || '정밀안전점검',
-                inspectionYear: next.year,
-                inspectionPeriod: next.period,
+                inspectionYear: nextYear,
+                inspectionPeriod: nextPeriod,
                 latestSurveyRoundKey: toKey,
                 siteVaultKey: siteVaultDocId(siteLabel),
                 structureType: sourceBldg.structureType || '',
@@ -12254,20 +12306,138 @@ document.addEventListener('DOMContentLoaded', () => {
             saveStateToLocalStorage();
             if (typeof syncStateToFirebase === 'function') syncStateToFirebase();
 
-            window.closeEditBuildingModalFunc();
-            renderDashboard();
-            window.selectBuildingAndInspect(newBldg);
-
-            window.showToast(
-                `${next.year} ${next.period} 새 점검 생성 · 전회차 결함 ${defectCount}건 · PDF는 「${siteLabel}」 보관함`,
-                'success',
-                6500
-            );
+            if (opts.closeEditModal && typeof window.closeEditBuildingModalFunc === 'function') {
+                window.closeEditBuildingModalFunc();
+            }
+            if (typeof renderDashboard === 'function') renderDashboard();
+            if (opts.selectAfter) window.selectBuildingAndInspect(newBldg);
+            return { building: newBldg, defectCount, siteLabel, toKey };
         } catch (err) {
-            console.error('다음 회차 현장 생성 오류:', err);
-            window.showToast('다음 회차 생성 중 오류가 발생했습니다.', 'error', 5000);
+            console.error('회차 현장 생성 오류:', err);
+            window.showToast('회차 생성 중 오류가 발생했습니다.', 'error', 5000);
+            return null;
         } finally {
             window.hideLoading();
+        }
+    }
+
+    function getSiteBuildingsSorted(siteKey) {
+        const all = filterDeletedBuildings(window.state.buildings || [], window.state.deletedBuildingIds);
+        const list = all.filter((b) => normalizeSiteVaultKey(b.name) === siteKey);
+        list.sort((a, b) => {
+            const ra = getSurveyRoundOrderRank(getBuildingSurveyRoundKey(a));
+            const rb = getSurveyRoundOrderRank(getBuildingSurveyRoundKey(b));
+            if (ra != null && rb != null && ra !== rb) return rb - ra;
+            if (ra != null && rb == null) return -1;
+            if (ra == null && rb != null) return 1;
+            return String(b.name || '').localeCompare(String(a.name || ''), 'ko');
+        });
+        return list;
+    }
+
+    function siteAlreadyHasRound(siteKey, year, period) {
+        const key = `${year}_${period}`;
+        return getSiteBuildingsSorted(siteKey).some((b) => getBuildingSurveyRoundKey(b) === key);
+    }
+
+    window.updateHomeFabForDashboardMode = function() {
+        const fab = document.getElementById('btnMobileFabAddBuilding');
+        if (!fab) return;
+        const roundMode = !!window.state.dashboardSiteKey;
+        fab.classList.toggle('is-round-mode', roundMode);
+        const label = fab.querySelector('.home-fab-label');
+        const text = roundMode ? '회차 추가하기' : '현장 추가하기';
+        if (label) label.textContent = text;
+        fab.title = text;
+        fab.setAttribute('aria-label', text);
+    };
+
+    window.openAddSurveyRoundModal = function() {
+        const siteKey = window.state.dashboardSiteKey;
+        if (!siteKey) {
+            window.showToast('회차를 추가할 현장을 먼저 열어 주세요.', 'warning');
+            return;
+        }
+        const rounds = getSiteBuildingsSorted(siteKey);
+        const latest = rounds[0];
+        if (!latest) {
+            window.showToast('이 현장에 기준이 될 회차가 없습니다. 먼저 현장을 등록해 주세요.', 'warning');
+            return;
+        }
+        const curYear = latest.inspectionYear || '2026년';
+        const curPeriod = latest.inspectionPeriod || '하반기';
+        const next = getNextSurveyRoundParts(curYear, curPeriod);
+
+        const siteEl = document.getElementById('addSurveyRoundSiteLabel');
+        const baseEl = document.getElementById('addSurveyRoundBaseLabel');
+        const yearEl = document.getElementById('addSurveyRoundYear');
+        const periodEl = document.getElementById('addSurveyRoundPeriod');
+        const hintEl = document.getElementById('addSurveyRoundHint');
+        if (siteEl) siteEl.textContent = siteKey;
+        if (baseEl) {
+            baseEl.textContent = `${formatSurveyRoundLabel(getBuildingSurveyRoundKey(latest))} · ${latest.inspectionType || '점검'}`;
+        }
+        if (yearEl) {
+            if (![...yearEl.options].some((o) => o.value === next.year)) {
+                const opt = document.createElement('option');
+                opt.value = next.year;
+                opt.textContent = next.year;
+                yearEl.appendChild(opt);
+            }
+            yearEl.value = next.year;
+        }
+        if (periodEl) periodEl.value = next.period;
+        if (hintEl) {
+            hintEl.textContent = `기본값: 다음 회차 ${next.year} ${next.period} (직접 변경 가능)`;
+        }
+        window._addSurveyRoundSourceId = latest.id;
+        const modal = document.getElementById('addSurveyRoundModal');
+        if (modal) modal.classList.add('active');
+    };
+
+    window.closeAddSurveyRoundModal = function() {
+        const modal = document.getElementById('addSurveyRoundModal');
+        if (modal) modal.classList.remove('active');
+        window._addSurveyRoundSourceId = null;
+    };
+
+    window.confirmAddSurveyRoundFromHome = async function() {
+        const siteKey = window.state.dashboardSiteKey;
+        const sourceId = window._addSurveyRoundSourceId;
+        const sourceBldg = (window.state.buildings || []).find((b) => b.id === sourceId)
+            || getSiteBuildingsSorted(siteKey)[0];
+        if (!siteKey || !sourceBldg) {
+            window.showToast('기준 회차를 찾을 수 없습니다.', 'warning');
+            return;
+        }
+        const year = document.getElementById('addSurveyRoundYear')?.value || '2026년';
+        const period = document.getElementById('addSurveyRoundPeriod')?.value || '하반기';
+        if (siteAlreadyHasRound(siteKey, year, period)) {
+            window.showToast(`${year} ${period} 회차가 이미 있습니다. 다른 회차를 선택해 주세요.`, 'warning', 4500);
+            return;
+        }
+        const defectCount = countBuildingDefects(sourceBldg);
+        if (!window.confirm(
+            `회차를 추가할까요?\n\n` +
+            `· 현장: ${siteKey}\n` +
+            `· 기준: ${formatSurveyRoundLabel(getBuildingSurveyRoundKey(sourceBldg))}\n` +
+            `· 새 회차: ${year} ${period}\n\n` +
+            `도면·결함(${defectCount}건, 전회차)·NDT를 복사한 새 점검이 만들어집니다.`
+        )) return;
+
+        window.closeAddSurveyRoundModal();
+        const created = await createSurveyRoundBuildingFromSource(sourceBldg, year, period, {
+            closeEditModal: false,
+            selectAfter: false
+        });
+        if (created) {
+            window.state.dashboardSiteKey = siteKey;
+            if (typeof renderDashboard === 'function') renderDashboard();
+            window.showToast(
+                `${year} ${period} 회차 추가 · 전회차 결함 ${created.defectCount}건 복사`,
+                'success',
+                5500
+            );
         }
     };
 

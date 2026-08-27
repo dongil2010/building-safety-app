@@ -5610,6 +5610,11 @@ body:not(.bsa-tab-home) .home-fab-add-building {
         box-shadow: 0 10px 28px rgba(15, 23, 42, 0.42);
     }
 
+    .home-fab-add-building.is-round-mode:hover,
+    .home-fab-add-building.is-round-mode:focus-visible {
+        width: 9.75rem;
+    }
+
     .home-fab-add-building:hover .home-fab-label,
     .home-fab-add-building:focus-visible .home-fab-label {
         max-width: 7.5rem;
