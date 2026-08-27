@@ -3541,7 +3541,9 @@ document.addEventListener('DOMContentLoaded', () => {
             if (siteNavTitle) {
                 siteNavTitle.textContent = `${selectedSiteKey} · ${formatSurveyRoundLabel(roundKey)}`;
             }
-            if (heroTitle) heroTitle.textContent = '🏢 동 선택';
+            if (heroTitle) {
+                heroTitle.textContent = isSiteMultiDong(selectedSiteKey) ? '🏢 동 선택' : '🏢 점검 선택';
+            }
 
             if (dongs.length === 0) {
                 grid.innerHTML = `<div class="building-list-empty">${term ? '🔍 검색 결과가 없습니다.' : '이 회차에 등록된 동이 없습니다.'} <button type="button" class="btn btn-sm btn-outline dashboard-back-rounds-inline" style="margin-top:0.6rem;">회차 목록으로</button></div>`;
@@ -3549,17 +3551,20 @@ document.addEventListener('DOMContentLoaded', () => {
                 return;
             }
 
+            const multiDong = isSiteMultiDong(selectedSiteKey);
             grid.innerHTML = dongs.map((bldg) => {
                 const floorCount = (bldg.floorsList && bldg.floorsList.length > 0)
                     ? `📐 도면 ${bldg.floorsList.length}개 층`
                     : '📐 도면 미등록';
                 const typeLabel = bldg.inspectionType || '점검';
+                const title = multiDong
+                    ? `<i class="fa-solid fa-door-open flag-icon-muted"></i> ${escapeHtml(formatDongRowLabel(bldg))}`
+                    : `<i class="fa-solid fa-building flag-icon-muted"></i> ${escapeHtml(getBuildingSiteName(bldg))}`;
                 return renderBuildingActionRow(
                     bldg,
-                    `<i class="fa-solid fa-door-open flag-icon-muted"></i> ${escapeHtml(formatDongRowLabel(bldg))}`,
-                    `${escapeHtml(typeLabel)} · ${escapeHtml(bldg.address || '주소 미등록')} · ${floorCount}`
-                    ,
-                    'building-row-dong'
+                    title,
+                    `${escapeHtml(typeLabel)} · ${escapeHtml(bldg.address || '주소 미등록')} · ${floorCount}`,
+                    multiDong ? 'building-row-dong' : 'building-row-dong building-row-single'
                 );
             }).join('');
             bindBuildingRowActions();
@@ -3702,19 +3707,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     window.openDashboardRoundDongs = function(siteKey, roundKey) {
         if (!siteKey || !roundKey) return;
-        // 단일 건물 현장: 동 선택 단계를 건너뛰고 바로 점검 진입
-        if (!isSiteMultiDong(siteKey)) {
-            const peers = filterActiveBuildings(window.state.buildings || [], window.state.deletedBuildingIds)
-                .filter((b) => getBuildingSiteName(b) === siteKey && getBuildingSurveyRoundKey(b) === roundKey);
-            if (peers.length === 1) {
-                window.state.dashboardSiteKey = siteKey;
-                window.state.dashboardRoundKey = null;
-                if (typeof window.selectBuildingAndInspect === 'function') {
-                    window.selectBuildingAndInspect(peers[0]);
-                }
-                return;
-            }
-        }
+        // 회차 → 점검/수정/도면 버튼이 있는 화면으로 진입 (단일 건물도 바로 점검 점프하지 않음)
         window.state.dashboardSiteKey = siteKey;
         window.state.dashboardRoundKey = roundKey;
         window.renderDashboard();
