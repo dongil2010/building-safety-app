@@ -32,7 +32,7 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <meta name="apple-mobile-web-app-title" content="스마트 안전점검">
-    <link rel="stylesheet" href="styles.css?v=20260827_crack_w_lines">
+    <link rel="stylesheet" href="styles.css?v=20260827_list_compact">
     <!-- FontAwesome icons for clean engineering UI -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <!-- PDF 생성용: 페이지별로 직접 캡처해서 조립(큰 보고서에서 html2pdf 한방 렌더링이 캔버스 높이 한계로
@@ -205,9 +205,8 @@
         <section id="tab-map" class="tab-content">
             <div class="inspect-layout">
 
-                <!-- LEFT: 등록된 결함 빠른 목록 -->
+                <!-- LEFT: 결함 빠른 목록 -->
                 <aside class="inspect-sidebar-left">
-                    <h4 class="inspect-sidebar-title"><i class="fa-solid fa-list-check"></i> 등록된 결함 목록</h4>
                     <div id="defectListSummary" class="defect-list-summary"></div>
                     <div id="defectListPanel" class="defect-list-panel"></div>
                 </aside>
@@ -2429,7 +2428,7 @@
     <script src="js/shared/report.js?v=20260827_overview"></script>
     <script src="js/shared/hwpx-import.js?v=20260825_hwpxin"></script>
     <script src="js/shared/auth.js?v=20260821_land1"></script>
-    <script src="app.js?v=20260827_crack_w_lines"></script>
+    <script src="app.js?v=20260827_list_compact"></script>
     <script>
         window.BSA_APP_VERSION = '20260826_mem1';
         (function () {

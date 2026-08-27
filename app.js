@@ -13120,22 +13120,23 @@ document.addEventListener('DOMContentLoaded', () => {
                 // 계단·기타 등은 양쪽이 켜져야 보이며, 건수 배지에는 넣지 않음
             });
             const openingCrackCount = allFloorDefects.filter(d => !!d.isOpeningCrack).length;
+            // 목록 상단 공간 절약: 짧은 라벨 + "N건" 생략
             const catMeta = [
-                { label: '기둥·벽체', key: 'columnWall', className: 'cat-structural', count: counts.columnWall },
-                { label: '보·슬래브', key: 'beamSlab', className: 'cat-structural-beam', count: counts.beamSlab },
-                { label: '비구조체', key: 'nonStructural', className: 'cat-nonstructural', count: counts.nonStructural },
-                { label: '마감재', key: 'finishing', className: 'cat-finishing', count: counts.finishing }
+                { label: '기둥·벽', short: '기둥·벽', key: 'columnWall', className: 'cat-structural', count: counts.columnWall },
+                { label: '보·슬래브', short: '보·슬', key: 'beamSlab', className: 'cat-structural-beam', count: counts.beamSlab },
+                { label: '비구조체', short: '비구조', key: 'nonStructural', className: 'cat-nonstructural', count: counts.nonStructural },
+                { label: '마감재', short: '마감', key: 'finishing', className: 'cat-finishing', count: counts.finishing }
             ];
-            let html = `<span>결함 ${allFloorDefects.length}건</span>`;
+            let html = `<span class="defect-summary-total">${allFloorDefects.length}</span>`;
             catMeta.forEach(meta => {
                 const on = isCategoryFilterOn(meta.key);
                 const offClass = on ? '' : ' is-off';
-                html += `<button type="button" class="defect-summary-badge ${meta.className}${offClass}" data-cat-filter="${meta.key}" title="${meta.label} 도면 표시 ${on ? '끄기' : '켜기'}">${meta.label} ${meta.count}건</button>`;
+                html += `<button type="button" class="defect-summary-badge ${meta.className}${offClass}" data-cat-filter="${meta.key}" title="${meta.label} ${meta.count}건 · 도면 표시 ${on ? '끄기' : '켜기'}"><span class="defect-summary-label">${meta.short}</span><span class="defect-summary-count">${meta.count}</span></button>`;
             });
             {
                 const openOn = window.state.showOpeningCracks !== false;
                 const openOff = openOn ? '' : ' is-off';
-                html += `<button type="button" class="defect-summary-badge cat-opening-crack${openOff}" data-opening-crack-filter="1" title="개구부 균열 표시 ${openOn ? '끄기' : '켜기'}">개구부 균열 ${openingCrackCount}건</button>`;
+                html += `<button type="button" class="defect-summary-badge cat-opening-crack${openOff}" data-opening-crack-filter="1" title="개구부 균열 ${openingCrackCount}건 · 표시 ${openOn ? '끄기' : '켜기'}"><span class="defect-summary-label">개구</span><span class="defect-summary-count">${openingCrackCount}</span></button>`;
             }
             summaryEl.innerHTML = html;
             summaryEl.querySelectorAll('[data-cat-filter]').forEach(btn => {
@@ -13160,7 +13161,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (defects.length === 0 && (!showPrevRoundRegister || unregisteredItems.length === 0)) {
             if (allFloorDefects.length > 0) {
-                panel.innerHTML = '<div class="defect-list-empty">표시 중인 분류가 없습니다.<br>위 기둥·벽체 / 보·슬래브 / 비구조체 / 마감재 버튼을 켜 주세요.</div>';
+                panel.innerHTML = '<div class="defect-list-empty">표시 중인 분류가 없습니다.<br>위 분류 버튼을 켜 주세요.</div>';
             } else {
                 panel.innerHTML = '<div class="defect-list-empty">아직 등록된 결함이 없습니다.<br>도면에서 핀을 찍어보세요.</div>';
             }
