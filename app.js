@@ -27415,6 +27415,15 @@ document.addEventListener('DOMContentLoaded', () => {
                     crackLength: isGood ? '' : crackLengthRaw,
                     isProgress: isGood ? false : resolveImportFlag(progressRaw),
                     isLeak: isGood ? false : resolveImportFlag(leakRaw),
+                    isOpeningCrack: isGood
+                        ? false
+                        : detectImportOpeningCrack({
+                            location: locationRaw || `${floorCode} ${componentRaw}`,
+                            defectType,
+                            component: componentRaw,
+                            size: sizeRaw,
+                            isGood
+                        }),
                     photos: [],
                     inspectorName: window.state.userName || ''
                 };
