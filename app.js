@@ -21294,8 +21294,14 @@ document.addEventListener('DOMContentLoaded', () => {
             window._pendingMapRegisterDefectId = null;
             if (typeof renderDefectListPanel === 'function') renderDefectListPanel();
         }
-        if (mode !== 'AREA') {
-            pendingAreaPoly = null;
+        // 영역 모드를 벗어날 때: 그리던 다각형이 있으면 그 모양으로 저장 (점 취소 없음)
+        if (mode !== 'AREA' && pendingAreaPoly && pendingAreaPoly.length) {
+            if (pendingAreaPoly.length >= 3) {
+                finishPendingAreaPolygon({ skipModeSwitch: true });
+            } else {
+                pendingAreaPoly = null;
+                window.showToast?.('다각형은 점 3개 이상일 때 저장됩니다.', 'info', 2500);
+            }
         }
         if (mode === 'MARK' || mode === 'AREA') {
             state.areaInkTool = null;
@@ -21325,11 +21331,12 @@ document.addEventListener('DOMContentLoaded', () => {
         return getCurrentFloorDefects().find((d) => ids.includes(d.id) && d.shapeType === 'area' && d.areaX1 !== undefined) || null;
     }
 
-    function finishPendingAreaPolygon() {
+    function finishPendingAreaPolygon(options) {
+        const skipModeSwitch = !!(options && options.skipModeSwitch);
         if (!pendingAreaPoly || pendingAreaPoly.length < 3) {
             pendingAreaPoly = null;
             drawCanvas();
-            return;
+            return false;
         }
         const pts = pendingAreaPoly.map((p) => ({ x: p.x, y: p.y }));
         pendingAreaPoly = null;
@@ -21344,8 +21351,9 @@ document.addEventListener('DOMContentLoaded', () => {
             areaAngle: 0,
             areaPoints: pts
         });
-        setDrawMode('PAN');
+        if (!skipModeSwitch) setDrawMode('PAN');
         drawCanvas();
+        return true;
     }
 
     function syncAreaToolPanelUi() {
@@ -21481,17 +21489,32 @@ document.addEventListener('DOMContentLoaded', () => {
         if (window.state.currentTab !== 'tab-map') return;
         if (k === 'escape') {
             e.preventDefault();
-            // 다각형 그리는 중: 전체 삭제가 아니라 마지막 점만 취소
+            // 다각형 그리는 중: 마지막 점 취소가 아니라, 지금까지 찍은 모양으로 저장
             if (pendingAreaPoly && pendingAreaPoly.length) {
-                pendingAreaPoly.pop();
-                if (!pendingAreaPoly.length) pendingAreaPoly = null;
-                drawCanvas();
+                if (pendingAreaPoly.length >= 3) {
+                    finishPendingAreaPolygon();
+                } else {
+                    window.showToast?.('다각형은 점 3개 이상일 때 저장됩니다. 점을 더 찍어 주세요.', 'info', 2800);
+                }
                 return;
             }
             if (pendingInkPoly && pendingInkPoly.points && pendingInkPoly.points.length) {
-                pendingInkPoly.points.pop();
-                if (!pendingInkPoly.points.length) pendingInkPoly = null;
-                drawCanvas();
+                if (pendingInkPoly.points.length >= 3) {
+                    const target = getCurrentFloorDefects().find((d) => d.id === pendingInkPoly.defectId);
+                    if (target) {
+                        if (typeof pushDefectHistory === 'function') pushDefectHistory();
+                        if (!Array.isArray(target.areaDrawings)) target.areaDrawings = [];
+                        target.areaDrawings.push({
+                            type: 'polygon',
+                            points: pendingInkPoly.points.map((p) => ({ x: p.x, y: p.y }))
+                        });
+                        pendingInkPoly = null;
+                        saveStateToLocalStorage();
+                        drawCanvas();
+                        return;
+                    }
+                }
+                window.showToast?.('내부 다각형은 점 3개 이상일 때 저장됩니다.', 'info', 2500);
                 return;
             }
             if (state.areaInkTool) {
