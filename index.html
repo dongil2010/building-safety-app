@@ -32,7 +32,7 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <meta name="apple-mobile-web-app-title" content="스마트 안전점검">
-    <link rel="stylesheet" href="styles.css?v=20260827_site_nav">
+    <link rel="stylesheet" href="styles.css?v=20260827_home_gear">
     <!-- FontAwesome icons for clean engineering UI -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <!-- PDF 생성용: 페이지별로 직접 캡처해서 조립(큰 보고서에서 html2pdf 한방 렌더링이 캔버스 높이 한계로
@@ -127,7 +127,7 @@
         <section id="tab-home" class="tab-content active" style="display: flex !important;">
             <div class="dashboard-wrapper">
                 
-                <!-- Hero Header with Add Building Button -->
+                <!-- Hero Header: 제목 + 설정(톱니바퀴) -->
                 <div class="dashboard-hero">
                     <div class="hero-text">
                         <span class="hero-badge" id="appVersionBadge">
@@ -135,36 +135,41 @@
                         </span>
                         <h2 class="hero-title" style="margin-top: 0.4rem;">🏢 점검 대상 건축물 목록</h2>
                     </div>
-                    <div class="hero-actions">
+                    <div class="hero-toolbar">
+                        <button type="button" class="home-settings-btn" id="btnHomeSettings" title="설정" aria-label="설정" aria-expanded="false" aria-controls="homeSettingsPanel">
+                            <i class="fa-solid fa-gear"></i>
+                        </button>
+                    </div>
+                </div>
+
+                <div id="homeSettingsPanel" class="home-settings-panel" hidden>
+                    <div class="home-settings-panel-inner">
                         <div class="hero-company-row">
                             <span class="hero-company-label"><i class="fa-solid fa-building-user"></i> 🏢 점검 수행회사:</span>
                             <input type="text" id="inputHomeCompanyName" class="form-control hero-company-input" placeholder="(주)한국안전진단기술원" value="(주)한국안전진단기술원">
                             <button type="button" id="btnSaveHomeCompanyName" class="btn btn-sm btn-primary hero-company-save"><i class="fa-solid fa-floppy-disk"></i> 저장</button>
                         </div>
-                        <button type="button" class="btn btn-outline pc-only-chrome hero-btn-backup" id="btnExportJSON">
-                            <i class="fa-solid fa-file-export"></i> 💾 데이터 백업 (.json)
-                        </button>
-                        <button type="button" class="btn btn-outline pc-only-chrome hero-btn-import" id="btnImportJSON">
-                            <i class="fa-solid fa-file-import"></i> 📥 백업 불러오기 (.json)
-                        </button>
-                        <input type="file" id="inputImportJSON" accept=".json" style="display:none;">
-                        <button type="button" class="btn btn-outline btn-hero-refresh" id="btnReloadWebApp" title="서버에서 최신 화면을 다시 불러옵니다">
-                            <i class="fa-solid fa-rotate"></i> 새로고침
-                        </button>
-                        <button type="button" class="btn btn-outline hero-btn-clear-pdf-cache" id="btnClearPdfCache" title="기기에 저장된 PDF 원본 캐시만 삭제 (서버·화면용 4000px 도면은 유지, 필요 시 서버에서 다시 받음)">
-                            <i class="fa-solid fa-eraser"></i> PDF 캐시 지우기
-                        </button>
-                        <button type="button" class="btn btn-outline pc-only-chrome hero-btn-purge" id="btnPurgeDeletedCodes" title="전원 동기화 확인 후에만 — 삭제 tombstone을 비워 고유코드 재사용">
-                            <i class="fa-solid fa-recycle"></i> 삭제 코드 정리
-                        </button>
-                        <button type="button" class="btn btn-outline hero-btn-phone" id="btnTriggerPhoneRelay">
-                            <i class="fa-solid fa-mobile-screen-button"></i> 📱 휴대폰으로 촬영해서 바로 받기
-                        </button>
-                        <button type="button" class="btn btn-primary btn-hero-cta" id="btnOpenAddBuildingModal">
-                            <i class="fa-solid fa-plus"></i> ➕ 신규 건축물 등록
-                        </button>
-
-                        <!-- User Profile Badge & Logout -->
+                        <div class="home-settings-actions">
+                            <button type="button" class="btn btn-outline pc-only-chrome hero-btn-backup" id="btnExportJSON">
+                                <i class="fa-solid fa-file-export"></i> 💾 데이터 백업 (.json)
+                            </button>
+                            <button type="button" class="btn btn-outline pc-only-chrome hero-btn-import" id="btnImportJSON">
+                                <i class="fa-solid fa-file-import"></i> 📥 백업 불러오기 (.json)
+                            </button>
+                            <input type="file" id="inputImportJSON" accept=".json" style="display:none;">
+                            <button type="button" class="btn btn-outline btn-hero-refresh" id="btnReloadWebApp" title="서버에서 최신 화면을 다시 불러옵니다">
+                                <i class="fa-solid fa-rotate"></i> 새로고침
+                            </button>
+                            <button type="button" class="btn btn-outline hero-btn-clear-pdf-cache" id="btnClearPdfCache" title="기기에 저장된 PDF 원본 캐시만 삭제 (서버·화면용 4000px 도면은 유지, 필요 시 서버에서 다시 받음)">
+                                <i class="fa-solid fa-eraser"></i> PDF 캐시 지우기
+                            </button>
+                            <button type="button" class="btn btn-outline pc-only-chrome hero-btn-purge" id="btnPurgeDeletedCodes" title="전원 동기화 확인 후에만 — 삭제 tombstone을 비워 고유코드 재사용">
+                                <i class="fa-solid fa-recycle"></i> 삭제 코드 정리
+                            </button>
+                            <button type="button" class="btn btn-outline hero-btn-phone" id="btnTriggerPhoneRelay">
+                                <i class="fa-solid fa-mobile-screen-button"></i> 📱 휴대폰으로 촬영해서 바로 받기
+                            </button>
+                        </div>
                         <div id="headerUserProfileGroup" class="hero-user-group">
                             <span id="userProfileText" class="hero-user-name">
                                 <i class="fa-solid fa-user-shield"></i> <span id="lblUserCompany">(주)한국안전진단기술원</span> (<span id="lblUserName">홍길동</span>)
@@ -2421,7 +2426,7 @@
     <script src="js/tabs/registry.js?v=20260826_bsafix"></script>
     <script src="js/pdf-vector-bridge.js?v=20260827_area_ink"></script>
     <script src="js/core/layout-mode.js?v=20260827_tablet"></script>
-    <script src="js/tabs/home.js?v=20260827_overview"></script>
+    <script src="js/tabs/home.js?v=20260827_home_gear"></script>
     <script src="js/tabs/map.js?v=20260826_mem1"></script>
     <script src="js/tabs/survey.js?v=20260824_nSub"></script>
     <script src="js/tabs/ndt.js?v=20260822_survey2dScroll"></script>

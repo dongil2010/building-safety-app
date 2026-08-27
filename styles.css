@@ -5538,7 +5538,7 @@ body.auth-gate-active #loginOverlay {
 }
 
 .home-fab-add-building {
-    display: none;
+    display: inline-flex;
     position: fixed;
     right: 1rem;
     bottom: calc(4.5rem + env(safe-area-inset-bottom, 0px));
@@ -5554,6 +5554,10 @@ body.auth-gate-active #loginOverlay {
     cursor: pointer;
     align-items: center;
     justify-content: center;
+}
+
+body:not(.bsa-tab-home) .home-fab-add-building {
+    display: none !important;
 }
 
 .home-fab-add-building:active {
@@ -6318,15 +6322,87 @@ body.auth-gate-active #loginOverlay {
     background-blend-mode: overlay;
     border: 1px solid var(--border-highlight);
     border-radius: var(--radius-lg);
-    padding: 1.5rem 2rem;
+    padding: 1rem 1.25rem;
     display: flex;
     justify-content: space-between;
     align-items: center;
-    gap: 1.5rem;
-    flex-wrap: wrap;
+    gap: 1rem;
+    flex-wrap: nowrap;
     box-shadow: var(--shadow-lg);
     min-width: 0;
     overflow: hidden;
+}
+
+.hero-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-shrink: 0;
+}
+
+.home-settings-btn {
+    width: 2.5rem;
+    height: 2.5rem;
+    border-radius: 999px;
+    border: 1px solid rgba(255, 255, 255, 0.28);
+    background: rgba(255, 255, 255, 0.12);
+    color: #ffffff;
+    font-size: 1.05rem;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition: transform 0.15s ease, background 0.15s ease;
+}
+
+.home-settings-btn:hover,
+.home-settings-btn[aria-expanded="true"] {
+    background: rgba(255, 255, 255, 0.22);
+    transform: rotate(20deg);
+}
+
+.home-settings-panel {
+    margin: -0.5rem 0 0;
+}
+
+.home-settings-panel[hidden] {
+    display: none !important;
+}
+
+.home-settings-panel-inner {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    padding: 0.9rem 1rem;
+    border: 1px solid var(--border-color, #e2e8f0);
+    border-radius: var(--radius-lg, 12px);
+    background: #ffffff;
+    box-shadow: var(--shadow-md, 0 4px 16px rgba(15, 23, 42, 0.08));
+}
+
+.home-settings-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+}
+
+.home-settings-panel .hero-company-row {
+    background: #f8fafc;
+    border-color: #e2e8f0;
+}
+
+.home-settings-panel .hero-company-label {
+    color: #0f172a;
+    text-shadow: none;
+}
+
+.home-settings-panel .hero-user-group {
+    background: #f8fafc;
+    border-color: #e2e8f0;
+}
+
+.home-settings-panel .hero-user-name {
+    color: #334155;
 }
 
 .hero-actions {
@@ -6437,45 +6513,45 @@ body.auth-gate-active #loginOverlay {
     text-shadow: 0 1px 0 #0a0a0a, 1px 0 0 #0a0a0a, -1px 0 0 #0a0a0a;
 }
 
-.dashboard-hero .btn-outline {
+.home-settings-panel .btn-outline {
     background: #f8fafc;
     color: #0f172a;
     border-width: 2px;
     font-weight: 800;
 }
 
-.dashboard-hero .hero-btn-backup,
-.dashboard-hero .btn-hero-refresh {
+.home-settings-panel .hero-btn-backup,
+.home-settings-panel .btn-hero-refresh {
     background: #ecfdf5;
     border-color: #166534;
     color: #14532d;
 }
 
-.dashboard-hero .hero-btn-import {
+.home-settings-panel .hero-btn-import {
     background: #f1f5f9;
     border-color: #1e293b;
     color: #0f172a;
 }
 
-.dashboard-hero .hero-btn-ota {
+.home-settings-panel .hero-btn-ota {
     background: #f5f3ff;
     border-color: #5b21b6;
     color: #4c1d95;
 }
 
-.dashboard-hero .hero-btn-purge {
+.home-settings-panel .hero-btn-purge {
     background: #f5f5f4;
     border-color: #44403c;
     color: #1c1917;
 }
 
-.dashboard-hero .hero-btn-phone {
+.home-settings-panel .hero-btn-phone {
     background: #fefce8;
     border-color: #a16207;
     color: #713f12;
 }
 
-.dashboard-hero .hero-btn-approve {
+.home-settings-panel .hero-btn-approve {
     background: #ecfdf5;
     border-color: #047857;
     color: #064e3b;
@@ -6483,7 +6559,7 @@ body.auth-gate-active #loginOverlay {
     padding: 0.15rem 0.55rem;
 }
 
-.dashboard-hero .hero-btn-logout {
+.home-settings-panel .hero-btn-logout {
     background: #fef2f2;
     border-color: #b91c1c;
     color: #7f1d1d;
@@ -6491,11 +6567,11 @@ body.auth-gate-active #loginOverlay {
     padding: 0.15rem 0.55rem;
 }
 
-.dashboard-hero .hero-user-name {
+.home-settings-panel .hero-user-name {
     font-size: 0.83rem;
     font-weight: 800;
-    color: #ffffff;
-    text-shadow: 0 1px 0 #0a0a0a, 1px 0 0 #0a0a0a, 0 -1px 0 #0a0a0a, -1px 0 0 #0a0a0a;
+    color: #334155;
+    text-shadow: none;
 }
 
 .btn-hero-cta {
@@ -6834,6 +6910,13 @@ body.auth-gate-active #loginOverlay {
 
 .building-row-site .building-row-info {
     cursor: pointer;
+}
+
+.building-row-site .building-row-rounds {
+    display: block;
+    margin-top: 0.2rem;
+    color: #475569;
+    font-weight: 600;
 }
 
 .building-row-round .building-row-name {
@@ -7679,36 +7762,25 @@ body.auth-gate-active #loginOverlay {
 
     /* 홈: 현장용 — 건물 선택만 */
     #tab-home .dashboard-hero {
-        padding: 0.55rem 0.65rem;
-        flex-direction: column;
-        align-items: stretch;
+        padding: 0.55rem 0.75rem;
+        flex-direction: row;
+        align-items: center;
         gap: 0.65rem;
     }
 
     #tab-home .hero-text {
-        width: 100%;
+        width: auto;
+        flex: 1 1 auto;
         min-width: 0;
     }
 
-    #tab-home .hero-actions {
-        width: 100%;
-        gap: 0.45rem;
+    #tab-home .home-settings-panel-inner {
+        padding: 0.75rem;
     }
 
-    #tab-home .hero-company-row {
-        flex: 1 1 100%;
-        width: 100%;
-    }
-
-    #tab-home .hero-company-input {
-        flex: 1 1 100%;
-        width: 100%;
-    }
-
-    #tab-home .hero-actions > .btn:not(.btn-sm) {
+    #tab-home .home-settings-actions > .btn {
         flex: 1 1 calc(50% - 0.25rem);
         min-width: 0;
-        max-width: 100%;
         justify-content: center;
         font-size: 0.72rem;
         padding: 0.45rem 0.5rem;
@@ -7717,17 +7789,10 @@ body.auth-gate-active #loginOverlay {
         text-align: center;
     }
 
-    #tab-home #btnTriggerPhoneRelay,
-    #tab-home #btnOpenAddBuildingModal,
-    #tab-home .hero-user-group {
+    #tab-home .home-settings-actions #btnTriggerPhoneRelay,
+    #tab-home .home-settings-panel .hero-user-group {
         flex: 1 1 100%;
         width: 100%;
-    }
-
-    #tab-home #btnOpenAddBuildingModal {
-        font-size: 0.88rem;
-        padding: 0.7rem 0.8rem;
-        font-weight: 800;
     }
 
     #tab-home .building-row {
@@ -7882,6 +7947,7 @@ body.auth-gate-active #loginOverlay {
 
     #tab-home .home-fab-add-building {
         display: inline-flex;
+        bottom: calc(4.5rem + env(safe-area-inset-bottom, 0px));
     }
 
     .add-mode-label-long { display: none; }

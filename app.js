@@ -3046,24 +3046,18 @@ document.addEventListener('DOMContentLoaded', () => {
 
             grid.innerHTML = siteKeys.map((siteKey) => {
                 const rounds = siteMap.get(siteKey) || [];
-                const latest = rounds[0];
-                const addr = (latest && latest.address) || '주소 미등록';
-                const roundCount = rounds.length;
-                const roundHint = roundCount === 1
-                    ? formatSurveyRoundLabel(getBuildingSurveyRoundKey(latest))
-                    : `회차 ${roundCount}건`;
+                const roundLabels = rounds
+                    .map((b) => formatSurveyRoundLabel(getBuildingSurveyRoundKey(b)))
+                    .filter(Boolean);
+                const roundHint = roundLabels.length
+                    ? roundLabels.join(' · ')
+                    : '등록된 회차 없음';
                 const safeSite = escapeHtml(siteKey);
                 return `
                     <div class="building-row building-row-site" data-site-key="${safeSite}">
                         <div class="building-row-info" data-action="open-site" data-site-key="${safeSite}">
                             <span class="building-row-name"><i class="fa-solid fa-building flag-icon-muted"></i> ${safeSite}</span>
-                            <span class="building-row-meta">${escapeHtml(addr)} · ${escapeHtml(roundHint)}</span>
-                        </div>
-                        <div class="building-row-actions">
-                            <button type="button" class="icon-btn icon-btn-start" title="회차 선택" data-action="open-site" data-site-key="${safeSite}">
-                                <i class="fa-solid fa-calendar-days"></i>
-                                <span class="icon-btn-label">회차</span>
-                            </button>
+                            <span class="building-row-meta building-row-rounds">${escapeHtml(roundHint)}</span>
                         </div>
                     </div>
                 `;
@@ -3130,6 +3124,27 @@ document.addEventListener('DOMContentLoaded', () => {
     if (btnDashboardBackSites) {
         btnDashboardBackSites.addEventListener('click', () => window.closeDashboardSiteRounds());
     }
+
+    (function bindHomeSettingsPanel() {
+        const btn = document.getElementById('btnHomeSettings');
+        const panel = document.getElementById('homeSettingsPanel');
+        if (!btn || !panel) return;
+        const setOpen = (open) => {
+            panel.hidden = !open;
+            btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+            const icon = btn.querySelector('i');
+            if (icon) icon.className = open ? 'fa-solid fa-xmark' : 'fa-solid fa-gear';
+        };
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            setOpen(!!panel.hidden);
+        });
+        document.addEventListener('click', (e) => {
+            if (panel.hidden) return;
+            if (panel.contains(e.target) || btn.contains(e.target)) return;
+            setOpen(false);
+        });
+    })();
 
     window.selectBuildingAndInspect = async function(bldgOrId) {
         if (!window.state.buildings) window.state.buildings = [];
