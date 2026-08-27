@@ -13850,8 +13850,17 @@ document.addEventListener('DOMContentLoaded', () => {
         } catch (_e) { /* ignore */ }
         applyMapDefectListChrome();
         if (typeof resizeCanvas === 'function') resizeCanvas();
+        // 끄면 현재 선택된(하이라이트) 마킹만 남기고, 켜면 전체+하이라이트로 복귀
         if (typeof drawCanvas === 'function') drawCanvas();
         if (typeof renderDefectListPanel === 'function') renderDefectListPanel();
+        if (!open) {
+            const n = (typeof window.getSelectedDefectIds === 'function' && window.getSelectedDefectIds())
+                ? window.getSelectedDefectIds().size
+                : 0;
+            if (n > 0) {
+                window.showToast('선택 마킹만 표시 중 · 빈 곳 탭하면 전체 다시 표시', 'info', 2800);
+            }
+        }
     };
 
     window.toggleMapDefectList = function() {
@@ -15161,7 +15170,8 @@ document.addEventListener('DOMContentLoaded', () => {
         strokeAreaShape(ctx, defect);
 
         const selected = !isPreview && !forReport && defect.id
-            && typeof selectedDefectIds !== 'undefined' && selectedDefectIds.has(defect.id);
+            && typeof selectedDefectIds !== 'undefined' && selectedDefectIds.has(defect.id)
+            && shouldDrawMapSelectionChrome();
         if (selected) {
             ctx.setLineDash([]);
             ctx.fillStyle = '#1e293b';
@@ -15635,8 +15645,9 @@ document.addEventListener('DOMContentLoaded', () => {
         // fill=false: 투명 내부 + 마킹색 네모 테두리 / fill=true: 기존 채우기
         paintPinBox(ctx, w, h, shapeCfg, activeColor, scale, roundLineMul, isBeingDragged);
 
-        // 마퀴/클릭 선택 강조
-        if (defect.id && typeof selectedDefectIds !== 'undefined' && selectedDefectIds.has(defect.id)) {
+        // 마퀴/클릭 선택 강조 (조사항목 창 ON일 때만 — OFF면 해당 마킹만 단독 표시)
+        if (defect.id && typeof selectedDefectIds !== 'undefined' && selectedDefectIds.has(defect.id)
+            && shouldDrawMapSelectionChrome()) {
             ctx.save();
             ctx.strokeStyle = '#6b6b6b';
             ctx.lineWidth = Math.max(2, 2.4 * scale);
