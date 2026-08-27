@@ -19708,7 +19708,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
                 if (typeof saveStateToLocalStorage === 'function') saveStateToLocalStorage();
                 if (typeof uploadOverviewPhotos === 'function') uploadOverviewPhotos(bldg);
-                if (typeof renderOverviewPhotosList === 'function') renderOverviewPhotosList();
+                if (typeof renderOverviewPhotosList === 'function') renderOverviewPhotosList({ force: true });
                 window.showToast('휴대폰에서 사진을 받아 전경사진에 추가했습니다.', 'success');
                 updatePhoneRelayButtonLabel();
                 return;
@@ -27729,9 +27729,29 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    function renderOverviewPhotosList() {
+    function flushOverviewCaptionsFromDom() {
+        if (!isOverviewPhotosModalOpen()) return;
+        const bldgId = window._overviewPhotosBuildingId;
+        const bldg = (window.state.buildings || []).find((b) => b.id === bldgId);
+        if (!bldg) return;
+        const list = getBuildingOverviewPhotos(bldg);
+        document.querySelectorAll('#overviewPhotosList .overview-photo-caption').forEach((input) => {
+            const id = input.getAttribute('data-overview-id');
+            const item = list.find((x) => x.id === id);
+            if (item) item.caption = input.value;
+        });
+    }
+
+    function renderOverviewPhotosList(options = {}) {
         const listEl = document.getElementById('overviewPhotosList');
         if (!listEl) return;
+        const force = !!(options && options.force);
+        const active = document.activeElement;
+        // 캡션 입력 중 전체 리렌더하면 한글 IME·타이핑 내용이 날아감
+        if (!force && active && active.classList && active.classList.contains('overview-photo-caption')
+            && listEl.contains(active)) {
+            return;
+        }
         const bldgId = window._overviewPhotosBuildingId;
         const bldg = (window.state.buildings || []).find((b) => b.id === bldgId);
         const titleEl = document.getElementById('overviewPhotosModalTitle');
@@ -27758,28 +27778,77 @@ document.addEventListener('DOMContentLoaded', () => {
             `;
         }).join('');
 
+        const findLiveOverviewItem = (photoId) => {
+            const liveBldg = (window.state.buildings || []).find((b) => b.id === window._overviewPhotosBuildingId);
+            if (!liveBldg || !photoId) return null;
+            return getBuildingOverviewPhotos(liveBldg).find((x) => x.id === photoId) || null;
+        };
+            const persistOverviewCaptionNow = (syncCloud) => {
+                if (typeof saveStateToLocalStorage !== 'function') return;
+                if (syncCloud) {
+                    saveStateToLocalStorage();
+                    const liveBldg = (window.state.buildings || []).find((b) => b.id === window._overviewPhotosBuildingId);
+                    if (liveBldg) uploadOverviewPhotos(liveBldg);
+                } else {
+                    const prev = _suppressSyncOnSave;
+                    try {
+                        _suppressSyncOnSave = true;
+                        saveStateToLocalStorage();
+                    } finally {
+                        _suppressSyncOnSave = prev;
+                    }
+                }
+            };
+        let captionSaveTimer = null;
+        const scheduleCaptionLocalSave = () => {
+            if (captionSaveTimer) clearTimeout(captionSaveTimer);
+            captionSaveTimer = setTimeout(() => persistOverviewCaptionNow(false), 450);
+        };
+
         listEl.querySelectorAll('.overview-photo-caption').forEach((input) => {
-            input.addEventListener('input', () => {
+            const applyCaptionFromInput = () => {
                 const id = input.getAttribute('data-overview-id');
-                const item = list.find((x) => x.id === id);
+                const item = findLiveOverviewItem(id);
                 if (!item) return;
                 item.caption = input.value;
-                if (typeof saveStateToLocalStorage === 'function') saveStateToLocalStorage();
+            };
+            input.addEventListener('input', () => {
+                applyCaptionFromInput();
+                // 조합 중(한글 IME)에는 저장/동기화로 DOM을 건드리지 않음
+                if (input.isComposing || input.composing) return;
+                scheduleCaptionLocalSave();
+            });
+            input.addEventListener('compositionend', () => {
+                applyCaptionFromInput();
+                scheduleCaptionLocalSave();
             });
             input.addEventListener('change', () => {
-                if (typeof saveStateToLocalStorage === 'function') saveStateToLocalStorage();
-                if (bldg) uploadOverviewPhotos(bldg);
+                applyCaptionFromInput();
+                if (captionSaveTimer) {
+                    clearTimeout(captionSaveTimer);
+                    captionSaveTimer = null;
+                }
+                persistOverviewCaptionNow(true);
+            });
+            input.addEventListener('blur', () => {
+                applyCaptionFromInput();
+                if (captionSaveTimer) {
+                    clearTimeout(captionSaveTimer);
+                    captionSaveTimer = null;
+                }
+                persistOverviewCaptionNow(true);
             });
         });
         listEl.querySelectorAll('[data-action="delete-overview"]').forEach((btn) => {
             btn.addEventListener('click', async () => {
                 const id = btn.getAttribute('data-overview-id');
-                if (!id || !bldg) return;
+                const liveBldg = (window.state.buildings || []).find((b) => b.id === window._overviewPhotosBuildingId);
+                if (!id || !liveBldg) return;
                 if (!confirm('이 전경사진을 삭제할까요?')) return;
-                bldg.overviewPhotos = getBuildingOverviewPhotos(bldg).filter((p) => p.id !== id);
-                await deleteOverviewPhotoStorage(bldg.id, id);
+                liveBldg.overviewPhotos = getBuildingOverviewPhotos(liveBldg).filter((p) => p.id !== id);
+                await deleteOverviewPhotoStorage(liveBldg.id, id);
                 if (typeof saveStateToLocalStorage === 'function') saveStateToLocalStorage();
-                renderOverviewPhotosList();
+                renderOverviewPhotosList({ force: true });
                 if (typeof window.showToast === 'function') window.showToast('전경사진을 삭제했습니다.', 'info');
             });
         });
@@ -27804,9 +27873,9 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!modal) return;
         modal.style.display = 'flex';
         modal.classList.add('open');
-        renderOverviewPhotosList();
+        renderOverviewPhotosList({ force: true });
         await hydrateBuildingOverviewPhotos(bldg);
-        renderOverviewPhotosList();
+        renderOverviewPhotosList({ force: true });
     }
     window.openOverviewPhotosModal = openOverviewPhotosModal;
     window.closeOverviewPhotosModal = closeOverviewPhotosModal;
@@ -27838,7 +27907,7 @@ document.addEventListener('DOMContentLoaded', () => {
         window._photoCache[key] = dataUrl;
         if (typeof saveStateToLocalStorage === 'function') saveStateToLocalStorage();
         uploadOverviewPhotos(bldg);
-        renderOverviewPhotosList();
+        renderOverviewPhotosList({ force: true });
         if (typeof window.showToast === 'function') window.showToast('전경사진을 추가했습니다. 아래에 설명을 입력하세요.', 'success');
     }
 
