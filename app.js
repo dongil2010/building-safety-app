@@ -2066,12 +2066,12 @@ document.addEventListener('DOMContentLoaded', () => {
         return (buildings || []).filter(b => b?.id && !del.has(b.id));
     }
 
-    /** 현장(정규화 명칭) 기준 남은 활성 회차 수 */
+    /** 현장(정규화 명칭) 기준 남은 활성 점검(동×회차) 수 */
     function countActiveBuildingsForSiteKey(siteKey, buildings, deletedIds) {
         const key = String(siteKey || '').trim();
         if (!key) return 0;
         return filterDeletedBuildings(buildings || [], deletedIds)
-            .filter((b) => normalizeSiteVaultKey(b.name) === key).length;
+            .filter((b) => getBuildingSiteName(b) === key).length;
     }
 
     /**
@@ -3130,6 +3130,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         const allBldgs = filterDeletedBuildings(window.state.buildings, window.state.deletedBuildingIds);
+        allBldgs.forEach(ensureBuildingSiteFields);
         const term = (window.state.buildingSearchTerm || '').trim().toLowerCase();
         const siteNav = document.getElementById('dashboardSiteNav');
         const siteNavTitle = document.getElementById('dashboardSiteNavTitle');
@@ -3139,9 +3140,11 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!term) return true;
             const name = (b.name || '').toLowerCase();
             const addr = (b.address || '').toLowerCase();
-            const site = normalizeSiteVaultKey(b.name).toLowerCase();
+            const site = getBuildingSiteName(b).toLowerCase();
+            const dong = getBuildingDongLabel(b).toLowerCase();
             const round = formatSurveyRoundLabel(getBuildingSurveyRoundKey(b)).toLowerCase();
-            return name.includes(term) || addr.includes(term) || site.includes(term) || round.includes(term);
+            return name.includes(term) || addr.includes(term) || site.includes(term)
+                || dong.includes(term) || round.includes(term);
         };
 
         const filtered = term ? allBldgs.filter(filterBldgByTerm) : allBldgs;
@@ -3149,141 +3152,221 @@ document.addEventListener('DOMContentLoaded', () => {
         const groupBuildingsBySite = (list) => {
             const map = new Map();
             list.forEach((b) => {
-                const key = normalizeSiteVaultKey(b.name);
+                const key = getBuildingSiteName(b);
                 if (!map.has(key)) map.set(key, []);
                 map.get(key).push(b);
-            });
-            map.forEach((rounds) => {
-                rounds.sort((a, b) => {
-                    const ra = getSurveyRoundOrderRank(getBuildingSurveyRoundKey(a));
-                    const rb = getSurveyRoundOrderRank(getBuildingSurveyRoundKey(b));
-                    if (ra != null && rb != null && ra !== rb) return rb - ra;
-                    if (ra != null && rb == null) return -1;
-                    if (ra == null && rb != null) return 1;
-                    return String(b.name || '').localeCompare(String(a.name || ''), 'ko');
-                });
             });
             return map;
         };
 
         const selectedSiteKey = window.state.dashboardSiteKey || null;
+        const selectedRoundKey = window.state.dashboardRoundKey || null;
+        if (selectedSiteKey && selectedRoundKey) {
+            const stillExists = filtered.some((b) =>
+                getBuildingSiteName(b) === selectedSiteKey
+                && getBuildingSurveyRoundKey(b) === selectedRoundKey
+            );
+            if (!stillExists) window.state.dashboardRoundKey = null;
+        }
         if (typeof window.updateHomeFabForDashboardMode === 'function') {
             window.updateHomeFabForDashboardMode();
         }
 
+        const bindBuildingRowActions = () => {
+            grid.querySelectorAll('[data-action="open-site"]').forEach((el) => {
+                el.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    const key = el.getAttribute('data-site-key');
+                    if (key) window.openDashboardSiteRounds(key);
+                });
+            });
+            grid.querySelectorAll('[data-action="open-round"]').forEach((el) => {
+                el.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    const site = el.getAttribute('data-site-key');
+                    const round = el.getAttribute('data-round-key');
+                    if (site && round) window.openDashboardRoundDongs(site, round);
+                });
+            });
+            grid.querySelectorAll('[data-action="inspect"]').forEach((el) => {
+                el.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    const id = el.getAttribute('data-bldg-id');
+                    if (id) window.selectBuildingAndInspect(id);
+                });
+            });
+            grid.querySelectorAll('[data-action="edit"]').forEach((el) => {
+                el.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    const id = el.getAttribute('data-bldg-id');
+                    if (id) window.openEditBuildingModalFunc(id, 'info');
+                });
+            });
+            grid.querySelectorAll('[data-action="drawing"]').forEach((el) => {
+                el.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    const id = el.getAttribute('data-bldg-id');
+                    if (id) window.openEditBuildingModalFunc(id, 'drawing');
+                });
+            });
+            grid.querySelectorAll('[data-action="overview"]').forEach((el) => {
+                el.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    const id = el.getAttribute('data-bldg-id');
+                    if (id && typeof window.openOverviewPhotosModal === 'function') window.openOverviewPhotosModal(id);
+                });
+            });
+        };
+
+        const renderBuildingActionRow = (bldg, titleHtml, metaHtml, rowClass) => {
+            const safeId = escapeHtml(bldg.id);
+            return `
+                <div class="building-row ${rowClass || ''}" data-id="${safeId}">
+                    <div class="building-row-info" data-action="inspect" data-bldg-id="${safeId}">
+                        <span class="building-row-name">${titleHtml}</span>
+                        <span class="building-row-meta">${metaHtml}</span>
+                    </div>
+                    <div class="building-row-actions">
+                        <button type="button" class="icon-btn icon-btn-start" title="이 동 점검 시작" data-action="inspect" data-bldg-id="${safeId}">
+                            <i class="fa-solid fa-map-location-dot"></i>
+                            <span class="icon-btn-label">점검</span>
+                        </button>
+                        <button type="button" class="icon-btn icon-btn-edit" title="건축물 개요 수정" data-action="edit" data-bldg-id="${safeId}">
+                            <i class="fa-solid fa-pen-to-square"></i>
+                            <span class="icon-btn-label">수정</span>
+                        </button>
+                        <button type="button" class="icon-btn icon-btn-drawing" title="도면 추가/교체" data-action="drawing" data-bldg-id="${safeId}">
+                            <i class="fa-solid fa-images"></i>
+                            <span class="icon-btn-label">도면</span>
+                        </button>
+                        <button type="button" class="icon-btn icon-btn-overview" title="전경사진" data-action="overview" data-bldg-id="${safeId}">
+                            <i class="fa-solid fa-panorama"></i>
+                            <span class="icon-btn-label">전경</span>
+                        </button>
+                    </div>
+                </div>
+            `;
+        };
+
+        // ── 3단: 현장 → 회차 → 동 ──
+        if (selectedSiteKey && window.state.dashboardRoundKey) {
+            const roundKey = window.state.dashboardRoundKey;
+            const dongs = filtered.filter((b) =>
+                getBuildingSiteName(b) === selectedSiteKey
+                && getBuildingSurveyRoundKey(b) === roundKey
+            ).sort((a, b) => formatDongRowLabel(a).localeCompare(formatDongRowLabel(b), 'ko'));
+
+            if (siteNav) siteNav.hidden = false;
+            if (siteNavTitle) {
+                siteNavTitle.textContent = `${selectedSiteKey} · ${formatSurveyRoundLabel(roundKey)}`;
+            }
+            if (heroTitle) heroTitle.textContent = '🏢 동 선택';
+
+            if (dongs.length === 0) {
+                grid.innerHTML = `<div class="building-list-empty">${term ? '🔍 검색 결과가 없습니다.' : '이 회차에 등록된 동이 없습니다.'} <button type="button" class="btn btn-sm btn-outline dashboard-back-rounds-inline" style="margin-top:0.6rem;">회차 목록으로</button></div>`;
+                grid.querySelector('.dashboard-back-rounds-inline')?.addEventListener('click', () => window.closeDashboardRoundDongs());
+                return;
+            }
+
+            grid.innerHTML = dongs.map((bldg) => {
+                const floorCount = (bldg.floorsList && bldg.floorsList.length > 0)
+                    ? `📐 도면 ${bldg.floorsList.length}개 층`
+                    : '📐 도면 미등록';
+                const typeLabel = bldg.inspectionType || '점검';
+                return renderBuildingActionRow(
+                    bldg,
+                    `<i class="fa-solid fa-door-open flag-icon-muted"></i> ${escapeHtml(formatDongRowLabel(bldg))}`,
+                    `${escapeHtml(typeLabel)} · ${escapeHtml(bldg.address || '주소 미등록')} · ${floorCount}`
+                    ,
+                    'building-row-dong'
+                );
+            }).join('');
+            bindBuildingRowActions();
+            if (typeof window.updateHomeFabForDashboardMode === 'function') window.updateHomeFabForDashboardMode();
+            return;
+        }
+
         if (selectedSiteKey) {
-            const siteRounds = filtered.filter((b) => normalizeSiteVaultKey(b.name) === selectedSiteKey);
+            const siteBuildings = filtered.filter((b) => getBuildingSiteName(b) === selectedSiteKey);
             if (siteNav) siteNav.hidden = false;
             if (siteNavTitle) siteNavTitle.textContent = selectedSiteKey;
             if (heroTitle) heroTitle.textContent = '📅 점검 회차 선택';
 
-            if (siteRounds.length === 0) {
+            if (siteBuildings.length === 0) {
                 grid.innerHTML = `<div class="building-list-empty">${term ? '🔍 검색 결과가 없습니다.' : '이 현장에 등록된 회차가 없습니다.'} <button type="button" class="btn btn-sm btn-outline dashboard-back-sites-inline" style="margin-top:0.6rem;">현장 목록으로</button></div>`;
                 grid.querySelector('.dashboard-back-sites-inline')?.addEventListener('click', () => window.closeDashboardSiteRounds());
                 return;
             }
 
-            grid.innerHTML = siteRounds.map((bldg) => {
-                const floorCount = (bldg.floorsList && bldg.floorsList.length > 0)
-                    ? `📐 도면 ${bldg.floorsList.length}개 층`
-                    : '📐 도면 미등록';
-                const roundLabel = formatSurveyRoundLabel(getBuildingSurveyRoundKey(bldg));
-                const typeLabel = bldg.inspectionType || '점검';
-                const safeId = escapeHtml(bldg.id);
+            const byRound = new Map();
+            siteBuildings.forEach((b) => {
+                const rk = getBuildingSurveyRoundKey(b) || '_none';
+                if (!byRound.has(rk)) byRound.set(rk, []);
+                byRound.get(rk).push(b);
+            });
+            const roundKeys = [...byRound.keys()].sort((a, b) => {
+                const ra = getSurveyRoundOrderRank(a);
+                const rb = getSurveyRoundOrderRank(b);
+                if (ra != null && rb != null && ra !== rb) return rb - ra;
+                if (ra != null && rb == null) return -1;
+                if (ra == null && rb != null) return 1;
+                return String(b).localeCompare(String(a), 'ko');
+            });
+
+            grid.innerHTML = roundKeys.map((rk) => {
+                const members = byRound.get(rk) || [];
+                const roundLabel = rk === '_none' ? '회차 미지정' : formatSurveyRoundLabel(rk);
+                const typeLabel = members[0]?.inspectionType || '점검';
+                const dongNames = members.map(formatDongRowLabel);
+                const dongHint = members.length > 1
+                    ? `동 ${members.length}개 · ${dongNames.join(', ')}`
+                    : formatDongRowLabel(members[0]);
+                const safeSite = escapeHtml(selectedSiteKey);
+                const safeRound = escapeHtml(rk);
                 return `
-                    <div class="building-row building-row-round" data-id="${safeId}">
-                        <div class="building-row-info" data-action="inspect" data-bldg-id="${safeId}">
+                    <div class="building-row building-row-round" data-round-key="${safeRound}">
+                        <div class="building-row-info" data-action="open-round" data-site-key="${safeSite}" data-round-key="${safeRound}">
                             <span class="building-row-name">${escapeHtml(roundLabel)} · ${escapeHtml(typeLabel)}</span>
-                            <span class="building-row-meta">${escapeHtml(bldg.name || '')} · ${escapeHtml(bldg.address || '주소 미등록')} · ${floorCount}</span>
-                        </div>
-                        <div class="building-row-actions">
-                            <button type="button" class="icon-btn icon-btn-start" title="이 회차 점검 시작" data-action="inspect" data-bldg-id="${safeId}">
-                                <i class="fa-solid fa-map-location-dot"></i>
-                                <span class="icon-btn-label">점검</span>
-                            </button>
-                            <button type="button" class="icon-btn icon-btn-edit" title="건축물 개요 수정" data-action="edit" data-bldg-id="${safeId}">
-                                <i class="fa-solid fa-pen-to-square"></i>
-                                <span class="icon-btn-label">수정</span>
-                            </button>
-                            <button type="button" class="icon-btn icon-btn-drawing" title="도면 추가/교체" data-action="drawing" data-bldg-id="${safeId}">
-                                <i class="fa-solid fa-images"></i>
-                                <span class="icon-btn-label">도면</span>
-                            </button>
-                            <button type="button" class="icon-btn icon-btn-overview" title="전경사진" data-action="overview" data-bldg-id="${safeId}">
-                                <i class="fa-solid fa-panorama"></i>
-                                <span class="icon-btn-label">전경</span>
-                            </button>
+                            <span class="building-row-meta">${escapeHtml(dongHint)}</span>
                         </div>
                     </div>
                 `;
             }).join('');
-        } else {
-            if (siteNav) siteNav.hidden = true;
-            if (heroTitle) heroTitle.textContent = '🏢 점검 대상 건축물 목록';
-
-            const siteMap = groupBuildingsBySite(filtered);
-            const siteKeys = [...siteMap.keys()].sort((a, b) => a.localeCompare(b, 'ko'));
-
-            if (siteKeys.length === 0) {
-                grid.innerHTML = `<div class="building-list-empty">${term ? '🔍 검색 결과가 없습니다.' : '등록된 건축물이 없습니다. 하단 + 버튼으로 현장을 추가하세요.'}</div>`;
-                return;
-            }
-
-            grid.innerHTML = siteKeys.map((siteKey) => {
-                const rounds = siteMap.get(siteKey) || [];
-                const roundLabels = rounds
-                    .map((b) => formatSurveyRoundLabel(getBuildingSurveyRoundKey(b)))
-                    .filter(Boolean);
-                const roundHint = roundLabels.length
-                    ? roundLabels.join(' · ')
-                    : '등록된 회차 없음';
-                const safeSite = escapeHtml(siteKey);
-                return `
-                    <div class="building-row building-row-site" data-site-key="${safeSite}">
-                        <div class="building-row-info" data-action="open-site" data-site-key="${safeSite}">
-                            <span class="building-row-name"><i class="fa-solid fa-building flag-icon-muted"></i> ${safeSite}</span>
-                            <span class="building-row-meta building-row-rounds">${escapeHtml(roundHint)}</span>
-                        </div>
-                    </div>
-                `;
-            }).join('');
+            bindBuildingRowActions();
+            if (typeof window.updateHomeFabForDashboardMode === 'function') window.updateHomeFabForDashboardMode();
+            return;
         }
 
-        grid.querySelectorAll('[data-action="open-site"]').forEach((el) => {
-            el.addEventListener('click', (e) => {
-                e.stopPropagation();
-                const key = el.getAttribute('data-site-key');
-                if (key) window.openDashboardSiteRounds(key);
-            });
-        });
-        grid.querySelectorAll('[data-action="inspect"]').forEach((el) => {
-            el.addEventListener('click', (e) => {
-                e.stopPropagation();
-                const id = el.getAttribute('data-bldg-id');
-                if (id) window.selectBuildingAndInspect(id);
-            });
-        });
-        grid.querySelectorAll('[data-action="edit"]').forEach((el) => {
-            el.addEventListener('click', (e) => {
-                e.stopPropagation();
-                const id = el.getAttribute('data-bldg-id');
-                if (id) window.openEditBuildingModalFunc(id, 'info');
-            });
-        });
-        grid.querySelectorAll('[data-action="drawing"]').forEach((el) => {
-            el.addEventListener('click', (e) => {
-                e.stopPropagation();
-                const id = el.getAttribute('data-bldg-id');
-                if (id) window.openEditBuildingModalFunc(id, 'drawing');
-            });
-        });
-        grid.querySelectorAll('[data-action="overview"]').forEach((el) => {
-            el.addEventListener('click', (e) => {
-                e.stopPropagation();
-                const id = el.getAttribute('data-bldg-id');
-                if (id && typeof window.openOverviewPhotosModal === 'function') window.openOverviewPhotosModal(id);
-            });
-        });
+        if (siteNav) siteNav.hidden = true;
+        if (heroTitle) heroTitle.textContent = '🏢 점검 대상 건축물 목록';
+
+        const siteMap = groupBuildingsBySite(filtered);
+        const siteKeys = [...siteMap.keys()].sort((a, b) => a.localeCompare(b, 'ko'));
+
+        if (siteKeys.length === 0) {
+            grid.innerHTML = `<div class="building-list-empty">${term ? '🔍 검색 결과가 없습니다.' : '등록된 건축물이 없습니다. 하단 + 버튼으로 현장을 추가하세요.'}</div>`;
+            return;
+        }
+
+        grid.innerHTML = siteKeys.map((siteKey) => {
+            const members = siteMap.get(siteKey) || [];
+            const roundSet = new Set(members.map((b) => formatSurveyRoundLabel(getBuildingSurveyRoundKey(b))).filter(Boolean));
+            const dongSet = new Set(members.map(formatDongRowLabel).filter((d) => d && d !== '동 미지정'));
+            const roundHint = roundSet.size
+                ? [...roundSet].join(' · ')
+                : '등록된 회차 없음';
+            const dongHint = dongSet.size > 1 ? ` · 동 ${dongSet.size}개` : (dongSet.size === 1 ? ` · ${[...dongSet][0]}` : '');
+            const safeSite = escapeHtml(siteKey);
+            return `
+                <div class="building-row building-row-site" data-site-key="${safeSite}">
+                    <div class="building-row-info" data-action="open-site" data-site-key="${safeSite}">
+                        <span class="building-row-name"><i class="fa-solid fa-building flag-icon-muted"></i> ${safeSite}</span>
+                        <span class="building-row-meta building-row-rounds">${escapeHtml(roundHint)}${escapeHtml(dongHint)}</span>
+                    </div>
+                </div>
+            `;
+        }).join('');
+        bindBuildingRowActions();
         if (typeof window.updateHomeFabForDashboardMode === 'function') {
             window.updateHomeFabForDashboardMode();
         }
@@ -3292,11 +3375,25 @@ document.addEventListener('DOMContentLoaded', () => {
     window.openDashboardSiteRounds = function(siteKey) {
         if (!siteKey) return;
         window.state.dashboardSiteKey = siteKey;
+        window.state.dashboardRoundKey = null;
         window.renderDashboard();
     };
 
     window.closeDashboardSiteRounds = function() {
         window.state.dashboardSiteKey = null;
+        window.state.dashboardRoundKey = null;
+        window.renderDashboard();
+    };
+
+    window.openDashboardRoundDongs = function(siteKey, roundKey) {
+        if (!siteKey || !roundKey) return;
+        window.state.dashboardSiteKey = siteKey;
+        window.state.dashboardRoundKey = roundKey;
+        window.renderDashboard();
+    };
+
+    window.closeDashboardRoundDongs = function() {
+        window.state.dashboardRoundKey = null;
         window.renderDashboard();
     };
 
@@ -3310,7 +3407,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const btnDashboardBackSites = document.getElementById('btnDashboardBackSites');
     if (btnDashboardBackSites) {
-        btnDashboardBackSites.addEventListener('click', () => window.closeDashboardSiteRounds());
+        btnDashboardBackSites.addEventListener('click', () => {
+            if (window.state.dashboardRoundKey) window.closeDashboardRoundDongs();
+            else window.closeDashboardSiteRounds();
+        });
     }
 
     (function bindHomeSettingsPanel() {
@@ -3949,7 +4049,9 @@ document.addEventListener('DOMContentLoaded', () => {
             const el = document.getElementById(id);
             if (el && val != null) el.value = val;
         };
-        setVal('inputBuildingName', (bldg.name || '').replace(/^🏢\s*/, ''));
+        setVal('inputBuildingSiteName', getBuildingSiteName(bldg));
+        setVal('inputBuildingDong', getBuildingDongLabel(bldg));
+        setVal('inputBuildingName', composeBuildingDisplayName(getBuildingSiteName(bldg), getBuildingDongLabel(bldg)));
         setVal('inputBuildingAddress', bldg.address || '');
         setVal('inputBuildingFloors', bldg.floors || '');
         setVal('inputBuildingStructureType', bldg.structureType || '');
@@ -4560,7 +4662,9 @@ document.addEventListener('DOMContentLoaded', () => {
     const btnMobileFabAddBuilding = document.getElementById('btnMobileFabAddBuilding');
     if (btnMobileFabAddBuilding) {
         btnMobileFabAddBuilding.addEventListener('click', () => {
-            if (window.state.dashboardSiteKey) {
+            if (window.state.dashboardSiteKey && window.state.dashboardRoundKey) {
+                if (typeof window.openAddDongModal === 'function') window.openAddDongModal();
+            } else if (window.state.dashboardSiteKey) {
                 if (typeof window.openAddSurveyRoundModal === 'function') window.openAddSurveyRoundModal();
             } else if (typeof window.openAddBuildingModalFunc === 'function') {
                 window.openAddBuildingModalFunc();
@@ -4580,6 +4684,18 @@ document.addEventListener('DOMContentLoaded', () => {
     if (addSurveyRoundModal) {
         addSurveyRoundModal.addEventListener('click', (e) => {
             if (e.target === addSurveyRoundModal) window.closeAddSurveyRoundModal();
+        });
+    }
+
+    ['btnCloseAddDongModal', 'btnCancelAddDong'].forEach((id) => {
+        const el = document.getElementById(id);
+        if (el) el.addEventListener('click', () => window.closeAddDongModal());
+    });
+    document.getElementById('btnConfirmAddDong')?.addEventListener('click', () => window.confirmAddDongFromHome());
+    const addDongModal = document.getElementById('addDongModal');
+    if (addDongModal) {
+        addDongModal.addEventListener('click', (e) => {
+            if (e.target === addDongModal) window.closeAddDongModal();
         });
     }
 
@@ -4675,13 +4791,18 @@ document.addEventListener('DOMContentLoaded', () => {
     const btnSaveBuilding = document.getElementById('btnSaveBuilding');
     if (btnSaveBuilding) {
         btnSaveBuilding.addEventListener('click', async () => {
-            const nameInput = document.getElementById('inputBuildingName');
-            const name = (nameInput ? nameInput.value : '').trim();
-            if (!name) {
-                window.showToast('건축물 명칭을 입력해 주세요.', 'warning');
-                if (nameInput) nameInput.focus();
+            const siteNameInput = document.getElementById('inputBuildingSiteName');
+            const dongInput = document.getElementById('inputBuildingDong');
+            const siteName = (siteNameInput ? siteNameInput.value : '').trim();
+            const dong = normalizeDongLabel(dongInput ? dongInput.value : '');
+            if (!siteName) {
+                window.showToast('현장명을 입력해 주세요.', 'warning');
+                if (siteNameInput) siteNameInput.focus();
                 return;
             }
+            const name = composeBuildingDisplayName(siteName, dong);
+            const nameInput = document.getElementById('inputBuildingName');
+            if (nameInput) nameInput.value = name;
 
             const isImportMode = window._addBuildingMode === 'import';
             const sourceId = document.getElementById('selectImportSourceBuilding')?.value || '';
@@ -4785,7 +4906,9 @@ document.addEventListener('DOMContentLoaded', () => {
             const newBldg = {
                 id: newBuildingId,
                 _pendingCloudSync: true,
-                name: name.startsWith('🏢') ? name : '🏢 ' + name,
+                siteName,
+                dong,
+                name: composeBuildingStorageName(siteName, dong),
                 address: address,
                 inspector: window.state.userName || '점검자',
                 date: date,
@@ -4802,7 +4925,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 floorDrawingPdfs: floorDrawingPdfsMap,
                 floorDrawingTiers: floorDrawingTiersMap,
                 floorDrawingSources: floorDrawingSourcesMap,
-                siteVaultKey: siteVaultDocId(normalizeSiteVaultKey(name)),
+                siteVaultKey: siteVaultDocId(siteName),
                 notes: notes
             };
 
@@ -4877,7 +5000,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Bind building info to edit modal form inputs
         document.getElementById('inputEditBuildingId').value = bldg.id;
-        document.getElementById('inputEditBuildingName').value = (bldg.name || '').replace(/^🏢\s*/, '');
+        ensureBuildingSiteFields(bldg);
+        const siteEl = document.getElementById('inputEditBuildingSiteName');
+        const dongEl = document.getElementById('inputEditBuildingDong');
+        const nameEl = document.getElementById('inputEditBuildingName');
+        if (siteEl) siteEl.value = getBuildingSiteName(bldg);
+        if (dongEl) dongEl.value = getBuildingDongLabel(bldg);
+        if (nameEl) nameEl.value = composeBuildingDisplayName(getBuildingSiteName(bldg), getBuildingDongLabel(bldg));
         document.getElementById('inputEditBuildingAddress').value = bldg.address || '';
         document.getElementById('inputEditBuildingFloors').value = bldg.floors || '';
         document.getElementById('inputEditBuildingDate').value = bldg.date || new Date().toISOString().split('T')[0];
@@ -5159,13 +5288,18 @@ document.addEventListener('DOMContentLoaded', () => {
             const bldg = window.currentEditingBuilding;
             if (!bldg) return;
 
-            const nameInput = document.getElementById('inputEditBuildingName');
-            const name = (nameInput ? nameInput.value : '').trim();
-            if (!name) {
-                window.showToast('건축물 명칭을 입력해 주세요.', 'warning');
-                if (nameInput) nameInput.focus();
+            const siteNameInput = document.getElementById('inputEditBuildingSiteName');
+            const dongInput = document.getElementById('inputEditBuildingDong');
+            const siteName = (siteNameInput ? siteNameInput.value : '').trim();
+            const dong = normalizeDongLabel(dongInput ? dongInput.value : '');
+            if (!siteName) {
+                window.showToast('현장명을 입력해 주세요.', 'warning');
+                if (siteNameInput) siteNameInput.focus();
                 return;
             }
+            const name = composeBuildingDisplayName(siteName, dong);
+            const nameInput = document.getElementById('inputEditBuildingName');
+            if (nameInput) nameInput.value = name;
 
             const address = (document.getElementById('inputEditBuildingAddress')?.value || '').trim() || bldg.address;
             const floors = (document.getElementById('inputEditBuildingFloors')?.value || '').trim() || bldg.floors;
@@ -5265,7 +5399,10 @@ document.addEventListener('DOMContentLoaded', () => {
             syncBuildingDrawingFloorCodes(bldg);
 
             // Update building metadata
-            bldg.name = name.startsWith('🏢') ? name : '🏢 ' + name;
+            bldg.siteName = siteName;
+            bldg.dong = dong;
+            bldg.name = composeBuildingStorageName(siteName, dong);
+            bldg.siteVaultKey = siteVaultDocId(siteName);
             bldg.address = address;
             bldg.floors = floors;
             bldg.date = date;
@@ -12432,7 +12569,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const nextYear = year || '2026년';
         const nextPeriod = period || '하반기';
         const toKey = `${nextYear}_${nextPeriod}`;
-        const siteLabel = normalizeSiteVaultKey(sourceBldg.name);
+        const siteLabel = getBuildingSiteName(sourceBldg);
         const defectCount = countBuildingDefects(sourceBldg);
 
         window.showLoading('회차 현장 생성 중…');
@@ -12440,11 +12577,14 @@ document.addEventListener('DOMContentLoaded', () => {
             await archiveBuildingPdfsToSiteVault(sourceBldg);
 
             const newBuildingId = 'bldg-' + Date.now();
-            const rawName = (sourceBldg.name || '').replace(/^🏢\s*/, '').trim();
+            const siteName = getBuildingSiteName(sourceBldg);
+            const dong = getBuildingDongLabel(sourceBldg);
             const newBldg = {
                 id: newBuildingId,
                 _pendingCloudSync: true,
-                name: rawName.startsWith('🏢') ? rawName : `🏢 ${rawName}`,
+                siteName,
+                dong,
+                name: composeBuildingStorageName(siteName, dong),
                 address: sourceBldg.address || '',
                 inspector: window.state.userName || sourceBldg.inspector || '점검자',
                 date: new Date().toISOString().split('T')[0],
@@ -12453,7 +12593,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 inspectionYear: nextYear,
                 inspectionPeriod: nextPeriod,
                 latestSurveyRoundKey: toKey,
-                siteVaultKey: siteVaultDocId(siteLabel),
+                siteVaultKey: siteVaultDocId(siteName),
                 structureType: sourceBldg.structureType || '',
                 facilityGrade: sourceBldg.facilityGrade || '',
                 completionDate: sourceBldg.completionDate || '',
@@ -12505,14 +12645,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function getSiteBuildingsSorted(siteKey) {
         const all = filterDeletedBuildings(window.state.buildings || [], window.state.deletedBuildingIds);
-        const list = all.filter((b) => normalizeSiteVaultKey(b.name) === siteKey);
+        const list = all.filter((b) => getBuildingSiteName(b) === siteKey);
         list.sort((a, b) => {
             const ra = getSurveyRoundOrderRank(getBuildingSurveyRoundKey(a));
             const rb = getSurveyRoundOrderRank(getBuildingSurveyRoundKey(b));
             if (ra != null && rb != null && ra !== rb) return rb - ra;
             if (ra != null && rb == null) return -1;
             if (ra == null && rb != null) return 1;
-            return String(b.name || '').localeCompare(String(a.name || ''), 'ko');
+            return formatDongRowLabel(a).localeCompare(formatDongRowLabel(b), 'ko');
         });
         return list;
     }
@@ -12522,13 +12662,23 @@ document.addEventListener('DOMContentLoaded', () => {
         return getSiteBuildingsSorted(siteKey).some((b) => getBuildingSurveyRoundKey(b) === key);
     }
 
+    function siteRoundAlreadyHasDong(siteKey, roundKey, dong) {
+        const want = normalizeDongLabel(dong) || '동 미지정';
+        return getSiteBuildingsSorted(siteKey).some((b) => {
+            if (getBuildingSurveyRoundKey(b) !== roundKey) return false;
+            return formatDongRowLabel(b) === want || normalizeDongLabel(getBuildingDongLabel(b)) === normalizeDongLabel(dong);
+        });
+    }
+
     window.updateHomeFabForDashboardMode = function() {
         const fab = document.getElementById('btnMobileFabAddBuilding');
         if (!fab) return;
-        const roundMode = !!window.state.dashboardSiteKey;
-        fab.classList.toggle('is-round-mode', roundMode);
+        const siteMode = !!window.state.dashboardSiteKey;
+        const dongMode = !!(window.state.dashboardSiteKey && window.state.dashboardRoundKey);
+        fab.classList.toggle('is-round-mode', siteMode && !dongMode);
+        fab.classList.toggle('is-dong-mode', dongMode);
         const label = fab.querySelector('.home-fab-label');
-        const text = roundMode ? '회차 추가하기' : '현장 추가하기';
+        const text = dongMode ? '동 추가하기' : (siteMode ? '회차 추가하기' : '현장 추가하기');
         if (label) label.textContent = text;
         fab.title = text;
         fab.setAttribute('aria-label', text);
@@ -12583,6 +12733,129 @@ document.addEventListener('DOMContentLoaded', () => {
         window._addSurveyRoundSourceId = null;
     };
 
+    window.openAddDongModal = function() {
+        const siteKey = window.state.dashboardSiteKey;
+        const roundKey = window.state.dashboardRoundKey;
+        if (!siteKey || !roundKey) {
+            window.showToast('동을 추가할 회차를 먼저 열어 주세요.', 'warning');
+            return;
+        }
+        const peers = getSiteBuildingsSorted(siteKey).filter((b) => getBuildingSurveyRoundKey(b) === roundKey);
+        if (!peers.length) {
+            window.showToast('이 회차에 기준이 될 동이 없습니다.', 'warning');
+            return;
+        }
+        const siteEl = document.getElementById('addDongSiteLabel');
+        const roundEl = document.getElementById('addDongRoundLabel');
+        const nameEl = document.getElementById('addDongNameInput');
+        const srcEl = document.getElementById('addDongCloneSource');
+        if (siteEl) siteEl.textContent = siteKey;
+        if (roundEl) roundEl.textContent = formatSurveyRoundLabel(roundKey);
+        if (nameEl) nameEl.value = '';
+        if (srcEl) {
+            srcEl.innerHTML = peers.map((b) =>
+                `<option value="${escapeHtml(b.id)}">${escapeHtml(formatDongRowLabel(b))}</option>`
+            ).join('');
+        }
+        const modal = document.getElementById('addDongModal');
+        if (modal) modal.classList.add('open');
+        setTimeout(() => nameEl?.focus(), 80);
+    };
+
+    window.closeAddDongModal = function() {
+        const modal = document.getElementById('addDongModal');
+        if (modal) modal.classList.remove('open');
+    };
+
+    window.confirmAddDongFromHome = async function() {
+        const siteKey = window.state.dashboardSiteKey;
+        const roundKey = window.state.dashboardRoundKey;
+        const dong = normalizeDongLabel(document.getElementById('addDongNameInput')?.value || '');
+        if (!siteKey || !roundKey) {
+            window.showToast('회차 정보가 없습니다.', 'warning');
+            return;
+        }
+        if (!dong) {
+            window.showToast('동 명칭을 입력해 주세요.', 'warning');
+            document.getElementById('addDongNameInput')?.focus();
+            return;
+        }
+        if (siteRoundAlreadyHasDong(siteKey, roundKey, dong)) {
+            window.showToast(`이 회차에 "${dong}"이(가) 이미 있습니다.`, 'warning', 4000);
+            return;
+        }
+        const sourceId = document.getElementById('addDongCloneSource')?.value;
+        const sourceBldg = (window.state.buildings || []).find((b) => b.id === sourceId)
+            || getSiteBuildingsSorted(siteKey).find((b) => getBuildingSurveyRoundKey(b) === roundKey);
+        if (!sourceBldg) {
+            window.showToast('기준 동을 찾을 수 없습니다.', 'warning');
+            return;
+        }
+        const cloneDrawings = !!document.getElementById('addDongCloneDrawings')?.checked;
+        const year = sourceBldg.inspectionYear || (String(roundKey).split('_')[0] || '2026년');
+        const period = sourceBldg.inspectionPeriod || (String(roundKey).split('_').slice(1).join('_') || '하반기');
+
+        window.closeAddDongModal();
+        window.showLoading('동 추가 중…');
+        try {
+            if (cloneDrawings) {
+                await archiveBuildingPdfsToSiteVault(sourceBldg);
+            }
+            const newBuildingId = 'bldg-' + Date.now();
+            const newBldg = {
+                id: newBuildingId,
+                _pendingCloudSync: true,
+                siteName: siteKey,
+                dong,
+                name: composeBuildingStorageName(siteKey, dong),
+                address: sourceBldg.address || '',
+                inspector: window.state.userName || sourceBldg.inspector || '점검자',
+                date: new Date().toISOString().split('T')[0],
+                floors: sourceBldg.floors || '',
+                inspectionType: sourceBldg.inspectionType || '정밀안전점검',
+                inspectionYear: year,
+                inspectionPeriod: period,
+                latestSurveyRoundKey: roundKey,
+                siteVaultKey: siteVaultDocId(siteKey),
+                structureType: sourceBldg.structureType || '',
+                facilityGrade: sourceBldg.facilityGrade || '',
+                completionDate: sourceBldg.completionDate || '',
+                notes: sourceBldg.notes || '',
+                floorsList: cloneDrawings ? JSON.parse(JSON.stringify(sourceBldg.floorsList || [])) : [],
+                floorDrawings: {},
+                floorDrawingPdfs: {},
+                floorDrawingTiers: {},
+                floorDrawingSources: {}
+            };
+            if (cloneDrawings) {
+                await cloneBuildingDataFromSource(sourceBldg, newBldg, {
+                    floorsDrawings: true,
+                    defects: false,
+                    ndt: false,
+                    mapStyles: true,
+                    merge: false
+                }, (msg) => {
+                    if (typeof window.updateLoadingText === 'function') window.updateLoadingText(msg);
+                });
+                await hydrateBuildingPdfsFromSiteVault(newBldg);
+                await persistBuildingDrawingAssetsNow(newBldg);
+            }
+            if (!window.state.buildings) window.state.buildings = [];
+            window.state.buildings.unshift(newBldg);
+            saveStateToLocalStorage();
+            if (typeof syncStateToFirebase === 'function') syncStateToFirebase();
+            window.state.dashboardSiteKey = siteKey;
+            window.state.dashboardRoundKey = roundKey;
+            if (typeof renderDashboard === 'function') renderDashboard();
+            window.showToast(`${dong} 추가 완료`, 'success');
+        } catch (err) {
+            console.error('동 추가 오류:', err);
+            window.showToast('동 추가 중 오류가 발생했습니다.', 'error');
+        } finally {
+            window.hideLoading();
+        }
+    };
+
     window.confirmAddSurveyRoundFromHome = async function() {
         const siteKey = window.state.dashboardSiteKey;
         const sourceId = window._addSurveyRoundSourceId;
@@ -12598,25 +12871,37 @@ document.addEventListener('DOMContentLoaded', () => {
             window.showToast(`${year} ${period} 회차가 이미 있습니다. 다른 회차를 선택해 주세요.`, 'warning', 4500);
             return;
         }
-        const defectCount = countBuildingDefects(sourceBldg);
+        const latestKey = getBuildingSurveyRoundKey(sourceBldg);
+        const peers = getSiteBuildingsSorted(siteKey).filter((b) => getBuildingSurveyRoundKey(b) === latestKey);
+        const sources = peers.length ? peers : [sourceBldg];
+        const defectCount = sources.reduce((n, b) => n + countBuildingDefects(b), 0);
+        const dongHint = sources.length > 1
+            ? `\n· 포함 동: ${sources.map(formatDongRowLabel).join(', ')} (${sources.length}개 동 모두 복사)`
+            : '';
         if (!window.confirm(
             `회차를 추가할까요?\n\n` +
             `· 현장: ${siteKey}\n` +
-            `· 기준: ${formatSurveyRoundLabel(getBuildingSurveyRoundKey(sourceBldg))}\n` +
-            `· 새 회차: ${year} ${period}\n\n` +
+            `· 기준: ${formatSurveyRoundLabel(latestKey)}\n` +
+            `· 새 회차: ${year} ${period}` +
+            `${dongHint}\n\n` +
             `도면·결함(${defectCount}건, 전회차)·NDT를 복사한 새 점검이 만들어집니다.`
         )) return;
 
         window.closeAddSurveyRoundModal();
-        const created = await createSurveyRoundBuildingFromSource(sourceBldg, year, period, {
-            closeEditModal: false,
-            selectAfter: false
-        });
-        if (created) {
+        let createdCount = 0;
+        for (const src of sources) {
+            const created = await createSurveyRoundBuildingFromSource(src, year, period, {
+                closeEditModal: false,
+                selectAfter: false
+            });
+            if (created) createdCount += 1;
+        }
+        if (createdCount > 0) {
             window.state.dashboardSiteKey = siteKey;
+            window.state.dashboardRoundKey = `${year}_${period}`;
             if (typeof renderDashboard === 'function') renderDashboard();
             window.showToast(
-                `${year} ${period} 회차 추가 · 전회차 결함 ${created.defectCount}건 복사`,
+                `${year} ${period} 회차 추가 · 동 ${createdCount}개 복사`,
                 'success',
                 5500
             );
@@ -29072,6 +29357,59 @@ document.addEventListener('DOMContentLoaded', () => {
         return s || 'unnamed';
     }
 
+    function normalizeDongLabel(dong) {
+        return String(dong || '').replace(/\s+/g, ' ').trim();
+    }
+
+    /** 명칭에서 현장명·동 추정 (레거시: "○○아파트 101동") */
+    function inferSiteAndDongFromName(buildingName) {
+        const stripped = normalizeSiteVaultKey(buildingName);
+        const m = stripped.match(/^(.+?)\s+((?:\d+|[A-Za-z]|[가-힣]+)동)$/u);
+        if (m) {
+            return { siteName: m[1].trim() || 'unnamed', dong: m[2].trim() };
+        }
+        return { siteName: stripped || 'unnamed', dong: '' };
+    }
+
+    function getBuildingSiteName(bldg) {
+        if (!bldg) return 'unnamed';
+        const explicit = String(bldg.siteName || '').replace(/^🏢\s*/, '').trim();
+        if (explicit) return explicit;
+        return inferSiteAndDongFromName(bldg.name).siteName;
+    }
+
+    function getBuildingDongLabel(bldg) {
+        if (!bldg) return '';
+        if (bldg.dong != null && String(bldg.dong).trim() !== '') {
+            return normalizeDongLabel(bldg.dong);
+        }
+        return inferSiteAndDongFromName(bldg.name).dong;
+    }
+
+    function composeBuildingDisplayName(siteName, dong) {
+        const site = String(siteName || '').replace(/^🏢\s*/, '').trim() || 'unnamed';
+        const d = normalizeDongLabel(dong);
+        return d ? `${site} ${d}` : site;
+    }
+
+    function composeBuildingStorageName(siteName, dong) {
+        const body = composeBuildingDisplayName(siteName, dong);
+        return body.startsWith('🏢') ? body : `🏢 ${body}`;
+    }
+
+    function ensureBuildingSiteFields(bldg) {
+        if (!bldg) return bldg;
+        if (!bldg.siteName) bldg.siteName = getBuildingSiteName(bldg);
+        if (bldg.dong == null) bldg.dong = getBuildingDongLabel(bldg);
+        return bldg;
+    }
+
+    function formatDongRowLabel(bldg) {
+        const dong = getBuildingDongLabel(bldg);
+        if (dong) return dong;
+        return '동 미지정';
+    }
+
     function siteVaultDocId(siteKey) {
         const id = String(siteKey || 'unnamed')
             .replace(/[\\/:*?"<>|#\s]+/g, '_')
@@ -29083,7 +29421,7 @@ document.addEventListener('DOMContentLoaded', () => {
     function getSiteVaultKeyFromBuilding(bldg) {
         if (!bldg) return 'unnamed';
         if (bldg.siteVaultKey) return bldg.siteVaultKey;
-        return siteVaultDocId(normalizeSiteVaultKey(bldg.name));
+        return siteVaultDocId(getBuildingSiteName(bldg));
     }
 
     async function writeChunkedPdfToDocRef(docRef, pdfDataUrl, extraFields) {

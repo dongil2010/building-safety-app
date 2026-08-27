@@ -32,7 +32,7 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <meta name="apple-mobile-web-app-title" content="스마트 안전점검">
-    <link rel="stylesheet" href="styles.css?v=20260827_multi_tip">
+    <link rel="stylesheet" href="styles.css?v=20260827_multi_dong">
     <!-- FontAwesome icons for clean engineering UI -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <!-- PDF 생성용: 페이지별로 직접 캡처해서 조립(큰 보고서에서 html2pdf 한방 렌더링이 캔버스 높이 한계로
@@ -1770,7 +1770,7 @@
             </div>
             <div class="modal-body" style="display:flex; flex-direction:column; gap:0.75rem;">
                 <p style="font-size:0.8rem; color:#64748b; margin:0;">
-                    마지막 회차를 기준으로 다음 회차를 만듭니다. 다른 회사가 중간 회차를 진행한 경우 등에는 연도·상하반기를 직접 지정할 수 있습니다.
+                    마지막 회차를 기준으로 다음 회차를 만듭니다. 동이 여러 개면 모든 동을 함께 복사합니다.
                 </p>
                 <div>
                     <div class="form-label">현장</div>
@@ -1806,6 +1806,47 @@
                 <button type="button" class="btn btn-outline" id="btnCancelAddSurveyRound">취소</button>
                 <button type="button" class="btn btn-primary" id="btnConfirmAddSurveyRound">
                     <i class="fa-solid fa-plus"></i> 회차 만들기
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL: 동 추가 (같은 회차에 다른 동) -->
+    <div class="modal-overlay" id="addDongModal">
+        <div class="modal-card" style="max-width: 440px; width: 92%;">
+            <div class="modal-header">
+                <h3><i class="fa-solid fa-door-open"></i> 동 추가</h3>
+                <button type="button" class="modal-close" id="btnCloseAddDongModal">&times;</button>
+            </div>
+            <div class="modal-body" style="display:flex; flex-direction:column; gap:0.75rem;">
+                <p style="font-size:0.8rem; color:#64748b; margin:0;">
+                    같은 현장·같은 회차에 다른 동을 추가합니다. 기준 동의 도면·기본정보를 복사할 수 있습니다.
+                </p>
+                <div>
+                    <div class="form-label">현장</div>
+                    <div id="addDongSiteLabel" style="font-weight:800; color:#0f172a;"></div>
+                </div>
+                <div>
+                    <div class="form-label">회차</div>
+                    <div id="addDongRoundLabel" style="font-size:0.9rem; color:#334155;"></div>
+                </div>
+                <div class="form-group" style="margin:0;">
+                    <label class="form-label" for="addDongNameInput">동 명칭 <span class="req-mark">*</span></label>
+                    <input type="text" id="addDongNameInput" class="form-control" placeholder="예: 101동, 102동, A동" autocomplete="off">
+                </div>
+                <div class="form-group" style="margin:0;">
+                    <label class="form-label" for="addDongCloneSource">기준 동 (도면·정보 복사)</label>
+                    <select id="addDongCloneSource" class="form-control"></select>
+                </div>
+                <label style="display:flex; align-items:center; gap:0.45rem; font-size:0.82rem; font-weight:600; color:#334155;">
+                    <input type="checkbox" id="addDongCloneDrawings" checked>
+                    기준 동의 도면·층 구성 복사
+                </label>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline" id="btnCancelAddDong">취소</button>
+                <button type="button" class="btn btn-primary" id="btnConfirmAddDong">
+                    <i class="fa-solid fa-plus"></i> 동 만들기
                 </button>
             </div>
         </div>
@@ -1911,8 +1952,17 @@
                 <section class="add-building-section add-building-collapsible-body">
                     <p class="add-section-desc add-section-desc-inline">점검 대상 건축물의 식별 정보를 입력합니다.</p>
                     <div class="form-group">
-                        <label class="form-label" for="inputBuildingName">건축물 명칭 <span class="req-mark">*</span></label>
-                        <input type="text" id="inputBuildingName" class="form-control" placeholder="예: 도휘에드가9차, 강남 서초 타워">
+                        <label class="form-label" for="inputBuildingSiteName">현장명 <span class="req-mark">*</span></label>
+                        <input type="text" id="inputBuildingSiteName" class="form-control" placeholder="예: ○○아파트, 강남 서초 타워">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label" for="inputBuildingDong">동 명칭</label>
+                        <input type="text" id="inputBuildingDong" class="form-control" placeholder="예: 101동, A동 (한 동만이면 비워도 됨)">
+                        <small style="color:#64748b; font-size:0.75rem;">같은 현장·같은 회차에 동이 여러 개일 때 구분합니다.</small>
+                    </div>
+                    <div class="form-group" hidden>
+                        <label class="form-label" for="inputBuildingName">건축물 명칭(자동)</label>
+                        <input type="text" id="inputBuildingName" class="form-control" tabindex="-1">
                     </div>
                     <div class="form-group">
                         <label class="form-label" for="inputBuildingAddress">소재지 주소</label>
@@ -2049,8 +2099,16 @@
                         </div>
                     </div>
                     <div class="form-group">
-                        <label class="form-label" for="inputEditBuildingName">건축물 명칭 <span class="req-mark">*</span></label>
-                        <input type="text" id="inputEditBuildingName" class="form-control" placeholder="예: 강남 테헤란 타워 A동">
+                        <label class="form-label" for="inputEditBuildingSiteName">현장명 <span class="req-mark">*</span></label>
+                        <input type="text" id="inputEditBuildingSiteName" class="form-control" placeholder="예: ○○아파트">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label" for="inputEditBuildingDong">동 명칭</label>
+                        <input type="text" id="inputEditBuildingDong" class="form-control" placeholder="예: 101동, A동">
+                    </div>
+                    <div class="form-group" hidden>
+                        <label class="form-label" for="inputEditBuildingName">건축물 명칭(자동)</label>
+                        <input type="text" id="inputEditBuildingName" class="form-control" tabindex="-1">
                     </div>
                     <div class="form-group">
                         <label class="form-label" for="inputEditBuildingAddress">소재지 주소</label>
@@ -2493,14 +2551,14 @@
     <script src="js/tabs/registry.js?v=20260826_bsafix"></script>
     <script src="js/pdf-vector-bridge.js?v=20260827_multi_tip"></script>
     <script src="js/core/layout-mode.js?v=20260827_tablet"></script>
-    <script src="js/tabs/home.js?v=20260827_round_fab"></script>
+    <script src="js/tabs/js/tabs/home.js?v=20260827_multi_dong"></script>
     <script src="js/tabs/map.js?v=20260826_mem1"></script>
     <script src="js/tabs/survey.js?v=20260824_nSub"></script>
     <script src="js/tabs/ndt.js?v=20260822_survey2dScroll"></script>
     <script src="js/shared/report.js?v=20260827_overview"></script>
     <script src="js/shared/hwpx-import.js?v=20260825_hwpxin"></script>
     <script src="js/shared/auth.js?v=20260821_land1"></script>
-    <script src="app.js?v=20260827_poly_commit"></script>
+    <script src="app.js?v=20260827_multi_dong"></script>
     <script>
         window.BSA_APP_VERSION = '20260826_mem1';
         (function () {

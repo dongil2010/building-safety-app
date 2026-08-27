@@ -5797,6 +5797,10 @@ body:not(.bsa-tab-home) .home-fab-add-building {
     .home-fab-add-building.is-round-mode:focus-visible {
         width: 9.75rem;
     }
+    .home-fab-add-building.is-dong-mode:hover,
+    .home-fab-add-building.is-dong-mode:focus-visible {
+        width: 8.75rem;
+    }
 
     .home-fab-add-building:hover .home-fab-label,
     .home-fab-add-building:focus-visible .home-fab-label {
