@@ -5055,6 +5055,59 @@ html:not(.layout-desktop) .survey-inline-select {
     color: #475569;
 }
 
+.site-layout-choice {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.5rem;
+}
+
+.site-layout-option {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.45rem;
+    margin: 0;
+    padding: 0.65rem 0.7rem;
+    border: 1px solid #dbe3ef;
+    border-radius: 10px;
+    background: #fff;
+    cursor: pointer;
+}
+
+.site-layout-option:has(input:checked) {
+    border-color: #2563eb;
+    background: #eff6ff;
+    box-shadow: 0 0 0 1px #2563eb inset;
+}
+
+.site-layout-option input {
+    margin-top: 0.15rem;
+    flex-shrink: 0;
+}
+
+.site-layout-option-body {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+    min-width: 0;
+}
+
+.site-layout-option-body strong {
+    font-size: 0.84rem;
+    color: #0f172a;
+}
+
+.site-layout-option-body small {
+    font-size: 0.72rem;
+    color: #64748b;
+    line-height: 1.35;
+}
+
+@media (max-width: 520px) {
+    .site-layout-choice {
+        grid-template-columns: 1fr;
+    }
+}
+
 .add-building-section .form-control,
 .add-building-section textarea.form-control,
 .add-building-section select.form-control {

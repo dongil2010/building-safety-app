@@ -32,7 +32,7 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <meta name="apple-mobile-web-app-title" content="스마트 안전점검">
-    <link rel="stylesheet" href="styles.css?v=20260827_bldg_trash">
+    <link rel="stylesheet" href="styles.css?v=20260827_site_layout">
     <!-- FontAwesome icons for clean engineering UI -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <!-- PDF 생성용: 페이지별로 직접 캡처해서 조립(큰 보고서에서 html2pdf 한방 렌더링이 캔버스 높이 한계로
@@ -1979,8 +1979,27 @@
                         <input type="text" id="inputBuildingSiteName" class="form-control" placeholder="예: ○○아파트, 강남 서초 타워">
                     </div>
                     <div class="form-group">
+                        <span class="form-label">현장 구성</span>
+                        <div class="site-layout-choice" role="radiogroup" aria-label="현장 구성">
+                            <label class="site-layout-option">
+                                <input type="radio" name="addBuildingSiteLayout" value="single" checked>
+                                <span class="site-layout-option-body">
+                                    <strong>단일 건물</strong>
+                                    <small>동 구분 없음 · 회차만 선택</small>
+                                </span>
+                            </label>
+                            <label class="site-layout-option">
+                                <input type="radio" name="addBuildingSiteLayout" value="multi">
+                                <span class="site-layout-option-body">
+                                    <strong>여러 동</strong>
+                                    <small>아파트 단지 등 · 동 추가 가능</small>
+                                </span>
+                            </label>
+                        </div>
+                    </div>
+                    <div class="form-group" id="addBuildingDongGroup">
                         <label class="form-label" for="inputBuildingDong">동 명칭</label>
-                        <input type="text" id="inputBuildingDong" class="form-control" placeholder="예: 101동, A동 (한 동만이면 비워도 됨)">
+                        <input type="text" id="inputBuildingDong" class="form-control" placeholder="예: 101동, A동">
                         <small style="color:#64748b; font-size:0.75rem;">같은 현장·같은 회차에 동이 여러 개일 때 구분합니다.</small>
                     </div>
                     <div class="form-group" hidden>
@@ -2126,6 +2145,25 @@
                         <input type="text" id="inputEditBuildingSiteName" class="form-control" placeholder="예: ○○아파트">
                     </div>
                     <div class="form-group">
+                        <span class="form-label">현장 구성</span>
+                        <div class="site-layout-choice" role="radiogroup" aria-label="현장 구성">
+                            <label class="site-layout-option">
+                                <input type="radio" name="editBuildingSiteLayout" value="single" checked>
+                                <span class="site-layout-option-body">
+                                    <strong>단일 건물</strong>
+                                    <small>동 구분 없음</small>
+                                </span>
+                            </label>
+                            <label class="site-layout-option">
+                                <input type="radio" name="editBuildingSiteLayout" value="multi">
+                                <span class="site-layout-option-body">
+                                    <strong>여러 동</strong>
+                                    <small>동 추가·선택 사용</small>
+                                </span>
+                            </label>
+                        </div>
+                    </div>
+                    <div class="form-group" id="editBuildingDongGroup">
                         <label class="form-label" for="inputEditBuildingDong">동 명칭</label>
                         <input type="text" id="inputEditBuildingDong" class="form-control" placeholder="예: 101동, A동">
                     </div>
@@ -2574,7 +2612,7 @@
     <script src="js/tabs/registry.js?v=20260826_bsafix"></script>
     <script src="js/pdf-vector-bridge.js?v=20260827_multi_tip"></script>
     <script src="js/core/layout-mode.js?v=20260827_tablet"></script>
-    <script src="js/tabs/home.js?v=20260827_multi_dong"></script>
+    <script src="js/tabs/home.js?v=20260827_site_layout"></script>
     <script src="js/tabs/map.js?v=20260826_mem1"></script>
     <script src="js/tabs/survey.js?v=20260824_nSub"></script>
     <script src="js/tabs/ndt.js?v=20260822_survey2dScroll"></script>

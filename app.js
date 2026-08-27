@@ -3595,17 +3595,27 @@ document.addEventListener('DOMContentLoaded', () => {
                 const members = byRound.get(rk) || [];
                 const roundLabel = rk === '_none' ? '회차 미지정' : formatSurveyRoundLabel(rk);
                 const typeLabel = members[0]?.inspectionType || '점검';
-                const dongNames = members.map(formatDongRowLabel);
-                const dongHint = members.length > 1
-                    ? `동 ${members.length}개 · ${dongNames.join(', ')}`
-                    : formatDongRowLabel(members[0]);
+                const multiDong = isSiteMultiDong(selectedSiteKey);
+                let metaHint;
+                if (multiDong) {
+                    const dongNames = members.map(formatDongRowLabel);
+                    metaHint = members.length > 1
+                        ? `동 ${members.length}개 · ${dongNames.join(', ')}`
+                        : formatDongRowLabel(members[0]);
+                } else {
+                    const b0 = members[0];
+                    const floorCount = (b0?.floorsList && b0.floorsList.length)
+                        ? `도면 ${b0.floorsList.length}개 층`
+                        : '도면 미등록';
+                    metaHint = `${b0?.address || '주소 미등록'} · ${floorCount}`;
+                }
                 const safeSite = escapeHtml(selectedSiteKey);
                 const safeRound = escapeHtml(rk);
                 return `
                     <div class="building-row building-row-round" data-round-key="${safeRound}">
                         <div class="building-row-info" data-action="open-round" data-site-key="${safeSite}" data-round-key="${safeRound}">
                             <span class="building-row-name">${escapeHtml(roundLabel)} · ${escapeHtml(typeLabel)}</span>
-                            <span class="building-row-meta">${escapeHtml(dongHint)}</span>
+                            <span class="building-row-meta">${escapeHtml(metaHint)}</span>
                         </div>
                     </div>
                 `;
@@ -3629,17 +3639,22 @@ document.addEventListener('DOMContentLoaded', () => {
         grid.innerHTML = siteKeys.map((siteKey) => {
             const members = siteMap.get(siteKey) || [];
             const roundSet = new Set(members.map((b) => formatSurveyRoundLabel(getBuildingSurveyRoundKey(b))).filter(Boolean));
-            const dongSet = new Set(members.map(formatDongRowLabel).filter((d) => d && d !== '동 미지정'));
             const roundHint = roundSet.size
                 ? [...roundSet].join(' · ')
                 : '등록된 회차 없음';
-            const dongHint = dongSet.size > 1 ? ` · 동 ${dongSet.size}개` : (dongSet.size === 1 ? ` · ${[...dongSet][0]}` : '');
+            let layoutHint = '';
+            if (isSiteMultiDong(siteKey)) {
+                const dongSet = new Set(members.map(formatDongRowLabel).filter((d) => d && d !== '동 미지정'));
+                layoutHint = dongSet.size > 1 ? ` · 동 ${dongSet.size}개` : (dongSet.size === 1 ? ` · ${[...dongSet][0]}` : ' · 여러 동');
+            } else {
+                layoutHint = ' · 단일 건물';
+            }
             const safeSite = escapeHtml(siteKey);
             return `
                 <div class="building-row building-row-site" data-site-key="${safeSite}">
                     <div class="building-row-info" data-action="open-site" data-site-key="${safeSite}">
                         <span class="building-row-name"><i class="fa-solid fa-building flag-icon-muted"></i> ${safeSite}</span>
-                        <span class="building-row-meta building-row-rounds">${escapeHtml(roundHint)}${escapeHtml(dongHint)}</span>
+                        <span class="building-row-meta building-row-rounds">${escapeHtml(roundHint)}${escapeHtml(layoutHint)}</span>
                     </div>
                 </div>
             `;
@@ -3665,6 +3680,19 @@ document.addEventListener('DOMContentLoaded', () => {
 
     window.openDashboardRoundDongs = function(siteKey, roundKey) {
         if (!siteKey || !roundKey) return;
+        // 단일 건물 현장: 동 선택 단계를 건너뛰고 바로 점검 진입
+        if (!isSiteMultiDong(siteKey)) {
+            const peers = filterActiveBuildings(window.state.buildings || [], window.state.deletedBuildingIds)
+                .filter((b) => getBuildingSiteName(b) === siteKey && getBuildingSurveyRoundKey(b) === roundKey);
+            if (peers.length === 1) {
+                window.state.dashboardSiteKey = siteKey;
+                window.state.dashboardRoundKey = null;
+                if (typeof window.selectBuildingAndInspect === 'function') {
+                    window.selectBuildingAndInspect(peers[0]);
+                }
+                return;
+            }
+        }
         window.state.dashboardSiteKey = siteKey;
         window.state.dashboardRoundKey = roundKey;
         window.renderDashboard();
@@ -4031,6 +4059,11 @@ document.addEventListener('DOMContentLoaded', () => {
             if (siteInput) siteInput.value = window.state.dashboardSiteKey || '';
             if (dongInput) dongInput.value = '';
             if (nameInput) nameInput.value = '';
+            const inheritMulti = window.state.dashboardSiteKey
+                ? isSiteMultiDong(window.state.dashboardSiteKey)
+                : false;
+            setSiteLayoutRadio('addBuildingSiteLayout', inheritMulti);
+            syncAddBuildingDongFieldVisibility();
             const addrInput = document.getElementById('inputBuildingAddress');
             if (addrInput) addrInput.value = '';
             const floorsInput = document.getElementById('inputBuildingFloors');
@@ -4957,7 +4990,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const btnMobileFabAddBuilding = document.getElementById('btnMobileFabAddBuilding');
     if (btnMobileFabAddBuilding) {
         btnMobileFabAddBuilding.addEventListener('click', () => {
-            if (window.state.dashboardSiteKey && window.state.dashboardRoundKey) {
+            if (window.state.dashboardSiteKey && window.state.dashboardRoundKey
+                && isSiteMultiDong(window.state.dashboardSiteKey)) {
                 if (typeof window.openAddDongModal === 'function') window.openAddDongModal();
             } else if (window.state.dashboardSiteKey) {
                 if (typeof window.openAddSurveyRoundModal === 'function') window.openAddSurveyRoundModal();
@@ -4966,6 +5000,15 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
     }
+
+    document.querySelectorAll('input[name="addBuildingSiteLayout"]').forEach((el) => {
+        el.addEventListener('change', () => syncAddBuildingDongFieldVisibility());
+    });
+    document.querySelectorAll('input[name="editBuildingSiteLayout"]').forEach((el) => {
+        el.addEventListener('change', () => syncEditBuildingDongFieldVisibility());
+    });
+    syncAddBuildingDongFieldVisibility();
+    syncEditBuildingDongFieldVisibility();
 
     ['btnCloseAddSurveyRoundModal', 'btnCancelAddSurveyRound'].forEach((id) => {
         const el = document.getElementById(id);
@@ -5089,7 +5132,9 @@ document.addEventListener('DOMContentLoaded', () => {
             const siteNameInput = document.getElementById('inputBuildingSiteName');
             const dongInput = document.getElementById('inputBuildingDong');
             const siteName = (siteNameInput ? siteNameInput.value : '').trim();
-            const dong = normalizeDongLabel(dongInput ? dongInput.value : '');
+            const multiDong = readSiteLayoutRadio('addBuildingSiteLayout', false)
+                || (window.state.dashboardSiteKey ? isSiteMultiDong(window.state.dashboardSiteKey) : false);
+            const dong = multiDong ? normalizeDongLabel(dongInput ? dongInput.value : '') : '';
             if (!siteName) {
                 window.showToast('현장명을 입력해 주세요.', 'warning');
                 if (siteNameInput) siteNameInput.focus();
@@ -5203,6 +5248,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 _pendingCloudSync: true,
                 siteName,
                 dong,
+                multiDong: !!multiDong,
                 name: composeBuildingStorageName(siteName, dong),
                 address: address,
                 inspector: window.state.userName || '점검자',
@@ -5225,6 +5271,8 @@ document.addEventListener('DOMContentLoaded', () => {
             };
 
             window.state.buildings.unshift(newBldg);
+            if (multiDong) setSiteMultiDongFlag(siteName, true);
+            else setSiteMultiDongFlag(siteName, false);
 
             window.showLoading('도면 저장 중...');
             try {
@@ -5302,6 +5350,8 @@ document.addEventListener('DOMContentLoaded', () => {
         if (siteEl) siteEl.value = getBuildingSiteName(bldg);
         if (dongEl) dongEl.value = getBuildingDongLabel(bldg);
         if (nameEl) nameEl.value = composeBuildingDisplayName(getBuildingSiteName(bldg), getBuildingDongLabel(bldg));
+        setSiteLayoutRadio('editBuildingSiteLayout', isSiteMultiDong(getBuildingSiteName(bldg)));
+        syncEditBuildingDongFieldVisibility();
         document.getElementById('inputEditBuildingAddress').value = bldg.address || '';
         document.getElementById('inputEditBuildingFloors').value = bldg.floors || '';
         document.getElementById('inputEditBuildingDate').value = bldg.date || new Date().toISOString().split('T')[0];
@@ -5586,7 +5636,8 @@ document.addEventListener('DOMContentLoaded', () => {
             const siteNameInput = document.getElementById('inputEditBuildingSiteName');
             const dongInput = document.getElementById('inputEditBuildingDong');
             const siteName = (siteNameInput ? siteNameInput.value : '').trim();
-            const dong = normalizeDongLabel(dongInput ? dongInput.value : '');
+            const multiDong = readSiteLayoutRadio('editBuildingSiteLayout', false);
+            const dong = multiDong ? normalizeDongLabel(dongInput ? dongInput.value : '') : '';
             if (!siteName) {
                 window.showToast('현장명을 입력해 주세요.', 'warning');
                 if (siteNameInput) siteNameInput.focus();
@@ -5694,8 +5745,10 @@ document.addEventListener('DOMContentLoaded', () => {
             syncBuildingDrawingFloorCodes(bldg);
 
             // Update building metadata
+            const prevSiteName = getBuildingSiteName(bldg);
             bldg.siteName = siteName;
             bldg.dong = dong;
+            bldg.multiDong = !!multiDong;
             bldg.name = composeBuildingStorageName(siteName, dong);
             bldg.siteVaultKey = siteVaultDocId(siteName);
             bldg.address = address;
@@ -5708,6 +5761,10 @@ document.addEventListener('DOMContentLoaded', () => {
             bldg.facilityGrade = facilityGrade;
             bldg.completionDate = completionDate;
             bldg.notes = notes;
+            setSiteMultiDongFlag(siteName, multiDong);
+            if (prevSiteName && prevSiteName !== siteName) {
+                // 현장명을 바꾼 경우 이전 키에 남은 형제 동은 건드리지 않음
+            }
 
             // Save state & sync
             window.showLoading('도면 저장 중...');
@@ -12865,6 +12922,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 _pendingCloudSync: true,
                 siteName,
                 dong,
+                multiDong: sourceBldg.multiDong === true || isSiteMultiDong(siteName),
                 name: composeBuildingStorageName(siteName, dong),
                 address: sourceBldg.address || '',
                 inspector: window.state.userName || sourceBldg.inspector || '점검자',
@@ -12954,8 +13012,10 @@ document.addEventListener('DOMContentLoaded', () => {
     window.updateHomeFabForDashboardMode = function() {
         const fab = document.getElementById('btnMobileFabAddBuilding');
         if (!fab) return;
-        const siteMode = !!window.state.dashboardSiteKey;
-        const dongMode = !!(window.state.dashboardSiteKey && window.state.dashboardRoundKey);
+        const siteKey = window.state.dashboardSiteKey;
+        const siteMode = !!siteKey;
+        const multiDong = siteKey ? isSiteMultiDong(siteKey) : false;
+        const dongMode = !!(siteKey && window.state.dashboardRoundKey && multiDong);
         fab.classList.toggle('is-round-mode', siteMode && !dongMode);
         fab.classList.toggle('is-dong-mode', dongMode);
         const label = fab.querySelector('.home-fab-label');
@@ -13012,6 +13072,10 @@ document.addEventListener('DOMContentLoaded', () => {
         const roundKey = window.state.dashboardRoundKey;
         if (!siteKey || !roundKey) {
             window.showToast('동을 추가할 회차를 먼저 열어 주세요.', 'warning');
+            return;
+        }
+        if (!isSiteMultiDong(siteKey)) {
+            window.showToast('이 현장은 단일 건물로 설정되어 있습니다. 수정 화면에서 「여러 동」으로 바꾼 뒤 동을 추가해 주세요.', 'warning', 5500);
             return;
         }
         const peers = getSiteBuildingsSorted(siteKey).filter((b) => getBuildingSurveyRoundKey(b) === roundKey);
@@ -13081,6 +13145,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 _pendingCloudSync: true,
                 siteName: siteKey,
                 dong,
+                multiDong: true,
                 name: composeBuildingStorageName(siteKey, dong),
                 address: sourceBldg.address || '',
                 inspector: window.state.userName || sourceBldg.inspector || '점검자',
@@ -13116,6 +13181,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             if (!window.state.buildings) window.state.buildings = [];
             window.state.buildings.unshift(newBldg);
+            setSiteMultiDongFlag(siteKey, true);
             saveStateToLocalStorage();
             if (typeof syncStateToFirebase === 'function') syncStateToFirebase();
             window.state.dashboardSiteKey = siteKey;
@@ -29719,6 +29785,73 @@ document.addEventListener('DOMContentLoaded', () => {
         const dong = getBuildingDongLabel(bldg);
         if (dong) return dong;
         return '동 미지정';
+    }
+
+    /** 현장 구성: multiDong=true 이면 동 단계 사용. 미지정 레거시는 회차에 동이 2개 이상이면 여러 동으로 간주 */
+    function isSiteMultiDong(siteKey) {
+        const key = String(siteKey || '').trim();
+        if (!key) return false;
+        const list = filterActiveBuildings(window.state.buildings || [], window.state.deletedBuildingIds)
+            .filter((b) => getBuildingSiteName(b) === key);
+        if (!list.length) return false;
+        if (list.some((b) => b.multiDong === true)) return true;
+        if (list.every((b) => b.multiDong === false)) return false;
+        const byRound = new Map();
+        list.forEach((b) => {
+            const rk = getBuildingSurveyRoundKey(b) || '_none';
+            if (!byRound.has(rk)) byRound.set(rk, []);
+            byRound.get(rk).push(b);
+        });
+        for (const members of byRound.values()) {
+            if (members.length > 1) return true;
+            const labels = new Set(members.map((b) => normalizeDongLabel(getBuildingDongLabel(b))).filter(Boolean));
+            if (labels.size > 1) return true;
+        }
+        return false;
+    }
+
+    function setSiteMultiDongFlag(siteKey, multiDong) {
+        const key = String(siteKey || '').trim();
+        if (!key) return;
+        filterActiveBuildings(window.state.buildings || [], window.state.deletedBuildingIds)
+            .filter((b) => getBuildingSiteName(b) === key)
+            .forEach((b) => {
+                b.multiDong = !!multiDong;
+                if (!multiDong) b.dong = '';
+            });
+    }
+
+    function readSiteLayoutRadio(name, fallbackMulti) {
+        const el = document.querySelector(`input[name="${name}"]:checked`);
+        if (!el) return !!fallbackMulti;
+        return el.value === 'multi';
+    }
+
+    function setSiteLayoutRadio(name, multiDong) {
+        const val = multiDong ? 'multi' : 'single';
+        document.querySelectorAll(`input[name="${name}"]`).forEach((el) => {
+            el.checked = el.value === val;
+        });
+    }
+
+    function syncAddBuildingDongFieldVisibility() {
+        const multi = readSiteLayoutRadio('addBuildingSiteLayout', false);
+        const group = document.getElementById('addBuildingDongGroup');
+        if (group) group.hidden = !multi;
+        if (!multi) {
+            const dongInput = document.getElementById('inputBuildingDong');
+            if (dongInput) dongInput.value = '';
+        }
+    }
+
+    function syncEditBuildingDongFieldVisibility() {
+        const multi = readSiteLayoutRadio('editBuildingSiteLayout', false);
+        const group = document.getElementById('editBuildingDongGroup');
+        if (group) group.hidden = !multi;
+        if (!multi) {
+            const dongInput = document.getElementById('inputEditBuildingDong');
+            if (dongInput) dongInput.value = '';
+        }
     }
 
     function siteVaultDocId(siteKey) {
