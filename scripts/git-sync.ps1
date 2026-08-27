@@ -1,4 +1,4 @@
-param(
+﻿param(
     [Parameter(Mandatory = $true)]
     [string]$Message,
     [switch]$NoPush
@@ -7,6 +7,27 @@ param(
 $ErrorActionPreference = "Stop"
 $repoRoot = Split-Path -Parent $PSScriptRoot
 Set-Location $repoRoot
+
+# Windows PowerShell 5.1 + git: 한글 커밋 메시지는 반드시 UTF-8 파일(-F)로 전달
+function Invoke-GitCommitUtf8 {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$CommitMessage
+    )
+    $tmp = Join-Path $env:TEMP ("bsa-git-commit-{0}.txt" -f [guid]::NewGuid().ToString("n"))
+    $utf8NoBom = New-Object System.Text.UTF8Encoding $false
+    $text = ($CommitMessage -replace "`r`n", "`n" -replace "`r", "`n").TrimEnd() + "`n"
+    [System.IO.File]::WriteAllText($tmp, $text, $utf8NoBom)
+    try {
+        & git -c i18n.commitEncoding=utf-8 commit -F $tmp
+        if ($LASTEXITCODE -ne 0) {
+            exit $LASTEXITCODE
+        }
+    }
+    finally {
+        Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
+    }
+}
 
 function Write-WebVersionFile {
     param([string]$Sha)
@@ -44,13 +65,12 @@ if (-not $status) {
 }
 
 git add app.js index.html styles.css js/ sw.js manifest.json web-version.json scripts/git-sync.ps1
-git commit -m $Message
-if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+Invoke-GitCommitUtf8 -CommitMessage $Message
 
 $sha = git rev-parse --short HEAD
 Write-WebVersionFile -Sha $sha
 git add web-version.json
-git commit -m "web-version.json 배포 버전 갱신 ($sha)"
+Invoke-GitCommitUtf8 -CommitMessage ("web-version.json 배포 버전 갱신 ({0})" -f $sha)
 
 if (-not $NoPush) {
     git push origin main

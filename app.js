@@ -21375,7 +21375,13 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function setAreaCreateShape(shape) {
-        state.areaCreateShape = normalizeAreaShape(shape === 'ellipse' || shape === 'polygon' ? shape : 'rect');
+        const next = normalizeAreaShape(shape === 'ellipse' || shape === 'polygon' ? shape : 'rect');
+        // 다른 도형 버튼으로 바꾸면 그리던 다각형은 그 모양으로 저장
+        if (pendingAreaPoly && pendingAreaPoly.length && next !== 'polygon') {
+            if (pendingAreaPoly.length >= 3) finishPendingAreaPolygon({ skipModeSwitch: true });
+            else pendingAreaPoly = null;
+        }
+        state.areaCreateShape = next;
         state.areaInkTool = null;
         pendingInkPoly = null;
         if (state.mode !== 'AREA') setDrawMode('AREA');
@@ -21387,6 +21393,10 @@ document.addEventListener('DOMContentLoaded', () => {
         if (next && !getSelectedAreaForInk()) {
             window.showToast?.('내부 그리기 전에 영역을 선택하세요.', 'info', 2500);
             return;
+        }
+        if (next && pendingAreaPoly && pendingAreaPoly.length) {
+            if (pendingAreaPoly.length >= 3) finishPendingAreaPolygon({ skipModeSwitch: true });
+            else pendingAreaPoly = null;
         }
         state.areaInkTool = next;
         pendingInkPoly = null;
