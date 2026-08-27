@@ -3741,7 +3741,11 @@ document.addEventListener('DOMContentLoaded', () => {
             window._addBuildingMode = 'new';
             setAddBuildingMode('new');
 
+            const siteInput = document.getElementById('inputBuildingSiteName');
+            const dongInput = document.getElementById('inputBuildingDong');
             const nameInput = document.getElementById('inputBuildingName');
+            if (siteInput) siteInput.value = window.state.dashboardSiteKey || '';
+            if (dongInput) dongInput.value = '';
             if (nameInput) nameInput.value = '';
             const addrInput = document.getElementById('inputBuildingAddress');
             if (addrInput) addrInput.value = '';
@@ -3763,6 +3767,12 @@ document.addEventListener('DOMContentLoaded', () => {
             if (yearInput) yearInput.value = '2026년';
             const periodInput = document.getElementById('inputBuildingInspectionPeriod');
             if (periodInput) periodInput.value = '하반기';
+            // 회차 화면에서 현장 추가가 아니라, 현장 목록에서 열릴 때 회차 기본값
+            if (window.state.dashboardRoundKey) {
+                const parts = String(window.state.dashboardRoundKey).split('_');
+                if (yearInput && parts[0]) yearInput.value = parts[0];
+                if (periodInput && parts.length > 1) periodInput.value = parts.slice(1).join('_');
+            }
 
             const preview = document.getElementById('drawingSortPreview');
             if (preview) preview.innerHTML = '';
@@ -3779,7 +3789,8 @@ document.addEventListener('DOMContentLoaded', () => {
             if (addBodyEl) addBodyEl.scrollTop = 0;
             // 터치(모바일/태블릿): 자동 포커스로 키보드가 뜨면 기본정보가 가려지므로 PC만 포커스
             const isTouchUi = (navigator.maxTouchPoints > 0) || ('ontouchstart' in window);
-            if (nameInput && !isTouchUi) setTimeout(() => nameInput.focus(), 80);
+            const focusEl = siteInput || nameInput;
+            if (focusEl && !isTouchUi) setTimeout(() => focusEl.focus(), 80);
         }
     };
 
