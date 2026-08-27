@@ -6,19 +6,25 @@
     <script>
     (function () {
         var ua = navigator.userAgent || '';
-        var desktopSite = (/(Macintosh/i.test(ua) && navigator.maxTouchPoints > 1)
-            || (/Android/i.test(ua) && !/Mobile/i.test(ua))
-            || (/Linux x86_64|CrOS/i.test(ua) && navigator.maxTouchPoints > 0));
         var tablet = /iPad|Tablet|PlayBook|Silk/i.test(ua)
-            || (/Android/i.test(ua) && !/Mobile/i.test(ua));
+            || (/Android/i.test(ua) && !/Mobile/i.test(ua))
+            || (/Macintosh/i.test(ua) && navigator.maxTouchPoints > 1);
         if (!tablet && navigator.maxTouchPoints > 0) {
             var w = window.innerWidth || document.documentElement.clientWidth || 0;
             var h = window.innerHeight || document.documentElement.clientHeight || 0;
             if (Math.min(w, h) >= 600 && Math.max(w, h) >= 900) tablet = true;
         }
-        if (!desktopSite && !tablet) return;
+        // 태블릿: 모바일 터치 UI (PC 강제 레이아웃/뷰포트 1280 사용 안 함)
+        if (tablet) {
+            document.documentElement.classList.add('layout-tablet');
+            document.documentElement.classList.remove('layout-desktop');
+            return;
+        }
+        // 폰 "데스크톱 사이트"만 PC 레이아웃
+        var desktopSite = (/Android/i.test(ua) && !/Mobile/i.test(ua))
+            || (/Linux x86_64|CrOS/i.test(ua) && navigator.maxTouchPoints > 0);
+        if (!desktopSite) return;
         document.documentElement.classList.add('layout-desktop');
-        if (tablet) document.documentElement.classList.add('layout-tablet');
         var vp = document.getElementById('viewportMeta');
         if (vp) vp.setAttribute('content', 'width=1280, initial-scale=1.0, minimum-scale=0.25, maximum-scale=5.0, user-scalable=yes');
     })();
@@ -32,7 +38,7 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <meta name="apple-mobile-web-app-title" content="스마트 안전점검">
-    <link rel="stylesheet" href="styles.css?v=20260827_edit_draw_split">
+    <link rel="stylesheet" href="styles.css?v=20260827_tablet_touch">
     <!-- FontAwesome icons for clean engineering UI -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <!-- PDF 생성용: 페이지별로 직접 캡처해서 조립(큰 보고서에서 html2pdf 한방 렌더링이 캔버스 높이 한계로
