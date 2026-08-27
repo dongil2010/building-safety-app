@@ -1209,6 +1209,14 @@ body {
     min-height: 0;
 }
 
+#tab-map.is-defect-list-collapsed .inspect-sidebar-left {
+    display: none !important;
+}
+
+.mode-btn.toolbar-defect-list-toggle[aria-pressed="false"] {
+    opacity: 0.72;
+}
+
 .inspect-sidebar-title {
     font-size: 0.85rem;
     font-weight: 800;

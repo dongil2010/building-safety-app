@@ -13728,9 +13728,56 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // 손상 유형·분류 필터가 적용된 현재 층 결함 중, 도면에 실제로 그릴 항목만 반환
-    function getCurrentFloorMapPlacedDefects() {
-        return filterMapPlacedDefects(getCurrentFloorFilteredDefects());
+    // 조사항목 창이 꺼진 채 마킹이 선택돼 있으면 선택된 것만 표시(솔로 보기)
+    function getCurrentFloorMapPlacedDefects(opts) {
+        opts = opts || {};
+        let list = filterMapPlacedDefects(getCurrentFloorFilteredDefects());
+        const forDraw = opts.forDraw !== false;
+        if (forDraw && !isMapDefectListOpen()
+            && typeof selectedDefectIds !== 'undefined'
+            && selectedDefectIds && selectedDefectIds.size > 0) {
+            list = list.filter((d) => d && d.id && selectedDefectIds.has(d.id));
+        }
+        return list;
     }
+
+    function isMapDefectListOpen() {
+        return window.state.mapDefectListOpen !== false;
+    }
+
+    function applyMapDefectListChrome() {
+        const open = isMapDefectListOpen();
+        const tab = document.getElementById('tab-map');
+        if (tab) tab.classList.toggle('is-defect-list-collapsed', !open);
+        document.body.classList.toggle('map-defect-list-collapsed', !open);
+        const syncBtn = (btn) => {
+            if (!btn) return;
+            btn.setAttribute('aria-pressed', open ? 'true' : 'false');
+            btn.classList.toggle('active', open);
+            const stateEl = btn.querySelector('.toolbar-toggle-state');
+            if (stateEl) stateEl.textContent = open ? 'ON' : 'OFF';
+            btn.title = open
+                ? '좌측 조사항목 창 끄기 (끄면 선택 마킹만 도면에 표시)'
+                : '좌측 조사항목 창 켜기 (켜면 전체 마킹·기존 하이라이트)';
+        };
+        syncBtn(document.getElementById('btnToggleDefectList'));
+        syncBtn(document.getElementById('mobileBtnToggleDefectList'));
+    }
+
+    window.setMapDefectListOpen = function(open) {
+        window.state.mapDefectListOpen = !!open;
+        try {
+            localStorage.setItem('bsa_map_defect_list_open', open ? '1' : '0');
+        } catch (_e) { /* ignore */ }
+        applyMapDefectListChrome();
+        if (typeof resizeCanvas === 'function') resizeCanvas();
+        if (typeof drawCanvas === 'function') drawCanvas();
+        if (typeof renderDefectListPanel === 'function') renderDefectListPanel();
+    };
+
+    window.toggleMapDefectList = function() {
+        window.setMapDefectListOpen(!isMapDefectListOpen());
+    };
 
     function startMapRegisterForDefect(defectId) {
         const defect = getCurrentFloorDefects().find(d => d.id === defectId);
@@ -18749,6 +18796,8 @@ document.addEventListener('DOMContentLoaded', () => {
             renderDefectListPanel({ scrollToSelection: options.scrollToSelection === true });
         }
         if (typeof syncAreaToolPanelUi === 'function') syncAreaToolPanelUi();
+        // 조사항목 창 OFF 시 선택 변경 = 도면에 보이는 마킹이 바뀌므로 즉시 다시 그림
+        if (!isMapDefectListOpen() && typeof drawCanvas === 'function') drawCanvas();
     }
 
     // 상태조사표 → 결함위치도: 해당 마킹 선택·화면 이동
@@ -18868,7 +18917,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 return { label, scale, defect: pendingDefect };
             }
         }
-        const currentDefects = getCurrentFloorMapPlacedDefects();
+        const currentDefects = getCurrentFloorMapPlacedDefects({ forDraw: false });
         const nextSeq = currentDefects.length + 1;
         const nextSeqStr = nextSeq < 10 ? `0${nextSeq}` : `${nextSeq}`;
         const label = `NO.${nextSeqStr}`;
@@ -22252,6 +22301,22 @@ document.addEventListener('DOMContentLoaded', () => {
             refreshCanvasAfterStylePanelToggle();
         });
     }
+
+    const bindDefectListToggle = (btn) => {
+        if (!btn || btn.dataset.defectListToggleBound) return;
+        btn.dataset.defectListToggleBound = '1';
+        btn.addEventListener('click', () => {
+            if (typeof window.toggleMapDefectList === 'function') window.toggleMapDefectList();
+        });
+    };
+    bindDefectListToggle(document.getElementById('btnToggleDefectList'));
+    bindDefectListToggle(document.getElementById('mobileBtnToggleDefectList'));
+    try {
+        const savedList = localStorage.getItem('bsa_map_defect_list_open');
+        if (savedList === '0') window.state.mapDefectListOpen = false;
+        else if (savedList === '1') window.state.mapDefectListOpen = true;
+    } catch (_e) { /* ignore */ }
+    if (typeof applyMapDefectListChrome === 'function') applyMapDefectListChrome();
 
     const btnToggleNdtStyleSize = document.getElementById('btnToggleNdtStyleSize');
     if (btnToggleNdtStyleSize && !btnToggleNdtStyleSize.dataset.pcToggleBound) {
