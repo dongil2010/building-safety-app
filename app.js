@@ -15238,6 +15238,130 @@ document.addEventListener('DOMContentLoaded', () => {
         return '/';
     }
 
+    /**
+     * 엑셀/한글 규모 문자열 → crackMeasures[].
+     * "0.3/3.00.2/3.0" → [{0.3,3.0,/},{0.2,3.0,/}]
+     * "0.3/2.00.3*0.3" → [{0.3,2.0,/},{0.3,0.3,x}]
+     * 콤마·공백으로 나뉜 경우도 동일. -nEA 개수 유지.
+     */
+    function parseSizeTextToCrackMeasures(raw) {
+        let rest = String(raw == null ? '' : raw)
+            .replace(/㎜/gi, 'mm')
+            .replace(/\u00d7/g, 'x') // ×
+            .trim();
+        if (!rest || rest === '-') return [];
+
+        const takeNumber = (s) => {
+            const m = String(s).match(/^(\d+(?:\.\d+)?)/);
+            if (!m) return null;
+            let num = m[1];
+            let after = s.slice(m[0].length);
+            // 3.00.2 → 3.0 + 0.2 (끝 0이 다음 소수 0.x 의 0)
+            while (/0$/.test(num) && /^\.\d/.test(after)) {
+                num = num.slice(0, -1);
+                after = `0${after}`;
+            }
+            if (num.endsWith('.')) num = num.slice(0, -1);
+            if (!num || !/^\d+(?:\.\d+)?$/.test(num)) return null;
+            return { num, after };
+        };
+
+        const out = [];
+        let guard = 0;
+        while (rest && guard++ < 40) {
+            rest = rest.replace(/^[\s,;|/·]+/, '');
+            if (!rest) break;
+
+            let m = rest.match(/^Cw\s*[:=]\s*/i);
+            if (m) {
+                rest = rest.slice(m[0].length);
+                const w = takeNumber(rest);
+                if (!w) break;
+                rest = w.after.replace(/^\s*mm\b/i, '');
+                let count = '';
+                const ea = rest.match(/^\s*-\s*(\d+)\s*EA(?![A-Za-z])/i);
+                if (ea) {
+                    count = ea[1];
+                    rest = rest.slice(ea[0].length);
+                }
+                out.push({
+                    width: normalizeCrackDecimalText(w.num),
+                    length: '',
+                    count,
+                    join: '/'
+                });
+                continue;
+            }
+
+            const w = takeNumber(rest);
+            if (!w) break;
+            rest = w.after.replace(/^\s*mm\b/i, '');
+            const joinM = rest.match(/^\s*([/x*])\s*/i);
+            if (!joinM) {
+                // 폭만
+                let count = '';
+                const ea = rest.match(/^\s*-\s*(\d+)\s*EA(?![A-Za-z])/i);
+                if (ea) {
+                    count = ea[1];
+                    rest = rest.slice(ea[0].length);
+                } else if (out.length === 0 && !/^\d/.test(rest.replace(/^[\s,;]+/, ''))) {
+                    // 숫자만 하나 있고 더 이상 규모 패턴이 아니면 폭 단독으로 인정
+                    out.push({
+                        width: normalizeCrackDecimalText(w.num),
+                        length: '',
+                        count: '',
+                        join: '/'
+                    });
+                    break;
+                } else {
+                    break;
+                }
+                out.push({
+                    width: normalizeCrackDecimalText(w.num),
+                    length: '',
+                    count,
+                    join: '/'
+                });
+                continue;
+            }
+            const join = /[x*]/i.test(joinM[1]) ? 'x' : '/';
+            rest = rest.slice(joinM[0].length);
+            const l = takeNumber(rest);
+            if (!l) break;
+            rest = l.after.replace(/^\s*m\b(?![m])/i, '');
+            let count = '';
+            const ea = rest.match(/^\s*-\s*(\d+)\s*EA(?![A-Za-z])/i);
+            if (ea) {
+                count = ea[1];
+                rest = rest.slice(ea[0].length);
+            }
+            out.push({
+                width: normalizeCrackDecimalText(w.num),
+                length: normalizeCrackDecimalText(l.num),
+                count,
+                join
+            });
+        }
+        return out;
+    }
+
+    function applyParsedCrackMeasuresToDefect(defect, measures, sizeFallback) {
+        if (!defect || !Array.isArray(measures) || !measures.length) return false;
+        defect.crackMeasures = measures.map((m) => ({
+            width: m.width || '',
+            length: m.length || '',
+            count: m.count || '',
+            join: normalizeMeasureJoin(m.join)
+        }));
+        defect.crackWidth = measures.map((m) => m.width).filter(Boolean).join(' / ');
+        defect.crackLength = measures.map((m) => m.length).filter(Boolean).join(' / ');
+        const counts = measures.map((m) => m.count).filter(Boolean);
+        if (counts.length) defect.itemCount = counts.join(' / ');
+        const composed = measures.map(formatCrackMeasurePair).filter(Boolean).join(', ');
+        defect.size = composed || sizeFallback || defect.size || '';
+        return true;
+    }
+
     /** 폭·길이: 0.3 처럼 소수 있으면 유지, 2·5·4 처럼 정수만이면 .0 붙임 */
     function normalizeCrackDecimalText(raw) {
         const s = String(raw == null ? '' : raw).trim();
@@ -21619,7 +21743,13 @@ document.addEventListener('DOMContentLoaded', () => {
                     defect.cause = value;
                     break;
                 case 'size': {
-                    // Cw:0.15 / Cw:0.15 -2EA / 0.15/1.5 / 0.15/1.5 -2EA
+                    const parsed = parseSizeTextToCrackMeasures(value);
+                    if (parsed.some((m) => m && m.width && m.length) || parsed.length > 1
+                        || (parsed.length === 1 && (parsed[0].count || parsed[0].width))) {
+                        applyParsedCrackMeasuresToDefect(defect, parsed, value);
+                        break;
+                    }
+                    // Cw:0.15 / Cw:0.15 -2EA / 0.15/1.5 / 0.15/1.5 -2EA (단일·구형)
                     const cwEa = value.match(/^Cw\s*[:=]\s*([^/\-\s]+)\s*(?:-\s*(\d+)\s*EA)?$/i);
                     if (cwEa) {
                         defect.crackWidth = cwEa[1].trim().replace(/mm$/i, '');
@@ -27192,14 +27322,21 @@ document.addEventListener('DOMContentLoaded', () => {
                 const defectType = defectTypeRaw || '기타';
                 const isGood = defectType === '상태양호';
 
-                // 균열폭/균열길이가 별도 매핑 안 됐고 결함크기 칸이 "0.15/1.5" 형태면 자동 분리
-                // (이 앱에서 내보낸 파일을 그대로 다시 가져올 때 호환되도록)
-                if (!crackWidthRaw && !crackLengthRaw && defectType === '균열' && sizeRaw) {
-                    const m = sizeRaw.match(/^\s*([\d.]+|-)\s*\/\s*([\d.]+|-)\s*$/);
-                    if (m) {
-                        crackWidthRaw = m[1] === '-' ? '' : m[1];
-                        crackLengthRaw = m[2] === '-' ? '' : m[2];
+                // 규모칸에 "0.3/3.00.2/3.0", "0.3/2.00.3*0.3"처럼 여러 폭·길이가 붙어 있으면
+                // crackMeasures 행으로 분리 ( / → 슬래시, *·x → x 조인 )
+                let parsedMeasures = [];
+                if (!isGood && sizeRaw) {
+                    parsedMeasures = parseSizeTextToCrackMeasures(sizeRaw);
+                }
+                const hasParsedPairs = parsedMeasures.some((m) => m && m.width && m.length);
+                const typeHasCrack = /균열/.test(defectType);
+                if (hasParsedPairs || (typeHasCrack && parsedMeasures.length && !crackWidthRaw && !crackLengthRaw)) {
+                    if (!crackWidthRaw && !crackLengthRaw) {
+                        crackWidthRaw = parsedMeasures.map((m) => m.width).filter(Boolean).join(' / ');
+                        crackLengthRaw = parsedMeasures.map((m) => m.length).filter(Boolean).join(' / ');
                     }
+                } else {
+                    parsedMeasures = [];
                 }
 
                 const noRawTrimmed = (noRaw || '').trim();
@@ -27218,6 +27355,11 @@ document.addEventListener('DOMContentLoaded', () => {
                     existing.size = isGood ? '' : sizeRaw;
                     existing.crackWidth = isGood ? '' : crackWidthRaw;
                     existing.crackLength = isGood ? '' : crackLengthRaw;
+                    if (!isGood && parsedMeasures.length) {
+                        applyParsedCrackMeasuresToDefect(existing, parsedMeasures, sizeRaw);
+                    } else if (isGood) {
+                        existing.crackMeasures = [];
+                    }
                     existing.isProgress = isGood ? false : resolveImportFlag(progressRaw);
                     existing.isLeak = isGood ? false : resolveImportFlag(leakRaw);
                     // 엑셀 가져오기는 항상 전차(전회차) 조사내용으로 분류
@@ -27252,6 +27394,9 @@ document.addEventListener('DOMContentLoaded', () => {
                     photos: [],
                     inspectorName: window.state.userName || ''
                 };
+                if (!isGood && parsedMeasures.length) {
+                    applyParsedCrackMeasuresToDefect(newDefect, parsedMeasures, sizeRaw);
+                }
 
                 if (importPrevRound) {
                     newDefect.isCarriedOver = true;
