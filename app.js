@@ -14899,11 +14899,22 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    function setDefectAreaStylePanelVisible(isArea) {
+    function syncDefectAreaAngleRowVisible(shapeHint) {
+        const angEl = document.getElementById('defectAreaAngle');
+        const row = angEl?.closest('.defect-area-style-row');
+        if (!row) return;
+        const shape = (shapeHint && typeof shapeHint === 'object')
+            ? getAreaShape(shapeHint)
+            : normalizeAreaShape(shapeHint || 'rect');
+        row.style.display = shape === 'polygon' ? 'none' : '';
+    }
+
+    function setDefectAreaStylePanelVisible(isArea, shapeHint) {
         const block = document.getElementById('defectAreaStyleBlock');
         const arrowBlock = document.querySelector('#defectModal .defect-arrow-block');
         if (block) block.style.display = isArea ? '' : 'none';
         if (arrowBlock) arrowBlock.style.display = isArea ? 'none' : '';
+        if (isArea) syncDefectAreaAngleRowVisible(shapeHint);
     }
 
     function paintAreaInterior(ctx, x1, y1, x2, y2, color, fillStyle) {
@@ -14941,6 +14952,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function getAreaShape(defect) {
         return normalizeAreaShape(defect && defect.areaShape);
+    }
+
+    function areaShapeSupportsRotation(defect) {
+        return getAreaShape(defect) !== 'polygon';
     }
 
     function getAreaAngleDeg(defect) {
@@ -15084,7 +15099,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function rotateAreaDefect(defect, newAngleDeg) {
-        if (!defect) return;
+        if (!defect || !areaShapeSupportsRotation(defect)) return;
         const { cx, cy } = getAreaAabb(defect);
         const old = getAreaAngleDeg(defect);
         const delta = newAngleDeg - old;
@@ -15407,20 +15422,22 @@ document.addEventListener('DOMContentLoaded', () => {
                 ctx.fill();
                 ctx.stroke();
             });
-            const handle = getAreaRotateHandle(defect);
-            const { cx, cy } = getAreaAabb(defect);
-            ctx.beginPath();
-            ctx.moveTo(cx, cy);
-            ctx.lineTo(handle.x, handle.y);
-            ctx.strokeStyle = '#0f172a';
-            ctx.lineWidth = 1.2;
-            ctx.stroke();
-            ctx.beginPath();
-            ctx.arc(handle.x, handle.y, 7, 0, Math.PI * 2);
-            ctx.fillStyle = '#f59e0b';
-            ctx.fill();
-            ctx.strokeStyle = '#fff';
-            ctx.stroke();
+            if (areaShapeSupportsRotation(defect)) {
+                const handle = getAreaRotateHandle(defect);
+                const { cx, cy } = getAreaAabb(defect);
+                ctx.beginPath();
+                ctx.moveTo(cx, cy);
+                ctx.lineTo(handle.x, handle.y);
+                ctx.strokeStyle = '#0f172a';
+                ctx.lineWidth = 1.2;
+                ctx.stroke();
+                ctx.beginPath();
+                ctx.arc(handle.x, handle.y, 7, 0, Math.PI * 2);
+                ctx.fillStyle = '#f59e0b';
+                ctx.fill();
+                ctx.strokeStyle = '#fff';
+                ctx.stroke();
+            }
         }
         ctx.restore();
     }
@@ -19350,9 +19367,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 const minYField = d.areaY1 <= d.areaY2 ? 'areaY1' : 'areaY2';
                 const maxYField = d.areaY1 <= d.areaY2 ? 'areaY2' : 'areaY1';
 
-                const rotHandle = getAreaRotateHandle(d);
-                if (Math.hypot(imgX - rotHandle.x, imgY - rotHandle.y) <= 14) {
-                    return { defect: d, part: 'AREA_ROTATE' };
+                if (areaShapeSupportsRotation(d)) {
+                    const rotHandle = getAreaRotateHandle(d);
+                    if (Math.hypot(imgX - rotHandle.x, imgY - rotHandle.y) <= 14) {
+                        return { defect: d, part: 'AREA_ROTATE' };
+                    }
                 }
 
                 // 다각형: 꼭짓점 핸들 (AABB 모서리 리사이즈 대신)
@@ -20826,7 +20845,11 @@ document.addEventListener('DOMContentLoaded', () => {
         const titleEl = document.getElementById('defectModalTitle');
         if (titleEl) titleEl.textContent = `📍 결함 핀 일괄 수정 (${defects.length}건)`;
 
-        setDefectAreaStylePanelVisible(defects.every(d => d.shapeType === 'area' && d.areaX1 !== undefined));
+        const bulkAllArea = defects.every(d => d.shapeType === 'area' && d.areaX1 !== undefined);
+        setDefectAreaStylePanelVisible(
+            bulkAllArea,
+            bulkAllArea && defects.some(d => getAreaShape(d) === 'polygon') ? 'polygon' : (defects[0] || 'rect')
+        );
 
         window._defectPhotosDirty = false;
         window._defectEditSessionHistoryPushed = false;
@@ -21116,7 +21139,11 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         const isAreaModal = !!(existingPin && existingPin.shapeType === 'area' && existingPin.areaX1 !== undefined) || !!areaRect || !!window._pendingAreaRect;
-        setDefectAreaStylePanelVisible(isAreaModal);
+        const areaShapeHint = existingPin
+            || (areaRect && { areaShape: areaRect.areaShape })
+            || (window._pendingAreaRect && { areaShape: window._pendingAreaRect.areaShape })
+            || 'rect';
+        setDefectAreaStylePanelVisible(isAreaModal, areaShapeHint);
         if (isAreaModal) {
             const src = existingPin || window._defectMarkingTemplate || null;
             syncDefectAreaStyleUi(
