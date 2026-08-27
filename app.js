@@ -12597,8 +12597,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function getStructuralComponentGroup(component) {
         const comp = component || '';
-        const isColumnWall = comp.includes('기둥') || comp.includes('벽체');
+        const isColumnWall = comp.includes('기둥') || comp.includes('벽체') || comp.includes('기초');
         const isBeamSlab = comp.includes('보') || comp.includes('슬래브') || comp.includes('거더') || comp.includes('빔');
+        if (comp.includes('접합부') || comp.includes('접합')) {
+            if (isColumnWall && isBeamSlab) return 'both';
+            if (isColumnWall) return 'columnWall';
+            if (isBeamSlab) return 'beamSlab';
+            return 'both';
+        }
         if (isColumnWall && isBeamSlab) return 'both';
         if (isColumnWall) return 'columnWall';
         if (isBeamSlab) return 'beamSlab';
@@ -13660,8 +13666,27 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // --- Dynamic Defect Component(부재 명칭) — 분류별 플랫 프리셋 ---
+    const DEFECT_JOINT_LEFT = ['기둥', 'RC기둥', '철골기둥', 'SRC기둥', '큰보', '작은보', '벽체', 'RC벽체', '내력벽', '슬래브', '기초'];
+    const DEFECT_JOINT_RIGHT = ['보', '큰보', '작은보', '철골거더', '철골빔', '기둥', '슬래브', '데크슬래브', '벽체', '기초'];
+    const DEFECT_JOINT_COMPONENT_PRESET = [
+        '기둥-보 접합부',
+        '기둥-슬래브 접합부',
+        '보-슬래브 접합부',
+        '벽체-슬래브 접합부',
+        '벽체-보 접합부',
+        '기초-기둥 접합부',
+        '철골 접합부'
+    ];
     const DEFECT_COMPONENT_PRESET = {
-        '구조체': ['기둥', 'RC기둥', '철골기둥', 'SRC기둥', '큰보', '작은보', '철골거더', '철골빔', '캔틸레버보', '슬래브', '데크슬래브', 'RC벽체', '내력벽', '계단', '계단참', '계단슬래브', '기초', '독립기초', '매트기초', '기타'],
+        '구조체': [
+            '기둥', 'RC기둥', '철골기둥', 'SRC기둥',
+            '큰보', '작은보', '철골거더', '철골빔', '캔틸레버보',
+            '슬래브', '데크슬래브', 'RC벽체', '내력벽',
+            '계단', '계단참', '계단슬래브',
+            '기초', '독립기초', '매트기초',
+            ...DEFECT_JOINT_COMPONENT_PRESET,
+            '기타'
+        ],
         '비구조체': ['조적벽체', '칸막이벽', 'ALC벽', '창호', '문', '셔터', '난간', '지붕 패널', '패널', '기타'],
         '마감재': ['외장타일', '외장석재', '도장', '금속패널', '내장타일', '수장', '내장도장', '천장 마감재', '바닥타일', '바닥마감', '기타']
     };
@@ -13736,28 +13761,121 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    function isJointComponentName(name) {
+        const t = String(name || '');
+        return t.includes('접합부') || t.includes('접합');
+    }
+
+    function fillDefectJointSelects() {
+        const left = document.getElementById('defectJointLeft');
+        const right = document.getElementById('defectJointRight');
+        if (!left || !right) return;
+        const fill = (el, list, preferred) => {
+            const cur = el.value || preferred || list[0];
+            el.innerHTML = list.map((v) => `<option value="${escapeHtml(v)}">${escapeHtml(v)}</option>`).join('');
+            if (list.includes(cur)) el.value = cur;
+        };
+        fill(left, DEFECT_JOINT_LEFT, '기둥');
+        fill(right, DEFECT_JOINT_RIGHT, '보');
+    }
+
+    function buildJointComponentName(left, right) {
+        const a = String(left || '').trim();
+        const b = String(right || '').trim();
+        if (!a || !b) return '';
+        return `${a}-${b} 접합부`;
+    }
+
+    function applyJointComponentFromComposer() {
+        const left = document.getElementById('defectJointLeft')?.value || '';
+        const right = document.getElementById('defectJointRight')?.value || '';
+        const name = buildJointComponentName(left, right);
+        if (!name) return;
+        const categoryEl = document.getElementById('defectCategory');
+        const cat = categoryEl?.value || '구조체';
+        if (categoryEl && cat !== '구조체') {
+            categoryEl.value = '구조체';
+            categoryEl.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+        const componentSelect = document.getElementById('defectComponent');
+        const componentInput = document.getElementById('defectComponentInput');
+        if (isDefectBulkEditMode()) markDefectBulkFieldChanged('component');
+        // 목록에 없으면 커스텀으로 확보
+        if (!window.state.customDefectComponents) window.state.customDefectComponents = { '구조체': [], '비구조체': [], '마감재': [] };
+        if (!window.state.customDefectComponents['구조체']) window.state.customDefectComponents['구조체'] = [];
+        const presetHas = (DEFECT_COMPONENT_PRESET['구조체'] || []).includes(name);
+        if (!presetHas && !window.state.customDefectComponents['구조체'].includes(name)) {
+            window.state.customDefectComponents['구조체'].push(name);
+        }
+        populateDefectComponentDropdown('구조체', name);
+        syncDefectComboFields(componentSelect, componentInput, name);
+        updateDefectTypeDropdown('구조체', getDefectComboValue(
+            document.getElementById('defectType'),
+            document.getElementById('defectTypeInput')
+        ));
+        if (typeof scheduleDefectAutoApply === 'function') scheduleDefectAutoApply();
+        if (typeof saveStateToLocalStorage === 'function') saveStateToLocalStorage();
+        refreshDefectQuickPickBar();
+    }
+
+    function bindDefectJointComposer() {
+        const modeBtn = document.getElementById('btnDefectJointMode');
+        const applyBtn = document.getElementById('btnApplyDefectJoint');
+        if (modeBtn && !modeBtn.dataset.bound) {
+            modeBtn.dataset.bound = '1';
+            modeBtn.addEventListener('click', () => {
+                window._defectComponentJointMode = !window._defectComponentJointMode;
+                refreshDefectQuickPickBar();
+            });
+        }
+        if (applyBtn && !applyBtn.dataset.bound) {
+            applyBtn.dataset.bound = '1';
+            applyBtn.addEventListener('click', () => applyJointComponentFromComposer());
+        }
+        fillDefectJointSelects();
+    }
+
     function refreshDefectQuickPickBar() {
+        bindDefectJointComposer();
         const categoryEl = document.getElementById('defectCategory');
         const componentSelect = document.getElementById('defectComponent');
         const componentInput = document.getElementById('defectComponentInput');
         const typeSelect = document.getElementById('defectType');
         const typeInput = document.getElementById('defectTypeInput');
-        const causeSelect = document.getElementById('defectCause');
-        const causeInput = document.getElementById('defectCauseInput');
         const currentCategory = categoryEl?.value || '구조체';
         const currentComponent = getDefectComboValue(componentSelect, componentInput);
         const currentType = getDefectComboValue(typeSelect, typeInput);
-        const currentCause = getDefectComboValue(causeSelect, causeInput);
 
         renderQuickPickChipGroup('quickCategoryChips', ['구조체', '비구조체', '마감재'], currentCategory, (value) => {
             if (!categoryEl) return;
             if (isDefectBulkEditMode()) markDefectBulkFieldChanged('category');
             categoryEl.value = value;
             categoryEl.dispatchEvent(new Event('change', { bubbles: true }));
+            if (value !== '구조체') window._defectComponentJointMode = false;
             if (typeof scheduleDefectAutoApply === 'function') scheduleDefectAutoApply();
         });
 
-        const componentOptions = getQuickPickOptionsFromSelect(componentSelect).slice(0, 16);
+        const jointToolbar = document.getElementById('defectJointToolbar');
+        const jointComposer = document.getElementById('defectJointComposer');
+        const jointModeBtn = document.getElementById('btnDefectJointMode');
+        const jointMode = !!window._defectComponentJointMode && currentCategory === '구조체';
+        if (jointToolbar) jointToolbar.style.display = (currentCategory === '구조체') ? '' : 'none';
+        if (jointModeBtn) jointModeBtn.classList.toggle('active', jointMode);
+        if (jointComposer) jointComposer.style.display = jointMode ? 'flex' : 'none';
+
+        let componentOptions = getQuickPickOptionsFromSelect(componentSelect);
+        if (jointMode) {
+            const jointSet = new Set(DEFECT_JOINT_COMPONENT_PRESET);
+            componentOptions = componentOptions.filter((v) => isJointComponentName(v) || jointSet.has(v));
+            DEFECT_JOINT_COMPONENT_PRESET.forEach((v) => {
+                if (!componentOptions.includes(v)) componentOptions.push(v);
+            });
+            if (currentComponent && isJointComponentName(currentComponent) && !componentOptions.includes(currentComponent)) {
+                componentOptions.unshift(currentComponent);
+            }
+        } else {
+            componentOptions = componentOptions.slice(0, 18);
+        }
         renderQuickPickChipGroup('quickComponentChips', componentOptions, currentComponent, (value) => {
             if (isDefectBulkEditMode()) markDefectBulkFieldChanged('component');
             syncDefectComboFields(componentSelect, componentInput, value);
@@ -13782,7 +13900,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const causeGroup = document.getElementById('quickCauseGroup');
         if (causeGroup) causeGroup.style.display = hasActionableDefectType(currentType) ? '' : 'none';
-        // 발생 원인은 체크박스 복수 선택 — 칩은 숨김 유지
         const causeChipHost = document.getElementById('quickCauseChips');
         if (causeChipHost) {
             causeChipHost.style.display = 'none';
@@ -13984,6 +14101,12 @@ document.addEventListener('DOMContentLoaded', () => {
     const RC_COLUMN_DEFECTS = ['상태양호', ...COLUMN_CRACK_KINDS, ...RC_COMMON_OTHER_DEFECTS];
     const RC_BEAM_DEFECTS = ['상태양호', ...BEAM_CRACK_KINDS, ...RC_COMMON_OTHER_DEFECTS];
     const RC_SLAB_DEFECTS = ['상태양호', '균열', ...RC_COMMON_OTHER_DEFECTS];
+    const JOINT_DEFECTS = [
+        '상태양호', ...WALL_CRACK_KINDS,
+        '누수', '철근노출', '백태/유출', '박리/박락',
+        '볼트 이완/파손', '용접부 균열/불량', '접합부 손상',
+        '부식/녹', '변형/좌굴', '기타'
+    ];
 
     // ── 비구조체: 부재별 결함 종류 ──
     const MASONRY_WALL_DEFECTS = [
@@ -14063,6 +14186,14 @@ document.addEventListener('DOMContentLoaded', () => {
         '캔틸레버보': RC_BEAM_DEFECTS,
         '슬래브': RC_SLAB_DEFECTS,
         '계단슬래브': RC_SLAB_DEFECTS,
+        // ── 접합부 ──
+        '기둥-보 접합부': JOINT_DEFECTS,
+        '기둥-슬래브 접합부': JOINT_DEFECTS,
+        '보-슬래브 접합부': JOINT_DEFECTS,
+        '벽체-슬래브 접합부': JOINT_DEFECTS,
+        '벽체-보 접합부': JOINT_DEFECTS,
+        '기초-기둥 접합부': JOINT_DEFECTS,
+        '철골 접합부': STEEL_MEMBER_DEFECTS,
         // ── 비구조체 ──
         '조적벽체': MASONRY_WALL_DEFECTS,
         '칸막이벽': PARTITION_WALL_DEFECTS,
@@ -14094,8 +14225,10 @@ document.addEventListener('DOMContentLoaded', () => {
         const key = normalizeComponentKey(component);
         if (!key) return null;
         if (key.includes('데크슬래브')) return null;
-        if (key.includes('슬래브')) return null; // 슬래브는 '균열'만
+        if (key.includes('슬래브') && !key.includes('접합')) return null; // 슬래브는 '균열'만
+        if (key.includes('철골') && key.includes('접합')) return null;
         if (key.includes('철골')) return null;
+        if (key.includes('접합부') || key.includes('접합')) return WALL_CRACK_KINDS.slice();
         // 비구조체·마감재는 RC 수직/수평균열 칩을 쓰지 않음 (조적벽체는 수직·수평·경사·망상균열 사용)
         if (key.includes('조적')) return WALL_CRACK_KINDS.slice();
         if (key.includes('ALC') || key.includes('칸막이')) return null;
@@ -14172,6 +14305,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (key.includes('패널')) return METAL_PANEL_FINISH_DEFECTS;
             }
             if (category === '구조체' || !category) {
+                if (key.includes('접합부') || key.includes('접합')) {
+                    if (key.includes('철골')) return STEEL_MEMBER_DEFECTS;
+                    return JOINT_DEFECTS;
+                }
                 if (key.includes('철골')) return STEEL_MEMBER_DEFECTS;
                 if ((key.includes('벽체') || key === '내력벽') && !key.includes('조적')) return RC_WALL_DEFECTS;
                 if (key.includes('기둥')) return RC_COLUMN_DEFECTS;
