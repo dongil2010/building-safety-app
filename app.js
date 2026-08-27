@@ -3699,10 +3699,9 @@ document.addEventListener('DOMContentLoaded', () => {
             })[0];
             const editId = editTarget ? escapeHtml(editTarget.id) : '';
             const editBtn = editId
-                ? `<div class="building-row-actions">
-                        <button type="button" class="icon-btn icon-btn-edit" title="현장 정보 수정" data-action="edit" data-bldg-id="${editId}">
+                ? `<div class="building-row-actions building-row-actions-compact">
+                        <button type="button" class="icon-btn icon-btn-edit" title="현장 정보 수정" data-action="edit" data-bldg-id="${editId}" aria-label="현장 정보 수정">
                             <i class="fa-solid fa-pen-to-square"></i>
-                            <span class="icon-btn-label">수정</span>
                         </button>
                    </div>`
                 : '';
@@ -5405,9 +5404,28 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
+        const mode = focusSection === 'drawing' ? 'drawing' : 'info';
         window.currentEditingBuilding = bldg;
         window.selectedEditUploadedDrawings = [];
         window.editDrawingPreviewManualOrder = false;
+        window._editBuildingMode = mode;
+
+        modal.dataset.editMode = mode;
+        modal.classList.toggle('edit-mode-drawing', mode === 'drawing');
+        modal.classList.toggle('edit-mode-info', mode === 'info');
+
+        const titleText = document.getElementById('editBuildingModalTitleText');
+        if (titleText) {
+            titleText.textContent = mode === 'drawing' ? '층별 도면 추가/교체' : '현장 정보 수정';
+        }
+        const titleIcon = document.querySelector('#editBuildingModalTitle i');
+        if (titleIcon) {
+            titleIcon.className = mode === 'drawing' ? 'fa-solid fa-images' : 'fa-solid fa-pen-to-square';
+        }
+        const saveLabel = document.getElementById('btnSaveEditBuildingLabel');
+        if (saveLabel) {
+            saveLabel.textContent = mode === 'drawing' ? '도면 저장' : '수정사항 저장';
+        }
 
         // Bind building info to edit modal form inputs
         document.getElementById('inputEditBuildingId').value = bldg.id;
@@ -5442,6 +5460,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const fileInput = document.getElementById('inputEditBuildingDrawings');
         if (fileInput) fileInput.value = '';
+        const pdfInput = document.getElementById('inputEditBuildingDrawingsPdf');
+        if (pdfInput) pdfInput.value = '';
 
         // Render current drawings list preview in low-to-high order
         renderEditDrawingPreview();
@@ -5452,12 +5472,11 @@ document.addEventListener('DOMContentLoaded', () => {
         const modalBody = modal.querySelector('.modal-body');
         if (modalBody) modalBody.scrollTop = 0;
 
-        if (focusSection === 'drawing') {
+        if (mode === 'drawing') {
             setTimeout(() => {
-                const drawingInput = document.getElementById('inputEditBuildingDrawings');
-                const drawingSection = drawingInput ? drawingInput.closest('.form-group') : null;
+                const drawingSection = document.getElementById('editBuildingDrawingSection');
                 if (drawingSection) drawingSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
-            }, 150);
+            }, 80);
         }
     };
 
@@ -5465,8 +5484,81 @@ document.addEventListener('DOMContentLoaded', () => {
         const modal = document.getElementById('editBuildingModal');
         if (modal) {
             modal.style.display = 'none';
-            modal.classList.remove('open');
+            modal.classList.remove('open', 'edit-mode-info', 'edit-mode-drawing');
+            modal.dataset.editMode = 'info';
         }
+        if (typeof window.closeDrawingPreviewLightbox === 'function') {
+            window.closeDrawingPreviewLightbox();
+        }
+    };
+
+    window.closeDrawingPreviewLightbox = function() {
+        const box = document.getElementById('drawingPreviewLightbox');
+        if (!box) return;
+        box.hidden = true;
+        box.classList.remove('open');
+        box.setAttribute('aria-hidden', 'true');
+        const img = document.getElementById('drawingPreviewLightboxImg');
+        if (img) {
+            img.removeAttribute('src');
+            img.hidden = true;
+        }
+        const empty = document.getElementById('drawingPreviewLightboxEmpty');
+        if (empty) empty.hidden = true;
+    };
+
+    window.openDrawingPreviewLightbox = function(src, title) {
+        const box = document.getElementById('drawingPreviewLightbox');
+        if (!box) return;
+        const img = document.getElementById('drawingPreviewLightboxImg');
+        const empty = document.getElementById('drawingPreviewLightboxEmpty');
+        const titleEl = document.getElementById('drawingPreviewLightboxTitle');
+        if (titleEl) titleEl.textContent = title || '도면 미리보기';
+        const usable = typeof isUsableRasterDrawingUrl === 'function'
+            ? isUsableRasterDrawingUrl(src)
+            : !!(src && String(src).length > 8);
+        if (usable && img) {
+            img.hidden = false;
+            img.src = src;
+            if (empty) empty.hidden = true;
+        } else {
+            if (img) {
+                img.hidden = true;
+                img.removeAttribute('src');
+            }
+            if (empty) empty.hidden = false;
+        }
+        box.hidden = false;
+        box.classList.add('open');
+        box.setAttribute('aria-hidden', 'false');
+        box.style.display = 'flex';
+    };
+
+    window.previewEditFloorDrawing = async function(floorCode) {
+        const bldg = window.currentEditingBuilding;
+        if (!bldg || !floorCode) return;
+        const label = (typeof window.getFloorLabelFromCode === 'function')
+            ? window.getFloorLabelFromCode(floorCode)
+            : floorCode;
+        window.showToast?.(`${label} 도면 불러오는 중…`, 'info', 1800);
+        try {
+            if (typeof hydrateFloorDrawingFromCloud === 'function') {
+                await hydrateFloorDrawingFromCloud(bldg, floorCode, {});
+            } else if (typeof ensureOfflineRasterForFloor === 'function') {
+                await ensureOfflineRasterForFloor(bldg, floorCode);
+            }
+        } catch (_e) { /* ignore */ }
+        let src = bldg.floorDrawings && bldg.floorDrawings[floorCode];
+        if (!isUsableRasterDrawingUrl(src) && bldg.floorDrawingTiers && bldg.floorDrawingTiers[floorCode]) {
+            const tiers = bldg.floorDrawingTiers[floorCode];
+            src = tiers['4000'] || tiers['8000'] || tiers['16000'] || Object.values(tiers).find((u) => isUsableRasterDrawingUrl(u));
+        }
+        if (!isUsableRasterDrawingUrl(src)) {
+            window.showToast?.('이 층에 표시할 도면 이미지가 없습니다.', 'warning', 2800);
+            window.openDrawingPreviewLightbox(null, `${label} 도면`);
+            return;
+        }
+        window.openDrawingPreviewLightbox(src, `${label} (${floorCode}) 도면`);
     };
 
     function renderEditDrawingPreview() {
@@ -5504,13 +5596,16 @@ document.addEventListener('DOMContentLoaded', () => {
             // Render Existing Registered Drawings
             existingFloors.forEach((f, idx) => {
                 const hasImg = bldg.floorDrawings && bldg.floorDrawings[f.floorCode];
+                const safeCode = escapeHtml(f.floorCode);
                 html += `
-                    <div style="display:flex; justify-content:space-between; align-items:center; background:#ffffff; border:1px solid #cbd5e1; padding:0.4rem 0.8rem; border-radius:6px; font-size:0.82rem;">
-                        <span>
-                            <strong style="color:#2a2a2a;">[기존 ${idx + 1}]</strong> 🏢 ${f.floorLabel} (${f.floorCode})
-                            ${hasImg ? '<span style="color:#16a34a; font-size:0.75rem; margin-left:0.4rem;">✓ 도면이미지 보유</span>' : ''}
+                    <div class="edit-floor-drawing-row is-viewable" data-floor-code="${safeCode}" role="button" tabindex="0" title="클릭하여 도면 보기">
+                        <span class="edit-floor-drawing-meta">
+                            <strong style="color:#2a2a2a;">[기존 ${idx + 1}]</strong> 🏢 ${escapeHtml(f.floorLabel)} (${safeCode})
+                            ${hasImg
+                                ? '<span class="edit-floor-drawing-badge">✓ 도면 · 눌러서 보기</span>'
+                                : '<span class="edit-floor-drawing-badge">눌러서 도면 불러오기</span>'}
                         </span>
-                        <button type="button" class="btn btn-sm btn-outline" style="border-color:#ef4444; color:#ef4444; font-size:0.72rem; padding:0.1rem 0.4rem;" onclick="window.deleteExistingFloorDrawing('${f.floorCode}')">
+                        <button type="button" class="btn btn-sm btn-outline edit-floor-drawing-delete" style="border-color:#ef4444; color:#ef4444; font-size:0.72rem; padding:0.1rem 0.4rem;" data-floor-code="${safeCode}">
                             <i class="fa-solid fa-trash"></i> 도면 삭제
                         </button>
                     </div>
@@ -5583,6 +5678,34 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         preview.innerHTML = html;
+
+        preview.querySelectorAll('.edit-floor-drawing-row').forEach((row) => {
+            const openView = () => {
+                const code = row.getAttribute('data-floor-code');
+                if (code && typeof window.previewEditFloorDrawing === 'function') {
+                    window.previewEditFloorDrawing(code);
+                }
+            };
+            row.addEventListener('click', (e) => {
+                if (e.target.closest('.edit-floor-drawing-delete')) return;
+                openView();
+            });
+            row.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    openView();
+                }
+            });
+        });
+        preview.querySelectorAll('.edit-floor-drawing-delete').forEach((btn) => {
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const code = btn.getAttribute('data-floor-code');
+                if (code && typeof window.deleteExistingFloorDrawing === 'function') {
+                    window.deleteExistingFloorDrawing(code);
+                }
+            });
+        });
 
         const editNewList = preview.querySelector('.edit-drawing-new-list');
         if (editNewList && editGroups.length > 1) {
@@ -5903,6 +6026,17 @@ document.addEventListener('DOMContentLoaded', () => {
     const btnCancelEditBuilding = document.getElementById('btnCancelEditBuilding');
     if (btnCancelEditBuilding) {
         btnCancelEditBuilding.addEventListener('click', window.closeEditBuildingModalFunc);
+    }
+
+    const btnCloseDrawingPreviewLightbox = document.getElementById('btnCloseDrawingPreviewLightbox');
+    if (btnCloseDrawingPreviewLightbox) {
+        btnCloseDrawingPreviewLightbox.addEventListener('click', () => window.closeDrawingPreviewLightbox());
+    }
+    const drawingPreviewLightbox = document.getElementById('drawingPreviewLightbox');
+    if (drawingPreviewLightbox) {
+        drawingPreviewLightbox.addEventListener('click', (e) => {
+            if (e.target === drawingPreviewLightbox) window.closeDrawingPreviewLightbox();
+        });
     }
 
     // --- 8. DRAWING CANVAS ENGINE (PAN/ZOOM/ROTATE & PINS) ---

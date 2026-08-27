@@ -32,7 +32,7 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <meta name="apple-mobile-web-app-title" content="스마트 안전점검">
-    <link rel="stylesheet" href="styles.css?v=20260827_tablet_drawer">
+    <link rel="stylesheet" href="styles.css?v=20260827_edit_draw_split">
     <!-- FontAwesome icons for clean engineering UI -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <!-- PDF 생성용: 페이지별로 직접 캡처해서 조립(큰 보고서에서 html2pdf 한방 렌더링이 캔버스 높이 한계로
@@ -2141,16 +2141,16 @@
     </div>
 
     <!-- MODAL: Building Information Edit & Floor Drawing Re-upload Modal -->
-    <div class="modal-overlay" id="editBuildingModal">
+    <div class="modal-overlay" id="editBuildingModal" data-edit-mode="info">
         <div class="modal-card edit-building-modal">
             <div class="modal-header edit-building-header">
-                <h3><i class="fa-solid fa-pen-to-square"></i> 건축물 명칭 수정 & 층별 도면 추가/교체</h3>
+                <h3 id="editBuildingModalTitle"><i class="fa-solid fa-pen-to-square"></i> <span id="editBuildingModalTitleText">현장 정보 수정</span></h3>
                 <button type="button" class="modal-close" id="btnCloseEditBuildingModal">&times;</button>
             </div>
             <div class="modal-body edit-building-body">
                 <input type="hidden" id="inputEditBuildingId">
 
-                <section class="add-building-section">
+                <section class="add-building-section edit-only-info">
                     <div class="add-section-head">
                         <span class="add-section-icon"><i class="fa-solid fa-building"></i></span>
                         <div>
@@ -2241,7 +2241,7 @@
                     </div>
                 </section>
 
-                <section class="add-building-section">
+                <section class="add-building-section edit-only-info">
                     <div class="add-section-head">
                         <span class="add-section-icon"><i class="fa-solid fa-clipboard-check"></i></span>
                         <div>
@@ -2282,7 +2282,7 @@
                     </div>
                 </section>
 
-                <div class="edit-next-round-section">
+                <div class="edit-next-round-section edit-only-info">
                     <div class="edit-next-round-head">
                         <div>
                             <h4 class="edit-next-round-title"><i class="fa-solid fa-forward"></i> 다음 회차 점검 시작</h4>
@@ -2294,7 +2294,7 @@
                     </div>
                 </div>
 
-                <div class="edit-import-section">
+                <div class="edit-import-section edit-only-info">
                     <div class="add-section-head">
                         <span class="add-section-icon"><i class="fa-solid fa-clone"></i></span>
                         <div>
@@ -2346,12 +2346,12 @@
                 </div>
                 
                 <!-- Floor Drawing Re-upload & Replace Section -->
-                <section class="add-building-section add-building-upload-section">
+                <section class="add-building-section add-building-upload-section edit-only-drawing" id="editBuildingDrawingSection">
                     <div class="add-section-head">
                         <span class="add-section-icon"><i class="fa-solid fa-file-arrow-up"></i></span>
                         <div>
                             <h4 class="add-section-title">층별 도면 추가 / 교체</h4>
-                            <p class="add-section-desc">B2, 1F 등 파일명 자동인식 · 저층➡️고층 자동 정렬</p>
+                            <p class="add-section-desc">목록을 누르면 도면을 크게 볼 수 있습니다 · B2, 1F 등 파일명 자동인식</p>
                         </div>
                     </div>
                     <div class="add-drawing-dropzone">
@@ -2370,11 +2370,25 @@
                 </section>
             </div>
             <div class="modal-footer edit-building-footer">
-                <button type="button" class="btn btn-outline btn-delete-building" id="btnDeleteBuilding"><i class="fa-solid fa-trash"></i> 휴지통으로 이동</button>
+                <button type="button" class="btn btn-outline btn-delete-building edit-only-info" id="btnDeleteBuilding"><i class="fa-solid fa-trash"></i> 휴지통으로 이동</button>
                 <div class="edit-building-footer-actions">
                     <button type="button" class="btn btn-outline" id="btnCancelEditBuilding">취소</button>
-                    <button type="button" class="btn btn-primary" id="btnSaveEditBuilding"><i class="fa-solid fa-check"></i> 수정사항 및 도면 저장</button>
+                    <button type="button" class="btn btn-primary" id="btnSaveEditBuilding"><i class="fa-solid fa-check"></i> <span id="btnSaveEditBuildingLabel">수정사항 저장</span></button>
                 </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 도면 창: 층 도면 크게 보기 -->
+    <div class="modal-overlay drawing-preview-lightbox" id="drawingPreviewLightbox" hidden aria-hidden="true">
+        <div class="drawing-preview-lightbox-card" role="dialog" aria-modal="true" aria-labelledby="drawingPreviewLightboxTitle">
+            <div class="drawing-preview-lightbox-head">
+                <h3 id="drawingPreviewLightboxTitle">도면 미리보기</h3>
+                <button type="button" class="modal-close" id="btnCloseDrawingPreviewLightbox" aria-label="닫기">&times;</button>
+            </div>
+            <div class="drawing-preview-lightbox-body">
+                <img id="drawingPreviewLightboxImg" alt="층별 도면 미리보기">
+                <p id="drawingPreviewLightboxEmpty" class="drawing-preview-lightbox-empty" hidden>표시할 도면 이미지가 없습니다.</p>
             </div>
         </div>
     </div>
@@ -2647,7 +2661,7 @@
     <script src="js/shared/report.js?v=20260827_overview"></script>
     <script src="js/shared/hwpx-import.js?v=20260825_hwpxin"></script>
     <script src="js/shared/auth.js?v=20260821_land1"></script>
-    <script src="app.js?v=20260827_map_popup_nav"></script>
+    <script src="app.js?v=20260827_edit_draw_split"></script>
     <script>
         window.BSA_APP_VERSION = '20260826_mem1';
         (function () {
