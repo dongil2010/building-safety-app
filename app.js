@@ -3454,8 +3454,10 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         const bindBuildingRowActions = () => {
+            const blockGhostClick = () => window._postAuthClickGuardUntil && Date.now() < window._postAuthClickGuardUntil;
             grid.querySelectorAll('[data-action="open-site"]').forEach((el) => {
                 el.addEventListener('click', (e) => {
+                    if (blockGhostClick()) { e.preventDefault(); e.stopPropagation(); return; }
                     e.stopPropagation();
                     const key = el.getAttribute('data-site-key');
                     if (key) window.openDashboardSiteRounds(key);
@@ -3478,6 +3480,7 @@ document.addEventListener('DOMContentLoaded', () => {
             });
             grid.querySelectorAll('[data-action="edit"]').forEach((el) => {
                 el.addEventListener('click', (e) => {
+                    if (blockGhostClick()) { e.preventDefault(); e.stopPropagation(); return; }
                     e.stopPropagation();
                     const id = el.getAttribute('data-bldg-id');
                     if (id) window.openEditBuildingModalFunc(id, 'info');
@@ -5414,6 +5417,7 @@ document.addEventListener('DOMContentLoaded', () => {
     window.openEditBuildingModalFunc = function(bldgId, focusSection = 'info') {
         const modal = document.getElementById('editBuildingModal');
         if (!modal) return;
+        if (document.body?.classList.contains('auth-gate-active')) return;
 
         const bldgs = window.state.buildings || [];
         const bldg = bldgs.find(b => b.id === bldgId);
@@ -5512,6 +5516,7 @@ document.addEventListener('DOMContentLoaded', () => {
             modal.classList.remove('open', 'edit-mode-info', 'edit-mode-drawing');
             modal.dataset.editMode = 'info';
         }
+        if (window.BSA?.mobileKeyboard?.reset) window.BSA.mobileKeyboard.reset();
         if (typeof window.closeDrawingPreviewLightbox === 'function') {
             window.closeDrawingPreviewLightbox();
         }
@@ -31625,6 +31630,8 @@ document.addEventListener('DOMContentLoaded', () => {
             overlay.style.cssText = 'display: none !important; opacity: 0 !important; pointer-events: none !important; visibility: hidden !important;';
             overlay.classList.remove('open');
         }
+        try { document.activeElement?.blur?.(); } catch (_e) { /* ignore */ }
+        if (window.BSA?.mobileKeyboard?.reset) window.BSA.mobileKeyboard.reset();
         if (typeof window.resetLoadingOverlay === 'function') window.resetLoadingOverlay();
         else if (typeof window.hideLoading === 'function') window.hideLoading();
     }
@@ -31637,6 +31644,9 @@ document.addEventListener('DOMContentLoaded', () => {
         window.state.role = profile.role;
 
         hideAuthOverlay();
+        if (typeof window.closeEditBuildingModalFunc === 'function') window.closeEditBuildingModalFunc();
+        if (typeof window.closeAddBuildingModalFunc === 'function') window.closeAddBuildingModalFunc();
+        window._postAuthClickGuardUntil = Date.now() + 700;
 
         const headerProfile = document.getElementById('headerUserProfileGroup');
         if (headerProfile) headerProfile.style.display = 'flex';
@@ -31672,8 +31682,11 @@ document.addEventListener('DOMContentLoaded', () => {
         if (typeof hydrateAllBuildingPdfsFromCloud === 'function') {
             hydrateAllBuildingPdfsFromCloud().catch((e) => console.warn('서버 PDF 일괄 조회 실패:', e));
         }
-        if (typeof renderDashboard === 'function') renderDashboard();
-        window.switchTab('tab-home');
+        // 로그인 탭 직후 고스트 클릭이 홈 수정 버튼을 누르지 않도록 한 틱 지연
+        setTimeout(() => {
+            if (typeof renderDashboard === 'function') renderDashboard();
+            window.switchTab('tab-home');
+        }, 50);
     }
 
     async function handleAuthStateChange(user) {

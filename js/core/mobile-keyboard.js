@@ -63,6 +63,7 @@
 
     function findPanelForField(el) {
         var overlay = el.closest('.modal-overlay');
+        if (overlay && overlay.id === 'loginOverlay') return null;
         if (overlay && isOverlayVisible(overlay)) {
             var panel = overlay.querySelector(PANEL_SELECTOR);
             if (panel) return { panel: panel, overlay: overlay };
@@ -177,12 +178,18 @@
         state.dragLift = 0;
         state.keyboardH = 0;
         state.dragging = false;
+        state.activeField = null;
         if (state.panel) {
             state.panel.classList.remove('bsa-kb-lifted');
             state.panel.style.removeProperty('--bsa-kb-lift');
-            var handle = state.panel.querySelector('.bsa-kb-drag-handle');
-            if (handle) handle.classList.remove('is-active');
         }
+        document.querySelectorAll('.bsa-kb-drag-handle').forEach(function (handle) {
+            handle.remove();
+        });
+        document.querySelectorAll('.bsa-kb-lifted').forEach(function (panel) {
+            panel.classList.remove('bsa-kb-lifted');
+            panel.style.removeProperty('--bsa-kb-lift');
+        });
         state.panel = null;
         state.overlay = null;
         document.body.classList.remove('bsa-keyboard-open');
@@ -327,6 +334,8 @@
         refresh: function () { updateLayout(true); },
         reset: clearLift
     };
+
+    window.BSA.resetMobileKeyboard = clearLift;
 
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', init);
