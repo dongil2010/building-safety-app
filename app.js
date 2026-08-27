@@ -3507,22 +3507,18 @@ document.addEventListener('DOMContentLoaded', () => {
                         <span class="building-row-name">${titleHtml}</span>
                         <span class="building-row-meta">${metaHtml}</span>
                     </div>
-                    <div class="building-row-actions">
-                        <button type="button" class="icon-btn icon-btn-start" title="이 동 점검 시작" data-action="inspect" data-bldg-id="${safeId}">
+                    <div class="building-row-actions building-row-actions-compact">
+                        <button type="button" class="icon-btn icon-btn-start" title="이 동 점검 시작" data-action="inspect" data-bldg-id="${safeId}" aria-label="점검">
                             <i class="fa-solid fa-map-location-dot"></i>
-                            <span class="icon-btn-label">점검</span>
                         </button>
-                        <button type="button" class="icon-btn icon-btn-edit" title="건축물 개요 수정" data-action="edit" data-bldg-id="${safeId}">
+                        <button type="button" class="icon-btn icon-btn-edit" title="건축물 개요 수정" data-action="edit" data-bldg-id="${safeId}" aria-label="수정">
                             <i class="fa-solid fa-pen-to-square"></i>
-                            <span class="icon-btn-label">수정</span>
                         </button>
-                        <button type="button" class="icon-btn icon-btn-drawing" title="도면 추가/교체" data-action="drawing" data-bldg-id="${safeId}">
+                        <button type="button" class="icon-btn icon-btn-drawing" title="도면 추가/교체" data-action="drawing" data-bldg-id="${safeId}" aria-label="도면">
                             <i class="fa-solid fa-images"></i>
-                            <span class="icon-btn-label">도면</span>
                         </button>
-                        <button type="button" class="icon-btn icon-btn-overview" title="전경사진" data-action="overview" data-bldg-id="${safeId}">
+                        <button type="button" class="icon-btn icon-btn-overview" title="전경사진" data-action="overview" data-bldg-id="${safeId}" aria-label="전경">
                             <i class="fa-solid fa-panorama"></i>
-                            <span class="icon-btn-label">전경</span>
                         </button>
                     </div>
                 </div>
@@ -5411,8 +5407,17 @@ document.addEventListener('DOMContentLoaded', () => {
         window._editBuildingMode = mode;
 
         modal.dataset.editMode = mode;
-        modal.classList.toggle('edit-mode-drawing', mode === 'drawing');
-        modal.classList.toggle('edit-mode-info', mode === 'info');
+        modal.classList.remove('edit-mode-drawing', 'edit-mode-info');
+        modal.classList.add(mode === 'drawing' ? 'edit-mode-drawing' : 'edit-mode-info');
+        // CSS만으로 빠질 때 대비 — 섹션 자체를 숨김
+        modal.querySelectorAll('.edit-only-info').forEach((el) => {
+            el.hidden = mode === 'drawing';
+            el.style.display = mode === 'drawing' ? 'none' : '';
+        });
+        modal.querySelectorAll('.edit-only-drawing').forEach((el) => {
+            el.hidden = mode === 'info';
+            el.style.display = mode === 'info' ? 'none' : '';
+        });
 
         const titleText = document.getElementById('editBuildingModalTitleText');
         if (titleText) {
@@ -5463,21 +5468,19 @@ document.addEventListener('DOMContentLoaded', () => {
         const pdfInput = document.getElementById('inputEditBuildingDrawingsPdf');
         if (pdfInput) pdfInput.value = '';
 
-        // Render current drawings list preview in low-to-high order
-        renderEditDrawingPreview();
+        // 도면 모드일 때만 목록 렌더 (수정 모드는 도면 섹션 숨김)
+        if (mode === 'drawing') {
+            renderEditDrawingPreview();
+        } else {
+            const preview = document.getElementById('editDrawingSortPreview');
+            if (preview) preview.innerHTML = '';
+        }
 
         modal.style.display = 'flex';
         modal.classList.add('open');
 
         const modalBody = modal.querySelector('.modal-body');
         if (modalBody) modalBody.scrollTop = 0;
-
-        if (mode === 'drawing') {
-            setTimeout(() => {
-                const drawingSection = document.getElementById('editBuildingDrawingSection');
-                if (drawingSection) drawingSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
-            }, 80);
-        }
     };
 
     window.closeEditBuildingModalFunc = function() {

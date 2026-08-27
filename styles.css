@@ -5784,16 +5784,21 @@ html:not(.layout-desktop) .survey-inline-select {
     flex-shrink: 0;
 }
 
-/* 수정 / 도면 창 분리 */
-#editBuildingModal.edit-mode-info .edit-only-drawing {
+/* 수정 / 도면 창 분리 (클래스·data·hidden 모두) */
+#editBuildingModal.edit-mode-info .edit-only-drawing,
+#editBuildingModal[data-edit-mode="info"] .edit-only-drawing,
+#editBuildingModal .edit-only-drawing[hidden] {
     display: none !important;
 }
 
-#editBuildingModal.edit-mode-drawing .edit-only-info {
+#editBuildingModal.edit-mode-drawing .edit-only-info,
+#editBuildingModal[data-edit-mode="drawing"] .edit-only-info,
+#editBuildingModal .edit-only-info[hidden] {
     display: none !important;
 }
 
-#editBuildingModal.edit-mode-drawing .edit-building-footer {
+#editBuildingModal.edit-mode-drawing .edit-building-footer,
+#editBuildingModal[data-edit-mode="drawing"] .edit-building-footer {
     justify-content: flex-end;
 }
 
