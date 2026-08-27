@@ -14384,7 +14384,7 @@ document.addEventListener('DOMContentLoaded', () => {
             ...DEFECT_JOINT_COMPONENT_PRESET,
             '기타'
         ],
-        '비구조체': ['조적벽체', '칸막이벽', 'ALC벽', '창호', '문', '셔터', '난간', '지붕 패널', '패널', '기타'],
+        '비구조체': ['조적벽체', '칸막이벽', 'ALC벽', '벽체 접합부', '창호', '문', '셔터', '난간', '지붕 패널', '패널', '기타'],
         '마감재': ['외장타일', '외장석재', '도장', '금속패널', '내장타일', '수장', '내장도장', '천장 마감재', '바닥타일', '바닥마감', '기타']
     };
 
@@ -14834,6 +14834,14 @@ document.addEventListener('DOMContentLoaded', () => {
         '상태양호', '부식/녹', '변형·기울음', '파손/결손', '이격/흔들림',
         '체결부 이완', '낙하·탈락 위험', '높이·간격 불량', '마감 손상', '기타'
     ];
+    // 비구조 벽체 접합부(조적·ALC·칸막이 등 이질재료 접합)
+    const NONSTRUCT_WALL_JOINT_DEFECTS = [
+        '상태양호', ...WALL_CRACK_KINDS, '이격', '줄눈 손상/탈락', '파손/결손', '누수', '백태/유출', '기타'
+    ];
+    const NONSTRUCT_WALL_JOINT_CAUSES = [
+        '이질재료 거동차이', '시공미흡', '온도·수축팽창', '구조체 변위', '부등침하',
+        '지진·진동', '이음·줄눈 불량', '습기·동결', '기타'
+    ];
 
     // ── 마감재: 부재별 결함 종류 ──
     const EXT_TILE_DEFECTS = [
@@ -14895,6 +14903,8 @@ document.addEventListener('DOMContentLoaded', () => {
         '조적벽체': MASONRY_WALL_DEFECTS,
         '칸막이벽': PARTITION_WALL_DEFECTS,
         'ALC벽': ALC_WALL_DEFECTS,
+        '벽체접합부': NONSTRUCT_WALL_JOINT_DEFECTS,
+        '벽체 접합부': NONSTRUCT_WALL_JOINT_DEFECTS,
         '창호': WINDOW_DEFECTS,
         '문': DOOR_DEFECTS,
         '셔터': SHUTTER_DEFECTS,
@@ -14980,6 +14990,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (key.includes('조적')) return MASONRY_WALL_DEFECTS;
                 if (key.includes('칸막이')) return PARTITION_WALL_DEFECTS;
                 if (key.includes('ALC') || key.includes('alc')) return ALC_WALL_DEFECTS;
+                if ((key.includes('벽체') && key.includes('접합')) || key === '벽체접합부') return NONSTRUCT_WALL_JOINT_DEFECTS;
                 if (key.includes('창호') || key.includes('유리창') || (key.includes('창') && !key.includes('천장'))) return WINDOW_DEFECTS;
                 if (key.includes('셔터')) return SHUTTER_DEFECTS;
                 if (key.includes('난간') || key.includes('난간대') || key.includes('손잡이')) return RAILING_DEFECTS;
@@ -15653,7 +15664,7 @@ document.addEventListener('DOMContentLoaded', () => {
         // ── 비구조체 결함 (구·신 라벨 모두) ──
         '조적벽체 균열': CORE_CRACK_CAUSE_PRESET.slice(),
         '이격': [
-            '구조체 변위', '부등침하', '온도·열팽창', '시공미흡', '이음 불량',
+            '이질재료 거동차이', '구조체 변위', '부등침하', '온도·열팽창', '시공미흡', '이음 불량',
             '외력·충격', '지진·진동', '기타'
         ],
         '줄눈 손상/탈락': [
@@ -15938,14 +15949,34 @@ document.addEventListener('DOMContentLoaded', () => {
         { border: '#0891b2', bg: '#ecfeff', text: '#0e7490', accent: '#06b6d4' }
     ];
 
+    function getExtraCausesForCurrentComponent() {
+        const component = getDefectComboValue(
+            document.getElementById('defectComponent'),
+            document.getElementById('defectComponentInput')
+        );
+        const key = normalizeComponentKey(component);
+        if ((key.includes('벽체') && key.includes('접합')) || key === '벽체접합부') {
+            return NONSTRUCT_WALL_JOINT_CAUSES.slice();
+        }
+        return [];
+    }
+
     function getCauseOptionsForKey(key) {
         if (!window.state.customDefectCauses) window.state.customDefectCauses = {};
         if (!window.state.hiddenDefectCauses) window.state.hiddenDefectCauses = {};
         const hidden = window.state.hiddenDefectCauses[key] || [];
         const presetList = (defectCausePreset[key] || defectCausePreset['기타']).filter(c => !hidden.includes(c));
         const customList = window.state.customDefectCauses[key] || [];
+        const extras = getExtraCausesForCurrentComponent().filter(c => !hidden.includes(c));
+        const merged = [];
+        const seen = new Set();
+        [...extras, ...presetList, ...customList].forEach((item) => {
+            if (!item || seen.has(item)) return;
+            seen.add(item);
+            merged.push(item);
+        });
         return applySavedOptionOrder(
-            presetList.concat(customList.filter(item => !presetList.includes(item))),
+            merged,
             ensureOptionOrderEntry('defectCauseOrder', key)
         );
     }
