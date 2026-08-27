@@ -9531,184 +9531,378 @@ html.layout-desktop #tab-ndt .canvas-hint {
 /* ============================================================
    태블릿 터치 UI (layout-tablet)
    - PC 강제 레이아웃 해제 → 모바일 현장 UI 기반
-   - 손가락 조작에 맞게 탭·레일·목록·드로워 크기 확대
+   - 상단 탭·우측 레일·하단 독은 폰과 같은 툴바 디자인
    ============================================================ */
 html.layout-tablet {
     -webkit-text-size-adjust: 100%;
     text-size-adjust: 100%;
 }
 
+/* 상단 탭 툴바 = 모바일 현장형 (콤팩트 + 층 선택 우측) */
 html.layout-tablet .main-tabs {
-    min-height: 3.1rem;
-    padding: 0.28rem 0.35rem;
-    gap: 0.28rem;
+    flex-shrink: 0 !important;
+    display: flex !important;
+    align-items: center !important;
+    gap: 0.25rem !important;
+    padding: 0.2rem 0.4rem !important;
+    min-height: 0 !important;
+    overflow: hidden !important;
+    border-bottom: 1px solid #d4d4d4 !important;
+    background: #fafafa !important;
+}
+
+html.layout-tablet .nav-tabs-cluster {
+    flex: 1 1 auto !important;
+    min-width: 0 !important;
+    overflow-x: auto !important;
+    -webkit-overflow-scrolling: touch;
+    gap: 0.15rem !important;
+}
+
+html.layout-tablet .nav-building-tabs {
+    gap: 0.15rem !important;
 }
 
 html.layout-tablet .tab-btn {
-    min-height: 2.55rem;
-    padding: 0.4rem 0.7rem;
-    font-size: 0.86rem;
-    border-radius: 10px;
-    gap: 0.35rem;
+    min-height: 0 !important;
+    padding: 0.32rem 0.48rem !important;
+    font-size: 0.72rem !important;
+    gap: 0.22rem !important;
+    border-bottom-width: 2px !important;
+    border-radius: 7px 7px 0 0 !important;
 }
 
 html.layout-tablet .tab-btn i {
-    font-size: 1.05rem;
+    font-size: 0.78rem !important;
+}
+
+html.layout-tablet .tab-label-long {
+    display: none !important;
+}
+
+html.layout-tablet .tab-label-short {
+    display: inline !important;
+}
+
+html.layout-tablet .nav-building-name {
+    display: none !important;
+}
+
+html.layout-tablet #headerSelectorGroup {
+    margin-left: auto !important;
+    flex-shrink: 0 !important;
+    padding: 0 !important;
+    gap: 0 !important;
+    display: flex !important;
+    align-items: center !important;
+}
+
+html.layout-tablet #headerSelectorGroup .selector-group {
+    gap: 0.25rem !important;
+}
+
+html.layout-tablet #headerSelectorGroup .floor-select-label-text {
+    display: none !important;
+}
+
+html.layout-tablet #headerSelectorGroup .floor-select-label {
+    font-size: 0.68rem !important;
+    color: #737373 !important;
+    margin: 0 !important;
+}
+
+html.layout-tablet #floorSelect.styled-select {
+    padding: 0.28rem 0.45rem !important;
+    font-size: 0.78rem !important;
+    min-width: 5.2rem !important;
+    max-width: 38vw !important;
+    min-height: 2rem !important;
+    height: auto !important;
+}
+
+html.layout-tablet .header-overview-btn {
+    padding: 0.28rem 0.45rem !important;
+    font-size: 0.72rem !important;
+    min-height: 2rem !important;
+}
+
+html.layout-tablet .header-overview-btn-label {
+    display: none !important;
+}
+
+html.layout-tablet .header-actions.pc-only-chrome,
+html.layout-tablet .pc-only-chrome,
+html.layout-tablet .map-unregistered-section {
+    display: none !important;
 }
 
 html.layout-tablet .building-row {
-    padding: 0.85rem 0.95rem;
-    gap: 0.7rem;
-    min-height: 3.4rem;
+    padding: 0.7rem 0.8rem;
+    gap: 0.55rem;
+    min-height: 3rem;
 }
 
 html.layout-tablet .building-row-name {
-    font-size: 1.05rem;
+    font-size: 0.98rem;
 }
 
 html.layout-tablet .building-row-meta {
-    font-size: 0.82rem;
+    font-size: 0.78rem;
 }
 
 html.layout-tablet .icon-btn {
-    width: 2.65rem;
-    height: 2.65rem;
-    font-size: 1.05rem;
-    border-radius: 10px;
+    width: 2.15rem;
+    height: 2.15rem;
+    font-size: 0.9rem;
+    border-radius: 8px;
 }
 
 html.layout-tablet .building-row-site .building-row-actions .icon-btn,
 html.layout-tablet .building-row-actions-compact .icon-btn,
 html.layout-tablet #tab-home .building-row-actions .icon-btn {
-    width: 2.15rem !important;
-    height: 2.15rem !important;
-    min-width: 2.15rem !important;
-    max-width: 2.15rem !important;
-    font-size: 0.88rem !important;
+    width: 2rem !important;
+    height: 2rem !important;
+    min-width: 2rem !important;
+    max-width: 2rem !important;
+    font-size: 0.82rem !important;
 }
 
 html.layout-tablet #tab-map .inspect-sidebar-left {
-    width: clamp(200px, 34vw, 300px) !important;
-    max-width: 36vw !important;
-    flex: 0 0 clamp(200px, 34vw, 300px) !important;
-    padding: 0.35rem 0.4rem !important;
-    gap: 0.28rem !important;
-    border-radius: 12px !important;
+    width: clamp(180px, 32vw, 280px) !important;
+    max-width: 34vw !important;
+    flex: 0 0 clamp(180px, 32vw, 280px) !important;
+    padding: 0.28rem 0.32rem !important;
+    gap: 0.22rem !important;
+    border-radius: 10px !important;
 }
 
 html.layout-tablet #tab-map .defect-list-summary {
-    gap: 0.28rem !important;
+    gap: 0.2rem !important;
 }
 
 html.layout-tablet #tab-map .defect-summary-total,
 html.layout-tablet #tab-map .defect-summary-badge {
-    font-size: 0.72rem !important;
-    padding: 0.22rem 0.4rem !important;
-    min-height: 1.7rem;
+    font-size: 0.66rem !important;
+    padding: 0.16rem 0.32rem !important;
+    min-height: 1.45rem;
 }
 
 html.layout-tablet #tab-map .defect-list-section-title {
-    font-size: 0.78rem !important;
-    padding: 0.28rem 0.15rem !important;
+    font-size: 0.7rem !important;
+    padding: 0.2rem 0.1rem !important;
 }
 
 html.layout-tablet #tab-map .defect-list-item {
-    padding: 0.48rem 0.5rem !important;
-    gap: 0.42rem !important;
-    border-radius: 10px !important;
-    min-height: 3.1rem;
+    padding: 0.4rem 0.42rem !important;
+    gap: 0.35rem !important;
+    border-radius: 8px !important;
+    min-height: 2.7rem;
 }
 
 html.layout-tablet #tab-map .defect-list-item-component {
-    font-size: 0.84rem !important;
-    line-height: 1.3 !important;
+    font-size: 0.78rem !important;
+    line-height: 1.28 !important;
 }
 
 html.layout-tablet #tab-map .defect-list-item-type {
-    font-size: 0.76rem !important;
+    font-size: 0.7rem !important;
 }
 
 html.layout-tablet #tab-map .defect-list-item-measure {
-    font-size: 0.74rem !important;
+    font-size: 0.68rem !important;
 }
 
 html.layout-tablet #tab-map .defect-badge-no {
-    min-width: 1.55rem;
-    height: 1.55rem;
-    font-size: 0.78rem;
+    min-width: 1.4rem;
+    height: 1.4rem;
+    font-size: 0.72rem;
 }
 
+/* 우측 레일 = 모바일 동일 톤 */
 html.layout-tablet .mobile-side-rail,
 html.layout-tablet #tab-map .mobile-side-rail,
 html.layout-tablet #tab-ndt .mobile-side-rail {
-    padding: 0.28rem 0.22rem !important;
-    gap: 0.22rem !important;
-    border-radius: 14px !important;
-    right: 0.35rem !important;
+    display: flex !important;
+    flex-direction: column !important;
+    position: absolute !important;
+    right: 0.28rem !important;
+    top: 50% !important;
+    left: auto !important;
+    bottom: auto !important;
+    transform: translateY(-50%) !important;
+    z-index: 45 !important;
+    padding: 0.22rem 0.16rem !important;
+    gap: 0.14rem !important;
+    max-height: calc(100% - 4.6rem) !important;
+    overflow-y: auto !important;
+    -webkit-overflow-scrolling: touch;
+    background: #ffffff !important;
+    border: 1px solid #d4d4d4 !important;
+    border-radius: 10px !important;
+    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.12) !important;
+    pointer-events: auto !important;
 }
 
 html.layout-tablet .mobile-rail-btn,
 html.layout-tablet #tab-map .mobile-rail-btn,
 html.layout-tablet #tab-ndt .mobile-rail-btn {
-    width: 3.15rem !important;
-    min-height: 2.85rem !important;
-    font-size: 0.58rem !important;
-    gap: 0.12rem !important;
-    padding: 0.22rem 0.12rem !important;
-    border-radius: 11px !important;
-    border-width: 2px !important;
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: center !important;
+    justify-content: center !important;
+    width: 2.7rem !important;
+    min-height: 2.55rem !important;
+    font-size: 0.52rem !important;
+    gap: 0.08rem !important;
+    padding: 0.14rem 0.06rem !important;
+    border-radius: 8px !important;
+    border: 1.5px solid #e5e7eb !important;
+    background: #f9fafb !important;
+    color: #737373 !important;
+    font-weight: 800 !important;
+    line-height: 1.05 !important;
 }
 
 html.layout-tablet .mobile-rail-btn i,
 html.layout-tablet #tab-map .mobile-rail-btn i,
 html.layout-tablet #tab-ndt .mobile-rail-btn i {
-    font-size: 1.15rem !important;
+    font-size: 0.98rem !important;
+    color: #a3a3a3 !important;
 }
 
-html.layout-tablet .mobile-canvas-dock .mobile-fab-btn,
+html.layout-tablet .mobile-rail-btn.active,
+html.layout-tablet .mobile-rail-btn[aria-pressed="true"],
+html.layout-tablet .mobile-rail-btn[aria-expanded="true"],
+html.layout-tablet #tab-map .mobile-rail-btn.active,
+html.layout-tablet #tab-map .mobile-rail-btn[aria-pressed="true"],
+html.layout-tablet #tab-ndt .mobile-rail-btn.active {
+    border: 2px solid #2563eb !important;
+    background: #eff6ff !important;
+    color: #1d4ed8 !important;
+    box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.22) !important;
+}
+
+html.layout-tablet .mobile-rail-btn.active i,
+html.layout-tablet .mobile-rail-btn[aria-pressed="true"] i,
+html.layout-tablet #tab-map .mobile-rail-btn.active i {
+    color: #2563eb !important;
+}
+
+html.layout-tablet .mobile-rail-btn.mobile-fab-mark.active,
+html.layout-tablet #tab-map .mobile-rail-btn.mobile-fab-mark.active {
+    border-color: #dc2626 !important;
+    background: #fee2e2 !important;
+    color: #b91c1c !important;
+}
+
+html.layout-tablet .mobile-rail-btn.mobile-fab-mark.active i {
+    color: #dc2626 !important;
+}
+
+html.layout-tablet .mobile-rail-btn.mobile-fab-area.active,
+html.layout-tablet #tab-map .mobile-rail-btn.mobile-fab-area.active {
+    border-color: #ea580c !important;
+    background: #ffedd5 !important;
+    color: #c2410c !important;
+}
+
+html.layout-tablet .mobile-rail-btn.mobile-fab-area.active i {
+    color: #ea580c !important;
+}
+
+/* 하단 독 = 모바일 FAB 바 디자인 */
+html.layout-tablet #tab-map .mobile-canvas-dock,
+html.layout-tablet #tab-ndt .mobile-canvas-dock,
+html.layout-tablet .mobile-canvas-dock {
+    display: block !important;
+    position: absolute !important;
+    left: 0.28rem !important;
+    right: 0.28rem !important;
+    bottom: max(0.14rem, env(safe-area-inset-bottom, 0px)) !important;
+    z-index: 44 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    pointer-events: none !important;
+}
+
+html.layout-tablet #tab-map .mobile-canvas-dock .mobile-map-fab,
+html.layout-tablet #tab-ndt .mobile-canvas-dock .mobile-map-fab,
+html.layout-tablet .mobile-map-fab,
+html.layout-tablet .mobile-ndt-fab {
+    display: grid !important;
+    pointer-events: auto !important;
+    grid-template-columns: repeat(6, 1fr) !important;
+    grid-auto-flow: unset !important;
+    grid-auto-columns: unset !important;
+    gap: 0.14rem !important;
+    padding: 0.26rem 0.22rem !important;
+    background: #ffffff !important;
+    border: 1px solid #d4d4d4 !important;
+    border-radius: 12px !important;
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.12) !important;
+}
+
+html.layout-tablet .mobile-ndt-fab {
+    grid-template-columns: repeat(4, 1fr) !important;
+}
+
+html.layout-tablet .mobile-fab-btn,
 html.layout-tablet #tab-map .mobile-canvas-dock .mobile-fab-btn {
-    min-width: 2.9rem;
-    min-height: 2.9rem;
-    font-size: 0.72rem;
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: center !important;
+    justify-content: center !important;
+    min-width: 0 !important;
+    min-height: 2.65rem !important;
+    width: auto !important;
+    height: auto !important;
+    gap: 0.08rem !important;
+    border-radius: 8px !important;
+    border: none !important;
+    background: transparent !important;
+    color: #404040 !important;
+    font-size: 0.55rem !important;
+    font-weight: 800 !important;
+    padding: 0.16rem 0.06rem !important;
+    line-height: 1.05 !important;
 }
 
-html.layout-tablet .mobile-canvas-dock .mobile-fab-btn i {
-    font-size: 1.05rem;
+html.layout-tablet .mobile-fab-btn i,
+html.layout-tablet #tab-map .mobile-canvas-dock .mobile-fab-btn i {
+    font-size: 0.98rem !important;
+    color: #262626 !important;
 }
 
-html.layout-tablet .mode-btn,
-html.layout-tablet .chip {
-    min-height: 2.35rem;
-    padding: 0.4rem 0.65rem;
-    font-size: 0.8rem;
+html.layout-tablet .mobile-fab-btn.active,
+html.layout-tablet .mobile-fab-btn.mobile-fab-toggle[aria-expanded="true"] {
+    background: #f4f4f4 !important;
+    color: #171717 !important;
 }
 
-html.layout-tablet #floorSelect.styled-select,
-html.layout-tablet .styled-select {
-    min-height: 2.35rem;
-    font-size: 0.88rem;
-    padding: 0.35rem 0.55rem;
+html.layout-tablet .mobile-fab-btn.mobile-fab-danger,
+html.layout-tablet .mobile-fab-btn.mobile-fab-danger i {
+    color: #b91c1c !important;
 }
 
 html.layout-tablet .map-selected-defect-popup {
     max-width: min(58vw, 340px);
-    padding: 0.5rem 0.6rem;
-    gap: 0.5rem;
+    padding: 0.45rem 0.55rem;
+    gap: 0.45rem;
 }
 
 html.layout-tablet .map-sel-popup-comp {
-    font-size: 0.84rem;
+    font-size: 0.8rem;
 }
 
 html.layout-tablet .map-sel-popup-type,
 html.layout-tablet .map-sel-popup-measure {
-    font-size: 0.78rem;
+    font-size: 0.74rem;
 }
 
 html.layout-tablet .map-sel-popup-edit {
-    width: 2.1rem;
-    height: 2.1rem;
-    font-size: 0.85rem;
+    width: 1.9rem;
+    height: 1.9rem;
+    font-size: 0.8rem;
 }
 
 /* 태블릿 세로: 하단 결함창을 조금 더 크게 */
@@ -9739,72 +9933,51 @@ html.layout-tablet .map-sel-popup-edit {
 }
 
 html.layout-tablet .defect-mobile-actions {
-    gap: 0.45rem !important;
-    padding: 0.55rem 0.65rem calc(0.55rem + env(safe-area-inset-bottom, 0px)) !important;
+    gap: 0.4rem !important;
+    padding: 0.5rem 0.6rem calc(0.5rem + env(safe-area-inset-bottom, 0px)) !important;
 }
 
 html.layout-tablet .defect-mobile-btn {
-    min-height: 3.55rem !important;
-    font-size: 0.8rem !important;
-    border-radius: 12px !important;
+    min-height: 3.2rem !important;
+    font-size: 0.76rem !important;
+    border-radius: 11px !important;
 }
 
 html.layout-tablet .defect-mobile-btn i {
-    font-size: 1.2rem !important;
+    font-size: 1.1rem !important;
 }
 
 html.layout-tablet .defect-quick-chip {
-    min-height: 2.45rem;
-    font-size: 0.8rem;
-    padding: 0.45rem 0.35rem;
+    min-height: 2.3rem;
+    font-size: 0.78rem;
+    padding: 0.4rem 0.3rem;
 }
 
 html.layout-tablet .form-control,
 html.layout-tablet .btn {
-    min-height: 2.45rem;
-    font-size: 0.92rem;
+    min-height: 2.3rem;
+    font-size: 0.9rem;
 }
 
 html.layout-tablet .btn-sm {
-    min-height: 2.15rem;
-    font-size: 0.82rem;
+    min-height: 2.05rem;
+    font-size: 0.8rem;
 }
 
 html.layout-tablet .home-fab-add-building,
 html.layout-tablet #tab-home .home-fab-add-building {
-    width: 3.5rem;
-    height: 3.5rem;
-    font-size: 1.35rem;
+    width: 3.2rem;
+    height: 3.2rem;
+    font-size: 1.25rem;
 }
 
 html.layout-tablet .bsa-select-sheet-item {
-    min-height: 3rem;
-    font-size: 1rem;
-    padding: 0.75rem 1rem;
+    min-height: 2.85rem;
+    font-size: 0.95rem;
+    padding: 0.65rem 0.9rem;
 }
 
 /* 태블릿: 폭이 1024px 넘어도 모바일 현장 툴바(우측 레일·하단 독) 강제 */
-html.layout-tablet .pc-only-chrome,
-html.layout-tablet .map-unregistered-section {
-    display: none !important;
-}
-
-html.layout-tablet .tab-label-long {
-    display: none !important;
-}
-
-html.layout-tablet .tab-label-short {
-    display: inline !important;
-}
-
-html.layout-tablet .nav-building-name {
-    display: none !important;
-}
-
-html.layout-tablet .header-actions.pc-only-chrome {
-    display: none !important;
-}
-
 html.layout-tablet body.bsa-tab-map {
     height: 100% !important;
     height: 100dvh !important;
@@ -9815,7 +9988,7 @@ html.layout-tablet body.bsa-tab-map .app-content {
     flex: 1 1 auto !important;
     min-height: 0 !important;
     overflow: hidden !important;
-    padding: 0.18rem !important;
+    padding: 0.14rem !important;
     display: flex !important;
     flex-direction: column !important;
 }
@@ -9834,7 +10007,7 @@ html.layout-tablet #tab-map .inspect-layout {
     flex: 1 1 auto !important;
     min-height: 0 !important;
     height: 100% !important;
-    gap: 0.28rem !important;
+    gap: 0.22rem !important;
     overflow: hidden !important;
 }
 
@@ -9855,7 +10028,8 @@ html.layout-tablet #tab-map .inspect-canvas-col {
 
 html.layout-tablet #tab-map .canvas-top-toolbar,
 html.layout-tablet #tab-ndt .canvas-top-toolbar,
-html.layout-tablet #tab-map .canvas-bottom-toolbar {
+html.layout-tablet #tab-map .canvas-bottom-toolbar,
+html.layout-tablet #tab-map .area-tool-panel {
     display: none !important;
 }
 
@@ -9875,7 +10049,7 @@ html.layout-tablet #ndtStyleSizeToolbar {
     position: absolute !important;
     left: 0.4rem !important;
     right: 0.4rem !important;
-    bottom: calc(3.6rem + env(safe-area-inset-bottom, 0px)) !important;
+    bottom: calc(3.5rem + env(safe-area-inset-bottom, 0px)) !important;
     z-index: 46 !important;
     margin: 0 !important;
     max-height: min(40vh, 240px) !important;
@@ -9890,62 +10064,10 @@ html.layout-tablet #ndtStyleSizeToolbar.is-mobile-sheet-open {
     display: flex !important;
 }
 
-html.layout-tablet #tab-map .mobile-canvas-dock,
-html.layout-tablet #tab-ndt .mobile-canvas-dock,
-html.layout-tablet .mobile-canvas-dock {
-    display: block !important;
-    position: absolute !important;
-    left: 0.28rem !important;
-    right: 0.28rem !important;
-    bottom: max(0.16rem, env(safe-area-inset-bottom, 0px)) !important;
-    z-index: 44 !important;
-    margin: 0 !important;
-    padding: 0 !important;
-    pointer-events: none !important;
-}
-
-html.layout-tablet #tab-map .mobile-canvas-dock .mobile-map-fab,
-html.layout-tablet #tab-ndt .mobile-canvas-dock .mobile-map-fab,
-html.layout-tablet .mobile-map-fab,
-html.layout-tablet .mobile-ndt-fab {
-    display: grid !important;
-    pointer-events: auto !important;
-    grid-auto-flow: column;
-    grid-auto-columns: 1fr;
-    gap: 0.28rem;
-    padding: 0.28rem 0.32rem;
-    border-radius: 14px;
-    background: rgba(255, 255, 255, 0.96);
-    border: 1px solid #d4d4d4;
-    box-shadow: 0 8px 22px rgba(15, 23, 42, 0.16);
-}
-
-html.layout-tablet #tab-map .mobile-side-rail,
-html.layout-tablet #tab-ndt .mobile-side-rail,
-html.layout-tablet .mobile-side-rail {
-    display: flex !important;
-    flex-direction: column !important;
-    position: absolute !important;
-    right: 0.35rem !important;
-    top: 50% !important;
-    left: auto !important;
-    bottom: auto !important;
-    transform: translateY(-50%) !important;
-    z-index: 45 !important;
-    max-height: calc(100% - 4.8rem) !important;
-    overflow-y: auto !important;
-    -webkit-overflow-scrolling: touch;
-    pointer-events: auto !important;
-    background: #ffffff !important;
-    border: 1px solid #d4d4d4 !important;
-    box-shadow: 0 8px 20px rgba(15, 23, 42, 0.14) !important;
-}
-
 html.layout-tablet body.defect-modal-open .mobile-canvas-dock,
 html.layout-tablet body.ndt-modal-open .mobile-canvas-dock,
 html.layout-tablet body.defect-modal-open .mobile-side-rail,
 html.layout-tablet body.ndt-modal-open .mobile-side-rail {
-    opacity: 0.35;
-    pointer-events: none !important;
+    display: none !important;
 }
 
