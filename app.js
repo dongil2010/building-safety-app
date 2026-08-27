@@ -3675,6 +3675,22 @@ document.addEventListener('DOMContentLoaded', () => {
                 : '담당자·연락처 미등록';
             const addrLine = addr || '주소 미등록';
             const safeSite = escapeHtml(siteKey);
+            // 최신 회차 건물(목록 정렬 기준) — 현장 목록에서 바로 수정 가능
+            const editTarget = members.slice().sort((a, b) => {
+                const ra = getSurveyRoundOrderRank(getBuildingSurveyRoundKey(a));
+                const rb = getSurveyRoundOrderRank(getBuildingSurveyRoundKey(b));
+                if (ra != null && rb != null && ra !== rb) return rb - ra;
+                return 0;
+            })[0];
+            const editId = editTarget ? escapeHtml(editTarget.id) : '';
+            const editBtn = editId
+                ? `<div class="building-row-actions">
+                        <button type="button" class="icon-btn icon-btn-edit" title="현장 정보 수정" data-action="edit" data-bldg-id="${editId}">
+                            <i class="fa-solid fa-pen-to-square"></i>
+                            <span class="icon-btn-label">수정</span>
+                        </button>
+                   </div>`
+                : '';
             return `
                 <div class="building-row building-row-site" data-site-key="${safeSite}">
                     <div class="building-row-info" data-action="open-site" data-site-key="${safeSite}">
@@ -3683,6 +3699,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         <span class="building-row-meta building-row-site-addr">${escapeHtml(addrLine)}</span>
                         <span class="building-row-meta building-row-site-contact">${escapeHtml(contactLine)}</span>
                     </div>
+                    ${editBtn}
                 </div>
             `;
         }).join('');
@@ -13764,17 +13781,43 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // 손상 유형·분류 필터가 적용된 현재 층 결함 중, 도면에 실제로 그릴 항목만 반환
-    // 조사항목 창이 꺼진 채 마킹이 선택돼 있으면 선택된 것만 표시(솔로 보기)
+    // 조사항목 창 OFF + 선택 있음 → 목록에서 하이라이트하던 그 항목(그룹 포함)만 표시
+    function collectSoloDrawDefectIds() {
+        const sel = (typeof window.getSelectedDefectIds === 'function')
+            ? window.getSelectedDefectIds()
+            : null;
+        if (!sel || sel.size === 0) return null;
+        const ids = new Set();
+        sel.forEach((id) => { if (id) ids.add(id); });
+        const all = getCurrentFloorDefects() || [];
+        const groupIds = new Set();
+        all.forEach((d) => {
+            if (d && d.id && ids.has(d.id) && d.groupId) groupIds.add(d.groupId);
+        });
+        if (groupIds.size) {
+            all.forEach((d) => {
+                if (d && d.id && d.groupId && groupIds.has(d.groupId)) ids.add(d.id);
+            });
+        }
+        return ids;
+    }
+
     function getCurrentFloorMapPlacedDefects(opts) {
         opts = opts || {};
         let list = filterMapPlacedDefects(getCurrentFloorFilteredDefects());
         const forDraw = opts.forDraw !== false;
-        if (forDraw && !isMapDefectListOpen()
-            && typeof selectedDefectIds !== 'undefined'
-            && selectedDefectIds && selectedDefectIds.size > 0) {
-            list = list.filter((d) => d && d.id && selectedDefectIds.has(d.id));
+        if (forDraw && !isMapDefectListOpen()) {
+            const soloIds = collectSoloDrawDefectIds();
+            if (soloIds && soloIds.size > 0) {
+                list = list.filter((d) => d && d.id && soloIds.has(d.id));
+            }
         }
         return list;
+    }
+
+    /** 목록 창이 켜져 있을 때만 선택 테두리(하이라이트) 표시. 창 OFF면 해당 마킹만 단독 표시 */
+    function shouldDrawMapSelectionChrome() {
+        return isMapDefectListOpen();
     }
 
     function isMapDefectListOpen() {
@@ -14522,9 +14565,14 @@ document.addEventListener('DOMContentLoaded', () => {
                 const set = window.getSelectedDefectIds();
                 if (set) {
                     set.clear();
-                    if (d.id) set.add(d.id);
+                    if (d._groupMemberIds && d._groupMemberIds.length) {
+                        d._groupMemberIds.forEach((id) => { if (id) set.add(id); });
+                    } else if (d.id) {
+                        set.add(d.id);
+                    }
                     if (typeof updateMapSelectionBar === 'function') updateMapSelectionBar({ scrollToSelection: false });
                     else if (typeof renderDefectListPanel === 'function') renderDefectListPanel();
+                    if (!isMapDefectListOpen() && typeof drawCanvas === 'function') drawCanvas();
                 }
             }
             // 결함표에서 고를 때만 상단 1/4로 맞춤 (도면 클릭은 그 위치 유지)
