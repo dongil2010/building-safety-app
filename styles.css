@@ -6816,6 +6816,10 @@ body.auth-gate-active #loginOverlay {
     padding: 0.45rem 0.1rem 0.15rem;
 }
 
+.dashboard-site-nav[hidden] {
+    display: none !important;
+}
+
 .dashboard-site-nav-title {
     font-size: 0.88rem;
     font-weight: 800;
