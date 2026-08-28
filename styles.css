@@ -10323,7 +10323,7 @@ html.layout-tablet body.bsa-keyboard-open .edit-building-body {
 }
 
 .hwpx-survey-th {
-    background: #f3f4f6;
+    background: #ffffff;
     color: #111827;
     font-weight: 700;
 }
@@ -10331,6 +10331,12 @@ html.layout-tablet body.bsa-keyboard-open .edit-building-body {
 .hwpx-survey-td {
     color: #111827;
     font-weight: 400;
+    background: #ffffff;
+}
+
+/* 한글 미리보기 모달 — PDF 양식처럼 흰 배경 */
+#modalReportPreviewBody:has(.hwpx-preview-root) {
+    background: #ffffff !important;
 }
 
 .hwpx-survey-empty {
