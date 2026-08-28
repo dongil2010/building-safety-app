@@ -25678,7 +25678,7 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     // --- HWPX(한글) 상태조사표 내보내기 (전체 층, 건수/사진 매수 제한 없음) ---
-    const HWPX_TEMPLATE_VERSION = '20260828_grade3_stamp';
+    const HWPX_TEMPLATE_VERSION = '20260828_grade3_legacy';
 
     function hwpxTagBlock(xml, tag, id) {
         const re = new RegExp(`<hh:${tag} id="${id}"[^>]*>[\\s\\S]*?<\\/hh:${tag}>`, 's');
@@ -25849,7 +25849,8 @@ document.addEventListener('DOMContentLoaded', () => {
             const resp = await fetch(`${templatePath}?v=${HWPX_TEMPLATE_VERSION}`, { cache: 'no-store' });
             if (!resp.ok) throw new Error('템플릿 파일을 불러오지 못했습니다.');
             const zip = await JSZip.loadAsync(await resp.arrayBuffer());
-            await applyHwpxSurveyStampToZip(zip, isGrade3);
+            // 3종은 번들 템플릿 표에 직접 행을 채우는 기존 방식이 안정적이다. 1·2종만 스탬프 이식.
+            if (!isGrade3) await applyHwpxSurveyStampToZip(zip, isGrade3);
 
             const HP_NS = 'http://www.hancom.co.kr/hwpml/2011/paragraph';
             const HC_NS = 'http://www.hancom.co.kr/hwpml/2011/core';
@@ -26544,10 +26545,35 @@ document.addEventListener('DOMContentLoaded', () => {
                     continue;
                 }
 
-                const templateDataRowSrc = pickSurveyTemplateDataRow(targetTbl, HEADER_ROW_COUNT);
-                const firstRowTpl = dataRows[0].cloneNode(true);
-                const normalRowTpl = (dataRows[Math.min(1, dataRows.length - 1)] || dataRows[0]).cloneNode(true);
-                const lastRowTpl = dataRows[dataRows.length - 1].cloneNode(true);
+
+                let firstRowTpl;
+                let normalRowTpl;
+                let lastRowTpl;
+                let normalStyleRow;
+                let styleMaps;
+                if (isGrade3) {
+                    const borderStyleByCol = (row) => {
+                        const map = {};
+                        Array.from(row.getElementsByTagNameNS(HP_NS, 'tc')).forEach(tc => {
+                            const addr = tc.getElementsByTagNameNS(HP_NS, 'cellAddr')[0];
+                            if (addr) map[addr.getAttribute('colAddr')] = tc.getAttribute('borderFillIDRef');
+                        });
+                        return map;
+                    };
+                    const firstStyleRow = dataRows[0];
+                    normalStyleRow = dataRows[Math.min(1, dataRows.length - 1)];
+                    styleMaps = {
+                        first: borderStyleByCol(firstStyleRow),
+                        normal: borderStyleByCol(normalStyleRow),
+                        last: borderStyleByCol(dataRows[dataRows.length - 1])
+                    };
+                } else {
+                    firstRowTpl = dataRows[0].cloneNode(true);
+                    normalRowTpl = (dataRows[Math.min(1, dataRows.length - 1)] || dataRows[0]).cloneNode(true);
+                    lastRowTpl = dataRows[dataRows.length - 1].cloneNode(true);
+                    normalStyleRow = normalRowTpl;
+                }
+                const layoutStyleRow = normalStyleRow;
 
                 // 기존에 있던 페이지(targetTbl 포함 전부)의 표본 데이터 행을 지운다.
                 slot.statusTbls.forEach(tbl => {
@@ -26578,13 +26604,13 @@ document.addEventListener('DOMContentLoaded', () => {
                         insertAfterNode.parentNode.insertBefore(clonedPara, insertAfterNode.nextSibling);
                         insertAfterNode = clonedPara;
                         pageTbls.push(clonedTbl);
-                        syncStatusTblLayoutFromTemplate(clonedTbl, targetTbl, HEADER_ROW_COUNT, normalRowTpl);
+                        syncStatusTblLayoutFromTemplate(clonedTbl, targetTbl, HEADER_ROW_COUNT, layoutStyleRow);
                     }
                 }
                 pageTbls.forEach((tbl, i) => {
                     if (i > 0) {
                         tbl.parentNode.parentNode.setAttribute('pageBreak', '1');
-                        syncStatusTblLayoutFromTemplate(tbl, targetTbl, HEADER_ROW_COUNT, normalRowTpl);
+                        syncStatusTblLayoutFromTemplate(tbl, targetTbl, HEADER_ROW_COUNT, layoutStyleRow);
                     }
                 });
 
@@ -26649,41 +26675,72 @@ document.addEventListener('DOMContentLoaded', () => {
                             photoRemark: photoLabelByDefect.get(d) || '-',
                             floorDisplayLabel: getFloorLabel(floorCode)
                         };
-                        const colCount = isGrade3 ? 7 : 10;
-                        const values = getReportSurveyRowValues(d, rowCtx, isGrade3, colCount);
-                        const rowTpl = localIdx === 0 ? firstRowTpl : (isLastOnPage ? lastRowTpl : normalRowTpl);
-                        const newRow = rowTpl.cloneNode(true);
-                        copyRowCellSizesFromTemplate(newRow, rowTpl);
+                        const colCount = isGrade3
+                            ? Array.from(normalStyleRow.getElementsByTagNameNS(HP_NS, 'tc')).length
+                            : 10;
+                        const values = getReportSurveyRowValues(d, rowCtx, isGrade3, isGrade3 ? colCount : 10);
+                        let newRow;
                         let rowMaxLines = 1;
                         let rowLineMetric = null;
-                        Array.from(newRow.getElementsByTagNameNS(HP_NS, 'tc')).forEach((tc) => {
-                            const addr = tc.getElementsByTagNameNS(HP_NS, 'cellAddr')[0];
-                            const colAddr = addr ? parseInt(addr.getAttribute('colAddr'), 10) : NaN;
-                            if (addr) {
-                                addr.setAttribute('rowAddr', String(HEADER_ROW_COUNT + localIdx));
-                            }
-                            if (!Number.isFinite(colAddr) || colAddr < 0 || colAddr >= values.length) return;
-                            const subList = tc.getElementsByTagNameNS(HP_NS, 'subList')[0];
-                            const paras = subList ? Array.from(subList.getElementsByTagNameNS(HP_NS, 'p')).filter(p => p.parentNode === subList) : [];
-                            if (paras.length > 0) {
-                                const fillInfo = fillCellParas(subList, paras, values[colAddr] !== undefined ? values[colAddr] : '', tc);
-                                if (fillInfo.lineCount > rowMaxLines) rowMaxLines = fillInfo.lineCount;
-                                if (fillInfo.vertsize) {
-                                    const marginEl = tc.getElementsByTagNameNS(HP_NS, 'cellMargin')[0];
-                                    const marginV = marginEl
-                                        ? (parseInt(marginEl.getAttribute('top'), 10) || 0) + (parseInt(marginEl.getAttribute('bottom'), 10) || 0)
-                                        : 282;
-                                    const metric = { vertsize: fillInfo.vertsize, spacing: fillInfo.spacing, marginV };
-                                    if (!rowLineMetric || fillInfo.lineCount >= rowMaxLines) rowLineMetric = metric;
+                        if (isGrade3) {
+                            const styleMap = localIdx === 0 ? styleMaps.first : (isLastOnPage ? styleMaps.last : styleMaps.normal);
+                            newRow = normalStyleRow.cloneNode(true);
+                            copyRowCellSizesFromTemplate(newRow, normalStyleRow);
+                            Array.from(newRow.getElementsByTagNameNS(HP_NS, 'tc')).forEach((tc, colIdx) => {
+                                const addr = tc.getElementsByTagNameNS(HP_NS, 'cellAddr')[0];
+                                if (addr) {
+                                    addr.setAttribute('rowAddr', String(HEADER_ROW_COUNT + localIdx));
+                                    const bf = styleMap[addr.getAttribute('colAddr')];
+                                    if (bf !== undefined) tc.setAttribute('borderFillIDRef', bf);
                                 }
-                            }
-                        });
-                        // 템플릿 행 높이 유지. 2줄 이상이면 내용 높이에 맞게 확장. vertpos는 템플릿 그대로(굴림·세로정렬 유지).
-                        applyRowHeightFromLines(newRow, rowMaxLines, rowLineMetric, 2800);
+                                const subList = tc.getElementsByTagNameNS(HP_NS, 'subList')[0];
+                                const paras = subList ? Array.from(subList.getElementsByTagNameNS(HP_NS, 'p')).filter(p => p.parentNode === subList) : [];
+                                if (paras.length > 0) {
+                                    const fillInfo = fillCellParas(subList, paras, values[colIdx] !== undefined ? values[colIdx] : '', tc);
+                                    if (fillInfo.lineCount > rowMaxLines) rowMaxLines = fillInfo.lineCount;
+                                    if (!rowLineMetric && fillInfo.vertsize) {
+                                        const marginEl = tc.getElementsByTagNameNS(HP_NS, 'cellMargin')[0];
+                                        const marginV = marginEl
+                                            ? (parseInt(marginEl.getAttribute('top'), 10) || 0) + (parseInt(marginEl.getAttribute('bottom'), 10) || 0)
+                                            : 282;
+                                        rowLineMetric = { vertsize: fillInfo.vertsize, spacing: fillInfo.spacing, marginV };
+                                    }
+                                }
+                            });
+                            applyRowHeightFromLines(newRow, rowMaxLines, rowLineMetric, 2800);
+                            Array.from(newRow.getElementsByTagNameNS(HP_NS, 'tc')).forEach(centerCellContent);
+                        } else {
+                            const rowTpl = localIdx === 0 ? firstRowTpl : (isLastOnPage ? lastRowTpl : normalRowTpl);
+                            newRow = rowTpl.cloneNode(true);
+                            copyRowCellSizesFromTemplate(newRow, rowTpl);
+                            Array.from(newRow.getElementsByTagNameNS(HP_NS, 'tc')).forEach((tc) => {
+                                const addr = tc.getElementsByTagNameNS(HP_NS, 'cellAddr')[0];
+                                const colAddr = addr ? parseInt(addr.getAttribute('colAddr'), 10) : NaN;
+                                if (addr) {
+                                    addr.setAttribute('rowAddr', String(HEADER_ROW_COUNT + localIdx));
+                                }
+                                if (!Number.isFinite(colAddr) || colAddr < 0 || colAddr >= values.length) return;
+                                const subList = tc.getElementsByTagNameNS(HP_NS, 'subList')[0];
+                                const paras = subList ? Array.from(subList.getElementsByTagNameNS(HP_NS, 'p')).filter(p => p.parentNode === subList) : [];
+                                if (paras.length > 0) {
+                                    const fillInfo = fillCellParas(subList, paras, values[colAddr] !== undefined ? values[colAddr] : '', tc);
+                                    if (fillInfo.lineCount > rowMaxLines) rowMaxLines = fillInfo.lineCount;
+                                    if (fillInfo.vertsize) {
+                                        const marginEl = tc.getElementsByTagNameNS(HP_NS, 'cellMargin')[0];
+                                        const marginV = marginEl
+                                            ? (parseInt(marginEl.getAttribute('top'), 10) || 0) + (parseInt(marginEl.getAttribute('bottom'), 10) || 0)
+                                            : 282;
+                                        const metric = { vertsize: fillInfo.vertsize, spacing: fillInfo.spacing, marginV };
+                                        if (!rowLineMetric || fillInfo.lineCount >= rowMaxLines) rowLineMetric = metric;
+                                    }
+                                }
+                            });
+                            applyRowHeightFromLines(newRow, rowMaxLines, rowLineMetric, 2800);
+                        }
                         destTbl.appendChild(newRow);
                     });
                     destTbl.setAttribute('rowCnt', String(HEADER_ROW_COUNT + pageItems.length));
-                    recalcHwpxTableHeight(destTbl);
+                    if (!isGrade3) recalcHwpxTableHeight(destTbl);
                 });
 
                 // ---- 결함 사진 갤러리 ----
