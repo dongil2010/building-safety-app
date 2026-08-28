@@ -13991,9 +13991,9 @@ document.addEventListener('DOMContentLoaded', () => {
         return window.state.mapDefectListOpen !== false;
     }
 
-    /** 목록 ON: 기존처럼 선택 테두리. 목록 OFF: 좌상단 팝업으로 내용 표시 */
+    /** 목록 ON/OFF 모두 도면 마킹 선택 강조(테두리·핸들). OFF일 때 내용은 좌상단 팝업 */
     function shouldDrawMapSelectionChrome() {
-        return isMapDefectListOpen();
+        return true;
     }
 
     function getSelectedDefectForPopup() {
@@ -15895,7 +15895,7 @@ document.addEventListener('DOMContentLoaded', () => {
         // fill=false: 투명 내부 + 마킹색 네모 테두리 / fill=true: 기존 채우기
         paintPinBox(ctx, w, h, shapeCfg, activeColor, scale, roundLineMul, isBeingDragged);
 
-        // 마퀴/클릭 선택 강조 (조사항목 창 ON일 때만 — OFF면 해당 마킹만 단독 표시)
+        // 마퀴/클릭 선택 강조 (목록 ON/OFF 공통)
         if (defect.id && typeof selectedDefectIds !== 'undefined' && selectedDefectIds.has(defect.id)
             && shouldDrawMapSelectionChrome()) {
             ctx.save();
