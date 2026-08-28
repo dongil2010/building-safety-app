@@ -38,7 +38,7 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <meta name="apple-mobile-web-app-title" content="스마트 안전점검">
-    <link rel="stylesheet" href="styles.css?v=20260828_modal_fix">
+    <link rel="stylesheet" href="styles.css?v=20260828_hwpx_preview_grid">
     <!-- FontAwesome icons for clean engineering UI -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <!-- PDF 생성용: 페이지별로 직접 캡처해서 조립(큰 보고서에서 html2pdf 한방 렌더링이 캔버스 높이 한계로
@@ -112,12 +112,12 @@
                 <i class="fa-solid fa-wifi"></i> 온라인
             </span>
             <button id="btnPreviewReport" class="btn btn-primary" onclick="window.openReportPreviewModalFunc()" style="background: linear-gradient(135deg, #2a2a2a, #1f1f1f); font-weight: 700;">
-                <i class="fa-solid fa-file-contract"></i> 미리보기
+                <i class="fa-solid fa-file-lines"></i> 한글 미리보기
             </button>
-            <button id="btnExportPDF" class="btn btn-outline" onclick="window.exportPDF()" style="border-color: #737373; color: #737373;">
+            <button id="btnExportPDF" class="btn btn-outline" onclick="window.exportPDF()" style="display:none; border-color: #737373; color: #737373;">
                 <i class="fa-solid fa-file-pdf"></i> PDF
             </button>
-            <button id="btnPrintReport" class="btn btn-outline" onclick="window.openReportPreviewModalFunc(); setTimeout(() => window.print(), 300);" style="border-color: #a3a3a3; color: #d0d0d0;">
+            <button id="btnPrintReport" class="btn btn-outline" onclick="window.openReportPreviewModalFunc(); setTimeout(() => window.print(), 300);" style="display:none; border-color: #a3a3a3; color: #d0d0d0;">
                 <i class="fa-solid fa-print"></i> 인쇄
             </button>
             <button id="btnThemeToggle" class="btn btn-icon" title="다크/라이트 모드 전환">
@@ -497,7 +497,7 @@
                 <div class="actions">
                     <button id="btnAddDefectDirect" class="btn btn-primary btn-sm"><i class="fa-solid fa-plus"></i> ➕ 결함 직접 등록</button>
                     <button id="btnOpenSurveyColumnModal" class="btn btn-outline btn-sm"><i class="fa-solid fa-table-columns"></i> ⚙️ 표 컬럼 설정</button>
-                    <button id="btnOpenReportPreview" class="btn btn-primary btn-sm pc-only-chrome" onclick="window.openReportPreviewModalFunc()" style="background:#2a2a2a; border-color:#2a2a2a;"><i class="fa-solid fa-file-contract"></i> 📋 6개 사진배치 보고서 출력/미리보기</button>
+                    <button id="btnOpenReportPreview" class="btn btn-primary btn-sm pc-only-chrome" onclick="window.openReportPreviewModalFunc()" style="background:#2a2a2a; border-color:#2a2a2a;"><i class="fa-solid fa-file-lines"></i> 한글 출력 미리보기</button>
                     <button id="btnExportExcel" class="btn btn-sm pc-only-chrome" style="background: #15803d; color: #ffffff; border: 1px solid #22c55e; font-weight: 700;"><i class="fa-solid fa-file-excel"></i> 🟢 엑셀 저장 (.xls)</button>
                     <button id="btnImportDefectExcel" class="btn btn-outline btn-sm pc-only-chrome" style="border-color:#2a2a2a; color:#2a2a2a;"><i class="fa-solid fa-file-import"></i> 📥 외부 엑셀 결함표 가져오기</button>
                     <button id="btnImportDefectHwpx" class="btn btn-outline btn-sm pc-only-chrome" style="border-color:#2563eb; color:#2563eb;"><i class="fa-solid fa-file-lines"></i> 📥 한글(HWPX) 상태조사표 가져오기</button>
@@ -2460,11 +2460,11 @@
     <div class="modal-overlay" id="reportPreviewModal">
         <div class="modal-card" style="max-width: 920px; width: 95%; height: 90vh; max-height: 92vh; display: flex; flex-direction: column; background: #ffffff; border: 1px solid #d0d0d0; box-shadow: 0 20px 50px rgba(15,23,42,0.15);">
             <div class="modal-header" style="background: #fafafa; padding: 1rem 1.5rem; border-bottom: 1px solid #e5e5e5; color: #171717;">
-                <h3 style="color: #2a2a2a; margin:0; font-size: 1.1rem; font-weight: 800;"><i class="fa-solid fa-file-contract"></i> 📋 정밀 안전점검 보고서 미리보기</h3>
+                <h3 style="color: #2a2a2a; margin:0; font-size: 1.1rem; font-weight: 800;"><i class="fa-solid fa-file-lines"></i> 한글 상태조사표 미리보기</h3>
                 <div style="display: flex; gap: 0.5rem; align-items: center;">
-                    <button class="btn btn-primary btn-sm" id="btnModalExportPdf" onclick="window.exportPDF()"><i class="fa-solid fa-file-pdf"></i> PDF 저장</button>
-                    <button class="btn btn-secondary btn-sm" id="btnModalExportHwpx" onclick="window.exportHwpxSurveyTable()" title="현재 층 상태조사표 1페이지 분량을 hwpx로 내보냅니다 (시험 기능)"><i class="fa-solid fa-file-lines"></i> 한글로 저장(시험)</button>
-                    <button class="btn btn-secondary btn-sm" id="btnModalPrint" onclick="window.print()"><i class="fa-solid fa-print"></i> 인쇄</button>
+                                        <button class="btn btn-primary btn-sm" id="btnModalExportHwpx" onclick="window.exportHwpxSurveyTable()" title="전체 층 상태조사표·사진·위치도를 hwpx로보냅니다"><i class="fa-solid fa-file-lines"></i> 한글로 저장</button>
+                    <button class="btn btn-secondary btn-sm" id="btnModalExportPdf" onclick="window.exportPDF()" style="display:none;"><i class="fa-solid fa-file-pdf"></i> PDF 저장</button>
+                    <button class="btn btn-secondary btn-sm" id="btnModalPrint" onclick="window.print()" style="display:none;"><i class="fa-solid fa-print"></i> 인쇄</button>
                     <button class="modal-close" id="btnCloseReportPreviewModal" style="color: #737373;">&times;</button>
                 </div>
             </div>
@@ -2675,7 +2675,7 @@
     <script src="js/shared/report.js?v=20260827_overview"></script>
     <script src="js/shared/hwpx-import.js?v=20260825_hwpxin"></script>
     <script src="js/shared/auth.js?v=20260821_land1"></script>
-    <script src="app.js?v=20260828_mark_tip_hl"></script>
+    <script src="app.js?v=20260828_grade3_stamp"></script>
     <script>
         window.BSA_APP_VERSION = '20260828_mark_tip_hl';
         (function () {

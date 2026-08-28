@@ -10290,3 +10290,51 @@ html.layout-tablet body.bsa-keyboard-open .edit-building-body {
     scroll-padding-bottom: calc(var(--bsa-kb-height, 0px) + 1rem);
 }
 
+/* 한글(HWPX) 상태조사표 미리보기 — 템플릿 열 비율·굴림·격자 */
+.hwpx-preview-page,
+.hwpx-preview-root {
+    font-family: Gulim, '굴림', 'Malgun Gothic', '맑은 고딕', sans-serif;
+}
+
+.hwpx-survey-table {
+    width: 100%;
+    border-collapse: collapse;
+    table-layout: fixed;
+    font-size: 8pt;
+    text-align: center;
+    margin-bottom: 0.4rem;
+    border: 1px solid #000;
+}
+
+.hwpx-survey-table col {
+    width: auto;
+}
+
+.hwpx-survey-th,
+.hwpx-survey-td {
+    box-sizing: border-box;
+    border: 1px solid #000;
+    padding: 0.18rem 0.12rem;
+    vertical-align: middle;
+    line-height: 1.35;
+    word-break: keep-all;
+    overflow-wrap: break-word;
+    white-space: pre-line;
+}
+
+.hwpx-survey-th {
+    background: #f3f4f6;
+    color: #111827;
+    font-weight: 700;
+}
+
+.hwpx-survey-td {
+    color: #111827;
+    font-weight: 400;
+}
+
+.hwpx-survey-empty {
+    padding: 2rem;
+    color: #a3a3a3;
+}
+
