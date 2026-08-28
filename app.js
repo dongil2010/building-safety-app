@@ -15612,24 +15612,15 @@ document.addEventListener('DOMContentLoaded', () => {
         return best;
     }
 
-    /** 영역 지시선 끝점(저장·동기화용) */
+    /** 영역 지시선 끝점(저장·동기화용) — 번호칸에 가장 가까운 변 중앙 */
     function getAreaLeaderTipForStorage(areaDefect, boxX, boxY) {
         if (!areaDefect || areaDefect.areaX1 === undefined) return null;
-        if (getAreaShape(areaDefect) === 'rect') {
-            return getRectAreaLeaderAttachOnArea(areaDefect, boxX, boxY);
-        }
-        return getAreaMarkCenter(areaDefect);
+        return projectPointToAreaEdgeCenterDefect(boxX, boxY, areaDefect);
     }
 
-    /** 영역 지시선: 직사각형=반대 사분면 변 중심↔번호칸 대각 꼭짓점 / 그 외=중심↔가까운 꼭짓점 */
+    /** 영역 지시선: 가까운 변 중심 ↔ 번호칸 대각 꼭짓점 */
     function resolveAreaLeaderEndpoints(boxX, boxY, boxW, boxH, rotationDeg, areaDefect) {
-        const center = getAreaMarkCenter(areaDefect);
-        if (getAreaShape(areaDefect) === 'rect') {
-            const tip = getRectAreaLeaderAttachOnArea(areaDefect, boxX, boxY);
-            const anchor = getPinLeaderBoxCornerAnchor(boxX, boxY, center.x, center.y, boxW, boxH, rotationDeg);
-            return { anchor, tip };
-        }
-        const tip = center;
+        const tip = projectPointToAreaEdgeCenterDefect(boxX, boxY, areaDefect);
         const anchor = getPinLeaderBoxCornerAnchor(boxX, boxY, tip.x, tip.y, boxW, boxH, rotationDeg);
         return { anchor, tip };
     }
@@ -23389,7 +23380,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const leak = d.isLeak ? markOn : '-';
         const no = formatSurveyReportNo(d, isGrade3, ctx.floorCode);
         if (isGrade3) {
-            // 3종 칠산타워 양식: No./구분/구조·비구조/점검내용/발생원인/비고 (7열 고정)
+            // 3종 양식: No./구분/구조·비구조/점검내용/발생원인/비고 (7열 고정)
             return [
                 no,
                 ctx.floorDisplayLabel || getSurveyCellText('floorGroup', d, ctx),
@@ -25413,7 +25404,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    // --- 한글(HWPX) 양식 미리보기 — 1·2종(신가병원) / 3종(칠산타워) 템플릿 구조 ---
+    // --- 한글(HWPX) 양식 미리보기 — 1·2종 / 3종 템플릿 구조 ---
     function getHwpxPreviewFloorLabel(bldg, floorCode) {
         const f = (bldg.floorsList || []).find(fl => fl.floorCode === floorCode);
         const raw = f ? f.floorLabel : (typeof window.getFloorLabelFromCode === 'function' ? window.getFloorLabelFromCode(floorCode) : floorCode);
@@ -25500,7 +25491,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const cleanBldgName = (bldg.name || '건축물').replace(/^🏢\s*/, '');
         const reportTitleHeader = `${cleanBldgName} ${iYear} ${iPeriod} ${iType}`;
         const grade3Report = isGrade3Building(bldg);
-        const formLabel = grade3Report ? '3종 시설물 · 칠산타워 양식' : '1·2종 시설물 · 신가병원 양식';
+        const formLabel = grade3Report ? '3종 시설물' : '1·2종 시설물';
 
         await preloadFloorDrawings(bldg);
         if (typeof hydrateBuildingOverviewPhotos === 'function') {
@@ -25841,7 +25832,7 @@ document.addEventListener('DOMContentLoaded', () => {
             // 한글에서 해당 섹션을 다 들어낸 별도 템플릿 파일을 만들어 분리했다.
             const isPreciseInspectionForTemplate = (bldg.inspectionType || '정밀안전점검') === '정밀안전점검';
             const isGrade3 = bldg.facilityGrade === '제3종시설물';
-            // 3종시설물은 칠산타워 서식(No./구분/부재 분류/점검내용/발생원인/비고, 구조·비구조
+            // 3종시설물 서식(No./구분/부재 분류/점검내용/발생원인/비고, 구조·비구조
             // 2행 헤더)을 쓰고, 비파괴 장비조사 섹션 유무는 1,2종과 똑같이 정밀/정기 여부로
             // 결정한다(정밀에 체크된 경우에만 비파괴장비조사 포함).
             const templatePath = isGrade3
@@ -25875,7 +25866,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const paraText = (p) => Array.from(p.getElementsByTagNameNS(HP_NS, 't')).map(t => t.textContent).join('');
             const secChildren = () => Array.from(sec.children).filter(c => c.localName === 'p');
 
-            // 3종 중점관리 전·금회차 비교사진 — 칠산타워 표 양식(templates/hwpx_priority_compare_grade3.hwpx)
+            // 3종 중점관리 전·금회차 비교사진 (templates/hwpx_priority_compare_grade3.hwpx)
             let grade3CompareTableStamp = null;
             if (isGrade3) {
                 try {
@@ -26294,8 +26285,8 @@ document.addEventListener('DOMContentLoaded', () => {
             const floorTitleRe = /^\d+\)\s*.+층/;
             // 표본 문서는 원본 건물의 그 층 결함이 많았으면 상태조사표가 애초에 표 여러 개(이어지는
             // 페이지)로 나뉘어 있을 수 있다. 사진첩이 나오기 전까지 등장하는 현재 서식 표를
-            // statusTbls로 모은다. 1·2종은 신가병원 서식(조사내용/크기/부재 분류), 3종은 칠산타워
-            // 서식(No./구분/부재 분류/점검내용). 옛 "부재종류" 10칸 표·1·2종 잔여 표는 버린다.
+            // statusTbls로 모은다. 1·2종은 10열 서식(조사내용/크기/부재 분류), 3종은 7열 서식
+            // (No./구분/부재 분류/점검내용). 옛 "부재종류" 10칸 표·잔여 표는 버린다.
             const isCurrentStatusTable = (tbl) => {
                 const colCnt = parseInt(tbl.getAttribute('colCnt') || '0', 10);
                 const firstRow = tbl.getElementsByTagNameNS(HP_NS, 'tr')[0];
@@ -26397,7 +26388,7 @@ document.addEventListener('DOMContentLoaded', () => {
             let floorSlots = discoverFloorSlots();
             if (!floorSlots.length) throw new Error('템플릿에서 상태조사표 블록을 찾지 못했습니다.');
 
-            // 신가병원/칠산타워 서식은 칸 너비가 이미 맞춰져 있어, 옛 10칸(부재종류/결함크기)용
+            // 1·2종/3종 서식은 칸 너비가 이미 맞춰져 있어, 옛 10칸(부재종류/결함크기)용
             // 폭 재배분은 적용하지 않는다.
 
             // "틀" 블록(첫 번째 층 블록, 제목 문단부터 문서 끝까지)을 실제 층 수만큼 복제한다. 복제한
@@ -26804,7 +26795,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     window.showToast(`${getFloorLabel(floorCode)} 사진 삽입 중 오류가 있어 사진은 제외하고 만듭니다.`, 'warning', 5000);
                 }
 
-                // ---- 3종 중점관리: 전·금회차 비교사진 (칠산타워 표 양식 — 좌우 사진 + 번호/회차 캡션) ----
+                // ---- 3종 중점관리: 전·금회차 비교사진 (좌우 사진 + 번호/회차 캡션) ----
                 if (isGrade3 && priorityCompareDefects.length > 0) {
                     try {
                         if (!grade3CompareTableStamp || !grade3CompareTableStamp.compareTblPara) {
@@ -28778,7 +28769,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const bldgGrade3 = isGrade3Building();
             if (parsed.grade3 !== bldgGrade3) {
                 window.showToast(
-                    `파일은 ${parsed.grade3 ? '3종(칠산타워)' : '1·2종(신가병원)'} 서식, 선택 건물은 ${bldgGrade3 ? '3종' : '1·2종'}입니다. 내용은 그대로 가져오되 표 컬럼은 건물 종별에 맞게 표시됩니다.`,
+                    `파일은 ${parsed.grade3 ? '3종' : '1·2종'} 서식, 선택 건물은 ${bldgGrade3 ? '3종' : '1·2종'}입니다. 내용은 그대로 가져오되 표 컬럼은 건물 종별에 맞게 표시됩니다.`,
                     'warning',
                     7000
                 );
@@ -28799,7 +28790,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
 
             window._importFromHwpx = true;
-            window._importHwpxGradeLabel = parsed.grade3 ? '3종 칠산타워' : '1·2종 신가병원';
+            window._importHwpxGradeLabel = parsed.grade3 ? '3종' : '1·2종';
             window._importExcelSheets = sheetInfos;
             window._importExcelFloors = floors;
             openImportDefectExcelModal();

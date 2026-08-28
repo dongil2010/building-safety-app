@@ -1,7 +1,7 @@
 /**
  * HWPX(한글) 상태조사표 → 결함 데이터 가져오기
- * - 1·2종: templates/hwpx_survey_template*.hwpx (신가병원 서식)
- * - 3종: templates/hwpx_survey_template_grade3*.hwpx (칠산타워 서식)
+ * - 1·2종: templates/hwpx_survey_template*.hwpx
+ * - 3종: templates/hwpx_survey_template_grade3*.hwpx
  */
 (function () {
     const HP_NS = 'http://www.hancom.co.kr/hwpml/2011/paragraph';
@@ -235,7 +235,7 @@
         ps.forEach((p, i) => {
             if (floorTitleRe.test(paraText(p))) starts.push(i);
         });
-        if (!starts.length) throw new Error('층 제목(예: 1) 지하1층)을 찾지 못했습니다. 신가병원/칠산타워 상태조사표 형식인지 확인해 주세요.');
+        if (!starts.length) throw new Error('층 제목(예: 1) 지하1층)을 찾지 못했습니다. 상태조사표 형식인지 확인해 주세요.');
 
         let preferGrade3 = !!(opts && opts.facilityGrade === '제3종시설물');
         if (opts && opts.facilityGrade && opts.facilityGrade !== '제3종시설물') {
