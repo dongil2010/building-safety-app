@@ -7441,9 +7441,10 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     /** 터치 화살표(TIP) 히트 반경 — 그려진 화살표 크기(arrowScale)와 동일 비율 */
-    function getArrowVisualTipRadius(arrowScale, dragged) {
+    function getArrowVisualTipRadius(arrowScale, dragged, tipShape) {
         const s = Math.max(Number(arrowScale) || 1, 0.2);
-        if (state.tipShape === 'circle') {
+        const shape = tipShape || state.tipShape || 'arrow';
+        if (isCircleMarkTipShape(shape)) {
             return (dragged ? 6 : 4.5) * s;
         }
         const headLen = (dragged ? 13 : 10) * s;
@@ -7451,9 +7452,10 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     /** 화살표 한 변/지름 기준 크기(도면 좌표 px) — 터치 박스 지름 = 2 × 이 값 */
-    function getArrowTouchCharacteristicSize(arrowScale) {
+    function getArrowTouchCharacteristicSize(arrowScale, tipShape) {
         const s = Math.max(Number(arrowScale) || 1, 0.2);
-        if (state.tipShape === 'circle') {
+        const shape = tipShape || state.tipShape || 'arrow';
+        if (isCircleMarkTipShape(shape)) {
             return (4.5 * 2) * s;
         }
         return 10 * s;
@@ -7469,20 +7471,21 @@ document.addEventListener('DOMContentLoaded', () => {
     /** 터치·조작 UI: 화면(CSS) px 기준 최소 지름 — 줌 배율과 무관하게 손가락 크기 확보 */
     const MAP_TIP_MIN_TOUCH_DIAMETER_CSS = 52;
 
-    function getMapTipHitRadius(arrowScale, isTouch) {
-        const visualR = getArrowVisualTipRadius(arrowScale, false);
+    function getMapTipHitRadius(arrowScale, isTouch, tipShape) {
+        const visualR = getArrowVisualTipRadius(arrowScale, false, tipShape);
         const coarse = isTouch
             || (window.matchMedia && window.matchMedia('(pointer: coarse)').matches);
         if (!coarse) return visualR + 1;
-        const arrowR = getArrowTouchCharacteristicSize(arrowScale);
+        const arrowR = getArrowTouchCharacteristicSize(arrowScale, tipShape);
         const viewScale = getMapCanvasViewScale();
         const minScreenRadiusImg = (MAP_TIP_MIN_TOUCH_DIAMETER_CSS / 2) / viewScale;
         return Math.max(arrowR, minScreenRadiusImg);
     }
 
     /** 삼각 화살촉: 세모 무게중심. 원형 화살촉: target(측정점) 그대로 */
-    function getMapArrowTipHitCenter(targetX, targetY, fromX, fromY, arrowScale) {
-        if (state.tipShape === 'circle') {
+    function getMapArrowTipHitCenter(targetX, targetY, fromX, fromY, arrowScale, tipShape) {
+        const shape = tipShape || state.tipShape || 'arrow';
+        if (isCircleMarkTipShape(shape)) {
             return { x: targetX, y: targetY };
         }
         const s = Math.max(Number(arrowScale) || 1, 0.2);
@@ -8154,6 +8157,22 @@ document.addEventListener('DOMContentLoaded', () => {
             : (defect && defect.arrowOctant !== undefined ? defect.arrowOctant : 0);
         const unit = getArrowOctantUnitVector(octantRaw);
         return { enabled: forceFlag, octant: unit.octant, ux: unit.x, uy: unit.y };
+    }
+
+    /** 마킹별 tipShape(arrow|circle) → 없으면 전역 state.tipShape. 방향 지정 시 항상 arrow */
+    function resolveMarkTipShape(defect, arrowItem) {
+        if (resolveForcedArrowDirection(arrowItem, defect).enabled) return 'arrow';
+        const per = (arrowItem && (arrowItem.markTipShape === 'arrow' || arrowItem.markTipShape === 'circle'))
+            ? arrowItem.markTipShape
+            : ((defect && (defect.markTipShape === 'arrow' || defect.markTipShape === 'circle'))
+                ? defect.markTipShape
+                : null);
+        if (per) return per;
+        return state.tipShape === 'circle' ? 'circle' : 'arrow';
+    }
+
+    function isCircleMarkTipShape(tipShape) {
+        return tipShape === 'circle';
     }
 
     function compactRoutePoints(points) {
@@ -15417,10 +15436,16 @@ document.addEventListener('DOMContentLoaded', () => {
         else ctx.setLineDash([]);
         strokeAreaShape(ctx, defect);
 
-        const selected = !isPreview && !forReport && defect.id
-            && typeof selectedDefectIds !== 'undefined' && selectedDefectIds.has(defect.id)
+        const selected = !isPreview && !forReport && isMapMarkSelected(defect)
             && shouldDrawMapSelectionChrome();
         if (selected) {
+            ctx.save();
+            ctx.strokeStyle = '#6b6b6b';
+            ctx.lineWidth = Math.max(2.5, getDefectLeaderLineWidth(areaPinScale, roundLineMul, false) + 2);
+            ctx.setLineDash([]);
+            beginAreaShapePath(ctx, defect);
+            ctx.stroke();
+            ctx.restore();
             ctx.setLineDash([]);
             ctx.fillStyle = '#1e293b';
             ctx.strokeStyle = '#f8fafc';
@@ -15738,6 +15763,7 @@ document.addEventListener('DOMContentLoaded', () => {
                             targetY: m.targetY,
                             forceArrowDir: !!m.forceArrowDir,
                             arrowOctant: (m.arrowOctant !== undefined ? m.arrowOctant : 0),
+                            markTipShape: m.markTipShape,
                             areaSource: (m.shapeType === 'area' && m.areaX1 !== undefined) ? m : null
                         });
                     });
@@ -15783,7 +15809,6 @@ document.addEventListener('DOMContentLoaded', () => {
         const defectStyleKey = getDefectStyleKey(defect.category, defect.defectType);
         const mainColor = getDefectColor(defect);
         const shapeCfg = getDefectPinShapeCfg(defect, defectStyleKey);
-        const useCircleTip = state.tipShape === 'circle';
 
         // 전회차(과거 조사) 결함은 도면에서 더 두껍고 진하게 표시 — 보고서(drawPinSafe)는 구분 없이 그대로 둠
         const isPrevRoundDefect = isPreviousRoundDefect(defect);
@@ -15817,6 +15842,8 @@ document.addEventListener('DOMContentLoaded', () => {
             const leaderAnchorOpts = { shape: shapeCfg.shape, scale };
             const anchor = getPinLeaderBoxAnchor(boxX, boxY, targetX, targetY, w, h, state.rotationAngle || 0, leaderAnchorOpts);
             const headLen = (isBeingDragged ? 13 : 10) * arrowScale;
+            const tipShape = resolveMarkTipShape(defect, t);
+            const useCircleTip = isCircleMarkTipShape(tipShape);
             const stemInset = useCircleTip
                 ? (isBeingDragged ? 6 : 4.5) * arrowScale
                 : headLen * Math.cos(Math.PI / 6);
@@ -15896,8 +15923,7 @@ document.addEventListener('DOMContentLoaded', () => {
         paintPinBox(ctx, w, h, shapeCfg, activeColor, scale, roundLineMul, isBeingDragged);
 
         // 마퀴/클릭 선택 강조 (목록 ON/OFF 공통)
-        if (defect.id && typeof selectedDefectIds !== 'undefined' && selectedDefectIds.has(defect.id)
-            && shouldDrawMapSelectionChrome()) {
+        if (isMapMarkSelected(defect) && shouldDrawMapSelectionChrome()) {
             ctx.save();
             ctx.strokeStyle = '#6b6b6b';
             ctx.lineWidth = Math.max(2, 2.4 * scale);
@@ -17826,6 +17852,42 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         updateDefectArrowOctantLabel();
         if (typeof scheduleDefectAutoApply === 'function') scheduleDefectAutoApply();
+        if (typeof drawCanvas === 'function') drawCanvas();
+    }
+
+    function getDefectMarkTipShapeFromUi() {
+        const v = document.getElementById('defectMarkTipShape')?.value;
+        if (v === 'arrow' || v === 'circle') return v;
+        return null;
+    }
+
+    function syncDefectMarkTipUi(shape) {
+        const normalized = (shape === 'arrow' || shape === 'circle') ? shape : '';
+        const hidden = document.getElementById('defectMarkTipShape');
+        if (hidden) hidden.value = normalized;
+        const btnDef = document.getElementById('btnDefectMarkTipDefault');
+        const btnArr = document.getElementById('btnDefectMarkTipArrow');
+        const btnCirc = document.getElementById('btnDefectMarkTipCircle');
+        if (btnDef) btnDef.classList.toggle('active', !normalized);
+        if (btnArr) btnArr.classList.toggle('active', normalized === 'arrow');
+        if (btnCirc) btnCirc.classList.toggle('active', normalized === 'circle');
+    }
+
+    function setupDefectMarkTipEvents() {
+        const bind = (id, shape) => {
+            const btn = document.getElementById(id);
+            if (!btn || btn.dataset.boundMarkTip) return;
+            btn.dataset.boundMarkTip = '1';
+            btn.addEventListener('click', () => {
+                syncDefectMarkTipUi(shape);
+                if (isDefectBulkEditMode()) markDefectBulkFieldChanged('markTipShape');
+                if (typeof scheduleDefectAutoApply === 'function') scheduleDefectAutoApply();
+                if (typeof drawCanvas === 'function') drawCanvas();
+            });
+        };
+        bind('btnDefectMarkTipDefault', '');
+        bind('btnDefectMarkTipArrow', 'arrow');
+        bind('btnDefectMarkTipCircle', 'circle');
     }
 
     function bindDefectArrowOctantGrid() {
@@ -17847,6 +17909,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     bindDefectArrowOctantGrid();
+    setupDefectMarkTipEvents();
 
     function applySavedOptionOrder(items, orderList) {
         if (!Array.isArray(items) || !items.length) return [];
@@ -19100,6 +19163,15 @@ document.addEventListener('DOMContentLoaded', () => {
     let selectedDefectIds = new Set();
     window.getSelectedDefectIds = () => selectedDefectIds;
 
+    function isMapMarkSelected(defect) {
+        if (!defect || !defect.id || typeof selectedDefectIds === 'undefined') return false;
+        if (selectedDefectIds.has(defect.id)) return true;
+        if (!defect.groupId || !state.currentBuildingId) return false;
+        const key = `${state.currentBuildingId}_${state.currentFloor}`;
+        const members = (state.defects[key] || []).filter((d) => d && d.groupId === defect.groupId);
+        return members.some((m) => m.id && selectedDefectIds.has(m.id));
+    }
+
     function updateMapSelectionBar(options = {}) {
         const n = selectedDefectIds.size;
         const label = n > 0 ? `선택 삭제 (${n})` : '선택 삭제';
@@ -19368,7 +19440,8 @@ document.addEventListener('DOMContentLoaded', () => {
             const dSize = getStyleSize(getDefectStyleKey(d.category, d.defectType));
             const scale = dSize.pin;
             const arrowScale = dSize.arrow;
-            const tipR = getMapTipHitRadius(arrowScale, activePointerIsTouch);
+            const tipShape = resolveMarkTipShape(d);
+            const tipR = getMapTipHitRadius(arrowScale, activePointerIsTouch, tipShape);
 
             if (d.shapeType === 'area' && d.areaX1 !== undefined) {
                 ensureAreaPinPlacement(d);
@@ -19442,7 +19515,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 const bx = d.x || 100;
                 const by = d.y || 100;
                 if (d.targetX !== undefined && d.targetY !== undefined) {
-                    const tipHit = getMapArrowTipHitCenter(d.targetX, d.targetY, bx, by, arrowScale);
+                    const tipHit = getMapArrowTipHitCenter(d.targetX, d.targetY, bx, by, arrowScale, tipShape);
                     const distTip = Math.hypot(imgX - tipHit.x, imgY - tipHit.y);
                     if (distTip <= tipR && (!bestTip || distTip < bestTip.dist)) {
                         bestTip = { defect: d, dist: distTip, tipR };
@@ -19464,7 +19537,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const boxDim = getPinBoxDimensions(scale, formatPinNumberLabel(d.groupNo || d.no || 'NO.01', pinStyleKey), state.ctx);
 
             if (d.targetX !== undefined && d.targetY !== undefined) {
-                const tipHit = getMapArrowTipHitCenter(d.targetX, d.targetY, bx, by, arrowScale);
+                const tipHit = getMapArrowTipHitCenter(d.targetX, d.targetY, bx, by, arrowScale, tipShape);
                 const distTip = Math.hypot(imgX - tipHit.x, imgY - tipHit.y);
                 if (distTip <= tipR && (!bestTip || distTip < bestTip.dist)) {
                     bestTip = { defect: d, dist: distTip, tipR };
@@ -20816,6 +20889,7 @@ document.addEventListener('DOMContentLoaded', () => {
             forceArrowDirEl.indeterminate = false;
             forceArrowDirEl.disabled = true;
         }
+        syncDefectMarkTipUi('');
 
         const allArea = defects.every(d => d.shapeType === 'area' && d.areaX1 !== undefined);
         if (allArea) {
@@ -20825,6 +20899,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 fill.mixed ? (rep.areaFillStyle || 'solid') : (fill.value || 'solid'),
                 border.mixed ? (rep.areaBorderStyle || 'solid') : (border.value || 'solid')
             );
+        } else {
+            const tip = bulkFieldConsensus(defects, d => d.markTipShape || '');
+            syncDefectMarkTipUi(tip.mixed ? '' : (tip.value || ''));
         }
 
         window._pendingPhotos = [];
@@ -20988,6 +21065,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (bookmarkEl) bookmarkEl.checked = !!existingPin.isBookmark;
             if (priorityManageEl) priorityManageEl.checked = !!existingPin.isPriorityManage;
             if (forceArrowDirEl) forceArrowDirEl.checked = !!existingPin.forceArrowDir;
+            syncDefectMarkTipUi(existingPin.markTipShape || '');
             setDefectArrowOctant(existingPin.arrowOctant);
             syncDefectArrowDirUi();
 
@@ -21078,6 +21156,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (bookmarkEl) bookmarkEl.checked = false;
             if (priorityManageEl) priorityManageEl.checked = false;
             if (forceArrowDirEl) forceArrowDirEl.checked = !!(tmpl && tmpl.forceArrowDir);
+            syncDefectMarkTipUi((tmpl && tmpl.markTipShape) || '');
             setDefectArrowOctant(tmpl && tmpl.arrowOctant);
             syncDefectArrowDirUi();
             window._pendingPhotos = [];
@@ -21801,6 +21880,11 @@ document.addEventListener('DOMContentLoaded', () => {
             if (changed.has('isCarriedOver')) d.isCarriedOver = isCarriedOver;
             if (changed.has('isBookmark')) d.isBookmark = isBookmark;
             if (changed.has('isPriorityManage')) d.isPriorityManage = isPriorityManage;
+            if (changed.has('markTipShape')) {
+                const tipVal = getDefectMarkTipShapeFromUi();
+                if (tipVal) d.markTipShape = tipVal;
+                else delete d.markTipShape;
+            }
             if (d.shapeType === 'area') {
                 if (changed.has('areaFillStyle')) d.areaFillStyle = areaFillVal;
                 if (changed.has('areaBorderStyle')) d.areaBorderStyle = areaBorderVal;
@@ -21868,6 +21952,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const isPriorityManage = document.getElementById('defectPriorityManage')?.checked || false;
         const forceArrowDir = document.getElementById('defectForceArrowDir')?.checked || false;
         const arrowOctant = ((parseInt(document.getElementById('defectArrowOctant')?.value || '0', 10) % 8) + 8) % 8;
+        const markTipShape = getDefectMarkTipShapeFromUi();
         const photosVal = window._pendingPhotos || [];
         const isGoodType = dTypeVal === '상태양호';
         syncHiddenCrackFieldsFromMeasures();
@@ -21905,6 +21990,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 state.defects[key][idx].isPriorityManage = isPriorityManage;
                 state.defects[key][idx].forceArrowDir = forceArrowDir;
                 state.defects[key][idx].arrowOctant = arrowOctant;
+                if (markTipShape) state.defects[key][idx].markTipShape = markTipShape;
+                else delete state.defects[key][idx].markTipShape;
                 if (state.defects[key][idx].shapeType === 'area') {
                     state.defects[key][idx].areaFillStyle = areaFillVal;
                     state.defects[key][idx].areaBorderStyle = areaBorderVal;
@@ -21977,6 +22064,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 targetX: coords.targetX,
                 targetY: coords.targetY
             };
+            if (markTipShape) newDefect.markTipShape = markTipShape;
             if (window._pendingAreaRect) {
                 newDefect.shapeType = 'area';
                 newDefect.areaX1 = window._pendingAreaRect.x1;
@@ -22163,6 +22251,7 @@ document.addEventListener('DOMContentLoaded', () => {
             isPriorityManage: !!src.isPriorityManage,
             forceArrowDir: !!src.forceArrowDir,
             arrowOctant: src.arrowOctant,
+            markTipShape: src.markTipShape,
             surveyRound: src.surveyRound,
             updatedAt: Date.now(),
             photos: [],
@@ -22264,6 +22353,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     crackLength: saved.crackLength,
                     forceArrowDir: !!saved.forceArrowDir,
                     arrowOctant: ((parseInt(saved.arrowOctant, 10) || 0) % 8 + 8) % 8,
+                    markTipShape: saved.markTipShape,
                     areaFillStyle: saved.areaFillStyle || getAreaFillStyle(saved),
                     areaBorderStyle: saved.areaBorderStyle || getAreaBorderStyle(saved),
                     groupId: saved.groupId,
@@ -24102,7 +24192,6 @@ document.addEventListener('DOMContentLoaded', () => {
             const safeStyleKey = getDefectStyleKey(defect.category, defect.defectType);
             const color = getDefectColor(defect);
             const safeShapeCfg = getDefectPinShapeCfg(defect, safeStyleKey);
-            const useCircleTipSafe = state.tipShape === 'circle';
             // 스타일 설정(핀/화살표 크기)이 화면과 동일하게 보고서에도 반영되도록 — 기존엔 여기가 고정 크기였음
             const safeDefectSize = getStyleSize(safeStyleKey);
             const safeScale = safeDefectSize.pin;
@@ -24134,6 +24223,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 const anchor = getPinLeaderBoxAnchor(boxX, boxY, tipX, tipY, safeBoxW, safeBoxH, 0, leaderAnchorOpts);
                 const safeHeadLen = 11 * safeArrowScale;
                 const forcedDir = tipIsArea ? { enabled: false } : resolveForcedArrowDirection(t, defect);
+                const tipShapeSafe = resolveMarkTipShape(defect, t);
+                const useCircleTipSafe = isCircleMarkTipShape(tipShapeSafe);
                 const stemInset = useCircleTipSafe
                     ? 4.5 * safeArrowScale
                     : safeHeadLen * Math.cos(Math.PI / 6);
@@ -24221,7 +24312,6 @@ document.addEventListener('DOMContentLoaded', () => {
         const styleKey = getDefectStyleKey(defect.category, defect.defectType);
         const color = getDefectColor(defect);
         const shapeCfg = getDefectPinShapeCfg(defect, styleKey);
-        const useCircleTip = state.tipShape === 'circle';
         const sizes = getStyleSize(styleKey);
         const pinScale = sizes.pin;
         const arrowScale = sizes.arrow;
@@ -24234,7 +24324,13 @@ document.addEventListener('DOMContentLoaded', () => {
         const targets = (arrows && arrows.length > 0)
             ? arrows
             : (defect.targetX !== undefined && defect.targetY !== undefined
-                ? [{ targetX: defect.targetX, targetY: defect.targetY, forceArrowDir: defect.forceArrowDir, arrowOctant: defect.arrowOctant }]
+                ? [{
+                    targetX: defect.targetX,
+                    targetY: defect.targetY,
+                    forceArrowDir: defect.forceArrowDir,
+                    arrowOctant: defect.arrowOctant,
+                    markTipShape: defect.markTipShape
+                }]
                 : []);
 
         const isAreaDefect = defect.shapeType === 'area' && defect.areaX1 !== undefined;
@@ -24284,6 +24380,8 @@ document.addEventListener('DOMContentLoaded', () => {
             const anchor = getPinLeaderBoxAnchor(boxX, boxY, tipX, tipY, boxDim.w, boxDim.h, 0, leaderAnchorOpts);
             const headLen = 11 * arrowScale;
             const forcedDir = tipIsArea ? { enabled: false } : resolveForcedArrowDirection(t, defect);
+            const tipShapePlan = resolveMarkTipShape(defect, t);
+            const useCircleTip = isCircleMarkTipShape(tipShapePlan);
             const stemInset = useCircleTip
                 ? 4.5 * arrowScale
                 : headLen * Math.cos(Math.PI / 6);

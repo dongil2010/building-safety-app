@@ -947,6 +947,13 @@
                     </div>
 
                     <div class="form-group defect-arrow-block">
+                        <div class="defect-mark-tip-row" id="defectMarkTipRow" style="display:flex; flex-wrap:wrap; align-items:center; gap:0.35rem; margin-bottom:0.55rem;">
+                            <span class="defect-area-style-label">지시선 끝:</span>
+                            <button type="button" id="btnDefectMarkTipDefault" class="chip active" title="도면 우측 전역 설정 따름">기본</button>
+                            <button type="button" id="btnDefectMarkTipArrow" class="chip">➔ 화살표</button>
+                            <button type="button" id="btnDefectMarkTipCircle" class="chip">● 점</button>
+                            <input type="hidden" id="defectMarkTipShape" value="">
+                        </div>
                         <label class="checkbox-chip" style="border-color:#6b6b6b; color:#6b6b6b; margin-bottom: 0.45rem;">
                             <input type="checkbox" id="defectForceArrowDir"> 화살표 방향 지정
                         </label>
@@ -2668,9 +2675,9 @@
     <script src="js/shared/report.js?v=20260827_overview"></script>
     <script src="js/shared/hwpx-import.js?v=20260825_hwpxin"></script>
     <script src="js/shared/auth.js?v=20260821_land1"></script>
-    <script src="app.js?v=20260828_list_sel_hl"></script>
+    <script src="app.js?v=20260828_mark_tip_hl"></script>
     <script>
-        window.BSA_APP_VERSION = '20260828_list_sel_hl';
+        window.BSA_APP_VERSION = '20260828_mark_tip_hl';
         (function () {
             var el = document.getElementById('appVersionText');
             if (el && window.BSA_APP_VERSION) el.textContent = 'v' + window.BSA_APP_VERSION;
