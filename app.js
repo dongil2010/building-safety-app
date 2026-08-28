@@ -25678,7 +25678,7 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     // --- HWPX(한글) 상태조사표 내보내기 (전체 층, 건수/사진 매수 제한 없음) ---
-    const HWPX_TEMPLATE_VERSION = '20260828_grade3_stamp';
+    const HWPX_TEMPLATE_VERSION = '20260828_no_grad';
 
     function hwpxTagBlock(xml, tag, id) {
         const re = new RegExp(`<hh:${tag} id="${id}"[^>]*>[\\s\\S]*?<\\/hh:${tag}>`, 's');
@@ -25704,6 +25704,15 @@ document.addEventListener('DOMContentLoaded', () => {
         if (m) return xml.slice(0, m.index + m[1].length) + m[2] + block + m[3] + xml.slice(m.index + m[0].length);
         return xml;
     }
+    /** 결함조사표 칸 배경 그라데이션(#FFF→#BBB) 제거 — 글자만 써도 회색으로 보이는 원인 */
+    function hwpxSanitizeBorderFillBlock(block) {
+        if (!block || !/gradation/i.test(block)) return block;
+        return block.replace(/<hc:fillBrush>[\s\S]*?<\/hc:fillBrush>/g, '');
+    }
+    function hwpxStripBorderFillGradation(headerXml) {
+        if (!headerXml) return headerXml;
+        return headerXml.replace(/<hh:borderFill id="\d+"[^>]*>[\s\S]*?<\/hh:borderFill>/g, (block) => hwpxSanitizeBorderFillBlock(block));
+    }
     function hwpxCollectStyleIds(tableXml, srcHeader) {
         const borderIds = new Set((tableXml.match(/borderFillIDRef="(\d+)"/g) || []).map(s => s.match(/\d+/)[0]));
         const charIds = new Set((tableXml.match(/charPrIDRef="(\d+)"/g) || []).map(s => s.match(/\d+/)[0]));
@@ -25728,7 +25737,7 @@ document.addEventListener('DOMContentLoaded', () => {
         });
         [...borderIds].sort((a, b) => +a - +b).forEach((bid) => {
             const block = hwpxTagBlock(stampHeader, 'borderFill', bid);
-            if (block) out = hwpxUpsertBlock(out, 'borderFill', bid, block);
+            if (block) out = hwpxUpsertBlock(out, 'borderFill', bid, hwpxSanitizeBorderFillBlock(block));
         });
         [...charIds].sort((a, b) => +a - +b).forEach((cid) => {
             const block = hwpxTagBlock(stampHeader, 'charPr', cid);
@@ -25738,9 +25747,8 @@ document.addEventListener('DOMContentLoaded', () => {
             const block = hwpxTagBlock(stampHeader, 'paraPr', pid);
             if (block) out = hwpxUpsertBlock(out, 'paraPr', pid, block);
         });
-        return out;
+        return hwpxStripBorderFillGradation(out);
     }
-    function hwpxIsSurveyStampTable(tblXml, isGrade3) {
         const colM = tblXml.match(/colCnt="(\d+)"/);
         if (!colM) return false;
         const texts = (tblXml.match(/<hp:t[^>]*>([^<]*)<\/hp:t>/g) || []).slice(0, 20).join('').replace(/\s+/g, '');
