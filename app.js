@@ -9507,7 +9507,7 @@ document.addEventListener('DOMContentLoaded', () => {
             } else {
                 cols.push({ label: firstLabel, value: first ? `${first.level}cm` : '-' });
                 cols.push({ label: lastLabel, value: last ? `${last.level}cm` : '-' });
-                cols.push({ label: `변위량총합\n(${firstLabel}-${lastLabel})`, value: `${arrow}${deltaAbs.toFixed(1)}cm` });
+                cols.push({ label: '변위량총합', value: `${arrow}${deltaAbs.toFixed(1)}cm` });
             }
             cols.push({ label: `변위평가\n(L=${lengthMmText})`, value: calc.tiltRatio || '-' });
 
@@ -26004,22 +26004,34 @@ document.addEventListener('DOMContentLoaded', () => {
         try {
             if (typeof JSZip === 'undefined') throw new Error('JSZip 라이브러리를 불러오지 못했습니다.');
 
+            // 3종/1,2종은 완전히 분리된 함수로 처리한다 (공유 로직 수정이 다른 등급까지
+            // 깨뜨린 사고가 반복되어, 표 생성 로직 자체를 등급별로 독립시켰다).
+            if (isGrade3Building(bldg)) {
+                await exportHwpxSurveyTable3(bldg, bldgId, floorsData, getFloorLabel);
+            } else {
+                await exportHwpxSurveyTable12(bldg, bldgId, floorsData, getFloorLabel);
+            }
+        } catch (err) {
+            console.error('HWPX export error:', err);
+            window.showToast('hwpx 생성 중 오류가 발생했습니다: ' + err.message, 'error', 5000);
+        } finally {
+            window.hideLoading();
+        }
+    };
+
+    async function exportHwpxSurveyTable3(bldg, bldgId, floorsData, getFloorLabel) {
             // 정기안전점검은 비파괴 장비조사 섹션(DATA·결과표/위치도/사진첩)이 통째로 빠진 전용
             // 템플릿을 쓴다. 프로그램으로 표/제목 문단을 골라 지우는 방식은 목차 번호·캡션·이미지
             // 슬롯이 얽혀있어 완전히 지우기가 어려워서(제목만 빈 채로 남는 문제 있었음), 애초에
             // 한글에서 해당 섹션을 다 들어낸 별도 템플릿 파일을 만들어 분리했다.
             const isPreciseInspectionForTemplate = (bldg.inspectionType || '정밀안전점검') === '정밀안전점검';
-            const isGrade3 = bldg.facilityGrade === '제3종시설물';
+            const isGrade3 = true; // exportHwpxSurveyTable3: always grade3
             // 3종시설물은 칠산타워 서식(No./구분/부재 분류/점검내용/발생원인/비고, 구조·비구조
             // 2행 헤더)을 쓰고, 비파괴 장비조사 섹션 유무는 1,2종과 똑같이 정밀/정기 여부로
             // 결정한다(정밀에 체크된 경우에만 비파괴장비조사 포함).
-            const templatePath = isGrade3
-                ? (isPreciseInspectionForTemplate
-                    ? './templates/hwpx_survey_template_grade3.hwpx'
-                    : './templates/hwpx_survey_template_grade3_regular.hwpx')
-                : (isPreciseInspectionForTemplate
-                    ? './templates/hwpx_survey_template.hwpx'
-                    : './templates/hwpx_survey_template_regular.hwpx');
+            const templatePath = isPreciseInspectionForTemplate
+                ? './templates/hwpx_survey_template_grade3.hwpx'
+                : './templates/hwpx_survey_template_grade3_regular.hwpx';
 
             // 템플릿 파일은 버전 쿼리스트링이 없어서, 브라우저 캐시에 옛 버전이 남아있으면 그걸 계속
             // 쓰는 문제가 있었다(실제로 표/사진이 예전 버전 그대로 나온 원인). 매번 네트워크에서
@@ -26045,7 +26057,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
             // 3종 중점관리 전·금회차 비교사진 — 칠산타워 표 양식(templates/hwpx_priority_compare_grade3.hwpx)
             let grade3CompareTableStamp = null;
-            if (isGrade3) {
                 try {
                     const cmpResp = await fetch('./templates/hwpx_priority_compare_grade3.hwpx', { cache: 'no-store' });
                     if (cmpResp.ok) {
@@ -26087,7 +26098,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 } catch (cmpLoadErr) {
                     console.warn('중점관리 비교표 템플릿 로드 실패:', cmpLoadErr);
                 }
-            }
             // 한글에서 표에 새 칸을 추가만 하고 한 번도 안 채운 셀은 문단/run은 있어도 hp:t(실제 글자
             // 요소)가 아예 없는 경우가 있다. 없으면 만들어서 항상 값을 넣을 자리를 보장한다.
             const ensureCellTextNode = (para) => {
@@ -26455,12 +26465,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (!firstRow) return false;
                 const headerJoined = Array.from(firstRow.getElementsByTagNameNS(HP_NS, 't'))
                     .map(t => t.textContent || '').join('').replace(/\s+/g, '');
-                if (isGrade3) {
                     return headerJoined.includes('점검내용') && headerJoined.includes('발생원인');
-                }
-                return headerJoined.includes('구분(NO') && headerJoined.includes('조사내용')
-                    && (headerJoined.includes('크기(mm') || headerJoined.includes('크기'))
-                    && !headerJoined.includes('부재종류');
             };
             const discoverFloorSlots = () => {
                 const ps = secChildren();
@@ -26511,7 +26516,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     }
                     // 3종시설물은 위치도를 층 블록에서 미리 떼어내 별도로 마지막에 몰아서 넣으므로,
                     // 층 블록 자체에는 위치도가 없어도(locationMapTbl === null) 유효한 슬롯으로 본다.
-                    if (statusTbls.length > 0 && photoTbl && (isGrade3 || locationMapTbl)) {
+                    if (statusTbls.length > 0 && photoTbl) {
                         slots.push({ titlePara: ps[s], statusTbls, photoTbl, locationMapTbl });
                     }
                 }
@@ -26559,7 +26564,7 @@ document.addEventListener('DOMContentLoaded', () => {
             // 들어가버리므로, 위치도 문단을 먼저 떼어내 따로 보관해두고 "틀"에서 제외한다 — 실제
             // 위치도 삽입은 아래 본 루프가 전부 끝난 뒤 별도로 한다.
             let grade3LocMapStampPara = null;
-            if (isGrade3 && floorSlots[0].locationMapTbl) {
+            if (floorSlots[0].locationMapTbl) {
                 let node = floorSlots[0].locationMapTbl.parentNode;
                 while (node && node.localName !== 'p') node = node.parentNode;
                 grade3LocMapStampPara = node;
@@ -26789,13 +26794,11 @@ document.addEventListener('DOMContentLoaded', () => {
                         if (filledPrev.length > 0) d.prevRoundPhotos = filledPrev;
                     }
                 }));
-                const priorityCompareDefects = isGrade3
-                    ? pageDefects.filter(d => d.isPriorityManage
-                        && (getDefectPrevOutputPhotos(d).length > 0 || getDefectOutputPhotos(d).length > 0))
-                    : [];
+                const priorityCompareDefects = pageDefects.filter(d => d.isPriorityManage
+                    && (getDefectPrevOutputPhotos(d).length > 0 || getDefectOutputPhotos(d).length > 0));
                 const regularPhotoDefects = pageDefects.filter(d => {
                     if (!getDefectOutputPhotos(d).length) return false;
-                    if (isGrade3 && d.isPriorityManage) return false;
+                    if (d.isPriorityManage) return false;
                     return true;
                 });
                 const photoDefects = regularPhotoDefects;
@@ -26958,7 +26961,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
 
                 // ---- 3종 중점관리: 전·금회차 비교사진 (칠산타워 표 양식 — 좌우 사진 + 번호/회차 캡션) ----
-                if (isGrade3 && priorityCompareDefects.length > 0) {
+                if (priorityCompareDefects.length > 0) {
                     try {
                         if (!grade3CompareTableStamp || !grade3CompareTableStamp.compareTblPara) {
                             window.showToast('중점관리 비교사진 양식(templates/hwpx_priority_compare_grade3.hwpx)을 찾지 못했습니다.', 'warning', 6000);
@@ -27070,12 +27073,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 // ---- 결함위치도 ----
                 // 3종시설물은 위치도를 층 블록에서 바로 넣지 않고, 모든 층 처리가 끝난 뒤 별도로
                 // 몰아서 넣는다(아래 본 루프 밖의 grade3LocMapStampPara 처리 참고).
-                if (!isGrade3) {
-                    let locPara = slot.locationMapTbl && slot.locationMapTbl.parentNode;
-                    while (locPara && locPara.localName !== 'p') locPara = locPara.parentNode;
-                    if (locPara) locPara.setAttribute('pageBreak', '1');
-                    await fillLocationMapForFloor(slot.locationMapTbl, floorCode, slotIdx + 1);
-                }
             }
 
             // 실제로 채운 블록 다음에 남은 표본 층 블록은 (비파괴조사 섹션 정리와 함께) 뒤에서 지운다.
@@ -27749,7 +27746,7 @@ document.addEventListener('DOMContentLoaded', () => {
             // ---- 3종시설물 위치도 일괄 삽입 ----
             // 모든 층의 상태조사표/사진첩이 다 채워지고 표본 잔여 정리까지 끝난 뒤, 떼어뒀던 위치도
             // "틀" 문단을 층 수만큼 복제해 문서 맨 뒤에 순서대로 붙이고 채운다.
-            if (isGrade3 && grade3LocMapStampPara) {
+            if (grade3LocMapStampPara) {
                 for (let i = 0; i < floorsData.length; i++) {
                     const { floorCode } = floorsData[i];
                     const clonedPara = grade3LocMapStampPara.cloneNode(true);
@@ -27867,13 +27864,1677 @@ document.addEventListener('DOMContentLoaded', () => {
 
             const totalDefectCount = floorsData.reduce((sum, f) => sum + f.pageDefects.length, 0);
             window.showToast(`hwpx 파일을 생성했습니다 (${floorsData.length}개 층, 총 ${totalDefectCount}건 반영).`, 'success', 4000);
-        } catch (err) {
-            console.error('HWPX export error:', err);
-            window.showToast('hwpx 생성 중 오류가 발생했습니다: ' + err.message, 'error', 5000);
-        } finally {
-            window.hideLoading();
-        }
-    };
+    }
+
+    async function exportHwpxSurveyTable12(bldg, bldgId, floorsData, getFloorLabel) {
+            // 정기안전점검은 비파괴 장비조사 섹션(DATA·결과표/위치도/사진첩)이 통째로 빠진 전용
+            // 템플릿을 쓴다. 프로그램으로 표/제목 문단을 골라 지우는 방식은 목차 번호·캡션·이미지
+            // 슬롯이 얽혀있어 완전히 지우기가 어려워서(제목만 빈 채로 남는 문제 있었음), 애초에
+            // 한글에서 해당 섹션을 다 들어낸 별도 템플릿 파일을 만들어 분리했다.
+            const isPreciseInspectionForTemplate = (bldg.inspectionType || '정밀안전점검') === '정밀안전점검';
+            const isGrade3 = false; // exportHwpxSurveyTable12: always grade1/2
+            // 3종시설물은 칠산타워 서식(No./구분/부재 분류/점검내용/발생원인/비고, 구조·비구조
+            // 2행 헤더)을 쓰고, 비파괴 장비조사 섹션 유무는 1,2종과 똑같이 정밀/정기 여부로
+            // 결정한다(정밀에 체크된 경우에만 비파괴장비조사 포함).
+            const templatePath = isPreciseInspectionForTemplate
+                ? './templates/hwpx_survey_template.hwpx'
+                : './templates/hwpx_survey_template_regular.hwpx';
+
+            // 템플릿 파일은 버전 쿼리스트링이 없어서, 브라우저 캐시에 옛 버전이 남아있으면 그걸 계속
+            // 쓰는 문제가 있었다(실제로 표/사진이 예전 버전 그대로 나온 원인). 매번 네트워크에서
+            // 새로 받아오도록 강제한다.
+            const resp = await fetch(templatePath, { cache: 'no-store' });
+            if (!resp.ok) throw new Error('템플릿 파일을 불러오지 못했습니다.');
+            const zip = await JSZip.loadAsync(await resp.arrayBuffer());
+
+            const HP_NS = 'http://www.hancom.co.kr/hwpml/2011/paragraph';
+            const HC_NS = 'http://www.hancom.co.kr/hwpml/2011/core';
+            // 한글에서 템플릿을 직접 열어 저장하면 섹션을 하나로 합치면서 section1.xml이 사라지고
+            // section0.xml 하나에 전체 내용이 들어가는 경우가 있다(실제로 겪음). 층별 조사표가 들어있는
+            // 실제 섹션 파일을 그때그때 찾는다.
+            const sectionPath = zip.file('Contents/section1.xml') ? 'Contents/section1.xml' : 'Contents/section0.xml';
+            const xmlText = await zip.file(sectionPath).async('string');
+            const xmlDoc = new DOMParser().parseFromString(xmlText, 'application/xml');
+            if (xmlDoc.querySelector('parsererror')) throw new Error('템플릿 ' + sectionPath + ' 파싱에 실패했습니다.');
+
+            const sec = xmlDoc.getElementsByTagName('hs:sec')[0];
+            if (!sec) throw new Error('템플릿 문서 구조(hs:sec)를 찾지 못했습니다.');
+            const paraText = (p) => Array.from(p.getElementsByTagNameNS(HP_NS, 't')).map(t => t.textContent).join('');
+            const secChildren = () => Array.from(sec.children).filter(c => c.localName === 'p');
+
+            // 한글에서 표에 새 칸을 추가만 하고 한 번도 안 채운 셀은 문단/run은 있어도 hp:t(실제 글자
+            // 요소)가 아예 없는 경우가 있다. 없으면 만들어서 항상 값을 넣을 자리를 보장한다.
+            const ensureCellTextNode = (para) => {
+                let run = para.getElementsByTagNameNS(HP_NS, 'run')[0];
+                if (!run) {
+                    run = xmlDoc.createElementNS(HP_NS, 'hp:run');
+                    para.appendChild(run);
+                }
+                let t = run.getElementsByTagNameNS(HP_NS, 't')[0];
+                if (!t) {
+                    t = xmlDoc.createElementNS(HP_NS, 'hp:t');
+                    run.appendChild(t);
+                }
+                return t;
+            };
+            // 표 칸에 값을 2줄 이상(줄바꿈 \n) 채울 때, 첫 문단을 복제해 다음 줄로 이어붙이는 곳마다
+            // 복제본이 원본과 똑같은 vertpos(보통 0)를 그대로 들고 나가서 여러 줄이 같은 자리에
+            // 겹쳐 보이는 버그가 있었다("변위량" 글자가 사라진 것처럼, 또는 엔터 친 것처럼 보이던 원인).
+            // 문서에서 이미 정상적으로 2줄인 칸들의 규칙(다음 줄 vertpos = 이전 vertpos + vertsize +
+            // spacing)을 그대로 적용해 복제된 줄마다 세로 위치를 다시 계산해준다.
+            const fixClonedParaVertpos = (clonedPara, lineIndex, baseVertsize, baseSpacing) => {
+                const seg = clonedPara.getElementsByTagNameNS(HP_NS, 'lineseg')[0];
+                if (seg) seg.setAttribute('vertpos', String(lineIndex * (baseVertsize + baseSpacing)));
+            };
+            // 한글 셀: 자간은 절대 손대지 않는다. 가운데 쪼개기(줄나눔)도 하지 않는다.
+            // 칸 너비를 넘는 지점부터 다음 줄로 넘기고(띄어쓰기 있으면 그 앞, 없으면 글자 단위),
+            // 행 높이는 템플릿을 유지하다가 4줄 이상일 때만 내용에 맞게 확장한다.
+            const HWPX_CELL_EXPAND_FROM_LINES = 4;
+            const hwpxCharWidthUnits = (ch) => {
+                // 반각·ASCII는 대략 절반 폭으로 잡아 넘어가는 위치를 맞춤
+                if (/[\u0020-\u007E\uFF61-\uFF9F]/.test(ch)) return 0.55;
+                return 1;
+            };
+            const estimateHwpxCellMaxChars = (tc, paras) => {
+                const DEFAULT_MAX = 16;
+                if (!tc) return DEFAULT_MAX;
+                const sz = tc.getElementsByTagNameNS(HP_NS, 'cellSz')[0];
+                const cellW = sz ? parseInt(sz.getAttribute('width'), 10) || 0 : 0;
+                if (!cellW) return DEFAULT_MAX;
+                const marginEl = tc.getElementsByTagNameNS(HP_NS, 'cellMargin')[0];
+                const ml = marginEl ? (parseInt(marginEl.getAttribute('left'), 10) || 0) : 141;
+                const mr = marginEl ? (parseInt(marginEl.getAttribute('right'), 10) || 0) : 141;
+                const seg = paras && paras[0] ? paras[0].getElementsByTagNameNS(HP_NS, 'lineseg')[0] : null;
+                const vertsize = seg ? (parseInt(seg.getAttribute('vertsize'), 10) || 1000) : 1000;
+                // 전각 한글 폭 ≈ 글자 높이. 여유 없이 꽉 채우지 않도록 0.95 배율.
+                const charW = Math.max(700, Math.round(vertsize * 0.95));
+                const usable = Math.max(charW, cellW - ml - mr);
+                return Math.max(4, Math.floor(usable / charW));
+            };
+            /** 칸을 넘는 위치부터 순차 줄바꿈. 가운데 분할(줄나눔) 없음. */
+            const wrapHwpxCellLine = (line, maxChars = 16) => {
+                const s = String(line == null ? '' : line);
+                const chars = Array.from(s);
+                if (!chars.length) return '';
+                const maxUnits = Math.max(4, Number(maxChars) || 16);
+                const lines = [];
+                let i = 0;
+                while (i < chars.length) {
+                    while (i < chars.length && (chars[i] === ' ' || chars[i] === '\t')) i++;
+                    if (i >= chars.length) break;
+                    let units = 0;
+                    let end = i;
+                    let lastBreak = -1; // 끊을 위치(이 인덱스부터 다음 줄)
+                    while (end < chars.length) {
+                        const ch = chars[end];
+                        const w = hwpxCharWidthUnits(ch);
+                        if (units + w > maxUnits && end > i) break;
+                        units += w;
+                        end++;
+                        if (ch === ' ' || ch === '\t') {
+                            // 폭/길이 -2EA · Cw:0.3 -2EA 앞 공백은 강제 줄바꿈(문단끝)하지 않음.
+                            // 공백만 두고 한글 자동 줄바꿈에 맡긴다.
+                            const after = chars.slice(end).join('');
+                            if (!/^-\d+\s*EA\b/i.test(after)) lastBreak = end;
+                        } else if (/[,|·、，]/.test(ch)) {
+                            // . / 는 규모(0.15/1.5) 중간이라 끊지 않음. 여러 건 구분자(콤마)만.
+                            lastBreak = end;
+                        }
+                    }
+                    if (end >= chars.length) {
+                        lines.push(chars.slice(i).join(''));
+                        break;
+                    }
+                    let cut = (lastBreak > i) ? lastBreak : end;
+                    // lastBreak가 공백을 가리키면 공백은 다음 줄 선두에서 제거됨
+                    if (cut > i && (chars[cut - 1] === ' ' || chars[cut - 1] === '\t')) {
+                        lines.push(chars.slice(i, cut - 1).join(''));
+                        i = cut;
+                    } else {
+                        lines.push(chars.slice(i, cut).join(''));
+                        i = cut;
+                    }
+                    if (!lines[lines.length - 1]) lines.pop();
+                }
+                return lines.length ? lines.join('\n') : s;
+            };
+            const wrapHwpxCellText = (raw, maxChars = 16) => String(normalizeEaSpacingInText(raw == null ? '' : raw))
+                .split('\n')
+                .map((line) => wrapHwpxCellLine(line, maxChars))
+                .join('\n');
+            // rawVal의 실제 줄 수(lines.length)를 반환한다 — 호출부에서 행 높이를 실제 줄 수에
+            // 맞춰 다시 계산하는 데 쓴다(표본 행이 다른 칸의 샘플 2줄 데이터 기준 키를 물려받아,
+            // 1줄로 줄어든 칸의 글자가 위로 뜬 것처럼 보이던 문제 — 한글에서 직접 확인됨).
+            const fillCellParas = (subList, paras, rawVal, tc) => {
+                const maxChars = estimateHwpxCellMaxChars(tc, paras);
+                const lines = wrapHwpxCellText(rawVal, maxChars).split('\n');
+                const baseSeg = paras[0].getElementsByTagNameNS(HP_NS, 'lineseg')[0];
+                const baseVertsize = baseSeg ? parseInt(baseSeg.getAttribute('vertsize'), 10) || 0 : 0;
+                const baseSpacing = baseSeg ? parseInt(baseSeg.getAttribute('spacing'), 10) || 0 : 0;
+                ensureCellTextNode(paras[0]).textContent = lines[0];
+                if (baseSeg) baseSeg.setAttribute('vertpos', '0');
+                for (let i = paras.length - 1; i >= 1; i--) subList.removeChild(paras[i]);
+                let refNode = paras[0];
+                for (let i = 1; i < lines.length; i++) {
+                    const clonedPara = paras[0].cloneNode(true);
+                    ensureCellTextNode(clonedPara).textContent = lines[i];
+                    fixClonedParaVertpos(clonedPara, i, baseVertsize, baseSpacing);
+                    subList.insertBefore(clonedPara, refNode.nextSibling);
+                    refNode = clonedPara;
+                }
+                return { lineCount: lines.length, vertsize: baseVertsize, spacing: baseSpacing };
+            };
+            // 템플릿 행 높이를 기본으로 유지한다. 줄이거나 미리 키우지 않고,
+            // 4줄 이상으로 넘어갈 때만 해당 행(칸들)을 내용 높이에 맞게 확장한다.
+            // 세로 병합(rowSpan>1) 칸은 여러 행에 걸친 높이라 건드리지 않는다.
+            const applyRowHeightFromLines = (row, rowMaxLines, rowLineMetric, minRowHeight) => {
+                if (!row || !rowLineMetric) return 0;
+                let templateHeight = 0;
+                Array.from(row.getElementsByTagNameNS(HP_NS, 'tc')).forEach((tc) => {
+                    const span = tc.getElementsByTagNameNS(HP_NS, 'cellSpan')[0];
+                    if (span && parseInt(span.getAttribute('rowSpan'), 10) > 1) return;
+                    const sz = tc.getElementsByTagNameNS(HP_NS, 'cellSz')[0];
+                    const h = sz ? parseInt(sz.getAttribute('height'), 10) || 0 : 0;
+                    if (h > templateHeight) templateHeight = h;
+                });
+                const contentHeight = rowLineMetric.marginV + rowLineMetric.vertsize
+                    + (rowMaxLines - 1) * (rowLineMetric.vertsize + rowLineMetric.spacing)
+                    + Math.round(rowLineMetric.vertsize * 0.2);
+                let neededHeight = templateHeight;
+                if (rowMaxLines >= HWPX_CELL_EXPAND_FROM_LINES) {
+                    neededHeight = Math.max(templateHeight, contentHeight);
+                    if (minRowHeight) {
+                        const floorH = minRowHeight
+                            + (rowMaxLines - 1) * (rowLineMetric.vertsize + rowLineMetric.spacing);
+                        neededHeight = Math.max(neededHeight, floorH);
+                    }
+                }
+                // 템플릿보다 줄이지 않음. 확장할 때만 기록.
+                if (neededHeight > templateHeight) {
+                    Array.from(row.getElementsByTagNameNS(HP_NS, 'tc')).forEach((tc) => {
+                        const span = tc.getElementsByTagNameNS(HP_NS, 'cellSpan')[0];
+                        if (span && parseInt(span.getAttribute('rowSpan'), 10) > 1) return;
+                        const sz = tc.getElementsByTagNameNS(HP_NS, 'cellSz')[0];
+                        if (sz) sz.setAttribute('height', String(neededHeight));
+                    });
+                }
+                return neededHeight || templateHeight;
+            };
+            // 한글은 subList의 vertAlign="CENTER"만으로 셀 안 글자를 자동으로 세로 가운데 정렬해
+            // 주지 않는다 — 저장된 vertpos를 셀 위쪽 여백부터의 절대 오프셋으로 그대로 쓴다. 그래서
+            // 지금까지 vertpos=0으로만 채워온 칸들은 셀 높이가 넉넉할수록 글자가 위로 붙어 보였다
+            // (사용자가 결과표 헤더에서 직접 확인). 셀의 최종 높이가 정해진 뒤 이 함수로 한 번 더
+            // 훑어서, 실제 줄 수만큼의 콘텐츠 높이를 셀 안에서 정확히 가운데로 오는 vertpos로
+            // 다시 계산해 넣는다.
+            const centerCellContent = (tc) => {
+                if (!tc) return;
+                const sz = tc.getElementsByTagNameNS(HP_NS, 'cellSz')[0];
+                const cellHeight = sz ? parseInt(sz.getAttribute('height'), 10) : 0;
+                if (!cellHeight) return;
+                const subList = tc.getElementsByTagNameNS(HP_NS, 'subList')[0];
+                if (!subList) return;
+                const paras = Array.from(subList.getElementsByTagNameNS(HP_NS, 'p')).filter(p => p.parentNode === subList);
+                if (paras.length === 0) return;
+                const marginEl = tc.getElementsByTagNameNS(HP_NS, 'cellMargin')[0];
+                const marginTop = marginEl ? (parseInt(marginEl.getAttribute('top'), 10) || 0) : 141;
+                const marginBottom = marginEl ? (parseInt(marginEl.getAttribute('bottom'), 10) || 0) : 141;
+                const firstSeg = paras[0].getElementsByTagNameNS(HP_NS, 'lineseg')[0];
+                if (!firstSeg) return;
+                const vertsize = parseInt(firstSeg.getAttribute('vertsize'), 10) || 0;
+                const spacing = parseInt(firstSeg.getAttribute('spacing'), 10) || 0;
+                if (!vertsize) return;
+                const contentHeight = vertsize + (paras.length - 1) * (vertsize + spacing);
+                const available = cellHeight - marginTop - marginBottom;
+                const offset = Math.max(0, Math.round((available - contentHeight) / 2));
+                paras.forEach((p, i) => {
+                    const seg = p.getElementsByTagNameNS(HP_NS, 'lineseg')[0];
+                    if (seg) seg.setAttribute('vertpos', String(offset + i * (vertsize + spacing)));
+                });
+            };
+            const setTcText = (tc, rawVal) => {
+                if (!tc) return;
+                const subList = tc.getElementsByTagNameNS(HP_NS, 'subList')[0];
+                const paras = subList
+                    ? Array.from(subList.getElementsByTagNameNS(HP_NS, 'p')).filter(p => p.parentNode === subList)
+                    : [];
+                if (paras.length > 0) fillCellParas(subList, paras, rawVal, tc);
+                else {
+                    const t = tc.getElementsByTagNameNS(HP_NS, 't')[0];
+                    if (t) t.textContent = wrapHwpxCellText(rawVal).split('\n').join(' ');
+                }
+            };
+            const ensureTblTreatAsChar = (tbl) => {
+                if (!tbl) return;
+                let pos = Array.from(tbl.children).find(c => c.localName === 'pos');
+                if (!pos) {
+                    pos = xmlDoc.createElementNS(HP_NS, 'hp:pos');
+                    const sz = Array.from(tbl.children).find(c => c.localName === 'sz');
+                    if (sz && sz.nextSibling) tbl.insertBefore(pos, sz.nextSibling);
+                    else tbl.appendChild(pos);
+                }
+                pos.setAttribute('treatAsChar', '1');
+                pos.setAttribute('affectLSpacing', '0');
+                pos.setAttribute('flowWithText', '1');
+                pos.setAttribute('allowOverlap', '0');
+                pos.setAttribute('holdAnchorAndSO', '0');
+                pos.setAttribute('vertRelTo', 'PARA');
+                pos.setAttribute('horzRelTo', 'PARA');
+                pos.setAttribute('vertAlign', 'TOP');
+                pos.setAttribute('horzAlign', 'LEFT');
+                pos.setAttribute('vertOffset', '0');
+                pos.setAttribute('horzOffset', '0');
+            };
+            const copyRowCellSizesFromTemplate = (row, templateRow) => {
+                if (!row || !templateRow) return;
+                const srcTcs = Array.from(templateRow.getElementsByTagNameNS(HP_NS, 'tc'));
+                const dstTcs = Array.from(row.getElementsByTagNameNS(HP_NS, 'tc'));
+                dstTcs.forEach((tc, i) => {
+                    const srcSz = srcTcs[i]?.getElementsByTagNameNS(HP_NS, 'cellSz')[0];
+                    const dstSz = tc.getElementsByTagNameNS(HP_NS, 'cellSz')[0];
+                    if (srcSz && dstSz) {
+                        const w = srcSz.getAttribute('width');
+                        const h = srcSz.getAttribute('height');
+                        if (w) dstSz.setAttribute('width', w);
+                        if (h) dstSz.setAttribute('height', h);
+                    }
+                });
+            };
+            const syncStatusTblLayoutFromTemplate = (destTbl, srcTbl, headerRowCount, templateDataRow) => {
+                if (!destTbl || !srcTbl) return;
+                const srcTblSz = Array.from(srcTbl.children).find(c => c.localName === 'sz');
+                const destTblSz = Array.from(destTbl.children).find(c => c.localName === 'sz');
+                if (srcTblSz && destTblSz) {
+                    ['width', 'height', 'widthRelTo', 'heightRelTo'].forEach(attr => {
+                        const v = srcTblSz.getAttribute(attr);
+                        if (v != null) destTblSz.setAttribute(attr, v);
+                    });
+                }
+                if (srcTbl.getAttribute('colCnt')) destTbl.setAttribute('colCnt', srcTbl.getAttribute('colCnt'));
+                if (srcTbl.getAttribute('rowCnt')) destTbl.setAttribute('rowCnt', srcTbl.getAttribute('rowCnt'));
+                const srcRows = Array.from(srcTbl.getElementsByTagNameNS(HP_NS, 'tr')).filter(tr => tr.parentNode === srcTbl);
+                const destRows = Array.from(destTbl.getElementsByTagNameNS(HP_NS, 'tr')).filter(tr => tr.parentNode === destTbl);
+                srcRows.forEach((srcRow, i) => {
+                    if (!destRows[i]) return;
+                    copyRowCellSizesFromTemplate(destRows[i], srcRow);
+                });
+                if (templateDataRow) {
+                    destRows.slice(headerRowCount).forEach(row => copyRowCellSizesFromTemplate(row, templateDataRow));
+                }
+            };
+            const stripPhotoTblRightHalf = (tbl) => {
+                Array.from(tbl.getElementsByTagNameNS(HP_NS, 'tr')).filter(tr => tr.parentNode === tbl).forEach(tr => {
+                    Array.from(tr.getElementsByTagNameNS(HP_NS, 'tc')).forEach(tc => {
+                        const addr = tc.getElementsByTagNameNS(HP_NS, 'cellAddr')[0];
+                        const col = addr ? parseInt(addr.getAttribute('colAddr') || '0', 10) : 0;
+                        if (col >= 3 && tc.parentNode) tc.parentNode.removeChild(tc);
+                    });
+                });
+                tbl.setAttribute('colCnt', '3');
+                const firstRow = Array.from(tbl.getElementsByTagNameNS(HP_NS, 'tr')).find(tr => tr.parentNode === tbl);
+                let width = 0;
+                if (firstRow) {
+                    Array.from(firstRow.getElementsByTagNameNS(HP_NS, 'tc')).forEach(tc => {
+                        const csz = tc.getElementsByTagNameNS(HP_NS, 'cellSz')[0];
+                        if (csz) width += parseInt(csz.getAttribute('width') || '0', 10) || 0;
+                    });
+                }
+                const sz = Array.from(tbl.children).find(c => c.localName === 'sz');
+                if (sz && width > 0) sz.setAttribute('width', String(width));
+            };
+            const removeParaRange = (fromP, toP) => {
+                const all = secChildren();
+                const start = all.indexOf(fromP);
+                const end = toP ? all.indexOf(toP) : all.length;
+                if (start < 0 || end < 0 || end <= start) return;
+                for (let i = end - 1; i >= start; i--) sec.removeChild(all[i]);
+            };
+
+            // 사진/위치도 이미지 삽입에 공용으로 쓰는 헬퍼들 (한 곳에서만 관리해 여러 층에서
+            // 다르게 어긋나지 않게 한다).
+            const dataUrlToBytes = (dataUrl) => {
+                const m = /^data:([^;]+);base64,(.*)$/.exec(dataUrl || '');
+                if (!m) throw new Error('이미지 데이터 형식을 인식할 수 없습니다.');
+                const mime = m[1];
+                const binary = atob(m[2]);
+                const bytes = new Uint8Array(binary.length);
+                for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+                const ext = mime === 'image/png' ? 'png' : 'jpg';
+                return { bytes, mime, ext };
+            };
+            const loadImageSize = (dataUrl) => new Promise((resolve, reject) => {
+                const img = new Image();
+                img.onload = () => resolve({ w: img.naturalWidth, h: img.naturalHeight });
+                img.onerror = () => reject(new Error('이미지를 불러오지 못했습니다.'));
+                img.src = dataUrl;
+            });
+            // 사진 1장을 표 안의 hp:pic 하나에 앉히는 작업. curSz/scaMatrix가 서로 어긋나면 비율이
+            // 깨져 보이는 걸 검증 과정에서 확인해서, orgSz/curSz/scaMatrix를 전부 일치시켜 계산한다.
+            // maxW/maxH는 그 hp:pic이 원래 차지하던 표시 박스 크기(넘지 않게 fit)다.
+            const setPicImage = (pic, imgId, pxW, pxH, maxW, maxH) => {
+                pic.getElementsByTagNameNS(HC_NS, 'img')[0].setAttribute('binaryItemIDRef', imgId);
+                pic.removeAttribute('thumbnailBinIDRef');
+                const orgW = pxW * 100, orgH = pxH * 100;
+                pic.getElementsByTagNameNS(HP_NS, 'orgSz')[0].setAttribute('width', String(orgW));
+                pic.getElementsByTagNameNS(HP_NS, 'orgSz')[0].setAttribute('height', String(orgH));
+                const aspect = pxW / pxH;
+                const boxAspect = maxW / maxH;
+                let curW, curH;
+                if (aspect >= boxAspect) { curW = maxW; curH = Math.round(maxW / aspect); }
+                else { curH = maxH; curW = Math.round(maxH * aspect); }
+                pic.getElementsByTagNameNS(HP_NS, 'curSz')[0].setAttribute('width', String(curW));
+                pic.getElementsByTagNameNS(HP_NS, 'curSz')[0].setAttribute('height', String(curH));
+                Array.from(pic.children).filter(c => c.localName === 'sz').forEach(sz => {
+                    sz.setAttribute('width', String(curW));
+                    sz.setAttribute('height', String(curH));
+                });
+                const rect = pic.getElementsByTagNameNS(HP_NS, 'imgRect')[0];
+                rect.getElementsByTagNameNS(HC_NS, 'pt1')[0].setAttribute('x', String(orgW));
+                const pt2 = rect.getElementsByTagNameNS(HC_NS, 'pt2')[0];
+                pt2.setAttribute('x', String(orgW)); pt2.setAttribute('y', String(orgH));
+                rect.getElementsByTagNameNS(HC_NS, 'pt3')[0].setAttribute('y', String(orgH));
+                const dimW = Math.round(orgW * 0.2095), dimH = Math.round(orgH * 0.2090);
+                const clip = pic.getElementsByTagNameNS(HP_NS, 'imgClip')[0];
+                clip.setAttribute('right', String(dimW)); clip.setAttribute('bottom', String(dimH));
+                const dim = pic.getElementsByTagNameNS(HP_NS, 'imgDim')[0];
+                dim.setAttribute('dimwidth', String(dimW)); dim.setAttribute('dimheight', String(dimH));
+                const cmt = pic.getElementsByTagNameNS(HP_NS, 'shapeComment')[0];
+                if (cmt) cmt.textContent = '';
+                const sca = pic.getElementsByTagNameNS(HC_NS, 'scaMatrix')[0];
+                sca.setAttribute('e1', String(curW / orgW));
+                sca.setAttribute('e5', String(curH / orgH));
+                const rot = pic.getElementsByTagNameNS(HP_NS, 'rotationInfo')[0];
+                if (rot) { rot.setAttribute('centerX', String(Math.round(curW / 2))); rot.setAttribute('centerY', String(Math.round(curH / 2))); }
+            };
+
+            // 사진 갤러리와 위치도가 새로 추가하는 이미지의 매니페스트 항목을 여기에 같이 모았다가
+            // 마지막에 한 번만 content.hpf에 반영한다.
+            const manifestAdds = [];
+            // 여러 층에 걸쳐 이미지/표를 새로 만들 때 id가 서로 겹치지 않도록 함수 전체에서 카운터를 공유한다.
+            let imgCounter = 0;
+            let photoTblCounter = 0;
+
+            // ---- 템플릿에 있는 "N) 층명" 블록(상태조사표+사진첩+위치도) 찾기 ----
+            // 템플릿에는 이 블록이 표본으로 1개만 들어있다(여러 개 남아있어도 첫 번째만 "틀"로 쓰고
+            // 나머지는 지운다). 이 틀을 실제 건물의 층 수만큼 복제해서 채우므로, 표본 문서에 층이 몇
+            // 개 있었는지와 무관하게 건물에 등록된 층 수만큼 그대로 내보낼 수 있다. 표 ID를 하드코딩
+            // 하는 대신 구조(제목 문단 → 상태조사표 → "사진1위치..."로 시작하는 사진첩 → pic 1개짜리
+            // 위치도)로 찾아서, 표본 문서가 조금 바뀌어도 잘 깨지지 않게 한다.
+            const floorTitleRe = /^\d+\)\s*.+층/;
+            // 표본 문서는 원본 건물의 그 층 결함이 많았으면 상태조사표가 애초에 표 여러 개(이어지는
+            // 페이지)로 나뉘어 있을 수 있다. 사진첩이 나오기 전까지 등장하는 현재 서식 표를
+            // statusTbls로 모은다. 1·2종은 신가병원 서식(조사내용/크기/부재 분류), 3종은 칠산타워
+            // 서식(No./구분/부재 분류/점검내용). 옛 "부재종류" 10칸 표·1·2종 잔여 표는 버린다.
+            const isCurrentStatusTable = (tbl) => {
+                const firstRow = tbl.getElementsByTagNameNS(HP_NS, 'tr')[0];
+                if (!firstRow) return false;
+                const headerJoined = Array.from(firstRow.getElementsByTagNameNS(HP_NS, 't'))
+                    .map(t => t.textContent || '').join('').replace(/\s+/g, '');
+                return headerJoined.includes('구분(NO') && headerJoined.includes('조사내용')
+                    && (headerJoined.includes('크기(mm') || headerJoined.includes('크기'))
+                    && !headerJoined.includes('부재종류');
+            };
+            const discoverFloorSlots = () => {
+                const ps = secChildren();
+                const starts = [];
+                ps.forEach((p, i) => { if (floorTitleRe.test(paraText(p).trim())) starts.push(i); });
+                const slots = [];
+                for (let idx = 0; idx < starts.length; idx++) {
+                    const s = starts[idx];
+                    const e = idx + 1 < starts.length ? starts[idx + 1] : ps.length;
+                    const statusTbls = [];
+                    let photoTbl = null, locationMapTbl = null;
+                    for (let i = s + 1; i < e; i++) {
+                        const txt = paraText(ps[i]).trim();
+                        const tbls = Array.from(ps[i].getElementsByTagNameNS(HP_NS, 'tbl'));
+                        if (tbls.length === 0) continue;
+                        if (!photoTbl && /^사진1/.test(txt)) { photoTbl = tbls[0]; continue; }
+                        if (!photoTbl) {
+                            // 한 문단 안에 표가 여러 개 겹쳐 들어있는 경우가 있다(옛 포맷을 새 포맷으로
+                            // 바꿀 때 지우지 않고 그 옆/위에 새로 붙여넣은 흔적으로 보임). 예전에는
+                            // tbls[0]만 보고 판단해서, 같은 문단의 두 번째/세 번째 표(대개 옛 포맷 잔여
+                            // 표)는 아예 검사조차 안 되고 영구히 남아 있었다 — 그 결과 층마다 옛 표가
+                            // 그대로 복제되어 "16~45번" 같은 표본 잔여 표가 문서 곳곳에 반복해서 끼어
+                            // 나오는 문제가 있었다. 문단 안의 표를 전부 하나씩 검사해서, 새 포맷이면
+                            // statusTbls에 담고 옛 포맷이면 그 표만 지운다. 표를 담은 hp:run을 통째로
+                            // 지우면 안 되는데(사진 갤러리처럼 표 여러 개가 같은 hp:run 안에 나란히
+                            // 들어있는 경우가 있어서, run을 지우면 그 안에 같이 있던 정상 표까지
+                            // 같이 사라진다 — 실제로 이 버그로 정상 표까지 날아간 적 있었음), 그래서
+                            // tbl 엘리먼트 자체만 그 부모에서 떼어낸다. 그 문단에 남는 표가 하나도
+                            // 없게 되면(옛 포맷 표만 혼자 문단을 차지하고 있던 경우) 문단 자체를
+                            // 통째로 지운다 — 안 지우면 그 문단이 갖고 있던 pageBreak="1" 속성이
+                            // 빈 문단인 채로 그대로 남아서, 표 다음에 빈 페이지가 하나 끼어 들어가는
+                            // 문제가 있었다.
+                            let keptAnyInPara = false;
+                            tbls.forEach(tbl => {
+                                if (isCurrentStatusTable(tbl)) {
+                                    statusTbls.push(tbl);
+                                    keptAnyInPara = true;
+                                } else if (tbl.parentNode) {
+                                    tbl.parentNode.removeChild(tbl);
+                                }
+                            });
+                            if (!keptAnyInPara && ps[i].parentNode) ps[i].parentNode.removeChild(ps[i]);
+                        }
+                    }
+                    for (let i = e - 1; i > s; i--) {
+                        const tbls = Array.from(ps[i].getElementsByTagNameNS(HP_NS, 'tbl'));
+                        if (tbls.length === 1 && tbls[0].getElementsByTagNameNS(HP_NS, 'pic').length === 1) { locationMapTbl = tbls[0]; break; }
+                    }
+                    if (statusTbls.length > 0 && photoTbl && (locationMapTbl)) {
+                        slots.push({ titlePara: ps[s], statusTbls, photoTbl, locationMapTbl });
+                    }
+                }
+                return slots;
+            };
+            // 표본 블록이 여러 개 남아있어도(예: 아직 안 줄인 옛 템플릿) 첫 번째만 "틀"로 쓰고 나머지는
+            // 지운다 — 이 시점부터 문서 끝까지가 그 "틀" 블록 하나만 남는다(층 블록이 문서의 마지막
+            // 섹션이라 안전하게 지울 수 있다). discoverFloorSlots()가 인식한 "유효한" 슬롯 개수
+            // (floorSlots.length)만 보고 판단하면, 두 번째 이후 블록이 옛 포맷 표라 isCurrentStatusTable을
+            // 통과 못해 slot 자체가 무효 처리되는 경우(그 표만 stale로 지워지고 사진첩/위치도는 남음) 이
+            // "여러 개 남음"을 놓쳐서 정리가 아예 안 되고, 그 뒤의 옛 표본 블록들이 통째로 "틀"에 딸려
+            // 들어가 실제 층 수만큼 복제되는 사고가 있었다(내보낸 문서에 표본 사진/표가 몇 배로 불어나
+            // 뒤섞여 나오고, 정작 뒤쪽 실제 층의 상태조사표는 밀려서 안 채워짐). 그래서 슬롯 유효성과
+            // 무관하게, "N) 층명" 형식 문단이 원문에 몇 개 있었는지(rawFloorTitleParas)부터 먼저 보고
+            // 두 번째 문단부터는 무조건 지운다.
+            const rawFloorTitleParas = secChildren().filter(p => floorTitleRe.test(paraText(p).trim()));
+            if (rawFloorTitleParas.length > 1) {
+                removeParaRange(rawFloorTitleParas[1], null);
+            }
+            let floorSlots = discoverFloorSlots();
+            if (!floorSlots.length) throw new Error('템플릿에서 상태조사표 블록을 찾지 못했습니다.');
+
+            // 신가병원/칠산타워 서식은 칸 너비가 이미 맞춰져 있어, 옛 10칸(부재종류/결함크기)용
+            // 폭 재배분은 적용하지 않는다.
+
+            // "틀" 블록(첫 번째 층 블록, 제목 문단부터 문서 끝까지)을 실제 층 수만큼 복제한다. 복제한
+            // 표/사진 안의 hp:tbl·hp:pic id가 원본과 겹치면 한글이 문서 구조를 제대로 못 읽어 열람 중
+            // 멈추거나 먹통이 될 수 있어서, 복제할 때마다 새 id를 부여한다.
+            let cloneIdSeq = 0;
+            const reassignClonedIds = (paragraphs) => {
+                paragraphs.forEach(p => {
+                    Array.from(p.getElementsByTagNameNS(HP_NS, 'tbl')).forEach(tbl => {
+                        cloneIdSeq++;
+                        tbl.setAttribute('id', String(8300000 + cloneIdSeq));
+                    });
+                    Array.from(p.getElementsByTagNameNS(HP_NS, 'pic')).forEach(pic => {
+                        cloneIdSeq++;
+                        pic.setAttribute('id', String(8400000 + cloneIdSeq));
+                        pic.setAttribute('instid', String(8500000 + cloneIdSeq));
+                    });
+                });
+            };
+            const stampChildren = secChildren();
+            const stampParas = stampChildren.slice(stampChildren.indexOf(floorSlots[0].titlePara));
+            for (let c = 1; c < floorsData.length; c++) {
+                const cloned = stampParas.map(p => p.cloneNode(true));
+                reassignClonedIds(cloned);
+                cloned.forEach(p => sec.appendChild(p));
+            }
+            floorSlots = discoverFloorSlots();
+            if (floorsData.length > floorSlots.length) {
+                console.error(`층 블록 복제 결과(${floorSlots.length}개)가 필요한 층 수(${floorsData.length}개)보다 적습니다.`);
+                floorsData.length = floorSlots.length;
+            }
+
+            // 사진은 로컬(IndexedDB)에도, 온라인 동기화 중이면 클라우드(Firestore)에도 있을 수 있는데,
+            // 층 진입 직후 곧바로 내보내면 아직 photos 배열이 안 채워졌을 수 있다. 여기서 한 번 더
+            // 직접 확인해서 photoIds는 있는데 photos가 비어있는 결함은 그 자리에서 채워 넣는다.
+            // (로컬에 없으면 클라우드에서도 찾아본다 — hydrateDefectPhotos와 같은 방식)
+            const companyPhotosCol = (db && window.state.companyId)
+                ? db.collection('safety_app').doc(getCompanyDocId()).collection('photos')
+                : null;
+            if (!window._photoCache) window._photoCache = {};
+
+            // 도면에 결함 핀이 찍힌 위치도 이미지를 만들어 locationMapTbl 한 칸에 채워 넣는다. 1,2종은
+            // 층 블록 안에서(아래 본 루프에서) 바로 호출하고, 3종은 모든 층 처리가 끝난 뒤 별도로 몰아서
+            // 호출한다(fillLocationMapForFloor 자체는 어느 쪽이든 동일).
+            const fillLocationMapForFloor = async (locationMapTbl, floorCode, imgSeq) => {
+                try {
+                    const bldgForMap = window.state.currentBuilding || {};
+
+                    // getFloorDrawingSrc()는 정확한 층 코드로 도면을 못 찾으면 "층 코드에 포함된
+                    // 숫자가 비슷한 다른 층 도면"까지 갖다 쓰는 폴백이 있어(예: 지하1층 "B1F"가
+                    // 지상1층 "1F" 도면과 섞여버림), 위치도만큼은 그 폴백을 타지 않도록 정확히
+                    // 일치하는 도면이 있는지 직접 먼저 확인한다. 못 찾으면 그냥 위치도를 뺀다.
+                    if (!bldgForMap.floorDrawings) bldgForMap.floorDrawings = {};
+                    if (!bldgForMap.floorDrawings[floorCode]) {
+                        const idbDrawing = await idbGet('floorDrawings', `${bldgForMap.id}_${floorCode}`);
+                        if (idbDrawing) bldgForMap.floorDrawings[floorCode] = idbDrawing;
+                    }
+                    const hasExactDrawing = !!bldgForMap.floorDrawings[floorCode];
+
+                    // 예전에(버그가 있던 상태로) 이미 한 번 잘못된 층 도면이 캐시됐을 수 있으니
+                    // 이번엔 무조건 새로 그리도록 캐시를 지운다.
+                    if (window.state.floorImageCache) delete window.state.floorImageCache[`${bldgForMap.id}_${floorCode}`];
+
+                    const mapDataUrl = hasExactDrawing ? (await (async () => {
+                        await preloadFloorDrawings(bldgForMap);
+                        return renderFloorPlanCanvasDataUrl(floorCode);
+                    })()) : null;
+                    if (mapDataUrl) {
+                        const mapPic = locationMapTbl.getElementsByTagNameNS(HP_NS, 'pic')[0];
+                        // 기존에는 표본 그림 자체의 curSz(표본 도면 비율에 맞춰 이미 안쪽으로 줄어들어
+                        // 있던 크기)를 그대로 "박스"로 썼다. 그 표본 그림이 이 칸(cell)보다 작게
+                        // 앉혀져 있던 경우, 우리 도면도 그 작은 박스 안에서만 맞춰져서 칸 여백이
+                        // 실제보다 훨씬 크게 남았다. 칸 자체의 실제 여유 공간(셀 크기 - 안쪽 여백)을
+                        // 박스로 써서 도면이 칸을 최대한 꽉 채우도록 한다(비율은 그대로 유지, 잘리지
+                        // 않게 안쪽에 맞추는 것만 동일).
+                        let mapCell = mapPic.parentNode;
+                        while (mapCell && mapCell.localName !== 'tc') mapCell = mapCell.parentNode;
+                        const cellSz = mapCell && mapCell.getElementsByTagNameNS(HP_NS, 'cellSz')[0];
+                        const cellMargin = mapCell && mapCell.getElementsByTagNameNS(HP_NS, 'cellMargin')[0];
+                        const picCurSz = mapPic.getElementsByTagNameNS(HP_NS, 'curSz')[0];
+                        let mapMaxW = parseInt(picCurSz.getAttribute('width'), 10);
+                        let mapMaxH = parseInt(picCurSz.getAttribute('height'), 10);
+                        if (cellSz) {
+                            const marginL = cellMargin ? parseInt(cellMargin.getAttribute('left'), 10) : 0;
+                            const marginR = cellMargin ? parseInt(cellMargin.getAttribute('right'), 10) : 0;
+                            const marginT = cellMargin ? parseInt(cellMargin.getAttribute('top'), 10) : 0;
+                            const marginB = cellMargin ? parseInt(cellMargin.getAttribute('bottom'), 10) : 0;
+                            mapMaxW = parseInt(cellSz.getAttribute('width'), 10) - marginL - marginR;
+                            mapMaxH = parseInt(cellSz.getAttribute('height'), 10) - marginT - marginB;
+                        }
+                        const { bytes, mime, ext } = dataUrlToBytes(mapDataUrl);
+                        const size = await loadImageSize(mapDataUrl);
+                        const mapImgId = `locationMapAuto${imgSeq}`;
+                        zip.file(`BinData/${mapImgId}.${ext}`, bytes);
+                        manifestAdds.push(`<opf:item id="${mapImgId}" href="BinData/${mapImgId}.${ext}" media-type="${mime}" isEmbeded="1"/>`);
+                        setPicImage(mapPic, mapImgId, size.w, size.h, mapMaxW, mapMaxH);
+
+                        const captionTc = locationMapTbl.getElementsByTagNameNS(HP_NS, 'tc')[1];
+                        const captionT = captionTc.getElementsByTagNameNS(HP_NS, 't')[0];
+                        if (captionT) captionT.textContent = `${getFloorLabel(floorCode)} 결함위치도`;
+                    } else {
+                        window.showToast(`${getFloorLabel(floorCode)}에 등록된 도면이 없어 위치도는 제외하고 만듭니다.`, 'info', 4000);
+                    }
+                } catch (mapErr) {
+                    console.error(`${floorCode} 위치도 삽입 실패(나머지는 계속 진행):`, mapErr);
+                    window.showToast(`${getFloorLabel(floorCode)} 위치도 삽입 중 오류가 있어 위치도는 제외하고 만듭니다.`, 'warning', 4000);
+                }
+            };
+
+            for (let slotIdx = 0; slotIdx < floorsData.length; slotIdx++) {
+                const { floorCode, pageDefects } = floorsData[slotIdx];
+                const slot = floorSlots[slotIdx];
+
+                // 표 바로 위에는 원본 표본 문서의 "1) 지하1층" 같은 고정 텍스트 문단이 그대로
+                // 남아있었다. 실제 층 이름으로 바꾸되, 표본 문서와 같은 "N) 층명" 형식을 유지하도록
+                // 건물에 등록된 층 순서를 그대로 번호로 붙인다(1)부터 slotIdx+1).
+                {
+                    const t = slot.titlePara.getElementsByTagNameNS(HP_NS, 't')[0];
+                    if (t) t.textContent = `${slotIdx + 1}) ${getFloorLabel(floorCode)}`;
+                    if (slotIdx === 0) {
+                        const dongPara = slot.titlePara.previousElementSibling;
+                        if (dongPara && dongPara.localName === 'p') {
+                            const dt = dongPara.getElementsByTagNameNS(HP_NS, 't')[0];
+                            if (dt) dt.textContent = '';
+                        }
+                    }
+                }
+
+                // ---- 상태조사표 ----
+                // slot.statusTbls는 이 층 블록에 "지금 실제로 존재하는" 상태조사표 페이지들이다(표본
+                // 문서가 원래 그 층에 여러 페이지를 갖고 있었다면 여러 개, 아니면 1개). 결함 개수에
+                // 맞는 페이지 수(15건당 1페이지)와 비교해서 모자라면 복제로 늘리고, 남으면 지운다 —
+                // 표본 페이지를 그대로 남겨두면 실제 데이터 사이에 표본 데이터가 섞여 나온다.
+                const targetTbl = slot.statusTbls[0];
+                const headerRow1Text = (() => {
+                    const trs = Array.from(targetTbl.getElementsByTagNameNS(HP_NS, 'tr')).filter(tr => tr.parentNode === targetTbl);
+                    if (trs.length < 2) return '';
+                    return Array.from(trs[1].getElementsByTagNameNS(HP_NS, 't')).map(t => t.textContent || '').join('');
+                })();
+                const HEADER_ROW_COUNT = (headerRow1Text.includes('구조부재') || headerRow1Text.includes('비구조부재')) ? 2 : 1;
+                const allTrs = Array.from(targetTbl.getElementsByTagNameNS(HP_NS, 'tr')).filter(tr => tr.parentNode === targetTbl);
+                const dataRows = allTrs.slice(HEADER_ROW_COUNT);
+                if (dataRows.length < 1) {
+                    console.error(`${floorCode}: 템플릿 표의 데이터 행 스타일을 판별할 수 없어 이 층은 건너뜁니다.`);
+                    continue;
+                }
+
+                const borderStyleByCol = (row) => {
+                    const map = {};
+                    Array.from(row.getElementsByTagNameNS(HP_NS, 'tc')).forEach(tc => {
+                        const addr = tc.getElementsByTagNameNS(HP_NS, 'cellAddr')[0];
+                        if (addr) map[addr.getAttribute('colAddr')] = tc.getAttribute('borderFillIDRef');
+                    });
+                    return map;
+                };
+                const firstStyleRow = dataRows[0];
+                const normalStyleRow = dataRows[Math.min(1, dataRows.length - 1)];
+                const styleMaps = {
+                    first: borderStyleByCol(firstStyleRow),
+                    normal: borderStyleByCol(normalStyleRow),
+                    last: borderStyleByCol(dataRows[dataRows.length - 1])
+                };
+
+                // 기존에 있던 페이지(targetTbl 포함 전부)의 표본 데이터 행을 지운다.
+                slot.statusTbls.forEach(tbl => {
+                    Array.from(tbl.getElementsByTagNameNS(HP_NS, 'tr')).filter(tr => tr.parentNode === tbl).slice(HEADER_ROW_COUNT).forEach(tr => tbl.removeChild(tr));
+                });
+
+                // 표 하나에 행을 전부 몰아넣으면 한글에서 다음 페이지로 안 넘어가거나 열람 중
+                // 멈추는 문제가 있었다. 15행(최대 17, n-n 추가분)마다 표를 나누고, 가능하면
+                // 본번호가 15·30·45에서 끝나게 한다.
+                const surveyPages = paginateSurveyDefects(pageDefects);
+                const neededPages = Math.max(1, surveyPages.length);
+
+                let pageTbls = slot.statusTbls.slice();
+                if (pageTbls.length > neededPages) {
+                    pageTbls.slice(neededPages).forEach(tbl => {
+                        const p = tbl.parentNode.parentNode;
+                        if (p.parentNode) p.parentNode.removeChild(p);
+                    });
+                    pageTbls = pageTbls.slice(0, neededPages);
+                } else if (pageTbls.length < neededPages) {
+                    let insertAfterNode = pageTbls[pageTbls.length - 1].parentNode.parentNode;
+                    for (let n = pageTbls.length; n < neededPages; n++) {
+                        const clonedPara = insertAfterNode.cloneNode(true);
+                        clonedPara.setAttribute('pageBreak', '1');
+                        const clonedTbl = clonedPara.getElementsByTagNameNS(HP_NS, 'tbl')[0];
+                        cloneIdSeq++;
+                        clonedTbl.setAttribute('id', String(8600000 + cloneIdSeq));
+                        insertAfterNode.parentNode.insertBefore(clonedPara, insertAfterNode.nextSibling);
+                        insertAfterNode = clonedPara;
+                        pageTbls.push(clonedTbl);
+                        syncStatusTblLayoutFromTemplate(clonedTbl, targetTbl, HEADER_ROW_COUNT, normalStyleRow);
+                    }
+                }
+                pageTbls.forEach((tbl, i) => {
+                    if (i > 0) {
+                        tbl.parentNode.parentNode.setAttribute('pageBreak', '1');
+                        syncStatusTblLayoutFromTemplate(tbl, targetTbl, HEADER_ROW_COUNT, normalStyleRow);
+                    }
+                });
+
+                await Promise.all(pageDefects.map(async (d) => {
+                    await ensureDefectPhotosLoaded(d);
+                    if ((!d.photos || d.photos.length === 0) && d.photoIds && d.photoIds.length > 0) {
+                        const photos = await Promise.all(d.photoIds.map(async pid => {
+                            const local = await idbGet('photos', pid);
+                            if (local) return local;
+                            if (window._photoCache[pid]) return window._photoCache[pid];
+                            if (companyPhotosCol) {
+                                try {
+                                    const snap = await companyPhotosCol.doc(pid).get();
+                                    const url = snap.exists ? snap.data().dataUrl : null;
+                                    if (url) window._photoCache[pid] = url;
+                                    return url;
+                                } catch (e) { return null; }
+                            }
+                            return null;
+                        }));
+                        const filled = photos.filter(Boolean);
+                        if (filled.length > 0) d.photos = filled;
+                    }
+                    if ((!d.prevRoundPhotos || d.prevRoundPhotos.length === 0) && d.prevRoundPhotoIds && d.prevRoundPhotoIds.length > 0) {
+                        const prevPhotos = await Promise.all(d.prevRoundPhotoIds.map(async pid => {
+                            const local = await idbGet('photos', pid);
+                            if (local) return local;
+                            if (window._photoCache[pid]) return window._photoCache[pid];
+                            if (companyPhotosCol) {
+                                try {
+                                    const snap = await companyPhotosCol.doc(pid).get();
+                                    const url = snap.exists ? snap.data().dataUrl : null;
+                                    if (url) window._photoCache[pid] = url;
+                                    return url;
+                                } catch (e) { return null; }
+                            }
+                            return null;
+                        }));
+                        const filledPrev = prevPhotos.filter(Boolean);
+                        if (filledPrev.length > 0) d.prevRoundPhotos = filledPrev;
+                    }
+                }));
+                const priorityCompareDefects = [];
+                const regularPhotoDefects = pageDefects.filter(d => {
+                    if (!getDefectOutputPhotos(d).length) return false;
+                    return true;
+                });
+                const photoDefects = regularPhotoDefects;
+                const photoLabelByDefect = new Map();
+                photoDefects.forEach((d, i) => photoLabelByDefect.set(d, `사진${i + 1}`));
+
+                surveyPages.forEach((pageItems, pageIdx) => {
+                    const destTbl = pageTbls[pageIdx];
+                    pageItems.forEach((d, localIdx) => {
+                        const isLastOnPage = localIdx === pageItems.length - 1;
+                        const rowCtx = {
+                            floorCode,
+                            photoRemark: photoLabelByDefect.get(d) || '-',
+                            floorDisplayLabel: getFloorLabel(floorCode)
+                        };
+                        const colCount = Array.from(normalStyleRow.getElementsByTagNameNS(HP_NS, 'tc')).length;
+                        const values = getReportSurveyRowValues(d, rowCtx, isGrade3, colCount);
+                        const styleMap = localIdx === 0 ? styleMaps.first : (isLastOnPage ? styleMaps.last : styleMaps.normal);
+
+                        const newRow = normalStyleRow.cloneNode(true);
+                        copyRowCellSizesFromTemplate(newRow, normalStyleRow);
+                        let rowMaxLines = 1;
+                        let rowLineMetric = null;
+                        Array.from(newRow.getElementsByTagNameNS(HP_NS, 'tc')).forEach((tc, colIdx) => {
+                            const addr = tc.getElementsByTagNameNS(HP_NS, 'cellAddr')[0];
+                            if (addr) {
+                                addr.setAttribute('rowAddr', String(HEADER_ROW_COUNT + localIdx));
+                                const bf = styleMap[addr.getAttribute('colAddr')];
+                                if (bf !== undefined) tc.setAttribute('borderFillIDRef', bf);
+                            }
+                            const subList = tc.getElementsByTagNameNS(HP_NS, 'subList')[0];
+                            const paras = subList ? Array.from(subList.getElementsByTagNameNS(HP_NS, 'p')).filter(p => p.parentNode === subList) : [];
+                            if (paras.length > 0) {
+                                const fillInfo = fillCellParas(subList, paras, values[colIdx] !== undefined ? values[colIdx] : '', tc);
+                                if (fillInfo.lineCount > rowMaxLines) rowMaxLines = fillInfo.lineCount;
+                                if (!rowLineMetric && fillInfo.vertsize) {
+                                    const marginEl = tc.getElementsByTagNameNS(HP_NS, 'cellMargin')[0];
+                                    const marginV = marginEl
+                                        ? (parseInt(marginEl.getAttribute('top'), 10) || 0) + (parseInt(marginEl.getAttribute('bottom'), 10) || 0)
+                                        : 282;
+                                    rowLineMetric = { vertsize: fillInfo.vertsize, spacing: fillInfo.spacing, marginV };
+                                }
+                            }
+                        });
+                        // 템플릿 행 높이 유지. 4줄 이상일 때만 확장(자간·줄나눔·상하 강제 축소/확대 없음).
+                        applyRowHeightFromLines(newRow, rowMaxLines, rowLineMetric, 2800);
+                        Array.from(newRow.getElementsByTagNameNS(HP_NS, 'tc')).forEach(centerCellContent);
+                        destTbl.appendChild(newRow);
+                    });
+                    destTbl.setAttribute('rowCnt', String(HEADER_ROW_COUNT + pageItems.length));
+                });
+
+                // ---- 결함 사진 갤러리 ----
+                // 템플릿에는 사진 2장씩 짝지은 표가 같은 hp:run 안에 여러 개 나란히 들어있다. 이걸 전부
+                // 지우고, 사진이 있는 결함 개수만큼 이 표를 복제해 다시 채운다. 이 표본 표 제거는 사진이
+                // 있을 때만 하면 안 된다 — 사진을 한 장도 안 찍은 층은 photoDefects.length가 0이라 이
+                // 블록 자체가 통째로 안 돌아서, 표본 건물의 원래 사진이 그대로 남아 나오는 문제가
+                // 있었다(우리 결함 사진이 아니라 템플릿 표본 사진이 나옴). 그래서 표본 표 제거는 사진
+                // 개수와 무관하게 항상 먼저 하고, 새 표로 채우는 부분만 사진이 있을 때로 한정한다.
+                try {
+                    const photoTbl = slot.photoTbl;
+                    const photoRun = photoTbl.parentNode; // 사진첩 표 여러 개가 같은 hp:run 안에 나란히 들어있다
+                    const existingPhotoTables = Array.from(photoRun.children).filter(c => c.localName === 'tbl');
+                    existingPhotoTables.forEach(t => photoRun.removeChild(t));
+
+                    if (photoDefects.length > 0) {
+                    const items = photoDefects;
+                    const PHOTOS_PER_PAGE = 6;
+
+                    const tplPics = photoTbl.getElementsByTagNameNS(HP_NS, 'pic');
+                    const maxW = parseInt(tplPics[0].getElementsByTagNameNS(HP_NS, 'curSz')[0].getAttribute('width'), 10);
+                    const maxH = parseInt(tplPics[0].getElementsByTagNameNS(HP_NS, 'curSz')[0].getAttribute('height'), 10);
+
+                    const decoded = [];
+                    for (const d of items) {
+                        const outPhotos = getDefectOutputPhotos(d);
+                        const src = outPhotos[0];
+                        if (!src) continue;
+                        const { bytes, mime, ext } = dataUrlToBytes(src);
+                        const size = await loadImageSize(src);
+                        decoded.push({ d, bytes, mime, ext, w: size.w, h: size.h });
+                    }
+
+                    let photoPara = photoRun.parentNode;
+                    while (photoPara && photoPara.localName !== 'p') photoPara = photoPara.parentNode;
+                    if (photoPara) photoPara.setAttribute('pageBreak', '1');
+                    const emptyPhotoPara = photoPara ? photoPara.cloneNode(true) : null;
+                    if (emptyPhotoPara) emptyPhotoPara.setAttribute('pageBreak', '1');
+
+                    let insertRun = photoRun;
+                    let insertPara = photoPara;
+                    let photosOnPage = 0;
+
+                    const appendPhotoTbl = (tbl) => {
+                        ensureTblTreatAsChar(tbl);
+                        const trail = Array.from(insertRun.children).find(c => c.localName === 't') || null;
+                        if (trail) insertRun.insertBefore(tbl, trail);
+                        else insertRun.appendChild(tbl);
+                    };
+                    const startNextPhotoPage = () => {
+                        if (!emptyPhotoPara || !insertPara || !insertPara.parentNode) return;
+                        const newPara = emptyPhotoPara.cloneNode(true);
+                        newPara.setAttribute('pageBreak', '1');
+                        insertPara.parentNode.insertBefore(newPara, insertPara.nextSibling);
+                        insertPara = newPara;
+                        insertRun = Array.from(newPara.children).find(c => c.localName === 'run') || newPara.getElementsByTagNameNS(HP_NS, 'run')[0];
+                        photosOnPage = 0;
+                    };
+
+                    for (let i = 0; i < decoded.length; i += 2) {
+                        const slot1 = decoded[i];
+                        const slot2 = decoded[i + 1] || null;
+                        const pairCount = slot2 ? 2 : 1;
+                        if (photosOnPage > 0 && photosOnPage + pairCount > PHOTOS_PER_PAGE) {
+                            startNextPhotoPage();
+                        }
+
+                        photoTblCounter++;
+                        const newTbl = photoTbl.cloneNode(true);
+                        newTbl.setAttribute('id', String(9500000 + photoTblCounter));
+                        const pics = Array.from(newTbl.getElementsByTagNameNS(HP_NS, 'pic'));
+                        pics.forEach((p, pIdx) => {
+                            p.setAttribute('id', String(9600000 + photoTblCounter * 2 + pIdx));
+                            p.setAttribute('instid', String(9700000 + photoTblCounter * 2 + pIdx));
+                        });
+
+                        const trs2 = Array.from(newTbl.getElementsByTagNameNS(HP_NS, 'tr')).filter(tr => tr.parentNode === newTbl);
+                        const capTcs = trs2[1].getElementsByTagNameNS(HP_NS, 'tc');
+                        const descTcs = trs2[2].getElementsByTagNameNS(HP_NS, 'tc');
+
+                        imgCounter++;
+                        const imgId1 = `photoAuto${imgCounter}`;
+                        zip.file(`BinData/${imgId1}.${slot1.ext}`, slot1.bytes);
+                        manifestAdds.push(`<opf:item id="${imgId1}" href="BinData/${imgId1}.${slot1.ext}" media-type="${slot1.mime}" isEmbeded="1"/>`);
+                        setPicImage(pics[0], imgId1, slot1.w, slot1.h, maxW, maxH);
+                        setTcText(capTcs[0], photoLabelByDefect.get(slot1.d));
+                        setTcText(capTcs[2], getSurveyCellText('location', slot1.d, { floorCode }));
+                        setTcText(descTcs[1], getSurveyCellText('defectType', slot1.d));
+
+                        if (slot2) {
+                            imgCounter++;
+                            const imgId2 = `photoAuto${imgCounter}`;
+                            zip.file(`BinData/${imgId2}.${slot2.ext}`, slot2.bytes);
+                            manifestAdds.push(`<opf:item id="${imgId2}" href="BinData/${imgId2}.${slot2.ext}" media-type="${slot2.mime}" isEmbeded="1"/>`);
+                            setPicImage(pics[1], imgId2, slot2.w, slot2.h, maxW, maxH);
+                            setTcText(capTcs[4], photoLabelByDefect.get(slot2.d));
+                            setTcText(capTcs[6], getSurveyCellText('location', slot2.d, { floorCode }));
+                            setTcText(descTcs[3], getSurveyCellText('defectType', slot2.d));
+                        } else {
+                            stripPhotoTblRightHalf(newTbl);
+                        }
+
+                        appendPhotoTbl(newTbl);
+                        photosOnPage += pairCount;
+                    }
+                    }
+                } catch (photoErr) {
+                    console.error(`${floorCode} 사진 갤러리 삽입 실패(나머지는 계속 진행):`, photoErr);
+                    window.showToast(`${getFloorLabel(floorCode)} 사진 삽입 중 오류가 있어 사진은 제외하고 만듭니다.`, 'warning', 5000);
+                }
+
+
+                // ---- 결함위치도 ----
+                // 3종시설물은 위치도를 층 블록에서 바로 넣지 않고, 모든 층 처리가 끝난 뒤 별도로
+                // 몰아서 넣는다(아래 본 루프 밖의 grade3LocMapStampPara 처리 참고).
+                    let locPara = slot.locationMapTbl && slot.locationMapTbl.parentNode;
+                    while (locPara && locPara.localName !== 'p') locPara = locPara.parentNode;
+                    if (locPara) locPara.setAttribute('pageBreak', '1');
+                    await fillLocationMapForFloor(slot.locationMapTbl, floorCode, slotIdx + 1);
+            }
+
+            // 실제로 채운 블록 다음에 남은 표본 층 블록은 (비파괴조사 섹션 정리와 함께) 뒤에서 지운다.
+            const unusedFloorSlotStart = floorSlots.length > floorsData.length ? floorSlots[floorsData.length].titlePara : null;
+
+            // 비파괴조사(NDT) 섹션은 아직 여러 층을 지원하지 않아 지금 화면에 보고 있는 층 기준으로만 채운다.
+            const floorCode = window.state.currentFloor || floorsData[0].floorCode;
+
+            // ---- 비파괴조사(NDT) 5개 섹션: 콘크리트 강도/탄산화/외벽기울기/부동침하/부재처짐 ----
+            // 정기안전점검용 템플릿(hwpx_survey_template_regular.hwpx)에는 이 섹션들이 애초에 없으므로
+            // 정밀안전점검일 때만 실행해서 앱에 등록된 실측 데이터로 채운다. 표 데이터 행 교체 로직
+            // (테두리 스타일 3종 판별 → 기존 행 삭제 → clone해서 채우기)은 위 상태조사표와 완전히
+            // 동일한 패턴이라 fillNdtTable로 뽑아 재사용한다. 실패해도 이미 만들어둔 상태조사표/사진/
+            // 결함위치도는 살려서 내보내야 하므로 전체를 try/catch로 감싼다.
+            try { if (isPreciseInspectionForTemplate) {
+                const ndtBldg = window.state.currentBuilding || {};
+                const ndtBldgId = ndtBldg.id || window.state.currentBuildingId;
+                const ndtKey = `${ndtBldgId}_${floorCode}`;
+                const allNdtItemsForHwpx = state.ndtData ? (state.ndtData[ndtKey] || []) : [];
+                const allDispGroupsForHwpx = state.ndtDisplacementGroups ? (state.ndtDisplacementGroups[ndtKey] || []) : [];
+
+                const measureItemsHwpx = allNdtItemsForHwpx.filter(item => item.category === '실측');
+                const fireproofItemsHwpx = allNdtItemsForHwpx.filter(item => item.category === '내화피복');
+                const strengthItemsHwpx = allNdtItemsForHwpx.filter(item => item.category === '강도');
+                const carbItemsHwpx = allNdtItemsForHwpx.filter(item => item.category === '탄산화');
+                const tiltItemsHwpx = allNdtItemsForHwpx.filter(item => item.category === '기울기');
+                const settlementGroupsHwpx = allDispGroupsForHwpx.filter(g => !g.category || g.category === '변위');
+                const memberDispGroupsHwpx = allDispGroupsForHwpx.filter(g => g.category === '부재변위');
+
+                const findTblById = (tblId, fallbackTextMarkers) => {
+                    const all = xmlDoc.getElementsByTagNameNS(HP_NS, 'tbl');
+                    for (let i = 0; i < all.length; i++) {
+                        if (all[i].getAttribute('id') === tblId) return all[i];
+                    }
+                    // 한글에서 템플릿을 직접 열어 저장하면 표 id가 바뀌는 경우가 있어(실제로 겪음),
+                    // id로 못 찾으면 표 헤더 글자 조합으로 구조 매칭해 찾는다.
+                    if (fallbackTextMarkers && fallbackTextMarkers.length) {
+                        for (let i = 0; i < all.length; i++) {
+                            const txt = Array.from(all[i].getElementsByTagNameNS(HP_NS, 't')).map(t => t.textContent).join('');
+                            if (fallbackTextMarkers.every(m => txt.includes(m))) return all[i];
+                        }
+                    }
+                    return null;
+                };
+                // 표를 통째로 지울 때는 표를 담고 있는 hp:run만 문단에서 떼어낸다(문단 자체는 남겨서
+                // 바로 위 제목 문단 구조를 안 건드림 — 제목 글자가 빈 문단 위에 남는 정도는 허용).
+                const removeNdtTableById = (tblId) => {
+                    const tbl = findTblById(tblId);
+                    if (!tbl) return;
+                    const runEl = tbl.parentNode;
+                    if (runEl && runEl.parentNode) runEl.parentNode.removeChild(runEl);
+                };
+
+                // 데이터 행 채우기 (상태조사표의 행 clone 패턴 재사용). headerRowCount개 행은 그대로
+                // 두고 그 다음부터 표 끝까지가 데이터 행이다. rowsValues[i]는 colAddr=1번 칸부터 순서대로
+                // 들어갈 값 배열이다(0번 칸은 세로로 병합된 표 왼쪽 라벨 칸이라 건드리지 않는다).
+                const fillNdtTable = (tbl, headerRowCount, rowsValues, includeCol0 = false) => {
+                    const allTrs = Array.from(tbl.getElementsByTagNameNS(HP_NS, 'tr')).filter(tr => tr.parentNode === tbl);
+                    const oldDataRows = allTrs.slice(headerRowCount);
+                    if (oldDataRows.length < 1) return;
+                    const borderStyleByColLocal = (row) => {
+                        const map = {};
+                        Array.from(row.getElementsByTagNameNS(HP_NS, 'tc')).forEach(tc => {
+                            const addr = tc.getElementsByTagNameNS(HP_NS, 'cellAddr')[0];
+                            if (addr) map[addr.getAttribute('colAddr')] = tc.getAttribute('borderFillIDRef');
+                        });
+                        return map;
+                    };
+                    const firstStyleRow = oldDataRows[0];
+                    const normalStyleRow = oldDataRows.length > 2 ? oldDataRows[1] : oldDataRows[0];
+                    const lastStyleRow = oldDataRows[oldDataRows.length - 1];
+                    const styleMaps = {
+                        first: borderStyleByColLocal(firstStyleRow),
+                        normal: borderStyleByColLocal(normalStyleRow),
+                        last: borderStyleByColLocal(lastStyleRow)
+                    };
+                    const findCol0 = (row) => Array.from(row.getElementsByTagNameNS(HP_NS, 'tc')).find(tc => {
+                        const addr = tc.getElementsByTagNameNS(HP_NS, 'cellAddr')[0];
+                        return addr && addr.getAttribute('colAddr') === '0';
+                    });
+                    // 강도/탄산화 표는 첫 데이터 행에만 세로 병합(rowSpan)된 숨은 0번 칸(예: 회사명
+                    // 라벨)이 있고 그 아래 행들엔 그 칸이 아예 없다. 예전엔 첫 행까지 통째로 지우고
+                    // normalStyleRow(0번 칸 없음)로만 다시 채워서, 표 전체에 0번 칸이 하나도 안 남는
+                    // "구멍 뚫린" 구조가 됐다 — 한글이 이런 표를 열다가 그대로 죽는 원인이었다. 새로
+                    // 만드는 첫 행에 그 칸을 그대로 옮겨 붙이고 rowSpan만 실제 데이터 행 수에 맞춘다.
+                    const firstCol0 = findCol0(firstStyleRow);
+                    const normalHasCol0 = !!findCol0(normalStyleRow);
+                    // 0번 칸의 원래 높이는 표본 문서의 원래 행 수(예: 16행) 전체를 합친 값이라, rowSpan만
+                    // 실제 행 수로 줄이고 높이를 그대로 두면 남은 행들이 그 큰 높이를 채우려고 줄이 통째로
+                    // 늘어난다. 일반 행 하나의 높이 × 실제 행 수로 다시 계산해서 자연스러운 줄 높이가
+                    // 되게 한다.
+                    const normalRowCellSz = normalStyleRow.getElementsByTagNameNS(HP_NS, 'tc')[0]
+                        ?.getElementsByTagNameNS(HP_NS, 'cellSz')[0];
+                    const normalRowHeight = normalRowCellSz ? parseInt(normalRowCellSz.getAttribute('height'), 10) : null;
+                    oldDataRows.forEach(tr => tbl.removeChild(tr));
+                    rowsValues.forEach((values, idx) => {
+                        const styleMap = idx === 0 ? styleMaps.first : (idx === rowsValues.length - 1 ? styleMaps.last : styleMaps.normal);
+                        const newRow = normalStyleRow.cloneNode(true);
+                        if (idx === 0 && firstCol0 && !normalHasCol0) {
+                            const col0Clone = firstCol0.cloneNode(true);
+                            const span = col0Clone.getElementsByTagNameNS(HP_NS, 'cellSpan')[0];
+                            if (span) span.setAttribute('rowSpan', String(rowsValues.length));
+                            const col0Addr = col0Clone.getElementsByTagNameNS(HP_NS, 'cellAddr')[0];
+                            if (col0Addr) col0Addr.setAttribute('rowAddr', String(headerRowCount));
+                            if (normalRowHeight) {
+                                const col0Sz = col0Clone.getElementsByTagNameNS(HP_NS, 'cellSz')[0];
+                                if (col0Sz) col0Sz.setAttribute('height', String(normalRowHeight * rowsValues.length));
+                            }
+                            // 표본 문서에 남아있던 회사명 등 샘플 글자(세로 병합 칸이라 한 글자씩
+                            // 위아래로 쪼개져 나온다) — 우리 데이터로 채우는 칸이 아니라 그대로 지운다.
+                            Array.from(col0Clone.getElementsByTagNameNS(HP_NS, 't')).forEach(t => { t.textContent = ''; });
+                            newRow.insertBefore(col0Clone, newRow.firstChild);
+                        }
+                        let rowMaxLines = 1;
+                        let rowLineMetric = null;
+                        Array.from(newRow.getElementsByTagNameNS(HP_NS, 'tc')).forEach(tc => {
+                            const addr = tc.getElementsByTagNameNS(HP_NS, 'cellAddr')[0];
+                            if (!addr) return;
+                            const colAddr = addr.getAttribute('colAddr');
+                            addr.setAttribute('rowAddr', String(headerRowCount + idx));
+                            const bf = styleMap[colAddr];
+                            if (bf !== undefined) tc.setAttribute('borderFillIDRef', bf);
+                            if (colAddr === '0' && !includeCol0) return;
+                            const colIdx = includeCol0 ? parseInt(colAddr, 10) : parseInt(colAddr, 10) - 1;
+                            const subList = tc.getElementsByTagNameNS(HP_NS, 'subList')[0];
+                            const paras = subList ? Array.from(subList.getElementsByTagNameNS(HP_NS, 'p')).filter(p => p.parentNode === subList) : [];
+                            if (paras.length > 0 && values[colIdx] !== undefined) {
+                                const fillInfo = fillCellParas(subList, paras, values[colIdx], tc);
+                                if (fillInfo.lineCount > rowMaxLines) rowMaxLines = fillInfo.lineCount;
+                                if (!rowLineMetric && fillInfo.vertsize) {
+                                    const marginEl = tc.getElementsByTagNameNS(HP_NS, 'cellMargin')[0];
+                                    const marginV = marginEl ? (parseInt(marginEl.getAttribute('top'), 10) || 0) + (parseInt(marginEl.getAttribute('bottom'), 10) || 0) : 282;
+                                    rowLineMetric = { vertsize: fillInfo.vertsize, spacing: fillInfo.spacing, marginV };
+                                }
+                            }
+                        });
+                        applyRowHeightFromLines(newRow, rowMaxLines, rowLineMetric);
+                        Array.from(newRow.getElementsByTagNameNS(HP_NS, 'tc')).forEach(centerCellContent);
+                        tbl.appendChild(newRow);
+                    });
+                    tbl.setAttribute('rowCnt', String(headerRowCount + rowsValues.length));
+                };
+
+                // 부동침하/부재변위 결과표 밑에 그룹별 요약박스+그래프 이미지를 순서대로 이어붙이는 도우미.
+                // 문서에 이미 있는 hp:pic 하나(콘크리트 강도/탄산화 위치도용)의 XML을 그대로 문자열
+                // 템플릿으로 써서 매번 새 문단으로 파싱해 넣는다 — 반발경도 성과표 섹션이 기존 그림
+                // 문단을 clone해서 재사용하는 것과 같은 발상이며, id/이미지 참조만 매번 새로 갈아끼운다.
+                const PIC_TEMPLATE_XML = '<hp:pic id="ID_PLACEHOLDER" zOrder="0" numberingType="PICTURE" textWrap="TOP_AND_BOTTOM" textFlow="BOTH_SIDES" lock="0" dropcapstyle="None" thumbnailBinIDRef="" href="" groupLevel="0" instid="0" reverse="0"><hp:offset x="0" y="0"/><hp:orgSz width="685500" height="864780"/><hp:curSz width="41824" height="52763"/><hp:flip horizontal="0" vertical="0"/><hp:rotationInfo angle="0" centerX="20912" centerY="26381" rotateimage="1"/><hp:renderingInfo><hc:transMatrix e1="1" e2="0" e3="0" e4="0" e5="1" e6="0"/><hc:scaMatrix e1="0.061012" e2="0" e3="0" e4="0" e5="0.061013" e6="0"/><hc:rotMatrix e1="1" e2="0" e3="0" e4="0" e5="1" e6="0"/></hp:renderingInfo><hc:img binaryItemIDRef="image6" bright="0" contrast="0" effect="REAL_PIC" alpha="0"/><hp:imgRect><hc:pt0 x="0" y="0"/><hc:pt1 x="685500" y="0"/><hc:pt2 x="685500" y="864780"/><hc:pt3 x="0" y="864780"/></hp:imgRect><hp:imgClip left="0" right="578460" top="0" bottom="729780"/><hp:inMargin left="0" right="0" top="0" bottom="0"/><hp:imgDim dimwidth="578460" dimheight="729780"/><hp:effects/><hp:sz width="41824" widthRelTo="ABSOLUTE" height="52763" heightRelTo="ABSOLUTE" protect="0"/><hp:pos treatAsChar="1" affectLSpacing="0" flowWithText="1" allowOverlap="0" holdAnchorAndSO="0" vertRelTo="PARA" horzRelTo="COLUMN" vertAlign="TOP" horzAlign="LEFT" vertOffset="0" horzOffset="0"/><hp:outMargin left="0" right="0" top="0" bottom="0"/></hp:pic>';
+
+                const insertImageParaAfter = async (afterPara, dataUrl, imgIdPrefix, maxW = 42520, maxH = 999999999) => {
+                    if (!afterPara || !dataUrl) return afterPara;
+                    const { bytes, mime, ext } = dataUrlToBytes(dataUrl);
+                    const size = await loadImageSize(dataUrl);
+                    const seq = imgCounter++;
+                    const imgId = `${imgIdPrefix}${seq}`;
+                    zip.file(`BinData/${imgId}.${ext}`, bytes);
+                    manifestAdds.push(`<opf:item id="${imgId}" href="BinData/${imgId}.${ext}" media-type="${mime}" isEmbeded="1"/>`);
+
+                    const picXml = PIC_TEMPLATE_XML.replace('id="ID_PLACEHOLDER"', `id="${900000000 + seq}"`);
+                    const picDoc = new DOMParser().parseFromString(
+                        `<root xmlns:hp="${HP_NS}" xmlns:hc="${HC_NS}">${picXml}</root>`, 'application/xml');
+                    const picNode = xmlDoc.importNode(picDoc.documentElement.firstChild, true);
+
+                    const newPara = xmlDoc.createElementNS(HP_NS, 'hp:p');
+                    newPara.setAttribute('id', '0');
+                    newPara.setAttribute('paraPrIDRef', '18');
+                    newPara.setAttribute('styleIDRef', '3');
+                    newPara.setAttribute('pageBreak', '0');
+                    newPara.setAttribute('columnBreak', '0');
+                    newPara.setAttribute('merged', '0');
+                    const run = xmlDoc.createElementNS(HP_NS, 'hp:run');
+                    run.setAttribute('charPrIDRef', '37');
+                    run.appendChild(picNode);
+                    newPara.appendChild(run);
+                    const lineseg = xmlDoc.createElementNS(HP_NS, 'hp:linesegarray');
+                    const seg = xmlDoc.createElementNS(HP_NS, 'hp:lineseg');
+                    seg.setAttribute('textpos', '0'); seg.setAttribute('vertpos', '0');
+                    seg.setAttribute('vertsize', '1300'); seg.setAttribute('textheight', '1300');
+                    seg.setAttribute('baseline', '1105'); seg.setAttribute('spacing', '1560');
+                    seg.setAttribute('horzpos', '0'); seg.setAttribute('horzsize', '42520');
+                    seg.setAttribute('flags', '393216');
+                    lineseg.appendChild(seg);
+                    newPara.appendChild(lineseg);
+
+                    afterPara.parentNode.insertBefore(newPara, afterPara.nextSibling);
+                    setPicImage(picNode, imgId, size.w, size.h, maxW, maxH);
+                    return newPara;
+                };
+
+                // 결과표(tbl)가 들어있는 문단 바로 다음 자리부터, 그룹마다 요약박스+그래프를 합친
+                // 그림 한 장씩 이어붙인다. 박스와 그래프를 따로 넣으면 표 중간에서 페이지가 갈릴 때
+                // 각각 다른 페이지로 쪼개질 수 있어서, 한 장(같은 테두리)으로 합쳐 그 문제를 막는다.
+                // 높이를 27000(≈95mm)으로 제한해서 페이지 하나에 두 장이 들어가도록(사용자 요청) 맞췄다.
+                const GROUP_IMG_MAX_H = 27000;
+                const insertGroupResultImages = async (tbl, groups) => {
+                    if (!tbl) return;
+                    let anchorPara = tbl.parentNode && tbl.parentNode.parentNode; // hp:pic|hp:tbl -> hp:run -> hp:p
+                    if (!anchorPara || anchorPara.localName !== 'p') return;
+                    for (let i = 0; i < groups.length; i++) {
+                        const group = groups[i];
+                        const combinedUrl = renderNdtDisplacementCombinedCanvas(group, floorCode, i + 1);
+                        anchorPara = await insertImageParaAfter(anchorPara, combinedUrl, 'ndtDispResultAuto', 42520, GROUP_IMG_MAX_H);
+                    }
+                };
+
+
+                // 내화피복 두께 결과표(부재당 플렌지/웨브 2행짜리) — 표 열 구성이 단순 1행/항목이
+                // 아니라서(항목 하나 = NO./구분/설계치가 두 행에 걸쳐 세로병합) fillNdtTable을
+                // 그대로 못 쓰고 전용 채움 함수를 따로 둔다. 원본 표는 2026-08-24 신설.
+                const FIREPROOF_TBL_ID = '504', FIREPROOF_HEADER_ROWS = 1;
+                const fillFireproofTable = (tbl, items) => {
+                    const allTrs = Array.from(tbl.getElementsByTagNameNS(HP_NS, 'tr')).filter(tr => tr.parentNode === tbl);
+                    const oldDataRows = allTrs.slice(FIREPROOF_HEADER_ROWS);
+                    if (oldDataRows.length < 2) return;
+
+                    const rowHasCol0 = (tr) => Array.from(tr.getElementsByTagNameNS(HP_NS, 'tc')).some(tc => {
+                        const addr = tc.getElementsByTagNameNS(HP_NS, 'cellAddr')[0];
+                        return addr && addr.getAttribute('colAddr') === '0';
+                    });
+                    const oldPairs = [];
+                    for (let i = 0; i < oldDataRows.length - 1; i++) {
+                        if (rowHasCol0(oldDataRows[i])) oldPairs.push([oldDataRows[i], oldDataRows[i + 1]]);
+                    }
+                    if (oldPairs.length === 0) return;
+                    const firstPair = oldPairs[0];
+                    const normalPair = oldPairs.length > 2 ? oldPairs[1] : oldPairs[0];
+                    const lastPair = oldPairs[oldPairs.length - 1];
+
+                    const borderStyleByColLocal = (row) => {
+                        const map = {};
+                        Array.from(row.getElementsByTagNameNS(HP_NS, 'tc')).forEach(tc => {
+                            const addr = tc.getElementsByTagNameNS(HP_NS, 'cellAddr')[0];
+                            if (addr) map[addr.getAttribute('colAddr')] = tc.getAttribute('borderFillIDRef');
+                        });
+                        return map;
+                    };
+                    const styleMapsA = { first: borderStyleByColLocal(firstPair[0]), normal: borderStyleByColLocal(normalPair[0]), last: borderStyleByColLocal(lastPair[0]) };
+                    const styleMapsB = { first: borderStyleByColLocal(firstPair[1]), normal: borderStyleByColLocal(normalPair[1]), last: borderStyleByColLocal(lastPair[1]) };
+
+                    const setRowAddr = (row, rowAddr) => {
+                        Array.from(row.getElementsByTagNameNS(HP_NS, 'tc')).forEach(tc => {
+                            const addr = tc.getElementsByTagNameNS(HP_NS, 'cellAddr')[0];
+                            if (addr) addr.setAttribute('rowAddr', String(rowAddr));
+                        });
+                    };
+                    // 칸이 좁아 넘치면 자간을 줄이지 않고, 넘어가는 위치부터 다음 줄로 넘긴다.
+                    const setCellText = (row, colAddr, text) => {
+                        const tc = Array.from(row.getElementsByTagNameNS(HP_NS, 'tc')).find(t => {
+                            const addr = t.getElementsByTagNameNS(HP_NS, 'cellAddr')[0];
+                            return addr && addr.getAttribute('colAddr') === String(colAddr);
+                        });
+                        if (!tc) return null;
+                        const subList = tc.getElementsByTagNameNS(HP_NS, 'subList')[0];
+                        const paras = subList ? Array.from(subList.getElementsByTagNameNS(HP_NS, 'p')).filter(p => p.parentNode === subList) : [];
+                        if (paras.length === 0) return null;
+                        const fillInfo = fillCellParas(subList, paras, text, tc);
+                        return { fillInfo, tc };
+                    };
+                    // 플렌지/웨브 행(newA/newB)도 다른 NDT 표와 마찬가지로, 표본 행이 물려받은 샘플용
+                    // 높이 대신 실제 채워지는 줄 수 기준으로 다시 계산한다(내화피복 표도 같은 문제 보고됨).
+                    const fillRowCells = (row, entries) => {
+                        let rowMaxLines = 1, rowLineMetric = null;
+                        entries.forEach(([colAddr, text]) => {
+                            const result = setCellText(row, colAddr, text);
+                            if (!result) return;
+                            const { fillInfo, tc } = result;
+                            if (fillInfo.lineCount > rowMaxLines) rowMaxLines = fillInfo.lineCount;
+                            if (!rowLineMetric && fillInfo.vertsize) {
+                                const marginEl = tc.getElementsByTagNameNS(HP_NS, 'cellMargin')[0];
+                                const marginV = marginEl ? (parseInt(marginEl.getAttribute('top'), 10) || 0) + (parseInt(marginEl.getAttribute('bottom'), 10) || 0) : 282;
+                                rowLineMetric = { vertsize: fillInfo.vertsize, spacing: fillInfo.spacing, marginV };
+                            }
+                        });
+                        return applyRowHeightFromLines(row, rowMaxLines, rowLineMetric);
+                    };
+                    const applyBorder = (row, styleMap) => {
+                        Array.from(row.getElementsByTagNameNS(HP_NS, 'tc')).forEach(tc => {
+                            const addr = tc.getElementsByTagNameNS(HP_NS, 'cellAddr')[0];
+                            if (!addr) return;
+                            const bf = styleMap[addr.getAttribute('colAddr')];
+                            if (bf !== undefined) tc.setAttribute('borderFillIDRef', bf);
+                        });
+                    };
+
+                    oldDataRows.forEach(tr => tbl.removeChild(tr));
+
+                    items.forEach((item, idx) => {
+                        const which = idx === 0 ? 'first' : (idx === items.length - 1 ? 'last' : 'normal');
+                        const [templateA, templateB] = which === 'first' ? firstPair : (which === 'last' ? lastPair : normalPair);
+                        const newA = templateA.cloneNode(true);
+                        const newB = templateB.cloneNode(true);
+                        const rowAddrA = FIREPROOF_HEADER_ROWS + idx * 2;
+                        setRowAddr(newA, rowAddrA);
+                        setRowAddr(newB, rowAddrA + 1);
+                        applyBorder(newA, styleMapsA[which]);
+                        applyBorder(newB, styleMapsB[which]);
+
+                        const fl = item.fpFlange || {};
+                        const web = item.fpWeb || {};
+                        const flVal = (i) => fl.unavailable ? '-' : ((fl.readings && fl.readings[i] !== undefined) ? fl.readings[i] : '-');
+                        const webVal = (i) => web.unavailable ? '-' : ((web.readings && web.readings[i] !== undefined) ? web.readings[i] : '-');
+
+                        const heightA = fillRowCells(newA, [
+                            [0, item.no || String(idx + 1)],
+                            [1, item.location || '-'],
+                            [2, '플렌지'],
+                            [3, item.fireproofDesign || '-'],
+                            [4, flVal(0)],
+                            [5, flVal(1)],
+                            [6, flVal(2)],
+                            [7, (fl.unavailable || fl.avg === null || fl.avg === undefined) ? '-' : fl.avg],
+                            [8, fl.unavailable ? '측정불가' : '-']
+                        ]);
+
+                        const heightB = fillRowCells(newB, [
+                            [2, '웨브'],
+                            [4, webVal(0)],
+                            [5, webVal(1)],
+                            [6, webVal(2)],
+                            [7, (web.unavailable || web.avg === null || web.avg === undefined) ? '-' : web.avg],
+                            [8, web.unavailable ? '측정불가' : '-']
+                        ]);
+
+                        // NO./위치/설계치 칸은 플렌지·웨브 두 행에 걸쳐 세로 병합(rowSpan=2)돼 있어
+                        // applyRowHeightFromLines가 건드리지 않는다 — 두 행 높이를 합친 값으로 따로
+                        // 맞춰줘야 병합 칸만 예전 높이 그대로 남아 두 행을 도로 벌리는 걸 막는다.
+                        const mergedHeight = (heightA || 0) + (heightB || 0);
+                        if (mergedHeight > 0) {
+                            Array.from(newA.getElementsByTagNameNS(HP_NS, 'tc')).forEach(tc => {
+                                const span = tc.getElementsByTagNameNS(HP_NS, 'cellSpan')[0];
+                                if (!span || parseInt(span.getAttribute('rowSpan'), 10) <= 1) return;
+                                const sz = tc.getElementsByTagNameNS(HP_NS, 'cellSz')[0];
+                                if (sz) sz.setAttribute('height', String(mergedHeight));
+                            });
+                        }
+
+                        Array.from(newA.getElementsByTagNameNS(HP_NS, 'tc')).forEach(centerCellContent);
+                        Array.from(newB.getElementsByTagNameNS(HP_NS, 'tc')).forEach(centerCellContent);
+
+                        tbl.appendChild(newA);
+                        tbl.appendChild(newB);
+                    });
+                    tbl.setAttribute('rowCnt', String(FIREPROOF_HEADER_ROWS + items.length * 2));
+                };
+
+                const MEASURE_TBL_ID = '2137459237', MEASURE_HEADER_ROWS = 2;
+                const STRENGTH_TBL_ID = '2119329126', STRENGTH_HEADER_ROWS = 1;
+                const CARB_TBL_ID = '2119328135', CARB_HEADER_ROWS = 1;
+                // 외벽기울기/부동침하/부재변위 결과표 3종 — 2026-08-24 템플릿에 새로 추가.
+                // 표 열 구성이 3개 다 동일: NO. / 위치 / 전회(기존, 항상 '-') / 금회(측정값) / 길이(또는 높이) / 비율 / 등급.
+                const TILT_TBL_ID = '501', TILT_HEADER_ROWS = 2;
+                const SETTLEMENT_TBL_ID = '502', SETTLEMENT_HEADER_ROWS = 2;
+                const MEMBER_DISP_TBL_ID = '503', MEMBER_DISP_HEADER_ROWS = 2;
+
+                {
+                    // 부재실측(단면 규격) 결과표 — 템플릿 표 열 구성: NO. / 위치(+부재명) / 설계치 / 실측치 / 마감상태 / 평가(c%) / 비고(등급).
+                    if (measureItemsHwpx.length > 0) {
+                        const tbl = findTblById(MEASURE_TBL_ID, ['마감상태', '설계', '실측']);
+                        if (tbl) fillNdtTable(tbl, MEASURE_HEADER_ROWS, measureItemsHwpx.map((item, i) => {
+                            const designText = item.designWidth ? `${item.designWidth}${item.designDepth ? '×' + item.designDepth : ''}` : '-';
+                            const measuredW = (item.measuredWidth !== undefined && item.measuredWidth !== null) ? item.measuredWidth : item.avgValue;
+                            const measuredText = measuredW ? `${measuredW}${item.measuredDepth ? '×' + item.measuredDepth : ''}` : '-';
+                            const ratioText = (item.sectionRatio !== undefined && item.sectionRatio !== null) ? item.sectionRatio.toFixed(1) + '%' : '-';
+                            return [
+                                item.no || (i + 1),
+                                `${item.location || '위치미지정'}\n(${item.component || ''})`,
+                                designText,
+                                measuredText,
+                                item.finishState || '-',
+                                ratioText,
+                                item.sectionGrade || '-'
+                            ];
+                        }), true);
+                    } else {
+                        removeNdtTableById(MEASURE_TBL_ID);
+                    }
+
+                    // 내화피복 두께 결과표 — NO./구분/설계치가 플렌지·웨브 두 행에 걸쳐 세로병합.
+                    if (fireproofItemsHwpx.length > 0) {
+                        const tbl = findTblById(FIREPROOF_TBL_ID, ['부  위', '설계치', '검토결과']);
+                        if (tbl) fillFireproofTable(tbl, fireproofItemsHwpx);
+                    } else {
+                        removeNdtTableById(FIREPROOF_TBL_ID);
+                    }
+
+                    if (strengthItemsHwpx.length > 0) {
+                        const tbl = findTblById(STRENGTH_TBL_ID);
+                        // strengthGrade는 내부 코드값('a_or_b' 등)이라 그대로 찍으면 표에 글자가
+                        // 깨진 것처럼 보인다 — 표시용 문구로 바꿔서 넣는다.
+                        const strengthGradeDisplay = (code) => code === 'a_or_b' ? 'a/b' : (code || '-');
+                        // 강도 항목 하나에 위치 슬롯이 여러 개(최대 3개) 붙을 수 있는데, 예전엔
+                        // item.strengthFinal 등 첫 슬롯 결과만 내보내서 2번째/3번째 위치 측정값이
+                        // 통째로 표에서 빠졌다 — 슬롯 단위로 행을 펼쳐서 채운다.
+                        const strengthRows = [];
+                        strengthItemsHwpx.forEach(item => {
+                            const slots = Array.isArray(item.strengthSlots) && item.strengthSlots.length > 0
+                                ? item.strengthSlots
+                                : [{ location: item.location, finalStrength: item.strengthFinal, ratio: item.strengthRatio, grade: item.strengthGrade }];
+                            // 슬롯 자체에 계산 결과가 없는(예전 형식) 데이터는 항목(item) 최상위에
+                            // 남아있는 첫 슬롯 계산값으로라도 채운다 — 그냥 '-'로 비워두면 실제로는
+                            // 측정값이 있는데도 표에는 아무것도 없는 것처럼 보인다.
+                            slots.forEach(slot => {
+                                const finalStrength = typeof slot.finalStrength === 'number' ? slot.finalStrength : item.strengthFinal;
+                                const ratio = slot.ratio != null ? slot.ratio : item.strengthRatio;
+                                const grade = slot.grade != null ? slot.grade : item.strengthGrade;
+                                strengthRows.push([
+                                    strengthRows.length + 1,
+                                    `${slot.location || item.location || ''}${item.component || ''}`,
+                                    item.designStrength != null ? item.designStrength : '-',
+                                    typeof finalStrength === 'number' ? finalStrength.toFixed(1) : (finalStrength || '-'),
+                                    ratio != null ? `${Math.round(ratio)}%` : '-',
+                                    strengthGradeDisplay(grade),
+                                    item.damageStatus === '균열발생' ? '균열발생' : '-'
+                                ]);
+                            });
+                        });
+                        // 2026-08-24: 템플릿에 남아있던 다른 병원 이름표 칸(NO. 왼쪽의 빈 병합 칸)을
+                        // 제거해서 이제 NO.가 표의 실제 0번 칸이 됨 — includeCol0=true로 채운다.
+                        if (tbl) fillNdtTable(tbl, STRENGTH_HEADER_ROWS, strengthRows, true);
+                    } else {
+                        removeNdtTableById(STRENGTH_TBL_ID);
+                    }
+
+                    // --- 콘크리트 반발경도 성과표(7.1.2.3) — 표본 문서엔 다른 회사의 실측 데이터를
+                    // 찍은 정적 그림(WMF)이 그대로 박혀 있어서, 그동안 어느 건물을 내보내든 항상 그
+                    // 남의 데이터가 그대로 나갔다. 제목 문단 바로 다음에 이어지는 그림 문단들을 전부
+                    // 걷어내고, NO.(위치 슬롯)별로 반발치·보정·압축강도·막대그래프를 캔버스로 그려
+                    // 그 자리에 하나씩 새로 넣는다.
+                    {
+                        const allParasForPerf = secChildren();
+                        const perfHeadingPara = allParasForPerf.find(p => paraText(p).includes('반발경도 성과표'));
+                        if (perfHeadingPara) {
+                            const headingIdx = allParasForPerf.indexOf(perfHeadingPara);
+                            const picParas = [];
+                            for (let i = headingIdx + 1; i < allParasForPerf.length; i++) {
+                                if (allParasForPerf[i].getElementsByTagNameNS(HP_NS, 'pic').length > 0) {
+                                    picParas.push(allParasForPerf[i]);
+                                } else {
+                                    break;
+                                }
+                            }
+                            if (picParas.length > 0) {
+                                const picParaTemplate = picParas[0].cloneNode(true);
+                                const stopNode = allParasForPerf[headingIdx + 1 + picParas.length] || null;
+                                removeParaRange(picParas[0], stopNode);
+
+                                const perfPoints = [];
+                                strengthItemsHwpx.forEach(item => {
+                                    const slots = Array.isArray(item.strengthSlots) && item.strengthSlots.length > 0
+                                        ? item.strengthSlots
+                                        : [{ location: item.location, readings: [] }];
+                                    slots.forEach(slot => perfPoints.push({ item, slot }));
+                                });
+
+                                const perfAgeDays = getConcreteAgeInDays();
+                                const perfEnabledNames = getEnabledStrengthFormulaNames(bldg);
+                                perfPoints.forEach((pt, seq) => {
+                                    const readings = (pt.slot.readings || []).filter(v => v !== '' && v !== null && v !== undefined);
+                                    if (readings.length === 0) return;
+                                    const calc = calcConcreteStrength(readings, parseFloat(pt.item.strengthAngle), perfAgeDays, perfEnabledNames);
+                                    if (!calc) return;
+                                    const canvas = renderStrengthPerfPointCanvas(seq + 1, pt.item, pt.slot, readings, calc);
+                                    const dataUrl = canvas.toDataURL('image/png');
+                                    const { bytes, mime, ext } = dataUrlToBytes(dataUrl);
+                                    imgCounter++;
+                                    const imgId = `strengthPerfAuto${imgCounter}`;
+                                    zip.file(`BinData/${imgId}.${ext}`, bytes);
+                                    manifestAdds.push(`<opf:item id="${imgId}" href="BinData/${imgId}.${ext}" media-type="${mime}" isEmbeded="1"/>`);
+
+                                    const newPara = picParaTemplate.cloneNode(true);
+                                    const pic = newPara.getElementsByTagNameNS(HP_NS, 'pic')[0];
+                                    setPicImage(pic, imgId, canvas.width, canvas.height, 42520, 999999999);
+                                    sec.insertBefore(newPara, stopNode);
+                                });
+                            }
+                        }
+                    }
+
+                    if (carbItemsHwpx.length > 0) {
+                        const tbl = findTblById(CARB_TBL_ID);
+                        if (tbl) fillNdtTable(tbl, CARB_HEADER_ROWS, carbItemsHwpx.map((item, i) => [
+                            item.no || (i + 1),
+                            `${item.location || ''}${item.component || ''}`,
+                            item.carbDepth != null ? item.carbDepth : '-',
+                            item.carbCover != null ? item.carbCover : '-',
+                            typeof item.carbRemainMm === 'number' ? item.carbRemainMm.toFixed(2) : '-',
+                            typeof item.carbRate === 'number' ? item.carbRate.toFixed(2) : '-',
+                            typeof item.carbLifeYears === 'number' ? Math.round(item.carbLifeYears) : '-',
+                            typeof item.carbRemainingLifeYears === 'number' ? Math.round(item.carbRemainingLifeYears) : '-',
+                            item.carbAgeDays != null ? `약 ${Math.round(item.carbAgeDays / 365)}년` : '-',
+                            '-'
+                        ]), true);
+                    } else {
+                        removeNdtTableById(CARB_TBL_ID);
+                    }
+
+                    // 3개 표 모두 열 순서 동일(2026-08-24 사용자 요청으로 재배치):
+                    // NO. / 위치 / 길이·높이 / 전회(항상 '-') / 금회 / 비율 / 등급. 단위는 전부 mm로 통일.
+                    if (tiltItemsHwpx.length > 0) {
+                        const tbl = findTblById(TILT_TBL_ID, ['높   이(H)', '전   회']);
+                        if (tbl) fillNdtTable(tbl, TILT_HEADER_ROWS, tiltItemsHwpx.map((item, i) => {
+                            const hDigits = String(item.height || '').replace(/[^0-9.]/g, '');
+                            const hNum = parseFloat(hDigits);
+                            const heightText = Number.isFinite(hNum) ? `${hNum.toLocaleString()}mm` : '-';
+                            const avgDigits = (item.avgValue || '').toString().replace(/[^0-9.-]/g, '');
+                            const avgNum = parseFloat(avgDigits);
+                            const avgText = Number.isFinite(avgNum) ? `${avgNum}mm` : '-';
+                            const delta = Math.abs(avgNum || 0);
+                            const calc = (Number.isFinite(hNum) && hNum > 0 && delta > 0)
+                                ? calcTiltGrade(hNum, delta)
+                                : { tiltRatio: '', grade: '' };
+                            return [item.no || (i + 1), item.location || '-', heightText, '-', avgText, item.tiltRatio || calc.tiltRatio || '-', item.grade || calc.grade || '-'];
+                        }), true);
+                    } else {
+                        removeNdtTableById(TILT_TBL_ID);
+                    }
+
+                    // 부동침하/부재변위는 2026-08-24부터 템플릿에 별도 표 2개로 분리 — 이전엔 표가
+                    // 하나뿐이라 두 그룹을 합쳐서 한 표에 담았지만, 이제 각자 자기 표에 채운다.
+                    if (settlementGroupsHwpx.length > 0) {
+                        const tbl = findTblById(SETTLEMENT_TBL_ID, ['변  위  량', '기   존']);
+                        if (tbl) fillNdtTable(tbl, SETTLEMENT_HEADER_ROWS, settlementGroupsHwpx.map((group, i) => {
+                            const calc = calcGroupDisplacement(group);
+                            const lengthMmText = group.measureLength ? `${(group.measureLength * 1000).toLocaleString()}mm` : '-';
+                            return [i + 1, group.locationType || '-', lengthMmText, '-', `${calc.delta.toFixed(1)}cm`, calc.tiltRatio, calc.grade];
+                        }), true);
+                        // 2026-08-24: 결과표 밑에 그룹별 요약박스+꺾은선 그래프를 한 쌍씩 이어붙임(사용자 요청).
+                        if (tbl) await insertGroupResultImages(tbl, settlementGroupsHwpx);
+                    } else {
+                        removeNdtTableById(SETTLEMENT_TBL_ID);
+                    }
+
+                    if (memberDispGroupsHwpx.length > 0) {
+                        const tbl = findTblById(MEMBER_DISP_TBL_ID, ['처  짐  량', '기   존']);
+                        if (tbl) fillNdtTable(tbl, MEMBER_DISP_HEADER_ROWS, memberDispGroupsHwpx.map((group, i) => {
+                            const calc = calcGroupDisplacement(group);
+                            const lengthMmText = group.measureLength ? `${(group.measureLength * 1000).toLocaleString()}mm` : '-';
+                            return [i + 1, group.locationType || '-', lengthMmText, '-', `${calc.delta.toFixed(1)}cm`, calc.tiltRatio, calc.grade];
+                        }), true);
+                        if (tbl) await insertGroupResultImages(tbl, memberDispGroupsHwpx);
+                    } else {
+                        removeNdtTableById(MEMBER_DISP_TBL_ID);
+                    }
+
+                    // ---- 위치도 일괄 삽입 ----
+                    // "비파괴 장비조사 위치도" 섹션의 표본 내용(다른 병원 위치도, 못 채우던 부재실측/
+                    // 내화피복 위치도 등)을 통째로 비우고, 실제로 채운 위치도만 사용자가 요청한 순서
+                    // (부재실측 → 강도/탄산화 → 내화피복 → 외벽기울기 → 부동침하 → 부재변위)로 모든
+                    // 비파괴조사 결과표가 다 끝난 이 자리에 새로 만들어 넣는다. 2026-08-25부터: 결과표
+                    // 바로 옆(표마다 따로)이 아니라 전부 이렇게 한곳에 모아서 넣는 방식으로 바뀜.
+                    {
+                        // "비파괴 장비조사 위치도"(상위 섹션 제목)와 "비파괴 장비조사 사진첩" 문단은
+                        // 과거 어느 시점(한글 재저장/KS병원 잔재 정리 등)에 이미 삭제되고 없다 —
+                        // 처음에 이 코드는 그 두 문단을 기준으로 구간을 찾으려 했는데 실제로는 항상
+                        // 못 찾아 조용히 아무 일도 안 하고 있었다(위치도가 하나도 안 나오던 원인).
+                        // 대신 실제로 남아있는 걸 직접 확인한 항목들 — 부재실측/내화피복/변위조사
+                        // 소제목 3개, 정체불명의 "부재실측" 단독 문단, 강도·탄산화용 옛 위치도 표
+                        // (id=2137459495, 우리가 더는 안 씀) — 을 문단 참조로 직접 찾아서 지운다.
+                        const all = secChildren();
+                        const findHeading = (text) => all.find(p => paraText(p).trim() === text && p.getElementsByTagNameNS(HP_NS, 'tbl').length === 0);
+                        const measureHeadingPara = findHeading('부재실측 위치도');
+                        const strengthCarbHeadingPara = all.find(p => paraText(p).trim().indexOf('비파괴 장비조사 위치도(') === 0);
+                        const fireproofHeadingPara = findHeading('내화피복 측정 위치도');
+                        const dispHeadingPara = findHeading('변위조사 위치도');
+                        const bareMeasurePara = findHeading('부재실측');
+                        // "내화피복 측정 위치도"/"변위조사 위치도" 바로 뒤에, 옛 문서 구조에서 쓰던
+                        // "콘크리트 강도측정"/"콘크리트 탄산화 시험"/"변위측정" 소제목 3개가 내용 없이
+                        // 문단만 그대로 남아있었다(사용자가 실제 한글에서 열어 확인) — 위 5개와 같은
+                        // 방식으로 찾아서 같이 지운다.
+                        const strengthBareHeadingPara = findHeading('콘크리트 강도측정');
+                        const carbBareHeadingPara = findHeading('콘크리트 탄산화 시험');
+                        const dispBareHeadingPara = findHeading('변위측정');
+                        const oldStrengthCarbTbl = findTblById('2137459495');
+                        let oldStrengthCarbTblPara = oldStrengthCarbTbl;
+                        while (oldStrengthCarbTblPara && oldStrengthCarbTblPara.localName !== 'p') oldStrengthCarbTblPara = oldStrengthCarbTblPara.parentNode;
+
+                        // 삽입 지점: 원래 이 소제목들이 있던 바로 그 자리(부재실측 위치도 바로 앞
+                        // 문단)를 그대로 이어받는다 — 지우기 전에 먼저 찾아둬야 한다.
+                        const mapStart = measureHeadingPara ? measureHeadingPara.previousElementSibling : null;
+
+                        [measureHeadingPara, strengthCarbHeadingPara, oldStrengthCarbTblPara, fireproofHeadingPara, dispHeadingPara, bareMeasurePara,
+                            strengthBareHeadingPara, carbBareHeadingPara, dispBareHeadingPara]
+                            .forEach(p => { if (p && p.parentNode) p.parentNode.removeChild(p); });
+
+                        if (mapStart) {
+                            // 결함위치도(fillLocationMapForFloor)와 똑같이 표(2행짜리: 위=그림칸,
+                            // 아래=캡션칸) 안에 그림을 넣는다 — 헤딩 문단 따로 + 그림 따로가 아니라
+                            // 표 하나가 그림+캡션을 같이 들고 있어서 테두리가 있고 칸을 꽉 채운다.
+                            // XML은 실제 결함위치도 표(id=1122472099)를 그대로 본떴다.
+                            const LOC_MAP_TBL_PARA_XML = '<hp:p id="0" paraPrIDRef="13" styleIDRef="0" pageBreak="1" columnBreak="0" merged="0"><hp:run charPrIDRef="53"><hp:tbl id="TBL_ID" zOrder="11" numberingType="TABLE" textWrap="TOP_AND_BOTTOM" textFlow="BOTH_SIDES" lock="0" dropcapstyle="None" pageBreak="NONE" repeatHeader="1" rowCnt="2" colCnt="1" cellSpacing="0" borderFillIDRef="5" noAdjust="0"><hp:sz width="41821" widthRelTo="ABSOLUTE" height="64087" heightRelTo="ABSOLUTE" protect="0"/><hp:pos treatAsChar="1" affectLSpacing="0" flowWithText="1" allowOverlap="0" holdAnchorAndSO="0" vertRelTo="PARA" horzRelTo="COLUMN" vertAlign="TOP" horzAlign="LEFT" vertOffset="0" horzOffset="0"/><hp:outMargin left="140" right="140" top="140" bottom="140"/><hp:inMargin left="140" right="140" top="140" bottom="140"/><hp:tr><hp:tc name="" header="0" hasMargin="0" protect="0" editable="0" dirty="0" borderFillIDRef="15"><hp:subList id="" textDirection="HORIZONTAL" lineWrap="BREAK" vertAlign="CENTER" linkListIDRef="0" linkListNextIDRef="0" textWidth="0" textHeight="0" hasTextRef="0" hasNumRef="0"><hp:p id="2147483648" paraPrIDRef="4" styleIDRef="0" pageBreak="0" columnBreak="0" merged="0"><hp:run charPrIDRef="6"><hp:pic id="PIC_ID" zOrder="36" numberingType="PICTURE" textWrap="TOP_AND_BOTTOM" textFlow="BOTH_SIDES" lock="0" dropcapstyle="None" thumbnailBinIDRef="" href="" groupLevel="0" instid="PIC_INSTID" reverse="0"><hp:offset x="0" y="0"/><hp:orgSz width="768540" height="969540"/><hp:curSz width="41541" height="52405"/><hp:flip horizontal="0" vertical="0"/><hp:rotationInfo angle="0" centerX="20770" centerY="26202" rotateimage="1"/><hp:renderingInfo><hc:transMatrix e1="1" e2="0" e3="0" e4="0" e5="1" e6="0"/><hc:scaMatrix e1="0.054052" e2="0" e3="0" e4="0" e5="0.054051" e6="0"/><hc:rotMatrix e1="1" e2="0" e3="0" e4="0" e5="1" e6="0"/></hp:renderingInfo><hc:img binaryItemIDRef="" bright="0" contrast="0" effect="REAL_PIC" alpha="0"/><hp:imgRect><hc:pt0 x="0" y="0"/><hc:pt1 x="768540" y="0"/><hc:pt2 x="768540" y="969540"/><hc:pt3 x="0" y="969540"/></hp:imgRect><hp:imgClip left="0" right="648540" top="0" bottom="818100"/><hp:inMargin left="0" right="0" top="0" bottom="0"/><hp:imgDim dimwidth="648540" dimheight="818100"/><hp:effects/><hp:sz width="41541" widthRelTo="ABSOLUTE" height="52405" heightRelTo="ABSOLUTE" protect="0"/><hp:pos treatAsChar="0" affectLSpacing="0" flowWithText="1" allowOverlap="0" holdAnchorAndSO="0" vertRelTo="PARA" horzRelTo="COLUMN" vertAlign="TOP" horzAlign="LEFT" vertOffset="0" horzOffset="0"/><hp:outMargin left="0" right="0" top="0" bottom="0"/></hp:pic><hp:t/></hp:run><hp:linesegarray><hp:lineseg textpos="0" vertpos="0" vertsize="1100" textheight="1100" baseline="935" spacing="1320" horzpos="0" horzsize="0" flags="393216"/></hp:linesegarray></hp:p></hp:subList><hp:cellAddr colAddr="0" rowAddr="0"/><hp:cellSpan colSpan="1" rowSpan="1"/><hp:cellSz width="41821" height="60813"/><hp:cellMargin left="141" right="141" top="141" bottom="141"/></hp:tc></hp:tr><hp:tr><hp:tc name="" header="0" hasMargin="0" protect="0" editable="0" dirty="0" borderFillIDRef="16"><hp:subList id="" textDirection="HORIZONTAL" lineWrap="BREAK" vertAlign="CENTER" linkListIDRef="0" linkListNextIDRef="0" textWidth="0" textHeight="0" hasTextRef="0" hasNumRef="0"><hp:p id="2147483648" paraPrIDRef="1" styleIDRef="16" pageBreak="0" columnBreak="0" merged="0"><hp:run charPrIDRef="43"><hp:t>CAPTION</hp:t></hp:run><hp:linesegarray><hp:lineseg textpos="0" vertpos="0" vertsize="1000" textheight="1000" baseline="850" spacing="600" horzpos="0" horzsize="41540" flags="393216"/></hp:linesegarray></hp:p></hp:subList><hp:cellAddr colAddr="0" rowAddr="1"/><hp:cellSpan colSpan="1" rowSpan="1"/><hp:cellSz width="41821" height="3274"/><hp:cellMargin left="141" right="141" top="141" bottom="141"/></hp:tc></hp:tr></hp:tbl><hp:t/></hp:run><hp:linesegarray><hp:lineseg textpos="0" vertpos="0" vertsize="64367" textheight="64367" baseline="54712" spacing="960" horzpos="0" horzsize="42520" flags="393216"/></hp:linesegarray></hp:p>';
+                            // 표 칸(cellSz) - 안쪽 여백(cellMargin) = 그림이 실제로 채울 수 있는 최대
+                            // 크기(fillLocationMapForFloor와 동일한 계산, 표를 고정 크기로 새로 만들기
+                            // 때문에 매번 다시 계산할 필요 없이 미리 값을 넣어둠).
+                            const LOC_MAP_MAX_W = 41821 - 141 - 141;
+                            const LOC_MAP_MAX_H = 60813 - 141 - 141;
+
+                            let mapAnchor = mapStart;
+                            const appendLocationMap = async (label, category, imgIdPrefix) => {
+                                const mapDataUrl = renderNdtFloorPlanCanvasDataUrl(floorCode, category);
+                                if (!mapDataUrl) return;
+                                imgCounter++;
+                                const xml = LOC_MAP_TBL_PARA_XML
+                                    .replace('TBL_ID', String(8600000 + imgCounter))
+                                    .replace('PIC_ID', String(8700000 + imgCounter))
+                                    .replace('PIC_INSTID', String(8800000 + imgCounter))
+                                    .replace('CAPTION', label);
+                                const doc = new DOMParser().parseFromString(`<root xmlns:hp="${HP_NS}" xmlns:hc="${HC_NS}">${xml}</root>`, 'application/xml');
+                                const newPara = xmlDoc.importNode(doc.documentElement.firstChild, true);
+                                mapAnchor.parentNode.insertBefore(newPara, mapAnchor.nextSibling);
+                                mapAnchor = newPara;
+
+                                const pic = newPara.getElementsByTagNameNS(HP_NS, 'pic')[0];
+                                const { bytes, mime, ext } = dataUrlToBytes(mapDataUrl);
+                                const size = await loadImageSize(mapDataUrl);
+                                const imgId = `${imgIdPrefix}${imgCounter}`;
+                                zip.file(`BinData/${imgId}.${ext}`, bytes);
+                                manifestAdds.push(`<opf:item id="${imgId}" href="BinData/${imgId}.${ext}" media-type="${mime}" isEmbeded="1"/>`);
+                                setPicImage(pic, imgId, size.w, size.h, LOC_MAP_MAX_W, LOC_MAP_MAX_H);
+                            };
+
+                            if (measureItemsHwpx.length > 0) {
+                                await appendLocationMap('부재실측 위치도', '실측', 'ndtLocMapMeasure');
+                            }
+                            if (strengthItemsHwpx.length > 0 || carbItemsHwpx.length > 0) {
+                                await appendLocationMap('비파괴 장비조사 위치도(콘크리트 강도 측정 및 탄산화 측정)', '일반비파괴', 'ndtLocMapStrengthCarb');
+                            }
+                            if (fireproofItemsHwpx.length > 0) {
+                                await appendLocationMap('내화피복 측정 위치도', '내화피복', 'ndtLocMapFireproof');
+                            }
+                            if (tiltItemsHwpx.length > 0) {
+                                await appendLocationMap('외벽 기울기 측정 위치도', '기울기', 'ndtLocMapTilt');
+                            }
+                            if (settlementGroupsHwpx.length > 0) {
+                                await appendLocationMap('부동침하 기울기 측정 위치도', '변위', 'ndtLocMapSettlement');
+                            }
+                            if (memberDispGroupsHwpx.length > 0) {
+                                await appendLocationMap('부재변위 측정 위치도', '부재변위', 'ndtLocMapMemberDisp');
+                            }
+                        }
+                    }
+                }
+            } } catch (ndtErr) {
+                console.error('비파괴조사 섹션 삽입 실패(나머지는 계속 진행):', ndtErr);
+                window.showToast('비파괴조사 섹션 삽입 중 오류가 있어 해당 부분은 제외하고 만듭니다: ' + ndtErr.message, 'warning', 5000);
+            }
+
+            // ---- 표본 템플릿 잔여 내용 정리 ----
+            // 템플릿은 완성된 표본 보고서 원본이라, 위에서 실제로 채운 층 블록/비파괴조사 5개 섹션
+            // 말고는 표본 데이터가 그대로 남아있다 — 다른 층들의 상태조사표/사진첩/위치도 전체와,
+            // 표본 건물의 "비파괴 장비조사 사진첩"이 대표적이다. 이걸 지우지 않으면 실제 결함 사진과
+            // 무관한 표본 사진이 내보낸 문서에 섞여 나온다. 정기점검용 템플릿에는 이 마커들이 애초에
+            // 없어서 아래 find()가 전부 못 찾고 조용히 넘어간다(해로울 게 없음). 실패해도 이미 만든
+            // 상태조사표/사진/위치도는 살려서 내보내야 하므로 전체를 try/catch로 감싼다.
+            try {
+                // 1) 실제로 채운 층 블록들 다음에 남은 표본 층 블록(있다면)은 통째로 삭제한다.
+                if (unusedFloorSlotStart) removeParaRange(unusedFloorSlotStart, null);
+
+                // "비파괴 장비조사 사진첩"(표본 NDT 사진, 우리 코드가 다루지 않음) 섹션의 경계를
+                // 찾아둔다. "비파괴 장비조사 위치도" 섹션 자체는 NDT try 블록 끝에서 이미 정리·
+                // 재구성했으므로(모든 결과표 뒤에 위치도를 한꺼번에 모아 넣는 단계) 여기서는
+                // 사진첩만 처리한다.
+                const albumStart = secChildren().find(p => /^비파괴 장비조사 사진첩/.test(paraText(p).trim()));
+                const surveyHeading = secChildren().find(p => /^주요 상태조사표, 사진 및 위치도/.test(paraText(p).trim()));
+
+                // 2) "비파괴 장비조사 사진첩" 섹션 전체 삭제
+                if (albumStart) removeParaRange(albumStart, surveyHeading || null);
+            } catch (cleanupErr) {
+                console.error('표본 템플릿 잔여 내용 정리 실패(나머지는 유지):', cleanupErr);
+            }
+
+
+            // ---- 전경사진 (문서 맨 마지막) ----
+            try {
+                await hydrateBuildingOverviewPhotos(bldg);
+                const overviewList = (getBuildingOverviewPhotos(bldg) || []).filter((p) => p && (p.dataUrl || p.id));
+                const overviewReady = [];
+                for (const p of overviewList) {
+                    let src = p.dataUrl;
+                    if (!src && p.id) src = await loadOverviewPhotoDataUrl(bldg.id, p.id);
+                    if (!src) continue;
+                    overviewReady.push({
+                        caption: (p.caption != null && String(p.caption).trim()) ? String(p.caption).trim() : '전경사진',
+                        dataUrl: src
+                    });
+                }
+                if (overviewReady.length > 0) {
+                    const OV_HEADING_XML = `<hp:p id="0" paraPrIDRef="13" styleIDRef="0" pageBreak="1" columnBreak="0" merged="0"><hp:run charPrIDRef="53"><hp:t>전경사진</hp:t></hp:run><hp:linesegarray><hp:lineseg textpos="0" vertpos="0" vertsize="1100" textheight="1100" baseline="935" spacing="600" horzpos="0" horzsize="41540" flags="393216"/></hp:linesegarray></hp:p>`;
+                    const OV_PHOTO_TBL_PARA_XML = '<hp:p id="0" paraPrIDRef="13" styleIDRef="0" pageBreak="1" columnBreak="0" merged="0"><hp:run charPrIDRef="53"><hp:tbl id="TBL_ID" zOrder="11" numberingType="TABLE" textWrap="TOP_AND_BOTTOM" textFlow="BOTH_SIDES" lock="0" dropcapstyle="None" pageBreak="NONE" repeatHeader="1" rowCnt="2" colCnt="1" cellSpacing="0" borderFillIDRef="5" noAdjust="0"><hp:sz width="41821" widthRelTo="ABSOLUTE" height="64087" heightRelTo="ABSOLUTE" protect="0"/><hp:pos treatAsChar="1" affectLSpacing="0" flowWithText="1" allowOverlap="0" holdAnchorAndSO="0" vertRelTo="PARA" horzRelTo="COLUMN" vertAlign="TOP" horzAlign="LEFT" vertOffset="0" horzOffset="0"/><hp:outMargin left="140" right="140" top="140" bottom="140"/><hp:inMargin left="140" right="140" top="140" bottom="140"/><hp:tr><hp:tc name="" header="0" hasMargin="0" protect="0" editable="0" dirty="0" borderFillIDRef="15"><hp:subList id="" textDirection="HORIZONTAL" lineWrap="BREAK" vertAlign="CENTER" linkListIDRef="0" linkListNextIDRef="0" textWidth="0" textHeight="0" hasTextRef="0" hasNumRef="0"><hp:p id="2147483648" paraPrIDRef="4" styleIDRef="0" pageBreak="0" columnBreak="0" merged="0"><hp:run charPrIDRef="6"><hp:pic id="PIC_ID" zOrder="36" numberingType="PICTURE" textWrap="TOP_AND_BOTTOM" textFlow="BOTH_SIDES" lock="0" dropcapstyle="None" thumbnailBinIDRef="" href="" groupLevel="0" instid="PIC_INSTID" reverse="0"><hp:offset x="0" y="0"/><hp:orgSz width="768540" height="969540"/><hp:curSz width="41541" height="52405"/><hp:flip horizontal="0" vertical="0"/><hp:rotationInfo angle="0" centerX="20770" centerY="26202" rotateimage="1"/><hp:renderingInfo><hc:transMatrix e1="1" e2="0" e3="0" e4="0" e5="1" e6="0"/><hc:scaMatrix e1="0.054052" e2="0" e3="0" e4="0" e5="0.054051" e6="0"/><hc:rotMatrix e1="1" e2="0" e3="0" e4="0" e5="1" e6="0"/></hp:renderingInfo><hc:img binaryItemIDRef="" bright="0" contrast="0" effect="REAL_PIC" alpha="0"/><hp:imgRect><hc:pt0 x="0" y="0"/><hc:pt1 x="768540" y="0"/><hc:pt2 x="768540" y="969540"/><hc:pt3 x="0" y="969540"/></hp:imgRect><hp:imgClip left="0" right="648540" top="0" bottom="818100"/><hp:inMargin left="0" right="0" top="0" bottom="0"/><hp:imgDim dimwidth="648540" dimheight="818100"/><hp:effects/><hp:sz width="41541" widthRelTo="ABSOLUTE" height="52405" heightRelTo="ABSOLUTE" protect="0"/><hp:pos treatAsChar="0" affectLSpacing="0" flowWithText="1" allowOverlap="0" holdAnchorAndSO="0" vertRelTo="PARA" horzRelTo="COLUMN" vertAlign="TOP" horzAlign="LEFT" vertOffset="0" horzOffset="0"/><hp:outMargin left="0" right="0" top="0" bottom="0"/></hp:pic><hp:t/></hp:run><hp:linesegarray><hp:lineseg textpos="0" vertpos="0" vertsize="1100" textheight="1100" baseline="935" spacing="1320" horzpos="0" horzsize="0" flags="393216"/></hp:linesegarray></hp:p></hp:subList><hp:cellAddr colAddr="0" rowAddr="0"/><hp:cellSpan colSpan="1" rowSpan="1"/><hp:cellSz width="41821" height="60813"/><hp:cellMargin left="141" right="141" top="141" bottom="141"/></hp:tc></hp:tr><hp:tr><hp:tc name="" header="0" hasMargin="0" protect="0" editable="0" dirty="0" borderFillIDRef="16"><hp:subList id="" textDirection="HORIZONTAL" lineWrap="BREAK" vertAlign="CENTER" linkListIDRef="0" linkListNextIDRef="0" textWidth="0" textHeight="0" hasTextRef="0" hasNumRef="0"><hp:p id="2147483648" paraPrIDRef="1" styleIDRef="16" pageBreak="0" columnBreak="0" merged="0"><hp:run charPrIDRef="43"><hp:t>CAPTION</hp:t></hp:run><hp:linesegarray><hp:lineseg textpos="0" vertpos="0" vertsize="1000" textheight="1000" baseline="850" spacing="600" horzpos="0" horzsize="41540" flags="393216"/></hp:linesegarray></hp:p></hp:subList><hp:cellAddr colAddr="0" rowAddr="1"/><hp:cellSpan colSpan="1" rowSpan="1"/><hp:cellSz width="41821" height="3274"/><hp:cellMargin left="141" right="141" top="141" bottom="141"/></hp:tc></hp:tr></hp:tbl><hp:t/></hp:run><hp:linesegarray><hp:lineseg textpos="0" vertpos="0" vertsize="64367" textheight="64367" baseline="54712" spacing="960" horzpos="0" horzsize="42520" flags="393216"/></hp:linesegarray></hp:p>';
+                    const OV_MAX_W = 41821 - 141 - 141;
+                    const OV_MAX_H = 60813 - 141 - 141;
+                    const escapeXmlText = (s) => String(s || '')
+                        .replace(/&/g, '&amp;')
+                        .replace(/</g, '&lt;')
+                        .replace(/>/g, '&gt;')
+                        .replace(/"/g, '&quot;');
+
+                    const headingDoc = new DOMParser().parseFromString(
+                        `<root xmlns:hp="${HP_NS}" xmlns:hc="${HC_NS}">${OV_HEADING_XML}</root>`,
+                        'application/xml'
+                    );
+                    sec.appendChild(xmlDoc.importNode(headingDoc.documentElement.firstChild, true));
+
+                    for (let oi = 0; oi < overviewReady.length; oi++) {
+                        const item = overviewReady[oi];
+                        imgCounter++;
+                        const xml = OV_PHOTO_TBL_PARA_XML
+                            .replace('TBL_ID', String(8900000 + imgCounter))
+                            .replace('PIC_ID', String(8910000 + imgCounter))
+                            .replace('PIC_INSTID', String(8920000 + imgCounter))
+                            .replace('CAPTION', escapeXmlText(item.caption));
+                        const docOv = new DOMParser().parseFromString(
+                            `<root xmlns:hp="${HP_NS}" xmlns:hc="${HC_NS}">${xml}</root>`,
+                            'application/xml'
+                        );
+                        const newPara = xmlDoc.importNode(docOv.documentElement.firstChild, true);
+                        if (oi === 0) newPara.setAttribute('pageBreak', '0');
+                        else newPara.setAttribute('pageBreak', '1');
+                        sec.appendChild(newPara);
+                        const pic = newPara.getElementsByTagNameNS(HP_NS, 'pic')[0];
+                        const { bytes, mime, ext } = dataUrlToBytes(item.dataUrl);
+                        const size = await loadImageSize(item.dataUrl);
+                        const imgId = `overviewPhoto${imgCounter}`;
+                        zip.file(`BinData/${imgId}.${ext}`, bytes);
+                        manifestAdds.push(`<opf:item id="${imgId}" href="BinData/${imgId}.${ext}" media-type="${mime}" isEmbeded="1"/>`);
+                        setPicImage(pic, imgId, size.w, size.h, OV_MAX_W, OV_MAX_H);
+                        ensureTblTreatAsChar(newPara.getElementsByTagNameNS(HP_NS, 'tbl')[0]);
+                    }
+                }
+            } catch (ovErr) {
+                console.error('전경사진 HWPX 삽입 실패(나머지는 유지):', ovErr);
+            }
+
+            Array.from(xmlDoc.getElementsByTagNameNS(HP_NS, 'tbl')).forEach(ensureTblTreatAsChar);
+
+            if (manifestAdds.length > 0) {
+                let hpfText = await zip.file('Contents/content.hpf').async('string');
+                // 실제 쓰인 섹션 파일(section1 또는 section0)의 매니페스트 항목 앞에 새 이미지 항목들을 끼워 넣는다.
+                const sectionItemId = sectionPath.replace('Contents/', '').replace('.xml', '');
+                const manifestMarker = `<opf:item id="${sectionItemId}"`;
+                if (hpfText.indexOf(manifestMarker) < 0) throw new Error('매니페스트 삽입 위치를 찾지 못했습니다.');
+                hpfText = hpfText.replace(manifestMarker, manifestAdds.join('') + manifestMarker);
+                zip.file('Contents/content.hpf', hpfText);
+            }
+
+            let newXml = new XMLSerializer().serializeToString(xmlDoc);
+            if (!newXml.startsWith('<?xml')) {
+                newXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes" ?>' + newXml;
+            }
+            zip.file(sectionPath, newXml);
+
+            // 원본처럼 mimetype/version.xml은 무압축(Store)으로 유지
+            zip.file('mimetype', await zip.file('mimetype').async('string'), { compression: 'STORE' });
+            zip.file('version.xml', await zip.file('version.xml').async('string'), { compression: 'STORE' });
+
+            // JSZip이 중첩 경로(Contents/section1.xml) 파일을 다시 쓸 때 원본에는 없던 빈 폴더
+            // 항목(예: "Contents/")을 자동으로 끼워 넣는 경우가 있어 원본과 항목 구성을 동일하게
+            // 맞춘다. zip.remove()는 폴더 지정 시 그 안의 파일까지 재귀적으로 지워버리므로 절대
+            // 쓰면 안 되고, 내부 맵(zip.files)에서 그 폴더 키 하나만 직접 지운다.
+            Object.keys(zip.files).forEach(name => { if (zip.files[name].dir) delete zip.files[name]; });
+
+            const blob = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE', mimeType: 'application/hwp+zip' });
+
+            const bldgName = (bldg.name || '건축물').replace(/^🏢\s*/, '').replace(/[^a-zA-Z0-9가-힣_-]/g, '_');
+            const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+            const filename = `${bldgName}_상태조사표_전체층_${dateStr}.hwpx`;
+
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+
+            const totalDefectCount = floorsData.reduce((sum, f) => sum + f.pageDefects.length, 0);
+            window.showToast(`hwpx 파일을 생성했습니다 (${floorsData.length}개 층, 총 ${totalDefectCount}건 반영).`, 'success', 4000);
+    }
 
     // Binding All Header & Survey Report Action Buttons
     const btnPreviewReport = document.getElementById('btnPreviewReport');
