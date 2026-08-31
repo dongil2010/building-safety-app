@@ -25968,192 +25968,6 @@ document.addEventListener('DOMContentLoaded', () => {
     // 번들 템플릿(templates/hwpx_survey_template.hwpx, 정기점검은 _regular.hwpx)에 이미 있는
     // "N) 층명" 블록(상태조사표+사진첩+위치도)을 표 ID 하드코딩 대신 문단 구조로 자동 탐지해
     // 건물에 등록된 층 수만큼 채우고, 남는 표본 블록은 뒤에서 지운다.
-    const HWPX_TEMPLATE_VERSION = '20260828_font_merge_fix';
-    /** 표 헤더 행 그라데이션용 borderFill — 데이터 칸 바탕 제거 시 이 ID는 유지 */
-    const HWPX_HEADER_GRAD_BORDER_IDS = {
-        grade3: new Set(['5', '6', '7', '16', '17']),
-        grade12: new Set(['5', '6', '7', '8'])
-    };
-    function hwpxGetHeaderGradBorderIds(isGrade3) {
-        return isGrade3 ? HWPX_HEADER_GRAD_BORDER_IDS.grade3 : HWPX_HEADER_GRAD_BORDER_IDS.grade12;
-    }
-
-    function hwpxTagBlock(xml, tag, id) {
-        const re = new RegExp(`<hh:${tag} id="${id}"[^>]*>[\\s\\S]*?<\\/hh:${tag}>`, 's');
-        const m = xml.match(re);
-        return m ? m[0] : null;
-    }
-    function hwpxFontBlock(xml, fid) {
-        const full = xml.match(new RegExp(`<hh:font id="${fid}"[^>]*>[\\s\\S]*?<\\/hh:font>`, 's'));
-        if (full) return full[0];
-        const self = xml.match(new RegExp(`<hh:font id="${fid}"[^>]*/>`));
-        return self ? self[0] : null;
-    }
-    function hwpxUpsertBlock(xml, tag, id, block) {
-        const re = new RegExp(`<hh:${tag} id="${id}"[^>]*>[\\s\\S]*?<\\/hh:${tag}>`, 's');
-        if (re.test(xml)) return xml.replace(re, block);
-        const containerRe = new RegExp(`(<hh:${tag}s[^>]*>)([\\s\\S]*?)(<\\/hh:${tag}s>)`, 's');
-        const m = xml.match(containerRe);
-        if (m) return xml.slice(0, m.index + m[1].length) + m[2] + block + m[3] + xml.slice(m.index + m[0].length);
-        return xml;
-    }
-    function hwpxUpsertFont(xml, fid, block) {
-        const fullRe = new RegExp(`<hh:font id="${fid}"[^>]*>[\\s\\S]*?<\\/hh:font>`, 's');
-        if (fullRe.test(xml)) return xml.replace(fullRe, block);
-        const selfRe = new RegExp(`<hh:font id="${fid}"[^>]*/>`);
-        if (selfRe.test(xml)) return xml.replace(selfRe, block);
-        const m = xml.match(/(<hh:fontfaces[^>]*>)([\s\S]*?)(<\/hh:fontfaces>)/);
-        if (m) return xml.slice(0, m.index + m[1].length) + m[2] + block + m[3] + xml.slice(m.index + m[0].length);
-        return xml;
-    }
-    function hwpxSanitizeBorderFillBlock(block, borderId, preserveGradIds) {
-        if (!block) return block;
-        if (preserveGradIds && preserveGradIds.has(String(borderId))) return block;
-        let out = block;
-        out = out.replace(/<hc:fillBrush>[\s\S]*?<\/hc:fillBrush>/g, '');
-        out = out.replace(/<hh:gradation[^>]*>[\s\S]*?<\/hh:gradation>/g, '');
-        return out;
-    }
-    function hwpxStripBorderFillGradation(headerXml, preserveGradIds) {
-        if (!headerXml) return headerXml;
-        return headerXml.replace(/<hh:borderFill id="(\d+)"[^>]*>[\s\S]*?<\/hh:borderFill>/g, (block, bid) => (
-            hwpxSanitizeBorderFillBlock(block, bid, preserveGradIds)
-        ));
-    }
-    /** 글자 스타일(charPr)의 borderFillIDRef·shadeColor — 줄마다 바탕/테두리 박스 원인 */
-    function hwpxSanitizeCharPrBlock(block) {
-        if (!block) return block;
-        return block
-            .replace(/\sborderFillIDRef="\d+"/g, '')
-            .replace(/\sshadeColor="[^"]*"/g, ' shadeColor="none"');
-    }
-    function hwpxClearCharPrLineBoxBorder(headerXml, charIds) {
-        if (!headerXml || !charIds || !charIds.size) return headerXml;
-        let out = headerXml;
-        [...charIds].sort((a, b) => +a - +b).forEach((cid) => {
-            const block = hwpxTagBlock(out, 'charPr', cid);
-            if (!block) return;
-            out = hwpxUpsertBlock(out, 'charPr', cid, hwpxSanitizeCharPrBlock(block));
-        });
-        return out;
-    }
-    /** header 전체 charPr에서 글자 바탕/테두리 박스 제거(스탬프 ID 충돌로 repo 쪽이 남는 경우 대비) */
-    function hwpxClearAllCharPrBackgrounds(headerXml) {
-        if (!headerXml) return headerXml;
-        return headerXml.replace(/<hh:charPr id="\d+"[^>]*>[\s\S]*?<\/hh:charPr>/g, (block) => hwpxSanitizeCharPrBlock(block));
-    }
-    /** paraPr 안의 <hh:border>가 칸 글자 줄마다 문단 테두리(박스)를 그린다 — 전부 제거 */
-    function hwpxClearParaPrBorders(headerXml) {
-        if (!headerXml) return headerXml;
-        return headerXml.replace(/<hh:paraPr id="\d+"[^>]*>[\s\S]*?<\/hh:paraPr>/g, (block) => (
-            block
-                .replace(/<hh:border[^>]*\/>/g, '')
-                .replace(/<hh:border[^>]*>[\s\S]*?<\/hh:border>/g, '')
-        ));
-    }
-    function hwpxSanitizeParaPrBlock(block) {
-        if (!block) return block;
-        return block
-            .replace(/<hh:border[^>]*\/>/g, '')
-            .replace(/<hh:border[^>]*>[\s\S]*?<\/hh:border>/g, '');
-    }
-    /** section 본문 hp:p/hp:run에 붙은 문단 테두리 속성 제거 */
-    function hwpxClearSectionParagraphBorders(secXml) {
-        if (!secXml) return secXml;
-        const stripTagBorder = (xml, tag) => xml.replace(new RegExp(`<${tag}\\b([^>]*)>`, 'g'), (full, attrs) => {
-            const cleaned = attrs.replace(/\sborderFillIDRef="\d+"/g, '');
-            return cleaned === attrs ? full : `<${tag}${cleaned}>`;
-        });
-        return stripTagBorder(stripTagBorder(secXml, 'hp:p'), 'hp:run');
-    }
-    function hwpxCollectStyleIds(tableXml, srcHeader) {
-        const borderIds = new Set((tableXml.match(/borderFillIDRef="(\d+)"/g) || []).map(s => s.match(/\d+/)[0]));
-        const charIds = new Set((tableXml.match(/charPrIDRef="(\d+)"/g) || []).map(s => s.match(/\d+/)[0]));
-        const paraIds = new Set((tableXml.match(/paraPrIDRef="(\d+)"/g) || []).map(s => s.match(/\d+/)[0]));
-        const fontIds = new Set();
-        charIds.forEach((cid) => {
-            const block = hwpxTagBlock(srcHeader, 'charPr', cid);
-            if (block) {
-                const charBf = block.match(/borderFillIDRef="(\d+)"/);
-                if (charBf) borderIds.add(charBf[1]);
-                (block.match(/(?:hangul|latin|hanja|japanese|other|symbol|user)="(\d+)"/g) || []).forEach((fm) => {
-                    fontIds.add(fm.match(/\d+/)[0]);
-                });
-            }
-        });
-        return { borderIds, charIds, paraIds, fontIds };
-    }
-    function hwpxMergeHeaderFromStamp(tgtHeader, stampHeader, stampTableXml, isGrade3) {
-        const preserveGradIds = hwpxGetHeaderGradBorderIds(isGrade3);
-        const { borderIds, charIds, paraIds, fontIds } = hwpxCollectStyleIds(stampTableXml, stampHeader);
-        let out = tgtHeader;
-        [...fontIds].sort((a, b) => +a - +b).forEach((fid) => {
-            const block = hwpxFontBlock(stampHeader, fid);
-            if (block) out = hwpxUpsertFont(out, fid, block);
-        });
-        [...borderIds].sort((a, b) => +a - +b).forEach((bid) => {
-            const block = hwpxTagBlock(stampHeader, 'borderFill', bid);
-            if (block) out = hwpxUpsertBlock(out, 'borderFill', bid, hwpxSanitizeBorderFillBlock(block, bid, preserveGradIds));
-        });
-        [...charIds].sort((a, b) => +a - +b).forEach((cid) => {
-            const block = hwpxTagBlock(stampHeader, 'charPr', cid);
-            if (block) out = hwpxUpsertBlock(out, 'charPr', cid, hwpxSanitizeCharPrBlock(block));
-        });
-        [...paraIds].sort((a, b) => +a - +b).forEach((pid) => {
-            const block = hwpxTagBlock(stampHeader, 'paraPr', pid);
-            if (block) out = hwpxUpsertBlock(out, 'paraPr', pid, hwpxSanitizeParaPrBlock(block));
-        });
-        out = hwpxStripBorderFillGradation(out, preserveGradIds);
-        out = hwpxClearParaPrBorders(out);
-        return hwpxClearCharPrLineBoxBorder(out, charIds);
-    }
-    function hwpxIsSurveyStampTable(tblXml, isGrade3) {
-        const colM = tblXml.match(/colCnt="(\d+)"/);
-        if (!colM) return false;
-        const texts = (tblXml.match(/<hp:t[^>]*>([^<]*)<\/hp:t>/g) || []).slice(0, 20).join('').replace(/\s+/g, '');
-        if (isGrade3) return colM[1] === '7' && texts.includes('점검내용') && texts.includes('발생원인');
-        return colM[1] === '10' && texts.includes('조사내용') && texts.includes('구분') && !texts.includes('부재종류');
-    }
-    function hwpxExtractSurveyStampTable(secXml, isGrade3) {
-        for (const m of secXml.matchAll(/<hp:tbl[^>]*>[\s\S]*?<\/hp:tbl>/g)) {
-            if (hwpxIsSurveyStampTable(m[0], isGrade3)) return m[0];
-        }
-        return null;
-    }
-    function hwpxReplaceSurveyTables(secXml, stampTableXml, isGrade3) {
-        return secXml.replace(/<hp:tbl[^>]*>[\s\S]*?<\/hp:tbl>/g, (tbl) => {
-            if (!hwpxIsSurveyStampTable(tbl, isGrade3)) return tbl;
-            const oldId = tbl.match(/\bid="(\d+)"/);
-            if (!oldId) return stampTableXml;
-            return stampTableXml.replace(/\bid="\d+"/, `id="${oldId[1]}"`);
-        });
-    }
-    async function applyHwpxSurveyStampToZip(zip, isGrade3) {
-        const stampPath = isGrade3
-            ? `./templates/hwpx_grade3_survey_stamp.hwpx?v=${HWPX_TEMPLATE_VERSION}`
-            : `./templates/hwpx_grade12_survey_stamp.hwpx?v=${HWPX_TEMPLATE_VERSION}`;
-        const stampResp = await fetch(stampPath, { cache: 'no-store' });
-        if (!stampResp.ok) {
-            console.warn('결함조사표 스탬프를 불러오지 못했습니다:', stampPath);
-            return;
-        }
-        const stampZip = await JSZip.loadAsync(await stampResp.arrayBuffer());
-        const stampSecPath = stampZip.file('Contents/section1.xml') ? 'Contents/section1.xml' : 'Contents/section0.xml';
-        const stampSecXml = await stampZip.file(stampSecPath).async('string');
-        const stampHeader = await stampZip.file('Contents/header.xml').async('string');
-        const stampTable = hwpxExtractSurveyStampTable(stampSecXml, isGrade3);
-        if (!stampTable) {
-            console.warn('스탬프 파일에서 상태조사표를 찾지 못했습니다.');
-            return;
-        }
-        const sectionPath = zip.file('Contents/section1.xml') ? 'Contents/section1.xml' : 'Contents/section0.xml';
-        let secXml = await zip.file(sectionPath).async('string');
-        secXml = hwpxReplaceSurveyTables(secXml, stampTable, isGrade3);
-        zip.file(sectionPath, secXml);
-        const tgtHeader = await zip.file('Contents/header.xml').async('string');
-        zip.file('Contents/header.xml', hwpxMergeHeaderFromStamp(tgtHeader, stampHeader, stampTable, isGrade3));
-    }
-
     window.exportHwpxSurveyTable = async function() {
         const bldg = window.state.currentBuilding;
         const bldgId = (bldg && bldg.id) || window.state.currentBuildingId;
@@ -26213,7 +26027,6 @@ document.addEventListener('DOMContentLoaded', () => {
             const resp = await fetch(templatePath, { cache: 'no-store' });
             if (!resp.ok) throw new Error('템플릿 파일을 불러오지 못했습니다.');
             const zip = await JSZip.loadAsync(await resp.arrayBuffer());
-            await applyHwpxSurveyStampToZip(zip, isGrade3);
 
             const HP_NS = 'http://www.hancom.co.kr/hwpml/2011/paragraph';
             const HC_NS = 'http://www.hancom.co.kr/hwpml/2011/core';
@@ -26882,9 +26695,21 @@ document.addEventListener('DOMContentLoaded', () => {
                     continue;
                 }
 
-                const firstRowTpl = dataRows[0].cloneNode(true);
-                const normalRowTpl = (dataRows[Math.min(1, dataRows.length - 1)] || dataRows[0]).cloneNode(true);
-                const lastRowTpl = dataRows[dataRows.length - 1].cloneNode(true);
+                const borderStyleByCol = (row) => {
+                    const map = {};
+                    Array.from(row.getElementsByTagNameNS(HP_NS, 'tc')).forEach(tc => {
+                        const addr = tc.getElementsByTagNameNS(HP_NS, 'cellAddr')[0];
+                        if (addr) map[addr.getAttribute('colAddr')] = tc.getAttribute('borderFillIDRef');
+                    });
+                    return map;
+                };
+                const firstStyleRow = dataRows[0];
+                const normalStyleRow = dataRows[Math.min(1, dataRows.length - 1)];
+                const styleMaps = {
+                    first: borderStyleByCol(firstStyleRow),
+                    normal: borderStyleByCol(normalStyleRow),
+                    last: borderStyleByCol(dataRows[dataRows.length - 1])
+                };
 
                 // 기존에 있던 페이지(targetTbl 포함 전부)의 표본 데이터 행을 지운다.
                 slot.statusTbls.forEach(tbl => {
@@ -26915,13 +26740,13 @@ document.addEventListener('DOMContentLoaded', () => {
                         insertAfterNode.parentNode.insertBefore(clonedPara, insertAfterNode.nextSibling);
                         insertAfterNode = clonedPara;
                         pageTbls.push(clonedTbl);
-                        syncStatusTblLayoutFromTemplate(clonedTbl, targetTbl, HEADER_ROW_COUNT, normalRowTpl);
+                        syncStatusTblLayoutFromTemplate(clonedTbl, targetTbl, HEADER_ROW_COUNT, normalStyleRow);
                     }
                 }
                 pageTbls.forEach((tbl, i) => {
                     if (i > 0) {
                         tbl.parentNode.parentNode.setAttribute('pageBreak', '1');
-                        syncStatusTblLayoutFromTemplate(tbl, targetTbl, HEADER_ROW_COUNT, normalRowTpl);
+                        syncStatusTblLayoutFromTemplate(tbl, targetTbl, HEADER_ROW_COUNT, normalStyleRow);
                     }
                 });
 
@@ -26986,25 +26811,25 @@ document.addEventListener('DOMContentLoaded', () => {
                             photoRemark: photoLabelByDefect.get(d) || '-',
                             floorDisplayLabel: getFloorLabel(floorCode)
                         };
-                        const colCount = Array.from(normalRowTpl.getElementsByTagNameNS(HP_NS, 'tc')).length;
+                        const colCount = Array.from(normalStyleRow.getElementsByTagNameNS(HP_NS, 'tc')).length;
                         const values = getReportSurveyRowValues(d, rowCtx, isGrade3, colCount);
-                        const rowTpl = localIdx === 0 ? firstRowTpl : (isLastOnPage ? lastRowTpl : normalRowTpl);
+                        const styleMap = localIdx === 0 ? styleMaps.first : (isLastOnPage ? styleMaps.last : styleMaps.normal);
 
-                        const newRow = rowTpl.cloneNode(true);
-                        copyRowCellSizesFromTemplate(newRow, rowTpl);
+                        const newRow = normalStyleRow.cloneNode(true);
+                        copyRowCellSizesFromTemplate(newRow, normalStyleRow);
                         let rowMaxLines = 1;
                         let rowLineMetric = null;
-                        Array.from(newRow.getElementsByTagNameNS(HP_NS, 'tc')).forEach((tc) => {
+                        Array.from(newRow.getElementsByTagNameNS(HP_NS, 'tc')).forEach((tc, colIdx) => {
                             const addr = tc.getElementsByTagNameNS(HP_NS, 'cellAddr')[0];
-                            const colAddr = addr ? parseInt(addr.getAttribute('colAddr'), 10) : NaN;
                             if (addr) {
                                 addr.setAttribute('rowAddr', String(HEADER_ROW_COUNT + localIdx));
+                                const bf = styleMap[addr.getAttribute('colAddr')];
+                                if (bf !== undefined) tc.setAttribute('borderFillIDRef', bf);
                             }
-                            if (!Number.isFinite(colAddr) || colAddr < 0 || colAddr >= values.length) return;
                             const subList = tc.getElementsByTagNameNS(HP_NS, 'subList')[0];
                             const paras = subList ? Array.from(subList.getElementsByTagNameNS(HP_NS, 'p')).filter(p => p.parentNode === subList) : [];
                             if (paras.length > 0) {
-                                const fillInfo = fillCellParas(subList, paras, values[colAddr] !== undefined ? values[colAddr] : '', tc);
+                                const fillInfo = fillCellParas(subList, paras, values[colIdx] !== undefined ? values[colIdx] : '', tc);
                                 if (fillInfo.lineCount > rowMaxLines) rowMaxLines = fillInfo.lineCount;
                                 if (!rowLineMetric && fillInfo.vertsize) {
                                     const marginEl = tc.getElementsByTagNameNS(HP_NS, 'cellMargin')[0];
@@ -27180,7 +27005,7 @@ document.addEventListener('DOMContentLoaded', () => {
                                     floorCode,
                                     floorDisplayLabel: getFloorLabel(floorCode)
                                 };
-                                const colCount = Array.from(normalRowTpl.getElementsByTagNameNS(HP_NS, 'tc')).length;
+                                const colCount = Array.from(normalStyleRow.getElementsByTagNameNS(HP_NS, 'tc')).length;
                                 const values = getReportSurveyRowValues(d, rowCtx, isGrade3, colCount);
                                 const defectNo = values[0] || getSurveyCellText('no', d, rowCtx) || (d.no || '').replace(/^NO\.?\s*/i, '');
                                 const roundLabels = getDefectHwpxCompareRoundLabelsFull(d, bldg);
@@ -28013,17 +27838,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!newXml.startsWith('<?xml')) {
                 newXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes" ?>' + newXml;
             }
-            newXml = hwpxClearSectionParagraphBorders(newXml);
             zip.file(sectionPath, newXml);
-
-            {
-                const preserveGradIds = hwpxGetHeaderGradBorderIds(isGrade3);
-                let hdrFinal = await zip.file('Contents/header.xml').async('string');
-                hdrFinal = hwpxStripBorderFillGradation(hdrFinal, preserveGradIds);
-                hdrFinal = hwpxClearParaPrBorders(hdrFinal);
-                hdrFinal = hwpxClearAllCharPrBackgrounds(hdrFinal);
-                zip.file('Contents/header.xml', hdrFinal);
-            }
 
             // 원본처럼 mimetype/version.xml은 무압축(Store)으로 유지
             zip.file('mimetype', await zip.file('mimetype').async('string'), { compression: 'STORE' });
