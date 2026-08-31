@@ -26040,6 +26040,208 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!resp.ok) throw new Error('템플릿 파일을 불러오지 못했습니다.');
             const zip = await JSZip.loadAsync(await resp.arrayBuffer());
 
+            // ---- 3종 결함조사표 스탬프 병합 ----
+            // hwpx_survey_template_grade3.hwpx 자체의 상태조사표 안 일부 스타일(테두리·글꼴·헤더
+            // 그라데이션) 참조가 header.xml에 정의되지 않은 고아 ID를 가리키고 있어(과거 한글
+            // 손편집 잔재로 추정) 테두리가 깨지고 그라데이션이 안 나오고 글자 모양이 뒤섞여 보이는
+            // 문제가 있었다. 깨끗한 스타일만 들어있는 별도 "스탬프" 템플릿
+            // (hwpx_grade3_survey_stamp.hwpx)에서 상태조사표를 통째로 가져와 이 표를 교체하고,
+            // 그 표가 참조하는 스타일 정의(font/borderFill/charPr/paraPr)만 header.xml에 병합해
+            // 넣는다. 1,2종(exportHwpxSurveyTable12)에는 이 문제가 없어 여기서만 적용한다.
+            const HWPX_TEMPLATE_VERSION = '20260831_grade3_stamp_fix';
+            const HWPX_HEADER_GRAD_BORDER_IDS = new Set(['5', '6', '7', '16', '17']);
+            function hwpxTagBlock(xmlStr, tag, id) {
+                const re = new RegExp(`<hh:${tag} id="${id}"[^>]*>[\\s\\S]*?<\\/hh:${tag}>`, 's');
+                const m = xmlStr.match(re);
+                return m ? m[0] : null;
+            }
+            // 글꼴 카탈로그(hh:fontfaces)는 언어(HANGUL/LATIN/HANJA/JAPANESE/OTHER/SYMBOL/USER)별로
+            // 7개의 별도 <hh:fontface> 그룹을 갖고, 그룹마다 독립적으로 id=0부터 번호가 매겨진다.
+            // 예전 코드는 이걸 몰라서 폰트 id 하나를 병합할 때 문서 전체에서 처음 걸리는 그룹
+            // 하나(보통 HANGUL)에만 적용하고 나머지 6개 그룹은 그대로 둬서, 표 칸을 클릭하면
+            // 한글이 글꼴 이름을 못 정하고 빈칸으로 보여주는 원인이 됐다(한글 표시는 굴림인데
+            // 숫자/영문(latin) 등 다른 언어 슬롯은 옛 글꼴 그대로 남아있던 것) — 그룹마다 따로 병합한다.
+            function hwpxGetFontFaceGroups(xmlStr) {
+                const re = /<hh:fontface lang="([^"]*)"[^>]*>[\s\S]*?<\/hh:fontface>/g;
+                const groups = [];
+                let gm;
+                while ((gm = re.exec(xmlStr))) groups.push({ lang: gm[1], block: gm[0] });
+                return groups;
+            }
+            function hwpxFontBlockInGroup(groupBlock, fid) {
+                const full = groupBlock.match(new RegExp(`<hh:font id="${fid}"[^>]*>[\\s\\S]*?<\\/hh:font>`, 's'));
+                if (full) return full[0];
+                const self = groupBlock.match(new RegExp(`<hh:font id="${fid}"[^>]*/>`));
+                return self ? self[0] : null;
+            }
+            function hwpxUpsertFontAllLangs(targetXml, stampXml, fid) {
+                const stampGroups = hwpxGetFontFaceGroups(stampXml);
+                let out = targetXml;
+                stampGroups.forEach((sg) => {
+                    const srcBlock = hwpxFontBlockInGroup(sg.block, fid);
+                    if (!srcBlock) return;
+                    const tgtGroups = hwpxGetFontFaceGroups(out);
+                    const tg = tgtGroups.find((g) => g.lang === sg.lang);
+                    if (!tg) return;
+                    const fullRe = new RegExp(`<hh:font id="${fid}"[^>]*>[\\s\\S]*?<\\/hh:font>`, 's');
+                    const selfRe = new RegExp(`<hh:font id="${fid}"[^>]*/>`);
+                    let newGroupBlock;
+                    if (fullRe.test(tg.block)) newGroupBlock = tg.block.replace(fullRe, srcBlock);
+                    else if (selfRe.test(tg.block)) newGroupBlock = tg.block.replace(selfRe, srcBlock);
+                    else newGroupBlock = tg.block.replace('</hh:fontface>', srcBlock + '</hh:fontface>');
+                    out = out.replace(tg.block, newGroupBlock);
+                });
+                return out;
+            }
+            function hwpxUpsertBlock(xmlStr, tag, id, block) {
+                const re = new RegExp(`<hh:${tag} id="${id}"[^>]*>[\\s\\S]*?<\\/hh:${tag}>`, 's');
+                if (re.test(xmlStr)) return xmlStr.replace(re, block);
+                const containerRe = new RegExp(`(<hh:${tag}s[^>]*>)([\\s\\S]*?)(<\\/hh:${tag}s>)`, 's');
+                const m = xmlStr.match(containerRe);
+                if (m) return xmlStr.slice(0, m.index + m[1].length) + m[2] + block + m[3] + xmlStr.slice(m.index + m[0].length);
+                return xmlStr;
+            }
+            function hwpxSanitizeBorderFillBlock(block, borderId, preserveGradIds) {
+                if (!block) return block;
+                if (preserveGradIds && preserveGradIds.has(String(borderId))) return block;
+                let out = block;
+                out = out.replace(/<hc:fillBrush>[\s\S]*?<\/hc:fillBrush>/g, '');
+                out = out.replace(/<hh:gradation[^>]*>[\s\S]*?<\/hh:gradation>/g, '');
+                return out;
+            }
+            function hwpxStripBorderFillGradation(headerXml, preserveGradIds) {
+                if (!headerXml) return headerXml;
+                return headerXml.replace(/<hh:borderFill id="(\d+)"[^>]*>[\s\S]*?<\/hh:borderFill>/g, (block, bid) => (
+                    hwpxSanitizeBorderFillBlock(block, bid, preserveGradIds)
+                ));
+            }
+            function hwpxSanitizeCharPrBlock(block) {
+                if (!block) return block;
+                return block
+                    .replace(/\sborderFillIDRef="\d+"/g, '')
+                    .replace(/\sshadeColor="[^"]*"/g, ' shadeColor="none"');
+            }
+            function hwpxClearCharPrLineBoxBorder(headerXml, charIds) {
+                if (!headerXml || !charIds || !charIds.size) return headerXml;
+                let out = headerXml;
+                [...charIds].sort((a, b) => +a - +b).forEach((cid) => {
+                    const block = hwpxTagBlock(out, 'charPr', cid);
+                    if (!block) return;
+                    out = hwpxUpsertBlock(out, 'charPr', cid, hwpxSanitizeCharPrBlock(block));
+                });
+                return out;
+            }
+            function hwpxClearAllCharPrBackgrounds(headerXml) {
+                if (!headerXml) return headerXml;
+                return headerXml.replace(/<hh:charPr id="\d+"[^>]*>[\s\S]*?<\/hh:charPr>/g, (block) => hwpxSanitizeCharPrBlock(block));
+            }
+            function hwpxClearParaPrBorders(headerXml) {
+                if (!headerXml) return headerXml;
+                return headerXml.replace(/<hh:paraPr id="\d+"[^>]*>[\s\S]*?<\/hh:paraPr>/g, (block) => (
+                    block
+                        .replace(/<hh:border[^>]*\/>/g, '')
+                        .replace(/<hh:border[^>]*>[\s\S]*?<\/hh:border>/g, '')
+                ));
+            }
+            function hwpxSanitizeParaPrBlock(block) {
+                if (!block) return block;
+                return block
+                    .replace(/<hh:border[^>]*\/>/g, '')
+                    .replace(/<hh:border[^>]*>[\s\S]*?<\/hh:border>/g, '');
+            }
+            function hwpxClearSectionParagraphBorders(secXml) {
+                if (!secXml) return secXml;
+                const stripTagBorder = (xmlStr, tag) => xmlStr.replace(new RegExp(`<${tag}\\b([^>]*)>`, 'g'), (full, attrs) => {
+                    const cleaned = attrs.replace(/\sborderFillIDRef="\d+"/g, '');
+                    return cleaned === attrs ? full : `<${tag}${cleaned}>`;
+                });
+                return stripTagBorder(stripTagBorder(secXml, 'hp:p'), 'hp:run');
+            }
+            function hwpxCollectStyleIds(tableXml, srcHeader) {
+                const borderIds = new Set((tableXml.match(/borderFillIDRef="(\d+)"/g) || []).map(s => s.match(/\d+/)[0]));
+                const charIds = new Set((tableXml.match(/charPrIDRef="(\d+)"/g) || []).map(s => s.match(/\d+/)[0]));
+                const paraIds = new Set((tableXml.match(/paraPrIDRef="(\d+)"/g) || []).map(s => s.match(/\d+/)[0]));
+                const fontIds = new Set();
+                charIds.forEach((cid) => {
+                    const block = hwpxTagBlock(srcHeader, 'charPr', cid);
+                    if (block) {
+                        const charBf = block.match(/borderFillIDRef="(\d+)"/);
+                        if (charBf) borderIds.add(charBf[1]);
+                        (block.match(/(?:hangul|latin|hanja|japanese|other|symbol|user)="(\d+)"/g) || []).forEach((fm) => {
+                            fontIds.add(fm.match(/\d+/)[0]);
+                        });
+                    }
+                });
+                return { borderIds, charIds, paraIds, fontIds };
+            }
+            function hwpxMergeHeaderFromStamp(tgtHeader, stampHeader, stampTableXml) {
+                const preserveGradIds = HWPX_HEADER_GRAD_BORDER_IDS;
+                const { borderIds, charIds, paraIds, fontIds } = hwpxCollectStyleIds(stampTableXml, stampHeader);
+                let out = tgtHeader;
+                [...fontIds].sort((a, b) => +a - +b).forEach((fid) => {
+                    out = hwpxUpsertFontAllLangs(out, stampHeader, fid);
+                });
+                [...borderIds].sort((a, b) => +a - +b).forEach((bid) => {
+                    const block = hwpxTagBlock(stampHeader, 'borderFill', bid);
+                    if (block) out = hwpxUpsertBlock(out, 'borderFill', bid, hwpxSanitizeBorderFillBlock(block, bid, preserveGradIds));
+                });
+                [...charIds].sort((a, b) => +a - +b).forEach((cid) => {
+                    const block = hwpxTagBlock(stampHeader, 'charPr', cid);
+                    if (block) out = hwpxUpsertBlock(out, 'charPr', cid, hwpxSanitizeCharPrBlock(block));
+                });
+                [...paraIds].sort((a, b) => +a - +b).forEach((pid) => {
+                    const block = hwpxTagBlock(stampHeader, 'paraPr', pid);
+                    if (block) out = hwpxUpsertBlock(out, 'paraPr', pid, hwpxSanitizeParaPrBlock(block));
+                });
+                out = hwpxStripBorderFillGradation(out, preserveGradIds);
+                out = hwpxClearParaPrBorders(out);
+                return hwpxClearCharPrLineBoxBorder(out, charIds);
+            }
+            function hwpxIsSurveyStampTable(tblXml) {
+                const colM = tblXml.match(/colCnt="(\d+)"/);
+                if (!colM) return false;
+                const texts = (tblXml.match(/<hp:t[^>]*>([^<]*)<\/hp:t>/g) || []).slice(0, 20).join('').replace(/\s+/g, '');
+                return colM[1] === '7' && texts.includes('점검내용') && texts.includes('발생원인');
+            }
+            function hwpxExtractSurveyStampTable(secXml) {
+                for (const m of secXml.matchAll(/<hp:tbl[^>]*>[\s\S]*?<\/hp:tbl>/g)) {
+                    if (hwpxIsSurveyStampTable(m[0])) return m[0];
+                }
+                return null;
+            }
+            function hwpxReplaceSurveyTables(secXml, stampTableXml) {
+                return secXml.replace(/<hp:tbl[^>]*>[\s\S]*?<\/hp:tbl>/g, (tbl) => {
+                    if (!hwpxIsSurveyStampTable(tbl)) return tbl;
+                    const oldId = tbl.match(/\bid="(\d+)"/);
+                    if (!oldId) return stampTableXml;
+                    return stampTableXml.replace(/\bid="\d+"/, `id="${oldId[1]}"`);
+                });
+            }
+            async function applyHwpxSurveyStampToZip(targetZip) {
+                const stampPath = `./templates/hwpx_grade3_survey_stamp.hwpx?v=${HWPX_TEMPLATE_VERSION}`;
+                const stampResp = await fetch(stampPath, { cache: 'no-store' });
+                if (!stampResp.ok) {
+                    console.warn('결함조사표 스탬프를 불러오지 못했습니다:', stampPath);
+                    return;
+                }
+                const stampZip = await JSZip.loadAsync(await stampResp.arrayBuffer());
+                const stampSecPath = stampZip.file('Contents/section1.xml') ? 'Contents/section1.xml' : 'Contents/section0.xml';
+                const stampSecXml = await stampZip.file(stampSecPath).async('string');
+                const stampHeader = await stampZip.file('Contents/header.xml').async('string');
+                const stampTable = hwpxExtractSurveyStampTable(stampSecXml);
+                if (!stampTable) {
+                    console.warn('스탬프 파일에서 상태조사표를 찾지 못했습니다.');
+                    return;
+                }
+                const stampSectionPath = targetZip.file('Contents/section1.xml') ? 'Contents/section1.xml' : 'Contents/section0.xml';
+                let stampSecTargetXml = await targetZip.file(stampSectionPath).async('string');
+                stampSecTargetXml = hwpxReplaceSurveyTables(stampSecTargetXml, stampTable);
+                targetZip.file(stampSectionPath, stampSecTargetXml);
+                const tgtHeader = await targetZip.file('Contents/header.xml').async('string');
+                targetZip.file('Contents/header.xml', hwpxMergeHeaderFromStamp(tgtHeader, stampHeader, stampTable));
+            }
+            await applyHwpxSurveyStampToZip(zip);
+
             const HP_NS = 'http://www.hancom.co.kr/hwpml/2011/paragraph';
             const HC_NS = 'http://www.hancom.co.kr/hwpml/2011/core';
             // 한글에서 템플릿을 직접 열어 저장하면 섹션을 하나로 합치면서 section1.xml이 사라지고
@@ -26577,6 +26779,7 @@ document.addEventListener('DOMContentLoaded', () => {
             for (let c = 1; c < floorsData.length; c++) {
                 const cloned = stampParas.map(p => p.cloneNode(true));
                 reassignClonedIds(cloned);
+                cloned[0].setAttribute('pageBreak', '1'); // 층마다 새 페이지에서 시작(사진 밑 남는 공간에 다음 층이 이어붙지 않도록)
                 cloned.forEach(p => sec.appendChild(p));
             }
             floorSlots = discoverFloorSlots();
@@ -26671,8 +26874,14 @@ document.addEventListener('DOMContentLoaded', () => {
                 // 건물에 등록된 층 순서를 그대로 번호로 붙인다(1)부터 slotIdx+1).
                 {
                     const t = slot.titlePara.getElementsByTagNameNS(HP_NS, 't')[0];
-                    if (t) t.textContent = `${slotIdx + 1}) ${getFloorLabel(floorCode)}`;
+                    if (t) t.textContent = `${slotIdx + 1}) ${getFloorLabel(floorCode)} 상태조사표`;
                     if (slotIdx === 0) {
+                        // 첫 페이지 표 제목 바로 위에 표본 문서의 "A동" 같은 동 이름 문단 + 빈 문단
+                        // 여러 개가 그대로 남아있어서 엔터를 여러 번 친 것처럼 빈 줄이 생겼다. 동 이름
+                        // 문단은 글자만 지우고(이 표는 동 구분이 없어 라벨 자체가 불필요), 그렇게 빈
+                        // 문단이 된 것부터 위로 훑어 내용 없는 문단은 통째로 지운다 — 글자만 지우면
+                        // 문단 자체의 줄 높이가 그대로 남기 때문. 표/그림이 든 문단이나 실제 텍스트가
+                        // 남은 문단을 만나면 멈춘다.
                         const dongPara = slot.titlePara.previousElementSibling;
                         if (dongPara && dongPara.localName === 'p') {
                             const dt = dongPara.getElementsByTagNameNS(HP_NS, 't')[0];
@@ -26700,21 +26909,19 @@ document.addEventListener('DOMContentLoaded', () => {
                     continue;
                 }
 
-                const borderStyleByCol = (row) => {
-                    const map = {};
-                    Array.from(row.getElementsByTagNameNS(HP_NS, 'tc')).forEach(tc => {
-                        const addr = tc.getElementsByTagNameNS(HP_NS, 'cellAddr')[0];
-                        if (addr) map[addr.getAttribute('colAddr')] = tc.getAttribute('borderFillIDRef');
+                const firstRowTpl = dataRows[0].cloneNode(true);
+                const normalRowTpl = (dataRows[Math.min(1, dataRows.length - 1)] || dataRows[0]).cloneNode(true);
+                const lastRowTpl = dataRows[dataRows.length - 1].cloneNode(true);
+                // 데이터 행 한 줄 높이를 2800으로 통일(헤더 행은 손대지 않음) — 사용자 요청.
+                const DATA_ROW_HEIGHT = 3500;
+                [firstRowTpl, normalRowTpl, lastRowTpl].forEach((rowTpl) => {
+                    Array.from(rowTpl.getElementsByTagNameNS(HP_NS, 'tc')).forEach((tc) => {
+                        const span = tc.getElementsByTagNameNS(HP_NS, 'cellSpan')[0];
+                        if (span && parseInt(span.getAttribute('rowSpan'), 10) > 1) return;
+                        const sz = tc.getElementsByTagNameNS(HP_NS, 'cellSz')[0];
+                        if (sz) sz.setAttribute('height', String(DATA_ROW_HEIGHT));
                     });
-                    return map;
-                };
-                const firstStyleRow = dataRows[0];
-                const normalStyleRow = dataRows[Math.min(1, dataRows.length - 1)];
-                const styleMaps = {
-                    first: borderStyleByCol(firstStyleRow),
-                    normal: borderStyleByCol(normalStyleRow),
-                    last: borderStyleByCol(dataRows[dataRows.length - 1])
-                };
+                });
 
                 // 기존에 있던 페이지(targetTbl 포함 전부)의 표본 데이터 행을 지운다.
                 slot.statusTbls.forEach(tbl => {
@@ -26745,13 +26952,13 @@ document.addEventListener('DOMContentLoaded', () => {
                         insertAfterNode.parentNode.insertBefore(clonedPara, insertAfterNode.nextSibling);
                         insertAfterNode = clonedPara;
                         pageTbls.push(clonedTbl);
-                        syncStatusTblLayoutFromTemplate(clonedTbl, targetTbl, HEADER_ROW_COUNT, normalStyleRow);
+                        syncStatusTblLayoutFromTemplate(clonedTbl, targetTbl, HEADER_ROW_COUNT, normalRowTpl);
                     }
                 }
                 pageTbls.forEach((tbl, i) => {
                     if (i > 0) {
                         tbl.parentNode.parentNode.setAttribute('pageBreak', '1');
-                        syncStatusTblLayoutFromTemplate(tbl, targetTbl, HEADER_ROW_COUNT, normalStyleRow);
+                        syncStatusTblLayoutFromTemplate(tbl, targetTbl, HEADER_ROW_COUNT, normalRowTpl);
                     }
                 });
 
@@ -26814,25 +27021,25 @@ document.addEventListener('DOMContentLoaded', () => {
                             photoRemark: photoLabelByDefect.get(d) || '-',
                             floorDisplayLabel: getFloorLabel(floorCode)
                         };
-                        const colCount = Array.from(normalStyleRow.getElementsByTagNameNS(HP_NS, 'tc')).length;
+                        const colCount = Array.from(normalRowTpl.getElementsByTagNameNS(HP_NS, 'tc')).length;
                         const values = getReportSurveyRowValues(d, rowCtx, isGrade3, colCount);
-                        const styleMap = localIdx === 0 ? styleMaps.first : (isLastOnPage ? styleMaps.last : styleMaps.normal);
+                        const rowTpl = localIdx === 0 ? firstRowTpl : (isLastOnPage ? lastRowTpl : normalRowTpl);
 
-                        const newRow = normalStyleRow.cloneNode(true);
-                        copyRowCellSizesFromTemplate(newRow, normalStyleRow);
+                        const newRow = rowTpl.cloneNode(true);
+                        copyRowCellSizesFromTemplate(newRow, rowTpl);
                         let rowMaxLines = 1;
                         let rowLineMetric = null;
-                        Array.from(newRow.getElementsByTagNameNS(HP_NS, 'tc')).forEach((tc, colIdx) => {
+                        Array.from(newRow.getElementsByTagNameNS(HP_NS, 'tc')).forEach((tc) => {
                             const addr = tc.getElementsByTagNameNS(HP_NS, 'cellAddr')[0];
+                            const colAddr = addr ? parseInt(addr.getAttribute('colAddr'), 10) : NaN;
                             if (addr) {
                                 addr.setAttribute('rowAddr', String(HEADER_ROW_COUNT + localIdx));
-                                const bf = styleMap[addr.getAttribute('colAddr')];
-                                if (bf !== undefined) tc.setAttribute('borderFillIDRef', bf);
                             }
+                            if (!Number.isFinite(colAddr) || colAddr < 0 || colAddr >= values.length) return;
                             const subList = tc.getElementsByTagNameNS(HP_NS, 'subList')[0];
                             const paras = subList ? Array.from(subList.getElementsByTagNameNS(HP_NS, 'p')).filter(p => p.parentNode === subList) : [];
                             if (paras.length > 0) {
-                                const fillInfo = fillCellParas(subList, paras, values[colIdx] !== undefined ? values[colIdx] : '', tc);
+                                const fillInfo = fillCellParas(subList, paras, values[colAddr] !== undefined ? values[colAddr] : '', tc);
                                 if (fillInfo.lineCount > rowMaxLines) rowMaxLines = fillInfo.lineCount;
                                 if (!rowLineMetric && fillInfo.vertsize) {
                                     const marginEl = tc.getElementsByTagNameNS(HP_NS, 'cellMargin')[0];
@@ -26844,7 +27051,7 @@ document.addEventListener('DOMContentLoaded', () => {
                             }
                         });
                         // 템플릿 행 높이 유지. 4줄 이상일 때만 확장(자간·줄나눔·상하 강제 축소/확대 없음).
-                        applyRowHeightFromLines(newRow, rowMaxLines, rowLineMetric, 2800);
+                        applyRowHeightFromLines(newRow, rowMaxLines, rowLineMetric, DATA_ROW_HEIGHT);
                         Array.from(newRow.getElementsByTagNameNS(HP_NS, 'tc')).forEach(centerCellContent);
                         destTbl.appendChild(newRow);
                     });
@@ -27008,7 +27215,7 @@ document.addEventListener('DOMContentLoaded', () => {
                                     floorCode,
                                     floorDisplayLabel: getFloorLabel(floorCode)
                                 };
-                                const colCount = Array.from(normalStyleRow.getElementsByTagNameNS(HP_NS, 'tc')).length;
+                                const colCount = Array.from(normalRowTpl.getElementsByTagNameNS(HP_NS, 'tc')).length;
                                 const values = getReportSurveyRowValues(d, rowCtx, isGrade3, colCount);
                                 const defectNo = values[0] || getSurveyCellText('no', d, rowCtx) || (d.no || '').replace(/^NO\.?\s*/i, '');
                                 const roundLabels = getDefectHwpxCompareRoundLabelsFull(d, bldg);
@@ -27739,6 +27946,29 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 // 2) "비파괴 장비조사 사진첩" 섹션 전체 삭제
                 if (albumStart) removeParaRange(albumStart, surveyHeading || null);
+                // 3) 첫 페이지 상태조사표 제목 바로 위 빈 문단 정리. 비파괴조사 섹션 정리(위 NDT
+                // try 블록)가 데이터 없는 항목의 표/제목을 지우면서 그 자리에 붙어있던 빈 문단들이
+                // 이제야 상태조사표 제목 바로 위로 올라와 엔터를 여러 번 친 것처럼 빈 줄이 남는다 —
+                // 그래서 이 정리는 NDT 처리가 다 끝난 뒤인 여기서 해야 한다. 표/그림이 든 문단이나
+                // 실제 텍스트가 남은 문단을 만나면 멈춘다.
+                if (floorSlots[0] && floorSlots[0].titlePara) {
+                    let emptyPara = floorSlots[0].titlePara.previousElementSibling;
+                    while (emptyPara && emptyPara.localName === 'p') {
+                        const hasTbl = emptyPara.getElementsByTagNameNS(HP_NS, 'tbl').length > 0;
+                        const hasPic = emptyPara.getElementsByTagNameNS(HP_NS, 'pic').length > 0;
+                        const text = Array.from(emptyPara.getElementsByTagNameNS(HP_NS, 't')).map(x => x.textContent || '').join('').trim();
+                        if (hasTbl || hasPic || text) break;
+                        const prev = emptyPara.previousElementSibling;
+                        if (emptyPara.parentNode) emptyPara.parentNode.removeChild(emptyPara);
+                        emptyPara = prev;
+                    }
+                    // 문서 맨 처음(1번째 층) 제목 문단이 표본 문서에서는 원래 그 앞에 다른 내용이
+                    // 있던 위치였어서 vertpos가 0이 아닌 큰 값으로 남아있는 경우가 있다 — 페이지
+                    // 맨 위인데도 그 값만큼 빈 공간이 생긴다. 문서의 실제 첫 문단이 됐으니 0으로
+                    // 되돌린다.
+                    const firstSeg = floorSlots[0].titlePara.getElementsByTagNameNS(HP_NS, 'lineseg')[0];
+                    if (firstSeg) firstSeg.setAttribute('vertpos', '0');
+                }
             } catch (cleanupErr) {
                 console.error('표본 템플릿 잔여 내용 정리 실패(나머지는 유지):', cleanupErr);
             }
@@ -27835,7 +28065,16 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!newXml.startsWith('<?xml')) {
                 newXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes" ?>' + newXml;
             }
+            newXml = hwpxClearSectionParagraphBorders(newXml);
             zip.file(sectionPath, newXml);
+
+            {
+                let hdrFinal = await zip.file('Contents/header.xml').async('string');
+                hdrFinal = hwpxStripBorderFillGradation(hdrFinal, HWPX_HEADER_GRAD_BORDER_IDS);
+                hdrFinal = hwpxClearParaPrBorders(hdrFinal);
+                hdrFinal = hwpxClearAllCharPrBackgrounds(hdrFinal);
+                zip.file('Contents/header.xml', hdrFinal);
+            }
 
             // 원본처럼 mimetype/version.xml은 무압축(Store)으로 유지
             zip.file('mimetype', await zip.file('mimetype').async('string'), { compression: 'STORE' });
