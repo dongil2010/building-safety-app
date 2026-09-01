@@ -26051,6 +26051,10 @@ document.addEventListener('DOMContentLoaded', () => {
             const HWPX_TEMPLATE_VERSION = '20260831_grade3_stamp_fix';
             const HWPX_HEADER_GRAD_BORDER_IDS = new Set(['5', '6', '7', '16', '17']);
             function hwpxTagBlock(xmlStr, tag, id) {
+                // hh:style처럼 자식 없이 자기닫힘 태그(.../>)로만 존재하는 경우가 있다 — 그것부터
+                // 먼저 확인하고, 아니면 여는/닫는 태그 쌍을 찾는다.
+                const selfM = xmlStr.match(new RegExp(`<hh:${tag} id="${id}"[^>]*/>`));
+                if (selfM) return selfM[0];
                 const re = new RegExp(`<hh:${tag} id="${id}"[^>]*>[\\s\\S]*?<\\/hh:${tag}>`, 's');
                 const m = xmlStr.match(re);
                 return m ? m[0] : null;
@@ -26093,13 +26097,26 @@ document.addEventListener('DOMContentLoaded', () => {
                 });
                 return out;
             }
+            // 컨테이너 태그 이름이 단순히 "태그+s"가 아닌 경우가 있다(charPr→charProperties,
+            // paraPr→paraProperties) — 이걸 그냥 "${tag}s"로 짐작하면 컨테이너를 못 찾아서 새 id
+            // 삽입이 조용히 실패한다(문서 자체는 well-formed라 에러도 안 남).
+            const HWPX_CONTAINER_TAG = { borderFill: 'borderFills', charPr: 'charProperties', paraPr: 'paraProperties', style: 'styles' };
             function hwpxUpsertBlock(xmlStr, tag, id, block) {
+                const selfRe = new RegExp(`<hh:${tag} id="${id}"[^>]*/>`);
+                if (selfRe.test(xmlStr)) return xmlStr.replace(selfRe, block);
                 const re = new RegExp(`<hh:${tag} id="${id}"[^>]*>[\\s\\S]*?<\\/hh:${tag}>`, 's');
                 if (re.test(xmlStr)) return xmlStr.replace(re, block);
-                const containerRe = new RegExp(`(<hh:${tag}s[^>]*>)([\\s\\S]*?)(<\\/hh:${tag}s>)`, 's');
+                // 기존에 없던 새 id를 추가하는 경우다 — 컨테이너(예: hh:borderFills)의 itemCnt를 실제
+                // 항목 수에 맞게 같이 올려줘야 한다. 여기서 안 올리면 XML 자체는 well-formed라도
+                // 한글이 itemCnt만큼만 읽고 새로 끼워 넣은 정의를 무시해버릴 수 있다 — 결국 표 칸이
+                // "정의 없는 스타일"을 참조하는 것과 똑같은 결과(테두리/글꼴이 기본값으로 깨짐)가 된다.
+                const containerTag = HWPX_CONTAINER_TAG[tag] || `${tag}s`;
+                const containerRe = new RegExp(`<hh:${containerTag}([^>]*)>([\\s\\S]*?)<\\/hh:${containerTag}>`, 's');
                 const m = xmlStr.match(containerRe);
-                if (m) return xmlStr.slice(0, m.index + m[1].length) + m[2] + block + m[3] + xmlStr.slice(m.index + m[0].length);
-                return xmlStr;
+                if (!m) return xmlStr;
+                const newAttrs = m[1].replace(/itemCnt="(\d+)"/, (mm, n) => `itemCnt="${parseInt(n, 10) + 1}"`);
+                const newContainer = `<hh:${containerTag}${newAttrs}>${m[2]}${block}</hh:${containerTag}>`;
+                return xmlStr.slice(0, m.index) + newContainer + xmlStr.slice(m.index + m[0].length);
             }
             function hwpxSanitizeBorderFillBlock(block, borderId, preserveGradIds) {
                 if (!block) return block;
@@ -26161,6 +26178,20 @@ document.addEventListener('DOMContentLoaded', () => {
                 const borderIds = new Set((tableXml.match(/borderFillIDRef="(\d+)"/g) || []).map(s => s.match(/\d+/)[0]));
                 const charIds = new Set((tableXml.match(/charPrIDRef="(\d+)"/g) || []).map(s => s.match(/\d+/)[0]));
                 const paraIds = new Set((tableXml.match(/paraPrIDRef="(\d+)"/g) || []).map(s => s.match(/\d+/)[0]));
+                // hp:p의 styleIDRef(예: "표안" 문단 스타일)는 그 자체가 또 paraPrIDRef/charPrIDRef를
+                // 안에 갖고 있다 — 표 XML에 직접 paraPrIDRef/charPrIDRef가 안 적혀 있어도 이 스타일을
+                // 거쳐 간접 참조되므로, 못 챙기면 그 문단만 대상 문서의 완전히 무관한 스타일(예:
+                // 엑셀에서 붙여넣기 때 생긴 "xl111" 스타일)을 대신 물게 된다 — 실제로 이 때문에 표
+                // 일부 칸만 테두리/글꼴이 이상하게 나온 적이 있다.
+                const styleIds = new Set((tableXml.match(/styleIDRef="(\d+)"/g) || []).map(s => s.match(/\d+/)[0]));
+                styleIds.forEach((sid) => {
+                    const block = hwpxTagBlock(srcHeader, 'style', sid);
+                    if (!block) return;
+                    const ppr = block.match(/paraPrIDRef="(\d+)"/);
+                    const cpr = block.match(/charPrIDRef="(\d+)"/);
+                    if (ppr) paraIds.add(ppr[1]);
+                    if (cpr) charIds.add(cpr[1]);
+                });
                 const fontIds = new Set();
                 charIds.forEach((cid) => {
                     const block = hwpxTagBlock(srcHeader, 'charPr', cid);
@@ -26172,30 +26203,85 @@ document.addEventListener('DOMContentLoaded', () => {
                         });
                     }
                 });
-                return { borderIds, charIds, paraIds, fontIds };
+                return { borderIds, charIds, paraIds, styleIds, fontIds };
+            }
+            // 스탬프가 쓰는 borderFill/charPr/paraPr 번호(예: 5/6/7/16/17)를 대상 문서에 그대로
+            // 덮어쓰면, 그 번호를 우연히 같이 쓰고 있는 완전히 무관한 표(위치도 표 2개·NDT
+            // 결과표 4개 등, 이 문서에서 흔히 "표 전체 기본 테두리 =5"로 잡는 표가 많다)의
+            // 테두리까지 스탬프 스타일(예: 아래쪽 이중선)로 바뀌어버린다 — 실제로 위치도 표의
+            // 맨 아래 굵은 단선이 이중선으로 깨지는 사고가 있었다. 대상 문서에 이미 있는 id와
+            // 절대 안 겹치는 새 번호를 매번 새로 배정해서 옮겨 붙인다.
+            function hwpxAllocateFreshIds(headerXml, ids, tag) {
+                const existing = [...headerXml.matchAll(new RegExp(`<hh:${tag} id="(\\d+)"`, 'g'))].map(m => parseInt(m[1], 10));
+                let next = (existing.length ? Math.max(...existing) : 0) + 1;
+                const map = {};
+                [...ids].sort((a, b) => +a - +b).forEach((id) => { map[id] = String(next++); });
+                return map;
+            }
+            function hwpxRemapIdRefs(xmlStr, attrName, idMap) {
+                return xmlStr.replace(new RegExp(`${attrName}="(\\d+)"`, 'g'), (m, id) => (
+                    idMap[id] ? `${attrName}="${idMap[id]}"` : m
+                ));
             }
             function hwpxMergeHeaderFromStamp(tgtHeader, stampHeader, stampTableXml) {
                 const preserveGradIds = HWPX_HEADER_GRAD_BORDER_IDS;
-                const { borderIds, charIds, paraIds, fontIds } = hwpxCollectStyleIds(stampTableXml, stampHeader);
+                const { borderIds, charIds, paraIds, styleIds, fontIds } = hwpxCollectStyleIds(stampTableXml, stampHeader);
                 let out = tgtHeader;
                 [...fontIds].sort((a, b) => +a - +b).forEach((fid) => {
                     out = hwpxUpsertFontAllLangs(out, stampHeader, fid);
                 });
-                [...borderIds].sort((a, b) => +a - +b).forEach((bid) => {
+                const borderMap = hwpxAllocateFreshIds(out, borderIds, 'borderFill');
+                const charMap = hwpxAllocateFreshIds(out, charIds, 'charPr');
+                const paraMap = hwpxAllocateFreshIds(out, paraIds, 'paraPr');
+                const styleMap = hwpxAllocateFreshIds(out, styleIds, 'style');
+                [...borderIds].forEach((bid) => {
                     const block = hwpxTagBlock(stampHeader, 'borderFill', bid);
-                    if (block) out = hwpxUpsertBlock(out, 'borderFill', bid, hwpxSanitizeBorderFillBlock(block, bid, preserveGradIds));
+                    if (!block) return;
+                    const newId = borderMap[bid];
+                    const renumbered = block.replace(/^<hh:borderFill id="\d+"/, `<hh:borderFill id="${newId}"`);
+                    out = hwpxUpsertBlock(out, 'borderFill', newId, hwpxSanitizeBorderFillBlock(renumbered, bid, preserveGradIds));
                 });
-                [...charIds].sort((a, b) => +a - +b).forEach((cid) => {
+                [...charIds].forEach((cid) => {
                     const block = hwpxTagBlock(stampHeader, 'charPr', cid);
-                    if (block) out = hwpxUpsertBlock(out, 'charPr', cid, hwpxSanitizeCharPrBlock(block));
+                    if (!block) return;
+                    const newId = charMap[cid];
+                    let renumbered = block.replace(/^<hh:charPr id="\d+"/, `<hh:charPr id="${newId}"`);
+                    renumbered = hwpxRemapIdRefs(renumbered, 'borderFillIDRef', borderMap);
+                    out = hwpxUpsertBlock(out, 'charPr', newId, hwpxSanitizeCharPrBlock(renumbered));
                 });
-                [...paraIds].sort((a, b) => +a - +b).forEach((pid) => {
+                [...paraIds].forEach((pid) => {
                     const block = hwpxTagBlock(stampHeader, 'paraPr', pid);
-                    if (block) out = hwpxUpsertBlock(out, 'paraPr', pid, hwpxSanitizeParaPrBlock(block));
+                    if (!block) return;
+                    const newId = paraMap[pid];
+                    const renumbered = block.replace(/^<hh:paraPr id="\d+"/, `<hh:paraPr id="${newId}"`);
+                    out = hwpxUpsertBlock(out, 'paraPr', newId, hwpxSanitizeParaPrBlock(renumbered));
                 });
-                out = hwpxStripBorderFillGradation(out, preserveGradIds);
-                out = hwpxClearParaPrBorders(out);
-                return hwpxClearCharPrLineBoxBorder(out, charIds);
+                // hp:p가 paraPrIDRef/charPrIDRef 말고 styleIDRef(예: "표안" 문단 스타일)로 서식을
+                // 물려받는 경우가 있다 — 그 hh:style 정의 자체도 옮겨 붙이고, 정의 안의
+                // paraPrIDRef/charPrIDRef도 위에서 이미 새로 붙인 번호로 맞춰 바꿔준다. 이걸
+                // 안 하면 표 칸 일부가 대상 문서에 이미 있던 완전히 무관한 스타일(예: 엑셀에서
+                // 붙여넣기 때 생긴 스타일)을 그대로 물게 된다.
+                [...styleIds].forEach((sid) => {
+                    const block = hwpxTagBlock(stampHeader, 'style', sid);
+                    if (!block) return;
+                    const newId = styleMap[sid];
+                    let renumbered = block.replace(/id="\d+"/, `id="${newId}"`);
+                    renumbered = renumbered.replace(/paraPrIDRef="(\d+)"/, (m, pid) => (
+                        paraMap[pid] ? `paraPrIDRef="${paraMap[pid]}"` : m
+                    ));
+                    renumbered = renumbered.replace(/charPrIDRef="(\d+)"/, (m, cid) => (
+                        charMap[cid] ? `charPrIDRef="${charMap[cid]}"` : m
+                    ));
+                    renumbered = renumbered.replace(/nextStyleIDRef="\d+"/, `nextStyleIDRef="${newId}"`);
+                    out = hwpxUpsertBlock(out, 'style', newId, renumbered);
+                });
+                // 표 XML 안의 참조도 새 번호에 맞춰 같이 옮긴다 — 위 header.xml 정의와 어긋나면 안 된다.
+                let remappedTableXml = stampTableXml;
+                remappedTableXml = hwpxRemapIdRefs(remappedTableXml, 'borderFillIDRef', borderMap);
+                remappedTableXml = hwpxRemapIdRefs(remappedTableXml, 'charPrIDRef', charMap);
+                remappedTableXml = hwpxRemapIdRefs(remappedTableXml, 'paraPrIDRef', paraMap);
+                remappedTableXml = hwpxRemapIdRefs(remappedTableXml, 'styleIDRef', styleMap);
+                return { header: out, tableXml: remappedTableXml };
             }
             function hwpxIsSurveyStampTable(tblXml) {
                 const colM = tblXml.match(/colCnt="(\d+)"/);
@@ -26233,12 +26319,14 @@ document.addEventListener('DOMContentLoaded', () => {
                     console.warn('스탬프 파일에서 상태조사표를 찾지 못했습니다.');
                     return;
                 }
+                const tgtHeader = await targetZip.file('Contents/header.xml').async('string');
+                const merged = hwpxMergeHeaderFromStamp(tgtHeader, stampHeader, stampTable);
+                targetZip.file('Contents/header.xml', merged.header);
+
                 const stampSectionPath = targetZip.file('Contents/section1.xml') ? 'Contents/section1.xml' : 'Contents/section0.xml';
                 let stampSecTargetXml = await targetZip.file(stampSectionPath).async('string');
-                stampSecTargetXml = hwpxReplaceSurveyTables(stampSecTargetXml, stampTable);
+                stampSecTargetXml = hwpxReplaceSurveyTables(stampSecTargetXml, merged.tableXml);
                 targetZip.file(stampSectionPath, stampSecTargetXml);
-                const tgtHeader = await targetZip.file('Contents/header.xml').async('string');
-                targetZip.file('Contents/header.xml', hwpxMergeHeaderFromStamp(tgtHeader, stampHeader, stampTable));
             }
             await applyHwpxSurveyStampToZip(zip);
 
@@ -28070,7 +28158,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
             {
                 let hdrFinal = await zip.file('Contents/header.xml').async('string');
-                hdrFinal = hwpxStripBorderFillGradation(hdrFinal, HWPX_HEADER_GRAD_BORDER_IDS);
+                // 스탬프 스타일은 이제 항상 새 번호로 옮겨 붙기 때문에(hwpxMergeHeaderFromStamp),
+                // 예전처럼 "5/6/7/16/17만 그라데이션 보존, 나머지 전부 제거"를 문서 전체에 걸어두면
+                // 옮겨 붙은 새 번호(스탬프 표 헤더의 진짜 그라데이션)까지 같이 지워진다 — 이 전체
+                // 재적용 단계는 더 이상 필요 없어 뺐다.
                 hdrFinal = hwpxClearParaPrBorders(hdrFinal);
                 hdrFinal = hwpxClearAllCharPrBackgrounds(hdrFinal);
                 zip.file('Contents/header.xml', hdrFinal);
