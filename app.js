@@ -668,6 +668,17 @@ document.addEventListener('DOMContentLoaded', () => {
         return LOCAL_STATE_KEY_LEGACY;
     }
 
+    /** 이 기기에 회사별 캐시가 하나라도 이미 있는지 (있다면 다른 회사 것일 수 있어 레거시 이관을 막는다) */
+    function hasAnyCompanyScopedLocalState() {
+        try {
+            for (let i = 0; i < localStorage.length; i++) {
+                const k = localStorage.key(i);
+                if (k && k.indexOf(LOCAL_STATE_KEY_COMPANY_PREFIX) === 0) return true;
+            }
+        } catch (_e) { /* ignore */ }
+        return false;
+    }
+
     function clearInspectionStateInMemory() {
         window.state.buildings = [];
         window.state.defects = {};
@@ -1961,6 +1972,16 @@ document.addEventListener('DOMContentLoaded', () => {
             // 회사 로그인 시 전역(가입 전) 로컬 blob은 읽지 않음 — 클라우드·회사별 캐시만 사용
             if (!saved && !companyId) {
                 saved = localStorage.getItem(LOCAL_STATE_KEY_LEGACY);
+            }
+            // 회사별 캐시 도입 전(레거시 단일 키) 데이터 1회 이관: 이 기기에 회사별 캐시가
+            // 하나도 없어 다른 회사 데이터와 섞일 위험이 없을 때만, 레거시 blob(미동기화 데이터
+            // 포함 가능)을 현재 회사 슬롯으로 옮겨써서 유실을 막는다.
+            if (!saved && companyId && !hasAnyCompanyScopedLocalState()) {
+                const legacy = localStorage.getItem(LOCAL_STATE_KEY_LEGACY);
+                if (legacy) {
+                    saved = legacy;
+                    try { localStorage.setItem(getLocalStorageStateKey(companyId), legacy); } catch (_e) { /* ignore */ }
+                }
             }
             if (saved) {
                 const parsed = JSON.parse(saved);
