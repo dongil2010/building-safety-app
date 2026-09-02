@@ -3401,6 +3401,42 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // --- 6. BUILDING MANAGEMENT ENGINE ---
 
+    const INSPECTION_TYPE_OPTIONS = ['정밀안전점검', '정기안전점검', '정밀안전진단'];
+
+    /**
+     * 현장의 특정 회차(연도_기간)에 속한 모든 동의 점검 종류를 한꺼번에 바꾼다.
+     * 회차마다 정밀/정기가 달라질 수 있어 회차 목록에서 바로 조정할 수 있게 한 것.
+     * 현재 열려 있는 건물이 그 회차에 속하면 상단 「점검 설정」 드롭다운도 맞춰 준다.
+     */
+    window.setSurveyRoundInspectionType = function(siteKey, roundKey, inspectionType) {
+        if (!siteKey || !roundKey || !INSPECTION_TYPE_OPTIONS.includes(inspectionType)) return;
+        const all = filterActiveBuildings(window.state.buildings || [], window.state.deletedBuildingIds);
+        const targets = all.filter((b) => getBuildingSiteName(b) === siteKey && getBuildingSurveyRoundKey(b) === roundKey);
+        if (!targets.length) return;
+        let changed = 0;
+        targets.forEach((b) => {
+            if (b.inspectionType === inspectionType) return;
+            b.inspectionType = inspectionType;
+            b._pendingCloudSync = true;
+            changed += 1;
+        });
+        if (!changed) return;
+        const cur = window.state.currentBuilding;
+        if (cur && targets.some((b) => b.id === cur.id)) {
+            cur.inspectionType = inspectionType;
+            const sel = document.getElementById('selectInspectionType');
+            if (sel) sel.value = inspectionType;
+        }
+        saveStateToLocalStorage();
+        if (typeof syncStateToFirebase === 'function') syncStateToFirebase();
+        window.showToast(
+            `${formatSurveyRoundLabel(roundKey)} 회차 → ${inspectionType}` + (targets.length > 1 ? ` (동 ${targets.length}개)` : ''),
+            'success',
+            3500
+        );
+        if (typeof window.renderDashboard === 'function') window.renderDashboard();
+    };
+
     window.renderDashboard = function() {
         const grid = elements.buildingListGrid || document.getElementById('buildingListGrid');
         if (!grid) return;
@@ -3473,6 +3509,16 @@ document.addEventListener('DOMContentLoaded', () => {
                     const site = el.getAttribute('data-site-key');
                     const round = el.getAttribute('data-round-key');
                     if (site && round) window.openDashboardRoundDongs(site, round);
+                });
+            });
+            grid.querySelectorAll('[data-action="round-type"]').forEach((el) => {
+                // 셀렉트 클릭이 행 클릭(점검 시작/동 선택)으로 번지지 않게 막는다
+                ['click', 'pointerdown', 'touchstart'].forEach((ev) => el.addEventListener(ev, (e) => e.stopPropagation()));
+                el.addEventListener('change', (e) => {
+                    e.stopPropagation();
+                    const site = el.getAttribute('data-site-key');
+                    const round = el.getAttribute('data-round-key');
+                    if (site && round) window.setSurveyRoundInspectionType(site, round, el.value);
                 });
             });
             grid.querySelectorAll('[data-action="inspect"]').forEach((el) => {
@@ -3616,14 +3662,23 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
                 const safeSite = escapeHtml(selectedSiteKey);
                 const safeRound = escapeHtml(rk);
+                // 회차별 점검 종류(정밀/정기/진단) 선택. 같은 회차의 모든 동에 함께 적용된다.
+                const typeSelect = `
+                    <select class="round-type-select" data-action="round-type" data-site-key="${safeSite}" data-round-key="${safeRound}"
+                        title="이 회차의 점검 종류" aria-label="${escapeHtml(roundLabel)} 점검 종류">
+                        ${INSPECTION_TYPE_OPTIONS.map((t) =>
+                            `<option value="${escapeHtml(t)}"${t === typeLabel ? ' selected' : ''}>${escapeHtml(t)}</option>`
+                        ).join('')}
+                    </select>`;
                 // 단일: 회차 = 점검 시작 + 도면·전경. 여러 동: 회차 = 동 선택으로 진입
                 if (multiDong) {
                     return `
                         <div class="building-row building-row-round" data-round-key="${safeRound}">
                             <div class="building-row-info" data-action="open-round" data-site-key="${safeSite}" data-round-key="${safeRound}">
-                                <span class="building-row-name">${escapeHtml(roundLabel)} · ${escapeHtml(typeLabel)}</span>
+                                <span class="building-row-name">${escapeHtml(roundLabel)}</span>
                                 <span class="building-row-meta">${escapeHtml(metaHint)} · 동 선택</span>
                             </div>
+                            <div class="building-row-actions building-row-actions-compact">${typeSelect}</div>
                         </div>
                     `;
                 }
@@ -3633,10 +3688,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 return `
                     <div class="building-row building-row-round building-row-round-single" data-round-key="${safeRound}" data-id="${safeId}">
                         <div class="building-row-info" data-action="inspect" data-bldg-id="${safeId}">
-                            <span class="building-row-name">${escapeHtml(roundLabel)} · ${escapeHtml(typeLabel)}</span>
+                            <span class="building-row-name">${escapeHtml(roundLabel)}</span>
                             <span class="building-row-meta">${escapeHtml(metaHint)}</span>
                         </div>
                         <div class="building-row-actions building-row-actions-compact">
+                            ${typeSelect}
                             <button type="button" class="icon-btn icon-btn-start" title="점검 시작" data-action="inspect" data-bldg-id="${safeId}" aria-label="점검">
                                 <i class="fa-solid fa-map-location-dot"></i>
                                 <span class="icon-btn-label">점검</span>
@@ -13267,7 +13323,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 contactPhone: sourceBldg.contactPhone || '',
                 date: new Date().toISOString().split('T')[0],
                 floors: sourceBldg.floors || '',
-                inspectionType: sourceBldg.inspectionType || '정밀안전점검',
+                inspectionType: opts.inspectionType || sourceBldg.inspectionType || '정밀안전점검',
                 inspectionYear: nextYear,
                 inspectionPeriod: nextPeriod,
                 latestSurveyRoundKey: toKey,
@@ -13387,6 +13443,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const baseEl = document.getElementById('addSurveyRoundBaseLabel');
         const yearEl = document.getElementById('addSurveyRoundYear');
         const periodEl = document.getElementById('addSurveyRoundPeriod');
+        const typeEl = document.getElementById('addSurveyRoundType');
         const hintEl = document.getElementById('addSurveyRoundHint');
         if (siteEl) siteEl.textContent = siteKey;
         if (baseEl) {
@@ -13394,6 +13451,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         if (yearEl) fillAddSurveyRoundYearOptions(yearEl, curYear, next.year);
         if (periodEl) periodEl.value = next.period;
+        if (typeEl) typeEl.value = latest.inspectionType || '정밀안전점검';
         if (hintEl) {
             const fromY = parseSurveyYearNum(curYear) - 5;
             hintEl.textContent = `기본값: 다음 회차 ${next.year} ${next.period} · 년도는 ${fromY}년부터 선택 가능`;
@@ -13550,6 +13608,8 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         const year = document.getElementById('addSurveyRoundYear')?.value || '2026년';
         const period = document.getElementById('addSurveyRoundPeriod')?.value || '하반기';
+        const inspectionType = document.getElementById('addSurveyRoundType')?.value
+            || sourceBldg.inspectionType || '정밀안전점검';
         if (siteAlreadyHasRound(siteKey, year, period)) {
             window.showToast(`${year} ${period} 회차가 이미 있습니다. 다른 회차를 선택해 주세요.`, 'warning', 4500);
             return;
@@ -13565,7 +13625,7 @@ document.addEventListener('DOMContentLoaded', () => {
             `회차를 추가할까요?\n\n` +
             `· 현장: ${siteKey}\n` +
             `· 기준: ${formatSurveyRoundLabel(latestKey)}\n` +
-            `· 새 회차: ${year} ${period}` +
+            `· 새 회차: ${year} ${period} (${inspectionType})` +
             `${dongHint}\n\n` +
             `도면·결함(${defectCount}건, 전회차)·NDT를 복사한 새 점검이 만들어집니다.`
         )) return;
@@ -13575,7 +13635,8 @@ document.addEventListener('DOMContentLoaded', () => {
         for (const src of sources) {
             const created = await createSurveyRoundBuildingFromSource(src, year, period, {
                 closeEditModal: false,
-                selectAfter: false
+                selectAfter: false,
+                inspectionType
             });
             if (created) createdCount += 1;
         }

@@ -7657,6 +7657,28 @@ body:not(.bsa-tab-home) .home-fab-add-building {
     color: #1e40af;
 }
 
+/* 회차 행의 점검 종류(정밀/정기/진단) 인라인 셀렉트 */
+.round-type-select {
+    flex: 0 0 auto;
+    height: 2.35rem;
+    padding: 0 1.6rem 0 0.55rem;
+    border: 1px solid #c7d2fe;
+    border-radius: 0.55rem;
+    background: #eef2ff url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'><path d='M1 1l4 4 4-4' fill='none' stroke='%233730a3' stroke-width='1.5'/></svg>") no-repeat right 0.55rem center;
+    color: #3730a3;
+    font-size: 0.78rem;
+    font-weight: 700;
+    -webkit-appearance: none;
+    appearance: none;
+    cursor: pointer;
+    max-width: 8.5rem;
+}
+
+.round-type-select:focus {
+    outline: 2px solid #818cf8;
+    outline-offset: 1px;
+}
+
 .building-row-actions {
     display: flex;
     align-items: center;
@@ -8570,6 +8592,14 @@ body:not(.bsa-tab-home) .home-fab-add-building {
     #tab-home .building-row-site .icon-btn-label,
     #tab-home .building-row-actions-compact .icon-btn-label {
         display: none !important;
+    }
+
+    #tab-home .round-type-select {
+        height: 2rem;
+        font-size: 0.7rem;
+        padding: 0 1.3rem 0 0.4rem;
+        max-width: 6.6rem;
+        background-position: right 0.4rem center;
     }
 
     /* 현장 목록: 수정은 우측 작은 네모만 */

@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
@@ -38,7 +38,7 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <meta name="apple-mobile-web-app-title" content="스마트 안전점검">
-    <link rel="stylesheet" href="styles.css?v=20260828_modal_fix">
+    <link rel="stylesheet" href="styles.css?v=20260902_round_type">
     <!-- FontAwesome icons for clean engineering UI -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <!-- PDF 생성용: 페이지별로 직접 캡처해서 조립(큰 보고서에서 html2pdf 한방 렌더링이 캔버스 높이 한계로
@@ -1844,6 +1844,15 @@
                         </select>
                     </div>
                 </div>
+                <div class="form-group" style="margin:0;">
+                    <label class="form-label" for="addSurveyRoundType">이 회차의 점검 종류</label>
+                    <select id="addSurveyRoundType" class="form-control">
+                        <option value="정밀안전점검">정밀안전점검</option>
+                        <option value="정기안전점검">정기안전점검</option>
+                        <option value="정밀안전진단">정밀안전진단</option>
+                    </select>
+                    <p style="font-size:0.75rem; color:#64748b; margin:0.3rem 0 0;">회차마다 다르게 둘 수 있습니다. 보고서(HWPX) 양식도 이 값에 따라 정밀/정기용으로 나뉩니다.</p>
+                </div>
                 <p id="addSurveyRoundHint" style="font-size:0.78rem; color:#166534; margin:0;"></p>
             </div>
             <div class="modal-footer">
@@ -2738,7 +2747,7 @@
     <script src="js/shared/report.js?v=20260827_overview"></script>
     <script src="js/shared/hwpx-import.js?v=20260825_hwpxin"></script>
     <script src="js/shared/auth.js?v=20260821_land1"></script>
-    <script src="app.js?v=20260902_grade3_tpl_fixed"></script>
+    <script src="app.js?v=20260902_round_type"></script>
     <script>
         window.BSA_APP_VERSION = '20260902_legend_lock';
         (function () {
