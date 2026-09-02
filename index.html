@@ -186,8 +186,14 @@
                             <button type="button" id="btnOpenMemberApproval" class="btn btn-sm btn-outline hero-btn-approve" style="display: none;" title="가입 승인 관리">
                                 <i class="fa-solid fa-user-check"></i> 가입 승인 관리
                             </button>
+                            <button type="button" id="btnLeaveCompany" class="btn btn-sm btn-outline hero-btn-leave-company" style="display: none;" title="회사 나가기">
+                                <i class="fa-solid fa-building-circle-xmark"></i> 회사 나가기
+                            </button>
                             <button type="button" id="btnLogout" class="btn btn-sm btn-outline hero-btn-logout" title="로그아웃">
                                 <i class="fa-solid fa-right-from-bracket"></i> 로그아웃
+                            </button>
+                            <button type="button" id="btnDeleteAccount" class="btn btn-sm btn-danger-outline hero-btn-delete-account" title="계정 삭제">
+                                <i class="fa-solid fa-user-xmark"></i> 계정 삭제
                             </button>
                         </div>
                     </div>
@@ -2537,7 +2543,7 @@
                     🏢 회사 대표로 신규 등록
                 </button>
                 <button type="button" id="regModeMemberBtn" class="chip" data-mode="member" style="flex: 1; text-align: center; justify-content: center; display: inline-flex;">
-                    🔑 코드로 가입 신청
+                    👤 점검자 계정 만들기
                 </button>
             </div>
 
@@ -2558,10 +2564,9 @@
                 </div>
 
                 <div class="form-group" id="groupRegJoinCode" style="display: none; margin-bottom: 0;">
-                    <label class="form-label" style="font-size: 0.83rem; font-weight: 700; color: #3f3f3f; margin-bottom: 0.4rem; display: block;">
-                        <i class="fa-solid fa-key" style="color: #2a2a2a;"></i> 회사 가입 코드 *
-                    </label>
-                    <input type="text" id="authJoinCode" class="form-control" placeholder="대표에게 받은 6자리 코드 입력" style="background: #fafafa; color: #171717; border: 1px solid #d0d0d0; border-radius: 10px; padding: 0.7rem 0.9rem; font-size: 0.9rem; width: 100%; box-sizing: border-box; text-transform: uppercase;">
+                    <p style="font-size: 0.8rem; color: #737373; margin: 0; line-height: 1.5;">
+                        가입 후 로그인하면 회사 코드로 소속 신청할 수 있습니다.
+                    </p>
                 </div>
 
                 <div class="form-group" style="margin-bottom: 0;">
@@ -2602,12 +2607,76 @@
             <p style="font-size: 0.85rem; color: #737373; line-height: 1.6; margin-bottom: 1.4rem;">
                 <strong id="pendingCompanyName">회사</strong>의 대표(관리자)가 가입 신청을 승인하면<br>바로 건축물 점검을 시작할 수 있어요.
             </p>
-            <div style="display: flex; gap: 0.6rem;">
-                <button type="button" id="btnPendingRecheck" class="btn btn-primary" style="flex: 1; justify-content: center;">
-                    <i class="fa-solid fa-rotate"></i> 승인 여부 새로고침
+            <div style="display: flex; flex-direction: column; gap: 0.6rem;">
+                <div style="display: flex; gap: 0.6rem;">
+                    <button type="button" id="btnPendingRecheck" class="btn btn-primary" style="flex: 1; justify-content: center;">
+                        <i class="fa-solid fa-rotate"></i> 승인 여부 새로고침
+                    </button>
+                    <button type="button" id="btnPendingLogout" class="btn btn-outline" style="flex: 1; justify-content: center;">
+                        <i class="fa-solid fa-right-from-bracket"></i> 로그아웃
+                    </button>
+                </div>
+                <button type="button" id="btnPendingCancelApplication" class="btn btn-outline" style="width: 100%; justify-content: center;">
+                    <i class="fa-solid fa-building-circle-xmark"></i> 신청 취소 · 다른 회사 신청
                 </button>
-                <button type="button" id="btnPendingLogout" class="btn btn-outline" style="flex: 1; justify-content: center;">
+                <button type="button" id="btnPendingDeleteAccount" class="btn btn-danger-outline" style="width: 100%; justify-content: center;">
+                    <i class="fa-solid fa-user-xmark"></i> 계정 삭제
+                </button>
+            </div>
+        </div>
+
+        <!-- Company Join (계정만 있고 회사 미소속) -->
+        <div class="modal-card" id="companyJoinCard" style="display: none; position: relative; max-width: 440px; width: 92%; background: #ffffff; border: 1px solid #e5e5e5; border-radius: 20px; box-shadow: 0 25px 60px rgba(20, 20, 20, 0.12); padding: 2.4rem 2rem; color: #171717; text-align: center; z-index: 10000;">
+            <div style="display: inline-flex; align-items: center; justify-content: center; width: 68px; height: 68px; border-radius: 18px; background: rgba(40, 40, 40, 0.12); margin-bottom: 1rem;">
+                <i class="fa-solid fa-building" style="font-size: 30px; color: #2a2a2a;"></i>
+            </div>
+            <h2 style="font-size: 1.25rem; font-weight: 800; margin-bottom: 0.6rem;">회사 가입 신청</h2>
+            <p id="companyJoinHint" style="font-size: 0.85rem; color: #737373; line-height: 1.6; margin-bottom: 1.2rem;">
+                대표에게 받은 <strong>6자리 가입 코드</strong>를 입력해 회사에 소속 신청하세요.<br>
+                승인 전까지는 점검 기능을 사용할 수 없습니다.
+            </p>
+            <div id="companyJoinErrorMsg" style="display: none; background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.3); color: #dc2626; font-size: 0.8rem; font-weight: 600; padding: 0.6rem 0.8rem; border-radius: 8px; margin-bottom: 0.8rem; text-align: left;"></div>
+            <div class="form-group" style="margin-bottom: 1rem; text-align: left;">
+                <label class="form-label" style="font-size: 0.83rem; font-weight: 700; color: #3f3f3f; margin-bottom: 0.4rem; display: block;">
+                    <i class="fa-solid fa-key"></i> 회사 가입 코드 *
+                </label>
+                <input type="text" id="companyJoinCodeInput" class="form-control" placeholder="예: ABC123" style="background: #fafafa; color: #171717; border: 1px solid #d0d0d0; border-radius: 10px; padding: 0.7rem 0.9rem; font-size: 0.9rem; width: 100%; box-sizing: border-box; text-transform: uppercase;">
+            </div>
+            <div style="display: flex; flex-direction: column; gap: 0.6rem;">
+                <button type="button" id="btnApplyCompanyJoin" class="btn btn-primary" style="width: 100%; justify-content: center;">
+                    <i class="fa-solid fa-paper-plane"></i> 가입 신청하기
+                </button>
+                <button type="button" id="btnCompanyJoinLogout" class="btn btn-outline" style="width: 100%; justify-content: center;">
                     <i class="fa-solid fa-right-from-bracket"></i> 로그아웃
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL: Account Delete -->
+    <div class="modal-overlay" id="deleteAccountModal" style="display: none; z-index: 10001;">
+        <div class="modal-card" style="max-width: 440px; width: 90%; background: #ffffff; border: 1px solid #e5e5e5; border-radius: 16px; padding: 1.6rem; color: #171717;">
+            <div class="modal-header" style="background: transparent; padding: 0 0 1rem 0; border-bottom: 1px solid #e5e5e5;">
+                <h3 style="margin:0; font-size: 1.1rem; color: #b91c1c;"><i class="fa-solid fa-user-xmark"></i> 계정 삭제</h3>
+                <button type="button" class="modal-close" id="btnCloseDeleteAccountModal">&times;</button>
+            </div>
+            <div class="modal-body" style="padding: 1rem 0;">
+                <p style="font-size: 0.85rem; color: #525252; line-height: 1.55; margin-top: 0;">
+                    계정을 삭제하면 로그인 정보와 프로필이 영구 삭제됩니다.<br>
+                    <strong>회사 점검 데이터(건물·결함 등)는 삭제되지 않습니다.</strong>
+                </p>
+                <p id="deleteAccountErrorMsg" style="display: none; margin: 0.8rem 0 0; padding: 0.55rem 0.7rem; border-radius: 8px; background: #fef2f2; color: #b91c1c; font-size: 0.82rem;"></p>
+                <div class="form-group" style="margin-top: 1rem;">
+                    <label class="form-label" style="font-size: 0.82rem; font-weight: 700; color: #404040; margin-bottom: 0.4rem; display: block;">
+                        비밀번호 확인 *
+                    </label>
+                    <input type="password" id="deleteAccountPassword" class="form-control" placeholder="현재 비밀번호" autocomplete="current-password" style="border-radius: 8px; padding: 0.65rem 0.8rem; font-size: 0.9rem; width: 100%; box-sizing: border-box;">
+                </div>
+            </div>
+            <div class="modal-footer" style="background: transparent; padding: 0.8rem 0 0 0; justify-content: space-between;">
+                <button type="button" class="btn btn-outline" id="btnCancelDeleteAccount">취소</button>
+                <button type="button" class="btn btn-danger-outline" id="btnConfirmDeleteAccount" style="font-weight: 700;">
+                    <i class="fa-solid fa-trash-can"></i> 계정 삭제
                 </button>
             </div>
         </div>
@@ -2669,7 +2738,7 @@
     <script src="js/shared/report.js?v=20260827_overview"></script>
     <script src="js/shared/hwpx-import.js?v=20260825_hwpxin"></script>
     <script src="js/shared/auth.js?v=20260821_land1"></script>
-    <script src="app.js?v=20260902_legend_lock"></script>
+    <script src="app.js?v=20260902_grade3_tpl_fixed"></script>
     <script>
         window.BSA_APP_VERSION = '20260902_legend_lock';
         (function () {

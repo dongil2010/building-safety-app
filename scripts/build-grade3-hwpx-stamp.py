@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""3종 스탬프: 헤더 그라데이션(5,6,7,16,17) 유지, 데이터 칸 바탕/문단테두리만 제거."""
+"""3종 스탬프: 바탕화면 원본 기준 — 헤더 그라데이션(5,6,7,16,17)만 유지, 데이터 칸 배경/문단테두리 제거."""
 import re
 import shutil
 import zipfile
@@ -65,15 +65,7 @@ def main():
     with zipfile.ZipFile(DST, "w") as zout:
         for name, data in files.items():
             zout.writestr(name, data)
-    with zipfile.ZipFile(DST) as z:
-        hdr = z.read("Contents/header.xml").decode()
-    grad = []
-    for m in re.finditer(r'<hh:borderFill id="(\d+)"[^>]*>[\s\S]*?</hh:borderFill>', hdr):
-        if 'gradation' in m.group(0).lower():
-            grad.append(m.group(1))
     print("written", DST)
-    print("header gradation borderFill ids:", sorted(grad, key=int))
-    print("para borders left", len(re.findall(r"<hh:border\\b", hdr)))
 
 
 if __name__ == "__main__":

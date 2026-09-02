@@ -37,9 +37,26 @@ service cloud.firestore {
     match /users/{uid} {
       allow read: if request.auth != null && request.auth.uid == uid;
       allow create: if request.auth != null && request.auth.uid == uid;
-      // role/companyId는 가입 시 한 번만 기록되고, 이후 상태 변경은
-      // companies/{companyId}/members 등에서만 이루어지므로 update는 막는다.
-      allow update, delete: if false;
+      // 회사 소속·가입 신청 상태만 본인 또는 해당 회사 admin이 갱신할 수 있다.
+      function membershipFieldsOnly() {
+        let allowed = ['companyId', 'companyName', 'role', 'pendingCompanyId', 'pendingCompanyName', 'defectPinPresets', 'defectPinPresetsUpdatedAt'];
+        return request.resource.data.diff(resource.data).affectedKeys().hasOnly(allowed);
+      }
+      function selfProfileFieldsOnly() {
+        let allowed = ['defectPinPresets', 'defectPinPresetsUpdatedAt'];
+        return request.resource.data.diff(resource.data).affectedKeys().hasOnly(allowed);
+      }
+      function adminCompanyIdForUserUpdate() {
+        return resource.data.get('pendingCompanyId', resource.data.get('companyId', ''));
+      }
+      allow update: if request.auth != null && (
+        (request.auth.uid == uid && membershipFieldsOnly()) ||
+        (request.auth.uid == uid && selfProfileFieldsOnly()) ||
+        (request.auth.uid != uid && membershipFieldsOnly() &&
+          adminCompanyIdForUserUpdate() != '' &&
+          isCompanyAdmin(adminCompanyIdForUserUpdate()))
+      );
+      allow delete: if request.auth != null && request.auth.uid == uid;
     }
 
     // --- joinCodes/{code}: 회사명 조회를 위해 로그인 전(팀원 가입 화면)에도 읽혀야 함 ---
@@ -66,7 +83,10 @@ service cloud.firestore {
         // 회사 최초 생성 시 admin 본인 문서 생성 + 이후 admin이 팀원을 승인 등록
         allow create: if request.auth != null &&
           (request.auth.uid == uid || isCompanyAdmin(companyId));
-        allow update, delete: if isCompanyAdmin(companyId);
+        allow update: if isCompanyAdmin(companyId);
+        // 팀원 탈퇴(본인) 또는 관리자가 멤버 제거
+        allow delete: if request.auth != null &&
+          (request.auth.uid == uid || isCompanyAdmin(companyId));
       }
 
       // pendingRequests: 본인이 신청서 생성, 본인 상태 조회, admin이 목록/삭제 처리
@@ -75,7 +95,9 @@ service cloud.firestore {
         allow list: if isCompanyAdmin(companyId);
         allow create: if request.auth != null && request.auth.uid == uid;
         allow update: if false;
-        allow delete: if isCompanyAdmin(companyId);
+        // 가입 대기 취소(본인) 또는 관리자 거절 처리
+        allow delete: if request.auth != null &&
+          (request.auth.uid == uid || isCompanyAdmin(companyId));
       }
 
       // rejectedRequests: admin만 생성, 본인은 자신의 거절 상태만 조회 가능
@@ -83,7 +105,9 @@ service cloud.firestore {
         allow get: if request.auth != null && (request.auth.uid == uid || isCompanyAdmin(companyId));
         allow list: if isCompanyAdmin(companyId);
         allow create: if isCompanyAdmin(companyId);
-        allow update, delete: if false;
+        allow update: if false;
+        // 거절 이력 정리(본인 탈퇴 시)
+        allow delete: if request.auth != null && request.auth.uid == uid;
       }
     }
 

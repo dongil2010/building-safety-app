@@ -26244,325 +26244,10 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!resp.ok) throw new Error('템플릿 파일을 불러오지 못했습니다.');
             const zip = await JSZip.loadAsync(await resp.arrayBuffer());
 
-            // ---- 3종 결함조사표 스탬프 병합 ----
-            // hwpx_survey_template_grade3.hwpx 자체의 상태조사표 안 일부 스타일(테두리·글꼴·헤더
-            // 그라데이션) 참조가 header.xml에 정의되지 않은 고아 ID를 가리키고 있어(과거 한글
-            // 손편집 잔재로 추정) 테두리가 깨지고 그라데이션이 안 나오고 글자 모양이 뒤섞여 보이는
-            // 문제가 있었다. 깨끗한 스타일만 들어있는 별도 "스탬프" 템플릿
-            // (hwpx_grade3_survey_stamp.hwpx)에서 상태조사표를 통째로 가져와 이 표를 교체하고,
-            // 그 표가 참조하는 스타일 정의(font/borderFill/charPr/paraPr)만 header.xml에 병합해
-            // 넣는다. 1,2종(exportHwpxSurveyTable12)에는 이 문제가 없어 여기서만 적용한다.
-            const HWPX_TEMPLATE_VERSION = '20260902_grade3_border_grad';
-            const HWPX_HEADER_GRAD_BORDER_IDS = new Set(['5', '6', '7', '16', '17']);
-            let hwpxStampMergeMeta = null;
-            function hwpxTagBlock(xmlStr, tag, id) {
-                // hh:style처럼 자식 없이 자기닫힘 태그(.../>)로만 존재하는 경우가 있다 — 그것부터
-                // 먼저 확인하고, 아니면 여는/닫는 태그 쌍을 찾는다.
-                const selfM = xmlStr.match(new RegExp(`<hh:${tag} id="${id}"[^>]*/>`));
-                if (selfM) return selfM[0];
-                const re = new RegExp(`<hh:${tag} id="${id}"[^>]*>[\\s\\S]*?<\\/hh:${tag}>`, 's');
-                const m = xmlStr.match(re);
-                return m ? m[0] : null;
-            }
-            // 글꼴 카탈로그(hh:fontfaces)는 언어(HANGUL/LATIN/HANJA/JAPANESE/OTHER/SYMBOL/USER)별로
-            // 7개의 별도 <hh:fontface> 그룹을 갖고, 그룹마다 독립적으로 id=0부터 번호가 매겨진다.
-            // 예전 코드는 이걸 몰라서 폰트 id 하나를 병합할 때 문서 전체에서 처음 걸리는 그룹
-            // 하나(보통 HANGUL)에만 적용하고 나머지 6개 그룹은 그대로 둬서, 표 칸을 클릭하면
-            // 한글이 글꼴 이름을 못 정하고 빈칸으로 보여주는 원인이 됐다(한글 표시는 굴림인데
-            // 숫자/영문(latin) 등 다른 언어 슬롯은 옛 글꼴 그대로 남아있던 것) — 그룹마다 따로 병합한다.
-            function hwpxGetFontFaceGroups(xmlStr) {
-                const re = /<hh:fontface lang="([^"]*)"[^>]*>[\s\S]*?<\/hh:fontface>/g;
-                const groups = [];
-                let gm;
-                while ((gm = re.exec(xmlStr))) groups.push({ lang: gm[1], block: gm[0] });
-                return groups;
-            }
-            function hwpxFontBlockInGroup(groupBlock, fid) {
-                const full = groupBlock.match(new RegExp(`<hh:font id="${fid}"[^>]*>[\\s\\S]*?<\\/hh:font>`, 's'));
-                if (full) return full[0];
-                const self = groupBlock.match(new RegExp(`<hh:font id="${fid}"[^>]*/>`));
-                return self ? self[0] : null;
-            }
-            function hwpxUpsertFontAllLangs(targetXml, stampXml, fid) {
-                const stampGroups = hwpxGetFontFaceGroups(stampXml);
-                let out = targetXml;
-                stampGroups.forEach((sg) => {
-                    const srcBlock = hwpxFontBlockInGroup(sg.block, fid);
-                    if (!srcBlock) return;
-                    const tgtGroups = hwpxGetFontFaceGroups(out);
-                    const tg = tgtGroups.find((g) => g.lang === sg.lang);
-                    if (!tg) return;
-                    const fullRe = new RegExp(`<hh:font id="${fid}"[^>]*>[\\s\\S]*?<\\/hh:font>`, 's');
-                    const selfRe = new RegExp(`<hh:font id="${fid}"[^>]*/>`);
-                    let newGroupBlock;
-                    if (fullRe.test(tg.block)) newGroupBlock = tg.block.replace(fullRe, srcBlock);
-                    else if (selfRe.test(tg.block)) newGroupBlock = tg.block.replace(selfRe, srcBlock);
-                    else newGroupBlock = tg.block.replace('</hh:fontface>', srcBlock + '</hh:fontface>');
-                    out = out.replace(tg.block, newGroupBlock);
-                });
-                return out;
-            }
-            // 컨테이너 태그 이름이 단순히 "태그+s"가 아닌 경우가 있다(charPr→charProperties,
-            // paraPr→paraProperties) — 이걸 그냥 "${tag}s"로 짐작하면 컨테이너를 못 찾아서 새 id
-            // 삽입이 조용히 실패한다(문서 자체는 well-formed라 에러도 안 남).
-            const HWPX_CONTAINER_TAG = { borderFill: 'borderFills', charPr: 'charProperties', paraPr: 'paraProperties', style: 'styles' };
-            function hwpxUpsertBlock(xmlStr, tag, id, block) {
-                const selfRe = new RegExp(`<hh:${tag} id="${id}"[^>]*/>`);
-                if (selfRe.test(xmlStr)) return xmlStr.replace(selfRe, block);
-                const re = new RegExp(`<hh:${tag} id="${id}"[^>]*>[\\s\\S]*?<\\/hh:${tag}>`, 's');
-                if (re.test(xmlStr)) return xmlStr.replace(re, block);
-                // 기존에 없던 새 id를 추가하는 경우다 — 컨테이너(예: hh:borderFills)의 itemCnt를 실제
-                // 항목 수에 맞게 같이 올려줘야 한다. 여기서 안 올리면 XML 자체는 well-formed라도
-                // 한글이 itemCnt만큼만 읽고 새로 끼워 넣은 정의를 무시해버릴 수 있다 — 결국 표 칸이
-                // "정의 없는 스타일"을 참조하는 것과 똑같은 결과(테두리/글꼴이 기본값으로 깨짐)가 된다.
-                const containerTag = HWPX_CONTAINER_TAG[tag] || `${tag}s`;
-                const containerRe = new RegExp(`<hh:${containerTag}([^>]*)>([\\s\\S]*?)<\\/hh:${containerTag}>`, 's');
-                const m = xmlStr.match(containerRe);
-                if (!m) return xmlStr;
-                const newAttrs = m[1].replace(/itemCnt="(\d+)"/, (mm, n) => `itemCnt="${parseInt(n, 10) + 1}"`);
-                const newContainer = `<hh:${containerTag}${newAttrs}>${m[2]}${block}</hh:${containerTag}>`;
-                return xmlStr.slice(0, m.index) + newContainer + xmlStr.slice(m.index + m[0].length);
-            }
-            function hwpxSyncBorderFillsItemCnt(headerXml) {
-                if (!headerXml) return headerXml;
-                return headerXml.replace(/<hh:borderFills([^>]*)>([\s\S]*?)<\/hh:borderFills>/, (full, attrs, body) => {
-                    const count = (body.match(/<hh:borderFill /g) || []).length;
-                    const newAttrs = attrs.replace(/itemCnt="\d+"/, `itemCnt="${count}"`);
-                    return `<hh:borderFills${newAttrs}>${body}</hh:borderFills>`;
-                });
-            }
-            function hwpxFinalizeStampDataBorderFills(headerXml, stampBorderNewIds, preservedGradNewIds) {
-                if (!headerXml || !stampBorderNewIds || !stampBorderNewIds.size) return headerXml;
-                let out = headerXml;
-                [...stampBorderNewIds].sort((a, b) => +a - +b).forEach((nid) => {
-                    if (preservedGradNewIds && preservedGradNewIds.has(String(nid))) return;
-                    const block = hwpxTagBlock(out, 'borderFill', nid);
-                    if (!block) return;
-                    out = hwpxUpsertBlock(out, 'borderFill', nid, hwpxSanitizeBorderFillBlock(block, nid, new Set()));
-                });
-                return hwpxSyncBorderFillsItemCnt(out);
-            }
-            function hwpxSanitizeBorderFillBlock(block, borderId, preserveGradIds) {
-                if (!block) return block;
-                if (preserveGradIds && preserveGradIds.has(String(borderId))) return block;
-                let out = block;
-                out = out.replace(/<hc:fillBrush>[\s\S]*?<\/hc:fillBrush>/g, '');
-                out = out.replace(/<hh:gradation[^>]*>[\s\S]*?<\/hh:gradation>/g, '');
-                return out;
-            }
-            function hwpxStripBorderFillGradation(headerXml, preserveGradIds) {
-                if (!headerXml) return headerXml;
-                return headerXml.replace(/<hh:borderFill id="(\d+)"[^>]*>[\s\S]*?<\/hh:borderFill>/g, (block, bid) => (
-                    hwpxSanitizeBorderFillBlock(block, bid, preserveGradIds)
-                ));
-            }
-            function hwpxSanitizeCharPrBlock(block) {
-                if (!block) return block;
-                return block
-                    .replace(/\sborderFillIDRef="\d+"/g, '')
-                    .replace(/\sshadeColor="[^"]*"/g, ' shadeColor="none"');
-            }
-            function hwpxClearCharPrLineBoxBorder(headerXml, charIds) {
-                if (!headerXml || !charIds || !charIds.size) return headerXml;
-                let out = headerXml;
-                [...charIds].sort((a, b) => +a - +b).forEach((cid) => {
-                    const block = hwpxTagBlock(out, 'charPr', cid);
-                    if (!block) return;
-                    out = hwpxUpsertBlock(out, 'charPr', cid, hwpxSanitizeCharPrBlock(block));
-                });
-                return out;
-            }
-            function hwpxClearAllCharPrBackgrounds(headerXml) {
-                if (!headerXml) return headerXml;
-                return headerXml.replace(/<hh:charPr id="\d+"[^>]*>[\s\S]*?<\/hh:charPr>/g, (block) => hwpxSanitizeCharPrBlock(block));
-            }
-            function hwpxClearParaPrBorders(headerXml) {
-                if (!headerXml) return headerXml;
-                return headerXml.replace(/<hh:paraPr id="\d+"[^>]*>[\s\S]*?<\/hh:paraPr>/g, (block) => (
-                    block
-                        .replace(/<hh:border[^>]*\/>/g, '')
-                        .replace(/<hh:border[^>]*>[\s\S]*?<\/hh:border>/g, '')
-                ));
-            }
-            function hwpxSanitizeParaPrBlock(block) {
-                if (!block) return block;
-                return block
-                    .replace(/<hh:border[^>]*\/>/g, '')
-                    .replace(/<hh:border[^>]*>[\s\S]*?<\/hh:border>/g, '');
-            }
-            function hwpxClearSectionParagraphBorders(secXml) {
-                if (!secXml) return secXml;
-                const stripTagBorder = (xmlStr, tag) => xmlStr.replace(new RegExp(`<${tag}\\b([^>]*)>`, 'g'), (full, attrs) => {
-                    const cleaned = attrs.replace(/\sborderFillIDRef="\d+"/g, '');
-                    return cleaned === attrs ? full : `<${tag}${cleaned}>`;
-                });
-                return stripTagBorder(stripTagBorder(secXml, 'hp:p'), 'hp:run');
-            }
-            function hwpxCollectStyleIds(tableXml, srcHeader) {
-                const borderIds = new Set((tableXml.match(/borderFillIDRef="(\d+)"/g) || []).map(s => s.match(/\d+/)[0]));
-                const charIds = new Set((tableXml.match(/charPrIDRef="(\d+)"/g) || []).map(s => s.match(/\d+/)[0]));
-                const paraIds = new Set((tableXml.match(/paraPrIDRef="(\d+)"/g) || []).map(s => s.match(/\d+/)[0]));
-                // hp:p의 styleIDRef(예: "표안" 문단 스타일)는 그 자체가 또 paraPrIDRef/charPrIDRef를
-                // 안에 갖고 있다 — 표 XML에 직접 paraPrIDRef/charPrIDRef가 안 적혀 있어도 이 스타일을
-                // 거쳐 간접 참조되므로, 못 챙기면 그 문단만 대상 문서의 완전히 무관한 스타일(예:
-                // 엑셀에서 붙여넣기 때 생긴 "xl111" 스타일)을 대신 물게 된다 — 실제로 이 때문에 표
-                // 일부 칸만 테두리/글꼴이 이상하게 나온 적이 있다.
-                const styleIds = new Set((tableXml.match(/styleIDRef="(\d+)"/g) || []).map(s => s.match(/\d+/)[0]));
-                styleIds.forEach((sid) => {
-                    const block = hwpxTagBlock(srcHeader, 'style', sid);
-                    if (!block) return;
-                    const ppr = block.match(/paraPrIDRef="(\d+)"/);
-                    const cpr = block.match(/charPrIDRef="(\d+)"/);
-                    if (ppr) paraIds.add(ppr[1]);
-                    if (cpr) charIds.add(cpr[1]);
-                });
-                const fontIds = new Set();
-                charIds.forEach((cid) => {
-                    const block = hwpxTagBlock(srcHeader, 'charPr', cid);
-                    if (block) {
-                        const charBf = block.match(/borderFillIDRef="(\d+)"/);
-                        if (charBf) borderIds.add(charBf[1]);
-                        (block.match(/(?:hangul|latin|hanja|japanese|other|symbol|user)="(\d+)"/g) || []).forEach((fm) => {
-                            fontIds.add(fm.match(/\d+/)[0]);
-                        });
-                    }
-                });
-                return { borderIds, charIds, paraIds, styleIds, fontIds };
-            }
-            // 스탬프가 쓰는 borderFill/charPr/paraPr 번호(예: 5/6/7/16/17)를 대상 문서에 그대로
-            // 덮어쓰면, 그 번호를 우연히 같이 쓰고 있는 완전히 무관한 표(위치도 표 2개·NDT
-            // 결과표 4개 등, 이 문서에서 흔히 "표 전체 기본 테두리 =5"로 잡는 표가 많다)의
-            // 테두리까지 스탬프 스타일(예: 아래쪽 이중선)로 바뀌어버린다 — 실제로 위치도 표의
-            // 맨 아래 굵은 단선이 이중선으로 깨지는 사고가 있었다. 대상 문서에 이미 있는 id와
-            // 절대 안 겹치는 새 번호를 매번 새로 배정해서 옮겨 붙인다.
-            function hwpxAllocateFreshIds(headerXml, ids, tag) {
-                const existing = [...headerXml.matchAll(new RegExp(`<hh:${tag} id="(\\d+)"`, 'g'))].map(m => parseInt(m[1], 10));
-                let next = (existing.length ? Math.max(...existing) : 0) + 1;
-                const map = {};
-                [...ids].sort((a, b) => +a - +b).forEach((id) => { map[id] = String(next++); });
-                return map;
-            }
-            function hwpxRemapIdRefs(xmlStr, attrName, idMap) {
-                return xmlStr.replace(new RegExp(`${attrName}="(\\d+)"`, 'g'), (m, id) => (
-                    idMap[id] ? `${attrName}="${idMap[id]}"` : m
-                ));
-            }
-            function hwpxMergeHeaderFromStamp(tgtHeader, stampHeader, stampTableXml) {
-                const preserveGradIds = HWPX_HEADER_GRAD_BORDER_IDS;
-                const { borderIds, charIds, paraIds, styleIds, fontIds } = hwpxCollectStyleIds(stampTableXml, stampHeader);
-                let out = tgtHeader;
-                [...fontIds].sort((a, b) => +a - +b).forEach((fid) => {
-                    out = hwpxUpsertFontAllLangs(out, stampHeader, fid);
-                });
-                const borderMap = hwpxAllocateFreshIds(out, borderIds, 'borderFill');
-                const charMap = hwpxAllocateFreshIds(out, charIds, 'charPr');
-                const paraMap = hwpxAllocateFreshIds(out, paraIds, 'paraPr');
-                const styleMap = hwpxAllocateFreshIds(out, styleIds, 'style');
-                [...borderIds].forEach((bid) => {
-                    const block = hwpxTagBlock(stampHeader, 'borderFill', bid);
-                    if (!block) return;
-                    const newId = borderMap[bid];
-                    const renumbered = block.replace(/^<hh:borderFill id="\d+"/, `<hh:borderFill id="${newId}"`);
-                    out = hwpxUpsertBlock(out, 'borderFill', newId, hwpxSanitizeBorderFillBlock(renumbered, bid, preserveGradIds));
-                });
-                [...charIds].forEach((cid) => {
-                    const block = hwpxTagBlock(stampHeader, 'charPr', cid);
-                    if (!block) return;
-                    const newId = charMap[cid];
-                    let renumbered = block.replace(/^<hh:charPr id="\d+"/, `<hh:charPr id="${newId}"`);
-                    renumbered = hwpxRemapIdRefs(renumbered, 'borderFillIDRef', borderMap);
-                    out = hwpxUpsertBlock(out, 'charPr', newId, hwpxSanitizeCharPrBlock(renumbered));
-                });
-                [...paraIds].forEach((pid) => {
-                    const block = hwpxTagBlock(stampHeader, 'paraPr', pid);
-                    if (!block) return;
-                    const newId = paraMap[pid];
-                    const renumbered = block.replace(/^<hh:paraPr id="\d+"/, `<hh:paraPr id="${newId}"`);
-                    out = hwpxUpsertBlock(out, 'paraPr', newId, hwpxSanitizeParaPrBlock(renumbered));
-                });
-                // hp:p가 paraPrIDRef/charPrIDRef 말고 styleIDRef(예: "표안" 문단 스타일)로 서식을
-                // 물려받는 경우가 있다 — 그 hh:style 정의 자체도 옮겨 붙이고, 정의 안의
-                // paraPrIDRef/charPrIDRef도 위에서 이미 새로 붙인 번호로 맞춰 바꿔준다. 이걸
-                // 안 하면 표 칸 일부가 대상 문서에 이미 있던 완전히 무관한 스타일(예: 엑셀에서
-                // 붙여넣기 때 생긴 스타일)을 그대로 물게 된다.
-                [...styleIds].forEach((sid) => {
-                    const block = hwpxTagBlock(stampHeader, 'style', sid);
-                    if (!block) return;
-                    const newId = styleMap[sid];
-                    let renumbered = block.replace(/id="\d+"/, `id="${newId}"`);
-                    renumbered = renumbered.replace(/paraPrIDRef="(\d+)"/, (m, pid) => (
-                        paraMap[pid] ? `paraPrIDRef="${paraMap[pid]}"` : m
-                    ));
-                    renumbered = renumbered.replace(/charPrIDRef="(\d+)"/, (m, cid) => (
-                        charMap[cid] ? `charPrIDRef="${charMap[cid]}"` : m
-                    ));
-                    renumbered = renumbered.replace(/nextStyleIDRef="\d+"/, `nextStyleIDRef="${newId}"`);
-                    out = hwpxUpsertBlock(out, 'style', newId, renumbered);
-                });
-                // 표 XML 안의 참조도 새 번호에 맞춰 같이 옮긴다 — 위 header.xml 정의와 어긋나면 안 된다.
-                let remappedTableXml = stampTableXml;
-                remappedTableXml = hwpxRemapIdRefs(remappedTableXml, 'borderFillIDRef', borderMap);
-                remappedTableXml = hwpxRemapIdRefs(remappedTableXml, 'charPrIDRef', charMap);
-                remappedTableXml = hwpxRemapIdRefs(remappedTableXml, 'paraPrIDRef', paraMap);
-                remappedTableXml = hwpxRemapIdRefs(remappedTableXml, 'styleIDRef', styleMap);
-                remappedTableXml = hwpxClearSectionParagraphBorders(remappedTableXml);
-                const preservedGradNewIds = new Set(
-                    Object.entries(borderMap)
-                        .filter(([orig]) => preserveGradIds.has(String(orig)))
-                        .map(([, nid]) => String(nid))
-                );
-                const stampBorderNewIds = new Set(Object.values(borderMap).map(String));
-                out = hwpxSyncBorderFillsItemCnt(out);
-                return { header: out, tableXml: remappedTableXml, preservedGradNewIds, stampBorderNewIds };
-            }
-            function hwpxIsSurveyStampTable(tblXml) {
-                const colM = tblXml.match(/colCnt="(\d+)"/);
-                if (!colM) return false;
-                const texts = (tblXml.match(/<hp:t[^>]*>([^<]*)<\/hp:t>/g) || []).slice(0, 20).join('').replace(/\s+/g, '');
-                return colM[1] === '7' && texts.includes('점검내용') && texts.includes('발생원인');
-            }
-            function hwpxExtractSurveyStampTable(secXml) {
-                for (const m of secXml.matchAll(/<hp:tbl[^>]*>[\s\S]*?<\/hp:tbl>/g)) {
-                    if (hwpxIsSurveyStampTable(m[0])) return m[0];
-                }
-                return null;
-            }
-            function hwpxReplaceSurveyTables(secXml, stampTableXml) {
-                return secXml.replace(/<hp:tbl[^>]*>[\s\S]*?<\/hp:tbl>/g, (tbl) => {
-                    if (!hwpxIsSurveyStampTable(tbl)) return tbl;
-                    const oldId = tbl.match(/\bid="(\d+)"/);
-                    if (!oldId) return stampTableXml;
-                    return stampTableXml.replace(/\bid="\d+"/, `id="${oldId[1]}"`);
-                });
-            }
-            async function applyHwpxSurveyStampToZip(targetZip) {
-                const stampPath = `./templates/hwpx_grade3_survey_stamp.hwpx?v=${HWPX_TEMPLATE_VERSION}`;
-                const stampResp = await fetch(stampPath, { cache: 'no-store' });
-                if (!stampResp.ok) {
-                    throw new Error('결함조사표 스탬프(hwpx_grade3_survey_stamp.hwpx)를 불러오지 못했습니다.');
-                }
-                const stampZip = await JSZip.loadAsync(await stampResp.arrayBuffer());
-                const stampSecPath = stampZip.file('Contents/section1.xml') ? 'Contents/section1.xml' : 'Contents/section0.xml';
-                const stampSecXml = await stampZip.file(stampSecPath).async('string');
-                const stampHeader = await stampZip.file('Contents/header.xml').async('string');
-                const stampTable = hwpxExtractSurveyStampTable(stampSecXml);
-                if (!stampTable) {
-                    throw new Error('스탬프 파일에서 3종 상태조사표를 찾지 못했습니다.');
-                }
-                const tgtHeader = await targetZip.file('Contents/header.xml').async('string');
-                const merged = hwpxMergeHeaderFromStamp(tgtHeader, stampHeader, stampTable);
-                hwpxStampMergeMeta = merged;
-                targetZip.file('Contents/header.xml', merged.header);
-
-                const stampSectionPath = targetZip.file('Contents/section1.xml') ? 'Contents/section1.xml' : 'Contents/section0.xml';
-                let stampSecTargetXml = await targetZip.file(stampSectionPath).async('string');
-                stampSecTargetXml = hwpxReplaceSurveyTables(stampSecTargetXml, merged.tableXml);
-                if (/borderFillIDRef="(?:3|59)"/.test(merged.tableXml)) {
-                    console.warn('스탬프 표에 옛 borderFill(3/59) 참조가 남아 있습니다.');
-                }
-                targetZip.file(stampSectionPath, stampSecTargetXml);
-            }
-            await applyHwpxSurveyStampToZip(zip);
+            // 3종 결함조사표 스타일은 템플릿에 고정되어 있다(scripts/build-grade3-template-from-stamp.py로
+            // 스탬프 표·스타일을 템플릿에 미리 병합). 예전에는 여기서 hwpx 생성마다 스탬프를 런타임
+            // 병합·ID 리맵·검증했는데, 그 위에 테두리 패치가 여러 겹 쌓여 하나 고치면 다른 게 깨지는
+            // 원인이 됐다. 이제 1·2종(exportHwpxSurveyTable12)과 똑같이 템플릿 표본 행만 복제한다.
 
             const HP_NS = 'http://www.hancom.co.kr/hwpml/2011/paragraph';
             const HC_NS = 'http://www.hancom.co.kr/hwpml/2011/core';
@@ -27234,6 +26919,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 const firstRowTpl = dataRows[0].cloneNode(true);
                 const normalRowTpl = (dataRows[Math.min(1, dataRows.length - 1)] || dataRows[0]).cloneNode(true);
                 const lastRowTpl = dataRows[dataRows.length - 1].cloneNode(true);
+                // 1·2종과 동일: 템플릿 표본 행(첫/중간/마지막)의 칸별 borderFill을 그대로 읽어 쓴다.
+                // 표본 행과 header.xml은 템플릿 빌드 단계에서 이미 맞춰져 있으므로 런타임 리맵이 없다.
                 const borderStyleByCol = (row) => {
                     const map = {};
                     Array.from(row.getElementsByTagNameNS(HP_NS, 'tc')).forEach((tc) => {
@@ -27358,6 +27045,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         };
                         const colCount = Array.from(normalRowTpl.getElementsByTagNameNS(HP_NS, 'tc')).length;
                         const values = getReportSurveyRowValues(d, rowCtx, isGrade3, colCount);
+                        // 첫 데이터 행: 헤더 직하 DOUBLE_SLIM 상단선(first). 마지막 행: 페이지 하단 테두리(last).
                         const rowTpl = localIdx === 0 ? firstRowTpl : (isLastOnPage ? lastRowTpl : normalRowTpl);
                         const styleMap = localIdx === 0 ? styleMaps.first : (isLastOnPage ? styleMaps.last : styleMaps.normal);
 
@@ -28403,22 +28091,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!newXml.startsWith('<?xml')) {
                 newXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes" ?>' + newXml;
             }
-            newXml = hwpxClearSectionParagraphBorders(newXml);
             zip.file(sectionPath, newXml);
-
-            {
-                let hdrFinal = await zip.file('Contents/header.xml').async('string');
-                if (hwpxStampMergeMeta) {
-                    hdrFinal = hwpxFinalizeStampDataBorderFills(
-                        hdrFinal,
-                        hwpxStampMergeMeta.stampBorderNewIds,
-                        hwpxStampMergeMeta.preservedGradNewIds
-                    );
-                }
-                hdrFinal = hwpxClearParaPrBorders(hdrFinal);
-                hdrFinal = hwpxClearAllCharPrBackgrounds(hdrFinal);
-                zip.file('Contents/header.xml', hdrFinal);
-            }
 
             // 원본처럼 mimetype/version.xml은 무압축(Store)으로 유지
             zip.file('mimetype', await zip.file('mimetype').async('string'), { compression: 'STORE' });
@@ -33889,12 +33562,51 @@ document.addEventListener('DOMContentLoaded', () => {
         const overlay = document.getElementById('loginOverlay');
         const loginCard = overlay ? overlay.querySelector('.modal-card') : null;
         const pendingCard = document.getElementById('pendingApprovalCard');
+        const companyJoinCard = document.getElementById('companyJoinCard');
         if (overlay) overlay.style.cssText = 'display: flex !important; opacity: 1 !important; pointer-events: auto !important; visibility: visible !important; z-index: 9999;';
         if (loginCard) loginCard.style.display = 'flex';
         if (pendingCard) pendingCard.style.display = 'none';
+        if (companyJoinCard) companyJoinCard.style.display = 'none';
         const headerProfile = document.getElementById('headerUserProfileGroup');
         if (headerProfile) headerProfile.style.display = 'none';
         clearAuthError();
+        clearCompanyJoinError();
+    }
+
+    function clearCompanyJoinError() {
+        const box = document.getElementById('companyJoinErrorMsg');
+        if (box) { box.style.display = 'none'; box.textContent = ''; }
+    }
+
+    function showCompanyJoinError(message) {
+        const box = document.getElementById('companyJoinErrorMsg');
+        if (!box) return;
+        box.textContent = message || '오류가 발생했습니다.';
+        box.style.display = 'block';
+    }
+
+    function showCompanyJoinOverlay(hintMessage) {
+        setAuthGateActive(true);
+        const overlay = document.getElementById('loginOverlay');
+        const loginCard = overlay ? overlay.querySelector('.modal-card') : null;
+        const pendingCard = document.getElementById('pendingApprovalCard');
+        const companyJoinCard = document.getElementById('companyJoinCard');
+        if (overlay) overlay.style.cssText = 'display: flex !important; opacity: 1 !important; pointer-events: auto !important; visibility: visible !important; z-index: 9999;';
+        if (loginCard) loginCard.style.display = 'none';
+        if (pendingCard) pendingCard.style.display = 'none';
+        if (companyJoinCard) companyJoinCard.style.display = 'block';
+        const hint = document.getElementById('companyJoinHint');
+        if (hint) {
+            hint.innerHTML = hintMessage || (
+                '대표에게 받은 <strong>6자리 가입 코드</strong>를 입력해 회사에 소속 신청하세요.<br>'
+                + '승인 전까지는 점검 기능을 사용할 수 없습니다.'
+            );
+        }
+        const codeInput = document.getElementById('companyJoinCodeInput');
+        if (codeInput) codeInput.value = '';
+        clearCompanyJoinError();
+        const headerProfile = document.getElementById('headerUserProfileGroup');
+        if (headerProfile) headerProfile.style.display = 'none';
     }
 
     function showPendingApproval(companyName) {
@@ -33902,9 +33614,11 @@ document.addEventListener('DOMContentLoaded', () => {
         const overlay = document.getElementById('loginOverlay');
         const loginCard = overlay ? overlay.querySelector('.modal-card') : null;
         const pendingCard = document.getElementById('pendingApprovalCard');
+        const companyJoinCard = document.getElementById('companyJoinCard');
         if (overlay) overlay.style.cssText = 'display: flex !important; opacity: 1 !important; pointer-events: auto !important; visibility: visible !important; z-index: 9999;';
         if (loginCard) loginCard.style.display = 'none';
         if (pendingCard) pendingCard.style.display = 'block';
+        if (companyJoinCard) companyJoinCard.style.display = 'none';
         const lbl = document.getElementById('pendingCompanyName');
         if (lbl) lbl.textContent = companyName || '회사';
         const headerProfile = document.getElementById('headerUserProfileGroup');
@@ -33947,6 +33661,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const btnApproval = document.getElementById('btnOpenMemberApproval');
         if (btnApproval) btnApproval.style.display = (profile.role === 'admin') ? 'inline-flex' : 'none';
+        const btnLeaveCompany = document.getElementById('btnLeaveCompany');
+        if (btnLeaveCompany) btnLeaveCompany.style.display = (profile.role === 'admin' || profile.role === 'member') ? 'inline-flex' : 'none';
 
         if (profile.role === 'admin' && db) {
             try {
@@ -33979,6 +33695,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     async function handleAuthStateChange(user) {
         if (!user) {
+            if (window._deletingAccount) return;
             if (currentUnsubscribe) { try { currentUnsubscribe(); } catch (e) {} currentUnsubscribe = null; }
             window.state.uid = null;
             window.state.userName = null;
@@ -33993,31 +33710,52 @@ document.addEventListener('DOMContentLoaded', () => {
         if (window._justRegistering) return; // 가입 절차가 직접 화면 전환을 처리함
 
         try {
-            const userDoc = await db.collection('users').doc(user.uid).get();
-            if (!userDoc.exists) {
+            const ctx = await getUserMembershipContext(user.uid);
+            if (!ctx) {
                 showAuthError({ message: '계정 정보를 찾을 수 없습니다. 다시 가입해 주세요.' });
                 await auth.signOut();
                 return;
             }
-            const data = userDoc.data();
-            const status = await resolveMembershipStatus(user.uid, data.companyId);
+            const { data, companyId, pendingCompanyId, activeCompanyId, status } = ctx;
+
+            if (!activeCompanyId || status === 'unaffiliated') {
+                window.state.uid = user.uid;
+                window.state.userName = data.name;
+                window.state.companyId = null;
+                window.state.companyName = null;
+                window.state.role = 'none';
+                showCompanyJoinOverlay();
+                return;
+            }
+
             if (status === 'pending') {
+                window.state.uid = user.uid;
+                window.state.userName = data.name;
+                window.state.companyId = pendingCompanyId || companyId;
+                window.state.companyName = data.pendingCompanyName || data.companyName || '';
                 window.state.role = 'pending';
-                showPendingApproval(data.companyName);
+                showPendingApproval(data.pendingCompanyName || data.companyName);
             } else if (status === 'rejected') {
-                showAuthError({ message: '가입 신청이 거절되었습니다. 회사 대표에게 문의해 주세요.' });
-                await auth.signOut();
+                await clearUserCompanyLinks(user.uid, activeCompanyId, { removeMember: false });
+                window.state.uid = user.uid;
+                window.state.userName = data.name;
+                window.state.companyId = null;
+                window.state.companyName = null;
+                window.state.role = 'none';
+                showCompanyJoinOverlay('가입 신청이 <strong>거절</strong>되었습니다. 다른 회사 코드로 다시 신청할 수 있습니다.');
             } else if (status === 'admin' || status === 'member') {
                 await enterAppAsUser({
                     uid: user.uid,
                     name: data.name,
-                    companyId: data.companyId,
+                    companyId: companyId || activeCompanyId,
                     companyName: data.companyName,
                     role: status
                 });
             } else {
-                showAuthError({ message: '알 수 없는 계정 상태입니다. 회사 대표에게 문의해 주세요.' });
-                await auth.signOut();
+                window.state.uid = user.uid;
+                window.state.userName = data.name;
+                window.state.role = 'none';
+                showCompanyJoinOverlay('회사 소속 정보를 확인할 수 없습니다. 가입 코드로 다시 신청해 주세요.');
             }
         } catch (e) {
             console.error('로그인 상태 확인 오류:', e);
@@ -34029,7 +33767,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // (users/{uid} 문서는 본인만 쓸 수 있어야 하므로, 대표가 팀원 상태를 바꿀 때도
     //  companies/{companyId} 하위 문서만 건드리도록 설계)
     async function resolveMembershipStatus(uid, companyId) {
-        if (!companyId) return 'unknown';
+        if (!companyId) return 'unaffiliated';
         const companyRef = db.collection('companies').doc(companyId);
         const memberDoc = await companyRef.collection('members').doc(uid).get();
         if (memberDoc.exists) return memberDoc.data().role || 'member';
@@ -34038,6 +33776,52 @@ document.addEventListener('DOMContentLoaded', () => {
         const rejectedDoc = await companyRef.collection('rejectedRequests').doc(uid).get();
         if (rejectedDoc.exists) return 'rejected';
         return 'unknown';
+    }
+
+    async function getUserMembershipContext(uid) {
+        const userDoc = await db.collection('users').doc(uid).get();
+        if (!userDoc.exists) return null;
+        const data = userDoc.data() || {};
+        const companyId = data.companyId || null;
+        const pendingCompanyId = data.pendingCompanyId || null;
+        const activeCompanyId = companyId || pendingCompanyId;
+        let status = 'unaffiliated';
+        if (activeCompanyId) status = await resolveMembershipStatus(uid, activeCompanyId);
+        return { data, companyId, pendingCompanyId, activeCompanyId, status };
+    }
+
+    async function clearUserCompanyLinks(uid, companyId, options) {
+        if (!uid || !companyId || !db) return;
+        options = options || {};
+        const companyRef = db.collection('companies').doc(companyId);
+        const batch = db.batch();
+        batch.delete(companyRef.collection('pendingRequests').doc(uid));
+        batch.delete(companyRef.collection('rejectedRequests').doc(uid));
+        if (options.removeMember !== false) {
+            batch.delete(companyRef.collection('members').doc(uid));
+        }
+        const userUpdate = {
+            companyId: null,
+            companyName: null,
+            pendingCompanyId: null,
+            pendingCompanyName: null,
+            role: 'none'
+        };
+        batch.update(db.collection('users').doc(uid), userUpdate);
+        await batch.commit();
+    }
+
+    async function assertCanLeaveCompany(uid, companyId) {
+        if (!uid || !companyId || !db) return;
+        const companyRef = db.collection('companies').doc(companyId);
+        const memberDoc = await companyRef.collection('members').doc(uid).get();
+        if (!memberDoc.exists || memberDoc.data().role !== 'admin') return;
+        const membersSnap = await companyRef.collection('members').get();
+        const otherMembers = membersSnap.docs.filter((d) => d.id !== uid);
+        const otherAdmins = otherMembers.filter((d) => d.data().role === 'admin');
+        if (otherMembers.length > 0 && otherAdmins.length === 0) {
+            throw new Error('다른 팀원이 있는 회사의 유일한 관리자는 나갈 수 없습니다. 다른 관리자를 지정한 뒤 다시 시도해 주세요.');
+        }
     }
 
     function ensureFirebaseAuthReady() {
@@ -34119,34 +33903,28 @@ document.addEventListener('DOMContentLoaded', () => {
     window.submitRegisterMember = async function() {
         clearAuthError();
         const name = (document.getElementById('authUserName')?.value || '').trim();
-        const joinCode = (document.getElementById('authJoinCode')?.value || '').trim().toUpperCase();
         const email = (document.getElementById('authEmail')?.value || '').trim();
         const password = document.getElementById('authPassword')?.value || '';
-        if (!name || !joinCode || !email || !password) {
-            showAuthError({ message: '이름, 가입 코드, 이메일, 비밀번호를 모두 입력해 주세요.' });
+        if (!name || !email || !password) {
+            showAuthError({ message: '이름, 이메일, 비밀번호를 모두 입력해 주세요.' });
             return;
         }
         window._justRegistering = true;
-        window.showLoading('가입 신청 중입니다...');
+        window.showLoading('계정을 생성하는 중입니다...');
         let cred = null;
         try {
-            const codeDoc = await db.collection('joinCodes').doc(joinCode).get();
-            if (!codeDoc.exists) {
-                showAuthError({ message: '가입 코드를 확인해 주세요. 일치하는 회사가 없습니다.' });
-                return;
-            }
-            const { companyId, companyName } = codeDoc.data();
-
             cred = await auth.createUserWithEmailAndPassword(email, password);
             const uid = cred.user.uid;
 
-            await db.collection('companies').doc(companyId).collection('pendingRequests').doc(uid).set({
-                name, email, requestedAt: firebase.firestore.FieldValue.serverTimestamp()
-            });
             await db.collection('users').doc(uid).set({
-                name, email, companyId, companyName, role: 'pending'
+                name, email, role: 'none'
             });
-            showPendingApproval(companyName);
+            window.state.uid = uid;
+            window.state.userName = name;
+            window.state.companyId = null;
+            window.state.companyName = null;
+            window.state.role = 'none';
+            showCompanyJoinOverlay('계정이 생성되었습니다.<br>회사 가입 코드를 입력해 소속을 신청해 주세요.');
         } catch (err) {
             showAuthError(err);
             if (cred && cred.user) { try { await cred.user.delete(); } catch (e) {} }
@@ -34156,10 +33934,273 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     };
 
+    window.applyToCompany = async function(joinCode) {
+        clearCompanyJoinError();
+        const user = auth && auth.currentUser;
+        if (!user || !db) {
+            showCompanyJoinError('로그인이 필요합니다.');
+            return;
+        }
+        const code = String(joinCode || '').trim().toUpperCase();
+        if (!code) {
+            showCompanyJoinError('가입 코드를 입력해 주세요.');
+            return;
+        }
+        window.showLoading('회사 가입을 신청하는 중입니다...');
+        try {
+            const uid = user.uid;
+            const ctx = await getUserMembershipContext(uid);
+            if (!ctx) throw new Error('계정 정보를 찾을 수 없습니다.');
+
+            if (ctx.companyId && (ctx.status === 'admin' || ctx.status === 'member')) {
+                showCompanyJoinError('이미 회사에 소속되어 있습니다. 회사를 나간 뒤 다시 신청해 주세요.');
+                return;
+            }
+
+            const codeDoc = await db.collection('joinCodes').doc(code).get();
+            if (!codeDoc.exists) {
+                showCompanyJoinError('가입 코드를 확인해 주세요. 일치하는 회사가 없습니다.');
+                return;
+            }
+            const { companyId, companyName } = codeDoc.data();
+
+            if (ctx.pendingCompanyId && ctx.pendingCompanyId !== companyId) {
+                await clearUserCompanyLinks(uid, ctx.pendingCompanyId, { removeMember: false });
+            }
+            if (ctx.companyId && ctx.companyId !== companyId) {
+                await clearUserCompanyLinks(uid, ctx.companyId, { removeMember: true });
+            }
+
+            const userDoc = await db.collection('users').doc(uid).get();
+            const name = (userDoc.exists && userDoc.data().name) || window.state.userName || '';
+            const email = user.email || (userDoc.exists ? userDoc.data().email : '');
+
+            await db.collection('companies').doc(companyId).collection('pendingRequests').doc(uid).set({
+                name, email, requestedAt: firebase.firestore.FieldValue.serverTimestamp()
+            });
+            await db.collection('users').doc(uid).update({
+                pendingCompanyId: companyId,
+                pendingCompanyName: companyName,
+                companyId: null,
+                companyName: null,
+                role: 'pending'
+            });
+
+            window.state.uid = uid;
+            window.state.userName = name;
+            window.state.companyId = companyId;
+            window.state.companyName = companyName;
+            window.state.role = 'pending';
+            showPendingApproval(companyName);
+            window.showToast(`'${companyName}'에 가입 신청했습니다. 관리자 승인을 기다려 주세요.`, 'success', 4500);
+        } catch (err) {
+            console.error('회사 가입 신청 오류:', err);
+            showCompanyJoinError(err.message || '가입 신청 중 오류가 발생했습니다.');
+        } finally {
+            window.hideLoading();
+        }
+    };
+
+    window.cancelCompanyApplication = async function() {
+        const user = auth && auth.currentUser;
+        if (!user || !db) return;
+        if (!confirm('가입 신청을 취소하고 다른 회사로 다시 신청하시겠습니까?')) return;
+        window.showLoading('신청을 취소하는 중입니다...');
+        try {
+            const ctx = await getUserMembershipContext(user.uid);
+            const companyId = ctx && (ctx.pendingCompanyId || ctx.companyId);
+            if (!companyId) {
+                showCompanyJoinOverlay();
+                return;
+            }
+            await clearUserCompanyLinks(user.uid, companyId, { removeMember: false });
+            window.state.companyId = null;
+            window.state.companyName = null;
+            window.state.role = 'none';
+            showCompanyJoinOverlay('가입 신청을 취소했습니다. 다른 회사 코드로 다시 신청할 수 있습니다.');
+        } catch (err) {
+            console.error('가입 신청 취소 오류:', err);
+            window.showToast('신청 취소 중 오류가 발생했습니다.', 'error');
+        } finally {
+            window.hideLoading();
+        }
+    };
+
+    window.leaveCompany = async function() {
+        const uid = window.state.uid;
+        const companyId = window.state.companyId;
+        if (!uid || !companyId || !db) return;
+        if (!confirm('회사에서 나가시겠습니까?\n\n나간 뒤에는 점검 데이터에 접근할 수 없습니다.')) return;
+        window.showLoading('회사에서 나가는 중입니다...');
+        try {
+            await assertCanLeaveCompany(uid, companyId);
+            if (currentUnsubscribe) {
+                try { currentUnsubscribe(); } catch (e) { /* ignore */ }
+                currentUnsubscribe = null;
+            }
+            await clearUserCompanyLinks(uid, companyId, { removeMember: true });
+            window.state.companyId = null;
+            window.state.companyName = null;
+            window.state.companyJoinCode = null;
+            window.state.role = 'none';
+            const btnApproval = document.getElementById('btnOpenMemberApproval');
+            if (btnApproval) btnApproval.style.display = 'none';
+            const btnLeaveCompany = document.getElementById('btnLeaveCompany');
+            if (btnLeaveCompany) btnLeaveCompany.style.display = 'none';
+            window.showToast('회사에서 나왔습니다.', 'info', 4000);
+            showCompanyJoinOverlay('다른 회사 가입 코드로 다시 소속을 신청할 수 있습니다.');
+        } catch (err) {
+            console.error('회사 나가기 오류:', err);
+            window.showToast(err.message || '회사 나가기 중 오류가 발생했습니다.', 'error', 5000);
+        } finally {
+            window.hideLoading();
+        }
+    };
+
     window.logout = async function() {
         if (!confirm('🔒 정말 로그아웃 하시겠습니까?')) return;
         try { if (auth) await auth.signOut(); } catch (e) {}
         showLoginOverlay();
+    };
+
+    function clearDeleteAccountError() {
+        const box = document.getElementById('deleteAccountErrorMsg');
+        if (!box) return;
+        box.style.display = 'none';
+        box.textContent = '';
+    }
+
+    function showDeleteAccountError(err) {
+        const box = document.getElementById('deleteAccountErrorMsg');
+        if (!box) return;
+        const map = {
+            'auth/wrong-password': '비밀번호가 올바르지 않습니다.',
+            'auth/invalid-credential': '비밀번호가 올바르지 않습니다.',
+            'auth/too-many-requests': '시도 횟수가 많습니다. 잠시 후 다시 시도해 주세요.',
+            'auth/requires-recent-login': '보안을 위해 비밀번호를 다시 입력해 주세요.'
+        };
+        const code = err && err.code;
+        box.textContent = (code && map[code]) ? map[code] : ((err && err.message) || '계정 삭제 중 오류가 발생했습니다.');
+        box.style.display = 'block';
+    }
+
+    function openDeleteAccountModal() {
+        const modal = document.getElementById('deleteAccountModal');
+        const pwdInput = document.getElementById('deleteAccountPassword');
+        clearDeleteAccountError();
+        if (pwdInput) pwdInput.value = '';
+        if (modal) {
+            modal.style.display = 'flex';
+            modal.classList.add('open');
+            setTimeout(() => pwdInput?.focus(), 50);
+        }
+    }
+
+    function closeDeleteAccountModal() {
+        const modal = document.getElementById('deleteAccountModal');
+        clearDeleteAccountError();
+        if (modal) {
+            modal.style.display = 'none';
+            modal.classList.remove('open');
+        }
+        const pwdInput = document.getElementById('deleteAccountPassword');
+        if (pwdInput) pwdInput.value = '';
+    }
+
+    async function assertCanDeleteAccount(uid, companyId) {
+        if (!uid || !companyId || !db) return;
+        const companyRef = db.collection('companies').doc(companyId);
+        const memberDoc = await companyRef.collection('members').doc(uid).get();
+        if (!memberDoc.exists || memberDoc.data().role !== 'admin') return;
+        const membersSnap = await companyRef.collection('members').get();
+        const otherMembers = membersSnap.docs.filter((d) => d.id !== uid);
+        const otherAdmins = otherMembers.filter((d) => d.data().role === 'admin');
+        if (otherMembers.length > 0 && otherAdmins.length === 0) {
+            throw new Error('다른 팀원이 있는 회사의 유일한 관리자는 계정을 삭제할 수 없습니다. 다른 관리자를 지정한 뒤 다시 시도해 주세요.');
+        }
+    }
+
+    async function cleanupUserFirestoreBeforeDelete(uid, companyId, pendingCompanyId) {
+        if (!uid || !db) return;
+        const batch = db.batch();
+        const companyIds = [...new Set([companyId, pendingCompanyId].filter(Boolean))];
+        companyIds.forEach((cid) => {
+            const companyRef = db.collection('companies').doc(cid);
+            batch.delete(companyRef.collection('pendingRequests').doc(uid));
+            batch.delete(companyRef.collection('rejectedRequests').doc(uid));
+            batch.delete(companyRef.collection('members').doc(uid));
+        });
+        batch.delete(db.collection('users').doc(uid));
+        await batch.commit();
+    }
+
+    function clearLocalUserDataOnDelete(uid) {
+        if (!uid) return;
+        try {
+            localStorage.removeItem(userDefectPinLocalKey(uid));
+            localStorage.removeItem('building_user_name');
+        } catch (e) {
+            console.warn('계정 삭제 후 로컬 데이터 정리 실패:', e);
+        }
+    }
+
+    window.deleteAccount = async function(password) {
+        const user = auth && auth.currentUser;
+        if (!user) {
+            window.showToast('로그인이 필요합니다.', 'warning');
+            return;
+        }
+        const pwd = (password || '').trim();
+        if (!pwd) {
+            showDeleteAccountError({ message: '비밀번호를 입력해 주세요.' });
+            return;
+        }
+        if (!confirm('정말 계정을 삭제하시겠습니까?\n\n삭제 후에는 복구할 수 없습니다.')) return;
+
+        window._deletingAccount = true;
+        window.showLoading('계정을 삭제하는 중입니다...');
+        try {
+            const uid = user.uid;
+            let companyId = window.state.companyId || null;
+            let pendingCompanyId = null;
+            const userDoc = await db.collection('users').doc(uid).get();
+            if (userDoc.exists) {
+                const d = userDoc.data();
+                if (!companyId) companyId = d.companyId || null;
+                pendingCompanyId = d.pendingCompanyId || null;
+            }
+            await assertCanDeleteAccount(uid, companyId);
+
+            const cred = firebase.auth.EmailAuthProvider.credential(user.email, pwd);
+            await user.reauthenticateWithCredential(cred);
+
+            if (currentUnsubscribe) {
+                try { currentUnsubscribe(); } catch (e) { /* ignore */ }
+                currentUnsubscribe = null;
+            }
+
+            await cleanupUserFirestoreBeforeDelete(uid, companyId, pendingCompanyId);
+            clearLocalUserDataOnDelete(uid);
+
+            await user.delete();
+
+            window.state.uid = null;
+            window.state.userName = null;
+            window.state.companyId = null;
+            window.state.companyName = null;
+            window.state.role = null;
+            if (typeof resetDefectPinPresetsToDefaults === 'function') resetDefectPinPresetsToDefaults();
+
+            closeDeleteAccountModal();
+            window.showToast('계정이 삭제되었습니다.', 'success', 4500);
+            showLoginOverlay();
+        } catch (err) {
+            console.error('계정 삭제 오류:', err);
+            showDeleteAccountError(err);
+        } finally {
+            window._deletingAccount = false;
+            window.hideLoading();
+        }
     };
 
     // --- 관리자 가입 승인 관리 패널 ---
@@ -34206,13 +34247,22 @@ document.addEventListener('DOMContentLoaded', () => {
         try {
             const membersSnap = await companyRef.collection('members').get();
             if (membersBox) {
+                const myUid = window.state.uid;
                 membersBox.innerHTML = membersSnap.docs.map(docSnap => {
                     const d = docSnap.data();
                     const roleLabel = d.role === 'admin' ? '대표' : '팀원';
+                    const isSelf = docSnap.id === myUid;
+                    const canRemove = !isSelf && (d.role !== 'admin' || membersSnap.docs.filter(x => x.data().role === 'admin').length > 1);
+                    const removeBtn = canRemove
+                        ? `<button type="button" class="btn btn-sm btn-outline" style="border-color:#ef4444; color:#ef4444;" onclick="window.removeMember('${docSnap.id}')"><i class="fa-solid fa-user-minus"></i>보내기</button>`
+                        : '';
                     return `
-                        <div style="display:flex; justify-content:space-between; align-items:center; background:#f8fafc; border:1px solid #e2e8f0; padding:0.5rem 0.9rem; border-radius:8px;">
-                            <span style="font-size:0.85rem;"><strong>${d.name || '이름없음'}</strong> <span style="color:#64748b; font-size:0.78rem;">(${d.email || ''})</span></span>
-                            <span class="badge badge-info">${roleLabel}</span>
+                        <div style="display:flex; justify-content:space-between; align-items:center; background:#f8fafc; border:1px solid #e2e8f0; padding:0.5rem 0.9rem; border-radius:8px; gap:0.6rem; flex-wrap:wrap;">
+                            <span style="font-size:0.85rem;"><strong>${d.name || '이름없음'}</strong> <span style="color:#64748b; font-size:0.78rem;">(${d.email || ''})</span>${isSelf ? ' <span style="color:#94a3b8; font-size:0.75rem;">(나)</span>' : ''}</span>
+                            <div style="display:flex; gap:0.4rem; align-items:center;">
+                                <span class="badge badge-info">${roleLabel}</span>
+                                ${removeBtn}
+                            </div>
                         </div>`;
                 }).join('');
             }
@@ -34233,6 +34283,15 @@ document.addEventListener('DOMContentLoaded', () => {
                 approvedAt: firebase.firestore.FieldValue.serverTimestamp()
             });
             await companyRef.collection('pendingRequests').doc(uid).delete();
+            const companyDoc = await companyRef.get();
+            const companyName = companyDoc.exists ? (companyDoc.data().name || '') : (window.state.companyName || '');
+            await db.collection('users').doc(uid).update({
+                companyId: window.state.companyId,
+                companyName,
+                role: 'member',
+                pendingCompanyId: null,
+                pendingCompanyName: null
+            });
             await renderMemberApprovalLists();
             window.showToast(`'${d.name || '팀원'}'님의 가입을 승인했습니다.`, 'success');
         } catch (e) {
@@ -34253,11 +34312,49 @@ document.addEventListener('DOMContentLoaded', () => {
                 rejectedAt: firebase.firestore.FieldValue.serverTimestamp()
             });
             await companyRef.collection('pendingRequests').doc(uid).delete();
+            await db.collection('users').doc(uid).update({
+                pendingCompanyId: null,
+                pendingCompanyName: null,
+                companyId: null,
+                companyName: null,
+                role: 'none'
+            });
             await renderMemberApprovalLists();
             window.showToast('가입 신청을 거절했습니다.', 'info');
         } catch (e) {
             console.error('거절 처리 오류:', e);
             window.showToast('거절 처리 중 오류가 발생했습니다.', 'error');
+        }
+    };
+
+    window.removeMember = async function(uid) {
+        if (!db || !window.state.companyId || window.state.role !== 'admin') return;
+        if (uid === window.state.uid) {
+            await window.leaveCompany();
+            return;
+        }
+        if (!confirm('이 팀원을 회사에서 보내시겠습니까?')) return;
+        try {
+            const companyRef = db.collection('companies').doc(window.state.companyId);
+            const memberDoc = await companyRef.collection('members').doc(uid).get();
+            if (!memberDoc.exists) {
+                window.showToast('이미 나간 팀원입니다.', 'warning');
+                await renderMemberApprovalLists();
+                return;
+            }
+            if (memberDoc.data().role === 'admin') {
+                const admins = (await companyRef.collection('members').get()).docs.filter((d) => d.data().role === 'admin');
+                if (admins.length <= 1) {
+                    window.showToast('유일한 관리자는 보낼 수 없습니다.', 'warning');
+                    return;
+                }
+            }
+            await clearUserCompanyLinks(uid, window.state.companyId, { removeMember: true });
+            await renderMemberApprovalLists();
+            window.showToast('팀원을 회사에서 보냈습니다.', 'info');
+        } catch (e) {
+            console.error('팀원보내기 오류:', e);
+            window.showToast('처리 중 오류가 발생했습니다.', 'error');
         }
     };
 
@@ -34296,7 +34393,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (regModeGroup) regModeGroup.style.display = 'flex';
                 if (groupRegUserName) groupRegUserName.style.display = 'block';
                 applyRegModeUI();
-                if (btnSubmit) btnSubmit.innerHTML = '<i class="fa-solid fa-user-plus"></i> 🏢 가입하기';
+                if (btnSubmit) btnSubmit.innerHTML = currentRegMode === 'admin'
+                    ? '<i class="fa-solid fa-user-plus"></i> 🏢 회사 등록 및 시작'
+                    : '<i class="fa-solid fa-user-plus"></i> 👤 계정 만들기';
             }
         }
 
@@ -34357,6 +34456,39 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (btnLogout) btnLogout.addEventListener('click', window.logout);
 
+        const btnLeaveCompany = document.getElementById('btnLeaveCompany');
+        if (btnLeaveCompany) btnLeaveCompany.addEventListener('click', window.leaveCompany);
+
+        const btnDeleteAccount = document.getElementById('btnDeleteAccount');
+        const btnPendingDeleteAccount = document.getElementById('btnPendingDeleteAccount');
+        const deleteAccountModal = document.getElementById('deleteAccountModal');
+        const btnCloseDeleteAccount = document.getElementById('btnCloseDeleteAccountModal');
+        const btnCancelDeleteAccount = document.getElementById('btnCancelDeleteAccount');
+        const btnConfirmDeleteAccount = document.getElementById('btnConfirmDeleteAccount');
+        const deleteAccountPassword = document.getElementById('deleteAccountPassword');
+        if (btnDeleteAccount) btnDeleteAccount.addEventListener('click', openDeleteAccountModal);
+        if (btnPendingDeleteAccount) btnPendingDeleteAccount.addEventListener('click', openDeleteAccountModal);
+        if (btnCloseDeleteAccount) btnCloseDeleteAccount.addEventListener('click', closeDeleteAccountModal);
+        if (btnCancelDeleteAccount) btnCancelDeleteAccount.addEventListener('click', closeDeleteAccountModal);
+        if (btnConfirmDeleteAccount) {
+            btnConfirmDeleteAccount.addEventListener('click', () => {
+                window.deleteAccount(deleteAccountPassword ? deleteAccountPassword.value : '');
+            });
+        }
+        if (deleteAccountPassword) {
+            deleteAccountPassword.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    window.deleteAccount(deleteAccountPassword.value);
+                }
+            });
+        }
+        if (deleteAccountModal) {
+            deleteAccountModal.addEventListener('click', (e) => {
+                if (e.target === deleteAccountModal) closeDeleteAccountModal();
+            });
+        }
+
         const btnOpenApproval = document.getElementById('btnOpenMemberApproval');
         const approvalModal = document.getElementById('memberApprovalModal');
         const btnCloseApproval1 = document.getElementById('btnCloseMemberApprovalModal');
@@ -34370,6 +34502,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const btnPendingRecheck = document.getElementById('btnPendingRecheck');
         const btnPendingLogout = document.getElementById('btnPendingLogout');
+        const btnPendingCancelApplication = document.getElementById('btnPendingCancelApplication');
         if (btnPendingRecheck) {
             btnPendingRecheck.addEventListener('click', async () => {
                 if (!auth || !auth.currentUser) return;
@@ -34380,6 +34513,25 @@ document.addEventListener('DOMContentLoaded', () => {
             });
         }
         if (btnPendingLogout) btnPendingLogout.addEventListener('click', window.logout);
+        if (btnPendingCancelApplication) btnPendingCancelApplication.addEventListener('click', window.cancelCompanyApplication);
+
+        const btnApplyCompanyJoin = document.getElementById('btnApplyCompanyJoin');
+        const btnCompanyJoinLogout = document.getElementById('btnCompanyJoinLogout');
+        const companyJoinCodeInput = document.getElementById('companyJoinCodeInput');
+        if (btnApplyCompanyJoin) {
+            btnApplyCompanyJoin.addEventListener('click', () => {
+                window.applyToCompany(companyJoinCodeInput ? companyJoinCodeInput.value : '');
+            });
+        }
+        if (companyJoinCodeInput) {
+            companyJoinCodeInput.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    window.applyToCompany(companyJoinCodeInput.value);
+                }
+            });
+        }
+        if (btnCompanyJoinLogout) btnCompanyJoinLogout.addEventListener('click', window.logout);
 
         // 비밀번호 찾기 모달 오픈/닫기/발송 핸들러
         const btnOpenForgot = document.getElementById('btnOpenForgotPassword');
