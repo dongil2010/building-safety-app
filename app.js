@@ -581,8 +581,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function buildImportPreviewHtml(sourceBldg, opts) {
         if (!sourceBldg || !opts) return '';
-        const floorCount = (sourceBldg.floorsList && sourceBldg.floorsList.length)
-            || Object.keys(sourceBldg.floorDrawings || {}).length;
+        const floorCount = countImportSourceFloorCodes(sourceBldg);
         const defectCount = countBuildingDefects(sourceBldg);
         const ndtCount = countBuildingNdtFloors(sourceBldg);
         const styleCount = countBuildingMapStyleFloors(sourceBldg);
@@ -3830,10 +3829,18 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const buildingSearchInput = document.getElementById('buildingSearchInput');
     if (buildingSearchInput) {
+        armBuildingSearchAntiAutofill(buildingSearchInput);
         buildingSearchInput.addEventListener('input', (e) => {
+            if (isBuildingSearchAutofillSpam(e.target.value)) {
+                e.target.value = '';
+                window.state.buildingSearchTerm = '';
+                return;
+            }
             window.state.buildingSearchTerm = e.target.value;
             window.renderDashboard();
         });
+        // 크롬이 input 이벤트 없이 value만 바꾸는 경우
+        buildingSearchInput.addEventListener('change', () => clearBuildingSearchAutofill());
     }
 
     const btnDashboardBackSites = document.getElementById('btnDashboardBackSites');
@@ -4473,14 +4480,20 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function getEditBuildingImportOptions() {
+        const floorsDrawings = !!document.getElementById('chkEditImportFloorsDrawings')?.checked;
+        const defects = !!document.getElementById('chkEditImportDefects')?.checked;
+        const ndt = !!document.getElementById('chkEditImportNdt')?.checked;
+        const mapStyles = !!document.getElementById('chkEditImportMapStyles')?.checked;
         return {
             basicInfo: false,
-            floorsDrawings: !!document.getElementById('chkEditImportFloorsDrawings')?.checked,
-            defects: !!document.getElementById('chkEditImportDefects')?.checked,
-            ndt: !!document.getElementById('chkEditImportNdt')?.checked,
-            mapStyles: !!document.getElementById('chkEditImportMapStyles')?.checked,
+            floorsDrawings,
+            defects,
+            ndt,
+            mapStyles,
             defectRoundMode: getImportDefectRoundMode('editImportDefectRoundMode'),
-            merge: true
+            merge: true,
+            // 수정 화면에서 도면만 가져올 때는 같은 층의 기존 도면도 덮어쓴다
+            overwriteDrawings: floorsDrawings && !defects && !ndt && !mapStyles
         };
     }
 
@@ -4511,7 +4524,7 @@ document.addEventListener('DOMContentLoaded', () => {
             box.innerHTML = '';
             return;
         }
-        const floorCount = (sourceBldg.floorsList && sourceBldg.floorsList.length) || Object.keys(sourceBldg.floorDrawings || {}).length;
+        const floorCount = countImportSourceFloorCodes(sourceBldg);
         const defectCount = countBuildingDefects(sourceBldg);
         const ndtCount = countBuildingNdtFloors(sourceBldg);
         box.hidden = false;
@@ -4620,69 +4633,173 @@ document.addEventListener('DOMContentLoaded', () => {
         return cloned;
     }
 
-    async function cloneFloorDrawingsFromSource(sourceBldg, newBuildingId, targetBldg) {
-        const srcDrawings = sourceBldg.floorDrawings || {};
-        const srcPdfs = sourceBldg.floorDrawingPdfs || {};
-        const floorCodes = new Set([
-            ...Object.keys(srcDrawings),
-            ...Object.keys(srcPdfs),
-            ...((sourceBldg.floorsList || []).map(f => f.floorCode))
-        ]);
+    function countImportSourceFloorCodes(bldg) {
+        if (!bldg) return 0;
+        const codes = collectKnownFloorCodesForBuilding(bldg);
+        if (codes.size > 0) return codes.size;
+        return (bldg.floorsList && bldg.floorsList.length) || 0;
+    }
+
+    /** 다른 점검 가져오기: 원본 층 도면을 IDB·클라우드·현장 보관함에서 먼저 채운다. */
+    async function ensureSourceFloorDrawingHydratedForClone(sourceBldg, floorCode) {
+        if (!sourceBldg?.id || !floorCode) return;
+        await hydrateFloorDrawingFromCloud(sourceBldg, floorCode, { localOnly: true });
+        if (!floorHasDrawingData(sourceBldg, floorCode) && !sourceBldg.floorDrawingPdfs?.[floorCode]) {
+            await hydrateFloorDrawingFromCloud(sourceBldg, floorCode, {});
+        }
+        if (!sourceBldg.floorDrawingPdfs?.[floorCode] && typeof resolveBuildingFloorPdf === 'function') {
+            let pdf = await resolveBuildingFloorPdf(sourceBldg, floorCode, { localOnly: true });
+            if (!pdf && navigator.onLine !== false) {
+                pdf = await resolveBuildingFloorPdf(sourceBldg, floorCode, { forceCloud: true });
+            }
+            if (pdf) await applyResolvedPdfToBuilding(sourceBldg, floorCode, pdf);
+        }
+        await hydrateFloorDrawingTiersForFloor(sourceBldg, floorCode, { localOnly: true });
+        if (navigator.onLine !== false) {
+            await hydrateFloorDrawingTiersForFloor(sourceBldg, floorCode, {});
+        }
+    }
+
+    async function collectSourceFloorTiersForClone(sourceBldg, floorCode) {
+        const dims = window.FLOOR_DRAWING_TIER_DIMS || [4000, 8000, 16000];
+        const out = {};
+        const mem = sourceBldg.floorDrawingTiers && sourceBldg.floorDrawingTiers[floorCode];
+        if (mem && typeof mem === 'object') {
+            Object.entries(mem).forEach(([dim, url]) => {
+                if (isUsableRasterDrawingUrl(url)) out[String(dim)] = url;
+            });
+        }
+        for (const dim of dims) {
+            const dimKey = String(dim);
+            if (isUsableRasterDrawingUrl(out[dimKey])) continue;
+            let url = await idbGetFloorDrawingTier(sourceBldg.id, floorCode, dim);
+            if (!isUsableRasterDrawingUrl(url) && navigator.onLine !== false
+                && typeof fetchAndCacheCloudFloorDrawingTier === 'function') {
+                url = await fetchAndCacheCloudFloorDrawingTier(sourceBldg, floorCode, dim);
+            }
+            if (isUsableRasterDrawingUrl(url)) out[dimKey] = url;
+        }
+        return Object.keys(out).length ? out : null;
+    }
+
+    async function copyFloorDrawingTierAssetsToTarget(targetBldg, newBuildingId, floorCode, tiers) {
+        if (!tiers || !targetBldg || !newBuildingId || !floorCode) return;
+        if (!targetBldg.floorDrawingTiers) targetBldg.floorDrawingTiers = {};
+        targetBldg.floorDrawingTiers[floorCode] = { ...tiers };
+        for (const [dim, url] of Object.entries(tiers)) {
+            if (!isUsableRasterDrawingUrl(url)) continue;
+            const tierKey = floorDrawingTierIdbKey(newBuildingId, floorCode, dim);
+            await idbSet('floorDrawingTiers', tierKey, url);
+            _idbPersistedTierKeys.add(tierKey);
+        }
+        await uploadFloorDrawingTiers(newBuildingId, floorCode, targetBldg.floorDrawingTiers[floorCode]);
+        const base = tiers['4000'] || tiers[4000];
+        if (!isUsableRasterDrawingUrl(base)) return;
+        if (!targetBldg.floorDrawings) targetBldg.floorDrawings = {};
+        targetBldg.floorDrawings[floorCode] = base;
+        const newKey = `${newBuildingId}_${floorCode}`;
+        await idbSet('floorDrawings', newKey, base);
+        _idbPersistedDrawingKeys.add(newKey);
+        await uploadFloorDrawing(newBuildingId, floorCode, base);
+    }
+
+    async function cloneFloorDrawingsFromSource(sourceBldg, newBuildingId, targetBldg, options, onProgress) {
+        if (!sourceBldg || !newBuildingId || !targetBldg) return;
+        options = options || {};
+        const overwrite = !!options.overwriteDrawings;
+        const merge = !!options.merge;
+
+        const floorCodes = collectKnownFloorCodesForBuilding(sourceBldg);
+        if (!floorCodes.size && sourceBldg.floorsList?.length) {
+            sourceBldg.floorsList.forEach((f) => { if (f?.floorCode) floorCodes.add(f.floorCode); });
+        }
 
         if (!targetBldg.floorDrawings) targetBldg.floorDrawings = {};
         if (!targetBldg.floorDrawingPdfs) targetBldg.floorDrawingPdfs = {};
         if (!targetBldg.floorDrawingTiers) targetBldg.floorDrawingTiers = {};
         if (!targetBldg.floorDrawingSources) targetBldg.floorDrawingSources = {};
 
-        await Promise.all(Array.from(floorCodes).map(async (fc) => {
+        const list = [...floorCodes];
+        let done = 0;
+        for (const fc of list) {
+            done += 1;
+            onProgress?.(`도면 복사 ${done}/${list.length || done} (${fc})…`);
+
+            await ensureSourceFloorDrawingHydratedForClone(sourceBldg, fc);
+
+            const hasTarget = floorHasDrawingData(targetBldg, fc)
+                || !!(targetBldg.floorDrawingPdfs && targetBldg.floorDrawingPdfs[fc]);
+            if (merge && hasTarget && !overwrite) continue;
+
             const oldKey = `${sourceBldg.id}_${fc}`;
             const newKey = `${newBuildingId}_${fc}`;
 
-            if (!targetBldg.floorDrawings[fc]) {
-                let raster = srcDrawings[fc];
-                if (!raster) raster = await idbGet('floorDrawings', oldKey);
-                if (raster) {
+            const tiers = await collectSourceFloorTiersForClone(sourceBldg, fc);
+            if (tiers) {
+                await copyFloorDrawingTierAssetsToTarget(targetBldg, newBuildingId, fc, tiers);
+            } else if (overwrite || !isUsableRasterDrawingUrl(targetBldg.floorDrawings?.[fc])) {
+                let raster = sourceBldg.floorDrawings?.[fc];
+                if (!isUsableRasterDrawingUrl(raster)) raster = await idbGet('floorDrawings', oldKey);
+                if (!isUsableRasterDrawingUrl(raster)) {
+                    raster = await idbGetFloorDrawingTier(sourceBldg.id, fc, 4000);
+                }
+                if (!isUsableRasterDrawingUrl(raster) && navigator.onLine !== false
+                    && typeof fetchCloudFloorDrawingDataUrl === 'function') {
+                    raster = await fetchCloudFloorDrawingDataUrl(sourceBldg.id, fc);
+                }
+                if (isUsableRasterDrawingUrl(raster)) {
                     targetBldg.floorDrawings[fc] = raster;
                     await idbSet('floorDrawings', newKey, raster);
+                    _idbPersistedDrawingKeys.add(newKey);
                     await uploadFloorDrawing(newBuildingId, fc, raster);
                 }
             }
 
-            if (!targetBldg.floorDrawingPdfs[fc]) {
-                let pdf = srcPdfs[fc];
+            if (overwrite || !targetBldg.floorDrawingPdfs?.[fc]) {
+                let pdf = sourceBldg.floorDrawingPdfs?.[fc];
                 if (!pdf) pdf = await idbGet('floorDrawingPdfs', oldKey);
+                if (!pdf && typeof resolveBuildingFloorPdf === 'function') {
+                    pdf = await resolveBuildingFloorPdf(sourceBldg, fc, { localOnly: true });
+                    if (!pdf && navigator.onLine !== false) {
+                        pdf = await resolveBuildingFloorPdf(sourceBldg, fc, { forceCloud: true });
+                    }
+                }
                 if (pdf) {
-                    targetBldg.floorDrawingPdfs[fc] = pdf;
-                    await idbSet('floorDrawingPdfs', newKey, pdf);
+                    await applyResolvedPdfToBuilding(targetBldg, fc, pdf);
                     await uploadFloorDrawingPdf(newBuildingId, fc, pdf);
                 }
             }
 
-            if (!targetBldg.floorDrawingTiers[fc]) {
-                let tiers = (sourceBldg.floorDrawingTiers && sourceBldg.floorDrawingTiers[fc]) || null;
-                if (!tiers) tiers = await idbGet('floorDrawingTiers', oldKey);
-                if (tiers) {
-                    targetBldg.floorDrawingTiers[fc] = tiers;
-                    await idbSet('floorDrawingTiers', newKey, tiers);
-                    await uploadFloorDrawingTiers(newBuildingId, fc, tiers);
+            if (overwrite || !targetBldg.floorDrawingSources?.[fc]) {
+                let srcUrl = sourceBldg.floorDrawingSources?.[fc];
+                if (!srcUrl) srcUrl = await idbGet('floorDrawingSources', oldKey);
+                if (srcUrl) {
+                    targetBldg.floorDrawingSources[fc] = srcUrl;
+                    await idbSet('floorDrawingSources', newKey, srcUrl);
+                    _idbPersistedSourceKeys.add(newKey);
                 }
             }
+        }
 
-            if (!targetBldg.floorDrawingSources[fc]) {
-                let src = (sourceBldg.floorDrawingSources && sourceBldg.floorDrawingSources[fc]) || null;
-                if (!src) src = await idbGet('floorDrawingSources', oldKey);
-                if (src) {
-                    targetBldg.floorDrawingSources[fc] = src;
-                    await idbSet('floorDrawingSources', newKey, src);
-                }
+        if (!targetBldg.floorsList?.length && sourceBldg.floorsList?.length) {
+            targetBldg.floorsList = JSON.parse(JSON.stringify(sourceBldg.floorsList));
+        } else if (sourceBldg.floorsList?.length) {
+            const existing = new Set((targetBldg.floorsList || []).map((f) => f.floorCode));
+            sourceBldg.floorsList.forEach((f) => {
+                if (!f?.floorCode || existing.has(f.floorCode)) return;
+                if (!targetBldg.floorsList) targetBldg.floorsList = [];
+                targetBldg.floorsList.push(JSON.parse(JSON.stringify(f)));
+                existing.add(f.floorCode);
+            });
+            if (typeof window.sortFloorsLowToHigh === 'function') {
+                targetBldg.floorsList = window.sortFloorsLowToHigh(targetBldg.floorsList);
             }
-        }));
-
-        if (!targetBldg.floorsList || targetBldg.floorsList.length === 0) {
-            targetBldg.floorsList = JSON.parse(JSON.stringify(sourceBldg.floorsList || []));
         }
         if (!targetBldg.floors && sourceBldg.floors) {
             targetBldg.floors = sourceBldg.floors;
+        }
+        if (typeof syncBuildingDrawingFloorCodes === 'function') {
+            syncBuildingDrawingFloorCodes(targetBldg);
         }
     }
 
@@ -4695,7 +4812,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (options.floorsDrawings) {
             onProgress?.('도면 복사 중…');
-            await cloneFloorDrawingsFromSource(sourceBldg, newId, targetBldg);
+            await cloneFloorDrawingsFromSource(sourceBldg, newId, targetBldg, options, onProgress);
             if (merge && sourceBldg.floorsList?.length) {
                 const existing = new Set((targetBldg.floorsList || []).map(f => f.floorCode));
                 sourceBldg.floorsList.forEach((f) => {
@@ -4822,6 +4939,9 @@ document.addEventListener('DOMContentLoaded', () => {
             await cloneBuildingDataFromSource(sourceBldg, targetBldg, importOpts, (msg) => {
                 if (typeof window.updateLoadingText === 'function') window.updateLoadingText(msg);
             });
+            if (importOpts.floorsDrawings && typeof persistBuildingDrawingAssetsNow === 'function') {
+                await persistBuildingDrawingAssetsNow(targetBldg);
+            }
             saveStateToLocalStorage();
             await syncAfterImportWithRetry(label || '가져오기');
         } catch (err) {
@@ -33698,16 +33818,49 @@ document.addEventListener('DOMContentLoaded', () => {
         if (typeof window.resetLoadingOverlay === 'function') window.resetLoadingOverlay();
         else if (typeof window.hideLoading === 'function') window.hideLoading();
         clearBuildingSearchAutofill();
+        scheduleBuildingSearchAutofillCleanup();
+    }
+
+    /** 로그인 이메일이 현장 검색칸에 박히는지 판별 (@ 포함 또는 저장된 이메일과 동일). */
+    function isBuildingSearchAutofillSpam(value) {
+        const v = (value || '').trim();
+        if (!v) return false;
+        if (v.includes('@')) return true;
+        const loginEmail = (document.getElementById('authEmail')?.value || '').trim().toLowerCase();
+        if (loginEmail && v.toLowerCase() === loginEmail) return true;
+        const sessionEmail = (typeof firebase !== 'undefined' && firebase.auth && firebase.auth().currentUser?.email || '').toLowerCase();
+        if (sessionEmail && v.toLowerCase() === sessionEmail) return true;
+        return false;
+    }
+
+    /** readonly → 첫 포커스 시 해제: 페이지 로드·로그인 직후 자동완성 주입을 막는다. */
+    function armBuildingSearchAntiAutofill(el) {
+        if (!el || el.dataset.bsaSearchArmed === '1') return;
+        el.dataset.bsaSearchArmed = '1';
+        const unlock = () => {
+            if (el.readOnly) el.readOnly = false;
+        };
+        el.readOnly = true;
+        el.addEventListener('focus', unlock, { once: false });
+        el.addEventListener('pointerdown', unlock, { once: false });
+        el.addEventListener('touchstart', unlock, { once: false, passive: true });
     }
 
     /** 브라우저 자동완성이 로그인 이메일을 현장 검색칸에 채우는 경우를 지운다. */
     function clearBuildingSearchAutofill() {
         const el = document.getElementById('buildingSearchInput');
         if (!el) return;
-        const v = (el.value || '').trim();
-        if (!v.includes('@')) return;
+        if (!isBuildingSearchAutofillSpam(el.value)) return;
         el.value = '';
         window.state.buildingSearchTerm = '';
+        armBuildingSearchAntiAutofill(el);
+    }
+
+    /** WebView는 로그인 직후 늦게 자동완성을 넣는 경우가 있어 여러 시점에 재확인한다. */
+    function scheduleBuildingSearchAutofillCleanup() {
+        [0, 120, 400, 1000, 2500].forEach((ms) => {
+            setTimeout(clearBuildingSearchAutofill, ms);
+        });
     }
 
     async function enterAppAsUser(profile) {
@@ -33761,10 +33914,9 @@ document.addEventListener('DOMContentLoaded', () => {
         // 로그인 탭 직후 고스트 클릭이 홈 수정 버튼을 누르지 않도록 한 틱 지연
         setTimeout(() => {
             clearBuildingSearchAutofill();
+            scheduleBuildingSearchAutofillCleanup();
             if (typeof renderDashboard === 'function') renderDashboard();
             window.switchTab('tab-home');
-            // WebView는 로그인 직후 늦게 자동완성을 넣는 경우가 있어 한 번 더 확인
-            setTimeout(clearBuildingSearchAutofill, 400);
         }, 50);
     }
 

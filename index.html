@@ -38,7 +38,7 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <meta name="apple-mobile-web-app-title" content="스마트 안전점검">
-    <link rel="stylesheet" href="styles.css?v=20260902_round_type">
+    <link rel="stylesheet" href="styles.css?v=20260902_search_autofill">
     <!-- FontAwesome icons for clean engineering UI -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <!-- PDF 생성용: 페이지별로 직접 캡처해서 조립(큰 보고서에서 html2pdf 한방 렌더링이 캔버스 높이 한계로
@@ -207,10 +207,14 @@
                         </button>
                         <span id="dashboardSiteNavTitle" class="dashboard-site-nav-title"></span>
                     </div>
-                    <div class="building-search-bar">
+                    <form class="building-search-bar" role="search" autocomplete="off" action="#" onsubmit="return false;">
+                        <div class="bsa-autofill-trap" aria-hidden="true">
+                            <input type="text" name="bsa_trap_username" tabindex="-1" autocomplete="username">
+                            <input type="password" name="bsa_trap_password" tabindex="-1" autocomplete="current-password">
+                        </div>
                         <i class="fa-solid fa-magnifying-glass"></i>
-                        <input type="search" id="buildingSearchInput" name="building-site-filter" placeholder="현장명·주소·담당자·연락처 검색..." autocomplete="off" spellcheck="false" enterkeyhint="search">
-                    </div>
+                        <input type="text" id="buildingSearchInput" inputmode="search" placeholder="현장명·주소·담당자·연락처 검색..." autocomplete="one-time-code" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="search" data-lpignore="true" data-1p-ignore="true" data-bsa-site-search="1">
+                    </form>
                     <div class="building-list" id="buildingListGrid"></div>
                 </div>
 
@@ -2557,7 +2561,11 @@
             </div>
 
             <!-- Login & Registration Form -->
-            <form id="formLogin" style="display: flex; flex-direction: column; gap: 1.1rem;">
+            <form id="formLogin" autocomplete="on" style="display: flex; flex-direction: column; gap: 1.1rem;">
+                <div class="bsa-autofill-trap" aria-hidden="true">
+                    <input type="text" name="bsa_login_trap_user" tabindex="-1" autocomplete="username">
+                    <input type="password" name="bsa_login_trap_pass" tabindex="-1" autocomplete="current-password">
+                </div>
                 <div class="form-group" id="groupRegUserName" style="display: none; margin-bottom: 0;">
                     <label class="form-label" style="font-size: 0.83rem; font-weight: 700; color: #3f3f3f; margin-bottom: 0.4rem; display: block;">
                         <i class="fa-solid fa-id-badge" style="color: #2a2a2a;"></i> 이름 / 점검자 성함 *
@@ -2747,7 +2755,7 @@
     <script src="js/shared/report.js?v=20260827_overview"></script>
     <script src="js/shared/hwpx-import.js?v=20260825_hwpxin"></script>
     <script src="js/shared/auth.js?v=20260821_land1"></script>
-    <script src="app.js?v=20260902_autofill_fix"></script>
+    <script src="app.js?v=20260902_import_drawings"></script>
     <script>
         window.BSA_APP_VERSION = '20260902_legend_lock';
         (function () {
