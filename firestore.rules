@@ -8,7 +8,7 @@ rules_version = '2';
 //   companies/{companyId}/members/{uid}         → 승인된 팀원 (role: admin|member)
 //   companies/{companyId}/pendingRequests/{uid} → 가입 승인 대기
 //   companies/{companyId}/rejectedRequests/{uid}→ 가입 거절 이력
-//   joinCodes/{code}                            → 가입 코드 → companyId 조회용 (가입 전 미인증 상태에서 조회됨)
+//   joinCodes/{code}                            → 회사 검색·식별코드 조회용 (가입 전 미인증 상태에서도 읽기 가능)
 //   safety_app/{companyId}                      → 회사별 건물/결함 메타데이터 (실시간 동기화 대상)
 //   safety_app/{companyId}/floorDrawings/{id}   → 층별 도면 이미지(dataUrl)
 //   safety_app/{companyId}/floorDrawingPdfs/{id} → 층별 PDF 원본(dataUrl 또는 parts 서브컬렉션)
@@ -59,7 +59,7 @@ service cloud.firestore {
       allow delete: if request.auth != null && request.auth.uid == uid;
     }
 
-    // --- joinCodes/{code}: 회사명 조회를 위해 로그인 전(팀원 가입 화면)에도 읽혀야 함 ---
+    // --- joinCodes/{code}: 회사명 검색·식별코드 확인을 위해 로그인 전(팀원 가입 화면)에도 읽혀야 함 ---
     match /joinCodes/{code} {
       allow read: if true;
       // 새 회사를 막 생성한 관리자 본인만 자신의 회사에 대한 코드를 생성 가능

@@ -10366,3 +10366,94 @@ html.layout-tablet body.bsa-keyboard-open .edit-building-body {
     scroll-padding-bottom: calc(var(--bsa-kb-height, 0px) + 1rem);
 }
 
+/* 회사 가입: 이름 검색 + 식별코드 */
+.company-join-search-wrap {
+    position: relative;
+}
+
+.company-join-search-results {
+    margin-top: 0.45rem;
+    max-height: 220px;
+    overflow-y: auto;
+    border: 1px solid #d0d0d0;
+    border-radius: 10px;
+    background: #ffffff;
+    box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
+}
+
+.company-join-search-results[hidden] {
+    display: none !important;
+}
+
+.company-join-search-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.6rem;
+    width: 100%;
+    padding: 0.65rem 0.8rem;
+    border: none;
+    border-bottom: 1px solid #f1f5f9;
+    background: transparent;
+    text-align: left;
+    cursor: pointer;
+    transition: background 0.15s ease;
+}
+
+.company-join-search-item:last-child {
+    border-bottom: none;
+}
+
+.company-join-search-item:hover,
+.company-join-search-item:focus-visible {
+    background: #f8fafc;
+    outline: none;
+}
+
+.company-join-search-name {
+    font-size: 0.88rem;
+    font-weight: 700;
+    color: #171717;
+    line-height: 1.35;
+}
+
+.company-join-search-code {
+    flex-shrink: 0;
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    color: #64748b;
+    background: #f1f5f9;
+    border-radius: 6px;
+    padding: 0.15rem 0.45rem;
+}
+
+.company-join-search-empty {
+    padding: 0.75rem 0.8rem;
+    font-size: 0.8rem;
+    color: #94a3b8;
+    text-align: center;
+}
+
+.company-join-selected {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.6rem;
+    margin-top: 0.55rem;
+    padding: 0.55rem 0.7rem;
+    border-radius: 10px;
+    border: 1px solid #cbd5e1;
+    background: #f8fafc;
+    font-size: 0.84rem;
+    color: #334155;
+}
+
+.company-join-selected[hidden] {
+    display: none !important;
+}
+
+.company-join-selected .company-join-search-code {
+    margin-left: 0.35rem;
+}
+

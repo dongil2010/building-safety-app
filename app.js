@@ -33884,6 +33884,151 @@ document.addEventListener('DOMContentLoaded', () => {
         return generateJoinCode() + Date.now().toString(36).slice(-2).toUpperCase();
     }
 
+    let _joinCodesDirectoryCache = null;
+    let _joinCodesDirectoryCacheAt = 0;
+    const JOIN_CODES_DIRECTORY_CACHE_MS = 5 * 60 * 1000;
+    let _selectedJoinCompany = null;
+    let _companyJoinSearchTimer = null;
+
+    function escapeCompanyJoinHtml(text) {
+        return String(text || '')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;');
+    }
+
+    function formatCompanyJoinLabel(company) {
+        if (!company) return '';
+        const name = escapeCompanyJoinHtml(company.companyName || '회사');
+        const code = escapeCompanyJoinHtml(company.joinCode || '');
+        return `${name} <span class="company-join-search-code">${code}</span>`;
+    }
+
+    async function fetchJoinCodesDirectory(forceRefresh) {
+        if (!db) return [];
+        const stale = !_joinCodesDirectoryCache || (Date.now() - _joinCodesDirectoryCacheAt) > JOIN_CODES_DIRECTORY_CACHE_MS;
+        if (!forceRefresh && !stale) return _joinCodesDirectoryCache;
+        const snap = await db.collection('joinCodes').get();
+        _joinCodesDirectoryCache = snap.docs.map((docSnap) => {
+            const data = docSnap.data() || {};
+            return {
+                joinCode: docSnap.id,
+                companyId: data.companyId || '',
+                companyName: data.companyName || ''
+            };
+        }).filter((row) => row.companyId && row.companyName);
+        _joinCodesDirectoryCacheAt = Date.now();
+        return _joinCodesDirectoryCache;
+    }
+
+    function searchCompaniesInDirectory(query, directory) {
+        const q = String(query || '').trim().toLowerCase();
+        if (!q || q.length < 1) return [];
+        return (directory || [])
+            .filter((row) => {
+                const name = String(row.companyName || '').toLowerCase();
+                const code = String(row.joinCode || '').toLowerCase();
+                return name.includes(q) || code.includes(q);
+            })
+            .sort((a, b) => String(a.companyName || '').localeCompare(String(b.companyName || ''), 'ko'))
+            .slice(0, 20);
+    }
+
+    function getSelectedJoinCompany() {
+        return _selectedJoinCompany;
+    }
+
+    function setSelectedJoinCompany(company) {
+        _selectedJoinCompany = company || null;
+        const selectedBox = document.getElementById('companyJoinSelected');
+        const selectedLabel = document.getElementById('companyJoinSelectedLabel');
+        const searchInput = document.getElementById('companyJoinSearchInput');
+        const resultsBox = document.getElementById('companyJoinSearchResults');
+        if (selectedLabel) {
+            selectedLabel.innerHTML = _selectedJoinCompany ? formatCompanyJoinLabel(_selectedJoinCompany) : '';
+        }
+        if (selectedBox) selectedBox.hidden = !_selectedJoinCompany;
+        if (searchInput) {
+            searchInput.style.display = _selectedJoinCompany ? 'none' : '';
+            if (!_selectedJoinCompany) searchInput.value = '';
+        }
+        if (resultsBox) {
+            resultsBox.hidden = true;
+            resultsBox.innerHTML = '';
+        }
+    }
+
+    function clearSelectedJoinCompany() {
+        setSelectedJoinCompany(null);
+        const searchInput = document.getElementById('companyJoinSearchInput');
+        if (searchInput) {
+            searchInput.style.display = '';
+            searchInput.focus();
+        }
+    }
+
+    async function renderCompanyJoinSearchResults(query) {
+        const resultsBox = document.getElementById('companyJoinSearchResults');
+        if (!resultsBox || _selectedJoinCompany) return;
+        const q = String(query || '').trim();
+        if (!q) {
+            resultsBox.hidden = true;
+            resultsBox.innerHTML = '';
+            return;
+        }
+        resultsBox.hidden = false;
+        resultsBox.innerHTML = '<div class="company-join-search-empty">검색 중...</div>';
+        try {
+            const directory = await fetchJoinCodesDirectory(false);
+            const matches = searchCompaniesInDirectory(q, directory);
+            if (!matches.length) {
+                resultsBox.innerHTML = '<div class="company-join-search-empty">일치하는 회사가 없습니다. 이름을 다시 확인해 주세요.</div>';
+                return;
+            }
+            resultsBox.innerHTML = matches.map((row) => `
+                <button type="button" class="company-join-search-item" data-company-id="${escapeCompanyJoinHtml(row.companyId)}" data-company-name="${escapeCompanyJoinHtml(row.companyName)}" data-join-code="${escapeCompanyJoinHtml(row.joinCode)}">
+                    <span class="company-join-search-name">${escapeCompanyJoinHtml(row.companyName)}</span>
+                    <span class="company-join-search-code">${escapeCompanyJoinHtml(row.joinCode)}</span>
+                </button>
+            `).join('');
+            resultsBox.querySelectorAll('.company-join-search-item').forEach((btn) => {
+                btn.addEventListener('click', () => {
+                    setSelectedJoinCompany({
+                        companyId: btn.dataset.companyId,
+                        companyName: btn.dataset.companyName,
+                        joinCode: btn.dataset.joinCode
+                    });
+                    clearCompanyJoinError();
+                });
+            });
+        } catch (err) {
+            console.warn('회사 검색 실패:', err);
+            resultsBox.innerHTML = '<div class="company-join-search-empty">회사 목록을 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.</div>';
+        }
+    }
+
+    function scheduleCompanyJoinSearch(query) {
+        if (_companyJoinSearchTimer) clearTimeout(_companyJoinSearchTimer);
+        _companyJoinSearchTimer = setTimeout(() => {
+            renderCompanyJoinSearchResults(query).catch(() => {});
+        }, 220);
+    }
+
+    function resetCompanyJoinSearchUi() {
+        clearSelectedJoinCompany();
+        const searchInput = document.getElementById('companyJoinSearchInput');
+        const resultsBox = document.getElementById('companyJoinSearchResults');
+        if (searchInput) {
+            searchInput.value = '';
+            searchInput.style.display = '';
+        }
+        if (resultsBox) {
+            resultsBox.hidden = true;
+            resultsBox.innerHTML = '';
+        }
+    }
+
     function showAuthError(err) {
         const box = document.getElementById('authErrorMsg');
         if (!box) return;
@@ -33953,12 +34098,11 @@ document.addEventListener('DOMContentLoaded', () => {
         const hint = document.getElementById('companyJoinHint');
         if (hint) {
             hint.innerHTML = hintMessage || (
-                '대표에게 받은 <strong>6자리 가입 코드</strong>를 입력해 회사에 소속 신청하세요.<br>'
-                + '승인 전까지는 점검 기능을 사용할 수 없습니다.'
+                '소속할 <strong>회사명을 검색</strong>해 선택한 뒤 가입을 신청하세요.<br>'
+                + '이름이 같은 회사는 <strong>식별코드</strong>로 구분합니다. 승인 전까지는 점검 기능을 사용할 수 없습니다.'
             );
         }
-        const codeInput = document.getElementById('companyJoinCodeInput');
-        if (codeInput) codeInput.value = '';
+        resetCompanyJoinSearchUi();
         clearCompanyJoinError();
         const headerProfile = document.getElementById('headerUserProfileGroup');
         if (headerProfile) headerProfile.style.display = 'none';
@@ -34156,7 +34300,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 window.state.companyId = null;
                 window.state.companyName = null;
                 window.state.role = 'none';
-                showCompanyJoinOverlay('가입 신청이 <strong>거절</strong>되었습니다. 다른 회사 코드로 다시 신청할 수 있습니다.');
+                showCompanyJoinOverlay('가입 신청이 <strong>거절</strong>되었습니다. 다른 회사를 검색해 다시 신청할 수 있습니다.');
             } else if (status === 'admin' || status === 'member') {
                 await enterAppAsUser({
                     uid: user.uid,
@@ -34169,7 +34313,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 window.state.uid = user.uid;
                 window.state.userName = data.name;
                 window.state.role = 'none';
-                showCompanyJoinOverlay('회사 소속 정보를 확인할 수 없습니다. 가입 코드로 다시 신청해 주세요.');
+                showCompanyJoinOverlay('회사 소속 정보를 확인할 수 없습니다. 회사명을 검색해 다시 신청해 주세요.');
             }
         } catch (e) {
             console.error('로그인 상태 확인 오류:', e);
@@ -34297,6 +34441,7 @@ document.addEventListener('DOMContentLoaded', () => {
             await db.collection('joinCodes').doc(joinCode).set({
                 companyId: companyRef.id, companyName
             });
+            _joinCodesDirectoryCache = null;
             await companyRef.collection('members').doc(uid).set({
                 name, email, role: 'admin',
                 approvedAt: firebase.firestore.FieldValue.serverTimestamp()
@@ -34338,7 +34483,7 @@ document.addEventListener('DOMContentLoaded', () => {
             window.state.companyId = null;
             window.state.companyName = null;
             window.state.role = 'none';
-            showCompanyJoinOverlay('계정이 생성되었습니다.<br>회사 가입 코드를 입력해 소속을 신청해 주세요.');
+            showCompanyJoinOverlay('계정이 생성되었습니다.<br>회사명을 검색해 소속을 신청해 주세요.');
         } catch (err) {
             showAuthError(err);
             if (cred && cred.user) { try { await cred.user.delete(); } catch (e) {} }
@@ -34348,18 +34493,22 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     };
 
-    window.applyToCompany = async function(joinCode) {
+    window.applyToCompany = async function() {
         clearCompanyJoinError();
         const user = auth && auth.currentUser;
         if (!user || !db) {
             showCompanyJoinError('로그인이 필요합니다.');
             return;
         }
-        const code = String(joinCode || '').trim().toUpperCase();
-        if (!code) {
-            showCompanyJoinError('가입 코드를 입력해 주세요.');
+
+        const selected = getSelectedJoinCompany();
+        if (!selected || !selected.companyId) {
+            showCompanyJoinError('가입할 회사를 검색해 선택해 주세요.');
             return;
         }
+        const companyId = selected.companyId;
+        let companyName = selected.companyName || '';
+
         window.showLoading('회사 가입을 신청하는 중입니다...');
         try {
             const uid = user.uid;
@@ -34371,12 +34520,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 return;
             }
 
-            const codeDoc = await db.collection('joinCodes').doc(code).get();
-            if (!codeDoc.exists) {
-                showCompanyJoinError('가입 코드를 확인해 주세요. 일치하는 회사가 없습니다.');
-                return;
+            if (!companyName) {
+                const companyDoc = await db.collection('companies').doc(companyId).get();
+                if (companyDoc.exists) companyName = companyDoc.data().name || companyName;
             }
-            const { companyId, companyName } = codeDoc.data();
 
             if (ctx.pendingCompanyId && ctx.pendingCompanyId !== companyId) {
                 await clearUserCompanyLinks(uid, ctx.pendingCompanyId, { removeMember: false });
@@ -34431,7 +34578,7 @@ document.addEventListener('DOMContentLoaded', () => {
             window.state.companyId = null;
             window.state.companyName = null;
             window.state.role = 'none';
-            showCompanyJoinOverlay('가입 신청을 취소했습니다. 다른 회사 코드로 다시 신청할 수 있습니다.');
+            showCompanyJoinOverlay('가입 신청을 취소했습니다. 다른 회사를 검색해 다시 신청할 수 있습니다.');
         } catch (err) {
             console.error('가입 신청 취소 오류:', err);
             window.showToast('신청 취소 중 오류가 발생했습니다.', 'error');
@@ -34463,7 +34610,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const btnLeaveCompany = document.getElementById('btnLeaveCompany');
             if (btnLeaveCompany) btnLeaveCompany.style.display = 'none';
             window.showToast('회사에서 나왔습니다.', 'info', 4000);
-            showCompanyJoinOverlay('다른 회사 가입 코드로 다시 소속을 신청할 수 있습니다.');
+            showCompanyJoinOverlay('다른 회사를 검색해 다시 소속을 신청할 수 있습니다.');
         } catch (err) {
             console.error('회사 나가기 오류:', err);
             window.showToast(err.message || '회사 나가기 중 오류가 발생했습니다.', 'error', 5000);
@@ -34933,19 +35080,28 @@ document.addEventListener('DOMContentLoaded', () => {
         const btnApplyCompanyJoin = document.getElementById('btnApplyCompanyJoin');
         const btnCompanyJoinLogout = document.getElementById('btnCompanyJoinLogout');
         const btnCompanyJoinDeleteAccount = document.getElementById('btnCompanyJoinDeleteAccount');
-        const companyJoinCodeInput = document.getElementById('companyJoinCodeInput');
+        const companyJoinSearchInput = document.getElementById('companyJoinSearchInput');
+        const btnCompanyJoinClearSelection = document.getElementById('btnCompanyJoinClearSelection');
         if (btnApplyCompanyJoin) {
             btnApplyCompanyJoin.addEventListener('click', () => {
-                window.applyToCompany(companyJoinCodeInput ? companyJoinCodeInput.value : '');
+                window.applyToCompany();
             });
         }
-        if (companyJoinCodeInput) {
-            companyJoinCodeInput.addEventListener('keydown', (e) => {
+        if (companyJoinSearchInput) {
+            companyJoinSearchInput.addEventListener('input', () => {
+                scheduleCompanyJoinSearch(companyJoinSearchInput.value);
+            });
+            companyJoinSearchInput.addEventListener('keydown', (e) => {
                 if (e.key === 'Enter') {
                     e.preventDefault();
-                    window.applyToCompany(companyJoinCodeInput.value);
+                    const first = document.querySelector('#companyJoinSearchResults .company-join-search-item');
+                    if (first) first.click();
+                    else window.applyToCompany();
                 }
             });
+        }
+        if (btnCompanyJoinClearSelection) {
+            btnCompanyJoinClearSelection.addEventListener('click', clearSelectedJoinCompany);
         }
         if (btnCompanyJoinLogout) btnCompanyJoinLogout.addEventListener('click', window.logout);
         if (btnCompanyJoinDeleteAccount) btnCompanyJoinDeleteAccount.addEventListener('click', openDeleteAccountModal);
