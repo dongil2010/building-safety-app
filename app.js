@@ -11690,7 +11690,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // 클라우드 OCR(Gemini, Cloudflare Worker 프록시) 주소.
     // 비워두면(빈 문자열) 클라우드 시도 없이 기존 Tesseract(로컬) 인식만 사용한다.
     // 배포 방법: cloudflare-worker/README.md 참고.
-    const CLOUD_OCR_ENDPOINT = '';
+    const CLOUD_OCR_ENDPOINT = 'https://frosty-king-12ef.dongilgujo2010.workers.dev';
 
     function rValueChipsHtml(slotIdx) {
         const readings = ndtStrengthSlots[slotIdx].readings;

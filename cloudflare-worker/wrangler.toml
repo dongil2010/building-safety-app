@@ -1,0 +1,10 @@
+name = "concrete-ocr-proxy"
+main = "ocr-proxy.js"
+compatibility_date = "2026-08-01"
+
+# GEMINI_API_KEY는 여기 적지 말고 secret으로 등록한다:
+#   wrangler secret put GEMINI_API_KEY
+#
+# 앱 도메인으로 CORS를 제한하고 싶으면 vars에 추가:
+# [vars]
+# ALLOWED_ORIGIN = "https://your-username.github.io"
