@@ -33697,6 +33697,17 @@ document.addEventListener('DOMContentLoaded', () => {
         if (window.BSA?.mobileKeyboard?.reset) window.BSA.mobileKeyboard.reset();
         if (typeof window.resetLoadingOverlay === 'function') window.resetLoadingOverlay();
         else if (typeof window.hideLoading === 'function') window.hideLoading();
+        clearBuildingSearchAutofill();
+    }
+
+    /** 브라우저 자동완성이 로그인 이메일을 현장 검색칸에 채우는 경우를 지운다. */
+    function clearBuildingSearchAutofill() {
+        const el = document.getElementById('buildingSearchInput');
+        if (!el) return;
+        const v = (el.value || '').trim();
+        if (!v.includes('@')) return;
+        el.value = '';
+        window.state.buildingSearchTerm = '';
     }
 
     async function enterAppAsUser(profile) {
@@ -33749,8 +33760,11 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         // 로그인 탭 직후 고스트 클릭이 홈 수정 버튼을 누르지 않도록 한 틱 지연
         setTimeout(() => {
+            clearBuildingSearchAutofill();
             if (typeof renderDashboard === 'function') renderDashboard();
             window.switchTab('tab-home');
+            // WebView는 로그인 직후 늦게 자동완성을 넣는 경우가 있어 한 번 더 확인
+            setTimeout(clearBuildingSearchAutofill, 400);
         }, 50);
     }
 

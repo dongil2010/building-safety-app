@@ -209,7 +209,7 @@
                     </div>
                     <div class="building-search-bar">
                         <i class="fa-solid fa-magnifying-glass"></i>
-                        <input type="text" id="buildingSearchInput" placeholder="현장명·주소·담당자·연락처 검색...">
+                        <input type="search" id="buildingSearchInput" name="building-site-filter" placeholder="현장명·주소·담당자·연락처 검색..." autocomplete="off" spellcheck="false" enterkeyhint="search">
                     </div>
                     <div class="building-list" id="buildingListGrid"></div>
                 </div>
@@ -2582,14 +2582,14 @@
                     <label class="form-label" style="font-size: 0.83rem; font-weight: 700; color: #3f3f3f; margin-bottom: 0.4rem; display: block;">
                         <i class="fa-solid fa-envelope" style="color: #2a2a2a;"></i> 이메일 *
                     </label>
-                    <input type="email" id="authEmail" class="form-control" placeholder="예: user@company.com" style="background: #fafafa; color: #171717; border: 1px solid #d0d0d0; border-radius: 10px; padding: 0.7rem 0.9rem; font-size: 0.9rem; width: 100%; box-sizing: border-box;">
+                    <input type="email" id="authEmail" class="form-control" placeholder="예: user@company.com" autocomplete="username" style="background: #fafafa; color: #171717; border: 1px solid #d0d0d0; border-radius: 10px; padding: 0.7rem 0.9rem; font-size: 0.9rem; width: 100%; box-sizing: border-box;">
                 </div>
 
                 <div class="form-group" style="margin-bottom: 0;">
                     <label class="form-label" style="font-size: 0.83rem; font-weight: 700; color: #3f3f3f; margin-bottom: 0.4rem; display: block;">
                         <i class="fa-solid fa-lock" style="color: #2a2a2a;"></i> 비밀번호 *
                     </label>
-                    <input type="password" id="authPassword" class="form-control" placeholder="비밀번호 입력 (6자 이상)" style="background: #fafafa; color: #171717; border: 1px solid #d0d0d0; border-radius: 10px; padding: 0.7rem 0.9rem; font-size: 0.9rem; width: 100%; box-sizing: border-box;">
+                    <input type="password" id="authPassword" class="form-control" placeholder="비밀번호 입력 (6자 이상)" autocomplete="current-password" style="background: #fafafa; color: #171717; border: 1px solid #d0d0d0; border-radius: 10px; padding: 0.7rem 0.9rem; font-size: 0.9rem; width: 100%; box-sizing: border-box;">
                 </div>
 
                 <div id="authErrorMsg" style="display: none; background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.3); color: #dc2626; font-size: 0.8rem; font-weight: 600; padding: 0.6rem 0.8rem; border-radius: 8px;"></div>
@@ -2747,7 +2747,7 @@
     <script src="js/shared/report.js?v=20260827_overview"></script>
     <script src="js/shared/hwpx-import.js?v=20260825_hwpxin"></script>
     <script src="js/shared/auth.js?v=20260821_land1"></script>
-    <script src="app.js?v=20260902_round_type"></script>
+    <script src="app.js?v=20260902_autofill_fix"></script>
     <script>
         window.BSA_APP_VERSION = '20260902_legend_lock';
         (function () {
