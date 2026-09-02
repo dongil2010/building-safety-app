@@ -7022,6 +7022,40 @@ body:not(.bsa-tab-home) .home-fab-add-building {
     border-color: #e2e8f0;
 }
 
+/* 홈 상단 계정 바 — 설정(톱니) 밖, 항상 표시 */
+.hero-account-bar {
+    margin: 0 0 0.75rem;
+    padding: 0.65rem 0.75rem;
+    border-radius: var(--radius-md);
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+}
+
+.hero-account-bar .hero-user-group {
+    display: flex;
+    flex-direction: column;
+    gap: 0.55rem;
+    background: transparent;
+    border: none;
+    padding: 0;
+}
+
+.hero-account-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    align-items: center;
+}
+
+.hero-user-email {
+    display: block;
+    margin-top: 0.15rem;
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: #64748b;
+    word-break: break-all;
+}
+
 .home-settings-panel .hero-user-name {
     color: #334155;
 }

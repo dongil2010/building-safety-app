@@ -38,7 +38,7 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <meta name="apple-mobile-web-app-title" content="스마트 안전점검">
-    <link rel="stylesheet" href="styles.css?v=20260902_search_autofill">
+    <link rel="stylesheet" href="styles.css?v=20260902_account_actions">
     <!-- FontAwesome icons for clean engineering UI -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <!-- PDF 생성용: 페이지별로 직접 캡처해서 조립(큰 보고서에서 html2pdf 한방 렌더링이 캔버스 높이 한계로
@@ -148,6 +148,32 @@
                     </div>
                 </div>
 
+                <!-- 계정: 설정 패널 밖에 항상 표시 (회사 나가기·계정 삭제·로그아웃) -->
+                <div id="heroAccountBar" class="hero-account-bar" hidden>
+                    <div id="headerUserProfileGroup" class="hero-user-group">
+                        <span id="userProfileText" class="hero-user-name">
+                            <i class="fa-solid fa-user-shield"></i>
+                            <span id="lblUserCompany">회사</span>
+                            (<span id="lblUserName">점검자</span>)
+                            <span id="lblUserEmail" class="hero-user-email"></span>
+                        </span>
+                        <div class="hero-account-actions">
+                            <button type="button" id="btnOpenMemberApproval" class="btn btn-sm btn-outline hero-btn-approve" style="display: none;" title="가입 승인 관리">
+                                <i class="fa-solid fa-user-check"></i> 가입 승인
+                            </button>
+                            <button type="button" id="btnLeaveCompany" class="btn btn-sm btn-outline hero-btn-leave-company" style="display: none;" title="회사 나가기">
+                                <i class="fa-solid fa-building-circle-xmark"></i> 회사 나가기
+                            </button>
+                            <button type="button" id="btnLogout" class="btn btn-sm btn-outline hero-btn-logout" title="로그아웃">
+                                <i class="fa-solid fa-right-from-bracket"></i> 로그아웃
+                            </button>
+                            <button type="button" id="btnDeleteAccount" class="btn btn-sm btn-danger-outline hero-btn-delete-account" title="계정 삭제">
+                                <i class="fa-solid fa-user-xmark"></i> 계정 삭제
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
                 <div id="homeSettingsPanel" class="home-settings-panel" hidden>
                     <div class="home-settings-panel-inner">
                         <div class="hero-company-row">
@@ -177,23 +203,6 @@
                             </button>
                             <button type="button" class="btn btn-outline hero-btn-phone" id="btnTriggerPhoneRelay">
                                 <i class="fa-solid fa-mobile-screen-button"></i> 📱 휴대폰으로 촬영해서 바로 받기
-                            </button>
-                        </div>
-                        <div id="headerUserProfileGroup" class="hero-user-group">
-                            <span id="userProfileText" class="hero-user-name">
-                                <i class="fa-solid fa-user-shield"></i> <span id="lblUserCompany">(주)한국안전진단기술원</span> (<span id="lblUserName">홍길동</span>)
-                            </span>
-                            <button type="button" id="btnOpenMemberApproval" class="btn btn-sm btn-outline hero-btn-approve" style="display: none;" title="가입 승인 관리">
-                                <i class="fa-solid fa-user-check"></i> 가입 승인 관리
-                            </button>
-                            <button type="button" id="btnLeaveCompany" class="btn btn-sm btn-outline hero-btn-leave-company" style="display: none;" title="회사 나가기">
-                                <i class="fa-solid fa-building-circle-xmark"></i> 회사 나가기
-                            </button>
-                            <button type="button" id="btnLogout" class="btn btn-sm btn-outline hero-btn-logout" title="로그아웃">
-                                <i class="fa-solid fa-right-from-bracket"></i> 로그아웃
-                            </button>
-                            <button type="button" id="btnDeleteAccount" class="btn btn-sm btn-danger-outline hero-btn-delete-account" title="계정 삭제">
-                                <i class="fa-solid fa-user-xmark"></i> 계정 삭제
                             </button>
                         </div>
                     </div>
@@ -296,7 +305,7 @@
                         </label>
                         <label style="display:flex; align-items:center; gap:0.4rem; font-size:0.78rem; white-space:nowrap;">📍 핀(박스) 크기 <input type="range" id="stylePinSizeAll" min="0.5" max="4.4" step="0.1" value="1.0" style="width:110px;" disabled> <span id="stylePinSizeAllLabel" style="font-weight:700; min-width:34px; display:inline-block; text-align:right;">100%</span></label>
                         <label style="display:flex; align-items:center; gap:0.4rem; font-size:0.78rem; white-space:nowrap;">➔ 화살표 크기 <input type="range" id="styleArrowSizeAll" min="0.5" max="5.0" step="0.1" value="1.0" style="width:110px;" disabled> <span id="styleArrowSizeAllLabel" style="font-weight:700; min-width:34px; display:inline-block; text-align:right;">100%</span></label>
-                        <label style="display:flex; align-items:center; gap:0.4rem; font-size:0.78rem; white-space:nowrap;">〰 연결선·테두리 굵기 <input type="range" id="styleLeaderLineScaleAll" min="0.5" max="5.0" step="0.1" value="1.0" style="width:110px;" disabled> <span id="styleLeaderLineScaleAllLabel" style="font-weight:700; min-width:34px; display:inline-block; text-align:right;">100%</span></label>
+                        <label style="display:flex; align-items:center; gap:0.4rem; font-size:0.78rem; white-space:nowrap;">〰 연결선·테두리 굵기 <input type="range" id="styleLeaderLineScaleAll" min="0.1" max="5.0" step="0.1" value="1.0" style="width:110px;" disabled> <span id="styleLeaderLineScaleAllLabel" style="font-weight:700; min-width:34px; display:inline-block; text-align:right;">100%</span></label>
                         <button type="button" id="btnApplyMapStyleAllFloors" class="chip map-style-all-floors-btn" title="지금 층의 핀·화살표·연결선 설정을 이 건물 전체 층에 복사">전체층 적용</button>
                     </div>
 
@@ -619,7 +628,7 @@
                 </label>
                 <label style="display:flex; align-items:center; gap:0.4rem; font-size:0.78rem; white-space:nowrap;">📍 핀(박스) 크기 <input type="range" id="stylePinSizeNdtCurrent" min="0.5" max="4.4" step="0.1" value="1.0" style="width:110px;" disabled> <span id="stylePinSizeNdtCurrentLabel" style="font-weight:700; min-width:34px; display:inline-block; text-align:right;">100%</span></label>
                 <label style="display:flex; align-items:center; gap:0.4rem; font-size:0.78rem; white-space:nowrap;">➔ 화살표 크기 <input type="range" id="styleArrowSizeNdtCurrent" min="0.5" max="5.0" step="0.1" value="1.0" style="width:110px;" disabled> <span id="styleArrowSizeNdtCurrentLabel" style="font-weight:700; min-width:34px; display:inline-block; text-align:right;">100%</span></label>
-                <label style="display:flex; align-items:center; gap:0.4rem; font-size:0.78rem; white-space:nowrap;">〰 연결선·테두리 굵기 <input type="range" id="styleLeaderLineScaleNdtCurrent" min="0.5" max="3.0" step="0.1" value="1.0" style="width:110px;" disabled> <span id="styleLeaderLineScaleNdtCurrentLabel" style="font-weight:700; min-width:34px; display:inline-block; text-align:right;">100%</span></label>
+                <label style="display:flex; align-items:center; gap:0.4rem; font-size:0.78rem; white-space:nowrap;">〰 연결선·테두리 굵기 <input type="range" id="styleLeaderLineScaleNdtCurrent" min="0.1" max="3.0" step="0.1" value="1.0" style="width:110px;" disabled> <span id="styleLeaderLineScaleNdtCurrentLabel" style="font-weight:700; min-width:34px; display:inline-block; text-align:right;">100%</span></label>
             </div>
 
             <!-- NDT Canvas Viewport -->
@@ -1151,7 +1160,7 @@
                     <div class="style-size-row">
                         <label>핀 <input type="range" id="stylePinSizeNdtMeasure" min="0.5" max="4.4" step="0.1" value="1.0"> <span id="stylePinSizeNdtMeasureLabel">100%</span></label>
                         <label>화살표 <input type="range" id="styleArrowSizeNdtMeasure" min="0.5" max="5.0" step="0.1" value="1.0"> <span id="styleArrowSizeNdtMeasureLabel">100%</span></label>
-                        <label>선 굵기 <input type="range" id="styleLeaderSizeNdtMeasure" min="0.5" max="3.0" step="0.1" value="1.0"> <span id="styleLeaderSizeNdtMeasureLabel">100%</span></label>
+                        <label>선 굵기 <input type="range" id="styleLeaderSizeNdtMeasure" min="0.1" max="3.0" step="0.1" value="1.0"> <span id="styleLeaderSizeNdtMeasureLabel">100%</span></label>
                     </div>
                     <div class="style-shape-row">
                         <select id="styleShapeNdtMeasure"><option value="rect">직사각형</option><option value="rounded">둥근 사각형</option><option value="circle">원형</option></select>
@@ -1167,7 +1176,7 @@
                     <div class="style-size-row">
                         <label>핀 <input type="range" id="stylePinSizeNdtStrength" min="0.5" max="4.4" step="0.1" value="1.0"> <span id="stylePinSizeNdtStrengthLabel">100%</span></label>
                         <label>화살표 <input type="range" id="styleArrowSizeNdtStrength" min="0.5" max="5.0" step="0.1" value="1.0"> <span id="styleArrowSizeNdtStrengthLabel">100%</span></label>
-                        <label>선 굵기 <input type="range" id="styleLeaderSizeNdtStrength" min="0.5" max="3.0" step="0.1" value="1.0"> <span id="styleLeaderSizeNdtStrengthLabel">100%</span></label>
+                        <label>선 굵기 <input type="range" id="styleLeaderSizeNdtStrength" min="0.1" max="3.0" step="0.1" value="1.0"> <span id="styleLeaderSizeNdtStrengthLabel">100%</span></label>
                     </div>
                     <div class="style-shape-row">
                         <select id="styleShapeNdtStrength"><option value="rect">직사각형</option><option value="rounded">둥근 사각형</option><option value="circle">원형</option></select>
@@ -1183,7 +1192,7 @@
                     <div class="style-size-row">
                         <label>핀 <input type="range" id="stylePinSizeNdtCarbonation" min="0.5" max="4.4" step="0.1" value="1.0"> <span id="stylePinSizeNdtCarbonationLabel">100%</span></label>
                         <label>화살표 <input type="range" id="styleArrowSizeNdtCarbonation" min="0.5" max="5.0" step="0.1" value="1.0"> <span id="styleArrowSizeNdtCarbonationLabel">100%</span></label>
-                        <label>선 굵기 <input type="range" id="styleLeaderSizeNdtCarbonation" min="0.5" max="3.0" step="0.1" value="1.0"> <span id="styleLeaderSizeNdtCarbonationLabel">100%</span></label>
+                        <label>선 굵기 <input type="range" id="styleLeaderSizeNdtCarbonation" min="0.1" max="3.0" step="0.1" value="1.0"> <span id="styleLeaderSizeNdtCarbonationLabel">100%</span></label>
                     </div>
                     <div class="style-shape-row">
                         <select id="styleShapeNdtCarbonation"><option value="rect">직사각형</option><option value="rounded">둥근 사각형</option><option value="circle">원형</option></select>
@@ -1199,7 +1208,7 @@
                     <div class="style-size-row">
                         <label>핀 <input type="range" id="stylePinSizeNdtTilt" min="0.5" max="4.4" step="0.1" value="1.0"> <span id="stylePinSizeNdtTiltLabel">100%</span></label>
                         <label>화살표 <input type="range" id="styleArrowSizeNdtTilt" min="0.5" max="5.0" step="0.1" value="1.0"> <span id="styleArrowSizeNdtTiltLabel">100%</span></label>
-                        <label>선 굵기 <input type="range" id="styleLeaderSizeNdtTilt" min="0.5" max="3.0" step="0.1" value="1.0"> <span id="styleLeaderSizeNdtTiltLabel">100%</span></label>
+                        <label>선 굵기 <input type="range" id="styleLeaderSizeNdtTilt" min="0.1" max="3.0" step="0.1" value="1.0"> <span id="styleLeaderSizeNdtTiltLabel">100%</span></label>
                     </div>
                     <div class="style-shape-row">
                         <select id="styleShapeNdtTilt"><option value="rect">직사각형</option><option value="rounded">둥근 사각형</option><option value="circle">원형</option></select>
@@ -1215,7 +1224,7 @@
                     <div class="style-size-row">
                         <label>핀 <input type="range" id="stylePinSizeNdtSettlement" min="0.5" max="4.4" step="0.1" value="1.0"> <span id="stylePinSizeNdtSettlementLabel">100%</span></label>
                         <label>화살표 <input type="range" id="styleArrowSizeNdtSettlement" min="0.5" max="5.0" step="0.1" value="1.0"> <span id="styleArrowSizeNdtSettlementLabel">100%</span></label>
-                        <label>선 굵기 <input type="range" id="styleLeaderSizeNdtSettlement" min="0.5" max="3.0" step="0.1" value="1.0"> <span id="styleLeaderSizeNdtSettlementLabel">100%</span></label>
+                        <label>선 굵기 <input type="range" id="styleLeaderSizeNdtSettlement" min="0.1" max="3.0" step="0.1" value="1.0"> <span id="styleLeaderSizeNdtSettlementLabel">100%</span></label>
                     </div>
                     <div class="style-shape-row">
                         <select id="styleShapeNdtSettlement"><option value="rect">직사각형</option><option value="rounded">둥근 사각형</option><option value="circle">원형</option></select>
@@ -1231,7 +1240,7 @@
                     <div class="style-size-row">
                         <label>핀 <input type="range" id="stylePinSizeNdtMemberDisp" min="0.5" max="4.4" step="0.1" value="1.0"> <span id="stylePinSizeNdtMemberDispLabel">100%</span></label>
                         <label>화살표 <input type="range" id="styleArrowSizeNdtMemberDisp" min="0.5" max="5.0" step="0.1" value="1.0"> <span id="styleArrowSizeNdtMemberDispLabel">100%</span></label>
-                        <label>선 굵기 <input type="range" id="styleLeaderSizeNdtMemberDisp" min="0.5" max="3.0" step="0.1" value="1.0"> <span id="styleLeaderSizeNdtMemberDispLabel">100%</span></label>
+                        <label>선 굵기 <input type="range" id="styleLeaderSizeNdtMemberDisp" min="0.1" max="3.0" step="0.1" value="1.0"> <span id="styleLeaderSizeNdtMemberDispLabel">100%</span></label>
                     </div>
                     <div class="style-shape-row">
                         <select id="styleShapeNdtMemberDisp"><option value="rect">직사각형</option><option value="rounded">둥근 사각형</option><option value="circle">원형</option></select>
@@ -1247,7 +1256,7 @@
                     <div class="style-size-row">
                         <label>핀 <input type="range" id="stylePinSizeNdtFireproof" min="0.5" max="4.4" step="0.1" value="1.0"> <span id="stylePinSizeNdtFireproofLabel">100%</span></label>
                         <label>화살표 <input type="range" id="styleArrowSizeNdtFireproof" min="0.5" max="5.0" step="0.1" value="1.0"> <span id="styleArrowSizeNdtFireproofLabel">100%</span></label>
-                        <label>선 굵기 <input type="range" id="styleLeaderSizeNdtFireproof" min="0.5" max="3.0" step="0.1" value="1.0"> <span id="styleLeaderSizeNdtFireproofLabel">100%</span></label>
+                        <label>선 굵기 <input type="range" id="styleLeaderSizeNdtFireproof" min="0.1" max="3.0" step="0.1" value="1.0"> <span id="styleLeaderSizeNdtFireproofLabel">100%</span></label>
                     </div>
                     <div class="style-shape-row">
                         <select id="styleShapeNdtFireproof"><option value="rect">직사각형</option><option value="rounded">둥근 사각형</option><option value="circle">원형</option></select>
@@ -2666,6 +2675,9 @@
                 <button type="button" id="btnCompanyJoinLogout" class="btn btn-outline" style="width: 100%; justify-content: center;">
                     <i class="fa-solid fa-right-from-bracket"></i> 로그아웃
                 </button>
+                <button type="button" id="btnCompanyJoinDeleteAccount" class="btn btn-danger-outline" style="width: 100%; justify-content: center;">
+                    <i class="fa-solid fa-user-xmark"></i> 계정 삭제
+                </button>
             </div>
         </div>
     </div>
@@ -2755,7 +2767,7 @@
     <script src="js/shared/report.js?v=20260827_overview"></script>
     <script src="js/shared/hwpx-import.js?v=20260825_hwpxin"></script>
     <script src="js/shared/auth.js?v=20260821_land1"></script>
-    <script src="app.js?v=20260902_import_drawings"></script>
+    <script src="app.js?v=20260902_leader_line_v4"></script>
     <script>
         window.BSA_APP_VERSION = '20260902_legend_lock';
         (function () {

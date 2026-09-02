@@ -659,6 +659,46 @@ document.addEventListener('DOMContentLoaded', () => {
     // --- 4. PERSISTENCE ENGINE (LOCAL STORAGE + INDEXEDDB) ---
     let _localStorageSaveFailedNotified = false;
     let _suppressSyncOnSave = false;
+    const LOCAL_STATE_KEY_LEGACY = 'building_safety_app_state_v2';
+    const LOCAL_STATE_KEY_COMPANY_PREFIX = 'building_safety_app_state_v2_c_';
+    let _activeLocalStateCompanyId = null;
+
+    function getLocalStorageStateKey(companyId) {
+        if (companyId) return `${LOCAL_STATE_KEY_COMPANY_PREFIX}${companyId}`;
+        return LOCAL_STATE_KEY_LEGACY;
+    }
+
+    function clearInspectionStateInMemory() {
+        window.state.buildings = [];
+        window.state.defects = {};
+        window.state.ndtData = {};
+        window.state.ndtDisplacementGroups = {};
+        window.state.deletedDefectIds = {};
+        window.state.deletedNdtIds = {};
+        window.state.deletedBuildingIds = [];
+        window.state.confirmedDeletedIds = {};
+        window.state.currentBuildingId = null;
+        window.state.currentBuilding = null;
+        window.state.currentFloor = null;
+    }
+
+    /** 회사 전환 시 메모리·로컬 캐시를 회사 단위로 분리 (다른 회사/가입 전 데이터와 섞이지 않게) */
+    async function switchCompanyLocalDataContext(companyId, uid) {
+        const prevCompanyId = _activeLocalStateCompanyId;
+        if (prevCompanyId && prevCompanyId !== companyId && typeof saveStateToLocalStorage === 'function') {
+            const prevSuppress = _suppressSyncOnSave;
+            _suppressSyncOnSave = true;
+            try { saveStateToLocalStorage(); } catch (e) { /* ignore */ }
+            _suppressSyncOnSave = prevSuppress;
+        }
+        _activeLocalStateCompanyId = companyId || null;
+        clearInspectionStateInMemory();
+        if (companyId && typeof loadStateFromLocalStorage === 'function') {
+            loadStateFromLocalStorage({ companyId });
+        } else if (!companyId && uid && typeof loadStateFromLocalStorage === 'function') {
+            loadStateFromLocalStorage({ companyId: null });
+        }
+    }
 
     // 이미 IndexedDB에 저장해둔 이미지는 매번 다시 쓰지 않도록 키를 기억해둔다
     // (saveStateToLocalStorage는 아주 자주 호출되므로, 안 그러면 같은 이미지를 계속 다시 쓰게 된다)
@@ -1863,7 +1903,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 areaFillStyle: window.state.areaFillStyle || 'solid',
                 areaBorderStyle: window.state.areaBorderStyle || 'solid'
             };
-            localStorage.setItem('building_safety_app_state_v2', JSON.stringify(dataToSave));
+            localStorage.setItem(getLocalStorageStateKey(window.state.companyId), JSON.stringify(dataToSave));
+            if (window.state.companyId) {
+                try { localStorage.setItem('bsa_last_active_company_id', window.state.companyId); } catch (_e) { /* ignore */ }
+            }
             _localStorageSaveFailedNotified = false;
             if (window.state.uid) persistUserDefectPinPresetsLocal(window.state.uid);
             if (!_suppressSyncOnSave && typeof scheduleSyncToFirebase === 'function') {
@@ -1910,9 +1953,15 @@ document.addEventListener('DOMContentLoaded', () => {
         ];
     }
 
-    function loadStateFromLocalStorage() {
+    function loadStateFromLocalStorage(options) {
+        options = options || {};
+        const companyId = options.companyId !== undefined ? options.companyId : window.state.companyId;
         try {
-            const saved = localStorage.getItem('building_safety_app_state_v2');
+            let saved = localStorage.getItem(getLocalStorageStateKey(companyId));
+            // 회사 로그인 시 전역(가입 전) 로컬 blob은 읽지 않음 — 클라우드·회사별 캐시만 사용
+            if (!saved && !companyId) {
+                saved = localStorage.getItem(LOCAL_STATE_KEY_LEGACY);
+            }
             if (saved) {
                 const parsed = JSON.parse(saved);
                 if (parsed.buildings && Array.isArray(parsed.buildings)) {
@@ -2048,6 +2097,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 window.purgeExpiredBuildingTrash().catch(() => {});
             }
             if (typeof window.updateBuildingTrashBadge === 'function') window.updateBuildingTrashBadge();
+            if (typeof migrateLeaderLineScalesIfNeeded === 'function') migrateLeaderLineScalesIfNeeded();
         } catch (e) {
             console.error('LocalStorage load failed:', e);
             window.state.buildings = getDefaultBuildings();
@@ -2792,6 +2842,14 @@ document.addEventListener('DOMContentLoaded', () => {
         return merged;
     }
 
+    function mergeNdtRecord(serverRec, localRec) {
+        const serverTs = getRecordUpdatedAt(serverRec, 'ndt');
+        const localTs = getRecordUpdatedAt(localRec, 'ndt');
+        const newer = localTs >= serverTs ? localRec : serverRec;
+        const older = localTs >= serverTs ? serverRec : localRec;
+        return { ...older, ...newer };
+    }
+
     function mergeIdRecordArrays(serverArr, localArr, deletedIds, kind) {
         const deleted = new Set(deletedIds || []);
         const byId = new Map();
@@ -2805,6 +2863,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 byId.set(rec.id, rec);
             } else if (kind === 'pin') {
                 byId.set(rec.id, mergeDefectRecord(existing, rec));
+            } else if (kind === 'ndt') {
+                byId.set(rec.id, mergeNdtRecord(existing, rec));
             } else if (getRecordUpdatedAt(rec, kind) >= getRecordUpdatedAt(existing, kind)) {
                 byId.set(rec.id, rec);
             }
@@ -8092,19 +8152,22 @@ document.addEventListener('DOMContentLoaded', () => {
         return shapeCfg.fill ? '#ffffff' : activeColor;
     }
 
-    /** 번호 박스 글자 — 얇은 흰 외곽선으로 도면 위 가독성 확보 */
-    function drawOutlinedPinText(ctx, text, x, y, fillColor, fontCss, outlineColor) {
+    /** 번호 박스 글자 — 흰 외곽선으로 도면 위 가독성 확보 */
+    function drawOutlinedPinText(ctx, text, x, y, fillColor, fontCss, outlineColor, opts) {
+        opts = opts || {};
         const label = String(text || '');
         if (!label) return;
         ctx.font = fontCss;
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
+        ctx.textAlign = opts.textAlign || 'center';
+        ctx.textBaseline = opts.textBaseline || 'middle';
         ctx.lineJoin = 'round';
         ctx.miterLimit = 2;
         const fontSizeMatch = String(fontCss).match(/(\d+(?:\.\d+)?)px/);
         const fontSize = fontSizeMatch ? parseFloat(fontSizeMatch[1]) : 11;
         ctx.strokeStyle = outlineColor || '#ffffff';
-        ctx.lineWidth = Math.max(0.75, Math.min(1.75, fontSize * 0.13));
+        ctx.lineWidth = opts.outlineWidth !== undefined
+            ? opts.outlineWidth
+            : Math.max(1.1, Math.min(2.8, fontSize * 0.2));
         ctx.strokeText(label, x, y);
         ctx.fillStyle = fillColor;
         ctx.fillText(label, x, y);
@@ -8134,17 +8197,88 @@ document.addEventListener('DOMContentLoaded', () => {
         return Math.max(9, Math.round(11 * scale));
     }
 
-    function getPinBoxBorderWidth(scale, roundLineMul, isBeingDragged, leaderScaleOverride) {
-        // 연결선 굵기 슬라이더와 동일 배율로 번호칸 테두리도 조절
+    const LEADER_LINE_SCALE_MIN = 0.1;
+    const LEADER_LINE_SCALE_MAX_MAP = 5.0;
+    const LEADER_LINE_SCALE_MAX_NDT = 3.0;
+    // 동일 슬라이더 %에서 구버전보다 얇게: factor = 슬라이더 × 0.5 (구버전 50% ≈ 신버전 100%)
+    const LEADER_LINE_RENDER_MUL = 0.5;
+    const LEADER_LINE_CORE_MUL = 1.0;
+    const PIN_BOX_BORDER_CORE_MUL = 1.1;
+
+    function clampLeaderLineScale(raw, max = LEADER_LINE_SCALE_MAX_MAP) {
+        return Math.min(Math.max(parseFloat(raw || 1), LEADER_LINE_SCALE_MIN), max);
+    }
+
+    function getLeaderLineRenderFactor(raw, max = LEADER_LINE_SCALE_MAX_MAP) {
+        return clampLeaderLineScale(raw, max) * LEADER_LINE_RENDER_MUL;
+    }
+
+    function getLeaderLineStrokeWidth(scale, roundLineMul, isBeingDragged, leaderScaleOverride) {
         const raw = leaderScaleOverride !== undefined && leaderScaleOverride !== null
             ? leaderScaleOverride
             : getActiveLeaderLineScale();
-        const factor = Math.min(Math.max(parseFloat(raw || 1), 0.5), 5.0);
-        return (isBeingDragged ? 1.5 : 1.1) * (scale || 1) * (roundLineMul || 1) * factor;
+        const max = leaderScaleOverride !== undefined && leaderScaleOverride !== null
+            ? LEADER_LINE_SCALE_MAX_NDT
+            : LEADER_LINE_SCALE_MAX_MAP;
+        const factor = getLeaderLineRenderFactor(raw, max);
+        const dragMul = isBeingDragged ? 1.5 : LEADER_LINE_CORE_MUL;
+        return dragMul * (scale || 1) * (roundLineMul || 1) * factor;
+    }
+
+    function scaleLeaderLineStoredValue(v, mul, max) {
+        if (v === undefined || v === null) return v;
+        const n = parseFloat(v);
+        if (!Number.isFinite(n)) return v;
+        const cap = max || LEADER_LINE_SCALE_MAX_MAP;
+        return Math.min(cap, Math.max(LEADER_LINE_SCALE_MIN, Math.round(n * mul * 10) / 10));
+    }
+
+    function migrateLeaderLineScalesIfNeeded() {
+        if (window.state._leaderLineScaleV3Migrated) return;
+        let changed = false;
+        const undoV2Halving = (obj, key, max) => {
+            if (!window.state._leaderLineScaleV2Migrated) return;
+            if (!obj || obj[key] === undefined || obj[key] === null) return;
+            const next = scaleLeaderLineStoredValue(obj[key], 2, max);
+            if (next !== obj[key]) {
+                obj[key] = next;
+                changed = true;
+            }
+        };
+        undoV2Halving(window.state, 'defectLeaderLineScale', LEADER_LINE_SCALE_MAX_MAP);
+        undoV2Halving(window.state, 'ndtLeaderLineScale', LEADER_LINE_SCALE_MAX_NDT);
+        if (window.state.styleSizes) {
+            Object.values(window.state.styleSizes).forEach((sz) => undoV2Halving(sz, 'leader', LEADER_LINE_SCALE_MAX_NDT));
+        }
+        if (window.state.floorMapStyleSettings) {
+            Object.values(window.state.floorMapStyleSettings).forEach((saved) => {
+                undoV2Halving(saved, 'defectLeaderLineScale', LEADER_LINE_SCALE_MAX_MAP);
+                if (saved && saved.styleSizes) {
+                    Object.values(saved.styleSizes).forEach((sz) => undoV2Halving(sz, 'leader', LEADER_LINE_SCALE_MAX_NDT));
+                }
+            });
+        }
+        window.state._leaderLineScaleV3Migrated = true;
+        if (changed && typeof saveStateToLocalStorage === 'function') {
+            saveStateToLocalStorage();
+        }
+    }
+
+    function getPinBoxBorderWidth(scale, roundLineMul, isBeingDragged, leaderScaleOverride) {
+        // 번호칸 테두리 — 연결선과 동일 슬라이더 배율, 기본 두께만 약간 더 두껍게
+        const raw = leaderScaleOverride !== undefined && leaderScaleOverride !== null
+            ? leaderScaleOverride
+            : getActiveLeaderLineScale();
+        const max = leaderScaleOverride !== undefined && leaderScaleOverride !== null
+            ? LEADER_LINE_SCALE_MAX_NDT
+            : LEADER_LINE_SCALE_MAX_MAP;
+        const factor = getLeaderLineRenderFactor(raw, max);
+        const dragMul = isBeingDragged ? 1.5 : PIN_BOX_BORDER_CORE_MUL;
+        return dragMul * (scale || 1) * (roundLineMul || 1) * factor;
     }
 
     function getDefectLeaderLineWidth(scale, roundLineMul, isBeingDragged) {
-        return getPinBoxBorderWidth(scale, roundLineMul, isBeingDragged);
+        return getLeaderLineStrokeWidth(scale, roundLineMul, isBeingDragged);
     }
 
     function getNdtLeaderLineScale(styleKey) {
@@ -8153,7 +8287,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function getNdtLeaderLineWidth(scale, isBeingDragged, styleKey) {
-        return getPinBoxBorderWidth(scale || 1, 1, isBeingDragged, getNdtLeaderLineScale(styleKey));
+        return getLeaderLineStrokeWidth(scale || 1, 1, isBeingDragged, getNdtLeaderLineScale(styleKey));
     }
 
     function getCurrentNdtStyleKey() {
@@ -8400,20 +8534,38 @@ document.addEventListener('DOMContentLoaded', () => {
         return getPinLeaderBoxAnchorFromPoint(boxX, boxY, targetX, targetY, boxW, boxH, rotationDeg, shapeOpts);
     }
 
-    function getArrowOctantUnitVector(octant) {
+    function rotateVec2Deg(x, y, deg) {
+        const rad = ((deg || 0) * Math.PI) / 180;
+        const cos = Math.cos(rad);
+        const sin = Math.sin(rad);
+        return { x: x * cos - y * sin, y: x * sin + y * cos };
+    }
+
+    function getArrowOctantScreenUnitVector(octant) {
         const o = ((parseInt(octant, 10) % 8) + 8) % 8;
         const rad = (o * Math.PI) / 4;
         return { x: Math.cos(rad), y: Math.sin(rad), octant: o };
     }
 
-    function resolveForcedArrowDirection(arrowItem, defect) {
+    /** UI(화면) 기준 팔방향 → 도면 이미지 좌표 단위벡터 */
+    function getArrowOctantImageUnitVector(octant, rotationDeg) {
+        const screen = getArrowOctantScreenUnitVector(octant);
+        const img = rotateVec2Deg(screen.x, screen.y, -(rotationDeg || 0));
+        return { x: img.x, y: img.y, octant: screen.octant };
+    }
+
+    function getArrowOctantUnitVector(octant) {
+        return getArrowOctantScreenUnitVector(octant);
+    }
+
+    function resolveForcedArrowDirection(arrowItem, defect, rotationDeg) {
         const forceFlag = (arrowItem && arrowItem.forceArrowDir !== undefined)
             ? !!arrowItem.forceArrowDir
             : !!(defect && defect.forceArrowDir);
         const octantRaw = (arrowItem && arrowItem.arrowOctant !== undefined)
             ? arrowItem.arrowOctant
             : (defect && defect.arrowOctant !== undefined ? defect.arrowOctant : 0);
-        const unit = getArrowOctantUnitVector(octantRaw);
+        const unit = getArrowOctantImageUnitVector(octantRaw, rotationDeg);
         return { enabled: forceFlag, octant: unit.octant, ux: unit.x, uy: unit.y };
     }
 
@@ -8438,7 +8590,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function buildForcedLeaderRoute(target, boxX, boxY, boxW, boxH, pinScale, arrowScale, octant, stemInset, headLen, rotationDeg, shapeOpts) {
-        const unit = getArrowOctantUnitVector(octant);
+        const unit = getArrowOctantImageUnitVector(octant, rotationDeg);
         const pullBack = Math.max(3 * (arrowScale || 1), headLen * 0.45);
         const stemEnd = getArrowStemEndPoint(target.x, target.y, unit.x, unit.y, stemInset);
         const tail = {
@@ -9220,21 +9372,15 @@ document.addEventListener('DOMContentLoaded', () => {
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
 
-        // 좌측 NO
-        ctx.font = `bold ${Math.round(15 * pinScale)}px sans-serif`;
-        ctx.fillText(noStr, -boxW / 2 + col1W / 2, 0);
+        const outline = '#ffffff';
+        drawOutlinedPinText(ctx, noStr, -boxW / 2 + col1W / 2, 0, color, `bold ${Math.round(15 * pinScale)}px sans-serif`, outline);
 
-        // 중·우 셀
         const midX = -boxW / 2 + col1W + col2W / 2;
         const rightX = -boxW / 2 + col1W + col2W + col3W / 2;
-        ctx.font = `bold ${Math.round(10.5 * pinScale)}px sans-serif`;
-        ctx.fillText(amountLabel, midX, -boxH / 4);
-        ctx.fillText('변위방향', midX, boxH / 4);
-
-        ctx.font = `bold ${Math.round(12.5 * pinScale)}px sans-serif`;
-        ctx.fillText(tiltVal, rightX, -boxH / 4);
-        ctx.font = `bold ${Math.round(18 * pinScale)}px sans-serif`;
-        ctx.fillText(dispDir, rightX, boxH / 4);
+        drawOutlinedPinText(ctx, amountLabel, midX, -boxH / 4, color, `bold ${Math.round(10.5 * pinScale)}px sans-serif`, outline);
+        drawOutlinedPinText(ctx, '변위방향', midX, boxH / 4, color, `bold ${Math.round(10.5 * pinScale)}px sans-serif`, outline);
+        drawOutlinedPinText(ctx, tiltVal, rightX, -boxH / 4, color, `bold ${Math.round(12.5 * pinScale)}px sans-serif`, outline);
+        drawOutlinedPinText(ctx, dispDir, rightX, boxH / 4, color, `bold ${Math.round(18 * pinScale)}px sans-serif`, outline);
 
         ctx.restore();
     }
@@ -9337,10 +9483,8 @@ document.addEventListener('DOMContentLoaded', () => {
             ctx.fillStyle = color;
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
-            ctx.font = `bold ${fontNo}px sans-serif`;
-            ctx.fillText(noStr, -boxW / 2 + col1W / 2, 0);
-            ctx.font = `bold ${fontType}px sans-serif`;
-            ctx.fillText(typeLabel, -boxW / 2 + col1W + (boxW - col1W) / 2, 0);
+            drawOutlinedPinText(ctx, noStr, -boxW / 2 + col1W / 2, 0, color, `bold ${fontNo}px sans-serif`, '#ffffff');
+            drawOutlinedPinText(ctx, typeLabel, -boxW / 2 + col1W + (boxW - col1W) / 2, 0, color, `bold ${fontType}px sans-serif`, '#ffffff');
             ctx.restore();
             return;
         }
@@ -9439,11 +9583,17 @@ document.addEventListener('DOMContentLoaded', () => {
             ctx.fill();
 
             if (groupCounterRotate) ctx.rotate((groupCounterRotate * Math.PI) / 180);
-            ctx.fillStyle = isPtDragged ? '#d97706' : color;
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'top';
-            ctx.font = `bold ${fontSize}px sans-serif`;
-            ctx.fillText(seqLabel, 0, r + 2 * pinScale);
+            const ptColor = isPtDragged ? '#d97706' : color;
+            drawOutlinedPinText(
+                ctx,
+                seqLabel,
+                0,
+                r + 2 * pinScale,
+                ptColor,
+                `bold ${fontSize}px sans-serif`,
+                '#ffffff',
+                { textBaseline: 'top' }
+            );
             ctx.restore();
         });
 
@@ -9470,11 +9620,13 @@ document.addEventListener('DOMContentLoaded', () => {
             ctx.strokeRect(-groupDim.w / 2 - 3 * pinScale, -groupDim.h / 2 - 3 * pinScale, groupDim.w + 6 * pinScale, groupDim.h + 6 * pinScale);
             ctx.setLineDash([]);
         }
-        ctx.fillStyle = boxColor;
-        ctx.font = `bold ${getPinBoxFontSize(pinScale)}px sans-serif`;
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText(groupNoStr, 0, 0);
+        drawPinBoxLabel(
+            ctx,
+            groupNoStr,
+            getPinBoxTextColor(boxColor, groupShapeCfg, isGroupDragged || isActiveZone),
+            pinScale,
+            groupShapeCfg
+        );
         ctx.restore();
     }
 
@@ -15669,8 +15821,7 @@ document.addEventListener('DOMContentLoaded', () => {
     function drawAreaRect(ctx, defect, isPreview, forReport) {
         if (!defect || defect.areaX1 === undefined) return;
         const isBeingDragged = (!isPreview && typeof activeDragPin !== 'undefined' && activeDragPin && activeDragPin.id === defect.id);
-        const isPrevRoundDefect = !forReport && isPreviousRoundDefect(defect);
-        const roundLineMul = isPrevRoundDefect ? 1.35 : 1.0;
+        const roundLineMul = 1.0;
         const mainColor = getDefectColor(defect);
         const activeColor = isBeingDragged ? '#facc15' : mainColor;
         const fillStyle = getAreaFillStyle(defect);
@@ -16054,9 +16205,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const shapeCfg = getDefectPinShapeCfg(defect, defectStyleKey);
         const useCircleTip = state.tipShape === 'circle';
 
-        // 전회차(과거 조사) 결함은 도면에서 더 두껍고 진하게 표시 — 보고서(drawPinSafe)는 구분 없이 그대로 둠
-        const isPrevRoundDefect = isPreviousRoundDefect(defect);
-        const roundLineMul = isPrevRoundDefect ? 1.6 : 1.0;
+        const roundLineMul = 1.0;
         const activeColor = isBeingDragged ? '#facc15' : mainColor;
 
         const targets = (arrows && arrows.length > 0)
@@ -16089,7 +16238,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const stemInset = useCircleTip
                 ? (isBeingDragged ? 6 : 4.5) * arrowScale
                 : headLen * Math.cos(Math.PI / 6);
-            const forcedDir = tipIsArea ? { enabled: false } : resolveForcedArrowDirection(t, defect);
+            const forcedDir = tipIsArea ? { enabled: false } : resolveForcedArrowDirection(t, defect, state.rotationAngle || 0);
             const leader = forcedDir.enabled
                 ? buildForcedLeaderRoute(
                     { x: targetX, y: targetY },
@@ -18716,7 +18865,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const sampleSize = getStyleSize('defectStructural');
         const pinV = sampleSize.pin;
         const arrowV = sampleSize.arrow;
-        const lineV = Math.min(Math.max(parseFloat(getActiveLeaderLineScale() || 1), 0.5), 5.0);
+        const lineV = clampLeaderLineScale(getActiveLeaderLineScale() || 1);
         if (pinAllInput) pinAllInput.value = pinV;
         if (pinAllLabel) pinAllLabel.textContent = `${Math.round(pinV * 100)}%`;
         if (arrowAllInput) arrowAllInput.value = arrowV;
@@ -18735,7 +18884,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const ndtSample = getStyleSize(ndtKey);
         const ndtPinV = ndtSample.pin;
         const ndtArrowV = ndtSample.arrow;
-        const ndtLineV = Math.min(Math.max(parseFloat(ndtSample.leader || 1), 0.5), 3.0);
+        const ndtLineV = clampLeaderLineScale(ndtSample.leader || 1, LEADER_LINE_SCALE_MAX_NDT);
         if (ndtCatLabel) {
             const cat = currentNdtCategory || '실측';
             ndtCatLabel.textContent = (cat === '강도' || cat === '탄산화')
@@ -18856,7 +19005,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             if (leaderInput) {
                 leaderInput.addEventListener('input', () => {
-                    const v = Math.min(Math.max(parseFloat(leaderInput.value || '1'), 0.5), 3.0);
+                    const v = clampLeaderLineScale(leaderInput.value || '1', LEADER_LINE_SCALE_MAX_NDT);
                     setStyleSizeFields(key, { leader: v });
                     if (leaderLabel) leaderLabel.textContent = `${Math.round(v * 100)}%`;
                     if (key === 'ndtStrength' || key === 'ndtCarbonation') syncNdtStrengthCarbSizeControlsUi();
@@ -18922,7 +19071,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const leaderLineAllInput = document.getElementById('styleLeaderLineScaleAll');
         const leaderLineAllLabel = document.getElementById('styleLeaderLineScaleAllLabel');
         const syncLeaderLineUi = () => {
-            const v = Math.min(Math.max(parseFloat(getActiveLeaderLineScale() || 1), 0.5), 5.0);
+            const v = clampLeaderLineScale(getActiveLeaderLineScale() || 1);
             if (leaderLineAllInput) leaderLineAllInput.value = v;
             if (leaderLineAllLabel) leaderLineAllLabel.textContent = `${Math.round(v * 100)}%`;
         };
@@ -18930,7 +19079,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (typeof window.syncBulkStyleSlidersUi === 'function') window.syncBulkStyleSlidersUi();
         if (leaderLineAllInput) {
             leaderLineAllInput.addEventListener('input', () => {
-                const v = Math.min(Math.max(parseFloat(leaderLineAllInput.value || '1'), 0.5), 5.0);
+                const v = clampLeaderLineScale(leaderLineAllInput.value || '1');
                 state.defectLeaderLineScale = v;
                 if (leaderLineAllLabel) leaderLineAllLabel.textContent = `${Math.round(v * 100)}%`;
                 if (typeof drawCanvas === 'function') drawCanvas();
@@ -18997,7 +19146,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (ndtLineCur) {
             ndtLineCur.addEventListener('input', () => {
                 const key = getCurrentNdtStyleKey();
-                const v = Math.min(Math.max(parseFloat(ndtLineCur.value || '1'), 0.5), 3.0);
+                const v = clampLeaderLineScale(ndtLineCur.value || '1', LEADER_LINE_SCALE_MAX_NDT);
                 if (ndtLineCurLabel) ndtLineCurLabel.textContent = `${Math.round(v * 100)}%`;
                 setStyleSizeFields(key, { leader: v });
                 syncNdtModalSizeUi(key);
@@ -24404,6 +24553,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
             const safeLabel = formatDefectPinLabel(defect, safeStyleKey);
             const { w: safeBoxW, h: safeBoxH } = measurePinBoxDimensions(ctx, safeLabel, safeScale, 1);
+            const floorRotSafe = getSavedFloorDrawingRotation(defect.buildingId || state.currentBuildingId, defect.floorCode || state.currentFloor) || 0;
 
             // Draw Leader Line & Arrowhead/Tip — 실선, 마킹과 가장 가까운 박스 모서리에서 시작
             const isAreaDefectSafe = defect.shapeType === 'area' && defect.areaX1 !== undefined;
@@ -24423,7 +24573,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 const leaderAnchorOpts = { shape: safeShapeCfg.shape, scale: safeScale };
                 const anchor = getPinLeaderBoxAnchor(boxX, boxY, tipX, tipY, safeBoxW, safeBoxH, 0, leaderAnchorOpts);
                 const safeHeadLen = 11 * safeArrowScale;
-                const forcedDir = tipIsArea ? { enabled: false } : resolveForcedArrowDirection(t, defect);
+                const forcedDir = tipIsArea ? { enabled: false } : resolveForcedArrowDirection(t, defect, floorRotSafe);
                 const stemInset = useCircleTipSafe
                     ? 4.5 * safeArrowScale
                     : safeHeadLen * Math.cos(Math.PI / 6);
@@ -24439,7 +24589,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         forcedDir.octant,
                         stemInset,
                         safeHeadLen,
-                        0,
+                        floorRotSafe,
                         leaderAnchorOpts
                     )
                     : (() => {
@@ -24528,6 +24678,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 : []);
 
         const isAreaDefect = defect.shapeType === 'area' && defect.areaX1 !== undefined;
+        const floorRot = getSavedFloorDrawingRotation(defect.buildingId || state.currentBuildingId, defect.floorCode || state.currentFloor) || 0;
         const leaders = [];
         const areaPayloads = [];
         const seenAreaIds = new Set();
@@ -24571,9 +24722,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 tipY = attach.y;
             }
             const leaderAnchorOpts = { shape: shapeCfg.shape, scale: pinScale };
-            const anchor = getPinLeaderBoxAnchor(boxX, boxY, tipX, tipY, boxDim.w, boxDim.h, 0, leaderAnchorOpts);
+            const anchor = getPinLeaderBoxAnchor(boxX, boxY, tipX, tipY, boxDim.w, boxDim.h, floorRot, leaderAnchorOpts);
             const headLen = 11 * arrowScale;
-            const forcedDir = tipIsArea ? { enabled: false } : resolveForcedArrowDirection(t, defect);
+            const forcedDir = tipIsArea ? { enabled: false } : resolveForcedArrowDirection(t, defect, floorRot);
             const stemInset = useCircleTip
                 ? 4.5 * arrowScale
                 : headLen * Math.cos(Math.PI / 6);
@@ -24582,7 +24733,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     { x: tipX, y: tipY },
                     boxX, boxY, boxDim.w, boxDim.h,
                     pinScale, arrowScale, forcedDir.octant,
-                    stemInset, headLen, 0,
+                    stemInset, headLen, floorRot,
                     leaderAnchorOpts
                 )
                 : (() => {
@@ -33416,9 +33567,9 @@ document.addEventListener('DOMContentLoaded', () => {
             isChanged = true;
         }
 
-        if (data.ndtData) {
+        {
             const ndtMerge = mergeNdtDataMaps(
-                filterMapKeysByDeletedBuildings(data.ndtData, mergedDeletedBuildings),
+                filterMapKeysByDeletedBuildings(data.ndtData || {}, mergedDeletedBuildings),
                 filterMapKeysByDeletedBuildings(window.state.ndtData || {}, mergedDeletedBuildings),
                 filterMapKeysByDeletedBuildings(data.deletedNdtIds || {}, mergedDeletedBuildings),
                 filterMapKeysByDeletedBuildings(window.state.deletedNdtIds || {}, mergedDeletedBuildings)
@@ -33434,11 +33585,14 @@ document.addEventListener('DOMContentLoaded', () => {
             isChanged = true;
         }
 
-        if (data.ndtDisplacementGroups) {
-            window.state.ndtDisplacementGroups = filterMapKeysByDeletedBuildings(
-                data.ndtDisplacementGroups,
-                mergedDeletedBuildings
+        {
+            const dispMerge = mergeNdtDataMaps(
+                filterMapKeysByDeletedBuildings(data.ndtDisplacementGroups || {}, mergedDeletedBuildings),
+                filterMapKeysByDeletedBuildings(window.state.ndtDisplacementGroups || {}, mergedDeletedBuildings),
+                {},
+                {}
             );
+            window.state.ndtDisplacementGroups = dispMerge.ndtData;
             isChanged = true;
         }
         if (data.grids) {
@@ -33654,6 +33808,20 @@ document.addEventListener('DOMContentLoaded', () => {
     let currentUnsubscribe = null;
     let _listenerNeedsResubscribe = false;
 
+    /** 로그인 직후 서버 문서를 한 번 강제로 읽어 팀원 NDT·결함 데이터를 즉시 반영 */
+    async function pullCompanySnapshotOnce() {
+        if (!db || !window.state.companyId || navigator.onLine === false) return;
+        try {
+            const docRef = db.collection('safety_app').doc(getCompanyDocId());
+            const snap = await fetchCompanyDocSnap(docRef);
+            if (snap.exists) {
+                await applyRemoteSnapshotFromListener(snap.data());
+            }
+        } catch (e) {
+            console.warn('회사 데이터 초기 조회 실패:', e);
+        }
+    }
+
     function listenToRealtimeUpdates() {
         if (!db || !window.state.companyId) return;
         if (currentUnsubscribe) {
@@ -33733,6 +33901,11 @@ document.addEventListener('DOMContentLoaded', () => {
         box.style.display = 'block';
     }
 
+    function setHeroAccountBarVisible(visible) {
+        const bar = document.getElementById('heroAccountBar');
+        if (bar) bar.hidden = !visible;
+    }
+
     function clearAuthError() {
         const box = document.getElementById('authErrorMsg');
         if (box) { box.style.display = 'none'; box.textContent = ''; }
@@ -33750,6 +33923,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (companyJoinCard) companyJoinCard.style.display = 'none';
         const headerProfile = document.getElementById('headerUserProfileGroup');
         if (headerProfile) headerProfile.style.display = 'none';
+        setHeroAccountBarVisible(false);
         clearAuthError();
         clearCompanyJoinError();
     }
@@ -33788,6 +33962,7 @@ document.addEventListener('DOMContentLoaded', () => {
         clearCompanyJoinError();
         const headerProfile = document.getElementById('headerUserProfileGroup');
         if (headerProfile) headerProfile.style.display = 'none';
+        setHeroAccountBarVisible(false);
     }
 
     function showPendingApproval(companyName) {
@@ -33804,6 +33979,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (lbl) lbl.textContent = companyName || '회사';
         const headerProfile = document.getElementById('headerUserProfileGroup');
         if (headerProfile) headerProfile.style.display = 'none';
+        setHeroAccountBarVisible(false);
     }
 
     function hideAuthOverlay() {
@@ -33877,10 +34053,17 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const headerProfile = document.getElementById('headerUserProfileGroup');
         if (headerProfile) headerProfile.style.display = 'flex';
+        setHeroAccountBarVisible(true);
         const lblCompany = document.getElementById('lblUserCompany');
         const lblUser = document.getElementById('lblUserName');
+        const lblEmail = document.getElementById('lblUserEmail');
         if (lblCompany) lblCompany.textContent = profile.companyName || '';
         if (lblUser) lblUser.textContent = profile.name || '';
+        if (lblEmail) {
+            const email = (auth && auth.currentUser && auth.currentUser.email) || '';
+            lblEmail.textContent = email ? email : '';
+            lblEmail.style.display = email ? 'block' : 'none';
+        }
         const inputHomeCompany = document.getElementById('inputHomeCompanyName');
         if (inputHomeCompany) inputHomeCompany.value = profile.companyName || '';
 
@@ -33896,9 +34079,13 @@ document.addEventListener('DOMContentLoaded', () => {
             } catch (e) { console.warn('회사 코드 조회 실패:', e); }
         }
 
-        if (typeof loadStateFromLocalStorage === 'function') loadStateFromLocalStorage();
+        await switchCompanyLocalDataContext(profile.companyId, profile.uid);
         if (typeof loadAndApplyUserDefectPinPresets === 'function') {
             await loadAndApplyUserDefectPinPresets(profile.uid);
+        }
+        if (typeof listenToRealtimeUpdates === 'function') listenToRealtimeUpdates();
+        if (typeof pullCompanySnapshotOnce === 'function') {
+            await pullCompanySnapshotOnce();
         }
         if (typeof ensureBuildingAccessSeeded === 'function') ensureBuildingAccessSeeded();
         else if (typeof touchBuildingAccess === 'function' && window.state.currentBuildingId) {
@@ -33907,7 +34094,6 @@ document.addEventListener('DOMContentLoaded', () => {
         if (typeof pruneStaleIndexedDbInspectionData === 'function' && navigator.onLine !== false) {
             pruneStaleIndexedDbInspectionData().catch(() => {});
         }
-        if (typeof listenToRealtimeUpdates === 'function') listenToRealtimeUpdates();
         if (typeof hydrateAllBuildingPdfsFromCloud === 'function') {
             hydrateAllBuildingPdfsFromCloud().catch((e) => console.warn('서버 PDF 일괄 조회 실패:', e));
         }
@@ -33930,6 +34116,7 @@ document.addEventListener('DOMContentLoaded', () => {
             window.state.companyName = null;
             window.state.role = null;
             if (typeof resetDefectPinPresetsToDefaults === 'function') resetDefectPinPresetsToDefaults();
+            switchCompanyLocalDataContext(null, null).catch(() => {});
             showLoginOverlay();
             return;
         }
@@ -34034,7 +34221,7 @@ document.addEventListener('DOMContentLoaded', () => {
             pendingCompanyName: null,
             role: 'none'
         };
-        batch.update(db.collection('users').doc(uid), userUpdate);
+        batch.set(db.collection('users').doc(uid), userUpdate, { merge: true });
         await batch.commit();
     }
 
@@ -34270,6 +34457,7 @@ document.addEventListener('DOMContentLoaded', () => {
             window.state.companyName = null;
             window.state.companyJoinCode = null;
             window.state.role = 'none';
+            await switchCompanyLocalDataContext(null, uid);
             const btnApproval = document.getElementById('btnOpenMemberApproval');
             if (btnApproval) btnApproval.style.display = 'none';
             const btnLeaveCompany = document.getElementById('btnLeaveCompany');
@@ -34744,6 +34932,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const btnApplyCompanyJoin = document.getElementById('btnApplyCompanyJoin');
         const btnCompanyJoinLogout = document.getElementById('btnCompanyJoinLogout');
+        const btnCompanyJoinDeleteAccount = document.getElementById('btnCompanyJoinDeleteAccount');
         const companyJoinCodeInput = document.getElementById('companyJoinCodeInput');
         if (btnApplyCompanyJoin) {
             btnApplyCompanyJoin.addEventListener('click', () => {
@@ -34759,6 +34948,7 @@ document.addEventListener('DOMContentLoaded', () => {
             });
         }
         if (btnCompanyJoinLogout) btnCompanyJoinLogout.addEventListener('click', window.logout);
+        if (btnCompanyJoinDeleteAccount) btnCompanyJoinDeleteAccount.addEventListener('click', openDeleteAccountModal);
 
         // 비밀번호 찾기 모달 오픈/닫기/발송 핸들러
         const btnOpenForgot = document.getElementById('btnOpenForgotPassword');
@@ -34862,7 +35052,7 @@ document.addEventListener('DOMContentLoaded', () => {
         initAuthEvents();
 
         try {
-            loadStateFromLocalStorage();
+            // 로그인 전에는 전역 로컬 점검 데이터를 올리지 않음 (회사 가입 후 클라우드·회사별 캐시 사용)
             setupCanvas();
             renderDashboard();
             window.switchTab('tab-home');
