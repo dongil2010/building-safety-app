@@ -67,7 +67,10 @@ def main():
             zout.writestr(name, data)
     with zipfile.ZipFile(DST) as z:
         hdr = z.read("Contents/header.xml").decode()
-    grad = [m.group(1) for m in re.finditer(r'<hh:borderFill id="(\d+)"', hdr) if "gradation" in m.group(0).lower()]
+    grad = []
+    for m in re.finditer(r'<hh:borderFill id="(\d+)"[^>]*>[\s\S]*?</hh:borderFill>', hdr):
+        if 'gradation' in m.group(0).lower():
+            grad.append(m.group(1))
     print("written", DST)
     print("header gradation borderFill ids:", sorted(grad, key=int))
     print("para borders left", len(re.findall(r"<hh:border\\b", hdr)))

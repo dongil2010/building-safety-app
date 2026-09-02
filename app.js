@@ -1853,6 +1853,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 styleSizeBarLockedMap: window.state.styleSizeBarLockedMap !== false,
                 styleSizeBarLockedNdt: window.state.styleSizeBarLockedNdt !== false,
                 floorMapStyleSettings: window.state.floorMapStyleSettings || null,
+                floorDrawingRotations: window.state.floorDrawingRotations || null,
                 styleShapes: window.state.styleShapes || null,
                 surveyColumns: window.state.surveyColumns || null,
                 surveyColumnsGrade3: window.state.surveyColumnsGrade3 || null,
@@ -1995,6 +1996,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
                 if (parsed.floorMapStyleSettings) {
                     window.state.floorMapStyleSettings = parsed.floorMapStyleSettings;
+                }
+                if (parsed.floorDrawingRotations) {
+                    window.state.floorDrawingRotations = parsed.floorDrawingRotations;
                 }
                 if (parsed.styleShapes) {
                     window.state.styleShapes = parsed.styleShapes;
@@ -4735,6 +4739,19 @@ document.addEventListener('DOMContentLoaded', () => {
                 };
             });
         }
+
+        if (options.mapStyles && window.state.floorDrawingRotations) {
+            if (!window.state.floorDrawingRotations) window.state.floorDrawingRotations = {};
+            Object.keys(window.state.floorDrawingRotations).forEach((k) => {
+                if (!k.startsWith(srcPrefix)) return;
+                const floorCode = k.slice(srcPrefix.length);
+                const destKey = `${newId}_${floorCode}`;
+                if (merge && Object.prototype.hasOwnProperty.call(window.state.floorDrawingRotations, destKey)) return;
+                const angle = window.state.floorDrawingRotations[k];
+                if (angle === undefined || angle === null) return;
+                window.state.floorDrawingRotations[destKey] = angle;
+            });
+        }
     }
 
     async function runBuildingImport(sourceBldg, targetBldg, importOpts, label) {
@@ -5806,6 +5823,7 @@ document.addEventListener('DOMContentLoaded', () => {
             _idbPersistedDrawingKeys.delete(drawingKey);
             _idbPersistedPdfKeys.delete(drawingKey);
             clearFloorDrawingTierCacheForFloor(bldg.id, floorCode, true);
+            clearFloorDrawingRotation(bldg.id, floorCode);
             idbDelete('floorDrawings', drawingKey);
             idbDelete('floorDrawingPdfs', drawingKey);
             deleteFloorDrawingPdfFromCloud(bldg.id, floorCode);
@@ -5942,6 +5960,7 @@ document.addEventListener('DOMContentLoaded', () => {
                                 _idbPersistedDrawingKeys.delete(`${bldg.id}_${item.floorCode}`);
                                 if (window._cloudSyncedDrawingKeys) window._cloudSyncedDrawingKeys.delete(`${bldg.id}_${item.floorCode}`);
                                 clearFloorDrawingTierCacheForFloor(bldg.id, item.floorCode);
+                                clearFloorDrawingRotation(bldg.id, item.floorCode);
                                 if (window._cloudSyncedTierKeys) {
                                     (window.FLOOR_DRAWING_TIER_DIMS || [4000, 8000, 16000]).forEach((d) => {
                                         window._cloudSyncedTierKeys.delete(`${bldg.id}_${item.floorCode}_${d}`);
@@ -6712,6 +6731,9 @@ document.addEventListener('DOMContentLoaded', () => {
             cancelFloorDrawingBlend();
             state.bgImage = null;
             state.floorDrawingHiPatch = null;
+            const rotBldgId = state.currentBuildingId;
+            const savedRot = rotBldgId ? getSavedFloorDrawingRotation(rotBldgId, floorCode) : null;
+            state.rotationAngle = savedRot !== null ? savedRot : 0;
         }
         const preserveView = !!opts.preserveView
             || (!opts.forceFit && prevFloor === floorCode && !!state.bgImage
@@ -6788,8 +6810,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     state.floorDrawingTierImageCache[`${bldg.id}_${floorCode}_${baseTier}`] = img;
                 }
                 // Auto-detect Portrait drawing and auto-rotate 90° to Landscape for optimal architectural inspection
-                if (img.naturalHeight > img.naturalWidth * 1.15 && (state.rotationAngle === undefined || state.rotationAngle === 0)) {
-                    state.rotationAngle = 90;
+                if (bldg && bldg.id) {
+                    resolveFloorDrawingRotation(bldg.id, floorCode, img);
                 }
                 resizeCanvas();
                 if (preserveView) {
@@ -7054,7 +7076,9 @@ document.addEventListener('DOMContentLoaded', () => {
             const currentDefects = getCurrentFloorMapPlacedDefects();
             renderDefectsGrouped(ctx, currentDefects, drawPin);
 
-            if (typeof drawLocationMapLegend === 'function') drawLocationMapLegend(ctx, imgW, imgH, true);
+            if (typeof drawLocationMapLegend === 'function') {
+                drawLocationMapLegend(ctx, imgW, imgH, true, state.rotationAngle || 0);
+            }
 
             // Draw Live Marking Drag Preview (드래그 중 — 클릭만 해도 위치 표시)
             if (isMarkingDrag) {
@@ -7651,6 +7675,57 @@ document.addEventListener('DOMContentLoaded', () => {
         const bId = buildingId || state.currentBuildingId || 'default';
         const fCode = floorCode || state.currentFloor || '1F';
         return `${bId}_${fCode}`;
+    }
+
+    function getFloorDrawingRotationKey(buildingId, floorCode) {
+        return getFloorMapStyleKey(buildingId, floorCode);
+    }
+
+    function normalizeDrawingRotation(angle) {
+        const n = Number(angle) || 0;
+        return ((n % 360) + 360) % 360;
+    }
+
+    function getSavedFloorDrawingRotation(buildingId, floorCode) {
+        const key = getFloorDrawingRotationKey(buildingId, floorCode);
+        const map = state.floorDrawingRotations;
+        if (!map || !Object.prototype.hasOwnProperty.call(map, key)) return null;
+        return normalizeDrawingRotation(map[key]);
+    }
+
+    function saveFloorDrawingRotation(buildingId, floorCode, angle, opts) {
+        if (!buildingId || !floorCode) return;
+        const norm = normalizeDrawingRotation(angle);
+        if (!state.floorDrawingRotations) state.floorDrawingRotations = {};
+        state.floorDrawingRotations[getFloorDrawingRotationKey(buildingId, floorCode)] = norm;
+        state.rotationAngle = norm;
+        if (!opts || opts.persist !== false) {
+            if (typeof saveStateToLocalStorage === 'function') saveStateToLocalStorage();
+        }
+    }
+
+    function clearFloorDrawingRotation(buildingId, floorCode) {
+        if (!buildingId || !floorCode || !state.floorDrawingRotations) return;
+        delete state.floorDrawingRotations[getFloorDrawingRotationKey(buildingId, floorCode)];
+    }
+
+    function resolveFloorDrawingRotation(buildingId, floorCode, img) {
+        if (!buildingId || !floorCode) {
+            state.rotationAngle = 0;
+            return 0;
+        }
+        const saved = getSavedFloorDrawingRotation(buildingId, floorCode);
+        if (saved !== null) {
+            state.rotationAngle = saved;
+            return saved;
+        }
+        let angle = 0;
+        if (img && img.naturalHeight > img.naturalWidth * 1.15) angle = 90;
+        if (!state.floorDrawingRotations) state.floorDrawingRotations = {};
+        state.floorDrawingRotations[getFloorDrawingRotationKey(buildingId, floorCode)] = angle;
+        state.rotationAngle = angle;
+        if (typeof saveStateToLocalStorage === 'function') saveStateToLocalStorage();
+        return angle;
     }
 
     function cloneStyleSizesMap(src) {
@@ -19032,13 +19107,25 @@ document.addEventListener('DOMContentLoaded', () => {
     // lastLegendBoxBounds(도면 원본 픽셀 좌표, 결함 핀과 동일 좌표계) 기준으로 이미지 좌표(imgX, imgY —
     // 핀 히트테스트에 쓰는 것과 동일하게 팬/줌/회전을 역변환한 좌표)가 범례 박스의 크기조절 손잡이/본문
     // 중 어디에 해당하는지 판정한다. 영역 마킹과 같이 모서리·변 히트도 지원한다.
+    function legendImageToLocal(imgX, imgY, boxX, boxY, rotDeg) {
+        const dx = imgX - boxX;
+        const dy = imgY - boxY;
+        const rad = ((rotDeg || 0) * Math.PI) / 180;
+        const cos = Math.cos(rad);
+        const sin = Math.sin(rad);
+        return { x: dx * cos - dy * sin, y: dx * sin + dy * cos };
+    }
+
     function hitTestLegendBox(imgX, imgY) {
         if (!lastLegendBoxBounds) return null;
         const b = lastLegendBoxBounds;
-        const x1 = b.x;
-        const y1 = b.y;
-        const x2 = b.x + b.w;
-        const y2 = b.y + b.h;
+        const local = legendImageToLocal(imgX, imgY, b.x, b.y, state.rotationAngle || 0);
+        const lx = local.x;
+        const ly = local.y;
+        const x1 = 0;
+        const y1 = 0;
+        const x2 = b.w;
+        const y2 = b.h;
         const cornerR = Math.max(LEGEND_HANDLE_SIZE * (b.scale || 1), 14);
         const edgeTol = Math.max(8, 6 * (b.scale || 1));
 
@@ -19048,23 +19135,23 @@ document.addEventListener('DOMContentLoaded', () => {
             { x: x1, y: y2, cursor: 'nesw-resize' },
             { x: x2, y: y2, cursor: 'nwse-resize' }
         ];
-        const hitCorner = corners.find(c => Math.hypot(imgX - c.x, imgY - c.y) <= cornerR);
+        const hitCorner = corners.find(c => Math.hypot(lx - c.x, ly - c.y) <= cornerR);
         if (hitCorner) {
             return { part: 'handle', cursor: hitCorner.cursor };
         }
-        if (Math.abs(imgY - y1) <= edgeTol && imgX >= x1 + cornerR && imgX <= x2 - cornerR) {
+        if (Math.abs(ly - y1) <= edgeTol && lx >= x1 + cornerR && lx <= x2 - cornerR) {
             return { part: 'handle', cursor: 'ns-resize' };
         }
-        if (Math.abs(imgY - y2) <= edgeTol && imgX >= x1 + cornerR && imgX <= x2 - cornerR) {
+        if (Math.abs(ly - y2) <= edgeTol && lx >= x1 + cornerR && lx <= x2 - cornerR) {
             return { part: 'handle', cursor: 'ns-resize' };
         }
-        if (Math.abs(imgX - x1) <= edgeTol && imgY >= y1 + cornerR && imgY <= y2 - cornerR) {
+        if (Math.abs(lx - x1) <= edgeTol && ly >= y1 + cornerR && ly <= y2 - cornerR) {
             return { part: 'handle', cursor: 'ew-resize' };
         }
-        if (Math.abs(imgX - x2) <= edgeTol && imgY >= y1 + cornerR && imgY <= y2 - cornerR) {
+        if (Math.abs(lx - x2) <= edgeTol && ly >= y1 + cornerR && ly <= y2 - cornerR) {
             return { part: 'handle', cursor: 'ew-resize' };
         }
-        if (imgX >= x1 && imgX <= x2 && imgY >= y1 && imgY <= y2) {
+        if (lx >= x1 && lx <= x2 && ly >= y1 && ly <= y2) {
             return { part: 'body', cursor: 'move' };
         }
         return null;
@@ -22325,6 +22412,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const prevFloor = window.state.currentFloor;
             if (prevFloor && state.currentBuildingId) {
                 saveFloorMapStyleSettings(prevFloor, state.currentBuildingId);
+                saveFloorDrawingRotation(state.currentBuildingId, prevFloor, state.rotationAngle || 0);
             }
             window.state.currentFloor = e.target.value;
             applyFloorMapStyleSettings(e.target.value, state.currentBuildingId);
@@ -22930,7 +23018,12 @@ document.addEventListener('DOMContentLoaded', () => {
     const btnRotateDrawing = document.getElementById('btnRotateDrawing');
     if (btnRotateDrawing) {
         btnRotateDrawing.addEventListener('click', () => {
-            state.rotationAngle = ((state.rotationAngle || 0) + 90) % 360;
+            const next = normalizeDrawingRotation((state.rotationAngle || 0) + 90);
+            if (state.currentBuildingId && state.currentFloor) {
+                saveFloorDrawingRotation(state.currentBuildingId, state.currentFloor, next);
+            } else {
+                state.rotationAngle = next;
+            }
             fitToScreen();
             drawCanvas();
         });
@@ -24840,7 +24933,9 @@ document.addEventListener('DOMContentLoaded', () => {
         };
     }
 
-    function drawLocationMapLegend(ctx, imgW, imgH, interactive) {
+    // 결함위치도에 색상 범례를 그린다. 위치(x,y)는 도면 원본 픽셀 좌표(좌상단)이며,
+    // counterRotateDeg로 도면 회전과 반대로 돌려 글자·표가 항상 수평으로 보이게 한다.
+    function drawLocationMapLegend(ctx, imgW, imgH, interactive, counterRotateDeg) {
         const items = getActiveLocationMapLegend().map(enrichLocationMapLegendItem);
         if (!items.length) {
             if (interactive) lastLegendBoxBounds = null;
@@ -24855,32 +24950,42 @@ document.addEventListener('DOMContentLoaded', () => {
         const boxX = (box.x !== undefined) ? box.x : margin;
         const boxY = (box.y !== undefined) ? box.y : imgH - boxH - margin;
         const lineW = Math.max(1, 1.2 * scale);
+        const legendRot = counterRotateDeg || 0;
 
         ctx.save();
+        ctx.translate(boxX, boxY);
+        if (legendRot === 90) {
+            ctx.rotate((-90 * Math.PI) / 180);
+        } else if (legendRot === 180) {
+            ctx.rotate((-180 * Math.PI) / 180);
+        } else if (legendRot === 270) {
+            ctx.rotate((-270 * Math.PI) / 180);
+        }
+
         ctx.fillStyle = '#ffffff';
         ctx.strokeStyle = '#a3a3a3';
         ctx.lineWidth = lineW;
 
         // 배경 + 외곽
-        ctx.fillRect(boxX, boxY, boxW, boxH);
-        ctx.strokeRect(boxX, boxY, boxW, boxH);
+        ctx.fillRect(0, 0, boxW, boxH);
+        ctx.strokeRect(0, 0, boxW, boxH);
 
         // 세로 구분선
         ctx.beginPath();
-        ctx.moveTo(boxX + col1W, boxY);
-        ctx.lineTo(boxX + col1W, boxY + boxH);
+        ctx.moveTo(col1W, 0);
+        ctx.lineTo(col1W, boxH);
         ctx.stroke();
 
         // 가로 구분선 (헤더 아래 + 각 행)
         ctx.beginPath();
-        ctx.moveTo(boxX, boxY + headerRowH);
-        ctx.lineTo(boxX + boxW, boxY + headerRowH);
+        ctx.moveTo(0, headerRowH);
+        ctx.lineTo(boxW, headerRowH);
         ctx.stroke();
         for (let i = 1; i < items.length; i++) {
-            const y = boxY + headerRowH + i * rowH;
+            const y = headerRowH + i * rowH;
             ctx.beginPath();
-            ctx.moveTo(boxX, y);
-            ctx.lineTo(boxX + boxW, y);
+            ctx.moveTo(0, y);
+            ctx.lineTo(boxW, y);
             ctx.stroke();
         }
 
@@ -24890,25 +24995,25 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // 헤더
         ctx.fillStyle = '#64748b';
-        ctx.fillText('구분', boxX + col1W / 2, boxY + headerRowH / 2);
-        ctx.fillText('내 용', boxX + col1W + col2W / 2, boxY + headerRowH / 2);
+        ctx.fillText('구분', col1W / 2, headerRowH / 2);
+        ctx.fillText('내 용', col1W + col2W / 2, headerRowH / 2);
 
         // 데이터 행
         items.forEach((item, i) => {
-            const rowY = boxY + headerRowH + i * rowH + rowH / 2;
+            const rowY = headerRowH + i * rowH + rowH / 2;
             const cat = resolveLegendColorName(item);
             ctx.fillStyle = item.color || '#1e293b';
-            ctx.fillText(cat, boxX + col1W / 2, rowY);
-            ctx.fillText(item.label || '', boxX + col1W + col2W / 2, rowY);
+            ctx.fillText(cat, col1W / 2, rowY);
+            ctx.fillText(item.label || '', col1W + col2W / 2, rowY);
         });
 
         if (interactive) {
             const hs = LEGEND_HANDLE_SIZE * scale;
             ctx.fillStyle = 'rgba(30,41,59,0.55)';
             ctx.beginPath();
-            ctx.moveTo(boxX + boxW, boxY + boxH - hs);
-            ctx.lineTo(boxX + boxW, boxY + boxH);
-            ctx.lineTo(boxX + boxW - hs, boxY + boxH);
+            ctx.moveTo(boxW, boxH - hs);
+            ctx.lineTo(boxW, boxH);
+            ctx.lineTo(boxW - hs, boxH);
             ctx.closePath();
             ctx.fill();
         }
@@ -26048,8 +26153,9 @@ document.addEventListener('DOMContentLoaded', () => {
             // (hwpx_grade3_survey_stamp.hwpx)에서 상태조사표를 통째로 가져와 이 표를 교체하고,
             // 그 표가 참조하는 스타일 정의(font/borderFill/charPr/paraPr)만 header.xml에 병합해
             // 넣는다. 1,2종(exportHwpxSurveyTable12)에는 이 문제가 없어 여기서만 적용한다.
-            const HWPX_TEMPLATE_VERSION = '20260831_grade3_stamp_fix';
+            const HWPX_TEMPLATE_VERSION = '20260902_grade3_border_grad';
             const HWPX_HEADER_GRAD_BORDER_IDS = new Set(['5', '6', '7', '16', '17']);
+            let hwpxStampMergeMeta = null;
             function hwpxTagBlock(xmlStr, tag, id) {
                 // hh:style처럼 자식 없이 자기닫힘 태그(.../>)로만 존재하는 경우가 있다 — 그것부터
                 // 먼저 확인하고, 아니면 여는/닫는 태그 쌍을 찾는다.
@@ -26117,6 +26223,25 @@ document.addEventListener('DOMContentLoaded', () => {
                 const newAttrs = m[1].replace(/itemCnt="(\d+)"/, (mm, n) => `itemCnt="${parseInt(n, 10) + 1}"`);
                 const newContainer = `<hh:${containerTag}${newAttrs}>${m[2]}${block}</hh:${containerTag}>`;
                 return xmlStr.slice(0, m.index) + newContainer + xmlStr.slice(m.index + m[0].length);
+            }
+            function hwpxSyncBorderFillsItemCnt(headerXml) {
+                if (!headerXml) return headerXml;
+                return headerXml.replace(/<hh:borderFills([^>]*)>([\s\S]*?)<\/hh:borderFills>/, (full, attrs, body) => {
+                    const count = (body.match(/<hh:borderFill /g) || []).length;
+                    const newAttrs = attrs.replace(/itemCnt="\d+"/, `itemCnt="${count}"`);
+                    return `<hh:borderFills${newAttrs}>${body}</hh:borderFills>`;
+                });
+            }
+            function hwpxFinalizeStampDataBorderFills(headerXml, stampBorderNewIds, preservedGradNewIds) {
+                if (!headerXml || !stampBorderNewIds || !stampBorderNewIds.size) return headerXml;
+                let out = headerXml;
+                [...stampBorderNewIds].sort((a, b) => +a - +b).forEach((nid) => {
+                    if (preservedGradNewIds && preservedGradNewIds.has(String(nid))) return;
+                    const block = hwpxTagBlock(out, 'borderFill', nid);
+                    if (!block) return;
+                    out = hwpxUpsertBlock(out, 'borderFill', nid, hwpxSanitizeBorderFillBlock(block, nid, new Set()));
+                });
+                return hwpxSyncBorderFillsItemCnt(out);
             }
             function hwpxSanitizeBorderFillBlock(block, borderId, preserveGradIds) {
                 if (!block) return block;
@@ -26281,7 +26406,15 @@ document.addEventListener('DOMContentLoaded', () => {
                 remappedTableXml = hwpxRemapIdRefs(remappedTableXml, 'charPrIDRef', charMap);
                 remappedTableXml = hwpxRemapIdRefs(remappedTableXml, 'paraPrIDRef', paraMap);
                 remappedTableXml = hwpxRemapIdRefs(remappedTableXml, 'styleIDRef', styleMap);
-                return { header: out, tableXml: remappedTableXml };
+                remappedTableXml = hwpxClearSectionParagraphBorders(remappedTableXml);
+                const preservedGradNewIds = new Set(
+                    Object.entries(borderMap)
+                        .filter(([orig]) => preserveGradIds.has(String(orig)))
+                        .map(([, nid]) => String(nid))
+                );
+                const stampBorderNewIds = new Set(Object.values(borderMap).map(String));
+                out = hwpxSyncBorderFillsItemCnt(out);
+                return { header: out, tableXml: remappedTableXml, preservedGradNewIds, stampBorderNewIds };
             }
             function hwpxIsSurveyStampTable(tblXml) {
                 const colM = tblXml.match(/colCnt="(\d+)"/);
@@ -26307,8 +26440,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 const stampPath = `./templates/hwpx_grade3_survey_stamp.hwpx?v=${HWPX_TEMPLATE_VERSION}`;
                 const stampResp = await fetch(stampPath, { cache: 'no-store' });
                 if (!stampResp.ok) {
-                    console.warn('결함조사표 스탬프를 불러오지 못했습니다:', stampPath);
-                    return;
+                    throw new Error('결함조사표 스탬프(hwpx_grade3_survey_stamp.hwpx)를 불러오지 못했습니다.');
                 }
                 const stampZip = await JSZip.loadAsync(await stampResp.arrayBuffer());
                 const stampSecPath = stampZip.file('Contents/section1.xml') ? 'Contents/section1.xml' : 'Contents/section0.xml';
@@ -26316,16 +26448,19 @@ document.addEventListener('DOMContentLoaded', () => {
                 const stampHeader = await stampZip.file('Contents/header.xml').async('string');
                 const stampTable = hwpxExtractSurveyStampTable(stampSecXml);
                 if (!stampTable) {
-                    console.warn('스탬프 파일에서 상태조사표를 찾지 못했습니다.');
-                    return;
+                    throw new Error('스탬프 파일에서 3종 상태조사표를 찾지 못했습니다.');
                 }
                 const tgtHeader = await targetZip.file('Contents/header.xml').async('string');
                 const merged = hwpxMergeHeaderFromStamp(tgtHeader, stampHeader, stampTable);
+                hwpxStampMergeMeta = merged;
                 targetZip.file('Contents/header.xml', merged.header);
 
                 const stampSectionPath = targetZip.file('Contents/section1.xml') ? 'Contents/section1.xml' : 'Contents/section0.xml';
                 let stampSecTargetXml = await targetZip.file(stampSectionPath).async('string');
                 stampSecTargetXml = hwpxReplaceSurveyTables(stampSecTargetXml, merged.tableXml);
+                if (/borderFillIDRef="(?:3|59)"/.test(merged.tableXml)) {
+                    console.warn('스탬프 표에 옛 borderFill(3/59) 참조가 남아 있습니다.');
+                }
                 targetZip.file(stampSectionPath, stampSecTargetXml);
             }
             await applyHwpxSurveyStampToZip(zip);
@@ -27000,6 +27135,19 @@ document.addEventListener('DOMContentLoaded', () => {
                 const firstRowTpl = dataRows[0].cloneNode(true);
                 const normalRowTpl = (dataRows[Math.min(1, dataRows.length - 1)] || dataRows[0]).cloneNode(true);
                 const lastRowTpl = dataRows[dataRows.length - 1].cloneNode(true);
+                const borderStyleByCol = (row) => {
+                    const map = {};
+                    Array.from(row.getElementsByTagNameNS(HP_NS, 'tc')).forEach((tc) => {
+                        const addr = tc.getElementsByTagNameNS(HP_NS, 'cellAddr')[0];
+                        if (addr) map[addr.getAttribute('colAddr')] = tc.getAttribute('borderFillIDRef');
+                    });
+                    return map;
+                };
+                const styleMaps = {
+                    first: borderStyleByCol(firstRowTpl),
+                    normal: borderStyleByCol(normalRowTpl),
+                    last: borderStyleByCol(lastRowTpl)
+                };
                 // 데이터 행 한 줄 높이를 2800으로 통일(헤더 행은 손대지 않음) — 사용자 요청.
                 const DATA_ROW_HEIGHT = 3500;
                 [firstRowTpl, normalRowTpl, lastRowTpl].forEach((rowTpl) => {
@@ -27112,6 +27260,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         const colCount = Array.from(normalRowTpl.getElementsByTagNameNS(HP_NS, 'tc')).length;
                         const values = getReportSurveyRowValues(d, rowCtx, isGrade3, colCount);
                         const rowTpl = localIdx === 0 ? firstRowTpl : (isLastOnPage ? lastRowTpl : normalRowTpl);
+                        const styleMap = localIdx === 0 ? styleMaps.first : (isLastOnPage ? styleMaps.last : styleMaps.normal);
 
                         const newRow = rowTpl.cloneNode(true);
                         copyRowCellSizesFromTemplate(newRow, rowTpl);
@@ -27122,6 +27271,8 @@ document.addEventListener('DOMContentLoaded', () => {
                             const colAddr = addr ? parseInt(addr.getAttribute('colAddr'), 10) : NaN;
                             if (addr) {
                                 addr.setAttribute('rowAddr', String(HEADER_ROW_COUNT + localIdx));
+                                const bf = styleMap[addr.getAttribute('colAddr')];
+                                if (bf !== undefined) tc.setAttribute('borderFillIDRef', bf);
                             }
                             if (!Number.isFinite(colAddr) || colAddr < 0 || colAddr >= values.length) return;
                             const subList = tc.getElementsByTagNameNS(HP_NS, 'subList')[0];
@@ -28158,10 +28309,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
             {
                 let hdrFinal = await zip.file('Contents/header.xml').async('string');
-                // 스탬프 스타일은 이제 항상 새 번호로 옮겨 붙기 때문에(hwpxMergeHeaderFromStamp),
-                // 예전처럼 "5/6/7/16/17만 그라데이션 보존, 나머지 전부 제거"를 문서 전체에 걸어두면
-                // 옮겨 붙은 새 번호(스탬프 표 헤더의 진짜 그라데이션)까지 같이 지워진다 — 이 전체
-                // 재적용 단계는 더 이상 필요 없어 뺐다.
+                if (hwpxStampMergeMeta) {
+                    hdrFinal = hwpxFinalizeStampDataBorderFills(
+                        hdrFinal,
+                        hwpxStampMergeMeta.stampBorderNewIds,
+                        hwpxStampMergeMeta.preservedGradNewIds
+                    );
+                }
                 hdrFinal = hwpxClearParaPrBorders(hdrFinal);
                 hdrFinal = hwpxClearAllCharPrBackgrounds(hdrFinal);
                 zip.file('Contents/header.xml', hdrFinal);
@@ -33367,6 +33521,10 @@ document.addEventListener('DOMContentLoaded', () => {
             window.state.floorMapStyleSettings = data.floorMapStyleSettings;
             isChanged = true;
         }
+        if (data.floorDrawingRotations) {
+            window.state.floorDrawingRotations = data.floorDrawingRotations;
+            isChanged = true;
+        }
         if (data.styleShapes) {
             window.state.styleShapes = data.styleShapes;
             isChanged = true;
@@ -33490,6 +33648,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 styleSizeBarLockedMap: window.state.styleSizeBarLockedMap !== false,
                 styleSizeBarLockedNdt: window.state.styleSizeBarLockedNdt !== false,
                 floorMapStyleSettings: window.state.floorMapStyleSettings || null,
+                floorDrawingRotations: window.state.floorDrawingRotations || null,
                 styleShapes: window.state.styleShapes || null,
                 locationMapLegend: window.state.locationMapLegend || null,
                 locationMapLegendBox: window.state.locationMapLegendBox || null,
