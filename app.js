@@ -3834,9 +3834,15 @@ document.addEventListener('DOMContentLoaded', () => {
         if (window.state.currentBuildingId && window.state.currentFloor) {
             saveFloorMapStyleSettings(window.state.currentFloor, window.state.currentBuildingId);
         }
+        const prevBldgId = window.state.currentBuildingId;
+        if (prevBldgId && prevBldgId !== bldg.id) {
+            const prevBldg = window.state.buildings.find((item) => item.id === prevBldgId);
+            if (prevBldg) saveBuildingLocationMapLegend(prevBldg);
+        }
 
         window.state.currentBuilding = bldg;
         window.state.currentBuildingId = bldg.id;
+        applyBuildingLocationMapLegend(bldg);
         if (typeof touchBuildingAccess === 'function') touchBuildingAccess(bldg.id);
 
         // 홈 복귀 시: 단일은 회차 목록, 여러 동은 동 선택 화면 유지
@@ -6019,7 +6025,11 @@ document.addEventListener('DOMContentLoaded', () => {
             bldg.inspectionYear = inspectionYear;
             bldg.inspectionPeriod = inspectionPeriod;
             bldg.structureType = structureType;
+            const prevFacilityGrade = bldg.facilityGrade || '';
             bldg.facilityGrade = facilityGrade;
+            if (facilityGrade !== prevFacilityGrade) {
+                applyBuildingLocationMapLegend(bldg, { forceDefault: true });
+            }
             bldg.completionDate = completionDate;
             bldg.notes = notes;
             setSiteMultiDongFlag(siteName, multiDong);
@@ -13273,6 +13283,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 floorDrawingSources: {},
                 locationMapLegend: sourceBldg.locationMapLegend
                     ? JSON.parse(JSON.stringify(sourceBldg.locationMapLegend))
+                    : undefined,
+                locationMapLegendBox: sourceBldg.locationMapLegendBox
+                    ? JSON.parse(JSON.stringify(sourceBldg.locationMapLegendBox))
                     : undefined
             };
 
@@ -19117,6 +19130,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function hitTestLegendBox(imgX, imgY) {
+        if (isLocationMapLegendLocked()) return null;
         if (!lastLegendBoxBounds) return null;
         const b = lastLegendBoxBounds;
         const local = legendImageToLocal(imgX, imgY, b.x, b.y, state.rotationAngle || 0);
@@ -20224,6 +20238,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (isResizingLegend) {
             isResizingLegend = false;
             saveStateToLocalStorage();
+            persistCurrentBuildingLocationMapLegend();
             if (elements.planCanvas) {
                 elements.planCanvas.style.cursor = getMapCanvasCursor();
             }
@@ -20232,6 +20247,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (isDraggingLegend) {
             isDraggingLegend = false;
             saveStateToLocalStorage();
+            persistCurrentBuildingLocationMapLegend();
             if (elements.planCanvas) {
                 elements.planCanvas.style.cursor = getMapCanvasCursor();
             }
@@ -24628,25 +24644,89 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // 결함위치도 범례 기본값 — 사용자가 아직 범례를 커스터마이징하지 않았으면 스타일 설정 색상을
     // 그대로 따라간다(스타일 설정에서 색을 바꾸면 범례도 같이 바뀜). 한 번이라도 범례 설정 모달에서
-    // 추가/수정하면 그 시점 값이 state.locationMapLegend에 고정 저장되어 이 함수 대신 그걸 쓴다.
-    function getDefaultLocationMapLegend() {
-        // 핀 색상이 카테고리가 아니라 등급·상태 기준으로 바뀌었으므로(getDefectColor 참고),
-        // 기본 범례도 실제 핀 색상과 맞도록 등급별로 다르게 구성한다.
-        if (isGrade3Building()) {
+    // 추가/수정하면 그 시점 값이 건물별 locationMapLegend에 고정 저장되어 이 함수 대신 그걸 쓴다.
+    function cloneLocationMapLegendItems(items) {
+        return JSON.parse(JSON.stringify(items || []));
+    }
+
+    function getDefaultLocationMapLegend(bldg) {
+        bldg = bldg || state.currentBuilding;
+        if (isGrade3Building(bldg)) {
             return [
                 { colorName: '흑색', label: '상태양호', color: getStyleColor('defectGoodGrade3') },
-                { colorName: '적색', label: '기존결함', color: getStyleColor('defectExistingGrade3') },
-                { colorName: '청색', label: '신규결함', color: getStyleColor('defectNewGrade3') },
+                { colorName: '적색', label: '기존조사', color: getStyleColor('defectExistingGrade3') },
+                { colorName: '청색', label: '신규조사', color: getStyleColor('defectNewGrade3') },
                 { colorName: '녹색', label: '중점관리', color: getStyleColor('priorityManage') }
             ];
         }
         return [
-            { colorName: '적색', label: '결함', color: getStyleColor('defectBad') },
-            { colorName: '청색', label: '상태양호', color: getStyleColor('defectGood') },
-            { colorName: '황색', label: '중요 결함', color: '#facc15' },
-            { colorName: '녹색', label: '중점관리', color: getStyleColor('priorityManage') }
+            { colorName: '적색', label: '결함발생', color: getStyleColor('defectBad') },
+            { colorName: '청색', label: '상태양호', color: getStyleColor('defectGood') }
         ];
     }
+
+    function saveBuildingLocationMapLegend(bldg) {
+        if (!bldg) return;
+        const items = state.locationMapLegend;
+        if (items && items.length) {
+            bldg.locationMapLegend = cloneLocationMapLegendItems(items);
+        }
+        bldg.locationMapLegendBox = state.locationMapLegendBox
+            ? { ...state.locationMapLegendBox }
+            : null;
+    }
+
+    function applyBuildingLocationMapLegend(bldg, opts) {
+        if (!bldg) return;
+        const forceDefault = !!(opts && opts.forceDefault);
+        if (!forceDefault && bldg.locationMapLegend && bldg.locationMapLegend.length) {
+            state.locationMapLegend = cloneLocationMapLegendItems(bldg.locationMapLegend);
+        state.locationMapLegendBox = bldg.locationMapLegendBox
+            ? { ...bldg.locationMapLegendBox }
+            : null;
+        syncLocationMapLegendLockButton();
+        return;
+    }
+    state.locationMapLegend = getDefaultLocationMapLegend(bldg);
+    state.locationMapLegendBox = null;
+    bldg.locationMapLegend = cloneLocationMapLegendItems(state.locationMapLegend);
+    bldg.locationMapLegendBox = null;
+    syncLocationMapLegendLockButton();
+}
+
+    function persistCurrentBuildingLocationMapLegend() {
+        if (state.currentBuilding) saveBuildingLocationMapLegend(state.currentBuilding);
+    }
+
+    function isLocationMapLegendLocked() {
+        return !!(state.locationMapLegendBox && state.locationMapLegendBox.locked);
+    }
+
+    function ensureLocationMapLegendBox() {
+        if (!state.locationMapLegendBox) state.locationMapLegendBox = {};
+        return state.locationMapLegendBox;
+    }
+
+    function syncLocationMapLegendLockButton() {
+        const btn = document.getElementById('btnLockLocationMapLegend');
+        if (!btn) return;
+        const locked = isLocationMapLegendLocked();
+        btn.classList.toggle('active', locked);
+        const icon = btn.querySelector('i');
+        if (icon) icon.className = locked ? 'fa-solid fa-lock' : 'fa-solid fa-lock-open';
+        btn.title = locked
+            ? '범례 고정 해제 (끌어서 이동·크기 조절 가능)'
+            : '범례 위치·크기 고정';
+    }
+
+    window.toggleLocationMapLegendLock = function() {
+        const box = ensureLocationMapLegendBox();
+        box.locked = !box.locked;
+        syncLocationMapLegendLockButton();
+        persistCurrentBuildingLocationMapLegend();
+        saveStateToLocalStorage();
+        if (typeof drawCanvas === 'function') drawCanvas();
+    };
 
     function getActiveLocationMapLegend() {
         return (state.locationMapLegend && state.locationMapLegend.length) ? state.locationMapLegend : getDefaultLocationMapLegend();
@@ -24668,6 +24748,7 @@ document.addEventListener('DOMContentLoaded', () => {
         renderLocationMapLegendModalList();
         saveStateToLocalStorage();
         if (typeof drawCanvas === 'function') drawCanvas();
+        persistCurrentBuildingLocationMapLegend();
     }
 
     function setupLocationMapLegendListDragDrop(listEl) {
@@ -24757,6 +24838,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         saveStateToLocalStorage();
         if (typeof drawCanvas === 'function') drawCanvas();
+        persistCurrentBuildingLocationMapLegend();
     };
 
     window.renameLocationMapLegendItem = function(idx, label) {
@@ -24765,6 +24847,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!trimmed) { renderLocationMapLegendModalList(); return; }
         if (items[idx]) items[idx].label = trimmed;
         saveStateToLocalStorage();
+        persistCurrentBuildingLocationMapLegend();
     };
 
     window.removeLocationMapLegendItem = function(idx) {
@@ -24773,11 +24856,16 @@ document.addEventListener('DOMContentLoaded', () => {
         renderLocationMapLegendModalList();
         saveStateToLocalStorage();
         if (typeof drawCanvas === 'function') drawCanvas();
+        persistCurrentBuildingLocationMapLegend();
     };
 
     function setupLocationMapLegendModalEvents() {
         const btnOpen = document.getElementById('btnOpenLocationMapLegendModal');
         if (btnOpen) btnOpen.addEventListener('click', window.openLocationMapLegendModal);
+
+        const btnLock = document.getElementById('btnLockLocationMapLegend');
+        if (btnLock) btnLock.addEventListener('click', window.toggleLocationMapLegendLock);
+        syncLocationMapLegendLockButton();
 
         const btnClose1 = document.getElementById('btnCloseLocationMapLegendModal');
         if (btnClose1) btnClose1.addEventListener('click', closeLocationMapLegendModal);
@@ -24791,13 +24879,13 @@ document.addEventListener('DOMContentLoaded', () => {
             items.push({ label: '새 항목', color, colorName: resolveLegendColorName({ color }) });
             renderLocationMapLegendModalList();
             saveStateToLocalStorage();
+            persistCurrentBuildingLocationMapLegend();
         });
 
         const btnReset = document.getElementById('btnResetLocationMapLegend');
         if (btnReset) btnReset.addEventListener('click', () => {
             if (!confirm('범례를 기본값으로 초기화하시겠습니까? (내용, 위치, 크기 모두 초기화됩니다)')) return;
-            state.locationMapLegend = null;
-            state.locationMapLegendBox = null;
+            applyBuildingLocationMapLegend(state.currentBuilding, { forceDefault: true });
             renderLocationMapLegendModalList();
             saveStateToLocalStorage();
             if (typeof drawCanvas === 'function') drawCanvas();
@@ -25008,14 +25096,25 @@ document.addEventListener('DOMContentLoaded', () => {
         });
 
         if (interactive) {
-            const hs = LEGEND_HANDLE_SIZE * scale;
-            ctx.fillStyle = 'rgba(30,41,59,0.55)';
-            ctx.beginPath();
-            ctx.moveTo(boxW, boxH - hs);
-            ctx.lineTo(boxW, boxH);
-            ctx.lineTo(boxW - hs, boxH);
-            ctx.closePath();
-            ctx.fill();
+            if (!isLocationMapLegendLocked()) {
+                const hs = LEGEND_HANDLE_SIZE * scale;
+                ctx.fillStyle = 'rgba(30,41,59,0.55)';
+                ctx.beginPath();
+                ctx.moveTo(boxW, boxH - hs);
+                ctx.lineTo(boxW, boxH);
+                ctx.lineTo(boxW - hs, boxH);
+                ctx.closePath();
+                ctx.fill();
+            } else {
+                const badge = Math.max(10, 11 * scale);
+                ctx.fillStyle = 'rgba(100,116,139,0.9)';
+                ctx.fillRect(boxW - badge - cellPadX, cellPadY, badge, badge);
+                ctx.fillStyle = '#ffffff';
+                ctx.font = `bold ${Math.max(7, badge * 0.65)}px sans-serif`;
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText('🔒', boxW - badge / 2 - cellPadX, cellPadY + badge / 2);
+            }
         }
 
         ctx.restore();

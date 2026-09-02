@@ -396,6 +396,7 @@
                         <div class="filter-group">
                             <button type="button" id="btnOpenStyleColorModal" class="chip"><i class="fa-solid fa-palette"></i> 스타일 설정</button>
                             <button type="button" id="btnOpenLocationMapLegendModal" class="chip"><i class="fa-solid fa-list"></i> 위치도 범례 설정</button>
+                            <button type="button" id="btnLockLocationMapLegend" class="chip" title="범례 위치·크기 고정"><i class="fa-solid fa-lock-open"></i> 범례 고정</button>
                         </div>
 
                         <!-- Target Tip Shape Selector -->
@@ -1260,7 +1261,7 @@
                 <button type="button" class="modal-close" id="btnCloseLocationMapLegendModal">&times;</button>
             </div>
             <div class="modal-body" style="max-height: 70vh; overflow-y: auto;">
-                <p style="font-size: 0.8rem; color: #a3a3a3; margin: 0 0 0.6rem;">결함위치도(도면)에 표시되는 범례입니다. 색상/문구를 수정하거나 항목을 추가·삭제할 수 있습니다. 왼쪽 <i class="fa-solid fa-grip-vertical"></i> 아이콘을 드래그하면 항목 순서를 바꿀 수 있습니다. 도면 화면에서 범례 박스를 직접 끌어서 옮기고, 우측 하단 모서리를 끌어서 크기를 조절할 수 있습니다.</p>
+                <p style="font-size: 0.8rem; color: #a3a3a3; margin: 0 0 0.6rem;">결함위치도(도면)에 표시되는 범례입니다. 색상/문구를 수정하거나 항목을 추가·삭제할 수 있습니다. 왼쪽 <i class="fa-solid fa-grip-vertical"></i> 아이콘을 드래그하면 항목 순서를 바꿀 수 있습니다. 도면 화면에서 범례 박스를 직접 끌어서 옮기고, 우측 하단 모서리를 끌어서 크기를 조절할 수 있습니다. <strong>범례 고정</strong>을 켜면 위치·크기가 잠깁니다.</p>
                 <div id="locationMapLegendListBody" class="legend-modal-list"></div>
                 <button type="button" id="btnAddLocationMapLegendItem" class="btn btn-outline btn-sm" style="margin-top: 0.6rem; width: 100%;"><i class="fa-solid fa-plus"></i> 항목 추가</button>
             </div>
@@ -2668,9 +2669,9 @@
     <script src="js/shared/report.js?v=20260827_overview"></script>
     <script src="js/shared/hwpx-import.js?v=20260825_hwpxin"></script>
     <script src="js/shared/auth.js?v=20260821_land1"></script>
-    <script src="app.js?v=20260902_grade3_border_grad"></script>
+    <script src="app.js?v=20260902_legend_lock"></script>
     <script>
-        window.BSA_APP_VERSION = '20260902_grade3_border_grad';
+        window.BSA_APP_VERSION = '20260902_legend_lock';
         (function () {
             var el = document.getElementById('appVersionText');
             if (el && window.BSA_APP_VERSION) el.textContent = 'v' + window.BSA_APP_VERSION;
