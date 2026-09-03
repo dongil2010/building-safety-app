@@ -3326,6 +3326,52 @@ html.layout-desktop #tab-ndt .ndt-top-bar .ndt-top-canvas-tools {
         grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
         gap: 0.75rem;
     }
+
+    /* PC(태블릿 UI 제외): NDT 결과표는 도면 아래 — flex 높이 고정으로 표가 잘리지 않게 */
+    html:not(.layout-tablet) body.bsa-tab-ndt .app-content {
+        overflow-y: auto !important;
+        overflow-x: hidden;
+    }
+
+    html:not(.layout-tablet) #tab-ndt.tab-content.active {
+        display: block !important;
+        flex: none !important;
+        height: auto !important;
+        min-height: 0 !important;
+        max-height: none !important;
+        overflow: visible !important;
+    }
+
+    html:not(.layout-tablet) #tab-ndt .ndt-canvas-col {
+        display: block;
+        height: auto;
+        min-height: 0;
+        overflow: visible;
+    }
+
+    html:not(.layout-tablet) #tab-ndt #ndtCanvasContainer {
+        flex: none !important;
+        width: 100%;
+        height: min(58vh, 640px) !important;
+        min-height: 420px !important;
+        max-height: 65vh !important;
+    }
+
+    html:not(.layout-tablet) #tab-ndt .ndt-results-section {
+        display: block !important;
+        flex: none !important;
+        max-height: none !important;
+        min-height: auto !important;
+        overflow: visible !important;
+        margin-top: 1.5rem;
+        margin-bottom: 1.25rem;
+    }
+
+    html:not(.layout-tablet) #tab-ndt .ndt-results-table-wrap {
+        overflow-x: auto;
+        overflow-y: visible;
+        max-height: none;
+    }
 }
 
 /* 넓은 PC: 앨범 카드 조금 더 큼 */
@@ -10959,7 +11005,8 @@ html.layout-tablet #tab-ndt.tab-content.active {
 
 html.layout-tablet #tab-ndt .ndt-canvas-col {
     flex: 1 1 67% !important;
-    min-height: 67% !important;
+    min-height: 0 !important;
+    max-height: 67% !important;
     display: flex !important;
     flex-direction: column !important;
     position: relative !important;
@@ -10976,9 +11023,10 @@ html.layout-tablet #tab-ndt .ndt-canvas-col .mobile-canvas-dock {
 }
 
 html.layout-tablet #tab-ndt .ndt-results-section {
-    flex: 0 1 33% !important;
+    flex: 0 0 33% !important;
+    flex-shrink: 0 !important;
     max-height: 33% !important;
-    min-height: 0 !important;
+    min-height: 33% !important;
     margin-top: 0.28rem !important;
     margin-bottom: 0 !important;
     display: flex !important;
@@ -11079,12 +11127,15 @@ html.layout-tablet #tab-ndt #ndtSummaryTable td:last-child {
 @media (orientation: landscape) {
     html.layout-tablet #tab-ndt .ndt-canvas-col {
         flex: 1 1 70% !important;
-        min-height: 70% !important;
+        min-height: 0 !important;
+        max-height: 70% !important;
     }
 
     html.layout-tablet #tab-ndt .ndt-results-section {
-        flex: 0 1 30% !important;
+        flex: 0 0 30% !important;
+        flex-shrink: 0 !important;
         max-height: 30% !important;
+        min-height: 30% !important;
     }
 
     html.layout-tablet #tab-ndt .ndt-results-title {
@@ -11124,6 +11175,67 @@ html.layout-tablet #tab-ndt #ndtSummaryTable td:last-child {
 
     html.layout-tablet #tab-ndt #ndtSummaryTable thead th {
         font-size: 0.64rem !important;
+    }
+}
+
+@media (min-width: 1025px) {
+    /* 터치 노트북 등 layout-tablet + 와이드: PC처럼 도면 아래 결과표 */
+    html.layout-tablet body.bsa-tab-ndt .app-content {
+        overflow-y: auto !important;
+        overflow-x: hidden;
+        padding-bottom: 1.25rem !important;
+    }
+
+    html.layout-tablet #tab-ndt.tab-content.active {
+        display: block !important;
+        flex: none !important;
+        height: auto !important;
+        max-height: none !important;
+        overflow: visible !important;
+    }
+
+    html.layout-tablet #tab-ndt .ndt-top-bar {
+        display: flex !important;
+    }
+
+    html.layout-tablet #tab-ndt .ndt-top-bar .ndt-top-cats {
+        display: flex !important;
+    }
+
+    html.layout-tablet #tab-ndt .ndt-right-rails,
+    html.layout-tablet #tab-ndt .ndt-cat-rail {
+        display: none !important;
+    }
+
+    html.layout-tablet #tab-ndt .ndt-canvas-col {
+        flex: none !important;
+        min-height: auto !important;
+        max-height: none !important;
+        display: block !important;
+        overflow: visible !important;
+    }
+
+    html.layout-tablet #tab-ndt #ndtCanvasContainer {
+        flex: none !important;
+        height: min(58vh, 640px) !important;
+        min-height: 420px !important;
+        max-height: 65vh !important;
+    }
+
+    html.layout-tablet #tab-ndt .ndt-results-section {
+        flex: none !important;
+        max-height: none !important;
+        min-height: auto !important;
+        display: block !important;
+        overflow: visible !important;
+        margin-top: 1.5rem !important;
+        margin-bottom: 1.25rem !important;
+    }
+
+    html.layout-tablet #tab-ndt .ndt-results-table-wrap {
+        overflow-x: auto;
+        overflow-y: visible;
+        max-height: none;
     }
 }
 
