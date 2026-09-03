@@ -11209,8 +11209,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     const dy = touch.clientY - ndtStartMouseY;
                     const dist = Math.hypot(dx, dy);
                     if (!pendingNdtPinArmed) {
-                        const pendingPart = pendingNdtPinHit?.part;
-                        if (pendingPart !== 'target' && dist > 14) {
+                        // 번호박스·화살표(target) 모두: 홀딩 전 이동이면 도면 팬
+                        if (dist > 14) {
                             clearPendingNdtLongPress();
                             pendingNdtPinHit = null;
                             isNdtDragging = true;
@@ -21252,11 +21252,9 @@ document.addEventListener('DOMContentLoaded', () => {
             const dist = Math.hypot(dx, dy);
             const threshold = pendingDragIsTouch ? TOUCH_DRAG_THRESHOLD : MOUSE_DRAG_THRESHOLD;
 
-            // 모바일: 홀딩 전에 손가락이 많이 움직이면 핀 고정 해제 → 도면 팬으로 전환
-            // (화살표 TIP은 홀딩 중에도 팬에 빼앗기지 않게 유지)
+            // 모바일: 홀딩 전에 손가락이 많이 움직이면 핀/화살표 고정 해제 → 도면 팬으로 전환
             if (pendingDragIsTouch && !pendingDragArmed) {
-                const pendingPart = pendingDragHit?.hitInfo?.part;
-                if (pendingPart !== 'TIP' && dist > threshold) {
+                if (dist > threshold) {
                     clearPendingDragLongPress();
                     pendingDragHit = null;
                     isDragging = true;
