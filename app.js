@@ -7902,8 +7902,8 @@ document.addEventListener('DOMContentLoaded', () => {
         defectFinishGood: '#15803d',        // 결함위치도 - 마감재 상태양호
         defectBad: '#b30000',           // 결함위치도(1,2종) - 결함(카테고리 무관)
         defectGood: '#0040c0',          // 결함위치도(1,2종) - 상태양호
-        defectNewGrade3: '#0040c0',     // 결함위치도(3종) - 신규결함
-        defectExistingGrade3: '#b30000', // 결함위치도(3종) - 기존결함(전회차)
+        defectNewGrade3: '#0040c0',     // 결함위치도(3종) - 신규조사
+        defectExistingGrade3: '#b30000', // 결함위치도(3종) - 기존조사(전회차)
         defectGoodGrade3: '#000000',    // 결함위치도(3종) - 상태양호
         priorityManage: '#15803d',      // 결함위치도 - 중점관리
         ndtMeasure: '#1f1f1f',          // 부재 실측
@@ -7930,7 +7930,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // 결함 핀 색상 — 카테고리(구조체/비구조체/마감재)가 아니라 등급·상태 기준.
     // 중점관리(체크)=녹색 (등급 무관 최우선)
     // 1,2종: 결함=빨강, 상태양호=파랑
-    // 3종: 상태양호=검정, 기존결함(전회차)=빨강, 신규결함=파랑
+    // 3종: 상태양호=검정, 기존조사(전회차)=빨강, 신규조사=파랑
     function getDefectColor(defect) {
         if (defect.isPriorityManage) return getStyleColor('priorityManage');
         const isGood = defect.defectType === '상태양호';
