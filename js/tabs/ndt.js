@@ -5,7 +5,7 @@ window.BSA.tabs['tab-ndt'] = {
     id: 'tab-ndt',
     title: '비파괴조사',
     features: [
-        'NDT 전용 도면 / 층 도면 연동',
+        'NDT 전용 도면 / 층 도면 연동 (상단 탭 우측)',
         '측정 위치 마킹 (결함위치도와 동일 핀·지시선 스타일)',
         '좌클릭 마퀴 선택 · Ctrl+드래그 추가선택 · 휠클릭 화면이동 · 선택 삭제',
         'Delete/Backspace: 선택·수정창 마킹 삭제',

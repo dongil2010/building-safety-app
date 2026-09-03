@@ -13,11 +13,13 @@ window.BSA.applyTabChrome = function (tabId) {
     const isHome = tabId === 'tab-home';
     const headerSelectorGroup = document.getElementById('headerSelectorGroup');
     const headerReportActions = document.getElementById('headerReportActions');
+    const headerNdtDrawingActions = document.getElementById('headerNdtDrawingActions');
     const navBuildingTabs = document.getElementById('navBuildingTabs');
     const appTitle = document.getElementById('navBuildingName');
 
     if (headerSelectorGroup) headerSelectorGroup.style.display = isHome ? 'none' : 'flex';
     if (headerReportActions) headerReportActions.style.display = isHome ? 'none' : 'flex';
+    if (headerNdtDrawingActions) headerNdtDrawingActions.style.display = (!isHome && tabId === 'tab-ndt') ? 'flex' : 'none';
     if (navBuildingTabs) navBuildingTabs.style.display = isHome ? 'none' : 'flex';
     if (appTitle) appTitle.style.display = isHome ? 'none' : 'inline-flex';
 
