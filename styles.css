@@ -1,24 +1,24 @@
-/* CSS Reset & Variables — 모노톤 현장용 테마 */
+/* CSS Reset & Variables — 소프트 디지털 현장용 테마 */
 :root {
-    --bg-primary: #ececec;
-    --bg-secondary: #f6f6f6;
+    --bg-primary: #f1f5f9;
+    --bg-secondary: #f8fafc;
     --bg-card: #ffffff;
     --bg-modal: #ffffff;
-    --text-primary: #111111;
-    --text-secondary: #2a2a2a;
-    --text-muted: #5c5c5c;
-    
-    --accent-blue: #1f1f1f;
-    --accent-indigo: #2f2f2f;
-    --accent-purple: #3a3a3a;
-    --border-color: #c4c4c4;
-    --border-highlight: #8a8a8a;
-    
+    --text-primary: #0f172a;
+    --text-secondary: #334155;
+    --text-muted: #64748b;
+
+    --accent-blue: #2563eb;
+    --accent-indigo: #1d4ed8;
+    --accent-purple: #4f46e5;
+    --border-color: #e2e8f0;
+    --border-highlight: #cbd5e1;
+
     /* Structural Tag Colors (데이터 구분용 — UI 크롬과 별개) */
     --color-structural: #b91c1c;
     --color-nonstructural: #404040;
     --color-finishing: #9a3412;
-    
+
     /* Grade Colors */
     --grade-a: #166534;
     --grade-b: #404040;
@@ -26,27 +26,30 @@
     --grade-d: #9a3412;
     --grade-e: #991b1b;
 
-    --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.10);
-    --shadow-lg: 0 6px 18px rgba(0, 0, 0, 0.14);
-    --radius-sm: 5px;
-    --radius-md: 8px;
-    --radius-lg: 12px;
+    --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.05);
+    --shadow-md: 0 4px 14px rgba(15, 23, 42, 0.07);
+    --shadow-lg: 0 12px 32px rgba(15, 23, 42, 0.10);
+    --radius-sm: 8px;
+    --radius-md: 12px;
+    --radius-lg: 16px;
+    --radius-input: 4px;
 
     --font-sans: 'Pretendard', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
 }
 
 body.theme-light {
-    --bg-primary: #ececec;
-    --bg-secondary: #f6f6f6;
+    --bg-primary: #f1f5f9;
+    --bg-secondary: #f8fafc;
     --bg-card: #ffffff;
     --bg-modal: #ffffff;
-    --text-primary: #111111;
-    --text-secondary: #2a2a2a;
-    --text-muted: #5c5c5c;
-    --border-color: #c4c4c4;
-    --border-highlight: #8a8a8a;
-    --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.10);
-    --shadow-lg: 0 6px 18px rgba(0, 0, 0, 0.14);
+    --text-primary: #0f172a;
+    --text-secondary: #334155;
+    --text-muted: #64748b;
+    --border-color: #e2e8f0;
+    --border-highlight: #cbd5e1;
+    --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.05);
+    --shadow-md: 0 4px 14px rgba(15, 23, 42, 0.07);
+    --shadow-lg: 0 12px 32px rgba(15, 23, 42, 0.10);
 }
 
 body.theme-dark {
@@ -84,17 +87,22 @@ body {
     font-family: var(--font-sans);
     background-color: var(--bg-primary);
     color: var(--text-primary);
-    line-height: 1.5;
+    line-height: 1.55;
     min-height: 100vh;
     display: flex;
     flex-direction: column;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
 }
 
 /* App Header */
 .app-header {
-    background: #ffffff;
-    border-bottom: 2px solid var(--border-highlight);
-    padding: 0.8rem 1.5rem;
+    background: rgba(255, 255, 255, 0.92);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border-bottom: 1px solid var(--border-color);
+    box-shadow: 0 1px 0 rgba(15, 23, 42, 0.04);
+    padding: 0.75rem 1.5rem;
     display: flex;
     justify-content: space-between;
     align-items: center;
@@ -109,17 +117,19 @@ body {
 }
 
 .brand-icon {
-    font-size: 2rem;
+    font-size: 1.85rem;
     color: #ffffff;
-    background: #1f1f1f;
-    padding: 0.5rem;
+    background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
+    padding: 0.48rem;
     border-radius: var(--radius-md);
+    box-shadow: 0 4px 12px rgba(37, 99, 235, 0.28);
 }
 
 .app-title {
-    font-size: 1.25rem;
-    font-weight: 700;
-    letter-spacing: -0.02em;
+    font-size: 1.2rem;
+    font-weight: 800;
+    letter-spacing: -0.025em;
+    color: var(--text-primary);
 }
 
 .app-subtitle {
@@ -146,9 +156,9 @@ body {
 .styled-select, .styled-input, .styled-textarea {
     background: #ffffff;
     color: var(--text-primary);
-    border: 1.5px solid var(--border-highlight);
+    border: 1px solid var(--border-highlight);
     padding: 0.5rem 0.8rem;
-    border-radius: var(--radius-sm);
+    border-radius: var(--radius-input);
     font-size: 0.9rem;
     font-weight: 600;
     outline: none;
@@ -156,8 +166,8 @@ body {
 }
 
 .styled-select:focus, .styled-input:focus, .styled-textarea:focus {
-    border-color: #1f1f1f;
-    box-shadow: 0 0 0 2px rgba(30, 30, 30, 0.2);
+    border-color: var(--accent-blue);
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.14);
 }
 
 /* Header Action Buttons */
@@ -171,26 +181,27 @@ body {
     display: inline-flex;
     align-items: center;
     gap: 0.4rem;
-    padding: 0.5rem 0.9rem;
+    padding: 0.5rem 0.95rem;
     border-radius: var(--radius-sm);
     font-size: 0.85rem;
     font-weight: 700;
     cursor: pointer;
-    border: 1.5px solid transparent;
-    transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+    border: 1px solid transparent;
+    transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
     white-space: nowrap;
     flex-shrink: 0;
 }
 
 .btn-primary {
-    background: #1f1f1f;
+    background: linear-gradient(180deg, #3b82f6 0%, #2563eb 100%);
     color: #ffffff;
-    border-color: #141414;
+    border-color: #1d4ed8;
+    box-shadow: 0 2px 8px rgba(37, 99, 235, 0.22);
 }
 
 .btn-primary:hover {
-    background: #1a1a1a;
-    opacity: 1;
+    background: linear-gradient(180deg, #2563eb 0%, #1d4ed8 100%);
+    box-shadow: 0 4px 12px rgba(37, 99, 235, 0.28);
     transform: none;
 }
 
@@ -198,20 +209,22 @@ body {
     background: #ffffff;
     color: var(--text-primary);
     border-color: var(--border-highlight);
+    box-shadow: var(--shadow-sm);
 }
 
 .btn-secondary:hover {
-    background: #e5e5e5;
+    background: #f8fafc;
+    border-color: #94a3b8;
 }
 
 .btn-outline {
     background: #ffffff;
-    border-color: #1f1f1f;
-    color: #1f1f1f;
+    border-color: var(--accent-blue);
+    color: var(--accent-blue);
 }
 
 .btn-outline:hover {
-    background: rgba(100, 100, 100, 0.1);
+    background: rgba(37, 99, 235, 0.06);
 }
 
 .btn-danger-outline {
@@ -236,10 +249,10 @@ body {
 .main-tabs {
     display: flex;
     align-items: center;
-    background: var(--bg-secondary);
+    background: var(--bg-primary);
     border-bottom: 1px solid var(--border-color);
-    padding: 0.5rem 1rem;
-    gap: 0.5rem;
+    padding: 0.45rem 1rem;
+    gap: 0.35rem;
     overflow-x: auto;
 }
 
@@ -287,32 +300,34 @@ body {
 .tab-btn {
     background: transparent;
     border: none;
-    color: var(--text-secondary);
-    padding: 0.8rem 1.2rem;
-    font-size: 0.95rem;
-    font-weight: 600;
+    color: var(--text-muted);
+    padding: 0.55rem 1rem;
+    font-size: 0.9rem;
+    font-weight: 700;
     cursor: pointer;
-    border-bottom: 3px solid transparent;
+    border-radius: 10px;
     display: inline-flex;
     align-items: center;
-    gap: 0.5rem;
+    gap: 0.45rem;
     white-space: nowrap;
-    transition: all 0.2s ease;
+    transition: background 0.18s ease, color 0.18s ease, box-shadow 0.18s ease;
 }
 
 .tab-btn:hover {
     color: var(--text-primary);
+    background: rgba(255, 255, 255, 0.65);
 }
 
 .tab-btn.active {
     color: var(--accent-blue);
-    border-bottom-color: var(--accent-blue);
+    background: #ffffff;
+    box-shadow: var(--shadow-sm);
 }
 
 /* App Content Area */
 .app-content {
     flex: 1;
-    padding: 1.2rem;
+    padding: 1.1rem 1.25rem 1.4rem;
     display: flex;
     flex-direction: column;
 }
@@ -329,7 +344,7 @@ body {
 
 /* TAB 1: Map Toolbar & Filters */
 .map-toolbar {
-    background: var(--bg-secondary);
+    background: #ffffff;
     border: 1px solid var(--border-color);
     border-radius: var(--radius-md);
     padding: 0.8rem 1rem;
@@ -339,6 +354,7 @@ body {
     align-items: center;
     gap: 1rem;
     flex-wrap: wrap;
+    box-shadow: var(--shadow-sm);
 }
 
 .toolbar-left {
@@ -370,13 +386,20 @@ body {
     display: inline-flex;
     align-items: center;
     gap: 0.3rem;
-    background: var(--bg-primary);
+    background: #ffffff;
     border: 1px solid var(--border-color);
-    padding: 0.3rem 0.6rem;
-    border-radius: var(--radius-sm);
+    padding: 0.3rem 0.65rem;
+    border-radius: 999px;
     font-size: 0.8rem;
     cursor: pointer;
     user-select: none;
+    box-shadow: var(--shadow-sm);
+    transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.checkbox-chip:hover {
+    border-color: #93c5fd;
+    background: #f8fafc;
 }
 
 .checkbox-chip.tag-structural { border-left: 3px solid var(--color-structural); }
@@ -2443,17 +2466,18 @@ body {
 }
 
 .section-header h2 {
-    font-size: 1.15rem;
+    font-size: 1.12rem;
     font-weight: 800;
-    color: #171717;
+    color: var(--text-primary);
+    letter-spacing: -0.02em;
 }
 
 /* Clean White Engineering Survey Table Styling */
 .table-container {
     background: #ffffff !important;
-    border-radius: 12px;
-    border: 1px solid #d0d0d0 !important;
-    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.08);
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border-color) !important;
+    box-shadow: var(--shadow-md);
     overflow-x: auto;
     /* overflow-y를 visible/auto로 두면 iOS가 이 박스를 세로 스크롤 포트로 취급해
        페이지 스크롤에 두 손가락이 필요해짐 → hidden으로 가로만 스크롤, 세로는 페이지로 */
@@ -2488,9 +2512,9 @@ body {
 }
 
 .survey-table th {
-    background: #fafafa !important;
-    color: #2a2a2a !important;
-    border-bottom: 2px solid #d0d0d0 !important;
+    background: #f8fafc !important;
+    color: var(--text-secondary) !important;
+    border-bottom: 1px solid var(--border-color) !important;
     padding: 0.85rem 0.8rem;
     font-weight: 800;
     text-align: center;
@@ -2499,18 +2523,18 @@ body {
 
 .survey-table td {
     padding: 0.8rem 0.75rem;
-    border-bottom: 1px solid #e5e5e5 !important;
-    color: #2a2a2a !important;
+    border-bottom: 1px solid #f1f5f9 !important;
+    color: var(--text-secondary) !important;
     text-align: center;
     vertical-align: middle;
 }
 
 .survey-table tbody tr:nth-child(even) {
-    background-color: #fafafa !important;
+    background-color: #fafbfc !important;
 }
 
 .survey-table tbody tr:hover {
-    background-color: #f4f4f4 !important;
+    background-color: #f1f5f9 !important;
 }
 
 .survey-inline-input,
@@ -2525,7 +2549,7 @@ body {
     line-height: 1.25;
     padding: 0.28rem 0.4rem;
     border: 1px solid #d4d4d4;
-    border-radius: 6px;
+    border-radius: var(--radius-input);
     background: #fff;
     color: #171717;
     text-align: center;
@@ -3224,8 +3248,9 @@ body.auth-gate-active #loginOverlay {
     left: 0;
     width: 100vw;
     height: 100vh;
-    background: rgba(0, 0, 0, 0.7);
-    backdrop-filter: blur(6px);
+    background: rgba(15, 23, 42, 0.45);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
     display: none;
     align-items: center;
     justify-content: center;
@@ -3623,6 +3648,170 @@ html:not(.layout-desktop) .survey-inline-select {
     min-height: 0;
     overflow-y: auto;
     -webkit-overflow-scrolling: touch;
+}
+
+/* 부재 실측 — 설계/실측 세로 스택 + 마감상태는 실측 아래 */
+#ndtModal .ndt-measure-stack {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    width: 100%;
+}
+
+#ndtModal .ndt-rc-dim-block,
+#ndtModal .ndt-steel-dim-block {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    width: 100%;
+}
+
+#ndtModal .ndt-measure-finish-block {
+    width: 100%;
+    margin-top: 0.15rem;
+    padding-top: 0.35rem;
+    border-top: 1px solid rgba(148, 163, 184, 0.2);
+}
+
+#ndtModal .ndt-measure-finish-block > .form-group {
+    width: 100%;
+    max-width: 100%;
+    margin: 0;
+}
+
+#ndtModal .ndt-form-row-2col {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.45rem;
+    align-items: start;
+    width: 100%;
+}
+
+#ndtModal .ndt-form-row-2col > .form-group {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+#ndtModal .ndt-form-row-2col .form-control {
+    width: 100%;
+    box-sizing: border-box;
+}
+
+/* 두께 전용: 두 번째 칸만 숨기고 첫 칸은 50% 유지 → 설계/실측 입력 폭 동일 */
+#ndtModal .ndt-dim-thickness #ndtDesignSecondaryGroup,
+#ndtModal .ndt-dim-thickness #ndtMeasuredSecondaryGroup {
+    visibility: hidden;
+    pointer-events: none;
+}
+
+#ndtModal .ndt-steel-dim-block .ndt-form-label,
+#ndtModal .ndt-form-label {
+    min-height: 2.1rem;
+    height: auto;
+    margin-bottom: 0.2rem;
+    font-size: 0.82rem;
+    white-space: nowrap;
+}
+
+#ndtModal .ndt-form-label {
+    display: flex;
+    flex-direction: row;
+    flex-wrap: nowrap;
+    align-items: flex-end;
+    gap: 0.1rem;
+    line-height: 1.2;
+    box-sizing: border-box;
+}
+
+#ndtModal .form-row {
+    display: flex;
+    gap: 0.8rem;
+    flex-wrap: wrap;
+}
+
+#ndtModal .ndt-standard-fields-stack {
+    display: flex;
+    flex-direction: column;
+    gap: 0.8rem;
+    width: 100%;
+}
+
+#ndtModal .form-label-hint {
+    font-size: 0.72rem;
+    font-weight: 400;
+    color: #64748b;
+    line-height: 1.25;
+}
+
+#ndtModal .form-label-req {
+    color: #dc2626;
+}
+
+#ndtModal .ndt-pick-group {
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+    width: 100%;
+    min-width: 0;
+}
+
+#ndtModal .ndt-quick-direct-input {
+    margin-bottom: 0.22rem;
+    font-size: 0.88rem;
+    font-weight: 400;
+}
+
+#ndtModal .ndt-quick-chip-grid {
+    width: 100%;
+    min-width: 0;
+}
+
+#ndtModal .ndt-quick-chip-grid .defect-quick-chip {
+    font-weight: 400;
+    border-radius: 6px;
+    padding: 0.4rem 0.2rem;
+    font-size: 0.7rem;
+    line-height: 1.3;
+    overflow: visible;
+    white-space: normal;
+    word-break: keep-all;
+    overflow-wrap: break-word;
+    min-width: 0;
+    box-sizing: border-box;
+}
+
+#ndtModal .dqg-finish .defect-quick-chip.active {
+    background: #b45309;
+    border-color: #b45309;
+    color: #ffffff;
+}
+
+#ndtModal .form-row > .form-group {
+    flex: 1 1 calc(50% - 0.4rem);
+    min-width: 0;
+}
+
+#ndtModal .form-control,
+#ndtModal .form-select {
+    width: 100%;
+    box-sizing: border-box;
+}
+
+@media (max-width: 768px) {
+    #ndtModal .ndt-form-row-2col {
+        grid-template-columns: 1fr;
+        align-items: stretch;
+    }
+
+    #ndtModal .ndt-dim-thickness #ndtDesignSecondaryGroup,
+    #ndtModal .ndt-dim-thickness #ndtMeasuredSecondaryGroup {
+        display: none !important;
+    }
+
+    #ndtModal .ndt-form-label {
+        white-space: normal;
+    }
 }
 
 #ndtModal.open .ndt-drawer-card {
@@ -4892,7 +5081,7 @@ html:not(.layout-desktop) .survey-inline-select {
 
 .modal-card {
     background: var(--bg-modal);
-    border: 1px solid var(--border-highlight);
+    border: 1px solid var(--border-color);
     border-radius: var(--radius-lg);
     width: 100%;
     max-width: 650px;
@@ -5234,7 +5423,7 @@ html:not(.layout-desktop) .survey-inline-select {
     background: #ffffff;
     color: #0f172a;
     border: 1px solid #dbe3ef;
-    border-radius: 10px;
+    border-radius: var(--radius-input);
     padding: 0.55rem 0.75rem;
     font-size: 0.88rem;
     font-weight: 600;
@@ -6272,7 +6461,7 @@ body:not(.bsa-tab-home) .home-fab-add-building {
 
 /* 부재: 최대 4칸 (넘치면 줄바꿈) */
 .defect-quick-chip-grid.dqg-component {
-    grid-template-columns: repeat(4, 1fr);
+    grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
 /* 결함 종류: 3칸 */
@@ -6283,6 +6472,10 @@ body:not(.bsa-tab-home) .home-fab-add-building {
 /* 발생 원인: 2칸 */
 .defect-quick-chip-grid.dqg-cause {
     grid-template-columns: repeat(2, 1fr);
+}
+
+.defect-quick-chip-grid.dqg-finish {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
 .defect-measure-grid {
@@ -6518,6 +6711,11 @@ body:not(.bsa-tab-home) .home-fab-add-building {
     border-color: #0369a1;
     color: #ffffff;
 }
+.dqg-finish .defect-quick-chip.active {
+    background: #b45309;
+    border-color: #b45309;
+    color: #ffffff;
+}
 
 /* 상태양호는 초록 */
 .dqg-type .defect-quick-chip[data-value="상태양호"].active {
@@ -6553,27 +6751,28 @@ body:not(.bsa-tab-home) .home-fab-add-building {
 
 .chip {
     background: #ffffff;
-    border: 1.5px solid #8a8a8a;
-    color: #171717;
-    padding: 0.4rem 0.8rem;
-    border-radius: 6px;
+    border: 1px solid var(--border-highlight);
+    color: var(--text-secondary);
+    padding: 0.4rem 0.85rem;
+    border-radius: 999px;
     font-size: 0.8rem;
     font-weight: 700;
     cursor: pointer;
-    transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+    transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
 }
 
 .chip:hover {
-    border-color: #111111;
-    color: #111111;
-    background: #f4f4f4;
+    border-color: var(--accent-blue);
+    color: var(--accent-blue);
+    background: rgba(37, 99, 235, 0.04);
 }
 
 .chip.active {
-    background: #1f1f1f;
-    border-color: #141414;
+    background: var(--accent-blue);
+    border-color: #1d4ed8;
     color: #ffffff;
     font-weight: 800;
+    box-shadow: 0 2px 8px rgba(37, 99, 235, 0.22);
 }
 
 .custom-add-row {
@@ -6939,9 +7138,8 @@ body:not(.bsa-tab-home) .home-fab-add-building {
 }
 
 .dashboard-hero {
-    background: linear-gradient(135deg, rgba(30, 41, 59, 0.9), rgba(20, 20, 20, 0.95)), url('https://images.unsplash.com/photo-1541888946425-d0fbb186a5b7?w=1200') center/cover;
-    background-blend-mode: overlay;
-    border: 1px solid var(--border-highlight);
+    background: linear-gradient(135deg, #1e3a8a 0%, #1d4ed8 48%, #2563eb 100%);
+    border: 1px solid rgba(255, 255, 255, 0.12);
     border-radius: var(--radius-lg);
     padding: 1rem 1.25rem;
     display: flex;
@@ -6949,7 +7147,7 @@ body:not(.bsa-tab-home) .home-fab-add-building {
     align-items: center;
     gap: 1rem;
     flex-wrap: nowrap;
-    box-shadow: var(--shadow-lg);
+    box-shadow: 0 8px 24px rgba(37, 99, 235, 0.22);
     min-width: 0;
     overflow: hidden;
 }
@@ -7372,14 +7570,14 @@ body:not(.bsa-tab-home) .home-fab-add-building {
 }
 
 .dashboard-section {
-    background: var(--bg-secondary);
+    background: #ffffff;
     border: 1px solid var(--border-color);
-    border-radius: var(--radius-md);
-    padding: 1.2rem 1.5rem;
+    border-radius: var(--radius-lg);
+    padding: 1.1rem 1.35rem;
     display: flex;
     flex-direction: column;
     gap: 1rem;
-    box-shadow: var(--shadow-md);
+    box-shadow: var(--shadow-sm);
 }
 
 .section-title {
@@ -7531,12 +7729,13 @@ body:not(.bsa-tab-home) .home-fab-add-building {
     display: flex;
     align-items: center;
     gap: 0.6rem;
-    background: var(--bg-primary);
+    background: #ffffff;
     border: 1px solid var(--border-color);
     border-radius: var(--radius-md);
-    padding: 0.6rem 0.9rem;
+    padding: 0.65rem 0.95rem;
     margin: 0 0 0.9rem;
     color: var(--text-muted);
+    box-shadow: var(--shadow-sm);
 }
 
 /* 크롬 자동완성 흡수용 더미 필드 — 화면 밖, 포커스 불가 */
@@ -7581,14 +7780,15 @@ body:not(.bsa-tab-home) .home-fab-add-building {
     gap: 0.8rem;
     background: var(--bg-card);
     border: 1px solid var(--border-color);
-    border-radius: var(--radius-sm);
-    padding: 0.65rem 0.9rem;
-    transition: all 0.15s ease;
+    border-radius: var(--radius-md);
+    padding: 0.7rem 1rem;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
+    box-shadow: var(--shadow-sm);
 }
 
 .building-row:hover {
-    border-color: var(--accent-indigo);
-    box-shadow: var(--shadow-sm);
+    border-color: #93c5fd;
+    box-shadow: 0 4px 14px rgba(37, 99, 235, 0.10);
 }
 
 .building-row-info {
@@ -7739,12 +7939,13 @@ body:not(.bsa-tab-home) .home-fab-add-building {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    border-radius: 8px;
+    border-radius: 10px;
     border: 1px solid var(--border-color);
-    background: var(--bg-primary);
+    background: #ffffff;
     font-size: 0.95rem;
     cursor: pointer;
     transition: all 0.15s ease;
+    box-shadow: var(--shadow-sm);
 }
 
 .icon-btn-label {
@@ -7752,12 +7953,13 @@ body:not(.bsa-tab-home) .home-fab-add-building {
 }
 
 .icon-btn-start {
-    border-color: #2a2a2a;
-    color: #2a2a2a;
+    border-color: #93c5fd;
+    color: #2563eb;
 }
 .icon-btn-start:hover {
-    background: #2a2a2a;
+    background: #2563eb;
     color: #ffffff;
+    border-color: #1d4ed8;
 }
 
 .icon-btn-edit {
@@ -7930,8 +8132,8 @@ body:not(.bsa-tab-home) .home-fab-add-building {
 .toast-error i { color: #dc2626; }
 .toast-warning { border-left: 4px solid #d97706; }
 .toast-warning i { color: #d97706; }
-.toast-info { border-left: 4px solid #2a2a2a; }
-.toast-info i { color: #2a2a2a; }
+.toast-info { border-left: 4px solid #2563eb; }
+.toast-info i { color: #2563eb; }
 
 .loading-overlay {
     display: none;
@@ -10455,5 +10657,225 @@ html.layout-tablet body.bsa-keyboard-open .edit-building-body {
 
 .company-join-selected .company-join-search-code {
     margin-left: 0.35rem;
+}
+
+/* ==========================================================================
+   Digital UI Polish — 소프트·깔끔·가독성 (기능 로직 무관, 스타일만)
+   ========================================================================== */
+
+/* 로그인 오버레이 — 인라인 스타일 덮어쓰기 */
+#loginOverlay {
+    background: linear-gradient(145deg, #eff6ff 0%, #f1f5f9 55%, #e2e8f0 100%) !important;
+}
+
+#loginOverlay .modal-card {
+    border: 1px solid #e2e8f0 !important;
+    border-radius: 20px !important;
+    box-shadow: 0 24px 48px rgba(15, 23, 42, 0.10), 0 0 0 1px rgba(255, 255, 255, 0.85) inset !important;
+}
+
+#loginOverlay .modal-card > div:first-child > div:first-child {
+    background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%) !important;
+    box-shadow: 0 8px 24px rgba(37, 99, 235, 0.28) !important;
+}
+
+#loginOverlay #authTabGroup {
+    background: #f1f5f9 !important;
+    border-color: #e2e8f0 !important;
+}
+
+#loginOverlay .auth-tab-btn.active {
+    background: #2563eb !important;
+    color: #ffffff !important;
+    box-shadow: 0 2px 8px rgba(37, 99, 235, 0.22);
+}
+
+#loginOverlay .auth-tab-btn:not(.active) {
+    color: #64748b !important;
+    background: transparent !important;
+}
+
+#loginOverlay .form-control {
+    background: #f8fafc !important;
+    border: 1px solid #e2e8f0 !important;
+    border-radius: var(--radius-input) !important;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+#loginOverlay .form-control:focus {
+    border-color: #2563eb !important;
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12) !important;
+    outline: none;
+}
+
+#loginOverlay #btnSubmitAuth {
+    background: linear-gradient(180deg, #3b82f6 0%, #2563eb 100%) !important;
+    box-shadow: 0 4px 14px rgba(37, 99, 235, 0.28) !important;
+}
+
+#loginOverlay #btnSubmitAuth:hover {
+    background: linear-gradient(180deg, #2563eb 0%, #1d4ed8 100%) !important;
+}
+
+/* 토스트·로딩 */
+.toast {
+    border-radius: var(--radius-md);
+    backdrop-filter: blur(8px);
+}
+
+.toast-info { border-left-color: #2563eb; }
+.toast-info i { color: #2563eb; }
+
+.loading-overlay {
+    background: rgba(15, 23, 42, 0.32);
+    backdrop-filter: blur(4px);
+}
+
+/* 체크박스 칩·필터 — hover는 상단 정의와 동일 */
+
+/* 캔버스 상단 툴바 */
+.canvas-top-toolbar,
+.map-style-toolbar {
+    border: 1px solid var(--border-color) !important;
+    box-shadow: var(--shadow-sm) !important;
+}
+
+/* 대시보드 섹션 카드 */
+.dashboard-section h3,
+.section-title {
+    letter-spacing: -0.02em;
+}
+
+/* 빠른 도구 카드 */
+.quick-tool-card {
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-sm);
+    transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
+}
+
+.quick-tool-card:hover {
+    border-color: #93c5fd;
+    box-shadow: 0 4px 14px rgba(37, 99, 235, 0.10);
+}
+
+/* 폼 공통 — 입력칸은 살짝 각진 모서리 */
+.form-control,
+input[type="text"].form-control,
+input[type="number"].form-control,
+input[type="email"].form-control,
+input[type="password"].form-control,
+input[type="search"].form-control,
+input[type="date"].form-control,
+input[type="tel"].form-control,
+select.form-control,
+textarea.form-control {
+    border-radius: var(--radius-input);
+    border-color: var(--border-color);
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.form-control:focus {
+    border-color: var(--accent-blue);
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+    outline: none;
+}
+
+.form-label {
+    color: var(--text-secondary);
+    font-weight: 700;
+}
+
+/* 스크롤바 (WebKit) */
+::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+    background: #cbd5e1;
+    border-radius: 999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: #94a3b8;
+}
+
+/* NDT 콘크리트 강도 R값 — 5열×4행(최대 20개) 고정 그리드 */
+.ndt-r-values-grid {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(2.6rem, 1fr));
+    gap: 0.22rem;
+    width: 100%;
+}
+
+.ndt-r-value-cell {
+    display: flex;
+    align-items: center;
+    gap: 0.05rem;
+    min-width: 0;
+    background: #fff;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-input);
+    padding: 0.08rem 0.12rem 0.08rem 0.18rem;
+}
+
+.ndt-r-value-input {
+    flex: 1 1 0;
+    min-width: 0;
+    width: 0;
+    padding: 0.1rem 0;
+    border: none !important;
+    background: transparent !important;
+    box-shadow: none !important;
+    font-size: 0.8rem;
+    font-weight: 400;
+    text-align: center;
+    -moz-appearance: textfield;
+    appearance: textfield;
+}
+
+.ndt-r-value-input::-webkit-outer-spin-button,
+.ndt-r-value-input::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+}
+
+.ndt-r-value-input:focus {
+    outline: none;
+}
+
+.ndt-r-value-remove {
+    flex-shrink: 0;
+    border: none;
+    background: transparent;
+    color: #94a3b8;
+    cursor: pointer;
+    padding: 0;
+    width: 0.85rem;
+    height: 0.85rem;
+    font-size: 0.72rem;
+    line-height: 1;
+    opacity: 0;
+    pointer-events: none;
+}
+
+.ndt-r-value-cell:has(.ndt-r-value-input:not(:placeholder-shown)) .ndt-r-value-remove,
+.ndt-r-value-cell:focus-within .ndt-r-value-remove {
+    opacity: 1;
+    pointer-events: auto;
+}
+
+.ndt-r-value-remove:hover {
+    color: #ef4444;
+}
+
+@media (max-width: 720px) {
+    .ndt-r-values-grid {
+        grid-template-columns: repeat(4, minmax(2.8rem, 1fr));
+    }
 }
 

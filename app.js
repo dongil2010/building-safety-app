@@ -284,6 +284,12 @@ document.addEventListener('DOMContentLoaded', () => {
         return toast;
     };
 
+    /** 삭제 전 확인 팝업 — 작업창 전역에서 동일하게 사용 */
+    window.confirmDelete = function(message) {
+        const msg = (message && String(message).trim()) || '정말 삭제하시겠습니까?';
+        return window.confirm(msg);
+    };
+
     let _loadingDepth = 0;
     window.showLoading = function(text = '처리 중입니다...') {
         let overlay = document.getElementById('globalLoadingOverlay');
@@ -2568,7 +2574,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     return;
                 }
                 if (action === 'purge') {
-                    if (!confirm(`'${bldg.name}'을(를) 영구 삭제할까요?\n도면·결함·첨부파일이 삭제되며 복구할 수 없습니다.`)) return;
+                    if (!window.confirmDelete(`'${bldg.name}'을(를) 영구 삭제할까요?\n도면·결함·첨부파일이 삭제되며 복구할 수 없습니다.`)) return;
                     await window.permanentlyDeleteBuilding(bldg);
                     window.renderBuildingTrashModal();
                 }
@@ -6067,7 +6073,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const bldg = window.currentEditingBuilding;
         if (!bldg) return;
 
-        if (confirm(`🗑️ 정말 ${floorCode} 층 도면을 삭제하시겠습니까?`)) {
+        if (window.confirmDelete(`정말 ${floorCode} 층 도면을 삭제하시겠습니까?`)) {
             if (bldg.floorDrawings && bldg.floorDrawings[floorCode]) {
                 delete bldg.floorDrawings[floorCode];
             }
@@ -6325,7 +6331,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const bldg = window.currentEditingBuilding;
             if (!bldg) return;
 
-            if (!confirm(
+            if (!window.confirmDelete(
                 `건축물 '${bldg.name}'을(를) 휴지통으로 보낼까요?\n\n` +
                 `· 약 30일간 보관되며 그 안에 복원할 수 있습니다.\n` +
                 `· 30일이 지나면 도면·결함과 함께 영구 삭제됩니다.`
@@ -7489,6 +7495,12 @@ document.addEventListener('DOMContentLoaded', () => {
     // 부재 실측(단면 규격)의 마감상태 기본 목록 — 사용자가 직접 추가한 항목은
     // state.customNdtFinishStates에 저장되어 이후 계속 노출된다.
     const NDT_FINISH_STATE_PRESET = ['노출', '몰탈마감', '석재마감', '타일마감', '기타'];
+    // 부재 구분 기본 목록 — 직접 입력·추가 항목은 state.customNdtComponents에 저장
+    const NDT_COMPONENT_PRESET = [
+        '기둥', '철골기둥', 'SRC기둥', '큰보',
+        '작은보', '철골거더', '철골빔', '캔틸레버보',
+        '슬래브', '데크슬래브', 'RC벽체', '조적벽체'
+    ];
     let ndtView = { offsetX: 0, offsetY: 0, scale: 1.0 };
     let ndtRotationAngle = 0;
     let ndtBgImage = null;
@@ -7690,7 +7702,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             return;
         }
-        if (!confirm(`선택한 비파괴 마킹 ${ids.length}건을 삭제할까요?`)) return;
+        if (!window.confirmDelete(`선택한 비파괴 마킹 ${ids.length}건을 삭제할까요?`)) return;
         const key = `${state.currentBuildingId}_${state.currentFloor}`;
         const pinIds = ids.filter(id => !String(id).startsWith('disp_'));
         const dispIds = ids.filter(id => String(id).startsWith('disp_')).map(id => id.slice(5));
@@ -8185,11 +8197,14 @@ document.addEventListener('DOMContentLoaded', () => {
         ctx.miterLimit = 2;
         const fontSizeMatch = String(fontCss).match(/(\d+(?:\.\d+)?)px/);
         const fontSize = fontSizeMatch ? parseFloat(fontSizeMatch[1]) : 11;
-        ctx.strokeStyle = outlineColor || '#ffffff';
-        ctx.lineWidth = opts.outlineWidth !== undefined
+        const outlineW = opts.outlineWidth !== undefined
             ? opts.outlineWidth
             : Math.max(1.1, Math.min(2.8, fontSize * 0.2));
-        ctx.strokeText(label, x, y);
+        if (outlineW > 0) {
+            ctx.strokeStyle = outlineColor || '#ffffff';
+            ctx.lineWidth = outlineW;
+            ctx.strokeText(label, x, y);
+        }
         ctx.fillStyle = fillColor;
         ctx.fillText(label, x, y);
     }
@@ -8785,14 +8800,193 @@ document.addEventListener('DOMContentLoaded', () => {
         return { w: isNaN(w) ? null : w, d: isNaN(d) ? null : d };
     }
 
+    function parseNdtDimNumber(raw) {
+        const n = parseFloat(String(raw ?? '').replace(/[^0-9.]/g, ''));
+        return Number.isFinite(n) ? n : null;
+    }
+
+    // 철골 H형 단면: 웨브(두께)·플렌지(두께)·웨브폭(H)·플렌지폭(B)
+    function isNdtSteelComponent(name) {
+        const t = String(name || '');
+        return t.includes('철골');
+    }
+
+    // 부재 실측 치수 입력 방식: steel | beam(폭×춤) | column(정면·측면) | thickness(두께만)
+    function getNdtMeasureDimKind(name) {
+        const t = String(name || '').trim();
+        if (isNdtSteelComponent(t)) return 'steel';
+        if (/슬래브|벽체/.test(t)) return 'thickness';
+        if (/기둥/.test(t)) return 'column';
+        if (/보|거더|빔/.test(t)) return 'beam';
+        return 'beam';
+    }
+
+    const NDT_DIM_LABELS = {
+        beam: {
+            designPrimary: '📐 설계 폭 (mm)',
+            designSecondary: '📐 설계 춤 (mm)',
+            measuredPrimary: '📐 실측 폭 (mm)',
+            measuredSecondary: '📐 실측 춤 (mm)',
+            designPrimaryPh: '예: 400',
+            designSecondaryPh: '예: 600',
+            measuredPrimaryPh: '예: 396',
+            measuredSecondaryPh: '예: 598'
+        },
+        column: {
+            designPrimary: '📐 설계 정면폭 (mm)',
+            designSecondary: '📐 설계 측면폭 (mm)',
+            measuredPrimary: '📐 실측 정면폭 (mm)',
+            measuredSecondary: '📐 실측 측면폭 (mm)',
+            designPrimaryPh: '예: 600',
+            designSecondaryPh: '예: 600',
+            measuredPrimaryPh: '예: 595',
+            measuredSecondaryPh: '예: 595'
+        },
+        thickness: {
+            designPrimary: '📐 설계 두께 (mm)',
+            designSecondary: '',
+            measuredPrimary: '📐 실측 두께 (mm)',
+            measuredSecondary: '',
+            designPrimaryPh: '예: 200',
+            designSecondaryPh: '',
+            measuredPrimaryPh: '예: 198',
+            measuredSecondaryPh: ''
+        }
+    };
+
+    function applyNdtDimLabels(kind) {
+        const labels = NDT_DIM_LABELS[kind] || NDT_DIM_LABELS.beam;
+        const set = (id, text) => {
+            const el = document.getElementById(id);
+            if (el) el.textContent = text || '';
+        };
+        set('lblNdtDesignPrimary', labels.designPrimary);
+        set('lblNdtDesignSecondary', labels.designSecondary);
+        set('lblNdtMeasuredPrimary', labels.measuredPrimary);
+        set('lblNdtMeasuredSecondary', labels.measuredSecondary);
+        const dw = document.getElementById('ndtDesignWidth');
+        const dd = document.getElementById('ndtDesignDepth');
+        const mw = document.getElementById('ndtMeasuredWidth');
+        const md = document.getElementById('ndtMeasuredDepth');
+        if (dw) dw.placeholder = labels.designPrimaryPh || '';
+        if (dd) dd.placeholder = labels.designSecondaryPh || '';
+        if (mw) mw.placeholder = labels.measuredPrimaryPh || '';
+        if (md) md.placeholder = labels.measuredSecondaryPh || '';
+    }
+
+    function getNdtCurrentComponentName() {
+        return getDefectComboValue(
+            document.getElementById('ndtComponent'),
+            document.getElementById('ndtComponentInput')
+        ) || '';
+    }
+
+    function toggleNdtMeasureDimMode() {
+        const kind = getNdtMeasureDimKind(getNdtCurrentComponentName());
+        const rcDesign = document.getElementById('ndtMeasureRcDesignBlock');
+        const steelDesign = document.getElementById('ndtMeasureSteelDesignBlock');
+        const rcMeasured = document.getElementById('ndtMeasureRcMeasuredBlock');
+        const steelMeasured = document.getElementById('ndtMeasureSteelMeasuredBlock');
+        const measuredRoot = document.getElementById('groupNdtMeasuredDepth');
+        const isSteel = kind === 'steel';
+        if (rcDesign) rcDesign.style.display = isSteel ? 'none' : '';
+        if (steelDesign) steelDesign.style.display = isSteel ? 'flex' : 'none';
+        if (rcMeasured) rcMeasured.style.display = isSteel ? 'none' : '';
+        if (steelMeasured) steelMeasured.style.display = isSteel ? 'flex' : 'none';
+        [rcDesign, rcMeasured, measuredRoot].forEach(root => {
+            if (!root) return;
+            root.classList.remove('ndt-dim-beam', 'ndt-dim-column', 'ndt-dim-thickness');
+            if (!isSteel) root.classList.add(`ndt-dim-${kind}`);
+        });
+        const secDesign = document.getElementById('ndtDesignSecondaryGroup');
+        const secMeasured = document.getElementById('ndtMeasuredSecondaryGroup');
+        const showSecondary = !isSteel && kind !== 'thickness';
+        // display:none 대신 숨김 유지해 2열 그리드(50%) 폭을 설계/실측 동일하게 맞춤
+        [secDesign, secMeasured].forEach(el => {
+            if (!el) return;
+            if (showSecondary) {
+                el.style.display = '';
+                el.style.visibility = '';
+                el.style.pointerEvents = '';
+            } else {
+                el.style.display = '';
+                el.style.visibility = 'hidden';
+                el.style.pointerEvents = 'none';
+            }
+        });
+        if (!isSteel) applyNdtDimLabels(kind);
+    }
+
+    // H형강 단면적 ≈ 2·B·tf + tw·(H − 2·tf)
+    // 표기 순서: 높이(H) × 폭(B) × 웨브두께(tw) × 플랜지두께(tf)
+    function calcSteelSectionArea(web, flange, webWidth, flangeWidth) {
+        if (!(web > 0) || !(flange > 0) || !(webWidth > 0) || !(flangeWidth > 0)) return null;
+        const clearWeb = Math.max(webWidth - 2 * flange, 0);
+        return (2 * flangeWidth * flange) + (web * clearWeb);
+    }
+
+    function readNdtSteelDims(prefix) {
+        // prefix: 'ndtDesign' | 'ndtMeasured'
+        // WebWidth=높이(H), FlangeWidth=폭(B), Web=웨브두께, Flange=플랜지두께
+        return {
+            web: parseNdtDimNumber(document.getElementById(`${prefix}Web`)?.value),
+            flange: parseNdtDimNumber(document.getElementById(`${prefix}Flange`)?.value),
+            webWidth: parseNdtDimNumber(document.getElementById(`${prefix}WebWidth`)?.value),
+            flangeWidth: parseNdtDimNumber(document.getElementById(`${prefix}FlangeWidth`)?.value)
+        };
+    }
+
+    function formatNdtSteelDimText(web, flange, webWidth, flangeWidth, joiner = ' × ') {
+        // 높이 × 폭 × 웨브 두께 × 플랜지 두께
+        const parts = [webWidth, flangeWidth, web, flange];
+        if (parts.every(v => v === undefined || v === null || v === '')) return '';
+        return parts.map(v => (v === undefined || v === null || v === '') ? '-' : v).join(joiner);
+    }
+
+    function formatNdtMeasureDimText(item, kind = 'design', joiner = ' × ') {
+        if (!item) return '-';
+        const dimMode = (item.measureDimMode === 'rc' || !item.measureDimMode)
+            ? getNdtMeasureDimKind(item.component)
+            : item.measureDimMode;
+        if (dimMode === 'steel') {
+            if (kind === 'design') {
+                const t = formatNdtSteelDimText(item.designWeb, item.designFlange, item.designWebWidth, item.designFlangeWidth, joiner);
+                return t || '-';
+            }
+            const t = formatNdtSteelDimText(item.measuredWeb, item.measuredFlange, item.measuredWebWidth, item.measuredFlangeWidth, joiner);
+            return t || '-';
+        }
+        if (dimMode === 'thickness') {
+            if (kind === 'design') return item.designWidth != null && item.designWidth !== '' ? String(item.designWidth) : '-';
+            const measuredW = (item.measuredWidth !== undefined && item.measuredWidth !== null) ? item.measuredWidth : item.avgValue;
+            return measuredW != null && measuredW !== '' ? String(measuredW) : '-';
+        }
+        if (kind === 'design') {
+            return item.designWidth ? `${item.designWidth}${item.designDepth ? joiner + item.designDepth : ''}` : '-';
+        }
+        const measuredW = (item.measuredWidth !== undefined && item.measuredWidth !== null) ? item.measuredWidth : item.avgValue;
+        return measuredW ? `${measuredW}${item.measuredDepth ? joiner + item.measuredDepth : ''}` : '-';
+    }
+
     // 콘크리트 부재단면의 규격: 시설물의 안전 및 유지관리 실시 세부지침(건축물편) [표 6.24]
     // c(%) = (측정단면적 ÷ 설계단면적) × 100. a: 100%이상, b: 95%이상, c: 90%이상, d: 75%이상, e: 75%미만.
     // 춤(depth)이 없는 단일치수 부재(슬래브 두께 등)는 면적 대신 그 치수 자체의 비율로 계산한다.
+    // 철골은 H형 단면적으로 동일 표 기준을 적용한다.
     function calcSectionGrade(designW, designD, measuredW, measuredD) {
         if (!(designW > 0) || !(measuredW > 0)) return null;
         const designArea = designD > 0 ? designW * designD : designW;
         const measuredArea = measuredD > 0 ? measuredW * measuredD : measuredW;
-        const ratio = (measuredArea / designArea) * 100;
+        return gradeFromSectionRatio((measuredArea / designArea) * 100);
+    }
+
+    function calcSteelSectionGrade(design, measured) {
+        const designArea = calcSteelSectionArea(design.web, design.flange, design.webWidth, design.flangeWidth);
+        const measuredArea = calcSteelSectionArea(measured.web, measured.flange, measured.webWidth, measured.flangeWidth);
+        if (!(designArea > 0) || !(measuredArea > 0)) return null;
+        return gradeFromSectionRatio((measuredArea / designArea) * 100);
+    }
+
+    function gradeFromSectionRatio(ratio) {
         let code = 'e';
         if (ratio >= 100) code = 'a';
         else if (ratio >= 95) code = 'b';
@@ -9199,19 +9393,31 @@ document.addEventListener('DOMContentLoaded', () => {
         const bx = item.boxX !== undefined ? item.boxX : (item.x || 0);
         const by = item.boxY !== undefined ? item.boxY : (item.y || 0);
         const cat = item.category || '';
-        const pinScale = getStyleSize(getNdtStyleKey(cat)).pin;
-        let w = 60 * pinScale;
-        let h = 28 * pinScale;
+        const ndtStyleKey = getNdtStyleKey(cat);
+        const pinScale = getStyleSize(ndtStyleKey).pin;
+        let noStr = item.no || 'NO.01';
+        if (noStr.startsWith('기울기-') || noStr.startsWith('NDT-') || noStr.startsWith('변위-')) {
+            const numPart = noStr.replace(/^[^\d]+/, '');
+            noStr = `NO.${numPart.length === 1 ? '0' + numPart : numPart}`;
+        }
+        noStr = formatPinNumberLabel(noStr, ndtStyleKey);
+        let w;
+        let h;
         let itemRot = 0;
         if (cat === '기울기' || cat === '변위' || cat === '부재변위') {
             w = 168 * pinScale;
             h = 44 * pinScale;
             itemRot = getNdtTiltItemRotation(item, cat);
         } else if (cat === '강도' || cat === '탄산화') {
-            const dims = measureNdtTypeCalloutDimensions(ctx, item.no || 'NO.01', getNdtStrengthCarbTypeLabel(cat), pinScale);
+            const dims = measureNdtTypeCalloutDimensions(ctx, noStr, getNdtStrengthCarbTypeLabel(cat), pinScale);
             w = dims.boxW;
             h = dims.boxH;
+        } else {
+            const dims = measurePinBoxDimensions(ctx, noStr, pinScale, 1);
+            w = dims.w;
+            h = dims.h;
         }
+        const pad = 2 * pinScale;
         ctx.save();
         ctx.translate(bx, by);
         if (ndtRotationAngle === 90) ctx.rotate((-90 * Math.PI) / 180);
@@ -9221,7 +9427,7 @@ document.addEventListener('DOMContentLoaded', () => {
         ctx.strokeStyle = '#6b6b6b';
         ctx.lineWidth = Math.max(2, 2.4 * pinScale);
         ctx.setLineDash([]);
-        ctx.strokeRect(-w / 2 - 3 * pinScale, -h / 2 - 3 * pinScale, w + 6 * pinScale, h + 6 * pinScale);
+        ctx.strokeRect(-w / 2 - pad, -h / 2 - pad, w + pad * 2, h + pad * 2);
         ctx.restore();
     }
 
@@ -9373,10 +9579,13 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         if (itemRot) ctx.rotate((itemRot * Math.PI) / 180);
 
-        ctx.strokeStyle = color;
-        ctx.lineWidth = lineW;
+        // 흰 배경으로 도면 위 글자·숫자·화살표 가독성 확보
         ctx.beginPath();
         ctx.rect(-boxW / 2, -boxH / 2, boxW, boxH);
+        ctx.fillStyle = '#ffffff';
+        ctx.fill();
+        ctx.strokeStyle = color;
+        ctx.lineWidth = lineW;
         ctx.stroke();
 
         // 격자: 세로 2줄 + 가로 1줄(오른쪽만)
@@ -9393,15 +9602,16 @@ document.addEventListener('DOMContentLoaded', () => {
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
 
-        const outline = '#ffffff';
-        drawOutlinedPinText(ctx, noStr, -boxW / 2 + col1W / 2, 0, color, `bold ${Math.round(15 * pinScale)}px sans-serif`, outline);
+        // 흰 배경 위에서는 외곽선 없이 본문색만 써도 잘 읽힘
+        const textOpts = { outlineWidth: 0 };
+        drawOutlinedPinText(ctx, noStr, -boxW / 2 + col1W / 2, 0, color, `bold ${Math.round(15 * pinScale)}px sans-serif`, '#ffffff', textOpts);
 
         const midX = -boxW / 2 + col1W + col2W / 2;
         const rightX = -boxW / 2 + col1W + col2W + col3W / 2;
-        drawOutlinedPinText(ctx, amountLabel, midX, -boxH / 4, color, `bold ${Math.round(10.5 * pinScale)}px sans-serif`, outline);
-        drawOutlinedPinText(ctx, '변위방향', midX, boxH / 4, color, `bold ${Math.round(10.5 * pinScale)}px sans-serif`, outline);
-        drawOutlinedPinText(ctx, tiltVal, rightX, -boxH / 4, color, `bold ${Math.round(12.5 * pinScale)}px sans-serif`, outline);
-        drawOutlinedPinText(ctx, dispDir, rightX, boxH / 4, color, `bold ${Math.round(18 * pinScale)}px sans-serif`, outline);
+        drawOutlinedPinText(ctx, amountLabel, midX, -boxH / 4, color, `bold ${Math.round(10.5 * pinScale)}px sans-serif`, '#ffffff', textOpts);
+        drawOutlinedPinText(ctx, '변위방향', midX, boxH / 4, color, `bold ${Math.round(10.5 * pinScale)}px sans-serif`, '#ffffff', textOpts);
+        drawOutlinedPinText(ctx, tiltVal, rightX, -boxH / 4, color, `bold ${Math.round(12.5 * pinScale)}px sans-serif`, '#ffffff', textOpts);
+        drawOutlinedPinText(ctx, dispDir, rightX, boxH / 4, color, `bold ${Math.round(18 * pinScale)}px sans-serif`, '#ffffff', textOpts);
 
         ctx.restore();
     }
@@ -11080,9 +11290,8 @@ document.addEventListener('DOMContentLoaded', () => {
             `).join('');
         } else if (currentCat === '실측') {
             tbody.innerHTML = items.map((item, idx) => {
-                const designText = item.designWidth ? `${item.designWidth}${item.designDepth ? ' × ' + item.designDepth : ''}` : '-';
-                const measuredW = (item.measuredWidth !== undefined && item.measuredWidth !== null) ? item.measuredWidth : item.avgValue;
-                const measuredText = measuredW ? `${measuredW}${item.measuredDepth ? ' × ' + item.measuredDepth : ''}` : '-';
+                const designText = formatNdtMeasureDimText(item, 'design');
+                const measuredText = formatNdtMeasureDimText(item, 'measured');
                 const ratioText = (item.sectionRatio !== undefined && item.sectionRatio !== null) ? `${item.sectionRatio.toFixed(1)}%` : '-';
                 return `
                 <tr>
@@ -11224,15 +11433,14 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     };
 
-    window.deleteNdtItem = function(id) {
-        if (confirm('⚠️ 해당 비파괴 조사 측정 항목을 삭제하시겠습니까?')) {
-            const key = `${state.currentBuildingId}_${state.currentFloor}`;
-            trackNdtDeletion(key, id);
-            state.ndtData[key] = (state.ndtData[key] || []).filter(x => x.id !== id);
-            saveStateToLocalStorage();
-            drawNdtCanvas();
-            renderNdtSummaryTable();
-        }
+    window.deleteNdtItem = function(id, options) {
+        if (!options?.skipConfirm && !window.confirmDelete('해당 비파괴 조사 측정 항목을 삭제하시겠습니까?')) return;
+        const key = `${state.currentBuildingId}_${state.currentFloor}`;
+        trackNdtDeletion(key, id);
+        state.ndtData[key] = (state.ndtData[key] || []).filter(x => x.id !== id);
+        saveStateToLocalStorage();
+        drawNdtCanvas();
+        renderNdtSummaryTable();
     };
 
     window.exportNdtTableExcel = function() {
@@ -11252,11 +11460,10 @@ document.addEventListener('DOMContentLoaded', () => {
         if (measureItems.length > 0) {
             csvContent += "조사번호,측정위치,부재명,설계치수(mm),실측치수(mm),마감상태,평가(c%),비고(등급)\n";
             measureItems.forEach(item => {
-                const designText = item.designWidth ? `${item.designWidth}${item.designDepth ? ' x ' + item.designDepth : ''}` : '';
-                const measuredW = (item.measuredWidth !== undefined && item.measuredWidth !== null) ? item.measuredWidth : item.avgValue;
-                const measuredText = measuredW ? `${measuredW}${item.measuredDepth ? ' x ' + item.measuredDepth : ''}` : '';
+                const designText = formatNdtMeasureDimText(item, 'design', ' x ');
+                const measuredText = formatNdtMeasureDimText(item, 'measured', ' x ');
                 const ratioText = (item.sectionRatio !== undefined && item.sectionRatio !== null) ? item.sectionRatio.toFixed(1) + '%' : '';
-                csvContent += `"${item.no}","${item.location}","${item.component}","${designText}","${measuredText}","${item.finishState || ''}","${ratioText}","${item.sectionGrade || ''}"\n`;
+                csvContent += `"${item.no}","${item.location}","${item.component}","${designText === '-' ? '' : designText}","${measuredText === '-' ? '' : measuredText}","${item.finishState || ''}","${ratioText}","${item.sectionGrade || ''}"\n`;
             });
         }
         if (fireproofItems.length > 0) {
@@ -11617,12 +11824,21 @@ document.addEventListener('DOMContentLoaded', () => {
         if (commonLocationGrp) commonLocationGrp.style.display = (cat === '강도') ? 'none' : '';
         // 부재 실측 전용 필드(설계치수/마감상태/실측 폭·춤/단면적비율)는 실측일 때만 노출.
         // 실측은 기존 1~3회 평균 UI 대신 설계치수와 동일한 폭/춤 입력을 쓰므로 평균값 칸도 숨긴다.
-        if (measureGrp) measureGrp.style.display = (cat === '실측') ? 'flex' : 'none';
-        if (measuredDepthGrp) measuredDepthGrp.style.display = (cat === '실측') ? 'flex' : 'none';
+        if (measureGrp) {
+            measureGrp.style.display = (cat === '실측') ? 'flex' : 'none';
+            if (cat === '실측') measureGrp.style.flexDirection = 'column';
+        }
+        if (measuredDepthGrp) {
+            measuredDepthGrp.style.display = (cat === '실측') ? 'flex' : 'none';
+            if (cat === '실측') measuredDepthGrp.style.flexDirection = 'column';
+        }
         if (sectionResultGrp) sectionResultGrp.style.display = (cat === '실측') ? 'block' : 'none';
         if (avgValueGrp) avgValueGrp.style.display = (cat === '실측' || cat === '내화피복') ? 'none' : 'block';
         if (fireproofGrp) fireproofGrp.style.display = (cat === '내화피복') ? 'flex' : 'none';
         if (cat === '실측' && !document.getElementById('ndtFinishState')?.options.length) populateNdtFinishStateDropdown(NDT_FINISH_STATE_PRESET[0]);
+        if (typeof toggleNdtMeasureDimMode === 'function') toggleNdtMeasureDimMode();
+        if (typeof refreshNdtComponentPickBar === 'function') refreshNdtComponentPickBar();
+        if (typeof refreshNdtFinishStatePickBar === 'function') refreshNdtFinishStatePickBar();
 
         if (cat === '부재변위') {
             if (stdGrp) stdGrp.style.display = 'none';
@@ -11694,13 +11910,17 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function rValueChipsHtml(slotIdx) {
         const readings = ndtStrengthSlots[slotIdx].readings;
-        return readings.map((v, i) => `
-            <span style="display:flex; align-items:center; gap:0.15rem; background:var(--bg-secondary); border:1px solid var(--border-color); border-radius:6px; padding:0.15rem 0.15rem 0.15rem 0.4rem;">
-                <span style="font-size:0.7rem; color:var(--text-muted);">${i + 1}</span>
-                <input type="number" step="1" class="form-control ndt-r-value-input" data-slot="${slotIdx}" data-idx="${i}" value="${v !== null && v !== undefined ? v : ''}" style="width:52px; padding:0.2rem 0.3rem; border:none; background:transparent;">
-                <button type="button" class="ndt-r-value-remove" data-slot="${slotIdx}" data-idx="${i}" title="삭제" style="border:none; background:transparent; color:#ef4444; cursor:pointer; padding:0 0.3rem;">×</button>
-            </span>
-        `).join('') + (readings.length === 0 ? '<span style="font-size:0.78rem; color:var(--text-muted);">R값을 추가하거나 사진으로 스캔해주세요.</span>' : '');
+        let html = '';
+        for (let i = 0; i < MAX_R_VALUES_PER_SLOT; i++) {
+            const v = readings[i];
+            const val = (v !== null && v !== undefined && v !== '') ? v : '';
+            html += `
+            <div class="ndt-r-value-cell">
+                <input type="number" step="1" min="10" max="80" class="form-control ndt-r-value-input" data-slot="${slotIdx}" data-idx="${i}" value="${val}" placeholder="—" inputmode="numeric">
+                <button type="button" class="ndt-r-value-remove" data-slot="${slotIdx}" data-idx="${i}" title="지우기" aria-label="지우기">×</button>
+            </div>`;
+        }
+        return html;
     }
 
     function wireRValueChipEvents(slotIdx) {
@@ -11709,7 +11929,9 @@ document.addEventListener('DOMContentLoaded', () => {
         container.querySelectorAll('.ndt-r-value-input').forEach(el => {
             el.addEventListener('input', (e) => {
                 const idx = parseInt(e.target.dataset.idx, 10);
-                ndtStrengthSlots[slotIdx].readings[idx] = e.target.value;
+                const slot = ndtStrengthSlots[slotIdx];
+                while (slot.readings.length <= idx) slot.readings.push('');
+                slot.readings[idx] = e.target.value;
                 recalcStrengthSlot(slotIdx);
                 scheduleNdtAutoApply();
             });
@@ -11717,7 +11939,12 @@ document.addEventListener('DOMContentLoaded', () => {
         container.querySelectorAll('.ndt-r-value-remove').forEach(el => {
             el.addEventListener('click', (e) => {
                 const idx = parseInt(e.currentTarget.dataset.idx, 10);
-                ndtStrengthSlots[slotIdx].readings.splice(idx, 1);
+                const slot = ndtStrengthSlots[slotIdx];
+                while (slot.readings.length <= idx) slot.readings.push('');
+                slot.readings[idx] = '';
+                while (slot.readings.length > 0 && slot.readings[slot.readings.length - 1] === '') {
+                    slot.readings.pop();
+                }
                 container.innerHTML = rValueChipsHtml(slotIdx);
                 wireRValueChipEvents(slotIdx);
                 recalcStrengthSlot(slotIdx);
@@ -11728,14 +11955,40 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function addRValueToSlot(slotIdx, value) {
         const slot = ndtStrengthSlots[slotIdx];
-        if (slot.readings.length >= MAX_R_VALUES_PER_SLOT) {
+        const filledCount = (slot.readings || []).filter(v => v !== '' && v !== null && v !== undefined).length;
+        if (filledCount >= MAX_R_VALUES_PER_SLOT) {
             window.showToast(`R값은 위치당 최대 ${MAX_R_VALUES_PER_SLOT}개까지 입력할 수 있습니다.`, 'warning');
             return;
         }
-        slot.readings.push(value !== undefined ? value : '');
+        let idx = (slot.readings || []).findIndex(v => v === '' || v === null || v === undefined);
+        if (idx === -1) idx = slot.readings.length;
+        if (idx >= MAX_R_VALUES_PER_SLOT) {
+            window.showToast(`R값은 위치당 최대 ${MAX_R_VALUES_PER_SLOT}개까지 입력할 수 있습니다.`, 'warning');
+            return;
+        }
+        while (slot.readings.length <= idx) slot.readings.push('');
+        slot.readings[idx] = value !== undefined ? value : '';
         const container = document.getElementById(`ndtRValuesList-${slotIdx}`);
         if (container) { container.innerHTML = rValueChipsHtml(slotIdx); wireRValueChipEvents(slotIdx); }
         scheduleNdtAutoApply();
+    }
+
+    function clearRValuesInSlot(slotIdx) {
+        const slot = ndtStrengthSlots[slotIdx];
+        if (!slot) return;
+        const hasValues = (slot.readings || []).some(v => v !== '' && v !== null && v !== undefined);
+        if (hasValues && !window.confirmDelete('이 위치의 R값을 모두 지울까요?')) return;
+        slot.readings = [];
+        const listContainer = document.getElementById(`ndtRValuesList-${slotIdx}`);
+        if (listContainer) {
+            listContainer.innerHTML = rValueChipsHtml(slotIdx);
+            wireRValueChipEvents(slotIdx);
+        }
+        const statusEl = document.getElementById(`rScanStatus-${slotIdx}`);
+        if (statusEl) statusEl.textContent = '';
+        recalcStrengthSlot(slotIdx);
+        scheduleNdtAutoApply();
+        if (typeof window.showToast === 'function') window.showToast('R값을 초기화했습니다.', 'info', 1500);
     }
 
     function renderNdtStrengthSlots() {
@@ -11761,11 +12014,14 @@ document.addEventListener('DOMContentLoaded', () => {
                     <div id="rScanStatus-${idx}" style="font-size:0.78rem; color:var(--text-muted); margin-top:0.3rem;"></div>
                 </div>
                 <div class="form-group" style="margin:0;">
-                    <label class="form-label" style="display:flex; justify-content:space-between; align-items:center;">
+                    <label class="form-label" style="display:flex; justify-content:space-between; align-items:center; gap:0.5rem;">
                         <span>🔢 R값 (반발경도) — 최대 ${MAX_R_VALUES_PER_SLOT}개, 인식/입력 후 꼭 확인해주세요</span>
-                        <button type="button" class="btn btn-sm btn-outline ndt-strength-slot-add-r" data-slot="${idx}" style="border-color:#6b6b6b; color:#6b6b6b;"><i class="fa-solid fa-plus"></i> 추가</button>
+                        <span style="display:flex; gap:0.35rem; flex-shrink:0;">
+                            <button type="button" class="btn btn-sm btn-outline ndt-strength-slot-clear-r" data-slot="${idx}" style="border-color:#ef4444; color:#ef4444;" title="R값 전체 지우기"><i class="fa-solid fa-eraser"></i> 초기화</button>
+                            <button type="button" class="btn btn-sm btn-outline ndt-strength-slot-add-r" data-slot="${idx}" style="border-color:#6b6b6b; color:#6b6b6b;"><i class="fa-solid fa-plus"></i> 추가</button>
+                        </span>
                     </label>
-                    <div id="ndtRValuesList-${idx}" style="display:flex; flex-wrap:wrap; gap:0.4rem;">${rValueChipsHtml(idx)}</div>
+                    <div id="ndtRValuesList-${idx}" class="ndt-r-values-grid">${rValueChipsHtml(idx)}</div>
                 </div>
                 <div style="background: rgba(2,132,199,0.08); border:1px solid rgba(2,132,199,0.3); border-radius:8px; padding:0.7rem 0.9rem; font-size:0.82rem;">
                     <div id="ndtStrengthCalcSummary-${idx}" style="margin-bottom:0.5rem; color:var(--text-muted);">R값을 입력하면 자동으로 계산됩니다.</div>
@@ -11791,6 +12047,7 @@ document.addEventListener('DOMContentLoaded', () => {
         });
         container.querySelectorAll('.ndt-strength-slot-remove').forEach(el => {
             el.addEventListener('click', (e) => {
+                if (!window.confirmDelete('이 측정 위치와 입력한 R값을 삭제할까요?')) return;
                 const idx = parseInt(e.currentTarget.dataset.slot, 10);
                 ndtStrengthSlots.splice(idx, 1);
                 renderNdtStrengthSlots();
@@ -11800,6 +12057,9 @@ document.addEventListener('DOMContentLoaded', () => {
         });
         container.querySelectorAll('.ndt-strength-slot-add-r').forEach(el => {
             el.addEventListener('click', (e) => addRValueToSlot(parseInt(e.currentTarget.dataset.slot, 10), ''));
+        });
+        container.querySelectorAll('.ndt-strength-slot-clear-r').forEach(el => {
+            el.addEventListener('click', (e) => clearRValuesInSlot(parseInt(e.currentTarget.dataset.slot, 10)));
         });
         container.querySelectorAll('.ndt-strength-slot-scan-btn').forEach(el => {
             el.addEventListener('click', async (e) => {
@@ -12085,6 +12345,35 @@ document.addEventListener('DOMContentLoaded', () => {
         await scanRValuesFromImageLocal(file, slotIdx, statusEl);
     }
 
+    function populateNdtComponentDropdown(currentVal) {
+        const select = document.getElementById('ndtComponent');
+        if (!select) return;
+        if (!window.state.customNdtComponents) window.state.customNdtComponents = [];
+        const cur = (currentVal || '').trim();
+        let html = `<option value="" ${!cur ? 'selected' : ''}>-</option>`;
+        NDT_COMPONENT_PRESET.forEach(item => {
+            const sel = (cur === item) ? 'selected' : '';
+            html += `<option value="${item}" ${sel}>${item}</option>`;
+        });
+        window.state.customNdtComponents.forEach(item => {
+            if (!NDT_COMPONENT_PRESET.includes(item)) {
+                const sel = (cur === item) ? 'selected' : '';
+                html += `<option value="${item}" ${sel}>${item}</option>`;
+            }
+        });
+        select.innerHTML = html;
+        if (cur && !NDT_COMPONENT_PRESET.includes(cur) && !window.state.customNdtComponents.includes(cur)) {
+            const customOpt = document.createElement('option');
+            customOpt.value = cur;
+            customOpt.textContent = cur;
+            customOpt.selected = true;
+            select.appendChild(customOpt);
+        }
+        const input = document.getElementById('ndtComponentInput');
+        if (input) input.value = cur;
+        if (cur && select) select.value = cur;
+    }
+
     function populateNdtFinishStateDropdown(currentVal) {
         const select = document.getElementById('ndtFinishState');
         if (!select) return;
@@ -12101,15 +12390,17 @@ document.addEventListener('DOMContentLoaded', () => {
                 html += `<option value="${item}" ${sel}>${item}</option>`;
             }
         });
-        html += `<option value="__ADD_CUSTOM_FINISH__">➕ [마감상태 직접 추가...]</option>`;
         select.innerHTML = html;
         if (cur && !NDT_FINISH_STATE_PRESET.includes(cur) && !window.state.customNdtFinishStates.includes(cur)) {
             const customOpt = document.createElement('option');
             customOpt.value = cur;
             customOpt.textContent = cur;
             customOpt.selected = true;
-            select.insertBefore(customOpt, select.lastElementChild);
+            select.appendChild(customOpt);
         }
+        const input = document.getElementById('ndtFinishStateInput');
+        if (input) input.value = cur;
+        if (cur && select) select.value = cur;
     }
 
     function setNdtDispDirection(dir, opts = {}) {
@@ -12165,6 +12456,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (noEl) noEl.value = existingItem.no;
             if (catEl) catEl.value = existingItem.category || '강도';
             if (compEl) compEl.value = existingItem.component || '';
+            populateNdtComponentDropdown(existingItem.component || '');
             if (locEl) locEl.value = existingItem.location || '';
             if (heightEl) heightEl.value = existingItem.height || '';
             setNdtDispDirection(existingItem.dispDirection || '-', { silent: true });
@@ -12208,6 +12500,19 @@ document.addEventListener('DOMContentLoaded', () => {
                     measuredWidthElExisting.value = isNaN(legacyW) ? '' : legacyW;
                 }
             }
+            [
+                ['ndtDesignWeb', 'designWeb'],
+                ['ndtDesignFlange', 'designFlange'],
+                ['ndtDesignWebWidth', 'designWebWidth'],
+                ['ndtDesignFlangeWidth', 'designFlangeWidth'],
+                ['ndtMeasuredWeb', 'measuredWeb'],
+                ['ndtMeasuredFlange', 'measuredFlange'],
+                ['ndtMeasuredWebWidth', 'measuredWebWidth'],
+                ['ndtMeasuredFlangeWidth', 'measuredFlangeWidth']
+            ].forEach(([elId, key]) => {
+                const el = document.getElementById(elId);
+                if (el) el.value = (existingItem[key] !== undefined && existingItem[key] !== null) ? existingItem[key] : '';
+            });
             populateNdtFinishStateDropdown(existingItem.finishState || '');
             const sectionRatioElExisting = document.getElementById('ndtSectionRatio');
             if (sectionRatioElExisting) sectionRatioElExisting.value = (existingItem.sectionRatio !== undefined && existingItem.sectionRatio !== null) ? `${existingItem.sectionRatio.toFixed(1)}%` : '';
@@ -12246,6 +12551,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (noEl) noEl.value = noStr;
             if (catEl) catEl.value = cat;
             if (compEl) compEl.value = '';
+            populateNdtComponentDropdown('');
             if (locEl) locEl.value = '';
             if (heightEl) heightEl.value = '';
             setNdtDispDirection(extraOpts?.dispDirection || '-', { silent: true });
@@ -12273,6 +12579,13 @@ document.addEventListener('DOMContentLoaded', () => {
             if (measuredDepthElNew) measuredDepthElNew.value = '';
             const measuredWidthElNew = document.getElementById('ndtMeasuredWidth');
             if (measuredWidthElNew) measuredWidthElNew.value = '';
+            [
+                'ndtDesignWeb', 'ndtDesignFlange', 'ndtDesignWebWidth', 'ndtDesignFlangeWidth',
+                'ndtMeasuredWeb', 'ndtMeasuredFlange', 'ndtMeasuredWebWidth', 'ndtMeasuredFlangeWidth'
+            ].forEach(id => {
+                const el = document.getElementById(id);
+                if (el) el.value = '';
+            });
             populateNdtFinishStateDropdown('');
             const sectionRatioElNew = document.getElementById('ndtSectionRatio');
             if (sectionRatioElNew) sectionRatioElNew.value = '';
@@ -12300,6 +12613,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         window.toggleNdtModalFields();
+        toggleNdtMeasureDimMode();
         renderNdtStrengthSlots();
         recalcAllStrengthSlots();
         recalcNdtCarbonation();
@@ -12392,7 +12706,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const pinId = document.getElementById('ndtPinId')?.value;
         const noStr = document.getElementById('ndtNo')?.value || 'NDT-01';
         const cat = document.getElementById('ndtCategory')?.value || '강도';
-        const comp = document.getElementById('ndtComponent')?.value || '';
+        const comp = getDefectComboValue(document.getElementById('ndtComponent'), document.getElementById('ndtComponentInput')) || '';
         // 강도는 위치를 슬롯별로 입력받으므로(공용 위치칸은 숨겨져 비어있음), 하위호환용
         // 최상위 location은 슬롯 1(또는 값이 있는 첫 슬롯) 것을 쓴다.
         const firstStrengthSlot = (cat === '강도')
@@ -12428,27 +12742,57 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // 부재 실측(단면 규격): 설계치수/마감상태/실측치수 + 단면적비율(c%)·등급 자동 산정
         // (시설물 안전 및 유지관리 실시 세부지침(건축물편) [표 6.24])
-        // 설계/실측 폭 칸에 "400*400"처럼 폭*춤을 한번에 적어도, 폭/춤을 따로 나눠 적어도 인식된다.
-        const finishState = (cat === '실측') ? (document.getElementById('ndtFinishState')?.value || '') : '';
-        const designParsed = (cat === '실측')
-            ? parseNdtDimensionPair(document.getElementById('ndtDesignWidth')?.value, document.getElementById('ndtDesignDepth')?.value)
-            : { w: null, d: null };
-        const measuredParsed = (cat === '실측')
-            ? parseNdtDimensionPair(document.getElementById('ndtMeasuredWidth')?.value, document.getElementById('ndtMeasuredDepth')?.value)
-            : { w: null, d: null };
-        const designWidth = designParsed.w;
-        const designDepth = designParsed.d;
-        const measuredWidth = measuredParsed.w;
-        const measuredDepth = measuredParsed.d;
-        // 실측 항목의 avgValue(하위호환용 요약 표시 필드)는 이제 실측 폭 칸 값을 그대로 담는다.
-        if (cat === '실측' && measuredWidth !== null) avg = String(measuredWidth);
+        // RC: 보(폭×춤) / 기둥(정면·측면) / 슬래브·벽체(두께) / 철골(웨브·플렌지 4칸)
+        const finishState = (cat === '실측')
+            ? (getDefectComboValue(document.getElementById('ndtFinishState'), document.getElementById('ndtFinishStateInput')) || '')
+            : '';
+        const dimKind = (cat === '실측') ? getNdtMeasureDimKind(comp) : null;
+        let designWidth = null, designDepth = null, measuredWidth = null, measuredDepth = null;
+        let designWeb = null, designFlange = null, designWebWidth = null, designFlangeWidth = null;
+        let measuredWeb = null, measuredFlange = null, measuredWebWidth = null, measuredFlangeWidth = null;
         let sectionRatio = null;
         let sectionGrade = null;
         if (cat === '실측') {
-            const sectionCalc = calcSectionGrade(designWidth, designDepth, measuredWidth, measuredDepth);
-            if (sectionCalc) {
-                sectionRatio = sectionCalc.ratio;
-                sectionGrade = sectionCalc.code;
+            if (dimKind === 'steel') {
+                const designSteel = readNdtSteelDims('ndtDesign');
+                const measuredSteel = readNdtSteelDims('ndtMeasured');
+                designWeb = designSteel.web;
+                designFlange = designSteel.flange;
+                designWebWidth = designSteel.webWidth;
+                designFlangeWidth = designSteel.flangeWidth;
+                measuredWeb = measuredSteel.web;
+                measuredFlange = measuredSteel.flange;
+                measuredWebWidth = measuredSteel.webWidth;
+                measuredFlangeWidth = measuredSteel.flangeWidth;
+                designWidth = designWebWidth;
+                designDepth = designFlangeWidth;
+                measuredWidth = measuredWebWidth;
+                measuredDepth = measuredFlangeWidth;
+                if (measuredWeb !== null) avg = String(measuredWeb);
+                const sectionCalc = calcSteelSectionGrade(designSteel, measuredSteel);
+                if (sectionCalc) {
+                    sectionRatio = sectionCalc.ratio;
+                    sectionGrade = sectionCalc.code;
+                }
+            } else {
+                const designParsed = parseNdtDimensionPair(
+                    document.getElementById('ndtDesignWidth')?.value,
+                    dimKind === 'thickness' ? '' : document.getElementById('ndtDesignDepth')?.value
+                );
+                const measuredParsed = parseNdtDimensionPair(
+                    document.getElementById('ndtMeasuredWidth')?.value,
+                    dimKind === 'thickness' ? '' : document.getElementById('ndtMeasuredDepth')?.value
+                );
+                designWidth = designParsed.w;
+                designDepth = dimKind === 'thickness' ? null : designParsed.d;
+                measuredWidth = measuredParsed.w;
+                measuredDepth = dimKind === 'thickness' ? null : measuredParsed.d;
+                if (measuredWidth !== null) avg = String(measuredWidth);
+                const sectionCalc = calcSectionGrade(designWidth, designDepth, measuredWidth, measuredDepth);
+                if (sectionCalc) {
+                    sectionRatio = sectionCalc.ratio;
+                    sectionGrade = sectionCalc.code;
+                }
             }
         }
 
@@ -12527,8 +12871,21 @@ document.addEventListener('DOMContentLoaded', () => {
         } : { carbDepth: null, carbCover: null, carbAgeDays: null, carbRemainMm: null, carbRate: null, carbLifeYears: null, carbRemainingLifeYears: null };
 
         const measureExtra = (cat === '실측')
-            ? { finishState, designWidth, designDepth, measuredWidth, measuredDepth, sectionRatio, sectionGrade }
-            : { finishState: null, designWidth: null, designDepth: null, measuredWidth: null, measuredDepth: null, sectionRatio: null, sectionGrade: null };
+            ? {
+                finishState,
+                measureDimMode: dimKind,
+                designWidth, designDepth, measuredWidth, measuredDepth,
+                designWeb, designFlange, designWebWidth, designFlangeWidth,
+                measuredWeb, measuredFlange, measuredWebWidth, measuredFlangeWidth,
+                sectionRatio, sectionGrade
+            }
+            : {
+                finishState: null, measureDimMode: null,
+                designWidth: null, designDepth: null, measuredWidth: null, measuredDepth: null,
+                designWeb: null, designFlange: null, designWebWidth: null, designFlangeWidth: null,
+                measuredWeb: null, measuredFlange: null, measuredWebWidth: null, measuredFlangeWidth: null,
+                sectionRatio: null, sectionGrade: null
+            };
 
         // 내화피복 두께: 부재당 플렌지/웨브 각 3회 실측 + 평균, "측정불가" 체크 시 실측값 없이 표시만.
         const buildFireproofPart = (part) => {
@@ -12671,6 +13028,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function setupNdtModalEvents() {
         bindNdtFormAutoApply();
+        bindNdtPickInputs();
+        populateNdtComponentDropdown('');
+        populateNdtFinishStateDropdown('');
+        refreshNdtComponentPickBar();
+        refreshNdtFinishStatePickBar();
         const modal = document.getElementById('ndtModal');
         const btnClose = document.getElementById('btnCloseNdtModal');
         const btnCancel = document.getElementById('btnCancelNdt');
@@ -12721,12 +13083,23 @@ document.addEventListener('DOMContentLoaded', () => {
         function calcSectionAuto() {
             const cat = document.getElementById('ndtCategory')?.value || '강도';
             if (cat !== '실측') return;
-            const design = parseNdtDimensionPair(document.getElementById('ndtDesignWidth')?.value, document.getElementById('ndtDesignDepth')?.value);
-            const measured = parseNdtDimensionPair(document.getElementById('ndtMeasuredWidth')?.value, document.getElementById('ndtMeasuredDepth')?.value);
-
             const ratioEl = document.getElementById('ndtSectionRatio');
             const gradeEl = document.getElementById('ndtSectionGrade');
-            const calc = calcSectionGrade(design.w, design.d, measured.w, measured.d);
+            const dimKind = getNdtMeasureDimKind(getNdtCurrentComponentName());
+            let calc = null;
+            if (dimKind === 'steel') {
+                calc = calcSteelSectionGrade(readNdtSteelDims('ndtDesign'), readNdtSteelDims('ndtMeasured'));
+            } else {
+                const design = parseNdtDimensionPair(
+                    document.getElementById('ndtDesignWidth')?.value,
+                    dimKind === 'thickness' ? '' : document.getElementById('ndtDesignDepth')?.value
+                );
+                const measured = parseNdtDimensionPair(
+                    document.getElementById('ndtMeasuredWidth')?.value,
+                    dimKind === 'thickness' ? '' : document.getElementById('ndtMeasuredDepth')?.value
+                );
+                calc = calcSectionGrade(design.w, design.d, measured.w, measured.d);
+            }
             if (calc) {
                 if (ratioEl) ratioEl.value = `${calc.ratio.toFixed(1)}%`;
                 if (gradeEl) gradeEl.value = calc.code;
@@ -12794,7 +13167,9 @@ document.addEventListener('DOMContentLoaded', () => {
         });
 
         // --- 부재 실측: 설계치수/실측치수 입력 시 단면적비율(c%)/등급 자동 재계산 ---
-        ['ndtDesignWidth', 'ndtDesignDepth', 'ndtMeasuredWidth', 'ndtMeasuredDepth'].forEach(id => {
+        ['ndtDesignWidth', 'ndtDesignDepth', 'ndtMeasuredWidth', 'ndtMeasuredDepth',
+            'ndtDesignWeb', 'ndtDesignFlange', 'ndtDesignWebWidth', 'ndtDesignFlangeWidth',
+            'ndtMeasuredWeb', 'ndtMeasuredFlange', 'ndtMeasuredWebWidth', 'ndtMeasuredFlangeWidth'].forEach(id => {
             const el = document.getElementById(id);
             if (el) el.addEventListener('input', calcSectionAuto);
         });
@@ -12804,26 +13179,6 @@ document.addEventListener('DOMContentLoaded', () => {
             const el = document.getElementById(id);
             if (el) el.addEventListener('input', calcFireproofAuto);
         });
-
-        // --- 부재 실측: 마감상태 직접 추가 ---
-        const ndtFinishStateEl = document.getElementById('ndtFinishState');
-        if (ndtFinishStateEl) {
-            ndtFinishStateEl.addEventListener('change', (e) => {
-                if (e.target.value !== '__ADD_CUSTOM_FINISH__') return;
-                const newVal = prompt('추가하실 마감상태를 입력하세요 (예: 도장마감):');
-                if (newVal && newVal.trim()) {
-                    const trimmed = newVal.trim();
-                    if (!window.state.customNdtFinishStates) window.state.customNdtFinishStates = [];
-                    if (!window.state.customNdtFinishStates.includes(trimmed)) {
-                        window.state.customNdtFinishStates.push(trimmed);
-                        saveStateToLocalStorage();
-                    }
-                    populateNdtFinishStateDropdown(trimmed);
-                } else {
-                    populateNdtFinishStateDropdown(NDT_FINISH_STATE_PRESET[0]);
-                }
-            });
-        }
 
         // --- 콘크리트 강도 위치 슬롯/각도 UI ---
         const btnAddStrengthSlot = document.getElementById('btnAddStrengthSlot');
@@ -12864,17 +13219,11 @@ document.addEventListener('DOMContentLoaded', () => {
         if (btnDelete) {
             btnDelete.addEventListener('click', () => {
                 const pinId = document.getElementById('ndtPinId')?.value;
-                if (pinId && confirm('⚠️ 해당 비파괴 조사 측정 항목을 삭제하시겠습니까?')) {
-                    window.clearTimeout(window._ndtAutoApplyTimer);
-                    window._ndtAutoApplyTimer = null;
-                    const key = `${state.currentBuildingId}_${state.currentFloor}`;
-                    trackNdtDeletion(key, pinId);
-                    state.ndtData[key] = (state.ndtData[key] || []).filter(x => x.id !== pinId);
-                    saveStateToLocalStorage();
-                    drawNdtCanvas();
-                    renderNdtSummaryTable();
-                    closeNdtModal();
-                }
+                if (!pinId) return;
+                window.clearTimeout(window._ndtAutoApplyTimer);
+                window._ndtAutoApplyTimer = null;
+                window.deleteNdtItem(pinId);
+                closeNdtModal();
             });
         }
 
@@ -13110,8 +13459,8 @@ document.addEventListener('DOMContentLoaded', () => {
         `).join('') || '<div style="color:#a3a3a3; font-size:0.85rem; padding:0.5rem;">측정 지점이 없습니다.</div>';
     }
 
-    window.deleteNdtDisplacementPoint = function(groupId, pointId) {
-        if (!confirm('⚠️ 해당 측정 지점을 삭제하시겠습니까?')) return;
+    window.deleteNdtDisplacementPoint = function(groupId, pointId, options) {
+        if (!options?.skipConfirm && !window.confirmDelete('해당 측정 지점을 삭제하시겠습니까?')) return;
         const key = `${state.currentBuildingId}_${state.currentFloor}`;
         const groups = state.ndtDisplacementGroups[key] || [];
         const group = groups.find(g => g.id === groupId);
@@ -13121,6 +13470,7 @@ document.addEventListener('DOMContentLoaded', () => {
             state.ndtDisplacementGroups[key] = groups.filter(g => g.id !== groupId);
             closeNdtDisplacementGroupEditModal();
         } else {
+            setActiveNdtDispGroup(group);
             renderNdtDispGroupPointList(group);
         }
         saveStateToLocalStorage();
@@ -13128,8 +13478,8 @@ document.addEventListener('DOMContentLoaded', () => {
         renderNdtSummaryTable();
     };
 
-    window.deleteNdtDisplacementGroup = function(groupId) {
-        if (!confirm('⚠️ 해당 측정 구역과 포함된 모든 지점을 삭제하시겠습니까?')) return;
+    window.deleteNdtDisplacementGroup = function(groupId, options) {
+        if (!options?.skipConfirm && !window.confirmDelete('해당 측정 구역과 포함된 모든 지점을 삭제하시겠습니까?')) return;
         const key = `${state.currentBuildingId}_${state.currentFloor}`;
         state.ndtDisplacementGroups[key] = (state.ndtDisplacementGroups[key] || []).filter(g => g.id !== groupId);
         if (window._activeNdtDispGroupId === groupId) setActiveNdtDispGroup(null);
@@ -13180,23 +13530,13 @@ document.addEventListener('DOMContentLoaded', () => {
         if (btnDeletePoint) {
             btnDeletePoint.addEventListener('click', () => {
                 const pointId = document.getElementById('ndtDispPointId').value;
-                if (!pointId || !confirm('⚠️ 해당 측정 지점을 삭제하시겠습니까?')) return;
+                if (!pointId) return;
                 const key = `${state.currentBuildingId}_${state.currentFloor}`;
                 const groups = state.ndtDisplacementGroups[key] || [];
                 const group = groups.find(g => g.points.some(p => p.id === pointId));
-                if (group) {
-                    group.points = group.points.filter(p => p.id !== pointId);
-                    if (group.points.length === 0) {
-                        state.ndtDisplacementGroups[key] = groups.filter(g => g.id !== group.id);
-                        if (window._activeNdtDispGroupId === group.id) setActiveNdtDispGroup(null);
-                    } else {
-                        setActiveNdtDispGroup(group);
-                    }
-                    saveStateToLocalStorage();
-                }
+                if (!group) return;
+                window.deleteNdtDisplacementPoint(group.id, pointId);
                 closeNdtDisplacementModal();
-                drawNdtCanvas();
-                renderNdtSummaryTable();
             });
         }
 
@@ -15278,12 +15618,8 @@ document.addEventListener('DOMContentLoaded', () => {
         deleteBtn.addEventListener('click', (e) => {
             e.stopPropagation();
             const isGroup = d._groupMemberIds && d._groupMemberIds.length > 1;
-            const label = `'${d.component || ''} ${d.defectType || ''}'`;
-            const confirmMsg = isGroup ? `${label} 결함(${d._groupMemberIds.length}개 위치)을 모두 삭제할까요?` : `${label} 결함을 삭제할까요?`;
-            if (confirm(confirmMsg)) {
-                if (isGroup) window.deleteDefectGroup(d.groupId);
-                else window.deleteDefectById(d.id);
-            }
+            if (isGroup) window.deleteDefectGroup(d.groupId);
+            else window.deleteDefectById(d.id);
         });
 
         return row;
@@ -16446,6 +16782,97 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    function getNdtPickOptions(preset, customStateKey) {
+        if (!window.state[customStateKey]) window.state[customStateKey] = [];
+        const customs = window.state[customStateKey].filter(v => v && !preset.includes(v));
+        return preset.concat(customs);
+    }
+
+    function rememberNdtCustomPick(value, preset, customStateKey) {
+        const v = String(value || '').trim();
+        if (!v || preset.includes(v)) return;
+        if (!window.state[customStateKey]) window.state[customStateKey] = [];
+        if (!window.state[customStateKey].includes(v)) {
+            window.state[customStateKey].push(v);
+            if (typeof saveStateToLocalStorage === 'function') saveStateToLocalStorage();
+        }
+    }
+
+    function refreshNdtComponentPickBar() {
+        const select = document.getElementById('ndtComponent');
+        const input = document.getElementById('ndtComponentInput');
+        if (!select || !input) return;
+        const current = getDefectComboValue(select, input);
+        const options = getNdtPickOptions(NDT_COMPONENT_PRESET, 'customNdtComponents');
+        renderQuickPickChipGroup('ndtComponentChips', options, current, (value) => {
+            syncDefectComboFields(select, input, value);
+            rememberNdtCustomPick(value, NDT_COMPONENT_PRESET, 'customNdtComponents');
+            if (value && !NDT_COMPONENT_PRESET.includes(value)) populateNdtComponentDropdown(value);
+            refreshNdtComponentPickBar();
+            toggleNdtMeasureDimMode();
+            document.getElementById('ndtDesignWidth')?.dispatchEvent(new Event('input', { bubbles: true }));
+            document.getElementById('ndtDesignWeb')?.dispatchEvent(new Event('input', { bubbles: true }));
+            if (typeof scheduleNdtAutoApply === 'function') scheduleNdtAutoApply();
+        });
+    }
+
+    function refreshNdtFinishStatePickBar() {
+        const select = document.getElementById('ndtFinishState');
+        const input = document.getElementById('ndtFinishStateInput');
+        if (!select || !input) return;
+        const current = getDefectComboValue(select, input);
+        const options = getNdtPickOptions(NDT_FINISH_STATE_PRESET, 'customNdtFinishStates');
+        renderQuickPickChipGroup('ndtFinishStateChips', options, current, (value) => {
+            syncDefectComboFields(select, input, value);
+            rememberNdtCustomPick(value, NDT_FINISH_STATE_PRESET, 'customNdtFinishStates');
+            if (value && !NDT_FINISH_STATE_PRESET.includes(value)) populateNdtFinishStateDropdown(value);
+            refreshNdtFinishStatePickBar();
+            if (typeof scheduleNdtAutoApply === 'function') scheduleNdtAutoApply();
+        });
+    }
+
+    function bindNdtPickInputs() {
+        const specs = [
+            {
+                selectId: 'ndtComponent',
+                inputId: 'ndtComponentInput',
+                preset: NDT_COMPONENT_PRESET,
+                customKey: 'customNdtComponents',
+                populate: populateNdtComponentDropdown,
+                refresh: refreshNdtComponentPickBar
+            },
+            {
+                selectId: 'ndtFinishState',
+                inputId: 'ndtFinishStateInput',
+                preset: NDT_FINISH_STATE_PRESET,
+                customKey: 'customNdtFinishStates',
+                populate: populateNdtFinishStateDropdown,
+                refresh: refreshNdtFinishStatePickBar
+            }
+        ];
+        specs.forEach(spec => {
+            const input = document.getElementById(spec.inputId);
+            if (!input || input.dataset.ndtPickBound) return;
+            input.dataset.ndtPickBound = '1';
+            input.addEventListener('input', () => {
+                const v = input.value.trim();
+                const select = document.getElementById(spec.selectId);
+                if (v) {
+                    ensureDefectComboOption(select, v);
+                    rememberNdtCustomPick(v, spec.preset, spec.customKey);
+                    if (!spec.preset.includes(v)) spec.populate(v);
+                    else if (select) select.value = v;
+                }
+                spec.refresh();
+                if (spec.selectId === 'ndtComponent') {
+                    toggleNdtMeasureDimMode();
+                    document.getElementById('ndtDesignWidth')?.dispatchEvent(new Event('input', { bubbles: true }));
+                    document.getElementById('ndtDesignWeb')?.dispatchEvent(new Event('input', { bubbles: true }));
+                }
+            });
+        });
+    }
+
     function isJointComponentName(name) {
         const t = String(name || '');
         return t.includes('접합부') || t.includes('접합');
@@ -17539,6 +17966,7 @@ document.addEventListener('DOMContentLoaded', () => {
         });
         list.querySelectorAll('.defect-crack-measure-del').forEach(btn => {
             btn.addEventListener('click', () => {
+                if (!window.confirmDelete('이 규격(폭·길이·개수) 행을 삭제할까요?')) return;
                 if (isDefectBulkEditMode()) markDefectBulkFieldChanged('crackMeasures');
                 const row = btn.closest('.defect-crack-measure-row');
                 const idx = row ? parseInt(row.getAttribute('data-row-idx') || '0', 10) : -1;
@@ -18555,7 +18983,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         const label = ctx.labelFor ? ctx.labelFor(item) : item;
-        if (!confirm(`「${label}」 항목을 삭제할까요?`)) return;
+        if (!window.confirmDelete(`「${label}」 항목을 삭제할까요?`)) return;
 
         if (isPreset) {
             if (!ctx.hiddenList.includes(item)) ctx.hiddenList.push(item);
@@ -19672,7 +20100,7 @@ document.addEventListener('DOMContentLoaded', () => {
     function deleteSelectedDefects() {
         const ids = [...selectedDefectIds];
         if (!ids.length || !state.currentBuildingId) return;
-        if (!confirm(`선택한 결함 ${ids.length}건을 삭제할까요? (되돌리기로 복원 가능)`)) return;
+        if (!window.confirmDelete(`선택한 결함 ${ids.length}건을 삭제할까요? (되돌리기로 복원 가능)`)) return;
         const key = `${state.currentBuildingId}_${state.currentFloor}`;
         if (!state.defects[key]) return;
         pushDefectHistory();
@@ -21808,6 +22236,7 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     window.removePendingPhoto = function(idx) {
+        if (!window.confirmDelete('이 사진을 삭제할까요?')) return;
         if (window._pendingPhotos) {
             window._pendingPhotos.splice(idx, 1);
             window._defectPhotosDirty = true;
@@ -23295,7 +23724,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 window.showToast('현재 층에 등록된 결함이 없습니다.', 'info');
                 return;
             }
-            if (!confirm(`현재 층의 결함 ${defects.length}건을 모두 삭제할까요? (되돌리기로 복원 가능)`)) return;
+        if (!window.confirmDelete(`현재 층의 결함 ${defects.length}건을 모두 삭제할까요? (되돌리기로 복원 가능)`)) return;
 
             closeDefectModal({ discardPending: true });
             pushDefectHistory();
@@ -25204,6 +25633,7 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     window.removeLocationMapLegendItem = function(idx) {
+        if (!window.confirmDelete('이 범례 항목을 삭제할까요?')) return;
         const items = ensureLocationMapLegendInitialized();
         items.splice(idx, 1);
         renderLocationMapLegendModalList();
@@ -25997,9 +26427,8 @@ document.addEventListener('DOMContentLoaded', () => {
                                 </thead>
                                 <tbody>
                                     ${measureNdtItems.length > 0 ? measureNdtItems.map(item => {
-                                        const designText = item.designWidth ? `${item.designWidth}${item.designDepth ? ' × ' + item.designDepth : ''}` : '-';
-                                        const measuredW = (item.measuredWidth !== undefined && item.measuredWidth !== null) ? item.measuredWidth : item.avgValue;
-                                        const measuredText = measuredW ? `${measuredW}${item.measuredDepth ? ' × ' + item.measuredDepth : ''}` : '-';
+                                        const designText = formatNdtMeasureDimText(item, 'design');
+                                        const measuredText = formatNdtMeasureDimText(item, 'measured');
                                         const ratioText = (item.sectionRatio !== undefined && item.sectionRatio !== null) ? `${item.sectionRatio.toFixed(1)}%` : '-';
                                         return `
                                         <tr>
@@ -28018,9 +28447,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     if (measureItemsHwpx.length > 0) {
                         const tbl = findTblById(MEASURE_TBL_ID, ['마감상태', '설계', '실측']);
                         if (tbl) fillNdtTable(tbl, MEASURE_HEADER_ROWS, measureItemsHwpx.map((item, i) => {
-                            const designText = item.designWidth ? `${item.designWidth}${item.designDepth ? '×' + item.designDepth : ''}` : '-';
-                            const measuredW = (item.measuredWidth !== undefined && item.measuredWidth !== null) ? item.measuredWidth : item.avgValue;
-                            const measuredText = measuredW ? `${measuredW}${item.measuredDepth ? '×' + item.measuredDepth : ''}` : '-';
+                            const designText = formatNdtMeasureDimText(item, 'design', '×');
+                            const measuredText = formatNdtMeasureDimText(item, 'measured', '×');
                             const ratioText = (item.sectionRatio !== undefined && item.sectionRatio !== null) ? item.sectionRatio.toFixed(1) + '%' : '-';
                             return [
                                 item.no || (i + 1),
@@ -29725,9 +30153,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     if (measureItemsHwpx.length > 0) {
                         const tbl = findTblById(MEASURE_TBL_ID, ['마감상태', '설계', '실측']);
                         if (tbl) fillNdtTable(tbl, MEASURE_HEADER_ROWS, measureItemsHwpx.map((item, i) => {
-                            const designText = item.designWidth ? `${item.designWidth}${item.designDepth ? '×' + item.designDepth : ''}` : '-';
-                            const measuredW = (item.measuredWidth !== undefined && item.measuredWidth !== null) ? item.measuredWidth : item.avgValue;
-                            const measuredText = measuredW ? `${measuredW}${item.measuredDepth ? '×' + item.measuredDepth : ''}` : '-';
+                            const designText = formatNdtMeasureDimText(item, 'design', '×');
+                            const measuredText = formatNdtMeasureDimText(item, 'measured', '×');
                             const ratioText = (item.sectionRatio !== undefined && item.sectionRatio !== null) ? item.sectionRatio.toFixed(1) + '%' : '-';
                             return [
                                 item.no || (i + 1),
@@ -30230,7 +30657,8 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    window.deleteDefectById = function(id) {
+    window.deleteDefectById = function(id, options) {
+        if (!options?.skipConfirm && !window.confirmDelete('이 결함을 삭제할까요?')) return;
         const key = `${state.currentBuildingId}_${state.currentFloor}`;
         if (state.defects[key]) {
             pushDefectHistory();
@@ -30242,8 +30670,15 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     // "마킹 추가"로 여러 위치에 묶인 결함 그룹 전체를 삭제
-    window.deleteDefectGroup = function(groupId) {
+    window.deleteDefectGroup = function(groupId, options) {
         const key = `${state.currentBuildingId}_${state.currentFloor}`;
+        if (!options?.skipConfirm) {
+            const count = (state.defects[key] || []).filter(d => d.groupId === groupId).length;
+            const msg = count > 1
+                ? `묶인 결함 ${count}개 위치를 모두 삭제할까요?`
+                : '이 결함을 삭제할까요?';
+            if (!window.confirmDelete(msg)) return;
+        }
         if (state.defects[key]) {
             pushDefectHistory();
             const memberIds = state.defects[key].filter(d => d.groupId === groupId).map(d => d.id);
@@ -30738,6 +31173,7 @@ document.addEventListener('DOMContentLoaded', () => {
         });
 
         document.getElementById('btnClearAnnotation')?.addEventListener('click', () => {
+            if (!window.confirmDelete('사진 위 마킹을 모두 지울까요?')) return;
             redrawAnnotationCanvas();
             saveAnnotationHistory();
         });
@@ -32096,7 +32532,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 const id = btn.getAttribute('data-overview-id');
                 const liveBldg = (window.state.buildings || []).find((b) => b.id === window._overviewPhotosBuildingId);
                 if (!id || !liveBldg) return;
-                if (!confirm('이 전경사진을 삭제할까요?')) return;
+                if (!window.confirmDelete('이 전경사진을 삭제할까요?')) return;
                 liveBldg.overviewPhotos = getBuildingOverviewPhotos(liveBldg).filter((p) => p.id !== id);
                 await deleteOverviewPhotoStorage(liveBldg.id, id);
                 if (typeof saveStateToLocalStorage === 'function') saveStateToLocalStorage();

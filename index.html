@@ -38,7 +38,8 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <meta name="apple-mobile-web-app-title" content="스마트 안전점검">
-    <link rel="stylesheet" href="styles.css?v=20260902_account_actions">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css">
+    <link rel="stylesheet" href="styles.css?v=20260903_ndt_finish_below">
     <!-- FontAwesome icons for clean engineering UI -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <!-- PDF 생성용: 페이지별로 직접 캡처해서 조립(큰 보고서에서 html2pdf 한방 렌더링이 캔버스 높이 한계로
@@ -1449,38 +1450,60 @@
                 </div>
 
                 <!-- Standard NDT Fields Group (Component, Location) -->
-                <div id="groupNdtStandardFields" class="form-row" style="display: flex; gap: 0.8rem;">
-                    <div class="form-group" style="flex: 1;">
+                <div id="groupNdtStandardFields" class="ndt-standard-fields-stack">
+                    <div class="form-group ndt-pick-group">
                         <label class="form-label">부재 구분 *</label>
-                        <select id="ndtComponent" class="form-select">
-                            <option value="기둥">기둥</option>
-                            <option value="큰보">큰보</option>
-                            <option value="작은보">작은보</option>
-                            <option value="철골거더">철골거더</option>
-                            <option value="철골빔">철골빔</option>
-                            <option value="슬래브">슬래브</option>
-                            <option value="데크슬래브">데크슬래브</option>
-                            <option value="RC벽체">RC벽체</option>
-                            <option value="조적벽체">조적벽체</option>
-                            <option value="기타">기타</option>
-                        </select>
+                        <select id="ndtComponent" class="form-select defect-legacy-fields" aria-hidden="true" tabindex="-1"></select>
+                        <input type="text" id="ndtComponentInput" class="form-control defect-quick-direct-input ndt-quick-direct-input" placeholder="부재 구분 직접 입력" autocomplete="off">
+                        <div class="defect-quick-chip-grid dqg-component ndt-quick-chip-grid" id="ndtComponentChips"></div>
                     </div>
-                    <div class="form-group" id="ndtLocationFieldWrap" style="flex: 1;">
+                    <div class="form-group" id="ndtLocationFieldWrap">
                         <label class="form-label">📍 측정 위치 *</label>
                         <input type="text" id="ndtLocation" class="form-control" placeholder="예: 101동 1F 기둥 C1 하부">
                     </div>
                 </div>
 
                 <!-- 📏 부재 실측 전용 필드 그룹: 설계치수 (단면 규격 상태평가 자동판정용) -->
-                <div id="groupNdtMeasureFields" style="display: none; flex-direction: column; gap: 0.8rem;">
-                    <div class="form-row" style="display: flex; gap: 0.8rem;">
-                        <div class="form-group" style="flex: 1;">
-                            <label class="form-label">📐 설계 폭/치수 (mm) *</label>
-                            <input type="text" inputmode="decimal" id="ndtDesignWidth" class="form-control" placeholder="예: 400 또는 400*400">
+                <div id="groupNdtMeasureFields" class="ndt-measure-stack" style="display: none;">
+                    <!-- RC: 보(폭×춤) / 기둥(정면·측면) / 슬래브·벽체(두께) -->
+                    <div id="ndtMeasureRcDesignBlock" class="ndt-rc-dim-block">
+                        <div id="ndtMeasureRcDesignRow" class="form-row ndt-form-row-2col">
+                            <div class="form-group" id="ndtDesignPrimaryGroup">
+                                <label class="form-label ndt-form-label">
+                                    <span id="lblNdtDesignPrimary">📐 설계 폭 (mm)</span>
+                                    <span class="form-label-req">*</span>
+                                </label>
+                                <input type="text" inputmode="decimal" id="ndtDesignWidth" class="form-control" placeholder="예: 400">
+                            </div>
+                            <div class="form-group" id="ndtDesignSecondaryGroup">
+                                <label class="form-label ndt-form-label">
+                                    <span id="lblNdtDesignSecondary">📐 설계 춤 (mm)</span>
+                                </label>
+                                <input type="text" inputmode="decimal" id="ndtDesignDepth" class="form-control" placeholder="예: 600">
+                            </div>
                         </div>
-                        <div class="form-group" style="flex: 1;">
-                            <label class="form-label">📐 설계 춤 (mm, 단일치수 부재는 비워두세요)</label>
-                            <input type="text" inputmode="decimal" id="ndtDesignDepth" class="form-control" placeholder="예: 600 (폭 칸에 400*600처럼 같이 써도 됨)">
+                    </div>
+                    <!-- 철골: 높이 × 폭 × 웨브 두께 × 플렌지 두께 -->
+                    <div id="ndtMeasureSteelDesignBlock" class="ndt-steel-dim-block" style="display:none;">
+                        <div class="form-row ndt-form-row-2col">
+                            <div class="form-group">
+                                <label class="form-label ndt-form-label">📐 설계 높이 (mm) <span class="form-label-req">*</span></label>
+                                <input type="text" inputmode="decimal" id="ndtDesignWebWidth" class="form-control" placeholder="H (예: 400)">
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label ndt-form-label">📐 설계 폭 (mm) <span class="form-label-req">*</span></label>
+                                <input type="text" inputmode="decimal" id="ndtDesignFlangeWidth" class="form-control" placeholder="B (예: 200)">
+                            </div>
+                        </div>
+                        <div class="form-row ndt-form-row-2col">
+                            <div class="form-group">
+                                <label class="form-label ndt-form-label">📐 설계 웨브 두께 (mm) <span class="form-label-req">*</span></label>
+                                <input type="text" inputmode="decimal" id="ndtDesignWeb" class="form-control" placeholder="tw (예: 8)">
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label ndt-form-label">📐 설계 플랜지 두께 (mm) <span class="form-label-req">*</span></label>
+                                <input type="text" inputmode="decimal" id="ndtDesignFlange" class="form-control" placeholder="tf (예: 13)">
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -1610,19 +1633,54 @@
                     </div>
                 </div>
 
-                <!-- 부재 실측: 실측 폭/춤 + 마감상태 — 설계치수와 동일한 구조로, 마감상태는 실측치수 오른쪽에 배치 -->
-                <div class="form-row" id="groupNdtMeasuredDepth" style="display:none; gap: 0.8rem;">
-                    <div class="form-group" style="flex: 1;">
-                        <label class="form-label">📐 실측 폭/치수 (mm) *</label>
-                        <input type="text" inputmode="decimal" id="ndtMeasuredWidth" class="form-control" placeholder="예: 396 또는 396*598">
+                <!-- 부재 실측: 실측 폭/춤(또는 철골 4칸) + 마감상태 -->
+                <div id="groupNdtMeasuredDepth" class="ndt-measure-stack ndt-measure-measured-block" style="display:none;">
+                    <div id="ndtMeasureRcMeasuredBlock" class="ndt-rc-dim-block">
+                        <div id="ndtMeasureRcMeasuredRow" class="form-row ndt-form-row-2col">
+                            <div class="form-group" id="ndtMeasuredPrimaryGroup">
+                                <label class="form-label ndt-form-label">
+                                    <span id="lblNdtMeasuredPrimary">📐 실측 폭 (mm)</span>
+                                    <span class="form-label-req">*</span>
+                                </label>
+                                <input type="text" inputmode="decimal" id="ndtMeasuredWidth" class="form-control" placeholder="예: 396">
+                            </div>
+                            <div class="form-group" id="ndtMeasuredSecondaryGroup">
+                                <label class="form-label ndt-form-label">
+                                    <span id="lblNdtMeasuredSecondary">📐 실측 춤 (mm)</span>
+                                </label>
+                                <input type="text" inputmode="decimal" id="ndtMeasuredDepth" class="form-control" placeholder="예: 598">
+                            </div>
+                        </div>
                     </div>
-                    <div class="form-group" style="flex: 1;">
-                        <label class="form-label">📐 실측 춤 (mm, 단일치수 부재는 비워두세요)</label>
-                        <input type="text" inputmode="decimal" id="ndtMeasuredDepth" class="form-control" placeholder="예: 598 (폭 칸에 396*598처럼 같이 써도 됨)">
+                    <div id="ndtMeasureSteelMeasuredBlock" class="ndt-steel-dim-block" style="display:none;">
+                        <div class="form-row ndt-form-row-2col">
+                            <div class="form-group">
+                                <label class="form-label ndt-form-label">📐 실측 높이 (mm) <span class="form-label-req">*</span></label>
+                                <input type="text" inputmode="decimal" id="ndtMeasuredWebWidth" class="form-control" placeholder="H (예: 398)">
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label ndt-form-label">📐 실측 폭 (mm) <span class="form-label-req">*</span></label>
+                                <input type="text" inputmode="decimal" id="ndtMeasuredFlangeWidth" class="form-control" placeholder="B (예: 199)">
+                            </div>
+                        </div>
+                        <div class="form-row ndt-form-row-2col">
+                            <div class="form-group">
+                                <label class="form-label ndt-form-label">📐 실측 웨브 두께 (mm) <span class="form-label-req">*</span></label>
+                                <input type="text" inputmode="decimal" id="ndtMeasuredWeb" class="form-control" placeholder="tw (예: 8)">
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label ndt-form-label">📐 실측 플랜지 두께 (mm) <span class="form-label-req">*</span></label>
+                                <input type="text" inputmode="decimal" id="ndtMeasuredFlange" class="form-control" placeholder="tf (예: 13)">
+                            </div>
+                        </div>
                     </div>
-                    <div class="form-group" style="flex: 1;">
-                        <label class="form-label">🏁 마감상태 *</label>
-                        <select id="ndtFinishState" class="form-select"></select>
+                    <div class="ndt-measure-finish-block">
+                        <div class="form-group ndt-pick-group">
+                            <label class="form-label">🏁 마감상태 *</label>
+                            <select id="ndtFinishState" class="form-select defect-legacy-fields" aria-hidden="true" tabindex="-1"></select>
+                            <input type="text" id="ndtFinishStateInput" class="form-control defect-quick-direct-input ndt-quick-direct-input" placeholder="마감상태 직접 입력" autocomplete="off">
+                            <div class="defect-quick-chip-grid dqg-finish ndt-quick-chip-grid" id="ndtFinishStateChips"></div>
+                        </div>
                     </div>
                 </div>
 
@@ -2772,7 +2830,7 @@
     <script src="js/shared/report.js?v=20260827_overview"></script>
     <script src="js/shared/hwpx-import.js?v=20260825_hwpxin"></script>
     <script src="js/shared/auth.js?v=20260821_land1"></script>
-    <script src="app.js?v=20260902_company_search_join"></script>
+    <script src="app.js?v=20260903_tilt_white_bg"></script>
     <script>
         window.BSA_APP_VERSION = '20260902_legend_lock';
         (function () {
