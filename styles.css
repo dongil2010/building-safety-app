@@ -1095,11 +1095,14 @@ html.layout-desktop #tab-ndt .ndt-top-bar .ndt-top-canvas-tools {
     border-radius: var(--radius-md);
     border: 1px solid var(--border-color);
     padding: 0.5rem;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
 }
 
 #tab-ndt #ndtSummaryTable {
     width: max-content;
-    min-width: 100%;
+    max-width: 100%;
+    margin-inline: auto;
     border-collapse: separate;
     border-spacing: 0;
     background: #fff;
@@ -1169,6 +1172,11 @@ html.layout-desktop #tab-ndt .ndt-top-bar .ndt-top-canvas-tools {
 }
 
 @media (min-width: 769px) {
+    html:not(.layout-tablet) #tab-ndt .ndt-results-section {
+        max-width: min(100%, 1080px);
+        margin-inline: auto;
+    }
+
     html:not(.layout-tablet) #tab-ndt #ndtSummaryTable {
         font-size: 0.84rem;
     }
@@ -1194,8 +1202,8 @@ html.layout-desktop #tab-ndt .ndt-top-bar .ndt-top-canvas-tools {
 
     html:not(.layout-tablet) #tab-ndt #ndtSummaryTable .ndt-col-location {
         font-weight: 700;
-        text-align: left;
-        min-width: 7.5rem;
+        text-align: center;
+        max-width: 12rem;
     }
 
     html:not(.layout-tablet) #tab-ndt #ndtSummaryTable .ndt-col-dim {
@@ -10003,7 +10011,8 @@ body:not(.bsa-tab-home) .home-fab-add-building {
     #tab-ndt #ndtSummaryTable,
     #tab-ndt .data-table {
         width: max-content;
-        min-width: 100%;
+        max-width: 100%;
+        margin-inline: auto;
         table-layout: auto;
         border-collapse: collapse;
         font-size: 0.78rem;
@@ -11227,11 +11236,13 @@ html.layout-tablet #tab-ndt .ndt-results-table-wrap {
     border-radius: 10px !important;
     padding: 0.24rem !important;
     box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06);
+    text-align: center;
 }
 
 html.layout-tablet #tab-ndt #ndtSummaryTable {
     width: max-content;
-    min-width: 100%;
+    max-width: 100%;
+    margin-inline: auto;
     table-layout: auto;
     border-collapse: separate !important;
     border-spacing: 0 !important;
