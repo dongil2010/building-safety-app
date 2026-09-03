@@ -11605,13 +11605,14 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     window.deleteNdtItem = function(id, options) {
-        if (!options?.skipConfirm && !window.confirmDelete('해당 비파괴 조사 측정 항목을 삭제하시겠습니까?')) return;
+        if (!options?.skipConfirm && !window.confirmDelete('해당 비파괴 조사 측정 항목을 삭제하시겠습니까?')) return false;
         const key = `${state.currentBuildingId}_${state.currentFloor}`;
         trackNdtDeletion(key, id);
         state.ndtData[key] = (state.ndtData[key] || []).filter(x => x.id !== id);
         saveStateToLocalStorage();
         drawNdtCanvas();
         renderNdtSummaryTable();
+        return true;
     };
 
     window.exportNdtTableExcel = function() {
@@ -13401,11 +13402,15 @@ document.addEventListener('DOMContentLoaded', () => {
         if (btnDelete) {
             btnDelete.addEventListener('click', () => {
                 const pinId = document.getElementById('ndtPinId')?.value;
-                if (!pinId) return;
+                if (!pinId) {
+                    closeNdtModal();
+                    return;
+                }
                 window.clearTimeout(window._ndtAutoApplyTimer);
                 window._ndtAutoApplyTimer = null;
-                window.deleteNdtItem(pinId);
-                closeNdtModal();
+                if (window.deleteNdtItem(pinId)) {
+                    closeNdtModal();
+                }
             });
         }
 
@@ -22787,11 +22792,14 @@ document.addEventListener('DOMContentLoaded', () => {
     const btnDeleteDefect = document.getElementById('btnDeleteDefect');
     if (btnDeleteDefect) {
         btnDeleteDefect.addEventListener('click', () => {
-            const pinId = document.getElementById('defectPinId').value;
+            const pinId = document.getElementById('defectPinId')?.value;
             if (pinId) {
-                window.deleteDefectById(pinId);
+                if (window.deleteDefectById(pinId)) {
+                    closeDefectModal({ discardPending: true });
+                }
+            } else {
+                closeDefectModal({ discardPending: true });
             }
-            closeDefectModal();
         });
     }
 
@@ -23658,9 +23666,25 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (typeof window.setNdtMode === 'function') window.setNdtMode('PAN');
                 return;
             }
-            if ((e.key === 'Delete' || e.key === 'Backspace') && selectedNdtIds.size > 0 && !isNdtModalOpen() && !typing) {
+            // Delete/Backspace: 수정창이 열려 있어도 현재 항목 삭제 (입력 중일 때만 무시)
+            if ((e.key === 'Delete' || e.key === 'Backspace') && !typing) {
                 e.preventDefault();
-                deleteSelectedNdtMarks();
+                if (isNdtModalOpen()) {
+                    const pinId = document.getElementById('ndtPinId')?.value;
+                    if (pinId) {
+                        window.clearTimeout(window._ndtAutoApplyTimer);
+                        window._ndtAutoApplyTimer = null;
+                        if (window.deleteNdtItem(pinId)) {
+                            selectedNdtIds.delete(pinId);
+                            updateNdtSelectionBar();
+                            closeNdtModal();
+                        }
+                    } else {
+                        closeNdtModal();
+                    }
+                    return;
+                }
+                if (selectedNdtIds.size > 0) deleteSelectedNdtMarks();
                 return;
             }
             if (typing || e.ctrlKey || e.metaKey || e.altKey) return;
@@ -23671,6 +23695,29 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
         if (window.state.currentTab !== 'tab-map') return;
+        // Delete/Backspace: 핀 클릭→수정창이 열린 상태에서도 삭제 (기존엔 모달 열리면 무시됨)
+        if ((e.key === 'Delete' || e.key === 'Backspace') && !typing) {
+            e.preventDefault();
+            if (typeof isDefectBulkEditMode === 'function' && isDefectBulkEditMode() && selectedDefectIds.size > 0) {
+                deleteSelectedDefects();
+                return;
+            }
+            if (typeof isDefectModalOpen === 'function' && isDefectModalOpen()) {
+                const pinId = document.getElementById('defectPinId')?.value;
+                if (pinId) {
+                    if (window.deleteDefectById(pinId)) {
+                        selectedDefectIds.delete(pinId);
+                        updateMapSelectionBar();
+                        closeDefectModal({ discardPending: true });
+                    }
+                } else {
+                    closeDefectModal({ discardPending: true });
+                }
+                return;
+            }
+            if (selectedDefectIds.size > 0) deleteSelectedDefects();
+            return;
+        }
         if (k === 'escape') {
             e.preventDefault();
             // 다각형 그리는 중: 마지막 점 취소가 아니라, 지금까지 찍은 모양으로 저장
@@ -24010,15 +24057,11 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // Ctrl+Z / Ctrl+Y 키보드 단축키 (입력 필드에 포커스가 있을 때는 무시)
+    // Delete/Backspace 삭제는 위 도면·비파괴 단축키 핸들러에서 처리 (수정창 열린 상태 포함)
     window.addEventListener('keydown', (e) => {
         const tag = (e.target && e.target.tagName || '').toUpperCase();
         if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || (e.target && e.target.isContentEditable)) return;
         if (!document.getElementById('tab-map')?.classList.contains('active')) return;
-        if ((e.key === 'Delete' || e.key === 'Backspace') && selectedDefectIds.size > 0 && !isDefectModalOpen()) {
-            e.preventDefault();
-            deleteSelectedDefects();
-            return;
-        }
         if (e.ctrlKey && !e.shiftKey && e.key.toLowerCase() === 'z') {
             e.preventDefault();
             undoDefectChange();
@@ -30911,7 +30954,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     window.deleteDefectById = function(id, options) {
-        if (!options?.skipConfirm && !window.confirmDelete('이 결함을 삭제할까요?')) return;
+        if (!options?.skipConfirm && !window.confirmDelete('이 결함을 삭제할까요?')) return false;
         const key = `${state.currentBuildingId}_${state.currentFloor}`;
         if (state.defects[key]) {
             pushDefectHistory();
@@ -30919,7 +30962,9 @@ document.addEventListener('DOMContentLoaded', () => {
             saveStateToLocalStorage();
             renderSurveyTable();
             drawCanvas();
+            return true;
         }
+        return false;
     };
 
     // "마킹 추가"로 여러 위치에 묶인 결함 그룹 전체를 삭제
