@@ -2231,11 +2231,11 @@ body {
         min-height: 180px !important;
         max-height: 52vh !important;
         margin-bottom: 0;
-        touch-action: pan-y pinch-zoom;
+        touch-action: none;
     }
 
     #tab-ndt #ndtCanvas {
-        touch-action: pan-y pinch-zoom;
+        touch-action: none;
     }
 
     #tab-ndt .mobile-canvas-dock {
@@ -9361,10 +9361,10 @@ body:not(.bsa-tab-home) .home-fab-add-building {
         white-space: nowrap;
     }
 
-    /* 비파괴 도면: 세로 한손가락=페이지 스크롤, 핀치=줌 */
+    /* 비파괴 도면: 한손가락 드래그=도면 팬, 핀치=줌 (페이지 스크롤은 도면 밖에서) */
     body.bsa-tab-ndt #ndtCanvasContainer,
     body.bsa-tab-ndt #ndtCanvas {
-        touch-action: pan-y pinch-zoom;
+        touch-action: none !important;
     }
 
     @media (orientation: portrait) {

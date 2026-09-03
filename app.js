@@ -7505,7 +7505,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let ndtRotationAngle = 0;
     let ndtBgImage = null;
     let isNdtDragging = false;
-    let ndtTouchMayPageScroll = false; // 모바일: 세로 스와이프면 페이지 스크롤 허용
+    let ndtTouchMayPageScroll = false; // 레거시 플래그(도면 팬으로 통일, 페이지 스크롤 위임 안 함)
     let ndtTouchStartedOnCanvas = false; // 도면에서 시작한 터치만 스크롤 잠금(preventDefault)
     let isNdtMarkingDrag = false;
     let isDraggingNdtDisplacement = false;
@@ -10791,9 +10791,10 @@ document.addEventListener('DOMContentLoaded', () => {
                     canvas.style.cursor = 'crosshair';
                     drawNdtCanvas();
                 } else if (layoutIsCompactWidth()) {
-                    // 모바일 PAN: 한손가락은 즉시 페이지 스크롤 (도면 팬은 가로 확정 후에만)
-                    ndtTouchMayPageScroll = true;
-                    isNdtDragging = false;
+                    // 모바일 PAN: 도면 위 한손가락 드래그는 페이지 스크롤이 아니라 도면 팬만
+                    ndtTouchMayPageScroll = false;
+                    isNdtDragging = true;
+                    if (e.cancelable) e.preventDefault();
                 } else {
                     ndtTouchMayPageScroll = false;
                     isNdtDragging = true;
@@ -10989,24 +10990,17 @@ document.addEventListener('DOMContentLoaded', () => {
                 ndtView.offsetY = ndtInitialOffsetY + dy;
                 drawNdtCanvas();
             } else if (!isNdtPinching && ndtTouchMayPageScroll && e.touches.length === 1) {
-                // 모바일: 세로·대각선은 스크롤에 맡기고, 가로가 뚜렷할 때만 도면 팬 시작
+                // 하위호환: 예전 세로스크롤 분기 — 이제는 도면 팬으로 전환
                 const touch = e.touches[0];
                 const dx = touch.clientX - ndtStartMouseX;
                 const dy = touch.clientY - ndtStartMouseY;
-                const absX = Math.abs(dx);
-                const absY = Math.abs(dy);
-                if (absX < 12 && absY < 12) return;
-                if (absX > absY * 1.35) {
-                    ndtTouchMayPageScroll = false;
-                    isNdtDragging = true;
-                    if (e.cancelable) e.preventDefault();
-                    ndtView.offsetX = ndtInitialOffsetX + dx;
-                    ndtView.offsetY = ndtInitialOffsetY + dy;
-                    drawNdtCanvas();
-                } else {
-                    // 세로 우선 → preventDefault 하지 않음 (즉시 페이지 스크롤)
-                    ndtTouchMayPageScroll = false;
-                }
+                if (Math.hypot(dx, dy) < 8) return;
+                ndtTouchMayPageScroll = false;
+                isNdtDragging = true;
+                if (e.cancelable) e.preventDefault();
+                ndtView.offsetX = ndtInitialOffsetX + dx;
+                ndtView.offsetY = ndtInitialOffsetY + dy;
+                drawNdtCanvas();
             }
         }, { passive: false });
 
