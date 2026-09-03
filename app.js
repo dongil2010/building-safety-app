@@ -738,6 +738,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // 표시하지 않아서, 실패 시 다음 saveStateToLocalStorage 호출 때 재시도되게 한다.
     const _idbPendingDrawingKeys = new Set();
     const _idbPendingPhotoKeys = new Set();
+    const _idbPhotoWriteGen = new Map();
     const _idbPendingPdfKeys = new Set();
     const _idbPendingTierKeys = new Set();
     const _idbPendingSourceKeys = new Set();
@@ -1711,11 +1712,135 @@ document.addEventListener('DOMContentLoaded', () => {
     // 다시 안 쓰여서 예전 사진이 그대로 남는다. 편집 직전에 이 결함의 기록을 지워서
     // 새 사진들이 다시 저장되게 한다.
     function invalidatePersistedPhotoCacheForDefect(defectId) {
+        if (!defectId) return;
         const prefix = `${defectId}_`;
-        Array.from(_idbPersistedPhotoKeys).forEach(k => {
-            if (k.startsWith(prefix)) _idbPersistedPhotoKeys.delete(k);
+        const bump = (k) => {
+            _idbPersistedPhotoKeys.delete(k);
+            _idbPhotoWriteGen.set(k, (_idbPhotoWriteGen.get(k) || 0) + 1);
+        };
+        Array.from(_idbPersistedPhotoKeys).forEach((k) => {
+            if (k.startsWith(prefix)) bump(k);
+        });
+        Array.from(_idbPendingPhotoKeys).forEach((k) => {
+            if (k.startsWith(prefix)) bump(k);
         });
     }
+
+    function isPersistableImageUrl(url) {
+        return typeof url === 'string' && url.length > 32 && !url.startsWith('blob:');
+    }
+
+    // 같은 키에 이전 쓰기가 끝나기 전에 새 사진이 오면, 세대(generation)로 옛 결과가
+    // 새 사진을 덮어쓰지 않게 한다. pending 중이라고 건너뛰면 모바일에서 새로고침 시
+    // 최신 사진이 IndexedDB에 안 남는 경우가 있었다.
+    function persistPhotoUrlToIdb(key, url) {
+        if (!key || !isPersistableImageUrl(url)) return Promise.resolve(false);
+        const gen = (_idbPhotoWriteGen.get(key) || 0) + 1;
+        _idbPhotoWriteGen.set(key, gen);
+        _idbPendingPhotoKeys.add(key);
+        return idbSet('photos', key, url).then((ok) => {
+            if (_idbPhotoWriteGen.get(key) !== gen) return false;
+            _idbPendingPhotoKeys.delete(key);
+            if (ok) {
+                _idbPersistedPhotoKeys.add(key);
+                _idbSaveFailedNotified = false;
+                if (!window._photoCache) window._photoCache = {};
+                window._photoCache[key] = url;
+                return true;
+            }
+            notifyIndexedDbSaveFailure();
+            return false;
+        });
+    }
+
+    async function persistDefectPhotosNow(defect) {
+        if (!defect || !defect.id) return;
+        const jobs = [];
+        (Array.isArray(defect.photos) ? defect.photos : []).forEach((url, i) => {
+            if (!url) return;
+            jobs.push(persistPhotoUrlToIdb(getPhotoDocId(defect.id, i), url));
+        });
+        (Array.isArray(defect.prevRoundPhotos) ? defect.prevRoundPhotos : []).forEach((url, i) => {
+            if (!url) return;
+            jobs.push(persistPhotoUrlToIdb(getPhotoDocId(defect.id, i, 'prev'), url));
+        });
+        if (jobs.length) await Promise.all(jobs);
+    }
+
+    async function persistOpenDefectPhotosNow() {
+        try {
+            if (window._defectFormHydrating) return;
+            if (typeof isDefectModalOpen === 'function' && !isDefectModalOpen()) return;
+            if (!state.currentBuildingId) return;
+            const pinId = document.getElementById('defectPinId')?.value;
+            if (!pinId) {
+                if (typeof commitDefectFromForm === 'function') {
+                    await commitDefectFromForm({
+                        pushHistory: !window._defectEditSessionHistoryPushed,
+                        uploadPhotos: false
+                    });
+                    window._defectEditSessionHistoryPushed = true;
+                }
+                return;
+            }
+            const key = `${state.currentBuildingId}_${state.currentFloor}`;
+            const d = (state.defects[key] || []).find((x) => x.id === pinId);
+            if (!d) return;
+            const photosVal = Array.isArray(window._pendingPhotos) ? window._pendingPhotos.filter(Boolean) : [];
+            const prevVal = Array.isArray(window._pendingPrevRoundPhotos)
+                ? window._pendingPrevRoundPhotos.filter(Boolean)
+                : [];
+            const oldCurr = (Array.isArray(d.photos) && d.photos.length)
+                || (Array.isArray(d.photoIds) && d.photoIds.length)
+                || 0;
+            const oldPrev = (Array.isArray(d.prevRoundPhotos) && d.prevRoundPhotos.length)
+                || (Array.isArray(d.prevRoundPhotoIds) && d.prevRoundPhotoIds.length)
+                || 0;
+            invalidatePersistedPhotoCacheForDefect(d.id);
+            d.photos = photosVal.slice();
+            d.prevRoundPhotos = prevVal.slice();
+            syncDefectPhotoRefs(d, d.photos, d.prevRoundPhotos);
+            if (typeof touchDefectUpdatedAt === 'function') touchDefectUpdatedAt(d);
+            if (typeof saveStateToLocalStorage === 'function') saveStateToLocalStorage();
+            await persistDefectPhotosNow(d);
+            await pruneExtraDefectPhotos(d.id, photosVal.length, oldCurr);
+            await pruneExtraDefectPhotos(d.id, prevVal.length, oldPrev, 'prev');
+        } catch (e) {
+            console.warn('사진 즉시 저장 실패:', e);
+        }
+    }
+
+    async function flushLocalPhotoPersistBeforeUnload() {
+        try {
+            if (window._defectAutoApplyTimer) {
+                window.clearTimeout(window._defectAutoApplyTimer);
+                window._defectAutoApplyTimer = null;
+            }
+            if (typeof isDefectModalOpen === 'function' && isDefectModalOpen()
+                && typeof commitDefectFromForm === 'function') {
+                await commitDefectFromForm({ pushHistory: false, uploadPhotos: false });
+            } else {
+                await persistOpenDefectPhotosNow();
+            }
+            if (typeof saveStateToLocalStorage === 'function') saveStateToLocalStorage();
+        } catch (e) {
+            console.warn('새로고침 전 사진 저장 실패:', e);
+        }
+    }
+    window.flushLocalPhotoPersistBeforeUnload = flushLocalPhotoPersistBeforeUnload;
+
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState !== 'hidden') return;
+        if (window._defectPhotosDirty || window._defectAutoApplyTimer) {
+            void flushLocalPhotoPersistBeforeUnload();
+        }
+    });
+    window.addEventListener('pagehide', () => {
+        try {
+            if (typeof flushDefectAutoApply === 'function') flushDefectAutoApply();
+            if (typeof saveStateToLocalStorage === 'function') saveStateToLocalStorage();
+        } catch (_e) { /* ignore */ }
+    });
 
     // 도면/사진처럼 무거운 base64 이미지는 localStorage가 아니라 IndexedDB에 저장한다.
     // (localStorage는 5~10MB로 작아서 이미지를 계속 쌓으면 금방 꽉 차지만, IndexedDB는
@@ -1800,34 +1925,16 @@ document.addEventListener('DOMContentLoaded', () => {
                     d.photos.forEach((url, i) => {
                         if (!url) return;
                         const key = getPhotoDocId(d.id, i);
-                        if (_idbPersistedPhotoKeys.has(key) || _idbPendingPhotoKeys.has(key)) return;
-                        _idbPendingPhotoKeys.add(key);
-                        idbSet('photos', key, url).then(ok => {
-                            _idbPendingPhotoKeys.delete(key);
-                            if (ok) {
-                                _idbPersistedPhotoKeys.add(key);
-                                _idbSaveFailedNotified = false;
-                            } else {
-                                notifyIndexedDbSaveFailure();
-                            }
-                        });
+                        if (_idbPersistedPhotoKeys.has(key)) return;
+                        persistPhotoUrlToIdb(key, url);
                     });
                 }
                 if (d.prevRoundPhotos && d.prevRoundPhotos.length > 0) {
                     d.prevRoundPhotos.forEach((url, i) => {
                         if (!url) return;
                         const key = getPhotoDocId(d.id, i, 'prev');
-                        if (_idbPersistedPhotoKeys.has(key) || _idbPendingPhotoKeys.has(key)) return;
-                        _idbPendingPhotoKeys.add(key);
-                        idbSet('photos', key, url).then(ok => {
-                            _idbPendingPhotoKeys.delete(key);
-                            if (ok) {
-                                _idbPersistedPhotoKeys.add(key);
-                                _idbSaveFailedNotified = false;
-                            } else {
-                                notifyIndexedDbSaveFailure();
-                            }
-                        });
+                        if (_idbPersistedPhotoKeys.has(key)) return;
+                        persistPhotoUrlToIdb(key, url);
                     });
                 }
             });
@@ -1837,17 +1944,8 @@ document.addEventListener('DOMContentLoaded', () => {
             b.overviewPhotos.forEach((p) => {
                 if (!p || !p.id || !p.dataUrl) return;
                 const key = getOverviewPhotoDocId(b.id, p.id);
-                if (_idbPersistedPhotoKeys.has(key) || _idbPendingPhotoKeys.has(key)) return;
-                _idbPendingPhotoKeys.add(key);
-                idbSet('photos', key, p.dataUrl).then((ok) => {
-                    _idbPendingPhotoKeys.delete(key);
-                    if (ok) {
-                        _idbPersistedPhotoKeys.add(key);
-                        _idbSaveFailedNotified = false;
-                    } else {
-                        notifyIndexedDbSaveFailure();
-                    }
-                });
+                if (_idbPersistedPhotoKeys.has(key)) return;
+                persistPhotoUrlToIdb(key, p.dataUrl);
             });
         });
     }
@@ -2853,7 +2951,12 @@ document.addEventListener('DOMContentLoaded', () => {
         const localPhotoIds = Array.isArray(localRec.photoIds) ? localRec.photoIds : [];
         if (serverPhotoIds.length || localPhotoIds.length) {
             merged.photoIds = (localPhotoIds.length >= serverPhotoIds.length) ? localPhotoIds.slice() : serverPhotoIds.slice();
-            delete merged.photos;
+            const inlinePhotos = mergePhotoArrays(
+                extractInlinePhotos(serverRec),
+                extractInlinePhotos(localRec)
+            );
+            if (inlinePhotos.length) merged.photos = inlinePhotos;
+            else delete merged.photos;
         } else {
             merged.photos = mergePhotoArrays(
                 extractInlinePhotos(serverRec),
@@ -2866,7 +2969,12 @@ document.addEventListener('DOMContentLoaded', () => {
         const localPrevPhotoIds = Array.isArray(localRec.prevRoundPhotoIds) ? localRec.prevRoundPhotoIds : [];
         if (serverPrevPhotoIds.length || localPrevPhotoIds.length) {
             merged.prevRoundPhotoIds = (localPrevPhotoIds.length >= serverPrevPhotoIds.length) ? localPrevPhotoIds.slice() : serverPrevPhotoIds.slice();
-            delete merged.prevRoundPhotos;
+            const inlinePrev = mergePhotoArrays(
+                extractInlinePhotos(serverRec, 'prev'),
+                extractInlinePhotos(localRec, 'prev')
+            );
+            if (inlinePrev.length) merged.prevRoundPhotos = inlinePrev;
+            else delete merged.prevRoundPhotos;
         } else {
             merged.prevRoundPhotos = mergePhotoArrays(
                 extractInlinePhotos(serverRec, 'prev'),
@@ -22336,6 +22444,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 window._pendingPhotos[idx] = annotatedDataUrl;
                 window._defectPhotosDirty = true;
                 renderDefectPhotoSection();
+                void persistOpenDefectPhotosNow();
                 scheduleDefectAutoApply();
             });
         }
@@ -22347,6 +22456,7 @@ document.addEventListener('DOMContentLoaded', () => {
             window._pendingPhotos.splice(idx, 1);
             window._defectPhotosDirty = true;
             renderDefectPhotoSection();
+            void persistOpenDefectPhotosNow();
             scheduleDefectAutoApply();
         }
     };
@@ -22434,6 +22544,7 @@ document.addEventListener('DOMContentLoaded', () => {
             window._pendingPhotos.push(compressedUrl);
             window._defectPhotosDirty = true;
             renderDefectPhotoSection();
+            void persistOpenDefectPhotosNow();
             scheduleDefectAutoApply();
         });
     }
@@ -22503,6 +22614,14 @@ document.addEventListener('DOMContentLoaded', () => {
                     if (!Array.isArray(bldg.overviewPhotos)) bldg.overviewPhotos = [];
                     bldg.overviewPhotos.push(item);
                 }
+                const ovKey = (typeof getOverviewPhotoDocId === 'function')
+                    ? getOverviewPhotoDocId(bldg.id, item.id)
+                    : null;
+                if (ovKey) {
+                    if (!window._photoCache) window._photoCache = {};
+                    window._photoCache[ovKey] = dataUrl;
+                    void persistPhotoUrlToIdb(ovKey, dataUrl);
+                }
                 if (typeof saveStateToLocalStorage === 'function') saveStateToLocalStorage();
                 if (typeof uploadOverviewPhotos === 'function') uploadOverviewPhotos(bldg);
                 if (typeof renderOverviewPhotosList === 'function') renderOverviewPhotosList({ force: true });
@@ -22514,7 +22633,10 @@ document.addEventListener('DOMContentLoaded', () => {
         if (isDefectModalOpen()) {
             if (!window._pendingPhotos) window._pendingPhotos = [];
             window._pendingPhotos.push(dataUrl);
+            window._defectPhotosDirty = true;
             renderDefectPhotoSection();
+            void persistOpenDefectPhotosNow();
+            scheduleDefectAutoApply();
             window.showToast('휴대폰에서 사진을 받아 결함에 추가했습니다.', 'success');
         } else {
             window._phoneRelayInbox.push(dataUrl);
@@ -22704,9 +22826,9 @@ document.addEventListener('DOMContentLoaded', () => {
             _idbPersistedPhotoKeys.delete(photoDocId);
             jobs.push(idbDelete('photos', photoDocId));
             if (companyPhotos) {
-                jobs.push(companyPhotos.doc(photoDocId).delete().catch((e) => {
+                companyPhotos.doc(photoDocId).delete().catch((e) => {
                     console.warn(`사진 슬롯 정리 실패 (${photoDocId}):`, e);
-                }));
+                });
             }
         }
         await Promise.all(jobs);
@@ -23001,21 +23123,38 @@ document.addEventListener('DOMContentLoaded', () => {
             state.defects[key].push(newDefect);
             syncDefectPhotoRefs(newDefect, photosVal, window._pendingPrevRoundPhotos);
             savedDefect = newDefect;
+            if (!pinId) {
+                const pinIdEl = document.getElementById('defectPinId');
+                if (pinIdEl && !pinIdEl.value) pinIdEl.value = savedDefect.id;
+            }
         }
 
         const prevPhotosVal = Array.isArray(window._pendingPrevRoundPhotos)
             ? window._pendingPrevRoundPhotos.filter(Boolean)
             : [];
         const photosWereDirty = !!window._defectPhotosDirty;
-        if (uploadPhotos && savedDefect && photosWereDirty) {
-            if (photosVal.length > 0) await uploadDefectPhotos(savedDefect.id, photosVal);
-            if (prevPhotosVal.length > 0) await uploadDefectPhotos(savedDefect.id, prevPhotosVal, 'prev');
-            await pruneExtraDefectPhotos(savedDefect.id, photosVal.length, oldCurrPhotoCount);
-            await pruneExtraDefectPhotos(savedDefect.id, prevPhotosVal.length, oldPrevPhotoCount, 'prev');
-            window._defectPhotosDirty = false;
+        const currPhotos = Array.isArray(photosVal) ? photosVal.filter(Boolean) : [];
+        const prevPhotos = prevPhotosVal;
+        if (savedDefect && photosWereDirty) {
+            // 클라우드 업로드를 기다리면 모바일 새로고침 때 사진이 기기에 안 남는다.
+            // photoIds는 localStorage에 먼저 남기고, 원본은 IndexedDB에 넣은 뒤 서버는 백그라운드.
+            saveStateToLocalStorage();
+            await persistDefectPhotosNow(savedDefect);
+            await pruneExtraDefectPhotos(savedDefect.id, currPhotos.length, oldCurrPhotoCount);
+            await pruneExtraDefectPhotos(savedDefect.id, prevPhotos.length, oldPrevPhotoCount, 'prev');
+        } else {
+            saveStateToLocalStorage();
         }
-
-        saveStateToLocalStorage();
+        if (uploadPhotos && savedDefect && photosWereDirty) {
+            window._defectPhotosDirty = false;
+            const defectId = savedDefect.id;
+            if (currPhotos.length > 0) {
+                uploadDefectPhotos(defectId, currPhotos).catch((e) => console.warn('사진 업로드 실패:', e));
+            }
+            if (prevPhotos.length > 0) {
+                uploadDefectPhotos(defectId, prevPhotos, 'prev').catch((e) => console.warn('전차 사진 업로드 실패:', e));
+            }
+        }
         return savedDefect;
     }
 
@@ -32307,10 +32446,19 @@ document.addEventListener('DOMContentLoaded', () => {
 
     window.reloadWebAppFromServer = function () {
         if (window._authSubmitInFlight || window._justRegistering) return;
-        try { sessionStorage.removeItem('bsa_web_sha'); } catch (_) { /* ignore */ }
-        const url = new URL(window.location.href);
-        url.searchParams.set('_r', String(Date.now()));
-        window.location.replace(url.toString());
+        const go = () => {
+            try { sessionStorage.removeItem('bsa_web_sha'); } catch (_) { /* ignore */ }
+            const url = new URL(window.location.href);
+            url.searchParams.set('_r', String(Date.now()));
+            window.location.replace(url.toString());
+        };
+        const flush = (typeof flushLocalPhotoPersistBeforeUnload === 'function')
+            ? flushLocalPhotoPersistBeforeUnload()
+            : Promise.resolve();
+        Promise.race([
+            flush,
+            new Promise((resolve) => window.setTimeout(resolve, 2500))
+        ]).then(go, go);
     };
 
     function isLoginOverlayOpen() {
@@ -32708,6 +32856,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!window._photoCache) window._photoCache = {};
         window._photoCache[key] = dataUrl;
         if (typeof saveStateToLocalStorage === 'function') saveStateToLocalStorage();
+        await persistPhotoUrlToIdb(key, dataUrl);
         uploadOverviewPhotos(bldg);
         renderOverviewPhotosList({ force: true });
         if (typeof window.showToast === 'function') window.showToast('전경사진을 추가했습니다. 아래에 설명을 입력하세요.', 'success');
