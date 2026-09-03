@@ -42,6 +42,11 @@ window.BSA.shared.bindHScrollVerticalPassthrough = function (selector) {
             }
 
             if (axis === 'v') {
+                var cs = window.getComputedStyle(el);
+                var oy = cs.overflowY;
+                if ((oy === 'auto' || oy === 'scroll') && el.scrollHeight > el.clientHeight + 1) {
+                    return;
+                }
                 e.preventDefault();
                 const scroller = document.querySelector('.app-content');
                 if (scroller) scroller.scrollTop -= (y - lastY);

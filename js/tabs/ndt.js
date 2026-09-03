@@ -14,7 +14,7 @@ window.BSA.tabs['tab-ndt'] = {
         '외벽 기울기 · 부동침하 · 부재변위',
         '모바일 하단 독: 마킹·크기 토글 시트',
         '측정 결과표 · NDT 엑셀 · 벡터 PDF',
-        '모바일: 결과표 횡스크롤 영역에서도 세로 페이지 스크롤'
+        '태블릿: 도면·결과표 split — 표는 45% 이내 내부 스크롤',
     ],
     ownerHint: 'app.js NDT FIELD SURVEY ENGINE',
     enter: function () {
