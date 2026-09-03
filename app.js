@@ -25400,7 +25400,12 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         elements.photoAlbumGrid.innerHTML = photoItems.map(p => `
-            <div class="photo-card survey-album-photo-card">
+            <div class="photo-card survey-album-photo-card" role="button" tabindex="0"
+                title="사진 크게 보기"
+                data-photo-src="${escapeSurveyAttr(p.src)}"
+                data-photo-title="${escapeSurveyAttr(p.label + '. ' + p.title)}"
+                onclick="window.openSurveyAlbumPhoto(this)"
+                onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();window.openSurveyAlbumPhoto(this);}">
                 <div class="photo-card-img-wrap survey-album-photo-wrap">
                     <img src="${p.src}" alt="${escapeSurveyAttr(p.label)}" loading="lazy">
                     <button type="button" class="survey-album-map-btn"
@@ -25417,6 +25422,33 @@ document.addEventListener('DOMContentLoaded', () => {
             </div>
         `).join('');
     }
+
+    window.openSurveyAlbumPhoto = function(el) {
+        if (!el) return;
+        const src = el.getAttribute('data-photo-src');
+        const title = el.getAttribute('data-photo-title') || '현장 결함 사진';
+        if (!src) return;
+        const box = document.getElementById('drawingPreviewLightbox');
+        if (!box) {
+            if (typeof window.openDrawingPreviewLightbox === 'function') {
+                window.openDrawingPreviewLightbox(src, title);
+            }
+            return;
+        }
+        const img = document.getElementById('drawingPreviewLightboxImg');
+        const empty = document.getElementById('drawingPreviewLightboxEmpty');
+        const titleEl = document.getElementById('drawingPreviewLightboxTitle');
+        if (titleEl) titleEl.textContent = title;
+        if (img) {
+            img.hidden = false;
+            img.src = src;
+        }
+        if (empty) empty.hidden = true;
+        box.hidden = false;
+        box.classList.add('open');
+        box.setAttribute('aria-hidden', 'false');
+        box.style.display = 'flex';
+    };
 
     // arrows: 그룹(마킹 추가로 묶인 결함들)을 한 박스+여러 화살표로 그릴 때 전달하는 {targetX,targetY}[]
     function drawPinSafe(ctx, defect, arrows) {
