@@ -3134,7 +3134,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
     /**
      * 결함 병합: 서버 순서 유지 → 로컬 전용(신규) 맨 뒤 → NO. 연속 재부여.
-     * 삭제보다 늦은 수정/사진이 있으면 tombstone을 무시하고 부활.
+     * 삭제보다 늦은 내용·사진 수정이 있으면 tombstone을 무시하고 부활.
+     * 마킹 위치만 옮긴 경우(positionUpdatedAt)는 부활하지 않음.
      */
     function mergeDefectsMaps(serverMap, localMap, serverDeleted, localDeleted, serverDeletedAt, localDeletedAt) {
         ensureSyncMetaState();
