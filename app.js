@@ -8099,8 +8099,8 @@ document.addEventListener('DOMContentLoaded', () => {
             leader = state.ndtLeaderLineScale;
         }
         return {
-            pin: (custom && custom.pin) || def.pin,
-            arrow: (custom && custom.arrow) || def.arrow,
+            pin: (custom && custom.pin != null) ? custom.pin : def.pin,
+            arrow: (custom && custom.arrow != null) ? custom.arrow : def.arrow,
             leader
         };
     }
@@ -19188,13 +19188,13 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // --- 카테고리별 핀/박스 색상 설정 모달 ---
+    // 결함 색상은 getDefectColor()가 쓰는 등급·상태 키와 맞춰야 도면에 바로 반영됨
     const STYLE_COLOR_FIELDS = [
-        ['styleColorDefectStructural', 'defectStructural'],
-        ['styleColorDefectNonStructural', 'defectNonStructural'],
-        ['styleColorDefectFinish', 'defectFinish'],
-        ['styleColorDefectStructuralGood', 'defectStructuralGood'],
-        ['styleColorDefectNonStructuralGood', 'defectNonStructuralGood'],
-        ['styleColorDefectFinishGood', 'defectFinishGood'],
+        ['styleColorDefectBad', 'defectBad'],
+        ['styleColorDefectGood', 'defectGood'],
+        ['styleColorDefectNewGrade3', 'defectNewGrade3'],
+        ['styleColorDefectExistingGrade3', 'defectExistingGrade3'],
+        ['styleColorDefectGoodGrade3', 'defectGoodGrade3'],
         ['styleColorPriorityManage', 'priorityManage'],
         ['styleColorNdtMeasure', 'ndtMeasure'],
         ['styleColorNdtStrength', 'ndtStrength'],
@@ -19227,6 +19227,59 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // [ID 접미사, styleShapes 키] — styleShape{suffix}/styleFill{suffix}/styleNumFmt{suffix} 컨트롤에 사용
     const STYLE_SHAPE_FIELDS = STYLE_SIZE_FIELDS;
+
+    let _styleModalDraftActive = false;
+    let _styleModalSnapshot = null;
+
+    function cloneStyleModalState() {
+        return {
+            styleColors: JSON.parse(JSON.stringify(state.styleColors || {})),
+            styleSizes: cloneStyleSizesMap(state.styleSizes) || {},
+            styleShapes: JSON.parse(JSON.stringify(state.styleShapes || {})),
+            defectLeaderLineScale: state.defectLeaderLineScale !== undefined ? state.defectLeaderLineScale : 1.0,
+            ndtLeaderLineScale: state.ndtLeaderLineScale !== undefined ? state.ndtLeaderLineScale : 1.0
+        };
+    }
+
+    function restoreStyleModalSnapshot(snap) {
+        if (!snap) return;
+        state.styleColors = JSON.parse(JSON.stringify(snap.styleColors || {}));
+        state.styleSizes = cloneStyleSizesMap(snap.styleSizes) || {};
+        state.styleShapes = JSON.parse(JSON.stringify(snap.styleShapes || {}));
+        state.defectLeaderLineScale = snap.defectLeaderLineScale !== undefined ? snap.defectLeaderLineScale : 1.0;
+        state.ndtLeaderLineScale = snap.ndtLeaderLineScale !== undefined ? snap.ndtLeaderLineScale : 1.0;
+    }
+
+    function populateStyleColorModalControls() {
+        STYLE_COLOR_FIELDS.forEach(([inputId, key]) => {
+            const input = document.getElementById(inputId);
+            if (input) input.value = getStyleColor(key);
+        });
+        STYLE_SIZE_FIELDS.forEach(([suffix, key]) => {
+            const sz = getStyleSize(key);
+            const pinInput = document.getElementById(`stylePinSize${suffix}`);
+            const pinLabel = document.getElementById(`stylePinSize${suffix}Label`);
+            const arrowInput = document.getElementById(`styleArrowSize${suffix}`);
+            const arrowLabel = document.getElementById(`styleArrowSize${suffix}Label`);
+            const leaderInput = document.getElementById(`styleLeaderSize${suffix}`);
+            const leaderLabel = document.getElementById(`styleLeaderSize${suffix}Label`);
+            if (pinInput) pinInput.value = sz.pin;
+            if (pinLabel) pinLabel.textContent = `${Math.round(sz.pin * 100)}%`;
+            if (arrowInput) arrowInput.value = sz.arrow;
+            if (arrowLabel) arrowLabel.textContent = `${Math.round(sz.arrow * 100)}%`;
+            if (leaderInput) leaderInput.value = sz.leader;
+            if (leaderLabel) leaderLabel.textContent = `${Math.round(sz.leader * 100)}%`;
+        });
+        STYLE_SHAPE_FIELDS.forEach(([suffix, key]) => {
+            const sh = getStyleShape(key);
+            const shapeInput = document.getElementById(`styleShape${suffix}`);
+            const fillInput = document.getElementById(`styleFill${suffix}`);
+            const numFmtInput = document.getElementById(`styleNumFmt${suffix}`);
+            if (shapeInput) shapeInput.value = sh.shape;
+            if (fillInput) fillInput.checked = sh.fill;
+            if (numFmtInput) numFmtInput.value = sh.numberFormat;
+        });
+    }
 
     function refreshAllStyleColoredCanvases() {
         if (typeof drawCanvas === 'function') drawCanvas();
@@ -19409,35 +19462,21 @@ document.addEventListener('DOMContentLoaded', () => {
         saveFloorMapStyleSettings(state.currentFloor, state.currentBuildingId);
     }
 
+    function commitStyleModalChanges() {
+        persistCurrentFloorMapStyleFromSliders();
+        state._globalStyleSizesFallback = cloneStyleSizesMap(state.styleSizes);
+        state._globalDefectLeaderLineScaleFallback = state.defectLeaderLineScale !== undefined
+            ? state.defectLeaderLineScale
+            : 1.0;
+        if (typeof window.syncBulkStyleSlidersUi === 'function') window.syncBulkStyleSlidersUi();
+        saveStateToLocalStorage();
+        if (typeof window.showToast === 'function') window.showToast('스타일 설정을 저장했습니다.', 'success');
+    }
+
     window.openStyleColorModal = function() {
-        STYLE_COLOR_FIELDS.forEach(([inputId, key]) => {
-            const input = document.getElementById(inputId);
-            if (input) input.value = getStyleColor(key);
-        });
-        STYLE_SIZE_FIELDS.forEach(([suffix, key]) => {
-            const sz = getStyleSize(key);
-            const pinInput = document.getElementById(`stylePinSize${suffix}`);
-            const pinLabel = document.getElementById(`stylePinSize${suffix}Label`);
-            const arrowInput = document.getElementById(`styleArrowSize${suffix}`);
-            const arrowLabel = document.getElementById(`styleArrowSize${suffix}Label`);
-            const leaderInput = document.getElementById(`styleLeaderSize${suffix}`);
-            const leaderLabel = document.getElementById(`styleLeaderSize${suffix}Label`);
-            if (pinInput) pinInput.value = sz.pin;
-            if (pinLabel) pinLabel.textContent = `${Math.round(sz.pin * 100)}%`;
-            if (arrowInput) arrowInput.value = sz.arrow;
-            if (arrowLabel) arrowLabel.textContent = `${Math.round(sz.arrow * 100)}%`;
-            if (leaderInput) leaderInput.value = sz.leader;
-            if (leaderLabel) leaderLabel.textContent = `${Math.round(sz.leader * 100)}%`;
-        });
-        STYLE_SHAPE_FIELDS.forEach(([suffix, key]) => {
-            const sh = getStyleShape(key);
-            const shapeInput = document.getElementById(`styleShape${suffix}`);
-            const fillInput = document.getElementById(`styleFill${suffix}`);
-            const numFmtInput = document.getElementById(`styleNumFmt${suffix}`);
-            if (shapeInput) shapeInput.value = sh.shape;
-            if (fillInput) fillInput.checked = sh.fill;
-            if (numFmtInput) numFmtInput.value = sh.numberFormat;
-        });
+        _styleModalSnapshot = cloneStyleModalState();
+        _styleModalDraftActive = true;
+        populateStyleColorModalControls();
         const modal = document.getElementById('styleColorModal');
         if (modal) {
             modal.style.display = 'flex';
@@ -19445,12 +19484,29 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     };
 
-    function closeStyleColorModal() {
+    function hideStyleColorModal() {
         const modal = document.getElementById('styleColorModal');
         if (modal) {
             modal.style.display = 'none';
             modal.classList.remove('open');
         }
+        _styleModalDraftActive = false;
+        _styleModalSnapshot = null;
+    }
+
+    function closeStyleColorModal() {
+        // 닫기: 수정사항 저장 없이 스냅샷 복원
+        if (_styleModalSnapshot) {
+            restoreStyleModalSnapshot(_styleModalSnapshot);
+            if (typeof window.syncBulkStyleSlidersUi === 'function') window.syncBulkStyleSlidersUi();
+            refreshAllStyleColoredCanvases();
+        }
+        hideStyleColorModal();
+    }
+
+    function saveStyleColorModal() {
+        commitStyleModalChanges();
+        hideStyleColorModal();
     }
 
     function setupStyleColorModalEvents() {
@@ -19463,6 +19519,15 @@ document.addEventListener('DOMContentLoaded', () => {
         if (btnClose1) btnClose1.addEventListener('click', closeStyleColorModal);
         const btnClose2 = document.getElementById('btnCloseStyleColorModal2');
         if (btnClose2) btnClose2.addEventListener('click', closeStyleColorModal);
+        const btnSave = document.getElementById('btnSaveStyleColorModal');
+        if (btnSave) btnSave.addEventListener('click', saveStyleColorModal);
+        const styleModalEl = document.getElementById('styleColorModal');
+        if (styleModalEl && !styleModalEl.dataset.overlayBound) {
+            styleModalEl.dataset.overlayBound = '1';
+            styleModalEl.addEventListener('click', (e) => {
+                if (e.target === styleModalEl) closeStyleColorModal();
+            });
+        }
 
         STYLE_COLOR_FIELDS.forEach(([inputId, key]) => {
             const input = document.getElementById(inputId);
@@ -19471,9 +19536,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (!state.styleColors) state.styleColors = {};
                 state.styleColors[key] = input.value;
                 refreshAllStyleColoredCanvases();
-            });
-            input.addEventListener('change', () => {
-                saveStateToLocalStorage();
             });
         });
 
@@ -19494,7 +19556,6 @@ document.addEventListener('DOMContentLoaded', () => {
                     if (typeof window.syncBulkStyleSlidersUi === 'function') window.syncBulkStyleSlidersUi();
                     refreshAllStyleColoredCanvases();
                 });
-                pinInput.addEventListener('change', () => saveStateToLocalStorage());
             }
             if (arrowInput) {
                 arrowInput.addEventListener('input', () => {
@@ -19505,7 +19566,6 @@ document.addEventListener('DOMContentLoaded', () => {
                     if (typeof window.syncBulkStyleSlidersUi === 'function') window.syncBulkStyleSlidersUi();
                     refreshAllStyleColoredCanvases();
                 });
-                arrowInput.addEventListener('change', () => saveStateToLocalStorage());
             }
             if (leaderInput) {
                 leaderInput.addEventListener('input', () => {
@@ -19516,7 +19576,6 @@ document.addEventListener('DOMContentLoaded', () => {
                     if (typeof window.syncBulkStyleSlidersUi === 'function') window.syncBulkStyleSlidersUi();
                     refreshAllStyleColoredCanvases();
                 });
-                leaderInput.addEventListener('change', () => saveStateToLocalStorage());
             }
         });
 
@@ -19536,6 +19595,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     if (pinInput) pinInput.value = v;
                     if (pinLabel) pinLabel.textContent = `${Math.round(v * 100)}%`;
                 });
+                persistCurrentFloorMapStyleFromSliders();
                 if (typeof drawCanvas === 'function') drawCanvas();
                 if (typeof renderDefectListPanel === 'function') renderDefectListPanel();
             });
@@ -19559,6 +19619,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     if (arrowInput) arrowInput.value = v;
                     if (arrowLabel) arrowLabel.textContent = `${Math.round(v * 100)}%`;
                 });
+                persistCurrentFloorMapStyleFromSliders();
                 if (typeof drawCanvas === 'function') drawCanvas();
             });
             arrowAllInput.addEventListener('change', () => {
@@ -19586,6 +19647,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 const v = clampLeaderLineScale(leaderLineAllInput.value || '1');
                 state.defectLeaderLineScale = v;
                 if (leaderLineAllLabel) leaderLineAllLabel.textContent = `${Math.round(v * 100)}%`;
+                persistCurrentFloorMapStyleFromSliders();
                 if (typeof drawCanvas === 'function') drawCanvas();
             });
             leaderLineAllInput.addEventListener('change', () => {
@@ -19691,7 +19753,6 @@ document.addEventListener('DOMContentLoaded', () => {
                     if (!state.styleShapes[key]) state.styleShapes[key] = {};
                     state.styleShapes[key].shape = shapeInput.value;
                     refreshAllStyleColoredCanvases();
-                    saveStateToLocalStorage();
                 });
             }
             if (fillInput) {
@@ -19700,7 +19761,6 @@ document.addEventListener('DOMContentLoaded', () => {
                     if (!state.styleShapes[key]) state.styleShapes[key] = {};
                     state.styleShapes[key].fill = fillInput.checked;
                     refreshAllStyleColoredCanvases();
-                    saveStateToLocalStorage();
                 });
             }
             if (numFmtInput) {
@@ -19709,7 +19769,6 @@ document.addEventListener('DOMContentLoaded', () => {
                     if (!state.styleShapes[key]) state.styleShapes[key] = {};
                     state.styleShapes[key].numberFormat = numFmtInput.value;
                     refreshAllStyleColoredCanvases();
-                    saveStateToLocalStorage();
                 });
             }
         });
@@ -19717,42 +19776,15 @@ document.addEventListener('DOMContentLoaded', () => {
         const btnReset = document.getElementById('btnResetStyleColors');
         if (btnReset) {
             btnReset.addEventListener('click', () => {
-                if (!confirm('모든 색상/크기/모양 설정을 기본값으로 초기화하시겠습니까?')) return;
+                if (!confirm('모든 색상/크기/모양 설정을 기본값으로 초기화하시겠습니까?\n(저장을 눌러야 반영됩니다)')) return;
                 state.styleColors = {};
                 state.styleSizes = {};
                 state.styleShapes = {};
                 state.ndtLeaderLineScale = 1.0;
-                STYLE_COLOR_FIELDS.forEach(([inputId, key]) => {
-                    const input = document.getElementById(inputId);
-                    if (input) input.value = DEFAULT_STYLE_COLORS[key];
-                });
-                STYLE_SIZE_FIELDS.forEach(([suffix, key]) => {
-                    const def = DEFAULT_STYLE_SIZES[key];
-                    const pinInput = document.getElementById(`stylePinSize${suffix}`);
-                    const pinLabel = document.getElementById(`stylePinSize${suffix}Label`);
-                    const arrowInput = document.getElementById(`styleArrowSize${suffix}`);
-                    const arrowLabel = document.getElementById(`styleArrowSize${suffix}Label`);
-                    const leaderInput = document.getElementById(`styleLeaderSize${suffix}`);
-                    const leaderLabel = document.getElementById(`styleLeaderSize${suffix}Label`);
-                    if (pinInput) pinInput.value = def.pin;
-                    if (pinLabel) pinLabel.textContent = `${Math.round(def.pin * 100)}%`;
-                    if (arrowInput) arrowInput.value = def.arrow;
-                    if (arrowLabel) arrowLabel.textContent = `${Math.round(def.arrow * 100)}%`;
-                    if (leaderInput) leaderInput.value = def.leader;
-                    if (leaderLabel) leaderLabel.textContent = `${Math.round(def.leader * 100)}%`;
-                });
-                STYLE_SHAPE_FIELDS.forEach(([suffix, key]) => {
-                    const def = DEFAULT_STYLE_SHAPES[key];
-                    const shapeInput = document.getElementById(`styleShape${suffix}`);
-                    const fillInput = document.getElementById(`styleFill${suffix}`);
-                    const numFmtInput = document.getElementById(`styleNumFmt${suffix}`);
-                    if (shapeInput) shapeInput.value = def.shape;
-                    if (fillInput) fillInput.checked = def.fill;
-                    if (numFmtInput) numFmtInput.value = def.numberFormat;
-                });
+                state.defectLeaderLineScale = 1.0;
+                populateStyleColorModalControls();
                 if (typeof window.syncBulkStyleSlidersUi === 'function') window.syncBulkStyleSlidersUi();
                 refreshAllStyleColoredCanvases();
-                saveStateToLocalStorage();
             });
         }
     }

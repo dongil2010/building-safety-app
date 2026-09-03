@@ -39,7 +39,7 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <meta name="apple-mobile-web-app-title" content="스마트 안전점검">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css">
-    <link rel="stylesheet" href="styles.css?v=20260903_ndt_bottom_full">
+    <link rel="stylesheet" href="styles.css?v=20260903_style_save">
     <!-- FontAwesome icons for clean engineering UI -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <!-- PDF 생성용: 페이지별로 직접 캡처해서 조립(큰 보고서에서 html2pdf 한방 렌더링이 캔버스 높이 한계로
@@ -1058,11 +1058,39 @@
                 <button type="button" class="modal-close" id="btnCloseStyleColorModal">&times;</button>
             </div>
             <div class="modal-body" style="max-height: 70vh; overflow-y: auto;">
-                <div class="style-color-section-title">결함 위치도</div>
+                <p style="font-size:0.78rem; color:#737373; margin:0 0 0.65rem; line-height:1.45;">변경 내용은 도면에 바로 미리보기됩니다. <b>저장</b>을 눌러야 반영되고, <b>닫기</b>는 저장하지 않고 원래 설정으로 되돌립니다.</p>
+                <div class="style-color-section-title">결함 위치도 — 색상</div>
                 <div class="style-cat-card">
                     <div class="style-color-row">
-                        <span>🔴 구조체</span>
-                        <input type="color" id="styleColorDefectStructural">
+                        <span>🔴 결함발생 (1·2종)</span>
+                        <input type="color" id="styleColorDefectBad">
+                    </div>
+                    <div class="style-color-row">
+                        <span>🔵 상태양호 (1·2종)</span>
+                        <input type="color" id="styleColorDefectGood">
+                    </div>
+                    <div class="style-color-row">
+                        <span>🔵 신규결함 (3종)</span>
+                        <input type="color" id="styleColorDefectNewGrade3">
+                    </div>
+                    <div class="style-color-row">
+                        <span>🔴 기존결함 (3종)</span>
+                        <input type="color" id="styleColorDefectExistingGrade3">
+                    </div>
+                    <div class="style-color-row">
+                        <span>⚫ 상태양호 (3종)</span>
+                        <input type="color" id="styleColorDefectGoodGrade3">
+                    </div>
+                    <div class="style-color-row">
+                        <span>🟢 중점관리</span>
+                        <input type="color" id="styleColorPriorityManage">
+                    </div>
+                </div>
+
+                <div class="style-color-section-title">결함 위치도 — 크기·모양</div>
+                <div class="style-cat-card">
+                    <div class="style-color-row" style="margin-bottom:0.25rem;">
+                        <span>구조체</span>
                     </div>
                     <div class="style-size-row">
                         <label>핀 <input type="range" id="stylePinSizeDefectStructural" min="0.5" max="4.4" step="0.1" value="1.0"> <span id="stylePinSizeDefectStructuralLabel">100%</span></label>
@@ -1075,9 +1103,8 @@
                     </div>
                 </div>
                 <div class="style-cat-card">
-                    <div class="style-color-row">
-                        <span>🔵 비구조체</span>
-                        <input type="color" id="styleColorDefectNonStructural">
+                    <div class="style-color-row" style="margin-bottom:0.25rem;">
+                        <span>비구조체</span>
                     </div>
                     <div class="style-size-row">
                         <label>핀 <input type="range" id="stylePinSizeDefectNonStructural" min="0.5" max="4.4" step="0.1" value="1.0"> <span id="stylePinSizeDefectNonStructuralLabel">100%</span></label>
@@ -1090,9 +1117,8 @@
                     </div>
                 </div>
                 <div class="style-cat-card">
-                    <div class="style-color-row">
-                        <span>🟠 마감재</span>
-                        <input type="color" id="styleColorDefectFinish">
+                    <div class="style-color-row" style="margin-bottom:0.25rem;">
+                        <span>마감재</span>
                     </div>
                     <div class="style-size-row">
                         <label>핀 <input type="range" id="stylePinSizeDefectFinish" min="0.5" max="4.4" step="0.1" value="1.0"> <span id="stylePinSizeDefectFinishLabel">100%</span></label>
@@ -1105,9 +1131,8 @@
                     </div>
                 </div>
                 <div class="style-cat-card">
-                    <div class="style-color-row">
-                        <span>🟢 구조체 상태양호</span>
-                        <input type="color" id="styleColorDefectStructuralGood">
+                    <div class="style-color-row" style="margin-bottom:0.25rem;">
+                        <span>구조체 상태양호</span>
                     </div>
                     <div class="style-size-row">
                         <label>핀 <input type="range" id="stylePinSizeDefectStructuralGood" min="0.5" max="4.4" step="0.1" value="1.0"> <span id="stylePinSizeDefectStructuralGoodLabel">100%</span></label>
@@ -1120,9 +1145,8 @@
                     </div>
                 </div>
                 <div class="style-cat-card">
-                    <div class="style-color-row">
-                        <span>🟢 비구조체 상태양호</span>
-                        <input type="color" id="styleColorDefectNonStructuralGood">
+                    <div class="style-color-row" style="margin-bottom:0.25rem;">
+                        <span>비구조체 상태양호</span>
                     </div>
                     <div class="style-size-row">
                         <label>핀 <input type="range" id="stylePinSizeDefectNonStructuralGood" min="0.5" max="4.4" step="0.1" value="1.0"> <span id="stylePinSizeDefectNonStructuralGoodLabel">100%</span></label>
@@ -1135,9 +1159,8 @@
                     </div>
                 </div>
                 <div class="style-cat-card">
-                    <div class="style-color-row">
-                        <span>🟢 마감재 상태양호</span>
-                        <input type="color" id="styleColorDefectFinishGood">
+                    <div class="style-color-row" style="margin-bottom:0.25rem;">
+                        <span>마감재 상태양호</span>
                     </div>
                     <div class="style-size-row">
                         <label>핀 <input type="range" id="stylePinSizeDefectFinishGood" min="0.5" max="4.4" step="0.1" value="1.0"> <span id="stylePinSizeDefectFinishGoodLabel">100%</span></label>
@@ -1147,12 +1170,6 @@
                         <select id="styleShapeDefectFinishGood"><option value="rect">직사각형</option><option value="rounded">둥근 사각형</option><option value="circle">원형</option></select>
                         <label class="style-fill-check"><input type="checkbox" id="styleFillDefectFinishGood"> 채우기</label>
                         <select id="styleNumFmtDefectFinishGood"><option value="no">NO.01</option><option value="plain">01</option></select>
-                    </div>
-                </div>
-                <div class="style-cat-card">
-                    <div class="style-color-row">
-                        <span>🟢 중점관리 배지</span>
-                        <input type="color" id="styleColorPriorityManage">
                     </div>
                 </div>
 
@@ -1270,9 +1287,12 @@
                     </div>
                 </div>
             </div>
-            <div class="modal-footer" style="justify-content: space-between;">
-                <button type="button" id="btnResetStyleColors" class="btn btn-outline"><i class="fa-solid fa-rotate-left"></i> 기본값으로 초기화</button>
-                <button type="button" id="btnCloseStyleColorModal2" class="btn btn-primary">닫기</button>
+            <div class="modal-footer" style="justify-content: space-between; gap:0.5rem; flex-wrap:wrap;">
+                <button type="button" id="btnResetStyleColors" class="btn btn-outline"><i class="fa-solid fa-rotate-left"></i> 기본값</button>
+                <div style="display:flex; gap:0.45rem; margin-left:auto;">
+                    <button type="button" id="btnCloseStyleColorModal2" class="btn btn-outline">닫기</button>
+                    <button type="button" id="btnSaveStyleColorModal" class="btn btn-primary"><i class="fa-solid fa-check"></i> 저장</button>
+                </div>
             </div>
         </div>
     </div>
@@ -2834,7 +2854,7 @@
     <script src="js/shared/report.js?v=20260827_overview"></script>
     <script src="js/shared/hwpx-import.js?v=20260825_hwpxin"></script>
     <script src="js/shared/auth.js?v=20260821_land1"></script>
-    <script src="app.js?v=20260903_ndt_bottom_full"></script>
+    <script src="app.js?v=20260903_style_save"></script>
     <script>
         window.BSA_APP_VERSION = '20260902_legend_lock';
         (function () {
