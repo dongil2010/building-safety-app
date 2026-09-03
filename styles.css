@@ -427,6 +427,158 @@ body {
     box-shadow: var(--shadow-md);
 }
 
+/* NDT 상단 — 제목·도면·항목·도구(PC)를 한 줄 가로 스크롤 */
+#tab-ndt .ndt-top-bar {
+    display: flex;
+    flex-direction: row;
+    flex-wrap: nowrap;
+    align-items: center;
+    gap: 0.45rem;
+    margin-bottom: 0.4rem;
+    padding: 0.3rem 0.45rem;
+    background: #ffffff;
+    border: 1.5px solid var(--border-highlight);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-md);
+    overflow-x: auto;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-x: contain;
+    flex-shrink: 0;
+}
+
+#tab-ndt .ndt-top-bar > .section-header,
+#tab-ndt .ndt-top-bar > .map-controls-toolbar,
+#tab-ndt .ndt-top-bar > .canvas-top-toolbar {
+    flex: 0 0 auto;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: none !important;
+    box-shadow: none !important;
+    background: transparent !important;
+    flex-wrap: nowrap;
+}
+
+#tab-ndt .ndt-top-bar .section-header {
+    display: flex;
+    flex-direction: row !important;
+    flex-wrap: nowrap !important;
+    justify-content: flex-start !important;
+    align-items: center;
+    gap: 0.35rem;
+    margin-bottom: 0 !important;
+}
+
+#tab-ndt .ndt-top-bar .map-controls-toolbar,
+#tab-ndt .ndt-top-bar .ndt-top-cats {
+    display: flex;
+    align-items: center;
+    flex-wrap: nowrap;
+}
+
+#tab-ndt .ndt-top-bar .ndt-top-title {
+    font-size: 0.82rem;
+    font-weight: 800;
+    white-space: nowrap;
+    margin: 0;
+    line-height: 1.2;
+}
+
+#tab-ndt .ndt-top-bar .ndt-drawing-actions {
+    display: flex;
+    flex-wrap: nowrap;
+    align-items: center;
+    gap: 0.28rem;
+}
+
+#tab-ndt .ndt-top-bar .ndt-top-draw-btn {
+    font-size: 0.68rem !important;
+    padding: 0.24rem 0.42rem !important;
+    white-space: nowrap;
+    flex-shrink: 0;
+    cursor: pointer;
+}
+
+#tab-ndt .ndt-top-bar label.ndt-top-draw-btn.btn-primary {
+    background: linear-gradient(135deg, #2a2a2a, #1f1f1f);
+    border-color: #171717;
+    color: #fff;
+}
+
+#tab-ndt .ndt-top-bar .ndt-top-draw-btn.btn-outline {
+    border-color: #171717;
+    color: #171717;
+}
+
+#tab-ndt .ndt-top-bar .filter-group {
+    flex-wrap: nowrap !important;
+    gap: 0.28rem;
+    width: auto !important;
+}
+
+#tab-ndt .ndt-top-bar .ndt-top-cats-label {
+    font-weight: 800;
+    color: #171717;
+    font-size: 0.72rem;
+    white-space: nowrap;
+}
+
+#tab-ndt .ndt-top-bar .chip {
+    font-size: 0.66rem;
+    padding: 0.2rem 0.38rem;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+#tab-ndt .ndt-top-bar .canvas-top-toolbar {
+    display: flex !important;
+    justify-content: flex-start;
+    align-items: center;
+    gap: 0.35rem;
+    margin-bottom: 0 !important;
+}
+
+#tab-ndt .ndt-top-bar .toolbar-mode-group,
+#tab-ndt .ndt-top-bar .toolbar-action-group {
+    flex-wrap: nowrap;
+    gap: 0.28rem;
+}
+
+#tab-ndt .ndt-top-bar .mode-btn {
+    font-size: 0.68rem;
+    padding: 0.22rem 0.38rem;
+    white-space: nowrap;
+}
+
+#tab-ndt .ndt-top-bar .btn-rotate-hero {
+    font-size: 0.66rem;
+    padding: 0.22rem 0.42rem;
+}
+
+#tab-ndt .ndt-top-bar .zoom-pill-group {
+    flex-shrink: 0;
+    padding: 0.12rem;
+}
+
+#tab-ndt .ndt-top-bar .zoom-pill-btn {
+    padding: 0.14rem 0.32rem;
+    font-size: 0.7rem;
+}
+
+#tab-ndt .ndt-top-bar .zoom-pill-badge {
+    font-size: 0.66rem;
+    padding: 0 0.22rem;
+}
+
+/* 태블릿·모바일: 도구는 사이드 레일·하단 독 — 상단바에선 숨김 */
+html:not(.layout-desktop) #tab-ndt .ndt-top-bar .ndt-top-canvas-tools {
+    display: none !important;
+}
+
+html.layout-desktop #tab-ndt .ndt-top-bar .ndt-top-canvas-tools {
+    display: flex !important;
+}
+
 .map-style-toolbar {
     background: #ffffff !important;
     border: 1.5px solid var(--border-highlight) !important;
@@ -579,24 +731,7 @@ body {
         padding: 0 0.28rem;
     }
 
-    #tab-ndt .map-controls-toolbar {
-        padding: 0.3rem 0.55rem !important;
-        margin-bottom: 0.4rem !important;
-    }
-
-    #tab-ndt .map-controls-toolbar .chip {
-        padding: 0.22rem 0.45rem;
-        font-size: 0.74rem;
-    }
-
-    #tab-ndt .section-header h2 {
-        font-size: 1rem;
-    }
-
-    #tab-ndt .section-header .btn {
-        padding: 0.28rem 0.55rem;
-        font-size: 0.76rem;
-    }
+    /* NDT 상단은 .ndt-top-bar 한 줄 — 개별 툴바 여백 규칙 사용 안 함 */
 }
 
 .map-style-toolbar label {
@@ -2202,15 +2337,29 @@ body {
     }
 
     /* NDT 가로: 도면은 고정 높이, 아래로 스크롤하면 측정 결과표 */
-    #tab-ndt .map-controls-toolbar {
-        margin-bottom: 0.35rem !important;
-        padding: 0.35rem 0.5rem !important;
-        overflow-x: auto;
-        flex-shrink: 0;
+    #tab-ndt .ndt-top-bar {
+        margin-bottom: 0.3rem !important;
+        padding: 0.28rem 0.38rem !important;
+        gap: 0.35rem;
     }
 
-    #tab-ndt .canvas-top-toolbar {
-        display: none !important;
+    #tab-ndt .ndt-top-bar .ndt-top-title {
+        font-size: 0.76rem;
+    }
+
+    #tab-ndt .ndt-top-bar .ndt-top-draw-btn {
+        font-size: 0.62rem !important;
+        padding: 0.2rem 0.35rem !important;
+    }
+
+    #tab-ndt .ndt-top-bar .chip {
+        font-size: 0.62rem;
+        padding: 0.18rem 0.32rem;
+    }
+
+    #tab-ndt .map-controls-toolbar {
+        margin-bottom: 0 !important;
+        padding: 0 !important;
     }
 
     #tab-ndt #ndtStyleSizeToolbar {
@@ -8446,7 +8595,7 @@ body:not(.bsa-tab-home) .home-fab-add-building {
     }
 
     /* 도면 밖(툴바·표·독)은 스크롤 잠금 없음 — 세로 스크롤 자유 */
-    body.bsa-tab-ndt #tab-ndt .map-controls-toolbar,
+    body.bsa-tab-ndt #tab-ndt .ndt-top-bar,
     body.bsa-tab-ndt #tab-ndt .ndt-results-section,
     body.bsa-tab-ndt #tab-ndt .mobile-canvas-dock,
     body.bsa-tab-ndt #tab-ndt .section-header,
@@ -9482,39 +9631,45 @@ body:not(.bsa-tab-home) .home-fab-add-building {
     }
 
     /* --- 비파괴 --- */
-    #tab-ndt .section-header {
-        flex-direction: column;
-        align-items: stretch;
-        gap: 0.35rem;
-        margin-bottom: 0.45rem;
-    }
-    #tab-ndt .section-header h2 {
-        font-size: 0.92rem;
-        margin: 0;
-        line-height: 1.3;
-    }
-    #tab-ndt .ndt-drawing-actions {
-        gap: 0.3rem !important;
-    }
-    #tab-ndt .ndt-drawing-actions .btn,
-    #tab-ndt .ndt-drawing-actions label.btn {
-        font-size: 0.7rem !important;
-        padding: 0.32rem 0.5rem !important;
-        flex: 1 1 auto;
-        justify-content: center;
+    #tab-ndt .ndt-top-bar {
+        margin-bottom: 0.35rem;
     }
 
-    #tab-ndt .map-controls-toolbar {
-        padding: 0.4rem 0.5rem !important;
-        margin-bottom: 0.45rem !important;
+    #tab-ndt .ndt-top-bar .section-header {
+        flex-direction: row !important;
+        align-items: center;
+        gap: 0.3rem;
+        margin-bottom: 0 !important;
     }
-    #tab-ndt .map-controls-toolbar .filter-group {
-        flex-wrap: wrap;
-        gap: 0.28rem;
+
+    #tab-ndt .ndt-top-bar .ndt-top-title {
+        font-size: 0.78rem;
+        margin: 0;
+        line-height: 1.2;
     }
-    #tab-ndt .map-controls-toolbar .chip {
-        font-size: 0.68rem;
-        padding: 0.28rem 0.42rem;
+
+    #tab-ndt .ndt-top-bar .ndt-drawing-actions {
+        gap: 0.25rem !important;
+    }
+
+    #tab-ndt .ndt-top-bar .ndt-top-draw-btn {
+        font-size: 0.62rem !important;
+        padding: 0.22rem 0.38rem !important;
+    }
+
+    #tab-ndt .ndt-top-bar .map-controls-toolbar {
+        padding: 0 !important;
+        margin-bottom: 0 !important;
+    }
+
+    #tab-ndt .ndt-top-bar .filter-group {
+        flex-wrap: nowrap !important;
+        gap: 0.22rem;
+    }
+
+    #tab-ndt .ndt-top-bar .chip {
+        font-size: 0.62rem;
+        padding: 0.18rem 0.32rem;
         white-space: nowrap;
     }
 
@@ -9665,9 +9820,13 @@ html.layout-desktop .mobile-ndt-fab {
 }
 
 html.layout-desktop #tab-map .canvas-top-toolbar,
-html.layout-desktop #tab-ndt .canvas-top-toolbar,
 html.layout-desktop #tab-map .canvas-bottom-toolbar {
     display: flex !important;
+}
+
+/* NDT 도구줄은 ndt-top-bar 안에서만 표시 (layout-desktop) */
+html.layout-desktop #tab-ndt .canvas-top-toolbar:not(.ndt-top-canvas-tools) {
+    display: none !important;
 }
 
 html.layout-desktop #mapStyleSizeToolbar.is-pc-size-panel-open,
@@ -10539,7 +10698,6 @@ html.layout-tablet #tab-map .inspect-canvas-col {
 }
 
 html.layout-tablet #tab-map .canvas-top-toolbar,
-html.layout-tablet #tab-ndt .canvas-top-toolbar,
 html.layout-tablet #tab-map .canvas-bottom-toolbar,
 html.layout-tablet #tab-map .area-tool-panel {
     display: none !important;

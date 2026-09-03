@@ -39,7 +39,7 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <meta name="apple-mobile-web-app-title" content="스마트 안전점검">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css">
-    <link rel="stylesheet" href="styles.css?v=20260903_175336">
+    <link rel="stylesheet" href="styles.css?v=20260903_224552">
     <!-- FontAwesome icons for clean engineering UI -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <!-- PDF 생성용: 페이지별로 직접 캡처해서 조립(큰 보고서에서 html2pdf 한방 렌더링이 캔버스 높이 한계로
@@ -562,23 +562,24 @@
 
         <!-- TAB 3: 🔬 비파괴 장비 조사 (NDT Field Inspection & Measurement) -->
         <section id="tab-ndt" class="tab-content">
-            <div class="section-header" style="flex-wrap: wrap; gap: 0.8rem;">
-                <h2>🔬 <span id="ndtFloorTitle">지상 1층 (1F)</span> 비파괴 장비 조사 현장점검</h2>
-                <div class="ndt-drawing-actions" style="display: flex; gap: 0.6rem; flex-wrap: wrap; align-items: center;">
-                    <label class="btn btn-primary" style="background: linear-gradient(135deg, #2a2a2a, #1f1f1f); font-size: 0.85rem; padding: 0.4rem 0.8rem; cursor: pointer;">
+            <div class="ndt-top-bar">
+            <div class="section-header">
+                <h2 class="ndt-top-title">🔬 <span id="ndtFloorTitle">지상 1층 (1F)</span> 비파괴 장비 조사 현장점검</h2>
+                <div class="ndt-drawing-actions">
+                    <label class="btn btn-primary ndt-top-draw-btn">
                         <i class="fa-solid fa-file-image"></i> 🖼️ NDT 전용 도면 불러오기
                         <input type="file" id="inputNdtDrawing" accept="image/*" style="display: none;">
                     </label>
-                    <button type="button" id="btnNdtSyncFloorDrawing" class="btn btn-outline" style="border-color: #171717; color: #171717; font-size: 0.85rem; padding: 0.4rem 0.8rem;">
+                    <button type="button" id="btnNdtSyncFloorDrawing" class="btn btn-outline ndt-top-draw-btn">
                         <i class="fa-solid fa-rotate"></i> 🔄 층별 원본 도면 연동
                     </button>
                 </div>
             </div>
 
             <!-- NDT Category Filter Chips Toolbar -->
-            <div class="map-controls-toolbar" style="margin-bottom: 0.8rem; background: var(--bg-secondary); padding: 0.6rem 0.9rem; border-radius: var(--radius-md); border: 1px solid var(--border-color);">
-                <div class="filter-group" style="width: 100%;">
-                    <span class="filter-label" style="font-weight: 800; color: #171717;"><i class="fa-solid fa-vial"></i> 비파괴 조사 항목:</span>
+            <div class="map-controls-toolbar ndt-top-cats">
+                <div class="filter-group">
+                    <span class="filter-label ndt-top-cats-label"><i class="fa-solid fa-vial"></i> 비파괴 조사 항목:</span>
                     <button type="button" id="btnNdtCatDim" class="chip active" onclick="window.setNdtCategory('실측')">📏 부재 실측</button>
                     <button type="button" id="btnNdtCatStrength" class="chip" onclick="window.setNdtCategory('강도')">🔨 콘크리트 강도 (슈미트)</button>
                     <button type="button" id="btnNdtCatCarb" class="chip" onclick="window.setNdtCategory('탄산화')">🧪 콘크리트 탄산화</button>
@@ -590,7 +591,7 @@
             </div>
 
             <!-- NDT Top Canvas Controls Toolbar -->
-            <div class="canvas-top-toolbar">
+            <div class="canvas-top-toolbar ndt-top-canvas-tools">
                 <div class="toolbar-mode-group">
                     <button type="button" id="btnNdtModePan" class="mode-btn active" onclick="window.setNdtMode('PAN')" title="좌클릭=선택/드래그 · 휠클릭=화면 이동 · Ctrl+드래그=추가선택 (Esc)">
                         <i class="fa-regular fa-hand-pointer"></i> 선택 <span class="mode-shortcut">Esc</span>
@@ -619,6 +620,7 @@
                     </div>
                 </div>
             </div>
+            </div><!-- /.ndt-top-bar -->
 
             <!-- NDT 핀/화살표/선 굵기 — 현재 선택한 조사 항목만 조절 -->
             <div class="map-style-toolbar map-style-size-panel" id="ndtStyleSizeToolbar">
@@ -2842,21 +2844,21 @@
     </div>
 
     <!-- Core → 탭 분류 → 기존 엔진(app.js) -->
-    <script src="js/core/state.js?v=20260903_175336"></script>
-    <script src="js/tabs/registry.js?v=20260903_175336"></script>
-    <script src="js/pdf-vector-bridge.js?v=20260903_175336"></script>
-    <script src="js/core/layout-mode.js?v=20260903_175336"></script>
-    <script src="js/core/mobile-keyboard.js?v=20260903_175336"></script>
-    <script src="js/tabs/home.js?v=20260903_175336"></script>
-    <script src="js/tabs/map.js?v=20260903_175336"></script>
-    <script src="js/tabs/survey.js?v=20260903_175336"></script>
-    <script src="js/tabs/ndt.js?v=20260903_175336"></script>
-    <script src="js/shared/report.js?v=20260903_175336"></script>
-    <script src="js/shared/hwpx-import.js?v=20260903_175336"></script>
-    <script src="js/shared/auth.js?v=20260903_175336"></script>
-    <script src="app.js?v=20260903_175336"></script>
+    <script src="js/core/state.js?v=20260903_224552"></script>
+    <script src="js/tabs/registry.js?v=20260903_224552"></script>
+    <script src="js/pdf-vector-bridge.js?v=20260903_224552"></script>
+    <script src="js/core/layout-mode.js?v=20260903_224552"></script>
+    <script src="js/core/mobile-keyboard.js?v=20260903_224552"></script>
+    <script src="js/tabs/home.js?v=20260903_224552"></script>
+    <script src="js/tabs/map.js?v=20260903_224552"></script>
+    <script src="js/tabs/survey.js?v=20260903_224552"></script>
+    <script src="js/tabs/ndt.js?v=20260903_224552"></script>
+    <script src="js/shared/report.js?v=20260903_224552"></script>
+    <script src="js/shared/hwpx-import.js?v=20260903_224552"></script>
+    <script src="js/shared/auth.js?v=20260903_224552"></script>
+    <script src="app.js?v=20260903_224552"></script>
     <script>
-        window.BSA_APP_VERSION = '20260903_175336';
+        window.BSA_APP_VERSION = '20260903_224552';
         (function () {
             var el = document.getElementById('appVersionText');
             if (el && window.BSA_APP_VERSION) el.textContent = 'v' + window.BSA_APP_VERSION;
@@ -2880,7 +2882,7 @@
                     native = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
                 } catch (e) {}
                 if (native) return;
-                navigator.serviceWorker.register('./sw.js?v=20260903_175336')
+                navigator.serviceWorker.register('./sw.js?v=20260903_224552')
                     .then(function(registration) {
                         console.log('✅ ServiceWorker Registered Successfully with scope:', registration.scope);
                         registration.update();
