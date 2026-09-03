@@ -25906,7 +25906,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const { col1W, col2W, boxW, boxH, rowH, headerRowH, fontSize, cellPadX, cellPadY } = dims;
         const margin = 16 * scale;
         const boxX = (box.x !== undefined) ? box.x : margin;
-        const boxY = (box.y !== undefined) ? box.y : imgH - boxH - margin;
+        const boxY = (box.y !== undefined) ? box.y : margin;
         const lineW = Math.max(1, 1.2 * scale);
         const legendRot = counterRotateDeg || 0;
 
@@ -26003,7 +26003,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const dims = measureLocationMapLegendTable(measureCtx || null, items, scale);
         const margin = 16 * scale;
         const boxX = (box.x !== undefined) ? box.x : margin;
-        const boxY = (box.y !== undefined) ? box.y : (imgH || 0) - dims.boxH - margin;
+        const boxY = (box.y !== undefined) ? box.y : margin;
         return {
             boxX, boxY,
             boxW: dims.boxW,
