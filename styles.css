@@ -1025,6 +1025,29 @@ body {
     background: #991b1b;
 }
 
+.map-selection-rotate {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    border: none;
+    border-radius: 999px;
+    padding: 0.32rem 0.65rem;
+    background: #334155;
+    color: #fff;
+    font-size: 0.78rem;
+    font-weight: 700;
+    cursor: pointer;
+}
+
+.map-selection-rotate:hover {
+    background: #1e293b;
+}
+
+.map-selection-rotate[hidden],
+.ndt-tilt-only-rotate[hidden] {
+    display: none !important;
+}
+
 /* 부재명/결함종류/결함원인 항목 관리 버튼 & 모달 */
 .btn-option-manage {
     background: none;
@@ -2271,17 +2294,48 @@ body {
 
     #tab-ndt .mobile-map-fab {
         display: grid;
-        grid-template-columns: repeat(4, 1fr);
-        gap: 0.2rem;
-        padding: 0.28rem 0.25rem;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 0.16rem;
+        padding: 0.18rem 0.18rem;
         background: #ffffff;
         border: 1px solid #d4d4d4;
-        border-radius: 12px;
+        border-radius: 10px;
+    }
+
+    #tab-ndt .mobile-map-fab.has-tilt-rotate {
+        grid-template-columns: repeat(4, 1fr);
     }
 
     #tab-ndt .mobile-fab-btn {
-        min-height: 2.7rem;
-        font-size: 0.55rem;
+        min-height: 2.2rem;
+        font-size: 0.48rem;
+        padding: 0.08rem 0.02rem;
+        gap: 0.02rem;
+    }
+
+    #tab-ndt .mobile-fab-btn i {
+        font-size: 0.78rem;
+    }
+
+    #tab-ndt #ndtSelectionBar {
+        bottom: 0.4rem;
+        gap: 0.35rem;
+        padding: 0.22rem 0.4rem 0.22rem 0.55rem;
+    }
+
+    #tab-ndt #ndtSelectionBar .map-selection-count {
+        font-size: 0.7rem;
+    }
+
+    #tab-ndt #ndtSelectionBar .map-selection-delete,
+    #tab-ndt #ndtSelectionBar .map-selection-rotate {
+        padding: 0.22rem 0.5rem;
+        font-size: 0.7rem;
+        gap: 0.2rem;
+    }
+
+    #tab-ndt #btnRotateSelectedNdtTilt {
+        display: none !important;
     }
 }
 
@@ -4187,6 +4241,10 @@ html:not(.layout-desktop) .survey-inline-select {
     }
 
     .mobile-ndt-fab {
+        grid-template-columns: repeat(3, 1fr);
+    }
+
+    .mobile-ndt-fab.has-tilt-rotate {
         grid-template-columns: repeat(4, 1fr);
     }
 
@@ -10190,6 +10248,10 @@ html.layout-tablet .mobile-ndt-fab {
 }
 
 html.layout-tablet .mobile-ndt-fab {
+    grid-template-columns: repeat(3, 1fr) !important;
+}
+
+html.layout-tablet .mobile-ndt-fab.has-tilt-rotate {
     grid-template-columns: repeat(4, 1fr) !important;
 }
 

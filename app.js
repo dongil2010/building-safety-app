@@ -7627,10 +7627,21 @@ document.addEventListener('DOMContentLoaded', () => {
         const n = pruneSelectedNdtIds();
         if (n === 0) {
             bar.hidden = true;
-            return;
+        } else {
+            bar.hidden = false;
+            if (countEl) countEl.textContent = `${n}개 선택`;
         }
-        bar.hidden = false;
-        if (countEl) countEl.textContent = `${n}개 선택`;
+        syncNdtTiltRotateButtons();
+    }
+
+    function syncNdtTiltRotateButtons() {
+        const show = currentNdtCategory === '기울기';
+        ['btnRotateSelectedNdtTilt', 'mobileNdtBtnRotateTilt'].forEach((id) => {
+            const el = document.getElementById(id);
+            if (el) el.hidden = !show;
+        });
+        const fab = document.getElementById('mobileNdtFabBar');
+        if (fab) fab.classList.toggle('has-tilt-rotate', show);
     }
 
     function getVisibleNdtPinsForSelect() {
@@ -10686,6 +10697,16 @@ document.addEventListener('DOMContentLoaded', () => {
                 window.rotateSelectedNdtTiltBoxes();
             });
         }
+        const btnRotateNdtMobile = document.getElementById('mobileNdtBtnRotateTilt');
+        if (btnRotateNdtMobile && !btnRotateNdtMobile.dataset.ndtSelBound) {
+            btnRotateNdtMobile.dataset.ndtSelBound = '1';
+            btnRotateNdtMobile.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                window.rotateSelectedNdtTiltBoxes();
+            });
+        }
+        syncNdtTiltRotateButtons();
 
         canvas.addEventListener('touchstart', (e) => {
             ndtTouchStartedOnCanvas = true;

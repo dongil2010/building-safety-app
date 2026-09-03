@@ -39,7 +39,7 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <meta name="apple-mobile-web-app-title" content="스마트 안전점검">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css">
-    <link rel="stylesheet" href="styles.css?v=20260903_ndt_finish_below">
+    <link rel="stylesheet" href="styles.css?v=20260903_ndt_tilt_rotate">
     <!-- FontAwesome icons for clean engineering UI -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <!-- PDF 생성용: 페이지별로 직접 캡처해서 조립(큰 보고서에서 html2pdf 한방 렌더링이 캔버스 높이 한계로
@@ -641,7 +641,7 @@
                 <canvas id="ndtCanvas"></canvas>
                 <div id="ndtSelectionBar" class="map-selection-bar" hidden>
                     <span id="ndtSelectionCount" class="map-selection-count">0개 선택</span>
-                    <button type="button" id="btnRotateSelectedNdtTilt" class="map-selection-delete" title="선택한 외벽 기울기 박스를 90도 회전 (좌우 폭이 좁을 때 세로형으로)">
+                    <button type="button" id="btnRotateSelectedNdtTilt" class="map-selection-rotate ndt-tilt-only-rotate" hidden title="선택한 외벽 기울기 박스를 90도 회전">
                         <i class="fa-solid fa-rotate"></i>
                         <span>박스 회전</span>
                     </button>
@@ -673,6 +673,10 @@
             <!-- 모바일 NDT 하단 액션 바 -->
             <div class="mobile-canvas-dock" id="mobileNdtDock">
                 <nav class="mobile-map-fab mobile-ndt-fab" id="mobileNdtFabBar" aria-label="모바일 비파괴 도면 액션">
+                    <button type="button" class="mobile-fab-btn ndt-tilt-only-rotate" id="mobileNdtBtnRotateTilt" hidden title="선택한 기울기 박스 회전">
+                        <i class="fa-solid fa-rotate"></i>
+                        <span>회전</span>
+                    </button>
                     <button type="button" class="mobile-fab-btn mobile-fab-danger" id="mobileNdtBtnDeleteSelected" title="선택한 NDT 삭제">
                         <i class="fa-solid fa-trash-can"></i>
                         <span>삭제</span>
@@ -2830,7 +2834,7 @@
     <script src="js/shared/report.js?v=20260827_overview"></script>
     <script src="js/shared/hwpx-import.js?v=20260825_hwpxin"></script>
     <script src="js/shared/auth.js?v=20260821_land1"></script>
-    <script src="app.js?v=20260903_tilt_white_bg"></script>
+    <script src="app.js?v=20260903_ndt_tilt_rotate"></script>
     <script>
         window.BSA_APP_VERSION = '20260902_legend_lock';
         (function () {
