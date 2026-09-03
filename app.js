@@ -12695,7 +12695,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const overlay = document.getElementById('ndtModal');
         if (!overlay) return;
 
-        // 모바일 세로 하단 시트 · 가로 우측 드로어는 전체 화면 기준 (도면 영역에 묶지 않음)
+        // 모바일: 결함창과 같이 전체 화면 기준 하단 시트로 — 도면 영역에 묶지 않음
         if (typeof layoutMediaMobileDefectDrawer === 'function' && layoutMediaMobileDefectDrawer()) {
             overlay.classList.remove('ndt-drawer-in-canvas');
             overlay.style.top = '';
