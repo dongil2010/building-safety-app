@@ -701,7 +701,9 @@ document.addEventListener('DOMContentLoaded', () => {
         window.state.ndtData = {};
         window.state.ndtDisplacementGroups = {};
         window.state.deletedDefectIds = {};
+        window.state.deletedDefectAt = {};
         window.state.deletedNdtIds = {};
+        window.state.deletedNdtAt = {};
         window.state.deletedBuildingIds = [];
         window.state.confirmedDeletedIds = {};
         window.state.currentBuildingId = null;
@@ -1996,8 +1998,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 ndtData: window.state.ndtData || {},
                 ndtDisplacementGroups: window.state.ndtDisplacementGroups || {},
                 deletedDefectIds: window.state.deletedDefectIds || {},
+                deletedDefectAt: window.state.deletedDefectAt || {},
                 confirmedDeletedIds: window.state.confirmedDeletedIds || {},
                 deletedNdtIds: window.state.deletedNdtIds || {},
+                deletedNdtAt: window.state.deletedNdtAt || {},
                 deletedBuildingIds: window.state.deletedBuildingIds || [],
                 buildings: sanitizedBuildings,
                 lastUsedBuildingId: window.state.currentBuildingId || null,
@@ -2121,11 +2125,17 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (parsed.deletedDefectIds) {
                     window.state.deletedDefectIds = parsed.deletedDefectIds;
                 }
+                if (parsed.deletedDefectAt) {
+                    window.state.deletedDefectAt = parsed.deletedDefectAt;
+                }
                 if (parsed.confirmedDeletedIds) {
                     window.state.confirmedDeletedIds = parsed.confirmedDeletedIds;
                 }
                 if (parsed.deletedNdtIds) {
                     window.state.deletedNdtIds = parsed.deletedNdtIds;
+                }
+                if (parsed.deletedNdtAt) {
+                    window.state.deletedNdtAt = parsed.deletedNdtAt;
                 }
                 if (parsed.deletedBuildingIds) {
                     window.state.deletedBuildingIds = parsed.deletedBuildingIds;
@@ -2240,10 +2250,14 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // --- 다기기 동기화: 고유코드(id) 기준 병합 + 표시번호(NO.) 당김 + 삭제코드 재사용 ---
+    // 원칙: 서버 문서를 먼저 기준으로 두고, 로컬(오프라인)에서만 생긴 항목·사진을 얹는다.
+    // 삭제 tombstone은 deletedAt보다 늦은 updatedAt(수정/사진추가)이 있으면 부활시킨다.
     function ensureSyncMetaState() {
         if (!window.state.deletedDefectIds) window.state.deletedDefectIds = {};
+        if (!window.state.deletedDefectAt) window.state.deletedDefectAt = {};
         if (!window.state.confirmedDeletedIds) window.state.confirmedDeletedIds = {};
         if (!window.state.deletedNdtIds) window.state.deletedNdtIds = {};
+        if (!window.state.deletedNdtAt) window.state.deletedNdtAt = {};
         if (!window.state.deletedBuildingIds) window.state.deletedBuildingIds = [];
     }
 
@@ -2717,11 +2731,17 @@ document.addEventListener('DOMContentLoaded', () => {
         Object.keys(window.state.deletedDefectIds || {}).forEach(k => {
             if (k.startsWith(`${buildingId}_`)) delete window.state.deletedDefectIds[k];
         });
+        Object.keys(window.state.deletedDefectAt || {}).forEach(k => {
+            if (k.startsWith(`${buildingId}_`)) delete window.state.deletedDefectAt[k];
+        });
         Object.keys(window.state.ndtData || {}).forEach(k => {
             if (k.startsWith(`${buildingId}_`)) delete window.state.ndtData[k];
         });
         Object.keys(window.state.deletedNdtIds || {}).forEach(k => {
             if (k.startsWith(`${buildingId}_`)) delete window.state.deletedNdtIds[k];
+        });
+        Object.keys(window.state.deletedNdtAt || {}).forEach(k => {
+            if (k.startsWith(`${buildingId}_`)) delete window.state.deletedNdtAt[k];
         });
         Object.keys(window.state.ndtDisplacementGroups || {}).forEach(k => {
             if (k.startsWith(`${buildingId}_`)) delete window.state.ndtDisplacementGroups[k];
@@ -2881,6 +2901,8 @@ document.addEventListener('DOMContentLoaded', () => {
         const set = new Set(window.state.deletedDefectIds[floorKey] || []);
         set.add(defectId);
         window.state.deletedDefectIds[floorKey] = Array.from(set);
+        if (!window.state.deletedDefectAt[floorKey]) window.state.deletedDefectAt[floorKey] = {};
+        window.state.deletedDefectAt[floorKey][defectId] = Date.now();
     }
 
     function trackNdtDeletion(floorKey, itemId) {
@@ -2889,6 +2911,8 @@ document.addEventListener('DOMContentLoaded', () => {
         const set = new Set(window.state.deletedNdtIds[floorKey] || []);
         set.add(itemId);
         window.state.deletedNdtIds[floorKey] = Array.from(set);
+        if (!window.state.deletedNdtAt[floorKey]) window.state.deletedNdtAt[floorKey] = {};
+        window.state.deletedNdtAt[floorKey][itemId] = Date.now();
     }
 
     function mergeDeletedIdsMaps(serverMap, localMap) {
@@ -2898,6 +2922,38 @@ document.addEventListener('DOMContentLoaded', () => {
             if (set.size > 0) out[key] = Array.from(set);
         });
         return out;
+    }
+
+    /** floorKey → { id → deletedAt } 합치기 (같은 id는 더 늦은 삭제 시각) */
+    function mergeDeletedAtMaps(serverMap, localMap) {
+        const out = {};
+        const keys = new Set([
+            ...Object.keys(serverMap || {}),
+            ...Object.keys(localMap || {})
+        ]);
+        keys.forEach((key) => {
+            const sm = (serverMap && serverMap[key]) || {};
+            const lm = (localMap && localMap[key]) || {};
+            const ids = new Set([...Object.keys(sm), ...Object.keys(lm)]);
+            const merged = {};
+            ids.forEach((id) => {
+                const t = Math.max(Number(sm[id]) || 0, Number(lm[id]) || 0);
+                if (t > 0) merged[id] = t;
+            });
+            if (Object.keys(merged).length) out[key] = merged;
+        });
+        return out;
+    }
+
+    /**
+     * 삭제보다 늦은 수정/사진추가가 있으면 부활.
+     * deletedAt이 없는 구버전 tombstone(0)은 기존처럼 삭제 유지.
+     */
+    function recordSurvivesDelete(rec, deletedAt, kind) {
+        if (!rec || !rec.id) return false;
+        const ts = Number(deletedAt) || 0;
+        if (ts <= 0) return false;
+        return getRecordUpdatedAt(rec, kind || 'pin') > ts;
     }
 
     function mergePhotoArrays(primaryArr, secondaryArr) {
@@ -2923,15 +2979,17 @@ document.addEventListener('DOMContentLoaded', () => {
         return (Array.isArray(defect.photos) ? defect.photos : []).filter(Boolean);
     }
 
-    /** 같은 결함 고유코드 — 텍스트·좌표는 최신쪽, 사진은 합침. 표시 no는 이후 renumber */
+    /** 같은 결함 고유코드 — 서버 기준 + 로컬 추가. 텍스트·좌표는 최신쪽, 사진은 합집합(서버 먼저). */
     function mergeDefectRecord(serverRec, localRec) {
         if (!serverRec) return localRec ? { ...localRec } : null;
         if (!localRec) return { ...serverRec };
 
         const serverTs = getRecordUpdatedAt(serverRec, 'pin');
         const localTs = getRecordUpdatedAt(localRec, 'pin');
+        // 서버를 먼저 깔고, 로컬이 더 최신이면 로컬 필드로 덮음 (사진은 아래에서 별도 합침)
         const newer = localTs >= serverTs ? localRec : serverRec;
-        const merged = { ...newer };
+        const older = localTs >= serverTs ? serverRec : localRec;
+        const merged = { ...older, ...newer };
 
         // 표시 번호는 서버(먼저 확정된 쪽) 순서를 따르고, 마지막에 일괄 renumber
         if (serverRec.no) merged.no = serverRec.no;
@@ -2939,18 +2997,13 @@ document.addEventListener('DOMContentLoaded', () => {
         if (serverRec.groupId) merged.groupId = serverRec.groupId;
         if (serverRec.surveyExtra || localRec.surveyExtra) merged.surveyExtra = true;
 
-        // 사진은 대부분 인라인(photos)이 아니라 IndexedDB 참조(photoIds)로 저장돼 있다 — 저장
-        // 시점에 무거운 사진은 IndexedDB로 옮기고 photos는 비운다(persistLocalImagesToIndexedDb/
-        // saveStateToLocalStorage 참고). 그런데 이 함수가 항상 photoIds를 지우고 인라인 photos만
-        // 합쳐서 다시 채웠기 때문에, 서버·로컬 둘 다 인라인 사진이 없는(=정상적으로 photoIds만
-        // 갖고 있는) 흔한 경우 병합 결과가 photos=[] · photoIds 없음이 되어 사진 참조가 통째로
-        // 사라졌다 — 동기화할 때마다 결함 사진이 없어지던 실제 원인(사용자가 실제로 겪음, 콘솔로
-        // 확인: 결함 37개 전부 photoIds:0, photos:0). 어느 한쪽이든 photoIds가 있으면 더 많은
-        // 쪽(= 최소한 있던 참조는 안 잃는 쪽)을 그대로 쓰고, 둘 다 없을 때만 인라인 사진을 합친다.
+        // 사진: 서버 photoIds를 먼저 두고 로컬에만 있는 id를 뒤에 추가 (합집합).
+        // 예전 "개수 많은 쪽만 채택"은 양쪽이 서로 다른 사진을 넣으면 한쪽이 사라짐.
         const serverPhotoIds = Array.isArray(serverRec.photoIds) ? serverRec.photoIds : [];
         const localPhotoIds = Array.isArray(localRec.photoIds) ? localRec.photoIds : [];
-        if (serverPhotoIds.length || localPhotoIds.length) {
-            merged.photoIds = (localPhotoIds.length >= serverPhotoIds.length) ? localPhotoIds.slice() : serverPhotoIds.slice();
+        const mergedPhotoIds = mergePhotoArrays(serverPhotoIds, localPhotoIds);
+        if (mergedPhotoIds.length) {
+            merged.photoIds = mergedPhotoIds;
             const inlinePhotos = mergePhotoArrays(
                 extractInlinePhotos(serverRec),
                 extractInlinePhotos(localRec)
@@ -2967,8 +3020,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const serverPrevPhotoIds = Array.isArray(serverRec.prevRoundPhotoIds) ? serverRec.prevRoundPhotoIds : [];
         const localPrevPhotoIds = Array.isArray(localRec.prevRoundPhotoIds) ? localRec.prevRoundPhotoIds : [];
-        if (serverPrevPhotoIds.length || localPrevPhotoIds.length) {
-            merged.prevRoundPhotoIds = (localPrevPhotoIds.length >= serverPrevPhotoIds.length) ? localPrevPhotoIds.slice() : serverPrevPhotoIds.slice();
+        const mergedPrevPhotoIds = mergePhotoArrays(serverPrevPhotoIds, localPrevPhotoIds);
+        if (mergedPrevPhotoIds.length) {
+            merged.prevRoundPhotoIds = mergedPrevPhotoIds;
             const inlinePrev = mergePhotoArrays(
                 extractInlinePhotos(serverRec, 'prev'),
                 extractInlinePhotos(localRec, 'prev')
@@ -2992,39 +3046,61 @@ document.addEventListener('DOMContentLoaded', () => {
         const localTs = getRecordUpdatedAt(localRec, 'ndt');
         const newer = localTs >= serverTs ? localRec : serverRec;
         const older = localTs >= serverTs ? serverRec : localRec;
+        // 서버(older/newer 중 서버 쪽)를 깔고 최신 필드로 덮되, 결과는 updatedAt 기준
         return { ...older, ...newer };
     }
 
-    function mergeIdRecordArrays(serverArr, localArr, deletedIds, kind) {
+    function mergeIdRecordArrays(serverArr, localArr, deletedIds, kind, deletedAtById) {
         const deleted = new Set(deletedIds || []);
+        const delAt = deletedAtById || {};
         const byId = new Map();
+        const localById = new Map((localArr || []).filter((r) => r?.id).map((r) => [r.id, r]));
+        // 서버 먼저
         (serverArr || []).forEach((rec) => {
-            if (rec?.id && !deleted.has(rec.id)) byId.set(rec.id, rec);
-        });
-        (localArr || []).forEach((rec) => {
-            if (!rec?.id || deleted.has(rec.id)) return;
-            const existing = byId.get(rec.id);
-            if (!existing) {
-                byId.set(rec.id, rec);
-            } else if (kind === 'pin') {
-                byId.set(rec.id, mergeDefectRecord(existing, rec));
-            } else if (kind === 'ndt') {
-                byId.set(rec.id, mergeNdtRecord(existing, rec));
-            } else if (getRecordUpdatedAt(rec, kind) >= getRecordUpdatedAt(existing, kind)) {
-                byId.set(rec.id, rec);
+            if (!rec?.id) return;
+            const localMatch = localById.get(rec.id);
+            const at = Number(delAt[rec.id]) || 0;
+            if (deleted.has(rec.id)
+                && !recordSurvivesDelete(rec, at, kind)
+                && !recordSurvivesDelete(localMatch, at, kind)) {
+                return;
             }
+            if (localMatch) {
+                if (kind === 'pin') byId.set(rec.id, mergeDefectRecord(rec, localMatch));
+                else if (kind === 'ndt') byId.set(rec.id, mergeNdtRecord(rec, localMatch));
+                else {
+                    byId.set(rec.id,
+                        getRecordUpdatedAt(localMatch, kind) >= getRecordUpdatedAt(rec, kind) ? localMatch : rec
+                    );
+                }
+            } else {
+                byId.set(rec.id, { ...rec });
+            }
+        });
+        // 로컬 전용 추가
+        (localArr || []).forEach((rec) => {
+            if (!rec?.id || byId.has(rec.id)) return;
+            const at = Number(delAt[rec.id]) || 0;
+            if (deleted.has(rec.id) && !recordSurvivesDelete(rec, at, kind)) return;
+            byId.set(rec.id, { ...rec });
         });
         return Array.from(byId.values());
     }
 
     /**
      * 결함 병합: 서버 순서 유지 → 로컬 전용(신규) 맨 뒤 → NO. 연속 재부여.
-     * 삭제 tombstone(deletedDefectIds)은 유지한다.
-     * (작업자 다수일 때 동기화 횟수로 자동 재사용하면 꼬이므로, 코드 재사용은 수동 정리만)
+     * 삭제보다 늦은 수정/사진이 있으면 tombstone을 무시하고 부활.
      */
-    function mergeDefectsMaps(serverMap, localMap, serverDeleted, localDeleted) {
+    function mergeDefectsMaps(serverMap, localMap, serverDeleted, localDeleted, serverDeletedAt, localDeletedAt) {
         ensureSyncMetaState();
         const mergedDeleted = mergeDeletedIdsMaps(serverDeleted, localDeleted);
+        const mergedDeletedAt = mergeDeletedAtMaps(serverDeletedAt, localDeletedAt);
+        Object.entries(mergedDeleted).forEach(([key, ids]) => {
+            if (!mergedDeletedAt[key]) mergedDeletedAt[key] = {};
+            (ids || []).forEach((id) => {
+                if (mergedDeletedAt[key][id] == null) mergedDeletedAt[key][id] = 0;
+            });
+        });
         const keys = new Set([
             ...Object.keys(serverMap || {}),
             ...Object.keys(localMap || {}),
@@ -3033,31 +3109,52 @@ document.addEventListener('DOMContentLoaded', () => {
         const defects = {};
 
         keys.forEach((key) => {
-            const deleted = new Set(mergedDeleted[key] || []);
-            const serverArr = (serverMap?.[key] || []).filter((r) => r?.id && !deleted.has(r.id));
-            const localArr = (localMap?.[key] || []).filter((r) => r?.id && !deleted.has(r.id));
-            const serverIds = new Set(serverArr.map((r) => r.id));
-            const localById = new Map(localArr.map((r) => [r.id, r]));
+            const delAt = mergedDeletedAt[key] || {};
+            const deletedSet = new Set(mergedDeleted[key] || []);
+            const serverArr = serverMap?.[key] || [];
+            const localArr = localMap?.[key] || [];
+            const serverById = new Map((serverArr || []).filter((r) => r?.id).map((r) => [r.id, r]));
+            const localById = new Map((localArr || []).filter((r) => r?.id).map((r) => [r.id, r]));
 
             const ordered = [];
+            // 1) 서버에 있는 것 먼저 (서버 기준)
             serverArr.forEach((sRec) => {
+                if (!sRec?.id) return;
                 const lRec = localById.get(sRec.id);
+                const at = Number(delAt[sRec.id]) || 0;
+                if (deletedSet.has(sRec.id)
+                    && !recordSurvivesDelete(sRec, at, 'pin')
+                    && !recordSurvivesDelete(lRec, at, 'pin')) {
+                    return;
+                }
                 ordered.push(lRec ? mergeDefectRecord(sRec, lRec) : { ...sRec });
             });
+            // 2) 로컬에만 있는 신규(오프라인 신규) 맨 뒤
             localArr.forEach((lRec) => {
-                if (!serverIds.has(lRec.id)) ordered.push({ ...lRec });
+                if (!lRec?.id || serverById.has(lRec.id)) return;
+                const at = Number(delAt[lRec.id]) || 0;
+                if (deletedSet.has(lRec.id) && !recordSurvivesDelete(lRec, at, 'pin')) return;
+                ordered.push({ ...lRec });
             });
+
             renumberFloorDefects(ordered, { preserveOrder: true });
             defects[key] = ordered;
 
-            // 활성에 다시 나타난 id는 tombstone에서 제거(이상 상태 복구)
             const activeIds = new Set(ordered.map((d) => d.id));
-            const stillDeleted = (mergedDeleted[key] || []).filter((id) => !activeIds.has(id));
+            const stillDeleted = [];
+            const stillDeletedAt = {};
+            deletedSet.forEach((id) => {
+                if (activeIds.has(id)) return; // 부활 → tombstone 제거
+                stillDeleted.push(id);
+                stillDeletedAt[id] = Number(delAt[id]) || 0;
+            });
             if (stillDeleted.length > 0) mergedDeleted[key] = stillDeleted;
             else delete mergedDeleted[key];
+            if (Object.keys(stillDeletedAt).length > 0) mergedDeletedAt[key] = stillDeletedAt;
+            else delete mergedDeletedAt[key];
         });
 
-        return { defects, deletedDefectIds: mergedDeleted };
+        return { defects, deletedDefectIds: mergedDeleted, deletedDefectAt: mergedDeletedAt };
     }
 
     /**
@@ -3084,6 +3181,18 @@ document.addEventListener('DOMContentLoaded', () => {
         window.state.deletedDefectIds = deleted;
         // 구버전 자동확정 맵은 더 이상 쓰지 않음
         window.state.confirmedDeletedIds = {};
+        if (window.state.deletedDefectAt) {
+            Object.keys(window.state.deletedDefectAt).forEach((key) => {
+                if (!deleted[key]) {
+                    delete window.state.deletedDefectAt[key];
+                    return;
+                }
+                const keep = new Set(deleted[key]);
+                Object.keys(window.state.deletedDefectAt[key] || {}).forEach((id) => {
+                    if (!keep.has(id)) delete window.state.deletedDefectAt[key][id];
+                });
+            });
+        }
         if (typeof saveStateToLocalStorage === 'function') saveStateToLocalStorage();
         return purged;
     };
@@ -3092,8 +3201,15 @@ document.addEventListener('DOMContentLoaded', () => {
         return window.purgeDeletedDefectCodes();
     };
 
-    function mergeNdtDataMaps(serverMap, localMap, serverDeleted, localDeleted) {
+    function mergeNdtDataMaps(serverMap, localMap, serverDeleted, localDeleted, serverDeletedAt, localDeletedAt) {
         const mergedDeleted = mergeDeletedIdsMaps(serverDeleted, localDeleted);
+        const mergedDeletedAt = mergeDeletedAtMaps(serverDeletedAt, localDeletedAt);
+        Object.entries(mergedDeleted).forEach(([key, ids]) => {
+            if (!mergedDeletedAt[key]) mergedDeletedAt[key] = {};
+            (ids || []).forEach((id) => {
+                if (mergedDeletedAt[key][id] == null) mergedDeletedAt[key][id] = 0;
+            });
+        });
         const keys = new Set([
             ...Object.keys(serverMap || {}),
             ...Object.keys(localMap || {}),
@@ -3105,10 +3221,24 @@ document.addEventListener('DOMContentLoaded', () => {
                 serverMap?.[key],
                 localMap?.[key],
                 mergedDeleted[key],
-                'ndt'
+                'ndt',
+                mergedDeletedAt[key]
             );
+            const activeIds = new Set((ndtData[key] || []).map((d) => d?.id).filter(Boolean));
+            const stillDeleted = (mergedDeleted[key] || []).filter((id) => !activeIds.has(id));
+            if (stillDeleted.length) {
+                mergedDeleted[key] = stillDeleted;
+                const stillAt = {};
+                stillDeleted.forEach((id) => {
+                    stillAt[id] = Number(mergedDeletedAt[key]?.[id]) || 0;
+                });
+                mergedDeletedAt[key] = stillAt;
+            } else {
+                delete mergedDeleted[key];
+                delete mergedDeletedAt[key];
+            }
         });
-        return { ndtData, deletedNdtIds: mergedDeleted };
+        return { ndtData, deletedNdtIds: mergedDeleted, deletedNdtAt: mergedDeletedAt };
     }
 
     // saveStateToLocalStorage에서 IndexedDB로 옮겨 저장한 도면/사진을 다시 불러와
@@ -34325,10 +34455,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 remoteHydrated,
                 localHydrated,
                 filterMapKeysByDeletedBuildings(data.deletedDefectIds || {}, mergedDeletedBuildings),
-                filterMapKeysByDeletedBuildings(window.state.deletedDefectIds || {}, mergedDeletedBuildings)
+                filterMapKeysByDeletedBuildings(window.state.deletedDefectIds || {}, mergedDeletedBuildings),
+                filterMapKeysByDeletedBuildings(data.deletedDefectAt || {}, mergedDeletedBuildings),
+                filterMapKeysByDeletedBuildings(window.state.deletedDefectAt || {}, mergedDeletedBuildings)
             );
             window.state.defects = await hydrateDefectPhotos(defectMerge.defects);
             window.state.deletedDefectIds = defectMerge.deletedDefectIds;
+            window.state.deletedDefectAt = defectMerge.deletedDefectAt || {};
             isChanged = true;
         }
 
@@ -34337,10 +34470,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 filterMapKeysByDeletedBuildings(data.ndtData || {}, mergedDeletedBuildings),
                 filterMapKeysByDeletedBuildings(window.state.ndtData || {}, mergedDeletedBuildings),
                 filterMapKeysByDeletedBuildings(data.deletedNdtIds || {}, mergedDeletedBuildings),
-                filterMapKeysByDeletedBuildings(window.state.deletedNdtIds || {}, mergedDeletedBuildings)
+                filterMapKeysByDeletedBuildings(window.state.deletedNdtIds || {}, mergedDeletedBuildings),
+                filterMapKeysByDeletedBuildings(data.deletedNdtAt || {}, mergedDeletedBuildings),
+                filterMapKeysByDeletedBuildings(window.state.deletedNdtAt || {}, mergedDeletedBuildings)
             );
             window.state.ndtData = ndtMerge.ndtData;
             window.state.deletedNdtIds = ndtMerge.deletedNdtIds;
+            window.state.deletedNdtAt = ndtMerge.deletedNdtAt || {};
             isChanged = true;
         }
 
@@ -34439,14 +34575,14 @@ document.addEventListener('DOMContentLoaded', () => {
             const docId = getCompanyDocId();
             const docRef = db.collection('safety_app').doc(docId);
             const snap = await fetchCompanyDocSnap(docRef);
-            const serverData = snap.exists ? snap.data() : {};
+            let serverData = snap.exists ? snap.data() : {};
 
-            const mergedDeletedBuildings = mergeDeletedBuildingIds(
+            let mergedDeletedBuildings = mergeDeletedBuildingIds(
                 serverData.deletedBuildingIds,
                 window.state.deletedBuildingIds
             );
             window.state.deletedBuildingIds = mergedDeletedBuildings;
-            const prevAssets = captureBuildingDrawingAssetsById(window.state.buildings);
+            let prevAssets = captureBuildingDrawingAssetsById(window.state.buildings);
             window.state.buildings = mergeBuildingsForSync(
                 serverData.buildings,
                 window.state.buildings,
@@ -34455,32 +34591,39 @@ document.addEventListener('DOMContentLoaded', () => {
             );
             mergedDeletedBuildings.forEach(purgeLocalStateForDeletedBuilding);
 
-            const serverDefectsHydrated = await hydrateDefectPhotos(
+            let serverDefectsHydrated = await hydrateDefectPhotos(
                 filterMapKeysByDeletedBuildings(serverData.defects || {}, mergedDeletedBuildings)
             );
-            const localDefectsHydrated = await hydrateDefectPhotos(
+            let localDefectsHydrated = await hydrateDefectPhotos(
                 filterMapKeysByDeletedBuildings(window.state.defects || {}, mergedDeletedBuildings)
             );
-            const defectMerge = mergeDefectsMaps(
+            let defectMerge = mergeDefectsMaps(
                 serverDefectsHydrated,
                 localDefectsHydrated,
                 filterMapKeysByDeletedBuildings(serverData.deletedDefectIds || {}, mergedDeletedBuildings),
-                filterMapKeysByDeletedBuildings(window.state.deletedDefectIds || {}, mergedDeletedBuildings)
+                filterMapKeysByDeletedBuildings(window.state.deletedDefectIds || {}, mergedDeletedBuildings),
+                filterMapKeysByDeletedBuildings(serverData.deletedDefectAt || {}, mergedDeletedBuildings),
+                filterMapKeysByDeletedBuildings(window.state.deletedDefectAt || {}, mergedDeletedBuildings)
             );
-            const ndtMerge = mergeNdtDataMaps(
+            let ndtMerge = mergeNdtDataMaps(
                 filterMapKeysByDeletedBuildings(serverData.ndtData || {}, mergedDeletedBuildings),
                 filterMapKeysByDeletedBuildings(window.state.ndtData || {}, mergedDeletedBuildings),
                 filterMapKeysByDeletedBuildings(serverData.deletedNdtIds || {}, mergedDeletedBuildings),
-                filterMapKeysByDeletedBuildings(window.state.deletedNdtIds || {}, mergedDeletedBuildings)
+                filterMapKeysByDeletedBuildings(window.state.deletedNdtIds || {}, mergedDeletedBuildings),
+                filterMapKeysByDeletedBuildings(serverData.deletedNdtAt || {}, mergedDeletedBuildings),
+                filterMapKeysByDeletedBuildings(window.state.deletedNdtAt || {}, mergedDeletedBuildings)
             );
 
             isRemoteSyncing = true;
             window.state.defects = await hydrateDefectPhotos(defectMerge.defects);
             window.state.deletedDefectIds = defectMerge.deletedDefectIds;
+            window.state.deletedDefectAt = defectMerge.deletedDefectAt || {};
             window.state.confirmedDeletedIds = {};
             window.state.ndtData = ndtMerge.ndtData;
             window.state.deletedNdtIds = ndtMerge.deletedNdtIds;
+            window.state.deletedNdtAt = ndtMerge.deletedNdtAt || {};
 
+            // 사진/도면 업로드는 시간이 걸림 — 그동안 다른 기기가 서버를 갱신할 수 있음
             await uploadInlineDefectPhotosForSync(window.state.defects);
             const fieldRasterOnly = typeof isNativeAndroidApp === 'function' && isNativeAndroidApp() && !layoutIsPcLike();
             if (!fieldRasterOnly) {
@@ -34491,23 +34634,82 @@ document.addEventListener('DOMContentLoaded', () => {
             await hydrateLocalImagesFromIndexedDb();
             refreshCurrentBuildingFromState();
 
+            // 쓰기 직전 서버 재조회: 업로드 중 올라온 동료 데이터를 받은 뒤 로컬을 다시 얹는다
+            // (미완료 서버 스냅샷만 보고 올리면 상대 조사가 통째로 사라질 수 있는 레이스 완화)
+            const snapFresh = await fetchCompanyDocSnap(docRef);
+            serverData = snapFresh.exists ? snapFresh.data() : {};
+            mergedDeletedBuildings = mergeDeletedBuildingIds(
+                serverData.deletedBuildingIds,
+                window.state.deletedBuildingIds
+            );
+            window.state.deletedBuildingIds = mergedDeletedBuildings;
+            prevAssets = captureBuildingDrawingAssetsById(window.state.buildings);
+            window.state.buildings = mergeBuildingsForSync(
+                serverData.buildings,
+                window.state.buildings,
+                mergedDeletedBuildings,
+                prevAssets
+            );
+            mergedDeletedBuildings.forEach(purgeLocalStateForDeletedBuilding);
+
+            serverDefectsHydrated = await hydrateDefectPhotos(
+                filterMapKeysByDeletedBuildings(serverData.defects || {}, mergedDeletedBuildings)
+            );
+            localDefectsHydrated = await hydrateDefectPhotos(
+                filterMapKeysByDeletedBuildings(window.state.defects || {}, mergedDeletedBuildings)
+            );
+            defectMerge = mergeDefectsMaps(
+                serverDefectsHydrated,
+                localDefectsHydrated,
+                filterMapKeysByDeletedBuildings(serverData.deletedDefectIds || {}, mergedDeletedBuildings),
+                filterMapKeysByDeletedBuildings(window.state.deletedDefectIds || {}, mergedDeletedBuildings),
+                filterMapKeysByDeletedBuildings(serverData.deletedDefectAt || {}, mergedDeletedBuildings),
+                filterMapKeysByDeletedBuildings(window.state.deletedDefectAt || {}, mergedDeletedBuildings)
+            );
+            ndtMerge = mergeNdtDataMaps(
+                filterMapKeysByDeletedBuildings(serverData.ndtData || {}, mergedDeletedBuildings),
+                filterMapKeysByDeletedBuildings(window.state.ndtData || {}, mergedDeletedBuildings),
+                filterMapKeysByDeletedBuildings(serverData.deletedNdtIds || {}, mergedDeletedBuildings),
+                filterMapKeysByDeletedBuildings(window.state.deletedNdtIds || {}, mergedDeletedBuildings),
+                filterMapKeysByDeletedBuildings(serverData.deletedNdtAt || {}, mergedDeletedBuildings),
+                filterMapKeysByDeletedBuildings(window.state.deletedNdtAt || {}, mergedDeletedBuildings)
+            );
+            window.state.defects = await hydrateDefectPhotos(defectMerge.defects);
+            window.state.deletedDefectIds = defectMerge.deletedDefectIds;
+            window.state.deletedDefectAt = defectMerge.deletedDefectAt || {};
+            window.state.ndtData = ndtMerge.ndtData;
+            window.state.deletedNdtIds = ndtMerge.deletedNdtIds;
+            window.state.deletedNdtAt = ndtMerge.deletedNdtAt || {};
+
+            {
+                const dispMerge = mergeNdtDataMaps(
+                    filterMapKeysByDeletedBuildings(serverData.ndtDisplacementGroups || {}, mergedDeletedBuildings),
+                    filterMapKeysByDeletedBuildings(window.state.ndtDisplacementGroups || {}, mergedDeletedBuildings),
+                    {},
+                    {}
+                );
+                window.state.ndtDisplacementGroups = dispMerge.ndtData;
+            }
+
             _suppressSyncOnSave = true;
             if (typeof saveStateToLocalStorage === 'function') saveStateToLocalStorage();
             _suppressSyncOnSave = false;
 
             const sanitizedBuildings = filterDeletedBuildings(window.state.buildings || [], mergedDeletedBuildings)
                 .map((b) => {
-                    const meta = sanitizeBuildingMetaForFirestore(b);
+                    const meta = sanitizeBuildingMetaForFirebase(b);
                     meta.drawingFloorCodes = Array.from(collectKnownFloorCodesForBuilding(b));
                     return meta;
                 });
 
             const dataToSync = {
-                defects: sanitizeDefectsForFirestore(window.state.defects),
+                defects: sanitizeDefectsForFirebase(window.state.defects),
                 deletedDefectIds: defectMerge.deletedDefectIds,
+                deletedDefectAt: defectMerge.deletedDefectAt || {},
                 confirmedDeletedIds: {},
                 ndtData: window.state.ndtData || {},
                 deletedNdtIds: ndtMerge.deletedNdtIds,
+                deletedNdtAt: ndtMerge.deletedNdtAt || {},
                 deletedBuildingIds: mergedDeletedBuildings,
                 ndtDisplacementGroups: window.state.ndtDisplacementGroups || {},
                 grids: window.state.grids || {},
@@ -34569,6 +34771,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         }
     }
+
 
     let currentUnsubscribe = null;
     let _listenerNeedsResubscribe = false;
