@@ -10747,14 +10747,12 @@ document.addEventListener('DOMContentLoaded', () => {
                         grabY: vy
                     };
                     pendingNdtPinIsTouch = true;
-                    pendingNdtPinArmed = false;
-                    pendingNdtLongPressTimer = setTimeout(() => {
-                        if (!pendingNdtPinHit || !pendingNdtPinIsTouch) return;
-                        pendingNdtPinArmed = true;
-                        try { if (navigator.vibrate) navigator.vibrate(12); } catch (_e) { /* ignore */ }
-                        drawNdtCanvas();
-                        refreshNdtLoupe(ndtStartMouseX, ndtStartMouseY);
-                    }, NDT_TOUCH_LONG_PRESS_MS);
+                    // 마우스와 동일: 박스/화살표는 바로 드래그 (길게 누를 필요 없음)
+                    pendingNdtPinArmed = true;
+                    if (pendingNdtLongPressTimer) {
+                        clearTimeout(pendingNdtLongPressTimer);
+                        pendingNdtLongPressTimer = null;
+                    }
                     return;
                 }
 
@@ -10852,26 +10850,30 @@ document.addEventListener('DOMContentLoaded', () => {
                     const dx = touch.clientX - ndtStartMouseX;
                     const dy = touch.clientY - ndtStartMouseY;
                     const dist = Math.hypot(dx, dy);
-                    if (!pendingNdtPinArmed) {
-                        const pendingPart = pendingNdtPinHit?.part;
-                        if (pendingPart !== 'target' && dist > 14) {
-                            clearPendingNdtLongPress();
-                            pendingNdtPinHit = null;
-                            isNdtDragging = true;
-                        }
-                        return;
-                    }
-                    if (dist <= 14) {
+                    if (dist <= 8) {
                         refreshNdtLoupe(touch.clientX, touch.clientY);
                         return;
                     }
-                    if (dist > 14) {
-                        const item = pendingNdtPinHit.item;
+                    const item = pendingNdtPinHit.item;
+                    const grabX = pendingNdtPinHit.grabX;
+                    const grabY = pendingNdtPinHit.grabY;
+                    const multiGroup = item && item.id
+                        && selectedNdtIds.size > 1
+                        && selectedNdtIds.has(item.id)
+                        && pendingNdtPinHit.part === 'box';
+                    if (pendingNdtLongPressTimer) {
+                        clearTimeout(pendingNdtLongPressTimer);
+                        pendingNdtLongPressTimer = null;
+                    }
+                    if (multiGroup) {
+                        isDraggingNdtPinGroup = true;
+                        ndtGroupDragLastX = grabX;
+                        ndtGroupDragLastY = grabY;
+                        pendingNdtPinHit = null;
+                    } else {
                         isDraggingNdtPin = true;
                         activeDragNdtPin = item;
                         dragNdtPart = pendingNdtPinHit.part;
-                        const grabX = pendingNdtPinHit.grabX;
-                        const grabY = pendingNdtPinHit.grabY;
                         if (dragNdtPart === 'target') {
                             ndtPinDragOffsetX = grabX - (item.targetX !== undefined ? item.targetX : (item.x || 0));
                             ndtPinDragOffsetY = grabY - (item.targetY !== undefined ? item.targetY : (item.y || 0));
@@ -10882,12 +10884,34 @@ document.addEventListener('DOMContentLoaded', () => {
                             ndtPinDragOffsetX = grabX - (item.x || 0);
                             ndtPinDragOffsetY = grabY - (item.y || 0);
                         }
-                        clearPendingNdtLongPress();
                         pendingNdtPinHit = null;
-                    } else {
-                        return;
                     }
                 }
+
+                if (isDraggingNdtPinGroup) {
+                    const pt = ndtClientToImg(touch.clientX, touch.clientY);
+                    const dx = pt.x - ndtGroupDragLastX;
+                    const dy = pt.y - ndtGroupDragLastY;
+                    ndtGroupDragLastX = pt.x;
+                    ndtGroupDragLastY = pt.y;
+                    const items = getCurrentFloorNdtData();
+                    selectedNdtIds.forEach((id) => {
+                        if (String(id).startsWith('disp_')) return;
+                        const it = items.find(x => x && x.id === id);
+                        if (!it) return;
+                        if (it.boxX !== undefined) it.boxX += dx;
+                        if (it.boxY !== undefined) it.boxY += dy;
+                        if (it.targetX !== undefined) it.targetX += dx;
+                        if (it.targetY !== undefined) it.targetY += dy;
+                        if (it.x !== undefined) it.x += dx;
+                        if (it.y !== undefined) it.y += dy;
+                    });
+                    drawNdtCanvas();
+                    refreshNdtLoupe(touch.clientX, touch.clientY);
+                    return;
+                }
+
+                if (!isDraggingNdtPin || !activeDragNdtPin) return;
 
                 const pt = ndtClientToImg(touch.clientX, touch.clientY);
                 const vx = pt.x;
@@ -11024,7 +11048,7 @@ document.addEventListener('DOMContentLoaded', () => {
             ndtTouchMayPageScroll = false;
             if (e.touches.length === 0) ndtTouchStartedOnCanvas = false;
             hideTouchLoupe(NDT_LOUPE_ID);
-            if (pendingNdtPinHit && !isDraggingNdtPin) {
+            if (pendingNdtPinHit && !isDraggingNdtPin && !isDraggingNdtPinGroup) {
                 const item = pendingNdtPinHit.item;
                 pendingNdtPinHit = null;
                 if (item) openNdtModal(item.x || item.boxX || 0, item.y || item.boxY || 0, item);
@@ -11055,6 +11079,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 isNdtDisplacementMarking = false;
                 const coords = window._ndtDispMarkCoords || { x: 100, y: 100 };
                 openNdtDisplacementModal(coords.x, coords.y);
+            }
+            if (isDraggingNdtPinGroup) {
+                isDraggingNdtPinGroup = false;
+                saveStateToLocalStorage();
+                drawNdtCanvas();
             }
             if (isDraggingNdtPin) {
                 if (activeDragNdtPin) {
