@@ -1097,6 +1097,152 @@ html.layout-desktop #tab-ndt .ndt-top-bar .ndt-top-canvas-tools {
     padding: 0.5rem;
 }
 
+#tab-ndt #ndtSummaryTable {
+    width: max-content;
+    min-width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+    background: #fff;
+}
+
+#tab-ndt #ndtSummaryTable th,
+#tab-ndt #ndtSummaryTable td {
+    vertical-align: middle;
+    text-align: center;
+}
+
+#tab-ndt #ndtSummaryTable thead th {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    background: #f3f4f6;
+    font-weight: 800;
+    color: #171717;
+    border-bottom: 2px solid #c4c4c4;
+    box-shadow: 0 1px 0 #e5e5e5;
+    white-space: nowrap;
+}
+
+#tab-ndt #ndtSummaryTable tbody tr:nth-child(even) td {
+    background: #fafafa;
+}
+
+#tab-ndt #ndtSummaryTable tbody tr:nth-child(odd) td {
+    background: #fff;
+}
+
+#tab-ndt #ndtSummaryTable .ndt-row-actions {
+    white-space: nowrap;
+    min-width: 7.25rem;
+}
+
+#tab-ndt #ndtSummaryTable .ndt-row-actions .btn {
+    font-size: 0.72rem;
+    font-weight: 700;
+    padding: 0.24rem 0.52rem;
+    min-height: 1.85rem;
+    line-height: 1.2;
+}
+
+#tab-ndt #ndtSummaryTable .ndt-btn-edit {
+    border-color: #525252;
+    color: #262626;
+    background: #fff;
+}
+
+#tab-ndt #ndtSummaryTable .ndt-btn-edit:hover {
+    background: #f5f5f5;
+    border-color: #171717;
+    color: #171717;
+}
+
+#tab-ndt #ndtSummaryTable .ndt-btn-delete {
+    margin-left: 0.22rem;
+}
+
+#tab-ndt #ndtSummaryTable .ndt-row-actions-wide {
+    min-width: 10.5rem;
+}
+
+#tab-ndt #ndtSummaryTable .ndt-row-actions-wide .btn {
+    padding: 0.22rem 0.42rem;
+}
+
+@media (min-width: 769px) {
+    html:not(.layout-tablet) #tab-ndt #ndtSummaryTable {
+        font-size: 0.84rem;
+    }
+
+    html:not(.layout-tablet) #tab-ndt #ndtSummaryTable th,
+    html:not(.layout-tablet) #tab-ndt #ndtSummaryTable td {
+        padding: 0.52rem 0.62rem;
+        border: 1px solid #d4d4d4;
+        color: #262626;
+        line-height: 1.35;
+    }
+
+    html:not(.layout-tablet) #tab-ndt #ndtSummaryTable thead th {
+        font-size: 0.78rem;
+        padding: 0.48rem 0.55rem;
+    }
+
+    html:not(.layout-tablet) #tab-ndt #ndtSummaryTable .ndt-col-no {
+        font-weight: 800;
+        color: #525252;
+        white-space: nowrap;
+    }
+
+    html:not(.layout-tablet) #tab-ndt #ndtSummaryTable .ndt-col-location {
+        font-weight: 700;
+        text-align: left;
+        min-width: 7.5rem;
+    }
+
+    html:not(.layout-tablet) #tab-ndt #ndtSummaryTable .ndt-col-dim {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: 0.82rem;
+        white-space: nowrap;
+    }
+
+    html:not(.layout-tablet) #tab-ndt #ndtSummaryTable .ndt-col-ratio {
+        font-weight: 800;
+        color: #16a34a;
+    }
+
+    html:not(.layout-tablet) #tab-ndt #ndtSummaryTable th:last-child,
+    html:not(.layout-tablet) #tab-ndt #ndtSummaryTable td.ndt-row-actions {
+        position: sticky;
+        right: 0;
+        z-index: 1;
+        background: #fff;
+        box-shadow: -3px 0 6px rgba(0, 0, 0, 0.06);
+        min-width: 8.5rem;
+    }
+
+    html:not(.layout-tablet) #tab-ndt #ndtSummaryTable thead th:last-child {
+        z-index: 3;
+        background: #f3f4f6;
+    }
+
+    html:not(.layout-tablet) #tab-ndt #ndtSummaryTable tbody tr:nth-child(even) td.ndt-row-actions {
+        background: #fafafa;
+    }
+
+    html:not(.layout-tablet) #tab-ndt #ndtSummaryTable .ndt-row-actions .btn {
+        font-size: 0.74rem;
+        padding: 0.26rem 0.58rem;
+        min-height: 1.95rem;
+    }
+
+    html:not(.layout-tablet) #tab-ndt .ndt-results-table-wrap {
+        background: #fff;
+        border: 1.5px solid #c4c4c4;
+        border-radius: 12px;
+        padding: 0.55rem;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+    }
+}
+
 /* 터치 중 돋보기 — 화면/도면은 확대하지 않고, 손가락 아래를 위로 옮겨 보여줌 */
 .touch-loupe {
     position: absolute;
@@ -9881,10 +10027,16 @@ body:not(.bsa-tab-home) .home-fab-add-building {
         font-weight: 800;
         color: #2a2a2a;
     }
-    /* 관리(수정/삭제) 열 숨김 — 도면에서 핀 탭으로 수정 */
-    #tab-ndt #ndtSummaryTable th:last-child,
-    #tab-ndt #ndtSummaryTable td:last-child {
-        display: none !important;
+
+    /* 폰(≤768): 삭제만 숨김 — 수정은 표에서 */
+    @media (max-width: 768px) {
+        #tab-ndt #ndtSummaryTable .ndt-btn-delete {
+            display: none !important;
+        }
+
+        #tab-ndt #ndtSummaryTable .ndt-row-actions {
+            min-width: 3.6rem;
+        }
     }
 
     #tab-ndt .mobile-canvas-dock {
@@ -11119,8 +11271,45 @@ html.layout-tablet #tab-ndt #ndtSummaryTable tbody tr:nth-child(odd) td {
 }
 
 html.layout-tablet #tab-ndt #ndtSummaryTable th:last-child,
-html.layout-tablet #tab-ndt #ndtSummaryTable td:last-child {
+html.layout-tablet #tab-ndt #ndtSummaryTable td.ndt-row-actions {
+    display: table-cell !important;
+    position: sticky;
+    right: 0;
+    z-index: 1;
+    background: inherit;
+    box-shadow: -2px 0 5px rgba(0, 0, 0, 0.08);
+    white-space: nowrap;
+    min-width: 5.2rem;
+    padding: 0.22rem 0.3rem !important;
+}
+
+html.layout-tablet #tab-ndt #ndtSummaryTable thead th:last-child {
+    z-index: 3;
+    background: #ececec !important;
+}
+
+html.layout-tablet #tab-ndt #ndtSummaryTable .ndt-row-actions .btn {
+    font-size: 0.58rem !important;
+    padding: 0.18rem 0.32rem !important;
+    min-height: 1.55rem;
+    line-height: 1.15;
+}
+
+html.layout-tablet #tab-ndt #ndtSummaryTable .ndt-btn-delete {
     display: none !important;
+}
+
+html.layout-tablet #tab-ndt #ndtSummaryTable .ndt-row-actions-wide {
+    min-width: 6.8rem;
+}
+
+html.layout-tablet #tab-ndt #ndtSummaryTable .ndt-row-actions-wide .ndt-btn-delete {
+    display: none !important;
+}
+
+html.layout-tablet #tab-ndt #ndtSummaryTable .ndt-row-actions-wide .ndt-btn-edit,
+html.layout-tablet #tab-ndt #ndtSummaryTable .ndt-row-actions-wide .btn-outline:not(.ndt-btn-delete) {
+    font-size: 0.56rem !important;
 }
 
 /* 가로 모드 태블릿: 표 더 작게 · 스크롤·테두리 유지 (landscape 미디어쿼리 덮어씀) */
@@ -11236,6 +11425,16 @@ html.layout-tablet #tab-ndt #ndtSummaryTable td:last-child {
         overflow-x: auto;
         overflow-y: visible;
         max-height: none;
+    }
+
+    html.layout-tablet #tab-ndt #ndtSummaryTable .ndt-btn-delete {
+        display: inline-flex !important;
+    }
+
+    html.layout-tablet #tab-ndt #ndtSummaryTable .ndt-row-actions .btn {
+        font-size: 0.72rem !important;
+        padding: 0.24rem 0.5rem !important;
+        min-height: 1.85rem;
     }
 }
 

@@ -11651,9 +11651,9 @@ document.addEventListener('DOMContentLoaded', () => {
                     <td style="font-weight:800; color:#f8fafc;">${item.avgValue || '-'}</td>
                     <td style="font-weight:800; color:#c084fc;">${item.tiltRatio || '-'}</td>
                     <td>${gradeBadges[item.grade] || '-'}</td>
-                    <td>
-                        <button class="btn btn-sm btn-outline" style="border-color:#6b6b6b; color:#6b6b6b; padding:0.15rem 0.45rem;" onclick="window.editNdtItem('${item.id}')">수정</button>
-                        <button class="btn btn-sm btn-danger-outline" style="padding:0.15rem 0.45rem;" onclick="window.deleteNdtItem('${item.id}')">삭제</button>
+                    <td class="ndt-row-actions">
+                        <button type="button" class="btn btn-sm btn-outline ndt-btn-edit" onclick="window.editNdtItem('${item.id}')">수정</button>
+                        <button type="button" class="btn btn-sm btn-danger-outline ndt-btn-delete" onclick="window.deleteNdtItem('${item.id}')">삭제</button>
                     </td>
                 </tr>
             `).join('');
@@ -11664,17 +11664,17 @@ document.addEventListener('DOMContentLoaded', () => {
                 const ratioText = (item.sectionRatio !== undefined && item.sectionRatio !== null) ? `${item.sectionRatio.toFixed(1)}%` : '-';
                 return `
                 <tr>
-                    <td style="font-weight:700; color:#6b6b6b;">${item.no || (idx + 1)}</td>
-                    <td style="font-weight:700;">${item.location || '-'}</td>
+                    <td class="ndt-col-no">${item.no || (idx + 1)}</td>
+                    <td class="ndt-col-location">${item.location || '-'}</td>
                     <td>${item.component || '-'}</td>
-                    <td style="font-family:monospace; font-size:0.88rem;">${designText}</td>
-                    <td style="font-family:monospace; font-size:0.88rem;">${measuredText}</td>
+                    <td class="ndt-col-dim">${designText}</td>
+                    <td class="ndt-col-dim">${measuredText}</td>
                     <td>${item.finishState || '-'}</td>
-                    <td style="font-weight:800; color:#4ade80;">${ratioText}</td>
+                    <td class="ndt-col-ratio">${ratioText}</td>
                     <td>${item.sectionGrade ? (sectionGradeBadges[item.sectionGrade] || item.sectionGrade) : '-'}</td>
-                    <td>
-                        <button class="btn btn-sm btn-outline" style="border-color:#6b6b6b; color:#6b6b6b; padding:0.15rem 0.45rem;" onclick="window.editNdtItem('${item.id}')">수정</button>
-                        <button class="btn btn-sm btn-danger-outline" style="padding:0.15rem 0.45rem;" onclick="window.deleteNdtItem('${item.id}')">삭제</button>
+                    <td class="ndt-row-actions">
+                        <button type="button" class="btn btn-sm btn-outline ndt-btn-edit" onclick="window.editNdtItem('${item.id}')">수정</button>
+                        <button type="button" class="btn btn-sm btn-danger-outline ndt-btn-delete" onclick="window.deleteNdtItem('${item.id}')">삭제</button>
                     </td>
                 </tr>
             `;
@@ -11696,9 +11696,9 @@ document.addEventListener('DOMContentLoaded', () => {
                     <td style="font-family:monospace; font-size:0.88rem;">${measuredText}</td>
                     <td style="font-weight:800; color:#4ade80;">${ratioText}</td>
                     <td>${sectionGradeBadges[item.strengthGrade] || gradeText}</td>
-                    <td>
-                        <button class="btn btn-sm btn-outline" style="border-color:#6b6b6b; color:#6b6b6b; padding:0.15rem 0.45rem;" onclick="window.editNdtItem('${item.id}')">수정</button>
-                        <button class="btn btn-sm btn-danger-outline" style="padding:0.15rem 0.45rem;" onclick="window.deleteNdtItem('${item.id}')">삭제</button>
+                    <td class="ndt-row-actions">
+                        <button type="button" class="btn btn-sm btn-outline ndt-btn-edit" onclick="window.editNdtItem('${item.id}')">수정</button>
+                        <button type="button" class="btn btn-sm btn-danger-outline ndt-btn-delete" onclick="window.deleteNdtItem('${item.id}')">삭제</button>
                     </td>
                 </tr>
             `;
@@ -11713,9 +11713,9 @@ document.addEventListener('DOMContentLoaded', () => {
                     <td style="font-family:monospace; font-size:0.88rem;">${item.carbCover != null ? item.carbCover : '-'}</td>
                     <td style="font-family:monospace; font-size:0.88rem;">${typeof item.carbRemainMm === 'number' ? item.carbRemainMm.toFixed(2) : '-'}</td>
                     <td style="font-weight:800; color:#4ade80;">${typeof item.carbRemainingLifeYears === 'number' ? Math.round(item.carbRemainingLifeYears) : '-'}</td>
-                    <td>
-                        <button class="btn btn-sm btn-outline" style="border-color:#6b6b6b; color:#6b6b6b; padding:0.15rem 0.45rem;" onclick="window.editNdtItem('${item.id}')">수정</button>
-                        <button class="btn btn-sm btn-danger-outline" style="padding:0.15rem 0.45rem;" onclick="window.deleteNdtItem('${item.id}')">삭제</button>
+                    <td class="ndt-row-actions">
+                        <button type="button" class="btn btn-sm btn-outline ndt-btn-edit" onclick="window.editNdtItem('${item.id}')">수정</button>
+                        <button type="button" class="btn btn-sm btn-danger-outline ndt-btn-delete" onclick="window.deleteNdtItem('${item.id}')">삭제</button>
                     </td>
                 </tr>
             `).join('');
@@ -11733,9 +11733,9 @@ document.addEventListener('DOMContentLoaded', () => {
                     <td style="font-weight:800; color:#4ade80;">${flangeText}</td>
                     <td style="font-weight:800; color:#4ade80;">${webText}</td>
                     <td>${note}</td>
-                    <td>
-                        <button class="btn btn-sm btn-outline" style="border-color:#6b6b6b; color:#6b6b6b; padding:0.15rem 0.45rem;" onclick="window.editNdtItem('${item.id}')">수정</button>
-                        <button class="btn btn-sm btn-danger-outline" style="padding:0.15rem 0.45rem;" onclick="window.deleteNdtItem('${item.id}')">삭제</button>
+                    <td class="ndt-row-actions">
+                        <button type="button" class="btn btn-sm btn-outline ndt-btn-edit" onclick="window.editNdtItem('${item.id}')">수정</button>
+                        <button type="button" class="btn btn-sm btn-danger-outline ndt-btn-delete" onclick="window.deleteNdtItem('${item.id}')">삭제</button>
                     </td>
                 </tr>
             `;
@@ -11779,10 +11779,10 @@ document.addEventListener('DOMContentLoaded', () => {
                     <td style="font-weight:800; color:#f8fafc;">${calc.delta.toFixed(1)}</td>
                     <td style="font-weight:800; color:#c084fc;">${calc.tiltRatio}</td>
                     <td>${NDT_GRADE_BADGES[calc.grade] || NDT_GRADE_BADGES['a등급']}</td>
-                    <td>
-                        <button class="btn btn-sm btn-outline" style="border-color:#6b6b6b; color:#6b6b6b; padding:0.15rem 0.45rem;" onclick="window.showNdtDisplacementChart('${group.id}')">그래프</button>
-                        <button class="btn btn-sm btn-outline" style="border-color:#6b6b6b; color:#6b6b6b; padding:0.15rem 0.45rem;" onclick="window.editNdtDisplacementGroup('${group.id}')">수정</button>
-                        <button class="btn btn-sm btn-danger-outline" style="padding:0.15rem 0.45rem;" onclick="window.deleteNdtDisplacementGroup('${group.id}')">삭제</button>
+                    <td class="ndt-row-actions ndt-row-actions-wide">
+                        <button type="button" class="btn btn-sm btn-outline" onclick="window.showNdtDisplacementChart('${group.id}')">그래프</button>
+                        <button type="button" class="btn btn-sm btn-outline ndt-btn-edit" onclick="window.editNdtDisplacementGroup('${group.id}')">수정</button>
+                        <button type="button" class="btn btn-sm btn-danger-outline ndt-btn-delete" onclick="window.deleteNdtDisplacementGroup('${group.id}')">삭제</button>
                     </td>
                 </tr>
             `;
