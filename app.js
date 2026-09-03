@@ -7852,7 +7852,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let ndtActivePointerIsTouch = false;
     let ndtMarqueeSelectEnabled = false;
     let ndtAddSelectEnabled = false;
-    const NDT_TOUCH_LONG_PRESS_MS = 300;
+    const NDT_TOUCH_LONG_PRESS_MS = 500; // 모바일·태블릿: 0.5초 홀딩 후 드래그
     let isDraggingNdtPinGroup = false;
     let ndtGroupDragLastX = 0;
     let ndtGroupDragLastY = 0;
@@ -11102,12 +11102,15 @@ document.addEventListener('DOMContentLoaded', () => {
                         grabY: vy
                     };
                     pendingNdtPinIsTouch = true;
-                    // 마우스와 동일: 박스/화살표는 바로 드래그 (길게 누를 필요 없음)
-                    pendingNdtPinArmed = true;
-                    if (pendingNdtLongPressTimer) {
-                        clearTimeout(pendingNdtLongPressTimer);
-                        pendingNdtLongPressTimer = null;
-                    }
+                    // 모바일·태블릿: 0.5초 홀딩 후 드래그 (살짝 밀면 도면 팬)
+                    pendingNdtPinArmed = false;
+                    pendingNdtLongPressTimer = setTimeout(() => {
+                        if (!pendingNdtPinHit || !pendingNdtPinIsTouch) return;
+                        pendingNdtPinArmed = true;
+                        try { if (navigator.vibrate) navigator.vibrate(12); } catch (_e) { /* ignore */ }
+                        drawNdtCanvas();
+                        refreshNdtLoupe(ndtStartMouseX, ndtStartMouseY);
+                    }, NDT_TOUCH_LONG_PRESS_MS);
                     return;
                 }
 
@@ -11205,6 +11208,15 @@ document.addEventListener('DOMContentLoaded', () => {
                     const dx = touch.clientX - ndtStartMouseX;
                     const dy = touch.clientY - ndtStartMouseY;
                     const dist = Math.hypot(dx, dy);
+                    if (!pendingNdtPinArmed) {
+                        const pendingPart = pendingNdtPinHit?.part;
+                        if (pendingPart !== 'target' && dist > 14) {
+                            clearPendingNdtLongPress();
+                            pendingNdtPinHit = null;
+                            isNdtDragging = true;
+                        }
+                        return;
+                    }
                     if (dist <= 8) {
                         refreshNdtLoupe(touch.clientX, touch.clientY);
                         return;
@@ -20269,7 +20281,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let _mapLoupePending = null;
     const TOUCH_DRAG_THRESHOLD = 10; // 터치 클릭 vs 드래그 구분 (너무 크면 돋보기만 움직이는 구간이 김)
     const MOUSE_DRAG_THRESHOLD = 6;
-    const TOUCH_LONG_PRESS_MS = 0; // 모바일 핀: NDT와 같이 길게 누르지 않고 바로 드래그
+    const TOUCH_LONG_PRESS_MS = 500; // 모바일·태블릿: 0.5초 홀딩 후 핀 이동
     const MAP_LOUPE_ID = 'mapTouchLoupe';
     const NDT_LOUPE_ID = 'ndtTouchLoupe';
     const TOUCH_LOUPE_SIZE = 168;
@@ -21079,8 +21091,8 @@ document.addEventListener('DOMContentLoaded', () => {
             pendingDragHit = { hitInfo, imgX, imgY, additive: useAdditive };
             pendingDragIsTouch = isTouch;
             pendingDragHitStartTime = Date.now();
-            // 터치도 NDT와 같이 즉시 드래그 가능 (길게 누르기 대기 없음 → 돋보기만 남는 구간 제거)
-            pendingDragArmed = true;
+            // 마우스는 즉시, 터치(모바일·태블릿)는 0.5초 홀딩 후에만 이동
+            pendingDragArmed = !isTouch;
             if (hitInfo.defect && hitInfo.defect.id) {
                 const id = hitInfo.defect.id;
                 const wasInSelection = selectedDefectIds.has(id);
@@ -21101,7 +21113,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 drawCanvas();
             }
             if (isTouch) {
-                refreshMapLoupe(clientX, clientY);
+                pendingDragLongPressTimer = setTimeout(() => {
+                    if (!pendingDragHit || !pendingDragIsTouch) return;
+                    pendingDragArmed = true;
+                    try { if (navigator.vibrate) navigator.vibrate(12); } catch (_e) { /* ignore */ }
+                    drawCanvas();
+                    refreshMapLoupe(startMouseX, startMouseY);
+                }, TOUCH_LONG_PRESS_MS);
             }
             return;
         }
@@ -21210,11 +21228,25 @@ document.addEventListener('DOMContentLoaded', () => {
             const dist = Math.hypot(dx, dy);
             const threshold = pendingDragIsTouch ? TOUCH_DRAG_THRESHOLD : MOUSE_DRAG_THRESHOLD;
 
-            // 임계값 이하: 클릭 대기. 터치면 돋보기만 갱신(핀은 아직 고정)
-            if (dist <= threshold) {
-                if (pendingDragIsTouch && pendingDragArmed) refreshMapLoupe(clientX, clientY);
+            // 모바일: 홀딩 전에 손가락이 많이 움직이면 핀 고정 해제 → 도면 팬으로 전환
+            // (화살표 TIP은 홀딩 중에도 팬에 빼앗기지 않게 유지)
+            if (pendingDragIsTouch && !pendingDragArmed) {
+                const pendingPart = pendingDragHit?.hitInfo?.part;
+                if (pendingPart !== 'TIP' && dist > threshold) {
+                    clearPendingDragLongPress();
+                    pendingDragHit = null;
+                    isDragging = true;
+                    if (elements.planCanvas) elements.planCanvas.style.cursor = 'grabbing';
+                }
                 return;
             }
+
+            // 임계값 이하: 클릭 대기. 홀딩 완료 후 터치면 돋보기만 갱신(핀은 아직 고정)
+            if (pendingDragIsTouch && pendingDragArmed && dist <= threshold) {
+                refreshMapLoupe(clientX, clientY);
+                return;
+            }
+            if (dist <= threshold) return;
 
             if (dist > threshold) {
                 pushDefectHistory();
