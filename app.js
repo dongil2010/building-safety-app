@@ -25818,6 +25818,12 @@ document.addEventListener('DOMContentLoaded', () => {
         const lightness = (max + min) / (2 * 255);
         if (delta < 35 && lightness < 0.22) return '흑색';
 
+        // 채널이 뚜렷하면 그대로 (0,0,255 = 청색). 스타일 슬롯 이름에 묶지 않음
+        if (max === b && (b - g) >= 30 && (b - r) >= 30) return '청색';
+        if (max === g && (g - r) >= 25 && (g - b) >= 25) return '녹색';
+        if (r > 160 && g > 130 && b < 90 && (r - b) > 80) return '황색';
+        if (max === r && (r - g) >= 30 && (r - b) >= 30) return '적색';
+
         let hue = 0;
         if (delta > 0) {
             if (max === r) hue = ((g - b) / delta) % 6;
@@ -25828,35 +25834,16 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         if (hue >= 38 && hue <= 68 && r > 160 && g > 130) return '황색';
-        if (hue >= 68 && hue <= 165 && g >= Math.max(r, b) - 20) return '녹색';
-        if (hue >= 165 && hue <= 260) return '청색';
+        if (hue >= 70 && hue < 165 && g >= Math.max(r, b) - 20) return '녹색';
+        if (hue >= 165 && hue <= 270) return '청색';
         return '적색';
     }
 
-    // 범례 '구분' 열 — 내용(label)과 무관하게 항목 색상(hex) 기준으로만 결정
+    // 범례 '구분' 열 — 현재 색상(RGB)으로만 결정. 스타일 키(중점관리=녹색 등)에 묶지 않음
     function resolveLegendColorName(item) {
         const hex = normalizeHexColor(item && item.color);
         if (!hex) return '—';
-
-        const styleKeyColorNames = [
-            ['defectGoodGrade3', '흑색'],
-            ['defectBad', '적색'],
-            ['defectExistingGrade3', '적색'],
-            ['defectStructural', '적색'],
-            ['defectFinish', '적색'],
-            ['defectGood', '청색'],
-            ['defectNewGrade3', '청색'],
-            ['defectNonStructural', '청색'],
-            ['priorityManage', '녹색'],
-            ['defectStructuralGood', '녹색'],
-            ['defectNonStructuralGood', '녹색'],
-            ['defectFinishGood', '녹색']
-        ];
-        for (const [key, name] of styleKeyColorNames) {
-            if (normalizeHexColor(getStyleColor(key)) === hex) return name;
-        }
         if (hex === '#facc15' || hex === '#eab308' || hex === '#ca8a04') return '황색';
-
         return hexToLegendColorName(hex);
     }
 
