@@ -39,7 +39,7 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <meta name="apple-mobile-web-app-title" content="스마트 안전점검">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css">
-    <link rel="stylesheet" href="styles.css?v=20260903_230742">
+    <link rel="stylesheet" href="styles.css?v=20260903_231711">
     <!-- FontAwesome icons for clean engineering UI -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <!-- PDF 생성용: 페이지별로 직접 캡처해서 조립(큰 보고서에서 html2pdf 한방 렌더링이 캔버스 높이 한계로
@@ -652,6 +652,37 @@
                         <span>삭제</span>
                     </button>
                 </div>
+                <div class="ndt-right-rails" aria-label="NDT 우측 도구">
+                <aside class="ndt-cat-rail" aria-label="비파괴 조사 항목">
+                    <button type="button" class="ndt-cat-rail-btn active" data-ndt-cat="실측" onclick="window.setNdtCategory('실측')" title="부재 실측">
+                        <span class="ndt-cat-rail-emoji" aria-hidden="true">📏</span>
+                        <span class="ndt-cat-rail-label">실측</span>
+                    </button>
+                    <button type="button" class="ndt-cat-rail-btn" data-ndt-cat="강도" onclick="window.setNdtCategory('강도')" title="콘크리트 강도 (슈미트)">
+                        <span class="ndt-cat-rail-emoji" aria-hidden="true">🔨</span>
+                        <span class="ndt-cat-rail-label">강도</span>
+                    </button>
+                    <button type="button" class="ndt-cat-rail-btn" data-ndt-cat="탄산화" onclick="window.setNdtCategory('탄산화')" title="콘크리트 탄산화">
+                        <span class="ndt-cat-rail-emoji" aria-hidden="true">🧪</span>
+                        <span class="ndt-cat-rail-label">탄산화</span>
+                    </button>
+                    <button type="button" class="ndt-cat-rail-btn" data-ndt-cat="기울기" onclick="window.setNdtCategory('기울기')" title="외벽 기울기">
+                        <span class="ndt-cat-rail-emoji" aria-hidden="true">📐</span>
+                        <span class="ndt-cat-rail-label">기울기</span>
+                    </button>
+                    <button type="button" class="ndt-cat-rail-btn" data-ndt-cat="변위" onclick="window.setNdtCategory('변위')" title="부동침하 기울기">
+                        <span class="ndt-cat-rail-emoji" aria-hidden="true">📉</span>
+                        <span class="ndt-cat-rail-label">부동침하</span>
+                    </button>
+                    <button type="button" class="ndt-cat-rail-btn" data-ndt-cat="부재변위" onclick="window.setNdtCategory('부재변위')" title="부재변위">
+                        <span class="ndt-cat-rail-emoji" aria-hidden="true">🏗️</span>
+                        <span class="ndt-cat-rail-label">부재변위</span>
+                    </button>
+                    <button type="button" class="ndt-cat-rail-btn" data-ndt-cat="내화피복" onclick="window.setNdtCategory('내화피복')" title="내화피복 두께">
+                        <span class="ndt-cat-rail-emoji" aria-hidden="true">🧯</span>
+                        <span class="ndt-cat-rail-label">내화피복</span>
+                    </button>
+                </aside>
                 <aside class="mobile-side-rail" id="mobileNdtSideRail" aria-label="NDT 마킹 도구">
                     <button type="button" class="mobile-rail-btn active" id="mobileNdtBtnModePan" data-ndt-mode="PAN" title="선택">
                         <i class="fa-regular fa-hand-pointer"></i>
@@ -670,6 +701,7 @@
                         <span>추가</span>
                     </button>
                 </aside>
+                </div><!-- /.ndt-right-rails -->
             </div>
 
             <!-- 모바일 NDT 하단 액션 바 -->
@@ -2844,21 +2876,21 @@
     </div>
 
     <!-- Core → 탭 분류 → 기존 엔진(app.js) -->
-    <script src="js/core/state.js?v=20260903_230742"></script>
-    <script src="js/tabs/registry.js?v=20260903_230742"></script>
-    <script src="js/pdf-vector-bridge.js?v=20260903_230742"></script>
-    <script src="js/core/layout-mode.js?v=20260903_230742"></script>
-    <script src="js/core/mobile-keyboard.js?v=20260903_230742"></script>
-    <script src="js/tabs/home.js?v=20260903_230742"></script>
-    <script src="js/tabs/map.js?v=20260903_230742"></script>
-    <script src="js/tabs/survey.js?v=20260903_230742"></script>
-    <script src="js/tabs/ndt.js?v=20260903_230742"></script>
-    <script src="js/shared/report.js?v=20260903_230742"></script>
-    <script src="js/shared/hwpx-import.js?v=20260903_230742"></script>
-    <script src="js/shared/auth.js?v=20260903_230742"></script>
-    <script src="app.js?v=20260903_230742"></script>
+    <script src="js/core/state.js?v=20260903_231711"></script>
+    <script src="js/tabs/registry.js?v=20260903_231711"></script>
+    <script src="js/pdf-vector-bridge.js?v=20260903_231711"></script>
+    <script src="js/core/layout-mode.js?v=20260903_231711"></script>
+    <script src="js/core/mobile-keyboard.js?v=20260903_231711"></script>
+    <script src="js/tabs/home.js?v=20260903_231711"></script>
+    <script src="js/tabs/map.js?v=20260903_231711"></script>
+    <script src="js/tabs/survey.js?v=20260903_231711"></script>
+    <script src="js/tabs/ndt.js?v=20260903_231711"></script>
+    <script src="js/shared/report.js?v=20260903_231711"></script>
+    <script src="js/shared/hwpx-import.js?v=20260903_231711"></script>
+    <script src="js/shared/auth.js?v=20260903_231711"></script>
+    <script src="app.js?v=20260903_231711"></script>
     <script>
-        window.BSA_APP_VERSION = '20260903_230742';
+        window.BSA_APP_VERSION = '20260903_231711';
         (function () {
             var el = document.getElementById('appVersionText');
             if (el && window.BSA_APP_VERSION) el.textContent = 'v' + window.BSA_APP_VERSION;
@@ -2882,7 +2914,7 @@
                     native = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
                 } catch (e) {}
                 if (native) return;
-                navigator.serviceWorker.register('./sw.js?v=20260903_230742')
+                navigator.serviceWorker.register('./sw.js?v=20260903_231711')
                     .then(function(registration) {
                         console.log('✅ ServiceWorker Registered Successfully with scope:', registration.scope);
                         registration.update();

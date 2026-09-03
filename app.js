@@ -9581,6 +9581,9 @@ document.addEventListener('DOMContentLoaded', () => {
         });
         const activeBtn = document.getElementById(`btnNdtCat${catMap[cat]}`);
         if (activeBtn) activeBtn.classList.add('active');
+        document.querySelectorAll('#tab-ndt .ndt-cat-rail-btn[data-ndt-cat]').forEach(btn => {
+            btn.classList.toggle('active', btn.getAttribute('data-ndt-cat') === cat);
+        });
         if (typeof renderNdtSummaryTable === 'function') renderNdtSummaryTable();
         if (typeof drawNdtCanvas === 'function') drawNdtCanvas();
         if (typeof window.syncBulkStyleSlidersUi === 'function') window.syncBulkStyleSlidersUi();

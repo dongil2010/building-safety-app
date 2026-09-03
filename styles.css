@@ -579,6 +579,10 @@ html.layout-desktop #tab-ndt .ndt-top-bar .ndt-top-canvas-tools {
     display: flex !important;
 }
 
+#tab-ndt .ndt-cat-rail {
+    display: none;
+}
+
 .map-style-toolbar {
     background: #ffffff !important;
     border: 1.5px solid var(--border-highlight) !important;
@@ -10460,6 +10464,94 @@ html.layout-tablet .mobile-rail-btn.mobile-fab-area.active i {
     color: #ea580c !important;
 }
 
+/* NDT 태블릿: 조사 항목은 상단 칩 대신 도면 우측 세로 레일(마킹 도구 옆) */
+html.layout-tablet #tab-ndt .ndt-top-bar .ndt-top-cats {
+    display: none !important;
+}
+
+html.layout-tablet #tab-ndt .ndt-right-rails {
+    display: flex !important;
+    flex-direction: row !important;
+    align-items: stretch !important;
+    gap: 0.12rem !important;
+    position: absolute !important;
+    right: 0.28rem !important;
+    top: 50% !important;
+    left: auto !important;
+    bottom: auto !important;
+    transform: translateY(-50%) !important;
+    z-index: 45 !important;
+    max-height: calc(100% - 4.6rem) !important;
+    pointer-events: none !important;
+}
+
+html.layout-tablet #tab-ndt .ndt-right-rails > aside {
+    pointer-events: auto !important;
+}
+
+html.layout-tablet #tab-ndt .ndt-cat-rail {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 0.12rem !important;
+    padding: 0.22rem 0.16rem !important;
+    overflow-y: auto !important;
+    -webkit-overflow-scrolling: touch;
+    background: #ffffff !important;
+    border: 1px solid #d4d4d4 !important;
+    border-radius: 10px !important;
+    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.12) !important;
+    flex-shrink: 0;
+}
+
+html.layout-tablet #tab-ndt .ndt-cat-rail-btn {
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: center !important;
+    justify-content: center !important;
+    width: 2.55rem !important;
+    min-height: 2.35rem !important;
+    padding: 0.12rem 0.06rem !important;
+    gap: 0.06rem !important;
+    border-radius: 8px !important;
+    border: 1.5px solid #e5e7eb !important;
+    background: #f9fafb !important;
+    color: #525252 !important;
+    font-size: 0.48rem !important;
+    font-weight: 800 !important;
+    line-height: 1.05 !important;
+    white-space: nowrap;
+    cursor: pointer;
+}
+
+html.layout-tablet #tab-ndt .ndt-cat-rail-emoji {
+    font-size: 0.82rem !important;
+    line-height: 1;
+}
+
+html.layout-tablet #tab-ndt .ndt-cat-rail-label {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+html.layout-tablet #tab-ndt .ndt-cat-rail-btn.active {
+    border: 2px solid #2563eb !important;
+    background: #eff6ff !important;
+    color: #1d4ed8 !important;
+    box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.22) !important;
+}
+
+html.layout-tablet #tab-ndt .ndt-right-rails .mobile-side-rail {
+    position: static !important;
+    top: auto !important;
+    right: auto !important;
+    left: auto !important;
+    bottom: auto !important;
+    transform: none !important;
+    max-height: none !important;
+    align-self: stretch;
+}
+
 /* 하단 독 = 모바일 FAB 바 디자인 */
 html.layout-tablet #tab-map .mobile-canvas-dock,
 html.layout-tablet #tab-ndt .mobile-canvas-dock,
@@ -10737,7 +10829,8 @@ html.layout-tablet #ndtStyleSizeToolbar.is-mobile-sheet-open {
 html.layout-tablet body.defect-modal-open .mobile-canvas-dock,
 html.layout-tablet body.ndt-modal-open .mobile-canvas-dock,
 html.layout-tablet body.defect-modal-open .mobile-side-rail,
-html.layout-tablet body.ndt-modal-open .mobile-side-rail {
+html.layout-tablet body.ndt-modal-open .mobile-side-rail,
+html.layout-tablet body.ndt-modal-open .ndt-right-rails {
     display: none !important;
 }
 
