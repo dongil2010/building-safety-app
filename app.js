@@ -661,9 +661,21 @@ document.addEventListener('DOMContentLoaded', () => {
     });
     // 앱/탭 복귀 시에도 동기화 (비행기모드 해제 후 online 이벤트가 안 뜨는 WebView 대비)
     document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'hidden') {
+            // 작업 탭에서 앱을 내리거나 화면을 벗어나면 미뤄 둔 변경을 이때 올린다
+            if (navigator.onLine && typeof window.flushDeferredWorkTabSync === 'function') {
+                try { window.flushDeferredWorkTabSync('hidden'); } catch (_e) { /* ignore */ }
+            }
+            return;
+        }
         if (document.visibilityState !== 'visible') return;
         if (navigator.onLine && typeof reconnectFirestoreSync === 'function') {
             reconnectFirestoreSync('visible');
+        }
+    });
+    window.addEventListener('pagehide', () => {
+        if (navigator.onLine && typeof window.flushDeferredWorkTabSync === 'function') {
+            try { window.flushDeferredWorkTabSync('pagehide'); } catch (_e) { /* ignore */ }
         }
     });
     window.addEventListener('focus', () => {
@@ -3618,7 +3630,14 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         } catch (_e) { /* ignore */ }
 
+        const prevTabId = window.state.currentTab;
         window.state.currentTab = targetTabId;
+
+        // 작업 탭 → 홈: 작업 중 미뤄 둔 변경을 이때 한 번에 올린다 (실시간 업로드 대신)
+        if (targetTabId === 'tab-home' && prevTabId && prevTabId !== 'tab-home'
+            && typeof window.flushDeferredWorkTabSync === 'function') {
+            try { window.flushDeferredWorkTabSync('home'); } catch (_e) { /* ignore */ }
+        }
 
         document.querySelectorAll('.tab-content').forEach(content => {
             if (content.id === targetTabId) {
@@ -32604,6 +32623,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
     async function flushPendingRemoteSync() {
         if (!_pendingRemoteData) return;
+        // 작업 탭에서는 원격 반영을 홈으로 나갈 때까지 보류 (switchTab → flushDeferredWorkTabSync)
+        if (typeof isWorkTabSyncDeferred === 'function' && isWorkTabSyncDeferred()) return;
         if (isRealtimeUiGestureBusy() || _syncInFlight) {
             scheduleFlushPendingRemoteSync();
             return;
@@ -34342,7 +34363,23 @@ document.addEventListener('DOMContentLoaded', () => {
         return sanitizedDefects;
     }
 
-    function scheduleSyncToFirebase() {
+    // 작업 탭(위치도·조사표·비파괴)에서는 실시간 업로드/원격 반영을 하지 않는다.
+    // 저장할 때마다 올리면 상태 교체·다시 그리기로 작업이 계속 끊기므로,
+    // 변경은 로컬에만 쌓아 두고 홈으로 나갈 때(또는 앱이 백그라운드로 갈 때) 한 번에 올린다.
+    const WORK_TABS_DEFER_SYNC = new Set(['tab-map', 'tab-survey', 'tab-ndt']);
+    let _deferredSyncDirty = false;
+
+    function isWorkTabSyncDeferred() {
+        return !!(window.state && WORK_TABS_DEFER_SYNC.has(window.state.currentTab));
+    }
+    window.isWorkTabSyncDeferred = isWorkTabSyncDeferred;
+
+    function scheduleSyncToFirebase(opts) {
+        const force = !!(opts && opts.force);
+        if (isWorkTabSyncDeferred() && !force) {
+            _deferredSyncDirty = true;
+            return;
+        }
         if (!db || !window.state.companyId || !navigator.onLine) return;
         // 원격 적용/업로드 중이면 버리지 말고 끝나면 한 번 더 돌린다
         if (isRemoteSyncing || _syncInFlight) {
@@ -34355,6 +34392,26 @@ document.addEventListener('DOMContentLoaded', () => {
             syncStateToFirebase();
         }, 400);
     }
+
+    /** 작업 탭에서 미뤄 둔 업로드·원격 반영을 지금 처리 (홈 진입·백그라운드 전환 시) */
+    function flushDeferredWorkTabSync(reason) {
+        const hadDirty = _deferredSyncDirty;
+        _deferredSyncDirty = false;
+        if (!db || !window.state.companyId || !navigator.onLine) {
+            // 오프라인이면 표시만 남겨 두고, 온라인 복귀 때 reconnect 경로가 올린다
+            if (hadDirty) _deferredSyncDirty = true;
+            return;
+        }
+        if (hadDirty) {
+            if (_syncDebounceTimer) clearTimeout(_syncDebounceTimer);
+            _syncDebounceTimer = null;
+            // 서버 병합 후 업로드 — 미뤄 둔 원격 스냅샷도 이 과정에서 반영됨
+            syncStateToFirebase();
+        } else if (_pendingRemoteData && typeof scheduleFlushPendingRemoteSync === 'function') {
+            scheduleFlushPendingRemoteSync();
+        }
+    }
+    window.flushDeferredWorkTabSync = flushDeferredWorkTabSync;
 
     /** 온라인 복귀·앱 포그라운드: 실시간 리스너 재구독 + 서버 기준 병합 동기화 */
     let _reconnectSyncTimer = null;
@@ -34377,6 +34434,8 @@ document.addEventListener('DOMContentLoaded', () => {
             _reconnectRetryTimer = setTimeout(() => {
                 _reconnectRetryTimer = null;
                 if (!navigator.onLine) return;
+                // 작업 탭이면 직접 올리지 않고 홈 진입 때까지 미룸 (작업 끊김 방지)
+                if (isWorkTabSyncDeferred()) { _deferredSyncDirty = true; return; }
                 if (typeof syncStateToFirebase === 'function') syncStateToFirebase();
             }, (reason === 'online') ? 2500 : 1200);
         }, delay);
@@ -35067,7 +35126,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     _pendingRemoteData = data;
                     return;
                 }
-                if (isRealtimeUiGestureBusy()) {
+                // 작업 탭(위치도·조사표·비파괴)에서는 화면을 건드리지 않고 보류 → 홈 진입 시 반영
+                if (isWorkTabSyncDeferred() || isRealtimeUiGestureBusy()) {
                     _pendingRemoteData = data;
                     return;
                 }
