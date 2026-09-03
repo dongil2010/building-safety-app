@@ -24,6 +24,8 @@
 .\scripts\git-sync.ps1 -Message "커밋 메시지" -NoPush  # push만 생략
 ```
 
+배포 시 스크립트가 `app.js`/`styles.css`/`js/*`의 `?v=`, 화면 `BSA_APP_VERSION`, `sw.js` 등록 URL·캐시 이름을 **같은 시각 토큰**으로 맞춘다. 에이전트가 `?v=`를 손으로 올리지 않아도 된다.
+
 ## Cursor 에이전트 동작
 
 - **상시 동기화**: 의미 있는 코드 변경을 마치면 별도 지시 없이도 표준 루틴(커밋 확인 → 필요 시 pull 1회 → commit → push)을 수행
