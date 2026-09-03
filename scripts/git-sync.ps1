@@ -81,18 +81,25 @@ function Update-CacheBustTokens {
     Write-Host "cache-bust -> $Label"
 }
 
-git fetch origin 2>&1 | Out-Null
-$remoteAhead = git log HEAD..origin/main --oneline 2>$null
-if ($remoteAhead) {
+function Invoke-GitPullAlways {
+    param([string]$Reason = "sync")
+    Write-Host "pull origin main ($Reason)..."
+    git fetch origin 2>&1 | Out-Null
     $dirty = git status --porcelain
     if ($dirty) {
         git stash push -u -m "git-sync autostash"
         git pull origin main
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
         git stash pop
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     } else {
         git pull origin main
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     }
 }
+
+# 푸시 전/커밋 전: 원격이 앞서지 않아도 항상 pull로 확인
+Invoke-GitPullAlways -Reason "before commit"
 
 $status = git status --porcelain
 if (-not $status) {
@@ -118,5 +125,7 @@ git add web-version.json
 Invoke-GitCommitUtf8 -CommitMessage ("web-version.json 배포 버전 갱신 ({0})" -f $sha)
 
 if (-not $NoPush) {
+    Invoke-GitPullAlways -Reason "before push"
     git push origin main
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 }
