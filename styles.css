@@ -1019,6 +1019,7 @@ body {
     font-size: 0.82rem;
     font-weight: 800;
     cursor: pointer;
+    white-space: nowrap;
 }
 
 .map-selection-delete:hover {
@@ -1037,6 +1038,7 @@ body {
     font-size: 0.78rem;
     font-weight: 700;
     cursor: pointer;
+    white-space: nowrap;
 }
 
 .map-selection-rotate:hover {
@@ -2303,18 +2305,32 @@ body {
     }
 
     #tab-ndt .mobile-map-fab.has-tilt-rotate {
-        grid-template-columns: repeat(4, 1fr);
+        display: flex !important;
+        grid-template-columns: none;
+        justify-content: space-evenly;
+        align-items: stretch;
+        gap: 0.1rem;
+        padding: 0.12rem 0.14rem;
     }
 
     #tab-ndt .mobile-fab-btn {
-        min-height: 2.2rem;
-        font-size: 0.48rem;
-        padding: 0.08rem 0.02rem;
+        flex: 1 1 0;
+        min-width: 0;
+        min-height: 1.7rem;
+        font-size: 0.56rem;
+        padding: 0.04rem 0.16rem;
         gap: 0.02rem;
+        white-space: nowrap;
+    }
+
+    #tab-ndt .mobile-fab-btn span {
+        white-space: nowrap;
+        word-break: keep-all;
+        line-height: 1;
     }
 
     #tab-ndt .mobile-fab-btn i {
-        font-size: 0.78rem;
+        font-size: 0.66rem;
     }
 
     #tab-ndt #ndtSelectionBar {
@@ -2329,9 +2345,10 @@ body {
 
     #tab-ndt #ndtSelectionBar .map-selection-delete,
     #tab-ndt #ndtSelectionBar .map-selection-rotate {
-        padding: 0.22rem 0.5rem;
-        font-size: 0.7rem;
-        gap: 0.2rem;
+        padding: 0.16rem 0.42rem;
+        font-size: 0.62rem;
+        gap: 0.16rem;
+        white-space: nowrap;
     }
 
     #tab-ndt #btnRotateSelectedNdtTilt {
@@ -4271,7 +4288,12 @@ html:not(.layout-desktop) .survey-inline-select {
     }
 
     .mobile-ndt-fab.has-tilt-rotate {
-        grid-template-columns: repeat(4, 1fr);
+        display: flex !important;
+        grid-template-columns: none;
+        justify-content: space-evenly;
+        align-items: stretch;
+        gap: 0.1rem;
+        padding: 0.12rem 0.14rem;
     }
 
     .mobile-fab-btn {
@@ -4279,23 +4301,34 @@ html:not(.layout-desktop) .survey-inline-select {
         flex-direction: column;
         align-items: center;
         justify-content: center;
-        gap: 0.06rem;
-        min-height: 2.45rem;
+        gap: 0.04rem;
+        min-height: 1.85rem;
         border-radius: 8px;
         border: none;
         background: transparent;
         color: #404040;
-        font-size: 0.5rem;
+        font-size: 0.56rem;
         font-weight: 800;
         cursor: pointer;
-        padding: 0.12rem 0.04rem;
+        padding: 0.06rem 0.16rem;
         -webkit-tap-highlight-color: transparent;
-        line-height: 1.05;
+        line-height: 1;
+        white-space: nowrap;
+    }
+
+    .mobile-fab-btn span {
+        white-space: nowrap;
+        word-break: keep-all;
+        line-height: 1;
     }
 
     .mobile-fab-btn i {
         font-size: 0.88rem;
         color: #262626;
+    }
+
+    .mobile-ndt-fab .mobile-fab-btn i {
+        font-size: 0.66rem;
     }
 
     .mobile-fab-btn.active,
@@ -10278,7 +10311,12 @@ html.layout-tablet .mobile-ndt-fab {
 }
 
 html.layout-tablet .mobile-ndt-fab.has-tilt-rotate {
-    grid-template-columns: repeat(4, 1fr) !important;
+    display: flex !important;
+    grid-template-columns: none !important;
+    justify-content: space-evenly !important;
+    align-items: stretch !important;
+    gap: 0.12rem !important;
+    padding: 0.16rem 0.18rem !important;
 }
 
 html.layout-tablet .mobile-fab-btn,
@@ -10287,25 +10325,37 @@ html.layout-tablet #tab-map .mobile-canvas-dock .mobile-fab-btn {
     flex-direction: column !important;
     align-items: center !important;
     justify-content: center !important;
+    flex: 1 1 0 !important;
     min-width: 0 !important;
-    min-height: 2.65rem !important;
+    min-height: 2.05rem !important;
     width: auto !important;
     height: auto !important;
-    gap: 0.08rem !important;
+    gap: 0.04rem !important;
     border-radius: 8px !important;
     border: none !important;
     background: transparent !important;
     color: #404040 !important;
-    font-size: 0.55rem !important;
+    font-size: 0.6rem !important;
     font-weight: 800 !important;
-    padding: 0.16rem 0.06rem !important;
-    line-height: 1.05 !important;
+    padding: 0.08rem 0.18rem !important;
+    line-height: 1 !important;
+    white-space: nowrap !important;
+}
+
+html.layout-tablet .mobile-fab-btn span {
+    white-space: nowrap !important;
+    word-break: keep-all !important;
+    line-height: 1 !important;
 }
 
 html.layout-tablet .mobile-fab-btn i,
 html.layout-tablet #tab-map .mobile-canvas-dock .mobile-fab-btn i {
     font-size: 0.98rem !important;
     color: #262626 !important;
+}
+
+html.layout-tablet #tab-ndt .mobile-fab-btn i {
+    font-size: 0.72rem !important;
 }
 
 html.layout-tablet .mobile-fab-btn.active,
