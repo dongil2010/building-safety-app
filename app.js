@@ -34633,6 +34633,19 @@ document.addEventListener('DOMContentLoaded', () => {
         return new Promise((resolve) => setTimeout(resolve, ms));
     }
 
+    /**
+     * 핀/영역/NDT 드래그·핀치 중이면 끝날 때까지 대기.
+     * 업로드 동기화가 state.defects/ndtData를 통째로 교체하고 도면을 다시 그리면
+     * 잡고 있던 핀 객체가 옛 객체가 되어 드래그가 풀리므로, 제스처가 끝난 뒤 진행한다.
+     */
+    async function waitForUiGestureIdle(maxMs = 60000) {
+        if (typeof isRealtimeUiGestureBusy !== 'function') return;
+        const deadline = Date.now() + maxMs;
+        while (isRealtimeUiGestureBusy() && Date.now() < deadline) {
+            await sleepMs(120);
+        }
+    }
+
     function getSyncLeaseDeviceId() {
         try {
             let id = localStorage.getItem('bsa_sync_device_id');
@@ -34723,8 +34736,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 return { ownerId, token, deviceId };
             }
 
-            // 토스트는 실제로 타인 잠금을 본 경우에만, 자주 울리지 않게
-            if (sawForeign && (!warned || (Date.now() - _syncLeaseWaitToastAt) > 20000)) {
+            // 토스트는 실제로 타인 잠금을 본 경우에만, 자주 울리지 않게 (드래그 중엔 띄우지 않음)
+            const gestureBusy = typeof isRealtimeUiGestureBusy === 'function' && isRealtimeUiGestureBusy();
+            if (sawForeign && !gestureBusy && (!warned || (Date.now() - _syncLeaseWaitToastAt) > 20000)) {
                 warned = true;
                 _syncLeaseWaitToastAt = Date.now();
                 if (typeof window.showToast === 'function') {
@@ -34800,11 +34814,17 @@ document.addEventListener('DOMContentLoaded', () => {
         const docId = getCompanyDocId();
         const docRef = db.collection('safety_app').doc(docId);
         try {
+            // 드래그 중이면 잠금을 잡기 전에 먼저 기다림 (잠금을 오래 쥐고 있지 않게)
+            await waitForUiGestureIdle();
+
             // 다른 작업자가 올리는 중이면 잠금이 풀릴 때까지 대기 → 완료본을 받은 뒤 동기화
             leaseInfo = await acquireCompanySyncLease(docRef);
             leaseHeartbeatTimer = setInterval(() => {
                 heartbeatCompanySyncLease(docRef, leaseInfo);
             }, SYNC_LEASE_HEARTBEAT_MS);
+
+            // 잠금 대기 중 사용자가 드래그를 시작했을 수 있음 — 상태 교체 전 다시 확인
+            await waitForUiGestureIdle();
 
             const snap = await fetchCompanyDocSnap(docRef);
             let serverData = snap.exists ? snap.data() : {};
@@ -34865,6 +34885,9 @@ document.addEventListener('DOMContentLoaded', () => {
             await uploadFloorDrawingsForSync(window.state.buildings);
             await hydrateLocalImagesFromIndexedDb();
             refreshCurrentBuildingFromState();
+
+            // 사진/도면 업로드 동안 드래그가 시작됐으면 재병합·다시 그리기 전에 대기
+            await waitForUiGestureIdle();
 
             // 쓰기 직전 서버 재조회 후 재병합 (잠금 덕에 동료 중간 쓰기는 거의 없지만 안전망)
             const snapFresh = await fetchCompanyDocSnap(docRef);
