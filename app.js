@@ -12694,6 +12694,17 @@ document.addEventListener('DOMContentLoaded', () => {
     function syncNdtDrawerToCanvasArea() {
         const overlay = document.getElementById('ndtModal');
         if (!overlay) return;
+
+        // 모바일 세로 하단 시트 · 가로 우측 드로어는 전체 화면 기준 (도면 영역에 묶지 않음)
+        if (typeof layoutMediaMobileDefectDrawer === 'function' && layoutMediaMobileDefectDrawer()) {
+            overlay.classList.remove('ndt-drawer-in-canvas');
+            overlay.style.top = '';
+            overlay.style.left = '';
+            overlay.style.width = '';
+            overlay.style.height = '';
+            return;
+        }
+
         const canvasArea = document.getElementById('ndtCanvasContainer');
         const onNdtTab = window.state.currentTab === 'tab-ndt';
         if (onNdtTab && canvasArea) {
