@@ -34596,6 +34596,155 @@ document.addEventListener('DOMContentLoaded', () => {
         return isChanged;
     }
 
+
+    // --- 회사 문서 동기화 잠금(lease): 다른 기기가 올리는 동안은 기다렸다가 완료본을 받은 뒤 동기화 ---
+    const SYNC_LEASE_STALE_MS = 150000; // heartbeat 없으면 이 시간 후 만료로 간주
+    const SYNC_LEASE_WAIT_MS = 120000;  // 타인 업로드 최대 대기
+    const SYNC_LEASE_POLL_MS = 1500;
+    const SYNC_LEASE_HEARTBEAT_MS = 25000;
+    let _syncLeaseWaitToastAt = 0;
+
+    function sleepMs(ms) {
+        return new Promise((resolve) => setTimeout(resolve, ms));
+    }
+
+    function getSyncLeaseDeviceId() {
+        try {
+            let id = localStorage.getItem('bsa_sync_device_id');
+            if (!id) {
+                id = `d_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
+                localStorage.setItem('bsa_sync_device_id', id);
+            }
+            return id;
+        } catch (_e) {
+            return `d_${Date.now().toString(36)}`;
+        }
+    }
+
+    function getSyncLeaseOwnerId() {
+        return window.state.uid || (`anon_${getSyncLeaseDeviceId()}`);
+    }
+
+    function isSyncLeaseFresh(lease, now) {
+        if (!lease || !lease.token) return false;
+        const beat = Number(lease.heartbeatAt || lease.startedAt) || 0;
+        if (!beat) return false;
+        return (now - beat) < SYNC_LEASE_STALE_MS;
+    }
+
+    function isForeignSyncLease(lease, myToken, now) {
+        if (!isSyncLeaseFresh(lease, now)) return false;
+        return String(lease.token) !== String(myToken);
+    }
+
+    async function acquireCompanySyncLease(docRef) {
+        const ownerId = getSyncLeaseOwnerId();
+        const token = `${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
+        const deviceId = getSyncLeaseDeviceId();
+        const waitDeadline = Date.now() + SYNC_LEASE_WAIT_MS;
+        let warned = false;
+
+        while (true) {
+            let acquired = false;
+            let foreign = false;
+            let holderName = '';
+            try {
+                await db.runTransaction(async (tx) => {
+                    const snap = await tx.get(docRef);
+                    const data = snap.exists ? (snap.data() || {}) : {};
+                    const lease = data.syncLease || null;
+                    const now = Date.now();
+                    if (isForeignSyncLease(lease, token, now)) {
+                        foreign = true;
+                        holderName = (lease && (lease.ownerName || lease.ownerId)) || '다른 작업자';
+                        return;
+                    }
+                    tx.set(docRef, {
+                        syncLease: {
+                            ownerId,
+                            ownerName: window.state.userName || '',
+                            deviceId,
+                            token,
+                            startedAt: now,
+                            heartbeatAt: now
+                        }
+                    }, { merge: true });
+                    acquired = true;
+                });
+            } catch (e) {
+                console.warn('동기화 잠금 획득 실패, 재시도:', e);
+                foreign = true;
+            }
+            if (acquired) return { ownerId, token, deviceId };
+
+            if (Date.now() >= waitDeadline) {
+                // 대기 한도 초과: 만료/장애로 보고 강제 점유 (데이터는 이후 재조회로 맞춤)
+                console.warn('동기화 잠금 대기 시간 초과 — 강제 획득');
+                const now = Date.now();
+                await docRef.set({
+                    syncLease: {
+                        ownerId,
+                        ownerName: window.state.userName || '',
+                        deviceId,
+                        token,
+                        startedAt: now,
+                        heartbeatAt: now,
+                        forced: true
+                    }
+                }, { merge: true });
+                return { ownerId, token, deviceId };
+            }
+
+            if (!warned || (Date.now() - _syncLeaseWaitToastAt) > 8000) {
+                warned = true;
+                _syncLeaseWaitToastAt = Date.now();
+                if (typeof window.showToast === 'function') {
+                    window.showToast(
+                        `${holderName || '다른 작업자'}가 동기화 중입니다. 완료될 때까지 기다린 뒤 반영합니다.`,
+                        'info',
+                        4500
+                    );
+                }
+            }
+            await sleepMs(SYNC_LEASE_POLL_MS);
+        }
+    }
+
+    async function heartbeatCompanySyncLease(docRef, leaseInfo) {
+        if (!docRef || !leaseInfo || !leaseInfo.token) return;
+        try {
+            await db.runTransaction(async (tx) => {
+                const snap = await tx.get(docRef);
+                const lease = snap.exists ? ((snap.data() || {}).syncLease || null) : null;
+                if (!lease || String(lease.token) !== String(leaseInfo.token)) return;
+                tx.set(docRef, {
+                    syncLease: Object.assign({}, lease, { heartbeatAt: Date.now() })
+                }, { merge: true });
+            });
+        } catch (e) {
+            console.warn('동기화 잠금 heartbeat 실패:', e);
+        }
+    }
+
+    async function releaseCompanySyncLease(docRef, leaseInfo) {
+        if (!docRef || !leaseInfo || !leaseInfo.token) return;
+        try {
+            await db.runTransaction(async (tx) => {
+                const snap = await tx.get(docRef);
+                const lease = snap.exists ? ((snap.data() || {}).syncLease || null) : null;
+                if (!lease || String(lease.token) !== String(leaseInfo.token)) return;
+                tx.set(docRef, {
+                    syncLease: firebase.firestore.FieldValue.delete()
+                }, { merge: true });
+            });
+        } catch (e) {
+            console.warn('동기화 잠금 해제 실패:', e);
+            try {
+                await docRef.set({ syncLease: firebase.firestore.FieldValue.delete() }, { merge: true });
+            } catch (_e2) { /* ignore */ }
+        }
+    }
+
     async function fetchCompanyDocSnap(docRef) {
         // 온라인일 때는 캐시가 아닌 서버 문서를 읽어, 다른 기기 작업을 덮어쓰지 않게 한다
         if (typeof navigator === 'undefined' || navigator.onLine !== false) {
@@ -34617,9 +34766,17 @@ document.addEventListener('DOMContentLoaded', () => {
         if (typeof flushOverviewCaptionsFromDom === 'function') flushOverviewCaptionsFromDom();
         _syncInFlight = true;
         ensureSyncMetaState();
+        let leaseInfo = null;
+        let leaseHeartbeatTimer = null;
+        const docId = getCompanyDocId();
+        const docRef = db.collection('safety_app').doc(docId);
         try {
-            const docId = getCompanyDocId();
-            const docRef = db.collection('safety_app').doc(docId);
+            // 다른 작업자가 올리는 중이면 잠금이 풀릴 때까지 대기 → 완료본을 받은 뒤 동기화
+            leaseInfo = await acquireCompanySyncLease(docRef);
+            leaseHeartbeatTimer = setInterval(() => {
+                heartbeatCompanySyncLease(docRef, leaseInfo);
+            }, SYNC_LEASE_HEARTBEAT_MS);
+
             const snap = await fetchCompanyDocSnap(docRef);
             let serverData = snap.exists ? snap.data() : {};
 
@@ -34669,7 +34826,7 @@ document.addEventListener('DOMContentLoaded', () => {
             window.state.deletedNdtIds = ndtMerge.deletedNdtIds;
             window.state.deletedNdtAt = ndtMerge.deletedNdtAt || {};
 
-            // 사진/도면 업로드는 시간이 걸림 — 그동안 다른 기기가 서버를 갱신할 수 있음
+            // 사진/도면 업로드 (잠금 유지 + heartbeat)
             await uploadInlineDefectPhotosForSync(window.state.defects);
             const fieldRasterOnly = typeof isNativeAndroidApp === 'function' && isNativeAndroidApp() && !layoutIsPcLike();
             if (!fieldRasterOnly) {
@@ -34680,8 +34837,7 @@ document.addEventListener('DOMContentLoaded', () => {
             await hydrateLocalImagesFromIndexedDb();
             refreshCurrentBuildingFromState();
 
-            // 쓰기 직전 서버 재조회: 업로드 중 올라온 동료 데이터를 받은 뒤 로컬을 다시 얹는다
-            // (미완료 서버 스냅샷만 보고 올리면 상대 조사가 통째로 사라질 수 있는 레이스 완화)
+            // 쓰기 직전 서버 재조회 후 재병합 (잠금 덕에 동료 중간 쓰기는 거의 없지만 안전망)
             const snapFresh = await fetchCompanyDocSnap(docRef);
             serverData = snapFresh.exists ? snapFresh.data() : {};
             mergedDeletedBuildings = mergeDeletedBuildingIds(
@@ -34787,7 +34943,6 @@ document.addEventListener('DOMContentLoaded', () => {
                     loadFloorDrawing(state.currentFloor, { preserveView: true });
                 }
             }
-            // 동기화로 받은 서버 결함·NDT 반영 UI
             if (typeof renderDefectListPanel === 'function') renderDefectListPanel();
             if (typeof drawCanvas === 'function') drawCanvas();
             if (typeof drawNdtCanvas === 'function') drawNdtCanvas();
@@ -34798,7 +34953,6 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         } catch (e) {
             console.warn('Firebase Sync Error:', e);
-            // 네트워크 순간 단절: 곧 재시도
             _syncPending = true;
             setTimeout(() => {
                 if (navigator.onLine && _syncPending) {
@@ -34807,6 +34961,14 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             }, 2000);
         } finally {
+            if (leaseHeartbeatTimer) {
+                clearInterval(leaseHeartbeatTimer);
+                leaseHeartbeatTimer = null;
+            }
+            if (leaseInfo) {
+                await releaseCompanySyncLease(docRef, leaseInfo);
+                leaseInfo = null;
+            }
             setTimeout(() => { isRemoteSyncing = false; }, 400);
             _syncInFlight = false;
             if (_syncPending) {
