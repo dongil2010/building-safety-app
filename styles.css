@@ -4280,8 +4280,12 @@ html:not(.layout-desktop) .survey-inline-select {
     min-width: 0;
 }
 
-#ndtModal .ndt-quick-direct-input {
+#ndtModal .ndt-pick-direct-row {
     margin-bottom: 0.22rem;
+}
+
+#ndtModal .ndt-quick-direct-input {
+    margin-bottom: 0;
     font-size: 0.88rem;
     font-weight: 400;
 }

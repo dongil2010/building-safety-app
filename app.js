@@ -17264,6 +17264,7 @@ document.addEventListener('DOMContentLoaded', () => {
             {
                 selectId: 'ndtComponent',
                 inputId: 'ndtComponentInput',
+                addBtnId: 'btnAddNdtComponent',
                 preset: NDT_COMPONENT_PRESET,
                 customKey: 'customNdtComponents',
                 populate: populateNdtComponentDropdown,
@@ -17272,32 +17273,55 @@ document.addEventListener('DOMContentLoaded', () => {
             {
                 selectId: 'ndtFinishState',
                 inputId: 'ndtFinishStateInput',
+                addBtnId: 'btnAddNdtFinishState',
                 preset: NDT_FINISH_STATE_PRESET,
                 customKey: 'customNdtFinishStates',
                 populate: populateNdtFinishStateDropdown,
                 refresh: refreshNdtFinishStatePickBar
             }
         ];
-        specs.forEach(spec => {
+        const applyTypedValue = (spec, commitCustom) => {
             const input = document.getElementById(spec.inputId);
-            if (!input || input.dataset.ndtPickBound) return;
-            input.dataset.ndtPickBound = '1';
-            input.addEventListener('input', () => {
-                const v = input.value.trim();
-                const select = document.getElementById(spec.selectId);
-                if (v) {
-                    ensureDefectComboOption(select, v);
+            const select = document.getElementById(spec.selectId);
+            if (!input) return;
+            const v = input.value.trim();
+            if (v) {
+                ensureDefectComboOption(select, v);
+                if (commitCustom) {
                     rememberNdtCustomPick(v, spec.preset, spec.customKey);
                     if (!spec.preset.includes(v)) spec.populate(v);
                     else if (select) select.value = v;
+                } else if (select && spec.preset.includes(v)) {
+                    select.value = v;
                 }
-                spec.refresh();
-                if (spec.selectId === 'ndtComponent') {
-                    toggleNdtMeasureDimMode();
-                    document.getElementById('ndtDesignWidth')?.dispatchEvent(new Event('input', { bubbles: true }));
-                    document.getElementById('ndtDesignWeb')?.dispatchEvent(new Event('input', { bubbles: true }));
-                }
-            });
+            }
+            spec.refresh();
+            if (spec.selectId === 'ndtComponent') {
+                toggleNdtMeasureDimMode();
+                document.getElementById('ndtDesignWidth')?.dispatchEvent(new Event('input', { bubbles: true }));
+                document.getElementById('ndtDesignWeb')?.dispatchEvent(new Event('input', { bubbles: true }));
+            }
+            if (typeof scheduleNdtAutoApply === 'function') scheduleNdtAutoApply();
+        };
+        specs.forEach(spec => {
+            const input = document.getElementById(spec.inputId);
+            const addBtn = document.getElementById(spec.addBtnId);
+            if (input && !input.dataset.ndtPickBound) {
+                input.dataset.ndtPickBound = '1';
+                input.addEventListener('input', () => applyTypedValue(spec, false));
+                input.addEventListener('keydown', (e) => {
+                    if (e.key !== 'Enter') return;
+                    e.preventDefault();
+                    applyTypedValue(spec, true);
+                });
+            }
+            if (addBtn && !addBtn.dataset.ndtPickBound) {
+                addBtn.dataset.ndtPickBound = '1';
+                addBtn.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    applyTypedValue(spec, true);
+                });
+            }
         });
     }
 
