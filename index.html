@@ -39,7 +39,7 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <meta name="apple-mobile-web-app-title" content="스마트 안전점검">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css">
-    <link rel="stylesheet" href="styles.css?v=20260903_232757">
+    <link rel="stylesheet" href="styles.css?v=20260903_233446">
     <!-- FontAwesome icons for clean engineering UI -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <!-- PDF 생성용: 페이지별로 직접 캡처해서 조립(큰 보고서에서 html2pdf 한방 렌더링이 캔버스 높이 한계로
@@ -735,17 +735,15 @@
             </div><!-- /.ndt-canvas-col -->
 
             <!-- NDT Summary Measurement Results Table -->
-            <div class="ndt-results-section" style="margin-top: 1.5rem;">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.8rem; flex-wrap: wrap; gap: 0.5rem;">
-                    <h3 style="font-size: 1.05rem; font-weight: 800; color: #171717; display: flex; align-items: center; gap: 0.5rem;">
-                        <i class="fa-solid fa-table-list"></i> 📊 <span id="lblNdtTableTitle">지상 1층 (1F)</span> 비파괴 장비 조사 측정 결과표
-                    </h3>
-                    <button type="button" class="btn btn-sm btn-outline" style="border-color: #171717; color: #171717;" onclick="window.exportNdtTableExcel()">
+            <div class="ndt-results-section ndt-results-panel">
+                <div class="ndt-results-head">
+                    <h3 class="ndt-results-title"><i class="fa-solid fa-table-list"></i> 📊 <span id="lblNdtTableTitle">지상 1층 (1F)</span> 비파괴 장비 조사 측정 결과표</h3>
+                    <button type="button" class="btn btn-sm btn-outline ndt-results-excel-btn" onclick="window.exportNdtTableExcel()">
                         <i class="fa-solid fa-file-excel"></i> NDT 결과 엑셀 다운로드
                     </button>
                 </div>
                 
-                <div class="table-responsive" style="background: var(--bg-secondary); border-radius: var(--radius-md); border: 1px solid var(--border-color); padding: 0.5rem;">
+                <div class="table-responsive ndt-results-table-wrap">
                     <table class="data-table" id="ndtSummaryTable">
                         <thead>
                             <tr>
@@ -2884,21 +2882,21 @@
     </div>
 
     <!-- Core → 탭 분류 → 기존 엔진(app.js) -->
-    <script src="js/core/state.js?v=20260903_232757"></script>
-    <script src="js/tabs/registry.js?v=20260903_232757"></script>
-    <script src="js/pdf-vector-bridge.js?v=20260903_232757"></script>
-    <script src="js/core/layout-mode.js?v=20260903_232757"></script>
-    <script src="js/core/mobile-keyboard.js?v=20260903_232757"></script>
-    <script src="js/tabs/home.js?v=20260903_232757"></script>
-    <script src="js/tabs/map.js?v=20260903_232757"></script>
-    <script src="js/tabs/survey.js?v=20260903_232757"></script>
-    <script src="js/tabs/ndt.js?v=20260903_232757"></script>
-    <script src="js/shared/report.js?v=20260903_232757"></script>
-    <script src="js/shared/hwpx-import.js?v=20260903_232757"></script>
-    <script src="js/shared/auth.js?v=20260903_232757"></script>
-    <script src="app.js?v=20260903_232757"></script>
+    <script src="js/core/state.js?v=20260903_233446"></script>
+    <script src="js/tabs/registry.js?v=20260903_233446"></script>
+    <script src="js/pdf-vector-bridge.js?v=20260903_233446"></script>
+    <script src="js/core/layout-mode.js?v=20260903_233446"></script>
+    <script src="js/core/mobile-keyboard.js?v=20260903_233446"></script>
+    <script src="js/tabs/home.js?v=20260903_233446"></script>
+    <script src="js/tabs/map.js?v=20260903_233446"></script>
+    <script src="js/tabs/survey.js?v=20260903_233446"></script>
+    <script src="js/tabs/ndt.js?v=20260903_233446"></script>
+    <script src="js/shared/report.js?v=20260903_233446"></script>
+    <script src="js/shared/hwpx-import.js?v=20260903_233446"></script>
+    <script src="js/shared/auth.js?v=20260903_233446"></script>
+    <script src="app.js?v=20260903_233446"></script>
     <script>
-        window.BSA_APP_VERSION = '20260903_232757';
+        window.BSA_APP_VERSION = '20260903_233446';
         (function () {
             var el = document.getElementById('appVersionText');
             if (el && window.BSA_APP_VERSION) el.textContent = 'v' + window.BSA_APP_VERSION;
@@ -2922,7 +2920,7 @@
                     native = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
                 } catch (e) {}
                 if (native) return;
-                navigator.serviceWorker.register('./sw.js?v=20260903_232757')
+                navigator.serviceWorker.register('./sw.js?v=20260903_233446')
                     .then(function(registration) {
                         console.log('✅ ServiceWorker Registered Successfully with scope:', registration.scope);
                         registration.update();
