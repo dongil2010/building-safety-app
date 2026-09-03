@@ -2873,7 +2873,17 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function touchDefectUpdatedAt(defect) {
-        if (defect) defect.updatedAt = Date.now();
+        if (!defect) return;
+        const now = Date.now();
+        defect.updatedAt = now;
+        // 내용·사진 변경 시각 — 삭제 부활 판정에 사용 (위치만 옮긴 경우는 제외)
+        defect.contentUpdatedAt = now;
+    }
+
+    /** 도면 위 마킹 위치/꼭짓점만 옮김 — 삭제보다 늦어도 부활시키지 않음 */
+    function touchDefectPositionUpdatedAt(defect) {
+        if (!defect) return;
+        defect.positionUpdatedAt = Date.now();
     }
 
     function touchNdtUpdatedAt(item) {
@@ -2893,6 +2903,19 @@ document.addEventListener('DOMContentLoaded', () => {
             if (m) return Number(m[1]) || 0;
         }
         return 0;
+    }
+
+    /** 내용·사진 기준 시각 (위치 이동은 포함하지 않음) */
+    function getDefectContentUpdatedAt(rec) {
+        if (!rec) return 0;
+        if (rec.contentUpdatedAt) return Number(rec.contentUpdatedAt) || 0;
+        // 구데이터: contentUpdatedAt 없으면 updatedAt을 내용 변경으로 간주
+        return getRecordUpdatedAt(rec, 'pin');
+    }
+
+    function getDefectPositionUpdatedAt(rec) {
+        if (!rec) return 0;
+        return Number(rec.positionUpdatedAt) || 0;
     }
 
     function trackDefectDeletion(floorKey, defectId) {
@@ -2946,14 +2969,16 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     /**
-     * 삭제보다 늦은 수정/사진추가가 있으면 부활.
+     * 삭제보다 늦은 내용·사진 수정이 있으면 부활.
+     * 도면 공간 부족으로 마킹 위치만 옮긴 경우(positionUpdatedAt)는 부활하지 않고 삭제 유지.
      * deletedAt이 없는 구버전 tombstone(0)은 기존처럼 삭제 유지.
      */
     function recordSurvivesDelete(rec, deletedAt, kind) {
         if (!rec || !rec.id) return false;
         const ts = Number(deletedAt) || 0;
         if (ts <= 0) return false;
-        return getRecordUpdatedAt(rec, kind || 'pin') > ts;
+        if (kind === 'ndt') return getRecordUpdatedAt(rec, 'ndt') > ts;
+        return getDefectContentUpdatedAt(rec) > ts;
     }
 
     function mergePhotoArrays(primaryArr, secondaryArr) {
@@ -2979,17 +3004,30 @@ document.addEventListener('DOMContentLoaded', () => {
         return (Array.isArray(defect.photos) ? defect.photos : []).filter(Boolean);
     }
 
-    /** 같은 결함 고유코드 — 서버 기준 + 로컬 추가. 텍스트·좌표는 최신쪽, 사진은 합집합(서버 먼저). */
+    /** 같은 결함 고유코드 — 서버 기준 + 로컬 추가. 내용은 content 시각, 좌표는 position 시각, 사진은 합집합. */
     function mergeDefectRecord(serverRec, localRec) {
         if (!serverRec) return localRec ? { ...localRec } : null;
         if (!localRec) return { ...serverRec };
 
-        const serverTs = getRecordUpdatedAt(serverRec, 'pin');
-        const localTs = getRecordUpdatedAt(localRec, 'pin');
-        // 서버를 먼저 깔고, 로컬이 더 최신이면 로컬 필드로 덮음 (사진은 아래에서 별도 합침)
-        const newer = localTs >= serverTs ? localRec : serverRec;
-        const older = localTs >= serverTs ? serverRec : localRec;
-        const merged = { ...older, ...newer };
+        const serverContentTs = getDefectContentUpdatedAt(serverRec);
+        const localContentTs = getDefectContentUpdatedAt(localRec);
+        const contentNewer = localContentTs >= serverContentTs ? localRec : serverRec;
+        const contentOlder = localContentTs >= serverContentTs ? serverRec : localRec;
+        const merged = { ...contentOlder, ...contentNewer };
+
+        // 위치만 옮긴 쪽의 좌표를 내용 승자 위에 덮어씀
+        const DEFECT_POSITION_FIELDS = [
+            'x', 'y', 'targetX', 'targetY', 'mapMarkedAt', 'mapUnregistered',
+            'vertices', 'points', 'areaAngle', 'width', 'height', 'rotation'
+        ];
+        const serverPosTs = getDefectPositionUpdatedAt(serverRec);
+        const localPosTs = getDefectPositionUpdatedAt(localRec);
+        if (serverPosTs > 0 || localPosTs > 0) {
+            const posNewer = localPosTs >= serverPosTs ? localRec : serverRec;
+            DEFECT_POSITION_FIELDS.forEach((field) => {
+                if (posNewer[field] !== undefined) merged[field] = posNewer[field];
+            });
+        }
 
         // 표시 번호는 서버(먼저 확정된 쪽) 순서를 따르고, 마지막에 일괄 renumber
         if (serverRec.no) merged.no = serverRec.no;
@@ -2998,7 +3036,6 @@ document.addEventListener('DOMContentLoaded', () => {
         if (serverRec.surveyExtra || localRec.surveyExtra) merged.surveyExtra = true;
 
         // 사진: 서버 photoIds를 먼저 두고 로컬에만 있는 id를 뒤에 추가 (합집합).
-        // 예전 "개수 많은 쪽만 채택"은 양쪽이 서로 다른 사진을 넣으면 한쪽이 사라짐.
         const serverPhotoIds = Array.isArray(serverRec.photoIds) ? serverRec.photoIds : [];
         const localPhotoIds = Array.isArray(localRec.photoIds) ? localRec.photoIds : [];
         const mergedPhotoIds = mergePhotoArrays(serverPhotoIds, localPhotoIds);
@@ -3037,7 +3074,15 @@ document.addEventListener('DOMContentLoaded', () => {
             delete merged.prevRoundPhotoIds;
         }
 
-        merged.updatedAt = Math.max(serverTs, localTs, Number(merged.updatedAt) || 0);
+        merged.contentUpdatedAt = Math.max(serverContentTs, localContentTs, Number(merged.contentUpdatedAt) || 0);
+        merged.positionUpdatedAt = Math.max(serverPosTs, localPosTs, Number(merged.positionUpdatedAt) || 0);
+        merged.updatedAt = Math.max(
+            getRecordUpdatedAt(serverRec, 'pin'),
+            getRecordUpdatedAt(localRec, 'pin'),
+            merged.contentUpdatedAt,
+            merged.positionUpdatedAt,
+            Number(merged.updatedAt) || 0
+        );
         return merged;
     }
 
@@ -15228,7 +15273,7 @@ document.addEventListener('DOMContentLoaded', () => {
         defect.targetY = targetY;
         defect.mapUnregistered = false;
         defect.mapMarkedAt = Date.now();
-        touchDefectUpdatedAt(defect);
+        touchDefectPositionUpdatedAt(defect);
         window._pendingMapRegisterDefectId = null;
         saveStateToLocalStorage();
         renderSurveyTable();
@@ -21415,10 +21460,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (isDraggingPin || isDraggingPinGroup) {
             rebindActiveDragPinFromState();
-            if (activeDragPin) touchDefectUpdatedAt(activeDragPin);
+            if (activeDragPin) touchDefectPositionUpdatedAt(activeDragPin);
             if (isDraggingPinGroup) {
                 filterMapPlacedDefects(getCurrentFloorDefects()).forEach(d => {
-                    if (selectedDefectIds.has(d.id)) touchDefectUpdatedAt(d);
+                    if (selectedDefectIds.has(d.id)) touchDefectPositionUpdatedAt(d);
                 });
             }
             isDraggingPin = false;
