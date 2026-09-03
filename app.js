@@ -20211,15 +20211,18 @@ document.addEventListener('DOMContentLoaded', () => {
     let pendingDragLongPressTimer = null;
     let activePointerIsTouch = false; // 현재 제스처가 터치인지 (합성 마우스 무시·돋보기용)
     let mapTouchStartedOnCanvas = false; // 도면에서 시작한 터치만 스크롤 잠금
-    const TOUCH_DRAG_THRESHOLD = 14; // 터치는 손가락 흔들림이 커서 마우스보다 넉넉한 이동임계값 필요
+    let mapSuppressMouseUntil = 0; // 터치 후 합성 mouseup/move가 드래그를 끊지 않게
+    let _mapLoupeRaf = 0;
+    let _mapLoupePending = null;
+    const TOUCH_DRAG_THRESHOLD = 10; // 터치 클릭 vs 드래그 구분 (너무 크면 돋보기만 움직이는 구간이 김)
     const MOUSE_DRAG_THRESHOLD = 6;
-    const TOUCH_LONG_PRESS_MS = 300; // 모바일: 선택 후 이만큼 눌러야 핀 이동
+    const TOUCH_LONG_PRESS_MS = 0; // 모바일 핀: NDT와 같이 길게 누르지 않고 바로 드래그
     const MAP_LOUPE_ID = 'mapTouchLoupe';
     const NDT_LOUPE_ID = 'ndtTouchLoupe';
     const TOUCH_LOUPE_SIZE = 168;
     // 1.0 = 손가락 아래를 그대로 위로 옮겨 보여줌 (실제 도면/화면은 확대하지 않음)
     const TOUCH_LOUPE_ZOOM = 1.0;
-    let mobileMarqueeSelectEnabled = false; // 우측 레일 '선택' — 빈 곳 드래그로 마퀴 선택 (핀 이동은 0.3초 길게 누름)
+    let mobileMarqueeSelectEnabled = false; // 우측 레일 '선택' — 빈 곳 드래그로 마퀴 선택
     let mobileAddSelectEnabled = false; // 우측 레일 '추가' — 터치마다 선택 토글
     let isDraggingPin = false;
     let isDraggingPinGroup = false;
@@ -20839,26 +20842,19 @@ document.addEventListener('DOMContentLoaded', () => {
     function updateTouchLoupe(sourceCanvas, container, clientX, clientY, loupeId) {
         if (!sourceCanvas || !container) return;
         const canvasRect = sourceCanvas.getBoundingClientRect();
-        const containerRect = container.getBoundingClientRect();
-        const localX = clientX - canvasRect.left;
-        const localY = clientY - canvasRect.top;
         // CSS→백버퍼 비율 (HiDPI 반영). ZOOM=1이면 손가락 아래를 1:1로 옮겨 표시
         const scaleX = sourceCanvas.width / Math.max(canvasRect.width, 1);
         const scaleY = sourceCanvas.height / Math.max(canvasRect.height, 1);
         const srcW = (TOUCH_LOUPE_SIZE / TOUCH_LOUPE_ZOOM) * scaleX;
         const srcH = (TOUCH_LOUPE_SIZE / TOUCH_LOUPE_ZOOM) * scaleY;
+        const localX = clientX - canvasRect.left;
+        const localY = clientY - canvasRect.top;
         const srcX = localX * scaleX - srcW / 2;
         const srcY = localY * scaleY - srcH / 2;
 
         const gap = 32;
-        // 항상 손가락 위쪽 — 가려진 점을 "옮겨서" 보여줌 (뷰포트 줌 없음)
-        const desiredTopVp = clientY - TOUCH_LOUPE_SIZE - gap;
-        // 도면 컨테이너 안에서 위쪽에 온전히 들어갈 수 있는지
-        const fitsAboveInContainer = desiredTopVp >= containerRect.top + 4;
-        const useFixed = !fitsAboveInContainer;
-
-        const host = useFixed ? document.body : container;
-        const loupe = ensureTouchLoupe(host, loupeId);
+        // 항상 body fixed — 제스처 중 부모를 바꾸면( WebView touchcancel ) 드래그가 끊김
+        const loupe = ensureTouchLoupe(document.body, loupeId);
         if (!loupe) return;
 
         const lctx = loupe.getContext('2d');
@@ -20891,23 +20887,11 @@ document.addEventListener('DOMContentLoaded', () => {
         lctx.lineWidth = 1.5;
         lctx.stroke();
 
-        let left;
-        let top;
-        if (useFixed) {
-            // 화면 전체 기준 — 손가락 위쪽 유지 (잘리면 화면 상단에 붙임)
-            left = clientX - TOUCH_LOUPE_SIZE / 2;
-            top = desiredTopVp;
-            left = Math.max(6, Math.min(left, window.innerWidth - TOUCH_LOUPE_SIZE - 6));
-            top = Math.max(6, Math.min(top, window.innerHeight - TOUCH_LOUPE_SIZE - 6));
-            loupe.classList.add('is-fixed');
-        } else {
-            left = clientX - containerRect.left - TOUCH_LOUPE_SIZE / 2;
-            top = clientY - containerRect.top - TOUCH_LOUPE_SIZE - gap;
-            left = Math.max(4, Math.min(left, containerRect.width - TOUCH_LOUPE_SIZE - 4));
-            // 위쪽만 — 아래로 내리지 않음
-            top = Math.max(4, top);
-            loupe.classList.remove('is-fixed');
-        }
+        let left = clientX - TOUCH_LOUPE_SIZE / 2;
+        let top = clientY - TOUCH_LOUPE_SIZE - gap;
+        left = Math.max(6, Math.min(left, window.innerWidth - TOUCH_LOUPE_SIZE - 6));
+        top = Math.max(6, Math.min(top, window.innerHeight - TOUCH_LOUPE_SIZE - 6));
+        loupe.classList.add('is-fixed');
         loupe.style.left = Math.round(left) + 'px';
         loupe.style.top = Math.round(top) + 'px';
         loupe.hidden = false;
@@ -20918,9 +20902,28 @@ document.addEventListener('DOMContentLoaded', () => {
         const dragArmedLoupe = pendingDragArmed && pendingDragHit && pendingDragIsTouch;
         if (!activePointerIsTouch || !(isDraggingPin || isDraggingPinGroup || isMarkingDrag || isAreaDrag || dragArmedLoupe)) {
             hideTouchLoupe(MAP_LOUPE_ID);
+            _mapLoupePending = null;
+            if (_mapLoupeRaf) {
+                cancelAnimationFrame(_mapLoupeRaf);
+                _mapLoupeRaf = 0;
+            }
             return;
         }
-        updateTouchLoupe(elements.planCanvas, document.getElementById('canvasContainer'), clientX, clientY, MAP_LOUPE_ID);
+        // 매 touchmove마다 drawImage 하면 태블릿에서 끊김 → rAF로 합침
+        _mapLoupePending = { clientX, clientY };
+        if (_mapLoupeRaf) return;
+        _mapLoupeRaf = requestAnimationFrame(() => {
+            _mapLoupeRaf = 0;
+            const p = _mapLoupePending;
+            _mapLoupePending = null;
+            if (!p) return;
+            if (!activePointerIsTouch || !(isDraggingPin || isDraggingPinGroup || isMarkingDrag || isAreaDrag
+                || (pendingDragArmed && pendingDragHit && pendingDragIsTouch))) {
+                hideTouchLoupe(MAP_LOUPE_ID);
+                return;
+            }
+            updateTouchLoupe(elements.planCanvas, document.getElementById('canvasContainer'), p.clientX, p.clientY, MAP_LOUPE_ID);
+        });
     }
 
     function refreshNdtLoupe(clientX, clientY) {
@@ -21023,8 +21026,8 @@ document.addEventListener('DOMContentLoaded', () => {
             pendingDragHit = { hitInfo, imgX, imgY, additive: useAdditive };
             pendingDragIsTouch = isTouch;
             pendingDragHitStartTime = Date.now();
-            // 마우스는 즉시, 터치는 번호 박스·화살표 모두 0.3초 길게 누른 뒤 이동
-            pendingDragArmed = !isTouch;
+            // 터치도 NDT와 같이 즉시 드래그 가능 (길게 누르기 대기 없음 → 돋보기만 남는 구간 제거)
+            pendingDragArmed = true;
             if (hitInfo.defect && hitInfo.defect.id) {
                 const id = hitInfo.defect.id;
                 const wasInSelection = selectedDefectIds.has(id);
@@ -21045,13 +21048,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 drawCanvas();
             }
             if (isTouch) {
-                pendingDragLongPressTimer = setTimeout(() => {
-                    if (!pendingDragHit || !pendingDragIsTouch) return;
-                    pendingDragArmed = true;
-                    try { if (navigator.vibrate) navigator.vibrate(12); } catch (_e) { /* ignore */ }
-                    drawCanvas();
-                    refreshMapLoupe(startMouseX, startMouseY);
-                }, TOUCH_LONG_PRESS_MS);
+                refreshMapLoupe(clientX, clientY);
             }
             return;
         }
@@ -21160,21 +21157,9 @@ document.addEventListener('DOMContentLoaded', () => {
             const dist = Math.hypot(dx, dy);
             const threshold = pendingDragIsTouch ? TOUCH_DRAG_THRESHOLD : MOUSE_DRAG_THRESHOLD;
 
-            // 모바일: 길게 누르기 전에는 핀을 움직이지 않음. 그 사이 손가락이 많이 움직이면 화면 팬으로 전환.
-            // 화살표(TIP)는 길게 누르는 동안 팬으로 빼앗기지 않음 — 미세 이동에도 드래그가 씹히던 문제.
-            if (pendingDragIsTouch && !pendingDragArmed) {
-                const pendingPart = pendingDragHit?.hitInfo?.part;
-                if (pendingPart !== 'TIP' && dist > threshold) {
-                    clearPendingDragLongPress();
-                    pendingDragHit = null;
-                    isDragging = true;
-                    if (elements.planCanvas) elements.planCanvas.style.cursor = 'grabbing';
-                }
-                return;
-            }
-
-            if (pendingDragIsTouch && pendingDragArmed && dist <= threshold) {
-                refreshMapLoupe(clientX, clientY);
+            // 임계값 이하: 클릭 대기. 터치면 돋보기만 갱신(핀은 아직 고정)
+            if (dist <= threshold) {
+                if (pendingDragIsTouch && pendingDragArmed) refreshMapLoupe(clientX, clientY);
                 return;
             }
 
@@ -21239,6 +21224,8 @@ document.addEventListener('DOMContentLoaded', () => {
                         }) || 'move';
                     }
                 }
+                document.body.classList.add('dragging-pin');
+                document.body.style.touchAction = 'none';
                 refreshMapLoupe(clientX, clientY);
             } else {
                 return;
@@ -21407,7 +21394,10 @@ document.addEventListener('DOMContentLoaded', () => {
         hideTouchLoupe(MAP_LOUPE_ID);
         // 터치 제스처 종료 여부 — 아래에서 클리어되기 전에 보관 (PC 전용 동작 분기)
         const endedFromTouch = !!activePointerIsTouch;
+        if (endedFromTouch) mapSuppressMouseUntil = Date.now() + 700;
         activePointerIsTouch = false;
+        document.body.classList.remove('dragging-pin');
+        document.body.style.touchAction = '';
 
         if (isResizingLegend) {
             isResizingLegend = false;
@@ -21584,8 +21574,8 @@ document.addEventListener('DOMContentLoaded', () => {
     if (elements.planCanvas) {
         // Mouse Events
         elements.planCanvas.addEventListener('mousedown', (e) => {
-            // 터치 제스처 중 합성 마우스 이벤트는 무시 (터치스크린 PC 오프셋 오염 방지)
-            if (activePointerIsTouch) return;
+            // 터치 제스처 중·직후 합성 마우스 이벤트는 무시 (드래그 중 끊김 방지)
+            if (activePointerIsTouch || Date.now() < mapSuppressMouseUntil) return;
             if (e.button === 1) {
                 e.preventDefault();
                 handleDragStart(e.clientX, e.clientY, false, true);
@@ -21604,14 +21594,14 @@ document.addEventListener('DOMContentLoaded', () => {
         });
 
         window.addEventListener('mousemove', (e) => {
-            if (activePointerIsTouch) return;
+            if (activePointerIsTouch || Date.now() < mapSuppressMouseUntil) return;
             if (isDragging || isMarkingDrag || isAreaDrag || isAreaInkDrag || isDraggingPin || isDraggingPinGroup || pendingDragHit || isDraggingLegend || isResizingLegend || isMarqueeSelecting) {
                 handleDragMove(e.clientX, e.clientY);
             }
         });
 
         elements.planCanvas.addEventListener('mousemove', (e) => {
-            if (activePointerIsTouch) return;
+            if (activePointerIsTouch || Date.now() < mapSuppressMouseUntil) return;
             if (isDragging || isMarkingDrag || isAreaDrag || isAreaInkDrag || isDraggingPin || isDraggingPinGroup || pendingDragHit || isDraggingLegend || isResizingLegend || isMarqueeSelecting) return;
             updateMapHoverCursor(e.clientX, e.clientY);
         });
@@ -21622,7 +21612,7 @@ document.addEventListener('DOMContentLoaded', () => {
         });
 
         window.addEventListener('mouseup', (e) => {
-            if (activePointerIsTouch) return;
+            if (activePointerIsTouch || Date.now() < mapSuppressMouseUntil) return;
             if (isDragging || isMarkingDrag || isAreaDrag || isAreaInkDrag || isDraggingPin || isDraggingPinGroup || pendingDragHit || isDraggingLegend || isResizingLegend || isMarqueeSelecting) handleDragEnd(e.clientX, e.clientY);
         });
 
@@ -21652,6 +21642,7 @@ document.addEventListener('DOMContentLoaded', () => {
         // Touch Events (Galaxy Tab & Smartphone Support with Multi-Touch Pinch Zoom & Pan)
         elements.planCanvas.addEventListener('touchstart', (e) => {
             mapTouchStartedOnCanvas = true;
+            mapSuppressMouseUntil = Date.now() + 700;
             if (e.touches.length === 1 && !isPinching) {
                 if (e.cancelable) e.preventDefault();
                 handleDragStart(e.touches[0].clientX, e.touches[0].clientY, true);
@@ -21725,6 +21716,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         window.addEventListener('touchend', (e) => {
             if (e.touches.length === 0) mapTouchStartedOnCanvas = false;
+            mapSuppressMouseUntil = Date.now() + 700;
             if (isPinching) {
                 if (e.touches.length < 2) {
                     isPinching = false;
@@ -34597,11 +34589,12 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
 
-    // --- 회사 문서 동기화 잠금(lease): 다른 기기가 올리는 동안은 기다렸다가 완료본을 받은 뒤 동기화 ---
-    const SYNC_LEASE_STALE_MS = 150000; // heartbeat 없으면 이 시간 후 만료로 간주
-    const SYNC_LEASE_WAIT_MS = 120000;  // 타인 업로드 최대 대기
-    const SYNC_LEASE_POLL_MS = 1500;
-    const SYNC_LEASE_HEARTBEAT_MS = 25000;
+    // --- 회사 문서 동기화 잠금(lease): 다른 기기가 올리는 동안만 짧게 기다림 ---
+    // 같은 계정/같은 기기 잠금은 즉시 회수 (크래시·해제 실패·연속 동기화 시 "계속 대기" 방지)
+    const SYNC_LEASE_STALE_MS = 60000;  // heartbeat 2회 정도 없으면 만료
+    const SYNC_LEASE_WAIT_MS = 45000;   // 타인 업로드 최대 대기 (초과 시 강제 점유)
+    const SYNC_LEASE_POLL_MS = 1200;
+    const SYNC_LEASE_HEARTBEAT_MS = 20000;
     let _syncLeaseWaitToastAt = 0;
 
     function sleepMs(ms) {
@@ -34632,9 +34625,13 @@ document.addEventListener('DOMContentLoaded', () => {
         return (now - beat) < SYNC_LEASE_STALE_MS;
     }
 
-    function isForeignSyncLease(lease, myToken, now) {
+    /** 진짜 다른 기기의 유효 잠금만 대기로 본다. 내 계정/기기·만료 잠금은 즉시 회수. */
+    function isForeignSyncLease(lease, myToken, myOwnerId, myDeviceId, now) {
         if (!isSyncLeaseFresh(lease, now)) return false;
-        return String(lease.token) !== String(myToken);
+        if (String(lease.token) === String(myToken)) return false;
+        if (myDeviceId && lease.deviceId && String(lease.deviceId) === String(myDeviceId)) return false;
+        if (myOwnerId && lease.ownerId && String(lease.ownerId) === String(myOwnerId)) return false;
+        return true;
     }
 
     async function acquireCompanySyncLease(docRef) {
@@ -34646,7 +34643,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         while (true) {
             let acquired = false;
-            let foreign = false;
+            let sawForeign = false;
             let holderName = '';
             try {
                 await db.runTransaction(async (tx) => {
@@ -34654,8 +34651,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     const data = snap.exists ? (snap.data() || {}) : {};
                     const lease = data.syncLease || null;
                     const now = Date.now();
-                    if (isForeignSyncLease(lease, token, now)) {
-                        foreign = true;
+                    if (isForeignSyncLease(lease, token, ownerId, deviceId, now)) {
+                        sawForeign = true;
                         holderName = (lease && (lease.ownerName || lease.ownerId)) || '다른 작업자';
                         return;
                     }
@@ -34672,13 +34669,12 @@ document.addEventListener('DOMContentLoaded', () => {
                     acquired = true;
                 });
             } catch (e) {
+                // 네트워크/경합 실패는 "다른 작업자 대기"가 아님 — 조용히 재시도
                 console.warn('동기화 잠금 획득 실패, 재시도:', e);
-                foreign = true;
             }
             if (acquired) return { ownerId, token, deviceId };
 
             if (Date.now() >= waitDeadline) {
-                // 대기 한도 초과: 만료/장애로 보고 강제 점유 (데이터는 이후 재조회로 맞춤)
                 console.warn('동기화 잠금 대기 시간 초과 — 강제 획득');
                 const now = Date.now();
                 await docRef.set({
@@ -34695,18 +34691,19 @@ document.addEventListener('DOMContentLoaded', () => {
                 return { ownerId, token, deviceId };
             }
 
-            if (!warned || (Date.now() - _syncLeaseWaitToastAt) > 8000) {
+            // 토스트는 실제로 타인 잠금을 본 경우에만, 자주 울리지 않게
+            if (sawForeign && (!warned || (Date.now() - _syncLeaseWaitToastAt) > 20000)) {
                 warned = true;
                 _syncLeaseWaitToastAt = Date.now();
                 if (typeof window.showToast === 'function') {
                     window.showToast(
-                        `${holderName || '다른 작업자'}가 동기화 중입니다. 완료될 때까지 기다린 뒤 반영합니다.`,
+                        `${holderName || '다른 작업자'}가 올리는 중입니다. 잠시만 기다려 주세요.`,
                         'info',
-                        4500
+                        3500
                     );
                 }
             }
-            await sleepMs(SYNC_LEASE_POLL_MS);
+            await sleepMs(sawForeign ? SYNC_LEASE_POLL_MS : 400);
         }
     }
 
