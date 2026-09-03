@@ -325,6 +325,16 @@ document.addEventListener('DOMContentLoaded', () => {
         if (el && text) el.textContent = text;
     };
 
+    function yieldToUi() {
+        return new Promise((resolve) => {
+            if (typeof requestAnimationFrame === 'function') {
+                requestAnimationFrame(() => setTimeout(resolve, 0));
+            } else {
+                setTimeout(resolve, 0);
+            }
+        });
+    }
+
     function getUserDefectPinPresetsPayload() {
         return {
             customDefectTypes: window.state.customDefectTypes || {},
@@ -9273,7 +9283,16 @@ document.addEventListener('DOMContentLoaded', () => {
         if (typeof window.syncBulkStyleSlidersUi === 'function') window.syncBulkStyleSlidersUi();
     };
 
+    let _ndtDrawRafId = 0;
     function drawNdtCanvas() {
+        if (_ndtDrawRafId) return;
+        _ndtDrawRafId = requestAnimationFrame(() => {
+            _ndtDrawRafId = 0;
+            paintNdtCanvas();
+        });
+    }
+
+    function paintNdtCanvas() {
         const canvas = document.getElementById('ndtCanvas');
         if (!canvas) return;
         const ctx = canvas.getContext('2d');
@@ -26259,7 +26278,8 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // --- REPORT PREVIEW MODAL (Instant Modal Open & Pure White Paper Theme) ---
-    window.openReportPreviewModalFunc = async function() {
+    window.openReportPreviewModalFunc = async function(opts) {
+        const manageLoading = !(opts && opts.skipLoading);
         try {
             const modal = document.getElementById('reportPreviewModal');
             const container = document.getElementById('modalReportPreviewBody');
@@ -26268,6 +26288,9 @@ document.addEventListener('DOMContentLoaded', () => {
             // 1. OPEN MODAL INSTANTLY ON CLICK! (Zero-delay visual feedback)
             modal.style.display = 'flex';
             modal.classList.add('open');
+            if (manageLoading && typeof window.showLoading === 'function') {
+                window.showLoading('보고서 미리보기를 생성하는 중입니다...');
+            }
 
             const bldg = window.state.currentBuilding || { id: 'default', name: '건축물', address: '서울특별시 강남구', inspector: '홍길동', date: '2026-07-29' };
             const currentBldgId = bldg.id || state.currentBuildingId || 'default';
@@ -26292,9 +26315,16 @@ document.addEventListener('DOMContentLoaded', () => {
                 availableFloors = [window.state.currentFloor || '1F'];
             }
 
+            container.innerHTML = `<div id="printableReportArea" style="width:100%; max-width: 210mm; margin: 0 auto; display: flex; flex-direction: column; align-items: center;"></div>`;
+            const reportArea = document.getElementById('printableReportArea');
             let reportPagesHtml = '';
 
-            availableFloors.forEach((floorCode, floorIdx) => {
+            for (let floorIdx = 0; floorIdx < availableFloors.length; floorIdx++) {
+                const floorCode = availableFloors[floorIdx];
+                const htmlBefore = reportPagesHtml.length;
+                if (typeof window.updateLoadingText === 'function') {
+                    window.updateLoadingText(`보고서 미리보기 생성 중... (${floorIdx + 1}/${availableFloors.length} 층)`);
+                }
                 // 보고서에는 "B1F" 같은 코드 대신 "지하 1층"처럼 사람이 읽는 층 이름을 표시
                 const floorDisplayLabel = stripFloorCodeSuffix(window.getFloorLabelFromCode(floorCode));
                 const key = `${currentBldgId}_${floorCode}`;
@@ -26933,9 +26963,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
 
                 } // iType === '정밀안전점검'
-            });
-
-            container.innerHTML = `<div id="printableReportArea" style="width:100%; max-width: 210mm; margin: 0 auto; display: flex; flex-direction: column; align-items: center;">${reportPagesHtml}</div>`;
+                if (reportArea) reportArea.insertAdjacentHTML('beforeend', reportPagesHtml.slice(htmlBefore));
+                await yieldToUi();
+            }
 
             // 상태조사표는 15/17행·15배수 마감 규칙을 유지한다. 높이 넘침으로 행을 다음 페이지로
             // 흘리면 끝 번호가 15·30에서 어긋나므로 재배치는 하지 않는다.
@@ -26946,6 +26976,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 modal.style.display = 'flex';
                 modal.classList.add('open');
             }
+            if (typeof window.showToast === 'function') {
+                window.showToast('보고서 미리보기 생성 중 오류가 발생했습니다.', 'error', 4500);
+            }
+        } finally {
+            if (manageLoading && typeof window.hideLoading === 'function') window.hideLoading();
         }
     };
 
@@ -26954,7 +26989,7 @@ document.addEventListener('DOMContentLoaded', () => {
         window.showLoading('PDF 보고서를 생성하는 중입니다...');
         try {
             // 1. Ensure report preview content is fully generated and preloaded
-            await window.openReportPreviewModalFunc();
+            await window.openReportPreviewModalFunc({ skipLoading: true });
             await new Promise(r => setTimeout(r, 250));
 
             const bldg = window.state.currentBuilding || { name: '건축물_점검보고서' };
@@ -26987,6 +27022,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     const pageH = pdf.internal.pageSize.getHeight();
 
                     const loadingTextEl = document.querySelector('#globalLoadingOverlay .loading-text');
+                    let failedPages = 0;
                     for (let i = 0; i < pageBlocks.length; i++) {
                         // showLoading()을 반복 호출하면 내부 카운터(_loadingDepth)가 계속 올라가
                         // 끝나고 hideLoading()을 한 번만 불러선 로딩창이 영영 안 사라지므로,
@@ -27000,11 +27036,15 @@ document.addEventListener('DOMContentLoaded', () => {
                             if (i > 0) pdf.addPage();
                             pdf.addImage(imgData, 'JPEG', 0, 0, pageW, imgHeight);
                         } catch (pageErr) {
+                            failedPages++;
                             console.error(`PDF page ${i + 1} render error:`, pageErr);
                         }
                     }
 
                     pdf.save(filename);
+                    if (failedPages && typeof window.showToast === 'function') {
+                        window.showToast(`PDF ${failedPages}개 페이지 캡처에 실패했습니다. 파일을 확인해 주세요.`, 'warning', 5000);
+                    }
                 } else {
                     window.print();
                 }
