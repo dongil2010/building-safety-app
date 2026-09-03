@@ -9260,6 +9260,35 @@ document.addEventListener('DOMContentLoaded', () => {
         };
     }
 
+    /** 철골 실측 칸이 비어 있으면 설계치수 값으로 보정 (칸별 fallback) */
+    function resolveNdtSteelMeasuredDims(design, measured) {
+        const pick = (m, d) => (m !== null && Number.isFinite(m) ? m : d);
+        return {
+            web: pick(measured.web, design.web),
+            flange: pick(measured.flange, design.flange),
+            webWidth: pick(measured.webWidth, design.webWidth),
+            flangeWidth: pick(measured.flangeWidth, design.flangeWidth)
+        };
+    }
+
+    function resolveNdtSteelMeasuredFromItem(item) {
+        if (!item) return { web: null, flange: null, webWidth: null, flangeWidth: null };
+        return resolveNdtSteelMeasuredDims(
+            {
+                web: item.designWeb,
+                flange: item.designFlange,
+                webWidth: item.designWebWidth,
+                flangeWidth: item.designFlangeWidth
+            },
+            {
+                web: item.measuredWeb,
+                flange: item.measuredFlange,
+                webWidth: item.measuredWebWidth,
+                flangeWidth: item.measuredFlangeWidth
+            }
+        );
+    }
+
     function formatNdtSteelDimText(web, flange, webWidth, flangeWidth, joiner = ' × ') {
         // 높이 × 폭 × 웨브 두께 × 플랜지 두께
         const parts = [webWidth, flangeWidth, web, flange];
@@ -9277,7 +9306,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 const t = formatNdtSteelDimText(item.designWeb, item.designFlange, item.designWebWidth, item.designFlangeWidth, joiner);
                 return t || '-';
             }
-            const t = formatNdtSteelDimText(item.measuredWeb, item.measuredFlange, item.measuredWebWidth, item.measuredFlangeWidth, joiner);
+            const resolved = resolveNdtSteelMeasuredFromItem(item);
+            const t = formatNdtSteelDimText(resolved.web, resolved.flange, resolved.webWidth, resolved.flangeWidth, joiner);
             return t || '-';
         }
         if (dimMode === 'thickness') {
@@ -13136,7 +13166,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (cat === '실측') {
             if (dimKind === 'steel') {
                 const designSteel = readNdtSteelDims('ndtDesign');
-                const measuredSteel = readNdtSteelDims('ndtMeasured');
+                const measuredSteel = resolveNdtSteelMeasuredDims(designSteel, readNdtSteelDims('ndtMeasured'));
                 designWeb = designSteel.web;
                 designFlange = designSteel.flange;
                 designWebWidth = designSteel.webWidth;
@@ -13469,7 +13499,8 @@ document.addEventListener('DOMContentLoaded', () => {
             const dimKind = getNdtMeasureDimKind(getNdtCurrentComponentName());
             let calc = null;
             if (dimKind === 'steel') {
-                calc = calcSteelSectionGrade(readNdtSteelDims('ndtDesign'), readNdtSteelDims('ndtMeasured'));
+                const designSteel = readNdtSteelDims('ndtDesign');
+                calc = calcSteelSectionGrade(designSteel, resolveNdtSteelMeasuredDims(designSteel, readNdtSteelDims('ndtMeasured')));
             } else {
                 const design = parseNdtDimensionPair(
                     document.getElementById('ndtDesignWidth')?.value,
