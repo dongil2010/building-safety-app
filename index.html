@@ -158,6 +158,9 @@
                         <h2 class="hero-title" style="margin-top: 0.4rem;">🏢 점검 대상 건축물 목록</h2>
                     </div>
                     <div class="hero-toolbar">
+                        <button type="button" class="home-settings-btn" id="btnHomeSyncQuick" title="서버 동기화 (올리기·받기)" aria-label="서버 동기화">
+                            <i class="fa-solid fa-cloud"></i>
+                        </button>
                         <button type="button" class="home-settings-btn" id="btnHomeSettings" title="설정" aria-label="설정" aria-expanded="false" aria-controls="homeSettingsPanel">
                             <i class="fa-solid fa-gear"></i>
                         </button>
@@ -196,6 +199,23 @@
                             <span class="hero-company-label"><i class="fa-solid fa-building-user"></i> 🏢 점검 수행회사:</span>
                             <input type="text" id="inputHomeCompanyName" class="form-control hero-company-input" placeholder="(주)한국안전진단기술원" value="(주)한국안전진단기술원">
                             <button type="button" id="btnSaveHomeCompanyName" class="btn btn-sm btn-primary hero-company-save"><i class="fa-solid fa-floppy-disk"></i> 저장</button>
+                        </div>
+                        <div class="home-sync-status-card" id="homeSyncStatusCard">
+                            <div class="home-sync-status-head">
+                                <i class="fa-solid fa-cloud"></i> 서버 동기화 상태
+                            </div>
+                            <div id="homeSyncStatusText" class="home-sync-status-text">로그인 후 표시됩니다.</div>
+                            <div class="home-sync-status-actions">
+                                <button type="button" class="btn btn-sm btn-outline" id="btnRefreshSyncStatus" title="로컬과 서버 건수·시각 비교">
+                                    <i class="fa-solid fa-arrows-rotate"></i> 상태 확인
+                                </button>
+                                <button type="button" class="btn btn-sm btn-primary" id="btnForceSyncNowHome" title="로컬 변경을 서버에 올림">
+                                    <i class="fa-solid fa-cloud-arrow-up"></i> 서버에 올리기
+                                </button>
+                                <button type="button" class="btn btn-sm btn-outline" id="btnPullFromServerHome" title="서버 최신 데이터를 받아 병합">
+                                    <i class="fa-solid fa-cloud-arrow-down"></i> 서버에서 받기
+                                </button>
+                            </div>
                         </div>
                         <div class="home-settings-actions">
                             <button type="button" class="btn btn-outline pc-only-chrome hero-btn-backup" id="btnExportJSON">

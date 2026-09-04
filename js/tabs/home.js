@@ -23,7 +23,7 @@ window.BSA.tabs['tab-home'] = {
         '사용자 프로필·로그아웃·계정 삭제·회사 나가기·가입 승인(관리자)',
         'Android WebView는 GitHub Pages 원격 웹 로드 (APK OTA 없음)',
         '점검 진입 시 로딩창 없이 맵으로 바로 들어가고, 온라인에서 3티어를 IDB에 받아 두면 오프라인에서도 확대 가능',
-        '홈에서 점검 재진입 시 온라인이면 결함·NDT·사진 서버 병합 동기화',
+        '홈·점검 진입 시 서버 병합 + 홈 이동 시 업로드 (실시간 동기화). 톱니 → 동기화 상태로 수동 확인·재시도',
         '24시간 이상 안 들어간 점검의 IndexedDB 도면·사진은 온라인일 때만 정리 (현재·오프라인 점검은 유지)',
         '홈 새로고침 · 앱 재실행 시 최신 웹 동기화',
         '도면 PDF 로컬 캐시 지우기 (서버 원본은 유지, 필요 시 재다운로드)',
@@ -34,5 +34,6 @@ window.BSA.tabs['tab-home'] = {
     ownerHint: 'app.js BUILDING MANAGEMENT + JSON 백업 + 휴대폰 연동',
     enter: function () {
         if (typeof window.renderDashboard === 'function') window.renderDashboard();
+        if (typeof window.refreshHomeSyncStatusUI === 'function') window.refreshHomeSyncStatusUI();
     }
 };
