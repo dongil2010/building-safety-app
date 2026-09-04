@@ -14938,8 +14938,39 @@ document.addEventListener('DOMContentLoaded', () => {
         return 0;
     }
 
+    function renderDefectMarkingMemberFloat(defectOrNull) {
+        const el = document.getElementById('defectMarkingMemberFloat');
+        if (!el) return;
+
+        const groupMembers = defectOrNull && defectOrNull.groupId
+            ? getDefectMarkingGroupMembers(defectOrNull.groupId)
+            : [];
+        if (!defectOrNull || groupMembers.length <= 1) {
+            el.hidden = true;
+            el.innerHTML = '';
+            return;
+        }
+
+        el.hidden = false;
+        el.innerHTML = groupMembers.map((m, i) => {
+            const label = formatDefectMemberChipLabel(m);
+            const active = m.id === defectOrNull.id ? ' is-active' : '';
+            return `<button type="button" class="defect-marking-float-btn${active}" data-marking-member-id="${escapeHtml(m.id)}" style="--float-i:${i}" title="마킹 ${escapeHtml(label)} 수정">${escapeHtml(label)}</button>`;
+        }).join('');
+
+        el.querySelectorAll('[data-marking-member-id]').forEach((btn) => {
+            btn.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                const mid = btn.getAttribute('data-marking-member-id');
+                if (mid) window.selectDefectMarkingMember(mid);
+            });
+        });
+    }
+
     function renderDefectMarkingTimeline(defectOrNull) {
         const el = document.getElementById('defectMarkingTimeline');
+        renderDefectMarkingMemberFloat(defectOrNull);
         if (!el) return;
 
         if (!defectOrNull) {
@@ -14961,42 +14992,13 @@ document.addEventListener('DOMContentLoaded', () => {
             ? '<span class="defect-timeline-chip defect-timeline-prev">전회차</span>'
             : '<span class="defect-timeline-chip defect-timeline-curr">금회차</span>';
 
-        const groupMembers = defectOrNull.groupId
-            ? getDefectMarkingGroupMembers(defectOrNull.groupId)
-            : [];
-        let memberSwitchHtml = '';
-        if (groupMembers.length > 1) {
-            const chips = groupMembers.map((m) => {
-                const label = formatDefectMemberChipLabel(m);
-                const active = m.id === defectOrNull.id ? ' is-active' : '';
-                return `<button type="button" class="defect-marking-member-chip${active}" data-marking-member-id="${escapeHtml(m.id)}" title="이 화살표/마킹 수정">${escapeHtml(label)}</button>`;
-            }).join('');
-            memberSwitchHtml = `
-                <span class="defect-timeline-sep">·</span>
-                <span class="defect-timeline-chip defect-timeline-members" title="같은 번호의 화살표를 골라 수정">
-                    <i class="fa-solid fa-share-nodes"></i> 마킹
-                    <span class="defect-marking-member-chips">${chips}</span>
-                </span>
-            `;
-        }
-
         el.innerHTML = `
             <span class="defect-timeline-chip defect-timeline-round" title="등록 회차"><i class="fa-solid fa-calendar"></i> ${escapeHtml(roundLabel)}</span>
             <span class="defect-timeline-sep">·</span>
             <span class="defect-timeline-chip defect-timeline-mark" title="도면 마킹 시각"><i class="fa-solid fa-location-dot"></i> ${escapeHtml(markedLabel)}</span>
             <span class="defect-timeline-sep">·</span>
             ${roundKind}
-            ${memberSwitchHtml}
         `;
-
-        el.querySelectorAll('[data-marking-member-id]').forEach((btn) => {
-            btn.addEventListener('click', (e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                const mid = btn.getAttribute('data-marking-member-id');
-                if (mid) window.selectDefectMarkingMember(mid);
-            });
-        });
     }
 
     /** 같은 번호 그룹의 다른 화살표(마킹)로 전환해 수정 */
