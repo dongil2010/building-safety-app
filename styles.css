@@ -2608,9 +2608,9 @@ html.layout-desktop #tab-ndt .ndt-top-bar .ndt-top-canvas-tools {
 
     #tab-ndt #ndtCanvasContainer {
         flex: none !important;
-        height: min(52vh, 360px) !important;
-        min-height: 180px !important;
-        max-height: 52vh !important;
+        height: min(62vh, 420px) !important;
+        min-height: 200px !important;
+        max-height: 62vh !important;
         margin-bottom: 0;
         touch-action: none;
     }
@@ -10149,12 +10149,15 @@ body:not(.bsa-tab-home) .home-fab-add-building {
         white-space: nowrap;
     }
 
-    #tab-ndt #ndtCanvasContainer {
-        min-height: 46vh !important;
-        height: 46vh !important;
-        max-height: none !important;
-        margin-bottom: 3.4rem !important;
-        border-radius: 10px;
+    /* 폰 세로: 상단 칩 제거분만큼 도면 높이 확대 */
+    @media (max-width: 768px) and (orientation: portrait) {
+        html:not(.layout-desktop):not(.layout-tablet) #tab-ndt #ndtCanvasContainer {
+            min-height: 58vh !important;
+            height: 58vh !important;
+            max-height: none !important;
+            margin-bottom: 3.4rem !important;
+            border-radius: 10px;
+        }
     }
 
     #tab-ndt .ndt-results-section {
@@ -11054,6 +11057,100 @@ html.layout-tablet #tab-ndt .ndt-right-rails .mobile-side-rail {
     transform: none !important;
     max-height: none !important;
     align-self: stretch;
+}
+
+/* 폰 모바일: 태블릿과 동일 — 상단 조사항목 칩 숨기고 도면 우측 레일로 (도면 세로 공간 확보) */
+@media (max-width: 1024px) {
+    html:not(.layout-desktop):not(.layout-tablet) #tab-ndt .ndt-top-bar {
+        display: none !important;
+    }
+
+    html:not(.layout-desktop):not(.layout-tablet) #tab-ndt .ndt-right-rails {
+        display: flex !important;
+        flex-direction: row !important;
+        align-items: stretch !important;
+        gap: 0.1rem !important;
+        position: absolute !important;
+        right: 0.22rem !important;
+        top: 50% !important;
+        left: auto !important;
+        bottom: auto !important;
+        transform: translateY(-50%) !important;
+        z-index: 45 !important;
+        max-height: calc(100% - 4.2rem) !important;
+        pointer-events: none !important;
+    }
+
+    html:not(.layout-desktop):not(.layout-tablet) #tab-ndt .ndt-right-rails > aside {
+        pointer-events: auto !important;
+    }
+
+    html:not(.layout-desktop):not(.layout-tablet) #tab-ndt .ndt-cat-rail {
+        display: flex !important;
+        flex-direction: column !important;
+        gap: 0.1rem !important;
+        padding: 0.18rem 0.12rem !important;
+        overflow-y: auto !important;
+        -webkit-overflow-scrolling: touch;
+        background: #ffffff !important;
+        border: 1px solid #d4d4d4 !important;
+        border-radius: 10px !important;
+        box-shadow: 0 6px 16px rgba(0, 0, 0, 0.12) !important;
+        flex-shrink: 0;
+    }
+
+    html:not(.layout-desktop):not(.layout-tablet) #tab-ndt .ndt-cat-rail-btn {
+        display: flex !important;
+        flex-direction: column !important;
+        align-items: center !important;
+        justify-content: center !important;
+        width: 2.4rem !important;
+        min-height: 2.15rem !important;
+        padding: 0.1rem 0.04rem !important;
+        gap: 0.04rem !important;
+        border-radius: 8px !important;
+        border: 1.5px solid #e5e7eb !important;
+        background: #f9fafb !important;
+        color: #525252 !important;
+        font-size: 0.44rem !important;
+        font-weight: 800 !important;
+        line-height: 1.05 !important;
+        white-space: nowrap;
+        cursor: pointer;
+    }
+
+    html:not(.layout-desktop):not(.layout-tablet) #tab-ndt .ndt-cat-rail-emoji {
+        font-size: 0.78rem !important;
+        line-height: 1;
+    }
+
+    html:not(.layout-desktop):not(.layout-tablet) #tab-ndt .ndt-cat-rail-label {
+        max-width: 100%;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    html:not(.layout-desktop):not(.layout-tablet) #tab-ndt .ndt-cat-rail-btn.active {
+        border: 2px solid #2563eb !important;
+        background: #eff6ff !important;
+        color: #1d4ed8 !important;
+        box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.22) !important;
+    }
+
+    html:not(.layout-desktop):not(.layout-tablet) #tab-ndt .ndt-right-rails .mobile-side-rail {
+        position: static !important;
+        top: auto !important;
+        right: auto !important;
+        left: auto !important;
+        bottom: auto !important;
+        transform: none !important;
+        max-height: none !important;
+        align-self: stretch;
+    }
+
+    html:not(.layout-desktop):not(.layout-tablet) body.ndt-modal-open .ndt-right-rails {
+        display: none !important;
+    }
 }
 
 /* 하단 독 = 모바일 FAB 바 디자인 */
