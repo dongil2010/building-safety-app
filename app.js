@@ -647,7 +647,8 @@ document.addEventListener('DOMContentLoaded', () => {
     updateOfflineBadge();
     window.addEventListener('online', () => {
         updateOfflineBadge();
-        if (typeof updateOnlineBadge === 'function') updateOnlineBadge(true);
+        if (typeof refreshSyncStatusBadge === 'function') refreshSyncStatusBadge();
+        else if (typeof updateOnlineBadge === 'function') updateOnlineBadge(true);
         window.showToast('온라인 상태로 전환되었습니다. 서버 데이터와 병합 후 동기화합니다.', 'success');
         if (typeof reconnectFirestoreSync === 'function') reconnectFirestoreSync('online');
         if (typeof pruneStaleIndexedDbInspectionData === 'function') {
@@ -656,7 +657,8 @@ document.addEventListener('DOMContentLoaded', () => {
     });
     window.addEventListener('offline', () => {
         updateOfflineBadge();
-        if (typeof updateOnlineBadge === 'function') updateOnlineBadge(false);
+        if (typeof refreshSyncStatusBadge === 'function') refreshSyncStatusBadge();
+        else if (typeof updateOnlineBadge === 'function') updateOnlineBadge(false);
         window.showToast('오프라인 상태입니다. 변경사항은 이 기기에 저장되며, 인터넷 연결 시 자동 동기화됩니다.', 'warning', 5000);
     });
     // 앱/탭 복귀 시에도 동기화 (비행기모드 해제 후 online 이벤트가 안 뜨는 WebView 대비)
@@ -2113,6 +2115,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     try { localStorage.setItem(getLocalStorageStateKey(companyId), legacy); } catch (_e) { /* ignore */ }
                 }
             }
+            let defectGroupRepairPending = false;
             if (saved) {
                 const parsed = JSON.parse(saved);
                 if (parsed.buildings && Array.isArray(parsed.buildings)) {
@@ -2127,6 +2130,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
                 if (parsed.defects) {
                     window.state.defects = parsed.defects;
+                    Object.keys(window.state.defects).forEach((floorKey) => {
+                        if (normalizeFloorDefectGroupsInPlace(window.state.defects[floorKey])) {
+                            defectGroupRepairPending = true;
+                        }
+                    });
                 }
                 if (parsed.ndtData) {
                     window.state.ndtData = parsed.ndtData;
@@ -2255,6 +2263,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             if (typeof window.updateBuildingTrashBadge === 'function') window.updateBuildingTrashBadge();
             if (typeof migrateLeaderLineScalesIfNeeded === 'function') migrateLeaderLineScalesIfNeeded();
+            if (defectGroupRepairPending) saveStateToLocalStorage();
         } catch (e) {
             console.error('LocalStorage load failed:', e);
             window.state.buildings = getDefaultBuildings();
@@ -2764,6 +2773,37 @@ document.addEventListener('DOMContentLoaded', () => {
         return `NO.${String(Math.max(1, Number(n) || 1)).padStart(2, '0')}`;
     }
 
+    /** 본번호(N) 슬롯: 그룹·화살표 여러 개는 1칸, 결함표 추가(-1)는 본번호에 포함 */
+    function getNextDefectMainNumber(defects) {
+        if (!Array.isArray(defects) || !defects.length) return 1;
+        const seenGroup = new Set();
+        let maxMain = 0;
+        defects.forEach((d) => {
+            if (!d || d.surveyExtra) return;
+            if (d.groupId) {
+                if (seenGroup.has(d.groupId)) return;
+                seenGroup.add(d.groupId);
+            }
+            const raw = stripDefectNoSuffix(d.groupNo || d.no || '');
+            const m = String(raw).replace(/^NO\.?\s*/i, '').trim().match(/(\d+)/);
+            const main = m ? parseInt(m[1], 10) : 0;
+            if (main > maxMain) maxMain = main;
+        });
+        return maxMain + 1;
+    }
+
+    function getNextDefectNoStr(defects) {
+        return formatDefectNoSeq(getNextDefectMainNumber(defects));
+    }
+
+    function getFloorDefectsForNumbering(floorKey) {
+        const list = (state.defects && state.defects[floorKey]) || [];
+        if (!isDefectMarkingGroupPending()) {
+            normalizeFloorDefectGroupsInPlace(list);
+        }
+        return list;
+    }
+
     function parseDefectNoParts(d) {
         const raw = String((d && d.no) || '').replace(/^NO\.?\s*/i, '').trim();
         const m = raw.match(/(\d+)(?:-(\d+))?/);
@@ -2855,6 +2895,48 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    /** 예전 데이터: 본번호 38 + 38-2·38-3 화살표가 groupId 없이 쪼개진 경우 한 그룹으로 복구 */
+    function repairLegacyMarkingSuffixGroups(defects) {
+        if (!Array.isArray(defects)) return false;
+        let changed = false;
+        const byMain = new Map();
+        defects.forEach((d) => {
+            if (!d || d.surveyExtra || d.groupId) return;
+            const p = parseDefectNoParts(d);
+            if (p.main === Number.MAX_SAFE_INTEGER) return;
+            const key = String(p.main);
+            if (!byMain.has(key)) byMain.set(key, []);
+            byMain.get(key).push(d);
+        });
+        byMain.forEach((list) => {
+            if (list.length <= 1) return;
+            const hasSuffix = list.some((d) => parseDefectNoParts(d).suffix > 0);
+            if (!hasSuffix) return;
+            const baseDef = list.find((d) => !parseDefectNoParts(d).suffix)
+                || list.slice().sort((a, b) => parseDefectSortNoValue(a) - parseDefectSortNoValue(b))[0];
+            if (!baseDef) return;
+            const gid = baseDef.id;
+            const gno = stripDefectNoSuffix(baseDef.groupNo || baseDef.no || formatDefectNoSeq(parseDefectNoParts(baseDef).main));
+            list.forEach((d) => {
+                if (d.groupId === gid && d.groupNo === gno && d.no === gno) return;
+                d.groupId = gid;
+                d.groupNo = gno;
+                d.no = gno;
+                changed = true;
+            });
+        });
+        return changed;
+    }
+
+    function normalizeFloorDefectGroupsInPlace(defects) {
+        if (!Array.isArray(defects)) return false;
+        const repaired = repairLegacyMarkingSuffixGroups(defects);
+        const snap = defects.map((d) => (d ? `${d.id}|${d.groupId || ''}|${d.no || ''}|${d.surveyExtra ? 1 : 0}` : '')).join(';');
+        normalizeAllDefectGroupNos(defects);
+        const snap2 = defects.map((d) => (d ? `${d.id}|${d.groupId || ''}|${d.no || ''}|${d.surveyExtra ? 1 : 0}` : '')).join(';');
+        return repaired || snap !== snap2;
+    }
+
     function collapseSingletonDefectGroups(defects) {
         if (!Array.isArray(defects)) return;
         const byG = new Map();
@@ -2872,6 +2954,23 @@ document.addEventListener('DOMContentLoaded', () => {
             delete d.surveyExtra;
         });
         normalizeAllDefectGroupNos(defects);
+    }
+
+    /** 위치추가 체인 중에는 멤버 1개 그룹을 접지 않는다 */
+    function isDefectMarkingGroupPending() {
+        return !!(window._defectMarkingTemplate || window._pendingMarkingGroup);
+    }
+
+    function syncDefectGroupNosForFloor(floorKey) {
+        if (!floorKey || !state.defects?.[floorKey]) return;
+        if (isDefectMarkingGroupPending()) {
+            normalizeAllDefectGroupNos(state.defects[floorKey]);
+        } else {
+            if (normalizeFloorDefectGroupsInPlace(state.defects[floorKey])) {
+                saveStateToLocalStorage();
+            }
+            collapseSingletonDefectGroups(state.defects[floorKey]);
+        }
     }
 
     /** 7자리 hex 고유 코드. 활성·삭제 tombstone 코드는 재사용하지 않음 */
@@ -3698,10 +3797,14 @@ document.addEventListener('DOMContentLoaded', () => {
         const prevTabId = window.state.currentTab;
         window.state.currentTab = targetTabId;
 
-        // 작업 탭 → 홈: 작업 중 미뤄 둔 변경을 이때 한 번에 올린다 (실시간 업로드 대신)
+        // 작업 탭 → 홈: 미뤄 둔 변경 업로드 + 다른 기기에서 온 변경 반영
         if (targetTabId === 'tab-home' && prevTabId && prevTabId !== 'tab-home'
             && typeof window.flushDeferredWorkTabSync === 'function') {
             try { window.flushDeferredWorkTabSync('home'); } catch (_e) { /* ignore */ }
+        } else if (targetTabId === 'tab-home' && typeof window.flushDeferredWorkTabSync === 'function') {
+            try {
+                if (typeof scheduleFlushPendingRemoteSync === 'function') scheduleFlushPendingRemoteSync();
+            } catch (_e2) { /* ignore */ }
         }
 
         document.querySelectorAll('.tab-content').forEach(content => {
@@ -3866,6 +3969,43 @@ document.addEventListener('DOMContentLoaded', () => {
     // --- 6. BUILDING MANAGEMENT ENGINE ---
 
     const INSPECTION_TYPE_OPTIONS = ['정밀안전점검', '정기안전점검', '정밀안전진단'];
+    const INSPECTION_TYPE_SHORT_LABELS = {
+        '정기안전점검': '정기',
+        '정밀안전점검': '정밀',
+        '정밀안전진단': '진단'
+    };
+
+    function formatInspectionTypeOptionLabel(type, preferShort) {
+        if (preferShort && INSPECTION_TYPE_SHORT_LABELS[type]) return INSPECTION_TYPE_SHORT_LABELS[type];
+        return type || '';
+    }
+
+    function shouldUseShortInspectionTypeLabels() {
+        return window.matchMedia('(max-width: 1024px)').matches;
+    }
+
+    function buildInspectionTypeOptionsHtml(selectedType, options = {}) {
+        const preferShort = options.short !== false;
+        return INSPECTION_TYPE_OPTIONS.map((t) => {
+            const label = formatInspectionTypeOptionLabel(t, preferShort);
+            return `<option value="${escapeHtml(t)}"${t === selectedType ? ' selected' : ''}>${escapeHtml(label)}</option>`;
+        }).join('');
+    }
+
+    /** 모바일 등 좁은 화면에서 점검 종류 셀렉트 글자 잘림 방지 */
+    function syncInspectionTypeSelectOptionLabels(root) {
+        const useShort = shouldUseShortInspectionTypeLabels();
+        (root || document).querySelectorAll(
+            '#selectInspectionType, #inputBuildingInspectionType, #inputEditBuildingInspectionType, select.round-type-select'
+        ).forEach((sel) => {
+            [...sel.options].forEach((opt) => {
+                const val = opt.value;
+                if (!INSPECTION_TYPE_OPTIONS.includes(val)) return;
+                if (!opt.dataset.fullLabel) opt.dataset.fullLabel = val;
+                opt.textContent = formatInspectionTypeOptionLabel(val, useShort);
+            });
+        });
+    }
 
     /**
      * 현장의 특정 회차(연도_기간)에 속한 모든 동의 점검 종류를 한꺼번에 바꾼다.
@@ -4014,6 +4154,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     if (id && typeof window.openOverviewPhotosModal === 'function') window.openOverviewPhotosModal(id);
                 });
             });
+            syncInspectionTypeSelectOptionLabels(grid);
         };
 
         const renderBuildingActionRow = (bldg, titleHtml, metaHtml, rowClass) => {
@@ -4130,9 +4271,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 const typeSelect = `
                     <select class="round-type-select" data-action="round-type" data-site-key="${safeSite}" data-round-key="${safeRound}"
                         title="이 회차의 점검 종류" aria-label="${escapeHtml(roundLabel)} 점검 종류">
-                        ${INSPECTION_TYPE_OPTIONS.map((t) =>
-                            `<option value="${escapeHtml(t)}"${t === typeLabel ? ' selected' : ''}>${escapeHtml(t)}</option>`
-                        ).join('')}
+                        ${buildInspectionTypeOptionsHtml(typeLabel, { short: true })}
                     </select>`;
                 // 단일: 회차 = 점검 시작 + 도면·전경. 여러 동: 회차 = 동 선택으로 진입
                 if (multiDong) {
@@ -4405,20 +4544,26 @@ document.addEventListener('DOMContentLoaded', () => {
         const targetFloor = window.state.currentFloor || '1F';
         const canFetchDrawings = typeof navigator === 'undefined' || navigator.onLine !== false;
         const entryBuildingId = bldg.id;
-        const reentrySameBuilding = window.state.currentTab === 'tab-home'
-            && window.state.currentBuildingId === entryBuildingId;
 
-        // 홈 탭에서 점검 재진입: 앱 내 탭 전환만으로는 online/visibility 이벤트가 없어 서버 병합이 안 돌 수 있음
-        if (canFetchDrawings && window.state.companyId
-            && typeof reconnectFirestoreSync === 'function'
-            && window.state.currentTab === 'tab-home') {
-            if (reentrySameBuilding) {
-                window.showToast('최신 점검 데이터 동기화 중…', 'info', 2200);
+        // 홈에서 회차·동 선택 후 점검 진입: 탭 전환 전 서버 스냅샷을 먼저 받아 병합 (오프라인이면 로컬만)
+        if (canFetchDrawings && window.state.companyId && typeof pullCompanySnapshotOnce === 'function') {
+            try {
+                window.showToast('서버에서 최신 데이터를 불러오는 중…', 'info', 2200);
+                await pullCompanySnapshotOnce();
+                const refreshed = window.state.buildings.find((item) => item.id === entryBuildingId);
+                if (refreshed) {
+                    bldg = refreshed;
+                    window.state.currentBuilding = bldg;
+                    applyBuildingLocationMapLegend(bldg);
+                    populateFloorSelectDropdown(bldg);
+                    applyFloorMapStyleSettings(window.state.currentFloor || '1F', bldg.id);
+                }
+            } catch (e) {
+                console.warn('점검 진입 전 서버 조회 실패:', e);
             }
-            reconnectFirestoreSync(reentrySameBuilding ? 'inspect-reentry' : 'inspect-entry');
         }
 
-        // 로딩 오버레이 없이 즉시 맵 진입. 로컬 캐시로 먼저 그리고, 없으면 백그라운드 hydrate.
+        // 로딩 오버레이 없이 맵 진입. 로컬 캐시로 먼저 그리고, 없으면 백그라운드 hydrate.
         loadFloorDrawing(targetFloor);
         window.switchTab('tab-map');
 
@@ -7735,11 +7880,10 @@ document.addEventListener('DOMContentLoaded', () => {
             if (isMarkingDrag) {
             const previewMeta = getLiveMarkPinPreviewMeta();
             const pendingDefect = previewMeta.defect;
-            const nextSeq = (currentDefects.length + 1);
-            const nextSeqStr = nextSeq < 10 ? `0${nextSeq}` : `${nextSeq}`;
+            const floorKey = `${state.currentBuildingId}_${state.currentFloor}`;
             const liveNoStr = previewMeta.fromGroup
                 ? previewMeta.label
-                : (pendingDefect ? (pendingDefect.groupNo || pendingDefect.no || previewMeta.label) : (document.getElementById('defectNo')?.value || `NO.${nextSeqStr}`));
+                : (pendingDefect ? (pendingDefect.groupNo || pendingDefect.no || previewMeta.label) : (document.getElementById('defectNo')?.value || getNextDefectNoStr(getFloorDefectsForNumbering(floorKey))));
             drawPin(ctx, {
                 no: liveNoStr,
                 groupNo: previewMeta.fromGroup ? previewMeta.label : (pendingDefect?.groupNo || liveNoStr),
@@ -14959,6 +15103,54 @@ document.addEventListener('DOMContentLoaded', () => {
         return 0;
     }
 
+    function formatMarkingArrowIndexLabel(index) {
+        return `화살표 ${index + 1}`;
+    }
+
+    function getMarkingMemberDirDisplay(m) {
+        if (!m || !m.forceArrowDir) {
+            return { symbol: '·', title: '자동(클릭 방향) · 누르면 방향 지정' };
+        }
+        const oct = ((parseInt(m.arrowOctant, 10) || 0) % 8 + 8) % 8;
+        const table = [
+            { symbol: '→', name: '동' },
+            { symbol: '↘', name: '남동' },
+            { symbol: '↓', name: '남' },
+            { symbol: '↙', name: '남서' },
+            { symbol: '←', name: '서' },
+            { symbol: '↖', name: '북서' },
+            { symbol: '↑', name: '북' },
+            { symbol: '↗', name: '북동' }
+        ];
+        const meta = table[oct] || table[0];
+        return { symbol: meta.symbol, title: `${meta.name} · 누르면 다음 방향` };
+    }
+
+    function syncDefectArrowFormFromMember(m) {
+        if (!m) return;
+        const pinId = document.getElementById('defectPinId')?.value;
+        if (pinId !== m.id) return;
+        const forceArrowDirEl = document.getElementById('defectForceArrowDir');
+        if (forceArrowDirEl) forceArrowDirEl.checked = !!m.forceArrowDir;
+        if (typeof setDefectArrowOctant === 'function') setDefectArrowOctant(m.arrowOctant);
+        else if (typeof syncDefectArrowDirUi === 'function') syncDefectArrowDirUi();
+    }
+
+    function persistMarkingMemberArrowDir(m, forceArrowDir, arrowOctant) {
+        if (!m) return;
+        m.forceArrowDir = !!forceArrowDir;
+        m.arrowOctant = ((parseInt(arrowOctant, 10) || 0) % 8 + 8) % 8;
+        touchDefectUpdatedAt(m);
+        saveStateToLocalStorage();
+        drawCanvas();
+        syncDefectArrowFormFromMember(m);
+        const pinId = document.getElementById('defectPinId')?.value;
+        const current = pinId
+            ? (state.defects[`${state.currentBuildingId}_${state.currentFloor}`] || []).find((x) => x.id === pinId)
+            : null;
+        if (current) renderDefectMarkingMemberFloat(current);
+    }
+
     function renderDefectMarkingMemberFloat(defectOrNull) {
         const el = document.getElementById('defectMarkingMemberFloat');
         if (!el) return;
@@ -14976,17 +15168,29 @@ document.addEventListener('DOMContentLoaded', () => {
         el.hidden = false;
         document.getElementById('defectModal')?.classList.add('has-marking-member-tabs');
         el.innerHTML = groupMembers.map((m, i) => {
-            const label = formatDefectMemberChipLabel(m);
             const active = m.id === defectOrNull.id ? ' is-active' : '';
-            return `<button type="button" class="defect-marking-float-btn${active}" data-marking-member-id="${escapeHtml(m.id)}" style="--float-i:${i}" title="마킹 ${escapeHtml(label)} 수정">${escapeHtml(label)}</button>`;
+            const dir = getMarkingMemberDirDisplay(m);
+            const forcedClass = m.forceArrowDir ? ' is-forced' : '';
+            return `<div class="defect-marking-arrow-row${active}" data-marking-member-id="${escapeHtml(m.id)}">`
+                + `<button type="button" class="defect-marking-float-btn defect-marking-arrow-select${active}" data-marking-member-id="${escapeHtml(m.id)}" title="${escapeHtml(formatMarkingArrowIndexLabel(i))} 선택">${i + 1}</button>`
+                + `<button type="button" class="defect-marking-arrow-dir-btn${forcedClass}" data-marking-member-id="${escapeHtml(m.id)}" title="${escapeHtml(dir.title)}">${dir.symbol}</button>`
+                + `</div>`;
         }).join('');
 
-        el.querySelectorAll('[data-marking-member-id]').forEach((btn) => {
+        el.querySelectorAll('.defect-marking-arrow-select').forEach((btn) => {
             btn.addEventListener('click', (e) => {
                 e.preventDefault();
                 e.stopPropagation();
                 const mid = btn.getAttribute('data-marking-member-id');
                 if (mid) window.selectDefectMarkingMember(mid);
+            });
+        });
+        el.querySelectorAll('.defect-marking-arrow-dir-btn').forEach((btn) => {
+            btn.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                const mid = btn.getAttribute('data-marking-member-id');
+                if (mid) window.cycleMarkingMemberArrowDir(mid);
             });
         });
     }
@@ -15024,6 +15228,33 @@ document.addEventListener('DOMContentLoaded', () => {
         `;
     }
 
+    /** 화살표 N 라벨 (번호 -1/-2 대신) */
+    window.cycleMarkingMemberArrowDir = async function(defectId) {
+        if (!defectId || !state.currentBuildingId) return;
+        if (typeof flushDefectAutoApply === 'function') {
+            try { await flushDefectAutoApply(); } catch (_e) { /* ignore */ }
+        }
+        const key = `${state.currentBuildingId}_${state.currentFloor}`;
+        const m = (state.defects[key] || []).find((x) => x.id === defectId);
+        if (!m || m.surveyExtra) return;
+
+        const pinId = document.getElementById('defectPinId')?.value;
+        if (pinId !== m.id && typeof window.selectDefectMarkingMember === 'function') {
+            await window.selectDefectMarkingMember(m.id);
+        }
+
+        let oct = ((parseInt(m.arrowOctant, 10) || 0) % 8 + 8) % 8;
+        if (!m.forceArrowDir) {
+            persistMarkingMemberArrowDir(m, true, oct);
+            return;
+        }
+        if (oct >= 7) {
+            persistMarkingMemberArrowDir(m, false, 0);
+            return;
+        }
+        persistMarkingMemberArrowDir(m, true, oct + 1);
+    };
+
     /** 같은 번호 그룹의 다른 화살표(마킹)로 전환해 수정 */
     window.selectDefectMarkingMember = async function(defectId) {
         if (!defectId || !state.currentBuildingId) return;
@@ -15044,8 +15275,10 @@ document.addEventListener('DOMContentLoaded', () => {
             window.focusDefectOnCanvas(d.id, { uncovered: true });
         }
         openAddDefectModal(d.x, d.y, d.targetX, d.targetY, d, null, { revealMarkingAboveDrawer: true });
-        const label = formatDefectMemberChipLabel(d);
-        window.showToast?.(`마킹 ${label} 선택`, 'info', 1600);
+        const members = d.groupId ? getDefectMarkingGroupMembers(d.groupId) : [];
+        const idx = members.findIndex((m) => m.id === d.id);
+        const label = idx >= 0 ? formatMarkingArrowIndexLabel(idx) : (d.no || '-');
+        window.showToast?.(`${label} 선택`, 'info', 1600);
     };
 
     // 다음 정기 회차(상반기→하반기→다음해 상반기). 수시점검은 다음 해 수시로 이동.
@@ -16230,16 +16463,14 @@ document.addEventListener('DOMContentLoaded', () => {
         if (d.surveyExtra) {
             return String(d.no || d.groupNo || '').replace(/^NO\.?\s*/i, '').trim() || '-';
         }
+        if (d.groupId) {
+            const members = getDefectMarkingGroupMembers(d.groupId);
+            const idx = members.findIndex((m) => m.id === d.id);
+            if (idx >= 0) return formatMarkingArrowIndexLabel(idx);
+        }
         const base = String(d.groupNo || stripDefectNoSuffix(d.no) || d.no || '')
             .replace(/^NO\.?\s*/i, '')
             .trim();
-        if (d.groupId) {
-            const members = getDefectMarkingGroupMembers(d.groupId);
-            if (members.length > 1) {
-                const idx = members.findIndex((m) => m.id === d.id);
-                if (idx >= 0 && base) return `${base}-${idx + 1}`;
-            }
-        }
         return base || '-';
     }
 
@@ -16573,10 +16804,13 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
+        const floorKey = `${state.currentBuildingId}_${state.currentFloor}`;
+        if (state.defects[floorKey]) syncDefectGroupNosForFloor(floorKey);
+
         const allFloorDefects = getCurrentFloorDefects();
-        const allForList = getDefectsForListPanel(getCurrentFloorDefects());
+        const allForList = getDefectsForListPanel(allFloorDefects, allFloorDefects);
         const unregisteredItems = allForList.filter(d => isPreviousRoundDefect(d) && isDefectMapUnregistered(d));
-        const defects = getDefectsForListPanel(getCurrentFloorFilteredDefects());
+        const defects = getDefectsForListPanel(getCurrentFloorFilteredDefects(), allFloorDefects);
 
         if (summaryEl) {
             const counts = { columnWall: 0, beamSlab: 0, nonStructural: 0, finishing: 0 };
@@ -16831,9 +17065,13 @@ document.addEventListener('DOMContentLoaded', () => {
         return '';
     }
 
-    // 좌측 결함목록: 그룹을 합치지 않고 마킹·결함표 추가를 하나씩 보여 준다
-    function getDefectsForListPanel(defects) {
-        return (defects || []).slice().sort((a, b) => {
+    // 좌측 결함목록: 위치추가(화살표)는 한 행·본번호, 결함표 추가(surveyExtra)만 별도 행
+    function getDefectsForListPanel(defects, allDefects) {
+        const list = defects || [];
+        const full = allDefects || list;
+        const seenMarkingGroups = new Set();
+        const rows = [];
+        const sorted = list.slice().sort((a, b) => {
             const pa = parseDefectNoParts(a);
             const pb = parseDefectNoParts(b);
             if (pa.main !== pb.main) return pa.main - pb.main;
@@ -16848,9 +17086,45 @@ document.addEventListener('DOMContentLoaded', () => {
             if (na !== nb) return na - nb;
             return String(a.no || '').localeCompare(String(b.no || ''));
         });
+
+        sorted.forEach((d) => {
+            if (d.surveyExtra) {
+                rows.push(d);
+                return;
+            }
+            if (d.groupId) {
+                if (seenMarkingGroups.has(d.groupId)) return;
+                seenMarkingGroups.add(d.groupId);
+                const markingMembers = full.filter((m) => m.groupId === d.groupId && !m.surveyExtra);
+                if (!markingMembers.length) return;
+                const rep = pickDefectGroupRepresentative(markingMembers) || d;
+                const locations = markingMembers.map((m) => m.location).filter(Boolean);
+                const uniqLoc = [];
+                locations.forEach((loc) => {
+                    if (uniqLoc.indexOf(loc) === -1) uniqLoc.push(loc);
+                });
+                rows.push({
+                    ...rep,
+                    no: rep.groupNo || stripDefectNoSuffix(rep.no) || rep.no,
+                    location: uniqLoc.length > 0 ? uniqLoc.join(' / ') : rep.location,
+                    isProgress: markingMembers.some((m) => m.isProgress),
+                    isLeak: markingMembers.some((m) => m.isLeak),
+                    isOpeningCrack: markingMembers.some((m) => m.isOpeningCrack),
+                    isCarriedOver: markingMembers.some((m) => m.isCarriedOver),
+                    mapUnregistered: markingMembers.some((m) => m.mapUnregistered),
+                    isPriorityManage: markingMembers.some((m) => m.isPriorityManage),
+                    isBookmark: markingMembers.some((m) => m.isBookmark),
+                    _groupMemberIds: markingMembers.map((m) => m.id),
+                    _representative: rep
+                });
+                return;
+            }
+            rows.push(d);
+        });
+        return rows;
     }
 
-    // 목록 원 번호: 첫 항목은 1, 같은 그룹의 나머지는 1-2, 1-3 (1-1은 쓰지 않음)
+    // 목록 원 번호: 마킹(화살표)은 본번호 N, 결함표 추가만 N-1, N-2 …
     function formatDefectListBadgeNo(d) {
         const compact = (raw) => {
             const m = String(raw || '').replace(/^NO\.?\s*/i, '').trim().match(/(\d+)(?:-(\d+))?/);
@@ -16859,28 +17133,8 @@ document.addEventListener('DOMContentLoaded', () => {
             return m[2] ? `${main}-${parseInt(m[2], 10)}` : main;
         };
         if (!d) return '?';
-        if (d.groupId && state.currentBuildingId) {
-            const key = `${state.currentBuildingId}_${state.currentFloor}`;
-            const members = (state.defects[key] || [])
-                .filter((m) => m && m.groupId === d.groupId)
-                .slice()
-                .sort((a, b) => {
-                    const ae = a.surveyExtra ? 1 : 0;
-                    const be = b.surveyExtra ? 1 : 0;
-                    if (ae !== be) return ae - be;
-                    const na = parseDefectSortNoValue(a);
-                    const nb = parseDefectSortNoValue(b);
-                    if (na !== nb) return na - nb;
-                    return String(a.id || '').localeCompare(String(b.id || ''));
-                });
-            if (members.length > 1) {
-                const idx = members.findIndex((m) => m.id === d.id);
-                const base = compact(d.groupNo || stripDefectNoSuffix(d.no) || d.no);
-                if (idx <= 0) return base || '1';
-                return `${base}-${idx + 1}`;
-            }
-        }
-        return compact(d.no || d.groupNo);
+        if (d.surveyExtra) return compact(d.no || d.groupNo);
+        return compact(d.groupNo || stripDefectNoSuffix(d.no) || d.no);
     }
 
     // 결함 1건의 목록 카드(DOM row) 생성 — renderDefectListSection에서 재사용
@@ -16986,7 +17240,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 const set = window.getSelectedDefectIds();
                 if (set) {
                     set.clear();
-                    if (d.id) set.add(d.id);
+                    if (d._groupMemberIds && d._groupMemberIds.length > 1) {
+                        d._groupMemberIds.forEach((id) => set.add(id));
+                    } else if (d.id) {
+                        set.add(d.id);
+                    }
                     if (typeof updateMapSelectionBar === 'function') updateMapSelectionBar({ scrollToSelection: false });
                     else if (typeof renderDefectListPanel === 'function') renderDefectListPanel();
                 }
@@ -21654,10 +21912,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 boxY: tmpl.boxY
             };
         }
-        const currentDefects = getCurrentFloorMapPlacedDefects();
-        const nextSeq = currentDefects.length + 1;
-        const nextSeqStr = nextSeq < 10 ? `0${nextSeq}` : `${nextSeq}`;
-        const label = `NO.${nextSeqStr}`;
+        const floorKey = `${state.currentBuildingId}_${state.currentFloor}`;
+        const label = getNextDefectNoStr(getFloorDefectsForNumbering(floorKey));
         const defaultCat = document.getElementById('defectCategory')?.value || '구조체';
         const scale = getStyleSize(getDefectStyleKey(defaultCat, '균열')).pin;
         return { label, scale, defect: null };
@@ -21693,9 +21949,8 @@ document.addEventListener('DOMContentLoaded', () => {
     function drawPendingDefectPreview(ctx, currentDefects) {
         if (!isDefectModalOpen() || !isNewDefectModalSession()) return;
         const category = document.getElementById('defectCategory')?.value || '구조체';
-        const nextSeq = currentDefects.length + 1;
-        const nextSeqStr = nextSeq < 10 ? `0${nextSeq}` : `${nextSeq}`;
-        const no = document.getElementById('defectNo')?.value || `NO.${nextSeqStr}`;
+        const floorKey = `${state.currentBuildingId}_${state.currentFloor}`;
+        const no = document.getElementById('defectNo')?.value || getNextDefectNoStr(getFloorDefectsForNumbering(floorKey));
         const forceArrowDir = document.getElementById('defectForceArrowDir')?.checked || false;
         const arrowOctant = ((parseInt(document.getElementById('defectArrowOctant')?.value || '0', 10) % 8) + 8) % 8;
         const grp = getActiveMarkingGroup();
@@ -23372,7 +23627,7 @@ document.addEventListener('DOMContentLoaded', () => {
         window._defectAutoApplyTimer = null;
 
         const key = `${state.currentBuildingId}_${state.currentFloor}`;
-        const defects = state.defects[key] || [];
+        const defects = getFloorDefectsForNumbering(key);
 
         const pinIdEl = document.getElementById('defectPinId');
         const noEl = document.getElementById('defectNo');
@@ -23476,9 +23731,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 window._pendingPinCoords = { x: existingPin.x, y: existingPin.y, targetX: existingPin.targetX, targetY: existingPin.targetY };
             }
         } else {
-            const seq = defects.length + 1;
-            const seqStr = seq < 10 ? `0${seq}` : `${seq}`;
-            const defectNoStr = `NO.${seqStr}`;
+            const defectNoStr = getNextDefectNoStr(defects);
 
             // 커밋 전에 PAN으로 바뀌어도 groupId가 유지되도록 먼저 스냅샷
             snapshotMarkingGroupForCommit(window._defectMarkingTemplate);
@@ -23506,8 +23759,13 @@ document.addEventListener('DOMContentLoaded', () => {
             if (openingCrackCheckEl) openingCrackCheckEl.checked = false;
             if (bookmarkEl) bookmarkEl.checked = false;
             if (priorityManageEl) priorityManageEl.checked = false;
-            if (forceArrowDirEl) forceArrowDirEl.checked = !!(tmpl && tmpl.forceArrowDir);
-            setDefectArrowOctant(tmpl && tmpl.arrowOctant);
+            if (tmpl && tmpl.groupId) {
+                if (forceArrowDirEl) forceArrowDirEl.checked = false;
+                setDefectArrowOctant(0);
+            } else {
+                if (forceArrowDirEl) forceArrowDirEl.checked = !!(tmpl && tmpl.forceArrowDir);
+                setDefectArrowOctant(tmpl && tmpl.arrowOctant);
+            }
             syncDefectArrowDirUi();
             window._pendingPhotos = [];
             window._pendingPrevRoundPhotos = [];
@@ -23611,6 +23869,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         const pinIdFresh = document.getElementById('defectPinId');
                         if (pinIdFresh) pinIdFresh.value = created.id;
                         window._defectEditSessionHistoryPushed = true;
+                        renderDefectMarkingTimeline(created);
                     }
                 }
                 await photoHydratePromise;
@@ -24714,6 +24973,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
                 saveStateToLocalStorage();
                 drawCanvas();
+                if (typeof renderDefectListPanel === 'function') renderDefectListPanel();
 
                 const isArea = saved.shapeType === 'area';
                 window._defectMarkingTemplate = {
@@ -25265,6 +25525,15 @@ document.addEventListener('DOMContentLoaded', () => {
     const mobileNdtBtnToggleSize = document.getElementById('mobileNdtBtnToggleSize');
     if (mobileNdtBtnToggleSize) {
         mobileNdtBtnToggleSize.addEventListener('click', () => {
+            const isDesktop = document.documentElement.classList.contains('layout-desktop');
+            if (isDesktop) {
+                document.getElementById('btnToggleNdtStyleSize')?.click();
+                const pcToggle = document.getElementById('btnToggleNdtStyleSize');
+                const isOn = pcToggle && pcToggle.classList.contains('is-on');
+                mobileNdtBtnToggleSize.classList.toggle('active', !!isOn);
+                mobileNdtBtnToggleSize.setAttribute('aria-expanded', isOn ? 'true' : 'false');
+                return;
+            }
             const bar = document.getElementById('ndtStyleSizeToolbar');
             const willOpen = !bar || !bar.classList.contains('is-mobile-sheet-open');
             if (bar) bar.classList.toggle('is-mobile-sheet-open', willOpen);
@@ -25299,16 +25568,12 @@ document.addEventListener('DOMContentLoaded', () => {
             );
         });
     }
-    const mobileNdtBtnModePan = document.getElementById('mobileNdtBtnModePan');
     const mobileNdtBtnModeMark = document.getElementById('mobileNdtBtnModeMark');
-    if (mobileNdtBtnModePan) {
-        mobileNdtBtnModePan.addEventListener('click', () => {
-            if (typeof window.setNdtMode === 'function') window.setNdtMode('PAN');
-        });
-    }
     if (mobileNdtBtnModeMark) {
         mobileNdtBtnModeMark.addEventListener('click', () => {
-            if (typeof window.setNdtMode === 'function') window.setNdtMode('MARK');
+            if (typeof window.setNdtMode !== 'function') return;
+            const markActive = mobileNdtBtnModeMark.classList.contains('active');
+            window.setNdtMode(markActive ? 'PAN' : 'MARK');
         });
     }
     const mobileNdtBtnZoomFit = document.getElementById('mobileNdtBtnZoomFit');
@@ -25321,6 +25586,24 @@ document.addEventListener('DOMContentLoaded', () => {
     if (mobileNdtBtnDeleteSelected) {
         mobileNdtBtnDeleteSelected.addEventListener('click', () => {
             document.getElementById('btnDeleteSelectedNdt')?.click();
+        });
+    }
+
+    const ndtRailProxy = (fromId, toId) => {
+        const from = document.getElementById(fromId);
+        const to = document.getElementById(toId);
+        if (from && to) from.addEventListener('click', () => to.click());
+    };
+    ndtRailProxy('ndtRailBtnZoomIn', 'btnNdtZoomIn');
+    ndtRailProxy('ndtRailBtnZoomOut', 'btnNdtZoomOut');
+    ndtRailProxy('ndtRailBtnStyle', 'btnOpenStyleColorModalNdt');
+    ndtRailProxy('ndtRailBtnRotateDraw', 'btnRotateNdtDrawing');
+    const ndtRailPdf = document.getElementById('ndtRailBtnVectorPdf');
+    if (ndtRailPdf) {
+        ndtRailPdf.addEventListener('click', () => {
+            if (typeof window.exportCurrentFloorNdtVectorPdf === 'function') {
+                window.exportCurrentFloorNdtVectorPdf();
+            }
         });
     }
 
@@ -26390,8 +26673,7 @@ document.addEventListener('DOMContentLoaded', () => {
             ? `${state.currentBuildingId}_${state.currentFloor}`
             : null;
         if (floorKey && state.defects[floorKey]) {
-            if (window._defectMarkingTemplate) normalizeAllDefectGroupNos(state.defects[floorKey]);
-            else collapseSingletonDefectGroups(state.defects[floorKey]);
+            syncDefectGroupNosForFloor(floorKey);
         }
         const rawDefects = getCurrentFloorDefects();
         const defects = getSurveyRowsForReport(rawDefects);
@@ -32741,6 +33023,8 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // Inspection Settings Toolbar Selects Change Handlers
+    syncInspectionTypeSelectOptionLabels();
+    window.addEventListener('resize', () => syncInspectionTypeSelectOptionLabels());
     ['selectInspectionType', 'selectInspectionYear', 'selectInspectionPeriod'].forEach(id => {
         const sel = document.getElementById(id);
         if (sel) {
@@ -34261,6 +34545,10 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function updateOnlineBadge(isOnline) {
+        if (isOnline && typeof refreshSyncStatusBadge === 'function') {
+            refreshSyncStatusBadge();
+            return;
+        }
         const badge = document.getElementById('onlineStatusBadge');
         if (badge) {
             if (isOnline) {
@@ -35889,16 +36177,67 @@ document.addEventListener('DOMContentLoaded', () => {
     // 변경은 로컬에만 쌓아 두고 홈으로 나갈 때(또는 앱이 백그라운드로 갈 때) 한 번에 올린다.
     const WORK_TABS_DEFER_SYNC = new Set(['tab-map', 'tab-survey', 'tab-ndt']);
     let _deferredSyncDirty = false;
+    let _syncFlushNotify = false;
 
     function isWorkTabSyncDeferred() {
         return !!(window.state && WORK_TABS_DEFER_SYNC.has(window.state.currentTab));
     }
     window.isWorkTabSyncDeferred = isWorkTabSyncDeferred;
 
+    function refreshSyncStatusBadge() {
+        const badge = document.getElementById('onlineStatusBadge');
+        if (!badge) return;
+        const paint = (bg, color, border, html) => {
+            badge.style.background = bg;
+            badge.style.color = color;
+            badge.style.borderColor = border;
+            badge.innerHTML = html;
+        };
+        if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+            paint('rgba(239, 68, 68, 0.15)', '#f87171', 'rgba(239, 68, 68, 0.3)',
+                '<i class="fa-solid fa-wifi-slash"></i> 오프라인 (로컬 보관중)');
+            return;
+        }
+        if (!db) {
+            paint('rgba(245, 158, 11, 0.15)', '#fbbf24', 'rgba(245, 158, 11, 0.35)',
+                '<i class="fa-solid fa-cloud"></i> Firebase 미연결 (로컬만 저장)');
+            return;
+        }
+        if (!window.state || !window.state.uid) {
+            paint('rgba(245, 158, 11, 0.15)', '#fbbf24', 'rgba(245, 158, 11, 0.35)',
+                '<i class="fa-solid fa-user-slash"></i> 로그인 필요 (로컬만 저장)');
+            return;
+        }
+        if (window.state.role === 'pending') {
+            paint('rgba(245, 158, 11, 0.15)', '#fbbf24', 'rgba(245, 158, 11, 0.35)',
+                '<i class="fa-solid fa-hourglass-half"></i> 회사 승인 대기 (동기화 불가)');
+            return;
+        }
+        if (!window.state.companyId) {
+            paint('rgba(245, 158, 11, 0.15)', '#fbbf24', 'rgba(245, 158, 11, 0.35)',
+                '<i class="fa-solid fa-building-circle-xmark"></i> 회사 미가입 (동기화 불가)');
+            return;
+        }
+        if (_syncInFlight) {
+            paint('rgba(56, 189, 248, 0.15)', '#38bdf8', 'rgba(56, 189, 248, 0.35)',
+                '<i class="fa-solid fa-cloud-arrow-up"></i> 서버 동기화 중…');
+            return;
+        }
+        if (_deferredSyncDirty && isWorkTabSyncDeferred()) {
+            paint('rgba(245, 158, 11, 0.15)', '#fbbf24', 'rgba(245, 158, 11, 0.35)',
+                '<i class="fa-solid fa-clock"></i> 업로드 대기 (홈 탭 이동 시 반영)');
+            return;
+        }
+        paint('rgba(34, 197, 94, 0.15)', '#4ade80', 'rgba(34, 197, 94, 0.3)',
+            '<i class="fa-solid fa-wifi"></i> 온라인 (실시간 동기화중)');
+    }
+    window.refreshSyncStatusBadge = refreshSyncStatusBadge;
+
     function scheduleSyncToFirebase(opts) {
         const force = !!(opts && opts.force);
         if (isWorkTabSyncDeferred() && !force) {
             _deferredSyncDirty = true;
+            refreshSyncStatusBadge();
             return;
         }
         if (!db || !window.state.companyId || !navigator.onLine) return;
@@ -35917,22 +36256,55 @@ document.addEventListener('DOMContentLoaded', () => {
     /** 작업 탭에서 미뤄 둔 업로드·원격 반영을 지금 처리 (홈 진입·백그라운드 전환 시) */
     function flushDeferredWorkTabSync(reason) {
         const hadDirty = _deferredSyncDirty;
-        _deferredSyncDirty = false;
-        if (!db || !window.state.companyId || !navigator.onLine) {
-            // 오프라인이면 표시만 남겨 두고, 온라인 복귀 때 reconnect 경로가 올린다
-            if (hadDirty) _deferredSyncDirty = true;
+        const onWorkTab = isWorkTabSyncDeferred();
+        const shouldUpload = hadDirty
+            || reason === 'home'
+            || ((reason === 'hidden' || reason === 'pagehide') && onWorkTab);
+
+        if (!shouldUpload) {
+            if (_pendingRemoteData && typeof scheduleFlushPendingRemoteSync === 'function') {
+                scheduleFlushPendingRemoteSync();
+            }
+            refreshSyncStatusBadge();
             return;
         }
-        if (hadDirty) {
-            if (_syncDebounceTimer) clearTimeout(_syncDebounceTimer);
-            _syncDebounceTimer = null;
-            // 서버 병합 후 업로드 — 미뤄 둔 원격 스냅샷도 이 과정에서 반영됨
-            syncStateToFirebase();
-        } else if (_pendingRemoteData && typeof scheduleFlushPendingRemoteSync === 'function') {
-            scheduleFlushPendingRemoteSync();
+
+        if (!db || !window.state.companyId || !navigator.onLine) {
+            _deferredSyncDirty = true;
+            if (shouldUpload && window.state && window.state.uid && !window.state.companyId) {
+                window.showToast('회사에 가입·승인되어야 다른 기기와 동기화됩니다.', 'warning', 4500);
+            } else if (shouldUpload && window.state && window.state.role === 'pending') {
+                window.showToast('회사 승인 대기 중입니다. 승인 후 다른 기기와 동기화됩니다.', 'warning', 4500);
+            } else if (shouldUpload && !navigator.onLine) {
+                window.showToast('오프라인입니다. 온라인 후 홈 탭에서 다시 동기화됩니다.', 'warning', 4000);
+            }
+            refreshSyncStatusBadge();
+            return;
         }
+
+        _deferredSyncDirty = false;
+        if (_syncDebounceTimer) clearTimeout(_syncDebounceTimer);
+        _syncDebounceTimer = null;
+        _syncFlushNotify = !!(reason === 'home' || reason === 'hidden' || reason === 'pagehide');
+        refreshSyncStatusBadge();
+        syncStateToFirebase();
     }
     window.flushDeferredWorkTabSync = flushDeferredWorkTabSync;
+
+    window.getSyncDiagnostics = function () {
+        return {
+            online: typeof navigator !== 'undefined' ? navigator.onLine !== false : null,
+            hasDb: !!db,
+            uid: window.state && window.state.uid,
+            companyId: window.state && window.state.companyId,
+            role: window.state && window.state.role,
+            currentTab: window.state && window.state.currentTab,
+            deferredDirty: _deferredSyncDirty,
+            syncInFlight: _syncInFlight,
+            pendingRemote: !!_pendingRemoteData,
+            workTabDeferred: isWorkTabSyncDeferred()
+        };
+    };
 
     /** 온라인 복귀·앱 포그라운드: 실시간 리스너 재구독 + 서버 기준 병합 동기화 */
     let _reconnectSyncTimer = null;
@@ -36567,6 +36939,10 @@ document.addEventListener('DOMContentLoaded', () => {
             (window.state.buildings || []).forEach((b) => {
                 if (b && b._pendingCloudSync) delete b._pendingCloudSync;
             });
+            if (_syncFlushNotify) {
+                _syncFlushNotify = false;
+                window.showToast('서버에 동기화했습니다. 다른 기기에서 홈 탭을 열면 반영됩니다.', 'success', 3200);
+            }
             if (state.currentTab === 'tab-map' && state.currentBuildingId && state.currentFloor) {
                 refreshCurrentBuildingFromState();
                 if (state.bgImage && typeof syncFloorDrawingTierForView === 'function') {
@@ -36586,6 +36962,9 @@ document.addEventListener('DOMContentLoaded', () => {
         } catch (e) {
             console.warn('Firebase Sync Error:', e);
             _syncPending = true;
+            _syncFlushNotify = false;
+            refreshSyncStatusBadge();
+            window.showToast('서버 동기화에 실패했습니다. 잠시 후 다시 시도합니다.', 'warning', 4000);
             setTimeout(() => {
                 if (navigator.onLine && _syncPending) {
                     _syncPending = false;
@@ -36603,6 +36982,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             setTimeout(() => { isRemoteSyncing = false; }, 400);
             _syncInFlight = false;
+            refreshSyncStatusBadge();
             if (_syncPending) {
                 _syncPending = false;
                 syncStateToFirebase();
@@ -37040,6 +37420,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (typeof pullCompanySnapshotOnce === 'function') {
             await pullCompanySnapshotOnce();
         }
+        if (typeof refreshSyncStatusBadge === 'function') refreshSyncStatusBadge();
         if (typeof ensureBuildingAccessSeeded === 'function') ensureBuildingAccessSeeded();
         else if (typeof touchBuildingAccess === 'function' && window.state.currentBuildingId) {
             touchBuildingAccess(window.state.currentBuildingId);
@@ -37070,6 +37451,7 @@ document.addEventListener('DOMContentLoaded', () => {
             window.state.role = null;
             if (typeof resetDefectPinPresetsToDefaults === 'function') resetDefectPinPresetsToDefaults();
             switchCompanyLocalDataContext(null, null).catch(() => {});
+            if (typeof refreshSyncStatusBadge === 'function') refreshSyncStatusBadge();
             showLoginOverlay();
             return;
         }
@@ -37102,6 +37484,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 window.state.companyName = data.pendingCompanyName || data.companyName || '';
                 window.state.role = 'pending';
                 showPendingApproval(data.pendingCompanyName || data.companyName);
+                if (typeof refreshSyncStatusBadge === 'function') refreshSyncStatusBadge();
             } else if (status === 'rejected') {
                 await clearUserCompanyLinks(user.uid, activeCompanyId, { removeMember: false });
                 window.state.uid = user.uid;

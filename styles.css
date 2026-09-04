@@ -613,11 +613,41 @@ html.layout-tablet #tab-ndt .ndt-top-canvas-tools {
 }
 
 html.layout-desktop #tab-ndt .ndt-top-canvas-tools {
-    display: flex !important;
+    display: none !important;
 }
 
-#tab-ndt .ndt-cat-rail {
+#tab-ndt .ndt-cat-rail,
+#tab-ndt .ndt-unified-rail {
     display: none;
+}
+
+#tab-ndt .ndt-unified-rail {
+    flex-direction: column;
+    gap: 0.1rem;
+    padding: 0.18rem 0.12rem;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    background: #ffffff;
+    border: 1px solid #d4d4d4;
+    border-radius: 10px;
+    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.12);
+    flex-shrink: 0;
+    max-height: calc(100% - 0.6rem);
+}
+
+#tab-ndt .ndt-rail-sep {
+    height: 1px;
+    margin: 0.08rem 0.12rem;
+    background: #e5e7eb;
+    flex-shrink: 0;
+}
+
+#tab-ndt .ndt-rail-sep-pc {
+    display: none;
+}
+
+#tab-ndt .ndt-rail-pc-only {
+    display: none !important;
 }
 
 .map-style-toolbar {
@@ -2743,8 +2773,8 @@ html.layout-desktop #tab-ndt .ndt-top-canvas-tools {
         display: none !important;
         position: absolute;
         left: 0.35rem;
-        right: 0.35rem;
-        bottom: calc(3.9rem + env(safe-area-inset-bottom, 0px));
+        right: 3.2rem;
+        bottom: calc(0.35rem + env(safe-area-inset-bottom, 0px));
         z-index: 36;
         max-height: min(38vh, 200px);
     }
@@ -2767,16 +2797,7 @@ html.layout-desktop #tab-ndt .ndt-top-canvas-tools {
     }
 
     #tab-ndt .mobile-canvas-dock {
-        display: block;
-        flex-shrink: 0;
-        margin-top: 0.3rem;
-        position: relative;
-        left: auto;
-        right: auto;
-        bottom: auto;
-        z-index: 30;
-        padding: 0;
-        padding-bottom: env(safe-area-inset-bottom, 0px);
+        display: none !important;
     }
 
     #tab-ndt .ndt-results-section {
@@ -4300,7 +4321,7 @@ html:not(.layout-desktop) .survey-inline-select {
     border-top: 1px dashed rgba(148, 163, 184, 0.45);
 }
 
-/* X-1/X-2 마킹 선택 탭 — PC는 드로어 왼쪽, 모바일은 시트 위에 붙음 */
+/* 화살표별 선택·방향 — PC는 드로어 왼쪽, 모바일은 시트 위에 붙음 */
 #defectMarkingMemberFloat.defect-marking-member-float {
     pointer-events: auto;
     display: flex;
@@ -4313,10 +4334,22 @@ html:not(.layout-desktop) .survey-inline-select {
     flex-shrink: 0;
     z-index: 6;
     margin: 14px 0 0 0;
-    max-width: 4.8rem;
+    max-width: 6.4rem;
 }
 #defectMarkingMemberFloat.defect-marking-member-float[hidden] {
     display: none !important;
+}
+.defect-marking-arrow-row {
+    display: flex;
+    flex-direction: row;
+    align-items: stretch;
+    gap: 0;
+    border-radius: 10px 0 0 10px;
+    overflow: hidden;
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08);
+}
+.defect-marking-arrow-row.is-active {
+    box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.35);
 }
 .defect-marking-float-btn {
     appearance: none;
@@ -4324,10 +4357,10 @@ html:not(.layout-desktop) .survey-inline-select {
     border-right: none;
     background: #f8fafc;
     color: #0f172a;
-    border-radius: 10px 0 0 10px;
-    min-width: 3.2rem;
+    border-radius: 0;
+    min-width: 2.35rem;
     min-height: 2.2rem;
-    padding: 0.32rem 0.72rem;
+    padding: 0.32rem 0.45rem;
     font-size: 0.82rem;
     font-weight: 800;
     letter-spacing: -0.02em;
@@ -4338,14 +4371,44 @@ html:not(.layout-desktop) .survey-inline-select {
     opacity: 1;
     transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
 }
-.defect-marking-float-btn:active {
-    filter: brightness(0.97);
+.defect-marking-arrow-row .defect-marking-arrow-select {
+    border-radius: 10px 0 0 10px;
 }
-.defect-marking-float-btn.is-active {
+.defect-marking-arrow-dir-btn {
+    appearance: none;
+    border: 1px solid #cbd5e1;
+    background: #fff;
+    color: #475569;
+    border-radius: 0;
+    min-width: 2.35rem;
+    min-height: 2.2rem;
+    padding: 0.28rem 0.4rem;
+    font-size: 1rem;
+    font-weight: 700;
+    line-height: 1;
+    cursor: pointer;
+    transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+.defect-marking-arrow-dir-btn.is-forced {
+    border-color: #6b6b6b;
+    background: #f1f5f9;
+    color: #0f172a;
+}
+.defect-marking-arrow-row.is-active .defect-marking-float-btn,
+.defect-marking-arrow-row.is-active .defect-marking-arrow-dir-btn {
     border-color: #2563eb;
+}
+.defect-marking-arrow-row.is-active .defect-marking-float-btn {
     background: #2563eb;
     color: #fff;
-    box-shadow: none;
+}
+.defect-marking-arrow-row.is-active .defect-marking-arrow-dir-btn.is-forced {
+    background: #dbeafe;
+    color: #1d4ed8;
+}
+.defect-marking-float-btn:active,
+.defect-marking-arrow-dir-btn:active {
+    filter: brightness(0.97);
 }
 
 
@@ -4918,7 +4981,7 @@ html:not(.layout-desktop) .survey-inline-select {
         flex-direction: column;
     }
 
-    /* 세로 모바일: X-1/X-2 탭을 시트 윗변에 붙임 */
+    /* 세로 모바일: 화살표 선택·방향 탭을 시트 윗변에 붙임 */
     html:not(.layout-desktop) #defectModal #defectMarkingMemberFloat:not([hidden]) {
         order: 1;
         margin-top: auto;
@@ -4927,21 +4990,30 @@ html:not(.layout-desktop) .survey-inline-select {
         margin-right: 0;
         align-self: flex-start;
         flex-direction: row;
+        flex-wrap: wrap;
         max-width: calc(100% - 1.6rem);
         padding: 0;
         gap: 6px;
     }
-    html:not(.layout-desktop) #defectModal #defectMarkingMemberFloat:not([hidden]) .defect-marking-float-btn {
+    html:not(.layout-desktop) #defectModal #defectMarkingMemberFloat:not([hidden]) .defect-marking-arrow-row {
         border-radius: 10px 10px 0 0;
-        border-right: 1px solid #cbd5e1;
-        border-bottom: none;
-        min-width: 3.2rem;
+        box-shadow: none;
+    }
+    html:not(.layout-desktop) #defectModal #defectMarkingMemberFloat:not([hidden]) .defect-marking-arrow-select {
+        border-radius: 10px 0 0 0;
+        border-right: none;
+        min-width: 2.2rem;
         min-height: 2.2rem;
         font-size: 0.84rem;
     }
-    html:not(.layout-desktop) #defectModal #defectMarkingMemberFloat:not([hidden]) .defect-marking-float-btn.is-active {
-        border-color: #2563eb;
-        border-bottom: none;
+    html:not(.layout-desktop) #defectModal #defectMarkingMemberFloat:not([hidden]) .defect-marking-arrow-dir-btn {
+        border-radius: 0 10px 0 0;
+        border-left: none;
+        min-width: 2.2rem;
+        min-height: 2.2rem;
+    }
+    html:not(.layout-desktop) #defectModal #defectMarkingMemberFloat:not([hidden]) .defect-marking-arrow-row.is-active {
+        box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.35);
     }
     html:not(.layout-desktop) #defectModal #defectMarkingMemberFloat:not([hidden]) + .defect-drawer-card {
         order: 2;
@@ -5031,8 +5103,8 @@ html:not(.layout-desktop) .survey-inline-select {
         display: none !important;
         position: fixed !important;
         left: 0.4rem;
-        right: 0.4rem;
-        bottom: calc(4.15rem + env(safe-area-inset-bottom, 0px));
+        right: 3.2rem;
+        bottom: calc(0.45rem + env(safe-area-inset-bottom, 0px));
         z-index: 60;
         margin: 0 !important;
         padding: 0.5rem 0.6rem !important;
@@ -5432,20 +5504,9 @@ html:not(.layout-desktop) .survey-inline-select {
         margin-left: 0;
         align-self: flex-start;
         flex-direction: column;
-        max-width: 4.6rem;
+        max-width: 6.4rem;
         padding: 0;
         gap: 6px;
-    }
-    html:not(.layout-desktop) #defectModal #defectMarkingMemberFloat:not([hidden]) .defect-marking-float-btn {
-        border-radius: 10px 0 0 10px;
-        border-right: none;
-        border-bottom: 1px solid #cbd5e1;
-        min-width: 3.15rem;
-        min-height: 2.15rem;
-    }
-    html:not(.layout-desktop) #defectModal #defectMarkingMemberFloat:not([hidden]) .defect-marking-float-btn.is-active {
-        border-color: #2563eb;
-        border-right: none;
     }
     html:not(.layout-desktop) #defectModal #defectMarkingMemberFloat:not([hidden]) + .defect-drawer-card {
         order: 2;
@@ -9925,10 +9986,11 @@ body:not(.bsa-tab-home) .home-fab-add-building {
 
     #tab-home .round-type-select {
         height: 2rem;
-        font-size: 0.7rem;
-        padding: 0 1.3rem 0 0.4rem;
-        max-width: 6.6rem;
-        background-position: right 0.4rem center;
+        font-size: 0.78rem;
+        padding: 0 1.1rem 0 0.35rem;
+        max-width: 3.4rem;
+        min-width: 3.4rem;
+        background-position: right 0.35rem center;
     }
 
     /* 현장 목록: 수정은 우측 작은 네모만 */
@@ -10475,7 +10537,7 @@ body:not(.bsa-tab-home) .home-fab-add-building {
             min-height: 58vh !important;
             height: 58vh !important;
             max-height: none !important;
-            margin-bottom: 3.4rem !important;
+            margin-bottom: 0.5rem !important;
             border-radius: 10px;
         }
     }
@@ -10543,18 +10605,7 @@ body:not(.bsa-tab-home) .home-fab-add-building {
     }
 
     #tab-ndt .mobile-canvas-dock {
-        display: block !important;
-        position: relative !important;
-        left: auto !important;
-        right: auto !important;
-        bottom: auto !important;
-        margin-top: -3.1rem;
-        margin-bottom: 0.4rem;
-        z-index: 30;
-        pointer-events: none;
-    }
-    #tab-ndt .mobile-canvas-dock .mobile-map-fab {
-        pointer-events: auto;
+        display: none !important;
     }
 }
 
@@ -10625,6 +10676,90 @@ html.layout-desktop .mobile-ndt-fab {
     display: none !important;
 }
 
+/* NDT PC: 도면 우측 통합 레일 사용 */
+html.layout-desktop #tab-ndt .ndt-unified-rail {
+    display: flex !important;
+}
+
+html.layout-desktop #tab-ndt .ndt-rail-sep-pc {
+    display: block !important;
+}
+
+html.layout-desktop #tab-ndt .ndt-rail-pc-only.mobile-rail-btn {
+    display: flex !important;
+}
+
+html.layout-desktop #tab-ndt .ndt-top-bar {
+    display: none !important;
+}
+
+html.layout-desktop #tab-ndt .ndt-top-canvas-tools {
+    display: none !important;
+}
+
+html.layout-desktop #tab-ndt .ndt-right-rails {
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: stretch !important;
+    position: absolute !important;
+    right: 0.32rem !important;
+    top: 50% !important;
+    left: auto !important;
+    bottom: auto !important;
+    transform: translateY(-50%) !important;
+    z-index: 45 !important;
+    max-height: calc(100% - 0.8rem) !important;
+    pointer-events: none !important;
+}
+
+html.layout-desktop #tab-ndt .ndt-unified-rail {
+    pointer-events: auto !important;
+    width: 2.65rem;
+}
+
+html.layout-desktop #tab-ndt .ndt-cat-rail-btn,
+html.layout-desktop #tab-ndt .ndt-unified-rail .mobile-rail-btn {
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: center !important;
+    justify-content: center !important;
+    width: 2.55rem !important;
+    min-height: 2.2rem !important;
+    padding: 0.1rem 0.04rem !important;
+    gap: 0.05rem !important;
+    border-radius: 8px !important;
+    border: 1.5px solid #e5e7eb !important;
+    background: #f9fafb !important;
+    color: #525252 !important;
+    font-size: 0.46rem !important;
+    font-weight: 800 !important;
+    line-height: 1.05 !important;
+    white-space: nowrap;
+    cursor: pointer;
+    box-sizing: border-box;
+}
+
+html.layout-desktop #tab-ndt .ndt-cat-rail-emoji {
+    font-size: 0.8rem !important;
+    line-height: 1;
+}
+
+html.layout-desktop #tab-ndt .ndt-unified-rail .mobile-rail-btn i {
+    font-size: 0.82rem !important;
+    color: #737373;
+}
+
+html.layout-desktop #tab-ndt .ndt-cat-rail-btn.active {
+    border: 2px solid #2563eb !important;
+    background: #eff6ff !important;
+    color: #1d4ed8 !important;
+    box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.22) !important;
+}
+
+html.layout-desktop #tab-ndt .mobile-canvas-dock {
+    display: none !important;
+}
+
 html.layout-desktop #tab-map .canvas-top-toolbar,
 html.layout-desktop #tab-map .canvas-bottom-toolbar {
     display: flex !important;
@@ -10640,8 +10775,8 @@ html.layout-desktop #ndtStyleSizeToolbar.is-pc-size-panel-open {
     display: flex !important;
     position: absolute !important;
     left: 0.4rem !important;
-    right: 0.4rem !important;
-    top: 3.15rem !important;
+    right: 3.4rem !important;
+    top: 0.4rem !important;
     bottom: auto !important;
     z-index: 37 !important;
     max-height: min(42vh, 260px) !important;
@@ -10846,15 +10981,22 @@ html.layout-desktop #defectModal #defectMarkingMemberFloat:not([hidden]) {
     align-self: flex-start !important;
     margin: 14px 0 0 0 !important;
     flex-direction: column;
-    max-width: 4.6rem;
+    max-width: 6.4rem;
     padding: 0;
     gap: 6px;
 }
-html.layout-desktop #defectModal #defectMarkingMemberFloat:not([hidden]) .defect-marking-float-btn {
-    min-width: 3.2rem;
+html.layout-desktop #defectModal #defectMarkingMemberFloat:not([hidden]) .defect-marking-arrow-row {
+    border-radius: 10px 0 0 10px;
+}
+html.layout-desktop #defectModal #defectMarkingMemberFloat:not([hidden]) .defect-marking-arrow-select {
+    min-width: 2.35rem;
     min-height: 2.2rem;
     border-radius: 10px 0 0 10px;
     border-right: none;
+}
+html.layout-desktop #defectModal #defectMarkingMemberFloat:not([hidden]) .defect-marking-arrow-dir-btn {
+    min-width: 2.35rem;
+    min-height: 2.2rem;
 }
 
 html.layout-desktop #defectModal .defect-drawer-card,
@@ -11318,9 +11460,9 @@ html.layout-tablet #tab-ndt .ndt-top-bar .ndt-top-cats {
 
 html.layout-tablet #tab-ndt .ndt-right-rails {
     display: flex !important;
-    flex-direction: row !important;
+    flex-direction: column !important;
     align-items: stretch !important;
-    gap: 0.12rem !important;
+    gap: 0 !important;
     position: absolute !important;
     right: 0.28rem !important;
     top: 50% !important;
@@ -11332,25 +11474,15 @@ html.layout-tablet #tab-ndt .ndt-right-rails {
     pointer-events: none !important;
 }
 
-html.layout-tablet #tab-ndt .ndt-right-rails > aside {
-    pointer-events: auto !important;
-}
-
-html.layout-tablet #tab-ndt .ndt-cat-rail {
+html.layout-tablet #tab-ndt .ndt-unified-rail {
     display: flex !important;
-    flex-direction: column !important;
-    gap: 0.12rem !important;
-    padding: 0.22rem 0.16rem !important;
-    overflow-y: auto !important;
-    -webkit-overflow-scrolling: touch;
-    background: #ffffff !important;
-    border: 1px solid #d4d4d4 !important;
-    border-radius: 10px !important;
-    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.12) !important;
-    flex-shrink: 0;
+    pointer-events: auto !important;
+    align-self: stretch;
+    max-height: calc(100vh - 8rem);
 }
 
-html.layout-tablet #tab-ndt .ndt-cat-rail-btn {
+html.layout-tablet #tab-ndt .ndt-cat-rail-btn,
+html.layout-tablet #tab-ndt .ndt-unified-rail .mobile-rail-btn {
     display: flex !important;
     flex-direction: column !important;
     align-items: center !important;
@@ -11388,15 +11520,8 @@ html.layout-tablet #tab-ndt .ndt-cat-rail-btn.active {
     box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.22) !important;
 }
 
-html.layout-tablet #tab-ndt .ndt-right-rails .mobile-side-rail {
-    position: static !important;
-    top: auto !important;
-    right: auto !important;
-    left: auto !important;
-    bottom: auto !important;
-    transform: none !important;
-    max-height: none !important;
-    align-self: stretch;
+html.layout-tablet #tab-ndt .mobile-canvas-dock {
+    display: none !important;
 }
 
 /* 폰 모바일: 태블릿과 동일 — 상단 조사항목 칩 숨기고 도면 우측 레일로 (도면 세로 공간 확보) */
@@ -11407,9 +11532,9 @@ html.layout-tablet #tab-ndt .ndt-right-rails .mobile-side-rail {
 
     html:not(.layout-desktop):not(.layout-tablet) #tab-ndt .ndt-right-rails {
         display: flex !important;
-        flex-direction: row !important;
+        flex-direction: column !important;
         align-items: stretch !important;
-        gap: 0.1rem !important;
+        gap: 0 !important;
         position: absolute !important;
         right: 0.22rem !important;
         top: 50% !important;
@@ -11417,29 +11542,19 @@ html.layout-tablet #tab-ndt .ndt-right-rails .mobile-side-rail {
         bottom: auto !important;
         transform: translateY(-50%) !important;
         z-index: 45 !important;
-        max-height: calc(100% - 4.2rem) !important;
+        max-height: calc(100% - 1.2rem) !important;
         pointer-events: none !important;
     }
 
-    html:not(.layout-desktop):not(.layout-tablet) #tab-ndt .ndt-right-rails > aside {
-        pointer-events: auto !important;
-    }
-
-    html:not(.layout-desktop):not(.layout-tablet) #tab-ndt .ndt-cat-rail {
+    html:not(.layout-desktop):not(.layout-tablet) #tab-ndt .ndt-unified-rail {
         display: flex !important;
-        flex-direction: column !important;
-        gap: 0.1rem !important;
-        padding: 0.18rem 0.12rem !important;
-        overflow-y: auto !important;
-        -webkit-overflow-scrolling: touch;
-        background: #ffffff !important;
-        border: 1px solid #d4d4d4 !important;
-        border-radius: 10px !important;
-        box-shadow: 0 6px 16px rgba(0, 0, 0, 0.12) !important;
-        flex-shrink: 0;
+        pointer-events: auto !important;
+        align-self: stretch;
+        max-height: calc(100vh - 6rem);
     }
 
-    html:not(.layout-desktop):not(.layout-tablet) #tab-ndt .ndt-cat-rail-btn {
+    html:not(.layout-desktop):not(.layout-tablet) #tab-ndt .ndt-cat-rail-btn,
+    html:not(.layout-desktop):not(.layout-tablet) #tab-ndt .ndt-unified-rail .mobile-rail-btn {
         display: flex !important;
         flex-direction: column !important;
         align-items: center !important;
@@ -11477,15 +11592,8 @@ html.layout-tablet #tab-ndt .ndt-right-rails .mobile-side-rail {
         box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.22) !important;
     }
 
-    html:not(.layout-desktop):not(.layout-tablet) #tab-ndt .ndt-right-rails .mobile-side-rail {
-        position: static !important;
-        top: auto !important;
-        right: auto !important;
-        left: auto !important;
-        bottom: auto !important;
-        transform: none !important;
-        max-height: none !important;
-        align-self: stretch;
+    html:not(.layout-desktop):not(.layout-tablet) #tab-ndt .mobile-canvas-dock {
+        display: none !important;
     }
 
     html:not(.layout-desktop):not(.layout-tablet) body.ndt-modal-open .ndt-right-rails {
@@ -11634,13 +11742,9 @@ html.layout-tablet .map-sel-popup-edit {
         margin-right: 0 !important;
         align-self: flex-start !important;
         flex-direction: row !important;
+        flex-wrap: wrap !important;
         max-width: calc(100% - 1.6rem) !important;
         gap: 6px;
-    }
-    html.layout-tablet #defectModal #defectMarkingMemberFloat:not([hidden]) .defect-marking-float-btn {
-        border-radius: 10px 10px 0 0;
-        border-right: 1px solid #cbd5e1;
-        border-bottom: none;
     }
     html.layout-tablet #defectModal #defectMarkingMemberFloat:not([hidden]) + .defect-drawer-card {
         order: 2;
@@ -11666,13 +11770,8 @@ html.layout-tablet .map-sel-popup-edit {
         margin-left: 0 !important;
         align-self: flex-start !important;
         flex-direction: column !important;
-        max-width: 4.6rem !important;
+        max-width: 6.4rem !important;
         gap: 6px;
-    }
-    html.layout-tablet #defectModal #defectMarkingMemberFloat:not([hidden]) .defect-marking-float-btn {
-        border-radius: 10px 0 0 10px;
-        border-right: none;
-        border-bottom: 1px solid #cbd5e1;
     }
     html.layout-tablet #defectModal #defectMarkingMemberFloat:not([hidden]) + .defect-drawer-card {
         border-top-left-radius: 16px !important;
@@ -12046,16 +12145,16 @@ html.layout-tablet #tab-ndt #ndtSummaryTable .ndt-row-actions-wide .btn-outline:
     }
 
     html.layout-tablet #tab-ndt .ndt-top-bar {
-        display: flex !important;
+        display: none !important;
     }
 
     html.layout-tablet #tab-ndt .ndt-top-bar .ndt-top-cats {
-        display: flex !important;
+        display: none !important;
     }
 
     html.layout-tablet #tab-ndt .ndt-right-rails,
-    html.layout-tablet #tab-ndt .ndt-cat-rail {
-        display: none !important;
+    html.layout-tablet #tab-ndt .ndt-unified-rail {
+        display: flex !important;
     }
 
     html.layout-tablet #tab-ndt .ndt-canvas-col {
@@ -12203,10 +12302,15 @@ html.layout-tablet body.ndt-modal-open .ndt-right-rails {
         will-change: transform;
     }
 
-    html:not(.layout-desktop) #defectModal.open .defect-drawer-card.bsa-kb-lifted,
     html:not(.layout-desktop) #ndtModal.open .ndt-drawer-card.bsa-kb-lifted,
     html:not(.layout-desktop) #ndtDisplacementModal.open .ndt-drawer-card.bsa-kb-lifted,
     html:not(.layout-desktop) #ndtDisplacementGroupEditModal.open .ndt-drawer-card.bsa-kb-lifted {
+        transform: translateY(calc(-1 * var(--bsa-kb-lift, 0px))) !important;
+        transition: transform 0.22s ease;
+        max-height: min(calc(100vh - var(--bsa-kb-height, 0px) - 0.5rem), 100%) !important;
+    }
+
+    html:not(.layout-desktop) #defectModal.open .defect-drawer-card.bsa-kb-lifted {
         transform: translateY(calc(-1 * var(--bsa-kb-lift, 0px))) !important;
         transition: transform 0.22s ease;
         will-change: transform;
@@ -12275,10 +12379,15 @@ html.layout-tablet .bsa-select-sheet-card.bsa-kb-lifted {
     transition: transform 0.22s ease;
 }
 
-html.layout-tablet #defectModal.open .defect-drawer-card.bsa-kb-lifted,
 html.layout-tablet #ndtModal.open .ndt-drawer-card.bsa-kb-lifted,
 html.layout-tablet #ndtDisplacementModal.open .ndt-drawer-card.bsa-kb-lifted,
 html.layout-tablet #ndtDisplacementGroupEditModal.open .ndt-drawer-card.bsa-kb-lifted {
+    transform: translateY(calc(-1 * var(--bsa-kb-lift, 0px))) !important;
+    transition: transform 0.22s ease;
+    max-height: min(calc(100vh - var(--bsa-kb-height, 0px) - 0.5rem), 100%) !important;
+}
+
+html.layout-tablet #defectModal.open .defect-drawer-card.bsa-kb-lifted {
     transform: translateY(calc(-1 * var(--bsa-kb-lift, 0px))) !important;
     transition: transform 0.22s ease;
 }

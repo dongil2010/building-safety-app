@@ -108,6 +108,10 @@
             || panel.classList.contains('ndt-drawer-card');
     }
 
+    function isNdtDrawerPanel(panel) {
+        return !!(panel && panel.classList.contains('ndt-drawer-card'));
+    }
+
     function computeAutoLift(field) {
         if (!field) return 0;
         var box = getVisualViewportBox();
@@ -126,8 +130,16 @@
         }
 
         if (state.panel && isBottomSheetPanel(state.panel)) {
-            // 우측/하단 드로어: 키보드 높이만큼은 최소로 올려 입력칸이 가려지지 않게
-            lift = Math.max(lift, Math.round(state.keyboardH * 0.85));
+            if (isNdtDrawerPanel(state.panel)) {
+                // NDT 측정 입력: 키보드 올릴 때 도면이 가려져도 되도록 드로어를 크게 올림
+                lift = Math.max(lift, Math.round(state.keyboardH * 1.12));
+                var ndtTargetTop = box.top + Math.min(36, Math.max(12, box.height * 0.06));
+                if (rect.top > ndtTargetTop) {
+                    lift = Math.max(lift, Math.ceil(rect.top - ndtTargetTop));
+                }
+            } else {
+                lift = Math.max(lift, Math.round(state.keyboardH * 0.85));
+            }
         } else if (!state.panel && state.keyboardH > 72) {
             // 페이지 본문 입력: 화면 전체를 일부 밀어 올림
             lift = Math.max(lift, Math.round(state.keyboardH * 0.45));
@@ -238,7 +250,7 @@
         if (!state.dragging) return;
         e.preventDefault();
         var dy = state.dragStartY - e.clientY;
-        var maxLift = state.keyboardH + 280;
+        var maxLift = state.keyboardH + (isNdtDrawerPanel(state.panel) ? 420 : 280);
         var next = state.dragStartLift + dy;
         state.dragLift = Math.max(-state.autoLift, Math.min(next, maxLift));
         applyLift();

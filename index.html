@@ -39,7 +39,7 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <meta name="apple-mobile-web-app-title" content="스마트 안전점검">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css">
-    <link rel="stylesheet" href="styles.css?v=20260904_125441">
+    <link rel="stylesheet" href="styles.css?v=20260904_133844">
     <!-- FontAwesome icons for clean engineering UI -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <!-- PDF 생성용: 페이지별로 직접 캡처해서 조립(큰 보고서에서 html2pdf 한방 렌더링이 캔버스 높이 한계로
@@ -665,7 +665,7 @@
                     </button>
                 </div>
                 <div class="ndt-right-rails" aria-label="NDT 우측 도구">
-                <aside class="ndt-cat-rail" aria-label="비파괴 조사 항목">
+                <aside class="ndt-unified-rail" id="mobileNdtSideRail" aria-label="비파괴 조사·도구">
                     <button type="button" class="ndt-cat-rail-btn active" data-ndt-cat="실측" onclick="window.setNdtCategory('실측')" title="부재 실측">
                         <span class="ndt-cat-rail-emoji" aria-hidden="true">📏</span>
                         <span class="ndt-cat-rail-label">실측</span>
@@ -694,23 +694,60 @@
                         <span class="ndt-cat-rail-emoji" aria-hidden="true">🧯</span>
                         <span class="ndt-cat-rail-label">내화피복</span>
                     </button>
-                </aside>
-                <aside class="mobile-side-rail" id="mobileNdtSideRail" aria-label="NDT 마킹 도구">
-                    <button type="button" class="mobile-rail-btn active" id="mobileNdtBtnModePan" data-ndt-mode="PAN" title="선택">
-                        <i class="fa-regular fa-hand-pointer"></i>
-                        <span>선택</span>
-                    </button>
-                    <button type="button" class="mobile-rail-btn mobile-fab-mark" id="mobileNdtBtnModeMark" data-ndt-mode="MARK" title="위치 마킹">
+                    <div class="ndt-rail-sep" aria-hidden="true"></div>
+                    <button type="button" class="mobile-rail-btn mobile-fab-mark" id="mobileNdtBtnModeMark" data-ndt-mode="MARK" title="위치 마킹 (D)">
                         <i class="fa-solid fa-location-dot"></i>
                         <span>마킹</span>
                     </button>
-                    <button type="button" class="mobile-rail-btn" id="mobileNdtBtnQuickDrag" title="켜면 빈 곳 드래그로 항목 다중 선택 (박스는 바로 드래그)" aria-pressed="false">
+                    <button type="button" class="mobile-rail-btn" id="mobileNdtBtnQuickDrag" title="켜면 빈 곳 드래그로 항목 다중 선택" aria-pressed="false">
                         <i class="fa-solid fa-square-dashed"></i>
-                        <span>선택</span>
+                        <span>박스</span>
                     </button>
                     <button type="button" class="mobile-rail-btn" id="mobileNdtBtnAddSelect" title="켜면 터치마다 선택 추가/해제" aria-pressed="false">
                         <i class="fa-solid fa-object-ungroup"></i>
                         <span>추가</span>
+                    </button>
+                    <div class="ndt-rail-sep" aria-hidden="true"></div>
+                    <button type="button" class="mobile-rail-btn ndt-disp-undo-btn" id="mobileNdtBtnUndoDisp" hidden title="마지막 부동침하/부재변위 마킹 되돌리기">
+                        <i class="fa-solid fa-rotate-left"></i>
+                        <span>되돌</span>
+                    </button>
+                    <button type="button" class="mobile-rail-btn ndt-tilt-only-rotate" id="mobileNdtBtnRotateTilt" hidden title="선택한 기울기 박스 회전">
+                        <i class="fa-solid fa-rotate"></i>
+                        <span>회전</span>
+                    </button>
+                    <button type="button" class="mobile-rail-btn mobile-fab-danger" id="mobileNdtBtnDeleteSelected" title="선택한 NDT 삭제">
+                        <i class="fa-solid fa-trash-can"></i>
+                        <span>삭제</span>
+                    </button>
+                    <button type="button" class="mobile-rail-btn mobile-fab-toggle" id="mobileNdtBtnToggleSize" aria-expanded="false" title="핀·화살표 크기">
+                        <i class="fa-solid fa-sliders"></i>
+                        <span>크기</span>
+                    </button>
+                    <button type="button" class="mobile-rail-btn" id="mobileNdtBtnZoomFit" title="화면에 맞추기">
+                        <i class="fa-solid fa-expand"></i>
+                        <span>맞춤</span>
+                    </button>
+                    <div class="ndt-rail-sep ndt-rail-sep-pc" aria-hidden="true"></div>
+                    <button type="button" class="mobile-rail-btn ndt-rail-pc-only" id="ndtRailBtnZoomIn" title="확대">
+                        <i class="fa-solid fa-plus"></i>
+                        <span>확대</span>
+                    </button>
+                    <button type="button" class="mobile-rail-btn ndt-rail-pc-only" id="ndtRailBtnZoomOut" title="축소">
+                        <i class="fa-solid fa-minus"></i>
+                        <span>축소</span>
+                    </button>
+                    <button type="button" class="mobile-rail-btn ndt-rail-pc-only" id="ndtRailBtnStyle" title="스타일 설정">
+                        <i class="fa-solid fa-palette"></i>
+                        <span>스타일</span>
+                    </button>
+                    <button type="button" class="mobile-rail-btn ndt-rail-pc-only" id="ndtRailBtnRotateDraw" title="도면 90° 회전">
+                        <i class="fa-solid fa-rotate-right"></i>
+                        <span>도면</span>
+                    </button>
+                    <button type="button" class="mobile-rail-btn ndt-rail-pc-only" id="ndtRailBtnVectorPdf" title="벡터 PDF">
+                        <i class="fa-solid fa-file-pdf"></i>
+                        <span>PDF</span>
                     </button>
                 </aside>
                 </div><!-- /.ndt-right-rails -->
@@ -801,8 +838,8 @@
 
     <!-- MODAL: Add Defect Pin Details Modal (우측 드로어 — 입력 즉시 적용) -->
     <div class="modal-overlay modal-drawer-overlay" id="defectModal">
-        <!-- X-1/X-2 마킹 전환: 모바일=시트 위, 데스크톱=드로어 좌측 -->
-        <div id="defectMarkingMemberFloat" class="defect-marking-member-float" hidden aria-label="마킹 선택"></div>
+        <!-- 화살표별 선택·방향: 모바일=시트 위, 데스크톱=드로어 좌측 -->
+        <div id="defectMarkingMemberFloat" class="defect-marking-member-float" hidden aria-label="화살표 선택 및 방향"></div>
         <div class="modal-card defect-drawer-card">
             <div class="modal-header defect-drawer-header">
                 <div class="defect-drawer-title-wrap">
@@ -2911,21 +2948,21 @@
     </div>
 
     <!-- Core → 탭 분류 → 기존 엔진(app.js) -->
-    <script src="js/core/state.js?v=20260904_125441"></script>
-    <script src="js/tabs/registry.js?v=20260904_125441"></script>
-    <script src="js/pdf-vector-bridge.js?v=20260904_125441"></script>
-    <script src="js/core/layout-mode.js?v=20260904_125441"></script>
-    <script src="js/core/mobile-keyboard.js?v=20260904_125441"></script>
-    <script src="js/tabs/home.js?v=20260904_125441"></script>
-    <script src="js/tabs/map.js?v=20260904_125441"></script>
-    <script src="js/tabs/survey.js?v=20260904_125441"></script>
-    <script src="js/tabs/ndt.js?v=20260904_125441"></script>
-    <script src="js/shared/report.js?v=20260904_125441"></script>
-    <script src="js/shared/hwpx-import.js?v=20260904_125441"></script>
-    <script src="js/shared/auth.js?v=20260904_125441"></script>
-    <script src="app.js?v=20260904_125441"></script>
+    <script src="js/core/state.js?v=20260904_133844"></script>
+    <script src="js/tabs/registry.js?v=20260904_133844"></script>
+    <script src="js/pdf-vector-bridge.js?v=20260904_133844"></script>
+    <script src="js/core/layout-mode.js?v=20260904_133844"></script>
+    <script src="js/core/mobile-keyboard.js?v=20260904_133844"></script>
+    <script src="js/tabs/home.js?v=20260904_133844"></script>
+    <script src="js/tabs/map.js?v=20260904_133844"></script>
+    <script src="js/tabs/survey.js?v=20260904_133844"></script>
+    <script src="js/tabs/ndt.js?v=20260904_133844"></script>
+    <script src="js/shared/report.js?v=20260904_133844"></script>
+    <script src="js/shared/hwpx-import.js?v=20260904_133844"></script>
+    <script src="js/shared/auth.js?v=20260904_133844"></script>
+    <script src="app.js?v=20260904_133844"></script>
     <script>
-        window.BSA_APP_VERSION = '20260904_125441';
+        window.BSA_APP_VERSION = '20260904_133844';
         (function () {
             var el = document.getElementById('appVersionText');
             if (el && window.BSA_APP_VERSION) el.textContent = 'v' + window.BSA_APP_VERSION;
@@ -2949,7 +2986,7 @@
                     native = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
                 } catch (e) {}
                 if (native) return;
-                navigator.serviceWorker.register('./sw.js?v=20260904_125441')
+                navigator.serviceWorker.register('./sw.js?v=20260904_133844')
                     .then(function(registration) {
                         console.log('✅ ServiceWorker Registered Successfully with scope:', registration.scope);
                         registration.update();
