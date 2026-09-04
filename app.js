@@ -8126,15 +8126,23 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function findNdtPinAt(vx, vy) {
-        const items = getCurrentFloorNdtData();
         const currentCat = currentNdtCategory || '실측';
-        let filtered = items;
-        if (currentCat === '기울기' || currentCat === '부재변위') {
-            filtered = items.filter(item => item.category === currentCat);
-        } else if (currentCat === '변위') {
-            filtered = items.filter(item => item.category === '변위');
+        // 수직변위 및 부재변위는 별도 전용 데이터(ndtDisplacementGroups)를 사용하므로 findNdtDisplacementHit에서 전담
+        if (currentCat === '변위' || currentCat === '부재변위') {
+            return null;
+        }
+
+        const items = getCurrentFloorNdtData();
+        let filtered = [];
+        if (currentCat === '기울기') {
+            filtered = items.filter(item => item.category === '기울기');
+        } else if (currentCat === '실측') {
+            filtered = items.filter(item => item.category === '실측');
+        } else if (currentCat === '내화피복') {
+            filtered = items.filter(item => item.category === '내화피복');
         } else {
-            filtered = items.filter(item => ['실측', '강도', '탄산화', '내화피복'].includes(item.category));
+            // 강도 / 탄산화 탭: 같은 도면에 함께 표시되는 항목만 히트테스트 (타 카테고리 간섭 배제)
+            filtered = items.filter(item => item.category === '강도' || item.category === '탄산화');
         }
 
         const measureCtx = state.ctx || null;
@@ -8160,10 +8168,38 @@ document.addEventListener('DOMContentLoaded', () => {
             noStr = formatPinNumberLabel(noStr, ndtStyleKey);
             const cat = item.category || '강도';
 
-            const tipR = getMapTipHitRadius(arrowScale, ndtActivePointerIsTouch);
-            const tipHit = getMapArrowTipHitCenter(targetX, targetY, baseBoxX, baseBoxY, arrowScale);
-            const distTarget = Math.hypot(vx - tipHit.x, vy - tipHit.y);
-            if (distTarget <= tipR && (!bestTarget || distTarget < bestTarget.dist)) {
+            // NDT 측정점(원 또는 화살표) 히트 판정
+            // 강도·탄산화·내화피복은 원(circle) 끝점을 사용하거나 tipShape 설정에 따름
+            const isCircleTip = (cat === '강도' || cat === '탄산화' || cat === '내화피복' || state.tipShape === 'circle');
+            const viewScale = getMapCanvasViewScale();
+            const minMouseRadiusImg = 18 / viewScale; // 마우스 조작 시 화면상 최소 18px 반경 (지름 36px 클릭 영역 확보)
+
+            let distTarget = Infinity;
+            let tipHitRadius = 0;
+
+            if (isCircleTip) {
+                // 원형 측정점: 도면에 실제 그려진 원의 중심(targetX, targetY)을 정확히 기준점으로 판정
+                const circleR = (cat === '강도' || cat === '탄산화' ? 4 : 4.5) * arrowScale;
+                distTarget = Math.hypot(vx - targetX, vy - targetY);
+                tipHitRadius = ndtActivePointerIsTouch
+                    ? getMapTipHitRadius(arrowScale, true)
+                    : Math.max(circleR * 2.5, minMouseRadiusImg);
+            } else {
+                // 화살표 측정점(기울기, 실측 화살표 등):
+                // 화살촉 꼭짓점(targetX, targetY)과 화살촉 중심부(tipHit) 모두 커버하여 화살표 끝/머리 어디를 잡아도 자연스럽게 드래그
+                const headLen = (cat === '기울기' ? 15 : 10) * arrowScale;
+                const tipHit = getMapArrowTipHitCenter(targetX, targetY, baseBoxX, baseBoxY, arrowScale);
+                const distToTip = Math.hypot(vx - targetX, vy - targetY);
+                const distToBody = Math.hypot(vx - tipHit.x, vy - tipHit.y);
+                distTarget = Math.min(distToTip, distToBody);
+
+                const visualArrowR = headLen * 0.5;
+                tipHitRadius = ndtActivePointerIsTouch
+                    ? getMapTipHitRadius(arrowScale, true)
+                    : Math.max(visualArrowR + 3, minMouseRadiusImg);
+            }
+
+            if (distTarget <= tipHitRadius && (!bestTarget || distTarget < bestTarget.dist)) {
                 bestTarget = { item, dist: distTarget };
             }
 
@@ -8172,7 +8208,7 @@ document.addEventListener('DOMContentLoaded', () => {
             let boxX = baseBoxX;
             let boxY = baseBoxY;
             let hitRotation = ndtRotationAngle || 0;
-            if (cat === '기울기' || cat === '변위' || cat === '부재변위') {
+            if (cat === '기울기') {
                 boxW = 168 * pinScale;
                 boxH = 44 * pinScale;
                 hitRotation -= getNdtTiltItemRotation(item, cat);
@@ -8191,7 +8227,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 bestBox = { item, part: 'box' };
             }
         }
-        // 측정점(화살표)이 박스와 겹쳐도 TIP(target) 우선
+        // 측정점(화살표/원)이 박스와 겹쳐도 TIP(target) 우선
         if (bestTarget) return { item: bestTarget.item, part: 'target' };
         if (bestBox) return bestBox;
         return null;
@@ -9477,18 +9513,33 @@ document.addEventListener('DOMContentLoaded', () => {
     // 수직변위/부재변위 그룹의 라벨 박스/포인트 원 히트테스트
     function findNdtDisplacementHit(vx, vy) {
         const groups = getCurrentFloorDisplacementGroups(currentNdtCategory);
+        const viewScale = getMapCanvasViewScale();
+        const minMouseRadiusImg = 18 / viewScale; // 화면상 최소 18px 반경 (지름 36px 클릭 영역 확보)
+        const counterAngle = ndtRotationAngle === 90 ? -90 : (ndtRotationAngle === 180 ? -180 : (ndtRotationAngle === 270 ? -270 : 0));
+        const rotRad = (counterAngle * Math.PI) / 180;
+
         for (let i = groups.length - 1; i >= 0; i--) {
             const group = groups[i];
             const groupSize = getStyleSize(group.category === '부재변위' ? 'ndtMemberDisp' : 'ndtSettlement');
+            const pinScale = groupSize.pin || 1;
+            const ptHitRadius = Math.max(16 * pinScale, minMouseRadiusImg);
+
+            // 포인트 원과 (01) 번호 라벨 히트테스트 (포인트 우선)
             for (let j = group.points.length - 1; j >= 0; j--) {
                 const p = group.points[j];
-                // 원 + 아래 (01) 라벨 영역까지 히트
-                const labelY = p.y + 18 * groupSize.pin;
-                if (Math.hypot(vx - p.x, vy - p.y) < 16 * groupSize.pin
-                    || Math.hypot(vx - p.x, vy - labelY) < 14 * groupSize.pin) {
+                const distDot = Math.hypot(vx - p.x, vy - p.y);
+                
+                // (01) 라벨 위치: drawNdtDisplacementGroup에서 r + 2*pinScale 아래에 baseline 'top'으로 그려짐
+                const labelDist = (5 + 8) * pinScale;
+                const labelX = p.x - labelDist * Math.sin(rotRad);
+                const labelY = p.y + labelDist * Math.cos(rotRad);
+                const distLabel = Math.hypot(vx - labelX, vy - labelY);
+
+                if (distDot <= ptHitRadius || distLabel <= ptHitRadius) {
                     return { type: 'point', group, point: p };
                 }
             }
+
             const bx = group.boxX !== undefined ? group.boxX : (group.points[0] ? group.points[0].x : 100);
             const by = group.boxY !== undefined ? group.boxY : (group.points[0] ? group.points[0].y : 100);
             const groupStyleKey = group.category === '부재변위' ? 'ndtMemberDisp' : 'ndtSettlement';
@@ -10753,47 +10804,7 @@ document.addEventListener('DOMContentLoaded', () => {
             ndtInitialOffsetX = ndtView.offsetX;
             ndtInitialOffsetY = ndtView.offsetY;
 
-            // Check hit test on existing NDT pin (Box or Target point)
-            // 클릭=수정창 / 드래그=이동 — 임계값 넘기기 전에는 pending만 보관
-            const hitPin = findNdtPinAt(vx, vy);
-            if (hitPin) {
-                const id = hitPin.item && hitPin.item.id;
-                if (id) {
-                    if (additive) {
-                        if (selectedNdtIds.has(id)) selectedNdtIds.delete(id);
-                        else selectedNdtIds.add(id);
-                    } else if (!selectedNdtIds.has(id) || selectedNdtIds.size <= 1) {
-                        selectedNdtIds = new Set([id]);
-                    }
-                    updateNdtSelectionBar();
-                    drawNdtCanvas();
-                }
-                pendingNdtPinHit = {
-                    item: hitPin.item,
-                    part: hitPin.part,
-                    grabX: vx,
-                    grabY: vy,
-                    additive
-                };
-                pendingNdtPinIsTouch = false;
-                pendingNdtPinArmed = true;
-                ndtActivePointerIsTouch = false;
-                clearPendingNdtLongPress();
-                return;
-            }
-
-            // 빈 곳 클릭 + 등록창 열려 있으면 닫기 (결함위치도와 동일)
-            if (ndtMode === 'PAN' && isNdtModalOpen()) {
-                closeNdtModal();
-                if (!additive) {
-                    selectedNdtIds.clear();
-                    updateNdtSelectionBar();
-                    drawNdtCanvas();
-                }
-                return;
-            }
-
-            // 바닥 수직변위 및 부재변위: 그룹 박스/포인트 원 히트 시 드래그 대기, 빈 곳 클릭 시 새 지점 등록
+            // 바닥 수직변위 및 부재변위: 전용 그룹/포인트 히트
             if (currentNdtCategory === '변위' || currentNdtCategory === '부재변위') {
                 const hitDisp = findNdtDisplacementHit(vx, vy);
                 if (hitDisp) {
@@ -10812,6 +10823,50 @@ document.addEventListener('DOMContentLoaded', () => {
                     pendingNdtDispHit = { hit: hitDisp, grabX: vx, grabY: vy, additive };
                     return;
                 }
+            } else {
+                // Check hit test on existing NDT pin (Box or Target point)
+                // 클릭=수정창 / 드래그=이동 — 임계값 넘기기 전에는 pending만 보관
+                const hitPin = findNdtPinAt(vx, vy);
+                if (hitPin) {
+                    const id = hitPin.item && hitPin.item.id;
+                    if (id) {
+                        if (additive) {
+                            if (selectedNdtIds.has(id)) selectedNdtIds.delete(id);
+                            else selectedNdtIds.add(id);
+                        } else if (!selectedNdtIds.has(id) || selectedNdtIds.size <= 1) {
+                            selectedNdtIds = new Set([id]);
+                        }
+                        updateNdtSelectionBar();
+                        drawNdtCanvas();
+                    }
+                    pendingNdtPinHit = {
+                        item: hitPin.item,
+                        part: hitPin.part,
+                        grabX: vx,
+                        grabY: vy,
+                        additive
+                    };
+                    pendingNdtPinIsTouch = false;
+                    pendingNdtPinArmed = true;
+                    ndtActivePointerIsTouch = false;
+                    clearPendingNdtLongPress();
+                    return;
+                }
+            }
+
+            // 빈 곳 클릭 + 등록창 열려 있으면 닫기 (결함위치도와 동일)
+            if (ndtMode === 'PAN' && isNdtModalOpen()) {
+                closeNdtModal();
+                if (!additive) {
+                    selectedNdtIds.clear();
+                    updateNdtSelectionBar();
+                    drawNdtCanvas();
+                }
+                return;
+            }
+
+            // 바닥 수직변위 및 부재변위: 빈 곳 클릭 시 새 지점 등록
+            if (currentNdtCategory === '변위' || currentNdtCategory === '부재변위') {
                 if (ndtMode === 'MARK') {
                     isNdtDisplacementMarking = true;
                     window._ndtDispMarkCoords = { x: vx, y: vy };
@@ -10981,6 +11036,13 @@ document.addEventListener('DOMContentLoaded', () => {
             } else if (mouseX >= 0 && mouseX <= rect.width && mouseY >= 0 && mouseY <= rect.height) {
                 if (ndtMode === 'MARK') {
                     canvas.style.cursor = 'crosshair';
+                } else if (currentNdtCategory === '변위' || currentNdtCategory === '부재변위') {
+                    const hitDisp = findNdtDisplacementHit(vx, vy);
+                    if (hitDisp) {
+                        canvas.style.cursor = hitDisp.type === 'point' ? 'pointer' : 'move';
+                    } else {
+                        canvas.style.cursor = 'default';
+                    }
                 } else {
                     const hit = findNdtPinAt(vx, vy);
                     if (hit) {
