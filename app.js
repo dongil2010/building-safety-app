@@ -647,8 +647,7 @@ document.addEventListener('DOMContentLoaded', () => {
     updateOfflineBadge();
     window.addEventListener('online', () => {
         updateOfflineBadge();
-        if (typeof refreshSyncStatusBadge === 'function') refreshSyncStatusBadge();
-        else if (typeof updateOnlineBadge === 'function') updateOnlineBadge(true);
+        if (typeof updateOnlineBadge === 'function') updateOnlineBadge(true);
         window.showToast('온라인 상태로 전환되었습니다. 서버 데이터와 병합 후 동기화합니다.', 'success');
         if (typeof reconnectFirestoreSync === 'function') reconnectFirestoreSync('online');
         if (typeof pruneStaleIndexedDbInspectionData === 'function') {
@@ -657,8 +656,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
     window.addEventListener('offline', () => {
         updateOfflineBadge();
-        if (typeof refreshSyncStatusBadge === 'function') refreshSyncStatusBadge();
-        else if (typeof updateOnlineBadge === 'function') updateOnlineBadge(false);
+        if (typeof updateOnlineBadge === 'function') updateOnlineBadge(false);
         window.showToast('오프라인 상태입니다. 변경사항은 이 기기에 저장되며, 인터넷 연결 시 자동 동기화됩니다.', 'warning', 5000);
     });
     // 앱/탭 복귀 시에도 동기화 (비행기모드 해제 후 online 이벤트가 안 뜨는 WebView 대비)
@@ -3366,16 +3364,6 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     /** 동기화 병합용 — photoIds·인라인 사진만으로 병합(클라우드 사진 fetch 없음) */
-    function mergeDefectsForSync(serverDefects, localDefects, serverDeleted, localDeleted, serverDeletedAt, localDeletedAt, mergedDeletedBuildings) {
-        return mergeDefectsMaps(
-            filterMapKeysByDeletedBuildings(serverDefects || {}, mergedDeletedBuildings),
-            filterMapKeysByDeletedBuildings(localDefects || {}, mergedDeletedBuildings),
-            filterMapKeysByDeletedBuildings(serverDeleted || {}, mergedDeletedBuildings),
-            filterMapKeysByDeletedBuildings(localDeleted || {}, mergedDeletedBuildings),
-            filterMapKeysByDeletedBuildings(serverDeletedAt || {}, mergedDeletedBuildings),
-            filterMapKeysByDeletedBuildings(localDeletedAt || {}, mergedDeletedBuildings)
-        );
-    }
 
     /**
      * 삭제 고유코드 재사용: 반드시 전원 동기화 확인 후 수동으로만 실행.
@@ -4459,30 +4447,7 @@ document.addEventListener('DOMContentLoaded', () => {
         document.addEventListener('click', (e) => {
             if (panel.hidden) return;
             if (panel.contains(e.target) || btn.contains(e.target)) return;
-            const syncQuick = document.getElementById('btnHomeSyncQuick');
-            if (syncQuick && syncQuick.contains(e.target)) return;
             setOpen(false);
-        });
-    })();
-
-    (function initHomeSyncQuickButton() {
-        const syncBtn = document.getElementById('btnHomeSyncQuick');
-        const settingsBtn = document.getElementById('btnHomeSettings');
-        const panel = document.getElementById('homeSettingsPanel');
-        if (!syncBtn || !panel) return;
-        syncBtn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            panel.hidden = false;
-            if (settingsBtn) {
-                settingsBtn.setAttribute('aria-expanded', 'true');
-                const icon = settingsBtn.querySelector('i');
-                if (icon) icon.className = 'fa-solid fa-xmark';
-            }
-            const card = document.getElementById('homeSyncStatusCard');
-            if (card && typeof card.scrollIntoView === 'function') {
-                card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-            }
-            if (typeof refreshHomeSyncStatusUI === 'function') refreshHomeSyncStatusUI();
         });
     })();
 
@@ -33037,69 +33002,6 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    const btnRefreshSyncStatus = document.getElementById('btnRefreshSyncStatus');
-    if (btnRefreshSyncStatus) {
-        btnRefreshSyncStatus.addEventListener('click', async () => {
-            btnRefreshSyncStatus.disabled = true;
-            try {
-                await refreshHomeSyncStatusUI();
-                window.showToast('서버와 비교했습니다. 아래 상태를 확인하세요.', 'info', 2800);
-            } finally {
-                btnRefreshSyncStatus.disabled = false;
-            }
-        });
-    }
-    const btnForceSyncNowHome = document.getElementById('btnForceSyncNowHome');
-    if (btnForceSyncNowHome) {
-        btnForceSyncNowHome.addEventListener('click', async () => {
-            btnForceSyncNowHome.disabled = true;
-            try {
-                const ok = await window.forceSyncNow();
-                await refreshHomeSyncStatusUI();
-                if (!ok) {
-                    const err = _syncJournal.lastUploadError;
-                    window.showToast(
-                        err
-                            ? `업로드 실패: ${String(err).slice(0, 80)}`
-                            : '업로드가 완료되지 않았습니다. 상태 확인 후 다시 시도하세요.',
-                        'warning',
-                        5500
-                    );
-                }
-            } finally {
-                btnForceSyncNowHome.disabled = false;
-            }
-        });
-    }
-    const btnPullFromServerHome = document.getElementById('btnPullFromServerHome');
-    if (btnPullFromServerHome) {
-        btnPullFromServerHome.addEventListener('click', async () => {
-            if (!db || !window.state.companyId) {
-                window.showToast('로그인·회사 가입 후 사용할 수 있습니다.', 'warning', 3500);
-                return;
-            }
-            if (!navigator.onLine) {
-                window.showToast('오프라인입니다.', 'warning', 3500);
-                return;
-            }
-            btnPullFromServerHome.disabled = true;
-            window.showToast('서버에서 최신 데이터를 받는 중…', 'info', 2200);
-            try {
-                if (typeof pullCompanySnapshotOnce === 'function') {
-                    await pullCompanySnapshotOnce();
-                }
-                _pendingRemoteData = null;
-                refreshSyncStatusBadge();
-                await refreshHomeSyncStatusUI();
-                window.showToast('서버 데이터를 병합했습니다.', 'success', 3200);
-            } catch (e) {
-                window.showToast('서버에서 받기 실패: ' + ((e && e.message) || e), 'warning', 5000);
-            } finally {
-                btnPullFromServerHome.disabled = false;
-            }
-        });
-    }
-
     const btnClearPdfCache = document.getElementById('btnClearPdfCache');
     if (btnClearPdfCache) {
         btnClearPdfCache.addEventListener('click', async () => {
@@ -34443,18 +34345,6 @@ document.addEventListener('DOMContentLoaded', () => {
         _pendingRemoteData = null;
     }
 
-    function waitForSyncInFlight(maxMs) {
-        const cap = (maxMs == null) ? 180000 : maxMs;
-        const start = Date.now();
-        return new Promise((resolve) => {
-            const tick = () => {
-                if (!_syncInFlight && !isRemoteSyncing) return resolve();
-                if (Date.now() - start >= cap) return resolve();
-                setTimeout(tick, 120);
-            };
-            tick();
-        });
-    }
 
     /** 핀/영역/NDT 드래그·핀치 등 UI 제스처 중이면 원격 스냅샷 적용을 미룸 (저장 업로드는 그대로) */
     function isRealtimeUiGestureBusy() {
@@ -34504,8 +34394,6 @@ document.addEventListener('DOMContentLoaded', () => {
             const isChanged = await applyMergedRemoteData(data);
 
             if (isChanged) {
-                _syncJournal.lastDownloadOkAt = Date.now();
-                _syncJournal.lastDownloadChanged = true;
                 _suppressSyncOnSave = true;
                 if (typeof saveStateToLocalStorage === 'function') saveStateToLocalStorage();
                 _suppressSyncOnSave = false;
@@ -34531,20 +34419,15 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (typeof drawNdtCanvas === 'function') drawNdtCanvas();
                 if (typeof renderNdtSummaryTable === 'function') renderNdtSummaryTable();
                 if (typeof renderDefectListPanel === 'function') renderDefectListPanel();
-            } else {
-                _syncJournal.lastDownloadOkAt = Date.now();
-                _syncJournal.lastDownloadChanged = false;
             }
         } catch (e) {
             console.error('Remote sync apply error:', e);
         } finally {
-            if (typeof refreshHomeSyncStatusUI === 'function') refreshHomeSyncStatusUI();
             setTimeout(() => {
                 isRemoteSyncing = false;
                 if (_syncPending) {
-                    const queuedUpload = _syncPending;
                     _syncPending = false;
-                    scheduleSyncWhenIdle({ forceQueued: queuedUpload });
+                    if (typeof syncStateToFirebase === 'function') syncStateToFirebase();
                 } else if (typeof scheduleFlushPendingRemoteSync === 'function') {
                     scheduleFlushPendingRemoteSync();
                 }
@@ -34676,8 +34559,8 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function updateOnlineBadge(isOnline) {
-        if (isOnline && typeof refreshSyncStatusBadge === 'function') {
-            refreshSyncStatusBadge();
+        if (isOnline && typeof updateOnlineBadge === 'function') {
+            updateOnlineBadge(true);
             return;
         }
         const badge = document.getElementById('onlineStatusBadge');
@@ -36164,22 +36047,6 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     /** 회사 문서 저장 후 사진·도면 업로드(메타데이터 업로드와 분리) */
-    async function runDeferredSyncAssetUploads() {
-        if (!db || !window.state.companyId) return;
-        try {
-            await uploadInlineDefectPhotosForSync(window.state.defects);
-            const fieldRasterOnly = typeof isNativeAndroidApp === 'function' && isNativeAndroidApp() && !layoutIsPcLike();
-            if (!fieldRasterOnly) {
-                await uploadFloorDrawingPdfsForSync(window.state.buildings);
-                await ensureRasterTiersForSync(window.state.buildings);
-            }
-            await uploadFloorDrawingsForSync(window.state.buildings);
-            await hydrateLocalImagesFromIndexedDb();
-            refreshCurrentBuildingFromState();
-        } catch (e) {
-            console.warn('동기화 후 사진·도면 업로드 실패:', e);
-        }
-    }
 
     // 반환값: 삭제 실패 건수. 실패해도 예외를 던지지 않지만, 호출부에서 사용자에게 알릴 수 있도록 건수를 반환한다.
     async function deletePhotosForDefect(defectId, count, kind) {
@@ -36334,126 +36201,12 @@ document.addEventListener('DOMContentLoaded', () => {
         return sanitizedDefects;
     }
 
-    // 30c32ad 이전: 모든 탭에서 저장 시 즉시 Firebase 동기화 (작업 탭 업로드 미룸 없음)
-    let _deferredSyncDirty = false;
-    let _syncFlushNotify = false;
 
-    function markLocalChangesPendingSync() {
-        if (typeof scheduleSyncToFirebase === 'function') scheduleSyncToFirebase();
-        refreshSyncStatusBadge();
-    }
-    window.markLocalChangesPendingSync = markLocalChangesPendingSync;
-
-    /** @deprecated 30c32ad 이후 호환용 — 항상 false (작업 탭도 즉시 동기화) */
-    function isWorkTabSyncDeferred() {
-        return false;
-    }
-    window.isWorkTabSyncDeferred = isWorkTabSyncDeferred;
-
-    function refreshSyncStatusBadge() {
-        const badge = document.getElementById('onlineStatusBadge');
-        if (!badge) return;
-        const paint = (bg, color, border, html) => {
-            badge.style.background = bg;
-            badge.style.color = color;
-            badge.style.borderColor = border;
-            badge.innerHTML = html;
-        };
-        if (typeof navigator !== 'undefined' && navigator.onLine === false) {
-            paint('rgba(239, 68, 68, 0.15)', '#f87171', 'rgba(239, 68, 68, 0.3)',
-                '<i class="fa-solid fa-wifi-slash"></i> 오프라인 (로컬 보관중)');
-            return;
-        }
-        if (!db) {
-            paint('rgba(245, 158, 11, 0.15)', '#fbbf24', 'rgba(245, 158, 11, 0.35)',
-                '<i class="fa-solid fa-cloud"></i> Firebase 미연결 (로컬만 저장)');
-            return;
-        }
-        if (!window.state || !window.state.uid) {
-            paint('rgba(245, 158, 11, 0.15)', '#fbbf24', 'rgba(245, 158, 11, 0.35)',
-                '<i class="fa-solid fa-user-slash"></i> 로그인 필요 (로컬만 저장)');
-            return;
-        }
-        if (window.state.role === 'pending') {
-            paint('rgba(245, 158, 11, 0.15)', '#fbbf24', 'rgba(245, 158, 11, 0.35)',
-                '<i class="fa-solid fa-hourglass-half"></i> 회사 승인 대기 (동기화 불가)');
-            return;
-        }
-        if (!window.state.companyId) {
-            paint('rgba(245, 158, 11, 0.15)', '#fbbf24', 'rgba(245, 158, 11, 0.35)',
-                '<i class="fa-solid fa-building-circle-xmark"></i> 회사 미가입 (동기화 불가)');
-            return;
-        }
-        if (_syncInFlight) {
-            paint('rgba(56, 189, 248, 0.15)', '#38bdf8', 'rgba(56, 189, 248, 0.35)',
-                '<i class="fa-solid fa-cloud-arrow-up"></i> 서버 동기화 중…');
-            return;
-        }
-        if (_deferredSyncDirty) {
-            paint('rgba(245, 158, 11, 0.15)', '#fbbf24', 'rgba(245, 158, 11, 0.35)',
-                '<i class="fa-solid fa-cloud-arrow-up"></i> 업로드 대기');
-            badge.title = '서버 업로드가 곧 재시도됩니다.';
-            return;
-        }
-        badge.title = '온라인 — 실시간 동기화';
-        paint('rgba(34, 197, 94, 0.15)', '#4ade80', 'rgba(34, 197, 94, 0.3)',
-            '<i class="fa-solid fa-wifi"></i> 온라인 (실시간 동기화중)');
-    }
-    window.refreshSyncStatusBadge = refreshSyncStatusBadge;
-
-    let _syncRetryWhenIdleTimer = null;
-
-    function clearSyncErrorRetryTimer() {
-        if (_syncRetryTimer) {
-            clearTimeout(_syncRetryTimer);
-            _syncRetryTimer = null;
-        }
-    }
-
-    /** 통신 오류 후 즉시 재귀하지 않고 지수 백오프로 한 번만 재시도 예약 */
-    function scheduleSyncRetryAfterError() {
-        _deferredSyncDirty = true;
-        if (_syncRetryTimer) return;
-        const delay = Math.min(
-            SYNC_RETRY_BASE_MS * Math.pow(2, _syncRetryFailCount),
-            SYNC_RETRY_MAX_MS
-        );
-        _syncRetryFailCount = Math.min(_syncRetryFailCount + 1, 8);
-        _syncRetryTimer = setTimeout(() => {
-            _syncRetryTimer = null;
-            if (!db || !window.state.companyId || !navigator.onLine) return;
-            syncStateToFirebase();
-        }, delay);
-    }
-
-    /** 원격 반영·업로드 중이면 끝난 뒤 대기 중인 업로드를 재시도.
-     * 2026-09-04 버그: 직전 시도가 429(quota exceeded)로 막 실패해서 scheduleSyncRetryAfterError()가
-     * 지수 백오프(_syncRetryTimer)를 걸어둔 상태여도, 이 폴링은 그걸 모르고 _syncInFlight가 풀리자마자
-     * (실패는 매우 빠르게 끝나므로 사실상 즉시) syncStateToFirebase()를 또 호출해버렸다. 그 결과 의도한
-     * 백오프(3.5초→점점 증가)가 무력화되고 150ms 간격으로 계속 같은 문서를 두드려 429가 반복됐다.
-     * 이제 백오프 타이머가 떠 있으면 그게 끝날 때까지 이 폴링도 같이 기다린다(직접 재시도하지 않음). */
-    function scheduleSyncWhenIdle(opts) {
-        const forceQueued = !!(opts && opts.forceQueued);
-        if (_syncRetryWhenIdleTimer) return;
-        const tick = () => {
-            _syncRetryWhenIdleTimer = null;
-            if (_syncInFlight || isRemoteSyncing || _syncRetryTimer) {
-                _syncRetryWhenIdleTimer = setTimeout(tick, 150);
-                return;
-            }
-            if (!forceQueued && !_syncPending && !_deferredSyncDirty) return;
-            _syncPending = false;
-            syncStateToFirebase();
-        };
-        _syncRetryWhenIdleTimer = setTimeout(tick, 150);
-    }
-
-    function scheduleSyncToFirebase(opts) {
+    function scheduleSyncToFirebase() {
         if (!db || !window.state.companyId || !navigator.onLine) return;
+        // 원격 적용/업로드 중이면 버리지 말고 끝나면 한 번 더 돌린다
         if (isRemoteSyncing || _syncInFlight) {
             _syncPending = true;
-            _deferredSyncDirty = true;
-            scheduleSyncWhenIdle({ forceQueued: true });
             return;
         }
         if (_syncDebounceTimer) clearTimeout(_syncDebounceTimer);
@@ -36462,226 +36215,6 @@ document.addEventListener('DOMContentLoaded', () => {
             syncStateToFirebase();
         }, 400);
     }
-
-    /** @deprecated 30c32ad 이전에는 없음 — 호환용 no-op (대기 중 원격만 flush) */
-    function flushDeferredWorkTabSync(reason) {
-        if (_pendingRemoteData && typeof scheduleFlushPendingRemoteSync === 'function') {
-            scheduleFlushPendingRemoteSync();
-        }
-        refreshSyncStatusBadge();
-    }
-    window.flushDeferredWorkTabSync = flushDeferredWorkTabSync;
-
-    const _syncJournal = {
-        lastUploadOkAt: null,
-        lastUploadErrorAt: null,
-        lastUploadError: null,
-        lastDownloadOkAt: null,
-        lastDownloadChanged: null,
-        lastCompareAt: null,
-        lastCompareSummary: null
-    };
-
-    function firestoreTsToMs(ts) {
-        if (!ts) return null;
-        if (typeof ts.toMillis === 'function') return ts.toMillis();
-        if (ts.seconds != null) return Number(ts.seconds) * 1000 + (Number(ts.nanoseconds) || 0) / 1e6;
-        const n = Number(ts);
-        return Number.isFinite(n) ? n : null;
-    }
-
-    function formatSyncTime(ms) {
-        if (!ms) return '—';
-        try {
-            return new Date(ms).toLocaleString('ko-KR', {
-                month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit'
-            });
-        } catch (_e) {
-            return '—';
-        }
-    }
-
-    function countBuildingsList(list) {
-        return (list || []).filter((b) => b && b.id).length;
-    }
-
-    function countDefectsInMap(defectsMap) {
-        let n = 0;
-        Object.values(defectsMap || {}).forEach((arr) => { n += (arr || []).length; });
-        return n;
-    }
-
-    function countNdtInMap(ndtMap) {
-        let n = 0;
-        Object.values(ndtMap || {}).forEach((arr) => { n += (arr || []).length; });
-        return n;
-    }
-
-    function summarizeLocalSyncCounts() {
-        return {
-            buildings: countBuildingsList(window.state.buildings),
-            defects: countDefectsInMap(window.state.defects),
-            ndt: countNdtInMap(window.state.ndtData)
-        };
-    }
-
-    function summarizeServerSyncCounts(serverData) {
-        const data = serverData || {};
-        return {
-            buildings: countBuildingsList(data.buildings),
-            defects: countDefectsInMap(data.defects),
-            ndt: countNdtInMap(data.ndtData)
-        };
-    }
-
-    /** 로컬 vs 서버 건수·시각 비교 — 업로드/다운로드 여부 확인용 */
-    window.compareLocalWithServer = async function () {
-        if (!db || !window.state.companyId) {
-            return { ok: false, reason: '로그인·회사 가입 후 비교할 수 있습니다.' };
-        }
-        if (!navigator.onLine) {
-            return { ok: false, reason: '오프라인입니다.' };
-        }
-        try {
-            const docRef = db.collection('safety_app').doc(getCompanyDocId());
-            const snap = await fetchCompanyDocSnap(docRef);
-            const serverData = snap.exists ? (snap.data() || {}) : {};
-            const local = summarizeLocalSyncCounts();
-            const server = summarizeServerSyncCounts(serverData);
-            const serverUpdatedAtMs = firestoreTsToMs(serverData.updatedAt);
-            const pendingUpload = !!_deferredSyncDirty;
-            const lines = [];
-            if (!snap.exists) {
-                lines.push('서버에 회사 데이터가 아직 없습니다. 「서버에 올리기」로 첫 업로드를 하세요.');
-            } else {
-                lines.push(`서버 마지막 갱신: ${formatSyncTime(serverUpdatedAtMs)}`);
-                lines.push(`건물 ${local.buildings}개(기기) / ${server.buildings}개(서버)`);
-                lines.push(`결함 ${local.defects}건(기기) / ${server.defects}건(서버)`);
-                lines.push(`NDT ${local.ndt}건(기기) / ${server.ndt}건(서버)`);
-            }
-            if (pendingUpload || _syncInFlight) {
-                lines.push('⚠ 이 기기에 아직 서버로 올리지 않은 변경이 있습니다.');
-            } else if (snap.exists && local.defects === server.defects && local.buildings === server.buildings) {
-                lines.push('✓ 건수 기준으로 로컬과 서버가 일치합니다.');
-            } else if (snap.exists) {
-                lines.push('건수가 다릅니다. 양쪽 모두 수정했거나, 한쪽이 아직 올리/받기 전일 수 있습니다.');
-                lines.push('병합 규칙: 같은 결함은 더 최근 수정이 이기고, 사진은 합쳐집니다(로컬 일방 우선 아님).');
-            }
-            if (_pendingRemoteData) {
-                lines.push('⚠ 서버 변경이 대기 중입니다. 홈 탭에서 자동 반영됩니다.');
-            }
-            const result = {
-                ok: true,
-                serverExists: snap.exists,
-                serverUpdatedAtMs,
-                local,
-                server,
-                pendingUpload,
-                syncInFlight: _syncInFlight,
-                pendingRemote: !!_pendingRemoteData,
-                summaryLines: lines,
-                summaryText: lines.join('\n')
-            };
-            _syncJournal.lastCompareAt = Date.now();
-            _syncJournal.lastCompareSummary = result.summaryText;
-            return result;
-        } catch (e) {
-            return { ok: false, reason: (e && e.message) || String(e) };
-        }
-    };
-
-    async function refreshHomeSyncStatusUI() {
-        const el = document.getElementById('homeSyncStatusText');
-        if (!el) return;
-        if (!window.state || !window.state.uid) {
-            el.textContent = '로그인 후 동기화 상태를 확인할 수 있습니다.';
-            return;
-        }
-        if (!window.state.companyId) {
-            el.textContent = '회사 가입·승인 후 서버와 동기화됩니다.';
-            return;
-        }
-        if (typeof navigator !== 'undefined' && navigator.onLine === false) {
-            el.textContent = '오프라인 — 변경은 이 기기에만 저장됩니다.';
-            return;
-        }
-        const parts = [];
-        if (_deferredSyncDirty) parts.push('⏳ 업로드 재시도 대기');
-        else if (_syncInFlight) parts.push('⬆ 서버에 올리는 중…');
-        else if (_syncJournal.lastUploadOkAt) {
-            parts.push(`⬆ 마지막 업로드: ${formatSyncTime(_syncJournal.lastUploadOkAt)}`);
-        }
-        if (_syncJournal.lastDownloadOkAt) {
-            const dl = `⬇ 마지막 받기: ${formatSyncTime(_syncJournal.lastDownloadOkAt)}`;
-            parts.push(_syncJournal.lastDownloadChanged === false ? `${dl} (변경 없음)` : dl);
-        }
-        if (_syncJournal.lastUploadErrorAt) {
-            parts.push(`⚠ 업로드 실패: ${formatSyncTime(_syncJournal.lastUploadErrorAt)}`);
-            if (_syncJournal.lastUploadError) {
-                parts.push(`   ${String(_syncJournal.lastUploadError).slice(0, 120)}`);
-            }
-        }
-        if (_pendingRemoteData) parts.push('⬇ 서버 변경 대기 중');
-        if (!parts.length) parts.push('「상태 확인」으로 서버와 비교하세요.');
-        el.textContent = parts.join('\n');
-        try {
-            const cmp = await window.compareLocalWithServer();
-            if (cmp.ok && cmp.summaryLines && cmp.summaryLines.length) {
-                el.textContent = parts.join('\n') + '\n\n' + cmp.summaryLines.join('\n');
-            } else if (!cmp.ok && cmp.reason) {
-                el.textContent = parts.join('\n') + '\n\n' + cmp.reason;
-            }
-        } catch (_e) { /* ignore */ }
-    }
-    window.refreshHomeSyncStatusUI = refreshHomeSyncStatusUI;
-
-    window.getSyncDiagnostics = function () {
-        return {
-            online: typeof navigator !== 'undefined' ? navigator.onLine !== false : null,
-            hasDb: !!db,
-            uid: window.state && window.state.uid,
-            companyId: window.state && window.state.companyId,
-            role: window.state && window.state.role,
-            currentTab: window.state && window.state.currentTab,
-            deferredDirty: _deferredSyncDirty,
-            syncInFlight: _syncInFlight,
-            remoteSyncing: isRemoteSyncing,
-            pendingRemote: !!_pendingRemoteData,
-            syncRetryScheduled: !!_syncRetryTimer,
-            syncRetryFailCount: _syncRetryFailCount,
-            workTabDeferred: isWorkTabSyncDeferred(),
-            journal: { ..._syncJournal },
-            localCounts: summarizeLocalSyncCounts(),
-            mergeRule: '저장 시 모든 탭에서 자동 Firebase 동기화 (30c32ad 이전 방식)'
-        };
-    };
-
-    /** 홈·설정에서 수동으로 서버 업로드 (진단·재시도용) */
-    window.forceSyncNow = async function () {
-        if (!db || !window.state.companyId) {
-            window.showToast('로그인·회사 승인 후 동기화할 수 있습니다.', 'warning', 4000);
-            refreshSyncStatusBadge();
-            return false;
-        }
-        if (!navigator.onLine) {
-            window.showToast('오프라인입니다.', 'warning', 3500);
-            refreshSyncStatusBadge();
-            return false;
-        }
-        if (typeof saveStateToLocalStorage === 'function') saveStateToLocalStorage();
-        _deferredSyncDirty = true;
-        _syncFlushNotify = true;
-        window.showToast('서버에 올리는 중…', 'info', 2200);
-        refreshSyncStatusBadge();
-        await waitForSyncInFlight();
-        await syncStateToFirebase();
-        await waitForSyncInFlight(60000);
-        if (typeof refreshHomeSyncStatusUI === 'function') refreshHomeSyncStatusUI();
-        if (_syncJournal.lastUploadOkAt && Date.now() - _syncJournal.lastUploadOkAt < 120000) {
-            return true;
-        }
-        return !_deferredSyncDirty;
-    };
 
     /** 온라인 복귀·앱 포그라운드: 실시간 리스너 재구독 + 서버 기준 병합 동기화 */
     let _reconnectSyncTimer = null;
@@ -36841,19 +36374,23 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         if (data.defects) {
-            const defectMerge = mergeDefectsForSync(
-                data.defects,
-                window.state.defects,
-                data.deletedDefectIds,
-                window.state.deletedDefectIds,
-                data.deletedDefectAt,
-                window.state.deletedDefectAt,
-                mergedDeletedBuildings
+            const remoteHydrated = await hydrateDefectPhotos(
+                filterMapKeysByDeletedBuildings(data.defects, mergedDeletedBuildings)
             );
-            window.state.defects = defectMerge.defects;
+            const localHydrated = await hydrateDefectPhotos(
+                filterMapKeysByDeletedBuildings(window.state.defects, mergedDeletedBuildings)
+            );
+            const defectMerge = mergeDefectsMaps(
+                remoteHydrated,
+                localHydrated,
+                filterMapKeysByDeletedBuildings(data.deletedDefectIds || {}, mergedDeletedBuildings),
+                filterMapKeysByDeletedBuildings(window.state.deletedDefectIds || {}, mergedDeletedBuildings),
+                filterMapKeysByDeletedBuildings(data.deletedDefectAt || {}, mergedDeletedBuildings),
+                filterMapKeysByDeletedBuildings(window.state.deletedDefectAt || {}, mergedDeletedBuildings)
+            );
+            window.state.defects = await hydrateDefectPhotos(defectMerge.defects);
             window.state.deletedDefectIds = defectMerge.deletedDefectIds;
             window.state.deletedDefectAt = defectMerge.deletedDefectAt || {};
-            await hydrateCurrentBuildingDefectPhotosIntoState();
             isChanged = true;
         }
 
@@ -37124,21 +36661,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
     async function syncStateToFirebase() {
         if (!db || !window.state.companyId || !navigator.onLine) return;
-        if (_syncInFlight) {
+        if (isRemoteSyncing || _syncInFlight) {
             _syncPending = true;
-            _deferredSyncDirty = true;
-            scheduleSyncWhenIdle();
-            return;
-        }
-        if (isRemoteSyncing) {
-            _syncPending = true;
-            _deferredSyncDirty = true;
-            scheduleSyncWhenIdle();
             return;
         }
         if (typeof flushOverviewCaptionsFromDom === 'function') flushOverviewCaptionsFromDom();
         _syncInFlight = true;
-        _deferredSyncDirty = false;
         ensureSyncMetaState();
         let leaseInfo = null;
         let leaseHeartbeatTimer = null;
@@ -37174,14 +36702,19 @@ document.addEventListener('DOMContentLoaded', () => {
             );
             mergedDeletedBuildings.forEach(purgeLocalStateForDeletedBuilding);
 
-            let defectMerge = mergeDefectsForSync(
-                serverData.defects,
-                window.state.defects,
-                serverData.deletedDefectIds,
-                window.state.deletedDefectIds,
-                serverData.deletedDefectAt,
-                window.state.deletedDefectAt,
-                mergedDeletedBuildings
+            let serverDefectsHydrated = await hydrateDefectPhotos(
+                filterMapKeysByDeletedBuildings(serverData.defects || {}, mergedDeletedBuildings)
+            );
+            let localDefectsHydrated = await hydrateDefectPhotos(
+                filterMapKeysByDeletedBuildings(window.state.defects || {}, mergedDeletedBuildings)
+            );
+            let defectMerge = mergeDefectsMaps(
+                serverDefectsHydrated,
+                localDefectsHydrated,
+                filterMapKeysByDeletedBuildings(serverData.deletedDefectIds || {}, mergedDeletedBuildings),
+                filterMapKeysByDeletedBuildings(window.state.deletedDefectIds || {}, mergedDeletedBuildings),
+                filterMapKeysByDeletedBuildings(serverData.deletedDefectAt || {}, mergedDeletedBuildings),
+                filterMapKeysByDeletedBuildings(window.state.deletedDefectAt || {}, mergedDeletedBuildings)
             );
             let ndtMerge = mergeNdtDataMaps(
                 filterMapKeysByDeletedBuildings(serverData.ndtData || {}, mergedDeletedBuildings),
@@ -37192,7 +36725,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 filterMapKeysByDeletedBuildings(window.state.deletedNdtAt || {}, mergedDeletedBuildings)
             );
 
-            window.state.defects = defectMerge.defects;
+            isRemoteSyncing = true;
+            window.state.defects = await hydrateDefectPhotos(defectMerge.defects);
             window.state.deletedDefectIds = defectMerge.deletedDefectIds;
             window.state.deletedDefectAt = defectMerge.deletedDefectAt || {};
             window.state.confirmedDeletedIds = {};
@@ -37200,7 +36734,18 @@ document.addEventListener('DOMContentLoaded', () => {
             window.state.deletedNdtIds = ndtMerge.deletedNdtIds;
             window.state.deletedNdtAt = ndtMerge.deletedNdtAt || {};
 
-            // 사진·도면은 회사 문서 저장 후 백그라운드 업로드 (2433건+ 사진이 메타 업로드를 막지 않게)
+            // 사진/도면 업로드 (잠금 유지 + heartbeat)
+            await uploadInlineDefectPhotosForSync(window.state.defects);
+            const fieldRasterOnly = typeof isNativeAndroidApp === 'function' && isNativeAndroidApp() && !layoutIsPcLike();
+            if (!fieldRasterOnly) {
+                await uploadFloorDrawingPdfsForSync(window.state.buildings);
+                await ensureRasterTiersForSync(window.state.buildings);
+            }
+            await uploadFloorDrawingsForSync(window.state.buildings);
+            await hydrateLocalImagesFromIndexedDb();
+            refreshCurrentBuildingFromState();
+
+            // 사진/도면 업로드 동안 드래그가 시작됐으면 재병합·다시 그리기 전에 대기
             await waitForUiGestureIdle();
 
             // 쓰기 직전 서버 재조회 후 재병합 (잠금 덕에 동료 중간 쓰기는 거의 없지만 안전망)
@@ -37220,14 +36765,19 @@ document.addEventListener('DOMContentLoaded', () => {
             );
             mergedDeletedBuildings.forEach(purgeLocalStateForDeletedBuilding);
 
-            defectMerge = mergeDefectsForSync(
-                serverData.defects,
-                window.state.defects,
-                serverData.deletedDefectIds,
-                window.state.deletedDefectIds,
-                serverData.deletedDefectAt,
-                window.state.deletedDefectAt,
-                mergedDeletedBuildings
+            serverDefectsHydrated = await hydrateDefectPhotos(
+                filterMapKeysByDeletedBuildings(serverData.defects || {}, mergedDeletedBuildings)
+            );
+            localDefectsHydrated = await hydrateDefectPhotos(
+                filterMapKeysByDeletedBuildings(window.state.defects || {}, mergedDeletedBuildings)
+            );
+            defectMerge = mergeDefectsMaps(
+                serverDefectsHydrated,
+                localDefectsHydrated,
+                filterMapKeysByDeletedBuildings(serverData.deletedDefectIds || {}, mergedDeletedBuildings),
+                filterMapKeysByDeletedBuildings(window.state.deletedDefectIds || {}, mergedDeletedBuildings),
+                filterMapKeysByDeletedBuildings(serverData.deletedDefectAt || {}, mergedDeletedBuildings),
+                filterMapKeysByDeletedBuildings(window.state.deletedDefectAt || {}, mergedDeletedBuildings)
             );
             ndtMerge = mergeNdtDataMaps(
                 filterMapKeysByDeletedBuildings(serverData.ndtData || {}, mergedDeletedBuildings),
@@ -37237,13 +36787,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 filterMapKeysByDeletedBuildings(serverData.deletedNdtAt || {}, mergedDeletedBuildings),
                 filterMapKeysByDeletedBuildings(window.state.deletedNdtAt || {}, mergedDeletedBuildings)
             );
-            window.state.defects = defectMerge.defects;
+            window.state.defects = await hydrateDefectPhotos(defectMerge.defects);
             window.state.deletedDefectIds = defectMerge.deletedDefectIds;
             window.state.deletedDefectAt = defectMerge.deletedDefectAt || {};
             window.state.ndtData = ndtMerge.ndtData;
             window.state.deletedNdtIds = ndtMerge.deletedNdtIds;
             window.state.deletedNdtAt = ndtMerge.deletedNdtAt || {};
-            await hydrateCurrentBuildingDefectPhotosIntoState();
 
             {
                 const dispMerge = mergeNdtDataMaps(
@@ -37261,13 +36810,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
             const sanitizedBuildings = filterDeletedBuildings(window.state.buildings || [], mergedDeletedBuildings)
                 .map((b) => {
-                    const meta = sanitizeBuildingMetaForFirebase(b);
+                    const meta = sanitizeBuildingMetaForFirestore(b);
                     meta.drawingFloorCodes = Array.from(collectKnownFloorCodesForBuilding(b));
                     return meta;
                 });
 
             const dataToSync = {
-                defects: sanitizeDefectsForFirebase(window.state.defects),
+                defects: sanitizeDefectsForFirestore(window.state.defects),
                 deletedDefectIds: defectMerge.deletedDefectIds,
                 deletedDefectAt: defectMerge.deletedDefectAt || {},
                 confirmedDeletedIds: {},
@@ -37294,19 +36843,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 updatedAt: firebase.firestore.FieldValue.serverTimestamp()
             };
             await docRef.set(dataToSync, { merge: true });
-            clearSyncErrorRetryTimer();
-            _syncRetryFailCount = 0;
-            _syncJournal.lastUploadOkAt = Date.now();
-            _syncJournal.lastUploadErrorAt = null;
-            _syncJournal.lastUploadError = null;
             (window.state.buildings || []).forEach((b) => {
                 if (b && b._pendingCloudSync) delete b._pendingCloudSync;
             });
-            if (_syncFlushNotify) {
-                _syncFlushNotify = false;
-                window.showToast('서버에 동기화했습니다. 사진·도면은 백그라운드에서 계속 올립니다.', 'success', 3200);
-            }
-            runDeferredSyncAssetUploads().catch(() => {});
             if (state.currentTab === 'tab-map' && state.currentBuildingId && state.currentFloor) {
                 refreshCurrentBuildingFromState();
                 if (state.bgImage && typeof syncFloorDrawingTierForView === 'function') {
@@ -37323,24 +36862,15 @@ document.addEventListener('DOMContentLoaded', () => {
             if (typeof window.purgeExpiredBuildingTrash === 'function') {
                 window.purgeExpiredBuildingTrash().catch(() => {});
             }
-            if (typeof refreshHomeSyncStatusUI === 'function') refreshHomeSyncStatusUI();
         } catch (e) {
             console.warn('Firebase Sync Error:', e);
-            _syncJournal.lastUploadErrorAt = Date.now();
-            _syncJournal.lastUploadError = (e && e.message) || String(e);
-            _deferredSyncDirty = true;
-            _syncFlushNotify = false;
-            refreshSyncStatusBadge();
-            const now = Date.now();
-            if (now - _syncErrorToastAt >= SYNC_ERROR_TOAST_COOLDOWN_MS) {
-                _syncErrorToastAt = now;
-                window.showToast(
-                    '서버 동기화에 실패했습니다. 잠시 후 자동으로 재시도합니다.',
-                    'warning',
-                    4500
-                );
-            }
-            scheduleSyncRetryAfterError();
+            _syncPending = true;
+            setTimeout(() => {
+                if (navigator.onLine && _syncPending) {
+                    _syncPending = false;
+                    syncStateToFirebase();
+                }
+            }, 2000);
         } finally {
             if (leaseHeartbeatTimer) {
                 clearInterval(leaseHeartbeatTimer);
@@ -37350,13 +36880,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 await releaseCompanySyncLease(docRef, leaseInfo);
                 leaseInfo = null;
             }
+            setTimeout(() => { isRemoteSyncing = false; }, 400);
             _syncInFlight = false;
-            refreshSyncStatusBadge();
-            const retryUpload = _syncPending;
-            _syncPending = false;
-            if (retryUpload) {
-                scheduleSyncWhenIdle({ forceQueued: true });
-            } else if (!_syncRetryTimer && typeof scheduleFlushPendingRemoteSync === 'function') {
+            if (_syncPending) {
+                _syncPending = false;
+                syncStateToFirebase();
+            } else if (typeof scheduleFlushPendingRemoteSync === 'function') {
                 scheduleFlushPendingRemoteSync();
             }
         }
@@ -37399,7 +36928,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
                 if (isRealtimeUiGestureBusy()) {
                     _pendingRemoteData = data;
-                    refreshSyncStatusBadge();
                     return;
                 }
                 await applyRemoteSnapshotFromListener(data);
@@ -37790,7 +37318,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (typeof pullCompanySnapshotOnce === 'function') {
             await pullCompanySnapshotOnce();
         }
-        if (typeof refreshSyncStatusBadge === 'function') refreshSyncStatusBadge();
+        if (typeof updateOnlineBadge === 'function') updateOnlineBadge(true);
         if (typeof ensureBuildingAccessSeeded === 'function') ensureBuildingAccessSeeded();
         else if (typeof touchBuildingAccess === 'function' && window.state.currentBuildingId) {
             touchBuildingAccess(window.state.currentBuildingId);
@@ -37821,7 +37349,7 @@ document.addEventListener('DOMContentLoaded', () => {
             window.state.role = null;
             if (typeof resetDefectPinPresetsToDefaults === 'function') resetDefectPinPresetsToDefaults();
             switchCompanyLocalDataContext(null, null).catch(() => {});
-            if (typeof refreshSyncStatusBadge === 'function') refreshSyncStatusBadge();
+            if (typeof updateOnlineBadge === 'function') updateOnlineBadge(true);
             showLoginOverlay();
             return;
         }
@@ -37854,7 +37382,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 window.state.companyName = data.pendingCompanyName || data.companyName || '';
                 window.state.role = 'pending';
                 showPendingApproval(data.pendingCompanyName || data.companyName);
-                if (typeof refreshSyncStatusBadge === 'function') refreshSyncStatusBadge();
+                if (typeof updateOnlineBadge === 'function') updateOnlineBadge(true);
             } else if (status === 'rejected') {
                 await clearUserCompanyLinks(user.uid, activeCompanyId, { removeMember: false });
                 window.state.uid = user.uid;
