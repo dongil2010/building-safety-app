@@ -110,7 +110,7 @@ if (-not $status) {
 $label = Get-Date -Format "yyyyMMdd_HHmmss"
 Update-CacheBustTokens -Label $label
 
-git add app.js index.html styles.css js/ sw.js manifest.json web-version.json scripts/git-sync.ps1 CLAUDE.md
+git add app.js index.html styles.css js/ sw.js manifest.json web-version.json scripts/git-sync.ps1 CLAUDE.md CURSOR_CHANNEL.md .cursor/rules/antigravity-bridge.mdc
 $staged = git diff --cached --name-only
 if (-not $staged) {
     Write-Host "No staged changes to commit."

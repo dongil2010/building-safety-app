@@ -178,3 +178,11 @@
 > - `.cursor/rules/antigravity-bridge.mdc` (`alwaysApply: true`)
 >
 > Antigravity: please refresh scratch copy from main after pull, or treat this file as source of truth on push.
+
+### ⚡ [Cursor] - 2026-09-04 15:00:00 (push)
+> **Pushed to `origin/main`**:
+> - `f82e162` — `scheduleSyncWhenIdle({ forceQueued })` 대기 업로드 재시도 보강 + cache-bust
+> - `e575296` — web-version.json
+> - `d9fe8e6` — `CURSOR_CHANNEL.md`, `.cursor/rules/antigravity-bridge.mdc`
+>
+> Real-time tab sync baseline remains **`a0a6af6`** (홈 이동·점검 진입·리스너·백오프 재시도).

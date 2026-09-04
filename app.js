@@ -663,20 +663,9 @@ document.addEventListener('DOMContentLoaded', () => {
     });
     // 앱/탭 복귀 시에도 동기화 (비행기모드 해제 후 online 이벤트가 안 뜨는 WebView 대비)
     document.addEventListener('visibilitychange', () => {
-        if (document.visibilityState === 'hidden') {
-            if (navigator.onLine && typeof window.flushDeferredWorkTabSync === 'function') {
-                try { window.flushDeferredWorkTabSync('hidden'); } catch (_e) { /* ignore */ }
-            }
-            return;
-        }
         if (document.visibilityState !== 'visible') return;
         if (navigator.onLine && typeof reconnectFirestoreSync === 'function') {
             reconnectFirestoreSync('visible');
-        }
-    });
-    window.addEventListener('pagehide', () => {
-        if (navigator.onLine && typeof window.flushDeferredWorkTabSync === 'function') {
-            try { window.flushDeferredWorkTabSync('pagehide'); } catch (_e) { /* ignore */ }
         }
     });
     window.addEventListener('focus', () => {
@@ -3803,22 +3792,6 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         } catch (_e) { /* ignore */ }
 
-        const prevTabId = window.state.currentTab;
-        const leavingForHome = targetTabId === 'tab-home' && prevTabId && prevTabId !== 'tab-home';
-        const diag = (typeof window.getSyncDiagnostics === 'function') ? window.getSyncDiagnostics() : null;
-        const pendingUpload = !!(diag && diag.deferredDirty);
-
-        if (targetTabId === 'tab-home' && (leavingForHome || pendingUpload)) {
-            if (leavingForHome && typeof saveStateToLocalStorage === 'function') {
-                try { saveStateToLocalStorage(); } catch (_e) { /* ignore */ }
-            }
-            if (typeof window.flushDeferredWorkTabSync === 'function') {
-                try { window.flushDeferredWorkTabSync(leavingForHome ? 'home' : 'home-repeat'); } catch (_e) { /* ignore */ }
-            }
-        } else if (targetTabId === 'tab-home' && typeof scheduleFlushPendingRemoteSync === 'function') {
-            try { scheduleFlushPendingRemoteSync(); } catch (_e2) { /* ignore */ }
-        }
-
         window.state.currentTab = targetTabId;
 
         document.querySelectorAll('.tab-content').forEach(content => {
@@ -4581,23 +4554,17 @@ document.addEventListener('DOMContentLoaded', () => {
         const targetFloor = window.state.currentFloor || '1F';
         const canFetchDrawings = typeof navigator === 'undefined' || navigator.onLine !== false;
         const entryBuildingId = bldg.id;
+        const reentrySameBuilding = window.state.currentTab === 'tab-home'
+            && window.state.currentBuildingId === entryBuildingId;
 
-        // 홈에서 회차·동 선택 후 점검 진입: 서버 스냅샷 병합 (오프라인이면 로컬만)
-        if (canFetchDrawings && window.state.companyId && typeof pullCompanySnapshotOnce === 'function') {
-            try {
-                window.showToast('서버에서 최신 데이터를 불러오는 중…', 'info', 2200);
-                await pullCompanySnapshotOnce();
-                const refreshed = window.state.buildings.find((item) => item.id === entryBuildingId);
-                if (refreshed) {
-                    bldg = refreshed;
-                    window.state.currentBuilding = bldg;
-                    applyBuildingLocationMapLegend(bldg);
-                    populateFloorSelectDropdown(bldg);
-                    applyFloorMapStyleSettings(window.state.currentFloor || '1F', bldg.id);
-                }
-            } catch (e) {
-                console.warn('점검 진입 전 서버 조회 실패:', e);
+        // 홈에서 점검 진입 시 reconnect로 서버 병합 (acf3985 / 30c32ad 이전 방식)
+        if (canFetchDrawings && window.state.companyId
+            && typeof reconnectFirestoreSync === 'function'
+            && window.state.currentTab === 'tab-home') {
+            if (reentrySameBuilding) {
+                window.showToast('최신 점검 데이터 동기화 중…', 'info', 2200);
             }
+            reconnectFirestoreSync(reentrySameBuilding ? 'inspect-reentry' : 'inspect-entry');
         }
 
         // 로딩 오버레이 없이 맵 진입. 로컬 캐시로 먼저 그리고, 없으면 백그라운드 hydrate.
@@ -33089,8 +33056,15 @@ document.addEventListener('DOMContentLoaded', () => {
             try {
                 const ok = await window.forceSyncNow();
                 await refreshHomeSyncStatusUI();
-                if (!ok && _deferredSyncDirty) {
-                    window.showToast('업로드가 완료되지 않았습니다. 상태 확인 후 다시 시도하세요.', 'warning', 4500);
+                if (!ok) {
+                    const err = _syncJournal.lastUploadError;
+                    window.showToast(
+                        err
+                            ? `업로드 실패: ${String(err).slice(0, 80)}`
+                            : '업로드가 완료되지 않았습니다. 상태 확인 후 다시 시도하세요.',
+                        'warning',
+                        5500
+                    );
                 }
             } finally {
                 btnForceSyncNowHome.disabled = false;
@@ -34469,6 +34443,19 @@ document.addEventListener('DOMContentLoaded', () => {
         _pendingRemoteData = null;
     }
 
+    function waitForSyncInFlight(maxMs) {
+        const cap = (maxMs == null) ? 180000 : maxMs;
+        const start = Date.now();
+        return new Promise((resolve) => {
+            const tick = () => {
+                if (!_syncInFlight && !isRemoteSyncing) return resolve();
+                if (Date.now() - start >= cap) return resolve();
+                setTimeout(tick, 120);
+            };
+            tick();
+        });
+    }
+
     /** 핀/영역/NDT 드래그·핀치 등 UI 제스처 중이면 원격 스냅샷 적용을 미룸 (저장 업로드는 그대로) */
     function isRealtimeUiGestureBusy() {
         return !!(
@@ -34501,7 +34488,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
     async function flushPendingRemoteSync() {
         if (!_pendingRemoteData) return;
-        if (typeof isWorkTabSyncDeferred === 'function' && isWorkTabSyncDeferred()) return;
         if (isRealtimeUiGestureBusy() || _syncInFlight) {
             scheduleFlushPendingRemoteSync();
             return;
@@ -36177,6 +36163,24 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    /** 회사 문서 저장 후 사진·도면 업로드(메타데이터 업로드와 분리) */
+    async function runDeferredSyncAssetUploads() {
+        if (!db || !window.state.companyId) return;
+        try {
+            await uploadInlineDefectPhotosForSync(window.state.defects);
+            const fieldRasterOnly = typeof isNativeAndroidApp === 'function' && isNativeAndroidApp() && !layoutIsPcLike();
+            if (!fieldRasterOnly) {
+                await uploadFloorDrawingPdfsForSync(window.state.buildings);
+                await ensureRasterTiersForSync(window.state.buildings);
+            }
+            await uploadFloorDrawingsForSync(window.state.buildings);
+            await hydrateLocalImagesFromIndexedDb();
+            refreshCurrentBuildingFromState();
+        } catch (e) {
+            console.warn('동기화 후 사진·도면 업로드 실패:', e);
+        }
+    }
+
     // 반환값: 삭제 실패 건수. 실패해도 예외를 던지지 않지만, 호출부에서 사용자에게 알릴 수 있도록 건수를 반환한다.
     async function deletePhotosForDefect(defectId, count, kind) {
         if (!count) return 0;
@@ -36330,20 +36334,19 @@ document.addEventListener('DOMContentLoaded', () => {
         return sanitizedDefects;
     }
 
-    // 작업 탭(위치도·조사표·비파괴)에서는 실시간 업로드/원격 반영을 하지 않는다.
-    // 변경은 로컬에 쌓아 두고 홈 진입·백그라운드 전환 시 업로드, 홈/비작업 탭에서 원격 반영.
-    const WORK_TABS_DEFER_SYNC = new Set(['tab-map', 'tab-survey', 'tab-ndt']);
+    // 30c32ad 이전: 모든 탭에서 저장 시 즉시 Firebase 동기화 (작업 탭 업로드 미룸 없음)
     let _deferredSyncDirty = false;
     let _syncFlushNotify = false;
 
     function markLocalChangesPendingSync() {
-        _deferredSyncDirty = true;
+        if (typeof scheduleSyncToFirebase === 'function') scheduleSyncToFirebase();
         refreshSyncStatusBadge();
     }
     window.markLocalChangesPendingSync = markLocalChangesPendingSync;
 
+    /** @deprecated 30c32ad 이후 호환용 — 항상 false (작업 탭도 즉시 동기화) */
     function isWorkTabSyncDeferred() {
-        return !!(window.state && WORK_TABS_DEFER_SYNC.has(window.state.currentTab));
+        return false;
     }
     window.isWorkTabSyncDeferred = isWorkTabSyncDeferred;
 
@@ -36386,16 +36389,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 '<i class="fa-solid fa-cloud-arrow-up"></i> 서버 동기화 중…');
             return;
         }
-        if (_deferredSyncDirty && isWorkTabSyncDeferred()) {
-            paint('rgba(245, 158, 11, 0.15)', '#fbbf24', 'rgba(245, 158, 11, 0.35)',
-                '<i class="fa-solid fa-clock"></i> 업로드 대기 (홈 탭 이동 시 반영)');
-            badge.title = '작업 탭 변경은 홈 탭 이동 시 서버에 올립니다.';
-            return;
-        }
         if (_deferredSyncDirty) {
             paint('rgba(245, 158, 11, 0.15)', '#fbbf24', 'rgba(245, 158, 11, 0.35)',
                 '<i class="fa-solid fa-cloud-arrow-up"></i> 업로드 대기');
-            badge.title = '서버 업로드 대기 중입니다.';
+            badge.title = '서버 업로드가 곧 재시도됩니다.';
             return;
         }
         badge.title = '온라인 — 실시간 동기화';
@@ -36451,17 +36448,11 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function scheduleSyncToFirebase(opts) {
-        const force = !!(opts && opts.force);
-        if (isWorkTabSyncDeferred() && !force) {
-            _deferredSyncDirty = true;
-            refreshSyncStatusBadge();
-            return;
-        }
         if (!db || !window.state.companyId || !navigator.onLine) return;
         if (isRemoteSyncing || _syncInFlight) {
             _syncPending = true;
             _deferredSyncDirty = true;
-            scheduleSyncWhenIdle();
+            scheduleSyncWhenIdle({ forceQueued: true });
             return;
         }
         if (_syncDebounceTimer) clearTimeout(_syncDebounceTimer);
@@ -36471,55 +36462,12 @@ document.addEventListener('DOMContentLoaded', () => {
         }, 400);
     }
 
-    /** 작업 탭에서 미뤄 둔 업로드를 홈 진입·백그라운드 전환 시 처리 */
+    /** @deprecated 30c32ad 이전에는 없음 — 호환용 no-op (대기 중 원격만 flush) */
     function flushDeferredWorkTabSync(reason) {
-        const hadDirty = _deferredSyncDirty;
-        const onWorkTab = isWorkTabSyncDeferred();
-        const shouldUpload = hadDirty
-            || reason === 'home'
-            || reason === 'home-repeat'
-            || ((reason === 'hidden' || reason === 'pagehide') && onWorkTab);
-
-        if (!shouldUpload) {
-            if (_pendingRemoteData && typeof scheduleFlushPendingRemoteSync === 'function') {
-                scheduleFlushPendingRemoteSync();
-            }
-            refreshSyncStatusBadge();
-            return;
-        }
-
-        if (!db || !window.state.companyId || !navigator.onLine) {
-            _deferredSyncDirty = true;
-            if (shouldUpload && window.state && window.state.uid && !window.state.companyId) {
-                window.showToast('회사에 가입·승인되어야 다른 기기와 동기화됩니다.', 'warning', 4500);
-            } else if (shouldUpload && window.state && window.state.role === 'pending') {
-                window.showToast('회사 승인 대기 중입니다. 승인 후 다른 기기와 동기화됩니다.', 'warning', 4500);
-            } else if (shouldUpload && !navigator.onLine) {
-                window.showToast('오프라인입니다. 온라인 후 홈 탭에서 다시 동기화됩니다.', 'warning', 4000);
-            }
-            refreshSyncStatusBadge();
-            return;
-        }
-
-        if (_syncInFlight || isRemoteSyncing) {
-            _deferredSyncDirty = true;
-            _syncPending = true;
-            scheduleSyncWhenIdle();
-            if (reason === 'home' || reason === 'home-repeat') {
-                window.showToast('동기화가 진행 중입니다. 완료되면 자동으로 올립니다.', 'info', 2800);
-            }
-            refreshSyncStatusBadge();
-            return;
-        }
-
-        if (_syncDebounceTimer) clearTimeout(_syncDebounceTimer);
-        _syncDebounceTimer = null;
-        _syncFlushNotify = !!(reason === 'home' || reason === 'home-repeat' || reason === 'hidden' || reason === 'pagehide');
-        if (reason === 'home' || reason === 'home-repeat') {
-            window.showToast('서버에 올리는 중…', 'info', 2200);
+        if (_pendingRemoteData && typeof scheduleFlushPendingRemoteSync === 'function') {
+            scheduleFlushPendingRemoteSync();
         }
         refreshSyncStatusBadge();
-        syncStateToFirebase();
     }
     window.flushDeferredWorkTabSync = flushDeferredWorkTabSync;
 
@@ -36657,7 +36605,7 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
         const parts = [];
-        if (_deferredSyncDirty) parts.push('⏳ 업로드 대기 (홈 탭 이동 시 자동 반영)');
+        if (_deferredSyncDirty) parts.push('⏳ 업로드 재시도 대기');
         else if (_syncInFlight) parts.push('⬆ 서버에 올리는 중…');
         else if (_syncJournal.lastUploadOkAt) {
             parts.push(`⬆ 마지막 업로드: ${formatSyncTime(_syncJournal.lastUploadOkAt)}`);
@@ -36668,6 +36616,9 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         if (_syncJournal.lastUploadErrorAt) {
             parts.push(`⚠ 업로드 실패: ${formatSyncTime(_syncJournal.lastUploadErrorAt)}`);
+            if (_syncJournal.lastUploadError) {
+                parts.push(`   ${String(_syncJournal.lastUploadError).slice(0, 120)}`);
+            }
         }
         if (_pendingRemoteData) parts.push('⬇ 서버 변경 대기 중');
         if (!parts.length) parts.push('「상태 확인」으로 서버와 비교하세요.');
@@ -36700,7 +36651,7 @@ document.addEventListener('DOMContentLoaded', () => {
             workTabDeferred: isWorkTabSyncDeferred(),
             journal: { ..._syncJournal },
             localCounts: summarizeLocalSyncCounts(),
-            mergeRule: '작업 탭은 로컬 저장 → 홈 이동 시 업로드. 홈·비작업 탭에서 서버 변경 자동 반영'
+            mergeRule: '저장 시 모든 탭에서 자동 Firebase 동기화 (30c32ad 이전 방식)'
         };
     };
 
@@ -36721,8 +36672,13 @@ document.addEventListener('DOMContentLoaded', () => {
         _syncFlushNotify = true;
         window.showToast('서버에 올리는 중…', 'info', 2200);
         refreshSyncStatusBadge();
+        await waitForSyncInFlight();
         await syncStateToFirebase();
+        await waitForSyncInFlight(60000);
         if (typeof refreshHomeSyncStatusUI === 'function') refreshHomeSyncStatusUI();
+        if (_syncJournal.lastUploadOkAt && Date.now() - _syncJournal.lastUploadOkAt < 120000) {
+            return true;
+        }
         return !_deferredSyncDirty;
     };
 
@@ -36746,7 +36702,6 @@ document.addEventListener('DOMContentLoaded', () => {
             _reconnectRetryTimer = setTimeout(() => {
                 _reconnectRetryTimer = null;
                 if (!navigator.onLine) return;
-                if (isWorkTabSyncDeferred()) { _deferredSyncDirty = true; return; }
                 if (typeof syncStateToFirebase === 'function') syncStateToFirebase();
             }, (reason === 'online') ? 2500 : 1200);
         }, delay);
@@ -37244,18 +37199,7 @@ document.addEventListener('DOMContentLoaded', () => {
             window.state.deletedNdtIds = ndtMerge.deletedNdtIds;
             window.state.deletedNdtAt = ndtMerge.deletedNdtAt || {};
 
-            // 사진/도면 업로드 (잠금 유지 + heartbeat) — 병합은 photoIds만, 인라인 사진만 업로드
-            await uploadInlineDefectPhotosForSync(window.state.defects);
-            const fieldRasterOnly = typeof isNativeAndroidApp === 'function' && isNativeAndroidApp() && !layoutIsPcLike();
-            if (!fieldRasterOnly) {
-                await uploadFloorDrawingPdfsForSync(window.state.buildings);
-                await ensureRasterTiersForSync(window.state.buildings);
-            }
-            await uploadFloorDrawingsForSync(window.state.buildings);
-            await hydrateLocalImagesFromIndexedDb();
-            refreshCurrentBuildingFromState();
-
-            // 사진/도면 업로드 동안 드래그가 시작됐으면 재병합·다시 그리기 전에 대기
+            // 사진·도면은 회사 문서 저장 후 백그라운드 업로드 (2433건+ 사진이 메타 업로드를 막지 않게)
             await waitForUiGestureIdle();
 
             // 쓰기 직전 서버 재조회 후 재병합 (잠금 덕에 동료 중간 쓰기는 거의 없지만 안전망)
@@ -37359,8 +37303,9 @@ document.addEventListener('DOMContentLoaded', () => {
             });
             if (_syncFlushNotify) {
                 _syncFlushNotify = false;
-                window.showToast('서버에 동기화했습니다. 다른 기기에서 홈 탭을 열면 반영됩니다.', 'success', 3200);
+                window.showToast('서버에 동기화했습니다. 사진·도면은 백그라운드에서 계속 올립니다.', 'success', 3200);
             }
+            runDeferredSyncAssetUploads().catch(() => {});
             if (state.currentTab === 'tab-map' && state.currentBuildingId && state.currentFloor) {
                 refreshCurrentBuildingFromState();
                 if (state.bgImage && typeof syncFloorDrawingTierForView === 'function') {
@@ -37451,7 +37396,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     _pendingRemoteData = data;
                     return;
                 }
-                if (isWorkTabSyncDeferred() || isRealtimeUiGestureBusy()) {
+                if (isRealtimeUiGestureBusy()) {
                     _pendingRemoteData = data;
                     refreshSyncStatusBadge();
                     return;
