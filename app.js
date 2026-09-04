@@ -2799,25 +2799,41 @@ document.addEventListener('DOMContentLoaded', () => {
     /** 그룹 멤버 번호: 1개면 N, 마킹만 여러 개면 N-1…, 결함표 추가(surveyExtra)는 본번호 유지 후 -1부터 */
     function normalizeDefectGroupNos(defects, groupId) {
         if (!Array.isArray(defects) || !groupId) return;
-        const members = defects.filter((d) => d && d.groupId === groupId);
+        const members = defects
+            .filter((d) => d && d.groupId === groupId)
+            .slice()
+            .sort((a, b) => {
+                const na = parseDefectSortNoValue(a);
+                const nb = parseDefectSortNoValue(b);
+                if (na !== nb) return na - nb;
+                return String(a.id || '').localeCompare(String(b.id || ''));
+            });
         if (!members.length) return;
         const base = stripDefectNoSuffix(members[0].groupNo || members[0].no || formatDefectNoSeq(1));
-        members.forEach((m) => { m.groupNo = base; });
         const marking = members.filter((m) => !m.surveyExtra);
         const extras = members.filter((m) => m.surveyExtra);
+        const assignNo = (m, nextNo) => {
+            const prev = String(m.no || '');
+            m.groupNo = base;
+            m.no = nextNo;
+            // 번호만 당겨도 동기화에 반영되도록 updatedAt 갱신 (내용 변경 시각은 건드리지 않음)
+            if (prev !== String(nextNo || '')) {
+                m.updatedAt = Date.now();
+            }
+        };
         if (marking.length <= 1 && extras.length === 0) {
-            if (marking[0]) marking[0].no = base;
+            if (marking[0]) assignNo(marking[0], base);
             return;
         }
         if (marking.length <= 1 && extras.length >= 1) {
             // 도면/본 결함표는 N, 결함표 추가만 N-1, N-2…
-            if (marking[0]) marking[0].no = base;
-            extras.forEach((m, idx) => { m.no = `${base}-${idx + 1}`; });
+            if (marking[0]) assignNo(marking[0], base);
+            extras.forEach((m, idx) => assignNo(m, `${base}-${idx + 1}`));
             return;
         }
         let i = 1;
-        marking.forEach((m) => { m.no = `${base}-${i++}`; });
-        extras.forEach((m) => { m.no = `${base}-${i++}`; });
+        marking.forEach((m) => assignNo(m, `${base}-${i++}`));
+        extras.forEach((m) => assignNo(m, `${base}-${i++}`));
     }
 
     function normalizeAllDefectGroupNos(defects) {
@@ -2911,7 +2927,15 @@ document.addEventListener('DOMContentLoaded', () => {
                 seq += 1;
                 groupBase.set(gid, seq);
                 const baseStr = formatDefectNoSeq(seq);
-                const members = ordered.filter((m) => m && m.groupId === gid);
+                const members = ordered
+                    .filter((m) => m && m.groupId === gid)
+                    .slice()
+                    .sort((a, b) => {
+                        const na = parseDefectSortNoValue(a);
+                        const nb = parseDefectSortNoValue(b);
+                        if (na !== nb) return na - nb;
+                        return String(a.id || '').localeCompare(String(b.id || ''));
+                    });
                 members.forEach((m) => { m.groupNo = baseStr; });
                 const marking = members.filter((m) => !m.surveyExtra);
                 const extras = members.filter((m) => m.surveyExtra);
@@ -21249,6 +21273,7 @@ document.addEventListener('DOMContentLoaded', () => {
         pushDefectHistory();
         ids.forEach(id => removeSingleDefectRecord(key, id, { skipRenumber: true }));
         renumberFloorDefects(state.defects[key], { preserveOrder: false });
+        normalizeAllDefectGroupNos(state.defects[key]);
         selectedDefectIds.clear();
         updateMapSelectionBar();
         saveStateToLocalStorage();
@@ -32000,6 +32025,7 @@ document.addEventListener('DOMContentLoaded', () => {
     function removeSingleDefectRecord(key, id, options) {
         const skipRenumber = !!(options && options.skipRenumber);
         const target = state.defects[key].find(d => d.id === id);
+        const affectedGroupId = target && target.groupId ? target.groupId : null;
         if (target) {
             trackDefectDeletion(key, id);
             deleteAllPhotosForDefect(target).then(failCount => {
@@ -32009,9 +32035,16 @@ document.addEventListener('DOMContentLoaded', () => {
             });
         }
         state.defects[key] = state.defects[key].filter(d => d.id !== id);
+        // 같은 그룹 남은 마킹의 -2,-3… 접미사를 앞으로 당김 (2 삭제 → 옛 3이 2가 됨)
+        if (affectedGroupId) {
+            normalizeDefectGroupNos(state.defects[key], affectedGroupId);
+        }
         collapseSingletonDefectGroups(state.defects[key]);
         if (!skipRenumber) {
             renumberFloorDefects(state.defects[key], { preserveOrder: false });
+            if (affectedGroupId) {
+                normalizeDefectGroupNos(state.defects[key], affectedGroupId);
+            }
         }
     }
 
@@ -32021,9 +32054,17 @@ document.addEventListener('DOMContentLoaded', () => {
         if (state.defects[key]) {
             pushDefectHistory();
             removeSingleDefectRecord(key, id);
+            if (typeof selectedDefectIds !== 'undefined') {
+                selectedDefectIds.delete(id);
+            }
             saveStateToLocalStorage();
             renderSurveyTable();
             drawCanvas();
+            if (typeof updateMapSelectionBar === 'function') {
+                updateMapSelectionBar({ scrollToSelection: false });
+            } else if (typeof renderDefectListPanel === 'function') {
+                renderDefectListPanel();
+            }
             return true;
         }
         return false;
