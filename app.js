@@ -36565,7 +36565,12 @@ document.addEventListener('DOMContentLoaded', () => {
                     acquired = true;
                 });
             } catch (e) {
-                // 네트워크/경합 실패는 "다른 작업자 대기"가 아님 — 조용히 재시도
+                // 2026-09-04: 429(resource-exhausted, 할당량/속도 초과)까지 "일시적 네트워크 문제"로
+                // 보고 0.4초마다 최대 45초(SYNC_LEASE_WAIT_MS)씩 계속 재시도하고 있었다 — 재시도할수록
+                // 같은 문서를 더 두드려서 오히려 제한이 안 풀리는 악순환이었다. 429는 여기서 계속
+                // 돌지 않고 바로 던져서, 호출부(syncStateToFirebase)의 지수 백오프가 처리하게 한다.
+                if (e && e.code === 'resource-exhausted') throw e;
+                // 그 외 네트워크/경합 실패는 "다른 작업자 대기"가 아님 — 조용히 재시도
                 console.warn('동기화 잠금 획득 실패, 재시도:', e);
             }
             if (acquired) return { ownerId, token, deviceId };
@@ -36824,6 +36829,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 updatedAt: firebase.firestore.FieldValue.serverTimestamp()
             };
             await docRef.set(dataToSync, { merge: true });
+            _syncRetryFailCount = 0;
+            if (_syncRetryTimer) { clearTimeout(_syncRetryTimer); _syncRetryTimer = null; }
             (window.state.buildings || []).forEach((b) => {
                 if (b && b._pendingCloudSync) delete b._pendingCloudSync;
             });
@@ -36845,13 +36852,25 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         } catch (e) {
             console.warn('Firebase Sync Error:', e);
-            _syncPending = true;
-            setTimeout(() => {
-                if (navigator.onLine && _syncPending) {
-                    _syncPending = false;
-                    syncStateToFirebase();
+            // 2026-09-04: catch에서 _syncPending=true로 설정하고, 바로 다음 finally가 지연 없이
+            // syncStateToFirebase()를 또 불러서(0ms 재귀) 통신 오류마다 CPU가 튀고 429가 반복되는
+            // 무한루프 버그였다(예전에 한 번 고쳤는데 "즉시 동기화 복원" 과정에서 되돌아왔다).
+            // 이제 여기서 재시도를 예약만 하고, finally는 이 타이머가 떠 있으면 직접 재시도하지 않는다.
+            const now = Date.now();
+            if (now - _syncErrorToastAt >= SYNC_ERROR_TOAST_COOLDOWN_MS) {
+                _syncErrorToastAt = now;
+                if (typeof window.showToast === 'function') {
+                    window.showToast('서버 동기화에 실패했습니다. 잠시 후 자동으로 재시도합니다.', 'warning', 4500);
                 }
-            }, 2000);
+            }
+            if (!_syncRetryTimer) {
+                const delay = Math.min(SYNC_RETRY_BASE_MS * Math.pow(2, _syncRetryFailCount), SYNC_RETRY_MAX_MS);
+                _syncRetryFailCount = Math.min(_syncRetryFailCount + 1, 8);
+                _syncRetryTimer = setTimeout(() => {
+                    _syncRetryTimer = null;
+                    if (navigator.onLine) syncStateToFirebase();
+                }, delay);
+            }
         } finally {
             if (leaseHeartbeatTimer) {
                 clearInterval(leaseHeartbeatTimer);
@@ -36863,7 +36882,9 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             setTimeout(() => { isRemoteSyncing = false; }, 400);
             _syncInFlight = false;
-            if (_syncPending) {
+            if (_syncRetryTimer) {
+                // 위 catch에서 이미 백오프 재시도를 예약했다 — 여기서 즉시 또 돌리지 않는다.
+            } else if (_syncPending) {
                 _syncPending = false;
                 syncStateToFirebase();
             } else if (typeof scheduleFlushPendingRemoteSync === 'function') {
