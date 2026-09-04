@@ -34556,8 +34556,9 @@ document.addEventListener('DOMContentLoaded', () => {
             setTimeout(() => {
                 isRemoteSyncing = false;
                 if (_syncPending) {
+                    const queuedUpload = _syncPending;
                     _syncPending = false;
-                    scheduleSyncWhenIdle();
+                    scheduleSyncWhenIdle({ forceQueued: queuedUpload });
                 } else if (typeof scheduleFlushPendingRemoteSync === 'function') {
                     scheduleFlushPendingRemoteSync();
                 }
@@ -36429,7 +36430,8 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     /** 원격 반영·업로드 중이면 끝난 뒤 대기 중인 업로드를 재시도 (오류 백오프와 별도) */
-    function scheduleSyncWhenIdle() {
+    function scheduleSyncWhenIdle(opts) {
+        const forceQueued = !!(opts && opts.forceQueued);
         if (_syncRetryWhenIdleTimer) return;
         const tick = () => {
             _syncRetryWhenIdleTimer = null;
@@ -36441,7 +36443,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 _syncRetryWhenIdleTimer = setTimeout(tick, 150);
                 return;
             }
-            if (!_syncPending && !_deferredSyncDirty) return;
+            if (!forceQueued && !_syncPending && !_deferredSyncDirty) return;
             _syncPending = false;
             syncStateToFirebase();
         };
@@ -37407,7 +37409,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const retryUpload = _syncPending;
             _syncPending = false;
             if (retryUpload) {
-                scheduleSyncWhenIdle();
+                scheduleSyncWhenIdle({ forceQueued: true });
             } else if (!_syncRetryTimer && typeof scheduleFlushPendingRemoteSync === 'function') {
                 scheduleFlushPendingRemoteSync();
             }
