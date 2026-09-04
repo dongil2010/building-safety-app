@@ -4519,22 +4519,23 @@ document.addEventListener('DOMContentLoaded', () => {
         const targetFloor = window.state.currentFloor || '1F';
         const canFetchDrawings = typeof navigator === 'undefined' || navigator.onLine !== false;
         const entryBuildingId = bldg.id;
-        const reentrySameBuilding = window.state.currentTab === 'tab-home'
-            && window.state.currentBuildingId === entryBuildingId;
+        const prevBuildingIdForEntry = window.state.currentBuildingId;
+        const enteringFromHome = window.state.currentTab === 'tab-home';
+        const reentrySameBuilding = enteringFromHome && prevBuildingIdForEntry === entryBuildingId;
 
-        // 홈에서 점검 진입 시 reconnect로 서버 병합 (acf3985 / 30c32ad 이전 방식)
-        if (canFetchDrawings && window.state.companyId
-            && typeof reconnectFirestoreSync === 'function'
-            && window.state.currentTab === 'tab-home') {
-            if (reentrySameBuilding) {
-                window.showToast('최신 점검 데이터 동기화 중…', 'info', 2200);
-            }
-            reconnectFirestoreSync(reentrySameBuilding ? 'inspect-reentry' : 'inspect-entry');
-        }
-
-        // 로딩 오버레이 없이 맵 진입. 로컬 캐시로 먼저 그리고, 없으면 백그라운드 hydrate.
+        // 맵 진입을 동기화보다 먼저 — reconnect 시 전체 업로드·사진 hydrate가 진입을 막지 않게
         loadFloorDrawing(targetFloor);
         window.switchTab('tab-map');
+
+        if (canFetchDrawings && window.state.companyId && enteringFromHome) {
+            if (reentrySameBuilding) {
+                window.showToast('최신 점검 데이터 받는 중…', 'info', 2200);
+            }
+            if (typeof listenToRealtimeUpdates === 'function') listenToRealtimeUpdates();
+            if (typeof pullCompanySnapshotOnce === 'function') {
+                pullCompanySnapshotOnce().catch((e) => console.warn('점검 진입 서버 받기:', e));
+            }
+        }
 
         if (canFetchDrawings && typeof pruneStaleIndexedDbInspectionData === 'function') {
             pruneStaleIndexedDbInspectionData().catch(() => {});
@@ -34559,10 +34560,6 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function updateOnlineBadge(isOnline) {
-        if (isOnline && typeof updateOnlineBadge === 'function') {
-            updateOnlineBadge(true);
-            return;
-        }
         const badge = document.getElementById('onlineStatusBadge');
         if (badge) {
             if (isOnline) {
@@ -36374,23 +36371,18 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         if (data.defects) {
-            const remoteHydrated = await hydrateDefectPhotos(
-                filterMapKeysByDeletedBuildings(data.defects, mergedDeletedBuildings)
-            );
-            const localHydrated = await hydrateDefectPhotos(
-                filterMapKeysByDeletedBuildings(window.state.defects, mergedDeletedBuildings)
-            );
             const defectMerge = mergeDefectsMaps(
-                remoteHydrated,
-                localHydrated,
+                filterMapKeysByDeletedBuildings(data.defects, mergedDeletedBuildings),
+                filterMapKeysByDeletedBuildings(window.state.defects, mergedDeletedBuildings),
                 filterMapKeysByDeletedBuildings(data.deletedDefectIds || {}, mergedDeletedBuildings),
                 filterMapKeysByDeletedBuildings(window.state.deletedDefectIds || {}, mergedDeletedBuildings),
                 filterMapKeysByDeletedBuildings(data.deletedDefectAt || {}, mergedDeletedBuildings),
                 filterMapKeysByDeletedBuildings(window.state.deletedDefectAt || {}, mergedDeletedBuildings)
             );
-            window.state.defects = await hydrateDefectPhotos(defectMerge.defects);
+            window.state.defects = defectMerge.defects;
             window.state.deletedDefectIds = defectMerge.deletedDefectIds;
             window.state.deletedDefectAt = defectMerge.deletedDefectAt || {};
+            await hydrateCurrentBuildingDefectPhotosIntoState();
             isChanged = true;
         }
 
@@ -36702,15 +36694,9 @@ document.addEventListener('DOMContentLoaded', () => {
             );
             mergedDeletedBuildings.forEach(purgeLocalStateForDeletedBuilding);
 
-            let serverDefectsHydrated = await hydrateDefectPhotos(
-                filterMapKeysByDeletedBuildings(serverData.defects || {}, mergedDeletedBuildings)
-            );
-            let localDefectsHydrated = await hydrateDefectPhotos(
-                filterMapKeysByDeletedBuildings(window.state.defects || {}, mergedDeletedBuildings)
-            );
             let defectMerge = mergeDefectsMaps(
-                serverDefectsHydrated,
-                localDefectsHydrated,
+                filterMapKeysByDeletedBuildings(serverData.defects || {}, mergedDeletedBuildings),
+                filterMapKeysByDeletedBuildings(window.state.defects || {}, mergedDeletedBuildings),
                 filterMapKeysByDeletedBuildings(serverData.deletedDefectIds || {}, mergedDeletedBuildings),
                 filterMapKeysByDeletedBuildings(window.state.deletedDefectIds || {}, mergedDeletedBuildings),
                 filterMapKeysByDeletedBuildings(serverData.deletedDefectAt || {}, mergedDeletedBuildings),
@@ -36726,7 +36712,7 @@ document.addEventListener('DOMContentLoaded', () => {
             );
 
             isRemoteSyncing = true;
-            window.state.defects = await hydrateDefectPhotos(defectMerge.defects);
+            window.state.defects = defectMerge.defects;
             window.state.deletedDefectIds = defectMerge.deletedDefectIds;
             window.state.deletedDefectAt = defectMerge.deletedDefectAt || {};
             window.state.confirmedDeletedIds = {};
@@ -36765,15 +36751,9 @@ document.addEventListener('DOMContentLoaded', () => {
             );
             mergedDeletedBuildings.forEach(purgeLocalStateForDeletedBuilding);
 
-            serverDefectsHydrated = await hydrateDefectPhotos(
-                filterMapKeysByDeletedBuildings(serverData.defects || {}, mergedDeletedBuildings)
-            );
-            localDefectsHydrated = await hydrateDefectPhotos(
-                filterMapKeysByDeletedBuildings(window.state.defects || {}, mergedDeletedBuildings)
-            );
             defectMerge = mergeDefectsMaps(
-                serverDefectsHydrated,
-                localDefectsHydrated,
+                filterMapKeysByDeletedBuildings(serverData.defects || {}, mergedDeletedBuildings),
+                filterMapKeysByDeletedBuildings(window.state.defects || {}, mergedDeletedBuildings),
                 filterMapKeysByDeletedBuildings(serverData.deletedDefectIds || {}, mergedDeletedBuildings),
                 filterMapKeysByDeletedBuildings(window.state.deletedDefectIds || {}, mergedDeletedBuildings),
                 filterMapKeysByDeletedBuildings(serverData.deletedDefectAt || {}, mergedDeletedBuildings),
@@ -36787,12 +36767,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 filterMapKeysByDeletedBuildings(serverData.deletedNdtAt || {}, mergedDeletedBuildings),
                 filterMapKeysByDeletedBuildings(window.state.deletedNdtAt || {}, mergedDeletedBuildings)
             );
-            window.state.defects = await hydrateDefectPhotos(defectMerge.defects);
+            window.state.defects = defectMerge.defects;
             window.state.deletedDefectIds = defectMerge.deletedDefectIds;
             window.state.deletedDefectAt = defectMerge.deletedDefectAt || {};
             window.state.ndtData = ndtMerge.ndtData;
             window.state.deletedNdtIds = ndtMerge.deletedNdtIds;
             window.state.deletedNdtAt = ndtMerge.deletedNdtAt || {};
+            await hydrateCurrentBuildingDefectPhotosIntoState();
 
             {
                 const dispMerge = mergeNdtDataMaps(
