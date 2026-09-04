@@ -41,8 +41,10 @@ export default {
     // 오인식이 그대로 강도 계산에 들어가는 걸 최대한 막는다 (그래도 현장에서 최종 확인은 필수).
     const prompt = `이 이미지는 콘크리트 비파괴 강도 측정지(반발경도/슈미트해머 측정 기록지)이다.
 표 안에 있는 "R값"(반발경도 측정값, 보통 10~80 사이의 정수) 목록을 기록된 순서 그대로 추출해라.
-오직 JSON 배열 형식의 정수만 출력해라. 예: [47,45,43,48]
-글자가 흐리거나 확신할 수 없는 숫자는 배열에서 제외해라.
+목록에 있는 항목(R01, R02, ...) 수만큼 값을 빠짐없이 하나씩 반환해라 — 항목을 건너뛰지 마라.
+글자가 흐리거나 일부만 보여도 최선으로 추정한 숫자를 넣어라. 완전히 읽을 수 없어서 추정조차
+불가능한 항목만 -1로 표시해라(그 자리를 비우거나 통째로 빼지 마라).
+오직 JSON 배열 형식의 정수만 출력해라. 예: [47,45,43,48,-1,52]
 설명, 코드블록, 다른 텍스트는 절대 붙이지 마라.`;
 
     const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent?key=${env.GEMINI_API_KEY}`;
@@ -72,7 +74,7 @@ export default {
 
     const geminiData = await geminiRes.json();
     const text = geminiData.candidates?.[0]?.content?.parts?.[0]?.text || '';
-    const match = text.match(/\[[\d,\s]*\]/);
+    const match = text.match(/\[[\d,\s-]*\]/);
     let values = [];
     if (match) {
       try { values = JSON.parse(match[0]); } catch { values = []; }

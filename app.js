@@ -12497,7 +12497,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // 막대그래프를 한 장의 캔버스 이미지로 그린다. ±20% 밖이라 제외된 값은 그래프/숫자 모두
     // 다른 색으로 표시한다.
     function renderStrengthPerfPointCanvas(seq, item, slot, readings, calc) {
-        const W = 2200, H = 560;
+        const W = 2200, H = 620;
         const canvas = document.createElement('canvas');
         canvas.width = W;
         canvas.height = H;
@@ -12527,16 +12527,18 @@ document.addEventListener('DOMContentLoaded', () => {
         ctx.fillStyle = '#111111';
         ctx.font = 'bold 34px sans-serif';
         ctx.fillText(`NO.${String(seq).padStart(2, '0')}`, (colX[0] + colX[1]) / 2, 75);
-        ctx.font = '24px sans-serif';
+        // 2026-09-04 사용자 요청: 위치 글씨가 너무 작아 안 보인다고 해서 NO.와 같은 글꼴/크기로 맞춤.
+        ctx.font = 'bold 34px sans-serif';
         [slot.location || item.location || '', item.component || ''].filter(Boolean).forEach((line, i) => {
-            ctx.fillText(line, (colX[0] + colX[1]) / 2, 140 + i * 34);
+            ctx.fillText(line, (colX[0] + colX[1]) / 2, 150 + i * 42);
         });
 
         // 2) 반발치 그리드 (5행 × 4열, ±20% 초과 제외값은 주황색)
+        // 2026-09-04: R값 글씨 크기를 2배로 키움(24px→48px) — 셀 높이도 같이 키워서 안 겹치게 함.
         const gridX0 = colX[1] + 25, gridX1 = colX[2] - 25;
-        const gridCols = 4, gridRows = 5, cellH = 40, gridY0 = 45;
+        const gridCols = 4, gridRows = 5, cellH = 80, gridY0 = 45;
         const cellW = (gridX1 - gridX0) / gridCols;
-        ctx.font = '24px sans-serif';
+        ctx.font = '48px sans-serif';
         readings.forEach((v, idx) => {
             if (idx >= gridCols * gridRows) return;
             const r = Math.floor(idx / gridCols), c = idx % gridCols;
@@ -12544,52 +12546,53 @@ document.addEventListener('DOMContentLoaded', () => {
             ctx.fillText(String(v), gridX0 + c * cellW + cellW / 2, gridY0 + r * cellH + cellH / 2);
         });
         ctx.fillStyle = '#555555';
-        ctx.font = '19px sans-serif';
+        // 2026-09-04 사용자 요청: 작은 글씨들이 안 보인다고 해서 Ro값(32px)만큼 전부 키움.
+        ctx.font = '32px sans-serif';
         ctx.textAlign = 'left';
-        ctx.fillText(`(총 ${calc.totalCount}개 · ±20% 제외 ${calc.excludedCount}개)`, gridX0, gridY0 + gridRows * cellH + 22);
+        ctx.fillText(`(총 ${calc.totalCount}개 · ±20% 제외 ${calc.excludedCount}개)`, gridX0, gridY0 + gridRows * cellH + 30);
 
         // 3) 평균경도(R) · 각도보정 · Ro
         ctx.textAlign = 'center';
         const c3x = (colX[2] + colX[3]) / 2;
-        ctx.font = '21px sans-serif'; ctx.fillStyle = '#555555';
-        ctx.fillText('평균경도(R)', c3x, 55);
+        ctx.font = '32px sans-serif'; ctx.fillStyle = '#555555';
+        ctx.fillText('평균경도(R)', c3x, 45);
         ctx.font = 'bold 42px sans-serif'; ctx.fillStyle = '#111111';
         ctx.fillText(calc.finalAvg.toFixed(1), c3x, 105);
-        ctx.font = '19px sans-serif'; ctx.fillStyle = '#555555';
-        ctx.fillText(`각도보정 ${calc.correction >= 0 ? '+' : ''}${calc.correction.toFixed(2)}`, c3x, 155);
+        ctx.font = '32px sans-serif'; ctx.fillStyle = '#555555';
+        ctx.fillText(`각도보정 ${calc.correction >= 0 ? '+' : ''}${calc.correction.toFixed(2)}`, c3x, 165);
         ctx.font = 'bold 32px sans-serif'; ctx.fillStyle = '#0369a1';
-        ctx.fillText(`Ro = ${calc.ro.toFixed(2)}`, c3x, 200);
+        ctx.fillText(`Ro = ${calc.ro.toFixed(2)}`, c3x, 225);
 
         // 4) 재령 · α(재령보정계수)
         const c4x = (colX[3] + colX[4]) / 2;
-        ctx.font = '21px sans-serif'; ctx.fillStyle = '#555555';
-        ctx.fillText('재령(일)', c4x, 55);
+        ctx.font = '32px sans-serif'; ctx.fillStyle = '#555555';
+        ctx.fillText('재령(일)', c4x, 45);
         ctx.font = 'bold 34px sans-serif'; ctx.fillStyle = '#111111';
-        ctx.fillText(calc.ageDays != null ? String(calc.ageDays) : '-', c4x, 100);
-        ctx.font = '19px sans-serif'; ctx.fillStyle = '#555555';
-        ctx.fillText('α(재령보정)', c4x, 150);
-        ctx.font = 'bold 28px sans-serif'; ctx.fillStyle = '#111111';
-        ctx.fillText(calc.alpha != null ? calc.alpha.toFixed(2) : '-', c4x, 185);
+        ctx.fillText(calc.ageDays != null ? String(calc.ageDays) : '-', c4x, 110);
+        ctx.font = '32px sans-serif'; ctx.fillStyle = '#555555';
+        ctx.fillText('α(재령보정)', c4x, 180);
+        ctx.font = 'bold 32px sans-serif'; ctx.fillStyle = '#111111';
+        ctx.fillText(calc.alpha != null ? calc.alpha.toFixed(2) : '-', c4x, 235);
 
         // 5) 압축강도(Fc): 활성화된 추정식만 1식/2식/3식 순서로, 맨 아래 최종 강도(굵게)
         const c5x0 = colX[4] + 20, c5x1 = colX[5] - 20;
-        ctx.textAlign = 'left'; ctx.font = 'bold 21px sans-serif'; ctx.fillStyle = '#555555';
-        ctx.fillText('압축강도(Fc, MPa)', c5x0, 32);
-        let fy = 75;
+        ctx.textAlign = 'left'; ctx.font = 'bold 32px sans-serif'; ctx.fillStyle = '#555555';
+        ctx.fillText('압축강도(Fc, MPa)', c5x0, 40);
+        let fy = 90;
         calc.results.forEach((r, i) => {
             if (!r.enabled) return;
-            ctx.font = '22px sans-serif'; ctx.fillStyle = '#333333'; ctx.textAlign = 'left';
+            ctx.font = '32px sans-serif'; ctx.fillStyle = '#333333'; ctx.textAlign = 'left';
             ctx.fillText(`${i + 1}식`, c5x0, fy);
-            ctx.font = 'bold 24px sans-serif'; ctx.fillStyle = '#111111'; ctx.textAlign = 'right';
+            ctx.font = 'bold 32px sans-serif'; ctx.fillStyle = '#111111'; ctx.textAlign = 'right';
             ctx.fillText(r.value.toFixed(1), c5x1, fy);
-            fy += 42;
+            fy += 54;
         });
         ctx.strokeStyle = '#94a3b8'; ctx.lineWidth = 1.5;
-        ctx.beginPath(); ctx.moveTo(c5x0, fy - 10); ctx.lineTo(c5x1, fy - 10); ctx.stroke();
-        ctx.font = 'bold 24px sans-serif'; ctx.fillStyle = '#333333'; ctx.textAlign = 'left';
-        ctx.fillText('강도', c5x0, fy + 24);
+        ctx.beginPath(); ctx.moveTo(c5x0, fy - 15); ctx.lineTo(c5x1, fy - 15); ctx.stroke();
+        ctx.font = 'bold 32px sans-serif'; ctx.fillStyle = '#333333'; ctx.textAlign = 'left';
+        ctx.fillText('강도', c5x0, fy + 28);
         ctx.font = 'bold 40px sans-serif'; ctx.fillStyle = '#b91c1c'; ctx.textAlign = 'right';
-        ctx.fillText(calc.finalStrength.toFixed(1), c5x1, fy + 24);
+        ctx.fillText(calc.finalStrength.toFixed(1), c5x1, fy + 28);
 
         // 6) 막대그래프 — ±20% 제외값은 옅은 빨강, 점선은 평균경도(R) 위치
         const chX0 = colX[5] + 20, chX1 = colX[6] - 20, chY0 = 35, chY1 = H - 35;
@@ -12610,6 +12613,136 @@ document.addEventListener('DOMContentLoaded', () => {
         ctx.setLineDash([]);
 
         return canvas;
+    }
+
+    // 콘크리트 반발경도 측정 DATA(hwpx 내보내기 전용) — 위 성과표(보정·강도·그래프)와 달리
+    // 보정 전 원시 R값 자료만 보여주는 절이다. 최대 3개 위치(NO.)를 한 행에 나란히 그린다.
+    // 표본 문서엔 이 절 자체가 비어 있었어서(제목만 있고 내용 없음), 다른 표를 그대로 옮기지
+    // 않고 실제 입력된 R값으로 이 캔버스를 직접 그려 채운다.
+    function renderStrengthDataRowCanvas(rowPoints) {
+        const cardW = 700, gapW = 24, padX = 24;
+        const cols = rowPoints.length;
+        const W = cols * cardW + (cols - 1) * gapW + padX * 2;
+        const H = 640;
+        const canvas = document.createElement('canvas');
+        canvas.width = W;
+        canvas.height = H;
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, W, H);
+        ctx.strokeStyle = '#333333';
+        ctx.lineWidth = 3;
+        ctx.strokeRect(1.5, 1.5, W - 3, H - 3);
+
+        rowPoints.forEach((pt, idx) => {
+            const x0 = padX + idx * (cardW + gapW);
+            const x1 = x0 + cardW;
+            if (idx > 0) {
+                ctx.strokeStyle = '#94a3b8';
+                ctx.lineWidth = 1.5;
+                ctx.beginPath();
+                ctx.moveTo(x0 - gapW / 2, 10);
+                ctx.lineTo(x0 - gapW / 2, H - 10);
+                ctx.stroke();
+            }
+
+            const nums = pt.readings.map(v => parseFloat(v)).filter(v => !isNaN(v));
+            const rawAvg = nums.length > 0 ? nums.reduce((a, b) => a + b, 0) / nums.length : 0;
+            const threshold = rawAvg * 0.2;
+            const isOutlier = (v) => rawAvg > 0 && Math.abs(v - rawAvg) > threshold;
+
+            // 1) NO.n / 위치
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.font = 'bold 30px sans-serif';
+            ctx.fillStyle = '#111111';
+            ctx.fillText(`NO.${String(pt.seq).padStart(2, '0')}`, (x0 + x1) / 2, 40);
+            ctx.font = '20px sans-serif';
+            ctx.fillStyle = '#333333';
+            const locLine = [pt.location, pt.component].filter(Boolean).join(' ');
+            ctx.fillText(locLine || '-', (x0 + x1) / 2, 75);
+
+            // 2) R값 그리드 (5행 × 4열, ±20% 초과값은 주황색 — 성과표와 동일 기준)
+            const gridPadX = 30;
+            const gx0 = x0 + gridPadX, gx1 = x1 - gridPadX;
+            const gridCols = 4, gridRows = 5, cellH = 42, gy0 = 100;
+            const cellW = (gx1 - gx0) / gridCols;
+            ctx.font = '22px sans-serif';
+            pt.readings.forEach((v, i) => {
+                if (i >= gridCols * gridRows) return;
+                const r = Math.floor(i / gridCols), c = i % gridCols;
+                const num = parseFloat(v);
+                ctx.fillStyle = isOutlier(num) ? '#c2410c' : '#111111';
+                ctx.fillText(`R${String(i + 1).padStart(2, '0')} ${v}`, gx0 + c * cellW + cellW / 2, gy0 + r * cellH + cellH / 2);
+            });
+
+            // 3) 평균경도(원시 평균) · 측정개수 · 측정각도
+            const footY = gy0 + gridRows * cellH + 35;
+            ctx.strokeStyle = '#cbd5e1';
+            ctx.lineWidth = 1.5;
+            ctx.beginPath();
+            ctx.moveTo(x0 + gridPadX, footY - 22);
+            ctx.lineTo(x1 - gridPadX, footY - 22);
+            ctx.stroke();
+            ctx.font = '18px sans-serif';
+            ctx.fillStyle = '#555555';
+            ctx.textAlign = 'left';
+            ctx.fillText(`(총 ${nums.length}개)`, x0 + gridPadX, footY);
+            ctx.font = 'bold 26px sans-serif';
+            ctx.fillStyle = '#111111';
+            ctx.textAlign = 'right';
+            ctx.fillText(`평균 ${rawAvg.toFixed(1)}`, x1 - gridPadX, footY);
+            ctx.font = '18px sans-serif';
+            ctx.fillStyle = '#555555';
+            ctx.textAlign = 'left';
+            ctx.fillText('측정각도', x0 + gridPadX, footY + 34);
+            ctx.font = 'bold 22px sans-serif';
+            ctx.fillStyle = '#111111';
+            ctx.textAlign = 'right';
+            ctx.fillText(Number.isFinite(pt.angle) ? `${pt.angle}°` : '0°', x1 - gridPadX, footY + 34);
+        });
+
+        return canvas;
+    }
+
+    function escapeXmlText(s) {
+        return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    }
+
+    // 콘크리트 반발경도 측정 DATA 표(hwpx 내보내기 전용) — 참고 이미지처럼 위치(NO.) 최대 3개를
+    // 한 표에 가로로 나란히 놓는다. 왼쪽 "구분/위치/평균경도(R)" 라벨 열은 공통, NO.별 값은
+    // 그 오른쪽에 각자 칸을 하나씩 쓴다. 병합 셀 없이(rowSpan/colSpan 전부 1) 3행 × (1+N)열의
+    // 단순 격자라 hwpx XML을 직접 만들어도 구조가 안전하다.
+    // borderFillIDRef="16"은 이 템플릿에서 이미 회색 음영 캡션칸에 쓰이던 것(라벨칸에 재사용),
+    // "15"는 사진칸처럼 흰 배경 칸에 쓰이던 것이다 — 둘 다 이미 검증된 값이라 새로 만들지 않았다.
+    function buildStrengthPhotoRowGroupXml(points, tblId) {
+        const LABEL_W = 9000;
+        const valueCount = points.length;
+        const VALUE_W = Math.floor((41821 - LABEL_W) / valueCount);
+        const ROW_H = { cat: 3000, photo: 25000, avg: 3000 };
+        const TOTAL_W = LABEL_W + VALUE_W * valueCount;
+        const TOTAL_H = ROW_H.cat + ROW_H.photo + ROW_H.avg;
+
+        const textCell = (text, colAddr, rowAddr, width, height, borderFillIDRef) => `<hp:tc name="" header="0" hasMargin="0" protect="0" editable="0" dirty="0" borderFillIDRef="${borderFillIDRef}"><hp:subList id="" textDirection="HORIZONTAL" lineWrap="BREAK" vertAlign="CENTER" linkListIDRef="0" linkListNextIDRef="0" textWidth="0" textHeight="0" hasTextRef="0" hasNumRef="0"><hp:p id="0" paraPrIDRef="1" styleIDRef="16" pageBreak="0" columnBreak="0" merged="0"><hp:run charPrIDRef="43"><hp:t>${escapeXmlText(text)}</hp:t></hp:run><hp:linesegarray><hp:lineseg textpos="0" vertpos="0" vertsize="1000" textheight="1000" baseline="850" spacing="600" horzpos="0" horzsize="${Math.max(width - 282, 100)}" flags="393216"/></hp:linesegarray></hp:p></hp:subList><hp:cellAddr colAddr="${colAddr}" rowAddr="${rowAddr}"/><hp:cellSpan colSpan="1" rowSpan="1"/><hp:cellSz width="${width}" height="${height}"/><hp:cellMargin left="141" right="141" top="141" bottom="141"/></hp:tc>`;
+
+        // 사진칸: 사진 문단 + 위치 텍스트 문단, 두 개를 한 칸(subList) 안에 같이 넣는다.
+        const photoLocCell = (colAddr, rowAddr, width, height, picId, picInstId, locText) => `<hp:tc name="" header="0" hasMargin="0" protect="0" editable="0" dirty="0" borderFillIDRef="15"><hp:subList id="" textDirection="HORIZONTAL" lineWrap="BREAK" vertAlign="CENTER" linkListIDRef="0" linkListNextIDRef="0" textWidth="0" textHeight="0" hasTextRef="0" hasNumRef="0"><hp:p id="2147483648" paraPrIDRef="4" styleIDRef="0" pageBreak="0" columnBreak="0" merged="0"><hp:run charPrIDRef="6"><hp:pic id="${picId}" zOrder="36" numberingType="PICTURE" textWrap="TOP_AND_BOTTOM" textFlow="BOTH_SIDES" lock="0" dropcapstyle="None" thumbnailBinIDRef="" href="" groupLevel="0" instid="${picInstId}" reverse="0"><hp:offset x="0" y="0"/><hp:orgSz width="768540" height="969540"/><hp:curSz width="41541" height="52405"/><hp:flip horizontal="0" vertical="0"/><hp:rotationInfo angle="0" centerX="20770" centerY="26202" rotateimage="1"/><hp:renderingInfo><hc:transMatrix e1="1" e2="0" e3="0" e4="0" e5="1" e6="0"/><hc:scaMatrix e1="0.054052" e2="0" e3="0" e4="0" e5="0.054051" e6="0"/><hc:rotMatrix e1="1" e2="0" e3="0" e4="0" e5="1" e6="0"/></hp:renderingInfo><hc:img binaryItemIDRef="" bright="0" contrast="0" effect="REAL_PIC" alpha="0"/><hp:imgRect><hc:pt0 x="0" y="0"/><hc:pt1 x="768540" y="0"/><hc:pt2 x="768540" y="969540"/><hc:pt3 x="0" y="969540"/></hp:imgRect><hp:imgClip left="0" right="648540" top="0" bottom="818100"/><hp:inMargin left="0" right="0" top="0" bottom="0"/><hp:imgDim dimwidth="648540" dimheight="818100"/><hp:effects/><hp:sz width="41541" widthRelTo="ABSOLUTE" height="52405" heightRelTo="ABSOLUTE" protect="0"/><hp:pos treatAsChar="0" affectLSpacing="0" flowWithText="1" allowOverlap="0" holdAnchorAndSO="0" vertRelTo="PARA" horzRelTo="COLUMN" vertAlign="TOP" horzAlign="LEFT" vertOffset="0" horzOffset="0"/><hp:outMargin left="0" right="0" top="0" bottom="0"/></hp:pic><hp:t/></hp:run><hp:linesegarray><hp:lineseg textpos="0" vertpos="0" vertsize="1100" textheight="1100" baseline="935" spacing="1320" horzpos="0" horzsize="0" flags="393216"/></hp:linesegarray></hp:p><hp:p id="0" paraPrIDRef="1" styleIDRef="16" pageBreak="0" columnBreak="0" merged="0"><hp:run charPrIDRef="43"><hp:t>${escapeXmlText(locText)}</hp:t></hp:run><hp:linesegarray><hp:lineseg textpos="0" vertpos="0" vertsize="1000" textheight="1000" baseline="850" spacing="600" horzpos="0" horzsize="${Math.max(width - 282, 100)}" flags="393216"/></hp:linesegarray></hp:p></hp:subList><hp:cellAddr colAddr="${colAddr}" rowAddr="${rowAddr}"/><hp:cellSpan colSpan="1" rowSpan="1"/><hp:cellSz width="${width}" height="${height}"/><hp:cellMargin left="141" right="141" top="141" bottom="141"/></hp:tc>`;
+
+        const row0 = [textCell('구분', 0, 0, LABEL_W, ROW_H.cat, 16)];
+        const row1 = [textCell('위치', 0, 1, LABEL_W, ROW_H.photo, 16)];
+        const row2 = [textCell('평균경도(R)', 0, 2, LABEL_W, ROW_H.avg, 16)];
+
+        points.forEach((pt, i) => {
+            const colAddr = i + 1;
+            const locText = [pt.location, pt.component].filter(Boolean).join(' ') || '-';
+            row0.push(textCell(`NO.${String(pt.seq).padStart(2, '0')}`, colAddr, 0, VALUE_W, ROW_H.cat, 15));
+            row1.push(photoLocCell(colAddr, 1, VALUE_W, ROW_H.photo, pt._picId, pt._picInstId, locText));
+            row2.push(textCell(pt._avgText, colAddr, 2, VALUE_W, ROW_H.avg, 15));
+        });
+
+        const rows = [row0, row1, row2].map(cells => `<hp:tr>${cells.join('')}</hp:tr>`).join('');
+
+        return `<hp:p id="0" paraPrIDRef="13" styleIDRef="0" pageBreak="1" columnBreak="0" merged="0"><hp:run charPrIDRef="53"><hp:tbl id="${tblId}" zOrder="11" numberingType="TABLE" textWrap="TOP_AND_BOTTOM" textFlow="BOTH_SIDES" lock="0" dropcapstyle="None" pageBreak="NONE" repeatHeader="1" rowCnt="3" colCnt="${valueCount + 1}" cellSpacing="0" borderFillIDRef="5" noAdjust="0"><hp:sz width="${TOTAL_W}" widthRelTo="ABSOLUTE" height="${TOTAL_H}" heightRelTo="ABSOLUTE" protect="0"/><hp:pos treatAsChar="1" affectLSpacing="0" flowWithText="1" allowOverlap="0" holdAnchorAndSO="0" vertRelTo="PARA" horzRelTo="COLUMN" vertAlign="TOP" horzAlign="LEFT" vertOffset="0" horzOffset="0"/><hp:outMargin left="140" right="140" top="140" bottom="140"/><hp:inMargin left="140" right="140" top="140" bottom="140"/>${rows}</hp:tbl><hp:t/></hp:run><hp:linesegarray><hp:lineseg textpos="0" vertpos="0" vertsize="${TOTAL_H + 280}" textheight="${TOTAL_H + 280}" baseline="${Math.round((TOTAL_H + 280) * 0.85)}" spacing="960" horzpos="0" horzsize="42520" flags="393216"/></hp:linesegarray></hp:p>`;
     }
 
     window.toggleNdtModalFields = function() {
@@ -12834,6 +12967,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         <input type="file" id="ndtStrengthSlotFile-${idx}" accept="image/*" style="display:none;">
                     </div>
                     <div id="rScanStatus-${idx}" style="font-size:0.78rem; color:var(--text-muted); margin-top:0.3rem;"></div>
+                    <div id="ndtStrengthPhotoPreview-${idx}" style="margin-top:0.4rem;"></div>
                 </div>
                 <div class="form-group" style="margin:0;">
                     <label class="form-label" style="display:flex; justify-content:space-between; align-items:center; gap:0.5rem;">
@@ -12871,6 +13005,9 @@ document.addEventListener('DOMContentLoaded', () => {
             el.addEventListener('click', (e) => {
                 if (!window.confirmDelete('이 측정 위치와 입력한 R값을 삭제할까요?')) return;
                 const idx = parseInt(e.currentTarget.dataset.slot, 10);
+                const bldgForRemove = window.state.currentBuilding;
+                const removedPhotoId = ndtStrengthSlots[idx] && ndtStrengthSlots[idx].photoId;
+                if (bldgForRemove && bldgForRemove.id && removedPhotoId) deleteStrengthPhotoStorage(bldgForRemove.id, removedPhotoId);
                 ndtStrengthSlots.splice(idx, 1);
                 renderNdtStrengthSlots();
                 recalcAllStrengthSlots();
@@ -12894,7 +13031,65 @@ document.addEventListener('DOMContentLoaded', () => {
         if (addBtn) addBtn.style.display = ndtStrengthSlots.length >= MAX_STRENGTH_SLOTS ? 'none' : '';
         ndtStrengthSlots.forEach((slot, idx) => {
             wireRValueChipEvents(idx);
+            renderStrengthSlotPhotoPreview(idx);
         });
+    }
+
+    // 측정지 사진 스캔 시 원본 사진을 저장해두고(보고서 '측정 DATA' 표에 그대로 넣기 위함),
+    // 슬롯 카드 안에 작은 미리보기 + 삭제 버튼을 보여준다.
+    async function renderStrengthSlotPhotoPreview(slotIdx) {
+        const el = document.getElementById(`ndtStrengthPhotoPreview-${slotIdx}`);
+        if (!el) return;
+        const slot = ndtStrengthSlots[slotIdx];
+        const bldg = window.state.currentBuilding;
+        if (!slot || !slot.photoId || !bldg || !bldg.id) { el.innerHTML = ''; return; }
+        el.innerHTML = `
+            <div style="display:flex; align-items:center; gap:0.5rem;">
+                <div class="ndt-strength-photo-thumb" style="width:48px; height:48px; border-radius:6px; overflow:hidden; background:#eee; flex-shrink:0; display:flex; align-items:center; justify-content:center; font-size:0.65rem; color:#999;">불러오는중</div>
+                <span style="font-size:0.78rem; color:var(--text-muted);">📎 측정지 사진 저장됨</span>
+                <button type="button" class="btn btn-sm btn-outline ndt-strength-slot-photo-remove" data-slot="${slotIdx}" style="border-color:#ef4444; color:#ef4444; margin-left:auto;" title="사진 삭제"><i class="fa-solid fa-trash"></i></button>
+            </div>`;
+        const removeBtn = el.querySelector('.ndt-strength-slot-photo-remove');
+        if (removeBtn) removeBtn.addEventListener('click', () => removeStrengthSlotPhoto(slotIdx));
+        const url = await loadStrengthPhotoDataUrl(bldg.id, slot.photoId);
+        const thumb = el.querySelector('.ndt-strength-photo-thumb');
+        if (url && thumb) thumb.innerHTML = `<img src="${url}" style="width:100%; height:100%; object-fit:cover;">`;
+    }
+
+    function removeStrengthSlotPhoto(slotIdx) {
+        const slot = ndtStrengthSlots[slotIdx];
+        if (!slot || !slot.photoId) return;
+        if (!window.confirmDelete('저장된 측정지 사진을 삭제할까요?')) return;
+        const bldg = window.state.currentBuilding;
+        if (bldg && bldg.id) deleteStrengthPhotoStorage(bldg.id, slot.photoId);
+        slot.photoId = null;
+        renderStrengthSlotPhotoPreview(slotIdx);
+        scheduleNdtAutoApply();
+    }
+
+    // R값 스캔에 쓴 원본 사진을 OCR 성공/실패와 무관하게 저장한다 — 보고서 '측정 DATA' 표에
+    // 나중에 그대로 넣기 위함. 4:3 크롭 압축(compressDefectPhoto43)은 세로로 긴 측정지 사진을
+    // 잘라먹으므로 쓰지 않고, 크롭 없이 긴 변만 줄이는 resizeDataUrlToMaxDim을 쓴다.
+    async function savePhotoForStrengthSlot(slotIdx, file) {
+        const bldg = window.state.currentBuilding;
+        const slot = ndtStrengthSlots[slotIdx];
+        if (!bldg || !bldg.id || !slot) return;
+        try {
+            const rawDataUrl = await fileToDataUrl(file);
+            const resized = (typeof window.resizeDataUrlToMaxDim === 'function')
+                ? await window.resizeDataUrlToMaxDim(rawDataUrl, 1600, 0.85)
+                : rawDataUrl;
+            if (!resized) return;
+            const oldPhotoId = slot.photoId;
+            const photoId = createOverviewPhotoId();
+            await saveStrengthPhotoDataUrl(bldg.id, photoId, resized);
+            slot.photoId = photoId;
+            if (oldPhotoId && oldPhotoId !== photoId) deleteStrengthPhotoStorage(bldg.id, oldPhotoId);
+            renderStrengthSlotPhotoPreview(slotIdx);
+            scheduleNdtAutoApply();
+        } catch (e) {
+            console.error('R값 측정지 사진 저장 실패:', e);
+        }
     }
 
     // 준공일(건축물 개요) ~ 점검일 사이 재령일수를 구한다. null이면 계산 불가(준공일 미입력 등).
@@ -13108,11 +13303,32 @@ document.addEventListener('DOMContentLoaded', () => {
         return data.values.map(v => parseInt(v, 10)).filter(v => !isNaN(v) && v >= 10 && v <= 80);
     }
 
-    // 기존 Tesseract(로컬, 오프라인 가능) 인식 — 클라우드 OCR을 안 쓰거나 실패했을 때의 폴백.
-    async function scanRValuesFromImageLocal(file, slotIdx, statusEl) {
+    // 같은 사진인데도 될 때/안 될 때가 있다면 Gemini 무료 티어의 분당 요청 제한에 순간적으로
+    // 걸린 것일 가능성이 크다(429). 그런 일시적인 오류(429/5xx)만 몇 초 쉬었다가 자동으로
+    // 한 번 더 시도한다 — 사진 자체가 안 읽히는 경우(0개 반환 등)는 재시도해도 소용없으니 그냥
+    // 통과시킨다.
+    async function scanRValuesFromImageCloudWithRetry(file, statusEl) {
+        const MAX_RETRIES = 2, RETRY_DELAY_MS = 4000;
+        for (let attempt = 0; ; attempt++) {
+            try {
+                return await scanRValuesFromImageCloud(file);
+            } catch (err) {
+                const msg = String((err && err.message) || err || '');
+                const isTransient = /\b(429|5\d\d)\b/.test(msg) || /RESOURCE_EXHAUSTED|rate.?limit/i.test(msg);
+                if (!isTransient || attempt >= MAX_RETRIES) throw err;
+                if (statusEl) statusEl.textContent = `☁️ 요청이 몰려서 잠시 후 다시 시도합니다... (${attempt + 1}/${MAX_RETRIES})`;
+                await new Promise(r => setTimeout(r, RETRY_DELAY_MS));
+            }
+        }
+    }
+
+    // 기존 Tesseract(로컬, 오프라인 가능) 인식 — 클라우드 OCR을 안 쓰거나 결과가 부족할 때 보완용으로
+    // 같이 돌린다. 인식된 배열만 반환하고(실패 시 빈 배열), 최종 적용/상태 메시지는 호출부
+    // (scanRValuesFromImage)가 클라우드 결과와 비교해서 맡는다.
+    async function scanRValuesFromImageLocal(file, statusEl) {
         if (typeof Tesseract === 'undefined') {
             if (statusEl) statusEl.textContent = 'OCR 라이브러리를 불러오지 못했습니다. 인터넷 연결을 확인해주세요.';
-            return;
+            return [];
         }
         if (statusEl) statusEl.textContent = '🔍 (로컬) 사진에서 숫자를 인식하는 중입니다... (처음 실행 시 시간이 더 걸릴 수 있어요)';
         let worker;
@@ -13131,15 +13347,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 scanned = matches.map(m => parseInt(m[2], 10)).filter(v => !isNaN(v) && v >= 10 && v <= 80);
                 if (scanned.length > 0) break;
             }
-
-            if (scanned.length === 0) {
-                if (statusEl) statusEl.textContent = '❌ 숫자를 인식하지 못했습니다. 직접 입력해주세요.';
-                return;
-            }
-            applyScannedReadings(scanned, slotIdx, statusEl, '💻 로컬 인식');
+            return scanned;
         } catch (err) {
-            console.error('R값 스캔 실패:', err);
-            if (statusEl) statusEl.textContent = '❌ 인식에 실패했습니다. 직접 입력해주세요.';
+            console.error('R값 스캔(로컬) 실패:', err);
+            return [];
         } finally {
             if (worker) await worker.terminate();
         }
@@ -13149,22 +13360,49 @@ document.addEventListener('DOMContentLoaded', () => {
         const statusEl = document.getElementById(`rScanStatus-${slotIdx}`);
         if (!file) return;
 
+        // 인식 성공/실패와 무관하게 원본 사진은 저장해둔다(보고서 '측정 DATA' 표에 그대로 삽입).
+        savePhotoForStrengthSlot(slotIdx, file);
+
+        // 2026-09-04: 로컬(Tesseract)은 이런 도트프린터 글씨엔 원래 약해서, "클라우드가 너무
+        // 적게 찾으면 로컬도 같이 돌려서 더 많이 찾은 쪽을 쓴다"고 했더니 로컬이 틀린 숫자를
+        // 더 많이(더 그럴듯하게) 채워서 오히려 정확한 클라우드 결과 대신 틀린 값이 채택되는
+        // 부작용이 있었다. 이제 클라우드가 하나라도 찾으면 그 결과를 그대로 쓰고(로컬로 절대
+        // 덮어쓰지 않음), 부족한 개수는 상태 메시지로만 알려준다. 클라우드가 아예 0개거나
+        // 오프라인일 때만 로컬로 넘어간다.
+        // 클라우드가 왜 실패했는지(레이트리밋/서버오류 등) 다음 사람이 바로 알 수 있게, 원인을
+        // 콘솔 로그가 아니라 화면 상태 메시지에도 잠깐 남긴다 — 그동안은 조용히 로컬로 넘어가서
+        // 실패 이유를 알 방법이 없었다.
+        let cloudFailReason = '';
         if (CLOUD_OCR_ENDPOINT && navigator.onLine) {
             if (statusEl) statusEl.textContent = '🔍 (클라우드) 사진에서 숫자를 인식하는 중입니다...';
             try {
-                const scanned = await scanRValuesFromImageCloud(file);
-                if (scanned.length > 0) {
-                    applyScannedReadings(scanned, slotIdx, statusEl, '☁️ 클라우드 인식');
+                const cloudScanned = await scanRValuesFromImageCloudWithRetry(file, statusEl);
+                if (cloudScanned.length > 0) {
+                    applyScannedReadings(cloudScanned, slotIdx, statusEl, '☁️ 클라우드 인식');
+                    if (cloudScanned.length < MAX_R_VALUES_PER_SLOT && statusEl) {
+                        statusEl.textContent += ` — 총 ${MAX_R_VALUES_PER_SLOT}개 중 ${cloudScanned.length}개만 인식됐어요. 나머지는 사진 보고 직접 입력해주세요.`;
+                    }
                     return;
                 }
-                if (statusEl) statusEl.textContent = '☁️ 클라우드 인식 결과가 없어 로컬 인식으로 다시 시도합니다...';
+                cloudFailReason = '클라우드가 0개를 반환함';
             } catch (err) {
                 console.error('클라우드 OCR 실패, 로컬 OCR로 대체합니다:', err);
-                if (statusEl) statusEl.textContent = '☁️ 클라우드 인식 실패, 로컬 인식으로 다시 시도합니다...';
+                cloudFailReason = err && err.message ? err.message : String(err);
             }
         }
 
-        await scanRValuesFromImageLocal(file, slotIdx, statusEl);
+        if (statusEl && cloudFailReason) {
+            statusEl.textContent = `☁️ 클라우드 인식 실패(${cloudFailReason}) — 로컬로 다시 시도합니다...`;
+        }
+        const localScanned = await scanRValuesFromImageLocal(file, statusEl);
+        if (localScanned.length === 0) {
+            if (statusEl) statusEl.textContent = '❌ 숫자를 인식하지 못했습니다. 직접 입력해주세요.';
+            return;
+        }
+        applyScannedReadings(localScanned, slotIdx, statusEl, '💻 로컬 인식');
+        if (localScanned.length < MAX_R_VALUES_PER_SLOT && statusEl) {
+            statusEl.textContent += ` — 총 ${MAX_R_VALUES_PER_SLOT}개 중 ${localScanned.length}개만 인식됐어요. 나머지는 사진 보고 직접 입력해주세요.`;
+        }
     }
 
     function populateNdtComponentDropdown(currentVal) {
@@ -13293,7 +13531,7 @@ document.addEventListener('DOMContentLoaded', () => {
             // 하나로 슬롯 1개를 만들어서 예전과 동일하게 보이게 한다.
             if (existingItem.category === '강도') {
                 ndtStrengthSlots = Array.isArray(existingItem.strengthSlots) && existingItem.strengthSlots.length > 0
-                    ? existingItem.strengthSlots.map(s => ({ location: s.location || '', readings: Array.isArray(s.readings) ? s.readings.slice() : [] }))
+                    ? existingItem.strengthSlots.map(s => ({ location: s.location || '', readings: Array.isArray(s.readings) ? s.readings.slice() : [], photoId: s.photoId || null }))
                     : [{ location: existingItem.location || '', readings: Array.isArray(existingItem.strengthReadings) ? existingItem.strengthReadings.slice() : [] }];
             } else {
                 ndtStrengthSlots = [{ location: '', readings: [] }];
@@ -13654,6 +13892,7 @@ document.addEventListener('DOMContentLoaded', () => {
             return {
                 location: slot.location || '',
                 readings: (slot.readings || []).slice(),
+                photoId: slot.photoId || null,
                 results: calc ? calc.results : [],
                 ro: calc ? calc.ro : null,
                 ageDays: calc ? calc.ageDays : null,
@@ -29889,6 +30128,91 @@ document.addEventListener('DOMContentLoaded', () => {
                         removeNdtTableById(STRENGTH_TBL_ID);
                     }
 
+                    // --- 콘크리트 반발경도 측정 DATA — 표본 문서엔 이 절이 제목만 있고 내용이
+                    // 통째로 비어 있었다. 2026-09-04부터: 사용자가 R값 스캔에 쓴 실제 측정지 사진을
+                    // (전경사진과 같은 방식으로 IndexedDB/클라우드에 저장해두었다가) 참고 양식처럼
+                    // 위치(NO.) 최대 3개를 한 표에 가로로 나란히 넣는다. 사진을 아직 저장 안 해둔
+                    // (이 기능 이전에 입력한) 위치만 원시 R값을 캔버스로 그려 사진 대신 넣는다.
+                    {
+                        const allParasForData = secChildren();
+                        const dataHeadingPara = allParasForData.find(p => paraText(p).includes('반발경도 측정 DATA'));
+                        const dataStopPara = allParasForData.find(p => paraText(p).includes('반발경도 성과표'));
+                        if (dataHeadingPara && dataStopPara) {
+                            const headingIdx = allParasForData.indexOf(dataHeadingPara);
+                            const dataPoints = [];
+                            strengthItemsHwpx.forEach(item => {
+                                const slots = Array.isArray(item.strengthSlots) && item.strengthSlots.length > 0
+                                    ? item.strengthSlots
+                                    : [{ location: item.location, readings: [], photoId: null }];
+                                slots.forEach(slot => {
+                                    const readings = (slot.readings || []).filter(v => v !== '' && v !== null && v !== undefined);
+                                    if (readings.length === 0 && !slot.photoId) return;
+                                    dataPoints.push({
+                                        location: slot.location || item.location || '',
+                                        component: item.component || '',
+                                        readings,
+                                        photoId: slot.photoId || null
+                                    });
+                                });
+                            });
+                            if (dataPoints.length > 0) {
+                                dataPoints.forEach((pt, i) => { pt.seq = i + 1; });
+                                if (allParasForData.indexOf(dataStopPara) > headingIdx + 1) {
+                                    removeParaRange(allParasForData[headingIdx + 1], dataStopPara);
+                                }
+
+                                let dataAnchor = dataHeadingPara;
+                                for (let i = 0; i < dataPoints.length; i += 3) {
+                                    const group = dataPoints.slice(i, i + 3);
+                                    // 그룹 안 각 포인트의 "사진"을 미리 준비한다 — 실제 저장된 측정지
+                                    // 사진이 있으면 그걸, 없으면 원시 R값 캔버스를 대신 그려서 똑같이
+                                    // 사진 취급으로 표 안에 넣는다.
+                                    for (const pt of group) {
+                                        const photoUrl = pt.photoId ? await loadStrengthPhotoDataUrl(bldg.id, pt.photoId) : null;
+                                        if (photoUrl) {
+                                            const size = await loadImageSize(photoUrl);
+                                            pt._imgUrl = photoUrl;
+                                            pt._imgW = size.w;
+                                            pt._imgH = size.h;
+                                        } else {
+                                            const canvas = renderStrengthDataRowCanvas([pt]);
+                                            pt._imgUrl = canvas.toDataURL('image/png');
+                                            pt._imgW = canvas.width;
+                                            pt._imgH = canvas.height;
+                                        }
+                                        const nums = pt.readings.map(v => parseFloat(v)).filter(v => !isNaN(v));
+                                        pt._avgText = nums.length > 0 ? (nums.reduce((a, b) => a + b, 0) / nums.length).toFixed(1) : '-';
+                                        imgCounter++;
+                                        pt._picId = String(9110000 + imgCounter);
+                                        pt._picInstId = String(9120000 + imgCounter);
+                                        pt._imgId = `strengthDataImg${imgCounter}`;
+                                    }
+
+                                    imgCounter++;
+                                    const tblId = String(9100000 + imgCounter);
+                                    const xml = buildStrengthPhotoRowGroupXml(group, tblId);
+                                    const doc = new DOMParser().parseFromString(`<root xmlns:hp="${HP_NS}" xmlns:hc="${HC_NS}">${xml}</root>`, 'application/xml');
+                                    const newPara = xmlDoc.importNode(doc.documentElement.firstChild, true);
+                                    dataAnchor.parentNode.insertBefore(newPara, dataAnchor.nextSibling);
+                                    dataAnchor = newPara;
+
+                                    // 그룹 안 사진(또는 대체 캔버스)들을 순서대로 이 표의 hp:pic들에 꽂는다.
+                                    const pics = newPara.getElementsByTagNameNS(HP_NS, 'pic');
+                                    const valueW = Math.floor((41821 - 9000) / group.length);
+                                    const photoMaxW = valueW - 141 - 141;
+                                    const photoMaxH = 25000 - 141 - 141;
+                                    group.forEach((pt, idx) => {
+                                        const pic = pics[idx];
+                                        const { bytes, mime, ext } = dataUrlToBytes(pt._imgUrl);
+                                        zip.file(`BinData/${pt._imgId}.${ext}`, bytes);
+                                        manifestAdds.push(`<opf:item id="${pt._imgId}" href="BinData/${pt._imgId}.${ext}" media-type="${mime}" isEmbeded="1"/>`);
+                                        setPicImage(pic, pt._imgId, pt._imgW, pt._imgH, photoMaxW, photoMaxH);
+                                    });
+                                }
+                            }
+                        }
+                    }
+
                     // --- 콘크리트 반발경도 성과표(7.1.2.3) — 표본 문서엔 다른 회사의 실측 데이터를
                     // 찍은 정적 그림(WMF)이 그대로 박혀 있어서, 그동안 어느 건물을 내보내든 항상 그
                     // 남의 데이터가 그대로 나갔다. 제목 문단 바로 다음에 이어지는 그림 문단들을 전부
@@ -31595,6 +31919,91 @@ document.addEventListener('DOMContentLoaded', () => {
                         if (tbl) fillNdtTable(tbl, STRENGTH_HEADER_ROWS, strengthRows, true);
                     } else {
                         removeNdtTableById(STRENGTH_TBL_ID);
+                    }
+
+                    // --- 콘크리트 반발경도 측정 DATA — 표본 문서엔 이 절이 제목만 있고 내용이
+                    // 통째로 비어 있었다. 2026-09-04부터: 사용자가 R값 스캔에 쓴 실제 측정지 사진을
+                    // (전경사진과 같은 방식으로 IndexedDB/클라우드에 저장해두었다가) 참고 양식처럼
+                    // 위치(NO.) 최대 3개를 한 표에 가로로 나란히 넣는다. 사진을 아직 저장 안 해둔
+                    // (이 기능 이전에 입력한) 위치만 원시 R값을 캔버스로 그려 사진 대신 넣는다.
+                    {
+                        const allParasForData = secChildren();
+                        const dataHeadingPara = allParasForData.find(p => paraText(p).includes('반발경도 측정 DATA'));
+                        const dataStopPara = allParasForData.find(p => paraText(p).includes('반발경도 성과표'));
+                        if (dataHeadingPara && dataStopPara) {
+                            const headingIdx = allParasForData.indexOf(dataHeadingPara);
+                            const dataPoints = [];
+                            strengthItemsHwpx.forEach(item => {
+                                const slots = Array.isArray(item.strengthSlots) && item.strengthSlots.length > 0
+                                    ? item.strengthSlots
+                                    : [{ location: item.location, readings: [], photoId: null }];
+                                slots.forEach(slot => {
+                                    const readings = (slot.readings || []).filter(v => v !== '' && v !== null && v !== undefined);
+                                    if (readings.length === 0 && !slot.photoId) return;
+                                    dataPoints.push({
+                                        location: slot.location || item.location || '',
+                                        component: item.component || '',
+                                        readings,
+                                        photoId: slot.photoId || null
+                                    });
+                                });
+                            });
+                            if (dataPoints.length > 0) {
+                                dataPoints.forEach((pt, i) => { pt.seq = i + 1; });
+                                if (allParasForData.indexOf(dataStopPara) > headingIdx + 1) {
+                                    removeParaRange(allParasForData[headingIdx + 1], dataStopPara);
+                                }
+
+                                let dataAnchor = dataHeadingPara;
+                                for (let i = 0; i < dataPoints.length; i += 3) {
+                                    const group = dataPoints.slice(i, i + 3);
+                                    // 그룹 안 각 포인트의 "사진"을 미리 준비한다 — 실제 저장된 측정지
+                                    // 사진이 있으면 그걸, 없으면 원시 R값 캔버스를 대신 그려서 똑같이
+                                    // 사진 취급으로 표 안에 넣는다.
+                                    for (const pt of group) {
+                                        const photoUrl = pt.photoId ? await loadStrengthPhotoDataUrl(bldg.id, pt.photoId) : null;
+                                        if (photoUrl) {
+                                            const size = await loadImageSize(photoUrl);
+                                            pt._imgUrl = photoUrl;
+                                            pt._imgW = size.w;
+                                            pt._imgH = size.h;
+                                        } else {
+                                            const canvas = renderStrengthDataRowCanvas([pt]);
+                                            pt._imgUrl = canvas.toDataURL('image/png');
+                                            pt._imgW = canvas.width;
+                                            pt._imgH = canvas.height;
+                                        }
+                                        const nums = pt.readings.map(v => parseFloat(v)).filter(v => !isNaN(v));
+                                        pt._avgText = nums.length > 0 ? (nums.reduce((a, b) => a + b, 0) / nums.length).toFixed(1) : '-';
+                                        imgCounter++;
+                                        pt._picId = String(9110000 + imgCounter);
+                                        pt._picInstId = String(9120000 + imgCounter);
+                                        pt._imgId = `strengthDataImg${imgCounter}`;
+                                    }
+
+                                    imgCounter++;
+                                    const tblId = String(9100000 + imgCounter);
+                                    const xml = buildStrengthPhotoRowGroupXml(group, tblId);
+                                    const doc = new DOMParser().parseFromString(`<root xmlns:hp="${HP_NS}" xmlns:hc="${HC_NS}">${xml}</root>`, 'application/xml');
+                                    const newPara = xmlDoc.importNode(doc.documentElement.firstChild, true);
+                                    dataAnchor.parentNode.insertBefore(newPara, dataAnchor.nextSibling);
+                                    dataAnchor = newPara;
+
+                                    // 그룹 안 사진(또는 대체 캔버스)들을 순서대로 이 표의 hp:pic들에 꽂는다.
+                                    const pics = newPara.getElementsByTagNameNS(HP_NS, 'pic');
+                                    const valueW = Math.floor((41821 - 9000) / group.length);
+                                    const photoMaxW = valueW - 141 - 141;
+                                    const photoMaxH = 25000 - 141 - 141;
+                                    group.forEach((pt, idx) => {
+                                        const pic = pics[idx];
+                                        const { bytes, mime, ext } = dataUrlToBytes(pt._imgUrl);
+                                        zip.file(`BinData/${pt._imgId}.${ext}`, bytes);
+                                        manifestAdds.push(`<opf:item id="${pt._imgId}" href="BinData/${pt._imgId}.${ext}" media-type="${mime}" isEmbeded="1"/>`);
+                                        setPicImage(pic, pt._imgId, pt._imgW, pt._imgH, photoMaxW, photoMaxH);
+                                    });
+                                }
+                            }
+                        }
                     }
 
                     // --- 콘크리트 반발경도 성과표(7.1.2.3) — 표본 문서엔 다른 회사의 실측 데이터를
@@ -33776,6 +34185,73 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         }
         return null;
+    }
+
+    // --- 콘크리트 반발경도 R값 측정지 사진 저장(전경사진과 동일한 패턴: IndexedDB + 클라우드) ---
+    // 위치 슬롯(strengthSlots[i])마다 photoId 하나만 들고, 실제 사진 데이터는 여기 저장한다.
+    function getStrengthPhotoDocId(bldgId, photoId) {
+        return `str_${bldgId}_${photoId}`;
+    }
+
+    async function loadStrengthPhotoDataUrl(bldgId, photoId) {
+        if (!bldgId || !photoId) return null;
+        const key = getStrengthPhotoDocId(bldgId, photoId);
+        if (window._photoCache && window._photoCache[key]) return window._photoCache[key];
+        try {
+            const local = await idbGet('photos', key);
+            if (typeof local === 'string' && local.length > 32) {
+                if (!window._photoCache) window._photoCache = {};
+                window._photoCache[key] = local;
+                return local;
+            }
+        } catch (_) { /* ignore */ }
+        if (db && window.state.companyId) {
+            try {
+                const snap = await db.collection('safety_app').doc(getCompanyDocId())
+                    .collection('photos').doc(key).get();
+                const url = snap.exists ? snap.data()?.dataUrl : null;
+                if (typeof url === 'string' && url.length > 32) {
+                    if (!window._photoCache) window._photoCache = {};
+                    window._photoCache[key] = url;
+                    idbSet('photos', key, url).then((ok) => {
+                        if (ok) _idbPersistedPhotoKeys.add(key);
+                    });
+                    return url;
+                }
+            } catch (e) {
+                console.warn('반발경도 측정지 사진 클라우드 조회 실패:', key, e);
+            }
+        }
+        return null;
+    }
+
+    async function saveStrengthPhotoDataUrl(bldgId, photoId, dataUrl) {
+        if (!bldgId || !photoId || !dataUrl) return;
+        const key = getStrengthPhotoDocId(bldgId, photoId);
+        if (!window._photoCache) window._photoCache = {};
+        window._photoCache[key] = dataUrl;
+        // 로컬(IndexedDB) 저장까지만 기다린다 — 클라우드 업로드(네트워크)까지 기다리면 사용자가
+        // 스캔 직후 바로 NDT 항목을 저장할 때 photoId가 아직 안 붙은 채로 저장돼버릴 수 있다.
+        // 클라우드 업로드(다른 기기 동기화용)는 실패해도 로컬엔 이미 남아있으니 백그라운드로 진행.
+        await persistPhotoUrlToIdb(key, dataUrl);
+        if (db && window.state.companyId) {
+            db.collection('safety_app').doc(getCompanyDocId()).collection('photos').doc(key).set({ dataUrl })
+                .catch((e) => console.warn('반발경도 측정지 사진 업로드 실패:', key, e));
+        }
+    }
+
+    async function deleteStrengthPhotoStorage(bldgId, photoId) {
+        if (!bldgId || !photoId) return;
+        const key = getStrengthPhotoDocId(bldgId, photoId);
+        if (window._photoCache) delete window._photoCache[key];
+        await idbDelete('photos', key);
+        if (db && window.state.companyId) {
+            try {
+                await db.collection('safety_app').doc(getCompanyDocId()).collection('photos').doc(key).delete();
+            } catch (e) {
+                console.warn('반발경도 측정지 사진 클라우드 삭제 실패:', key, e);
+            }
+        }
     }
 
     async function hydrateBuildingOverviewPhotos(bldg) {
