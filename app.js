@@ -14698,14 +14698,67 @@ document.addEventListener('DOMContentLoaded', () => {
             ? '<span class="defect-timeline-chip defect-timeline-prev">전회차</span>'
             : '<span class="defect-timeline-chip defect-timeline-curr">금회차</span>';
 
+        const groupMembers = defectOrNull.groupId
+            ? getDefectMarkingGroupMembers(defectOrNull.groupId)
+            : [];
+        let memberSwitchHtml = '';
+        if (groupMembers.length > 1) {
+            const chips = groupMembers.map((m) => {
+                const label = formatDefectMemberChipLabel(m);
+                const active = m.id === defectOrNull.id ? ' is-active' : '';
+                return `<button type="button" class="defect-marking-member-chip${active}" data-marking-member-id="${escapeHtml(m.id)}" title="이 화살표/마킹 수정">${escapeHtml(label)}</button>`;
+            }).join('');
+            memberSwitchHtml = `
+                <span class="defect-timeline-sep">·</span>
+                <span class="defect-timeline-chip defect-timeline-members" title="같은 번호의 화살표를 골라 수정">
+                    <i class="fa-solid fa-share-nodes"></i> 마킹
+                    <span class="defect-marking-member-chips">${chips}</span>
+                </span>
+            `;
+        }
+
         el.innerHTML = `
             <span class="defect-timeline-chip defect-timeline-round" title="등록 회차"><i class="fa-solid fa-calendar"></i> ${escapeHtml(roundLabel)}</span>
             <span class="defect-timeline-sep">·</span>
             <span class="defect-timeline-chip defect-timeline-mark" title="도면 마킹 시각"><i class="fa-solid fa-location-dot"></i> ${escapeHtml(markedLabel)}</span>
             <span class="defect-timeline-sep">·</span>
             ${roundKind}
+            ${memberSwitchHtml}
         `;
+
+        el.querySelectorAll('[data-marking-member-id]').forEach((btn) => {
+            btn.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                const mid = btn.getAttribute('data-marking-member-id');
+                if (mid) window.selectDefectMarkingMember(mid);
+            });
+        });
     }
+
+    /** 같은 번호 그룹의 다른 화살표(마킹)로 전환해 수정 */
+    window.selectDefectMarkingMember = async function(defectId) {
+        if (!defectId || !state.currentBuildingId) return;
+        if (typeof flushDefectAutoApply === 'function') {
+            try { await flushDefectAutoApply(); } catch (_e) { /* ignore */ }
+        }
+        const key = `${state.currentBuildingId}_${state.currentFloor}`;
+        const d = (state.defects[key] || []).find((x) => x.id === defectId);
+        if (!d) return;
+        if (d.groupId) {
+            window._groupBoxCycle = { groupId: d.groupId, lastId: d.id };
+        }
+        if (typeof selectedDefectIds !== 'undefined') {
+            selectedDefectIds = new Set([d.id]);
+        }
+        if (typeof updateMapSelectionBar === 'function') updateMapSelectionBar({ scrollToSelection: true });
+        if (typeof window.focusDefectOnCanvas === 'function') {
+            window.focusDefectOnCanvas(d.id, { uncovered: true });
+        }
+        openAddDefectModal(d.x, d.y, d.targetX, d.targetY, d, null, { revealMarkingAboveDrawer: true });
+        const label = formatDefectMemberChipLabel(d);
+        window.showToast?.(`마킹 ${label} 선택`, 'info', 1600);
+    };
 
     // 다음 정기 회차(상반기→하반기→다음해 상반기). 수시점검은 다음 해 수시로 이동.
     function getNextSurveyRoundParts(yearStr, periodStr) {
@@ -15875,6 +15928,39 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // "마킹 추가"로 같은 결함을 여러 위치에 표시한 그룹(groupId 공유)을 목록/보고서용으로 한 행으로 합친다.
     // 위치는 지점별 위치를 ' / '로 이어붙이고, 진행/누수/전회차 여부는 멤버 중 하나라도 해당되면 true로 간주.
+    function getDefectMarkingGroupMembers(groupId) {
+        if (!groupId || !state.currentBuildingId) return [];
+        const key = `${state.currentBuildingId}_${state.currentFloor}`;
+        return (state.defects[key] || [])
+            .filter((d) => d && d.groupId === groupId && !d.surveyExtra)
+            .slice()
+            .sort((a, b) => parseDefectSortNoValue(a) - parseDefectSortNoValue(b));
+    }
+
+    function formatDefectMemberChipLabel(d) {
+        const raw = String((d && (d.no || d.groupNo)) || '').replace(/^NO\.?\s*/i, '').trim();
+        return raw || '-';
+    }
+
+    /** 공유 NO.박스 클릭 시 x-1 → x-2 → x-3 순환 선택 */
+    function cycleMarkingGroupMemberOnBoxClick(defect) {
+        if (!defect || !defect.groupId) return defect;
+        const members = getDefectMarkingGroupMembers(defect.groupId);
+        if (members.length <= 1) return defect;
+        const st = window._groupBoxCycle || { groupId: null, lastId: null };
+        let idx = 0;
+        if (st.groupId === defect.groupId && st.lastId) {
+            const cur = members.findIndex((m) => m.id === st.lastId);
+            idx = cur >= 0 ? (cur + 1) % members.length : 0;
+        } else {
+            const sel = members.findIndex((m) => typeof selectedDefectIds !== 'undefined' && selectedDefectIds.has(m.id));
+            idx = sel >= 0 ? (sel + 1) % members.length : 0;
+        }
+        const next = members[idx] || defect;
+        window._groupBoxCycle = { groupId: defect.groupId, lastId: next.id };
+        return next;
+    }
+
     function consolidateDefectGroups(defects) {
         const seen = new Set();
         const result = [];
@@ -16531,8 +16617,35 @@ document.addEventListener('DOMContentLoaded', () => {
 
         row.appendChild(actions);
 
+        // 마킹 추가 그룹: 목록에서 x-1 / x-2 / x-3 개별 선택
+        const markingMembers = (d.groupId && d._groupMemberIds && d._groupMemberIds.length > 1)
+            ? getDefectMarkingGroupMembers(d.groupId)
+            : [];
+        if (markingMembers.length > 1) {
+            const memberBar = document.createElement('div');
+            memberBar.className = 'defect-list-marking-members';
+            memberBar.title = '화살표(마킹)를 골라 수정 · 도면 NO.박스를 눌러도 순환 선택됩니다';
+            markingMembers.forEach((m) => {
+                const btn = document.createElement('button');
+                btn.type = 'button';
+                btn.className = 'defect-list-marking-member-btn'
+                    + (typeof selectedDefectIds !== 'undefined' && selectedDefectIds.has(m.id) ? ' is-active' : '');
+                btn.textContent = formatDefectMemberChipLabel(m);
+                btn.title = `마킹 ${formatDefectMemberChipLabel(m)} 수정`;
+                btn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    if (typeof window.selectDefectMarkingMember === 'function') {
+                        window.selectDefectMarkingMember(m.id);
+                    }
+                });
+                memberBar.appendChild(btn);
+            });
+            row.appendChild(memberBar);
+        }
+
         row.addEventListener('click', (e) => {
             if (actions.contains(e.target)) return;
+            if (e.target.closest && e.target.closest('.defect-list-marking-members')) return;
             if (isUnregistered) {
                 startMapRegisterForDefect(d.id);
                 return;
@@ -16563,9 +16676,15 @@ document.addEventListener('DOMContentLoaded', () => {
         });
         editBtn.addEventListener('click', (e) => {
             e.stopPropagation();
-            const rep = d._representative || d;
-            if (rep && rep.id) window.focusDefectOnCanvas(rep.id, { uncovered: true });
-            openAddDefectModal(rep.x, rep.y, rep.targetX, rep.targetY, rep, null, { revealMarkingAboveDrawer: true });
+            const members = d.groupId ? getDefectMarkingGroupMembers(d.groupId) : [];
+            // 그룹이면 현재 선택된 멤버 우선, 없으면 대표
+            let target = d._representative || d;
+            if (members.length > 1 && typeof selectedDefectIds !== 'undefined') {
+                const sel = members.find((m) => selectedDefectIds.has(m.id));
+                if (sel) target = sel;
+            }
+            if (target && target.id) window.focusDefectOnCanvas(target.id, { uncovered: true });
+            openAddDefectModal(target.x, target.y, target.targetX, target.targetY, target, null, { revealMarkingAboveDrawer: true });
         });
         deleteBtn.addEventListener('click', (e) => {
             e.stopPropagation();
@@ -17467,7 +17586,8 @@ document.addEventListener('DOMContentLoaded', () => {
                             targetY: m.targetY,
                             forceArrowDir: !!m.forceArrowDir,
                             arrowOctant: (m.arrowOctant !== undefined ? m.arrowOctant : 0),
-                            areaSource: (m.shapeType === 'area' && m.areaX1 !== undefined) ? m : null
+                            areaSource: (m.shapeType === 'area' && m.areaX1 !== undefined) ? m : null,
+                            memberId: m.id || null
                         });
                     });
                     drawFn(ctx, representative, arrows);
@@ -17519,10 +17639,18 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const targets = (arrows && arrows.length > 0)
             ? arrows
-            : (defect.targetX !== undefined && defect.targetY !== undefined ? [{ targetX: defect.targetX, targetY: defect.targetY }] : []);
+            : (defect.targetX !== undefined && defect.targetY !== undefined
+                ? [{ targetX: defect.targetX, targetY: defect.targetY, memberId: defect.id || null }]
+                : []);
 
         const pinLabel = formatDefectPinLabel(defect, defectStyleKey);
         const { w, h } = measurePinBoxDimensions(ctx, pinLabel, scale, roundLineMul);
+
+        const groupMemberSelected = !!(defect.groupId
+            && typeof selectedDefectIds !== 'undefined'
+            && getDefectMarkingGroupMembers(defect.groupId).some((m) => selectedDefectIds.has(m.id)));
+        const pinChromeSelected = !!(typeof selectedDefectIds !== 'undefined' && shouldDrawMapSelectionChrome()
+            && ((defect.id && selectedDefectIds.has(defect.id)) || groupMemberSelected));
 
         // Leader Line & Arrow Tip Rendering — 실선, 마킹과 가장 가까운 박스 모서리에서 시작
         // 영역 마킹: 테두리에만 선이 꼽히고 내부/화살표 관통은 없음
@@ -17541,11 +17669,16 @@ document.addEventListener('DOMContentLoaded', () => {
                 targetX = attach.x;
                 targetY = attach.y;
             }
+            const tipSelected = !!(t.memberId
+                && typeof selectedDefectIds !== 'undefined'
+                && selectedDefectIds.has(t.memberId)
+                && shouldDrawMapSelectionChrome());
+            const lineColor = tipSelected ? '#f59e0b' : activeColor;
             const leaderAnchorOpts = { shape: shapeCfg.shape, scale };
             const anchor = getPinLeaderBoxAnchor(boxX, boxY, targetX, targetY, w, h, state.rotationAngle || 0, leaderAnchorOpts);
-            const headLen = (isBeingDragged ? 13 : 10) * arrowScale;
+            const headLen = ((isBeingDragged || tipSelected) ? 13 : 10) * arrowScale;
             const stemInset = useCircleTip
-                ? (isBeingDragged ? 6 : 4.5) * arrowScale
+                ? ((isBeingDragged || tipSelected) ? 6 : 4.5) * arrowScale
                 : headLen * Math.cos(Math.PI / 6);
             const forcedDir = tipIsArea ? { enabled: false } : resolveForcedArrowDirection(t, defect, state.rotationAngle || 0);
             const leader = forcedDir.enabled
@@ -17578,15 +17711,15 @@ document.addEventListener('DOMContentLoaded', () => {
             ctx.beginPath();
             ctx.moveTo(leader.route[0].x, leader.route[0].y);
             for (let i = 1; i < leader.route.length; i++) ctx.lineTo(leader.route[i].x, leader.route[i].y);
-            ctx.strokeStyle = activeColor;
-            ctx.lineWidth = getDefectLeaderLineWidth(scale, roundLineMul, isBeingDragged);
+            ctx.strokeStyle = lineColor;
+            ctx.lineWidth = getDefectLeaderLineWidth(scale, roundLineMul, isBeingDragged || tipSelected);
             ctx.lineCap = 'butt';
             ctx.setLineDash([]);
             ctx.stroke();
 
             // 영역 마킹은 화살표 머리 없이 테두리에 선만 꽂음
             if (!tipIsArea) {
-                ctx.fillStyle = activeColor;
+                ctx.fillStyle = lineColor;
                 if (useCircleTip) {
                     ctx.beginPath();
                     ctx.arc(targetX, targetY, (isBeingDragged ? 6 : 4.5) * arrowScale, 0, Math.PI * 2);
@@ -17622,9 +17755,8 @@ document.addEventListener('DOMContentLoaded', () => {
         // fill=false: 투명 내부 + 마킹색 네모 테두리 / fill=true: 기존 채우기
         paintPinBox(ctx, w, h, shapeCfg, activeColor, scale, roundLineMul, isBeingDragged);
 
-        // 마퀴/클릭 선택 강조 (목록 ON/OFF 공통)
-        if (defect.id && typeof selectedDefectIds !== 'undefined' && selectedDefectIds.has(defect.id)
-            && shouldDrawMapSelectionChrome()) {
+        // 마퀴/클릭 선택 강조 (목록 ON/OFF 공통) — 그룹이면 멤버 중 하나만 선택돼도 박스 강조
+        if (pinChromeSelected) {
             ctx.save();
             ctx.strokeStyle = '#6b6b6b';
             ctx.lineWidth = Math.max(2, 2.4 * scale);
@@ -21605,7 +21737,17 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Check if existing pin box, arrowhead tip, or area handle was clicked.
         // 터치: 즉시 선택만 하고, 약 0.3초 길게 누른 뒤에야 드래그 시작.
-        const hitInfo = findHitPinPart(imgX, imgY);
+        const hitInfoRaw = findHitPinPart(imgX, imgY);
+        let hitInfo = hitInfoRaw;
+        // 공유 NO.박스 클릭: 같은 번호의 화살표(x-1,x-2,x-3)를 순환 선택
+        if (hitInfo && (hitInfo.part === 'BOX' || hitInfo.part === 'AREA_MOVE') && hitInfo.defect && hitInfo.defect.groupId) {
+            const cycled = cycleMarkingGroupMemberOnBoxClick(hitInfo.defect);
+            if (cycled && cycled !== hitInfo.defect) {
+                hitInfo = { ...hitInfo, defect: cycled };
+            }
+        } else if (hitInfo && hitInfo.part === 'TIP' && hitInfo.defect && hitInfo.defect.groupId) {
+            window._groupBoxCycle = { groupId: hitInfo.defect.groupId, lastId: hitInfo.defect.id };
+        }
         if (hitInfo && state.areaInkTool && hitInfo.defect && hitInfo.defect.shapeType === 'area'
             && (hitInfo.part === 'AREA_MOVE' || hitInfo.part === 'BOX')) {
             selectedDefectIds = new Set([hitInfo.defect.id]);
@@ -22076,6 +22218,13 @@ document.addEventListener('DOMContentLoaded', () => {
             selectedDefectIds = new Set([d.id]);
             updateMapSelectionBar({ scrollToSelection: true });
             openAddDefectModal(d.x, d.y, d.targetX, d.targetY, d);
+            if (d.groupId && getDefectMarkingGroupMembers(d.groupId).length > 1) {
+                window.showToast?.(
+                    `마킹 ${formatDefectMemberChipLabel(d)} 선택 · NO.박스를 다시 누르면 다음 화살표`,
+                    'info',
+                    2200
+                );
+            }
             return;
         }
         pendingDragHit = null;

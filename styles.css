@@ -4247,6 +4247,47 @@ html:not(.layout-desktop) .survey-inline-select {
     white-space: nowrap;
 }
 
+.defect-timeline-members {
+    flex-wrap: wrap;
+    gap: 0.35rem;
+}
+.defect-marking-member-chips {
+    display: inline-flex;
+    flex-wrap: wrap;
+    gap: 0.22rem;
+    margin-left: 0.2rem;
+}
+.defect-marking-member-chip,
+.defect-list-marking-member-btn {
+    appearance: none;
+    border: 1px solid #94a3b8;
+    background: #f8fafc;
+    color: #334155;
+    border-radius: 0.35rem;
+    padding: 0.12rem 0.4rem;
+    font-size: 0.7rem;
+    font-weight: 800;
+    line-height: 1.3;
+    cursor: pointer;
+}
+.defect-marking-member-chip.is-active,
+.defect-list-marking-member-btn.is-active {
+    border-color: #d97706;
+    background: #fff7ed;
+    color: #b45309;
+    box-shadow: 0 0 0 1px rgba(245, 158, 11, 0.35);
+}
+.defect-list-marking-members {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem;
+    width: 100%;
+    margin-top: 0.35rem;
+    padding-top: 0.3rem;
+    border-top: 1px dashed rgba(148, 163, 184, 0.45);
+}
+
+
 .defect-timeline-chip i {
     opacity: 0.75;
     font-size: 0.68rem;
