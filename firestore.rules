@@ -128,6 +128,12 @@ service cloud.firestore {
         }
       }
 
+      // 도면 배율별(4000/8000/16000 등) 캐시 — floorDrawings/floorDrawingPdfs와 같은 회사 소속
+      // 규칙인데 이 컬렉션만 빠져 있어서 "Missing or insufficient permissions"로 항상 막혀 있었다.
+      match /floorDrawingTiers/{docId} {
+        allow read, write: if isCompanyMember(companyId);
+      }
+
       match /photos/{docId} {
         allow read, write: if isCompanyMember(companyId);
       }
