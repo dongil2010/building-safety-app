@@ -1989,6 +1989,7 @@ html.layout-desktop #tab-ndt .ndt-top-canvas-tools {
 .defect-list-item {
     display: flex;
     align-items: flex-start;
+    flex-wrap: nowrap;
     gap: 0.4rem;
     background: #ffffff;
     border: 1.5px solid var(--border-color);
@@ -2094,18 +2095,21 @@ html.layout-desktop #tab-ndt .ndt-top-canvas-tools {
 
 .defect-badge-no {
     flex-shrink: 0;
-    width: 26px;
+    min-width: 26px;
+    width: auto;
     height: 26px;
-    border-radius: 50%;
+    padding: 0 0.32rem;
+    border-radius: 999px;
     background: #ef4444;
     color: #ffffff;
-    font-size: 0.7rem;
+    font-size: 0.68rem;
     font-weight: 800;
     display: flex;
     align-items: center;
     justify-content: center;
     box-sizing: border-box;
     margin-top: 0.08rem;
+    letter-spacing: -0.02em;
 }
 
 .defect-list-item.cat-nonstructural .defect-badge-no { background: #525252; }
@@ -5356,9 +5360,11 @@ html:not(.layout-desktop) .survey-inline-select {
     }
 
     .defect-badge-no {
-        width: 1.55rem;
+        min-width: 1.55rem;
+        width: auto;
         height: 1.55rem;
-        font-size: 0.62rem;
+        padding: 0 0.28rem;
+        font-size: 0.58rem;
     }
 
     /* 모바일 공통: 목록 수정·삭제 숨김 (현장 점검용) */
@@ -9653,9 +9659,11 @@ body:not(.bsa-tab-home) .home-fab-add-building {
     }
 
     #tab-map .defect-badge-no {
-        width: 1.5rem;
+        min-width: 1.5rem;
+        width: auto;
         height: 1.5rem;
-        font-size: 0.6rem;
+        padding: 0 0.26rem;
+        font-size: 0.56rem;
         margin-top: 0.08rem;
         flex-shrink: 0;
     }
@@ -11201,8 +11209,10 @@ html.layout-tablet #tab-map .defect-list-item-measure {
 
 html.layout-tablet #tab-map .defect-badge-no {
     min-width: 1.4rem;
+    width: auto;
     height: 1.4rem;
-    font-size: 0.72rem;
+    padding: 0 0.3rem;
+    font-size: 0.64rem;
 }
 
 /* 우측 레일 = 모바일 동일 톤 */
