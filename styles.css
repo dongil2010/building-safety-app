@@ -3442,6 +3442,16 @@ html.layout-desktop #tab-ndt .ndt-top-canvas-tools {
     gap: 0.22rem;
     min-width: 7.5rem;
 }
+.survey-inline-stack-head {
+    display: flex;
+    flex-direction: row;
+    align-items: stretch;
+    gap: 0.22rem;
+}
+.survey-inline-stack-head .survey-inline-input {
+    flex: 1 1 0;
+    min-width: 0;
+}
 
 /* 상태조사표 — 사진 앨범 패널 */
 .survey-album-panel {

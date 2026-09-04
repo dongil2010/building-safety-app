@@ -25028,8 +25028,10 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    // 보고서(PDF/HWPX) 상태조사표: "마킹 추가" 그룹(NO.04-1, 04-2)은 한 행으로 합치지 않고
-    // 각각 출력한다. 표는 기본 15행, n-n 추가분이 있으면 최대 17행까지 담고, 가능하면
+    // 보고서(PDF/HWPX)·화면 상태조사표 행 구성:
+    // - "마킹 추가"(같은 번호 박스 + 화살표만 늘림) → 그룹을 한 행으로 합침 (도면과 동일)
+    // - "결함표 추가"(surveyExtra) → N-2, N-3 … 별도 행으로 유지
+    // 표는 기본 15행, 결함표 추가분이 있으면 최대 17행까지 담고, 가능하면
     // 본번호가 15·30·45…에서 끝나도록 다음 표로 넘긴다.
     const SURVEY_REPORT_ROWS_BASE = 15;
     const SURVEY_REPORT_ROWS_MAX = 17;
@@ -25042,10 +25044,60 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function getSurveyRowsForReport(defects) {
-        return (defects || []).slice().sort((a, b) => {
+        const list = defects || [];
+        const result = [];
+        const seenMarkingGroups = new Set();
+
+        const sorted = list.slice().sort((a, b) => {
             const pa = parseSurveyDefectNo(a);
             const pb = parseSurveyDefectNo(b);
             if (pa.main !== pb.main) return pa.main - pb.main;
+            if (pa.suffix !== pb.suffix) return pa.suffix - pb.suffix;
+            return String(a.no || '').localeCompare(String(b.no || ''));
+        });
+
+        sorted.forEach((d) => {
+            if (d.surveyExtra) {
+                result.push(d);
+                return;
+            }
+            if (d.groupId) {
+                if (seenMarkingGroups.has(d.groupId)) return;
+                seenMarkingGroups.add(d.groupId);
+                const members = list.filter((m) => m.groupId === d.groupId && !m.surveyExtra);
+                if (!members.length) return;
+                const rep = pickDefectGroupRepresentative(members) || members[0];
+                const locations = members.map((m) => m.location).filter(Boolean);
+                const uniqLoc = [];
+                locations.forEach((loc) => {
+                    if (uniqLoc.indexOf(loc) === -1) uniqLoc.push(loc);
+                });
+                result.push({
+                    ...rep,
+                    no: rep.groupNo || stripDefectNoSuffix(rep.no) || rep.no,
+                    location: uniqLoc.length > 0 ? uniqLoc.join(' / ') : rep.location,
+                    isProgress: members.some((m) => m.isProgress),
+                    isLeak: members.some((m) => m.isLeak),
+                    isOpeningCrack: members.some((m) => m.isOpeningCrack),
+                    isCarriedOver: members.some((m) => m.isCarriedOver),
+                    mapUnregistered: members.some((m) => m.mapUnregistered),
+                    isPriorityManage: members.some((m) => m.isPriorityManage),
+                    isBookmark: members.some((m) => m.isBookmark),
+                    _groupMemberIds: members.map((m) => m.id),
+                    _representative: rep
+                });
+                return;
+            }
+            result.push(d);
+        });
+
+        return result.sort((a, b) => {
+            const pa = parseSurveyDefectNo(a);
+            const pb = parseSurveyDefectNo(b);
+            if (pa.main !== pb.main) return pa.main - pb.main;
+            const aExtra = a.surveyExtra ? 1 : 0;
+            const bExtra = b.surveyExtra ? 1 : 0;
+            if (aExtra !== bExtra) return aExtra - bExtra;
             if (pa.suffix !== pb.suffix) return pa.suffix - pb.suffix;
             return String(a.no || '').localeCompare(String(b.no || ''));
         });
@@ -25272,12 +25324,19 @@ document.addEventListener('DOMContentLoaded', () => {
                 return (d.defectType === '균열')
                     ? textInput('crackLength', d.crackLength != null ? d.crackLength : '', 'm')
                     : '<span style="color:#a3a3a3;">-</span>';
-            case 'inspectionContent':
+            case 'inspectionContent': {
+                // 보고서·한글과 같이 2줄: (부재 + 조사내용) / 크기
+                const sizeDisp = (d.defectType === '상태양호')
+                    ? ''
+                    : String(getSurveyCellText('size', d, {}) || '').replace(/^-$/, '');
                 return `<div class="survey-inline-stack" ${stop}>` +
+                    `<div class="survey-inline-stack-head">` +
                     textInput('component', d.component || '', '부재', 'survey-inline-narrow') +
                     textInput('defectType', d.defectType || '', '조사내용', 'survey-inline-narrow') +
-                    textInput('size', (d.defectType === '상태양호') ? '' : ((d.size != null) ? String(d.size) : ''), '크기', 'survey-inline-narrow') +
+                    `</div>` +
+                    textInput('size', sizeDisp, '크기', 'survey-inline-narrow') +
                     `</div>`;
+            }
             default:
                 return renderScreenSurveyCellHtml(colKey, d, ctx);
         }
@@ -25500,8 +25559,11 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             case 'crackWidth': return d.defectType === '균열' ? surveyCharLen(d.crackWidth) : 0;
             case 'crackLength': return d.defectType === '균열' ? surveyCharLen(d.crackLength) : 0;
-            case 'inspectionContent':
-                return Math.max(surveyCharLen(d.component), surveyCharLen(d.defectType), surveyCharLen(d.size));
+            case 'inspectionContent': {
+                const headLen = surveyCharLen([d.component, d.defectType].filter(Boolean).join(' '));
+                const sizeLen = d.defectType === '상태양호' ? 0 : surveyCharLen(getSurveyCellText('size', d, ctx));
+                return Math.max(headLen, sizeLen);
+            }
             default:
                 return surveyCharLen(getSurveyCellText(colKey, d, ctx));
         }
@@ -25727,7 +25789,9 @@ document.addEventListener('DOMContentLoaded', () => {
         });
 
         const buildRowCtx = (d, dIdx) => {
-            const memberIds = [d.id || `idx_${dIdx}`];
+            const memberIds = (d._groupMemberIds && d._groupMemberIds.length)
+                ? d._groupMemberIds
+                : [d.id || `idx_${dIdx}`];
             const labels = memberIds.flatMap(mid => defectPhotoLabels[mid] || []);
             const photoRemark = labels.length > 0 ? labels.join(' ') : '-';
             const grade3 = isGrade3Building();
@@ -27302,8 +27366,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 });
 
                 // --- 1. 상태조사표 (신가병원 1·2종 / 칠산타워 3종 서식)
-                //     기본 15행, 마킹추가(n-n)가 있으면 최대 17행. 본번호는 가능하면 15·30·45에서 끝낸다.
-                //     화면 표처럼 그룹을 한 행으로 합치지 않고 4-1, 4-2를 각각 출력한다. ---
+                //     기본 15행, 결함표 추가(n-n)가 있으면 최대 17행. 본번호는 가능하면 15·30·45에서 끝낸다.
+                //     마킹 추가 그룹은 한 행으로 합치고, 결함표 추가(surveyExtra)만 별도 행으로 둔다. ---
                 const grade3Report = isGrade3Building(bldg);
                 const surveyDefects = getSurveyRowsForReport(defects);
                 const surveyPages = paginateSurveyDefects(surveyDefects);
@@ -32371,7 +32435,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 window.showToast('현재 층에 등록된 결함 데이터가 없습니다.', 'warning');
                 return;
             }
-            // "마킹 추가"·결함표 추가(N-1, N-2)는 표·엑셀·한글과 같이 행을 나눈다
+            // 마킹 추가는 한 행, 결함표 추가(surveyExtra)만 N-2… 별도 행
             const defects = getSurveyRowsForReport(rawDefects);
 
             const floorCode = window.state.currentFloor;
@@ -32415,7 +32479,10 @@ document.addEventListener('DOMContentLoaded', () => {
             `;
 
             defects.forEach((d, dIdx) => {
-                const labels = defectPhotoLabels[d.id || `idx_${dIdx}`] || [];
+                const memberIds = (d._groupMemberIds && d._groupMemberIds.length)
+                    ? d._groupMemberIds
+                    : [d.id || `idx_${dIdx}`];
+                const labels = memberIds.flatMap((mid) => defectPhotoLabels[mid] || []);
                 const pRemark = labels.length > 0 ? labels.join(' ') : '-';
                 const grade3 = isGrade3Building(bldg);
                 const cellCtx = {
