@@ -3774,6 +3774,10 @@ document.addEventListener('DOMContentLoaded', () => {
             if (typeof isNdtModalOpen === 'function' && isNdtModalOpen() && typeof closeNdtModal === 'function') {
                 closeNdtModal();
             }
+            if (typeof isNdtCrackMonitorModalOpen === 'function' && isNdtCrackMonitorModalOpen()
+                && typeof closeNdtCrackMonitorModal === 'function') {
+                closeNdtCrackMonitorModal();
+            }
             const dispModal = document.getElementById('ndtDisplacementModal');
             if (dispModal && (dispModal.classList.contains('open') || dispModal.style.display === 'flex')
                 && typeof closeNdtDisplacementModal === 'function') {
@@ -3862,6 +3866,11 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             if (typeof isNdtModalOpen === 'function' && isNdtModalOpen() && typeof closeNdtModal === 'function') {
                 closeNdtModal();
+                return true;
+            }
+            if (typeof isNdtCrackMonitorModalOpen === 'function' && isNdtCrackMonitorModalOpen()
+                && typeof closeNdtCrackMonitorModal === 'function') {
+                closeNdtCrackMonitorModal();
                 return true;
             }
             const named = [
@@ -8049,6 +8058,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let ndtDispDragOffsetX = 0;
     let ndtDispDragOffsetY = 0;
     let pendingNdtPinHit = null; // 클릭=수정창 / 드래그=이동 구분
+    let pendingNdtCrackDefectHit = null; // 균열모니터: 결함 핀 클릭 → 작성 팝업
     let pendingNdtPinArmed = false;
     let pendingNdtPinIsTouch = false;
     let pendingNdtLongPressTimer = null;
@@ -8094,6 +8104,7 @@ document.addEventListener('DOMContentLoaded', () => {
         window._ndtMarkCurrentCoords = null;
         clearPendingNdtLongPress();
         pendingNdtPinHit = null;
+        pendingNdtCrackDefectHit = null;
         pendingNdtDispHit = null;
         pendingNdtDispIsTouch = false;
         isDraggingNdtDisplacement = false;
@@ -8998,7 +9009,8 @@ document.addEventListener('DOMContentLoaded', () => {
             '기울기': '외벽 기울기',
             '변위': '부동침하 기울기',
             '부재변위': '부재변위',
-            '내화피복': '내화피복 두께'
+            '내화피복': '내화피복 두께',
+            '균열모니터': '균열 게이지·팁'
         };
         return map[cat] || cat || '비파괴';
     }
@@ -10043,11 +10055,14 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     window.setNdtCategory = function(cat) {
+        if (cat !== '균열모니터' && typeof closeNdtCrackMonitorModal === 'function') {
+            closeNdtCrackMonitorModal();
+        }
         currentNdtCategory = cat;
         setActiveNdtDispGroup(null);
         selectedNdtIds.clear();
         updateNdtSelectionBar();
-        const catMap = { '실측': 'Dim', '강도': 'Strength', '탄산화': 'Carb', '기울기': 'Tilt', '변위': 'Vert', '부재변위': 'MemberDisp', '내화피복': 'Fireproof' };
+        const catMap = { '실측': 'Dim', '강도': 'Strength', '탄산화': 'Carb', '기울기': 'Tilt', '변위': 'Vert', '부재변위': 'MemberDisp', '내화피복': 'Fireproof', '균열모니터': 'CrackMonitor' };
         Object.values(catMap).forEach(id => {
             const btn = document.getElementById(`btnNdtCat${id}`);
             if (btn) btn.classList.remove('active');
@@ -10062,6 +10077,14 @@ document.addEventListener('DOMContentLoaded', () => {
         if (typeof window.syncBulkStyleSlidersUi === 'function') window.syncBulkStyleSlidersUi();
         if (typeof syncNdtTiltRotateButtons === 'function') syncNdtTiltRotateButtons();
         if (typeof syncNdtDispUndoButton === 'function') syncNdtDispUndoButton();
+        const hintSpan = document.querySelector('#ndtCanvasHintText span');
+        if (hintSpan) {
+            if (cat === '균열모니터') {
+                hintSpan.textContent = '결함위치도에 등록된 균열 핀을 클릭하면 게이지·팁 측정 팝업이 열립니다';
+            } else {
+                hintSpan.textContent = '[📍 NDT 위치 마킹] 6대 비파괴 조사 측정 위치를 도면 상에 핀으로 표시하세요';
+            }
+        }
     };
 
     let _ndtDrawRafId = 0;
@@ -10116,6 +10139,11 @@ document.addEventListener('DOMContentLoaded', () => {
             ndtItems = ndtItems.filter(item => item.category === currentCat);
         } else if (currentCat === '변위' || currentCat === '부재변위') {
             ndtItems = [];
+        } else if (currentCat === '균열모니터') {
+            ndtItems = [];
+            getCurrentFloorCrackMonitorDefects().forEach((defect) => {
+                drawPin(ctx, defect);
+            });
         } else if (currentCat === '실측') {
             ndtItems = ndtItems.filter(item => item.category === '실측');
         } else if (currentCat === '내화피복') {
@@ -11271,7 +11299,23 @@ document.addEventListener('DOMContentLoaded', () => {
             ndtInitialOffsetY = ndtView.offsetY;
 
             // 바닥 수직변위 및 부재변위: 전용 그룹/포인트 히트
-            if (currentNdtCategory === '변위' || currentNdtCategory === '부재변위') {
+            if (currentNdtCategory === '균열모니터') {
+                const crackHit = findHitPinPart(vx, vy);
+                if (crackHit && crackHit.defect && defectNeedsCrackMonitorUi(crackHit.defect)) {
+                    pendingNdtCrackDefectHit = { defect: crackHit.defect, grabX: vx, grabY: vy };
+                    return;
+                }
+                if (ndtMode === 'PAN' && isNdtCrackMonitorModalOpen()) {
+                    closeNdtCrackMonitorModal();
+                    return;
+                }
+                if (ndtMode === 'MARK') {
+                    if (typeof window.showToast === 'function') {
+                        window.showToast('결함위치도에 등록된 균열 핀을 클릭하세요.', 'info');
+                    }
+                    return;
+                }
+            } else if (currentNdtCategory === '변위' || currentNdtCategory === '부재변위') {
                 const hitDisp = findNdtDisplacementHit(vx, vy);
                 if (hitDisp) {
                     const gid = hitDisp.group && hitDisp.group.id;
@@ -11344,12 +11388,12 @@ document.addEventListener('DOMContentLoaded', () => {
                     window._ndtDispMarkCoords = { x: vx, y: vy };
                     return;
                 }
-            }
-
-            if (ndtMode === 'MARK') {
+            } else if (currentNdtCategory !== '균열모니터' && ndtMode === 'MARK') {
                 isNdtMarkingDrag = true;
                 window._ndtMarkStartCoords = { x: vx, y: vy };
                 window._ndtMarkCurrentCoords = { x: vx, y: vy };
+            } else if (ndtMode === 'MARK') {
+                // 균열모니터 MARK는 위에서 처리
             } else {
                 // 좌클릭 빈 곳 = 마퀴 선택 (화면 이동은 휠클릭)
                 isNdtMarqueeSelecting = true;
@@ -11523,6 +11567,13 @@ document.addEventListener('DOMContentLoaded', () => {
                     } else {
                         canvas.style.cursor = 'default';
                     }
+                } else if (currentNdtCategory === '균열모니터') {
+                    const crackHit = findHitPinPart(vx, vy);
+                    if (crackHit && crackHit.defect && defectNeedsCrackMonitorUi(crackHit.defect)) {
+                        canvas.style.cursor = 'pointer';
+                    } else {
+                        canvas.style.cursor = 'default';
+                    }
                 } else {
                     const hit = findNdtPinAt(vx, vy);
                     if (hit) {
@@ -11537,6 +11588,12 @@ document.addEventListener('DOMContentLoaded', () => {
         window.addEventListener('mouseup', (e) => {
             if (ndtActivePointerIsTouch) return;
             try {
+            if (pendingNdtCrackDefectHit && !isDraggingNdtPin && !isDraggingNdtPinGroup) {
+                const defect = pendingNdtCrackDefectHit.defect;
+                pendingNdtCrackDefectHit = null;
+                if (defect && defect.id) openNdtCrackMonitorModal(defect.id, state.currentFloor);
+                return;
+            }
             if (pendingNdtPinHit && !isDraggingNdtPin && !isDraggingNdtPinGroup) {
                 const item = pendingNdtPinHit.item;
                 const wasAdditive = !!pendingNdtPinHit.additive;
@@ -11746,6 +11803,27 @@ document.addEventListener('DOMContentLoaded', () => {
                 isNdtMarqueeSelecting = false;
                 clearPendingNdtLongPress();
 
+                if (currentNdtCategory === '균열모니터') {
+                    const crackHit = findHitPinPart(vx, vy);
+                    if (crackHit && crackHit.defect && defectNeedsCrackMonitorUi(crackHit.defect)) {
+                        if (e.cancelable) e.preventDefault();
+                        pendingNdtCrackDefectHit = { defect: crackHit.defect, grabX: vx, grabY: vy };
+                        return;
+                    }
+                    if (ndtMode === 'PAN' && isNdtCrackMonitorModalOpen()) {
+                        if (e.cancelable) e.preventDefault();
+                        closeNdtCrackMonitorModal();
+                        return;
+                    }
+                    if (ndtMode === 'MARK') {
+                        if (e.cancelable) e.preventDefault();
+                        if (typeof window.showToast === 'function') {
+                            window.showToast('결함위치도에 등록된 균열 핀을 클릭하세요.', 'info');
+                        }
+                        return;
+                    }
+                }
+
                 const hitPin = findNdtPinAt(vx, vy);
                 if (hitPin) {
                     if (e.cancelable) e.preventDefault();
@@ -11806,9 +11884,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 if (ndtMode === 'MARK') {
                     if (e.cancelable) e.preventDefault();
-                    isNdtMarkingDrag = true;
-                    window._ndtMarkStartCoords = { x: vx, y: vy };
-                    window._ndtMarkCurrentCoords = { x: vx, y: vy };
+                    if (currentNdtCategory === '균열모니터') {
+                        if (typeof window.showToast === 'function') {
+                            window.showToast('결함위치도에 등록된 균열 핀을 클릭하세요.', 'info');
+                        }
+                    } else {
+                        isNdtMarkingDrag = true;
+                        window._ndtMarkStartCoords = { x: vx, y: vy };
+                        window._ndtMarkCurrentCoords = { x: vx, y: vy };
+                    }
                 } else if (ndtMarqueeSelectEnabled && ndtMode === 'PAN') {
                     if (e.cancelable) e.preventDefault();
                     isNdtMarqueeSelecting = true;
@@ -12103,7 +12187,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 ? Math.hypot(t.clientX - ndtStartMouseX, t.clientY - ndtStartMouseY)
                 : 99;
             const wasEmptyTap = ndtTouchStartedOnCanvas
-                && !pendingNdtPinHit && !pendingNdtDispHit
+                && !pendingNdtPinHit && !pendingNdtDispHit && !pendingNdtCrackDefectHit
                 && !isDraggingNdtPin && !isDraggingNdtDisplacement && !isDraggingNdtPinGroup
                 && !isNdtMarkingDrag && !isNdtDisplacementMarking && !isNdtPinching
                 && ndtMode === 'PAN' && tapMoved < 14;
@@ -12112,6 +12196,12 @@ document.addEventListener('DOMContentLoaded', () => {
             ndtTouchMayPageScroll = false;
             if (e.touches.length === 0) ndtTouchStartedOnCanvas = false;
             hideTouchLoupe(NDT_LOUPE_ID);
+            if (pendingNdtCrackDefectHit && !isDraggingNdtPin && !isDraggingNdtPinGroup) {
+                const defect = pendingNdtCrackDefectHit.defect;
+                pendingNdtCrackDefectHit = null;
+                if (defect && defect.id) openNdtCrackMonitorModal(defect.id, state.currentFloor);
+                return;
+            }
             if (pendingNdtPinHit && !isDraggingNdtPin && !isDraggingNdtPinGroup) {
                 const item = pendingNdtPinHit.item;
                 const part = pendingNdtPinHit.part;
@@ -12276,13 +12366,32 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function renderNdtSummaryTable() {
-        if (typeof renderNdtCrackMonitorSection === 'function') renderNdtCrackMonitorSection();
         const tbody = document.getElementById('ndtTableBody');
         const thead = document.querySelector('#ndtSummaryTable thead tr');
         if (!tbody) return;
 
         const currentCat = currentNdtCategory || '실측';
         let items = getCurrentFloorNdtData();
+
+        if (currentCat === '균열모니터') {
+            const crackDefects = getCurrentFloorCrackMonitorDefects();
+            if (thead) {
+                thead.innerHTML = `
+                    <th>번호</th>
+                    <th>부재·조사내용</th>
+                    <th>게이지</th>
+                    <th>최근 X/Y (Δ)</th>
+                    <th>팁 길이 (누적)</th>
+                    <th>관리</th>
+                `;
+            }
+            if (!crackDefects.length) {
+                tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:#a3a3a3;padding:1.5rem;">이 층에 균열 결함이 없습니다. 결함위치도에서 균열 종류 결함을 등록한 뒤, 도면의 핀을 클릭해 기록하세요.</td></tr>';
+                return;
+            }
+            tbody.innerHTML = renderNdtCrackMonitorSummaryRows(crackDefects);
+            return;
+        }
 
         if (currentCat === '변위' || currentCat === '부재변위') {
             renderNdtDisplacementSummaryTable(tbody, thead);
@@ -14062,7 +14171,7 @@ document.addEventListener('DOMContentLoaded', () => {
     function syncNdtDrawerToCanvasArea(overlayId) {
         const ids = overlayId
             ? [overlayId]
-            : ['ndtModal', 'ndtDisplacementModal', 'ndtDisplacementGroupEditModal'];
+            : ['ndtModal', 'ndtCrackMonitorModal', 'ndtDisplacementModal', 'ndtDisplacementGroupEditModal'];
         ids.forEach((id) => {
             const overlay = document.getElementById(id);
             if (!overlay) return;
@@ -20247,9 +20356,8 @@ document.addEventListener('DOMContentLoaded', () => {
         return type.includes('균열');
     }
 
-    function ndtCrackMonitorAllFloorsEnabled() {
-        const el = document.getElementById('ndtCrackMonitorAllFloors');
-        return !el || !!el.checked;
+    function getCurrentFloorCrackMonitorDefects() {
+        return filterMapPlacedDefects(getCurrentFloorDefects()).filter(defectNeedsCrackMonitorUi);
     }
 
     function getCrackMonitorDefectFloorCode(defectId, fallbackFloor) {
@@ -20283,33 +20391,83 @@ document.addEventListener('DOMContentLoaded', () => {
             .map((d) => ({ defect: d, floorCode: floorCode || state.currentFloor }));
     }
 
-    function getBuildingCrackMonitorItems(bldg, opts) {
+    function populateNdtCrackMonitorDefectSelect(floorCode, defectId) {
+        const select = document.getElementById('ndtCrackMonitorDefectSelect');
+        if (!select) return;
+        const fc = floorCode || state.currentFloor;
+        const items = getCrackMonitorEligibleDefects(getCurrentFloorDefects(), fc);
+        const bldg = state.currentBuilding;
+        if (!items.length) {
+            select.innerHTML = '<option value="">— 균열 결함 없음 —</option>';
+            return;
+        }
+        select.innerHTML = items.map(({ defect: d, floorCode: itemFloor }) => {
+            const ctx = {
+                floorCode: itemFloor,
+                gradeNo: formatSurveyReportNo(d, true, itemFloor),
+                floorDisplayLabel: getGrade3FloorDisplayLabel(itemFloor, bldg)
+            };
+            const no = getSurveyCellText('no', d, ctx) || (d.no || '').replace(/^NO\.?\s*/i, '');
+            const title = `${d.component || '부재'} ${d.defectType || ''}`.trim();
+            const val = `${itemFloor}::${d.id}`;
+            return `<option value="${escapeSurveyAttr(val)}">${escapeSurveyAttr(no)} · ${escapeSurveyAttr(title)}</option>`;
+        }).join('');
+        if (defectId) select.value = `${fc}::${defectId}`;
+    }
+
+    function isNdtCrackMonitorModalOpen() {
+        const modal = document.getElementById('ndtCrackMonitorModal');
+        if (!modal) return false;
+        return modal.classList.contains('open') || modal.style.display === 'flex';
+    }
+
+    function openNdtCrackMonitorModal(defectId, floorCode) {
+        if (!defectId) return;
+        if (window._ndtCrackMonitorDefectId && window._ndtCrackMonitorDefectId !== defectId) {
+            saveNdtCrackMonitorForSelectedDefect({ silent: true });
+        }
+        populateNdtCrackMonitorDefectSelect(floorCode, defectId);
+        selectNdtCrackMonitorDefect(defectId, floorCode);
+        const modal = document.getElementById('ndtCrackMonitorModal');
+        if (!modal) return;
+        const title = document.getElementById('ndtCrackMonitorModalTitle');
+        const rec = findCrackMonitorDefectRecord(defectId, floorCode);
+        if (title && rec) {
+            const ctx = {
+                floorCode: rec.floorCode,
+                gradeNo: formatSurveyReportNo(rec.defect, true, rec.floorCode),
+                floorDisplayLabel: getGrade3FloorDisplayLabel(rec.floorCode, state.currentBuilding)
+            };
+            const no = getSurveyCellText('no', rec.defect, ctx) || (rec.defect.no || '').replace(/^NO\.?\s*/i, '');
+            title.innerHTML = `<i class="fa-solid fa-chart-line"></i> ${escapeSurveyAttr(no)} · 균열 게이지·팁`;
+        }
+        syncNdtDrawerToCanvasArea('ndtCrackMonitorModal');
+        modal.style.display = 'flex';
+        document.body.classList.add('ndt-modal-open');
+        window.requestAnimationFrame(() => {
+            syncNdtDrawerToCanvasArea('ndtCrackMonitorModal');
+            modal.classList.add('open');
+            if (typeof drawNdtCanvas === 'function') drawNdtCanvas();
+        });
+        if (typeof window.setNdtMode === 'function') window.setNdtMode('PAN');
+    }
+
+    function closeNdtCrackMonitorModal(opts) {
         opts = opts || {};
-        if (!bldg || !bldg.id) return [];
-        const allFloors = ndtCrackMonitorAllFloorsEnabled();
-        const currentFloor = state.currentFloor;
-        const prefix = `${bldg.id}_`;
-        const items = [];
-        const floorCodes = [];
-        if (typeof window.getBuildingAvailableFloors === 'function') {
-            window.getBuildingAvailableFloors(bldg).forEach((f) => floorCodes.push(f.floorCode));
+        if (opts.save !== false) saveNdtCrackMonitorForSelectedDefect({ silent: true });
+        const modal = document.getElementById('ndtCrackMonitorModal');
+        if (!modal) return;
+        modal.classList.remove('open');
+        if (!isNdtModalOpen() && !isNdtDisplacementModalOpen() && !isNdtDisplacementGroupEditOpen()) {
+            document.body.classList.remove('ndt-modal-open');
         }
-        Object.keys(state.defects || {}).forEach((key) => {
-            if (!key.startsWith(prefix)) return;
-            const code = key.slice(prefix.length);
-            if (floorCodes.indexOf(code) < 0) floorCodes.push(code);
-        });
-        if (typeof window.sortFloorsLowToHigh === 'function') {
-            const sorted = window.sortFloorsLowToHigh(floorCodes.map((c) => ({ floorCode: c })));
-            floorCodes.length = 0;
-            sorted.forEach((f) => floorCodes.push(f.floorCode));
-        }
-        floorCodes.forEach((floorCode) => {
-            if (!allFloors && floorCode !== currentFloor) return;
-            getCrackMonitorEligibleDefects(state.defects[`${bldg.id}_${floorCode}`] || [], floorCode)
-                .forEach((item) => items.push(item));
-        });
-        return items;
+        window.setTimeout(() => {
+            if (modal && !modal.classList.contains('open')) {
+                modal.style.display = 'none';
+                syncNdtDrawerToCanvasArea('ndtCrackMonitorModal');
+            }
+        }, 280);
+        if (typeof drawNdtCanvas === 'function') drawNdtCanvas();
     }
 
     function scheduleNdtCrackMonitorSave() {
@@ -20336,7 +20494,7 @@ document.addEventListener('DOMContentLoaded', () => {
         window._ndtCrackMonitorFloorCode = floorCode;
         if (typeof saveStateToLocalStorage === 'function') saveStateToLocalStorage();
         if (typeof syncStateToFirebase === 'function') syncStateToFirebase();
-        renderNdtCrackMonitorSection({ keepSelection: true });
+        if (typeof renderNdtSummaryTable === 'function') renderNdtSummaryTable();
         if (typeof renderSurveyCrackMonitorSection === 'function') {
             renderSurveyCrackMonitorSection(state.defects[key]);
         }
@@ -20368,15 +20526,15 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    function renderNdtCrackMonitorListRows(items) {
+    function renderNdtCrackMonitorSummaryRows(defects) {
         const bldg = state.currentBuilding;
-        return items.map(({ defect: d, floorCode }) => {
+        const floorCode = state.currentFloor;
+        return (defects || []).map((d) => {
             const ctx = {
                 floorCode,
                 gradeNo: formatSurveyReportNo(d, true, floorCode),
                 floorDisplayLabel: getGrade3FloorDisplayLabel(floorCode, bldg)
             };
-            const floorLabel = getGrade3FloorDisplayLabel(floorCode, bldg) || floorCode;
             const no = getSurveyCellText('no', d, ctx) || (d.no || '').replace(/^NO\.?\s*/i, '');
             const title = `${d.component || '부재'} ${d.defectType || ''}`.trim();
             const gauge = normalizeCrackGaugeLog(d.crackGaugeLog);
@@ -20388,15 +20546,18 @@ document.addEventListener('DOMContentLoaded', () => {
                 : '-';
             const tipSum = summarizeCrackTipLog(d.crackTipLog);
             return `<tr>
-                <td>${escapeSurveyAttr(floorLabel)}</td>
                 <td>${escapeSurveyAttr(no)}</td>
                 <td>${escapeSurveyAttr(title)}</td>
                 <td>${escapeSurveyAttr(gaugeLabel)}</td>
                 <td>${escapeSurveyAttr(xyText)}</td>
                 <td>${escapeSurveyAttr(tipSum)}</td>
-                <td><button type="button" class="btn btn-sm btn-outline ndt-crack-monitor-open" onclick="window.openNdtCrackMonitorDefect('${escapeSurveyAttr(d.id)}','${escapeSurveyAttr(floorCode)}')">기록</button></td>
+                <td><button type="button" class="btn btn-sm btn-outline ndt-crack-monitor-open" onclick="window.openNdtCrackMonitorDefect('${escapeSurveyAttr(d.id)}')">기록</button></td>
             </tr>`;
         }).join('');
+    }
+
+    function renderNdtCrackMonitorSection() {
+        /* 하단 고정 섹션 제거 — 도면 핀 클릭 시 모달로 대체 */
     }
 
     function parseNdtCrackMonitorSelectValue(raw) {
@@ -20406,72 +20567,14 @@ document.addEventListener('DOMContentLoaded', () => {
         return { floorCode: state.currentFloor, defectId: s };
     }
 
-    function renderNdtCrackMonitorSection(opts) {
-        opts = opts || {};
-        const section = document.getElementById('ndtCrackMonitorSection');
-        const listBody = document.getElementById('ndtCrackMonitorListBody');
-        const select = document.getElementById('ndtCrackMonitorDefectSelect');
-        const hint = document.getElementById('ndtCrackMonitorHint');
-        const bldg = state.currentBuilding;
-        if (!section || !listBody) return;
-        if (!bldg || !state.currentBuildingId) {
-            section.hidden = true;
-            return;
-        }
-        section.hidden = false;
-        const items = getBuildingCrackMonitorItems(bldg);
-        if (!items.length) {
-            listBody.innerHTML = '<tr><td colspan="7" class="stats-empty">균열 결함이 없습니다. 결함위치도에서 균열 종류 결함을 등록한 뒤 여기서 기록하세요.</td></tr>';
-            if (select) select.innerHTML = '<option value="">— 균열 결함 없음 —</option>';
-            if (hint) hint.textContent = '이 건물·층 범위에 균열 결함이 없습니다. 「전체 층」을 켜거나 결함위치도에서 균열 결함을 등록하세요.';
-            selectNdtCrackMonitorDefect(null);
-            return;
-        }
-        if (hint) hint.textContent = '균열 결함의 회차별 X/Y·균열길이·누적 증가량을 기록합니다. 목록 또는 선택 상자에서 결함을 고르세요.';
-        listBody.innerHTML = renderNdtCrackMonitorListRows(items);
-        if (select) {
-            select.innerHTML = items.map(({ defect: d, floorCode }) => {
-                const ctx = {
-                    floorCode,
-                    gradeNo: formatSurveyReportNo(d, true, floorCode),
-                    floorDisplayLabel: getGrade3FloorDisplayLabel(floorCode, bldg)
-                };
-                const no = getSurveyCellText('no', d, ctx) || (d.no || '').replace(/^NO\.?\s*/i, '');
-                const title = `${d.component || '부재'} ${d.defectType || ''}`.trim();
-                const floorLabel = getGrade3FloorDisplayLabel(floorCode, bldg) || floorCode;
-                const val = `${floorCode}::${d.id}`;
-                return `<option value="${escapeSurveyAttr(val)}">${escapeSurveyAttr(floorLabel)} · ${escapeSurveyAttr(no)} · ${escapeSurveyAttr(title)}</option>`;
-            }).join('');
-        }
-        if (opts.keepSelection && window._ndtCrackMonitorDefectId) {
-            const still = items.some(({ defect: d, floorCode }) => (
-                d.id === window._ndtCrackMonitorDefectId
-                && floorCode === window._ndtCrackMonitorFloorCode
-            ));
-            if (still) return;
-        }
-        let pickId = opts.selectDefectId || window._ndtCrackMonitorPendingDefectId || window._ndtCrackMonitorDefectId;
-        let pickFloor = opts.selectFloorCode || window._ndtCrackMonitorPendingFloorCode || window._ndtCrackMonitorFloorCode;
-        delete window._ndtCrackMonitorPendingDefectId;
-        delete window._ndtCrackMonitorPendingFloorCode;
-        let pick = items.find(({ defect: d, floorCode }) => d.id === pickId && (!pickFloor || floorCode === pickFloor));
-        if (!pick) pick = items.find(({ floorCode }) => floorCode === state.currentFloor) || items[0];
-        if (pick) selectNdtCrackMonitorDefect(pick.defect.id, pick.floorCode);
-    }
-
     window.openNdtCrackMonitorDefect = function(defectId, floorCode) {
         if (window._ndtCrackMonitorDefectId && window._ndtCrackMonitorDefectId !== defectId) {
             saveNdtCrackMonitorForSelectedDefect({ silent: true });
         }
         if (typeof window.switchTab === 'function') window.switchTab('tab-ndt');
-        window._ndtCrackMonitorPendingDefectId = defectId;
-        window._ndtCrackMonitorPendingFloorCode = floorCode || null;
+        if (typeof window.setNdtCategory === 'function') window.setNdtCategory('균열모니터');
         setTimeout(() => {
-            if (typeof renderNdtCrackMonitorSection === 'function') {
-                renderNdtCrackMonitorSection({ selectDefectId: defectId, selectFloorCode: floorCode });
-            }
-            const editor = document.getElementById('ndtCrackMonitorEditor');
-            if (editor) editor.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            openNdtCrackMonitorModal(defectId, floorCode || state.currentFloor);
         }, 120);
     };
 
@@ -20677,15 +20780,17 @@ document.addEventListener('DOMContentLoaded', () => {
                 selectNdtCrackMonitorDefect(parsed.defectId, parsed.floorCode);
             });
         }
-        const allFloorsEl = document.getElementById('ndtCrackMonitorAllFloors');
-        if (allFloorsEl && !allFloorsEl.dataset.bound) {
-            allFloorsEl.dataset.bound = '1';
-            allFloorsEl.addEventListener('change', () => renderNdtCrackMonitorSection());
+        const closeBtn = document.getElementById('btnCloseNdtCrackMonitorModal');
+        if (closeBtn && !closeBtn.dataset.bound) {
+            closeBtn.dataset.bound = '1';
+            closeBtn.addEventListener('click', () => closeNdtCrackMonitorModal());
         }
         const saveBtn = document.getElementById('btnSaveNdtCrackMonitor');
         if (saveBtn && !saveBtn.dataset.bound) {
             saveBtn.dataset.bound = '1';
-            saveBtn.addEventListener('click', () => saveNdtCrackMonitorForSelectedDefect());
+            saveBtn.addEventListener('click', () => {
+                if (saveNdtCrackMonitorForSelectedDefect()) closeNdtCrackMonitorModal({ save: false });
+            });
         }
     }
 
@@ -26306,6 +26411,9 @@ document.addEventListener('DOMContentLoaded', () => {
             if (k === 'escape') {
                 e.preventDefault();
                 if (isNdtModalOpen()) closeNdtModal();
+                if (typeof isNdtCrackMonitorModalOpen === 'function' && isNdtCrackMonitorModalOpen()) {
+                    closeNdtCrackMonitorModal();
+                }
                 const dispModal = document.getElementById('ndtDisplacementModal');
                 if (dispModal && dispModal.classList.contains('open')) closeNdtDisplacementModal();
                 const dispEditModal = document.getElementById('ndtDisplacementGroupEditModal');
@@ -39661,6 +39769,9 @@ document.addEventListener('DOMContentLoaded', () => {
         window.renderNdtSummaryTable = renderNdtSummaryTable;
         window.renderNdtCrackMonitorSection = renderNdtCrackMonitorSection;
         window.bindNdtCrackMonitorInputs = bindNdtCrackMonitorInputs;
+        window.openNdtCrackMonitorModal = openNdtCrackMonitorModal;
+        window.closeNdtCrackMonitorModal = closeNdtCrackMonitorModal;
+        window.isNdtCrackMonitorModalOpen = isNdtCrackMonitorModalOpen;
         window.getSurveyRowsForReport = getSurveyRowsForReport;
         window.isPreviousRoundDefect = isPreviousRoundDefect;
         window.isGrade3Building = isGrade3Building;

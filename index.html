@@ -663,6 +663,7 @@
                     <button type="button" id="btnNdtCatVert" class="chip" onclick="window.setNdtCategory('변위')">📉 부동침하 기울기</button>
                     <button type="button" id="btnNdtCatMemberDisp" class="chip" onclick="window.setNdtCategory('부재변위')">🏗️ 부재변위</button>
                     <button type="button" id="btnNdtCatFireproof" class="chip" onclick="window.setNdtCategory('내화피복')">🧯 내화피복 두께</button>
+                    <button type="button" id="btnNdtCatCrackMonitor" class="chip" onclick="window.setNdtCategory('균열모니터')">📈 균열 게이지·팁</button>
                 </div>
             </div>
 
@@ -764,6 +765,10 @@
                         <span class="ndt-cat-rail-emoji" aria-hidden="true">🧯</span>
                         <span class="ndt-cat-rail-label">내화피복</span>
                     </button>
+                    <button type="button" class="ndt-cat-rail-btn" data-ndt-cat="균열모니터" onclick="window.setNdtCategory('균열모니터')" title="균열 게이지·팁 누적 측정">
+                        <span class="ndt-cat-rail-emoji" aria-hidden="true">📈</span>
+                        <span class="ndt-cat-rail-label">균열</span>
+                    </button>
                     <div class="ndt-rail-sep" aria-hidden="true"></div>
                     <button type="button" class="mobile-rail-btn mobile-fab-mark" id="mobileNdtBtnModeMark" data-ndt-mode="MARK" title="위치 마킹 (D)">
                         <i class="fa-solid fa-location-dot"></i>
@@ -849,78 +854,6 @@
                 </nav>
             </div>
             </div><!-- /.ndt-canvas-col -->
-
-            <div class="ndt-bottom-stack">
-            <!-- 균열 게이지 · 팁 누적 측정 (결함 수정창과 분리) -->
-            <div class="ndt-crack-monitor-section ndt-results-panel" id="ndtCrackMonitorSection">
-                <div class="ndt-results-head">
-                    <h3 class="ndt-results-title"><i class="fa-solid fa-chart-line"></i> 균열 게이지 · 팁 누적 측정</h3>
-                    <label class="ndt-crack-monitor-floor-filter">
-                        <input type="checkbox" id="ndtCrackMonitorAllFloors" checked>
-                        <span>전체 층</span>
-                    </label>
-                </div>
-                <p class="ndt-crack-monitor-hint" id="ndtCrackMonitorHint">균열 결함의 회차별 X/Y·균열길이·누적 증가량을 기록합니다. 아래에서 결함을 선택하세요.</p>
-                <div class="table-responsive ndt-crack-monitor-list-wrap">
-                    <table class="data-table ndt-crack-monitor-list-table">
-                        <thead>
-                            <tr>
-                                <th>층</th>
-                                <th>번호</th>
-                                <th>부재·조사내용</th>
-                                <th>게이지</th>
-                                <th>최근 X/Y (Δ)</th>
-                                <th>팁 길이 (누적)</th>
-                                <th>관리</th>
-                            </tr>
-                        </thead>
-                        <tbody id="ndtCrackMonitorListBody"></tbody>
-                    </table>
-                </div>
-                <div class="ndt-crack-monitor-editor" id="ndtCrackMonitorEditor">
-                    <div class="ndt-crack-monitor-editor-bar">
-                        <label class="ndt-crack-monitor-select-label">
-                            <span>결함 선택</span>
-                            <select id="ndtCrackMonitorDefectSelect" class="form-select"></select>
-                        </label>
-                        <span id="ndtCrackMonitorDefectMeta" class="ndt-crack-monitor-defect-meta"></span>
-                        <button type="button" class="btn btn-sm btn-primary" id="btnSaveNdtCrackMonitor">
-                            <i class="fa-solid fa-floppy-disk"></i> 저장
-                        </button>
-                    </div>
-                    <div class="ndt-crack-monitor-form">
-                        <div class="defect-crack-monitor-block">
-                            <div class="defect-crack-monitor-head">균열 게이지</div>
-                            <div class="defect-crack-monitor-meta">
-                                <label>게이지 No.<input type="text" id="crackGaugeNo" class="form-control" placeholder="예: G-01" autocomplete="off"></label>
-                                <label>설치일<input type="date" id="crackGaugeInstallDate" class="form-control"></label>
-                                <label>초기 X(mm)<input type="text" id="crackGaugeInitialX" class="form-control" inputmode="decimal" autocomplete="off"></label>
-                                <label>초기 Y(mm)<input type="text" id="crackGaugeInitialY" class="form-control" inputmode="decimal" autocomplete="off"></label>
-                            </div>
-                            <div class="defect-crack-monitor-table-wrap">
-                                <table class="defect-crack-monitor-table">
-                                    <thead><tr><th>회차</th><th>측정일</th><th>X(mm)</th><th>Y(mm)</th><th>ΔX</th><th>ΔY</th><th>비고</th><th></th></tr></thead>
-                                    <tbody id="crackGaugeReadingBody"></tbody>
-                                </table>
-                            </div>
-                            <button type="button" class="btn btn-sm btn-outline defect-crack-monitor-add" id="btnAddCrackGaugeReading"><i class="fa-solid fa-plus"></i> 게이지 측정 행 추가</button>
-                        </div>
-                        <div class="defect-crack-monitor-block">
-                            <div class="defect-crack-monitor-head">균열 팁 누적</div>
-                            <div class="defect-crack-monitor-meta">
-                                <label>초기 길이(mm)<input type="text" id="crackTipInitialLength" class="form-control" inputmode="decimal" autocomplete="off"></label>
-                            </div>
-                            <div class="defect-crack-monitor-table-wrap">
-                                <table class="defect-crack-monitor-table">
-                                    <thead><tr><th>회차</th><th>측정일</th><th>길이(mm)</th><th>증가</th><th>누적</th><th>비고</th><th></th></tr></thead>
-                                    <tbody id="crackTipReadingBody"></tbody>
-                                </table>
-                            </div>
-                            <button type="button" class="btn btn-sm btn-outline defect-crack-monitor-add" id="btnAddCrackTipReading"><i class="fa-solid fa-plus"></i> 팁 측정 행 추가</button>
-                        </div>
-                    </div>
-                </div>
-            </div>
 
             <!-- NDT Summary Measurement Results Table -->
             <div class="ndt-results-section ndt-results-panel">
@@ -1998,6 +1931,63 @@
                     <button type="button" class="btn btn-outline" id="btnCancelNdt" style="display:none;">취소</button>
                     <button type="button" class="btn btn-primary" id="btnSaveNdt"><i class="fa-solid fa-check"></i> 닫기</button>
                 </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL: 균열 게이지·팁 누적 측정 (도면 핀 클릭 시 팝업) -->
+    <div class="modal-overlay modal-drawer-overlay" id="ndtCrackMonitorModal">
+        <div class="modal-card defect-drawer-card ndt-drawer-card ndt-crack-drawer-card">
+            <div class="modal-header defect-drawer-header">
+                <div class="defect-drawer-title-wrap">
+                    <h3 id="ndtCrackMonitorModalTitle"><i class="fa-solid fa-chart-line"></i> 균열 게이지 · 팁 누적 측정</h3>
+                    <span class="defect-autosave-badge" id="ndtCrackMonitorAutosaveBadge">자동 저장</span>
+                </div>
+                <button type="button" class="modal-close" id="btnCloseNdtCrackMonitorModal" title="닫기 (Esc)">&times;</button>
+            </div>
+            <div class="modal-body defect-drawer-body ndt-crack-monitor-modal-body">
+                <p class="ndt-crack-monitor-hint" id="ndtCrackMonitorHint">균열 결함의 회차별 X/Y·균열길이·누적 증가량을 기록합니다.</p>
+                <div class="ndt-crack-monitor-editor-bar">
+                    <label class="ndt-crack-monitor-select-label">
+                        <span>결함</span>
+                        <select id="ndtCrackMonitorDefectSelect" class="form-select"></select>
+                    </label>
+                    <span id="ndtCrackMonitorDefectMeta" class="ndt-crack-monitor-defect-meta"></span>
+                </div>
+                <div class="ndt-crack-monitor-form">
+                    <div class="defect-crack-monitor-block">
+                        <div class="defect-crack-monitor-head">균열 게이지</div>
+                        <div class="defect-crack-monitor-meta">
+                            <label>게이지 No.<input type="text" id="crackGaugeNo" class="form-control" placeholder="예: G-01" autocomplete="off"></label>
+                            <label>설치일<input type="date" id="crackGaugeInstallDate" class="form-control"></label>
+                            <label>초기 X(mm)<input type="text" id="crackGaugeInitialX" class="form-control" inputmode="decimal" autocomplete="off"></label>
+                            <label>초기 Y(mm)<input type="text" id="crackGaugeInitialY" class="form-control" inputmode="decimal" autocomplete="off"></label>
+                        </div>
+                        <div class="defect-crack-monitor-table-wrap">
+                            <table class="defect-crack-monitor-table">
+                                <thead><tr><th>회차</th><th>측정일</th><th>X(mm)</th><th>Y(mm)</th><th>ΔX</th><th>ΔY</th><th>비고</th><th></th></tr></thead>
+                                <tbody id="crackGaugeReadingBody"></tbody>
+                            </table>
+                        </div>
+                        <button type="button" class="btn btn-sm btn-outline defect-crack-monitor-add" id="btnAddCrackGaugeReading"><i class="fa-solid fa-plus"></i> 게이지 측정 행 추가</button>
+                    </div>
+                    <div class="defect-crack-monitor-block">
+                        <div class="defect-crack-monitor-head">균열 팁 누적</div>
+                        <div class="defect-crack-monitor-meta">
+                            <label>초기 길이(mm)<input type="text" id="crackTipInitialLength" class="form-control" inputmode="decimal" autocomplete="off"></label>
+                        </div>
+                        <div class="defect-crack-monitor-table-wrap">
+                            <table class="defect-crack-monitor-table">
+                                <thead><tr><th>회차</th><th>측정일</th><th>길이(mm)</th><th>증가</th><th>누적</th><th>비고</th><th></th></tr></thead>
+                                <tbody id="crackTipReadingBody"></tbody>
+                            </table>
+                        </div>
+                        <button type="button" class="btn btn-sm btn-outline defect-crack-monitor-add" id="btnAddCrackTipReading"><i class="fa-solid fa-plus"></i> 팁 측정 행 추가</button>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer defect-drawer-footer" style="justify-content: flex-end; gap: 0.5rem;">
+                <button type="button" class="btn btn-primary" id="btnSaveNdtCrackMonitor"><i class="fa-solid fa-check"></i> 저장 후 닫기</button>
             </div>
         </div>
     </div>
