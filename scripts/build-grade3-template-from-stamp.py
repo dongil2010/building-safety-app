@@ -26,7 +26,12 @@ TARGETS = [
 ]
 BACKUP_DIR = ROOT / "_tmp_template_bak"
 
-HEADER_GRAD_IDS = {"5", "6", "7", "16", "17"}
+# 헤더 칸 그라데이션(#FFF→#BBB)도 제거한다 — 결함표 글자 뒤 배경이 보이던 원인.
+# (예전에는 헤더만 보존했으나, 사용자 요청으로 글자 배경·테두리 없는 상태로 통일)
+HEADER_GRAD_IDS = set()
+# 글자용 투명 borderFill(테두리 NONE, 채우기 없음) — 한글에서 borderFillIDRef 누락 시
+# 기본 글자 테두리/바탕이 생기는 경우가 있어 명시적으로 붙인다.
+CHAR_TRANSPARENT_BF_ID = "18"
 CONTAINER = {"borderFill": "borderFills", "charPr": "charProperties", "paraPr": "paraProperties", "style": "styles"}
 FONT_ATTR_TO_LANG = {
     "hangul": "HANGUL", "latin": "LATIN", "hanja": "HANJA", "japanese": "JAPANESE",
@@ -91,9 +96,17 @@ def sanitize_border_fill(block, orig_id):
     return block
 
 
-def sanitize_char_pr(block):
-    block = re.sub(r'\s*borderFillIDRef="[^"]*"', "", block)
+def sanitize_char_pr(block, transparent_bf_new_id=None):
+    """글자 바탕/테두리 박스 제거. shadeColor=none, 투명 borderFill만 유지."""
     block = re.sub(r'\s*shadeColor="[^"]*"', ' shadeColor="none"', block)
+    block = re.sub(r'\s*borderFillIDRef="[^"]*"', "", block)
+    if transparent_bf_new_id:
+        block = re.sub(
+            r'(<hh:charPr\b[^>]*?)(/?>)',
+            lambda m: f'{m.group(1)} borderFillIDRef="{transparent_bf_new_id}"{m.group(2)}',
+            block,
+            count=1,
+        )
     return block
 
 
@@ -168,6 +181,7 @@ def merge(tgt_hdr, stamp_hdr, stamp_tbl):
     char_ids = set(re.findall(r'charPrIDRef="(\d+)"', stamp_tbl))
     para_ids = set(re.findall(r'paraPrIDRef="(\d+)"', stamp_tbl))
     style_ids = set(re.findall(r'styleIDRef="(\d+)"', stamp_tbl))
+    border_ids.add(CHAR_TRANSPARENT_BF_ID)
     for sid in style_ids:
         b = tag_block(stamp_hdr, "style", sid)
         if b:
@@ -204,13 +218,14 @@ def merge(tgt_hdr, stamp_hdr, stamp_tbl):
         if not b: raise SystemExit(f"stamp borderFill {bid} missing")
         b = re.sub(r'^<hh:borderFill id="\d+"', f'<hh:borderFill id="{border_map[bid]}"', b)
         out = append_block(out, "borderFill", sanitize_border_fill(b, bid))
+    transparent_bf_new = border_map.get(CHAR_TRANSPARENT_BF_ID)
     for cid in sorted(char_ids, key=int):
         b = tag_block(stamp_hdr, "charPr", cid)
         if not b: raise SystemExit(f"stamp charPr {cid} missing")
         b = re.sub(r'^<hh:charPr id="\d+"', f'<hh:charPr id="{char_map[cid]}"', b)
         b = remap_attr(b, "borderFillIDRef", border_map)
         b = remap_font_ref(b, lang_maps)
-        out = append_block(out, "charPr", sanitize_char_pr(b))
+        out = append_block(out, "charPr", sanitize_char_pr(b, transparent_bf_new))
     for pid in sorted(para_ids, key=int):
         b = tag_block(stamp_hdr, "paraPr", pid)
         if not b: raise SystemExit(f"stamp paraPr {pid} missing")
@@ -262,15 +277,37 @@ def verify(hdr, sec, maps):
         cnt = int(re.search(rf'<hh:{cont}[^>]*itemCnt="(\d+)"', hdr).group(1))
         if cnt != len(defined):
             errors.append(f"{cont} itemCnt={cnt} but defined={len(defined)}")
-    for oid in HEADER_GRAD_IDS:
-        nid = maps["borderFill"].get(oid)
-        b = tag_block(hdr, "borderFill", nid) if nid else None
-        if not b or "<hc:gradation" not in b:
-            errors.append(f"header grad borderFill {oid}->{nid} missing gradation")
     survey = [t for t in re.findall(r"<hp:tbl[^>]*>[\s\S]*?</hp:tbl>", sec) if is_survey_table(t)]
     if not survey:
         errors.append("no survey table after replace")
     for t in survey:
+        # 결함표 칸에 그라데이션/면채우기가 남아 있으면 글자 배경처럼 보임
+        for bid in set(re.findall(r'borderFillIDRef="(\d+)"', t)):
+            b = tag_block(hdr, "borderFill", bid)
+            if b and ("gradation" in b.lower() or "<hc:fillBrush>" in b):
+                # 글자용 투명 fill(faceColor=none)만 허용
+                fc = re.search(r'faceColor="([^"]*)"', b)
+                if not (fc and fc.group(1) == "none"):
+                    errors.append(f"survey cell borderFill {bid} still has visible fill/grad")
+        cps = set(re.findall(r'charPrIDRef="(\d+)"', t))
+        for cid in cps:
+            b = tag_block(hdr, "charPr", cid)
+            if not b:
+                errors.append(f"survey charPr {cid} missing")
+                continue
+            if re.search(r'shadeColor="(?!none)[^"]+"', b):
+                errors.append(f"survey charPr {cid} shadeColor not none")
+            bm = re.search(r'borderFillIDRef="(\d+)"', b)
+            if not bm:
+                errors.append(f"survey charPr {cid} missing transparent borderFillIDRef")
+            else:
+                bf = tag_block(hdr, "borderFill", bm.group(1))
+                if not bf:
+                    errors.append(f"survey charPr {cid} borderFill {bm.group(1)} missing")
+                else:
+                    solid = re.findall(r'<(?:left|right|top|bottom)Border type="(?!NONE)([^"]+)"', bf)
+                    if solid:
+                        errors.append(f"survey charPr {cid} borderFill has visible borders {solid}")
         bf3 = tag_block(hdr, "borderFill", "3")
         if bf3 and bf3.count('type="NONE"') >= 4 and re.search(r'borderFillIDRef="3"', t):
             errors.append("survey table still references bf3 (all NONE)")
