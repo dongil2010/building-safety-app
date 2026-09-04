@@ -28850,7 +28850,8 @@ document.addEventListener('DOMContentLoaded', () => {
                         setPicImage(pics[0], imgId1, slot1.w, slot1.h, maxW, maxH);
                         setTcText(capTcs[0], photoLabelByDefect.get(slot1.d));
                         setTcText(capTcs[2], getSurveyCellText('location', slot1.d, { floorCode }));
-                        setTcText(descTcs[1], getSurveyCellText('defectType', slot1.d));
+                        // 내용 칸 = 상단 상태조사표 점검내용과 동일(부재 + 결함내용 + 결함사이즈)
+                        setTcText(descTcs[1], getSurveyCellText('inspectionContent', slot1.d, { floorCode }));
 
                         if (slot2) {
                             imgCounter++;
@@ -28860,7 +28861,7 @@ document.addEventListener('DOMContentLoaded', () => {
                             setPicImage(pics[1], imgId2, slot2.w, slot2.h, maxW, maxH);
                             setTcText(capTcs[4], photoLabelByDefect.get(slot2.d));
                             setTcText(capTcs[6], getSurveyCellText('location', slot2.d, { floorCode }));
-                            setTcText(descTcs[3], getSurveyCellText('defectType', slot2.d));
+                            setTcText(descTcs[3], getSurveyCellText('inspectionContent', slot2.d, { floorCode }));
                         } else {
                             stripPhotoTblRightHalf(newTbl);
                         }
