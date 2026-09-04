@@ -4351,6 +4351,23 @@ html:not(.layout-desktop) .survey-inline-select {
 .defect-marking-arrow-row.is-active {
     box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.35);
 }
+.defect-marking-float-section {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+.defect-marking-float-defects {
+    padding-top: 4px;
+    border-top: 1px dashed rgba(148, 163, 184, 0.55);
+}
+.defect-marking-arrow-row.is-arrow-only .defect-marking-arrow-select {
+    font-weight: 800;
+}
+.defect-marking-arrow-row.is-survey-extra .defect-marking-row-select {
+    border-right: 1px solid #cbd5e1;
+    border-radius: 10px 0 0 10px;
+    width: 100%;
+}
 .defect-marking-float-btn {
     appearance: none;
     border: 1px solid #cbd5e1;
