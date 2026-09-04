@@ -8041,6 +8041,9 @@ document.addEventListener('DOMContentLoaded', () => {
     let dragNdtPart = 'box';
     let ndtPinDragOffsetX = 0;
     let ndtPinDragOffsetY = 0;
+    let ndtTiltRotatePivot = null;
+    let ndtTiltRotateStartMouse = 0;
+    let ndtTiltRotateBaseAngle = 0;
     let ndtDispDragOffsetX = 0;
     let ndtDispDragOffsetY = 0;
     let pendingNdtPinHit = null; // 클릭=수정창 / 드래그=이동 구분
@@ -8096,6 +8099,8 @@ document.addEventListener('DOMContentLoaded', () => {
         activeDragNdtDisplacementPoint = null;
         isDraggingNdtPin = false;
         activeDragNdtPin = null;
+        dragNdtPart = 'box';
+        endNdtTiltRotateSession();
         isDraggingNdtPinGroup = false;
         isNdtMarqueeSelecting = false;
         isNdtDragging = false;
@@ -8232,13 +8237,13 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function syncNdtTiltRotateButtons() {
-        const show = currentNdtCategory === '기울기';
+        // 90° 버튼 대신 선택 박스 위 회전 핸들(드래그) 사용
         ['btnRotateSelectedNdtTilt', 'mobileNdtBtnRotateTilt'].forEach((id) => {
             const el = document.getElementById(id);
-            if (el) el.hidden = !show;
+            if (el) el.hidden = true;
         });
         const fab = document.getElementById('mobileNdtFabBar');
-        if (fab) fab.classList.toggle('has-tilt-rotate', show);
+        if (fab) fab.classList.remove('has-tilt-rotate');
     }
 
     function getVisibleNdtPinsForSelect() {
@@ -8435,14 +8440,24 @@ document.addEventListener('DOMContentLoaded', () => {
 
         for (let i = filtered.length - 1; i >= 0; i--) {
             const item = filtered[i];
-            const ndtStyleKey = getNdtStyleKey(item.category || '강도');
+            const cat = item.category || '강도';
+            const ndtStyleKey = getNdtStyleKey(cat);
             const itemSize = getStyleSize(ndtStyleKey);
             const pinScale = itemSize.pin;
             const arrowScale = itemSize.arrow;
             const baseBoxX = item.boxX !== undefined ? item.boxX : (item.x || 100);
             const baseBoxY = item.boxY !== undefined ? item.boxY : (item.y || 100);
-            const targetX = item.targetX !== undefined ? item.targetX : (item.x || baseBoxX);
-            const targetY = item.targetY !== undefined ? item.targetY : (item.y || baseBoxY);
+            let targetX = item.targetX !== undefined ? item.targetX : (item.x || baseBoxX);
+            let targetY = item.targetY !== undefined ? item.targetY : (item.y || baseBoxY);
+            if (cat === '기울기') {
+                const geom = getNdtTiltArrowGeometry(item, cat);
+                targetX = geom.tip.x;
+                targetY = geom.tip.y;
+            }
+
+            if (cat === '기울기' && item.id && selectedNdtIds.has(item.id) && isNearNdtTiltRotateHandle(item, cat, vx, vy)) {
+                return { item, part: 'rotate' };
+            }
 
             let noStr = item.no || 'NO.01';
             if (noStr.startsWith('기울기-') || noStr.startsWith('NDT-') || noStr.startsWith('변위-')) {
@@ -8450,7 +8465,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 noStr = `NO.${numPart.length === 1 ? '0' + numPart : numPart}`;
             }
             noStr = formatPinNumberLabel(noStr, ndtStyleKey);
-            const cat = item.category || '강도';
 
             // NDT 측정점(원 또는 화살표) 히트 판정
             // 강도·탄산화·내화피복은 원(circle) 끝점을 사용하거나 tipShape 설정에 따름
@@ -10154,34 +10168,187 @@ document.addEventListener('DOMContentLoaded', () => {
         return cat || '';
     }
 
-    // 외벽 기울기 콜아웃 박스 회전 — 박스 모양(직사각형+글씨)을 그대로 90도씩 돌려서
-    // 도면 좌우 폭이 좁을 때 박스가 넘어가지 않게 한다. 글씨도 박스와 같이 회전된다.
+    // 외벽 기울기 콜아웃 — 박스 회전(calloutRotation) + 면 수직 화살표(calloutEdge/T/Len)
     function getNdtTiltItemRotation(item, cat) {
         return (cat === '기울기') ? (((item && item.calloutRotation) || 0) % 360 + 360) % 360 : 0;
     }
 
-    window.rotateSelectedNdtTiltBoxes = function () {
-        if (!selectedNdtIds.size) {
-            if (typeof window.showToast === 'function') window.showToast('회전할 기울기 항목을 먼저 선택해 주세요.', 'info');
-            return;
-        }
-        const items = getCurrentFloorNdtData();
-        let changed = 0;
-        selectedNdtIds.forEach((id) => {
-            if (String(id).startsWith('disp_')) return;
-            const item = items.find(x => x.id === id);
-            if (item && item.category === '기울기') {
-                item.calloutRotation = (((item.calloutRotation || 0) + 90) % 360 + 360) % 360;
-                changed++;
-            }
+    function getNdtTiltCalloutLayout(item, cat) {
+        const pinScale = getStyleSize(getNdtStyleKey(cat || '기울기')).pin;
+        const boxW = 168 * pinScale;
+        const boxH = 44 * pinScale;
+        const boxX = item.boxX !== undefined ? item.boxX : (item.x || 0);
+        const boxY = item.boxY !== undefined ? item.boxY : (item.y || 0);
+        const netRotDeg = normalizeDrawingRotation(getNdtTiltItemRotation(item, cat) - (ndtRotationAngle || 0));
+        return { boxX, boxY, boxW, boxH, hw: boxW / 2, hh: boxH / 2, pinScale, netRotDeg };
+    }
+
+    function ndtTiltWorldToLocal(boxX, boxY, wx, wy, netRotDeg) {
+        const dx = wx - boxX;
+        const dy = wy - boxY;
+        const rad = (-(netRotDeg || 0) * Math.PI) / 180;
+        const cos = Math.cos(rad);
+        const sin = Math.sin(rad);
+        return { x: dx * cos - dy * sin, y: dx * sin + dy * cos };
+    }
+
+    function ndtTiltLocalToWorld(boxX, boxY, lx, ly, netRotDeg) {
+        const r = rotateVec2Deg(lx, ly, netRotDeg || 0);
+        return { x: boxX + r.x, y: boxY + r.y };
+    }
+
+    function getNdtTiltEdgeDefs(hw, hh) {
+        return [
+            { edge: 0, nx: 0, ny: -1, tOf: (lx) => lx / hw, lenOf: (lx, ly) => -(ly + hh) },
+            { edge: 1, nx: 1, ny: 0, tOf: (_lx, ly) => ly / hh, lenOf: (lx) => lx - hw },
+            { edge: 2, nx: 0, ny: 1, tOf: (lx) => lx / hw, lenOf: (_lx, ly) => ly - hh },
+            { edge: 3, nx: -1, ny: 0, tOf: (_lx, ly) => ly / hh, lenOf: (lx) => -(lx + hw) }
+        ];
+    }
+
+    /** 로컬 좌표 기준: 가장 바깥쪽 면 + 그 면을 따라 t · 수직 len */
+    function resolveNdtTiltArrowLocal(local, hw, hh) {
+        const lx = local.x;
+        const ly = local.y;
+        const edges = getNdtTiltEdgeDefs(hw, hh);
+        let best = edges[2];
+        let bestScore = -Infinity;
+        edges.forEach((e) => {
+            const score = lx * e.nx + ly * e.ny;
+            if (score > bestScore) { bestScore = score; best = e; }
         });
-        if (!changed) {
-            if (typeof window.showToast === 'function') window.showToast('선택 항목 중 외벽 기울기 박스가 없습니다.', 'info');
-            return;
+        const t = Math.max(-1, Math.min(1, best.tOf(lx, ly)));
+        const len = Math.max(12, best.lenOf(lx, ly));
+        return { edge: best.edge, t, len, nx: best.nx, ny: best.ny };
+    }
+
+    function ensureNdtTiltArrowModel(item, cat) {
+        if (!item || cat !== '기울기') return;
+        if (item.calloutEdge != null && Number.isFinite(item.calloutEdgeT) && Number.isFinite(item.calloutArrowLen)) return;
+        const layout = getNdtTiltCalloutLayout(item, cat);
+        const tx = item.targetX !== undefined ? item.targetX : layout.boxX;
+        const ty = item.targetY !== undefined ? item.targetY : layout.boxY + layout.hh + 40;
+        const local = ndtTiltWorldToLocal(layout.boxX, layout.boxY, tx, ty, layout.netRotDeg);
+        const resolved = resolveNdtTiltArrowLocal(local, layout.hw, layout.hh);
+        item.calloutEdge = resolved.edge;
+        item.calloutEdgeT = resolved.t;
+        item.calloutArrowLen = resolved.len;
+    }
+
+    function syncNdtTiltArrowModelFromTarget(item, cat) {
+        if (!item || cat !== '기울기') return;
+        const layout = getNdtTiltCalloutLayout(item, cat);
+        const tx = item.targetX !== undefined ? item.targetX : layout.boxX;
+        const ty = item.targetY !== undefined ? item.targetY : layout.boxY + layout.hh + 40;
+        const local = ndtTiltWorldToLocal(layout.boxX, layout.boxY, tx, ty, layout.netRotDeg);
+        const resolved = resolveNdtTiltArrowLocal(local, layout.hw, layout.hh);
+        item.calloutEdge = resolved.edge;
+        item.calloutEdgeT = resolved.t;
+        item.calloutArrowLen = resolved.len;
+    }
+
+    function getNdtTiltArrowGeometry(item, cat) {
+        const draggingTip = typeof activeDragNdtPin !== 'undefined'
+            && activeDragNdtPin === item
+            && dragNdtPart === 'target';
+        if (draggingTip) ensureNdtTiltArrowModel(item, cat);
+        else syncNdtTiltArrowModelFromTarget(item, cat);
+        const layout = getNdtTiltCalloutLayout(item, cat);
+        const edge = item.calloutEdge ?? 2;
+        const t = Math.max(-1, Math.min(1, Number(item.calloutEdgeT) || 0));
+        const len = Math.max(12, Number(item.calloutArrowLen) || 40);
+        const { boxX, boxY, hw, hh, netRotDeg } = layout;
+        let ax; let ay; let nx; let ny;
+        if (edge === 0) { ax = t * hw; ay = -hh; nx = 0; ny = -1; }
+        else if (edge === 1) { ax = hw; ay = t * hh; nx = 1; ny = 0; }
+        else if (edge === 2) { ax = t * hw; ay = hh; nx = 0; ny = 1; }
+        else { ax = -hw; ay = t * hh; nx = -1; ny = 0; }
+        const anchor = ndtTiltLocalToWorld(boxX, boxY, ax, ay, netRotDeg);
+        const normal = rotateVec2Deg(nx, ny, netRotDeg);
+        const tip = { x: anchor.x + normal.x * len, y: anchor.y + normal.y * len };
+        return { anchor, tip, normal, edge, t, len, layout };
+    }
+
+    function updateNdtTiltArrowFromDrag(item, cat, mx, my) {
+        if (!item || cat !== '기울기') return;
+        ensureNdtTiltArrowModel(item, cat);
+        const layout = getNdtTiltCalloutLayout(item, cat);
+        const local = ndtTiltWorldToLocal(layout.boxX, layout.boxY, mx, my, layout.netRotDeg);
+        const resolved = resolveNdtTiltArrowLocal(local, layout.hw, layout.hh);
+        item.calloutEdge = resolved.edge;
+        item.calloutEdgeT = resolved.t;
+        item.calloutArrowLen = resolved.len;
+        const geom = getNdtTiltArrowGeometry(item, cat);
+        item.targetX = geom.tip.x;
+        item.targetY = geom.tip.y;
+    }
+
+    function getNdtTiltRotateHandle(item, cat) {
+        const layout = getNdtTiltCalloutLayout(item, cat);
+        return ndtTiltLocalToWorld(layout.boxX, layout.boxY, 0, -layout.hh - 28, layout.netRotDeg);
+    }
+
+    function isNearNdtTiltRotateHandle(item, cat, vx, vy) {
+        const handle = getNdtTiltRotateHandle(item, cat);
+        const pinScale = getNdtTiltCalloutLayout(item, cat).pinScale;
+        const viewScale = getMapCanvasViewScale();
+        const minR = ndtActivePointerIsTouch
+            ? Math.max(14 / viewScale, 12 * pinScale)
+            : Math.max(10 / viewScale, 9 * pinScale);
+        return Math.hypot(vx - handle.x, vy - handle.y) <= minR;
+    }
+
+    function beginNdtTiltRotateSession(item, imgX, imgY, cat) {
+        if (!item) return;
+        const layout = getNdtTiltCalloutLayout(item, cat);
+        ndtTiltRotatePivot = { x: layout.boxX, y: layout.boxY };
+        ndtTiltRotateStartMouse = Math.atan2(imgY - layout.boxY, imgX - layout.boxX);
+        ndtTiltRotateBaseAngle = getNdtTiltItemRotation(item, cat);
+        ensureNdtTiltArrowModel(item, cat);
+    }
+
+    function applyNdtTiltRotateSession(item, cat, imgX, imgY) {
+        if (!item || !ndtTiltRotatePivot) return;
+        const mouse = Math.atan2(imgY - ndtTiltRotatePivot.y, imgX - ndtTiltRotatePivot.x);
+        let deltaDeg = ((mouse - ndtTiltRotateStartMouse) * 180) / Math.PI;
+        while (deltaDeg > 180) deltaDeg -= 360;
+        while (deltaDeg < -180) deltaDeg += 360;
+        item.calloutRotation = ndtTiltRotateBaseAngle + deltaDeg;
+        const geom = getNdtTiltArrowGeometry(item, cat);
+        item.targetX = geom.tip.x;
+        item.targetY = geom.tip.y;
+    }
+
+    function endNdtTiltRotateSession() {
+        ndtTiltRotatePivot = null;
+        ndtTiltRotateStartMouse = 0;
+        ndtTiltRotateBaseAngle = 0;
+    }
+
+    function drawNdtTiltRotateHandle(ctx, item, cat) {
+        const layout = getNdtTiltCalloutLayout(item, cat);
+        const handle = getNdtTiltRotateHandle(item, cat);
+        ctx.save();
+        ctx.beginPath();
+        ctx.moveTo(layout.boxX, layout.boxY);
+        ctx.lineTo(handle.x, handle.y);
+        ctx.strokeStyle = '#0f172a';
+        ctx.lineWidth = 1.2;
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.arc(handle.x, handle.y, 7, 0, Math.PI * 2);
+        ctx.fillStyle = '#f59e0b';
+        ctx.fill();
+        ctx.strokeStyle = '#fff';
+        ctx.lineWidth = 1.4;
+        ctx.stroke();
+        ctx.restore();
+    }
+
+    window.rotateSelectedNdtTiltBoxes = function () {
+        if (typeof window.showToast === 'function') {
+            window.showToast('외벽 기울기 박스는 선택 후 주황 회전 핸들을 드래그해 각도를 조절하세요.', 'info', 2800);
         }
-        saveStateToLocalStorage();
-        drawNdtCanvas();
-        if (typeof window.showToast === 'function') window.showToast(`기울기 박스 ${changed}개 회전`, 'success', 2000);
     };
 
     function drawNdtSelectionHalo(ctx, item) {
@@ -10224,6 +10391,7 @@ document.addEventListener('DOMContentLoaded', () => {
         ctx.setLineDash([]);
         ctx.strokeRect(-w / 2 - pad, -h / 2 - pad, w + pad * 2, h + pad * 2);
         ctx.restore();
+        if (cat === '기울기') drawNdtTiltRotateHandle(ctx, item, cat);
     }
 
     function drawNdtDispSelectionHalo(ctx, group) {
@@ -10323,10 +10491,14 @@ document.addEventListener('DOMContentLoaded', () => {
         const headLen = (isBeingDragged ? 18 : 15) * arrowScale;
         const itemRot = getNdtTiltItemRotation(item, cat);
 
-        // 지시선: 박스에서 측정점으로 — 가장 가까운 변에서 시작, 끝은 채워진 화살촉
-        const anchor = getPinLeaderBoxEdgeCenterAnchor(boxX, boxY, targetX, targetY, boxW, boxH, (rotationAngle || 0) - itemRot);
-        const ux = targetX - anchor.x;
-        const uy = targetY - anchor.y;
+        const arrowGeom = (cat === '기울기') ? getNdtTiltArrowGeometry(item, cat) : null;
+        const tipX = arrowGeom ? arrowGeom.tip.x : targetX;
+        const tipY = arrowGeom ? arrowGeom.tip.y : targetY;
+        const anchor = arrowGeom
+            ? arrowGeom.anchor
+            : getPinLeaderBoxEdgeCenterAnchor(boxX, boxY, tipX, tipY, boxW, boxH, (rotationAngle || 0) - itemRot);
+        const ux = tipX - anchor.x;
+        const uy = tipY - anchor.y;
         const dist = Math.hypot(ux, uy);
 
         ctx.save();
@@ -10337,7 +10509,7 @@ document.addEventListener('DOMContentLoaded', () => {
         ctx.lineCap = 'round';
 
         if (dist > 4) {
-            const stemEnd = getArrowStemEndPoint(targetX, targetY, ux, uy, headLen * 0.85);
+            const stemEnd = getArrowStemEndPoint(tipX, tipY, ux, uy, headLen * 0.85);
             ctx.beginPath();
             ctx.moveTo(anchor.x, anchor.y);
             ctx.lineTo(stemEnd.x, stemEnd.y);
@@ -10347,14 +10519,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
             const angle = Math.atan2(uy, ux);
             ctx.beginPath();
-            ctx.moveTo(targetX, targetY);
+            ctx.moveTo(tipX, tipY);
             ctx.lineTo(
-                targetX - headLen * Math.cos(angle - Math.PI / 7),
-                targetY - headLen * Math.sin(angle - Math.PI / 7)
+                tipX - headLen * Math.cos(angle - Math.PI / 7),
+                tipY - headLen * Math.sin(angle - Math.PI / 7)
             );
             ctx.lineTo(
-                targetX - headLen * Math.cos(angle + Math.PI / 7),
-                targetY - headLen * Math.sin(angle + Math.PI / 7)
+                tipX - headLen * Math.cos(angle + Math.PI / 7),
+                tipY - headLen * Math.sin(angle + Math.PI / 7)
             );
             ctx.closePath();
             ctx.fill();
@@ -11226,7 +11398,9 @@ document.addEventListener('DOMContentLoaded', () => {
                         isDraggingNdtPin = true;
                         activeDragNdtPin = item;
                         dragNdtPart = pendingNdtPinHit.part;
-                        if (dragNdtPart === 'target') {
+                        if (dragNdtPart === 'rotate') {
+                            beginNdtTiltRotateSession(item, grabX, grabY, item.category || '기울기');
+                        } else if (dragNdtPart === 'target') {
                             ndtPinDragOffsetX = grabX - (item.targetX !== undefined ? item.targetX : (item.x || 0));
                             ndtPinDragOffsetY = grabY - (item.targetY !== undefined ? item.targetY : (item.y || 0));
                         } else if (dragNdtPart === 'box') {
@@ -11299,9 +11473,15 @@ document.addEventListener('DOMContentLoaded', () => {
                     drawNdtCanvas();
                 }
             } else if (isDraggingNdtPin && activeDragNdtPin) {
-                if (dragNdtPart === 'target') {
-                    activeDragNdtPin.targetX = vx - ndtPinDragOffsetX;
-                    activeDragNdtPin.targetY = vy - ndtPinDragOffsetY;
+                if (dragNdtPart === 'rotate') {
+                    applyNdtTiltRotateSession(activeDragNdtPin, activeDragNdtPin.category || '기울기', vx, vy);
+                } else if (dragNdtPart === 'target') {
+                    if (activeDragNdtPin.category === '기울기') {
+                        updateNdtTiltArrowFromDrag(activeDragNdtPin, '기울기', vx, vy);
+                    } else {
+                        activeDragNdtPin.targetX = vx - ndtPinDragOffsetX;
+                        activeDragNdtPin.targetY = vy - ndtPinDragOffsetY;
+                    }
                 } else if (dragNdtPart === 'box') {
                     activeDragNdtPin.boxX = vx - ndtPinDragOffsetX;
                     activeDragNdtPin.boxY = vy - ndtPinDragOffsetY;
@@ -11344,7 +11524,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 } else {
                     const hit = findNdtPinAt(vx, vy);
                     if (hit) {
-                        canvas.style.cursor = hit.part === 'target' ? 'pointer' : 'move';
+                        canvas.style.cursor = hit.part === 'target' ? 'pointer' : (hit.part === 'rotate' ? 'grab' : 'move');
                     } else {
                         canvas.style.cursor = 'default';
                     }
@@ -11358,7 +11538,9 @@ document.addEventListener('DOMContentLoaded', () => {
             if (pendingNdtPinHit && !isDraggingNdtPin && !isDraggingNdtPinGroup) {
                 const item = pendingNdtPinHit.item;
                 const wasAdditive = !!pendingNdtPinHit.additive;
+                const part = pendingNdtPinHit.part;
                 pendingNdtPinHit = null;
+                if (part === 'rotate') return;
                 if (item && !wasAdditive) openNdtModal(item.x || item.boxX || 0, item.y || item.boxY || 0, item);
                 return;
             }
@@ -11408,8 +11590,10 @@ document.addEventListener('DOMContentLoaded', () => {
                         boxY: activeDragNdtPin.boxY !== undefined ? activeDragNdtPin.boxY : (activeDragNdtPin.y || 0)
                     };
                 }
+                endNdtTiltRotateSession();
                 isDraggingNdtPin = false;
                 activeDragNdtPin = null;
+                dragNdtPart = 'box';
                 saveStateToLocalStorage();
                 const canvas = document.getElementById('ndtCanvas');
                 if (canvas) canvas.style.cursor = ndtMode === 'MARK' ? 'crosshair' : 'default';
@@ -11729,7 +11913,9 @@ document.addEventListener('DOMContentLoaded', () => {
                         isDraggingNdtPin = true;
                         activeDragNdtPin = item;
                         dragNdtPart = pendingNdtPinHit.part;
-                        if (dragNdtPart === 'target') {
+                        if (dragNdtPart === 'rotate') {
+                            beginNdtTiltRotateSession(item, grabX, grabY, item.category || '기울기');
+                        } else if (dragNdtPart === 'target') {
                             ndtPinDragOffsetX = grabX - (item.targetX !== undefined ? item.targetX : (item.x || 0));
                             ndtPinDragOffsetY = grabY - (item.targetY !== undefined ? item.targetY : (item.y || 0));
                         } else if (dragNdtPart === 'box') {
@@ -11772,9 +11958,15 @@ document.addEventListener('DOMContentLoaded', () => {
                 const vx = pt.x;
                 const vy = pt.y;
 
-                if (dragNdtPart === 'target') {
-                    activeDragNdtPin.targetX = vx - ndtPinDragOffsetX;
-                    activeDragNdtPin.targetY = vy - ndtPinDragOffsetY;
+                if (dragNdtPart === 'rotate') {
+                    applyNdtTiltRotateSession(activeDragNdtPin, activeDragNdtPin.category || '기울기', vx, vy);
+                } else if (dragNdtPart === 'target') {
+                    if (activeDragNdtPin.category === '기울기') {
+                        updateNdtTiltArrowFromDrag(activeDragNdtPin, '기울기', vx, vy);
+                    } else {
+                        activeDragNdtPin.targetX = vx - ndtPinDragOffsetX;
+                        activeDragNdtPin.targetY = vy - ndtPinDragOffsetY;
+                    }
                 } else if (dragNdtPart === 'box') {
                     activeDragNdtPin.boxX = vx - ndtPinDragOffsetX;
                     activeDragNdtPin.boxY = vy - ndtPinDragOffsetY;
@@ -11920,7 +12112,9 @@ document.addEventListener('DOMContentLoaded', () => {
             hideTouchLoupe(NDT_LOUPE_ID);
             if (pendingNdtPinHit && !isDraggingNdtPin && !isDraggingNdtPinGroup) {
                 const item = pendingNdtPinHit.item;
+                const part = pendingNdtPinHit.part;
                 pendingNdtPinHit = null;
+                if (part === 'rotate') return;
                 if (item) openNdtModal(item.x || item.boxX || 0, item.y || item.boxY || 0, item);
                 return;
             }
@@ -11976,8 +12170,10 @@ document.addEventListener('DOMContentLoaded', () => {
                         boxY: activeDragNdtPin.boxY !== undefined ? activeDragNdtPin.boxY : (activeDragNdtPin.y || 0)
                     };
                 }
+                endNdtTiltRotateSession();
                 isDraggingNdtPin = false;
                 activeDragNdtPin = null;
+                dragNdtPart = 'box';
                 saveStateToLocalStorage();
                 drawNdtCanvas();
             }
