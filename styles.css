@@ -7969,7 +7969,27 @@ body:not(.bsa-tab-home) .home-fab-add-building {
     margin-top: 0.75rem;
 }
 
+.ndt-bottom-stack {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+}
+
+.ndt-crack-monitor-floor-filter {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    font-size: 0.78rem;
+    color: #475569;
+    cursor: pointer;
+    white-space: nowrap;
+}
+
 .ndt-crack-monitor-section[hidden] {
+    display: none !important;
+}
+
+.ndt-crack-monitor-editor[hidden] {
     display: none !important;
 }
 
@@ -10022,7 +10042,9 @@ body.bsa-tab-stats .app-content {
 
     /* 도면 밖(툴바·표·독)은 스크롤 잠금 없음 — 세로 스크롤 자유 */
     body.bsa-tab-ndt #tab-ndt .ndt-top-bar,
+    body.bsa-tab-ndt #tab-ndt .ndt-bottom-stack,
     body.bsa-tab-ndt #tab-ndt .ndt-results-section,
+    body.bsa-tab-ndt #tab-ndt .ndt-crack-monitor-section,
     body.bsa-tab-ndt #tab-ndt .mobile-canvas-dock,
     body.bsa-tab-ndt #tab-ndt .section-header,
     body.bsa-tab-survey #tab-survey {
@@ -12528,13 +12550,28 @@ html.layout-tablet #tab-ndt .ndt-canvas-col .mobile-canvas-dock {
     margin: 0 !important;
 }
 
-html.layout-tablet #tab-ndt .ndt-results-section {
-    flex: 0 0 33% !important;
+html.layout-tablet #tab-ndt .ndt-bottom-stack {
+    flex: 0 0 38% !important;
     flex-shrink: 0 !important;
-    max-height: 33% !important;
-    min-height: 33% !important;
+    max-height: 38% !important;
+    min-height: 38% !important;
     margin-top: 0.28rem !important;
+    overflow-y: auto !important;
+    overflow-x: hidden !important;
+    -webkit-overflow-scrolling: touch;
+}
+
+html.layout-tablet #tab-ndt .ndt-crack-monitor-section,
+html.layout-tablet #tab-ndt .ndt-results-section {
+    flex: none !important;
+    max-height: none !important;
+    min-height: auto !important;
+    margin-top: 0 !important;
     margin-bottom: 0 !important;
+    overflow: visible !important;
+}
+
+html.layout-tablet #tab-ndt .ndt-results-section {
     display: flex !important;
     flex-direction: column !important;
     overflow: hidden !important;

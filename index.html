@@ -39,7 +39,7 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <meta name="apple-mobile-web-app-title" content="스마트 안전점검">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css">
-    <link rel="stylesheet" href="styles.css?v=20260904_200558">
+    <link rel="stylesheet" href="styles.css?v=20260904_201343">
     <!-- FontAwesome icons for clean engineering UI -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <!-- PDF 생성용: 페이지별로 직접 캡처해서 조립(큰 보고서에서 html2pdf 한방 렌더링이 캔버스 높이 한계로
@@ -850,48 +850,22 @@
             </div>
             </div><!-- /.ndt-canvas-col -->
 
-            <!-- NDT Summary Measurement Results Table -->
-            <div class="ndt-results-section ndt-results-panel">
-                <div class="ndt-results-head">
-                    <h3 class="ndt-results-title"><i class="fa-solid fa-table-list"></i> 📊 <span id="lblNdtTableTitle">지상 1층 (1F)</span> 비파괴 장비 조사 측정 결과표</h3>
-                    <button type="button" class="btn btn-sm btn-outline ndt-results-excel-btn" onclick="window.exportNdtTableExcel()">
-                        <i class="fa-solid fa-file-excel"></i> NDT 결과 엑셀 다운로드
-                    </button>
-                </div>
-                
-                <div class="table-responsive ndt-results-table-wrap">
-                    <table class="data-table" id="ndtSummaryTable">
-                        <thead>
-                            <tr>
-                                <th>번호</th>
-                                <th>조사 항목</th>
-                                <th>측정 위치</th>
-                                <th>부재명</th>
-                                <th>측정 수치 / 결과</th>
-                                <th>평균 / 판정</th>
-                                <th>상태</th>
-                                <th>관리</th>
-                            </tr>
-                        </thead>
-                        <tbody id="ndtTableBody">
-                            <tr>
-                                <td colspan="8" style="text-align: center; color: #a3a3a3; padding: 1.5rem;">등록된 비파괴 장비 조사 측정 데이터가 없습니다. 도면 상에 위치를 마킹해 주세요.</td>
-                            </tr>
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-
+            <div class="ndt-bottom-stack">
             <!-- 균열 게이지 · 팁 누적 측정 (결함 수정창과 분리) -->
-            <div class="ndt-crack-monitor-section ndt-results-panel" id="ndtCrackMonitorSection" hidden>
+            <div class="ndt-crack-monitor-section ndt-results-panel" id="ndtCrackMonitorSection">
                 <div class="ndt-results-head">
                     <h3 class="ndt-results-title"><i class="fa-solid fa-chart-line"></i> 균열 게이지 · 팁 누적 측정</h3>
+                    <label class="ndt-crack-monitor-floor-filter">
+                        <input type="checkbox" id="ndtCrackMonitorAllFloors" checked>
+                        <span>전체 층</span>
+                    </label>
                 </div>
-                <p class="ndt-crack-monitor-hint">균열 결함(3종·중점관리)의 회차별 X/Y·균열길이·누적 증가량을 기록합니다.</p>
+                <p class="ndt-crack-monitor-hint" id="ndtCrackMonitorHint">균열 결함의 회차별 X/Y·균열길이·누적 증가량을 기록합니다. 아래에서 결함을 선택하세요.</p>
                 <div class="table-responsive ndt-crack-monitor-list-wrap">
                     <table class="data-table ndt-crack-monitor-list-table">
                         <thead>
                             <tr>
+                                <th>층</th>
                                 <th>번호</th>
                                 <th>부재·조사내용</th>
                                 <th>게이지</th>
@@ -903,7 +877,7 @@
                         <tbody id="ndtCrackMonitorListBody"></tbody>
                     </table>
                 </div>
-                <div class="ndt-crack-monitor-editor" id="ndtCrackMonitorEditor" hidden>
+                <div class="ndt-crack-monitor-editor" id="ndtCrackMonitorEditor">
                     <div class="ndt-crack-monitor-editor-bar">
                         <label class="ndt-crack-monitor-select-label">
                             <span>결함 선택</span>
@@ -947,6 +921,39 @@
                     </div>
                 </div>
             </div>
+
+            <!-- NDT Summary Measurement Results Table -->
+            <div class="ndt-results-section ndt-results-panel">
+                <div class="ndt-results-head">
+                    <h3 class="ndt-results-title"><i class="fa-solid fa-table-list"></i> 📊 <span id="lblNdtTableTitle">지상 1층 (1F)</span> 비파괴 장비 조사 측정 결과표</h3>
+                    <button type="button" class="btn btn-sm btn-outline ndt-results-excel-btn" onclick="window.exportNdtTableExcel()">
+                        <i class="fa-solid fa-file-excel"></i> NDT 결과 엑셀 다운로드
+                    </button>
+                </div>
+                
+                <div class="table-responsive ndt-results-table-wrap">
+                    <table class="data-table" id="ndtSummaryTable">
+                        <thead>
+                            <tr>
+                                <th>번호</th>
+                                <th>조사 항목</th>
+                                <th>측정 위치</th>
+                                <th>부재명</th>
+                                <th>측정 수치 / 결과</th>
+                                <th>평균 / 판정</th>
+                                <th>상태</th>
+                                <th>관리</th>
+                            </tr>
+                        </thead>
+                        <tbody id="ndtTableBody">
+                            <tr>
+                                <td colspan="8" style="text-align: center; color: #a3a3a3; padding: 1.5rem;">등록된 비파괴 장비 조사 측정 데이터가 없습니다. 도면 상에 위치를 마킹해 주세요.</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            </div><!-- /.ndt-bottom-stack -->
         </section>
 
     </main>
@@ -3084,22 +3091,22 @@
     </div>
 
     <!-- Core → 탭 분류 → 기존 엔진(app.js) -->
-    <script src="js/core/state.js?v=20260904_200558"></script>
-    <script src="js/tabs/registry.js?v=20260904_200558"></script>
-    <script src="js/pdf-vector-bridge.js?v=20260904_200558"></script>
-    <script src="js/core/layout-mode.js?v=20260904_200558"></script>
-    <script src="js/core/mobile-keyboard.js?v=20260904_200558"></script>
-    <script src="js/tabs/home.js?v=20260904_200558"></script>
-    <script src="js/tabs/map.js?v=20260904_200558"></script>
-    <script src="js/tabs/survey.js?v=20260904_200558"></script>
-    <script src="js/tabs/stats.js?v=20260904_200558"></script>
-    <script src="js/tabs/ndt.js?v=20260904_200558"></script>
-    <script src="js/shared/report.js?v=20260904_200558"></script>
-    <script src="js/shared/hwpx-import.js?v=20260904_200558"></script>
-    <script src="js/shared/auth.js?v=20260904_200558"></script>
-    <script src="app.js?v=20260904_200558"></script>
+    <script src="js/core/state.js?v=20260904_201343"></script>
+    <script src="js/tabs/registry.js?v=20260904_201343"></script>
+    <script src="js/pdf-vector-bridge.js?v=20260904_201343"></script>
+    <script src="js/core/layout-mode.js?v=20260904_201343"></script>
+    <script src="js/core/mobile-keyboard.js?v=20260904_201343"></script>
+    <script src="js/tabs/home.js?v=20260904_201343"></script>
+    <script src="js/tabs/map.js?v=20260904_201343"></script>
+    <script src="js/tabs/survey.js?v=20260904_201343"></script>
+    <script src="js/tabs/stats.js?v=20260904_201343"></script>
+    <script src="js/tabs/ndt.js?v=20260904_201343"></script>
+    <script src="js/shared/report.js?v=20260904_201343"></script>
+    <script src="js/shared/hwpx-import.js?v=20260904_201343"></script>
+    <script src="js/shared/auth.js?v=20260904_201343"></script>
+    <script src="app.js?v=20260904_201343"></script>
     <script>
-        window.BSA_APP_VERSION = '20260904_200558';
+        window.BSA_APP_VERSION = '20260904_201343';
         (function () {
             var el = document.getElementById('appVersionText');
             if (el && window.BSA_APP_VERSION) el.textContent = 'v' + window.BSA_APP_VERSION;
@@ -3123,7 +3130,7 @@
                     native = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
                 } catch (e) {}
                 if (native) return;
-                navigator.serviceWorker.register('./sw.js?v=20260904_200558')
+                navigator.serviceWorker.register('./sw.js?v=20260904_201343')
                     .then(function(registration) {
                         console.log('✅ ServiceWorker Registered Successfully with scope:', registration.scope);
                         registration.update();

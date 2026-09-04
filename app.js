@@ -20244,14 +20244,72 @@ document.addEventListener('DOMContentLoaded', () => {
     function defectNeedsCrackMonitorUi(defect) {
         if (!defect) return false;
         const type = String(defect.defectType || '');
-        if (!type.includes('균열')) return false;
-        if (isGrade3Building() && defect.isPriorityManage) return true;
-        if (isGrade3Building()) return true;
-        return !!defect.isPriorityManage;
+        return type.includes('균열');
     }
 
-    function getCrackMonitorEligibleDefects(defects) {
-        return (defects || []).filter((d) => defectNeedsCrackMonitorUi(d));
+    function ndtCrackMonitorAllFloorsEnabled() {
+        const el = document.getElementById('ndtCrackMonitorAllFloors');
+        return !el || !!el.checked;
+    }
+
+    function getCrackMonitorDefectFloorCode(defectId, fallbackFloor) {
+        if (window._ndtCrackMonitorFloorCode && window._ndtCrackMonitorDefectId === defectId) {
+            return window._ndtCrackMonitorFloorCode;
+        }
+        return fallbackFloor || state.currentFloor;
+    }
+
+    function findCrackMonitorDefectRecord(defectId, floorCode) {
+        if (!defectId || !state.currentBuildingId) return null;
+        const bldg = state.currentBuilding;
+        const tryFloor = floorCode || getCrackMonitorDefectFloorCode(defectId);
+        if (tryFloor) {
+            const key = `${state.currentBuildingId}_${tryFloor}`;
+            const hit = (state.defects[key] || []).find((d) => d.id === defectId);
+            if (hit) return { defect: hit, floorCode: tryFloor, key };
+        }
+        const prefix = `${state.currentBuildingId}_`;
+        for (const key of Object.keys(state.defects || {})) {
+            if (!key.startsWith(prefix)) continue;
+            const hit = (state.defects[key] || []).find((d) => d.id === defectId);
+            if (hit) return { defect: hit, floorCode: key.slice(prefix.length), key };
+        }
+        return null;
+    }
+
+    function getCrackMonitorEligibleDefects(defects, floorCode) {
+        return (defects || [])
+            .filter((d) => defectNeedsCrackMonitorUi(d))
+            .map((d) => ({ defect: d, floorCode: floorCode || state.currentFloor }));
+    }
+
+    function getBuildingCrackMonitorItems(bldg, opts) {
+        opts = opts || {};
+        if (!bldg || !bldg.id) return [];
+        const allFloors = ndtCrackMonitorAllFloorsEnabled();
+        const currentFloor = state.currentFloor;
+        const prefix = `${bldg.id}_`;
+        const items = [];
+        const floorCodes = [];
+        if (typeof window.getBuildingAvailableFloors === 'function') {
+            window.getBuildingAvailableFloors(bldg).forEach((f) => floorCodes.push(f.floorCode));
+        }
+        Object.keys(state.defects || {}).forEach((key) => {
+            if (!key.startsWith(prefix)) return;
+            const code = key.slice(prefix.length);
+            if (floorCodes.indexOf(code) < 0) floorCodes.push(code);
+        });
+        if (typeof window.sortFloorsLowToHigh === 'function') {
+            const sorted = window.sortFloorsLowToHigh(floorCodes.map((c) => ({ floorCode: c })));
+            floorCodes.length = 0;
+            sorted.forEach((f) => floorCodes.push(f.floorCode));
+        }
+        floorCodes.forEach((floorCode) => {
+            if (!allFloors && floorCode !== currentFloor) return;
+            getCrackMonitorEligibleDefects(state.defects[`${bldg.id}_${floorCode}`] || [], floorCode)
+                .forEach((item) => items.push(item));
+        });
+        return items;
     }
 
     function scheduleNdtCrackMonitorSave() {
@@ -20266,14 +20324,16 @@ document.addEventListener('DOMContentLoaded', () => {
         opts = opts || {};
         const defectId = window._ndtCrackMonitorDefectId;
         if (!defectId || !state.currentBuildingId) return false;
-        const key = `${state.currentBuildingId}_${state.currentFloor}`;
+        const rec = findCrackMonitorDefectRecord(defectId, window._ndtCrackMonitorFloorCode);
+        if (!rec) return false;
+        const { defect, key, floorCode } = rec;
+        if (!defectNeedsCrackMonitorUi(defect)) return false;
         const idx = (state.defects[key] || []).findIndex((d) => d.id === defectId);
         if (idx < 0) return false;
-        const defect = state.defects[key][idx];
-        if (!defectNeedsCrackMonitorUi(defect)) return false;
         state.defects[key][idx].crackGaugeLog = getCrackGaugeLogFromUi();
         state.defects[key][idx].crackTipLog = getCrackTipLogFromUi();
         state.defects[key][idx].updatedAt = Date.now();
+        window._ndtCrackMonitorFloorCode = floorCode;
         if (typeof saveStateToLocalStorage === 'function') saveStateToLocalStorage();
         if (typeof syncStateToFirebase === 'function') syncStateToFirebase();
         renderNdtCrackMonitorSection({ keepSelection: true });
@@ -20284,32 +20344,39 @@ document.addEventListener('DOMContentLoaded', () => {
         return true;
     }
 
-    function selectNdtCrackMonitorDefect(defectId) {
-        if (!defectId) return;
-        const key = `${state.currentBuildingId}_${state.currentFloor}`;
-        const defect = (state.defects[key] || []).find((d) => d.id === defectId);
-        if (!defect || !defectNeedsCrackMonitorUi(defect)) return;
+    function selectNdtCrackMonitorDefect(defectId, floorCode) {
+        if (!defectId) {
+            clearCrackMonitorLogsUi();
+            window._ndtCrackMonitorDefectId = null;
+            window._ndtCrackMonitorFloorCode = null;
+            const meta = document.getElementById('ndtCrackMonitorDefectMeta');
+            if (meta) meta.textContent = '';
+            return;
+        }
+        const rec = findCrackMonitorDefectRecord(defectId, floorCode);
+        if (!rec || !defectNeedsCrackMonitorUi(rec.defect)) return;
         window._ndtCrackMonitorDefectId = defectId;
+        window._ndtCrackMonitorFloorCode = rec.floorCode;
         window._ndtCrackMonitorHydrating = true;
-        setCrackMonitorLogsToUi(defect);
+        setCrackMonitorLogsToUi(rec.defect);
         window._ndtCrackMonitorHydrating = false;
         const select = document.getElementById('ndtCrackMonitorDefectSelect');
-        if (select && select.value !== defectId) select.value = defectId;
+        if (select) select.value = `${rec.floorCode}::${defectId}`;
         const meta = document.getElementById('ndtCrackMonitorDefectMeta');
         if (meta) {
-            meta.textContent = `${defect.component || '부재'} ${defect.defectType || ''}`.trim();
+            meta.textContent = `${rec.defect.component || '부재'} ${rec.defect.defectType || ''}`.trim();
         }
-        const editor = document.getElementById('ndtCrackMonitorEditor');
-        if (editor) editor.hidden = false;
     }
 
-    function renderNdtCrackMonitorListRows(items, floorCode) {
-        return items.map((d) => {
+    function renderNdtCrackMonitorListRows(items) {
+        const bldg = state.currentBuilding;
+        return items.map(({ defect: d, floorCode }) => {
             const ctx = {
                 floorCode,
                 gradeNo: formatSurveyReportNo(d, true, floorCode),
-                floorDisplayLabel: getGrade3FloorDisplayLabel(floorCode, state.currentBuilding)
+                floorDisplayLabel: getGrade3FloorDisplayLabel(floorCode, bldg)
             };
+            const floorLabel = getGrade3FloorDisplayLabel(floorCode, bldg) || floorCode;
             const no = getSurveyCellText('no', d, ctx) || (d.no || '').replace(/^NO\.?\s*/i, '');
             const title = `${d.component || '부재'} ${d.defectType || ''}`.trim();
             const gauge = normalizeCrackGaugeLog(d.crackGaugeLog);
@@ -20321,14 +20388,22 @@ document.addEventListener('DOMContentLoaded', () => {
                 : '-';
             const tipSum = summarizeCrackTipLog(d.crackTipLog);
             return `<tr>
+                <td>${escapeSurveyAttr(floorLabel)}</td>
                 <td>${escapeSurveyAttr(no)}</td>
                 <td>${escapeSurveyAttr(title)}</td>
                 <td>${escapeSurveyAttr(gaugeLabel)}</td>
                 <td>${escapeSurveyAttr(xyText)}</td>
                 <td>${escapeSurveyAttr(tipSum)}</td>
-                <td><button type="button" class="btn btn-sm btn-outline ndt-crack-monitor-open" onclick="window.openNdtCrackMonitorDefect('${escapeSurveyAttr(d.id)}')">기록</button></td>
+                <td><button type="button" class="btn btn-sm btn-outline ndt-crack-monitor-open" onclick="window.openNdtCrackMonitorDefect('${escapeSurveyAttr(d.id)}','${escapeSurveyAttr(floorCode)}')">기록</button></td>
             </tr>`;
         }).join('');
+    }
+
+    function parseNdtCrackMonitorSelectValue(raw) {
+        const s = String(raw || '');
+        const sep = s.indexOf('::');
+        if (sep >= 0) return { floorCode: s.slice(0, sep), defectId: s.slice(sep + 2) };
+        return { floorCode: state.currentFloor, defectId: s };
     }
 
     function renderNdtCrackMonitorSection(opts) {
@@ -20336,52 +20411,64 @@ document.addEventListener('DOMContentLoaded', () => {
         const section = document.getElementById('ndtCrackMonitorSection');
         const listBody = document.getElementById('ndtCrackMonitorListBody');
         const select = document.getElementById('ndtCrackMonitorDefectSelect');
-        const editor = document.getElementById('ndtCrackMonitorEditor');
+        const hint = document.getElementById('ndtCrackMonitorHint');
+        const bldg = state.currentBuilding;
         if (!section || !listBody) return;
-        const defects = typeof getCurrentFloorDefects === 'function' ? getCurrentFloorDefects() : [];
-        const items = getCrackMonitorEligibleDefects(defects);
-        if (!items.length) {
+        if (!bldg || !state.currentBuildingId) {
             section.hidden = true;
-            listBody.innerHTML = '';
-            if (select) select.innerHTML = '';
-            if (editor) editor.hidden = true;
-            window._ndtCrackMonitorDefectId = null;
             return;
         }
         section.hidden = false;
-        const floorCode = state.currentFloor;
-        listBody.innerHTML = renderNdtCrackMonitorListRows(items, floorCode);
+        const items = getBuildingCrackMonitorItems(bldg);
+        if (!items.length) {
+            listBody.innerHTML = '<tr><td colspan="7" class="stats-empty">균열 결함이 없습니다. 결함위치도에서 균열 종류 결함을 등록한 뒤 여기서 기록하세요.</td></tr>';
+            if (select) select.innerHTML = '<option value="">— 균열 결함 없음 —</option>';
+            if (hint) hint.textContent = '이 건물·층 범위에 균열 결함이 없습니다. 「전체 층」을 켜거나 결함위치도에서 균열 결함을 등록하세요.';
+            selectNdtCrackMonitorDefect(null);
+            return;
+        }
+        if (hint) hint.textContent = '균열 결함의 회차별 X/Y·균열길이·누적 증가량을 기록합니다. 목록 또는 선택 상자에서 결함을 고르세요.';
+        listBody.innerHTML = renderNdtCrackMonitorListRows(items);
         if (select) {
-            select.innerHTML = items.map((d) => {
+            select.innerHTML = items.map(({ defect: d, floorCode }) => {
                 const ctx = {
                     floorCode,
                     gradeNo: formatSurveyReportNo(d, true, floorCode),
-                    floorDisplayLabel: getGrade3FloorDisplayLabel(floorCode, state.currentBuilding)
+                    floorDisplayLabel: getGrade3FloorDisplayLabel(floorCode, bldg)
                 };
                 const no = getSurveyCellText('no', d, ctx) || (d.no || '').replace(/^NO\.?\s*/i, '');
                 const title = `${d.component || '부재'} ${d.defectType || ''}`.trim();
-                return `<option value="${escapeSurveyAttr(d.id)}">${escapeSurveyAttr(no)} · ${escapeSurveyAttr(title)}</option>`;
+                const floorLabel = getGrade3FloorDisplayLabel(floorCode, bldg) || floorCode;
+                const val = `${floorCode}::${d.id}`;
+                return `<option value="${escapeSurveyAttr(val)}">${escapeSurveyAttr(floorLabel)} · ${escapeSurveyAttr(no)} · ${escapeSurveyAttr(title)}</option>`;
             }).join('');
         }
-        if (opts.keepSelection && window._ndtCrackMonitorDefectId && items.some((d) => d.id === window._ndtCrackMonitorDefectId)) {
-            listBody.innerHTML = renderNdtCrackMonitorListRows(items, floorCode);
-            return;
+        if (opts.keepSelection && window._ndtCrackMonitorDefectId) {
+            const still = items.some(({ defect: d, floorCode }) => (
+                d.id === window._ndtCrackMonitorDefectId
+                && floorCode === window._ndtCrackMonitorFloorCode
+            ));
+            if (still) return;
         }
         let pickId = opts.selectDefectId || window._ndtCrackMonitorPendingDefectId || window._ndtCrackMonitorDefectId;
+        let pickFloor = opts.selectFloorCode || window._ndtCrackMonitorPendingFloorCode || window._ndtCrackMonitorFloorCode;
         delete window._ndtCrackMonitorPendingDefectId;
-        if (!pickId || !items.some((d) => d.id === pickId)) pickId = items[0].id;
-        selectNdtCrackMonitorDefect(pickId);
+        delete window._ndtCrackMonitorPendingFloorCode;
+        let pick = items.find(({ defect: d, floorCode }) => d.id === pickId && (!pickFloor || floorCode === pickFloor));
+        if (!pick) pick = items.find(({ floorCode }) => floorCode === state.currentFloor) || items[0];
+        if (pick) selectNdtCrackMonitorDefect(pick.defect.id, pick.floorCode);
     }
 
-    window.openNdtCrackMonitorDefect = function(defectId) {
+    window.openNdtCrackMonitorDefect = function(defectId, floorCode) {
         if (window._ndtCrackMonitorDefectId && window._ndtCrackMonitorDefectId !== defectId) {
             saveNdtCrackMonitorForSelectedDefect({ silent: true });
         }
         if (typeof window.switchTab === 'function') window.switchTab('tab-ndt');
         window._ndtCrackMonitorPendingDefectId = defectId;
+        window._ndtCrackMonitorPendingFloorCode = floorCode || null;
         setTimeout(() => {
             if (typeof renderNdtCrackMonitorSection === 'function') {
-                renderNdtCrackMonitorSection({ selectDefectId: defectId });
+                renderNdtCrackMonitorSection({ selectDefectId: defectId, selectFloorCode: floorCode });
             }
             const editor = document.getElementById('ndtCrackMonitorEditor');
             if (editor) editor.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
@@ -20579,12 +20666,21 @@ document.addEventListener('DOMContentLoaded', () => {
         if (select && !select.dataset.bound) {
             select.dataset.bound = '1';
             select.addEventListener('change', () => {
-                const nextId = select.value;
-                if (window._ndtCrackMonitorDefectId && window._ndtCrackMonitorDefectId !== nextId) {
+                const parsed = parseNdtCrackMonitorSelectValue(select.value);
+                if (!parsed.defectId) {
+                    selectNdtCrackMonitorDefect(null);
+                    return;
+                }
+                if (window._ndtCrackMonitorDefectId && window._ndtCrackMonitorDefectId !== parsed.defectId) {
                     saveNdtCrackMonitorForSelectedDefect({ silent: true });
                 }
-                selectNdtCrackMonitorDefect(nextId);
+                selectNdtCrackMonitorDefect(parsed.defectId, parsed.floorCode);
             });
+        }
+        const allFloorsEl = document.getElementById('ndtCrackMonitorAllFloors');
+        if (allFloorsEl && !allFloorsEl.dataset.bound) {
+            allFloorsEl.dataset.bound = '1';
+            allFloorsEl.addEventListener('change', () => renderNdtCrackMonitorSection());
         }
         const saveBtn = document.getElementById('btnSaveNdtCrackMonitor');
         if (saveBtn && !saveBtn.dataset.bound) {
@@ -39564,6 +39660,7 @@ document.addEventListener('DOMContentLoaded', () => {
         window.resizeNdtCanvas = resizeNdtCanvas;
         window.renderNdtSummaryTable = renderNdtSummaryTable;
         window.renderNdtCrackMonitorSection = renderNdtCrackMonitorSection;
+        window.bindNdtCrackMonitorInputs = bindNdtCrackMonitorInputs;
         window.getSurveyRowsForReport = getSurveyRowsForReport;
         window.isPreviousRoundDefect = isPreviousRoundDefect;
         window.isGrade3Building = isGrade3Building;

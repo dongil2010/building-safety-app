@@ -19,7 +19,7 @@ window.BSA.tabs['tab-ndt'] = {
         '모바일·태블릿: 조사 항목(실측·강도·기울기 등)은 도면 우측 레일 — 상단 칩 숨겨 도면 공간 확보',
         '모바일 하단 독: 마킹·크기 토글 시트',
         '측정 결과표 · NDT 엑셀 · 벡터 PDF',
-        '균열 게이지 · 팁 누적 측정 (3종·중점관리 균열, 결함 수정창과 분리)',
+        '균열 게이지 · 팁 누적 측정 (균열 결함, 결함 수정창과 분리 · 전체 층 선택 가능)',
         '태블릿: 도면·결과표 split — 표는 45% 이내 내부 스크롤',
     ],
     ownerHint: 'app.js NDT FIELD SURVEY ENGINE',
@@ -32,6 +32,7 @@ window.BSA.tabs['tab-ndt'] = {
             if (typeof window.resizeNdtCanvas === 'function') window.resizeNdtCanvas();
             if (typeof window.renderNdtSummaryTable === 'function') window.renderNdtSummaryTable();
             if (typeof window.renderNdtCrackMonitorSection === 'function') window.renderNdtCrackMonitorSection();
+            if (typeof window.bindNdtCrackMonitorInputs === 'function') window.bindNdtCrackMonitorInputs();
             if (typeof window.syncBulkStyleSlidersUi === 'function') window.syncBulkStyleSlidersUi();
             if (typeof window.BSA.shared.bindSurveyNdtTableScrollPassthrough === 'function') {
                 window.BSA.shared.bindSurveyNdtTableScrollPassthrough();
