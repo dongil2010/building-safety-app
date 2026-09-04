@@ -21295,6 +21295,16 @@ document.addEventListener('DOMContentLoaded', () => {
         if (activeDragPart === 'TIP') {
             if (activeDragPin.targetX !== undefined) fresh.targetX = activeDragPin.targetX;
             if (activeDragPin.targetY !== undefined) fresh.targetY = activeDragPin.targetY;
+            fresh.x = activeDragPin.x;
+            fresh.y = activeDragPin.y;
+            if (activeDragPin.groupId) {
+                arr.forEach(d => {
+                    if (d.groupId === activeDragPin.groupId && d.id !== activeDragPin.id) {
+                        d.x = activeDragPin.x;
+                        d.y = activeDragPin.y;
+                    }
+                });
+            }
         } else if (activeDragPart === 'AREA_MOVE') {
             fresh.areaX1 = activeDragPin.areaX1;
             fresh.areaY1 = activeDragPin.areaY1;
@@ -21515,6 +21525,30 @@ document.addEventListener('DOMContentLoaded', () => {
             d.areaY2 += dy;
             translateAreaDrawings(d, dx, dy);
         }
+    }
+
+    function syncSharedMarkingGroupBox(defect) {
+        if (!defect || !defect.groupId) return;
+        const x = defect.x;
+        const y = defect.y;
+        getCurrentFloorDefects().forEach((d) => {
+            if (d && d.groupId === defect.groupId && d.id !== defect.id) {
+                d.x = x;
+                d.y = y;
+            }
+        });
+    }
+
+    /** 화살표/점 드래그: 번호칸과 지시 끝을 같은 거리만큼 함께 이동 */
+    function translatePinMarkingRigid(defect, dx, dy) {
+        if (!defect || (!dx && !dy)) return;
+        if (typeof defect.x === 'number') defect.x += dx;
+        else defect.x = (defect.targetX || 0) + dx;
+        if (typeof defect.y === 'number') defect.y += dy;
+        else defect.y = (defect.targetY || 0) + dy;
+        if (typeof defect.targetX === 'number') defect.targetX += dx;
+        if (typeof defect.targetY === 'number') defect.targetY += dy;
+        syncSharedMarkingGroupBox(defect);
     }
 
     function getDefectMarqueeAnchor(d) {
@@ -22366,8 +22400,11 @@ document.addEventListener('DOMContentLoaded', () => {
                     activeDragPin.targetX = snapped.x;
                     activeDragPin.targetY = snapped.y;
                 } else {
-                    activeDragPin.targetX = currentImgX - pinDragOffsetX;
-                    activeDragPin.targetY = currentImgY - pinDragOffsetY;
+                    const newTipX = currentImgX - pinDragOffsetX;
+                    const newTipY = currentImgY - pinDragOffsetY;
+                    const prevTipX = (activeDragPin.targetX !== undefined) ? activeDragPin.targetX : newTipX;
+                    const prevTipY = (activeDragPin.targetY !== undefined) ? activeDragPin.targetY : newTipY;
+                    translatePinMarkingRigid(activeDragPin, newTipX - prevTipX, newTipY - prevTipY);
                 }
             } else if (activeDragPart === 'AREA_MOVE') {
                 const dx = currentImgX - areaMoveLastImgX;
@@ -22426,19 +22463,12 @@ document.addEventListener('DOMContentLoaded', () => {
                     }) || 'nwse-resize';
                 }
             } else {
+                // 번호칸만 이동 — 화살표/점(target)은 고정
                 const newX = currentImgX - pinDragOffsetX;
                 const newY = currentImgY - pinDragOffsetY;
                 activeDragPin.x = newX;
                 activeDragPin.y = newY;
-                // "마킹 추가"로 묶인 그룹은 박스 위치를 공유하므로 하나를 옮기면 전부 같이 이동
-                if (activeDragPin.groupId) {
-                    getCurrentFloorDefects().forEach(d => {
-                        if (d.groupId === activeDragPin.groupId && d.id !== activeDragPin.id) {
-                            d.x = newX;
-                            d.y = newY;
-                        }
-                    });
-                }
+                syncSharedMarkingGroupBox(activeDragPin);
             }
             drawCanvas();
             refreshMapLoupe(clientX, clientY);
