@@ -261,72 +261,72 @@
                     <div id="defectListPanel" class="defect-list-panel"></div>
                 </aside>
 
-                <!-- CENTER: 캔버스 + 최소 툴바 -->
+                <!-- CENTER: 캔버스 (PC 툴바는 도면 안쪽 오버레이) -->
                 <div class="inspect-canvas-col">
-                    <!-- Unified Top Drawing Controls Toolbar -->
-                    <div class="canvas-top-toolbar">
-                        <div class="toolbar-mode-group">
-                            <button type="button" id="btnModePan" class="mode-btn active" title="선택 모드 (Esc) — 좌클릭 드래그: 선택 / Ctrl+드래그·클릭: 추가·해제 / 휠클릭: 도면 이동">
-                                <i class="fa-regular fa-hand-pointer"></i> 선택 <span class="mode-shortcut">Esc</span>
-                            </button>
-                            <button type="button" id="btnModeMark" class="mode-btn btn-mark-mode" title="결함 위치 마킹 모드 (D)">
-                                <i class="fa-solid fa-location-dot"></i> 📍 핀 마킹 <span class="mode-shortcut">D</span>
-                            </button>
-                            <button type="button" id="btnModeArea" class="mode-btn btn-area-mode" title="결함 영역(면적) 마킹 모드 (A)">
-                                <i class="fa-solid fa-draw-square"></i> 🟧 영역 마킹 <span class="mode-shortcut">A</span>
-                            </button>
-                        </div>
-                        <div class="area-tool-panel" id="areaToolPanel" hidden>
-                            <span class="area-tool-kicker">영역 모양</span>
-                            <button type="button" class="area-tool-btn active" id="btnAreaCreateRect" data-area-create="rect" title="박스">박스</button>
-                            <button type="button" class="area-tool-btn" id="btnAreaCreateEllipse" data-area-create="ellipse" title="타원">타원</button>
-                            <button type="button" class="area-tool-btn" id="btnAreaCreatePolygon" data-area-create="polygon" title="다각형 — 점 찍고 더블클릭 또는 첫 점에 가깝게 클릭해서 닫기">다각형</button>
-                            <span class="area-tool-kicker">내부 그리기</span>
-                            <button type="button" class="area-tool-btn" id="btnAreaInkLine" data-area-ink="line" title="선택한 영역 안에 선">선</button>
-                            <button type="button" class="area-tool-btn" id="btnAreaInkRect" data-area-ink="rect" title="선택한 영역 안에 박스">박스</button>
-                            <button type="button" class="area-tool-btn" id="btnAreaInkPoly" data-area-ink="polygon" title="선택한 영역 안에 다각형">다각형</button>
-                            <button type="button" class="area-tool-btn" id="btnAreaInkEllipse" data-area-ink="ellipse" title="선택한 영역 안에 타원">타원</button>
-                            <button type="button" class="area-tool-btn" id="btnAreaInkPath" data-area-ink="path" title="선택한 영역 안에 자유선">자유선</button>
-                            <button type="button" class="area-tool-btn area-tool-btn-undo" id="btnAreaInkUndo" title="마지막 내부 그리기 지우기">그리기 취소</button>
-                        </div>
-
-                        <div class="toolbar-action-group">
-                            <button type="button" id="btnToggleDefectList" class="mode-btn toolbar-defect-list-toggle" title="좌측 조사항목(결함목록) 창 표시" aria-pressed="true">
-                                <i class="fa-solid fa-table-list"></i> 목록 <span class="toolbar-toggle-state">ON</span>
-                            </button>
-                            <button type="button" id="btnToggleMapStyleSize" class="mode-btn toolbar-size-toggle pc-only-chrome" title="핀·화살표·연결선 크기 조절 패널 표시" aria-pressed="false">
-                                <i class="fa-solid fa-sliders"></i> 크기 <span class="toolbar-toggle-state">OFF</span>
-                            </button>
-                            <button type="button" id="btnRotateDrawing" class="btn-rotate-hero" title="세로 도면 가로로 90도 회전">
-                                <i class="fa-solid fa-rotate-right"></i> 🔄 회전
-                            </button>
-                            <div class="zoom-pill-group">
-                                <button id="btnZoomIn" class="zoom-pill-btn" title="확대 (+)"><i class="fa-solid fa-plus"></i></button>
-                                <span id="zoomScaleText" class="zoom-pill-badge">100%</span>
-                                <button id="btnZoomOut" class="zoom-pill-btn" title="축소 (-)"><i class="fa-solid fa-minus"></i></button>
-                                <button id="btnZoomFit" class="zoom-pill-btn text-btn" title="화면에 맞추기"><i class="fa-solid fa-expand"></i> 맞춤</button>
-                                <button type="button" id="btnExportVectorPdf" class="zoom-pill-btn text-btn" title="원본 PDF 벡터 + 마킹 벡터로 내보내기" style="border-color:#525252;color:#2a2a2a;">
-                                    <i class="fa-solid fa-file-pdf"></i> 벡터 PDF
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- 핀/화살표 크기 일괄 조정 (결함위치도 전용 — NDT와 별도) -->
-                    <div class="map-style-toolbar map-style-size-panel" id="mapStyleSizeToolbar">
-                        <span class="map-style-floor-hint" style="font-size:0.72rem; color:var(--text-muted); white-space:nowrap;">결함위치도 · 현재 층</span>
-                        <label class="style-size-lock-label" title="체크 시 슬라이더 조작 불가">
-                            <input type="checkbox" id="styleSizeLockMap" checked>
-                            <i class="fa-solid fa-lock"></i> 잠금
-                        </label>
-                        <label style="display:flex; align-items:center; gap:0.4rem; font-size:0.78rem; white-space:nowrap;">📍 핀(박스) 크기 <input type="range" id="stylePinSizeAll" min="0.5" max="4.4" step="0.1" value="1.0" style="width:110px;" disabled> <span id="stylePinSizeAllLabel" style="font-weight:700; min-width:34px; display:inline-block; text-align:right;">100%</span></label>
-                        <label style="display:flex; align-items:center; gap:0.4rem; font-size:0.78rem; white-space:nowrap;">➔ 화살표 크기 <input type="range" id="styleArrowSizeAll" min="0.5" max="5.0" step="0.1" value="1.0" style="width:110px;" disabled> <span id="styleArrowSizeAllLabel" style="font-weight:700; min-width:34px; display:inline-block; text-align:right;">100%</span></label>
-                        <label style="display:flex; align-items:center; gap:0.4rem; font-size:0.78rem; white-space:nowrap;">〰 연결선·테두리 굵기 <input type="range" id="styleLeaderLineScaleAll" min="0.1" max="5.0" step="0.1" value="1.0" style="width:110px;" disabled> <span id="styleLeaderLineScaleAllLabel" style="font-weight:700; min-width:34px; display:inline-block; text-align:right;">100%</span></label>
-                        <button type="button" id="btnApplyMapStyleAllFloors" class="chip map-style-all-floors-btn" title="지금 층의 핀·화살표·연결선 설정을 이 건물 전체 층에 복사">전체층 적용</button>
-                    </div>
-
                     <!-- Canvas Viewport -->
                     <div class="canvas-container" id="canvasContainer">
+                        <!-- Unified Top Drawing Controls Toolbar (PC: 도면 안 오버레이) -->
+                        <div class="canvas-top-toolbar">
+                            <div class="toolbar-mode-group">
+                                <button type="button" id="btnModePan" class="mode-btn active" title="선택 모드 (Esc) — 좌클릭 드래그: 선택 / Ctrl+드래그·클릭: 추가·해제 / 휠클릭: 도면 이동">
+                                    <i class="fa-regular fa-hand-pointer"></i> 선택 <span class="mode-shortcut">Esc</span>
+                                </button>
+                                <button type="button" id="btnModeMark" class="mode-btn btn-mark-mode" title="결함 위치 마킹 모드 (D)">
+                                    <i class="fa-solid fa-location-dot"></i> 📍 핀 마킹 <span class="mode-shortcut">D</span>
+                                </button>
+                                <button type="button" id="btnModeArea" class="mode-btn btn-area-mode" title="결함 영역(면적) 마킹 모드 (A)">
+                                    <i class="fa-solid fa-draw-square"></i> 🟧 영역 마킹 <span class="mode-shortcut">A</span>
+                                </button>
+                            </div>
+                            <div class="area-tool-panel" id="areaToolPanel" hidden>
+                                <span class="area-tool-kicker">영역 모양</span>
+                                <button type="button" class="area-tool-btn active" id="btnAreaCreateRect" data-area-create="rect" title="박스">박스</button>
+                                <button type="button" class="area-tool-btn" id="btnAreaCreateEllipse" data-area-create="ellipse" title="타원">타원</button>
+                                <button type="button" class="area-tool-btn" id="btnAreaCreatePolygon" data-area-create="polygon" title="다각형 — 점 찍고 더블클릭 또는 첫 점에 가깝게 클릭해서 닫기">다각형</button>
+                                <span class="area-tool-kicker">내부 그리기</span>
+                                <button type="button" class="area-tool-btn" id="btnAreaInkLine" data-area-ink="line" title="선택한 영역 안에 선">선</button>
+                                <button type="button" class="area-tool-btn" id="btnAreaInkRect" data-area-ink="rect" title="선택한 영역 안에 박스">박스</button>
+                                <button type="button" class="area-tool-btn" id="btnAreaInkPoly" data-area-ink="polygon" title="선택한 영역 안에 다각형">다각형</button>
+                                <button type="button" class="area-tool-btn" id="btnAreaInkEllipse" data-area-ink="ellipse" title="선택한 영역 안에 타원">타원</button>
+                                <button type="button" class="area-tool-btn" id="btnAreaInkPath" data-area-ink="path" title="선택한 영역 안에 자유선">자유선</button>
+                                <button type="button" class="area-tool-btn area-tool-btn-undo" id="btnAreaInkUndo" title="마지막 내부 그리기 지우기">그리기 취소</button>
+                            </div>
+
+                            <div class="toolbar-action-group">
+                                <button type="button" id="btnToggleDefectList" class="mode-btn toolbar-defect-list-toggle" title="좌측 조사항목(결함목록) 창 표시" aria-pressed="true">
+                                    <i class="fa-solid fa-table-list"></i> 목록 <span class="toolbar-toggle-state">ON</span>
+                                </button>
+                                <button type="button" id="btnToggleMapStyleSize" class="mode-btn toolbar-size-toggle pc-only-chrome" title="핀·화살표·연결선 크기 조절 패널 표시" aria-pressed="false">
+                                    <i class="fa-solid fa-sliders"></i> 크기 <span class="toolbar-toggle-state">OFF</span>
+                                </button>
+                                <button type="button" id="btnRotateDrawing" class="btn-rotate-hero" title="세로 도면 가로로 90도 회전">
+                                    <i class="fa-solid fa-rotate-right"></i> 🔄 회전
+                                </button>
+                                <div class="zoom-pill-group">
+                                    <button id="btnZoomIn" class="zoom-pill-btn" title="확대 (+)"><i class="fa-solid fa-plus"></i></button>
+                                    <span id="zoomScaleText" class="zoom-pill-badge">100%</span>
+                                    <button id="btnZoomOut" class="zoom-pill-btn" title="축소 (-)"><i class="fa-solid fa-minus"></i></button>
+                                    <button id="btnZoomFit" class="zoom-pill-btn text-btn" title="화면에 맞추기"><i class="fa-solid fa-expand"></i> 맞춤</button>
+                                    <button type="button" id="btnExportVectorPdf" class="zoom-pill-btn text-btn" title="원본 PDF 벡터 + 마킹 벡터로 내보내기" style="border-color:#525252;color:#2a2a2a;">
+                                        <i class="fa-solid fa-file-pdf"></i> 벡터 PDF
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- 핀/화살표 크기 일괄 조정 (결함위치도 전용 — NDT와 별도) -->
+                        <div class="map-style-toolbar map-style-size-panel" id="mapStyleSizeToolbar">
+                            <span class="map-style-floor-hint" style="font-size:0.72rem; color:var(--text-muted); white-space:nowrap;">결함위치도 · 현재 층</span>
+                            <label class="style-size-lock-label" title="체크 시 슬라이더 조작 불가">
+                                <input type="checkbox" id="styleSizeLockMap" checked>
+                                <i class="fa-solid fa-lock"></i> 잠금
+                            </label>
+                            <label style="display:flex; align-items:center; gap:0.4rem; font-size:0.78rem; white-space:nowrap;">📍 핀(박스) 크기 <input type="range" id="stylePinSizeAll" min="0.5" max="4.4" step="0.1" value="1.0" style="width:110px;" disabled> <span id="stylePinSizeAllLabel" style="font-weight:700; min-width:34px; display:inline-block; text-align:right;">100%</span></label>
+                            <label style="display:flex; align-items:center; gap:0.4rem; font-size:0.78rem; white-space:nowrap;">➔ 화살표 크기 <input type="range" id="styleArrowSizeAll" min="0.5" max="5.0" step="0.1" value="1.0" style="width:110px;" disabled> <span id="styleArrowSizeAllLabel" style="font-weight:700; min-width:34px; display:inline-block; text-align:right;">100%</span></label>
+                            <label style="display:flex; align-items:center; gap:0.4rem; font-size:0.78rem; white-space:nowrap;">〰 연결선·테두리 굵기 <input type="range" id="styleLeaderLineScaleAll" min="0.1" max="5.0" step="0.1" value="1.0" style="width:110px;" disabled> <span id="styleLeaderLineScaleAllLabel" style="font-weight:700; min-width:34px; display:inline-block; text-align:right;">100%</span></label>
+                            <button type="button" id="btnApplyMapStyleAllFloors" class="chip map-style-all-floors-btn" title="지금 층의 핀·화살표·연결선 설정을 이 건물 전체 층에 복사">전체층 적용</button>
+                        </div>
+
                         <div id="mapZoomOverlay" class="map-zoom-overlay" aria-hidden="true"></div>
                         <div id="mapSelectedDefectPopup" class="map-selected-defect-popup" hidden></div>
                         <div id="mapDrawingEmpty" class="map-drawing-empty" aria-live="polite" style="display:none;">
@@ -367,30 +367,30 @@
                                 <span>추가</span>
                             </button>
                         </aside>
-                    </div>
 
-                    <!-- Bottom Icon Toolbar -->
-                    <div class="canvas-bottom-toolbar">
-                        <button type="button" id="btnUndo" class="icon-pill-btn" title="실행 취소 (Ctrl+Z)" disabled>
-                            <i class="fa-solid fa-rotate-left"></i>
-                            <span>되돌리기</span>
-                        </button>
-                        <button type="button" id="btnRedo" class="icon-pill-btn" title="다시 실행" disabled>
-                            <i class="fa-solid fa-rotate-right"></i>
-                            <span>다시 실행</span>
-                        </button>
-                        <button type="button" id="btnBulkEditSelectedDefects" class="icon-pill-btn map-toolbar-bulk-edit" title="선택한 결함 일괄 수정" hidden disabled>
-                            <i class="fa-solid fa-pen-to-square"></i>
-                            <span id="mapBulkEditToolbarLabel">일괄 수정</span>
-                        </button>
-                        <button type="button" id="btnDeleteSelectedDefects" class="icon-pill-btn icon-pill-danger map-toolbar-delete-selected" title="선택한 결함 삭제" hidden disabled>
-                            <i class="fa-solid fa-trash-can"></i>
-                            <span id="mapSelectionToolbarLabel">선택 삭제</span>
-                        </button>
-                        <button type="button" id="btnClearPins" class="icon-pill-btn icon-pill-danger" title="현재 층 핀 전체 초기화">
-                            <i class="fa-solid fa-trash-can"></i>
-                            <span>전체 초기화</span>
-                        </button>
+                        <!-- Bottom Icon Toolbar (PC: 도면 안 하단 오버레이) -->
+                        <div class="canvas-bottom-toolbar">
+                            <button type="button" id="btnUndo" class="icon-pill-btn" title="실행 취소 (Ctrl+Z)" disabled>
+                                <i class="fa-solid fa-rotate-left"></i>
+                                <span>되돌리기</span>
+                            </button>
+                            <button type="button" id="btnRedo" class="icon-pill-btn" title="다시 실행" disabled>
+                                <i class="fa-solid fa-rotate-right"></i>
+                                <span>다시 실행</span>
+                            </button>
+                            <button type="button" id="btnBulkEditSelectedDefects" class="icon-pill-btn map-toolbar-bulk-edit" title="선택한 결함 일괄 수정" hidden disabled>
+                                <i class="fa-solid fa-pen-to-square"></i>
+                                <span id="mapBulkEditToolbarLabel">일괄 수정</span>
+                            </button>
+                            <button type="button" id="btnDeleteSelectedDefects" class="icon-pill-btn icon-pill-danger map-toolbar-delete-selected" title="선택한 결함 삭제" hidden disabled>
+                                <i class="fa-solid fa-trash-can"></i>
+                                <span id="mapSelectionToolbarLabel">선택 삭제</span>
+                            </button>
+                            <button type="button" id="btnClearPins" class="icon-pill-btn icon-pill-danger" title="현재 층 핀 전체 초기화">
+                                <i class="fa-solid fa-trash-can"></i>
+                                <span>전체 초기화</span>
+                            </button>
+                        </div>
                     </div>
 
                     <!-- 모바일 하단 액션 바 -->
@@ -596,53 +596,55 @@
                 </div>
             </div>
 
-            <!-- NDT Top Canvas Controls Toolbar -->
-            <div class="canvas-top-toolbar ndt-top-canvas-tools">
-                <div class="toolbar-mode-group">
-                    <button type="button" id="btnNdtModePan" class="mode-btn active" onclick="window.setNdtMode('PAN')" title="좌클릭=선택/드래그 · 휠클릭=화면 이동 · Ctrl+드래그=추가선택 (Esc)">
-                        <i class="fa-regular fa-hand-pointer"></i> 선택 <span class="mode-shortcut">Esc</span>
-                    </button>
-                    <button type="button" id="btnNdtModeMark" class="mode-btn btn-mark-mode" onclick="window.setNdtMode('MARK')" title="NDT 위치 마킹 (D)">
-                        <i class="fa-solid fa-location-dot"></i> 📍 [NDT 위치 마킹] <span class="mode-shortcut">D</span>
-                    </button>
-                </div>
+            <!-- NDT Top Canvas Controls — PC에서는 도면 안 오버레이로 이동 (아래 ndtCanvasContainer) -->
 
-                <div class="toolbar-action-group">
-                    <button type="button" id="btnToggleNdtStyleSize" class="mode-btn toolbar-size-toggle pc-only-chrome" title="핀·화살표·연결선 크기 조절 패널 표시" aria-pressed="false">
-                        <i class="fa-solid fa-sliders"></i> 크기 <span class="toolbar-toggle-state">OFF</span>
-                    </button>
-                    <div class="filter-group">
-                        <button type="button" id="btnOpenStyleColorModalNdt" class="chip"><i class="fa-solid fa-palette"></i> 스타일 설정</button>
-                        <button type="button" class="chip" onclick="window.exportCurrentFloorNdtVectorPdf && window.exportCurrentFloorNdtVectorPdf()" title="PDF 원본 + NDT 마킹 벡터"><i class="fa-solid fa-file-pdf"></i> 벡터 PDF</button>
-                    </div>
-                    <button type="button" id="btnRotateNdtDrawing" class="btn-rotate-hero" onclick="window.rotateNdtDrawing()">
-                        <i class="fa-solid fa-rotate-right"></i> 🔄 도면 90° 회전
-                    </button>
-                    <div class="zoom-pill-group">
-                        <button id="btnNdtZoomIn" class="zoom-pill-btn" onclick="window.zoomNdtCanvas(1.2)"><i class="fa-solid fa-plus"></i></button>
-                        <span id="ndtZoomScaleText" class="zoom-pill-badge">100%</span>
-                        <button id="btnNdtZoomOut" class="zoom-pill-btn" onclick="window.zoomNdtCanvas(0.83)"><i class="fa-solid fa-minus"></i></button>
-                        <button id="btnNdtZoomFit" class="zoom-pill-btn text-btn" onclick="window.fitNdtCanvas()"><i class="fa-solid fa-expand"></i> 맞춤</button>
-                    </div>
-                </div>
-            </div>
             </div><!-- /.ndt-top-bar -->
-
-            <!-- NDT 핀/화살표/선 굵기 — 현재 선택한 조사 항목만 조절 -->
-            <div class="map-style-toolbar map-style-size-panel" id="ndtStyleSizeToolbar">
-                <span style="font-size:0.72rem; color:var(--text-muted); white-space:nowrap;">비파괴 · <strong id="ndtStyleCatLabel" style="color:var(--text-primary);">부재 실측</strong></span>
-                <label class="style-size-lock-label" title="체크 시 슬라이더 조작 불가">
-                    <input type="checkbox" id="styleSizeLockNdt" checked>
-                    <i class="fa-solid fa-lock"></i> 잠금
-                </label>
-                <label style="display:flex; align-items:center; gap:0.4rem; font-size:0.78rem; white-space:nowrap;">📍 핀(박스) 크기 <input type="range" id="stylePinSizeNdtCurrent" min="0.5" max="4.4" step="0.1" value="1.0" style="width:110px;" disabled> <span id="stylePinSizeNdtCurrentLabel" style="font-weight:700; min-width:34px; display:inline-block; text-align:right;">100%</span></label>
-                <label style="display:flex; align-items:center; gap:0.4rem; font-size:0.78rem; white-space:nowrap;">➔ 화살표 크기 <input type="range" id="styleArrowSizeNdtCurrent" min="0.5" max="5.0" step="0.1" value="1.0" style="width:110px;" disabled> <span id="styleArrowSizeNdtCurrentLabel" style="font-weight:700; min-width:34px; display:inline-block; text-align:right;">100%</span></label>
-                <label style="display:flex; align-items:center; gap:0.4rem; font-size:0.78rem; white-space:nowrap;">〰 연결선·테두리 굵기 <input type="range" id="styleLeaderLineScaleNdtCurrent" min="0.1" max="3.0" step="0.1" value="1.0" style="width:110px;" disabled> <span id="styleLeaderLineScaleNdtCurrentLabel" style="font-weight:700; min-width:34px; display:inline-block; text-align:right;">100%</span></label>
-            </div>
 
             <!-- NDT Canvas Viewport + 하단 독 -->
             <div class="ndt-canvas-col">
             <div class="canvas-container" id="ndtCanvasContainer">
+                <div class="canvas-top-toolbar ndt-top-canvas-tools">
+                    <div class="toolbar-mode-group">
+                        <button type="button" id="btnNdtModePan" class="mode-btn active" onclick="window.setNdtMode('PAN')" title="좌클릭=선택/드래그 · 휠클릭=화면 이동 · Ctrl+드래그=추가선택 (Esc)">
+                            <i class="fa-regular fa-hand-pointer"></i> 선택 <span class="mode-shortcut">Esc</span>
+                        </button>
+                        <button type="button" id="btnNdtModeMark" class="mode-btn btn-mark-mode" onclick="window.setNdtMode('MARK')" title="NDT 위치 마킹 (D)">
+                            <i class="fa-solid fa-location-dot"></i> 📍 [NDT 위치 마킹] <span class="mode-shortcut">D</span>
+                        </button>
+                    </div>
+
+                    <div class="toolbar-action-group">
+                        <button type="button" id="btnToggleNdtStyleSize" class="mode-btn toolbar-size-toggle pc-only-chrome" title="핀·화살표·연결선 크기 조절 패널 표시" aria-pressed="false">
+                            <i class="fa-solid fa-sliders"></i> 크기 <span class="toolbar-toggle-state">OFF</span>
+                        </button>
+                        <div class="filter-group">
+                            <button type="button" id="btnOpenStyleColorModalNdt" class="chip"><i class="fa-solid fa-palette"></i> 스타일 설정</button>
+                            <button type="button" class="chip" onclick="window.exportCurrentFloorNdtVectorPdf && window.exportCurrentFloorNdtVectorPdf()" title="PDF 원본 + NDT 마킹 벡터"><i class="fa-solid fa-file-pdf"></i> 벡터 PDF</button>
+                        </div>
+                        <button type="button" id="btnRotateNdtDrawing" class="btn-rotate-hero" onclick="window.rotateNdtDrawing()">
+                            <i class="fa-solid fa-rotate-right"></i> 🔄 도면 90° 회전
+                        </button>
+                        <div class="zoom-pill-group">
+                            <button id="btnNdtZoomIn" class="zoom-pill-btn" onclick="window.zoomNdtCanvas(1.2)"><i class="fa-solid fa-plus"></i></button>
+                            <span id="ndtZoomScaleText" class="zoom-pill-badge">100%</span>
+                            <button id="btnNdtZoomOut" class="zoom-pill-btn" onclick="window.zoomNdtCanvas(0.83)"><i class="fa-solid fa-minus"></i></button>
+                            <button id="btnNdtZoomFit" class="zoom-pill-btn text-btn" onclick="window.fitNdtCanvas()"><i class="fa-solid fa-expand"></i> 맞춤</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- NDT 핀/화살표/선 굵기 — 현재 선택한 조사 항목만 조절 -->
+                <div class="map-style-toolbar map-style-size-panel" id="ndtStyleSizeToolbar">
+                    <span style="font-size:0.72rem; color:var(--text-muted); white-space:nowrap;">비파괴 · <strong id="ndtStyleCatLabel" style="color:var(--text-primary);">부재 실측</strong></span>
+                    <label class="style-size-lock-label" title="체크 시 슬라이더 조작 불가">
+                        <input type="checkbox" id="styleSizeLockNdt" checked>
+                        <i class="fa-solid fa-lock"></i> 잠금
+                    </label>
+                    <label style="display:flex; align-items:center; gap:0.4rem; font-size:0.78rem; white-space:nowrap;">📍 핀(박스) 크기 <input type="range" id="stylePinSizeNdtCurrent" min="0.5" max="4.4" step="0.1" value="1.0" style="width:110px;" disabled> <span id="stylePinSizeNdtCurrentLabel" style="font-weight:700; min-width:34px; display:inline-block; text-align:right;">100%</span></label>
+                    <label style="display:flex; align-items:center; gap:0.4rem; font-size:0.78rem; white-space:nowrap;">➔ 화살표 크기 <input type="range" id="styleArrowSizeNdtCurrent" min="0.5" max="5.0" step="0.1" value="1.0" style="width:110px;" disabled> <span id="styleArrowSizeNdtCurrentLabel" style="font-weight:700; min-width:34px; display:inline-block; text-align:right;">100%</span></label>
+                    <label style="display:flex; align-items:center; gap:0.4rem; font-size:0.78rem; white-space:nowrap;">〰 연결선·테두리 굵기 <input type="range" id="styleLeaderLineScaleNdtCurrent" min="0.1" max="3.0" step="0.1" value="1.0" style="width:110px;" disabled> <span id="styleLeaderLineScaleNdtCurrentLabel" style="font-weight:700; min-width:34px; display:inline-block; text-align:right;">100%</span></label>
+                </div>
+
                 <div class="canvas-hint" id="ndtCanvasHintText">
                     <i class="fa-solid fa-vial"></i> 
                     <span>[📍 NDT 위치 마킹] 6대 비파괴 조사 측정 위치를 도면 상에 핀으로 표시하세요</span>
