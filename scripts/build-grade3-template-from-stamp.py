@@ -26,9 +26,8 @@ TARGETS = [
 ]
 BACKUP_DIR = ROOT / "_tmp_template_bak"
 
-# 헤더 칸 그라데이션(#FFF→#BBB)도 제거한다 — 결함표 글자 뒤 배경이 보이던 원인.
-# (예전에는 헤더만 보존했으나, 사용자 요청으로 글자 배경·테두리 없는 상태로 통일)
-HEADER_GRAD_IDS = set()
+# 결함표 상단(헤더) 칸만 #FFF→#BBB 그라데이션 유지. 데이터 칸·글자 바탕은 제거.
+HEADER_GRAD_IDS = {"5", "6", "7", "16", "17"}
 # 글자용 투명 borderFill(테두리 NONE, 채우기 없음) — 한글에서 borderFillIDRef 누락 시
 # 기본 글자 테두리/바탕이 생기는 경우가 있어 명시적으로 붙인다.
 CHAR_TRANSPARENT_BF_ID = "18"
@@ -280,12 +279,23 @@ def verify(hdr, sec, maps):
     survey = [t for t in re.findall(r"<hp:tbl[^>]*>[\s\S]*?</hp:tbl>", sec) if is_survey_table(t)]
     if not survey:
         errors.append("no survey table after replace")
+    allowed_header_grads = {
+        maps["borderFill"][oid]
+        for oid in HEADER_GRAD_IDS
+        if oid in maps["borderFill"]
+    }
+    for oid in HEADER_GRAD_IDS:
+        nid = maps["borderFill"].get(oid)
+        b = tag_block(hdr, "borderFill", nid) if nid else None
+        if not b or "<hc:gradation" not in b:
+            errors.append(f"header grad borderFill {oid}->{nid} missing gradation")
     for t in survey:
-        # 결함표 칸에 그라데이션/면채우기가 남아 있으면 글자 배경처럼 보임
+        # 데이터 칸에 그라데이션/면채우기가 남아 있으면 글자 배경처럼 보임 (헤더만 예외)
         for bid in set(re.findall(r'borderFillIDRef="(\d+)"', t)):
+            if bid in allowed_header_grads:
+                continue
             b = tag_block(hdr, "borderFill", bid)
             if b and ("gradation" in b.lower() or "<hc:fillBrush>" in b):
-                # 글자용 투명 fill(faceColor=none)만 허용
                 fc = re.search(r'faceColor="([^"]*)"', b)
                 if not (fc and fc.group(1) == "none"):
                     errors.append(f"survey cell borderFill {bid} still has visible fill/grad")

@@ -1,5 +1,8 @@
 # -*- coding: utf-8 -*-
-"""3종 결함조사표 스탬프: 칸 배경(그라데이션) 제거 + 글자용 투명 borderFill 명시."""
+"""3종 결함조사표 스탬프: 데이터 칸 배경 제거 + 글자용 투명 borderFill 명시.
+
+헤더 칸(5/6/7/16/17) #FFF→#BBB 그라데이션은 유지한다.
+"""
 import re
 import shutil
 import zipfile
@@ -8,6 +11,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 STAMP = ROOT / "templates" / "hwpx_grade3_survey_stamp.hwpx"
 HEADER_GRAD_IDS = {"5", "6", "7", "16", "17"}
+DATA_FILL_IDS = {str(i) for i in range(4, 18)} - HEADER_GRAD_IDS - {"18"}
 CHAR_IDS = {"10", "11", "12"}
 TRANSPARENT_BF = (
     '<hh:borderFill id="18" threeD="0" shadow="0" centerLine="NONE" breakCellSeparateLine="0">'
@@ -24,11 +28,13 @@ TRANSPARENT_BF = (
 
 
 def strip_cell_fill(block: str, bid: str) -> str:
-    if bid not in HEADER_GRAD_IDS and bid not in {str(i) for i in range(4, 18)}:
+    if bid in HEADER_GRAD_IDS:
         return block
-    # 모든 결함표 칸(헤더 포함)에서 면채우기/그라데이션 제거 — 선 테두리만 유지
     if bid == "18":
         return TRANSPARENT_BF
+    if bid not in DATA_FILL_IDS:
+        return block
+    # 데이터 칸만 면채우기/그라데이션 제거 — 선 테두리만 유지
     block = re.sub(r"<hc:fillBrush>[\s\S]*?</hc:fillBrush>", "", block)
     block = re.sub(r"<hc:gradation[^>]*/?>", "", block)
     block = re.sub(r"<hc:gradation[^>]*>[\s\S]*?</hc:gradation>", "", block)
