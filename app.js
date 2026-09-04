@@ -3795,17 +3795,22 @@ document.addEventListener('DOMContentLoaded', () => {
         } catch (_e) { /* ignore */ }
 
         const prevTabId = window.state.currentTab;
-        window.state.currentTab = targetTabId;
+        const leavingForHome = targetTabId === 'tab-home' && prevTabId && prevTabId !== 'tab-home';
+        const diag = (typeof window.getSyncDiagnostics === 'function') ? window.getSyncDiagnostics() : null;
+        const pendingUpload = !!(diag && diag.deferredDirty);
 
-        // 작업 탭 → 홈: 미뤄 둔 변경 업로드 + 다른 기기에서 온 변경 반영
-        if (targetTabId === 'tab-home' && prevTabId && prevTabId !== 'tab-home'
-            && typeof window.flushDeferredWorkTabSync === 'function') {
-            try { window.flushDeferredWorkTabSync('home'); } catch (_e) { /* ignore */ }
-        } else if (targetTabId === 'tab-home' && typeof window.flushDeferredWorkTabSync === 'function') {
-            try {
-                if (typeof scheduleFlushPendingRemoteSync === 'function') scheduleFlushPendingRemoteSync();
-            } catch (_e2) { /* ignore */ }
+        if (targetTabId === 'tab-home' && (leavingForHome || pendingUpload)) {
+            if (leavingForHome && typeof saveStateToLocalStorage === 'function') {
+                try { saveStateToLocalStorage(); } catch (_e) { /* ignore */ }
+            }
+            if (typeof window.flushDeferredWorkTabSync === 'function') {
+                try { window.flushDeferredWorkTabSync(leavingForHome ? 'home' : 'home-repeat'); } catch (_e) { /* ignore */ }
+            }
+        } else if (targetTabId === 'tab-home' && typeof scheduleFlushPendingRemoteSync === 'function') {
+            try { scheduleFlushPendingRemoteSync(); } catch (_e2) { /* ignore */ }
         }
+
+        window.state.currentTab = targetTabId;
 
         document.querySelectorAll('.tab-content').forEach(content => {
             if (content.id === targetTabId) {
@@ -36259,6 +36264,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const onWorkTab = isWorkTabSyncDeferred();
         const shouldUpload = hadDirty
             || reason === 'home'
+            || reason === 'home-repeat'
             || ((reason === 'hidden' || reason === 'pagehide') && onWorkTab);
 
         if (!shouldUpload) {
@@ -36282,10 +36288,22 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
-        _deferredSyncDirty = false;
+        if (_syncInFlight || isRemoteSyncing) {
+            _deferredSyncDirty = true;
+            _syncPending = true;
+            if (reason === 'home' || reason === 'home-repeat') {
+                window.showToast('동기화가 진행 중입니다. 완료되면 자동으로 올립니다.', 'info', 2800);
+            }
+            refreshSyncStatusBadge();
+            return;
+        }
+
         if (_syncDebounceTimer) clearTimeout(_syncDebounceTimer);
         _syncDebounceTimer = null;
-        _syncFlushNotify = !!(reason === 'home' || reason === 'hidden' || reason === 'pagehide');
+        _syncFlushNotify = !!(reason === 'home' || reason === 'home-repeat' || reason === 'hidden' || reason === 'pagehide');
+        if (reason === 'home' || reason === 'home-repeat') {
+            window.showToast('서버에 올리는 중…', 'info', 2200);
+        }
         refreshSyncStatusBadge();
         syncStateToFirebase();
     }
@@ -36304,6 +36322,27 @@ document.addEventListener('DOMContentLoaded', () => {
             pendingRemote: !!_pendingRemoteData,
             workTabDeferred: isWorkTabSyncDeferred()
         };
+    };
+
+    /** 홈·설정에서 수동으로 서버 업로드 (진단·재시도용) */
+    window.forceSyncNow = async function () {
+        if (!db || !window.state.companyId) {
+            window.showToast('로그인·회사 승인 후 동기화할 수 있습니다.', 'warning', 4000);
+            refreshSyncStatusBadge();
+            return false;
+        }
+        if (!navigator.onLine) {
+            window.showToast('오프라인입니다.', 'warning', 3500);
+            refreshSyncStatusBadge();
+            return false;
+        }
+        if (typeof saveStateToLocalStorage === 'function') saveStateToLocalStorage();
+        _deferredSyncDirty = true;
+        _syncFlushNotify = true;
+        window.showToast('서버에 올리는 중…', 'info', 2200);
+        refreshSyncStatusBadge();
+        await syncStateToFirebase();
+        return !_deferredSyncDirty;
     };
 
     /** 온라인 복귀·앱 포그라운드: 실시간 리스너 재구독 + 서버 기준 병합 동기화 */
@@ -36756,10 +36795,12 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!db || !window.state.companyId || !navigator.onLine) return;
         if (isRemoteSyncing || _syncInFlight) {
             _syncPending = true;
+            _deferredSyncDirty = true;
             return;
         }
         if (typeof flushOverviewCaptionsFromDom === 'function') flushOverviewCaptionsFromDom();
         _syncInFlight = true;
+        _deferredSyncDirty = false;
         ensureSyncMetaState();
         let leaseInfo = null;
         let leaseHeartbeatTimer = null;
@@ -36962,9 +37003,10 @@ document.addEventListener('DOMContentLoaded', () => {
         } catch (e) {
             console.warn('Firebase Sync Error:', e);
             _syncPending = true;
+            _deferredSyncDirty = true;
             _syncFlushNotify = false;
             refreshSyncStatusBadge();
-            window.showToast('서버 동기화에 실패했습니다. 잠시 후 다시 시도합니다.', 'warning', 4000);
+            window.showToast('서버 동기화에 실패했습니다. 홈 탭을 다시 눌러 재시도해 주세요.', 'warning', 5000);
             setTimeout(() => {
                 if (navigator.onLine && _syncPending) {
                     _syncPending = false;
