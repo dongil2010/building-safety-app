@@ -601,9 +601,15 @@ label.header-ndt-draw-btn.btn-primary {
     padding: 0 0.22rem;
 }
 
-/* 태블릿·모바일: 도구는 사이드 레일·하단 독 — 상단바에선 숨김 */
-html:not(.layout-desktop) #tab-ndt .ndt-top-bar .ndt-top-canvas-tools {
+/* 태블릿·모바일: 도구는 사이드 레일·하단 독 — 상단바에선 숨김 (PC 환경에서는 표시) */
+html.layout-tablet #tab-ndt .ndt-top-bar .ndt-top-canvas-tools {
     display: none !important;
+}
+
+@media (max-width: 768px) {
+    html:not(.layout-desktop) #tab-ndt .ndt-top-bar .ndt-top-canvas-tools {
+        display: none !important;
+    }
 }
 
 html.layout-desktop #tab-ndt .ndt-top-bar .ndt-top-canvas-tools {
