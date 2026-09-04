@@ -39,7 +39,7 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <meta name="apple-mobile-web-app-title" content="스마트 안전점검">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css">
-    <link rel="stylesheet" href="styles.css?v=20260904_092528">
+    <link rel="stylesheet" href="styles.css?v=20260904_092703">
     <!-- FontAwesome icons for clean engineering UI -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <!-- PDF 생성용: 페이지별로 직접 캡처해서 조립(큰 보고서에서 html2pdf 한방 렌더링이 캔버스 높이 한계로
@@ -1811,100 +1811,108 @@
         </div>
     </div>
 
-    <!-- MODAL: 부동침하 기울기 - 그룹 생성/포인트 추가·수정 -->
-    <div class="modal-overlay" id="ndtDisplacementModal">
-        <div class="modal-card" style="max-width: 460px; width: 94%;">
-            <div class="modal-header" style="background: linear-gradient(135deg, #2a2a2a, #1f1f1f); border-bottom: 1px solid #6b6b6b;">
-                <h3><i class="fa-solid fa-arrows-up-down" style="color: #6b6b6b;"></i> 📉 부동침하 기울기 측정</h3>
-                <button type="button" class="modal-close" id="btnCloseNdtDisplacementModal">&times;</button>
+    <!-- MODAL: 부동침하/부재변위 - 지점 등록·수정 (비파괴 우측 드로어와 동일) -->
+    <div class="modal-overlay modal-drawer-overlay" id="ndtDisplacementModal">
+        <div class="modal-card defect-drawer-card ndt-drawer-card">
+            <div class="modal-header defect-drawer-header">
+                <div class="defect-drawer-title-wrap">
+                    <h3 id="ndtDispModalTitle"><i class="fa-solid fa-arrows-up-down"></i> 📉 부동침하 기울기 측정</h3>
+                </div>
+                <button type="button" class="modal-close" id="btnCloseNdtDisplacementModal" title="닫기 (Esc)">&times;</button>
             </div>
-            <div class="modal-body" style="display: flex; flex-direction: column; gap: 1rem;">
+            <div class="modal-body defect-drawer-body" style="display: flex; flex-direction: column; gap: 1rem;">
                 <input type="hidden" id="ndtDispGroupId">
                 <input type="hidden" id="ndtDispPointId">
-                <div id="ndtDispModalHint" style="font-size: 0.85rem; color: #6b6b6b; font-weight: 700;"></div>
+                <div id="ndtDispModalHint" class="ndt-disp-modal-hint"></div>
 
-                <div id="groupNdtDispInfo" class="form-row" style="display: flex; gap: 0.8rem;">
-                    <div class="form-group" style="flex: 1;">
+                <div id="groupNdtDispInfo" class="ndt-standard-fields-stack">
+                    <div class="form-group ndt-pick-group">
                         <label class="form-label">📍 측정 위치 *</label>
-                        <select id="ndtDispLocationType" class="form-select">
+                        <select id="ndtDispLocationType" class="form-select defect-legacy-fields" aria-hidden="true" tabindex="-1">
                             <option value="보">보</option>
                             <option value="슬래브">슬래브</option>
                             <option value="바닥">바닥</option>
                         </select>
+                        <div class="defect-quick-chip-grid dqg-component ndt-quick-chip-grid" id="ndtDispLocationChips"></div>
                     </div>
-                    <div class="form-group" style="flex: 1;">
+                    <div class="form-group">
                         <label class="form-label">📏 총 측정길이 (m) *</label>
-                        <input type="number" id="ndtDispMeasureLength" class="form-control" step="0.1" min="0" placeholder="예: 12">
+                        <input type="number" id="ndtDispMeasureLength" class="form-control" step="0.1" min="0" placeholder="예: 12" inputmode="decimal">
                     </div>
                 </div>
 
                 <div id="ndtDispMinorDamageRow" class="form-group" style="display:none;">
-                    <label class="form-label" style="display:flex; align-items:center; gap:0.4rem; cursor:pointer;">
-                        <input type="checkbox" id="ndtDispHasMinorDamage" style="width:auto;">
-                        ⚠️ 경미한 손상(균열 등) 동반 — 처짐비가 L/480 이내여도 a 대신 b등급으로 판정
+                    <label class="form-label" style="display:flex; align-items:flex-start; gap:0.4rem; cursor:pointer; line-height:1.4;">
+                        <input type="checkbox" id="ndtDispHasMinorDamage" style="width:auto; margin-top:0.2rem;">
+                        <span>⚠️ 경미한 손상(균열 등) 동반 — 처짐비가 L/480 이내여도 a 대신 b등급으로 판정</span>
                     </label>
                 </div>
 
                 <div class="form-group">
                     <label class="form-label" id="lblNdtDispLevel">📊 레벨값 (mm) *</label>
-                    <input type="number" id="ndtDispLevel" class="form-control" step="0.1" placeholder="예: -3 또는 2.5" style="font-weight: 800; color: #4ade80;">
+                    <input type="number" id="ndtDispLevel" class="form-control" step="0.1" placeholder="예: -3 또는 2.5" inputmode="decimal" style="font-weight: 800; color: #4ade80;">
                 </div>
             </div>
-            <div class="modal-footer" style="justify-content: space-between; flex-wrap: wrap; gap: 0.4rem;">
-                <button type="button" class="btn btn-danger-outline" id="btnDeleteNdtDispPoint" style="display:none;"><i class="fa-solid fa-trash"></i> 삭제</button>
-                <button type="button" class="btn btn-outline" id="btnStartNewNdtDispZone" style="display:none;" title="활성 구역을 끊고 새 측정 구역을 만듭니다"><i class="fa-solid fa-layer-group"></i> 새 구역</button>
+            <div class="modal-footer defect-drawer-footer" style="justify-content: space-between; flex-wrap: wrap; gap: 0.4rem;">
+                <div style="display:flex; gap:0.4rem; flex-wrap:wrap;">
+                    <button type="button" class="btn btn-danger-outline" id="btnDeleteNdtDispPoint" style="display:none;"><i class="fa-solid fa-trash"></i> 삭제</button>
+                    <button type="button" class="btn btn-outline" id="btnStartNewNdtDispZone" style="display:none;" title="활성 구역을 끊고 새 측정 구역을 만듭니다"><i class="fa-solid fa-layer-group"></i> 새 구역</button>
+                </div>
                 <div style="display:flex; gap:0.4rem; margin-left:auto; flex-wrap:wrap;">
                     <button type="button" class="btn btn-outline" id="btnCancelNdtDisp">취소</button>
-                    <button type="button" class="btn btn-primary" id="btnSaveNdtDisp" style="background: linear-gradient(135deg, #2a2a2a, #1f1f1f);"><i class="fa-solid fa-check"></i> 저장</button>
-                    <button type="button" class="btn btn-primary" id="btnAddAnotherNdtPoint" style="background: linear-gradient(135deg, #2a2a2a, #1f1f1f);"><i class="fa-solid fa-plus"></i> 저장 후 이어서 측정</button>
+                    <button type="button" class="btn btn-primary" id="btnSaveNdtDisp"><i class="fa-solid fa-check"></i> 저장</button>
+                    <button type="button" class="btn btn-primary" id="btnAddAnotherNdtPoint"><i class="fa-solid fa-plus"></i> 이어서 측정</button>
                 </div>
             </div>
         </div>
     </div>
 
-    <!-- MODAL: 부동침하 기울기 - 그룹 정보 수정 (측정위치/측정길이 + 포인트 목록) -->
-    <div class="modal-overlay" id="ndtDisplacementGroupEditModal">
-        <div class="modal-card" style="max-width: 460px; width: 94%;">
-            <div class="modal-header" style="background: linear-gradient(135deg, #2a2a2a, #1f1f1f); border-bottom: 1px solid #6b6b6b;">
-                <h3><i class="fa-solid fa-layer-group" style="color: #6b6b6b;"></i> <span id="ndtDispGroupEditTitle">측정 구역 정보</span></h3>
-                <button type="button" class="modal-close" id="btnCloseNdtDispGroupEditModal">&times;</button>
+    <!-- MODAL: 부동침하/부재변위 - 구역 정보 수정 (비파괴 우측 드로어와 동일) -->
+    <div class="modal-overlay modal-drawer-overlay" id="ndtDisplacementGroupEditModal">
+        <div class="modal-card defect-drawer-card ndt-drawer-card">
+            <div class="modal-header defect-drawer-header">
+                <div class="defect-drawer-title-wrap">
+                    <h3><i class="fa-solid fa-layer-group"></i> <span id="ndtDispGroupEditTitle">측정 구역 정보</span></h3>
+                </div>
+                <button type="button" class="modal-close" id="btnCloseNdtDispGroupEditModal" title="닫기 (Esc)">&times;</button>
             </div>
-            <div class="modal-body" style="display: flex; flex-direction: column; gap: 1rem;">
+            <div class="modal-body defect-drawer-body" style="display: flex; flex-direction: column; gap: 1rem;">
                 <input type="hidden" id="ndtDispEditGroupId">
-                <div class="form-row" style="display: flex; gap: 0.8rem;">
-                    <div class="form-group" style="flex: 1;">
+                <div class="ndt-standard-fields-stack">
+                    <div class="form-group ndt-pick-group">
                         <label class="form-label">📍 측정 위치 *</label>
-                        <select id="ndtDispEditLocationType" class="form-select">
+                        <select id="ndtDispEditLocationType" class="form-select defect-legacy-fields" aria-hidden="true" tabindex="-1">
                             <option value="보">보</option>
                             <option value="슬래브">슬래브</option>
                             <option value="바닥">바닥</option>
                         </select>
+                        <div class="defect-quick-chip-grid dqg-component ndt-quick-chip-grid" id="ndtDispEditLocationChips"></div>
                     </div>
-                    <div class="form-group" style="flex: 1;">
+                    <div class="form-group">
                         <label class="form-label">📏 총 측정길이 (m) *</label>
-                        <input type="number" id="ndtDispEditMeasureLength" class="form-control" step="0.1" min="0">
+                        <input type="number" id="ndtDispEditMeasureLength" class="form-control" step="0.1" min="0" inputmode="decimal">
                     </div>
                 </div>
                 <div class="form-group">
-                    <label class="form-label">🎨 구역 색상 (도면·그래프·표에서 이 구역을 표시하는 색)</label>
-                    <input type="color" id="ndtDispEditColor" style="width: 60px; height: 36px; padding: 2px; cursor: pointer; border: 1px solid var(--border-color); border-radius: 6px; background: transparent;">
+                    <label class="form-label">🎨 구역 색상</label>
+                    <input type="color" id="ndtDispEditColor" class="ndt-disp-color-input" title="도면·그래프·표에서 이 구역을 표시하는 색">
                 </div>
                 <div id="ndtDispEditMinorDamageRow" class="form-group" style="display:none;">
-                    <label class="form-label" style="display:flex; align-items:center; gap:0.4rem; cursor:pointer;">
-                        <input type="checkbox" id="ndtDispEditHasMinorDamage" style="width:auto;">
-                        ⚠️ 경미한 손상(균열 등) 동반 — 처짐비가 L/480 이내여도 a 대신 b등급으로 판정
+                    <label class="form-label" style="display:flex; align-items:flex-start; gap:0.4rem; cursor:pointer; line-height:1.4;">
+                        <input type="checkbox" id="ndtDispEditHasMinorDamage" style="width:auto; margin-top:0.2rem;">
+                        <span>⚠️ 경미한 손상(균열 등) 동반 — 처짐비가 L/480 이내여도 a 대신 b등급으로 판정</span>
                     </label>
                 </div>
                 <div class="form-group">
-                    <label class="form-label">📊 측정 지점 목록 (지점을 삭제하면 순번이 다시 매겨집니다)</label>
+                    <label class="form-label">📊 측정 지점 목록</label>
                     <div id="ndtDispEditPointList" class="option-manager-list"></div>
                 </div>
             </div>
-            <div class="modal-footer" style="justify-content: space-between;">
-                <button type="button" class="btn btn-danger-outline" id="btnDeleteNdtDispGroup"><i class="fa-solid fa-trash"></i> 구역 전체 삭제</button>
-                <div>
+            <div class="modal-footer defect-drawer-footer" style="justify-content: space-between; flex-wrap: wrap; gap: 0.4rem;">
+                <button type="button" class="btn btn-danger-outline" id="btnDeleteNdtDispGroup"><i class="fa-solid fa-trash"></i> 구역 삭제</button>
+                <div style="display:flex; gap:0.4rem; margin-left:auto;">
                     <button type="button" class="btn btn-outline" id="btnCloseNdtDispGroupEdit">닫기</button>
-                    <button type="button" class="btn btn-primary" id="btnSaveNdtDispGroupEdit" style="background: linear-gradient(135deg, #2a2a2a, #1f1f1f);"><i class="fa-solid fa-check"></i> 저장</button>
+                    <button type="button" class="btn btn-primary" id="btnSaveNdtDispGroupEdit"><i class="fa-solid fa-check"></i> 저장</button>
                 </div>
             </div>
         </div>
@@ -2888,21 +2896,21 @@
     </div>
 
     <!-- Core → 탭 분류 → 기존 엔진(app.js) -->
-    <script src="js/core/state.js?v=20260904_092528"></script>
-    <script src="js/tabs/registry.js?v=20260904_092528"></script>
-    <script src="js/pdf-vector-bridge.js?v=20260904_092528"></script>
-    <script src="js/core/layout-mode.js?v=20260904_092528"></script>
-    <script src="js/core/mobile-keyboard.js?v=20260904_092528"></script>
-    <script src="js/tabs/home.js?v=20260904_092528"></script>
-    <script src="js/tabs/map.js?v=20260904_092528"></script>
-    <script src="js/tabs/survey.js?v=20260904_092528"></script>
-    <script src="js/tabs/ndt.js?v=20260904_092528"></script>
-    <script src="js/shared/report.js?v=20260904_092528"></script>
-    <script src="js/shared/hwpx-import.js?v=20260904_092528"></script>
-    <script src="js/shared/auth.js?v=20260904_092528"></script>
-    <script src="app.js?v=20260904_092528"></script>
+    <script src="js/core/state.js?v=20260904_092703"></script>
+    <script src="js/tabs/registry.js?v=20260904_092703"></script>
+    <script src="js/pdf-vector-bridge.js?v=20260904_092703"></script>
+    <script src="js/core/layout-mode.js?v=20260904_092703"></script>
+    <script src="js/core/mobile-keyboard.js?v=20260904_092703"></script>
+    <script src="js/tabs/home.js?v=20260904_092703"></script>
+    <script src="js/tabs/map.js?v=20260904_092703"></script>
+    <script src="js/tabs/survey.js?v=20260904_092703"></script>
+    <script src="js/tabs/ndt.js?v=20260904_092703"></script>
+    <script src="js/shared/report.js?v=20260904_092703"></script>
+    <script src="js/shared/hwpx-import.js?v=20260904_092703"></script>
+    <script src="js/shared/auth.js?v=20260904_092703"></script>
+    <script src="app.js?v=20260904_092703"></script>
     <script>
-        window.BSA_APP_VERSION = '20260904_092528';
+        window.BSA_APP_VERSION = '20260904_092703';
         (function () {
             var el = document.getElementById('appVersionText');
             if (el && window.BSA_APP_VERSION) el.textContent = 'v' + window.BSA_APP_VERSION;
@@ -2926,7 +2934,7 @@
                     native = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
                 } catch (e) {}
                 if (native) return;
-                navigator.serviceWorker.register('./sw.js?v=20260904_092528')
+                navigator.serviceWorker.register('./sw.js?v=20260904_092703')
                     .then(function(registration) {
                         console.log('✅ ServiceWorker Registered Successfully with scope:', registration.scope);
                         registration.update();

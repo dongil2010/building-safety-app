@@ -13059,44 +13059,51 @@ document.addEventListener('DOMContentLoaded', () => {
         return modal.classList.contains('open') || modal.style.display === 'flex';
     }
 
-    function syncNdtDrawerToCanvasArea() {
-        const overlay = document.getElementById('ndtModal');
-        if (!overlay) return;
+    function syncNdtDrawerToCanvasArea(overlayId) {
+        const ids = overlayId
+            ? [overlayId]
+            : ['ndtModal', 'ndtDisplacementModal', 'ndtDisplacementGroupEditModal'];
+        ids.forEach((id) => {
+            const overlay = document.getElementById(id);
+            if (!overlay) return;
 
-        // 모바일: 결함창과 같이 전체 화면 기준 하단 시트로 — 도면 영역에 묶지 않음
-        if (typeof layoutMediaMobileDefectDrawer === 'function' && layoutMediaMobileDefectDrawer()) {
+            // 모바일: 결함창과 같이 전체 화면 기준 하단 시트로 — 도면 영역에 묶지 않음
+            if (typeof layoutMediaMobileDefectDrawer === 'function' && layoutMediaMobileDefectDrawer()) {
+                overlay.classList.remove('ndt-drawer-in-canvas');
+                overlay.style.top = '';
+                overlay.style.left = '';
+                overlay.style.width = '';
+                overlay.style.height = '';
+                return;
+            }
+
+            const canvasArea = document.getElementById('ndtCanvasContainer');
+            const onNdtTab = window.state.currentTab === 'tab-ndt';
+            if (onNdtTab && canvasArea && (overlay.classList.contains('open') || overlay.style.display === 'flex' || id === 'ndtModal')) {
+                const rect = canvasArea.getBoundingClientRect();
+                if (rect.width >= 40 && rect.height >= 40) {
+                    overlay.classList.add('ndt-drawer-in-canvas');
+                    overlay.style.top = `${Math.round(rect.top)}px`;
+                    overlay.style.left = `${Math.round(rect.left)}px`;
+                    overlay.style.width = `${Math.round(rect.width)}px`;
+                    overlay.style.height = `${Math.round(rect.height)}px`;
+                    return;
+                }
+            }
             overlay.classList.remove('ndt-drawer-in-canvas');
             overlay.style.top = '';
             overlay.style.left = '';
             overlay.style.width = '';
             overlay.style.height = '';
-            return;
-        }
-
-        const canvasArea = document.getElementById('ndtCanvasContainer');
-        const onNdtTab = window.state.currentTab === 'tab-ndt';
-        if (onNdtTab && canvasArea) {
-            const rect = canvasArea.getBoundingClientRect();
-            if (rect.width >= 40 && rect.height >= 40) {
-                overlay.classList.add('ndt-drawer-in-canvas');
-                overlay.style.top = `${Math.round(rect.top)}px`;
-                overlay.style.left = `${Math.round(rect.left)}px`;
-                overlay.style.width = `${Math.round(rect.width)}px`;
-                overlay.style.height = `${Math.round(rect.height)}px`;
-                return;
-            }
-        }
-        overlay.classList.remove('ndt-drawer-in-canvas');
-        overlay.style.top = '';
-        overlay.style.left = '';
-        overlay.style.width = '';
-        overlay.style.height = '';
+        });
     }
 
     function closeNdtModal() {
         flushNdtAutoApply();
         const modal = document.getElementById('ndtModal');
-        document.body.classList.remove('ndt-modal-open');
+        if (!isNdtDisplacementModalOpen() && !isNdtDisplacementGroupEditOpen()) {
+            document.body.classList.remove('ndt-modal-open');
+        }
         if (!modal) return;
         modal.classList.remove('open');
         window.setTimeout(() => {
@@ -13691,6 +13698,18 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // --- 수직변위 / 부재변위: 그룹/포인트 등록·수정 모달 ---
 
+    const NDT_DISP_LOCATION_PRESET = ['보', '슬래브', '바닥'];
+
+    function refreshNdtDispLocationChips(selectId, chipsId) {
+        const select = document.getElementById(selectId);
+        if (!select || typeof renderQuickPickChipGroup !== 'function') return;
+        const current = select.value || '보';
+        renderQuickPickChipGroup(chipsId, NDT_DISP_LOCATION_PRESET, current, (value) => {
+            select.value = value;
+            refreshNdtDispLocationChips(selectId, chipsId);
+        });
+    }
+
     function openNdtDisplacementModal(imgX, imgY, existingGroup, existingPoint) {
         const modal = document.getElementById('ndtDisplacementModal');
         if (!modal) return;
@@ -13706,7 +13725,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const damageRow = document.getElementById('ndtDispMinorDamageRow');
         const damageEl = document.getElementById('ndtDispHasMinorDamage');
         const levelEl = document.getElementById('ndtDispLevel');
-        const modalTitleEl = modal.querySelector('.modal-header h3');
+        const modalTitleEl = document.getElementById('ndtDispModalTitle') || modal.querySelector('.modal-header h3');
         const btnDelete = document.getElementById('btnDeleteNdtDispPoint');
         const btnAddAnother = document.getElementById('btnAddAnotherNdtPoint');
         const btnNewZone = document.getElementById('btnStartNewNdtDispZone');
@@ -13716,9 +13735,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (modalTitleEl) {
             if (isMemberDisp) {
-                modalTitleEl.innerHTML = `<i class="fa-solid fa-arrows-up-down" style="color: #6b6b6b;"></i> 🏗️ 부재처짐 (부재변위) 측정`;
+                modalTitleEl.innerHTML = `<i class="fa-solid fa-arrows-up-down"></i> 🏗️ 부재처짐 (부재변위) 측정`;
             } else {
-                modalTitleEl.innerHTML = `<i class="fa-solid fa-arrows-up-down" style="color: #6b6b6b;"></i> 📉 부동침하 기울기 측정`;
+                modalTitleEl.innerHTML = `<i class="fa-solid fa-arrows-up-down"></i> 📉 부동침하 기울기 측정`;
             }
         }
 
@@ -13763,8 +13782,8 @@ document.addEventListener('DOMContentLoaded', () => {
             pointIdEl.value = '';
             const ptRole = isMemberDisp ? ' (단부 1)' : '';
             hintEl.textContent = `새 측정 구역 (${nextDisplacementGroupNo(cat)}) - ${formatNdtDisplacementPointLabel(1)}${ptRole}`;
-            infoBlock.style.display = 'flex';
-            if (damageRow) damageRow.style.display = isMemberDisp ? 'block' : 'none';
+            infoBlock.style.display = '';
+            if (damageRow) damageRow.style.display = isMemberDisp ? '' : 'none';
             if (damageEl) damageEl.checked = false;
             locEl.value = '보';
             lenEl.value = '';
@@ -13774,9 +13793,15 @@ document.addEventListener('DOMContentLoaded', () => {
             if (btnNewZone) btnNewZone.style.display = 'none';
         }
 
+        refreshNdtDispLocationChips('ndtDispLocationType', 'ndtDispLocationChips');
+        document.body.classList.add('ndt-modal-open');
         modal.style.display = 'flex';
         modal.classList.add('open');
-        levelEl.focus();
+        syncNdtDrawerToCanvasArea('ndtDisplacementModal');
+        requestAnimationFrame(() => {
+            syncNdtDrawerToCanvasArea('ndtDisplacementModal');
+            levelEl.focus();
+        });
     }
 
     function closeNdtDisplacementModal() {
@@ -13785,10 +13810,33 @@ document.addEventListener('DOMContentLoaded', () => {
         refreshNdtDispActiveTemplate();
         const modal = document.getElementById('ndtDisplacementModal');
         if (modal) {
-            modal.style.display = 'none';
             modal.classList.remove('open');
+            window.setTimeout(() => {
+                if (modal && !modal.classList.contains('open')) {
+                    modal.style.display = 'none';
+                    syncNdtDrawerToCanvasArea('ndtDisplacementModal');
+                }
+            }, 280);
+        }
+        if (!isNdtModalOpen() && !isNdtDisplacementGroupEditOpen()) {
+            document.body.classList.remove('ndt-modal-open');
         }
     }
+
+    function isNdtDisplacementModalOpen() {
+        const modal = document.getElementById('ndtDisplacementModal');
+        if (!modal) return false;
+        return modal.classList.contains('open') || modal.style.display === 'flex';
+    }
+
+    function isNdtDisplacementGroupEditOpen() {
+        const modal = document.getElementById('ndtDisplacementGroupEditModal');
+        if (!modal) return false;
+        return modal.classList.contains('open') || modal.style.display === 'flex';
+    }
+
+    window.closeNdtDisplacementModal = closeNdtDisplacementModal;
+    window.isNdtDisplacementModalOpen = isNdtDisplacementModalOpen;
 
     // 모달 입력값을 저장하고 {group, point}를 반환 (검증 실패 시 null)
     function commitNdtDisplacement() {
@@ -13860,21 +13908,35 @@ document.addEventListener('DOMContentLoaded', () => {
         const damageRow = document.getElementById('ndtDispEditMinorDamageRow');
         const damageEl = document.getElementById('ndtDispEditHasMinorDamage');
         const isMemberDisp = group.category === '부재변위';
-        if (damageRow) damageRow.style.display = isMemberDisp ? 'block' : 'none';
+        if (damageRow) damageRow.style.display = isMemberDisp ? '' : 'none';
         if (damageEl) damageEl.checked = !!group.hasMinorDamage;
         renderNdtDispGroupPointList(group);
+        refreshNdtDispLocationChips('ndtDispEditLocationType', 'ndtDispEditLocationChips');
         const modal = document.getElementById('ndtDisplacementGroupEditModal');
+        document.body.classList.add('ndt-modal-open');
         modal.style.display = 'flex';
         modal.classList.add('open');
+        syncNdtDrawerToCanvasArea('ndtDisplacementGroupEditModal');
+        requestAnimationFrame(() => syncNdtDrawerToCanvasArea('ndtDisplacementGroupEditModal'));
     }
 
     function closeNdtDisplacementGroupEditModal() {
         const modal = document.getElementById('ndtDisplacementGroupEditModal');
         if (modal) {
-            modal.style.display = 'none';
             modal.classList.remove('open');
+            window.setTimeout(() => {
+                if (modal && !modal.classList.contains('open')) {
+                    modal.style.display = 'none';
+                    syncNdtDrawerToCanvasArea('ndtDisplacementGroupEditModal');
+                }
+            }, 280);
+        }
+        if (!isNdtModalOpen() && !isNdtDisplacementModalOpen()) {
+            document.body.classList.remove('ndt-modal-open');
         }
     }
+    window.closeNdtDisplacementGroupEditModal = closeNdtDisplacementGroupEditModal;
+    window.isNdtDisplacementGroupEditOpen = isNdtDisplacementGroupEditOpen;
 
     function renderNdtDispGroupPointList(group) {
         const container = document.getElementById('ndtDispEditPointList');
