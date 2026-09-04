@@ -4296,63 +4296,52 @@ html:not(.layout-desktop) .survey-inline-select {
     border-top: 1px dashed rgba(148, 163, 184, 0.45);
 }
 
-/* X-1/X-2 플로팅 선택 버튼 (핀 수정창 옆/위) */
+/* X-1/X-2 마킹 선택 탭 — PC는 드로어 왼쪽, 모바일은 시트 위에 붙음 */
 #defectMarkingMemberFloat.defect-marking-member-float {
     pointer-events: auto;
     display: flex;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
     flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    align-self: center;
-    gap: 0.45rem;
+    align-items: stretch;
+    justify-content: flex-start;
+    align-self: flex-start;
+    gap: 6px;
     flex-shrink: 0;
-    z-index: 5;
-    margin-right: 0.55rem;
-    max-width: 5.2rem;
+    z-index: 6;
+    margin: 14px 0 0 0;
+    max-width: 4.8rem;
 }
 #defectMarkingMemberFloat.defect-marking-member-float[hidden] {
     display: none !important;
 }
 .defect-marking-float-btn {
     appearance: none;
-    border: 2px solid #f59e0b;
-    background: #fffbeb;
-    color: #92400e;
-    border-radius: 999px;
-    min-width: 3.1rem;
-    min-height: 2.55rem;
-    padding: 0.35rem 0.85rem;
-    font-size: 0.92rem;
-    font-weight: 900;
+    border: 1px solid #cbd5e1;
+    border-right: none;
+    background: #f8fafc;
+    color: #0f172a;
+    border-radius: 10px 0 0 10px;
+    min-width: 3.2rem;
+    min-height: 2.2rem;
+    padding: 0.32rem 0.72rem;
+    font-size: 0.82rem;
+    font-weight: 800;
     letter-spacing: -0.02em;
     line-height: 1;
     cursor: pointer;
-    box-shadow:
-        0 8px 20px rgba(15, 23, 42, 0.22),
-        0 2px 0 rgba(255, 255, 255, 0.75) inset;
-    transform: scale(0.72);
-    opacity: 0;
-    animation: defectMarkingFloatPop 0.38s cubic-bezier(0.22, 1.4, 0.36, 1) forwards;
-    animation-delay: calc(var(--float-i, 0) * 45ms);
-    transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
+    box-shadow: none;
+    transform: none;
+    opacity: 1;
+    transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
 }
 .defect-marking-float-btn:active {
-    transform: scale(0.94);
+    filter: brightness(0.97);
 }
 .defect-marking-float-btn.is-active {
-    border-color: #ea580c;
-    background: #ffedd5;
-    color: #9a3412;
-    box-shadow:
-        0 0 0 3px rgba(251, 146, 60, 0.35),
-        0 10px 22px rgba(234, 88, 12, 0.28),
-        0 2px 0 rgba(255, 255, 255, 0.8) inset;
-}
-@keyframes defectMarkingFloatPop {
-    0% { transform: scale(0.55) translateY(10px); opacity: 0; }
-    70% { transform: scale(1.08) translateY(-2px); opacity: 1; }
-    100% { transform: scale(1) translateY(0); opacity: 1; }
+    border-color: #2563eb;
+    background: #2563eb;
+    color: #fff;
+    box-shadow: none;
 }
 
 
@@ -4925,25 +4914,35 @@ html:not(.layout-desktop) .survey-inline-select {
         flex-direction: column;
     }
 
-    /* 마킹 플로트 보이면 시트를 밀어 올리고, 버튼은 시트 바로 위에 (세로 모바일) */
+    /* 세로 모바일: X-1/X-2 탭을 시트 윗변에 붙임 */
     html:not(.layout-desktop) #defectModal #defectMarkingMemberFloat:not([hidden]) {
         order: 1;
         margin-top: auto;
-        margin-bottom: 0.55rem;
+        margin-bottom: 0;
+        margin-left: 14px;
         margin-right: 0;
-        align-self: center;
+        align-self: flex-start;
         flex-direction: row;
-        max-width: calc(100% - 1.2rem);
-        padding: 0 0.4rem;
+        max-width: calc(100% - 1.6rem);
+        padding: 0;
+        gap: 6px;
+    }
+    html:not(.layout-desktop) #defectModal #defectMarkingMemberFloat:not([hidden]) .defect-marking-float-btn {
+        border-radius: 10px 10px 0 0;
+        border-right: 1px solid #cbd5e1;
+        border-bottom: none;
+        min-width: 3.2rem;
+        min-height: 2.2rem;
+        font-size: 0.84rem;
+    }
+    html:not(.layout-desktop) #defectModal #defectMarkingMemberFloat:not([hidden]) .defect-marking-float-btn.is-active {
+        border-color: #2563eb;
+        border-bottom: none;
     }
     html:not(.layout-desktop) #defectModal #defectMarkingMemberFloat:not([hidden]) + .defect-drawer-card {
         order: 2;
         margin-top: 0;
-    }
-    html:not(.layout-desktop) #defectModal.open #defectMarkingMemberFloat:not([hidden]) .defect-marking-float-btn {
-        min-width: 3.4rem;
-        min-height: 2.75rem;
-        font-size: 0.98rem;
+        border-top-left-radius: 4px;
     }
 
     html:not(.layout-desktop) #defectModal .defect-drawer-body {
@@ -5418,20 +5417,34 @@ html:not(.layout-desktop) .survey-inline-select {
         flex-direction: column;
     }
 
-    /* 가로 모바일: 핀 수정창 왼쪽에 플로팅 */
+    /* 가로 모바일: 수정창 왼쪽에 탭처럼 붙임 */
     html:not(.layout-desktop) #defectModal #defectMarkingMemberFloat:not([hidden]) {
         order: 1;
-        margin-top: 0;
+        margin-top: 14px;
         margin-bottom: 0;
-        margin-right: 0.5rem;
-        align-self: center;
+        margin-right: 0;
+        margin-left: 0;
+        align-self: flex-start;
         flex-direction: column;
-        max-width: 4.8rem;
+        max-width: 4.6rem;
         padding: 0;
+        gap: 6px;
+    }
+    html:not(.layout-desktop) #defectModal #defectMarkingMemberFloat:not([hidden]) .defect-marking-float-btn {
+        border-radius: 10px 0 0 10px;
+        border-right: none;
+        border-bottom: 1px solid #cbd5e1;
+        min-width: 3.15rem;
+        min-height: 2.15rem;
+    }
+    html:not(.layout-desktop) #defectModal #defectMarkingMemberFloat:not([hidden]) .defect-marking-float-btn.is-active {
+        border-color: #2563eb;
+        border-right: none;
     }
     html:not(.layout-desktop) #defectModal #defectMarkingMemberFloat:not([hidden]) + .defect-drawer-card {
         order: 2;
         margin-top: 0;
+        border-top-left-radius: 16px;
     }
 
     html:not(.layout-desktop) #defectModal.open .defect-drawer-card,
@@ -10817,21 +10830,23 @@ html.layout-desktop #defectModal.modal-drawer-overlay.defect-drawer-in-canvas {
 html.layout-desktop #defectModal.modal-drawer-overlay.open,
 html.layout-desktop #defectModal.modal-drawer-overlay.open.defect-drawer-in-canvas {
     display: flex !important;
+    gap: 0 !important;
 }
 
-/* PC/태블릿: 핀 수정창 좌측에 뽈롱 버튼 */
+/* PC: 핀 수정창 왼쪽에 탭처럼 붙임 */
 html.layout-desktop #defectModal #defectMarkingMemberFloat:not([hidden]) {
-    align-self: center !important;
-    margin-right: 0.55rem !important;
-    margin-top: 0 !important;
-    margin-bottom: 0 !important;
+    align-self: flex-start !important;
+    margin: 14px 0 0 0 !important;
     flex-direction: column;
-    max-width: 5.2rem;
-    padding: 0.15rem;
+    max-width: 4.6rem;
+    padding: 0;
+    gap: 6px;
 }
 html.layout-desktop #defectModal #defectMarkingMemberFloat:not([hidden]) .defect-marking-float-btn {
-    min-width: 3.35rem;
-    min-height: 2.6rem;
+    min-width: 3.2rem;
+    min-height: 2.2rem;
+    border-radius: 10px 0 0 10px;
+    border-right: none;
 }
 
 html.layout-desktop #defectModal .defect-drawer-card,
@@ -11600,19 +11615,27 @@ html.layout-tablet .map-sel-popup-edit {
         padding-bottom: 56dvh;
     }
 
-    /* 태블릿 세로: 핀 수정창 위에 플로팅 */
+    /* 태블릿 세로: 수정창 윗변에 탭처럼 붙임 */
     html.layout-tablet #defectModal #defectMarkingMemberFloat:not([hidden]) {
         order: 1;
         margin-top: auto !important;
-        margin-bottom: 0.55rem !important;
+        margin-bottom: 0 !important;
+        margin-left: 14px !important;
         margin-right: 0 !important;
-        align-self: center !important;
+        align-self: flex-start !important;
         flex-direction: row !important;
-        max-width: calc(100% - 1.2rem) !important;
+        max-width: calc(100% - 1.6rem) !important;
+        gap: 6px;
+    }
+    html.layout-tablet #defectModal #defectMarkingMemberFloat:not([hidden]) .defect-marking-float-btn {
+        border-radius: 10px 10px 0 0;
+        border-right: 1px solid #cbd5e1;
+        border-bottom: none;
     }
     html.layout-tablet #defectModal #defectMarkingMemberFloat:not([hidden]) + .defect-drawer-card {
         order: 2;
         margin-top: 0 !important;
+        border-top-left-radius: 4px !important;
     }
 }
 
@@ -11627,12 +11650,22 @@ html.layout-tablet .map-sel-popup-edit {
 
     html.layout-tablet #defectModal #defectMarkingMemberFloat:not([hidden]) {
         order: 1;
-        margin-top: 0 !important;
+        margin-top: 14px !important;
         margin-bottom: 0 !important;
-        margin-right: 0.55rem !important;
-        align-self: center !important;
+        margin-right: 0 !important;
+        margin-left: 0 !important;
+        align-self: flex-start !important;
         flex-direction: column !important;
-        max-width: 5.2rem !important;
+        max-width: 4.6rem !important;
+        gap: 6px;
+    }
+    html.layout-tablet #defectModal #defectMarkingMemberFloat:not([hidden]) .defect-marking-float-btn {
+        border-radius: 10px 0 0 10px;
+        border-right: none;
+        border-bottom: 1px solid #cbd5e1;
+    }
+    html.layout-tablet #defectModal #defectMarkingMemberFloat:not([hidden]) + .defect-drawer-card {
+        border-top-left-radius: 16px !important;
     }
 }
 

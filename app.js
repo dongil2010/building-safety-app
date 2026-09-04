@@ -14986,10 +14986,12 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!defectOrNull || groupMembers.length <= 1) {
             el.hidden = true;
             el.innerHTML = '';
+            document.getElementById('defectModal')?.classList.remove('has-marking-member-tabs');
             return;
         }
 
         el.hidden = false;
+        document.getElementById('defectModal')?.classList.add('has-marking-member-tabs');
         el.innerHTML = groupMembers.map((m, i) => {
             const label = formatDefectMemberChipLabel(m);
             const active = m.id === defectOrNull.id ? ' is-active' : '';
@@ -23337,6 +23339,7 @@ document.addEventListener('DOMContentLoaded', () => {
     function shouldKeepDefectModalForTarget(target) {
         if (!target || typeof target.closest !== 'function') return false;
         if (target.closest('#defectModal .defect-drawer-card')) return true;
+        if (target.closest('#defectMarkingMemberFloat')) return true;
         if (target.closest('.defect-list-item')) return true; // 목록에서 다른 결함 열기
         if (target.closest('#planCanvas')) return true; // 캔버스는 handleDragStart가 처리
         if (target.closest('#canvasContainer')) return true;
