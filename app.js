@@ -4532,9 +4532,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 window.showToast('최신 점검 데이터 받는 중…', 'info', 2200);
             }
             if (typeof listenToRealtimeUpdates === 'function') listenToRealtimeUpdates();
-            if (typeof pullCompanySnapshotOnce === 'function') {
-                pullCompanySnapshotOnce().catch((e) => console.warn('점검 진입 서버 받기:', e));
-            }
         }
 
         if (canFetchDrawings && typeof pruneStaleIndexedDbInspectionData === 'function') {
@@ -34341,6 +34338,44 @@ document.addEventListener('DOMContentLoaded', () => {
     const SYNC_RETRY_BASE_MS = 3500;
     const SYNC_RETRY_MAX_MS = 60000;
     const SYNC_ERROR_TOAST_COOLDOWN_MS = 10000;
+    const SYNC_QUOTA_COOLDOWN_MS = 120000;
+    let _photoFetchQuotaPausedUntil = 0;
+    let _photoFetchInflight = 0;
+    const PHOTO_FETCH_MAX_CONCURRENT = 4;
+
+    function isFirestoreQuotaError(err) {
+        const msg = String((err && err.message) || err || '');
+        const code = String((err && err.code) || '');
+        return /\b429\b/.test(msg) || /resource-exhausted|RESOURCE_EXHAUSTED|quota/i.test(msg + code);
+    }
+
+    function clearSyncErrorRetryTimer() {
+        if (_syncRetryTimer) {
+            clearTimeout(_syncRetryTimer);
+            _syncRetryTimer = null;
+        }
+    }
+
+    /** 통신·할당량 오류 후 지수 백오프로 재시도 (429는 최소 2분 쉬고 한 번만 예약) */
+    function scheduleSyncRetryAfterError(err) {
+        if (_syncRetryTimer) return;
+        const isQuota = isFirestoreQuotaError(err);
+        let delay = Math.min(
+            SYNC_RETRY_BASE_MS * Math.pow(2, _syncRetryFailCount),
+            SYNC_RETRY_MAX_MS
+        );
+        if (isQuota) delay = Math.max(delay, SYNC_QUOTA_COOLDOWN_MS);
+        _syncRetryFailCount = Math.min(_syncRetryFailCount + 1, 8);
+        _syncRetryTimer = setTimeout(() => {
+            _syncRetryTimer = null;
+            if (!db || !window.state.companyId || !navigator.onLine) return;
+            if (Date.now() < _photoFetchQuotaPausedUntil) {
+                scheduleSyncRetryAfterError(err);
+                return;
+            }
+            syncStateToFirebase();
+        }, delay);
+    }
 
     function discardStalePendingRemoteAfterLocalPinEdit() {
         _pendingRemoteData = null;
@@ -36140,13 +36175,24 @@ document.addEventListener('DOMContentLoaded', () => {
                             return fromIdb;
                         }
                         if (!companyPhotos) return null;
+                        if (Date.now() < _photoFetchQuotaPausedUntil) return null;
+                        while (_photoFetchInflight >= PHOTO_FETCH_MAX_CONCURRENT) {
+                            await new Promise((r) => setTimeout(r, 40));
+                            if (Date.now() < _photoFetchQuotaPausedUntil) return null;
+                        }
+                        _photoFetchInflight += 1;
                         try {
                             const snap = await companyPhotos.doc(pid).get();
                             const url = snap.exists ? snap.data().dataUrl : null;
                             if (url) window._photoCache[pid] = url;
                             return url;
                         } catch (e) {
+                            if (isFirestoreQuotaError(e)) {
+                                _photoFetchQuotaPausedUntil = Date.now() + SYNC_QUOTA_COOLDOWN_MS;
+                            }
                             return null;
+                        } finally {
+                            _photoFetchInflight -= 1;
                         }
                     }));
                     return photos.filter(Boolean);
@@ -36213,9 +36259,8 @@ document.addEventListener('DOMContentLoaded', () => {
         }, 400);
     }
 
-    /** 온라인 복귀·앱 포그라운드: 실시간 리스너 재구독 + 서버 기준 병합 동기화 */
+    /** 온라인 복귀·앱 포그라운드: 실시간 리스너 재구독 (업로드는 저장 시 debounce) */
     let _reconnectSyncTimer = null;
-    let _reconnectRetryTimer = null;
     function reconnectFirestoreSync(reason) {
         if (!db || !window.state.companyId) return;
         if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
@@ -36228,13 +36273,8 @@ document.addEventListener('DOMContentLoaded', () => {
         _reconnectSyncTimer = setTimeout(() => {
             _reconnectSyncTimer = null;
             if (!navigator.onLine) return;
+            if (Date.now() < _photoFetchQuotaPausedUntil) return;
             scheduleSyncToFirebase();
-            if (_reconnectRetryTimer) clearTimeout(_reconnectRetryTimer);
-            _reconnectRetryTimer = setTimeout(() => {
-                _reconnectRetryTimer = null;
-                if (!navigator.onLine) return;
-                if (typeof syncStateToFirebase === 'function') syncStateToFirebase();
-            }, (reason === 'online') ? 2500 : 1200);
         }, delay);
     }
     window.reconnectFirestoreSync = reconnectFirestoreSync;
@@ -36650,6 +36690,10 @@ document.addEventListener('DOMContentLoaded', () => {
             try {
                 return await docRef.get({ source: 'server' });
             } catch (e) {
+                if (isFirestoreQuotaError(e)) {
+                    _photoFetchQuotaPausedUntil = Date.now() + SYNC_QUOTA_COOLDOWN_MS;
+                    throw e;
+                }
                 console.warn('서버 문서 조회 실패, 캐시/기본 조회로 재시도:', e);
             }
         }
@@ -36829,8 +36873,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 updatedAt: firebase.firestore.FieldValue.serverTimestamp()
             };
             await docRef.set(dataToSync, { merge: true });
+            clearSyncErrorRetryTimer();
             _syncRetryFailCount = 0;
-            if (_syncRetryTimer) { clearTimeout(_syncRetryTimer); _syncRetryTimer = null; }
             (window.state.buildings || []).forEach((b) => {
                 if (b && b._pendingCloudSync) delete b._pendingCloudSync;
             });
@@ -36852,25 +36896,21 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         } catch (e) {
             console.warn('Firebase Sync Error:', e);
-            // 2026-09-04: catch에서 _syncPending=true로 설정하고, 바로 다음 finally가 지연 없이
-            // syncStateToFirebase()를 또 불러서(0ms 재귀) 통신 오류마다 CPU가 튀고 429가 반복되는
-            // 무한루프 버그였다(예전에 한 번 고쳤는데 "즉시 동기화 복원" 과정에서 되돌아왔다).
-            // 이제 여기서 재시도를 예약만 하고, finally는 이 타이머가 떠 있으면 직접 재시도하지 않는다.
+            _syncPending = false;
             const now = Date.now();
             if (now - _syncErrorToastAt >= SYNC_ERROR_TOAST_COOLDOWN_MS) {
                 _syncErrorToastAt = now;
                 if (typeof window.showToast === 'function') {
-                    window.showToast('서버 동기화에 실패했습니다. 잠시 후 자동으로 재시도합니다.', 'warning', 4500);
+                    window.showToast(
+                        isFirestoreQuotaError(e)
+                            ? 'Firebase 읽기/쓰기 한도(429)에 걸렸습니다. 2분 후 자동 재시도합니다.'
+                            : '서버 동기화에 실패했습니다. 잠시 후 자동으로 재시도합니다.',
+                        'warning',
+                        isFirestoreQuotaError(e) ? 6000 : 4500
+                    );
                 }
             }
-            if (!_syncRetryTimer) {
-                const delay = Math.min(SYNC_RETRY_BASE_MS * Math.pow(2, _syncRetryFailCount), SYNC_RETRY_MAX_MS);
-                _syncRetryFailCount = Math.min(_syncRetryFailCount + 1, 8);
-                _syncRetryTimer = setTimeout(() => {
-                    _syncRetryTimer = null;
-                    if (navigator.onLine) syncStateToFirebase();
-                }, delay);
-            }
+            scheduleSyncRetryAfterError(e);
         } finally {
             if (leaseHeartbeatTimer) {
                 clearInterval(leaseHeartbeatTimer);
@@ -36882,12 +36922,10 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             setTimeout(() => { isRemoteSyncing = false; }, 400);
             _syncInFlight = false;
-            if (_syncRetryTimer) {
-                // 위 catch에서 이미 백오프 재시도를 예약했다 — 여기서 즉시 또 돌리지 않는다.
-            } else if (_syncPending) {
+            if (_syncPending && !_syncRetryTimer) {
                 _syncPending = false;
                 syncStateToFirebase();
-            } else if (typeof scheduleFlushPendingRemoteSync === 'function') {
+            } else if (!_syncPending && !_syncRetryTimer && typeof scheduleFlushPendingRemoteSync === 'function') {
                 scheduleFlushPendingRemoteSync();
             }
         }
