@@ -35,6 +35,8 @@ document.addEventListener('DOMContentLoaded', () => {
         // Tables & Albums
         surveyTableBody: document.getElementById('surveyTableBody'),
         photoAlbumGrid: document.getElementById('photoAlbumGrid'),
+        surveyPriorityCompareSection: document.getElementById('surveyPriorityCompareSection'),
+        surveyPriorityCompareGrid: document.getElementById('surveyPriorityCompareGrid'),
         surveyFloorTitle: document.getElementById('surveyFloorTitle'),
         albumFloorTitle: document.getElementById('albumFloorTitle')
     };
@@ -12274,6 +12276,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function renderNdtSummaryTable() {
+        if (typeof renderNdtCrackMonitorSection === 'function') renderNdtCrackMonitorSection();
         const tbody = document.getElementById('ndtTableBody');
         const thead = document.querySelector('#ndtSummaryTable thead tr');
         if (!tbody) return;
@@ -20138,7 +20141,531 @@ document.addEventListener('DOMContentLoaded', () => {
             if (list) list.dataset.inited = '1';
             renderCrackMeasureRows([{ width: '', length: '', count: '', join: '/' }]);
         }
+        bindNdtCrackMonitorInputs();
     }
+
+    function emptyCrackGaugeLog() {
+        return { gaugeNo: '', installDate: '', initialX: '', initialY: '', readings: [] };
+    }
+
+    function emptyCrackTipLog() {
+        return { initialLengthMm: '', readings: [] };
+    }
+
+    function normalizeCrackGaugeLog(raw) {
+        const base = emptyCrackGaugeLog();
+        if (!raw || typeof raw !== 'object') return base;
+        base.gaugeNo = raw.gaugeNo != null ? String(raw.gaugeNo) : '';
+        base.installDate = raw.installDate != null ? String(raw.installDate) : '';
+        base.initialX = raw.initialX != null ? String(raw.initialX) : '';
+        base.initialY = raw.initialY != null ? String(raw.initialY) : '';
+        base.readings = Array.isArray(raw.readings)
+            ? raw.readings.map((r) => ({
+                roundKey: r && r.roundKey != null ? String(r.roundKey) : '',
+                date: r && r.date != null ? String(r.date) : '',
+                xMm: r && r.xMm != null ? String(r.xMm) : '',
+                yMm: r && r.yMm != null ? String(r.yMm) : '',
+                note: r && r.note != null ? String(r.note) : ''
+            }))
+            : [];
+        return base;
+    }
+
+    function normalizeCrackTipLog(raw) {
+        const base = emptyCrackTipLog();
+        if (!raw || typeof raw !== 'object') return base;
+        base.initialLengthMm = raw.initialLengthMm != null ? String(raw.initialLengthMm) : '';
+        base.readings = Array.isArray(raw.readings)
+            ? raw.readings.map((r) => ({
+                roundKey: r && r.roundKey != null ? String(r.roundKey) : '',
+                date: r && r.date != null ? String(r.date) : '',
+                lengthMm: r && r.lengthMm != null ? String(r.lengthMm) : '',
+                incrementMm: r && r.incrementMm != null ? String(r.incrementMm) : '',
+                note: r && r.note != null ? String(r.note) : ''
+            }))
+            : [];
+        return base;
+    }
+
+    function parseMonitorNumber(raw) {
+        const s = String(raw == null ? '' : raw).trim().replace(/,/g, '');
+        if (!s) return null;
+        const n = Number(s);
+        return Number.isFinite(n) ? n : null;
+    }
+
+    function formatMonitorDelta(n) {
+        if (n == null || !Number.isFinite(n)) return '-';
+        const rounded = Math.round(n * 100) / 100;
+        return (rounded > 0 ? '+' : '') + String(rounded);
+    }
+
+    function computeGaugeDeltas(log, reading) {
+        const ix = parseMonitorNumber(log.initialX);
+        const iy = parseMonitorNumber(log.initialY);
+        const x = parseMonitorNumber(reading && reading.xMm);
+        const y = parseMonitorNumber(reading && reading.yMm);
+        return {
+            dx: (ix != null && x != null) ? x - ix : null,
+            dy: (iy != null && y != null) ? y - iy : null
+        };
+    }
+
+    function computeTipCumulative(log, readingIndex) {
+        const initial = parseMonitorNumber(log.initialLengthMm);
+        const readings = log.readings || [];
+        let cumulative = 0;
+        for (let i = 0; i <= readingIndex; i += 1) {
+            const r = readings[i];
+            if (!r) continue;
+            const inc = parseMonitorNumber(r.incrementMm);
+            if (inc != null) {
+                cumulative += inc;
+                continue;
+            }
+            const len = parseMonitorNumber(r.lengthMm);
+            if (initial != null && len != null && i === 0) cumulative = len - initial;
+            else if (initial != null && len != null) cumulative = len - initial;
+        }
+        return cumulative;
+    }
+
+    function defaultCrackMonitorRoundKey() {
+        const bldg = state.currentBuilding;
+        return (bldg && typeof getBuildingSurveyRoundKey === 'function')
+            ? (getBuildingSurveyRoundKey(bldg) || '')
+            : (getCurrentSurveyRoundKey ? getCurrentSurveyRoundKey() : '');
+    }
+
+    function defaultCrackMonitorDate() {
+        return new Date().toISOString().split('T')[0];
+    }
+
+    function defectNeedsCrackMonitorUi(defect) {
+        if (!defect) return false;
+        const type = String(defect.defectType || '');
+        if (!type.includes('균열')) return false;
+        if (isGrade3Building() && defect.isPriorityManage) return true;
+        if (isGrade3Building()) return true;
+        return !!defect.isPriorityManage;
+    }
+
+    function getCrackMonitorEligibleDefects(defects) {
+        return (defects || []).filter((d) => defectNeedsCrackMonitorUi(d));
+    }
+
+    function scheduleNdtCrackMonitorSave() {
+        if (window._ndtCrackMonitorHydrating) return;
+        window.clearTimeout(window._ndtCrackMonitorSaveTimer);
+        window._ndtCrackMonitorSaveTimer = window.setTimeout(() => {
+            saveNdtCrackMonitorForSelectedDefect({ silent: true });
+        }, 500);
+    }
+
+    function saveNdtCrackMonitorForSelectedDefect(opts) {
+        opts = opts || {};
+        const defectId = window._ndtCrackMonitorDefectId;
+        if (!defectId || !state.currentBuildingId) return false;
+        const key = `${state.currentBuildingId}_${state.currentFloor}`;
+        const idx = (state.defects[key] || []).findIndex((d) => d.id === defectId);
+        if (idx < 0) return false;
+        const defect = state.defects[key][idx];
+        if (!defectNeedsCrackMonitorUi(defect)) return false;
+        state.defects[key][idx].crackGaugeLog = getCrackGaugeLogFromUi();
+        state.defects[key][idx].crackTipLog = getCrackTipLogFromUi();
+        state.defects[key][idx].updatedAt = Date.now();
+        if (typeof saveStateToLocalStorage === 'function') saveStateToLocalStorage();
+        if (typeof syncStateToFirebase === 'function') syncStateToFirebase();
+        renderNdtCrackMonitorSection({ keepSelection: true });
+        if (typeof renderSurveyCrackMonitorSection === 'function') {
+            renderSurveyCrackMonitorSection(state.defects[key]);
+        }
+        if (!opts.silent && typeof window.showToast === 'function') window.showToast('균열 게이지·팁 측정을 저장했습니다.', 'success');
+        return true;
+    }
+
+    function selectNdtCrackMonitorDefect(defectId) {
+        if (!defectId) return;
+        const key = `${state.currentBuildingId}_${state.currentFloor}`;
+        const defect = (state.defects[key] || []).find((d) => d.id === defectId);
+        if (!defect || !defectNeedsCrackMonitorUi(defect)) return;
+        window._ndtCrackMonitorDefectId = defectId;
+        window._ndtCrackMonitorHydrating = true;
+        setCrackMonitorLogsToUi(defect);
+        window._ndtCrackMonitorHydrating = false;
+        const select = document.getElementById('ndtCrackMonitorDefectSelect');
+        if (select && select.value !== defectId) select.value = defectId;
+        const meta = document.getElementById('ndtCrackMonitorDefectMeta');
+        if (meta) {
+            meta.textContent = `${defect.component || '부재'} ${defect.defectType || ''}`.trim();
+        }
+        const editor = document.getElementById('ndtCrackMonitorEditor');
+        if (editor) editor.hidden = false;
+    }
+
+    function renderNdtCrackMonitorListRows(items, floorCode) {
+        return items.map((d) => {
+            const ctx = {
+                floorCode,
+                gradeNo: formatSurveyReportNo(d, true, floorCode),
+                floorDisplayLabel: getGrade3FloorDisplayLabel(floorCode, state.currentBuilding)
+            };
+            const no = getSurveyCellText('no', d, ctx) || (d.no || '').replace(/^NO\.?\s*/i, '');
+            const title = `${d.component || '부재'} ${d.defectType || ''}`.trim();
+            const gauge = normalizeCrackGaugeLog(d.crackGaugeLog);
+            const gaugeLabel = gauge.gaugeNo ? `No.${gauge.gaugeNo}` : '-';
+            const lastGauge = gauge.readings.length ? gauge.readings[gauge.readings.length - 1] : null;
+            const gDelta = lastGauge ? computeGaugeDeltas(gauge, lastGauge) : { dx: null, dy: null };
+            const xyText = lastGauge
+                ? `${lastGauge.xMm || '-'}/${lastGauge.yMm || '-'} (Δ${formatMonitorDelta(gDelta.dx)}/${formatMonitorDelta(gDelta.dy)})`
+                : '-';
+            const tipSum = summarizeCrackTipLog(d.crackTipLog);
+            return `<tr>
+                <td>${escapeSurveyAttr(no)}</td>
+                <td>${escapeSurveyAttr(title)}</td>
+                <td>${escapeSurveyAttr(gaugeLabel)}</td>
+                <td>${escapeSurveyAttr(xyText)}</td>
+                <td>${escapeSurveyAttr(tipSum)}</td>
+                <td><button type="button" class="btn btn-sm btn-outline ndt-crack-monitor-open" onclick="window.openNdtCrackMonitorDefect('${escapeSurveyAttr(d.id)}')">기록</button></td>
+            </tr>`;
+        }).join('');
+    }
+
+    function renderNdtCrackMonitorSection(opts) {
+        opts = opts || {};
+        const section = document.getElementById('ndtCrackMonitorSection');
+        const listBody = document.getElementById('ndtCrackMonitorListBody');
+        const select = document.getElementById('ndtCrackMonitorDefectSelect');
+        const editor = document.getElementById('ndtCrackMonitorEditor');
+        if (!section || !listBody) return;
+        const defects = typeof getCurrentFloorDefects === 'function' ? getCurrentFloorDefects() : [];
+        const items = getCrackMonitorEligibleDefects(defects);
+        if (!items.length) {
+            section.hidden = true;
+            listBody.innerHTML = '';
+            if (select) select.innerHTML = '';
+            if (editor) editor.hidden = true;
+            window._ndtCrackMonitorDefectId = null;
+            return;
+        }
+        section.hidden = false;
+        const floorCode = state.currentFloor;
+        listBody.innerHTML = renderNdtCrackMonitorListRows(items, floorCode);
+        if (select) {
+            select.innerHTML = items.map((d) => {
+                const ctx = {
+                    floorCode,
+                    gradeNo: formatSurveyReportNo(d, true, floorCode),
+                    floorDisplayLabel: getGrade3FloorDisplayLabel(floorCode, state.currentBuilding)
+                };
+                const no = getSurveyCellText('no', d, ctx) || (d.no || '').replace(/^NO\.?\s*/i, '');
+                const title = `${d.component || '부재'} ${d.defectType || ''}`.trim();
+                return `<option value="${escapeSurveyAttr(d.id)}">${escapeSurveyAttr(no)} · ${escapeSurveyAttr(title)}</option>`;
+            }).join('');
+        }
+        if (opts.keepSelection && window._ndtCrackMonitorDefectId && items.some((d) => d.id === window._ndtCrackMonitorDefectId)) {
+            listBody.innerHTML = renderNdtCrackMonitorListRows(items, floorCode);
+            return;
+        }
+        let pickId = opts.selectDefectId || window._ndtCrackMonitorPendingDefectId || window._ndtCrackMonitorDefectId;
+        delete window._ndtCrackMonitorPendingDefectId;
+        if (!pickId || !items.some((d) => d.id === pickId)) pickId = items[0].id;
+        selectNdtCrackMonitorDefect(pickId);
+    }
+
+    window.openNdtCrackMonitorDefect = function(defectId) {
+        if (window._ndtCrackMonitorDefectId && window._ndtCrackMonitorDefectId !== defectId) {
+            saveNdtCrackMonitorForSelectedDefect({ silent: true });
+        }
+        if (typeof window.switchTab === 'function') window.switchTab('tab-ndt');
+        window._ndtCrackMonitorPendingDefectId = defectId;
+        setTimeout(() => {
+            if (typeof renderNdtCrackMonitorSection === 'function') {
+                renderNdtCrackMonitorSection({ selectDefectId: defectId });
+            }
+            const editor = document.getElementById('ndtCrackMonitorEditor');
+            if (editor) editor.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }, 120);
+    };
+
+    function renderCrackGaugeReadingRows(readings) {
+        const body = document.getElementById('crackGaugeReadingBody');
+        if (!body) return;
+        const log = normalizeCrackGaugeLog({
+            initialX: document.getElementById('crackGaugeInitialX')?.value || '',
+            initialY: document.getElementById('crackGaugeInitialY')?.value || '',
+            readings: readings
+        });
+        const rows = log.readings.length ? log.readings : [{
+            roundKey: defaultCrackMonitorRoundKey(),
+            date: defaultCrackMonitorDate(),
+            xMm: '', yMm: '', note: ''
+        }];
+        body.innerHTML = rows.map((r, idx) => {
+            const deltas = computeGaugeDeltas(log, r);
+            return `<tr data-gauge-row="${idx}">
+                <td><input type="text" data-gauge-round value="${escapeSurveyAttr(r.roundKey || '')}" placeholder="회차"></td>
+                <td><input type="date" data-gauge-date value="${escapeSurveyAttr(r.date || '')}"></td>
+                <td><input type="text" data-gauge-x inputmode="decimal" value="${escapeSurveyAttr(r.xMm || '')}"></td>
+                <td><input type="text" data-gauge-y inputmode="decimal" value="${escapeSurveyAttr(r.yMm || '')}"></td>
+                <td class="monitor-readonly">${formatMonitorDelta(deltas.dx)}</td>
+                <td class="monitor-readonly">${formatMonitorDelta(deltas.dy)}</td>
+                <td><input type="text" data-gauge-note value="${escapeSurveyAttr(r.note || '')}"></td>
+                <td><button type="button" class="defect-crack-monitor-del" data-gauge-del ${rows.length <= 1 ? 'disabled' : ''} title="삭제"><i class="fa-solid fa-trash"></i></button></td>
+            </tr>`;
+        }).join('');
+        body.querySelectorAll('input').forEach((inp) => {
+            inp.addEventListener('input', () => {
+                if (typeof scheduleNdtCrackMonitorSave === 'function') scheduleNdtCrackMonitorSave();
+                renderCrackGaugeReadingRows(getCrackGaugeLogFromUi().readings);
+            });
+        });
+        body.querySelectorAll('[data-gauge-del]').forEach((btn) => {
+            btn.addEventListener('click', () => {
+                const next = getCrackGaugeLogFromUi().readings;
+                const i = Number(btn.closest('tr')?.getAttribute('data-gauge-row'));
+                if (!Number.isFinite(i) || next.length <= 1) return;
+                next.splice(i, 1);
+                renderCrackGaugeReadingRows(next);
+                if (typeof scheduleNdtCrackMonitorSave === 'function') scheduleNdtCrackMonitorSave();
+            });
+        });
+    }
+
+    function renderCrackTipReadingRows(readings) {
+        const body = document.getElementById('crackTipReadingBody');
+        if (!body) return;
+        const log = normalizeCrackTipLog({
+            initialLengthMm: document.getElementById('crackTipInitialLength')?.value || '',
+            readings
+        });
+        const rows = log.readings.length ? log.readings : [{
+            roundKey: defaultCrackMonitorRoundKey(),
+            date: defaultCrackMonitorDate(),
+            lengthMm: '', incrementMm: '', note: ''
+        }];
+        body.innerHTML = rows.map((r, idx) => {
+            const cumulative = computeTipCumulative(log, idx);
+            return `<tr data-tip-row="${idx}">
+                <td><input type="text" data-tip-round value="${escapeSurveyAttr(r.roundKey || '')}" placeholder="회차"></td>
+                <td><input type="date" data-tip-date value="${escapeSurveyAttr(r.date || '')}"></td>
+                <td><input type="text" data-tip-length inputmode="decimal" value="${escapeSurveyAttr(r.lengthMm || '')}"></td>
+                <td><input type="text" data-tip-inc inputmode="decimal" value="${escapeSurveyAttr(r.incrementMm || '')}"></td>
+                <td class="monitor-readonly">${formatMonitorDelta(cumulative)}</td>
+                <td><input type="text" data-tip-note value="${escapeSurveyAttr(r.note || '')}"></td>
+                <td><button type="button" class="defect-crack-monitor-del" data-tip-del ${rows.length <= 1 ? 'disabled' : ''} title="삭제"><i class="fa-solid fa-trash"></i></button></td>
+            </tr>`;
+        }).join('');
+        body.querySelectorAll('input').forEach((inp) => {
+            inp.addEventListener('input', () => {
+                if (typeof scheduleNdtCrackMonitorSave === 'function') scheduleNdtCrackMonitorSave();
+                renderCrackTipReadingRows(getCrackTipLogFromUi().readings);
+            });
+        });
+        body.querySelectorAll('[data-tip-del]').forEach((btn) => {
+            btn.addEventListener('click', () => {
+                const next = getCrackTipLogFromUi().readings;
+                const i = Number(btn.closest('tr')?.getAttribute('data-tip-row'));
+                if (!Number.isFinite(i) || next.length <= 1) return;
+                next.splice(i, 1);
+                renderCrackTipReadingRows(next);
+                if (typeof scheduleNdtCrackMonitorSave === 'function') scheduleNdtCrackMonitorSave();
+            });
+        });
+    }
+
+    function getCrackGaugeLogFromUi() {
+        const body = document.getElementById('crackGaugeReadingBody');
+        const readings = body
+            ? Array.from(body.querySelectorAll('tr')).map((tr) => ({
+                roundKey: tr.querySelector('[data-gauge-round]')?.value || '',
+                date: tr.querySelector('[data-gauge-date]')?.value || '',
+                xMm: tr.querySelector('[data-gauge-x]')?.value || '',
+                yMm: tr.querySelector('[data-gauge-y]')?.value || '',
+                note: tr.querySelector('[data-gauge-note]')?.value || ''
+            })).filter((r) => r.roundKey || r.date || r.xMm || r.yMm || r.note)
+            : [];
+        return normalizeCrackGaugeLog({
+            gaugeNo: document.getElementById('crackGaugeNo')?.value || '',
+            installDate: document.getElementById('crackGaugeInstallDate')?.value || '',
+            initialX: document.getElementById('crackGaugeInitialX')?.value || '',
+            initialY: document.getElementById('crackGaugeInitialY')?.value || '',
+            readings
+        });
+    }
+
+    function getCrackTipLogFromUi() {
+        const body = document.getElementById('crackTipReadingBody');
+        const readings = body
+            ? Array.from(body.querySelectorAll('tr')).map((tr) => ({
+                roundKey: tr.querySelector('[data-tip-round]')?.value || '',
+                date: tr.querySelector('[data-tip-date]')?.value || '',
+                lengthMm: tr.querySelector('[data-tip-length]')?.value || '',
+                incrementMm: tr.querySelector('[data-tip-inc]')?.value || '',
+                note: tr.querySelector('[data-tip-note]')?.value || ''
+            })).filter((r) => r.roundKey || r.date || r.lengthMm || r.incrementMm || r.note)
+            : [];
+        return normalizeCrackTipLog({
+            initialLengthMm: document.getElementById('crackTipInitialLength')?.value || '',
+            readings
+        });
+    }
+
+    function setCrackMonitorLogsToUi(defect) {
+        const gauge = normalizeCrackGaugeLog(defect && defect.crackGaugeLog);
+        const tip = normalizeCrackTipLog(defect && defect.crackTipLog);
+        const setVal = (id, val) => {
+            const el = document.getElementById(id);
+            if (el) el.value = val != null ? String(val) : '';
+        };
+        setVal('crackGaugeNo', gauge.gaugeNo);
+        setVal('crackGaugeInstallDate', gauge.installDate);
+        setVal('crackGaugeInitialX', gauge.initialX);
+        setVal('crackGaugeInitialY', gauge.initialY);
+        setVal('crackTipInitialLength', tip.initialLengthMm);
+        renderCrackGaugeReadingRows(gauge.readings);
+        renderCrackTipReadingRows(tip.readings);
+    }
+
+    function clearCrackMonitorLogsUi() {
+        setCrackMonitorLogsToUi(null);
+    }
+
+    function bindNdtCrackMonitorInputs() {
+        const addGauge = document.getElementById('btnAddCrackGaugeReading');
+        if (addGauge && !addGauge.dataset.bound) {
+            addGauge.dataset.bound = '1';
+            addGauge.addEventListener('click', () => {
+                const log = getCrackGaugeLogFromUi();
+                log.readings.push({
+                    roundKey: defaultCrackMonitorRoundKey(),
+                    date: defaultCrackMonitorDate(),
+                    xMm: '', yMm: '', note: ''
+                });
+                renderCrackGaugeReadingRows(log.readings);
+                if (typeof scheduleNdtCrackMonitorSave === 'function') scheduleNdtCrackMonitorSave();
+            });
+        }
+        const addTip = document.getElementById('btnAddCrackTipReading');
+        if (addTip && !addTip.dataset.bound) {
+            addTip.dataset.bound = '1';
+            addTip.addEventListener('click', () => {
+                const log = getCrackTipLogFromUi();
+                log.readings.push({
+                    roundKey: defaultCrackMonitorRoundKey(),
+                    date: defaultCrackMonitorDate(),
+                    lengthMm: '', incrementMm: '', note: ''
+                });
+                renderCrackTipReadingRows(log.readings);
+                if (typeof scheduleNdtCrackMonitorSave === 'function') scheduleNdtCrackMonitorSave();
+            });
+        }
+        ['crackGaugeNo', 'crackGaugeInstallDate', 'crackGaugeInitialX', 'crackGaugeInitialY', 'crackTipInitialLength'].forEach((id) => {
+            const el = document.getElementById(id);
+            if (!el || el.dataset.monitorBound) return;
+            el.dataset.monitorBound = '1';
+            el.addEventListener('input', () => {
+                renderCrackGaugeReadingRows(getCrackGaugeLogFromUi().readings);
+                renderCrackTipReadingRows(getCrackTipLogFromUi().readings);
+                if (typeof scheduleNdtCrackMonitorSave === 'function') scheduleNdtCrackMonitorSave();
+            });
+            el.addEventListener('change', () => {
+                renderCrackGaugeReadingRows(getCrackGaugeLogFromUi().readings);
+                renderCrackTipReadingRows(getCrackTipLogFromUi().readings);
+                if (typeof scheduleNdtCrackMonitorSave === 'function') scheduleNdtCrackMonitorSave();
+            });
+        });
+        const select = document.getElementById('ndtCrackMonitorDefectSelect');
+        if (select && !select.dataset.bound) {
+            select.dataset.bound = '1';
+            select.addEventListener('change', () => {
+                const nextId = select.value;
+                if (window._ndtCrackMonitorDefectId && window._ndtCrackMonitorDefectId !== nextId) {
+                    saveNdtCrackMonitorForSelectedDefect({ silent: true });
+                }
+                selectNdtCrackMonitorDefect(nextId);
+            });
+        }
+        const saveBtn = document.getElementById('btnSaveNdtCrackMonitor');
+        if (saveBtn && !saveBtn.dataset.bound) {
+            saveBtn.dataset.bound = '1';
+            saveBtn.addEventListener('click', () => saveNdtCrackMonitorForSelectedDefect());
+        }
+    }
+
+    function summarizeCrackGaugeLog(log) {
+        log = normalizeCrackGaugeLog(log);
+        const last = log.readings.length ? log.readings[log.readings.length - 1] : null;
+        if (!last) return log.gaugeNo ? `No.${log.gaugeNo}` : '-';
+        const d = computeGaugeDeltas(log, last);
+        const xy = [last.xMm, last.yMm].filter(Boolean).join('/') || '-';
+        const delta = (d.dx != null || d.dy != null)
+            ? ` (Δ${formatMonitorDelta(d.dx)}/${formatMonitorDelta(d.dy)})`
+            : '';
+        return `${log.gaugeNo ? log.gaugeNo + ' · ' : ''}${xy}${delta}`;
+    }
+
+    function summarizeCrackTipLog(log) {
+        log = normalizeCrackTipLog(log);
+        const lastIdx = log.readings.length - 1;
+        const last = lastIdx >= 0 ? log.readings[lastIdx] : null;
+        if (!last) return log.initialLengthMm ? `초기 ${log.initialLengthMm}mm` : '-';
+        const cum = computeTipCumulative(log, lastIdx);
+        const len = last.lengthMm || '-';
+        return `${len}mm (누적 ${formatMonitorDelta(cum)})`;
+    }
+
+    function renderSurveyCrackMonitorSection(defects) {
+        const section = document.getElementById('surveyCrackMonitorSection');
+        const body = document.getElementById('surveyCrackMonitorBody');
+        if (!section || !body) return;
+        if (!isGrade3Building()) {
+            section.hidden = true;
+            body.innerHTML = '';
+            return;
+        }
+        const items = (defects || []).filter((d) => {
+            if (!d || !String(d.defectType || '').includes('균열')) return false;
+            if (d.isPriorityManage) return true;
+            const g = normalizeCrackGaugeLog(d.crackGaugeLog);
+            const t = normalizeCrackTipLog(d.crackTipLog);
+            return g.readings.length > 0 || t.readings.length > 0 || g.gaugeNo;
+        });
+        if (!items.length) {
+            section.hidden = true;
+            body.innerHTML = '';
+            return;
+        }
+        section.hidden = false;
+        const floorCode = state.currentFloor;
+        body.innerHTML = items.map((d) => {
+            const ctx = {
+                floorCode,
+                gradeNo: formatSurveyReportNo(d, true, floorCode),
+                floorDisplayLabel: getGrade3FloorDisplayLabel(floorCode, state.currentBuilding)
+            };
+            const no = getSurveyCellText('no', d, ctx) || (d.no || '').replace(/^NO\.?\s*/i, '');
+            const title = `${d.component || '부재'} ${d.defectType || ''}`.trim();
+            const gauge = normalizeCrackGaugeLog(d.crackGaugeLog);
+            const gaugeLabel = gauge.gaugeNo ? `No.${gauge.gaugeNo}` : '-';
+            const lastGauge = gauge.readings.length ? gauge.readings[gauge.readings.length - 1] : null;
+            const gDelta = lastGauge ? computeGaugeDeltas(gauge, lastGauge) : { dx: null, dy: null };
+            const xyText = lastGauge
+                ? `${lastGauge.xMm || '-'}/${lastGauge.yMm || '-'} (Δ${formatMonitorDelta(gDelta.dx)}/${formatMonitorDelta(gDelta.dy)})`
+                : '-';
+            const tipSum = summarizeCrackTipLog(d.crackTipLog);
+            return `<tr>
+                <td>${escapeSurveyAttr(no)}</td>
+                <td>${escapeSurveyAttr(title)}</td>
+                <td>${escapeSurveyAttr(gaugeLabel)}</td>
+                <td>${escapeSurveyAttr(xyText)}</td>
+                <td>${escapeSurveyAttr(tipSum)}</td>
+                <td><button type="button" class="btn btn-sm btn-outline survey-crack-monitor-open" onclick="window.openNdtCrackMonitorDefect('${escapeSurveyAttr(d.id)}')">기록</button></td>
+            </tr>`;
+        }).join('');
+    }
+
+    window.openSurveyCrackMonitorDefect = window.openNdtCrackMonitorDefect;
 
     // --- Dynamic Defect Cause Presets & Custom Adding ---
     const CORE_CRACK_CAUSE_PRESET = [
@@ -25007,6 +25534,9 @@ document.addEventListener('DOMContentLoaded', () => {
         const isGoodType = dTypeVal === '상태양호';
         syncHiddenCrackFieldsFromMeasures();
         const crackMeasuresVal = isGoodType ? [] : getCrackMeasuresFromUi();
+        const existingForCrack = pinId ? (state.defects[key] || []).find((d) => d.id === pinId) : null;
+        const crackGaugeLogVal = isGoodType ? null : (existingForCrack ? existingForCrack.crackGaugeLog : null);
+        const crackTipLogVal = isGoodType ? null : (existingForCrack ? existingForCrack.crackTipLog : null);
         const crackWidthVal = isGoodType ? '' : (document.getElementById('defectCrackWidth')?.value || '');
         const crackLengthVal = isGoodType ? '' : (document.getElementById('defectCrackLength')?.value || '');
         const itemCountVal = isGoodType ? '' : (document.getElementById('defectItemCount')?.value || '');
@@ -25031,6 +25561,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 state.defects[key][idx].crackWidth = crackWidthVal;
                 state.defects[key][idx].crackLength = crackLengthVal;
                 state.defects[key][idx].crackMeasures = crackMeasuresVal;
+                state.defects[key][idx].crackGaugeLog = crackGaugeLogVal;
+                state.defects[key][idx].crackTipLog = crackTipLogVal;
                 state.defects[key][idx].itemCount = itemCountVal;
                 state.defects[key][idx].isProgress = isProgress;
                 state.defects[key][idx].isLeak = isLeak;
@@ -25090,6 +25622,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 crackWidth: crackWidthVal,
                 crackLength: crackLengthVal,
                 crackMeasures: crackMeasuresVal,
+                crackGaugeLog: crackGaugeLogVal,
+                crackTipLog: crackTipLogVal,
                 itemCount: itemCountVal,
                 isProgress: isProgress,
                 isLeak: isLeak,
@@ -25466,6 +26000,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (typeof renderPhotoAlbum === 'function') renderPhotoAlbum();
         if (typeof renderDefectListPanel === 'function') renderDefectListPanel();
         if (typeof renderNdtSummaryTable === 'function') renderNdtSummaryTable();
+        if (typeof window.renderDefectStatsTab === 'function') window.renderDefectStatsTab();
         const ndtFloorTitle = document.getElementById('ndtFloorTitle');
         if (ndtFloorTitle && window.state.currentFloor) {
             ndtFloorTitle.textContent = window.state.currentFloor;
@@ -26844,6 +27379,7 @@ document.addEventListener('DOMContentLoaded', () => {
             renderSurveyTable();
         } else if (field === 'progress' || field === 'leak' || field === 'priorityManage') {
             renderSurveyTable();
+            if (field === 'priorityManage' && typeof renderPhotoAlbum === 'function') renderPhotoAlbum();
         }
     };
 
@@ -27187,6 +27723,9 @@ document.addEventListener('DOMContentLoaded', () => {
         }).join('');
         applySurveyColumnMetrics(columns, colMetrics);
         if (typeof renderPhotoAlbum === 'function') renderPhotoAlbum();
+        if (state.currentTab === 'tab-stats' && typeof window.renderDefectStatsTab === 'function') {
+            window.renderDefectStatsTab();
+        }
     }
 
     (function bindSurveyPortraitCompactRefresh() {
@@ -27377,10 +27916,115 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    function renderSurveyPriorityCompareSlotHtml(src, label, openTitle) {
+        if (!src) {
+            return `<div class="survey-priority-compare-img-wrap"><div class="survey-priority-compare-empty">사진 없음</div></div>`;
+        }
+        return `<div class="survey-priority-compare-img-wrap" role="button" tabindex="0"
+            title="${escapeSurveyAttr(openTitle)}"
+            data-photo-src="${escapeSurveyAttr(src)}"
+            data-photo-title="${escapeSurveyAttr(openTitle)}"
+            onclick="window.openSurveyAlbumPhoto(this)"
+            onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();window.openSurveyAlbumPhoto(this);}">
+            <img src="${src}" alt="${escapeSurveyAttr(label)}" loading="lazy">
+        </div>`;
+    }
+
+    function renderSurveyPriorityCompareSection(defects) {
+        const section = elements.surveyPriorityCompareSection || document.getElementById('surveyPriorityCompareSection');
+        const grid = elements.surveyPriorityCompareGrid || document.getElementById('surveyPriorityCompareGrid');
+        if (!section || !grid) return;
+
+        const bldg = state.currentBuilding;
+        const grade3 = isGrade3Building(bldg);
+        if (!grade3) {
+            section.hidden = true;
+            grid.innerHTML = '';
+            return;
+        }
+
+        const floorCode = state.currentFloor;
+        const compareItems = (defects || []).filter((d) => d && d.isPriorityManage);
+
+        if (!compareItems.length) {
+            section.hidden = true;
+            grid.innerHTML = '';
+            return;
+        }
+
+        section.hidden = false;
+        grid.innerHTML = compareItems.map((d) => {
+            const prevSrc = getDefectPrevOutputPhotos(d)[0] || '';
+            const currSrc = getDefectOutputPhotos(d)[0] || '';
+            const ctx = {
+                floorCode,
+                gradeNo: formatSurveyReportNo(d, true, floorCode),
+                floorDisplayLabel: getGrade3FloorDisplayLabel(floorCode, bldg)
+            };
+            const defectNo = getSurveyCellText('no', d, ctx) || (d.no || '').replace(/^NO\.?\s*/i, '');
+            const title = `${d.component || '부재'} ${d.defectType || '결함'}`.trim();
+            const roundLabels = getDefectHwpxCompareRoundLabels(d, bldg);
+            const prevLabel = roundLabels.prev ? `전차 · ${roundLabels.prev}` : '전차';
+            const currLabel = roundLabels.curr ? `현차 · ${roundLabels.curr}` : '현차';
+            const openBase = `${defectNo} ${title}`.trim();
+            return `
+                <div class="survey-priority-compare-card">
+                    <div class="survey-priority-compare-head">
+                        <span class="survey-priority-compare-no">${escapeSurveyAttr(defectNo)}</span>
+                        <span class="survey-priority-compare-defect-title">${escapeSurveyAttr(title)}</span>
+                        <button type="button" class="survey-priority-compare-map-btn"
+                            title="결함위치도에서 마킹 위치 보기"
+                            onclick="window.viewDefectOnMapFromSurvey('${escapeSurveyAttr(d.id)}')">
+                            <i class="fa-solid fa-map-location-dot"></i> 도면
+                        </button>
+                    </div>
+                    <div class="survey-priority-compare-pair">
+                        <div class="survey-priority-compare-slot">
+                            <div class="survey-priority-compare-slot-label">${escapeSurveyAttr(prevLabel)}</div>
+                            ${renderSurveyPriorityCompareSlotHtml(prevSrc, prevLabel, `${openBase} — ${prevLabel}`)}
+                        </div>
+                        <div class="survey-priority-compare-slot">
+                            <div class="survey-priority-compare-slot-label">${escapeSurveyAttr(currLabel)}</div>
+                            ${renderSurveyPriorityCompareSlotHtml(currSrc, currLabel, `${openBase} — ${currLabel}`)}
+                        </div>
+                    </div>
+                </div>
+            `;
+        }).join('');
+    }
+
+    function scheduleSurveyPriorityCompareHydrate(defects) {
+        const grade3 = isGrade3Building();
+        if (!grade3 || !defects || !defects.length) return;
+        const targets = defects.filter((d) => d && d.isPriorityManage);
+        if (!targets.length) return;
+        const buildingId = state.currentBuildingId;
+        const floor = state.currentFloor;
+        (async () => {
+            let changed = false;
+            for (const d of targets) {
+                const beforePrev = getDefectPrevOutputPhotos(d).length;
+                const beforeCurr = getDefectOutputPhotos(d).length;
+                await ensureDefectPhotosLoaded(d);
+                if (getDefectPrevOutputPhotos(d).length !== beforePrev || getDefectOutputPhotos(d).length !== beforeCurr) {
+                    changed = true;
+                }
+            }
+            if (!changed) return;
+            if (state.currentTab !== 'tab-survey') return;
+            if (state.currentBuildingId !== buildingId || state.currentFloor !== floor) return;
+            renderSurveyPriorityCompareSection(getCurrentFloorDefects());
+        })().catch((e) => console.warn('중점관리 비교사진 로드:', e));
+    }
+
     function renderPhotoAlbum() {
         if (!elements.photoAlbumGrid) return;
         const defects = getCurrentFloorDefects();
         if (elements.albumFloorTitle) elements.albumFloorTitle.textContent = state.currentFloor;
+
+        renderSurveyPriorityCompareSection(defects);
+        scheduleSurveyPriorityCompareHydrate(defects);
+        renderSurveyCrackMonitorSection(defects);
 
         const photoItems = [];
         let pCounter = 0;
@@ -29550,12 +30194,91 @@ document.addEventListener('DOMContentLoaded', () => {
             const paraText = (p) => Array.from(p.getElementsByTagNameNS(HP_NS, 't')).map(t => t.textContent).join('');
             const secChildren = () => Array.from(sec.children).filter(c => c.localName === 'p');
 
+            // 비교표 borderFill만 본문 header에 추가한다. paraPr/charPr/style(문단모양)은 건드리지 않는다.
+            const mergeGrade3CompareStampHeader = (mainHdr, stampHdr, stampParas) => {
+                const ser = new XMLSerializer();
+                let fragmentXml = '';
+                (stampParas || []).forEach((p) => { if (p) fragmentXml += ser.serializeToString(p); });
+                if (!fragmentXml || !stampHdr) return { header: mainHdr, remapAttrs: null };
+
+                const borderIds = new Set();
+                for (const m of fragmentXml.matchAll(/<hp:(?:tbl|tc)\b[^>]*borderFillIDRef="(\d+)"/g)) {
+                    borderIds.add(m[1]);
+                }
+                if (!borderIds.size) return { header: mainHdr, remapAttrs: null };
+
+                const tagBlock = (hdr, tag, id) => {
+                    const re = new RegExp(`<hh:${tag} id="${id}"[\\s\\S]*?</hh:${tag}>`);
+                    const m = hdr.match(re);
+                    return m ? m[0] : null;
+                };
+                const maxId = (hdr, tag) => {
+                    const ids = [...hdr.matchAll(new RegExp(`<hh:${tag} id="(\\d+)"`, 'g'))].map(x => parseInt(x[1], 10));
+                    return ids.length ? Math.max(...ids) : 0;
+                };
+                let nxt = maxId(mainHdr, 'borderFill') + 1;
+                const borderMap = {};
+                [...borderIds].sort((a, b) => parseInt(a, 10) - parseInt(b, 10)).forEach((id) => {
+                    borderMap[id] = String(nxt++);
+                });
+
+                let outHdr = mainHdr;
+                [...borderIds].sort((a, b) => parseInt(a, 10) - parseInt(b, 10)).forEach((bid) => {
+                    let b = tagBlock(stampHdr, 'borderFill', bid);
+                    if (!b) return;
+                    b = b.replace(/^<hh:borderFill id="\d+"/, `<hh:borderFill id="${borderMap[bid]}"`);
+                    outHdr = outHdr.replace('</hh:borderFills>', b + '</hh:borderFills>');
+                });
+                const bfCnt = (outHdr.match(/<hh:borderFill id="/g) || []).length;
+                outHdr = outHdr.replace(/(<hh:borderFills[^>]*itemCnt=")(\d+)(")/, `$1${bfCnt}$3`);
+
+                return {
+                    header: outHdr,
+                    remapAttrs: { borderFillIDRef: borderMap }
+                };
+            };
+            const stripHwpxParaRunBorderFill = (node) => {
+                if (!node) return node;
+                const walk = (el) => {
+                    if (!el || el.nodeType !== 1) return;
+                    if (el.localName === 'p' || el.localName === 'run') {
+                        el.removeAttribute('borderFillIDRef');
+                    }
+                    Array.from(el.children || []).forEach(walk);
+                };
+                walk(node);
+                return node;
+            };
+            const remapHwpxCompareNode = (node, remapAttrs) => {
+                if (!node || !remapAttrs) return stripHwpxParaRunBorderFill(node);
+                const borderMap = remapAttrs.borderFillIDRef;
+                const walk = (el) => {
+                    if (!el || el.nodeType !== 1) return;
+                    if (el.localName === 'tbl' || el.localName === 'tc') {
+                        const v = el.getAttribute('borderFillIDRef');
+                        if (v && borderMap && borderMap[v]) el.setAttribute('borderFillIDRef', borderMap[v]);
+                    }
+                    if (el.localName === 'p' || el.localName === 'run') {
+                        el.removeAttribute('borderFillIDRef');
+                    }
+                    Array.from(el.children || []).forEach(walk);
+                };
+                walk(node);
+                return node;
+            };
+            let hwpxHeaderText = null;
+            let hwpxHeaderDirty = false;
+
             // 3종 중점관리 전·금회차 비교사진 — 칠산타워 표 양식(templates/hwpx_priority_compare_grade3.hwpx)
             let grade3CompareTableStamp = null;
+            let grade3CompareHeaderText = null;
                 try {
                     const cmpResp = await fetch('./templates/hwpx_priority_compare_grade3.hwpx', { cache: 'no-store' });
                     if (cmpResp.ok) {
                         const cmpZip = await JSZip.loadAsync(await cmpResp.arrayBuffer());
+                        if (cmpZip.file('Contents/header.xml')) {
+                            grade3CompareHeaderText = await cmpZip.file('Contents/header.xml').async('string');
+                        }
                         const cmpSectionPath = cmpZip.file('Contents/section1.xml')
                             ? 'Contents/section1.xml'
                             : 'Contents/section0.xml';
@@ -29582,7 +30305,7 @@ document.addEventListener('DOMContentLoaded', () => {
                                             grade3CompareTableStamp.compareTblPara = p.cloneNode(true);
                                             grade3CompareTableStamp.compareTbl = tbl.cloneNode(true);
                                         }
-                                    } else if (rowCnt === 1 && colCnt === 1 && txt.includes('사진')) {
+                                    } else if (rowCnt === 1 && colCnt === 1 && (txt.includes('사진') || txt.includes('외관') || txt.includes('중점'))) {
                                         if (!grade3CompareTableStamp) grade3CompareTableStamp = {};
                                         grade3CompareTableStamp.titlePara = p.cloneNode(true);
                                     }
@@ -29593,6 +30316,18 @@ document.addEventListener('DOMContentLoaded', () => {
                 } catch (cmpLoadErr) {
                     console.warn('중점관리 비교표 템플릿 로드 실패:', cmpLoadErr);
                 }
+            const resolveHwpxPhotoGalleryRows = (tbl) => {
+                const trs = Array.from(tbl.getElementsByTagNameNS(HP_NS, 'tr')).filter(tr => tr.parentNode === tbl);
+                const rowJoinedText = (tr) => Array.from(tr.getElementsByTagNameNS(HP_NS, 't')).map(t => t.textContent || '').join('');
+                const capRow = trs.find(tr => !tr.getElementsByTagNameNS(HP_NS, 'pic').length && /사진|위치/.test(rowJoinedText(tr)))
+                    || trs[1] || null;
+                const descRow = trs.find(tr => !tr.getElementsByTagNameNS(HP_NS, 'pic').length && /내\s*용/.test(rowJoinedText(tr)))
+                    || trs[2] || null;
+                return {
+                    capTcs: capRow ? Array.from(capRow.getElementsByTagNameNS(HP_NS, 'tc')) : [],
+                    descTcs: descRow ? Array.from(descRow.getElementsByTagNameNS(HP_NS, 'tc')) : []
+                };
+            };
             // 한글에서 표에 새 칸을 추가만 하고 한 번도 안 채운 셀은 문단/run은 있어도 hp:t(실제 글자
             // 요소)가 아예 없는 경우가 있다. 없으면 만들어서 항상 값을 넣을 자리를 보장한다.
             const ensureCellTextNode = (para) => {
@@ -29971,12 +30706,16 @@ document.addEventListener('DOMContentLoaded', () => {
                     const s = starts[idx];
                     const e = idx + 1 < starts.length ? starts[idx + 1] : ps.length;
                     const statusTbls = [];
-                    let photoTbl = null, locationMapTbl = null;
+                    let photoTbl = null, photoParaStamp = null, locationMapTbl = null;
                     for (let i = s + 1; i < e; i++) {
                         const txt = paraText(ps[i]).trim();
                         const tbls = Array.from(ps[i].getElementsByTagNameNS(HP_NS, 'tbl'));
                         if (tbls.length === 0) continue;
-                        if (!photoTbl && /^사진1/.test(txt)) { photoTbl = tbls[0]; continue; }
+                        if (!photoTbl && /^사진1/.test(txt)) {
+                            photoTbl = tbls[0];
+                            photoParaStamp = ps[i].cloneNode(true);
+                            continue;
+                        }
                         if (!photoTbl) {
                             // 한 문단 안에 표가 여러 개 겹쳐 들어있는 경우가 있다(옛 포맷을 새 포맷으로
                             // 바꿀 때 지우지 않고 그 옆/위에 새로 붙여넣은 흔적으로 보임). 예전에는
@@ -30012,7 +30751,14 @@ document.addEventListener('DOMContentLoaded', () => {
                     // 3종시설물은 위치도를 층 블록에서 미리 떼어내 별도로 마지막에 몰아서 넣으므로,
                     // 층 블록 자체에는 위치도가 없어도(locationMapTbl === null) 유효한 슬롯으로 본다.
                     if (statusTbls.length > 0 && photoTbl) {
-                        slots.push({ titlePara: ps[s], statusTbls, photoTbl, locationMapTbl });
+                        slots.push({
+                            titlePara: ps[s],
+                            statusTbls,
+                            photoTbl,
+                            photoTblStamp: photoTbl.cloneNode(true),
+                            photoParaStamp,
+                            locationMapTbl
+                        });
                     }
                 }
                 return slots;
@@ -30156,6 +30902,24 @@ document.addEventListener('DOMContentLoaded', () => {
                     console.error(`${floorCode} 위치도 삽입 실패(나머지는 계속 진행):`, mapErr);
                     window.showToast(`${getFloorLabel(floorCode)} 위치도 삽입 중 오류가 있어 위치도는 제외하고 만듭니다.`, 'warning', 4000);
                 }
+            };
+
+            let grade3HwpxCompareAnchorPara = null;
+            const markGrade3HwpxCompareAnchorFromSlot = (slot) => {
+                if (!slot || !slot.titlePara) return;
+                const children = secChildren();
+                const start = children.indexOf(slot.titlePara);
+                if (start < 0) return;
+                let lastPhotoPara = null;
+                for (let i = start + 1; i < children.length; i++) {
+                    const p = children[i];
+                    const txt = paraText(p).trim();
+                    if (floorTitleRe.test(txt)) break;
+                    if (/^사진1/.test(txt) || p.getElementsByTagNameNS(HP_NS, 'tbl').length > 0) {
+                        lastPhotoPara = p;
+                    }
+                }
+                if (lastPhotoPara) grade3HwpxCompareAnchorPara = lastPhotoPara;
             };
 
             for (let slotIdx = 0; slotIdx < floorsData.length; slotIdx++) {
@@ -30309,13 +31073,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         if (filledPrev.length > 0) d.prevRoundPhotos = filledPrev;
                     }
                 }));
-                const priorityCompareDefects = pageDefects.filter(d => d.isPriorityManage
-                    && (getDefectPrevOutputPhotos(d).length > 0 || getDefectOutputPhotos(d).length > 0));
-                const regularPhotoDefects = pageDefects.filter(d => {
-                    if (!getDefectOutputPhotos(d).length) return false;
-                    if (d.isPriorityManage) return false;
-                    return true;
-                });
+                const regularPhotoDefects = pageDefects.filter(d => getDefectOutputPhotos(d).length > 0);
                 const photoDefects = regularPhotoDefects;
                 const photoLabelByDefect = new Map();
                 photoDefects.forEach((d, i) => photoLabelByDefect.set(d, `사진${i + 1}`));
@@ -30378,6 +31136,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 // 있었다(우리 결함 사진이 아니라 템플릿 표본 사진이 나옴). 그래서 표본 표 제거는 사진
                 // 개수와 무관하게 항상 먼저 하고, 새 표로 채우는 부분만 사진이 있을 때로 한정한다.
                 try {
+                    const photoTblStamp = slot.photoTblStamp || slot.photoTbl.cloneNode(true);
                     const photoTbl = slot.photoTbl;
                     const photoRun = photoTbl.parentNode; // 사진첩 표 여러 개가 같은 hp:run 안에 나란히 들어있다
                     const existingPhotoTables = Array.from(photoRun.children).filter(c => c.localName === 'tbl');
@@ -30387,7 +31146,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     const items = photoDefects;
                     const PHOTOS_PER_PAGE = 6;
 
-                    const tplPics = photoTbl.getElementsByTagNameNS(HP_NS, 'pic');
+                    const tplPics = photoTblStamp.getElementsByTagNameNS(HP_NS, 'pic');
+                    if (!tplPics.length) throw new Error('사진첩 템플릿 표에 hp:pic 슬롯이 없습니다.');
                     const maxW = parseInt(tplPics[0].getElementsByTagNameNS(HP_NS, 'curSz')[0].getAttribute('width'), 10);
                     const maxH = parseInt(tplPics[0].getElementsByTagNameNS(HP_NS, 'curSz')[0].getAttribute('height'), 10);
 
@@ -30436,7 +31196,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         }
 
                         photoTblCounter++;
-                        const newTbl = photoTbl.cloneNode(true);
+                        const newTbl = photoTblStamp.cloneNode(true);
                         newTbl.setAttribute('id', String(9500000 + photoTblCounter));
                         const pics = Array.from(newTbl.getElementsByTagNameNS(HP_NS, 'pic'));
                         pics.forEach((p, pIdx) => {
@@ -30444,9 +31204,8 @@ document.addEventListener('DOMContentLoaded', () => {
                             p.setAttribute('instid', String(9700000 + photoTblCounter * 2 + pIdx));
                         });
 
-                        const trs2 = Array.from(newTbl.getElementsByTagNameNS(HP_NS, 'tr')).filter(tr => tr.parentNode === newTbl);
-                        const capTcs = trs2[1].getElementsByTagNameNS(HP_NS, 'tc');
-                        const descTcs = trs2[2].getElementsByTagNameNS(HP_NS, 'tc');
+                        const { capTcs, descTcs } = resolveHwpxPhotoGalleryRows(newTbl);
+                        if (!capTcs.length || !descTcs.length) throw new Error('사진첩 템플릿 표 행(번호/위치/내용)을 찾지 못했습니다.');
 
                         imgCounter++;
                         const imgId1 = `photoAuto${imgCounter}`;
@@ -30480,121 +31239,13 @@ document.addEventListener('DOMContentLoaded', () => {
                         appendPhotoTbl(newTbl);
                         photosOnPage += pairCount;
                     }
+                    if (insertPara) grade3HwpxCompareAnchorPara = insertPara;
                     }
                 } catch (photoErr) {
                     console.error(`${floorCode} 사진 갤러리 삽입 실패(나머지는 계속 진행):`, photoErr);
                     window.showToast(`${getFloorLabel(floorCode)} 사진 삽입 중 오류가 있어 사진은 제외하고 만듭니다.`, 'warning', 5000);
                 }
-
-                // ---- 3종 중점관리: 전·금회차 비교사진 (칠산타워 표 양식 — 좌우 사진 + 번호/회차 캡션) ----
-                if (priorityCompareDefects.length > 0) {
-                    try {
-                        if (!grade3CompareTableStamp || !grade3CompareTableStamp.compareTblPara) {
-                            window.showToast('중점관리 비교사진 양식(templates/hwpx_priority_compare_grade3.hwpx)을 찾지 못했습니다.', 'warning', 6000);
-                        } else {
-                            let compareAnchorPara = slot.photoTbl.parentNode;
-                            while (compareAnchorPara && compareAnchorPara.localName !== 'p') compareAnchorPara = compareAnchorPara.parentNode;
-
-                            const reassignCompareParaIds = (para) => {
-                                Array.from(para.getElementsByTagNameNS(HP_NS, 'tbl')).forEach(tbl => {
-                                    cloneIdSeq++;
-                                    tbl.setAttribute('id', String(10400000 + cloneIdSeq));
-                                });
-                                Array.from(para.getElementsByTagNameNS(HP_NS, 'pic')).forEach(pic => {
-                                    cloneIdSeq++;
-                                    pic.setAttribute('id', String(10500000 + cloneIdSeq));
-                                    pic.setAttribute('instid', String(10600000 + cloneIdSeq));
-                                });
-                            };
-
-                            const insertComparePara = (para) => {
-                                if (!compareAnchorPara || !compareAnchorPara.parentNode || !para) return;
-                                compareAnchorPara.parentNode.insertBefore(para, compareAnchorPara.nextSibling);
-                                compareAnchorPara = para;
-                            };
-
-                            const stampPic = grade3CompareTableStamp.compareTbl.getElementsByTagNameNS(HP_NS, 'pic')[0];
-                            const cmpMaxW = parseInt(stampPic.getElementsByTagNameNS(HP_NS, 'curSz')[0].getAttribute('width'), 10);
-                            const cmpMaxH = parseInt(stampPic.getElementsByTagNameNS(HP_NS, 'curSz')[0].getAttribute('height'), 10);
-
-                            if (grade3CompareTableStamp.titlePara) {
-                                const titleP = grade3CompareTableStamp.titlePara.cloneNode(true);
-                                reassignCompareParaIds(titleP);
-                                titleP.setAttribute('pageBreak', '1');
-                                insertComparePara(titleP);
-                            }
-
-                            for (let ci = 0; ci < priorityCompareDefects.length; ci++) {
-                                const d = priorityCompareDefects[ci];
-                                const prevSrc = getDefectPrevOutputPhotos(d)[0];
-                                const currSrc = getDefectOutputPhotos(d)[0];
-                                if (!prevSrc && !currSrc) continue;
-
-                                const rowCtx = {
-                                    floorCode,
-                                    floorDisplayLabel: getFloorLabel(floorCode)
-                                };
-                                const colCount = Array.from(normalRowTpl.getElementsByTagNameNS(HP_NS, 'tc')).length;
-                                const values = getReportSurveyRowValues(d, rowCtx, isGrade3, colCount);
-                                const defectNo = values[0] || getSurveyCellText('no', d, rowCtx) || (d.no || '').replace(/^NO\.?\s*/i, '');
-                                const roundLabels = getDefectHwpxCompareRoundLabelsFull(d, bldg);
-
-                                const tblPara = grade3CompareTableStamp.compareTblPara.cloneNode(true);
-                                reassignCompareParaIds(tblPara);
-                                const tbl = tblPara.getElementsByTagNameNS(HP_NS, 'tbl')[0];
-                                ensureTblTreatAsChar(tbl);
-                                const pics = Array.from(tbl.getElementsByTagNameNS(HP_NS, 'pic'));
-
-                                if (prevSrc && pics[0]) {
-                                    imgCounter++;
-                                    const imgIdPrev = `photoAuto${imgCounter}`;
-                                    let pack = dataUrlToBytes(prevSrc);
-                                    let size = await loadImageSize(prevSrc);
-                                    zip.file(`BinData/${imgIdPrev}.${pack.ext}`, pack.bytes);
-                                    manifestAdds.push(`<opf:item id="${imgIdPrev}" href="BinData/${imgIdPrev}.${pack.ext}" media-type="${pack.mime}" isEmbeded="1"/>`);
-                                    setPicImage(pics[0], imgIdPrev, size.w, size.h, cmpMaxW, cmpMaxH);
-                                }
-                                if (currSrc && pics[1]) {
-                                    imgCounter++;
-                                    const imgIdCurr = `photoAuto${imgCounter}`;
-                                    const pack = dataUrlToBytes(currSrc);
-                                    const size = await loadImageSize(currSrc);
-                                    zip.file(`BinData/${imgIdCurr}.${pack.ext}`, pack.bytes);
-                                    manifestAdds.push(`<opf:item id="${imgIdCurr}" href="BinData/${imgIdCurr}.${pack.ext}" media-type="${pack.mime}" isEmbeded="1"/>`);
-                                    setPicImage(pics[1], imgIdCurr, size.w, size.h, cmpMaxW, cmpMaxH);
-                                } else if (currSrc && pics[0] && !prevSrc) {
-                                    imgCounter++;
-                                    const imgIdCurr = `photoAuto${imgCounter}`;
-                                    const pack = dataUrlToBytes(currSrc);
-                                    const size = await loadImageSize(currSrc);
-                                    zip.file(`BinData/${imgIdCurr}.${pack.ext}`, pack.bytes);
-                                    manifestAdds.push(`<opf:item id="${imgIdCurr}" href="BinData/${imgIdCurr}.${pack.ext}" media-type="${pack.mime}" isEmbeded="1"/>`);
-                                    setPicImage(pics[0], imgIdCurr, size.w, size.h, cmpMaxW, cmpMaxH);
-                                }
-
-                                const trs = Array.from(tbl.getElementsByTagNameNS(HP_NS, 'tr')).filter(tr => tr.parentNode === tbl);
-                                if (trs.length >= 2) {
-                                    Array.from(trs[1].getElementsByTagNameNS(HP_NS, 'tc')).forEach(tc => {
-                                        const addr = tc.getElementsByTagNameNS(HP_NS, 'cellAddr')[0];
-                                        const col = addr ? addr.getAttribute('colAddr') : '';
-                                        if (col === '0' || col === '3') setTcText(tc, defectNo);
-                                        else if (col === '1') setTcText(tc, roundLabels.prev);
-                                        else if (col === '4') setTcText(tc, roundLabels.curr);
-                                    });
-                                }
-
-                                insertComparePara(tblPara);
-                            }
-
-                            if (grade3CompareTableStamp.legendPara) {
-                                insertComparePara(grade3CompareTableStamp.legendPara.cloneNode(true));
-                            }
-                        }
-                    } catch (cmpErr) {
-                        console.error(`${floorCode} 중점관리 비교사진 삽입 실패:`, cmpErr);
-                        window.showToast(`${getFloorLabel(floorCode)} 중점관리 비교사진 삽입 중 오류가 있어 해당 사진은 제외합니다.`, 'warning', 5000);
-                    }
-                }
+                markGrade3HwpxCompareAnchorFromSlot(slot);
 
                 // ---- 결함위치도 ----
                 // 3종시설물은 위치도를 층 블록에서 바로 넣지 않고, 모든 층 처리가 끝난 뒤 별도로
@@ -31378,6 +32029,176 @@ document.addEventListener('DOMContentLoaded', () => {
                 console.error('표본 템플릿 잔여 내용 정리 실패(나머지는 유지):', cleanupErr);
             }
 
+            // ---- 3종 중점관리: 전·금회차 비교사진 (hwpx_priority_compare_grade3.hwpx — 좌=전차/우=현차 큰 비교표) ----
+            const allPriorityCompareEntries = [];
+            for (let fi = 0; fi < floorsData.length; fi++) {
+                const { floorCode: fc, pageDefects: defs } = floorsData[fi];
+                defs.filter(d => d.isPriorityManage)
+                    .forEach(d => allPriorityCompareEntries.push({ d, floorCode: fc }));
+            }
+            if (allPriorityCompareEntries.length > 0) {
+                try {
+                    await Promise.all(allPriorityCompareEntries.map(({ d }) => ensureDefectPhotosLoaded(d)));
+                    if (!grade3CompareTableStamp || !grade3CompareTableStamp.compareTblPara) {
+                        window.showToast('중점관리 비교사진 양식(templates/hwpx_priority_compare_grade3.hwpx)을 찾지 못했습니다.', 'warning', 6000);
+                    } else {
+                        let compareInsertAnchor = grade3HwpxCompareAnchorPara;
+                        let compareRemapAttrs = null;
+                        if (grade3CompareHeaderText) {
+                            if (!hwpxHeaderText) hwpxHeaderText = await zip.file('Contents/header.xml').async('string');
+                            const mergedHdr = mergeGrade3CompareStampHeader(hwpxHeaderText, grade3CompareHeaderText, [
+                                grade3CompareTableStamp.compareTblPara,
+                                grade3CompareTableStamp.legendPara
+                            ]);
+                            hwpxHeaderText = mergedHdr.header;
+                            compareRemapAttrs = mergedHdr.remapAttrs;
+                            hwpxHeaderDirty = true;
+                        }
+                        const cloneCompareStampPara = (proto) => {
+                            if (!proto) return null;
+                            const cloned = remapHwpxCompareNode(proto.cloneNode(true), compareRemapAttrs);
+                            return xmlDoc.importNode(cloned, true);
+                        };
+                        const reassignCompareParaIds = (para) => {
+                            Array.from(para.getElementsByTagNameNS(HP_NS, 'tbl')).forEach(tbl => {
+                                cloneIdSeq++;
+                                tbl.setAttribute('id', String(10400000 + cloneIdSeq));
+                            });
+                            Array.from(para.getElementsByTagNameNS(HP_NS, 'pic')).forEach(pic => {
+                                cloneIdSeq++;
+                                pic.setAttribute('id', String(10500000 + cloneIdSeq));
+                                pic.setAttribute('instid', String(10600000 + cloneIdSeq));
+                            });
+                        };
+                        const appendComparePara = (para) => {
+                            if (!para) return;
+                            reassignCompareParaIds(para);
+                            if (compareInsertAnchor && compareInsertAnchor.parentNode) {
+                                compareInsertAnchor.parentNode.insertBefore(para, compareInsertAnchor.nextSibling);
+                                compareInsertAnchor = para;
+                            } else {
+                                sec.appendChild(para);
+                                compareInsertAnchor = para;
+                            }
+                        };
+
+                        const stampPic = grade3CompareTableStamp.compareTbl.getElementsByTagNameNS(HP_NS, 'pic')[0];
+                        const cmpMaxW = parseInt(stampPic.getElementsByTagNameNS(HP_NS, 'curSz')[0].getAttribute('width'), 10);
+                        const cmpMaxH = parseInt(stampPic.getElementsByTagNameNS(HP_NS, 'curSz')[0].getAttribute('height'), 10);
+
+                        const refTbl = floorSlots[0].statusTbls[0];
+                        const refTrs = Array.from(refTbl.getElementsByTagNameNS(HP_NS, 'tr')).filter(tr => tr.parentNode === refTbl);
+                        const refHeaderText = refTrs.length >= 2
+                            ? Array.from(refTrs[1].getElementsByTagNameNS(HP_NS, 't')).map(t => t.textContent || '').join('')
+                            : '';
+                        const refHeaderRowCount = (refHeaderText.includes('구조부재') || refHeaderText.includes('비구조부재')) ? 2 : 1;
+                        const refDataRows = refTrs.slice(refHeaderRowCount);
+                        const refNormalRowTpl = (refDataRows[Math.min(1, refDataRows.length - 1)] || refDataRows[0]);
+                        const refColCount = refNormalRowTpl
+                            ? Array.from(refNormalRowTpl.getElementsByTagNameNS(HP_NS, 'tc')).length
+                            : 8;
+
+                        const COMPARE_DEFECTS_PER_PAGE = 2;
+
+                        const clearHwpxPicImage = (pic) => {
+                            if (!pic) return;
+                            const imgEl = pic.getElementsByTagNameNS(HC_NS, 'img')[0];
+                            if (imgEl) imgEl.setAttribute('binaryItemIDRef', '');
+                            pic.removeAttribute('thumbnailBinIDRef');
+                        };
+                        const fillComparePicSlot = async (pic, src) => {
+                            if (!pic) return;
+                            if (!src) {
+                                clearHwpxPicImage(pic);
+                                return;
+                            }
+                            imgCounter++;
+                            const imgId = `photoAuto${imgCounter}`;
+                            const pack = dataUrlToBytes(src);
+                            const size = await loadImageSize(src);
+                            zip.file(`BinData/${imgId}.${pack.ext}`, pack.bytes);
+                            manifestAdds.push(`<opf:item id="${imgId}" href="BinData/${imgId}.${pack.ext}" media-type="${pack.mime}" isEmbeded="1"/>`);
+                            setPicImage(pic, imgId, size.w, size.h, cmpMaxW, cmpMaxH);
+                        };
+
+                        // 제목은 compare 템플릿(분홍 바 '외관조사 사진첩')이 아니라, 본문 소제목(1.2. 중점관리 항목) 형식
+                        if (floorSlots[0] && floorSlots[0].titlePara) {
+                            const titleP = floorSlots[0].titlePara.cloneNode(true);
+                            titleP.setAttribute('pageBreak', '1');
+                            const t = titleP.getElementsByTagNameNS(HP_NS, 't')[0];
+                            if (t) t.textContent = '1.2. 중점관리 항목';
+                            appendComparePara(titleP);
+                        } else if (grade3CompareTableStamp.titlePara) {
+                            const titleP = grade3CompareTableStamp.titlePara.cloneNode(true);
+                            titleP.setAttribute('pageBreak', '1');
+                            Array.from(titleP.getElementsByTagNameNS(HP_NS, 't')).forEach(t => {
+                                const txt = (t.textContent || '').trim();
+                                if (txt.includes('사진') || txt.includes('외관') || txt.includes('중점')) {
+                                    t.textContent = '1.2. 중점관리 항목';
+                                }
+                            });
+                            appendComparePara(titleP);
+                        }
+
+                        let compareDefectsOnPage = 0;
+                        let comparePairIndex = 0;
+                        for (let ci = 0; ci < allPriorityCompareEntries.length; ci++) {
+                            const { d, floorCode: cmpFloorCode } = allPriorityCompareEntries[ci];
+                            const prevSrc = getDefectPrevOutputPhotos(d)[0];
+                            const currSrc = getDefectOutputPhotos(d)[0];
+                            if (!prevSrc && !currSrc) continue;
+
+                            if (compareDefectsOnPage > 0 && compareDefectsOnPage >= COMPARE_DEFECTS_PER_PAGE) {
+                                compareDefectsOnPage = 0;
+                            }
+
+                            const rowCtx = {
+                                floorCode: cmpFloorCode,
+                                floorDisplayLabel: getFloorLabel(cmpFloorCode)
+                            };
+                            const values = getReportSurveyRowValues(d, rowCtx, isGrade3, refColCount);
+                            const defectNo = values[0] || getSurveyCellText('no', d, rowCtx) || (d.no || '').replace(/^NO\.?\s*/i, '');
+                            const roundLabels = getDefectHwpxCompareRoundLabelsFull(d, bldg);
+
+                            const tblPara = cloneCompareStampPara(grade3CompareTableStamp.compareTblPara);
+                            if (!tblPara) continue;
+                            if (compareDefectsOnPage === 0 && comparePairIndex > 0) {
+                                tblPara.setAttribute('pageBreak', '1');
+                            }
+                            const tbl = tblPara.getElementsByTagNameNS(HP_NS, 'tbl')[0];
+                            ensureTblTreatAsChar(tbl);
+                            const pics = Array.from(tbl.getElementsByTagNameNS(HP_NS, 'pic'));
+
+                            await fillComparePicSlot(pics[0], prevSrc);
+                            await fillComparePicSlot(pics[1], currSrc);
+
+                            const trs = Array.from(tbl.getElementsByTagNameNS(HP_NS, 'tr')).filter(tr => tr.parentNode === tbl);
+                            if (trs.length >= 2) {
+                                Array.from(trs[1].getElementsByTagNameNS(HP_NS, 'tc')).forEach(tc => {
+                                    const addr = tc.getElementsByTagNameNS(HP_NS, 'cellAddr')[0];
+                                    const col = addr ? addr.getAttribute('colAddr') : '';
+                                    if (col === '0' || col === '3') setTcText(tc, defectNo);
+                                    else if (col === '1') setTcText(tc, prevSrc ? roundLabels.prev : '');
+                                    else if (col === '4') setTcText(tc, currSrc ? roundLabels.curr : '');
+                                });
+                            }
+
+                            appendComparePara(tblPara);
+                            compareDefectsOnPage++;
+                            comparePairIndex++;
+                        }
+
+                        if (grade3CompareTableStamp.legendPara) {
+                            const legendP = cloneCompareStampPara(grade3CompareTableStamp.legendPara);
+                            if (legendP) appendComparePara(legendP);
+                        }
+                    }
+                } catch (cmpErr) {
+                    console.error('중점관리 비교사진 삽입 실패:', cmpErr);
+                    window.showToast('중점관리 비교사진 삽입 중 오류가 있어 해당 사진은 제외합니다.', 'warning', 5000);
+                }
+            }
+
             // ---- 3종시설물 위치도 일괄 삽입 ----
             // 모든 층의 상태조사표/사진첩이 다 채워지고 표본 잔여 정리까지 끝난 뒤, 떼어뒀던 위치도
             // "틀" 문단을 층 수만큼 복제해 문서 맨 뒤에 순서대로 붙이고 채운다.
@@ -31455,6 +32276,10 @@ document.addEventListener('DOMContentLoaded', () => {
             }
 
             Array.from(xmlDoc.getElementsByTagNameNS(HP_NS, 'tbl')).forEach(ensureTblTreatAsChar);
+
+            if (hwpxHeaderDirty && hwpxHeaderText) {
+                zip.file('Contents/header.xml', hwpxHeaderText);
+            }
 
             if (manifestAdds.length > 0) {
                 let hpfText = await zip.file('Contents/content.hpf').async('string');
@@ -32283,6 +33108,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 // 있었다(우리 결함 사진이 아니라 템플릿 표본 사진이 나옴). 그래서 표본 표 제거는 사진
                 // 개수와 무관하게 항상 먼저 하고, 새 표로 채우는 부분만 사진이 있을 때로 한정한다.
                 try {
+                    const photoTblStamp = slot.photoTblStamp || slot.photoTbl.cloneNode(true);
                     const photoTbl = slot.photoTbl;
                     const photoRun = photoTbl.parentNode; // 사진첩 표 여러 개가 같은 hp:run 안에 나란히 들어있다
                     const existingPhotoTables = Array.from(photoRun.children).filter(c => c.localName === 'tbl');
@@ -32292,7 +33118,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     const items = photoDefects;
                     const PHOTOS_PER_PAGE = 6;
 
-                    const tplPics = photoTbl.getElementsByTagNameNS(HP_NS, 'pic');
+                    const tplPics = photoTblStamp.getElementsByTagNameNS(HP_NS, 'pic');
+                    if (!tplPics.length) throw new Error('사진첩 템플릿 표에 hp:pic 슬롯이 없습니다.');
                     const maxW = parseInt(tplPics[0].getElementsByTagNameNS(HP_NS, 'curSz')[0].getAttribute('width'), 10);
                     const maxH = parseInt(tplPics[0].getElementsByTagNameNS(HP_NS, 'curSz')[0].getAttribute('height'), 10);
 
@@ -32341,7 +33168,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         }
 
                         photoTblCounter++;
-                        const newTbl = photoTbl.cloneNode(true);
+                        const newTbl = photoTblStamp.cloneNode(true);
                         newTbl.setAttribute('id', String(9500000 + photoTblCounter));
                         const pics = Array.from(newTbl.getElementsByTagNameNS(HP_NS, 'pic'));
                         pics.forEach((p, pIdx) => {
@@ -38736,6 +39563,11 @@ document.addEventListener('DOMContentLoaded', () => {
         window.setupNdtCanvas = setupNdtCanvas;
         window.resizeNdtCanvas = resizeNdtCanvas;
         window.renderNdtSummaryTable = renderNdtSummaryTable;
+        window.renderNdtCrackMonitorSection = renderNdtCrackMonitorSection;
+        window.getSurveyRowsForReport = getSurveyRowsForReport;
+        window.isPreviousRoundDefect = isPreviousRoundDefect;
+        window.isGrade3Building = isGrade3Building;
+        window.getCurrentSurveyRoundKey = getCurrentSurveyRoundKey;
         window.renderSurveyTable = renderSurveyTable;
 
         initFirebaseSync();

@@ -39,7 +39,7 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <meta name="apple-mobile-web-app-title" content="스마트 안전점검">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css">
-    <link rel="stylesheet" href="styles.css?v=20260904_182609">
+    <link rel="stylesheet" href="styles.css?v=20260904_200558">
     <!-- FontAwesome icons for clean engineering UI -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <!-- PDF 생성용: 페이지별로 직접 캡처해서 조립(큰 보고서에서 html2pdf 한방 렌더링이 캔버스 높이 한계로
@@ -85,6 +85,11 @@
                     <i class="fa-solid fa-clipboard-list"></i>
                     <span class="tab-label-long">상태조사표</span>
                     <span class="tab-label-short">조사표</span>
+                </button>
+                <button type="button" class="tab-btn" data-tab="tab-stats" onclick="window.switchTab('tab-stats')">
+                    <i class="fa-solid fa-chart-column"></i>
+                    <span class="tab-label-long">통계</span>
+                    <span class="tab-label-short">통계</span>
                 </button>
                 <button type="button" class="tab-btn" data-tab="tab-ndt" onclick="window.switchTab('tab-ndt')">
                     <i class="fa-solid fa-microscope"></i>
@@ -567,11 +572,76 @@
 
             <!-- Field Defect Photo Album Section -->
             <div class="survey-album-panel">
+                <div id="surveyPriorityCompareSection" class="survey-priority-compare-section" hidden>
+                    <h3 class="survey-album-title survey-priority-compare-title">
+                        <i class="fa-solid fa-arrows-left-right"></i> 중점관리 전·현차 비교
+                    </h3>
+                    <div id="surveyPriorityCompareGrid" class="survey-priority-compare-grid"></div>
+                </div>
+                <div id="surveyCrackMonitorSection" class="survey-crack-monitor-section" hidden>
+                    <h3 class="survey-album-title survey-crack-monitor-title">
+                        <i class="fa-solid fa-chart-line"></i> 균열 게이지 · 팁 누적 측정 기록
+                    </h3>
+                    <div class="table-container survey-crack-monitor-table-wrap">
+                        <table class="survey-table survey-crack-monitor-table">
+                            <thead>
+                                <tr>
+                                    <th>번호</th>
+                                    <th>부재·조사내용</th>
+                                    <th>게이지</th>
+                                    <th>최근 X/Y (Δ)</th>
+                                    <th>팁 길이 (누적)</th>
+                                    <th>관리</th>
+                                </tr>
+                            </thead>
+                            <tbody id="surveyCrackMonitorBody"></tbody>
+                        </table>
+                    </div>
+                </div>
                 <h3 class="survey-album-title">
                     <i class="fa-solid fa-images"></i> 📷 <span id="albumFloorTitle">지상 1층 (1F)</span> 현장 결함 사진 앨범
                 </h3>
                 <div id="photoAlbumGrid" class="survey-album-grid"></div>
             </div>
+            </div>
+        </section>
+
+        <!-- TAB: 결함 통계 -->
+        <section id="tab-stats" class="tab-content">
+            <div class="stats-page">
+                <div class="section-header stats-page-header">
+                    <h2 class="stats-page-title"><i class="fa-solid fa-chart-column"></i> <span id="statsBuildingTitle">결함 통계</span></h2>
+                    <p class="stats-page-sub" id="statsBuildingMeta"></p>
+                </div>
+
+                <div class="stats-toolbar">
+                    <div class="stats-view-chips" role="tablist" aria-label="통계 보기 방식">
+                        <button type="button" class="chip active" data-stats-view="floor" aria-pressed="true">층별</button>
+                        <button type="button" class="chip" data-stats-view="group" aria-pressed="false">층묶음</button>
+                        <button type="button" class="chip" data-stats-view="overall" aria-pressed="false">전체</button>
+                    </div>
+                    <div class="stats-filter-row">
+                        <label class="stats-filter-check"><input type="checkbox" id="statsExcludeGood" checked> 상태양호 제외</label>
+                        <label class="stats-filter-check"><input type="checkbox" id="statsCurrentRoundOnly"> 금회차만</label>
+                    </div>
+                </div>
+
+                <p class="stats-hint" id="statsViewHint"></p>
+
+                <div class="stats-summary-cards" id="statsSummaryCards"></div>
+
+                <div class="stats-panel">
+                    <div class="stats-panel-head">
+                        <h3 class="stats-panel-title" id="statsPanelTitle">층별 결함 종류</h3>
+                    </div>
+                    <div class="table-responsive stats-table-wrap">
+                        <table class="data-table stats-matrix-table" id="statsMatrixTable">
+                            <thead id="statsMatrixHead"></thead>
+                            <tbody id="statsMatrixBody"></tbody>
+                        </table>
+                    </div>
+                    <div class="stats-bar-section" id="statsBarSection"></div>
+                </div>
             </div>
         </section>
 
@@ -809,6 +879,72 @@
                             </tr>
                         </tbody>
                     </table>
+                </div>
+            </div>
+
+            <!-- 균열 게이지 · 팁 누적 측정 (결함 수정창과 분리) -->
+            <div class="ndt-crack-monitor-section ndt-results-panel" id="ndtCrackMonitorSection" hidden>
+                <div class="ndt-results-head">
+                    <h3 class="ndt-results-title"><i class="fa-solid fa-chart-line"></i> 균열 게이지 · 팁 누적 측정</h3>
+                </div>
+                <p class="ndt-crack-monitor-hint">균열 결함(3종·중점관리)의 회차별 X/Y·균열길이·누적 증가량을 기록합니다.</p>
+                <div class="table-responsive ndt-crack-monitor-list-wrap">
+                    <table class="data-table ndt-crack-monitor-list-table">
+                        <thead>
+                            <tr>
+                                <th>번호</th>
+                                <th>부재·조사내용</th>
+                                <th>게이지</th>
+                                <th>최근 X/Y (Δ)</th>
+                                <th>팁 길이 (누적)</th>
+                                <th>관리</th>
+                            </tr>
+                        </thead>
+                        <tbody id="ndtCrackMonitorListBody"></tbody>
+                    </table>
+                </div>
+                <div class="ndt-crack-monitor-editor" id="ndtCrackMonitorEditor" hidden>
+                    <div class="ndt-crack-monitor-editor-bar">
+                        <label class="ndt-crack-monitor-select-label">
+                            <span>결함 선택</span>
+                            <select id="ndtCrackMonitorDefectSelect" class="form-select"></select>
+                        </label>
+                        <span id="ndtCrackMonitorDefectMeta" class="ndt-crack-monitor-defect-meta"></span>
+                        <button type="button" class="btn btn-sm btn-primary" id="btnSaveNdtCrackMonitor">
+                            <i class="fa-solid fa-floppy-disk"></i> 저장
+                        </button>
+                    </div>
+                    <div class="ndt-crack-monitor-form">
+                        <div class="defect-crack-monitor-block">
+                            <div class="defect-crack-monitor-head">균열 게이지</div>
+                            <div class="defect-crack-monitor-meta">
+                                <label>게이지 No.<input type="text" id="crackGaugeNo" class="form-control" placeholder="예: G-01" autocomplete="off"></label>
+                                <label>설치일<input type="date" id="crackGaugeInstallDate" class="form-control"></label>
+                                <label>초기 X(mm)<input type="text" id="crackGaugeInitialX" class="form-control" inputmode="decimal" autocomplete="off"></label>
+                                <label>초기 Y(mm)<input type="text" id="crackGaugeInitialY" class="form-control" inputmode="decimal" autocomplete="off"></label>
+                            </div>
+                            <div class="defect-crack-monitor-table-wrap">
+                                <table class="defect-crack-monitor-table">
+                                    <thead><tr><th>회차</th><th>측정일</th><th>X(mm)</th><th>Y(mm)</th><th>ΔX</th><th>ΔY</th><th>비고</th><th></th></tr></thead>
+                                    <tbody id="crackGaugeReadingBody"></tbody>
+                                </table>
+                            </div>
+                            <button type="button" class="btn btn-sm btn-outline defect-crack-monitor-add" id="btnAddCrackGaugeReading"><i class="fa-solid fa-plus"></i> 게이지 측정 행 추가</button>
+                        </div>
+                        <div class="defect-crack-monitor-block">
+                            <div class="defect-crack-monitor-head">균열 팁 누적</div>
+                            <div class="defect-crack-monitor-meta">
+                                <label>초기 길이(mm)<input type="text" id="crackTipInitialLength" class="form-control" inputmode="decimal" autocomplete="off"></label>
+                            </div>
+                            <div class="defect-crack-monitor-table-wrap">
+                                <table class="defect-crack-monitor-table">
+                                    <thead><tr><th>회차</th><th>측정일</th><th>길이(mm)</th><th>증가</th><th>누적</th><th>비고</th><th></th></tr></thead>
+                                    <tbody id="crackTipReadingBody"></tbody>
+                                </table>
+                            </div>
+                            <button type="button" class="btn btn-sm btn-outline defect-crack-monitor-add" id="btnAddCrackTipReading"><i class="fa-solid fa-plus"></i> 팁 측정 행 추가</button>
+                        </div>
+                    </div>
                 </div>
             </div>
         </section>
@@ -2948,21 +3084,22 @@
     </div>
 
     <!-- Core → 탭 분류 → 기존 엔진(app.js) -->
-    <script src="js/core/state.js?v=20260904_182609"></script>
-    <script src="js/tabs/registry.js?v=20260904_182609"></script>
-    <script src="js/pdf-vector-bridge.js?v=20260904_182609"></script>
-    <script src="js/core/layout-mode.js?v=20260904_182609"></script>
-    <script src="js/core/mobile-keyboard.js?v=20260904_182609"></script>
-    <script src="js/tabs/home.js?v=20260904_182609"></script>
-    <script src="js/tabs/map.js?v=20260904_182609"></script>
-    <script src="js/tabs/survey.js?v=20260904_182609"></script>
-    <script src="js/tabs/ndt.js?v=20260904_182609"></script>
-    <script src="js/shared/report.js?v=20260904_182609"></script>
-    <script src="js/shared/hwpx-import.js?v=20260904_182609"></script>
-    <script src="js/shared/auth.js?v=20260904_182609"></script>
-    <script src="app.js?v=20260904_182609"></script>
+    <script src="js/core/state.js?v=20260904_200558"></script>
+    <script src="js/tabs/registry.js?v=20260904_200558"></script>
+    <script src="js/pdf-vector-bridge.js?v=20260904_200558"></script>
+    <script src="js/core/layout-mode.js?v=20260904_200558"></script>
+    <script src="js/core/mobile-keyboard.js?v=20260904_200558"></script>
+    <script src="js/tabs/home.js?v=20260904_200558"></script>
+    <script src="js/tabs/map.js?v=20260904_200558"></script>
+    <script src="js/tabs/survey.js?v=20260904_200558"></script>
+    <script src="js/tabs/stats.js?v=20260904_200558"></script>
+    <script src="js/tabs/ndt.js?v=20260904_200558"></script>
+    <script src="js/shared/report.js?v=20260904_200558"></script>
+    <script src="js/shared/hwpx-import.js?v=20260904_200558"></script>
+    <script src="js/shared/auth.js?v=20260904_200558"></script>
+    <script src="app.js?v=20260904_200558"></script>
     <script>
-        window.BSA_APP_VERSION = '20260904_182609';
+        window.BSA_APP_VERSION = '20260904_200558';
         (function () {
             var el = document.getElementById('appVersionText');
             if (el && window.BSA_APP_VERSION) el.textContent = 'v' + window.BSA_APP_VERSION;
@@ -2986,7 +3123,7 @@
                     native = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
                 } catch (e) {}
                 if (native) return;
-                navigator.serviceWorker.register('./sw.js?v=20260904_182609')
+                navigator.serviceWorker.register('./sw.js?v=20260904_200558')
                     .then(function(registration) {
                         console.log('✅ ServiceWorker Registered Successfully with scope:', registration.scope);
                         registration.update();

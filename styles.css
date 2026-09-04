@@ -3585,6 +3585,144 @@ html.layout-desktop #tab-ndt .ndt-top-canvas-tools {
     text-align: center;
 }
 
+/* 3종 중점관리 — 전·현차 비교 (조사표 사진 앨범 상단) */
+.survey-priority-compare-section {
+    margin-bottom: 1.25rem;
+    padding-bottom: 1rem;
+    border-bottom: 1px dashed #cbd5e1;
+}
+
+.survey-priority-compare-section[hidden] {
+    display: none !important;
+}
+
+.survey-priority-compare-title {
+    margin-bottom: 0.75rem !important;
+    color: #15803d !important;
+}
+
+.survey-priority-compare-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 0.85rem;
+}
+
+.survey-priority-compare-card {
+    background: #ffffff;
+    border: 1.5px solid #86efac;
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: 0 4px 12px rgba(21, 128, 61, 0.08);
+}
+
+.survey-priority-compare-head {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+    flex-wrap: wrap;
+    padding: 0.45rem 0.55rem;
+    background: #f0fdf4;
+    border-bottom: 1px solid #bbf7d0;
+}
+
+.survey-priority-compare-no {
+    font-size: 0.78rem;
+    font-weight: 800;
+    color: #15803d;
+    background: #dcfce7;
+    border-radius: 6px;
+    padding: 0.12rem 0.4rem;
+}
+
+.survey-priority-compare-defect-title {
+    flex: 1;
+    min-width: 0;
+    font-size: 0.78rem;
+    font-weight: 700;
+    color: #334155;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.survey-priority-compare-map-btn {
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.22rem;
+    border: 1px solid #cbd5e1;
+    background: #fff;
+    color: #334155;
+    font-size: 0.68rem;
+    font-weight: 700;
+    border-radius: 7px;
+    padding: 0.22rem 0.42rem;
+    cursor: pointer;
+}
+
+.survey-priority-compare-map-btn:hover,
+.survey-priority-compare-map-btn:focus-visible {
+    border-color: #15803d;
+    color: #15803d;
+}
+
+.survey-priority-compare-pair {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0;
+}
+
+.survey-priority-compare-slot {
+    min-width: 0;
+    border-right: 1px solid #e2e8f0;
+}
+
+.survey-priority-compare-slot:last-child {
+    border-right: none;
+}
+
+.survey-priority-compare-slot-label {
+    font-size: 0.68rem;
+    font-weight: 800;
+    color: #64748b;
+    padding: 0.28rem 0.4rem;
+    background: #f8fafc;
+    border-bottom: 1px solid #e2e8f0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.survey-priority-compare-img-wrap {
+    aspect-ratio: 4 / 3;
+    background: #f1f5f9;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    cursor: zoom-in;
+}
+
+.survey-priority-compare-img-wrap img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+}
+
+.survey-priority-compare-empty {
+    font-size: 0.72rem;
+    font-weight: 600;
+    color: #94a3b8;
+    text-align: center;
+    padding: 0.5rem;
+}
+
+@media (max-width: 520px) {
+    .survey-priority-compare-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
 .survey-album-photo-label {
     font-size: 1rem;
     font-weight: 800;
@@ -7712,6 +7850,411 @@ body:not(.bsa-tab-home) .home-fab-add-building {
     width: 100%;
     margin-bottom: 0.2rem;
     font-weight: 800;
+}
+
+.defect-crack-monitor-block {
+    margin-bottom: 0.75rem;
+    padding: 0.55rem;
+    border: 1px solid #cbd5e1;
+    border-radius: 10px;
+    background: #f8fafc;
+}
+
+.defect-crack-monitor-head {
+    font-size: 0.78rem;
+    font-weight: 800;
+    color: #334155;
+    margin-bottom: 0.4rem;
+}
+
+.defect-crack-monitor-meta {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.35rem;
+    margin-bottom: 0.45rem;
+}
+
+.defect-crack-monitor-meta label {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+    font-size: 0.68rem;
+    font-weight: 700;
+    color: #64748b;
+}
+
+.defect-crack-monitor-table-wrap {
+    overflow-x: auto;
+    margin-bottom: 0.35rem;
+}
+
+.defect-crack-monitor-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.72rem;
+}
+
+.defect-crack-monitor-table th,
+.defect-crack-monitor-table td {
+    border: 1px solid #e2e8f0;
+    padding: 0.22rem 0.28rem;
+    text-align: center;
+    white-space: nowrap;
+}
+
+.defect-crack-monitor-table th {
+    background: #eef2ff;
+    font-weight: 800;
+    color: #334155;
+}
+
+.defect-crack-monitor-table input {
+    width: 100%;
+    min-width: 3.2rem;
+    border: 1px solid #cbd5e1;
+    border-radius: 6px;
+    padding: 0.15rem 0.25rem;
+    font-size: 0.72rem;
+}
+
+.defect-crack-monitor-table .monitor-readonly {
+    color: #64748b;
+    font-weight: 700;
+}
+
+.defect-crack-monitor-add {
+    width: 100%;
+    font-weight: 700;
+}
+
+.defect-crack-monitor-del {
+    border: none;
+    background: transparent;
+    color: #ef4444;
+    cursor: pointer;
+    padding: 0.1rem 0.25rem;
+}
+
+.survey-crack-monitor-section {
+    margin-bottom: 1.1rem;
+    padding-bottom: 0.85rem;
+    border-bottom: 1px dashed #cbd5e1;
+}
+
+.survey-crack-monitor-section[hidden] {
+    display: none !important;
+}
+
+.survey-crack-monitor-title {
+    color: #1d4ed8 !important;
+}
+
+.survey-crack-monitor-table-wrap {
+    max-height: 320px;
+    overflow: auto;
+}
+
+.survey-crack-monitor-table td {
+    font-size: 0.78rem;
+    vertical-align: middle;
+}
+
+.survey-crack-monitor-open {
+    font-size: 0.72rem;
+    font-weight: 700;
+    padding: 0.2rem 0.45rem;
+}
+
+.ndt-crack-monitor-section {
+    margin-top: 0.75rem;
+}
+
+.ndt-crack-monitor-section[hidden] {
+    display: none !important;
+}
+
+.ndt-crack-monitor-hint {
+    margin: 0 0 0.75rem;
+    font-size: 0.82rem;
+    color: #64748b;
+}
+
+.ndt-crack-monitor-list-wrap {
+    max-height: 280px;
+    overflow: auto;
+    margin-bottom: 0.85rem;
+}
+
+.ndt-crack-monitor-list-table td {
+    font-size: 0.78rem;
+    vertical-align: middle;
+}
+
+.ndt-crack-monitor-open {
+    font-size: 0.72rem;
+    font-weight: 700;
+    padding: 0.2rem 0.45rem;
+}
+
+.ndt-crack-monitor-editor {
+    border-top: 1px dashed #cbd5e1;
+    padding-top: 0.85rem;
+}
+
+.ndt-crack-monitor-editor[hidden] {
+    display: none !important;
+}
+
+.ndt-crack-monitor-editor-bar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.55rem 0.85rem;
+    margin-bottom: 0.75rem;
+}
+
+.ndt-crack-monitor-select-label {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+    font-size: 0.82rem;
+    font-weight: 700;
+    color: #334155;
+}
+
+.ndt-crack-monitor-select-label .form-select {
+    min-width: 220px;
+    max-width: min(100%, 420px);
+}
+
+.ndt-crack-monitor-defect-meta {
+    flex: 1 1 160px;
+    font-size: 0.8rem;
+    color: #475569;
+}
+
+.ndt-crack-monitor-form {
+    display: grid;
+    gap: 0.75rem;
+}
+
+@media (min-width: 900px) {
+    .ndt-crack-monitor-form {
+        grid-template-columns: 1fr 1fr;
+    }
+}
+
+/* ── 통계 탭 ── */
+.stats-page {
+    padding: 0.5rem 0 1.5rem;
+}
+
+.stats-page-header {
+    margin-bottom: 0.75rem;
+}
+
+.stats-page-title {
+    margin: 0;
+    font-size: 1.15rem;
+}
+
+.stats-page-sub {
+    margin: 0.35rem 0 0;
+    font-size: 0.82rem;
+    color: #64748b;
+}
+
+.stats-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.65rem 1rem;
+    margin-bottom: 0.55rem;
+}
+
+.stats-view-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+}
+
+.stats-filter-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.65rem 1rem;
+}
+
+.stats-filter-check {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    font-size: 0.82rem;
+    color: #475569;
+    cursor: pointer;
+}
+
+.stats-hint {
+    margin: 0 0 0.75rem;
+    font-size: 0.8rem;
+    color: #64748b;
+}
+
+.stats-summary-cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+    gap: 0.55rem;
+    margin-bottom: 0.85rem;
+}
+
+.stats-summary-card {
+    border: 1px solid #e2e8f0;
+    border-radius: 10px;
+    padding: 0.55rem 0.65rem;
+    background: #fff;
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+}
+
+.stats-summary-value {
+    font-size: 1.25rem;
+    font-weight: 800;
+    color: #1e293b;
+    line-height: 1.1;
+}
+
+.stats-summary-label {
+    font-size: 0.72rem;
+    color: #64748b;
+}
+
+.stats-card-total .stats-summary-value { color: #2563eb; }
+.stats-card-types .stats-summary-value { color: #7c3aed; }
+.stats-card-struct .stats-summary-value { color: #0f766e; }
+.stats-card-nonstruct .stats-summary-value { color: #b45309; }
+.stats-card-finish .stats-summary-value { color: #be185d; }
+
+.stats-panel {
+    border: 1px solid #e2e8f0;
+    border-radius: 12px;
+    background: #fff;
+    overflow: hidden;
+}
+
+.stats-panel-head {
+    padding: 0.65rem 0.85rem;
+    border-bottom: 1px solid #e2e8f0;
+    background: linear-gradient(180deg, #f8fafc, #fff);
+}
+
+.stats-panel-title {
+    margin: 0;
+    font-size: 0.95rem;
+    color: #334155;
+}
+
+.stats-table-wrap {
+    max-height: min(52vh, 520px);
+    overflow: auto;
+}
+
+.stats-matrix-table th,
+.stats-matrix-table td {
+    font-size: 0.78rem;
+    vertical-align: middle;
+    white-space: nowrap;
+}
+
+.stats-matrix-table th[scope="row"] {
+    position: sticky;
+    left: 0;
+    z-index: 1;
+    background: #fff;
+    font-weight: 700;
+    max-width: 220px;
+    white-space: normal;
+}
+
+.stats-row-current th[scope="row"],
+.stats-row-current td {
+    background: #eff6ff;
+}
+
+.stats-cell-sum {
+    font-weight: 800;
+    color: #1d4ed8;
+}
+
+.stats-cell-hit {
+    font-weight: 700;
+    color: #334155;
+}
+
+.stats-cell-zero {
+    color: #cbd5e1;
+}
+
+.stats-empty {
+    text-align: center;
+    color: #94a3b8;
+    padding: 1.5rem !important;
+}
+
+.stats-bar-section {
+    padding: 0.75rem 0.85rem 0.95rem;
+    border-top: 1px dashed #e2e8f0;
+}
+
+.stats-bar-title {
+    margin: 0 0 0.55rem;
+    font-size: 0.85rem;
+    color: #475569;
+}
+
+.stats-bar-list {
+    display: grid;
+    gap: 0.4rem;
+}
+
+.stats-bar-row {
+    display: grid;
+    grid-template-columns: minmax(80px, 140px) 1fr 36px;
+    align-items: center;
+    gap: 0.45rem;
+}
+
+.stats-bar-label {
+    font-size: 0.76rem;
+    color: #334155;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.stats-bar-track {
+    height: 10px;
+    border-radius: 999px;
+    background: #f1f5f9;
+    overflow: hidden;
+}
+
+.stats-bar-fill {
+    height: 100%;
+    border-radius: 999px;
+    background: linear-gradient(90deg, #60a5fa, #2563eb);
+    min-width: 2px;
+}
+
+.stats-bar-count {
+    font-size: 0.76rem;
+    font-weight: 700;
+    color: #1e40af;
+    text-align: right;
+}
+
+body.bsa-tab-stats .app-content {
+    overflow-y: auto;
 }
 
 /* 발생 원인 복수 선택 — 종류별 색상만 구분, 한 그리드에 이어서 배치 */

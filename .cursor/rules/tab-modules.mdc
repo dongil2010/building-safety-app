@@ -12,6 +12,7 @@ alwaysApply: true
 | 홈 | `js/tabs/home.js` | 건물 목록, 등록/수정, JSON 백업, 회사명, QR 촬영 시작 |
 | 결함위치도 | `js/tabs/map.js` | 도면 캔버스, 핀/영역, 결함 모달, 스타일/범례, 필터 |
 | 상태조사표 | `js/tabs/survey.js` | 표/앨범/차트, 컬럼 설정, 엑셀 in/out |
+| 통계 | `js/tabs/stats.js` | 층별·전체·층묶음 결함 종류 집계 |
 | 비파괴조사 | `js/tabs/ndt.js` | 실측·강도·탄산화·기울기·변위 |
 | 공통 보고서 | `js/shared/report.js` | 미리보기, PDF, 인쇄, HWPX |
 | 공통 로그인 | `js/shared/auth.js` | Firebase Auth, 회사 승인, 동기화 |
