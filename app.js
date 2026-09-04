@@ -13424,6 +13424,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Cloudflare Worker 프록시 → Gemini Vision에 사진을 보내 R값 목록(JSON 배열)만 받는다.
     // 실패 시 예외를 던져서, 호출부(scanRValuesFromImage)가 로컬 Tesseract로 폴백하게 한다.
+    //
+    // 2026-09-04 버그: Worker는 Gemini가 400/403/404 등 무엇으로 실패하든 자기 응답은 항상
+    // 502로 감싸서 내려준다(ocr-proxy.js의 502 응답 참고). 그런데 여기서 res.status(=502)만
+    // 보고 바로 던져버려서, 응답 본문(JSON)에 들어있는 진짜 Gemini 에러 코드/메시지를 한 번도
+    // 못 읽고 있었다 — 그래서 실제로는 재시도해도 안 풀리는 400/404 같은 에러가 매번 "일시적
+    // 서버 오류(502)"로 오분류돼 쓸데없이 재시도만 하다 로컬로 떨어졌다. 이제 본문을 먼저
+    // 읽어서 안에 담긴 진짜 에러를 우선 사용한다.
     async function scanRValuesFromImageCloud(file) {
         const dataUrl = await fileToDataUrl(file);
         const res = await fetch(CLOUD_OCR_ENDPOINT, {
@@ -13431,17 +13438,30 @@ document.addEventListener('DOMContentLoaded', () => {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ image: dataUrl })
         });
+        let data = null;
+        try { data = await res.json(); } catch (_) { /* 본문이 JSON이 아니면 아래에서 상태코드로 처리 */ }
+        if (data && data.error) throw new Error(data.error);
         if (!res.ok) throw new Error(`클라우드 OCR 서버 오류 (${res.status})`);
-        const data = await res.json();
-        if (data.error) throw new Error(data.error);
-        if (!Array.isArray(data.values)) throw new Error('클라우드 OCR 응답 형식 오류');
+        if (!data || !Array.isArray(data.values)) throw new Error('클라우드 OCR 응답 형식 오류');
         return data.values.map(v => parseInt(v, 10)).filter(v => !isNaN(v) && v >= 10 && v <= 80);
     }
 
-    // 같은 사진인데도 될 때/안 될 때가 있다면 Gemini 무료 티어의 분당 요청 제한에 순간적으로
-    // 걸린 것일 가능성이 크다(429). 그런 일시적인 오류(429/5xx)만 몇 초 쉬었다가 자동으로
-    // 한 번 더 시도한다 — 사진 자체가 안 읽히는 경우(0개 반환 등)는 재시도해도 소용없으니 그냥
-    // 통과시킨다.
+    function isRateLimitErrorMsg(msg) {
+        return /\b429\b/.test(msg) || /RESOURCE_EXHAUSTED|rate.?limit/i.test(msg);
+    }
+
+    // 2026-09-04: 실제로 확인해보니 분당 요청 제한(429)은 몇 초가 아니라 1~2분은 기다려야
+    // 풀렸다 — 그래서 429는 여기서 재시도하지 않고(호출부가 바로 "잠시 후 다시 시도" 안내로
+    // 처리) 진짜 서버 일시 오류(5xx)만 몇 초 쉬었다가 자동으로 재시도한다.
+    //
+    // 실제 실패 원인을 확인해보니 "User location is not supported for the API use"
+    // (FAILED_PRECONDITION, 400)였다 — 이건 우리 위치 문제가 아니라 Cloudflare Worker가
+    // 요청마다 전 세계 여러 엣지 서버 중 하나에서 실행되는데, 그중 일부가 Gemini 무료 API
+    // 미지원 지역이라 그때만 나는 것으로 보인다(같은 사진이 됐다 안됐다 하던 현상과 일치).
+    // 재시도하면 다른 엣지로 배정될 수 있으니 이 에러도 재시도 대상에 넣는다.
+    function isLocationFlakyErrorMsg(msg) {
+        return /User location is not supported|FAILED_PRECONDITION/i.test(msg);
+    }
     async function scanRValuesFromImageCloudWithRetry(file, statusEl) {
         const MAX_RETRIES = 2, RETRY_DELAY_MS = 4000;
         for (let attempt = 0; ; attempt++) {
@@ -13449,9 +13469,15 @@ document.addEventListener('DOMContentLoaded', () => {
                 return await scanRValuesFromImageCloud(file);
             } catch (err) {
                 const msg = String((err && err.message) || err || '');
-                const isTransient = /\b(429|5\d\d)\b/.test(msg) || /RESOURCE_EXHAUSTED|rate.?limit/i.test(msg);
-                if (!isTransient || attempt >= MAX_RETRIES) throw err;
-                if (statusEl) statusEl.textContent = `☁️ 요청이 몰려서 잠시 후 다시 시도합니다... (${attempt + 1}/${MAX_RETRIES})`;
+                if (isRateLimitErrorMsg(msg)) throw err;
+                const isLocationFlaky = isLocationFlakyErrorMsg(msg);
+                const isTransient5xx = /\b5\d\d\b/.test(msg);
+                if ((!isTransient5xx && !isLocationFlaky) || attempt >= MAX_RETRIES) throw err;
+                if (statusEl) {
+                    statusEl.textContent = isLocationFlaky
+                        ? `☁️ 서버 위치 문제로 잠시 후 다시 시도합니다... (${attempt + 1}/${MAX_RETRIES})`
+                        : `☁️ 서버 오류로 잠시 후 다시 시도합니다... (${attempt + 1}/${MAX_RETRIES})`;
+                }
                 await new Promise(r => setTimeout(r, RETRY_DELAY_MS));
             }
         }
@@ -13521,22 +13547,37 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
                 cloudFailReason = '클라우드가 0개를 반환함';
             } catch (err) {
-                console.error('클라우드 OCR 실패, 로컬 OCR로 대체합니다:', err);
                 cloudFailReason = err && err.message ? err.message : String(err);
+                // 2026-09-04: 실측 결과 429(분당 요청 제한)는 몇 초~몇 분씩 걸려야 풀렸다. 그
+                // 사이에 로컬(Tesseract)로 넘어가면 도트프린터 글씨를 잘못 읽어 틀린 값이
+                // 채워지므로, 속도제한일 땐 로컬로 넘어가지 않고 잠시 후 다시 시도하라고만
+                // 안내한다 — 사진은 이미 저장돼 있으니 나중에 다시 스캔하면 된다.
+                if (isRateLimitErrorMsg(cloudFailReason)) {
+                    console.warn('클라우드 OCR 속도제한:', err);
+                    if (statusEl) statusEl.textContent = '⏳ 클라우드 인식 사용량이 일시적으로 다 찼습니다. 1~2분 후 다시 시도해주세요. (사진은 저장되어 있어요)';
+                    return;
+                }
+                console.error('클라우드 OCR 실패, 로컬 OCR로 대체합니다:', err);
             }
         }
 
-        if (statusEl && cloudFailReason) {
-            statusEl.textContent = `☁️ 클라우드 인식 실패(${cloudFailReason}) — 로컬로 다시 시도합니다...`;
-        }
+        // 2026-09-04: 여기서 상태 메시지에 클라우드 실패 사유를 잠깐 띄웠는데, 바로 다음 줄
+        // scanRValuesFromImageLocal이 시작하자마자 그 메시지를 덮어써서 뜨자마자 사라지는
+        // 버그가 있었다(사용자가 실패 이유를 볼 수가 없었음). 이제 최종 메시지 끝에 계속
+        // 남도록 붙인다.
         const localScanned = await scanRValuesFromImageLocal(file, statusEl);
+        const cloudFailSuffix = cloudFailReason ? ` [클라우드 실패: ${cloudFailReason}]` : '';
         if (localScanned.length === 0) {
-            if (statusEl) statusEl.textContent = '❌ 숫자를 인식하지 못했습니다. 직접 입력해주세요.';
+            if (statusEl) statusEl.textContent = `❌ 숫자를 인식하지 못했습니다. 직접 입력해주세요.${cloudFailSuffix}`;
             return;
         }
         applyScannedReadings(localScanned, slotIdx, statusEl, '💻 로컬 인식');
-        if (localScanned.length < MAX_R_VALUES_PER_SLOT && statusEl) {
-            statusEl.textContent += ` — 총 ${MAX_R_VALUES_PER_SLOT}개 중 ${localScanned.length}개만 인식됐어요. 나머지는 사진 보고 직접 입력해주세요.`;
+        if (statusEl) {
+            let extra = '';
+            if (localScanned.length < MAX_R_VALUES_PER_SLOT) {
+                extra += ` — 총 ${MAX_R_VALUES_PER_SLOT}개 중 ${localScanned.length}개만 인식됐어요. 나머지는 사진 보고 직접 입력해주세요.`;
+            }
+            statusEl.textContent += extra + cloudFailSuffix;
         }
     }
 
