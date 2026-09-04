@@ -5002,9 +5002,12 @@ html:not(.layout-desktop) .survey-inline-select {
     html:not(.layout-desktop) #defectModal #defectMarkingMemberFloat:not([hidden]) .defect-marking-arrow-select {
         border-radius: 10px 0 0 0;
         border-right: none;
-        min-width: 2.2rem;
+        min-width: 3.1rem;
         min-height: 2.2rem;
-        font-size: 0.84rem;
+        font-size: 0.82rem;
+        font-weight: 700;
+        letter-spacing: -0.02em;
+        padding: 0 0.35rem;
     }
     html:not(.layout-desktop) #defectModal #defectMarkingMemberFloat:not([hidden]) .defect-marking-arrow-dir-btn {
         border-radius: 0 10px 0 0;
@@ -11009,7 +11012,7 @@ html.layout-desktop #defectModal #defectMarkingMemberFloat:not([hidden]) {
     align-self: flex-start !important;
     margin: 14px 0 0 0 !important;
     flex-direction: column;
-    max-width: 6.4rem;
+    max-width: 8.5rem;
     padding: 0;
     gap: 6px;
 }
@@ -11017,10 +11020,14 @@ html.layout-desktop #defectModal #defectMarkingMemberFloat:not([hidden]) .defect
     border-radius: 10px 0 0 10px;
 }
 html.layout-desktop #defectModal #defectMarkingMemberFloat:not([hidden]) .defect-marking-arrow-select {
-    min-width: 2.35rem;
+    min-width: 3.1rem;
     min-height: 2.2rem;
     border-radius: 10px 0 0 10px;
     border-right: none;
+    font-size: 0.82rem;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    padding: 0 0.35rem;
 }
 html.layout-desktop #defectModal #defectMarkingMemberFloat:not([hidden]) .defect-marking-arrow-dir-btn {
     min-width: 2.35rem;

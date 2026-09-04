@@ -2820,21 +2820,30 @@ document.addEventListener('DOMContentLoaded', () => {
         return defect;
     }
 
-    /** 도면 마킹은 본번호 N, 결함표 추가만 N-1, N-2… (화살표 개수와 무관) */
+    /** 그룹 멤버 1개=본번호 N, 2개 이상=N-1,N-2… (화살표·결함표 공통 순번) */
     function applyDefectGroupNumbering(members, base, assignNo) {
         const marking = (members || []).filter((m) => m && !m.surveyExtra);
         const extras = (members || []).filter((m) => m && m.surveyExtra);
-        marking.forEach((m) => assignNo(m, base));
-        extras.forEach((m, idx) => assignNo(m, `${base}-${idx + 1}`));
+        const ordered = marking.concat(extras);
+        if (ordered.length <= 1) {
+            if (ordered[0]) assignNo(ordered[0], base);
+            return;
+        }
+        ordered.forEach((m, idx) => {
+            assignNo(m, `${base}-${idx + 1}`);
+        });
     }
 
-    /** 그룹 멤버 번호: 마킹(화살표)은 본번호 N 유지, 결함표 추가만 N-1부터 */
+    /** 그룹 멤버 번호: 화살표 먼저, 결함표 다음 — 2개부터 N-1, N-2 … */
     function normalizeDefectGroupNos(defects, groupId) {
         if (!Array.isArray(defects) || !groupId) return;
         const members = defects
             .filter((d) => d && d.groupId === groupId)
             .slice()
             .sort((a, b) => {
+                const ae = a.surveyExtra ? 1 : 0;
+                const be = b.surveyExtra ? 1 : 0;
+                if (ae !== be) return ae - be;
                 const na = parseDefectSortNoValue(a);
                 const nb = parseDefectSortNoValue(b);
                 if (na !== nb) return na - nb;
@@ -2923,6 +2932,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function collapseSingletonDefectGroups(defects) {
         if (!Array.isArray(defects)) return;
+        if (isDefectMarkingGroupPending()) return;
         const byG = new Map();
         defects.forEach((d) => {
             if (!d || !d.groupId) return;
@@ -14986,7 +14996,8 @@ document.addEventListener('DOMContentLoaded', () => {
         const grp = getActiveMarkingGroup();
         if (!grp || !grp.groupId || !newDefect) return false;
         newDefect.groupId = grp.groupId;
-        newDefect.groupNo = grp.groupNo;
+        newDefect.groupNo = stripDefectNoSuffix(grp.groupNo || newDefect.no || '');
+        newDefect.no = newDefect.groupNo;
         if (Number.isFinite(grp.boxX)) newDefect.x = grp.boxX;
         if (Number.isFinite(grp.boxY)) newDefect.y = grp.boxY;
         return true;
@@ -14995,6 +15006,122 @@ document.addEventListener('DOMContentLoaded', () => {
     function finishMarkingGroupCommit() {
         window._pendingMarkingGroup = null;
         clearDefectMarkingTemplate({ keepGroup: true });
+    }
+
+    function getMarkingGroupRepresentative(groupId) {
+        if (!groupId || !state.currentBuildingId) return null;
+        const members = getDefectMarkingGroupMembers(groupId);
+        if (members.length) return pickDefectGroupRepresentative(members) || members[0];
+        const key = `${state.currentBuildingId}_${state.currentFloor}`;
+        return (state.defects[key] || []).find((d) => d && d.id === groupId) || null;
+    }
+
+    /** 위치 추가(마킹 추가) 체인: 모달 없이 같은 NO.박스·groupId로 화살표/영역만 추가 */
+    function commitAdditionalMarkingAtTarget(boxX, boxY, targetX, targetY, areaRect) {
+        const grp = getActiveMarkingGroup();
+        if (!grp || !grp.groupId || !state.currentBuildingId) return null;
+        const key = `${state.currentBuildingId}_${state.currentFloor}`;
+        if (!state.defects[key]) state.defects[key] = [];
+        const rep = getMarkingGroupRepresentative(grp.groupId);
+        const tmpl = window._defectMarkingTemplate || {};
+        const src = rep || tmpl;
+        const groupNo = stripDefectNoSuffix(grp.groupNo || src.groupNo || src.no || formatDefectNoSeq(1));
+        const sharedBoxX = Number.isFinite(grp.boxX) ? grp.boxX : boxX;
+        const sharedBoxY = Number.isFinite(grp.boxY) ? grp.boxY : boxY;
+        const tgtX = targetX !== undefined ? targetX : (sharedBoxX - 35);
+        const tgtY = targetY !== undefined ? targetY : (sharedBoxY + 35);
+
+        pushDefectHistory();
+        const newDefect = {
+            id: generateDefectUniqueId(key),
+            no: groupNo,
+            groupId: grp.groupId,
+            groupNo,
+            category: src.category || '구조체',
+            component: src.component || '',
+            location: src.location || composeDefectLocation(''),
+            defectType: src.defectType || '',
+            cause: src.cause || '',
+            size: src.size || '',
+            crackWidth: src.crackWidth || '',
+            crackLength: src.crackLength || '',
+            crackMeasures: Array.isArray(src.crackMeasures)
+                ? JSON.parse(JSON.stringify(src.crackMeasures))
+                : [],
+            itemCount: src.itemCount || '',
+            isProgress: !!src.isProgress,
+            isLeak: !!src.isLeak,
+            isOpeningCrack: !!src.isOpeningCrack,
+            isCarriedOver: !!src.isCarriedOver,
+            isBookmark: !!src.isBookmark,
+            isPriorityManage: !!src.isPriorityManage,
+            forceArrowDir: false,
+            arrowOctant: 0,
+            surveyRound: src.surveyRound || getCurrentSurveyRoundKey(),
+            mapMarkedAt: Date.now(),
+            mapUnregistered: false,
+            updatedAt: Date.now(),
+            photos: [],
+            prevRoundPhotos: [],
+            inspectorName: src.inspectorName || window.state.userName || '',
+            x: sharedBoxX,
+            y: sharedBoxY,
+            targetX: tgtX,
+            targetY: tgtY
+        };
+        touchDefectPositionUpdatedAt(newDefect);
+
+        if (areaRect) {
+            const ax1 = Math.min(areaRect.x1, areaRect.x2);
+            const ay1 = Math.min(areaRect.y1, areaRect.y2);
+            const ax2 = Math.max(areaRect.x1, areaRect.x2);
+            const ay2 = Math.max(areaRect.y1, areaRect.y2);
+            newDefect.shapeType = 'area';
+            newDefect.areaX1 = ax1;
+            newDefect.areaY1 = ay1;
+            newDefect.areaX2 = ax2;
+            newDefect.areaY2 = ay2;
+            newDefect.areaShape = normalizeAreaShape(areaRect.areaShape || 'rect');
+            newDefect.areaAngle = Number(areaRect.areaAngle) || 0;
+            if (Array.isArray(areaRect.areaPoints)) {
+                newDefect.areaPoints = areaRect.areaPoints.map((p) => ({ x: p.x, y: p.y }));
+            }
+            newDefect.areaDrawings = [];
+            newDefect.areaFillStyle = src.areaFillStyle || getAreaFillStyle(src);
+            newDefect.areaBorderStyle = src.areaBorderStyle || getAreaBorderStyle(src);
+            const attach = getAreaCenterBorderAttachDefect(sharedBoxX, sharedBoxY, newDefect);
+            newDefect.targetX = attach.x;
+            newDefect.targetY = attach.y;
+        }
+
+        state.defects[key].push(newDefect);
+        normalizeDefectGroupNos(state.defects[key], grp.groupId);
+        window._pendingMarkingGroup = null;
+        window._defectMarkingTemplate = {
+            category: newDefect.category,
+            component: newDefect.component,
+            defectType: newDefect.defectType,
+            cause: newDefect.cause,
+            size: newDefect.size,
+            crackWidth: newDefect.crackWidth,
+            crackLength: newDefect.crackLength,
+            forceArrowDir: false,
+            arrowOctant: 0,
+            areaFillStyle: newDefect.areaFillStyle || src.areaFillStyle || getAreaFillStyle(src),
+            areaBorderStyle: newDefect.areaBorderStyle || src.areaBorderStyle || getAreaBorderStyle(src),
+            groupId: grp.groupId,
+            groupNo,
+            boxX: sharedBoxX,
+            boxY: sharedBoxY,
+            chainIndex: (Number(tmpl.chainIndex) || 2) + 1
+        };
+        saveStateToLocalStorage();
+        drawCanvas();
+        if (typeof renderDefectListPanel === 'function') renderDefectListPanel();
+        if (typeof renderSurveyTable === 'function' && state.currentTab === 'tab-survey') renderSurveyTable();
+        const label = String(groupNo).replace(/^NO\.?\s*/i, '').trim();
+        window.showToast?.(`같은 번호(${label})에 위치를 추가했습니다`, 'success', 2200);
+        return newDefect;
     }
 
     // 현재 선택된 조사 회차(연도_기간) 키 — 결함 등록 시점의 회차를 기록하는 데 사용
@@ -15169,7 +15296,11 @@ document.addEventListener('DOMContentLoaded', () => {
         const groupMembers = defectOrNull && defectOrNull.groupId
             ? getDefectMarkingGroupMembers(defectOrNull.groupId)
             : [];
-        if (!defectOrNull || groupMembers.length <= 1) {
+        const allGroupMembers = defectOrNull && defectOrNull.groupId && state.currentBuildingId
+            ? (state.defects[`${state.currentBuildingId}_${state.currentFloor}`] || [])
+                .filter((d) => d && d.groupId === defectOrNull.groupId)
+            : [];
+        if (!defectOrNull || !groupMembers.length || allGroupMembers.length <= 1) {
             el.hidden = true;
             el.innerHTML = '';
             document.getElementById('defectModal')?.classList.remove('has-marking-member-tabs');
@@ -15178,12 +15309,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
         el.hidden = false;
         document.getElementById('defectModal')?.classList.add('has-marking-member-tabs');
-        el.innerHTML = groupMembers.map((m, i) => {
+        el.innerHTML = groupMembers.map((m) => {
             const active = m.id === defectOrNull.id ? ' is-active' : '';
             const dir = getMarkingMemberDirDisplay(m);
             const forcedClass = m.forceArrowDir ? ' is-forced' : '';
+            const chip = formatDefectMemberChipLabel(m);
             return `<div class="defect-marking-arrow-row${active}" data-marking-member-id="${escapeHtml(m.id)}">`
-                + `<button type="button" class="defect-marking-float-btn defect-marking-arrow-select${active}" data-marking-member-id="${escapeHtml(m.id)}" title="${escapeHtml(formatMarkingArrowIndexLabel(i))} 선택">${i + 1}</button>`
+                + `<button type="button" class="defect-marking-float-btn defect-marking-arrow-select${active}" data-marking-member-id="${escapeHtml(m.id)}" title="${escapeHtml(chip)} 선택">${escapeHtml(chip)}</button>`
                 + `<button type="button" class="defect-marking-arrow-dir-btn${forcedClass}" data-marking-member-id="${escapeHtml(m.id)}" title="${escapeHtml(dir.title)}">${dir.symbol}</button>`
                 + `</div>`;
         }).join('');
@@ -15287,8 +15419,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         openAddDefectModal(d.x, d.y, d.targetX, d.targetY, d, null, { revealMarkingAboveDrawer: true });
         const members = d.groupId ? getDefectMarkingGroupMembers(d.groupId) : [];
-        const idx = members.findIndex((m) => m.id === d.id);
-        const label = idx >= 0 ? formatMarkingArrowIndexLabel(idx) : (d.no || '-');
+        const label = formatDefectMemberChipLabel(d);
         window.showToast?.(`${label} 선택`, 'info', 1600);
     };
 
@@ -16471,18 +16602,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function formatDefectMemberChipLabel(d) {
         if (!d) return '-';
-        if (d.surveyExtra) {
-            return String(d.no || d.groupNo || '').replace(/^NO\.?\s*/i, '').trim() || '-';
-        }
-        if (d.groupId) {
-            const members = getDefectMarkingGroupMembers(d.groupId);
-            const idx = members.findIndex((m) => m.id === d.id);
-            if (idx >= 0) return formatMarkingArrowIndexLabel(idx);
-        }
-        const base = String(d.groupNo || stripDefectNoSuffix(d.no) || d.no || '')
-            .replace(/^NO\.?\s*/i, '')
-            .trim();
-        return base || '-';
+        const p = parseDefectNoParts(d);
+        const compactMain = String(p.main === Number.MAX_SAFE_INTEGER ? '?' : p.main);
+        if (p.suffix > 0) return `${compactMain}-${p.suffix}`;
+        return compactMain;
     }
 
     /** 공유 NO.박스 클릭 시 x-1 → x-2 → x-3 순환 선택 */
@@ -17076,11 +17199,12 @@ document.addEventListener('DOMContentLoaded', () => {
         return '';
     }
 
-    // 좌측 결함목록: 위치추가(화살표)는 한 행·본번호, 결함표 추가(surveyExtra)만 별도 행
+    // 좌측 결함목록: 그룹 멤버(화살표·결함표)마다 한 행, 2개부터 41-1·41-2 …
     function getDefectsForListPanel(defects, allDefects) {
         const list = defects || [];
         const full = allDefects || list;
-        const seenMarkingGroups = new Set();
+        if (Array.isArray(full) && full.length) repairLegacyMarkingSuffixGroups(full);
+        const seenMainMarking = new Set();
         const rows = [];
         const sorted = list.slice().sort((a, b) => {
             const pa = parseDefectNoParts(a);
@@ -17089,6 +17213,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const ae = a.surveyExtra ? 1 : 0;
             const be = b.surveyExtra ? 1 : 0;
             if (ae !== be) return ae - be;
+            if (pa.suffix !== pb.suffix) return pa.suffix - pb.suffix;
             if (a.groupId && a.groupId === b.groupId) {
                 return String(a.id || '').localeCompare(String(b.id || ''));
             }
@@ -17103,49 +17228,27 @@ document.addEventListener('DOMContentLoaded', () => {
                 rows.push(d);
                 return;
             }
-            if (d.groupId) {
-                if (seenMarkingGroups.has(d.groupId)) return;
-                seenMarkingGroups.add(d.groupId);
-                const markingMembers = full.filter((m) => m.groupId === d.groupId && !m.surveyExtra);
-                if (!markingMembers.length) return;
-                const rep = pickDefectGroupRepresentative(markingMembers) || d;
-                const locations = markingMembers.map((m) => m.location).filter(Boolean);
-                const uniqLoc = [];
-                locations.forEach((loc) => {
-                    if (uniqLoc.indexOf(loc) === -1) uniqLoc.push(loc);
-                });
-                rows.push({
-                    ...rep,
-                    no: rep.groupNo || stripDefectNoSuffix(rep.no) || rep.no,
-                    location: uniqLoc.length > 0 ? uniqLoc.join(' / ') : rep.location,
-                    isProgress: markingMembers.some((m) => m.isProgress),
-                    isLeak: markingMembers.some((m) => m.isLeak),
-                    isOpeningCrack: markingMembers.some((m) => m.isOpeningCrack),
-                    isCarriedOver: markingMembers.some((m) => m.isCarriedOver),
-                    mapUnregistered: markingMembers.some((m) => m.mapUnregistered),
-                    isPriorityManage: markingMembers.some((m) => m.isPriorityManage),
-                    isBookmark: markingMembers.some((m) => m.isBookmark),
-                    _groupMemberIds: markingMembers.map((m) => m.id),
-                    _representative: rep
-                });
-                return;
+            const parts = parseDefectNoParts(d);
+            if (parts.suffix > 0 && !d.groupId) {
+                if (seenMainMarking.has(parts.main)) return;
+            } else if (!d.groupId && parts.main !== Number.MAX_SAFE_INTEGER) {
+                seenMainMarking.add(parts.main);
             }
             rows.push(d);
         });
         return rows;
     }
 
-    // 목록 원 번호: 마킹(화살표)은 본번호 N, 결함표 추가만 N-1, N-2 …
+    // 목록 원 번호: 1개면 N, 2개부터 N-1, N-2 …
     function formatDefectListBadgeNo(d) {
-        const compact = (raw) => {
+        const compactWithSuffix = (raw) => {
             const m = String(raw || '').replace(/^NO\.?\s*/i, '').trim().match(/(\d+)(?:-(\d+))?/);
             if (!m) return String(raw || '').replace(/^NO\.?\s*/i, '').trim() || '?';
             const main = String(parseInt(m[1], 10));
             return m[2] ? `${main}-${parseInt(m[2], 10)}` : main;
         };
         if (!d) return '?';
-        if (d.surveyExtra) return compact(d.no || d.groupNo);
-        return compact(d.groupNo || stripDefectNoSuffix(d.no) || d.no);
+        return compactWithSuffix(d.no || d.groupNo);
     }
 
     // 결함 1건의 목록 카드(DOM row) 생성 — renderDefectListSection에서 재사용
@@ -18254,16 +18357,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 targetX = attach.x;
                 targetY = attach.y;
             }
-            const tipSelected = !!(t.memberId
-                && typeof selectedDefectIds !== 'undefined'
-                && selectedDefectIds.has(t.memberId)
-                && shouldDrawMapSelectionChrome());
             const lineColor = activeColor;
             const leaderAnchorOpts = { shape: shapeCfg.shape, scale };
             const anchor = getPinLeaderBoxAnchor(boxX, boxY, targetX, targetY, w, h, state.rotationAngle || 0, leaderAnchorOpts);
-            const headLen = ((isBeingDragged || tipSelected) ? 13 : 10) * arrowScale;
+            const headLen = (isBeingDragged ? 13 : 10) * arrowScale;
             const stemInset = useCircleTip
-                ? ((isBeingDragged || tipSelected) ? 6 : 4.5) * arrowScale
+                ? (isBeingDragged ? 6 : 4.5) * arrowScale
                 : headLen * Math.cos(Math.PI / 6);
             const forcedDir = tipIsArea ? { enabled: false } : resolveForcedArrowDirection(t, defect, state.rotationAngle || 0);
             const leader = forcedDir.enabled
@@ -18297,7 +18396,7 @@ document.addEventListener('DOMContentLoaded', () => {
             ctx.moveTo(leader.route[0].x, leader.route[0].y);
             for (let i = 1; i < leader.route.length; i++) ctx.lineTo(leader.route[i].x, leader.route[i].y);
             ctx.strokeStyle = lineColor;
-            ctx.lineWidth = getDefectLeaderLineWidth(scale, roundLineMul, isBeingDragged || tipSelected);
+            ctx.lineWidth = getDefectLeaderLineWidth(scale, roundLineMul, isBeingDragged);
             ctx.lineCap = 'butt';
             ctx.setLineDash([]);
             ctx.stroke();
@@ -22461,7 +22560,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         // 도면 빈곳 터치/클릭 → 입력창 닫기 + (선택 모드면) 선택 해제
-        if (isDefectModalOpen()) {
+        if (isDefectModalOpen() && !isDefectMarkingGroupPending()) {
             closeDefectModal();
         }
         if (state.mode === 'PAN' && !additive && !mobileAddSelectEnabled && selectedDefectIds.size > 0) {
@@ -22903,10 +23002,14 @@ document.addEventListener('DOMContentLoaded', () => {
             markingHasMoved = false;
             if (window._pendingMapRegisterDefectId) {
                 commitMapRegisterFromMarking(liveBoxImgX, liveBoxImgY, markTargetImgX, markTargetImgY);
+                setDrawMode('PAN');
+            } else if (getActiveMarkingGroup()?.groupId) {
+                commitAdditionalMarkingAtTarget(liveBoxImgX, liveBoxImgY, markTargetImgX, markTargetImgY);
+                // MARK/AREA 모드 유지 — 같은 번호에 연속 위치 추가
             } else {
                 openAddDefectModal(liveBoxImgX, liveBoxImgY, markTargetImgX, markTargetImgY);
+                setDrawMode('PAN');
             }
-            setDrawMode('PAN');
             drawCanvas();
         }
 
@@ -22934,16 +23037,21 @@ document.addEventListener('DOMContentLoaded', () => {
             const x2 = Math.max(areaStartImgX, areaCurImgX);
             const y2 = Math.max(areaStartImgY, areaCurImgY);
             if (Math.hypot(x2 - x1, y2 - y1) < 15) {
-                setDrawMode('PAN');
+                if (!getActiveMarkingGroup()?.groupId) setDrawMode('PAN');
                 drawCanvas();
             } else {
                 const shape = state.areaCreateShape || 'rect';
-                openAddDefectModal(x1, y1, undefined, undefined, null, {
+                const areaPayload = {
                     x1, y1, x2, y2,
                     areaShape: shape === 'ellipse' ? 'ellipse' : 'rect',
                     areaAngle: 0
-                });
-                setDrawMode('PAN');
+                };
+                if (getActiveMarkingGroup()?.groupId) {
+                    commitAdditionalMarkingAtTarget(x1, y1, undefined, undefined, areaPayload);
+                } else {
+                    openAddDefectModal(x1, y1, undefined, undefined, null, areaPayload);
+                    setDrawMode('PAN');
+                }
                 drawCanvas();
             }
         }
@@ -24863,8 +24971,8 @@ document.addEventListener('DOMContentLoaded', () => {
         const key = `${state.currentBuildingId}_${state.currentFloor}`;
         if (!state.defects[key]) return null;
         ensureDefectMarkingGroup(src);
-        const extraCount = (state.defects[key] || []).filter((d) => d.groupId === src.groupId && d.surveyExtra).length;
-        const nextSuffix = extraCount + 1;
+        const groupMembers = (state.defects[key] || []).filter((d) => d && d.groupId === src.groupId);
+        const nextSuffix = groupMembers.length + 1;
         const newId = generateDefectUniqueId(key);
         const copy = {
             id: newId,
@@ -24969,24 +25077,19 @@ document.addEventListener('DOMContentLoaded', () => {
             closeDefectModal();
             if (saved) {
                 // 핀·영역 공통: 같은 번호칸에 화살표/영역 연결을 추가할 수 있게 그룹화
-                // 아직 멤버가 1개면 no는 본번호 유지( -1 붙이지 않음 ). 2번째 저장 시 normalize.
-                let nextChainIndex = 2;
-                if (!saved.groupId) {
-                    saved.groupId = saved.id;
-                    saved.groupNo = stripDefectNoSuffix(saved.no || formatDefectNoSeq(1));
-                    saved.no = saved.groupNo;
-                    nextChainIndex = 2;
-                } else {
-                    const key = `${state.currentBuildingId}_${state.currentFloor}`;
-                    const memberCount = (state.defects[key] || []).filter(d => d.groupId === saved.groupId && !d.surveyExtra).length;
-                    nextChainIndex = memberCount + 1;
-                    normalizeDefectGroupNos(state.defects[key], saved.groupId);
-                }
-                saveStateToLocalStorage();
-                drawCanvas();
-                if (typeof renderDefectListPanel === 'function') renderDefectListPanel();
+                ensureDefectMarkingGroup(saved);
+                const floorKey = `${state.currentBuildingId}_${state.currentFloor}`;
+                const chainGroupId = saved.groupId || saved.id;
+                const chainGroupNo = stripDefectNoSuffix(saved.groupNo || saved.no || formatDefectNoSeq(1));
+                saved.groupId = chainGroupId;
+                saved.groupNo = chainGroupNo;
+                saved.no = chainGroupNo;
+                const memberCount = (state.defects[floorKey] || [])
+                    .filter((d) => d && d.groupId === chainGroupId && !d.surveyExtra).length;
+                const nextChainIndex = Math.max(2, memberCount + 1);
 
                 const isArea = saved.shapeType === 'area';
+                // template를 먼저 세워야 renderDefectListPanel의 singleton collapse가 groupId를 지우지 않음
                 window._defectMarkingTemplate = {
                     category: saved.category,
                     component: saved.component,
@@ -24999,12 +25102,17 @@ document.addEventListener('DOMContentLoaded', () => {
                     arrowOctant: ((parseInt(saved.arrowOctant, 10) || 0) % 8 + 8) % 8,
                     areaFillStyle: saved.areaFillStyle || getAreaFillStyle(saved),
                     areaBorderStyle: saved.areaBorderStyle || getAreaBorderStyle(saved),
-                    groupId: saved.groupId,
-                    groupNo: saved.groupNo,
+                    groupId: chainGroupId,
+                    groupNo: chainGroupNo,
                     boxX: saved.x,
                     boxY: saved.y,
                     chainIndex: nextChainIndex
                 };
+                snapshotMarkingGroupForCommit(window._defectMarkingTemplate);
+                normalizeDefectGroupNos(state.defects[floorKey], chainGroupId);
+                saveStateToLocalStorage();
+                drawCanvas();
+                if (typeof renderDefectListPanel === 'function') renderDefectListPanel();
                 setDrawMode(isArea ? 'AREA' : 'MARK');
                 window.showToast(
                     isArea
@@ -25950,7 +26058,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // 보고서(PDF/HWPX)·화면 상태조사표 행 구성:
     // - "마킹 추가"(같은 번호 박스 + 화살표만 늘림) → 그룹을 한 행으로 합침 (도면과 동일)
-    // - "결함표 추가"(surveyExtra) → N-1, N-2 … 별도 행으로 유지 (화살표 개수와 무관)
+    // - "결함표 추가"(surveyExtra) 포함, 멤버 2개부터 N-1, N-2 … 별도 행
     // 표는 기본 15행, 결함표 추가분이 있으면 최대 17행까지 담고, 가능하면
     // 본번호가 15·30·45…에서 끝나도록 다음 표로 넘긴다.
     const SURVEY_REPORT_ROWS_BASE = 15;
@@ -25965,8 +26073,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function getSurveyRowsForReport(defects) {
         const list = defects || [];
+        if (list.length) repairLegacyMarkingSuffixGroups(list);
         const result = [];
         const seenMarkingGroups = new Set();
+        const seenMainMarking = new Set();
 
         const sorted = list.slice().sort((a, b) => {
             const pa = parseSurveyDefectNo(a);
@@ -25981,9 +26091,16 @@ document.addEventListener('DOMContentLoaded', () => {
                 result.push(d);
                 return;
             }
+            const parts = parseDefectNoParts(d);
+            if (parts.suffix > 0 && !d.groupId) {
+                if (seenMainMarking.has(parts.main)) return;
+            } else if (!d.groupId && parts.main !== Number.MAX_SAFE_INTEGER) {
+                seenMainMarking.add(parts.main);
+            }
             if (d.groupId) {
                 if (seenMarkingGroups.has(d.groupId)) return;
                 seenMarkingGroups.add(d.groupId);
+                if (parts.main !== Number.MAX_SAFE_INTEGER) seenMainMarking.add(parts.main);
                 const members = list.filter((m) => m.groupId === d.groupId && !m.surveyExtra);
                 if (!members.length) return;
                 const rep = pickDefectGroupRepresentative(members) || members[0];
@@ -26050,7 +26167,8 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function formatSurveyReportNo(d, isGrade3, floorCode) {
-        const raw = String(d.no || '').replace(/^NO\.?\s*/i, '').trim();
+        let raw = String(d.no || '').replace(/^NO\.?\s*/i, '').trim();
+        if (!d.surveyExtra) raw = String(stripDefectNoSuffix(raw)).replace(/^NO\.?\s*/i, '').trim();
         const stripped = raw.replace(/^0+(\d)/, '$1');
         if (isGrade3) return `${getGrade3FloorPrefix(floorCode)}-${stripped || '0'}`;
         return stripped || '-';
