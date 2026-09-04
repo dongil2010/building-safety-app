@@ -7825,7 +7825,11 @@ document.addEventListener('DOMContentLoaded', () => {
     let activeDragNdtDisplacementGroup = null;
     let activeDragNdtDisplacementPoint = null;
     let pendingNdtDispHit = null;
+    let pendingNdtDispArmed = false;
+    let pendingNdtDispIsTouch = false;
     let isNdtDisplacementMarking = false;
+    let ndtGestureCancelledByPinch = false;
+    let ndtDispMarkUndoStack = []; // 부동침하·부재변위 마킹 한 개씩 되돌리기
     let isNdtPinching = false;
     let ndtPinchDist = 0;
     let ndtPinchScale = 1.0;
@@ -7878,7 +7882,93 @@ document.addEventListener('DOMContentLoaded', () => {
             pendingNdtLongPressTimer = null;
         }
         pendingNdtPinArmed = false;
+        pendingNdtDispArmed = false;
     }
+
+    /** 두 손가락 핀치가 시작되면 진행 중이던 마킹·드래그 예약을 모두 무효화 */
+    function cancelNdtGestureForPinch() {
+        ndtGestureCancelledByPinch = true;
+        isNdtDisplacementMarking = false;
+        window._ndtDispMarkCoords = null;
+        isNdtMarkingDrag = false;
+        window._ndtMarkStartCoords = null;
+        window._ndtMarkCurrentCoords = null;
+        clearPendingNdtLongPress();
+        pendingNdtPinHit = null;
+        pendingNdtDispHit = null;
+        pendingNdtDispIsTouch = false;
+        isDraggingNdtDisplacement = false;
+        activeDragNdtDisplacementGroup = null;
+        activeDragNdtDisplacementPoint = null;
+        isDraggingNdtPin = false;
+        activeDragNdtPin = null;
+        isDraggingNdtPinGroup = false;
+        isNdtMarqueeSelecting = false;
+        isNdtDragging = false;
+        hideTouchLoupe(NDT_LOUPE_ID);
+    }
+
+    function syncNdtDispUndoButton() {
+        const show = (currentNdtCategory === '변위' || currentNdtCategory === '부재변위')
+            && ndtDispMarkUndoStack.length > 0;
+        ['btnNdtUndoDispMark', 'mobileNdtBtnUndoDisp'].forEach((id) => {
+            const el = document.getElementById(id);
+            if (!el) return;
+            el.hidden = !show;
+            el.disabled = !show;
+        });
+        const fab = document.getElementById('mobileNdtFabBar');
+        if (fab) fab.classList.toggle('has-disp-undo', show);
+    }
+
+    function recordNdtDispMarkUndo(entry) {
+        if (!entry || !entry.key || !entry.groupId || !entry.pointId) return;
+        ndtDispMarkUndoStack.push(entry);
+        if (ndtDispMarkUndoStack.length > 40) ndtDispMarkUndoStack.shift();
+        syncNdtDispUndoButton();
+    }
+
+    function undoLastNdtDisplacementMark() {
+        const entry = ndtDispMarkUndoStack.pop();
+        syncNdtDispUndoButton();
+        if (!entry) {
+            window.showToast('되돌릴 마킹이 없습니다.', 'info', 2000);
+            return false;
+        }
+        if (!state.ndtDisplacementGroups) state.ndtDisplacementGroups = {};
+        const groups = state.ndtDisplacementGroups[entry.key] || [];
+        const gi = groups.findIndex((g) => g && g.id === entry.groupId);
+        if (gi < 0) {
+            window.showToast('되돌릴 마킹을 찾지 못했습니다.', 'warning', 2200);
+            return false;
+        }
+        const group = groups[gi];
+        if (entry.createdGroup) {
+            groups.splice(gi, 1);
+            if (getActiveNdtDispGroup() && getActiveNdtDispGroup().id === entry.groupId) {
+                setActiveNdtDispGroup(null);
+            }
+        } else {
+            group.points = (group.points || []).filter((p) => p && p.id !== entry.pointId);
+            if (!group.points.length) {
+                groups.splice(gi, 1);
+                if (getActiveNdtDispGroup() && getActiveNdtDispGroup().id === entry.groupId) {
+                    setActiveNdtDispGroup(null);
+                }
+            }
+        }
+        const selKey = ndtDispSelKey(entry.groupId);
+        if (selectedNdtIds.has(selKey) && !groups.some((g) => g && g.id === entry.groupId)) {
+            selectedNdtIds.delete(selKey);
+            updateNdtSelectionBar();
+        }
+        saveStateToLocalStorage();
+        drawNdtCanvas();
+        renderNdtSummaryTable();
+        window.showToast('마지막 마킹을 되돌렸습니다.', 'success', 2000);
+        return true;
+    }
+    window.undoLastNdtDisplacementMark = undoLastNdtDisplacementMark;
 
     function pruneSelectedNdtIds() {
         if (!selectedNdtIds.size) return 0;
@@ -9479,6 +9569,9 @@ document.addEventListener('DOMContentLoaded', () => {
         if (group) {
             group.points.push(point);
             setActiveNdtDispGroup(group);
+            recordNdtDispMarkUndo({
+                key, groupId: group.id, pointId: point.id, createdGroup: false
+            });
             saveStateToLocalStorage();
             drawNdtCanvas();
             renderNdtSummaryTable();
@@ -9502,6 +9595,9 @@ document.addEventListener('DOMContentLoaded', () => {
         };
         groups.push(group);
         setActiveNdtDispGroup(group);
+        recordNdtDispMarkUndo({
+            key, groupId: group.id, pointId: point.id, createdGroup: true
+        });
         saveStateToLocalStorage();
         drawNdtCanvas();
         renderNdtSummaryTable();
@@ -9754,6 +9850,8 @@ document.addEventListener('DOMContentLoaded', () => {
         if (typeof renderNdtSummaryTable === 'function') renderNdtSummaryTable();
         if (typeof drawNdtCanvas === 'function') drawNdtCanvas();
         if (typeof window.syncBulkStyleSlidersUi === 'function') window.syncBulkStyleSlidersUi();
+        if (typeof syncNdtTiltRotateButtons === 'function') syncNdtTiltRotateButtons();
+        if (typeof syncNdtDispUndoButton === 'function') syncNdtDispUndoButton();
     };
 
     let _ndtDrawRafId = 0;
@@ -10821,6 +10919,12 @@ document.addEventListener('DOMContentLoaded', () => {
                         drawNdtCanvas();
                     }
                     pendingNdtDispHit = { hit: hitDisp, grabX: vx, grabY: vy, additive };
+                    pendingNdtDispIsTouch = false;
+                    if (pendingNdtLongPressTimer) {
+                        clearTimeout(pendingNdtLongPressTimer);
+                        pendingNdtLongPressTimer = null;
+                    }
+                    pendingNdtDispArmed = true; // 마우스: 홀딩 없이 바로 드래그
                     return;
                 }
             } else {
@@ -11223,6 +11327,26 @@ document.addEventListener('DOMContentLoaded', () => {
             });
         }
         syncNdtTiltRotateButtons();
+        syncNdtDispUndoButton();
+
+        const btnUndoDisp = document.getElementById('btnNdtUndoDispMark');
+        if (btnUndoDisp && !btnUndoDisp.dataset.ndtUndoBound) {
+            btnUndoDisp.dataset.ndtUndoBound = '1';
+            btnUndoDisp.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                undoLastNdtDisplacementMark();
+            });
+        }
+        const btnUndoDispMobile = document.getElementById('mobileNdtBtnUndoDisp');
+        if (btnUndoDispMobile && !btnUndoDispMobile.dataset.ndtUndoBound) {
+            btnUndoDispMobile.dataset.ndtUndoBound = '1';
+            btnUndoDispMobile.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                undoLastNdtDisplacementMark();
+            });
+        }
 
         canvas.addEventListener('touchstart', (e) => {
             ndtTouchStartedOnCanvas = true;
@@ -11280,10 +11404,20 @@ document.addEventListener('DOMContentLoaded', () => {
                     if (hitDisp) {
                         if (e.cancelable) e.preventDefault();
                         pendingNdtDispHit = { hit: hitDisp, grabX: vx, grabY: vy };
+                        pendingNdtDispIsTouch = true;
+                        pendingNdtDispArmed = false;
+                        // 모바일: 0.5초 홀딩 후 드래그 (바로 밀면 도면 팬)
+                        pendingNdtLongPressTimer = setTimeout(() => {
+                            if (!pendingNdtDispHit || !pendingNdtDispIsTouch) return;
+                            pendingNdtDispArmed = true;
+                            try { if (navigator.vibrate) navigator.vibrate(12); } catch (_e) { /* ignore */ }
+                            drawNdtCanvas();
+                        }, NDT_TOUCH_LONG_PRESS_MS);
                         return;
                     }
                     if (ndtMode === 'MARK') {
                         if (e.cancelable) e.preventDefault();
+                        ndtGestureCancelledByPinch = false;
                         isNdtDisplacementMarking = true;
                         window._ndtDispMarkCoords = { x: vx, y: vy };
                         return;
@@ -11317,8 +11451,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     isNdtDragging = true;
                 }
             } else if (e.touches.length >= 2) {
-                isNdtDragging = false;
-                ndtTouchMayPageScroll = false;
+                cancelNdtGestureForPinch();
                 isNdtPinching = true;
                 hideTouchLoupe(NDT_LOUPE_ID);
                 const rect = canvas.getBoundingClientRect();
@@ -11473,7 +11606,19 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (pendingNdtDispHit && !isDraggingNdtDisplacement) {
                     const dx = touch.clientX - ndtStartMouseX;
                     const dy = touch.clientY - ndtStartMouseY;
-                    if (Math.hypot(dx, dy) > 6) {
+                    const dist = Math.hypot(dx, dy);
+                    if (pendingNdtDispIsTouch && !pendingNdtDispArmed) {
+                        // 홀딩 전 이동 → 도면 팬 (마킹이 따라오지 않음)
+                        if (dist > 14) {
+                            clearPendingNdtLongPress();
+                            pendingNdtDispHit = null;
+                            pendingNdtDispIsTouch = false;
+                            isNdtDragging = true;
+                        }
+                        return;
+                    }
+                    if (dist > 6) {
+                        if (e.cancelable) e.preventDefault();
                         isDraggingNdtDisplacement = true;
                         activeDragNdtDisplacementGroup = pendingNdtDispHit.hit.group;
                         activeDragNdtDisplacementPoint = pendingNdtDispHit.hit.type === 'point' ? pendingNdtDispHit.hit.point : null;
@@ -11490,11 +11635,14 @@ document.addEventListener('DOMContentLoaded', () => {
                             ndtDispDragOffsetY = grabY - by;
                         }
                         pendingNdtDispHit = null;
+                        pendingNdtDispIsTouch = false;
+                        clearPendingNdtLongPress();
                     } else {
                         return;
                     }
                 }
 
+                if (e.cancelable) e.preventDefault();
                 const rect = canvas.getBoundingClientRect();
                 const mouseX = touch.clientX - rect.left;
                 const mouseY = touch.clientY - rect.top;
@@ -11605,9 +11753,21 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             if (isNdtDisplacementMarking) {
                 isNdtDisplacementMarking = false;
-                const coords = window._ndtDispMarkCoords || { x: 100, y: 100 };
-                placeNdtDisplacementMarkAt(coords.x, coords.y);
+                const cancelled = ndtGestureCancelledByPinch || isNdtPinching || (e.touches && e.touches.length > 0);
+                ndtGestureCancelledByPinch = false;
+                if (!cancelled) {
+                    const coords = window._ndtDispMarkCoords || { x: 100, y: 100 };
+                    placeNdtDisplacementMarkAt(coords.x, coords.y);
+                }
+                window._ndtDispMarkCoords = null;
             }
+            if (isNdtMarkingDrag && (ndtGestureCancelledByPinch || isNdtPinching || (e.touches && e.touches.length > 0))) {
+                isNdtMarkingDrag = false;
+                window._ndtMarkStartCoords = null;
+                window._ndtMarkCurrentCoords = null;
+                ndtGestureCancelledByPinch = false;
+            }
+            if (e.touches.length === 0) ndtGestureCancelledByPinch = false;
             if (isDraggingNdtPinGroup) {
                 isDraggingNdtPinGroup = false;
                 saveStateToLocalStorage();

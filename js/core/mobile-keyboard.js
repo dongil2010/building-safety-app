@@ -62,7 +62,7 @@
     }
 
     function findPanelForField(el) {
-        var overlay = el.closest('.modal-overlay');
+        var overlay = el.closest('.modal-overlay, .modal-drawer-overlay');
         if (overlay && overlay.id === 'loginOverlay') return null;
         if (overlay && isOverlayVisible(overlay)) {
             var panel = overlay.querySelector(PANEL_SELECTOR);
@@ -113,7 +113,7 @@
         var box = getVisualViewportBox();
         var rect = field.getBoundingClientRect();
         var padTop = 12;
-        var padBottom = 20;
+        var padBottom = 28;
         var visibleTop = box.top + padTop;
         var visibleBottom = box.top + box.height - padBottom;
         var lift = 0;
@@ -126,7 +126,11 @@
         }
 
         if (state.panel && isBottomSheetPanel(state.panel)) {
-            lift = Math.max(lift, state.keyboardH);
+            // 우측/하단 드로어: 키보드 높이만큼은 최소로 올려 입력칸이 가려지지 않게
+            lift = Math.max(lift, Math.round(state.keyboardH * 0.85));
+        } else if (!state.panel && state.keyboardH > 72) {
+            // 페이지 본문 입력: 화면 전체를 일부 밀어 올림
+            lift = Math.max(lift, Math.round(state.keyboardH * 0.45));
         }
         return Math.max(0, lift);
     }
@@ -166,6 +170,8 @@
         document.documentElement.style.setProperty('--bsa-kb-height', state.keyboardH + 'px');
         document.documentElement.style.setProperty('--bsa-kb-lift', lift + 'px');
         document.body.classList.toggle('bsa-keyboard-open', state.keyboardH > 72 || lift > 0);
+        // 모달/드로어가 없으면 페이지 콘텐츠 전체를 위로 (입력칸이 키보드에 가리지 않게)
+        document.body.classList.toggle('bsa-kb-page-lift', !state.panel && lift > 0);
 
         if (state.panel) {
             state.panel.style.setProperty('--bsa-kb-lift', lift + 'px');
@@ -193,6 +199,7 @@
         state.panel = null;
         state.overlay = null;
         document.body.classList.remove('bsa-keyboard-open');
+        document.body.classList.remove('bsa-kb-page-lift');
         document.documentElement.style.removeProperty('--bsa-kb-height');
         document.documentElement.style.removeProperty('--bsa-kb-lift');
     }

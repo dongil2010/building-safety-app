@@ -11965,10 +11965,20 @@ html.layout-tablet body.ndt-modal-open .ndt-right-rails {
     }
 
     html:not(.layout-desktop) #defectModal.open .defect-drawer-card.bsa-kb-lifted,
-    html:not(.layout-desktop) #ndtModal.open .ndt-drawer-card.bsa-kb-lifted {
+    html:not(.layout-desktop) #ndtModal.open .ndt-drawer-card.bsa-kb-lifted,
+    html:not(.layout-desktop) #ndtDisplacementModal.open .ndt-drawer-card.bsa-kb-lifted,
+    html:not(.layout-desktop) #ndtDisplacementGroupEditModal.open .ndt-drawer-card.bsa-kb-lifted {
         transform: translateY(calc(-1 * var(--bsa-kb-lift, 0px))) !important;
         transition: transform 0.22s ease;
         will-change: transform;
+    }
+
+    /* 드로어 없이 본문 입력 시: 화면(콘텐츠) 전체를 위로 */
+    html:not(.layout-desktop) body.bsa-keyboard-open.bsa-kb-page-lift .app-content {
+        transform: translateY(calc(-1 * var(--bsa-kb-lift, 0px)));
+        transition: transform 0.2s ease;
+        will-change: transform;
+        padding-bottom: calc(var(--bsa-kb-height, 0px) + 2rem) !important;
     }
 
     html:not(.layout-desktop) body.bsa-keyboard-open .app-content {
@@ -12027,9 +12037,17 @@ html.layout-tablet .bsa-select-sheet-card.bsa-kb-lifted {
 }
 
 html.layout-tablet #defectModal.open .defect-drawer-card.bsa-kb-lifted,
-html.layout-tablet #ndtModal.open .ndt-drawer-card.bsa-kb-lifted {
+html.layout-tablet #ndtModal.open .ndt-drawer-card.bsa-kb-lifted,
+html.layout-tablet #ndtDisplacementModal.open .ndt-drawer-card.bsa-kb-lifted,
+html.layout-tablet #ndtDisplacementGroupEditModal.open .ndt-drawer-card.bsa-kb-lifted {
     transform: translateY(calc(-1 * var(--bsa-kb-lift, 0px))) !important;
     transition: transform 0.22s ease;
+}
+
+html.layout-tablet body.bsa-keyboard-open.bsa-kb-page-lift .app-content {
+    transform: translateY(calc(-1 * var(--bsa-kb-lift, 0px)));
+    transition: transform 0.2s ease;
+    padding-bottom: calc(var(--bsa-kb-height, 0px) + 2rem) !important;
 }
 
 html.layout-tablet body.bsa-keyboard-open .app-content,

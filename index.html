@@ -617,6 +617,9 @@
                         <button type="button" id="btnToggleNdtStyleSize" class="mode-btn toolbar-size-toggle pc-only-chrome" title="핀·화살표·연결선 크기 조절 패널 표시" aria-pressed="false">
                             <i class="fa-solid fa-sliders"></i> 크기 <span class="toolbar-toggle-state">OFF</span>
                         </button>
+                        <button type="button" id="btnNdtUndoDispMark" class="mode-btn ndt-disp-undo-btn" hidden title="마지막 부동침하/부재변위 마킹 되돌리기">
+                            <i class="fa-solid fa-rotate-left"></i> 되돌리기
+                        </button>
                         <div class="filter-group">
                             <button type="button" id="btnOpenStyleColorModalNdt" class="chip"><i class="fa-solid fa-palette"></i> 스타일 설정</button>
                             <button type="button" class="chip" onclick="window.exportCurrentFloorNdtVectorPdf && window.exportCurrentFloorNdtVectorPdf()" title="PDF 원본 + NDT 마킹 벡터"><i class="fa-solid fa-file-pdf"></i> 벡터 PDF</button>
@@ -716,6 +719,10 @@
             <!-- 모바일 NDT 하단 액션 바 -->
             <div class="mobile-canvas-dock" id="mobileNdtDock">
                 <nav class="mobile-map-fab mobile-ndt-fab" id="mobileNdtFabBar" aria-label="모바일 비파괴 도면 액션">
+                    <button type="button" class="mobile-fab-btn ndt-disp-undo-btn" id="mobileNdtBtnUndoDisp" hidden title="마지막 부동침하/부재변위 마킹 되돌리기">
+                        <i class="fa-solid fa-rotate-left"></i>
+                        <span>되돌리기</span>
+                    </button>
                     <button type="button" class="mobile-fab-btn ndt-tilt-only-rotate" id="mobileNdtBtnRotateTilt" hidden title="선택한 기울기 박스 회전">
                         <i class="fa-solid fa-rotate"></i>
                         <span>회전</span>
