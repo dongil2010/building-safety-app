@@ -2788,13 +2788,61 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!defect.groupId) {
             defect.groupId = defect.id;
             defect.groupNo = stripDefectNoSuffix(defect.no || formatDefectNoSeq(1));
-            if (!/-\d+$/.test(String(defect.no || ''))) {
-                defect.no = `${defect.groupNo}-1`;
-            }
+            // 멤버가 1개일 때는 접미사 없음. 2개 이상일 때만 -1,-2 (normalizeDefectGroupNos)
+            defect.no = defect.groupNo;
         } else if (!defect.groupNo) {
             defect.groupNo = stripDefectNoSuffix(defect.no || '');
         }
         return defect;
+    }
+
+    /** 그룹 멤버 번호: 1개면 N, 마킹만 여러 개면 N-1…, 결함표 추가(surveyExtra)는 본번호 유지 후 -1부터 */
+    function normalizeDefectGroupNos(defects, groupId) {
+        if (!Array.isArray(defects) || !groupId) return;
+        const members = defects.filter((d) => d && d.groupId === groupId);
+        if (!members.length) return;
+        const base = stripDefectNoSuffix(members[0].groupNo || members[0].no || formatDefectNoSeq(1));
+        members.forEach((m) => { m.groupNo = base; });
+        const marking = members.filter((m) => !m.surveyExtra);
+        const extras = members.filter((m) => m.surveyExtra);
+        if (marking.length <= 1 && extras.length === 0) {
+            if (marking[0]) marking[0].no = base;
+            return;
+        }
+        if (marking.length <= 1 && extras.length >= 1) {
+            // 도면/본 결함표는 N, 결함표 추가만 N-1, N-2…
+            if (marking[0]) marking[0].no = base;
+            extras.forEach((m, idx) => { m.no = `${base}-${idx + 1}`; });
+            return;
+        }
+        let i = 1;
+        marking.forEach((m) => { m.no = `${base}-${i++}`; });
+        extras.forEach((m) => { m.no = `${base}-${i++}`; });
+    }
+
+    function normalizeAllDefectGroupNos(defects) {
+        if (!Array.isArray(defects)) return;
+        const gids = new Set();
+        defects.forEach((d) => {
+            if (d && d.groupId) gids.add(d.groupId);
+        });
+        gids.forEach((gid) => normalizeDefectGroupNos(defects, gid));
+        // 그룹 없이 no만 N-1 인 고아 싱글톤도 접미사 제거
+        const byMain = new Map();
+        defects.forEach((d) => {
+            if (!d || d.groupId) return;
+            const p = parseDefectNoParts(d);
+            if (p.main === Number.MAX_SAFE_INTEGER) return;
+            if (!byMain.has(p.main)) byMain.set(p.main, []);
+            byMain.get(p.main).push(d);
+        });
+        byMain.forEach((list) => {
+            if (list.length !== 1) return;
+            const d = list[0];
+            if (parseDefectNoParts(d).suffix === 1) {
+                d.no = stripDefectNoSuffix(d.no);
+            }
+        });
     }
 
     function collapseSingletonDefectGroups(defects) {
@@ -2808,11 +2856,12 @@ document.addEventListener('DOMContentLoaded', () => {
         byG.forEach((members) => {
             if (members.length !== 1) return;
             const d = members[0];
-            d.no = d.groupNo || stripDefectNoSuffix(d.no);
+            d.no = stripDefectNoSuffix(d.groupNo || d.no);
             delete d.groupId;
             delete d.groupNo;
             delete d.surveyExtra;
         });
+        normalizeAllDefectGroupNos(defects);
     }
 
     /** 7자리 hex 고유 코드. 활성·삭제 tombstone 코드는 재사용하지 않음 */
@@ -2851,22 +2900,31 @@ document.addEventListener('DOMContentLoaded', () => {
 
         let seq = 0;
         const groupBase = new Map();
-        const groupMemberIdx = new Map();
+        const seenGroup = new Set();
 
         ordered.forEach((d) => {
             if (!d) return;
             const gid = d.groupId || null;
             if (gid) {
-                if (!groupBase.has(gid)) {
-                    seq += 1;
-                    groupBase.set(gid, seq);
-                    groupMemberIdx.set(gid, 1);
+                if (seenGroup.has(gid)) return;
+                seenGroup.add(gid);
+                seq += 1;
+                groupBase.set(gid, seq);
+                const baseStr = formatDefectNoSeq(seq);
+                const members = ordered.filter((m) => m && m.groupId === gid);
+                members.forEach((m) => { m.groupNo = baseStr; });
+                const marking = members.filter((m) => !m.surveyExtra);
+                const extras = members.filter((m) => m.surveyExtra);
+                if (marking.length <= 1 && extras.length === 0) {
+                    if (marking[0]) marking[0].no = baseStr;
+                } else if (marking.length <= 1 && extras.length >= 1) {
+                    if (marking[0]) marking[0].no = baseStr;
+                    extras.forEach((m, idx) => { m.no = `${baseStr}-${idx + 1}`; });
+                } else {
+                    let i = 1;
+                    marking.forEach((m) => { m.no = `${baseStr}-${i++}`; });
+                    extras.forEach((m) => { m.no = `${baseStr}-${i++}`; });
                 }
-                const base = groupBase.get(gid);
-                const mi = groupMemberIdx.get(gid);
-                d.groupNo = formatDefectNoSeq(base);
-                d.no = `${formatDefectNoSeq(base)}-${mi}`;
-                groupMemberIdx.set(gid, mi + 1);
             } else {
                 seq += 1;
                 d.no = formatDefectNoSeq(seq);
@@ -14488,6 +14546,18 @@ document.addEventListener('DOMContentLoaded', () => {
         return state.defects[key] || [];
     }
 
+    /** 마킹 추가 취소·모드 이탈 시: 템플릿 해제 + 싱글톤 그룹의 불필요 -1 정리 */
+    function clearDefectMarkingTemplate(options) {
+        const hadTemplate = !!window._defectMarkingTemplate;
+        window._defectMarkingTemplate = null;
+        if (options && options.keepGroup) return;
+        if (!hadTemplate && !(options && options.forceCollapse)) return;
+        if (!state.currentBuildingId || !state.currentFloor) return;
+        const key = `${state.currentBuildingId}_${state.currentFloor}`;
+        if (!state.defects[key]) return;
+        collapseSingletonDefectGroups(state.defects[key]);
+    }
+
     // 현재 선택된 조사 회차(연도_기간) 키 — 결함 등록 시점의 회차를 기록하는 데 사용
     function getCurrentSurveyRoundKey() {
         const year = document.getElementById('selectInspectionYear')?.value
@@ -22679,7 +22749,7 @@ document.addEventListener('DOMContentLoaded', () => {
         window._defectAutoApplyTimer = null;
         window._defectBulkEditIds = ids.slice();
         window._defectBulkChangedFields = new Set();
-        window._defectMarkingTemplate = null;
+        clearDefectMarkingTemplate({ keepGroup: true });
 
         hydrateBulkDefectForm(defects);
         renderDefectMarkingTimeline(null);
@@ -22727,7 +22797,7 @@ document.addEventListener('DOMContentLoaded', () => {
             flushDefectAutoApply();
         }
         window._defectPhotoHydrateToken = (window._defectPhotoHydrateToken || 0) + 1;
-        window._defectMarkingTemplate = null;
+        clearDefectMarkingTemplate();
         window._pendingPinCoords = null;
         window._pendingAreaRect = null;
         window._pendingPhotos = [];
@@ -23858,6 +23928,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 newDefect.groupNo = window._defectMarkingTemplate.groupNo;
             }
             state.defects[key].push(newDefect);
+            if (newDefect.groupId) {
+                normalizeDefectGroupNos(state.defects[key], newDefect.groupId);
+            }
             syncDefectPhotoRefs(newDefect, photosVal, window._pendingPrevRoundPhotos);
             savedDefect = newDefect;
             if (!pinId) {
@@ -24053,6 +24126,7 @@ document.addEventListener('DOMContentLoaded', () => {
         });
         if (lastIdx >= 0) state.defects[key].splice(lastIdx + 1, 0, copy);
         else state.defects[key].push(copy);
+        normalizeDefectGroupNos(state.defects[key], src.groupId);
         return copy;
     }
 
@@ -24104,16 +24178,18 @@ document.addEventListener('DOMContentLoaded', () => {
             closeDefectModal();
             if (saved) {
                 // 핀·영역 공통: 같은 번호칸에 화살표/영역 연결을 추가할 수 있게 그룹화
+                // 아직 멤버가 1개면 no는 본번호 유지( -1 붙이지 않음 ). 2번째 저장 시 normalize.
                 let nextChainIndex = 2;
                 if (!saved.groupId) {
                     saved.groupId = saved.id;
-                    saved.groupNo = saved.no;
-                    saved.no = `${saved.no}-1`;
+                    saved.groupNo = stripDefectNoSuffix(saved.no || formatDefectNoSeq(1));
+                    saved.no = saved.groupNo;
                     nextChainIndex = 2;
                 } else {
                     const key = `${state.currentBuildingId}_${state.currentFloor}`;
                     const memberCount = (state.defects[key] || []).filter(d => d.groupId === saved.groupId).length;
                     nextChainIndex = memberCount + 1;
+                    normalizeDefectGroupNos(state.defects[key], saved.groupId);
                 }
                 saveStateToLocalStorage();
                 drawCanvas();
@@ -24204,6 +24280,11 @@ document.addEventListener('DOMContentLoaded', () => {
         if (mode === 'PAN' && window._pendingMapRegisterDefectId) {
             window._pendingMapRegisterDefectId = null;
             if (typeof renderDefectListPanel === 'function') renderDefectListPanel();
+        }
+        // 마킹 추가 중 MARK/AREA를 벗어나면 싱글톤에 남은 -1 그룹을 정리
+        if (window._defectMarkingTemplate && mode !== 'MARK' && mode !== 'AREA') {
+            clearDefectMarkingTemplate();
+            saveStateToLocalStorage();
         }
         // 영역 모드를 벗어날 때: 그리던 다각형이 있으면 그 모양으로 저장 (점 취소 없음)
         if (mode !== 'AREA' && pendingAreaPoly && pendingAreaPoly.length) {
@@ -25761,6 +25842,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function renderSurveyTable() {
         if (!elements.surveyTableBody) return;
+        const floorKey = state.currentBuildingId && state.currentFloor
+            ? `${state.currentBuildingId}_${state.currentFloor}`
+            : null;
+        if (floorKey && state.defects[floorKey]) {
+            if (window._defectMarkingTemplate) normalizeAllDefectGroupNos(state.defects[floorKey]);
+            else collapseSingletonDefectGroups(state.defects[floorKey]);
+        }
         const rawDefects = getCurrentFloorDefects();
         const defects = getSurveyRowsForReport(rawDefects);
         if (elements.surveyFloorTitle) elements.surveyFloorTitle.textContent = state.currentFloor;
