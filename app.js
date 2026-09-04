@@ -7754,9 +7754,12 @@ document.addEventListener('DOMContentLoaded', () => {
             const pendingDefect = previewMeta.defect;
             const nextSeq = (currentDefects.length + 1);
             const nextSeqStr = nextSeq < 10 ? `0${nextSeq}` : `${nextSeq}`;
-            const liveNoStr = pendingDefect ? (pendingDefect.no || previewMeta.label) : (document.getElementById('defectNo')?.value || `NO.${nextSeqStr}`);
+            const liveNoStr = previewMeta.fromGroup
+                ? previewMeta.label
+                : (pendingDefect ? (pendingDefect.groupNo || pendingDefect.no || previewMeta.label) : (document.getElementById('defectNo')?.value || `NO.${nextSeqStr}`));
             drawPin(ctx, {
                 no: liveNoStr,
+                groupNo: previewMeta.fromGroup ? previewMeta.label : (pendingDefect?.groupNo || liveNoStr),
                 category: pendingDefect?.category || document.getElementById('defectCategory')?.value || '구조체',
                 defectType: pendingDefect?.defectType || getDefectComboValue(document.getElementById('defectType'), document.getElementById('defectTypeInput')) || '',
                 x: liveBoxImgX,
@@ -14815,10 +14818,45 @@ document.addEventListener('DOMContentLoaded', () => {
         window._defectMarkingTemplate = null;
         if (options && options.keepGroup) return;
         if (!hadTemplate && !(options && options.forceCollapse)) return;
+        // 다음 위치 커밋 전에는 원본이 아직 멤버 1개라서, 여기서 접으면 groupId가 날아간다
+        if (window._pendingMarkingGroup) return;
         if (!state.currentBuildingId || !state.currentFloor) return;
         const key = `${state.currentBuildingId}_${state.currentFloor}`;
         if (!state.defects[key]) return;
         collapseSingletonDefectGroups(state.defects[key]);
+    }
+
+    function snapshotMarkingGroupForCommit(tmpl) {
+        if (!tmpl || !tmpl.groupId) {
+            window._pendingMarkingGroup = null;
+            return null;
+        }
+        window._pendingMarkingGroup = {
+            groupId: tmpl.groupId,
+            groupNo: tmpl.groupNo,
+            boxX: tmpl.boxX,
+            boxY: tmpl.boxY
+        };
+        return window._pendingMarkingGroup;
+    }
+
+    function getActiveMarkingGroup() {
+        return window._pendingMarkingGroup || window._defectMarkingTemplate || null;
+    }
+
+    function applyMarkingGroupToNewDefect(newDefect) {
+        const grp = getActiveMarkingGroup();
+        if (!grp || !grp.groupId || !newDefect) return false;
+        newDefect.groupId = grp.groupId;
+        newDefect.groupNo = grp.groupNo;
+        if (Number.isFinite(grp.boxX)) newDefect.x = grp.boxX;
+        if (Number.isFinite(grp.boxY)) newDefect.y = grp.boxY;
+        return true;
+    }
+
+    function finishMarkingGroupCommit() {
+        window._pendingMarkingGroup = null;
+        clearDefectMarkingTemplate({ keepGroup: true });
     }
 
     // 현재 선택된 조사 회차(연도_기간) 키 — 결함 등록 시점의 회차를 기록하는 데 사용
@@ -17938,7 +17976,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 && typeof selectedDefectIds !== 'undefined'
                 && selectedDefectIds.has(t.memberId)
                 && shouldDrawMapSelectionChrome());
-            const lineColor = tipSelected ? '#f59e0b' : activeColor;
+            const lineColor = activeColor;
             const leaderAnchorOpts = { shape: shapeCfg.shape, scale };
             const anchor = getPinLeaderBoxAnchor(boxX, boxY, targetX, targetY, w, h, state.rotationAngle || 0, leaderAnchorOpts);
             const headLen = ((isBeingDragged || tipSelected) ? 13 : 10) * arrowScale;
@@ -21551,6 +21589,24 @@ document.addEventListener('DOMContentLoaded', () => {
                 return { label, scale, defect: pendingDefect };
             }
         }
+        const tmpl = window._defectMarkingTemplate;
+        if (tmpl && tmpl.groupId) {
+            const label = tmpl.groupNo || 'NO.01';
+            const scale = getStyleSize(getDefectStyleKey(tmpl.category || '구조체', tmpl.defectType || '')).pin;
+            return {
+                label,
+                scale,
+                defect: {
+                    no: label,
+                    groupNo: label,
+                    category: tmpl.category || '구조체',
+                    defectType: tmpl.defectType || ''
+                },
+                fromGroup: true,
+                boxX: tmpl.boxX,
+                boxY: tmpl.boxY
+            };
+        }
         const currentDefects = getCurrentFloorMapPlacedDefects();
         const nextSeq = currentDefects.length + 1;
         const nextSeqStr = nextSeq < 10 ? `0${nextSeq}` : `${nextSeq}`;
@@ -21561,8 +21617,15 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function syncLiveMarkBoxAboveTarget(targetX, targetY) {
-        const { label, scale } = getLiveMarkPinPreviewMeta();
-        const pos = computePinBoxAboveTarget(targetX, targetY, label, scale, state.ctx, 1);
+        const meta = getLiveMarkPinPreviewMeta();
+        if (meta.fromGroup && Number.isFinite(meta.boxX) && Number.isFinite(meta.boxY)) {
+            liveBoxImgX = meta.boxX;
+            liveBoxImgY = meta.boxY;
+            markPreviewTargetX = targetX;
+            markPreviewTargetY = targetY;
+            return;
+        }
+        const pos = computePinBoxAboveTarget(targetX, targetY, meta.label, meta.scale, state.ctx, 1);
         liveBoxImgX = pos.boxX;
         liveBoxImgY = pos.boxY;
         markPreviewTargetX = targetX;
@@ -21588,6 +21651,8 @@ document.addEventListener('DOMContentLoaded', () => {
         const no = document.getElementById('defectNo')?.value || `NO.${nextSeqStr}`;
         const forceArrowDir = document.getElementById('defectForceArrowDir')?.checked || false;
         const arrowOctant = ((parseInt(document.getElementById('defectArrowOctant')?.value || '0', 10) % 8) + 8) % 8;
+        const grp = getActiveMarkingGroup();
+        const pinNo = (grp && grp.groupNo) ? grp.groupNo : no;
 
         if (window._pendingAreaRect) {
             const r = window._pendingAreaRect;
@@ -21598,7 +21663,8 @@ document.addEventListener('DOMContentLoaded', () => {
             areaY1: r.y1,
             areaX2: r.x2,
             areaY2: r.y2,
-            no,
+            no: pinNo,
+            groupNo: pinNo,
             category,
             defectType: getDefectComboValue(document.getElementById('defectType'), document.getElementById('defectTypeInput')) || '',
             x: pending.x,
@@ -21614,7 +21680,8 @@ document.addEventListener('DOMContentLoaded', () => {
         const pending = window._pendingPinCoords;
         if (!pending) return;
         drawPin(ctx, {
-            no,
+            no: pinNo,
+            groupNo: pinNo,
             category,
             defectType: getDefectComboValue(document.getElementById('defectType'), document.getElementById('defectTypeInput')) || '',
             x: pending.x,
@@ -23369,6 +23436,9 @@ document.addEventListener('DOMContentLoaded', () => {
             const seqStr = seq < 10 ? `0${seq}` : `${seq}`;
             const defectNoStr = `NO.${seqStr}`;
 
+            // 커밋 전에 PAN으로 바뀌어도 groupId가 유지되도록 먼저 스냅샷
+            snapshotMarkingGroupForCommit(window._defectMarkingTemplate);
+
             // "마킹 추가"로 이어서 등록하는 경우, 직전 결함의 부재/종류/원인/규모를 그대로 이어받는다
             const tmpl = window._defectMarkingTemplate;
 
@@ -23440,10 +23510,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
                 window._pendingAreaRect = null;
                 // 마킹 추가 체인이면 박스 위치는 그룹의 공유 위치로 고정하고, 클릭한 지점은 화살표 끝(target)으로만 사용
-                const useGroupBox = !!(tmpl && tmpl.groupId);
+                const grp = getActiveMarkingGroup() || tmpl;
+                const useGroupBox = !!(grp && grp.groupId && Number.isFinite(grp.boxX) && Number.isFinite(grp.boxY));
                 window._pendingPinCoords = {
-                    x: useGroupBox ? tmpl.boxX : boxX,
-                    y: useGroupBox ? tmpl.boxY : boxY,
+                    x: useGroupBox ? grp.boxX : boxX,
+                    y: useGroupBox ? grp.boxY : boxY,
                     targetX: tX,
                     targetY: tY
                 };
@@ -24330,22 +24401,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (Number.isFinite(angRawNew) && Math.abs(angRawNew) > 0.01) {
                     rotateAreaDefect(newDefect, angRawNew);
                 }
-                // 같은 번호에 영역 추가(계속 마킹): 번호칸은 공유, 영역·연결선만 추가
-                if (window._defectMarkingTemplate && window._defectMarkingTemplate.groupId) {
-                    newDefect.groupId = window._defectMarkingTemplate.groupId;
-                    newDefect.groupNo = window._defectMarkingTemplate.groupNo;
-                    if (Number.isFinite(window._defectMarkingTemplate.boxX)) newDefect.x = window._defectMarkingTemplate.boxX;
-                    if (Number.isFinite(window._defectMarkingTemplate.boxY)) newDefect.y = window._defectMarkingTemplate.boxY;
-                }
-            } else if (window._defectMarkingTemplate && window._defectMarkingTemplate.groupId) {
-                // "마킹 추가" 체인의 연속 마킹 — 같은 그룹으로 묶어서 도면에는 화살표만 늘어나도록 표시
-                newDefect.groupId = window._defectMarkingTemplate.groupId;
-                newDefect.groupNo = window._defectMarkingTemplate.groupNo;
             }
+            const groupedNew = applyMarkingGroupToNewDefect(newDefect);
             state.defects[key].push(newDefect);
             if (newDefect.groupId) {
                 normalizeDefectGroupNos(state.defects[key], newDefect.groupId);
             }
+            if (groupedNew) finishMarkingGroupCommit();
             syncDefectPhotoRefs(newDefect, photosVal, window._pendingPrevRoundPhotos);
             savedDefect = newDefect;
             if (!pinId) {
@@ -24602,7 +24664,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     nextChainIndex = 2;
                 } else {
                     const key = `${state.currentBuildingId}_${state.currentFloor}`;
-                    const memberCount = (state.defects[key] || []).filter(d => d.groupId === saved.groupId).length;
+                    const memberCount = (state.defects[key] || []).filter(d => d.groupId === saved.groupId && !d.surveyExtra).length;
                     nextChainIndex = memberCount + 1;
                     normalizeDefectGroupNos(state.defects[key], saved.groupId);
                 }
@@ -24697,9 +24759,14 @@ document.addEventListener('DOMContentLoaded', () => {
             if (typeof renderDefectListPanel === 'function') renderDefectListPanel();
         }
         // 마킹 추가 중 MARK/AREA를 벗어나면 싱글톤에 남은 -1 그룹을 정리
+        // 다만 방금 찍은 다음 위치의 커밋이 남아 있으면 groupId를 유지한다
         if (window._defectMarkingTemplate && mode !== 'MARK' && mode !== 'AREA') {
-            clearDefectMarkingTemplate();
-            saveStateToLocalStorage();
+            if (window._pendingMarkingGroup) {
+                window._defectMarkingTemplate = null;
+            } else {
+                clearDefectMarkingTemplate();
+                saveStateToLocalStorage();
+            }
         }
         // 영역 모드를 벗어날 때: 그리던 다각형이 있으면 그 모양으로 저장 (점 취소 없음)
         if (mode !== 'AREA' && pendingAreaPoly && pendingAreaPoly.length) {
