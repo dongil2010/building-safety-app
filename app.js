@@ -2796,7 +2796,15 @@ document.addEventListener('DOMContentLoaded', () => {
         return defect;
     }
 
-    /** 그룹 멤버 번호: 1개면 N, 마킹만 여러 개면 N-1…, 결함표 추가(surveyExtra)는 본번호 유지 후 -1부터 */
+    /** 도면 마킹은 본번호 N, 결함표 추가만 N-1, N-2… (화살표 개수와 무관) */
+    function applyDefectGroupNumbering(members, base, assignNo) {
+        const marking = (members || []).filter((m) => m && !m.surveyExtra);
+        const extras = (members || []).filter((m) => m && m.surveyExtra);
+        marking.forEach((m) => assignNo(m, base));
+        extras.forEach((m, idx) => assignNo(m, `${base}-${idx + 1}`));
+    }
+
+    /** 그룹 멤버 번호: 마킹(화살표)은 본번호 N 유지, 결함표 추가만 N-1부터 */
     function normalizeDefectGroupNos(defects, groupId) {
         if (!Array.isArray(defects) || !groupId) return;
         const members = defects
@@ -2810,8 +2818,6 @@ document.addEventListener('DOMContentLoaded', () => {
             });
         if (!members.length) return;
         const base = stripDefectNoSuffix(members[0].groupNo || members[0].no || formatDefectNoSeq(1));
-        const marking = members.filter((m) => !m.surveyExtra);
-        const extras = members.filter((m) => m.surveyExtra);
         const assignNo = (m, nextNo) => {
             const prev = String(m.no || '');
             m.groupNo = base;
@@ -2821,19 +2827,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 m.updatedAt = Date.now();
             }
         };
-        if (marking.length <= 1 && extras.length === 0) {
-            if (marking[0]) assignNo(marking[0], base);
-            return;
-        }
-        if (marking.length <= 1 && extras.length >= 1) {
-            // 도면/본 결함표는 N, 결함표 추가만 N-1, N-2…
-            if (marking[0]) assignNo(marking[0], base);
-            extras.forEach((m, idx) => assignNo(m, `${base}-${idx + 1}`));
-            return;
-        }
-        let i = 1;
-        marking.forEach((m) => assignNo(m, `${base}-${i++}`));
-        extras.forEach((m) => assignNo(m, `${base}-${i++}`));
+        applyDefectGroupNumbering(members, base, assignNo);
     }
 
     function normalizeAllDefectGroupNos(defects) {
@@ -2937,18 +2931,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         return String(a.id || '').localeCompare(String(b.id || ''));
                     });
                 members.forEach((m) => { m.groupNo = baseStr; });
-                const marking = members.filter((m) => !m.surveyExtra);
-                const extras = members.filter((m) => m.surveyExtra);
-                if (marking.length <= 1 && extras.length === 0) {
-                    if (marking[0]) marking[0].no = baseStr;
-                } else if (marking.length <= 1 && extras.length >= 1) {
-                    if (marking[0]) marking[0].no = baseStr;
-                    extras.forEach((m, idx) => { m.no = `${baseStr}-${idx + 1}`; });
-                } else {
-                    let i = 1;
-                    marking.forEach((m) => { m.no = `${baseStr}-${i++}`; });
-                    extras.forEach((m) => { m.no = `${baseStr}-${i++}`; });
-                }
+                applyDefectGroupNumbering(members, baseStr, (m, nextNo) => { m.no = nextNo; });
             } else {
                 seq += 1;
                 d.no = formatDefectNoSeq(seq);
@@ -16243,8 +16226,21 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function formatDefectMemberChipLabel(d) {
-        const raw = String((d && (d.no || d.groupNo)) || '').replace(/^NO\.?\s*/i, '').trim();
-        return raw || '-';
+        if (!d) return '-';
+        if (d.surveyExtra) {
+            return String(d.no || d.groupNo || '').replace(/^NO\.?\s*/i, '').trim() || '-';
+        }
+        const base = String(d.groupNo || stripDefectNoSuffix(d.no) || d.no || '')
+            .replace(/^NO\.?\s*/i, '')
+            .trim();
+        if (d.groupId) {
+            const members = getDefectMarkingGroupMembers(d.groupId);
+            if (members.length > 1) {
+                const idx = members.findIndex((m) => m.id === d.id);
+                if (idx >= 0 && base) return `${base}-${idx + 1}`;
+            }
+        }
+        return base || '-';
     }
 
     /** 공유 NO.박스 클릭 시 x-1 → x-2 → x-3 순환 선택 */
@@ -23476,7 +23472,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const tmpl = window._defectMarkingTemplate;
 
             if (pinIdEl) pinIdEl.value = '';
-            if (noEl) noEl.value = (tmpl && tmpl.groupId) ? `${tmpl.groupNo}-${tmpl.chainIndex}` : defectNoStr;
+            if (noEl) noEl.value = (tmpl && tmpl.groupId) ? (tmpl.groupNo || defectNoStr) : defectNoStr;
             const defaultCat = (tmpl && tmpl.category) || '구조체';
             if (catEl) catEl.value = defaultCat;
             populateDefectComponentDropdown(defaultCat, tmpl ? (tmpl.component || '') : '');
@@ -24582,8 +24578,8 @@ document.addEventListener('DOMContentLoaded', () => {
         const key = `${state.currentBuildingId}_${state.currentFloor}`;
         if (!state.defects[key]) return null;
         ensureDefectMarkingGroup(src);
-        const members = state.defects[key].filter(d => d.groupId === src.groupId);
-        const nextSuffix = members.length + 1;
+        const extraCount = (state.defects[key] || []).filter((d) => d.groupId === src.groupId && d.surveyExtra).length;
+        const nextSuffix = extraCount + 1;
         const newId = generateDefectUniqueId(key);
         const copy = {
             id: newId,
@@ -25645,7 +25641,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // 보고서(PDF/HWPX)·화면 상태조사표 행 구성:
     // - "마킹 추가"(같은 번호 박스 + 화살표만 늘림) → 그룹을 한 행으로 합침 (도면과 동일)
-    // - "결함표 추가"(surveyExtra) → N-2, N-3 … 별도 행으로 유지
+    // - "결함표 추가"(surveyExtra) → N-1, N-2 … 별도 행으로 유지 (화살표 개수와 무관)
     // 표는 기본 15행, 결함표 추가분이 있으면 최대 17행까지 담고, 가능하면
     // 본번호가 15·30·45…에서 끝나도록 다음 표로 넘긴다.
     const SURVEY_REPORT_ROWS_BASE = 15;
@@ -33262,7 +33258,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 window.showToast('현재 층에 등록된 결함 데이터가 없습니다.', 'warning');
                 return;
             }
-            // 마킹 추가는 한 행, 결함표 추가(surveyExtra)만 N-2… 별도 행
+            // 마킹 추가는 한 행, 결함표 추가(surveyExtra)만 N-1… 별도 행
             const defects = getSurveyRowsForReport(rawDefects);
 
             const floorCode = window.state.currentFloor;
