@@ -4442,6 +4442,33 @@ html:not(.layout-desktop) .survey-inline-select {
     background: transparent;
 }
 
+#ndtDisplacementGroupEditModal .ndt-disp-edit-point-row {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+    width: 100%;
+}
+
+#ndtDisplacementGroupEditModal .ndt-disp-edit-point-label {
+    min-width: 4.6rem;
+    flex-shrink: 0;
+    font-weight: 800;
+    font-size: 0.88rem;
+    color: #2a2a2a;
+}
+
+#ndtDisplacementGroupEditModal .ndt-disp-edit-level-input {
+    flex: 1;
+    min-width: 0;
+    font-weight: 800;
+    color: #16a34a;
+}
+
+#ndtDisplacementGroupEditModal .ndt-disp-edit-point-list {
+    max-height: min(42vh, 320px);
+    overflow-y: auto;
+}
+
 #ndtDisplacementModal .ndt-standard-fields-stack,
 #ndtDisplacementGroupEditModal .ndt-standard-fields-stack {
     display: flex;

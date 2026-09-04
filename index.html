@@ -39,7 +39,7 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <meta name="apple-mobile-web-app-title" content="스마트 안전점검">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css">
-    <link rel="stylesheet" href="styles.css?v=20260904_092703">
+    <link rel="stylesheet" href="styles.css?v=20260904_093443">
     <!-- FontAwesome icons for clean engineering UI -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <!-- PDF 생성용: 페이지별로 직접 캡처해서 조립(큰 보고서에서 html2pdf 한방 렌더링이 캔버스 높이 한계로
@@ -1849,8 +1849,8 @@
                 </div>
 
                 <div class="form-group">
-                    <label class="form-label" id="lblNdtDispLevel">📊 레벨값 (mm) *</label>
-                    <input type="number" id="ndtDispLevel" class="form-control" step="0.1" placeholder="예: -3 또는 2.5" inputmode="decimal" style="font-weight: 800; color: #4ade80;">
+                    <label class="form-label" id="lblNdtDispLevel">📊 레벨값 (mm)</label>
+                    <input type="number" id="ndtDispLevel" class="form-control" step="0.1" placeholder="비워 두면 나중에 구역에서 일괄 입력" inputmode="decimal" style="font-weight: 800; color: #4ade80;">
                 </div>
             </div>
             <div class="modal-footer defect-drawer-footer" style="justify-content: space-between; flex-wrap: wrap; gap: 0.4rem;">
@@ -1904,12 +1904,16 @@
                     </label>
                 </div>
                 <div class="form-group">
-                    <label class="form-label">📊 측정 지점 목록</label>
-                    <div id="ndtDispEditPointList" class="option-manager-list"></div>
+                    <label class="form-label">📊 측정 지점 레벨</label>
+                    <div id="ndtDispEditPointListHint" class="ndt-disp-modal-hint" style="margin-bottom:0.5rem;">마킹한 지점 레벨을 한 창에서 입력·수정하세요.</div>
+                    <div id="ndtDispEditPointList" class="option-manager-list ndt-disp-edit-point-list"></div>
                 </div>
             </div>
             <div class="modal-footer defect-drawer-footer" style="justify-content: space-between; flex-wrap: wrap; gap: 0.4rem;">
-                <button type="button" class="btn btn-danger-outline" id="btnDeleteNdtDispGroup"><i class="fa-solid fa-trash"></i> 구역 삭제</button>
+                <div style="display:flex; gap:0.4rem; flex-wrap:wrap;">
+                    <button type="button" class="btn btn-danger-outline" id="btnDeleteNdtDispGroup"><i class="fa-solid fa-trash"></i> 구역 삭제</button>
+                    <button type="button" class="btn btn-outline" id="btnNdtDispStartNewZoneFromEdit" title="현재 구역을 끊고 새 측정 구역을 마킹합니다"><i class="fa-solid fa-layer-group"></i> 새 구역 마킹</button>
+                </div>
                 <div style="display:flex; gap:0.4rem; margin-left:auto;">
                     <button type="button" class="btn btn-outline" id="btnCloseNdtDispGroupEdit">닫기</button>
                     <button type="button" class="btn btn-primary" id="btnSaveNdtDispGroupEdit"><i class="fa-solid fa-check"></i> 저장</button>
@@ -2896,21 +2900,21 @@
     </div>
 
     <!-- Core → 탭 분류 → 기존 엔진(app.js) -->
-    <script src="js/core/state.js?v=20260904_092703"></script>
-    <script src="js/tabs/registry.js?v=20260904_092703"></script>
-    <script src="js/pdf-vector-bridge.js?v=20260904_092703"></script>
-    <script src="js/core/layout-mode.js?v=20260904_092703"></script>
-    <script src="js/core/mobile-keyboard.js?v=20260904_092703"></script>
-    <script src="js/tabs/home.js?v=20260904_092703"></script>
-    <script src="js/tabs/map.js?v=20260904_092703"></script>
-    <script src="js/tabs/survey.js?v=20260904_092703"></script>
-    <script src="js/tabs/ndt.js?v=20260904_092703"></script>
-    <script src="js/shared/report.js?v=20260904_092703"></script>
-    <script src="js/shared/hwpx-import.js?v=20260904_092703"></script>
-    <script src="js/shared/auth.js?v=20260904_092703"></script>
-    <script src="app.js?v=20260904_092703"></script>
+    <script src="js/core/state.js?v=20260904_093443"></script>
+    <script src="js/tabs/registry.js?v=20260904_093443"></script>
+    <script src="js/pdf-vector-bridge.js?v=20260904_093443"></script>
+    <script src="js/core/layout-mode.js?v=20260904_093443"></script>
+    <script src="js/core/mobile-keyboard.js?v=20260904_093443"></script>
+    <script src="js/tabs/home.js?v=20260904_093443"></script>
+    <script src="js/tabs/map.js?v=20260904_093443"></script>
+    <script src="js/tabs/survey.js?v=20260904_093443"></script>
+    <script src="js/tabs/ndt.js?v=20260904_093443"></script>
+    <script src="js/shared/report.js?v=20260904_093443"></script>
+    <script src="js/shared/hwpx-import.js?v=20260904_093443"></script>
+    <script src="js/shared/auth.js?v=20260904_093443"></script>
+    <script src="app.js?v=20260904_093443"></script>
     <script>
-        window.BSA_APP_VERSION = '20260904_092703';
+        window.BSA_APP_VERSION = '20260904_093443';
         (function () {
             var el = document.getElementById('appVersionText');
             if (el && window.BSA_APP_VERSION) el.textContent = 'v' + window.BSA_APP_VERSION;
@@ -2934,7 +2938,7 @@
                     native = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
                 } catch (e) {}
                 if (native) return;
-                navigator.serviceWorker.register('./sw.js?v=20260904_092703')
+                navigator.serviceWorker.register('./sw.js?v=20260904_093443')
                     .then(function(registration) {
                         console.log('✅ ServiceWorker Registered Successfully with scope:', registration.scope);
                         registration.update();

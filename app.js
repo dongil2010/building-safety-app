@@ -9349,6 +9349,17 @@ document.addEventListener('DOMContentLoaded', () => {
         return { ratio, code };
     }
 
+    // 레벨 미입력(null/빈값) 허용 — 마크 우선 UX에서 먼저 지점만 찍고 나중에 일괄 입력
+    function isNdtDispLevelFilled(level) {
+        if (level === null || level === undefined || level === '') return false;
+        return Number.isFinite(Number(level));
+    }
+
+    function ndtDispGroupLevelsComplete(group) {
+        const pts = (group && group.points) || [];
+        return pts.length > 0 && pts.every((p) => isNdtDispLevelFilled(p.level));
+    }
+
     // 그룹(부동침하 또는 부재처짐) 변위량/처짐량 및 안전등급 연산.
     // group.points[].level은 cm 단위로 입력받는다(화면 입력칸 라벨은 "mm"로 잘못 표시돼 있지만
     // 실제 현장 입력 관행은 cm) — calcTiltGrade/calcMemberDispGrade는 delta를 mm로 받으므로
@@ -9356,37 +9367,112 @@ document.addEventListener('DOMContentLoaded', () => {
     // cm 값 그대로 둔다(호출부에서 "cm" 단위로 그대로 출력).
     function calcGroupDisplacement(group) {
         const points = group.points || [];
-        if (points.length === 0) return { delta: 0, absDelta: 0, tiltRatio: '1/750', grade: 'a등급' };
+        if (points.length === 0) {
+            return { delta: 0, absDelta: 0, tiltRatio: '-', grade: '', incomplete: true };
+        }
+        if (!ndtDispGroupLevelsComplete(group) || !(Number(group.measureLength) > 0)) {
+            return { delta: 0, absDelta: 0, tiltRatio: '-', grade: '', incomplete: true };
+        }
 
         const isMemberDisp = group.category === '부재변위';
         const lengthMm = (group.measureLength || 0) * 1000;
+        const lv = (p) => Number(p.level);
 
         if (isMemberDisp) {
             let delta = 0;
             if (points.length >= 3) {
-                const first = points[0].level;
-                const last = points[points.length - 1].level;
+                const first = lv(points[0]);
+                const last = lv(points[points.length - 1]);
                 const midIdx = Math.floor(points.length / 2);
-                const mid = points[midIdx].level;
+                const mid = lv(points[midIdx]);
                 const endAvg = (first + last) / 2.0;
                 delta = endAvg - mid;
             } else if (points.length === 2) {
-                delta = points[0].level - points[1].level;
+                delta = lv(points[0]) - lv(points[1]);
             } else {
-                delta = points[0].level;
+                delta = lv(points[0]);
             }
             const absDelta = Math.abs(delta);
             const calc = calcMemberDispGrade(lengthMm, absDelta * 10, group.hasMinorDamage);
-            return { delta, absDelta, tiltRatio: calc.tiltRatio, grade: calc.grade };
+            return { delta, absDelta, tiltRatio: calc.tiltRatio, grade: calc.grade, incomplete: false };
         } else {
             const first = points[0];
             const last = points[points.length - 1];
-            const delta = (first && last) ? (first.level - last.level) : 0;
+            const delta = (first && last) ? (lv(first) - lv(last)) : 0;
             const absDelta = Math.abs(delta);
             const calc = calcTiltGrade(lengthMm, absDelta * 10);
-            return { delta, absDelta, tiltRatio: calc.tiltRatio, grade: calc.grade };
+            return { delta, absDelta, tiltRatio: calc.tiltRatio, grade: calc.grade, incomplete: false };
         }
     }
+
+    function formatDispCalcForExport(calc) {
+        if (!calc || calc.incomplete) {
+            return { delta: '-', deltaCm: '-', tiltRatio: '-', grade: '미입력' };
+        }
+        return {
+            delta: calc.delta.toFixed(1),
+            deltaCm: `${calc.delta.toFixed(1)}cm`,
+            tiltRatio: calc.tiltRatio || '-',
+            grade: calc.grade || '-'
+        };
+    }
+
+    /** MARK 모드: 모달 없이 측정 지점을 즉시 배치 (레벨은 나중에 구역 편집에서 일괄 입력) */
+    function placeNdtDisplacementMarkAt(imgX, imgY) {
+        if (!state.currentBuildingId) {
+            window.showToast('건물을 먼저 선택해 주세요.', 'warning');
+            return null;
+        }
+        const key = `${state.currentBuildingId}_${state.currentFloor}`;
+        if (!state.ndtDisplacementGroups) state.ndtDisplacementGroups = {};
+        if (!state.ndtDisplacementGroups[key]) state.ndtDisplacementGroups[key] = [];
+        const groups = state.ndtDisplacementGroups[key];
+        const cat = currentNdtCategory === '부재변위' ? '부재변위' : '변위';
+
+        let group = getActiveNdtDispGroup();
+        if (group) {
+            const gCat = group.category || '변위';
+            if (gCat !== cat) {
+                group = null;
+                setActiveNdtDispGroup(null);
+            }
+        }
+
+        const point = { id: `ndtp_${Date.now()}`, x: imgX, y: imgY, level: null };
+
+        if (group) {
+            group.points.push(point);
+            setActiveNdtDispGroup(group);
+            saveStateToLocalStorage();
+            drawNdtCanvas();
+            renderNdtSummaryTable();
+            const seq = formatNdtDisplacementPointLabel(group.points.length);
+            window.showToast(`${group.groupNo} ${seq} 마킹 · NO.박스 탭으로 레벨 일괄 입력`, 'success', 2600);
+            return { group, point };
+        }
+
+        const color = NDT_DISPLACEMENT_COLORS[groups.length % NDT_DISPLACEMENT_COLORS.length];
+        group = {
+            id: `ndtg_${Date.now()}`,
+            category: cat,
+            groupNo: nextDisplacementGroupNo(cat),
+            locationType: '보',
+            measureLength: null,
+            hasMinorDamage: false,
+            color,
+            boxX: imgX - 40,
+            boxY: imgY - 50,
+            points: [point]
+        };
+        groups.push(group);
+        setActiveNdtDispGroup(group);
+        saveStateToLocalStorage();
+        drawNdtCanvas();
+        renderNdtSummaryTable();
+        window.showToast(`${group.groupNo} 구역 시작 · 계속 마킹 후 NO.박스를 눌러 위치·길이·레벨 입력`, 'info', 3600);
+        return { group, point };
+    }
+    window.placeNdtDisplacementMarkAt = placeNdtDisplacementMarkAt;
 
     // 수직변위/부재변위 그룹의 라벨 박스/포인트 원 히트테스트
     function findNdtDisplacementHit(vx, vy) {
@@ -10316,7 +10402,15 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
-        const levels = points.map(p => p.level);
+        if (!ndtDispGroupLevelsComplete(group)) {
+            ctx.textAlign = 'center';
+            ctx.font = '16px sans-serif';
+            ctx.fillStyle = '#a3a3a3';
+            ctx.fillText('레벨이 미입력된 지점이 있습니다.', cw / 2, yOffset + ch / 2);
+            return;
+        }
+
+        const levels = points.map(p => Number(p.level));
         let minL = Math.min(...levels, 0);
         let maxL = Math.max(...levels, 0);
         if (minL === maxL) { minL -= 1; maxL += 1; }
@@ -10584,6 +10678,11 @@ document.addEventListener('DOMContentLoaded', () => {
     window.showNdtDisplacementChart = function(groupId) {
         const group = getCurrentFloorDisplacementGroups().find(g => g.id === groupId);
         if (!group) return;
+        if (!ndtDispGroupLevelsComplete(group) || !(Number(group.measureLength) > 0)) {
+            window.showToast('위치·측정길이·모든 지점 레벨을 입력한 뒤 그래프를 확인하세요. NO.박스를 눌러 일괄 입력할 수 있습니다.', 'warning', 3800);
+            openNdtDisplacementGroupEditModal(group);
+            return;
+        }
         const dataUrl = renderNdtDisplacementChartDataUrl(group, state.currentFloor);
         if (!dataUrl) {
             window.showToast('그래프를 생성할 수 없습니다.', 'error');
@@ -10914,7 +11013,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 } else {
                     setActiveNdtDispGroup(hit.group);
                     openNdtDisplacementGroupEditModal(hit.group);
-                    window.showToast(`${hit.group.groupNo} 구역 활성 · 마킹 시 지점 번호가 이 구역에서 이어집니다`, 'info', 2800);
+                    window.showToast(`${hit.group.groupNo} 구역 · 레벨·길이를 입력하세요 (마킹 시 지점 번호 이어짐)`, 'info', 2800);
                 }
                 return;
             }
@@ -10931,7 +11030,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (isNdtDisplacementMarking) {
                 isNdtDisplacementMarking = false;
                 const coords = window._ndtDispMarkCoords || { x: 100, y: 100 };
-                openNdtDisplacementModal(coords.x, coords.y);
+                placeNdtDisplacementMarkAt(coords.x, coords.y);
             }
             if (isDraggingNdtPinGroup) {
                 isDraggingNdtPinGroup = false;
@@ -11430,7 +11529,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 } else {
                     setActiveNdtDispGroup(hit.group);
                     openNdtDisplacementGroupEditModal(hit.group);
-                    window.showToast(`${hit.group.groupNo} 구역 활성 · 마킹 시 지점 번호가 이 구역에서 이어집니다`, 'info', 2800);
+                    window.showToast(`${hit.group.groupNo} 구역 · 레벨·길이를 입력하세요 (마킹 시 지점 번호 이어짐)`, 'info', 2800);
                 }
                 return;
             }
@@ -11445,7 +11544,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (isNdtDisplacementMarking) {
                 isNdtDisplacementMarking = false;
                 const coords = window._ndtDispMarkCoords || { x: 100, y: 100 };
-                openNdtDisplacementModal(coords.x, coords.y);
+                placeNdtDisplacementMarkAt(coords.x, coords.y);
             }
             if (isDraggingNdtPinGroup) {
                 isDraggingNdtPinGroup = false;
@@ -11813,14 +11912,20 @@ document.addEventListener('DOMContentLoaded', () => {
 
         tbody.innerHTML = groups.map(group => {
             const calc = calcGroupDisplacement(group);
+            const lenText = (Number(group.measureLength) > 0) ? group.measureLength : '—';
+            const deltaText = calc.incomplete ? '미입력' : calc.delta.toFixed(1);
+            const ratioText = calc.incomplete ? '—' : calc.tiltRatio;
+            const gradeHtml = calc.incomplete
+                ? '<span style="color:#a3a3a3; font-weight:700;">미입력</span>'
+                : (NDT_GRADE_BADGES[calc.grade] || '—');
             return `
                 <tr>
                     <td style="font-weight:800; color:${group.color || getStyleColor(isMemberDisp ? 'ndtMemberDisp' : 'ndtSettlement')};">${group.groupNo}</td>
-                    <td style="font-weight:700;">${group.locationType} (${group.points.length}개 지점)</td>
-                    <td style="font-weight:700; color:#6b6b6b;">${group.measureLength}</td>
-                    <td style="font-weight:800; color:#f8fafc;">${calc.delta.toFixed(1)}</td>
-                    <td style="font-weight:800; color:#c084fc;">${calc.tiltRatio}</td>
-                    <td>${NDT_GRADE_BADGES[calc.grade] || NDT_GRADE_BADGES['a등급']}</td>
+                    <td style="font-weight:700;">${group.locationType || '보'} (${group.points.length}개 지점)</td>
+                    <td style="font-weight:700; color:#6b6b6b;">${lenText}</td>
+                    <td style="font-weight:800; color:#f8fafc;">${deltaText}</td>
+                    <td style="font-weight:800; color:#c084fc;">${ratioText}</td>
+                    <td>${gradeHtml}</td>
                     <td class="ndt-row-actions ndt-row-actions-wide">
                         <button type="button" class="btn btn-sm btn-outline" onclick="window.showNdtDisplacementChart('${group.id}')">그래프</button>
                         <button type="button" class="btn btn-sm btn-outline ndt-btn-edit" onclick="window.editNdtDisplacementGroup('${group.id}')">수정</button>
@@ -11918,8 +12023,9 @@ document.addEventListener('DOMContentLoaded', () => {
             csvContent += "조사번호,조사항목,측정위치,측정길이(m),변위/처짐량(mm),비율(1/L),안전등급\n";
             dispGroups.forEach(group => {
                 const calc = calcGroupDisplacement(group);
+                const fmt = formatDispCalcForExport(calc);
                 const catLabel = group.category === '부재변위' ? '부재처짐' : '부동침하 기울기';
-                csvContent += `"${group.groupNo}","${catLabel}","${group.locationType}","${group.measureLength}","${calc.delta.toFixed(1)}","${calc.tiltRatio}","${calc.grade}"\n`;
+                csvContent += `"${group.groupNo}","${catLabel}","${group.locationType || ''}","${group.measureLength ?? ''}","${fmt.delta}","${fmt.tiltRatio}","${fmt.grade}"\n`;
             });
         }
 
@@ -13755,10 +13861,10 @@ document.addEventListener('DOMContentLoaded', () => {
             hintEl.textContent = `${existingGroup.groupNo} 구역 - ${formatNdtDisplacementPointLabel(idx + 1)} 지점${ptRole} 수정`;
             infoBlock.style.display = 'none';
             if (damageRow) damageRow.style.display = 'none';
-            levelEl.value = existingPoint.level;
+            levelEl.value = isNdtDispLevelFilled(existingPoint.level) ? existingPoint.level : '';
             btnDelete.style.display = '';
             if (btnAddAnother) btnAddAnother.style.display = 'none';
-            if (btnNewZone) btnNewZone.style.display = 'none';
+            if (btnNewZone) btnNewZone.style.display = '';
         } else if (continueGroup || tmpl) {
             const group = continueGroup || getCurrentFloorDisplacementGroups(cat).find(g => g.id === tmpl.groupId);
             if (!group) {
@@ -13846,9 +13952,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const groupId = document.getElementById('ndtDispGroupId').value;
         const pointId = document.getElementById('ndtDispPointId').value;
-        const level = parseFloat(document.getElementById('ndtDispLevel').value);
-        if (isNaN(level)) {
-            window.showToast('레벨값을 입력해 주세요.', 'warning');
+        const levelRaw = document.getElementById('ndtDispLevel').value;
+        const level = (levelRaw === '' || levelRaw === null || levelRaw === undefined)
+            ? null
+            : parseFloat(levelRaw);
+        if (levelRaw !== '' && levelRaw != null && isNaN(level)) {
+            window.showToast('레벨값을 확인해 주세요.', 'warning');
             return null;
         }
         const coords = window._pendingNdtDispCoords || { x: 100, y: 100 };
@@ -13872,11 +13981,12 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         const locationType = document.getElementById('ndtDispLocationType').value || '보';
-        const measureLength = parseFloat(document.getElementById('ndtDispMeasureLength').value);
-        if (!measureLength || measureLength <= 0) {
-            window.showToast('측정길이를 입력해 주세요.', 'warning');
-            return null;
-        }
+        const measureLengthRaw = document.getElementById('ndtDispMeasureLength').value;
+        const measureLength = parseFloat(measureLengthRaw);
+        // 모달로 새 구역을 만들 때는 길이 권장 — 비어 있으면 null로 두고 구역 편집에서 채움
+        const resolvedLength = (!measureLengthRaw || isNaN(measureLength) || measureLength <= 0)
+            ? null
+            : measureLength;
         const cat = currentNdtCategory === '부재변위' ? '부재변위' : '변위';
         const hasMinorDamage = cat === '부재변위' && !!document.getElementById('ndtDispHasMinorDamage')?.checked;
         const color = NDT_DISPLACEMENT_COLORS[groups.length % NDT_DISPLACEMENT_COLORS.length];
@@ -13886,7 +13996,7 @@ document.addEventListener('DOMContentLoaded', () => {
             category: cat,
             groupNo: nextDisplacementGroupNo(cat),
             locationType,
-            measureLength,
+            measureLength: resolvedLength,
             hasMinorDamage,
             color,
             boxX: coords.x - 40,
@@ -13901,8 +14011,9 @@ document.addEventListener('DOMContentLoaded', () => {
     function openNdtDisplacementGroupEditModal(group) {
         document.getElementById('ndtDispEditGroupId').value = group.id;
         document.getElementById('ndtDispGroupEditTitle').textContent = `${group.groupNo} 측정 구역 정보`;
-        document.getElementById('ndtDispEditLocationType').value = group.locationType;
-        document.getElementById('ndtDispEditMeasureLength').value = group.measureLength;
+        document.getElementById('ndtDispEditLocationType').value = group.locationType || '보';
+        const lenEl = document.getElementById('ndtDispEditMeasureLength');
+        if (lenEl) lenEl.value = (group.measureLength != null && group.measureLength !== '') ? group.measureLength : '';
         const colorEl = document.getElementById('ndtDispEditColor');
         if (colorEl) colorEl.value = group.color || getStyleColor(group.category === '부재변위' ? 'ndtMemberDisp' : 'ndtSettlement');
         const damageRow = document.getElementById('ndtDispEditMinorDamageRow');
@@ -13910,6 +14021,10 @@ document.addEventListener('DOMContentLoaded', () => {
         const isMemberDisp = group.category === '부재변위';
         if (damageRow) damageRow.style.display = isMemberDisp ? '' : 'none';
         if (damageEl) damageEl.checked = !!group.hasMinorDamage;
+        const hintEl = document.getElementById('ndtDispEditPointListHint');
+        if (hintEl) {
+            hintEl.textContent = '마킹한 지점 레벨을 한 창에서 입력·수정한 뒤 저장하세요. (위치·측정길이도 함께)';
+        }
         renderNdtDispGroupPointList(group);
         refreshNdtDispLocationChips('ndtDispEditLocationType', 'ndtDispEditLocationChips');
         const modal = document.getElementById('ndtDisplacementGroupEditModal');
@@ -13917,7 +14032,12 @@ document.addEventListener('DOMContentLoaded', () => {
         modal.style.display = 'flex';
         modal.classList.add('open');
         syncNdtDrawerToCanvasArea('ndtDisplacementGroupEditModal');
-        requestAnimationFrame(() => syncNdtDrawerToCanvasArea('ndtDisplacementGroupEditModal'));
+        requestAnimationFrame(() => {
+            syncNdtDrawerToCanvasArea('ndtDisplacementGroupEditModal');
+            const firstEmpty = modal.querySelector('.ndt-disp-edit-level-input:not([value]), .ndt-disp-edit-level-input[value=""]')
+                || modal.querySelector('.ndt-disp-edit-level-input');
+            if (firstEmpty) firstEmpty.focus();
+        });
     }
 
     function closeNdtDisplacementGroupEditModal() {
@@ -13941,12 +14061,25 @@ document.addEventListener('DOMContentLoaded', () => {
     function renderNdtDispGroupPointList(group) {
         const container = document.getElementById('ndtDispEditPointList');
         if (!container) return;
-        container.innerHTML = group.points.map((p, idx) => `
-            <div class="option-manager-item">
-                <span>${formatNdtDisplacementPointLabel(idx + 1)}: ${p.level}mm</span>
-                <button type="button" class="option-manager-item-delete" onclick="window.deleteNdtDisplacementPoint('${group.id}','${p.id}')"><i class="fa-solid fa-trash"></i></button>
-            </div>
-        `).join('') || '<div style="color:#a3a3a3; font-size:0.85rem; padding:0.5rem;">측정 지점이 없습니다.</div>';
+        const isMemberDisp = group.category === '부재변위';
+        if (!group.points || group.points.length === 0) {
+            container.innerHTML = '<div style="color:#a3a3a3; font-size:0.85rem; padding:0.5rem;">측정 지점이 없습니다. MARK 모드로 도면을 클릭해 지점을 추가하세요.</div>';
+            return;
+        }
+        container.innerHTML = group.points.map((p, idx) => {
+            const role = isMemberDisp
+                ? (idx === 0 ? ' 단부1' : (idx === group.points.length - 1 ? ' 단부2' : ' 중앙'))
+                : '';
+            const val = isNdtDispLevelFilled(p.level) ? p.level : '';
+            return `
+            <div class="option-manager-item ndt-disp-edit-point-row" data-point-id="${p.id}">
+                <span class="ndt-disp-edit-point-label">${formatNdtDisplacementPointLabel(idx + 1)}${role}</span>
+                <input type="number" class="form-control ndt-disp-edit-level-input" data-point-id="${p.id}"
+                    step="0.1" placeholder="레벨" value="${val}" inputmode="decimal" aria-label="${formatNdtDisplacementPointLabel(idx + 1)} 레벨">
+                <button type="button" class="option-manager-item-delete" title="지점 삭제"
+                    onclick="window.deleteNdtDisplacementPoint('${group.id}','${p.id}')"><i class="fa-solid fa-trash"></i></button>
+            </div>`;
+        }).join('');
     }
 
     window.deleteNdtDisplacementPoint = function(groupId, pointId, options) {
@@ -14010,9 +14143,9 @@ document.addEventListener('DOMContentLoaded', () => {
         const btnNewZone = document.getElementById('btnStartNewNdtDispZone');
         if (btnNewZone) {
             btnNewZone.addEventListener('click', () => {
-                const coords = window._pendingNdtDispCoords || { x: 100, y: 100 };
                 setActiveNdtDispGroup(null);
-                openNdtDisplacementModal(coords.x, coords.y, null, null);
+                closeNdtDisplacementModal();
+                window.showToast('새 구역 마킹 모드 · 도면을 클릭하면 새 NO. 구역이 시작됩니다', 'info', 3200);
             });
         }
 
@@ -14047,6 +14180,27 @@ document.addEventListener('DOMContentLoaded', () => {
                     window.showToast('측정길이를 입력해 주세요.', 'warning');
                     return;
                 }
+                const levelInputs = document.querySelectorAll('#ndtDispEditPointList .ndt-disp-edit-level-input');
+                let badLevel = false;
+                levelInputs.forEach((inp) => {
+                    const pt = group.points.find((p) => p.id === inp.dataset.pointId);
+                    if (!pt) return;
+                    const raw = inp.value;
+                    if (raw === '' || raw == null) {
+                        pt.level = null;
+                        return;
+                    }
+                    const v = parseFloat(raw);
+                    if (isNaN(v)) {
+                        badLevel = true;
+                        return;
+                    }
+                    pt.level = v;
+                });
+                if (badLevel) {
+                    window.showToast('레벨값 형식을 확인해 주세요.', 'warning');
+                    return;
+                }
                 group.locationType = document.getElementById('ndtDispEditLocationType').value || '보';
                 group.measureLength = len;
                 const colorVal = document.getElementById('ndtDispEditColor')?.value;
@@ -14059,7 +14213,23 @@ document.addEventListener('DOMContentLoaded', () => {
                 drawNdtCanvas();
                 renderNdtSummaryTable();
                 closeNdtDisplacementGroupEditModal();
-                window.showToast(`${group.groupNo} 구역이 활성입니다. 마킹하면 지점 번호가 이어집니다.`, 'info', 3000);
+                const missing = !ndtDispGroupLevelsComplete(group);
+                window.showToast(
+                    missing
+                        ? `${group.groupNo} 저장 · 미입력 레벨이 있습니다. 마킹을 이어가거나 다시 수정하세요`
+                        : `${group.groupNo} 구역 저장 · 마킹하면 지점 번호가 이어집니다`,
+                    missing ? 'warning' : 'success',
+                    3200
+                );
+            });
+        }
+
+        const btnNewZoneFromEdit = document.getElementById('btnNdtDispStartNewZoneFromEdit');
+        if (btnNewZoneFromEdit) {
+            btnNewZoneFromEdit.addEventListener('click', () => {
+                setActiveNdtDispGroup(null);
+                closeNdtDisplacementGroupEditModal();
+                window.showToast('새 구역 마킹 모드 · 도면을 클릭하면 새 NO. 구역이 시작됩니다', 'info', 3200);
             });
         }
 
@@ -27339,15 +27509,16 @@ document.addEventListener('DOMContentLoaded', () => {
                                 <tbody>
                                     ${settlementGroups.map(group => {
                                         const calc = calcGroupDisplacement(group);
-                                        const gradeColor = calc.grade === 'a등급' ? '#16a34a' : (calc.grade === 'b등급' ? '#2a2a2a' : (calc.grade === 'c등급' ? '#ca8a04' : '#dc2626'));
+                                        const fmt = formatDispCalcForExport(calc);
+                                        const gradeColor = calc.incomplete ? '#64748b' : (calc.grade === 'a등급' ? '#16a34a' : (calc.grade === 'b등급' ? '#2a2a2a' : (calc.grade === 'c등급' ? '#ca8a04' : '#dc2626')));
                                         return `
                                         <tr>
                                             <td style="padding:0.4rem 0.3rem; border:1px solid #e2e8f0; font-weight:800; color:#2a2a2a;">${group.groupNo}</td>
-                                            <td style="padding:0.4rem 0.3rem; border:1px solid #e2e8f0; font-weight:700;">${group.locationType} (${group.points.length}개 지점)</td>
-                                            <td style="padding:0.4rem 0.3rem; border:1px solid #e2e8f0; font-weight:700; color:#2a2a2a;">${group.measureLength}</td>
-                                            <td style="padding:0.4rem 0.3rem; border:1px solid #e2e8f0; font-weight:800; color:#16a34a;">${calc.delta.toFixed(1)}</td>
-                                            <td style="padding:0.4rem 0.3rem; border:1px solid #e2e8f0; font-weight:800; color:#9333ea;">${calc.tiltRatio}</td>
-                                            <td style="padding:0.4rem 0.3rem; border:1px solid #e2e8f0; font-weight:800; color:${gradeColor};">${calc.grade}</td>
+                                            <td style="padding:0.4rem 0.3rem; border:1px solid #e2e8f0; font-weight:700;">${group.locationType || '보'} (${group.points.length}개 지점)</td>
+                                            <td style="padding:0.4rem 0.3rem; border:1px solid #e2e8f0; font-weight:700; color:#2a2a2a;">${group.measureLength || '—'}</td>
+                                            <td style="padding:0.4rem 0.3rem; border:1px solid #e2e8f0; font-weight:800; color:#16a34a;">${fmt.delta}</td>
+                                            <td style="padding:0.4rem 0.3rem; border:1px solid #e2e8f0; font-weight:800; color:#9333ea;">${fmt.tiltRatio}</td>
+                                            <td style="padding:0.4rem 0.3rem; border:1px solid #e2e8f0; font-weight:800; color:${gradeColor};">${fmt.grade}</td>
                                         </tr>
                                     `;}).join('')}
                                 </tbody>
@@ -27440,15 +27611,16 @@ document.addEventListener('DOMContentLoaded', () => {
                                 <tbody>
                                     ${memberDispGroups.map(group => {
                                         const calc = calcGroupDisplacement(group);
-                                        const gradeColor = calc.grade === 'a등급' ? '#16a34a' : (calc.grade === 'b등급' ? '#2a2a2a' : (calc.grade === 'c등급' ? '#ca8a04' : '#dc2626'));
+                                        const fmt = formatDispCalcForExport(calc);
+                                        const gradeColor = calc.incomplete ? '#64748b' : (calc.grade === 'a등급' ? '#16a34a' : (calc.grade === 'b등급' ? '#2a2a2a' : (calc.grade === 'c등급' ? '#ca8a04' : '#dc2626')));
                                         return `
                                         <tr>
                                             <td style="padding:0.4rem 0.3rem; border:1px solid #e2e8f0; font-weight:800; color:#2a2a2a;">${group.groupNo}</td>
-                                            <td style="padding:0.4rem 0.3rem; border:1px solid #e2e8f0; font-weight:700;">${group.locationType} (${group.points.length}개 지점)</td>
-                                            <td style="padding:0.4rem 0.3rem; border:1px solid #e2e8f0; font-weight:700; color:#2a2a2a;">${group.measureLength}</td>
-                                            <td style="padding:0.4rem 0.3rem; border:1px solid #e2e8f0; font-weight:800; color:#16a34a;">${calc.delta.toFixed(1)}</td>
-                                            <td style="padding:0.4rem 0.3rem; border:1px solid #e2e8f0; font-weight:800; color:#9333ea;">${calc.tiltRatio}</td>
-                                            <td style="padding:0.4rem 0.3rem; border:1px solid #e2e8f0; font-weight:800; color:${gradeColor};">${calc.grade}</td>
+                                            <td style="padding:0.4rem 0.3rem; border:1px solid #e2e8f0; font-weight:700;">${group.locationType || '보'} (${group.points.length}개 지점)</td>
+                                            <td style="padding:0.4rem 0.3rem; border:1px solid #e2e8f0; font-weight:700; color:#2a2a2a;">${group.measureLength || '—'}</td>
+                                            <td style="padding:0.4rem 0.3rem; border:1px solid #e2e8f0; font-weight:800; color:#16a34a;">${fmt.delta}</td>
+                                            <td style="padding:0.4rem 0.3rem; border:1px solid #e2e8f0; font-weight:800; color:#9333ea;">${fmt.tiltRatio}</td>
+                                            <td style="padding:0.4rem 0.3rem; border:1px solid #e2e8f0; font-weight:800; color:${gradeColor};">${fmt.grade}</td>
                                         </tr>
                                     `;}).join('')}
                                 </tbody>
@@ -29275,8 +29447,9 @@ document.addEventListener('DOMContentLoaded', () => {
                         const tbl = findTblById(SETTLEMENT_TBL_ID, ['변  위  량', '기   존']);
                         if (tbl) fillNdtTable(tbl, SETTLEMENT_HEADER_ROWS, settlementGroupsHwpx.map((group, i) => {
                             const calc = calcGroupDisplacement(group);
+                            const fmt = formatDispCalcForExport(calc);
                             const lengthMmText = group.measureLength ? `${(group.measureLength * 1000).toLocaleString()}mm` : '-';
-                            return [i + 1, group.locationType || '-', lengthMmText, '-', `${calc.delta.toFixed(1)}cm`, calc.tiltRatio, calc.grade];
+                            return [i + 1, group.locationType || '-', lengthMmText, '-', fmt.deltaCm, fmt.tiltRatio, fmt.grade];
                         }), true);
                         // 2026-08-24: 결과표 밑에 그룹별 요약박스+꺾은선 그래프를 한 쌍씩 이어붙임(사용자 요청).
                         if (tbl) await insertGroupResultImages(tbl, settlementGroupsHwpx);
@@ -29288,8 +29461,9 @@ document.addEventListener('DOMContentLoaded', () => {
                         const tbl = findTblById(MEMBER_DISP_TBL_ID, ['처  짐  량', '기   존']);
                         if (tbl) fillNdtTable(tbl, MEMBER_DISP_HEADER_ROWS, memberDispGroupsHwpx.map((group, i) => {
                             const calc = calcGroupDisplacement(group);
+                            const fmt = formatDispCalcForExport(calc);
                             const lengthMmText = group.measureLength ? `${(group.measureLength * 1000).toLocaleString()}mm` : '-';
-                            return [i + 1, group.locationType || '-', lengthMmText, '-', `${calc.delta.toFixed(1)}cm`, calc.tiltRatio, calc.grade];
+                            return [i + 1, group.locationType || '-', lengthMmText, '-', fmt.deltaCm, fmt.tiltRatio, fmt.grade];
                         }), true);
                         if (tbl) await insertGroupResultImages(tbl, memberDispGroupsHwpx);
                     } else {
@@ -30981,8 +31155,9 @@ document.addEventListener('DOMContentLoaded', () => {
                         const tbl = findTblById(SETTLEMENT_TBL_ID, ['변  위  량', '기   존']);
                         if (tbl) fillNdtTable(tbl, SETTLEMENT_HEADER_ROWS, settlementGroupsHwpx.map((group, i) => {
                             const calc = calcGroupDisplacement(group);
+                            const fmt = formatDispCalcForExport(calc);
                             const lengthMmText = group.measureLength ? `${(group.measureLength * 1000).toLocaleString()}mm` : '-';
-                            return [i + 1, group.locationType || '-', lengthMmText, '-', `${calc.delta.toFixed(1)}cm`, calc.tiltRatio, calc.grade];
+                            return [i + 1, group.locationType || '-', lengthMmText, '-', fmt.deltaCm, fmt.tiltRatio, fmt.grade];
                         }), true);
                         // 2026-08-24: 결과표 밑에 그룹별 요약박스+꺾은선 그래프를 한 쌍씩 이어붙임(사용자 요청).
                         if (tbl) await insertGroupResultImages(tbl, settlementGroupsHwpx);
@@ -30994,8 +31169,9 @@ document.addEventListener('DOMContentLoaded', () => {
                         const tbl = findTblById(MEMBER_DISP_TBL_ID, ['처  짐  량', '기   존']);
                         if (tbl) fillNdtTable(tbl, MEMBER_DISP_HEADER_ROWS, memberDispGroupsHwpx.map((group, i) => {
                             const calc = calcGroupDisplacement(group);
+                            const fmt = formatDispCalcForExport(calc);
                             const lengthMmText = group.measureLength ? `${(group.measureLength * 1000).toLocaleString()}mm` : '-';
-                            return [i + 1, group.locationType || '-', lengthMmText, '-', `${calc.delta.toFixed(1)}cm`, calc.tiltRatio, calc.grade];
+                            return [i + 1, group.locationType || '-', lengthMmText, '-', fmt.deltaCm, fmt.tiltRatio, fmt.grade];
                         }), true);
                         if (tbl) await insertGroupResultImages(tbl, memberDispGroupsHwpx);
                     } else {
