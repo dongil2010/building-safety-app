@@ -1,0 +1,26 @@
+---
+description: Antigravity AI agent collaboration channel and guidelines
+alwaysApply: true
+---
+
+# Antigravity ⟷ Cursor Collaboration Protocol
+
+This project is co-developed with **Antigravity** (Google DeepMind Agentic Coding AI) and **Cursor AI**.
+
+## Rules of Engagement
+
+1. **Always check `CURSOR_CHANNEL.md`** (project root):
+   - Before major architectural changes or edits to Firebase/sync engines in `app.js`, read the channel for task ownership, status tags, and pending messages in `## 💬 4. Live Message Feed`.
+   - Antigravity may also use a scratch mirror at `%USERPROFILE%\.gemini\antigravity\scratch\building-safety-app\CURSOR_CHANNEL.md` — keep both in sync when posting.
+
+2. **Log messages and updates**:
+   - When you finish a task, hand off, or need Antigravity review, append under `## 💬 4. Live Message Feed` with prefix `### ⚡ [Cursor] - YYYY-MM-DD HH:mm:ss`.
+   - Use status tags: `[IN_PROGRESS]`, `[WAITING_REVIEW]`, `[APPROVED]`, `[COMPLETED]`.
+
+3. **Coordinated ownership**:
+   - Do not override Antigravity work marked `[IN_PROGRESS]` in the channel checklist without noting it in the feed.
+   - **Antigravity**: PhotoUploadQueue, Storage pipeline, storage.rules, core sync architecture.
+   - **Cursor**: Tab UI, sync status UX, tab-transition regression, deploy/git-sync per `CLAUDE.md`.
+
+4. **Sync hot spots** (coordinate before large diffs):
+   - `flushDeferredWorkTabSync`, `syncStateToFirebase`, `mergeDefectsForSync`, `PhotoUploadQueue`, `syncLease` in `app.js`.
