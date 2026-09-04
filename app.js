@@ -25188,9 +25188,7 @@ document.addEventListener('DOMContentLoaded', () => {
             case 'no': return ctx.gradeNo || ctx.surveyReportNo || (d.no || '').replace(/^NO\.?\s*/i, '');
             case 'floorGroup': return ctx.floorDisplayLabel || ctx.floorCode || state.currentFloor || '';
             case 'inspectionContent': {
-                // 결함크기는 부재종류/조사내용과 한 줄로 붙이지 않고 줄바꿈해서 출력한다.
-                // 여기서는 화면/HWPX/엑셀 어디에도 종속되지 않는 순수 개행문자(\n)만 넣어두고,
-                // 실제 표현 방식(<br>, HWP 줄바꿈 제어문자 등)은 각 출력 경로에서 변환한다.
+                // 부재 + 조사내용 + 크기를 한 줄로 출력 (화면/HWPX/엑셀 공통)
                 const headParts = [getSurveyCellText('component', d, ctx), getSurveyCellText('defectType', d, ctx)]
                     .map(s => (s || '').trim())
                     .filter(s => s && s !== '-');
@@ -25200,7 +25198,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (!head && !hasSize) return '-';
                 if (!hasSize) return head;
                 if (!head) return sizeText;
-                return `${head}\n${sizeText}`;
+                return `${head} ${sizeText}`;
             }
             case 'location': return d.location || ((ctx.floorCode || state.currentFloor) + ' ' + (d.component || '기둥'));
             case 'component': return d.component || '기둥';
@@ -25555,15 +25553,13 @@ document.addEventListener('DOMContentLoaded', () => {
                     ? textInput('crackLength', d.crackLength != null ? d.crackLength : '', 'm')
                     : '<span style="color:#a3a3a3;">-</span>';
             case 'inspectionContent': {
-                // 보고서·한글과 같이 2줄: (부재 + 조사내용) / 크기
+                // 한 줄: 부재 | 조사내용 | 크기
                 const sizeDisp = (d.defectType === '상태양호')
                     ? ''
                     : String(getSurveyCellText('size', d, {}) || '').replace(/^-$/, '');
-                return `<div class="survey-inline-stack" ${stop}>` +
-                    `<div class="survey-inline-stack-head">` +
+                return `<div class="survey-inline-stack survey-inline-stack-one-line" ${stop}>` +
                     textInput('component', d.component || '', '부재', 'survey-inline-narrow') +
                     textInput('defectType', d.defectType || '', '조사내용', 'survey-inline-narrow') +
-                    `</div>` +
                     textInput('size', sizeDisp, '크기', 'survey-inline-narrow') +
                     `</div>`;
             }
@@ -25789,11 +25785,8 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             case 'crackWidth': return d.defectType === '균열' ? surveyCharLen(d.crackWidth) : 0;
             case 'crackLength': return d.defectType === '균열' ? surveyCharLen(d.crackLength) : 0;
-            case 'inspectionContent': {
-                const headLen = surveyCharLen([d.component, d.defectType].filter(Boolean).join(' '));
-                const sizeLen = d.defectType === '상태양호' ? 0 : surveyCharLen(getSurveyCellText('size', d, ctx));
-                return Math.max(headLen, sizeLen);
-            }
+            case 'inspectionContent':
+                return surveyCharLen(getSurveyCellText('inspectionContent', d, ctx));
             default:
                 return surveyCharLen(getSurveyCellText(colKey, d, ctx));
         }
