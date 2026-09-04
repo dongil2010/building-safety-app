@@ -26192,6 +26192,7 @@ document.addEventListener('DOMContentLoaded', () => {
         { key: 'progress', label: '진행여부' },
         { key: 'leak', label: '누수여부' },
         { key: 'cause', label: '발생원인' },
+        { key: 'priorityManage', label: '중점관리' },
         { key: 'remark', label: '비고' }
     ];
 
@@ -26268,11 +26269,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function getActiveSurveyColumns() {
         const grade3 = isGrade3Building();
-        const stateCols = grade3 ? state.surveyColumnsGrade3 : state.surveyColumns;
         const defaults = grade3 ? GRADE3_SURVEY_COLUMNS : DEFAULT_SURVEY_COLUMNS;
-        const cols = (stateCols && stateCols.length) ? stateCols : defaults;
+        const cols = ensureSurveyColumnsInitialized();
+        const source = (cols && cols.length) ? cols : defaults;
         const mode = state.defectSizeMode || 'combined';
-        return cols.filter(c => {
+        return source.filter(c => {
             if (c.visible === false) return false;
             if (mode === 'combined' && (c.key === 'crackWidth' || c.key === 'crackLength')) return false;
             if (mode === 'split' && c.key === 'size') return false;
@@ -27233,6 +27234,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 };
                 insertFlagCol('progress', '진행여부');
                 insertFlagCol('leak', '누수여부');
+                if (!state[stateKey].some(c => c.key === 'priorityManage')) {
+                    const causeIdx = state[stateKey].findIndex(c => c.key === 'cause');
+                    const remarkIdx = state[stateKey].findIndex(c => c.key === 'remark');
+                    const insertAt = causeIdx >= 0 ? causeIdx + 1 : (remarkIdx >= 0 ? remarkIdx : state[stateKey].length);
+                    state[stateKey].splice(insertAt, 0, { key: 'priorityManage', label: '중점관리', visible: true });
+                }
             }
         }
         return state[stateKey];
