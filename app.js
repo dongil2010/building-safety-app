@@ -25357,14 +25357,35 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // 제3종시설물 상태조사표 컬럼(실제 3종 점검보고서 서식 기준) — 부재종류/조사내용/결함크기를
     // "점검내용" 한 칸으로 합치고, 구조체 여부 하나로 구조/비구조 구분을 대신한다.
+    // 진행中·누수中는 화면에서 토글하고, 한글/PDF는 점검내용 끝에 붙여 표기한다.
     const GRADE3_SURVEY_COLUMNS = [
         { key: 'no', label: '번호' },
         { key: 'floorGroup', label: '구분' },
         { key: 'category', label: '구조체 여부' },
         { key: 'inspectionContent', label: '점검내용' },
+        { key: 'progress', label: '진행여부' },
+        { key: 'leak', label: '누수여부' },
         { key: 'cause', label: '발생원인' },
         { key: 'remark', label: '비고' }
     ];
+
+    function getSurveyProgressLabel(isGrade3) {
+        return isGrade3 ? '진행中' : '진행중';
+    }
+
+    function getSurveyLeakLabel(isGrade3) {
+        return isGrade3 ? '누수中' : '누수중';
+    }
+
+    function appendGrade3ProgressLeakToContent(content, d) {
+        const flags = [];
+        if (d && d.isProgress) flags.push('진행中');
+        if (d && d.isLeak) flags.push('누수中');
+        if (!flags.length) return content;
+        const base = String(content == null ? '' : content).trim();
+        if (!base || base === '-') return flags.join(' ');
+        return `${base} ${flags.join(' ')}`;
+    }
 
     function isGrade3Building(bldg) {
         bldg = bldg || state.currentBuilding;
@@ -25511,8 +25532,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (isCrack) return (d.crackLength !== undefined && d.crackLength !== '') ? `${d.crackLength}m` : '-';
                 return '-';
             }
-            case 'progress': return d.isProgress ? '진행중' : '-';
-            case 'leak': return d.isLeak ? '누수중' : '-';
+            case 'progress': return d.isProgress ? getSurveyProgressLabel(isGrade3Building()) : '-';
+            case 'leak': return d.isLeak ? getSurveyLeakLabel(isGrade3Building()) : '-';
             case 'cause': return isGood ? '-' : (d.cause || '건조수축');
             case 'priorityManage': return d.isPriorityManage ? '중점관리' : '-';
             case 'remark': return ctx.photoRemark || '-';
@@ -25642,12 +25663,16 @@ document.addEventListener('DOMContentLoaded', () => {
         const leak = d.isLeak ? markOn : '-';
         const no = formatSurveyReportNo(d, isGrade3, ctx.floorCode);
         if (isGrade3) {
+            const content = appendGrade3ProgressLeakToContent(
+                getSurveyCellText('inspectionContent', d, ctx),
+                d
+            );
             if (colCount === 6) {
                 return [
                     no,
                     ctx.floorDisplayLabel || getSurveyCellText('floorGroup', d, ctx),
                     getSurveyCellText('category', d, ctx),
-                    getSurveyCellText('inspectionContent', d, ctx),
+                    content,
                     getSurveyCellText('cause', d, ctx),
                     getSurveyCellText('remark', d, ctx)
                 ];
@@ -25657,7 +25682,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 ctx.floorDisplayLabel || getSurveyCellText('floorGroup', d, ctx),
                 marks.struct,
                 marks.nonstruct,
-                getSurveyCellText('inspectionContent', d, ctx),
+                content,
                 getSurveyCellText('cause', d, ctx),
                 getSurveyCellText('remark', d, ctx)
             ];
@@ -25715,8 +25740,8 @@ document.addEventListener('DOMContentLoaded', () => {
             case 'category': return `<span style="font-weight:800; font-size:1.15rem; color:${text === '○' ? '#ef4444' : '#a3a3a3'};">${text}</span>`;
             case 'openingCrack': return `<span style="font-weight:800; font-size:1.15rem; color:${text === '○' ? '#0d9488' : '#a3a3a3'};">${text}</span>`;
             case 'size': case 'crackWidth': case 'crackLength': return text;
-            case 'progress': return `<span style="font-weight:800; font-size:0.92rem; color:${text === '진행중' ? '#dc2626' : '#a3a3a3'};">${text}</span>`;
-            case 'leak': return `<span style="font-weight:800; font-size:0.92rem; color:${text === '누수중' ? '#2a2a2a' : '#a3a3a3'};">${text}</span>`;
+            case 'progress': return `<span style="font-weight:800; font-size:0.92rem; color:${(text === '진행중' || text === '진행中') ? '#dc2626' : '#a3a3a3'};">${text}</span>`;
+            case 'leak': return `<span style="font-weight:800; font-size:0.92rem; color:${(text === '누수중' || text === '누수中') ? '#2a2a2a' : '#a3a3a3'};">${text}</span>`;
             case 'cause': return `<span style="font-weight:700; color:#334155;">🔍 ${text}</span>`;
             case 'priorityManage': return `<span style="font-weight:800; font-size:0.92rem; color:${text === '중점관리' ? getStyleColor('priorityManage') : '#a3a3a3'};">${text}</span>`;
             case 'remark': return `<span style="font-weight:700; color:${text !== '-' ? '#2563eb' : '#a3a3a3'};">${text}</span>`;
@@ -25786,11 +25811,11 @@ document.addEventListener('DOMContentLoaded', () => {
                     `</select>`;
             }
             case 'progress':
-                return renderSurveyFlagToggle(id, 'progress', !!d.isProgress, '진행중');
+                return renderSurveyFlagToggle(id, 'progress', !!d.isProgress, getSurveyProgressLabel(isGrade3Building()));
             case 'openingCrack':
                 return renderSurveyFlagToggle(id, 'openingCrack', !!d.isOpeningCrack, '개구부', 'survey-toggle-opening');
             case 'leak':
-                return renderSurveyFlagToggle(id, 'leak', !!d.isLeak, '누수중');
+                return renderSurveyFlagToggle(id, 'leak', !!d.isLeak, getSurveyLeakLabel(isGrade3Building()));
             case 'priorityManage':
                 return renderSurveyFlagToggle(id, 'priorityManage', !!d.isPriorityManage, '중점관리', 'survey-toggle-priority');
             case 'location':
@@ -25881,13 +25906,13 @@ document.addEventListener('DOMContentLoaded', () => {
                     defect.category = value || '구조체';
                     break;
                 case 'progress':
-                    defect.isProgress = value === '1' || value === '진행중';
+                    defect.isProgress = value === '1' || value === '진행중' || value === '진행中';
                     break;
                 case 'openingCrack':
                     defect.isOpeningCrack = value === '1' || value === '개구부' || value === '○';
                     break;
                 case 'leak':
-                    defect.isLeak = value === '1' || value === '누수중';
+                    defect.isLeak = value === '1' || value === '누수중' || value === '누수中';
                     break;
                 case 'priorityManage':
                     defect.isPriorityManage = value === '1' || value === '중점관리';
@@ -26167,8 +26192,8 @@ document.addEventListener('DOMContentLoaded', () => {
             case 'component': return 'font-weight:700;';
             case 'defectType': return 'font-weight:700; color:#1f1f1f;';
             case 'category': return `font-weight:800; color:${text === '○' ? '#ef4444' : '#a3a3a3'};`;
-            case 'progress': return `font-weight:800; color:${text === '진행중' ? '#dc2626' : '#a3a3a3'};`;
-            case 'leak': return `font-weight:800; color:${text === '누수중' ? '#2a2a2a' : '#a3a3a3'};`;
+            case 'progress': return `font-weight:800; color:${(text === '진행중' || text === '진행中') ? '#dc2626' : '#a3a3a3'};`;
+            case 'leak': return `font-weight:800; color:${(text === '누수중' || text === '누수中') ? '#2a2a2a' : '#a3a3a3'};`;
             case 'cause': return 'font-weight:700;';
             case 'priorityManage': return `font-weight:800; color:${text === '중점관리' ? getStyleColor('priorityManage') : '#a3a3a3'};`;
             case 'remark': return `font-weight:700; color:${text !== '-' ? '#2563eb' : '#a3a3a3'};`;
@@ -26353,6 +26378,20 @@ document.addEventListener('DOMContentLoaded', () => {
                 const progIdx = state[stateKey].findIndex(c => c.key === 'progress');
                 const insertAt = catIdx >= 0 ? catIdx + 1 : (progIdx >= 0 ? progIdx : state[stateKey].length);
                 state[stateKey].splice(insertAt, 0, { key: 'openingCrack', label: '개구부 결함유무', visible: true });
+            }
+            // 3종: 기존 저장 컬럼에 진행/누수가 없으면 점검내용 뒤에 삽입
+            if (grade3) {
+                const insertFlagCol = (key, label) => {
+                    if (state[stateKey].some(c => c.key === key)) return;
+                    const contentIdx = state[stateKey].findIndex(c => c.key === 'inspectionContent');
+                    const causeIdx = state[stateKey].findIndex(c => c.key === 'cause');
+                    const insertAt = contentIdx >= 0
+                        ? contentIdx + 1 + (key === 'leak' && state[stateKey].some(c => c.key === 'progress') ? 1 : 0)
+                        : (causeIdx >= 0 ? causeIdx : state[stateKey].length);
+                    state[stateKey].splice(insertAt, 0, { key, label, visible: true });
+                };
+                insertFlagCol('progress', '진행여부');
+                insertFlagCol('leak', '누수여부');
             }
         }
         return state[stateKey];
@@ -29569,7 +29608,10 @@ document.addEventListener('DOMContentLoaded', () => {
                         setTcText(capTcs[0], photoLabelByDefect.get(slot1.d));
                         setTcText(capTcs[2], getSurveyCellText('location', slot1.d, { floorCode }));
                         // 내용 칸 = 상단 상태조사표 점검내용과 동일(부재 + 결함내용 + 결함사이즈)
-                        setTcText(descTcs[1], getSurveyCellText('inspectionContent', slot1.d, { floorCode }));
+                        setTcText(descTcs[1], appendGrade3ProgressLeakToContent(
+                            getSurveyCellText('inspectionContent', slot1.d, { floorCode }),
+                            slot1.d
+                        ));
 
                         if (slot2) {
                             imgCounter++;
@@ -29579,7 +29621,10 @@ document.addEventListener('DOMContentLoaded', () => {
                             setPicImage(pics[1], imgId2, slot2.w, slot2.h, maxW, maxH);
                             setTcText(capTcs[4], photoLabelByDefect.get(slot2.d));
                             setTcText(capTcs[6], getSurveyCellText('location', slot2.d, { floorCode }));
-                            setTcText(descTcs[3], getSurveyCellText('inspectionContent', slot2.d, { floorCode }));
+                            setTcText(descTcs[3], appendGrade3ProgressLeakToContent(
+                                getSurveyCellText('inspectionContent', slot2.d, { floorCode }),
+                                slot2.d
+                            ));
                         } else {
                             stripPhotoTblRightHalf(newTbl);
                         }
