@@ -36426,17 +36426,18 @@ document.addEventListener('DOMContentLoaded', () => {
         }, delay);
     }
 
-    /** 원격 반영·업로드 중이면 끝난 뒤 대기 중인 업로드를 재시도 (오류 백오프와 별도) */
+    /** 원격 반영·업로드 중이면 끝난 뒤 대기 중인 업로드를 재시도.
+     * 2026-09-04 버그: 직전 시도가 429(quota exceeded)로 막 실패해서 scheduleSyncRetryAfterError()가
+     * 지수 백오프(_syncRetryTimer)를 걸어둔 상태여도, 이 폴링은 그걸 모르고 _syncInFlight가 풀리자마자
+     * (실패는 매우 빠르게 끝나므로 사실상 즉시) syncStateToFirebase()를 또 호출해버렸다. 그 결과 의도한
+     * 백오프(3.5초→점점 증가)가 무력화되고 150ms 간격으로 계속 같은 문서를 두드려 429가 반복됐다.
+     * 이제 백오프 타이머가 떠 있으면 그게 끝날 때까지 이 폴링도 같이 기다린다(직접 재시도하지 않음). */
     function scheduleSyncWhenIdle(opts) {
         const forceQueued = !!(opts && opts.forceQueued);
         if (_syncRetryWhenIdleTimer) return;
         const tick = () => {
             _syncRetryWhenIdleTimer = null;
-            if (_syncInFlight) {
-                _syncRetryWhenIdleTimer = setTimeout(tick, 150);
-                return;
-            }
-            if (isRemoteSyncing) {
+            if (_syncInFlight || isRemoteSyncing || _syncRetryTimer) {
                 _syncRetryWhenIdleTimer = setTimeout(tick, 150);
                 return;
             }
