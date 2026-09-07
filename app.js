@@ -13032,134 +13032,153 @@ document.addEventListener('DOMContentLoaded', () => {
         return canvas;
     }
 
-    // 콘크리트 반발경도 측정 DATA(hwpx 내보내기 전용) — 위 성과표(보정·강도·그래프)와 달리
-    // 보정 전 원시 R값 자료만 보여주는 절이다. 최대 3개 위치(NO.)를 한 행에 나란히 그린다.
-    // 표본 문서엔 이 절 자체가 비어 있었어서(제목만 있고 내용 없음), 다른 표를 그대로 옮기지
-    // 않고 실제 입력된 R값으로 이 캔버스를 직접 그려 채운다.
-    function renderStrengthDataRowCanvas(rowPoints) {
-        const cardW = 700, gapW = 24, padX = 24;
-        const cols = rowPoints.length;
-        const W = cols * cardW + (cols - 1) * gapW + padX * 2;
-        const H = 640;
+    // 콘크리트 반발경도 측정 DATA(hwpx 내보내기 전용) — 실제 측정지 사진을 저장 안 해둔 위치의
+    // 대체 이미지. 이 이미지가 들어가는 표 칸의 가로세로 비율(aspect = 폭/높이)은 위치 개수(전체를
+    // 한 표에 가로로 다 펼치므로 개수가 늘수록 칸이 좁아짐)에 따라 매번 달라져서, 호출부가 실제
+    // 칸 비율을 넘겨주면 캔버스를 그 비율에 딱 맞게 그린다(=축소 없이 칸을 꽉 채움). 줄 수(20개
+    // 고정이 아니라 실제 입력된 개수)에 맞춰 줄 높이·글자 크기도 매번 다시 계산한다.
+    function renderStrengthDataRowCanvas(pt, aspect) {
+        const nums = pt.readings.map(v => parseFloat(v)).filter(v => !isNaN(v));
+        const avg = nums.length > 0 ? nums.reduce((a, b) => a + b, 0) / nums.length : 0;
+        const threshold = avg * 0.2;
+        const isOutlier = (v) => avg > 0 && Math.abs(v - avg) > threshold;
+
+        const H = 1400;
+        const W = Math.max(140, Math.round(H * (aspect || 0.43)));
+        const rowCount = pt.readings.length || 1;
+        const totalLines = rowCount + 3; // 제목 1줄 + R값 rowCount줄 + AVERAGE 1줄 + ANGLE 1줄
+        const lineH = Math.floor((H - 40) / totalLines);
+        const fontRow = Math.max(14, Math.min(30, Math.floor(lineH * 0.55)));
+        const fontTitle = Math.max(16, Math.min(34, Math.floor(lineH * 0.6)));
+        const padX = Math.max(14, Math.round(W * 0.08));
+
         const canvas = document.createElement('canvas');
         canvas.width = W;
         canvas.height = H;
         const ctx = canvas.getContext('2d');
         ctx.fillStyle = '#ffffff';
         ctx.fillRect(0, 0, W, H);
-        ctx.strokeStyle = '#333333';
-        ctx.lineWidth = 3;
-        ctx.strokeRect(1.5, 1.5, W - 3, H - 3);
+        ctx.textBaseline = 'middle';
 
-        rowPoints.forEach((pt, idx) => {
-            const x0 = padX + idx * (cardW + gapW);
-            const x1 = x0 + cardW;
-            if (idx > 0) {
-                ctx.strokeStyle = '#94a3b8';
-                ctx.lineWidth = 1.5;
-                ctx.beginPath();
-                ctx.moveTo(x0 - gapW / 2, 10);
-                ctx.lineTo(x0 - gapW / 2, H - 10);
-                ctx.stroke();
-            }
+        let y = lineH / 2 + 10;
+        ctx.textAlign = 'center';
+        ctx.font = `bold ${fontTitle}px sans-serif`;
+        ctx.fillStyle = '#111111';
+        ctx.fillText('R VALUE', W / 2, y);
+        y += lineH;
 
-            const nums = pt.readings.map(v => parseFloat(v)).filter(v => !isNaN(v));
-            const rawAvg = nums.length > 0 ? nums.reduce((a, b) => a + b, 0) / nums.length : 0;
-            const threshold = rawAvg * 0.2;
-            const isOutlier = (v) => rawAvg > 0 && Math.abs(v - rawAvg) > threshold;
-
-            // 1) NO.n / 위치
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'middle';
-            ctx.font = 'bold 30px sans-serif';
-            ctx.fillStyle = '#111111';
-            ctx.fillText(`NO.${String(pt.seq).padStart(2, '0')}`, (x0 + x1) / 2, 40);
-            ctx.font = '20px sans-serif';
-            ctx.fillStyle = '#333333';
-            const locLine = [pt.location, pt.component].filter(Boolean).join(' ');
-            ctx.fillText(locLine || '-', (x0 + x1) / 2, 75);
-
-            // 2) R값 그리드 (5행 × 4열, ±20% 초과값은 주황색 — 성과표와 동일 기준)
-            const gridPadX = 30;
-            const gx0 = x0 + gridPadX, gx1 = x1 - gridPadX;
-            const gridCols = 4, gridRows = 5, cellH = 42, gy0 = 100;
-            const cellW = (gx1 - gx0) / gridCols;
-            ctx.font = '22px sans-serif';
-            pt.readings.forEach((v, i) => {
-                if (i >= gridCols * gridRows) return;
-                const r = Math.floor(i / gridCols), c = i % gridCols;
-                const num = parseFloat(v);
-                ctx.fillStyle = isOutlier(num) ? '#c2410c' : '#111111';
-                ctx.fillText(`R${String(i + 1).padStart(2, '0')} ${v}`, gx0 + c * cellW + cellW / 2, gy0 + r * cellH + cellH / 2);
-            });
-
-            // 3) 평균경도(원시 평균) · 측정개수 · 측정각도
-            const footY = gy0 + gridRows * cellH + 35;
-            ctx.strokeStyle = '#cbd5e1';
-            ctx.lineWidth = 1.5;
-            ctx.beginPath();
-            ctx.moveTo(x0 + gridPadX, footY - 22);
-            ctx.lineTo(x1 - gridPadX, footY - 22);
-            ctx.stroke();
-            ctx.font = '18px sans-serif';
-            ctx.fillStyle = '#555555';
-            ctx.textAlign = 'left';
-            ctx.fillText(`(총 ${nums.length}개)`, x0 + gridPadX, footY);
-            ctx.font = 'bold 26px sans-serif';
-            ctx.fillStyle = '#111111';
-            ctx.textAlign = 'right';
-            ctx.fillText(`평균 ${rawAvg.toFixed(1)}`, x1 - gridPadX, footY);
-            ctx.font = '18px sans-serif';
-            ctx.fillStyle = '#555555';
-            ctx.textAlign = 'left';
-            ctx.fillText('측정각도', x0 + gridPadX, footY + 34);
-            ctx.font = 'bold 22px sans-serif';
-            ctx.fillStyle = '#111111';
-            ctx.textAlign = 'right';
-            ctx.fillText(Number.isFinite(pt.angle) ? `${pt.angle}°` : '0°', x1 - gridPadX, footY + 34);
+        ctx.textAlign = 'left';
+        ctx.font = `${fontRow}px monospace`;
+        pt.readings.forEach((v, i) => {
+            const num = parseFloat(v);
+            ctx.fillStyle = isOutlier(num) ? '#c2410c' : '#111111';
+            ctx.fillText(`R${String(i + 1).padStart(2, '0')} ${v}`, padX, y);
+            y += lineH;
         });
+
+        ctx.strokeStyle = '#cbd5e1';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.moveTo(padX, y - lineH * 0.3);
+        ctx.lineTo(W - padX, y - lineH * 0.3);
+        ctx.stroke();
+
+        ctx.font = `bold ${fontRow}px sans-serif`;
+        ctx.fillStyle = '#111111';
+        ctx.fillText(`AVERAGE ${avg.toFixed(1)}`, padX, y);
+        y += lineH;
+        ctx.font = `${fontRow}px sans-serif`;
+        ctx.fillText(`ANGLE ${Number.isFinite(pt.angle) ? pt.angle : 0}°`, padX, y);
 
         return canvas;
     }
 
-    function escapeXmlText(s) {
-        return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    // header.xml에 반발경도 측정 DATA 표 전용 테두리 스타일 8개를 새로 만들어 넣는다. 기존
+    // 스타일(템플릿 여기저기서 재활용되던 것들)을 그대로 갖다 썼더니, 옆 칸과 짝이 안 맞는 조합
+    // (양쪽 다 "테두리 없음"이라 실제로 안 보이는 경계선, 라벨칸마다 제각각인 그라데이션 유무,
+    // 가장자리가 얇은 선인 문제)이 계속 나왔다. 그래서 필요한 굵기·그라데이션을 직접 명시해서
+    // 새로 만든다 — 표 가장자리(맨 위/왼쪽/오른쪽/맨 아래)만 굵은선(0.4mm), 안쪽 칸 경계는 전부
+    // 얇은 실선(0.12mm)으로 통일해서 어느 쪽 셀 기준으로 봐도 항상 선이 그려지게 했다.
+    function buildStrengthBorderFillXml(id, { l, r, t, b, gradient }) {
+        const W = { THICK: '0.4 mm', THIN: '0.12 mm' };
+        const side = (tag, type) => `<hh:${tag}Border type="SOLID" width="${W[type]}" color="#000000"/>`;
+        const grad = gradient ? '<hc:fillBrush><hc:gradation type="LINEAR" angle="0" centerX="100" centerY="50" step="50" colorNum="2" stepCenter="50" alpha="0"><hc:color value="#FFFFFF"/><hc:color value="#BBBBBB"/></hc:gradation></hc:fillBrush>' : '';
+        return `<hh:borderFill id="${id}" threeD="0" shadow="0" centerLine="NONE" breakCellSeparateLine="0"><hh:slash type="NONE" Crooked="0" isCounter="0"/><hh:backSlash type="NONE" Crooked="0" isCounter="0"/>${side('left', l)}${side('right', r)}${side('top', t)}${side('bottom', b)}${grad}</hh:borderFill>`;
+    }
+    const STRENGTH_BORDER_SPECS = [
+        ['labelR0', { l: 'THICK', r: 'THIN', t: 'THICK', b: 'THIN', gradient: true }],
+        ['labelR1', { l: 'THICK', r: 'THIN', t: 'THIN', b: 'THIN', gradient: true }],
+        ['labelR2', { l: 'THICK', r: 'THIN', t: 'THIN', b: 'THICK', gradient: true }],
+        ['textR0', { l: 'THIN', r: 'THIN', t: 'THICK', b: 'THIN', gradient: false }],
+        ['textR1', { l: 'THIN', r: 'THIN', t: 'THIN', b: 'THIN', gradient: false }],
+        ['textR2', { l: 'THIN', r: 'THIN', t: 'THIN', b: 'THICK', gradient: false }],
+        ['photoNonLast', { l: 'THIN', r: 'THIN', t: 'THICK', b: 'THICK', gradient: false }],
+        ['photoLast', { l: 'THIN', r: 'THICK', t: 'THICK', b: 'THICK', gradient: false }],
+    ];
+    function injectStrengthDataBorderFills(headerXml) {
+        const ids2 = [...headerXml.matchAll(/<hh:borderFill id="(\d+)"/g)].map(m => parseInt(m[1], 10));
+        const maxId = ids2.length ? Math.max(...ids2) : 0;
+        const ids = {};
+        let out = headerXml;
+        STRENGTH_BORDER_SPECS.forEach(([name, spec], i) => {
+            const id = maxId + 1 + i;
+            ids[name] = id;
+            out = out.replace('</hh:borderFills>', buildStrengthBorderFillXml(id, spec) + '</hh:borderFills>');
+        });
+        const bfCnt = (out.match(/<hh:borderFill id="/g) || []).length;
+        out = out.replace(/(<hh:borderFills[^>]*itemCnt=")(\d+)(")/, `$1${bfCnt}$3`);
+        return { header: out, ids };
     }
 
-    // 콘크리트 반발경도 측정 DATA 표(hwpx 내보내기 전용) — 참고 이미지처럼 위치(NO.) 최대 3개를
-    // 한 표에 가로로 나란히 놓는다. 왼쪽 "구분/위치/평균경도(R)" 라벨 열은 공통, NO.별 값은
-    // 그 오른쪽에 각자 칸을 하나씩 쓴다. 병합 셀 없이(rowSpan/colSpan 전부 1) 3행 × (1+N)열의
-    // 단순 격자라 hwpx XML을 직접 만들어도 구조가 안전하다.
-    // borderFillIDRef="16"은 이 템플릿에서 이미 회색 음영 캡션칸에 쓰이던 것(라벨칸에 재사용),
-    // "15"는 사진칸처럼 흰 배경 칸에 쓰이던 것이다 — 둘 다 이미 검증된 값이라 새로 만들지 않았다.
-    function buildStrengthPhotoRowGroupXml(points, tblId) {
-        const LABEL_W = 9000;
+    // 콘크리트 반발경도 측정 DATA 표(hwpx 내보내기 전용) — 사용자가 실제 한글에서 손으로 만들어
+    // 보내준 정상 예시(구분/위치/평균 경도 3행 × "라벨칸 1 + (NO.칸+사진칸[rowSpan=3]) × 최대 3쌍"
+    // = 최대 7칸) 구조를 그대로 옮긴 것이다. 사진칸이 rowSpan=3이라 위치·평균경도 행에서는 그
+    // 칸이 아예 생략되고, NO./평균경도는 좁은 텍스트칸에, 사진은 그 옆의 넓고 긴 칸에 3행을
+    // 통째로 차지해 들어간다 — 예전처럼 사진과 텍스트를 한 칸에 같이 넣지 않아 행이 늘어나는
+    // 문제가 없다. 너비/행높이(LABEL_W/NOTEXT_W/PHOTO_W/ROW_H)는 실제 예시 파일에서 그대로
+    // 읽어온 값이고, 테두리는 injectStrengthDataBorderFills()가 새로 만든 스타일(borderIds)을
+    // 쓴다. 텍스트(NO./위치/평균경도)는 여기서는 빈칸으로 두고, 호출부가 setTcText()로 채운다
+    // (줄바꿈 계산을 검증된 공용 로직에 맡김).
+    function buildStrengthPhotoRowGroupXml(points, tblId, borderIds) {
+        const LABEL_W = 3599, NOTEXT_W = 4957, PHOTO_W = 7787, ROW_H = 9365, TOTAL_H = ROW_H * 3;
         const valueCount = points.length;
-        const VALUE_W = Math.floor((41821 - LABEL_W) / valueCount);
-        const ROW_H = { cat: 3000, photo: 25000, avg: 3000 };
-        const TOTAL_W = LABEL_W + VALUE_W * valueCount;
-        const TOTAL_H = ROW_H.cat + ROW_H.photo + ROW_H.avg;
+        const TOTAL_W = LABEL_W + valueCount * (NOTEXT_W + PHOTO_W);
+        const colCnt = 1 + valueCount * 2;
 
-        const textCell = (text, colAddr, rowAddr, width, height, borderFillIDRef) => `<hp:tc name="" header="0" hasMargin="0" protect="0" editable="0" dirty="0" borderFillIDRef="${borderFillIDRef}"><hp:subList id="" textDirection="HORIZONTAL" lineWrap="BREAK" vertAlign="CENTER" linkListIDRef="0" linkListNextIDRef="0" textWidth="0" textHeight="0" hasTextRef="0" hasNumRef="0"><hp:p id="0" paraPrIDRef="1" styleIDRef="16" pageBreak="0" columnBreak="0" merged="0"><hp:run charPrIDRef="43"><hp:t>${escapeXmlText(text)}</hp:t></hp:run><hp:linesegarray><hp:lineseg textpos="0" vertpos="0" vertsize="1000" textheight="1000" baseline="850" spacing="600" horzpos="0" horzsize="${Math.max(width - 282, 100)}" flags="393216"/></hp:linesegarray></hp:p></hp:subList><hp:cellAddr colAddr="${colAddr}" rowAddr="${rowAddr}"/><hp:cellSpan colSpan="1" rowSpan="1"/><hp:cellSz width="${width}" height="${height}"/><hp:cellMargin left="141" right="141" top="141" bottom="141"/></hp:tc>`;
+        const textCell = (colAddr, rowAddr, width, height, borderFillIDRef) => `<hp:tc name="" header="0" hasMargin="0" protect="0" editable="0" dirty="0" borderFillIDRef="${borderFillIDRef}"><hp:subList id="" textDirection="HORIZONTAL" lineWrap="BREAK" vertAlign="CENTER" linkListIDRef="0" linkListNextIDRef="0" textWidth="0" textHeight="0" hasTextRef="0" hasNumRef="0"><hp:p id="2147483648" paraPrIDRef="0" styleIDRef="91" pageBreak="0" columnBreak="0" merged="0"><hp:run charPrIDRef="13"><hp:t></hp:t></hp:run><hp:linesegarray><hp:lineseg textpos="0" vertpos="0" vertsize="800" textheight="800" baseline="680" spacing="480" horzpos="0" horzsize="${Math.max(width - 282, 100)}" flags="393216"/></hp:linesegarray></hp:p></hp:subList><hp:cellAddr colAddr="${colAddr}" rowAddr="${rowAddr}"/><hp:cellSpan colSpan="1" rowSpan="1"/><hp:cellSz width="${width}" height="${height}"/><hp:cellMargin left="141" right="141" top="141" bottom="141"/></hp:tc>`;
 
-        // 사진칸: 사진 문단 + 위치 텍스트 문단, 두 개를 한 칸(subList) 안에 같이 넣는다.
-        const photoLocCell = (colAddr, rowAddr, width, height, picId, picInstId, locText) => `<hp:tc name="" header="0" hasMargin="0" protect="0" editable="0" dirty="0" borderFillIDRef="15"><hp:subList id="" textDirection="HORIZONTAL" lineWrap="BREAK" vertAlign="CENTER" linkListIDRef="0" linkListNextIDRef="0" textWidth="0" textHeight="0" hasTextRef="0" hasNumRef="0"><hp:p id="2147483648" paraPrIDRef="4" styleIDRef="0" pageBreak="0" columnBreak="0" merged="0"><hp:run charPrIDRef="6"><hp:pic id="${picId}" zOrder="36" numberingType="PICTURE" textWrap="TOP_AND_BOTTOM" textFlow="BOTH_SIDES" lock="0" dropcapstyle="None" thumbnailBinIDRef="" href="" groupLevel="0" instid="${picInstId}" reverse="0"><hp:offset x="0" y="0"/><hp:orgSz width="768540" height="969540"/><hp:curSz width="41541" height="52405"/><hp:flip horizontal="0" vertical="0"/><hp:rotationInfo angle="0" centerX="20770" centerY="26202" rotateimage="1"/><hp:renderingInfo><hc:transMatrix e1="1" e2="0" e3="0" e4="0" e5="1" e6="0"/><hc:scaMatrix e1="0.054052" e2="0" e3="0" e4="0" e5="0.054051" e6="0"/><hc:rotMatrix e1="1" e2="0" e3="0" e4="0" e5="1" e6="0"/></hp:renderingInfo><hc:img binaryItemIDRef="" bright="0" contrast="0" effect="REAL_PIC" alpha="0"/><hp:imgRect><hc:pt0 x="0" y="0"/><hc:pt1 x="768540" y="0"/><hc:pt2 x="768540" y="969540"/><hc:pt3 x="0" y="969540"/></hp:imgRect><hp:imgClip left="0" right="648540" top="0" bottom="818100"/><hp:inMargin left="0" right="0" top="0" bottom="0"/><hp:imgDim dimwidth="648540" dimheight="818100"/><hp:effects/><hp:sz width="41541" widthRelTo="ABSOLUTE" height="52405" heightRelTo="ABSOLUTE" protect="0"/><hp:pos treatAsChar="0" affectLSpacing="0" flowWithText="1" allowOverlap="0" holdAnchorAndSO="0" vertRelTo="PARA" horzRelTo="COLUMN" vertAlign="TOP" horzAlign="LEFT" vertOffset="0" horzOffset="0"/><hp:outMargin left="0" right="0" top="0" bottom="0"/></hp:pic><hp:t/></hp:run><hp:linesegarray><hp:lineseg textpos="0" vertpos="0" vertsize="1100" textheight="1100" baseline="935" spacing="1320" horzpos="0" horzsize="0" flags="393216"/></hp:linesegarray></hp:p><hp:p id="0" paraPrIDRef="1" styleIDRef="16" pageBreak="0" columnBreak="0" merged="0"><hp:run charPrIDRef="43"><hp:t>${escapeXmlText(locText)}</hp:t></hp:run><hp:linesegarray><hp:lineseg textpos="0" vertpos="0" vertsize="1000" textheight="1000" baseline="850" spacing="600" horzpos="0" horzsize="${Math.max(width - 282, 100)}" flags="393216"/></hp:linesegarray></hp:p></hp:subList><hp:cellAddr colAddr="${colAddr}" rowAddr="${rowAddr}"/><hp:cellSpan colSpan="1" rowSpan="1"/><hp:cellSz width="${width}" height="${height}"/><hp:cellMargin left="141" right="141" top="141" bottom="141"/></hp:tc>`;
+        const photoCell = (colAddr, picId, picInstId, borderFillIDRef) => `<hp:tc name="" header="0" hasMargin="0" protect="0" editable="0" dirty="0" borderFillIDRef="${borderFillIDRef}"><hp:subList id="" textDirection="HORIZONTAL" lineWrap="BREAK" vertAlign="CENTER" linkListIDRef="0" linkListNextIDRef="0" textWidth="0" textHeight="0" hasTextRef="0" hasNumRef="0"><hp:p id="2147483648" paraPrIDRef="0" styleIDRef="91" pageBreak="0" columnBreak="0" merged="0"><hp:run charPrIDRef="13"><hp:pic id="${picId}" zOrder="48" numberingType="PICTURE" textWrap="TOP_AND_BOTTOM" textFlow="BOTH_SIDES" lock="0" dropcapstyle="None" href="" groupLevel="0" instid="${picInstId}" reverse="0"><hp:offset x="0" y="0"/><hp:orgSz width="16260" height="44460"/><hp:curSz width="7507" height="20526"/><hp:flip horizontal="0" vertical="0"/><hp:rotationInfo angle="0" centerX="3753" centerY="10263" rotateimage="1"/><hp:renderingInfo><hc:transMatrix e1="1" e2="0" e3="0" e4="0" e5="1" e6="0"/><hc:scaMatrix e1="0.461685" e2="0" e3="0" e4="0" e5="0.461673" e6="0"/><hc:rotMatrix e1="1" e2="0" e3="0" e4="0" e5="1" e6="0"/></hp:renderingInfo><hc:img binaryItemIDRef="" bright="0" contrast="0" effect="REAL_PIC" alpha="0"/><hp:imgRect><hc:pt0 x="0" y="0"/><hc:pt1 x="16260" y="0"/><hc:pt2 x="16260" y="44460"/><hc:pt3 x="0" y="44460"/></hp:imgRect><hp:imgClip left="0" right="15660" top="0" bottom="42780"/><hp:inMargin left="0" right="0" top="0" bottom="0"/><hp:imgDim dimwidth="15660" dimheight="42780"/><hp:effects/><hp:sz width="7507" widthRelTo="ABSOLUTE" height="20526" heightRelTo="ABSOLUTE" protect="0"/><hp:pos treatAsChar="0" affectLSpacing="0" flowWithText="1" allowOverlap="0" holdAnchorAndSO="0" vertRelTo="PARA" horzRelTo="COLUMN" vertAlign="TOP" horzAlign="LEFT" vertOffset="0" horzOffset="0"/><hp:outMargin left="0" right="0" top="0" bottom="0"/></hp:pic><hp:t/></hp:run><hp:linesegarray><hp:lineseg textpos="0" vertpos="0" vertsize="800" textheight="800" baseline="680" spacing="480" horzpos="0" horzsize="0" flags="393216"/></hp:linesegarray></hp:p></hp:subList><hp:cellAddr colAddr="${colAddr}" rowAddr="0"/><hp:cellSpan colSpan="1" rowSpan="3"/><hp:cellSz width="${PHOTO_W}" height="${TOTAL_H}"/><hp:cellMargin left="141" right="141" top="141" bottom="141"/></hp:tc>`;
 
-        const row0 = [textCell('구분', 0, 0, LABEL_W, ROW_H.cat, 16)];
-        const row1 = [textCell('위치', 0, 1, LABEL_W, ROW_H.photo, 16)];
-        const row2 = [textCell('평균경도(R)', 0, 2, LABEL_W, ROW_H.avg, 16)];
+        const row0 = [textCell(0, 0, LABEL_W, ROW_H, borderIds.labelR0)];
+        const row1 = [textCell(0, 1, LABEL_W, ROW_H, borderIds.labelR1)];
+        const row2 = [textCell(0, 2, LABEL_W, ROW_H, borderIds.labelR2)];
 
         points.forEach((pt, i) => {
-            const colAddr = i + 1;
-            const locText = [pt.location, pt.component].filter(Boolean).join(' ') || '-';
-            row0.push(textCell(`NO.${String(pt.seq).padStart(2, '0')}`, colAddr, 0, VALUE_W, ROW_H.cat, 15));
-            row1.push(photoLocCell(colAddr, 1, VALUE_W, ROW_H.photo, pt._picId, pt._picInstId, locText));
-            row2.push(textCell(pt._avgText, colAddr, 2, VALUE_W, ROW_H.avg, 15));
+            const noCol = 1 + i * 2, picCol = 2 + i * 2;
+            const isLastCol = (i === valueCount - 1);
+            row0.push(textCell(noCol, 0, NOTEXT_W, ROW_H, borderIds.textR0));
+            row0.push(photoCell(picCol, pt._picId, pt._picInstId, isLastCol ? borderIds.photoLast : borderIds.photoNonLast));
+            row1.push(textCell(noCol, 1, NOTEXT_W, ROW_H, borderIds.textR1));
+            row2.push(textCell(noCol, 2, NOTEXT_W, ROW_H, borderIds.textR2));
         });
 
         const rows = [row0, row1, row2].map(cells => `<hp:tr>${cells.join('')}</hp:tr>`).join('');
 
-        return `<hp:p id="0" paraPrIDRef="13" styleIDRef="0" pageBreak="1" columnBreak="0" merged="0"><hp:run charPrIDRef="53"><hp:tbl id="${tblId}" zOrder="11" numberingType="TABLE" textWrap="TOP_AND_BOTTOM" textFlow="BOTH_SIDES" lock="0" dropcapstyle="None" pageBreak="NONE" repeatHeader="1" rowCnt="3" colCnt="${valueCount + 1}" cellSpacing="0" borderFillIDRef="5" noAdjust="0"><hp:sz width="${TOTAL_W}" widthRelTo="ABSOLUTE" height="${TOTAL_H}" heightRelTo="ABSOLUTE" protect="0"/><hp:pos treatAsChar="1" affectLSpacing="0" flowWithText="1" allowOverlap="0" holdAnchorAndSO="0" vertRelTo="PARA" horzRelTo="COLUMN" vertAlign="TOP" horzAlign="LEFT" vertOffset="0" horzOffset="0"/><hp:outMargin left="140" right="140" top="140" bottom="140"/><hp:inMargin left="140" right="140" top="140" bottom="140"/>${rows}</hp:tbl><hp:t/></hp:run><hp:linesegarray><hp:lineseg textpos="0" vertpos="0" vertsize="${TOTAL_H + 280}" textheight="${TOTAL_H + 280}" baseline="${Math.round((TOTAL_H + 280) * 0.85)}" spacing="960" horzpos="0" horzsize="42520" flags="393216"/></hp:linesegarray></hp:p>`;
+        return `<hp:p id="2147483648" paraPrIDRef="6" styleIDRef="0" pageBreak="0" columnBreak="0" merged="0"><hp:run charPrIDRef="3"><hp:tbl id="${tblId}" zOrder="47" numberingType="TABLE" textWrap="TOP_AND_BOTTOM" textFlow="BOTH_SIDES" lock="0" dropcapstyle="None" pageBreak="NONE" repeatHeader="1" rowCnt="3" colCnt="${colCnt}" cellSpacing="0" borderFillIDRef="2" noAdjust="1"><hp:sz width="${TOTAL_W}" widthRelTo="ABSOLUTE" height="${TOTAL_H}" heightRelTo="ABSOLUTE" protect="0"/><hp:pos treatAsChar="1" affectLSpacing="0" flowWithText="1" allowOverlap="0" holdAnchorAndSO="0" vertRelTo="PARA" horzRelTo="PARA" vertAlign="TOP" horzAlign="LEFT" vertOffset="0" horzOffset="0"/><hp:outMargin left="141" right="141" top="141" bottom="141"/><hp:inMargin left="140" right="140" top="140" bottom="140"/>${rows}</hp:tbl><hp:t/></hp:run><hp:linesegarray><hp:lineseg textpos="0" vertpos="0" vertsize="${TOTAL_H + 280}" textheight="${TOTAL_H + 280}" baseline="${Math.round((TOTAL_H + 280) * 0.85)}" spacing="1320" horzpos="0" horzsize="42520" flags="393216"/></hp:linesegarray></hp:p>`;
+    }
+
+    // hp:tbl 안에서 colAddr/rowAddr로 hp:tc 하나를 찾는다(반발경도 측정 DATA 표에서 NO./위치/
+    // 평균경도 칸의 실제 텍스트를 채울 때 씀 — 사진칸은 rowSpan=3이라 rowAddr=0에만 존재).
+    // HP_NS는 내보내기 함수 안에서만 지역 선언돼 있어 이 바깥 스코프에선 안 보이므로(ReferenceError:
+    // HP_NS is not defined로 실제 내보내기가 깨졌던 원인), 네임스페이스 문자열을 직접 적는다.
+    function tcAtAddr(tbl, colAddr, rowAddr) {
+        const HP_NS_LOCAL = 'http://www.hancom.co.kr/hwpml/2011/paragraph';
+        const tcs = tbl.getElementsByTagNameNS(HP_NS_LOCAL, 'tc');
+        for (let i = 0; i < tcs.length; i++) {
+            const addr = tcs[i].getElementsByTagNameNS(HP_NS_LOCAL, 'cellAddr')[0];
+            if (addr && addr.getAttribute('colAddr') === String(colAddr) && addr.getAttribute('rowAddr') === String(rowAddr)) return tcs[i];
+        }
+        return null;
     }
 
     window.toggleNdtModalFields = function() {
@@ -31906,52 +31925,78 @@ document.addEventListener('DOMContentLoaded', () => {
                                     removeParaRange(allParasForData[headingIdx + 1], dataStopPara);
                                 }
 
+                                // 위치(NO.) 최대 3개를 한 표에 담는다(라벨칸 1 + (NO.칸+사진칸) × 최대
+                                // 3쌍 = 최대 7칸, 사용자가 직접 한글로 만들어 보내준 정상 예시와 동일한
+                                // 구조). 4개 이상이면 표를 새로 만들어 바로 아래에 이어붙이되, 그 예시처럼
+                                // 표 사이에 강제 페이지분할을 넣지 않아 공간이 되면 한 페이지에 이어진다.
+                                const PHOTO_W = 7787, TOTAL_H = 9365 * 3;
+                                const photoMaxW = PHOTO_W - 141 - 141;
+                                const photoMaxH = TOTAL_H - 141 - 141;
+                                const boxAspect = photoMaxW / photoMaxH;
+                                // 각 포인트의 "사진"을 미리 준비한다 — 실제 저장된 측정지 사진이
+                                // 있으면 그걸, 없으면 원시 R값 캔버스를(칸 비율에 맞춰) 대신 그려서
+                                // 똑같이 사진 취급으로 표 안에 넣는다.
+                                for (const pt of dataPoints) {
+                                    const photoUrl = pt.photoId ? await loadStrengthPhotoDataUrl(bldg.id, pt.photoId) : null;
+                                    if (photoUrl) {
+                                        const size = await loadImageSize(photoUrl);
+                                        pt._imgUrl = photoUrl;
+                                        pt._imgW = size.w;
+                                        pt._imgH = size.h;
+                                    } else {
+                                        const canvas = renderStrengthDataRowCanvas(pt, boxAspect);
+                                        pt._imgUrl = canvas.toDataURL('image/png');
+                                        pt._imgW = canvas.width;
+                                        pt._imgH = canvas.height;
+                                    }
+                                    const nums = pt.readings.map(v => parseFloat(v)).filter(v => !isNaN(v));
+                                    pt._avgText = nums.length > 0 ? (nums.reduce((a, b) => a + b, 0) / nums.length).toFixed(1) : '-';
+                                    imgCounter++;
+                                    pt._picId = String(9110000 + imgCounter);
+                                    pt._picInstId = String(9120000 + imgCounter);
+                                    pt._imgId = `strengthDataImg${imgCounter}`;
+                                }
+
+                                // 이 표 전용 테두리 스타일(굵은 가장자리+라벨 그라데이션)을 header.xml에
+                                // 한 번만 추가하고, 이후 표들은 전부 이 id들을 재사용한다.
+                                if (!hwpxHeaderText) hwpxHeaderText = await zip.file('Contents/header.xml').async('string');
+                                const strengthBorders = injectStrengthDataBorderFills(hwpxHeaderText);
+                                hwpxHeaderText = strengthBorders.header;
+                                hwpxHeaderDirty = true;
+                                const strengthBorderIds = strengthBorders.ids;
+
                                 let dataAnchor = dataHeadingPara;
                                 for (let i = 0; i < dataPoints.length; i += 3) {
                                     const group = dataPoints.slice(i, i + 3);
-                                    // 그룹 안 각 포인트의 "사진"을 미리 준비한다 — 실제 저장된 측정지
-                                    // 사진이 있으면 그걸, 없으면 원시 R값 캔버스를 대신 그려서 똑같이
-                                    // 사진 취급으로 표 안에 넣는다.
-                                    for (const pt of group) {
-                                        const photoUrl = pt.photoId ? await loadStrengthPhotoDataUrl(bldg.id, pt.photoId) : null;
-                                        if (photoUrl) {
-                                            const size = await loadImageSize(photoUrl);
-                                            pt._imgUrl = photoUrl;
-                                            pt._imgW = size.w;
-                                            pt._imgH = size.h;
-                                        } else {
-                                            const canvas = renderStrengthDataRowCanvas([pt]);
-                                            pt._imgUrl = canvas.toDataURL('image/png');
-                                            pt._imgW = canvas.width;
-                                            pt._imgH = canvas.height;
-                                        }
-                                        const nums = pt.readings.map(v => parseFloat(v)).filter(v => !isNaN(v));
-                                        pt._avgText = nums.length > 0 ? (nums.reduce((a, b) => a + b, 0) / nums.length).toFixed(1) : '-';
-                                        imgCounter++;
-                                        pt._picId = String(9110000 + imgCounter);
-                                        pt._picInstId = String(9120000 + imgCounter);
-                                        pt._imgId = `strengthDataImg${imgCounter}`;
-                                    }
-
                                     imgCounter++;
                                     const tblId = String(9100000 + imgCounter);
-                                    const xml = buildStrengthPhotoRowGroupXml(group, tblId);
+                                    const xml = buildStrengthPhotoRowGroupXml(group, tblId, strengthBorderIds);
                                     const doc = new DOMParser().parseFromString(`<root xmlns:hp="${HP_NS}" xmlns:hc="${HC_NS}">${xml}</root>`, 'application/xml');
                                     const newPara = xmlDoc.importNode(doc.documentElement.firstChild, true);
                                     dataAnchor.parentNode.insertBefore(newPara, dataAnchor.nextSibling);
                                     dataAnchor = newPara;
 
-                                    // 그룹 안 사진(또는 대체 캔버스)들을 순서대로 이 표의 hp:pic들에 꽂는다.
+                                    // 라벨(구분/위치/평균경도)·NO./위치/평균경도 텍스트를 채우고,
+                                    // 사진(또는 대체 캔버스)들을 순서대로 이 표의 hp:pic들에 꽂는다.
+                                    const tbl = newPara.getElementsByTagNameNS(HP_NS, 'tbl')[0];
                                     const pics = newPara.getElementsByTagNameNS(HP_NS, 'pic');
-                                    const valueW = Math.floor((41821 - 9000) / group.length);
-                                    const photoMaxW = valueW - 141 - 141;
-                                    const photoMaxH = 25000 - 141 - 141;
+                                    setTcText(tcAtAddr(tbl, 0, 0), '구  분');
+                                    setTcText(tcAtAddr(tbl, 0, 1), '위  치');
+                                    setTcText(tcAtAddr(tbl, 0, 2), '평균 경도');
                                     group.forEach((pt, idx) => {
-                                        const pic = pics[idx];
-                                        const { bytes, mime, ext } = dataUrlToBytes(pt._imgUrl);
-                                        zip.file(`BinData/${pt._imgId}.${ext}`, bytes);
-                                        manifestAdds.push(`<opf:item id="${pt._imgId}" href="BinData/${pt._imgId}.${ext}" media-type="${mime}" isEmbeded="1"/>`);
-                                        setPicImage(pic, pt._imgId, pt._imgW, pt._imgH, photoMaxW, photoMaxH);
+                                        try {
+                                            const noCol = 1 + idx * 2;
+                                            setTcText(tcAtAddr(tbl, noCol, 0), `NO. ${pt.seq}`);
+                                            setTcText(tcAtAddr(tbl, noCol, 1), [pt.location, pt.component].filter(Boolean).join(' ') || '-');
+                                            setTcText(tcAtAddr(tbl, noCol, 2), pt._avgText);
+                                            const pic = pics[idx];
+                                            const { bytes, mime, ext } = dataUrlToBytes(pt._imgUrl);
+                                            zip.file(`BinData/${pt._imgId}.${ext}`, bytes);
+                                            manifestAdds.push(`<opf:item id="${pt._imgId}" href="BinData/${pt._imgId}.${ext}" media-type="${mime}" isEmbeded="1"/>`);
+                                            setPicImage(pic, pt._imgId, pt._imgW, pt._imgH, photoMaxW, photoMaxH);
+                                        } catch (e) {
+                                            console.error('반발경도 측정 DATA 표 채우기 실패 (NO.' + pt.seq + '):', e);
+                                        }
                                     });
                                 }
                             }
@@ -32547,6 +32592,8 @@ document.addEventListener('DOMContentLoaded', () => {
             const resp = await fetch(templatePath, { cache: 'no-store' });
             if (!resp.ok) throw new Error('템플릿 파일을 불러오지 못했습니다.');
             const zip = await JSZip.loadAsync(await resp.arrayBuffer());
+            let hwpxHeaderText = null;
+            let hwpxHeaderDirty = false;
 
             const HP_NS = 'http://www.hancom.co.kr/hwpml/2011/paragraph';
             const HC_NS = 'http://www.hancom.co.kr/hwpml/2011/core';
@@ -33875,52 +33922,78 @@ document.addEventListener('DOMContentLoaded', () => {
                                     removeParaRange(allParasForData[headingIdx + 1], dataStopPara);
                                 }
 
+                                // 위치(NO.) 최대 3개를 한 표에 담는다(라벨칸 1 + (NO.칸+사진칸) × 최대
+                                // 3쌍 = 최대 7칸, 사용자가 직접 한글로 만들어 보내준 정상 예시와 동일한
+                                // 구조). 4개 이상이면 표를 새로 만들어 바로 아래에 이어붙이되, 그 예시처럼
+                                // 표 사이에 강제 페이지분할을 넣지 않아 공간이 되면 한 페이지에 이어진다.
+                                const PHOTO_W = 7787, TOTAL_H = 9365 * 3;
+                                const photoMaxW = PHOTO_W - 141 - 141;
+                                const photoMaxH = TOTAL_H - 141 - 141;
+                                const boxAspect = photoMaxW / photoMaxH;
+                                // 각 포인트의 "사진"을 미리 준비한다 — 실제 저장된 측정지 사진이
+                                // 있으면 그걸, 없으면 원시 R값 캔버스를(칸 비율에 맞춰) 대신 그려서
+                                // 똑같이 사진 취급으로 표 안에 넣는다.
+                                for (const pt of dataPoints) {
+                                    const photoUrl = pt.photoId ? await loadStrengthPhotoDataUrl(bldg.id, pt.photoId) : null;
+                                    if (photoUrl) {
+                                        const size = await loadImageSize(photoUrl);
+                                        pt._imgUrl = photoUrl;
+                                        pt._imgW = size.w;
+                                        pt._imgH = size.h;
+                                    } else {
+                                        const canvas = renderStrengthDataRowCanvas(pt, boxAspect);
+                                        pt._imgUrl = canvas.toDataURL('image/png');
+                                        pt._imgW = canvas.width;
+                                        pt._imgH = canvas.height;
+                                    }
+                                    const nums = pt.readings.map(v => parseFloat(v)).filter(v => !isNaN(v));
+                                    pt._avgText = nums.length > 0 ? (nums.reduce((a, b) => a + b, 0) / nums.length).toFixed(1) : '-';
+                                    imgCounter++;
+                                    pt._picId = String(9110000 + imgCounter);
+                                    pt._picInstId = String(9120000 + imgCounter);
+                                    pt._imgId = `strengthDataImg${imgCounter}`;
+                                }
+
+                                // 이 표 전용 테두리 스타일(굵은 가장자리+라벨 그라데이션)을 header.xml에
+                                // 한 번만 추가하고, 이후 표들은 전부 이 id들을 재사용한다.
+                                if (!hwpxHeaderText) hwpxHeaderText = await zip.file('Contents/header.xml').async('string');
+                                const strengthBorders = injectStrengthDataBorderFills(hwpxHeaderText);
+                                hwpxHeaderText = strengthBorders.header;
+                                hwpxHeaderDirty = true;
+                                const strengthBorderIds = strengthBorders.ids;
+
                                 let dataAnchor = dataHeadingPara;
                                 for (let i = 0; i < dataPoints.length; i += 3) {
                                     const group = dataPoints.slice(i, i + 3);
-                                    // 그룹 안 각 포인트의 "사진"을 미리 준비한다 — 실제 저장된 측정지
-                                    // 사진이 있으면 그걸, 없으면 원시 R값 캔버스를 대신 그려서 똑같이
-                                    // 사진 취급으로 표 안에 넣는다.
-                                    for (const pt of group) {
-                                        const photoUrl = pt.photoId ? await loadStrengthPhotoDataUrl(bldg.id, pt.photoId) : null;
-                                        if (photoUrl) {
-                                            const size = await loadImageSize(photoUrl);
-                                            pt._imgUrl = photoUrl;
-                                            pt._imgW = size.w;
-                                            pt._imgH = size.h;
-                                        } else {
-                                            const canvas = renderStrengthDataRowCanvas([pt]);
-                                            pt._imgUrl = canvas.toDataURL('image/png');
-                                            pt._imgW = canvas.width;
-                                            pt._imgH = canvas.height;
-                                        }
-                                        const nums = pt.readings.map(v => parseFloat(v)).filter(v => !isNaN(v));
-                                        pt._avgText = nums.length > 0 ? (nums.reduce((a, b) => a + b, 0) / nums.length).toFixed(1) : '-';
-                                        imgCounter++;
-                                        pt._picId = String(9110000 + imgCounter);
-                                        pt._picInstId = String(9120000 + imgCounter);
-                                        pt._imgId = `strengthDataImg${imgCounter}`;
-                                    }
-
                                     imgCounter++;
                                     const tblId = String(9100000 + imgCounter);
-                                    const xml = buildStrengthPhotoRowGroupXml(group, tblId);
+                                    const xml = buildStrengthPhotoRowGroupXml(group, tblId, strengthBorderIds);
                                     const doc = new DOMParser().parseFromString(`<root xmlns:hp="${HP_NS}" xmlns:hc="${HC_NS}">${xml}</root>`, 'application/xml');
                                     const newPara = xmlDoc.importNode(doc.documentElement.firstChild, true);
                                     dataAnchor.parentNode.insertBefore(newPara, dataAnchor.nextSibling);
                                     dataAnchor = newPara;
 
-                                    // 그룹 안 사진(또는 대체 캔버스)들을 순서대로 이 표의 hp:pic들에 꽂는다.
+                                    // 라벨(구분/위치/평균경도)·NO./위치/평균경도 텍스트를 채우고,
+                                    // 사진(또는 대체 캔버스)들을 순서대로 이 표의 hp:pic들에 꽂는다.
+                                    const tbl = newPara.getElementsByTagNameNS(HP_NS, 'tbl')[0];
                                     const pics = newPara.getElementsByTagNameNS(HP_NS, 'pic');
-                                    const valueW = Math.floor((41821 - 9000) / group.length);
-                                    const photoMaxW = valueW - 141 - 141;
-                                    const photoMaxH = 25000 - 141 - 141;
+                                    setTcText(tcAtAddr(tbl, 0, 0), '구  분');
+                                    setTcText(tcAtAddr(tbl, 0, 1), '위  치');
+                                    setTcText(tcAtAddr(tbl, 0, 2), '평균 경도');
                                     group.forEach((pt, idx) => {
-                                        const pic = pics[idx];
-                                        const { bytes, mime, ext } = dataUrlToBytes(pt._imgUrl);
-                                        zip.file(`BinData/${pt._imgId}.${ext}`, bytes);
-                                        manifestAdds.push(`<opf:item id="${pt._imgId}" href="BinData/${pt._imgId}.${ext}" media-type="${mime}" isEmbeded="1"/>`);
-                                        setPicImage(pic, pt._imgId, pt._imgW, pt._imgH, photoMaxW, photoMaxH);
+                                        try {
+                                            const noCol = 1 + idx * 2;
+                                            setTcText(tcAtAddr(tbl, noCol, 0), `NO. ${pt.seq}`);
+                                            setTcText(tcAtAddr(tbl, noCol, 1), [pt.location, pt.component].filter(Boolean).join(' ') || '-');
+                                            setTcText(tcAtAddr(tbl, noCol, 2), pt._avgText);
+                                            const pic = pics[idx];
+                                            const { bytes, mime, ext } = dataUrlToBytes(pt._imgUrl);
+                                            zip.file(`BinData/${pt._imgId}.${ext}`, bytes);
+                                            manifestAdds.push(`<opf:item id="${pt._imgId}" href="BinData/${pt._imgId}.${ext}" media-type="${mime}" isEmbeded="1"/>`);
+                                            setPicImage(pic, pt._imgId, pt._imgW, pt._imgH, photoMaxW, photoMaxH);
+                                        } catch (e) {
+                                            console.error('반발경도 측정 DATA 표 채우기 실패 (NO.' + pt.seq + '):', e);
+                                        }
                                     });
                                 }
                             }
@@ -34239,6 +34312,10 @@ document.addEventListener('DOMContentLoaded', () => {
             }
 
             Array.from(xmlDoc.getElementsByTagNameNS(HP_NS, 'tbl')).forEach(ensureTblTreatAsChar);
+
+            if (hwpxHeaderDirty && hwpxHeaderText) {
+                zip.file('Contents/header.xml', hwpxHeaderText);
+            }
 
             if (manifestAdds.length > 0) {
                 let hpfText = await zip.file('Contents/content.hpf').async('string');
