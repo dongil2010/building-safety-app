@@ -7675,6 +7675,7 @@ document.addEventListener('DOMContentLoaded', () => {
             showFloorDrawingEmptyState(floorCode);
         }
     }
+    window.loadFloorDrawing = loadFloorDrawing;
 
     function viewToImgCoords(vx, vy) {
         const angle = state.rotationAngle || 0;

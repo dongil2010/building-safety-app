@@ -4,6 +4,7 @@ window.BSA = window.BSA || { tabs: {}, shared: {} };
 (function () {
     var statsView = 'floor';
     var statsBound = false;
+    var selectedComponentGroup = null;
 
     function esc(s) {
         return String(s == null ? '' : s)
@@ -18,6 +19,69 @@ window.BSA = window.BSA || { tabs: {}, shared: {} };
             .split(/[,，]+/)
             .map(function (s) { return s.trim(); })
             .filter(Boolean);
+    }
+
+    // 경사균열/수직균열/수평균열/망상균열/U자형균열은 통계에서 "균열"로 통합 집계
+    var CRACK_KIND_SET = { '수직균열': true, '수평균열': true, '경사균열': true, '망상균열': true, 'U자형균열': true };
+    function normalizeTypeLabel(t) {
+        return CRACK_KIND_SET[t] ? '균열' : t;
+    }
+
+    var COMPONENT_GROUP_ORDER = [
+        { key: 'column', label: '기둥', sort: 1 },
+        { key: 'bigBeam', label: '큰보', sort: 2 },
+        { key: 'smallBeam', label: '작은보', sort: 3 },
+        { key: 'upperBeam', label: '상부 보', sort: 4 },
+        { key: 'slab', label: '슬래브', sort: 5 },
+        { key: 'rcWall', label: 'RC벽체', sort: 6 },
+        { key: 'masonryWall', label: '조적벽체', sort: 7 },
+        { key: 'other', label: '기타 부재', sort: 99 }
+    ];
+    function classifyComponentGroup(component) {
+        var key = String(component || '').replace(/\s+/g, '');
+        if (!key) return 'other';
+        if (key.indexOf('접합') >= 0) return 'other';
+        if (key.indexOf('조적') >= 0) return 'masonryWall';
+        if (key.indexOf('상부보') >= 0) return 'upperBeam';
+        if (key.indexOf('큰보') >= 0) return 'bigBeam';
+        if (key.indexOf('작은보') >= 0) return 'smallBeam';
+        if (key.indexOf('슬래브') >= 0) return 'slab';
+        if (key === 'RC벽체' || key === '벽체' || key === '내력벽') return 'rcWall';
+        if (key.indexOf('기둥') >= 0) return 'column';
+        return 'other';
+    }
+
+    /** 균열폭/길이 자유텍스트 한 조각에서 "폭"에 해당하는 숫자만 뽑는다.
+     * 지원 표기: "Cw:0.4"(폭 라벨), "0.4mm"(단위 명시), "1.0/4.5"(폭/길이, 앞이 폭) */
+    function extractWidthFromSegment(seg) {
+        if (!seg) return null;
+        var cwMatch = seg.match(/cw\s*[:=]?\s*(\d+(?:\.\d+)?)/i);
+        if (cwMatch) return parseFloat(cwMatch[1]);
+        var mmMatch = seg.match(/(\d+(?:\.\d+)?)\s*(?:mm|㎜)/i);
+        if (mmMatch) return parseFloat(mmMatch[1]);
+        var slashMatch = seg.match(/^\s*(\d+(?:\.\d+)?)\s*\/\s*(\d+(?:\.\d+)?)\s*$/);
+        if (slashMatch) return parseFloat(slashMatch[1]);
+        var bareMatch = seg.match(/^\s*(\d+(?:\.\d+)?)\s*$/);
+        if (bareMatch) return parseFloat(bareMatch[1]);
+        return null;
+    }
+
+    /** 균열폭 값 추출. crackWidth("0.15 / 0.20"처럼 여러 측정점의 폭을 슬래시로 이어붙인 값)가
+     * 있으면 그대로 쓰고, 비어 있으면 균열폭/길이 분리 입력 이전 구버전 데이터(자유텍스트 size:
+     * "Cw:0.4", "0.4mm", "1.0/4.5"(앞이 폭·뒤가 길이) 등)에서 폭만 뽑아본다. */
+    function getCrackWidthNumbers(d) {
+        var raw = String(d && d.crackWidth != null ? d.crackWidth : '').trim();
+        if (raw) {
+            return raw.split(/\s*[\/,]\s*/).map(function (part) {
+                var n = parseFloat(String(part).replace(/[^\d.\-]/g, ''));
+                return isNaN(n) ? null : n;
+            }).filter(function (n) { return n != null; });
+        }
+        var sizeRaw = String(d && d.size != null ? d.size : '').trim();
+        if (!sizeRaw) return [];
+        return sizeRaw.split(/\s*,\s*/).map(extractWidthFromSegment).filter(function (n) {
+            return n != null && !isNaN(n);
+        });
     }
 
     function getSurveyRows(defects) {
@@ -57,7 +121,8 @@ window.BSA = window.BSA || { tabs: {}, shared: {} };
             }
             types.forEach(function (t) {
                 if (!t) return;
-                counts[t] = (counts[t] || 0) + 1;
+                var label = normalizeTypeLabel(t);
+                counts[label] = (counts[label] || 0) + 1;
             });
         });
         return counts;
@@ -123,6 +188,7 @@ window.BSA = window.BSA || { tabs: {}, shared: {} };
         var overallCounts = {};
         var totalRows = 0;
         var categoryCounts = { structural: 0, nonStructural: 0, finishing: 0, other: 0 };
+        var componentCounts = {};
 
         var floors = typeof window.getBuildingAvailableFloors === 'function'
             ? window.getBuildingAvailableFloors(bldg) : [];
@@ -149,12 +215,23 @@ window.BSA = window.BSA || { tabs: {}, shared: {} };
             Object.keys(typeCounts).forEach(function (t) {
                 overallCounts[t] = (overallCounts[t] || 0) + typeCounts[t];
             });
+            var floorComponentCounts = {};
+            var floorComponentCrackMax = {};
             rows.forEach(function (d) {
                 var cat = d.category || '구조체';
                 if (cat === '비구조체') categoryCounts.nonStructural += 1;
                 else if (cat === '마감재') categoryCounts.finishing += 1;
                 else if (cat === '구조체') categoryCounts.structural += 1;
                 else categoryCounts.other += 1;
+                var compGroup = classifyComponentGroup(d.component);
+                componentCounts[compGroup] = (componentCounts[compGroup] || 0) + 1;
+                floorComponentCounts[compGroup] = (floorComponentCounts[compGroup] || 0) + 1;
+                getCrackWidthNumbers(d).forEach(function (w) {
+                    var cur = floorComponentCrackMax[compGroup];
+                    if (!cur || w > cur.value) {
+                        floorComponentCrackMax[compGroup] = { value: w, id: d.id || '', no: d.no || d.groupNo || '' };
+                    }
+                });
             });
             totalRows += rows.length;
             floorRows.push({
@@ -162,6 +239,8 @@ window.BSA = window.BSA || { tabs: {}, shared: {} };
                 floorLabel: getFloorLabel(floorCode, bldg),
                 rowCount: rows.length,
                 typeCounts: typeCounts,
+                componentCounts: floorComponentCounts,
+                componentCrackMax: floorComponentCrackMax,
                 coarseGroup: getCoarseFloorGroup(floorCode),
                 zoneInfo: classifyFloorGroup(floorCode)
             });
@@ -199,6 +278,7 @@ window.BSA = window.BSA || { tabs: {}, shared: {} };
             typeKeys: sortedTypeKeys(overallCounts),
             totalRows: totalRows,
             categoryCounts: categoryCounts,
+            componentCounts: componentCounts,
             currentFloor: window.state.currentFloor
         };
     }
@@ -265,20 +345,69 @@ window.BSA = window.BSA || { tabs: {}, shared: {} };
         }).join('');
     }
 
-    function renderBarChart(payload, root) {
+    function renderComponentCrackPanel(payload, root) {
         if (!root || !payload) return;
-        var counts = payload.overallCounts;
-        var keys = payload.typeKeys.slice(0, 12);
-        if (!keys.length) {
-            root.innerHTML = '';
-            return;
+        var counts = payload.componentCounts || {};
+        var groups = COMPONENT_GROUP_ORDER;
+        if (!selectedComponentGroup || !groups.some(function (g) { return g.key === selectedComponentGroup; })) {
+            selectedComponentGroup = groups[0].key;
         }
-        var max = keys.reduce(function (m, k) { return Math.max(m, counts[k] || 0); }, 1);
-        root.innerHTML = '<h4 class="stats-bar-title">전체 결함 종류 분포</h4><div class="stats-bar-list">' + keys.map(function (k) {
-            var n = counts[k] || 0;
-            var pct = Math.round((n / max) * 100);
-            return '<div class="stats-bar-row"><span class="stats-bar-label">' + esc(k) + '</span><div class="stats-bar-track"><div class="stats-bar-fill" style="width:' + pct + '%"></div></div><span class="stats-bar-count">' + n + '</span></div>';
+
+        var chipsHtml = '<div class="chips-container stats-component-chips">' + groups.map(function (g) {
+            var active = g.key === selectedComponentGroup ? ' active' : '';
+            return '<button type="button" class="chip' + active + '" data-component-group="' + esc(g.key) + '">' + esc(g.label) + ' (' + (counts[g.key] || 0) + ')</button>';
         }).join('') + '</div>';
+
+        var activeLabel = groups.filter(function (g) { return g.key === selectedComponentGroup; }).map(function (g) { return g.label; })[0] || '';
+        var floorsWithData = payload.floorRows.filter(function (fr) {
+            return (fr.componentCounts[selectedComponentGroup] || 0) > 0;
+        });
+
+        var tableHtml;
+        if (!floorsWithData.length) {
+            tableHtml = '<p class="stats-empty">' + esc(activeLabel) + ' 결함 데이터가 없습니다.</p>';
+        } else {
+            tableHtml = '<div class="table-responsive stats-table-wrap"><table class="data-table stats-component-crack-table"><thead><tr><th>층</th><th>최대 균열폭(mm)</th><th>결함 번호</th><th>건수</th></tr></thead><tbody>' +
+                floorsWithData.map(function (fr) {
+                    var info = fr.componentCrackMax[selectedComponentGroup];
+                    var isCurrent = fr.floorCode === payload.currentFloor;
+                    var trCls = isCurrent ? ' class="stats-row-current"' : '';
+                    var widthCell = (info && info.value != null) ? info.value : '-';
+                    var noCell = '-';
+                    if (info && info.id) {
+                        var noLabel = info.no ? String(info.no) : '보기';
+                        noCell = '<button type="button" class="stats-defect-no-link" data-defect-id="' + esc(info.id) + '" data-floor-code="' + esc(fr.floorCode) + '">' + esc(noLabel) + '</button>';
+                    }
+                    return '<tr' + trCls + '><th scope="row">' + esc(fr.floorLabel) + '</th><td class="stats-cell-sum">' + widthCell + '</td><td>' + noCell + '</td><td class="' + (fr.componentCounts[selectedComponentGroup] ? 'stats-cell-hit' : 'stats-cell-zero') + '">' + (fr.componentCounts[selectedComponentGroup] || 0) + '</td></tr>';
+                }).join('') + '</tbody></table></div>';
+        }
+
+        root.innerHTML = '<h4 class="stats-bar-title">구조 부재별 층별 최대 균열폭</h4>' + chipsHtml + tableHtml;
+
+        root.querySelectorAll('[data-component-group]').forEach(function (btn) {
+            btn.addEventListener('click', function () {
+                selectedComponentGroup = btn.getAttribute('data-component-group');
+                if (typeof window.renderDefectStatsTab === 'function') window.renderDefectStatsTab();
+            });
+        });
+        root.querySelectorAll('[data-defect-id]').forEach(function (btn) {
+            btn.addEventListener('click', function () {
+                goToDefectOnMap(btn.getAttribute('data-floor-code'), btn.getAttribute('data-defect-id'));
+            });
+        });
+    }
+
+    /** 통계탭의 특정 결함을 결함위치도 작성 화면으로 이동해 선택 표시한다 */
+    function goToDefectOnMap(floorCode, defectId) {
+        if (!floorCode || !defectId || !window.state) return;
+        if (window.state.currentFloor !== floorCode && typeof window.loadFloorDrawing === 'function') {
+            window.loadFloorDrawing(floorCode);
+        }
+        if (typeof window.viewDefectOnMapFromSurvey === 'function') {
+            window.viewDefectOnMapFromSurvey(defectId);
+        } else if (typeof window.switchTab === 'function') {
+            window.switchTab('tab-map');
+        }
     }
 
     function updateHint(view, bldg) {
@@ -318,8 +447,8 @@ window.BSA = window.BSA || { tabs: {}, shared: {} };
 
         var payload = buildStatsPayload(bldg, getStatsOptions());
         renderSummaryCards(payload, document.getElementById('statsSummaryCards'));
+        renderComponentCrackPanel(payload, document.getElementById('statsComponentSection'));
         renderMatrixTable(payload, statsView);
-        renderBarChart(payload, document.getElementById('statsBarSection'));
         updateHint(statsView, bldg);
     };
 
@@ -354,7 +483,8 @@ window.BSA = window.BSA || { tabs: {}, shared: {} };
             '정밀안전점검 시 층 구역 묶음 분석',
             '상태양호 제외 · 금회차만 필터',
             '구조체/비구조체/마감재 요약 카드',
-            '결함 종류 분포 막대 그래프'
+            '구조 부재(기둥·큰보·작은보·상부 보·슬래브·RC벽체·조적벽체) 클릭 시 층별 최대 균열폭 표시',
+            '경사·수직·수평균열은 "균열"로 통합 집계'
         ],
         ownerHint: 'js/tabs/stats.js',
         enter: function () {

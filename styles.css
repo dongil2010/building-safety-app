@@ -8132,12 +8132,12 @@ body:not(.bsa-tab-home) .home-fab-add-building {
 
 .stats-page-title {
     margin: 0;
-    font-size: 1.15rem;
+    font-size: 1.32rem;
 }
 
 .stats-page-sub {
     margin: 0.35rem 0 0;
-    font-size: 0.82rem;
+    font-size: 0.94rem;
     color: #64748b;
 }
 
@@ -8166,15 +8166,20 @@ body:not(.bsa-tab-home) .home-fab-add-building {
     display: inline-flex;
     align-items: center;
     gap: 0.35rem;
-    font-size: 0.82rem;
+    font-size: 0.94rem;
     color: #475569;
     cursor: pointer;
 }
 
 .stats-hint {
     margin: 0 0 0.75rem;
-    font-size: 0.8rem;
+    font-size: 0.92rem;
     color: #64748b;
+}
+
+.stats-page .chip {
+    font-size: 0.92rem;
+    padding: 0.5rem 1rem;
 }
 
 .stats-summary-cards {
@@ -8195,14 +8200,14 @@ body:not(.bsa-tab-home) .home-fab-add-building {
 }
 
 .stats-summary-value {
-    font-size: 1.25rem;
+    font-size: 1.5rem;
     font-weight: 800;
     color: #1e293b;
     line-height: 1.1;
 }
 
 .stats-summary-label {
-    font-size: 0.72rem;
+    font-size: 0.85rem;
     color: #64748b;
 }
 
@@ -8227,7 +8232,7 @@ body:not(.bsa-tab-home) .home-fab-add-building {
 
 .stats-panel-title {
     margin: 0;
-    font-size: 0.95rem;
+    font-size: 1.1rem;
     color: #334155;
 }
 
@@ -8238,7 +8243,7 @@ body:not(.bsa-tab-home) .home-fab-add-building {
 
 .stats-matrix-table th,
 .stats-matrix-table td {
-    font-size: 0.78rem;
+    font-size: 0.95rem;
     vertical-align: middle;
     white-space: nowrap;
 }
@@ -8285,8 +8290,28 @@ body:not(.bsa-tab-home) .home-fab-add-building {
 
 .stats-bar-title {
     margin: 0 0 0.55rem;
-    font-size: 0.85rem;
+    font-size: 1rem;
     color: #475569;
+}
+
+.stats-component-crack-table th,
+.stats-component-crack-table td {
+    font-size: 0.95rem;
+}
+
+.stats-defect-no-link {
+    border: 1px solid var(--accent-blue, #2563eb);
+    background: rgba(37, 99, 235, 0.08);
+    color: var(--accent-blue, #2563eb);
+    font-weight: 700;
+    font-size: 0.85rem;
+    padding: 0.2rem 0.6rem;
+    border-radius: 999px;
+    cursor: pointer;
+}
+
+.stats-defect-no-link:hover {
+    background: rgba(37, 99, 235, 0.16);
 }
 
 .stats-bar-list {
