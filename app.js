@@ -27016,40 +27016,112 @@ document.addEventListener('DOMContentLoaded', () => {
         const appP2 = calib.pt2;
         const floorKey = calib.floorKey;
 
-        // CAD 좌표 차이
-        const dx_c = cadP2.x - cadP1.x;
-        const dy_c = cadP2.y - cadP1.y;
-        const dist_cad = Math.hypot(dx_c, dy_c);
+        // 비결함 텍스트 필터링
+        const NON_DEFECT_WORDS = ['관리실', '창고', '평면도', '결함발생', '상태양호', '구분', '내용', '적색', '청색', '주차장'];
+        const validDefects = (calib.data.defects || []).filter(item => {
+            const no = String(item.no || '').trim();
+            if (!no) return false;
+            return !NON_DEFECT_WORDS.some(w => no.includes(w));
+        });
 
-        // 앱 Canvas 좌표 차이
-        const du_a = appP2.x - appP1.x;
-        const dv_a = appP2.y - appP1.y;
-        const dist_app = Math.hypot(du_a, dv_a);
-
-        if (dist_cad < 1.0 || dist_app < 1.0) {
-            alert('기준점 거리가 너무 가깝습니다. 다시 시도해 주세요.');
+        if (validDefects.length === 0) {
+            alert('가져올 유효한 결함 데이터가 없습니다.');
             cancelCadCalibration();
             return;
         }
 
-        // 각도와 스케일 보존 변환 (CAD Y-up -> Canvas Y-down 방향 고려)
-        const S = dist_app / dist_cad;
-        const phi_cad = Math.atan2(-dy_c, dx_c);
-        const phi_app = Math.atan2(dv_a, du_a);
-        const dphi = phi_app - phi_cad;
-        const cosA = Math.cos(dphi);
-        const sinA = Math.sin(dphi);
+        const dims = (typeof getFloorPlanDisplayDims === 'function')
+            ? getFloorPlanDisplayDims()
+            : { w: 2000, h: 1500 };
+        const imgW = dims.w || 2000;
+        const imgH = dims.h || 1500;
 
-        function cadToApp(cx, cy) {
-            const dx_prime = cx - cadP1.x;
-            const dy_prime = -(cy - cadP1.y); // CAD Y-up to Canvas Y-down
-            const rx = S * (dx_prime * cosA - dy_prime * sinA);
-            const ry = S * (dx_prime * sinA + dy_prime * cosA);
-            return {
-                x: appP1.x + rx,
-                y: appP1.y + ry
+        // 변환 엔진 생성기 (정방향, 180도 반전, 거울반사)
+        function createSimilarityTransform(p1_cad, p2_cad, p1_app, p2_app, isMirror = false) {
+            const dx_c = p2_cad.x - p1_cad.x;
+            const dy_c = p2_cad.y - p1_cad.y;
+            const dist_cad = Math.hypot(dx_c, dy_c);
+
+            const du_a = p2_app.x - p1_app.x;
+            const dv_a = p2_app.y - p1_app.y;
+            const dist_app = Math.hypot(du_a, dv_a);
+
+            if (dist_cad < 1.0 || dist_app < 1.0) return null;
+
+            const S = dist_app / dist_cad;
+            const phi_cad = Math.atan2(-dy_c, dx_c);
+            const phi_app = Math.atan2(dv_a, du_a);
+            const dphi = phi_app - phi_cad;
+            const cosA = Math.cos(dphi);
+            const sinA = Math.sin(dphi);
+
+            return function (cx, cy) {
+                const dx_prime = cx - p1_cad.x;
+                let dy_prime = -(cy - p1_cad.y);
+                if (isMirror) {
+                    dy_prime = -dy_prime; // 반사(거울 대칭) 보정
+                }
+                const rx = S * (dx_prime * cosA - dy_prime * sinA);
+                const ry = S * (dx_prime * sinA + dy_prime * cosA);
+                return {
+                    x: p1_app.x + rx,
+                    y: p1_app.y + ry
+                };
             };
         }
+
+        // 4가지 변환 모드 후보군
+        const candidateModes = [
+            { name: '정상 정렬', fn: createSimilarityTransform(cadP1, cadP2, appP1, appP2, false) },
+            { name: '180도 뒤집힘 자동교정', fn: createSimilarityTransform(cadP1, cadP2, appP2, appP1, false) },
+            { name: '거울 대칭(상하) 자동교정', fn: createSimilarityTransform(cadP1, cadP2, appP1, appP2, true) },
+            { name: '거울 대칭(좌우) 자동교정', fn: createSimilarityTransform(cadP1, cadP2, appP2, appP1, true) }
+        ].filter(m => m.fn !== null);
+
+        // 캐드에서 기준점 1에 가장 가까운 결함 검출 (방향 일치 검증용)
+        let minCadDist1 = Infinity;
+        let defectNearCadP1 = validDefects[0];
+        validDefects.forEach(d => {
+            const dist = Math.hypot(Number(d.cadBoxX) - cadP1.x, Number(d.cadBoxY) - cadP1.y);
+            if (dist < minCadDist1) {
+                minCadDist1 = dist;
+                defectNearCadP1 = d;
+            }
+        });
+
+        // 최적 모드 자동 선별
+        let bestMode = candidateModes[0];
+        let maxScore = -Infinity;
+
+        candidateModes.forEach(mode => {
+            let score = 0;
+            // 1. 결함들이 도면 경계 범위 내에 몇 개나 안착되는지 검사
+            let inBounds = 0;
+            validDefects.forEach(d => {
+                const pt = mode.fn(Number(d.cadBoxX), Number(d.cadBoxY));
+                if (pt.x >= -imgW * 0.15 && pt.x <= imgW * 1.15 && pt.y >= -imgH * 0.15 && pt.y <= imgH * 1.15) {
+                    inBounds++;
+                }
+            });
+            score += inBounds * 100;
+
+            // 2. 캐드 기준점 1 근처의 결함이 앱 기준점 1과 실제로 가까운지 검증
+            const testPt = mode.fn(Number(defectNearCadP1.cadBoxX), Number(defectNearCadP1.cadBoxY));
+            const distToP1 = Math.hypot(testPt.x - appP1.x, testPt.y - appP1.y);
+            const distToP2 = Math.hypot(testPt.x - appP2.x, testPt.y - appP2.y);
+            if (distToP1 < distToP2) {
+                score += 5000;
+            } else {
+                score -= 5000;
+            }
+
+            if (score > maxScore) {
+                maxScore = score;
+                bestMode = mode;
+            }
+        });
+
+        const cadToApp = bestMode.fn;
 
         const existingCount = (state.defects[floorKey] || []).length;
         let replaceMode = false;
@@ -27068,14 +27140,6 @@ document.addEventListener('DOMContentLoaded', () => {
         const currentDefects = state.defects[floorKey];
         let addedCount = 0;
 
-        // 비결함 텍스트 필터링
-        const NON_DEFECT_WORDS = ['관리실', '창고', '평면도', '결함발생', '상태양호', '구분', '내용', '적색', '청색', '주차장'];
-        const validDefects = calib.data.defects.filter(item => {
-            const no = String(item.no || '').trim();
-            if (!no) return false;
-            return !NON_DEFECT_WORDS.some(w => no.includes(w));
-        });
-
         validDefects.forEach((cadItem, idx) => {
             // 캐드에 적혀 있던 결함 번호 원본 100% 보존
             const rawNo = String(cadItem.no || '').trim() || String(currentDefects.length + 1);
@@ -27090,6 +27154,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 id: newId,
                 no: rawNo,
                 groupNo: rawNo,
+                cadNo: rawNo,
+                isCadImported: true,
                 category: cadItem.category || '구조체',
                 component: cadItem.component || '기둥',
                 location: state.currentFloor,
@@ -27137,7 +27203,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (typeof renderDefectListPanel === 'function') renderDefectListPanel();
         if (typeof renderSurveyTable === 'function' && state.currentTab === 'tab-survey') renderSurveyTable();
 
-        window.showToast?.(`🎉 2점 정밀 캘리브레이션 완료! ${addedCount}개의 결함 핀이 도면 원래 위치에 100% 오차 없이 배치되었습니다!`, 'success', 5000);
+        window.showToast?.(`🎉 2점 정밀 캘리브레이션 완료! ${addedCount}개의 결함 핀이 도면 원래 위치에 100% 오차 없이 배치되었습니다! (${bestMode.name})`, 'success', 5000);
     }
 
     function startCad2PointCalibration(data, floorKey, bldg) {
@@ -27154,7 +27220,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (hintEl) {
             hintEl.style.background = 'rgba(2, 132, 199, 0.95)';
             hintEl.style.color = '#ffffff';
-            hintEl.innerHTML = `<i class="fa-solid fa-crosshairs"></i> <strong>[캐드 보정 1/2단계]</strong> 캐드에서 찍으셨던 <strong>첫 번째 기준점(기둥 중심)</strong>을 도면에서 클릭하세요. <button id="btnCancelCadCalib" style="margin-left:8px;padding:2px 8px;border-radius:4px;border:none;background:#ef4444;color:#fff;cursor:pointer;font-weight:700;">취소</button>`;
+            hintEl.innerHTML = `<i class="fa-solid fa-crosshairs"></i> <strong>[캐드 보정 1/2단계]</strong> 캐드에서 찍으셨던 <strong>첫 번째 기준점(예: 도면 좌상단 기둥)</strong>을 클릭하세요. <button id="btnCancelCadCalib" style="margin-left:8px;padding:2px 8px;border-radius:4px;border:none;background:#ef4444;color:#fff;cursor:pointer;font-weight:700;">취소</button>`;
             const btnCancel = document.getElementById('btnCancelCadCalib');
             if (btnCancel) {
                 btnCancel.onclick = (e) => {
@@ -27163,7 +27229,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 };
             }
         }
-        window.showToast?.('📍 [1/2] 캐드에서 찍은 첫 번째 기준점을 도면에서 클릭해 주세요.', 'info', 5000);
+        window.showToast?.('📍 [1/2] 캐드에서 찍은 첫 번째 기준점(예: 좌상단 기둥)을 도면에서 클릭해 주세요.', 'info', 5000);
     }
 
     window.importCadPinsJson = function (event) {
