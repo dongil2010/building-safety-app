@@ -7991,6 +7991,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 ctx.restore();
             }
         }
+        }
 
         ctx.restore(); // Restore drawing rotation matrix
 
