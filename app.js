@@ -27139,6 +27139,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const currentDefects = state.defects[floorKey];
         let addedCount = 0;
+        const newDefectsList = [];
 
         validDefects.forEach((cadItem, idx) => {
             // 캐드에 적혀 있던 결함 번호 원본 100% 보존
@@ -27192,6 +27193,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
 
             currentDefects.push(newDefect);
+            newDefectsList.push(newDefect);
             addedCount++;
         });
 
@@ -27203,7 +27205,154 @@ document.addEventListener('DOMContentLoaded', () => {
         if (typeof renderDefectListPanel === 'function') renderDefectListPanel();
         if (typeof renderSurveyTable === 'function' && state.currentTab === 'tab-survey') renderSurveyTable();
 
-        window.showToast?.(`🎉 2점 정밀 캘리브레이션 완료! ${addedCount}개의 결함 핀이 도면 원래 위치에 100% 오차 없이 배치되었습니다! (${bestMode.name})`, 'success', 5000);
+        window.showToast?.(`🎉 캐드 결함 핀 ${addedCount}개가 배치되었습니다! 상단 조정 바로 좌우 반전 및 위치를 맞춰보세요.`, 'success', 6000);
+        showCadPinAdjustToolbar(newDefectsList, floorKey);
+    }
+
+    function showCadPinAdjustToolbar(importedDefects, floorKey) {
+        const oldBar = document.getElementById('cadPinAdjustBar');
+        if (oldBar) oldBar.remove();
+
+        const bar = document.createElement('div');
+        bar.id = 'cadPinAdjustBar';
+        bar.style.cssText = `
+            position: fixed;
+            top: 75px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 100000;
+            background: rgba(15, 23, 42, 0.96);
+            color: #ffffff;
+            padding: 9px 16px;
+            border-radius: 12px;
+            box-shadow: 0 12px 36px rgba(0, 0, 0, 0.6);
+            display: flex;
+            align-items: center;
+            gap: 7px;
+            font-size: 13px;
+            font-weight: 700;
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(56, 189, 248, 0.4);
+            flex-wrap: wrap;
+            justify-content: center;
+        `;
+
+        const importedIds = new Set(importedDefects.map(d => d.id));
+        const getTargets = () => (state.defects[floorKey] || []).filter(d => importedIds.has(d.id));
+
+        function getCenter() {
+            const targets = getTargets();
+            if (!targets.length) return { cx: 0, cy: 0 };
+            let sx = 0, sy = 0;
+            targets.forEach(d => { sx += d.x; sy += d.y; });
+            return { cx: sx / targets.length, cy: sy / targets.length };
+        }
+
+        bar.innerHTML = `
+            <span style="color:#38bdf8;margin-right:2px;"><i class="fa-solid fa-arrows-to-dot"></i> [캐드 핀 위치 맞춤]</span>
+            <button id="btnCadBarFlipH" title="좌우가 뒤집혔을 때 누르세요" style="background:#0284c7;color:#fff;border:none;padding:5px 10px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:700;">🔄 좌우 반전</button>
+            <button id="btnCadBarFlipV" title="상하가 뒤집혔을 때 누르세요" style="background:#0284c7;color:#fff;border:none;padding:5px 10px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:700;">🔄 상하 반전</button>
+            <button id="btnCadBarRot180" title="180도 회전" style="background:#6366f1;color:#fff;border:none;padding:5px 10px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:700;">🔄 180° 회전</button>
+            <span style="color:#64748b;margin:0 2px;">|</span>
+            <span style="font-size:12px;color:#cbd5e1;">위치이동:</span>
+            <button id="btnCadBarUp" style="background:#334155;color:#fff;border:none;padding:5px 8px;border-radius:6px;cursor:pointer;font-size:12px;">⬆️</button>
+            <button id="btnCadBarDown" style="background:#334155;color:#fff;border:none;padding:5px 8px;border-radius:6px;cursor:pointer;font-size:12px;">⬇️</button>
+            <button id="btnCadBarLeft" style="background:#334155;color:#fff;border:none;padding:5px 8px;border-radius:6px;cursor:pointer;font-size:12px;">⬅️</button>
+            <button id="btnCadBarRight" style="background:#334155;color:#fff;border:none;padding:5px 8px;border-radius:6px;cursor:pointer;font-size:12px;">➡️</button>
+            <span style="color:#64748b;margin:0 2px;">|</span>
+            <span style="font-size:12px;color:#cbd5e1;">간격:</span>
+            <button id="btnCadBarScaleUp" style="background:#334155;color:#fff;border:none;padding:5px 8px;border-radius:6px;cursor:pointer;font-size:12px;">➕</button>
+            <button id="btnCadBarScaleDown" style="background:#334155;color:#fff;border:none;padding:5px 8px;border-radius:6px;cursor:pointer;font-size:12px;">➖</button>
+            <span style="color:#64748b;margin:0 4px;">|</span>
+            <button id="btnCadBarConfirm" style="background:#10b981;color:#fff;border:none;padding:6px 14px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:800;">✅ 이 위치로 확정</button>
+        `;
+
+        document.body.appendChild(bar);
+
+        const stepMove = 25;
+
+        // 1. 좌우 반전
+        document.getElementById('btnCadBarFlipH').onclick = () => {
+            const { cx } = getCenter();
+            getTargets().forEach(d => {
+                d.x = Math.round(cx - (d.x - cx));
+                if (d.targetX !== undefined) d.targetX = Math.round(cx - (d.targetX - cx));
+            });
+            drawCanvas();
+        };
+
+        // 2. 상하 반전
+        document.getElementById('btnCadBarFlipV').onclick = () => {
+            const { cy } = getCenter();
+            getTargets().forEach(d => {
+                d.y = Math.round(cy - (d.y - cy));
+                if (d.targetY !== undefined) d.targetY = Math.round(cy - (d.targetY - cy));
+            });
+            drawCanvas();
+        };
+
+        // 3. 180도 회전
+        document.getElementById('btnCadBarRot180').onclick = () => {
+            const { cx, cy } = getCenter();
+            getTargets().forEach(d => {
+                d.x = Math.round(2 * cx - d.x);
+                d.y = Math.round(2 * cy - d.y);
+                if (d.targetX !== undefined) d.targetX = Math.round(2 * cx - d.targetX);
+                if (d.targetY !== undefined) d.targetY = Math.round(2 * cy - d.targetY);
+            });
+            drawCanvas();
+        };
+
+        // 4. 상하좌우 이동
+        document.getElementById('btnCadBarUp').onclick = () => {
+            getTargets().forEach(d => { d.y -= stepMove; if (d.targetY !== undefined) d.targetY -= stepMove; });
+            drawCanvas();
+        };
+        document.getElementById('btnCadBarDown').onclick = () => {
+            getTargets().forEach(d => { d.y += stepMove; if (d.targetY !== undefined) d.targetY += stepMove; });
+            drawCanvas();
+        };
+        document.getElementById('btnCadBarLeft').onclick = () => {
+            getTargets().forEach(d => { d.x -= stepMove; if (d.targetX !== undefined) d.targetX -= stepMove; });
+            drawCanvas();
+        };
+        document.getElementById('btnCadBarRight').onclick = () => {
+            getTargets().forEach(d => { d.x += stepMove; if (d.targetX !== undefined) d.targetX += stepMove; });
+            drawCanvas();
+        };
+
+        // 5. 간격 확대/축소
+        document.getElementById('btnCadBarScaleUp').onclick = () => {
+            const { cx, cy } = getCenter();
+            const factor = 1.02;
+            getTargets().forEach(d => {
+                d.x = Math.round(cx + (d.x - cx) * factor);
+                d.y = Math.round(cy + (d.y - cy) * factor);
+                if (d.targetX !== undefined) d.targetX = Math.round(cx + (d.targetX - cx) * factor);
+                if (d.targetY !== undefined) d.targetY = Math.round(cy + (d.targetY - cy) * factor);
+            });
+            drawCanvas();
+        };
+        document.getElementById('btnCadBarScaleDown').onclick = () => {
+            const { cx, cy } = getCenter();
+            const factor = 0.98;
+            getTargets().forEach(d => {
+                d.x = Math.round(cx + (d.x - cx) * factor);
+                d.y = Math.round(cy + (d.y - cy) * factor);
+                if (d.targetX !== undefined) d.targetX = Math.round(cx + (d.targetX - cx) * factor);
+                if (d.targetY !== undefined) d.targetY = Math.round(cy + (d.targetY - cy) * factor);
+            });
+            drawCanvas();
+        };
+
+        // 6. 확정
+        document.getElementById('btnCadBarConfirm').onclick = () => {
+            saveStateToLocalStorage();
+            bar.remove();
+            if (typeof renderDefectListPanel === 'function') renderDefectListPanel();
+            if (typeof renderSurveyTable === 'function' && state.currentTab === 'tab-survey') renderSurveyTable();
+            window.showToast?.('🎉 캐드 핀 위치가 최종 확정되어 안전하게 저장되었습니다!', 'success', 3500);
+        };
     }
 
     function startCad2PointCalibration(data, floorKey, bldg) {
