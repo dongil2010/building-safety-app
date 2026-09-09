@@ -307,6 +307,10 @@
                                 <button type="button" id="btnRotateDrawing" class="btn-rotate-hero" title="세로 도면 가로로 90도 회전">
                                     <i class="fa-solid fa-rotate-right"></i> 🔄 회전
                                 </button>
+                                <button type="button" id="btnImportCadPins" class="btn-rotate-hero pc-only-chrome" style="background:linear-gradient(135deg, #0284c7, #0369a1); color:#fff; border-color:#38bdf8;" title="AutoCAD(CAD2APP)에서 추출한 cad_defects_import.json 파일을 현재 층에 자동 매핑">
+                                    <i class="fa-solid fa-compass-drafting"></i> 📐 캐드 핀 가져오기
+                                </button>
+                                <input type="file" id="inputImportCadPins" accept=".json" style="display:none;">
                                 <div class="zoom-pill-group">
                                     <button id="btnZoomIn" class="zoom-pill-btn" title="확대 (+)"><i class="fa-solid fa-plus"></i></button>
                                     <span id="zoomScaleText" class="zoom-pill-badge">100%</span>

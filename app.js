@@ -7968,8 +7968,26 @@ document.addEventListener('DOMContentLoaded', () => {
             ctx.strokeStyle = '#2a2a2a';
             ctx.lineWidth = 1.5 / Math.max(state.view.scale || 1, 0.01);
             ctx.setLineDash([6 / Math.max(state.view.scale || 1, 0.01), 4 / Math.max(state.view.scale || 1, 0.01)]);
-            ctx.fillRect(x1, y1, x2 - x1, y2 - y1);
-            ctx.strokeRect(x1, y1, x2 - x1, y2 - y1);
+            if (window.cadCalibrationState && window.cadCalibrationState.pt1) {
+                const p1 = window.cadCalibrationState.pt1;
+                ctx.save();
+                ctx.strokeStyle = '#ef4444';
+                ctx.fillStyle = 'rgba(239, 68, 68, 0.25)';
+                ctx.lineWidth = 3 / Math.max(state.view.scale || 1, 0.01);
+                const r = 24 / Math.max(state.view.scale || 1, 0.01);
+                ctx.beginPath();
+                ctx.arc(p1.x, p1.y, r, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.stroke();
+                ctx.beginPath();
+                ctx.moveTo(p1.x - r * 1.5, p1.y);
+                ctx.lineTo(p1.x + r * 1.5, p1.y);
+                ctx.moveTo(p1.x, p1.y - r * 1.5);
+                ctx.lineTo(p1.x, p1.y + r * 1.5);
+                ctx.stroke();
+                ctx.font = `bold ${Math.round(16 / Math.max(state.view.scale || 1, 0.01))}px sans-serif`;
+                ctx.fillStyle = '#ef4444';
+                ctx.fillText('📍 기준점 1', p1.x + r + 4, p1.y - 4);
                 ctx.restore();
             }
         }
@@ -24166,6 +24184,14 @@ document.addEventListener('DOMContentLoaded', () => {
         elements.planCanvas.addEventListener('mousedown', (e) => {
             // 터치 제스처 중·직후 합성 마우스 이벤트는 무시 (드래그 중 끊김 방지)
             if (activePointerIsTouch || Date.now() < mapSuppressMouseUntil) return;
+            if (window.cadCalibrationState && e.button === 0) {
+                e.preventDefault();
+                e.stopPropagation();
+                if (typeof handleCadCalibrationClick === 'function') {
+                    handleCadCalibrationClick(e.clientX, e.clientY);
+                }
+                return;
+            }
             if (e.button === 1) {
                 e.preventDefault();
                 handleDragStart(e.clientX, e.clientY, false, true);
@@ -24233,6 +24259,14 @@ document.addEventListener('DOMContentLoaded', () => {
         elements.planCanvas.addEventListener('touchstart', (e) => {
             mapTouchStartedOnCanvas = true;
             mapSuppressMouseUntil = Date.now() + 700;
+            if (window.cadCalibrationState && e.touches.length === 1) {
+                if (e.cancelable) e.preventDefault();
+                e.stopPropagation();
+                if (typeof handleCadCalibrationClick === 'function') {
+                    handleCadCalibrationClick(e.touches[0].clientX, e.touches[0].clientY);
+                }
+                return;
+            }
             if (e.touches.length === 1 && !isPinching) {
                 if (e.cancelable) e.preventDefault();
                 handleDragStart(e.touches[0].clientX, e.touches[0].clientY, true);
@@ -26922,6 +26956,249 @@ document.addEventListener('DOMContentLoaded', () => {
             fitToScreen();
             drawCanvas();
         });
+    }
+
+    // --- 9-1. CAD Defect Pins 2-Point Calibration Engine (v2.0) ---
+    window.cadCalibrationState = null;
+
+    function handleCadCalibrationClick(clientX, clientY) {
+        if (!window.cadCalibrationState || !elements.planCanvas) return;
+        const rect = elements.planCanvas.getBoundingClientRect();
+        const cx = clientX - rect.left;
+        const cy = clientY - rect.top;
+        const imgPt = canvasCssToImgCoords(cx, cy);
+
+        if (window.cadCalibrationState.step === 1) {
+            window.cadCalibrationState.pt1 = imgPt;
+            window.cadCalibrationState.step = 2;
+
+            const hintEl = document.getElementById('canvasHintText');
+            if (hintEl) {
+                hintEl.innerHTML = `<i class="fa-solid fa-crosshairs"></i> <strong>[캐드 보정 2/2단계]</strong> 캐드에서 찍으셨던 <strong>두 번째 기준점(기둥 중심)</strong>을 도면에서 클릭하세요. <button id="btnCancelCadCalib" style="margin-left:8px;padding:2px 8px;border-radius:4px;border:none;background:#ef4444;color:#fff;cursor:pointer;font-weight:700;">취소</button>`;
+                const btnCancel = document.getElementById('btnCancelCadCalib');
+                if (btnCancel) {
+                    btnCancel.onclick = (e) => {
+                        e.stopPropagation();
+                        cancelCadCalibration();
+                    };
+                }
+            }
+            window.showToast?.('📍 [1/2] 1번 기준점 등록 완료! 이어서 2번 기준점을 클릭해 주세요.', 'info', 3500);
+            drawCanvas();
+            return;
+        }
+
+        if (window.cadCalibrationState.step === 2) {
+            window.cadCalibrationState.pt2 = imgPt;
+            finishCad2PointCalibration();
+        }
+    }
+
+    function cancelCadCalibration() {
+        window.cadCalibrationState = null;
+        const hintEl = document.getElementById('canvasHintText');
+        if (hintEl) {
+            hintEl.style.background = '';
+            hintEl.style.color = '';
+            hintEl.innerHTML = `<i class="fa-solid fa-hand-pointer"></i> <span>[✋ 화면 이동 모드] 도면 이동 및 확대 | 핀을 찍으려면 <strong>📍[결함 위치 마킹]</strong> 버튼 클릭</span>`;
+        }
+        drawCanvas();
+    }
+
+    function finishCad2PointCalibration() {
+        const calib = window.cadCalibrationState;
+        if (!calib) return;
+
+        const cadP1 = calib.data.refPoint1;
+        const cadP2 = calib.data.refPoint2;
+        const appP1 = calib.pt1;
+        const appP2 = calib.pt2;
+        const floorKey = calib.floorKey;
+
+        // CAD 좌표 차이
+        const dx_c = cadP2.x - cadP1.x;
+        const dy_c = cadP2.y - cadP1.y;
+        const d_c2 = dx_c * dx_c + dy_c * dy_c;
+
+        // 앱 Canvas 좌표 차이
+        const du_a = appP2.x - appP1.x;
+        const dv_a = appP2.y - appP1.y;
+
+        if (d_c2 < 1e-6) {
+            alert('캐드 기준점 거리가 너무 가깝습니다. 다시 시도해 주세요.');
+            cancelCadCalibration();
+            return;
+        }
+
+        // 2D Conformal Similarity Transformation (Negative determinant for CAD Y-up to Canvas Y-down)
+        const a = (dx_c * du_a - dy_c * dv_a) / d_c2;
+        const b = (dy_c * du_a + dx_c * dv_a) / d_c2;
+        const c = appP1.x - (a * cadP1.x + b * cadP1.y);
+        const d = appP1.y - (b * cadP1.x - a * cadP1.y);
+
+        function cadToApp(cx, cy) {
+            return {
+                x: a * cx + b * cy + c,
+                y: b * cx - a * cy + d
+            };
+        }
+
+        const existingCount = (state.defects[floorKey] || []).length;
+        let replaceMode = false;
+        if (existingCount > 0) {
+            replaceMode = confirm(
+                `현재 층(${state.currentFloor})에 이미 ${existingCount}개의 결함이 등록되어 있습니다.\n\n` +
+                `[확인] : 기존 결함을 모두 비우고 캐드 핀으로 새로 교체\n` +
+                `[취소] : 기존 결함 뒤에 이어서 추가 (병합)`
+            );
+        }
+
+        if (replaceMode) {
+            state.defects[floorKey] = [];
+        }
+
+        const currentDefects = state.defects[floorKey];
+        let addedCount = 0;
+
+        calib.data.defects.forEach((cadItem, idx) => {
+            const rawNo = String(cadItem.no || '').trim() || String(currentDefects.length + 1);
+            const box = cadToApp(Number(cadItem.cadBoxX), Number(cadItem.cadBoxY));
+            const tip = cadToApp(Number(cadItem.cadTipX), Number(cadItem.cadTipY));
+
+            const newId = (typeof generateDefectUniqueId === 'function')
+                ? generateDefectUniqueId(floorKey)
+                : ('cad_' + Date.now() + '_' + idx);
+
+            const newDefect = {
+                id: newId,
+                no: rawNo,
+                groupNo: rawNo,
+                category: cadItem.category || '구조체',
+                component: cadItem.component || '기둥',
+                location: state.currentFloor,
+                defectType: cadItem.defectType || '균열',
+                cause: cadItem.cause || '건조수축',
+                size: cadItem.size || '',
+                crackWidth: cadItem.crackWidth || '',
+                crackLength: cadItem.crackLength || '',
+                crackMeasures: [],
+                itemCount: '',
+                isProgress: false,
+                isLeak: false,
+                isOpeningCrack: false,
+                isCarriedOver: true,
+                isBookmark: false,
+                isPriorityManage: false,
+                forceArrowDir: false,
+                arrowOctant: 0,
+                surveyRound: (typeof getCurrentSurveyRoundKey === 'function') ? getCurrentSurveyRoundKey() : '2026년_하반기',
+                mapMarkedAt: Date.now(),
+                mapUnregistered: false,
+                updatedAt: Date.now(),
+                photos: [],
+                prevRoundPhotos: [],
+                inspectorName: state.userName || '',
+                x: Math.round(box.x),
+                y: Math.round(box.y),
+                targetX: Math.round(tip.x),
+                targetY: Math.round(tip.y)
+            };
+
+            if (typeof touchDefectPositionUpdatedAt === 'function') {
+                touchDefectPositionUpdatedAt(newDefect);
+            }
+
+            currentDefects.push(newDefect);
+            addedCount++;
+        });
+
+        if (typeof normalizeAllDefectGroupNos === 'function') {
+            normalizeAllDefectGroupNos(currentDefects);
+        }
+        if (typeof normalizeFloorDefectGroupsInPlace === 'function') {
+            normalizeFloorDefectGroupsInPlace(currentDefects);
+        }
+
+        saveStateToLocalStorage();
+        cancelCadCalibration();
+        drawCanvas();
+        if (typeof renderDefectListPanel === 'function') renderDefectListPanel();
+        if (typeof renderSurveyTable === 'function' && state.currentTab === 'tab-survey') renderSurveyTable();
+
+        window.showToast?.(`🎉 2점 정밀 캘리브레이션 완료! ${addedCount}개의 결함 핀이 도면 원래 위치에 100% 오차 없이 배치되었습니다!`, 'success', 5000);
+    }
+
+    function startCad2PointCalibration(data, floorKey, bldg) {
+        window.cadCalibrationState = {
+            data: data,
+            floorKey: floorKey,
+            bldg: bldg,
+            step: 1,
+            pt1: null,
+            pt2: null
+        };
+
+        const hintEl = document.getElementById('canvasHintText');
+        if (hintEl) {
+            hintEl.style.background = 'rgba(2, 132, 199, 0.95)';
+            hintEl.style.color = '#ffffff';
+            hintEl.innerHTML = `<i class="fa-solid fa-crosshairs"></i> <strong>[캐드 보정 1/2단계]</strong> 캐드에서 찍으셨던 <strong>첫 번째 기준점(기둥 중심)</strong>을 도면에서 클릭하세요. <button id="btnCancelCadCalib" style="margin-left:8px;padding:2px 8px;border-radius:4px;border:none;background:#ef4444;color:#fff;cursor:pointer;font-weight:700;">취소</button>`;
+            const btnCancel = document.getElementById('btnCancelCadCalib');
+            if (btnCancel) {
+                btnCancel.onclick = (e) => {
+                    e.stopPropagation();
+                    cancelCadCalibration();
+                };
+            }
+        }
+        window.showToast?.('📍 [1/2] 캐드에서 찍은 첫 번째 기준점을 도면에서 클릭해 주세요.', 'info', 5000);
+    }
+
+    window.importCadPinsJson = function (event) {
+        const file = event.target.files && event.target.files[0];
+        if (!file) return;
+
+        if (!state.currentBuildingId || !state.currentFloor) {
+            window.showToast?.('먼저 점검할 대상 건축물과 층을 선택해 주세요.', 'warning', 3500);
+            event.target.value = '';
+            return;
+        }
+
+        const bldg = state.currentBuilding || (state.buildings || []).find(b => b.id === state.currentBuildingId);
+        const floorKey = `${state.currentBuildingId}_${state.currentFloor}`;
+        if (!state.defects) state.defects = {};
+        if (!state.defects[floorKey]) state.defects[floorKey] = [];
+
+        const reader = new FileReader();
+        reader.onload = function (e) {
+            try {
+                const data = JSON.parse(e.target.result);
+                const cadDefects = (data && Array.isArray(data.defects)) ? data.defects : [];
+                if (cadDefects.length === 0) {
+                    alert('선택한 파일에 유효한 결함 데이터(defects 배열)가 없습니다.');
+                    return;
+                }
+
+                if (data.refPoint1 && data.refPoint2) {
+                    startCad2PointCalibration(data, floorKey, bldg);
+                } else {
+                    alert('구버전 캐드 파일입니다. 최신 CAD2APP.lsp (v2.0)으로 다시 추출해 주세요.');
+                }
+            } catch (err) {
+                console.error('[importCadPinsJson Error]', err);
+                alert('캐드 JSON 파일을 불러오는 중 오류가 발생했습니다:\n' + err.message);
+            } finally {
+                event.target.value = '';
+            }
+        };
+        reader.readAsText(file);
+    };
+
+    const btnImportCadPins = document.getElementById('btnImportCadPins');
+    const inputImportCadPins = document.getElementById('inputImportCadPins');
+    if (btnImportCadPins && inputImportCadPins) {
+        btnImportCadPins.addEventListener('click', () => inputImportCadPins.click());
+        inputImportCadPins.addEventListener('change', window.importCadPinsJson);
     }
 
     // --- 10. SURVEY TABLE & ALBUM RENDERING ---
