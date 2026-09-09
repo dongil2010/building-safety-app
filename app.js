@@ -27019,28 +27019,35 @@ document.addEventListener('DOMContentLoaded', () => {
         // CAD 좌표 차이
         const dx_c = cadP2.x - cadP1.x;
         const dy_c = cadP2.y - cadP1.y;
-        const d_c2 = dx_c * dx_c + dy_c * dy_c;
+        const dist_cad = Math.hypot(dx_c, dy_c);
 
         // 앱 Canvas 좌표 차이
         const du_a = appP2.x - appP1.x;
         const dv_a = appP2.y - appP1.y;
+        const dist_app = Math.hypot(du_a, dv_a);
 
-        if (d_c2 < 1e-6) {
-            alert('캐드 기준점 거리가 너무 가깝습니다. 다시 시도해 주세요.');
+        if (dist_cad < 1.0 || dist_app < 1.0) {
+            alert('기준점 거리가 너무 가깝습니다. 다시 시도해 주세요.');
             cancelCadCalibration();
             return;
         }
 
-        // 2D Conformal Similarity Transformation (Negative determinant for CAD Y-up to Canvas Y-down)
-        const a = (dx_c * du_a - dy_c * dv_a) / d_c2;
-        const b = (dy_c * du_a + dx_c * dv_a) / d_c2;
-        const c = appP1.x - (a * cadP1.x + b * cadP1.y);
-        const d = appP1.y - (b * cadP1.x - a * cadP1.y);
+        // 각도와 스케일 보존 변환 (CAD Y-up -> Canvas Y-down 방향 고려)
+        const S = dist_app / dist_cad;
+        const phi_cad = Math.atan2(-dy_c, dx_c);
+        const phi_app = Math.atan2(dv_a, du_a);
+        const dphi = phi_app - phi_cad;
+        const cosA = Math.cos(dphi);
+        const sinA = Math.sin(dphi);
 
         function cadToApp(cx, cy) {
+            const dx_prime = cx - cadP1.x;
+            const dy_prime = -(cy - cadP1.y); // CAD Y-up to Canvas Y-down
+            const rx = S * (dx_prime * cosA - dy_prime * sinA);
+            const ry = S * (dx_prime * sinA + dy_prime * cosA);
             return {
-                x: a * cx + b * cy + c,
-                y: b * cx - a * cy + d
+                x: appP1.x + rx,
+                y: appP1.y + ry
             };
         }
 
@@ -27061,7 +27068,16 @@ document.addEventListener('DOMContentLoaded', () => {
         const currentDefects = state.defects[floorKey];
         let addedCount = 0;
 
-        calib.data.defects.forEach((cadItem, idx) => {
+        // 비결함 텍스트 필터링
+        const NON_DEFECT_WORDS = ['관리실', '창고', '평면도', '결함발생', '상태양호', '구분', '내용', '적색', '청색', '주차장'];
+        const validDefects = calib.data.defects.filter(item => {
+            const no = String(item.no || '').trim();
+            if (!no) return false;
+            return !NON_DEFECT_WORDS.some(w => no.includes(w));
+        });
+
+        validDefects.forEach((cadItem, idx) => {
+            // 캐드에 적혀 있던 결함 번호 원본 100% 보존
             const rawNo = String(cadItem.no || '').trim() || String(currentDefects.length + 1);
             const box = cadToApp(Number(cadItem.cadBoxX), Number(cadItem.cadBoxY));
             const tip = cadToApp(Number(cadItem.cadTipX), Number(cadItem.cadTipY));
@@ -27113,12 +27129,7 @@ document.addEventListener('DOMContentLoaded', () => {
             addedCount++;
         });
 
-        if (typeof normalizeAllDefectGroupNos === 'function') {
-            normalizeAllDefectGroupNos(currentDefects);
-        }
-        if (typeof normalizeFloorDefectGroupsInPlace === 'function') {
-            normalizeFloorDefectGroupsInPlace(currentDefects);
-        }
+        // 캐드 원본 번호 유지를 위해 번호 재정렬(normalize)은 호출하지 않음
 
         saveStateToLocalStorage();
         cancelCadCalibration();
