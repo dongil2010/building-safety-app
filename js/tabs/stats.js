@@ -103,7 +103,8 @@ window.BSA = window.BSA || { tabs: {}, shared: {} };
         if (!d) return false;
         if (opts.excludeGood) {
             var types = parseDefectTypeList(d.defectType);
-            if (!types.length || (types.length === 1 && types[0] === '상태양호')) return false;
+            // "접합부 상태양호"처럼 부재명과 붙여 쓴 경우도 상태양호로 인식해 제외한다
+            if (!types.length || (types.length === 1 && String(types[0] || '').indexOf('상태양호') !== -1)) return false;
         }
         if (opts.currentRoundOnly && typeof window.isPreviousRoundDefect === 'function') {
             if (window.isPreviousRoundDefect(d)) return false;

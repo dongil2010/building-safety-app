@@ -8577,9 +8577,15 @@ document.addEventListener('DOMContentLoaded', () => {
         return (state.styleColors && state.styleColors[key]) || DEFAULT_STYLE_COLORS[key];
     }
 
+    // 결함 종류 텍스트에 "상태양호"가 들어있으면 양호로 인식한다
+    // (예: "접합부 상태양호", "단열재 상태양호"처럼 부재명과 붙여 쓴 경우도 포함)
+    function isGoodDefectType(defectType) {
+        return String(defectType || '').includes('상태양호');
+    }
+
     // 결함(구조체/비구조체/마감재) 카테고리 → 스타일 설정 키 매핑 (색상/크기 공용)
     function getDefectStyleKey(category, defectType) {
-        const isGood = defectType === '상태양호';
+        const isGood = isGoodDefectType(defectType);
         if (category === '비구조체') return isGood ? 'defectNonStructuralGood' : 'defectNonStructural';
         if (category === '마감재') return isGood ? 'defectFinishGood' : 'defectFinish';
         return isGood ? 'defectStructuralGood' : 'defectStructural';
@@ -8591,7 +8597,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // 3종: 상태양호=검정, 기존조사(전회차)=빨강, 신규조사=파랑
     function getDefectColor(defect) {
         if (defect.isPriorityManage) return getStyleColor('priorityManage');
-        const isGood = defect.defectType === '상태양호';
+        const isGood = isGoodDefectType(defect.defectType);
         if (isGrade3Building()) {
             if (isGood) return getStyleColor('defectGoodGrade3');
             return isPreviousRoundDefect(defect) ? getStyleColor('defectExistingGrade3') : getStyleColor('defectNewGrade3');
@@ -16839,7 +16845,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const numMatch = (d.no || '').match(/\d+/);
         const badgeNo = numMatch ? numMatch[0] : '?';
         const shapeIcon = d.shapeType === 'area' ? '🟧 ' : '';
-        const isGood = d.defectType === '상태양호';
+        const isGood = isGoodDefectType(d.defectType);
         const measureText = typeof formatDefectListMeasure === 'function' ? formatDefectListMeasure(d) : '';
         const sizeFallback = String(d.size || '').trim();
         const measureDisplay = measureText
@@ -17707,7 +17713,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const badge = document.createElement('span');
         badge.className = 'defect-badge-no';
         if (isUnregistered) badge.classList.add('badge-unregistered');
-        else if (d.defectType === '상태양호') badge.classList.add('badge-good');
+        else if (isGoodDefectType(d.defectType)) badge.classList.add('badge-good');
         badge.textContent = badgeNo;
         row.appendChild(badge);
 
@@ -17727,7 +17733,7 @@ document.addEventListener('DOMContentLoaded', () => {
         lines.appendChild(typeLine);
 
         // 상태양호 · 균열폭/이격폭(규모) 공란이면 3번째 줄 생략해 목록 칸을 아낀다
-        const isGood = d.defectType === '상태양호';
+        const isGood = isGoodDefectType(d.defectType);
         const measureText = formatDefectListMeasure(d);
         const sizeFallback = String(d.size || '').trim();
         const measureDisplay = measureText
@@ -19861,7 +19867,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const dType = getDefectComboValue(typeSelect, typeInput) || '';
         const kinds = getSelectedCrackKindsFromUi();
         const isCrack = isCrackKindLabel(dType) || kinds.length > 0;
-        const isGood = dType === '상태양호';
+        const isGood = isGoodDefectType(dType);
         const crackGroup = document.getElementById('defectCrackSizeGroup');
         const measureGroup = document.getElementById('quickMeasureGroup');
         const freeLabel = document.getElementById('defectSizeFreeLabel');
@@ -25639,7 +25645,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const isCarriedOver = document.getElementById('defectCarriedOver')?.checked || false;
         const isBookmark = document.getElementById('defectBookmark')?.checked || false;
         const isPriorityManage = document.getElementById('defectPriorityManage')?.checked || false;
-        const isGoodType = dTypeVal === '상태양호';
+        const isGoodType = isGoodDefectType(dTypeVal);
         syncHiddenCrackFieldsFromMeasures();
         const crackMeasuresVal = isGoodType ? [] : getCrackMeasuresFromUi();
         const crackWidthVal = isGoodType ? '' : (document.getElementById('defectCrackWidth')?.value || '');
@@ -25749,7 +25755,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const forceArrowDir = document.getElementById('defectForceArrowDir')?.checked || false;
         const arrowOctant = ((parseInt(document.getElementById('defectArrowOctant')?.value || '0', 10) % 8) + 8) % 8;
         const photosVal = window._pendingPhotos || [];
-        const isGoodType = dTypeVal === '상태양호';
+        const isGoodType = isGoodDefectType(dTypeVal);
         syncHiddenCrackFieldsFromMeasures();
         const crackMeasuresVal = isGoodType ? [] : getCrackMeasuresFromUi();
         const existingForCrack = pinId ? (state.defects[key] || []).find((d) => d.id === pinId) : null;
@@ -27051,7 +27057,7 @@ document.addEventListener('DOMContentLoaded', () => {
     function getSurveyCellText(colKey, d, ctx) {
         ctx = ctx || {};
         const isCrack = d.defectType === '균열';
-        const isGood = d.defectType === '상태양호';
+        const isGood = isGoodDefectType(d.defectType);
         switch (colKey) {
             case 'no': return ctx.gradeNo || ctx.surveyReportNo || (d.no || '').replace(/^NO\.?\s*/i, '');
             case 'floorGroup': return ctx.floorDisplayLabel || ctx.floorCode || state.currentFloor || '';
@@ -27426,7 +27432,7 @@ document.addEventListener('DOMContentLoaded', () => {
             case 'cause':
                 return textInput('cause', d.cause || '', '원인');
             case 'size': {
-                const isGood = d.defectType === '상태양호';
+                const isGood = isGoodDefectType(d.defectType);
                 if (isGood) return '<span style="color:#a3a3a3;">-</span>';
                 const val = getSurveyCellText('size', d, {}) || '';
                 const display = val === '-' ? '' : val;
@@ -27442,7 +27448,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     : '<span style="color:#a3a3a3;">-</span>';
             case 'inspectionContent': {
                 // 한 줄: 부재 | 조사내용 | 크기
-                const sizeDisp = (d.defectType === '상태양호')
+                const sizeDisp = (isGoodDefectType(d.defectType))
                     ? ''
                     : String(getSurveyCellText('size', d, {}) || '').replace(/^-$/, '');
                 return `<div class="survey-inline-stack survey-inline-stack-one-line" ${stop}>` +
@@ -27524,7 +27530,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     break;
                 case 'defectType':
                     defect.defectType = value;
-                    if (value === '상태양호') {
+                    if (isGoodDefectType(value)) {
                         defect.cause = '';
                         defect.size = '';
                         defect.crackWidth = '';
@@ -27596,7 +27602,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (prevWrap !== nextWrap) renderSurveyTable();
         }
         // 상태양호로 바꾼 뒤에는 크기/진행/누수 UI를 맞추기 위해 표만 다시 그림
-        if (field === 'defectType' && value === '상태양호') {
+        if (field === 'defectType' && isGoodDefectType(value)) {
             renderSurveyTable();
         } else if (field === 'progress' || field === 'leak' || field === 'priorityManage') {
             renderSurveyTable();
@@ -27669,7 +27675,7 @@ document.addEventListener('DOMContentLoaded', () => {
             case 'defectType': return surveyCharLen(d.defectType);
             case 'cause': return surveyCharLen(d.cause);
             case 'size': {
-                if (d.defectType === '상태양호') return 0;
+                if (isGoodDefectType(d.defectType)) return 0;
                 return surveyCharLen(getSurveyCellText('size', d, ctx));
             }
             case 'crackWidth': return d.defectType === '균열' ? surveyCharLen(d.crackWidth) : 0;
@@ -29604,8 +29610,8 @@ document.addEventListener('DOMContentLoaded', () => {
                             title: componentDefectTitle,
                             defectNo: d.no,
                             location: d.location || `${floorDisplayLabel} ${d.component || ''}`,
-                            cause: d.defectType === '상태양호' ? '-' : (d.cause || '건조수축'),
-                            size: d.defectType === '상태양호' ? '-' : ((d.size && String(d.size).trim()) || '-'),
+                            cause: isGoodDefectType(d.defectType) ? '-' : (d.cause || '건조수축'),
+                            size: isGoodDefectType(d.defectType) ? '-' : ((d.size && String(d.size).trim()) || '-'),
                             src: src
                         });
                     });
@@ -35621,7 +35627,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 const category = resolveImportCategoryWithContent(categoryRaw, defectTypeRaw, componentRaw);
                 const defectType = defectTypeRaw || '기타';
-                const isGood = defectType === '상태양호';
+                const isGood = isGoodDefectType(defectType);
 
                 // 규모칸에 "0.3/3.00.2/3.0", "0.3/2.00.3*0.3"처럼 여러 폭·길이가 붙어 있으면
                 // crackMeasures 행으로 분리 ( / → 슬래시, *·x → x 조인 )
