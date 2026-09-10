@@ -15712,21 +15712,48 @@ document.addEventListener('DOMContentLoaded', () => {
         return p.main === Number.MAX_SAFE_INTEGER ? '?' : String(p.main);
     }
 
+    /** 결함 수정 탭: 7-1, 7-2 … (마킹·결함표 통합, 방향은 각 슬롯의 dirMember) */
+    function buildDefectMarkingFloatSlots(groupId) {
+        if (!groupId) return [];
+        const markingMembers = getDefectMarkingGroupMembers(groupId);
+        const extras = getDefectGroupMembersOrdered(groupId).filter((m) => m.surveyExtra);
+        if (markingMembers.length <= 1 && !extras.length) return [];
+        const mainNo = getDefectGroupMainNo(markingMembers[0] || extras[0]);
+        const slotCount = extras.length > 0
+            ? Math.max(markingMembers.length, extras.length + 1)
+            : markingMembers.length;
+        const slots = [];
+        for (let slot = 1; slot <= slotCount; slot++) {
+            const formMember = slot === 1
+                ? markingMembers[0]
+                : (extras[slot - 2] || markingMembers[slot - 1] || null);
+            const dirMember = markingMembers[slot - 1] || null;
+            if (!formMember) continue;
+            slots.push({
+                slot,
+                label: `${mainNo}-${slot}`,
+                formMember,
+                dirMember: (dirMember && !dirMember.surveyExtra) ? dirMember : null
+            });
+        }
+        return slots;
+    }
+
+    function getDefectMarkingFloatSlotLabel(groupId, defectOrNull) {
+        if (!groupId || !defectOrNull) return null;
+        const slots = buildDefectMarkingFloatSlots(groupId);
+        const hit = slots.find((s) => s.formMember.id === defectOrNull.id);
+        return hit ? hit.label : null;
+    }
+
     function renderDefectMarkingMemberFloat(defectOrNull) {
         const el = document.getElementById('defectMarkingMemberFloat');
         if (!el) return;
 
         const groupId = defectOrNull && defectOrNull.groupId;
-        const markingMembers = groupId ? getDefectMarkingGroupMembers(groupId) : [];
-        const extras = groupId
-            ? getDefectGroupMembersOrdered(groupId).filter((m) => m.surveyExtra)
-            : [];
-        const rep = markingMembers.length
-            ? (pickDefectGroupRepresentative(markingMembers) || markingMembers[0])
-            : null;
-        const mainNo = getDefectGroupMainNo(rep || extras[0] || defectOrNull);
+        const slots = groupId ? buildDefectMarkingFloatSlots(groupId) : [];
 
-        if (!defectOrNull || (markingMembers.length <= 1 && !extras.length)) {
+        if (!defectOrNull || !slots.length) {
             el.hidden = true;
             el.innerHTML = '';
             document.getElementById('defectModal')?.classList.remove('has-marking-member-tabs');
@@ -15743,7 +15770,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     e.stopPropagation();
                     const mid = btn.getAttribute('data-marking-member-id');
                     const displayLabel = btn.getAttribute('data-display-label') || undefined;
-                    if (mid) window.selectDefectMarkingMember(mid, displayLabel);
+                    const focusId = btn.getAttribute('data-focus-member-id') || mid;
+                    if (mid) window.selectDefectMarkingMember(mid, displayLabel, focusId);
                 });
             });
             root.querySelectorAll('.defect-marking-arrow-dir-btn').forEach((btn) => {
@@ -15756,42 +15784,24 @@ document.addEventListener('DOMContentLoaded', () => {
             });
         };
 
-        let html = '';
-
-        // 화살표 전용: 2개 이상일 때만 1, 2 … (+ 방향)
-        if (markingMembers.length > 1) {
-            html += '<div class="defect-marking-float-section defect-marking-float-arrows">';
-            markingMembers.forEach((m, i) => {
-                const active = m.id === defectOrNull.id ? ' is-active' : '';
-                const dir = getMarkingMemberDirDisplay(m);
-                const forcedClass = m.forceArrowDir ? ' is-forced' : '';
-                const arrowLabel = String(i + 1);
-                html += `<div class="defect-marking-arrow-row is-arrow-only${active}" data-marking-member-id="${escapeHtml(m.id)}">`
-                    + `<button type="button" class="defect-marking-float-btn defect-marking-arrow-select${active}" data-marking-member-id="${escapeHtml(m.id)}" title="화살표 ${arrowLabel}">${arrowLabel}</button>`
-                    + `<button type="button" class="defect-marking-arrow-dir-btn${forcedClass}" data-marking-member-id="${escapeHtml(m.id)}" title="${escapeHtml(dir.title)}">${dir.symbol}</button>`
-                    + `</div>`;
-            });
+        let html = '<div class="defect-marking-float-section">';
+        slots.forEach(({ label, formMember, dirMember }) => {
+            const active = formMember.id === defectOrNull.id ? ' is-active' : '';
+            const noDirClass = dirMember ? '' : ' is-no-dir';
+            html += `<div class="defect-marking-arrow-row${noDirClass}${active}">`
+                + `<button type="button" class="defect-marking-float-btn defect-marking-arrow-select${active}"`
+                + ` data-marking-member-id="${escapeHtml(formMember.id)}"`
+                + ` data-focus-member-id="${escapeHtml((dirMember || formMember).id)}"`
+                + ` data-display-label="${escapeHtml(label)}" title="${escapeHtml(label)}">${escapeHtml(label)}</button>`;
+            if (dirMember) {
+                const dir = getMarkingMemberDirDisplay(dirMember);
+                const forcedClass = dirMember.forceArrowDir ? ' is-forced' : '';
+                html += `<button type="button" class="defect-marking-arrow-dir-btn${forcedClass}"`
+                    + ` data-marking-member-id="${escapeHtml(dirMember.id)}" title="${escapeHtml(dir.title)}">${dir.symbol}</button>`;
+            }
             html += '</div>';
-        }
-
-        // 결함 행: 41-1(마킹 대표) · 41-2…(결함표)
-        if (extras.length > 0 && rep) {
-            html += '<div class="defect-marking-float-section defect-marking-float-defects">';
-            const defectLabel = `${mainNo}-1`;
-            const defectActive = !defectOrNull.surveyExtra
-                && markingMembers.some((m) => m.id === defectOrNull.id) ? ' is-active' : '';
-            html += `<div class="defect-marking-arrow-row is-survey-extra${defectActive}" data-marking-member-id="${escapeHtml(rep.id)}">`
-                + `<button type="button" class="defect-marking-float-btn defect-marking-arrow-select defect-marking-row-select${defectActive}" data-marking-member-id="${escapeHtml(rep.id)}" data-display-label="${escapeHtml(defectLabel)}" title="${escapeHtml(defectLabel)}">${escapeHtml(defectLabel)}</button>`
-                + `</div>`;
-            extras.forEach((m) => {
-                const active = m.id === defectOrNull.id ? ' is-active' : '';
-                const chip = formatDefectMemberChipLabel(m);
-                html += `<div class="defect-marking-arrow-row is-survey-extra${active}" data-marking-member-id="${escapeHtml(m.id)}">`
-                    + `<button type="button" class="defect-marking-float-btn defect-marking-arrow-select defect-marking-row-select${active}" data-marking-member-id="${escapeHtml(m.id)}" title="${escapeHtml(chip)} 결함표">${escapeHtml(chip)}</button>`
-                    + `</div>`;
-            });
-            html += '</div>';
-        }
+        });
+        html += '</div>';
 
         el.innerHTML = html;
         bindRow(el);
@@ -15858,7 +15868,7 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     /** 같은 번호 그룹의 다른 화살표(마킹)로 전환해 수정 */
-    window.selectDefectMarkingMember = async function(defectId, displayLabel) {
+    window.selectDefectMarkingMember = async function(defectId, displayLabel, focusMemberId) {
         if (!defectId || !state.currentBuildingId) return;
         if (typeof flushDefectAutoApply === 'function') {
             try { await flushDefectAutoApply(); } catch (_e) { /* ignore */ }
@@ -15873,25 +15883,16 @@ document.addEventListener('DOMContentLoaded', () => {
             selectedDefectIds = new Set([d.id]);
         }
         if (typeof updateMapSelectionBar === 'function') updateMapSelectionBar({ scrollToSelection: true });
+        const canvasFocusId = focusMemberId || d.id;
         if (typeof window.focusDefectOnCanvas === 'function') {
-            window.focusDefectOnCanvas(d.id, { uncovered: true });
+            window.focusDefectOnCanvas(canvasFocusId, { uncovered: true });
         }
         openAddDefectModal(d.x, d.y, d.targetX, d.targetY, d, null, { revealMarkingAboveDrawer: true });
-        const markingMembers = d.groupId ? getDefectMarkingGroupMembers(d.groupId) : [];
-        const extras = d.groupId && state.currentBuildingId
-            ? (state.defects[`${state.currentBuildingId}_${state.currentFloor}`] || [])
-                .filter((x) => x && x.groupId === d.groupId && x.surveyExtra)
-            : [];
-        let label = displayLabel;
+        let label = displayLabel || getDefectMarkingFloatSlotLabel(d.groupId, d);
         if (!label) {
-            if (d.surveyExtra) {
-                label = formatDefectMemberChipLabel(d);
-            } else if (extras.length && markingMembers.length <= 1) {
-                label = `${getDefectGroupMainNo(d)}-1`;
-            } else {
-                const arrowIdx = markingMembers.findIndex((m) => m.id === d.id);
-                label = formatDefectMemberChipLabel(d, arrowIdx >= 0 ? arrowIdx : undefined);
-            }
+            const markingMembers = d.groupId ? getDefectMarkingGroupMembers(d.groupId) : [];
+            const arrowIdx = markingMembers.findIndex((m) => m.id === d.id);
+            label = formatDefectMemberChipLabel(d, arrowIdx >= 0 ? arrowIdx : undefined);
         }
         window.showToast?.(`${label} 선택`, 'info', 1600);
     };
@@ -17101,7 +17102,7 @@ document.addEventListener('DOMContentLoaded', () => {
             return main;
         }
         if (arrowIndexAmongMarking != null && Number.isFinite(arrowIndexAmongMarking) && arrowIndexAmongMarking >= 0) {
-            return String(arrowIndexAmongMarking + 1);
+            return `${main}-${arrowIndexAmongMarking + 1}`;
         }
         return main;
     }
