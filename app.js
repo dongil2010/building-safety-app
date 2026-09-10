@@ -1082,6 +1082,12 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function startFloorDrawingBlend(fromBg, toBg, fromPatch, toPatch) {
+        if (window.BSA?.performance?.skipFloorCrossfade?.()) {
+            if (toBg) state.bgImage = toBg;
+            state.floorDrawingHiPatch = toPatch;
+            drawCanvas({ immediate: true });
+            return;
+        }
         if (_floorBlend) commitFloorBlendNow();
         _floorBlend = {
             start: performance.now(),
@@ -1956,6 +1962,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function saveStateToLocalStorage() {
         try {
+            if (state.currentTab === 'tab-map' && typeof captureFloorSnapshotNow === 'function') {
+                captureFloorSnapshotNow();
+            }
             const rawBuildings = window.state.buildings || [];
             const rawDefects = window.state.defects || {};
 
@@ -6924,7 +6933,10 @@ document.addEventListener('DOMContentLoaded', () => {
     /** 화면 선명도용 DPR — 업로드/서버 용량과 무관. GPU·메모리 한도 내로 캡 */
     function getSafeCanvasDpr(cssW, cssH) {
         const raw = window.devicePixelRatio || 1;
-        let dpr = Math.min(Math.max(raw, 1), 2.5);
+        const perfCap = (window.BSA && window.BSA.performance && typeof window.BSA.performance.getMaxCanvasDpr === 'function')
+            ? window.BSA.performance.getMaxCanvasDpr()
+            : 2.5;
+        let dpr = Math.min(Math.max(raw, 1), perfCap);
         const maxSide = 4096; // 대부분 모바일 GPU 안전권
         const maxPixels = 8 * 1024 * 1024;
         let bw = cssW * dpr;
@@ -6937,7 +6949,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (bw * bh > maxPixels) {
             dpr *= Math.sqrt(maxPixels / (bw * bh));
         }
-        return Math.max(1, Math.min(dpr, 2.5));
+        return Math.max(1, Math.min(dpr, perfCap));
     }
 
     function resizeCanvas() {
@@ -7850,7 +7862,54 @@ document.addEventListener('DOMContentLoaded', () => {
         }, 900);
     };
 
-    function drawCanvas() {
+    let _mapDrawRafId = 0;
+    let _floorSnapshotTimer = 0;
+
+    function captureFloorSnapshotNow() {
+        if (!state.canvas || !state.currentFloor) return;
+        try {
+            if (!state.floorSnapshots) state.floorSnapshots = {};
+            const snapW = state.canvasCssW || state.canvas.width;
+            const snapH = state.canvasCssH || state.canvas.height;
+            if ((state.canvasDpr || 1) > 1.05) {
+                const off = document.createElement('canvas');
+                off.width = snapW;
+                off.height = snapH;
+                off.getContext('2d').drawImage(state.canvas, 0, 0, snapW, snapH);
+                state.floorSnapshots[state.currentFloor] = off.toDataURL('image/jpeg', 0.82);
+            } else {
+                state.floorSnapshots[state.currentFloor] = state.canvas.toDataURL('image/jpeg', 0.82);
+            }
+        } catch (_e) { /* ignore */ }
+    }
+
+    function scheduleFloorSnapshotCapture() {
+        if (_floorSnapshotTimer) clearTimeout(_floorSnapshotTimer);
+        const delay = window.BSA?.performance?.getFloorSnapshotDelayMs?.() ?? 500;
+        _floorSnapshotTimer = setTimeout(() => {
+            _floorSnapshotTimer = 0;
+            captureFloorSnapshotNow();
+        }, delay);
+    }
+
+    function drawCanvas(opts) {
+        opts = opts || {};
+        if (opts.immediate) {
+            if (_mapDrawRafId) {
+                cancelAnimationFrame(_mapDrawRafId);
+                _mapDrawRafId = 0;
+            }
+            paintMapCanvas(opts);
+            return;
+        }
+        if (_mapDrawRafId) return;
+        _mapDrawRafId = requestAnimationFrame(() => {
+            _mapDrawRafId = 0;
+            paintMapCanvas(opts);
+        });
+    }
+
+    function paintMapCanvas(_opts) {
         if (!state.ctx || !state.canvas) return;
         const ctx = state.ctx;
         const dpr = state.canvasDpr || 1;
@@ -8027,23 +8086,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         ctx.restore(); // Restore view offset & scale
 
-        if (state.canvas && state.currentFloor) {
-            try {
-                if (!state.floorSnapshots) state.floorSnapshots = {};
-                // 스냅샷은 CSS 해상도 JPEG로 — HiDPI 백버퍼를 그대로 저장하면 용량·서버 한도 초과
-                const snapW = state.canvasCssW || state.canvas.width;
-                const snapH = state.canvasCssH || state.canvas.height;
-                if ((state.canvasDpr || 1) > 1.05) {
-                    const off = document.createElement('canvas');
-                    off.width = snapW;
-                    off.height = snapH;
-                    off.getContext('2d').drawImage(state.canvas, 0, 0, snapW, snapH);
-                    state.floorSnapshots[state.currentFloor] = off.toDataURL('image/jpeg', 0.82);
-                } else {
-                    state.floorSnapshots[state.currentFloor] = state.canvas.toDataURL('image/jpeg', 0.82);
-                }
-            } catch(e) {}
-        }
+        scheduleFloorSnapshotCapture();
 
         // 결함 목록 DOM은 drawCanvas마다 재생성하지 않음 (선택 스크롤·하이라이트가 즉시 undo됨).
         // 목록 갱신은 updateMapSelectionBar / 필터 / 저장 등 명시적 호출에서만.
@@ -28581,7 +28624,13 @@ document.addEventListener('DOMContentLoaded', () => {
             `;
         }).join('');
         applySurveyColumnMetrics(columns, colMetrics);
-        if (typeof renderPhotoAlbum === 'function') renderPhotoAlbum();
+        if (typeof renderPhotoAlbum === 'function') {
+            if (window.BSA?.performance?.deferHeavyWork?.()) {
+                window.BSA.performance.runWhenIdle(() => renderPhotoAlbum(), 1200);
+            } else {
+                renderPhotoAlbum();
+            }
+        }
         if (state.currentTab === 'tab-stats' && typeof window.renderDefectStatsTab === 'function') {
             window.renderDefectStatsTab();
         }
@@ -35630,6 +35679,23 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    const btnTogglePerfMode = document.getElementById('btnTogglePerfMode');
+    if (btnTogglePerfMode) {
+        btnTogglePerfMode.addEventListener('click', () => {
+            if (!window.BSA?.performance?.cycleMode) return;
+            const next = window.BSA.performance.cycleMode();
+            const label = window.BSA.performance.getModeLabel(next);
+            window.showToast?.('성능 모드: ' + label, 'info');
+            if (state.currentTab === 'tab-map') {
+                if (typeof resizeCanvas === 'function') resizeCanvas();
+                drawCanvas({ immediate: true });
+            } else if (state.currentTab === 'tab-ndt') {
+                if (typeof resizeNdtCanvas === 'function') resizeNdtCanvas();
+                if (typeof drawNdtCanvas === 'function') drawNdtCanvas();
+            }
+        });
+    }
+
     const btnClearPdfCache = document.getElementById('btnClearPdfCache');
     if (btnClearPdfCache) {
         btnClearPdfCache.addEventListener('click', async () => {
@@ -37078,13 +37144,20 @@ document.addEventListener('DOMContentLoaded', () => {
                     }
                 }
 
-                if (typeof renderDashboard === 'function') renderDashboard();
+                const activeTab = state.currentTab || 'tab-home';
                 if (typeof renderBuildingSelector === 'function') renderBuildingSelector();
-                if (typeof renderSurveyTable === 'function') renderSurveyTable();
-                if (typeof drawCanvas === 'function') drawCanvas();
-                if (typeof drawNdtCanvas === 'function') drawNdtCanvas();
-                if (typeof renderNdtSummaryTable === 'function') renderNdtSummaryTable();
-                if (typeof renderDefectListPanel === 'function') renderDefectListPanel();
+                if (activeTab === 'tab-home' && typeof renderDashboard === 'function') renderDashboard();
+                if (activeTab === 'tab-map') {
+                    if (typeof drawCanvas === 'function') drawCanvas();
+                    if (typeof renderDefectListPanel === 'function') renderDefectListPanel();
+                } else if (activeTab === 'tab-survey') {
+                    if (typeof renderSurveyTable === 'function') renderSurveyTable();
+                } else if (activeTab === 'tab-stats') {
+                    if (typeof window.renderDefectStatsTab === 'function') window.renderDefectStatsTab();
+                } else if (activeTab === 'tab-ndt') {
+                    if (typeof drawNdtCanvas === 'function') drawNdtCanvas();
+                    if (typeof renderNdtSummaryTable === 'function') renderNdtSummaryTable();
+                }
             }
         } catch (e) {
             console.error('Remote sync apply error:', e);
@@ -38902,10 +38975,11 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
         if (_syncDebounceTimer) clearTimeout(_syncDebounceTimer);
+        const debounceMs = window.BSA?.performance?.getSyncDebounceMs?.() ?? 400;
         _syncDebounceTimer = setTimeout(() => {
             _syncDebounceTimer = null;
             syncStateToFirebase();
-        }, 400);
+        }, debounceMs);
     }
 
     /** 온라인 복귀·앱 포그라운드: 실시간 리스너 재구독 (업로드는 저장 시 debounce) */
@@ -40978,6 +41052,7 @@ document.addEventListener('DOMContentLoaded', () => {
         window.fitToScreen = fitToScreen;
         window.shouldAutoFitMapView = shouldAutoFitMapView;
         window.drawCanvas = drawCanvas;
+        window.captureFloorSnapshotNow = captureFloorSnapshotNow;
         window.setupNdtCanvas = setupNdtCanvas;
         window.resizeNdtCanvas = resizeNdtCanvas;
         window.renderNdtSummaryTable = renderNdtSummaryTable;

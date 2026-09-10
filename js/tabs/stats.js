@@ -490,10 +490,15 @@ window.BSA = window.BSA || { tabs: {}, shared: {} };
         ownerHint: 'js/tabs/stats.js',
         enter: function () {
             bindStatsControlsOnce();
-            if (typeof window.renderDefectStatsTab === 'function') window.renderDefectStatsTab();
-            setTimeout(function () {
+            function refreshStats() {
                 if (typeof window.renderDefectStatsTab === 'function') window.renderDefectStatsTab();
-            }, 120);
+            }
+            if (window.BSA && window.BSA.performance && typeof window.BSA.performance.scheduleTabRefresh === 'function') {
+                window.BSA.performance.scheduleTabRefresh(function () { refreshStats(); });
+            } else {
+                refreshStats();
+                setTimeout(refreshStats, 120);
+            }
         }
     };
 

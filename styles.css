@@ -13672,3 +13672,33 @@ textarea.form-control {
     }
 }
 
+/* 저사양·절전 모드 — 숨겨진 탭 레이아웃 생략, 애니메이션 축소 */
+.tab-content:not(.active) {
+    content-visibility: hidden;
+    contain-intrinsic-size: 0 480px;
+}
+
+html.bsa-low-end .tab-content:not(.active) {
+    content-visibility: hidden;
+}
+
+html.bsa-low-end .floor-drawing-blend-overlay,
+html.bsa-low-end .bsa-kb-drag-handle {
+    display: none !important;
+}
+
+.hero-btn-perf-mode.active {
+    border-color: #2563eb;
+    color: #2563eb;
+    background: rgba(37, 99, 235, 0.08);
+}
+
+@media (prefers-reduced-motion: reduce) {
+    html:not(.layout-desktop) .tab-content,
+    html.bsa-low-end * {
+        scroll-behavior: auto !important;
+        transition-duration: 0.01ms !important;
+        animation-duration: 0.01ms !important;
+    }
+}
+

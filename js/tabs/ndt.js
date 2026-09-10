@@ -27,19 +27,27 @@ window.BSA.tabs['tab-ndt'] = {
         if (typeof window.BSA.shared.bindSurveyNdtTableScrollPassthrough === 'function') {
             window.BSA.shared.bindSurveyNdtTableScrollPassthrough();
         }
-        setTimeout(function () {
-            if (typeof window.setupNdtCanvas === 'function') window.setupNdtCanvas();
-            if (typeof window.resizeNdtCanvas === 'function') window.resizeNdtCanvas();
-            if (typeof window.renderNdtSummaryTable === 'function') window.renderNdtSummaryTable();
-            if (typeof window.bindNdtCrackMonitorInputs === 'function') window.bindNdtCrackMonitorInputs();
-            if (typeof window.syncBulkStyleSlidersUi === 'function') window.syncBulkStyleSlidersUi();
-            if (typeof window.BSA.shared.bindSurveyNdtTableScrollPassthrough === 'function') {
-                window.BSA.shared.bindSurveyNdtTableScrollPassthrough();
+        function refreshNdt(firstPass) {
+            if (firstPass) {
+                if (typeof window.setupNdtCanvas === 'function') window.setupNdtCanvas();
             }
-        }, 50);
-        setTimeout(function () {
             if (typeof window.resizeNdtCanvas === 'function') window.resizeNdtCanvas();
-            if (typeof window.fitNdtCanvas === 'function') window.fitNdtCanvas();
-        }, 220);
+            if (firstPass) {
+                if (typeof window.renderNdtSummaryTable === 'function') window.renderNdtSummaryTable();
+                if (typeof window.bindNdtCrackMonitorInputs === 'function') window.bindNdtCrackMonitorInputs();
+                if (typeof window.syncBulkStyleSlidersUi === 'function') window.syncBulkStyleSlidersUi();
+                if (typeof window.BSA.shared.bindSurveyNdtTableScrollPassthrough === 'function') {
+                    window.BSA.shared.bindSurveyNdtTableScrollPassthrough();
+                }
+            } else if (typeof window.fitNdtCanvas === 'function') {
+                window.fitNdtCanvas();
+            }
+        }
+        if (window.BSA && window.BSA.performance && typeof window.BSA.performance.scheduleTabRefresh === 'function') {
+            window.BSA.performance.scheduleTabRefresh(refreshNdt, { secondDelay: 200 });
+        } else {
+            setTimeout(function () { refreshNdt(true); }, 50);
+            setTimeout(function () { refreshNdt(false); }, 220);
+        }
     }
 };

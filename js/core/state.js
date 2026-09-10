@@ -294,17 +294,25 @@ window.getFloorDrawingTierDimForZoomVsFit = function(zoomVsFit, opts) {
     const BACK_LO = zoom.BACK_LO || 1.6;
     const BACK_MID = mobile ? (zoom.BACK_MID_MOBILE || 18.0) : (zoom.BACK_MID || 10.0);
 
+    const maxTier = (window.BSA && window.BSA.performance && typeof window.BSA.performance.getMaxFloorTierDim === 'function')
+        ? window.BSA.performance.getMaxFloorTierDim()
+        : dims[2];
+    const capTier = function (dim) {
+        const n = Number(dim) || dims[0];
+        return n > maxTier ? maxTier : n;
+    };
+
     if (cur >= dims[2]) {
-        if (z < BACK_MID) return dims[1];
-        return dims[2];
+        if (z < BACK_MID) return capTier(dims[1]);
+        return capTier(dims[2]);
     }
     if (cur >= dims[1]) {
-        if (z >= TO_HI) return dims[2];
-        if (z < BACK_LO) return dims[0];
-        return dims[1];
+        if (z >= TO_HI && maxTier >= dims[2]) return capTier(dims[2]);
+        if (z < BACK_LO) return capTier(dims[0]);
+        return capTier(dims[1]);
     }
-    if (z >= TO_MID) return dims[1];
-    return dims[0];
+    if (z >= TO_MID) return capTier(dims[1]);
+    return capTier(dims[0]);
 };
 
 /**

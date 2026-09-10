@@ -51,9 +51,13 @@ window.BSA.tabs['tab-map'] = {
             if (typeof window.resizeCanvas === 'function') window.resizeCanvas();
             const autoFit = allowFit && (typeof window.shouldAutoFitMapView !== 'function' || window.shouldAutoFitMapView());
             if (autoFit && typeof window.fitToScreen === 'function') window.fitToScreen();
-            else if (typeof window.drawCanvas === 'function') window.drawCanvas();
+            else if (typeof window.drawCanvas === 'function') window.drawCanvas({ immediate: true });
         }
-        setTimeout(function () { refreshMapCanvas(true); }, 50);
-        setTimeout(function () { refreshMapCanvas(false); }, 220);
+        if (window.BSA && window.BSA.performance && typeof window.BSA.performance.scheduleTabRefresh === 'function') {
+            window.BSA.performance.scheduleTabRefresh(refreshMapCanvas, { secondDelay: 200 });
+        } else {
+            setTimeout(function () { refreshMapCanvas(true); }, 50);
+            setTimeout(function () { refreshMapCanvas(false); }, 220);
+        }
     }
 };
