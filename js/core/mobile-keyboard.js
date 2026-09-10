@@ -332,7 +332,48 @@
         }, 140);
     }
 
+    function bindBodyScrollDrag(gripEl, scrollEl) {
+        if (!gripEl || !scrollEl || gripEl._bsaScrollDragBound) return;
+        gripEl._bsaScrollDragBound = true;
+        var dragging = false;
+        var startY = 0;
+        var startScroll = 0;
+
+        gripEl.addEventListener('pointerdown', function (e) {
+            if (e.button > 0) return;
+            dragging = true;
+            startY = e.clientY;
+            startScroll = scrollEl.scrollTop;
+            gripEl.classList.add('is-dragging');
+            try { gripEl.setPointerCapture(e.pointerId); } catch (_err) {}
+            e.preventDefault();
+        }, { passive: false });
+
+        gripEl.addEventListener('pointermove', function (e) {
+            if (!dragging) return;
+            e.preventDefault();
+            scrollEl.scrollTop = startScroll - (e.clientY - startY);
+        }, { passive: false });
+
+        function endDrag(e) {
+            if (!dragging) return;
+            dragging = false;
+            gripEl.classList.remove('is-dragging');
+            try { gripEl.releasePointerCapture(e.pointerId); } catch (_err) {}
+        }
+
+        gripEl.addEventListener('pointerup', endDrag);
+        gripEl.addEventListener('pointercancel', endDrag);
+    }
+
+    function initScrollDrags() {
+        var addGrip = document.getElementById('addBuildingBodyGrip');
+        var addHost = document.getElementById('addBuildingScrollHost');
+        bindBodyScrollDrag(addGrip, addHost);
+    }
+
     function init() {
+        initScrollDrags();
         if (!isTouchKeyboardUi()) return;
 
         document.addEventListener('focusin', onFocusIn, true);
@@ -351,7 +392,8 @@
     window.BSA.mobileKeyboard = {
         isActive: isTouchKeyboardUi,
         refresh: function () { updateLayout(true); },
-        reset: clearLift
+        reset: clearLift,
+        bindBodyScrollDrag: bindBodyScrollDrag
     };
 
     window.BSA.resetMobileKeyboard = clearLift;

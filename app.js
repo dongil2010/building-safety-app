@@ -4811,6 +4811,24 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // --- 7. BUILDING REGISTRATION MODAL HANDLERS ---
 
+    function initAddBuildingScrollHost() {
+        const overlay = elements.addBuildingModal;
+        const host = document.getElementById('addBuildingScrollHost');
+        if (!overlay || !host || overlay._bsaAddBuildingScrollBound) return;
+        overlay._bsaAddBuildingScrollBound = true;
+
+        const syncAddBuildingScrollHint = () => {
+            if (!overlay.classList.contains('open')) return;
+            const maxScroll = host.scrollHeight - host.clientHeight;
+            host.classList.toggle('has-scroll', maxScroll > 4);
+            host.classList.toggle('at-scroll-end', maxScroll <= 4 || host.scrollTop >= maxScroll - 4);
+        };
+
+        host.addEventListener('scroll', syncAddBuildingScrollHint, { passive: true });
+        window.addEventListener('resize', syncAddBuildingScrollHint, { passive: true });
+        overlay._bsaSyncAddBuildingScrollHint = syncAddBuildingScrollHint;
+    }
+
     window.openAddBuildingModalFunc = function() {
         if (elements.addBuildingModal) {
             window._addBuildingMode = 'new';
@@ -4869,8 +4887,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
             elements.addBuildingModal.style.display = 'flex';
             elements.addBuildingModal.classList.add('open');
-            const addBodyEl = elements.addBuildingModal.querySelector('.add-building-body');
-            if (addBodyEl) addBodyEl.scrollTop = 0;
+            document.body.classList.add('add-building-modal-open');
+            initAddBuildingScrollHost();
+            const addScrollHost = document.getElementById('addBuildingScrollHost');
+            if (addScrollHost) addScrollHost.scrollTop = 0;
+            if (elements.addBuildingModal?._bsaSyncAddBuildingScrollHint) {
+                requestAnimationFrame(() => elements.addBuildingModal._bsaSyncAddBuildingScrollHint());
+            }
+            if (window.BSA && window.BSA.resetMobileKeyboard) window.BSA.resetMobileKeyboard();
             // 터치(모바일/태블릿): 자동 포커스로 키보드가 뜨면 기본정보가 가려지므로 PC만 포커스
             const isTouchUi = (navigator.maxTouchPoints > 0) || ('ontouchstart' in window);
             const focusEl = siteInput || nameInput;
@@ -4883,6 +4907,8 @@ document.addEventListener('DOMContentLoaded', () => {
             elements.addBuildingModal.style.display = 'none';
             elements.addBuildingModal.classList.remove('open');
         }
+        document.body.classList.remove('add-building-modal-open');
+        if (window.BSA && window.BSA.resetMobileKeyboard) window.BSA.resetMobileKeyboard();
     };
 
     function setAddBuildingMode(mode) {
@@ -4897,13 +4923,13 @@ document.addEventListener('DOMContentLoaded', () => {
         const basicDetails = document.getElementById('addBuildingBasicDetails');
         const inspectionDetails = document.getElementById('addBuildingInspectionDetails');
         if (isImport) {
-            if (basicDetails) basicDetails.open = false;
-            if (inspectionDetails) inspectionDetails.open = false;
+            if (basicDetails) basicDetails.hidden = true;
+            if (inspectionDetails) inspectionDetails.hidden = true;
             populateAddBuildingImportSources();
             setTimeout(() => document.getElementById('inputImportSourceBuildingSearch')?.focus(), 80);
         } else {
-            if (basicDetails) basicDetails.open = true;
-            if (inspectionDetails) inspectionDetails.open = true;
+            if (basicDetails) basicDetails.hidden = false;
+            if (inspectionDetails) inspectionDetails.hidden = false;
         }
     }
 
@@ -30829,6 +30855,482 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     };
 
+    // --- HWPX 균열 게이지·팁 측정결과 (templates/hwpx_crack_monitor.hwpx) ---
+    const HWPX_HP_NS = 'http://www.hancom.co.kr/hwpml/2011/paragraph';
+    const HWPX_HC_NS = 'http://www.hancom.co.kr/hwpml/2011/core';
+
+    const mergeGrade3CompareStampHeader = (mainHdr, stampHdr, stampParas) => {
+        const ser = new XMLSerializer();
+        let fragmentXml = '';
+        (stampParas || []).forEach((p) => { if (p) fragmentXml += ser.serializeToString(p); });
+        if (!fragmentXml || !stampHdr) return { header: mainHdr, remapAttrs: null };
+
+        const borderIds = new Set();
+        for (const m of fragmentXml.matchAll(/<hp:(?:tbl|tc)\b[^>]*borderFillIDRef="(\d+)"/g)) {
+            borderIds.add(m[1]);
+        }
+        if (!borderIds.size) return { header: mainHdr, remapAttrs: null };
+
+        const tagBlock = (hdr, tag, id) => {
+            const re = new RegExp(`<hh:${tag} id="${id}"[\\s\\S]*?</hh:${tag}>`);
+            const m = hdr.match(re);
+            return m ? m[0] : null;
+        };
+        const maxId = (hdr, tag) => {
+            const ids = [...hdr.matchAll(new RegExp(`<hh:${tag} id="(\\d+)"`, 'g'))].map(x => parseInt(x[1], 10));
+            return ids.length ? Math.max(...ids) : 0;
+        };
+        let nxt = maxId(mainHdr, 'borderFill') + 1;
+        const borderMap = {};
+        [...borderIds].sort((a, b) => parseInt(a, 10) - parseInt(b, 10)).forEach((id) => {
+            borderMap[id] = String(nxt++);
+        });
+
+        let outHdr = mainHdr;
+        [...borderIds].sort((a, b) => parseInt(a, 10) - parseInt(b, 10)).forEach((bid) => {
+            let b = tagBlock(stampHdr, 'borderFill', bid);
+            if (!b) return;
+            b = b.replace(/^<hh:borderFill id="\d+"/, `<hh:borderFill id="${borderMap[bid]}"`);
+            outHdr = outHdr.replace('</hh:borderFills>', b + '</hh:borderFills>');
+        });
+        const bfCnt = (outHdr.match(/<hh:borderFill id="/g) || []).length;
+        outHdr = outHdr.replace(/(<hh:borderFills[^>]*itemCnt=")(\d+)(")/, `$1${bfCnt}$3`);
+
+        return {
+            header: outHdr,
+            remapAttrs: { borderFillIDRef: borderMap }
+        };
+    };
+    const stripHwpxParaRunBorderFill = (node) => {
+        if (!node) return node;
+        const walk = (el) => {
+            if (!el || el.nodeType !== 1) return;
+            if (el.localName === 'p' || el.localName === 'run') {
+                el.removeAttribute('borderFillIDRef');
+            }
+            Array.from(el.children || []).forEach(walk);
+        };
+        walk(node);
+        return node;
+    };
+    const remapHwpxCompareNode = (node, remapAttrs) => {
+        if (!node || !remapAttrs) return stripHwpxParaRunBorderFill(node);
+        const borderMap = remapAttrs.borderFillIDRef;
+        const walk = (el) => {
+            if (!el || el.nodeType !== 1) return;
+            if (el.localName === 'tbl' || el.localName === 'tc') {
+                const v = el.getAttribute('borderFillIDRef');
+                if (v && borderMap && borderMap[v]) el.setAttribute('borderFillIDRef', borderMap[v]);
+            }
+            if (el.localName === 'p' || el.localName === 'run') {
+                el.removeAttribute('borderFillIDRef');
+            }
+            Array.from(el.children || []).forEach(walk);
+        };
+        walk(node);
+        return node;
+    };
+
+    function extractHwpxSecTopLevelParas(secEl) {
+        if (!secEl) return [];
+        return Array.from(secEl.childNodes).filter((n) => n.nodeType === 1 && (n.localName === 'p' || n.nodeName === 'hp:p'));
+    }
+
+    function formatHwpxCrackMonitorDate(dateStr) {
+        const s = String(dateStr || '').trim();
+        const m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+        if (m) return `${m[1]}. ${m[2]}. ${m[3]}`;
+        return s;
+    }
+
+    function formatHwpxGaugeAxisCell(axis, val, prevVal, opts) {
+        opts = opts || {};
+        if (val == null || String(val).trim() === '') return '-';
+        const n = parseMonitorNumber(val);
+        if (n == null) return String(val);
+        let prefix = axis === 'y' ? '↓ ' : (n > 0 ? '→ ' : '± ');
+        if (axis === 'x' && n === 0) prefix = '± ';
+        let s = prefix + (axis === 'y' ? n : Math.abs(n));
+        if (opts.isInitial) s += '(초기값)';
+        else if (prevVal != null && String(prevVal).trim() !== '') {
+            const pn = parseMonitorNumber(prevVal);
+            if (pn != null && pn !== n) {
+                const d = Math.round(Math.abs(n - pn) * 10) / 10;
+                s += ` ←${d}`;
+            }
+        }
+        return s;
+    }
+
+    function formatHwpxTipLengthCell(val, opts) {
+        opts = opts || {};
+        if (val == null || String(val).trim() === '') return '-';
+        let s = String(val).trim();
+        if (opts.isInitial) s += '(초기값)';
+        return s;
+    }
+
+    function formatHwpxCrackChangeSummary(slot) {
+        if (!slot) return '-';
+        if (slot.kind === 'tip') {
+            const log = slot.tip;
+            const lastIdx = (log.readings || []).length - 1;
+            if (lastIdx < 0) return '-';
+            const cum = computeTipCumulative(log, lastIdx);
+            if (cum == null || !Number.isFinite(cum)) return '-';
+            return `${Math.abs(Math.round(cum * 100) / 100)}mm`;
+        }
+        const log = slot.gauge;
+        const last = log.readings && log.readings.length ? log.readings[log.readings.length - 1] : null;
+        if (!last) return '-';
+        const d = computeGaugeDeltas(log, last);
+        const parts = [];
+        if (d.dy != null && Number.isFinite(d.dy)) parts.push(`↓ ${Math.abs(Math.round(d.dy * 10) / 10)}mm`);
+        if (d.dx != null && Number.isFinite(d.dx)) parts.push(`${d.dx >= 0 ? '→' : '±'} ${Math.abs(Math.round(d.dx * 10) / 10)}mm`);
+        return parts.length ? parts.join(' ') : '-';
+    }
+
+    function formatHwpxCrackSummaryChangeText(slot) {
+        if (!slot) return '-';
+        if (slot.kind === 'tip') return formatHwpxCrackChangeSummary(slot);
+        const log = slot.gauge;
+        const last = log.readings && log.readings.length ? log.readings[log.readings.length - 1] : null;
+        if (!last) return '-';
+        const d = computeGaugeDeltas(log, last);
+        const parts = [];
+        if (d.dx != null && Number.isFinite(d.dx)) parts.push(`${d.dx >= 0 ? '→' : '↓'}${Math.abs(Math.round(d.dx * 10) / 10)}mm`);
+        if (d.dy != null && Number.isFinite(d.dy)) parts.push(`${d.dy >= 0 ? '↓' : '↑'}${Math.abs(Math.round(d.dy * 10) / 10)}mm`);
+        return parts.length ? parts.join('/') : '-';
+    }
+
+    function buildHwpxCrackMonitorFloorsData(bldg, bldgId) {
+        let floorCodes = [];
+        if (bldg.floorsList && bldg.floorsList.length) {
+            floorCodes = bldg.floorsList.map((f) => f.floorCode);
+        } else if (window.state.currentFloor) {
+            floorCodes = [window.state.currentFloor];
+        }
+        return floorCodes.map((floorCode) => {
+            const key = `${bldgId}_${floorCode}`;
+            const pageDefects = window.state.defects[key] || (window.state.currentFloor === floorCode ? getCurrentFloorDefects() : []);
+            return { floorCode, pageDefects };
+        }).filter((row) => row.pageDefects && row.pageDefects.length);
+    }
+
+    function collectHwpxCrackMonitorExportItems(bldg, bldgId, floorsData, getFloorLabel) {
+        const items = [];
+        (floorsData || []).forEach(({ floorCode, pageDefects }) => {
+            (pageDefects || []).forEach((defect) => {
+                if (!defectNeedsCrackMonitorUi(defect)) return;
+                const gauge = normalizeCrackGaugeLog(defect.crackGaugeLog);
+                const tip = normalizeCrackTipLog(defect.crackTipLog);
+                const hasGauge = !!(gauge.gaugeNo || gauge.initialX || gauge.initialY || (gauge.readings && gauge.readings.length));
+                const hasTip = !!(tip.initialLengthMm || (tip.readings && tip.readings.length));
+                if (!hasGauge && !hasTip) return;
+                items.push({
+                    defect,
+                    floorCode,
+                    floorLabel: getFloorLabel(floorCode),
+                    gauge,
+                    tip,
+                    hasGauge,
+                    hasTip
+                });
+            });
+        });
+        const slots = [];
+        const gaugeItems = items.filter((it) => it.hasGauge);
+        const tipItems = items.filter((it) => it.hasTip && !it.hasGauge);
+        gaugeItems.slice(0, 2).forEach((item, idx) => slots.push({ ...item, col: idx + 1, kind: 'gauge' }));
+        const third = gaugeItems[2] || tipItems[0] || items.find((it) => it.hasTip);
+        if (third && slots.length < 3) {
+            slots.push({ ...third, col: 3, kind: third.hasTip && !third.hasGauge ? 'tip' : (third.hasTip ? 'tip' : 'gauge') });
+        }
+        return { items, slots };
+    }
+
+    function getHwpxTblCellByAddr(tbl, rowAddr, colAddr) {
+        if (!tbl) return null;
+        const trs = Array.from(tbl.getElementsByTagNameNS(HWPX_HP_NS, 'tr'));
+        for (let i = 0; i < trs.length; i += 1) {
+            const tcs = Array.from(trs[i].getElementsByTagNameNS(HWPX_HP_NS, 'tc'));
+            for (let j = 0; j < tcs.length; j += 1) {
+                const addr = tcs[j].getElementsByTagNameNS(HWPX_HP_NS, 'cellAddr')[0];
+                if (!addr) continue;
+                if (parseInt(addr.getAttribute('rowAddr'), 10) === rowAddr && parseInt(addr.getAttribute('colAddr'), 10) === colAddr) {
+                    return tcs[j];
+                }
+            }
+        }
+        return null;
+    }
+
+    function findHwpxTblByRowCount(root, rowCnt) {
+        const tbls = Array.from(root.getElementsByTagNameNS(HWPX_HP_NS, 'tbl'));
+        return tbls.find((tbl) => parseInt(tbl.getAttribute('rowCnt') || '0', 10) === rowCnt) || null;
+    }
+
+    function fillHwpxCrackMonitorCurrentTable(tbl, slots, setTcText) {
+        if (!tbl || !slots || !slots.length) return;
+        slots.forEach((slot) => {
+            const col = slot.col;
+            const header = `NO.${slot.col}${slot.floorLabel || ''} ${slot.defect.component || ''}`.trim();
+            setTcText(getHwpxTblCellByAddr(tbl, 1, col), header);
+            setTcText(getHwpxTblCellByAddr(tbl, 2, col), slot.kind === 'tip' ? '균열팁' : '크랙모니터');
+            if (slot.kind === 'tip') {
+                setTcText(getHwpxTblCellByAddr(tbl, 3, col), formatHwpxTipLengthCell(slot.tip.initialLengthMm, { isInitial: true }));
+            } else {
+                setTcText(getHwpxTblCellByAddr(tbl, 3, col), formatHwpxGaugeAxisCell('y', slot.gauge.initialY, null, { isInitial: true }));
+                // col is single cell per slot; combine X/Y on initial row if both exist
+                const xInit = slot.gauge.initialX;
+                if (xInit) {
+                    const tc = getHwpxTblCellByAddr(tbl, 3, col);
+                    const cur = formatHwpxGaugeAxisCell('y', slot.gauge.initialY, null, { isInitial: true });
+                    setTcText(tc, `${cur} / ${formatHwpxGaugeAxisCell('x', xInit, null, { isInitial: true })}`);
+                }
+            }
+        });
+        const dateKeys = [];
+        const dateMap = {};
+        slots.forEach((slot) => {
+            const readings = slot.kind === 'tip' ? (slot.tip.readings || []) : (slot.gauge.readings || []);
+            readings.forEach((r) => {
+                const key = formatHwpxCrackMonitorDate(r.date) || r.roundKey || '';
+                if (!key) return;
+                if (!dateMap[key]) {
+                    dateMap[key] = {};
+                    dateKeys.push(key);
+                }
+                dateMap[key][slot.col] = { slot, reading: r };
+            });
+        });
+        let dataRow = 4;
+        const maxDataRow = 14;
+        dateKeys.forEach((dk, idx) => {
+            if (dataRow > maxDataRow) return;
+            setTcText(getHwpxTblCellByAddr(tbl, dataRow, 0), dk);
+            slots.forEach((slot) => {
+                const hit = dateMap[dk] && dateMap[dk][slot.col];
+                if (!hit) {
+                    setTcText(getHwpxTblCellByAddr(tbl, dataRow, slot.col), '-');
+                    return;
+                }
+                const readings = hit.slot.kind === 'tip' ? (hit.slot.tip.readings || []) : (hit.slot.gauge.readings || []);
+                const rIdx = readings.indexOf(hit.reading);
+                const prev = rIdx > 0 ? readings[rIdx - 1] : null;
+                if (hit.slot.kind === 'tip') {
+                    setTcText(getHwpxTblCellByAddr(tbl, dataRow, slot.col), formatHwpxTipLengthCell(hit.reading.lengthMm, {}));
+                } else {
+                    const yTxt = formatHwpxGaugeAxisCell('y', hit.reading.yMm, prev && prev.yMm, {});
+                    const xTxt = hit.reading.xMm ? formatHwpxGaugeAxisCell('x', hit.reading.xMm, prev && prev.xMm, {}) : '';
+                    setTcText(getHwpxTblCellByAddr(tbl, dataRow, slot.col), xTxt ? `${yTxt} / ${xTxt}` : yTxt);
+                }
+            });
+            setTcText(getHwpxTblCellByAddr(tbl, dataRow, 4), '-');
+            dataRow += 1;
+        });
+        for (let r = dataRow; r <= maxDataRow; r += 1) {
+            for (let c = 0; c <= 4; c += 1) setTcText(getHwpxTblCellByAddr(tbl, r, c), c === 0 && r === maxDataRow ? '금회 측정' : '-');
+        }
+        setTcText(getHwpxTblCellByAddr(tbl, 15, 0), '변화량(금회측정-초기값)');
+        slots.forEach((slot) => {
+            setTcText(getHwpxTblCellByAddr(tbl, 15, slot.col), formatHwpxCrackChangeSummary(slot));
+        });
+        setTcText(getHwpxTblCellByAddr(tbl, 15, 4), '-');
+    }
+
+    async function loadHwpxCrackMonitorStampTemplate() {
+        try {
+            const resp = await fetch('./templates/hwpx_crack_monitor.hwpx', { cache: 'no-store' });
+            if (!resp.ok) return null;
+            const stampZip = await JSZip.loadAsync(await resp.arrayBuffer());
+            const sectionPath = stampZip.file('Contents/section1.xml') ? 'Contents/section1.xml' : 'Contents/section0.xml';
+            const sectionXml = await stampZip.file(sectionPath).async('string');
+            const stampDoc = new DOMParser().parseFromString(sectionXml, 'application/xml');
+            const stampSec = stampDoc.getElementsByTagName('hs:sec')[0];
+            if (!stampSec) return null;
+            const topParas = extractHwpxSecTopLevelParas(stampSec);
+            const headerText = stampZip.file('Contents/header.xml') ? await stampZip.file('Contents/header.xml').async('string') : null;
+            return { stampZip, topParas, headerText };
+        } catch (e) {
+            console.warn('균열게이지 HWPX 양식 로드 실패:', e);
+            return null;
+        }
+    }
+
+    async function appendHwpxCrackMonitorSectionEnd(ctx) {
+        const {
+            bldg, bldgId, getFloorLabel, sec, xmlDoc, zip,
+            setTcText, ensureTblTreatAsChar, dataUrlToBytes, loadImageSize, setPicImage,
+            ensureDefectPhotosLoaded, manifestAdds, counters,
+            mergeStampHeader, remapStampNode, hwpxHeaderState
+        } = ctx;
+        const crackFloorsData = buildHwpxCrackMonitorFloorsData(bldg, bldgId);
+        const { items, slots } = collectHwpxCrackMonitorExportItems(bldg, bldgId, crackFloorsData, getFloorLabel);
+        if (!items.length || !slots.length) return;
+
+        const stamp = await loadHwpxCrackMonitorStampTemplate();
+        if (!stamp || !stamp.topParas || !stamp.topParas.length) {
+            window.showToast('균열게이지·팁 양식(templates/hwpx_crack_monitor.hwpx)을 찾지 못했습니다.', 'warning', 5000);
+            return;
+        }
+
+        let remapAttrs = null;
+        if (mergeStampHeader && stamp.headerText && hwpxHeaderState) {
+            if (!hwpxHeaderState.text && zip.file('Contents/header.xml')) {
+                hwpxHeaderState.text = await zip.file('Contents/header.xml').async('string');
+            }
+            const merged = mergeStampHeader(hwpxHeaderState.text, stamp.headerText, stamp.topParas);
+            if (merged && merged.header) {
+                hwpxHeaderState.text = merged.header;
+                hwpxHeaderState.dirty = true;
+                remapAttrs = merged.remapAttrs;
+            }
+        }
+
+        const cloneStampPara = (proto) => {
+            if (!proto) return null;
+            let node = proto.cloneNode(true);
+            if (remapStampNode) node = remapStampNode(node, remapAttrs);
+            return xmlDoc.importNode(node, true);
+        };
+
+        const reassignStampIds = (para) => {
+            Array.from(para.getElementsByTagNameNS(HWPX_HP_NS, 'tbl')).forEach((tbl) => {
+                counters.cloneIdSeq += 1;
+                tbl.setAttribute('id', String(10700000 + counters.cloneIdSeq));
+            });
+            Array.from(para.getElementsByTagNameNS(HWPX_HP_NS, 'pic')).forEach((pic) => {
+                counters.cloneIdSeq += 1;
+                pic.setAttribute('id', String(10800000 + counters.cloneIdSeq));
+                pic.setAttribute('instid', String(10900000 + counters.cloneIdSeq));
+            });
+        };
+
+        const copyStampBinary = async (oldId, ext, mime) => {
+            const path = `BinData/${oldId}.${ext}`;
+            const file = stamp.stampZip.file(path);
+            if (!file) return null;
+            counters.imgCounter += 1;
+            const newId = `crackMonImg${counters.imgCounter}`;
+            const bytes = await file.async('uint8array');
+            zip.file(`BinData/${newId}.${ext}`, bytes);
+            manifestAdds.push(`<opf:item id="${newId}" href="BinData/${newId}.${ext}" media-type="${mime}" isEmbeded="1"/>`);
+            return newId;
+        };
+
+        const remapEmbeddedStampImages = async (root) => {
+            const map = {
+                image1: ['jpg', 'image/jpg'],
+                image2: ['jpg', 'image/jpg'],
+                image3: ['jpg', 'image/jpg'],
+                image4: ['jpg', 'image/jpg'],
+                image5: ['jpg', 'image/jpg'],
+                image6: ['emf', 'image/emf']
+            };
+            const refs = new Set();
+            Array.from(root.getElementsByTagNameNS(HWPX_HC_NS, 'img')).forEach((imgEl) => {
+                const ref = imgEl.getAttribute('binaryItemIDRef');
+                if (ref) refs.add(ref);
+            });
+            const idMap = {};
+            for (const ref of refs) {
+                const spec = map[ref];
+                if (!spec) continue;
+                const newId = await copyStampBinary(ref, spec[0], spec[1]);
+                if (newId) idMap[ref] = newId;
+            }
+            Array.from(root.getElementsByTagNameNS(HWPX_HC_NS, 'img')).forEach((imgEl) => {
+                const ref = imgEl.getAttribute('binaryItemIDRef');
+                if (ref && idMap[ref]) imgEl.setAttribute('binaryItemIDRef', idMap[ref]);
+            });
+        };
+
+        const fillSummaryPhotoTable = async (tbl, item, photoNo) => {
+            if (!tbl || !item) return;
+            const d = item.defect;
+            await ensureDefectPhotosLoaded(d);
+            const prevSrc = getDefectPrevOutputPhotos(d)[0];
+            const currSrc = getDefectOutputPhotos(d)[0];
+            const roundLabels = getDefectHwpxCompareRoundLabelsFull(d, bldg);
+            setTcText(getHwpxTblCellByAddr(tbl, 1, 0), String(photoNo));
+            setTcText(getHwpxTblCellByAddr(tbl, 1, 1), d.component || '');
+            setTcText(getHwpxTblCellByAddr(tbl, 1, 2), `${item.floorLabel || ''} ${d.locationDetail || ''}`.trim());
+            setTcText(getHwpxTblCellByAddr(tbl, 1, 4), formatHwpxCrackSummaryChangeText(item));
+            setTcText(getHwpxTblCellByAddr(tbl, 1, 5), '-');
+            const pics = Array.from(tbl.getElementsByTagNameNS(HWPX_HP_NS, 'pic'));
+            const stampPic = pics[0];
+            const maxW = stampPic ? parseInt(stampPic.getElementsByTagNameNS(HWPX_HP_NS, 'curSz')[0]?.getAttribute('width') || '0', 10) : 0;
+            const maxH = stampPic ? parseInt(stampPic.getElementsByTagNameNS(HWPX_HP_NS, 'curSz')[0]?.getAttribute('height') || '0', 10) : 0;
+            const fillPic = async (pic, src) => {
+                if (!pic) return;
+                if (!src) {
+                    const imgEl = pic.getElementsByTagNameNS(HWPX_HC_NS, 'img')[0];
+                    if (imgEl) imgEl.setAttribute('binaryItemIDRef', '');
+                    return;
+                }
+                counters.imgCounter += 1;
+                const pack = dataUrlToBytes(src);
+                const size = await loadImageSize(src);
+                const imgId = `crackMonPhoto${counters.imgCounter}`;
+                zip.file(`BinData/${imgId}.${pack.ext}`, pack.bytes);
+                manifestAdds.push(`<opf:item id="${imgId}" href="BinData/${imgId}.${pack.ext}" media-type="${pack.mime}" isEmbeded="1"/>`);
+                setPicImage(pic, imgId, size.w, size.h, maxW || undefined, maxH || undefined);
+            };
+            await fillPic(pics[0], prevSrc);
+            await fillPic(pics[1], currSrc);
+            setTcText(getHwpxTblCellByAddr(tbl, 3, 0), roundLabels.prev || '전회 측정');
+            setTcText(getHwpxTblCellByAddr(tbl, 3, 3), roundLabels.curr || '금회 측정');
+        };
+
+        try {
+            const titlePara = cloneStampPara(stamp.topParas[0]);
+            if (titlePara) {
+                titlePara.setAttribute('pageBreak', '1');
+                reassignStampIds(titlePara);
+                sec.appendChild(titlePara);
+            }
+
+            const dataPara = cloneStampPara(stamp.topParas[1]);
+            if (dataPara) {
+                reassignStampIds(dataPara);
+                const currentTbl = findHwpxTblByRowCount(dataPara, 16);
+                if (currentTbl) {
+                    fillHwpxCrackMonitorCurrentTable(currentTbl, slots, setTcText);
+                    ensureTblTreatAsChar(currentTbl);
+                }
+                sec.appendChild(dataPara);
+            }
+
+            const summaryProtos = [stamp.topParas[2], stamp.topParas[3], stamp.topParas[4]].filter(Boolean);
+            for (let si = 0; si < slots.length; si += 1) {
+                const proto = summaryProtos[si] || summaryProtos[summaryProtos.length - 1];
+                const sumPara = cloneStampPara(proto);
+                if (!sumPara) continue;
+                reassignStampIds(sumPara);
+                const sumTbl = sumPara.getElementsByTagNameNS(HWPX_HP_NS, 'tbl')[0];
+                if (sumTbl) {
+                    await fillSummaryPhotoTable(sumTbl, slots[si], si + 1);
+                    ensureTblTreatAsChar(sumTbl);
+                }
+                sec.appendChild(sumPara);
+            }
+
+            [stamp.topParas[5], stamp.topParas[6], stamp.topParas[7]].forEach((proto) => {
+                const p = cloneStampPara(proto);
+                if (!p) return;
+                reassignStampIds(p);
+                sec.appendChild(p);
+            });
+
+            const installPara = sec.lastElementChild;
+            if (installPara) await remapEmbeddedStampImages(installPara);
+        } catch (crackErr) {
+            console.error('균열게이지·팁 HWPX 삽입 실패(나머지는 유지):', crackErr);
+            window.showToast('균열게이지·팁 양식 삽입 중 오류가 있어 해당 섹션은 제외합니다.', 'warning', 5000);
+        }
+    }
+
     // --- HWPX(한글) 상태조사표 내보내기 (전체 층, 건수/사진 매수 제한 없음) ---
     // 번들 템플릿(templates/hwpx_survey_template.hwpx, 정기점검은 _regular.hwpx)에 이미 있는
     // "N) 층명" 블록(상태조사표+사진첩+위치도)을 표 ID 하드코딩 대신 문단 구조로 자동 탐지해
@@ -30926,77 +31428,6 @@ document.addEventListener('DOMContentLoaded', () => {
             const secChildren = () => Array.from(sec.children).filter(c => c.localName === 'p');
 
             // 비교표 borderFill만 본문 header에 추가한다. paraPr/charPr/style(문단모양)은 건드리지 않는다.
-            const mergeGrade3CompareStampHeader = (mainHdr, stampHdr, stampParas) => {
-                const ser = new XMLSerializer();
-                let fragmentXml = '';
-                (stampParas || []).forEach((p) => { if (p) fragmentXml += ser.serializeToString(p); });
-                if (!fragmentXml || !stampHdr) return { header: mainHdr, remapAttrs: null };
-
-                const borderIds = new Set();
-                for (const m of fragmentXml.matchAll(/<hp:(?:tbl|tc)\b[^>]*borderFillIDRef="(\d+)"/g)) {
-                    borderIds.add(m[1]);
-                }
-                if (!borderIds.size) return { header: mainHdr, remapAttrs: null };
-
-                const tagBlock = (hdr, tag, id) => {
-                    const re = new RegExp(`<hh:${tag} id="${id}"[\\s\\S]*?</hh:${tag}>`);
-                    const m = hdr.match(re);
-                    return m ? m[0] : null;
-                };
-                const maxId = (hdr, tag) => {
-                    const ids = [...hdr.matchAll(new RegExp(`<hh:${tag} id="(\\d+)"`, 'g'))].map(x => parseInt(x[1], 10));
-                    return ids.length ? Math.max(...ids) : 0;
-                };
-                let nxt = maxId(mainHdr, 'borderFill') + 1;
-                const borderMap = {};
-                [...borderIds].sort((a, b) => parseInt(a, 10) - parseInt(b, 10)).forEach((id) => {
-                    borderMap[id] = String(nxt++);
-                });
-
-                let outHdr = mainHdr;
-                [...borderIds].sort((a, b) => parseInt(a, 10) - parseInt(b, 10)).forEach((bid) => {
-                    let b = tagBlock(stampHdr, 'borderFill', bid);
-                    if (!b) return;
-                    b = b.replace(/^<hh:borderFill id="\d+"/, `<hh:borderFill id="${borderMap[bid]}"`);
-                    outHdr = outHdr.replace('</hh:borderFills>', b + '</hh:borderFills>');
-                });
-                const bfCnt = (outHdr.match(/<hh:borderFill id="/g) || []).length;
-                outHdr = outHdr.replace(/(<hh:borderFills[^>]*itemCnt=")(\d+)(")/, `$1${bfCnt}$3`);
-
-                return {
-                    header: outHdr,
-                    remapAttrs: { borderFillIDRef: borderMap }
-                };
-            };
-            const stripHwpxParaRunBorderFill = (node) => {
-                if (!node) return node;
-                const walk = (el) => {
-                    if (!el || el.nodeType !== 1) return;
-                    if (el.localName === 'p' || el.localName === 'run') {
-                        el.removeAttribute('borderFillIDRef');
-                    }
-                    Array.from(el.children || []).forEach(walk);
-                };
-                walk(node);
-                return node;
-            };
-            const remapHwpxCompareNode = (node, remapAttrs) => {
-                if (!node || !remapAttrs) return stripHwpxParaRunBorderFill(node);
-                const borderMap = remapAttrs.borderFillIDRef;
-                const walk = (el) => {
-                    if (!el || el.nodeType !== 1) return;
-                    if (el.localName === 'tbl' || el.localName === 'tc') {
-                        const v = el.getAttribute('borderFillIDRef');
-                        if (v && borderMap && borderMap[v]) el.setAttribute('borderFillIDRef', borderMap[v]);
-                    }
-                    if (el.localName === 'p' || el.localName === 'run') {
-                        el.removeAttribute('borderFillIDRef');
-                    }
-                    Array.from(el.children || []).forEach(walk);
-                };
-                walk(node);
-                return node;
-            };
             let hwpxHeaderText = null;
             let hwpxHeaderDirty = false;
 
@@ -33032,6 +33463,24 @@ document.addEventListener('DOMContentLoaded', () => {
                 console.error('전경사진 HWPX 삽입 실패(나머지는 유지):', ovErr);
             }
 
+            // ---- 균열게이지·균열팁 (문서 맨 마지막 — 전경사진 뒤) ----
+            try {
+                const crackHdrState = { text: hwpxHeaderText, dirty: hwpxHeaderDirty };
+                await appendHwpxCrackMonitorSectionEnd({
+                    bldg, bldgId, getFloorLabel, sec, xmlDoc, zip,
+                    setTcText, ensureTblTreatAsChar, dataUrlToBytes, loadImageSize, setPicImage,
+                    ensureDefectPhotosLoaded, manifestAdds,
+                    counters: { imgCounter, cloneIdSeq },
+                    mergeStampHeader: mergeGrade3CompareStampHeader,
+                    remapStampNode: remapHwpxCompareNode,
+                    hwpxHeaderState: crackHdrState
+                });
+                hwpxHeaderText = crackHdrState.text;
+                hwpxHeaderDirty = crackHdrState.dirty;
+            } catch (crackAppendErr) {
+                console.error('균열게이지·팁 HWPX 섹션 추가 실패(나머지는 유지):', crackAppendErr);
+            }
+
             Array.from(xmlDoc.getElementsByTagNameNS(HP_NS, 'tbl')).forEach(ensureTblTreatAsChar);
 
             if (hwpxHeaderDirty && hwpxHeaderText) {
@@ -33120,6 +33569,8 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!sec) throw new Error('템플릿 문서 구조(hs:sec)를 찾지 못했습니다.');
             const paraText = (p) => Array.from(p.getElementsByTagNameNS(HP_NS, 't')).map(t => t.textContent).join('');
             const secChildren = () => Array.from(sec.children).filter(c => c.localName === 'p');
+            let hwpxHeaderText = null;
+            let hwpxHeaderDirty = false;
 
             // 한글에서 표에 새 칸을 추가만 하고 한 번도 안 채운 셀은 문단/run은 있어도 hp:t(실제 글자
             // 요소)가 아예 없는 경우가 있다. 없으면 만들어서 항상 값을 넣을 자리를 보장한다.
@@ -34820,6 +35271,24 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             } catch (ovErr) {
                 console.error('전경사진 HWPX 삽입 실패(나머지는 유지):', ovErr);
+            }
+
+            // ---- 균열게이지·균열팁 (문서 맨 마지막 — 전경사진 뒤) ----
+            try {
+                const crackHdrState = { text: hwpxHeaderText, dirty: hwpxHeaderDirty };
+                await appendHwpxCrackMonitorSectionEnd({
+                    bldg, bldgId, getFloorLabel, sec, xmlDoc, zip,
+                    setTcText, ensureTblTreatAsChar, dataUrlToBytes, loadImageSize, setPicImage,
+                    ensureDefectPhotosLoaded, manifestAdds,
+                    counters: { imgCounter, cloneIdSeq },
+                    mergeStampHeader: mergeGrade3CompareStampHeader,
+                    remapStampNode: remapHwpxCompareNode,
+                    hwpxHeaderState: crackHdrState
+                });
+                hwpxHeaderText = crackHdrState.text;
+                hwpxHeaderDirty = crackHdrState.dirty;
+            } catch (crackAppendErr) {
+                console.error('균열게이지·팁 HWPX 섹션 추가 실패(나머지는 유지):', crackAppendErr);
             }
 
             Array.from(xmlDoc.getElementsByTagNameNS(HP_NS, 'tbl')).forEach(ensureTblTreatAsChar);

@@ -3,7 +3,7 @@
    앱 JS/CSS는 네트워크 전용(캐시 fallback 없음) — 모바일 웹 구버전 고착 방지
    ========================================================================== */
 
-const CACHE_NAME = 'building-safety-v20260909_173427';
+const CACHE_NAME = 'building-safety-v20260910_154555';
 
 /** 오프라인 셸·한글 템플릿만 선캐시 (app.js / js/* 는 제외) */
 const STATIC_ASSETS = [
@@ -13,6 +13,7 @@ const STATIC_ASSETS = [
     './templates/hwpx_survey_template_regular.hwpx',
     './templates/hwpx_survey_template_grade3.hwpx',
     './templates/hwpx_survey_template_grade3_regular.hwpx',
+    './templates/hwpx_crack_monitor.hwpx',
     'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css',
     'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js',
     'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js',

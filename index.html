@@ -39,7 +39,7 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <meta name="apple-mobile-web-app-title" content="스마트 안전점검">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css">
-    <link rel="stylesheet" href="styles.css?v=20260909_173427">
+    <link rel="stylesheet" href="styles.css?v=20260910_154555">
     <!-- FontAwesome icons for clean engineering UI -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <!-- PDF 생성용: 페이지별로 직접 캡처해서 조립(큰 보고서에서 html2pdf 한방 렌더링이 캔버스 높이 한계로
@@ -2268,7 +2268,12 @@
                 </button>
             </div>
 
-            <div class="modal-body add-building-body">
+            <div class="modal-body add-building-body" id="addBuildingScrollHost">
+                <div class="add-building-body-grip" id="addBuildingBodyGrip" aria-hidden="true">
+                    <span class="add-building-body-grip-bar"></span>
+                    <span class="add-building-body-grip-text">위·아래로 드래그 · 스크롤</span>
+                </div>
+                <div class="add-building-body-content">
                 <section class="add-building-panel" id="addBuildingImportPanel" hidden>
                     <div class="add-building-section add-building-section-accent">
                         <div class="add-section-head">
@@ -2339,9 +2344,9 @@
                     </div>
                 </section>
 
-                <details class="add-building-collapsible" id="addBuildingBasicDetails" open>
-                    <summary class="add-building-collapsible-summary"><i class="fa-solid fa-circle-info"></i> 기본 정보</summary>
-                <section class="add-building-section add-building-collapsible-body">
+                <div class="add-building-block" id="addBuildingBasicDetails">
+                    <div class="add-building-block-title"><i class="fa-solid fa-circle-info"></i> 기본 정보</div>
+                <section class="add-building-section">
                     <p class="add-section-desc add-section-desc-inline">점검 대상 건축물의 식별 정보를 입력합니다.</p>
                     <div class="form-group">
                         <label class="form-label" for="inputBuildingSiteName">현장명 <span class="req-mark">*</span></label>
@@ -2426,11 +2431,11 @@
                         </div>
                     </div>
                 </section>
-                </details>
+                </div>
 
-                <details class="add-building-collapsible" id="addBuildingInspectionDetails" open>
-                    <summary class="add-building-collapsible-summary"><i class="fa-solid fa-clipboard-check"></i> 점검 정보</summary>
-                <section class="add-building-section add-building-collapsible-body">
+                <div class="add-building-block" id="addBuildingInspectionDetails">
+                    <div class="add-building-block-title"><i class="fa-solid fa-clipboard-check"></i> 점검 정보</div>
+                <section class="add-building-section">
                     <p class="add-section-desc add-section-desc-inline">이번에 수행할 점검 종류와 회차를 지정합니다.</p>
                     <div class="form-row add-building-row-3">
                         <div class="form-group flex-1">
@@ -2464,7 +2469,7 @@
                         <textarea id="inputBuildingNotes" class="form-control" rows="2" placeholder="건물 특이사항이나 주요 요청 사항 입력"></textarea>
                     </div>
                 </section>
-                </details>
+                </div>
 
                 <section class="add-building-section add-building-upload-section">
                     <div class="add-section-head">
@@ -2490,6 +2495,7 @@
                         <div id="drawingSortPreview" class="add-drawing-preview"></div>
                     </div>
                 </section>
+                </div>
             </div>
 
             <div class="modal-footer add-building-footer">
@@ -3086,22 +3092,22 @@
     </div>
 
     <!-- Core → 탭 분류 → 기존 엔진(app.js) -->
-    <script src="js/core/state.js?v=20260909_173427"></script>
-    <script src="js/tabs/registry.js?v=20260909_173427"></script>
-    <script src="js/pdf-vector-bridge.js?v=20260909_173427"></script>
-    <script src="js/core/layout-mode.js?v=20260909_173427"></script>
-    <script src="js/core/mobile-keyboard.js?v=20260909_173427"></script>
-    <script src="js/tabs/home.js?v=20260909_173427"></script>
-    <script src="js/tabs/map.js?v=20260909_173427"></script>
-    <script src="js/tabs/survey.js?v=20260909_173427"></script>
-    <script src="js/tabs/stats.js?v=20260909_173427"></script>
-    <script src="js/tabs/ndt.js?v=20260909_173427"></script>
-    <script src="js/shared/report.js?v=20260909_173427"></script>
-    <script src="js/shared/hwpx-import.js?v=20260909_173427"></script>
-    <script src="js/shared/auth.js?v=20260909_173427"></script>
-    <script src="app.js?v=20260909_184300"></script>
+    <script src="js/core/state.js?v=20260910_154555"></script>
+    <script src="js/tabs/registry.js?v=20260910_154555"></script>
+    <script src="js/pdf-vector-bridge.js?v=20260910_154555"></script>
+    <script src="js/core/layout-mode.js?v=20260910_154555"></script>
+    <script src="js/core/mobile-keyboard.js?v=20260910_154555"></script>
+    <script src="js/tabs/home.js?v=20260910_154555"></script>
+    <script src="js/tabs/map.js?v=20260910_154555"></script>
+    <script src="js/tabs/survey.js?v=20260910_154555"></script>
+    <script src="js/tabs/stats.js?v=20260910_154555"></script>
+    <script src="js/tabs/ndt.js?v=20260910_154555"></script>
+    <script src="js/shared/report.js?v=20260910_154555"></script>
+    <script src="js/shared/hwpx-import.js?v=20260910_154555"></script>
+    <script src="js/shared/auth.js?v=20260910_154555"></script>
+    <script src="app.js?v=20260910_154555"></script>
     <script>
-        window.BSA_APP_VERSION = '20260909_184300';
+        window.BSA_APP_VERSION = '20260910_154555';
         (function () {
             var el = document.getElementById('appVersionText');
             if (el && window.BSA_APP_VERSION) el.textContent = 'v' + window.BSA_APP_VERSION;
@@ -3125,7 +3131,7 @@
                     native = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
                 } catch (e) {}
                 if (native) return;
-                navigator.serviceWorker.register('./sw.js?v=20260909_173427')
+                navigator.serviceWorker.register('./sw.js?v=20260910_154555')
                     .then(function(registration) {
                         console.log('✅ ServiceWorker Registered Successfully with scope:', registration.scope);
                         registration.update();

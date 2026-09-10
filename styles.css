@@ -4972,6 +4972,8 @@ html:not(.layout-desktop) .survey-inline-select {
 @media (max-width: 768px), (orientation: landscape) and (max-width: 1024px) {
     html:not(.layout-desktop) #ndtModal.modal-drawer-overlay,
     html:not(.layout-desktop) #ndtModal.modal-drawer-overlay.ndt-drawer-in-canvas,
+    html:not(.layout-desktop) #ndtCrackMonitorModal.modal-drawer-overlay,
+    html:not(.layout-desktop) #ndtCrackMonitorModal.modal-drawer-overlay.ndt-drawer-in-canvas,
     html:not(.layout-desktop) #ndtDisplacementModal.modal-drawer-overlay,
     html:not(.layout-desktop) #ndtDisplacementModal.modal-drawer-overlay.ndt-drawer-in-canvas,
     html:not(.layout-desktop) #ndtDisplacementGroupEditModal.modal-drawer-overlay,
@@ -4992,6 +4994,8 @@ html:not(.layout-desktop) .survey-inline-select {
 
     html:not(.layout-desktop) #ndtModal.modal-drawer-overlay.open,
     html:not(.layout-desktop) #ndtModal.modal-drawer-overlay.open.ndt-drawer-in-canvas,
+    html:not(.layout-desktop) #ndtCrackMonitorModal.modal-drawer-overlay.open,
+    html:not(.layout-desktop) #ndtCrackMonitorModal.modal-drawer-overlay.open.ndt-drawer-in-canvas,
     html:not(.layout-desktop) #ndtDisplacementModal.modal-drawer-overlay.open,
     html:not(.layout-desktop) #ndtDisplacementModal.modal-drawer-overlay.open.ndt-drawer-in-canvas,
     html:not(.layout-desktop) #ndtDisplacementGroupEditModal.modal-drawer-overlay.open,
@@ -5023,7 +5027,29 @@ html:not(.layout-desktop) .survey-inline-select {
         flex-direction: column;
     }
 
+    html:not(.layout-desktop) #ndtCrackMonitorModal .ndt-drawer-card,
+    html:not(.layout-desktop) #ndtCrackMonitorModal.ndt-drawer-in-canvas .ndt-drawer-card {
+        pointer-events: auto;
+        width: 100%;
+        max-width: 100%;
+        height: 78vh;
+        height: 78dvh;
+        max-height: 78vh;
+        max-height: 78dvh;
+        min-height: 55vh;
+        min-height: 55dvh;
+        margin: 0;
+        margin-top: auto;
+        align-self: stretch;
+        border-radius: 16px 16px 0 0;
+        transform: translateY(110%);
+        display: flex;
+        flex-direction: column;
+    }
+
     html:not(.layout-desktop) #ndtModal .defect-drawer-body,
+    html:not(.layout-desktop) #ndtCrackMonitorModal .defect-drawer-body,
+    html:not(.layout-desktop) #ndtCrackMonitorModal .ndt-crack-monitor-modal-body,
     html:not(.layout-desktop) #ndtDisplacementModal .defect-drawer-body,
     html:not(.layout-desktop) #ndtDisplacementGroupEditModal .defect-drawer-body {
         overflow-y: auto;
@@ -5035,6 +5061,8 @@ html:not(.layout-desktop) .survey-inline-select {
 
     html:not(.layout-desktop) #ndtModal.open .ndt-drawer-card,
     html:not(.layout-desktop) #ndtModal.open.ndt-drawer-in-canvas .ndt-drawer-card,
+    html:not(.layout-desktop) #ndtCrackMonitorModal.open .ndt-drawer-card,
+    html:not(.layout-desktop) #ndtCrackMonitorModal.open.ndt-drawer-in-canvas .ndt-drawer-card,
     html:not(.layout-desktop) #ndtDisplacementModal.open .ndt-drawer-card,
     html:not(.layout-desktop) #ndtDisplacementModal.open.ndt-drawer-in-canvas .ndt-drawer-card,
     html:not(.layout-desktop) #ndtDisplacementGroupEditModal.open .ndt-drawer-card,
@@ -6421,7 +6449,8 @@ html:not(.layout-desktop) .survey-inline-select {
 .modal-body {
     padding: 1.2rem;
     overflow-y: auto;
-    flex: 1;
+    flex: 1 1 auto;
+    min-height: 0;
 }
 
 .modal-footer {
@@ -6433,7 +6462,7 @@ html:not(.layout-desktop) .survey-inline-select {
     gap: 0.5rem;
 }
 
-/* ── 신규 건축물 등록 모달 ── */
+/* ── 신규 건축물 등록 모달 — 수정 모달과 동일 flex·modal-body 스크롤 ── */
 .add-building-modal {
     max-width: 680px;
     width: min(96vw, 680px);
@@ -6443,31 +6472,36 @@ html:not(.layout-desktop) .survey-inline-select {
     overflow: hidden;
     display: flex;
     flex-direction: column;
-    max-height: min(92dvh, calc(100dvh - 1.5rem));
     min-height: 0;
+    height: min(92dvh, calc(100dvh - 1.5rem - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px)));
+    max-height: min(92dvh, calc(100dvh - 1.5rem - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px)));
+    animation: none;
 }
 
-/* 카드 안에서만 스크롤 — 헤더/모드바/푸터는 고정, 본문 flex 수축 */
 #addBuildingModal.modal-overlay.open {
-    overflow-x: hidden;
-    overflow-y: auto;
-    -webkit-overflow-scrolling: touch;
-    overscroll-behavior: contain;
     display: grid !important;
     place-items: center;
     align-content: center;
     justify-items: center;
-    padding: 1rem;
+    padding: 0.75rem;
+    padding-top: max(0.75rem, env(safe-area-inset-top, 0px));
+    padding-bottom: max(0.75rem, env(safe-area-inset-bottom, 0px));
     box-sizing: border-box;
+    overscroll-behavior: contain;
 }
 
 #addBuildingModal .modal-card.add-building-modal {
     flex-shrink: 0;
     width: min(96vw, 680px);
-    max-height: min(92dvh, calc(100dvh - 1.25rem - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px)));
-    min-height: 0;
     margin: 0;
     justify-self: center;
+    align-self: center;
+    display: flex !important;
+    flex-direction: column;
+    min-height: 0;
+    overflow: hidden;
+    height: min(92dvh, calc(100dvh - 1.5rem - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px)));
+    max-height: min(92dvh, calc(100dvh - 1.5rem - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px)));
 }
 
 .add-building-header {
@@ -6520,6 +6554,7 @@ html:not(.layout-desktop) .survey-inline-select {
 }
 
 .add-building-mode-bar {
+    flex-shrink: 0;
     display: grid;
     grid-template-columns: 1fr 1fr;
     gap: 0;
@@ -6557,21 +6592,110 @@ html:not(.layout-desktop) .survey-inline-select {
     box-shadow: 0 2px 8px rgba(15, 23, 42, 0.08);
 }
 
-.add-building-body {
-    display: flex;
-    flex-direction: column;
-    gap: 0.85rem;
-    padding: 1rem 1.2rem 1.1rem;
-    background: #f8fafc;
-    /* PC: flex-basis 0이면 카드 높이 미지정 시 본문이 0으로 수축 → auto */
-    flex: 1 1 auto;
+#addBuildingModal .modal-body,
+#addBuildingModal .add-building-body {
+    display: block;
+    flex: 1 1 0;
     min-height: 0;
     max-height: none;
-    overflow-y: auto;
+    padding: 0;
+    overflow-y: auto !important;
     overflow-x: hidden;
     -webkit-overflow-scrolling: touch;
     overscroll-behavior: contain;
     touch-action: pan-y;
+    scroll-padding-bottom: 1.5rem;
+    scrollbar-gutter: stable;
+    background: #f8fafc;
+    position: relative;
+}
+
+.add-building-body::after {
+    content: '';
+    position: sticky;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    display: block;
+    height: 1.35rem;
+    margin-top: -1.35rem;
+    pointer-events: none;
+    background: linear-gradient(180deg, rgba(248, 250, 252, 0) 0%, #f8fafc 88%);
+    z-index: 1;
+    opacity: 0;
+    transition: opacity 0.15s ease;
+}
+
+.add-building-body.has-scroll:not(.at-scroll-end)::after {
+    opacity: 1;
+}
+
+#addBuildingModal .add-building-body::-webkit-scrollbar {
+    width: 8px;
+}
+
+#addBuildingModal .add-building-body::-webkit-scrollbar-thumb {
+    background: #cbd5e1;
+    border-radius: 999px;
+}
+
+#addBuildingModal .add-building-body::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+@media (hover: hover) and (pointer: fine) {
+    #addBuildingModal .add-building-body {
+        overflow-y: scroll !important;
+    }
+}
+
+.add-building-body-content {
+    display: block;
+    padding: 0 1.2rem 1.5rem;
+}
+
+.add-building-body-content > * + * {
+    margin-top: 0.85rem;
+}
+
+.add-building-body-grip {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.2rem;
+    padding: 0.15rem 0 0.45rem;
+    margin: 0 0 0.15rem;
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    background: linear-gradient(180deg, #f8fafc 70%, rgba(248, 250, 252, 0));
+    touch-action: none;
+    cursor: grab;
+    user-select: none;
+}
+
+.add-building-body-grip.is-dragging {
+    cursor: grabbing;
+}
+
+.add-building-body-grip-bar {
+    width: 2.35rem;
+    height: 0.28rem;
+    border-radius: 999px;
+    background: #94a3b8;
+}
+
+.add-building-body-grip-text {
+    font-size: 0.62rem;
+    font-weight: 700;
+    color: #94a3b8;
+    letter-spacing: -0.01em;
+}
+
+@media (min-width: 1025px) {
+    .add-building-body-grip-text {
+        display: none;
+    }
 }
 
 .add-building-section {
@@ -7100,10 +7224,72 @@ html:not(.layout-desktop) .survey-inline-select {
 }
 
 .add-building-footer {
+    flex-shrink: 0;
     background: #ffffff;
     border-top: 1px solid #e2e8f0;
     padding: 0.85rem 1.2rem;
     flex-shrink: 0;
+    position: relative;
+    z-index: 2;
+}
+
+body.add-building-modal-open .app-content {
+    overflow: hidden !important;
+}
+
+@media (max-height: 860px) {
+    #addBuildingModal .add-building-header {
+        padding: 0.8rem 1rem;
+    }
+
+    #addBuildingModal .add-building-header h3 {
+        font-size: 1.05rem;
+    }
+
+    #addBuildingModal .add-building-subtitle {
+        font-size: 0.74rem;
+        margin-top: 0.2rem;
+    }
+
+    #addBuildingModal .add-building-mode-btn {
+        padding: 0.48rem 0.55rem;
+        font-size: 0.78rem;
+    }
+
+    #addBuildingModal .add-building-section {
+        padding: 0.75rem 0.85rem;
+    }
+
+    #addBuildingModal .add-building-section .form-group {
+        margin-bottom: 0.55rem;
+    }
+
+    #addBuildingModal .add-building-block-title {
+        padding: 0.5rem 0.85rem;
+        font-size: 0.84rem;
+    }
+}
+
+@media (max-height: 720px) {
+    #addBuildingModal .add-building-subtitle {
+        display: none;
+    }
+
+    #addBuildingModal .add-building-kicker {
+        font-size: 0.66rem;
+    }
+
+    #addBuildingModal .add-section-desc-inline {
+        display: none;
+    }
+
+    #addBuildingModal .site-layout-option {
+        padding: 0.5rem 0.55rem;
+    }
+
+    #addBuildingModal .add-building-footer {
+        padding: 0.65rem 1rem;
+    }
 }
 
 /* 현장 수정 모달 */
@@ -7135,6 +7321,8 @@ html:not(.layout-desktop) .survey-inline-select {
     display: flex;
     flex-direction: column;
     min-height: 0;
+    height: min(86dvh, calc(100dvh - 1.2rem));
+    max-height: min(86dvh, calc(100dvh - 1.2rem));
 }
 
 .edit-building-header {
@@ -7165,8 +7353,15 @@ html:not(.layout-desktop) .survey-inline-select {
     display: flex;
     flex-direction: column;
     gap: 0.85rem;
-    padding: 1rem 1.2rem 1.1rem;
+    padding: 1rem 1.2rem 1.35rem;
     background: #f8fafc;
+    flex: 1 1 0;
+    min-height: 0;
+    overflow-y: auto;
+    overflow-x: hidden;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+    touch-action: pan-y;
 }
 
 #editBuildingModal .modal-body {
@@ -7277,36 +7472,25 @@ html:not(.layout-desktop) .survey-inline-select {
     justify-content: flex-end;
 }
 
-/* PC(>1024px): 등록·수정 모달 본문 높이 보장 — flex-basis 0 수축 방지 */
+/* PC(>1024px): 수정 모달 등 — 등록 모달은 기본 grid 규칙 사용 */
 @media (min-width: 1025px) {
-    #addBuildingModal.modal-overlay.open,
+    #addBuildingModal.modal-overlay.open {
+        overflow-y: auto;
+    }
+
     #editBuildingModal.modal-overlay.open {
         display: grid !important;
         place-items: center;
         align-content: center;
         justify-items: center;
         padding: 1rem;
-    }
-
-    #addBuildingModal .modal-card.add-building-modal {
-        width: min(96vw, 680px);
-        max-height: min(92vh, calc(100vh - 2rem));
-        height: auto;
-        margin: 0;
-        justify-self: center;
-    }
-
-    #addBuildingModal .add-building-body,
-    #addBuildingModal .modal-body.add-building-body {
-        flex: 1 1 auto;
-        min-height: 14rem;
-        max-height: calc(92vh - 12.5rem);
-        overflow-y: auto;
+        overflow: hidden;
     }
 
     #editBuildingModal .modal-card.edit-building-modal {
         max-width: 480px;
         width: min(92vw, 480px);
+        height: min(88vh, calc(100vh - 2rem));
         max-height: min(88vh, calc(100vh - 2rem));
         margin: 0;
         justify-self: center;
@@ -7314,9 +7498,9 @@ html:not(.layout-desktop) .survey-inline-select {
 
     #editBuildingModal .modal-body,
     #editBuildingModal .edit-building-body {
-        flex: 1 1 auto;
-        min-height: 12rem;
-        max-height: calc(88vh - 9rem);
+        flex: 1 1 0;
+        min-height: 0;
+        max-height: none;
         overflow-y: auto;
     }
 }
@@ -7494,11 +7678,39 @@ html:not(.layout-desktop) .survey-inline-select {
     color: #78350f;
 }
 
+.add-building-block {
+    display: block;
+}
+
+.add-building-block[hidden] {
+    display: none !important;
+}
+
+.add-building-block-title {
+    padding: 0.65rem 0.95rem;
+    font-size: 0.88rem;
+    font-weight: 800;
+    color: #0f172a;
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 12px 12px 0 0;
+    margin: 0;
+}
+
+.add-building-block .add-building-section {
+    border-top: none;
+    border-radius: 0 0 12px 12px;
+    margin-top: 0;
+}
+
 .add-building-collapsible {
     border: 1px solid #e2e8f0;
     border-radius: 12px;
     background: #ffffff;
-    overflow: hidden;
+    overflow: visible;
 }
 
 .add-building-collapsible-summary {
@@ -7522,6 +7734,7 @@ html:not(.layout-desktop) .survey-inline-select {
     border-radius: 0;
     box-shadow: none;
     padding-top: 0.85rem;
+    overflow: visible;
 }
 
 .add-section-desc-inline {
@@ -7980,7 +8193,7 @@ body:not(.bsa-tab-home) .home-fab-add-building {
 #ndtCrackMonitorModal.modal-drawer-overlay.ndt-drawer-in-canvas {
     inset: auto;
     overflow: hidden;
-    padding: 10px;
+    padding: 8px;
     box-sizing: border-box;
 }
 
@@ -7991,11 +8204,11 @@ body:not(.bsa-tab-home) .home-fab-add-building {
 #ndtCrackMonitorModal .ndt-drawer-card,
 #ndtCrackMonitorModal .ndt-crack-drawer-card {
     pointer-events: auto;
-    width: min(460px, calc(100% - 20px));
-    max-width: 460px;
-    height: calc(100% - 20px);
-    max-height: calc(100vh - 24px);
-    margin: 10px 10px 10px 0;
+    width: min(520px, calc(100% - 16px));
+    max-width: 520px;
+    height: calc(100% - 16px);
+    max-height: calc(100vh - 20px);
+    margin: 8px 8px 8px 0;
     border-radius: 14px;
     border: 1px solid #d0d0d0;
     box-shadow: 0 14px 40px rgba(20, 20, 20, 0.28);
@@ -8004,13 +8217,14 @@ body:not(.bsa-tab-home) .home-fab-add-building {
     display: flex;
     flex-direction: column;
     overflow: hidden;
+    min-height: 0;
 }
 
 #ndtCrackMonitorModal.ndt-drawer-in-canvas .ndt-drawer-card {
     margin: 0;
     height: 100%;
     max-height: 100%;
-    width: min(460px, 100%);
+    width: min(520px, 100%);
 }
 
 #ndtCrackMonitorModal.open .ndt-drawer-card {
@@ -8018,8 +8232,59 @@ body:not(.bsa-tab-home) .home-fab-add-building {
 }
 
 #ndtCrackMonitorModal .ndt-crack-monitor-modal-body {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-x: hidden;
     overflow-y: auto;
     -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+    touch-action: pan-y;
+}
+
+#ndtCrackMonitorModal .ndt-crack-monitor-form {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+}
+
+#ndtCrackMonitorModal .defect-crack-monitor-block {
+    min-width: 0;
+}
+
+#ndtCrackMonitorModal .defect-crack-monitor-table-wrap {
+    overflow-x: hidden;
+    overflow-y: visible;
+    margin-bottom: 0.35rem;
+}
+
+#ndtCrackMonitorModal .defect-crack-monitor-table {
+    table-layout: fixed;
+    width: 100%;
+}
+
+#ndtCrackMonitorModal .defect-crack-monitor-table th,
+#ndtCrackMonitorModal .defect-crack-monitor-table td {
+    white-space: normal;
+    word-break: break-word;
+    padding: 0.18rem 0.14rem;
+    font-size: 0.68rem;
+    vertical-align: middle;
+}
+
+#ndtCrackMonitorModal .defect-crack-monitor-table input {
+    min-width: 0;
+    width: 100%;
+    box-sizing: border-box;
+    font-size: 0.68rem;
+    padding: 0.12rem 0.16rem;
+}
+
+#ndtCrackMonitorModal .defect-crack-monitor-meta {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+#ndtCrackMonitorModal .modal-footer.defect-drawer-footer {
+    flex-shrink: 0;
 }
 
 .ndt-crack-monitor-section {
@@ -8111,14 +8376,9 @@ body:not(.bsa-tab-home) .home-fab-add-building {
 }
 
 .ndt-crack-monitor-form {
-    display: grid;
+    display: flex;
+    flex-direction: column;
     gap: 0.75rem;
-}
-
-@media (min-width: 900px) {
-    .ndt-crack-monitor-form {
-        grid-template-columns: 1fr 1fr;
-    }
 }
 
 /* ── 통계 탭 ── */
@@ -10712,44 +10972,26 @@ body.bsa-tab-stats .app-content {
         display: none;
     }
 
-    /* 신규 건축물 등록 모달 — 카드 고정 높이 + 본문 내부 스크롤 */
+    /* 신규 건축물 등록 모달 — 모바일/태블릿 */
     #addBuildingModal.modal-overlay.open {
-        overflow-x: hidden;
-        overflow-y: auto;
-        -webkit-overflow-scrolling: touch;
-        display: grid !important;
-        place-items: center;
-        align-content: center;
-        justify-items: center;
-        padding:
-            max(0.35rem, env(safe-area-inset-top, 0px))
-            max(0.35rem, env(safe-area-inset-right, 0px))
-            max(0.35rem, env(safe-area-inset-bottom, 0px))
-            max(0.35rem, env(safe-area-inset-left, 0px));
-        box-sizing: border-box;
+        padding: 0.5rem;
     }
 
     #addBuildingModal .modal-card.add-building-modal {
         width: min(96vw, 640px);
-        height: calc(100dvh - 0.7rem - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
-        max-height: calc(100dvh - 0.7rem - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
-        margin: 0;
-        justify-self: center;
-        display: flex;
+        display: flex !important;
         flex-direction: column;
-        min-height: 0;
-        overflow: hidden;
-        flex-shrink: 0;
+        height: calc(100dvh - 1rem - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
+        max-height: calc(100dvh - 1rem - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
     }
 
-    #addBuildingModal .add-building-header,
-    #addBuildingModal .add-building-mode-bar,
-    #addBuildingModal .add-building-footer {
-        flex-shrink: 0;
+    #addBuildingModal .modal-card.add-building-modal.bsa-kb-lifted {
+        height: calc(100dvh - 1rem - var(--bsa-kb-lift, 0px) - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px)) !important;
+        max-height: calc(100dvh - 1rem - var(--bsa-kb-lift, 0px) - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px)) !important;
     }
 
-    #addBuildingModal .add-building-body,
-    #addBuildingModal .modal-body.add-building-body {
+    #addBuildingModal .modal-body,
+    #addBuildingModal .add-building-body {
         flex: 1 1 0 !important;
         min-height: 0 !important;
         max-height: none !important;
@@ -10758,11 +11000,10 @@ body.bsa-tab-stats .app-content {
         -webkit-overflow-scrolling: touch;
         overscroll-behavior: contain;
         touch-action: pan-y;
-        padding: 0.75rem 0.85rem;
     }
 
-    #addBuildingModal .add-building-collapsible {
-        overflow: visible;
+    #addBuildingModal .add-building-body-content {
+        padding: 0 0.85rem 1.5rem;
     }
 
     /* 수정 모달 */
@@ -10773,16 +11014,19 @@ body.bsa-tab-stats .app-content {
         justify-items: center;
         padding: 0.75rem;
         box-sizing: border-box;
+        overflow: hidden;
     }
 
     #editBuildingModal .modal-card {
         width: min(86vw, 360px);
+        height: calc(100dvh - 0.9rem);
         max-height: calc(100dvh - 0.9rem);
         margin: 0;
         justify-self: center;
         display: flex;
         flex-direction: column;
         min-height: 0;
+        overflow: hidden;
     }
 
     #editBuildingModal .modal-body,
@@ -10791,8 +11035,9 @@ body.bsa-tab-stats .app-content {
         overflow-y: auto !important;
         overflow-x: hidden;
         -webkit-overflow-scrolling: touch;
-        flex: 1 1 auto;
+        flex: 1 1 0;
         min-height: 0;
+        touch-action: pan-y;
         padding: 0.6rem 0.7rem;
         gap: 0.65rem;
     }
@@ -11503,36 +11748,30 @@ html.layout-desktop .app-content {
     overflow-y: auto;
 }
 
-/* 태블릿·데스크톱사이트(뷰포트 1280): 모바일 @media 미적용 시에도 등록 모달 스크롤 보장 */
+/* 태블릿·데스크톱사이트(뷰포트 1280): 등록 모달 — 수정 모달과 동일 flex 스크롤 */
 html.layout-desktop #addBuildingModal.modal-overlay.open {
-    overflow-x: hidden;
-    overflow-y: auto;
-    -webkit-overflow-scrolling: touch;
     display: grid !important;
     place-items: center;
     align-content: center;
     justify-items: center;
-    padding: max(0.5rem, env(safe-area-inset-top, 0px)) 0.75rem max(0.5rem, env(safe-area-inset-bottom, 0px));
+    padding: 0.75rem;
     box-sizing: border-box;
 }
 
 html.layout-desktop #addBuildingModal .modal-card.add-building-modal {
-    width: min(96vw, 680px);
-    max-height: calc(100dvh - 1.25rem - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
-    height: auto;
+    display: flex !important;
+    flex-direction: column;
     min-height: 0;
     overflow: hidden;
-    display: flex;
-    flex-direction: column;
-    margin: 0;
-    justify-self: center;
+    height: min(92dvh, calc(100dvh - 1.5rem - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px)));
+    max-height: min(92dvh, calc(100dvh - 1.5rem - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px)));
 }
 
-html.layout-desktop #addBuildingModal .add-building-body,
-html.layout-desktop #addBuildingModal .modal-body.add-building-body {
-    flex: 1 1 auto !important;
+html.layout-desktop #addBuildingModal .modal-body,
+html.layout-desktop #addBuildingModal .add-building-body {
+    flex: 1 1 0 !important;
     min-height: 0 !important;
-    max-height: calc(92dvh - 12.5rem) !important;
+    max-height: none !important;
     overflow-y: auto !important;
     overflow-x: hidden !important;
     -webkit-overflow-scrolling: touch;
@@ -13091,6 +13330,17 @@ html.layout-tablet .modal-card.bsa-kb-lifted,
 html.layout-tablet .bsa-select-sheet-card.bsa-kb-lifted {
     transform: translateY(calc(-1 * var(--bsa-kb-lift, 0px)));
     transition: transform 0.22s ease;
+}
+
+html.layout-tablet #addBuildingModal .add-building-modal.bsa-kb-lifted {
+    height: min(
+        calc(100dvh - 1rem - var(--bsa-kb-lift, 0px) - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px)),
+        92dvh
+    ) !important;
+    max-height: min(
+        calc(100dvh - 1rem - var(--bsa-kb-lift, 0px) - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px)),
+        92dvh
+    ) !important;
 }
 
 html.layout-tablet #ndtModal.open .ndt-drawer-card.bsa-kb-lifted,
