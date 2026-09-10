@@ -6228,7 +6228,6 @@ html:not(.layout-desktop) .survey-inline-select {
     padding-right: 0.7rem;
 }
 
-.defect-drawer-footer #btnAddSurveyTableRow,
 .defect-drawer-footer #btnAddAnotherMarking {
     flex: 1;
     border-color: #2a2a2a;

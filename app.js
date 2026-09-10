@@ -8943,6 +8943,32 @@ document.addEventListener('DOMContentLoaded', () => {
         );
     }
 
+    /** 화면 전용 — PDF/HWPX·drawPinSafe 미사용. 같은 번호의 화살표가 여러 개일 때 1·2… 구분 */
+    function drawArrowMapIndexLabel(ctx, arrowIndex, targetX, targetY, ux, uy, lineColor, arrowScale, isBeingDragged) {
+        if (arrowIndex == null || arrowIndex < 0) return;
+        const label = String(arrowIndex + 1);
+        const len = Math.hypot(ux, uy) || 1;
+        const nx = ux / len;
+        const ny = uy / len;
+        const along = (isBeingDragged ? 14 : 11) * arrowScale;
+        const perp = 9 * arrowScale;
+        const px = -ny;
+        const py = nx;
+        const x = targetX - nx * along + px * perp;
+        const y = targetY - ny * along + py * perp;
+        const fontSize = Math.max(9, Math.round(11 * arrowScale));
+        drawOutlinedPinText(
+            ctx,
+            label,
+            x,
+            y,
+            lineColor,
+            `bold ${fontSize}px sans-serif`,
+            '#ffffff',
+            { outlineWidth: 2 }
+        );
+    }
+
     // 결함 핀 번호 박스 — 글자 실측 기준, 테두리가 글자에 거의 닿도록 최소 여백
     const PIN_BOX_PAD_X = 1.5;
     const PIN_BOX_PAD_Y = 0.75;
@@ -15342,6 +15368,7 @@ document.addEventListener('DOMContentLoaded', () => {
     function clearDefectMarkingTemplate(options) {
         const hadTemplate = !!window._defectMarkingTemplate;
         window._defectMarkingTemplate = null;
+        window._markingAddAlsoSurveyRow = false;
         if (options && options.keepGroup) return;
         if (!hadTemplate && !(options && options.forceCollapse)) return;
         // 다음 위치 커밋 전에는 원본이 아직 멤버 1개라서, 여기서 접으면 groupId가 날아간다
@@ -15474,13 +15501,35 @@ document.addEventListener('DOMContentLoaded', () => {
 
         state.defects[key].push(newDefect);
         normalizeDefectGroupNos(state.defects[key], grp.groupId);
+
+        let surveyExtra = null;
+        if (window._markingAddAlsoSurveyRow) {
+            surveyExtra = cloneDefectForSurveyTableRow(newDefect);
+            window._markingAddAlsoSurveyRow = false;
+        }
+
         finishMarkingGroupCommit();
         saveStateToLocalStorage();
         drawCanvas();
         if (typeof renderDefectListPanel === 'function') renderDefectListPanel();
-        if (typeof renderSurveyTable === 'function' && state.currentTab === 'tab-survey') renderSurveyTable();
+        if (typeof renderSurveyTable === 'function') renderSurveyTable();
         const label = String(groupNo).replace(/^NO\.?\s*/i, '').trim();
-        window.showToast?.(`같은 번호(${label})에 화살표를 추가했습니다`, 'success', 2200);
+        const arrowIdx = getDefectMarkingGroupMembers(grp.groupId).findIndex((m) => m.id === newDefect.id);
+        const arrowNum = arrowIdx >= 0 ? arrowIdx + 1 : null;
+        if (surveyExtra) {
+            const rowNo = String(surveyExtra.no || '').replace(/^NO\.?\s*/i, '').trim();
+            window.showToast?.(
+                `화살표 ${arrowNum != null ? arrowNum : ''} 추가 · 결함표 ${rowNo} 행 생성 (도면 ${label})`,
+                'success',
+                3200
+            );
+        } else {
+            window.showToast?.(
+                `같은 번호(${label})에 화살표${arrowNum != null ? ' ' + arrowNum : ''}를 추가했습니다`,
+                'success',
+                2200
+            );
+        }
         return newDefect;
     }
 
@@ -18750,8 +18799,11 @@ document.addEventListener('DOMContentLoaded', () => {
                     const representative = pickDefectGroupRepresentative(groupMembers) || defect;
                     const seenArrow = new Set();
                     const arrows = [];
-                    groupMembers.forEach((m) => {
-                        if (m.surveyExtra) return;
+                    const markingMembers = groupMembers
+                        .filter((m) => m && !m.surveyExtra)
+                        .slice()
+                        .sort((a, b) => parseDefectSortNoValue(a) - parseDefectSortNoValue(b));
+                    markingMembers.forEach((m, arrowIndex) => {
                         if (m.targetX === undefined || m.targetY === undefined) return;
                         const akey = `${Math.round(m.targetX)}|${Math.round(m.targetY)}|${m.arrowOctant || 0}|${m.id || ''}`;
                         if (seenArrow.has(akey)) return;
@@ -18762,7 +18814,8 @@ document.addEventListener('DOMContentLoaded', () => {
                             forceArrowDir: !!m.forceArrowDir,
                             arrowOctant: (m.arrowOctant !== undefined ? m.arrowOctant : 0),
                             areaSource: (m.shapeType === 'area' && m.areaX1 !== undefined) ? m : null,
-                            memberId: m.id || null
+                            memberId: m.id || null,
+                            arrowIndex: markingMembers.length > 1 ? arrowIndex : null
                         });
                     });
                     drawFn(ctx, representative, arrows);
@@ -18905,6 +18958,19 @@ document.addEventListener('DOMContentLoaded', () => {
                     ctx.lineTo(targetX - arrowLen * Math.cos(angle + Math.PI / 6), targetY - arrowLen * Math.sin(angle + Math.PI / 6));
                     ctx.closePath();
                     ctx.fill();
+                }
+                if (t.arrowIndex != null && t.arrowIndex >= 0) {
+                    drawArrowMapIndexLabel(
+                        ctx,
+                        t.arrowIndex,
+                        targetX,
+                        targetY,
+                        leader.ux,
+                        leader.uy,
+                        lineColor,
+                        arrowScale,
+                        isBeingDragged
+                    );
                 }
             }
             ctx.restore();
@@ -24648,8 +24714,8 @@ document.addEventListener('DOMContentLoaded', () => {
         const badge = document.getElementById('defectAutosaveBadge');
         if (badge) badge.textContent = isBulk ? '변경 항목만 적용' : '자동 적용';
         [
-            'btnDeleteDefect', 'btnAddSurveyTableRow', 'btnAddAnotherMarking',
-            'btnDeleteDefectMobile', 'btnAddSurveyTableRowMobile', 'btnAddAnotherMarkingMobile',
+            'btnDeleteDefect', 'btnAddAnotherMarking',
+            'btnDeleteDefectMobile', 'btnAddAnotherMarkingMobile',
         ].forEach(id => {
             const el = document.getElementById(id);
             if (el) el.style.display = isBulk ? 'none' : '';
@@ -26159,39 +26225,7 @@ document.addEventListener('DOMContentLoaded', () => {
         return copy;
     }
 
-    async function addSurveyTableRowFromCurrentDefect() {
-        if (window._defectAutoApplyTimer) {
-            window.clearTimeout(window._defectAutoApplyTimer);
-            window._defectAutoApplyTimer = null;
-        }
-        const saved = await commitDefectFromForm({
-            pushHistory: !window._defectEditSessionHistoryPushed,
-            uploadPhotos: !!window._defectPhotosDirty
-        });
-        window._defectEditSessionHistoryPushed = true;
-        if (!saved) {
-            window.showToast('결함을 먼저 저장한 뒤 결함표를 추가하세요.', 'warning');
-            return;
-        }
-        pushDefectHistory();
-        const extra = cloneDefectForSurveyTableRow(saved);
-        if (!extra) return;
-        saveStateToLocalStorage();
-        drawCanvas();
-        if (typeof renderDefectListPanel === 'function') renderDefectListPanel();
-        if (typeof renderSurveyTable === 'function') renderSurveyTable();
-        openAddDefectModal(extra.x, extra.y, extra.targetX, extra.targetY, extra);
-        window.showToast(`도면은 ${String(extra.groupNo || '').replace(/^NO\.?\s*/i, '')} · 결함표는 ${String(extra.no || '').replace(/^NO\.?\s*/i, '')} 행을 추가했습니다.`, 'success', 3200);
-    }
-
-    const btnAddSurveyTableRow = document.getElementById('btnAddSurveyTableRow');
-    if (btnAddSurveyTableRow) {
-        btnAddSurveyTableRow.addEventListener('click', () => {
-            addSurveyTableRowFromCurrentDefect();
-        });
-    }
-
-    // 같은 결함 정보(부재/종류/원인/규모)를 유지한 채 위치만 바꿔서 여러 곳에 반복 마킹
+    // 같은 결함 정보(부재/종류/원인/규모)를 유지한 채 위치만 바꿔서 여러 곳에 반복 마킹 + 결함표 행(N-2…) 자동 생성
     const btnAddAnotherMarking = document.getElementById('btnAddAnotherMarking');
     if (btnAddAnotherMarking) {
         btnAddAnotherMarking.addEventListener('click', async () => {
@@ -26239,6 +26273,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     chainIndex: nextChainIndex
                 };
                 snapshotMarkingGroupForCommit(window._defectMarkingTemplate);
+                window._markingAddAlsoSurveyRow = true;
                 normalizeDefectGroupNos(state.defects[floorKey], chainGroupId);
                 saveStateToLocalStorage();
                 drawCanvas();
@@ -26246,10 +26281,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 setDrawMode(isArea ? 'AREA' : 'MARK');
                 window.showToast(
                     isArea
-                        ? '같은 번호에 영역 1개를 추가합니다. 도면에서 영역을 그려 주세요.'
-                        : '같은 번호에 화살표 1개를 추가합니다. 도면에서 위치를 한 번 클릭해 주세요.',
+                        ? '같은 번호에 영역·결함표 행을 추가합니다. 도면에서 영역을 그려 주세요.'
+                        : '같은 번호에 화살표·결함표 행을 추가합니다. 도면에서 위치를 한 번 클릭해 주세요. (화살표 옆 1·2…는 화면에만 표시)',
                     'info',
-                    3500
+                    4000
                 );
             } else {
                 drawCanvas();
@@ -26867,7 +26902,6 @@ document.addEventListener('DOMContentLoaded', () => {
         if (from && to) from.addEventListener('click', () => to.click());
     };
     proxyClick('btnDeleteDefectMobile', 'btnDeleteDefect');
-    proxyClick('btnAddSurveyTableRowMobile', 'btnAddSurveyTableRow');
     proxyClick('btnAddAnotherMarkingMobile', 'btnAddAnotherMarking');
     proxyClick('btnSaveDefectMobile', 'btnSaveDefect');
 
