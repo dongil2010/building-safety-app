@@ -944,6 +944,10 @@ document.addEventListener('DOMContentLoaded', () => {
         } catch (e) {
             console.warn('PDF ref 좌표계 설정 실패:', e);
         }
+        // 캐드 벡터 스냅용 선분 데이터도 같이 준비 (실패해도 스냅만 못 쓸 뿐, 도면 표시엔 영향 없음)
+        if (window.BSA_PDF_SNAP && typeof window.BSA_PDF_SNAP.ensureGeometry === 'function') {
+            window.BSA_PDF_SNAP.ensureGeometry(pdfUrl, bldg.id, floorCode, window.FLOOR_DRAWING_PDF_PREVIEW_DIM || 4000);
+        }
     }
 
     function shouldUpdateViewportPatchRegion(region, meta) {
@@ -2041,7 +2045,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 defectSizeMode: window.state.defectSizeMode || 'combined',
                 tipShape: window.state.tipShape || 'arrow',
                 areaFillStyle: window.state.areaFillStyle || 'solid',
-                areaBorderStyle: window.state.areaBorderStyle || 'solid'
+                areaBorderStyle: window.state.areaBorderStyle || 'solid',
+                snapToCad: window.state.snapToCad !== false
             };
             localStorage.setItem(getLocalStorageStateKey(window.state.companyId), JSON.stringify(dataToSave));
             if (window.state.companyId) {
@@ -2234,6 +2239,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
                 if (parsed.areaBorderStyle) {
                     window.state.areaBorderStyle = parsed.areaBorderStyle;
+                }
+                if (parsed.snapToCad !== undefined) {
+                    window.state.snapToCad = parsed.snapToCad !== false;
                 }
             } else {
                 window.state.buildings = getDefaultBuildings();
@@ -3020,6 +3028,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
         ordered.forEach((d) => {
             if (!d) return;
+            // 캐드에서 가져온 결함(isCadImported)은 원본 번호를 그대로 보존한다.
+            // 여기서 건드리면(동기화 병합 때마다 이 함수가 호출됨) NO.20 같은 원본 번호가
+            // 병합 순서 기준 NO.01, NO.02...로 매번 덮어써져 버린다.
+            if (d.isCadImported) return;
             const gid = d.groupId || null;
             if (gid) {
                 if (seenGroup.has(gid)) return;
@@ -23827,7 +23839,8 @@ document.addEventListener('DOMContentLoaded', () => {
         if (state.mode === 'MARK') {
             isMarkingDrag = true;
             markingHasMoved = false;
-            const markCoords = clientToImgCoords(clientX, clientY);
+            const rawMarkCoords = clientToImgCoords(clientX, clientY);
+            const markCoords = snapImgCoordsForMarking(rawMarkCoords.x, rawMarkCoords.y);
             syncLiveMarkBoxAboveTarget(markCoords.x, markCoords.y);
             drawCanvas();
         } else if (state.mode === 'AREA') {
@@ -24103,7 +24116,8 @@ document.addEventListener('DOMContentLoaded', () => {
             refreshMapLoupe(clientX, clientY);
         } else if (isMarkingDrag) {
             markingHasMoved = true;
-            const coords = clientToImgCoords(clientX, clientY);
+            const rawCoords = clientToImgCoords(clientX, clientY);
+            const coords = snapImgCoordsForMarking(rawCoords.x, rawCoords.y);
             syncLiveMarkBoxAboveTarget(coords.x, coords.y);
             drawCanvas();
             refreshMapLoupe(clientX, clientY);
@@ -24150,6 +24164,22 @@ document.addEventListener('DOMContentLoaded', () => {
         const vx = (mouseX - state.view.offsetX) / state.view.scale;
         const vy = (mouseY - state.view.offsetY) / state.view.scale;
         return viewToImgCoords(vx, vy);
+    }
+
+    const SNAP_SCREEN_RADIUS_PX = 16; // 화면상 이 반경 안에 CAD 선이 있으면 달라붙는다
+
+    /** 결함 마킹 중일 때만, 근처 CAD 벡터 선/끝점/교차점에 좌표를 스냅한다 (없으면 원래 좌표 그대로) */
+    function snapImgCoordsForMarking(x, y) {
+        if (state.snapToCad === false) return { x, y, snapped: false };
+        if (state.mode !== 'MARK') return { x, y, snapped: false };
+        const bldg = state.currentBuilding;
+        const fc = state.currentFloor;
+        if (!bldg || !fc || !window.BSA_PDF_SNAP) return { x, y, snapped: false };
+        const scale = state.view.scale || 1;
+        const radius = SNAP_SCREEN_RADIUS_PX / scale;
+        const hit = window.BSA_PDF_SNAP.snap(bldg.id, fc, x, y, radius);
+        if (!hit) return { x, y, snapped: false };
+        return { x: hit.x, y: hit.y, snapped: true, snapType: hit.type };
     }
 
     function handleDragEnd(clientX, clientY) {
@@ -24245,7 +24275,8 @@ document.addEventListener('DOMContentLoaded', () => {
         if (isMarkingDrag) {
             isMarkingDrag = false;
             if (clientX != null && clientY != null) {
-                const coords = clientToImgCoords(clientX, clientY);
+                const rawCoords = clientToImgCoords(clientX, clientY);
+                const coords = snapImgCoordsForMarking(rawCoords.x, rawCoords.y);
                 markTargetImgX = coords.x;
                 markTargetImgY = coords.y;
                 syncLiveMarkBoxAboveTarget(markTargetImgX, markTargetImgY);
@@ -26630,6 +26661,24 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     setupAreaToolPanelEvents();
 
+    const btnSnapToCad = document.getElementById('btnSnapToCad');
+    const mobileBtnSnapToCad = document.getElementById('mobileBtnSnapToCad');
+    if (state.snapToCad === undefined) state.snapToCad = true;
+    function syncSnapToCadButtons() {
+        const on = state.snapToCad !== false;
+        if (btnSnapToCad) btnSnapToCad.classList.toggle('active', on);
+        if (mobileBtnSnapToCad) mobileBtnSnapToCad.classList.toggle('active', on);
+    }
+    function toggleSnapToCad() {
+        state.snapToCad = state.snapToCad === false ? true : false;
+        syncSnapToCadButtons();
+        saveStateToLocalStorage();
+        window.showToast?.(state.snapToCad ? 'CAD 스냅 켜짐' : 'CAD 스냅 꺼짐', 'info', 1500);
+    }
+    syncSnapToCadButtons();
+    if (btnSnapToCad) btnSnapToCad.addEventListener('click', toggleSnapToCad);
+    if (mobileBtnSnapToCad) mobileBtnSnapToCad.addEventListener('click', toggleSnapToCad);
+
     // 도면 탭 단축키: D=핀 마킹, A=영역 마킹, Esc=수정창 닫기+선택모드
     // 비파괴 탭: D=NDT 마킹, Esc=등록창 닫기+이동모드
     window.addEventListener('keydown', (e) => {
@@ -27222,7 +27271,9 @@ document.addEventListener('DOMContentLoaded', () => {
             const S = dist_app / dist_cad;
             const phi_cad = Math.atan2(-dy_c, dx_c);
             const phi_app = Math.atan2(dv_a, du_a);
-            const dphi = phi_app - phi_cad;
+            // 거울 대칭(반사) 모드는 회전각 부호를 반대로 잡아야 기준점2도 appP2에 정확히 정합된다.
+            // (그렇지 않으면 기준점1만 맞고 기준점2는 어긋난 채로 전체 결함이 잘못된 방향으로 퍼진다)
+            const dphi = isMirror ? (phi_app + phi_cad) : (phi_app - phi_cad);
             const cosA = Math.cos(dphi);
             const sinA = Math.sin(dphi);
 
@@ -27241,24 +27292,33 @@ document.addEventListener('DOMContentLoaded', () => {
             };
         }
 
-        // 4가지 변환 모드 후보군
+        // 자동 선택 후보군: 정상 정렬 / 두 기준점을 반대 순서로 클릭했을 때의 보정.
+        // 거울(반사) 모드는 일부러 뺐다 — 캐드 PDF와 도면 좌표계는 원래 거울반사가 필요 없는
+        // 관계라(둘 다 같은 원본에서 나와 방향이 보존됨), 후보에 넣으면 건물 형태에 따라
+        // 정상 모드와 완전히 동점이 나오는 경우가 있어 자동선택이 불안정해진다.
+        // 정말 거울반사가 필요한 예외 상황은 가져오기 직후 뜨는 "좌우/상하 반전" 툴바로 바로잡으면 된다.
         const candidateModes = [
             { name: '정상 정렬', fn: createSimilarityTransform(cadP1, cadP2, appP1, appP2, false) },
-            { name: '180도 뒤집힘 자동교정', fn: createSimilarityTransform(cadP1, cadP2, appP2, appP1, false) },
-            { name: '거울 대칭(상하) 자동교정', fn: createSimilarityTransform(cadP1, cadP2, appP1, appP2, true) },
-            { name: '거울 대칭(좌우) 자동교정', fn: createSimilarityTransform(cadP1, cadP2, appP2, appP1, true) }
+            { name: '180도 뒤집힘 자동교정', fn: createSimilarityTransform(cadP1, cadP2, appP2, appP1, false) }
         ].filter(m => m.fn !== null);
 
-        // 캐드에서 기준점 1에 가장 가까운 결함 검출 (방향 일치 검증용)
-        let minCadDist1 = Infinity;
-        let defectNearCadP1 = validDefects[0];
-        validDefects.forEach(d => {
-            const dist = Math.hypot(Number(d.cadBoxX) - cadP1.x, Number(d.cadBoxY) - cadP1.y);
-            if (dist < minCadDist1) {
-                minCadDist1 = dist;
-                defectNearCadP1 = d;
-            }
-        });
+        // 캐드에서 기준점1/기준점2에 각각 가장 가까운 결함 검출 (방향 일치 검증용).
+        // 두 기준점을 모두 확인해야 좌우/상하 대칭에 가까운 건물에서 거울 모드가
+        // 우연히 동점으로 뽑히는 걸 막을 수 있다.
+        function findNearestDefect(cadPt) {
+            let best = validDefects[0];
+            let bestDist = Infinity;
+            validDefects.forEach(d => {
+                const dist = Math.hypot(Number(d.cadBoxX) - cadPt.x, Number(d.cadBoxY) - cadPt.y);
+                if (dist < bestDist) {
+                    bestDist = dist;
+                    best = d;
+                }
+            });
+            return best;
+        }
+        const defectNearCadP1 = findNearestDefect(cadP1);
+        const defectNearCadP2 = findNearestDefect(cadP2);
 
         // 최적 모드 자동 선별
         let bestMode = candidateModes[0];
@@ -27276,15 +27336,17 @@ document.addEventListener('DOMContentLoaded', () => {
             });
             score += inBounds * 100;
 
-            // 2. 캐드 기준점 1 근처의 결함이 앱 기준점 1과 실제로 가까운지 검증
-            const testPt = mode.fn(Number(defectNearCadP1.cadBoxX), Number(defectNearCadP1.cadBoxY));
-            const distToP1 = Math.hypot(testPt.x - appP1.x, testPt.y - appP1.y);
-            const distToP2 = Math.hypot(testPt.x - appP2.x, testPt.y - appP2.y);
-            if (distToP1 < distToP2) {
-                score += 5000;
-            } else {
-                score -= 5000;
-            }
+            // 2. 기준점1 근처 결함은 appP1에, 기준점2 근처 결함은 appP2에 더 가까워야 한다.
+            //    고정 보너스(+-5000) 대신 거리 차이를 그대로 점수로 써서, 두 모드가 우연히
+            //    똑같은 점수로 동점 나는 상황 자체를 원천적으로 막는다.
+            const p1Pt = mode.fn(Number(defectNearCadP1.cadBoxX), Number(defectNearCadP1.cadBoxY));
+            const p2Pt = mode.fn(Number(defectNearCadP2.cadBoxX), Number(defectNearCadP2.cadBoxY));
+            const d1to1 = Math.hypot(p1Pt.x - appP1.x, p1Pt.y - appP1.y);
+            const d1to2 = Math.hypot(p1Pt.x - appP2.x, p1Pt.y - appP2.y);
+            const d2to1 = Math.hypot(p2Pt.x - appP1.x, p2Pt.y - appP1.y);
+            const d2to2 = Math.hypot(p2Pt.x - appP2.x, p2Pt.y - appP2.y);
+            score += (d1to2 - d1to1) * 2;
+            score += (d2to1 - d2to2) * 2;
 
             if (score > maxScore) {
                 maxScore = score;
@@ -37180,7 +37242,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // ==========================================================================
     // 웹뷰 원격 로드 — GitHub Pages 웹이 곧 앱 화면 (APK OTA 없음)
     // ==========================================================================
-    window.BSA_APP_BUILD = { versionCode: 8, versionName: '1.3.0' };
+    window.BSA_APP_BUILD = { versionCode: 10, versionName: '1.3.2' };
 
     function isNativeAndroidApp() {
         try {
