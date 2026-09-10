@@ -7985,15 +7985,20 @@ document.addEventListener('DOMContentLoaded', () => {
             }
 
             if (isMarqueeSelecting) {
-            const x1 = Math.min(marqueeStartImgX, marqueeCurImgX);
-            const y1 = Math.min(marqueeStartImgY, marqueeCurImgY);
-            const x2 = Math.max(marqueeStartImgX, marqueeCurImgX);
-            const y2 = Math.max(marqueeStartImgY, marqueeCurImgY);
-            ctx.save();
-            ctx.fillStyle = 'rgba(40, 40, 40, 0.12)';
-            ctx.strokeStyle = '#2a2a2a';
-            ctx.lineWidth = 1.5 / Math.max(state.view.scale || 1, 0.01);
-            ctx.setLineDash([6 / Math.max(state.view.scale || 1, 0.01), 4 / Math.max(state.view.scale || 1, 0.01)]);
+                const x1 = Math.min(marqueeStartImgX, marqueeCurImgX);
+                const y1 = Math.min(marqueeStartImgY, marqueeCurImgY);
+                const x2 = Math.max(marqueeStartImgX, marqueeCurImgX);
+                const y2 = Math.max(marqueeStartImgY, marqueeCurImgY);
+                ctx.save();
+                ctx.fillStyle = 'rgba(37, 99, 235, 0.14)';
+                ctx.strokeStyle = '#2563eb';
+                ctx.lineWidth = 1.5 / Math.max(state.view.scale || 1, 0.01);
+                ctx.setLineDash([6 / Math.max(state.view.scale || 1, 0.01), 4 / Math.max(state.view.scale || 1, 0.01)]);
+                ctx.fillRect(x1, y1, x2 - x1, y2 - y1);
+                ctx.strokeRect(x1, y1, x2 - x1, y2 - y1);
+                ctx.restore();
+            }
+
             if (window.cadCalibrationState && window.cadCalibrationState.pt1) {
                 const p1 = window.cadCalibrationState.pt1;
                 ctx.save();
@@ -8016,7 +8021,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 ctx.fillText('📍 기준점 1', p1.x + r + 4, p1.y - 4);
                 ctx.restore();
             }
-        }
         }
 
         ctx.restore(); // Restore drawing rotation matrix
@@ -20722,6 +20726,31 @@ document.addEventListener('DOMContentLoaded', () => {
         }, 120);
     };
 
+    function updateCrackGaugeReadingComputedCells() {
+        const body = document.getElementById('crackGaugeReadingBody');
+        if (!body) return;
+        const log = getCrackGaugeLogFromUi();
+        Array.from(body.querySelectorAll('tr')).forEach((tr, idx) => {
+            const reading = log.readings[idx];
+            if (!reading) return;
+            const deltas = computeGaugeDeltas(log, reading);
+            const cells = tr.querySelectorAll('.monitor-readonly');
+            if (cells[0]) cells[0].textContent = formatMonitorDelta(deltas.dx);
+            if (cells[1]) cells[1].textContent = formatMonitorDelta(deltas.dy);
+        });
+    }
+
+    function updateCrackTipReadingComputedCells() {
+        const body = document.getElementById('crackTipReadingBody');
+        if (!body) return;
+        const log = getCrackTipLogFromUi();
+        Array.from(body.querySelectorAll('tr')).forEach((tr, idx) => {
+            const cumulative = computeTipCumulative(log, idx);
+            const cell = tr.querySelector('.monitor-readonly');
+            if (cell) cell.textContent = formatMonitorDelta(cumulative);
+        });
+    }
+
     function renderCrackGaugeReadingRows(readings) {
         const body = document.getElementById('crackGaugeReadingBody');
         if (!body) return;
@@ -20750,8 +20779,8 @@ document.addEventListener('DOMContentLoaded', () => {
         }).join('');
         body.querySelectorAll('input').forEach((inp) => {
             inp.addEventListener('input', () => {
+                updateCrackGaugeReadingComputedCells();
                 if (typeof scheduleNdtCrackMonitorSave === 'function') scheduleNdtCrackMonitorSave();
-                renderCrackGaugeReadingRows(getCrackGaugeLogFromUi().readings);
             });
         });
         body.querySelectorAll('[data-gauge-del]').forEach((btn) => {
@@ -20792,8 +20821,8 @@ document.addEventListener('DOMContentLoaded', () => {
         }).join('');
         body.querySelectorAll('input').forEach((inp) => {
             inp.addEventListener('input', () => {
+                updateCrackTipReadingComputedCells();
                 if (typeof scheduleNdtCrackMonitorSave === 'function') scheduleNdtCrackMonitorSave();
-                renderCrackTipReadingRows(getCrackTipLogFromUi().readings);
             });
         });
         body.querySelectorAll('[data-tip-del]').forEach((btn) => {
@@ -20899,13 +20928,13 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!el || el.dataset.monitorBound) return;
             el.dataset.monitorBound = '1';
             el.addEventListener('input', () => {
-                renderCrackGaugeReadingRows(getCrackGaugeLogFromUi().readings);
-                renderCrackTipReadingRows(getCrackTipLogFromUi().readings);
+                updateCrackGaugeReadingComputedCells();
+                updateCrackTipReadingComputedCells();
                 if (typeof scheduleNdtCrackMonitorSave === 'function') scheduleNdtCrackMonitorSave();
             });
             el.addEventListener('change', () => {
-                renderCrackGaugeReadingRows(getCrackGaugeLogFromUi().readings);
-                renderCrackTipReadingRows(getCrackTipLogFromUi().readings);
+                updateCrackGaugeReadingComputedCells();
+                updateCrackTipReadingComputedCells();
                 if (typeof scheduleNdtCrackMonitorSave === 'function') scheduleNdtCrackMonitorSave();
             });
         });
@@ -37641,6 +37670,14 @@ document.addEventListener('DOMContentLoaded', () => {
         return db.collection('safety_app').doc(getCompanyDocId()).collection('floorDrawingTiers');
     }
 
+    function isFirestorePermissionError(err) {
+        if (!err) return false;
+        const code = String(err.code || '');
+        const msg = String(err.message || '');
+        return code === 'permission-denied'
+            || msg.includes('Missing or insufficient permissions');
+    }
+
     async function fetchCloudFloorDrawingTier(buildingId, floorCode, dim) {
         if (!buildingId || !floorCode || !dim) return null;
         const col = getFloorDrawingTiersCollection();
@@ -37649,7 +37686,18 @@ document.addEventListener('DOMContentLoaded', () => {
             const url = await readChunkedPdfFromDocRef(col.doc(floorDrawingTierCloudDocId(buildingId, floorCode, dim)));
             return (typeof url === 'string' && url.length > 32) ? url : null;
         } catch (e) {
-            console.warn('도면 티어 조회 실패:', buildingId, floorCode, dim, e);
+            if (isFirestorePermissionError(e)) {
+                if (!window._floorTierPermissionWarned) {
+                    window._floorTierPermissionWarned = true;
+                    console.warn(
+                        '도면 티어(Firestore floorDrawingTiers) 조회 권한 없음 — '
+                        + 'Firebase 콘솔에 firestore.rules(floorDrawingTiers·parts)를 배포했는지 확인하세요.',
+                        e
+                    );
+                }
+            } else {
+                console.warn('도면 티어 조회 실패:', buildingId, floorCode, dim, e);
+            }
             return null;
         }
     }
