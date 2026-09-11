@@ -20457,11 +20457,19 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function emptyCrackGaugeLog() {
-        return { gaugeNo: '', installDate: '', initialX: '', initialY: '', readings: [] };
+        return { gaugeNo: '', installDate: '', initialX: '', initialY: '', prevPhoto: '', currPhoto: '', readings: [] };
     }
 
     function emptyCrackTipLog() {
-        return { initialLengthMm: '', readings: [] };
+        return { initialLengthMm: '', prevPhoto: '', currPhoto: '', readings: [] };
+    }
+
+    function normalizeCrackMonitorPhoto(raw) {
+        if (raw == null) return '';
+        const s = String(raw).trim();
+        if (!s) return '';
+        // data URL or http(s) / blob URL for display & HWPX
+        return s;
     }
 
     function normalizeCrackGaugeLog(raw) {
@@ -20471,6 +20479,8 @@ document.addEventListener('DOMContentLoaded', () => {
         base.installDate = raw.installDate != null ? String(raw.installDate) : '';
         base.initialX = raw.initialX != null ? String(raw.initialX) : '';
         base.initialY = raw.initialY != null ? String(raw.initialY) : '';
+        base.prevPhoto = normalizeCrackMonitorPhoto(raw.prevPhoto);
+        base.currPhoto = normalizeCrackMonitorPhoto(raw.currPhoto);
         base.readings = Array.isArray(raw.readings)
             ? raw.readings.map((r) => ({
                 roundKey: r && r.roundKey != null ? String(r.roundKey) : '',
@@ -20487,6 +20497,8 @@ document.addEventListener('DOMContentLoaded', () => {
         const base = emptyCrackTipLog();
         if (!raw || typeof raw !== 'object') return base;
         base.initialLengthMm = raw.initialLengthMm != null ? String(raw.initialLengthMm) : '';
+        base.prevPhoto = normalizeCrackMonitorPhoto(raw.prevPhoto);
+        base.currPhoto = normalizeCrackMonitorPhoto(raw.currPhoto);
         base.readings = Array.isArray(raw.readings)
             ? raw.readings.map((r) => ({
                 roundKey: r && r.roundKey != null ? String(r.roundKey) : '',
@@ -20513,6 +20525,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function computeGaugeDeltas(log, reading) {
+        // 누적 = 현회 측정값 − 초기치
         const ix = parseMonitorNumber(log.initialX);
         const iy = parseMonitorNumber(log.initialY);
         const x = parseMonitorNumber(reading && reading.xMm);
@@ -20523,23 +20536,52 @@ document.addEventListener('DOMContentLoaded', () => {
         };
     }
 
+    function computeGaugePrevDeltas(log, readingIndex) {
+        // 전차 대비 = 현회 − 직전 회차
+        const readings = (log && log.readings) || [];
+        const reading = readings[readingIndex];
+        if (!reading || readingIndex <= 0) return { dx: null, dy: null };
+        const prev = readings[readingIndex - 1];
+        const x = parseMonitorNumber(reading.xMm);
+        const y = parseMonitorNumber(reading.yMm);
+        const px = parseMonitorNumber(prev && prev.xMm);
+        const py = parseMonitorNumber(prev && prev.yMm);
+        return {
+            dx: (px != null && x != null) ? x - px : null,
+            dy: (py != null && y != null) ? y - py : null
+        };
+    }
+
     function computeTipCumulative(log, readingIndex) {
+        // 누적 = 현회 길이 − 초기치 (증가량 합산이 아니라 초기치 대비)
         const initial = parseMonitorNumber(log.initialLengthMm);
         const readings = log.readings || [];
+        const r = readings[readingIndex];
+        if (!r) return null;
+        const len = parseMonitorNumber(r.lengthMm);
+        if (initial != null && len != null) return len - initial;
+        const inc = parseMonitorNumber(r.incrementMm);
+        if (inc == null) return null;
+        // 길이 미입력 시에만: 증가량을 1회차부터 합산한 값을 누적으로 사용
         let cumulative = 0;
         for (let i = 0; i <= readingIndex; i += 1) {
-            const r = readings[i];
-            if (!r) continue;
-            const inc = parseMonitorNumber(r.incrementMm);
-            if (inc != null) {
-                cumulative += inc;
-                continue;
-            }
-            const len = parseMonitorNumber(r.lengthMm);
-            if (initial != null && len != null && i === 0) cumulative = len - initial;
-            else if (initial != null && len != null) cumulative = len - initial;
+            const row = readings[i];
+            const rowInc = parseMonitorNumber(row && row.incrementMm);
+            if (rowInc != null) cumulative += rowInc;
         }
         return cumulative;
+    }
+
+    function computeTipPrevDelta(log, readingIndex) {
+        // 전차 대비 = 현회 길이 − 직전 회차 길이 (없으면 증가량)
+        const readings = (log && log.readings) || [];
+        const r = readings[readingIndex];
+        if (!r || readingIndex <= 0) return null;
+        const prev = readings[readingIndex - 1];
+        const len = parseMonitorNumber(r.lengthMm);
+        const prevLen = parseMonitorNumber(prev && prev.lengthMm);
+        if (len != null && prevLen != null) return len - prevLen;
+        return parseMonitorNumber(r.incrementMm);
     }
 
     function defaultCrackMonitorRoundKey() {
@@ -20789,9 +20831,12 @@ document.addEventListener('DOMContentLoaded', () => {
             const reading = log.readings[idx];
             if (!reading) return;
             const deltas = computeGaugeDeltas(log, reading);
+            const prevD = computeGaugePrevDeltas(log, idx);
             const cells = tr.querySelectorAll('.monitor-readonly');
             if (cells[0]) cells[0].textContent = formatMonitorDelta(deltas.dx);
             if (cells[1]) cells[1].textContent = formatMonitorDelta(deltas.dy);
+            if (cells[2]) cells[2].textContent = formatMonitorDelta(prevD.dx);
+            if (cells[3]) cells[3].textContent = formatMonitorDelta(prevD.dy);
         });
     }
 
@@ -20801,8 +20846,10 @@ document.addEventListener('DOMContentLoaded', () => {
         const log = getCrackTipLogFromUi();
         Array.from(body.querySelectorAll('tr')).forEach((tr, idx) => {
             const cumulative = computeTipCumulative(log, idx);
-            const cell = tr.querySelector('.monitor-readonly');
-            if (cell) cell.textContent = formatMonitorDelta(cumulative);
+            const prevDelta = computeTipPrevDelta(log, idx);
+            const cells = tr.querySelectorAll('.monitor-readonly');
+            if (cells[0]) cells[0].textContent = formatMonitorDelta(cumulative);
+            if (cells[1]) cells[1].textContent = formatMonitorDelta(prevDelta);
         });
     }
 
@@ -20821,13 +20868,16 @@ document.addEventListener('DOMContentLoaded', () => {
         }];
         body.innerHTML = rows.map((r, idx) => {
             const deltas = computeGaugeDeltas(log, r);
+            const prevD = computeGaugePrevDeltas(log, idx);
             return `<tr data-gauge-row="${idx}">
                 <td><input type="text" data-gauge-round value="${escapeSurveyAttr(r.roundKey || '')}" placeholder="회차"></td>
                 <td><input type="date" data-gauge-date value="${escapeSurveyAttr(r.date || '')}"></td>
                 <td><input type="text" data-gauge-x inputmode="decimal" value="${escapeSurveyAttr(r.xMm || '')}"></td>
                 <td><input type="text" data-gauge-y inputmode="decimal" value="${escapeSurveyAttr(r.yMm || '')}"></td>
-                <td class="monitor-readonly">${formatMonitorDelta(deltas.dx)}</td>
-                <td class="monitor-readonly">${formatMonitorDelta(deltas.dy)}</td>
+                <td class="monitor-readonly" title="누적(현회−초기)">${formatMonitorDelta(deltas.dx)}</td>
+                <td class="monitor-readonly" title="누적(현회−초기)">${formatMonitorDelta(deltas.dy)}</td>
+                <td class="monitor-readonly" title="전차 대비">${formatMonitorDelta(prevD.dx)}</td>
+                <td class="monitor-readonly" title="전차 대비">${formatMonitorDelta(prevD.dy)}</td>
                 <td><input type="text" data-gauge-note value="${escapeSurveyAttr(r.note || '')}"></td>
                 <td><button type="button" class="defect-crack-monitor-del" data-gauge-del ${rows.length <= 1 ? 'disabled' : ''} title="삭제"><i class="fa-solid fa-trash"></i></button></td>
             </tr>`;
@@ -20864,12 +20914,14 @@ document.addEventListener('DOMContentLoaded', () => {
         }];
         body.innerHTML = rows.map((r, idx) => {
             const cumulative = computeTipCumulative(log, idx);
+            const prevDelta = computeTipPrevDelta(log, idx);
             return `<tr data-tip-row="${idx}">
                 <td><input type="text" data-tip-round value="${escapeSurveyAttr(r.roundKey || '')}" placeholder="회차"></td>
                 <td><input type="date" data-tip-date value="${escapeSurveyAttr(r.date || '')}"></td>
                 <td><input type="text" data-tip-length inputmode="decimal" value="${escapeSurveyAttr(r.lengthMm || '')}"></td>
                 <td><input type="text" data-tip-inc inputmode="decimal" value="${escapeSurveyAttr(r.incrementMm || '')}"></td>
-                <td class="monitor-readonly">${formatMonitorDelta(cumulative)}</td>
+                <td class="monitor-readonly" title="누적(현회−초기치)">${formatMonitorDelta(cumulative)}</td>
+                <td class="monitor-readonly" title="전차 대비">${formatMonitorDelta(prevDelta)}</td>
                 <td><input type="text" data-tip-note value="${escapeSurveyAttr(r.note || '')}"></td>
                 <td><button type="button" class="defect-crack-monitor-del" data-tip-del ${rows.length <= 1 ? 'disabled' : ''} title="삭제"><i class="fa-solid fa-trash"></i></button></td>
             </tr>`;
@@ -20908,6 +20960,8 @@ document.addEventListener('DOMContentLoaded', () => {
             installDate: document.getElementById('crackGaugeInstallDate')?.value || '',
             initialX: document.getElementById('crackGaugeInitialX')?.value || '',
             initialY: document.getElementById('crackGaugeInitialY')?.value || '',
+            prevPhoto: window._crackGaugePrevPhoto || '',
+            currPhoto: window._crackGaugeCurrPhoto || '',
             readings
         });
     }
@@ -20925,6 +20979,8 @@ document.addEventListener('DOMContentLoaded', () => {
             : [];
         return normalizeCrackTipLog({
             initialLengthMm: document.getElementById('crackTipInitialLength')?.value || '',
+            prevPhoto: window._crackTipPrevPhoto || '',
+            currPhoto: window._crackTipCurrPhoto || '',
             readings
         });
     }
@@ -20941,8 +20997,86 @@ document.addEventListener('DOMContentLoaded', () => {
         setVal('crackGaugeInitialX', gauge.initialX);
         setVal('crackGaugeInitialY', gauge.initialY);
         setVal('crackTipInitialLength', tip.initialLengthMm);
+        window._crackGaugePrevPhoto = gauge.prevPhoto || '';
+        window._crackGaugeCurrPhoto = gauge.currPhoto || '';
+        window._crackTipPrevPhoto = tip.prevPhoto || '';
+        window._crackTipCurrPhoto = tip.currPhoto || '';
         renderCrackGaugeReadingRows(gauge.readings);
         renderCrackTipReadingRows(tip.readings);
+        renderCrackMonitorPhotoFrames();
+    }
+
+    function getCrackMonitorPhotoState(kind, slot) {
+        if (kind === 'gauge') return slot === 'prev' ? (window._crackGaugePrevPhoto || '') : (window._crackGaugeCurrPhoto || '');
+        return slot === 'prev' ? (window._crackTipPrevPhoto || '') : (window._crackTipCurrPhoto || '');
+    }
+
+    function setCrackMonitorPhotoState(kind, slot, dataUrl) {
+        const val = dataUrl || '';
+        if (kind === 'gauge') {
+            if (slot === 'prev') window._crackGaugePrevPhoto = val;
+            else window._crackGaugeCurrPhoto = val;
+        } else if (slot === 'prev') window._crackTipPrevPhoto = val;
+        else window._crackTipCurrPhoto = val;
+    }
+
+    function renderCrackMonitorPhotoFrame(frameId, src, label) {
+        const frame = document.getElementById(frameId);
+        if (!frame) return;
+        if (!src) {
+            frame.classList.remove('has-photo');
+            frame.innerHTML = `<span>${label} 사진 없음</span>`;
+            return;
+        }
+        frame.classList.add('has-photo');
+        frame.innerHTML = `<img src="${src}" alt="${label}" title="${label} — 탭하여 확대">`;
+        const img = frame.querySelector('img');
+        if (img) {
+            img.addEventListener('click', () => {
+                if (typeof window.openPhotoAnnotationModal === 'function') window.openPhotoAnnotationModal(src, null);
+                else window.open(src, '_blank');
+            });
+        }
+    }
+
+    function renderCrackMonitorPhotoFrames() {
+        renderCrackMonitorPhotoFrame('crackGaugePrevPhotoFrame', window._crackGaugePrevPhoto, '게이지 전차');
+        renderCrackMonitorPhotoFrame('crackGaugeCurrPhotoFrame', window._crackGaugeCurrPhoto, '게이지 현차');
+        renderCrackMonitorPhotoFrame('crackTipPrevPhotoFrame', window._crackTipPrevPhoto, '팁 전차');
+        renderCrackMonitorPhotoFrame('crackTipCurrPhotoFrame', window._crackTipCurrPhoto, '팁 현차');
+    }
+
+    async function pickCrackMonitorPhoto(kind, slot, mode) {
+        try {
+            const file = (typeof pickImageFromDevice === 'function')
+                ? await pickImageFromDevice(mode === 'camera' ? 'camera' : 'gallery')
+                : null;
+            if (!file) return;
+            let dataUrl = null;
+            if (typeof window.compressDefectPhoto43 === 'function') {
+                dataUrl = await window.compressDefectPhoto43(file, 1000, 0.85);
+            } else {
+                dataUrl = await new Promise((resolve, reject) => {
+                    const reader = new FileReader();
+                    reader.onload = () => resolve(reader.result);
+                    reader.onerror = reject;
+                    reader.readAsDataURL(file);
+                });
+            }
+            if (!dataUrl) return;
+            setCrackMonitorPhotoState(kind, slot, dataUrl);
+            renderCrackMonitorPhotoFrames();
+            if (typeof scheduleNdtCrackMonitorSave === 'function') scheduleNdtCrackMonitorSave();
+        } catch (err) {
+            console.warn('crack monitor photo pick failed:', err);
+            if (typeof window.showToast === 'function') window.showToast('사진 추가에 실패했습니다.', 'error');
+        }
+    }
+
+    function clearCrackMonitorPhoto(kind, slot) {
+        setCrackMonitorPhotoState(kind, slot, '');
+        renderCrackMonitorPhotoFrames();
+        if (typeof scheduleNdtCrackMonitorSave === 'function') scheduleNdtCrackMonitorSave();
     }
 
     function clearCrackMonitorLogsUi() {
@@ -21018,6 +21152,26 @@ document.addEventListener('DOMContentLoaded', () => {
             saveBtn.dataset.bound = '1';
             saveBtn.addEventListener('click', () => {
                 if (saveNdtCrackMonitorForSelectedDefect()) closeNdtCrackMonitorModal({ save: false });
+            });
+        }
+        if (!window._crackMonitorPhotoUiBound) {
+            window._crackMonitorPhotoUiBound = true;
+            document.addEventListener('click', (e) => {
+                const pickBtn = e.target && e.target.closest && e.target.closest('[data-cm-photo-pick]');
+                if (pickBtn) {
+                    e.preventDefault();
+                    const raw = pickBtn.getAttribute('data-cm-photo-pick') || '';
+                    const [kind, slot, mode] = raw.split(':');
+                    if (kind && slot) pickCrackMonitorPhoto(kind, slot, mode || 'gallery');
+                    return;
+                }
+                const clearBtn = e.target && e.target.closest && e.target.closest('[data-cm-photo-clear]');
+                if (clearBtn) {
+                    e.preventDefault();
+                    const raw = clearBtn.getAttribute('data-cm-photo-clear') || '';
+                    const [kind, slot] = raw.split(':');
+                    if (kind && slot) clearCrackMonitorPhoto(kind, slot);
+                }
             });
         }
     }
@@ -31261,8 +31415,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (!defectNeedsCrackMonitorUi(defect)) return;
                 const gauge = normalizeCrackGaugeLog(defect.crackGaugeLog);
                 const tip = normalizeCrackTipLog(defect.crackTipLog);
-                const hasGauge = !!(gauge.gaugeNo || gauge.initialX || gauge.initialY || (gauge.readings && gauge.readings.length));
-                const hasTip = !!(tip.initialLengthMm || (tip.readings && tip.readings.length));
+                const hasGauge = !!(gauge.gaugeNo || gauge.initialX || gauge.initialY || gauge.prevPhoto || gauge.currPhoto || (gauge.readings && gauge.readings.length));
+                const hasTip = !!(tip.initialLengthMm || tip.prevPhoto || tip.currPhoto || (tip.readings && tip.readings.length));
                 if (!hasGauge && !hasTip) return;
                 items.push({
                     defect,
@@ -31376,6 +31530,143 @@ document.addEventListener('DOMContentLoaded', () => {
         setTcText(getHwpxTblCellByAddr(tbl, 15, 4), '-');
     }
 
+    function hwpxIsLightPurpleColor(hex) {
+        if (!hex) return false;
+        const s = String(hex).replace(/^#/, '').toUpperCase();
+        if (s.length !== 6) return false;
+        if (s === 'CCC0DA' || s === 'E2D5F1' || s === 'D8C8E8' || s === 'BFA5D4') return true;
+        const r = parseInt(s.slice(0, 2), 16);
+        const g = parseInt(s.slice(2, 4), 16);
+        const b = parseInt(s.slice(4, 6), 16);
+        // light purple-ish: blue & red high, green a bit lower
+        return b >= 180 && r >= 150 && g >= 130 && b >= g && r >= g - 10 && (b - g) >= 15;
+    }
+
+    function ensureHwpxCrackMonitorStyleIds(hwpxHeaderState) {
+        if (!hwpxHeaderState || !hwpxHeaderState.text) return { transparentBfId: null, gulimCharPrId: null };
+        let hdr = hwpxHeaderState.text;
+        const maxId = (tag) => {
+            const ids = [...hdr.matchAll(new RegExp(`<hh:${tag} id="(\\d+)"`, 'g'))].map((x) => parseInt(x[1], 10));
+            return ids.length ? Math.max(...ids) : 0;
+        };
+        let transparentBfId = null;
+        // Prefer an existing transparent winBrush fill
+        const bfRe = /<hh:borderFill id="(\d+)"[\s\S]*?<\/hh:borderFill>/g;
+        let m;
+        while ((m = bfRe.exec(hdr))) {
+            const block = m[0];
+            const faces = [...block.matchAll(/faceColor="([^"]+)"/g)].map((x) => x[1]);
+            const solids = [...block.matchAll(/value="#([0-9A-Fa-f]{6})"/g)].map((x) => x[1].toUpperCase());
+            if (faces.includes('none') && !solids.some(hwpxIsLightPurpleColor)) {
+                transparentBfId = m[1];
+                break;
+            }
+        }
+        if (!transparentBfId) {
+            transparentBfId = String(maxId('borderFill') + 1);
+            const bfXml = `<hh:borderFill id="${transparentBfId}" threeD="0" shadow="0" centerLine="NONE" breakCellSeparateLine="0"><hh:slash type="NONE" Crooked="0" isCounter="0"/><hh:backSlash type="NONE" Crooked="0" isCounter="0"/><hh:leftBorder type="SOLID" width="0.12 mm" color="#000000"/><hh:rightBorder type="SOLID" width="0.12 mm" color="#000000"/><hh:topBorder type="SOLID" width="0.12 mm" color="#000000"/><hh:bottomBorder type="SOLID" width="0.12 mm" color="#000000"/><hc:fillBrush><hc:winBrush faceColor="none" hatchColor="#999999" alpha="0"/></hc:fillBrush></hh:borderFill>`;
+            if (hdr.includes('</hh:borderFills>')) {
+                hdr = hdr.replace('</hh:borderFills>', bfXml + '</hh:borderFills>');
+                const bfCnt = (hdr.match(/<hh:borderFill id="/g) || []).length;
+                hdr = hdr.replace(/(<hh:borderFills[^>]*itemCnt=")(\d+)(")/, `$1${bfCnt}$3`);
+            }
+            hwpxHeaderState.dirty = true;
+        }
+
+        // Find Gulim font id in hangul fontface (first face="굴림")
+        let gulimFontId = null;
+        const fontFace = [...hdr.matchAll(/<hh:font id="(\d+)"[^>]*face="굴림"/g)];
+        if (fontFace.length) gulimFontId = fontFace[0][1];
+        if (!gulimFontId) gulimFontId = '1';
+
+        let gulimCharPrId = null;
+        const charRe = /<hh:charPr id="(\d+)"([^>]*)>([\s\S]*?)<\/hh:charPr>/g;
+        while ((m = charRe.exec(hdr))) {
+            const attrs = m[2] || '';
+            const body = m[3] || '';
+            const shade = (attrs.match(/shadeColor="([^"]+)"/) || [])[1] || 'none';
+            const hangul = (body.match(/hangul="(\d+)"/) || [])[1];
+            if (shade === 'none' && hangul === gulimFontId && !hwpxIsLightPurpleColor((attrs.match(/textColor="#([^"]+)"/) || [])[1])) {
+                gulimCharPrId = m[1];
+                break;
+            }
+        }
+        if (!gulimCharPrId) {
+            gulimCharPrId = String(maxId('charPr') + 1);
+            const proto = hdr.match(/<hh:charPr id="\d+"[\s\S]*?<\/hh:charPr>/);
+            let bodyInner = '<hh:fontRef hangul="FONT" latin="FONT" hanja="FONT" japanese="FONT" other="FONT" symbol="FONT" user="FONT"/><hh:ratio hangul="100" latin="100" hanja="100" japanese="100" other="100" symbol="100" user="100"/><hh:spacing hangul="0" latin="0" hanja="0" japanese="0" other="0" symbol="0" user="0"/><hh:relSz hangul="100" latin="100" hanja="100" japanese="100" other="100" symbol="100" user="100"/><hh:offset hangul="0" latin="0" hanja="0" japanese="0" other="0" symbol="0" user="0"/>';
+            if (proto) {
+                const inner = proto[0].replace(/^<hh:charPr[^>]*>/, '').replace(/<\/hh:charPr>$/, '');
+                bodyInner = inner.replace(/hangul="\d+"/g, `hangul="${gulimFontId}"`)
+                    .replace(/latin="\d+"/g, `latin="${gulimFontId}"`)
+                    .replace(/hanja="\d+"/g, `hanja="${gulimFontId}"`)
+                    .replace(/japanese="\d+"/g, `japanese="${gulimFontId}"`)
+                    .replace(/other="\d+"/g, `other="${gulimFontId}"`)
+                    .replace(/symbol="\d+"/g, `symbol="${gulimFontId}"`)
+                    .replace(/user="\d+"/g, `user="${gulimFontId}"`);
+            } else {
+                bodyInner = bodyInner.replace(/FONT/g, gulimFontId);
+            }
+            const charXml = `<hh:charPr id="${gulimCharPrId}" height="850" textColor="#000000" shadeColor="none" useFontSpace="0" useKerning="0" symMark="NONE" borderFillIDRef="${transparentBfId}">${bodyInner}</hh:charPr>`;
+            if (hdr.includes('</hh:charProperties>')) {
+                hdr = hdr.replace('</hh:charProperties>', charXml + '</hh:charProperties>');
+                const cpCnt = (hdr.match(/<hh:charPr id="/g) || []).length;
+                hdr = hdr.replace(/(<hh:charProperties[^>]*itemCnt=")(\d+)(")/, `$1${cpCnt}$3`);
+            }
+            hwpxHeaderState.dirty = true;
+        }
+
+        hwpxHeaderState.text = hdr;
+        return { transparentBfId, gulimCharPrId };
+    }
+
+
+    function polishHwpxCrackMonitorNode(root, styleIds, purpleBfIds) {
+        if (!root || !styleIds) return root;
+        const transparentBfId = styleIds.transparentBfId;
+        const gulimCharPrId = styleIds.gulimCharPrId;
+        const purpleSet = purpleBfIds instanceof Set ? purpleBfIds : new Set(purpleBfIds || []);
+        const walk = (el) => {
+            if (!el || el.nodeType !== 1) return;
+            if ((el.localName === 'tc' || el.localName === 'tbl') && transparentBfId) {
+                const bf = el.getAttribute('borderFillIDRef');
+                // Only remap cells that still point at a purple fill (ID collision with main template)
+                if (bf && purpleSet.has(String(bf))) el.setAttribute('borderFillIDRef', transparentBfId);
+            }
+            if ((el.localName === 'run' || el.localName === 'p') && gulimCharPrId) {
+                if (el.localName === 'run') el.setAttribute('charPrIDRef', gulimCharPrId);
+                el.removeAttribute('borderFillIDRef');
+            }
+            Array.from(el.children || []).forEach(walk);
+        };
+        walk(root);
+        return root;
+    }
+
+    function collectHwpxPurpleBorderFillIds(headerText) {
+        const ids = new Set();
+        if (!headerText) return ids;
+        const re = /<hh:borderFill id="(\d+)"[\s\S]*?<\/hh:borderFill>/g;
+        let m;
+        while ((m = re.exec(headerText))) {
+            const block = m[0];
+            const faces = [...block.matchAll(/faceColor="([^"]+)"/g)].map((x) => String(x[1]).replace(/^#/, ''));
+            const vals = [...block.matchAll(/value="#([0-9A-Fa-f]{6})"/g)].map((x) => x[1]);
+            if (faces.some(hwpxIsLightPurpleColor) || vals.some(hwpxIsLightPurpleColor)) ids.add(m[1]);
+        }
+        return ids;
+    }
+
+    function getCrackMonitorComparePhotos(slot) {
+        if (!slot) return { prev: '', curr: '' };
+        if (slot.kind === 'tip') {
+            const tip = slot.tip || {};
+            return { prev: tip.prevPhoto || '', curr: tip.currPhoto || '' };
+        }
+        const gauge = slot.gauge || {};
+        return { prev: gauge.prevPhoto || '', curr: gauge.currPhoto || '' };
+    }
+
     async function loadHwpxCrackMonitorStampTemplate() {
         try {
             const resp = await fetch('./templates/hwpx_crack_monitor.hwpx', { cache: 'no-store' });
@@ -31425,10 +31716,18 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         }
 
+        // Ensure destination header is loaded before style injection / purple detection
+        if (hwpxHeaderState && !hwpxHeaderState.text && zip.file('Contents/header.xml')) {
+            hwpxHeaderState.text = await zip.file('Contents/header.xml').async('string');
+        }
+        const purpleBfIds = collectHwpxPurpleBorderFillIds(hwpxHeaderState && hwpxHeaderState.text);
+        const crackStyleIds = ensureHwpxCrackMonitorStyleIds(hwpxHeaderState || { text: null, dirty: false });
+
         const cloneStampPara = (proto) => {
             if (!proto) return null;
             let node = proto.cloneNode(true);
             if (remapStampNode) node = remapStampNode(node, remapAttrs);
+            node = polishHwpxCrackMonitorNode(node, crackStyleIds, purpleBfIds);
             return xmlDoc.importNode(node, true);
         };
 
@@ -31486,10 +31785,13 @@ document.addEventListener('DOMContentLoaded', () => {
         const fillSummaryPhotoTable = async (tbl, item, photoNo) => {
             if (!tbl || !item) return;
             const d = item.defect;
-            await ensureDefectPhotosLoaded(d);
-            const prevSrc = getDefectPrevOutputPhotos(d)[0];
-            const currSrc = getDefectOutputPhotos(d)[0];
-            const roundLabels = getDefectHwpxCompareRoundLabelsFull(d, bldg);
+            // 균열 게이지/팁 전용 비교사진 (결함 일반 사진 슬롯에 넣지 않음)
+            const cmpPhotos = getCrackMonitorComparePhotos(item);
+            const prevSrc = cmpPhotos.prev || '';
+            const currSrc = cmpPhotos.curr || '';
+            const roundLabels = (typeof getDefectHwpxCompareRoundLabelsFull === 'function')
+                ? getDefectHwpxCompareRoundLabelsFull(d, bldg)
+                : { prev: '전회 측정', curr: '금회 측정' };
             setTcText(getHwpxTblCellByAddr(tbl, 1, 0), String(photoNo));
             setTcText(getHwpxTblCellByAddr(tbl, 1, 1), d.component || '');
             setTcText(getHwpxTblCellByAddr(tbl, 1, 2), `${item.floorLabel || ''} ${d.locationDetail || ''}`.trim());
@@ -31534,6 +31836,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 const currentTbl = findHwpxTblByRowCount(dataPara, 16);
                 if (currentTbl) {
                     fillHwpxCrackMonitorCurrentTable(currentTbl, slots, setTcText);
+                    polishHwpxCrackMonitorNode(currentTbl, crackStyleIds, purpleBfIds);
                     ensureTblTreatAsChar(currentTbl);
                 }
                 sec.appendChild(dataPara);
@@ -31548,6 +31851,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 const sumTbl = sumPara.getElementsByTagNameNS(HWPX_HP_NS, 'tbl')[0];
                 if (sumTbl) {
                     await fillSummaryPhotoTable(sumTbl, slots[si], si + 1);
+                    polishHwpxCrackMonitorNode(sumTbl, crackStyleIds, purpleBfIds);
                     ensureTblTreatAsChar(sumTbl);
                 }
                 sec.appendChild(sumPara);
@@ -39046,6 +39350,23 @@ document.addEventListener('DOMContentLoaded', () => {
                     : (prevRoundPhotoIds && prevRoundPhotoIds.length ? prevRoundPhotoIds.slice() : null);
                 if (curIds && curIds.length) out.photoIds = curIds;
                 if (prevIds && prevIds.length) out.prevRoundPhotoIds = prevIds;
+                // 균열 게이지/팁 비교사진 dataURL은 Firestore에 올리지 않음(로컬/IndexedDB 상태만)
+                if (out.crackGaugeLog && typeof out.crackGaugeLog === 'object') {
+                    const { prevPhoto, currPhoto, ...gRest } = out.crackGaugeLog;
+                    out.crackGaugeLog = {
+                        ...gRest,
+                        hasPrevPhoto: !!(prevPhoto && String(prevPhoto).trim()),
+                        hasCurrPhoto: !!(currPhoto && String(currPhoto).trim())
+                    };
+                }
+                if (out.crackTipLog && typeof out.crackTipLog === 'object') {
+                    const { prevPhoto, currPhoto, ...tRest } = out.crackTipLog;
+                    out.crackTipLog = {
+                        ...tRest,
+                        hasPrevPhoto: !!(prevPhoto && String(prevPhoto).trim()),
+                        hasCurrPhoto: !!(currPhoto && String(currPhoto).trim())
+                    };
+                }
                 return out;
             });
         });

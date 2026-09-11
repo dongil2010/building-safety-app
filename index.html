@@ -2,15 +2,7 @@
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" id="viewportMeta">
-<script>
-(function () {
-  try {
-    document.documentElement.style.webkitTextSizeAdjust = '100%';
-    document.documentElement.style.textSizeAdjust = '100%';
-  } catch (e) {}
-})();
-</script>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" id="viewportMeta">
     <script>
     (function () {
         var ua = navigator.userAgent || '';
@@ -47,7 +39,7 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <meta name="apple-mobile-web-app-title" content="스마트 안전점검">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css">
-    <link rel="stylesheet" href="styles.css?v=20260911_171308">
+    <link rel="stylesheet" href="styles.css?v=20260911_174603">
     <!-- FontAwesome icons for clean engineering UI -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <!-- PDF 생성용: 페이지별로 직접 캡처해서 조립(큰 보고서에서 html2pdf 한방 렌더링이 캔버스 높이 한계로
@@ -1974,7 +1966,7 @@
                 <button type="button" class="modal-close" id="btnCloseNdtCrackMonitorModal" title="닫기 (Esc)">&times;</button>
             </div>
             <div class="modal-body defect-drawer-body ndt-crack-monitor-modal-body">
-                <p class="ndt-crack-monitor-hint" id="ndtCrackMonitorHint">균열 결함의 회차별 X/Y·균열길이·누적 증가량을 기록합니다.</p>
+                <p class="ndt-crack-monitor-hint" id="ndtCrackMonitorHint">균열 결함의 회차별 X/Y·균열길이·누적(초기치 대비)·전차 대비와 전차/현차 비교 사진을 기록합니다.</p>
                 <div class="ndt-crack-monitor-editor-bar">
                     <label class="ndt-crack-monitor-select-label">
                         <span>결함</span>
@@ -1992,10 +1984,33 @@
                             <label>초기 Y(mm)<input type="text" id="crackGaugeInitialY" class="form-control" inputmode="decimal" autocomplete="off"></label>
                         </div>
                         <div class="defect-crack-monitor-table-wrap">
-                            <table class="defect-crack-monitor-table">
-                                <thead><tr><th>회차</th><th>측정일</th><th>X(mm)</th><th>Y(mm)</th><th>ΔX</th><th>ΔY</th><th>비고</th><th></th></tr></thead>
+                            <table class="defect-crack-monitor-table defect-crack-monitor-table-gauge">
+                                <thead><tr><th>회차</th><th>측정일</th><th>X(mm)</th><th>Y(mm)</th><th title="현회−초기">누적ΔX</th><th title="현회−초기">누적ΔY</th><th title="현회−전회">전차ΔX</th><th title="현회−전회">전차ΔY</th><th>비고</th><th></th></tr></thead>
                                 <tbody id="crackGaugeReadingBody"></tbody>
                             </table>
+                        </div>
+                        <div class="crack-monitor-photo-compare" id="crackGaugePhotoCompare" data-log-kind="gauge">
+                            <div class="crack-monitor-photo-label">비교 사진 (전차 / 현차)</div>
+                            <div class="crack-monitor-photo-slots">
+                                <div class="crack-monitor-photo-slot" data-slot="prev">
+                                    <div class="crack-monitor-photo-slot-title">전차</div>
+                                    <div class="crack-monitor-photo-frame" id="crackGaugePrevPhotoFrame"></div>
+                                    <div class="crack-monitor-photo-actions">
+                                        <button type="button" class="btn btn-sm btn-outline" data-cm-photo-pick="gauge:prev:gallery" title="갤러리"><i class="fa-solid fa-image"></i></button>
+                                        <button type="button" class="btn btn-sm btn-outline" data-cm-photo-pick="gauge:prev:camera" title="카메라"><i class="fa-solid fa-camera"></i></button>
+                                        <button type="button" class="btn btn-sm btn-outline crack-monitor-photo-clear" data-cm-photo-clear="gauge:prev" title="삭제"><i class="fa-solid fa-trash"></i></button>
+                                    </div>
+                                </div>
+                                <div class="crack-monitor-photo-slot" data-slot="curr">
+                                    <div class="crack-monitor-photo-slot-title">현차</div>
+                                    <div class="crack-monitor-photo-frame" id="crackGaugeCurrPhotoFrame"></div>
+                                    <div class="crack-monitor-photo-actions">
+                                        <button type="button" class="btn btn-sm btn-outline" data-cm-photo-pick="gauge:curr:gallery" title="갤러리"><i class="fa-solid fa-image"></i></button>
+                                        <button type="button" class="btn btn-sm btn-outline" data-cm-photo-pick="gauge:curr:camera" title="카메라"><i class="fa-solid fa-camera"></i></button>
+                                        <button type="button" class="btn btn-sm btn-outline crack-monitor-photo-clear" data-cm-photo-clear="gauge:curr" title="삭제"><i class="fa-solid fa-trash"></i></button>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
                         <button type="button" class="btn btn-sm btn-outline defect-crack-monitor-add" id="btnAddCrackGaugeReading"><i class="fa-solid fa-plus"></i> 게이지 측정 행 추가</button>
                     </div>
@@ -2005,10 +2020,33 @@
                             <label>초기 길이(mm)<input type="text" id="crackTipInitialLength" class="form-control" inputmode="decimal" autocomplete="off"></label>
                         </div>
                         <div class="defect-crack-monitor-table-wrap">
-                            <table class="defect-crack-monitor-table">
-                                <thead><tr><th>회차</th><th>측정일</th><th>길이(mm)</th><th>증가</th><th>누적</th><th>비고</th><th></th></tr></thead>
+                            <table class="defect-crack-monitor-table defect-crack-monitor-table-tip">
+                                <thead><tr><th>회차</th><th>측정일</th><th>길이(mm)</th><th>증가</th><th title="현회−초기치">누적</th><th title="현회−전회">전차</th><th>비고</th><th></th></tr></thead>
                                 <tbody id="crackTipReadingBody"></tbody>
                             </table>
+                        </div>
+                        <div class="crack-monitor-photo-compare" id="crackTipPhotoCompare" data-log-kind="tip">
+                            <div class="crack-monitor-photo-label">비교 사진 (전차 / 현차)</div>
+                            <div class="crack-monitor-photo-slots">
+                                <div class="crack-monitor-photo-slot" data-slot="prev">
+                                    <div class="crack-monitor-photo-slot-title">전차</div>
+                                    <div class="crack-monitor-photo-frame" id="crackTipPrevPhotoFrame"></div>
+                                    <div class="crack-monitor-photo-actions">
+                                        <button type="button" class="btn btn-sm btn-outline" data-cm-photo-pick="tip:prev:gallery" title="갤러리"><i class="fa-solid fa-image"></i></button>
+                                        <button type="button" class="btn btn-sm btn-outline" data-cm-photo-pick="tip:prev:camera" title="카메라"><i class="fa-solid fa-camera"></i></button>
+                                        <button type="button" class="btn btn-sm btn-outline crack-monitor-photo-clear" data-cm-photo-clear="tip:prev" title="삭제"><i class="fa-solid fa-trash"></i></button>
+                                    </div>
+                                </div>
+                                <div class="crack-monitor-photo-slot" data-slot="curr">
+                                    <div class="crack-monitor-photo-slot-title">현차</div>
+                                    <div class="crack-monitor-photo-frame" id="crackTipCurrPhotoFrame"></div>
+                                    <div class="crack-monitor-photo-actions">
+                                        <button type="button" class="btn btn-sm btn-outline" data-cm-photo-pick="tip:curr:gallery" title="갤러리"><i class="fa-solid fa-image"></i></button>
+                                        <button type="button" class="btn btn-sm btn-outline" data-cm-photo-pick="tip:curr:camera" title="카메라"><i class="fa-solid fa-camera"></i></button>
+                                        <button type="button" class="btn btn-sm btn-outline crack-monitor-photo-clear" data-cm-photo-clear="tip:curr" title="삭제"><i class="fa-solid fa-trash"></i></button>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
                         <button type="button" class="btn btn-sm btn-outline defect-crack-monitor-add" id="btnAddCrackTipReading"><i class="fa-solid fa-plus"></i> 팁 측정 행 추가</button>
                     </div>
@@ -3115,24 +3153,24 @@
     </div>
 
     <!-- Core → 탭 분류 → 기존 엔진(app.js) -->
-    <script src="js/core/state.js?v=20260911_171308"></script>
-    <script src="js/tabs/registry.js?v=20260911_171308"></script>
-    <script src="js/pdf-vector-bridge.js?v=20260911_171308"></script>
-    <script src="js/pdf-vector-snap.js?v=20260911_171308"></script>
-    <script src="js/core/layout-mode.js?v=20260911_171308"></script>
-    <script src="js/core/performance.js?v=20260911_171308"></script>
-    <script src="js/core/mobile-keyboard.js?v=20260911_171308"></script>
-    <script src="js/tabs/home.js?v=20260911_171308"></script>
-    <script src="js/tabs/map.js?v=20260911_171308"></script>
-    <script src="js/tabs/survey.js?v=20260911_171308"></script>
-    <script src="js/tabs/stats.js?v=20260911_171308"></script>
-    <script src="js/tabs/ndt.js?v=20260911_171308"></script>
-    <script src="js/shared/report.js?v=20260911_171308"></script>
-    <script src="js/shared/hwpx-import.js?v=20260911_171308"></script>
-    <script src="js/shared/auth.js?v=20260911_171308"></script>
-    <script src="app.js?v=20260911_171308"></script>
+    <script src="js/core/state.js?v=20260911_174603"></script>
+    <script src="js/tabs/registry.js?v=20260911_174603"></script>
+    <script src="js/pdf-vector-bridge.js?v=20260911_174603"></script>
+    <script src="js/pdf-vector-snap.js?v=20260911_174603"></script>
+    <script src="js/core/layout-mode.js?v=20260911_174603"></script>
+    <script src="js/core/performance.js?v=20260911_174603"></script>
+    <script src="js/core/mobile-keyboard.js?v=20260911_174603"></script>
+    <script src="js/tabs/home.js?v=20260911_174603"></script>
+    <script src="js/tabs/map.js?v=20260911_174603"></script>
+    <script src="js/tabs/survey.js?v=20260911_174603"></script>
+    <script src="js/tabs/stats.js?v=20260911_174603"></script>
+    <script src="js/tabs/ndt.js?v=20260911_174603"></script>
+    <script src="js/shared/report.js?v=20260911_174603"></script>
+    <script src="js/shared/hwpx-import.js?v=20260911_174603"></script>
+    <script src="js/shared/auth.js?v=20260911_174603"></script>
+    <script src="app.js?v=20260911_174603"></script>
     <script>
-        window.BSA_APP_VERSION = '20260911_171308';
+        window.BSA_APP_VERSION = '20260911_174603';
         (function () {
             var el = document.getElementById('appVersionText');
             if (el && window.BSA_APP_VERSION) el.textContent = 'v' + window.BSA_APP_VERSION;
@@ -3156,7 +3194,7 @@
                     native = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
                 } catch (e) {}
                 if (native) return;
-                navigator.serviceWorker.register('./sw.js?v=20260911_171308')
+                navigator.serviceWorker.register('./sw.js?v=20260911_174603')
                     .then(function(registration) {
                         console.log('✅ ServiceWorker Registered Successfully with scope:', registration.scope);
                         registration.update();
