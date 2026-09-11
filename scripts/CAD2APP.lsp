@@ -1,6 +1,7 @@
 ﻿;;; =========================================================================
 ;;;  CAD to Smart Safety App - 결함위치도 2점 정밀 캘리브레이션 추출기
-;;;  버전: v2.4 (사용자 요청으로 v2.5~v2.8 되돌림 - 텍스트-원 1:1배정/텍스트박스중심/원-선1:1배정 모두 제거)
+;;;  버전: v2.11 (v2.10 + 원 없이 리더/라인으로 추측한 항목을 텍스트 주황색으로 표시 +
+;;;              완료 메시지에 대상 번호 목록 안내 추가)
 ;;; =========================================================================
 
 ;; MTEXT 서식 제거 함수 ({\fGulim...;NO.01} -> NO.01)
@@ -93,10 +94,11 @@
                      attachTol circleAnchorList anchorPt usedLine usedLine2
                      remainLines cAnchor
                      pairList idxT idxC ti ci usedTextIdx usedCircleIdx
-                     circleAssign pr assigned usedLineIdx circleLineAssign boxInfo )
+                     circleAssign pr assigned usedLineIdx circleLineAssign boxInfo
+                     isDupCircle existC dupCircleCount txtEnt uncertainList uncertainMsg n )
   (vl-load-com)
   (princ "\n=======================================================")
-  (princ "\n  [CAD2APP v2.4] 스마트 안전점검 - 결함 번호/지시선 정밀 추출기")
+  (princ "\n  [CAD2APP v2.11] 스마트 안전점검 - 결함 번호/지시선 정밀 추출기")
   (princ "\n=======================================================")
 
   ;; 1. 기준점 2개 지정
@@ -126,6 +128,8 @@
   (setq lineList '())
   (setq circleList '())
   (setq jsonList '())
+  (setq dupCircleCount 0)
+  (setq uncertainList '())
   (setq i 0)
 
   ;; 3. 객체 분류
@@ -157,7 +161,7 @@
        (setq cleanNo (cleanMText rawNo))
        (setq boxPt (cdr (assoc 10 dxf)))
        (if (and (isDefectText cleanNo) boxPt)
-         (setq textList (cons (list cleanNo (list (car boxPt) (cadr boxPt))) textList))
+         (setq textList (cons (list cleanNo (list (car boxPt) (cadr boxPt)) ent) textList))
        )
       )
 
@@ -189,7 +193,26 @@
        ;; 반지름 500짜리는 이 스크립트가 방금 찍은 기준점 표시용 원이므로 제외.
        ;; 결함위치 원이 500mm보다 크면 이 400 기준을 필요에 맞게 조정할 것.
        (if (and cPt cRad (< cRad 400.0))
-         (setq circleList (cons (list (car cPt) (cadr cPt)) circleList))
+         (progn
+           ;; 같은 자리에 원이 실수로 2개 겹쳐 그려진 경우(복사 실수 등) 중복 등록 방지.
+           ;; 10mm 이내에 이미 등록된 원이 있으면 새로 추가하지 않는다.
+           (setq isDupCircle nil)
+           (foreach existC circleList
+             (if (< (distance (list (car cPt) (cadr cPt)) existC) 10.0)
+               (setq isDupCircle T)
+             )
+           )
+           (if isDupCircle
+             (progn
+               (setq dupCircleCount (1+ dupCircleCount))
+               ;; 중복 원을 캐드 화면에서 바로 확인할 수 있도록 마젠타(분홍/자주 계열)로 표시해둔다.
+               ;; (사용 안 하는 원이니 지우거나, 진짜 위치로 옮겨서 다시 써도 됨)
+               (entmod (list (cons -1 ent) (cons 62 6)))
+               (entupd ent)
+             )
+             (setq circleList (cons (list (car cPt) (cadr cPt)) circleList))
+           )
+         )
        )
       )
     )
@@ -214,32 +237,56 @@
     (setq circleAnchorList (cons (list cPt anchorPt) circleAnchorList))
   )
 
-  ;; 5. 독립 텍스트와 주변 지시선/원 매칭 (최대 탐색 반경 3500mm)
-  ;;    원(CIRCLE)의 anchor(지시선이 가리키는 텍스트쪽 지점)가 이 텍스트 박스와 가장 가까우면
-  ;;    그 원을 결함 위치로 확정하고, 없을 때만 기존처럼 리더/라인 중 제일 가까운 끝점을
-  ;;    추측으로 사용한다 (번호박스 자기 테두리선을 지시선으로 오인식하는 문제 방지).
+  ;; 5. 텍스트-원 전체 조합의 거리쌍을 계산해 그리디 1:1 확정배정한다.
+  ;;    (v2.4까지는 텍스트마다 독립적으로 "제일 가까운 원"을 골랐는데, 밀집구역에서
+  ;;    서로 다른 텍스트 2개가 같은 원 하나를 동시에 차지하는 중복 배정 버그가 있었다.
+  ;;    이제 전체 거리쌍을 가까운 순으로 정렬한 뒤, 이미 확정된 텍스트/원은 건너뛰면서
+  ;;    순서대로 확정해서 원 하나당 텍스트 하나만 배정되도록 보장한다.)
   (setq maxDist 3500.0)
+  (setq pairList '())
+  (setq idxT 0)
+  (foreach txtItem textList
+    (setq boxPt (nth 1 txtItem))
+    (setq idxC 0)
+    (foreach cAnchor circleAnchorList
+      (setq curDist (distance boxPt (cadr cAnchor)))
+      (if (< curDist maxDist)
+        (setq pairList (cons (list curDist idxT idxC) pairList))
+      )
+      (setq idxC (1+ idxC))
+    )
+    (setq idxT (1+ idxT))
+  )
+  (setq pairList (vl-sort pairList (function (lambda (a b) (< (car a) (car b))))))
+
+  (setq usedTextIdx '())
+  (setq usedCircleIdx '())
+  (setq circleAssign '())  ;; ((idxT . 원중심점) ...)
+  (foreach pr pairList
+    (setq ti (nth 1 pr))
+    (setq ci (nth 2 pr))
+    (if (and (not (member ti usedTextIdx)) (not (member ci usedCircleIdx)))
+      (progn
+        (setq usedTextIdx (cons ti usedTextIdx))
+        (setq usedCircleIdx (cons ci usedCircleIdx))
+        (setq circleAssign (cons (cons ti (car (nth ci circleAnchorList))) circleAssign))
+      )
+    )
+  )
+
+  ;; 6. 확정배정된 텍스트는 그 원을 결함 위치로 쓰고, 원을 못 받은 텍스트만 기존처럼
+  ;;    리더/라인 중 제일 가까운 끝점을 추측으로 사용한다.
+  (setq idxT 0)
   (foreach txtItem textList
     (setq cleanNo (nth 0 txtItem))
     (setq boxPt (nth 1 txtItem))
+    (setq txtEnt (nth 2 txtItem))
     (setq bestTip boxPt)
     (setq minDist maxDist)
+    (setq assigned (assoc idxT circleAssign))
 
-    ;; 0. CIRCLE 검색 (최우선, anchor 지점 기준)
-    (setq bestCircle nil)
-    (setq minCircleDist maxDist)
-    (foreach cAnchor circleAnchorList
-      (setq curDist (distance boxPt (cadr cAnchor)))
-      (if (< curDist minCircleDist)
-        (progn
-          (setq minCircleDist curDist)
-          (setq bestCircle (car cAnchor))
-        )
-      )
-    )
-
-    (if bestCircle
-      (setq bestTip bestCircle)
+    (if assigned
+      (setq bestTip (cdr assigned))
       (progn
         ;; Leader 검색
         (foreach ldr leaderList
@@ -269,22 +316,29 @@
             )
           )
         )
+
+        ;; 원(CIRCLE)으로 확정배정을 못 받은 항목 - 리더/라인 추측값이라 틀릴 수 있으니
+        ;; 캐드에서 바로 눈에 띄게 텍스트를 주황색으로 표시하고, 완료 메시지에도 목록으로 안내한다.
+        (setq uncertainList (cons cleanNo uncertainList))
+        (entmod (list (cons -1 txtEnt) (cons 62 30)))
+        (entupd txtEnt)
       )
     )
 
     (setq jsonList (cons (list cleanNo boxPt bestTip) jsonList))
+    (setq idxT (1+ idxT))
   )
 
   (if (null jsonList)
     (progn (alert "추출할 수 있는 결함 번호가 없습니다.") (exit))
   )
 
-  ;; 5. JSON 파일 저장
+  ;; 7. JSON 파일 저장
   (setq outPath (strcat (getenv "USERPROFILE") "\\Desktop\\cad_defects_import.json"))
   (setq f (open outPath "w"))
   (write-line "{" f)
   (write-line "  \"source\": \"AutoCAD\"," f)
-  (write-line "  \"version\": \"2.4_revert\"," f)
+  (write-line "  \"version\": \"2.11_uncertain_flagged\"," f)
   (write-line "  \"refPoint1\": {" f)
   (write-line (strcat "    \"x\": " (rtos (car pt1) 2 4) ",") f)
   (write-line (strcat "    \"y\": " (rtos (cadr pt1) 2 4)) f)
@@ -318,10 +372,30 @@
   (write-line "}" f)
   (close f)
 
-  (alert (strcat "총 " (itoa (length jsonList)) "개의 결함(비결함 텍스트 제외 완료)과 기준점 2개를 추출했습니다!\n\n저장 경로:\n" outPath "\n\n이제 스마트 안전점검 앱에서 [📐 캐드 핀 가져오기]를 누르고 2개 기준점을 클릭해 주세요."))
-  (princ (strcat "\n[CAD2APP v2.4] 추출 완료! 파일 경로: " outPath "\n"))
+  ;; 원 없이 리더/라인으로 추측한 항목 목록 문구 조립
+  (setq uncertainMsg "")
+  (if uncertainList
+    (progn
+      (setq uncertainMsg (strcat "\n\n⚠ " (itoa (length uncertainList)) "개 결함 번호는 원(CIRCLE)을 못 찾아서 리더/라인 위치로 추측했습니다.\n해당 텍스트를 주황색으로 표시해뒀으니, 잘못 표기되었을 수 있으니 캐드에서 확인 후 수정해주세요.\n대상 번호: "))
+      (setq firstItem T)
+      (foreach n uncertainList
+        (if (not firstItem) (setq uncertainMsg (strcat uncertainMsg ", ")))
+        (setq uncertainMsg (strcat uncertainMsg n))
+        (setq firstItem nil)
+      )
+    )
+  )
+
+  (alert (strcat "총 " (itoa (length jsonList)) "개의 결함(비결함 텍스트 제외 완료)과 기준점 2개를 추출했습니다!\n\n저장 경로:\n" outPath "\n\n이제 스마트 안전점검 앱에서 [📐 캐드 핀 가져오기]를 누르고 2개 기준점을 클릭해 주세요."
+    (if (> dupCircleCount 0)
+      (strcat "\n\n⚠ 같은 자리에 겹쳐 그려진 원 " (itoa dupCircleCount) "개를 발견해서 마젠타(분홍/자주) 색으로 표시해뒀습니다.\n도면에서 마젠타색 원을 찾아 확인 후, 진짜 위치로 옮기거나 필요없으면 지워주세요.")
+      ""
+    )
+    uncertainMsg
+  ))
+  (princ (strcat "\n[CAD2APP v2.11] 추출 완료! 파일 경로: " outPath "\n"))
   (princ)
 )
 
-(princ "\n[CAD2APP v2.4] 로드 완료. 캐드 명령창에 CAD2APP 을 입력하세요.\n")
+(princ "\n[CAD2APP v2.11] 로드 완료. 캐드 명령창에 CAD2APP 을 입력하세요.\n")
 (princ)
