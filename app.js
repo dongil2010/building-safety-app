@@ -37556,7 +37556,9 @@ document.addEventListener('DOMContentLoaded', () => {
     function isFirestoreQuotaError(err) {
         const msg = String((err && err.message) || err || '');
         const code = String((err && err.code) || '');
-        return /\b429\b/.test(msg) || /resource-exhausted|RESOURCE_EXHAUSTED|quota/i.test(msg + code);
+        return /\b429\b/.test(msg)
+            || /resource-exhausted|RESOURCE_EXHAUSTED|quota/i.test(msg + code)
+            || /Write stream exhausted|maximum allowed queued writes|using maximum backoff/i.test(msg);
     }
 
     function clearSyncErrorRetryTimer() {
@@ -37574,7 +37576,10 @@ document.addEventListener('DOMContentLoaded', () => {
             SYNC_RETRY_BASE_MS * Math.pow(2, _syncRetryFailCount),
             SYNC_RETRY_MAX_MS
         );
-        if (isQuota) delay = Math.max(delay, SYNC_QUOTA_COOLDOWN_MS);
+        if (isQuota) {
+            delay = Math.max(delay, SYNC_QUOTA_COOLDOWN_MS);
+            pauseFirestoreWrites(delay);
+        }
         _syncRetryFailCount = Math.min(_syncRetryFailCount + 1, 8);
         _syncRetryTimer = setTimeout(() => {
             _syncRetryTimer = null;
@@ -38614,75 +38619,107 @@ document.addEventListener('DOMContentLoaded', () => {
         return siteVaultDocId(getBuildingSiteName(bldg));
     }
 
+    /** Firestore client write stream overload guard */
+    let _fsWriteChain = Promise.resolve();
+    let _fsWritePausedUntil = 0;
+    function pauseFirestoreWrites(ms) {
+        _fsWritePausedUntil = Math.max(_fsWritePausedUntil, Date.now() + Math.max(0, ms || 0));
+    }
+    function enqueueFirestoreWrite(task) {
+        const run = async () => {
+            while (Date.now() < _fsWritePausedUntil) {
+                await new Promise((r) => setTimeout(r, Math.min(1000, Math.max(50, _fsWritePausedUntil - Date.now()))));
+            }
+            return task();
+        };
+        const p = _fsWriteChain.then(run, run);
+        _fsWriteChain = p.then(() => undefined, () => undefined);
+        return p;
+    }
+
     async function writeChunkedPdfToDocRef(docRef, pdfDataUrl, extraFields) {
         const payload = String(pdfDataUrl);
         const base = { ...(extraFields || {}), updatedAt: firebase.firestore.FieldValue.serverTimestamp() };
+        const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
         if (payload.length <= PDF_CLOUD_CHUNK_CHARS) {
-            await docRef.set({ ...base, dataUrl: payload, chunked: false, chunkCount: 0, writeId: null });
-            try {
-                const oldParts = await docRef.collection('parts').get();
-                if (!oldParts.empty) {
-                    let delBatch = db.batch();
-                    let delCount = 0;
-                    for (const d of oldParts.docs) {
-                        delBatch.delete(d.ref);
-                        delCount++;
-                        if (delCount >= 400) {
-                            await delBatch.commit();
-                            delBatch = db.batch();
-                            delCount = 0;
-                        }
-                    }
-                    if (delCount > 0) await delBatch.commit();
-                }
-            } catch (e) {
-                console.warn('청크 parts 정리 경고:', docRef.path, e);
-            }
+            await enqueueFirestoreWrite(() =>
+                docRef.set({ ...base, dataUrl: payload, chunked: false, chunkCount: 0, writeId: null })
+            );
+            // 고아 parts 정리는 즉시 하지 않고 여유 있을 때 (write stream 보호)
+            scheduleChunkPartsCleanup(docRef, null);
             return;
         }
         const parts = [];
         for (let i = 0; i < payload.length; i += PDF_CLOUD_CHUNK_CHARS) {
             parts.push(payload.slice(i, i + PDF_CLOUD_CHUNK_CHARS));
         }
-        // 레이스 방지: 기존 parts를 먼저 지우지 않음.
-        // 새 writeId parts를 모두 쓴 뒤 부모를 전환하고, 이전/고아만 삭제.
         const writeId = `w_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
-        const PARTS_PER_BATCH = 6;
+        // 배치를 크게, 커밋 사이 간격을 두어 queued writes 폭주 방지
+        const PARTS_PER_BATCH = 20;
         for (let start = 0; start < parts.length; start += PARTS_PER_BATCH) {
-            const batch = db.batch();
             const end = Math.min(start + PARTS_PER_BATCH, parts.length);
-            for (let i = start; i < end; i++) {
-                batch.set(docRef.collection('parts').doc(`${writeId}_${i}`), { data: parts[i], writeId, index: i });
-            }
-            await batch.commit();
-        }
-        await docRef.set({
-            ...base,
-            chunked: true,
-            chunkCount: parts.length,
-            writeId,
-            dataUrl: firebase.firestore.FieldValue.delete()
-        }, { merge: true });
-        try {
-            const oldParts = await docRef.collection('parts').get();
-            if (!oldParts.empty) {
-                let delBatch = db.batch();
-                let delCount = 0;
-                for (const d of oldParts.docs) {
-                    const id = String(d.id || '');
-                    if (id.startsWith(writeId + '_')) continue;
-                    delBatch.delete(d.ref);
-                    delCount++;
-                    if (delCount >= 400) {
-                        await delBatch.commit();
-                        delBatch = db.batch();
-                        delCount = 0;
-                    }
+            await enqueueFirestoreWrite(async () => {
+                const batch = db.batch();
+                for (let i = start; i < end; i++) {
+                    batch.set(docRef.collection('parts').doc(`${writeId}_${i}`), { data: parts[i], writeId, index: i });
                 }
-                if (delCount > 0) await delBatch.commit();
+                await batch.commit();
+            });
+            if (end < parts.length) await sleep(80);
+        }
+        await enqueueFirestoreWrite(() =>
+            docRef.set({
+                ...base,
+                chunked: true,
+                chunkCount: parts.length,
+                writeId,
+                dataUrl: firebase.firestore.FieldValue.delete()
+            }, { merge: true })
+        );
+        scheduleChunkPartsCleanup(docRef, writeId);
+    }
+
+    const _chunkCleanupTimers = new Map();
+    function scheduleChunkPartsCleanup(docRef, keepWriteId) {
+        const key = (docRef && docRef.path) ? String(docRef.path) : String(docRef);
+        const prev = _chunkCleanupTimers.get(key);
+        if (prev) clearTimeout(prev);
+        const timer = setTimeout(() => {
+            _chunkCleanupTimers.delete(key);
+            cleanupChunkPartsDeferred(docRef, keepWriteId).catch((e) =>
+                console.warn('청크 parts 정리 경고:', docRef.path, e)
+            );
+        }, 8000);
+        _chunkCleanupTimers.set(key, timer);
+    }
+
+    async function cleanupChunkPartsDeferred(docRef, keepWriteId) {
+        if (!db) return;
+        if (Date.now() < _fsWritePausedUntil) {
+            scheduleChunkPartsCleanup(docRef, keepWriteId);
+            return;
+        }
+        const oldParts = await docRef.collection('parts').get();
+        if (oldParts.empty) return;
+        const toDelete = oldParts.docs.filter((d) => {
+            const id = String(d.id || '');
+            if (keepWriteId) return !id.startsWith(keepWriteId + '_');
+            return true; // non-chunked parent: drop all parts
+        });
+        const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+        for (let i = 0; i < toDelete.length; i += 40) {
+            if (Date.now() < _fsWritePausedUntil) {
+                scheduleChunkPartsCleanup(docRef, keepWriteId);
+                return;
             }
-        } catch (e) {
-            console.warn('청크 parts 정리 경고:', docRef.path, e);
+            const slice = toDelete.slice(i, i + 40);
+            await enqueueFirestoreWrite(async () => {
+                const batch = db.batch();
+                slice.forEach((d) => batch.delete(d.ref));
+                await batch.commit();
+            });
+            await sleep(120);
         }
     }
 
@@ -39416,19 +39453,32 @@ document.addEventListener('DOMContentLoaded', () => {
             ? db.collection('safety_app').doc(getCompanyDocId()).collection('photos')
             : null;
         let failCount = 0;
-        const jobs = [];
+        const localJobs = [];
+        const cloudIds = [];
         for (let i = 0; i < count; i++) {
             const photoDocId = getPhotoDocId(defectId, i, kind);
             _idbPersistedPhotoKeys.delete(photoDocId);
-            jobs.push(idbDelete('photos', photoDocId));
-            if (companyPhotos) {
-                jobs.push(companyPhotos.doc(photoDocId).delete().catch(e => {
-                    failCount++;
-                    console.warn(`사진 삭제 실패 (${photoDocId}):`, e);
-                }));
-            }
+            if (window._cloudSyncedPhotoIds) window._cloudSyncedPhotoIds.delete(photoDocId);
+            localJobs.push(idbDelete('photos', photoDocId));
+            if (companyPhotos) cloudIds.push(photoDocId);
         }
-        await Promise.all(jobs);
+        await Promise.all(localJobs);
+        // 클라우드 삭제는 직렬 소배치 — Write stream exhausted 방지
+        for (let i = 0; i < cloudIds.length; i++) {
+            const photoDocId = cloudIds[i];
+            try {
+                await enqueueFirestoreWrite(() => companyPhotos.doc(photoDocId).delete());
+            } catch (e) {
+                failCount++;
+                console.warn(`사진 클라우드 삭제 실패 (${photoDocId}):`, e);
+                if (typeof isFirestoreQuotaError === 'function' && isFirestoreQuotaError(e)) {
+                    pauseFirestoreWrites(SYNC_QUOTA_COOLDOWN_MS);
+                    // 나머지는 나중에 — 로컬은 이미 지워짐
+                    break;
+                }
+            }
+            if (i > 0 && i % 5 === 0) await new Promise((r) => setTimeout(r, 50));
+        }
         return failCount;
     }
 
@@ -40262,6 +40312,7 @@ document.addEventListener('DOMContentLoaded', () => {
         } catch (e) {
             console.warn('Firebase Sync Error:', e);
             _syncPending = false;
+            if (isFirestoreQuotaError(e)) pauseFirestoreWrites(SYNC_QUOTA_COOLDOWN_MS);
             const now = Date.now();
             if (now - _syncErrorToastAt >= SYNC_ERROR_TOAST_COOLDOWN_MS) {
                 _syncErrorToastAt = now;
@@ -40289,7 +40340,11 @@ document.addEventListener('DOMContentLoaded', () => {
             _syncInFlight = false;
             if (_syncPending && !_syncRetryTimer) {
                 _syncPending = false;
-                syncStateToFirebase();
+                if (typeof _fsWritePausedUntil === 'number' && Date.now() < _fsWritePausedUntil) {
+                    scheduleSyncRetryAfterError({ code: 'resource-exhausted', message: 'Write stream cooling down' });
+                } else {
+                    syncStateToFirebase();
+                }
             } else if (!_syncPending && !_syncRetryTimer && typeof scheduleFlushPendingRemoteSync === 'function') {
                 scheduleFlushPendingRemoteSync();
             }
