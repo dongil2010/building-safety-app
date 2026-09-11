@@ -3062,6 +3062,97 @@ document.addEventListener('DOMContentLoaded', () => {
         return defects;
     }
 
+    
+    /**
+     * 마킹번호 빈 칸 땡기기: [min..max] 중 가장 작은 빈 번호로
+     * 가장 큰 메인 번호를 옮기며 연속 구간이 될 때까지 반복.
+     * CAD 가져오기 번호(isCadImported)도 포함. 그룹은 메인 1개로 취급.
+     * @returns {{ moved: number, before: string, after: string }|null}
+     */
+    function compactDefectMarkingNumberGaps(defects) {
+        if (!Array.isArray(defects) || !defects.length) return null;
+
+        const getMain = (d) => {
+            const raw = stripDefectNoSuffix(d.groupNo || d.no || '');
+            const m = String(raw).replace(/^NO\.?\s*/i, '').trim().match(/(\d+)/);
+            return m ? parseInt(m[1], 10) : 0;
+        };
+
+        const buildUnits = () => {
+            const units = [];
+            const seenGroup = new Set();
+            defects.forEach((d) => {
+                if (!d || d.surveyExtra) return;
+                const gid = d.groupId || null;
+                if (gid) {
+                    if (seenGroup.has(gid)) return;
+                    seenGroup.add(gid);
+                    const members = defects.filter((m) => m && m.groupId === gid);
+                    units.push({ kind: 'group', groupId: gid, main: getMain(d), members });
+                } else {
+                    units.push({ kind: 'single', id: d.id, main: getMain(d), defect: d });
+                }
+            });
+            return units.filter((u) => u.main > 0);
+        };
+
+        let units = buildUnits();
+        if (units.length < 2) return null;
+
+        const mainsBefore = units.map((u) => u.main).sort((a, b) => a - b);
+        const beforeStr = mainsBefore.join(', ');
+
+        let moved = 0;
+        const maxSteps = units.length * 4 + 20;
+        for (let step = 0; step < maxSteps; step++) {
+            units = buildUnits();
+            const mains = [...new Set(units.map((u) => u.main))].sort((a, b) => a - b);
+            if (mains.length < 2) break;
+            const minM = mains[0];
+            const maxM = mains[mains.length - 1];
+            let gap = null;
+            for (let n = minM; n <= maxM; n++) {
+                if (!mains.includes(n)) { gap = n; break; }
+            }
+            if (gap == null) break;
+
+            // 가장 큰 메인 번호를 가진 유닛 (동률이면 id/groupId 큰 쪽)
+            const topMain = maxM;
+            const candidates = units.filter((u) => u.main === topMain);
+            if (!candidates.length || topMain <= gap) break;
+            candidates.sort((a, b) => {
+                const ka = a.groupId || a.id || '';
+                const kb = b.groupId || b.id || '';
+                return String(kb).localeCompare(String(ka));
+            });
+            const victim = candidates[0];
+            const baseStr = formatDefectNoSeq(gap);
+            const now = Date.now();
+
+            if (victim.kind === 'group') {
+                victim.members.forEach((m) => { m.groupNo = baseStr; });
+                applyDefectGroupNumbering(victim.members, baseStr, (m, nextNo) => {
+                    const prev = String(m.no || '');
+                    m.no = nextNo;
+                    if (prev !== String(nextNo || '')) m.updatedAt = now;
+                });
+            } else if (victim.defect) {
+                const prev = String(victim.defect.no || '');
+                victim.defect.no = baseStr;
+                if (victim.defect.groupNo) victim.defect.groupNo = baseStr;
+                if (prev !== baseStr) victim.defect.updatedAt = now;
+            }
+            moved += 1;
+        }
+
+        units = buildUnits();
+        const afterStr = units.map((u) => u.main).sort((a, b) => a - b).join(', ');
+        if (!moved) return { moved: 0, before: beforeStr, after: afterStr };
+        return { moved, before: beforeStr, after: afterStr };
+    }
+
+    window.compactDefectMarkingNumberGaps = compactDefectMarkingNumberGaps;
+
     function renumberDefectsForFloorKey(floorKey) {
         if (!floorKey || !window.state.defects?.[floorKey]) return;
         renumberFloorDefects(window.state.defects[floorKey], { preserveOrder: false });
@@ -27834,6 +27925,37 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const btnImportCadPins = document.getElementById('btnImportCadPins');
     const inputImportCadPins = document.getElementById('inputImportCadPins');
+    
+    const btnCompactMarkingGaps = document.getElementById('btnCompactMarkingGaps');
+    if (btnCompactMarkingGaps) {
+        btnCompactMarkingGaps.addEventListener('click', () => {
+            const key = `${state.currentBuildingId}_${state.currentFloor}`;
+            const list = (state.defects && state.defects[key]) || [];
+            if (!list.length) {
+                if (typeof window.showToast === 'function') window.showToast('현재 층에 마킹이 없습니다.', 'warning');
+                return;
+            }
+            if (!window.confirm('현재 층의 마킹번호 빈 칸을 뒤에서부터 앞으로 땡길까요?\n(예: 14,15,17,18 → 14,15,16,17)')) return;
+            if (typeof pushDefectHistory === 'function') pushDefectHistory();
+            const result = compactDefectMarkingNumberGaps(list);
+            if (!result || !result.moved) {
+                if (typeof window.showToast === 'function') window.showToast('채울 빈 번호가 없습니다.', 'info');
+                return;
+            }
+            saveStateToLocalStorage();
+            if (typeof renderSurveyTable === 'function') renderSurveyTable();
+            if (typeof drawCanvas === 'function') drawCanvas();
+            if (typeof updateMapSelectionBar === 'function') {
+                updateMapSelectionBar({ scrollToSelection: false });
+            } else if (typeof renderDefectListPanel === 'function') {
+                renderDefectListPanel();
+            }
+            if (typeof window.showToast === 'function') {
+                window.showToast(`마킹번호 ${result.moved}개 이동: ${result.before} → ${result.after}`, 'success', 4500);
+            }
+        });
+    }
+
     if (btnImportCadPins && inputImportCadPins) {
         btnImportCadPins.addEventListener('click', () => inputImportCadPins.click());
         inputImportCadPins.addEventListener('change', window.importCadPinsJson);
