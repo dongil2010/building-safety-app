@@ -14303,7 +14303,7 @@ html:not(.layout-desktop) #tab-map .defect-list-item-measure {
    Fixed UI ratio: rem/root ignore device font preferences
    ============================================================ */
 html {
-    font-size: 16px !important; /* rem baseline locked */
+    font-size: 14px !important; /* rem baseline locked (app scale down) */
     -webkit-text-size-adjust: 100% !important;
     text-size-adjust: 100% !important;
 }
@@ -14511,4 +14511,37 @@ html:not(.layout-desktop) #tab-map .defect-list-item-prev-photos i {
         font-size: 9px !important;
         padding: 0 3px !important;
     }
+}
+
+/* ============================================================
+   App UI scale down pass (on top of fontScale lock)
+   ============================================================ */
+html {
+    font-size: 14px !important;
+}
+
+html:not(.layout-desktop) #tab-map .defect-list-item-component {
+    font-size: 9px !important;
+}
+html:not(.layout-desktop) #tab-map .defect-list-item-type {
+    font-size: 8px !important;
+}
+html:not(.layout-desktop) #tab-map .defect-list-item-measure,
+html:not(.layout-desktop) #tab-map .defect-list-item-prev-photos,
+html:not(.layout-desktop) #tab-map .defect-list-item-prev-photos i {
+    font-size: 8px !important;
+}
+html:not(.layout-desktop) #tab-map .defect-badge-no {
+    min-width: 16px !important;
+    width: 16px !important;
+    height: 16px !important;
+    max-height: 16px !important;
+    flex-basis: 16px !important;
+    font-size: 7px !important;
+    line-height: 16px !important;
+}
+html:not(.layout-desktop) #tab-map .defect-summary-total,
+html:not(.layout-desktop) #tab-map .defect-summary-badge,
+html:not(.layout-desktop) #tab-map .defect-list-section-title {
+    font-size: 8px !important;
 }

@@ -56,13 +56,13 @@ public class MainActivity extends BridgeActivity {
             WebView webView = getBridge().getWebView();
             if (webView == null) return;
             WebSettings settings = webView.getSettings();
-            settings.setTextZoom(100);
+            settings.setTextZoom(85);
             settings.setMinimumFontSize(1);
             settings.setMinimumLogicalFontSize(1);
             // Re-assert after load; Pages content can inherit OEM text inflation.
             webView.post(() -> {
                 try {
-                    settings.setTextZoom(100);
+                    settings.setTextZoom(85);
                     webView.evaluateJavascript(
                         "(function(){try{document.documentElement.style.webkitTextSizeAdjust='100%';" +
                         "document.documentElement.style.textSizeAdjust='100%';" +
