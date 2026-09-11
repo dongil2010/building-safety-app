@@ -14298,3 +14298,78 @@ html:not(.layout-desktop) #tab-map .defect-list-item-measure {
         flex-basis: 16px !important;
     }
 }
+
+/* ============================================================
+   Fixed UI ratio: rem/root ignore device font preferences
+   ============================================================ */
+html {
+    font-size: 16px !important; /* rem baseline locked */
+    -webkit-text-size-adjust: 100% !important;
+    text-size-adjust: 100% !important;
+}
+body {
+    -webkit-text-size-adjust: 100% !important;
+    text-size-adjust: 100% !important;
+    text-rendering: geometricPrecision;
+}
+
+/* Target look: compact cards, badge top-left, content can be 2–3 lines */
+html:not(.layout-desktop) #tab-map .defect-list-item {
+    display: flex !important;
+    align-items: flex-start !important; /* badge top like reference shot */
+    padding: 6px 8px 6px 6px !important;
+    gap: 6px !important;
+    min-height: 0 !important;
+    height: auto !important;
+}
+
+html:not(.layout-desktop) #tab-map .defect-badge-no {
+    min-width: 22px !important;
+    width: 22px !important;
+    height: 22px !important;
+    max-height: 22px !important;
+    flex: 0 0 22px !important;
+    margin: 1px 0 0 0 !important;
+    padding: 0 !important;
+    font-size: 10px !important;
+    line-height: 22px !important;
+    align-self: flex-start !important;
+}
+
+html:not(.layout-desktop) #tab-map .defect-list-item-lines {
+    flex: 1 1 auto !important;
+    min-width: 0 !important;
+    gap: 2px !important;
+    line-height: 1.2 !important;
+    justify-content: flex-start !important;
+}
+
+html:not(.layout-desktop) #tab-map .defect-list-item-component {
+    font-size: 12px !important;
+    line-height: 1.2 !important;
+    font-weight: 800 !important;
+    white-space: normal !important;
+    overflow: visible !important;
+    text-overflow: unset !important;
+    word-break: keep-all !important;
+}
+
+html:not(.layout-desktop) #tab-map .defect-list-item-type {
+    font-size: 11px !important;
+    line-height: 1.2 !important;
+    white-space: normal !important;
+    overflow: visible !important;
+}
+
+html:not(.layout-desktop) #tab-map .defect-list-item-measure {
+    font-size: 10px !important;
+    line-height: 1.2 !important;
+    padding: 1px 5px !important;
+    white-space: nowrap !important;
+}
+
+html:not(.layout-desktop) #tab-map .defect-list-item-prev-photos {
+    font-size: 10px !important;
+    line-height: 1.2 !important;
+    margin-top: 1px !important;
+}
