@@ -36102,6 +36102,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (state.defects[key]) {
             pushDefectHistory();
             removeSingleDefectRecord(key, id);
+            if (typeof discardStalePendingRemoteAfterLocalPinEdit === 'function') discardStalePendingRemoteAfterLocalPinEdit();
             if (typeof selectedDefectIds !== 'undefined') {
                 selectedDefectIds.delete(id);
             }
@@ -36132,6 +36133,7 @@ document.addEventListener('DOMContentLoaded', () => {
             pushDefectHistory();
             const memberIds = state.defects[key].filter(d => d.groupId === groupId).map(d => d.id);
             memberIds.forEach(id => removeSingleDefectRecord(key, id, { skipRenumber: true }));
+            if (typeof discardStalePendingRemoteAfterLocalPinEdit === 'function') discardStalePendingRemoteAfterLocalPinEdit();
             renumberFloorDefects(state.defects[key], { preserveOrder: false });
             saveStateToLocalStorage();
             renderSurveyTable();
@@ -38616,20 +38618,59 @@ document.addEventListener('DOMContentLoaded', () => {
         const payload = String(pdfDataUrl);
         const base = { ...(extraFields || {}), updatedAt: firebase.firestore.FieldValue.serverTimestamp() };
         if (payload.length <= PDF_CLOUD_CHUNK_CHARS) {
-            await docRef.set({ ...base, dataUrl: payload, chunked: false, chunkCount: 0 });
+            await docRef.set({ ...base, dataUrl: payload, chunked: false, chunkCount: 0, writeId: null });
+            try {
+                const oldParts = await docRef.collection('parts').get();
+                if (!oldParts.empty) {
+                    let delBatch = db.batch();
+                    let delCount = 0;
+                    for (const d of oldParts.docs) {
+                        delBatch.delete(d.ref);
+                        delCount++;
+                        if (delCount >= 400) {
+                            await delBatch.commit();
+                            delBatch = db.batch();
+                            delCount = 0;
+                        }
+                    }
+                    if (delCount > 0) await delBatch.commit();
+                }
+            } catch (e) {
+                console.warn('청크 parts 정리 경고:', docRef.path, e);
+            }
             return;
         }
         const parts = [];
         for (let i = 0; i < payload.length; i += PDF_CLOUD_CHUNK_CHARS) {
             parts.push(payload.slice(i, i + PDF_CLOUD_CHUNK_CHARS));
         }
-        // 이전 조각 정리 (청크 수가 줄었을 때 잔여 parts 방지)
+        // 레이스 방지: 기존 parts를 먼저 지우지 않음.
+        // 새 writeId parts를 모두 쓴 뒤 부모를 전환하고, 이전/고아만 삭제.
+        const writeId = `w_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+        const PARTS_PER_BATCH = 6;
+        for (let start = 0; start < parts.length; start += PARTS_PER_BATCH) {
+            const batch = db.batch();
+            const end = Math.min(start + PARTS_PER_BATCH, parts.length);
+            for (let i = start; i < end; i++) {
+                batch.set(docRef.collection('parts').doc(`${writeId}_${i}`), { data: parts[i], writeId, index: i });
+            }
+            await batch.commit();
+        }
+        await docRef.set({
+            ...base,
+            chunked: true,
+            chunkCount: parts.length,
+            writeId,
+            dataUrl: firebase.firestore.FieldValue.delete()
+        }, { merge: true });
         try {
             const oldParts = await docRef.collection('parts').get();
             if (!oldParts.empty) {
                 let delBatch = db.batch();
                 let delCount = 0;
                 for (const d of oldParts.docs) {
+                    const id = String(d.id || '');
+                    if (id.startsWith(writeId + '_')) continue;
                     delBatch.delete(d.ref);
                     delCount++;
                     if (delCount >= 400) {
@@ -38641,18 +38682,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (delCount > 0) await delBatch.commit();
             }
         } catch (e) {
-            console.warn('청크 parts 정리 실패:', docRef.path, e);
-        }
-        await docRef.set({ ...base, chunked: true, chunkCount: parts.length });
-        // Firestore batch 10MB 한도 — 조각을 나눠 커밋 (한 번에 몰아넣으면 대용량 도면에서 hang)
-        const PARTS_PER_BATCH = 6;
-        for (let start = 0; start < parts.length; start += PARTS_PER_BATCH) {
-            const batch = db.batch();
-            const end = Math.min(start + PARTS_PER_BATCH, parts.length);
-            for (let i = start; i < end; i++) {
-                batch.set(docRef.collection('parts').doc(String(i)), { data: parts[i] });
-            }
-            await batch.commit();
+            console.warn('청크 parts 정리 경고:', docRef.path, e);
         }
     }
 
@@ -38667,8 +38697,6 @@ document.addEventListener('DOMContentLoaded', () => {
         if (data.chunked && chunkCount > 0) {
             const partsSnap = await docRef.collection('parts').get();
             if (partsSnap.empty) {
-                // writeChunkedPdfToDocRef가 부모 문서(chunked:true)를 먼저 쓰고 parts는 뒤이어
-                // 배치로 쓰기 때문에, 그 사이 타이밍에 읽으면 일시적으로 비어 보일 수 있다 — 한 번만 재시도.
                 if (!_retried) {
                     await new Promise((r) => setTimeout(r, 1000));
                     return readChunkedPdfFromDocRef(docRef, true);
@@ -38676,12 +38704,37 @@ document.addEventListener('DOMContentLoaded', () => {
                 console.warn('[PDF] chunked 문서인데 parts가 비어 있음:', docRef.path);
                 return null;
             }
-            const joined = partsSnap.docs
-                .sort((a, b) => Number(a.id) - Number(b.id))
+            const writeId = data.writeId ? String(data.writeId) : null;
+            let docs = partsSnap.docs.slice();
+            if (writeId) {
+                docs = docs.filter((d) => String(d.id || '').startsWith(writeId + '_'));
+                docs.sort((a, b) => {
+                    const ia = Number(a.data()?.index);
+                    const ib = Number(b.data()?.index);
+                    if (Number.isFinite(ia) && Number.isFinite(ib)) return ia - ib;
+                    const na = Number(String(a.id).slice(writeId.length + 1));
+                    const nb = Number(String(b.id).slice(writeId.length + 1));
+                    return na - nb;
+                });
+            } else {
+                docs = docs
+                    .filter((d) => /^\d+$/.test(String(d.id || '')))
+                    .sort((a, b) => Number(a.id) - Number(b.id));
+            }
+            if (docs.length < chunkCount) {
+                if (!_retried) {
+                    await new Promise((r) => setTimeout(r, 1000));
+                    return readChunkedPdfFromDocRef(docRef, true);
+                }
+                console.warn('[PDF] parts 불완전:', docRef.path, docs.length, '/', chunkCount);
+                return null;
+            }
+            const joined = docs
+                .slice(0, chunkCount)
                 .map((d) => (d.data() && d.data().data) || '')
                 .join('');
             if (joined.length > 32) return joined;
-            console.warn('[PDF] parts 조립 결과가 비어 있음:', docRef.path);
+            console.warn('[PDF] parts 합쳐도 내용이 비어 있음:', docRef.path);
             return null;
         }
         return null;
@@ -38700,14 +38753,26 @@ document.addEventListener('DOMContentLoaded', () => {
         await writeChunkedPdfToDocRef(getBulkSyncDocRef(), json);
     }
 
+    async function fetchBulkSyncDataReliable(maxAttempts = 4) {
+        let last = null;
+        for (let i = 0; i < maxAttempts; i++) {
+            last = await fetchBulkSyncData();
+            if (last) return last;
+            await new Promise((r) => setTimeout(r, 400 * (i + 1)));
+        }
+        return last || {};
+    }
+
     async function fetchBulkSyncData() {
-        if (!db || !window.state.companyId) return {};
+        if (!db || !window.state.companyId) return null;
         try {
             const json = await readChunkedPdfFromDocRef(getBulkSyncDocRef());
-            return json ? JSON.parse(json) : {};
+            if (json == null) return null;
+            if (!json) return {};
+            return JSON.parse(json);
         } catch (e) {
             console.warn('결함/NDT 데이터(bulkData) 조회 실패:', e);
-            return {};
+            return null;
         }
     }
 
@@ -40010,7 +40075,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
             const snap = await fetchCompanyDocSnap(docRef);
             let serverData = snap.exists ? snap.data() : {};
-            Object.assign(serverData, await fetchBulkSyncData());
+            Object.assign(serverData, await fetchBulkSyncDataReliable());
 
             let mergedDeletedBuildings = mergeDeletedBuildingIds(
                 serverData.deletedBuildingIds,
@@ -40069,7 +40134,7 @@ document.addEventListener('DOMContentLoaded', () => {
             // 쓰기 직전 서버 재조회 후 재병합 (잠금 덕에 동료 중간 쓰기는 거의 없지만 안전망)
             const snapFresh = await fetchCompanyDocSnap(docRef);
             serverData = snapFresh.exists ? snapFresh.data() : {};
-            Object.assign(serverData, await fetchBulkSyncData());
+            Object.assign(serverData, await fetchBulkSyncDataReliable());
             mergedDeletedBuildings = mergeDeletedBuildingIds(
                 serverData.deletedBuildingIds,
                 window.state.deletedBuildingIds
@@ -40237,6 +40302,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let _listenerNeedsResubscribe = false;
     let _lastRootSnapshotData = {};
     let _lastBulkSnapshotData = {};
+    let _bulkHydratedOnce = false;
 
     /** 로그인 직후 서버 문서를 한 번 강제로 읽어 팀원 NDT·결함 데이터를 즉시 반영 */
     async function pullCompanySnapshotOnce() {
@@ -40285,8 +40351,18 @@ document.addEventListener('DOMContentLoaded', () => {
         // 각각 구독해서 최신값을 합쳐 적용한다 (한쪽만 바뀌어도 최신 상태를 유지해야 함).
         const applyCombinedSnapshot = async () => {
             if (typeof updateOnlineBadge === 'function') updateOnlineBadge(true);
-            const data = { ..._lastRootSnapshotData, ..._lastBulkSnapshotData };
-            if (!Object.keys(data).length) return;
+            // 루트에 남아 있는 구버전 defects/ndt 필드가 bulk 실패 시 되살아나지 않게,
+            // 결함/NDT 계열은 bulk 스냅샷만 신뢰한다.
+            const data = { ..._lastRootSnapshotData };
+            const bulk = _lastBulkSnapshotData || {};
+            const BULK_KEYS = [
+                'defects', 'deletedDefectIds', 'deletedDefectAt',
+                'ndtData', 'deletedNdtIds', 'deletedNdtAt',
+                'ndtDisplacementGroups'
+            ];
+            BULK_KEYS.forEach((k) => { delete data[k]; });
+            Object.assign(data, bulk);
+            if (!Object.keys(data).length && !Object.keys(bulk).length) return;
             if (_syncInFlight) {
                 _pendingRemoteData = data;
                 return;
@@ -40305,10 +40381,23 @@ document.addEventListener('DOMContentLoaded', () => {
 
         currentBulkUnsubscribe = getBulkSyncDocRef().onSnapshot(async (doc) => {
             if (!doc || !doc.exists) {
-                _lastBulkSnapshotData = {};
+                // bulk 문서가 아직 없으면 레거시(루트)만 사용 — 빈 객체로 지우지 않음
+                if (!_bulkHydratedOnce) {
+                    // 최초 이전이면 루트 defects를 임시 허용하기 위해 플래그만
+                    _lastBulkSnapshotData = {};
+                    _bulkHydratedOnce = true;
+                    await applyCombinedSnapshot();
+                }
                 return;
             }
-            _lastBulkSnapshotData = await fetchBulkSyncData();
+            const bulkData = await fetchBulkSyncData();
+            if (bulkData == null) {
+                // 불완전/실패: 마지막 정상 bulk 유지, 적용 스킵
+                console.warn('bulkData 불완전 읽기 — 이전 스냅샷 유지');
+                return;
+            }
+            _lastBulkSnapshotData = bulkData;
+            _bulkHydratedOnce = true;
             await applyCombinedSnapshot();
         }, onListenerErr);
     }
