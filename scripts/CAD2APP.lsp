@@ -1,7 +1,8 @@
 ﻿;;; =========================================================================
 ;;;  CAD to Smart Safety App - 결함위치도 2점 정밀 캘리브레이션 추출기
-;;;  버전: v2.11 (v2.10 + 원 없이 리더/라인으로 추측한 항목을 텍스트 주황색으로 표시 +
-;;;              완료 메시지에 대상 번호 목록 안내 추가)
+;;;  버전: v2.13 (v2.12 + 결함 도면층 자동감지 추가 — NO./# 로 확실히 판별된 결함번호가
+;;;              가장 많이 모인 도면층을 자동으로 찾아서, 그 도면층 안에서는 NO./# 없는
+;;;              순수 숫자("3","4" 등)도 결함번호로 인정. NO./# 안전장치는 그대로 유지)
 ;;; =========================================================================
 
 ;; MTEXT 서식 제거 함수 ({\fGulim...;NO.01} -> NO.01)
@@ -80,9 +81,13 @@
     ((vl-string-search "적색" upper) nil)
     ((vl-string-search "청색" upper) nil)
     ((vl-string-search "주차장" upper) nil)
-    ;; NO. 또는 숫자가 포함된 경우 결함 번호로 인정
+    ;; NO. 또는 리터럴 # 문자가 포함된 경우만 결함 번호로 인정.
+    ;; (주의: wcmatch에서 # 는 "숫자 한 글자" 와일드카드라서 "*#*"는 "숫자가 하나라도
+    ;;  있으면 매치"가 되어버림 — 리터럴 # 을 매치하려면 반드시 `# 로 이스케이프해야 함.
+    ;;  이 버그 때문에 "소그룹실3" 같은 방 이름/그리드좌표/치수 텍스트가 전부 결함번호로
+    ;;  오인식되던 문제가 있었음, 2026-09-11 수정)
     ((wcmatch upper "*NO*") T)
-    ((wcmatch upper "*#*") T)
+    ((wcmatch upper "*`#*") T)
     (T nil)
   )
 )
@@ -95,10 +100,11 @@
                      remainLines cAnchor
                      pairList idxT idxC ti ci usedTextIdx usedCircleIdx
                      circleAssign pr assigned usedLineIdx circleLineAssign boxInfo
-                     isDupCircle existC dupCircleCount txtEnt uncertainList uncertainMsg n )
+                     isDupCircle existC dupCircleCount txtEnt uncertainList uncertainMsg n
+                     textCandidates layerVotes layerName existing detectedLayer bestCount tc )
   (vl-load-com)
   (princ "\n=======================================================")
-  (princ "\n  [CAD2APP v2.11] 스마트 안전점검 - 결함 번호/지시선 정밀 추출기")
+  (princ "\n  [CAD2APP v2.13] 스마트 안전점검 - 결함 번호/지시선 정밀 추출기")
   (princ "\n=======================================================")
 
   ;; 1. 기준점 2개 지정
@@ -130,6 +136,8 @@
   (setq jsonList '())
   (setq dupCircleCount 0)
   (setq uncertainList '())
+  (setq textCandidates '())
+  (setq layerVotes '())
   (setq i 0)
 
   ;; 3. 객체 분류
@@ -156,12 +164,29 @@
       )
 
       ;; (B) TEXT / MTEXT
+      ;; "NO."/# 표기가 없는 순수 숫자 결함번호도 잡을 수 있도록, 일단 도면층 이름과 함께
+      ;; 후보 목록에만 담아두고(textCandidates), 최종 채택 여부는 전체 분류가 끝난 뒤
+      ;; "결함 도면층 자동감지" 결과를 반영해서 한꺼번에 결정한다 (아래 3-1 단계).
       ((or (= entType "TEXT") (= entType "MTEXT"))
        (setq rawNo (cdr (assoc 1 dxf)))
        (setq cleanNo (cleanMText rawNo))
        (setq boxPt (cdr (assoc 10 dxf)))
-       (if (and (isDefectText cleanNo) boxPt)
-         (setq textList (cons (list cleanNo (list (car boxPt) (cadr boxPt)) ent) textList))
+       (setq layerName (cdr (assoc 8 dxf)))
+       (if boxPt
+         (progn
+           (setq textCandidates (cons (list cleanNo (list (car boxPt) (cadr boxPt)) ent layerName) textCandidates))
+           ;; NO./# 로 이미 확실하게 결함번호로 판별된 텍스트의 도면층에만 투표한다
+           ;; (엉뚱한 도면층이 결함층으로 오인되지 않도록, "확실한" 표본만 사용)
+           (if (isDefectText cleanNo)
+             (progn
+               (setq existing (assoc layerName layerVotes))
+               (if existing
+                 (setq layerVotes (subst (cons layerName (1+ (cdr existing))) existing layerVotes))
+                 (setq layerVotes (cons (cons layerName 1) layerVotes))
+               )
+             )
+           )
+         )
        )
       )
 
@@ -217,6 +242,31 @@
       )
     )
     (setq i (1+ i))
+  )
+
+  ;; 3-1. 결함 도면층 자동감지: NO./# 로 확실히 결함번호로 판별된 텍스트들이 가장 많이
+  ;;    모여있는 도면층을 "결함 도면층"으로 자동 채택한다. 이 도면층에 있는 텍스트는
+  ;;    NO./# 표기가 없는 순수 숫자("3","4" 등)여도 결함번호로 인정한다.
+  ;;    (NO./# 조건은 안전장치로 계속 유지 — 결함 도면층이 아니어도 NO./# 표기가 있으면 인정)
+  (setq detectedLayer nil)
+  (setq bestCount 0)
+  (foreach pr layerVotes
+    (if (> (cdr pr) bestCount)
+      (progn (setq bestCount (cdr pr)) (setq detectedLayer (car pr)))
+    )
+  )
+  (if detectedLayer
+    (princ (strcat "\n[결함 도면층 자동감지] \"" detectedLayer "\" 도면층 - 이 층의 텍스트는 순수 숫자여도 결함번호로 인정합니다."))
+    (princ "\n[결함 도면층 자동감지] NO./# 표기 결함번호를 찾지 못해 도면층 자동감지를 건너뜁니다.")
+  )
+  (foreach tc textCandidates
+    (setq cleanNo (nth 0 tc))
+    (setq boxPt (nth 1 tc))
+    (setq txtEnt (nth 2 tc))
+    (setq layerName (nth 3 tc))
+    (if (or (isDefectText cleanNo) (and detectedLayer (= layerName detectedLayer)))
+      (setq textList (cons (list cleanNo boxPt txtEnt) textList))
+    )
   )
 
   ;; 4. 원(CIRCLE) 각각에 대해, 그 원에 실제로(딱 붙어서) 연결된 지시선 "한 구간만" 따라가서
@@ -338,7 +388,7 @@
   (setq f (open outPath "w"))
   (write-line "{" f)
   (write-line "  \"source\": \"AutoCAD\"," f)
-  (write-line "  \"version\": \"2.11_uncertain_flagged\"," f)
+  (write-line "  \"version\": \"2.13_layer_autodetect\"," f)
   (write-line "  \"refPoint1\": {" f)
   (write-line (strcat "    \"x\": " (rtos (car pt1) 2 4) ",") f)
   (write-line (strcat "    \"y\": " (rtos (cadr pt1) 2 4)) f)
@@ -393,9 +443,9 @@
     )
     uncertainMsg
   ))
-  (princ (strcat "\n[CAD2APP v2.11] 추출 완료! 파일 경로: " outPath "\n"))
+  (princ (strcat "\n[CAD2APP v2.13] 추출 완료! 파일 경로: " outPath "\n"))
   (princ)
 )
 
-(princ "\n[CAD2APP v2.11] 로드 완료. 캐드 명령창에 CAD2APP 을 입력하세요.\n")
+(princ "\n[CAD2APP v2.13] 로드 완료. 캐드 명령창에 CAD2APP 을 입력하세요.\n")
 (princ)
