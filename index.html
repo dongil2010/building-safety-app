@@ -2,7 +2,7 @@
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" id="viewportMeta">
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" id="viewportMeta">
     <script>
     (function () {
         var ua = navigator.userAgent || '';
@@ -39,7 +39,7 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <meta name="apple-mobile-web-app-title" content="스마트 안전점검">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css">
-    <link rel="stylesheet" href="styles.css?v=20260910_180000">
+    <link rel="stylesheet" href="styles.css?v=20260911_165713">
     <!-- FontAwesome icons for clean engineering UI -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <!-- PDF 생성용: 페이지별로 직접 캡처해서 조립(큰 보고서에서 html2pdf 한방 렌더링이 캔버스 높이 한계로
@@ -369,13 +369,18 @@
                                 <i class="fa-solid fa-vector-square"></i>
                                 <span>영역</span>
                             </button>
+                            <button type="button" class="mobile-rail-btn mobile-rail-more-toggle" id="mobileBtnRailMore" title="추가 도구 보이기/숨기기" aria-expanded="false" aria-controls="mobileMapRailSecondary">
+                                <i class="fa-solid fa-ellipsis"></i>
+                                <span>더보기</span>
+                            </button>
+                            <div class="mobile-rail-secondary" id="mobileMapRailSecondary" hidden>
                             <button type="button" class="mobile-rail-btn" id="mobileBtnAreaInk" title="영역 내부 그리기 (영역을 선택한 뒤 사용)">
                                 <i class="fa-solid fa-pen"></i>
                                 <span>그리기</span>
                             </button>
                             <button type="button" class="mobile-rail-btn" id="mobileBtnQuickDrag" title="켜면 빈 곳 드래그로 결함 다중 선택 (핀·화살표 이동은 0.3초 길게 누름)" aria-pressed="false">
                                 <i class="fa-solid fa-square-dashed"></i>
-                                <span>선택</span>
+                                <span>박스</span>
                             </button>
                             <button type="button" class="mobile-rail-btn" id="mobileBtnAddSelect" title="켜면 터치마다 선택 추가/해제" aria-pressed="false">
                                 <i class="fa-solid fa-object-ungroup"></i>
@@ -385,6 +390,7 @@
                                 <i class="fa-solid fa-magnet"></i>
                                 <span>스냅</span>
                             </button>
+                            </div>
                         </aside>
 
                         <!-- Bottom Icon Toolbar (PC: 도면 안 하단 오버레이) -->
@@ -789,6 +795,11 @@
                         <i class="fa-solid fa-location-dot"></i>
                         <span>마킹</span>
                     </button>
+                    <button type="button" class="mobile-rail-btn mobile-rail-more-toggle" id="mobileNdtBtnRailMore" title="추가 도구 보이기/숨기기" aria-expanded="false" aria-controls="mobileNdtRailSecondary">
+                        <i class="fa-solid fa-ellipsis"></i>
+                        <span>더보기</span>
+                    </button>
+                    <div class="mobile-rail-secondary" id="mobileNdtRailSecondary" hidden>
                     <button type="button" class="mobile-rail-btn" id="mobileNdtBtnQuickDrag" title="켜면 빈 곳 드래그로 항목 다중 선택" aria-pressed="false">
                         <i class="fa-solid fa-square-dashed"></i>
                         <span>박스</span>
@@ -797,6 +808,7 @@
                         <i class="fa-solid fa-object-ungroup"></i>
                         <span>추가</span>
                     </button>
+                    </div>
                     <div class="ndt-rail-sep" aria-hidden="true"></div>
                     <button type="button" class="mobile-rail-btn ndt-disp-undo-btn" id="mobileNdtBtnUndoDisp" hidden title="마지막 부동침하/부재변위 마킹 되돌리기">
                         <i class="fa-solid fa-rotate-left"></i>
@@ -3095,24 +3107,24 @@
     </div>
 
     <!-- Core → 탭 분류 → 기존 엔진(app.js) -->
-    <script src="js/core/state.js?v=20260910_180000"></script>
-    <script src="js/tabs/registry.js?v=20260910_180000"></script>
-    <script src="js/pdf-vector-bridge.js?v=20260910_180000"></script>
-    <script src="js/pdf-vector-snap.js?v=20260910_180000"></script>
-    <script src="js/core/layout-mode.js?v=20260910_180000"></script>
-    <script src="js/core/performance.js?v=20260910_180000"></script>
-    <script src="js/core/mobile-keyboard.js?v=20260910_180000"></script>
-    <script src="js/tabs/home.js?v=20260910_180000"></script>
-    <script src="js/tabs/map.js?v=20260910_180000"></script>
-    <script src="js/tabs/survey.js?v=20260910_180000"></script>
-    <script src="js/tabs/stats.js?v=20260910_180000"></script>
-    <script src="js/tabs/ndt.js?v=20260910_180000"></script>
-    <script src="js/shared/report.js?v=20260910_180000"></script>
-    <script src="js/shared/hwpx-import.js?v=20260910_180000"></script>
-    <script src="js/shared/auth.js?v=20260910_180000"></script>
-    <script src="app.js?v=20260910_180000"></script>
+    <script src="js/core/state.js?v=20260911_165713"></script>
+    <script src="js/tabs/registry.js?v=20260911_165713"></script>
+    <script src="js/pdf-vector-bridge.js?v=20260911_165713"></script>
+    <script src="js/pdf-vector-snap.js?v=20260911_165713"></script>
+    <script src="js/core/layout-mode.js?v=20260911_165713"></script>
+    <script src="js/core/performance.js?v=20260911_165713"></script>
+    <script src="js/core/mobile-keyboard.js?v=20260911_165713"></script>
+    <script src="js/tabs/home.js?v=20260911_165713"></script>
+    <script src="js/tabs/map.js?v=20260911_165713"></script>
+    <script src="js/tabs/survey.js?v=20260911_165713"></script>
+    <script src="js/tabs/stats.js?v=20260911_165713"></script>
+    <script src="js/tabs/ndt.js?v=20260911_165713"></script>
+    <script src="js/shared/report.js?v=20260911_165713"></script>
+    <script src="js/shared/hwpx-import.js?v=20260911_165713"></script>
+    <script src="js/shared/auth.js?v=20260911_165713"></script>
+    <script src="app.js?v=20260911_165713"></script>
     <script>
-        window.BSA_APP_VERSION = '20260910_180000';
+        window.BSA_APP_VERSION = '20260911_165713';
         (function () {
             var el = document.getElementById('appVersionText');
             if (el && window.BSA_APP_VERSION) el.textContent = 'v' + window.BSA_APP_VERSION;
@@ -3136,7 +3148,7 @@
                     native = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
                 } catch (e) {}
                 if (native) return;
-                navigator.serviceWorker.register('./sw.js?v=20260910_180000')
+                navigator.serviceWorker.register('./sw.js?v=20260911_165713')
                     .then(function(registration) {
                         console.log('✅ ServiceWorker Registered Successfully with scope:', registration.scope);
                         registration.update();

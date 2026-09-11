@@ -26916,6 +26916,30 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    function bindMobileRailMoreToggle(toggleId, railId, storageKey) {
+        const btn = document.getElementById(toggleId);
+        const rail = document.getElementById(railId);
+        if (!btn || !rail || btn.dataset.railMoreBound) return;
+        btn.dataset.railMoreBound = '1';
+        const secondary = rail.querySelector('.mobile-rail-secondary') || document.getElementById(btn.getAttribute('aria-controls'));
+        if (!secondary) return;
+        const apply = (open) => {
+            rail.classList.toggle('is-rail-expanded', open);
+            secondary.hidden = !open;
+            btn.classList.toggle('active', open);
+            btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+            const label = btn.querySelector('span');
+            if (label) label.textContent = open ? '접기' : '더보기';
+            try { localStorage.setItem(storageKey, open ? '1' : '0'); } catch (_e) { /* ignore */ }
+        };
+        let startOpen = false;
+        try { startOpen = localStorage.getItem(storageKey) === '1'; } catch (_e) { startOpen = false; }
+        apply(startOpen);
+        btn.addEventListener('click', () => apply(!rail.classList.contains('is-rail-expanded')));
+    }
+    bindMobileRailMoreToggle('mobileBtnRailMore', 'mobileMapSideRail', 'bsa_map_rail_expanded');
+    bindMobileRailMoreToggle('mobileNdtBtnRailMore', 'mobileNdtSideRail', 'bsa_ndt_rail_expanded');
+
     const mobileBtnQuickDrag = document.getElementById('mobileBtnQuickDrag');
     if (mobileBtnQuickDrag) {
         mobileBtnQuickDrag.addEventListener('click', () => {
