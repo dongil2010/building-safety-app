@@ -9,7 +9,8 @@ rules_version = '2';
 //   companies/{companyId}/pendingRequests/{uid} → 가입 승인 대기
 //   companies/{companyId}/rejectedRequests/{uid}→ 가입 거절 이력
 //   joinCodes/{code}                            → 회사 검색·식별코드 조회용 (가입 전 미인증 상태에서도 읽기 가능)
-//   safety_app/{companyId}                      → 회사별 건물/결함 메타데이터 (실시간 동기화 대상)
+//   safety_app/{companyId}                      → 회사별 건물 목록/설정 메타데이터 (실시간 동기화 대상)
+//   safety_app/{companyId}/bulkData/defectsAndNdt → 결함/NDT 데이터(dataUrl 또는 parts 서브컬렉션) — 계속 쌓이는 데이터라 루트 문서 1MB 한도를 피하려고 분리
 //   safety_app/{companyId}/floorDrawings/{id}   → 층별 도면 이미지(dataUrl)
 //   safety_app/{companyId}/floorDrawingPdfs/{id} → 층별 PDF 원본(dataUrl 또는 parts 서브컬렉션)
 //   safety_app/{companyId}/siteDrawingVault/{siteKey}/floors/{floorCode} → 현장명 기준 PDF 보관함(건물 삭제 후에도 유지)
@@ -115,6 +116,15 @@ service cloud.firestore {
     // 해당 회사의 승인된 멤버(admin/member)만 읽고 쓸 수 있음
     match /safety_app/{companyId} {
       allow read, write: if isCompanyMember(companyId);
+
+      // 결함/NDT 데이터 — 루트 문서 1MB 한도를 피하려고 분리한 문서 (writeChunkedPdfToDocRef 재사용)
+      match /bulkData/{docId} {
+        allow read, write: if isCompanyMember(companyId);
+
+        match /parts/{partId} {
+          allow read, write: if isCompanyMember(companyId);
+        }
+      }
 
       match /floorDrawings/{docId} {
         allow read, write: if isCompanyMember(companyId);

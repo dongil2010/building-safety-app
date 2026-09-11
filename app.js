@@ -38534,7 +38534,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    async function readChunkedPdfFromDocRef(docRef) {
+    async function readChunkedPdfFromDocRef(docRef, _retried) {
         const snap = await docRef.get();
         if (!snap.exists) return null;
         const data = snap.data() || {};
@@ -38545,6 +38545,12 @@ document.addEventListener('DOMContentLoaded', () => {
         if (data.chunked && chunkCount > 0) {
             const partsSnap = await docRef.collection('parts').get();
             if (partsSnap.empty) {
+                // writeChunkedPdfToDocRef가 부모 문서(chunked:true)를 먼저 쓰고 parts는 뒤이어
+                // 배치로 쓰기 때문에, 그 사이 타이밍에 읽으면 일시적으로 비어 보일 수 있다 — 한 번만 재시도.
+                if (!_retried) {
+                    await new Promise((r) => setTimeout(r, 1000));
+                    return readChunkedPdfFromDocRef(docRef, true);
+                }
                 console.warn('[PDF] chunked 문서인데 parts가 비어 있음:', docRef.path);
                 return null;
             }
@@ -38557,6 +38563,30 @@ document.addEventListener('DOMContentLoaded', () => {
             return null;
         }
         return null;
+    }
+
+    function getBulkSyncDocRef() {
+        return db.collection('safety_app').doc(getCompanyDocId()).collection('bulkData').doc('defectsAndNdt');
+    }
+
+    /** 결함/NDT 데이터를 회사 루트 문서(safety_app/{companyId})와 분리된 별도 문서에 저장한다.
+        도면 PDF와 같은 청크 저장 방식을 재사용 — 결함이 계속 쌓이면 루트 문서 하나로는
+        Firestore 1MB 문서 한도에 걸리기 때문에 분리한다. */
+    async function writeBulkSyncData(fields) {
+        if (!db || !window.state.companyId) return;
+        const json = JSON.stringify(fields || {});
+        await writeChunkedPdfToDocRef(getBulkSyncDocRef(), json);
+    }
+
+    async function fetchBulkSyncData() {
+        if (!db || !window.state.companyId) return {};
+        try {
+            const json = await readChunkedPdfFromDocRef(getBulkSyncDocRef());
+            return json ? JSON.parse(json) : {};
+        } catch (e) {
+            console.warn('결함/NDT 데이터(bulkData) 조회 실패:', e);
+            return {};
+        }
     }
 
     async function uploadSiteVaultPdf(siteKey, floorCode, pdfDataUrl) {
@@ -39858,6 +39888,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
             const snap = await fetchCompanyDocSnap(docRef);
             let serverData = snap.exists ? snap.data() : {};
+            Object.assign(serverData, await fetchBulkSyncData());
 
             let mergedDeletedBuildings = mergeDeletedBuildingIds(
                 serverData.deletedBuildingIds,
@@ -39916,6 +39947,7 @@ document.addEventListener('DOMContentLoaded', () => {
             // 쓰기 직전 서버 재조회 후 재병합 (잠금 덕에 동료 중간 쓰기는 거의 없지만 안전망)
             const snapFresh = await fetchCompanyDocSnap(docRef);
             serverData = snapFresh.exists ? snapFresh.data() : {};
+            Object.assign(serverData, await fetchBulkSyncData());
             mergedDeletedBuildings = mergeDeletedBuildingIds(
                 serverData.deletedBuildingIds,
                 window.state.deletedBuildingIds
@@ -39975,16 +40007,32 @@ document.addEventListener('DOMContentLoaded', () => {
                     return meta;
                 });
 
-            const dataToSync = {
+            // 결함/NDT 데이터는 계속 쌓이면 회사 루트 문서 하나(1MB 한도)를 넘기므로
+            // 별도 문서(bulkData, 도면 PDF와 같은 청크 저장 방식 재사용)에 따로 쓴다.
+            const bulkFields = {
                 defects: sanitizeDefectsForFirestore(window.state.defects),
                 deletedDefectIds: defectMerge.deletedDefectIds,
                 deletedDefectAt: defectMerge.deletedDefectAt || {},
-                confirmedDeletedIds: {},
                 ndtData: window.state.ndtData || {},
                 deletedNdtIds: ndtMerge.deletedNdtIds,
                 deletedNdtAt: ndtMerge.deletedNdtAt || {},
+                ndtDisplacementGroups: window.state.ndtDisplacementGroups || {}
+            };
+            await writeBulkSyncData(bulkFields);
+
+            const dataToSync = {
+                // 예전 버전에서 루트 문서에 직접 쓰던 필드들 — bulkData로 이전했으니 루트에서는 제거
+                // (merge:true는 필드를 지우지 않으므로 FieldValue.delete()로 명시적으로 삭제해야
+                //  루트 문서 크기가 실제로 줄어든다)
+                defects: firebase.firestore.FieldValue.delete(),
+                deletedDefectIds: firebase.firestore.FieldValue.delete(),
+                deletedDefectAt: firebase.firestore.FieldValue.delete(),
+                ndtData: firebase.firestore.FieldValue.delete(),
+                deletedNdtIds: firebase.firestore.FieldValue.delete(),
+                deletedNdtAt: firebase.firestore.FieldValue.delete(),
+                ndtDisplacementGroups: firebase.firestore.FieldValue.delete(),
+                confirmedDeletedIds: {},
                 deletedBuildingIds: mergedDeletedBuildings,
-                ndtDisplacementGroups: window.state.ndtDisplacementGroups || {},
                 grids: window.state.grids || {},
                 buildings: sanitizedBuildings,
                 lastUsedBuildingId: window.state.currentBuildingId || null,
@@ -40063,7 +40111,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
 
     let currentUnsubscribe = null;
+    let currentBulkUnsubscribe = null;
     let _listenerNeedsResubscribe = false;
+    let _lastRootSnapshotData = {};
+    let _lastBulkSnapshotData = {};
 
     /** 로그인 직후 서버 문서를 한 번 강제로 읽어 팀원 NDT·결함 데이터를 즉시 반영 */
     async function pullCompanySnapshotOnce() {
@@ -40071,9 +40122,9 @@ document.addEventListener('DOMContentLoaded', () => {
         try {
             const docRef = db.collection('safety_app').doc(getCompanyDocId());
             const snap = await fetchCompanyDocSnap(docRef);
-            if (snap.exists) {
-                await applyRemoteSnapshotFromListener(snap.data());
-            }
+            const rootData = snap.exists ? snap.data() : {};
+            const bulkData = await fetchBulkSyncData();
+            await applyRemoteSnapshotFromListener({ ...rootData, ...bulkData });
         } catch (e) {
             console.warn('회사 데이터 초기 조회 실패:', e);
         }
@@ -40085,24 +40136,16 @@ document.addEventListener('DOMContentLoaded', () => {
             try { currentUnsubscribe(); } catch(e) {}
             currentUnsubscribe = null;
         }
+        if (currentBulkUnsubscribe) {
+            try { currentBulkUnsubscribe(); } catch(e) {}
+            currentBulkUnsubscribe = null;
+        }
         const docId = getCompanyDocId();
         _listenerNeedsResubscribe = false;
-        currentUnsubscribe = db.collection('safety_app').doc(docId).onSnapshot(async (doc) => {
-            if (typeof updateOnlineBadge === 'function') updateOnlineBadge(true);
-            if (doc && doc.exists) {
-                const data = doc.data();
-                if (!data) return;
-                if (_syncInFlight) {
-                    _pendingRemoteData = data;
-                    return;
-                }
-                if (isRealtimeUiGestureBusy()) {
-                    _pendingRemoteData = data;
-                    return;
-                }
-                await applyRemoteSnapshotFromListener(data);
-            }
-        }, (err) => {
+        _lastRootSnapshotData = {};
+        _lastBulkSnapshotData = {};
+
+        const onListenerErr = (err) => {
             console.warn('Realtime listener warning:', err);
             _listenerNeedsResubscribe = true;
             if (typeof updateOnlineBadge === 'function') updateOnlineBadge(false);
@@ -40114,7 +40157,38 @@ document.addEventListener('DOMContentLoaded', () => {
                     }
                 }, 1500);
             }
-        });
+        };
+
+        // 결함/NDT는 별도 문서(bulkData)에 저장되므로, 루트 문서와 bulkData 문서 두 곳을
+        // 각각 구독해서 최신값을 합쳐 적용한다 (한쪽만 바뀌어도 최신 상태를 유지해야 함).
+        const applyCombinedSnapshot = async () => {
+            if (typeof updateOnlineBadge === 'function') updateOnlineBadge(true);
+            const data = { ..._lastRootSnapshotData, ..._lastBulkSnapshotData };
+            if (!Object.keys(data).length) return;
+            if (_syncInFlight) {
+                _pendingRemoteData = data;
+                return;
+            }
+            if (isRealtimeUiGestureBusy()) {
+                _pendingRemoteData = data;
+                return;
+            }
+            await applyRemoteSnapshotFromListener(data);
+        };
+
+        currentUnsubscribe = db.collection('safety_app').doc(docId).onSnapshot(async (doc) => {
+            _lastRootSnapshotData = (doc && doc.exists && doc.data()) || {};
+            await applyCombinedSnapshot();
+        }, onListenerErr);
+
+        currentBulkUnsubscribe = getBulkSyncDocRef().onSnapshot(async (doc) => {
+            if (!doc || !doc.exists) {
+                _lastBulkSnapshotData = {};
+                return;
+            }
+            _lastBulkSnapshotData = await fetchBulkSyncData();
+            await applyCombinedSnapshot();
+        }, onListenerErr);
     }
 
     // ==========================================================================
@@ -40512,6 +40586,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!user) {
             if (window._deletingAccount) return;
             if (currentUnsubscribe) { try { currentUnsubscribe(); } catch (e) {} currentUnsubscribe = null; }
+            if (currentBulkUnsubscribe) { try { currentBulkUnsubscribe(); } catch (e) {} currentBulkUnsubscribe = null; }
             window.state.uid = null;
             window.state.userName = null;
             window.state.companyId = null;
@@ -40859,6 +40934,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 try { currentUnsubscribe(); } catch (e) { /* ignore */ }
                 currentUnsubscribe = null;
             }
+            if (currentBulkUnsubscribe) {
+                try { currentBulkUnsubscribe(); } catch (e) { /* ignore */ }
+                currentBulkUnsubscribe = null;
+            }
             await clearUserCompanyLinks(uid, companyId, { removeMember: true });
             window.state.companyId = null;
             window.state.companyName = null;
@@ -40999,6 +41078,10 @@ document.addEventListener('DOMContentLoaded', () => {
             if (currentUnsubscribe) {
                 try { currentUnsubscribe(); } catch (e) { /* ignore */ }
                 currentUnsubscribe = null;
+            }
+            if (currentBulkUnsubscribe) {
+                try { currentBulkUnsubscribe(); } catch (e) { /* ignore */ }
+                currentBulkUnsubscribe = null;
             }
 
             await cleanupUserFirestoreBeforeDelete(uid, companyId, pendingCompanyId);
