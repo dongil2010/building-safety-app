@@ -14373,3 +14373,142 @@ html:not(.layout-desktop) #tab-map .defect-list-item-prev-photos {
     line-height: 1.2 !important;
     margin-top: 1px !important;
 }
+
+/* ============================================================
+   Left defect cards denser: smaller type, less nested chip chrome
+   - Prefer 2-line wrap over clipping
+   - Shrink measure / prev-photo nested boxes that steal width
+   ============================================================ */
+html:not(.layout-desktop) #tab-map .inspect-sidebar-left {
+    padding: 0.16rem 0.18rem !important;
+    gap: 0.12rem !important;
+}
+
+html:not(.layout-desktop) #tab-map .defect-list-summary {
+    gap: 0.12rem !important;
+    margin-bottom: 0.1rem !important;
+}
+
+html:not(.layout-desktop) #tab-map .defect-summary-total,
+html:not(.layout-desktop) #tab-map .defect-summary-badge {
+    font-size: 9px !important;
+    padding: 1px 5px !important;
+    min-height: 0 !important;
+    line-height: 1.2 !important;
+}
+
+html:not(.layout-desktop) #tab-map .defect-list-panel {
+    padding: 0.06rem !important;
+    gap: 0.12rem !important;
+}
+
+html:not(.layout-desktop) #tab-map .defect-list-section-title {
+    font-size: 10px !important;
+    padding: 0.08rem 0.04rem !important;
+    margin: 0 !important;
+}
+
+html:not(.layout-desktop) #tab-map .defect-list-item {
+    padding: 4px 5px 4px 4px !important;
+    gap: 4px !important;
+    border-width: 1px !important;
+    align-items: flex-start !important;
+}
+
+html:not(.layout-desktop) #tab-map .defect-badge-no {
+    min-width: 18px !important;
+    width: 18px !important;
+    height: 18px !important;
+    max-height: 18px !important;
+    flex: 0 0 18px !important;
+    font-size: 8px !important;
+    line-height: 18px !important;
+    margin: 1px 0 0 0 !important;
+}
+
+html:not(.layout-desktop) #tab-map .defect-list-item-lines {
+    gap: 1px !important;
+    line-height: 1.15 !important;
+    min-width: 0 !important;
+    overflow: visible !important;
+}
+
+/* Main labels: allow up to 2 lines, no ellipsis cut-off */
+html:not(.layout-desktop) #tab-map .defect-list-item-component,
+html:not(.layout-desktop) #tab-map .defect-list-item-type {
+    display: -webkit-box !important;
+    -webkit-box-orient: vertical !important;
+    -webkit-line-clamp: 2 !important;
+    line-clamp: 2 !important;
+    white-space: normal !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    word-break: keep-all !important;
+    overflow-wrap: anywhere !important;
+    max-width: 100% !important;
+}
+
+html:not(.layout-desktop) #tab-map .defect-list-item-component {
+    font-size: 10px !important;
+    line-height: 1.18 !important;
+    font-weight: 800 !important;
+}
+
+html:not(.layout-desktop) #tab-map .defect-list-item-type {
+    font-size: 9px !important;
+    line-height: 1.18 !important;
+    font-weight: 600 !important;
+}
+
+/* Nested measure chip: less padding/border so text width wins */
+html:not(.layout-desktop) #tab-map .defect-list-item-measure {
+    display: inline-block !important;
+    max-width: 100% !important;
+    font-size: 9px !important;
+    line-height: 1.15 !important;
+    font-weight: 700 !important;
+    padding: 0 3px !important;
+    margin: 1px 0 0 0 !important;
+    border-width: 1px !important;
+    border-radius: 3px !important;
+    white-space: normal !important; /* allow wrap into 2 lines if long */
+    overflow-wrap: anywhere !important;
+    word-break: keep-all !important;
+    box-sizing: border-box !important;
+}
+
+/* Nested prev-photo chip: compact */
+html:not(.layout-desktop) #tab-map .defect-list-item-prev-photos {
+    display: inline-flex !important;
+    align-items: center !important;
+    gap: 2px !important;
+    max-width: 100% !important;
+    font-size: 8px !important;
+    line-height: 1.15 !important;
+    padding: 0 3px !important;
+    margin: 1px 0 0 0 !important;
+    border-radius: 3px !important;
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    box-sizing: border-box !important;
+}
+
+html:not(.layout-desktop) #tab-map .defect-list-item-prev-photos i {
+    font-size: 8px !important;
+    margin: 0 !important;
+}
+
+/* Landscape left rail often wider — still keep dense chips */
+@media (orientation: landscape) and (max-width: 1200px) {
+    html:not(.layout-desktop) #tab-map .defect-list-item-component {
+        font-size: 10px !important;
+    }
+    html:not(.layout-desktop) #tab-map .defect-list-item-type {
+        font-size: 9px !important;
+    }
+    html:not(.layout-desktop) #tab-map .defect-list-item-measure {
+        font-size: 9px !important;
+        padding: 0 3px !important;
+    }
+}
