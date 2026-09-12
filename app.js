@@ -4677,7 +4677,9 @@ document.addEventListener('DOMContentLoaded', () => {
             try {
                 // IndexedDB에만 남아 있는 층도 점검층 목록에 복구
                 const enriched = await enrichFloorsListFromIndexedDb(bldg);
-                if (enriched) populateFloorSelectDropdown(bldg);
+                // 반대로 로컬·클라우드 어디에도 실제 도면이 없는 유령 층은 정리
+                const pruned = await pruneGhostFloorEntries(bldg);
+                if (enriched || pruned) populateFloorSelectDropdown(bldg);
 
                 // 도면(현재 층)과 사진(현재 층)을 동시에 불러온다 — 예전엔 도면을 다 기다린
                 // 뒤에야 사진 로딩을 시작해서(그것도 건물 전체 층을 층마다 순서대로) 사진이
@@ -4885,6 +4887,74 @@ document.addEventListener('DOMContentLoaded', () => {
         bldg.drawingFloorCodes = Array.from(codeSet);
         bldg.floorsList = window.getBuildingAvailableFloors(bldg);
         return (bldg.floorsList || []).length > before;
+    }
+
+    /** 예전 삭제 버그 등으로 floorsList/drawingFloorCodes에만 남고 실제 도면은
+     * 로컬(RAM·IDB)에도 클라우드에도 전혀 없는 "유령 층"을 목록에서 제거한다.
+     * (점검층 드롭다운·도면 추가/교체 목록 둘 다 이 floorsList를 기준으로 그려짐) */
+    async function pruneGhostFloorEntries(bldg) {
+        if (!bldg || !bldg.id) return false;
+        const candidates = new Set();
+        (bldg.floorsList || []).forEach((f) => { if (f && f.floorCode) candidates.add(f.floorCode); });
+        (bldg.drawingFloorCodes || []).forEach((c) => { if (c) candidates.add(c); });
+        if (candidates.size === 0) return false;
+
+        const hasRamTrace = (fc) =>
+            !!((bldg.floorDrawings && bldg.floorDrawings[fc]) ||
+               (bldg.floorDrawingPdfs && bldg.floorDrawingPdfs[fc]) ||
+               (bldg.floorDrawingTiers && bldg.floorDrawingTiers[fc]) ||
+               (bldg.floorDrawingSources && bldg.floorDrawingSources[fc]));
+
+        const suspects = Array.from(candidates).filter((fc) => !hasRamTrace(fc));
+        if (suspects.length === 0) return false;
+
+        let idbFound;
+        try {
+            const prefix = `${bldg.id}_`;
+            idbFound = new Set();
+            const takeKeys = (keys) => {
+                (keys || []).forEach((key) => {
+                    if (!key || !String(key).startsWith(prefix)) return;
+                    const rest = String(key).slice(prefix.length);
+                    if (!rest) return;
+                    const tierSuffix = rest.match(/^(.*)_(4000|8000|16000)$/);
+                    idbFound.add(tierSuffix ? tierSuffix[1] : rest);
+                });
+            };
+            const [drawKeys, pdfKeys, srcKeys, tierKeys] = await Promise.all([
+                idbGetAllKeys('floorDrawings'),
+                idbGetAllKeys('floorDrawingPdfs'),
+                idbGetAllKeys('floorDrawingSources'),
+                idbGetAllKeys('floorDrawingTiers')
+            ]);
+            [drawKeys, pdfKeys, srcKeys, tierKeys].forEach(takeKeys);
+        } catch (e) {
+            return false; // IDB 조회 실패 시 안전하게 아무 것도 지우지 않음
+        }
+
+        const stillSuspect = suspects.filter((fc) => !idbFound.has(fc));
+        if (stillSuspect.length === 0) return false;
+
+        // 오프라인이거나 클라우드 조회가 안 되면, 아직 이 기기에 안 내려받았을 뿐일 수 있으니 보류
+        if (typeof navigator !== 'undefined' && navigator.onLine === false) return false;
+        if (!db || !window.state.companyId || typeof discoverCloudDrawingFloorCodes !== 'function') return false;
+
+        let cloudFound;
+        try {
+            cloudFound = await discoverCloudDrawingFloorCodes(bldg);
+        } catch (e) {
+            return false;
+        }
+
+        const ghosts = stillSuspect.filter((fc) => !cloudFound.has(fc));
+        if (ghosts.length === 0) return false;
+
+        bldg.floorsList = (bldg.floorsList || []).filter((f) => !ghosts.includes(f.floorCode));
+        if (Array.isArray(bldg.drawingFloorCodes)) {
+            bldg.drawingFloorCodes = bldg.drawingFloorCodes.filter((c) => !ghosts.includes(c));
+        }
+        console.info('유령 층 정리:', bldg.id, ghosts);
+        return true;
     }
 
     function populateFloorSelectDropdown(bldg) {
@@ -6742,15 +6812,24 @@ document.addEventListener('DOMContentLoaded', () => {
             const drawingKey = `${bldg.id}_${floorCode}`;
             _idbPersistedDrawingKeys.delete(drawingKey);
             _idbPersistedPdfKeys.delete(drawingKey);
+            _idbPersistedSourceKeys.delete(drawingKey);
             clearFloorDrawingTierCacheForFloor(bldg.id, floorCode, true);
             clearFloorDrawingRotation(bldg.id, floorCode);
             idbDelete('floorDrawings', drawingKey);
             idbDelete('floorDrawingPdfs', drawingKey);
+            idbDelete('floorDrawingSources', drawingKey);
+            deleteFloorDrawingRasterFromCloud(bldg.id, floorCode);
             deleteFloorDrawingPdfFromCloud(bldg.id, floorCode);
             deleteFloorDrawingTiersFromCloud(bldg.id, floorCode);
             if (window._cloudSyncedPdfKeys) window._cloudSyncedPdfKeys.delete(drawingKey);
+            if (window._cloudSyncedDrawingKeys) window._cloudSyncedDrawingKeys.delete(drawingKey);
+            // floorsList뿐 아니라 drawingFloorCodes(재발견용 기억 목록)에도 남아 있으면
+            // syncBuildingDrawingFloorCodes()가 이 층을 도로 살려낸다 — 반드시 같이 지운다.
             if (bldg.floorsList) {
                 bldg.floorsList = bldg.floorsList.filter(f => f.floorCode !== floorCode);
+            }
+            if (Array.isArray(bldg.drawingFloorCodes)) {
+                bldg.drawingFloorCodes = bldg.drawingFloorCodes.filter(c => c !== floorCode);
             }
             renderEditDrawingPreview();
         }
@@ -38399,6 +38478,18 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    async function deleteFloorDrawingRasterFromCloud(buildingId, floorCode) {
+        if (!db || !window.state.companyId || !buildingId || !floorCode) return;
+        const docId = `${buildingId}_${floorCode}`;
+        try {
+            await db.collection('safety_app').doc(getCompanyDocId())
+                .collection('floorDrawings').doc(docId).delete();
+            if (window._cloudSyncedDrawingKeys) window._cloudSyncedDrawingKeys.delete(docId);
+        } catch (e) {
+            console.warn('도면 원본 서버 삭제 실패:', docId, e);
+        }
+    }
+
     async function fetchCloudFloorDrawingDataUrl(buildingId, floorCode) {
         if (!db || !window.state.companyId || !buildingId || !floorCode) return null;
         try {
@@ -39978,6 +40069,7 @@ document.addEventListener('DOMContentLoaded', () => {
             let acquired = false;
             let sawForeign = false;
             let holderName = '';
+            let acquiredServerData = null;
             try {
                 await db.runTransaction(async (tx) => {
                     const snap = await tx.get(docRef);
@@ -40000,6 +40092,10 @@ document.addEventListener('DOMContentLoaded', () => {
                         }
                     }, { merge: true });
                     acquired = true;
+                    // 잠금을 잡은 이 스냅샷을 그대로 재사용하면, 바로 이어서 같은 문서를
+                    // 또 읽는(fetchCompanyDocSnap) 중복 읽기 1회를 아낄 수 있다 — 잠금을
+                    // 잡은 순간부터는 다른 기기가 끼어들 수 없으므로 최신값이기도 하다.
+                    acquiredServerData = data;
                 });
             } catch (e) {
                 // 2026-09-04: 429(resource-exhausted, 할당량/속도 초과)까지 "일시적 네트워크 문제"로
@@ -40010,7 +40106,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 // 그 외 네트워크/경합 실패는 "다른 작업자 대기"가 아님 — 조용히 재시도
                 console.warn('동기화 잠금 획득 실패, 재시도:', e);
             }
-            if (acquired) return { ownerId, token, deviceId };
+            if (acquired) return { ownerId, token, deviceId, serverData: acquiredServerData };
 
             if (Date.now() >= waitDeadline) {
                 console.warn('동기화 잠금 대기 시간 초과 — 강제 획득');
@@ -40123,8 +40219,15 @@ document.addEventListener('DOMContentLoaded', () => {
             // 잠금 대기 중 사용자가 드래그를 시작했을 수 있음 — 상태 교체 전 다시 확인
             await waitForUiGestureIdle();
 
-            const snap = await fetchCompanyDocSnap(docRef);
-            let serverData = snap.exists ? snap.data() : {};
+            // 잠금 획득 트랜잭션에서 이미 최신 문서를 읽었으면 그걸 재사용 — 같은 문서를
+            // 곧바로 두 번 읽는 낭비(Firestore 읽기 할당량 절약)를 없앤다.
+            let serverData;
+            if (leaseInfo && leaseInfo.serverData) {
+                serverData = leaseInfo.serverData;
+            } else {
+                const snap = await fetchCompanyDocSnap(docRef);
+                serverData = snap.exists ? snap.data() : {};
+            }
             Object.assign(serverData, await fetchBulkSyncDataReliable());
 
             let mergedDeletedBuildings = mergeDeletedBuildingIds(
