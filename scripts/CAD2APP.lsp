@@ -1,11 +1,12 @@
 ﻿;;; =========================================================================
 ;;;  CAD to Smart Safety App - 결함위치도 2점 정밀 캘리브레이션 추출기
-;;;  버전: v2.19 (v2.18의 "텍스트에 제일 가까운 아무 선"이 벽선/가구선까지 걸려서
-;;;              오배정이 훨씬 늘어난 문제 확인 → v2.17의 "선의 한쪽 끝이 원에 붙어야
-;;;              지시선 후보로 인정" 방식으로 되돌림 + 선-원이 "같은 도면층"일 때만
-;;;              인정하는 조건 추가(사용자 제안) — 도면층이 다르면 아무리 가까워도
-;;;              후보에서 빠지므로 거리 기준도 500까지 여유 있게 늘림. 원/선/확정배정
-;;;              개수와 LWPOLYLINE 처리 여부를 콘솔에 출력하는 진단 로그 추가)
+;;;  버전: v2.24 (매칭 순서 유지: 텍스트 실제 바운딩박스 → 제일 가까운 지시선 끝점
+;;;              → 반대쪽 끝의 같은 도면층 CIRCLE. v2.18 "아무 선" 금지 유지.
+;;;              v2.21 회귀(~7 WRONG → ~30 WRONG) 대응: 과도한 확정 게이트
+;;;              (uniqueNearest·상호최근접·비애매 AND·tol 220·확정거부 후 아무선
+;;;              주황 폴백)를 완화. 거리순 그리디 1:1 확정으로 되돌리고,
+;;;              미배정 폴백도 clear 지시선(같은 도면층 원)만 사용.
+;;;              LWPOLYLINE 첫·끝 정점 지시선 후보 유지)
 ;;; =========================================================================
 
 ;; MTEXT 서식 제거 함수 ({\fGulim...;NO.01} -> NO.01)
@@ -42,6 +43,60 @@
     )
   )
   bestC
+)
+
+;; pt에서 tol 안·같은 도면층 원 중 제일 가까운 것을 (거리 . (x y)) 로 돌려준다.
+;; 없으면 nil. 선 끝이 "원에 붙었는지"와 붙음 거리를 같이 볼 때 쓴다.
+(defun nearestCircleDistWithinTol ( pt circles tol layerFilter / c d bestD bestC )
+  (setq bestD nil)
+  (setq bestC nil)
+  (foreach c circles
+    (if (or (null layerFilter) (= (caddr c) layerFilter))
+      (progn
+        (setq d (distance pt (list (car c) (cadr c))))
+        (if (and (< d tol) (or (null bestD) (< d bestD)))
+          (progn (setq bestD d) (setq bestC (list (car c) (cadr c))))
+        )
+      )
+    )
+  )
+  (if bestC (cons bestD bestC) nil)
+)
+
+;; (v2.21용, v2.24에서는 쓰지 않음 — uniqueNearest가 정상 지시선까지 많이 탈락시킴)
+;; 제일 가까운 원이 "유일하게" 가까운 경우에만 중심점 (x y)를 돌려준다.
+(defun uniqueNearestCircleWithinTol ( pt circles tol layerFilter uniqMargin
+                                      / c d bestD bestC secondD )
+  (setq bestD nil)
+  (setq bestC nil)
+  (setq secondD nil)
+  (foreach c circles
+    (if (or (null layerFilter) (= (caddr c) layerFilter))
+      (progn
+        (setq d (distance pt (list (car c) (cadr c))))
+        (if (< d tol)
+          (cond
+            ((null bestD)
+             (setq bestD d)
+             (setq bestC (list (car c) (cadr c)))
+            )
+            ((< d bestD)
+             (setq secondD bestD)
+             (setq bestD d)
+             (setq bestC (list (car c) (cadr c)))
+            )
+            ((or (null secondD) (< d secondD))
+             (setq secondD d)
+            )
+          )
+        )
+      )
+    )
+  )
+  (if (and bestC (or (null secondD) (>= (- secondD bestD) uniqMargin)))
+    bestC
+    nil
+  )
 )
 
 ;; TEXT/MTEXT의 "삽입점"(그룹코드10)은 정렬방식(좌측정렬/가운데정렬 등)에 따라 글자 시작쪽으로
@@ -145,10 +200,13 @@
                      textCandidates layerVotes layerName existing detectedLayer bestCount tc
                      numberCounts dupNumberList numSeq missingNumberList seqMin seqMax
                      chk nv jItem dupMissingMsg txtItem
-                     ln idxL whichEnd endPt farEnd matchedCircle lwPolyCount )
+                     ln idxL whichEnd endPt farEnd matchedCircle lwPolyCount
+                     verts leaderLineCount
+                     bothEndGap clearLeaderList a1 a2 textEndPt
+                     vlaObj coords )
   (vl-load-com)
   (princ "\n=======================================================")
-  (princ "\n  [CAD2APP v2.19] 스마트 안전점검 - 결함 번호/지시선 정밀 추출기")
+  (princ "\n  [CAD2APP v2.24] 스마트 안전점검 - 결함 번호/지시선 정밀 추출기")
   (princ "\n=======================================================")
 
   ;; 1. 기준점 2개 지정
@@ -295,10 +353,28 @@
        )
       )
 
-      ;; (F) LWPOLYLINE — 아직 지시선으로 처리하지 않음. 이 도면에서 지시선이
-      ;; LINE이 아니라 LWPOLYLINE으로 그려졌을 가능성을 진단하기 위해 개수만 센다.
+      ;; (F) LWPOLYLINE — 첫 정점·끝 정점을 LINE과 같은 (p1 p2 layer) 형식으로
+      ;; 지시선 후보에 넣는다. 꺾인 지시선도 텍스트 쪽/원 쪽 끝만 있으면 매칭 가능.
+      ;; 너무 긴 것(벽체/치수, 8000 이상)은 LINE과 동일하게 제외. 개수는 진단용으로 유지.
       ((= entType "LWPOLYLINE")
        (setq lwPolyCount (1+ lwPolyCount))
+       (setq layerName (cdr (assoc 8 dxf)))
+       (setq verts '())
+       (foreach item dxf
+         (if (= (car item) 10)
+           (setq verts (cons (list (cadr item) (caddr item)) verts))
+         )
+       )
+       (setq verts (reverse verts))
+       (if (>= (length verts) 2)
+         (progn
+           (setq p1 (car verts))
+           (setq p2 (nth (1- (length verts)) verts))
+           (if (< (distance p1 p2) 8000.0)
+             (setq lineList (cons (list p1 p2 layerName) lineList))
+           )
+         )
+       )
       )
     )
     (setq i (1+ i))
@@ -330,92 +406,166 @@
     )
   )
 
-  ;; 4. v2.18에서 "텍스트에 제일 가까운 선"을 원 연결 여부와 상관없이 아무 선이나
-  ;;    후보로 삼았더니, 벽선·가구선처럼 결함이랑 무관한 짧은 선까지 걸려서 오히려
-  ;;    오배정이 훨씬 늘어났다 (2026-09-12 실사용 확인 — 반드시 되돌릴 것).
-  ;;    그래서 "선의 한쪽 끝이 원에 붙어있어야만 지시선 후보로 인정"하는 v2.17 방식으로
-  ;;    되돌리고, 여기에 사용자 제안대로 "같은 도면층"인 원만 인정하는 조건을 추가한다.
-  ;;    도면층이 다르면 아무리 가까워도 후보에서 제외되므로, 벽선·가구선이 결함 원 근처를
-  ;;    지나가도 안전하다 — 그래서 거리 기준(attachTol)도 여유 있게 늘릴 수 있다.
-  (setq attachTol 500.0)  ;; 같은 도면층 안에서, 이 거리 이내면 "원에 연결된 선"으로 인정
-  (setq circleAnchorList '())
-  (foreach ln lineList
-    (setq bestCircle (nearestCircleWithinTol (car ln) circleList attachTol (caddr ln)))
-    (setq matchedCircle (nearestCircleWithinTol (cadr ln) circleList attachTol (caddr ln)))
-    (cond
-      ;; 시작점만 원에 붙어있으면 반대쪽 끝(cadr)이 텍스트 쪽 anchor
-      ((and bestCircle (not matchedCircle))
-       (setq circleAnchorList (cons (list bestCircle (cadr ln)) circleAnchorList))
-      )
-      ;; 끝점만 원에 붙어있으면 반대쪽 끝(car)이 텍스트 쪽 anchor
-      ((and matchedCircle (not bestCircle))
-       (setq circleAnchorList (cons (list matchedCircle (car ln)) circleAnchorList))
-      )
-      ;; 양쪽 다 원에 붙었거나(원-원 직결) 둘 다 안 붙었으면 애매한 선이므로 후보에서 제외
-    )
-  )
-  ;; 진단용 로그 — 원/선/후보 개수를 찍어서, 다음에도 틀리면 허용거리(attachTol) 문제인지
-  ;; 애초에 선 개수 자체가 원 개수보다 훨씬 적은(LWPOLYLINE 등 다른 형식) 문제인지 구분한다.
-  (princ (strcat "\n[진단] 원 " (itoa (length circleList)) "개, 선 " (itoa (length lineList))
-                 "개 중 원에 연결된 것으로 확정된 선 " (itoa (length circleAnchorList)) "개"))
-  (if (> lwPolyCount 0)
-    (princ (strcat "\n[진단] LWPOLYLINE " (itoa lwPolyCount) "개는 아직 지시선으로 처리 안 함 (선택은 됐지만 무시됨)"))
-  )
-
-  ;; 5. 텍스트-원 전체 조합의 거리쌍을 계산해 그리디 1:1 확정배정한다.
+  ;; 4~5. v2.24 핵심 매칭 순서 — 반드시 "텍스트 → 지시선 → 반대쪽 끝 → 원" 순서
+  ;;
+  ;; v2.23에서 남은 밀집구역 문제:
+  ;;   텍스트에서 가장 가까운 선 끝을 기준으로 후보를 만든 뒤 단순 거리순 그리디를 하면,
+  ;;   12가 56의 원으로 연결되는 것처럼 "가까운 선끝"은 맞지만 "반대쪽 원 연결"이 약한
+  ;;   후보가 먼저 원을 차지할 수 있다.
+  ;;
+  ;; v2.24에서는 후보 생성 순서는 그대로 유지하되, 후보의 품질을 함께 평가한다.
+  ;;   (1) TEXT 실제 바운딩박스 → 가장 가까운 지시선 끝점
+  ;;   (2) 그 반대쪽 끝점 → 같은 Layer CIRCLE
+  ;;   (3) 텍스트쪽 거리 + 원쪽 연결거리를 함께 사용해 후보 품질을 계산
+  ;;   (4) 텍스트/원/지시선을 1:1로 배정
+  ;;
+  ;; 핵심은 "원에 가까운 선을 먼저 고르는 것"이 아니다.
+  ;; 모든 후보가 먼저 사용자 지정 순서(텍스트→선끝→반대끝→원)를 통과한 뒤,
+  ;; 그 중 텍스트 연결이 가깝고 반대쪽 원 연결도 강한 후보를 우선한다.
+  ;;
+  ;; v2.18의 "아무 LINE 최근접" 방식은 사용하지 않는다.
+  ;; 반대쪽 끝에 같은 Layer CIRCLE이 없는 LINE/LWPOLYLINE은 후보가 되지 않는다.
+  (setq attachTol 400.0)
   (setq maxDist 3500.0)
+  ;; circleWeight가 너무 크면 텍스트와 먼 선을 선택하는 회귀가 생길 수 있으므로
+  ;; 텍스트쪽 거리를 기본으로 유지하고 원쪽 연결을 보정값으로 사용한다.
+  (setq circleWeight 1.20)
   (setq pairList '())
+
+  ;; pair 형식:
+  ;; (품질점수 텍스트→선끝거리 반대끝→원거리 텍스트인덱스 원중심 선인덱스)
+  ;; 품질점수 = 텍스트거리 + circleWeight * 원연결거리
+  ;; 원 연결거리는 반드시 같은 Layer CIRCLE만 대상으로 계산된다.
   (setq idxT 0)
   (foreach txtItem textList
     (setq boxPt (nth 1 txtItem))
-    (setq idxC 0)
-    (foreach cAnchor circleAnchorList
-      ;; 텍스트 삽입점 하나가 아니라 실제 글자 박스(있으면)까지의 최단거리로 비교한다.
+    (setq idxL 0)
+
+    (foreach ln lineList
+      (setq p1 (car ln))
+      (setq p2 (cadr ln))
+      (setq layerName (caddr ln))
+
+      ;; ★ 1단계: 실제 텍스트 바운딩박스에서 더 가까운 끝을 텍스트쪽 끝으로 결정
       (if (and (nth 3 txtItem) (nth 4 txtItem))
-        (setq curDist (distPtToBox (cadr cAnchor) (nth 3 txtItem) (nth 4 txtItem)))
-        (setq curDist (distance boxPt (cadr cAnchor)))
+        (progn
+          (setq d1 (distPtToBox p1 (nth 3 txtItem) (nth 4 txtItem)))
+          (setq d2 (distPtToBox p2 (nth 3 txtItem) (nth 4 txtItem)))
+        )
+        (progn
+          (setq d1 (distance boxPt p1))
+          (setq d2 (distance boxPt p2))
+        )
       )
-      (if (< curDist maxDist)
-        (setq pairList (cons (list curDist idxT idxC) pairList))
+
+      (if (<= (min d1 d2) maxDist)
+        (progn
+          (if (<= d1 d2)
+            (progn
+              (setq textEndPt p1)
+              (setq farEnd p2)
+              (setq curDist d1)
+            )
+            (progn
+              (setq textEndPt p2)
+              (setq farEnd p1)
+              (setq curDist d2)
+            )
+          )
+
+          ;; ★ 2단계: 반드시 반대쪽 끝에서 같은 Layer CIRCLE을 찾는다.
+          ;; 반환값 = (원까지 거리 . 원중심)
+          (setq a1 (nearestCircleDistWithinTol farEnd circleList attachTol layerName))
+
+          (if a1
+            (progn
+              ;; ★ 3단계: 텍스트 연결을 우선하되 원 연결 상태도 점수에 반영.
+              ;; 밀집구역에서 12→56 같은 약한 연결이 강한 실제 연결을 밀어내는 것을 줄인다.
+              (setq circleDist (car a1))
+              (setq matchedCircle (cdr a1))
+              (setq pairScore (+ curDist (* circleWeight circleDist)))
+
+              (setq pairList
+                (cons
+                  (list pairScore curDist circleDist idxT matchedCircle idxL)
+                  pairList
+                )
+              )
+            )
+          )
+        )
       )
-      (setq idxC (1+ idxC))
+      (setq idxL (1+ idxL))
     )
     (setq idxT (1+ idxT))
   )
-  (setq pairList (vl-sort pairList (function (lambda (a b) (< (car a) (car b))))))
+
+  (princ (strcat "\n[진단] 원 " (itoa (length circleList))
+                 "개, 선(LINE+LWPOLY 끝점) " (itoa (length lineList))
+                 "개 — 텍스트→선끝→반대끝→같은 Layer 원 후보 생성 완료"))
+
+  (if (> lwPolyCount 0)
+    (princ (strcat "\n[진단] LWPOLYLINE " (itoa lwPolyCount)
+                   "개는 첫·끝 정점으로 지시선 후보에 포함함"))
+  )
+
+  ;; ★ 4단계: 품질점수 순으로 1:1 배정.
+  ;; 품질점수는 텍스트 연결거리 + 원 연결거리 보정이다.
+  ;; v2.21처럼 후보를 대량 탈락시키는 hard gate는 사용하지 않는다.
+  (setq pairList
+    (vl-sort pairList
+      (function
+        (lambda (a b)
+          (cond
+            ((< (car a) (car b)) T)
+            ((> (car a) (car b)) nil)
+            ((< (cadr a) (cadr b)) T)
+            ((> (cadr a) (cadr b)) nil)
+            (T (< (nth 3 a) (nth 3 b)))
+          )
+        )
+      )
+    )
+  )
 
   (setq usedTextIdx '())
-  (setq usedCircleIdx '())  ;; 원 좌표 자체로 중복 배정 방지 (선이 2개 붙어 같은 원이
-                             ;; circleAnchorList에 중복 등장해도 한 번만 배정)
-  (setq circleAssign '())  ;; ((idxT . 원중심점) ...)
+  (setq usedCircleIdx '())
+  (setq usedLineIdx '())
+  (setq circleAssign '())
+
   (foreach pr pairList
-    (setq ti (nth 1 pr))
-    (setq idxC (nth 2 pr))
-    (setq matchedCircle (car (nth idxC circleAnchorList)))
-    (if (and (not (member ti usedTextIdx)) (not (member matchedCircle usedCircleIdx)))
+    (setq ti (nth 3 pr))
+    (setq matchedCircle (nth 4 pr))
+    (setq idxL (nth 5 pr))
+
+    (if (and (not (member ti usedTextIdx))
+             (not (member matchedCircle usedCircleIdx))
+             (not (member idxL usedLineIdx)))
       (progn
         (setq usedTextIdx (cons ti usedTextIdx))
         (setq usedCircleIdx (cons matchedCircle usedCircleIdx))
+        (setq usedLineIdx (cons idxL usedLineIdx))
         (setq circleAssign (cons (cons ti matchedCircle) circleAssign))
       )
     )
   )
 
-  ;; 6. 확정배정된 텍스트는 그 원을 결함 위치로 쓰고, 원을 못 받은 텍스트만 기존처럼
-  ;;    리더/라인 중 제일 가까운 끝점을 추측으로 사용한다.
+  ;; 6. 확정배정된 텍스트는 그 원을 결함 위치로 쓴다.
+  ;;    미배정은 LEADER 엔티티만 보조 추측하고 주황 표시.
+  ;;    일반 LINE 아무 최근접 추측(=v2.18)은 하지 않는다 — v2.21 WRONG 폭증의 핵심 원인.
   (setq idxT 0)
   (foreach txtItem textList
     (setq cleanNo (nth 0 txtItem))
     (setq boxPt (nth 1 txtItem))
     (setq txtEnt (nth 2 txtItem))
     (setq bestTip boxPt)
-    (setq minDist maxDist)
     (setq assigned (assoc idxT circleAssign))
 
     (if assigned
       (setq bestTip (cdr assigned))
       (progn
-        ;; Leader 검색
+        ;; LEADER 객체(진짜 지시선 엔티티)만 보조 추측. 일반 LINE 아무 최근접은 금지.
+        (setq minDist maxDist)
         (foreach ldr leaderList
           (setq curDist (distance boxPt (cadr ldr)))
           (if (< curDist minDist)
@@ -425,27 +575,6 @@
             )
           )
         )
-
-        ;; Line 검색
-        (foreach ln lineList
-          (setq d1 (distance boxPt (car ln)))
-          (setq d2 (distance boxPt (cadr ln)))
-          (if (and (< d1 minDist) (< d1 d2))
-            (progn
-              (setq minDist d1)
-              (setq bestTip (cadr ln))
-            )
-          )
-          (if (and (< d2 minDist) (< d2 d1))
-            (progn
-              (setq minDist d2)
-              (setq bestTip (car ln))
-            )
-          )
-        )
-
-        ;; 원(CIRCLE)으로 확정배정을 못 받은 항목 - 리더/라인 추측값이라 틀릴 수 있으니
-        ;; 캐드에서 바로 눈에 띄게 텍스트를 주황색으로 표시하고, 완료 메시지에도 목록으로 안내한다.
         (setq uncertainList (cons cleanNo uncertainList))
         (entmod (list (cons -1 txtEnt) (cons 62 30)))
         (entupd txtEnt)
@@ -513,7 +642,7 @@
   (setq f (open outPath "w"))
   (write-line "{" f)
   (write-line "  \"source\": \"AutoCAD\"," f)
-  (write-line "  \"version\": \"2.13_layer_autodetect\"," f)
+  (write-line "  \"version\": \"2.24_text_leader_circle_consistency\"," f)
   (write-line "  \"refPoint1\": {" f)
   (write-line (strcat "    \"x\": " (rtos (car pt1) 2 4) ",") f)
   (write-line (strcat "    \"y\": " (rtos (cadr pt1) 2 4)) f)
@@ -598,9 +727,9 @@
     dupMissingMsg
     uncertainMsg
   ))
-  (princ (strcat "\n[CAD2APP v2.19] 추출 완료! 파일 경로: " outPath "\n"))
+  (princ (strcat "\n[CAD2APP v2.24] 추출 완료! 파일 경로: " outPath "\n"))
   (princ)
 )
 
-(princ "\n[CAD2APP v2.19] 로드 완료. 캐드 명령창에 CAD2APP 을 입력하세요.\n")
+(princ "\n[CAD2APP v2.24] 로드 완료. 캐드 명령창에 CAD2APP 을 입력하세요.\n")
 (princ)
