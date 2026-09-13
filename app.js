@@ -38430,6 +38430,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 window._cloudSyncedTierKeys.add(docId);
             } catch (e) {
                 console.warn('도면 티어 업로드 실패:', docId, e);
+                if (window._cloudSyncedTierKeys) window._cloudSyncedTierKeys.delete(docId);
                 ok = false;
             }
         }
@@ -38438,16 +38439,47 @@ document.addEventListener('DOMContentLoaded', () => {
 
     async function cloudFloorDrawingTierExists(buildingId, floorCode, dim) {
         const docId = floorDrawingTierCloudDocId(buildingId, floorCode, dim);
-        if (window._cloudSyncedTierKeys && window._cloudSyncedTierKeys.has(docId)) return true;
         const col = getFloorDrawingTiersCollection();
         if (!col) return false;
         try {
             const snap = await col.doc(docId).get();
-            if (snap.exists) {
+            if (!snap.exists) {
+                if (window._cloudSyncedTierKeys) window._cloudSyncedTierKeys.delete(docId);
+                return false;
+            }
+            const data = snap.data() || {};
+            if (data.dataUrl && String(data.dataUrl).length > 32) {
                 if (!window._cloudSyncedTierKeys) window._cloudSyncedTierKeys = new Set();
                 window._cloudSyncedTierKeys.add(docId);
                 return true;
             }
+            if (data.chunkStatus === 'ready' && data.chunked && Number(data.chunkCount) > 0) {
+                const writeId = data.writeId ? String(data.writeId) : null;
+                const partsSnap = await col.doc(docId).collection('parts').get();
+                let n = 0;
+                if (writeId) {
+                    partsSnap.forEach((d) => {
+                        if (String(d.id || '').startsWith(writeId + '_')) n++;
+                    });
+                } else {
+                    n = partsSnap.size;
+                }
+                if (n >= Number(data.chunkCount)) {
+                    if (!window._cloudSyncedTierKeys) window._cloudSyncedTierKeys = new Set();
+                    window._cloudSyncedTierKeys.add(docId);
+                    return true;
+                }
+            }
+            if (data.chunked && Number(data.chunkCount) > 0 && !data.chunkStatus) {
+                const url = await readChunkedPdfFromDocRef(col.doc(docId));
+                if (url && String(url).length > 32) {
+                    if (!window._cloudSyncedTierKeys) window._cloudSyncedTierKeys = new Set();
+                    window._cloudSyncedTierKeys.add(docId);
+                    return true;
+                }
+            }
+            if (window._cloudSyncedTierKeys) window._cloudSyncedTierKeys.delete(docId);
+            return false;
         } catch (e) {
             console.warn('도면 티어 존재 확인 실패:', docId, e);
         }
@@ -38735,40 +38767,89 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (payload.length <= PDF_CLOUD_CHUNK_CHARS) {
             await enqueueFirestoreWrite(() =>
-                docRef.set({ ...base, dataUrl: payload, chunked: false, chunkCount: 0, writeId: null })
+                docRef.set({
+                    ...base,
+                    dataUrl: payload,
+                    chunked: false,
+                    chunkCount: 0,
+                    writeId: null,
+                    chunkStatus: 'ready'
+                })
             );
-            // 고아 parts 정리는 즉시 하지 않고 여유 있을 때 (write stream 보호)
             scheduleChunkPartsCleanup(docRef, null);
             return;
         }
+
         const parts = [];
         for (let i = 0; i < payload.length; i += PDF_CLOUD_CHUNK_CHARS) {
             parts.push(payload.slice(i, i + PDF_CLOUD_CHUNK_CHARS));
         }
-        const writeId = `w_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
-        // 배치를 크게, 커밋 사이 간격을 두어 queued writes 폭주 방지
-        const PARTS_PER_BATCH = 20;
-        for (let start = 0; start < parts.length; start += PARTS_PER_BATCH) {
-            const end = Math.min(start + PARTS_PER_BATCH, parts.length);
-            await enqueueFirestoreWrite(async () => {
-                const batch = db.batch();
-                for (let i = start; i < end; i++) {
-                    batch.set(docRef.collection('parts').doc(`${writeId}_${i}`), { data: parts[i], writeId, index: i });
-                }
-                await batch.commit();
-            });
-            if (end < parts.length) await sleep(80);
+        const writeId = 'w_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8);
+
+        // 기존 ready 문서는 읽기 유지. 신규/깨진 문서만 uploading 마킹.
+        let hadReady = false;
+        try {
+            const prevSnap = await docRef.get();
+            const prev = prevSnap.exists ? (prevSnap.data() || {}) : {};
+            hadReady = prev.chunkStatus === 'ready'
+                || (!!prev.dataUrl && String(prev.dataUrl).length > 32)
+                || (prev.chunked === true && prev.chunkStatus !== 'failed' && prev.chunkStatus !== 'uploading' && Number(prev.chunkCount) > 0 && !!prev.writeId);
+            if (!hadReady) {
+                await enqueueFirestoreWrite(() =>
+                    docRef.set({
+                        ...base,
+                        chunked: true,
+                        chunkCount: parts.length,
+                        writeId,
+                        chunkStatus: 'uploading',
+                        dataUrl: firebase.firestore.FieldValue.delete()
+                    }, { merge: true })
+                );
+            }
+        } catch (e) {
+            console.warn('청크 업로드 상태 마킹 실패:', docRef.path, e);
         }
-        await enqueueFirestoreWrite(() =>
-            docRef.set({
-                ...base,
-                chunked: true,
-                chunkCount: parts.length,
-                writeId,
-                dataUrl: firebase.firestore.FieldValue.delete()
-            }, { merge: true })
-        );
-        scheduleChunkPartsCleanup(docRef, writeId);
+
+        try {
+            const PARTS_PER_BATCH = 20;
+            for (let start = 0; start < parts.length; start += PARTS_PER_BATCH) {
+                const end = Math.min(start + PARTS_PER_BATCH, parts.length);
+                await enqueueFirestoreWrite(async () => {
+                    const batch = db.batch();
+                    for (let i = start; i < end; i++) {
+                        batch.set(docRef.collection('parts').doc(writeId + '_' + i), {
+                            data: parts[i],
+                            writeId,
+                            index: i
+                        });
+                    }
+                    await batch.commit();
+                });
+                if (end < parts.length) await sleep(80);
+            }
+
+            await enqueueFirestoreWrite(() =>
+                docRef.set({
+                    ...base,
+                    chunked: true,
+                    chunkCount: parts.length,
+                    writeId,
+                    chunkStatus: 'ready',
+                    dataUrl: firebase.firestore.FieldValue.delete()
+                }, { merge: true })
+            );
+            scheduleChunkPartsCleanup(docRef, writeId);
+        } catch (e) {
+            try {
+                await enqueueFirestoreWrite(() =>
+                    docRef.set({
+                        chunkStatus: 'failed',
+                        updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+                    }, { merge: true })
+                );
+            } catch (_) { /* ignore */ }
+            throw e;
+        }
     }
 
     const _chunkCleanupTimers = new Map();
@@ -38818,18 +38899,29 @@ document.addEventListener('DOMContentLoaded', () => {
         const snap = await docRef.get();
         if (!snap.exists) return null;
         const data = snap.data() || {};
+
         if (data.dataUrl && typeof data.dataUrl === 'string' && data.dataUrl.length > 32) {
             return data.dataUrl;
         }
+
+        const status = data.chunkStatus || null;
+        if (status === 'uploading' || status === 'failed') {
+            return null;
+        }
+
         const chunkCount = Number(data.chunkCount) || 0;
         if (data.chunked && chunkCount > 0) {
             const partsSnap = await docRef.collection('parts').get();
             if (partsSnap.empty) {
-                if (!_retried) {
-                    await new Promise((r) => setTimeout(r, 1000));
+                if (!_retried && status !== 'ready') {
+                    await new Promise((r) => setTimeout(r, 800));
                     return readChunkedPdfFromDocRef(docRef, true);
                 }
-                console.warn('[PDF] chunked 문서인데 parts가 비어 있음:', docRef.path);
+                if (status === 'ready') {
+                    console.warn('[PDF] ready인데 parts 없음(손상 문서):', docRef.path);
+                } else {
+                    console.warn('[PDF] chunked 문서인데 parts가 비어 있음:', docRef.path);
+                }
                 return null;
             }
             const writeId = data.writeId ? String(data.writeId) : null;
