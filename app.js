@@ -33090,17 +33090,10 @@ document.addEventListener('DOMContentLoaded', () => {
                     const e = idx + 1 < starts.length ? starts[idx + 1] : ps.length;
                     const statusTbls = [];
                     let photoTbl = null, photoParaStamp = null, locationMapTbl = null;
-                    for (let i = s; i < e; i++) {
+                    for (let i = s + 1; i < e; i++) {
                         const txt = paraText(ps[i]).trim();
                         const tbls = Array.from(ps[i].getElementsByTagNameNS(HP_NS, 'tbl'));
                         if (tbls.length === 0) continue;
-                        // 제목 문단(i===s)에는 표만 수집하고 사진/기타 판정은 하지 않는다.
-                        if (i === s) {
-                            tbls.forEach((tbl) => {
-                                if (isCurrentStatusTable(tbl)) statusTbls.push(tbl);
-                            });
-                            continue;
-                        }
                         if (!photoTbl && /^사진1/.test(txt)) {
                             photoTbl = tbls[0];
                             photoParaStamp = ps[i].cloneNode(true);
@@ -33203,60 +33196,6 @@ document.addEventListener('DOMContentLoaded', () => {
                     grade3LocMapStampPara.parentNode.removeChild(grade3LocMapStampPara);
                 }
             }
-            // 샘플 상태조사표가 여러 장이면 1장만 남긴다. 제목과 표가 같은 문단이면
-            // 문단 삭제 금지(표 노드만 제거). 빈 문단 생성/createElementNS 금지 — HWPX 손상 원인.
-            const owningPara = (node) => {
-                let p = node;
-                while (p && p.localName !== "p" && p.nodeName !== "hp:p") p = p.parentNode;
-                return p;
-            };
-            const safeRemoveStatusTable = (tbl, titlePara) => {
-                if (!tbl) return;
-                const p = owningPara(tbl);
-                if (p && titlePara && p === titlePara) {
-                    if (tbl.parentNode) tbl.parentNode.removeChild(tbl);
-                    return;
-                }
-                if (p && p.parentNode) p.parentNode.removeChild(p);
-            };
-            const clearStatusTableDataRows = (tbl) => {
-                if (!tbl) return;
-                const trs = Array.from(tbl.getElementsByTagNameNS(HP_NS, "tr"));
-                let hdr = 1;
-                if (trs.length > 1) {
-                    const r1 = Array.from(trs[1].getElementsByTagNameNS(HP_NS, "t")).map(t => t.textContent || "").join("");
-                    if (r1.includes("구조") || r1.includes("비구조")) hdr = 2;
-                }
-                trs.forEach((tr, idx) => {
-                    if (idx < hdr) return;
-                    if (tr.parentNode) tr.parentNode.removeChild(tr);
-                });
-            };
-            const stripStampStatusToOne = (stampSlot) => {
-                if (!stampSlot || !stampSlot.titlePara) return;
-                const titlePara = stampSlot.titlePara;
-                const ps = secChildren();
-                const start = ps.indexOf(titlePara);
-                if (start < 0) return;
-                const all = [];
-                for (let i = start; i < ps.length; i++) {
-                    const txt = paraText(ps[i]).trim();
-                    if (i > start && /^사진1/.test(txt)) break;
-                    if (i > start && floorTitleRe.test(txt)) break;
-                    Array.from(ps[i].getElementsByTagNameNS(HP_NS, "tbl")).forEach((tbl) => {
-                        if (isCurrentStatusTable(tbl)) all.push(tbl);
-                    });
-                }
-                if (!all.length) return;
-                const keep = all[0];
-                all.slice(1).forEach((tbl) => safeRemoveStatusTable(tbl, titlePara));
-                clearStatusTableDataRows(keep);
-                const keepP = owningPara(keep);
-                if (keepP && keepP !== titlePara) keepP.removeAttribute("pageBreak");
-                stampSlot.statusTbls = [keep];
-            };
-            stripStampStatusToOne(floorSlots[0]);
-
             const stampChildren = secChildren();
             const stampParas = stampChildren.slice(stampChildren.indexOf(floorSlots[0].titlePara));
             for (let c = 1; c < floorsData.length; c++) {
@@ -33457,26 +33396,15 @@ document.addEventListener('DOMContentLoaded', () => {
                 let pageTbls = slot.statusTbls.slice();
                 if (pageTbls.length > neededPages) {
                     pageTbls.slice(neededPages).forEach(tbl => {
-                        safeRemoveStatusTable(tbl, slot.titlePara);
+                        const p = tbl.parentNode.parentNode;
+                        if (p.parentNode) p.parentNode.removeChild(p);
                     });
                     pageTbls = pageTbls.slice(0, neededPages);
                 } else if (pageTbls.length < neededPages) {
-                    let insertAfterNode = owningPara(pageTbls[pageTbls.length - 1]);
-                    if (!insertAfterNode) insertAfterNode = pageTbls[pageTbls.length - 1].parentNode;
+                    let insertAfterNode = pageTbls[pageTbls.length - 1].parentNode.parentNode;
                     for (let n = pageTbls.length; n < neededPages; n++) {
-                        // cloneNode(true)만 사용(속성·paraPr 유지). 제목 문단이면 표 없는 run 제거.
                         const clonedPara = insertAfterNode.cloneNode(true);
                         clonedPara.setAttribute('pageBreak', '1');
-                        if (insertAfterNode === slot.titlePara) {
-                            Array.from(clonedPara.childNodes).forEach((ch) => {
-                                if (ch.nodeType !== 1) return;
-                                if (ch.localName === 'run' || ch.nodeName === 'hp:run') {
-                                    if (!ch.getElementsByTagNameNS(HP_NS, 'tbl').length && ch.parentNode) {
-                                        ch.parentNode.removeChild(ch);
-                                    }
-                                }
-                            });
-                        }
                         const clonedTbl = clonedPara.getElementsByTagNameNS(HP_NS, 'tbl')[0];
                         cloneIdSeq++;
                         clonedTbl.setAttribute('id', String(8600000 + cloneIdSeq));
@@ -33486,15 +33414,9 @@ document.addEventListener('DOMContentLoaded', () => {
                         syncStatusTblLayoutFromTemplate(clonedTbl, targetTbl, HEADER_ROW_COUNT, normalRowTpl);
                     }
                 }
-                // 여분 표는 위에서 neededPages만큼만 남긴 상태. 여기서는 pageBreak만 정리한다.
-                // (제목과 표가 같은 문단인 경우 문단 삭제 금지)
                 pageTbls.forEach((tbl, i) => {
-                    const pbPara = owningPara(tbl);
-                    if (pbPara && pbPara !== slot.titlePara) {
-                        if (i === 0) pbPara.removeAttribute('pageBreak');
-                        else pbPara.setAttribute('pageBreak', '1');
-                    }
                     if (i > 0) {
+                        tbl.parentNode.parentNode.setAttribute('pageBreak', '1');
                         syncStatusTblLayoutFromTemplate(tbl, targetTbl, HEADER_ROW_COUNT, normalRowTpl);
                     }
                 });
@@ -35254,17 +35176,10 @@ document.addEventListener('DOMContentLoaded', () => {
                     const e = idx + 1 < starts.length ? starts[idx + 1] : ps.length;
                     const statusTbls = [];
                     let photoTbl = null, locationMapTbl = null;
-                    for (let i = s; i < e; i++) {
+                    for (let i = s + 1; i < e; i++) {
                         const txt = paraText(ps[i]).trim();
                         const tbls = Array.from(ps[i].getElementsByTagNameNS(HP_NS, 'tbl'));
                         if (tbls.length === 0) continue;
-                        // 제목 문단(i===s)에는 표만 수집하고 사진/기타 판정은 하지 않는다.
-                        if (i === s) {
-                            tbls.forEach((tbl) => {
-                                if (isCurrentStatusTable(tbl)) statusTbls.push(tbl);
-                            });
-                            continue;
-                        }
                         if (!photoTbl && /^사진1/.test(txt)) { photoTbl = tbls[0]; continue; }
                         if (!photoTbl) {
                             // 한 문단 안에 표가 여러 개 겹쳐 들어있는 경우가 있다(옛 포맷을 새 포맷으로
@@ -35341,60 +35256,6 @@ document.addEventListener('DOMContentLoaded', () => {
                     });
                 });
             };
-            // 샘플 상태조사표가 여러 장이면 1장만 남긴다. 제목과 표가 같은 문단이면
-            // 문단 삭제 금지(표 노드만 제거). 빈 문단 생성/createElementNS 금지 — HWPX 손상 원인.
-            const owningPara = (node) => {
-                let p = node;
-                while (p && p.localName !== "p" && p.nodeName !== "hp:p") p = p.parentNode;
-                return p;
-            };
-            const safeRemoveStatusTable = (tbl, titlePara) => {
-                if (!tbl) return;
-                const p = owningPara(tbl);
-                if (p && titlePara && p === titlePara) {
-                    if (tbl.parentNode) tbl.parentNode.removeChild(tbl);
-                    return;
-                }
-                if (p && p.parentNode) p.parentNode.removeChild(p);
-            };
-            const clearStatusTableDataRows = (tbl) => {
-                if (!tbl) return;
-                const trs = Array.from(tbl.getElementsByTagNameNS(HP_NS, "tr"));
-                let hdr = 1;
-                if (trs.length > 1) {
-                    const r1 = Array.from(trs[1].getElementsByTagNameNS(HP_NS, "t")).map(t => t.textContent || "").join("");
-                    if (r1.includes("구조") || r1.includes("비구조")) hdr = 2;
-                }
-                trs.forEach((tr, idx) => {
-                    if (idx < hdr) return;
-                    if (tr.parentNode) tr.parentNode.removeChild(tr);
-                });
-            };
-            const stripStampStatusToOne = (stampSlot) => {
-                if (!stampSlot || !stampSlot.titlePara) return;
-                const titlePara = stampSlot.titlePara;
-                const ps = secChildren();
-                const start = ps.indexOf(titlePara);
-                if (start < 0) return;
-                const all = [];
-                for (let i = start; i < ps.length; i++) {
-                    const txt = paraText(ps[i]).trim();
-                    if (i > start && /^사진1/.test(txt)) break;
-                    if (i > start && floorTitleRe.test(txt)) break;
-                    Array.from(ps[i].getElementsByTagNameNS(HP_NS, "tbl")).forEach((tbl) => {
-                        if (isCurrentStatusTable(tbl)) all.push(tbl);
-                    });
-                }
-                if (!all.length) return;
-                const keep = all[0];
-                all.slice(1).forEach((tbl) => safeRemoveStatusTable(tbl, titlePara));
-                clearStatusTableDataRows(keep);
-                const keepP = owningPara(keep);
-                if (keepP && keepP !== titlePara) keepP.removeAttribute("pageBreak");
-                stampSlot.statusTbls = [keep];
-            };
-            stripStampStatusToOne(floorSlots[0]);
-
             const stampChildren = secChildren();
             const stampParas = stampChildren.slice(stampChildren.indexOf(floorSlots[0].titlePara));
             for (let c = 1; c < floorsData.length; c++) {
@@ -35557,26 +35418,15 @@ document.addEventListener('DOMContentLoaded', () => {
                 let pageTbls = slot.statusTbls.slice();
                 if (pageTbls.length > neededPages) {
                     pageTbls.slice(neededPages).forEach(tbl => {
-                        safeRemoveStatusTable(tbl, slot.titlePara);
+                        const p = tbl.parentNode.parentNode;
+                        if (p.parentNode) p.parentNode.removeChild(p);
                     });
                     pageTbls = pageTbls.slice(0, neededPages);
                 } else if (pageTbls.length < neededPages) {
-                    let insertAfterNode = owningPara(pageTbls[pageTbls.length - 1]);
-                    if (!insertAfterNode) insertAfterNode = pageTbls[pageTbls.length - 1].parentNode;
+                    let insertAfterNode = pageTbls[pageTbls.length - 1].parentNode.parentNode;
                     for (let n = pageTbls.length; n < neededPages; n++) {
-                        // cloneNode(true)만 사용(속성·paraPr 유지). 제목 문단이면 표 없는 run 제거.
                         const clonedPara = insertAfterNode.cloneNode(true);
                         clonedPara.setAttribute('pageBreak', '1');
-                        if (insertAfterNode === slot.titlePara) {
-                            Array.from(clonedPara.childNodes).forEach((ch) => {
-                                if (ch.nodeType !== 1) return;
-                                if (ch.localName === 'run' || ch.nodeName === 'hp:run') {
-                                    if (!ch.getElementsByTagNameNS(HP_NS, 'tbl').length && ch.parentNode) {
-                                        ch.parentNode.removeChild(ch);
-                                    }
-                                }
-                            });
-                        }
                         const clonedTbl = clonedPara.getElementsByTagNameNS(HP_NS, 'tbl')[0];
                         cloneIdSeq++;
                         clonedTbl.setAttribute('id', String(8600000 + cloneIdSeq));
@@ -35586,15 +35436,9 @@ document.addEventListener('DOMContentLoaded', () => {
                         syncStatusTblLayoutFromTemplate(clonedTbl, targetTbl, HEADER_ROW_COUNT, normalStyleRow);
                     }
                 }
-                // 여분 표는 위에서 neededPages만큼만 남긴 상태. 여기서는 pageBreak만 정리한다.
-                // (제목과 표가 같은 문단인 경우 문단 삭제 금지)
                 pageTbls.forEach((tbl, i) => {
-                    const pbPara = owningPara(tbl);
-                    if (pbPara && pbPara !== slot.titlePara) {
-                        if (i === 0) pbPara.removeAttribute('pageBreak');
-                        else pbPara.setAttribute('pageBreak', '1');
-                    }
                     if (i > 0) {
+                        tbl.parentNode.parentNode.setAttribute('pageBreak', '1');
                         syncStatusTblLayoutFromTemplate(tbl, targetTbl, HEADER_ROW_COUNT, normalStyleRow);
                     }
                 });
