@@ -33203,17 +33203,11 @@ document.addEventListener('DOMContentLoaded', () => {
                     grade3LocMapStampPara.parentNode.removeChild(grade3LocMapStampPara);
                 }
             }
-            // 템플릿 상태조사표는 여러 장(샘플 NO.16/31/46…)이고, 첫 표는 제목과 같은 hp:p에
-            // 들어 있는 경우가 많다. 문단 전체를 지우면 제목·필요한 표까지 사라지므로,
-            // 제목 문단 안에서는 표 노드만 제거하고, 그 외 문단만 문단째 제거한다.
+            // 샘플 상태조사표가 여러 장이면 1장만 남긴다. 제목과 표가 같은 문단이면
+            // 문단 삭제 금지(표 노드만 제거). 빈 문단 생성/createElementNS 금지 — HWPX 손상 원인.
             const owningPara = (node) => {
                 let p = node;
                 while (p && p.localName !== "p" && p.nodeName !== "hp:p") p = p.parentNode;
-                return p;
-            };
-            const removeOwningPara = (node) => {
-                const p = owningPara(node);
-                if (p && p.parentNode) p.parentNode.removeChild(p);
                 return p;
             };
             const safeRemoveStatusTable = (tbl, titlePara) => {
@@ -33223,70 +33217,41 @@ document.addEventListener('DOMContentLoaded', () => {
                     if (tbl.parentNode) tbl.parentNode.removeChild(tbl);
                     return;
                 }
-                removeOwningPara(tbl);
+                if (p && p.parentNode) p.parentNode.removeChild(p);
             };
-            const clearStatusTableDataRows = (tbl, headerRowCount) => {
+            const clearStatusTableDataRows = (tbl) => {
                 if (!tbl) return;
-                const hdr = Math.max(1, headerRowCount || 2);
                 const trs = Array.from(tbl.getElementsByTagNameNS(HP_NS, "tr"));
+                let hdr = 1;
+                if (trs.length > 1) {
+                    const r1 = Array.from(trs[1].getElementsByTagNameNS(HP_NS, "t")).map(t => t.textContent || "").join("");
+                    if (r1.includes("구조") || r1.includes("비구조")) hdr = 2;
+                }
                 trs.forEach((tr, idx) => {
                     if (idx < hdr) return;
                     if (tr.parentNode) tr.parentNode.removeChild(tr);
                 });
             };
-            const collectStatusTablesUntilPhoto = (titlePara) => {
+            const stripStampStatusToOne = (stampSlot) => {
+                if (!stampSlot || !stampSlot.titlePara) return;
+                const titlePara = stampSlot.titlePara;
                 const ps = secChildren();
                 const start = ps.indexOf(titlePara);
-                const out = [];
-                if (start < 0) return out;
-                // 제목 문단 포함: 제목과 표가 한 문단인 템플릿 대응
+                if (start < 0) return;
+                const all = [];
                 for (let i = start; i < ps.length; i++) {
                     const txt = paraText(ps[i]).trim();
                     if (i > start && /^사진1/.test(txt)) break;
                     if (i > start && floorTitleRe.test(txt)) break;
                     Array.from(ps[i].getElementsByTagNameNS(HP_NS, "tbl")).forEach((tbl) => {
-                        if (isCurrentStatusTable(tbl)) out.push(tbl);
+                        if (isCurrentStatusTable(tbl)) all.push(tbl);
                     });
                 }
-                return out;
-            };
-            const stripStampStatusToOne = (stampSlot) => {
-                if (!stampSlot || !stampSlot.titlePara) return;
-                const all = collectStatusTablesUntilPhoto(stampSlot.titlePara);
                 if (!all.length) return;
-                // 제목 문단에 붙은 샘플 표보다, 가능하면 그 다음 장을 keep으로 쓰지 않고
-                // 문서상 첫 상태조사표 1장만 남긴다(데이터 행만 비움).
                 const keep = all[0];
-                const titlePara = stampSlot.titlePara;
                 all.slice(1).forEach((tbl) => safeRemoveStatusTable(tbl, titlePara));
-                // 헤더는 유지하고 샘플 데이터 행만 제거
-                const keepTrs = Array.from(keep.getElementsByTagNameNS(HP_NS, "tr"));
-                let hdr = 1;
-                if (keepTrs.length > 1) {
-                    const r1 = Array.from(keepTrs[1].getElementsByTagNameNS(HP_NS, "t")).map(t => t.textContent || "").join("");
-                    if (r1.includes("구조") || r1.includes("비구조")) hdr = 2;
-                }
-                clearStatusTableDataRows(keep, hdr);
-                // 제목과 같은 문단에 있으면 추가 페이지 복제 때 제목까지 복제되므로, 표를 다음 문단으로 분리한다.
-                let keepP = owningPara(keep);
-                if (keepP && keepP === titlePara && titlePara.parentNode) {
-                    const fresh = titlePara.cloneNode(false);
-                    fresh.removeAttribute("pageBreak");
-                    const run = keep.parentNode;
-                    if (run && run.localName === "run") {
-                        run.parentNode && run.parentNode.removeChild(run);
-                        fresh.appendChild(run);
-                    } else {
-                        if (keep.parentNode) keep.parentNode.removeChild(keep);
-                        const ns = titlePara.namespaceURI || HP_NS;
-                        const newRun = titlePara.ownerDocument.createElementNS(ns, "hp:run");
-                        newRun.appendChild(keep);
-                        fresh.appendChild(newRun);
-                    }
-                    if (titlePara.nextSibling) titlePara.parentNode.insertBefore(fresh, titlePara.nextSibling);
-                    else titlePara.parentNode.appendChild(fresh);
-                    keepP = fresh;
-                }
+                clearStatusTableDataRows(keep);
+                const keepP = owningPara(keep);
                 if (keepP && keepP !== titlePara) keepP.removeAttribute("pageBreak");
                 stampSlot.statusTbls = [keep];
             };
@@ -33499,23 +33464,19 @@ document.addEventListener('DOMContentLoaded', () => {
                     let insertAfterNode = owningPara(pageTbls[pageTbls.length - 1]);
                     if (!insertAfterNode) insertAfterNode = pageTbls[pageTbls.length - 1].parentNode;
                     for (let n = pageTbls.length; n < neededPages; n++) {
-                        // 제목 문단을 복제하지 않는다(표만 있는 문단을 복제).
-                        let cloneSrc = insertAfterNode;
-                        if (cloneSrc === slot.titlePara) {
-                            const only = slot.titlePara.cloneNode(false);
-                            const srcTbl = pageTbls[pageTbls.length - 1];
-                            const srcRun = srcTbl && srcTbl.parentNode;
-                            if (srcRun && srcRun.localName === 'run') only.appendChild(srcRun.cloneNode(true));
-                            else if (srcTbl) {
-                                const ns = slot.titlePara.namespaceURI || HP_NS;
-                                const newRun = slot.titlePara.ownerDocument.createElementNS(ns, 'hp:run');
-                                newRun.appendChild(srcTbl.cloneNode(true));
-                                only.appendChild(newRun);
-                            }
-                            cloneSrc = only;
-                        }
-                        const clonedPara = cloneSrc.cloneNode(true);
+                        // cloneNode(true)만 사용(속성·paraPr 유지). 제목 문단이면 표 없는 run 제거.
+                        const clonedPara = insertAfterNode.cloneNode(true);
                         clonedPara.setAttribute('pageBreak', '1');
+                        if (insertAfterNode === slot.titlePara) {
+                            Array.from(clonedPara.childNodes).forEach((ch) => {
+                                if (ch.nodeType !== 1) return;
+                                if (ch.localName === 'run' || ch.nodeName === 'hp:run') {
+                                    if (!ch.getElementsByTagNameNS(HP_NS, 'tbl').length && ch.parentNode) {
+                                        ch.parentNode.removeChild(ch);
+                                    }
+                                }
+                            });
+                        }
                         const clonedTbl = clonedPara.getElementsByTagNameNS(HP_NS, 'tbl')[0];
                         cloneIdSeq++;
                         clonedTbl.setAttribute('id', String(8600000 + cloneIdSeq));
@@ -35380,17 +35341,11 @@ document.addEventListener('DOMContentLoaded', () => {
                     });
                 });
             };
-            // 템플릿 상태조사표는 여러 장(샘플 NO.16/31/46…)이고, 첫 표는 제목과 같은 hp:p에
-            // 들어 있는 경우가 많다. 문단 전체를 지우면 제목·필요한 표까지 사라지므로,
-            // 제목 문단 안에서는 표 노드만 제거하고, 그 외 문단만 문단째 제거한다.
+            // 샘플 상태조사표가 여러 장이면 1장만 남긴다. 제목과 표가 같은 문단이면
+            // 문단 삭제 금지(표 노드만 제거). 빈 문단 생성/createElementNS 금지 — HWPX 손상 원인.
             const owningPara = (node) => {
                 let p = node;
                 while (p && p.localName !== "p" && p.nodeName !== "hp:p") p = p.parentNode;
-                return p;
-            };
-            const removeOwningPara = (node) => {
-                const p = owningPara(node);
-                if (p && p.parentNode) p.parentNode.removeChild(p);
                 return p;
             };
             const safeRemoveStatusTable = (tbl, titlePara) => {
@@ -35400,70 +35355,41 @@ document.addEventListener('DOMContentLoaded', () => {
                     if (tbl.parentNode) tbl.parentNode.removeChild(tbl);
                     return;
                 }
-                removeOwningPara(tbl);
+                if (p && p.parentNode) p.parentNode.removeChild(p);
             };
-            const clearStatusTableDataRows = (tbl, headerRowCount) => {
+            const clearStatusTableDataRows = (tbl) => {
                 if (!tbl) return;
-                const hdr = Math.max(1, headerRowCount || 2);
                 const trs = Array.from(tbl.getElementsByTagNameNS(HP_NS, "tr"));
+                let hdr = 1;
+                if (trs.length > 1) {
+                    const r1 = Array.from(trs[1].getElementsByTagNameNS(HP_NS, "t")).map(t => t.textContent || "").join("");
+                    if (r1.includes("구조") || r1.includes("비구조")) hdr = 2;
+                }
                 trs.forEach((tr, idx) => {
                     if (idx < hdr) return;
                     if (tr.parentNode) tr.parentNode.removeChild(tr);
                 });
             };
-            const collectStatusTablesUntilPhoto = (titlePara) => {
+            const stripStampStatusToOne = (stampSlot) => {
+                if (!stampSlot || !stampSlot.titlePara) return;
+                const titlePara = stampSlot.titlePara;
                 const ps = secChildren();
                 const start = ps.indexOf(titlePara);
-                const out = [];
-                if (start < 0) return out;
-                // 제목 문단 포함: 제목과 표가 한 문단인 템플릿 대응
+                if (start < 0) return;
+                const all = [];
                 for (let i = start; i < ps.length; i++) {
                     const txt = paraText(ps[i]).trim();
                     if (i > start && /^사진1/.test(txt)) break;
                     if (i > start && floorTitleRe.test(txt)) break;
                     Array.from(ps[i].getElementsByTagNameNS(HP_NS, "tbl")).forEach((tbl) => {
-                        if (isCurrentStatusTable(tbl)) out.push(tbl);
+                        if (isCurrentStatusTable(tbl)) all.push(tbl);
                     });
                 }
-                return out;
-            };
-            const stripStampStatusToOne = (stampSlot) => {
-                if (!stampSlot || !stampSlot.titlePara) return;
-                const all = collectStatusTablesUntilPhoto(stampSlot.titlePara);
                 if (!all.length) return;
-                // 제목 문단에 붙은 샘플 표보다, 가능하면 그 다음 장을 keep으로 쓰지 않고
-                // 문서상 첫 상태조사표 1장만 남긴다(데이터 행만 비움).
                 const keep = all[0];
-                const titlePara = stampSlot.titlePara;
                 all.slice(1).forEach((tbl) => safeRemoveStatusTable(tbl, titlePara));
-                // 헤더는 유지하고 샘플 데이터 행만 제거
-                const keepTrs = Array.from(keep.getElementsByTagNameNS(HP_NS, "tr"));
-                let hdr = 1;
-                if (keepTrs.length > 1) {
-                    const r1 = Array.from(keepTrs[1].getElementsByTagNameNS(HP_NS, "t")).map(t => t.textContent || "").join("");
-                    if (r1.includes("구조") || r1.includes("비구조")) hdr = 2;
-                }
-                clearStatusTableDataRows(keep, hdr);
-                // 제목과 같은 문단에 있으면 추가 페이지 복제 때 제목까지 복제되므로, 표를 다음 문단으로 분리한다.
-                let keepP = owningPara(keep);
-                if (keepP && keepP === titlePara && titlePara.parentNode) {
-                    const fresh = titlePara.cloneNode(false);
-                    fresh.removeAttribute("pageBreak");
-                    const run = keep.parentNode;
-                    if (run && run.localName === "run") {
-                        run.parentNode && run.parentNode.removeChild(run);
-                        fresh.appendChild(run);
-                    } else {
-                        if (keep.parentNode) keep.parentNode.removeChild(keep);
-                        const ns = titlePara.namespaceURI || HP_NS;
-                        const newRun = titlePara.ownerDocument.createElementNS(ns, "hp:run");
-                        newRun.appendChild(keep);
-                        fresh.appendChild(newRun);
-                    }
-                    if (titlePara.nextSibling) titlePara.parentNode.insertBefore(fresh, titlePara.nextSibling);
-                    else titlePara.parentNode.appendChild(fresh);
-                    keepP = fresh;
-                }
+                clearStatusTableDataRows(keep);
+                const keepP = owningPara(keep);
                 if (keepP && keepP !== titlePara) keepP.removeAttribute("pageBreak");
                 stampSlot.statusTbls = [keep];
             };
@@ -35638,23 +35564,19 @@ document.addEventListener('DOMContentLoaded', () => {
                     let insertAfterNode = owningPara(pageTbls[pageTbls.length - 1]);
                     if (!insertAfterNode) insertAfterNode = pageTbls[pageTbls.length - 1].parentNode;
                     for (let n = pageTbls.length; n < neededPages; n++) {
-                        // 제목 문단을 복제하지 않는다(표만 있는 문단을 복제).
-                        let cloneSrc = insertAfterNode;
-                        if (cloneSrc === slot.titlePara) {
-                            const only = slot.titlePara.cloneNode(false);
-                            const srcTbl = pageTbls[pageTbls.length - 1];
-                            const srcRun = srcTbl && srcTbl.parentNode;
-                            if (srcRun && srcRun.localName === 'run') only.appendChild(srcRun.cloneNode(true));
-                            else if (srcTbl) {
-                                const ns = slot.titlePara.namespaceURI || HP_NS;
-                                const newRun = slot.titlePara.ownerDocument.createElementNS(ns, 'hp:run');
-                                newRun.appendChild(srcTbl.cloneNode(true));
-                                only.appendChild(newRun);
-                            }
-                            cloneSrc = only;
-                        }
-                        const clonedPara = cloneSrc.cloneNode(true);
+                        // cloneNode(true)만 사용(속성·paraPr 유지). 제목 문단이면 표 없는 run 제거.
+                        const clonedPara = insertAfterNode.cloneNode(true);
                         clonedPara.setAttribute('pageBreak', '1');
+                        if (insertAfterNode === slot.titlePara) {
+                            Array.from(clonedPara.childNodes).forEach((ch) => {
+                                if (ch.nodeType !== 1) return;
+                                if (ch.localName === 'run' || ch.nodeName === 'hp:run') {
+                                    if (!ch.getElementsByTagNameNS(HP_NS, 'tbl').length && ch.parentNode) {
+                                        ch.parentNode.removeChild(ch);
+                                    }
+                                }
+                            });
+                        }
                         const clonedTbl = clonedPara.getElementsByTagNameNS(HP_NS, 'tbl')[0];
                         cloneIdSeq++;
                         clonedTbl.setAttribute('id', String(8600000 + cloneIdSeq));
