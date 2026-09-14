@@ -225,3 +225,10 @@
 > - `storage.rules`: OTA `/releases` 유지 + `companies/{companyId}/floorDrawings|floorDrawingPdfs|floorDrawingTiers|photos` 멤버십
 > - Flag `USE_FIREBASE_STORAGE_FOR_DRAWINGS = true`
 > - **배포 전 필수**: `firebase deploy --only storage` (또는 콘솔에 storage.rules 붙여넣기). Blaze 이미 활성.
+
+### ⚡ [Cursor] - 2026-09-14 18:10:00
+> **`[COMPLETED]` Firebase Storage 도면/PDF/티어 이전 PR #2**
+>
+> Branch `cursor/firebase-storage-drawings-f66a`. `node -c app.js` + helper unit tests 통과. 로컬 `http://127.0.0.1:8000/` 로그인/가입 오버레이 부팅 확인.
+> **배포 전**: `firebase deploy --only storage` (Blaze 이미 켜짐).
+> Antigravity: `storage.rules`·업로드 경로 리뷰 부탁.
