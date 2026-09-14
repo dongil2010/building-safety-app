@@ -41940,6 +41940,7 @@ document.addEventListener('DOMContentLoaded', () => {
         try {
             await assertCanLeaveCompany(uid, companyId);
             if (typeof stopRealtimeListeners === 'function') stopRealtimeListeners({ clearCache: true });
+            await clearUserCompanyLinks(uid, companyId, { removeMember: true });
             window.state.companyId = null;
             window.state.companyName = null;
             window.state.companyJoinCode = null;
@@ -42077,6 +42078,7 @@ document.addEventListener('DOMContentLoaded', () => {
             await user.reauthenticateWithCredential(cred);
 
             if (typeof stopRealtimeListeners === 'function') stopRealtimeListeners({ clearCache: true });
+            await cleanupUserFirestoreBeforeDelete(uid, companyId, pendingCompanyId);
             clearLocalUserDataOnDelete(uid);
 
             await user.delete();
