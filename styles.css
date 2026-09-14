@@ -1853,6 +1853,38 @@ html.layout-desktop #tab-ndt .ndt-top-canvas-tools {
         top: 3.4rem;
     }
 
+/* PC: 결함위치도 좌측 조사항목(목록) 글자 1.25배 — 태블릿/모바일 밀도 규칙과 분리 */
+html:not(.layout-tablet) #tab-map .inspect-sidebar-left .defect-list-summary {
+    font-size: 0.9375rem;
+}
+html:not(.layout-tablet) #tab-map .inspect-sidebar-left .defect-summary-total {
+    font-size: 0.9rem;
+}
+html:not(.layout-tablet) #tab-map .inspect-sidebar-left .defect-summary-badge {
+    font-size: 0.85rem;
+}
+html:not(.layout-tablet) #tab-map .inspect-sidebar-left .defect-list-section-title {
+    font-size: 0.9375rem;
+}
+html:not(.layout-tablet) #tab-map .inspect-sidebar-left .defect-list-empty {
+    font-size: 1rem;
+}
+html:not(.layout-tablet) #tab-map .inspect-sidebar-left .defect-list-item-component {
+    font-size: 0.975rem;
+}
+html:not(.layout-tablet) #tab-map .inspect-sidebar-left .defect-list-item-type {
+    font-size: 0.875rem;
+}
+html:not(.layout-tablet) #tab-map .inspect-sidebar-left .defect-list-item-measure {
+    font-size: 0.825rem;
+}
+html:not(.layout-tablet) #tab-map .inspect-sidebar-left .defect-badge-no {
+    font-size: 0.85rem;
+    min-width: 2.05rem;
+    height: 2.05rem;
+    padding: 0 0.4rem;
+}
+
     /* NDT PC: 선택·마킹·크기·회전·줌을 도면 안 오버레이 */
     html:not(.layout-tablet) #tab-ndt #ndtCanvasContainer {
         position: relative !important;
