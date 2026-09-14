@@ -1,12 +1,10 @@
 ﻿;;; =========================================================================
 ;;;  CAD to Smart Safety App - 결함위치도 2점 정밀 캘리브레이션 추출기
-;;;  버전: v2.24 (매칭 순서 유지: 텍스트 실제 바운딩박스 → 제일 가까운 지시선 끝점
-;;;              → 반대쪽 끝의 같은 도면층 CIRCLE. v2.18 "아무 선" 금지 유지.
-;;;              v2.21 회귀(~7 WRONG → ~30 WRONG) 대응: 과도한 확정 게이트
-;;;              (uniqueNearest·상호최근접·비애매 AND·tol 220·확정거부 후 아무선
-;;;              주황 폴백)를 완화. 거리순 그리디 1:1 확정으로 되돌리고,
-;;;              미배정 폴백도 clear 지시선(같은 도면층 원)만 사용.
-;;;              LWPOLYLINE 첫·끝 정점 지시선 후보 유지)
+;;;  버전: v2.29 (테두리: v2.25식 닫힌 4변 LWPOLY + 맞닿은 4선 거의-직사각
+;;;              복구 + 특수 이중 평행변(gap≤2.0, 약 0.735mm)만 추가 제외.
+;;;              4~8선 클러스터·박스둘레 양끝 LINE 과필터·away-leader 없음.
+;;;              매칭은 v2.28/v2.24식 단순 그리디 + 가벼운 2-스왑·애매 주황.
+;;;              미배정 폴백은 LEADER 엔티티만 사용)
 ;;; =========================================================================
 
 ;; MTEXT 서식 제거 함수 ({\fGulim...;NO.01} -> NO.01)
@@ -63,7 +61,7 @@
   (if bestC (cons bestD bestC) nil)
 )
 
-;; (v2.21용, v2.24에서는 쓰지 않음 — uniqueNearest가 정상 지시선까지 많이 탈락시킴)
+;; (v2.21용, v2.29에서도 쓰지 않음 — uniqueNearest가 정상 지시선까지 많이 탈락시킴)
 ;; 제일 가까운 원이 "유일하게" 가까운 경우에만 중심점 (x y)를 돌려준다.
 (defun uniqueNearestCircleWithinTol ( pt circles tol layerFilter uniqMargin
                                       / c d bestD bestC secondD )
@@ -129,6 +127,386 @@
   (setq cx (max (car minPt) (min (car maxPt) (car pt))))
   (setq cy (max (cadr minPt) (min (cadr maxPt) (cadr pt))))
   (distance pt (list cx cy))
+)
+
+;; ---------- v2.29: 텍스트 테두리 감지 (지시선 후보에서만) ----------
+;; v2.25식: 닫힌 4변 LWPOLY / 맞닿은 LINE 4개 거의-직사각(강도 유지).
+;; 특수 추가: 평행 이중변 gap≤2.0(약 0.735mm) — 같은 글자박스 근처·프레임
+;; 길이일 때만 그 두 변만 제외. 4~8선 클러스터·박스둘레 양끝 LINE은 넣지 않음.
+(defun cad2-ptClose ( a b tol )
+  (and a b (<= (distance a b) tol))
+)
+
+(defun cad2-samePt ( a b )
+  (and a b (< (distance a b) 0.5))
+)
+
+(defun cad2-vdot2 ( u v )
+  (+ (* (car u) (car v)) (* (cadr u) (cadr v)))
+)
+
+(defun cad2-lineLen ( ln )
+  (distance (car ln) (cadr ln))
+)
+
+(defun cad2-lineMid ( ln )
+  (list (/ (+ (car (car ln)) (car (cadr ln))) 2.0)
+        (/ (+ (cadr (car ln)) (cadr (cadr ln))) 2.0))
+)
+
+(defun cad2-lineDir ( ln / len dx dy )
+  (setq len (cad2-lineLen ln))
+  (if (< len 1e-9)
+    nil
+    (progn
+      (setq dx (- (car (cadr ln)) (car (car ln))))
+      (setq dy (- (cadr (cadr ln)) (cadr (car ln))))
+      (list (/ dx len) (/ dy len))
+    )
+  )
+)
+
+(defun cad2-dirsParallel ( d1 d2 / c )
+  (setq c (abs (cad2-vdot2 d1 d2)))
+  (>= c 0.98)
+)
+
+;; 점에서 무한직선(a-b)까지 수직거리.
+(defun cad2-distPtToInfLine ( pt a b / ab len )
+  (setq ab (list (- (car b) (car a)) (- (cadr b) (cadr a))))
+  (setq len (distance a b))
+  (if (< len 1e-9)
+    (distance pt a)
+    (/ (abs (- (* (- (car pt) (car a)) (cadr ab))
+               (* (- (cadr pt) (cadr a)) (car ab))))
+       len)
+  )
+)
+
+;; 선분 방향 투영 겹침 비율(짧은 쪽 길이 기준). 0~1.
+(defun cad2-segProjOverlapRatio ( ln1 ln2 / d ax ay bx by p1 p2 q1 q2
+                                         t1 t2 s1 s2 lo hi span )
+  (setq d (cad2-lineDir ln1))
+  (if (null d)
+    0.0
+    (progn
+      (setq ax (car (car ln1)) ay (cadr (car ln1)))
+      (setq p1 0.0)
+      (setq p2 (cad2-lineLen ln1))
+      (setq bx (car (car ln2)) by (cadr (car ln2)))
+      (setq q1 (cad2-vdot2 (list (- bx ax) (- by ay)) d))
+      (setq q2 (cad2-vdot2 (list (- (car (cadr ln2)) ax) (- (cadr (cadr ln2)) ay)) d))
+      (setq t1 (min p1 p2) t2 (max p1 p2))
+      (setq s1 (min q1 q2) s2 (max q1 q2))
+      (setq lo (max t1 s1) hi (min t2 s2))
+      (setq span (min (- t2 t1) (- s2 s1)))
+      (if (or (<= span 1e-9) (>= lo hi))
+        0.0
+        (/ (- hi lo) span)
+      )
+    )
+  )
+)
+
+;; 거의 평행하고 간격이 (0, maxGap] 이며 길이·투영이 비슷한 이중변인가.
+(defun cad2-isParallelDouble ( ln1 ln2 maxGap / d1 d2 g len1 len2 )
+  (setq d1 (cad2-lineDir ln1))
+  (setq d2 (cad2-lineDir ln2))
+  (if (not (and d1 d2 (cad2-dirsParallel d1 d2)))
+    nil
+    (progn
+      (setq len1 (cad2-lineLen ln1) len2 (cad2-lineLen ln2))
+      (setq g (cad2-distPtToInfLine (cad2-lineMid ln1) (car ln2) (cadr ln2)))
+      (and (> len1 1.0) (> len2 1.0)
+           (<= (abs (- len1 len2)) (* 0.40 (max len1 len2)))
+           (> g 0.05) (<= g maxGap)
+           (>= (cad2-segProjOverlapRatio ln1 ln2) 0.25))
+    )
+  )
+)
+
+;; 시계/반시계 순 4꼭짓점이 거의 직사각형인지 판정 (대변 길이·직각만 봄).
+(defun cad2-isNearlyRectPts ( pts / a b c d ab bc cd da lab lbc lcd lda )
+  (if (/= (length pts) 4)
+    nil
+    (progn
+      (setq a (nth 0 pts) b (nth 1 pts) c (nth 2 pts) d (nth 3 pts))
+      (setq lab (distance a b) lbc (distance b c) lcd (distance c d) lda (distance d a))
+      (if (or (< lab 1.0) (< lbc 1.0) (< lcd 1.0) (< lda 1.0))
+        nil
+        (progn
+          (setq ab (list (- (car b) (car a)) (- (cadr b) (cadr a))))
+          (setq bc (list (- (car c) (car b)) (- (cadr c) (cadr b))))
+          (setq cd (list (- (car d) (car c)) (- (cadr d) (cadr c))))
+          (setq da (list (- (car a) (car d)) (- (cadr a) (cadr d))))
+          (and
+            (<= (abs (- lab lcd)) (* 0.25 (max lab lcd)))
+            (<= (abs (- lbc lda)) (* 0.25 (max lbc lda)))
+            (<= (abs (cad2-vdot2 ab bc)) (* 0.35 lab lbc))
+            (<= (abs (cad2-vdot2 bc cd)) (* 0.35 lbc lcd))
+            (<= (abs (cad2-vdot2 cd da)) (* 0.35 lcd lda))
+            (<= (abs (cad2-vdot2 da ab)) (* 0.35 lda lab))
+          )
+        )
+      )
+    )
+  )
+)
+
+;; 꼭짓점을 중심 기준 각도순으로 정렬해 사각형 판정에 쓸 순서를 만든다.
+(defun cad2-orderCornersByAngle ( pts / cx cy keyed p )
+  (setq cx 0.0 cy 0.0)
+  (foreach p pts
+    (setq cx (+ cx (car p)))
+    (setq cy (+ cy (cadr p)))
+  )
+  (setq cx (/ cx (float (length pts))))
+  (setq cy (/ cy (float (length pts))))
+  (setq keyed '())
+  (foreach p pts
+    (setq keyed (cons (cons (angle (list cx cy) p) p) keyed))
+  )
+  (setq keyed
+    (vl-sort keyed (function (lambda ( a b ) (< (car a) (car b)))))
+  )
+  (mapcar (function cdr) keyed)
+)
+
+;; 닫힌(또는 시작=끝) 4변 LWPOLY가 작은 거의-직사각형 테두리인지.
+(defun cad2-isTextBorderLwpoly ( dxf verts maxSide / closedFlag n pts sideOk i a b )
+  (setq closedFlag
+    (and (assoc 70 dxf) (= (logand (cdr (assoc 70 dxf)) 1) 1))
+  )
+  (setq pts verts)
+  (setq n (length pts))
+  (if (and (>= n 5) (cad2-ptClose (car pts) (nth (1- n) pts) 1.0))
+    (progn
+      (setq pts (reverse (cdr (reverse pts))))
+      (setq n (length pts))
+      (setq closedFlag T)
+    )
+  )
+  (if (and (= n 4) closedFlag)
+    (progn
+      (setq sideOk T)
+      (setq i 0)
+      (while (and sideOk (< i 4))
+        (setq a (nth i pts))
+        (setq b (nth (rem (1+ i) 4) pts))
+        (if (> (distance a b) maxSide) (setq sideOk nil))
+        (setq i (1+ i))
+      )
+      (and sideOk (cad2-isNearlyRectPts pts))
+    )
+    nil
+  )
+)
+
+(defun cad2-linesShareEnd ( ln1 ln2 tol )
+  (or (cad2-ptClose (car ln1) (car ln2) tol)
+      (cad2-ptClose (car ln1) (cadr ln2) tol)
+      (cad2-ptClose (cadr ln1) (car ln2) tol)
+      (cad2-ptClose (cadr ln1) (cadr ln2) tol))
+)
+
+;; 선분이 같은 글자 박스 근처의 프레임 변인지(중점 근접 + 길이가 박스 대비 과도하지 않음).
+;; v2.28의 scale 1.5는 글자박스보다 큰 테두리 변을 놓쳐, v2.29는 여유(scale 4 + 하한 200)만 둔다.
+(defun cad2-lineIsFrameEdgeNearBox ( ln minPt maxPt scale minLim / mid len tw th lim nearLim )
+  (setq mid (cad2-lineMid ln))
+  (setq len (cad2-lineLen ln))
+  (setq tw (abs (- (car maxPt) (car minPt))))
+  (setq th (abs (- (cadr maxPt) (cadr minPt))))
+  (setq lim (max (* scale (max tw th 1.0)) minLim))
+  (setq nearLim (max tw th 80.0))
+  (and (<= len lim)
+       (<= (distPtToBox mid minPt maxPt) nearLim))
+)
+
+;; 평행 이중변 두 선이 같은 글자 박스의 프레임 이중변으로 보이는지.
+(defun cad2-parallelDoubleNearSameText ( ln1 ln2 textBoxes
+                                         / box minPt maxPt found )
+  (setq found nil)
+  (foreach box textBoxes
+    (setq minPt (car box) maxPt (cadr box))
+    (if (and minPt maxPt (not found)
+             (cad2-lineIsFrameEdgeNearBox ln1 minPt maxPt 4.0 200.0)
+             (cad2-lineIsFrameEdgeNearBox ln2 minPt maxPt 4.0 200.0))
+      (setq found T)
+    )
+  )
+  found
+)
+
+;; 네 선분 끝점에서 중복을 합쳐 꼭짓점 목록을 만든다.
+(defun cad2-uniqueCornersFromLines ( lnA lnB lnC lnD tol / raw pts p q found )
+  (setq raw (list (car lnA) (cadr lnA) (car lnB) (cadr lnB)
+                  (car lnC) (cadr lnC) (car lnD) (cadr lnD)))
+  (setq pts '())
+  (foreach p raw
+    (setq found nil)
+    (foreach q pts
+      (if (cad2-ptClose p q tol) (setq found T))
+    )
+    (if (not found) (setq pts (cons p pts)))
+  )
+  pts
+)
+
+;; 서로 맞닿은 LINE 4개가 작은 거의-직사각형을 이루면 T. (v2.25 강도: 이웃 정확히 2, 꼭짓점 4)
+(defun cad2-fourLinesFormSmallRect ( lnA lnB lnC lnD joinTol maxSide
+                                     / setL ln o touchCnt corners ordered ok )
+  (setq setL (list lnA lnB lnC lnD))
+  (if (or (> (cad2-lineLen lnA) maxSide)
+          (> (cad2-lineLen lnB) maxSide)
+          (> (cad2-lineLen lnC) maxSide)
+          (> (cad2-lineLen lnD) maxSide))
+    nil
+    (progn
+      ;; 각 선이 나머지 중 정확히 2개와 끝점을 공유해야 닫힌 4각형이다.
+      (setq ok T)
+      (foreach ln setL
+        (setq touchCnt 0)
+        (foreach o setL
+          (if (and (not (eq o ln)) (cad2-linesShareEnd ln o joinTol))
+            (setq touchCnt (1+ touchCnt))
+          )
+        )
+        (if (/= touchCnt 2) (setq ok nil))
+      )
+      (if (not ok)
+        nil
+        (progn
+          (setq corners (cad2-uniqueCornersFromLines lnA lnB lnC lnD joinTol))
+          (if (/= (length corners) 4)
+            nil
+            (progn
+              (setq ordered (cad2-orderCornersByAngle corners))
+              (cad2-isNearlyRectPts ordered)
+            )
+          )
+        )
+      )
+    )
+  )
+)
+
+;; (ti, 원중심) 조합의 최저 품질점수를 pairList에서 찾는다. 없으면 nil.
+(defun cad2-bestPairScoreFor ( pairList ti circ / best pr )
+  (setq best nil)
+  (foreach pr pairList
+    (if (and (= (nth 3 pr) ti) (cad2-samePt (nth 4 pr) circ))
+      (if (or (null best) (< (car pr) best))
+        (setq best (car pr))
+      )
+    )
+  )
+  best
+)
+
+;; 텍스트 ti의 pair 중 텍스트쪽 거리가 가장 짧은 후보의 원 중심.
+(defun cad2-nearestCircByTextDist ( pairList ti / bestPr pr )
+  (setq bestPr nil)
+  (foreach pr pairList
+    (if (= (nth 3 pr) ti)
+      (if (or (null bestPr)
+              (< (cadr pr) (cadr bestPr))
+              (and (= (cadr pr) (cadr bestPr)) (< (car pr) (car bestPr))))
+        (setq bestPr pr)
+      )
+    )
+  )
+  (if bestPr (nth 4 bestPr) nil)
+)
+
+;; lineList에서 텍스트 테두리 LINE을 뺀다.
+;; (1) v2.25: 맞닿은 4선 거의-직사각형
+;; (2) v2.29 특수: 평행 이중변(gap≤parallelGap≈0.735mm) — 같은 글자박스 근처일 때만 그 두 변
+;; 4~8선 클러스터·박스둘레 양끝 LINE 과필터는 넣지 않는다.
+;; 반환: (filteredLines excludedLineCount frameCount)
+(defun cad2-filterRectBorderLines ( lines joinTol maxSide parallelGap textBoxes
+                                    / n shortIdxs excl i ii jj kk mm
+                                      lnI lnJ lnK frameCount filtered idx )
+  (setq n (length lines))
+  (setq shortIdxs '())
+  (setq i 0)
+  (while (< i n)
+    (if (<= (cad2-lineLen (nth i lines)) maxSide)
+      (setq shortIdxs (cons i shortIdxs))
+    )
+    (setq i (1+ i))
+  )
+  (setq shortIdxs (reverse shortIdxs))
+  (setq excl '())
+  (setq frameCount 0)
+
+  ;; (1) v2.25: 맞닿은 4선 거의-직사각형
+  (foreach ii shortIdxs
+    (if (not (member ii excl))
+      (progn
+        (setq lnI (nth ii lines))
+        (foreach jj shortIdxs
+          (if (and (not (member jj excl))
+                   (/= jj ii)
+                   (cad2-linesShareEnd lnI (nth jj lines) joinTol))
+            (progn
+              (setq lnJ (nth jj lines))
+              (foreach kk shortIdxs
+                (if (and (not (member kk excl))
+                         (/= kk ii) (/= kk jj)
+                         (cad2-linesShareEnd lnJ (nth kk lines) joinTol))
+                  (progn
+                    (setq lnK (nth kk lines))
+                    (foreach mm shortIdxs
+                      (if (and (not (member mm excl))
+                               (/= mm ii) (/= mm jj) (/= mm kk)
+                               (cad2-linesShareEnd (nth mm lines) lnI joinTol)
+                               (cad2-fourLinesFormSmallRect
+                                 lnI lnJ lnK (nth mm lines) joinTol maxSide))
+                        (progn
+                          (setq excl (cons ii (cons jj (cons kk (cons mm excl)))))
+                          (setq frameCount (1+ frameCount))
+                        )
+                      )
+                    )
+                  )
+                )
+              )
+            )
+          )
+        )
+      )
+    )
+  )
+
+  ;; (2) v2.29 특수: 평행 이중변 — 같은 글자박스 근처 프레임 변 쌍만(과필터 금지)
+  (if textBoxes
+    (foreach ii shortIdxs
+      (if (not (member ii excl))
+        (foreach jj shortIdxs
+          (if (and (> jj ii)
+                   (not (member jj excl))
+                   (cad2-isParallelDouble (nth ii lines) (nth jj lines) parallelGap)
+                   (cad2-parallelDoubleNearSameText
+                     (nth ii lines) (nth jj lines) textBoxes))
+            (progn
+              (setq excl (cons ii (cons jj excl)))
+              (setq frameCount (1+ frameCount))
+            )
+          )
+        )
+      )
+    )
+  )
+
+  (setq filtered '())
+  (setq idx 0)
+  (foreach lnI lines
+    (if (not (member idx excl))
+      (setq filtered (cons lnI filtered))
+    )
+    (setq idx (1+ idx))
+  )
+  (list (reverse filtered) (length excl) frameCount)
 )
 
 ;; 결함 번호인지 확인 (관리실, 창고, 범례 등 제외)
@@ -203,10 +581,17 @@
                      ln idxL whichEnd endPt farEnd matchedCircle lwPolyCount
                      verts leaderLineCount
                      bothEndGap clearLeaderList a1 a2 textEndPt
-                     vlaObj coords )
+                     vlaObj coords
+                     frameMaxSide borderJoinTol borderFilter
+                     borderLineSkip borderFrameLine borderFrameLw
+                     circleWeight circleDist pairScore
+                     parallelGap textBoxes farBoxDist lnLen
+                     ambMargin ambiguousIdx ambiguousList ambiguousMsg
+                     asgA asgB asgX tiA tiB circA circB sAC sAD sBC sBD
+                     newAssign nearA nearB secondSc bestSc )
   (vl-load-com)
   (princ "\n=======================================================")
-  (princ "\n  [CAD2APP v2.24] 스마트 안전점검 - 결함 번호/지시선 정밀 추출기")
+  (princ "\n  [CAD2APP v2.29] 스마트 안전점검 - 결함 번호/지시선 정밀 추출기")
   (princ "\n=======================================================")
 
   ;; 1. 기준점 2개 지정
@@ -241,6 +626,14 @@
   (setq uncertainList '())
   (setq textCandidates '())
   (setq layerVotes '())
+  ;; 텍스트 테두리 네모 한 변 최대 길이 / 끝점 접합 허용 (도면 단위 mm 가정)
+  ;; v2.29: v2.25식 4선(joinTol 15) + 이중변 gap≤2.0만 특수 추가(과필터 금지)
+  (setq frameMaxSide 4500.0)
+  (setq borderJoinTol 15.0)
+  (setq parallelGap 2.0)
+  (setq borderFrameLw 0)
+  (setq borderFrameLine 0)
+  (setq borderLineSkip 0)
   (setq i 0)
 
   ;; 3. 객체 분류
@@ -356,6 +749,7 @@
       ;; (F) LWPOLYLINE — 첫 정점·끝 정점을 LINE과 같은 (p1 p2 layer) 형식으로
       ;; 지시선 후보에 넣는다. 꺾인 지시선도 텍스트 쪽/원 쪽 끝만 있으면 매칭 가능.
       ;; 너무 긴 것(벽체/치수, 8000 이상)은 LINE과 동일하게 제외. 개수는 진단용으로 유지.
+      ;; v2.29: 닫힌 4변 거의-직사각형(텍스트 테두리)은 후보에 넣지 않는다.
       ((= entType "LWPOLYLINE")
        (setq lwPolyCount (1+ lwPolyCount))
        (setq layerName (cdr (assoc 8 dxf)))
@@ -366,12 +760,15 @@
          )
        )
        (setq verts (reverse verts))
-       (if (>= (length verts) 2)
-         (progn
-           (setq p1 (car verts))
-           (setq p2 (nth (1- (length verts)) verts))
-           (if (< (distance p1 p2) 8000.0)
-             (setq lineList (cons (list p1 p2 layerName) lineList))
+       (if (cad2-isTextBorderLwpoly dxf verts frameMaxSide)
+         (setq borderFrameLw (1+ borderFrameLw))
+         (if (>= (length verts) 2)
+           (progn
+             (setq p1 (car verts))
+             (setq p2 (nth (1- (length verts)) verts))
+             (if (< (distance p1 p2) 8000.0)
+               (setq lineList (cons (list p1 p2 layerName) lineList))
+             )
            )
          )
        )
@@ -379,6 +776,21 @@
     )
     (setq i (1+ i))
   )
+
+  ;; 3-0. v2.29: LINE 테두리(v2.25식 4선 직사각 + 이중 평행변 gap≤2만)를 지시선 후보에서 제외.
+  ;;      4~8선 클러스터·박스둘레 양끝 LINE 제외는 하지 않는다(정상 지시선 보존).
+  (setq textBoxes '())
+  (foreach tc textCandidates
+    (if (and (nth 4 tc) (nth 5 tc))
+      (setq textBoxes (cons (list (nth 4 tc) (nth 5 tc)) textBoxes))
+    )
+  )
+  (setq borderFilter
+    (cad2-filterRectBorderLines lineList borderJoinTol frameMaxSide
+                                parallelGap textBoxes))
+  (setq lineList (car borderFilter))
+  (setq borderLineSkip (cadr borderFilter))
+  (setq borderFrameLine (caddr borderFilter))
 
   ;; 3-1. 결함 도면층 자동감지: NO./# 로 확실히 결함번호로 판별된 텍스트들이 가장 많이
   ;;    모여있는 도면층을 "결함 도면층"으로 자동 채택한다. 이 도면층에 있는 텍스트는
@@ -406,36 +818,22 @@
     )
   )
 
-  ;; 4~5. v2.24 핵심 매칭 순서 — 반드시 "텍스트 → 지시선 → 반대쪽 끝 → 원" 순서
-  ;;
-  ;; v2.23에서 남은 밀집구역 문제:
-  ;;   텍스트에서 가장 가까운 선 끝을 기준으로 후보를 만든 뒤 단순 거리순 그리디를 하면,
-  ;;   12가 56의 원으로 연결되는 것처럼 "가까운 선끝"은 맞지만 "반대쪽 원 연결"이 약한
-  ;;   후보가 먼저 원을 차지할 수 있다.
-  ;;
-  ;; v2.24에서는 후보 생성 순서는 그대로 유지하되, 후보의 품질을 함께 평가한다.
-  ;;   (1) TEXT 실제 바운딩박스 → 가장 가까운 지시선 끝점
-  ;;   (2) 그 반대쪽 끝점 → 같은 Layer CIRCLE
-  ;;   (3) 텍스트쪽 거리 + 원쪽 연결거리를 함께 사용해 후보 품질을 계산
-  ;;   (4) 텍스트/원/지시선을 1:1로 배정
-  ;;
-  ;; 핵심은 "원에 가까운 선을 먼저 고르는 것"이 아니다.
-  ;; 모든 후보가 먼저 사용자 지정 순서(텍스트→선끝→반대끝→원)를 통과한 뒤,
-  ;; 그 중 텍스트 연결이 가깝고 반대쪽 원 연결도 강한 후보를 우선한다.
-  ;;
+  ;; 4~5. v2.29 핵심 매칭 — v2.28/v2.24식 단순 골격
+  ;;   (1) TEXT 실제 바운딩박스 → 가장 가까운 지시선 끝점(=텍스트쪽)
+  ;;   (2) 그 반대쪽 끝점만 → 같은 Layer CIRCLE
+  ;;   (3) 텍스트쪽 거리 + 원쪽 연결거리로 품질점수 → 텍스트/원/선 1:1 그리디
+  ;;   (4) 그리디 후 가벼운 2-스왑·애매/교차 의심만 주황 표시
+  ;; away-leader / 박스둘레 양끝 스킵 / 4~8선 과필터 없음.
   ;; v2.18의 "아무 LINE 최근접" 방식은 사용하지 않는다.
-  ;; 반대쪽 끝에 같은 Layer CIRCLE이 없는 LINE/LWPOLYLINE은 후보가 되지 않는다.
   (setq attachTol 400.0)
   (setq maxDist 3500.0)
-  ;; circleWeight가 너무 크면 텍스트와 먼 선을 선택하는 회귀가 생길 수 있으므로
-  ;; 텍스트쪽 거리를 기본으로 유지하고 원쪽 연결을 보정값으로 사용한다.
   (setq circleWeight 1.20)
+  (setq ambMargin 80.0)
   (setq pairList '())
 
   ;; pair 형식:
   ;; (품질점수 텍스트→선끝거리 반대끝→원거리 텍스트인덱스 원중심 선인덱스)
   ;; 품질점수 = 텍스트거리 + circleWeight * 원연결거리
-  ;; 원 연결거리는 반드시 같은 Layer CIRCLE만 대상으로 계산된다.
   (setq idxT 0)
   (foreach txtItem textList
     (setq boxPt (nth 1 txtItem))
@@ -445,6 +843,7 @@
       (setq p1 (car ln))
       (setq p2 (cadr ln))
       (setq layerName (caddr ln))
+      (setq lnLen (distance p1 p2))
 
       ;; ★ 1단계: 실제 텍스트 바운딩박스에서 더 가까운 끝을 텍스트쪽 끝으로 결정
       (if (and (nth 3 txtItem) (nth 4 txtItem))
@@ -473,17 +872,21 @@
             )
           )
 
-          ;; ★ 2단계: 반드시 반대쪽 끝에서 같은 Layer CIRCLE을 찾는다.
-          ;; 반환값 = (원까지 거리 . 원중심)
+          (if (and (nth 3 txtItem) (nth 4 txtItem))
+            (setq farBoxDist (distPtToBox farEnd (nth 3 txtItem) (nth 4 txtItem)))
+            (setq farBoxDist (distance boxPt farEnd))
+          )
+
+          ;; ★ 2단계: 반드시 반대쪽 끝에서만 같은 Layer CIRCLE을 찾는다.
           (setq a1 (nearestCircleDistWithinTol farEnd circleList attachTol layerName))
 
           (if a1
             (progn
-              ;; ★ 3단계: 텍스트 연결을 우선하되 원 연결 상태도 점수에 반영.
-              ;; 밀집구역에서 12→56 같은 약한 연결이 강한 실제 연결을 밀어내는 것을 줄인다.
               (setq circleDist (car a1))
               (setq matchedCircle (cdr a1))
               (setq pairScore (+ curDist (* circleWeight circleDist)))
+              ;; 원쪽이 글자에서 멀수록(지시선이 뚜렷할수록) 소폭 가산점
+              (setq pairScore (- pairScore (* 0.05 (max 0.0 (- farBoxDist curDist)))))
 
               (setq pairList
                 (cons
@@ -504,14 +907,19 @@
                  "개, 선(LINE+LWPOLY 끝점) " (itoa (length lineList))
                  "개 — 텍스트→선끝→반대끝→같은 Layer 원 후보 생성 완료"))
 
+  (if (or (> borderFrameLw 0) (> borderFrameLine 0))
+    (princ (strcat "\n[진단] 텍스트 테두리 제외(v2.29 v2.25네모+이중변): LWPOLY "
+                   (itoa borderFrameLw) "개, LINE프레임/이중변 "
+                   (itoa borderFrameLine) "개(선 "
+                   (itoa borderLineSkip) "개) — 지시선 후보에서만 제외"))
+  )
+
   (if (> lwPolyCount 0)
     (princ (strcat "\n[진단] LWPOLYLINE " (itoa lwPolyCount)
-                   "개는 첫·끝 정점으로 지시선 후보에 포함함"))
+                   "개 선택됨(테두리 네모 제외 후 나머지 첫·끝 정점을 지시선 후보에 포함)"))
   )
 
   ;; ★ 4단계: 품질점수 순으로 1:1 배정.
-  ;; 품질점수는 텍스트 연결거리 + 원 연결거리 보정이다.
-  ;; v2.21처럼 후보를 대량 탈락시키는 hard gate는 사용하지 않는다.
   (setq pairList
     (vl-sort pairList
       (function
@@ -545,9 +953,119 @@
         (setq usedTextIdx (cons ti usedTextIdx))
         (setq usedCircleIdx (cons matchedCircle usedCircleIdx))
         (setq usedLineIdx (cons idxL usedLineIdx))
-        (setq circleAssign (cons (cons ti matchedCircle) circleAssign))
+        ;; (텍스트인덱스 원중심 선인덱스 품질점수)
+        (setq circleAssign (cons (list ti matchedCircle idxL (car pr)) circleAssign))
       )
     )
+  )
+
+  ;; ★ 4b. v2.29(=v2.28) 가벼운 2-스왑: A↔B 맞바꿈이 점수 합을 낮추면 적용(한 패스)
+  (setq newAssign '())
+  (foreach asgA circleAssign
+    (foreach asgB circleAssign
+      (setq tiA (car asgA) circA (nth 1 asgA))
+      (setq tiB (car asgB) circB (nth 1 asgB))
+      (if (< tiA tiB)
+        (progn
+          (setq sAC (cad2-bestPairScoreFor pairList tiA circA))
+          (setq sBD (cad2-bestPairScoreFor pairList tiB circB))
+          (setq sAD (cad2-bestPairScoreFor pairList tiA circB))
+          (setq sBC (cad2-bestPairScoreFor pairList tiB circA))
+          (if (and sAC sBD sAD sBC
+                   (< (+ sAD sBC) (+ sAC sBD)))
+            (setq newAssign
+              (cons (list tiA tiB circB circA sAD sBC) newAssign))
+          )
+        )
+      )
+    )
+  )
+  ;; 겹치지 않는 스왑만 앞에서부터 적용
+  (setq usedTextIdx '())
+  (foreach asgA (reverse newAssign)
+    (setq tiA (nth 0 asgA) tiB (nth 1 asgA))
+    (setq circB (nth 2 asgA) circA (nth 3 asgA))
+    (setq sAD (nth 4 asgA) sBC (nth 5 asgA))
+    (if (and (not (member tiA usedTextIdx)) (not (member tiB usedTextIdx)))
+      (progn
+        (setq usedTextIdx (cons tiA (cons tiB usedTextIdx)))
+        (setq asgB '())
+        (foreach asgX circleAssign
+          (cond
+            ((= (car asgX) tiA)
+             (setq asgB (cons (list tiA circB (nth 2 asgX) sAD) asgB)))
+            ((= (car asgX) tiB)
+             (setq asgB (cons (list tiB circA (nth 2 asgX) sBC) asgB)))
+            (T (setq asgB (cons asgX asgB)))
+          )
+        )
+        (setq circleAssign (reverse asgB))
+      )
+    )
+  )
+  (if usedTextIdx
+    (princ (strcat "\n[진단] 교차 배정 2-스왑 보정 "
+                   (itoa (/ (length usedTextIdx) 2)) "쌍 적용"))
+  )
+
+  ;; ★ 4c. 애매 배정·잔여 교차 스왑 의심 → 주황(색만, 배정은 유지)
+  (setq ambiguousIdx '())
+  (foreach asgA circleAssign
+    (setq tiA (car asgA))
+    (setq circA (nth 1 asgA))
+    (setq bestSc (nth 3 asgA))
+    (setq secondSc nil)
+    (foreach pr pairList
+      (if (and (= (nth 3 pr) tiA) (not (cad2-samePt (nth 4 pr) circA)))
+        (if (or (null secondSc) (< (car pr) secondSc))
+          (setq secondSc (car pr))
+        )
+      )
+    )
+    (if (and bestSc secondSc (< (- secondSc bestSc) ambMargin))
+      (if (not (member tiA ambiguousIdx))
+        (setq ambiguousIdx (cons tiA ambiguousIdx))
+      )
+    )
+  )
+  ;; A가 B의 최근접 원을, B가 A의 최근접 원을 가진 교차 패턴
+  (foreach asgA circleAssign
+    (foreach asgB circleAssign
+      (setq tiA (car asgA) circA (nth 1 asgA))
+      (setq tiB (car asgB) circB (nth 1 asgB))
+      (if (< tiA tiB)
+        (progn
+          (setq nearA (cad2-nearestCircByTextDist pairList tiA))
+          (setq nearB (cad2-nearestCircByTextDist pairList tiB))
+          (if (and nearA nearB
+                   (cad2-samePt nearA circB)
+                   (cad2-samePt nearB circA))
+            (progn
+              (if (not (member tiA ambiguousIdx))
+                (setq ambiguousIdx (cons tiA ambiguousIdx)))
+              (if (not (member tiB ambiguousIdx))
+                (setq ambiguousIdx (cons tiB ambiguousIdx)))
+            )
+          )
+        )
+      )
+    )
+  )
+
+  (setq ambiguousList '())
+  (foreach ti ambiguousIdx
+    (setq txtItem (nth ti textList))
+    (if txtItem
+      (progn
+        (setq ambiguousList (cons (nth 0 txtItem) ambiguousList))
+        (entmod (list (cons -1 (nth 2 txtItem)) (cons 62 30)))
+        (entupd (nth 2 txtItem))
+      )
+    )
+  )
+  (if ambiguousList
+    (princ (strcat "\n[진단] 애매/교차 의심 배정 " (itoa (length ambiguousList))
+                   "개 → 주황 표시(핀은 유지, 수동 확인)"))
   )
 
   ;; 6. 확정배정된 텍스트는 그 원을 결함 위치로 쓴다.
@@ -562,7 +1080,7 @@
     (setq assigned (assoc idxT circleAssign))
 
     (if assigned
-      (setq bestTip (cdr assigned))
+      (setq bestTip (nth 1 assigned))
       (progn
         ;; LEADER 객체(진짜 지시선 엔티티)만 보조 추측. 일반 LINE 아무 최근접은 금지.
         (setq minDist maxDist)
@@ -642,7 +1160,7 @@
   (setq f (open outPath "w"))
   (write-line "{" f)
   (write-line "  \"source\": \"AutoCAD\"," f)
-  (write-line "  \"version\": \"2.24_text_leader_circle_consistency\"," f)
+  (write-line "  \"version\": \"2.29_v25_rect_plus_double_edge\"," f)
   (write-line "  \"refPoint1\": {" f)
   (write-line (strcat "    \"x\": " (rtos (car pt1) 2 4) ",") f)
   (write-line (strcat "    \"y\": " (rtos (cadr pt1) 2 4)) f)
@@ -690,6 +1208,20 @@
     )
   )
 
+  ;; 애매/교차 의심(배정은 됐지만 침묵 오핀 가능) 안내
+  (setq ambiguousMsg "")
+  (if ambiguousList
+    (progn
+      (setq ambiguousMsg (strcat "\n\n⚠ " (itoa (length ambiguousList)) "개 결함은 원에 배정됐지만 애매하거나 교차 스왑 의심이라 주황으로 표시했습니다.\n앱에서 자리가 바뀌어 보일 수 있으니 캐드에서 확인해주세요.\n대상 번호: "))
+      (setq firstItem T)
+      (foreach n ambiguousList
+        (if (not firstItem) (setq ambiguousMsg (strcat ambiguousMsg ", ")))
+        (setq ambiguousMsg (strcat ambiguousMsg n))
+        (setq firstItem nil)
+      )
+    )
+  )
+
   ;; 중복/빠진 번호 안내 문구 조립
   (setq dupMissingMsg "")
   (if dupNumberList
@@ -717,7 +1249,8 @@
 
   (princ (strcat "\n[진단] 텍스트 " (itoa (length textList)) "개 중 원으로 확정배정 "
                  (itoa (length circleAssign)) "개, 리더/라인 추측(주황) "
-                 (itoa (length uncertainList)) "개"))
+                 (itoa (length uncertainList)) "개, 애매/교차의심(주황) "
+                 (itoa (length ambiguousList)) "개"))
 
   (alert (strcat "총 " (itoa (length jsonList)) "개의 결함(비결함 텍스트 제외 완료)과 기준점 2개를 추출했습니다!\n\n저장 경로:\n" outPath "\n\n이제 스마트 안전점검 앱에서 [📐 캐드 핀 가져오기]를 누르고 2개 기준점을 클릭해 주세요."
     (if (> dupCircleCount 0)
@@ -726,10 +1259,11 @@
     )
     dupMissingMsg
     uncertainMsg
+    ambiguousMsg
   ))
-  (princ (strcat "\n[CAD2APP v2.24] 추출 완료! 파일 경로: " outPath "\n"))
+  (princ (strcat "\n[CAD2APP v2.29] 추출 완료! 파일 경로: " outPath "\n"))
   (princ)
 )
 
-(princ "\n[CAD2APP v2.24] 로드 완료. 캐드 명령창에 CAD2APP 을 입력하세요.\n")
+(princ "\n[CAD2APP v2.29] 로드 완료. 캐드 명령창에 CAD2APP 을 입력하세요.\n")
 (princ)
