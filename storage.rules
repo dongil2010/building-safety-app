@@ -1,7 +1,9 @@
 rules_version = '2';
 
-// Firebase Storage — OTA APK 배포용
-// 배포: Firebase 콘솔 → Storage → 규칙 탭에 붙여넣기 후 게시
+// Firebase Storage
+// 배포: firebase deploy --only storage
+//   또는 Firebase 콘솔 → Storage → 규칙 탭에 붙여넣기 후 게시
+// Blaze 필요 (Firestore 멤버십 조회). 이 프로젝트는 이미 Blaze.
 
 service firebase.storage {
   match /b/{bucket}/o {
@@ -10,12 +12,38 @@ service firebase.storage {
         firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.get('otaPublisher', false) == true;
     }
 
+    function isCompanyMember(companyId) {
+      return request.auth != null &&
+        firestore.exists(/databases/(default)/documents/companies/$(companyId)/members/$(request.auth.uid));
+    }
+
+    function isCompanyAssetType(assetType) {
+      return assetType == 'floorDrawings'
+        || assetType == 'floorDrawingPdfs'
+        || assetType == 'floorDrawingTiers'
+        || assetType == 'photos';
+    }
+
+    function isAllowedCompanyContentType() {
+      return request.resource.contentType.matches('^(image/.*|application/pdf)$');
+    }
+
     // OTA APK — 네이티브 앱이 토큰 URL로 무인증 다운로드
     match /releases/{fileName} {
       allow read: if true;
       allow write: if isOtaPublisher()
         && request.resource.size < 120 * 1024 * 1024
         && request.resource.contentType == 'application/vnd.android.package-archive';
+    }
+
+    // 회사 멤버 도면/PDF/티어/사진 — Firestore companies/{id}/members/{uid} 와 동일
+    match /companies/{companyId}/{assetType}/{fileName} {
+      allow read: if isCompanyMember(companyId) && isCompanyAssetType(assetType);
+      allow create, update: if isCompanyMember(companyId)
+        && isCompanyAssetType(assetType)
+        && request.resource.size < 80 * 1024 * 1024
+        && isAllowedCompanyContentType();
+      allow delete: if isCompanyMember(companyId) && isCompanyAssetType(assetType);
     }
   }
 }

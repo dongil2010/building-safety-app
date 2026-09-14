@@ -5426,7 +5426,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (db && window.state.companyId) {
             try {
                 const snap = await db.collection('safety_app').doc(getCompanyDocId()).collection('photos').doc(pid).get();
-                const url = snap.exists ? snap.data().dataUrl : null;
+                const url = snap.exists ? await resolvePhotoUrlFromSnapData(snap.data() || {}) : null;
                 if (url) {
                     if (!window._photoCache) window._photoCache = {};
                     window._photoCache[pid] = url;
@@ -7595,6 +7595,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 return;
             }
             const img = new Image();
+            if (typeof dataUrl === 'string' && /^https?:\/\//i.test(dataUrl)) {
+                img.crossOrigin = 'anonymous';
+            }
             const preferBlob = isMobileDrawingContext();
             let objectUrl = null;
             const cleanup = () => {
@@ -7896,6 +7899,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 return;
             }
             const img = new Image();
+            if (typeof srcUrl === 'string' && /^https?:\/\//i.test(srcUrl)) {
+                img.crossOrigin = 'anonymous';
+            }
             img.onload = async () => {
                 applyFloorDrawingTarget(img, null, { immediate: !state.bgImage });
                 updateFloorDrawingEmptyOverlay(null);
@@ -16974,7 +16980,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!db || !window.state.companyId) return null;
         try {
             const snap = await db.collection('safety_app').doc(getCompanyDocId()).collection('photos').doc(pid).get();
-            const url = snap.exists ? snap.data().dataUrl : null;
+            const url = snap.exists ? await resolvePhotoUrlFromSnapData(snap.data() || {}) : null;
             if (url) {
                 if (!window._photoCache) window._photoCache = {};
                 window._photoCache[pid] = url;
@@ -17006,7 +17012,10 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!db || !window.state.companyId) return false;
         try {
             const snap = await db.collection('safety_app').doc(getCompanyDocId()).collection('photos').doc(pid).get();
-            return !!(snap.exists && snap.data() && snap.data().dataUrl);
+            return !!(snap.exists && snap.data() && (
+                hasFirebaseStorageMeta(snap.data())
+                || snap.data().dataUrl
+            ));
         } catch (e) {
             return false;
         }
@@ -33431,7 +33440,7 @@ document.addEventListener('DOMContentLoaded', () => {
                             if (companyPhotosCol) {
                                 try {
                                     const snap = await companyPhotosCol.doc(pid).get();
-                                    const url = snap.exists ? snap.data().dataUrl : null;
+                                    const url = snap.exists ? await resolvePhotoUrlFromSnapData(snap.data() || {}) : null;
                                     if (url) window._photoCache[pid] = url;
                                     return url;
                                 } catch (e) { return null; }
@@ -33449,7 +33458,7 @@ document.addEventListener('DOMContentLoaded', () => {
                             if (companyPhotosCol) {
                                 try {
                                     const snap = await companyPhotosCol.doc(pid).get();
-                                    const url = snap.exists ? snap.data().dataUrl : null;
+                                    const url = snap.exists ? await resolvePhotoUrlFromSnapData(snap.data() || {}) : null;
                                     if (url) window._photoCache[pid] = url;
                                     return url;
                                 } catch (e) { return null; }
@@ -35453,7 +35462,7 @@ document.addEventListener('DOMContentLoaded', () => {
                             if (companyPhotosCol) {
                                 try {
                                     const snap = await companyPhotosCol.doc(pid).get();
-                                    const url = snap.exists ? snap.data().dataUrl : null;
+                                    const url = snap.exists ? await resolvePhotoUrlFromSnapData(snap.data() || {}) : null;
                                     if (url) window._photoCache[pid] = url;
                                     return url;
                                 } catch (e) { return null; }
@@ -35471,7 +35480,7 @@ document.addEventListener('DOMContentLoaded', () => {
                             if (companyPhotosCol) {
                                 try {
                                     const snap = await companyPhotosCol.doc(pid).get();
-                                    const url = snap.exists ? snap.data().dataUrl : null;
+                                    const url = snap.exists ? await resolvePhotoUrlFromSnapData(snap.data() || {}) : null;
                                     if (url) window._photoCache[pid] = url;
                                     return url;
                                 } catch (e) { return null; }
@@ -38101,6 +38110,77 @@ document.addEventListener('DOMContentLoaded', () => {
         measurementId: "G-NF80EL460D"
     };
 
+    // 도면/PDF/티어 파일 본문 → Firebase Storage (Firestore는 URL/메타만). 사진 path는 준비만.
+    const SA = (window.BSA && window.BSA.storageAssets) || {};
+    const USE_FIREBASE_STORAGE_FOR_DRAWINGS = SA.USE_FIREBASE_STORAGE_FOR_DRAWINGS !== false;
+    window.USE_FIREBASE_STORAGE_FOR_DRAWINGS = USE_FIREBASE_STORAGE_FOR_DRAWINGS;
+    function getFirebaseStorage() {
+        return typeof SA.getFirebaseStorage === 'function' ? SA.getFirebaseStorage() : null;
+    }
+    function uploadBlobToFirebaseStorage(storagePath, blob, contentType) {
+        if (typeof SA.uploadBlobToFirebaseStorage !== 'function') {
+            return Promise.reject(new Error('Firebase Storage helpers missing'));
+        }
+        return SA.uploadBlobToFirebaseStorage(storagePath, blob, contentType);
+    }
+    function deleteFirebaseStoragePath(storagePath) {
+        if (typeof SA.deleteFirebaseStoragePath !== 'function') return Promise.resolve(false);
+        return SA.deleteFirebaseStoragePath(storagePath);
+    }
+    function parseDataUrl(dataUrl) {
+        return typeof SA.parseDataUrl === 'function' ? SA.parseDataUrl(dataUrl) : null;
+    }
+    function storagePathFloorDrawing(companyId, buildingId, floorCode, contentType) {
+        return typeof SA.storagePathFloorDrawing === 'function'
+            ? SA.storagePathFloorDrawing(companyId, buildingId, floorCode, contentType)
+            : '';
+    }
+    function storagePathFloorDrawingPdf(companyId, buildingId, floorCode) {
+        return typeof SA.storagePathFloorDrawingPdf === 'function'
+            ? SA.storagePathFloorDrawingPdf(companyId, buildingId, floorCode)
+            : '';
+    }
+    function storagePathFloorDrawingTier(companyId, buildingId, floorCode, dim, contentType) {
+        return typeof SA.storagePathFloorDrawingTier === 'function'
+            ? SA.storagePathFloorDrawingTier(companyId, buildingId, floorCode, dim, contentType)
+            : '';
+    }
+    function storagePathPhoto(companyId, photoId, contentType) {
+        return typeof SA.storagePathPhoto === 'function'
+            ? SA.storagePathPhoto(companyId, photoId, contentType)
+            : '';
+    }
+    function firestoreStorageMetaFields(uploaded) {
+        return typeof SA.firestoreStorageMetaFields === 'function'
+            ? SA.firestoreStorageMetaFields(uploaded)
+            : { backend: 'storage', chunked: false, chunkStatus: 'ready' };
+    }
+    function resolveCloudAssetUrlFromSnapData(snapData) {
+        if (typeof SA.resolveCloudAssetUrlFromSnapData === 'function') {
+            return SA.resolveCloudAssetUrlFromSnapData(snapData);
+        }
+        return Promise.resolve(null);
+    }
+    function hasFirebaseStorageMeta(data) {
+        return typeof SA.hasFirebaseStorageMeta === 'function' ? SA.hasFirebaseStorageMeta(data) : false;
+    }
+    function materializeCloudAssetPayload(url, snapData) {
+        if (typeof SA.materializeCloudAssetPayload === 'function') {
+            return SA.materializeCloudAssetPayload(url, snapData);
+        }
+        return Promise.resolve(url || null);
+    }
+    function assetUrlToUploadBlob(url) {
+        if (typeof SA.assetUrlToUploadBlob === 'function') return SA.assetUrlToUploadBlob(url);
+        return Promise.resolve(null);
+    }
+    function isFirebaseStorageHttpUrl(url) {
+        return typeof SA.isFirebaseStorageHttpUrl === 'function' ? SA.isFirebaseStorageHttpUrl(url) : false;
+    }
+    function storagePathFromDownloadURL(url) {
+        return typeof SA.storagePathFromDownloadURL === 'function' ? SA.storagePathFromDownloadURL(url) : null;
+    }
+
     let db = null;
     let isRemoteSyncing = false;
     let _syncInFlight = false;
@@ -38451,7 +38531,7 @@ document.addEventListener('DOMContentLoaded', () => {
             try {
                 const snap = await db.collection('safety_app').doc(getCompanyDocId())
                     .collection('photos').doc(key).get();
-                const url = snap.exists ? snap.data()?.dataUrl : null;
+                const url = snap.exists ? await resolvePhotoUrlFromSnapData(snap.data() || {}) : null;
                 if (typeof url === 'string' && url.length > 32) {
                     if (!window._photoCache) window._photoCache = {};
                     window._photoCache[key] = url;
@@ -38489,7 +38569,7 @@ document.addEventListener('DOMContentLoaded', () => {
             try {
                 const snap = await db.collection('safety_app').doc(getCompanyDocId())
                     .collection('photos').doc(key).get();
-                const url = snap.exists ? snap.data()?.dataUrl : null;
+                const url = snap.exists ? await resolvePhotoUrlFromSnapData(snap.data() || {}) : null;
                 if (typeof url === 'string' && url.length > 32) {
                     if (!window._photoCache) window._photoCache = {};
                     window._photoCache[key] = url;
@@ -38795,9 +38875,96 @@ document.addEventListener('DOMContentLoaded', () => {
         if (btnGal) btnGal.addEventListener('click', () => triggerOverviewPhotoPick('gallery'));
     })();
 
+    async function writeFirestoreStorageMeta(docRef, uploaded, extraFields) {
+        if (!docRef) return;
+        const payload = {
+            ...(extraFields || {}),
+            ...firestoreStorageMetaFields(uploaded),
+            updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+        };
+        await enqueueFirestoreWrite(() => docRef.set(payload));
+        scheduleChunkPartsCleanup(docRef, null);
+    }
+
+    async function uploadAssetToFirebaseStorageAndMeta(docRef, storagePath, sourceUrl, extraFields) {
+        let uploaded;
+        if (isFirebaseStorageHttpUrl(sourceUrl)) {
+            uploaded = {
+                storagePath: storagePathFromDownloadURL(sourceUrl) || storagePath,
+                downloadURL: sourceUrl,
+                contentType: (extraFields && extraFields.contentType) || null,
+                size: null
+            };
+        } else {
+            const parsed = await assetUrlToUploadBlob(sourceUrl);
+            if (!parsed || !parsed.blob) throw new Error('asset parse failed');
+            uploaded = await uploadBlobToFirebaseStorage(storagePath, parsed.blob, parsed.contentType);
+        }
+        await writeFirestoreStorageMeta(docRef, uploaded, extraFields);
+        return uploaded;
+    }
+
+    async function deleteCloudAssetDoc(docRef, fallbackStoragePath) {
+        if (!docRef) return;
+        let storagePath = fallbackStoragePath || null;
+        const snap = await docRef.get();
+        if (snap.exists) {
+            const data = snap.data() || {};
+            if (typeof data.storagePath === 'string' && data.storagePath) {
+                storagePath = data.storagePath;
+            } else if (!storagePath && data.downloadURL) {
+                storagePath = storagePathFromDownloadURL(data.downloadURL) || storagePath;
+            }
+        }
+        if (storagePath) await deleteFirebaseStoragePath(storagePath);
+        let partsDocs = [];
+        try {
+            const partsSnap = await docRef.collection('parts').get();
+            if (partsSnap && !partsSnap.empty) partsDocs = partsSnap.docs.slice();
+        } catch (_e) { /* floorDrawings 등 parts 규칙이 없는 컬렉션 */ }
+        if (partsDocs.length) {
+            const batch = db.batch();
+            partsDocs.forEach((d) => batch.delete(d.ref));
+            batch.delete(docRef);
+            await batch.commit();
+        } else if (snap.exists) {
+            await docRef.delete();
+        }
+    }
+
+    async function resolvePhotoUrlFromSnapData(data) {
+        if (!data) return null;
+        const remote = await resolveCloudAssetUrlFromSnapData(data);
+        if (remote) return remote;
+        if (typeof data.dataUrl === 'string' && data.dataUrl.length > 32) return data.dataUrl;
+        return null;
+    }
+
     async function uploadFloorDrawing(buildingId, floorCode, dataUrl) {
         if (!db || !window.state.companyId || !dataUrl) return false;
         if (isPdfDrawingUrl(dataUrl)) return false;
+        const docId = `${buildingId}_${floorCode}`;
+        const docRef = db.collection('safety_app').doc(getCompanyDocId())
+            .collection('floorDrawings').doc(docId);
+
+        if (USE_FIREBASE_STORAGE_FOR_DRAWINGS && getFirebaseStorage()) {
+            try {
+                const parsedHint = parseDataUrl(dataUrl);
+                const contentType = (parsedHint && parsedHint.contentType) || 'image/jpeg';
+                const path = storagePathFloorDrawing(getCompanyDocId(), buildingId, floorCode, contentType);
+                await uploadAssetToFirebaseStorageAndMeta(docRef, path, dataUrl, {
+                    buildingId,
+                    floorCode
+                });
+                if (!window._cloudSyncedDrawingKeys) window._cloudSyncedDrawingKeys = new Set();
+                window._cloudSyncedDrawingKeys.add(docId);
+                return true;
+            } catch (e) {
+                console.warn('도면 Storage 업로드 실패:', buildingId, floorCode, e);
+                return false;
+            }
+        }
+
         let payload = dataUrl;
         const maxChars = 950000;
         try {
@@ -38807,11 +38974,9 @@ document.addEventListener('DOMContentLoaded', () => {
             if (payload.length > maxChars && typeof window.resizeDataUrlToMaxDim === 'function') {
                 payload = await window.resizeDataUrlToMaxDim(payload, 2400, 0.8);
             }
-            await db.collection('safety_app').doc(getCompanyDocId())
-                .collection('floorDrawings').doc(`${buildingId}_${floorCode}`)
-                .set({ dataUrl: payload });
+            await docRef.set({ dataUrl: payload });
             if (!window._cloudSyncedDrawingKeys) window._cloudSyncedDrawingKeys = new Set();
-            window._cloudSyncedDrawingKeys.add(`${buildingId}_${floorCode}`);
+            window._cloudSyncedDrawingKeys.add(docId);
             return true;
         } catch (e) {
             console.warn('도면 업로드 실패:', buildingId, floorCode, e);
@@ -38905,15 +39070,33 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!url || !isUsableRasterDrawingUrl(url)) continue;
             const docId = floorDrawingTierCloudDocId(buildingId, floorCode, dim);
             try {
-                await withTimeout(
-                    writeChunkedPdfToDocRef(col.doc(docId), url, {
-                        dim,
-                        floorCode,
-                        buildingId
-                    }),
-                    dim >= 16000 ? 90000 : 60000,
-                    `tier-upload-${dim}`
-                );
+                const docRef = col.doc(docId);
+                if (USE_FIREBASE_STORAGE_FOR_DRAWINGS && getFirebaseStorage()) {
+                    const parsedHint = parseDataUrl(url);
+                    const contentType = (parsedHint && parsedHint.contentType) || 'image/jpeg';
+                    const path = storagePathFloorDrawingTier(
+                        getCompanyDocId(), buildingId, floorCode, dim, contentType
+                    );
+                    await withTimeout(
+                        uploadAssetToFirebaseStorageAndMeta(docRef, path, url, {
+                            dim,
+                            floorCode,
+                            buildingId
+                        }),
+                        dim >= 16000 ? 90000 : 60000,
+                        `tier-upload-${dim}`
+                    );
+                } else {
+                    await withTimeout(
+                        writeChunkedPdfToDocRef(docRef, url, {
+                            dim,
+                            floorCode,
+                            buildingId
+                        }),
+                        dim >= 16000 ? 90000 : 60000,
+                        `tier-upload-${dim}`
+                    );
+                }
                 window._cloudSyncedTierKeys.add(docId);
             } catch (e) {
                 console.warn('도면 티어 업로드 실패:', docId, e);
@@ -38936,7 +39119,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 return false;
             }
             const data = snap.data() || {};
-            if (data.dataUrl && String(data.dataUrl).length > 32) {
+            if (hasFirebaseStorageMeta(data)
+                || (data.dataUrl && String(data.dataUrl).length > 32)) {
                 if (!window._cloudSyncedTierKeys) window._cloudSyncedTierKeys = new Set();
                 window._cloudSyncedTierKeys.add(docId);
                 return true;
@@ -38970,16 +39154,10 @@ document.addEventListener('DOMContentLoaded', () => {
         for (const dim of dims) {
             const docId = floorDrawingTierCloudDocId(buildingId, floorCode, dim);
             try {
-                const docRef = col.doc(docId);
-                const partsSnap = await docRef.collection('parts').get();
-                if (!partsSnap.empty) {
-                    const batch = db.batch();
-                    partsSnap.forEach((d) => batch.delete(d.ref));
-                    batch.delete(docRef);
-                    await batch.commit();
-                } else {
-                    await docRef.delete();
-                }
+                const fallback = storagePathFloorDrawingTier(
+                    getCompanyDocId(), buildingId, floorCode, dim, 'image/jpeg'
+                );
+                await deleteCloudAssetDoc(col.doc(docId), fallback);
                 if (window._cloudSyncedTierKeys) window._cloudSyncedTierKeys.delete(docId);
             } catch (e) {
                 console.warn('도면 티어 서버 삭제 실패:', docId, e);
@@ -38991,8 +39169,12 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!db || !window.state.companyId || !buildingId || !floorCode) return;
         const docId = `${buildingId}_${floorCode}`;
         try {
-            await db.collection('safety_app').doc(getCompanyDocId())
-                .collection('floorDrawings').doc(docId).delete();
+            const docRef = db.collection('safety_app').doc(getCompanyDocId())
+                .collection('floorDrawings').doc(docId);
+            const fallback = storagePathFloorDrawing(
+                getCompanyDocId(), buildingId, floorCode, 'image/jpeg'
+            );
+            await deleteCloudAssetDoc(docRef, fallback);
             if (window._cloudSyncedDrawingKeys) window._cloudSyncedDrawingKeys.delete(docId);
         } catch (e) {
             console.warn('도면 원본 서버 삭제 실패:', docId, e);
@@ -39002,9 +39184,11 @@ document.addEventListener('DOMContentLoaded', () => {
     async function fetchCloudFloorDrawingDataUrl(buildingId, floorCode) {
         if (!db || !window.state.companyId || !buildingId || !floorCode) return null;
         try {
-            const snap = await db.collection('safety_app').doc(getCompanyDocId())
-                .collection('floorDrawings').doc(`${buildingId}_${floorCode}`).get();
-            const url = (snap.exists && snap.data()) ? snap.data().dataUrl : null;
+            const docRef = db.collection('safety_app').doc(getCompanyDocId())
+                .collection('floorDrawings').doc(`${buildingId}_${floorCode}`);
+            const snap = await docRef.get();
+            if (!snap.exists) return null;
+            const url = await decodeChunkedPayloadFromData(snap.data() || {}, docRef);
             return (typeof url === 'string' && url.length > 32) ? url : null;
         } catch (e) {
             console.warn('Firestore 도면 조회 실패:', buildingId, floorCode, e);
@@ -39013,8 +39197,29 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     async function cloudFloorDrawingExists(buildingId, floorCode) {
-        const url = await fetchCloudFloorDrawingDataUrl(buildingId, floorCode);
-        return isUsableRasterDrawingUrl(url);
+        if (!db || !window.state.companyId || !buildingId || !floorCode) return false;
+        const docId = `${buildingId}_${floorCode}`;
+        if (window._cloudSyncedDrawingKeys && window._cloudSyncedDrawingKeys.has(docId)) return true;
+        try {
+            const snap = await db.collection('safety_app').doc(getCompanyDocId())
+                .collection('floorDrawings').doc(docId).get();
+            if (!snap.exists) {
+                if (window._cloudSyncedDrawingKeys) window._cloudSyncedDrawingKeys.delete(docId);
+                return false;
+            }
+            const data = snap.data() || {};
+            const ok = hasFirebaseStorageMeta(data) || isUsableRasterDrawingUrl(data.dataUrl);
+            if (ok) {
+                if (!window._cloudSyncedDrawingKeys) window._cloudSyncedDrawingKeys = new Set();
+                window._cloudSyncedDrawingKeys.add(docId);
+                return true;
+            }
+            if (window._cloudSyncedDrawingKeys) window._cloudSyncedDrawingKeys.delete(docId);
+            return false;
+        } catch (e) {
+            console.warn('도면 존재 확인 실패:', docId, e);
+            return false;
+        }
     }
 
     /** Firestore·현장 보관함에 실제로 올라간 층 코드 목록 (floorsList 없을 때 사용) */
@@ -39385,6 +39590,12 @@ document.addEventListener('DOMContentLoaded', () => {
     /** onSnapshot이 이미 준 문서 본문에서 청크 payload를 복원한다. 부모 get()을 한 번 더 치지 않는다. */
     async function decodeChunkedPayloadFromData(data, docRef, _retried) {
         if (!data) return null;
+
+        const storageUrl = await resolveCloudAssetUrlFromSnapData(data);
+        if (storageUrl) {
+            const local = await materializeCloudAssetPayload(storageUrl, data);
+            if (local && String(local).length > 32) return local;
+        }
 
         if (data.dataUrl && typeof data.dataUrl === 'string' && data.dataUrl.length > 32) {
             return data.dataUrl;
@@ -39907,7 +40118,15 @@ document.addEventListener('DOMContentLoaded', () => {
         const docId = `${buildingId}_${floorCode}`;
         const docRef = db.collection('safety_app').doc(getCompanyDocId()).collection('floorDrawingPdfs').doc(docId);
         try {
-            await writeChunkedPdfToDocRef(docRef, pdfDataUrl);
+            if (USE_FIREBASE_STORAGE_FOR_DRAWINGS && getFirebaseStorage()) {
+                const path = storagePathFloorDrawingPdf(getCompanyDocId(), buildingId, floorCode);
+                await uploadAssetToFirebaseStorageAndMeta(docRef, path, pdfDataUrl, {
+                    buildingId,
+                    floorCode
+                });
+            } else {
+                await writeChunkedPdfToDocRef(docRef, pdfDataUrl);
+            }
             if (!window._cloudSyncedPdfKeys) window._cloudSyncedPdfKeys = new Set();
             window._cloudSyncedPdfKeys.add(docId);
             const bldg = (window.state.buildings || []).find(b => b.id === buildingId);
@@ -39936,21 +40155,42 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    async function cloudFloorDrawingPdfExists(buildingId, floorCode) {
+        if (!db || !window.state.companyId || !buildingId || !floorCode) return false;
+        const docId = `${buildingId}_${floorCode}`;
+        if (window._cloudSyncedPdfKeys && window._cloudSyncedPdfKeys.has(docId)) return true;
+        try {
+            const snap = await db.collection('safety_app').doc(getCompanyDocId())
+                .collection('floorDrawingPdfs').doc(docId).get();
+            if (!snap.exists) {
+                if (window._cloudSyncedPdfKeys) window._cloudSyncedPdfKeys.delete(docId);
+                return false;
+            }
+            const data = snap.data() || {};
+            const ok = hasFirebaseStorageMeta(data)
+                || (data.dataUrl && String(data.dataUrl).length > 32)
+                || (data.chunkStatus === 'ready' && data.chunked && Number(data.chunkCount) > 0);
+            if (ok) {
+                if (!window._cloudSyncedPdfKeys) window._cloudSyncedPdfKeys = new Set();
+                window._cloudSyncedPdfKeys.add(docId);
+                return true;
+            }
+            if (window._cloudSyncedPdfKeys) window._cloudSyncedPdfKeys.delete(docId);
+            return false;
+        } catch (e) {
+            console.warn('PDF 원본 존재 확인 실패:', docId, e);
+            return false;
+        }
+    }
+
     async function deleteFloorDrawingPdfFromCloud(buildingId, floorCode) {
         if (!db || !window.state.companyId) return;
         const docId = `${buildingId}_${floorCode}`;
         try {
             const docRef = db.collection('safety_app').doc(getCompanyDocId())
                 .collection('floorDrawingPdfs').doc(docId);
-            const partsSnap = await docRef.collection('parts').get();
-            if (!partsSnap.empty) {
-                const batch = db.batch();
-                partsSnap.forEach((d) => batch.delete(d.ref));
-                batch.delete(docRef);
-                await batch.commit();
-            } else {
-                await docRef.delete();
-            }
+            const fallback = storagePathFloorDrawingPdf(getCompanyDocId(), buildingId, floorCode);
+            await deleteCloudAssetDoc(docRef, fallback);
             if (window._cloudSyncedPdfKeys) window._cloudSyncedPdfKeys.delete(docId);
         } catch (e) {
             console.warn(`PDF 원본 서버 삭제 실패 (${docId}):`, e);
@@ -40074,6 +40314,7 @@ document.addEventListener('DOMContentLoaded', () => {
             for (const floorCode of floorCodes) {
                 const docId = `${b.id}_${floorCode}`;
                 if (window._cloudSyncedPdfKeys.has(docId)) continue;
+                if (await cloudFloorDrawingPdfExists(b.id, floorCode)) continue;
                 let pdfDataUrl = pdfs[floorCode];
                 if (!pdfDataUrl) pdfDataUrl = await idbGet('floorDrawingPdfs', docId);
                 if (!pdfDataUrl) continue;
@@ -40177,9 +40418,6 @@ document.addEventListener('DOMContentLoaded', () => {
         const floors = (bldg.floorsList && bldg.floorsList.length > 0)
             ? bldg.floorsList.map(f => f.floorCode)
             : Object.keys(bldg.floorDrawings || {});
-        const companyDrawings = (db && window.state.companyId)
-            ? db.collection('safety_app').doc(getCompanyDocId()).collection('floorDrawings')
-            : null;
         let failCount = 0;
         await Promise.all(floors.map(fc => {
             const drawingDocId = `${bldg.id}_${fc}`;
@@ -40194,13 +40432,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 idbDelete('floorDrawingSources', drawingDocId)
             ];
             if (purgeCloud) {
-                if (companyDrawings) {
-                    jobs.push(companyDrawings.doc(drawingDocId).delete().catch(e => {
-                        failCount++;
-                        console.warn(`도면 삭제 실패 (${drawingDocId}):`, e);
-                    }));
-                }
+                jobs.push(deleteFloorDrawingRasterFromCloud(bldg.id, fc).catch(e => {
+                    failCount++;
+                    console.warn(`도면 삭제 실패 (${drawingDocId}):`, e);
+                }));
                 jobs.push(deleteFloorDrawingPdfFromCloud(bldg.id, fc).catch(() => {}));
+                jobs.push(deleteFloorDrawingTiersFromCloud(bldg.id, fc).catch(() => {}));
             }
             return Promise.all(jobs);
         }));
@@ -40240,7 +40477,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         _photoFetchInflight += 1;
                         try {
                             const snap = await companyPhotos.doc(pid).get();
-                            const url = snap.exists ? snap.data().dataUrl : null;
+                            const url = snap.exists ? await resolvePhotoUrlFromSnapData(snap.data() || {}) : null;
                             if (url) window._photoCache[pid] = url;
                             return url;
                         } catch (e) {
