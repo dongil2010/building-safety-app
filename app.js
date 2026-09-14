@@ -28384,6 +28384,54 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // 3종 상태조사표 "구분" 칸에 쓸 층 표시명 — 등록된 floorsList의 라벨을 우선 쓰고,
     // hwpx 내보내기와 동일하게 코드 접미사((B1F) 등)와 숫자 앞 띄어쓰기를 정리한다.
+    function isExteriorFloorCode(code) {
+        if (typeof window.isExteriorFloorCode === 'function') return window.isExteriorFloorCode(code);
+        const c = String(code || '').toUpperCase().trim();
+        return c === 'EXT' || c.startsWith('EXT_');
+    }
+
+    function getExteriorElevationShortLabel(code) {
+        if (typeof window.getExteriorElevationShortLabel === 'function') {
+            return window.getExteriorElevationShortLabel(code) || '';
+        }
+        return '';
+    }
+
+    function enrichExteriorLocationForReport(location, floorCode) {
+        const dir = getExteriorElevationShortLabel(floorCode);
+        const loc = String(location || '').trim();
+        if (!dir) return loc;
+        if (/(정면|배면|좌측면|우측면|북측|동측|남측|서측)/.test(loc)) return loc || dir;
+        let full = '';
+        try { full = stripFloorCodeSuffix(window.getFloorLabelFromCode(floorCode) || ''); } catch (_) {}
+        if (full && loc.startsWith(full)) {
+            const rest = loc.slice(full.length).trim();
+            return rest ? (dir + ' ' + rest) : dir;
+        }
+        if (!loc) return dir;
+        return (dir + ' ' + loc).trim();
+    }
+
+    function buildCombinedExteriorSurveyDefects(bldgId, exteriorFloorCodes) {
+        const combined = [];
+        (exteriorFloorCodes || []).forEach((fc) => {
+            const key = bldgId + '_' + fc;
+            const raw = (state.defects && state.defects[key]) || [];
+            raw.forEach((d) => {
+                if (!d) return;
+                combined.push(Object.assign({}, d, {
+                    location: enrichExteriorLocationForReport(d.location, fc),
+                    _exteriorFloorCode: fc
+                }));
+            });
+        });
+        return getSurveyRowsForReport(combined);
+    }
+
+    function collectExteriorFloorCodes(availableFloors) {
+        return (availableFloors || []).filter((fc) => isExteriorFloorCode(fc));
+    }
+
     function getGrade3FloorDisplayLabel(floorCode, bldg) {
         bldg = bldg || state.currentBuilding;
         const f = bldg && (bldg.floorsList || []).find(fl => fl.floorCode === floorCode);
@@ -30968,6 +31016,10 @@ document.addEventListener('DOMContentLoaded', () => {
             const reportArea = document.getElementById('printableReportArea');
             let reportPagesHtml = '';
 
+            const exteriorFloorCodesForReport = collectExteriorFloorCodes(availableFloors);
+            const exteriorFloorSetForReport = new Set(exteriorFloorCodesForReport);
+            let exteriorSurveyEmitted = false;
+
             for (let floorIdx = 0; floorIdx < availableFloors.length; floorIdx++) {
                 const floorCode = availableFloors[floorIdx];
                 const htmlBefore = reportPagesHtml.length;
@@ -31009,27 +31061,61 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 // --- 1. 상태조사표 (신가병원 1·2종 / 칠산타워 3종 서식)
                 //     기본 15행, 결함표 추가(n-n)가 있으면 최대 17행. 본번호는 가능하면 15·30·45에서 끝낸다.
-                //     마킹 추가 그룹은 한 행으로 합치고, 결함표 추가(surveyExtra)만 별도 행으로 둔다. ---
+                //     마킹 추가 그룹은 한 행으로 합치고, 결함표 추가(surveyExtra)만 별도 행으로 둔다.
+                //     외부 입면(EXT_*)은 도면별 표를 나누지 않고 한 표로 합치며, 위치에 정면/배면/좌·우를 넣는다. ---
                 const grade3Report = isGrade3Building(bldg);
-                const surveyDefects = getSurveyRowsForReport(defects);
-                const surveyPages = paginateSurveyDefects(surveyDefects);
+                const isExtFloor = exteriorFloorSetForReport.has(floorCode);
+                let surveyDefects;
+                let surveyFloorLabel = floorDisplayLabel;
+                let surveyFloorCode = floorCode;
+                let surveyPhotoLabels = defectPhotoLabels;
+                if (isExtFloor) {
+                    if (exteriorSurveyEmitted) {
+                        surveyDefects = null;
+                    } else {
+                        exteriorSurveyEmitted = true;
+                        surveyDefects = buildCombinedExteriorSurveyDefects(currentBldgId, exteriorFloorCodesForReport);
+                        surveyFloorLabel = '건축물 외부';
+                        surveyFloorCode = 'EXT';
+                        // 합쳐진 표의 비고(사진번호)도 전체 외부 층 기준으로 다시 매긴다
+                        surveyPhotoLabels = {};
+                        let extPCounter = 0;
+                        exteriorFloorCodesForReport.forEach((efc) => {
+                            const eKey = `${currentBldgId}_${efc}`;
+                            const eDefs = state.defects[eKey] || [];
+                            eDefs.forEach((d, dIdx) => {
+                                const defectKey = d.id || (`idx_${efc}_${dIdx}`);
+                                surveyPhotoLabels[defectKey] = [];
+                                getDefectOutputPhotos(d).forEach(() => {
+                                    extPCounter++;
+                                    const pNumStr = extPCounter < 10 ? `0${extPCounter}` : `${extPCounter}`;
+                                    surveyPhotoLabels[defectKey].push(`사진${pNumStr}`);
+                                });
+                            });
+                        });
+                    }
+                } else {
+                    surveyDefects = getSurveyRowsForReport(defects);
+                }
 
-                surveyPages.forEach((sDefects, sPageIdx) => {
-                    const surveyTableHtml = buildReportSurveyTableHtml(sDefects, (d, dSubIdx) => {
-                        const memberIds = d._groupMemberIds || [d.id || ('idx_' + dSubIdx)];
-                        const labels = memberIds.flatMap(mid => defectPhotoLabels[mid] || []);
-                        const pRemark = labels.length > 0 ? labels.join(' ') : '-';
-                        return { floorCode, photoRemark: pRemark, floorDisplayLabel };
-                    }, grade3Report);
-                    reportPagesHtml += `
-                        <div class="report-page-block" data-role="survey-page" data-floor="${floorCode}" style="background:#ffffff; color:#0f172a; padding: 10mm 14mm 10mm 14mm; margin-bottom: 2rem; font-family: sans-serif; font-size:0.9rem; border-radius:4px; box-shadow: 0 4px 20px rgba(0,0,0,0.1); page-break-after: always; break-after: page; page-break-inside: avoid !important; break-inside: avoid !important; box-sizing: border-box; width: 210mm; height: 295mm; max-height: 295mm; overflow: hidden; display: flex; flex-direction: column; position: relative;">
+                if (surveyDefects) {
+                    const surveyPages = paginateSurveyDefects(surveyDefects);
+                    surveyPages.forEach((sDefects, sPageIdx) => {
+                        const surveyTableHtml = buildReportSurveyTableHtml(sDefects, (d, dSubIdx) => {
+                            const memberIds = d._groupMemberIds || [d.id || ('idx_' + dSubIdx)];
+                            const labels = memberIds.flatMap(mid => surveyPhotoLabels[mid] || []);
+                            const pRemark = labels.length > 0 ? labels.join(' ') : '-';
+                            return { floorCode: surveyFloorCode, photoRemark: pRemark, floorDisplayLabel: surveyFloorLabel };
+                        }, grade3Report);
+                        reportPagesHtml += `
+                        <div class="report-page-block" data-role="survey-page" data-floor="${surveyFloorCode}" style="background:#ffffff; color:#0f172a; padding: 10mm 14mm 10mm 14mm; margin-bottom: 2rem; font-family: sans-serif; font-size:0.9rem; border-radius:4px; box-shadow: 0 4px 20px rgba(0,0,0,0.1); page-break-after: always; break-after: page; page-break-inside: avoid !important; break-inside: avoid !important; box-sizing: border-box; width: 210mm; height: 295mm; max-height: 295mm; overflow: hidden; display: flex; flex-direction: column; position: relative;">
                             <div style="text-align:center; border-bottom: 1px solid #cbd5e1; padding-bottom: 0.3rem; margin-bottom: 0.6rem;">
                                 <h1 style="font-size:0.75rem; font-weight:700; color:#000000; margin:0;">${reportTitleHeader}</h1>
                             </div>
 
                             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.6rem;">
                                 <h2 style="font-size:1.02rem; font-weight:800; color:#0f172a; border-left: 4px solid #2a2a2a; padding-left: 0.5rem; margin:0;">
-                                    1. ${floorDisplayLabel} 상태조사표
+                                    1. ${surveyFloorLabel} 상태조사표
                                 </h2>
                             </div>
 
@@ -31041,7 +31127,8 @@ document.addEventListener('DOMContentLoaded', () => {
                             </div>
                         </div>
                     `;
-                });
+                    });
+                }
 
                 // --- 2. 현장 사진첩 (A4 1페이지당 정확히 6개 배치 및 4:3 비율 규격) ---
                 const photoPages = [];
@@ -32368,7 +32455,18 @@ document.addEventListener('DOMContentLoaded', () => {
         // 등록된 결함/사진은 개수 제한 없이 전부 반영한다. 표 행이 많아지면 한글 워드프로세서가
         // 자동으로 다음 페이지까지 이어 그려주므로, 결함 개수만큼 그대로 행을 추가한다.
         const floorsData = [];
+        const exteriorCodes = collectExteriorFloorCodes(availableFloors);
+        const exteriorSet = new Set(exteriorCodes);
+        let exteriorMerged = false;
         availableFloors.forEach(fc => {
+            if (exteriorSet.has(fc)) {
+                if (exteriorMerged) return;
+                exteriorMerged = true;
+                const defects = buildCombinedExteriorSurveyDefects(bldgId, exteriorCodes);
+                if (!defects.length) return;
+                floorsData.push({ floorCode: 'EXT', pageDefects: defects, exteriorCombined: true, exteriorFloorCodes: exteriorCodes.slice() });
+                return;
+            }
             const key = `${bldgId}_${fc}`;
             const rawDefects = window.state.defects[key] || (window.state.currentFloor === fc ? getCurrentFloorDefects() : []);
             const defects = getSurveyRowsForReport(rawDefects);
@@ -33103,7 +33201,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 // 건물에 등록된 층 순서를 그대로 번호로 붙인다(1)부터 slotIdx+1).
                 {
                     const t = slot.titlePara.getElementsByTagNameNS(HP_NS, 't')[0];
-                    if (t) t.textContent = `${slotIdx + 1}) ${getFloorLabel(floorCode)} 상태조사표`;
+                    if (t) {
+                        const extCombined = !!(floorsData[slotIdx] && floorsData[slotIdx].exteriorCombined);
+                        const titleFloor = extCombined ? '건축물 외부' : getFloorLabel(floorCode);
+                        t.textContent = `${slotIdx + 1}) ${titleFloor} 상태조사표`;
+                    }
                     if (slotIdx === 0) {
                         // 첫 페이지 표 제목 바로 위에 표본 문서의 "A동" 같은 동 이름 문단 + 빈 문단
                         // 여러 개가 그대로 남아있어서 엔터를 여러 번 친 것처럼 빈 줄이 생겼다. 동 이름

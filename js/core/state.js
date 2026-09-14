@@ -648,11 +648,31 @@ window.compressDefectPhoto43 = function(file, targetW = 1000, quality = 0.85) {
 // 하나의 "건축물 외부"가 아니라 방향별로 별도 층(EXT_N/EXT_E/EXT_S/EXT_W)으로 인식한다.
 // getFloorLabelFromCode/getFloorRankFromCode/parseFloorInfoFromFilename이 공통으로 사용.
 window.EXT_DIRECTION_DEFS = [
-    { code: 'EXT_N', label: '건축물 외부-북측 (EXT_N)', strongKeys: ['북측', '북면', '북쪽', 'NORTH'], soloChar: '북' },
-    { code: 'EXT_E', label: '건축물 외부-동측 (EXT_E)', strongKeys: ['동측', '동면', '동쪽', 'EAST'], soloChar: '동' },
-    { code: 'EXT_S', label: '건축물 외부-남측 (EXT_S)', strongKeys: ['남측', '남면', '남쪽', 'SOUTH'], soloChar: '남' },
-    { code: 'EXT_W', label: '건축물 외부-서측 (EXT_W)', strongKeys: ['서측', '서면', '서쪽', 'WEST'], soloChar: '서' }
+    // 입면도 2·4·6장: 정면/배면/좌·우 + 방위. 상태조사표는 합치고 위치에 shortLabel 사용
+    { code: 'EXT_FRONT', label: '건축물 외부-정면 (EXT_FRONT)', shortLabel: '정면', strongKeys: ['정면', 'FRONT'], soloChar: null },
+    { code: 'EXT_BACK', label: '건축물 외부-배면 (EXT_BACK)', shortLabel: '배면', strongKeys: ['배면', '후면', 'BACK', 'REAR'], soloChar: null },
+    { code: 'EXT_LEFT', label: '건축물 외부-좌측면 (EXT_LEFT)', shortLabel: '좌측면', strongKeys: ['좌측면', '좌측', 'LEFTSIDE', 'LEFT_ELEV', 'LEFT'], soloChar: null },
+    { code: 'EXT_RIGHT', label: '건축물 외부-우측면 (EXT_RIGHT)', shortLabel: '우측면', strongKeys: ['우측면', '우측', 'RIGHTSIDE', 'RIGHT_ELEV', 'RIGHT'], soloChar: null },
+    { code: 'EXT_N', label: '건축물 외부-북측 (EXT_N)', shortLabel: '북측', strongKeys: ['북측', '북면', '북쪽', 'NORTH'], soloChar: '북' },
+    { code: 'EXT_E', label: '건축물 외부-동측 (EXT_E)', shortLabel: '동측', strongKeys: ['동측', '동면', '동쪽', 'EAST'], soloChar: '동' },
+    { code: 'EXT_S', label: '건축물 외부-남측 (EXT_S)', shortLabel: '남측', strongKeys: ['남측', '남면', '남쪽', 'SOUTH'], soloChar: '남' },
+    { code: 'EXT_W', label: '건축물 외부-서측 (EXT_W)', shortLabel: '서측', strongKeys: ['서측', '서면', '서쪽', 'WEST'], soloChar: '서' }
 ];
+
+window.isExteriorFloorCode = function(code) {
+    const c = String(code || '').toUpperCase().trim();
+    const raw = String(code || '');
+    return c === 'EXT' || c.startsWith('EXT_') || raw.includes('외부') || raw.includes('입면');
+};
+
+window.getExteriorElevationShortLabel = function(code) {
+    const c = String(code || '').toUpperCase().trim();
+    const defs = window.EXT_DIRECTION_DEFS || [];
+    const hit = defs.find((d) => d.code === c);
+    if (hit) return hit.shortLabel || String(hit.label || '').replace(/^건축물 외부-/, '').replace(/\s*\(.*\)$/, '');
+    if (c === 'EXT') return '';
+    return '';
+};
 
 // 옥상 / 옥탑 / 옥탑 지붕 — 파일명이 다르면 서로 다른 층으로 인식 (같은 ROOF로 합치지 않음)
 window.ROOF_FLOOR_DEFS = [
