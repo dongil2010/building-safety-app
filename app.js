@@ -6830,47 +6830,103 @@ document.addEventListener('DOMContentLoaded', () => {
 
     window.deleteExistingFloorDrawing = function(floorCode) {
         const bldg = window.currentEditingBuilding;
-        if (!bldg) return;
+        if (!bldg || !floorCode) return;
 
-        if (window.confirmDelete(`정말 ${floorCode} 층 도면을 삭제하시겠습니까?`)) {
-            if (bldg.floorDrawings && bldg.floorDrawings[floorCode]) {
-                delete bldg.floorDrawings[floorCode];
-            }
-            if (bldg.floorDrawingPdfs && bldg.floorDrawingPdfs[floorCode]) {
-                delete bldg.floorDrawingPdfs[floorCode];
-            }
-            if (bldg.floorDrawingTiers && bldg.floorDrawingTiers[floorCode]) {
-                delete bldg.floorDrawingTiers[floorCode];
-            }
-            if (bldg.floorDrawingSources && bldg.floorDrawingSources[floorCode]) {
-                delete bldg.floorDrawingSources[floorCode];
-            }
-            // IndexedDB에 저장해둔 예전 도면도 지우고, "이미 저장했다"는 기록도 지워서
-            // 나중에 이 층에 새 도면을 올리면 다시 저장되게 한다(안 지우면 새 도면이 안 덮어써짐).
-            const drawingKey = `${bldg.id}_${floorCode}`;
-            _idbPersistedDrawingKeys.delete(drawingKey);
-            _idbPersistedPdfKeys.delete(drawingKey);
-            _idbPersistedSourceKeys.delete(drawingKey);
-            clearFloorDrawingTierCacheForFloor(bldg.id, floorCode, true);
-            clearFloorDrawingRotation(bldg.id, floorCode);
-            idbDelete('floorDrawings', drawingKey);
-            idbDelete('floorDrawingPdfs', drawingKey);
-            idbDelete('floorDrawingSources', drawingKey);
-            deleteFloorDrawingRasterFromCloud(bldg.id, floorCode);
-            deleteFloorDrawingPdfFromCloud(bldg.id, floorCode);
-            deleteFloorDrawingTiersFromCloud(bldg.id, floorCode);
-            if (window._cloudSyncedPdfKeys) window._cloudSyncedPdfKeys.delete(drawingKey);
-            if (window._cloudSyncedDrawingKeys) window._cloudSyncedDrawingKeys.delete(drawingKey);
-            // floorsList뿐 아니라 drawingFloorCodes(재발견용 기억 목록)에도 남아 있으면
-            // syncBuildingDrawingFloorCodes()가 이 층을 도로 살려낸다 — 반드시 같이 지운다.
-            if (bldg.floorsList) {
-                bldg.floorsList = bldg.floorsList.filter(f => f.floorCode !== floorCode);
-            }
-            if (Array.isArray(bldg.drawingFloorCodes)) {
-                bldg.drawingFloorCodes = bldg.drawingFloorCodes.filter(c => c !== floorCode);
-            }
-            renderEditDrawingPreview();
+        const floorKey = `${bldg.id}_${floorCode}`;
+        const defectCount = ((window.state.defects && window.state.defects[floorKey]) || []).length;
+        const ndtCount = ((window.state.ndtData && window.state.ndtData[floorKey]) || []).length;
+        const label = (typeof window.getFloorLabelFromCode === 'function')
+            ? window.getFloorLabelFromCode(floorCode)
+            : floorCode;
+        let msg = `정말 ${label} (${floorCode}) 도면을 삭제할까요?`;
+        if (defectCount > 0 || ndtCount > 0) {
+            msg += `\n\n이 층의 마킹 ${defectCount}건`;
+            if (ndtCount > 0) msg += `, 비파괴 ${ndtCount}건`;
+            msg += '도 함께 삭제됩니다.';
         }
+        if (!window.confirmDelete(msg)) return;
+
+        if (bldg.floorDrawings && bldg.floorDrawings[floorCode]) {
+            delete bldg.floorDrawings[floorCode];
+        }
+        if (bldg.floorDrawingPdfs && bldg.floorDrawingPdfs[floorCode]) {
+            delete bldg.floorDrawingPdfs[floorCode];
+        }
+        if (bldg.floorDrawingTiers && bldg.floorDrawingTiers[floorCode]) {
+            delete bldg.floorDrawingTiers[floorCode];
+        }
+        if (bldg.floorDrawingSources && bldg.floorDrawingSources[floorCode]) {
+            delete bldg.floorDrawingSources[floorCode];
+        }
+        _idbPersistedDrawingKeys.delete(floorKey);
+        _idbPersistedPdfKeys.delete(floorKey);
+        _idbPersistedSourceKeys.delete(floorKey);
+        clearFloorDrawingTierCacheForFloor(bldg.id, floorCode, true);
+        clearFloorDrawingRotation(bldg.id, floorCode);
+        idbDelete('floorDrawings', floorKey);
+        idbDelete('floorDrawingPdfs', floorKey);
+        idbDelete('floorDrawingSources', floorKey);
+        deleteFloorDrawingRasterFromCloud(bldg.id, floorCode);
+        deleteFloorDrawingPdfFromCloud(bldg.id, floorCode);
+        deleteFloorDrawingTiersFromCloud(bldg.id, floorCode);
+        if (window._cloudSyncedPdfKeys) window._cloudSyncedPdfKeys.delete(floorKey);
+        if (window._cloudSyncedDrawingKeys) window._cloudSyncedDrawingKeys.delete(floorKey);
+        if (window._cloudSyncedTierKeys) {
+            (window.FLOOR_DRAWING_TIER_DIMS || [4000, 8000, 16000]).forEach((d) => {
+                window._cloudSyncedTierKeys.delete(`${bldg.id}_${floorCode}_${d}`);
+            });
+        }
+
+        const defects = (window.state.defects && window.state.defects[floorKey]) || [];
+        if (defects.length) {
+            defects.slice().forEach((d) => {
+                if (!d || !d.id) return;
+                if (typeof trackDefectDeletion === 'function') trackDefectDeletion(floorKey, d.id);
+                if (typeof deleteAllPhotosForDefect === 'function') {
+                    try { deleteAllPhotosForDefect(d); } catch (_e) { /* ignore */ }
+                }
+            });
+            delete window.state.defects[floorKey];
+        }
+
+        const ndtItems = (window.state.ndtData && window.state.ndtData[floorKey]) || [];
+        if (ndtItems.length) {
+            ndtItems.slice().forEach((item) => {
+                if (!item || !item.id) return;
+                if (typeof trackNdtDeletion === 'function') trackNdtDeletion(floorKey, item.id);
+            });
+            delete window.state.ndtData[floorKey];
+        }
+        if (window.state.ndtDisplacementGroups && window.state.ndtDisplacementGroups[floorKey]) {
+            delete window.state.ndtDisplacementGroups[floorKey];
+        }
+
+        if (bldg.floorsList) {
+            bldg.floorsList = bldg.floorsList.filter((f) => f.floorCode !== floorCode);
+        }
+        if (Array.isArray(bldg.drawingFloorCodes)) {
+            bldg.drawingFloorCodes = bldg.drawingFloorCodes.filter((c) => c !== floorCode);
+        }
+
+        if (window.state.currentBuildingId === bldg.id && window.state.currentFloor === floorCode) {
+            const avail = (typeof window.getBuildingAvailableFloors === 'function')
+                ? window.getBuildingAvailableFloors(bldg) : (bldg.floorsList || []);
+            const next = (avail[0] && avail[0].floorCode) || '1F';
+            window.state.currentFloor = next;
+            if (typeof loadFloorDrawing === 'function') {
+                try { loadFloorDrawing(bldg, next); } catch (_e) { /* ignore */ }
+            }
+        }
+
+        if (typeof discardStalePendingRemoteAfterLocalPinEdit === 'function') {
+            discardStalePendingRemoteAfterLocalPinEdit();
+        }
+        if (typeof populateFloorSelectDropdown === 'function') populateFloorSelectDropdown(bldg);
+        if (typeof saveStateToLocalStorage === 'function') saveStateToLocalStorage();
+        if (typeof drawCanvas === 'function') drawCanvas();
+        if (typeof renderSurveyTable === 'function') renderSurveyTable();
+        renderEditDrawingPreview();
+        window.showToast?.(`${label} 도면·마킹을 삭제했습니다.`, 'success', 3200);
     };
 
     // Handling Additional Drawing File Selection
