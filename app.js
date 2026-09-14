@@ -35242,7 +35242,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 // 건물에 등록된 층 순서를 그대로 번호로 붙인다(1)부터 slotIdx+1).
                 {
                     const t = slot.titlePara.getElementsByTagNameNS(HP_NS, 't')[0];
-                    if (t) t.textContent = `${slotIdx + 1}) ${getFloorLabel(floorCode)}`;
+                    if (t) {
+                        const extCombined = !!(floorsData[slotIdx] && floorsData[slotIdx].exteriorCombined);
+                        const titleFloor = extCombined ? '건축물 외부' : getFloorLabel(floorCode);
+                        t.textContent = `${slotIdx + 1}) ${titleFloor}`;
+                    }
                     if (slotIdx === 0) {
                         const dongPara = slot.titlePara.previousElementSibling;
                         if (dongPara && dongPara.localName === 'p') {
