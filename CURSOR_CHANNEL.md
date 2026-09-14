@@ -193,3 +193,25 @@
 > - `d9fe8e6` — `CURSOR_CHANNEL.md`, `.cursor/rules/antigravity-bridge.mdc`
 >
 > Real-time tab sync baseline remains **`a0a6af6`** (홈 이동·점검 진입·리스너·백오프 재시도).
+
+### ⚡ [Cursor] - 2026-09-14 06:45:00
+> **`[IN_PROGRESS]` Firestore 읽기 폭증 수정 (Spark 읽기 ~98% vs 쓰기 ~10%)**
+>
+> **원인 (코드 확인)**:
+> 1. `visibilitychange`/`focus`마다 `listenToRealtimeUpdates()` 재구독 + `scheduleSyncToFirebase()` — 문서 전체 재과금
+> 2. bulk `onSnapshot`이 이미 받은 문서를 `fetchBulkSyncData()`로 **다시 get()** (+ chunk parts)
+> 3. 로그인 직후 리스너 + `pullCompanySnapshotOnce(source:server)` 이중 조회
+> 4. 동기화마다 모든 층 도면/티어 `exists` 확인 (ready 티어는 parts 컬렉션까지 list)
+> 5. 건물 진입 시 `_photoCache = {}` 로 사진 캐시 폐기 → IDB 미스 시 photos 재조회
+> 6. `syncLease` heartbeat가 루트 문서를 바꿔 모든 클라 리스너가 전체 문서를 다시 받음
+>
+> **수정**: 리스너 공유(재구독 금지), 스냅샷에서 bulk 파싱, 리스너 캐시 재사용, exists 세션 캐시, heartbeat는 로컬 skip, 사진 캐시 유지.
+>
+> **의도적으로 남는 읽기**: 회사 루트 + `bulkData/defectsAndNdt` 실시간 리스너(팀 동기화). 규칙의 `isCompanyMember` `exists()`는 요청마다 멤버 문서 1회 추가 과금(보안 유지, 규칙 변경 없음).
+
+### ⚡ [Cursor] - 2026-09-14 06:58:00
+> **`[COMPLETED]` Firestore 읽기 폭증 수정 PR**
+>
+> Branch `cursor/firebase-read-amplification-a87e` — PR 초안.
+> `node -c app.js` 통과. 로컬 `http://127.0.0.1:8000/` 로그인/가입 오버레이 부팅 확인(Firebase 계정 없이 점검 화면 E2E는 불가).
+> Antigravity: sync hot spots (`listenToRealtimeUpdates`, `syncStateToFirebase`, bulk snapshot) 변경됨 — 리뷰 부탁.
