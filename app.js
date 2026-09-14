@@ -32803,7 +32803,14 @@ document.addEventListener('DOMContentLoaded', () => {
                         lines.push(chars.slice(i).join(''));
                         break;
                     }
-                    let cut = (lastBreak > i) ? lastBreak : end;
+                    // 공백/구분자 등 자연 끊김이 없으면 글자 중간을 강제 문단 분리하지 않는다.
+                    // (좁은 칸+ASCII 크기값에서 "Cw:0." / "15" 같은 엉터리 줄바꿈이 생기던 원인)
+                    // 한글 자동 줄바꿈에 맡기고, 높이 계산용 강제 문단은 자연 끊김에만 만든다.
+                    if (!(lastBreak > i)) {
+                        lines.push(chars.slice(i).join(''));
+                        break;
+                    }
+                    let cut = lastBreak;
                     // lastBreak가 공백을 가리키면 공백은 다음 줄 선두에서 제거됨
                     if (cut > i && (chars[cut - 1] === ' ' || chars[cut - 1] === '\t')) {
                         lines.push(chars.slice(i, cut - 1).join(''));
@@ -32816,10 +32823,14 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
                 return lines.length ? lines.join('\n') : s;
             };
-            const wrapHwpxCellText = (raw, maxChars = 16) => String(normalizeEaSpacingInText(raw == null ? '' : raw))
-                .split('\n')
-                .map((line) => wrapHwpxCellLine(line, maxChars))
-                .join('\n');
+            const wrapHwpxCellText = (raw, maxChars = 16) => {
+                // 입력값에 섞인 CR/LF는 강제 문단 분리로 이어져 칸 안에서 엉뚱한 줄바꿈이 된다.
+                // 공백으로 정리한 뒤, 칸 너비 줄바꿈만 적용한다.
+                const flat = String(normalizeEaSpacingInText(raw == null ? '' : raw))
+                    .replace(/\r\n|\r|\n/g, ' ')
+                    .replace(/[ \t]{2,}/g, ' ');
+                return wrapHwpxCellLine(flat, maxChars);
+            };
             // rawVal의 실제 줄 수(lines.length)를 반환한다 — 호출부에서 행 높이를 실제 줄 수에
             // 맞춰 다시 계산하는 데 쓴다(표본 행이 다른 칸의 샘플 2줄 데이터 기준 키를 물려받아,
             // 1줄로 줄어든 칸의 글자가 위로 뜬 것처럼 보이던 문제 — 한글에서 직접 확인됨).
@@ -33358,7 +33369,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     if (t) {
                         const extCombined = !!(floorsData[slotIdx] && floorsData[slotIdx].exteriorCombined);
                         const titleFloor = extCombined ? '건축물 외부' : getFloorLabel(floorCode);
-                        t.textContent = `${slotIdx + 1}) ${titleFloor} 상태조사표\n`;
+                        t.textContent = `${slotIdx + 1}) ${titleFloor} 상태조사표`;
                     }
                     if (slotIdx === 0) {
                         // 첫 페이지 표 제목 바로 위에 표본 문서의 "A동" 같은 동 이름 문단 + 빈 문단
@@ -34933,7 +34944,14 @@ document.addEventListener('DOMContentLoaded', () => {
                         lines.push(chars.slice(i).join(''));
                         break;
                     }
-                    let cut = (lastBreak > i) ? lastBreak : end;
+                    // 공백/구분자 등 자연 끊김이 없으면 글자 중간을 강제 문단 분리하지 않는다.
+                    // (좁은 칸+ASCII 크기값에서 "Cw:0." / "15" 같은 엉터리 줄바꿈이 생기던 원인)
+                    // 한글 자동 줄바꿈에 맡기고, 높이 계산용 강제 문단은 자연 끊김에만 만든다.
+                    if (!(lastBreak > i)) {
+                        lines.push(chars.slice(i).join(''));
+                        break;
+                    }
+                    let cut = lastBreak;
                     // lastBreak가 공백을 가리키면 공백은 다음 줄 선두에서 제거됨
                     if (cut > i && (chars[cut - 1] === ' ' || chars[cut - 1] === '\t')) {
                         lines.push(chars.slice(i, cut - 1).join(''));
@@ -34946,10 +34964,14 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
                 return lines.length ? lines.join('\n') : s;
             };
-            const wrapHwpxCellText = (raw, maxChars = 16) => String(normalizeEaSpacingInText(raw == null ? '' : raw))
-                .split('\n')
-                .map((line) => wrapHwpxCellLine(line, maxChars))
-                .join('\n');
+            const wrapHwpxCellText = (raw, maxChars = 16) => {
+                // 입력값에 섞인 CR/LF는 강제 문단 분리로 이어져 칸 안에서 엉뚱한 줄바꿈이 된다.
+                // 공백으로 정리한 뒤, 칸 너비 줄바꿈만 적용한다.
+                const flat = String(normalizeEaSpacingInText(raw == null ? '' : raw))
+                    .replace(/\r\n|\r|\n/g, ' ')
+                    .replace(/[ \t]{2,}/g, ' ');
+                return wrapHwpxCellLine(flat, maxChars);
+            };
             // rawVal의 실제 줄 수(lines.length)를 반환한다 — 호출부에서 행 높이를 실제 줄 수에
             // 맞춰 다시 계산하는 데 쓴다(표본 행이 다른 칸의 샘플 2줄 데이터 기준 키를 물려받아,
             // 1줄로 줄어든 칸의 글자가 위로 뜬 것처럼 보이던 문제 — 한글에서 직접 확인됨).
@@ -35445,7 +35467,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     if (t) {
                         const extCombined = !!(floorsData[slotIdx] && floorsData[slotIdx].exteriorCombined);
                         const titleFloor = extCombined ? '건축물 외부' : getFloorLabel(floorCode);
-                        t.textContent = `${slotIdx + 1}) ${titleFloor}\n`;
+                        t.textContent = `${slotIdx + 1}) ${titleFloor}`;
                     }
                     if (slotIdx === 0) {
                         const dongPara = slot.titlePara.previousElementSibling;
