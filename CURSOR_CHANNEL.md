@@ -232,3 +232,8 @@
 > Branch `cursor/firebase-storage-drawings-f66a`. `node -c app.js` + helper unit tests 통과. 로컬 `http://127.0.0.1:8000/` 로그인/가입 오버레이 부팅 확인.
 > **배포 전**: `firebase deploy --only storage` (Blaze 이미 켜짐).
 > Antigravity: `storage.rules`·업로드 경로 리뷰 부탁.
+
+### ⚡ [Cursor] - 2026-09-14 19:12:00
+> **`[COMPLETED]` Storage 규칙 콘솔 게시 확인 후 `main` 적용**
+>
+> Storage 규칙은 Firebase 콘솔에서 게시됨. 클라이언트 코드를 `origin/main`에 머지해 GitHub Pages에 반영.
