@@ -1,11 +1,12 @@
 /**
- * Firebase Storage helpers — 도면/PDF/티어 파일 본문을 Firestore 청크 대신 Storage에 둔다.
- * Firestore 문서에는 URL/메타만 저장. 사진 경로는 규칙·path 헬퍼만 준비하고 업로드는 후속.
+ * Firebase Storage helpers — 도면/PDF/티어/사진 파일 본문을 Firestore 대신 Storage에 둔다.
+ * Firestore 문서에는 URL/메타만 저장.
  */
 (function (root) {
     'use strict';
 
     const USE_FIREBASE_STORAGE_FOR_DRAWINGS = true;
+    const USE_FIREBASE_STORAGE_FOR_PHOTOS = true;
     const COMPANY_ASSET_TYPES = {
         floorDrawings: 'floorDrawings',
         floorDrawingPdfs: 'floorDrawingPdfs',
@@ -277,6 +278,7 @@
 
     const api = {
         USE_FIREBASE_STORAGE_FOR_DRAWINGS: USE_FIREBASE_STORAGE_FOR_DRAWINGS,
+        USE_FIREBASE_STORAGE_FOR_PHOTOS: USE_FIREBASE_STORAGE_FOR_PHOTOS,
         COMPANY_ASSET_TYPES: COMPANY_ASSET_TYPES,
         sanitizeStoragePathSegment: sanitizeStoragePathSegment,
         guessExtFromContentType: guessExtFromContentType,

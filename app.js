@@ -5416,17 +5416,21 @@ document.addEventListener('DOMContentLoaded', () => {
 
     async function loadPhotoBlobForClone(pid) {
         if (!pid) return null;
-        if (window._photoCache && window._photoCache[pid]) return window._photoCache[pid];
+        if (window._photoCache && window._photoCache[pid]) {
+            maybeScheduleMigrateFromLocal(pid, window._photoCache[pid]);
+            return window._photoCache[pid];
+        }
         const fromIdb = await idbGet('photos', pid);
         if (fromIdb) {
             if (!window._photoCache) window._photoCache = {};
             window._photoCache[pid] = fromIdb;
+            maybeScheduleMigrateFromLocal(pid, fromIdb);
             return fromIdb;
         }
         if (db && window.state.companyId) {
             try {
                 const snap = await db.collection('safety_app').doc(getCompanyDocId()).collection('photos').doc(pid).get();
-                const url = snap.exists ? await resolvePhotoUrlFromSnapData(snap.data() || {}) : null;
+                const url = await photoUrlFromCloudSnap(snap, pid);
                 if (url) {
                     if (!window._photoCache) window._photoCache = {};
                     window._photoCache[pid] = url;
@@ -16970,17 +16974,21 @@ document.addEventListener('DOMContentLoaded', () => {
     // (사용자가 실제로 겪음).
     async function loadPhotoByIdWithCloudFallback(pid) {
         if (!pid) return null;
-        if (window._photoCache && window._photoCache[pid]) return window._photoCache[pid];
+        if (window._photoCache && window._photoCache[pid]) {
+            maybeScheduleMigrateFromLocal(pid, window._photoCache[pid]);
+            return window._photoCache[pid];
+        }
         const fromIdb = await idbGet('photos', pid);
         if (fromIdb) {
             if (!window._photoCache) window._photoCache = {};
             window._photoCache[pid] = fromIdb;
+            maybeScheduleMigrateFromLocal(pid, fromIdb);
             return fromIdb;
         }
         if (!db || !window.state.companyId) return null;
         try {
             const snap = await db.collection('safety_app').doc(getCompanyDocId()).collection('photos').doc(pid).get();
-            const url = snap.exists ? await resolvePhotoUrlFromSnapData(snap.data() || {}) : null;
+            const url = await photoUrlFromCloudSnap(snap, pid);
             if (url) {
                 if (!window._photoCache) window._photoCache = {};
                 window._photoCache[pid] = url;
@@ -26447,20 +26455,15 @@ document.addEventListener('DOMContentLoaded', () => {
         const keep = Math.max(0, Number(keepCount) || 0);
         const old = Math.max(0, Number(oldCount) || 0);
         if (!defectId || old <= keep) return;
-        const companyPhotos = (db && window.state.companyId)
-            ? db.collection('safety_app').doc(getCompanyDocId()).collection('photos')
-            : null;
         const jobs = [];
         for (let i = keep; i < old; i++) {
             const photoDocId = getPhotoDocId(defectId, i, kind);
             if (window._photoCache) delete window._photoCache[photoDocId];
             _idbPersistedPhotoKeys.delete(photoDocId);
             jobs.push(idbDelete('photos', photoDocId));
-            if (companyPhotos) {
-                companyPhotos.doc(photoDocId).delete().catch((e) => {
-                    console.warn(`사진 슬롯 정리 실패 (${photoDocId}):`, e);
-                });
-            }
+            jobs.push(deleteCloudPhoto(photoDocId).catch((e) => {
+                console.warn(`사진 슬롯 정리 실패 (${photoDocId}):`, e);
+            }));
         }
         await Promise.all(jobs);
     }
@@ -33497,7 +33500,7 @@ document.addEventListener('DOMContentLoaded', () => {
                             if (companyPhotosCol) {
                                 try {
                                     const snap = await companyPhotosCol.doc(pid).get();
-                                    const url = snap.exists ? await resolvePhotoUrlFromSnapData(snap.data() || {}) : null;
+                                    const url = await photoUrlFromCloudSnap(snap, pid);
                                     if (url) window._photoCache[pid] = url;
                                     return url;
                                 } catch (e) { return null; }
@@ -33515,7 +33518,7 @@ document.addEventListener('DOMContentLoaded', () => {
                             if (companyPhotosCol) {
                                 try {
                                     const snap = await companyPhotosCol.doc(pid).get();
-                                    const url = snap.exists ? await resolvePhotoUrlFromSnapData(snap.data() || {}) : null;
+                                    const url = await photoUrlFromCloudSnap(snap, pid);
                                     if (url) window._photoCache[pid] = url;
                                     return url;
                                 } catch (e) { return null; }
@@ -35576,7 +35579,7 @@ document.addEventListener('DOMContentLoaded', () => {
                             if (companyPhotosCol) {
                                 try {
                                     const snap = await companyPhotosCol.doc(pid).get();
-                                    const url = snap.exists ? await resolvePhotoUrlFromSnapData(snap.data() || {}) : null;
+                                    const url = await photoUrlFromCloudSnap(snap, pid);
                                     if (url) window._photoCache[pid] = url;
                                     return url;
                                 } catch (e) { return null; }
@@ -35594,7 +35597,7 @@ document.addEventListener('DOMContentLoaded', () => {
                             if (companyPhotosCol) {
                                 try {
                                     const snap = await companyPhotosCol.doc(pid).get();
-                                    const url = snap.exists ? await resolvePhotoUrlFromSnapData(snap.data() || {}) : null;
+                                    const url = await photoUrlFromCloudSnap(snap, pid);
                                     if (url) window._photoCache[pid] = url;
                                     return url;
                                 } catch (e) { return null; }
@@ -38224,10 +38227,12 @@ document.addEventListener('DOMContentLoaded', () => {
         measurementId: "G-NF80EL460D"
     };
 
-    // 도면/PDF/티어 파일 본문 → Firebase Storage (Firestore는 URL/메타만). 사진 path는 준비만.
+    // 도면/PDF/티어/사진 파일 본문 → Firebase Storage (Firestore는 URL/메타만)
     const SA = (window.BSA && window.BSA.storageAssets) || {};
     const USE_FIREBASE_STORAGE_FOR_DRAWINGS = SA.USE_FIREBASE_STORAGE_FOR_DRAWINGS !== false;
+    const USE_FIREBASE_STORAGE_FOR_PHOTOS = SA.USE_FIREBASE_STORAGE_FOR_PHOTOS !== false;
     window.USE_FIREBASE_STORAGE_FOR_DRAWINGS = USE_FIREBASE_STORAGE_FOR_DRAWINGS;
+    window.USE_FIREBASE_STORAGE_FOR_PHOTOS = USE_FIREBASE_STORAGE_FOR_PHOTOS;
     function getFirebaseStorage() {
         return typeof SA.getFirebaseStorage === 'function' ? SA.getFirebaseStorage() : null;
     }
@@ -38632,12 +38637,16 @@ document.addEventListener('DOMContentLoaded', () => {
     async function loadOverviewPhotoDataUrl(bldgId, photoId) {
         if (!bldgId || !photoId) return null;
         const key = getOverviewPhotoDocId(bldgId, photoId);
-        if (window._photoCache && window._photoCache[key]) return window._photoCache[key];
+        if (window._photoCache && window._photoCache[key]) {
+            maybeScheduleMigrateFromLocal(key, window._photoCache[key]);
+            return window._photoCache[key];
+        }
         try {
             const local = await idbGet('photos', key);
             if (typeof local === 'string' && local.length > 32) {
                 if (!window._photoCache) window._photoCache = {};
                 window._photoCache[key] = local;
+                maybeScheduleMigrateFromLocal(key, local);
                 return local;
             }
         } catch (_) { /* ignore */ }
@@ -38645,7 +38654,7 @@ document.addEventListener('DOMContentLoaded', () => {
             try {
                 const snap = await db.collection('safety_app').doc(getCompanyDocId())
                     .collection('photos').doc(key).get();
-                const url = snap.exists ? await resolvePhotoUrlFromSnapData(snap.data() || {}) : null;
+                const url = await photoUrlFromCloudSnap(snap, key);
                 if (typeof url === 'string' && url.length > 32) {
                     if (!window._photoCache) window._photoCache = {};
                     window._photoCache[key] = url;
@@ -38670,12 +38679,16 @@ document.addEventListener('DOMContentLoaded', () => {
     async function loadStrengthPhotoDataUrl(bldgId, photoId) {
         if (!bldgId || !photoId) return null;
         const key = getStrengthPhotoDocId(bldgId, photoId);
-        if (window._photoCache && window._photoCache[key]) return window._photoCache[key];
+        if (window._photoCache && window._photoCache[key]) {
+            maybeScheduleMigrateFromLocal(key, window._photoCache[key]);
+            return window._photoCache[key];
+        }
         try {
             const local = await idbGet('photos', key);
             if (typeof local === 'string' && local.length > 32) {
                 if (!window._photoCache) window._photoCache = {};
                 window._photoCache[key] = local;
+                maybeScheduleMigrateFromLocal(key, local);
                 return local;
             }
         } catch (_) { /* ignore */ }
@@ -38683,7 +38696,7 @@ document.addEventListener('DOMContentLoaded', () => {
             try {
                 const snap = await db.collection('safety_app').doc(getCompanyDocId())
                     .collection('photos').doc(key).get();
-                const url = snap.exists ? await resolvePhotoUrlFromSnapData(snap.data() || {}) : null;
+                const url = await photoUrlFromCloudSnap(snap, key);
                 if (typeof url === 'string' && url.length > 32) {
                     if (!window._photoCache) window._photoCache = {};
                     window._photoCache[key] = url;
@@ -38708,10 +38721,9 @@ document.addEventListener('DOMContentLoaded', () => {
         // 스캔 직후 바로 NDT 항목을 저장할 때 photoId가 아직 안 붙은 채로 저장돼버릴 수 있다.
         // 클라우드 업로드(다른 기기 동기화용)는 실패해도 로컬엔 이미 남아있으니 백그라운드로 진행.
         await persistPhotoUrlToIdb(key, dataUrl);
-        if (db && window.state.companyId) {
-            db.collection('safety_app').doc(getCompanyDocId()).collection('photos').doc(key).set({ dataUrl })
-                .catch((e) => console.warn('반발경도 측정지 사진 업로드 실패:', key, e));
-        }
+        persistPhotoToCloud(key, dataUrl).catch((e) => {
+            console.warn('반발경도 측정지 사진 업로드 실패:', key, e);
+        });
     }
 
     async function deleteStrengthPhotoStorage(bldgId, photoId) {
@@ -38719,12 +38731,10 @@ document.addEventListener('DOMContentLoaded', () => {
         const key = getStrengthPhotoDocId(bldgId, photoId);
         if (window._photoCache) delete window._photoCache[key];
         await idbDelete('photos', key);
-        if (db && window.state.companyId) {
-            try {
-                await db.collection('safety_app').doc(getCompanyDocId()).collection('photos').doc(key).delete();
-            } catch (e) {
-                console.warn('반발경도 측정지 사진 클라우드 삭제 실패:', key, e);
-            }
+        try {
+            await deleteCloudPhoto(key);
+        } catch (e) {
+            console.warn('반발경도 측정지 사진 클라우드 삭제 실패:', key, e);
         }
     }
 
@@ -38737,6 +38747,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 const key = getOverviewPhotoDocId(bldg.id, p.id);
                 if (!window._photoCache) window._photoCache = {};
                 window._photoCache[key] = p.dataUrl;
+                maybeScheduleMigrateFromLocal(key, p.dataUrl);
                 return;
             }
             const url = await loadOverviewPhotoDataUrl(bldg.id, p.id);
@@ -38749,20 +38760,11 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!bldg || !bldg.id || !Array.isArray(bldg.overviewPhotos)) return;
         if (!window._photoCache) window._photoCache = {};
         if (!window._cloudSyncedPhotoIds) window._cloudSyncedPhotoIds = new Set();
-        const companyPhotos = (db && window.state.companyId)
-            ? db.collection('safety_app').doc(getCompanyDocId()).collection('photos')
-            : null;
         await Promise.all(bldg.overviewPhotos.map(async (p) => {
             if (!p || !p.id || !p.dataUrl) return;
             const key = getOverviewPhotoDocId(bldg.id, p.id);
             window._photoCache[key] = p.dataUrl;
-            if (!companyPhotos || window._cloudSyncedPhotoIds.has(key)) return;
-            try {
-                await companyPhotos.doc(key).set({ dataUrl: p.dataUrl });
-                window._cloudSyncedPhotoIds.add(key);
-            } catch (e) {
-                console.warn('전경사진 업로드 실패:', key, e);
-            }
+            await persistPhotoToCloud(key, p.dataUrl);
         }));
     }
 
@@ -38773,12 +38775,10 @@ document.addEventListener('DOMContentLoaded', () => {
         if (window._photoCache) delete window._photoCache[key];
         if (window._cloudSyncedPhotoIds) window._cloudSyncedPhotoIds.delete(key);
         await idbDelete('photos', key);
-        if (db && window.state.companyId) {
-            try {
-                await db.collection('safety_app').doc(getCompanyDocId()).collection('photos').doc(key).delete();
-            } catch (e) {
-                console.warn('전경사진 클라우드 삭제 실패:', key, e);
-            }
+        try {
+            await deleteCloudPhoto(key);
+        } catch (e) {
+            console.warn('전경사진 클라우드 삭제 실패:', key, e);
         }
     }
 
@@ -39049,9 +39049,218 @@ document.addEventListener('DOMContentLoaded', () => {
     async function resolvePhotoUrlFromSnapData(data) {
         if (!data) return null;
         const remote = await resolveCloudAssetUrlFromSnapData(data);
-        if (remote) return remote;
+        if (remote) {
+            const local = await materializeCloudAssetPayload(remote, data);
+            if (local && String(local).length > 32) return local;
+            return remote;
+        }
         if (typeof data.dataUrl === 'string' && data.dataUrl.length > 32) return data.dataUrl;
         return null;
+    }
+
+    const PHOTO_STORAGE_UPLOAD_MAX = 4;
+    let _photoStorageUploadInflight = 0;
+    const _photoStorageUploadWaiters = [];
+    function runPhotoStorageUpload(task) {
+        return new Promise((resolve, reject) => {
+            const start = async () => {
+                _photoStorageUploadInflight += 1;
+                try {
+                    resolve(await task());
+                } catch (e) {
+                    reject(e);
+                } finally {
+                    _photoStorageUploadInflight -= 1;
+                    const next = _photoStorageUploadWaiters.shift();
+                    if (next) next();
+                }
+            };
+            if (_photoStorageUploadInflight < PHOTO_STORAGE_UPLOAD_MAX) start();
+            else _photoStorageUploadWaiters.push(start);
+        });
+    }
+
+    function photoStorageMarkKey() {
+        const cid = (typeof getCompanyDocId === 'function' && getCompanyDocId()) || window.state.companyId || '';
+        return 'bsaCloudPhotoStorage:' + cid;
+    }
+    function isPhotoMarkedOnStorage(photoId) {
+        if (!photoId) return false;
+        if (window._cloudSyncedPhotoIds && window._cloudSyncedPhotoIds.has(photoId)) return true;
+        try {
+            const raw = localStorage.getItem(photoStorageMarkKey());
+            if (!raw) return false;
+            const arr = JSON.parse(raw);
+            return Array.isArray(arr) && arr.indexOf(photoId) >= 0;
+        } catch (_e) {
+            return false;
+        }
+    }
+    function markPhotoOnStorage(photoId) {
+        if (!photoId) return;
+        if (!window._cloudSyncedPhotoIds) window._cloudSyncedPhotoIds = new Set();
+        window._cloudSyncedPhotoIds.add(photoId);
+        try {
+            const key = photoStorageMarkKey();
+            const arr = JSON.parse(localStorage.getItem(key) || '[]');
+            const set = new Set(Array.isArray(arr) ? arr : []);
+            set.add(photoId);
+            localStorage.setItem(key, JSON.stringify(Array.from(set)));
+        } catch (_e) { /* quota / private mode */ }
+    }
+    function unmarkPhotoOnStorage(photoId) {
+        if (!photoId) return;
+        if (window._cloudSyncedPhotoIds) window._cloudSyncedPhotoIds.delete(photoId);
+        try {
+            const key = photoStorageMarkKey();
+            const arr = JSON.parse(localStorage.getItem(key) || '[]');
+            const next = (Array.isArray(arr) ? arr : []).filter((id) => id !== photoId);
+            localStorage.setItem(key, JSON.stringify(next));
+        } catch (_e) { /* ignore */ }
+    }
+
+    function getCompanyPhotosCollection() {
+        if (!db || !window.state.companyId) return null;
+        return db.collection('safety_app').doc(getCompanyDocId()).collection('photos');
+    }
+
+    async function photoUrlFromCloudSnap(snap, photoId) {
+        if (!snap || !snap.exists) return null;
+        const data = snap.data() || {};
+        if (hasFirebaseStorageMeta(data)) markPhotoOnStorage(photoId);
+        const url = await resolvePhotoUrlFromSnapData(data);
+        if (url && data.dataUrl && !hasFirebaseStorageMeta(data)) {
+            scheduleLegacyPhotoMigrate(photoId, data.dataUrl);
+        }
+        return url;
+    }
+
+    const _photoPersistInflight = {};
+
+    async function persistPhotoToCloud(photoId, sourceUrl, existingData) {
+        if (!photoId || !sourceUrl) return false;
+        const companyPhotos = getCompanyPhotosCollection();
+        if (!companyPhotos) return false;
+        if (isPhotoMarkedOnStorage(photoId)) return true;
+        if (_photoPersistInflight[photoId]) return _photoPersistInflight[photoId];
+        const job = (async () => {
+            if (isPhotoMarkedOnStorage(photoId)) return true;
+            const docRef = companyPhotos.doc(photoId);
+            try {
+                let data = existingData;
+                if (data == null) {
+                    const snap = await docRef.get();
+                    data = snap.exists ? (snap.data() || {}) : {};
+                }
+                if (hasFirebaseStorageMeta(data)) {
+                    markPhotoOnStorage(photoId);
+                    return true;
+                }
+                if (USE_FIREBASE_STORAGE_FOR_PHOTOS && getFirebaseStorage()) {
+                    await runPhotoStorageUpload(async () => {
+                        const parsedHint = parseDataUrl(sourceUrl);
+                        const contentType = (parsedHint && parsedHint.contentType) || 'image/jpeg';
+                        const path = storagePathPhoto(getCompanyDocId(), photoId, contentType);
+                        await uploadAssetToFirebaseStorageAndMeta(docRef, path, sourceUrl, { kind: 'photo' });
+                    });
+                    markPhotoOnStorage(photoId);
+                    return true;
+                }
+                await enqueueFirestoreWrite(() => docRef.set({ dataUrl: sourceUrl }));
+                return true;
+            } catch (e) {
+                console.warn('사진 클라우드 업로드 실패:', photoId, e);
+                return false;
+            }
+        })();
+        _photoPersistInflight[photoId] = job;
+        try {
+            return await job;
+        } finally {
+            if (_photoPersistInflight[photoId] === job) delete _photoPersistInflight[photoId];
+        }
+    }
+
+    function scheduleLegacyPhotoMigrate(photoId, sourceUrl) {
+        if (!photoId || !sourceUrl) return;
+        if (isPhotoMarkedOnStorage(photoId)) return;
+        if (isFirebaseStorageHttpUrl(sourceUrl)) {
+            markPhotoOnStorage(photoId);
+            return;
+        }
+        if (typeof sourceUrl !== 'string' || sourceUrl.indexOf('data:') !== 0) return;
+        setTimeout(() => {
+            persistPhotoToCloud(photoId, sourceUrl).catch((e) => {
+                console.warn('레거시 사진 Storage 이관 실패:', photoId, e);
+            });
+        }, 0);
+    }
+
+    async function deleteCloudPhoto(photoId) {
+        if (!photoId) return;
+        unmarkPhotoOnStorage(photoId);
+        const companyPhotos = getCompanyPhotosCollection();
+        if (!companyPhotos) return;
+        const fallback = storagePathPhoto(getCompanyDocId(), photoId, 'image/jpeg');
+        await deleteCloudAssetDoc(companyPhotos.doc(photoId), fallback);
+    }
+
+    function maybeScheduleMigrateFromLocal(photoId, url) {
+        if (!photoId || typeof url !== 'string' || url.length < 32) return;
+        if (isPhotoMarkedOnStorage(photoId)) return;
+        if (url.indexOf('data:') === 0) scheduleLegacyPhotoMigrate(photoId, url);
+    }
+
+    async function resolveLocalPhotoUrl(photoId) {
+        if (!photoId) return null;
+        if (window._photoCache && window._photoCache[photoId]) return window._photoCache[photoId];
+        try {
+            const fromIdb = await idbGet('photos', photoId);
+            if (typeof fromIdb === 'string' && fromIdb.length > 32) return fromIdb;
+        } catch (_e) { /* ignore */ }
+        return null;
+    }
+
+    async function migrateLegacyCloudPhoto(photoId) {
+        if (!photoId || isPhotoMarkedOnStorage(photoId)) return true;
+        const companyPhotos = getCompanyPhotosCollection();
+        if (!companyPhotos) return false;
+        try {
+            const snap = await companyPhotos.doc(photoId).get();
+            if (!snap.exists) return false;
+            const data = snap.data() || {};
+            if (hasFirebaseStorageMeta(data)) {
+                markPhotoOnStorage(photoId);
+                return true;
+            }
+            if (typeof data.dataUrl === 'string' && data.dataUrl.length > 32) {
+                return persistPhotoToCloud(photoId, data.dataUrl, data);
+            }
+            return false;
+        } catch (e) {
+            console.warn('레거시 사진 Storage 이관 조회 실패:', photoId, e);
+            return false;
+        }
+    }
+
+    async function ensurePhotoPersistedToStorage(photoId, inlineUrl) {
+        if (!photoId || isPhotoMarkedOnStorage(photoId)) return true;
+        let url = (typeof inlineUrl === 'string' && inlineUrl.length > 32) ? inlineUrl : null;
+        if (!url) url = await resolveLocalPhotoUrl(photoId);
+        if (typeof url === 'string' && url.length > 32
+            && (url.indexOf('data:') === 0 || isFirebaseStorageHttpUrl(url))) {
+            return persistPhotoToCloud(photoId, url);
+        }
+        return migrateLegacyCloudPhoto(photoId);
+    }
+
+    async function runPhotoJobsInBatches(items, worker, batchSize) {
+        const size = batchSize || PHOTO_STORAGE_UPLOAD_MAX;
+        const list = Array.isArray(items) ? items : [];
+        for (let i = 0; i < list.length; i += size) {
+            const slice = list.slice(i, i + size);
+            await Promise.all(slice.map((item) => worker(item)));
+        }
     }
 
     async function uploadFloorDrawing(buildingId, floorCode, dataUrl) {
@@ -40446,35 +40655,68 @@ document.addEventListener('DOMContentLoaded', () => {
         const photoIds = photosArray.map((_, i) => getPhotoDocId(defectId, i, kind));
         photosArray.forEach((url, i) => { window._photoCache[photoIds[i]] = url; });
         if (db && window.state.companyId) {
-            const companyPhotos = db.collection('safety_app').doc(getCompanyDocId()).collection('photos');
             await Promise.all(photosArray.map((url, i) => {
                 const pid = photoIds[i];
-                if (!url || window._cloudSyncedPhotoIds.has(pid)) return Promise.resolve();
-                return companyPhotos.doc(pid).set({ dataUrl: url }).then(() => {
-                    window._cloudSyncedPhotoIds.add(pid);
-                }).catch(e => console.warn('사진 업로드 실패:', e));
+                if (!url) return Promise.resolve();
+                return persistPhotoToCloud(pid, url);
             }));
         }
         return photoIds;
     }
 
-    /** 동기화 시 로컬에만 있는 인라인 사진을 클라우드에 올려 웹↔폰 표시가 맞도록 함 */
+    /** 동기화 시 로컬·레거시 Firestore dataUrl 사진을 Storage로 올려 웹↔폰 표시가 맞도록 함 */
     async function uploadInlineDefectPhotosForSync(defectsMap) {
         if (!db || !window.state.companyId) return;
+        const jobs = [];
+        const pushJob = (photoId, inlineUrl) => {
+            if (!photoId) return;
+            jobs.push({ photoId, inlineUrl });
+        };
         for (const arr of Object.values(defectsMap || {})) {
             for (const d of (arr || [])) {
                 if (!d || !d.id) continue;
-                if (d.photos && d.photos.length > 0) await uploadDefectPhotos(d.id, d.photos);
-                if (d.prevRoundPhotos && d.prevRoundPhotos.length > 0) {
-                    await uploadDefectPhotos(d.id, d.prevRoundPhotos, 'prev');
-                }
+                const pushList = (photos, ids, kind) => {
+                    const count = Math.max(
+                        (Array.isArray(photos) ? photos.length : 0),
+                        (Array.isArray(ids) ? ids.length : 0)
+                    );
+                    for (let i = 0; i < count; i++) {
+                        const pid = (ids && ids[i]) || getPhotoDocId(d.id, i, kind);
+                        pushJob(pid, photos && photos[i]);
+                    }
+                };
+                pushList(d.photos, d.photoIds);
+                pushList(d.prevRoundPhotos, d.prevRoundPhotoIds, 'prev');
             }
         }
         for (const b of (window.state.buildings || [])) {
-            if (b && Array.isArray(b.overviewPhotos) && b.overviewPhotos.length) {
-                await uploadOverviewPhotos(b);
-            }
+            if (!b || !b.id) continue;
+            const overview = Array.isArray(b.overviewPhotos) ? b.overviewPhotos : [];
+            overview.forEach((p) => {
+                if (!p || !p.id) return;
+                pushJob(getOverviewPhotoDocId(b.id, p.id), p.dataUrl);
+            });
+            const prefix = b.id + '_';
+            const ndt = window.state.ndtData || {};
+            Object.keys(ndt).forEach((k) => {
+                if (!k.startsWith(prefix)) return;
+                (ndt[k] || []).forEach((item) => {
+                    const slots = (item && Array.isArray(item.strengthSlots)) ? item.strengthSlots : [];
+                    slots.forEach((s) => {
+                        if (!s || !s.photoId) return;
+                        pushJob(getStrengthPhotoDocId(b.id, s.photoId), null);
+                    });
+                });
+            });
         }
+        const seen = new Set();
+        const unique = [];
+        jobs.forEach((job) => {
+            if (seen.has(job.photoId)) return;
+            seen.add(job.photoId);
+            unique.push(job);
+        });
+        await runPhotoJobsInBatches(unique, (job) => ensurePhotoPersistedToStorage(job.photoId, job.inlineUrl));
     }
 
     /** 회사 문서 저장 후 사진·도면 업로드(메타데이터 업로드와 분리) */
@@ -40500,7 +40742,7 @@ document.addEventListener('DOMContentLoaded', () => {
         for (let i = 0; i < cloudIds.length; i++) {
             const photoDocId = cloudIds[i];
             try {
-                await enqueueFirestoreWrite(() => companyPhotos.doc(photoDocId).delete());
+                await deleteCloudPhoto(photoDocId);
             } catch (e) {
                 failCount++;
                 console.warn(`사진 클라우드 삭제 실패 (${photoDocId}):`, e);
@@ -40576,10 +40818,14 @@ document.addEventListener('DOMContentLoaded', () => {
                 const loadIds = async (ids) => {
                     if (!ids || ids.length === 0) return [];
                     const photos = await Promise.all(ids.map(async pid => {
-                        if (window._photoCache[pid]) return window._photoCache[pid];
+                        if (window._photoCache[pid]) {
+                            maybeScheduleMigrateFromLocal(pid, window._photoCache[pid]);
+                            return window._photoCache[pid];
+                        }
                         const fromIdb = await idbGet('photos', pid);
                         if (fromIdb) {
                             window._photoCache[pid] = fromIdb;
+                            maybeScheduleMigrateFromLocal(pid, fromIdb);
                             return fromIdb;
                         }
                         if (!companyPhotos) return null;
@@ -40591,7 +40837,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         _photoFetchInflight += 1;
                         try {
                             const snap = await companyPhotos.doc(pid).get();
-                            const url = snap.exists ? await resolvePhotoUrlFromSnapData(snap.data() || {}) : null;
+                            const url = await photoUrlFromCloudSnap(snap, pid);
                             if (url) window._photoCache[pid] = url;
                             return url;
                         } catch (e) {

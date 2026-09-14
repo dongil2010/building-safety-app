@@ -78,6 +78,7 @@ function testDownloadUrlPath() {
 
 function testFlag() {
     assert.strictEqual(api.USE_FIREBASE_STORAGE_FOR_DRAWINGS, true);
+    assert.strictEqual(api.USE_FIREBASE_STORAGE_FOR_PHOTOS, true);
 }
 
 const tests = [
