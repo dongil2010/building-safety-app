@@ -33099,10 +33099,17 @@ document.addEventListener('DOMContentLoaded', () => {
                     const e = idx + 1 < starts.length ? starts[idx + 1] : ps.length;
                     const statusTbls = [];
                     let photoTbl = null, photoParaStamp = null, locationMapTbl = null;
-                    for (let i = s + 1; i < e; i++) {
+                    for (let i = s; i < e; i++) {
                         const txt = paraText(ps[i]).trim();
                         const tbls = Array.from(ps[i].getElementsByTagNameNS(HP_NS, 'tbl'));
                         if (tbls.length === 0) continue;
+                        // 제목 문단(i===s): 상태조사표만 수집. 사진 판정은 하지 않음.
+                        if (i === s) {
+                            tbls.forEach((tbl) => {
+                                if (isCurrentStatusTable(tbl)) statusTbls.push(tbl);
+                            });
+                            continue;
+                        }
                         if (!photoTbl && /^사진1/.test(txt)) {
                             photoTbl = tbls[0];
                             photoParaStamp = ps[i].cloneNode(true);
@@ -33205,6 +33212,31 @@ document.addEventListener('DOMContentLoaded', () => {
                     grade3LocMapStampPara.parentNode.removeChild(grade3LocMapStampPara);
                 }
             }
+            // 여분 샘플 상태조사표(NO.16/31/46…)만 제거. 첫 장(statusTbls[0])은 유지.
+            // 제목 문단의 표를 지우지 않는다 — 1번 표가 제목과 같은 문단에 있음.
+            const owningPara = (node) => {
+                let p = node;
+                while (p && p.localName !== "p") p = p.parentNode;
+                return p;
+            };
+            const stripExcessStampStatusTables = (stampSlot) => {
+                if (!stampSlot || !stampSlot.statusTbls || stampSlot.statusTbls.length <= 1) return;
+                const titlePara = stampSlot.titlePara;
+                const keep = stampSlot.statusTbls[0];
+                stampSlot.statusTbls.slice(1).forEach((tbl) => {
+                    if (!tbl || !tbl.parentNode) return;
+                    const p = owningPara(tbl);
+                    if (p && titlePara && p === titlePara) {
+                        tbl.parentNode.removeChild(tbl);
+                        return;
+                    }
+                    if (p && p.parentNode) p.parentNode.removeChild(p);
+                    else if (tbl.parentNode) tbl.parentNode.removeChild(tbl);
+                });
+                stampSlot.statusTbls = (keep && keep.parentNode) ? [keep] : stampSlot.statusTbls.filter(t => t && t.parentNode).slice(0, 1);
+            };
+            stripExcessStampStatusTables(floorSlots[0]);
+
             const stampChildren = secChildren();
             const stampParas = stampChildren.slice(stampChildren.indexOf(floorSlots[0].titlePara));
             for (let c = 1; c < floorsData.length; c++) {
@@ -33410,10 +33442,24 @@ document.addEventListener('DOMContentLoaded', () => {
                     });
                     pageTbls = pageTbls.slice(0, neededPages);
                 } else if (pageTbls.length < neededPages) {
-                    let insertAfterNode = pageTbls[pageTbls.length - 1].parentNode.parentNode;
+                    let insertAfterNode = (() => {
+                        let p = pageTbls[pageTbls.length - 1];
+                        while (p && p.localName !== 'p') p = p.parentNode;
+                        return p || pageTbls[pageTbls.length - 1].parentNode;
+                    })();
                     for (let n = pageTbls.length; n < neededPages; n++) {
                         const clonedPara = insertAfterNode.cloneNode(true);
                         clonedPara.setAttribute('pageBreak', '1');
+                        if (insertAfterNode === slot.titlePara) {
+                            Array.from(clonedPara.childNodes).forEach((ch) => {
+                                if (ch.nodeType !== 1) return;
+                                if ((ch.localName === 'run' || ch.nodeName === 'hp:run') &&
+                                    !ch.getElementsByTagNameNS(HP_NS, 'tbl').length &&
+                                    ch.parentNode) {
+                                    ch.parentNode.removeChild(ch);
+                                }
+                            });
+                        }
                         const clonedTbl = clonedPara.getElementsByTagNameNS(HP_NS, 'tbl')[0];
                         cloneIdSeq++;
                         clonedTbl.setAttribute('id', String(8600000 + cloneIdSeq));
@@ -35185,10 +35231,17 @@ document.addEventListener('DOMContentLoaded', () => {
                     const e = idx + 1 < starts.length ? starts[idx + 1] : ps.length;
                     const statusTbls = [];
                     let photoTbl = null, locationMapTbl = null;
-                    for (let i = s + 1; i < e; i++) {
+                    for (let i = s; i < e; i++) {
                         const txt = paraText(ps[i]).trim();
                         const tbls = Array.from(ps[i].getElementsByTagNameNS(HP_NS, 'tbl'));
                         if (tbls.length === 0) continue;
+                        // 제목 문단(i===s): 상태조사표만 수집. 사진 판정은 하지 않음.
+                        if (i === s) {
+                            tbls.forEach((tbl) => {
+                                if (isCurrentStatusTable(tbl)) statusTbls.push(tbl);
+                            });
+                            continue;
+                        }
                         if (!photoTbl && /^사진1/.test(txt)) { photoTbl = tbls[0]; continue; }
                         if (!photoTbl) {
                             // 한 문단 안에 표가 여러 개 겹쳐 들어있는 경우가 있다(옛 포맷을 새 포맷으로
@@ -35265,6 +35318,31 @@ document.addEventListener('DOMContentLoaded', () => {
                     });
                 });
             };
+            // 여분 샘플 상태조사표(NO.16/31/46…)만 제거. 첫 장(statusTbls[0])은 유지.
+            // 제목 문단의 표를 지우지 않는다 — 1번 표가 제목과 같은 문단에 있음.
+            const owningPara = (node) => {
+                let p = node;
+                while (p && p.localName !== "p") p = p.parentNode;
+                return p;
+            };
+            const stripExcessStampStatusTables = (stampSlot) => {
+                if (!stampSlot || !stampSlot.statusTbls || stampSlot.statusTbls.length <= 1) return;
+                const titlePara = stampSlot.titlePara;
+                const keep = stampSlot.statusTbls[0];
+                stampSlot.statusTbls.slice(1).forEach((tbl) => {
+                    if (!tbl || !tbl.parentNode) return;
+                    const p = owningPara(tbl);
+                    if (p && titlePara && p === titlePara) {
+                        tbl.parentNode.removeChild(tbl);
+                        return;
+                    }
+                    if (p && p.parentNode) p.parentNode.removeChild(p);
+                    else if (tbl.parentNode) tbl.parentNode.removeChild(tbl);
+                });
+                stampSlot.statusTbls = (keep && keep.parentNode) ? [keep] : stampSlot.statusTbls.filter(t => t && t.parentNode).slice(0, 1);
+            };
+            stripExcessStampStatusTables(floorSlots[0]);
+
             const stampChildren = secChildren();
             const stampParas = stampChildren.slice(stampChildren.indexOf(floorSlots[0].titlePara));
             for (let c = 1; c < floorsData.length; c++) {
@@ -35432,10 +35510,24 @@ document.addEventListener('DOMContentLoaded', () => {
                     });
                     pageTbls = pageTbls.slice(0, neededPages);
                 } else if (pageTbls.length < neededPages) {
-                    let insertAfterNode = pageTbls[pageTbls.length - 1].parentNode.parentNode;
+                    let insertAfterNode = (() => {
+                        let p = pageTbls[pageTbls.length - 1];
+                        while (p && p.localName !== 'p') p = p.parentNode;
+                        return p || pageTbls[pageTbls.length - 1].parentNode;
+                    })();
                     for (let n = pageTbls.length; n < neededPages; n++) {
                         const clonedPara = insertAfterNode.cloneNode(true);
                         clonedPara.setAttribute('pageBreak', '1');
+                        if (insertAfterNode === slot.titlePara) {
+                            Array.from(clonedPara.childNodes).forEach((ch) => {
+                                if (ch.nodeType !== 1) return;
+                                if ((ch.localName === 'run' || ch.nodeName === 'hp:run') &&
+                                    !ch.getElementsByTagNameNS(HP_NS, 'tbl').length &&
+                                    ch.parentNode) {
+                                    ch.parentNode.removeChild(ch);
+                                }
+                            });
+                        }
                         const clonedTbl = clonedPara.getElementsByTagNameNS(HP_NS, 'tbl')[0];
                         cloneIdSeq++;
                         clonedTbl.setAttribute('id', String(8600000 + cloneIdSeq));
