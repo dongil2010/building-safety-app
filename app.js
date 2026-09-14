@@ -27744,21 +27744,51 @@ document.addEventListener('DOMContentLoaded', () => {
             replaceMode = confirm(
                 `현재 층(${state.currentFloor})에 이미 ${existingCount}개의 결함이 등록되어 있습니다.\n\n` +
                 `[확인] : 기존 결함을 모두 비우고 캐드 핀으로 새로 교체\n` +
-                `[취소] : 기존 결함 뒤에 이어서 추가 (병합)`
+                `[취소] : 기존은 두고, 같은 번호는 건너뛰고 새 번호만 추가`
             );
         }
 
         if (replaceMode) {
-            state.defects[floorKey] = [];
+            const toClear = (state.defects[floorKey] || []).slice();
+            if (typeof pushDefectHistory === 'function') pushDefectHistory();
+            toClear.forEach((d) => {
+                if (!d || !d.id) return;
+                if (typeof removeSingleDefectRecord === 'function') {
+                    removeSingleDefectRecord(floorKey, d.id, { skipRenumber: true });
+                }
+            });
+            if (!state.defects[floorKey]) state.defects[floorKey] = [];
+            if (typeof discardStalePendingRemoteAfterLocalPinEdit === 'function') {
+                discardStalePendingRemoteAfterLocalPinEdit();
+            }
         }
 
         const currentDefects = state.defects[floorKey];
         let addedCount = 0;
+        let skippedDupCount = 0;
         const newDefectsList = [];
+
+        const normalizeCadNoKey = (no) => {
+            const raw = String(no || '').replace(/^NO\.?\s*/i, '').trim();
+            const m = raw.match(/(\d+)(?:-(\d+))?/);
+            if (!m) return raw.toLowerCase();
+            return m[2] ? (m[1] + '-' + m[2]) : m[1];
+        };
+        const existingNoKeys = new Set(
+            (currentDefects || []).map((d) => normalizeCadNoKey(d.cadNo || d.no || d.groupNo || ''))
+                .filter(Boolean)
+        );
 
         validDefects.forEach((cadItem, idx) => {
             // 캐드에 적혀 있던 결함 번호 원본 100% 보존
             const rawNo = String(cadItem.no || '').trim() || String(currentDefects.length + 1);
+            const noKey = normalizeCadNoKey(rawNo);
+            // 같은 JSON 재가져오기 시 번호 중복 핀 방지 (병합 모드)
+            if (!replaceMode && noKey && existingNoKeys.has(noKey)) {
+                skippedDupCount++;
+                return;
+            }
+            if (noKey) existingNoKeys.add(noKey);
             const box = cadToApp(Number(cadItem.cadBoxX), Number(cadItem.cadBoxY));
             const tip = cadToApp(Number(cadItem.cadTipX), Number(cadItem.cadTipY));
 
@@ -27820,7 +27850,12 @@ document.addEventListener('DOMContentLoaded', () => {
         if (typeof renderDefectListPanel === 'function') renderDefectListPanel();
         if (typeof renderSurveyTable === 'function' && state.currentTab === 'tab-survey') renderSurveyTable();
 
-        window.showToast?.(`🎉 캐드 결함 핀 ${addedCount}개가 배치되었습니다! 상단 조정 바로 좌우 반전 및 위치를 맞춰보세요.`, 'success', 6000);
+        if (addedCount === 0 && skippedDupCount > 0) {
+            window.showToast?.(`같은 번호 캐드 핀 ${skippedDupCount}개는 이미 있어 추가하지 않았습니다.`, 'info', 4500);
+            return;
+        }
+        const skipMsg = skippedDupCount > 0 ? ` (같은 번호 ${skippedDupCount}개 건너뜀)` : '';
+        window.showToast?.(`🎉 캐드 결함 핀 ${addedCount}개가 배치되었습니다!${skipMsg} 상단 조정 바로 좌우 반전 및 위치를 맞춰보세요.`, 'success', 6000);
         showCadPinAdjustToolbar(newDefectsList, floorKey);
     }
 
