@@ -1,5 +1,6 @@
 /**
  * Firebase Storage helpers — 도면/PDF/티어/사진 파일 본문을 Firestore 대신 Storage에 둔다.
+ * 경로: companies/{companyId}/{현장}/{회차}/{assetType}/{file}
  * Firestore 문서에는 URL/메타만 저장.
  */
 (function (root) {
@@ -16,12 +17,35 @@
 
     function sanitizeStoragePathSegment(value, fallback) {
         let s = String(value == null ? '' : value).trim();
+        s = s.replace(/^🏢\s*/, '');
         s = s.replace(/[\\/]/g, '_');
         s = s.replace(/[#?[\]*]/g, '_');
+        s = s.replace(/\s+/g, '_');
         s = s.replace(/\.\.+/g, '.');
         s = s.replace(/_+/g, '_');
+        s = s.replace(/^_+|_+$/g, '');
         s = s.slice(0, 180);
         return s || fallback || 'unnamed';
+    }
+
+    function storageScopeSegments(scope) {
+        const site = sanitizeStoragePathSegment(
+            scope && (scope.site || scope.siteName),
+            'unnamed-site'
+        );
+        const round = sanitizeStoragePathSegment(
+            scope && (scope.round || scope.roundKey),
+            'unnamed-round'
+        );
+        return site + '/' + round;
+    }
+
+    function companyScopedAssetPath(companyId, assetType, fileBase, ext, scope) {
+        return 'companies/'
+            + sanitizeStoragePathSegment(companyId)
+            + '/' + storageScopeSegments(scope)
+            + '/' + sanitizeStoragePathSegment(assetType, 'files')
+            + '/' + withExt(fileBase, ext);
     }
 
     function guessExtFromContentType(contentType, fallback) {
@@ -41,46 +65,49 @@
         return base + '.' + e;
     }
 
-    function storagePathFloorDrawing(companyId, buildingId, floorCode, contentType) {
+    function storagePathFloorDrawing(companyId, buildingId, floorCode, contentType, scope) {
         const ext = guessExtFromContentType(contentType, 'jpg');
-        return 'companies/'
-            + sanitizeStoragePathSegment(companyId)
-            + '/floorDrawings/'
-            + withExt(
-                sanitizeStoragePathSegment(buildingId) + '_' + sanitizeStoragePathSegment(floorCode),
-                ext
-            );
+        return companyScopedAssetPath(
+            companyId,
+            'floorDrawings',
+            sanitizeStoragePathSegment(buildingId) + '_' + sanitizeStoragePathSegment(floorCode),
+            ext,
+            scope
+        );
     }
 
-    function storagePathFloorDrawingPdf(companyId, buildingId, floorCode) {
-        return 'companies/'
-            + sanitizeStoragePathSegment(companyId)
-            + '/floorDrawingPdfs/'
-            + withExt(
-                sanitizeStoragePathSegment(buildingId) + '_' + sanitizeStoragePathSegment(floorCode),
-                'pdf'
-            );
+    function storagePathFloorDrawingPdf(companyId, buildingId, floorCode, scope) {
+        return companyScopedAssetPath(
+            companyId,
+            'floorDrawingPdfs',
+            sanitizeStoragePathSegment(buildingId) + '_' + sanitizeStoragePathSegment(floorCode),
+            'pdf',
+            scope
+        );
     }
 
-    function storagePathFloorDrawingTier(companyId, buildingId, floorCode, dim, contentType) {
+    function storagePathFloorDrawingTier(companyId, buildingId, floorCode, dim, contentType, scope) {
         const ext = guessExtFromContentType(contentType, 'jpg');
-        return 'companies/'
-            + sanitizeStoragePathSegment(companyId)
-            + '/floorDrawingTiers/'
-            + withExt(
-                sanitizeStoragePathSegment(buildingId)
+        return companyScopedAssetPath(
+            companyId,
+            'floorDrawingTiers',
+            sanitizeStoragePathSegment(buildingId)
                 + '_' + sanitizeStoragePathSegment(floorCode)
                 + '_' + sanitizeStoragePathSegment(dim, '4000'),
-                ext
-            );
+            ext,
+            scope
+        );
     }
 
-    function storagePathPhoto(companyId, photoId, contentType) {
+    function storagePathPhoto(companyId, photoId, contentType, scope) {
         const ext = guessExtFromContentType(contentType, 'jpg');
-        return 'companies/'
-            + sanitizeStoragePathSegment(companyId)
-            + '/photos/'
-            + withExt(sanitizeStoragePathSegment(photoId), ext);
+        return companyScopedAssetPath(
+            companyId,
+            'photos',
+            sanitizeStoragePathSegment(photoId),
+            ext,
+            scope
+        );
     }
 
     function parseDataUrl(dataUrl) {
@@ -281,6 +308,8 @@
         USE_FIREBASE_STORAGE_FOR_PHOTOS: USE_FIREBASE_STORAGE_FOR_PHOTOS,
         COMPANY_ASSET_TYPES: COMPANY_ASSET_TYPES,
         sanitizeStoragePathSegment: sanitizeStoragePathSegment,
+        storageScopeSegments: storageScopeSegments,
+        companyScopedAssetPath: companyScopedAssetPath,
         guessExtFromContentType: guessExtFromContentType,
         storagePathFloorDrawing: storagePathFloorDrawing,
         storagePathFloorDrawingPdf: storagePathFloorDrawingPdf,

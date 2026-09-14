@@ -36,14 +36,26 @@ service firebase.storage {
         && request.resource.contentType == 'application/vnd.android.package-archive';
     }
 
-    // 회사 멤버 도면/PDF/티어/사진 — Firestore companies/{id}/members/{uid} 와 동일
+    function allowCompanyAsset(companyId, assetType) {
+      return isCompanyMember(companyId) && isCompanyAssetType(assetType);
+    }
+
+    // 레거시 평면 경로: companies/{companyId}/{assetType}/{fileName}
     match /companies/{companyId}/{assetType}/{fileName} {
-      allow read: if isCompanyMember(companyId) && isCompanyAssetType(assetType);
-      allow create, update: if isCompanyMember(companyId)
-        && isCompanyAssetType(assetType)
+      allow read: if allowCompanyAsset(companyId, assetType);
+      allow create, update: if allowCompanyAsset(companyId, assetType)
         && request.resource.size < 80 * 1024 * 1024
         && isAllowedCompanyContentType();
-      allow delete: if isCompanyMember(companyId) && isCompanyAssetType(assetType);
+      allow delete: if allowCompanyAsset(companyId, assetType);
+    }
+
+    // 현장 → 회차 폴더: companies/{companyId}/{site}/{round}/{assetType}/{fileName}
+    match /companies/{companyId}/{site}/{round}/{assetType}/{fileName} {
+      allow read: if allowCompanyAsset(companyId, assetType);
+      allow create, update: if allowCompanyAsset(companyId, assetType)
+        && request.resource.size < 80 * 1024 * 1024
+        && isAllowedCompanyContentType();
+      allow delete: if allowCompanyAsset(companyId, assetType);
     }
   }
 }

@@ -32,17 +32,21 @@ function testStoragePaths() {
     const company = 'co-1';
     const bldg = 'bldgA';
     const floor = '3F/옥상';
-    const drawing = api.storagePathFloorDrawing(company, bldg, floor, 'image/jpeg');
-    assert.strictEqual(drawing, 'companies/co-1/floorDrawings/bldgA_3F_옥상.jpg');
+    const scope = { site: '신가 병원', round: '2026년_하반기' };
+    const drawing = api.storagePathFloorDrawing(company, bldg, floor, 'image/jpeg', scope);
+    assert.strictEqual(drawing, 'companies/co-1/신가_병원/2026년_하반기/floorDrawings/bldgA_3F_옥상.jpg');
 
-    const pdf = api.storagePathFloorDrawingPdf(company, bldg, floor);
-    assert.strictEqual(pdf, 'companies/co-1/floorDrawingPdfs/bldgA_3F_옥상.pdf');
+    const pdf = api.storagePathFloorDrawingPdf(company, bldg, floor, scope);
+    assert.strictEqual(pdf, 'companies/co-1/신가_병원/2026년_하반기/floorDrawingPdfs/bldgA_3F_옥상.pdf');
 
-    const tier = api.storagePathFloorDrawingTier(company, bldg, floor, 8000, 'image/jpeg');
-    assert.strictEqual(tier, 'companies/co-1/floorDrawingTiers/bldgA_3F_옥상_8000.jpg');
+    const tier = api.storagePathFloorDrawingTier(company, bldg, floor, 8000, 'image/jpeg', scope);
+    assert.strictEqual(tier, 'companies/co-1/신가_병원/2026년_하반기/floorDrawingTiers/bldgA_3F_옥상_8000.jpg');
 
-    const photo = api.storagePathPhoto(company, 'def1_0', 'image/jpeg');
-    assert.strictEqual(photo, 'companies/co-1/photos/def1_0.jpg');
+    const photo = api.storagePathPhoto(company, 'def1_0', 'image/jpeg', scope);
+    assert.strictEqual(photo, 'companies/co-1/신가_병원/2026년_하반기/photos/def1_0.jpg');
+
+    const fallback = api.storagePathPhoto(company, 'def1_0', 'image/jpeg');
+    assert.strictEqual(fallback, 'companies/co-1/unnamed-site/unnamed-round/photos/def1_0.jpg');
 }
 
 function testMetaFields() {

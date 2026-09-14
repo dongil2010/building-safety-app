@@ -10,6 +10,7 @@ window.BSA.tabs['tab-map'] = {
         'PC·현장 공통: 서버가 만든 일반·고해상도·초고해상도 레스터만 표시 (PDF는 최초 등록·벡터 출력만)',
         '도면·PDF·티어 파일 본문은 Firebase Storage, Firestore는 URL/메타만 (레거시 청크 호환)',
         '결함 사진 본문은 Firebase Storage, Firestore는 URL/메타만 (기존 Firestore dataUrl은 조회·동기화 시 이관)',
+        'Storage 폴더는 현장 → 회차 → 사진/도면',
         '핀 마킹: 화살표·점은 마킹 전체 이동, 번호칸만 끌면 지시 위치 고정',
         '화살표 추가: 같은 번호칸에 화살표·영역 1개씩 추가 (버튼 누를 때마다 1회)',
         '마킹 X-1/X-2 탭: PC는 수정창 왼쪽, 모바일은 수정창 위에 붙임',

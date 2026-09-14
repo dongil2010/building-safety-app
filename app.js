@@ -38249,24 +38249,24 @@ document.addEventListener('DOMContentLoaded', () => {
     function parseDataUrl(dataUrl) {
         return typeof SA.parseDataUrl === 'function' ? SA.parseDataUrl(dataUrl) : null;
     }
-    function storagePathFloorDrawing(companyId, buildingId, floorCode, contentType) {
+    function storagePathFloorDrawing(companyId, buildingId, floorCode, contentType, scope) {
         return typeof SA.storagePathFloorDrawing === 'function'
-            ? SA.storagePathFloorDrawing(companyId, buildingId, floorCode, contentType)
+            ? SA.storagePathFloorDrawing(companyId, buildingId, floorCode, contentType, scope)
             : '';
     }
-    function storagePathFloorDrawingPdf(companyId, buildingId, floorCode) {
+    function storagePathFloorDrawingPdf(companyId, buildingId, floorCode, scope) {
         return typeof SA.storagePathFloorDrawingPdf === 'function'
-            ? SA.storagePathFloorDrawingPdf(companyId, buildingId, floorCode)
+            ? SA.storagePathFloorDrawingPdf(companyId, buildingId, floorCode, scope)
             : '';
     }
-    function storagePathFloorDrawingTier(companyId, buildingId, floorCode, dim, contentType) {
+    function storagePathFloorDrawingTier(companyId, buildingId, floorCode, dim, contentType, scope) {
         return typeof SA.storagePathFloorDrawingTier === 'function'
-            ? SA.storagePathFloorDrawingTier(companyId, buildingId, floorCode, dim, contentType)
+            ? SA.storagePathFloorDrawingTier(companyId, buildingId, floorCode, dim, contentType, scope)
             : '';
     }
-    function storagePathPhoto(companyId, photoId, contentType) {
+    function storagePathPhoto(companyId, photoId, contentType, scope) {
         return typeof SA.storagePathPhoto === 'function'
-            ? SA.storagePathPhoto(companyId, photoId, contentType)
+            ? SA.storagePathPhoto(companyId, photoId, contentType, scope)
             : '';
     }
     function firestoreStorageMetaFields(uploaded) {
@@ -39119,6 +39119,61 @@ document.addEventListener('DOMContentLoaded', () => {
         } catch (_e) { /* ignore */ }
     }
 
+    function findBuildingById(buildingId) {
+        if (!buildingId) return null;
+        return (window.state.buildings || []).find((b) => b && b.id === buildingId) || null;
+    }
+
+    function storageScopeFromBuilding(bldg) {
+        if (!bldg) return { site: 'unnamed-site', round: 'unnamed-round' };
+        const site = (typeof getBuildingSiteName === 'function')
+            ? getBuildingSiteName(bldg)
+            : (bldg.siteName || bldg.name || 'unnamed-site');
+        const round = (typeof getBuildingSurveyRoundKey === 'function')
+            ? getBuildingSurveyRoundKey(bldg)
+            : `${bldg.inspectionYear || '2026년'}_${bldg.inspectionPeriod || '하반기'}`;
+        return { site: site || 'unnamed-site', round: round || 'unnamed-round' };
+    }
+
+    function storageScopeForBuildingId(buildingId) {
+        return storageScopeFromBuilding(findBuildingById(buildingId));
+    }
+
+    function findBuildingIdForDefectId(defectId) {
+        if (!defectId) return null;
+        const defects = window.state.defects || {};
+        const buildings = window.state.buildings || [];
+        for (const key of Object.keys(defects)) {
+            const arr = defects[key] || [];
+            if (!arr.some((d) => d && d.id === defectId)) continue;
+            const match = buildings.find((b) => b && b.id && key.startsWith(b.id + '_'));
+            if (match) return match.id;
+        }
+        return null;
+    }
+
+    function resolveBuildingIdFromPhotoId(photoId) {
+        if (!photoId) return null;
+        const buildings = window.state.buildings || [];
+        if (photoId.indexOf('ov_') === 0 || photoId.indexOf('str_') === 0) {
+            const rest = photoId.slice(photoId.indexOf('_') + 1);
+            const match = buildings.find((b) => b && b.id && rest.startsWith(b.id + '_'));
+            if (match) return match.id;
+        }
+        let defectId = photoId;
+        const prev = photoId.match(/^(.*)_prev_\d+$/);
+        if (prev) defectId = prev[1];
+        else {
+            const cur = photoId.match(/^(.*)_\d+$/);
+            if (cur) defectId = cur[1];
+        }
+        return findBuildingIdForDefectId(defectId);
+    }
+
+    function storageScopeForPhotoId(photoId) {
+        return storageScopeForBuildingId(resolveBuildingIdFromPhotoId(photoId));
+    }
+
     function getCompanyPhotosCollection() {
         if (!db || !window.state.companyId) return null;
         return db.collection('safety_app').doc(getCompanyDocId()).collection('photos');
@@ -39160,8 +39215,13 @@ document.addEventListener('DOMContentLoaded', () => {
                     await runPhotoStorageUpload(async () => {
                         const parsedHint = parseDataUrl(sourceUrl);
                         const contentType = (parsedHint && parsedHint.contentType) || 'image/jpeg';
-                        const path = storagePathPhoto(getCompanyDocId(), photoId, contentType);
-                        await uploadAssetToFirebaseStorageAndMeta(docRef, path, sourceUrl, { kind: 'photo' });
+                        const scope = storageScopeForPhotoId(photoId);
+                        const path = storagePathPhoto(getCompanyDocId(), photoId, contentType, scope);
+                        await uploadAssetToFirebaseStorageAndMeta(docRef, path, sourceUrl, {
+                            kind: 'photo',
+                            site: scope.site,
+                            round: scope.round
+                        });
                     });
                     markPhotoOnStorage(photoId);
                     return true;
@@ -39201,7 +39261,9 @@ document.addEventListener('DOMContentLoaded', () => {
         unmarkPhotoOnStorage(photoId);
         const companyPhotos = getCompanyPhotosCollection();
         if (!companyPhotos) return;
-        const fallback = storagePathPhoto(getCompanyDocId(), photoId, 'image/jpeg');
+        const fallback = storagePathPhoto(
+            getCompanyDocId(), photoId, 'image/jpeg', storageScopeForPhotoId(photoId)
+        );
         await deleteCloudAssetDoc(companyPhotos.doc(photoId), fallback);
     }
 
@@ -39274,10 +39336,13 @@ document.addEventListener('DOMContentLoaded', () => {
             try {
                 const parsedHint = parseDataUrl(dataUrl);
                 const contentType = (parsedHint && parsedHint.contentType) || 'image/jpeg';
-                const path = storagePathFloorDrawing(getCompanyDocId(), buildingId, floorCode, contentType);
+                const scope = storageScopeForBuildingId(buildingId);
+                const path = storagePathFloorDrawing(getCompanyDocId(), buildingId, floorCode, contentType, scope);
                 await uploadAssetToFirebaseStorageAndMeta(docRef, path, dataUrl, {
                     buildingId,
-                    floorCode
+                    floorCode,
+                    site: scope.site,
+                    round: scope.round
                 });
                 if (!window._cloudSyncedDrawingKeys) window._cloudSyncedDrawingKeys = new Set();
                 window._cloudSyncedDrawingKeys.add(docId);
@@ -39397,14 +39462,17 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (USE_FIREBASE_STORAGE_FOR_DRAWINGS && getFirebaseStorage()) {
                     const parsedHint = parseDataUrl(url);
                     const contentType = (parsedHint && parsedHint.contentType) || 'image/jpeg';
+                    const scope = storageScopeForBuildingId(buildingId);
                     const path = storagePathFloorDrawingTier(
-                        getCompanyDocId(), buildingId, floorCode, dim, contentType
+                        getCompanyDocId(), buildingId, floorCode, dim, contentType, scope
                     );
                     await withTimeout(
                         uploadAssetToFirebaseStorageAndMeta(docRef, path, url, {
                             dim,
                             floorCode,
-                            buildingId
+                            buildingId,
+                            site: scope.site,
+                            round: scope.round
                         }),
                         dim >= 16000 ? 90000 : 60000,
                         `tier-upload-${dim}`
@@ -39478,7 +39546,8 @@ document.addEventListener('DOMContentLoaded', () => {
             const docId = floorDrawingTierCloudDocId(buildingId, floorCode, dim);
             try {
                 const fallback = storagePathFloorDrawingTier(
-                    getCompanyDocId(), buildingId, floorCode, dim, 'image/jpeg'
+                    getCompanyDocId(), buildingId, floorCode, dim, 'image/jpeg',
+                    storageScopeForBuildingId(buildingId)
                 );
                 await deleteCloudAssetDoc(col.doc(docId), fallback);
                 if (window._cloudSyncedTierKeys) window._cloudSyncedTierKeys.delete(docId);
@@ -39495,7 +39564,8 @@ document.addEventListener('DOMContentLoaded', () => {
             const docRef = db.collection('safety_app').doc(getCompanyDocId())
                 .collection('floorDrawings').doc(docId);
             const fallback = storagePathFloorDrawing(
-                getCompanyDocId(), buildingId, floorCode, 'image/jpeg'
+                getCompanyDocId(), buildingId, floorCode, 'image/jpeg',
+                storageScopeForBuildingId(buildingId)
             );
             await deleteCloudAssetDoc(docRef, fallback);
             if (window._cloudSyncedDrawingKeys) window._cloudSyncedDrawingKeys.delete(docId);
@@ -40442,10 +40512,13 @@ document.addEventListener('DOMContentLoaded', () => {
         const docRef = db.collection('safety_app').doc(getCompanyDocId()).collection('floorDrawingPdfs').doc(docId);
         try {
             if (USE_FIREBASE_STORAGE_FOR_DRAWINGS && getFirebaseStorage()) {
-                const path = storagePathFloorDrawingPdf(getCompanyDocId(), buildingId, floorCode);
+                const scope = storageScopeForBuildingId(buildingId);
+                const path = storagePathFloorDrawingPdf(getCompanyDocId(), buildingId, floorCode, scope);
                 await uploadAssetToFirebaseStorageAndMeta(docRef, path, pdfDataUrl, {
                     buildingId,
-                    floorCode
+                    floorCode,
+                    site: scope.site,
+                    round: scope.round
                 });
             } else {
                 await writeChunkedPdfToDocRef(docRef, pdfDataUrl);
@@ -40512,7 +40585,9 @@ document.addEventListener('DOMContentLoaded', () => {
         try {
             const docRef = db.collection('safety_app').doc(getCompanyDocId())
                 .collection('floorDrawingPdfs').doc(docId);
-            const fallback = storagePathFloorDrawingPdf(getCompanyDocId(), buildingId, floorCode);
+            const fallback = storagePathFloorDrawingPdf(
+                getCompanyDocId(), buildingId, floorCode, storageScopeForBuildingId(buildingId)
+            );
             await deleteCloudAssetDoc(docRef, fallback);
             if (window._cloudSyncedPdfKeys) window._cloudSyncedPdfKeys.delete(docId);
         } catch (e) {
