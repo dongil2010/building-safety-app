@@ -3022,7 +3022,16 @@ document.addEventListener('DOMContentLoaded', () => {
                 return String(a.id || '').localeCompare(String(b.id || ''));
             });
 
+        // CAD 원본 번호는 보존하되, 수동 추가 결함은 CAD 최대 본번호 다음부터 이어간다.
+        // (예전: seq=0부터라 CAD 100개 뒤 신규가 잠깐 NO.101이었다가 재부여 때 NO.01로 덮임)
         let seq = 0;
+        ordered.forEach((d) => {
+            if (!d || !d.isCadImported || d.surveyExtra) return;
+            const raw = stripDefectNoSuffix(d.groupNo || d.cadNo || d.no || '');
+            const m = String(raw).replace(/^NO\.?\s*/i, '').trim().match(/(\d+)/);
+            const main = m ? parseInt(m[1], 10) : 0;
+            if (main > seq) seq = main;
+        });
         const groupBase = new Map();
         const seenGroup = new Set();
 
