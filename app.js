@@ -17655,30 +17655,52 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // 결함목록 스크롤 위치 저장·복원 (DOM 재렌더 시 맨 위로 튀는 현상 방지)
+    // 섹션 키는 제목 텍스트(건수 포함)가 아니라 data-section-key 사용 — 동기화 후 건수 변경에 깨지지 않게
+    let _lastDefectListScrollSnapshot = null;
+    let _defectListScrollGen = 0;
+
+    function getDefectListSectionKey(sec) {
+        if (!sec) return '';
+        if (sec.dataset && sec.dataset.sectionKey) return String(sec.dataset.sectionKey);
+        const titleEl = sec.querySelector('.defect-list-section-title');
+        const raw = titleEl ? titleEl.textContent.trim() : '';
+        return raw.replace(/\s*\(\d+\)\s*$/, '');
+    }
+
     function captureDefectListScroll(panel) {
         if (!panel) return null;
         const sections = {};
         panel.querySelectorAll('.defect-list-section').forEach((sec) => {
-            const titleEl = sec.querySelector('.defect-list-section-title');
-            const key = titleEl ? titleEl.textContent.trim() : '';
+            const key = getDefectListSectionKey(sec);
             const box = sec.querySelector('.defect-list-section-scroll');
             if (key && box) sections[key] = box.scrollTop;
         });
-        return { panelTop: panel.scrollTop, sections };
+        const snap = { panelTop: panel.scrollTop, sections };
+        _lastDefectListScrollSnapshot = snap;
+        return snap;
+    }
+
+    function applyDefectListScrollSnapshot(panel, snapshot) {
+        if (!panel || !snapshot) return;
+        if (typeof snapshot.panelTop === 'number') panel.scrollTop = snapshot.panelTop;
+        panel.querySelectorAll('.defect-list-section').forEach((sec) => {
+            const key = getDefectListSectionKey(sec);
+            const box = sec.querySelector('.defect-list-section-scroll');
+            if (key && box && snapshot.sections && snapshot.sections[key] !== undefined) {
+                box.scrollTop = snapshot.sections[key];
+            }
+        });
     }
 
     function restoreDefectListScroll(panel, snapshot) {
-        if (!panel || !snapshot) return;
+        const snap = snapshot || _lastDefectListScrollSnapshot;
+        if (!panel || !snap) return;
+        // 진행 중이던 "선택 행으로 스크롤" 예약 무효화 (동기화 재렌더와 경쟁하지 않게)
+        _defectListScrollGen += 1;
+        applyDefectListScrollSnapshot(panel, snap);
         requestAnimationFrame(() => {
-            if (typeof snapshot.panelTop === 'number') panel.scrollTop = snapshot.panelTop;
-            panel.querySelectorAll('.defect-list-section').forEach((sec) => {
-                const titleEl = sec.querySelector('.defect-list-section-title');
-                const key = titleEl ? titleEl.textContent.trim() : '';
-                const box = sec.querySelector('.defect-list-section-scroll');
-                if (key && box && snapshot.sections[key] !== undefined) {
-                    box.scrollTop = snapshot.sections[key];
-                }
-            });
+            applyDefectListScrollSnapshot(panel, snap);
+            requestAnimationFrame(() => applyDefectListScrollSnapshot(panel, snap));
         });
     }
 
@@ -17702,9 +17724,11 @@ document.addEventListener('DOMContentLoaded', () => {
         return panel.querySelector('.defect-list-item.is-map-selected');
     }
 
-    function scrollDefectListRowIntoView(row, behavior) {
+    function scrollDefectListRowIntoView(row, behavior, align) {
         if (!row) return;
         const scrollBehavior = behavior || 'smooth';
+        // 도면에서 마킹 선택 시 조사표 스크롤 영역 가운데에 오도록 (기본 center)
+        const alignMode = align || 'center';
         const pad = 8;
         const panel = document.getElementById('defectListPanel');
         let node = row.parentElement;
@@ -17716,7 +17740,12 @@ document.addEventListener('DOMContentLoaded', () => {
             if (canScrollY) {
                 const rowRect = row.getBoundingClientRect();
                 const nodeRect = node.getBoundingClientRect();
-                if (rowRect.top < nodeRect.top + pad) {
+                if (alignMode === 'center') {
+                    const rowMid = rowRect.top + (rowRect.height / 2);
+                    const nodeMid = nodeRect.top + (nodeRect.height / 2);
+                    node.scrollTop += rowMid - nodeMid;
+                    anyScrolled = true;
+                } else if (rowRect.top < nodeRect.top + pad) {
                     node.scrollTop += rowRect.top - nodeRect.top - pad;
                     anyScrolled = true;
                 } else if (rowRect.bottom > nodeRect.bottom - pad) {
@@ -17728,8 +17757,14 @@ document.addEventListener('DOMContentLoaded', () => {
             node = node.parentElement;
         }
         if (!anyScrolled) {
-            row.scrollIntoView({ behavior: scrollBehavior, block: 'nearest', inline: 'nearest' });
+            row.scrollIntoView({
+                behavior: scrollBehavior,
+                block: alignMode === 'center' ? 'center' : 'nearest',
+                inline: 'nearest'
+            });
         }
+        const livePanel = document.getElementById('defectListPanel');
+        if (livePanel) captureDefectListScroll(livePanel);
     }
 
     function isMobilePortraitDefectDrawer() {
@@ -17901,16 +17936,19 @@ document.addEventListener('DOMContentLoaded', () => {
                 ? selectedCluster.map(d => d.id || d.groupId).join(',')
                 : `single:${selectedCluster[0].id || selectedCluster[0].groupId}`;
             window._defectListScrollSelectedId = scrollKey;
+            _defectListScrollGen += 1;
+            const gen = _defectListScrollGen;
             const doScroll = () => {
+                if (gen !== _defectListScrollGen) return;
                 const targetRow = findDefectListRowForSelection(panel, selectedCluster, pinSelectedToTop);
-                if (targetRow) scrollDefectListRowIntoView(targetRow);
+                if (targetRow) scrollDefectListRowIntoView(targetRow, 'smooth', 'center');
             };
             requestAnimationFrame(() => {
                 requestAnimationFrame(doScroll);
             });
             setTimeout(doScroll, 120);
         } else if (!scrollToSelection) {
-            restoreDefectListScroll(panel, scrollSnapshot);
+            restoreDefectListScroll(panel, scrollSnapshot || _lastDefectListScrollSnapshot);
             if (selectedCluster.length === 0) window._defectListScrollSelectedId = null;
         } else {
             window._defectListScrollSelectedId = null;
@@ -18260,6 +18298,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (items.length === 0) return null;
         const section = document.createElement('div');
         section.className = 'defect-list-section';
+        section.dataset.sectionKey = String(title || '');
         if (options.unregistered) section.classList.add('map-unregistered-section');
 
         const header = document.createElement('div');
