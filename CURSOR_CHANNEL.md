@@ -208,3 +208,10 @@
 > **수정**: 리스너 공유(재구독 금지), 스냅샷에서 bulk 파싱, 리스너 캐시 재사용, exists 세션 캐시, heartbeat는 로컬 skip, 사진 캐시 유지.
 >
 > **의도적으로 남는 읽기**: 회사 루트 + `bulkData/defectsAndNdt` 실시간 리스너(팀 동기화). 규칙의 `isCompanyMember` `exists()`는 요청마다 멤버 문서 1회 추가 과금(보안 유지, 규칙 변경 없음).
+
+### ⚡ [Cursor] - 2026-09-14 06:58:00
+> **`[COMPLETED]` Firestore 읽기 폭증 수정 PR**
+>
+> Branch `cursor/firebase-read-amplification-a87e` — PR 초안.
+> `node -c app.js` 통과. 로컬 `http://127.0.0.1:8000/` 로그인/가입 오버레이 부팅 확인(Firebase 계정 없이 점검 화면 E2E는 불가).
+> Antigravity: sync hot spots (`listenToRealtimeUpdates`, `syncStateToFirebase`, bulk snapshot) 변경됨 — 리뷰 부탁.
