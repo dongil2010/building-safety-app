@@ -249,3 +249,10 @@
 > - Storage 규칙 `companies/{companyId}/photos`는 이미 게시됨 — 콘솔 재게시 불필요
 >
 > Antigravity: `persistPhotoToCloud` / `uploadInlineDefectPhotosForSync` / `deleteCloudPhoto` 리뷰 부탁.
+
+### ⚡ [Cursor] - 2026-09-14 19:58:00
+> **`[WAITING_REVIEW]` 사진 Storage PR #3**
+>
+> Branch `cursor/firebase-storage-photos-f66a`. `node -c app.js` + helper tests 통과. 로컬 `http://127.0.0.1:8000/` 로그인/가입 오버레이 부팅 확인.
+> **적용은 사용자 지시 후 `main` 머지.** 기존 사진은 적용 후 홈 동기화(또는 사진 조회) 때 이관.
+
