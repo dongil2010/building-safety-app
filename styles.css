@@ -1750,8 +1750,9 @@ html.layout-desktop #tab-ndt .ndt-top-canvas-tools {
 /* ============================================================
    PC: 도면 도구(선택·핀·영역·목록·크기·회전·줌 등)를 도면 안 오버레이로
    — 위쪽 문서 흐름에서 빼서 캔버스 세로 공간 확보
+   — 1025px 미만은 모바일 독 사용(769–1024에서 PC·모바일 툴바 겹침 방지)
    ============================================================ */
-@media (min-width: 769px) {
+@media (min-width: 1025px) {
     html:not(.layout-tablet) body.bsa-tab-map .app-content {
         display: flex !important;
         flex-direction: column !important;
@@ -2641,8 +2642,8 @@ html.layout-desktop #tab-ndt .ndt-top-canvas-tools {
         display: none !important;
     }
 
-    #tab-map .canvas-top-toolbar,
-    #tab-map .canvas-bottom-toolbar {
+    html:not(.layout-desktop) #tab-map .canvas-top-toolbar,
+    html:not(.layout-desktop) #tab-map .canvas-bottom-toolbar {
         display: none !important;
     }
 
@@ -5267,13 +5268,14 @@ html:not(.layout-desktop) .survey-inline-select {
     }
 
     /* 모바일: PC 툴바 숨김 · 하단 독/크기 시트는 화면 하단에 고정 */
-    #tab-map .canvas-top-toolbar,
-    #tab-ndt .canvas-top-toolbar {
-        display: none;
+    html:not(.layout-desktop) #tab-map .canvas-top-toolbar,
+    html:not(.layout-desktop) #tab-ndt .canvas-top-toolbar,
+    html:not(.layout-desktop) #tab-ndt .ndt-top-canvas-tools {
+        display: none !important;
     }
 
-    #tab-map .canvas-bottom-toolbar {
-        display: none;
+    html:not(.layout-desktop) #tab-map .canvas-bottom-toolbar {
+        display: none !important;
     }
 
     #mapStyleSizeToolbar,
@@ -10311,6 +10313,13 @@ body.bsa-tab-stats .app-content {
    - 결함위치도: 좌측 ~1/3 목록 · 우측 도면
    ============================================================ */
 @media (max-width: 1024px) {
+    /* PC 오버레이(min-width:1025)보다 우선 — 창 너비 조절 시 하단 툴바 이중 표시 방지 */
+    html:not(.layout-desktop) #tab-map .canvas-top-toolbar,
+    html:not(.layout-desktop) #tab-map .canvas-bottom-toolbar,
+    html:not(.layout-desktop) #tab-ndt .ndt-top-canvas-tools {
+        display: none !important;
+    }
+
     .pc-only-chrome,
     .map-unregistered-section {
         display: none !important;
@@ -10692,8 +10701,8 @@ body.bsa-tab-stats .app-content {
         display: none !important;
     }
 
-    #tab-map .canvas-top-toolbar,
-    #tab-map .canvas-bottom-toolbar {
+    html:not(.layout-desktop) #tab-map .canvas-top-toolbar,
+    html:not(.layout-desktop) #tab-map .canvas-bottom-toolbar {
         display: none !important;
     }
 
