@@ -2744,6 +2744,10 @@ html.layout-desktop #tab-ndt .ndt-top-canvas-tools {
         box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12);
     }
 
+    #tab-map .mobile-map-fab.has-add-marking {
+        grid-template-columns: repeat(7, 1fr);
+    }
+
     /* NDT 가로: 도면은 고정 높이, 아래로 스크롤하면 측정 결과표 */
     #tab-ndt .ndt-top-bar {
         margin-bottom: 0.3rem !important;
@@ -5117,7 +5121,7 @@ html:not(.layout-desktop) .survey-inline-select {
 }
 
 @media (max-width: 768px) {
-    /* 세로: 전체화면 하단에서 화면의 1/2까지 (태블릿·데스크톱사이트 제외) */
+    /* 세로: 전체화면 하단에서 화면의 약 3/5까지 (태블릿·데스크톱사이트 제외) */
     html:not(.layout-desktop) #defectModal.modal-drawer-overlay,
     html:not(.layout-desktop) #defectModal.modal-drawer-overlay.defect-drawer-in-canvas {
         position: fixed;
@@ -5142,12 +5146,12 @@ html:not(.layout-desktop) .survey-inline-select {
     html:not(.layout-desktop) #defectModal.defect-drawer-in-canvas .defect-drawer-card {
         width: 100%;
         max-width: 100%;
-        height: 50vh;
-        height: 50dvh;
-        max-height: 50vh;
-        max-height: 50dvh;
-        min-height: 50vh;
-        min-height: 50dvh;
+        height: 60vh;
+        height: 60dvh;
+        max-height: 60vh;
+        max-height: 60dvh;
+        min-height: 60vh;
+        min-height: 60dvh;
         margin: 0;
         margin-top: auto;
         align-self: stretch;
@@ -5178,18 +5182,19 @@ html:not(.layout-desktop) .survey-inline-select {
     html:not(.layout-desktop) #defectModal #defectMarkingMemberFloat:not([hidden]) .defect-marking-arrow-select {
         border-radius: 10px 0 0 0;
         border-right: none;
-        min-width: 3.1rem;
-        min-height: 2.2rem;
-        font-size: 0.82rem;
+        min-width: 2.35rem;
+        min-height: 1.75rem;
+        font-size: 0.72rem;
         font-weight: 700;
         letter-spacing: -0.02em;
-        padding: 0 0.35rem;
+        padding: 0 0.28rem;
     }
     html:not(.layout-desktop) #defectModal #defectMarkingMemberFloat:not([hidden]) .defect-marking-arrow-dir-btn {
         border-radius: 0 10px 0 0;
         border-left: none;
-        min-width: 2.2rem;
-        min-height: 2.2rem;
+        min-width: 1.85rem;
+        min-height: 1.75rem;
+        font-size: 0.88rem;
     }
     html:not(.layout-desktop) #defectModal #defectMarkingMemberFloat:not([hidden]) .defect-marking-arrow-row.is-active {
         box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.35);
@@ -5219,9 +5224,9 @@ html:not(.layout-desktop) .survey-inline-select {
 
     html:not(.layout-desktop) .defect-mobile-actions {
         display: grid;
-        grid-template-columns: 0.75fr 1fr 1fr 0.9fr;
-        gap: 0.45rem;
-        padding: 0.55rem 0.7rem calc(0.55rem + env(safe-area-inset-bottom, 0px));
+        grid-template-columns: 1fr;
+        gap: 0.32rem;
+        padding: 0.38rem 0.55rem calc(0.38rem + env(safe-area-inset-bottom, 0px));
         border-top: 1px solid var(--border-color);
         background: rgba(20, 20, 20, 0.96);
         flex-shrink: 0;
@@ -5232,21 +5237,21 @@ html:not(.layout-desktop) .survey-inline-select {
         flex-direction: column;
         align-items: center;
         justify-content: center;
-        gap: 0.2rem;
-        min-height: 3.35rem;
-        border-radius: 12px;
+        gap: 0.1rem;
+        min-height: 2.35rem;
+        border-radius: 9px;
         border: 1px solid var(--border-color);
         background: var(--bg-card);
         color: var(--text-secondary);
-        font-size: 0.72rem;
+        font-size: 0.62rem;
         font-weight: 800;
         cursor: pointer;
-        padding: 0.35rem 0.25rem;
+        padding: 0.22rem 0.18rem;
         -webkit-tap-highlight-color: transparent;
     }
 
     .defect-mobile-btn i {
-        font-size: 1.05rem;
+        font-size: 0.82rem;
     }
 
     .defect-mobile-btn.primary {
@@ -5445,6 +5450,18 @@ html:not(.layout-desktop) .survey-inline-select {
         box-shadow: 0 6px 18px rgba(0, 0, 0, 0.12);
     }
 
+    .mobile-map-fab.has-add-marking {
+        grid-template-columns: repeat(7, 1fr);
+    }
+
+    .mobile-fab-btn.mobile-fab-add-marking {
+        color: #1d4ed8;
+    }
+
+    .mobile-fab-btn.mobile-fab-add-marking i {
+        color: #2563eb;
+    }
+
     .mobile-ndt-fab {
         grid-template-columns: repeat(3, 1fr);
     }
@@ -5512,11 +5529,22 @@ html:not(.layout-desktop) .survey-inline-select {
         pointer-events: none;
     }
 
-    body.defect-modal-open .mobile-canvas-dock,
+    /* NDT 모달만 독 숨김 — 결함 수정창은 하단 독을 시트 위로 밀어 올림 */
     body.ndt-modal-open .mobile-canvas-dock,
     body.defect-modal-open .mobile-side-rail,
     body.ndt-modal-open .mobile-side-rail {
         display: none;
+    }
+
+    html:not(.layout-desktop) #tab-map #mobileMapDock {
+        transition: bottom 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    /* 세로: 수정 시트가 60dvh(약 3/5)로 올라올 때 하단 툴바도 같이 상승 */
+    html:not(.layout-desktop) body.defect-modal-open #tab-map #mobileMapDock {
+        display: block !important;
+        bottom: calc(60dvh + 0.22rem);
+        z-index: 260;
     }
 
     body.defect-modal-open #mapStyleSizeToolbar.is-mobile-sheet-open,
@@ -5675,6 +5703,11 @@ html:not(.layout-desktop) .survey-inline-select {
         flex-direction: column;
     }
 
+    /* 가로 모바일: 수정창은 우측 패널 — 하단 툴바는 올리지 않음 */
+    html:not(.layout-desktop) body.defect-modal-open #tab-map #mobileMapDock {
+        bottom: max(0.1rem, env(safe-area-inset-bottom, 0px));
+    }
+
     /* 가로 모바일: 수정창 왼쪽에 탭처럼 붙임 */
     html:not(.layout-desktop) #defectModal #defectMarkingMemberFloat:not([hidden]) {
         order: 1;
@@ -5684,9 +5717,22 @@ html:not(.layout-desktop) .survey-inline-select {
         margin-left: 0;
         align-self: flex-start;
         flex-direction: column;
-        max-width: 6.4rem;
+        max-width: 5.4rem;
         padding: 0;
-        gap: 6px;
+        gap: 4px;
+    }
+
+    html:not(.layout-desktop) #defectModal #defectMarkingMemberFloat:not([hidden]) .defect-marking-arrow-select {
+        min-width: 2.1rem;
+        min-height: 1.75rem;
+        font-size: 0.72rem;
+        padding: 0.24rem 0.3rem;
+    }
+
+    html:not(.layout-desktop) #defectModal #defectMarkingMemberFloat:not([hidden]) .defect-marking-arrow-dir-btn {
+        min-width: 1.85rem;
+        min-height: 1.75rem;
+        font-size: 0.88rem;
     }
     html:not(.layout-desktop) #defectModal #defectMarkingMemberFloat:not([hidden]) + .defect-drawer-card {
         order: 2;
@@ -5713,9 +5759,9 @@ html:not(.layout-desktop) .survey-inline-select {
 
     html:not(.layout-desktop) .defect-mobile-actions {
         display: grid;
-        grid-template-columns: 0.75fr 1fr 1fr 0.9fr;
-        gap: 0.35rem;
-        padding: 0.4rem 0.5rem calc(0.4rem + env(safe-area-inset-bottom, 0px));
+        grid-template-columns: 1fr;
+        gap: 0.32rem;
+        padding: 0.38rem 0.55rem calc(0.38rem + env(safe-area-inset-bottom, 0px));
         border-top: 1px solid var(--border-color);
         background: rgba(20, 20, 20, 0.96);
         flex-shrink: 0;
@@ -5735,21 +5781,21 @@ html:not(.layout-desktop) .survey-inline-select {
         flex-direction: column;
         align-items: center;
         justify-content: center;
-        gap: 0.15rem;
-        min-height: 2.85rem;
-        border-radius: 10px;
+        gap: 0.1rem;
+        min-height: 2.35rem;
+        border-radius: 9px;
         border: 1px solid var(--border-color);
         background: var(--bg-card);
         color: var(--text-secondary);
-        font-size: 0.68rem;
+        font-size: 0.62rem;
         font-weight: 800;
         cursor: pointer;
-        padding: 0.28rem 0.2rem;
+        padding: 0.22rem 0.18rem;
         -webkit-tap-highlight-color: transparent;
     }
 
     .defect-mobile-btn i {
-        font-size: 0.95rem;
+        font-size: 0.82rem;
     }
 
     .defect-mobile-btn.primary {
@@ -10318,6 +10364,86 @@ body.bsa-tab-stats .app-content {
     html:not(.layout-desktop) #tab-map .canvas-bottom-toolbar,
     html:not(.layout-desktop) #tab-ndt .ndt-top-canvas-tools {
         display: none !important;
+        visibility: hidden !important;
+        pointer-events: none !important;
+        height: 0 !important;
+        min-height: 0 !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        overflow: hidden !important;
+    }
+
+    /* ≤1024: 항상 하단 FAB 바(6칸 그리드) — 중간 pill 클러스터 형태 생략 */
+    html:not(.layout-desktop) #tab-map .mobile-canvas-dock,
+    html:not(.layout-desktop) #tab-ndt .mobile-canvas-dock {
+        display: block !important;
+        position: absolute !important;
+        left: 0.28rem !important;
+        right: 0.28rem !important;
+        bottom: max(0.14rem, env(safe-area-inset-bottom, 0px)) !important;
+        z-index: 44 !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        pointer-events: none !important;
+    }
+
+    html:not(.layout-desktop) .mobile-map-fab,
+    html:not(.layout-desktop) #tab-map .mobile-canvas-dock .mobile-map-fab,
+    html:not(.layout-desktop) #tab-ndt .mobile-canvas-dock .mobile-map-fab {
+        display: grid !important;
+        grid-template-columns: repeat(6, minmax(0, 1fr)) !important;
+        grid-auto-flow: column !important;
+        gap: 0.12rem !important;
+        padding: 0.22rem 0.18rem !important;
+        background: #ffffff !important;
+        border: 1px solid #d4d4d4 !important;
+        border-radius: 12px !important;
+        box-shadow: 0 6px 18px rgba(0, 0, 0, 0.12) !important;
+        pointer-events: auto !important;
+        width: 100% !important;
+        box-sizing: border-box !important;
+    }
+
+    html:not(.layout-desktop) .mobile-ndt-fab {
+        grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+    }
+
+    html:not(.layout-desktop) .mobile-fab-btn,
+    html:not(.layout-desktop) #tab-map .mobile-canvas-dock .mobile-fab-btn,
+    html:not(.layout-desktop) #tab-ndt .mobile-canvas-dock .mobile-fab-btn {
+        display: flex !important;
+        flex-direction: column !important;
+        align-items: center !important;
+        justify-content: center !important;
+        min-width: 0 !important;
+        min-height: 2rem !important;
+        border: none !important;
+        border-radius: 8px !important;
+        background: transparent !important;
+        color: #404040 !important;
+        font-size: 0.56rem !important;
+        font-weight: 800 !important;
+        padding: 0.08rem 0.06rem !important;
+        gap: 0.04rem !important;
+        line-height: 1 !important;
+        white-space: nowrap !important;
+        box-shadow: none !important;
+    }
+
+    html:not(.layout-desktop) .mobile-fab-btn[hidden] {
+        display: none !important;
+    }
+
+    html:not(.layout-desktop) .mobile-fab-btn i,
+    html:not(.layout-desktop) #tab-map .mobile-canvas-dock .mobile-fab-btn i,
+    html:not(.layout-desktop) #tab-ndt .mobile-canvas-dock .mobile-fab-btn i {
+        font-size: 0.88rem !important;
+        color: #262626 !important;
+    }
+
+    html:not(.layout-desktop) .mobile-fab-btn.mobile-fab-danger,
+    html:not(.layout-desktop) .mobile-fab-btn.mobile-fab-danger i {
+        color: #b91c1c !important;
     }
 
     .pc-only-chrome,
@@ -10552,10 +10678,10 @@ body.bsa-tab-stats .app-content {
         transition: padding-bottom 0.28s cubic-bezier(0.16, 1, 0.3, 1);
     }
 
-    /* 세로: 하단 결함 창(50dvh)이 목록 하이라이트를 가리지 않도록 목록을 그만큼 줄임 */
+    /* 세로: 하단 결함 창(60dvh)이 목록 하이라이트를 가리지 않도록 목록을 그만큼 줄임 */
     @media (orientation: portrait) and (max-width: 768px) {
         html:not(.layout-desktop) body.defect-modal-open #tab-map .inspect-sidebar-left {
-            padding-bottom: 50dvh;
+            padding-bottom: 60dvh;
         }
     }
 
@@ -12717,18 +12843,19 @@ html.layout-tablet .map-sel-popup-edit {
 }
 
 html.layout-tablet .defect-mobile-actions {
-    gap: 0.4rem !important;
-    padding: 0.5rem 0.6rem calc(0.5rem + env(safe-area-inset-bottom, 0px)) !important;
+    grid-template-columns: 1fr !important;
+    gap: 0.35rem !important;
+    padding: 0.4rem 0.55rem calc(0.4rem + env(safe-area-inset-bottom, 0px)) !important;
 }
 
 html.layout-tablet .defect-mobile-btn {
-    min-height: 3.2rem !important;
-    font-size: 0.76rem !important;
-    border-radius: 11px !important;
+    min-height: 2.45rem !important;
+    font-size: 0.64rem !important;
+    border-radius: 9px !important;
 }
 
 html.layout-tablet .defect-mobile-btn i {
-    font-size: 1.1rem !important;
+    font-size: 0.86rem !important;
 }
 
 html.layout-tablet .defect-quick-chip {

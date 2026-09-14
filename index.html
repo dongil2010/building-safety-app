@@ -39,7 +39,7 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <meta name="apple-mobile-web-app-title" content="스마트 안전점검">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css">
-    <link rel="stylesheet" href="styles.css?v=20260913_092100">
+    <link rel="stylesheet" href="styles.css?v=20260914_102101">
 
     <!-- FontAwesome icons for clean engineering UI -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
@@ -440,6 +440,10 @@
                             <button type="button" class="mobile-fab-btn mobile-fab-danger" id="mobileBtnDeleteSelected" title="선택한 결함 삭제" hidden disabled>
                                 <i class="fa-solid fa-trash-can"></i>
                                 <span id="mobileMapSelectionLabel">선택 삭제</span>
+                            </button>
+                            <button type="button" class="mobile-fab-btn mobile-fab-add-marking" id="mobileBtnAddAnotherMarking" title="같은 번호에 화살표·결함표 추가" hidden disabled>
+                                <i class="fa-solid fa-diagram-project"></i>
+                                <span>화살표추가</span>
                             </button>
                             <button type="button" class="mobile-fab-btn mobile-fab-toggle" id="mobileBtnToggleSize" aria-expanded="false" title="핀·화살표 크기">
                                 <i class="fa-solid fa-sliders"></i>
@@ -1194,21 +1198,6 @@
                 </button>
                 <button class="btn btn-primary" id="btnSaveDefect"><i class="fa-solid fa-check"></i> 닫기</button>
                 <button class="btn btn-outline" id="btnCancelDefect" style="display:none;">취소</button>
-            </div>
-            <!-- 모바일 전용 하단 액션 (큰 터치 버튼) -->
-            <div class="defect-mobile-actions" id="defectMobileActions" aria-label="모바일 결함 작업">
-                <button type="button" class="defect-mobile-btn danger" id="btnDeleteDefectMobile">
-                    <i class="fa-solid fa-trash"></i>
-                    <span>삭제</span>
-                </button>
-                <button type="button" class="defect-mobile-btn secondary" id="btnAddAnotherMarkingMobile">
-                    <i class="fa-solid fa-diagram-project"></i>
-                    <span>화살표·표</span>
-                </button>
-                <button type="button" class="defect-mobile-btn primary" id="btnSaveDefectMobile">
-                    <i class="fa-solid fa-check"></i>
-                    <span>닫기</span>
-                </button>
             </div>
         </div>
     </div>
@@ -3157,24 +3146,24 @@
     </div>
 
     <!-- Core → 탭 분류 → 기존 엔진(app.js) -->
-    <script src="js/core/state.js?v=20260913_092100"></script>
-    <script src="js/tabs/registry.js?v=20260913_092100"></script>
-    <script src="js/pdf-vector-bridge.js?v=20260913_092100"></script>
-    <script src="js/pdf-vector-snap.js?v=20260913_092100"></script>
-    <script src="js/core/layout-mode.js?v=20260913_092100"></script>
-    <script src="js/core/performance.js?v=20260913_092100"></script>
-    <script src="js/core/mobile-keyboard.js?v=20260913_092100"></script>
-    <script src="js/tabs/home.js?v=20260913_092100"></script>
-    <script src="js/tabs/map.js?v=20260913_092100"></script>
-    <script src="js/tabs/survey.js?v=20260913_092100"></script>
-    <script src="js/tabs/stats.js?v=20260913_092100"></script>
-    <script src="js/tabs/ndt.js?v=20260913_092100"></script>
-    <script src="js/shared/report.js?v=20260913_092100"></script>
-    <script src="js/shared/hwpx-import.js?v=20260913_092100"></script>
-    <script src="js/shared/auth.js?v=20260913_092100"></script>
-    <script src="app.js?v=20260913_092100"></script>
+    <script src="js/core/state.js?v=20260914_102101"></script>
+    <script src="js/tabs/registry.js?v=20260914_102101"></script>
+    <script src="js/pdf-vector-bridge.js?v=20260914_102101"></script>
+    <script src="js/pdf-vector-snap.js?v=20260914_102101"></script>
+    <script src="js/core/layout-mode.js?v=20260914_102101"></script>
+    <script src="js/core/performance.js?v=20260914_102101"></script>
+    <script src="js/core/mobile-keyboard.js?v=20260914_102101"></script>
+    <script src="js/tabs/home.js?v=20260914_102101"></script>
+    <script src="js/tabs/map.js?v=20260914_102101"></script>
+    <script src="js/tabs/survey.js?v=20260914_102101"></script>
+    <script src="js/tabs/stats.js?v=20260914_102101"></script>
+    <script src="js/tabs/ndt.js?v=20260914_102101"></script>
+    <script src="js/shared/report.js?v=20260914_102101"></script>
+    <script src="js/shared/hwpx-import.js?v=20260914_102101"></script>
+    <script src="js/shared/auth.js?v=20260914_102101"></script>
+    <script src="app.js?v=20260914_102101"></script>
     <script>
-        window.BSA_APP_VERSION = '20260913_092100';
+        window.BSA_APP_VERSION = '20260914_102101';
 
         (function () {
             var el = document.getElementById('appVersionText');
@@ -3199,7 +3188,7 @@
                     native = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
                 } catch (e) {}
                 if (native) return;
-                navigator.serviceWorker.register('./sw.js?v=20260913_092100')
+                navigator.serviceWorker.register('./sw.js?v=20260914_102101')
 
                     .then(function(registration) {
                         console.log('✅ ServiceWorker Registered Successfully with scope:', registration.scope);

@@ -179,6 +179,13 @@
 >
 > Antigravity: please refresh scratch copy from main after pull, or treat this file as source of truth on push.
 
+### ⚡ [Cursor] - 2026-09-10 17:35:00
+> **`[COMPLETED]` 저사양 PC·모바일 성능 개선 (`9e138c9`)**
+>
+> - `js/core/performance.js`: RAM≤4GB·코어≤4 자동 절전, 홈 **성능 모드** 버튼(자동→저사양 ON→고성능)
+> - `drawCanvas` RAF 합치기 + JPEG 스냅샷 지연(팬/줌 중 매 프레임 encode 제거)
+> - DPR·도면 티어(8000 cap)·동기화 debounce·탭별 원격 갱신·사진 앨범 idle 렌더
+
 ### ⚡ [Cursor] - 2026-09-04 15:00:00 (push)
 > **Pushed to `origin/main`**:
 > - `f82e162` — `scheduleSyncWhenIdle({ forceQueued })` 대기 업로드 재시도 보강 + cache-bust

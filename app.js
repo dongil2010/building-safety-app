@@ -7950,7 +7950,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // 결함 수정 창이 가리는 영역을 피한 캔버스 포커스 지점
-    // 세로: 화면 상단 1/4 (하단 1/2 드로어 위) · 가로: 좌측 2/3 영역의 중앙
+    // 세로: 화면 상단 1/4 (하단 3/5 드로어 위) · 가로: 좌측 2/3 영역의 중앙
     function getUncoveredCanvasFocusPoint() {
         const cssW = state.canvasCssW || 0;
         const cssH = state.canvasCssH || 0;
@@ -7964,7 +7964,7 @@ document.addEventListener('DOMContentLoaded', () => {
         let visB = cssH;
 
         if (layoutMediaMobilePortrait()) {
-            const drawerTop = window.innerHeight * 0.5;
+            const drawerTop = window.innerHeight * 0.6;
             visB = Math.max(64, Math.min(cssH, drawerTop - cRect.top - 12));
             // 세로: 화면 상단 1/4 지점(캔버스 좌표). 드로어에 가려지지 않게 클램프
             const quarterY = (window.innerHeight * 0.25) - cRect.top;
@@ -23447,7 +23447,21 @@ document.addEventListener('DOMContentLoaded', () => {
         if (typeof syncAreaToolPanelUi === 'function') syncAreaToolPanelUi();
         // 조사항목 창 OFF: 좌상단 팝업으로 선택 결함 내용·폭 표시
         if (typeof updateMapSelectedDefectPopup === 'function') updateMapSelectedDefectPopup();
+        if (typeof syncMobileAddMarkingFab === 'function') syncMobileAddMarkingFab();
     }
+
+    function syncMobileAddMarkingFab() {
+        const btn = document.getElementById('mobileBtnAddAnotherMarking');
+        const fab = document.getElementById('mobileMapFabBar');
+        if (!btn) return;
+        const bulk = typeof isDefectBulkEditMode === 'function' && isDefectBulkEditMode();
+        const modalOpen = document.body.classList.contains('defect-modal-open');
+        const show = modalOpen && !bulk;
+        btn.hidden = !show;
+        btn.disabled = !show;
+        if (fab) fab.classList.toggle('has-add-marking', show);
+    }
+    window.syncMobileAddMarkingFab = syncMobileAddMarkingFab;
 
     // 상태조사표 → 결함위치도: 해당 마킹 선택·화면 이동
     window.viewDefectOnMapFromSurvey = function(defectId) {
@@ -25159,11 +25173,12 @@ document.addEventListener('DOMContentLoaded', () => {
         if (badge) badge.textContent = isBulk ? '변경 항목만 적용' : '자동 적용';
         [
             'btnDeleteDefect', 'btnAddAnotherMarking',
-            'btnDeleteDefectMobile', 'btnAddAnotherMarkingMobile',
+            'mobileBtnAddAnotherMarking',
         ].forEach(id => {
             const el = document.getElementById(id);
             if (el) el.style.display = isBulk ? 'none' : '';
         });
+        if (typeof syncMobileAddMarkingFab === 'function') syncMobileAddMarkingFab();
         if (isBulk) updateDefectBulkEditBanner();
     }
 
@@ -25301,6 +25316,7 @@ document.addEventListener('DOMContentLoaded', () => {
             syncDefectDrawerToCanvasArea();
             elements.defectModal.style.display = 'flex';
             document.body.classList.add('defect-modal-open');
+            if (typeof syncMobileAddMarkingFab === 'function') syncMobileAddMarkingFab();
             window.requestAnimationFrame(() => {
                 syncDefectDrawerToCanvasArea();
                 if (elements.defectModal) elements.defectModal.classList.add('open');
@@ -25338,6 +25354,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const pinIdEl = document.getElementById('defectPinId');
         if (pinIdEl) pinIdEl.value = '';
         document.body.classList.remove('defect-modal-open');
+        if (typeof syncMobileAddMarkingFab === 'function') syncMobileAddMarkingFab();
         if (elements.defectModal) {
             elements.defectModal.classList.remove('open');
             window.setTimeout(() => {
@@ -25356,6 +25373,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!target || typeof target.closest !== 'function') return false;
         if (target.closest('#defectModal .defect-drawer-card')) return true;
         if (target.closest('#defectMarkingMemberFloat')) return true;
+        if (target.closest('#mobileMapDock')) return true;
         if (target.closest('.defect-list-item')) return true; // 목록에서 다른 결함 열기
         if (target.closest('#planCanvas')) return true; // 캔버스는 handleDragStart가 처리
         if (target.closest('#canvasContainer')) return true;
@@ -25613,6 +25631,7 @@ document.addEventListener('DOMContentLoaded', () => {
             syncDefectDrawerToCanvasArea();
             elements.defectModal.style.display = 'flex';
             document.body.classList.add('defect-modal-open');
+            if (typeof syncMobileAddMarkingFab === 'function') syncMobileAddMarkingFab();
             window.requestAnimationFrame(async () => {
                 syncDefectDrawerToCanvasArea();
                 if (elements.defectModal) elements.defectModal.classList.add('open');
@@ -27409,9 +27428,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const to = document.getElementById(toId);
         if (from && to) from.addEventListener('click', () => to.click());
     };
-    proxyClick('btnDeleteDefectMobile', 'btnDeleteDefect');
-    proxyClick('btnAddAnotherMarkingMobile', 'btnAddAnotherMarking');
-    proxyClick('btnSaveDefectMobile', 'btnSaveDefect');
+    proxyClick('mobileBtnAddAnotherMarking', 'btnAddAnotherMarking');
 
     // 되돌리기 / 다시실행 / 전체초기화 (하단 아이콘 툴바)
     const btnUndoEl = document.getElementById('btnUndo');
