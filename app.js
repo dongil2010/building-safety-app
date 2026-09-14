@@ -33196,59 +33196,6 @@ document.addEventListener('DOMContentLoaded', () => {
                     grade3LocMapStampPara.parentNode.removeChild(grade3LocMapStampPara);
                 }
             }
-            // 샘플 상태조사표(NO.16~30 등) 정리:
-            // 1) 제목 문단에 붙은 표는 문단을 지우지 않고 표 노드만 제거 (제목 유지)
-            // 2) statusTbls는 1장만 남기고 나머지 문단 제거
-            // 3) 남긴 표의 샘플 데이터 행만 비움 (헤더 유지)
-            // createElementNS/cloneNode(false) 사용 금지 — HWPX 손상 원인.
-            const owningPara = (node) => {
-                let p = node;
-                while (p && p.localName !== "p") p = p.parentNode;
-                return p;
-            };
-            const stripStampSampleStatusTables = (stampSlot) => {
-                if (!stampSlot || !stampSlot.titlePara) return;
-                const titlePara = stampSlot.titlePara;
-                // 제목 문단 안의 상태조사표(디스커버가 건너뛰는 샘플) 제거
-                Array.from(titlePara.getElementsByTagNameNS(HP_NS, "tbl")).forEach((tbl) => {
-                    if (isCurrentStatusTable(tbl) && tbl.parentNode) tbl.parentNode.removeChild(tbl);
-                });
-                const kept = [];
-                (stampSlot.statusTbls || []).forEach((tbl, idx) => {
-                    if (!tbl || !tbl.parentNode) return;
-                    if (idx === 0) {
-                        kept.push(tbl);
-                        return;
-                    }
-                    const p = owningPara(tbl);
-                    if (p && p === titlePara) {
-                        if (tbl.parentNode) tbl.parentNode.removeChild(tbl);
-                    } else if (p && p.parentNode) {
-                        p.parentNode.removeChild(p);
-                    } else if (tbl.parentNode) {
-                        tbl.parentNode.removeChild(tbl);
-                    }
-                });
-                if (!kept.length && stampSlot.statusTbls && stampSlot.statusTbls[0]) {
-                    kept.push(stampSlot.statusTbls[0]);
-                }
-                const keep = kept[0];
-                if (keep) {
-                    const trs = Array.from(keep.getElementsByTagNameNS(HP_NS, "tr"));
-                    let hdr = 1;
-                    if (trs.length > 1) {
-                        const r1 = Array.from(trs[1].getElementsByTagNameNS(HP_NS, "t")).map(t => t.textContent || "").join("");
-                        if (r1.includes("구조") || r1.includes("비구조")) hdr = 2;
-                    }
-                    trs.forEach((tr, i) => {
-                        if (i < hdr) return;
-                        if (tr.parentNode) tr.parentNode.removeChild(tr);
-                    });
-                }
-                stampSlot.statusTbls = keep ? [keep] : [];
-            };
-            stripStampSampleStatusTables(floorSlots[0]);
-
             const stampChildren = secChildren();
             const stampParas = stampChildren.slice(stampChildren.indexOf(floorSlots[0].titlePara));
             for (let c = 1; c < floorsData.length; c++) {
@@ -35309,59 +35256,6 @@ document.addEventListener('DOMContentLoaded', () => {
                     });
                 });
             };
-            // 샘플 상태조사표(NO.16~30 등) 정리:
-            // 1) 제목 문단에 붙은 표는 문단을 지우지 않고 표 노드만 제거 (제목 유지)
-            // 2) statusTbls는 1장만 남기고 나머지 문단 제거
-            // 3) 남긴 표의 샘플 데이터 행만 비움 (헤더 유지)
-            // createElementNS/cloneNode(false) 사용 금지 — HWPX 손상 원인.
-            const owningPara = (node) => {
-                let p = node;
-                while (p && p.localName !== "p") p = p.parentNode;
-                return p;
-            };
-            const stripStampSampleStatusTables = (stampSlot) => {
-                if (!stampSlot || !stampSlot.titlePara) return;
-                const titlePara = stampSlot.titlePara;
-                // 제목 문단 안의 상태조사표(디스커버가 건너뛰는 샘플) 제거
-                Array.from(titlePara.getElementsByTagNameNS(HP_NS, "tbl")).forEach((tbl) => {
-                    if (isCurrentStatusTable(tbl) && tbl.parentNode) tbl.parentNode.removeChild(tbl);
-                });
-                const kept = [];
-                (stampSlot.statusTbls || []).forEach((tbl, idx) => {
-                    if (!tbl || !tbl.parentNode) return;
-                    if (idx === 0) {
-                        kept.push(tbl);
-                        return;
-                    }
-                    const p = owningPara(tbl);
-                    if (p && p === titlePara) {
-                        if (tbl.parentNode) tbl.parentNode.removeChild(tbl);
-                    } else if (p && p.parentNode) {
-                        p.parentNode.removeChild(p);
-                    } else if (tbl.parentNode) {
-                        tbl.parentNode.removeChild(tbl);
-                    }
-                });
-                if (!kept.length && stampSlot.statusTbls && stampSlot.statusTbls[0]) {
-                    kept.push(stampSlot.statusTbls[0]);
-                }
-                const keep = kept[0];
-                if (keep) {
-                    const trs = Array.from(keep.getElementsByTagNameNS(HP_NS, "tr"));
-                    let hdr = 1;
-                    if (trs.length > 1) {
-                        const r1 = Array.from(trs[1].getElementsByTagNameNS(HP_NS, "t")).map(t => t.textContent || "").join("");
-                        if (r1.includes("구조") || r1.includes("비구조")) hdr = 2;
-                    }
-                    trs.forEach((tr, i) => {
-                        if (i < hdr) return;
-                        if (tr.parentNode) tr.parentNode.removeChild(tr);
-                    });
-                }
-                stampSlot.statusTbls = keep ? [keep] : [];
-            };
-            stripStampSampleStatusTables(floorSlots[0]);
-
             const stampChildren = secChildren();
             const stampParas = stampChildren.slice(stampChildren.indexOf(floorSlots[0].titlePara));
             for (let c = 1; c < floorsData.length; c++) {
