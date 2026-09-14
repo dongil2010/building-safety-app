@@ -33090,10 +33090,17 @@ document.addEventListener('DOMContentLoaded', () => {
                     const e = idx + 1 < starts.length ? starts[idx + 1] : ps.length;
                     const statusTbls = [];
                     let photoTbl = null, photoParaStamp = null, locationMapTbl = null;
-                    for (let i = s + 1; i < e; i++) {
+                    for (let i = s; i < e; i++) {
                         const txt = paraText(ps[i]).trim();
                         const tbls = Array.from(ps[i].getElementsByTagNameNS(HP_NS, 'tbl'));
                         if (tbls.length === 0) continue;
+                        // 제목 문단(i===s)에는 표만 수집하고 사진/기타 판정은 하지 않는다.
+                        if (i === s) {
+                            tbls.forEach((tbl) => {
+                                if (isCurrentStatusTable(tbl)) statusTbls.push(tbl);
+                            });
+                            continue;
+                        }
                         if (!photoTbl && /^사진1/.test(txt)) {
                             photoTbl = tbls[0];
                             photoParaStamp = ps[i].cloneNode(true);
@@ -33196,67 +33203,91 @@ document.addEventListener('DOMContentLoaded', () => {
                     grade3LocMapStampPara.parentNode.removeChild(grade3LocMapStampPara);
                 }
             }
-            // 템플릿에는 상태조사표가 여러 장(샘플 NO.16/31/46…) 들어 있다. 층 스탬프 복제 전에
-            // 첫 장만 남기고 나머지는 문단째 제거한다. statusTbls 배열에만 의존하면 삭제가
-            // 빗나갈 수 있어, 제목~사진 구간을 직접 순회한다.
-            const removeOwningPara = (node) => {
-                let p = node;
-                while (p && p.localName !== "p" && p.nodeName !== "hp:p") p = p.parentNode;
-                if (p && p.parentNode) p.parentNode.removeChild(p);
-                return p;
-            };
+            // 템플릿 상태조사표는 여러 장(샘플 NO.16/31/46…)이고, 첫 표는 제목과 같은 hp:p에
+            // 들어 있는 경우가 많다. 문단 전체를 지우면 제목·필요한 표까지 사라지므로,
+            // 제목 문단 안에서는 표 노드만 제거하고, 그 외 문단만 문단째 제거한다.
             const owningPara = (node) => {
                 let p = node;
                 while (p && p.localName !== "p" && p.nodeName !== "hp:p") p = p.parentNode;
                 return p;
             };
-            const clearStatusTableDataRows = (tbl) => {
+            const removeOwningPara = (node) => {
+                const p = owningPara(node);
+                if (p && p.parentNode) p.parentNode.removeChild(p);
+                return p;
+            };
+            const safeRemoveStatusTable = (tbl, titlePara) => {
                 if (!tbl) return;
-                const trs = Array.from(tbl.getElementsByTagNameNS(HP_NS, "tr"));
-                // 헤더 1~2행만 남긴다. parent가 tbl이 아닌 경우도 제거.
-                const headerJoined = (() => {
-                    const fr = trs[0];
-                    if (!fr) return "";
-                    return Array.from(fr.getElementsByTagNameNS(HP_NS, "t")).map(t => t.textContent || "").join("");
-                })();
-                let hdr = 1;
-                if (trs.length > 1) {
-                    const r1 = Array.from(trs[1].getElementsByTagNameNS(HP_NS, "t")).map(t => t.textContent || "").join("");
-                    if (r1.includes("구조") || r1.includes("비구조") || headerJoined.includes("부재")) hdr = 2;
+                const p = owningPara(tbl);
+                if (p && titlePara && p === titlePara) {
+                    if (tbl.parentNode) tbl.parentNode.removeChild(tbl);
+                    return;
                 }
+                removeOwningPara(tbl);
+            };
+            const clearStatusTableDataRows = (tbl, headerRowCount) => {
+                if (!tbl) return;
+                const hdr = Math.max(1, headerRowCount || 2);
+                const trs = Array.from(tbl.getElementsByTagNameNS(HP_NS, "tr"));
                 trs.forEach((tr, idx) => {
                     if (idx < hdr) return;
                     if (tr.parentNode) tr.parentNode.removeChild(tr);
                 });
             };
-            const purgeStatusTablesInRange = (fromPara, beforePara, keepSet) => {
+            const collectStatusTablesUntilPhoto = (titlePara) => {
                 const ps = secChildren();
-                const start = Math.max(0, ps.indexOf(fromPara));
-                const end = beforePara ? ps.indexOf(beforePara) : ps.length;
-                const stop = end >= 0 ? end : ps.length;
-                const doomed = [];
-                for (let i = start + 1; i < stop; i++) {
+                const start = ps.indexOf(titlePara);
+                const out = [];
+                if (start < 0) return out;
+                // 제목 문단 포함: 제목과 표가 한 문단인 템플릿 대응
+                for (let i = start; i < ps.length; i++) {
                     const txt = paraText(ps[i]).trim();
-                    if (/^사진1/.test(txt)) break;
-                    const tbls = Array.from(ps[i].getElementsByTagNameNS(HP_NS, "tbl"));
-                    tbls.forEach((tbl) => {
-                        if (!isCurrentStatusTable(tbl)) return;
-                        if (keepSet && keepSet.has(tbl)) return;
-                        doomed.push(tbl);
+                    if (i > start && /^사진1/.test(txt)) break;
+                    if (i > start && floorTitleRe.test(txt)) break;
+                    Array.from(ps[i].getElementsByTagNameNS(HP_NS, "tbl")).forEach((tbl) => {
+                        if (isCurrentStatusTable(tbl)) out.push(tbl);
                     });
                 }
-                doomed.forEach((tbl) => removeOwningPara(tbl));
+                return out;
             };
             const stripStampStatusToOne = (stampSlot) => {
-                if (!stampSlot || !stampSlot.statusTbls || !stampSlot.statusTbls.length) return;
-                const keep = stampSlot.statusTbls[0];
-                clearStatusTableDataRows(keep);
-                const keepP = owningPara(keep);
-                if (keepP) keepP.removeAttribute("pageBreak");
-                const keepSet = new Set([keep]);
-                const photoPara = stampSlot.photoTbl ? owningPara(stampSlot.photoTbl) : null;
-                purgeStatusTablesInRange(stampSlot.titlePara, photoPara, keepSet);
-                // statusTbls에 없던 잔여 표까지 제거된 뒤, 참조는 1장만 유지
+                if (!stampSlot || !stampSlot.titlePara) return;
+                const all = collectStatusTablesUntilPhoto(stampSlot.titlePara);
+                if (!all.length) return;
+                // 제목 문단에 붙은 샘플 표보다, 가능하면 그 다음 장을 keep으로 쓰지 않고
+                // 문서상 첫 상태조사표 1장만 남긴다(데이터 행만 비움).
+                const keep = all[0];
+                const titlePara = stampSlot.titlePara;
+                all.slice(1).forEach((tbl) => safeRemoveStatusTable(tbl, titlePara));
+                // 헤더는 유지하고 샘플 데이터 행만 제거
+                const keepTrs = Array.from(keep.getElementsByTagNameNS(HP_NS, "tr"));
+                let hdr = 1;
+                if (keepTrs.length > 1) {
+                    const r1 = Array.from(keepTrs[1].getElementsByTagNameNS(HP_NS, "t")).map(t => t.textContent || "").join("");
+                    if (r1.includes("구조") || r1.includes("비구조")) hdr = 2;
+                }
+                clearStatusTableDataRows(keep, hdr);
+                // 제목과 같은 문단에 있으면 추가 페이지 복제 때 제목까지 복제되므로, 표를 다음 문단으로 분리한다.
+                let keepP = owningPara(keep);
+                if (keepP && keepP === titlePara && titlePara.parentNode) {
+                    const fresh = titlePara.cloneNode(false);
+                    fresh.removeAttribute("pageBreak");
+                    const run = keep.parentNode;
+                    if (run && run.localName === "run") {
+                        run.parentNode && run.parentNode.removeChild(run);
+                        fresh.appendChild(run);
+                    } else {
+                        if (keep.parentNode) keep.parentNode.removeChild(keep);
+                        const ns = titlePara.namespaceURI || HP_NS;
+                        const newRun = titlePara.ownerDocument.createElementNS(ns, "hp:run");
+                        newRun.appendChild(keep);
+                        fresh.appendChild(newRun);
+                    }
+                    if (titlePara.nextSibling) titlePara.parentNode.insertBefore(fresh, titlePara.nextSibling);
+                    else titlePara.parentNode.appendChild(fresh);
+                    keepP = fresh;
+                }
+                if (keepP && keepP !== titlePara) keepP.removeAttribute("pageBreak");
                 stampSlot.statusTbls = [keep];
             };
             stripStampStatusToOne(floorSlots[0]);
@@ -33461,14 +33492,29 @@ document.addEventListener('DOMContentLoaded', () => {
                 let pageTbls = slot.statusTbls.slice();
                 if (pageTbls.length > neededPages) {
                     pageTbls.slice(neededPages).forEach(tbl => {
-                        removeOwningPara(tbl);
+                        safeRemoveStatusTable(tbl, slot.titlePara);
                     });
                     pageTbls = pageTbls.slice(0, neededPages);
                 } else if (pageTbls.length < neededPages) {
                     let insertAfterNode = owningPara(pageTbls[pageTbls.length - 1]);
                     if (!insertAfterNode) insertAfterNode = pageTbls[pageTbls.length - 1].parentNode;
                     for (let n = pageTbls.length; n < neededPages; n++) {
-                        const clonedPara = insertAfterNode.cloneNode(true);
+                        // 제목 문단을 복제하지 않는다(표만 있는 문단을 복제).
+                        let cloneSrc = insertAfterNode;
+                        if (cloneSrc === slot.titlePara) {
+                            const only = slot.titlePara.cloneNode(false);
+                            const srcTbl = pageTbls[pageTbls.length - 1];
+                            const srcRun = srcTbl && srcTbl.parentNode;
+                            if (srcRun && srcRun.localName === 'run') only.appendChild(srcRun.cloneNode(true));
+                            else if (srcTbl) {
+                                const ns = slot.titlePara.namespaceURI || HP_NS;
+                                const newRun = slot.titlePara.ownerDocument.createElementNS(ns, 'hp:run');
+                                newRun.appendChild(srcTbl.cloneNode(true));
+                                only.appendChild(newRun);
+                            }
+                            cloneSrc = only;
+                        }
+                        const clonedPara = cloneSrc.cloneNode(true);
                         clonedPara.setAttribute('pageBreak', '1');
                         const clonedTbl = clonedPara.getElementsByTagNameNS(HP_NS, 'tbl')[0];
                         cloneIdSeq++;
@@ -33479,26 +33525,11 @@ document.addEventListener('DOMContentLoaded', () => {
                         syncStatusTblLayoutFromTemplate(clonedTbl, targetTbl, HEADER_ROW_COUNT, normalRowTpl);
                     }
                 }
-                // 이 층 구간에 남은 여분 상태조사표(템플릿 샘플)를 전부 제거한 뒤,
-                // pageTbls만 문서 순으로 정렬하고 첫 장 pageBreak를 끈다.
-                {
-                    const photoPara = slot.photoTbl ? owningPara(slot.photoTbl) : null;
-                    const keepSet = new Set(pageTbls.filter(Boolean));
-                    purgeStatusTablesInRange(slot.titlePara, photoPara, keepSet);
-                    pageTbls = pageTbls.filter((tbl) => tbl && tbl.parentNode);
-                    pageTbls.sort((a, b) => {
-                        const pa = owningPara(a);
-                        const pb = owningPara(b);
-                        if (!pa || !pb || pa === pb) return 0;
-                        const pos = pa.compareDocumentPosition(pb);
-                        if (pos & 4) return -1; // FOLLOWING
-                        if (pos & 2) return 1;  // PRECEDING
-                        return 0;
-                    });
-                }
+                // 여분 표는 위에서 neededPages만큼만 남긴 상태. 여기서는 pageBreak만 정리한다.
+                // (제목과 표가 같은 문단인 경우 문단 삭제 금지)
                 pageTbls.forEach((tbl, i) => {
                     const pbPara = owningPara(tbl);
-                    if (pbPara) {
+                    if (pbPara && pbPara !== slot.titlePara) {
                         if (i === 0) pbPara.removeAttribute('pageBreak');
                         else pbPara.setAttribute('pageBreak', '1');
                     }
@@ -35262,10 +35293,17 @@ document.addEventListener('DOMContentLoaded', () => {
                     const e = idx + 1 < starts.length ? starts[idx + 1] : ps.length;
                     const statusTbls = [];
                     let photoTbl = null, locationMapTbl = null;
-                    for (let i = s + 1; i < e; i++) {
+                    for (let i = s; i < e; i++) {
                         const txt = paraText(ps[i]).trim();
                         const tbls = Array.from(ps[i].getElementsByTagNameNS(HP_NS, 'tbl'));
                         if (tbls.length === 0) continue;
+                        // 제목 문단(i===s)에는 표만 수집하고 사진/기타 판정은 하지 않는다.
+                        if (i === s) {
+                            tbls.forEach((tbl) => {
+                                if (isCurrentStatusTable(tbl)) statusTbls.push(tbl);
+                            });
+                            continue;
+                        }
                         if (!photoTbl && /^사진1/.test(txt)) { photoTbl = tbls[0]; continue; }
                         if (!photoTbl) {
                             // 한 문단 안에 표가 여러 개 겹쳐 들어있는 경우가 있다(옛 포맷을 새 포맷으로
@@ -35342,67 +35380,91 @@ document.addEventListener('DOMContentLoaded', () => {
                     });
                 });
             };
-            // 템플릿에는 상태조사표가 여러 장(샘플 NO.16/31/46…) 들어 있다. 층 스탬프 복제 전에
-            // 첫 장만 남기고 나머지는 문단째 제거한다. statusTbls 배열에만 의존하면 삭제가
-            // 빗나갈 수 있어, 제목~사진 구간을 직접 순회한다.
-            const removeOwningPara = (node) => {
-                let p = node;
-                while (p && p.localName !== "p" && p.nodeName !== "hp:p") p = p.parentNode;
-                if (p && p.parentNode) p.parentNode.removeChild(p);
-                return p;
-            };
+            // 템플릿 상태조사표는 여러 장(샘플 NO.16/31/46…)이고, 첫 표는 제목과 같은 hp:p에
+            // 들어 있는 경우가 많다. 문단 전체를 지우면 제목·필요한 표까지 사라지므로,
+            // 제목 문단 안에서는 표 노드만 제거하고, 그 외 문단만 문단째 제거한다.
             const owningPara = (node) => {
                 let p = node;
                 while (p && p.localName !== "p" && p.nodeName !== "hp:p") p = p.parentNode;
                 return p;
             };
-            const clearStatusTableDataRows = (tbl) => {
+            const removeOwningPara = (node) => {
+                const p = owningPara(node);
+                if (p && p.parentNode) p.parentNode.removeChild(p);
+                return p;
+            };
+            const safeRemoveStatusTable = (tbl, titlePara) => {
                 if (!tbl) return;
-                const trs = Array.from(tbl.getElementsByTagNameNS(HP_NS, "tr"));
-                // 헤더 1~2행만 남긴다. parent가 tbl이 아닌 경우도 제거.
-                const headerJoined = (() => {
-                    const fr = trs[0];
-                    if (!fr) return "";
-                    return Array.from(fr.getElementsByTagNameNS(HP_NS, "t")).map(t => t.textContent || "").join("");
-                })();
-                let hdr = 1;
-                if (trs.length > 1) {
-                    const r1 = Array.from(trs[1].getElementsByTagNameNS(HP_NS, "t")).map(t => t.textContent || "").join("");
-                    if (r1.includes("구조") || r1.includes("비구조") || headerJoined.includes("부재")) hdr = 2;
+                const p = owningPara(tbl);
+                if (p && titlePara && p === titlePara) {
+                    if (tbl.parentNode) tbl.parentNode.removeChild(tbl);
+                    return;
                 }
+                removeOwningPara(tbl);
+            };
+            const clearStatusTableDataRows = (tbl, headerRowCount) => {
+                if (!tbl) return;
+                const hdr = Math.max(1, headerRowCount || 2);
+                const trs = Array.from(tbl.getElementsByTagNameNS(HP_NS, "tr"));
                 trs.forEach((tr, idx) => {
                     if (idx < hdr) return;
                     if (tr.parentNode) tr.parentNode.removeChild(tr);
                 });
             };
-            const purgeStatusTablesInRange = (fromPara, beforePara, keepSet) => {
+            const collectStatusTablesUntilPhoto = (titlePara) => {
                 const ps = secChildren();
-                const start = Math.max(0, ps.indexOf(fromPara));
-                const end = beforePara ? ps.indexOf(beforePara) : ps.length;
-                const stop = end >= 0 ? end : ps.length;
-                const doomed = [];
-                for (let i = start + 1; i < stop; i++) {
+                const start = ps.indexOf(titlePara);
+                const out = [];
+                if (start < 0) return out;
+                // 제목 문단 포함: 제목과 표가 한 문단인 템플릿 대응
+                for (let i = start; i < ps.length; i++) {
                     const txt = paraText(ps[i]).trim();
-                    if (/^사진1/.test(txt)) break;
-                    const tbls = Array.from(ps[i].getElementsByTagNameNS(HP_NS, "tbl"));
-                    tbls.forEach((tbl) => {
-                        if (!isCurrentStatusTable(tbl)) return;
-                        if (keepSet && keepSet.has(tbl)) return;
-                        doomed.push(tbl);
+                    if (i > start && /^사진1/.test(txt)) break;
+                    if (i > start && floorTitleRe.test(txt)) break;
+                    Array.from(ps[i].getElementsByTagNameNS(HP_NS, "tbl")).forEach((tbl) => {
+                        if (isCurrentStatusTable(tbl)) out.push(tbl);
                     });
                 }
-                doomed.forEach((tbl) => removeOwningPara(tbl));
+                return out;
             };
             const stripStampStatusToOne = (stampSlot) => {
-                if (!stampSlot || !stampSlot.statusTbls || !stampSlot.statusTbls.length) return;
-                const keep = stampSlot.statusTbls[0];
-                clearStatusTableDataRows(keep);
-                const keepP = owningPara(keep);
-                if (keepP) keepP.removeAttribute("pageBreak");
-                const keepSet = new Set([keep]);
-                const photoPara = stampSlot.photoTbl ? owningPara(stampSlot.photoTbl) : null;
-                purgeStatusTablesInRange(stampSlot.titlePara, photoPara, keepSet);
-                // statusTbls에 없던 잔여 표까지 제거된 뒤, 참조는 1장만 유지
+                if (!stampSlot || !stampSlot.titlePara) return;
+                const all = collectStatusTablesUntilPhoto(stampSlot.titlePara);
+                if (!all.length) return;
+                // 제목 문단에 붙은 샘플 표보다, 가능하면 그 다음 장을 keep으로 쓰지 않고
+                // 문서상 첫 상태조사표 1장만 남긴다(데이터 행만 비움).
+                const keep = all[0];
+                const titlePara = stampSlot.titlePara;
+                all.slice(1).forEach((tbl) => safeRemoveStatusTable(tbl, titlePara));
+                // 헤더는 유지하고 샘플 데이터 행만 제거
+                const keepTrs = Array.from(keep.getElementsByTagNameNS(HP_NS, "tr"));
+                let hdr = 1;
+                if (keepTrs.length > 1) {
+                    const r1 = Array.from(keepTrs[1].getElementsByTagNameNS(HP_NS, "t")).map(t => t.textContent || "").join("");
+                    if (r1.includes("구조") || r1.includes("비구조")) hdr = 2;
+                }
+                clearStatusTableDataRows(keep, hdr);
+                // 제목과 같은 문단에 있으면 추가 페이지 복제 때 제목까지 복제되므로, 표를 다음 문단으로 분리한다.
+                let keepP = owningPara(keep);
+                if (keepP && keepP === titlePara && titlePara.parentNode) {
+                    const fresh = titlePara.cloneNode(false);
+                    fresh.removeAttribute("pageBreak");
+                    const run = keep.parentNode;
+                    if (run && run.localName === "run") {
+                        run.parentNode && run.parentNode.removeChild(run);
+                        fresh.appendChild(run);
+                    } else {
+                        if (keep.parentNode) keep.parentNode.removeChild(keep);
+                        const ns = titlePara.namespaceURI || HP_NS;
+                        const newRun = titlePara.ownerDocument.createElementNS(ns, "hp:run");
+                        newRun.appendChild(keep);
+                        fresh.appendChild(newRun);
+                    }
+                    if (titlePara.nextSibling) titlePara.parentNode.insertBefore(fresh, titlePara.nextSibling);
+                    else titlePara.parentNode.appendChild(fresh);
+                    keepP = fresh;
+                }
+                if (keepP && keepP !== titlePara) keepP.removeAttribute("pageBreak");
                 stampSlot.statusTbls = [keep];
             };
             stripStampStatusToOne(floorSlots[0]);
@@ -35569,14 +35631,29 @@ document.addEventListener('DOMContentLoaded', () => {
                 let pageTbls = slot.statusTbls.slice();
                 if (pageTbls.length > neededPages) {
                     pageTbls.slice(neededPages).forEach(tbl => {
-                        removeOwningPara(tbl);
+                        safeRemoveStatusTable(tbl, slot.titlePara);
                     });
                     pageTbls = pageTbls.slice(0, neededPages);
                 } else if (pageTbls.length < neededPages) {
                     let insertAfterNode = owningPara(pageTbls[pageTbls.length - 1]);
                     if (!insertAfterNode) insertAfterNode = pageTbls[pageTbls.length - 1].parentNode;
                     for (let n = pageTbls.length; n < neededPages; n++) {
-                        const clonedPara = insertAfterNode.cloneNode(true);
+                        // 제목 문단을 복제하지 않는다(표만 있는 문단을 복제).
+                        let cloneSrc = insertAfterNode;
+                        if (cloneSrc === slot.titlePara) {
+                            const only = slot.titlePara.cloneNode(false);
+                            const srcTbl = pageTbls[pageTbls.length - 1];
+                            const srcRun = srcTbl && srcTbl.parentNode;
+                            if (srcRun && srcRun.localName === 'run') only.appendChild(srcRun.cloneNode(true));
+                            else if (srcTbl) {
+                                const ns = slot.titlePara.namespaceURI || HP_NS;
+                                const newRun = slot.titlePara.ownerDocument.createElementNS(ns, 'hp:run');
+                                newRun.appendChild(srcTbl.cloneNode(true));
+                                only.appendChild(newRun);
+                            }
+                            cloneSrc = only;
+                        }
+                        const clonedPara = cloneSrc.cloneNode(true);
                         clonedPara.setAttribute('pageBreak', '1');
                         const clonedTbl = clonedPara.getElementsByTagNameNS(HP_NS, 'tbl')[0];
                         cloneIdSeq++;
@@ -35587,26 +35664,11 @@ document.addEventListener('DOMContentLoaded', () => {
                         syncStatusTblLayoutFromTemplate(clonedTbl, targetTbl, HEADER_ROW_COUNT, normalStyleRow);
                     }
                 }
-                // 이 층 구간에 남은 여분 상태조사표(템플릿 샘플)를 전부 제거한 뒤,
-                // pageTbls만 문서 순으로 정렬하고 첫 장 pageBreak를 끈다.
-                {
-                    const photoPara = slot.photoTbl ? owningPara(slot.photoTbl) : null;
-                    const keepSet = new Set(pageTbls.filter(Boolean));
-                    purgeStatusTablesInRange(slot.titlePara, photoPara, keepSet);
-                    pageTbls = pageTbls.filter((tbl) => tbl && tbl.parentNode);
-                    pageTbls.sort((a, b) => {
-                        const pa = owningPara(a);
-                        const pb = owningPara(b);
-                        if (!pa || !pb || pa === pb) return 0;
-                        const pos = pa.compareDocumentPosition(pb);
-                        if (pos & 4) return -1; // FOLLOWING
-                        if (pos & 2) return 1;  // PRECEDING
-                        return 0;
-                    });
-                }
+                // 여분 표는 위에서 neededPages만큼만 남긴 상태. 여기서는 pageBreak만 정리한다.
+                // (제목과 표가 같은 문단인 경우 문단 삭제 금지)
                 pageTbls.forEach((tbl, i) => {
                     const pbPara = owningPara(tbl);
-                    if (pbPara) {
+                    if (pbPara && pbPara !== slot.titlePara) {
                         if (i === 0) pbPara.removeAttribute('pageBreak');
                         else pbPara.setAttribute('pageBreak', '1');
                     }
