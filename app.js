@@ -18928,7 +18928,7 @@ document.addEventListener('DOMContentLoaded', () => {
         return { x: hits[0].x, y: hits[0].y };
     }
 
-    // 영역 마킹: 번호칸 방향의 변 **중앙**(상·하·좌·우 중 하나)에 선을 꽂음
+    // 영역 마킹: 번호칸에서 가장 가까운 변 중앙(상·하·좌·우)에 선을 꽂음
     function getAreaCenterBorderAttach(fromX, fromY, areaX1, areaY1, areaX2, areaY2) {
         const x1 = Math.min(areaX1, areaX2);
         const y1 = Math.min(areaY1, areaY2);
@@ -18936,14 +18936,19 @@ document.addEventListener('DOMContentLoaded', () => {
         const y2 = Math.max(areaY1, areaY2);
         const cx = (x1 + x2) / 2;
         const cy = (y1 + y2) / 2;
-        const w = Math.max(x2 - x1, 1e-6);
-        const h = Math.max(y2 - y1, 1e-6);
-        const dx = fromX - cx;
-        const dy = fromY - cy;
-        if (Math.abs(dx) * h >= Math.abs(dy) * w) {
-            return dx < 0 ? { x: x1, y: cy } : { x: x2, y: cy };
-        }
-        return dy < 0 ? { x: cx, y: y1 } : { x: cx, y: y2 };
+        const candidates = [
+            { x: cx, y: y1 },
+            { x: cx, y: y2 },
+            { x: x1, y: cy },
+            { x: x2, y: cy }
+        ];
+        let best = candidates[0];
+        let bestD = Infinity;
+        candidates.forEach((c) => {
+            const d = (c.x - fromX) ** 2 + (c.y - fromY) ** 2;
+            if (d < bestD) { bestD = d; best = c; }
+        });
+        return best;
     }
 
     function getAreaEdgeMidpoints(defect) {
@@ -18958,20 +18963,8 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function getAreaCenterBorderAttachDefect(fromX, fromY, defect) {
-        const { cx, cy } = getAreaAabb(defect);
-        const cands = getAreaEdgeMidpoints(defect);
-        if (!cands.length) return getAreaCenterBorderAttach(fromX, fromY, defect.areaX1, defect.areaY1, defect.areaX2, defect.areaY2);
-        let best = cands[0];
-        let bestDot = -Infinity;
-        const vx = fromX - cx;
-        const vy = fromY - cy;
-        cands.forEach((c) => {
-            const dx = c.x - cx;
-            const dy = c.y - cy;
-            const dot = dx * vx + dy * vy;
-            if (dot > bestDot) { bestDot = dot; best = c; }
-        });
-        return best;
+        // 번호칸(from)에서 유클리드 거리가 가장 가까운 변 중앙에 꽂음 (방향 dot 아님)
+        return projectPointToAreaEdgeCenterDefect(fromX, fromY, defect);
     }
 
     // 선분이 영역 내부(테두리 제외)를 지나는지 검사 — 지시선이 면적 안을 침범하지 않게
@@ -23942,6 +23935,10 @@ document.addEventListener('DOMContentLoaded', () => {
                     }
                 }
 
+                // 안쪽(살짝 inset)=이동, 테두리·바깥 밴드=리사이즈
+                // 좁은 영역에서도 내부 클릭이 코너/엣지 히트에 먹히지 않게 한다.
+                const insideForMove = isPointInAreaMark(d, imgX, imgY, -2);
+
                 // 다각형: 꼭짓점 핸들 (AABB 모서리 리사이즈 대신)
                 if (getAreaShape(d) === 'polygon') {
                     const pts = getAreaPolyPoints(d);
@@ -23951,15 +23948,19 @@ document.addEventListener('DOMContentLoaded', () => {
                             return { defect: d, part: 'AREA_VERTEX', vertexIndex: vi };
                         }
                     }
-                    const edgeTol = 10;
-                    for (let ei = 0; ei < pts.length; ei++) {
-                        const a = pts[ei];
-                        const b = pts[(ei + 1) % pts.length];
-                        if (distPointToSegment(imgX, imgY, a.x, a.y, b.x, b.y) <= edgeTol) {
-                            return { defect: d, part: 'AREA_MOVE' };
+                    if (!insideForMove) {
+                        const edgeTol = 10;
+                        for (let ei = 0; ei < pts.length; ei++) {
+                            const a = pts[ei];
+                            const b = pts[(ei + 1) % pts.length];
+                            if (distPointToSegment(imgX, imgY, a.x, a.y, b.x, b.y) <= edgeTol) {
+                                // 외곽선 근처(바깥/테두리) — 이동은 내부에서만
+                                if (!bestBox) bestBox = { defect: d, part: 'AREA_MOVE' };
+                                break;
+                            }
                         }
                     }
-                } else {
+                } else if (!insideForMove) {
                     const cornerR = 14;
                     const hw = aabb.w / 2;
                     const hh = aabb.h / 2;
@@ -23977,18 +23978,25 @@ document.addEventListener('DOMContentLoaded', () => {
                         }
                     }
 
-                    const edgeTol = 10;
+                    // 외곽선 바깥(또는 선 위) 밴드만 리사이즈 — 안쪽은 위에서 이동으로 처리
+                    const edgeTol = 12;
                     const loc = areaImgToLocal(d, imgX, imgY);
-                    if (Math.abs(loc.y + hh) <= edgeTol && loc.x >= -hw + cornerR && loc.x <= hw - cornerR) {
+                    const onTop = loc.y <= -hh + 1 && loc.y >= -hh - edgeTol;
+                    const onBot = loc.y >= hh - 1 && loc.y <= hh + edgeTol;
+                    const onLeft = loc.x <= -hw + 1 && loc.x >= -hw - edgeTol;
+                    const onRight = loc.x >= hw - 1 && loc.x <= hw + edgeTol;
+                    const alongX = loc.x >= -hw - edgeTol && loc.x <= hw + edgeTol;
+                    const alongY = loc.y >= -hh - edgeTol && loc.y <= hh + edgeTol;
+                    if (onTop && alongX && loc.x >= -hw + cornerR && loc.x <= hw - cornerR) {
                         return { defect: d, part: 'AREA_RESIZE', resizeXField: null, resizeYField: minYField };
                     }
-                    if (Math.abs(loc.y - hh) <= edgeTol && loc.x >= -hw + cornerR && loc.x <= hw - cornerR) {
+                    if (onBot && alongX && loc.x >= -hw + cornerR && loc.x <= hw - cornerR) {
                         return { defect: d, part: 'AREA_RESIZE', resizeXField: null, resizeYField: maxYField };
                     }
-                    if (Math.abs(loc.x + hw) <= edgeTol && loc.y >= -hh + cornerR && loc.y <= hh - cornerR) {
+                    if (onLeft && alongY && loc.y >= -hh + cornerR && loc.y <= hh - cornerR) {
                         return { defect: d, part: 'AREA_RESIZE', resizeXField: minXField, resizeYField: null };
                     }
-                    if (Math.abs(loc.x - hw) <= edgeTol && loc.y >= -hh + cornerR && loc.y <= hh - cornerR) {
+                    if (onRight && alongY && loc.y >= -hh + cornerR && loc.y <= hh - cornerR) {
                         return { defect: d, part: 'AREA_RESIZE', resizeXField: maxXField, resizeYField: null };
                     }
                 }
@@ -24008,7 +24016,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     bestBox = { defect: d, part: 'BOX' };
                 }
 
-                if (isPointInAreaMark(d, imgX, imgY, pad) && !bestBox) {
+                if (insideForMove && !bestBox) {
                     bestBox = { defect: d, part: 'AREA_MOVE' };
                 }
                 continue;
