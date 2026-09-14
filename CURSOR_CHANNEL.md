@@ -263,3 +263,10 @@
 > `storage.rules`에 중첩 match 추가(레거시 평면 경로 유지). **콘솔 재게시 필요.**
 > 이미 Storage에 있는 파일은 경로를 옮기지 않음(메타의 storagePath 유지).
 
+### ⚡ [Cursor] - 2026-09-15 08:46:00
+> **`[COMPLETED]` 사진 Storage + 현장/회차 폴더 `main` 적용**
+>
+> PR #3 (`cursor/firebase-storage-photos-f66a`)를 `origin/main`에 fast-forward 머지. GitHub Pages 반영.
+> **필수**: Firebase 콘솔 → Storage → 규칙에 중첩 경로(`{site}/{round}/{assetType}`) 게시. 게시 전엔 새 폴더 업로드가 거부됨.
+> 적용 후 홈 동기화하면 기존 Firestore `dataUrl` 사진이 Storage로 이관됨.
+
