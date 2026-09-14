@@ -23805,8 +23805,9 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!state.defects[key]) return;
         pushDefectHistory();
         ids.forEach(id => removeSingleDefectRecord(key, id, { skipRenumber: true }));
-        renumberFloorDefects(state.defects[key], { preserveOrder: false });
+        // 번호 재부여 없음 — 삭제된 번호만 비우고 나머지는 유지 (화살표/핀 동일)
         normalizeAllDefectGroupNos(state.defects[key]);
+        collapseSingletonDefectGroups(state.defects[key]);
         selectedDefectIds.clear();
         updateMapSelectionBar();
         saveStateToLocalStorage();
@@ -36780,11 +36781,13 @@ document.addEventListener('DOMContentLoaded', () => {
             normalizeDefectGroupNos(state.defects[key], affectedGroupId);
         }
         collapseSingletonDefectGroups(state.defects[key]);
-        if (!skipRenumber) {
-            renumberFloorDefects(state.defects[key], { preserveOrder: false });
-            if (affectedGroupId) {
-                normalizeDefectGroupNos(state.defects[key], affectedGroupId);
-            }
+        // 삭제 후 층 전체 재부여(renumberFloorDefects)는 하지 않는다.
+        // CAD 최대번호 다음으로 수동 마킹을 밀어 기존 번호가 공란이 되고
+        // 마지막 번호가 +1 되는 버그가 난다. 남은 마킹 번호는 유지하고,
+        // 다음 신규 번호는 getNextDefectMainNumber(max+1)로 자연스럽게 이어간다.
+        // (빈 칸 채우기는 사용자가 '마킹번호 빈칸 땡기기'로 수행)
+        if (!skipRenumber && affectedGroupId) {
+            normalizeDefectGroupNos(state.defects[key], affectedGroupId);
         }
     }
 
@@ -36826,7 +36829,9 @@ document.addEventListener('DOMContentLoaded', () => {
             const memberIds = state.defects[key].filter(d => d.groupId === groupId).map(d => d.id);
             memberIds.forEach(id => removeSingleDefectRecord(key, id, { skipRenumber: true }));
             if (typeof discardStalePendingRemoteAfterLocalPinEdit === 'function') discardStalePendingRemoteAfterLocalPinEdit();
-            renumberFloorDefects(state.defects[key], { preserveOrder: false });
+            // 그룹 전체 삭제 시에도 다른 마킹 번호는 건드리지 않음
+            normalizeAllDefectGroupNos(state.defects[key]);
+            collapseSingletonDefectGroups(state.defects[key]);
             saveStateToLocalStorage();
             renderSurveyTable();
             drawCanvas();
