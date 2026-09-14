@@ -4464,20 +4464,22 @@ html:not(.layout-desktop) .survey-inline-select {
     border-top: 1px dashed rgba(148, 163, 184, 0.45);
 }
 
-/* 화살표별 선택·방향 — PC는 드로어 왼쪽, 모바일은 시트 위에 붙음 */
+/* 화살표별 선택·방향 — 헤더 제목 옆(자동적용 자리) */
 #defectMarkingMemberFloat.defect-marking-member-float {
     pointer-events: auto;
     display: flex;
-    flex-wrap: nowrap;
-    flex-direction: column;
-    align-items: stretch;
+    flex-wrap: wrap;
+    flex-direction: row;
+    align-items: center;
     justify-content: flex-start;
-    align-self: flex-start;
-    gap: 6px;
-    flex-shrink: 0;
-    z-index: 6;
-    margin: 14px 0 0 0;
-    max-width: 6.4rem;
+    align-self: center;
+    gap: 4px;
+    flex: 1 1 auto;
+    flex-shrink: 1;
+    z-index: 1;
+    margin: 0;
+    max-width: none;
+    min-width: 0;
 }
 #defectMarkingMemberFloat.defect-marking-member-float[hidden] {
     display: none !important;
@@ -4487,17 +4489,19 @@ html:not(.layout-desktop) .survey-inline-select {
     flex-direction: row;
     align-items: stretch;
     gap: 0;
-    border-radius: 10px 0 0 10px;
+    border-radius: 8px;
     overflow: hidden;
-    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08);
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
 }
 .defect-marking-arrow-row.is-active {
     box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.35);
 }
 .defect-marking-float-section {
     display: flex;
-    flex-direction: column;
-    gap: 6px;
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 4px;
+    align-items: center;
 }
 .defect-marking-arrow-row.is-no-dir .defect-marking-arrow-select {
     border-right: 1px solid #cbd5e1;
@@ -4510,10 +4514,10 @@ html:not(.layout-desktop) .survey-inline-select {
     background: #f8fafc;
     color: #0f172a;
     border-radius: 0;
-    min-width: 2.35rem;
-    min-height: 2.2rem;
-    padding: 0.32rem 0.45rem;
-    font-size: 0.82rem;
+    min-width: 2.1rem;
+    min-height: 1.75rem;
+    padding: 0.2rem 0.35rem;
+    font-size: 0.72rem;
     font-weight: 800;
     letter-spacing: -0.02em;
     line-height: 1;
@@ -4524,18 +4528,18 @@ html:not(.layout-desktop) .survey-inline-select {
     transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
 }
 .defect-marking-arrow-row .defect-marking-arrow-select {
-    border-radius: 10px 0 0 10px;
+    border-radius: 8px 0 0 8px;
 }
 .defect-marking-arrow-dir-btn {
     appearance: none;
     border: 1px solid #cbd5e1;
     background: #fff;
     color: #475569;
-    border-radius: 0;
-    min-width: 2.35rem;
-    min-height: 2.2rem;
-    padding: 0.28rem 0.4rem;
-    font-size: 1rem;
+    border-radius: 0 8px 8px 0;
+    min-width: 1.75rem;
+    min-height: 1.75rem;
+    padding: 0.18rem 0.28rem;
+    font-size: 0.88rem;
     font-weight: 700;
     line-height: 1;
     cursor: pointer;
@@ -5161,48 +5165,40 @@ html:not(.layout-desktop) .survey-inline-select {
         flex-direction: column;
     }
 
-    /* 세로 모바일: 화살표 선택·방향 탭을 시트 윗변에 붙임 */
-    html:not(.layout-desktop) #defectModal #defectMarkingMemberFloat:not([hidden]) {
-        order: 1;
-        margin-top: auto;
-        margin-bottom: 0;
-        margin-left: 14px;
-        margin-right: 0;
-        align-self: flex-start;
+    /* 세로 모바일: 화살표 선택은 헤더 안 — 시트 위 플로트 규칙 무효 */
+    html:not(.layout-desktop) #defectModal .defect-drawer-title-wrap #defectMarkingMemberFloat:not([hidden]) {
+        order: unset;
+        margin: 0;
+        align-self: center;
         flex-direction: row;
         flex-wrap: wrap;
-        max-width: calc(100% - 1.6rem);
+        max-width: none;
         padding: 0;
-        gap: 6px;
+        gap: 4px;
     }
-    html:not(.layout-desktop) #defectModal #defectMarkingMemberFloat:not([hidden]) .defect-marking-arrow-row {
-        border-radius: 10px 10px 0 0;
-        box-shadow: none;
+    html:not(.layout-desktop) #defectModal .defect-drawer-title-wrap #defectMarkingMemberFloat:not([hidden]) .defect-marking-arrow-row {
+        border-radius: 8px;
+        box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
     }
-    html:not(.layout-desktop) #defectModal #defectMarkingMemberFloat:not([hidden]) .defect-marking-arrow-select {
-        border-radius: 10px 0 0 0;
+    html:not(.layout-desktop) #defectModal .defect-drawer-title-wrap #defectMarkingMemberFloat:not([hidden]) .defect-marking-arrow-select {
+        border-radius: 8px 0 0 8px;
         border-right: none;
-        min-width: 2.35rem;
-        min-height: 1.75rem;
-        font-size: 0.72rem;
+        min-width: 2rem;
+        min-height: 1.65rem;
+        font-size: 0.7rem;
         font-weight: 700;
         letter-spacing: -0.02em;
         padding: 0 0.28rem;
     }
-    html:not(.layout-desktop) #defectModal #defectMarkingMemberFloat:not([hidden]) .defect-marking-arrow-dir-btn {
-        border-radius: 0 10px 0 0;
+    html:not(.layout-desktop) #defectModal .defect-drawer-title-wrap #defectMarkingMemberFloat:not([hidden]) .defect-marking-arrow-dir-btn {
+        border-radius: 0 8px 8px 0;
         border-left: none;
-        min-width: 1.85rem;
-        min-height: 1.75rem;
-        font-size: 0.88rem;
+        min-width: 1.65rem;
+        min-height: 1.65rem;
+        font-size: 0.82rem;
     }
-    html:not(.layout-desktop) #defectModal #defectMarkingMemberFloat:not([hidden]) .defect-marking-arrow-row.is-active {
+    html:not(.layout-desktop) #defectModal .defect-drawer-title-wrap #defectMarkingMemberFloat:not([hidden]) .defect-marking-arrow-row.is-active {
         box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.35);
-    }
-    html:not(.layout-desktop) #defectModal #defectMarkingMemberFloat:not([hidden]) + .defect-drawer-card {
-        order: 2;
-        margin-top: 0;
-        border-top-left-radius: 4px;
     }
 
     html:not(.layout-desktop) #defectModal .defect-drawer-body {
@@ -5517,11 +5513,17 @@ html:not(.layout-desktop) .survey-inline-select {
     }
 
     .mobile-fab-btn.mobile-fab-danger {
-        color: #b91c1c;
+        color: #dc2626;
+        background: #fef2f2;
+        border-radius: 8px;
     }
 
     .mobile-fab-btn.mobile-fab-danger i {
-        color: #b91c1c;
+        color: #dc2626;
+    }
+
+    .mobile-fab-btn.mobile-fab-danger span {
+        color: #dc2626;
     }
 
     .mobile-fab-btn:disabled {
@@ -5708,36 +5710,29 @@ html:not(.layout-desktop) .survey-inline-select {
         bottom: max(0.1rem, env(safe-area-inset-bottom, 0px));
     }
 
-    /* 가로 모바일: 수정창 왼쪽에 탭처럼 붙임 */
-    html:not(.layout-desktop) #defectModal #defectMarkingMemberFloat:not([hidden]) {
-        order: 1;
-        margin-top: 14px;
-        margin-bottom: 0;
-        margin-right: 0;
-        margin-left: 0;
-        align-self: flex-start;
-        flex-direction: column;
-        max-width: 5.4rem;
+    /* 가로 모바일: 화살표 선택도 헤더 안 */
+    html:not(.layout-desktop) #defectModal .defect-drawer-title-wrap #defectMarkingMemberFloat:not([hidden]) {
+        order: unset;
+        margin: 0;
+        align-self: center;
+        flex-direction: row;
+        flex-wrap: wrap;
+        max-width: none;
         padding: 0;
         gap: 4px;
     }
 
-    html:not(.layout-desktop) #defectModal #defectMarkingMemberFloat:not([hidden]) .defect-marking-arrow-select {
-        min-width: 2.1rem;
-        min-height: 1.75rem;
-        font-size: 0.72rem;
-        padding: 0.24rem 0.3rem;
+    html:not(.layout-desktop) #defectModal .defect-drawer-title-wrap #defectMarkingMemberFloat:not([hidden]) .defect-marking-arrow-select {
+        min-width: 1.95rem;
+        min-height: 1.6rem;
+        font-size: 0.68rem;
+        padding: 0 0.24rem;
     }
 
-    html:not(.layout-desktop) #defectModal #defectMarkingMemberFloat:not([hidden]) .defect-marking-arrow-dir-btn {
-        min-width: 1.85rem;
-        min-height: 1.75rem;
-        font-size: 0.88rem;
-    }
-    html:not(.layout-desktop) #defectModal #defectMarkingMemberFloat:not([hidden]) + .defect-drawer-card {
-        order: 2;
-        margin-top: 0;
-        border-top-left-radius: 16px;
+    html:not(.layout-desktop) #defectModal .defect-drawer-title-wrap #defectMarkingMemberFloat:not([hidden]) .defect-marking-arrow-dir-btn {
+        min-width: 1.6rem;
+        min-height: 1.6rem;
+        font-size: 0.8rem;
     }
 
     html:not(.layout-desktop) #defectModal.open .defect-drawer-card,
@@ -5906,7 +5901,7 @@ html:not(.layout-desktop) .survey-inline-select {
 .defect-drawer-title-wrap {
     display: flex;
     align-items: center;
-    gap: 0.55rem;
+    gap: 0.4rem;
     flex: 1;
     min-width: 0;
 }
@@ -5914,24 +5909,11 @@ html:not(.layout-desktop) .survey-inline-select {
 .defect-drawer-title-wrap h3 {
     margin: 0;
     font-size: 1rem;
+    flex-shrink: 0;
 }
 
 .defect-autosave-badge {
-    flex-shrink: 0;
-    font-size: 0.68rem;
-    font-weight: 800;
-    letter-spacing: 0.02em;
-    color: #4ade80;
-    background: rgba(74, 222, 128, 0.12);
-    border: 1px solid rgba(74, 222, 128, 0.35);
-    border-radius: 999px;
-    padding: 0.12rem 0.5rem;
-}
-
-.defect-autosave-badge.is-saving {
-    color: #6b6b6b;
-    background: rgba(100, 100, 100, 0.12);
-    border-color: rgba(100, 100, 100, 0.35);
+    display: none !important;
 }
 
 .defect-form-compact .form-group {
@@ -10442,8 +10424,17 @@ body.bsa-tab-stats .app-content {
     }
 
     html:not(.layout-desktop) .mobile-fab-btn.mobile-fab-danger,
-    html:not(.layout-desktop) .mobile-fab-btn.mobile-fab-danger i {
-        color: #b91c1c !important;
+    html:not(.layout-desktop) .mobile-fab-btn.mobile-fab-danger i,
+    html:not(.layout-desktop) #tab-map .mobile-canvas-dock .mobile-fab-btn.mobile-fab-danger,
+    html:not(.layout-desktop) #tab-map .mobile-canvas-dock .mobile-fab-btn.mobile-fab-danger i,
+    html:not(.layout-desktop) #tab-ndt .mobile-canvas-dock .mobile-fab-btn.mobile-fab-danger,
+    html:not(.layout-desktop) #tab-ndt .mobile-canvas-dock .mobile-fab-btn.mobile-fab-danger i {
+        color: #dc2626 !important;
+    }
+
+    html:not(.layout-desktop) .mobile-fab-btn.mobile-fab-danger {
+        background: #fef2f2 !important;
+        border-radius: 8px;
     }
 
     .pc-only-chrome,
@@ -12036,31 +12027,33 @@ html.layout-desktop #defectModal.modal-drawer-overlay.open.defect-drawer-in-canv
     gap: 0 !important;
 }
 
-/* PC: 핀 수정창 왼쪽에 탭처럼 붙임 */
-html.layout-desktop #defectModal #defectMarkingMemberFloat:not([hidden]) {
-    align-self: flex-start !important;
-    margin: 14px 0 0 0 !important;
-    flex-direction: column;
-    max-width: 8.5rem;
-    padding: 0;
-    gap: 6px;
+/* PC: 화살표 선택은 헤더 제목 옆 */
+html.layout-desktop #defectModal .defect-drawer-title-wrap #defectMarkingMemberFloat:not([hidden]) {
+    align-self: center !important;
+    margin: 0 !important;
+    flex-direction: row !important;
+    flex-wrap: wrap !important;
+    max-width: none !important;
+    padding: 0 !important;
+    gap: 4px !important;
 }
-html.layout-desktop #defectModal #defectMarkingMemberFloat:not([hidden]) .defect-marking-arrow-row {
-    border-radius: 10px 0 0 10px;
+html.layout-desktop #defectModal .defect-drawer-title-wrap #defectMarkingMemberFloat:not([hidden]) .defect-marking-arrow-row {
+    border-radius: 8px;
 }
-html.layout-desktop #defectModal #defectMarkingMemberFloat:not([hidden]) .defect-marking-arrow-select {
-    min-width: 3.1rem;
-    min-height: 2.2rem;
-    border-radius: 10px 0 0 10px;
+html.layout-desktop #defectModal .defect-drawer-title-wrap #defectMarkingMemberFloat:not([hidden]) .defect-marking-arrow-select {
+    min-width: 2.2rem;
+    min-height: 1.8rem;
+    border-radius: 8px 0 0 8px;
     border-right: none;
-    font-size: 0.82rem;
+    font-size: 0.74rem;
     font-weight: 700;
     letter-spacing: -0.02em;
-    padding: 0 0.35rem;
+    padding: 0 0.32rem;
 }
-html.layout-desktop #defectModal #defectMarkingMemberFloat:not([hidden]) .defect-marking-arrow-dir-btn {
-    min-width: 2.35rem;
-    min-height: 2.2rem;
+html.layout-desktop #defectModal .defect-drawer-title-wrap #defectMarkingMemberFloat:not([hidden]) .defect-marking-arrow-dir-btn {
+    min-width: 1.8rem;
+    min-height: 1.8rem;
+    border-radius: 0 8px 8px 0;
 }
 
 html.layout-desktop #defectModal .defect-drawer-card,
@@ -12742,7 +12735,6 @@ html.layout-tablet .mobile-fab-btn span {
 html.layout-tablet .mobile-fab-btn i,
 html.layout-tablet #tab-map .mobile-canvas-dock .mobile-fab-btn i {
     font-size: 0.98rem !important;
-    color: #262626 !important;
 }
 
 html.layout-tablet #tab-ndt .mobile-fab-btn i {
@@ -12756,8 +12748,17 @@ html.layout-tablet .mobile-fab-btn.mobile-fab-toggle[aria-expanded="true"] {
 }
 
 html.layout-tablet .mobile-fab-btn.mobile-fab-danger,
-html.layout-tablet .mobile-fab-btn.mobile-fab-danger i {
-    color: #b91c1c !important;
+html.layout-tablet .mobile-fab-btn.mobile-fab-danger i,
+html.layout-tablet #tab-map .mobile-canvas-dock .mobile-fab-btn.mobile-fab-danger,
+html.layout-tablet #tab-map .mobile-canvas-dock .mobile-fab-btn.mobile-fab-danger i,
+html.layout-tablet #tab-ndt .mobile-canvas-dock .mobile-fab-btn.mobile-fab-danger,
+html.layout-tablet #tab-ndt .mobile-canvas-dock .mobile-fab-btn.mobile-fab-danger i {
+    color: #dc2626 !important;
+}
+
+html.layout-tablet .mobile-fab-btn.mobile-fab-danger {
+    background: #fef2f2 !important;
+    border-radius: 8px;
 }
 
 html.layout-tablet .map-selected-defect-popup {
@@ -12797,23 +12798,15 @@ html.layout-tablet .map-sel-popup-edit {
         padding-bottom: 56dvh;
     }
 
-    /* 태블릿 세로: 수정창 윗변에 탭처럼 붙임 */
-    html.layout-tablet #defectModal #defectMarkingMemberFloat:not([hidden]) {
-        order: 1;
-        margin-top: auto !important;
-        margin-bottom: 0 !important;
-        margin-left: 14px !important;
-        margin-right: 0 !important;
-        align-self: flex-start !important;
+    /* 태블릿 세로: 화살표 선택은 헤더 안 */
+    html.layout-tablet #defectModal .defect-drawer-title-wrap #defectMarkingMemberFloat:not([hidden]) {
+        order: unset !important;
+        margin: 0 !important;
+        align-self: center !important;
         flex-direction: row !important;
         flex-wrap: wrap !important;
-        max-width: calc(100% - 1.6rem) !important;
-        gap: 6px;
-    }
-    html.layout-tablet #defectModal #defectMarkingMemberFloat:not([hidden]) + .defect-drawer-card {
-        order: 2;
-        margin-top: 0 !important;
-        border-top-left-radius: 4px !important;
+        max-width: none !important;
+        gap: 4px;
     }
 }
 
@@ -12826,19 +12819,14 @@ html.layout-tablet .map-sel-popup-edit {
         min-width: min(320px, 38vw) !important;
     }
 
-    html.layout-tablet #defectModal #defectMarkingMemberFloat:not([hidden]) {
-        order: 1;
-        margin-top: 14px !important;
-        margin-bottom: 0 !important;
-        margin-right: 0 !important;
-        margin-left: 0 !important;
-        align-self: flex-start !important;
-        flex-direction: column !important;
-        max-width: 6.4rem !important;
-        gap: 6px;
-    }
-    html.layout-tablet #defectModal #defectMarkingMemberFloat:not([hidden]) + .defect-drawer-card {
-        border-top-left-radius: 16px !important;
+    html.layout-tablet #defectModal .defect-drawer-title-wrap #defectMarkingMemberFloat:not([hidden]) {
+        order: unset !important;
+        margin: 0 !important;
+        align-self: center !important;
+        flex-direction: row !important;
+        flex-wrap: wrap !important;
+        max-width: none !important;
+        gap: 4px;
     }
 }
 
@@ -14286,6 +14274,29 @@ html.layout-tablet #tab-map .mobile-canvas-dock .mobile-fab-btn {
 html.layout-tablet .mobile-canvas-dock .mobile-fab-btn i,
 html.layout-tablet #tab-map .mobile-canvas-dock .mobile-fab-btn i {
     font-size: 0.98rem !important;
+}
+
+/* 삭제 버튼은 항상 빨강 (일반 FAB 아이콘 색 규칙보다 우선) */
+html:not(.layout-desktop) #tab-map .mobile-canvas-dock .mobile-fab-btn.mobile-fab-danger,
+html:not(.layout-desktop) #tab-map .mobile-canvas-dock .mobile-fab-btn.mobile-fab-danger i,
+html:not(.layout-desktop) #tab-map .mobile-canvas-dock .mobile-fab-btn.mobile-fab-danger span,
+html:not(.layout-desktop) #tab-ndt .mobile-canvas-dock .mobile-fab-btn.mobile-fab-danger,
+html:not(.layout-desktop) #tab-ndt .mobile-canvas-dock .mobile-fab-btn.mobile-fab-danger i,
+html:not(.layout-desktop) #tab-ndt .mobile-canvas-dock .mobile-fab-btn.mobile-fab-danger span,
+html.layout-tablet #tab-map .mobile-canvas-dock .mobile-fab-btn.mobile-fab-danger,
+html.layout-tablet #tab-map .mobile-canvas-dock .mobile-fab-btn.mobile-fab-danger i,
+html.layout-tablet #tab-map .mobile-canvas-dock .mobile-fab-btn.mobile-fab-danger span,
+html.layout-tablet #tab-ndt .mobile-canvas-dock .mobile-fab-btn.mobile-fab-danger,
+html.layout-tablet #tab-ndt .mobile-canvas-dock .mobile-fab-btn.mobile-fab-danger i,
+html.layout-tablet #tab-ndt .mobile-canvas-dock .mobile-fab-btn.mobile-fab-danger span {
+    color: #dc2626 !important;
+}
+
+html:not(.layout-desktop) #tab-map .mobile-canvas-dock .mobile-fab-btn.mobile-fab-danger,
+html:not(.layout-desktop) #tab-ndt .mobile-canvas-dock .mobile-fab-btn.mobile-fab-danger,
+html.layout-tablet #tab-map .mobile-canvas-dock .mobile-fab-btn.mobile-fab-danger,
+html.layout-tablet #tab-ndt .mobile-canvas-dock .mobile-fab-btn.mobile-fab-danger {
+    background: #fef2f2 !important;
 }
 
 html.layout-tablet .bsa-select-sheet-item {

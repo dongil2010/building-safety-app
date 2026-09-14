@@ -25299,6 +25299,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         hydrateBulkDefectForm(defects);
         renderDefectMarkingTimeline(null);
+        resetDefectDrawerScroll();
 
         const titleEl = document.getElementById('defectModalTitle');
         if (titleEl) titleEl.textContent = `📍 결함 핀 일괄 수정 (${defects.length}건)`;
@@ -25320,6 +25321,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (typeof syncMobileAddMarkingFab === 'function') syncMobileAddMarkingFab();
             window.requestAnimationFrame(() => {
                 syncDefectDrawerToCanvasArea();
+                resetDefectDrawerScroll();
                 if (elements.defectModal) elements.defectModal.classList.add('open');
                 window._defectFormHydrating = false;
                 drawCanvas();
@@ -25387,6 +25389,15 @@ document.addEventListener('DOMContentLoaded', () => {
         closeDefectModal();
     }, true);
 
+    function resetDefectDrawerScroll() {
+        const body = document.querySelector('#defectModal .defect-drawer-body');
+        if (!body) return;
+        body.scrollTop = 0;
+        if (typeof body.scrollTo === 'function') {
+            try { body.scrollTo({ top: 0, left: 0, behavior: 'auto' }); } catch (_e) { body.scrollTop = 0; }
+        }
+    }
+
     function openAddDefectModal(boxX, boxY, targetX, targetY, existingPin = null, areaRect = null, options = {}) {
         clearDefectBulkEditState();
         syncDefectBulkEditChrome(false);
@@ -25394,6 +25405,7 @@ document.addEventListener('DOMContentLoaded', () => {
         window._defectPhotoHydrateToken = (window._defectPhotoHydrateToken || 0) + 1;
         window.clearTimeout(window._defectAutoApplyTimer);
         window._defectAutoApplyTimer = null;
+        resetDefectDrawerScroll();
 
         const key = `${state.currentBuildingId}_${state.currentFloor}`;
         const defects = getFloorDefectsForNumbering(key);
@@ -25635,6 +25647,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (typeof syncMobileAddMarkingFab === 'function') syncMobileAddMarkingFab();
             window.requestAnimationFrame(async () => {
                 syncDefectDrawerToCanvasArea();
+                resetDefectDrawerScroll();
                 if (elements.defectModal) elements.defectModal.classList.add('open');
                 // 신규 마킹은 모달을 여는 순간 바로 저장해, 저장 버튼 없이 도면에 확정한다
                 if (!existingPin) {
@@ -25658,6 +25671,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (existingPin && options && options.revealMarkingAboveDrawer) {
                     scheduleRevealMarkingAboveDrawer(existingPin);
                 }
+                resetDefectDrawerScroll();
             });
         }
     }
@@ -26534,16 +26548,8 @@ document.addEventListener('DOMContentLoaded', () => {
         return savedDefect;
     }
 
-    function flashDefectAutosaveBadge(mode) {
-        const badge = document.getElementById('defectAutosaveBadge');
-        if (!badge) return;
-        if (mode === 'saving') {
-            badge.textContent = '적용 중…';
-            badge.classList.add('is-saving');
-            return;
-        }
-        badge.textContent = '자동 적용';
-        badge.classList.remove('is-saving');
+    function flashDefectAutosaveBadge(_mode) {
+        // 헤더 '자동 적용' 뱃지는 제거됨 — 화살표 선택 UI가 그 자리를 씀
     }
 
     function scheduleDefectAutoApply() {
