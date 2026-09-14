@@ -5543,8 +5543,8 @@ html:not(.layout-desktop) .survey-inline-select {
     /* 세로: 수정 시트가 60dvh(약 3/5)로 올라올 때 하단 툴바도 같이 상승 */
     html:not(.layout-desktop) body.defect-modal-open #tab-map #mobileMapDock {
         display: block !important;
-        bottom: calc(60dvh + 0.22rem);
-        z-index: 260;
+        bottom: calc(60dvh + 0.22rem) !important;
+        z-index: 260 !important;
     }
 
     body.defect-modal-open #mapStyleSizeToolbar.is-mobile-sheet-open,
@@ -13300,12 +13300,45 @@ html.layout-tablet #ndtStyleSizeToolbar.is-mobile-sheet-open {
     display: flex !important;
 }
 
-html.layout-tablet body.defect-modal-open .mobile-canvas-dock,
 html.layout-tablet body.ndt-modal-open .mobile-canvas-dock,
 html.layout-tablet body.defect-modal-open .mobile-side-rail,
 html.layout-tablet body.ndt-modal-open .mobile-side-rail,
 html.layout-tablet body.ndt-modal-open .ndt-right-rails {
     display: none !important;
+}
+
+/* 결함 수정창 열림: 맵 하단 툴바는 숨기지 말고 시트 위로 올림 (후순위 !important 덮어쓰기) */
+html:not(.layout-desktop) body.defect-modal-open #tab-map #mobileMapDock.mobile-canvas-dock,
+html.layout-tablet body.defect-modal-open #tab-map #mobileMapDock.mobile-canvas-dock {
+    display: block !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+    position: fixed !important;
+    left: 0.28rem !important;
+    right: 0.28rem !important;
+    width: auto !important;
+    pointer-events: none !important;
+    bottom: calc(60dvh + 0.22rem) !important;
+    z-index: 260 !important;
+    transition: bottom 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+html:not(.layout-desktop) body.defect-modal-open #tab-map #mobileMapDock .mobile-map-fab,
+html.layout-tablet body.defect-modal-open #tab-map #mobileMapDock .mobile-map-fab {
+    pointer-events: auto !important;
+}
+
+html:not(.layout-desktop) body.defect-modal-open #tab-map #mobileMapFabBar.has-add-marking,
+html.layout-tablet body.defect-modal-open #tab-map #mobileMapFabBar.has-add-marking {
+    grid-template-columns: repeat(7, minmax(0, 1fr)) !important;
+}
+
+@media (orientation: landscape) and (max-width: 1024px) {
+    html:not(.layout-desktop) body.defect-modal-open #tab-map #mobileMapDock.mobile-canvas-dock,
+    html.layout-tablet body.defect-modal-open #tab-map #mobileMapDock.mobile-canvas-dock {
+        position: absolute !important;
+        bottom: max(0.12rem, env(safe-area-inset-bottom, 0px)) !important;
+    }
 }
 
 /* 건축물 등록·수정 모달 — 화면 정중앙 (하위 규칙 최종 우선) */

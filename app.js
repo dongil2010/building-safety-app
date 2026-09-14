@@ -23459,6 +23459,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const show = modalOpen && !bulk;
         btn.hidden = !show;
         btn.disabled = !show;
+        if (show) btn.style.display = '';
         if (fab) fab.classList.toggle('has-add-marking', show);
     }
     window.syncMobileAddMarkingFab = syncMobileAddMarkingFab;
@@ -26698,82 +26699,94 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // 같은 결함 정보(부재/종류/원인/규모)를 유지한 채 위치만 바꿔서 여러 곳에 반복 마킹 + 결함표 행(N-2…) 자동 생성
+    async function handleAddAnotherMarking() {
+        if (window._defectAutoApplyTimer) {
+            window.clearTimeout(window._defectAutoApplyTimer);
+            window._defectAutoApplyTimer = null;
+        }
+        const saved = await commitDefectFromForm({
+            pushHistory: !window._defectEditSessionHistoryPushed,
+            uploadPhotos: !!window._defectPhotosDirty
+        });
+        window._defectEditSessionHistoryPushed = true;
+        let markingTmpl = null;
+        let isAreaMode = false;
+        if (saved) {
+            // 핀·영역 공통: 같은 번호칸에 화살표/영역 연결을 추가할 수 있게 그룹화
+            ensureDefectMarkingGroup(saved);
+            const floorKey = `${state.currentBuildingId}_${state.currentFloor}`;
+            const chainGroupId = saved.groupId || saved.id;
+            const chainGroupNo = stripDefectNoSuffix(saved.groupNo || saved.no || formatDefectNoSeq(1));
+            saved.groupId = chainGroupId;
+            saved.groupNo = chainGroupNo;
+            if (!saved.surveyExtra) saved.no = chainGroupNo;
+            const boxSource = saved.surveyExtra
+                ? (getMarkingGroupRepresentative(chainGroupId) || saved)
+                : saved;
+            const memberCount = (state.defects[floorKey] || [])
+                .filter((d) => d && d.groupId === chainGroupId && !d.surveyExtra).length;
+            const nextChainIndex = Math.max(2, memberCount + 1);
+
+            isAreaMode = boxSource.shapeType === 'area';
+            markingTmpl = {
+                category: boxSource.category || saved.category,
+                component: boxSource.component || saved.component,
+                defectType: boxSource.defectType || saved.defectType,
+                cause: boxSource.cause || saved.cause,
+                size: boxSource.size || saved.size,
+                crackWidth: boxSource.crackWidth || saved.crackWidth,
+                crackLength: boxSource.crackLength || saved.crackLength,
+                forceArrowDir: !!boxSource.forceArrowDir,
+                arrowOctant: ((parseInt(boxSource.arrowOctant, 10) || 0) % 8 + 8) % 8,
+                areaFillStyle: boxSource.areaFillStyle || getAreaFillStyle(boxSource),
+                areaBorderStyle: boxSource.areaBorderStyle || getAreaBorderStyle(boxSource),
+                groupId: chainGroupId,
+                groupNo: chainGroupNo,
+                boxX: boxSource.x,
+                boxY: boxSource.y,
+                chainIndex: nextChainIndex,
+                addAlsoSurveyRow: true
+            };
+            // closeDefectModal 전에 pending을 잡아 두면 싱글톤 groupId가 접히지 않음
+            snapshotMarkingGroupForCommit(markingTmpl, { addAlsoSurveyRow: true });
+            window._defectMarkingTemplate = markingTmpl;
+            window._markingAddAlsoSurveyRow = true;
+        }
+        closeDefectModal();
+        if (saved && markingTmpl) {
+            window._defectMarkingTemplate = markingTmpl;
+            window._markingAddAlsoSurveyRow = true;
+            snapshotMarkingGroupForCommit(markingTmpl, { addAlsoSurveyRow: true });
+            const floorKey = `${state.currentBuildingId}_${state.currentFloor}`;
+            normalizeDefectGroupNos(state.defects[floorKey], markingTmpl.groupId);
+            saveStateToLocalStorage();
+            drawCanvas();
+            if (typeof renderDefectListPanel === 'function') renderDefectListPanel();
+            setDrawMode(isAreaMode ? 'AREA' : 'MARK');
+            window.showToast(
+                isAreaMode
+                    ? '같은 번호에 영역·결함표 행을 추가합니다. 도면에서 영역을 그려 주세요.'
+                    : '같은 번호에 화살표·결함표 행을 추가합니다. 도면에서 위치를 한 번 클릭해 주세요. (화살표 옆 1·2…는 화면에만 표시)',
+                'info',
+                4000
+            );
+        } else {
+            drawCanvas();
+        }
+    }
+    window.handleAddAnotherMarking = handleAddAnotherMarking;
+
     const btnAddAnotherMarking = document.getElementById('btnAddAnotherMarking');
     if (btnAddAnotherMarking) {
-        btnAddAnotherMarking.addEventListener('click', async () => {
-            if (window._defectAutoApplyTimer) {
-                window.clearTimeout(window._defectAutoApplyTimer);
-                window._defectAutoApplyTimer = null;
-            }
-            const saved = await commitDefectFromForm({
-                pushHistory: !window._defectEditSessionHistoryPushed,
-                uploadPhotos: !!window._defectPhotosDirty
-            });
-            window._defectEditSessionHistoryPushed = true;
-            let markingTmpl = null;
-            let isAreaMode = false;
-            if (saved) {
-                // 핀·영역 공통: 같은 번호칸에 화살표/영역 연결을 추가할 수 있게 그룹화
-                ensureDefectMarkingGroup(saved);
-                const floorKey = `${state.currentBuildingId}_${state.currentFloor}`;
-                const chainGroupId = saved.groupId || saved.id;
-                const chainGroupNo = stripDefectNoSuffix(saved.groupNo || saved.no || formatDefectNoSeq(1));
-                saved.groupId = chainGroupId;
-                saved.groupNo = chainGroupNo;
-                if (!saved.surveyExtra) saved.no = chainGroupNo;
-                const boxSource = saved.surveyExtra
-                    ? (getMarkingGroupRepresentative(chainGroupId) || saved)
-                    : saved;
-                const memberCount = (state.defects[floorKey] || [])
-                    .filter((d) => d && d.groupId === chainGroupId && !d.surveyExtra).length;
-                const nextChainIndex = Math.max(2, memberCount + 1);
-
-                isAreaMode = boxSource.shapeType === 'area';
-                markingTmpl = {
-                    category: boxSource.category || saved.category,
-                    component: boxSource.component || saved.component,
-                    defectType: boxSource.defectType || saved.defectType,
-                    cause: boxSource.cause || saved.cause,
-                    size: boxSource.size || saved.size,
-                    crackWidth: boxSource.crackWidth || saved.crackWidth,
-                    crackLength: boxSource.crackLength || saved.crackLength,
-                    forceArrowDir: !!boxSource.forceArrowDir,
-                    arrowOctant: ((parseInt(boxSource.arrowOctant, 10) || 0) % 8 + 8) % 8,
-                    areaFillStyle: boxSource.areaFillStyle || getAreaFillStyle(boxSource),
-                    areaBorderStyle: boxSource.areaBorderStyle || getAreaBorderStyle(boxSource),
-                    groupId: chainGroupId,
-                    groupNo: chainGroupNo,
-                    boxX: boxSource.x,
-                    boxY: boxSource.y,
-                    chainIndex: nextChainIndex,
-                    addAlsoSurveyRow: true
-                };
-                // closeDefectModal 전에 pending을 잡아 두면 싱글톤 groupId가 접히지 않음
-                snapshotMarkingGroupForCommit(markingTmpl, { addAlsoSurveyRow: true });
-                window._defectMarkingTemplate = markingTmpl;
-                window._markingAddAlsoSurveyRow = true;
-            }
-            closeDefectModal();
-            if (saved && markingTmpl) {
-                window._defectMarkingTemplate = markingTmpl;
-                window._markingAddAlsoSurveyRow = true;
-                snapshotMarkingGroupForCommit(markingTmpl, { addAlsoSurveyRow: true });
-                const floorKey = `${state.currentBuildingId}_${state.currentFloor}`;
-                normalizeDefectGroupNos(state.defects[floorKey], markingTmpl.groupId);
-                saveStateToLocalStorage();
-                drawCanvas();
-                if (typeof renderDefectListPanel === 'function') renderDefectListPanel();
-                setDrawMode(isAreaMode ? 'AREA' : 'MARK');
-                window.showToast(
-                    isAreaMode
-                        ? '같은 번호에 영역·결함표 행을 추가합니다. 도면에서 영역을 그려 주세요.'
-                        : '같은 번호에 화살표·결함표 행을 추가합니다. 도면에서 위치를 한 번 클릭해 주세요. (화살표 옆 1·2…는 화면에만 표시)',
-                    'info',
-                    4000
-                );
-            } else {
-                drawCanvas();
-            }
+        btnAddAnotherMarking.addEventListener('click', () => { handleAddAnotherMarking(); });
+    }
+    const mobileBtnAddAnotherMarking = document.getElementById('mobileBtnAddAnotherMarking');
+    if (mobileBtnAddAnotherMarking) {
+        mobileBtnAddAnotherMarking.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            if (mobileBtnAddAnotherMarking.disabled || mobileBtnAddAnotherMarking.hidden) return;
+            handleAddAnotherMarking();
         });
     }
 
@@ -27428,8 +27441,6 @@ document.addEventListener('DOMContentLoaded', () => {
         const to = document.getElementById(toId);
         if (from && to) from.addEventListener('click', () => to.click());
     };
-    proxyClick('mobileBtnAddAnotherMarking', 'btnAddAnotherMarking');
-
     // 되돌리기 / 다시실행 / 전체초기화 (하단 아이콘 툴바)
     const btnUndoEl = document.getElementById('btnUndo');
     if (btnUndoEl) btnUndoEl.addEventListener('click', () => undoDefectChange());
