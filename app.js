@@ -944,6 +944,10 @@ document.addEventListener('DOMContentLoaded', () => {
         } catch (e) {
             console.warn('PDF ref 좌표계 설정 실패:', e);
         }
+        // 캐드 벡터 스냅용 선분 데이터도 같이 준비 (실패해도 스냅만 못 쓸 뿐, 도면 표시엔 영향 없음)
+        if (window.BSA_PDF_SNAP && typeof window.BSA_PDF_SNAP.ensureGeometry === 'function') {
+            window.BSA_PDF_SNAP.ensureGeometry(pdfUrl, bldg.id, floorCode, window.FLOOR_DRAWING_PDF_PREVIEW_DIM || 4000);
+        }
     }
 
     function shouldUpdateViewportPatchRegion(region, meta) {
@@ -2041,7 +2045,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 defectSizeMode: window.state.defectSizeMode || 'combined',
                 tipShape: window.state.tipShape || 'arrow',
                 areaFillStyle: window.state.areaFillStyle || 'solid',
-                areaBorderStyle: window.state.areaBorderStyle || 'solid'
+                areaBorderStyle: window.state.areaBorderStyle || 'solid',
+                snapToCad: window.state.snapToCad !== false
             };
             localStorage.setItem(getLocalStorageStateKey(window.state.companyId), JSON.stringify(dataToSave));
             if (window.state.companyId) {
@@ -2234,6 +2239,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
                 if (parsed.areaBorderStyle) {
                     window.state.areaBorderStyle = parsed.areaBorderStyle;
+                }
+                if (parsed.snapToCad !== undefined) {
+                    window.state.snapToCad = parsed.snapToCad !== false;
                 }
             } else {
                 window.state.buildings = getDefaultBuildings();
@@ -3020,6 +3028,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
         ordered.forEach((d) => {
             if (!d) return;
+            // 캐드에서 가져온 결함(isCadImported)은 원본 번호를 그대로 보존한다.
+            // 여기서 건드리면(동기화 병합 때마다 이 함수가 호출됨) NO.20 같은 원본 번호가
+            // 병합 순서 기준 NO.01, NO.02...로 매번 덮어써져 버린다.
+            if (d.isCadImported) return;
             const gid = d.groupId || null;
             if (gid) {
                 if (seenGroup.has(gid)) return;
@@ -3049,6 +3061,97 @@ document.addEventListener('DOMContentLoaded', () => {
         ordered.forEach((d) => { if (d) defects.push(d); });
         return defects;
     }
+
+    
+    /**
+     * 마킹번호 빈 칸 땡기기: [min..max] 중 가장 작은 빈 번호로
+     * 가장 큰 메인 번호를 옮기며 연속 구간이 될 때까지 반복.
+     * CAD 가져오기 번호(isCadImported)도 포함. 그룹은 메인 1개로 취급.
+     * @returns {{ moved: number, before: string, after: string }|null}
+     */
+    function compactDefectMarkingNumberGaps(defects) {
+        if (!Array.isArray(defects) || !defects.length) return null;
+
+        const getMain = (d) => {
+            const raw = stripDefectNoSuffix(d.groupNo || d.no || '');
+            const m = String(raw).replace(/^NO\.?\s*/i, '').trim().match(/(\d+)/);
+            return m ? parseInt(m[1], 10) : 0;
+        };
+
+        const buildUnits = () => {
+            const units = [];
+            const seenGroup = new Set();
+            defects.forEach((d) => {
+                if (!d || d.surveyExtra) return;
+                const gid = d.groupId || null;
+                if (gid) {
+                    if (seenGroup.has(gid)) return;
+                    seenGroup.add(gid);
+                    const members = defects.filter((m) => m && m.groupId === gid);
+                    units.push({ kind: 'group', groupId: gid, main: getMain(d), members });
+                } else {
+                    units.push({ kind: 'single', id: d.id, main: getMain(d), defect: d });
+                }
+            });
+            return units.filter((u) => u.main > 0);
+        };
+
+        let units = buildUnits();
+        if (units.length < 2) return null;
+
+        const mainsBefore = units.map((u) => u.main).sort((a, b) => a - b);
+        const beforeStr = mainsBefore.join(', ');
+
+        let moved = 0;
+        const maxSteps = units.length * 4 + 20;
+        for (let step = 0; step < maxSteps; step++) {
+            units = buildUnits();
+            const mains = [...new Set(units.map((u) => u.main))].sort((a, b) => a - b);
+            if (mains.length < 2) break;
+            const minM = mains[0];
+            const maxM = mains[mains.length - 1];
+            let gap = null;
+            for (let n = minM; n <= maxM; n++) {
+                if (!mains.includes(n)) { gap = n; break; }
+            }
+            if (gap == null) break;
+
+            // 가장 큰 메인 번호를 가진 유닛 (동률이면 id/groupId 큰 쪽)
+            const topMain = maxM;
+            const candidates = units.filter((u) => u.main === topMain);
+            if (!candidates.length || topMain <= gap) break;
+            candidates.sort((a, b) => {
+                const ka = a.groupId || a.id || '';
+                const kb = b.groupId || b.id || '';
+                return String(kb).localeCompare(String(ka));
+            });
+            const victim = candidates[0];
+            const baseStr = formatDefectNoSeq(gap);
+            const now = Date.now();
+
+            if (victim.kind === 'group') {
+                victim.members.forEach((m) => { m.groupNo = baseStr; });
+                applyDefectGroupNumbering(victim.members, baseStr, (m, nextNo) => {
+                    const prev = String(m.no || '');
+                    m.no = nextNo;
+                    if (prev !== String(nextNo || '')) m.updatedAt = now;
+                });
+            } else if (victim.defect) {
+                const prev = String(victim.defect.no || '');
+                victim.defect.no = baseStr;
+                if (victim.defect.groupNo) victim.defect.groupNo = baseStr;
+                if (prev !== baseStr) victim.defect.updatedAt = now;
+            }
+            moved += 1;
+        }
+
+        units = buildUnits();
+        const afterStr = units.map((u) => u.main).sort((a, b) => a - b).join(', ');
+        if (!moved) return { moved: 0, before: beforeStr, after: afterStr };
+        return { moved, before: beforeStr, after: afterStr };
+    }
+
+    window.compactDefectMarkingNumberGaps = compactDefectMarkingNumberGaps;
 
     function renumberDefectsForFloorKey(floorKey) {
         if (!floorKey || !window.state.defects?.[floorKey]) return;
@@ -4574,7 +4677,9 @@ document.addEventListener('DOMContentLoaded', () => {
             try {
                 // IndexedDB에만 남아 있는 층도 점검층 목록에 복구
                 const enriched = await enrichFloorsListFromIndexedDb(bldg);
-                if (enriched) populateFloorSelectDropdown(bldg);
+                // 반대로 로컬·클라우드 어디에도 실제 도면이 없는 유령 층은 정리
+                const pruned = await pruneGhostFloorEntries(bldg);
+                if (enriched || pruned) populateFloorSelectDropdown(bldg);
 
                 // 도면(현재 층)과 사진(현재 층)을 동시에 불러온다 — 예전엔 도면을 다 기다린
                 // 뒤에야 사진 로딩을 시작해서(그것도 건물 전체 층을 층마다 순서대로) 사진이
@@ -4782,6 +4887,74 @@ document.addEventListener('DOMContentLoaded', () => {
         bldg.drawingFloorCodes = Array.from(codeSet);
         bldg.floorsList = window.getBuildingAvailableFloors(bldg);
         return (bldg.floorsList || []).length > before;
+    }
+
+    /** 예전 삭제 버그 등으로 floorsList/drawingFloorCodes에만 남고 실제 도면은
+     * 로컬(RAM·IDB)에도 클라우드에도 전혀 없는 "유령 층"을 목록에서 제거한다.
+     * (점검층 드롭다운·도면 추가/교체 목록 둘 다 이 floorsList를 기준으로 그려짐) */
+    async function pruneGhostFloorEntries(bldg) {
+        if (!bldg || !bldg.id) return false;
+        const candidates = new Set();
+        (bldg.floorsList || []).forEach((f) => { if (f && f.floorCode) candidates.add(f.floorCode); });
+        (bldg.drawingFloorCodes || []).forEach((c) => { if (c) candidates.add(c); });
+        if (candidates.size === 0) return false;
+
+        const hasRamTrace = (fc) =>
+            !!((bldg.floorDrawings && bldg.floorDrawings[fc]) ||
+               (bldg.floorDrawingPdfs && bldg.floorDrawingPdfs[fc]) ||
+               (bldg.floorDrawingTiers && bldg.floorDrawingTiers[fc]) ||
+               (bldg.floorDrawingSources && bldg.floorDrawingSources[fc]));
+
+        const suspects = Array.from(candidates).filter((fc) => !hasRamTrace(fc));
+        if (suspects.length === 0) return false;
+
+        let idbFound;
+        try {
+            const prefix = `${bldg.id}_`;
+            idbFound = new Set();
+            const takeKeys = (keys) => {
+                (keys || []).forEach((key) => {
+                    if (!key || !String(key).startsWith(prefix)) return;
+                    const rest = String(key).slice(prefix.length);
+                    if (!rest) return;
+                    const tierSuffix = rest.match(/^(.*)_(4000|8000|16000)$/);
+                    idbFound.add(tierSuffix ? tierSuffix[1] : rest);
+                });
+            };
+            const [drawKeys, pdfKeys, srcKeys, tierKeys] = await Promise.all([
+                idbGetAllKeys('floorDrawings'),
+                idbGetAllKeys('floorDrawingPdfs'),
+                idbGetAllKeys('floorDrawingSources'),
+                idbGetAllKeys('floorDrawingTiers')
+            ]);
+            [drawKeys, pdfKeys, srcKeys, tierKeys].forEach(takeKeys);
+        } catch (e) {
+            return false; // IDB 조회 실패 시 안전하게 아무 것도 지우지 않음
+        }
+
+        const stillSuspect = suspects.filter((fc) => !idbFound.has(fc));
+        if (stillSuspect.length === 0) return false;
+
+        // 오프라인이거나 클라우드 조회가 안 되면, 아직 이 기기에 안 내려받았을 뿐일 수 있으니 보류
+        if (typeof navigator !== 'undefined' && navigator.onLine === false) return false;
+        if (!db || !window.state.companyId || typeof discoverCloudDrawingFloorCodes !== 'function') return false;
+
+        let cloudFound;
+        try {
+            cloudFound = await discoverCloudDrawingFloorCodes(bldg);
+        } catch (e) {
+            return false;
+        }
+
+        const ghosts = stillSuspect.filter((fc) => !cloudFound.has(fc));
+        if (ghosts.length === 0) return false;
+
+        bldg.floorsList = (bldg.floorsList || []).filter((f) => !ghosts.includes(f.floorCode));
+        if (Array.isArray(bldg.drawingFloorCodes)) {
+            bldg.drawingFloorCodes = bldg.drawingFloorCodes.filter((c) => !ghosts.includes(c));
+        }
+        console.info('유령 층 정리:', bldg.id, ghosts);
+        return true;
     }
 
     function populateFloorSelectDropdown(bldg) {
@@ -6639,15 +6812,24 @@ document.addEventListener('DOMContentLoaded', () => {
             const drawingKey = `${bldg.id}_${floorCode}`;
             _idbPersistedDrawingKeys.delete(drawingKey);
             _idbPersistedPdfKeys.delete(drawingKey);
+            _idbPersistedSourceKeys.delete(drawingKey);
             clearFloorDrawingTierCacheForFloor(bldg.id, floorCode, true);
             clearFloorDrawingRotation(bldg.id, floorCode);
             idbDelete('floorDrawings', drawingKey);
             idbDelete('floorDrawingPdfs', drawingKey);
+            idbDelete('floorDrawingSources', drawingKey);
+            deleteFloorDrawingRasterFromCloud(bldg.id, floorCode);
             deleteFloorDrawingPdfFromCloud(bldg.id, floorCode);
             deleteFloorDrawingTiersFromCloud(bldg.id, floorCode);
             if (window._cloudSyncedPdfKeys) window._cloudSyncedPdfKeys.delete(drawingKey);
+            if (window._cloudSyncedDrawingKeys) window._cloudSyncedDrawingKeys.delete(drawingKey);
+            // floorsList뿐 아니라 drawingFloorCodes(재발견용 기억 목록)에도 남아 있으면
+            // syncBuildingDrawingFloorCodes()가 이 층을 도로 살려낸다 — 반드시 같이 지운다.
             if (bldg.floorsList) {
                 bldg.floorsList = bldg.floorsList.filter(f => f.floorCode !== floorCode);
+            }
+            if (Array.isArray(bldg.drawingFloorCodes)) {
+                bldg.drawingFloorCodes = bldg.drawingFloorCodes.filter(c => c !== floorCode);
             }
             renderEditDrawingPreview();
         }
@@ -20445,11 +20627,19 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function emptyCrackGaugeLog() {
-        return { gaugeNo: '', installDate: '', initialX: '', initialY: '', readings: [] };
+        return { gaugeNo: '', installDate: '', initialX: '', initialY: '', prevPhoto: '', currPhoto: '', readings: [] };
     }
 
     function emptyCrackTipLog() {
-        return { initialLengthMm: '', readings: [] };
+        return { initialLengthMm: '', prevPhoto: '', currPhoto: '', readings: [] };
+    }
+
+    function normalizeCrackMonitorPhoto(raw) {
+        if (raw == null) return '';
+        const s = String(raw).trim();
+        if (!s) return '';
+        // data URL or http(s) / blob URL for display & HWPX
+        return s;
     }
 
     function normalizeCrackGaugeLog(raw) {
@@ -20459,6 +20649,8 @@ document.addEventListener('DOMContentLoaded', () => {
         base.installDate = raw.installDate != null ? String(raw.installDate) : '';
         base.initialX = raw.initialX != null ? String(raw.initialX) : '';
         base.initialY = raw.initialY != null ? String(raw.initialY) : '';
+        base.prevPhoto = normalizeCrackMonitorPhoto(raw.prevPhoto);
+        base.currPhoto = normalizeCrackMonitorPhoto(raw.currPhoto);
         base.readings = Array.isArray(raw.readings)
             ? raw.readings.map((r) => ({
                 roundKey: r && r.roundKey != null ? String(r.roundKey) : '',
@@ -20475,6 +20667,8 @@ document.addEventListener('DOMContentLoaded', () => {
         const base = emptyCrackTipLog();
         if (!raw || typeof raw !== 'object') return base;
         base.initialLengthMm = raw.initialLengthMm != null ? String(raw.initialLengthMm) : '';
+        base.prevPhoto = normalizeCrackMonitorPhoto(raw.prevPhoto);
+        base.currPhoto = normalizeCrackMonitorPhoto(raw.currPhoto);
         base.readings = Array.isArray(raw.readings)
             ? raw.readings.map((r) => ({
                 roundKey: r && r.roundKey != null ? String(r.roundKey) : '',
@@ -20501,6 +20695,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function computeGaugeDeltas(log, reading) {
+        // 누적 = 현회 측정값 − 초기치
         const ix = parseMonitorNumber(log.initialX);
         const iy = parseMonitorNumber(log.initialY);
         const x = parseMonitorNumber(reading && reading.xMm);
@@ -20511,23 +20706,52 @@ document.addEventListener('DOMContentLoaded', () => {
         };
     }
 
+    function computeGaugePrevDeltas(log, readingIndex) {
+        // 전차 대비 = 현회 − 직전 회차
+        const readings = (log && log.readings) || [];
+        const reading = readings[readingIndex];
+        if (!reading || readingIndex <= 0) return { dx: null, dy: null };
+        const prev = readings[readingIndex - 1];
+        const x = parseMonitorNumber(reading.xMm);
+        const y = parseMonitorNumber(reading.yMm);
+        const px = parseMonitorNumber(prev && prev.xMm);
+        const py = parseMonitorNumber(prev && prev.yMm);
+        return {
+            dx: (px != null && x != null) ? x - px : null,
+            dy: (py != null && y != null) ? y - py : null
+        };
+    }
+
     function computeTipCumulative(log, readingIndex) {
+        // 누적 = 현회 길이 − 초기치 (증가량 합산이 아니라 초기치 대비)
         const initial = parseMonitorNumber(log.initialLengthMm);
         const readings = log.readings || [];
+        const r = readings[readingIndex];
+        if (!r) return null;
+        const len = parseMonitorNumber(r.lengthMm);
+        if (initial != null && len != null) return len - initial;
+        const inc = parseMonitorNumber(r.incrementMm);
+        if (inc == null) return null;
+        // 길이 미입력 시에만: 증가량을 1회차부터 합산한 값을 누적으로 사용
         let cumulative = 0;
         for (let i = 0; i <= readingIndex; i += 1) {
-            const r = readings[i];
-            if (!r) continue;
-            const inc = parseMonitorNumber(r.incrementMm);
-            if (inc != null) {
-                cumulative += inc;
-                continue;
-            }
-            const len = parseMonitorNumber(r.lengthMm);
-            if (initial != null && len != null && i === 0) cumulative = len - initial;
-            else if (initial != null && len != null) cumulative = len - initial;
+            const row = readings[i];
+            const rowInc = parseMonitorNumber(row && row.incrementMm);
+            if (rowInc != null) cumulative += rowInc;
         }
         return cumulative;
+    }
+
+    function computeTipPrevDelta(log, readingIndex) {
+        // 전차 대비 = 현회 길이 − 직전 회차 길이 (없으면 증가량)
+        const readings = (log && log.readings) || [];
+        const r = readings[readingIndex];
+        if (!r || readingIndex <= 0) return null;
+        const prev = readings[readingIndex - 1];
+        const len = parseMonitorNumber(r.lengthMm);
+        const prevLen = parseMonitorNumber(prev && prev.lengthMm);
+        if (len != null && prevLen != null) return len - prevLen;
+        return parseMonitorNumber(r.incrementMm);
     }
 
     function defaultCrackMonitorRoundKey() {
@@ -20777,9 +21001,12 @@ document.addEventListener('DOMContentLoaded', () => {
             const reading = log.readings[idx];
             if (!reading) return;
             const deltas = computeGaugeDeltas(log, reading);
+            const prevD = computeGaugePrevDeltas(log, idx);
             const cells = tr.querySelectorAll('.monitor-readonly');
             if (cells[0]) cells[0].textContent = formatMonitorDelta(deltas.dx);
             if (cells[1]) cells[1].textContent = formatMonitorDelta(deltas.dy);
+            if (cells[2]) cells[2].textContent = formatMonitorDelta(prevD.dx);
+            if (cells[3]) cells[3].textContent = formatMonitorDelta(prevD.dy);
         });
     }
 
@@ -20789,8 +21016,10 @@ document.addEventListener('DOMContentLoaded', () => {
         const log = getCrackTipLogFromUi();
         Array.from(body.querySelectorAll('tr')).forEach((tr, idx) => {
             const cumulative = computeTipCumulative(log, idx);
-            const cell = tr.querySelector('.monitor-readonly');
-            if (cell) cell.textContent = formatMonitorDelta(cumulative);
+            const prevDelta = computeTipPrevDelta(log, idx);
+            const cells = tr.querySelectorAll('.monitor-readonly');
+            if (cells[0]) cells[0].textContent = formatMonitorDelta(cumulative);
+            if (cells[1]) cells[1].textContent = formatMonitorDelta(prevDelta);
         });
     }
 
@@ -20809,13 +21038,16 @@ document.addEventListener('DOMContentLoaded', () => {
         }];
         body.innerHTML = rows.map((r, idx) => {
             const deltas = computeGaugeDeltas(log, r);
+            const prevD = computeGaugePrevDeltas(log, idx);
             return `<tr data-gauge-row="${idx}">
                 <td><input type="text" data-gauge-round value="${escapeSurveyAttr(r.roundKey || '')}" placeholder="회차"></td>
                 <td><input type="date" data-gauge-date value="${escapeSurveyAttr(r.date || '')}"></td>
                 <td><input type="text" data-gauge-x inputmode="decimal" value="${escapeSurveyAttr(r.xMm || '')}"></td>
                 <td><input type="text" data-gauge-y inputmode="decimal" value="${escapeSurveyAttr(r.yMm || '')}"></td>
-                <td class="monitor-readonly">${formatMonitorDelta(deltas.dx)}</td>
-                <td class="monitor-readonly">${formatMonitorDelta(deltas.dy)}</td>
+                <td class="monitor-readonly" title="누적(현회−초기)">${formatMonitorDelta(deltas.dx)}</td>
+                <td class="monitor-readonly" title="누적(현회−초기)">${formatMonitorDelta(deltas.dy)}</td>
+                <td class="monitor-readonly" title="전차 대비">${formatMonitorDelta(prevD.dx)}</td>
+                <td class="monitor-readonly" title="전차 대비">${formatMonitorDelta(prevD.dy)}</td>
                 <td><input type="text" data-gauge-note value="${escapeSurveyAttr(r.note || '')}"></td>
                 <td><button type="button" class="defect-crack-monitor-del" data-gauge-del ${rows.length <= 1 ? 'disabled' : ''} title="삭제"><i class="fa-solid fa-trash"></i></button></td>
             </tr>`;
@@ -20852,12 +21084,14 @@ document.addEventListener('DOMContentLoaded', () => {
         }];
         body.innerHTML = rows.map((r, idx) => {
             const cumulative = computeTipCumulative(log, idx);
+            const prevDelta = computeTipPrevDelta(log, idx);
             return `<tr data-tip-row="${idx}">
                 <td><input type="text" data-tip-round value="${escapeSurveyAttr(r.roundKey || '')}" placeholder="회차"></td>
                 <td><input type="date" data-tip-date value="${escapeSurveyAttr(r.date || '')}"></td>
                 <td><input type="text" data-tip-length inputmode="decimal" value="${escapeSurveyAttr(r.lengthMm || '')}"></td>
                 <td><input type="text" data-tip-inc inputmode="decimal" value="${escapeSurveyAttr(r.incrementMm || '')}"></td>
-                <td class="monitor-readonly">${formatMonitorDelta(cumulative)}</td>
+                <td class="monitor-readonly" title="누적(현회−초기치)">${formatMonitorDelta(cumulative)}</td>
+                <td class="monitor-readonly" title="전차 대비">${formatMonitorDelta(prevDelta)}</td>
                 <td><input type="text" data-tip-note value="${escapeSurveyAttr(r.note || '')}"></td>
                 <td><button type="button" class="defect-crack-monitor-del" data-tip-del ${rows.length <= 1 ? 'disabled' : ''} title="삭제"><i class="fa-solid fa-trash"></i></button></td>
             </tr>`;
@@ -20896,6 +21130,8 @@ document.addEventListener('DOMContentLoaded', () => {
             installDate: document.getElementById('crackGaugeInstallDate')?.value || '',
             initialX: document.getElementById('crackGaugeInitialX')?.value || '',
             initialY: document.getElementById('crackGaugeInitialY')?.value || '',
+            prevPhoto: window._crackGaugePrevPhoto || '',
+            currPhoto: window._crackGaugeCurrPhoto || '',
             readings
         });
     }
@@ -20913,6 +21149,8 @@ document.addEventListener('DOMContentLoaded', () => {
             : [];
         return normalizeCrackTipLog({
             initialLengthMm: document.getElementById('crackTipInitialLength')?.value || '',
+            prevPhoto: window._crackTipPrevPhoto || '',
+            currPhoto: window._crackTipCurrPhoto || '',
             readings
         });
     }
@@ -20929,8 +21167,86 @@ document.addEventListener('DOMContentLoaded', () => {
         setVal('crackGaugeInitialX', gauge.initialX);
         setVal('crackGaugeInitialY', gauge.initialY);
         setVal('crackTipInitialLength', tip.initialLengthMm);
+        window._crackGaugePrevPhoto = gauge.prevPhoto || '';
+        window._crackGaugeCurrPhoto = gauge.currPhoto || '';
+        window._crackTipPrevPhoto = tip.prevPhoto || '';
+        window._crackTipCurrPhoto = tip.currPhoto || '';
         renderCrackGaugeReadingRows(gauge.readings);
         renderCrackTipReadingRows(tip.readings);
+        renderCrackMonitorPhotoFrames();
+    }
+
+    function getCrackMonitorPhotoState(kind, slot) {
+        if (kind === 'gauge') return slot === 'prev' ? (window._crackGaugePrevPhoto || '') : (window._crackGaugeCurrPhoto || '');
+        return slot === 'prev' ? (window._crackTipPrevPhoto || '') : (window._crackTipCurrPhoto || '');
+    }
+
+    function setCrackMonitorPhotoState(kind, slot, dataUrl) {
+        const val = dataUrl || '';
+        if (kind === 'gauge') {
+            if (slot === 'prev') window._crackGaugePrevPhoto = val;
+            else window._crackGaugeCurrPhoto = val;
+        } else if (slot === 'prev') window._crackTipPrevPhoto = val;
+        else window._crackTipCurrPhoto = val;
+    }
+
+    function renderCrackMonitorPhotoFrame(frameId, src, label) {
+        const frame = document.getElementById(frameId);
+        if (!frame) return;
+        if (!src) {
+            frame.classList.remove('has-photo');
+            frame.innerHTML = `<span>${label} 사진 없음</span>`;
+            return;
+        }
+        frame.classList.add('has-photo');
+        frame.innerHTML = `<img src="${src}" alt="${label}" title="${label} — 탭하여 확대">`;
+        const img = frame.querySelector('img');
+        if (img) {
+            img.addEventListener('click', () => {
+                if (typeof window.openPhotoAnnotationModal === 'function') window.openPhotoAnnotationModal(src, null);
+                else window.open(src, '_blank');
+            });
+        }
+    }
+
+    function renderCrackMonitorPhotoFrames() {
+        renderCrackMonitorPhotoFrame('crackGaugePrevPhotoFrame', window._crackGaugePrevPhoto, '게이지 전차');
+        renderCrackMonitorPhotoFrame('crackGaugeCurrPhotoFrame', window._crackGaugeCurrPhoto, '게이지 현차');
+        renderCrackMonitorPhotoFrame('crackTipPrevPhotoFrame', window._crackTipPrevPhoto, '팁 전차');
+        renderCrackMonitorPhotoFrame('crackTipCurrPhotoFrame', window._crackTipCurrPhoto, '팁 현차');
+    }
+
+    async function pickCrackMonitorPhoto(kind, slot, mode) {
+        try {
+            const file = (typeof pickImageFromDevice === 'function')
+                ? await pickImageFromDevice(mode === 'camera' ? 'camera' : 'gallery')
+                : null;
+            if (!file) return;
+            let dataUrl = null;
+            if (typeof window.compressDefectPhoto43 === 'function') {
+                dataUrl = await window.compressDefectPhoto43(file, 1000, 0.85);
+            } else {
+                dataUrl = await new Promise((resolve, reject) => {
+                    const reader = new FileReader();
+                    reader.onload = () => resolve(reader.result);
+                    reader.onerror = reject;
+                    reader.readAsDataURL(file);
+                });
+            }
+            if (!dataUrl) return;
+            setCrackMonitorPhotoState(kind, slot, dataUrl);
+            renderCrackMonitorPhotoFrames();
+            if (typeof scheduleNdtCrackMonitorSave === 'function') scheduleNdtCrackMonitorSave();
+        } catch (err) {
+            console.warn('crack monitor photo pick failed:', err);
+            if (typeof window.showToast === 'function') window.showToast('사진 추가에 실패했습니다.', 'error');
+        }
+    }
+
+    function clearCrackMonitorPhoto(kind, slot) {
+        setCrackMonitorPhotoState(kind, slot, '');
+        renderCrackMonitorPhotoFrames();
+        if (typeof scheduleNdtCrackMonitorSave === 'function') scheduleNdtCrackMonitorSave();
     }
 
     function clearCrackMonitorLogsUi() {
@@ -21006,6 +21322,26 @@ document.addEventListener('DOMContentLoaded', () => {
             saveBtn.dataset.bound = '1';
             saveBtn.addEventListener('click', () => {
                 if (saveNdtCrackMonitorForSelectedDefect()) closeNdtCrackMonitorModal({ save: false });
+            });
+        }
+        if (!window._crackMonitorPhotoUiBound) {
+            window._crackMonitorPhotoUiBound = true;
+            document.addEventListener('click', (e) => {
+                const pickBtn = e.target && e.target.closest && e.target.closest('[data-cm-photo-pick]');
+                if (pickBtn) {
+                    e.preventDefault();
+                    const raw = pickBtn.getAttribute('data-cm-photo-pick') || '';
+                    const [kind, slot, mode] = raw.split(':');
+                    if (kind && slot) pickCrackMonitorPhoto(kind, slot, mode || 'gallery');
+                    return;
+                }
+                const clearBtn = e.target && e.target.closest && e.target.closest('[data-cm-photo-clear]');
+                if (clearBtn) {
+                    e.preventDefault();
+                    const raw = clearBtn.getAttribute('data-cm-photo-clear') || '';
+                    const [kind, slot] = raw.split(':');
+                    if (kind && slot) clearCrackMonitorPhoto(kind, slot);
+                }
             });
         }
     }
@@ -23827,7 +24163,8 @@ document.addEventListener('DOMContentLoaded', () => {
         if (state.mode === 'MARK') {
             isMarkingDrag = true;
             markingHasMoved = false;
-            const markCoords = clientToImgCoords(clientX, clientY);
+            const rawMarkCoords = clientToImgCoords(clientX, clientY);
+            const markCoords = snapImgCoordsForMarking(rawMarkCoords.x, rawMarkCoords.y);
             syncLiveMarkBoxAboveTarget(markCoords.x, markCoords.y);
             drawCanvas();
         } else if (state.mode === 'AREA') {
@@ -24103,7 +24440,8 @@ document.addEventListener('DOMContentLoaded', () => {
             refreshMapLoupe(clientX, clientY);
         } else if (isMarkingDrag) {
             markingHasMoved = true;
-            const coords = clientToImgCoords(clientX, clientY);
+            const rawCoords = clientToImgCoords(clientX, clientY);
+            const coords = snapImgCoordsForMarking(rawCoords.x, rawCoords.y);
             syncLiveMarkBoxAboveTarget(coords.x, coords.y);
             drawCanvas();
             refreshMapLoupe(clientX, clientY);
@@ -24150,6 +24488,22 @@ document.addEventListener('DOMContentLoaded', () => {
         const vx = (mouseX - state.view.offsetX) / state.view.scale;
         const vy = (mouseY - state.view.offsetY) / state.view.scale;
         return viewToImgCoords(vx, vy);
+    }
+
+    const SNAP_SCREEN_RADIUS_PX = 16; // 화면상 이 반경 안에 CAD 선이 있으면 달라붙는다
+
+    /** 결함 마킹 중일 때만, 근처 CAD 벡터 선/끝점/교차점에 좌표를 스냅한다 (없으면 원래 좌표 그대로) */
+    function snapImgCoordsForMarking(x, y) {
+        if (state.snapToCad === false) return { x, y, snapped: false };
+        if (state.mode !== 'MARK') return { x, y, snapped: false };
+        const bldg = state.currentBuilding;
+        const fc = state.currentFloor;
+        if (!bldg || !fc || !window.BSA_PDF_SNAP) return { x, y, snapped: false };
+        const scale = state.view.scale || 1;
+        const radius = SNAP_SCREEN_RADIUS_PX / scale;
+        const hit = window.BSA_PDF_SNAP.snap(bldg.id, fc, x, y, radius);
+        if (!hit) return { x, y, snapped: false };
+        return { x: hit.x, y: hit.y, snapped: true, snapType: hit.type };
     }
 
     function handleDragEnd(clientX, clientY) {
@@ -24245,7 +24599,8 @@ document.addEventListener('DOMContentLoaded', () => {
         if (isMarkingDrag) {
             isMarkingDrag = false;
             if (clientX != null && clientY != null) {
-                const coords = clientToImgCoords(clientX, clientY);
+                const rawCoords = clientToImgCoords(clientX, clientY);
+                const coords = snapImgCoordsForMarking(rawCoords.x, rawCoords.y);
                 markTargetImgX = coords.x;
                 markTargetImgY = coords.y;
                 syncLiveMarkBoxAboveTarget(markTargetImgX, markTargetImgY);
@@ -26630,6 +26985,24 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     setupAreaToolPanelEvents();
 
+    const btnSnapToCad = document.getElementById('btnSnapToCad');
+    const mobileBtnSnapToCad = document.getElementById('mobileBtnSnapToCad');
+    if (state.snapToCad === undefined) state.snapToCad = true;
+    function syncSnapToCadButtons() {
+        const on = state.snapToCad !== false;
+        if (btnSnapToCad) btnSnapToCad.classList.toggle('active', on);
+        if (mobileBtnSnapToCad) mobileBtnSnapToCad.classList.toggle('active', on);
+    }
+    function toggleSnapToCad() {
+        state.snapToCad = state.snapToCad === false ? true : false;
+        syncSnapToCadButtons();
+        saveStateToLocalStorage();
+        window.showToast?.(state.snapToCad ? 'CAD 스냅 켜짐' : 'CAD 스냅 꺼짐', 'info', 1500);
+    }
+    syncSnapToCadButtons();
+    if (btnSnapToCad) btnSnapToCad.addEventListener('click', toggleSnapToCad);
+    if (mobileBtnSnapToCad) mobileBtnSnapToCad.addEventListener('click', toggleSnapToCad);
+
     // 도면 탭 단축키: D=핀 마킹, A=영역 마킹, Esc=수정창 닫기+선택모드
     // 비파괴 탭: D=NDT 마킹, Esc=등록창 닫기+이동모드
     window.addEventListener('keydown', (e) => {
@@ -26866,6 +27239,30 @@ document.addEventListener('DOMContentLoaded', () => {
             if (typeof window.applyStyleSizeBarLockUi === 'function') window.applyStyleSizeBarLockUi();
         });
     }
+
+    function bindMobileRailMoreToggle(toggleId, railId, storageKey) {
+        const btn = document.getElementById(toggleId);
+        const rail = document.getElementById(railId);
+        if (!btn || !rail || btn.dataset.railMoreBound) return;
+        btn.dataset.railMoreBound = '1';
+        const secondary = rail.querySelector('.mobile-rail-secondary') || document.getElementById(btn.getAttribute('aria-controls'));
+        if (!secondary) return;
+        const apply = (open) => {
+            rail.classList.toggle('is-rail-expanded', open);
+            secondary.hidden = !open;
+            btn.classList.toggle('active', open);
+            btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+            const label = btn.querySelector('span');
+            if (label) label.textContent = open ? '접기' : '더보기';
+            try { localStorage.setItem(storageKey, open ? '1' : '0'); } catch (_e) { /* ignore */ }
+        };
+        let startOpen = false;
+        try { startOpen = localStorage.getItem(storageKey) === '1'; } catch (_e) { startOpen = false; }
+        apply(startOpen);
+        btn.addEventListener('click', () => apply(!rail.classList.contains('is-rail-expanded')));
+    }
+    bindMobileRailMoreToggle('mobileBtnRailMore', 'mobileMapSideRail', 'bsa_map_rail_expanded');
+    bindMobileRailMoreToggle('mobileNdtBtnRailMore', 'mobileNdtSideRail', 'bsa_ndt_rail_expanded');
 
     const mobileBtnQuickDrag = document.getElementById('mobileBtnQuickDrag');
     if (mobileBtnQuickDrag) {
@@ -27222,7 +27619,9 @@ document.addEventListener('DOMContentLoaded', () => {
             const S = dist_app / dist_cad;
             const phi_cad = Math.atan2(-dy_c, dx_c);
             const phi_app = Math.atan2(dv_a, du_a);
-            const dphi = phi_app - phi_cad;
+            // 거울 대칭(반사) 모드는 회전각 부호를 반대로 잡아야 기준점2도 appP2에 정확히 정합된다.
+            // (그렇지 않으면 기준점1만 맞고 기준점2는 어긋난 채로 전체 결함이 잘못된 방향으로 퍼진다)
+            const dphi = isMirror ? (phi_app + phi_cad) : (phi_app - phi_cad);
             const cosA = Math.cos(dphi);
             const sinA = Math.sin(dphi);
 
@@ -27241,24 +27640,33 @@ document.addEventListener('DOMContentLoaded', () => {
             };
         }
 
-        // 4가지 변환 모드 후보군
+        // 자동 선택 후보군: 정상 정렬 / 두 기준점을 반대 순서로 클릭했을 때의 보정.
+        // 거울(반사) 모드는 일부러 뺐다 — 캐드 PDF와 도면 좌표계는 원래 거울반사가 필요 없는
+        // 관계라(둘 다 같은 원본에서 나와 방향이 보존됨), 후보에 넣으면 건물 형태에 따라
+        // 정상 모드와 완전히 동점이 나오는 경우가 있어 자동선택이 불안정해진다.
+        // 정말 거울반사가 필요한 예외 상황은 가져오기 직후 뜨는 "좌우/상하 반전" 툴바로 바로잡으면 된다.
         const candidateModes = [
             { name: '정상 정렬', fn: createSimilarityTransform(cadP1, cadP2, appP1, appP2, false) },
-            { name: '180도 뒤집힘 자동교정', fn: createSimilarityTransform(cadP1, cadP2, appP2, appP1, false) },
-            { name: '거울 대칭(상하) 자동교정', fn: createSimilarityTransform(cadP1, cadP2, appP1, appP2, true) },
-            { name: '거울 대칭(좌우) 자동교정', fn: createSimilarityTransform(cadP1, cadP2, appP2, appP1, true) }
+            { name: '180도 뒤집힘 자동교정', fn: createSimilarityTransform(cadP1, cadP2, appP2, appP1, false) }
         ].filter(m => m.fn !== null);
 
-        // 캐드에서 기준점 1에 가장 가까운 결함 검출 (방향 일치 검증용)
-        let minCadDist1 = Infinity;
-        let defectNearCadP1 = validDefects[0];
-        validDefects.forEach(d => {
-            const dist = Math.hypot(Number(d.cadBoxX) - cadP1.x, Number(d.cadBoxY) - cadP1.y);
-            if (dist < minCadDist1) {
-                minCadDist1 = dist;
-                defectNearCadP1 = d;
-            }
-        });
+        // 캐드에서 기준점1/기준점2에 각각 가장 가까운 결함 검출 (방향 일치 검증용).
+        // 두 기준점을 모두 확인해야 좌우/상하 대칭에 가까운 건물에서 거울 모드가
+        // 우연히 동점으로 뽑히는 걸 막을 수 있다.
+        function findNearestDefect(cadPt) {
+            let best = validDefects[0];
+            let bestDist = Infinity;
+            validDefects.forEach(d => {
+                const dist = Math.hypot(Number(d.cadBoxX) - cadPt.x, Number(d.cadBoxY) - cadPt.y);
+                if (dist < bestDist) {
+                    bestDist = dist;
+                    best = d;
+                }
+            });
+            return best;
+        }
+        const defectNearCadP1 = findNearestDefect(cadP1);
+        const defectNearCadP2 = findNearestDefect(cadP2);
 
         // 최적 모드 자동 선별
         let bestMode = candidateModes[0];
@@ -27276,15 +27684,17 @@ document.addEventListener('DOMContentLoaded', () => {
             });
             score += inBounds * 100;
 
-            // 2. 캐드 기준점 1 근처의 결함이 앱 기준점 1과 실제로 가까운지 검증
-            const testPt = mode.fn(Number(defectNearCadP1.cadBoxX), Number(defectNearCadP1.cadBoxY));
-            const distToP1 = Math.hypot(testPt.x - appP1.x, testPt.y - appP1.y);
-            const distToP2 = Math.hypot(testPt.x - appP2.x, testPt.y - appP2.y);
-            if (distToP1 < distToP2) {
-                score += 5000;
-            } else {
-                score -= 5000;
-            }
+            // 2. 기준점1 근처 결함은 appP1에, 기준점2 근처 결함은 appP2에 더 가까워야 한다.
+            //    고정 보너스(+-5000) 대신 거리 차이를 그대로 점수로 써서, 두 모드가 우연히
+            //    똑같은 점수로 동점 나는 상황 자체를 원천적으로 막는다.
+            const p1Pt = mode.fn(Number(defectNearCadP1.cadBoxX), Number(defectNearCadP1.cadBoxY));
+            const p2Pt = mode.fn(Number(defectNearCadP2.cadBoxX), Number(defectNearCadP2.cadBoxY));
+            const d1to1 = Math.hypot(p1Pt.x - appP1.x, p1Pt.y - appP1.y);
+            const d1to2 = Math.hypot(p1Pt.x - appP2.x, p1Pt.y - appP2.y);
+            const d2to1 = Math.hypot(p2Pt.x - appP1.x, p2Pt.y - appP1.y);
+            const d2to2 = Math.hypot(p2Pt.x - appP2.x, p2Pt.y - appP2.y);
+            score += (d1to2 - d1to1) * 2;
+            score += (d2to1 - d2to2) * 2;
 
             if (score > maxScore) {
                 maxScore = score;
@@ -27594,6 +28004,37 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const btnImportCadPins = document.getElementById('btnImportCadPins');
     const inputImportCadPins = document.getElementById('inputImportCadPins');
+    
+    const btnCompactMarkingGaps = document.getElementById('btnCompactMarkingGaps');
+    if (btnCompactMarkingGaps) {
+        btnCompactMarkingGaps.addEventListener('click', () => {
+            const key = `${state.currentBuildingId}_${state.currentFloor}`;
+            const list = (state.defects && state.defects[key]) || [];
+            if (!list.length) {
+                if (typeof window.showToast === 'function') window.showToast('현재 층에 마킹이 없습니다.', 'warning');
+                return;
+            }
+            if (!window.confirm('현재 층의 마킹번호 빈 칸을 뒤에서부터 앞으로 땡길까요?\n(예: 14,15,17,18 → 14,15,16,17)')) return;
+            if (typeof pushDefectHistory === 'function') pushDefectHistory();
+            const result = compactDefectMarkingNumberGaps(list);
+            if (!result || !result.moved) {
+                if (typeof window.showToast === 'function') window.showToast('채울 빈 번호가 없습니다.', 'info');
+                return;
+            }
+            saveStateToLocalStorage();
+            if (typeof renderSurveyTable === 'function') renderSurveyTable();
+            if (typeof drawCanvas === 'function') drawCanvas();
+            if (typeof updateMapSelectionBar === 'function') {
+                updateMapSelectionBar({ scrollToSelection: false });
+            } else if (typeof renderDefectListPanel === 'function') {
+                renderDefectListPanel();
+            }
+            if (typeof window.showToast === 'function') {
+                window.showToast(`마킹번호 ${result.moved}개 이동: ${result.before} → ${result.after}`, 'success', 4500);
+            }
+        });
+    }
+
     if (btnImportCadPins && inputImportCadPins) {
         btnImportCadPins.addEventListener('click', () => inputImportCadPins.click());
         inputImportCadPins.addEventListener('change', window.importCadPinsJson);
@@ -31175,8 +31616,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (!defectNeedsCrackMonitorUi(defect)) return;
                 const gauge = normalizeCrackGaugeLog(defect.crackGaugeLog);
                 const tip = normalizeCrackTipLog(defect.crackTipLog);
-                const hasGauge = !!(gauge.gaugeNo || gauge.initialX || gauge.initialY || (gauge.readings && gauge.readings.length));
-                const hasTip = !!(tip.initialLengthMm || (tip.readings && tip.readings.length));
+                const hasGauge = !!(gauge.gaugeNo || gauge.initialX || gauge.initialY || gauge.prevPhoto || gauge.currPhoto || (gauge.readings && gauge.readings.length));
+                const hasTip = !!(tip.initialLengthMm || tip.prevPhoto || tip.currPhoto || (tip.readings && tip.readings.length));
                 if (!hasGauge && !hasTip) return;
                 items.push({
                     defect,
@@ -31290,6 +31731,143 @@ document.addEventListener('DOMContentLoaded', () => {
         setTcText(getHwpxTblCellByAddr(tbl, 15, 4), '-');
     }
 
+    function hwpxIsLightPurpleColor(hex) {
+        if (!hex) return false;
+        const s = String(hex).replace(/^#/, '').toUpperCase();
+        if (s.length !== 6) return false;
+        if (s === 'CCC0DA' || s === 'E2D5F1' || s === 'D8C8E8' || s === 'BFA5D4') return true;
+        const r = parseInt(s.slice(0, 2), 16);
+        const g = parseInt(s.slice(2, 4), 16);
+        const b = parseInt(s.slice(4, 6), 16);
+        // light purple-ish: blue & red high, green a bit lower
+        return b >= 180 && r >= 150 && g >= 130 && b >= g && r >= g - 10 && (b - g) >= 15;
+    }
+
+    function ensureHwpxCrackMonitorStyleIds(hwpxHeaderState) {
+        if (!hwpxHeaderState || !hwpxHeaderState.text) return { transparentBfId: null, gulimCharPrId: null };
+        let hdr = hwpxHeaderState.text;
+        const maxId = (tag) => {
+            const ids = [...hdr.matchAll(new RegExp(`<hh:${tag} id="(\\d+)"`, 'g'))].map((x) => parseInt(x[1], 10));
+            return ids.length ? Math.max(...ids) : 0;
+        };
+        let transparentBfId = null;
+        // Prefer an existing transparent winBrush fill
+        const bfRe = /<hh:borderFill id="(\d+)"[\s\S]*?<\/hh:borderFill>/g;
+        let m;
+        while ((m = bfRe.exec(hdr))) {
+            const block = m[0];
+            const faces = [...block.matchAll(/faceColor="([^"]+)"/g)].map((x) => x[1]);
+            const solids = [...block.matchAll(/value="#([0-9A-Fa-f]{6})"/g)].map((x) => x[1].toUpperCase());
+            if (faces.includes('none') && !solids.some(hwpxIsLightPurpleColor)) {
+                transparentBfId = m[1];
+                break;
+            }
+        }
+        if (!transparentBfId) {
+            transparentBfId = String(maxId('borderFill') + 1);
+            const bfXml = `<hh:borderFill id="${transparentBfId}" threeD="0" shadow="0" centerLine="NONE" breakCellSeparateLine="0"><hh:slash type="NONE" Crooked="0" isCounter="0"/><hh:backSlash type="NONE" Crooked="0" isCounter="0"/><hh:leftBorder type="SOLID" width="0.12 mm" color="#000000"/><hh:rightBorder type="SOLID" width="0.12 mm" color="#000000"/><hh:topBorder type="SOLID" width="0.12 mm" color="#000000"/><hh:bottomBorder type="SOLID" width="0.12 mm" color="#000000"/><hc:fillBrush><hc:winBrush faceColor="none" hatchColor="#999999" alpha="0"/></hc:fillBrush></hh:borderFill>`;
+            if (hdr.includes('</hh:borderFills>')) {
+                hdr = hdr.replace('</hh:borderFills>', bfXml + '</hh:borderFills>');
+                const bfCnt = (hdr.match(/<hh:borderFill id="/g) || []).length;
+                hdr = hdr.replace(/(<hh:borderFills[^>]*itemCnt=")(\d+)(")/, `$1${bfCnt}$3`);
+            }
+            hwpxHeaderState.dirty = true;
+        }
+
+        // Find Gulim font id in hangul fontface (first face="굴림")
+        let gulimFontId = null;
+        const fontFace = [...hdr.matchAll(/<hh:font id="(\d+)"[^>]*face="굴림"/g)];
+        if (fontFace.length) gulimFontId = fontFace[0][1];
+        if (!gulimFontId) gulimFontId = '1';
+
+        let gulimCharPrId = null;
+        const charRe = /<hh:charPr id="(\d+)"([^>]*)>([\s\S]*?)<\/hh:charPr>/g;
+        while ((m = charRe.exec(hdr))) {
+            const attrs = m[2] || '';
+            const body = m[3] || '';
+            const shade = (attrs.match(/shadeColor="([^"]+)"/) || [])[1] || 'none';
+            const hangul = (body.match(/hangul="(\d+)"/) || [])[1];
+            if (shade === 'none' && hangul === gulimFontId && !hwpxIsLightPurpleColor((attrs.match(/textColor="#([^"]+)"/) || [])[1])) {
+                gulimCharPrId = m[1];
+                break;
+            }
+        }
+        if (!gulimCharPrId) {
+            gulimCharPrId = String(maxId('charPr') + 1);
+            const proto = hdr.match(/<hh:charPr id="\d+"[\s\S]*?<\/hh:charPr>/);
+            let bodyInner = '<hh:fontRef hangul="FONT" latin="FONT" hanja="FONT" japanese="FONT" other="FONT" symbol="FONT" user="FONT"/><hh:ratio hangul="100" latin="100" hanja="100" japanese="100" other="100" symbol="100" user="100"/><hh:spacing hangul="0" latin="0" hanja="0" japanese="0" other="0" symbol="0" user="0"/><hh:relSz hangul="100" latin="100" hanja="100" japanese="100" other="100" symbol="100" user="100"/><hh:offset hangul="0" latin="0" hanja="0" japanese="0" other="0" symbol="0" user="0"/>';
+            if (proto) {
+                const inner = proto[0].replace(/^<hh:charPr[^>]*>/, '').replace(/<\/hh:charPr>$/, '');
+                bodyInner = inner.replace(/hangul="\d+"/g, `hangul="${gulimFontId}"`)
+                    .replace(/latin="\d+"/g, `latin="${gulimFontId}"`)
+                    .replace(/hanja="\d+"/g, `hanja="${gulimFontId}"`)
+                    .replace(/japanese="\d+"/g, `japanese="${gulimFontId}"`)
+                    .replace(/other="\d+"/g, `other="${gulimFontId}"`)
+                    .replace(/symbol="\d+"/g, `symbol="${gulimFontId}"`)
+                    .replace(/user="\d+"/g, `user="${gulimFontId}"`);
+            } else {
+                bodyInner = bodyInner.replace(/FONT/g, gulimFontId);
+            }
+            const charXml = `<hh:charPr id="${gulimCharPrId}" height="850" textColor="#000000" shadeColor="none" useFontSpace="0" useKerning="0" symMark="NONE" borderFillIDRef="${transparentBfId}">${bodyInner}</hh:charPr>`;
+            if (hdr.includes('</hh:charProperties>')) {
+                hdr = hdr.replace('</hh:charProperties>', charXml + '</hh:charProperties>');
+                const cpCnt = (hdr.match(/<hh:charPr id="/g) || []).length;
+                hdr = hdr.replace(/(<hh:charProperties[^>]*itemCnt=")(\d+)(")/, `$1${cpCnt}$3`);
+            }
+            hwpxHeaderState.dirty = true;
+        }
+
+        hwpxHeaderState.text = hdr;
+        return { transparentBfId, gulimCharPrId };
+    }
+
+
+    function polishHwpxCrackMonitorNode(root, styleIds, purpleBfIds) {
+        if (!root || !styleIds) return root;
+        const transparentBfId = styleIds.transparentBfId;
+        const gulimCharPrId = styleIds.gulimCharPrId;
+        const purpleSet = purpleBfIds instanceof Set ? purpleBfIds : new Set(purpleBfIds || []);
+        const walk = (el) => {
+            if (!el || el.nodeType !== 1) return;
+            if ((el.localName === 'tc' || el.localName === 'tbl') && transparentBfId) {
+                const bf = el.getAttribute('borderFillIDRef');
+                // Only remap cells that still point at a purple fill (ID collision with main template)
+                if (bf && purpleSet.has(String(bf))) el.setAttribute('borderFillIDRef', transparentBfId);
+            }
+            if ((el.localName === 'run' || el.localName === 'p') && gulimCharPrId) {
+                if (el.localName === 'run') el.setAttribute('charPrIDRef', gulimCharPrId);
+                el.removeAttribute('borderFillIDRef');
+            }
+            Array.from(el.children || []).forEach(walk);
+        };
+        walk(root);
+        return root;
+    }
+
+    function collectHwpxPurpleBorderFillIds(headerText) {
+        const ids = new Set();
+        if (!headerText) return ids;
+        const re = /<hh:borderFill id="(\d+)"[\s\S]*?<\/hh:borderFill>/g;
+        let m;
+        while ((m = re.exec(headerText))) {
+            const block = m[0];
+            const faces = [...block.matchAll(/faceColor="([^"]+)"/g)].map((x) => String(x[1]).replace(/^#/, ''));
+            const vals = [...block.matchAll(/value="#([0-9A-Fa-f]{6})"/g)].map((x) => x[1]);
+            if (faces.some(hwpxIsLightPurpleColor) || vals.some(hwpxIsLightPurpleColor)) ids.add(m[1]);
+        }
+        return ids;
+    }
+
+    function getCrackMonitorComparePhotos(slot) {
+        if (!slot) return { prev: '', curr: '' };
+        if (slot.kind === 'tip') {
+            const tip = slot.tip || {};
+            return { prev: tip.prevPhoto || '', curr: tip.currPhoto || '' };
+        }
+        const gauge = slot.gauge || {};
+        return { prev: gauge.prevPhoto || '', curr: gauge.currPhoto || '' };
+    }
+
     async function loadHwpxCrackMonitorStampTemplate() {
         try {
             const resp = await fetch('./templates/hwpx_crack_monitor.hwpx', { cache: 'no-store' });
@@ -31339,10 +31917,18 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         }
 
+        // Ensure destination header is loaded before style injection / purple detection
+        if (hwpxHeaderState && !hwpxHeaderState.text && zip.file('Contents/header.xml')) {
+            hwpxHeaderState.text = await zip.file('Contents/header.xml').async('string');
+        }
+        const purpleBfIds = collectHwpxPurpleBorderFillIds(hwpxHeaderState && hwpxHeaderState.text);
+        const crackStyleIds = ensureHwpxCrackMonitorStyleIds(hwpxHeaderState || { text: null, dirty: false });
+
         const cloneStampPara = (proto) => {
             if (!proto) return null;
             let node = proto.cloneNode(true);
             if (remapStampNode) node = remapStampNode(node, remapAttrs);
+            node = polishHwpxCrackMonitorNode(node, crackStyleIds, purpleBfIds);
             return xmlDoc.importNode(node, true);
         };
 
@@ -31400,10 +31986,13 @@ document.addEventListener('DOMContentLoaded', () => {
         const fillSummaryPhotoTable = async (tbl, item, photoNo) => {
             if (!tbl || !item) return;
             const d = item.defect;
-            await ensureDefectPhotosLoaded(d);
-            const prevSrc = getDefectPrevOutputPhotos(d)[0];
-            const currSrc = getDefectOutputPhotos(d)[0];
-            const roundLabels = getDefectHwpxCompareRoundLabelsFull(d, bldg);
+            // 균열 게이지/팁 전용 비교사진 (결함 일반 사진 슬롯에 넣지 않음)
+            const cmpPhotos = getCrackMonitorComparePhotos(item);
+            const prevSrc = cmpPhotos.prev || '';
+            const currSrc = cmpPhotos.curr || '';
+            const roundLabels = (typeof getDefectHwpxCompareRoundLabelsFull === 'function')
+                ? getDefectHwpxCompareRoundLabelsFull(d, bldg)
+                : { prev: '전회 측정', curr: '금회 측정' };
             setTcText(getHwpxTblCellByAddr(tbl, 1, 0), String(photoNo));
             setTcText(getHwpxTblCellByAddr(tbl, 1, 1), d.component || '');
             setTcText(getHwpxTblCellByAddr(tbl, 1, 2), `${item.floorLabel || ''} ${d.locationDetail || ''}`.trim());
@@ -31448,6 +32037,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 const currentTbl = findHwpxTblByRowCount(dataPara, 16);
                 if (currentTbl) {
                     fillHwpxCrackMonitorCurrentTable(currentTbl, slots, setTcText);
+                    polishHwpxCrackMonitorNode(currentTbl, crackStyleIds, purpleBfIds);
                     ensureTblTreatAsChar(currentTbl);
                 }
                 sec.appendChild(dataPara);
@@ -31462,6 +32052,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 const sumTbl = sumPara.getElementsByTagNameNS(HWPX_HP_NS, 'tbl')[0];
                 if (sumTbl) {
                     await fillSummaryPhotoTable(sumTbl, slots[si], si + 1);
+                    polishHwpxCrackMonitorNode(sumTbl, crackStyleIds, purpleBfIds);
                     ensureTblTreatAsChar(sumTbl);
                 }
                 sec.appendChild(sumPara);
@@ -35590,6 +36181,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (state.defects[key]) {
             pushDefectHistory();
             removeSingleDefectRecord(key, id);
+            if (typeof discardStalePendingRemoteAfterLocalPinEdit === 'function') discardStalePendingRemoteAfterLocalPinEdit();
             if (typeof selectedDefectIds !== 'undefined') {
                 selectedDefectIds.delete(id);
             }
@@ -35620,6 +36212,7 @@ document.addEventListener('DOMContentLoaded', () => {
             pushDefectHistory();
             const memberIds = state.defects[key].filter(d => d.groupId === groupId).map(d => d.id);
             memberIds.forEach(id => removeSingleDefectRecord(key, id, { skipRenumber: true }));
+            if (typeof discardStalePendingRemoteAfterLocalPinEdit === 'function') discardStalePendingRemoteAfterLocalPinEdit();
             renumberFloorDefects(state.defects[key], { preserveOrder: false });
             saveStateToLocalStorage();
             renderSurveyTable();
@@ -37042,7 +37635,9 @@ document.addEventListener('DOMContentLoaded', () => {
     function isFirestoreQuotaError(err) {
         const msg = String((err && err.message) || err || '');
         const code = String((err && err.code) || '');
-        return /\b429\b/.test(msg) || /resource-exhausted|RESOURCE_EXHAUSTED|quota/i.test(msg + code);
+        return /\b429\b/.test(msg)
+            || /resource-exhausted|RESOURCE_EXHAUSTED|quota/i.test(msg + code)
+            || /Write stream exhausted|maximum allowed queued writes|using maximum backoff/i.test(msg);
     }
 
     function clearSyncErrorRetryTimer() {
@@ -37060,7 +37655,10 @@ document.addEventListener('DOMContentLoaded', () => {
             SYNC_RETRY_BASE_MS * Math.pow(2, _syncRetryFailCount),
             SYNC_RETRY_MAX_MS
         );
-        if (isQuota) delay = Math.max(delay, SYNC_QUOTA_COOLDOWN_MS);
+        if (isQuota) {
+            delay = Math.max(delay, SYNC_QUOTA_COOLDOWN_MS);
+            pauseFirestoreWrites(delay);
+        }
         _syncRetryFailCount = Math.min(_syncRetryFailCount + 1, 8);
         _syncRetryTimer = setTimeout(() => {
             _syncRetryTimer = null;
@@ -37180,7 +37778,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // ==========================================================================
     // 웹뷰 원격 로드 — GitHub Pages 웹이 곧 앱 화면 (APK OTA 없음)
     // ==========================================================================
-    window.BSA_APP_BUILD = { versionCode: 8, versionName: '1.3.0' };
+    window.BSA_APP_BUILD = { versionCode: 10, versionName: '1.3.2' };
 
     function isNativeAndroidApp() {
         try {
@@ -37832,6 +38430,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 window._cloudSyncedTierKeys.add(docId);
             } catch (e) {
                 console.warn('도면 티어 업로드 실패:', docId, e);
+                if (window._cloudSyncedTierKeys) window._cloudSyncedTierKeys.delete(docId);
                 ok = false;
             }
         }
@@ -37840,16 +38439,47 @@ document.addEventListener('DOMContentLoaded', () => {
 
     async function cloudFloorDrawingTierExists(buildingId, floorCode, dim) {
         const docId = floorDrawingTierCloudDocId(buildingId, floorCode, dim);
-        if (window._cloudSyncedTierKeys && window._cloudSyncedTierKeys.has(docId)) return true;
         const col = getFloorDrawingTiersCollection();
         if (!col) return false;
         try {
             const snap = await col.doc(docId).get();
-            if (snap.exists) {
+            if (!snap.exists) {
+                if (window._cloudSyncedTierKeys) window._cloudSyncedTierKeys.delete(docId);
+                return false;
+            }
+            const data = snap.data() || {};
+            if (data.dataUrl && String(data.dataUrl).length > 32) {
                 if (!window._cloudSyncedTierKeys) window._cloudSyncedTierKeys = new Set();
                 window._cloudSyncedTierKeys.add(docId);
                 return true;
             }
+            if (data.chunkStatus === 'ready' && data.chunked && Number(data.chunkCount) > 0) {
+                const writeId = data.writeId ? String(data.writeId) : null;
+                const partsSnap = await col.doc(docId).collection('parts').get();
+                let n = 0;
+                if (writeId) {
+                    partsSnap.forEach((d) => {
+                        if (String(d.id || '').startsWith(writeId + '_')) n++;
+                    });
+                } else {
+                    n = partsSnap.size;
+                }
+                if (n >= Number(data.chunkCount)) {
+                    if (!window._cloudSyncedTierKeys) window._cloudSyncedTierKeys = new Set();
+                    window._cloudSyncedTierKeys.add(docId);
+                    return true;
+                }
+            }
+            if (data.chunked && Number(data.chunkCount) > 0 && !data.chunkStatus) {
+                const url = await readChunkedPdfFromDocRef(col.doc(docId));
+                if (url && String(url).length > 32) {
+                    if (!window._cloudSyncedTierKeys) window._cloudSyncedTierKeys = new Set();
+                    window._cloudSyncedTierKeys.add(docId);
+                    return true;
+                }
+            }
+            if (window._cloudSyncedTierKeys) window._cloudSyncedTierKeys.delete(docId);
+            return false;
         } catch (e) {
             console.warn('도면 티어 존재 확인 실패:', docId, e);
         }
@@ -37877,6 +38507,18 @@ document.addEventListener('DOMContentLoaded', () => {
             } catch (e) {
                 console.warn('도면 티어 서버 삭제 실패:', docId, e);
             }
+        }
+    }
+
+    async function deleteFloorDrawingRasterFromCloud(buildingId, floorCode) {
+        if (!db || !window.state.companyId || !buildingId || !floorCode) return;
+        const docId = `${buildingId}_${floorCode}`;
+        try {
+            await db.collection('safety_app').doc(getCompanyDocId())
+                .collection('floorDrawings').doc(docId).delete();
+            if (window._cloudSyncedDrawingKeys) window._cloudSyncedDrawingKeys.delete(docId);
+        } catch (e) {
+            console.warn('도면 원본 서버 삭제 실패:', docId, e);
         }
     }
 
@@ -38100,73 +38742,258 @@ document.addEventListener('DOMContentLoaded', () => {
         return siteVaultDocId(getBuildingSiteName(bldg));
     }
 
+    /** Firestore client write stream overload guard */
+    let _fsWriteChain = Promise.resolve();
+    let _fsWritePausedUntil = 0;
+    function pauseFirestoreWrites(ms) {
+        _fsWritePausedUntil = Math.max(_fsWritePausedUntil, Date.now() + Math.max(0, ms || 0));
+    }
+    function enqueueFirestoreWrite(task) {
+        const run = async () => {
+            while (Date.now() < _fsWritePausedUntil) {
+                await new Promise((r) => setTimeout(r, Math.min(1000, Math.max(50, _fsWritePausedUntil - Date.now()))));
+            }
+            return task();
+        };
+        const p = _fsWriteChain.then(run, run);
+        _fsWriteChain = p.then(() => undefined, () => undefined);
+        return p;
+    }
+
     async function writeChunkedPdfToDocRef(docRef, pdfDataUrl, extraFields) {
         const payload = String(pdfDataUrl);
         const base = { ...(extraFields || {}), updatedAt: firebase.firestore.FieldValue.serverTimestamp() };
+        const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
         if (payload.length <= PDF_CLOUD_CHUNK_CHARS) {
-            await docRef.set({ ...base, dataUrl: payload, chunked: false, chunkCount: 0 });
+            await enqueueFirestoreWrite(() =>
+                docRef.set({
+                    ...base,
+                    dataUrl: payload,
+                    chunked: false,
+                    chunkCount: 0,
+                    writeId: null,
+                    chunkStatus: 'ready'
+                })
+            );
+            scheduleChunkPartsCleanup(docRef, null);
             return;
         }
+
         const parts = [];
         for (let i = 0; i < payload.length; i += PDF_CLOUD_CHUNK_CHARS) {
             parts.push(payload.slice(i, i + PDF_CLOUD_CHUNK_CHARS));
         }
-        // 이전 조각 정리 (청크 수가 줄었을 때 잔여 parts 방지)
+        const writeId = 'w_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8);
+
+        // 기존 ready 문서는 읽기 유지. 신규/깨진 문서만 uploading 마킹.
+        let hadReady = false;
         try {
-            const oldParts = await docRef.collection('parts').get();
-            if (!oldParts.empty) {
-                let delBatch = db.batch();
-                let delCount = 0;
-                for (const d of oldParts.docs) {
-                    delBatch.delete(d.ref);
-                    delCount++;
-                    if (delCount >= 400) {
-                        await delBatch.commit();
-                        delBatch = db.batch();
-                        delCount = 0;
-                    }
-                }
-                if (delCount > 0) await delBatch.commit();
+            const prevSnap = await docRef.get();
+            const prev = prevSnap.exists ? (prevSnap.data() || {}) : {};
+            hadReady = prev.chunkStatus === 'ready'
+                || (!!prev.dataUrl && String(prev.dataUrl).length > 32)
+                || (prev.chunked === true && prev.chunkStatus !== 'failed' && prev.chunkStatus !== 'uploading' && Number(prev.chunkCount) > 0 && !!prev.writeId);
+            if (!hadReady) {
+                await enqueueFirestoreWrite(() =>
+                    docRef.set({
+                        ...base,
+                        chunked: true,
+                        chunkCount: parts.length,
+                        writeId,
+                        chunkStatus: 'uploading',
+                        dataUrl: firebase.firestore.FieldValue.delete()
+                    }, { merge: true })
+                );
             }
         } catch (e) {
-            console.warn('청크 parts 정리 실패:', docRef.path, e);
+            console.warn('청크 업로드 상태 마킹 실패:', docRef.path, e);
         }
-        await docRef.set({ ...base, chunked: true, chunkCount: parts.length });
-        // Firestore batch 10MB 한도 — 조각을 나눠 커밋 (한 번에 몰아넣으면 대용량 도면에서 hang)
-        const PARTS_PER_BATCH = 6;
-        for (let start = 0; start < parts.length; start += PARTS_PER_BATCH) {
-            const batch = db.batch();
-            const end = Math.min(start + PARTS_PER_BATCH, parts.length);
-            for (let i = start; i < end; i++) {
-                batch.set(docRef.collection('parts').doc(String(i)), { data: parts[i] });
+
+        try {
+            const PARTS_PER_BATCH = 20;
+            for (let start = 0; start < parts.length; start += PARTS_PER_BATCH) {
+                const end = Math.min(start + PARTS_PER_BATCH, parts.length);
+                await enqueueFirestoreWrite(async () => {
+                    const batch = db.batch();
+                    for (let i = start; i < end; i++) {
+                        batch.set(docRef.collection('parts').doc(writeId + '_' + i), {
+                            data: parts[i],
+                            writeId,
+                            index: i
+                        });
+                    }
+                    await batch.commit();
+                });
+                if (end < parts.length) await sleep(80);
             }
-            await batch.commit();
+
+            await enqueueFirestoreWrite(() =>
+                docRef.set({
+                    ...base,
+                    chunked: true,
+                    chunkCount: parts.length,
+                    writeId,
+                    chunkStatus: 'ready',
+                    dataUrl: firebase.firestore.FieldValue.delete()
+                }, { merge: true })
+            );
+            scheduleChunkPartsCleanup(docRef, writeId);
+        } catch (e) {
+            try {
+                await enqueueFirestoreWrite(() =>
+                    docRef.set({
+                        chunkStatus: 'failed',
+                        updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+                    }, { merge: true })
+                );
+            } catch (_) { /* ignore */ }
+            throw e;
         }
     }
 
-    async function readChunkedPdfFromDocRef(docRef) {
+    const _chunkCleanupTimers = new Map();
+    function scheduleChunkPartsCleanup(docRef, keepWriteId) {
+        const key = (docRef && docRef.path) ? String(docRef.path) : String(docRef);
+        const prev = _chunkCleanupTimers.get(key);
+        if (prev) clearTimeout(prev);
+        const timer = setTimeout(() => {
+            _chunkCleanupTimers.delete(key);
+            cleanupChunkPartsDeferred(docRef, keepWriteId).catch((e) =>
+                console.warn('청크 parts 정리 경고:', docRef.path, e)
+            );
+        }, 8000);
+        _chunkCleanupTimers.set(key, timer);
+    }
+
+    async function cleanupChunkPartsDeferred(docRef, keepWriteId) {
+        if (!db) return;
+        if (Date.now() < _fsWritePausedUntil) {
+            scheduleChunkPartsCleanup(docRef, keepWriteId);
+            return;
+        }
+        const oldParts = await docRef.collection('parts').get();
+        if (oldParts.empty) return;
+        const toDelete = oldParts.docs.filter((d) => {
+            const id = String(d.id || '');
+            if (keepWriteId) return !id.startsWith(keepWriteId + '_');
+            return true; // non-chunked parent: drop all parts
+        });
+        const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+        for (let i = 0; i < toDelete.length; i += 40) {
+            if (Date.now() < _fsWritePausedUntil) {
+                scheduleChunkPartsCleanup(docRef, keepWriteId);
+                return;
+            }
+            const slice = toDelete.slice(i, i + 40);
+            await enqueueFirestoreWrite(async () => {
+                const batch = db.batch();
+                slice.forEach((d) => batch.delete(d.ref));
+                await batch.commit();
+            });
+            await sleep(120);
+        }
+    }
+
+    async function readChunkedPdfFromDocRef(docRef, _retried) {
         const snap = await docRef.get();
         if (!snap.exists) return null;
         const data = snap.data() || {};
+
         if (data.dataUrl && typeof data.dataUrl === 'string' && data.dataUrl.length > 32) {
             return data.dataUrl;
         }
+
+        const status = data.chunkStatus || null;
+        if (status === 'uploading' || status === 'failed') {
+            return null;
+        }
+
         const chunkCount = Number(data.chunkCount) || 0;
         if (data.chunked && chunkCount > 0) {
             const partsSnap = await docRef.collection('parts').get();
             if (partsSnap.empty) {
-                console.warn('[PDF] chunked 문서인데 parts가 비어 있음:', docRef.path);
+                if (!_retried && status !== 'ready') {
+                    await new Promise((r) => setTimeout(r, 800));
+                    return readChunkedPdfFromDocRef(docRef, true);
+                }
+                if (status === 'ready') {
+                    console.warn('[PDF] ready인데 parts 없음(손상 문서):', docRef.path);
+                } else {
+                    console.warn('[PDF] chunked 문서인데 parts가 비어 있음:', docRef.path);
+                }
                 return null;
             }
-            const joined = partsSnap.docs
-                .sort((a, b) => Number(a.id) - Number(b.id))
+            const writeId = data.writeId ? String(data.writeId) : null;
+            let docs = partsSnap.docs.slice();
+            if (writeId) {
+                docs = docs.filter((d) => String(d.id || '').startsWith(writeId + '_'));
+                docs.sort((a, b) => {
+                    const ia = Number(a.data()?.index);
+                    const ib = Number(b.data()?.index);
+                    if (Number.isFinite(ia) && Number.isFinite(ib)) return ia - ib;
+                    const na = Number(String(a.id).slice(writeId.length + 1));
+                    const nb = Number(String(b.id).slice(writeId.length + 1));
+                    return na - nb;
+                });
+            } else {
+                docs = docs
+                    .filter((d) => /^\d+$/.test(String(d.id || '')))
+                    .sort((a, b) => Number(a.id) - Number(b.id));
+            }
+            if (docs.length < chunkCount) {
+                if (!_retried) {
+                    await new Promise((r) => setTimeout(r, 1000));
+                    return readChunkedPdfFromDocRef(docRef, true);
+                }
+                console.warn('[PDF] parts 불완전:', docRef.path, docs.length, '/', chunkCount);
+                return null;
+            }
+            const joined = docs
+                .slice(0, chunkCount)
                 .map((d) => (d.data() && d.data().data) || '')
                 .join('');
             if (joined.length > 32) return joined;
-            console.warn('[PDF] parts 조립 결과가 비어 있음:', docRef.path);
+            console.warn('[PDF] parts 합쳐도 내용이 비어 있음:', docRef.path);
             return null;
         }
         return null;
+    }
+
+    function getBulkSyncDocRef() {
+        return db.collection('safety_app').doc(getCompanyDocId()).collection('bulkData').doc('defectsAndNdt');
+    }
+
+    /** 결함/NDT 데이터를 회사 루트 문서(safety_app/{companyId})와 분리된 별도 문서에 저장한다.
+        도면 PDF와 같은 청크 저장 방식을 재사용 — 결함이 계속 쌓이면 루트 문서 하나로는
+        Firestore 1MB 문서 한도에 걸리기 때문에 분리한다. */
+    async function writeBulkSyncData(fields) {
+        if (!db || !window.state.companyId) return;
+        const json = JSON.stringify(fields || {});
+        await writeChunkedPdfToDocRef(getBulkSyncDocRef(), json);
+    }
+
+    async function fetchBulkSyncDataReliable(maxAttempts = 4) {
+        let last = null;
+        for (let i = 0; i < maxAttempts; i++) {
+            last = await fetchBulkSyncData();
+            if (last) return last;
+            await new Promise((r) => setTimeout(r, 400 * (i + 1)));
+        }
+        return last || {};
+    }
+
+    async function fetchBulkSyncData() {
+        if (!db || !window.state.companyId) return null;
+        try {
+            const json = await readChunkedPdfFromDocRef(getBulkSyncDocRef());
+            if (json == null) return null;
+            if (!json) return {};
+            return JSON.parse(json);
+        } catch (e) {
+            console.warn('결함/NDT 데이터(bulkData) 조회 실패:', e);
+            return null;
+        }
     }
 
     async function uploadSiteVaultPdf(siteKey, floorCode, pdfDataUrl) {
@@ -38809,19 +39636,32 @@ document.addEventListener('DOMContentLoaded', () => {
             ? db.collection('safety_app').doc(getCompanyDocId()).collection('photos')
             : null;
         let failCount = 0;
-        const jobs = [];
+        const localJobs = [];
+        const cloudIds = [];
         for (let i = 0; i < count; i++) {
             const photoDocId = getPhotoDocId(defectId, i, kind);
             _idbPersistedPhotoKeys.delete(photoDocId);
-            jobs.push(idbDelete('photos', photoDocId));
-            if (companyPhotos) {
-                jobs.push(companyPhotos.doc(photoDocId).delete().catch(e => {
-                    failCount++;
-                    console.warn(`사진 삭제 실패 (${photoDocId}):`, e);
-                }));
-            }
+            if (window._cloudSyncedPhotoIds) window._cloudSyncedPhotoIds.delete(photoDocId);
+            localJobs.push(idbDelete('photos', photoDocId));
+            if (companyPhotos) cloudIds.push(photoDocId);
         }
-        await Promise.all(jobs);
+        await Promise.all(localJobs);
+        // 클라우드 삭제는 직렬 소배치 — Write stream exhausted 방지
+        for (let i = 0; i < cloudIds.length; i++) {
+            const photoDocId = cloudIds[i];
+            try {
+                await enqueueFirestoreWrite(() => companyPhotos.doc(photoDocId).delete());
+            } catch (e) {
+                failCount++;
+                console.warn(`사진 클라우드 삭제 실패 (${photoDocId}):`, e);
+                if (typeof isFirestoreQuotaError === 'function' && isFirestoreQuotaError(e)) {
+                    pauseFirestoreWrites(SYNC_QUOTA_COOLDOWN_MS);
+                    // 나머지는 나중에 — 로컬은 이미 지워짐
+                    break;
+                }
+            }
+            if (i > 0 && i % 5 === 0) await new Promise((r) => setTimeout(r, 50));
+        }
         return failCount;
     }
 
@@ -38960,6 +39800,23 @@ document.addEventListener('DOMContentLoaded', () => {
                     : (prevRoundPhotoIds && prevRoundPhotoIds.length ? prevRoundPhotoIds.slice() : null);
                 if (curIds && curIds.length) out.photoIds = curIds;
                 if (prevIds && prevIds.length) out.prevRoundPhotoIds = prevIds;
+                // 균열 게이지/팁 비교사진 dataURL은 Firestore에 올리지 않음(로컬/IndexedDB 상태만)
+                if (out.crackGaugeLog && typeof out.crackGaugeLog === 'object') {
+                    const { prevPhoto, currPhoto, ...gRest } = out.crackGaugeLog;
+                    out.crackGaugeLog = {
+                        ...gRest,
+                        hasPrevPhoto: !!(prevPhoto && String(prevPhoto).trim()),
+                        hasCurrPhoto: !!(currPhoto && String(currPhoto).trim())
+                    };
+                }
+                if (out.crackTipLog && typeof out.crackTipLog === 'object') {
+                    const { prevPhoto, currPhoto, ...tRest } = out.crackTipLog;
+                    out.crackTipLog = {
+                        ...tRest,
+                        hasPrevPhoto: !!(prevPhoto && String(prevPhoto).trim()),
+                        hasCurrPhoto: !!(currPhoto && String(currPhoto).trim())
+                    };
+                }
                 return out;
             });
         });
@@ -39304,6 +40161,7 @@ document.addEventListener('DOMContentLoaded', () => {
             let acquired = false;
             let sawForeign = false;
             let holderName = '';
+            let acquiredServerData = null;
             try {
                 await db.runTransaction(async (tx) => {
                     const snap = await tx.get(docRef);
@@ -39326,6 +40184,10 @@ document.addEventListener('DOMContentLoaded', () => {
                         }
                     }, { merge: true });
                     acquired = true;
+                    // 잠금을 잡은 이 스냅샷을 그대로 재사용하면, 바로 이어서 같은 문서를
+                    // 또 읽는(fetchCompanyDocSnap) 중복 읽기 1회를 아낄 수 있다 — 잠금을
+                    // 잡은 순간부터는 다른 기기가 끼어들 수 없으므로 최신값이기도 하다.
+                    acquiredServerData = data;
                 });
             } catch (e) {
                 // 2026-09-04: 429(resource-exhausted, 할당량/속도 초과)까지 "일시적 네트워크 문제"로
@@ -39336,7 +40198,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 // 그 외 네트워크/경합 실패는 "다른 작업자 대기"가 아님 — 조용히 재시도
                 console.warn('동기화 잠금 획득 실패, 재시도:', e);
             }
-            if (acquired) return { ownerId, token, deviceId };
+            if (acquired) return { ownerId, token, deviceId, serverData: acquiredServerData };
 
             if (Date.now() >= waitDeadline) {
                 console.warn('동기화 잠금 대기 시간 초과 — 강제 획득');
@@ -39449,8 +40311,16 @@ document.addEventListener('DOMContentLoaded', () => {
             // 잠금 대기 중 사용자가 드래그를 시작했을 수 있음 — 상태 교체 전 다시 확인
             await waitForUiGestureIdle();
 
-            const snap = await fetchCompanyDocSnap(docRef);
-            let serverData = snap.exists ? snap.data() : {};
+            // 잠금 획득 트랜잭션에서 이미 최신 문서를 읽었으면 그걸 재사용 — 같은 문서를
+            // 곧바로 두 번 읽는 낭비(Firestore 읽기 할당량 절약)를 없앤다.
+            let serverData;
+            if (leaseInfo && leaseInfo.serverData) {
+                serverData = leaseInfo.serverData;
+            } else {
+                const snap = await fetchCompanyDocSnap(docRef);
+                serverData = snap.exists ? snap.data() : {};
+            }
+            Object.assign(serverData, await fetchBulkSyncDataReliable());
 
             let mergedDeletedBuildings = mergeDeletedBuildingIds(
                 serverData.deletedBuildingIds,
@@ -39509,6 +40379,7 @@ document.addEventListener('DOMContentLoaded', () => {
             // 쓰기 직전 서버 재조회 후 재병합 (잠금 덕에 동료 중간 쓰기는 거의 없지만 안전망)
             const snapFresh = await fetchCompanyDocSnap(docRef);
             serverData = snapFresh.exists ? snapFresh.data() : {};
+            Object.assign(serverData, await fetchBulkSyncDataReliable());
             mergedDeletedBuildings = mergeDeletedBuildingIds(
                 serverData.deletedBuildingIds,
                 window.state.deletedBuildingIds
@@ -39568,16 +40439,32 @@ document.addEventListener('DOMContentLoaded', () => {
                     return meta;
                 });
 
-            const dataToSync = {
+            // 결함/NDT 데이터는 계속 쌓이면 회사 루트 문서 하나(1MB 한도)를 넘기므로
+            // 별도 문서(bulkData, 도면 PDF와 같은 청크 저장 방식 재사용)에 따로 쓴다.
+            const bulkFields = {
                 defects: sanitizeDefectsForFirestore(window.state.defects),
                 deletedDefectIds: defectMerge.deletedDefectIds,
                 deletedDefectAt: defectMerge.deletedDefectAt || {},
-                confirmedDeletedIds: {},
                 ndtData: window.state.ndtData || {},
                 deletedNdtIds: ndtMerge.deletedNdtIds,
                 deletedNdtAt: ndtMerge.deletedNdtAt || {},
+                ndtDisplacementGroups: window.state.ndtDisplacementGroups || {}
+            };
+            await writeBulkSyncData(bulkFields);
+
+            const dataToSync = {
+                // 예전 버전에서 루트 문서에 직접 쓰던 필드들 — bulkData로 이전했으니 루트에서는 제거
+                // (merge:true는 필드를 지우지 않으므로 FieldValue.delete()로 명시적으로 삭제해야
+                //  루트 문서 크기가 실제로 줄어든다)
+                defects: firebase.firestore.FieldValue.delete(),
+                deletedDefectIds: firebase.firestore.FieldValue.delete(),
+                deletedDefectAt: firebase.firestore.FieldValue.delete(),
+                ndtData: firebase.firestore.FieldValue.delete(),
+                deletedNdtIds: firebase.firestore.FieldValue.delete(),
+                deletedNdtAt: firebase.firestore.FieldValue.delete(),
+                ndtDisplacementGroups: firebase.firestore.FieldValue.delete(),
+                confirmedDeletedIds: {},
                 deletedBuildingIds: mergedDeletedBuildings,
-                ndtDisplacementGroups: window.state.ndtDisplacementGroups || {},
                 grids: window.state.grids || {},
                 buildings: sanitizedBuildings,
                 lastUsedBuildingId: window.state.currentBuildingId || null,
@@ -39620,6 +40507,7 @@ document.addEventListener('DOMContentLoaded', () => {
         } catch (e) {
             console.warn('Firebase Sync Error:', e);
             _syncPending = false;
+            if (isFirestoreQuotaError(e)) pauseFirestoreWrites(SYNC_QUOTA_COOLDOWN_MS);
             const now = Date.now();
             if (now - _syncErrorToastAt >= SYNC_ERROR_TOAST_COOLDOWN_MS) {
                 _syncErrorToastAt = now;
@@ -39647,7 +40535,11 @@ document.addEventListener('DOMContentLoaded', () => {
             _syncInFlight = false;
             if (_syncPending && !_syncRetryTimer) {
                 _syncPending = false;
-                syncStateToFirebase();
+                if (typeof _fsWritePausedUntil === 'number' && Date.now() < _fsWritePausedUntil) {
+                    scheduleSyncRetryAfterError({ code: 'resource-exhausted', message: 'Write stream cooling down' });
+                } else {
+                    syncStateToFirebase();
+                }
             } else if (!_syncPending && !_syncRetryTimer && typeof scheduleFlushPendingRemoteSync === 'function') {
                 scheduleFlushPendingRemoteSync();
             }
@@ -39656,7 +40548,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
 
     let currentUnsubscribe = null;
+    let currentBulkUnsubscribe = null;
     let _listenerNeedsResubscribe = false;
+    let _lastRootSnapshotData = {};
+    let _lastBulkSnapshotData = {};
+    let _bulkHydratedOnce = false;
 
     /** 로그인 직후 서버 문서를 한 번 강제로 읽어 팀원 NDT·결함 데이터를 즉시 반영 */
     async function pullCompanySnapshotOnce() {
@@ -39664,9 +40560,9 @@ document.addEventListener('DOMContentLoaded', () => {
         try {
             const docRef = db.collection('safety_app').doc(getCompanyDocId());
             const snap = await fetchCompanyDocSnap(docRef);
-            if (snap.exists) {
-                await applyRemoteSnapshotFromListener(snap.data());
-            }
+            const rootData = snap.exists ? snap.data() : {};
+            const bulkData = await fetchBulkSyncData();
+            await applyRemoteSnapshotFromListener({ ...rootData, ...bulkData });
         } catch (e) {
             console.warn('회사 데이터 초기 조회 실패:', e);
         }
@@ -39678,24 +40574,16 @@ document.addEventListener('DOMContentLoaded', () => {
             try { currentUnsubscribe(); } catch(e) {}
             currentUnsubscribe = null;
         }
+        if (currentBulkUnsubscribe) {
+            try { currentBulkUnsubscribe(); } catch(e) {}
+            currentBulkUnsubscribe = null;
+        }
         const docId = getCompanyDocId();
         _listenerNeedsResubscribe = false;
-        currentUnsubscribe = db.collection('safety_app').doc(docId).onSnapshot(async (doc) => {
-            if (typeof updateOnlineBadge === 'function') updateOnlineBadge(true);
-            if (doc && doc.exists) {
-                const data = doc.data();
-                if (!data) return;
-                if (_syncInFlight) {
-                    _pendingRemoteData = data;
-                    return;
-                }
-                if (isRealtimeUiGestureBusy()) {
-                    _pendingRemoteData = data;
-                    return;
-                }
-                await applyRemoteSnapshotFromListener(data);
-            }
-        }, (err) => {
+        _lastRootSnapshotData = {};
+        _lastBulkSnapshotData = {};
+
+        const onListenerErr = (err) => {
             console.warn('Realtime listener warning:', err);
             _listenerNeedsResubscribe = true;
             if (typeof updateOnlineBadge === 'function') updateOnlineBadge(false);
@@ -39707,7 +40595,61 @@ document.addEventListener('DOMContentLoaded', () => {
                     }
                 }, 1500);
             }
-        });
+        };
+
+        // 결함/NDT는 별도 문서(bulkData)에 저장되므로, 루트 문서와 bulkData 문서 두 곳을
+        // 각각 구독해서 최신값을 합쳐 적용한다 (한쪽만 바뀌어도 최신 상태를 유지해야 함).
+        const applyCombinedSnapshot = async () => {
+            if (typeof updateOnlineBadge === 'function') updateOnlineBadge(true);
+            // 루트에 남아 있는 구버전 defects/ndt 필드가 bulk 실패 시 되살아나지 않게,
+            // 결함/NDT 계열은 bulk 스냅샷만 신뢰한다.
+            const data = { ..._lastRootSnapshotData };
+            const bulk = _lastBulkSnapshotData || {};
+            const BULK_KEYS = [
+                'defects', 'deletedDefectIds', 'deletedDefectAt',
+                'ndtData', 'deletedNdtIds', 'deletedNdtAt',
+                'ndtDisplacementGroups'
+            ];
+            BULK_KEYS.forEach((k) => { delete data[k]; });
+            Object.assign(data, bulk);
+            if (!Object.keys(data).length && !Object.keys(bulk).length) return;
+            if (_syncInFlight) {
+                _pendingRemoteData = data;
+                return;
+            }
+            if (isRealtimeUiGestureBusy()) {
+                _pendingRemoteData = data;
+                return;
+            }
+            await applyRemoteSnapshotFromListener(data);
+        };
+
+        currentUnsubscribe = db.collection('safety_app').doc(docId).onSnapshot(async (doc) => {
+            _lastRootSnapshotData = (doc && doc.exists && doc.data()) || {};
+            await applyCombinedSnapshot();
+        }, onListenerErr);
+
+        currentBulkUnsubscribe = getBulkSyncDocRef().onSnapshot(async (doc) => {
+            if (!doc || !doc.exists) {
+                // bulk 문서가 아직 없으면 레거시(루트)만 사용 — 빈 객체로 지우지 않음
+                if (!_bulkHydratedOnce) {
+                    // 최초 이전이면 루트 defects를 임시 허용하기 위해 플래그만
+                    _lastBulkSnapshotData = {};
+                    _bulkHydratedOnce = true;
+                    await applyCombinedSnapshot();
+                }
+                return;
+            }
+            const bulkData = await fetchBulkSyncData();
+            if (bulkData == null) {
+                // 불완전/실패: 마지막 정상 bulk 유지, 적용 스킵
+                console.warn('bulkData 불완전 읽기 — 이전 스냅샷 유지');
+                return;
+            }
+            _lastBulkSnapshotData = bulkData;
+            _bulkHydratedOnce = true;
+            await applyCombinedSnapshot();
+        }, onListenerErr);
     }
 
     // ==========================================================================
@@ -40105,6 +41047,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!user) {
             if (window._deletingAccount) return;
             if (currentUnsubscribe) { try { currentUnsubscribe(); } catch (e) {} currentUnsubscribe = null; }
+            if (currentBulkUnsubscribe) { try { currentBulkUnsubscribe(); } catch (e) {} currentBulkUnsubscribe = null; }
             window.state.uid = null;
             window.state.userName = null;
             window.state.companyId = null;
@@ -40452,6 +41395,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 try { currentUnsubscribe(); } catch (e) { /* ignore */ }
                 currentUnsubscribe = null;
             }
+            if (currentBulkUnsubscribe) {
+                try { currentBulkUnsubscribe(); } catch (e) { /* ignore */ }
+                currentBulkUnsubscribe = null;
+            }
             await clearUserCompanyLinks(uid, companyId, { removeMember: true });
             window.state.companyId = null;
             window.state.companyName = null;
@@ -40592,6 +41539,10 @@ document.addEventListener('DOMContentLoaded', () => {
             if (currentUnsubscribe) {
                 try { currentUnsubscribe(); } catch (e) { /* ignore */ }
                 currentUnsubscribe = null;
+            }
+            if (currentBulkUnsubscribe) {
+                try { currentBulkUnsubscribe(); } catch (e) { /* ignore */ }
+                currentBulkUnsubscribe = null;
             }
 
             await cleanupUserFirestoreBeforeDelete(uid, companyId, pendingCompanyId);

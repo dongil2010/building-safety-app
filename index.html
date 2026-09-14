@@ -39,7 +39,8 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <meta name="apple-mobile-web-app-title" content="스마트 안전점검">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css">
-    <link rel="stylesheet" href="styles.css?v=20260910_173527">
+    <link rel="stylesheet" href="styles.css?v=20260913_092100">
+
     <!-- FontAwesome icons for clean engineering UI -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <!-- PDF 생성용: 페이지별로 직접 캡처해서 조립(큰 보고서에서 html2pdf 한방 렌더링이 캔버스 높이 한계로
@@ -285,6 +286,9 @@
                                 <button type="button" id="btnModeArea" class="mode-btn btn-area-mode" title="결함 영역(면적) 마킹 모드 (A)">
                                     <i class="fa-solid fa-draw-square"></i> 🟧 영역 마킹 <span class="mode-shortcut">A</span>
                                 </button>
+                                <button type="button" id="btnSnapToCad" class="mode-btn btn-snap-toggle active" title="CAD 벡터 스냅 — 핀 마킹 시 근처 CAD 선/끝점/교차점에 자동으로 붙습니다 (PDF 벡터 도면에서만 동작)">
+                                    <i class="fa-solid fa-magnet"></i> 스냅
+                                </button>
                             </div>
                             <div class="area-tool-panel" id="areaToolPanel" hidden>
                                 <span class="area-tool-kicker">영역 모양</span>
@@ -311,7 +315,10 @@
                                     <i class="fa-solid fa-rotate-right"></i> 🔄 회전
                                 </button>
                                 <button type="button" id="btnImportCadPins" class="btn-rotate-hero pc-only-chrome" style="background:linear-gradient(135deg, #0284c7, #0369a1); color:#fff; border-color:#38bdf8;" title="AutoCAD(CAD2APP)에서 추출한 cad_defects_import.json 파일을 현재 층에 자동 매핑">
-                                    <i class="fa-solid fa-compass-drafting"></i> 📐 캐드 핀 가져오기
+                                    <i class="fa-solid fa-compass-drafting"></i> 📐 CAD 핀
+                                </button>
+                                <button type="button" id="btnCompactMarkingGaps" class="btn-rotate-hero pc-only-chrome" style="background:linear-gradient(135deg, #7c3aed, #5b21b6); color:#fff; border-color:#a78bfa;" title="현재 층 마킹번호의 빈 칸을 뒤에서부터 앞으로 땡깁니다 (예: 14,15,17,18 → 14,15,16,17)">
+                                    <i class="fa-solid fa-arrow-down-1-9"></i> 빈칸 땡기기
                                 </button>
                                 <input type="file" id="inputImportCadPins" accept=".json" style="display:none;">
                                 <div class="zoom-pill-group">
@@ -366,18 +373,28 @@
                                 <i class="fa-solid fa-vector-square"></i>
                                 <span>영역</span>
                             </button>
+                            <button type="button" class="mobile-rail-btn mobile-rail-more-toggle" id="mobileBtnRailMore" title="추가 도구 보이기/숨기기" aria-expanded="false" aria-controls="mobileMapRailSecondary">
+                                <i class="fa-solid fa-ellipsis"></i>
+                                <span>더보기</span>
+                            </button>
+                            <div class="mobile-rail-secondary" id="mobileMapRailSecondary" hidden>
                             <button type="button" class="mobile-rail-btn" id="mobileBtnAreaInk" title="영역 내부 그리기 (영역을 선택한 뒤 사용)">
                                 <i class="fa-solid fa-pen"></i>
                                 <span>그리기</span>
                             </button>
                             <button type="button" class="mobile-rail-btn" id="mobileBtnQuickDrag" title="켜면 빈 곳 드래그로 결함 다중 선택 (핀·화살표 이동은 0.3초 길게 누름)" aria-pressed="false">
                                 <i class="fa-solid fa-square-dashed"></i>
-                                <span>선택</span>
+                                <span>박스</span>
                             </button>
                             <button type="button" class="mobile-rail-btn" id="mobileBtnAddSelect" title="켜면 터치마다 선택 추가/해제" aria-pressed="false">
                                 <i class="fa-solid fa-object-ungroup"></i>
                                 <span>추가</span>
                             </button>
+                            <button type="button" class="mobile-rail-btn active" id="mobileBtnSnapToCad" title="CAD 벡터 스냅 — 핀 마킹 시 근처 CAD 선/끝점/교차점에 자동으로 붙습니다 (PDF 벡터 도면에서만 동작)">
+                                <i class="fa-solid fa-magnet"></i>
+                                <span>스냅</span>
+                            </button>
+                            </div>
                         </aside>
 
                         <!-- Bottom Icon Toolbar (PC: 도면 안 하단 오버레이) -->
@@ -782,6 +799,11 @@
                         <i class="fa-solid fa-location-dot"></i>
                         <span>마킹</span>
                     </button>
+                    <button type="button" class="mobile-rail-btn mobile-rail-more-toggle" id="mobileNdtBtnRailMore" title="추가 도구 보이기/숨기기" aria-expanded="false" aria-controls="mobileNdtRailSecondary">
+                        <i class="fa-solid fa-ellipsis"></i>
+                        <span>더보기</span>
+                    </button>
+                    <div class="mobile-rail-secondary" id="mobileNdtRailSecondary" hidden>
                     <button type="button" class="mobile-rail-btn" id="mobileNdtBtnQuickDrag" title="켜면 빈 곳 드래그로 항목 다중 선택" aria-pressed="false">
                         <i class="fa-solid fa-square-dashed"></i>
                         <span>박스</span>
@@ -790,6 +812,7 @@
                         <i class="fa-solid fa-object-ungroup"></i>
                         <span>추가</span>
                     </button>
+                    </div>
                     <div class="ndt-rail-sep" aria-hidden="true"></div>
                     <button type="button" class="mobile-rail-btn ndt-disp-undo-btn" id="mobileNdtBtnUndoDisp" hidden title="마지막 부동침하/부재변위 마킹 되돌리기">
                         <i class="fa-solid fa-rotate-left"></i>
@@ -1947,7 +1970,7 @@
                 <button type="button" class="modal-close" id="btnCloseNdtCrackMonitorModal" title="닫기 (Esc)">&times;</button>
             </div>
             <div class="modal-body defect-drawer-body ndt-crack-monitor-modal-body">
-                <p class="ndt-crack-monitor-hint" id="ndtCrackMonitorHint">균열 결함의 회차별 X/Y·균열길이·누적 증가량을 기록합니다.</p>
+                <p class="ndt-crack-monitor-hint" id="ndtCrackMonitorHint">균열 결함의 회차별 X/Y·균열길이·누적(초기치 대비)·전차 대비와 전차/현차 비교 사진을 기록합니다.</p>
                 <div class="ndt-crack-monitor-editor-bar">
                     <label class="ndt-crack-monitor-select-label">
                         <span>결함</span>
@@ -1965,10 +1988,33 @@
                             <label>초기 Y(mm)<input type="text" id="crackGaugeInitialY" class="form-control" inputmode="decimal" autocomplete="off"></label>
                         </div>
                         <div class="defect-crack-monitor-table-wrap">
-                            <table class="defect-crack-monitor-table">
-                                <thead><tr><th>회차</th><th>측정일</th><th>X(mm)</th><th>Y(mm)</th><th>ΔX</th><th>ΔY</th><th>비고</th><th></th></tr></thead>
+                            <table class="defect-crack-monitor-table defect-crack-monitor-table-gauge">
+                                <thead><tr><th>회차</th><th>측정일</th><th>X(mm)</th><th>Y(mm)</th><th title="현회−초기">누적ΔX</th><th title="현회−초기">누적ΔY</th><th title="현회−전회">전차ΔX</th><th title="현회−전회">전차ΔY</th><th>비고</th><th></th></tr></thead>
                                 <tbody id="crackGaugeReadingBody"></tbody>
                             </table>
+                        </div>
+                        <div class="crack-monitor-photo-compare" id="crackGaugePhotoCompare" data-log-kind="gauge">
+                            <div class="crack-monitor-photo-label">비교 사진 (전차 / 현차)</div>
+                            <div class="crack-monitor-photo-slots">
+                                <div class="crack-monitor-photo-slot" data-slot="prev">
+                                    <div class="crack-monitor-photo-slot-title">전차</div>
+                                    <div class="crack-monitor-photo-frame" id="crackGaugePrevPhotoFrame"></div>
+                                    <div class="crack-monitor-photo-actions">
+                                        <button type="button" class="btn btn-sm btn-outline" data-cm-photo-pick="gauge:prev:gallery" title="갤러리"><i class="fa-solid fa-image"></i></button>
+                                        <button type="button" class="btn btn-sm btn-outline" data-cm-photo-pick="gauge:prev:camera" title="카메라"><i class="fa-solid fa-camera"></i></button>
+                                        <button type="button" class="btn btn-sm btn-outline crack-monitor-photo-clear" data-cm-photo-clear="gauge:prev" title="삭제"><i class="fa-solid fa-trash"></i></button>
+                                    </div>
+                                </div>
+                                <div class="crack-monitor-photo-slot" data-slot="curr">
+                                    <div class="crack-monitor-photo-slot-title">현차</div>
+                                    <div class="crack-monitor-photo-frame" id="crackGaugeCurrPhotoFrame"></div>
+                                    <div class="crack-monitor-photo-actions">
+                                        <button type="button" class="btn btn-sm btn-outline" data-cm-photo-pick="gauge:curr:gallery" title="갤러리"><i class="fa-solid fa-image"></i></button>
+                                        <button type="button" class="btn btn-sm btn-outline" data-cm-photo-pick="gauge:curr:camera" title="카메라"><i class="fa-solid fa-camera"></i></button>
+                                        <button type="button" class="btn btn-sm btn-outline crack-monitor-photo-clear" data-cm-photo-clear="gauge:curr" title="삭제"><i class="fa-solid fa-trash"></i></button>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
                         <button type="button" class="btn btn-sm btn-outline defect-crack-monitor-add" id="btnAddCrackGaugeReading"><i class="fa-solid fa-plus"></i> 게이지 측정 행 추가</button>
                     </div>
@@ -1978,10 +2024,33 @@
                             <label>초기 길이(mm)<input type="text" id="crackTipInitialLength" class="form-control" inputmode="decimal" autocomplete="off"></label>
                         </div>
                         <div class="defect-crack-monitor-table-wrap">
-                            <table class="defect-crack-monitor-table">
-                                <thead><tr><th>회차</th><th>측정일</th><th>길이(mm)</th><th>증가</th><th>누적</th><th>비고</th><th></th></tr></thead>
+                            <table class="defect-crack-monitor-table defect-crack-monitor-table-tip">
+                                <thead><tr><th>회차</th><th>측정일</th><th>길이(mm)</th><th>증가</th><th title="현회−초기치">누적</th><th title="현회−전회">전차</th><th>비고</th><th></th></tr></thead>
                                 <tbody id="crackTipReadingBody"></tbody>
                             </table>
+                        </div>
+                        <div class="crack-monitor-photo-compare" id="crackTipPhotoCompare" data-log-kind="tip">
+                            <div class="crack-monitor-photo-label">비교 사진 (전차 / 현차)</div>
+                            <div class="crack-monitor-photo-slots">
+                                <div class="crack-monitor-photo-slot" data-slot="prev">
+                                    <div class="crack-monitor-photo-slot-title">전차</div>
+                                    <div class="crack-monitor-photo-frame" id="crackTipPrevPhotoFrame"></div>
+                                    <div class="crack-monitor-photo-actions">
+                                        <button type="button" class="btn btn-sm btn-outline" data-cm-photo-pick="tip:prev:gallery" title="갤러리"><i class="fa-solid fa-image"></i></button>
+                                        <button type="button" class="btn btn-sm btn-outline" data-cm-photo-pick="tip:prev:camera" title="카메라"><i class="fa-solid fa-camera"></i></button>
+                                        <button type="button" class="btn btn-sm btn-outline crack-monitor-photo-clear" data-cm-photo-clear="tip:prev" title="삭제"><i class="fa-solid fa-trash"></i></button>
+                                    </div>
+                                </div>
+                                <div class="crack-monitor-photo-slot" data-slot="curr">
+                                    <div class="crack-monitor-photo-slot-title">현차</div>
+                                    <div class="crack-monitor-photo-frame" id="crackTipCurrPhotoFrame"></div>
+                                    <div class="crack-monitor-photo-actions">
+                                        <button type="button" class="btn btn-sm btn-outline" data-cm-photo-pick="tip:curr:gallery" title="갤러리"><i class="fa-solid fa-image"></i></button>
+                                        <button type="button" class="btn btn-sm btn-outline" data-cm-photo-pick="tip:curr:camera" title="카메라"><i class="fa-solid fa-camera"></i></button>
+                                        <button type="button" class="btn btn-sm btn-outline crack-monitor-photo-clear" data-cm-photo-clear="tip:curr" title="삭제"><i class="fa-solid fa-trash"></i></button>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
                         <button type="button" class="btn btn-sm btn-outline defect-crack-monitor-add" id="btnAddCrackTipReading"><i class="fa-solid fa-plus"></i> 팁 측정 행 추가</button>
                     </div>
@@ -3088,23 +3157,25 @@
     </div>
 
     <!-- Core → 탭 분류 → 기존 엔진(app.js) -->
-    <script src="js/core/state.js?v=20260910_173527"></script>
-    <script src="js/tabs/registry.js?v=20260910_173527"></script>
-    <script src="js/pdf-vector-bridge.js?v=20260910_173527"></script>
-    <script src="js/core/layout-mode.js?v=20260910_173527"></script>
-    <script src="js/core/performance.js?v=20260910_173527"></script>
-    <script src="js/core/mobile-keyboard.js?v=20260910_173527"></script>
-    <script src="js/tabs/home.js?v=20260910_173527"></script>
-    <script src="js/tabs/map.js?v=20260910_173527"></script>
-    <script src="js/tabs/survey.js?v=20260910_173527"></script>
-    <script src="js/tabs/stats.js?v=20260910_173527"></script>
-    <script src="js/tabs/ndt.js?v=20260910_173527"></script>
-    <script src="js/shared/report.js?v=20260910_173527"></script>
-    <script src="js/shared/hwpx-import.js?v=20260910_173527"></script>
-    <script src="js/shared/auth.js?v=20260910_173527"></script>
-    <script src="app.js?v=20260910_173527"></script>
+    <script src="js/core/state.js?v=20260913_092100"></script>
+    <script src="js/tabs/registry.js?v=20260913_092100"></script>
+    <script src="js/pdf-vector-bridge.js?v=20260913_092100"></script>
+    <script src="js/pdf-vector-snap.js?v=20260913_092100"></script>
+    <script src="js/core/layout-mode.js?v=20260913_092100"></script>
+    <script src="js/core/performance.js?v=20260913_092100"></script>
+    <script src="js/core/mobile-keyboard.js?v=20260913_092100"></script>
+    <script src="js/tabs/home.js?v=20260913_092100"></script>
+    <script src="js/tabs/map.js?v=20260913_092100"></script>
+    <script src="js/tabs/survey.js?v=20260913_092100"></script>
+    <script src="js/tabs/stats.js?v=20260913_092100"></script>
+    <script src="js/tabs/ndt.js?v=20260913_092100"></script>
+    <script src="js/shared/report.js?v=20260913_092100"></script>
+    <script src="js/shared/hwpx-import.js?v=20260913_092100"></script>
+    <script src="js/shared/auth.js?v=20260913_092100"></script>
+    <script src="app.js?v=20260913_092100"></script>
     <script>
-        window.BSA_APP_VERSION = '20260910_173527';
+        window.BSA_APP_VERSION = '20260913_092100';
+
         (function () {
             var el = document.getElementById('appVersionText');
             if (el && window.BSA_APP_VERSION) el.textContent = 'v' + window.BSA_APP_VERSION;
@@ -3128,7 +3199,8 @@
                     native = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
                 } catch (e) {}
                 if (native) return;
-                navigator.serviceWorker.register('./sw.js?v=20260910_173527')
+                navigator.serviceWorker.register('./sw.js?v=20260913_092100')
+
                     .then(function(registration) {
                         console.log('✅ ServiceWorker Registered Successfully with scope:', registration.scope);
                         registration.update();

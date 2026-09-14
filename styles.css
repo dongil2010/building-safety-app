@@ -13711,3 +13711,908 @@ html.bsa-low-end .bsa-kb-drag-handle {
     }
 }
 
+
+/* ============================================================
+   Mobile / tablet breathing room (density first-pass)
+   - Desktop web (wide PC + layout-desktop) stays unchanged
+   - Softens cramped chrome via spacing + progressive disclosure
+   - Preserves existing scroll/position tuning; only visual density
+   ============================================================ */
+
+/* Secondary rail tools collapse (map + NDT) */
+.mobile-rail-secondary {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: inherit;
+    width: 100%;
+}
+
+.mobile-rail-secondary[hidden] {
+    display: none !important;
+}
+
+.mobile-side-rail .mobile-rail-more-toggle,
+.ndt-unified-rail .mobile-rail-more-toggle {
+    border-style: dashed !important;
+}
+
+.mobile-side-rail.is-rail-expanded .mobile-rail-more-toggle,
+.ndt-unified-rail.is-rail-expanded .mobile-rail-more-toggle {
+    border-style: solid !important;
+}
+
+/* Phone + compact widths (exclude desktop-site / PC) */
+@media (max-width: 1024px) {
+    html:not(.layout-desktop) {
+        --bsa-touch-gap: 0.28rem;
+        --bsa-touch-pad: 0.42rem;
+    }
+
+    /* Header / tabs: slightly larger hit targets & readable labels */
+    html:not(.layout-desktop) .main-tabs {
+        padding: 0.28rem 0.45rem !important;
+        gap: 0.32rem !important;
+    }
+
+    html:not(.layout-desktop) .nav-tabs-cluster,
+    html:not(.layout-desktop) .nav-building-tabs {
+        gap: 0.22rem !important;
+    }
+
+    html:not(.layout-desktop) .tab-btn {
+        padding: 0.38rem 0.52rem !important;
+        font-size: 0.76rem !important;
+        gap: 0.28rem !important;
+        min-height: 2.05rem;
+    }
+
+    html:not(.layout-desktop) .tab-btn i {
+        font-size: 0.82rem !important;
+    }
+
+    html:not(.layout-desktop) #floorSelect.styled-select {
+        padding: 0.32rem 0.48rem !important;
+        font-size: 0.8rem !important;
+        min-width: 5.4rem !important;
+        min-height: 2.05rem;
+    }
+
+    html:not(.layout-desktop) #headerNdtDrawingActions .header-ndt-draw-btn {
+        font-size: 0.68rem !important;
+        padding: 0.3rem 0.42rem !important;
+        min-height: 2.05rem !important;
+    }
+
+    html:not(.layout-desktop) .header-overview-btn {
+        padding: 0.32rem 0.48rem !important;
+        font-size: 0.76rem !important;
+        min-height: 2.05rem !important;
+    }
+
+    /* Content padding — less edge-to-edge packing */
+    html:not(.layout-desktop) body.bsa-tab-map .app-content {
+        padding: 0.28rem !important;
+    }
+
+    html:not(.layout-desktop) body.bsa-tab-survey .app-content,
+    html:not(.layout-desktop) body.bsa-tab-ndt .app-content,
+    html:not(.layout-desktop) body.bsa-tab-home .app-content,
+    html:not(.layout-desktop) body:not(.bsa-tab-map) .app-content {
+        padding: 0.55rem 0.6rem 2.25rem !important;
+    }
+
+    /* Map defect list: readable density */
+    html:not(.layout-desktop) #tab-map .inspect-layout {
+        gap: 0.34rem !important;
+    }
+
+    html:not(.layout-desktop) #tab-map .inspect-sidebar-left {
+        padding: 0.34rem 0.38rem !important;
+        gap: 0.28rem !important;
+        border-radius: 12px !important;
+    }
+
+    html:not(.layout-desktop) #tab-map .defect-list-summary {
+        gap: 0.22rem !important;
+    }
+
+    html:not(.layout-desktop) #tab-map .defect-summary-total,
+    html:not(.layout-desktop) #tab-map .defect-summary-badge {
+        font-size: 0.68rem !important;
+        padding: 0.16rem 0.32rem !important;
+        min-height: 1.45rem;
+    }
+
+    html:not(.layout-desktop) #tab-map .defect-list-panel {
+        padding: 0.22rem !important;
+        gap: 0.28rem !important;
+    }
+
+    html:not(.layout-desktop) #tab-map .defect-list-item {
+        padding: 0.22rem 0.28rem 0.22rem 0.22rem !important; gap: 0.22rem !important; border-radius: 8px; min-height: 0 !important; align-items: center !important;
+    }
+
+    html:not(.layout-desktop) #tab-map .defect-list-item-component {
+        font-size: 0.7rem !important; line-height: 1.15 !important;
+    }
+
+    html:not(.layout-desktop) #tab-map .defect-list-item-type {
+        font-size: 0.62rem !important; line-height: 1.12 !important;
+    }
+
+    html:not(.layout-desktop) #tab-map .defect-list-item-measure {
+        font-size: 0.6rem !important; padding: 0 0.18rem !important;
+    }
+
+    html:not(.layout-desktop) #tab-map .defect-badge-no {
+        min-width: 1.2rem !important; width: 1.2rem !important; height: 1.2rem !important; font-size: 0.52rem !important; margin-top: 0 !important; align-self: center !important;
+    }
+
+    /* Side rail — fewer default buttons + larger targets */
+    html:not(.layout-desktop) #tab-map .mobile-side-rail,
+    html:not(.layout-desktop) #tab-ndt .mobile-side-rail,
+    html:not(.layout-desktop) #tab-ndt .ndt-unified-rail {
+        padding: 0.28rem 0.2rem !important;
+        gap: 0.22rem !important;
+        border-radius: 12px !important;
+        max-height: calc(100% - 5.2rem) !important;
+    }
+
+    html:not(.layout-desktop) #tab-map .mobile-rail-btn,
+    html:not(.layout-desktop) #tab-ndt .mobile-rail-btn,
+    html:not(.layout-desktop) #tab-ndt .ndt-cat-rail-btn,
+    html:not(.layout-desktop) #tab-ndt .ndt-unified-rail .mobile-rail-btn {
+        width: 2.65rem !important;
+        min-height: 2.5rem !important;
+        font-size: 0.55rem !important;
+        gap: 0.1rem !important;
+        padding: 0.16rem 0.08rem !important;
+        border-radius: 9px !important;
+    }
+
+    html:not(.layout-desktop) #tab-map .mobile-rail-btn i,
+    html:not(.layout-desktop) #tab-ndt .mobile-rail-btn i {
+        font-size: 0.98rem !important;
+    }
+
+    html:not(.layout-desktop) #tab-ndt .ndt-cat-rail-emoji {
+        font-size: 0.9rem !important;
+    }
+
+    /* Bottom dock FABs — readable on portrait + landscape */
+    html:not(.layout-desktop) #tab-map .mobile-canvas-dock,
+    html:not(.layout-desktop) #tab-ndt .mobile-canvas-dock {
+        left: 0.28rem !important;
+        right: 0.28rem !important;
+        bottom: max(0.2rem, env(safe-area-inset-bottom, 0px)) !important;
+    }
+
+    html:not(.layout-desktop) .mobile-map-fab,
+    html:not(.layout-desktop) #tab-map .mobile-canvas-dock .mobile-map-fab,
+    html:not(.layout-desktop) #tab-ndt .mobile-canvas-dock .mobile-map-fab {
+        padding: 0.22rem 0.18rem !important;
+        gap: 0.14rem !important;
+        border-radius: 12px !important;
+    }
+
+    html:not(.layout-desktop) .mobile-fab-btn,
+    html:not(.layout-desktop) #tab-map .mobile-canvas-dock .mobile-fab-btn,
+    html:not(.layout-desktop) #tab-ndt .mobile-canvas-dock .mobile-fab-btn {
+        min-height: 2.35rem !important;
+        font-size: 0.58rem !important;
+        gap: 0.1rem !important;
+        padding: 0.16rem 0.1rem !important;
+        border-radius: 9px !important;
+    }
+
+    html:not(.layout-desktop) .mobile-fab-btn i,
+    html:not(.layout-desktop) #tab-map .mobile-canvas-dock .mobile-fab-btn i,
+    html:not(.layout-desktop) #tab-ndt .mobile-canvas-dock .mobile-fab-btn i {
+        font-size: 0.92rem !important;
+    }
+
+    /* Sheets / drawers / select lists */
+    html:not(.layout-desktop) #defectModal .defect-drawer-body,
+    html:not(.layout-desktop) #ndtModal .defect-drawer-body,
+    html:not(.layout-desktop) #ndtCrackMonitorModal .defect-drawer-body,
+    html:not(.layout-desktop) #ndtCrackMonitorModal .ndt-crack-monitor-modal-body,
+    html:not(.layout-desktop) #ndtDisplacementModal .defect-drawer-body,
+    html:not(.layout-desktop) #ndtDisplacementGroupEditModal .defect-drawer-body {
+        padding: 0.72rem 0.85rem !important;
+    }
+
+    html:not(.layout-desktop) .bsa-select-sheet-item {
+        min-height: 2.65rem;
+        padding: 0.72rem 0.9rem !important;
+        font-size: 0.92rem !important;
+    }
+
+    html:not(.layout-desktop) .bsa-select-sheet-card {
+        padding-bottom: max(0.5rem, env(safe-area-inset-bottom, 0px));
+    }
+
+    html:not(.layout-desktop) .modal-body,
+    html:not(.layout-desktop) .defect-drawer-body .form-group,
+    html:not(.layout-desktop) .ndt-drawer-body .form-group {
+        row-gap: 0.45rem;
+    }
+
+    html:not(.layout-desktop) .chip {
+        padding: 0.32rem 0.55rem;
+        font-size: 0.78rem;
+        min-height: 2rem;
+    }
+
+    /* Home / survey cards */
+    html:not(.layout-desktop) .building-row {
+        padding: 0.72rem 0.78rem !important;
+        gap: 0.55rem !important;
+        min-height: 3.05rem;
+    }
+
+    html:not(.layout-desktop) .building-row-name {
+        font-size: 0.98rem !important;
+    }
+
+    html:not(.layout-desktop) .building-row-meta {
+        font-size: 0.8rem !important;
+    }
+
+    html:not(.layout-desktop) .icon-btn {
+        width: 2.2rem !important;
+        height: 2.2rem !important;
+        font-size: 0.92rem !important;
+    }
+
+    html:not(.layout-desktop) .section-header,
+    html:not(.layout-desktop) .ndt-results-head {
+        gap: 0.45rem !important;
+        margin-bottom: 0.55rem !important;
+    }
+
+    html:not(.layout-desktop) #ndtSummaryTable th,
+    html:not(.layout-desktop) #ndtSummaryTable td {
+        padding: 0.42rem 0.4rem !important;
+        font-size: 0.78rem !important;
+    }
+
+    html:not(.layout-desktop) .ndt-r-values-grid {
+        gap: 0.32rem !important;
+    }
+
+    html:not(.layout-desktop) .ndt-r-value-cell {
+        padding: 0.16rem 0.18rem 0.16rem 0.28rem !important;
+    }
+}
+
+/* Landscape phone: prior pass used ~0.42rem labels — restore readability
+   without changing absolute dock/rail positioning strategy */
+@media (orientation: landscape) and (max-width: 1200px) and (max-height: 900px) {
+    html:not(.layout-desktop) .app-header {
+        padding: 0.34rem 0.7rem !important;
+        gap: 0.45rem !important;
+    }
+
+    html:not(.layout-desktop) .main-tabs {
+        padding: 0.22rem 0.4rem !important;
+    }
+
+    html:not(.layout-desktop) .tab-btn {
+        padding: 0.36rem 0.52rem !important;
+        font-size: 0.78rem !important;
+    }
+
+    html:not(.layout-desktop) body.bsa-tab-map .app-content {
+        padding: 0.32rem 0.4rem !important;
+    }
+
+    html:not(.layout-desktop) #tab-map .inspect-sidebar-left {
+        padding: 0.38rem 0.42rem !important;
+    }
+
+    html:not(.layout-desktop) #tab-map .mobile-canvas-dock .mobile-fab-btn {
+        min-height: 2.15rem !important;
+        font-size: 0.52rem !important;
+    }
+
+    html:not(.layout-desktop) #tab-map .mobile-canvas-dock .mobile-fab-btn i {
+        font-size: 0.84rem !important;
+    }
+
+    html:not(.layout-desktop) #tab-map .mobile-rail-btn {
+        width: 2.4rem !important;
+        min-height: 2.2rem !important;
+        font-size: 0.5rem !important;
+    }
+
+    html:not(.layout-desktop) #tab-map .mobile-rail-btn i {
+        font-size: 0.88rem !important;
+    }
+}
+
+/* Narrow portrait: keep essentials; secondary tools stay behind 더보기 */
+@media (orientation: portrait) and (max-width: 768px) {
+    html:not(.layout-desktop):not(.layout-tablet) #tab-map .mobile-side-rail:not(.is-rail-expanded),
+    html:not(.layout-desktop):not(.layout-tablet) #tab-ndt .ndt-unified-rail:not(.is-rail-expanded) {
+        max-height: calc(100% - 4.8rem) !important;
+    }
+
+    /* Give canvas a touch more air vs chrome */
+    html:not(.layout-desktop):not(.layout-tablet) #tab-map .inspect-sidebar-left {
+        width: 31% !important;
+        max-width: 31% !important;
+        flex: 0 0 31% !important;
+    }
+}
+
+/* Tablet touch UI — same breathing room, slightly roomier than phone */
+html.layout-tablet .main-tabs {
+    padding: 0.28rem 0.5rem !important;
+    gap: 0.3rem !important;
+}
+
+html.layout-tablet .tab-btn {
+    padding: 0.4rem 0.58rem !important;
+    font-size: 0.8rem !important;
+    min-height: 2.15rem;
+}
+
+html.layout-tablet .tab-btn i {
+    font-size: 0.86rem !important;
+}
+
+html.layout-tablet #floorSelect.styled-select {
+    padding: 0.34rem 0.52rem !important;
+    font-size: 0.84rem !important;
+    min-height: 2.15rem !important;
+}
+
+html.layout-tablet #tab-map .inspect-sidebar-left {
+    padding: 0.4rem 0.42rem !important;
+    gap: 0.3rem !important;
+}
+
+html.layout-tablet #tab-map .defect-list-item {
+    padding: 0.28rem 0.3rem !important; min-height: 0 !important; align-items: center !important;
+}
+
+html.layout-tablet #tab-map .defect-list-item-component {
+    font-size: 0.84rem !important;
+}
+
+html.layout-tablet #tab-map .defect-list-item-type {
+    font-size: 0.74rem !important;
+}
+
+html.layout-tablet #tab-map .defect-summary-total,
+html.layout-tablet #tab-map .defect-summary-badge {
+    font-size: 0.72rem !important;
+    padding: 0.18rem 0.36rem !important;
+}
+
+html.layout-tablet .mobile-side-rail,
+html.layout-tablet #tab-map .mobile-side-rail,
+html.layout-tablet #tab-ndt .mobile-side-rail,
+html.layout-tablet #tab-ndt .ndt-unified-rail {
+    padding: 0.3rem 0.22rem !important;
+    gap: 0.2rem !important;
+    border-radius: 12px !important;
+}
+
+html.layout-tablet .mobile-rail-btn,
+html.layout-tablet #tab-map .mobile-rail-btn,
+html.layout-tablet #tab-ndt .mobile-rail-btn,
+html.layout-tablet #tab-ndt .ndt-cat-rail-btn,
+html.layout-tablet #tab-ndt .ndt-unified-rail .mobile-rail-btn {
+    width: 2.85rem !important;
+    min-height: 2.65rem !important;
+    font-size: 0.58rem !important;
+    padding: 0.18rem 0.08rem !important;
+}
+
+html.layout-tablet .mobile-rail-btn i,
+html.layout-tablet #tab-map .mobile-rail-btn i,
+html.layout-tablet #tab-ndt .mobile-rail-btn i {
+    font-size: 1.05rem !important;
+}
+
+html.layout-tablet .mobile-canvas-dock .mobile-fab-btn,
+html.layout-tablet #tab-map .mobile-canvas-dock .mobile-fab-btn {
+    min-height: 2.45rem !important;
+    font-size: 0.62rem !important;
+}
+
+html.layout-tablet .mobile-canvas-dock .mobile-fab-btn i,
+html.layout-tablet #tab-map .mobile-canvas-dock .mobile-fab-btn i {
+    font-size: 0.98rem !important;
+}
+
+html.layout-tablet .bsa-select-sheet-item {
+    min-height: 2.75rem;
+    padding: 0.78rem 1rem !important;
+    font-size: 0.95rem !important;
+}
+
+html.layout-tablet #defectModal .defect-drawer-body,
+html.layout-tablet #ndtModal .defect-drawer-body,
+html.layout-tablet #ndtCrackMonitorModal .defect-drawer-body,
+html.layout-tablet #ndtCrackMonitorModal .ndt-crack-monitor-modal-body {
+    padding: 0.8rem 1rem !important;
+}
+
+/* Desktop / desktop-site: keep secondary tools visible; hide only the 더보기 toggle */
+html.layout-desktop .mobile-rail-more-toggle {
+    display: none !important;
+}
+
+html.layout-desktop .mobile-rail-secondary,
+html.layout-desktop .mobile-rail-secondary[hidden] {
+    display: contents !important;
+}
+
+@media (min-width: 1025px) {
+    html:not(.layout-tablet) .mobile-rail-more-toggle {
+        display: none !important;
+    }
+    html:not(.layout-tablet) .mobile-rail-secondary,
+    html:not(.layout-tablet) .mobile-rail-secondary[hidden] {
+        display: contents !important;
+    }
+}
+
+/* ============================================================
+   Lock system font scale + portrait left defect list single-line
+   ============================================================ */
+html, body {
+    -webkit-text-size-adjust: 100% !important;
+    text-size-adjust: 100% !important;
+}
+
+/* Portrait phone: keep left defect list on one line; shrink badge/type */
+@media (max-width: 768px) and (orientation: portrait) {
+    html:not(.layout-desktop) #tab-map .defect-list-item {
+        padding: 0.28rem 0.32rem !important;
+        gap: 0.28rem !important;
+        min-height: 0 !important;
+        align-items: center !important;
+    }
+
+    html:not(.layout-desktop) #tab-map .defect-list-item-lines {
+        gap: 0.02rem !important;
+        line-height: 1.15 !important;
+        min-width: 0 !important;
+        overflow: hidden !important;
+    }
+
+    html:not(.layout-desktop) #tab-map .defect-list-item-component,
+    html:not(.layout-desktop) #tab-map .defect-list-item-type,
+    html:not(.layout-desktop) #tab-map .defect-list-item-measure {
+        white-space: nowrap !important;
+        overflow: hidden !important;
+        text-overflow: ellipsis !important;
+        word-break: normal !important;
+        overflow-wrap: normal !important;
+        max-width: 100% !important;
+        line-height: 1.15 !important;
+    }
+
+    html:not(.layout-desktop) #tab-map .defect-list-item-component {
+        font-size: 11px !important; /* px: ignore rem root / OEM quirks */
+        font-weight: 800 !important;
+    }
+
+    html:not(.layout-desktop) #tab-map .defect-list-item-type {
+        font-size: 10px !important;
+        font-weight: 600 !important;
+    }
+
+    html:not(.layout-desktop) #tab-map .defect-list-item-measure {
+        font-size: 10px !important;
+        padding: 0.02rem 0.22rem !important;
+    }
+
+    html:not(.layout-desktop) #tab-map .defect-badge-no {
+        min-width: 20px !important;
+        width: 20px !important;
+        height: 20px !important;
+        padding: 0 !important;
+        font-size: 9px !important;
+        margin-top: 0 !important;
+        border-radius: 999px !important;
+        display: inline-flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+        flex-shrink: 0 !important;
+    }
+
+    html:not(.layout-desktop) #tab-map .defect-summary-total,
+    html:not(.layout-desktop) #tab-map .defect-summary-badge {
+        font-size: 10px !important;
+        padding: 0.1rem 0.24rem !important;
+        min-height: 0 !important;
+    }
+}
+
+/* ============================================================
+   Compact left defect cards: cut empty right/below-badge padding
+   ============================================================ */
+html:not(.layout-desktop) #tab-map .defect-list-panel {
+    padding: 0.1rem !important;
+    gap: 0.16rem !important;
+}
+
+html:not(.layout-desktop) #tab-map .inspect-sidebar-left {
+    padding: 0.22rem 0.24rem !important;
+    gap: 0.16rem !important;
+}
+
+html:not(.layout-desktop) #tab-map .defect-list-item {
+    padding: 3px 4px 3px 3px !important;
+    gap: 4px !important;
+    min-height: 0 !important;
+    height: auto !important;
+    align-items: center !important;
+    box-sizing: border-box !important;
+}
+
+html:not(.layout-desktop) #tab-map .defect-list-item-lines {
+    flex: 1 1 auto !important;
+    min-width: 0 !important;
+    gap: 0 !important;
+    line-height: 1.12 !important;
+    justify-content: center !important;
+}
+
+html:not(.layout-desktop) #tab-map .defect-badge-no {
+    min-width: 18px !important;
+    width: 18px !important;
+    height: 18px !important;
+    max-height: 18px !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    font-size: 9px !important;
+    line-height: 18px !important;
+    align-self: center !important;
+    flex: 0 0 18px !important;
+}
+
+html:not(.layout-desktop) #tab-map .defect-list-item-component,
+html:not(.layout-desktop) #tab-map .defect-list-item-type,
+html:not(.layout-desktop) #tab-map .defect-list-item-measure {
+    margin: 0 !important;
+    padding-top: 0 !important;
+    padding-bottom: 0 !important;
+}
+
+html:not(.layout-desktop) #tab-map .defect-list-item-measure {
+    padding-left: 0.16rem !important;
+    padding-right: 0.16rem !important;
+    align-self: flex-start !important;
+}
+
+/* Portrait: keep single-line + even tighter right padding */
+@media (max-width: 768px) and (orientation: portrait) {
+    html:not(.layout-desktop) #tab-map .defect-list-item {
+        padding: 2px 3px 2px 2px !important;
+        gap: 3px !important;
+    }
+    html:not(.layout-desktop) #tab-map .defect-badge-no {
+        min-width: 16px !important;
+        width: 16px !important;
+        height: 16px !important;
+        max-height: 16px !important;
+        font-size: 8px !important;
+        line-height: 16px !important;
+        flex-basis: 16px !important;
+    }
+}
+
+/* ============================================================
+   Fixed UI ratio: rem/root ignore device font preferences
+   ============================================================ */
+html {
+    font-size: 14px !important; /* rem baseline locked (app scale down) */
+    -webkit-text-size-adjust: 100% !important;
+    text-size-adjust: 100% !important;
+}
+body {
+    -webkit-text-size-adjust: 100% !important;
+    text-size-adjust: 100% !important;
+    text-rendering: geometricPrecision;
+}
+
+/* Target look: compact cards, badge top-left, content can be 2–3 lines */
+html:not(.layout-desktop) #tab-map .defect-list-item {
+    display: flex !important;
+    align-items: flex-start !important; /* badge top like reference shot */
+    padding: 6px 8px 6px 6px !important;
+    gap: 6px !important;
+    min-height: 0 !important;
+    height: auto !important;
+}
+
+html:not(.layout-desktop) #tab-map .defect-badge-no {
+    min-width: 22px !important;
+    width: 22px !important;
+    height: 22px !important;
+    max-height: 22px !important;
+    flex: 0 0 22px !important;
+    margin: 1px 0 0 0 !important;
+    padding: 0 !important;
+    font-size: 10px !important;
+    line-height: 22px !important;
+    align-self: flex-start !important;
+}
+
+html:not(.layout-desktop) #tab-map .defect-list-item-lines {
+    flex: 1 1 auto !important;
+    min-width: 0 !important;
+    gap: 2px !important;
+    line-height: 1.2 !important;
+    justify-content: flex-start !important;
+}
+
+html:not(.layout-desktop) #tab-map .defect-list-item-component {
+    font-size: 12px !important;
+    line-height: 1.2 !important;
+    font-weight: 800 !important;
+    white-space: normal !important;
+    overflow: visible !important;
+    text-overflow: unset !important;
+    word-break: keep-all !important;
+}
+
+html:not(.layout-desktop) #tab-map .defect-list-item-type {
+    font-size: 11px !important;
+    line-height: 1.2 !important;
+    white-space: normal !important;
+    overflow: visible !important;
+}
+
+html:not(.layout-desktop) #tab-map .defect-list-item-measure {
+    font-size: 10px !important;
+    line-height: 1.2 !important;
+    padding: 1px 5px !important;
+    white-space: nowrap !important;
+}
+
+html:not(.layout-desktop) #tab-map .defect-list-item-prev-photos {
+    font-size: 10px !important;
+    line-height: 1.2 !important;
+    margin-top: 1px !important;
+}
+
+/* ============================================================
+   Left defect cards denser: smaller type, less nested chip chrome
+   - Prefer 2-line wrap over clipping
+   - Shrink measure / prev-photo nested boxes that steal width
+   ============================================================ */
+html:not(.layout-desktop) #tab-map .inspect-sidebar-left {
+    padding: 0.16rem 0.18rem !important;
+    gap: 0.12rem !important;
+}
+
+html:not(.layout-desktop) #tab-map .defect-list-summary {
+    gap: 0.12rem !important;
+    margin-bottom: 0.1rem !important;
+}
+
+html:not(.layout-desktop) #tab-map .defect-summary-total,
+html:not(.layout-desktop) #tab-map .defect-summary-badge {
+    font-size: 9px !important;
+    padding: 1px 5px !important;
+    min-height: 0 !important;
+    line-height: 1.2 !important;
+}
+
+html:not(.layout-desktop) #tab-map .defect-list-panel {
+    padding: 0.06rem !important;
+    gap: 0.12rem !important;
+}
+
+html:not(.layout-desktop) #tab-map .defect-list-section-title {
+    font-size: 10px !important;
+    padding: 0.08rem 0.04rem !important;
+    margin: 0 !important;
+}
+
+html:not(.layout-desktop) #tab-map .defect-list-item {
+    padding: 4px 5px 4px 4px !important;
+    gap: 4px !important;
+    border-width: 1px !important;
+    align-items: flex-start !important;
+}
+
+html:not(.layout-desktop) #tab-map .defect-badge-no {
+    min-width: 18px !important;
+    width: 18px !important;
+    height: 18px !important;
+    max-height: 18px !important;
+    flex: 0 0 18px !important;
+    font-size: 8px !important;
+    line-height: 18px !important;
+    margin: 1px 0 0 0 !important;
+}
+
+html:not(.layout-desktop) #tab-map .defect-list-item-lines {
+    gap: 1px !important;
+    line-height: 1.15 !important;
+    min-width: 0 !important;
+    overflow: visible !important;
+}
+
+/* Main labels: allow up to 2 lines, no ellipsis cut-off */
+html:not(.layout-desktop) #tab-map .defect-list-item-component,
+html:not(.layout-desktop) #tab-map .defect-list-item-type {
+    display: -webkit-box !important;
+    -webkit-box-orient: vertical !important;
+    -webkit-line-clamp: 2 !important;
+    line-clamp: 2 !important;
+    white-space: normal !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    word-break: keep-all !important;
+    overflow-wrap: anywhere !important;
+    max-width: 100% !important;
+}
+
+html:not(.layout-desktop) #tab-map .defect-list-item-component {
+    font-size: 10px !important;
+    line-height: 1.18 !important;
+    font-weight: 800 !important;
+}
+
+html:not(.layout-desktop) #tab-map .defect-list-item-type {
+    font-size: 9px !important;
+    line-height: 1.18 !important;
+    font-weight: 600 !important;
+}
+
+/* Nested measure chip: less padding/border so text width wins */
+html:not(.layout-desktop) #tab-map .defect-list-item-measure {
+    display: inline-block !important;
+    max-width: 100% !important;
+    font-size: 9px !important;
+    line-height: 1.15 !important;
+    font-weight: 700 !important;
+    padding: 0 3px !important;
+    margin: 1px 0 0 0 !important;
+    border-width: 1px !important;
+    border-radius: 3px !important;
+    white-space: normal !important; /* allow wrap into 2 lines if long */
+    overflow-wrap: anywhere !important;
+    word-break: keep-all !important;
+    box-sizing: border-box !important;
+}
+
+/* Nested prev-photo chip: compact */
+html:not(.layout-desktop) #tab-map .defect-list-item-prev-photos {
+    display: inline-flex !important;
+    align-items: center !important;
+    gap: 2px !important;
+    max-width: 100% !important;
+    font-size: 8px !important;
+    line-height: 1.15 !important;
+    padding: 0 3px !important;
+    margin: 1px 0 0 0 !important;
+    border-radius: 3px !important;
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    box-sizing: border-box !important;
+}
+
+html:not(.layout-desktop) #tab-map .defect-list-item-prev-photos i {
+    font-size: 8px !important;
+    margin: 0 !important;
+}
+
+/* Landscape left rail often wider — still keep dense chips */
+@media (orientation: landscape) and (max-width: 1200px) {
+    html:not(.layout-desktop) #tab-map .defect-list-item-component {
+        font-size: 10px !important;
+    }
+    html:not(.layout-desktop) #tab-map .defect-list-item-type {
+        font-size: 9px !important;
+    }
+    html:not(.layout-desktop) #tab-map .defect-list-item-measure {
+        font-size: 9px !important;
+        padding: 0 3px !important;
+    }
+}
+
+/* ============================================================
+   App UI scale down pass (on top of fontScale lock)
+   ============================================================ */
+html {
+    font-size: 14px !important;
+}
+
+html:not(.layout-desktop) #tab-map .defect-list-item-component {
+    font-size: 9px !important;
+}
+html:not(.layout-desktop) #tab-map .defect-list-item-type {
+    font-size: 8px !important;
+}
+html:not(.layout-desktop) #tab-map .defect-list-item-measure,
+html:not(.layout-desktop) #tab-map .defect-list-item-prev-photos,
+html:not(.layout-desktop) #tab-map .defect-list-item-prev-photos i {
+    font-size: 8px !important;
+}
+html:not(.layout-desktop) #tab-map .defect-badge-no {
+    min-width: 16px !important;
+    width: 16px !important;
+    height: 16px !important;
+    max-height: 16px !important;
+    flex-basis: 16px !important;
+    font-size: 7px !important;
+    line-height: 16px !important;
+}
+html:not(.layout-desktop) #tab-map .defect-summary-total,
+html:not(.layout-desktop) #tab-map .defect-summary-badge,
+html:not(.layout-desktop) #tab-map .defect-list-section-title {
+    font-size: 8px !important;
+}
+
+/* Crack monitor prev/curr photo compare */
+.crack-monitor-photo-compare {
+    margin: 0.55rem 0 0.35rem;
+    padding: 0.55rem 0.6rem;
+    border: 1px dashed var(--border-color);
+    border-radius: 10px;
+    background: var(--bg-secondary);
+}
+.crack-monitor-photo-label {
+    font-size: 0.78rem;
+    font-weight: 700;
+    color: var(--text-muted);
+    margin-bottom: 0.45rem;
+}
+.crack-monitor-photo-slots {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.55rem;
+}
+.crack-monitor-photo-slot-title {
+    font-size: 0.75rem;
+    font-weight: 700;
+    margin-bottom: 0.3rem;
+}
+.crack-monitor-photo-frame {
+    width: 100%;
+    aspect-ratio: 4 / 3;
+    border-radius: 8px;
+    border: 1px solid var(--border-color);
+    background: #1a1a1a0d;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-muted);
+    font-size: 0.72rem;
+    font-weight: 600;
+}
+.crack-monitor-photo-frame.has-photo img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    cursor: pointer;
+}
+.crack-monitor-photo-actions {
+    display: flex;
+    gap: 0.3rem;
+    margin-top: 0.35rem;
+    flex-wrap: wrap;
+}
+.crack-monitor-photo-actions .btn {
+    padding: 0.15rem 0.4rem;
+    font-size: 0.72rem;
+}
+
+#ndtCrackMonitorModal .crack-monitor-photo-compare {
+    margin-top: 0.5rem;
+}
+html:not(.layout-desktop) .crack-monitor-photo-slots {
+    grid-template-columns: 1fr 1fr;
+}
