@@ -3022,6 +3022,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 return String(a.id || '').localeCompare(String(b.id || ''));
             });
 
+        // 동기화 병합(preserveOrder): 번호는 절대 다시 매기지 않는다.
+        // (빈칸 땡기기·CAD 원본·수동 번호가 서버 스냅샷/재부여에 덮이지 않게)
+        if (preserveOrder) {
+            defects.length = 0;
+            ordered.forEach((d) => { if (d) defects.push(d); });
+            return defects;
+        }
         // CAD 원본 번호는 보존하되, 수동 추가 결함은 CAD 최대 본번호 다음부터 이어간다.
         // (예전: seq=0부터라 CAD 100개 뒤 신규가 잠깐 NO.101이었다가 재부여 때 NO.01로 덮임)
         let seq = 0;
@@ -3143,13 +3150,21 @@ document.addEventListener('DOMContentLoaded', () => {
                 applyDefectGroupNumbering(victim.members, baseStr, (m, nextNo) => {
                     const prev = String(m.no || '');
                     m.no = nextNo;
-                    if (prev !== String(nextNo || '')) m.updatedAt = now;
+                    if (m.isCadImported) m.cadNo = nextNo;
+                    if (prev !== String(nextNo || '')) {
+                        m.updatedAt = now;
+                        m.contentUpdatedAt = now;
+                    }
                 });
             } else if (victim.defect) {
                 const prev = String(victim.defect.no || '');
                 victim.defect.no = baseStr;
                 if (victim.defect.groupNo) victim.defect.groupNo = baseStr;
-                if (prev !== baseStr) victim.defect.updatedAt = now;
+                if (victim.defect.isCadImported) victim.defect.cadNo = baseStr;
+                if (prev !== baseStr) {
+                    victim.defect.updatedAt = now;
+                    victim.defect.contentUpdatedAt = now;
+                }
             }
             moved += 1;
         }
@@ -3313,7 +3328,9 @@ document.addEventListener('DOMContentLoaded', () => {
         // 위치만 옮긴 쪽의 좌표를 내용 승자 위에 덮어씀
         const DEFECT_POSITION_FIELDS = [
             'x', 'y', 'targetX', 'targetY', 'mapMarkedAt', 'mapUnregistered',
-            'vertices', 'points', 'areaAngle', 'width', 'height', 'rotation'
+            'vertices', 'points', 'areaAngle', 'width', 'height', 'rotation',
+            'shapeType', 'areaX1', 'areaY1', 'areaX2', 'areaY2', 'areaShape',
+            'areaPoints', 'areaDrawings', 'areaFillStyle', 'areaBorderStyle'
         ];
         const serverPosTs = getDefectPositionUpdatedAt(serverRec);
         const localPosTs = getDefectPositionUpdatedAt(localRec);
@@ -3324,10 +3341,22 @@ document.addEventListener('DOMContentLoaded', () => {
             });
         }
 
-        // 표시 번호는 서버(먼저 확정된 쪽) 순서를 따르고, 마지막에 일괄 renumber
-        if (serverRec.no) merged.no = serverRec.no;
-        if (serverRec.groupNo) merged.groupNo = serverRec.groupNo;
+        // 표시 번호: 더 최근 updatedAt(또는 contentUpdatedAt) 쪽을 따른다.
+        // (예전: 항상 서버 no → 빈칸 땡기기 결과가 동기화 직후 뒷번호로 되돌아감)
+        const serverNoTs = Math.max(serverContentTs, Number(serverRec.updatedAt) || 0);
+        const localNoTs = Math.max(localContentTs, Number(localRec.updatedAt) || 0);
+        const noSource = localNoTs >= serverNoTs ? localRec : serverRec;
+        if (noSource.no != null && noSource.no !== '') merged.no = noSource.no;
+        else if (serverRec.no) merged.no = serverRec.no;
+        else if (localRec.no) merged.no = localRec.no;
+        if (noSource.groupNo != null && noSource.groupNo !== '') merged.groupNo = noSource.groupNo;
+        else if (serverRec.groupNo) merged.groupNo = serverRec.groupNo;
+        else if (localRec.groupNo) merged.groupNo = localRec.groupNo;
+        if (noSource.cadNo != null && noSource.cadNo !== '') merged.cadNo = noSource.cadNo;
+        if (noSource.isCadImported != null) merged.isCadImported = noSource.isCadImported;
+        // groupId는 묶음 구조 안정성을 위해 서버 우선(있으면), 없으면 로컬
         if (serverRec.groupId) merged.groupId = serverRec.groupId;
+        else if (localRec.groupId) merged.groupId = localRec.groupId;
         if (serverRec.surveyExtra || localRec.surveyExtra) merged.surveyExtra = true;
 
         // 사진: 서버 photoIds를 먼저 두고 로컬에만 있는 id를 뒤에 추가 (합집합).
@@ -18988,6 +19017,98 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // 구버전 영역 마킹(번호가 좌상단 고정, tip 없음)을 일반 핀처럼 지시선 연결 좌표로 보정
+    /** 핀 → 영역: tip(또는 박스) 기준으로 기본 사각형 영역 생성 */
+    function convertDefectPinToArea(defect, options) {
+        if (!defect) return false;
+        if (defect.shapeType === 'area' && defect.areaX1 !== undefined) return false;
+        const tipX = Number(defect.targetX);
+        const tipY = Number(defect.targetY);
+        const boxX = Number(defect.x);
+        const boxY = Number(defect.y);
+        const cx = Number.isFinite(tipX) ? tipX : (Number.isFinite(boxX) ? boxX : 0);
+        const cy = Number.isFinite(tipY) ? tipY : (Number.isFinite(boxY) ? boxY : 0);
+        const half = Math.max(40, Number(options && options.halfSize) || 60);
+        defect.shapeType = 'area';
+        defect.areaX1 = Math.round(cx - half);
+        defect.areaY1 = Math.round(cy - half);
+        defect.areaX2 = Math.round(cx + half);
+        defect.areaY2 = Math.round(cy + half);
+        defect.areaShape = 'rect';
+        defect.areaAngle = 0;
+        defect.areaPoints = undefined;
+        defect.areaDrawings = Array.isArray(defect.areaDrawings) ? defect.areaDrawings : [];
+        defect.areaFillStyle = defect.areaFillStyle || state.areaFillStyle || 'solid';
+        defect.areaBorderStyle = defect.areaBorderStyle || state.areaBorderStyle || 'solid';
+        if (typeof ensureAreaPinPlacement === 'function') ensureAreaPinPlacement(defect);
+        if (typeof touchDefectPositionUpdatedAt === 'function') touchDefectPositionUpdatedAt(defect);
+        defect.updatedAt = Date.now();
+        defect.contentUpdatedAt = Date.now();
+        return true;
+    }
+
+    /** 영역 → 핀: 영역 중심을 tip으로, 번호 박스는 위쪽에 배치 */
+    function convertDefectAreaToPin(defect) {
+        if (!defect) return false;
+        if (!(defect.shapeType === 'area' && defect.areaX1 !== undefined)) return false;
+        const x1 = Math.min(Number(defect.areaX1) || 0, Number(defect.areaX2) || 0);
+        const y1 = Math.min(Number(defect.areaY1) || 0, Number(defect.areaY2) || 0);
+        const x2 = Math.max(Number(defect.areaX1) || 0, Number(defect.areaX2) || 0);
+        const y2 = Math.max(Number(defect.areaY1) || 0, Number(defect.areaY2) || 0);
+        const cx = (x1 + x2) / 2;
+        const cy = (y1 + y2) / 2;
+        defect.targetX = Math.round(cx);
+        defect.targetY = Math.round(cy);
+        const styleKey = (typeof getDefectStyleKey === 'function')
+            ? getDefectStyleKey(defect.category, defect.defectType)
+            : 'default';
+        const label = (typeof formatDefectPinLabel === 'function')
+            ? formatDefectPinLabel(defect, styleKey)
+            : String(defect.no || '');
+        const scale = (typeof getStyleSize === 'function') ? getStyleSize(styleKey).pin : 1;
+        if (typeof computePinBoxAboveTarget === 'function' && state.ctx) {
+            const pos = computePinBoxAboveTarget(defect.targetX, defect.targetY, label, scale, state.ctx, 1);
+            defect.x = pos.boxX;
+            defect.y = pos.boxY;
+        } else {
+            defect.x = Math.round(cx);
+            defect.y = Math.round(cy - 40);
+        }
+        delete defect.shapeType;
+        delete defect.areaX1;
+        delete defect.areaY1;
+        delete defect.areaX2;
+        delete defect.areaY2;
+        delete defect.areaShape;
+        delete defect.areaAngle;
+        delete defect.areaPoints;
+        delete defect.areaDrawings;
+        delete defect.areaFillStyle;
+        delete defect.areaBorderStyle;
+        if (typeof touchDefectPositionUpdatedAt === 'function') touchDefectPositionUpdatedAt(defect);
+        defect.updatedAt = Date.now();
+        defect.contentUpdatedAt = Date.now();
+        return true;
+    }
+
+    window.convertDefectPinToArea = convertDefectPinToArea;
+    window.convertDefectAreaToPin = convertDefectAreaToPin;
+
+    function syncDefectShapeConvertButton(existingPin) {
+        const btn = document.getElementById('btnConvertDefectShape');
+        if (!btn) return;
+        if (!existingPin) {
+            btn.hidden = true;
+            return;
+        }
+        btn.hidden = false;
+        const isArea = existingPin.shapeType === 'area' && existingPin.areaX1 !== undefined;
+        btn.dataset.mode = isArea ? 'to-pin' : 'to-area';
+        btn.innerHTML = isArea
+            ? '<i class="fa-solid fa-location-dot"></i> 핀 마킹으로 변경'
+            : '<i class="fa-solid fa-draw-polygon"></i> 영역 마킹으로 변경';
+        btn.title = isArea ? '영역 마킹을 핀(화살표) 마킹으로 바꿉니다' : '핀 마킹을 영역(사각형) 마킹으로 바꿉니다';
+    }
+
     function ensureAreaPinPlacement(defect) {
         if (!defect || defect.shapeType !== 'area' || defect.areaX1 === undefined) return;
         const x1 = Math.min(defect.areaX1, defect.areaX2);
@@ -25629,8 +25750,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const titleEl = document.getElementById('defectModalTitle');
         if (titleEl) {
-            titleEl.textContent = existingPin ? '📍 결함 핀 수정' : '📍 결함 핀 등록';
+            const isAreaTitle = !!(existingPin && existingPin.shapeType === 'area' && existingPin.areaX1 !== undefined);
+            if (!existingPin) titleEl.textContent = '📍 결함 핀 등록';
+            else titleEl.textContent = isAreaTitle ? '⬚ 결함 영역 수정' : '📍 결함 핀 수정';
         }
+        if (typeof syncDefectShapeConvertButton === 'function') syncDefectShapeConvertButton(existingPin || null);
 
         const isAreaModal = !!(existingPin && existingPin.shapeType === 'area' && existingPin.areaX1 !== undefined) || !!areaRect || !!window._pendingAreaRect;
         const areaShapeHint = existingPin
@@ -28099,6 +28223,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (typeof window.showToast === 'function') window.showToast('채울 빈 번호가 없습니다.', 'info');
                 return;
             }
+            if (typeof discardStalePendingRemoteAfterLocalPinEdit === 'function') {
+                discardStalePendingRemoteAfterLocalPinEdit();
+            }
             saveStateToLocalStorage();
             if (typeof renderSurveyTable === 'function') renderSurveyTable();
             if (typeof drawCanvas === 'function') drawCanvas();
@@ -28110,6 +28237,69 @@ document.addEventListener('DOMContentLoaded', () => {
             if (typeof window.showToast === 'function') {
                 window.showToast(`마킹번호 ${result.moved}개 이동: ${result.before} → ${result.after}`, 'success', 4500);
             }
+        });
+    }
+
+    const btnConvertDefectShape = document.getElementById('btnConvertDefectShape');
+    if (btnConvertDefectShape) {
+        btnConvertDefectShape.addEventListener('click', async () => {
+            const pinId = document.getElementById('defectPinId')?.value;
+            if (!pinId || !state.currentBuildingId) {
+                window.showToast?.('저장된 마킹만 형태를 바꿀 수 있습니다.', 'warning');
+                return;
+            }
+            const key = `${state.currentBuildingId}_${state.currentFloor}`;
+            const list = (state.defects && state.defects[key]) || [];
+            const defect = list.find((d) => d && d.id === pinId);
+            if (!defect) {
+                window.showToast?.('마킹을 찾을 수 없습니다.', 'warning');
+                return;
+            }
+            const mode = btnConvertDefectShape.dataset.mode || 'to-area';
+            const toArea = mode === 'to-area';
+            const msg = toArea
+                ? '이 핀 마킹을 영역(사각형) 마킹으로 바꿀까요?\n(중심 tip 기준으로 기본 영역이 생깁니다. 이후 크기·위치는 도면에서 조절하세요.)'
+                : '이 영역 마킹을 핀(화살표) 마킹으로 바꿀까요?\n(영역 중심이 tip이 됩니다.)';
+            if (!window.confirm(msg)) return;
+            if (typeof pushDefectHistory === 'function') pushDefectHistory();
+            const ok = toArea ? convertDefectPinToArea(defect) : convertDefectAreaToPin(defect);
+            if (!ok) {
+                window.showToast?.('형태 변경에 실패했습니다.', 'error');
+                return;
+            }
+            if (typeof discardStalePendingRemoteAfterLocalPinEdit === 'function') {
+                discardStalePendingRemoteAfterLocalPinEdit();
+            }
+            // 모달 pending 좌표/영역 동기화
+            if (toArea) {
+                window._pendingAreaRect = {
+                    x1: defect.areaX1, y1: defect.areaY1,
+                    x2: defect.areaX2, y2: defect.areaY2,
+                    areaShape: defect.areaShape || 'rect',
+                    areaAngle: defect.areaAngle || 0,
+                    areaPoints: defect.areaPoints
+                };
+            } else {
+                window._pendingAreaRect = null;
+            }
+            window._pendingPinCoords = {
+                x: defect.x, y: defect.y,
+                targetX: defect.targetX, targetY: defect.targetY
+            };
+            saveStateToLocalStorage();
+            if (typeof setDefectAreaStylePanelVisible === 'function') {
+                setDefectAreaStylePanelVisible(!!toArea, defect);
+            }
+            if (toArea && typeof syncDefectAreaStyleUi === 'function') {
+                syncDefectAreaStyleUi(defect.areaFillStyle || 'solid', defect.areaBorderStyle || 'solid');
+            }
+            const titleEl2 = document.getElementById('defectModalTitle');
+            if (titleEl2) titleEl2.textContent = toArea ? '⬚ 결함 영역 수정' : '📍 결함 핀 수정';
+            syncDefectShapeConvertButton(defect);
+            if (typeof drawCanvas === 'function') drawCanvas();
+            if (typeof renderSurveyTable === 'function') renderSurveyTable();
+            if (typeof renderDefectListPanel === 'function') renderDefectListPanel();
+            window.showToast?.(toArea ? '영역 마킹으로 변경했습니다.' : '핀 마킹으로 변경했습니다.', 'success');
         });
     }
 
