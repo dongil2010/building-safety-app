@@ -3,12 +3,7 @@
    앱 JS/CSS는 네트워크 전용(캐시 fallback 없음) — 모바일 웹 구버전 고착 방지
    ========================================================================== */
 
-<<<<<<< HEAD
-const CACHE_NAME = 'building-safety-v20260912_125522';
-=======
-const CACHE_NAME = 'building-safety-v20260913_085819';
->>>>>>> 8e1226b (fix(sync): 청크 문서는 parts 완료 후에만 ready로 읽기)
-
+const CACHE_NAME = 'building-safety-v20260913_092100';
 
 /** 오프라인 셸·한글 템플릿만 선캐시 (app.js / js/* 는 제외) */
 const STATIC_ASSETS = [
