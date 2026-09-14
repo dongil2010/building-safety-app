@@ -33188,6 +33188,36 @@ document.addEventListener('DOMContentLoaded', () => {
                     grade3LocMapStampPara.parentNode.removeChild(grade3LocMapStampPara);
                 }
             }
+            // 템플릿 샘플 상태조사표(예: NO.16~30)가 층 스탬프와 같이 복제되지 않도록,
+            // 복제 직전에 첫 층은 유효 표 1장만 남긴다. 같은 문단에 표가 여러 개면 표만 떼고,
+            // 별도 문단이면 문단 전체를 제거한다(부모 두 칸 가정은 HWPX 구조에 따라 실패함).
+            const removeOwningPara = (node) => {
+                let p = node;
+                while (p && p.localName !== "p") p = p.parentNode;
+                if (p && p.parentNode) p.parentNode.removeChild(p);
+                return p;
+            };
+            const owningPara = (node) => {
+                let p = node;
+                while (p && p.localName !== "p") p = p.parentNode;
+                return p;
+            };
+            const stripStampStatusToOne = (stampSlot) => {
+                if (!stampSlot || !stampSlot.statusTbls || stampSlot.statusTbls.length <= 1) return;
+                const keep = stampSlot.statusTbls[0];
+                const keepP = owningPara(keep);
+                stampSlot.statusTbls.slice(1).forEach((tbl) => {
+                    const p = owningPara(tbl);
+                    if (p && keepP && p === keepP) {
+                        if (tbl.parentNode) tbl.parentNode.removeChild(tbl);
+                    } else {
+                        removeOwningPara(tbl);
+                    }
+                });
+                stampSlot.statusTbls = [keep];
+            };
+            stripStampStatusToOne(floorSlots[0]);
+
             const stampChildren = secChildren();
             const stampParas = stampChildren.slice(stampChildren.indexOf(floorSlots[0].titlePara));
             for (let c = 1; c < floorsData.length; c++) {
@@ -33388,12 +33418,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 let pageTbls = slot.statusTbls.slice();
                 if (pageTbls.length > neededPages) {
                     pageTbls.slice(neededPages).forEach(tbl => {
-                        const p = tbl.parentNode.parentNode;
-                        if (p.parentNode) p.parentNode.removeChild(p);
+                        removeOwningPara(tbl);
                     });
                     pageTbls = pageTbls.slice(0, neededPages);
                 } else if (pageTbls.length < neededPages) {
-                    let insertAfterNode = pageTbls[pageTbls.length - 1].parentNode.parentNode;
+                    let insertAfterNode = owningPara(pageTbls[pageTbls.length - 1]);
+                    if (!insertAfterNode) insertAfterNode = pageTbls[pageTbls.length - 1].parentNode;
                     for (let n = pageTbls.length; n < neededPages; n++) {
                         const clonedPara = insertAfterNode.cloneNode(true);
                         clonedPara.setAttribute('pageBreak', '1');
@@ -33408,7 +33438,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
                 pageTbls.forEach((tbl, i) => {
                     if (i > 0) {
-                        tbl.parentNode.parentNode.setAttribute('pageBreak', '1');
+                        const pbPara = owningPara(tbl);
+                        if (pbPara) pbPara.setAttribute('pageBreak', '1');
                         syncStatusTblLayoutFromTemplate(tbl, targetTbl, HEADER_ROW_COUNT, normalRowTpl);
                     }
                 });
@@ -35248,6 +35279,36 @@ document.addEventListener('DOMContentLoaded', () => {
                     });
                 });
             };
+            // 템플릿 샘플 상태조사표(예: NO.16~30)가 층 스탬프와 같이 복제되지 않도록,
+            // 복제 직전에 첫 층은 유효 표 1장만 남긴다. 같은 문단에 표가 여러 개면 표만 떼고,
+            // 별도 문단이면 문단 전체를 제거한다(부모 두 칸 가정은 HWPX 구조에 따라 실패함).
+            const removeOwningPara = (node) => {
+                let p = node;
+                while (p && p.localName !== "p") p = p.parentNode;
+                if (p && p.parentNode) p.parentNode.removeChild(p);
+                return p;
+            };
+            const owningPara = (node) => {
+                let p = node;
+                while (p && p.localName !== "p") p = p.parentNode;
+                return p;
+            };
+            const stripStampStatusToOne = (stampSlot) => {
+                if (!stampSlot || !stampSlot.statusTbls || stampSlot.statusTbls.length <= 1) return;
+                const keep = stampSlot.statusTbls[0];
+                const keepP = owningPara(keep);
+                stampSlot.statusTbls.slice(1).forEach((tbl) => {
+                    const p = owningPara(tbl);
+                    if (p && keepP && p === keepP) {
+                        if (tbl.parentNode) tbl.parentNode.removeChild(tbl);
+                    } else {
+                        removeOwningPara(tbl);
+                    }
+                });
+                stampSlot.statusTbls = [keep];
+            };
+            stripStampStatusToOne(floorSlots[0]);
+
             const stampChildren = secChildren();
             const stampParas = stampChildren.slice(stampChildren.indexOf(floorSlots[0].titlePara));
             for (let c = 1; c < floorsData.length; c++) {
@@ -35410,12 +35471,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 let pageTbls = slot.statusTbls.slice();
                 if (pageTbls.length > neededPages) {
                     pageTbls.slice(neededPages).forEach(tbl => {
-                        const p = tbl.parentNode.parentNode;
-                        if (p.parentNode) p.parentNode.removeChild(p);
+                        removeOwningPara(tbl);
                     });
                     pageTbls = pageTbls.slice(0, neededPages);
                 } else if (pageTbls.length < neededPages) {
-                    let insertAfterNode = pageTbls[pageTbls.length - 1].parentNode.parentNode;
+                    let insertAfterNode = owningPara(pageTbls[pageTbls.length - 1]);
+                    if (!insertAfterNode) insertAfterNode = pageTbls[pageTbls.length - 1].parentNode;
                     for (let n = pageTbls.length; n < neededPages; n++) {
                         const clonedPara = insertAfterNode.cloneNode(true);
                         clonedPara.setAttribute('pageBreak', '1');
@@ -35430,7 +35491,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
                 pageTbls.forEach((tbl, i) => {
                     if (i > 0) {
-                        tbl.parentNode.parentNode.setAttribute('pageBreak', '1');
+                        const pbPara = owningPara(tbl);
+                        if (pbPara) pbPara.setAttribute('pageBreak', '1');
                         syncStatusTblLayoutFromTemplate(tbl, targetTbl, HEADER_ROW_COUNT, normalStyleRow);
                     }
                 });
