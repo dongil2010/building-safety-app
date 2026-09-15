@@ -747,6 +747,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const _idbPendingPdfKeys = new Set();
     const _idbPendingTierKeys = new Set();
     const _idbPendingSourceKeys = new Set();
+    const _sessionDeletedDrawingKeys = new Set();
+    const _drawingFloorTombstone = (window.BSA && window.BSA.drawingFloorTombstone) || {};
     let _idbSaveFailedNotified = false;
     let floorDrawingActiveTierDim = (typeof window.getFloorDrawingBaseTierDim === 'function')
         ? window.getFloorDrawingBaseTierDim()
@@ -1347,9 +1349,65 @@ document.addEventListener('DOMContentLoaded', () => {
         idbDelete('floorDrawings', idbKey);
     }
 
+    function isDeletedDrawingFloor(bldg, floorCode) {
+        if (typeof _drawingFloorTombstone.isDeletedDrawingFloor === 'function') {
+            return _drawingFloorTombstone.isDeletedDrawingFloor(bldg, floorCode, _sessionDeletedDrawingKeys);
+        }
+        return false;
+    }
+
+    function rememberDeletedDrawingFloor(bldg, floorCode) {
+        if (typeof _drawingFloorTombstone.rememberDeletedDrawingFloor === 'function') {
+            _drawingFloorTombstone.rememberDeletedDrawingFloor(bldg, floorCode, _sessionDeletedDrawingKeys);
+        }
+        if (typeof _drawingFloorTombstone.stripDeletedDrawingFloorsFromBuilding === 'function') {
+            _drawingFloorTombstone.stripDeletedDrawingFloorsFromBuilding(bldg, _sessionDeletedDrawingKeys);
+        }
+        return bldg;
+    }
+
+    function forgetDeletedDrawingFloor(bldg, floorCode) {
+        if (typeof _drawingFloorTombstone.forgetDeletedDrawingFloor === 'function') {
+            _drawingFloorTombstone.forgetDeletedDrawingFloor(bldg, floorCode, _sessionDeletedDrawingKeys);
+        }
+        return bldg;
+    }
+
+    function stripDeletedDrawingFloorsFromBuilding(bldg) {
+        if (typeof _drawingFloorTombstone.stripDeletedDrawingFloorsFromBuilding === 'function') {
+            _drawingFloorTombstone.stripDeletedDrawingFloorsFromBuilding(bldg, _sessionDeletedDrawingKeys);
+        }
+        return bldg;
+    }
+
+    function isSessionDeletedDrawingKey(key) {
+        return !!(key && _sessionDeletedDrawingKeys.has(key));
+    }
+
+    function clearLocalDrawingPersistFlags(bldgId, floorCode) {
+        if (!bldgId || !floorCode) return;
+        const floorKey = `${bldgId}_${floorCode}`;
+        _idbPersistedDrawingKeys.delete(floorKey);
+        _idbPersistedPdfKeys.delete(floorKey);
+        _idbPersistedSourceKeys.delete(floorKey);
+        _idbPendingDrawingKeys.delete(floorKey);
+        _idbPendingPdfKeys.delete(floorKey);
+        _idbPendingSourceKeys.delete(floorKey);
+        _idbPersistedTierKeys.delete(floorKey);
+        _idbPendingTierKeys.delete(floorKey);
+        (window.FLOOR_DRAWING_TIER_DIMS || [4000, 8000, 16000]).forEach((d) => {
+            const tierKey = (typeof floorDrawingTierIdbKey === 'function')
+                ? floorDrawingTierIdbKey(bldgId, floorCode, d)
+                : `${bldgId}_${floorCode}_${d}`;
+            _idbPersistedTierKeys.delete(tierKey);
+            _idbPendingTierKeys.delete(tierKey);
+        });
+    }
+
     /** 층 목록 등록과 별도 — 실제 도면·PDF·소스·IDB 캐시가 있는지 */
     function floorHasDrawingData(bldg, floorCode) {
         if (!bldg || !floorCode) return false;
+        if (isDeletedDrawingFloor(bldg, floorCode)) return false;
         const tiers = bldg.floorDrawingTiers && bldg.floorDrawingTiers[floorCode];
         if (tiers && Object.values(tiers).some(Boolean)) return true;
         if (bldg.floorDrawings && bldg.floorDrawings[floorCode]) return true;
@@ -1389,6 +1447,9 @@ document.addEventListener('DOMContentLoaded', () => {
         if (window.state.currentBuildingId === bldg.id && window.state.currentFloor) {
             codes.add(window.state.currentFloor);
         }
+        Array.from(codes).forEach((fc) => {
+            if (isDeletedDrawingFloor(bldg, fc)) codes.delete(fc);
+        });
         return codes;
     }
 
@@ -1397,12 +1458,12 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!bldg.floorsList) bldg.floorsList = [];
         const existing = new Set(bldg.floorsList.map((f) => f.floorCode));
         floorCodes.forEach((fc) => {
-            if (!existing.has(fc)) {
-                bldg.floorsList.push({
-                    floorCode: fc,
-                    floorLabel: window.getFloorLabelFromCode(fc)
-                });
-            }
+            if (!fc || isDeletedDrawingFloor(bldg, fc) || existing.has(fc)) return;
+            existing.add(fc);
+            bldg.floorsList.push({
+                floorCode: fc,
+                floorLabel: window.getFloorLabelFromCode(fc)
+            });
         });
         if (typeof window.sortFloorsLowToHigh === 'function') {
             bldg.floorsList = window.sortFloorsLowToHigh(bldg.floorsList);
@@ -1411,6 +1472,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function floorMayExistOnCloud(bldg, floorCode) {
         if (!bldg || !floorCode || !db || !window.state.companyId) return false;
+        if (isDeletedDrawingFloor(bldg, floorCode)) return false;
         if (typeof navigator !== 'undefined' && navigator.onLine === false) return false;
         if (collectKnownFloorCodesForBuilding(bldg).has(floorCode)) return true;
         // floorsList가 비어 있어도 등록된 건물이면 Firestore·현장 보관함 조회
@@ -1421,6 +1483,7 @@ document.addEventListener('DOMContentLoaded', () => {
     /** 층 목록에 있거나 서버에 있을 수 있으면 IDB·클라우드 조회 시도 */
     function shouldAttemptFloorDrawingLoad(bldg, floorCode) {
         if (!bldg || !floorCode) return false;
+        if (isDeletedDrawingFloor(bldg, floorCode)) return false;
         if (floorHasDrawingData(bldg, floorCode) || floorMayHavePdfSource(bldg, floorCode)) return true;
         if ((bldg.floorsList || []).some((f) => f && f.floorCode === floorCode)) return true;
         if ((bldg.drawingFloorCodes || []).includes(floorCode)) return true;
@@ -1865,11 +1928,17 @@ document.addEventListener('DOMContentLoaded', () => {
             const drawings = b.floorDrawings || {};
             Object.entries(drawings).forEach(([floorCode, dataUrl]) => {
                 if (!dataUrl) return;
+                if (isDeletedDrawingFloor(b, floorCode)) return;
                 const key = `${b.id}_${floorCode}`;
+                if (isSessionDeletedDrawingKey(key)) return;
                 if (_idbPersistedDrawingKeys.has(key) || _idbPendingDrawingKeys.has(key)) return;
                 _idbPendingDrawingKeys.add(key);
                 idbSet('floorDrawings', key, dataUrl).then(ok => {
                     _idbPendingDrawingKeys.delete(key);
+                    if (isDeletedDrawingFloor(b, floorCode) || isSessionDeletedDrawingKey(key)) {
+                        idbDelete('floorDrawings', key);
+                        return;
+                    }
                     if (ok) {
                         _idbPersistedDrawingKeys.add(key);
                         _idbSaveFailedNotified = false;
@@ -1882,6 +1951,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const tierMaps = b.floorDrawingTiers || {};
             Object.entries(tierMaps).forEach(([floorCode, tiersObj]) => {
                 if (!tiersObj || typeof tiersObj !== 'object') return;
+                if (isDeletedDrawingFloor(b, floorCode)) return;
                 Object.entries(tiersObj).forEach(([dim, url]) => {
                     if (typeof url !== 'string' || url.length < 32) return;
                     const key = floorDrawingTierIdbKey(b.id, floorCode, dim);
@@ -1889,6 +1959,10 @@ document.addEventListener('DOMContentLoaded', () => {
                     _idbPendingTierKeys.add(key);
                     idbSet('floorDrawingTiers', key, url).then(ok => {
                         _idbPendingTierKeys.delete(key);
+                        if (isDeletedDrawingFloor(b, floorCode) || isSessionDeletedDrawingKey(`${b.id}_${floorCode}`)) {
+                            idbDelete('floorDrawingTiers', key);
+                            return;
+                        }
                         if (ok) {
                             _idbPersistedTierKeys.add(key);
                             _idbSaveFailedNotified = false;
@@ -1902,11 +1976,17 @@ document.addEventListener('DOMContentLoaded', () => {
             const sourceMaps = b.floorDrawingSources || {};
             Object.entries(sourceMaps).forEach(([floorCode, sourceUrl]) => {
                 if (!sourceUrl) return;
+                if (isDeletedDrawingFloor(b, floorCode)) return;
                 const key = `${b.id}_${floorCode}`;
+                if (isSessionDeletedDrawingKey(key)) return;
                 if (_idbPersistedSourceKeys.has(key) || _idbPendingSourceKeys.has(key)) return;
                 _idbPendingSourceKeys.add(key);
                 idbSet('floorDrawingSources', key, sourceUrl).then(ok => {
                     _idbPendingSourceKeys.delete(key);
+                    if (isDeletedDrawingFloor(b, floorCode) || isSessionDeletedDrawingKey(key)) {
+                        idbDelete('floorDrawingSources', key);
+                        return;
+                    }
                     if (ok) {
                         _idbPersistedSourceKeys.add(key);
                         _idbSaveFailedNotified = false;
@@ -1920,11 +2000,17 @@ document.addEventListener('DOMContentLoaded', () => {
             const pdfs = b.floorDrawingPdfs || {};
             Object.entries(pdfs).forEach(([floorCode, pdfDataUrl]) => {
                 if (!pdfDataUrl) return;
+                if (isDeletedDrawingFloor(b, floorCode)) return;
                 const key = `${b.id}_${floorCode}`;
+                if (isSessionDeletedDrawingKey(key)) return;
                 if (_idbPersistedPdfKeys.has(key) || _idbPendingPdfKeys.has(key)) return;
                 _idbPendingPdfKeys.add(key);
                 idbSet('floorDrawingPdfs', key, pdfDataUrl).then(ok => {
                     _idbPendingPdfKeys.delete(key);
+                    if (isDeletedDrawingFloor(b, floorCode) || isSessionDeletedDrawingKey(key)) {
+                        idbDelete('floorDrawingPdfs', key);
+                        return;
+                    }
                     if (ok) {
                         _idbPersistedPdfKeys.add(key);
                         _idbSaveFailedNotified = false;
@@ -2121,6 +2207,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 const parsed = JSON.parse(saved);
                 if (parsed.buildings && Array.isArray(parsed.buildings)) {
                     window.state.buildings = parsed.buildings.map(bldg => {
+                        stripDeletedDrawingFloorsFromBuilding(bldg);
+                        (bldg.deletedDrawingFloorCodes || []).forEach((code) => {
+                            if (bldg && bldg.id && code) {
+                                _sessionDeletedDrawingKeys.add(`${bldg.id}_${code}`);
+                            }
+                        });
                         if (typeof window.getBuildingAvailableFloors === 'function') {
                             bldg.floorsList = window.getBuildingAvailableFloors(bldg);
                         }
@@ -2425,6 +2517,16 @@ document.addEventListener('DOMContentLoaded', () => {
                 )
             };
             const merged = attachPreservedDrawingAssets(b, bundle);
+            merged.deletedDrawingFloorCodes = (typeof _drawingFloorTombstone.mergeDeletedDrawingFloorCodes === 'function')
+                ? _drawingFloorTombstone.mergeDeletedDrawingFloorCodes(
+                    localMatch?.deletedDrawingFloorCodes,
+                    b.deletedDrawingFloorCodes
+                )
+                : Array.from(new Set([
+                    ...(localMatch?.deletedDrawingFloorCodes || []),
+                    ...(b.deletedDrawingFloorCodes || [])
+                ]));
+            stripDeletedDrawingFloorsFromBuilding(merged);
             // 원격이 옛 floorsList(1층만)를 갖고 와도, 로컬에서 추가한 층이 사라지지 않게 합친다
             merged.floorsList = mergeFloorMetaLists(localMatch?.floorsList, b.floorsList);
             merged.drawingFloorCodes = mergeDrawingFloorCodeLists(
@@ -2433,12 +2535,14 @@ document.addEventListener('DOMContentLoaded', () => {
                 merged.floorsList,
                 [merged.floorDrawings, merged.floorDrawingPdfs, merged.floorDrawingTiers, merged.floorDrawingSources]
             );
+            stripDeletedDrawingFloorsFromBuilding(merged);
             if (merged.drawingFloorCodes.length) {
                 mergeDiscoveredFloorsIntoBuilding(merged, new Set(merged.drawingFloorCodes));
             }
             if (typeof window.getBuildingAvailableFloors === 'function') {
                 merged.floorsList = window.getBuildingAvailableFloors(merged);
             }
+            stripDeletedDrawingFloorsFromBuilding(merged);
             merged.overviewPhotos = mergeOverviewPhotoLists(localMatch?.overviewPhotos, b.overviewPhotos);
             mergeBuildingTrashState(merged, localMatch, b);
             if (localMatch && localMatch._pendingCloudSync) merged._pendingCloudSync = true;
@@ -2505,6 +2609,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
     /** state.buildings 병합 후 currentBuilding 참조·도면 메모리 갱신 */
     function refreshCurrentBuildingFromState() {
+        if (window.currentEditingBuilding && window.currentEditingBuilding.id) {
+            const editing = (window.state.buildings || []).find((b) => b.id === window.currentEditingBuilding.id);
+            if (editing) window.currentEditingBuilding = editing;
+        }
         if (!state.currentBuildingId) return null;
         const fresh = (window.state.buildings || []).find((b) => b.id === state.currentBuildingId);
         if (fresh) state.currentBuilding = fresh;
@@ -3620,6 +3728,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // 다음 저장 때 자연스럽게 IndexedDB로 옮겨진다.)
     async function ensureOfflineRasterForFloor(bldg, floorCode) {
         if (!bldg || !floorCode) return false;
+        if (isDeletedDrawingFloor(bldg, floorCode)) return false;
         const idbKey = `${bldg.id}_${floorCode}`;
         if (isUsableRasterDrawingUrl(bldg.floorDrawings && bldg.floorDrawings[floorCode])) {
             return true;
@@ -3639,6 +3748,7 @@ document.addEventListener('DOMContentLoaded', () => {
     async function hydrateFloorDrawingTiersForFloor(bldg, floorCode, opts) {
         const options = opts || {};
         if (!bldg || !bldg.id || !floorCode) return false;
+        if (isDeletedDrawingFloor(bldg, floorCode)) return false;
         const extraDims = (window.FLOOR_DRAWING_TIER_DIMS || [4000, 8000, 16000]).filter((d) => d > 4000);
         if (!bldg.floorDrawingTiers) bldg.floorDrawingTiers = {};
         if (!bldg.floorDrawingTiers[floorCode]) bldg.floorDrawingTiers[floorCode] = {};
@@ -3673,6 +3783,7 @@ document.addEventListener('DOMContentLoaded', () => {
     async function hydrateFloorDrawingFromCloud(bldg, floorCode, opts) {
         const options = opts || {};
         if (!bldg || !bldg.id || !floorCode) return false;
+        if (isDeletedDrawingFloor(bldg, floorCode)) return false;
         if (!bldg.floorDrawings) bldg.floorDrawings = {};
         if (!bldg.floorDrawingPdfs) bldg.floorDrawingPdfs = {};
         if (!bldg.floorDrawingTiers) bldg.floorDrawingTiers = {};
@@ -3788,13 +3899,19 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!options.localOnly && floors.size === 0 && typeof discoverCloudDrawingFloorCodes === 'function') {
             try {
                 const discovered = await withTimeout(discoverCloudDrawingFloorCodes(bldg), 8000, '도면 층 탐색 시간 초과');
-                discovered.forEach((fc) => floors.add(fc));
+                discovered.forEach((fc) => {
+                    if (!isDeletedDrawingFloor(bldg, fc)) floors.add(fc);
+                });
             } catch (e) {
                 console.warn('서버 도면 층 탐색 실패:', bldg.id, e);
             }
         }
+        Array.from(floors).forEach((fc) => {
+            if (isDeletedDrawingFloor(bldg, fc)) floors.delete(fc);
+        });
         if (floors.size === 0) {
-            floors.add(window.state.currentFloor || '1F');
+            const fallback = window.state.currentFloor || '1F';
+            if (!isDeletedDrawingFloor(bldg, fallback)) floors.add(fallback);
         }
         mergeDiscoveredFloorsIntoBuilding(bldg, floors);
         const priority = options.priorityFloor && floors.has(options.priorityFloor)
@@ -4863,10 +4980,12 @@ document.addEventListener('DOMContentLoaded', () => {
             if (_idbPersistedTierKeys) _idbPersistedTierKeys.forEach(addFromPersistedKey);
         }
 
-        const list = Object.entries(floorMap).map(([code, label]) => ({
-            floorCode: code,
-            floorLabel: label
-        }));
+        const list = Object.entries(floorMap)
+            .filter(([code]) => !isDeletedDrawingFloor(bldg, code))
+            .map(([code, label]) => ({
+                floorCode: code,
+                floorLabel: label
+            }));
 
         if (typeof window.sortFloorsLowToHigh === 'function') {
             return window.sortFloorsLowToHigh(list);
@@ -4881,12 +5000,14 @@ document.addEventListener('DOMContentLoaded', () => {
         // floorsList에 이미 있는 코드도 포함
         (bldg.floorsList || []).forEach((f) => { if (f && f.floorCode) codes.add(f.floorCode); });
         (bldg.drawingFloorCodes || []).forEach((c) => { if (c) codes.add(c); });
-        bldg.drawingFloorCodes = Array.from(codes);
-        mergeDiscoveredFloorsIntoBuilding(bldg, codes);
+        bldg.drawingFloorCodes = Array.from(codes).filter((c) => !isDeletedDrawingFloor(bldg, c));
+        mergeDiscoveredFloorsIntoBuilding(bldg, new Set(bldg.drawingFloorCodes));
+        stripDeletedDrawingFloorsFromBuilding(bldg);
         // floorsList를 최신 집합으로 정렬 유지
         if (typeof window.getBuildingAvailableFloors === 'function') {
             bldg.floorsList = window.getBuildingAvailableFloors(bldg);
         }
+        stripDeletedDrawingFloorsFromBuilding(bldg);
     }
 
     /** IDB에 남아 있는 이 건물 도면 키로 층 목록 보강 (새로고침 후 복구) */
@@ -4900,7 +5021,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 const rest = String(key).slice(prefix.length);
                 if (!rest) return;
                 const tierSuffix = rest.match(/^(.*)_(4000|8000|16000)$/);
-                found.add(tierSuffix ? tierSuffix[1] : rest);
+                const fc = tierSuffix ? tierSuffix[1] : rest;
+                if (!isDeletedDrawingFloor(bldg, fc)) found.add(fc);
             });
         };
         try {
@@ -4924,8 +5046,9 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!bldg.drawingFloorCodes) bldg.drawingFloorCodes = [];
         const codeSet = new Set(bldg.drawingFloorCodes);
         found.forEach((c) => codeSet.add(c));
-        bldg.drawingFloorCodes = Array.from(codeSet);
+        bldg.drawingFloorCodes = Array.from(codeSet).filter((c) => !isDeletedDrawingFloor(bldg, c));
         bldg.floorsList = window.getBuildingAvailableFloors(bldg);
+        stripDeletedDrawingFloorsFromBuilding(bldg);
         return (bldg.floorsList || []).length > before;
     }
 
@@ -4934,10 +5057,14 @@ document.addEventListener('DOMContentLoaded', () => {
      * (점검층 드롭다운·도면 추가/교체 목록 둘 다 이 floorsList를 기준으로 그려짐) */
     async function pruneGhostFloorEntries(bldg) {
         if (!bldg || !bldg.id) return false;
+        const beforeList = (bldg.floorsList || []).length;
+        stripDeletedDrawingFloorsFromBuilding(bldg);
+        const tombstoneRemoved = (bldg.floorsList || []).length !== beforeList;
+
         const candidates = new Set();
         (bldg.floorsList || []).forEach((f) => { if (f && f.floorCode) candidates.add(f.floorCode); });
         (bldg.drawingFloorCodes || []).forEach((c) => { if (c) candidates.add(c); });
-        if (candidates.size === 0) return false;
+        if (candidates.size === 0) return tombstoneRemoved;
 
         const hasRamTrace = (fc) =>
             !!((bldg.floorDrawings && bldg.floorDrawings[fc]) ||
@@ -4946,7 +5073,7 @@ document.addEventListener('DOMContentLoaded', () => {
                (bldg.floorDrawingSources && bldg.floorDrawingSources[fc]));
 
         const suspects = Array.from(candidates).filter((fc) => !hasRamTrace(fc));
-        if (suspects.length === 0) return false;
+        if (suspects.length === 0) return tombstoneRemoved;
 
         let idbFound;
         try {
@@ -4969,30 +5096,31 @@ document.addEventListener('DOMContentLoaded', () => {
             ]);
             [drawKeys, pdfKeys, srcKeys, tierKeys].forEach(takeKeys);
         } catch (e) {
-            return false; // IDB 조회 실패 시 안전하게 아무 것도 지우지 않음
+            return tombstoneRemoved; // IDB 조회 실패 시 안전하게 유령만 추가로 지우지 않음
         }
 
         const stillSuspect = suspects.filter((fc) => !idbFound.has(fc));
-        if (stillSuspect.length === 0) return false;
+        if (stillSuspect.length === 0) return tombstoneRemoved;
 
         // 오프라인이거나 클라우드 조회가 안 되면, 아직 이 기기에 안 내려받았을 뿐일 수 있으니 보류
-        if (typeof navigator !== 'undefined' && navigator.onLine === false) return false;
-        if (!db || !window.state.companyId || typeof discoverCloudDrawingFloorCodes !== 'function') return false;
+        if (typeof navigator !== 'undefined' && navigator.onLine === false) return tombstoneRemoved;
+        if (!db || !window.state.companyId || typeof discoverCloudDrawingFloorCodes !== 'function') return tombstoneRemoved;
 
         let cloudFound;
         try {
             cloudFound = await discoverCloudDrawingFloorCodes(bldg);
         } catch (e) {
-            return false;
+            return tombstoneRemoved;
         }
 
-        const ghosts = stillSuspect.filter((fc) => !cloudFound.has(fc));
-        if (ghosts.length === 0) return false;
+        const ghosts = stillSuspect.filter((fc) => !cloudFound.has(fc) || isDeletedDrawingFloor(bldg, fc));
+        if (ghosts.length === 0) return tombstoneRemoved;
 
         bldg.floorsList = (bldg.floorsList || []).filter((f) => !ghosts.includes(f.floorCode));
         if (Array.isArray(bldg.drawingFloorCodes)) {
             bldg.drawingFloorCodes = bldg.drawingFloorCodes.filter((c) => !ghosts.includes(c));
         }
+        stripDeletedDrawingFloorsFromBuilding(bldg);
         console.info('유령 층 정리:', bldg.id, ghosts);
         return true;
     }
@@ -6670,6 +6798,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Sort existing floors in low-to-high order (B2F -> B1F -> 1F -> 2F -> ROOF)
         existingFloors = window.sortFloorsLowToHigh(existingFloors);
+        existingFloors = existingFloors.filter((f) => f && !isDeletedDrawingFloor(bldg, f.floorCode));
 
         const newFiles = Array.isArray(window.selectedEditUploadedDrawings) ? window.selectedEditUploadedDrawings : [];
         const editGroups = groupDrawingItemsByFloor(newFiles);
@@ -6834,7 +6963,7 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    window.deleteExistingFloorDrawing = function(floorCode) {
+    window.deleteExistingFloorDrawing = async function(floorCode) {
         const bldg = window.currentEditingBuilding;
         if (!bldg || !floorCode) return;
 
@@ -6852,6 +6981,10 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         if (!window.confirmDelete(msg)) return;
 
+        // 동기화·hydrate가 클라우드/IDB에서 되살리기 전에 tombstone을 먼저 남긴다
+        rememberDeletedDrawingFloor(bldg, floorCode);
+        bldg._pendingCloudSync = true;
+
         if (bldg.floorDrawings && bldg.floorDrawings[floorCode]) {
             delete bldg.floorDrawings[floorCode];
         }
@@ -6864,23 +6997,11 @@ document.addEventListener('DOMContentLoaded', () => {
         if (bldg.floorDrawingSources && bldg.floorDrawingSources[floorCode]) {
             delete bldg.floorDrawingSources[floorCode];
         }
-        _idbPersistedDrawingKeys.delete(floorKey);
-        _idbPersistedPdfKeys.delete(floorKey);
-        _idbPersistedSourceKeys.delete(floorKey);
+        clearLocalDrawingPersistFlags(bldg.id, floorCode);
         clearFloorDrawingTierCacheForFloor(bldg.id, floorCode, true);
         clearFloorDrawingRotation(bldg.id, floorCode);
-        idbDelete('floorDrawings', floorKey);
-        idbDelete('floorDrawingPdfs', floorKey);
-        idbDelete('floorDrawingSources', floorKey);
-        deleteFloorDrawingRasterFromCloud(bldg.id, floorCode);
-        deleteFloorDrawingPdfFromCloud(bldg.id, floorCode);
-        deleteFloorDrawingTiersFromCloud(bldg.id, floorCode);
-        if (window._cloudSyncedPdfKeys) window._cloudSyncedPdfKeys.delete(floorKey);
-        if (window._cloudSyncedDrawingKeys) window._cloudSyncedDrawingKeys.delete(floorKey);
-        if (window._cloudSyncedTierKeys) {
-            (window.FLOOR_DRAWING_TIER_DIMS || [4000, 8000, 16000]).forEach((d) => {
-                window._cloudSyncedTierKeys.delete(`${bldg.id}_${floorCode}_${d}`);
-            });
+        if (typeof invalidateCloudDrawingFloorCodesCache === 'function') {
+            invalidateCloudDrawingFloorCodesCache(bldg);
         }
 
         const defects = (window.state.defects && window.state.defects[floorKey]) || [];
@@ -6913,14 +7034,15 @@ document.addEventListener('DOMContentLoaded', () => {
         if (Array.isArray(bldg.drawingFloorCodes)) {
             bldg.drawingFloorCodes = bldg.drawingFloorCodes.filter((c) => c !== floorCode);
         }
+        stripDeletedDrawingFloorsFromBuilding(bldg);
 
         if (window.state.currentBuildingId === bldg.id && window.state.currentFloor === floorCode) {
             const avail = (typeof window.getBuildingAvailableFloors === 'function')
                 ? window.getBuildingAvailableFloors(bldg) : (bldg.floorsList || []);
             const next = (avail[0] && avail[0].floorCode) || '1F';
             window.state.currentFloor = next;
-            if (typeof loadFloorDrawing === 'function') {
-                try { loadFloorDrawing(bldg, next); } catch (_e) { /* ignore */ }
+            if (typeof loadFloorDrawing === 'function' && next !== floorCode) {
+                try { loadFloorDrawing(next); } catch (_e) { /* ignore */ }
             }
         }
 
@@ -6932,6 +7054,33 @@ document.addEventListener('DOMContentLoaded', () => {
         if (typeof drawCanvas === 'function') drawCanvas();
         if (typeof renderSurveyTable === 'function') renderSurveyTable();
         renderEditDrawingPreview();
+
+        window.showLoading?.(`${label} 도면 삭제 중...`);
+        try {
+            await Promise.all([
+                idbDelete('floorDrawings', floorKey),
+                idbDelete('floorDrawingPdfs', floorKey),
+                idbDelete('floorDrawingSources', floorKey),
+                deleteFloorDrawingRasterFromCloud(bldg.id, floorCode),
+                deleteFloorDrawingPdfFromCloud(bldg.id, floorCode),
+                deleteFloorDrawingTiersFromCloud(bldg.id, floorCode)
+            ]);
+        } catch (e) {
+            console.warn('도면 삭제 정리 실패:', floorKey, e);
+        } finally {
+            if (window._cloudSyncedPdfKeys) window._cloudSyncedPdfKeys.delete(floorKey);
+            if (window._cloudSyncedDrawingKeys) window._cloudSyncedDrawingKeys.delete(floorKey);
+            if (window._cloudSyncedTierKeys) {
+                (window.FLOOR_DRAWING_TIER_DIMS || [4000, 8000, 16000]).forEach((d) => {
+                    window._cloudSyncedTierKeys.delete(`${bldg.id}_${floorCode}_${d}`);
+                });
+            }
+            if (typeof window.resetLoadingOverlay === 'function') window.resetLoadingOverlay();
+            else if (typeof window.hideLoading === 'function') window.hideLoading();
+        }
+
+        if (typeof scheduleSyncToFirebase === 'function') scheduleSyncToFirebase();
+        else if (typeof syncStateToFirebase === 'function') syncStateToFirebase();
         window.showToast?.(`${label} 도면·마킹을 삭제했습니다.`, 'success', 3200);
     };
 
@@ -7037,6 +7186,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 try {
                     for (let i = 0; i < newFiles.length; i++) {
                         const item = newFiles[i];
+                        forgetDeletedDrawingFloor(bldg, item.floorCode);
                         // Check if floor already exists in floorsList, if not add it
                         const existingIdx = bldg.floorsList.findIndex(f => f.floorCode === item.floorCode);
                         if (existingIdx < 0) {
@@ -39667,13 +39817,25 @@ document.addEventListener('DOMContentLoaded', () => {
     const _cloudDrawingFloorCodesCache = new Map();
     const CLOUD_DRAWING_FLOOR_CODES_TTL_MS = 5 * 60 * 1000;
 
+    function invalidateCloudDrawingFloorCodesCache(bldg) {
+        try {
+            if (bldg && bldg.id) {
+                _cloudDrawingFloorCodesCache.delete(`${getCompanyDocId()}::${bldg.id}`);
+            } else {
+                _cloudDrawingFloorCodesCache.clear();
+            }
+        } catch (_e) { /* ignore */ }
+    }
+
     async function discoverCloudDrawingFloorCodes(bldg) {
         const codes = new Set();
         if (!bldg || !bldg.id || !db || !window.state.companyId) return codes;
         const cacheKey = `${getCompanyDocId()}::${bldg.id}`;
         const cached = _cloudDrawingFloorCodesCache.get(cacheKey);
         if (cached && (Date.now() - cached.at) < CLOUD_DRAWING_FLOOR_CODES_TTL_MS) {
-            cached.codes.forEach((fc) => codes.add(fc));
+            cached.codes.forEach((fc) => {
+                if (fc && !isDeletedDrawingFloor(bldg, fc)) codes.add(fc);
+            });
             return codes;
         }
         const companyRef = db.collection('safety_app').doc(getCompanyDocId());
@@ -39726,6 +39888,9 @@ document.addEventListener('DOMContentLoaded', () => {
             console.warn('현장 보관함 층 목록 조회 실패:', bldg.name, e);
         }
         _cloudDrawingFloorCodesCache.set(cacheKey, { at: Date.now(), codes: Array.from(codes) });
+        Array.from(codes).forEach((fc) => {
+            if (isDeletedDrawingFloor(bldg, fc)) codes.delete(fc);
+        });
         return codes;
     }
     window.discoverCloudDrawingFloorCodes = discoverCloudDrawingFloorCodes;
@@ -40661,6 +40826,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!b || !b.id) continue;
             const floorCodes = collectKnownFloorCodesForBuilding(b);
             for (const floorCode of floorCodes) {
+                if (isDeletedDrawingFloor(b, floorCode)) continue;
                 const docId = `${b.id}_${floorCode}`;
                 if (window._cloudSyncedDrawingKeys.has(docId)) continue;
                 let raster = b.floorDrawings && b.floorDrawings[floorCode];
@@ -40682,6 +40848,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!b || !b.id) continue;
             const floorCodes = collectKnownFloorCodesForBuilding(b);
             for (const floorCode of floorCodes) {
+                if (isDeletedDrawingFloor(b, floorCode)) continue;
                 const docId = `${b.id}_${floorCode}`;
                 let tiers = (b.floorDrawingTiers && b.floorDrawingTiers[floorCode]) || null;
                 if (!tiers && typeof idbGet === 'function') {
@@ -41124,6 +41291,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     async function persistFloorDrawingAssetsForFloor(bldg, floorCode) {
         if (!bldg || !bldg.id || !floorCode) return;
+        if (isDeletedDrawingFloor(bldg, floorCode)) return;
         const tasks = [];
         const key = `${bldg.id}_${floorCode}`;
         const raster = bldg.floorDrawings && bldg.floorDrawings[floorCode];
@@ -41165,11 +41333,16 @@ document.addEventListener('DOMContentLoaded', () => {
         const persistEntries = (storeName, map, persistedSet, pendingSet) => {
             Object.entries(map || {}).forEach(([floorCode, val]) => {
                 if (!val) return;
+                if (isDeletedDrawingFloor(bldg, floorCode)) return;
                 const key = `${bldg.id}_${floorCode}`;
-                if (persistedSet.has(key)) return;
+                if (isSessionDeletedDrawingKey(key) || persistedSet.has(key)) return;
                 pendingSet.add(key);
                 tasks.push(idbSet(storeName, key, val).then((ok) => {
                     pendingSet.delete(key);
+                    if (isDeletedDrawingFloor(bldg, floorCode) || isSessionDeletedDrawingKey(key)) {
+                        idbDelete(storeName, key);
+                        return;
+                    }
                     if (ok) persistedSet.add(key);
                 }));
             });
@@ -41179,6 +41352,7 @@ document.addEventListener('DOMContentLoaded', () => {
         persistEntries('floorDrawingSources', bldg.floorDrawingSources, _idbPersistedSourceKeys, _idbPendingSourceKeys);
         Object.entries(bldg.floorDrawingTiers || {}).forEach(([floorCode, tiersObj]) => {
             if (!tiersObj || typeof tiersObj !== 'object') return;
+            if (isDeletedDrawingFloor(bldg, floorCode)) return;
             Object.entries(tiersObj).forEach(([dim, url]) => {
                 if (typeof url !== 'string' || url.length < 32) return;
                 const key = floorDrawingTierIdbKey(bldg.id, floorCode, dim);
@@ -41186,6 +41360,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 _idbPendingTierKeys.add(key);
                 tasks.push(idbSet('floorDrawingTiers', key, url).then((ok) => {
                     _idbPendingTierKeys.delete(key);
+                    if (isDeletedDrawingFloor(bldg, floorCode)) {
+                        idbDelete('floorDrawingTiers', key);
+                        return;
+                    }
                     if (ok) _idbPersistedTierKeys.add(key);
                 }));
             });
