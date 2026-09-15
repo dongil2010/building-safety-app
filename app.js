@@ -2981,11 +2981,12 @@ document.addEventListener('DOMContentLoaded', () => {
         return `NO.${String(Math.max(1, Number(n) || 1)).padStart(2, '0')}`;
     }
 
-    /** 본번호(N) 슬롯: 그룹·화살표 여러 개는 1칸, 결함표 추가(-1)는 본번호에 포함 */
+        /** 본번호(N) 슬롯: 그룹·화살표 여러 개는 1칸, 결함표 추가(-1)는 본번호에 포함.
+     * 삭제 후 빈 번호가 있으면 가장 작은 빈 칸을 재사용(max+1만 쓰지 않음). */
     function getNextDefectMainNumber(defects) {
         if (!Array.isArray(defects) || !defects.length) return 1;
         const seenGroup = new Set();
-        let maxMain = 0;
+        const used = new Set();
         defects.forEach((d) => {
             if (!d || d.surveyExtra) return;
             if (d.groupId) {
@@ -2995,9 +2996,11 @@ document.addEventListener('DOMContentLoaded', () => {
             const raw = stripDefectNoSuffix(d.groupNo || d.no || '');
             const m = String(raw).replace(/^NO\.?\s*/i, '').trim().match(/(\d+)/);
             const main = m ? parseInt(m[1], 10) : 0;
-            if (main > maxMain) maxMain = main;
+            if (main > 0) used.add(main);
         });
-        return maxMain + 1;
+        let n = 1;
+        while (used.has(n)) n += 1;
+        return n;
     }
 
     function getNextDefectNoStr(defects) {
