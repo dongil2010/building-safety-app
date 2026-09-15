@@ -1460,13 +1460,18 @@ document.addEventListener('DOMContentLoaded', () => {
         floorCodes.forEach((fc) => {
             if (!fc || isDeletedDrawingFloor(bldg, fc) || existing.has(fc)) return;
             existing.add(fc);
+            const fi = window.BSA && window.BSA.floorIdentity;
             bldg.floorsList.push({
                 floorCode: fc,
-                floorLabel: window.getFloorLabelFromCode(fc)
+                floorLabel: (fi && typeof fi.labelFromCode === 'function')
+                    ? fi.labelFromCode(fc)
+                    : window.getFloorLabelFromCode(fc)
             });
         });
-        if (typeof window.sortFloorsLowToHigh === 'function') {
-            bldg.floorsList = window.sortFloorsLowToHigh(bldg.floorsList);
+        if (bldg.floorsOrderManual) return;
+        if (window.BSA && window.BSA.floorIdentity && typeof window.BSA.floorIdentity.assembleFloors === 'function') {
+            bldg.floorsList = window.BSA.floorIdentity.assembleFloors(bldg.floorsList, []);
+            return;
         }
     }
 
@@ -2456,21 +2461,27 @@ document.addEventListener('DOMContentLoaded', () => {
      * (다른 기기에서 삭제된 고아 레코드가 모바일에 4개·PC 2개처럼 남는 현상 방지)
      */
     function mergeFloorMetaLists(localList, remoteList) {
+        const fi = window.BSA && window.BSA.floorIdentity;
         const map = {};
-        const add = (f) => {
+        const add = (f, overwriteLabel) => {
             if (!f || !f.floorCode) return;
             const code = String(f.floorCode);
+            const label = (fi && typeof fi.normalizeUserLabel === 'function')
+                ? fi.normalizeUserLabel(code, f.floorLabel)
+                : (f.floorLabel || (typeof window.getFloorLabelFromCode === 'function'
+                    ? window.getFloorLabelFromCode(code)
+                    : code));
             if (!map[code]) {
-                map[code] = {
-                    floorCode: code,
-                    floorLabel: f.floorLabel || (typeof window.getFloorLabelFromCode === 'function'
-                        ? window.getFloorLabelFromCode(code)
-                        : code)
-                };
+                map[code] = { floorCode: code, floorLabel: label };
+            } else if (overwriteLabel && f.floorLabel) {
+                map[code].floorLabel = label;
             }
         };
-        (remoteList || []).forEach(add);
-        (localList || []).forEach(add); // 로컬이 더 많은 층을 갖고 있으면 유지
+        (remoteList || []).forEach((f) => add(f, false));
+        (localList || []).forEach((f) => add(f, true));
+        if (fi && typeof fi.assembleFloors === 'function') {
+            return fi.assembleFloors(localList && localList.length ? localList : remoteList, Object.values(map));
+        }
         const list = Object.values(map);
         return (typeof window.sortFloorsLowToHigh === 'function')
             ? window.sortFloorsLowToHigh(list)
@@ -2491,6 +2502,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const _buildingMetaMerge = (window.BSA && window.BSA.buildingMetaMerge) || null;
     const BUILDING_LOCAL_META_KEYS = (_buildingMetaMerge && _buildingMetaMerge.KEYS) || [
         'inspectionType', 'inspectionYear', 'inspectionPeriod', 'latestSurveyRoundKey',
+        'floorsOrderManual',
         'siteName', 'dong', 'multiDong', 'name', 'address', 'inspector', 'contactPhone',
         'floors', 'date', 'structureType', 'facilityGrade', 'completionDate', 'notes'
     ];
@@ -5003,49 +5015,43 @@ document.addEventListener('DOMContentLoaded', () => {
         })();
     };
 
-    window.getFloorLabelFromCode = function(code) {
+    window.getFloorLabelFromCode = function(code, bldg) {
+        const building = bldg
+            || (window.state && window.state.currentBuilding)
+            || window.currentEditingBuilding
+            || null;
+        const fi = window.BSA && window.BSA.floorIdentity;
+        if (fi && typeof fi.lookupFloorLabel === 'function') {
+            return fi.lookupFloorLabel(code, building);
+        }
         if (!code) return '1F';
         const c = String(code).toUpperCase().trim();
-        const dirDef = window.EXT_DIRECTION_DEFS.find(d => d.code === c);
+        const dirDef = (window.EXT_DIRECTION_DEFS || []).find(d => d.code === c);
         if (dirDef) return dirDef.label;
-        if (c === 'EXT' || c.includes('외부')) return '건축물 외부 (EXT)';
+        if (c === 'EXT' || String(code).includes('외부')) return '건축물 외부 (EXT)';
         const roofInfo = typeof window.resolveRoofFloorFromText === 'function' ? window.resolveRoofFloorFromText(code) : null;
         if (roofInfo) return roofInfo.label;
-        const bMatch = c.match(/B\s*([0-9]+)/);
+        const bMatch = c.match(/^B\s*([0-9]+)\s*F?$/);
         if (bMatch) return `지하 ${bMatch[1]}층 (${c})`;
-        const fMatch = c.match(/([0-9]+)\s*F/);
+        const fMatch = c.match(/^([0-9]+)\s*F$/);
         if (fMatch) return `지상 ${fMatch[1]}층 (${c})`;
-        return `${c}층 (${c})`;
+        return String(code).trim();
     };
 
     window.getBuildingAvailableFloors = function(bldg) {
         if (!bldg) return [];
-        const floorMap = {};
-        const addFloor = (code, label) => {
+        const extras = [];
+        const addExtra = (code, label) => {
             if (!code) return;
-            const c = String(code);
-            if (!floorMap[c]) {
-                floorMap[c] = label || window.getFloorLabelFromCode(c);
-            }
+            extras.push({ floorCode: String(code), floorLabel: label || '' });
         };
 
-        // 1. 기존 층 목록 (RAM에서 도면을 내려도 유지되어야 함)
-        if (bldg.floorsList && Array.isArray(bldg.floorsList)) {
-            bldg.floorsList.forEach((f) => {
-                if (f && f.floorCode) addFloor(f.floorCode, f.floorLabel);
-            });
-        }
+        (bldg.drawingFloorCodes || []).forEach((c) => addExtra(c));
+        Object.keys(bldg.floorDrawings || {}).forEach((c) => addExtra(c));
+        Object.keys(bldg.floorDrawingPdfs || {}).forEach((c) => addExtra(c));
+        Object.keys(bldg.floorDrawingSources || {}).forEach((c) => addExtra(c));
+        Object.keys(bldg.floorDrawingTiers || {}).forEach((c) => addExtra(c));
 
-        // 2. 등록 시 기억해 둔 도면 층 코드 (releaseHeavyDrawingMemory 이후 복구용)
-        (bldg.drawingFloorCodes || []).forEach((c) => addFloor(c));
-
-        // 3. RAM에 남아 있는 도면/PDF/티어/원본
-        Object.keys(bldg.floorDrawings || {}).forEach((c) => addFloor(c));
-        Object.keys(bldg.floorDrawingPdfs || {}).forEach((c) => addFloor(c));
-        Object.keys(bldg.floorDrawingSources || {}).forEach((c) => addFloor(c));
-        Object.keys(bldg.floorDrawingTiers || {}).forEach((c) => addFloor(c));
-
-        // 4. IndexedDB에 이미 쓴 키 (세션 중 persist 플래그)
         if (bldg.id) {
             const prefix = `${bldg.id}_`;
             const addFromPersistedKey = (key) => {
@@ -5053,7 +5059,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 const rest = String(key).slice(prefix.length);
                 if (!rest) return;
                 const tierSuffix = rest.match(/^(.*)_(4000|8000|16000)$/);
-                addFloor(tierSuffix ? tierSuffix[1] : rest);
+                addExtra(tierSuffix ? tierSuffix[1] : rest);
             };
             if (_idbPersistedDrawingKeys) _idbPersistedDrawingKeys.forEach(addFromPersistedKey);
             if (_idbPersistedPdfKeys) _idbPersistedPdfKeys.forEach(addFromPersistedKey);
@@ -5061,17 +5067,25 @@ document.addEventListener('DOMContentLoaded', () => {
             if (_idbPersistedTierKeys) _idbPersistedTierKeys.forEach(addFromPersistedKey);
         }
 
-        const list = Object.entries(floorMap)
-            .filter(([code]) => !isDeletedDrawingFloor(bldg, code))
-            .map(([code, label]) => ({
-                floorCode: code,
-                floorLabel: label
-            }));
-
-        if (typeof window.sortFloorsLowToHigh === 'function') {
-            return window.sortFloorsLowToHigh(list);
+        const fi = window.BSA && window.BSA.floorIdentity;
+        let list;
+        if (fi && typeof fi.assembleFloors === 'function') {
+            list = fi.assembleFloors(bldg.floorsList || [], extras);
+        } else {
+            const floorMap = {};
+            const addFloor = (code, label) => {
+                if (!code) return;
+                const c = String(code);
+                if (!floorMap[c]) floorMap[c] = label || window.getFloorLabelFromCode(c);
+            };
+            (bldg.floorsList || []).forEach((f) => {
+                if (f && f.floorCode) addFloor(f.floorCode, f.floorLabel);
+            });
+            extras.forEach((f) => addFloor(f.floorCode, f.floorLabel));
+            list = Object.entries(floorMap).map(([code, label]) => ({ floorCode: code, floorLabel: label }));
         }
-        return list;
+
+        return list.filter((f) => f && f.floorCode && !isDeletedDrawingFloor(bldg, f.floorCode));
     };
 
     /** 도면 저장/메모리 해제 전에 층 코드를 meta에 고정 — 점검층 드롭다운이 비지 않게 */
@@ -5081,7 +5095,11 @@ document.addEventListener('DOMContentLoaded', () => {
         // floorsList에 이미 있는 코드도 포함
         (bldg.floorsList || []).forEach((f) => { if (f && f.floorCode) codes.add(f.floorCode); });
         (bldg.drawingFloorCodes || []).forEach((c) => { if (c) codes.add(c); });
-        bldg.drawingFloorCodes = Array.from(codes).filter((c) => !isDeletedDrawingFloor(bldg, c));
+        const orderedCodes = (bldg.floorsList || [])
+            .map((f) => f && f.floorCode)
+            .filter((c) => c && codes.has(c) && !isDeletedDrawingFloor(bldg, c));
+        const extraCodes = Array.from(codes).filter((c) => c && !orderedCodes.includes(c) && !isDeletedDrawingFloor(bldg, c));
+        bldg.drawingFloorCodes = orderedCodes.concat(extraCodes);
         mergeDiscoveredFloorsIntoBuilding(bldg, new Set(bldg.drawingFloorCodes));
         stripDeletedDrawingFloorsFromBuilding(bldg);
         // floorsList를 최신 집합으로 정렬 유지
@@ -5852,7 +5870,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 targetBldg.floorsList.push(JSON.parse(JSON.stringify(f)));
                 existing.add(f.floorCode);
             });
-            if (typeof window.sortFloorsLowToHigh === 'function') {
+            if (typeof window.sortFloorsLowToHigh === 'function' && !targetBldg.floorsOrderManual) {
                 targetBldg.floorsList = window.sortFloorsLowToHigh(targetBldg.floorsList);
             }
         }
@@ -5883,7 +5901,9 @@ document.addEventListener('DOMContentLoaded', () => {
                         existing.add(f.floorCode);
                     }
                 });
-                targetBldg.floorsList = window.sortFloorsLowToHigh(targetBldg.floorsList);
+                if (!targetBldg.floorsOrderManual && !sourceBldg.floorsOrderManual) {
+                    targetBldg.floorsList = window.sortFloorsLowToHigh(targetBldg.floorsList);
+                }
             }
         }
 
@@ -6045,6 +6065,10 @@ document.addEventListener('DOMContentLoaded', () => {
             item.floorLabel = trimmed;
             item.rank = window.getFloorRankFromCode(trimmed);
             item.matched = true;
+            const editing = window.currentEditingBuilding;
+            if (editing) editing.floorsOrderManual = true;
+            window.drawingPreviewManualOrder = true;
+            window.editDrawingPreviewManualOrder = true;
             return true;
         }
         item.floorCode = code;
@@ -6169,8 +6193,11 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    function drawingPreviewDragHandleHtml(floorCode) {
-        const label = window.getFloorLabelFromCode(floorCode);
+    function drawingPreviewDragHandleHtml(floorCode, floorLabel) {
+        const label = floorLabel
+            || (typeof window.getFloorLabelFromCode === 'function'
+                ? window.getFloorLabelFromCode(floorCode)
+                : floorCode);
         return `<button type="button" class="add-drawing-drag-handle" aria-label="드래그하여 ${escapeHtml(label)} 순서 변경" title="드래그하여 순서 변경">
             <i class="fa-solid fa-grip-vertical"></i>
         </button>
@@ -6196,7 +6223,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const singleRowHtml = (item, idx, floorCode) => `
             <div class="add-drawing-preview-row is-draggable${item.matched === false ? ' is-warning' : ''}" data-floor-code="${escapeHtml(floorCode)}">
-                ${drawingPreviewDragHandleHtml(floorCode)}
+                ${drawingPreviewDragHandleHtml(floorCode, item.floorLabel)}
                 <span class="add-drawing-preview-name" title="${escapeHtml(item.fileName)}">${escapeHtml(item.fileName)}</span>
                 <select class="form-control drawing-floor-select" data-idx="${idx}" style="width:auto; font-size:0.78rem; padding:0.2rem 0.4rem;">
                     ${window.buildFloorCodeOptionsHtml(item.floorCode)}
@@ -6205,10 +6232,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const groupHtml = (g) => {
             if (g.entries.length === 1) return singleRowHtml(g.entries[0].item, g.entries[0].idx, g.floorCode);
-            const floorLabel = window.getFloorLabelFromCode(g.floorCode);
+            const floorLabel = (g.entries[0] && g.entries[0].item && g.entries[0].item.floorLabel)
+                || window.getFloorLabelFromCode(g.floorCode);
             return `
                 <div class="add-drawing-preview-row is-duplicate-group is-draggable" data-floor-code="${escapeHtml(g.floorCode)}">
-                    ${drawingPreviewDragHandleHtml(g.floorCode)}
+                    ${drawingPreviewDragHandleHtml(g.floorCode, floorLabel)}
                     <div style="width:100%; min-width:0;">
                         <div class="add-drawing-preview-title">${floorLabel} — 파일 ${g.entries.length}개 · 저장할 파일 하나를 선택</div>
                         <div style="display:flex; flex-direction:column; gap:0.25rem;">
@@ -6293,7 +6321,7 @@ document.addEventListener('DOMContentLoaded', () => {
         window.selectedUploadedDrawings = (window.selectedUploadedDrawings || [])
             .concat(newItems);
         if (!window.drawingPreviewManualOrder) {
-            window.selectedUploadedDrawings.sort((a, b) => a.rank - b.rank);
+            window.selectedUploadedDrawings = window.sortFloorsLowToHigh(window.selectedUploadedDrawings);
         }
 
         renderNewBuildingDrawingPreview();
@@ -6602,6 +6630,18 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             }
 
+            const fiAdd = window.BSA && window.BSA.floorIdentity;
+            if (fiAdd && typeof fiAdd.normalizeUserLabel === 'function') {
+                floorsList.forEach((f) => {
+                    if (!f) return;
+                    f.floorLabel = fiAdd.normalizeUserLabel(f.floorCode, f.floorLabel);
+                });
+            }
+            const newBldgHasCustom = floorsList.some((f) =>
+                f && f.floorCode && fiAdd && typeof fiAdd.isStandardFloorCode === 'function'
+                    && !fiAdd.isStandardFloorCode(f.floorCode)
+            );
+
             const newBldg = {
                 id: newBuildingId,
                 _pendingCloudSync: true,
@@ -6622,6 +6662,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 completionDate: completionDate,
                 floorsList: floorsList.length > 0 ? floorsList : null,
                 drawingFloorCodes: floorsList.map((f) => f.floorCode).filter(Boolean),
+                floorsOrderManual: !!(window.drawingPreviewManualOrder || newBldgHasCustom),
                 floorDrawings: floorDrawingsMap,
                 floorDrawingPdfs: floorDrawingPdfsMap,
                 floorDrawingTiers: floorDrawingTiersMap,
@@ -6667,20 +6708,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Low-to-High Floor Sort Helper (B3F -> B2F -> B1F -> 1F -> 2F -> 3F -> ROOF -> PH -> PH_ROOF)
     window.sortFloorsLowToHigh = function(floorsList) {
+        const fi = window.BSA && window.BSA.floorIdentity;
+        if (fi && typeof fi.sortFloorsLowToHigh === 'function') {
+            return fi.sortFloorsLowToHigh(floorsList);
+        }
         if (!Array.isArray(floorsList)) return [];
         const getRank = (code) => {
             if (typeof window.getFloorRankFromCode === 'function') return window.getFloorRankFromCode(code);
-            if (!code) return 0;
-            const c = String(code).toUpperCase().trim();
-            if (c.includes('EXT') || c.includes('외부')) return 10000;
-            const roofInfo = typeof window.resolveRoofFloorFromText === 'function' ? window.resolveRoofFloorFromText(code) : null;
-            if (roofInfo) return roofInfo.rank;
-            const bMatch = c.match(/B\s*([0-9]+)/);
-            if (bMatch) return -parseInt(bMatch[1], 10);
-            const fMatch = c.match(/([0-9]+)\s*F/);
-            if (fMatch) return parseInt(fMatch[1], 10);
-            const numMatch = c.match(/([0-9]+)/);
-            if (numMatch) return parseInt(numMatch[1], 10);
             return 0;
         };
         return [...floorsList].sort((a, b) => getRank(a.floorCode) - getRank(b.floorCode));
@@ -6872,13 +6906,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
         let existingFloors = [];
         if (bldg.floorsList && bldg.floorsList.length > 0) {
-            existingFloors = bldg.floorsList;
+            existingFloors = bldg.floorsList.slice();
         } else if (bldg.floorDrawings) {
             existingFloors = Object.keys(bldg.floorDrawings).map(code => ({ floorCode: code, floorLabel: code }));
         }
 
-        // Sort existing floors in low-to-high order (B2F -> B1F -> 1F -> 2F -> ROOF)
-        existingFloors = window.sortFloorsLowToHigh(existingFloors);
         existingFloors = existingFloors.filter((f) => f && !isDeletedDrawingFloor(bldg, f.floorCode));
 
         const newFiles = Array.isArray(window.selectedEditUploadedDrawings) ? window.selectedEditUploadedDrawings : [];
@@ -6886,7 +6918,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         let html = `
             <div style="font-size:0.85rem; font-weight:800; color:#2a2a2a; margin-bottom:0.4rem; display:flex; justify-content:space-between; align-items:center;">
-                <span>🖼️ 층별 도면 목록 (저층 ➡️ 고층 순서 정렬):</span>
+                <span>🖼️ 층별 도면 목록 (저장한 이름·순서 유지, ⠿ 드래그로 변경):</span>
                 <span style="font-size:0.78rem; color:#64748b;">(기존 ${existingFloors.length}개 + 신규추가 ${newFiles.length}개)</span>
             </div>
         `;
@@ -6895,15 +6927,19 @@ document.addEventListener('DOMContentLoaded', () => {
             html += `<div style="font-size:0.8rem; color:#a3a3a3; padding:0.6rem; text-align:center; border:1px dashed #cbd5e1; border-radius:6px;">등록된 층별 도면이 없습니다. 아래에서 파일들을 선택하여 추가해 주세요.</div>`;
         } else {
             html += `<div style="display:flex; flex-direction:column; gap:0.4rem; max-height:220px; overflow-y:auto; padding-right:4px;">`;
+            if (existingFloors.length > 0) {
+                html += `<div class="add-drawing-preview-list edit-drawing-existing-list">`;
+            }
             
             // Render Existing Registered Drawings
             existingFloors.forEach((f, idx) => {
                 const hasImg = bldg.floorDrawings && bldg.floorDrawings[f.floorCode];
                 const safeCode = escapeHtml(f.floorCode);
                 html += `
-                    <div class="edit-floor-drawing-row is-viewable" data-floor-code="${safeCode}" role="button" tabindex="0" title="클릭하여 도면 보기">
+                    <div class="edit-floor-drawing-row is-viewable is-draggable" data-floor-code="${safeCode}" role="button" tabindex="0" title="클릭하여 도면 보기">
+                        ${drawingPreviewDragHandleHtml(f.floorCode, f.floorLabel)}
                         <span class="edit-floor-drawing-meta">
-                            <strong style="color:#2a2a2a;">[기존 ${idx + 1}]</strong> 🏢 ${escapeHtml(f.floorLabel)} (${safeCode})
+                            <strong style="color:#2a2a2a;">[기존 ${idx + 1}]</strong> 🏢 ${escapeHtml(f.floorLabel || f.floorCode)}
                             ${hasImg
                                 ? '<span class="edit-floor-drawing-badge">✓ 도면 · 눌러서 보기</span>'
                                 : '<span class="edit-floor-drawing-badge">눌러서 도면 불러오기</span>'}
@@ -6914,6 +6950,9 @@ document.addEventListener('DOMContentLoaded', () => {
                     </div>
                 `;
             });
+            if (existingFloors.length > 0) {
+                html += `</div>`;
+            }
 
             // 신규추가 파일 중 같은 층으로 지정된 파일 검사 (저장 시 나중 파일이 이전 파일을 덮어씀)
             const hasUnmatched = newFiles.some(it => it.matched === false);
@@ -6937,7 +6976,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     const flagged = item.matched === false;
                     html += `
                         <div class="add-drawing-preview-row is-draggable${flagged ? ' is-warning' : ''}" data-floor-code="${escapeHtml(g.floorCode)}" style="background:${flagged ? '#fffbeb' : '#e0f2fe'}; border-color:${flagged ? '#f59e0b' : '#2a2a2a'};">
-                            ${drawingPreviewDragHandleHtml(g.floorCode)}
+                            ${drawingPreviewDragHandleHtml(g.floorCode, item.floorLabel)}
                             <span class="add-drawing-preview-name" title="${escapeHtml(item.fileName)}">
                                 <strong style="color:#1f1f1f;">[신규]</strong> ${escapeHtml(item.fileName)}
                             </span>
@@ -6947,12 +6986,13 @@ document.addEventListener('DOMContentLoaded', () => {
                         </div>
                     `;
                 } else {
-                    const floorLabel = window.getFloorLabelFromCode(g.floorCode);
+                    const floorLabel = (g.entries[0] && g.entries[0].item && g.entries[0].item.floorLabel)
+                        || window.getFloorLabelFromCode(g.floorCode);
                     html += `
                         <div class="add-drawing-preview-row is-duplicate-group is-draggable" data-floor-code="${escapeHtml(g.floorCode)}">
-                            ${drawingPreviewDragHandleHtml(g.floorCode)}
+                            ${drawingPreviewDragHandleHtml(g.floorCode, floorLabel)}
                             <div style="width:100%; min-width:0;">
-                                <div class="add-drawing-preview-title">[신규] ${floorLabel} — 파일 ${g.entries.length}개 · 저장할 파일 하나를 선택</div>
+                                <div class="add-drawing-preview-title">[신규] ${escapeHtml(floorLabel)} — 파일 ${g.entries.length}개 · 저장할 파일 하나를 선택</div>
                                 <div style="display:flex; flex-direction:column; gap:0.25rem;">
                                 ${g.entries.map(({ item, idx }, i) => {
                                     const isFinal = i === g.entries.length - 1;
@@ -6991,6 +7031,7 @@ document.addEventListener('DOMContentLoaded', () => {
             };
             row.addEventListener('click', (e) => {
                 if (e.target.closest('.edit-floor-drawing-delete')) return;
+                if (e.target.closest('.add-drawing-drag-handle')) return;
                 openView();
             });
             row.addEventListener('keydown', (e) => {
@@ -7009,6 +7050,28 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             });
         });
+
+        const editExistingList = preview.querySelector('.edit-drawing-existing-list');
+        if (editExistingList && existingFloors.length > 1) {
+            bindDrawingPreviewListDrag(editExistingList, '.edit-floor-drawing-row.is-draggable', (floorCodes) => {
+                const b = window.currentEditingBuilding;
+                if (!b || !Array.isArray(b.floorsList)) return;
+                const byCode = {};
+                b.floorsList.forEach((f) => { if (f && f.floorCode) byCode[f.floorCode] = f; });
+                const next = [];
+                floorCodes.forEach((code) => {
+                    if (byCode[code]) next.push(byCode[code]);
+                });
+                b.floorsList.forEach((f) => {
+                    if (f && f.floorCode && !floorCodes.includes(f.floorCode)) next.push(f);
+                });
+                b.floorsList = next;
+                b.floorsOrderManual = true;
+                b.drawingFloorCodes = next.map((f) => f.floorCode).filter(Boolean);
+                if (typeof markBuildingMetaDirty === 'function') markBuildingMetaDirty(b);
+                renderEditDrawingPreview();
+            });
+        }
 
         const editNewList = preview.querySelector('.edit-drawing-new-list');
         if (editNewList && editGroups.length > 1) {
@@ -7333,8 +7396,23 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             }
 
-            // Always rebuild and sort floorsList in LOW-TO-HIGH order (B2F -> B1F -> 1F -> 2F -> ROOF)
+            // 사용자가 지정한 층 이름·순서를 유지한 채 도면 층 목록을 고정
             syncBuildingDrawingFloorCodes(bldg);
+            const fi = window.BSA && window.BSA.floorIdentity;
+            if (fi && typeof fi.normalizeUserLabel === 'function') {
+                bldg.floorsList = (bldg.floorsList || []).map((f) => ({
+                    floorCode: f.floorCode,
+                    floorLabel: fi.normalizeUserLabel(f.floorCode, f.floorLabel)
+                }));
+            }
+            const hasCustomFloor = (bldg.floorsList || []).some((f) =>
+                f && f.floorCode && fi && typeof fi.isStandardFloorCode === 'function'
+                    ? !fi.isStandardFloorCode(f.floorCode)
+                    : false
+            );
+            if (hasCustomFloor || window.editDrawingPreviewManualOrder) {
+                bldg.floorsOrderManual = true;
+            }
 
             // Update building metadata
             const prevSiteName = getBuildingSiteName(bldg);

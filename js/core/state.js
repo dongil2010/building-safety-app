@@ -759,9 +759,32 @@ window.parseFloorInfoFromFilename = function(fileName) {
         return { rank: 1000, floorCode: 'EXT', floorLabel: '건축물 외부 (EXT)', matched: true };
     }
 
-    const bMatch = cleanName.match(/(?:B|지하).{0,8}?([0-9]{1,2})(?![0-9])/i);
-    if (bMatch) {
+    const parkingCustom = (window.BSA && window.BSA.floorIdentity
+        && typeof window.BSA.floorIdentity.parseCustomStemFromFilename === 'function')
+        ? window.BSA.floorIdentity.parseCustomStemFromFilename(nameWithoutExt)
+        : null;
+    if (parkingCustom && /주차/.test(nameWithoutExt)) {
+        return parkingCustom;
+    }
+
+    const basementNum = (window.BSA && window.BSA.floorIdentity
+        && typeof window.BSA.floorIdentity.parseBasementNumber === 'function')
+        ? window.BSA.floorIdentity.parseBasementNumber(nameWithoutExt)
+        : null;
+    if (basementNum) {
+        return { rank: -basementNum, floorCode: `B${basementNum}F`, floorLabel: `지하 ${basementNum}층 (B${basementNum}F)`, matched: true };
+    }
+
+    const bMatch = cleanName.match(/(?:^|[^A-Z0-9])B[\s_-]*([0-9]{1,2})\s*F?(?:[^0-9]|$)/);
+    if (bMatch && !/주차/.test(nameWithoutExt)) {
         const num = parseInt(bMatch[1], 10);
+        if (num > 0 && num <= 99) {
+            return { rank: -num, floorCode: `B${num}F`, floorLabel: `지하 ${num}층 (B${num}F)`, matched: true };
+        }
+    }
+    const basementLabel = nameWithoutExt.match(/지하\s*([0-9]{1,2})\s*층/);
+    if (basementLabel && !/주차/.test(nameWithoutExt)) {
+        const num = parseInt(basementLabel[1], 10);
         if (num > 0 && num <= 99) {
             return { rank: -num, floorCode: `B${num}F`, floorLabel: `지하 ${num}층 (B${num}F)`, matched: true };
         }
@@ -803,19 +826,19 @@ window.FLOOR_CODE_OPTION_LIST = (function() {
 })();
 
 window.getFloorRankFromCode = function(code) {
+    if (window.BSA && window.BSA.floorIdentity && typeof window.BSA.floorIdentity.rankFromCode === 'function') {
+        return window.BSA.floorIdentity.rankFromCode(code);
+    }
     if (!code) return 0;
     const raw = String(code).trim();
     const c = raw.toUpperCase();
     if (c.includes('EXT') || raw.includes('외부')) return 10000;
     const roofInfo = window.resolveRoofFloorFromText(raw);
     if (roofInfo) return roofInfo.rank;
-    // "지하주차장1"처럼 지하/B와 숫자 사이에 다른 글자가 끼어있어도 지하층으로 인식
-    const bMatch = c.match(/B\s*([0-9]+)/) || raw.match(/지하.{0,8}?([0-9]+)/);
+    const bMatch = c.match(/^B[\s_-]*([0-9]+)\s*F?$/) || raw.match(/^지하\s*([0-9]+)\s*층?$/);
     if (bMatch) return -parseInt(bMatch[1], 10);
-    const fMatch = c.match(/([0-9]+)\s*F/);
+    const fMatch = c.match(/^([0-9]+)\s*F$/);
     if (fMatch) return parseInt(fMatch[1], 10);
-    const numMatch = c.match(/([0-9]+)/);
-    if (numMatch) return parseInt(numMatch[1], 10);
     return 0;
 };
 
