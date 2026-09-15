@@ -749,6 +749,20 @@ document.addEventListener('DOMContentLoaded', () => {
     const _idbPendingSourceKeys = new Set();
     const _sessionDeletedDrawingKeys = new Set();
     const _drawingFloorTombstone = (window.BSA && window.BSA.drawingFloorTombstone) || {};
+
+    /** 실시간 동기화가 state.buildings를 새 객체로 바꾸면, 수정창이 들고 있던 참조는 떨어진다. */
+    function resolveLiveEditingBuilding(bldgOrId) {
+        const id = typeof bldgOrId === 'string'
+            ? bldgOrId
+            : (bldgOrId && bldgOrId.id);
+        if (!id) return (typeof bldgOrId === 'object' && bldgOrId) ? bldgOrId : null;
+        const live = (window.state.buildings || []).find((b) => b && b.id === id);
+        if (live) {
+            window.currentEditingBuilding = live;
+            return live;
+        }
+        return (typeof bldgOrId === 'object' && bldgOrId) ? bldgOrId : null;
+    }
     let _idbSaveFailedNotified = false;
     let floorDrawingActiveTierDim = (typeof window.getFloorDrawingBaseTierDim === 'function')
         ? window.getFloorDrawingBaseTierDim()
@@ -2209,7 +2223,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     window.state.buildings = parsed.buildings.map(bldg => {
                         stripDeletedDrawingFloorsFromBuilding(bldg);
                         (bldg.deletedDrawingFloorCodes || []).forEach((code) => {
-                            if (bldg && bldg.id && code) {
+                            if (bldg && bldg.id && code && isDeletedDrawingFloor(bldg, code)) {
                                 _sessionDeletedDrawingKeys.add(`${bldg.id}_${code}`);
                             }
                         });
@@ -2589,15 +2603,22 @@ document.addEventListener('DOMContentLoaded', () => {
                 )
             };
             const merged = attachPreservedDrawingAssets(b, bundle);
-            merged.deletedDrawingFloorCodes = (typeof _drawingFloorTombstone.mergeDeletedDrawingFloorCodes === 'function')
-                ? _drawingFloorTombstone.mergeDeletedDrawingFloorCodes(
-                    localMatch?.deletedDrawingFloorCodes,
-                    b.deletedDrawingFloorCodes
-                )
-                : Array.from(new Set([
-                    ...(localMatch?.deletedDrawingFloorCodes || []),
-                    ...(b.deletedDrawingFloorCodes || [])
-                ]));
+            if (typeof _drawingFloorTombstone.mergeDeletedDrawingFloorState === 'function') {
+                const tomb = _drawingFloorTombstone.mergeDeletedDrawingFloorState(localMatch, b);
+                merged.deletedDrawingFloorCodes = tomb.deletedDrawingFloorCodes;
+                merged.deletedDrawingFloorAt = tomb.deletedDrawingFloorAt;
+                merged.revivedDrawingFloorAt = tomb.revivedDrawingFloorAt;
+            } else {
+                merged.deletedDrawingFloorCodes = (typeof _drawingFloorTombstone.mergeDeletedDrawingFloorCodes === 'function')
+                    ? _drawingFloorTombstone.mergeDeletedDrawingFloorCodes(
+                        localMatch?.deletedDrawingFloorCodes,
+                        b.deletedDrawingFloorCodes
+                    )
+                    : Array.from(new Set([
+                        ...(localMatch?.deletedDrawingFloorCodes || []),
+                        ...(b.deletedDrawingFloorCodes || [])
+                    ]));
+            }
             stripDeletedDrawingFloorsFromBuilding(merged);
             // 원격이 옛 floorsList(1층만)를 갖고 와도, 로컬에서 추가한 층이 사라지지 않게 합친다
             merged.floorsList = mergeFloorMetaLists(localMatch?.floorsList, b.floorsList);
@@ -6448,7 +6469,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const btnEditImportApply = document.getElementById('btnEditImportApply');
     if (btnEditImportApply) {
         btnEditImportApply.addEventListener('click', async () => {
-            const targetBldg = window.currentEditingBuilding;
+            const targetBldg = resolveLiveEditingBuilding(window.currentEditingBuilding);
             if (!targetBldg) return;
             const sourceId = document.getElementById('selectEditImportSource')?.value || '';
             const sourceBldg = (window.state.buildings || []).find(b => b.id === sourceId);
@@ -6837,7 +6858,7 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     window.previewEditFloorDrawing = async function(floorCode) {
-        const bldg = window.currentEditingBuilding;
+        const bldg = resolveLiveEditingBuilding(window.currentEditingBuilding);
         if (!bldg || !floorCode) return;
         const label = (typeof window.getFloorLabelFromCode === 'function')
             ? window.getFloorLabelFromCode(floorCode)
@@ -6867,7 +6888,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const preview = document.getElementById('editDrawingSortPreview');
         if (!preview) return;
 
-        const bldg = window.currentEditingBuilding;
+        const bldg = resolveLiveEditingBuilding(window.currentEditingBuilding);
         if (!bldg) return;
 
         let existingFloors = [];
@@ -7045,7 +7066,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     window.deleteExistingFloorDrawing = async function(floorCode) {
-        const bldg = window.currentEditingBuilding;
+        const bldg = resolveLiveEditingBuilding(window.currentEditingBuilding);
         if (!bldg || !floorCode) return;
 
         const floorKey = `${bldg.id}_${floorCode}`;
@@ -7214,15 +7235,22 @@ document.addEventListener('DOMContentLoaded', () => {
     const btnSaveEditBuilding = document.getElementById('btnSaveEditBuilding');
     if (btnSaveEditBuilding) {
         btnSaveEditBuilding.addEventListener('click', async () => {
-            const bldg = window.currentEditingBuilding;
+            try {
+            const bldg = resolveLiveEditingBuilding(window.currentEditingBuilding);
             if (!bldg) return;
 
+            const drawingMode = window._editBuildingMode === 'drawing'
+                || (document.getElementById('editBuildingModal') || {}).dataset.editMode === 'drawing';
             const siteNameInput = document.getElementById('inputEditBuildingSiteName');
             const dongInput = document.getElementById('inputEditBuildingDong');
-            const siteName = (siteNameInput ? siteNameInput.value : '').trim();
-            const multiDong = readSiteLayoutRadio('editBuildingSiteLayout', false);
-            const dong = multiDong ? normalizeDongLabel(dongInput ? dongInput.value : '') : '';
-            if (!siteName) {
+            const siteName = (siteNameInput ? siteNameInput.value : '').trim()
+                || (typeof getBuildingSiteName === 'function' ? getBuildingSiteName(bldg) : '')
+                || String(bldg.siteName || '').trim();
+            const multiDong = drawingMode
+                ? !!bldg.multiDong
+                : readSiteLayoutRadio('editBuildingSiteLayout', false);
+            const dong = multiDong ? normalizeDongLabel(dongInput ? dongInput.value : (bldg.dong || '')) : '';
+            if (!drawingMode && !siteName) {
                 window.showToast('현장명을 입력해 주세요.', 'warning');
                 if (siteNameInput) siteNameInput.focus();
                 return;
@@ -7336,6 +7364,7 @@ document.addEventListener('DOMContentLoaded', () => {
             // Always rebuild and sort floorsList in LOW-TO-HIGH order (B2F -> B1F -> 1F -> 2F -> ROOF)
             syncBuildingDrawingFloorCodes(bldg);
 
+            if (!drawingMode) {
             // Update building metadata
             const prevSiteName = getBuildingSiteName(bldg);
             bldg.siteName = siteName;
@@ -7396,8 +7425,8 @@ document.addEventListener('DOMContentLoaded', () => {
             bldg.completionDate = completionDate;
             bldg.notes = notes;
             setSiteMultiDongFlag(siteName, multiDong);
-            if (prevSiteName && prevSiteName !== siteName) {
-                // 현장명을 바꾼 경우 이전 키에 남은 형제 동은 건드리지 않음
+            } else {
+                bldg._pendingCloudSync = true;
             }
 
             // Save state & sync
@@ -7427,7 +7456,15 @@ document.addEventListener('DOMContentLoaded', () => {
                 window.selectBuildingAndInspect(bldg);
             }
 
-            window.showToast(`'${bldg.name}' 명칭 및 도면 저장이 완료되었습니다. (총 ${bldg.floorsList.length}개 층)`, 'success');
+            window.showToast(drawingMode
+                ? `'${bldg.name}' 도면 저장이 완료되었습니다. (총 ${(bldg.floorsList || []).length}개 층)`
+                : `'${bldg.name}' 명칭 및 도면 저장이 완료되었습니다. (총 ${(bldg.floorsList || []).length}개 층)`, 'success');
+            } catch (err) {
+                console.error('도면/현장 저장 실패:', err);
+                if (typeof window.resetLoadingOverlay === 'function') window.resetLoadingOverlay();
+                else if (typeof window.hideLoading === 'function') window.hideLoading();
+                window.showToast(`저장 실패: ${err && err.message ? err.message : err}`, 'error', 5500);
+            }
         });
     }
 
@@ -7435,7 +7472,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const btnDeleteBuilding = document.getElementById('btnDeleteBuilding');
     if (btnDeleteBuilding) {
         btnDeleteBuilding.addEventListener('click', () => {
-            const bldg = window.currentEditingBuilding;
+            const bldg = resolveLiveEditingBuilding(window.currentEditingBuilding);
             if (!bldg) return;
 
             if (!window.confirmDelete(

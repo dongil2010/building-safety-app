@@ -69,7 +69,65 @@ function testForgetAllowsReupload() {
     assert.strictEqual(api.isDeletedDrawingFloor(bldg, '3F', session), false);
 }
 
+function testReuploadBeatsStaleRemoteTombstone() {
+    const session = new Set();
+    const local = {
+        id: 'bldg-1',
+        deletedDrawingFloorCodes: ['1F'],
+        floorDrawings: {}
+    };
+    api.rememberDeletedDrawingFloor(local, '1F', session);
+    api.forgetDeletedDrawingFloor(local, '1F', session);
+    local.floorDrawings = { '1F': 'new-upload' };
+    local.floorsList = [{ floorCode: '1F', floorLabel: '1층' }];
+    local.drawingFloorCodes = ['1F'];
+
+    const remote = {
+        id: 'bldg-1',
+        deletedDrawingFloorCodes: ['1F'],
+        floorDrawings: {}
+    };
+    const st = api.mergeDeletedDrawingFloorState(local, remote);
+    const merged = Object.assign({
+        id: 'bldg-1',
+        floorDrawings: { '1F': 'new-upload' },
+        floorsList: [{ floorCode: '1F', floorLabel: '1층' }],
+        drawingFloorCodes: ['1F']
+    }, st);
+    api.stripDeletedDrawingFloorsFromBuilding(merged, session);
+    assert.strictEqual(api.isDeletedDrawingFloor(merged, '1F', session), false);
+    assert.strictEqual(merged.floorDrawings['1F'], 'new-upload');
+    assert.ok(merged.deletedDrawingFloorCodes.indexOf('1F') < 0);
+}
+
+function testOtherDeviceDeleteStillWins() {
+    const session = new Set();
+    const local = {
+        id: 'bldg-1',
+        floorDrawings: { '1F': 'stale-local' },
+        floorsList: [{ floorCode: '1F', floorLabel: '1층' }],
+        drawingFloorCodes: ['1F']
+    };
+    const remote = {
+        id: 'bldg-1',
+        deletedDrawingFloorCodes: ['1F'],
+        deletedDrawingFloorAt: { '1F': Date.now() }
+    };
+    const st = api.mergeDeletedDrawingFloorState(local, remote);
+    const merged = Object.assign({
+        id: 'bldg-1',
+        floorDrawings: { '1F': 'stale-local' },
+        floorsList: [{ floorCode: '1F', floorLabel: '1층' }],
+        drawingFloorCodes: ['1F']
+    }, st);
+    api.stripDeletedDrawingFloorsFromBuilding(merged, session);
+    assert.strictEqual(api.isDeletedDrawingFloor(merged, '1F', session), true);
+    assert.strictEqual(merged.floorDrawings['1F'], undefined);
+}
+
 testRememberAndStrip();
 testMergeKeepsLocalTombstoneAgainstRemoteRevival();
 testForgetAllowsReupload();
+testReuploadBeatsStaleRemoteTombstone();
+testOtherDeviceDeleteStillWins();
 console.log('drawing-floor-tombstone tests ok');
