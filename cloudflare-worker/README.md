@@ -38,6 +38,12 @@
 (Secret 이름을 `GOOGLE_VISION_API_KEY`로 새로 추가 — 기존 `GEMINI_API_KEY`는 안 지워도 무방)만
 다시 하면 됩니다.
 
+## Storage 이미지 프록시 (한글 HWPX)
+
+같은 Worker가 `{ "action": "proxyStorage", "url": "https://firebasestorage..." }` POST도
+처리합니다. 브라우저 CORS로 Storage 바이트를 못 읽을 때 한글 출력이 이 경로로 폴백합니다.
+**ocr-proxy.js를 다시 Deploy**해야 프록시가 켜집니다. (OCR Secret은 그대로)
+
 ## 3. 앱에 연결
 
 `app.js`에서 `CLOUD_OCR_ENDPOINT` 상수를 찾아 5번에서 복사한 URL로 채웁니다(이미 기존 Worker
