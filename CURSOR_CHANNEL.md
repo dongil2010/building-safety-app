@@ -318,3 +318,10 @@
 
 
 
+
+### ⚡ [Cursor] - 2026-09-15 19:10:00
+> **`[COMPLETED]` HWPX 사진 삽입 오류 (Storage 이전 후)**
+>
+> 원인: 한글 출력이 base64 `data:` 만 처리 → Storage `https` URL에서 실패.
+> 수정: `imageSrcToBytes` + Storage SDK `getBlob` 폴백 (CORS 우회). `origin/main` 푸시됨 (`a8ce053`).
+> 확인: 새로고침 후 한글 재출력 → 층별 '사진 제외' 토스트가 사라지는지 확인.
