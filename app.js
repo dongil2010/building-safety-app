@@ -6216,7 +6216,7 @@ document.addEventListener('DOMContentLoaded', () => {
         let warningHtml = '';
         if (hasUnmatched || hasDuplicate) {
             warningHtml = `<div class="add-drawing-preview-warning">
-                파일명만으로는 층을 정확히 인식하지 못한 파일이 있습니다. 아래에서 각 파일의 층을 직접 확인/선택해 주세요.
+                ${hasUnmatched ? '파일명에서 층을 못 찾은 파일은 파일 이름 그대로 새 층으로 넣습니다. 다르면 아래에서 바꿔 주세요.' : ''}
                 ${hasDuplicate ? '<br>같은 층으로 묶인 파일은 "이 파일 저장" 버튼으로 고른 파일 하나만 실제로 저장됩니다.' : ''}
             </div>`;
         }
@@ -6302,25 +6302,46 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    // 업로드 파일 → 층 코드. 인식 실패는 1F로 몰지 않고 파일 이름 그대로 새 층(중복이면 -2, -3).
+    function assignDrawingUploadItems(files, usedCodes) {
+        const used = (usedCodes || []).slice();
+        const fi = window.BSA && window.BSA.floorIdentity;
+        return Array.from(files || []).map((file) => {
+            const info = window.parseFloorInfoFromFilename(file.name);
+            const assigned = (fi && typeof fi.assignParsedFloorForUpload === 'function')
+                ? fi.assignParsedFloorForUpload(info, used)
+                : info;
+            if (assigned && assigned.floorCode) used.push(assigned.floorCode);
+            return {
+                file: file,
+                fileName: file.name,
+                rank: assigned.rank,
+                floorCode: assigned.floorCode,
+                floorLabel: assigned.floorLabel,
+                matched: assigned.matched
+            };
+        });
+    }
+
+    function usedFloorCodesFromItems(items) {
+        return (items || []).map((it) => it && it.floorCode).filter(Boolean);
+    }
+
     // 이미지 입력과 PDF 입력, 두 개의 <input type=file>에서 선택한 파일을 같은 목록에 누적
     function handleNewBuildingFilesSelected(files) {
         if (files.length === 0) return;
 
-        const newItems = files.map(file => {
-            const info = window.parseFloorInfoFromFilename(file.name);
-            return {
-                file: file,
-                fileName: file.name,
-                rank: info.rank,
-                floorCode: info.floorCode,
-                floorLabel: info.floorLabel,
-                matched: info.matched
-            };
-        });
+        const newItems = assignDrawingUploadItems(
+            files,
+            usedFloorCodesFromItems(window.selectedUploadedDrawings)
+        );
 
         window.selectedUploadedDrawings = (window.selectedUploadedDrawings || [])
             .concat(newItems);
-        if (!window.drawingPreviewManualOrder) {
+        const hasUnmatched = newItems.some((it) => it.matched === false);
+        if (hasUnmatched) {
+            window.drawingPreviewManualOrder = true;
+        } else if (!window.drawingPreviewManualOrder) {
             window.selectedUploadedDrawings = window.sortFloorsLowToHigh(window.selectedUploadedDrawings);
         }
 
@@ -6329,7 +6350,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const unmatchedCount = newItems.filter(it => it.matched === false).length;
         if (unmatchedCount > 0) {
-            window.showToast(`${unmatchedCount}개 파일의 층을 파일명에서 자동으로 인식하지 못했습니다. 목록에서 직접 층을 선택해 주세요.`, 'warning', 5500);
+            window.showToast(`${unmatchedCount}개 파일은 층 이름을 파일명에서 못 찾아 파일 이름 그대로 새 층으로 넣었습니다. 다르면 목록에서 바꿔 주세요.`, 'warning', 5500);
         }
     }
 
@@ -6915,6 +6936,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const newFiles = Array.isArray(window.selectedEditUploadedDrawings) ? window.selectedEditUploadedDrawings : [];
         const editGroups = groupDrawingItemsByFloor(newFiles);
+        const existingCodeSet = new Set(existingFloors.map((f) => f && f.floorCode).filter(Boolean));
+        const replacingCodes = [...new Set(newFiles.map((it) => it && it.floorCode).filter((c) => c && existingCodeSet.has(c)))];
 
         let html = `
             <div style="font-size:0.85rem; font-weight:800; color:#2a2a2a; margin-bottom:0.4rem; display:flex; justify-content:space-between; align-items:center;">
@@ -6926,51 +6949,33 @@ document.addEventListener('DOMContentLoaded', () => {
         if (existingFloors.length === 0 && newFiles.length === 0) {
             html += `<div style="font-size:0.8rem; color:#a3a3a3; padding:0.6rem; text-align:center; border:1px dashed #cbd5e1; border-radius:6px;">등록된 층별 도면이 없습니다. 아래에서 파일들을 선택하여 추가해 주세요.</div>`;
         } else {
-            html += `<div style="display:flex; flex-direction:column; gap:0.4rem; max-height:220px; overflow-y:auto; padding-right:4px;">`;
-            if (existingFloors.length > 0) {
-                html += `<div class="add-drawing-preview-list edit-drawing-existing-list">`;
-            }
-            
-            // Render Existing Registered Drawings
-            existingFloors.forEach((f, idx) => {
-                const hasImg = bldg.floorDrawings && bldg.floorDrawings[f.floorCode];
-                const safeCode = escapeHtml(f.floorCode);
-                html += `
-                    <div class="edit-floor-drawing-row is-viewable is-draggable" data-floor-code="${safeCode}" role="button" tabindex="0" title="클릭하여 도면 보기">
-                        ${drawingPreviewDragHandleHtml(f.floorCode, f.floorLabel)}
-                        <span class="edit-floor-drawing-meta">
-                            <strong style="color:#2a2a2a;">[기존 ${idx + 1}]</strong> 🏢 ${escapeHtml(f.floorLabel || f.floorCode)}
-                            ${hasImg
-                                ? '<span class="edit-floor-drawing-badge">✓ 도면 · 눌러서 보기</span>'
-                                : '<span class="edit-floor-drawing-badge">눌러서 도면 불러오기</span>'}
-                        </span>
-                        <button type="button" class="btn btn-sm btn-outline edit-floor-drawing-delete" style="border-color:#ef4444; color:#ef4444; font-size:0.72rem; padding:0.1rem 0.4rem;" data-floor-code="${safeCode}">
-                            <i class="fa-solid fa-trash"></i> 도면 삭제
-                        </button>
-                    </div>
-                `;
-            });
-            if (existingFloors.length > 0) {
-                html += `</div>`;
-            }
+            html += `<div style="display:flex; flex-direction:column; gap:0.4rem; padding-right:4px;">`;
 
             // 신규추가 파일 중 같은 층으로 지정된 파일 검사 (저장 시 나중 파일이 이전 파일을 덮어씀)
             const hasUnmatched = newFiles.some(it => it.matched === false);
             const hasDuplicate = editGroups.some(g => g.entries.length > 1);
-            if (hasUnmatched || hasDuplicate) {
-                html += `<div style="font-size:0.78rem; color:#d97706; background:rgba(217,119,6,0.12); border:1px solid #d97706; border-radius:6px; padding:0.5rem 0.7rem; margin-bottom:0.4rem;">
-                    ⚠️ 파일명만으로는 층을 정확히 인식하지 못한 파일이 있습니다. 아래 [신규추가] 항목에서 층을 직접 확인/선택해 주세요.
-                    ${hasDuplicate ? '<br>같은 층으로 묶인 파일은 "이 파일 저장" 버튼으로 고른 파일 하나만 실제로 저장됩니다.' : ''}
-                </div>`;
+            if (hasUnmatched || hasDuplicate || replacingCodes.length > 0) {
+                const warnParts = [];
+                if (hasUnmatched) {
+                    warnParts.push('⚠️ 파일명에서 층을 못 찾은 파일은 파일 이름 그대로 <b>새 층</b>으로 넣습니다. 이름이 다르면 아래에서 바꿔 주세요.');
+                }
+                if (hasDuplicate) {
+                    warnParts.push('같은 층으로 묶인 파일은 "이 파일 저장" 버튼으로 고른 파일 하나만 실제로 저장됩니다.');
+                }
+                if (replacingCodes.length > 0) {
+                    warnParts.push('⚠️ 저장하면 기존 도면이 교체됩니다: ' + replacingCodes.map((c) => escapeHtml(c)).join(', '));
+                }
+                html += `<div style="font-size:0.78rem; color:#d97706; background:rgba(217,119,6,0.12); border:1px solid #d97706; border-radius:6px; padding:0.5rem 0.7rem; margin-bottom:0.4rem;">${warnParts.join('<br>')}</div>`;
             }
 
             if (editGroups.length > 0) {
-                html += `<div class="add-drawing-preview-title" style="margin-top:0.35rem;">신규 도면 ${newFiles.length}개${editGroups.length > 1 ? ' · <span class="add-drawing-preview-drag-hint">⠿ 드래그로 순서 변경</span>' : ''}</div>`;
+                html += `<div class="add-drawing-preview-title">신규 도면 ${newFiles.length}개 · 저장해야 반영됩니다${editGroups.length > 1 ? ' · <span class="add-drawing-preview-drag-hint">⠿ 드래그로 순서 변경</span>' : ''}</div>`;
                 html += `<div class="add-drawing-preview-list edit-drawing-new-list">`;
             }
 
             // Render Newly Added Drawings — 같은 층으로 인식된 파일은 한 그룹으로 묶어서 표시
             editGroups.forEach(g => {
+                const willReplace = existingCodeSet.has(g.floorCode);
                 if (g.entries.length === 1) {
                     const { item, idx } = g.entries[0];
                     const flagged = item.matched === false;
@@ -6979,6 +6984,7 @@ document.addEventListener('DOMContentLoaded', () => {
                             ${drawingPreviewDragHandleHtml(g.floorCode, item.floorLabel)}
                             <span class="add-drawing-preview-name" title="${escapeHtml(item.fileName)}">
                                 <strong style="color:#1f1f1f;">[신규]</strong> ${escapeHtml(item.fileName)}
+                                ${willReplace ? '<span class="edit-floor-drawing-badge" style="color:#b45309;">기존 도면 교체</span>' : '<span class="edit-floor-drawing-badge">새 층</span>'}
                             </span>
                             <select class="form-control edit-drawing-floor-select" data-idx="${idx}" style="width:auto; font-size:0.78rem; padding:0.2rem 0.4rem; flex-shrink:0;">
                                 ${window.buildFloorCodeOptionsHtml(item.floorCode)}
@@ -7014,6 +7020,30 @@ document.addEventListener('DOMContentLoaded', () => {
             });
 
             if (editGroups.length > 0) {
+                html += `</div>`;
+            }
+
+            if (existingFloors.length > 0) {
+                html += `<div class="add-drawing-preview-title" style="margin-top:0.35rem;">기존 도면 ${existingFloors.length}개</div>`;
+                html += `<div class="add-drawing-preview-list edit-drawing-existing-list" style="max-height:220px; overflow-y:auto;">`;
+                existingFloors.forEach((f, idx) => {
+                    const hasImg = bldg.floorDrawings && bldg.floorDrawings[f.floorCode];
+                    const safeCode = escapeHtml(f.floorCode);
+                    html += `
+                    <div class="edit-floor-drawing-row is-viewable is-draggable" data-floor-code="${safeCode}" role="button" tabindex="0" title="클릭하여 도면 보기">
+                        ${drawingPreviewDragHandleHtml(f.floorCode, f.floorLabel)}
+                        <span class="edit-floor-drawing-meta">
+                            <strong style="color:#2a2a2a;">[기존 ${idx + 1}]</strong> 🏢 ${escapeHtml(f.floorLabel || f.floorCode)}
+                            ${hasImg
+                                ? '<span class="edit-floor-drawing-badge">✓ 도면 · 눌러서 보기</span>'
+                                : '<span class="edit-floor-drawing-badge">눌러서 도면 불러오기</span>'}
+                        </span>
+                        <button type="button" class="btn btn-sm btn-outline edit-floor-drawing-delete" style="border-color:#ef4444; color:#ef4444; font-size:0.72rem; padding:0.1rem 0.4rem;" data-floor-code="${safeCode}">
+                            <i class="fa-solid fa-trash"></i> 도면 삭제
+                        </button>
+                    </div>
+                `;
+                });
                 html += `</div>`;
             }
 
@@ -7233,27 +7263,28 @@ document.addEventListener('DOMContentLoaded', () => {
     function handleEditBuildingFilesSelected(files) {
         if (files.length === 0) return;
 
-        const parsedItems = files.map(file => {
-            const info = window.parseFloorInfoFromFilename(file.name);
-            return {
-                file: file,
-                fileName: file.name,
-                rank: info.rank,
-                floorCode: info.floorCode,
-                floorLabel: info.floorLabel,
-                matched: info.matched
-            };
+        const bldg = window.currentEditingBuilding;
+        const used = [];
+        ((bldg && bldg.floorsList) || []).forEach((f) => {
+            if (f && f.floorCode && !isDeletedDrawingFloor(bldg, f.floorCode)) used.push(f.floorCode);
         });
+        usedFloorCodesFromItems(window.selectedEditUploadedDrawings).forEach((c) => used.push(c));
+
+        const parsedItems = assignDrawingUploadItems(files, used);
 
         window.selectedEditUploadedDrawings = (window.selectedEditUploadedDrawings || []).concat(parsedItems);
-        if (!window.editDrawingPreviewManualOrder) {
+        const hasUnmatched = parsedItems.some((it) => it.matched === false);
+        if (hasUnmatched) {
+            window.editDrawingPreviewManualOrder = true;
+            if (bldg) bldg.floorsOrderManual = true;
+        } else if (!window.editDrawingPreviewManualOrder) {
             window.selectedEditUploadedDrawings = window.sortFloorsLowToHigh(window.selectedEditUploadedDrawings);
         }
         renderEditDrawingPreview();
 
         const unmatchedCount = parsedItems.filter(it => it.matched === false).length;
         if (unmatchedCount > 0) {
-            window.showToast(`${unmatchedCount}개 파일의 층을 파일명에서 자동으로 인식하지 못했습니다. 목록에서 직접 층을 선택해 주세요.`, 'warning', 5500);
+            window.showToast(`${unmatchedCount}개 파일은 층 이름을 파일명에서 못 찾아 파일 이름 그대로 새 층으로 넣었습니다. 다르면 목록에서 바꿔 주세요.`, 'warning', 5500);
         }
     }
 

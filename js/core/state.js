@@ -800,16 +800,14 @@ window.parseFloorInfoFromFilename = function(fileName) {
         }
     }
 
-    // 마지막 수단: 파일명 속 숫자를 추정치로만 사용 (카메라 자동 생성 파일명 등은 신뢰도 낮음 -> matched:false 로 표시)
-    const looseMatch = cleanName.match(/(?<![0-9])([0-9]{1,2})(?![0-9])/);
-    if (looseMatch) {
-        const num = parseInt(looseMatch[1], 10);
-        if (num > 0 && num <= 99) {
-            return { rank: num, floorCode: `${num}F`, floorLabel: `지상 ${num}층 (${num}F)`, matched: false };
-        }
+    // 숫자를 1F·2F로 추정하지 않는다. IMG_001 / 도면.jpg 가 기존 1F를 덮어쓰기 때문.
+    // 인식 실패는 파일 이름 그대로 새 층(커스텀)으로 두고, 업로드 쪽에서 고유화한다.
+    if (window.BSA && window.BSA.floorIdentity
+        && typeof window.BSA.floorIdentity.unmatchedFloorFromFilename === 'function') {
+        return window.BSA.floorIdentity.unmatchedFloorFromFilename(nameWithoutExt);
     }
-
-    return { rank: 1, floorCode: '1F', floorLabel: '지상 1층 (1F)', matched: false };
+    const stem = (nameWithoutExt || '').trim() || '도면';
+    return { rank: 0, floorCode: stem, floorLabel: stem, matched: false };
 };
 
 // 층 코드 수동 선택용 옵션 목록 (지하10층 ~ 지상30층 + 옥상/옥탑 + 건축물 외부)

@@ -195,8 +195,12 @@
         return ordered.concat(restOrdered);
     }
 
+    function stemFromFilename(fileName) {
+        return asText(String(fileName || '').replace(/\.[^/.]+$/, '')) || '도면';
+    }
+
     function parseCustomStemFromFilename(fileName) {
-        const stem = asText(String(fileName || '').replace(/\.[^/.]+$/, ''));
+        const stem = stemFromFilename(fileName);
         if (!stem) return null;
         if (isParkingZoneName(stem) || !isStandardFloorCode(stem)) {
             if (isParkingZoneName(stem)) {
@@ -204,6 +208,56 @@
             }
         }
         return null;
+    }
+
+    /**
+     * 파일명에서 층을 못 알아낸 경우 1F로 몰지 않고, 파일 이름(확장자 제외)을 층 코드로 쓴다.
+     * IMG_001.jpg / 도면.jpg 가 기존 1F 도면을 덮어쓰던 문제 방지.
+     */
+    function unmatchedFloorFromFilename(fileName) {
+        const stem = stemFromFilename(fileName);
+        return { rank: 0, floorCode: stem, floorLabel: stem, matched: false };
+    }
+
+    /**
+     * 직접 입력(커스텀) 층만 고유화. 1F·B1F 등 표준 코드는 같은 층 교체로 둔다.
+     */
+    function uniquifyCustomFloorCode(baseCode, usedCodes) {
+        const base = asText(baseCode) || '도면';
+        if (isStandardFloorCode(base)) return base;
+        const used = new Set();
+        (usedCodes || []).forEach(function (c) {
+            if (c != null && String(c)) used.add(String(c));
+        });
+        if (!used.has(base)) return base;
+        var n = 2;
+        var next = base + '-' + n;
+        while (used.has(next)) {
+            n += 1;
+            next = base + '-' + n;
+        }
+        return next;
+    }
+
+    /**
+     * 업로드 한 장의 층 코드를 확정.
+     * 인식 실패(matched:false)만 기존·같은 배치 코드와 겹치지 않게 고유화한다.
+     */
+    function assignParsedFloorForUpload(parsed, usedCodes) {
+        const src = parsed || {};
+        const matched = !!src.matched;
+        var code = asText(src.floorCode) || '도면';
+        var label = asText(src.floorLabel) || code;
+        if (!matched) {
+            code = uniquifyCustomFloorCode(code, usedCodes);
+            label = code;
+        }
+        return {
+            rank: typeof src.rank === 'number' ? src.rank : 0,
+            floorCode: code,
+            floorLabel: label,
+            matched: matched
+        };
     }
 
     var api = {
@@ -217,7 +271,11 @@
         lookupFloorLabel: lookupFloorLabel,
         sortFloorsLowToHigh: sortFloorsLowToHigh,
         assembleFloors: assembleFloors,
-        parseCustomStemFromFilename: parseCustomStemFromFilename
+        stemFromFilename: stemFromFilename,
+        parseCustomStemFromFilename: parseCustomStemFromFilename,
+        unmatchedFloorFromFilename: unmatchedFloorFromFilename,
+        uniquifyCustomFloorCode: uniquifyCustomFloorCode,
+        assignParsedFloorForUpload: assignParsedFloorForUpload
     };
 
     root.BSA = root.BSA || {};
