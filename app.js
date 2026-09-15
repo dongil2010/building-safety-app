@@ -8161,7 +8161,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (state.currentFloor !== floorCode) return;
         const offlineHint = (typeof navigator !== 'undefined' && navigator.onLine === false)
             ? '오프라인 — 로컬에 도면이 없습니다. 온라인에서 점검을 다시 시작해 주세요.'
-            : '로컬에 도면이 없습니다. 온라인에서 점검을 다시 시작하면 전 층 도면을 받습니다.';
+            : '클라우드에서 도면을 받지 못했습니다. 네트워크 확인 후 점검을 다시 시작해 주세요.';
         showFloorDrawingEmptyState(floorCode, offlineHint);
         if (typeof window.showToast === 'function') {
             window.showToast(offlineHint, 'warning', 4500);
@@ -8335,13 +8335,30 @@ document.addEventListener('DOMContentLoaded', () => {
             img.onerror = () => {
                 if (loadToken !== floorDrawingTierLoadToken || state.currentFloor !== floorCode) return;
                 clearBrokenRasterDrawingCache(bldg, floorCode);
-                if (shouldLoadDrawing) {
-                    tryLoadCloudRasterThenFinish().then((ok) => {
-                        if (!ok) finishRegisteredFloorDrawingLoadFailed(floorCode);
-                    });
-                    return;
-                }
-                showFloorDrawingEmptyState(floorCode);
+                (async () => {
+                    if (typeof srcUrl === 'string' && /^https?:\/\//i.test(srcUrl)
+                        && typeof fetchStorageImageViaProxy === 'function') {
+                        try {
+                            const proxied = await fetchStorageImageViaProxy(srcUrl);
+                            if (proxied && loadToken === floorDrawingTierLoadToken && state.currentFloor === floorCode) {
+                                tryLoadImage(proxied);
+                                return;
+                            }
+                        } catch (proxyErr) {
+                            console.warn('도면 https→프록시 실패:', floorCode, proxyErr);
+                        }
+                    }
+                    if (shouldLoadDrawing) {
+                        const ok = await tryLoadCloudRasterThenFinish();
+                        if (!ok && loadToken === floorDrawingTierLoadToken && state.currentFloor === floorCode) {
+                            finishRegisteredFloorDrawingLoadFailed(floorCode);
+                        }
+                        return;
+                    }
+                    if (loadToken === floorDrawingTierLoadToken && state.currentFloor === floorCode) {
+                        showFloorDrawingEmptyState(floorCode);
+                    }
+                })();
             };
             img.src = srcUrl;
         };
@@ -8387,8 +8404,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (loadToken === floorDrawingTierLoadToken && state.currentFloor === floorCode) {
                     const offlineHint = (typeof navigator !== 'undefined' && navigator.onLine === false)
                         ? '오프라인 — 로컬에 도면이 없습니다. 온라인에서 점검을 다시 시작해 주세요.'
-                        : '로컬에 도면이 없습니다. 온라인에서 점검을 다시 시작하면 전 층 도면을 받습니다.';
+                        : '클라우드에서 도면을 받지 못했습니다. 네트워크 확인 후 점검을 다시 시작해 주세요.';
                     showFloorDrawingEmptyState(floorCode, offlineHint);
+                    if (typeof window.showToast === 'function') {
+                        window.showToast(offlineHint, 'warning', 4500);
+                    }
                 }
             })();
         } else {
@@ -40675,7 +40695,22 @@ document.addEventListener('DOMContentLoaded', () => {
         const storageUrl = await resolveCloudAssetUrlFromSnapData(data);
         if (storageUrl) {
             const local = await materializeCloudAssetPayload(storageUrl, data);
-            if (local && String(local).length > 32) return local;
+            if (local && String(local).indexOf('data:') === 0 && String(local).length > 32) {
+                return local;
+            }
+            // 버킷 CORS 없으면 materialize가 https만 돌려줌 → Worker로 바이트 확보
+            // (https를 그대로 img+crossOrigin에 넣으면 도면이 영원히 안 뜸)
+            if (/^https?:\/\//i.test(String(storageUrl)) && typeof fetchStorageImageViaProxy === 'function') {
+                try {
+                    const proxied = await fetchStorageImageViaProxy(storageUrl);
+                    if (proxied && String(proxied).indexOf('data:') === 0 && String(proxied).length > 32) {
+                        return proxied;
+                    }
+                } catch (proxyErr) {
+                    console.warn('도면/에셋 Storage 프록시 실패:', docRef && docRef.path, proxyErr);
+                }
+            }
+            // data:가 아니면 포기 — 깨진 https를 usable로 취급하지 않음
         }
 
         if (data.dataUrl && typeof data.dataUrl === 'string' && data.dataUrl.length > 32) {

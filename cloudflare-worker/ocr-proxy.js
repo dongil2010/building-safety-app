@@ -74,8 +74,9 @@ export default {
         return json({ error: '빈 이미지 응답' }, 502, corsHeaders);
       }
       let mime = (upstream.headers.get('content-type') || '').split(';')[0].trim().toLowerCase();
-      if (!mime.startsWith('image/')) {
-        if (/\.png(\?|$)/i.test(url)) mime = 'image/png';
+      if (!mime.startsWith('image/') && mime !== 'application/pdf') {
+        if (/\.pdf(\?|$)/i.test(url)) mime = 'application/pdf';
+        else if (/\.png(\?|$)/i.test(url)) mime = 'image/png';
         else mime = 'image/jpeg';
       }
       if (mime === 'image/jpg') mime = 'image/jpeg';
