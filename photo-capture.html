@@ -118,7 +118,7 @@
         return;
     }
 
-    // 결함 사진과 동일한 4:3 크롭/압축 규격 (app.js의 compressDefectPhoto43과 동일 로직)
+    // 결함 사진과 동일한 4:3 크롭/압축 규격 (장축 2000 = 2000x1500)
     function compressPhoto43(file, targetW, quality) {
         return new Promise((resolve) => {
             const reader = new FileReader();
@@ -189,7 +189,7 @@
         thumbsEl.appendChild(wrap);
 
         try {
-            const dataUrl = await compressPhoto43(file, 1000, 0.85);
+            const dataUrl = await compressPhoto43(file, 2000, 0.85);
             img.src = dataUrl;
             await db.collection('photoRelay').doc(sessionId).collection('photos').add({
                 dataUrl: dataUrl,
