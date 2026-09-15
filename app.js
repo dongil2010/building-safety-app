@@ -8058,21 +8058,18 @@ document.addEventListener('DOMContentLoaded', () => {
         const previewDim = isMobileDrawingContext()
             ? 2800
             : (window.FLOOR_DRAWING_PDF_PREVIEW_DIM || 4000);
-        const maxPreviewBytes = isMobileDrawingContext()
-            ? 650000
-            : 900000;
         const has4000 = (bldg.floorDrawingTiers && bldg.floorDrawingTiers[floorCode] && bldg.floorDrawingTiers[floorCode]['4000'])
             || isUsableRasterDrawingUrl(bldg.floorDrawings && bldg.floorDrawings[floorCode]);
         if (!has4000 && typeof window.renderPdfDataUrlToImage === 'function') {
             const previewAttempts = [
-                { dim: previewDim, maxBytes: maxPreviewBytes },
-                { dim: 1800, maxBytes: 480000 },
-                { dim: 1400, maxBytes: 360000 },
+                { dim: previewDim },
+                { dim: 1800 },
+                { dim: 1400 },
             ];
             for (const attempt of previewAttempts) {
                 if (loadToken !== floorDrawingTierLoadToken || state.currentFloor !== floorCode) break;
                 try {
-                    const preview = await window.renderPdfDataUrlToImage(pdfUrl, attempt.dim, attempt.maxBytes, pdfCacheKey);
+                    const preview = await window.renderPdfDataUrlToImage(pdfUrl, attempt.dim, 0, pdfCacheKey);
                     if (preview && isUsableRasterDrawingUrl(preview)) {
                         if (!bldg.floorDrawings) bldg.floorDrawings = {};
                         bldg.floorDrawings[floorCode] = preview;
@@ -39667,6 +39664,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         }
 
+        // Storage 실패 시에만 Firestore dataUrl로 남긴다. 문서 1MB 한도는 이 경로에만 적용.
         let payload = dataUrl;
         const maxChars = 950000;
         try {

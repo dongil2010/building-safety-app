@@ -93,7 +93,7 @@
       ? await window.buildFloorDrawingTiersFromPdf(pdfDataUrl, cacheKey)
       : null;
     const rasterDataUrl = (tiers && tiers['4000'])
-      || await window.renderPdfFileToImage(file, 4000, 1400000);
+      || await window.renderPdfFileToImage(file, 4000);
     return { rasterDataUrl, tiers, pdfDataUrl, isPdf: true };
   };
 

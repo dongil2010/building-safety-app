@@ -248,8 +248,13 @@ function withPdfRenderDedupe(key, fn) {
 
 /**
  * 캐드(CAD)에서 내보낸 PDF 도면을 pdf.js로 첫 페이지 고해상도 렌더링 (벡터 원본 기반이라 글씨/선이 뭉개지지 않음)
- * Firestore 문서 용량(1MB) 여유를 위해 결과가 너무 크면 스케일을 낮춰 재시도
+ * 본문은 Firebase Storage라서 용량(1MB) 때문에 해상도를 깎지 않는다.
+ * maxDataUrlBytes > 0 일 때만 예전 Firestore dataUrl 한도용으로 스케일을 낮춘다.
  */
+window.drawingDataUrlByteCap = function (maxDataUrlBytes) {
+    const n = Number(maxDataUrlBytes);
+    return (Number.isFinite(n) && n > 0) ? n : 0;
+};
 /** 도면 LOD 해상도 단계 (긴 변 기준 픽셀) — 표시용 3구간 */
 window.FLOOR_DRAWING_TIER_DIMS = [4000, 8000, 16000];
 window.FLOOR_DRAWING_TIER_LABELS = {
@@ -380,12 +385,11 @@ function withPdfTierTimeout(promise, ms, label) {
 window.buildFloorDrawingTiersFromPdf = async function(pdfDataUrl, cacheKey) {
     const tiers = {};
     if (!pdfDataUrl || typeof window.renderPdfDataUrlToImage !== 'function') return tiers;
-    const maxBytes = { 4000: 950000, 8000: 2200000, 16000: 3800000 };
     const quality = { 4000: 0.85, 8000: 0.82, 16000: 0.78 };
     const renderAt = async (dim) => window.renderPdfDataUrlToImage(
         pdfDataUrl,
         dim,
-        maxBytes[dim] || 2500000,
+        0,
         cacheKey,
         { forceJpeg: true, quality: quality[dim] || 0.82 }
     );
@@ -444,18 +448,21 @@ window.getPdfRefPixelSize = async function(pdfDataUrl, targetLongSide = 4000, ca
     };
 };
 
-window.renderPdfDataUrlToImage = function(pdfDataUrl, targetLongSide = 16000, maxDataUrlBytes = 2500000, cacheKey, opts) {
+window.renderPdfDataUrlToImage = function(pdfDataUrl, targetLongSide = 16000, maxDataUrlBytes, cacheKey, opts) {
     const options = opts || {};
     const quality = Number(options.quality) > 0 ? Number(options.quality) : 0.85;
     const mime = (options.forceJpeg === false) ? 'image/png' : 'image/jpeg';
-    const dedupeKey = `img|${cacheKey || 'anon'}|${targetLongSide}|${mime}`;
+    const byteCap = (typeof window.drawingDataUrlByteCap === 'function')
+        ? window.drawingDataUrlByteCap(maxDataUrlBytes)
+        : 0;
+    const dedupeKey = `img|${cacheKey || 'anon'}|${targetLongSide}|${mime}|${byteCap || 'nocap'}`;
     return withPdfRenderDedupe(dedupeKey, async () => {
         const { page, baseViewport } = await acquirePdfPageFromDataUrl(pdfDataUrl, cacheKey);
         let scale = targetLongSide / Math.max(baseViewport.width, baseViewport.height);
         scale = Math.min(Math.max(scale, 1), 16);
         let dataUrl = await renderPdfPageToDataUrl(page, scale, mime, quality);
         let attempts = 0;
-        while (dataUrl && dataUrl.length > maxDataUrlBytes && attempts < 4) {
+        while (byteCap > 0 && dataUrl && dataUrl.length > byteCap && attempts < 4) {
             scale *= 0.75;
             dataUrl = await renderPdfPageToDataUrl(page, scale, mime, Math.max(0.7, quality - 0.05));
             attempts++;
@@ -515,7 +522,7 @@ window.pickFloorDrawingTierDim = function(viewScale, cssW, cssH, dpr, currentTie
     return window.FLOOR_DRAWING_TIER_DIMS[0] || 4000;
 };
 
-window.renderPdfFileToImage = function(file, targetLongSide = 4200, maxDataUrlBytes = 950000) {
+window.renderPdfFileToImage = function(file, targetLongSide = 4000, maxDataUrlBytes) {
     return new Promise((resolve, reject) => {
         if (typeof pdfjsLib === 'undefined') {
             reject(new Error('PDF 렌더링 라이브러리를 불러오지 못했습니다. 인터넷 연결을 확인해 주세요.'));
@@ -531,8 +538,11 @@ window.renderPdfFileToImage = function(file, targetLongSide = 4200, maxDataUrlBy
                 scale = Math.min(Math.max(scale, 1), 8); // 너무 작은 PDF는 과도확대, 너무 큰 PDF는 과도축소 방지
 
                 let dataUrl = await renderPdfPageToDataUrl(page, scale);
+                const byteCap = (typeof window.drawingDataUrlByteCap === 'function')
+                    ? window.drawingDataUrlByteCap(maxDataUrlBytes)
+                    : 0;
                 let attempts = 0;
-                while (dataUrl && dataUrl.length > maxDataUrlBytes && attempts < 4) {
+                while (byteCap > 0 && dataUrl && dataUrl.length > byteCap && attempts < 4) {
                     scale *= 0.75;
                     dataUrl = await renderPdfPageToDataUrl(page, scale);
                     attempts++;
@@ -548,17 +558,20 @@ window.renderPdfFileToImage = function(file, targetLongSide = 4200, maxDataUrlBy
 };
 
 /**
- * HTML5 Canvas Image Compressor
- * Reduces 4K/8K drawing photos (5~20MB) to lightweight JPEG (~150KB)
- * PDF 파일이 들어오면 pdf.js로 고해상도 렌더링 (renderPdfFileToImage) 후 PNG로 반환
+ * 래스터 도면을 표시용 JPEG로 변환. 긴 변은 LOD 최대(16000)까지 유지.
+ * PDF 파일이 들어오면 pdf.js로 렌더링 (renderPdfFileToImage).
+ * 본문은 Firebase Storage라서 1MB 이하로 깎지 않는다.
  */
-window.compressDrawingImage = function(file, maxDim = 2200, quality = 0.88) {
+window.compressDrawingImage = function(file, maxDim, quality = 0.88) {
+    const dimCap = (Number(maxDim) > 0)
+        ? Number(maxDim)
+        : ((window.FLOOR_DRAWING_TIER_DIMS && window.FLOOR_DRAWING_TIER_DIMS[2]) || 16000);
     return new Promise((resolve) => {
         if (!file || !(file instanceof Blob)) {
             return resolve(null);
         }
         if (isPdfFile(file)) {
-            window.renderPdfFileToImage(file)
+            window.renderPdfFileToImage(file, dimCap)
                 .then(resolve)
                 .catch((err) => {
                     console.error('PDF 도면 렌더링 오류:', err);
@@ -575,13 +588,13 @@ window.compressDrawingImage = function(file, maxDim = 2200, quality = 0.88) {
             img.onload = () => {
                 let w = img.width;
                 let h = img.height;
-                if (w > maxDim || h > maxDim) {
+                if (w > dimCap || h > dimCap) {
                     if (w > h) {
-                        h = Math.round((h * maxDim) / w);
-                        w = maxDim;
+                        h = Math.round((h * dimCap) / w);
+                        w = dimCap;
                     } else {
-                        w = Math.round((w * maxDim) / h);
-                        h = maxDim;
+                        w = Math.round((w * dimCap) / h);
+                        h = dimCap;
                     }
                 }
                 const canvas = document.createElement('canvas');
