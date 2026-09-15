@@ -113,6 +113,22 @@ function testAssignParsedFloorForUpload() {
     assert.strictEqual(replace.matched, true);
 }
 
+function testExtraDrawingsDoNotCollapseTo1F() {
+    const used = ['지하주차장-1', '지하주차장-2', '1F'];
+    const names = ['IMG_001.jpg', 'IMG_002.jpg', '도면.jpg', '2F.jpg'];
+    const assigned = names.map((name) => {
+        const parking = api.parseCustomStemFromFilename(name);
+        const parsed = parking || (/^\d+F\./i.test(name)
+            ? { floorCode: name.replace(/\.[^.]+$/, '').toUpperCase(), floorLabel: name, matched: true, rank: 2 }
+            : api.unmatchedFloorFromFilename(name));
+        const next = api.assignParsedFloorForUpload(parsed, used);
+        used.push(next.floorCode);
+        return next.floorCode;
+    });
+    assert.deepStrictEqual(assigned, ['IMG_001', 'IMG_002', '도면', '2F']);
+    assert.ok(!assigned.includes('1F'));
+}
+
 testParkingIsNotBasement();
 testCustomLabelNotRewritten();
 testUserOrderPreserved();
@@ -123,4 +139,5 @@ testLookupUsesFloorsList();
 testUnmatchedFilenameIsNot1F();
 testUniquifyCustomOnly();
 testAssignParsedFloorForUpload();
+testExtraDrawingsDoNotCollapseTo1F();
 console.log('test-floor-identity: ok');
