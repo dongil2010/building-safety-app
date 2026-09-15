@@ -271,10 +271,11 @@
 > 적용 후 홈 동기화하면 기존 Firestore `dataUrl` 사진이 Storage로 이관됨.
 
 ### ⚡ [Cursor] - 2026-09-15 16:10:00
-> **`[IN_PROGRESS]` 층별 도면 추가/교체에서 도면 삭제가 되살아나던 문제 수정**
+> **`[WAITING_REVIEW]` 층별 도면 추가/교체에서 도면 삭제가 되살아나던 문제 수정**
 >
 > 원인: 로컬 RAM만 지우고 tombstone이 없어, 원격 `drawingFloorCodes` UNION 병합 + IDB/클라우드 hydrate가 층을 다시 붙임. `_cloudSyncedDrawingKeys`를 지운 뒤 동기화가 IDB에 남은 레스터를 재업로드하기도 함.
 > 수정: `deletedDrawingFloorCodes` tombstone, 삭제 층은 hydrate/persist/upload 제외, IDB·클라우드 삭제를 await, 편집 중 건물 참조를 동기화 병합 후 갱신.
-> Branch `cursor/fix-floor-drawing-delete-720c`.
+> Branch `cursor/fix-floor-drawing-delete-720c`. PR #5.
+> 검증: `node -c app.js`, tombstone 단위 테스트, `http://127.0.0.1:8000/` 로그인 오버레이 부팅·스크립트 로드 확인(계정 없이 도면 삭제 E2E는 불가).
 
 
