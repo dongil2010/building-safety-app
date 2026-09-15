@@ -600,10 +600,26 @@ window.compressDrawingImage = function(file, maxDim = 2200, quality = 0.88) {
 };
 
 /**
- * Defect Photo Compressor with 4:3 Aspect Ratio Crop
- * Crops and resizes defect photos to 4:3 ratio (1000x750) without distortion
+ * 현장 사진 저장 규격 — 4:3 크롭 후 장축(가로) 2000px
  */
-window.compressDefectPhoto43 = function(file, targetW = 1000, quality = 0.85) {
+window.BSA_PHOTO_LONG_EDGE = 2000;
+window.BSA_PHOTO_JPEG_QUALITY = 0.85;
+window.getPhotoLongEdge = function () {
+    const n = Number(window.BSA_PHOTO_LONG_EDGE);
+    return (n > 0) ? n : 2000;
+};
+window.getPhotoJpegQuality = function () {
+    const n = Number(window.BSA_PHOTO_JPEG_QUALITY);
+    return (n > 0 && n <= 1) ? n : 0.85;
+};
+
+/**
+ * Defect Photo Compressor with 4:3 Aspect Ratio Crop
+ * Crops and resizes defect photos to 4:3 (기본 2000x1500) without distortion
+ */
+window.compressDefectPhoto43 = function(file, targetW, quality) {
+    const longEdge = (Number(targetW) > 0) ? Number(targetW) : window.getPhotoLongEdge();
+    const q = (Number(quality) > 0 && Number(quality) <= 1) ? Number(quality) : window.getPhotoJpegQuality();
     return new Promise((resolve) => {
         if (!file || !(file instanceof Blob)) {
             return resolve(null);
@@ -614,7 +630,8 @@ window.compressDefectPhoto43 = function(file, targetW = 1000, quality = 0.85) {
             img.onload = () => {
                 const imgW = img.width;
                 const imgH = img.height;
-                const targetH = Math.round((targetW * 3) / 4); // 1000 x 750 (4:3)
+                const outW = longEdge;
+                const outH = Math.round((outW * 3) / 4);
 
                 let cropX = 0;
                 let cropY = 0;
@@ -630,11 +647,11 @@ window.compressDefectPhoto43 = function(file, targetW = 1000, quality = 0.85) {
                 }
 
                 const canvas = document.createElement('canvas');
-                canvas.width = targetW;
-                canvas.height = targetH;
+                canvas.width = outW;
+                canvas.height = outH;
                 const ctx = canvas.getContext('2d');
-                ctx.drawImage(img, cropX, cropY, cropW, cropH, 0, 0, targetW, targetH);
-                resolve(canvas.toDataURL('image/jpeg', quality));
+                ctx.drawImage(img, cropX, cropY, cropW, cropH, 0, 0, outW, outH);
+                resolve(canvas.toDataURL('image/jpeg', q));
             };
             img.onerror = () => resolve(e.target.result);
             img.src = e.target.result;

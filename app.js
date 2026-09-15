@@ -13926,7 +13926,11 @@ document.addEventListener('DOMContentLoaded', () => {
         try {
             const rawDataUrl = await fileToDataUrl(file);
             const resized = (typeof window.resizeDataUrlToMaxDim === 'function')
-                ? await window.resizeDataUrlToMaxDim(rawDataUrl, 1600, 0.85)
+                ? await window.resizeDataUrlToMaxDim(
+                    rawDataUrl,
+                    (typeof window.getPhotoLongEdge === 'function') ? window.getPhotoLongEdge() : 2000,
+                    (typeof window.getPhotoJpegQuality === 'function') ? window.getPhotoJpegQuality() : 0.85
+                )
                 : rawDataUrl;
             if (!resized) return;
             const oldPhotoId = slot.photoId;
@@ -21461,7 +21465,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!file) return;
             let dataUrl = null;
             if (typeof window.compressDefectPhoto43 === 'function') {
-                dataUrl = await window.compressDefectPhoto43(file, 1000, 0.85);
+                dataUrl = await window.compressDefectPhoto43(file);
             } else {
                 dataUrl = await new Promise((resolve, reject) => {
                     const reader = new FileReader();
@@ -26144,7 +26148,8 @@ document.addEventListener('DOMContentLoaded', () => {
         if (Camera && window.Capacitor?.isNativePlatform?.()) {
             try {
                 const result = await Camera.getPhoto({
-                    quality: 85,
+                    quality: 90,
+                    width: (typeof window.getPhotoLongEdge === 'function') ? window.getPhotoLongEdge() : 2000,
                     allowEditing: false,
                     resultType: 'dataUrl',
                     source: wantCamera ? 'CAMERA' : 'PHOTOS',
@@ -26176,7 +26181,7 @@ document.addEventListener('DOMContentLoaded', () => {
     function handleSelectedPhotoFile(file, target = 'curr') {
         if (!file) return;
         if (target === 'prev') return;
-        window.compressDefectPhoto43(file, 1000, 0.85).then(compressedUrl => {
+        window.compressDefectPhoto43(file).then(compressedUrl => {
             if (!window._pendingPhotos) window._pendingPhotos = [];
             window._pendingPhotos.push(compressedUrl);
             window._defectPhotosDirty = true;
@@ -38950,7 +38955,7 @@ document.addEventListener('DOMContentLoaded', () => {
             ? window.compressDefectPhoto43
             : null;
         const dataUrl = compress
-            ? await compress(file, 1200, 0.85)
+            ? await compress(file)
             : await new Promise((resolve, reject) => {
                 const reader = new FileReader();
                 reader.onload = () => resolve(reader.result);
