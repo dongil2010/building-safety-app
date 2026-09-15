@@ -2488,6 +2488,78 @@ document.addEventListener('DOMContentLoaded', () => {
         return Array.from(set);
     }
 
+    const _buildingMetaMerge = (window.BSA && window.BSA.buildingMetaMerge) || null;
+    const BUILDING_LOCAL_META_KEYS = (_buildingMetaMerge && _buildingMetaMerge.KEYS) || [
+        'inspectionType', 'inspectionYear', 'inspectionPeriod', 'latestSurveyRoundKey',
+        'siteName', 'dong', 'multiDong', 'name', 'address', 'inspector', 'contactPhone',
+        'floors', 'date', 'structureType', 'facilityGrade', 'completionDate', 'notes'
+    ];
+
+    function buildingMetaUpdatedAt(bldg) {
+        if (_buildingMetaMerge && typeof _buildingMetaMerge.metaUpdatedAt === 'function') {
+            return _buildingMetaMerge.metaUpdatedAt(bldg);
+        }
+        const n = Number(bldg && bldg.metaUpdatedAt);
+        return Number.isFinite(n) && n > 0 ? n : 0;
+    }
+
+    function markBuildingMetaDirty(bldg) {
+        if (_buildingMetaMerge && typeof _buildingMetaMerge.markDirty === 'function') {
+            _buildingMetaMerge.markDirty(bldg);
+            return;
+        }
+        if (!bldg) return;
+        bldg.metaUpdatedAt = Date.now();
+        bldg._pendingCloudSync = true;
+    }
+
+    function shouldKeepLocalBuildingMeta(localMatch, remote) {
+        if (_buildingMetaMerge && typeof _buildingMetaMerge.shouldKeepLocal === 'function') {
+            return _buildingMetaMerge.shouldKeepLocal(localMatch, remote);
+        }
+        if (!localMatch) return false;
+        if (localMatch._pendingCloudSync) return true;
+        const localAt = buildingMetaUpdatedAt(localMatch);
+        if (!localAt) return false;
+        return localAt >= buildingMetaUpdatedAt(remote);
+    }
+
+    function applyLocalBuildingMeta(merged, localMatch) {
+        if (_buildingMetaMerge && typeof _buildingMetaMerge.applyLocal === 'function') {
+            return _buildingMetaMerge.applyLocal(merged, localMatch);
+        }
+        if (!merged || !localMatch) return merged;
+        BUILDING_LOCAL_META_KEYS.forEach((key) => {
+            if (localMatch[key] == null || localMatch[key] === '') return;
+            merged[key] = localMatch[key];
+        });
+        if (buildingMetaUpdatedAt(localMatch)) merged.metaUpdatedAt = localMatch.metaUpdatedAt;
+        return merged;
+    }
+
+    function applyInspectionSelectsFromBuilding(bldg) {
+        if (!bldg) return;
+        const setSel = (id, value) => {
+            if (!value) return;
+            const el = document.getElementById(id);
+            if (!el) return;
+            if (typeof ensureSurveyRoundSelectOption === 'function') {
+                ensureSurveyRoundSelectOption(id, value);
+            } else {
+                el.value = value;
+            }
+        };
+        setSel('selectInspectionType', bldg.inspectionType);
+        setSel('selectInspectionYear', bldg.inspectionYear);
+        setSel('selectInspectionPeriod', bldg.inspectionPeriod);
+        const editing = window.currentEditingBuilding;
+        if (editing && editing.id === bldg.id) {
+            setSel('inputEditBuildingInspectionType', bldg.inspectionType);
+            setSel('inputEditBuildingInspectionYear', bldg.inspectionYear);
+            setSel('inputEditBuildingInspectionPeriod', bldg.inspectionPeriod);
+        }
+    }
+
     function mergeBuildingsForSync(serverBuildings, localBuildings, deletedIds, prevAssetsById) {
         const remoteFiltered = filterDeletedBuildings(serverBuildings || [], deletedIds);
         const remoteIds = new Set(remoteFiltered.map((b) => b.id));
@@ -2545,7 +2617,14 @@ document.addEventListener('DOMContentLoaded', () => {
             stripDeletedDrawingFloorsFromBuilding(merged);
             merged.overviewPhotos = mergeOverviewPhotoLists(localMatch?.overviewPhotos, b.overviewPhotos);
             mergeBuildingTrashState(merged, localMatch, b);
-            if (localMatch && localMatch._pendingCloudSync) merged._pendingCloudSync = true;
+            if (_buildingMetaMerge && typeof _buildingMetaMerge.overlay === 'function') {
+                _buildingMetaMerge.overlay(merged, localMatch, b);
+            } else {
+                if (shouldKeepLocalBuildingMeta(localMatch, b)) {
+                    applyLocalBuildingMeta(merged, localMatch);
+                }
+                if (localMatch && localMatch._pendingCloudSync) merged._pendingCloudSync = true;
+            }
             return merged;
         });
         return [...localOnly, ...mergedRemote];
@@ -4287,7 +4366,7 @@ document.addEventListener('DOMContentLoaded', () => {
         targets.forEach((b) => {
             if (b.inspectionType === inspectionType) return;
             b.inspectionType = inspectionType;
-            b._pendingCloudSync = true;
+            markBuildingMetaDirty(b);
             changed += 1;
         });
         if (!changed) return;
@@ -4750,6 +4829,10 @@ document.addEventListener('DOMContentLoaded', () => {
             bldg = window.state.buildings.find(b => b.id === bldgOrId || b.name === bldgOrId || (b.name && b.name.includes(bldgOrId)));
         } else if (bldgOrId && typeof bldgOrId === 'object') {
             bldg = bldgOrId;
+            if (bldg.id) {
+                const fresh = window.state.buildings.find((b) => b && b.id === bldg.id);
+                if (fresh) bldg = fresh;
+            }
         }
 
         if (!bldg && window.state.buildings.length > 0) {
@@ -4795,9 +4878,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const cleanName = bldg.name ? bldg.name.replace(/^🏢\s*/, '') : '건축물';
         if (elements.appTitle) elements.appTitle.textContent = cleanName;
 
-        if (bldg.inspectionType && document.getElementById('selectInspectionType')) document.getElementById('selectInspectionType').value = bldg.inspectionType;
-        if (bldg.inspectionYear && document.getElementById('selectInspectionYear')) document.getElementById('selectInspectionYear').value = bldg.inspectionYear;
-        if (bldg.inspectionPeriod && document.getElementById('selectInspectionPeriod')) document.getElementById('selectInspectionPeriod').value = bldg.inspectionPeriod;
+        applyInspectionSelectsFromBuilding(bldg);
         if (!bldg.latestSurveyRoundKey) {
             const maxDefectRoundKey = getMaxSurveyRoundKeyForBuilding(bldg);
             advanceLatestSurveyRound(bldg, maxDefectRoundKey || `${bldg.inspectionYear || '2026년'}_${bldg.inspectionPeriod || '하반기'}`);
@@ -7156,6 +7237,9 @@ document.addEventListener('DOMContentLoaded', () => {
             const contactPhone = (document.getElementById('inputEditBuildingContactPhone')?.value || '').trim();
             const floors = (document.getElementById('inputEditBuildingFloors')?.value || '').trim() || bldg.floors;
             const date = document.getElementById('inputEditBuildingDate')?.value || bldg.date;
+            const prevRoundKey = (typeof getBuildingSurveyRoundKey === 'function')
+                ? getBuildingSurveyRoundKey(bldg)
+                : `${bldg.inspectionYear || '2026년'}_${bldg.inspectionPeriod || '하반기'}`;
             const inspectionType = document.getElementById('inputEditBuildingInspectionType')?.value || bldg.inspectionType || '정밀안전점검';
             const inspectionYear = document.getElementById('inputEditBuildingInspectionYear')?.value || bldg.inspectionYear || '2026년';
             const inspectionPeriod = document.getElementById('inputEditBuildingInspectionPeriod')?.value || bldg.inspectionPeriod || '하반기';
@@ -7267,6 +7351,42 @@ document.addEventListener('DOMContentLoaded', () => {
             bldg.inspectionType = inspectionType;
             bldg.inspectionYear = inspectionYear;
             bldg.inspectionPeriod = inspectionPeriod;
+            const inArr = (window.state.buildings || []).find((item) => item && item.id === bldg.id);
+            if (inArr && inArr !== bldg) {
+                inArr.inspectionType = inspectionType;
+                inArr.inspectionYear = inspectionYear;
+                inArr.inspectionPeriod = inspectionPeriod;
+                markBuildingMetaDirty(inArr);
+            }
+            markBuildingMetaDirty(bldg);
+            applyInspectionSelectsFromBuilding(bldg);
+            const siteKey = getBuildingSiteName(bldg);
+            const newRoundKey = (typeof getBuildingSurveyRoundKey === 'function')
+                ? getBuildingSurveyRoundKey(bldg)
+                : `${inspectionYear}_${inspectionPeriod}`;
+            if (!bldg.latestSurveyRoundKey || bldg.latestSurveyRoundKey === prevRoundKey) {
+                bldg.latestSurveyRoundKey = newRoundKey;
+            }
+            if (inArr && inArr !== bldg) {
+                inArr.latestSurveyRoundKey = bldg.latestSurveyRoundKey;
+            }
+            if (siteKey && prevRoundKey) {
+                filterActiveBuildings(window.state.buildings || [], window.state.deletedBuildingIds).forEach((sib) => {
+                    if (!sib || sib.id === bldg.id) return;
+                    if (getBuildingSiteName(sib) !== siteKey) return;
+                    if (getBuildingSurveyRoundKey(sib) !== prevRoundKey) return;
+                    sib.inspectionType = inspectionType;
+                    sib.inspectionYear = inspectionYear;
+                    sib.inspectionPeriod = inspectionPeriod;
+                    if (!sib.latestSurveyRoundKey || sib.latestSurveyRoundKey === prevRoundKey) {
+                        sib.latestSurveyRoundKey = newRoundKey;
+                    }
+                    markBuildingMetaDirty(sib);
+                });
+            }
+            if (siteKey && window.state.dashboardSiteKey === siteKey) {
+                window.state.dashboardRoundKey = newRoundKey;
+            }
             bldg.structureType = structureType;
             const prevFacilityGrade = bldg.facilityGrade || '';
             bldg.facilityGrade = facilityGrade;
@@ -7288,7 +7408,14 @@ document.addEventListener('DOMContentLoaded', () => {
                 window.resetLoadingOverlay();
             }
             window.selectedEditUploadedDrawings = [];
+            if (typeof discardStalePendingRemoteAfterLocalPinEdit === 'function') {
+                discardStalePendingRemoteAfterLocalPinEdit();
+            }
             saveStateToLocalStorage();
+            if (typeof refreshCurrentBuildingFromState === 'function') refreshCurrentBuildingFromState();
+            applyInspectionSelectsFromBuilding(
+                (window.state.buildings || []).find((item) => item && item.id === bldg.id) || bldg
+            );
             if (typeof syncStateToFirebase === 'function') syncStateToFirebase();
 
             window.closeEditBuildingModalFunc();
@@ -37103,6 +37230,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     if (id === 'selectInspectionType') window.state.currentBuilding.inspectionType = sel.value;
                     if (id === 'selectInspectionYear') window.state.currentBuilding.inspectionYear = sel.value;
                     if (id === 'selectInspectionPeriod') window.state.currentBuilding.inspectionPeriod = sel.value;
+                    markBuildingMetaDirty(window.state.currentBuilding);
                     // ⚠️ 여기서 "최신 회차" 기준점(latestSurveyRoundKey)을 전진시키지 않는다.
                     // 이 드롭다운은 보고서 미리보기 등으로도 잠깐씩 바뀌는데, 예전엔 change
                     // 이벤트마다 advanceLatestSurveyRound를 호출해서 미리보기로 미래 회차를
@@ -38579,11 +38707,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 _suppressSyncOnSave = true;
                 if (typeof saveStateToLocalStorage === 'function') saveStateToLocalStorage();
                 _suppressSyncOnSave = false;
+                refreshCurrentBuildingFromState();
 
                 if (state.currentBuildingId) {
                     const activeBldg = (window.state.buildings || []).find(b => b.id === state.currentBuildingId);
                     if (activeBldg) {
                         state.currentBuilding = activeBldg;
+                        applyInspectionSelectsFromBuilding(activeBldg);
                         if (state.currentFloor) {
                             applyFloorMapStyleSettings(state.currentFloor, state.currentBuildingId);
                             loadFloorDrawing(state.currentFloor, { preserveView: true });
