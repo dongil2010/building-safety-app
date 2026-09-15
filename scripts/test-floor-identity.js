@@ -73,6 +73,46 @@ function testLookupUsesFloorsList() {
     assert.strictEqual(api.lookupFloorLabel('지하주차장-1', bldg), '지하주차장-1');
 }
 
+function testUnmatchedFilenameIsNot1F() {
+    const parsed = api.unmatchedFloorFromFilename('IMG_001.jpg');
+    assert.strictEqual(parsed.floorCode, 'IMG_001');
+    assert.strictEqual(parsed.floorLabel, 'IMG_001');
+    assert.strictEqual(parsed.matched, false);
+    const drawing = api.unmatchedFloorFromFilename('도면.jpg');
+    assert.strictEqual(drawing.floorCode, '도면');
+    assert.strictEqual(drawing.matched, false);
+}
+
+function testUniquifyCustomOnly() {
+    assert.strictEqual(api.uniquifyCustomFloorCode('1F', ['1F', '2F']), '1F');
+    assert.strictEqual(api.uniquifyCustomFloorCode('2F', ['2F']), '2F');
+    assert.strictEqual(api.uniquifyCustomFloorCode('도면', ['지하주차장-1']), '도면');
+    assert.strictEqual(api.uniquifyCustomFloorCode('도면', ['도면']), '도면-2');
+    assert.strictEqual(api.uniquifyCustomFloorCode('IMG_001', ['IMG_001', 'IMG_001-2']), 'IMG_001-3');
+}
+
+function testAssignParsedFloorForUpload() {
+    const used = ['지하주차장-1', '지하주차장-2'];
+    const a = api.assignParsedFloorForUpload(
+        { floorCode: 'IMG_001', floorLabel: 'IMG_001', matched: false, rank: 0 },
+        used
+    );
+    used.push(a.floorCode);
+    const b = api.assignParsedFloorForUpload(
+        { floorCode: 'IMG_001', floorLabel: 'IMG_001', matched: false, rank: 0 },
+        used
+    );
+    assert.strictEqual(a.floorCode, 'IMG_001');
+    assert.strictEqual(b.floorCode, 'IMG_001-2');
+
+    const replace = api.assignParsedFloorForUpload(
+        { floorCode: '2F', floorLabel: '지상 2층 (2F)', matched: true, rank: 2 },
+        ['2F', '지하주차장-1']
+    );
+    assert.strictEqual(replace.floorCode, '2F');
+    assert.strictEqual(replace.matched, true);
+}
+
 testParkingIsNotBasement();
 testCustomLabelNotRewritten();
 testUserOrderPreserved();
@@ -80,4 +120,7 @@ testCustomSortDoesNotReverseParking();
 testStandardStillSortsLowToHigh();
 testFilenameParkingStem();
 testLookupUsesFloorsList();
+testUnmatchedFilenameIsNot1F();
+testUniquifyCustomOnly();
+testAssignParsedFloorForUpload();
 console.log('test-floor-identity: ok');
