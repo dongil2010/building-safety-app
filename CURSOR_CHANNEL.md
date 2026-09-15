@@ -332,3 +332,10 @@
 > 원인: 바이트 다운로드는 성공해도 `loadImageSize(https)`가 CORS로 실패 → 전 컷 스킵 · '임베드 가능한 사진이 없습니다'.
 > 수정: (1) `loadImageNaturalSizeFromBytes`로 이미 받은 바이트에서 w/h 산출 (2) https는 `imageSrcToBytes` 경로 (3) Storage REST+Auth 폴백 (`downloadStoragePathAsBlob`).
 > 배포 후 홈 새로고침 → 한글 재출력 확인.
+
+### ⚡ [Cursor] - 2026-09-16 08:45:00
+> **[COMPLETED] HWPX 사진: Storage CORS / Worker 프록시**
+>
+> 점검 화면은 img로 보이지만 한글 임베드는 바이트 fetch 필요 → 버킷 CORS 없면 실패.
+> 수정: (1) Worker proxyStorage (2) imageSrcToBytes 프록시 폴백 (3) IDB dataURL 보존 (4) storage-cors.json.
+> **필수**: Cloudflare Worker에 cloudflare-worker/ocr-proxy.js 다시 Deploy.

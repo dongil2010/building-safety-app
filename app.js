@@ -564,7 +564,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 const pid = d.prevRoundPhotoIds[i];
                 if (!window._photoCache) window._photoCache = {};
                 window._photoCache[pid] = url;
-                idbSet('photos', pid, url);
+                idbSetPhotoPreferDataUrl(pid, url);
             });
         } else if (prev.length > 0) {
             d.prevRoundPhotos = prev;
@@ -573,7 +573,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 const pid = d.prevRoundPhotoIds[i];
                 if (!window._photoCache) window._photoCache = {};
                 window._photoCache[pid] = url;
-                idbSet('photos', pid, url);
+                idbSetPhotoPreferDataUrl(pid, url);
             });
         } else {
             delete d.prevRoundPhotos;
@@ -1821,14 +1821,19 @@ document.addEventListener('DOMContentLoaded', () => {
         const gen = (_idbPhotoWriteGen.get(key) || 0) + 1;
         _idbPhotoWriteGen.set(key, gen);
         _idbPendingPhotoKeys.add(key);
-        return idbSet('photos', key, url).then((ok) => {
+        return idbSetPhotoPreferDataUrl(key, url).then((ok) => {
             if (_idbPhotoWriteGen.get(key) !== gen) return false;
             _idbPendingPhotoKeys.delete(key);
             if (ok) {
                 _idbPersistedPhotoKeys.add(key);
                 _idbSaveFailedNotified = false;
                 if (!window._photoCache) window._photoCache = {};
-                window._photoCache[key] = url;
+                // dataURL이면 캐시도 data 유지. https면 표시용으로만 캐시(IDB data는 보존).
+                if (typeof url === 'string' && url.indexOf('data:') === 0) {
+                    window._photoCache[key] = url;
+                } else if (!window._photoCache[key] || String(window._photoCache[key]).indexOf('data:') !== 0) {
+                    window._photoCache[key] = url;
+                }
                 return true;
             }
             notifyIndexedDbSaveFailure();
@@ -5661,7 +5666,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (url) {
                     if (!window._photoCache) window._photoCache = {};
                     window._photoCache[pid] = url;
-                    idbSet('photos', pid, url);
+                    idbSetPhotoPreferDataUrl(pid, url);
                 }
                 return url;
             } catch (_e) {
@@ -5694,7 +5699,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 const pid = cloned.photoIds[i];
                 if (!window._photoCache) window._photoCache = {};
                 window._photoCache[pid] = url;
-                idbSet('photos', pid, url);
+                idbSetPhotoPreferDataUrl(pid, url);
             });
         }
         if (validPrev.length > 0) {
@@ -5706,7 +5711,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 const pid = cloned.prevRoundPhotoIds[i];
                 if (!window._photoCache) window._photoCache = {};
                 window._photoCache[pid] = url;
-                idbSet('photos', pid, url);
+                idbSetPhotoPreferDataUrl(pid, url);
             });
         }
         return cloned;
@@ -17381,9 +17386,58 @@ document.addEventListener('DOMContentLoaded', () => {
         return trimmed ? trimmed : null;
     }
 
+    // 한글(HWPX)용 Storage 이미지 프록시 — OCR Worker와 동일 엔드포인트(action=proxyStorage).
+    // 점검 화면 <img>는 CORS 없이 보이지만, 바이트 fetch는 버킷 CORS가 없으면 막힘.
+    const STORAGE_IMAGE_PROXY_ENDPOINT =
+        (typeof CLOUD_OCR_ENDPOINT === 'string' && CLOUD_OCR_ENDPOINT)
+            ? CLOUD_OCR_ENDPOINT
+            : 'https://frosty-king-12ef.dongilgujo2010.workers.dev';
+
+    async function fetchStorageImageViaProxy(url) {
+        if (!STORAGE_IMAGE_PROXY_ENDPOINT || !url || !/^https?:\/\//i.test(url)) return null;
+        const resp = await fetch(STORAGE_IMAGE_PROXY_ENDPOINT, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'proxyStorage', url: String(url) })
+        });
+        if (!resp.ok) throw new Error(`Storage 프록시 HTTP ${resp.status}`);
+        const data = await resp.json();
+        if (!data || typeof data.dataUrl !== 'string' || data.dataUrl.indexOf('data:') !== 0) {
+            throw new Error((data && data.error) || 'Storage 프록시 응답 없음');
+        }
+        return data.dataUrl;
+    }
+
+    /** 한글 임베드용: IDB에 dataURL이 남아 있으면 https보다 우선 */
+    async function resolveSrcForHwpxEmbed(src, photoIdHint) {
+        if (src && typeof src === 'string' && src.indexOf('data:') === 0) return src;
+        if (photoIdHint && typeof idbGet === 'function') {
+            try {
+                const local = await idbGet('photos', photoIdHint);
+                if (local && typeof local === 'string' && local.indexOf('data:') === 0) return local;
+            } catch (_e) { /* ignore */ }
+        }
+        return src;
+    }
+
+    /** IDB에 https로 dataURL을 덮어쓰지 않음(한글 출력용 로컬 바이트 보존) */
+    async function idbSetPhotoPreferDataUrl(pid, url) {
+        if (!pid || !url || typeof idbSet !== 'function') return false;
+        if (typeof url === 'string' && url.indexOf('data:') === 0) {
+            return idbSet('photos', pid, url);
+        }
+        try {
+            const existing = typeof idbGet === 'function' ? await idbGet('photos', pid) : null;
+            if (existing && typeof existing === 'string' && existing.indexOf('data:') === 0) {
+                return true;
+            }
+        } catch (_e) { /* ignore */ }
+        return idbSet('photos', pid, url);
+    }
+
     /**
      * dataURL / https(Storage) / blob URL → HWPX BinData용 바이트.
-     * Storage 이전 후 한글 출력 시 https URL이 들어오므로 fetch 지원 필수.
+     * Storage 이전 후 한글 출력 시 https URL이 들어오므로 fetch + Worker 프록시 필수.
      */
     async function imageSrcToBytes(src) {
         if (!src || typeof src !== 'string') {
@@ -17403,7 +17457,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (/^https?:\/\//i.test(raw) || raw.startsWith('blob:')) {
             let bytes = null;
             let mime = 'image/jpeg';
-            // Storage SDK(getBlob) 우선 — CORS로 fetch가 막혀도 한글 출력에 사진을 넣을 수 있게
+            // Storage SDK(getBlob)/REST 우선
             try {
                 if (typeof assetUrlToUploadBlob === 'function') {
                     const pack = await assetUrlToUploadBlob(raw);
@@ -17414,11 +17468,24 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             } catch (_sdkErr) { /* fall through */ }
             if (!bytes) {
-                const resp = await fetch(raw, { mode: 'cors', credentials: 'omit', cache: 'force-cache' });
-                if (!resp.ok) throw new Error(`이미지 다운로드 실패 (${resp.status})`);
-                bytes = new Uint8Array(await resp.arrayBuffer());
-                mime = ((resp.headers.get('content-type') || '').split(';')[0] || '').trim().toLowerCase();
+                try {
+                    const resp = await fetch(raw, { mode: 'cors', credentials: 'omit', cache: 'no-store' });
+                    if (resp.ok) {
+                        bytes = new Uint8Array(await resp.arrayBuffer());
+                        mime = ((resp.headers.get('content-type') || '').split(';')[0] || '').trim().toLowerCase();
+                    }
+                } catch (_corsErr) { /* CORS — 프록시로 */ }
             }
+            // 버킷 CORS 미설정 시 Worker가 서버에서 받아 dataURL로 돌려줌
+            if (!bytes && /^https?:\/\//i.test(raw)) {
+                try {
+                    const proxied = await fetchStorageImageViaProxy(raw);
+                    if (proxied) return imageSrcToBytes(proxied);
+                } catch (proxyErr) {
+                    console.warn('Storage 이미지 프록시 실패:', proxyErr);
+                }
+            }
+            if (!bytes) throw new Error('이미지 다운로드 실패 (CORS/Storage)');
             if (!mime.startsWith('image/')) {
                 if (raw.toLowerCase().includes('.png')) mime = 'image/png';
                 else mime = 'image/jpeg';
@@ -17544,7 +17611,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (url) {
                 if (!window._photoCache) window._photoCache = {};
                 window._photoCache[pid] = url;
-                idbSet('photos', pid, url).then(ok => { if (ok && _idbPersistedPhotoKeys) _idbPersistedPhotoKeys.add(pid); });
+                idbSetPhotoPreferDataUrl(pid, url).then(ok => { if (ok && _idbPersistedPhotoKeys) _idbPersistedPhotoKeys.add(pid); });
             }
             return url;
         } catch (e) {
@@ -34150,9 +34217,10 @@ document.addEventListener('DOMContentLoaded', () => {
                     const decoded = [];
                     for (const d of items) {
                         const outPhotos = getDefectOutputPhotos(d);
-                        const src = outPhotos[0];
-                        if (!src) continue;
+                        const src0 = outPhotos[0];
+                        if (!src0) continue;
                         try {
+                            const src = await resolveSrcForHwpxEmbed(src0, d.photoIds && d.photoIds[0]);
                             const { bytes, mime, ext } = await dataUrlToBytes(src);
                             const size = await loadImageNaturalSizeFromBytes(bytes, mime);
                             decoded.push({ d, bytes, mime, ext, w: size.w, h: size.h });
@@ -36224,9 +36292,10 @@ document.addEventListener('DOMContentLoaded', () => {
                     const decoded = [];
                     for (const d of items) {
                         const outPhotos = getDefectOutputPhotos(d);
-                        const src = outPhotos[0];
-                        if (!src) continue;
+                        const src0 = outPhotos[0];
+                        if (!src0) continue;
                         try {
+                            const src = await resolveSrcForHwpxEmbed(src0, d.photoIds && d.photoIds[0]);
                             const { bytes, mime, ext } = await dataUrlToBytes(src);
                             const size = await loadImageNaturalSizeFromBytes(bytes, mime);
                             decoded.push({ d, bytes, mime, ext, w: size.w, h: size.h });
@@ -39215,7 +39284,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (typeof url === 'string' && url.length > 32) {
                     if (!window._photoCache) window._photoCache = {};
                     window._photoCache[key] = url;
-                    idbSet('photos', key, url).then((ok) => {
+                    idbSetPhotoPreferDataUrl(key, url).then((ok) => {
                         if (ok) _idbPersistedPhotoKeys.add(key);
                     });
                     return url;
@@ -39257,7 +39326,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (typeof url === 'string' && url.length > 32) {
                     if (!window._photoCache) window._photoCache = {};
                     window._photoCache[key] = url;
-                    idbSet('photos', key, url).then((ok) => {
+                    idbSetPhotoPreferDataUrl(key, url).then((ok) => {
                         if (ok) _idbPersistedPhotoKeys.add(key);
                     });
                     return url;
@@ -39619,6 +39688,18 @@ document.addEventListener('DOMContentLoaded', () => {
         const remote = await resolveCloudAssetUrlFromSnapData(data);
         if (remote) {
             const local = await materializeCloudAssetPayload(remote, data);
+            if (local && String(local).indexOf('data:') === 0 && String(local).length > 32) {
+                return local;
+            }
+            // 버킷 CORS 없으면 materialize가 https만 돌려줌 → Worker 프록시로 dataURL 확보
+            if (/^https?:\/\//i.test(String(remote))) {
+                try {
+                    const proxied = await fetchStorageImageViaProxy(remote);
+                    if (proxied && proxied.indexOf('data:') === 0) return proxied;
+                } catch (proxyErr) {
+                    console.warn('사진 materialize 프록시 실패:', proxyErr);
+                }
+            }
             if (local && String(local).length > 32) return local;
             return remote;
         }
