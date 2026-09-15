@@ -14526,6 +14526,24 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    // 도트프린터 측정지는 "R 01 44" 처럼 R번호+측정값이 한 줄에 같이 찍히는데, 인쇄가 흐리거나
+    // 체크박스(□)에 가려 R번호 쪽 숫자만 깨지면 기존 "R+번호+값"을 한 번에 매칭하는 정규식은
+    // 그 줄 전체(진짜 측정값까지)를 통째로 버렸다. 이제 "R"로 시작하는 줄인지만 보고, 그 줄에서
+    // 마지막에 나오는 2~3자리 숫자를 측정값으로 쓴다 — R번호 숫자가 깨져도 값은 살아남는다.
+    // (cloudflare-worker/ocr-proxy.js의 extractRValues와 동일 로직 — 서버/로컬 양쪽에서 씀)
+    function extractRValuesFromText(text) {
+        const lines = String(text || '').split(/\r?\n/);
+        const values = [];
+        for (const line of lines) {
+            if (!/^\s*R\b/i.test(line)) continue;
+            const nums = line.match(/\d{2,3}/g);
+            if (!nums || nums.length === 0) continue;
+            const last = parseInt(nums[nums.length - 1], 10);
+            if (!isNaN(last) && last >= 10 && last <= 80) values.push(last);
+        }
+        return values;
+    }
+
     // Cloudflare Worker 프록시 → Gemini Vision에 사진을 보내 R값 목록(JSON 배열)만 받는다.
     // 실패 시 예외를 던져서, 호출부(scanRValuesFromImage)가 로컬 Tesseract로 폴백하게 한다.
     //
@@ -14607,9 +14625,7 @@ document.addEventListener('DOMContentLoaded', () => {
             for (const psm of psmModesToTry) {
                 await worker.setParameters({ tessedit_pageseg_mode: psm });
                 const { data: { text } } = await worker.recognize(file);
-                // "R 01 47" / "R01  47" 등 다양한 간격/서식을 허용해서 R번호 뒤에 오는 실제 측정값만 뽑는다
-                const matches = [...text.matchAll(/R\s*0?(\d{1,2})\D+(\d{2,3})/gi)];
-                scanned = matches.map(m => parseInt(m[2], 10)).filter(v => !isNaN(v) && v >= 10 && v <= 80);
+                scanned = extractRValuesFromText(text);
                 if (scanned.length > 0) break;
             }
             return scanned;
