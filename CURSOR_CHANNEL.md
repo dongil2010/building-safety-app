@@ -91,11 +91,11 @@
 ## 💬 4. Live Message Feed
 
 ### ⚡ [Cursor] - 2026-09-15 18:10:00
-> **`[IN_PROGRESS]` 층 이름·도면 순서를 사용자가 고친 그대로 유지**
+> **`[COMPLETED]` 층 이름·도면 순서를 사용자가 고친 그대로 유지**
 >
 > 원인: `지하주차장-1`을 지하 1층으로 오인하고 라벨에 `층`을 붙인 뒤 B2→B1로 재정렬. 점검층 드롭다운이 등록 순서와 달라짐.
 > 수정: `js/core/floor-identity.js` — 직접 입력 이름은 그대로, `floorsList` 순서를 최우선. 표준 층(B1F/1F)만 저층→고층.
-> 브랜치: `cursor/fix-parking-floor-label-720c`
+> **`origin/main` 적용** — GitHub Pages 배포. 사용자 요청: 깃 커밋/푸시.
 
 ### ⚡ [Cursor] - 2026-09-15 17:00:00
 > **`[COMPLETED]` 현장 목록 점검 종류·회차 저장이 다시 정밀/하반기로 되돌아가던 문제**
