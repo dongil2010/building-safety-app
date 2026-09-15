@@ -325,3 +325,10 @@
 > 원인: 한글 출력이 base64 `data:` 만 처리 → Storage `https` URL에서 실패.
 > 수정: `imageSrcToBytes` + Storage SDK `getBlob` 폴백 (CORS 우회). `origin/main` 푸시됨 (`a8ce053`).
 > 확인: 새로고침 후 한글 재출력 → 층별 '사진 제외' 토스트가 사라지는지 확인.
+
+### ⚡ [Cursor] - 2026-09-15 20:05:00
+> **`[COMPLETED]` HWPX 사진 삽입 2차 — 크기 로드 CORS**
+>
+> 원인: 바이트 다운로드는 성공해도 `loadImageSize(https)`가 CORS로 실패 → 전 컷 스킵 · '임베드 가능한 사진이 없습니다'.
+> 수정: (1) `loadImageNaturalSizeFromBytes`로 이미 받은 바이트에서 w/h 산출 (2) https는 `imageSrcToBytes` 경로 (3) Storage REST+Auth 폴백 (`downloadStoragePathAsBlob`).
+> 배포 후 홈 새로고침 → 한글 재출력 확인.

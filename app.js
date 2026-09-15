@@ -17455,14 +17455,49 @@ document.addEventListener('DOMContentLoaded', () => {
         throw new Error('이미지 데이터 형식을 인식할 수 없습니다.');
     }
 
-    function loadImageNaturalSize(src) {
+    function loadImageNaturalSizeFromBytes(bytes, mime) {
         return new Promise((resolve, reject) => {
+            if (!bytes || !bytes.length) {
+                reject(new Error('이미지를 불러오지 못했습니다.'));
+                return;
+            }
+            const blob = new Blob([bytes], { type: mime || 'image/jpeg' });
+            const objUrl = URL.createObjectURL(blob);
+            const img = new Image();
+            img.onload = () => {
+                const w = img.naturalWidth || img.width;
+                const h = img.naturalHeight || img.height;
+                URL.revokeObjectURL(objUrl);
+                if (!w || !h) reject(new Error('이미지를 불러오지 못했습니다.'));
+                else resolve({ w, h });
+            };
+            img.onerror = () => {
+                URL.revokeObjectURL(objUrl);
+                reject(new Error('이미지를 불러오지 못했습니다.'));
+            };
+            img.src = objUrl;
+        });
+    }
+
+    function loadImageNaturalSize(src) {
+        return new Promise(async (resolve, reject) => {
             if (!src) {
                 reject(new Error('이미지를 불러오지 못했습니다.'));
                 return;
             }
+            // https Storage URL은 CORS로 Image() 로드가 자주 실패 → 바이트로 받아 object URL 사용
+            if (/^https?:\/\//i.test(String(src))) {
+                try {
+                    const pack = await imageSrcToBytes(src);
+                    const size = await loadImageNaturalSizeFromBytes(pack.bytes, pack.mime);
+                    resolve(size);
+                    return;
+                } catch (e) {
+                    reject(e);
+                    return;
+                }
+            }
             const img = new Image();
-            if (/^https?:\/\//i.test(src)) img.crossOrigin = 'anonymous';
             img.onload = () => resolve({ w: img.naturalWidth, h: img.naturalHeight });
             img.onerror = () => reject(new Error('이미지를 불러오지 못했습니다.'));
             img.src = src;
@@ -33010,7 +33045,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
                 counters.imgCounter += 1;
                 const pack = await dataUrlToBytes(src);
-                const size = await loadImageSize(src);
+                const size = await loadImageNaturalSizeFromBytes(pack.bytes, pack.mime);
                 const imgId = `crackMonPhoto${counters.imgCounter}`;
                 zip.file(`BinData/${imgId}.${pack.ext}`, pack.bytes);
                 manifestAdds.push(`<opf:item id="${imgId}" href="BinData/${imgId}.${pack.ext}" media-type="${pack.mime}" isEmbeded="1"/>`);
@@ -34119,7 +34154,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         if (!src) continue;
                         try {
                             const { bytes, mime, ext } = await dataUrlToBytes(src);
-                            const size = await loadImageSize(src);
+                            const size = await loadImageNaturalSizeFromBytes(bytes, mime);
                             decoded.push({ d, bytes, mime, ext, w: size.w, h: size.h });
                         } catch (onePhotoErr) {
                             console.warn('사진 1장 임베드 실패(해당 컷만 생략):', d && d.id, onePhotoErr);
@@ -35111,7 +35146,7 @@ document.addEventListener('DOMContentLoaded', () => {
                             imgCounter++;
                             const imgId = `photoAuto${imgCounter}`;
                             const pack = await dataUrlToBytes(src);
-                            const size = await loadImageSize(src);
+                            const size = await loadImageNaturalSizeFromBytes(pack.bytes, pack.mime);
                             zip.file(`BinData/${imgId}.${pack.ext}`, pack.bytes);
                             manifestAdds.push(`<opf:item id="${imgId}" href="BinData/${imgId}.${pack.ext}" media-type="${pack.mime}" isEmbeded="1"/>`);
                             setPicImage(pic, imgId, size.w, size.h, cmpMaxW, cmpMaxH);
@@ -36193,7 +36228,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         if (!src) continue;
                         try {
                             const { bytes, mime, ext } = await dataUrlToBytes(src);
-                            const size = await loadImageSize(src);
+                            const size = await loadImageNaturalSizeFromBytes(bytes, mime);
                             decoded.push({ d, bytes, mime, ext, w: size.w, h: size.h });
                         } catch (onePhotoErr) {
                             console.warn('사진 1장 임베드 실패(해당 컷만 생략):', d && d.id, onePhotoErr);

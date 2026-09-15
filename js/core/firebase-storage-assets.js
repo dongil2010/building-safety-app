@@ -299,11 +299,12 @@
         return blobToDataUrl(blob);
     }
 
-    /** Storage SDK로 본문 받기 — 브라우저 CORS 우회(인증된 SDK 경로) */
+    /** Storage SDK로 본문 받기 — 브라우저 CORS 우회(인증된 SDK/REST 경로) */
     async function downloadStoragePathAsBlob(storagePath, fallbackType) {
         const storage = getFirebaseStorage();
         if (!storage || !storagePath) throw new Error('Storage path 없음');
-        const ref = storage.ref().child(String(storagePath).replace(/^\/+/, ''));
+        const path = String(storagePath).replace(/^\/+/, '');
+        const ref = storage.ref().child(path);
         if (typeof ref.getBlob === 'function') {
             const blob = await ref.getBlob();
             if (fallbackType && (!blob.type || blob.type === 'application/octet-stream')) {
@@ -314,6 +315,36 @@
         if (typeof ref.getBytes === 'function') {
             const bytes = await ref.getBytes();
             return new Blob([bytes], { type: fallbackType || 'application/octet-stream' });
+        }
+        // compat SDK에 getBlob이 없으면 Auth 토큰으로 Storage REST 다운로드 (CORS 회피)
+        try {
+            const user = (typeof firebase !== 'undefined' && firebase.auth && firebase.auth().currentUser)
+                ? firebase.auth().currentUser
+                : null;
+            if (user) {
+                const token = await user.getIdToken();
+                const bucket = (storage.app && storage.app.options && storage.app.options.storageBucket)
+                    || (typeof firebase !== 'undefined' && firebase.app && firebase.app().options.storageBucket)
+                    || '';
+                if (bucket) {
+                    const restUrl = 'https://firebasestorage.googleapis.com/v0/b/'
+                        + encodeURIComponent(bucket)
+                        + '/o/'
+                        + encodeURIComponent(path)
+                        + '?alt=media';
+                    const res = await fetch(restUrl, {
+                        headers: { Authorization: 'Bearer ' + token }
+                    });
+                    if (!res.ok) throw new Error('Storage REST HTTP ' + res.status);
+                    const blob = await res.blob();
+                    if (fallbackType && (!blob.type || blob.type === 'application/octet-stream')) {
+                        return new Blob([blob], { type: fallbackType });
+                    }
+                    return blob;
+                }
+            }
+        } catch (restErr) {
+            console.warn('Storage REST 다운로드 실패, getDownloadURL+fetch 시도:', path, restErr);
         }
         const url = await ref.getDownloadURL();
         const res = await fetch(url, { mode: 'cors' });
