@@ -14526,20 +14526,31 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // 도트프린터 측정지는 "R 01 44" 처럼 R번호+측정값이 한 줄에 같이 찍히는데, 인쇄가 흐리거나
-    // 체크박스(□)에 가려 R번호 쪽 숫자만 깨지면 기존 "R+번호+값"을 한 번에 매칭하는 정규식은
-    // 그 줄 전체(진짜 측정값까지)를 통째로 버렸다. 이제 "R"로 시작하는 줄인지만 보고, 그 줄에서
-    // 마지막에 나오는 2~3자리 숫자를 측정값으로 쓴다 — R번호 숫자가 깨져도 값은 살아남는다.
+    // 도트프린터 측정지는 "R 01 44" 처럼 R번호+측정값이 이어져 찍히는데, OCR이 줄바꿈을
+    // 다르게 잡으면(번호 "10"과 값 "48"이 서로 다른 줄로 떨어지면) 줄 단위 파싱은 번호 숫자만
+    // 있는 줄에서 그 번호 자체를 값으로 잘못 채택했다("R 10"~"R 20" 구간이 그대로 10~20 값으로
+    // 나오던 버그). 이제 줄 경계 대신 "R" 하나가 나온 지점부터 그 다음 "R"이 나오기 직전까지를
+    // 한 덩어리로 보고, 그 안에서 두 번째 숫자(번호 다음에 오는 진짜 측정값)를 쓴다. 번호 숫자가
+    // 아예 안 읽혀서 숫자가 하나만 잡히면 그때만 그 하나를 값으로 쓴다. "ER06"처럼 다른 글자
+    // 뒤에 붙은 R(에러 코드 등)은 새 구간 시작으로 치지 않아 오염원에서 제외한다.
     // (cloudflare-worker/ocr-proxy.js의 extractRValues와 동일 로직 — 서버/로컬 양쪽에서 씀)
     function extractRValuesFromText(text) {
-        const lines = String(text || '').split(/\r?\n/);
+        const str = String(text || '');
+        const starts = [];
+        const re = /R/gi;
+        let m;
+        while ((m = re.exec(str)) !== null) {
+            const prev = str[m.index - 1];
+            if (prev && /[A-Za-z]/.test(prev)) continue;
+            starts.push(m.index);
+        }
         const values = [];
-        for (const line of lines) {
-            if (!/^\s*R\b/i.test(line)) continue;
-            const nums = line.match(/\d{2,3}/g);
+        for (let i = 0; i < starts.length; i++) {
+            const segment = str.slice(starts[i], i + 1 < starts.length ? starts[i + 1] : str.length);
+            const nums = segment.match(/\d{2,3}/g);
             if (!nums || nums.length === 0) continue;
-            const last = parseInt(nums[nums.length - 1], 10);
-            if (!isNaN(last) && last >= 10 && last <= 80) values.push(last);
+            const value = parseInt(nums.length >= 2 ? nums[1] : nums[0], 10);
+            if (!isNaN(value) && value >= 10 && value <= 80) values.push(value);
         }
         return values;
     }
