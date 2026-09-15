@@ -80,6 +80,27 @@ function testDownloadUrlPath() {
     assert.strictEqual(api.isFirebaseStorageHttpUrl('https://example.com/x'), false);
 }
 
+function testSiteRoundPathDetection() {
+    assert.strictEqual(
+        api.isSiteRoundScopedStoragePath('companies/co-1/칠산타워/2026년_하반기/floorDrawings/bldgA_1F.jpg'),
+        true
+    );
+    assert.strictEqual(
+        api.isSiteRoundScopedStoragePath('companies/co-1/floorDrawings/bldgA_1F.jpg'),
+        false
+    );
+    assert.strictEqual(
+        api.snapNeedsSiteRoundMove({ storagePath: 'companies/co-1/floorDrawings/bldgA_1F.jpg' }),
+        true
+    );
+    assert.strictEqual(
+        api.snapNeedsSiteRoundMove({
+            storagePath: 'companies/co-1/칠산타워/2026년_하반기/floorDrawings/bldgA_1F.jpg'
+        }),
+        false
+    );
+}
+
 function testFlag() {
     assert.strictEqual(api.USE_FIREBASE_STORAGE_FOR_DRAWINGS, true);
     assert.strictEqual(api.USE_FIREBASE_STORAGE_FOR_PHOTOS, true);
@@ -93,6 +114,7 @@ const tests = [
     testMetaFields,
     testHasStorageMeta,
     testDownloadUrlPath,
+    testSiteRoundPathDetection,
     testFlag
 ];
 

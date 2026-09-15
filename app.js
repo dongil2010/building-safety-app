@@ -38304,6 +38304,12 @@ document.addEventListener('DOMContentLoaded', () => {
     function storagePathFromDownloadURL(url) {
         return typeof SA.storagePathFromDownloadURL === 'function' ? SA.storagePathFromDownloadURL(url) : null;
     }
+    function storagePathFromSnapData(data) {
+        return typeof SA.storagePathFromSnapData === 'function' ? SA.storagePathFromSnapData(data) : null;
+    }
+    function snapNeedsSiteRoundMove(data) {
+        return typeof SA.snapNeedsSiteRoundMove === 'function' ? SA.snapNeedsSiteRoundMove(data) : false;
+    }
 
     let db = null;
     let isRemoteSyncing = false;
@@ -39006,20 +39012,31 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     async function uploadAssetToFirebaseStorageAndMeta(docRef, storagePath, sourceUrl, extraFields) {
+        const extra = Object.assign({}, extraFields || {});
+        let previousPath = extra.previousStoragePath || null;
+        delete extra.previousStoragePath;
+        if (!previousPath && isFirebaseStorageHttpUrl(sourceUrl)) {
+            previousPath = storagePathFromDownloadURL(sourceUrl);
+        }
+        const targetPath = String(storagePath || '').replace(/^\/+/, '');
+        const sameObject = previousPath && targetPath && previousPath === targetPath;
         let uploaded;
-        if (isFirebaseStorageHttpUrl(sourceUrl)) {
+        if (sameObject) {
             uploaded = {
-                storagePath: storagePathFromDownloadURL(sourceUrl) || storagePath,
+                storagePath: previousPath,
                 downloadURL: sourceUrl,
-                contentType: (extraFields && extraFields.contentType) || null,
+                contentType: extra.contentType || null,
                 size: null
             };
         } else {
             const parsed = await assetUrlToUploadBlob(sourceUrl);
             if (!parsed || !parsed.blob) throw new Error('asset parse failed');
-            uploaded = await uploadBlobToFirebaseStorage(storagePath, parsed.blob, parsed.contentType);
+            uploaded = await uploadBlobToFirebaseStorage(targetPath, parsed.blob, parsed.contentType);
         }
-        await writeFirestoreStorageMeta(docRef, uploaded, extraFields);
+        await writeFirestoreStorageMeta(docRef, uploaded, extra);
+        if (previousPath && uploaded.storagePath && previousPath !== uploaded.storagePath) {
+            await deleteFirebaseStoragePath(previousPath);
+        }
         return uploaded;
     }
 
@@ -39212,7 +39229,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     const snap = await docRef.get();
                     data = snap.exists ? (snap.data() || {}) : {};
                 }
-                if (hasFirebaseStorageMeta(data)) {
+                if (hasFirebaseStorageMeta(data) && !snapNeedsSiteRoundMove(data)) {
                     markPhotoOnStorage(photoId);
                     return true;
                 }
@@ -39225,7 +39242,8 @@ document.addEventListener('DOMContentLoaded', () => {
                         await uploadAssetToFirebaseStorageAndMeta(docRef, path, sourceUrl, {
                             kind: 'photo',
                             site: scope.site,
-                            round: scope.round
+                            round: scope.round,
+                            previousStoragePath: storagePathFromSnapData(data)
                         });
                     });
                     markPhotoOnStorage(photoId);
@@ -39343,11 +39361,17 @@ document.addEventListener('DOMContentLoaded', () => {
                 const contentType = (parsedHint && parsedHint.contentType) || 'image/jpeg';
                 const scope = storageScopeForBuildingId(buildingId);
                 const path = storagePathFloorDrawing(getCompanyDocId(), buildingId, floorCode, contentType, scope);
+                let previousStoragePath = null;
+                try {
+                    const prevSnap = await docRef.get();
+                    if (prevSnap.exists) previousStoragePath = storagePathFromSnapData(prevSnap.data() || {});
+                } catch (_e) { /* ignore */ }
                 await uploadAssetToFirebaseStorageAndMeta(docRef, path, dataUrl, {
                     buildingId,
                     floorCode,
                     site: scope.site,
-                    round: scope.round
+                    round: scope.round,
+                    previousStoragePath
                 });
                 if (!window._cloudSyncedDrawingKeys) window._cloudSyncedDrawingKeys = new Set();
                 window._cloudSyncedDrawingKeys.add(docId);
@@ -39471,13 +39495,19 @@ document.addEventListener('DOMContentLoaded', () => {
                     const path = storagePathFloorDrawingTier(
                         getCompanyDocId(), buildingId, floorCode, dim, contentType, scope
                     );
+                    let previousStoragePath = null;
+                    try {
+                        const prevSnap = await docRef.get();
+                        if (prevSnap.exists) previousStoragePath = storagePathFromSnapData(prevSnap.data() || {});
+                    } catch (_e) { /* ignore */ }
                     await withTimeout(
                         uploadAssetToFirebaseStorageAndMeta(docRef, path, url, {
                             dim,
                             floorCode,
                             buildingId,
                             site: scope.site,
-                            round: scope.round
+                            round: scope.round,
+                            previousStoragePath
                         }),
                         dim >= 16000 ? 90000 : 60000,
                         `tier-upload-${dim}`
@@ -39515,6 +39545,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 return false;
             }
             const data = snap.data() || {};
+            if (snapNeedsSiteRoundMove(data)) {
+                if (window._cloudSyncedTierKeys) window._cloudSyncedTierKeys.delete(docId);
+                return false;
+            }
             if (hasFirebaseStorageMeta(data)
                 || (data.dataUrl && String(data.dataUrl).length > 32)) {
                 if (!window._cloudSyncedTierKeys) window._cloudSyncedTierKeys = new Set();
@@ -39606,6 +39640,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 return false;
             }
             const data = snap.data() || {};
+            if (snapNeedsSiteRoundMove(data)) {
+                if (window._cloudSyncedDrawingKeys) window._cloudSyncedDrawingKeys.delete(docId);
+                return false;
+            }
             const ok = hasFirebaseStorageMeta(data) || isUsableRasterDrawingUrl(data.dataUrl);
             if (ok) {
                 if (!window._cloudSyncedDrawingKeys) window._cloudSyncedDrawingKeys = new Set();
@@ -40519,11 +40557,17 @@ document.addEventListener('DOMContentLoaded', () => {
             if (USE_FIREBASE_STORAGE_FOR_DRAWINGS && getFirebaseStorage()) {
                 const scope = storageScopeForBuildingId(buildingId);
                 const path = storagePathFloorDrawingPdf(getCompanyDocId(), buildingId, floorCode, scope);
+                let previousStoragePath = null;
+                try {
+                    const prevSnap = await docRef.get();
+                    if (prevSnap.exists) previousStoragePath = storagePathFromSnapData(prevSnap.data() || {});
+                } catch (_e) { /* ignore */ }
                 await uploadAssetToFirebaseStorageAndMeta(docRef, path, pdfDataUrl, {
                     buildingId,
                     floorCode,
                     site: scope.site,
-                    round: scope.round
+                    round: scope.round,
+                    previousStoragePath
                 });
             } else {
                 await writeChunkedPdfToDocRef(docRef, pdfDataUrl);
@@ -40568,6 +40612,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 return false;
             }
             const data = snap.data() || {};
+            if (snapNeedsSiteRoundMove(data)) {
+                if (window._cloudSyncedPdfKeys) window._cloudSyncedPdfKeys.delete(docId);
+                return false;
+            }
             const ok = hasFirebaseStorageMeta(data)
                 || (data.dataUrl && String(data.dataUrl).length > 32)
                 || (data.chunkStatus === 'ready' && data.chunked && Number(data.chunkCount) > 0);

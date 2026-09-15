@@ -65,6 +65,31 @@
         return base + '.' + e;
     }
 
+    function isSiteRoundScopedStoragePath(storagePath) {
+        const parts = String(storagePath || '').replace(/^\/+/, '').split('/').filter(Boolean);
+        if (parts.length < 6) return false;
+        if (parts[0] !== 'companies') return false;
+        return parts[4] === 'floorDrawings'
+            || parts[4] === 'floorDrawingPdfs'
+            || parts[4] === 'floorDrawingTiers'
+            || parts[4] === 'photos';
+    }
+
+    function storagePathFromSnapData(data) {
+        if (!data || typeof data !== 'object') return null;
+        if (typeof data.storagePath === 'string' && data.storagePath.length > 0) {
+            return data.storagePath;
+        }
+        if (data.downloadURL) return storagePathFromDownloadURL(data.downloadURL);
+        return null;
+    }
+
+    function snapNeedsSiteRoundMove(data) {
+        const path = storagePathFromSnapData(data);
+        if (path) return !isSiteRoundScopedStoragePath(path);
+        return false;
+    }
+
     function storagePathFloorDrawing(companyId, buildingId, floorCode, contentType, scope) {
         const ext = guessExtFromContentType(contentType, 'jpg');
         return companyScopedAssetPath(
@@ -318,6 +343,9 @@
         parseDataUrl: parseDataUrl,
         isFirebaseStorageHttpUrl: isFirebaseStorageHttpUrl,
         storagePathFromDownloadURL: storagePathFromDownloadURL,
+        isSiteRoundScopedStoragePath: isSiteRoundScopedStoragePath,
+        storagePathFromSnapData: storagePathFromSnapData,
+        snapNeedsSiteRoundMove: snapNeedsSiteRoundMove,
         hasFirebaseStorageMeta: hasFirebaseStorageMeta,
         firestoreStorageMetaFields: firestoreStorageMetaFields,
         getFirebaseStorage: getFirebaseStorage,

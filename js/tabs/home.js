@@ -32,7 +32,7 @@ window.BSA.tabs['tab-home'] = {
         '전경사진(결함과 별도) — 회차 목록·점검 중 상단에서 촬영·한 줄 설명',
         '도면·PDF·티어 파일 본문은 Firebase Storage, Firestore는 URL/메타만 (레거시 청크 호환)',
         '결함·전경·강도 사진 본문은 Firebase Storage, Firestore는 URL/메타만 (기존 dataUrl은 동기화 시 이관)',
-        'Storage 폴더는 현장 → 회차 → 사진/도면 (companies/{회사}/{현장}/{회차}/…)'
+        'Storage 폴더는 현장 → 회차 → 사진/도면 (기존 평면 도면은 동기화 시 현장 폴더로 이동)'
     ],
     ownerHint: 'app.js BUILDING MANAGEMENT + JSON 백업 + 휴대폰 연동',
     enter: function () {
