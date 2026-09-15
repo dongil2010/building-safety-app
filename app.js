@@ -17343,6 +17343,106 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     /**
+     * Firestore photos 문서에서 실제 이미지 소스 추출.
+     * Storage 이전 후: { url, storagePath } / 구형: { dataUrl }
+     */
+    function getPhotoUrlFromDocData(data) {
+        if (!data || typeof data !== 'object') return null;
+        const u = data.url || data.dataUrl || data.downloadUrl || null;
+        if (typeof u !== 'string') return null;
+        const trimmed = u.trim();
+        return trimmed ? trimmed : null;
+    }
+
+    /**
+     * dataURL / https(Storage) / blob URL → HWPX BinData용 바이트.
+     * Storage 이전 후 한글 출력 시 https URL이 들어오므로 fetch 지원 필수.
+     */
+    async function imageSrcToBytes(src) {
+        if (!src || typeof src !== 'string') {
+            throw new Error('이미지 데이터 형식을 인식할 수 없습니다.');
+        }
+        const raw = src.trim();
+        if (raw.startsWith('data:')) {
+            const m = /^data:([^;]+);base64,([\s\S]*)$/.exec(raw);
+            if (!m) throw new Error('이미지 데이터 형식을 인식할 수 없습니다.');
+            const mimeRaw = (m[1] || 'image/jpeg').toLowerCase();
+            const binary = atob(m[2]);
+            const bytes = new Uint8Array(binary.length);
+            for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+            if (mimeRaw === 'image/png') return { bytes, mime: 'image/png', ext: 'png' };
+            return { bytes, mime: 'image/jpeg', ext: 'jpg' };
+        }
+        if (/^https?:\/\//i.test(raw) || raw.startsWith('blob:')) {
+            let bytes = null;
+            let mime = 'image/jpeg';
+            // Storage SDK(getBlob) 우선 — CORS로 fetch가 막혀도 한글 출력에 사진을 넣을 수 있게
+            try {
+                if (typeof assetUrlToUploadBlob === 'function') {
+                    const pack = await assetUrlToUploadBlob(raw);
+                    if (pack && pack.blob) {
+                        bytes = new Uint8Array(await pack.blob.arrayBuffer());
+                        mime = String(pack.contentType || pack.blob.type || 'image/jpeg').toLowerCase();
+                    }
+                }
+            } catch (_sdkErr) { /* fall through */ }
+            if (!bytes) {
+                const resp = await fetch(raw, { mode: 'cors', credentials: 'omit', cache: 'force-cache' });
+                if (!resp.ok) throw new Error(`이미지 다운로드 실패 (${resp.status})`);
+                bytes = new Uint8Array(await resp.arrayBuffer());
+                mime = ((resp.headers.get('content-type') || '').split(';')[0] || '').trim().toLowerCase();
+            }
+            if (!mime.startsWith('image/')) {
+                if (raw.toLowerCase().includes('.png')) mime = 'image/png';
+                else mime = 'image/jpeg';
+            }
+            if (mime === 'image/jpg') mime = 'image/jpeg';
+            // 한글은 webp/gif 임베드가 불안정 → JPEG로 변환
+            if (mime === 'image/webp' || mime === 'image/gif' || mime === 'image/bmp') {
+                const dataUrl = await new Promise((resolve, reject) => {
+                    const blob = new Blob([bytes], { type: mime });
+                    const objUrl = URL.createObjectURL(blob);
+                    const img = new Image();
+                    img.onload = () => {
+                        try {
+                            const canvas = document.createElement('canvas');
+                            canvas.width = img.naturalWidth || img.width;
+                            canvas.height = img.naturalHeight || img.height;
+                            const ctx = canvas.getContext('2d');
+                            ctx.drawImage(img, 0, 0);
+                            resolve(canvas.toDataURL('image/jpeg', 0.92));
+                        } catch (e) { reject(e); }
+                        finally { URL.revokeObjectURL(objUrl); }
+                    };
+                    img.onerror = () => {
+                        URL.revokeObjectURL(objUrl);
+                        reject(new Error('이미지 변환에 실패했습니다.'));
+                    };
+                    img.src = objUrl;
+                });
+                return imageSrcToBytes(dataUrl);
+            }
+            if (mime === 'image/png') return { bytes, mime: 'image/png', ext: 'png' };
+            return { bytes, mime: 'image/jpeg', ext: 'jpg' };
+        }
+        throw new Error('이미지 데이터 형식을 인식할 수 없습니다.');
+    }
+
+    function loadImageNaturalSize(src) {
+        return new Promise((resolve, reject) => {
+            if (!src) {
+                reject(new Error('이미지를 불러오지 못했습니다.'));
+                return;
+            }
+            const img = new Image();
+            if (/^https?:\/\//i.test(src)) img.crossOrigin = 'anonymous';
+            img.onload = () => resolve({ w: img.naturalWidth, h: img.naturalHeight });
+            img.onerror = () => reject(new Error('이미지를 불러오지 못했습니다.'));
+            img.src = src;
+        });
+    }
+
+    /**
      * 현회차 출력(사진첩·보고서·상태조사표 사진란)에 쓸 사진 — defect.photos(현차)만.
      * prevRoundPhotos(전차)는 제외. 전회차 결함도 현차에 새로 넣은 photos는 출력한다.
      */
@@ -32882,7 +32982,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     return;
                 }
                 counters.imgCounter += 1;
-                const pack = dataUrlToBytes(src);
+                const pack = await dataUrlToBytes(src);
                 const size = await loadImageSize(src);
                 const imgId = `crackMonPhoto${counters.imgCounter}`;
                 zip.file(`BinData/${imgId}.${pack.ext}`, pack.bytes);
@@ -33414,23 +33514,9 @@ document.addEventListener('DOMContentLoaded', () => {
             };
 
             // 사진/위치도 이미지 삽입에 공용으로 쓰는 헬퍼들 (한 곳에서만 관리해 여러 층에서
-            // 다르게 어긋나지 않게 한다).
-            const dataUrlToBytes = (dataUrl) => {
-                const m = /^data:([^;]+);base64,(.*)$/.exec(dataUrl || '');
-                if (!m) throw new Error('이미지 데이터 형식을 인식할 수 없습니다.');
-                const mime = m[1];
-                const binary = atob(m[2]);
-                const bytes = new Uint8Array(binary.length);
-                for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-                const ext = mime === 'image/png' ? 'png' : 'jpg';
-                return { bytes, mime, ext };
-            };
-            const loadImageSize = (dataUrl) => new Promise((resolve, reject) => {
-                const img = new Image();
-                img.onload = () => resolve({ w: img.naturalWidth, h: img.naturalHeight });
-                img.onerror = () => reject(new Error('이미지를 불러오지 못했습니다.'));
-                img.src = dataUrl;
-            });
+            // 다르게 어긋나지 않게 한다). Storage URL(https)도 dataURL과 같이 처리한다.
+            const dataUrlToBytes = (src) => imageSrcToBytes(src);
+            const loadImageSize = (src) => loadImageNaturalSize(src);
             // 사진 1장을 표 안의 hp:pic 하나에 앉히는 작업. curSz/scaMatrix가 서로 어긋나면 비율이
             // 깨져 보이는 걸 검증 과정에서 확인해서, orgSz/curSz/scaMatrix를 전부 일치시켜 계산한다.
             // maxW/maxH는 그 hp:pic이 원래 차지하던 표시 박스 크기(넘지 않게 fit)다.
@@ -33715,7 +33801,7 @@ document.addEventListener('DOMContentLoaded', () => {
                             mapMaxW = parseInt(cellSz.getAttribute('width'), 10) - marginL - marginR;
                             mapMaxH = parseInt(cellSz.getAttribute('height'), 10) - marginT - marginB;
                         }
-                        const { bytes, mime, ext } = dataUrlToBytes(mapDataUrl);
+                        const { bytes, mime, ext } = await dataUrlToBytes(mapDataUrl);
                         const size = await loadImageSize(mapDataUrl);
                         const mapImgId = `locationMapAuto${imgSeq}`;
                         zip.file(`BinData/${mapImgId}.${ext}`, bytes);
@@ -34004,9 +34090,16 @@ document.addEventListener('DOMContentLoaded', () => {
                         const outPhotos = getDefectOutputPhotos(d);
                         const src = outPhotos[0];
                         if (!src) continue;
-                        const { bytes, mime, ext } = dataUrlToBytes(src);
-                        const size = await loadImageSize(src);
-                        decoded.push({ d, bytes, mime, ext, w: size.w, h: size.h });
+                        try {
+                            const { bytes, mime, ext } = await dataUrlToBytes(src);
+                            const size = await loadImageSize(src);
+                            decoded.push({ d, bytes, mime, ext, w: size.w, h: size.h });
+                        } catch (onePhotoErr) {
+                            console.warn('사진 1장 임베드 실패(해당 컷만 생략):', d && d.id, onePhotoErr);
+                        }
+                    }
+                    if (!decoded.length) {
+                        throw new Error('임베드 가능한 사진이 없습니다. (Storage URL/권한/CORS 확인)');
                     }
 
                     let photoPara = photoRun.parentNode;
@@ -34249,7 +34342,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 const insertImageParaAfter = async (afterPara, dataUrl, imgIdPrefix, maxW = 42520, maxH = 999999999) => {
                     if (!afterPara || !dataUrl) return afterPara;
-                    const { bytes, mime, ext } = dataUrlToBytes(dataUrl);
+                    const { bytes, mime, ext } = await dataUrlToBytes(dataUrl);
                     const size = await loadImageSize(dataUrl);
                     const seq = imgCounter++;
                     const imgId = `${imgIdPrefix}${seq}`;
@@ -34611,21 +34704,22 @@ document.addEventListener('DOMContentLoaded', () => {
                                     setTcText(tcAtAddr(tbl, 0, 0), '구  분');
                                     setTcText(tcAtAddr(tbl, 0, 1), '위  치');
                                     setTcText(tcAtAddr(tbl, 0, 2), '평균 경도');
-                                    group.forEach((pt, idx) => {
+                                    for (let idx = 0; idx < group.length; idx++) {
+                                        const pt = group[idx];
                                         try {
                                             const noCol = 1 + idx * 2;
                                             setTcText(tcAtAddr(tbl, noCol, 0), `NO. ${pt.seq}`);
                                             setTcText(tcAtAddr(tbl, noCol, 1), [pt.location, pt.component].filter(Boolean).join(' ') || '-');
                                             setTcText(tcAtAddr(tbl, noCol, 2), pt._avgText);
                                             const pic = pics[idx];
-                                            const { bytes, mime, ext } = dataUrlToBytes(pt._imgUrl);
+                                            const { bytes, mime, ext } = await dataUrlToBytes(pt._imgUrl);
                                             zip.file(`BinData/${pt._imgId}.${ext}`, bytes);
                                             manifestAdds.push(`<opf:item id="${pt._imgId}" href="BinData/${pt._imgId}.${ext}" media-type="${mime}" isEmbeded="1"/>`);
                                             setPicImage(pic, pt._imgId, pt._imgW, pt._imgH, photoMaxW, photoMaxH);
                                         } catch (e) {
                                             console.error('반발경도 측정 DATA 표 채우기 실패 (NO.' + pt.seq + '):', e);
                                         }
-                                    });
+                                    }
                                 }
                             }
                         }
@@ -34664,14 +34758,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
                                 const perfAgeDays = getConcreteAgeInDays();
                                 const perfEnabledNames = getEnabledStrengthFormulaNames(bldg);
-                                perfPoints.forEach((pt, seq) => {
+                                for (let seq = 0; seq < perfPoints.length; seq++) {
+                                    const pt = perfPoints[seq];
                                     const readings = (pt.slot.readings || []).filter(v => v !== '' && v !== null && v !== undefined);
-                                    if (readings.length === 0) return;
+                                    if (readings.length === 0) continue;
                                     const calc = calcConcreteStrength(readings, parseFloat(pt.item.strengthAngle), perfAgeDays, perfEnabledNames);
-                                    if (!calc) return;
+                                    if (!calc) continue;
                                     const canvas = renderStrengthPerfPointCanvas(seq + 1, pt.item, pt.slot, readings, calc);
                                     const dataUrl = canvas.toDataURL('image/png');
-                                    const { bytes, mime, ext } = dataUrlToBytes(dataUrl);
+                                    const { bytes, mime, ext } = await dataUrlToBytes(dataUrl);
                                     imgCounter++;
                                     const imgId = `strengthPerfAuto${imgCounter}`;
                                     zip.file(`BinData/${imgId}.${ext}`, bytes);
@@ -34681,7 +34776,7 @@ document.addEventListener('DOMContentLoaded', () => {
                                     const pic = newPara.getElementsByTagNameNS(HP_NS, 'pic')[0];
                                     setPicImage(pic, imgId, canvas.width, canvas.height, 42520, 999999999);
                                     sec.insertBefore(newPara, stopNode);
-                                });
+                                }
                             }
                         }
                     }
@@ -34822,7 +34917,7 @@ document.addEventListener('DOMContentLoaded', () => {
                                 mapAnchor = newPara;
 
                                 const pic = newPara.getElementsByTagNameNS(HP_NS, 'pic')[0];
-                                const { bytes, mime, ext } = dataUrlToBytes(mapDataUrl);
+                                const { bytes, mime, ext } = await dataUrlToBytes(mapDataUrl);
                                 const size = await loadImageSize(mapDataUrl);
                                 const imgId = `${imgIdPrefix}${imgCounter}`;
                                 zip.file(`BinData/${imgId}.${ext}`, bytes);
@@ -34988,7 +35083,7 @@ document.addEventListener('DOMContentLoaded', () => {
                             }
                             imgCounter++;
                             const imgId = `photoAuto${imgCounter}`;
-                            const pack = dataUrlToBytes(src);
+                            const pack = await dataUrlToBytes(src);
                             const size = await loadImageSize(src);
                             zip.file(`BinData/${imgId}.${pack.ext}`, pack.bytes);
                             manifestAdds.push(`<opf:item id="${imgId}" href="BinData/${imgId}.${pack.ext}" media-type="${pack.mime}" isEmbeded="1"/>`);
@@ -35136,7 +35231,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         else newPara.setAttribute('pageBreak', '1');
                         sec.appendChild(newPara);
                         const pic = newPara.getElementsByTagNameNS(HP_NS, 'pic')[0];
-                        const { bytes, mime, ext } = dataUrlToBytes(item.dataUrl);
+                        const { bytes, mime, ext } = await dataUrlToBytes(item.dataUrl);
                         const size = await loadImageSize(item.dataUrl);
                         const imgId = `overviewPhoto${imgCounter}`;
                         zip.file(`BinData/${imgId}.${ext}`, bytes);
@@ -35555,23 +35650,9 @@ document.addEventListener('DOMContentLoaded', () => {
             };
 
             // 사진/위치도 이미지 삽입에 공용으로 쓰는 헬퍼들 (한 곳에서만 관리해 여러 층에서
-            // 다르게 어긋나지 않게 한다).
-            const dataUrlToBytes = (dataUrl) => {
-                const m = /^data:([^;]+);base64,(.*)$/.exec(dataUrl || '');
-                if (!m) throw new Error('이미지 데이터 형식을 인식할 수 없습니다.');
-                const mime = m[1];
-                const binary = atob(m[2]);
-                const bytes = new Uint8Array(binary.length);
-                for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-                const ext = mime === 'image/png' ? 'png' : 'jpg';
-                return { bytes, mime, ext };
-            };
-            const loadImageSize = (dataUrl) => new Promise((resolve, reject) => {
-                const img = new Image();
-                img.onload = () => resolve({ w: img.naturalWidth, h: img.naturalHeight });
-                img.onerror = () => reject(new Error('이미지를 불러오지 못했습니다.'));
-                img.src = dataUrl;
-            });
+            // 다르게 어긋나지 않게 한다). Storage URL(https)도 dataURL과 같이 처리한다.
+            const dataUrlToBytes = (src) => imageSrcToBytes(src);
+            const loadImageSize = (src) => loadImageNaturalSize(src);
             // 사진 1장을 표 안의 hp:pic 하나에 앉히는 작업. curSz/scaMatrix가 서로 어긋나면 비율이
             // 깨져 보이는 걸 검증 과정에서 확인해서, orgSz/curSz/scaMatrix를 전부 일치시켜 계산한다.
             // maxW/maxH는 그 hp:pic이 원래 차지하던 표시 박스 크기(넘지 않게 fit)다.
@@ -35831,7 +35912,7 @@ document.addEventListener('DOMContentLoaded', () => {
                             mapMaxW = parseInt(cellSz.getAttribute('width'), 10) - marginL - marginR;
                             mapMaxH = parseInt(cellSz.getAttribute('height'), 10) - marginT - marginB;
                         }
-                        const { bytes, mime, ext } = dataUrlToBytes(mapDataUrl);
+                        const { bytes, mime, ext } = await dataUrlToBytes(mapDataUrl);
                         const size = await loadImageSize(mapDataUrl);
                         const mapImgId = `locationMapAuto${imgSeq}`;
                         zip.file(`BinData/${mapImgId}.${ext}`, bytes);
@@ -36083,9 +36164,16 @@ document.addEventListener('DOMContentLoaded', () => {
                         const outPhotos = getDefectOutputPhotos(d);
                         const src = outPhotos[0];
                         if (!src) continue;
-                        const { bytes, mime, ext } = dataUrlToBytes(src);
-                        const size = await loadImageSize(src);
-                        decoded.push({ d, bytes, mime, ext, w: size.w, h: size.h });
+                        try {
+                            const { bytes, mime, ext } = await dataUrlToBytes(src);
+                            const size = await loadImageSize(src);
+                            decoded.push({ d, bytes, mime, ext, w: size.w, h: size.h });
+                        } catch (onePhotoErr) {
+                            console.warn('사진 1장 임베드 실패(해당 컷만 생략):', d && d.id, onePhotoErr);
+                        }
+                    }
+                    if (!decoded.length) {
+                        throw new Error('임베드 가능한 사진이 없습니다. (Storage URL/권한/CORS 확인)');
                     }
 
                     let photoPara = photoRun.parentNode;
@@ -36325,7 +36413,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 const insertImageParaAfter = async (afterPara, dataUrl, imgIdPrefix, maxW = 42520, maxH = 999999999) => {
                     if (!afterPara || !dataUrl) return afterPara;
-                    const { bytes, mime, ext } = dataUrlToBytes(dataUrl);
+                    const { bytes, mime, ext } = await dataUrlToBytes(dataUrl);
                     const size = await loadImageSize(dataUrl);
                     const seq = imgCounter++;
                     const imgId = `${imgIdPrefix}${seq}`;
@@ -36687,21 +36775,22 @@ document.addEventListener('DOMContentLoaded', () => {
                                     setTcText(tcAtAddr(tbl, 0, 0), '구  분');
                                     setTcText(tcAtAddr(tbl, 0, 1), '위  치');
                                     setTcText(tcAtAddr(tbl, 0, 2), '평균 경도');
-                                    group.forEach((pt, idx) => {
+                                    for (let idx = 0; idx < group.length; idx++) {
+                                        const pt = group[idx];
                                         try {
                                             const noCol = 1 + idx * 2;
                                             setTcText(tcAtAddr(tbl, noCol, 0), `NO. ${pt.seq}`);
                                             setTcText(tcAtAddr(tbl, noCol, 1), [pt.location, pt.component].filter(Boolean).join(' ') || '-');
                                             setTcText(tcAtAddr(tbl, noCol, 2), pt._avgText);
                                             const pic = pics[idx];
-                                            const { bytes, mime, ext } = dataUrlToBytes(pt._imgUrl);
+                                            const { bytes, mime, ext } = await dataUrlToBytes(pt._imgUrl);
                                             zip.file(`BinData/${pt._imgId}.${ext}`, bytes);
                                             manifestAdds.push(`<opf:item id="${pt._imgId}" href="BinData/${pt._imgId}.${ext}" media-type="${mime}" isEmbeded="1"/>`);
                                             setPicImage(pic, pt._imgId, pt._imgW, pt._imgH, photoMaxW, photoMaxH);
                                         } catch (e) {
                                             console.error('반발경도 측정 DATA 표 채우기 실패 (NO.' + pt.seq + '):', e);
                                         }
-                                    });
+                                    }
                                 }
                             }
                         }
@@ -36740,14 +36829,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
                                 const perfAgeDays = getConcreteAgeInDays();
                                 const perfEnabledNames = getEnabledStrengthFormulaNames(bldg);
-                                perfPoints.forEach((pt, seq) => {
+                                for (let seq = 0; seq < perfPoints.length; seq++) {
+                                    const pt = perfPoints[seq];
                                     const readings = (pt.slot.readings || []).filter(v => v !== '' && v !== null && v !== undefined);
-                                    if (readings.length === 0) return;
+                                    if (readings.length === 0) continue;
                                     const calc = calcConcreteStrength(readings, parseFloat(pt.item.strengthAngle), perfAgeDays, perfEnabledNames);
-                                    if (!calc) return;
+                                    if (!calc) continue;
                                     const canvas = renderStrengthPerfPointCanvas(seq + 1, pt.item, pt.slot, readings, calc);
                                     const dataUrl = canvas.toDataURL('image/png');
-                                    const { bytes, mime, ext } = dataUrlToBytes(dataUrl);
+                                    const { bytes, mime, ext } = await dataUrlToBytes(dataUrl);
                                     imgCounter++;
                                     const imgId = `strengthPerfAuto${imgCounter}`;
                                     zip.file(`BinData/${imgId}.${ext}`, bytes);
@@ -36757,7 +36847,7 @@ document.addEventListener('DOMContentLoaded', () => {
                                     const pic = newPara.getElementsByTagNameNS(HP_NS, 'pic')[0];
                                     setPicImage(pic, imgId, canvas.width, canvas.height, 42520, 999999999);
                                     sec.insertBefore(newPara, stopNode);
-                                });
+                                }
                             }
                         }
                     }
@@ -36898,7 +36988,7 @@ document.addEventListener('DOMContentLoaded', () => {
                                 mapAnchor = newPara;
 
                                 const pic = newPara.getElementsByTagNameNS(HP_NS, 'pic')[0];
-                                const { bytes, mime, ext } = dataUrlToBytes(mapDataUrl);
+                                const { bytes, mime, ext } = await dataUrlToBytes(mapDataUrl);
                                 const size = await loadImageSize(mapDataUrl);
                                 const imgId = `${imgIdPrefix}${imgCounter}`;
                                 zip.file(`BinData/${imgId}.${ext}`, bytes);
@@ -37005,7 +37095,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         else newPara.setAttribute('pageBreak', '1');
                         sec.appendChild(newPara);
                         const pic = newPara.getElementsByTagNameNS(HP_NS, 'pic')[0];
-                        const { bytes, mime, ext } = dataUrlToBytes(item.dataUrl);
+                        const { bytes, mime, ext } = await dataUrlToBytes(item.dataUrl);
                         const size = await loadImageSize(item.dataUrl);
                         const imgId = `overviewPhoto${imgCounter}`;
                         zip.file(`BinData/${imgId}.${ext}`, bytes);

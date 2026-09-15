@@ -299,6 +299,32 @@
         return blobToDataUrl(blob);
     }
 
+    /** Storage SDK로 본문 받기 — 브라우저 CORS 우회(인증된 SDK 경로) */
+    async function downloadStoragePathAsBlob(storagePath, fallbackType) {
+        const storage = getFirebaseStorage();
+        if (!storage || !storagePath) throw new Error('Storage path 없음');
+        const ref = storage.ref().child(String(storagePath).replace(/^\/+/, ''));
+        if (typeof ref.getBlob === 'function') {
+            const blob = await ref.getBlob();
+            if (fallbackType && (!blob.type || blob.type === 'application/octet-stream')) {
+                return new Blob([blob], { type: fallbackType });
+            }
+            return blob;
+        }
+        if (typeof ref.getBytes === 'function') {
+            const bytes = await ref.getBytes();
+            return new Blob([bytes], { type: fallbackType || 'application/octet-stream' });
+        }
+        const url = await ref.getDownloadURL();
+        const res = await fetch(url, { mode: 'cors' });
+        if (!res.ok) throw new Error('asset fetch HTTP ' + res.status);
+        const blob = await res.blob();
+        if (fallbackType && (!blob.type || blob.type === 'application/octet-stream')) {
+            return new Blob([blob], { type: fallbackType });
+        }
+        return blob;
+    }
+
     async function materializeCloudAssetPayload(url, snapData) {
         if (!url || typeof url !== 'string') return null;
         if (url.indexOf('data:') === 0) return url;
@@ -306,6 +332,16 @@
         try {
             return await fetchUrlAsDataUrl(url, ctype || undefined);
         } catch (e) {
+            const path = (snapData && snapData.storagePath)
+                || storagePathFromDownloadURL(url);
+            if (path) {
+                try {
+                    const blob = await downloadStoragePathAsBlob(path, ctype || 'image/jpeg');
+                    return await blobToDataUrl(blob);
+                } catch (e2) {
+                    console.warn('Storage SDK 본문 받기 실패:', path, e2);
+                }
+            }
             console.warn('클라우드 파일 본문 받기 실패, URL 유지:', url.slice(0, 80), e);
             return url;
         }
@@ -315,8 +351,29 @@
         const parsed = parseDataUrl(url);
         if (parsed) return parsed;
         if (typeof url !== 'string') return null;
-        if (url.indexOf('blob:') === 0 || /^https?:\/\//i.test(url)) {
+        if (url.indexOf('blob:') === 0) {
             const res = await fetch(url);
+            if (!res.ok) throw new Error('asset fetch HTTP ' + res.status);
+            const blob = await res.blob();
+            return {
+                contentType: blob.type || 'application/octet-stream',
+                blob: blob,
+                size: blob.size
+            };
+        }
+        if (/^https?:\/\//i.test(url)) {
+            const path = storagePathFromDownloadURL(url);
+            if (path) {
+                try {
+                    const blob = await downloadStoragePathAsBlob(path, 'image/jpeg');
+                    return {
+                        contentType: blob.type || 'image/jpeg',
+                        blob: blob,
+                        size: blob.size
+                    };
+                } catch (_e) { /* fall through to fetch */ }
+            }
+            const res = await fetch(url, { mode: 'cors' });
             if (!res.ok) throw new Error('asset fetch HTTP ' + res.status);
             const blob = await res.blob();
             return {
@@ -354,6 +411,7 @@
         resolveCloudAssetUrlFromSnapData: resolveCloudAssetUrlFromSnapData,
         blobToDataUrl: blobToDataUrl,
         fetchUrlAsDataUrl: fetchUrlAsDataUrl,
+        downloadStoragePathAsBlob: downloadStoragePathAsBlob,
         materializeCloudAssetPayload: materializeCloudAssetPayload,
         assetUrlToUploadBlob: assetUrlToUploadBlob
     };
