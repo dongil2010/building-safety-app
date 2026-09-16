@@ -18990,18 +18990,34 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function revealSelectedDefectListAboveDrawer() {
         const panel = document.getElementById('defectListPanel');
-        const row = panel && panel.querySelector('.defect-list-item.is-map-selected');
-        if (row) scrollDefectListRowIntoView(row, 'auto');
+        if (!panel) return;
+        const cluster = panel.querySelector('.defect-list-section.is-selected-cluster');
+        if (cluster) {
+            // 선택됨 구역을 패널 맨 위로 — 하단 수정창에 조사표가 잘려도 선택 마킹이 보이게
+            panel.scrollTop = 0;
+            try {
+                cluster.scrollIntoView({ behavior: 'auto', block: 'start', inline: 'nearest' });
+            } catch (_e) { /* ignore */ }
+            const row = cluster.querySelector('.defect-list-item');
+            if (row) scrollDefectListRowIntoView(row, 'auto', 'start');
+            return;
+        }
+        const row = panel.querySelector('.defect-list-item.is-map-selected');
+        if (row) scrollDefectListRowIntoView(row, 'auto', 'start');
     }
 
     function scheduleRevealDefectListAboveDrawer() {
-        if (!isMobilePortraitDefectDrawer()) return;
+        const need = (typeof isMobilePortraitDefectDrawer === 'function' && isMobilePortraitDefectDrawer())
+            || (typeof isDefectDrawerBottomLayout === 'function' && isDefectDrawerBottomLayout())
+            || (typeof layoutIsCompactWidth === 'function' && layoutIsCompactWidth());
+        if (!need) return;
         const run = () => revealSelectedDefectListAboveDrawer();
         requestAnimationFrame(() => {
             requestAnimationFrame(run);
         });
         setTimeout(run, 80);
         setTimeout(run, 300);
+        setTimeout(run, 520);
     }
 
     // 좌측 사이드바에 표시되는 "현재 층에 등록된 결함" 간단 목록 렌더링
@@ -19119,7 +19135,7 @@ document.addEventListener('DOMContentLoaded', () => {
         collectSelected(previousItemsRaw);
         collectSelected(currentItemsRaw);
 
-        const pinSelectedToTop = selectedCluster.length >= 2;
+        const pinSelectedToTop = selectedCluster.length >= 1;
         const previousItems = pinSelectedToTop
             ? previousItemsRaw.filter(d => !isDefectListItemSelected(d))
             : previousItemsRaw;
@@ -19131,7 +19147,10 @@ document.addEventListener('DOMContentLoaded', () => {
             : unregisteredItems;
 
         if (pinSelectedToTop) {
-            const selSection = renderDefectListSection(`✅ 선택됨 (${selectedCluster.length})`, selectedCluster, { mapSelected: true });
+            const selTitle = selectedCluster.length === 1
+                ? '✅ 선택됨'
+                : `✅ 선택됨 (${selectedCluster.length})`;
+            const selSection = renderDefectListSection(selTitle, selectedCluster, { mapSelected: true });
             if (selSection) {
                 selSection.classList.add('is-selected-cluster');
                 panel.appendChild(selSection);
@@ -26975,6 +26994,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             }, 280);
         }
+        // 수정창을 닫으면 선택 해제 → 좌측 조사표 '선택됨' 상단 고정 해제
+        if (typeof selectedDefectIds !== 'undefined' && selectedDefectIds && typeof selectedDefectIds.clear === 'function') {
+            selectedDefectIds.clear();
+        }
+        if (typeof updateMapSelectionBar === 'function') updateMapSelectionBar({ scrollToSelection: false });
+        else if (typeof renderDefectListPanel === 'function') renderDefectListPanel();
         drawCanvas();
     }
     window.closeDefectModal = closeDefectModal;
