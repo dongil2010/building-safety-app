@@ -9626,6 +9626,66 @@ document.addEventListener('DOMContentLoaded', () => {
         return state.ndtData[key];
     }
 
+    // 비파괴조사 NO.는 층별이 아니라 건물 전체(카테고리별)로 이어지게 한다 — 1층에서
+    // NO.06까지 썼으면 5층은 NO.07부터 시작해야 해서, 번호 매길 땐 현재 층뿐 아니라
+    // 이 건물의 모든 층 항목을 모아서 세야 한다. floorsList 순서대로 모아서, 결과표를
+    // 합칠 때도(건물 전체 결과표) 같은 순서를 쓸 수 있게 한다.
+    function getAllFloorsNdtData(buildingId) {
+        if (!buildingId || !state.ndtData) return [];
+        const bldg = (state.buildings || []).find(b => b.id === buildingId);
+        const floorCodes = (bldg && Array.isArray(bldg.floorsList) && bldg.floorsList.length > 0)
+            ? bldg.floorsList.map(f => f.floorCode)
+            : Object.keys(state.ndtData)
+                .filter(k => k.startsWith(buildingId + '_'))
+                .map(k => k.slice(buildingId.length + 1));
+        const seen = new Set();
+        const out = [];
+        floorCodes.forEach(fc => {
+            if (seen.has(fc)) return;
+            seen.add(fc);
+            const arr = state.ndtData[`${buildingId}_${fc}`];
+            if (Array.isArray(arr)) out.push(...arr);
+        });
+        return out;
+    }
+
+    // 비파괴조사 결과표(보고서/HWPX)를 건물 전체로 합칠 때 쓰는 공용 헬퍼. 항목을 복제해서
+    // 위치(location) 앞에 층 이름을 붙인다 — 여러 층이 한 표에 섞이면 어느 층 건지 구분이
+    // 안 되기 때문(결함위치도의 buildCombinedExteriorSurveyDefects와 같은 패턴). 위치도(도면
+    // 이미지)는 이 함수가 건드리지 않는다 — 표(데이터 목록)만 합치고, 위치도는 호출부에서
+    // 기존 방식(현재 보고 있는 층 등) 그대로 쓴다.
+    function buildCombinedNdtDataForReport(buildingId) {
+        if (!buildingId) return { allItems: [], allDispGroups: [] };
+        const bldg = (state.buildings || []).find(b => b.id === buildingId);
+        const floorCodes = (bldg && Array.isArray(bldg.floorsList) && bldg.floorsList.length > 0)
+            ? bldg.floorsList.map(f => f.floorCode)
+            : Object.keys(state.ndtData || {})
+                .filter(k => k.startsWith(buildingId + '_'))
+                .map(k => k.slice(buildingId.length + 1));
+        const allItems = [];
+        const allDispGroups = [];
+        const seen = new Set();
+        floorCodes.forEach(fc => {
+            if (seen.has(fc)) return;
+            seen.add(fc);
+            const floorLabel = stripFloorCodeSuffix(window.getFloorLabelFromCode(fc));
+            const key = `${buildingId}_${fc}`;
+            ((state.ndtData && state.ndtData[key]) || []).forEach(item => {
+                if (!item) return;
+                allItems.push(Object.assign({}, item, {
+                    location: item.location ? `${floorLabel} ${item.location}` : floorLabel,
+                    _ndtFloorCode: fc,
+                    _ndtFloorLabel: floorLabel
+                }));
+            });
+            ((state.ndtDisplacementGroups && state.ndtDisplacementGroups[key]) || []).forEach(g => {
+                if (!g) return;
+                allDispGroups.push(Object.assign({}, g, { _ndtFloorCode: fc, _ndtFloorLabel: floorLabel }));
+            });
+        });
+        return { allItems, allDispGroups };
+    }
+
     // --- 카테고리별 핀/박스 색상 커스터마이징 ---
     const DEFAULT_STYLE_COLORS = {
         defectStructural: '#b30000',    // 결함위치도 - 구조체 (진한 빨강)
@@ -15356,7 +15416,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 boxY: existingItem.boxY !== undefined ? existingItem.boxY : existingItem.y
             };
         } else {
-            const items = getCurrentFloorNdtData();
+            const items = getAllFloorsNdtData(state.currentBuildingId);
             const cat = currentNdtCategory || '강도';
             const count = items.filter(x => x.category === cat).length + 1;
             const seqStr = count < 10 ? `0${count}` : `${count}`;
@@ -15997,7 +16057,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 const cat = catEl.value;
                 const pinId = document.getElementById('ndtPinId')?.value;
                 if (!pinId) {
-                    const items = getCurrentFloorNdtData();
+                    const items = getAllFloorsNdtData(state.currentBuildingId);
                     const count = items.filter(x => x.category === cat).length + 1;
                     const seqStr = count < 10 ? `0${count}` : `${count}`;
                     const noEl = document.getElementById('ndtNo');
@@ -33235,6 +33295,18 @@ document.addEventListener('DOMContentLoaded', () => {
             const exteriorFloorSetForReport = new Set(exteriorFloorCodesForReport);
             let exteriorSurveyEmitted = false;
 
+            // 비파괴조사 결과표(데이터 목록)는 층별로 따로 만들지 않고 건물 전체를 미리 한 번에
+            // 모아둔다 — 표는 해당 카테고리 항목이 있는 첫 층에서 한 번만(ndtTableEmitted.*) 내고,
+            // 위치도(도면 이미지)는 그대로 층마다(각 층 자기 데이터 기준으로) 계속 낸다.
+            const ndtCombinedForReport = buildCombinedNdtDataForReport(currentBldgId);
+            const measureNdtItemsCombined = ndtCombinedForReport.allItems.filter(item => item.category === '실측');
+            const strengthNdtItemsCombined = ndtCombinedForReport.allItems.filter(item => item.category === '강도');
+            const carbNdtItemsCombined = ndtCombinedForReport.allItems.filter(item => item.category === '탄산화');
+            const tiltNdtItemsCombined = ndtCombinedForReport.allItems.filter(item => item.category === '기울기');
+            const settlementGroupsCombined = ndtCombinedForReport.allDispGroups.filter(g => !g.category || g.category === '변위');
+            const memberDispGroupsCombined = ndtCombinedForReport.allDispGroups.filter(g => g.category === '부재변위');
+            const ndtTableEmitted = { measure: false, 강도: false, 탄산화: false, tilt: false, settlement: false, memberDisp: false };
+
             for (let floorIdx = 0; floorIdx < availableFloors.length; floorIdx++) {
                 const floorCode = availableFloors[floorIdx];
                 const htmlBefore = reportPagesHtml.length;
@@ -33454,8 +33526,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (iType === '정밀안전점검') {
 
                 // --- 4. 📏 부재 실측 결과표 및 측정 위치도 (강도·탄산화와 별도 도면) ---
-                if (measureNdtItems.length > 0) {
-                    const measureDrawingUrl = renderNdtFloorPlanCanvasDataUrl(floorCode, '실측');
+                if (measureNdtItems.length > 0 || (!ndtTableEmitted.measure && measureNdtItemsCombined.length > 0)) {
+                    // 결과표는 건물 전체를 모아 첫 층에서 한 번만 낸다(ndtTableEmitted.measure) —
+                    // 위치도는 아래에서 그대로 층별로 계속 낸다.
+                    if (!ndtTableEmitted.measure && measureNdtItemsCombined.length > 0) {
+                    ndtTableEmitted.measure = true;
                     const curSecNo1 = sectionNo++;
                     reportPagesHtml += `
                         <div class="report-page-block" style="background:#ffffff; color:#0f172a; padding: 10mm 14mm 10mm 14mm; margin-bottom: 2rem; font-family: sans-serif; font-size:0.9rem; border-radius:4px; box-shadow: 0 4px 20px rgba(0,0,0,0.1); page-break-after: always; break-after: page; page-break-inside: avoid !important; break-inside: avoid !important; box-sizing: border-box; width: 210mm; height: 295mm; max-height: 295mm; overflow: hidden; display: flex; flex-direction: column; position: relative;">
@@ -33464,7 +33539,7 @@ document.addEventListener('DOMContentLoaded', () => {
                             </div>
 
                             <h2 style="font-size:1.02rem; font-weight:800; color:#0f172a; border-left: 4px solid #2a2a2a; padding-left: 0.5rem; margin-bottom: 0.5rem;">
-                                ${curSecNo1}. ${floorDisplayLabel} 비파괴 장비 조사 (부재 실측) 결과표
+                                ${curSecNo1}. 비파괴 장비 조사 (부재 실측) 결과표
                             </h2>
 
                             <table style="width: 100%; border-collapse: collapse; font-size: 0.81rem; text-align: center; margin-bottom: 0.4rem;">
@@ -33481,7 +33556,7 @@ document.addEventListener('DOMContentLoaded', () => {
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    ${measureNdtItems.length > 0 ? measureNdtItems.map(item => {
+                                    ${measureNdtItemsCombined.length > 0 ? measureNdtItemsCombined.map(item => {
                                         const designText = formatNdtMeasureDimText(item, 'design');
                                         const measuredText = formatNdtMeasureDimText(item, 'measured');
                                         const ratioText = (item.sectionRatio !== undefined && item.sectionRatio !== null) ? `${item.sectionRatio.toFixed(1)}%` : '-';
@@ -33509,7 +33584,10 @@ document.addEventListener('DOMContentLoaded', () => {
                             </div>
                         </div>
                     `;
+                    }
 
+                    if (measureNdtItems.length > 0) {
+                    const measureDrawingUrl = renderNdtFloorPlanCanvasDataUrl(floorCode, '실측');
                     const curSecNo2 = sectionNo++;
                     reportPagesHtml += `
                         <div class="report-page-block" style="background:#ffffff; color:#0f172a; padding: 10mm 14mm 10mm 14mm; margin-bottom: 2rem; font-family: sans-serif; font-size:0.9rem; border-radius:4px; box-shadow: 0 4px 20px rgba(0,0,0,0.1); page-break-after: always; break-after: page; page-break-inside: avoid !important; break-inside: avoid !important; box-sizing: border-box; width: 210mm; height: 295mm; max-height: 295mm; overflow: hidden; display: flex; flex-direction: column; position: relative;">
@@ -33538,15 +33616,17 @@ document.addEventListener('DOMContentLoaded', () => {
                             </div>
                         </div>
                     `;
+                    }
                 }
 
                 // --- 4-1. 🔬 콘크리트 강도 결과표 (표만 분리, 위치도는 탄산화와 공통) ---
                 // --- 4-2. 🔬 탄산화 결과표 ---
                 [
-                    { items: strengthNdtItems, catLabel: '강도' },
-                    { items: carbNdtItems, catLabel: '탄산화' }
+                    { items: strengthNdtItemsCombined, catLabel: '강도' },
+                    { items: carbNdtItemsCombined, catLabel: '탄산화' }
                 ].forEach(({ items: stdItems, catLabel }) => {
-                    if (stdItems.length === 0) return;
+                    if (stdItems.length === 0 || ndtTableEmitted[catLabel]) return;
+                    ndtTableEmitted[catLabel] = true;
                     const curSecNo1 = sectionNo++;
                     reportPagesHtml += `
                         <div class="report-page-block" style="background:#ffffff; color:#0f172a; padding: 10mm 14mm 10mm 14mm; margin-bottom: 2rem; font-family: sans-serif; font-size:0.9rem; border-radius:4px; box-shadow: 0 4px 20px rgba(0,0,0,0.1); page-break-after: always; break-after: page; page-break-inside: avoid !important; break-inside: avoid !important; box-sizing: border-box; width: 210mm; height: 295mm; max-height: 295mm; overflow: hidden; display: flex; flex-direction: column; position: relative;">
@@ -33555,7 +33635,7 @@ document.addEventListener('DOMContentLoaded', () => {
                             </div>
 
                             <h2 style="font-size:1.02rem; font-weight:800; color:#0f172a; border-left: 4px solid #2a2a2a; padding-left: 0.5rem; margin-bottom: 0.5rem;">
-                                ${curSecNo1}. ${floorDisplayLabel} 비파괴 장비 조사 (${catLabel}) 결과표
+                                ${curSecNo1}. 비파괴 장비 조사 (${catLabel}) 결과표
                             </h2>
 
                             <table style="width: 100%; border-collapse: collapse; font-size: 0.81rem; text-align: center; margin-bottom: 0.4rem;">
@@ -33625,8 +33705,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
 
                 // --- 5. 📐 외벽 기울기 전용 결과표 및 독립 위치도 ---
-                if (tiltNdtItems.length > 0) {
-                    const tiltDrawingUrl = renderNdtFloorPlanCanvasDataUrl(floorCode, '기울기');
+                if (tiltNdtItems.length > 0 || (!ndtTableEmitted.tilt && tiltNdtItemsCombined.length > 0)) {
+                    if (!ndtTableEmitted.tilt && tiltNdtItemsCombined.length > 0) {
+                    ndtTableEmitted.tilt = true;
                     const curSecNo1 = sectionNo++;
                     reportPagesHtml += `
                         <div class="report-page-block" style="background:#ffffff; color:#0f172a; padding: 10mm 14mm 10mm 14mm; margin-bottom: 2rem; font-family: sans-serif; font-size:0.9rem; border-radius:4px; box-shadow: 0 4px 20px rgba(0,0,0,0.1); page-break-after: always; break-after: page; page-break-inside: avoid !important; break-inside: avoid !important; box-sizing: border-box; width: 210mm; height: 295mm; max-height: 295mm; overflow: hidden; display: flex; flex-direction: column; position: relative;">
@@ -33635,7 +33716,7 @@ document.addEventListener('DOMContentLoaded', () => {
                             </div>
 
                             <h2 style="font-size:1.02rem; font-weight:800; color:#0f172a; border-left: 4px solid #2a2a2a; padding-left: 0.5rem; margin-bottom: 0.5rem;">
-                                ${curSecNo1}. ${floorDisplayLabel} 외벽 기울기 측정 결과표
+                                ${curSecNo1}. 외벽 기울기 측정 결과표
                             </h2>
 
                             <table style="width: 100%; border-collapse: collapse; font-size: 0.81rem; text-align: center; margin-bottom: 0.4rem;">
@@ -33650,7 +33731,7 @@ document.addEventListener('DOMContentLoaded', () => {
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    ${tiltNdtItems.map(item => {
+                                    ${tiltNdtItemsCombined.map(item => {
                                         const fmtH = formatHeightValue(item.height) || '-';
                                         const hDigits = (fmtH || '').replace(/[^0-9.]/g, '');
                                         const avgDigits = (item.avgValue || '').replace(/[^0-9.-]/g, '');
@@ -33680,7 +33761,10 @@ document.addEventListener('DOMContentLoaded', () => {
                             </div>
                         </div>
                     `;
+                    }
 
+                    if (tiltNdtItems.length > 0) {
+                    const tiltDrawingUrl = renderNdtFloorPlanCanvasDataUrl(floorCode, '기울기');
                     const curSecNo2 = sectionNo++;
                     reportPagesHtml += `
                         <div class="report-page-block" style="background:#ffffff; color:#0f172a; padding: 10mm 14mm 10mm 14mm; margin-bottom: 2rem; font-family: sans-serif; font-size:0.9rem; border-radius:4px; box-shadow: 0 4px 20px rgba(0,0,0,0.1); page-break-after: always; break-after: page; page-break-inside: avoid !important; break-inside: avoid !important; box-sizing: border-box; width: 210mm; height: 295mm; max-height: 295mm; overflow: hidden; display: flex; flex-direction: column; position: relative;">
@@ -33709,11 +33793,13 @@ document.addEventListener('DOMContentLoaded', () => {
                             </div>
                         </div>
                     `;
+                    }
                 }
 
                 // --- 6. 📉 부동침하 기울기 전용 결과표 + 위치도 + 꺾은선 그래프 ---
-                if (settlementGroups.length > 0) {
-                    const settlementDrawingUrl = renderNdtFloorPlanCanvasDataUrl(floorCode, '변위');
+                if (settlementGroups.length > 0 || (!ndtTableEmitted.settlement && settlementGroupsCombined.length > 0)) {
+                    if (!ndtTableEmitted.settlement && settlementGroupsCombined.length > 0) {
+                    ndtTableEmitted.settlement = true;
                     const curSecNo1 = sectionNo++;
                     reportPagesHtml += `
                         <div class="report-page-block" style="background:#ffffff; color:#0f172a; padding: 10mm 14mm 10mm 14mm; margin-bottom: 2rem; font-family: sans-serif; font-size:0.9rem; border-radius:4px; box-shadow: 0 4px 20px rgba(0,0,0,0.1); page-break-after: always; break-after: page; page-break-inside: avoid !important; break-inside: avoid !important; box-sizing: border-box; width: 210mm; height: 295mm; max-height: 295mm; overflow: hidden; display: flex; flex-direction: column; position: relative;">
@@ -33722,7 +33808,7 @@ document.addEventListener('DOMContentLoaded', () => {
                             </div>
 
                             <h2 style="font-size:1.02rem; font-weight:800; color:#0f172a; border-left: 4px solid #2a2a2a; padding-left: 0.5rem; margin-bottom: 0.5rem;">
-                                ${curSecNo1}. ${floorDisplayLabel} 부동침하 기울기 측정 결과표
+                                ${curSecNo1}. 부동침하 기울기 측정 결과표
                             </h2>
 
                             <table style="width: 100%; border-collapse: collapse; font-size: 0.81rem; text-align: center; margin-bottom: 0.4rem;">
@@ -33737,14 +33823,14 @@ document.addEventListener('DOMContentLoaded', () => {
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    ${settlementGroups.map(group => {
+                                    ${settlementGroupsCombined.map(group => {
                                         const calc = calcGroupDisplacement(group);
                                         const fmt = formatDispCalcForExport(calc);
                                         const gradeColor = calc.incomplete ? '#64748b' : (calc.grade === 'a등급' ? '#16a34a' : (calc.grade === 'b등급' ? '#2a2a2a' : (calc.grade === 'c등급' ? '#ca8a04' : '#dc2626')));
                                         return `
                                         <tr>
                                             <td style="padding:0.4rem 0.3rem; border:1px solid #e2e8f0; font-weight:800; color:#2a2a2a;">${group.groupNo}</td>
-                                            <td style="padding:0.4rem 0.3rem; border:1px solid #e2e8f0; font-weight:700;">${group.locationType || '보'} (${group.points.length}개 지점)</td>
+                                            <td style="padding:0.4rem 0.3rem; border:1px solid #e2e8f0; font-weight:700;">${group._ndtFloorLabel ? group._ndtFloorLabel + ' ' : ''}${group.locationType || '보'} (${group.points.length}개 지점)</td>
                                             <td style="padding:0.4rem 0.3rem; border:1px solid #e2e8f0; font-weight:700; color:#2a2a2a;">${group.measureLength || '—'}</td>
                                             <td style="padding:0.4rem 0.3rem; border:1px solid #e2e8f0; font-weight:800; color:#16a34a;">${fmt.delta}</td>
                                             <td style="padding:0.4rem 0.3rem; border:1px solid #e2e8f0; font-weight:800; color:#9333ea;">${fmt.tiltRatio}</td>
@@ -33761,6 +33847,36 @@ document.addEventListener('DOMContentLoaded', () => {
                         </div>
                     `;
 
+                    settlementGroupsCombined.forEach(group => {
+                        const chartDataUrl = renderNdtDisplacementChartDataUrl(group, group._ndtFloorCode || floorCode);
+                        const curGraphNo = sectionNo++;
+                        reportPagesHtml += `
+                            <div class="report-page-block" style="background:#ffffff; color:#0f172a; padding: 10mm 14mm 10mm 14mm; margin-bottom: 2rem; font-family: sans-serif; font-size:0.9rem; border-radius:4px; box-shadow: 0 4px 20px rgba(0,0,0,0.1); page-break-after: always; break-after: page; page-break-inside: avoid !important; break-inside: avoid !important; box-sizing: border-box; width: 210mm; height: 295mm; max-height: 295mm; overflow: hidden; display: flex; flex-direction: column; position: relative;">
+                                <div style="text-align:center; border-bottom: 1px solid #cbd5e1; padding-bottom: 0.3rem; margin-bottom: 0.6rem;">
+                                    <h1 style="font-size:0.75rem; font-weight:700; color:#000000; margin:0;">${reportTitleHeader}</h1>
+                                </div>
+
+                                <h2 style="font-size:1.02rem; font-weight:800; color:#0f172a; border-left: 4px solid #2a2a2a; padding-left: 0.5rem; margin-bottom: 0.5rem;">
+                                    ${curGraphNo}. ${group._ndtFloorLabel || floorDisplayLabel} 부동침하 기울기 그래프 (${group.groupNo})
+                                </h2>
+
+                                ${chartDataUrl ? `
+                                    <div style="width: 100%; height: 222mm; max-height: 222mm; border: 2px solid #2a2a2a; border-radius: 6px; overflow: hidden; background: #ffffff; text-align: center; padding: 2px; box-sizing: border-box; display: flex; align-items: center; justify-content: center;">
+                                        <img src="${chartDataUrl}" style="width: 100%; height: 100%; object-fit: contain; border-radius: 4px; display: block; margin: 0 auto;">
+                                    </div>
+                                ` : ''}
+
+                                <div style="margin-top: auto; padding-top: 0.6rem; border-top: 1px solid #e2e8f0; display: flex; justify-content: space-between; align-items: center; font-size: 0.8rem; color: #475569;">
+                                    <span>🏢 점검수행기관: <strong style="color: #1f1f1f; font-weight: 800;">${compName}</strong></span>
+                                    <span>📄 스마트 건축물 안전점검 시스템</span>
+                                </div>
+                            </div>
+                        `;
+                    });
+                    }
+
+                    if (settlementGroups.length > 0) {
+                    const settlementDrawingUrl = renderNdtFloorPlanCanvasDataUrl(floorCode, '변위');
                     const curSecNo2 = sectionNo++;
                     reportPagesHtml += `
                         <div class="report-page-block" style="background:#ffffff; color:#0f172a; padding: 10mm 14mm 10mm 14mm; margin-bottom: 2rem; font-family: sans-serif; font-size:0.9rem; border-radius:4px; box-shadow: 0 4px 20px rgba(0,0,0,0.1); page-break-after: always; break-after: page; page-break-inside: avoid !important; break-inside: avoid !important; box-sizing: border-box; width: 210mm; height: 295mm; max-height: 295mm; overflow: hidden; display: flex; flex-direction: column; position: relative;">
@@ -33784,38 +33900,13 @@ document.addEventListener('DOMContentLoaded', () => {
                             </div>
                         </div>
                     `;
-
-                    settlementGroups.forEach(group => {
-                        const chartDataUrl = renderNdtDisplacementChartDataUrl(group, floorCode);
-                        const curGraphNo = sectionNo++;
-                        reportPagesHtml += `
-                            <div class="report-page-block" style="background:#ffffff; color:#0f172a; padding: 10mm 14mm 10mm 14mm; margin-bottom: 2rem; font-family: sans-serif; font-size:0.9rem; border-radius:4px; box-shadow: 0 4px 20px rgba(0,0,0,0.1); page-break-after: always; break-after: page; page-break-inside: avoid !important; break-inside: avoid !important; box-sizing: border-box; width: 210mm; height: 295mm; max-height: 295mm; overflow: hidden; display: flex; flex-direction: column; position: relative;">
-                                <div style="text-align:center; border-bottom: 1px solid #cbd5e1; padding-bottom: 0.3rem; margin-bottom: 0.6rem;">
-                                    <h1 style="font-size:0.75rem; font-weight:700; color:#000000; margin:0;">${reportTitleHeader}</h1>
-                                </div>
-
-                                <h2 style="font-size:1.02rem; font-weight:800; color:#0f172a; border-left: 4px solid #2a2a2a; padding-left: 0.5rem; margin-bottom: 0.5rem;">
-                                    ${curGraphNo}. ${floorDisplayLabel} 부동침하 기울기 그래프 (${group.groupNo})
-                                </h2>
-
-                                ${chartDataUrl ? `
-                                    <div style="width: 100%; height: 222mm; max-height: 222mm; border: 2px solid #2a2a2a; border-radius: 6px; overflow: hidden; background: #ffffff; text-align: center; padding: 2px; box-sizing: border-box; display: flex; align-items: center; justify-content: center;">
-                                        <img src="${chartDataUrl}" style="width: 100%; height: 100%; object-fit: contain; border-radius: 4px; display: block; margin: 0 auto;">
-                                    </div>
-                                ` : ''}
-
-                                <div style="margin-top: auto; padding-top: 0.6rem; border-top: 1px solid #e2e8f0; display: flex; justify-content: space-between; align-items: center; font-size: 0.8rem; color: #475569;">
-                                    <span>🏢 점검수행기관: <strong style="color: #1f1f1f; font-weight: 800;">${compName}</strong></span>
-                                    <span>📄 스마트 건축물 안전점검 시스템</span>
-                                </div>
-                            </div>
-                        `;
-                    });
+                    }
                 }
 
                 // --- 7. 🏗️ 부재처짐 (부재변위) 전용 결과표 + 위치도 + 꺾은선 그래프 ---
-                if (memberDispGroups.length > 0) {
-                    const memberDispDrawingUrl = renderNdtFloorPlanCanvasDataUrl(floorCode, '부재변위');
+                if (memberDispGroups.length > 0 || (!ndtTableEmitted.memberDisp && memberDispGroupsCombined.length > 0)) {
+                    if (!ndtTableEmitted.memberDisp && memberDispGroupsCombined.length > 0) {
+                    ndtTableEmitted.memberDisp = true;
                     const curSecNo1 = sectionNo++;
                     reportPagesHtml += `
                         <div class="report-page-block" style="background:#ffffff; color:#0f172a; padding: 10mm 14mm 10mm 14mm; margin-bottom: 2rem; font-family: sans-serif; font-size:0.9rem; border-radius:4px; box-shadow: 0 4px 20px rgba(0,0,0,0.1); page-break-after: always; break-after: page; page-break-inside: avoid !important; break-inside: avoid !important; box-sizing: border-box; width: 210mm; height: 295mm; max-height: 295mm; overflow: hidden; display: flex; flex-direction: column; position: relative;">
@@ -33824,7 +33915,7 @@ document.addEventListener('DOMContentLoaded', () => {
                             </div>
 
                             <h2 style="font-size:1.02rem; font-weight:800; color:#0f172a; border-left: 4px solid #2a2a2a; padding-left: 0.5rem; margin-bottom: 0.5rem;">
-                                ${curSecNo1}. ${floorDisplayLabel} 부재처짐 (부재변위) 측정 결과표
+                                ${curSecNo1}. 부재처짐 (부재변위) 측정 결과표
                             </h2>
 
                             <table style="width: 100%; border-collapse: collapse; font-size: 0.81rem; text-align: center; margin-bottom: 0.4rem;">
@@ -33839,14 +33930,14 @@ document.addEventListener('DOMContentLoaded', () => {
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    ${memberDispGroups.map(group => {
+                                    ${memberDispGroupsCombined.map(group => {
                                         const calc = calcGroupDisplacement(group);
                                         const fmt = formatDispCalcForExport(calc);
                                         const gradeColor = calc.incomplete ? '#64748b' : (calc.grade === 'a등급' ? '#16a34a' : (calc.grade === 'b등급' ? '#2a2a2a' : (calc.grade === 'c등급' ? '#ca8a04' : '#dc2626')));
                                         return `
                                         <tr>
                                             <td style="padding:0.4rem 0.3rem; border:1px solid #e2e8f0; font-weight:800; color:#2a2a2a;">${group.groupNo}</td>
-                                            <td style="padding:0.4rem 0.3rem; border:1px solid #e2e8f0; font-weight:700;">${group.locationType || '보'} (${group.points.length}개 지점)</td>
+                                            <td style="padding:0.4rem 0.3rem; border:1px solid #e2e8f0; font-weight:700;">${group._ndtFloorLabel ? group._ndtFloorLabel + ' ' : ''}${group.locationType || '보'} (${group.points.length}개 지점)</td>
                                             <td style="padding:0.4rem 0.3rem; border:1px solid #e2e8f0; font-weight:700; color:#2a2a2a;">${group.measureLength || '—'}</td>
                                             <td style="padding:0.4rem 0.3rem; border:1px solid #e2e8f0; font-weight:800; color:#16a34a;">${fmt.delta}</td>
                                             <td style="padding:0.4rem 0.3rem; border:1px solid #e2e8f0; font-weight:800; color:#9333ea;">${fmt.tiltRatio}</td>
@@ -33863,6 +33954,36 @@ document.addEventListener('DOMContentLoaded', () => {
                         </div>
                     `;
 
+                    memberDispGroupsCombined.forEach(group => {
+                        const chartDataUrl = renderNdtDisplacementChartDataUrl(group, group._ndtFloorCode || floorCode);
+                        const curGraphNo = sectionNo++;
+                        reportPagesHtml += `
+                            <div class="report-page-block" style="background:#ffffff; color:#0f172a; padding: 10mm 14mm 10mm 14mm; margin-bottom: 2rem; font-family: sans-serif; font-size:0.9rem; border-radius:4px; box-shadow: 0 4px 20px rgba(0,0,0,0.1); page-break-after: always; break-after: page; page-break-inside: avoid !important; break-inside: avoid !important; box-sizing: border-box; width: 210mm; height: 295mm; max-height: 295mm; overflow: hidden; display: flex; flex-direction: column; position: relative;">
+                                <div style="text-align:center; border-bottom: 1px solid #cbd5e1; padding-bottom: 0.3rem; margin-bottom: 0.6rem;">
+                                    <h1 style="font-size:0.75rem; font-weight:700; color:#000000; margin:0;">${reportTitleHeader}</h1>
+                                </div>
+
+                                <h2 style="font-size:1.02rem; font-weight:800; color:#0f172a; border-left: 4px solid #2a2a2a; padding-left: 0.5rem; margin-bottom: 0.5rem;">
+                                    ${curGraphNo}. ${group._ndtFloorLabel || floorDisplayLabel} 부재처짐 그래프 (${group.groupNo})
+                                </h2>
+
+                                ${chartDataUrl ? `
+                                    <div style="width: 100%; height: 222mm; max-height: 222mm; border: 2px solid #2a2a2a; border-radius: 6px; overflow: hidden; background: #ffffff; text-align: center; padding: 2px; box-sizing: border-box; display: flex; align-items: center; justify-content: center;">
+                                        <img src="${chartDataUrl}" style="width: 100%; height: 100%; object-fit: contain; border-radius: 4px; display: block; margin: 0 auto;">
+                                    </div>
+                                ` : ''}
+
+                                <div style="margin-top: auto; padding-top: 0.6rem; border-top: 1px solid #e2e8f0; display: flex; justify-content: space-between; align-items: center; font-size: 0.8rem; color: #475569;">
+                                    <span>🏢 점검수행기관: <strong style="color: #1f1f1f; font-weight: 800;">${compName}</strong></span>
+                                    <span>📄 스마트 건축물 안전점검 시스템</span>
+                                </div>
+                            </div>
+                        `;
+                    });
+                    }
+
+                    if (memberDispGroups.length > 0) {
+                    const memberDispDrawingUrl = renderNdtFloorPlanCanvasDataUrl(floorCode, '부재변위');
                     const curSecNo2 = sectionNo++;
                     reportPagesHtml += `
                         <div class="report-page-block" style="background:#ffffff; color:#0f172a; padding: 10mm 14mm 10mm 14mm; margin-bottom: 2rem; font-family: sans-serif; font-size:0.9rem; border-radius:4px; box-shadow: 0 4px 20px rgba(0,0,0,0.1); page-break-after: always; break-after: page; page-break-inside: avoid !important; break-inside: avoid !important; box-sizing: border-box; width: 210mm; height: 295mm; max-height: 295mm; overflow: hidden; display: flex; flex-direction: column; position: relative;">
@@ -33886,33 +34007,7 @@ document.addEventListener('DOMContentLoaded', () => {
                             </div>
                         </div>
                     `;
-
-                    memberDispGroups.forEach(group => {
-                        const chartDataUrl = renderNdtDisplacementChartDataUrl(group, floorCode);
-                        const curGraphNo = sectionNo++;
-                        reportPagesHtml += `
-                            <div class="report-page-block" style="background:#ffffff; color:#0f172a; padding: 10mm 14mm 10mm 14mm; margin-bottom: 2rem; font-family: sans-serif; font-size:0.9rem; border-radius:4px; box-shadow: 0 4px 20px rgba(0,0,0,0.1); page-break-after: always; break-after: page; page-break-inside: avoid !important; break-inside: avoid !important; box-sizing: border-box; width: 210mm; height: 295mm; max-height: 295mm; overflow: hidden; display: flex; flex-direction: column; position: relative;">
-                                <div style="text-align:center; border-bottom: 1px solid #cbd5e1; padding-bottom: 0.3rem; margin-bottom: 0.6rem;">
-                                    <h1 style="font-size:0.75rem; font-weight:700; color:#000000; margin:0;">${reportTitleHeader}</h1>
-                                </div>
-
-                                <h2 style="font-size:1.02rem; font-weight:800; color:#0f172a; border-left: 4px solid #2a2a2a; padding-left: 0.5rem; margin-bottom: 0.5rem;">
-                                    ${curGraphNo}. ${floorDisplayLabel} 부재처짐 그래프 (${group.groupNo})
-                                </h2>
-
-                                ${chartDataUrl ? `
-                                    <div style="width: 100%; height: 222mm; max-height: 222mm; border: 2px solid #2a2a2a; border-radius: 6px; overflow: hidden; background: #ffffff; text-align: center; padding: 2px; box-sizing: border-box; display: flex; align-items: center; justify-content: center;">
-                                        <img src="${chartDataUrl}" style="width: 100%; height: 100%; object-fit: contain; border-radius: 4px; display: block; margin: 0 auto;">
-                                    </div>
-                                ` : ''}
-
-                                <div style="margin-top: auto; padding-top: 0.6rem; border-top: 1px solid #e2e8f0; display: flex; justify-content: space-between; align-items: center; font-size: 0.8rem; color: #475569;">
-                                    <span>🏢 점검수행기관: <strong style="color: #1f1f1f; font-weight: 800;">${compName}</strong></span>
-                                    <span>📄 스마트 건축물 안전점검 시스템</span>
-                                </div>
-                            </div>
-                        `;
-                    });
+                    }
                 }
 
                 } // iType === '정밀안전점검'
@@ -35873,9 +35968,10 @@ document.addEventListener('DOMContentLoaded', () => {
             try { if (isPreciseInspectionForTemplate && floorCode) {
                 const ndtBldg = window.state.currentBuilding || {};
                 const ndtBldgId = ndtBldg.id || window.state.currentBuildingId;
-                const ndtKey = `${ndtBldgId}_${floorCode}`;
-                const allNdtItemsForHwpx = state.ndtData ? (state.ndtData[ndtKey] || []) : [];
-                const allDispGroupsForHwpx = state.ndtDisplacementGroups ? (state.ndtDisplacementGroups[ndtKey] || []) : [];
+                // 결과표(데이터 목록)는 건물 전체 층을 합쳐서 채운다 — 위치도(도면 이미지)는 위의
+                // floorCode(현재 보고 있는 층) 기준 그대로 유지(표만 합치고 위치도는 층별 구조라
+                // 템플릿에 한 장만 들어갈 수 있어 못 바꿈).
+                const { allItems: allNdtItemsForHwpx, allDispGroups: allDispGroupsForHwpx } = buildCombinedNdtDataForReport(ndtBldgId);
 
                 const measureItemsHwpx = allNdtItemsForHwpx.filter(item => item.category === '실측');
                 const fireproofItemsHwpx = allNdtItemsForHwpx.filter(item => item.category === '내화피복');
@@ -37966,9 +38062,10 @@ document.addEventListener('DOMContentLoaded', () => {
             try { if (isPreciseInspectionForTemplate && floorCode) {
                 const ndtBldg = window.state.currentBuilding || {};
                 const ndtBldgId = ndtBldg.id || window.state.currentBuildingId;
-                const ndtKey = `${ndtBldgId}_${floorCode}`;
-                const allNdtItemsForHwpx = state.ndtData ? (state.ndtData[ndtKey] || []) : [];
-                const allDispGroupsForHwpx = state.ndtDisplacementGroups ? (state.ndtDisplacementGroups[ndtKey] || []) : [];
+                // 결과표(데이터 목록)는 건물 전체 층을 합쳐서 채운다 — 위치도(도면 이미지)는 위의
+                // floorCode(현재 보고 있는 층) 기준 그대로 유지(표만 합치고 위치도는 층별 구조라
+                // 템플릿에 한 장만 들어갈 수 있어 못 바꿈).
+                const { allItems: allNdtItemsForHwpx, allDispGroups: allDispGroupsForHwpx } = buildCombinedNdtDataForReport(ndtBldgId);
 
                 const measureItemsHwpx = allNdtItemsForHwpx.filter(item => item.category === '실측');
                 const fireproofItemsHwpx = allNdtItemsForHwpx.filter(item => item.category === '내화피복');
