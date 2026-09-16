@@ -8506,8 +8506,83 @@ document.addEventListener('DOMContentLoaded', () => {
         return { x, y };
     }
 
+    let _panAnimRafId = 0;
+
+    function cancelCanvasPanAnimation() {
+        if (_panAnimRafId) {
+            cancelAnimationFrame(_panAnimRafId);
+            _panAnimRafId = 0;
+        }
+    }
+
+    // 결함 수정창이 하단 바텀시트로 올라오는 레이아웃인지 판별 (모바일 세로, 태블릿 세로 등)
+    function isDefectDrawerBottomLayout() {
+        if (layoutIsPcLike()) return false;
+        if (window.matchMedia && window.matchMedia('(orientation: portrait)').matches) return true;
+        if ((window.innerHeight || 0) > (window.innerWidth || 0)) return true;
+        if (layoutIsMobileWidth() && !(window.matchMedia && window.matchMedia('(orientation: landscape)').matches)) return true;
+        const card = document.querySelector('#defectModal .defect-drawer-card');
+        if (card) {
+            const r = card.getBoundingClientRect();
+            if (r.width >= (window.innerWidth || 1) * 0.75) return true;
+        }
+        return false;
+    }
+
+    // 결함 마킹이 드로어에 가려지는지 또는 화면 가시 영역 밖인지 판별
+    function isDefectMarkingCoveredByDrawer(defect) {
+        if (!defect || !state.canvas) return false;
+        const center = getDefectMarkingImgCenter(defect);
+        if (!center) return false;
+        const v = imgToViewCoords(center.x, center.y);
+        const scale = state.view.scale || 1;
+        const canvas = (typeof elements !== 'undefined' && elements.planCanvas) || state.canvas;
+        const cRect = canvas.getBoundingClientRect();
+        const ptX = cRect.left + (v.x * scale + state.view.offsetX);
+        const ptY = cRect.top + (v.y * scale + state.view.offsetY);
+
+        if (isDefectDrawerBottomLayout()) {
+            let drawerHeight = 0;
+            const card = document.querySelector('#defectModal .defect-drawer-card');
+            if (card && card.offsetHeight > 80) {
+                drawerHeight = card.offsetHeight;
+            } else if (document.documentElement.classList.contains('layout-tablet')) {
+                drawerHeight = window.innerHeight * 0.56;
+            } else {
+                drawerHeight = window.innerHeight * 0.60;
+            }
+            const drawerTop = Math.max(window.innerHeight * 0.35, window.innerHeight - drawerHeight);
+            if (ptY + 36 >= drawerTop || ptY - 36 <= cRect.top) return true;
+            if (ptX - 30 <= cRect.left || ptX + 30 >= cRect.right) return true;
+            return false;
+        }
+
+        if (window.matchMedia && window.matchMedia('(orientation: landscape)').matches && !layoutIsPcLike()) {
+            let drawerW = window.innerWidth * 0.333;
+            if (document.documentElement.classList.contains('layout-tablet')) {
+                drawerW = Math.min(420, window.innerWidth * 0.38);
+            }
+            const card = document.querySelector('#defectModal .defect-drawer-card');
+            if (card && card.offsetWidth > 100) drawerW = card.offsetWidth;
+            const drawerLeft = window.innerWidth - drawerW;
+            if (ptX + 44 >= drawerLeft || ptX - 36 <= cRect.left) return true;
+            if (ptY - 30 <= cRect.top || ptY + 30 >= cRect.bottom) return true;
+            return false;
+        }
+
+        const card = document.querySelector('#defectModal .defect-drawer-card');
+        if (card) {
+            const dRect = card.getBoundingClientRect();
+            if (dRect.width > 40 && ptX + 36 >= dRect.left && ptX - 36 <= dRect.right && ptY >= dRect.top && ptY <= dRect.bottom) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     // 결함 수정 창이 가리는 영역을 피한 캔버스 포커스 지점
-    // 세로: 화면 상단 1/4 (하단 3/5 드로어 위) · 가로: 좌측 2/3 영역의 중앙
+    // 세로 모바일/태블릿: 하단 바텀시트(56~60vh) 위 상단 가시 영역 중앙
+    // 가로 모바일/태블릿: 우측 드로어(33~38vw) 좌측 가시 영역 중앙
     function getUncoveredCanvasFocusPoint() {
         const cssW = state.canvasCssW || 0;
         const cssH = state.canvasCssH || 0;
@@ -8520,17 +8595,34 @@ document.addEventListener('DOMContentLoaded', () => {
         let visR = cssW;
         let visB = cssH;
 
-        if (layoutMediaMobilePortrait()) {
-            const drawerTop = window.innerHeight * 0.6;
-            visB = Math.max(64, Math.min(cssH, drawerTop - cRect.top - 12));
-            // 세로: 화면 상단 1/4 지점(캔버스 좌표). 드로어에 가려지지 않게 클램프
-            const quarterY = (window.innerHeight * 0.25) - cRect.top;
-            const focusY = Math.max(visT + 24, Math.min(visB - 24, quarterY));
+        if (isDefectDrawerBottomLayout()) {
+            let drawerHeight = 0;
+            const card = document.querySelector('#defectModal .defect-drawer-card');
+            if (card && card.offsetHeight > 80) {
+                drawerHeight = card.offsetHeight;
+            } else if (document.documentElement.classList.contains('layout-tablet')) {
+                drawerHeight = window.innerHeight * 0.56;
+            } else {
+                drawerHeight = window.innerHeight * 0.60;
+            }
+            const drawerTop = Math.max(window.innerHeight * 0.35, window.innerHeight - drawerHeight);
+            visT = Math.max(0, -cRect.top);
+            visB = Math.max(visT + 64, Math.min(cssH, drawerTop - cRect.top - 12));
+            const centerY = (visT + visB) / 2;
+            const focusY = Math.max(visT + 28, Math.min(visB - 28, centerY));
             return { x: (visL + visR) / 2, y: focusY };
         }
-        if (window.matchMedia('(orientation: landscape) and (max-width: 1024px)').matches && !layoutIsPcLike()) {
-            const drawerLeft = window.innerWidth * (2 / 3);
+
+        if (window.matchMedia && window.matchMedia('(orientation: landscape)').matches && !layoutIsPcLike()) {
+            let drawerW = window.innerWidth * 0.333;
+            if (document.documentElement.classList.contains('layout-tablet')) {
+                drawerW = Math.min(420, window.innerWidth * 0.38);
+            }
+            const card = document.querySelector('#defectModal .defect-drawer-card');
+            if (card && card.offsetWidth > 100) drawerW = card.offsetWidth;
+            const drawerLeft = window.innerWidth - drawerW;
             visR = Math.max(64, Math.min(cssW, drawerLeft - cRect.left - 12));
+            return { x: (visL + visR) / 2, y: (visT + visB) / 2 };
         } else {
             const card = document.querySelector('#defectModal .defect-drawer-card');
             if (card) {
@@ -8548,9 +8640,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!defect || !state.canvas) return false;
         const center = getDefectMarkingImgCenter(defect);
         if (!center) return false;
-        // uncovered는 결함표에서 고를 때만 — 도면 클릭은 클릭 위치 유지
         const useUncovered = options.uncovered === true;
-        // 결함표·조사표·사진 → 도면: 과도한 확대 없이 위치만 알 수 있게 (이전 0.7~1.05의 약 절반)
         const cur = state.view.scale || 1;
         const targetScale = options.keepScale
             ? cur
@@ -8561,25 +8651,71 @@ document.addEventListener('DOMContentLoaded', () => {
         const focus = useUncovered
             ? getUncoveredCanvasFocusPoint()
             : { x: cssW / 2, y: cssH / 2 };
+        const targetOffsetX = focus.x - v.x * targetScale;
+        const targetOffsetY = focus.y - v.y * targetScale;
+
+        if (options.animate && typeof requestAnimationFrame === 'function') {
+            cancelCanvasPanAnimation();
+            const startX = state.view.offsetX;
+            const startY = state.view.offsetY;
+            const startScale = state.view.scale || 1;
+            const deltaX = targetOffsetX - startX;
+            const deltaY = targetOffsetY - startY;
+            const deltaScale = targetScale - startScale;
+            if (Math.hypot(deltaX, deltaY) < 3 && Math.abs(deltaScale) < 0.005) {
+                state.view.scale = targetScale;
+                state.view.offsetX = targetOffsetX;
+                state.view.offsetY = targetOffsetY;
+                if (elements.zoomScaleText) elements.zoomScaleText.textContent = `${Math.round(targetScale * 100)}%`;
+                return true;
+            }
+            const duration = Number.isFinite(options.duration) ? options.duration : 260;
+            const startTime = performance.now();
+            function step(now) {
+                const elapsed = now - startTime;
+                const progress = Math.min(1, elapsed / duration);
+                const ease = 1 - Math.pow(1 - progress, 3);
+                state.view.offsetX = startX + deltaX * ease;
+                state.view.offsetY = startY + deltaY * ease;
+                state.view.scale = startScale + deltaScale * ease;
+                if (elements.zoomScaleText) elements.zoomScaleText.textContent = `${Math.round(state.view.scale * 100)}%`;
+                drawCanvas({ immediate: true });
+                if (progress < 1) {
+                    _panAnimRafId = requestAnimationFrame(step);
+                } else {
+                    _panAnimRafId = 0;
+                    state.view.offsetX = targetOffsetX;
+                    state.view.offsetY = targetOffsetY;
+                    state.view.scale = targetScale;
+                    drawCanvas({ immediate: true });
+                }
+            }
+            _panAnimRafId = requestAnimationFrame(step);
+            return true;
+        }
+
+        cancelCanvasPanAnimation();
         state.view.scale = targetScale;
-        state.view.offsetX = focus.x - v.x * targetScale;
-        state.view.offsetY = focus.y - v.y * targetScale;
+        state.view.offsetX = targetOffsetX;
+        state.view.offsetY = targetOffsetY;
         if (elements.zoomScaleText) elements.zoomScaleText.textContent = `${Math.round(targetScale * 100)}%`;
         return true;
     }
 
-    function scheduleRevealMarkingAboveDrawer(defect) {
+    function scheduleRevealMarkingAboveDrawer(defect, options = {}) {
         if (!defect) return;
-        const run = () => {
-            panCanvasToDefectMarking(defect, { uncovered: true, keepScale: true });
+        const animate = options.animate !== false;
+        panCanvasToDefectMarking(defect, { uncovered: true, keepScale: true, animate });
+        // 드로어 열림 CSS 트랜지션(0.28s) 완료 후 최종 레이아웃 기준으로 안정화
+        setTimeout(() => {
+            panCanvasToDefectMarking(defect, { uncovered: true, keepScale: true, animate: false });
             if (typeof drawCanvas === 'function') drawCanvas();
-        };
-        requestAnimationFrame(() => {
-            requestAnimationFrame(run);
-        });
-        setTimeout(run, 80);
-        setTimeout(run, 300);
+        }, 320);
     }
+    window.scheduleRevealMarkingAboveDrawer = scheduleRevealMarkingAboveDrawer;
+    window.getUncoveredCanvasFocusPoint = getUncoveredCanvasFocusPoint;
+    window.isDefectDrawerBottomLayout = isDefectDrawerBottomLayout;
+    window.isDefectMarkingCoveredByDrawer = isDefectMarkingCoveredByDrawer;
 
     // 좌측 결함 목록에서 특정 결함을 클릭했을 때 캔버스를 그 위치로 이동·표시 (과도한 확대는 피함)
     window.focusDefectOnCanvas = function(defectId, options = {}) {
@@ -25480,6 +25616,7 @@ document.addEventListener('DOMContentLoaded', () => {
         activePointerIsTouch = !!isTouch;
         clearPendingDragLongPress();
         hideTouchLoupe(MAP_LOUPE_ID);
+        if (typeof cancelCanvasPanAnimation === 'function') cancelCanvasPanAnimation();
 
         // 중간 클릭(휠 클릭): MARK/AREA 모드에서도 도면 PAN 이동
         if (forcePan) {
@@ -26032,7 +26169,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             selectedDefectIds = new Set([d.id]);
             updateMapSelectionBar({ scrollToSelection: true });
-            openAddDefectModal(d.x, d.y, d.targetX, d.targetY, d);
+            openAddDefectModal(d.x, d.y, d.targetX, d.targetY, d, null, { revealMarkingAboveDrawer: true, fromCanvas: true });
             if (d.groupId && getDefectMarkingGroupMembers(d.groupId).length > 1) {
                 window.showToast?.(
                     `마킹 ${formatDefectMemberChipLabel(d)} 선택 · NO.박스를 다시 누르면 다음 화살표`,
@@ -26089,7 +26226,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 );
                 setDrawMode('PAN');
             } else {
-                openAddDefectModal(liveBoxImgX, liveBoxImgY, markTargetImgX, markTargetImgY);
+                openAddDefectModal(liveBoxImgX, liveBoxImgY, markTargetImgX, markTargetImgY, null, null, { revealMarkingAboveDrawer: true, fromCanvas: true });
                 setDrawMode('PAN');
             }
             drawCanvas();
@@ -26133,7 +26270,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     commitAdditionalMarkingAtTarget(x1, y1, undefined, undefined, areaPayload);
                     setDrawMode('PAN');
                 } else {
-                    openAddDefectModal(x1, y1, undefined, undefined, null, areaPayload);
+                    openAddDefectModal(x1, y1, undefined, undefined, null, areaPayload, { revealMarkingAboveDrawer: true, fromCanvas: true });
                     setDrawMode('PAN');
                 }
                 drawCanvas();
@@ -26165,7 +26302,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!endedFromTouch && !tiny && selectedDefectIds.size === 1) {
                 const onlyId = [...selectedDefectIds][0];
                 const d = getCurrentFloorDefects().find(def => def.id === onlyId);
-                if (d) openAddDefectModal(d.x, d.y, d.targetX, d.targetY, d);
+                if (d) openAddDefectModal(d.x, d.y, d.targetX, d.targetY, d, null, { revealMarkingAboveDrawer: true, fromCanvas: true });
             }
         }
 
@@ -26263,6 +26400,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Touch Events (Galaxy Tab & Smartphone Support with Multi-Touch Pinch Zoom & Pan)
         elements.planCanvas.addEventListener('touchstart', (e) => {
+            if (typeof cancelCanvasPanAnimation === 'function') cancelCanvasPanAnimation();
             mapTouchStartedOnCanvas = true;
             mapSuppressMouseUntil = Date.now() + 700;
             if (window.cadCalibrationState && e.touches.length === 1) {
@@ -26399,6 +26537,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Wheel Zoom (마우스 커서 위치 기준)
         elements.planCanvas.addEventListener('wheel', (e) => {
+            if (typeof cancelCanvasPanAnimation === 'function') cancelCanvasPanAnimation();
             e.preventDefault();
             const rect = elements.planCanvas.getBoundingClientRect();
             const mouseX = e.clientX - rect.left;
@@ -27109,13 +27248,14 @@ document.addEventListener('DOMContentLoaded', () => {
                 resetDefectDrawerScroll();
                 if (elements.defectModal) elements.defectModal.classList.add('open');
                 // 신규 마킹은 모달을 여는 순간 바로 저장해, 저장 버튼 없이 도면에 확정한다
+                let createdPin = null;
                 if (!existingPin) {
-                    const created = await commitDefectFromForm({ pushHistory: true, uploadPhotos: false });
-                    if (created) {
+                    createdPin = await commitDefectFromForm({ pushHistory: true, uploadPhotos: false });
+                    if (createdPin) {
                         const pinIdFresh = document.getElementById('defectPinId');
-                        if (pinIdFresh) pinIdFresh.value = created.id;
+                        if (pinIdFresh) pinIdFresh.value = createdPin.id;
                         window._defectEditSessionHistoryPushed = true;
-                        renderDefectMarkingTimeline(created);
+                        renderDefectMarkingTimeline(createdPin);
                     }
                 }
                 await photoHydratePromise;
@@ -27126,9 +27266,20 @@ document.addEventListener('DOMContentLoaded', () => {
                     renderDefectListPanel({ scrollToSelection: true });
                 }
                 scheduleRevealDefectListAboveDrawer();
-                // 결함표에서 고른 경우만 마킹을 상단 1/4로 — 도면 클릭은 순간이동하지 않음
-                if (existingPin && options && options.revealMarkingAboveDrawer) {
-                    scheduleRevealMarkingAboveDrawer(existingPin);
+
+                const targetPin = existingPin || createdPin;
+                const isBottom = isDefectDrawerBottomLayout();
+                const isMobileOrTablet = !layoutIsPcLike();
+                const isCovered = targetPin && isDefectMarkingCoveredByDrawer(targetPin);
+
+                // 모바일/태블릿에서 수정창(하단 드로어)이 올라올 때 또는 마킹이 가려질 때 마킹이 보이는 위치로 도면 화면 이동
+                const shouldReveal = !!(
+                    (options && options.revealMarkingAboveDrawer && (options.fromCanvas ? (isMobileOrTablet || isCovered) : true)) ||
+                    (isBottom && targetPin) ||
+                    (isCovered)
+                );
+                if (targetPin && shouldReveal) {
+                    scheduleRevealMarkingAboveDrawer(targetPin, { animate: true });
                 }
                 resetDefectDrawerScroll();
             });
@@ -28549,7 +28700,7 @@ document.addEventListener('DOMContentLoaded', () => {
             areaShape: 'polygon',
             areaAngle: 0,
             areaPoints: pts
-        });
+        }, { revealMarkingAboveDrawer: true, fromCanvas: true });
         if (!skipModeSwitch) setDrawMode('PAN');
         drawCanvas();
         return true;
@@ -30991,7 +31142,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const key = `${state.currentBuildingId}_${state.currentFloor}`;
         const defect = (state.defects[key] || []).find(d => d.id === defectId);
         if (!defect) return;
-        openAddDefectModal(defect.x, defect.y, defect.targetX, defect.targetY, defect);
+        openAddDefectModal(defect.x, defect.y, defect.targetX, defect.targetY, defect, null, { revealMarkingAboveDrawer: true });
     };
 
     function renderSurveyTable() {
