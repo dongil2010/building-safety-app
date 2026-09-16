@@ -21482,11 +21482,21 @@ document.addEventListener('DOMContentLoaded', () => {
 
     /**
      * 규모 문자열의 -nEA 앞을 한 칸 띄움 (0.3/2.0-2EA → 0.3/2.0 -2EA).
-     * 강제 줄바꿈(\n)·문단끝은 넣지 않는다 — 한글이 공백에서 자연 줄바꿈하도록.
+     * 화면/엑셀은 공백 유지. 한글 칸의 문단 분리는 insertHwpxEaCountLineBreaks.
      */
     function normalizeEaSpacingInText(raw) {
         return String(raw == null ? '' : raw)
             .replace(/([^\s\n])[ \t]*-(\d+)\s*EA\b/gi, '$1 -$2EA');
+    }
+
+    /**
+     * HWPX 셀: 측정값과 -nEA 갯수 접미사 사이를 문단 줄바꿈으로 나눔.
+     * wrapHwpxCellText가 CR/LF를 공백으로 평탄화한 뒤에 호출해야 줄바꿈이 살아남는다.
+     * 0.3~0.7/0.5 -12EA → 0.3~0.7/0.5\n-12EA
+     */
+    function insertHwpxEaCountLineBreaks(raw) {
+        return String(raw == null ? '' : raw)
+            .replace(/([^\s\n])[ \t]*-(\d+)\s*EA\b/gi, '$1\n-$2EA');
     }
 
     function formatCrackMeasurePair(m) {
@@ -21494,7 +21504,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const w = normalizeCrackDecimalText((m && m.width) || '');
         const l = normalizeCrackDecimalText((m && m.length) || '');
         const n = String((m && m.count) || '').trim();
-        // 한 칸 띄움: 한글에서 폭/길이 · Cw 다음 줄에 -nEA 로 자연 줄바꿈
+        // 한 칸 띄움: 화면/엑셀용. HWPX는 wrapHwpxCellText가 -nEA 앞을 문단 분리.
         const eaSuffix = n ? ` -${n}EA` : '';
 
         if (join === 'x') {
@@ -33761,8 +33771,8 @@ document.addEventListener('DOMContentLoaded', () => {
                         units += w;
                         end++;
                         if (ch === ' ' || ch === '\t') {
-                            // 폭/길이 -2EA · Cw:0.3 -2EA 앞 공백은 강제 줄바꿈(문단끝)하지 않음.
-                            // 공백만 두고 한글 자동 줄바꿈에 맡긴다.
+                            // -nEA 앞 공백은 wrapHwpxCellText가 문단 분리한다.
+                            // 여기선 줄바꿈 후보로 쓰지 않음(측정값 중간 쪼개기 방지).
                             const after = chars.slice(end).join('');
                             if (!/^-\d+\s*EA\b/i.test(after)) lastBreak = end;
                         } else if (/[,|·、，]/.test(ch)) {
@@ -33800,7 +33810,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 const flat = String(normalizeEaSpacingInText(raw == null ? '' : raw))
                     .replace(/\r\n|\r|\n/g, ' ')
                     .replace(/[ \t]{2,}/g, ' ');
-                return wrapHwpxCellLine(flat, maxChars);
+                // 갯수 접미사(-nEA)만 평탄화 뒤에 다시 문단 분리. fillCellParas가
+                // cloneNode(true)로 기존 문단을 복제해 다음 줄로 이어붙인다(한글 엔터와 동일).
+                return insertHwpxEaCountLineBreaks(flat)
+                    .split('\n')
+                    .map((line) => wrapHwpxCellLine(line, maxChars))
+                    .join('\n');
             };
             // rawVal의 실제 줄 수(lines.length)를 반환한다 — 호출부에서 행 높이를 실제 줄 수에
             // 맞춰 다시 계산하는 데 쓴다(표본 행이 다른 칸의 샘플 2줄 데이터 기준 키를 물려받아,
@@ -35888,8 +35903,8 @@ document.addEventListener('DOMContentLoaded', () => {
                         units += w;
                         end++;
                         if (ch === ' ' || ch === '\t') {
-                            // 폭/길이 -2EA · Cw:0.3 -2EA 앞 공백은 강제 줄바꿈(문단끝)하지 않음.
-                            // 공백만 두고 한글 자동 줄바꿈에 맡긴다.
+                            // -nEA 앞 공백은 wrapHwpxCellText가 문단 분리한다.
+                            // 여기선 줄바꿈 후보로 쓰지 않음(측정값 중간 쪼개기 방지).
                             const after = chars.slice(end).join('');
                             if (!/^-\d+\s*EA\b/i.test(after)) lastBreak = end;
                         } else if (/[,|·、，]/.test(ch)) {
@@ -35927,7 +35942,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 const flat = String(normalizeEaSpacingInText(raw == null ? '' : raw))
                     .replace(/\r\n|\r|\n/g, ' ')
                     .replace(/[ \t]{2,}/g, ' ');
-                return wrapHwpxCellLine(flat, maxChars);
+                // 갯수 접미사(-nEA)만 평탄화 뒤에 다시 문단 분리. fillCellParas가
+                // cloneNode(true)로 기존 문단을 복제해 다음 줄로 이어붙인다(한글 엔터와 동일).
+                return insertHwpxEaCountLineBreaks(flat)
+                    .split('\n')
+                    .map((line) => wrapHwpxCellLine(line, maxChars))
+                    .join('\n');
             };
             // rawVal의 실제 줄 수(lines.length)를 반환한다 — 호출부에서 행 높이를 실제 줄 수에
             // 맞춰 다시 계산하는 데 쓴다(표본 행이 다른 칸의 샘플 2줄 데이터 기준 키를 물려받아,
