@@ -1310,10 +1310,13 @@ document.addEventListener('DOMContentLoaded', () => {
             || url.startsWith('file:///');
     }
 
-    /** data URL 헤더만 있고 본문이 잘린 등 실제로 img 로드 불가능한 경우 제외 */
+    /** data URL 헤더만 있고 본문이 잘린 등 실제로 img 로드 불가능한 경우 제외.
+     *  https Storage URL은 캔버스 crossOrigin 때문에 CORS/규칙에 막히므로 usable이 아님.
+     *  클라우드 경로는 data: 로 materialize 한 뒤에만 쓴다. */
     function isUsableRasterDrawingUrl(url) {
         if (!isRasterDrawingUrl(url)) return false;
         if (url.startsWith('data:image/')) return url.length >= 2000;
+        if (url.startsWith('http://') || url.startsWith('https://')) return false;
         return true;
     }
 
@@ -7800,6 +7803,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function cacheFloorDrawingTierToDevice(bldg, floorCode, tierDim, dataUrl) {
         if (!bldg || !floorCode || !dataUrl || !tierDim) return;
+        if (typeof dataUrl === 'string' && /^https?:\/\//i.test(dataUrl)) return;
         const dimKey = String(tierDim);
         if (!bldg.floorDrawingTiers) bldg.floorDrawingTiers = {};
         if (!bldg.floorDrawingTiers[floorCode]) bldg.floorDrawingTiers[floorCode] = {};
@@ -17409,26 +17413,73 @@ document.addEventListener('DOMContentLoaded', () => {
         return trimmed ? trimmed : null;
     }
 
-    // 한글(HWPX)용 Storage 이미지 프록시 — OCR Worker와 동일 엔드포인트(action=proxyStorage).
-    // 점검 화면 <img>는 CORS 없이 보이지만, 바이트 fetch는 버킷 CORS가 없으면 막힘.
+    // 한글(HWPX)·도면 캔버스용 Storage 이미지 프록시 — OCR Worker와 동일 엔드포인트(action=proxyStorage).
+    // 버킷 CORS 없거나 규칙이 인증을 요구하면 downloadURL 단독 fetch가 403/CORS로 실패한다.
     const STORAGE_IMAGE_PROXY_ENDPOINT =
         (typeof CLOUD_OCR_ENDPOINT === 'string' && CLOUD_OCR_ENDPOINT)
             ? CLOUD_OCR_ENDPOINT
             : 'https://frosty-king-12ef.dongilgujo2010.workers.dev';
 
+    async function blobResponseToDataUrl(blob) {
+        if (window.BSA && window.BSA.storageAssets && typeof window.BSA.storageAssets.blobToDataUrl === 'function') {
+            return window.BSA.storageAssets.blobToDataUrl(blob);
+        }
+        return new Promise(function (resolve, reject) {
+            const reader = new FileReader();
+            reader.onload = function () { resolve(reader.result); };
+            reader.onerror = function () { reject(reader.error || new Error('blobToDataUrl failed')); };
+            reader.readAsDataURL(blob);
+        });
+    }
+
     async function fetchStorageImageViaProxy(url) {
         if (!STORAGE_IMAGE_PROXY_ENDPOINT || !url || !/^https?:\/\//i.test(url)) return null;
+        let authToken = '';
+        try {
+            if (typeof firebase !== 'undefined' && firebase.auth && firebase.auth().currentUser) {
+                authToken = await firebase.auth().currentUser.getIdToken();
+            }
+        } catch (_e) { /* 비로그인 시 토큰 URL만 시도 */ }
         const resp = await fetch(STORAGE_IMAGE_PROXY_ENDPOINT, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ action: 'proxyStorage', url: String(url) })
+            body: JSON.stringify({
+                action: 'proxyStorage',
+                url: String(url),
+                authToken: authToken || undefined
+            })
         });
-        if (!resp.ok) throw new Error(`Storage 프록시 HTTP ${resp.status}`);
-        const data = await resp.json();
+        const ct = String(resp.headers.get('content-type') || '').toLowerCase();
+        if (resp.ok && (ct.indexOf('image/') === 0 || ct.indexOf('application/pdf') === 0
+            || ct.indexOf('application/octet-stream') === 0)) {
+            const blob = await resp.blob();
+            if (!blob || !blob.size) throw new Error('Storage 프록시 빈 응답');
+            return blobResponseToDataUrl(blob);
+        }
+        let data = null;
+        try {
+            data = await resp.json();
+        } catch (_e) {
+            data = null;
+        }
+        if (!resp.ok) {
+            const errText = (data && data.error) ? String(data.error) : ('Storage 프록시 HTTP ' + resp.status);
+            if (/image 필드가 없거나/.test(errText)) {
+                throw new Error(
+                    'Storage 프록시가 Worker에 아직 배포되지 않았습니다. '
+                    + 'cloudflare-worker/ 에서 wrangler deploy 하세요.'
+                );
+            }
+            throw new Error(errText);
+        }
         if (!data || typeof data.dataUrl !== 'string' || data.dataUrl.indexOf('data:') !== 0) {
             throw new Error((data && data.error) || 'Storage 프록시 응답 없음');
         }
         return data.dataUrl;
+    }
+    window.fetchStorageImageViaProxy = fetchStorageImageViaProxy;
+    if (window.BSA && window.BSA.storageAssets && typeof window.BSA.storageAssets.setAssetProxy === 'function') {
+        window.BSA.storageAssets.setAssetProxy(fetchStorageImageViaProxy);
     }
 
     /** 한글 임베드용: IDB에 dataURL이 남아 있으면 https보다 우선 */
