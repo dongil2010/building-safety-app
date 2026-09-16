@@ -21804,20 +21804,17 @@ document.addEventListener('DOMContentLoaded', () => {
                     return;
                 }
                 if (selectId === 'defectComponent') {
+                    // 수기 부재 명칭은 이번 결함 값으로만 반영.
+                    // 퀵픽 버튼/커스텀 목록에는 넣지 않음(명시적 추가 UI만 버튼 생성).
                     const cat = document.getElementById('defectCategory')?.value || '구조체';
                     migrateDefectComponentStateShape();
                     const preset = DEFECT_COMPONENT_PRESET[cat] || [];
-                    if (!preset.includes(v)) {
-                        if (!window.state.customDefectComponents) window.state.customDefectComponents = { '구조체': [], '비구조체': [], '마감재': [] };
-                        if (!window.state.customDefectComponents[cat]) window.state.customDefectComponents[cat] = [];
-                        if (!window.state.customDefectComponents[cat].includes(v)) {
-                            window.state.customDefectComponents[cat].push(v);
-                            const order = ensureOptionOrderEntry('defectComponentOrder', cat);
-                            if (!order.includes(v)) order.push(v);
-                            if (typeof saveStateToLocalStorage === 'function') saveStateToLocalStorage();
-                        }
+                    if (preset.includes(v) || (window.state.customDefectComponents?.[cat] || []).includes(v)) {
+                        populateDefectComponentDropdown(cat, v);
+                    } else {
+                        ensureDefectComboOption(select, v);
+                        select.value = v;
                     }
-                    populateDefectComponentDropdown(cat, v);
                 } else {
                     ensureDefectComboOption(select, v);
                 }
