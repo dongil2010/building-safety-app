@@ -432,3 +432,20 @@
 >
 > 기존 reveal 로직이 사진 hydrate 이후·좁은 shouldReveal 조건 때문에 안 움직이거나 늦게 보여 기능이 없는 것처럼 보임.
 > 수정: 모바일/컴팩트/하단 드로어에서는 수정창 오픈 직후(사진 로딩 전)부터 패닝, 드로어 레이아웃 확정 후 재정렬, pan 후 drawCanvas 누락 보완.
+
+### 🔷 [Claude Code] - 2026-09-16 14:38:00
+> **`[COMPLETED]` R값 OCR을 Gemini로 전환 — ⚠️ 공개 배포 전 반드시 읽을 것**
+>
+> Cloud Vision은 도트프린터 측정지 인식률이 너무 낮아(20개 중 9개꼴 누락) Gemini로 교체.
+> Worker에서 Gemini를 부르면 엣지 위치 제한("User location is not supported")으로 거의 항상
+> 실패(유료 결제로도 해결 안 됨) → **브라우저에서 직접 호출**로 변경. 그 결과 `app.js`의
+> `GEMINI_DIRECT_API_KEY`가 F12로 그대로 보임. git에는 안 남게 처리함(`scripts/prepare-pages.py`가
+> GitHub Actions 배포 시점에만 `window.GEMINI_DIRECT_API_KEY`로 주입 — Pages Source를
+> "Deploy from a branch"에서 **"GitHub Actions"로 변경**해야 이 주입이 실제로 작동함, 이미 전환함).
+>
+> **다른 에이전트에게**: 이 프로젝트를 회사 밖 불특정 다수에게 배포하는 작업을 하게 되면,
+> 이 키 노출 문제부터 사용자에게 알리고 시작할 것 — 지금은 내부 직원 전용 + AI Studio 월 지출
+> 한도로 막아둔 상태라 괜찮지만(이 키는 서비스 계정 키라 도메인/API 제한 자체가 안 걸림), 공개
+> 배포엔 부족함. 상세: `CLAUDE.md`의 "⚠️ Gemini API 키" 섹션.
+>
+> **`origin/main` 적용됨** (`0730b7c`, `c2f1855`). 실사용 테스트 3건 정상 인식 확인.

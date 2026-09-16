@@ -16,6 +16,26 @@
 7. **배포는 GitHub Pages** — 현장 Android 앱은 Capacitor WebView로
    `https://dongil2010.github.io/building-safety-app/` 를 연다. push 후 Pages가
    갱신되면 앱 재실행 또는 홈 **새로고침**으로 최신 웹을 받는다. **APK OTA는 하지 않는다.**
+   (2026-09-16부터: Pages Source가 "Deploy from a branch"가 아니라 **GitHub Actions**로
+   바뀜 — `.github/workflows/deploy-web.yml`이 `scripts/prepare-pages.py`로 `_site/`를
+   만들어 배포한다. push하면 자동으로 이 워크플로가 돌아가는 건 그대로 동일하다.)
+
+## ⚠️ Gemini API 키 — 공개 배포 전 반드시 다시 볼 것
+
+`app.js`의 `GEMINI_DIRECT_API_KEY`(R값 OCR)는 **브라우저에서 Gemini를 직접 호출**하는 구조라
+키가 F12(개발자도구)로 그대로 보인다. git에는 안 남지만(`scripts/prepare-pages.py`가 GitHub
+Actions 배포 시점에만 주입, [cloudflare-worker/README.md](cloudflare-worker/README.md) 0번
+참고), **브라우저 노출 자체는 막을 방법이 없다.**
+
+**왜 지금은 괜찮은가**: 로그인해야 쓰는 내부 직원 전용 도구라 사용자 수가 적고, AI Studio에
+월 지출 한도를 걸어둬서 유출돼도 피해가 제한됨. (이 키는 서비스 계정 인증 키라 Cloud Console의
+도메인/API 제한 자체를 못 건다 — 지출 한도가 유일한 안전장치.)
+
+**이 앱을 회사 밖 불특정 다수/일반 사용자에게 배포하자는 이야기가 나오면, 진행 전에 반드시
+이 문제를 사용자에게 알릴 것.** 그때는 지금 구조로는 부족하고, Worker 쪽에서 Gemini를 안전하게
+부르는 방법(예: Vertex AI + OAuth, 또는 다른 OCR 벤더)으로 다시 바꿔야 한다.
+(배경: 원래 Worker에서 Gemini를 불렀는데 엣지 서버 위치 제한으로 거의 항상 실패해서 — 유료
+결제로도 해결 안 됨 — 어쩔 수 없이 브라우저 직접 호출로 옮긴 것. 2026-09-16.)
 
 ### PowerShell 스크립트
 
