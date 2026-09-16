@@ -17458,6 +17458,52 @@ document.addEventListener('DOMContentLoaded', () => {
         return idbSet('photos', pid, url);
     }
 
+    const HWPX_IMAGE_FETCH_MS = 8000;
+    const _hwpxBytesByUrl = new Map();
+
+    function withTimeout(promise, ms, label) {
+        return new Promise((resolve, reject) => {
+            const t = setTimeout(() => reject(new Error(label || '시간 초과')), ms);
+            Promise.resolve(promise).then(
+                (v) => { clearTimeout(t); resolve(v); },
+                (e) => { clearTimeout(t); reject(e); }
+            );
+        });
+    }
+
+    async function mapLimit(items, limit, worker) {
+        const list = Array.from(items || []);
+        const out = new Array(list.length);
+        let cursor = 0;
+        async function workerLoop() {
+            while (cursor < list.length) {
+                const idx = cursor++;
+                out[idx] = await worker(list[idx], idx);
+            }
+        }
+        const n = Math.max(1, Math.min(limit || 4, list.length || 1));
+        await Promise.all(Array.from({ length: Math.min(n, Math.max(list.length, 0)) }, () => workerLoop()));
+        return out;
+    }
+
+    async function decodeDataUrlToBytes(raw) {
+        const m = /^data:([^;]+);base64,([\s\S]*)$/.exec(raw);
+        if (!m) throw new Error('이미지 데이터 형식을 인식할 수 없습니다.');
+        const mimeRaw = (m[1] || 'image/jpeg').toLowerCase();
+        try {
+            const resp = await fetch(raw);
+            const bytes = new Uint8Array(await resp.arrayBuffer());
+            if (mimeRaw === 'image/png') return { bytes, mime: 'image/png', ext: 'png' };
+            return { bytes, mime: 'image/jpeg', ext: 'jpg' };
+        } catch (_e) {
+            const binary = atob(m[2]);
+            const bytes = new Uint8Array(binary.length);
+            for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+            if (mimeRaw === 'image/png') return { bytes, mime: 'image/png', ext: 'png' };
+            return { bytes, mime: 'image/jpeg', ext: 'jpg' };
+        }
+    }
+
     /**
      * dataURL / https(Storage) / blob URL → HWPX BinData용 바이트.
      * Storage 이전 후 한글 출력 시 https URL이 들어오므로 fetch + Worker 프록시 필수.
@@ -17468,22 +17514,17 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         const raw = src.trim();
         if (raw.startsWith('data:')) {
-            const m = /^data:([^;]+);base64,([\s\S]*)$/.exec(raw);
-            if (!m) throw new Error('이미지 데이터 형식을 인식할 수 없습니다.');
-            const mimeRaw = (m[1] || 'image/jpeg').toLowerCase();
-            const binary = atob(m[2]);
-            const bytes = new Uint8Array(binary.length);
-            for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-            if (mimeRaw === 'image/png') return { bytes, mime: 'image/png', ext: 'png' };
-            return { bytes, mime: 'image/jpeg', ext: 'jpg' };
+            return decodeDataUrlToBytes(raw);
         }
         if (/^https?:\/\//i.test(raw) || raw.startsWith('blob:')) {
+            if (_hwpxBytesByUrl.has(raw)) return _hwpxBytesByUrl.get(raw);
+            const pending = (async () => {
             let bytes = null;
             let mime = 'image/jpeg';
             // Storage SDK(getBlob)/REST 우선
             try {
                 if (typeof assetUrlToUploadBlob === 'function') {
-                    const pack = await assetUrlToUploadBlob(raw);
+                    const pack = await withTimeout(assetUrlToUploadBlob(raw), HWPX_IMAGE_FETCH_MS, 'Storage 이미지 수신 시간 초과');
                     if (pack && pack.blob) {
                         bytes = new Uint8Array(await pack.blob.arrayBuffer());
                         mime = String(pack.contentType || pack.blob.type || 'image/jpeg').toLowerCase();
@@ -17492,7 +17533,11 @@ document.addEventListener('DOMContentLoaded', () => {
             } catch (_sdkErr) { /* fall through */ }
             if (!bytes) {
                 try {
-                    const resp = await fetch(raw, { mode: 'cors', credentials: 'omit', cache: 'no-store' });
+                    const resp = await withTimeout(
+                        fetch(raw, { mode: 'cors', credentials: 'omit', cache: 'force-cache' }),
+                        HWPX_IMAGE_FETCH_MS,
+                        '이미지 fetch 시간 초과'
+                    );
                     if (resp.ok) {
                         bytes = new Uint8Array(await resp.arrayBuffer());
                         mime = ((resp.headers.get('content-type') || '').split(';')[0] || '').trim().toLowerCase();
@@ -17502,7 +17547,11 @@ document.addEventListener('DOMContentLoaded', () => {
             // 버킷 CORS 미설정 시 Worker가 서버에서 받아 dataURL로 돌려줌
             if (!bytes && /^https?:\/\//i.test(raw)) {
                 try {
-                    const proxied = await fetchStorageImageViaProxy(raw);
+                    const proxied = await withTimeout(
+                        fetchStorageImageViaProxy(raw),
+                        HWPX_IMAGE_FETCH_MS,
+                        'Storage 프록시 시간 초과'
+                    );
                     if (proxied) return imageSrcToBytes(proxied);
                 } catch (proxyErr) {
                     console.warn('Storage 이미지 프록시 실패:', proxyErr);
@@ -17541,6 +17590,14 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             if (mime === 'image/png') return { bytes, mime: 'image/png', ext: 'png' };
             return { bytes, mime: 'image/jpeg', ext: 'jpg' };
+            })();
+            _hwpxBytesByUrl.set(raw, pending);
+            try {
+                return await pending;
+            } catch (e) {
+                _hwpxBytesByUrl.delete(raw);
+                throw e;
+            }
         }
         throw new Error('이미지 데이터 형식을 인식할 수 없습니다.');
     }
@@ -33346,6 +33403,18 @@ document.addEventListener('DOMContentLoaded', () => {
     // "N) 층명" 블록(상태조사표+사진첩+위치도)을 표 ID 하드코딩 대신 문단 구조로 자동 탐지해
     // 건물에 등록된 층 수만큼 채우고, 남는 표본 블록은 뒤에서 지운다.
     // 슬롯 정리/정밀·정기 판별은 js/shared/hwpx-survey-slots.js (PWA에서 스크립트 누락 대비 폴백).
+    const _hwpxTemplateBuf = Object.create(null);
+    async function loadHwpxZipFromPath(templatePath) {
+        if (!_hwpxTemplateBuf[templatePath]) {
+            const v = (typeof window.BSA_APP_VERSION === 'string' && window.BSA_APP_VERSION)
+                ? `?v=${encodeURIComponent(window.BSA_APP_VERSION)}`
+                : '';
+            const resp = await fetch(templatePath + v, { cache: 'force-cache' });
+            if (!resp.ok) throw new Error('템플릿 파일을 불러오지 못했습니다.');
+            _hwpxTemplateBuf[templatePath] = await resp.arrayBuffer();
+        }
+        return JSZip.loadAsync(_hwpxTemplateBuf[templatePath]);
+    }
     const getHwpxSlotApi = () => (window.BSA && window.BSA.shared && window.BSA.shared.hwpxSurveySlots) || {
         isPreciseInspectionForHwpx: (t) => (t || '정밀안전점검') !== '정기안전점검',
         stripExcessStampStatusTables: (stampSlot) => {
@@ -33466,9 +33535,7 @@ document.addEventListener('DOMContentLoaded', () => {
             // 템플릿 파일은 버전 쿼리스트링이 없어서, 브라우저 캐시에 옛 버전이 남아있으면 그걸 계속
             // 쓰는 문제가 있었다(실제로 표/사진이 예전 버전 그대로 나온 원인). 매번 네트워크에서
             // 새로 받아오도록 강제한다.
-            const resp = await fetch(templatePath, { cache: 'no-store' });
-            if (!resp.ok) throw new Error('템플릿 파일을 불러오지 못했습니다.');
-            const zip = await JSZip.loadAsync(await resp.arrayBuffer());
+            const zip = await loadHwpxZipFromPath(templatePath);
 
             // 3종 결함조사표 스타일은 템플릿에 고정되어 있다(scripts/build-grade3-template-from-stamp.py로
             // 스탬프 표·스타일을 템플릿에 미리 병합). 예전에는 여기서 hwpx 생성마다 스탬프를 런타임
@@ -34073,6 +34140,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 ? db.collection('safety_app').doc(getCompanyDocId()).collection('photos')
                 : null;
             if (!window._photoCache) window._photoCache = {};
+            if (typeof window.updateLoadingText === 'function') {
+                window.updateLoadingText('한글(hwpx) 위치도 도면 준비 중...');
+            }
+            await preloadFloorDrawings(window.state.currentBuilding || bldg);
 
             // 도면에 결함 핀이 찍힌 위치도 이미지를 만들어 locationMapTbl 한 칸에 채워 넣는다. 1,2종은
             // 층 블록 안에서(아래 본 루프에서) 바로 호출하고, 3종은 모든 층 처리가 끝난 뒤 별도로 몰아서
@@ -34092,14 +34163,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     }
                     const hasExactDrawing = !!bldgForMap.floorDrawings[floorCode];
 
-                    // 예전에(버그가 있던 상태로) 이미 한 번 잘못된 층 도면이 캐시됐을 수 있으니
-                    // 이번엔 무조건 새로 그리도록 캐시를 지운다.
-                    if (window.state.floorImageCache) delete window.state.floorImageCache[`${bldgForMap.id}_${floorCode}`];
-
-                    const mapDataUrl = hasExactDrawing ? (await (async () => {
-                        await preloadFloorDrawings(bldgForMap);
-                        return renderFloorPlanCanvasDataUrl(floorCode);
-                    })()) : null;
+                    const mapDataUrl = hasExactDrawing ? renderFloorPlanCanvasDataUrl(floorCode) : null;
                     if (mapDataUrl) {
                         const mapPic = locationMapTbl.getElementsByTagNameNS(HP_NS, 'pic')[0];
                         // 기존에는 표본 그림 자체의 curSz(표본 도면 비율에 맞춰 이미 안쪽으로 줄어들어
@@ -34163,6 +34227,10 @@ document.addEventListener('DOMContentLoaded', () => {
             for (let slotIdx = 0; slotIdx < floorsData.length; slotIdx++) {
                 const { floorCode, pageDefects } = floorsData[slotIdx];
                 const slot = floorSlots[slotIdx];
+                if (typeof window.updateLoadingText === 'function') {
+                    window.updateLoadingText(`한글(hwpx) 상태조사표 생성 중... (${slotIdx + 1}/${floorsData.length} 층)`);
+                }
+                if (typeof yieldToUi === 'function') await yieldToUi();
 
                 // 표 바로 위에는 원본 표본 문서의 "1) 지하1층" 같은 고정 텍스트 문단이 그대로
                 // 남아있었다. 실제 층 이름으로 바꾸되, 표본 문서와 같은 "N) 층명" 형식을 유지하도록
@@ -34407,20 +34475,20 @@ document.addEventListener('DOMContentLoaded', () => {
                     const maxW = parseInt(tplPics[0].getElementsByTagNameNS(HP_NS, 'curSz')[0].getAttribute('width'), 10);
                     const maxH = parseInt(tplPics[0].getElementsByTagNameNS(HP_NS, 'curSz')[0].getAttribute('height'), 10);
 
-                    const decoded = [];
-                    for (const d of items) {
+                    const decoded = (await mapLimit(items, 6, async (d) => {
                         const outPhotos = getDefectOutputPhotos(d);
                         const src0 = outPhotos[0];
-                        if (!src0) continue;
+                        if (!src0) return null;
                         try {
                             const src = await resolveSrcForHwpxEmbed(src0, d.photoIds && d.photoIds[0]);
                             const { bytes, mime, ext } = await dataUrlToBytes(src);
                             const size = await loadImageNaturalSizeFromBytes(bytes, mime);
-                            decoded.push({ d, bytes, mime, ext, w: size.w, h: size.h });
+                            return { d, bytes, mime, ext, w: size.w, h: size.h };
                         } catch (onePhotoErr) {
                             console.warn('사진 1장 임베드 실패(해당 컷만 생략):', d && d.id, onePhotoErr);
+                            return null;
                         }
-                    }
+                    })).filter(Boolean);
                     if (!decoded.length) {
                         throw new Error('임베드 가능한 사진이 없습니다. (Storage URL/권한/CORS 확인)');
                     }
@@ -35617,7 +35685,15 @@ document.addEventListener('DOMContentLoaded', () => {
             // 쓰면 안 되고, 내부 맵(zip.files)에서 그 폴더 키 하나만 직접 지운다.
             Object.keys(zip.files).forEach(name => { if (zip.files[name].dir) delete zip.files[name]; });
 
-            const blob = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE', mimeType: 'application/hwp+zip' });
+            if (typeof window.updateLoadingText === 'function') {
+                window.updateLoadingText('한글(hwpx) 파일 압축 중...');
+            }
+            const blob = await zip.generateAsync({
+                type: 'blob',
+                compression: 'DEFLATE',
+                compressionOptions: { level: 1 },
+                mimeType: 'application/hwp+zip'
+            });
 
             const bldgName = (bldg.name || '건축물').replace(/^🏢\s*/, '').replace(/[^a-zA-Z0-9가-힣_-]/g, '_');
             const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
@@ -35654,9 +35730,7 @@ document.addEventListener('DOMContentLoaded', () => {
             // 템플릿 파일은 버전 쿼리스트링이 없어서, 브라우저 캐시에 옛 버전이 남아있으면 그걸 계속
             // 쓰는 문제가 있었다(실제로 표/사진이 예전 버전 그대로 나온 원인). 매번 네트워크에서
             // 새로 받아오도록 강제한다.
-            const resp = await fetch(templatePath, { cache: 'no-store' });
-            if (!resp.ok) throw new Error('템플릿 파일을 불러오지 못했습니다.');
-            const zip = await JSZip.loadAsync(await resp.arrayBuffer());
+            const zip = await loadHwpxZipFromPath(templatePath);
             let hwpxHeaderText = null;
             let hwpxHeaderDirty = false;
 
@@ -36170,6 +36244,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 ? db.collection('safety_app').doc(getCompanyDocId()).collection('photos')
                 : null;
             if (!window._photoCache) window._photoCache = {};
+            if (typeof window.updateLoadingText === 'function') {
+                window.updateLoadingText('한글(hwpx) 위치도 도면 준비 중...');
+            }
+            await preloadFloorDrawings(window.state.currentBuilding || bldg);
 
             // 도면에 결함 핀이 찍힌 위치도 이미지를 만들어 locationMapTbl 한 칸에 채워 넣는다. 1,2종은
             // 층 블록 안에서(아래 본 루프에서) 바로 호출하고, 3종은 모든 층 처리가 끝난 뒤 별도로 몰아서
@@ -36189,14 +36267,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     }
                     const hasExactDrawing = !!bldgForMap.floorDrawings[floorCode];
 
-                    // 예전에(버그가 있던 상태로) 이미 한 번 잘못된 층 도면이 캐시됐을 수 있으니
-                    // 이번엔 무조건 새로 그리도록 캐시를 지운다.
-                    if (window.state.floorImageCache) delete window.state.floorImageCache[`${bldgForMap.id}_${floorCode}`];
-
-                    const mapDataUrl = hasExactDrawing ? (await (async () => {
-                        await preloadFloorDrawings(bldgForMap);
-                        return renderFloorPlanCanvasDataUrl(floorCode);
-                    })()) : null;
+                    const mapDataUrl = hasExactDrawing ? renderFloorPlanCanvasDataUrl(floorCode) : null;
                     if (mapDataUrl) {
                         const mapPic = locationMapTbl.getElementsByTagNameNS(HP_NS, 'pic')[0];
                         // 기존에는 표본 그림 자체의 curSz(표본 도면 비율에 맞춰 이미 안쪽으로 줄어들어
@@ -36242,6 +36313,10 @@ document.addEventListener('DOMContentLoaded', () => {
             for (let slotIdx = 0; slotIdx < floorsData.length; slotIdx++) {
                 const { floorCode, pageDefects } = floorsData[slotIdx];
                 const slot = floorSlots[slotIdx];
+                if (typeof window.updateLoadingText === 'function') {
+                    window.updateLoadingText(`한글(hwpx) 상태조사표 생성 중... (${slotIdx + 1}/${floorsData.length} 층)`);
+                }
+                if (typeof yieldToUi === 'function') await yieldToUi();
 
                 // 표 바로 위에는 원본 표본 문서의 "1) 지하1층" 같은 고정 텍스트 문단이 그대로
                 // 남아있었다. 실제 층 이름으로 바꾸되, 표본 문서와 같은 "N) 층명" 형식을 유지하도록
@@ -36467,20 +36542,20 @@ document.addEventListener('DOMContentLoaded', () => {
                     const maxW = parseInt(tplPics[0].getElementsByTagNameNS(HP_NS, 'curSz')[0].getAttribute('width'), 10);
                     const maxH = parseInt(tplPics[0].getElementsByTagNameNS(HP_NS, 'curSz')[0].getAttribute('height'), 10);
 
-                    const decoded = [];
-                    for (const d of items) {
+                    const decoded = (await mapLimit(items, 6, async (d) => {
                         const outPhotos = getDefectOutputPhotos(d);
                         const src0 = outPhotos[0];
-                        if (!src0) continue;
+                        if (!src0) return null;
                         try {
                             const src = await resolveSrcForHwpxEmbed(src0, d.photoIds && d.photoIds[0]);
                             const { bytes, mime, ext } = await dataUrlToBytes(src);
                             const size = await loadImageNaturalSizeFromBytes(bytes, mime);
-                            decoded.push({ d, bytes, mime, ext, w: size.w, h: size.h });
+                            return { d, bytes, mime, ext, w: size.w, h: size.h };
                         } catch (onePhotoErr) {
                             console.warn('사진 1장 임베드 실패(해당 컷만 생략):', d && d.id, onePhotoErr);
+                            return null;
                         }
-                    }
+                    })).filter(Boolean);
                     if (!decoded.length) {
                         throw new Error('임베드 가능한 사진이 없습니다. (Storage URL/권한/CORS 확인)');
                     }
@@ -37467,7 +37542,15 @@ document.addEventListener('DOMContentLoaded', () => {
             // 쓰면 안 되고, 내부 맵(zip.files)에서 그 폴더 키 하나만 직접 지운다.
             Object.keys(zip.files).forEach(name => { if (zip.files[name].dir) delete zip.files[name]; });
 
-            const blob = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE', mimeType: 'application/hwp+zip' });
+            if (typeof window.updateLoadingText === 'function') {
+                window.updateLoadingText('한글(hwpx) 파일 압축 중...');
+            }
+            const blob = await zip.generateAsync({
+                type: 'blob',
+                compression: 'DEFLATE',
+                compressionOptions: { level: 1 },
+                mimeType: 'application/hwp+zip'
+            });
 
             const bldgName = (bldg.name || '건축물').replace(/^🏢\s*/, '').replace(/[^a-zA-Z0-9가-힣_-]/g, '_');
             const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');

@@ -349,3 +349,5 @@
 > 3. `정밀안전진단`이 `=== '정밀안전점검'`만 정밀로 봐 정기 양식을 씀.
 >
 > 수정: `js/shared/hwpx-survey-slots.js` — keep 문단은 표만 제거, 복제본에서 secPr run 제거, 정밀=정기 아님. 오프라인 fixture: `scripts/test-hwpx-template-slots.py`.
+>
+> **속도 (2026-09-16)**: 예전 1초는 표를 안 채우고 표본 zip만 만들던 경로. 실제 채우기 후 사진 순차 다운로드·층마다 전체 도면 preload가 길어짐. 사진 6장 병렬+8초 타임아웃+URL 바이트 캐시, 도면은 한 번만 preload, zip level 1, 층 진행 문구.
