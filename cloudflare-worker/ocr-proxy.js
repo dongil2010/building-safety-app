@@ -140,13 +140,18 @@ function json(body, status, corsHeaders) {
   });
 }
 
-// 도트프린터 측정지는 "R 01 44" 처럼 R번호+측정값이 이어져 찍히는데, OCR이 줄바꿈을
-// 다르게 잡으면(번호 "10"과 값 "48"이 서로 다른 줄로 떨어지면) 줄 단위 파싱은 번호 숫자만
-// 있는 줄에서 그 번호 자체를 값으로 잘못 채택했다("R 10"~"R 20" 구간이 그대로 10~20 값으로
-// 나오던 버그). 이제 줄 경계 대신 "R" 하나가 나온 지점부터 그 다음 "R"이 나오기 직전까지를
-// 한 덩어리로 보고, 그 안에서 두 번째 숫자(번호 다음에 오는 진짜 측정값)를 쓴다. 번호 숫자가
-// 아예 안 읽혀서 숫자가 하나만 잡히면 그때만 그 하나를 값으로 쓴다. "ER06"처럼 다른 글자
-// 뒤에 붙은 R(에러 코드 등)은 새 구간 시작으로 치지 않아 오염원에서 제외한다.
+// 도트프린터 측정지는 "R 01 44" 처럼 R번호+측정값이 이어져 찍히는데, OCR이 한 줄을 통째로
+// 놓치거나(예: R03이 안 읽힘) 번호는 읽었는데 그 옆 값만 못 읽는 경우가 실측에서 확인됐다.
+// 예전엔 인식된 값들을 나온 순서대로 그냥 이어붙였는데, 그러면 중간에 한 줄이라도 빠지는
+// 순간 그 뒤 모든 값이 한 칸씩 밀려서 엉뚱한 R번호 자리에 들어갔다(실측 사진 대조로 확인:
+// R12/R13 값이 안 읽히니까 "12"/"13"이라는, 원래 R번호 라벨 숫자 자체가 값으로 잘못 채택됨).
+// 이제 각 구간에서 R번호(라벨)를 먼저 읽어서 그 번호의 제자리(rIdx-1)에만 값을 채우고,
+// 라벨은 읽었는데 값을 못 읽은 줄은 값 없이(null) 그 자리를 비워둔다 — 틀린 값을 넣느니
+// 빈칸으로 두고 사용자가 사진 보고 채우게 한다. 라벨(R번호) 자체를 못 읽은 줄은 어느 자리인지
+// 알 수 없어 건너뛴다. "ER06"처럼 다른 글자 뒤에 붙은 R(에러 코드 등)은 구간 시작에서 제외.
+// 반환값은 항상 길이 MAX_R_VALUES(20)의 배열이며, 못 읽은 자리는 null.
+// (app.js의 extractRValuesFromText와 동일 로직 — 서버/로컬 양쪽에서 씀)
+const MAX_R_VALUES = 20;
 function extractRValues(text) {
   const str = String(text || '');
   const starts = [];
@@ -157,13 +162,19 @@ function extractRValues(text) {
     if (prev && /[A-Za-z]/.test(prev)) continue;
     starts.push(m.index);
   }
-  const values = [];
+  const slots = new Array(MAX_R_VALUES).fill(null);
   for (let i = 0; i < starts.length; i++) {
     const segment = str.slice(starts[i], i + 1 < starts.length ? starts[i + 1] : str.length);
-    const nums = segment.match(/\d{2,3}/g);
-    if (!nums || nums.length === 0) continue;
-    const value = parseInt(nums.length >= 2 ? nums[1] : nums[0], 10);
-    if (!isNaN(value) && value >= 10 && value <= 80) values.push(value);
+    const labelMatch = segment.match(/^R\s*[:.\-]?\s*0*(\d{1,2})\b/i);
+    if (!labelMatch) continue;
+    const rIdx = parseInt(labelMatch[1], 10);
+    if (!rIdx || rIdx < 1 || rIdx > MAX_R_VALUES) continue;
+    const rest = segment.slice(labelMatch.index + labelMatch[0].length);
+    const valNums = rest.match(/\d{2,3}/g);
+    if (!valNums || valNums.length === 0) continue;
+    const value = parseInt(valNums[0], 10);
+    if (isNaN(value) || value < 10 || value > 80) continue;
+    slots[rIdx - 1] = value;
   }
-  return values;
+  return slots;
 }
