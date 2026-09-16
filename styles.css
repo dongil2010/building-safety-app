@@ -2278,7 +2278,7 @@ html:not(.layout-tablet) #tab-map .inspect-sidebar-left .defect-badge-no {
     overflow: visible;
     text-overflow: unset;
     word-break: keep-all;
-    overflow-wrap: anywhere;
+    overflow-wrap: break-word;
     line-height: 1.2;
 }
 
@@ -2289,7 +2289,7 @@ html:not(.layout-tablet) #tab-map .inspect-sidebar-left .defect-badge-no {
     overflow: visible;
     text-overflow: unset;
     word-break: keep-all;
-    overflow-wrap: anywhere;
+    overflow-wrap: break-word;
     min-width: 0;
     line-height: 1.2;
 }
@@ -2309,7 +2309,7 @@ html:not(.layout-tablet) #tab-map .inspect-sidebar-left .defect-badge-no {
     overflow: visible;
     text-overflow: unset;
     word-break: keep-all;
-    overflow-wrap: anywhere;
+    overflow-wrap: break-word;
     max-width: 100%;
 }
 
@@ -2721,7 +2721,7 @@ html:not(.layout-tablet) #tab-map .inspect-sidebar-left .defect-badge-no {
         text-overflow: unset;
         line-height: 1.25;
         word-break: keep-all;
-        overflow-wrap: anywhere;
+        overflow-wrap: break-word;
     }
 
     #tab-map .inspect-canvas-col {
@@ -3407,7 +3407,7 @@ html:not(.layout-tablet) #tab-map .inspect-sidebar-left .defect-badge-no {
 #tab-survey .survey-table .survey-inline-multiline {
     white-space: pre-wrap;
     word-break: keep-all;
-    overflow-wrap: anywhere;
+    overflow-wrap: break-word;
     resize: none;
     min-height: 2.4em;
     line-height: 1.35;
@@ -3467,6 +3467,13 @@ html:not(.layout-tablet) #tab-map .inspect-sidebar-left .defect-badge-no {
     font-size: 0.74rem;
     white-space: normal;
     word-break: keep-all;
+}
+
+#printableReportArea td,
+#modalReportPreviewBody td {
+    word-break: keep-all;
+    overflow-wrap: break-word;
+    line-break: strict;
 }
 
 #tab-survey .survey-table th[data-col="component"],
@@ -10986,7 +10993,7 @@ body.bsa-tab-stats .app-content {
         overflow: visible !important;
         text-overflow: unset !important;
         word-break: keep-all;
-        overflow-wrap: anywhere;
+        overflow-wrap: break-word;
         max-width: 100%;
         line-height: 1.22;
     }
@@ -10996,7 +11003,7 @@ body.bsa-tab-stats .app-content {
         overflow: visible !important;
         text-overflow: unset !important;
         word-break: keep-all;
-        overflow-wrap: anywhere;
+        overflow-wrap: break-word;
         max-width: 100%;
         line-height: 1.25;
     }
@@ -14873,7 +14880,7 @@ html:not(.layout-desktop) #tab-map .defect-list-item-type {
     overflow: hidden !important;
     text-overflow: ellipsis !important;
     word-break: keep-all !important;
-    overflow-wrap: anywhere !important;
+    overflow-wrap: break-word !important;
     max-width: 100% !important;
 }
 
@@ -14901,7 +14908,7 @@ html:not(.layout-desktop) #tab-map .defect-list-item-measure {
     border-width: 1px !important;
     border-radius: 3px !important;
     white-space: normal !important; /* allow wrap into 2 lines if long */
-    overflow-wrap: anywhere !important;
+    overflow-wrap: break-word !important;
     word-break: keep-all !important;
     box-sizing: border-box !important;
 }
@@ -15075,7 +15082,7 @@ html:not(.layout-desktop) .crack-monitor-photo-slots {
         overflow: visible !important;
         text-overflow: unset !important;
         word-break: keep-all !important;
-        overflow-wrap: anywhere !important;
+        overflow-wrap: break-word !important;
     }
     html:not(.layout-tablet) #tab-map .inspect-sidebar-left .defect-list-item-component {
         font-size: 0.975rem !important;
