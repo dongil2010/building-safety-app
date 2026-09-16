@@ -33532,9 +33532,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 ? './templates/hwpx_survey_template_grade3.hwpx'
                 : './templates/hwpx_survey_template_grade3_regular.hwpx';
 
-            // 템플릿 파일은 버전 쿼리스트링이 없어서, 브라우저 캐시에 옛 버전이 남아있으면 그걸 계속
-            // 쓰는 문제가 있었다(실제로 표/사진이 예전 버전 그대로 나온 원인). 매번 네트워크에서
-            // 새로 받아오도록 강제한다.
+            // 템플릿은 세션 메모리 + ?v= 로 받고, 같은 내보내기에서 다시 받지 않는다.
             const zip = await loadHwpxZipFromPath(templatePath);
 
             // 3종 결함조사표 스타일은 템플릿에 고정되어 있다(scripts/build-grade3-template-from-stamp.py로
@@ -35727,9 +35725,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 ? './templates/hwpx_survey_template.hwpx'
                 : './templates/hwpx_survey_template_regular.hwpx';
 
-            // 템플릿 파일은 버전 쿼리스트링이 없어서, 브라우저 캐시에 옛 버전이 남아있으면 그걸 계속
-            // 쓰는 문제가 있었다(실제로 표/사진이 예전 버전 그대로 나온 원인). 매번 네트워크에서
-            // 새로 받아오도록 강제한다.
+            // 템플릿은 세션 메모리 + ?v= 로 받고, 같은 내보내기에서 다시 받지 않는다.
             const zip = await loadHwpxZipFromPath(templatePath);
             let hwpxHeaderText = null;
             let hwpxHeaderDirty = false;
