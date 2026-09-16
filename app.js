@@ -36185,7 +36185,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     });
                 });
             };
-            // 3종시설물은 위치도를 층별 표 옆이 아니라 모든 층 상태조사표/사진첩이 끝난 뒤에 몰아서
+            // 3종시설물은 위치도를 층별 표 옆이 아니라 모든 층 상태조사표·전역 사진첩·중점관리 비교가 끝난 뒤에 몰아서
             // 마지막에 넣는다. "틀" 블록(title~문서 끝)을 통째로 복제하면 위치도까지 층마다 끼어
             // 들어가버리므로, 위치도 문단을 먼저 떼어내 따로 보관해두고 "틀"에서 제외한다 — 실제
             // 위치도 삽입은 아래 본 루프가 전부 끝난 뒤 별도로 한다.
@@ -36322,22 +36322,67 @@ document.addEventListener('DOMContentLoaded', () => {
             };
 
             let grade3HwpxCompareAnchorPara = null;
-            const markGrade3HwpxCompareAnchorFromSlot = (slot) => {
-                if (!slot || !slot.titlePara) return;
-                const children = secChildren();
-                const start = children.indexOf(slot.titlePara);
-                if (start < 0) return;
-                let lastPhotoPara = null;
-                for (let i = start + 1; i < children.length; i++) {
-                    const p = children[i];
-                    const txt = paraText(p).trim();
-                    if (floorTitleRe.test(txt)) break;
-                    if (/^사진1/.test(txt) || p.getElementsByTagNameNS(HP_NS, 'tbl').length > 0) {
-                        lastPhotoPara = p;
+
+            // 3종: 층별 사진첩을 층 루프에서 빼서, 모든 층 상태조사표 다음에 전역 번호(사진1…)로 한 번에 넣는다.
+            // 표 비고(photoRemark)와 사진첩 캡션이 같은 전역 번호를 쓰도록 사전 패스에서 Map을 만든다.
+            const globalPhotoLabelByDefect = new Map();
+            const globalPhotoEntries = []; // { d, floorCode } — 층 순서·층 내 결함 순서
+            const grade3GlobalPhotoTblStamp = floorSlots[0]
+                ? (floorSlots[0].photoTblStamp || (floorSlots[0].photoTbl && floorSlots[0].photoTbl.cloneNode(true)))
+                : null;
+            let grade3GlobalPhotoParaStamp = floorSlots[0] ? floorSlots[0].photoParaStamp : null;
+            if (!grade3GlobalPhotoParaStamp && floorSlots[0] && floorSlots[0].photoTbl) {
+                let node = floorSlots[0].photoTbl.parentNode;
+                while (node && node.localName !== 'p') node = node.parentNode;
+                if (node) grade3GlobalPhotoParaStamp = node.cloneNode(true);
+            }
+
+            for (let preIdx = 0; preIdx < floorsData.length; preIdx++) {
+                const { floorCode: preFloorCode, pageDefects: preDefects } = floorsData[preIdx];
+                await Promise.all(preDefects.map(async (d) => {
+                    await ensureDefectPhotosLoaded(d);
+                    if ((!d.photos || d.photos.length === 0) && d.photoIds && d.photoIds.length > 0) {
+                        const photos = await Promise.all(d.photoIds.map(async pid => {
+                            const local = await idbGet('photos', pid);
+                            if (local) return local;
+                            if (window._photoCache[pid]) return window._photoCache[pid];
+                            if (companyPhotosCol) {
+                                try {
+                                    const snap = await companyPhotosCol.doc(pid).get();
+                                    const url = await photoUrlFromCloudSnap(snap, pid);
+                                    if (url) window._photoCache[pid] = url;
+                                    return url;
+                                } catch (e) { return null; }
+                            }
+                            return null;
+                        }));
+                        const filled = photos.filter(Boolean);
+                        if (filled.length > 0) d.photos = filled;
                     }
-                }
-                if (lastPhotoPara) grade3HwpxCompareAnchorPara = lastPhotoPara;
-            };
+                    if ((!d.prevRoundPhotos || d.prevRoundPhotos.length === 0) && d.prevRoundPhotoIds && d.prevRoundPhotoIds.length > 0) {
+                        const prevPhotos = await Promise.all(d.prevRoundPhotoIds.map(async pid => {
+                            const local = await idbGet('photos', pid);
+                            if (local) return local;
+                            if (window._photoCache[pid]) return window._photoCache[pid];
+                            if (companyPhotosCol) {
+                                try {
+                                    const snap = await companyPhotosCol.doc(pid).get();
+                                    const url = await photoUrlFromCloudSnap(snap, pid);
+                                    if (url) window._photoCache[pid] = url;
+                                    return url;
+                                } catch (e) { return null; }
+                            }
+                            return null;
+                        }));
+                        const filledPrev = prevPhotos.filter(Boolean);
+                        if (filledPrev.length > 0) d.prevRoundPhotos = filledPrev;
+                    }
+                }));
+                preDefects.filter(d => getDefectOutputPhotos(d).length > 0).forEach((d) => {
+                    globalPhotoEntries.push({ d, floorCode: preFloorCode });
+                    globalPhotoLabelByDefect.set(d, `사진${globalPhotoEntries.length}`);
+                });
+            }
 
             for (let slotIdx = 0; slotIdx < floorsData.length; slotIdx++) {
                 const { floorCode, pageDefects } = floorsData[slotIdx];
@@ -36473,57 +36518,13 @@ document.addEventListener('DOMContentLoaded', () => {
                     }
                 });
 
-                await Promise.all(pageDefects.map(async (d) => {
-                    await ensureDefectPhotosLoaded(d);
-                    if ((!d.photos || d.photos.length === 0) && d.photoIds && d.photoIds.length > 0) {
-                        const photos = await Promise.all(d.photoIds.map(async pid => {
-                            const local = await idbGet('photos', pid);
-                            if (local) return local;
-                            if (window._photoCache[pid]) return window._photoCache[pid];
-                            if (companyPhotosCol) {
-                                try {
-                                    const snap = await companyPhotosCol.doc(pid).get();
-                                    const url = await photoUrlFromCloudSnap(snap, pid);
-                                    if (url) window._photoCache[pid] = url;
-                                    return url;
-                                } catch (e) { return null; }
-                            }
-                            return null;
-                        }));
-                        const filled = photos.filter(Boolean);
-                        if (filled.length > 0) d.photos = filled;
-                    }
-                    if ((!d.prevRoundPhotos || d.prevRoundPhotos.length === 0) && d.prevRoundPhotoIds && d.prevRoundPhotoIds.length > 0) {
-                        const prevPhotos = await Promise.all(d.prevRoundPhotoIds.map(async pid => {
-                            const local = await idbGet('photos', pid);
-                            if (local) return local;
-                            if (window._photoCache[pid]) return window._photoCache[pid];
-                            if (companyPhotosCol) {
-                                try {
-                                    const snap = await companyPhotosCol.doc(pid).get();
-                                    const url = await photoUrlFromCloudSnap(snap, pid);
-                                    if (url) window._photoCache[pid] = url;
-                                    return url;
-                                } catch (e) { return null; }
-                            }
-                            return null;
-                        }));
-                        const filledPrev = prevPhotos.filter(Boolean);
-                        if (filledPrev.length > 0) d.prevRoundPhotos = filledPrev;
-                    }
-                }));
-                const regularPhotoDefects = pageDefects.filter(d => getDefectOutputPhotos(d).length > 0);
-                const photoDefects = regularPhotoDefects;
-                const photoLabelByDefect = new Map();
-                photoDefects.forEach((d, i) => photoLabelByDefect.set(d, `사진${i + 1}`));
-
                 surveyPages.forEach((pageItems, pageIdx) => {
                     const destTbl = pageTbls[pageIdx];
                     pageItems.forEach((d, localIdx) => {
                         const isLastOnPage = localIdx === pageItems.length - 1;
                         const rowCtx = {
                             floorCode,
-                            photoRemark: photoLabelByDefect.get(d) || '-',
+                            photoRemark: globalPhotoLabelByDefect.get(d) || '-',
                             floorDisplayLabel: getFloorLabel(floorCode)
                         };
                         const colCount = Array.from(normalRowTpl.getElementsByTagNameNS(HP_NS, 'tc')).length;
@@ -36567,30 +36568,54 @@ document.addEventListener('DOMContentLoaded', () => {
                     destTbl.setAttribute('rowCnt', String(HEADER_ROW_COUNT + pageItems.length));
                 });
 
-                // ---- 결함 사진 갤러리 ----
-                // 템플릿에는 사진 2장씩 짝지은 표가 같은 hp:run 안에 여러 개 나란히 들어있다. 이걸 전부
-                // 지우고, 사진이 있는 결함 개수만큼 이 표를 복제해 다시 채운다. 이 표본 표 제거는 사진이
-                // 있을 때만 하면 안 된다 — 사진을 한 장도 안 찍은 층은 photoDefects.length가 0이라 이
-                // 블록 자체가 통째로 안 돌아서, 표본 건물의 원래 사진이 그대로 남아 나오는 문제가
-                // 있었다(우리 결함 사진이 아니라 템플릿 표본 사진이 나옴). 그래서 표본 표 제거는 사진
-                // 개수와 무관하게 항상 먼저 하고, 새 표로 채우는 부분만 사진이 있을 때로 한정한다.
+                // ---- 층별 사진첩 제거(전역 앨범으로 이동) ----
+                // 표본 사진 표는 항상 지운다. 빈 사진 문단(pageBreak)이 층 사이에 남지 않도록 문단도 제거.
                 try {
-                    const photoTblStamp = slot.photoTblStamp || slot.photoTbl.cloneNode(true);
                     const photoTbl = slot.photoTbl;
-                    const photoRun = photoTbl.parentNode; // 사진첩 표 여러 개가 같은 hp:run 안에 나란히 들어있다
-                    const existingPhotoTables = Array.from(photoRun.children).filter(c => c.localName === 'tbl');
-                    existingPhotoTables.forEach(t => photoRun.removeChild(t));
+                    if (photoTbl && photoTbl.parentNode) {
+                        const photoRun = photoTbl.parentNode;
+                        Array.from(photoRun.children).filter(c => c.localName === 'tbl').forEach(t => photoRun.removeChild(t));
+                        let photoPara = photoRun;
+                        while (photoPara && photoPara.localName !== 'p') photoPara = photoPara.parentNode;
+                        if (photoPara && photoPara.parentNode) photoPara.parentNode.removeChild(photoPara);
+                    }
+                } catch (photoStripErr) {
+                    console.error(`${floorCode} 층별 사진첩 제거 실패(나머지는 계속 진행):`, photoStripErr);
+                }
 
-                    if (photoDefects.length > 0) {
-                    const items = photoDefects;
+                // 중점관리 비교사진 삽입 앵커 폴백: 이 층 마지막 상태조사표 문단(전역 앨범이 덮어씀)
+                {
+                    let lastTblPara = null;
+                    pageTbls.forEach((tbl) => {
+                        let p = tbl.parentNode;
+                        while (p && p.localName !== 'p') p = p.parentNode;
+                        if (p) lastTblPara = p;
+                    });
+                    if (lastTblPara) grade3HwpxCompareAnchorPara = lastTblPara;
+                }
+
+                // ---- 결함위치도 ----
+                // 3종시설물은 위치도를 층 블록에서 바로 넣지 않고, 모든 층 처리가 끝난 뒤 별도로
+                // 몰아서 넣는다(아래 본 루프 밖의 grade3LocMapStampPara 처리 참고).
+            }
+
+            // ---- 전 층 결함 사진첩 (사진1… 전역 이어번호) ----
+            // 모든 층 상태조사표 뒤에 한 번만 삽입. 중점관리 비교사진은 이 앨범 끝 다음에 붙는다.
+            try {
+                if (globalPhotoEntries.length > 0 && grade3GlobalPhotoTblStamp && grade3GlobalPhotoParaStamp) {
+                    if (typeof window.updateLoadingText === 'function') {
+                        window.updateLoadingText('한글(hwpx) 결함 사진첩 생성 중...');
+                    }
+                    const photoTblStamp = grade3GlobalPhotoTblStamp;
                     const PHOTOS_PER_PAGE = 6;
-
                     const tplPics = photoTblStamp.getElementsByTagNameNS(HP_NS, 'pic');
                     if (!tplPics.length) throw new Error('사진첩 템플릿 표에 hp:pic 슬롯이 없습니다.');
                     const maxW = parseInt(tplPics[0].getElementsByTagNameNS(HP_NS, 'curSz')[0].getAttribute('width'), 10);
                     const maxH = parseInt(tplPics[0].getElementsByTagNameNS(HP_NS, 'curSz')[0].getAttribute('height'), 10);
 
-                    const decoded = (await mapLimit(items, 6, async (d) => {
+                    const decoded = (await mapLimit(globalPhotoEntries, 6, async (entry) => {
+                        const d = entry.d;
+                        const floorCode = entry.floorCode;
                         const outPhotos = getDefectOutputPhotos(d);
                         const src0 = outPhotos[0];
                         if (!src0) return null;
@@ -36598,7 +36623,7 @@ document.addEventListener('DOMContentLoaded', () => {
                             const src = await resolveSrcForHwpxEmbed(src0, d.photoIds && d.photoIds[0]);
                             const { bytes, mime, ext } = await dataUrlToBytes(src);
                             const size = await loadImageNaturalSizeFromBytes(bytes, mime);
-                            return { d, bytes, mime, ext, w: size.w, h: size.h };
+                            return { d, floorCode, bytes, mime, ext, w: size.w, h: size.h };
                         } catch (onePhotoErr) {
                             console.warn('사진 1장 임베드 실패(해당 컷만 생략):', d && d.id, onePhotoErr);
                             return null;
@@ -36608,14 +36633,21 @@ document.addEventListener('DOMContentLoaded', () => {
                         throw new Error('임베드 가능한 사진이 없습니다. (Storage URL/권한/CORS 확인)');
                     }
 
-                    let photoPara = photoRun.parentNode;
-                    while (photoPara && photoPara.localName !== 'p') photoPara = photoPara.parentNode;
-                    if (photoPara) photoPara.setAttribute('pageBreak', '1');
-                    const emptyPhotoPara = photoPara ? photoPara.cloneNode(true) : null;
-                    if (emptyPhotoPara) emptyPhotoPara.setAttribute('pageBreak', '1');
-
-                    let insertRun = photoRun;
-                    let insertPara = photoPara;
+                    let insertPara = grade3GlobalPhotoParaStamp.cloneNode(true);
+                    Array.from(insertPara.getElementsByTagNameNS(HP_NS, 'tbl')).forEach((t) => {
+                        if (t.parentNode) t.parentNode.removeChild(t);
+                    });
+                    insertPara.setAttribute('pageBreak', '1');
+                    const insertAfter = grade3HwpxCompareAnchorPara;
+                    if (insertAfter && insertAfter.parentNode) {
+                        insertAfter.parentNode.insertBefore(insertPara, insertAfter.nextSibling);
+                    } else {
+                        sec.appendChild(insertPara);
+                    }
+                    const emptyPhotoPara = insertPara.cloneNode(true);
+                    emptyPhotoPara.setAttribute('pageBreak', '1');
+                    let insertRun = Array.from(insertPara.children).find(c => c.localName === 'run')
+                        || insertPara.getElementsByTagNameNS(HP_NS, 'run')[0];
                     let photosOnPage = 0;
 
                     const appendPhotoTbl = (tbl) => {
@@ -36659,11 +36691,10 @@ document.addEventListener('DOMContentLoaded', () => {
                         zip.file(`BinData/${imgId1}.${slot1.ext}`, slot1.bytes);
                         manifestAdds.push(`<opf:item id="${imgId1}" href="BinData/${imgId1}.${slot1.ext}" media-type="${slot1.mime}" isEmbeded="1"/>`);
                         setPicImage(pics[0], imgId1, slot1.w, slot1.h, maxW, maxH);
-                        setTcText(capTcs[0], photoLabelByDefect.get(slot1.d));
-                        setTcText(capTcs[2], getSurveyCellText('location', slot1.d, { floorCode }));
-                        // 내용 칸 = 상단 상태조사표 점검내용과 동일(부재 + 결함내용 + 결함사이즈)
+                        setTcText(capTcs[0], globalPhotoLabelByDefect.get(slot1.d));
+                        setTcText(capTcs[2], getSurveyCellText('location', slot1.d, { floorCode: slot1.floorCode }));
                         setTcText(descTcs[1], appendGrade3ProgressLeakToContent(
-                            getSurveyCellText('inspectionContent', slot1.d, { floorCode }),
+                            getSurveyCellText('inspectionContent', slot1.d, { floorCode: slot1.floorCode }),
                             slot1.d
                         ));
 
@@ -36673,10 +36704,10 @@ document.addEventListener('DOMContentLoaded', () => {
                             zip.file(`BinData/${imgId2}.${slot2.ext}`, slot2.bytes);
                             manifestAdds.push(`<opf:item id="${imgId2}" href="BinData/${imgId2}.${slot2.ext}" media-type="${slot2.mime}" isEmbeded="1"/>`);
                             setPicImage(pics[1], imgId2, slot2.w, slot2.h, maxW, maxH);
-                            setTcText(capTcs[4], photoLabelByDefect.get(slot2.d));
-                            setTcText(capTcs[6], getSurveyCellText('location', slot2.d, { floorCode }));
+                            setTcText(capTcs[4], globalPhotoLabelByDefect.get(slot2.d));
+                            setTcText(capTcs[6], getSurveyCellText('location', slot2.d, { floorCode: slot2.floorCode }));
                             setTcText(descTcs[3], appendGrade3ProgressLeakToContent(
-                                getSurveyCellText('inspectionContent', slot2.d, { floorCode }),
+                                getSurveyCellText('inspectionContent', slot2.d, { floorCode: slot2.floorCode }),
                                 slot2.d
                             ));
                         } else {
@@ -36687,16 +36718,10 @@ document.addEventListener('DOMContentLoaded', () => {
                         photosOnPage += pairCount;
                     }
                     if (insertPara) grade3HwpxCompareAnchorPara = insertPara;
-                    }
-                } catch (photoErr) {
-                    console.error(`${floorCode} 사진 갤러리 삽입 실패(나머지는 계속 진행):`, photoErr);
-                    window.showToast(`${getFloorLabel(floorCode)} 사진 삽입 중 오류가 있어 사진은 제외하고 만듭니다.`, 'warning', 5000);
                 }
-                markGrade3HwpxCompareAnchorFromSlot(slot);
-
-                // ---- 결함위치도 ----
-                // 3종시설물은 위치도를 층 블록에서 바로 넣지 않고, 모든 층 처리가 끝난 뒤 별도로
-                // 몰아서 넣는다(아래 본 루프 밖의 grade3LocMapStampPara 처리 참고).
+            } catch (photoErr) {
+                console.error('전 층 결함 사진 갤러리 삽입 실패(나머지는 계속 진행):', photoErr);
+                window.showToast('결함 사진 삽입 중 오류가 있어 사진은 제외하고 만듭니다.', 'warning', 5000);
             }
 
             // 실제로 채운 블록 다음에 남은 표본 층 블록은 (비파괴조사 섹션 정리와 함께) 뒤에서 지운다.
