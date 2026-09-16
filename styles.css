@@ -6229,6 +6229,32 @@ html:not(.layout-desktop) .survey-inline-select {
     box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
 }
 
+.defect-photo-location-under-prev {
+    margin: 0;
+    margin-top: auto;
+    padding-top: 0.05rem;
+}
+.defect-photo-location-label {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 0.35rem;
+    margin-bottom: 0.22rem;
+    font-size: 0.72rem;
+    font-weight: 800;
+    color: #475569;
+}
+.defect-photo-location-under-prev .defect-speech-btn {
+    padding: 0.12rem 0.38rem;
+    min-height: 1.45rem;
+    font-size: 0.68rem;
+    line-height: 1;
+}
+.defect-photo-location-under-prev .form-control {
+    font-size: 0.78rem;
+    min-height: 2.1rem;
+    padding: 0.35rem 0.5rem;
+}
 .defect-photo-slot-actions {
     display: flex;
     flex-direction: row;

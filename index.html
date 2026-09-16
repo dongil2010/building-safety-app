@@ -990,6 +990,15 @@
                                 <div class="defect-photo-slot-main">
                                     <div class="defect-photo-frame" id="defectPrevMainFrame"></div>
                                     <div class="defect-photo-extra-row" id="defectPrevExtraRow" style="display:none;"></div>
+                                    <div class="form-group defect-photo-location-under-prev">
+                                        <div class="form-label defect-photo-location-label">
+                                            <span>상세 위치</span>
+                                            <button type="button" id="btnSpeechLocation" class="btn btn-sm btn-outline defect-speech-btn" title="음성으로 위치 입력">
+                                                <i class="fa-solid fa-microphone"></i>
+                                            </button>
+                                        </div>
+                                        <input type="text" id="defectLocation" class="form-control" placeholder="비우면 층수만 · 예: 기둥 C1 하부" autocomplete="off">
+                                    </div>
                                 </div>
                             </div>
 
@@ -1136,15 +1145,7 @@
                         </div>
                     </div>
 
-                    <div class="form-group">
-                        <div class="form-label" style="display:flex; justify-content:space-between; align-items:center;">
-                            <span>상세 위치</span>
-                            <button type="button" id="btnSpeechLocation" class="btn btn-sm btn-outline defect-speech-btn" title="음성으로 위치 입력">
-                                <i class="fa-solid fa-microphone"></i> 음성
-                            </button>
-                        </div>
-                        <input type="text" id="defectLocation" class="form-control" placeholder="비우면 층수만 · 입력 예: 기둥 C1 하부 → 지상1층 기둥 C1 하부">
-                    </div>
+
 
                     <div class="defect-flag-grid">
                         <label class="checkbox-chip"><input type="checkbox" id="defectProgressCheck"> 진행중</label>
