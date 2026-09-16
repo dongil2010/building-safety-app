@@ -368,8 +368,9 @@
 > 클라 REST 폴백만으로도 로그인 상태면 도면이 떠야 함.
 
 ### ⚡ [Cursor] - 2026-09-16 12:40:00
-> **`[IN_PROGRESS]` HWPX 규모 칸 `-nEA` 줄바꿈**
+> **`[WAITING_REVIEW]` HWPX 규모 칸 `-nEA` 줄바꿈**
 >
 > 증상: `0.3~0.7/0.5 -12EA` 가 좁은 칸에서 한 줄로 붙어 보임. 공백은 있으나 `wrapHwpxCellLine`이 `-nEA` 앞을 문단 분리하지 않고, `wrapHwpxCellText`는 CR/LF를 공백으로 평탄화.
 > 수정: `insertHwpxEaCountLineBreaks` — 평탄화 **뒤**에 `-nEA` 앞만 `\n` 재삽입. `fillCellParas`의 기존 `cloneNode(true)` 문단 복제로 한글 엔터와 동일하게 살아남음. 화면/엑셀 공백 접미사는 유지. 1·2종 사진 칸(부재+내용) / 3종 폭·갯수는 구성 변경 없음.
 > 위치: `formatCrackMeasurePair`는 여전히 ` -nEA` 공백 조인, 실제 줄바꿈은 `exportHwpxSurveyTable3/12` 의 `wrapHwpxCellText`.
+> PR: https://github.com/dongil2010/building-safety-app/pull/15
