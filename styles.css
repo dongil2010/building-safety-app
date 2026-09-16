@@ -6369,6 +6369,94 @@ html:not(.layout-desktop) .survey-inline-select {
     cursor: default;
 }
 
+.defect-polygon-redraw-btn {
+    width: 100%;
+    font-weight: 700;
+    margin-top: 0.55rem;
+}
+
+.area-polygon-redraw-banner {
+    position: absolute;
+    left: 50%;
+    top: 4.4rem;
+    transform: translateX(-50%);
+    z-index: 22;
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+    max-width: calc(100% - 1.2rem);
+    padding: 0.4rem 0.55rem 0.4rem 0.85rem;
+    background: rgba(28, 28, 28, 0.94);
+    border: 1px solid rgba(251, 146, 60, 0.55);
+    border-radius: 999px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
+    color: #f5f5f5;
+    pointer-events: auto;
+}
+.area-polygon-redraw-banner[hidden] {
+    display: none !important;
+}
+.area-polygon-redraw-text {
+    font-size: 0.78rem;
+    font-weight: 700;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.area-polygon-redraw-btn {
+    flex: 0 0 auto;
+    border: 1px solid #fb923c;
+    background: #ea580c;
+    color: #fff;
+    font-size: 0.75rem;
+    font-weight: 800;
+    border-radius: 999px;
+    padding: 0.28rem 0.7rem;
+    cursor: pointer;
+}
+.area-polygon-redraw-btn:disabled {
+    opacity: 0.45;
+    cursor: default;
+}
+.area-polygon-redraw-btn-cancel {
+    background: transparent;
+    color: #fed7aa;
+    border-color: rgba(254, 215, 170, 0.55);
+}
+
+html.layout-mobile .area-polygon-redraw-banner,
+html.layout-tablet .area-polygon-redraw-banner {
+    top: auto;
+    bottom: 5.8rem;
+    max-width: calc(100% - 4.5rem);
+    flex-wrap: wrap;
+    justify-content: center;
+    border-radius: 16px;
+    padding: 0.45rem 0.55rem;
+}
+html.layout-mobile .area-polygon-redraw-text,
+html.layout-tablet .area-polygon-redraw-text {
+    white-space: normal;
+    text-align: center;
+    width: 100%;
+}
+
+@media (max-width: 768px) {
+    .area-polygon-redraw-banner {
+        top: auto;
+        bottom: 5.8rem;
+        max-width: calc(100% - 1.2rem);
+        flex-wrap: wrap;
+        justify-content: center;
+        border-radius: 16px;
+    }
+    .area-polygon-redraw-text {
+        white-space: normal;
+        text-align: center;
+        width: 100%;
+    }
+}
+
 .defect-arrow-block .checkbox-chip {
     border-color: #6b6b6b !important;
     color: #efefef !important;
