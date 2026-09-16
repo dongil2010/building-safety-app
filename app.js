@@ -21482,7 +21482,7 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
         container.innerHTML = options.map(value => {
-            return `<button type="button" class="defect-quick-chip ${value === currentValue ? 'active' : ''}" data-value="${escapeHtml(value)}">${escapeHtml(value)}</button>`;
+            return `<button type="button" class="defect-quick-chip ${value === currentValue ? 'active' : ''}" tabindex="-1" data-value="${escapeHtml(value)}">${escapeHtml(value)}</button>`;
         }).join('');
         container.querySelectorAll('.defect-quick-chip').forEach(btn => {
             btn.addEventListener('click', () => onPick(btn.dataset.value || ''));
@@ -21752,7 +21752,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (typeContainer) {
             typeContainer.innerHTML = typeChipOptions.map(value => {
                 const active = selectedTypeSet.has(value);
-                return `<button type="button" class="defect-quick-chip${active ? ' active' : ''}" data-value="${escapeHtml(value)}">${escapeHtml(value)}</button>`;
+                return `<button type="button" class="defect-quick-chip${active ? ' active' : ''}" tabindex="-1" data-value="${escapeHtml(value)}">${escapeHtml(value)}</button>`;
             }).join('');
             typeContainer.querySelectorAll('.defect-quick-chip').forEach(btn => {
                 btn.addEventListener('click', () => toggleDefectTypeChip(btn.dataset.value || ''));
@@ -21847,6 +21847,99 @@ document.addEventListener('DOMContentLoaded', () => {
         });
         bindDefectCauseDirectInput();
     }
+
+    function isDefectHandwriteTabStopVisible(el) {
+        if (!el || el.disabled) return false;
+        if (el.getAttribute('type') === 'hidden') return false;
+        const style = window.getComputedStyle(el);
+        if (style.display === 'none' || style.visibility === 'hidden') return false;
+        // offsetParent null when display:none ancestor (except fixed); still allow if in open modal
+        const rect = el.getBoundingClientRect();
+        return rect.width > 0 || rect.height > 0;
+    }
+
+    function getDefectHandwriteTabStops() {
+        const stops = [];
+        const push = (el) => {
+            if (el && isDefectHandwriteTabStopVisible(el) && !stops.includes(el)) stops.push(el);
+        };
+        push(document.getElementById('defectLocation'));
+        push(document.getElementById('defectComponentInput'));
+        push(document.getElementById('defectTypeInput'));
+        const measureGroup = document.getElementById('quickMeasureGroup');
+        const measureVisible = measureGroup && isDefectHandwriteTabStopVisible(measureGroup);
+        if (measureVisible) {
+            const list = document.getElementById('defectCrackMeasureList');
+            if (list) {
+                list.querySelectorAll('input[type="text"], input:not([type])').forEach((inp) => push(inp));
+            }
+        }
+        const causeGroup = document.getElementById('quickCauseGroup');
+        if (!causeGroup || isDefectHandwriteTabStopVisible(causeGroup)) {
+            push(document.getElementById('defectCauseInput'));
+        }
+        return stops;
+    }
+
+    function bindDefectHandwriteTabOrder() {
+        const form = document.getElementById('defectForm');
+        if (!form || form.dataset.handwriteTabBound === '1') return;
+        form.dataset.handwriteTabBound = '1';
+        form.addEventListener('keydown', (e) => {
+            if (e.key !== 'Tab' || e.altKey || e.ctrlKey || e.metaKey) return;
+            // 터치 전용(휴대폰)에서는 네이티브 포커스 유지
+            if (window.matchMedia && window.matchMedia('(pointer: coarse)').matches
+                && window.matchMedia('(hover: none)').matches) {
+                return;
+            }
+            const stops = getDefectHandwriteTabStops();
+            if (stops.length < 2) return;
+            const active = document.activeElement;
+            let idx = stops.indexOf(active);
+            if (idx < 0) {
+                // 칩/버튼에 있어도 수기 칸으로 점프 (DOM 순 다음 수기 칸)
+                if (!form.contains(active)) return;
+                const all = Array.from(form.querySelectorAll('input, select, textarea, button, [tabindex]'));
+                const aIdx = all.indexOf(active);
+                if (aIdx < 0) return;
+                e.preventDefault();
+                if (e.shiftKey) {
+                    for (let i = stops.length - 1; i >= 0; i -= 1) {
+                        if (all.indexOf(stops[i]) < aIdx) {
+                            stops[i].focus();
+                            if (typeof stops[i].select === 'function') stops[i].select();
+                            return;
+                        }
+                    }
+                    const last = stops[stops.length - 1];
+                    last.focus();
+                    if (typeof last.select === 'function') last.select();
+                } else {
+                    for (let i = 0; i < stops.length; i += 1) {
+                        if (all.indexOf(stops[i]) > aIdx) {
+                            stops[i].focus();
+                            if (typeof stops[i].select === 'function') stops[i].select();
+                            return;
+                        }
+                    }
+                    const first = stops[0];
+                    first.focus();
+                    if (typeof first.select === 'function') first.select();
+                }
+                return;
+            }
+            // 양 끝에서는 폼의 다음/이전 컨트롤(체크 등)로 네이티브 탭 유지
+            if (!e.shiftKey && idx === stops.length - 1) return;
+            if (e.shiftKey && idx === 0) return;
+            e.preventDefault();
+            const nextIdx = e.shiftKey ? idx - 1 : idx + 1;
+            const next = stops[nextIdx];
+            next.focus();
+            if (typeof next.select === 'function') next.select();
+        });
+    }
+
+
 
     function syncCauseComboValue(joined) {
         const causeSelect = document.getElementById('defectCause');
@@ -22784,7 +22877,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     <input type="text" data-crack-w inputmode="decimal" placeholder="직접입력" autocomplete="off" value="${String(m.width || '').replace(/"/g, '&quot;')}">
                     <span class="defect-measure-unit" data-crack-w-unit>${m.join === 'x' ? 'm' : 'mm'}</span>
                 </label>
-                <button type="button" class="defect-measure-join-toggle" data-crack-join="${m.join}" title="${m.join === 'x' ? 'x 모드(폭·길이 모두 m) — 누르면 / 로 전환' : '/ 모드(폭 mm · 길이 m) — 누르면 x 로 전환'}">${m.join}</button>
+                <button type="button" class="defect-measure-join-toggle" tabindex="-1" data-crack-join="${m.join}" title="${m.join === 'x' ? 'x 모드(폭·길이 모두 m) — 누르면 / 로 전환' : '/ 모드(폭 mm · 길이 m) — 누르면 x 로 전환'}">${m.join}</button>
                 <label class="defect-measure-btn">
                     <span class="defect-measure-name">길이</span>
                     <input type="text" data-crack-l inputmode="decimal" placeholder="직접입력" autocomplete="off" value="${String(m.length || '').replace(/"/g, '&quot;')}">
@@ -22795,7 +22888,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     <input type="text" data-crack-n inputmode="numeric" placeholder="직접입력" autocomplete="off" value="${String(m.count || '').replace(/"/g, '&quot;')}">
                     <span class="defect-measure-unit">개</span>
                 </label>
-                <button type="button" class="defect-crack-measure-del" title="이 행 삭제" ${rows.length <= 1 ? 'disabled' : ''}>
+                <button type="button" class="defect-crack-measure-del" tabindex="-1" title="이 행 삭제" ${rows.length <= 1 ? 'disabled' : ''}>
                     <i class="fa-solid fa-trash"></i>
                 </button>
             </div>
@@ -24101,7 +24194,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const safe = String(cause).replace(/"/g, '&quot;');
             return `<label class="defect-cause-check-item${checked ? ' is-checked' : ''}" for="${id}"
                 style="--cause-tone-border:${tone.border};--cause-tone-bg:${tone.bg};--cause-tone-text:${tone.text};--cause-tone-accent:${tone.accent};">
-                <input type="checkbox" id="${id}" value="${safe}" ${checked}>
+                <input type="checkbox" id="${id}" value="${safe}" tabindex="-1" ${checked}>
                 <span>${cause}</span>
             </label>`;
         }).join('');
@@ -24315,6 +24408,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     bindDefectComboInputs();
+        bindDefectHandwriteTabOrder();
     bindDefectMeasureInputs();
 
     const ARROW_OCTANT_META = {

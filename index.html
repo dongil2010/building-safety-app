@@ -39,7 +39,7 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <meta name="apple-mobile-web-app-title" content="스마트 안전점검">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css">
-    <link rel="stylesheet" href="styles.css?v=20260916_191437">
+    <link rel="stylesheet" href="styles.css?v=20260916_193010">
 
     <!-- FontAwesome icons for clean engineering UI -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
@@ -1038,17 +1038,17 @@
                             <div class="defect-quick-label">
                                 <i class="fa-solid fa-building-columns"></i> 부재 명칭
                                 <span class="defect-quick-hint">⚙ 으로 순서·항목 편집 (계정별 저장)</span>
-                                <button type="button" id="btnManageComponent" class="btn-option-manage" title="부재 명칭 항목 관리"><i class="fa-solid fa-gear"></i></button>
+                                <button type="button" id="btnManageComponent" class="btn-option-manage" tabindex="-1" title="부재 명칭 항목 관리"><i class="fa-solid fa-gear"></i></button>
                             </div>
                             <input type="text" id="defectComponentInput" class="form-control defect-combo-input defect-quick-direct-input" placeholder="부재 명칭 직접 입력" autocomplete="off">
                             <div class="defect-joint-toolbar" id="defectJointToolbar" style="display:none;">
-                                <button type="button" class="defect-quick-chip defect-joint-mode-btn" id="btnDefectJointMode" title="접합부 부재 빠른 선택">접합부</button>
+                                <button type="button" class="defect-quick-chip defect-joint-mode-btn" id="btnDefectJointMode" tabindex="-1" title="접합부 부재 빠른 선택">접합부</button>
                                 <div class="defect-joint-composer" id="defectJointComposer" style="display:none;">
                                     <select id="defectJointLeft" class="form-control defect-joint-select" aria-label="접합부 좌측 부재"></select>
                                     <span class="defect-joint-dash">-</span>
                                     <select id="defectJointRight" class="form-control defect-joint-select" aria-label="접합부 우측 부재"></select>
                                     <span class="defect-joint-suffix">접합부</span>
-                                    <button type="button" class="btn btn-sm btn-primary" id="btnApplyDefectJoint">적용</button>
+                                    <button type="button" class="btn btn-sm btn-primary" id="btnApplyDefectJoint" tabindex="-1">적용</button>
                                 </div>
                             </div>
                             <div class="defect-quick-chip-grid dqg-component" id="quickComponentChips"></div>
@@ -1057,7 +1057,7 @@
                             <div class="defect-quick-label">
                                 <i class="fa-solid fa-triangle-exclamation"></i> 결함 종류
                                 <span class="defect-quick-hint">눌러서 여러 개 선택 (선택 순) · ⚙ 계정별 편집</span>
-                                <button type="button" id="btnManageDefectType" class="btn-option-manage" title="결함 종류 항목 관리"><i class="fa-solid fa-gear"></i></button>
+                                <button type="button" id="btnManageDefectType" class="btn-option-manage" tabindex="-1" title="결함 종류 항목 관리"><i class="fa-solid fa-gear"></i></button>
                             </div>
                             <input type="text" id="defectTypeInput" class="form-control defect-combo-input defect-quick-direct-input" placeholder="결함 종류 직접 입력" autocomplete="off">
                             <div class="defect-quick-chip-grid dqg-type" id="quickDefectTypeChips"></div>
@@ -1065,7 +1065,7 @@
                         <div class="defect-quick-group" id="quickMeasureGroup">
                             <div class="defect-quick-label"><i class="fa-solid fa-ruler-combined"></i> 폭 · 길이 · 개수 <span class="defect-quick-hint">/ = mm·m · x = m·m</span></div>
                             <div class="defect-crack-measure-list" id="defectCrackMeasureList"></div>
-                            <button type="button" class="btn btn-sm btn-outline defect-crack-measure-add" id="btnAddCrackMeasure" title="폭·길이·개수 행 추가">
+                            <button type="button" class="btn btn-sm btn-outline defect-crack-measure-add" id="btnAddCrackMeasure" tabindex="-1" title="폭·길이·개수 행 추가">
                                 <i class="fa-solid fa-plus"></i> 폭·길이·개수 추가
                             </button>
                             <!-- 하위 호환: 단일 값 동기화용(화면 숨김) -->
@@ -1076,11 +1076,11 @@
                         <div class="defect-quick-group" id="quickCauseGroup">
                             <div class="defect-quick-label">
                                 <i class="fa-solid fa-magnifying-glass"></i> 발생 원인 (복수 선택)
-                                <button type="button" id="btnManageCause" class="btn-option-manage" title="결함 원인 항목 관리"><i class="fa-solid fa-gear"></i></button>
+                                <button type="button" id="btnManageCause" class="btn-option-manage" tabindex="-1" title="결함 원인 항목 관리"><i class="fa-solid fa-gear"></i></button>
                             </div>
                             <div class="defect-cause-custom-row">
                                 <input type="text" id="defectCauseInput" class="form-control defect-combo-input defect-quick-direct-input" placeholder="발생 원인 직접 입력 후 Enter" autocomplete="off">
-                                <button type="button" id="btnAddCustomCause" class="btn btn-sm btn-outline defect-cause-add-btn" title="입력한 원인 추가">추가</button>
+                                <button type="button" id="btnAddCustomCause" class="btn btn-sm btn-outline defect-cause-add-btn" tabindex="-1" title="입력한 원인 추가">추가</button>
                             </div>
                             <div class="defect-cause-checks-host" id="defectCauseChecks"></div>
                             <div class="defect-quick-chip-grid dqg-cause" id="quickCauseChips" style="display:none;" aria-hidden="true"></div>
@@ -3174,31 +3174,31 @@
     </div>
 
     <!-- Core → 탭 분류 → 기존 엔진(app.js) -->
-    <script src="js/core/floor-identity.js?v=20260916_191437"></script>
-    <script src="js/core/state.js?v=20260916_191437"></script>
-    <script src="js/tabs/registry.js?v=20260916_191437"></script>
-    <script src="js/pdf-vector-bridge.js?v=20260916_191437"></script>
-    <script src="js/pdf-vector-snap.js?v=20260916_191437"></script>
-    <script src="js/core/layout-mode.js?v=20260916_191437"></script>
-    <script src="js/core/performance.js?v=20260916_191437"></script>
-    <script src="js/core/mobile-keyboard.js?v=20260916_191437"></script>
-    <script src="js/tabs/home.js?v=20260916_191437"></script>
-    <script src="js/tabs/map.js?v=20260916_191437"></script>
-    <script src="js/tabs/survey.js?v=20260916_191437"></script>
-    <script src="js/tabs/stats.js?v=20260916_191437"></script>
-    <script src="js/tabs/ndt.js?v=20260916_191437"></script>
-    <script src="js/shared/report.js?v=20260916_191437"></script>
-    <script src="js/shared/hwpx-survey-slots.js?v=20260916_191437"></script>
-    <script src="js/shared/hwpx-ndt-maps.js?v=20260916_191437"></script>
-    <script src="js/shared/cad-unmarked-place.js?v=20260916_191437"></script>
-    <script src="js/shared/arrow-survey-number.js?v=20260916_191437"></script>
-    <script src="js/shared/hwpx-import.js?v=20260916_191437"></script>
-    <script src="js/shared/auth.js?v=20260916_191437"></script>
-    <script src="js/core/firebase-storage-assets.js?v=20260916_191437"></script>
-    <script src="js/core/drawing-floor-tombstone.js?v=20260916_191437"></script>
-    <script src="js/core/building-meta-merge.js?v=20260916_191437"></script>
-    <script src="js/core/legend-layout.js?v=20260916_191437"></script>
-    <script src="app.js?v=20260916_191437"></script>
+    <script src="js/core/floor-identity.js?v=20260916_193010"></script>
+    <script src="js/core/state.js?v=20260916_193010"></script>
+    <script src="js/tabs/registry.js?v=20260916_193010"></script>
+    <script src="js/pdf-vector-bridge.js?v=20260916_193010"></script>
+    <script src="js/pdf-vector-snap.js?v=20260916_193010"></script>
+    <script src="js/core/layout-mode.js?v=20260916_193010"></script>
+    <script src="js/core/performance.js?v=20260916_193010"></script>
+    <script src="js/core/mobile-keyboard.js?v=20260916_193010"></script>
+    <script src="js/tabs/home.js?v=20260916_193010"></script>
+    <script src="js/tabs/map.js?v=20260916_193010"></script>
+    <script src="js/tabs/survey.js?v=20260916_193010"></script>
+    <script src="js/tabs/stats.js?v=20260916_193010"></script>
+    <script src="js/tabs/ndt.js?v=20260916_193010"></script>
+    <script src="js/shared/report.js?v=20260916_193010"></script>
+    <script src="js/shared/hwpx-survey-slots.js?v=20260916_193010"></script>
+    <script src="js/shared/hwpx-ndt-maps.js?v=20260916_193010"></script>
+    <script src="js/shared/cad-unmarked-place.js?v=20260916_193010"></script>
+    <script src="js/shared/arrow-survey-number.js?v=20260916_193010"></script>
+    <script src="js/shared/hwpx-import.js?v=20260916_193010"></script>
+    <script src="js/shared/auth.js?v=20260916_193010"></script>
+    <script src="js/core/firebase-storage-assets.js?v=20260916_193010"></script>
+    <script src="js/core/drawing-floor-tombstone.js?v=20260916_193010"></script>
+    <script src="js/core/building-meta-merge.js?v=20260916_193010"></script>
+    <script src="js/core/legend-layout.js?v=20260916_193010"></script>
+    <script src="app.js?v=20260916_193010"></script>
 
     <script>
         window.BSA_APP_VERSION = '20260916_185539';
@@ -3226,7 +3226,7 @@
                     native = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
                 } catch (e) {}
                 if (native) return;
-                navigator.serviceWorker.register('./sw.js?v=20260916_191437')
+                navigator.serviceWorker.register('./sw.js?v=20260916_193010')
 
                     .then(function(registration) {
                         console.log('✅ ServiceWorker Registered Successfully with scope:', registration.scope);
