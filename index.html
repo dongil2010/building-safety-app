@@ -39,7 +39,7 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <meta name="apple-mobile-web-app-title" content="스마트 안전점검">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css">
-    <link rel="stylesheet" href="styles.css?v=20260916_165508">
+    <link rel="stylesheet" href="styles.css?v=20260916_170248">
 
     <!-- FontAwesome icons for clean engineering UI -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
@@ -990,6 +990,15 @@
                                 <div class="defect-photo-slot-main">
                                     <div class="defect-photo-frame" id="defectPrevMainFrame"></div>
                                     <div class="defect-photo-extra-row" id="defectPrevExtraRow" style="display:none;"></div>
+                                    <div class="form-group defect-photo-location-under-prev">
+                                        <div class="form-label defect-photo-location-label">
+                                            <span>상세 위치</span>
+                                            <button type="button" id="btnSpeechLocation" class="btn btn-sm btn-outline defect-speech-btn" title="음성으로 위치 입력">
+                                                <i class="fa-solid fa-microphone"></i>
+                                            </button>
+                                        </div>
+                                        <input type="text" id="defectLocation" class="form-control" placeholder="비우면 층수만 · 예: 기둥 C1 하부" autocomplete="off">
+                                    </div>
                                 </div>
                             </div>
 
@@ -1136,15 +1145,7 @@
                         </div>
                     </div>
 
-                    <div class="form-group">
-                        <div class="form-label" style="display:flex; justify-content:space-between; align-items:center;">
-                            <span>상세 위치</span>
-                            <button type="button" id="btnSpeechLocation" class="btn btn-sm btn-outline defect-speech-btn" title="음성으로 위치 입력">
-                                <i class="fa-solid fa-microphone"></i> 음성
-                            </button>
-                        </div>
-                        <input type="text" id="defectLocation" class="form-control" placeholder="비우면 층수만 · 입력 예: 기둥 C1 하부 → 지상1층 기둥 C1 하부">
-                    </div>
+
 
                     <div class="defect-flag-grid">
                         <label class="checkbox-chip"><input type="checkbox" id="defectProgressCheck"> 진행중</label>
@@ -3173,33 +3174,33 @@
     </div>
 
     <!-- Core → 탭 분류 → 기존 엔진(app.js) -->
-    <script src="js/core/floor-identity.js?v=20260916_165508"></script>
-    <script src="js/core/state.js?v=20260916_165508"></script>
-    <script src="js/tabs/registry.js?v=20260916_165508"></script>
-    <script src="js/pdf-vector-bridge.js?v=20260916_165508"></script>
-    <script src="js/pdf-vector-snap.js?v=20260916_165508"></script>
-    <script src="js/core/layout-mode.js?v=20260916_165508"></script>
-    <script src="js/core/performance.js?v=20260916_165508"></script>
-    <script src="js/core/mobile-keyboard.js?v=20260916_165508"></script>
-    <script src="js/tabs/home.js?v=20260916_165508"></script>
-    <script src="js/tabs/map.js?v=20260916_165508"></script>
-    <script src="js/tabs/survey.js?v=20260916_165508"></script>
-    <script src="js/tabs/stats.js?v=20260916_165508"></script>
-    <script src="js/tabs/ndt.js?v=20260916_165508"></script>
-    <script src="js/shared/report.js?v=20260916_165508"></script>
-    <script src="js/shared/hwpx-survey-slots.js?v=20260916_165508"></script>
-    <script src="js/shared/cad-unmarked-place.js?v=20260916_165508"></script>
-    <script src="js/shared/arrow-survey-number.js?v=20260916_165508"></script>
-    <script src="js/shared/hwpx-import.js?v=20260916_165508"></script>
-    <script src="js/shared/auth.js?v=20260916_165508"></script>
-    <script src="js/core/firebase-storage-assets.js?v=20260916_165508"></script>
-    <script src="js/core/drawing-floor-tombstone.js?v=20260916_165508"></script>
-    <script src="js/core/building-meta-merge.js?v=20260916_165508"></script>
-    <script src="js/core/legend-layout.js?v=20260916_165508"></script>
-    <script src="app.js?v=20260916_165508"></script>
+    <script src="js/core/floor-identity.js?v=20260916_170248"></script>
+    <script src="js/core/state.js?v=20260916_170248"></script>
+    <script src="js/tabs/registry.js?v=20260916_170248"></script>
+    <script src="js/pdf-vector-bridge.js?v=20260916_170248"></script>
+    <script src="js/pdf-vector-snap.js?v=20260916_170248"></script>
+    <script src="js/core/layout-mode.js?v=20260916_170248"></script>
+    <script src="js/core/performance.js?v=20260916_170248"></script>
+    <script src="js/core/mobile-keyboard.js?v=20260916_170248"></script>
+    <script src="js/tabs/home.js?v=20260916_170248"></script>
+    <script src="js/tabs/map.js?v=20260916_170248"></script>
+    <script src="js/tabs/survey.js?v=20260916_170248"></script>
+    <script src="js/tabs/stats.js?v=20260916_170248"></script>
+    <script src="js/tabs/ndt.js?v=20260916_170248"></script>
+    <script src="js/shared/report.js?v=20260916_170248"></script>
+    <script src="js/shared/hwpx-survey-slots.js?v=20260916_170248"></script>
+    <script src="js/shared/cad-unmarked-place.js?v=20260916_170248"></script>
+    <script src="js/shared/arrow-survey-number.js?v=20260916_170248"></script>
+    <script src="js/shared/hwpx-import.js?v=20260916_170248"></script>
+    <script src="js/shared/auth.js?v=20260916_170248"></script>
+    <script src="js/core/firebase-storage-assets.js?v=20260916_170248"></script>
+    <script src="js/core/drawing-floor-tombstone.js?v=20260916_170248"></script>
+    <script src="js/core/building-meta-merge.js?v=20260916_170248"></script>
+    <script src="js/core/legend-layout.js?v=20260916_170248"></script>
+    <script src="app.js?v=20260916_170248"></script>
 
     <script>
-        window.BSA_APP_VERSION = '20260916_165508';
+        window.BSA_APP_VERSION = '20260916_170248';
 
         (function () {
             var el = document.getElementById('appVersionText');
@@ -3224,7 +3225,7 @@
                     native = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
                 } catch (e) {}
                 if (native) return;
-                navigator.serviceWorker.register('./sw.js?v=20260916_165508')
+                navigator.serviceWorker.register('./sw.js?v=20260916_170248')
 
                     .then(function(registration) {
                         console.log('✅ ServiceWorker Registered Successfully with scope:', registration.scope);
