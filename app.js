@@ -21798,25 +21798,25 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // ── 마감재: 부재별 결함 종류 ──
     const EXT_TILE_DEFECTS = [
-        '상태양호', '들뜸/탈락', '균열', '줄눈 손상', '백태', '파손', '기타'
+        '상태양호', '균열', '들뜸/탈락', '줄눈 손상', '백태', '파손', '기타'
     ];
     const EXT_STONE_DEFECTS = [
         '상태양호', '파손/팟칭', '들뜸/탈락', '줄눈 손상', '철물 노출·녹', '변색/오염', '기타'
     ];
     const EXT_PAINT_DEFECTS = [
-        '상태양호', '변색/오염', '박리/탈락', '부풀음', '균열', '기타'
+        '상태양호', '균열', '변색/오염', '박리/탈락', '부풀음', '기타'
     ];
     const METAL_PANEL_FINISH_DEFECTS = [
         '상태양호', '부식', '변형/들뜸', '이음부 손상', '도장 박리', '체결부 이완', '기타'
     ];
     const INT_TILE_DEFECTS = [
-        '상태양호', '들뜸/탈락', '균열', '줄눈 손상', '파손', '기타'
+        '상태양호', '균열', '들뜸/탈락', '줄눈 손상', '파손', '기타'
     ];
     const INTERIOR_FINISH_DEFECTS = [
         '상태양호', '들뜸/탈락', '파손', '변색/오염', '이격', '기타'
     ];
     const INT_PAINT_DEFECTS = [
-        '상태양호', '변색/오염', '박리/탈락', '곰팡이·결로 흔적', '균열', '기타'
+        '상태양호', '균열', '변색/오염', '박리/탈락', '곰팡이·결로 흔적', '기타'
     ];
     const CEILING_FINISH_DEFECTS = [
         '상태양호', '들뜸/탈락', '처짐', '오염/변색', '누수 흔적', '파손', '기타'
@@ -21825,7 +21825,7 @@ document.addEventListener('DOMContentLoaded', () => {
         '상태양호', '들뜸/탈락', '균열/파손', '줄눈 손상', '마모', '기타'
     ];
     const FLOOR_FINISH_DEFECTS = [
-        '상태양호', '마모/손상', '들뜸', '균열', '오염', '기타'
+        '상태양호', '균열', '마모/손상', '들뜸', '오염', '기타'
     ];
 
     const componentDefectPreset = {
@@ -22005,8 +22005,8 @@ document.addEventListener('DOMContentLoaded', () => {
         ],
         '마감재': [
             '상태양호',
-            '들뜸/탈락',
             '균열',
+            '들뜸/탈락',
             '박리/탈락',
             '변색/오염',
             '줄눈 손상',
@@ -22019,6 +22019,27 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!v) return true;
         if (/[,，]/.test(v) && parseDefectTypeList(v).length > 1) return true;
         return false;
+    }
+
+    function isCrackFamilyDefectType(label) {
+        const t = String(label || '').trim();
+        if (!t) return false;
+        if (typeof isRcStructuralCrackKind === 'function' && isRcStructuralCrackKind(t)) return true;
+        return t.includes('균열');
+    }
+
+    /** 결함핀 수정: 상태양호 다음으로 균열류를 항상 최상단에 둠 */
+    function prioritizeCrackDefectTypes(items) {
+        if (!Array.isArray(items) || !items.length) return [];
+        const good = [];
+        const cracks = [];
+        const rest = [];
+        items.forEach((t) => {
+            if (t === '상태양호') good.push(t);
+            else if (isCrackFamilyDefectType(t)) cracks.push(t);
+            else rest.push(t);
+        });
+        return good.concat(cracks, rest);
     }
 
     function getPinnedDefectTypeChips(category, component) {
@@ -22039,7 +22060,7 @@ document.addEventListener('DOMContentLoaded', () => {
         crackKinds.forEach(push);
         preset.forEach((t) => { if (!crackKinds.includes(t)) push(t); });
         custom.forEach(push);
-        return applySavedOptionOrder(out, ensureOptionOrderEntry('defectTypeOrder', category));
+        return prioritizeCrackDefectTypes(applySavedOptionOrder(out, ensureOptionOrderEntry('defectTypeOrder', category)));
     }
 
     function updateDefectTypeDropdown(category, currentVal = null) {
@@ -22068,10 +22089,10 @@ document.addEventListener('DOMContentLoaded', () => {
         customList.forEach(item => {
             if (!allOptions.includes(item)) allOptions.push(item);
         });
-        const orderedOptions = applySavedOptionOrder(
+        const orderedOptions = prioritizeCrackDefectTypes(applySavedOptionOrder(
             allOptions,
             ensureOptionOrderEntry('defectTypeOrder', category)
-        );
+        ));
         orderedOptions.forEach(item => {
             const sel = (currentVal && currentVal === item) ? 'selected' : '';
             html += `<option value="${item}" ${sel}>${item}</option>`;
