@@ -1496,10 +1496,9 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!bldg || !floorCode || !db || !window.state.companyId) return false;
         if (isDeletedDrawingFloor(bldg, floorCode)) return false;
         if (typeof navigator !== 'undefined' && navigator.onLine === false) return false;
-        if (collectKnownFloorCodesForBuilding(bldg).has(floorCode)) return true;
-        // floorsList가 비어 있어도 등록된 건물이면 Firestore·현장 보관함 조회
-        if (bldg.id) return true;
-        return false;
+        // 이 건물에 실제로 등록·발견된 층만 클라우드에 있을 수 있다고 본다.
+        // (id만 있다고 true면 신규 빈 건물도 1F·현장보관함 도면을 조회해 엉뚱한 도면이 붙음)
+        return collectKnownFloorCodesForBuilding(bldg).has(floorCode);
     }
 
     /** 층 목록에 있거나 서버에 있을 수 있으면 IDB·클라우드 조회 시도 */
@@ -4090,8 +4089,8 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!bldg.floorDrawings) bldg.floorDrawings = {};
         if (!bldg.floorDrawingPdfs) bldg.floorDrawingPdfs = {};
         const floors = collectKnownFloorCodesForBuilding(bldg);
-        // floorsList가 있으면 그 층만 받는다. 현장 보관함의 다른 회차 층까지 붙이면
-        // 없는 층 PDF 조회가 끝나지 않은 채 로딩이 멈춘다.
+        // floorsList·도면 키가 있을 때만 그 층을 받는다.
+        // 비어 있을 때 현장 보관함/기본 1F를 붙이면 신규 건축물에 엉뚱한 도면이 생긴다.
         if (!options.localOnly && floors.size === 0 && typeof discoverCloudDrawingFloorCodes === 'function') {
             try {
                 const discovered = await withTimeout(discoverCloudDrawingFloorCodes(bldg), 8000, '도면 층 탐색 시간 초과');
@@ -4106,8 +4105,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (isDeletedDrawingFloor(bldg, fc)) floors.delete(fc);
         });
         if (floors.size === 0) {
-            const fallback = window.state.currentFloor || '1F';
-            if (!isDeletedDrawingFloor(bldg, fallback)) floors.add(fallback);
+            return false;
         }
         mergeDiscoveredFloorsIntoBuilding(bldg, floors);
         const priority = options.priorityFloor && floors.has(options.priorityFloor)
@@ -5003,9 +5001,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
         populateFloorSelectDropdown(bldg);
 
-        applyFloorMapStyleSettings(window.state.currentFloor || '1F', bldg.id);
+        const availableOnEnter = (typeof window.getBuildingAvailableFloors === 'function')
+            ? window.getBuildingAvailableFloors(bldg)
+            : (bldg.floorsList || []);
+        const targetFloor = (window.state.currentFloor && availableOnEnter.some((f) => f && f.floorCode === window.state.currentFloor))
+            ? window.state.currentFloor
+            : ((availableOnEnter[0] && availableOnEnter[0].floorCode) || '');
+        window.state.currentFloor = targetFloor;
+        if (targetFloor) applyFloorMapStyleSettings(targetFloor, bldg.id);
 
-        const targetFloor = window.state.currentFloor || '1F';
         const canFetchDrawings = typeof navigator === 'undefined' || navigator.onLine !== false;
         const entryBuildingId = bldg.id;
         const prevBuildingIdForEntry = window.state.currentBuildingId;
@@ -5013,7 +5017,8 @@ document.addEventListener('DOMContentLoaded', () => {
         const reentrySameBuilding = enteringFromHome && prevBuildingIdForEntry === entryBuildingId;
 
         // 맵 진입을 동기화보다 먼저 — reconnect 시 전체 업로드·사진 hydrate가 진입을 막지 않게
-        loadFloorDrawing(targetFloor);
+        if (targetFloor) loadFloorDrawing(targetFloor);
+        else if (typeof showFloorDrawingEmptyState === 'function') showFloorDrawingEmptyState('', '이 건축물에 등록된 도면이 없습니다.');
         window.switchTab('tab-map');
 
         if (canFetchDrawings && window.state.companyId && enteringFromHome) {
@@ -5276,7 +5281,31 @@ document.addEventListener('DOMContentLoaded', () => {
                (bldg.floorDrawingTiers && bldg.floorDrawingTiers[fc]) ||
                (bldg.floorDrawingSources && bldg.floorDrawingSources[fc]));
 
-        const suspects = Array.from(candidates).filter((fc) => !hasRamTrace(fc));
+        // 방금 저장·업로드 중인 층은 RAM을 비운 직후에도 유령으로 보지 않는다.
+        const hasSessionAssetTrace = (fc) => {
+            if (!fc || !bldg.id) return false;
+            const key = `${bldg.id}_${fc}`;
+            if (_idbPersistedDrawingKeys && _idbPersistedDrawingKeys.has(key)) return true;
+            if (_idbPendingDrawingKeys && _idbPendingDrawingKeys.has(key)) return true;
+            if (_idbPersistedPdfKeys && _idbPersistedPdfKeys.has(key)) return true;
+            if (_idbPendingPdfKeys && _idbPendingPdfKeys.has(key)) return true;
+            if (_idbPersistedSourceKeys && _idbPersistedSourceKeys.has(key)) return true;
+            if (_idbPendingSourceKeys && _idbPendingSourceKeys.has(key)) return true;
+            if (window._cloudSyncedDrawingKeys && window._cloudSyncedDrawingKeys.has(key)) return true;
+            if (window._cloudSyncedPdfKeys && window._cloudSyncedPdfKeys.has(key)) return true;
+            const dims = window.FLOOR_DRAWING_TIER_DIMS || [4000, 8000, 16000];
+            for (let i = 0; i < dims.length; i++) {
+                const tierKey = (typeof floorDrawingTierIdbKey === 'function')
+                    ? floorDrawingTierIdbKey(bldg.id, fc, dims[i])
+                    : `${key}_${dims[i]}`;
+                if (_idbPersistedTierKeys && _idbPersistedTierKeys.has(tierKey)) return true;
+                if (_idbPendingTierKeys && _idbPendingTierKeys.has(tierKey)) return true;
+                if (window._cloudSyncedTierKeys && window._cloudSyncedTierKeys.has(`${key}_${dims[i]}`)) return true;
+            }
+            return false;
+        };
+
+        const suspects = Array.from(candidates).filter((fc) => !hasRamTrace(fc) && !hasSessionAssetTrace(fc));
         if (suspects.length === 0) return tombstoneRemoved;
 
         let idbFound;
@@ -5303,12 +5332,17 @@ document.addEventListener('DOMContentLoaded', () => {
             return tombstoneRemoved; // IDB 조회 실패 시 안전하게 유령만 추가로 지우지 않음
         }
 
-        const stillSuspect = suspects.filter((fc) => !idbFound.has(fc));
+        const stillSuspect = suspects.filter((fc) => !idbFound.has(fc) && !hasSessionAssetTrace(fc));
         if (stillSuspect.length === 0) return tombstoneRemoved;
 
         // 오프라인이거나 클라우드 조회가 안 되면, 아직 이 기기에 안 내려받았을 뿐일 수 있으니 보류
         if (typeof navigator !== 'undefined' && navigator.onLine === false) return tombstoneRemoved;
         if (!db || !window.state.companyId || typeof discoverCloudDrawingFloorCodes !== 'function') return tombstoneRemoved;
+
+        // 업로드 직후 캐시가 옛 목록이면 방금 넣은 층을 유령으로 오인하므로 캐시 무효화
+        if (typeof invalidateCloudDrawingFloorCodesCache === 'function') {
+            invalidateCloudDrawingFloorCodesCache(bldg);
+        }
 
         let cloudFound;
         try {
@@ -5317,7 +5351,12 @@ document.addEventListener('DOMContentLoaded', () => {
             return tombstoneRemoved;
         }
 
-        const ghosts = stillSuspect.filter((fc) => !cloudFound.has(fc) || isDeletedDrawingFloor(bldg, fc));
+        // 클라우드에 있거나, 삭제 tombstone인 경우만 제거. 불확실하면 남긴다.
+        const ghosts = stillSuspect.filter((fc) => {
+            if (isDeletedDrawingFloor(bldg, fc)) return true;
+            if (hasSessionAssetTrace(fc)) return false;
+            return !cloudFound.has(fc);
+        });
         if (ghosts.length === 0) return tombstoneRemoved;
 
         bldg.floorsList = (bldg.floorsList || []).filter((f) => !ghosts.includes(f.floorCode));
@@ -5349,17 +5388,8 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             elements.floorSelect.value = window.state.currentFloor;
         } else {
-            elements.floorSelect.innerHTML = `
-                <option value="B2F">지하 2층 (B2F)</option>
-                <option value="B1F">지하 1층 (B1F)</option>
-                <option value="1F" selected>지상 1층 (1F)</option>
-                <option value="2F">지상 2층 (2F)</option>
-                <option value="ROOF">옥상층 (ROOF)</option>
-                <option value="PH">옥탑층 (PH)</option>
-                <option value="PH_ROOF">옥탑 지붕층 (PH_ROOF)</option>
-                <option value="EXT">건축물 외부 (EXT)</option>
-            `;
-            window.state.currentFloor = '1F';
+            elements.floorSelect.innerHTML = `<option value="">등록된 도면 층 없음</option>`;
+            window.state.currentFloor = '';
         }
     }
 
@@ -6804,7 +6834,9 @@ document.addEventListener('DOMContentLoaded', () => {
             window.showLoading('도면 저장 중...');
             try {
                 await persistBuildingDrawingAssetsNow(newBldg);
-                await hydrateBuildingPdfsFromSiteVault(newBldg);
+                // 신규 등록에서는 현장 보관함 PDF를 붙이지 않는다.
+                // (같은 현장명의 다른 점검 1F 등이 새 건물에 섞이던 문제)
+                // 다른 점검 가져오기·다음 회차 복제 경로에서만 hydrateBuildingPdfsFromSiteVault 사용.
             } finally {
                 window.resetLoadingOverlay();
             }
@@ -7529,6 +7561,9 @@ document.addEventListener('DOMContentLoaded', () => {
                     }
                 } finally {
                     window.hideLoading();
+                }
+                if (typeof invalidateCloudDrawingFloorCodesCache === 'function') {
+                    invalidateCloudDrawingFloorCodesCache(bldg);
                 }
             }
 
@@ -41882,15 +41917,10 @@ document.addEventListener('DOMContentLoaded', () => {
         } catch (e) {
             console.warn('Firestore 도면 층 목록 조회 실패:', bldg.id, e);
         }
-        try {
-            const siteKey = normalizeSiteVaultKey(bldg.name);
-            const siteId = siteVaultDocId(siteKey);
-            const vaultSnap = await companyRef.collection('siteDrawingVault')
-                .doc(siteId).collection('floors').get();
-            vaultSnap.forEach((doc) => { if (doc.id) codes.add(doc.id); });
-        } catch (e) {
-            console.warn('현장 보관함 층 목록 조회 실패:', bldg.name, e);
-        }
+        // 현장 보관함(siteDrawingVault) 층은 "같은 현장의 다른 회차 PDF 공유"용이다.
+        // 여기서 층 목록에 합치면 신규·다른 동 건축물에도 엉뚱한 1F 등이 붙으므로 탐색에서 제외.
+        // PDF가 필요할 때는 resolveBuildingFloorPdf / hydrateBuildingPdfsFromSiteVault가
+        // 이미 등록된 층 코드에 한해 보관함을 조회한다.
         _cloudDrawingFloorCodesCache.set(cacheKey, { at: Date.now(), codes: Array.from(codes) });
         Array.from(codes).forEach((fc) => {
             if (isDeletedDrawingFloor(bldg, fc)) codes.delete(fc);
