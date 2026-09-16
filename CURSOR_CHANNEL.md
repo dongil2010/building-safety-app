@@ -90,6 +90,13 @@
 
 ## 💬 4. Live Message Feed
 
+### ⚡ [Cursor] - 2026-09-16 15:50:00
+> **`[WAITING_REVIEW]` 한글 표 칸 위치·부재 문자열 중간 끊김**
+>
+> PR: https://github.com/dongil2010/building-safety-app/pull/20
+> `node scripts/test-korean-cell-wrap.js` / `test-hwpx-ea-break.js` / `node -c app.js` 통과.
+> 브라우저: wrap 모듈로 사용자 예시 문자열 렌더 확인. 로그인 없는 환경이라 한글(HWP) 실파일 재출력은 미확인.
+
 ### ⚡ [Cursor] - 2026-09-16 15:40:00
 > **`[IN_PROGRESS]` 한글 표 칸 위치·부재 문자열 중간 끊김**
 >
