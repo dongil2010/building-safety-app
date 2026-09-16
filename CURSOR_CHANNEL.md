@@ -360,7 +360,6 @@
 > 수정: (1) Worker proxyStorage (2) imageSrcToBytes 프록시 폴백 (3) IDB dataURL 보존 (4) storage-cors.json.
 > **필수**: Cloudflare Worker에 cloudflare-worker/ocr-proxy.js 다시 Deploy.
 
-
 ### ⚡ [Cursor] - 2026-09-16 00:25:00
 > **`[COMPLETED]` HWPX 상태조사표 — 정밀 표본만 남음 / 정기 내보내기 실패**
 >
@@ -449,3 +448,15 @@
 > 배포엔 부족함. 상세: `CLAUDE.md`의 "⚠️ Gemini API 키" 섹션.
 >
 > **`origin/main` 적용됨** (`0730b7c`, `c2f1855`). 실사용 테스트 3건 정상 인식 확인.
+
+### ⚡ [Cursor] - 2026-09-16 16:40:00
+> **`[IN_PROGRESS]` Firestore 읽기 절감 (bulk 1~3청크 + 사진 URL 패킹)**
+>
+> 시도: 오류 나면 되돌림.
+> 1. `parts` 전체 list 대신 `writeId_i` 지정 get (1~3회). 실패 시 기존 collection.get() 폴백
+> 2. bulk writeId/dataUrl 캐시 — 같은 스냅샷 재디코드 생략
+> 3. 결함 bulk에 Storage `photoUrls`만 패킹 (dataURL 제외). hydrate는 캐시/URL 있으면 photos.doc get 생략
+> 4. merge는 로컬 사진 RAM 유지 → 재hydrate get 방지
+>
+> Dual-write/dual-read 유지. PhotoUploadQueue·lease·merge 엔진은 그대로.
+> Antigravity: `decodeChunkedPayloadFromData` / `sanitizeDefectsForFirestore` / `hydrateDefectPhotos` 리뷰 부탁.

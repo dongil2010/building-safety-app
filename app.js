@@ -3647,6 +3647,62 @@ document.addEventListener('DOMContentLoaded', () => {
         return out;
     }
 
+    /** Storage https/gs 만 bulk에 실음. dataURL(바이너리)은 1MB를 바로 넘긴다. */
+    function isLightweightCloudPhotoRef(src) {
+        const t = String(src || '').trim();
+        if (!t || t.length < 12 || t.length > 4096) return false;
+        if (t.indexOf('data:') === 0) return false;
+        return /^https?:\/\//i.test(t) || /^gs:\/\//i.test(t);
+    }
+
+    function collectPackedPhotoUrlMap(ids, urls, photos) {
+        const map = {};
+        const n = Math.max(
+            Array.isArray(ids) ? ids.length : 0,
+            Array.isArray(urls) ? urls.length : 0,
+            Array.isArray(photos) ? photos.length : 0
+        );
+        for (let i = 0; i < n; i++) {
+            const pid = ids && ids[i];
+            const cands = [
+                urls && urls[i],
+                photos && photos[i],
+                pid && window._photoCache && window._photoCache[pid]
+            ];
+            let picked = '';
+            for (let c = 0; c < cands.length; c++) {
+                if (isLightweightCloudPhotoRef(cands[c])) {
+                    picked = String(cands[c]).trim();
+                    break;
+                }
+            }
+            if (pid && picked) map[String(pid)] = picked;
+        }
+        return map;
+    }
+
+    function collectPackedPhotoUrlsFrom(ids, photos, existingUrls) {
+        if (!ids || !ids.length) return null;
+        const map = collectPackedPhotoUrlMap(ids, existingUrls, photos);
+        const out = ids.map((pid) => (pid && map[String(pid)]) || '');
+        return out.some(Boolean) ? out : null;
+    }
+
+    function seedPhotoCacheFromDefect(d) {
+        if (!d) return;
+        const seed = (ids, photos, urls) => {
+            if (!ids || !ids.length) return;
+            if (!window._photoCache) window._photoCache = {};
+            ids.forEach((pid, i) => {
+                if (!pid || window._photoCache[pid]) return;
+                const src = (photos && photos[i]) || (urls && urls[i]);
+                if (src) window._photoCache[pid] = src;
+            });
+        };
+        seed(d.photoIds, d.photos, d.photoUrls);
+        seed(d.prevRoundPhotoIds, d.prevRoundPhotos, d.prevRoundPhotoUrls);
+    }
+
     function extractInlinePhotos(defect, kind) {
         if (!defect) return [];
         if (kind === 'prev') {
@@ -3717,12 +3773,21 @@ document.addEventListener('DOMContentLoaded', () => {
             );
             if (inlinePhotos.length) merged.photos = inlinePhotos;
             else delete merged.photos;
+            const packedUrlMap = Object.assign(
+                {},
+                collectPackedPhotoUrlMap(serverPhotoIds, serverRec.photoUrls, extractInlinePhotos(serverRec)),
+                collectPackedPhotoUrlMap(localPhotoIds, localRec.photoUrls, extractInlinePhotos(localRec))
+            );
+            const packedUrls = mergedPhotoIds.map((pid) => (pid && packedUrlMap[String(pid)]) || '');
+            if (packedUrls.some(Boolean)) merged.photoUrls = packedUrls;
+            else delete merged.photoUrls;
         } else {
             merged.photos = mergePhotoArrays(
                 extractInlinePhotos(serverRec),
                 extractInlinePhotos(localRec)
             );
             delete merged.photoIds;
+            delete merged.photoUrls;
         }
 
         const serverPrevPhotoIds = Array.isArray(serverRec.prevRoundPhotoIds) ? serverRec.prevRoundPhotoIds : [];
@@ -3736,12 +3801,21 @@ document.addEventListener('DOMContentLoaded', () => {
             );
             if (inlinePrev.length) merged.prevRoundPhotos = inlinePrev;
             else delete merged.prevRoundPhotos;
+            const packedPrevMap = Object.assign(
+                {},
+                collectPackedPhotoUrlMap(serverPrevPhotoIds, serverRec.prevRoundPhotoUrls, extractInlinePhotos(serverRec, 'prev')),
+                collectPackedPhotoUrlMap(localPrevPhotoIds, localRec.prevRoundPhotoUrls, extractInlinePhotos(localRec, 'prev'))
+            );
+            const packedPrev = mergedPrevPhotoIds.map((pid) => (pid && packedPrevMap[String(pid)]) || '');
+            if (packedPrev.some(Boolean)) merged.prevRoundPhotoUrls = packedPrev;
+            else delete merged.prevRoundPhotoUrls;
         } else {
             merged.prevRoundPhotos = mergePhotoArrays(
                 extractInlinePhotos(serverRec, 'prev'),
                 extractInlinePhotos(localRec, 'prev')
             );
             delete merged.prevRoundPhotoIds;
+            delete merged.prevRoundPhotoUrls;
         }
 
         merged.contentUpdatedAt = Math.max(serverContentTs, localContentTs, Number(merged.contentUpdatedAt) || 0);
@@ -42328,8 +42402,9 @@ document.addEventListener('DOMContentLoaded', () => {
                     chunkStatus: 'ready'
                 })
             );
+            rememberDecodedChunkPayload(docRef, { writeId: null, dataUrl: payload }, payload);
             scheduleChunkPartsCleanup(docRef, null);
-            return;
+            return { writeId: null, dataUrl: payload, chunked: false, chunkCount: 0 };
         }
 
         const parts = [];
@@ -42390,7 +42465,9 @@ document.addEventListener('DOMContentLoaded', () => {
                     dataUrl: firebase.firestore.FieldValue.delete()
                 }, { merge: true })
             );
+            rememberDecodedChunkPayload(docRef, { writeId, chunked: true, chunkCount: parts.length }, payload);
             scheduleChunkPartsCleanup(docRef, writeId);
+            return { writeId, chunked: true, chunkCount: parts.length };
         } catch (e) {
             try {
                 await enqueueFirestoreWrite(() =>
@@ -42447,9 +42524,74 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    /** bulk JSON 등 텍스트 청크만 RAM 캐시. 도면 dataURL은 넣지 않는다. */
+    const _decodedChunkPayloadCache = new Map();
+    let _lastBulkPayloadIdentity = '';
+
+    function chunkDocCacheKey(docRef) {
+        return (docRef && docRef.path) ? String(docRef.path) : '';
+    }
+
+    function bulkPayloadIdentity(data) {
+        if (!data) return '';
+        if (data.writeId) return 'w:' + String(data.writeId);
+        const u = data.dataUrl;
+        if (typeof u === 'string' && u.length > 32) {
+            return 'u:' + u.length + ':' + u.slice(0, 32) + ':' + u.slice(-32);
+        }
+        const n = Number(data.chunkCount) || 0;
+        if (data.chunked && n > 0) return 'c:' + n + ':' + String(data.chunkStatus || '');
+        return '';
+    }
+
+    function rememberDecodedChunkPayload(docRef, data, payload) {
+        const key = chunkDocCacheKey(docRef);
+        if (!key || payload == null) return;
+        const s = String(payload);
+        if (s.indexOf('data:') === 0) return;
+        _decodedChunkPayloadCache.set(key, {
+            writeId: data && data.writeId ? String(data.writeId) : null,
+            identity: bulkPayloadIdentity(data),
+            payload: s
+        });
+        while (_decodedChunkPayloadCache.size > 8) {
+            const first = _decodedChunkPayloadCache.keys().next().value;
+            if (!first || first === key) break;
+            _decodedChunkPayloadCache.delete(first);
+        }
+    }
+
+    function readCachedChunkPayload(docRef, data) {
+        const key = chunkDocCacheKey(docRef);
+        if (!key) return null;
+        const hit = _decodedChunkPayloadCache.get(key);
+        if (!hit || !hit.payload) return null;
+        const ident = bulkPayloadIdentity(data);
+        if (ident && hit.identity === ident) return hit.payload;
+        if (data && data.writeId && hit.writeId && String(data.writeId) === hit.writeId) {
+            return hit.payload;
+        }
+        return null;
+    }
+
+    async function joinChunkPartsByWriteId(docRef, writeId, chunkCount) {
+        if (!docRef || !writeId || !(chunkCount > 0)) return null;
+        const snaps = await Promise.all(
+            Array.from({ length: chunkCount }, (_, i) =>
+                docRef.collection('parts').doc(String(writeId) + '_' + i).get()
+            )
+        );
+        if (snaps.some((s) => !s.exists)) return null;
+        const joined = snaps.map((s) => (s.data() && s.data().data) || '').join('');
+        return joined.length > 32 ? joined : null;
+    }
+
     /** onSnapshot이 이미 준 문서 본문에서 청크 payload를 복원한다. 부모 get()을 한 번 더 치지 않는다. */
     async function decodeChunkedPayloadFromData(data, docRef, _retried) {
         if (!data) return null;
+
+        const cachedPayload = readCachedChunkPayload(docRef, data);
+        if (cachedPayload) return cachedPayload;
 
         const storageUrl = await resolveCloudAssetUrlFromSnapData(data);
         if (storageUrl) {
@@ -42473,6 +42615,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         if (data.dataUrl && typeof data.dataUrl === 'string' && data.dataUrl.length > 32) {
+            rememberDecodedChunkPayload(docRef, data, data.dataUrl);
             return data.dataUrl;
         }
 
@@ -42483,6 +42626,18 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const chunkCount = Number(data.chunkCount) || 0;
         if (data.chunked && chunkCount > 0) {
+            const writeId = data.writeId ? String(data.writeId) : null;
+            if (writeId) {
+                try {
+                    const targeted = await joinChunkPartsByWriteId(docRef, writeId, chunkCount);
+                    if (targeted) {
+                        rememberDecodedChunkPayload(docRef, data, targeted);
+                        return targeted;
+                    }
+                } catch (targetedErr) {
+                    console.warn('[PDF] writeId 지정 읽기 실패, parts 목록으로 폴백:', docRef && docRef.path, targetedErr);
+                }
+            }
             const partsSnap = await docRef.collection('parts').get();
             if (partsSnap.empty) {
                 if (!_retried && status !== 'ready') {
@@ -42496,7 +42651,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
                 return null;
             }
-            const writeId = data.writeId ? String(data.writeId) : null;
             let docs = partsSnap.docs.slice();
             if (writeId) {
                 docs = docs.filter((d) => String(d.id || '').startsWith(writeId + '_'));
@@ -42525,7 +42679,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 .slice(0, chunkCount)
                 .map((d) => (d.data() && d.data().data) || '')
                 .join('');
-            if (joined.length > 32) return joined;
+            if (joined.length > 32) {
+                rememberDecodedChunkPayload(docRef, data, joined);
+                return joined;
+            }
             console.warn('[PDF] parts 합쳐도 내용이 비어 있음:', docRef.path);
             return null;
         }
@@ -42548,7 +42705,8 @@ document.addEventListener('DOMContentLoaded', () => {
     async function writeBulkSyncData(fields) {
         if (!db || !window.state.companyId) return;
         const json = JSON.stringify(fields || {});
-        await writeChunkedPdfToDocRef(getBulkSyncDocRef(), json);
+        const meta = await writeChunkedPdfToDocRef(getBulkSyncDocRef(), json);
+        _lastBulkPayloadIdentity = bulkPayloadIdentity(meta || { dataUrl: json });
     }
 
     async function fetchBulkSyncDataReliable(maxAttempts = 4) {
@@ -43384,6 +43542,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const loadThis = !!options.loadAll || (!!buildingId && key.startsWith(`${buildingId}_`));
             if (!loadThis) return [key, arr || []];
             const hydratedArr = await Promise.all((arr || []).map(async d => {
+                seedPhotoCacheFromDefect(d);
                 const loadIds = async (ids) => {
                     if (!ids || ids.length === 0) return [];
                     const photos = await Promise.all(ids.map(async pid => {
@@ -43442,6 +43601,9 @@ document.addEventListener('DOMContentLoaded', () => {
             if (key.startsWith(`${currentId}_`)) subset[key] = arr;
         });
         if (!Object.keys(subset).length) return;
+        Object.values(subset).forEach((arr) => {
+            (arr || []).forEach(seedPhotoCacheFromDefect);
+        });
         const loaded = await hydrateDefectPhotos(subset, { buildingId: currentId });
         Object.assign(window.state.defects, loaded);
     }
@@ -43450,7 +43612,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const sanitizedDefects = {};
         Object.entries(defectsMap || {}).forEach(([key, arr]) => {
             sanitizedDefects[key] = (arr || []).map(d => {
-                const { photos, prevRoundPhotos, photoIds, prevRoundPhotoIds, ...rest } = d;
+                const { photos, prevRoundPhotos, photoIds, prevRoundPhotoIds, photoUrls, prevRoundPhotoUrls, ...rest } = d;
                 const out = { ...rest };
                 // photos가 아직 hydrate 전(빈 배열)이어도 기존 photoIds는 유지 — 다른 기기 사진 참조가 끊기지 않게
                 const curIds = (photos && photos.length > 0)
@@ -43461,6 +43623,10 @@ document.addEventListener('DOMContentLoaded', () => {
                     : (prevRoundPhotoIds && prevRoundPhotoIds.length ? prevRoundPhotoIds.slice() : null);
                 if (curIds && curIds.length) out.photoIds = curIds;
                 if (prevIds && prevIds.length) out.prevRoundPhotoIds = prevIds;
+                const packedUrls = collectPackedPhotoUrlsFrom(curIds || photoIds, photos, photoUrls);
+                const packedPrev = collectPackedPhotoUrlsFrom(prevIds || prevRoundPhotoIds, prevRoundPhotos, prevRoundPhotoUrls);
+                if (packedUrls && packedUrls.length) out.photoUrls = packedUrls;
+                if (packedPrev && packedPrev.length) out.prevRoundPhotoUrls = packedPrev;
                 // 균열 게이지/팁 비교사진 dataURL은 Firestore에 올리지 않음(로컬/IndexedDB 상태만)
                 if (out.crackGaugeLog && typeof out.crackGaugeLog === 'object') {
                     const { prevPhoto, currPhoto, ...gRest } = out.crackGaugeLog;
@@ -44289,6 +44455,7 @@ document.addEventListener('DOMContentLoaded', () => {
             _lastRootSnapshotData = {};
             _lastBulkSnapshotData = {};
             _bulkHydratedOnce = false;
+            _lastBulkPayloadIdentity = '';
         }
     }
 
@@ -44378,6 +44545,7 @@ document.addEventListener('DOMContentLoaded', () => {
             _lastRootSnapshotData = {};
             _lastBulkSnapshotData = {};
             _bulkHydratedOnce = false;
+            _lastBulkPayloadIdentity = '';
         }
 
         const onListenerErr = (err) => {
@@ -44419,9 +44587,15 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
                 return;
             }
+            const snapData = doc.data() || {};
+            const ident = bulkPayloadIdentity(snapData);
+            if (ident && ident === _lastBulkPayloadIdentity && _bulkHydratedOnce && _lastBulkSnapshotData
+                && Object.keys(_lastBulkSnapshotData).length) {
+                return;
+            }
             let parsed = null;
             try {
-                const json = await decodeChunkedPayloadFromData(doc.data() || {}, getBulkSyncDocRef());
+                const json = await decodeChunkedPayloadFromData(snapData, getBulkSyncDocRef());
                 if (json == null) parsed = null;
                 else if (!json) parsed = {};
                 else parsed = JSON.parse(json);
@@ -44434,6 +44608,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 return;
             }
             _lastBulkSnapshotData = parsed;
+            _lastBulkPayloadIdentity = ident;
             _bulkHydratedOnce = true;
             await applyCombinedSnapshot();
         }, onListenerErr);

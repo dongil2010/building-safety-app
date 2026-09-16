@@ -84,7 +84,10 @@ function Update-CacheBustTokens {
 function Invoke-GitPullAlways {
     param([string]$Reason = "sync")
     Write-Host "pull origin main ($Reason)..."
-    git fetch origin 2>&1 | Out-Null
+    $prevEap = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    git fetch origin | Out-Null
+    $ErrorActionPreference = $prevEap
     $dirty = git status --porcelain
     if ($dirty) {
         git stash push -u -m "git-sync autostash"
