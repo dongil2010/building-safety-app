@@ -35692,17 +35692,214 @@ document.addEventListener('DOMContentLoaded', () => {
                 } catch (cmpLoadErr) {
                     console.warn('중점관리 비교표 템플릿 로드 실패:', cmpLoadErr);
                 }
+            // 3종 결함사진첩: 신규 템플릿은 footer에 [사진N|점검내용]만 있고 위치/내용 행이 없다.
+            // 구형(사진N|위치|… + 내용 행)도 슬롯으로 해석하되, 위치 칸에는 절대 쓰지 않는다.
+            const hwpxPhotoCellText = (tc) => Array.from(tc.getElementsByTagNameNS(HP_NS, 't'))
+                .map(t => t.textContent || '').join('').replace(/\s+/g, ' ').trim();
+            const hwpxPhotoCellWidth = (tc) => {
+                const sz = tc && tc.getElementsByTagNameNS(HP_NS, 'cellSz')[0];
+                return sz ? (parseInt(sz.getAttribute('width'), 10) || 0) : 0;
+            };
             const resolveHwpxPhotoGalleryRows = (tbl) => {
                 const trs = Array.from(tbl.getElementsByTagNameNS(HP_NS, 'tr')).filter(tr => tr.parentNode === tbl);
                 const rowJoinedText = (tr) => Array.from(tr.getElementsByTagNameNS(HP_NS, 't')).map(t => t.textContent || '').join('');
                 const capRow = trs.find(tr => !tr.getElementsByTagNameNS(HP_NS, 'pic').length && /사진|위치/.test(rowJoinedText(tr)))
                     || trs[1] || null;
                 const descRow = trs.find(tr => !tr.getElementsByTagNameNS(HP_NS, 'pic').length && /내\s*용/.test(rowJoinedText(tr)))
-                    || trs[2] || null;
+                    || null;
                 return {
                     capTcs: capRow ? Array.from(capRow.getElementsByTagNameNS(HP_NS, 'tc')) : [],
                     descTcs: descRow ? Array.from(descRow.getElementsByTagNameNS(HP_NS, 'tc')) : []
                 };
+            };
+            const resolveGrade3HwpxPhotoAlbumSlots = (tbl) => {
+                const trs = Array.from(tbl.getElementsByTagNameNS(HP_NS, 'tr')).filter(tr => tr.parentNode === tbl);
+                const footerRow = trs.find(tr => Array.from(tr.getElementsByTagNameNS(HP_NS, 'tc'))
+                    .some(tc => /^사진\s*\d/.test(hwpxPhotoCellText(tc)))) || null;
+                const descRow = trs.find(tr => {
+                    if (tr === footerRow) return false;
+                    if (tr.getElementsByTagNameNS(HP_NS, 'pic').length) return false;
+                    return /내\s*용/.test(Array.from(tr.getElementsByTagNameNS(HP_NS, 't')).map(t => t.textContent || '').join(''));
+                }) || null;
+                const imageRow = trs.find(tr => tr.getElementsByTagNameNS(HP_NS, 'pic').length > 0)
+                    || (footerRow ? trs[Math.max(0, trs.indexOf(footerRow) - 1)] : trs[0])
+                    || trs[0]
+                    || null;
+                const slots = [];
+                if (!footerRow) {
+                    return { slots, imageRow, footerRow, descRow, legacy: !!descRow };
+                }
+                const footerTcs = Array.from(footerRow.getElementsByTagNameNS(HP_NS, 'tc'));
+                const imageTcs = imageRow
+                    ? Array.from(imageRow.getElementsByTagNameNS(HP_NS, 'tc')).filter(tc => {
+                        if (tc.getElementsByTagNameNS(HP_NS, 'pic').length) return true;
+                        return hwpxPhotoCellWidth(tc) > 1000;
+                    })
+                    : [];
+                const labelIndices = [];
+                footerTcs.forEach((tc, idx) => {
+                    if (/^사진\s*\d/.test(hwpxPhotoCellText(tc))) labelIndices.push(idx);
+                });
+                const descContentTcs = descRow
+                    ? Array.from(descRow.getElementsByTagNameNS(HP_NS, 'tc'))
+                        .filter(tc => !/내\s*용/.test(hwpxPhotoCellText(tc)))
+                    : [];
+                labelIndices.forEach((labelIdx, slotIdx) => {
+                    const labelTc = footerTcs[labelIdx];
+                    let contentTc = null;
+                    let locationTc = null;
+                    if (descRow) {
+                        contentTc = descContentTcs[slotIdx] || null;
+                        if (footerTcs[labelIdx + 1] && /위치/.test(hwpxPhotoCellText(footerTcs[labelIdx + 1]))) {
+                            locationTc = footerTcs[labelIdx + 2] || null;
+                        }
+                    } else {
+                        let j = labelIdx + 1;
+                        while (j < footerTcs.length && /^(위치|내\s*용)$/.test(hwpxPhotoCellText(footerTcs[j]))) j++;
+                        if (j < footerTcs.length && !/^사진\s*\d/.test(hwpxPhotoCellText(footerTcs[j]))) {
+                            const c1 = footerTcs[j];
+                            const c1w = hwpxPhotoCellWidth(c1);
+                            if (c1w > 0 && c1w < 1000 && j + 1 < footerTcs.length
+                                && !/^사진\s*\d/.test(hwpxPhotoCellText(footerTcs[j + 1]))) {
+                                contentTc = footerTcs[j + 1];
+                            } else {
+                                contentTc = c1;
+                            }
+                        }
+                    }
+                    const imageTc = imageTcs[slotIdx] || null;
+                    slots.push({
+                        labelTc,
+                        contentTc,
+                        locationTc,
+                        imageTc,
+                        pic: imageTc ? (imageTc.getElementsByTagNameNS(HP_NS, 'pic')[0] || null) : null
+                    });
+                });
+                return { slots, imageRow, footerRow, descRow, legacy: !!descRow };
+            };
+            // grade3LocMapStampPara / grade3GlobalPhotoTblStamp는 아래쪽에서 채워진다.
+            // 호출 시점(전역 앨범 삽입)에는 이미 준비되어 있다.
+            const findGrade3PhotoDonorPic = () => {
+                // 호출은 grade3LocMapStampPara / grade3GlobalPhotoTblStamp 할당 이후에만 한다.
+                const fromLoc = grade3LocMapStampPara
+                    ? grade3LocMapStampPara.getElementsByTagNameNS(HP_NS, 'pic')[0]
+                    : null;
+                if (fromLoc) return fromLoc;
+                const fromStamp = grade3GlobalPhotoTblStamp
+                    ? grade3GlobalPhotoTblStamp.getElementsByTagNameNS(HP_NS, 'pic')[0]
+                    : null;
+                if (fromStamp) return fromStamp;
+                return xmlDoc.getElementsByTagNameNS(HP_NS, 'pic')[0] || null;
+            };
+            const ensureGrade3PhotoPicsInTbl = (tbl, slots, donorPic) => {
+                let maxW = 0;
+                let maxH = 0;
+                slots.forEach((slot) => {
+                    if (slot.pic) {
+                        const cur = slot.pic.getElementsByTagNameNS(HP_NS, 'curSz')[0];
+                        if (cur) {
+                            maxW = Math.max(maxW, parseInt(cur.getAttribute('width'), 10) || 0);
+                            maxH = Math.max(maxH, parseInt(cur.getAttribute('height'), 10) || 0);
+                        }
+                        return;
+                    }
+                    if (!slot.imageTc || !donorPic) return;
+                    const subList = slot.imageTc.getElementsByTagNameNS(HP_NS, 'subList')[0];
+                    if (!subList) return;
+                    let para = Array.from(subList.getElementsByTagNameNS(HP_NS, 'p')).find(p => p.parentNode === subList);
+                    if (!para) {
+                        para = xmlDoc.createElementNS(HP_NS, 'hp:p');
+                        para.setAttribute('id', '2147483648');
+                        para.setAttribute('paraPrIDRef', '0');
+                        para.setAttribute('styleIDRef', '0');
+                        para.setAttribute('pageBreak', '0');
+                        para.setAttribute('columnBreak', '0');
+                        para.setAttribute('merged', '0');
+                        subList.appendChild(para);
+                    }
+                    let run = Array.from(para.children).find(c => c.localName === 'run')
+                        || para.getElementsByTagNameNS(HP_NS, 'run')[0];
+                    if (!run) {
+                        run = xmlDoc.createElementNS(HP_NS, 'hp:run');
+                        run.setAttribute('charPrIDRef', '13');
+                        para.insertBefore(run, para.firstChild);
+                    }
+                    const pic = donorPic.cloneNode(true);
+                    const img = pic.getElementsByTagNameNS(HC_NS, 'img')[0];
+                    if (img) img.setAttribute('binaryItemIDRef', '');
+                    pic.removeAttribute('thumbnailBinIDRef');
+                    const csz = slot.imageTc.getElementsByTagNameNS(HP_NS, 'cellSz')[0];
+                    const cellW = csz ? (parseInt(csz.getAttribute('width'), 10) || 20000) : 20000;
+                    const cellH = csz ? (parseInt(csz.getAttribute('height'), 10) || 15000) : 15000;
+                    const boxW = Math.max(1000, cellW - 282);
+                    const boxH = Math.max(1000, cellH - 282);
+                    const cur = pic.getElementsByTagNameNS(HP_NS, 'curSz')[0];
+                    if (cur) {
+                        cur.setAttribute('width', String(boxW));
+                        cur.setAttribute('height', String(boxH));
+                    }
+                    Array.from(pic.children).filter(c => c.localName === 'sz').forEach((sz) => {
+                        sz.setAttribute('width', String(boxW));
+                        sz.setAttribute('height', String(boxH));
+                    });
+                    const trail = Array.from(run.children).find(c => c.localName === 't') || null;
+                    if (trail) run.insertBefore(pic, trail);
+                    else run.appendChild(pic);
+                    slot.pic = pic;
+                    maxW = Math.max(maxW, boxW);
+                    maxH = Math.max(maxH, boxH);
+                });
+                if (!maxW || !maxH) {
+                    maxW = maxW || 20000;
+                    maxH = maxH || 15000;
+                }
+                return { maxW, maxH };
+            };
+            const stripGrade3UnusedPhotoSlots = (tbl, keepCount) => {
+                const resolved = resolveGrade3HwpxPhotoAlbumSlots(tbl);
+                if (!resolved.slots.length || resolved.slots.length <= keepCount) {
+                    if (keepCount === 1) stripPhotoTblRightHalf(tbl);
+                    return;
+                }
+                const keepCols = new Set();
+                const markTcCols = (tc) => {
+                    if (!tc) return;
+                    const addr = tc.getElementsByTagNameNS(HP_NS, 'cellAddr')[0];
+                    if (!addr) return;
+                    const c0 = parseInt(addr.getAttribute('colAddr') || '0', 10) || 0;
+                    const span = tc.getElementsByTagNameNS(HP_NS, 'cellSpan')[0];
+                    const cs = span ? (parseInt(span.getAttribute('colSpan') || '1', 10) || 1) : 1;
+                    for (let c = c0; c < c0 + cs; c++) keepCols.add(c);
+                };
+                resolved.slots.slice(0, keepCount).forEach((s) => {
+                    markTcCols(s.labelTc);
+                    markTcCols(s.contentTc);
+                    markTcCols(s.locationTc);
+                    markTcCols(s.imageTc);
+                });
+                if (!keepCols.size) {
+                    stripPhotoTblRightHalf(tbl);
+                    return;
+                }
+                Array.from(tbl.getElementsByTagNameNS(HP_NS, 'tr')).filter(tr => tr.parentNode === tbl).forEach((tr) => {
+                    Array.from(tr.getElementsByTagNameNS(HP_NS, 'tc')).forEach((tc) => {
+                        const addr = tc.getElementsByTagNameNS(HP_NS, 'cellAddr')[0];
+                        const col = addr ? (parseInt(addr.getAttribute('colAddr') || '0', 10) || 0) : 0;
+                        if (!keepCols.has(col) && tc.parentNode) tc.parentNode.removeChild(tc);
+                    });
+                });
+                const maxCol = Math.max(...keepCols);
+                tbl.setAttribute('colCnt', String(maxCol + 1));
+                const firstRow = Array.from(tbl.getElementsByTagNameNS(HP_NS, 'tr')).find(tr => tr.parentNode === tbl);
+                let width = 0;
+                if (firstRow) {
+                    Array.from(firstRow.getElementsByTagNameNS(HP_NS, 'tc')).forEach((tc) => {
+                        width += hwpxPhotoCellWidth(tc);
+                    });
+                }
+                const sz = Array.from(tbl.children).find(c => c.localName === 'sz');
+                if (sz && width > 0) sz.setAttribute('width', String(width));
             };
             // 한글에서 표에 새 칸을 추가만 하고 한 번도 안 채운 셀은 문단/run은 있어도 hp:t(실제 글자
             // 요소)가 아예 없는 경우가 있다. 없으면 만들어서 항상 값을 넣을 자리를 보장한다.
@@ -36608,10 +36805,32 @@ document.addEventListener('DOMContentLoaded', () => {
                     }
                     const photoTblStamp = grade3GlobalPhotoTblStamp;
                     const PHOTOS_PER_PAGE = 6;
-                    const tplPics = photoTblStamp.getElementsByTagNameNS(HP_NS, 'pic');
-                    if (!tplPics.length) throw new Error('사진첩 템플릿 표에 hp:pic 슬롯이 없습니다.');
-                    const maxW = parseInt(tplPics[0].getElementsByTagNameNS(HP_NS, 'curSz')[0].getAttribute('width'), 10);
-                    const maxH = parseInt(tplPics[0].getElementsByTagNameNS(HP_NS, 'curSz')[0].getAttribute('height'), 10);
+                    const donorPic = findGrade3PhotoDonorPic();
+                    const stampSlotsProbe = resolveGrade3HwpxPhotoAlbumSlots(photoTblStamp);
+                    let maxW = 0;
+                    let maxH = 0;
+                    {
+                        const tplPics = photoTblStamp.getElementsByTagNameNS(HP_NS, 'pic');
+                        if (tplPics.length) {
+                            maxW = parseInt(tplPics[0].getElementsByTagNameNS(HP_NS, 'curSz')[0].getAttribute('width'), 10) || 0;
+                            maxH = parseInt(tplPics[0].getElementsByTagNameNS(HP_NS, 'curSz')[0].getAttribute('height'), 10) || 0;
+                        } else if (stampSlotsProbe.slots.length) {
+                            const probe = stampSlotsProbe.slots.map(s => s.imageTc).filter(Boolean);
+                            probe.forEach((tc) => {
+                                maxW = Math.max(maxW, Math.max(1000, hwpxPhotoCellWidth(tc) - 282));
+                                const sz = tc.getElementsByTagNameNS(HP_NS, 'cellSz')[0];
+                                const h = sz ? (parseInt(sz.getAttribute('height'), 10) || 0) : 0;
+                                maxH = Math.max(maxH, Math.max(1000, h - 282));
+                            });
+                        }
+                        if (!maxW || !maxH) {
+                            maxW = maxW || 20000;
+                            maxH = maxH || 15000;
+                        }
+                        if (!tplPics.length && !donorPic) {
+                            throw new Error('사진첩 템플릿에 hp:pic이 없고 복제할 사진 노드도 없습니다.');
+                        }
+                    }
 
                     const decoded = (await mapLimit(globalPhotoEntries, 6, async (entry) => {
                         const d = entry.d;
@@ -36677,41 +36896,54 @@ document.addEventListener('DOMContentLoaded', () => {
                         photoTblCounter++;
                         const newTbl = photoTblStamp.cloneNode(true);
                         newTbl.setAttribute('id', String(9500000 + photoTblCounter));
-                        const pics = Array.from(newTbl.getElementsByTagNameNS(HP_NS, 'pic'));
+                        let album = resolveGrade3HwpxPhotoAlbumSlots(newTbl);
+                        if (!album.slots.length) {
+                            throw new Error('사진첩 템플릿에서 사진N 라벨 셀을 찾지 못했습니다.');
+                        }
+                        const sizeInfo = ensureGrade3PhotoPicsInTbl(newTbl, album.slots, donorPic);
+                        const fitW = sizeInfo.maxW || maxW;
+                        const fitH = sizeInfo.maxH || maxH;
+                        album = resolveGrade3HwpxPhotoAlbumSlots(newTbl);
+                        const pics = album.slots.map(s => s.pic).filter(Boolean);
                         pics.forEach((p, pIdx) => {
                             p.setAttribute('id', String(9600000 + photoTblCounter * 2 + pIdx));
                             p.setAttribute('instid', String(9700000 + photoTblCounter * 2 + pIdx));
                         });
+                        if (!album.slots[0] || !album.slots[0].pic) {
+                            throw new Error('사진첩 템플릿 표에 hp:pic 슬롯이 없습니다.');
+                        }
 
-                        const { capTcs, descTcs } = resolveHwpxPhotoGalleryRows(newTbl);
-                        if (!capTcs.length || !descTcs.length) throw new Error('사진첩 템플릿 표 행(번호/위치/내용)을 찾지 못했습니다.');
+                        const fillGrade3PhotoSlot = (slot, entry) => {
+                            if (!slot || !entry) return;
+                            const inspectionContent = appendGrade3ProgressLeakToContent(
+                                getSurveyCellText('inspectionContent', entry.d, { floorCode: entry.floorCode }),
+                                entry.d
+                            );
+                            if (slot.labelTc) setTcText(slot.labelTc, globalPhotoLabelByDefect.get(entry.d));
+                            // 위치 칸에는 절대 쓰지 않는다(신규 템플릿에는 없음). 구형 스탬프 샘플 위치 문구만 비운다.
+                            if (slot.locationTc) setTcText(slot.locationTc, '');
+                            if (slot.contentTc) setTcText(slot.contentTc, inspectionContent);
+                        };
 
                         imgCounter++;
                         const imgId1 = `photoAuto${imgCounter}`;
                         zip.file(`BinData/${imgId1}.${slot1.ext}`, slot1.bytes);
                         manifestAdds.push(`<opf:item id="${imgId1}" href="BinData/${imgId1}.${slot1.ext}" media-type="${slot1.mime}" isEmbeded="1"/>`);
-                        setPicImage(pics[0], imgId1, slot1.w, slot1.h, maxW, maxH);
-                        setTcText(capTcs[0], globalPhotoLabelByDefect.get(slot1.d));
-                        setTcText(capTcs[2], getSurveyCellText('location', slot1.d, { floorCode: slot1.floorCode }));
-                        setTcText(descTcs[1], appendGrade3ProgressLeakToContent(
-                            getSurveyCellText('inspectionContent', slot1.d, { floorCode: slot1.floorCode }),
-                            slot1.d
-                        ));
+                        setPicImage(album.slots[0].pic, imgId1, slot1.w, slot1.h, fitW, fitH);
+                        fillGrade3PhotoSlot(album.slots[0], slot1);
 
                         if (slot2) {
+                            if (!album.slots[1] || !album.slots[1].pic) {
+                                throw new Error('사진첩 템플릿에 오른쪽 사진 슬롯이 없습니다.');
+                            }
                             imgCounter++;
                             const imgId2 = `photoAuto${imgCounter}`;
                             zip.file(`BinData/${imgId2}.${slot2.ext}`, slot2.bytes);
                             manifestAdds.push(`<opf:item id="${imgId2}" href="BinData/${imgId2}.${slot2.ext}" media-type="${slot2.mime}" isEmbeded="1"/>`);
-                            setPicImage(pics[1], imgId2, slot2.w, slot2.h, maxW, maxH);
-                            setTcText(capTcs[4], globalPhotoLabelByDefect.get(slot2.d));
-                            setTcText(capTcs[6], getSurveyCellText('location', slot2.d, { floorCode: slot2.floorCode }));
-                            setTcText(descTcs[3], appendGrade3ProgressLeakToContent(
-                                getSurveyCellText('inspectionContent', slot2.d, { floorCode: slot2.floorCode }),
-                                slot2.d
-                            ));
+                            setPicImage(album.slots[1].pic, imgId2, slot2.w, slot2.h, fitW, fitH);
+                            fillGrade3PhotoSlot(album.slots[1], slot2);
                         } else {
-                            stripPhotoTblRightHalf(newTbl);
+                            stripGrade3UnusedPhotoSlots(newTbl, 1);
                         }
 
                         appendPhotoTbl(newTbl);
