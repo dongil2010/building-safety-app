@@ -17,12 +17,16 @@ function extractFunction(name) {
 
 const normalizeEaSpacingInText = extractFunction('normalizeEaSpacingInText');
 const insertHwpxEaCountLineBreaks = extractFunction('insertHwpxEaCountLineBreaks');
+const koreanWrap = require(path.join(__dirname, '..', 'js', 'shared', 'korean-cell-wrap.js'));
 
-function simulateWrapHwpxCellText(raw) {
+function simulateWrapHwpxCellText(raw, maxChars = 16) {
     const flat = String(normalizeEaSpacingInText(raw == null ? '' : raw))
         .replace(/\r\n|\r|\n/g, ' ')
         .replace(/[ \t]{2,}/g, ' ');
-    return insertHwpxEaCountLineBreaks(flat);
+    return insertHwpxEaCountLineBreaks(flat)
+        .split('\n')
+        .map((line) => koreanWrap.wrapLine(line, maxChars))
+        .join('\n');
 }
 
 function testScreenshotCase() {
@@ -77,5 +81,13 @@ testMultipleMeasures();
 testFlattenThenBreak();
 testUnchangedWithoutCount();
 testCaseInsensitive();
+
+function testLocationWrapKeepsYRange() {
+    assert.strictEqual(simulateWrapHwpxCellText('복도X7~8/Y2~3', 5), '복도X7~8/\nY2~3');
+    assert.strictEqual(simulateWrapHwpxCellText('X12~13/Y1~2', 5), 'X12~13/\nY1~2');
+    assert.strictEqual(simulateWrapHwpxCellText('슬래브 균열 0.3~0.7/0.5 -12EA', 16), '슬래브 균열 0.3~0.7/0.5\n-12EA');
+}
+
+testLocationWrapKeepsYRange();
 
 console.log('test-hwpx-ea-break: ok');
