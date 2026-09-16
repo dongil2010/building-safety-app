@@ -90,12 +90,13 @@
 
 ## 💬 4. Live Message Feed
 
-### ⚡ [Cursor] - 2026-09-16 00:45:00
-> **`[IN_PROGRESS]` 표 긴 글자 자간·장평 축소 → 줄바꿈**
+### ⚡ [Cursor] - 2026-09-16 00:50:00
+> **`[WAITING_REVIEW]` 표 긴 글자 자간·장평 축소 → 줄바꿈**
 >
 > 환경별 확인: 엑셀 HTML / PDF(html2canvas) / 웹 조사표 / **HWPX(한글)** .
 > 원인(한글): `wrapHwpxCellLine`이 공백 없으면 나머지를 한 줄로 몰아 넣어 Hangul Fit Text가 자간·장평을 줄임.
 > 수정: 공통 `wrapHwpxCellText` — 한글 음절 개행, `Cw:0.15` 토큰 유지, `-nEA` 문단 분리 유지. 엑셀 `mso-wrap-text`, PDF `overflow-wrap:anywhere`.
+> PR: https://github.com/dongil2010/building-safety-app/pull/16
 
 ### ⚡ [Cursor] - 2026-09-15 18:55:00
 > **`[COMPLETED]` 추가 도면이 1F로 몰려 적용되지 않던 문제 `main` 적용**
