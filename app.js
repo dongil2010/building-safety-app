@@ -31198,7 +31198,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
     function isGrade3Building(bldg) {
         bldg = bldg || state.currentBuilding;
-        return !!bldg && bldg.facilityGrade === '제3종시설물';
+        if (!bldg) return false;
+        const g = String(bldg.facilityGrade || '').replace(/\s+/g, '');
+        return g === '제3종시설물' || g.includes('3종');
     }
 
     // 3종 상태조사표 번호(예: B1-1, 1-3, R-2)용 층코드→접두사 매핑.
@@ -35772,6 +35774,51 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 }
             // 3종 결함사진첩: 신규 템플릿은 footer에 [사진N|점검내용]만 있고 위치/내용 행이 없다.
             // 구형(사진N|위치|… + 내용 행)도 슬롯으로 해석하되, 위치 칸에는 절대 쓰지 않는다.
+            // 3종 결함 사진첩 전용 양식 (첨부 2열·사진N+내용) — 1·2종 3x7(위치/내용)과 분리
+            let grade3PhotoAlbumHeaderText = null;
+            let grade3PhotoAlbumTblStamp = null;
+            let grade3PhotoAlbumParaStamp = null;
+            let grade3PhotoAlbumRemap = null;
+            try {
+                const albumResp = await fetch('./templates/hwpx_grade3_photo_album.hwpx', { cache: 'no-store' });
+                if (albumResp.ok) {
+                    const albumZip = await JSZip.loadAsync(await albumResp.arrayBuffer());
+                    if (albumZip.file('Contents/header.xml')) {
+                        grade3PhotoAlbumHeaderText = await albumZip.file('Contents/header.xml').async('string');
+                    }
+                    const albumSectionPath = albumZip.file('Contents/section1.xml')
+                        ? 'Contents/section1.xml'
+                        : 'Contents/section0.xml';
+                    const albumXml = await albumZip.file(albumSectionPath).async('string');
+                    const albumDoc = new DOMParser().parseFromString(albumXml, 'application/xml');
+                    const albumSec = albumDoc.getElementsByTagName('hs:sec')[0];
+                    if (albumSec) {
+                        const albumParas = Array.from(albumSec.children).filter(c => c.localName === 'p');
+                        for (const p of albumParas) {
+                            const tbls = Array.from(p.getElementsByTagNameNS(HP_NS, 'tbl'));
+                            for (const tbl of tbls) {
+                                const rowCnt = parseInt(tbl.getAttribute('rowCnt') || '0', 10);
+                                const colCnt = parseInt(tbl.getAttribute('colCnt') || '0', 10);
+                                const joined = Array.from(tbl.getElementsByTagNameNS(HP_NS, 't'))
+                                    .map(t => t.textContent || '').join('');
+                                if (rowCnt === 2 && colCnt === 5 && /사진\s*1/.test(joined)) {
+                                    grade3PhotoAlbumTblStamp = tbl.cloneNode(true);
+                                    grade3PhotoAlbumParaStamp = p.cloneNode(true);
+                                    Array.from(grade3PhotoAlbumParaStamp.getElementsByTagNameNS(HP_NS, 'tbl'))
+                                        .forEach((t, ti) => {
+                                            if (ti > 0 && t.parentNode) t.parentNode.removeChild(t);
+                                        });
+                                    break;
+                                }
+                            }
+                            if (grade3PhotoAlbumTblStamp) break;
+                        }
+                    }
+                }
+            } catch (albumLoadErr) {
+                console.warn('3종 사진첩 양식 템플릿 로드 실패:', albumLoadErr);
+            }
+
             const hwpxPhotoCellText = (tc) => Array.from(tc.getElementsByTagNameNS(HP_NS, 't'))
                 .map(t => t.textContent || '').join('').replace(/\s+/g, ' ').trim();
             const hwpxPhotoCellWidth = (tc) => {
@@ -36602,7 +36649,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             // 표 비고(photoRemark)와 사진첩 캡션이 같은 전역 번호를 쓰도록 사전 패스에서 Map을 만든다.
             const globalPhotoLabelByDefect = new Map();
             const globalPhotoEntries = []; // { d, floorCode } — 층 순서·층 내 결함 순서
-            const grade3GlobalPhotoTblStamp = floorSlots[0]
+            let grade3GlobalPhotoTblStamp = floorSlots[0]
                 ? (floorSlots[0].photoTblStamp || (floorSlots[0].photoTbl && floorSlots[0].photoTbl.cloneNode(true)))
                 : null;
             let grade3GlobalPhotoParaStamp = floorSlots[0] ? floorSlots[0].photoParaStamp : null;
@@ -36610,6 +36657,35 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 let node = floorSlots[0].photoTbl.parentNode;
                 while (node && node.localName !== 'p') node = node.parentNode;
                 if (node) grade3GlobalPhotoParaStamp = node.cloneNode(true);
+            }
+
+            // 첨부 양식(hwpx_grade3_photo_album.hwpx)이 있으면 템플릿 내장 사진표를 덮어쓴다.
+            if (grade3PhotoAlbumTblStamp) {
+                try {
+                    if (grade3PhotoAlbumHeaderText) {
+                        if (!hwpxHeaderText) hwpxHeaderText = await zip.file('Contents/header.xml').async('string');
+                        const mergedAlbumHdr = mergeGrade3CompareStampHeader(
+                            hwpxHeaderText,
+                            grade3PhotoAlbumHeaderText,
+                            [grade3PhotoAlbumParaStamp]
+                        );
+                        hwpxHeaderText = mergedAlbumHdr.header;
+                        grade3PhotoAlbumRemap = mergedAlbumHdr.remapAttrs;
+                        hwpxHeaderDirty = true;
+                    }
+                    grade3GlobalPhotoTblStamp = remapHwpxCompareNode(
+                        grade3PhotoAlbumTblStamp.cloneNode(true),
+                        grade3PhotoAlbumRemap
+                    );
+                    if (grade3PhotoAlbumParaStamp) {
+                        grade3GlobalPhotoParaStamp = remapHwpxCompareNode(
+                            grade3PhotoAlbumParaStamp.cloneNode(true),
+                            grade3PhotoAlbumRemap
+                        );
+                    }
+                } catch (albumApplyErr) {
+                    console.warn('3종 사진첩 양식 적용 실패, 템플릿 내장 표 사용:', albumApplyErr);
+                }
             }
 
             for (let preIdx = 0; preIdx < floorsData.length; preIdx++) {
