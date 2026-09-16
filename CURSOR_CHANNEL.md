@@ -374,3 +374,12 @@
 > 수정: `insertHwpxEaCountLineBreaks` — 평탄화 **뒤**에 `-nEA` 앞만 `\n` 재삽입. `fillCellParas`의 기존 `cloneNode(true)` 문단 복제로 한글 엔터와 동일하게 살아남음. 화면/엑셀 공백 접미사는 유지. 1·2종 사진 칸(부재+내용) / 3종 폭·갯수는 구성 변경 없음.
 > 위치: `formatCrackMeasurePair`는 여전히 ` -nEA` 공백 조인, 실제 줄바꿈은 `exportHwpxSurveyTable3/12` 의 `wrapHwpxCellText`.
 > PR: https://github.com/dongil2010/building-safety-app/pull/15
+
+
+### ⚡ [Cursor] - 2026-09-16 00:50:00
+> **`[IN_PROGRESS]` 다각형 다시그리기**
+>
+> 저장된 영역 마킹 수정창에 「다각형 다시그리기」 추가. 기존 `AREA` + `pendingAreaPoly` 점찍기 UX 재사용.
+> 완료 시에만 `areaPoints`/AABB 교체. 번호·사진·내용 유지. 취소는 원본 기하 유지.
+> 네모/타원도 버튼 활성 — 완료 시 다각형으로 변환 (미리 변환하지 않아 취소 안전).
+

@@ -348,6 +348,11 @@
 
                         <div id="mapZoomOverlay" class="map-zoom-overlay" aria-hidden="true"></div>
                         <div id="mapSelectedDefectPopup" class="map-selected-defect-popup" hidden></div>
+                        <div id="areaPolygonRedrawBanner" class="area-polygon-redraw-banner" hidden>
+                            <span class="area-polygon-redraw-text" id="areaPolygonRedrawText">다각형 꼭짓점을 찍으세요. 완료: 첫 점 근처 클릭 · 더블클릭 · Enter</span>
+                            <button type="button" class="area-polygon-redraw-btn" id="btnFinishAreaPolygonRedraw" disabled>완료</button>
+                            <button type="button" class="area-polygon-redraw-btn area-polygon-redraw-btn-cancel" id="btnCancelAreaPolygonRedraw">취소</button>
+                        </div>
                         <div id="mapDrawingEmpty" class="map-drawing-empty" aria-live="polite" style="display:none;">
                             <div class="map-drawing-empty-inner">
                                 <i class="fa-regular fa-image" aria-hidden="true"></i>
@@ -1158,6 +1163,9 @@
                                 <button type="button" class="defect-area-style-btn" data-area-shape-convert="ellipse" title="타원">타원</button>
                             </div>
                         </div>
+                        <button type="button" id="btnRedrawDefectPolygon" class="btn btn-outline btn-sm defect-polygon-redraw-btn" hidden>
+                            <i class="fa-solid fa-pen"></i> 다각형 다시그리기
+                        </button>
                     </div>
                     <div class="form-group defect-area-style-block" id="defectAreaStyleBlock" style="display:none;">
                         <div class="defect-area-style-row">
