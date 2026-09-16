@@ -1853,7 +1853,9 @@ html.layout-desktop #tab-ndt .ndt-top-canvas-tools {
         top: 3.4rem;
     }
 
-/* PC: 결함위치도 좌측 조사항목(목록) 글자 1.25배 — 태블릿/모바일 밀도 규칙과 분리 */
+/* PC: 결함위치도 좌측 조사항목(목록) 글자 1.25배 — 태블릿/모바일 밀도 규칙과 분리
+   파일 하단 Android compact lock(`html:not(.layout-desktop) … !important`)이
+   일반 PC(layout-desktop 없음)에도 먹으므로, 동일 값은 파일 끝에서 !important로 재선언한다. */
 html:not(.layout-tablet) #tab-map .inspect-sidebar-left .defect-list-summary {
     font-size: 0.9375rem;
 }
@@ -14922,4 +14924,86 @@ html:not(.layout-desktop) #tab-map .defect-list-section-title {
 }
 html:not(.layout-desktop) .crack-monitor-photo-slots {
     grid-template-columns: 1fr 1fr;
+}
+
+/* ============================================================
+   PC restore: left survey/defect list readable type
+   Android compact locks above use html:not(.layout-desktop) + !important.
+   Regular desktop PCs do not get .layout-desktop (that class is phone
+   "데스크톱 사이트" only), so those 8–10px rules were shrinking the
+   PC left rail. Re-assert the existing 1.25× PC scale after those locks.
+   Tablets (.layout-tablet) and <1025px stay on the compact rules.
+   ============================================================ */
+@media (min-width: 1025px) {
+    html:not(.layout-tablet) #tab-map .inspect-sidebar-left .defect-list-summary {
+        font-size: 0.9375rem !important;
+    }
+    html:not(.layout-tablet) #tab-map .inspect-sidebar-left .defect-summary-total {
+        font-size: 0.9rem !important;
+    }
+    html:not(.layout-tablet) #tab-map .inspect-sidebar-left .defect-summary-badge {
+        font-size: 0.85rem !important;
+        padding: 0.12rem 0.35rem !important;
+        min-height: 0 !important;
+        line-height: 1.15 !important;
+    }
+    html:not(.layout-tablet) #tab-map .inspect-sidebar-left .defect-list-section-title {
+        font-size: 0.9375rem !important;
+        padding: 0.2rem 0.1rem !important;
+    }
+    html:not(.layout-tablet) #tab-map .inspect-sidebar-left .defect-list-empty {
+        font-size: 1rem !important;
+    }
+    html:not(.layout-tablet) #tab-map .inspect-sidebar-left .defect-list-item-component,
+    html:not(.layout-tablet) #tab-map .inspect-sidebar-left .defect-list-item-type {
+        display: block !important;
+        -webkit-box-orient: unset !important;
+        -webkit-line-clamp: unset !important;
+        line-clamp: unset !important;
+        white-space: normal !important;
+        overflow: visible !important;
+        text-overflow: unset !important;
+        word-break: keep-all !important;
+        overflow-wrap: anywhere !important;
+    }
+    html:not(.layout-tablet) #tab-map .inspect-sidebar-left .defect-list-item-component {
+        font-size: 0.975rem !important;
+        line-height: 1.2 !important;
+        font-weight: 800 !important;
+    }
+    html:not(.layout-tablet) #tab-map .inspect-sidebar-left .defect-list-item-type {
+        font-size: 0.875rem !important;
+        line-height: 1.2 !important;
+        font-weight: 400 !important;
+    }
+    html:not(.layout-tablet) #tab-map .inspect-sidebar-left .defect-list-item-measure {
+        display: inline-block !important;
+        font-size: 0.825rem !important;
+        line-height: 1.25 !important;
+        padding: 0 0.22rem !important;
+        white-space: pre-line !important;
+        overflow: visible !important;
+        text-overflow: unset !important;
+    }
+    html:not(.layout-tablet) #tab-map .inspect-sidebar-left .defect-list-item-prev-photos {
+        font-size: 0.8rem !important;
+        line-height: 1.2 !important;
+        padding: 0.05rem 0.28rem !important;
+        white-space: nowrap !important;
+    }
+    html:not(.layout-tablet) #tab-map .inspect-sidebar-left .defect-list-item-prev-photos i {
+        font-size: 0.75rem !important;
+    }
+    html:not(.layout-tablet) #tab-map .inspect-sidebar-left .defect-badge-no {
+        min-width: 2.05rem !important;
+        width: auto !important;
+        height: 2.05rem !important;
+        max-height: none !important;
+        flex: 0 0 auto !important;
+        flex-basis: auto !important;
+        font-size: 0.85rem !important;
+        line-height: 1.2 !important;
+        padding: 0 0.4rem !important;
+        margin-top: 0.08rem !important;
+    }
 }
