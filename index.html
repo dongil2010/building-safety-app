@@ -314,7 +314,7 @@
                                 <button type="button" id="btnRotateDrawing" class="btn-rotate-hero" title="세로 도면 가로로 90도 회전">
                                     <i class="fa-solid fa-rotate-right"></i> 🔄 회전
                                 </button>
-                                <button type="button" id="btnImportCadPins" class="btn-rotate-hero pc-only-chrome" style="background:linear-gradient(135deg, #0284c7, #0369a1); color:#fff; border-color:#38bdf8;" title="AutoCAD(CAD2APP)에서 추출한 cad_defects_import.json 파일을 현재 층에 자동 매핑">
+                                <button type="button" id="btnImportCadPins" class="btn-rotate-hero pc-only-chrome" style="background:linear-gradient(135deg, #0284c7, #0369a1); color:#fff; border-color:#38bdf8;" title="AutoCAD(CAD2APP) JSON을 현재 층에 매핑. 전차 미표기(미등록) 마킹이 있으면 그 조사내용을 캐드 위치에 붙입니다">
                                     <i class="fa-solid fa-compass-drafting"></i> 📐 CAD 핀
                                 </button>
                                 <button type="button" id="btnCompactMarkingGaps" class="btn-rotate-hero pc-only-chrome" style="background:linear-gradient(135deg, #7c3aed, #5b21b6); color:#fff; border-color:#a78bfa;" title="현재 층 마킹번호의 빈 칸을 뒤에서부터 앞으로 땡깁니다 (예: 14,15,17,18 → 14,15,16,17)">
@@ -3181,6 +3181,7 @@
     <script src="js/tabs/ndt.js?v=20260916_095027"></script>
     <script src="js/shared/report.js?v=20260916_095027"></script>
     <script src="js/shared/hwpx-survey-slots.js?v=20260916_095027"></script>
+    <script src="js/shared/cad-unmarked-place.js?v=20260916_095027"></script>
     <script src="js/shared/hwpx-import.js?v=20260916_095027"></script>
     <script src="js/shared/auth.js?v=20260916_095027"></script>
     <script src="js/core/firebase-storage-assets.js?v=20260916_095027"></script>

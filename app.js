@@ -28906,9 +28906,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // 비결함 텍스트 필터링
         const NON_DEFECT_WORDS = ['관리실', '창고', '평면도', '결함발생', '상태양호', '구분', '내용', '적색', '청색', '주차장'];
+        const cadPlaceApi = (window.BSA && window.BSA.shared && window.BSA.shared.cadUnmarkedPlace) || null;
+        const unmarkedList = cadPlaceApi
+            ? cadPlaceApi.collectUnmarkedDefects(state.defects[floorKey] || [])
+            : (state.defects[floorKey] || []).filter((d) => d && d.mapUnregistered);
+        const includeUnlabeledCad = unmarkedList.length > 0;
         const validDefects = (calib.data.defects || []).filter(item => {
             const no = String(item.no || '').trim();
-            if (!no) return false;
+            if (!Number.isFinite(Number(item.cadBoxX)) || !Number.isFinite(Number(item.cadBoxY))) return false;
+            if (!no) return includeUnlabeledCad;
             return !NON_DEFECT_WORDS.some(w => no.includes(w));
         });
 
@@ -29025,18 +29031,34 @@ document.addEventListener('DOMContentLoaded', () => {
         const cadToApp = bestMode.fn;
 
         const existingCount = (state.defects[floorKey] || []).length;
+        const placedOnlyCount = existingCount - unmarkedList.length;
         let replaceMode = false;
-        if (existingCount > 0) {
+        let historyPushed = false;
+        const ensureCadImportHistory = () => {
+            if (historyPushed) return;
+            if (typeof pushDefectHistory === 'function') pushDefectHistory();
+            historyPushed = true;
+        };
+
+        // 미표기(전차 미등록)가 있으면 조사내용은 유지하고 캐드 위치만 붙인다.
+        // 전체 교체 확인을 띄우면 미표기 데이터가 지워진다.
+        if (unmarkedList.length === 0 && existingCount > 0) {
             replaceMode = confirm(
                 `현재 층(${state.currentFloor})에 이미 ${existingCount}개의 결함이 등록되어 있습니다.\n\n` +
                 `[확인] : 기존 결함을 모두 비우고 캐드 핀으로 새로 교체\n` +
                 `[취소] : 기존은 두고, 같은 번호는 건너뛰고 새 번호만 추가`
             );
+        } else if (unmarkedList.length > 0 && placedOnlyCount > 0) {
+            window.showToast?.(
+                `미표기 ${unmarkedList.length}건은 캐드 위치에 붙이고, 이미 그려진 마킹 ${placedOnlyCount}건은 유지합니다.`,
+                'info',
+                4000
+            );
         }
 
         if (replaceMode) {
             const toClear = (state.defects[floorKey] || []).slice();
-            if (typeof pushDefectHistory === 'function') pushDefectHistory();
+            ensureCadImportHistory();
             toClear.forEach((d) => {
                 if (!d || !d.id) return;
                 if (typeof removeSingleDefectRecord === 'function') {
@@ -29052,20 +29074,55 @@ document.addEventListener('DOMContentLoaded', () => {
         const currentDefects = state.defects[floorKey];
         let addedCount = 0;
         let skippedDupCount = 0;
+        let placedUnmarkedCount = 0;
         const newDefectsList = [];
 
-        const normalizeCadNoKey = (no) => {
-            const raw = String(no || '').replace(/^NO\.?\s*/i, '').trim();
-            const m = raw.match(/(\d+)(?:-(\d+))?/);
-            if (!m) return raw.toLowerCase();
-            return m[2] ? (m[1] + '-' + m[2]) : m[1];
-        };
+        const normalizeCadNoKey = (cadPlaceApi && cadPlaceApi.normalizeCadNoKey)
+            ? cadPlaceApi.normalizeCadNoKey
+            : (no) => {
+                const raw = String(no || '').replace(/^NO\.?\s*/i, '').trim();
+                const m = raw.match(/(\d+)(?:-(\d+))?/);
+                if (!m) return raw.toLowerCase();
+                return m[2] ? (m[1] + '-' + m[2]) : m[1];
+            };
+
+        let cadItemsToCreate = validDefects;
+        if (!replaceMode && unmarkedList.length > 0 && cadPlaceApi) {
+            const match = cadPlaceApi.matchUnmarkedToCadItems(unmarkedList, validDefects);
+            if (match.pairs.length) ensureCadImportHistory();
+            match.pairs.forEach(({ defect, cad }) => {
+                if (!defect || !cad) return;
+                const box = cadToApp(Number(cad.cadBoxX), Number(cad.cadBoxY));
+                const tip = cadToApp(Number(cad.cadTipX), Number(cad.cadTipY));
+                defect.x = Math.round(box.x);
+                defect.y = Math.round(box.y);
+                defect.targetX = Math.round(tip.x);
+                defect.targetY = Math.round(tip.y);
+                defect.mapUnregistered = false;
+                defect.mapMarkedAt = Date.now();
+                defect.isCadImported = true;
+                const rawCadNo = String(cad.no || '').trim();
+                if (rawCadNo) defect.cadNo = rawCadNo;
+                if (rawCadNo && !String(defect.no || '').trim()) {
+                    defect.no = rawCadNo;
+                    defect.groupNo = rawCadNo;
+                }
+                if (typeof touchDefectPositionUpdatedAt === 'function') {
+                    touchDefectPositionUpdatedAt(defect);
+                }
+                defect.updatedAt = Date.now();
+                newDefectsList.push(defect);
+                placedUnmarkedCount++;
+            });
+            cadItemsToCreate = cadPlaceApi.leftoverNumberedCad(match.leftoverCad);
+        }
+
         const existingNoKeys = new Set(
             (currentDefects || []).map((d) => normalizeCadNoKey(d.cadNo || d.no || d.groupNo || ''))
                 .filter(Boolean)
         );
 
-        validDefects.forEach((cadItem, idx) => {
+        cadItemsToCreate.forEach((cadItem, idx) => {
             // 캐드에 적혀 있던 결함 번호 원본 100% 보존
             const rawNo = String(cadItem.no || '').trim() || String(currentDefects.length + 1);
             const noKey = normalizeCadNoKey(rawNo);
@@ -29123,12 +29180,16 @@ document.addEventListener('DOMContentLoaded', () => {
                 touchDefectPositionUpdatedAt(newDefect);
             }
 
+            if (!historyPushed) ensureCadImportHistory();
             currentDefects.push(newDefect);
             newDefectsList.push(newDefect);
             addedCount++;
         });
 
         // 캐드 원본 번호 유지를 위해 번호 재정렬(normalize)은 호출하지 않음
+        if (placedUnmarkedCount > 0 && typeof discardStalePendingRemoteAfterLocalPinEdit === 'function') {
+            discardStalePendingRemoteAfterLocalPinEdit();
+        }
 
         saveStateToLocalStorage();
         cancelCadCalibration();
@@ -29136,13 +29197,20 @@ document.addEventListener('DOMContentLoaded', () => {
         if (typeof renderDefectListPanel === 'function') renderDefectListPanel();
         if (typeof renderSurveyTable === 'function' && state.currentTab === 'tab-survey') renderSurveyTable();
 
-        if (addedCount === 0 && skippedDupCount > 0) {
+        if (addedCount === 0 && placedUnmarkedCount === 0 && skippedDupCount > 0) {
             window.showToast?.(`같은 번호 캐드 핀 ${skippedDupCount}개는 이미 있어 추가하지 않았습니다.`, 'info', 4500);
             return;
         }
+        const parts = [];
+        if (placedUnmarkedCount > 0) parts.push(`미표기 ${placedUnmarkedCount}건을 캐드 위치에 배치`);
+        if (addedCount > 0) parts.push(`새 캐드 핀 ${addedCount}개`);
         const skipMsg = skippedDupCount > 0 ? ` (같은 번호 ${skippedDupCount}개 건너뜀)` : '';
-        window.showToast?.(`🎉 캐드 결함 핀 ${addedCount}개가 배치되었습니다!${skipMsg} 상단 조정 바로 좌우 반전 및 위치를 맞춰보세요.`, 'success', 6000);
-        showCadPinAdjustToolbar(newDefectsList, floorKey);
+        window.showToast?.(
+            `🎉 ${parts.join(' · ') || '캐드 핀 배치 완료'}!${skipMsg} 상단 조정 바로 좌우 반전 및 위치를 맞춰보세요.`,
+            'success',
+            6000
+        );
+        if (newDefectsList.length) showCadPinAdjustToolbar(newDefectsList, floorKey);
     }
 
     function showCadPinAdjustToolbar(importedDefects, floorKey) {
