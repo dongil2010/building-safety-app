@@ -16633,7 +16633,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         let html = '<div class="defect-marking-float-section">';
         slots.forEach(({ label, formMember, dirMember }) => {
-            const active = formMember.id === defectOrNull.id ? ' is-active' : '';
+            const active = (formMember.id === defectOrNull.id || (dirMember && dirMember.id === defectOrNull.id)) ? ' is-active' : '';
             const assignTarget = (dirMember && canAssignSurveyNumberToDefect(dirMember))
                 ? dirMember
                 : (canAssignSurveyNumberToDefect(formMember) ? formMember : null);
@@ -18083,7 +18083,63 @@ document.addEventListener('DOMContentLoaded', () => {
             ? window.getSelectedDefectIds()
             : null;
         if (!sel || sel.size === 0) return null;
-        const consolidated = consolidateDefectGroups(getCurrentFloorDefects() || []);
+        const allDefects = getCurrentFloorDefects() || [];
+
+        // 1. 단일 선택이거나 최근 클릭된 결함이 있는 경우 우선 탐색
+        let directTarget = null;
+        if (sel.size === 1) {
+            directTarget = allDefects.find((d) => d && sel.has(d.id)) || null;
+        } else if (window._groupBoxCycle && window._groupBoxCycle.lastId && sel.has(window._groupBoxCycle.lastId)) {
+            directTarget = allDefects.find((d) => d && d.id === window._groupBoxCycle.lastId) || null;
+        } else {
+            directTarget = allDefects.find((d) => d && sel.has(d.id)) || null;
+        }
+
+        // 2. 그룹에 속한 결함이면 floatSlots 매핑으로 정확한 번호 및 조사 데이터 반환
+        if (directTarget && directTarget.groupId) {
+            const groupDefects = allDefects.filter(m => m && m.groupId === directTarget.groupId);
+            const rep = (typeof pickDefectGroupRepresentative === 'function' ? pickDefectGroupRepresentative(groupDefects.filter(m => !m.surveyExtra)) : null)
+                || groupDefects.find(m => !m.surveyExtra && (m.defectType || m.size))
+                || groupDefects.find(m => !m.surveyExtra)
+                || groupDefects[0]
+                || directTarget;
+            const donor = groupDefects.find(m => m && (m.defectType || m.size || m.crackWidth || (Array.isArray(m.crackMeasures) && m.crackMeasures.length))) || rep;
+
+            const slots = buildDefectMarkingFloatSlots(directTarget.groupId);
+            let matched = null;
+            if (slots.length > 0) {
+                matched = slots.find((s) =>
+                    (s.dirMember && s.dirMember.id === directTarget.id) ||
+                    (s.formMember && s.formMember.id === directTarget.id)
+                ) || null;
+            }
+
+            const targetItem = (matched && matched.formMember) ? matched.formMember : directTarget;
+            const displayNo = matched ? matched.label : (targetItem.displayNo || targetItem._slotLabel || formatDefectListBadgeNo(targetItem));
+
+            return {
+                ...rep,
+                ...targetItem,
+                displayNo,
+                _slotLabel: matched ? matched.label : (targetItem._slotLabel || displayNo),
+                component: targetItem.component || rep.component || donor.component || '',
+                defectType: targetItem.defectType || rep.defectType || donor.defectType || '',
+                cause: targetItem.cause || rep.cause || donor.cause || '',
+                size: targetItem.size || rep.size || donor.size || '',
+                crackWidth: targetItem.crackWidth || rep.crackWidth || donor.crackWidth || '',
+                crackLength: targetItem.crackLength || rep.crackLength || donor.crackLength || '',
+                crackMeasures: (Array.isArray(targetItem.crackMeasures) && targetItem.crackMeasures.length) ? targetItem.crackMeasures
+                    : ((Array.isArray(rep.crackMeasures) && rep.crackMeasures.length) ? rep.crackMeasures
+                    : (donor.crackMeasures || [])),
+                category: targetItem.category || rep.category || donor.category || '구조체',
+                _representative: (matched && matched.dirMember) || rep,
+                _focusMemberId: (matched && matched.dirMember && matched.dirMember.id) || targetItem.id,
+                _isSlotMember: !!matched
+            };
+        }
+        if (directTarget) return directTarget;
+
+        const consolidated = consolidateDefectGroups(allDefects);
         const hit = consolidated.find((d) => {
             if (!d) return false;
             if (d.id && sel.has(d.id)) return true;
@@ -18091,21 +18147,177 @@ document.addEventListener('DOMContentLoaded', () => {
             return false;
         });
         if (hit) return hit;
-        return (getCurrentFloorDefects() || []).find((d) => d && d.id && sel.has(d.id)) || null;
+        return allDefects.find((d) => d && d.id && sel.has(d.id)) || null;
     }
 
     function updateMapSelectedDefectPopup() {
         const popup = document.getElementById('mapSelectedDefectPopup');
         if (!popup) return;
         const show = !isMapDefectListOpen();
-        const d = show ? getSelectedDefectForPopup() : null;
+        if (!show) {
+            popup.hidden = true;
+            popup.innerHTML = '';
+            return;
+        }
+
+        const sel = (typeof window.getSelectedDefectIds === 'function')
+            ? window.getSelectedDefectIds()
+            : null;
+        if (!sel || sel.size === 0) {
+            popup.hidden = true;
+            popup.innerHTML = '';
+            return;
+        }
+        const allDefects = getCurrentFloorDefects() || [];
+
+        let directTarget = null;
+        if (sel.size === 1) {
+            directTarget = allDefects.find((d) => d && sel.has(d.id)) || null;
+        } else if (window._groupBoxCycle && window._groupBoxCycle.lastId && sel.has(window._groupBoxCycle.lastId)) {
+            directTarget = allDefects.find((d) => d && d.id === window._groupBoxCycle.lastId) || null;
+        } else {
+            directTarget = allDefects.find((d) => d && sel.has(d.id)) || null;
+        }
+
+        // 그룹 결함: 슬롯이 2개 이상이면 그룹 내 모든 항목(예: 45-1, 45-2)을 함께 표시!
+        if (directTarget && directTarget.groupId) {
+            const groupDefects = allDefects.filter(m => m && m.groupId === directTarget.groupId);
+            const slots = buildDefectMarkingFloatSlots(directTarget.groupId);
+            if (slots.length > 1) {
+                const rep = (typeof pickDefectGroupRepresentative === 'function' ? pickDefectGroupRepresentative(groupDefects.filter(m => !m.surveyExtra)) : null)
+                    || groupDefects.find(m => !m.surveyExtra && (m.defectType || m.size))
+                    || groupDefects.find(m => !m.surveyExtra)
+                    || groupDefects[0]
+                    || directTarget;
+                const donor = groupDefects.find(m => m && (m.defectType || m.size || m.crackWidth || (Array.isArray(m.crackMeasures) && m.crackMeasures.length))) || rep;
+
+                const matchedSlot = slots.find((s) =>
+                    (s.dirMember && s.dirMember.id === directTarget.id) ||
+                    (s.formMember && s.formMember.id === directTarget.id)
+                ) || null;
+                const activeSlotNum = matchedSlot ? matchedSlot.slot : 1;
+
+                let itemsHtml = '';
+                slots.forEach((s) => {
+                    const formMember = s.formMember || rep;
+                    const dirMember = s.dirMember || formMember;
+                    const isActive = s.slot === activeSlotNum;
+                    const badgeNo = s.label;
+
+                    const comp = ((formMember.shapeType === 'area' ? '🟧 ' : '') + (formMember.component || rep.component || donor.component || '')).trim();
+                    const typeText = (formMember.defectType || formMember.cause || (s.slot === 1 ? (donor.defectType || donor.cause) : '') || '').trim();
+                    const isGood = isGoodDefectType(typeText);
+                    const measureText = typeof formatDefectListMeasure === 'function' ? formatDefectListMeasure(formMember) : '';
+                    const sizeFallback = String(formMember.size || (s.slot === 1 ? donor.size : '') || '').trim();
+                    const measureDisplay = measureText || ((sizeFallback && sizeFallback !== '-') ? sizeFallback : '');
+
+                    let measureHtml = '';
+                    if (!isGood && measureDisplay) {
+                        measureHtml = '<span class="map-sel-popup-measure">'
+                            + escapeHtml(measureDisplay).replace(/\n/g, '<br>')
+                            + '</span>';
+                    }
+
+                    let typeHtml = '';
+                    if (typeText) {
+                        typeHtml = '<span class="map-sel-popup-type">' + escapeHtml(typeText) + '</span>';
+                    } else {
+                        typeHtml = '<span class="map-sel-popup-type map-sel-popup-type-empty">조사내용 미입력</span>';
+                    }
+
+                    const canAssign = (dirMember && canAssignSurveyNumberToDefect(dirMember))
+                        || (formMember && canAssignSurveyNumberToDefect(formMember));
+                    const assignId = (dirMember && canAssignSurveyNumberToDefect(dirMember))
+                        ? dirMember.id
+                        : (formMember ? formMember.id : null);
+
+                    const cat = formMember.category || rep.category || donor.category || '구조체';
+                    const catClass = cat === '비구조체' ? 'cat-nonstructural'
+                        : (cat === '마감재' ? 'cat-finishing' : '');
+
+                    itemsHtml +=
+                        `<div class="map-sel-popup-item ${isActive ? 'is-active' : ''} ${catClass}"`
+                        + ` data-marking-member-id="${escapeHtml(formMember.id)}"`
+                        + ` data-focus-member-id="${escapeHtml((dirMember || formMember).id)}"`
+                        + ` data-display-label="${escapeHtml(badgeNo)}">`
+                        + `<span class="map-sel-popup-badge">${escapeHtml(badgeNo)}</span>`
+                        + `<div class="map-sel-popup-lines">`
+                        + (comp ? `<span class="map-sel-popup-comp">${escapeHtml(comp)}</span>` : '')
+                        + typeHtml
+                        + measureHtml
+                        + `</div>`
+                        + (canAssign
+                            ? `<button type="button" class="defect-marking-assign-no-btn map-sel-popup-assign-btn"`
+                                + ` data-marking-member-id="${escapeHtml(assignId)}"`
+                                + ` title="이 화살표에 조사표 번호 부여">번호 부여</button>`
+                            : `<button type="button" class="map-sel-popup-edit" title="${escapeHtml(badgeNo)} 결함 수정">`
+                                + `<i class="fa-solid fa-pen"></i>`
+                                + `</button>`
+                          )
+                        + `</div>`;
+                });
+
+                popup.className = 'map-selected-defect-popup is-group';
+                popup.innerHTML = itemsHtml;
+                popup.hidden = false;
+
+                popup.querySelectorAll('.map-sel-popup-item').forEach((rowEl) => {
+                    const mid = rowEl.getAttribute('data-marking-member-id');
+                    const fid = rowEl.getAttribute('data-focus-member-id') || mid;
+                    const dlabel = rowEl.getAttribute('data-display-label') || undefined;
+                    const editBtn = rowEl.querySelector('.map-sel-popup-edit');
+                    const assignBtn = rowEl.querySelector('.map-sel-popup-assign-btn');
+
+                    if (assignBtn) {
+                        assignBtn.onclick = (e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            const assignMid = assignBtn.getAttribute('data-marking-member-id');
+                            if (assignMid && typeof window.assignSurveyNumberToArrow === 'function') {
+                                window.assignSurveyNumberToArrow(assignMid);
+                            }
+                        };
+                    }
+
+                    const openItemDetail = () => {
+                        if (mid && typeof window.selectDefectMarkingMember === 'function') {
+                            window.selectDefectMarkingMember(mid, dlabel, fid);
+                        } else if (typeof openAddDefectModal === 'function') {
+                            const targetDef = allDefects.find(x => x && x.id === mid) || rep;
+                            openAddDefectModal(targetDef.x, targetDef.y, targetDef.targetX, targetDef.targetY, targetDef, null, { revealMarkingAboveDrawer: true });
+                        }
+                    };
+
+                    if (editBtn) {
+                        editBtn.onclick = (e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            openItemDetail();
+                        };
+                    }
+                    rowEl.onclick = (e) => {
+                        if (assignBtn && assignBtn.contains(e.target)) return;
+                        if (editBtn && editBtn.contains(e.target)) return;
+                        openItemDetail();
+                    };
+                });
+                return;
+            }
+        }
+
+        const d = getSelectedDefectForPopup();
         if (!d) {
             popup.hidden = true;
             popup.innerHTML = '';
             return;
         }
-        const numMatch = (d.no || '').match(/\d+/);
-        const badgeNo = numMatch ? numMatch[0] : '?';
+        let badgeNo = d.displayNo || d._slotLabel;
+        if (!badgeNo || badgeNo.startsWith('화살표')) {
+            const baseNum = typeof formatDefectListBadgeNo === 'function'
+                ? formatDefectListBadgeNo(d)
+                : ((d.no || '').match(/\d+(?:-\d+)?/) ? (d.no || '').match(/\d+(?:-\d+)?/)[0] : '?');
+            badgeNo = (badgeNo && badgeNo.startsWith('화살표')) ? `${baseNum} (${badgeNo})` : baseNum;
+        }
         const shapeIcon = d.shapeType === 'area' ? '🟧 ' : '';
         const isGood = isGoodDefectType(d.defectType);
         const measureText = typeof formatDefectListMeasure === 'function' ? formatDefectListMeasure(d) : '';
@@ -18121,18 +18333,30 @@ document.addEventListener('DOMContentLoaded', () => {
                 + '</span>';
         }
         const comp = (shapeIcon + (d.component || '')).trim();
+        const typeText = (d.defectType || d.cause || '').trim();
+        let typeHtml = '';
+        if (typeText) {
+            typeHtml = '<span class="map-sel-popup-type">' + escapeHtml(typeText) + '</span>';
+        } else {
+            typeHtml = '<span class="map-sel-popup-type map-sel-popup-type-empty">조사내용 미입력</span>';
+        }
+
         popup.className = ('map-selected-defect-popup ' + catClass).trim();
         popup.innerHTML =
             '<span class="map-sel-popup-badge">' + escapeHtml(badgeNo) + '</span>' +
             '<div class="map-sel-popup-lines">' +
-            '<span class="map-sel-popup-comp">' + escapeHtml(comp) + '</span>' +
-            '<span class="map-sel-popup-type">' + escapeHtml(d.defectType || '') + '</span>' +
+            (comp ? ('<span class="map-sel-popup-comp">' + escapeHtml(comp) + '</span>') : '') +
+            typeHtml +
             measureHtml +
             '</div>' +
             '<button type="button" class="map-sel-popup-edit" title="결함 수정"><i class="fa-solid fa-pen"></i></button>';
         popup.hidden = false;
         const editBtn = popup.querySelector('.map-sel-popup-edit');
         const openDetail = () => {
+            if (d.groupId && typeof window.selectDefectMarkingMember === 'function') {
+                window.selectDefectMarkingMember(d.id, d.displayNo, d._focusMemberId || d.id);
+                return;
+            }
             const rep = d._representative || d;
             if (typeof openAddDefectModal === 'function') {
                 openAddDefectModal(rep.x, rep.y, rep.targetX, rep.targetY, rep, null, { revealMarkingAboveDrawer: true });
@@ -18146,6 +18370,7 @@ document.addEventListener('DOMContentLoaded', () => {
             openDetail();
         };
     }
+    window.updateMapSelectedDefectPopup = updateMapSelectedDefectPopup;
 
     function applyMapDefectListChrome() {
         const open = isMapDefectListOpen();
@@ -28033,8 +28258,13 @@ document.addEventListener('DOMContentLoaded', () => {
         drawCanvas();
         if (typeof renderDefectListPanel === 'function') renderDefectListPanel();
         if (typeof renderSurveyTable === 'function') renderSurveyTable();
-        if (typeof renderDefectMarkingTimeline === 'function') renderDefectMarkingTimeline(target);
+        if (extra && typeof window.selectDefectMarkingMember === 'function') {
+            await window.selectDefectMarkingMember(extra.id, extra.no, target.id);
+        } else {
+            if (typeof renderDefectMarkingTimeline === 'function') renderDefectMarkingTimeline(target);
+        }
         if (typeof syncMobileAddMarkingFab === 'function') syncMobileAddMarkingFab();
+        if (typeof updateMapSelectedDefectPopup === 'function') updateMapSelectedDefectPopup();
         const rowNo = String((extra && extra.no) || '').replace(/^NO\.?\s*/i, '').trim();
         const parentNo = String(target.groupNo || target.no || '').replace(/^NO\.?\s*/i, '').trim();
         window.showToast?.(

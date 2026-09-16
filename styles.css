@@ -952,6 +952,8 @@ html.layout-desktop #tab-ndt .ndt-top-canvas-tools {
 .map-selected-defect-popup .map-sel-popup-badge {
     flex-shrink: 0;
     min-width: 1.35rem;
+    width: auto;
+    white-space: nowrap;
     height: 1.35rem;
     padding: 0 0.28rem;
     border-radius: 5px;
@@ -1000,6 +1002,12 @@ html.layout-desktop #tab-ndt .ndt-top-canvas-tools {
     text-overflow: ellipsis;
 }
 
+.map-sel-popup-type.map-sel-popup-type-empty {
+    color: #94a3b8;
+    font-size: 0.65rem;
+    font-weight: 500;
+}
+
 .map-sel-popup-measure {
     font-size: 0.7rem;
     font-weight: 800;
@@ -1028,6 +1036,61 @@ html.layout-desktop #tab-ndt .ndt-top-canvas-tools {
     background: #eff6ff;
     border-color: #93c5fd;
     color: #1d4ed8;
+}
+
+/* 결함 그룹 다중 슬롯 (45-1, 45-2 등) 팝업 */
+.map-selected-defect-popup.is-group {
+    flex-direction: column;
+    gap: 0.28rem;
+    max-width: min(85vw, 320px);
+    padding: 0.32rem 0.36rem;
+}
+
+.map-selected-defect-popup .map-sel-popup-item {
+    display: flex;
+    align-items: center;
+    gap: 0.38rem;
+    width: 100%;
+    padding: 0.24rem 0.34rem;
+    border-radius: 6px;
+    border: 1.5px solid transparent;
+    box-sizing: border-box;
+    cursor: pointer;
+    transition: background 0.12s ease, border-color 0.12s ease;
+}
+
+.map-selected-defect-popup .map-sel-popup-item:hover {
+    background: rgba(15, 23, 42, 0.04);
+}
+
+.map-selected-defect-popup .map-sel-popup-item.is-active {
+    background: rgba(37, 99, 235, 0.09);
+    border-color: rgba(37, 99, 235, 0.45);
+}
+
+.map-selected-defect-popup .map-sel-popup-item.cat-nonstructural .map-sel-popup-badge {
+    background: #525252;
+}
+
+.map-selected-defect-popup .map-sel-popup-item.cat-finishing .map-sel-popup-badge {
+    background: #f97316;
+}
+
+.map-selected-defect-popup .map-sel-popup-assign-btn {
+    flex-shrink: 0;
+    padding: 2px 7px;
+    font-size: 0.65rem;
+    font-weight: 700;
+    color: #ffffff;
+    background: #2563eb;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+.map-selected-defect-popup .map-sel-popup-assign-btn:hover {
+    background: #1d4ed8;
 }
 
 .map-zoom-overlay {
