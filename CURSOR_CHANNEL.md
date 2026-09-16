@@ -341,7 +341,7 @@
 > **필수**: Cloudflare Worker에 cloudflare-worker/ocr-proxy.js 다시 Deploy.
 
 ### ⚡ [Cursor] - 2026-09-16 00:25:00
-> **`[IN_PROGRESS]` HWPX 상태조사표 — 정밀 표본만 남음 / 정기 내보내기 실패**
+> **`[WAITING_REVIEW]` HWPX 상태조사표 — 정밀 표본만 남음 / 정기 내보내기 실패**
 >
 > 원인:
 > 1. 1·2종 정밀 템플릿은 1번 표가 제목 **다음** 문단에 있고 같은 문단에 여분 샘플 표가 있음. `stripExcessStampStatusTables`가 그 문단을 통째로 지워 keep 표까지 사라짐 → rediscover 0슬롯 → 표본 그대로 다운로드.
