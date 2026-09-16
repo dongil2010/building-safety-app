@@ -3421,8 +3421,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
     
     /**
-     * 마킹번호 빈 칸 땡기기: [min..max] 중 가장 작은 빈 번호로
-     * 가장 큰 메인 번호를 옮기며 연속 구간이 될 때까지 반복.
+     * 마킹번호 빈 칸 땡기기: 1..max 중 가장 작은 빈 번호로
+     * 가장 큰 메인 번호를 옮기며 1부터 연속이 될 때까지 반복.
+     * (1번을 지워 2,3,4만 남은 경우 → 끝번호가 1로 당겨짐)
      * CAD 가져오기 번호(isCadImported)도 포함. 그룹은 메인 1개로 취급.
      * @returns {{ moved: number, before: string, after: string }|null}
      */
@@ -3454,21 +3455,22 @@ document.addEventListener('DOMContentLoaded', () => {
         };
 
         let units = buildUnits();
-        if (units.length < 2) return null;
+        if (!units.length) return null;
 
         const mainsBefore = units.map((u) => u.main).sort((a, b) => a - b);
         const beforeStr = mainsBefore.join(', ');
 
         let moved = 0;
-        const maxSteps = units.length * 4 + 20;
+        const maxSteps = units.length * 4 + 40;
         for (let step = 0; step < maxSteps; step++) {
             units = buildUnits();
+            if (!units.length) break;
             const mains = [...new Set(units.map((u) => u.main))].sort((a, b) => a - b);
-            if (mains.length < 2) break;
-            const minM = mains[0];
             const maxM = mains[mains.length - 1];
+            // 최소 번호가 아니라 1부터 빈 칸을 찾는다.
+            // (1번 삭제 후 2..N만 있으면 min=2라서 예전엔 빈 칸이 없다고 오판함)
             let gap = null;
-            for (let n = minM; n <= maxM; n++) {
+            for (let n = 1; n <= maxM; n++) {
                 if (!mains.includes(n)) { gap = n; break; }
             }
             if (gap == null) break;
@@ -30576,7 +30578,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             const confirmMsg = exteriorPool
                 ? '외부 도면(외부1·2·…) 전체를 한 번호로 보고 빈 칸을 뒤에서부터 앞으로 땡길까요?\n(한 도면의 빈 번호는 다른 외부 도면에 있을 수 있습니다.)'
-                : '현재 층의 마킹번호 빈 칸을 뒤에서부터 앞으로 땡길까요?\n(예: 14,15,17,18 → 14,15,16,17)';
+                : '현재 층의 마킹번호 빈 칸을 뒤에서부터 앞으로 땡길까요?\n(예: 1번 삭제 후 2,3,4 → 1,2,3 / 14,15,17,18 → 14,15,16,17)';
             if (!window.confirm(confirmMsg)) return;
             if (typeof pushDefectHistory === 'function') pushDefectHistory();
             const result = compactDefectMarkingNumberGaps(list);
