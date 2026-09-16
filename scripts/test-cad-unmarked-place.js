@@ -91,4 +91,37 @@ testOrderUsesUnlabeledBoxes();
 testLeftoverUnmarkedStays();
 testUnlabeledLeftoverNotNumbered();
 testCollectUnmarked();
+
+function testMatchNumberedOnly() {
+    const placed = [
+        { id: 'e1', no: 'NO.01', mapUnregistered: false, defectType: 'crack', size: '0.3' },
+        { id: 'e2', no: '02', mapUnregistered: false, defectType: 'peel' }
+    ];
+    const cad = [
+        { no: '1', cadBoxX: 10 },
+        { no: '2', cadBoxX: 20 },
+        { no: '3', cadBoxX: 30 }
+    ];
+    const m = api.matchNumberedDefectsToCadItems(placed, cad);
+    assert.strictEqual(m.pairs.length, 2);
+    assert.strictEqual(m.pairs[0].defect.id, 'e1');
+    assert.strictEqual(m.pairs[0].cad.no, '1');
+    assert.strictEqual(m.pairs[1].defect.id, 'e2');
+    assert.strictEqual(m.leftoverCad.length, 1);
+    assert.strictEqual(m.leftoverCad[0].no, '3');
+}
+
+function testFindNormalizedNo() {
+    const list = [
+        { id: 'a', no: 'NO.03', isCadImported: true },
+        { id: 'b', no: '3', surveyExtra: true }
+    ];
+    const hit = api.findDefectByNormalizedNo(list, '3');
+    assert.strictEqual(hit.id, 'a');
+    assert.strictEqual(api.findDefectByNormalizedNo(list, 'NO.03').id, 'a');
+    assert.strictEqual(api.findDefectByNormalizedNo(list, '99'), null);
+}
+
+testMatchNumberedOnly();
+testFindNormalizedNo();
 console.log('test-cad-unmarked-place.js: ok');
