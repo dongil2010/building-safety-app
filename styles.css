@@ -3319,7 +3319,16 @@ html:not(.layout-tablet) #tab-map .inspect-sidebar-left .defect-badge-no {
 }
 
 #tab-survey .survey-table .survey-col-wrap {
-    white-space: nowrap;
+    white-space: normal;
+    word-break: keep-all;
+    overflow-wrap: anywhere;
+}
+
+#tab-survey .survey-table .survey-col-wrap .survey-inline-input,
+#tab-survey .survey-table .survey-col-wrap .survey-inline-textarea {
+    white-space: pre-wrap;
+    word-break: keep-all;
+    overflow-wrap: anywhere;
 }
 
 #tab-survey .survey-table .survey-col-dynamic .survey-inline-input,

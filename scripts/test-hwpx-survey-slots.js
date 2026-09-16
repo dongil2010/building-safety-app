@@ -137,9 +137,47 @@ function testStripSecPrFromClones() {
     assert.strictEqual(tableRun.parentNode, para, 'table run is kept');
 }
 
+function testCjkWrapsInsteadOfFitText() {
+    const longKo = '슬래브하부균열및박리탈락과누수흔적';
+    const wrapped = slots.wrapHwpxCellLine(longKo, 8);
+    const lines = wrapped.split('\n');
+    assert.ok(lines.length >= 3, 'CJK text must wrap at cell width, not dump as one line');
+    assert.strictEqual(lines.join(''), longKo, 'wrap must not drop or reorder Hangul syllables');
+    lines.forEach((line) => {
+        assert.ok(Array.from(line).length <= 8, `wrapped line too long: ${line}`);
+    });
+}
+
+function testAsciiMeasureTokenStaysIntact() {
+    assert.strictEqual(slots.wrapHwpxCellLine('Cw:0.15', 4), 'Cw:0.15');
+    assert.strictEqual(slots.wrapHwpxCellLine('0.15/1.5', 4), '0.15/1.5');
+    assert.strictEqual(slots.wrapHwpxCellLine('0.3~0.7/0.5', 4), '0.3~0.7/0.5');
+    const mixed = slots.wrapHwpxCellLine('슬래브하부균열및박리 Cw:0.15', 8);
+    assert.ok(mixed.includes('Cw:0.15'), 'measurement token must stay on one line');
+    assert.ok(!mixed.includes('Cw:0.\n'), 'must not split Cw:0.15 at the decimal');
+}
+
+function testEaSuffixStillOwnLine() {
+    const out = slots.wrapHwpxCellText('0.3~0.7/0.5 -12EA', 16, (s) =>
+        String(s).replace(/([^\s\n])[ \t]*-(\d+)\s*EA\b/gi, '$1 -$2EA'));
+    assert.strictEqual(out, '0.3~0.7/0.5\n-12EA');
+}
+
+function testOldBugDumpedRestAsOneLine() {
+    const longKo = '슬래브하부균열및박리탈락과누수흔적추가설명문장';
+    const oldDump = longKo; // pre-fix: no lastBreak → push rest, break
+    const fixed = slots.wrapHwpxCellLine(longKo, 8);
+    assert.notStrictEqual(fixed, oldDump, 'old path left the whole Korean run on one line');
+    assert.ok(fixed.split('\n').length > 1);
+}
+
 testInspectionTypeMapping();
 testStripKeepsSharedParaTable();
 testStripTitleParaTablesOnly();
 testOldBugWouldDeleteKeepPara();
 testStripSecPrFromClones();
+testCjkWrapsInsteadOfFitText();
+testAsciiMeasureTokenStaysIntact();
+testEaSuffixStillOwnLine();
+testOldBugDumpedRestAsOneLine();
 console.log('test-hwpx-survey-slots.js: ok');
