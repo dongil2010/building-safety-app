@@ -90,6 +90,12 @@
 
 ## 💬 4. Live Message Feed
 
+### ⚡ [Cursor] - 2026-09-16 01:10:02
+> **`[COMPLETED]` CAD 미표기→캐드 위치 배치 `main` 배포**
+>
+> 전차 미등록(미표기) 마킹이 있으면 CAD 핀 불러오기가 조사내용을 캐드 좌표에 붙임.
+> **`origin/main` 적용** — GitHub Pages. 앱 재실행 또는 홈 새로고침.
+
 ### ⚡ [Cursor] - 2026-09-16 01:08:00
 > **`[WAITING_REVIEW]` CAD 핀 ← 미표기(전차 미등록) 마킹 데이터**
 >
