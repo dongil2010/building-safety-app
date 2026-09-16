@@ -25578,18 +25578,17 @@ document.addEventListener('DOMContentLoaded', () => {
     window.syncMobileAddMarkingFab = syncMobileAddMarkingFab;
 
     // 상태조사표 → 결함위치도: 해당 마킹 선택·화면 이동
+    // 외부는 조사표가 전체 공유이므로, 다른 외부 도면에 있는 번호면 그 도면으로 전환 후 보여 준다.
     window.viewDefectOnMapFromSurvey = function(defectId) {
         if (!defectId) return;
         if (!state.currentBuildingId) {
             window.showToast?.('건물을 먼저 선택하세요.', 'info');
             return;
         }
-        const key = `${state.currentBuildingId}_${state.currentFloor}`;
-        const list = state.defects[key] || [];
-        const consolidated = consolidateDefectGroups(list).find(d =>
-            d.id === defectId || (d._groupMemberIds && d._groupMemberIds.indexOf(defectId) !== -1)
-        );
+        const located = findDefectAcrossBuildingFloors(defectId);
+        const consolidated = located && located.defect ? located.defect : null;
         const focusId = consolidated ? consolidated.id : defectId;
+        const targetFloor = (located && located.floorCode) || state.currentFloor;
         selectedDefectIds.clear();
         if (consolidated && consolidated._groupMemberIds && consolidated._groupMemberIds.length > 1) {
             consolidated._groupMemberIds.forEach(id => selectedDefectIds.add(id));
@@ -25597,15 +25596,34 @@ document.addEventListener('DOMContentLoaded', () => {
             selectedDefectIds.add(focusId);
         }
         if (typeof setDrawMode === 'function') setDrawMode('PAN');
+
+        const floorChanged = targetFloor && targetFloor !== state.currentFloor;
+        if (floorChanged) {
+            if (elements.floorSelect) {
+                try { elements.floorSelect.value = targetFloor; } catch (_e) { /* ignore */ }
+            }
+            if (typeof applyFloorMapStyleSettings === 'function') {
+                applyFloorMapStyleSettings(targetFloor, state.currentBuildingId);
+            }
+            if (typeof loadFloorDrawing === 'function') loadFloorDrawing(targetFloor);
+            if (typeof refreshFloorDependentUi === 'function') refreshFloorDependentUi();
+            const label = (typeof window.getFloorLabelFromCode === 'function')
+                ? window.getFloorLabelFromCode(targetFloor)
+                : targetFloor;
+            window.showToast?.(`외부 도면 「${label}」으로 이동`, 'info', 2200);
+        }
+
         window.switchTab('tab-map');
         setTimeout(() => {
             if (typeof resizeCanvas === 'function') resizeCanvas();
             if (typeof updateMapSelectionBar === 'function') updateMapSelectionBar({ scrollToSelection: true });
             if (typeof drawCanvas === 'function') drawCanvas();
-            if (typeof window.focusDefectOnCanvas === 'function') {
+            if (floorChanged) {
+                focusDefectAfterFloorReady(focusId, targetFloor, 0);
+            } else if (typeof window.focusDefectOnCanvas === 'function') {
                 window.focusDefectOnCanvas(focusId, { uncovered: true });
             }
-        }, 280);
+        }, floorChanged ? 320 : 280);
     };
 
     function translateDefectBy(d, dx, dy) {
@@ -30862,6 +30880,109 @@ document.addEventListener('DOMContentLoaded', () => {
         return (availableFloors || []).filter((fc) => isExteriorFloorCode(fc));
     }
 
+    /** 현재 건물의 외부 도면 코드 목록(floorsList + defects 키 합집합) */
+    function listExteriorFloorCodesForBuilding(bldgId) {
+        const id = bldgId || state.currentBuildingId;
+        if (!id) return [];
+        const codes = new Set();
+        const bldg = state.currentBuilding
+            || ((state.buildings || []).find((b) => b && b.id === id));
+        const floors = (typeof window.getBuildingAvailableFloors === 'function' && bldg)
+            ? window.getBuildingAvailableFloors(bldg)
+            : ((bldg && bldg.floorsList) || []);
+        (floors || []).forEach((f) => {
+            const fc = f && (f.floorCode || f);
+            if (fc && isExteriorFloorCode(fc)) codes.add(String(fc));
+        });
+        Object.keys(state.defects || {}).forEach((k) => {
+            if (!String(k).startsWith(String(id) + '_')) return;
+            const fc = String(k).slice(String(id).length + 1);
+            if (isExteriorFloorCode(fc)) codes.add(fc);
+        });
+        return Array.from(codes);
+    }
+
+    /** 외부 조사표용: 모든 외부 도면 마킹을 한 목록으로 (실객체 + _exteriorFloorCode) */
+    function getCombinedExteriorDefectsLive(bldgId) {
+        const id = bldgId || state.currentBuildingId;
+        if (!id) return [];
+        const out = [];
+        const seen = new Set();
+        listExteriorFloorCodesForBuilding(id).forEach((fc) => {
+            const key = String(id) + '_' + fc;
+            if (state.defects[key] && typeof syncDefectGroupNosForFloor === 'function') {
+                try { syncDefectGroupNosForFloor(key); } catch (_e) { /* ignore */ }
+            }
+            ((state.defects && state.defects[key]) || []).forEach((d) => {
+                if (!d || d.id == null) return;
+                if (seen.has(d.id)) return;
+                seen.add(d.id);
+                d._exteriorFloorCode = fc;
+                out.push(d);
+            });
+        });
+        return out;
+    }
+
+    function getSurveyTableSourceDefects() {
+        if (!state.currentBuildingId) return [];
+        if (isExteriorFloorCode(state.currentFloor)) {
+            return getCombinedExteriorDefectsLive(state.currentBuildingId);
+        }
+        return getCurrentFloorDefects();
+    }
+
+    function findDefectAcrossBuildingFloors(defectId) {
+        if (!defectId || !state.currentBuildingId) return null;
+        const id = state.currentBuildingId;
+        const preferExt = isExteriorFloorCode(state.currentFloor);
+        const tryFloor = (fc) => {
+            const key = String(id) + '_' + fc;
+            const list = (state.defects && state.defects[key]) || [];
+            const consolidated = (typeof consolidateDefectGroups === 'function')
+                ? consolidateDefectGroups(list)
+                : list;
+            const hit = consolidated.find((d) =>
+                d && (d.id === defectId || (d._groupMemberIds && d._groupMemberIds.indexOf(defectId) !== -1))
+            );
+            if (hit) return { defect: hit, floorCode: fc, floorKey: key };
+            const raw = list.find((d) => d && d.id === defectId);
+            if (raw) return { defect: raw, floorCode: fc, floorKey: key };
+            return null;
+        };
+        if (preferExt) {
+            const codes = listExteriorFloorCodesForBuilding(id);
+            for (let i = 0; i < codes.length; i++) {
+                const found = tryFloor(codes[i]);
+                if (found) return found;
+            }
+        }
+        const cur = tryFloor(state.currentFloor);
+        if (cur) return cur;
+        const keys = Object.keys(state.defects || {}).filter((k) => String(k).startsWith(String(id) + '_'));
+        for (let i = 0; i < keys.length; i++) {
+            const fc = keys[i].slice(String(id).length + 1);
+            const found = tryFloor(fc);
+            if (found) return found;
+        }
+        return null;
+    }
+
+    function focusDefectAfterFloorReady(defectId, floorCode, attempt) {
+        const n = attempt || 0;
+        if (state.currentFloor !== floorCode) return;
+        const ready = !!state.bgImage || n >= 45;
+        if (ready) {
+            if (typeof window.focusDefectOnCanvas === 'function') {
+                window.focusDefectOnCanvas(defectId, { uncovered: true });
+            }
+            if (typeof drawCanvas === 'function') drawCanvas();
+            if (typeof updateMapSelectionBar === 'function') updateMapSelectionBar({ scrollToSelection: true });
+            return;
+        }
+        setTimeout(() => focusDefectAfterFloorReady(defectId, floorCode, n + 1), 100);
+    }
+
     function getGrade3FloorDisplayLabel(floorCode, bldg) {
         bldg = bldg || state.currentBuilding;
         const f = bldg && (bldg.floorsList || []).find(fl => fl.floorCode === floorCode);
@@ -31337,7 +31458,10 @@ document.addEventListener('DOMContentLoaded', () => {
     // 상태조사표 인라인 수정 저장 — 그룹 결함은 동일 필드를 멤버 전체에 반영(위치는 대표만)
     window.toggleSurveyInlineFlag = function(defectId, field) {
         if (window.event) window.event.stopPropagation();
-        const key = `${state.currentBuildingId}_${state.currentFloor}`;
+        const located = findDefectAcrossBuildingFloors(defectId);
+        const key = located
+            ? located.floorKey
+            : `${state.currentBuildingId}_${state.currentFloor}`;
         const list = state.defects[key] || [];
         const defect = list.find(d => d.id === defectId);
         if (!defect) return;
@@ -31363,7 +31487,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
     window.updateSurveyInlineField = function(defectId, field, rawValue) {
         if (window.event) window.event.stopPropagation();
-        const key = `${state.currentBuildingId}_${state.currentFloor}`;
+        const located = findDefectAcrossBuildingFloors(defectId);
+        const key = located
+            ? located.floorKey
+            : `${state.currentBuildingId}_${state.currentFloor}`;
         const list = state.defects[key] || [];
         const consolidated = consolidateDefectGroups(list).find(d =>
             d.id === defectId || (d._groupMemberIds && d._groupMemberIds.indexOf(defectId) !== -1)
@@ -31743,9 +31870,23 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // 상태조사표 행: 셀에서 바로 수정. 상세 모달은 "상세" 버튼으로 연다.
     window.openSurveyRowEditModal = function(defectId) {
-        const key = `${state.currentBuildingId}_${state.currentFloor}`;
-        const defect = (state.defects[key] || []).find(d => d.id === defectId);
+        const located = findDefectAcrossBuildingFloors(defectId);
+        const defect = located
+            ? ((state.defects[located.floorKey] || []).find((d) => d && d.id === defectId) || located.defect)
+            : null;
         if (!defect) return;
+        // 상세 수정 전에 해당 외부 도면으로 맞춰 두면 저장·포커스가 어긋나지 않음
+        if (located && located.floorCode && located.floorCode !== state.currentFloor
+            && isExteriorFloorCode(state.currentFloor) && isExteriorFloorCode(located.floorCode)) {
+            if (elements.floorSelect) {
+                try { elements.floorSelect.value = located.floorCode; } catch (_e) { /* ignore */ }
+            }
+            if (typeof applyFloorMapStyleSettings === 'function') {
+                applyFloorMapStyleSettings(located.floorCode, state.currentBuildingId);
+            }
+            if (typeof loadFloorDrawing === 'function') loadFloorDrawing(located.floorCode);
+            if (typeof refreshFloorDependentUi === 'function') refreshFloorDependentUi();
+        }
         openAddDefectModal(defect.x, defect.y, defect.targetX, defect.targetY, defect, null, { revealMarkingAboveDrawer: true });
     };
 
@@ -31757,9 +31898,20 @@ document.addEventListener('DOMContentLoaded', () => {
         if (floorKey && state.defects[floorKey]) {
             syncDefectGroupNosForFloor(floorKey);
         }
-        const rawDefects = getCurrentFloorDefects();
+        const exteriorSurvey = isExteriorFloorCode(state.currentFloor);
+        if (exteriorSurvey && state.currentBuildingId) {
+            listExteriorFloorCodesForBuilding(state.currentBuildingId).forEach((fc) => {
+                const k = `${state.currentBuildingId}_${fc}`;
+                if (state.defects[k]) {
+                    try { syncDefectGroupNosForFloor(k); } catch (_e) { /* ignore */ }
+                }
+            });
+        }
+        const rawDefects = getSurveyTableSourceDefects();
         const defects = getSurveyRowsForReport(rawDefects);
-        if (elements.surveyFloorTitle) elements.surveyFloorTitle.textContent = state.currentFloor;
+        if (elements.surveyFloorTitle) {
+            elements.surveyFloorTitle.textContent = exteriorSurvey ? '외부 전체' : state.currentFloor;
+        }
 
         renderSurveyTableHeader();
         const columns = getActiveSurveyColumns();
@@ -31791,14 +31943,17 @@ document.addEventListener('DOMContentLoaded', () => {
             const labels = memberIds.flatMap(mid => defectPhotoLabels[mid] || []);
             const photoRemark = labels.length > 0 ? labels.join(' ') : '-';
             const grade3 = isGrade3Building();
+            const rowFloor = d._exteriorFloorCode || state.currentFloor;
             const ctx = {
-                floorCode: state.currentFloor,
+                floorCode: rowFloor,
                 photoRemark,
-                surveyReportNo: formatSurveyReportNo(d, grade3, state.currentFloor)
+                surveyReportNo: formatSurveyReportNo(d, grade3, rowFloor)
             };
             if (grade3) {
                 ctx.gradeNo = ctx.surveyReportNo;
-                ctx.floorDisplayLabel = getGrade3FloorDisplayLabel(state.currentFloor);
+                ctx.floorDisplayLabel = getGrade3FloorDisplayLabel(rowFloor);
+            } else if (exteriorSurvey && rowFloor) {
+                ctx.floorDisplayLabel = getGrade3FloorDisplayLabel(rowFloor);
             }
             return ctx;
         };
@@ -31809,13 +31964,17 @@ document.addEventListener('DOMContentLoaded', () => {
         elements.surveyTableBody.innerHTML = defects.map((d, dIdx) => {
             const ctx = buildRowCtx(d, dIdx);
             const mapHint = d.surveyExtra ? ' (도면 번호는 본번호)' : '';
+            const safeId = String(d.id || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+            const rowTitle = exteriorSurvey
+                ? `클릭하면 ${(ctx.floorDisplayLabel || d._exteriorFloorCode || '해당')} 도면으로 이동`
+                : '클릭하면 도면에서 마킹 위치로 이동';
 
             return `
-                <tr>
+                <tr class="survey-row-clickable" style="cursor:pointer;" title="${rowTitle}" onclick="window.viewDefectOnMapFromSurvey('${safeId}')">
                     ${columns.map(c => `<td data-col="${c.key}">${renderInlineSurveyCellHtml(c.key, d, ctx, colMetrics)}</td>`).join('')}
                     <td data-col="actions" class="survey-row-actions">
-                        <button type="button" class="btn btn-sm btn-outline" onclick="event.stopPropagation(); window.openSurveyRowEditModal('${d.id}')" title="상세 모달">상세</button>
-                        <button type="button" class="btn btn-sm btn-outline survey-btn-map-view" onclick="event.stopPropagation(); window.viewDefectOnMapFromSurvey('${d.id}')" title="결함위치도에서 마킹 선택${mapHint}"><i class="fa-solid fa-map-location-dot"></i> 도면</button>
+                        <button type="button" class="btn btn-sm btn-outline" onclick="event.stopPropagation(); window.openSurveyRowEditModal('${safeId}')" title="상세 모달">상세</button>
+                        <button type="button" class="btn btn-sm btn-outline survey-btn-map-view" onclick="event.stopPropagation(); window.viewDefectOnMapFromSurvey('${safeId}')" title="결함위치도에서 마킹 선택${mapHint}"><i class="fa-solid fa-map-location-dot"></i> 도면</button>
                     </td>
                 </tr>
             `;
