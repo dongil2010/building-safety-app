@@ -9870,30 +9870,61 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // --- 카테고리별 핀/박스 색상 커스터마이징 ---
+    // 기본은 채널 0/255 순색. 예전에 저장해 둔 진한 기본값(#b30000 등)도 새 기본으로 본다.
     const DEFAULT_STYLE_COLORS = {
-        defectStructural: '#b30000',    // 결함위치도 - 구조체 (진한 빨강)
-        defectNonStructural: '#0040c0', // 결함위치도 - 비구조체 (진한 파랑)
-        defectFinish: '#c2410c',        // 결함위치도 - 마감재 (진한 주황)
-        defectStructuralGood: '#15803d',    // 결함위치도 - 구조체 상태양호
-        defectNonStructuralGood: '#15803d', // 결함위치도 - 비구조체 상태양호
-        defectFinishGood: '#15803d',        // 결함위치도 - 마감재 상태양호
-        defectBad: '#b30000',           // 결함위치도(1,2종) - 결함(카테고리 무관)
-        defectGood: '#0040c0',          // 결함위치도(1,2종) - 상태양호
-        defectNewGrade3: '#0040c0',     // 결함위치도(3종) - 신규조사
-        defectExistingGrade3: '#b30000', // 결함위치도(3종) - 기존조사(전회차)
-        defectGoodGrade3: '#000000',    // 결함위치도(3종) - 상태양호
-        priorityManage: '#15803d',      // 결함위치도 - 중점관리
-        ndtMeasure: '#1f1f1f',          // 부재 실측
-        ndtStrength: '#b30000',         // 강도 (빨강)
-        ndtCarbonation: '#0040c0',      // 탄산화 (파랑)
-        ndtTilt: '#b30000',             // 기울기
-        ndtSettlement: '#7e22ce',       // 부동침하 기울기
-        ndtMemberDisp: '#15803d',       // 부재변위
-        ndtFireproof: '#c2410c'         // 내화피복 두께
+        defectStructural: '#ff0000',
+        defectNonStructural: '#0000ff',
+        defectFinish: '#ffff00',
+        defectStructuralGood: '#00ff00',
+        defectNonStructuralGood: '#00ff00',
+        defectFinishGood: '#00ff00',
+        defectBad: '#ff0000',
+        defectGood: '#0000ff',
+        defectNewGrade3: '#0000ff',
+        defectExistingGrade3: '#ff0000',
+        defectGoodGrade3: '#000000',
+        priorityManage: '#00ff00',
+        ndtMeasure: '#000000',
+        ndtStrength: '#ff0000',
+        ndtCarbonation: '#0000ff',
+        ndtTilt: '#ff0000',
+        ndtSettlement: '#ff00ff',
+        ndtMemberDisp: '#00ff00',
+        ndtFireproof: '#ffff00'
+    };
+    const LEGACY_DEFAULT_STYLE_COLORS = {
+        defectStructural: '#b30000',
+        defectNonStructural: '#0040c0',
+        defectFinish: '#c2410c',
+        defectStructuralGood: '#15803d',
+        defectNonStructuralGood: '#15803d',
+        defectFinishGood: '#15803d',
+        defectBad: '#b30000',
+        defectGood: '#0040c0',
+        defectNewGrade3: '#0040c0',
+        defectExistingGrade3: '#b30000',
+        defectGoodGrade3: '#000000',
+        priorityManage: '#15803d',
+        ndtMeasure: '#1f1f1f',
+        ndtStrength: '#b30000',
+        ndtCarbonation: '#0040c0',
+        ndtTilt: '#b30000',
+        ndtSettlement: '#7e22ce',
+        ndtMemberDisp: '#15803d',
+        ndtFireproof: '#c2410c'
     };
 
+    function hexColorKey(c) {
+        return String(c || '').trim().toLowerCase();
+    }
+
     function getStyleColor(key) {
-        return (state.styleColors && state.styleColors[key]) || DEFAULT_STYLE_COLORS[key];
+        const next = DEFAULT_STYLE_COLORS[key];
+        const custom = state.styleColors && state.styleColors[key];
+        if (!custom) return next;
+        const legacy = LEGACY_DEFAULT_STYLE_COLORS[key];
+        if (legacy && hexColorKey(custom) === hexColorKey(legacy)) return next;
+        return custom;
     }
 
     // 결함 종류 텍스트에 "상태양호"가 들어있으면 양호로 인식한다
