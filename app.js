@@ -33367,6 +33367,47 @@ document.addEventListener('DOMContentLoaded', () => {
     // 번들 템플릿(templates/hwpx_survey_template.hwpx, 정기점검은 _regular.hwpx)에 이미 있는
     // "N) 층명" 블록(상태조사표+사진첩+위치도)을 표 ID 하드코딩 대신 문단 구조로 자동 탐지해
     // 건물에 등록된 층 수만큼 채우고, 남는 표본 블록은 뒤에서 지운다.
+    // 슬롯 정리/정밀·정기 판별은 js/shared/hwpx-survey-slots.js (PWA에서 스크립트 누락 대비 폴백).
+    const getHwpxSlotApi = () => (window.BSA && window.BSA.shared && window.BSA.shared.hwpxSurveySlots) || {
+        isPreciseInspectionForHwpx: (t) => (t || '정밀안전점검') !== '정기안전점검',
+        stripExcessStampStatusTables: (stampSlot) => {
+            if (!stampSlot || !stampSlot.statusTbls || stampSlot.statusTbls.length <= 1) return stampSlot;
+            const titlePara = stampSlot.titlePara;
+            const keep = stampSlot.statusTbls[0];
+            const keepPara = (() => {
+                let p = keep;
+                while (p && p.localName !== 'p') p = p.parentNode;
+                return p;
+            })();
+            stampSlot.statusTbls.slice(1).forEach((tbl) => {
+                if (!tbl || !tbl.parentNode) return;
+                let p = tbl;
+                while (p && p.localName !== 'p') p = p.parentNode;
+                if (p && ((keepPara && p === keepPara) || (titlePara && p === titlePara))) {
+                    tbl.parentNode.removeChild(tbl);
+                    return;
+                }
+                if (p && p.parentNode) p.parentNode.removeChild(p);
+                else if (tbl.parentNode) tbl.parentNode.removeChild(tbl);
+            });
+            stampSlot.statusTbls = (keep && keep.parentNode)
+                ? [keep]
+                : stampSlot.statusTbls.filter((t) => t && t.parentNode).slice(0, 1);
+            return stampSlot;
+        },
+        stripSecPrRunsFromClonedParas: (paragraphs, hpNs) => {
+            if (!paragraphs) return;
+            Array.from(paragraphs).forEach((p) => {
+                Array.from(p.childNodes || []).forEach((ch) => {
+                    if (!ch || ch.nodeType !== 1 || ch.localName !== 'run') return;
+                    const hasSecPr = ch.getElementsByTagNameNS(hpNs, 'secPr').length > 0;
+                    const hasTbl = ch.getElementsByTagNameNS(hpNs, 'tbl').length > 0;
+                    const hasPic = ch.getElementsByTagNameNS(hpNs, 'pic').length > 0;
+                    if (hasSecPr && !hasTbl && !hasPic && ch.parentNode) ch.parentNode.removeChild(ch);
+                });
+            });
+        }
+    };
     window.exportHwpxSurveyTable = async function() {
         const bldg = window.state.currentBuilding;
         const bldgId = (bldg && bldg.id) || window.state.currentBuildingId;
@@ -33434,7 +33475,8 @@ document.addEventListener('DOMContentLoaded', () => {
             // 템플릿을 쓴다. 프로그램으로 표/제목 문단을 골라 지우는 방식은 목차 번호·캡션·이미지
             // 슬롯이 얽혀있어 완전히 지우기가 어려워서(제목만 빈 채로 남는 문제 있었음), 애초에
             // 한글에서 해당 섹션을 다 들어낸 별도 템플릿 파일을 만들어 분리했다.
-            const isPreciseInspectionForTemplate = (bldg.inspectionType || '정밀안전점검') === '정밀안전점검';
+            const hwpxSlotApi = getHwpxSlotApi();
+            const isPreciseInspectionForTemplate = hwpxSlotApi.isPreciseInspectionForHwpx(bldg.inspectionType);
             const isGrade3 = true; // exportHwpxSurveyTable3: always grade3
             // 3종시설물은 칠산타워 서식(No./구분/부재 분류/점검내용/발생원인/비고, 구조·비구조
             // 2행 헤더)을 쓰고, 비파괴 장비조사 섹션 유무는 1,2종과 똑같이 정밀/정기 여부로
@@ -34023,39 +34065,23 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             }
             // 여분 샘플 상태조사표(NO.16/31/46…)만 제거. 첫 장(statusTbls[0])은 유지.
-            // 제목 문단의 표를 지우지 않는다 — 1번 표가 제목과 같은 문단에 있음.
-            const owningPara = (node) => {
-                let p = node;
-                while (p && p.localName !== "p") p = p.parentNode;
-                return p;
-            };
-            const stripExcessStampStatusTables = (stampSlot) => {
-                if (!stampSlot || !stampSlot.statusTbls || stampSlot.statusTbls.length <= 1) return;
-                const titlePara = stampSlot.titlePara;
-                const keep = stampSlot.statusTbls[0];
-                stampSlot.statusTbls.slice(1).forEach((tbl) => {
-                    if (!tbl || !tbl.parentNode) return;
-                    const p = owningPara(tbl);
-                    if (p && titlePara && p === titlePara) {
-                        tbl.parentNode.removeChild(tbl);
-                        return;
-                    }
-                    if (p && p.parentNode) p.parentNode.removeChild(p);
-                    else if (tbl.parentNode) tbl.parentNode.removeChild(tbl);
-                });
-                stampSlot.statusTbls = (keep && keep.parentNode) ? [keep] : stampSlot.statusTbls.filter(t => t && t.parentNode).slice(0, 1);
-            };
-            stripExcessStampStatusTables(floorSlots[0]);
+            // keep 표가 들어 있는 문단은 통째로 지우지 않는다 — 1·2종 정밀은 1번 표가
+            // 제목 다음 문단에 있고 같은 문단에 여분 샘플 표가 더 있다.
+            hwpxSlotApi.stripExcessStampStatusTables(floorSlots[0]);
 
             const stampChildren = secChildren();
             const stampParas = stampChildren.slice(stampChildren.indexOf(floorSlots[0].titlePara));
             for (let c = 1; c < floorsData.length; c++) {
                 const cloned = stampParas.map(p => p.cloneNode(true));
                 reassignClonedIds(cloned);
+                hwpxSlotApi.stripSecPrRunsFromClonedParas(cloned, HP_NS);
                 cloned[0].setAttribute('pageBreak', '1'); // 층마다 새 페이지에서 시작(사진 밑 남는 공간에 다음 층이 이어붙지 않도록)
                 cloned.forEach(p => sec.appendChild(p));
             }
             floorSlots = discoverFloorSlots();
+            if (!floorSlots.length) {
+                throw new Error('템플릿에서 상태조사표 블록을 찾지 못했습니다. (표본 표 정리 후 슬롯이 사라졌습니다)');
+            }
             if (floorsData.length > floorSlots.length) {
                 console.error(`층 블록 복제 결과(${floorSlots.length}개)가 필요한 층 수(${floorsData.length}개)보다 적습니다.`);
                 floorsData.length = floorSlots.length;
@@ -34516,7 +34542,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const unusedFloorSlotStart = floorSlots.length > floorsData.length ? floorSlots[floorsData.length].titlePara : null;
 
             // 비파괴조사(NDT) 섹션은 아직 여러 층을 지원하지 않아 지금 화면에 보고 있는 층 기준으로만 채운다.
-            const floorCode = window.state.currentFloor || floorsData[0].floorCode;
+            const floorCode = window.state.currentFloor || (floorsData[0] && floorsData[0].floorCode);
 
             // ---- 비파괴조사(NDT) 5개 섹션: 콘크리트 강도/탄산화/외벽기울기/부동침하/부재처짐 ----
             // 정기안전점검용 템플릿(hwpx_survey_template_regular.hwpx)에는 이 섹션들이 애초에 없으므로
@@ -34524,7 +34550,7 @@ document.addEventListener('DOMContentLoaded', () => {
             // (테두리 스타일 3종 판별 → 기존 행 삭제 → clone해서 채우기)은 위 상태조사표와 완전히
             // 동일한 패턴이라 fillNdtTable로 뽑아 재사용한다. 실패해도 이미 만들어둔 상태조사표/사진/
             // 결함위치도는 살려서 내보내야 하므로 전체를 try/catch로 감싼다.
-            try { if (isPreciseInspectionForTemplate) {
+            try { if (isPreciseInspectionForTemplate && floorCode) {
                 const ndtBldg = window.state.currentBuilding || {};
                 const ndtBldgId = ndtBldg.id || window.state.currentBuildingId;
                 const ndtKey = `${ndtBldgId}_${floorCode}`;
@@ -35637,7 +35663,8 @@ document.addEventListener('DOMContentLoaded', () => {
             // 템플릿을 쓴다. 프로그램으로 표/제목 문단을 골라 지우는 방식은 목차 번호·캡션·이미지
             // 슬롯이 얽혀있어 완전히 지우기가 어려워서(제목만 빈 채로 남는 문제 있었음), 애초에
             // 한글에서 해당 섹션을 다 들어낸 별도 템플릿 파일을 만들어 분리했다.
-            const isPreciseInspectionForTemplate = (bldg.inspectionType || '정밀안전점검') === '정밀안전점검';
+            const hwpxSlotApi = getHwpxSlotApi();
+            const isPreciseInspectionForTemplate = hwpxSlotApi.isPreciseInspectionForHwpx(bldg.inspectionType);
             const isGrade3 = false; // exportHwpxSurveyTable12: always grade1/2
             // 3종시설물은 칠산타워 서식(No./구분/부재 분류/점검내용/발생원인/비고, 구조·비구조
             // 2행 헤더)을 쓰고, 비파괴 장비조사 섹션 유무는 1,2종과 똑같이 정밀/정기 여부로
@@ -36136,38 +36163,22 @@ document.addEventListener('DOMContentLoaded', () => {
                 });
             };
             // 여분 샘플 상태조사표(NO.16/31/46…)만 제거. 첫 장(statusTbls[0])은 유지.
-            // 제목 문단의 표를 지우지 않는다 — 1번 표가 제목과 같은 문단에 있음.
-            const owningPara = (node) => {
-                let p = node;
-                while (p && p.localName !== "p") p = p.parentNode;
-                return p;
-            };
-            const stripExcessStampStatusTables = (stampSlot) => {
-                if (!stampSlot || !stampSlot.statusTbls || stampSlot.statusTbls.length <= 1) return;
-                const titlePara = stampSlot.titlePara;
-                const keep = stampSlot.statusTbls[0];
-                stampSlot.statusTbls.slice(1).forEach((tbl) => {
-                    if (!tbl || !tbl.parentNode) return;
-                    const p = owningPara(tbl);
-                    if (p && titlePara && p === titlePara) {
-                        tbl.parentNode.removeChild(tbl);
-                        return;
-                    }
-                    if (p && p.parentNode) p.parentNode.removeChild(p);
-                    else if (tbl.parentNode) tbl.parentNode.removeChild(tbl);
-                });
-                stampSlot.statusTbls = (keep && keep.parentNode) ? [keep] : stampSlot.statusTbls.filter(t => t && t.parentNode).slice(0, 1);
-            };
-            stripExcessStampStatusTables(floorSlots[0]);
+            // keep 표가 들어 있는 문단은 통째로 지우지 않는다 — 1·2종 정밀은 1번 표가
+            // 제목 다음 문단에 있고 같은 문단에 여분 샘플 표가 더 있다.
+            hwpxSlotApi.stripExcessStampStatusTables(floorSlots[0]);
 
             const stampChildren = secChildren();
             const stampParas = stampChildren.slice(stampChildren.indexOf(floorSlots[0].titlePara));
             for (let c = 1; c < floorsData.length; c++) {
                 const cloned = stampParas.map(p => p.cloneNode(true));
                 reassignClonedIds(cloned);
+                hwpxSlotApi.stripSecPrRunsFromClonedParas(cloned, HP_NS);
                 cloned.forEach(p => sec.appendChild(p));
             }
             floorSlots = discoverFloorSlots();
+            if (!floorSlots.length) {
+                throw new Error('템플릿에서 상태조사표 블록을 찾지 못했습니다. (표본 표 정리 후 슬롯이 사라졌습니다)');
+            }
             if (floorsData.length > floorSlots.length) {
                 console.error(`층 블록 복제 결과(${floorSlots.length}개)가 필요한 층 수(${floorsData.length}개)보다 적습니다.`);
                 floorsData.length = floorSlots.length;
@@ -36588,7 +36599,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const unusedFloorSlotStart = floorSlots.length > floorsData.length ? floorSlots[floorsData.length].titlePara : null;
 
             // 비파괴조사(NDT) 섹션은 아직 여러 층을 지원하지 않아 지금 화면에 보고 있는 층 기준으로만 채운다.
-            const floorCode = window.state.currentFloor || floorsData[0].floorCode;
+            const floorCode = window.state.currentFloor || (floorsData[0] && floorsData[0].floorCode);
 
             // ---- 비파괴조사(NDT) 5개 섹션: 콘크리트 강도/탄산화/외벽기울기/부동침하/부재처짐 ----
             // 정기안전점검용 템플릿(hwpx_survey_template_regular.hwpx)에는 이 섹션들이 애초에 없으므로
@@ -36596,7 +36607,7 @@ document.addEventListener('DOMContentLoaded', () => {
             // (테두리 스타일 3종 판별 → 기존 행 삭제 → clone해서 채우기)은 위 상태조사표와 완전히
             // 동일한 패턴이라 fillNdtTable로 뽑아 재사용한다. 실패해도 이미 만들어둔 상태조사표/사진/
             // 결함위치도는 살려서 내보내야 하므로 전체를 try/catch로 감싼다.
-            try { if (isPreciseInspectionForTemplate) {
+            try { if (isPreciseInspectionForTemplate && floorCode) {
                 const ndtBldg = window.state.currentBuilding || {};
                 const ndtBldgId = ndtBldg.id || window.state.currentBuildingId;
                 const ndtKey = `${ndtBldgId}_${floorCode}`;

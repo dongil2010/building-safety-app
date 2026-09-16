@@ -339,3 +339,13 @@
 > 점검 화면은 img로 보이지만 한글 임베드는 바이트 fetch 필요 → 버킷 CORS 없면 실패.
 > 수정: (1) Worker proxyStorage (2) imageSrcToBytes 프록시 폴백 (3) IDB dataURL 보존 (4) storage-cors.json.
 > **필수**: Cloudflare Worker에 cloudflare-worker/ocr-proxy.js 다시 Deploy.
+
+### ⚡ [Cursor] - 2026-09-16 00:25:00
+> **`[WAITING_REVIEW]` HWPX 상태조사표 — 정밀 표본만 남음 / 정기 내보내기 실패**
+>
+> 원인:
+> 1. 1·2종 정밀 템플릿은 1번 표가 제목 **다음** 문단에 있고 같은 문단에 여분 샘플 표가 있음. `stripExcessStampStatusTables`가 그 문단을 통째로 지워 keep 표까지 사라짐 → rediscover 0슬롯 → 표본 그대로 다운로드.
+> 2. 1·2종 정기 템플릿은 제목 문단에 `hp:secPr`가 있음. 층 틀 복제가 섹션 속성을 복제 → 한글이 파일을 열지 못함.
+> 3. `정밀안전진단`이 `=== '정밀안전점검'`만 정밀로 봐 정기 양식을 씀.
+>
+> 수정: `js/shared/hwpx-survey-slots.js` — keep 문단은 표만 제거, 복제본에서 secPr run 제거, 정밀=정기 아님. 오프라인 fixture: `scripts/test-hwpx-template-slots.py`.
