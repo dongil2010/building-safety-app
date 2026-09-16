@@ -421,3 +421,8 @@
 > **수정**: 화살표만 추가(`surveyNumbered: false`). 「번호 부여」를 눌러야 surveyExtra(-1/-2) 생성. 기존 번호 있는 화살표는 플래그 없음=번호 있음으로 유지. `renumberFloorDefects(preserveOrder:false)` 전체 재부여는 호출하지 않음.
 > 헬퍼: `js/shared/arrow-survey-number.js`
 
+### ⚡ [Grok] - 2026-09-16 11:40:00
+> **(COMPLETED) 한글 출력 층별 도면이 첫 도면만 나가던 문제**
+>
+> 원인: preloadFloorDrawings가 getFloorDrawingSrc 폴백(첫 도면)으로 층 캐시를 오염시키고, HWPX illLocationMapForFloor가 그 캐시를 우선 사용. 성능 커밋이 층마다 캐시 삭제+재preload를 제거하며 재발.
+> 수정: 층 키 래스터만 hydrate/캐시, 렌더는 exact usable URL만, 위치도 채우기 전 해당 층 캐시 삭제.

@@ -31645,35 +31645,42 @@ document.addEventListener('DOMContentLoaded', () => {
             availableFloors = Object.keys(bldg.floorDrawings);
         }
 
-        // 로컬에 없는 도면은 보고서 생성 전에 Firestore에서 미리 일괄 조회
-        if (db && window.state.companyId) {
-            if (!bldg.floorDrawings) bldg.floorDrawings = {};
-            const missingFloors = availableFloors.filter(fc => !bldg.floorDrawings[fc]);
-            if (missingFloors.length > 0) {
-                const companyDrawings = db.collection('safety_app').doc(getCompanyDocId()).collection('floorDrawings');
-                await Promise.all(missingFloors.map(async fc => {
-                    try {
-                        const doc = await companyDrawings.doc(`${bldg.id}_${fc}`).get();
-                        if (doc.exists && doc.data().dataUrl) bldg.floorDrawings[fc] = doc.data().dataUrl;
-                    } catch (e) { /* 도면 없음 -> 기본 플레이스홀더로 폴백 */ }
-                }));
+        // HWPX/보고서용: getFloorDrawingSrc 첫 도면 폴백으로 캐시가 오염되지 않게
+        // 해당 층 키 래스터만 적재한다.
+        if (!bldg.floorDrawings) bldg.floorDrawings = {};
+        for (const fc of availableFloors) {
+            if (typeof hydrateFloorDrawingFromCloud === 'function') {
+                try {
+                    await hydrateFloorDrawingFromCloud(bldg, fc, { localOnly: false });
+                } catch (e) { /* 층별 도면 없음 허용 */ }
+            } else if (typeof ensureOfflineRasterForFloor === 'function') {
+                try { await ensureOfflineRasterForFloor(bldg, fc); } catch (e) { /* ignore */ }
             }
         }
 
         const promises = availableFloors.map((floorCode) => {
             return new Promise((resolve) => {
                 const cacheKey = `${bldg.id}_${floorCode}`;
-                const src = getFloorDrawingSrc(bldg, floorCode);
-                if (!src) return resolve();
-                if (state.floorImageCache[cacheKey] && state.floorImageCache[cacheKey].complete && state.floorImageCache[cacheKey].naturalWidth > 0) {
+                const exact = bldg.floorDrawings && bldg.floorDrawings[floorCode];
+                const src = (typeof isUsableRasterDrawingUrl === 'function' && isUsableRasterDrawingUrl(exact))
+                    ? exact
+                    : null;
+                if (!src) {
+                    if (state.floorImageCache[cacheKey]) delete state.floorImageCache[cacheKey];
                     return resolve();
                 }
+                const cached = state.floorImageCache[cacheKey];
+                if (cached && cached.complete && cached.naturalWidth > 0 && cached.src === src) {
+                    return resolve();
+                }
+                if (cached) delete state.floorImageCache[cacheKey];
                 const img = new Image();
                 img.onload = () => {
                     state.floorImageCache[cacheKey] = img;
                     resolve();
                 };
                 img.onerror = () => {
+                    if (state.floorImageCache[cacheKey]) delete state.floorImageCache[cacheKey];
                     resolve();
                 };
                 img.src = src;
@@ -31682,9 +31689,6 @@ document.addEventListener('DOMContentLoaded', () => {
         await Promise.all(promises);
     }
 
-    // 결함위치도 범례 기본값 — 사용자가 아직 범례를 커스터마이징하지 않았으면 스타일 설정 색상을
-    // 그대로 따라간다(스타일 설정에서 색을 바꾸면 범례도 같이 바뀜). 한 번이라도 범례 설정 모달에서
-    // 추가/수정하면 그 시점 값이 건물별 locationMapLegend에 고정 저장되어 이 함수 대신 그걸 쓴다.
     function cloneLocationMapLegendItems(items) {
         return JSON.parse(JSON.stringify(items || []));
     }
@@ -32242,10 +32246,22 @@ document.addEventListener('DOMContentLoaded', () => {
             const defects = filterMapPlacedDefects(rawDefects);
 
             // 1. Check preloaded image cache or image source for this floor (건물별로 구분된 캐시 키 사용)
-            let loadedImg = state.floorImageCache ? state.floorImageCache[`${currentBldgId}_${floorCode}`] : null;
-            let floorDrawingSrc = getFloorDrawingSrc(bldg, floorCode);
+            // 1. 해당 층 키의 도면만 사용 (다른 층 폴백/오염 캐시 금지)
+            const cacheKey = `${currentBldgId}_${floorCode}`;
+            const exactSrc = (bldg.floorDrawings && bldg.floorDrawings[floorCode]) || null;
+            let floorDrawingSrc = (typeof isUsableRasterDrawingUrl === 'function' && isUsableRasterDrawingUrl(exactSrc))
+                ? exactSrc
+                : null;
             if (!floorDrawingSrc && state.currentFloor === floorCode && state.bgImage && state.bgImage.src) {
                 floorDrawingSrc = state.bgImage.src;
+            }
+            let loadedImg = state.floorImageCache ? state.floorImageCache[cacheKey] : null;
+            if (loadedImg && floorDrawingSrc && loadedImg.src && loadedImg.src !== floorDrawingSrc) {
+                delete state.floorImageCache[cacheKey];
+                loadedImg = null;
+            }
+            if (loadedImg && !(loadedImg.complete && loadedImg.naturalWidth > 0)) {
+                loadedImg = null;
             }
 
             // 2. If image exists, render onto A4 PORTRAIT (세로 규격: 900 x 1270) canvas with defect pins!
@@ -34697,13 +34713,39 @@ document.addEventListener('DOMContentLoaded', () => {
                     // 지상1층 "1F" 도면과 섞여버림), 위치도만큼은 그 폴백을 타지 않도록 정확히
                     // 일치하는 도면이 있는지 직접 먼저 확인한다. 못 찾으면 그냥 위치도를 뺀다.
                     if (!bldgForMap.floorDrawings) bldgForMap.floorDrawings = {};
-                    if (!bldgForMap.floorDrawings[floorCode]) {
+                    // 층별 래스터를 IDB/클라우드에서 정확히 채운 뒤, 오염된 캐시는 버린다.
+                    if (typeof hydrateFloorDrawingFromCloud === 'function') {
+                        try {
+                            await hydrateFloorDrawingFromCloud(bldgForMap, floorCode, { localOnly: false });
+                        } catch (e) { /* 도면 없음 */ }
+                    } else if (!bldgForMap.floorDrawings[floorCode]) {
                         const idbDrawing = await idbGet('floorDrawings', `${bldgForMap.id}_${floorCode}`);
                         if (idbDrawing) bldgForMap.floorDrawings[floorCode] = idbDrawing;
                     }
-                    const hasExactDrawing = !!bldgForMap.floorDrawings[floorCode];
+                    const cacheKey = `${bldgForMap.id}_${floorCode}`;
+                    if (state.floorImageCache) delete state.floorImageCache[cacheKey];
+                    const hasExactDrawing = (typeof isUsableRasterDrawingUrl === 'function')
+                        ? isUsableRasterDrawingUrl(bldgForMap.floorDrawings[floorCode])
+                        : !!bldgForMap.floorDrawings[floorCode];
 
-                    const mapDataUrl = hasExactDrawing ? renderFloorPlanCanvasDataUrl(floorCode) : null;
+                    let mapDataUrl = null;
+                    if (hasExactDrawing) {
+                        mapDataUrl = renderFloorPlanCanvasDataUrl(floorCode);
+                        if (!mapDataUrl) {
+                            const src = bldgForMap.floorDrawings[floorCode];
+                            await new Promise((resolve) => {
+                                const img = new Image();
+                                img.onload = () => {
+                                    if (!state.floorImageCache) state.floorImageCache = {};
+                                    state.floorImageCache[cacheKey] = img;
+                                    resolve();
+                                };
+                                img.onerror = () => resolve();
+                                img.src = src;
+                            });
+                            mapDataUrl = renderFloorPlanCanvasDataUrl(floorCode);
+                        }
+                    }
                     if (mapDataUrl) {
                         const mapPic = locationMapTbl.getElementsByTagNameNS(HP_NS, 'pic')[0];
                         // 기존에는 표본 그림 자체의 curSz(표본 도면 비율에 맞춰 이미 안쪽으로 줄어들어
@@ -36804,13 +36846,39 @@ document.addEventListener('DOMContentLoaded', () => {
                     // 지상1층 "1F" 도면과 섞여버림), 위치도만큼은 그 폴백을 타지 않도록 정확히
                     // 일치하는 도면이 있는지 직접 먼저 확인한다. 못 찾으면 그냥 위치도를 뺀다.
                     if (!bldgForMap.floorDrawings) bldgForMap.floorDrawings = {};
-                    if (!bldgForMap.floorDrawings[floorCode]) {
+                    // 층별 래스터를 IDB/클라우드에서 정확히 채운 뒤, 오염된 캐시는 버린다.
+                    if (typeof hydrateFloorDrawingFromCloud === 'function') {
+                        try {
+                            await hydrateFloorDrawingFromCloud(bldgForMap, floorCode, { localOnly: false });
+                        } catch (e) { /* 도면 없음 */ }
+                    } else if (!bldgForMap.floorDrawings[floorCode]) {
                         const idbDrawing = await idbGet('floorDrawings', `${bldgForMap.id}_${floorCode}`);
                         if (idbDrawing) bldgForMap.floorDrawings[floorCode] = idbDrawing;
                     }
-                    const hasExactDrawing = !!bldgForMap.floorDrawings[floorCode];
+                    const cacheKey = `${bldgForMap.id}_${floorCode}`;
+                    if (state.floorImageCache) delete state.floorImageCache[cacheKey];
+                    const hasExactDrawing = (typeof isUsableRasterDrawingUrl === 'function')
+                        ? isUsableRasterDrawingUrl(bldgForMap.floorDrawings[floorCode])
+                        : !!bldgForMap.floorDrawings[floorCode];
 
-                    const mapDataUrl = hasExactDrawing ? renderFloorPlanCanvasDataUrl(floorCode) : null;
+                    let mapDataUrl = null;
+                    if (hasExactDrawing) {
+                        mapDataUrl = renderFloorPlanCanvasDataUrl(floorCode);
+                        if (!mapDataUrl) {
+                            const src = bldgForMap.floorDrawings[floorCode];
+                            await new Promise((resolve) => {
+                                const img = new Image();
+                                img.onload = () => {
+                                    if (!state.floorImageCache) state.floorImageCache = {};
+                                    state.floorImageCache[cacheKey] = img;
+                                    resolve();
+                                };
+                                img.onerror = () => resolve();
+                                img.src = src;
+                            });
+                            mapDataUrl = renderFloorPlanCanvasDataUrl(floorCode);
+                        }
+                    }
                     if (mapDataUrl) {
                         const mapPic = locationMapTbl.getElementsByTagNameNS(HP_NS, 'pic')[0];
                         // 기존에는 표본 그림 자체의 curSz(표본 도면 비율에 맞춰 이미 안쪽으로 줄어들어
