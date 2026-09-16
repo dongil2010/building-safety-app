@@ -9,6 +9,32 @@
 > 클라우드에서 오는 요청을 막는 정책("User location is not supported for the API use")에 걸려
 > 거의 항상 실패해서 Cloud Vision API로 교체했다. Cloud Vision API는 애초에 서버에서 자동
 > 호출하는 용도로 만들어진 정식 OCR 상품이라 이 문제가 없다.
+>
+> 2026-09-16 실측: Cloud Vision은 도트프린터 측정지 표에서 20개 중 9개꼴로 인식 자체를 실패했다
+> (맥락 이해 없이 글자만 읽어서). Gemini는 표 맥락을 이해해서 인식률이 훨씬 높았던 걸로 기억됨 —
+> 그래서 `GEMINI_API_KEY`가 설정돼 있으면 **Gemini를 먼저 시도하고, 실패하면 Cloud Vision으로
+> 자동 전환**하도록 바꿨다(정확도 + 안정성 둘 다). 아래 "0번" 참고.
+
+## 0. (신규) Gemini 유료 키 추가 — 인식률 올리기
+
+Cloud Vision만으로 인식률이 낮다면, 이미 발급받은 **Cloud Vision용 결제(Billing) 프로젝트**에
+Gemini API도 켜서 `GEMINI_API_KEY` Secret을 추가하세요. 무료 AI Studio 키가 겪던 지역 제한은
+결제 연결된 프로젝트 키에서는 안 겪을 가능성이 높습니다(단, 100% 보장은 아니라 실패 시 Worker가
+자동으로 Cloud Vision으로 넘어가게 이미 만들어뒀습니다).
+
+1. https://aistudio.google.com/apikey 접속
+2. **"Get API key"** → **"Create API key"** → 키를 발급받을 프로젝트로, 아래 1번에서 만든
+   **Cloud Vision용(결제 연결된) 프로젝트를 선택** (새 프로젝트로 만들지 말 것 — 결제가 안 걸린
+   기본 프로젝트로 만들면 예전과 같은 지역 제한을 다시 겪을 수 있음)
+3. 생성된 키 복사
+4. Cloudflare 대시보드 → 운영 Worker(`frosty-king-12ef`) → **Settings → Variables** →
+   **Secret 추가**: 이름 `GEMINI_API_KEY`, 값은 방금 발급받은 키 → "Encrypt" 상태로 저장
+   (기존 `GOOGLE_VISION_API_KEY`는 그대로 두세요 — 폴백용으로 계속 씀)
+5. ocr-proxy.js 코드 재배포(아래 4번 참고) — 코드가 `GEMINI_API_KEY` 유무를 보고 자동 분기하므로
+   URL이나 앱 쪽 코드는 안 바꿔도 됩니다.
+
+이 키만 새로 등록하고 코드를 재배포하면, 다음 OCR 요청부터 자동으로 Gemini가 먼저 시도됩니다.
+응답의 `source` 필드(`"gemini"`/`"vision"`)로 실제 어느 쪽이 답했는지 확인할 수 있습니다.
 
 ## 1. Google Cloud Vision API 키 발급
 
@@ -108,7 +134,8 @@ curl -sS -X POST https://frosty-king-12ef.dongilgujo2010.workers.dev \
    반영. 대시보드는 파일 하나라서, `ocr-proxy.js` 맨 위의
    `import { isAllowedStorageUrl } from './storage-url-allowlist.js';` 를 지우고
    `storage-url-allowlist.js` 의 `isAllowedStorageUrl` 함수를 **같은 파일 상단에 붙여 넣은 뒤** Deploy.
-3. Settings → Variables 의 `GOOGLE_VISION_API_KEY` Secret은 그대로.
+3. Settings → Variables 의 `GOOGLE_VISION_API_KEY` Secret은 그대로. 인식률 개선용 `GEMINI_API_KEY`를
+   새로 추가하려면 0번 참고.
 
 ## 참고
 
