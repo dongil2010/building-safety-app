@@ -21804,16 +21804,14 @@ document.addEventListener('DOMContentLoaded', () => {
                     return;
                 }
                 if (selectId === 'defectComponent') {
-                    // 수기 부재 명칭은 이번 결함 값으로만 반영.
-                    // 퀵픽 버튼/커스텀 목록에는 넣지 않음(명시적 추가 UI만 버튼 생성).
+                    // 부재는 '직접 추가'로만 목록/칩에 반영. 입력칸 타이핑만으로는 select/커스텀/칩에 넣지 않음.
                     const cat = document.getElementById('defectCategory')?.value || '구조체';
-                    migrateDefectComponentStateShape();
                     const preset = DEFECT_COMPONENT_PRESET[cat] || [];
-                    if (preset.includes(v) || (window.state.customDefectComponents?.[cat] || []).includes(v)) {
+                    const customs = (window.state.customDefectComponents && window.state.customDefectComponents[cat]) || [];
+                    if (preset.includes(v) || customs.includes(v)) {
                         populateDefectComponentDropdown(cat, v);
-                    } else {
-                        ensureDefectComboOption(select, v);
-                        select.value = v;
+                    } else if (select) {
+                        if (!isDefectComboCustomToken(select.value)) select.selectedIndex = -1;
                     }
                 } else {
                     ensureDefectComboOption(select, v);
