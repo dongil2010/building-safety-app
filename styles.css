@@ -4783,9 +4783,11 @@ html:not(.layout-desktop) .survey-inline-select {
     box-sizing: border-box;
 }
 
-/* 두께 전용: 두 번째 칸만 숨기고 첫 칸은 50% 유지 → 설계/실측 입력 폭 동일 */
+/* 두께/지름(원형기둥) 전용: 두 번째 칸만 숨기고 첫 칸은 50% 유지 → 설계/실측 입력 폭 동일 */
 #ndtModal .ndt-dim-thickness #ndtDesignSecondaryGroup,
-#ndtModal .ndt-dim-thickness #ndtMeasuredSecondaryGroup {
+#ndtModal .ndt-dim-thickness #ndtMeasuredSecondaryGroup,
+#ndtModal .ndt-dim-circle #ndtDesignSecondaryGroup,
+#ndtModal .ndt-dim-circle #ndtMeasuredSecondaryGroup {
     visibility: hidden;
     pointer-events: none;
 }
@@ -4894,7 +4896,9 @@ html:not(.layout-desktop) .survey-inline-select {
     }
 
     #ndtModal .ndt-dim-thickness #ndtDesignSecondaryGroup,
-    #ndtModal .ndt-dim-thickness #ndtMeasuredSecondaryGroup {
+    #ndtModal .ndt-dim-thickness #ndtMeasuredSecondaryGroup,
+    #ndtModal .ndt-dim-circle #ndtDesignSecondaryGroup,
+    #ndtModal .ndt-dim-circle #ndtMeasuredSecondaryGroup {
         display: none !important;
     }
 

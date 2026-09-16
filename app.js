@@ -9054,7 +9054,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const NDT_FINISH_STATE_PRESET = ['노출', '몰탈마감', '석재마감', '타일마감', '기타'];
     // 부재 구분 기본 목록 — 직접 입력·추가 항목은 state.customNdtComponents에 저장
     const NDT_COMPONENT_PRESET = [
-        '기둥', '철골기둥', 'SRC기둥', '큰보',
+        '기둥', '원형기둥', '철골기둥', 'SRC기둥', '큰보',
         '작은보', '철골거더', '철골빔', '캔틸레버보',
         '슬래브', '데크슬래브', 'RC벽체', '조적벽체'
     ];
@@ -10554,11 +10554,12 @@ document.addEventListener('DOMContentLoaded', () => {
         return t.includes('철골');
     }
 
-    // 부재 실측 치수 입력 방식: steel | beam(폭×춤) | column(정면·측면) | thickness(두께만)
+    // 부재 실측 치수 입력 방식: steel | beam(폭×춤) | column(정면·측면) | circle(지름) | thickness(두께만)
     function getNdtMeasureDimKind(name) {
         const t = String(name || '').trim();
         if (isNdtSteelComponent(t)) return 'steel';
         if (/슬래브|벽체/.test(t)) return 'thickness';
+        if (/원형/.test(t)) return 'circle';
         if (/기둥/.test(t)) return 'column';
         if (/보|거더|빔/.test(t)) return 'beam';
         return 'beam';
@@ -10593,6 +10594,16 @@ document.addEventListener('DOMContentLoaded', () => {
             designPrimaryPh: '예: 200',
             designSecondaryPh: '',
             measuredPrimaryPh: '예: 198',
+            measuredSecondaryPh: ''
+        },
+        circle: {
+            designPrimary: '📐 설계 지름 (mm)',
+            designSecondary: '',
+            measuredPrimary: '📐 실측 지름 (mm)',
+            measuredSecondary: '',
+            designPrimaryPh: '예: 500',
+            designSecondaryPh: '',
+            measuredPrimaryPh: '예: 497',
             measuredSecondaryPh: ''
         }
     };
@@ -10638,12 +10649,12 @@ document.addEventListener('DOMContentLoaded', () => {
         if (steelMeasured) steelMeasured.style.display = isSteel ? 'flex' : 'none';
         [rcDesign, rcMeasured, measuredRoot].forEach(root => {
             if (!root) return;
-            root.classList.remove('ndt-dim-beam', 'ndt-dim-column', 'ndt-dim-thickness');
+            root.classList.remove('ndt-dim-beam', 'ndt-dim-column', 'ndt-dim-thickness', 'ndt-dim-circle');
             if (!isSteel) root.classList.add(`ndt-dim-${kind}`);
         });
         const secDesign = document.getElementById('ndtDesignSecondaryGroup');
         const secMeasured = document.getElementById('ndtMeasuredSecondaryGroup');
-        const showSecondary = !isSteel && kind !== 'thickness';
+        const showSecondary = !isSteel && kind !== 'thickness' && kind !== 'circle';
         // display:none 대신 숨김 유지해 2열 그리드(50%) 폭을 설계/실측 동일하게 맞춤
         [secDesign, secMeasured].forEach(el => {
             if (!el) return;
@@ -10734,6 +10745,12 @@ document.addEventListener('DOMContentLoaded', () => {
             const measuredW = (item.measuredWidth !== undefined && item.measuredWidth !== null) ? item.measuredWidth : item.avgValue;
             return measuredW != null && measuredW !== '' ? String(measuredW) : '-';
         }
+        if (dimMode === 'circle') {
+            // 원형기둥은 폭×춤이 아니라 지름 하나 — 표/보고서에서 폭과 헷갈리지 않게 Φ(지름 기호) 접두
+            if (kind === 'design') return item.designWidth != null && item.designWidth !== '' ? `Φ${item.designWidth}` : '-';
+            const measuredW = (item.measuredWidth !== undefined && item.measuredWidth !== null) ? item.measuredWidth : item.avgValue;
+            return measuredW != null && measuredW !== '' ? `Φ${measuredW}` : '-';
+        }
         if (kind === 'design') {
             return item.designWidth ? `${item.designWidth}${item.designDepth ? joiner + item.designDepth : ''}` : '-';
         }
@@ -10749,6 +10766,15 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!(designW > 0) || !(measuredW > 0)) return null;
         const designArea = designD > 0 ? designW * designD : designW;
         const measuredArea = measuredD > 0 ? measuredW * measuredD : measuredW;
+        return gradeFromSectionRatio((measuredArea / designArea) * 100);
+    }
+
+    // 원형기둥: 단면적은 지름의 제곱에 비례(π(d/2)²) — 정사각형처럼 폭×춤이 아니라
+    // 지름 하나만 입력받고, 여기서 면적으로 환산해 동일한 등급 기준(a~e)을 적용한다.
+    function calcCircleSectionGrade(designDiameter, measuredDiameter) {
+        if (!(designDiameter > 0) || !(measuredDiameter > 0)) return null;
+        const designArea = Math.PI * (designDiameter / 2) ** 2;
+        const measuredArea = Math.PI * (measuredDiameter / 2) ** 2;
         return gradeFromSectionRatio((measuredArea / designArea) * 100);
     }
 
@@ -15546,19 +15572,29 @@ document.addEventListener('DOMContentLoaded', () => {
                     sectionRatio = sectionCalc.ratio;
                     sectionGrade = sectionCalc.code;
                 }
+            } else if (dimKind === 'circle') {
+                designWidth = parseNdtDimNumber(document.getElementById('ndtDesignWidth')?.value);
+                measuredWidth = parseNdtDimNumber(document.getElementById('ndtMeasuredWidth')?.value);
+                if (measuredWidth !== null) avg = String(measuredWidth);
+                const sectionCalc = calcCircleSectionGrade(designWidth, measuredWidth);
+                if (sectionCalc) {
+                    sectionRatio = sectionCalc.ratio;
+                    sectionGrade = sectionCalc.code;
+                }
             } else {
+                const noSecondary = dimKind === 'thickness';
                 const designParsed = parseNdtDimensionPair(
                     document.getElementById('ndtDesignWidth')?.value,
-                    dimKind === 'thickness' ? '' : document.getElementById('ndtDesignDepth')?.value
+                    noSecondary ? '' : document.getElementById('ndtDesignDepth')?.value
                 );
                 const measuredParsed = parseNdtDimensionPair(
                     document.getElementById('ndtMeasuredWidth')?.value,
-                    dimKind === 'thickness' ? '' : document.getElementById('ndtMeasuredDepth')?.value
+                    noSecondary ? '' : document.getElementById('ndtMeasuredDepth')?.value
                 );
                 designWidth = designParsed.w;
-                designDepth = dimKind === 'thickness' ? null : designParsed.d;
+                designDepth = noSecondary ? null : designParsed.d;
                 measuredWidth = measuredParsed.w;
-                measuredDepth = dimKind === 'thickness' ? null : measuredParsed.d;
+                measuredDepth = noSecondary ? null : measuredParsed.d;
                 if (measuredWidth !== null) avg = String(measuredWidth);
                 const sectionCalc = calcSectionGrade(designWidth, designDepth, measuredWidth, measuredDepth);
                 if (sectionCalc) {
@@ -15863,6 +15899,10 @@ document.addEventListener('DOMContentLoaded', () => {
             if (dimKind === 'steel') {
                 const designSteel = readNdtSteelDims('ndtDesign');
                 calc = calcSteelSectionGrade(designSteel, resolveNdtSteelMeasuredDims(designSteel, readNdtSteelDims('ndtMeasured')));
+            } else if (dimKind === 'circle') {
+                const designDiameter = parseNdtDimNumber(document.getElementById('ndtDesignWidth')?.value);
+                const measuredDiameter = parseNdtDimNumber(document.getElementById('ndtMeasuredWidth')?.value);
+                calc = calcCircleSectionGrade(designDiameter, measuredDiameter);
             } else {
                 const design = parseNdtDimensionPair(
                     document.getElementById('ndtDesignWidth')?.value,
