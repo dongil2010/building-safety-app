@@ -2508,6 +2508,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     const _buildingMetaMerge = (window.BSA && window.BSA.buildingMetaMerge) || null;
+    const _legendLayout = (window.BSA && window.BSA.legendLayout) || null;
     const BUILDING_LOCAL_META_KEYS = (_buildingMetaMerge && _buildingMetaMerge.KEYS) || [
         'inspectionType', 'inspectionYear', 'inspectionPeriod', 'latestSurveyRoundKey',
         'floorsOrderManual',
@@ -2644,6 +2645,16 @@ document.addEventListener('DOMContentLoaded', () => {
                     applyLocalBuildingMeta(merged, localMatch);
                 }
                 if (localMatch && localMatch._pendingCloudSync) merged._pendingCloudSync = true;
+            }
+            if (_legendLayout && typeof _legendLayout.overlayOnMerged === 'function') {
+                _legendLayout.overlayOnMerged(merged, localMatch);
+            } else if (localMatch) {
+                if (Array.isArray(localMatch.locationMapLegend) && localMatch.locationMapLegend.length) {
+                    merged.locationMapLegend = JSON.parse(JSON.stringify(localMatch.locationMapLegend));
+                }
+                if (localMatch.locationMapLegendBox) {
+                    merged.locationMapLegendBox = { ...localMatch.locationMapLegendBox };
+                }
             }
             return merged;
         });
@@ -25396,6 +25407,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 state.locationMapLegendBox.x = imgX - legendDragOffsetX;
                 state.locationMapLegendBox.y = imgY - legendDragOffsetY;
             }
+            const legendDims = (typeof getFloorPlanDisplayDims === 'function')
+                ? getFloorPlanDisplayDims()
+                : { w: 0, h: 0 };
+            if (_legendLayout && typeof _legendLayout.stampNormalized === 'function') {
+                _legendLayout.stampNormalized(state.locationMapLegendBox, legendDims.w, legendDims.h);
+            }
             drawCanvas();
             return;
         }
@@ -25675,8 +25692,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (isResizingLegend) {
             isResizingLegend = false;
-            saveStateToLocalStorage();
             persistCurrentBuildingLocationMapLegend();
+            saveStateToLocalStorage();
             if (elements.planCanvas) {
                 elements.planCanvas.style.cursor = getMapCanvasCursor();
             }
@@ -25684,8 +25701,8 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         if (isDraggingLegend) {
             isDraggingLegend = false;
-            saveStateToLocalStorage();
             persistCurrentBuildingLocationMapLegend();
+            saveStateToLocalStorage();
             if (elements.planCanvas) {
                 elements.planCanvas.style.cursor = getMapCanvasCursor();
             }
@@ -27978,6 +27995,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (prevFloor && state.currentBuildingId) {
                 saveFloorMapStyleSettings(prevFloor, state.currentBuildingId);
                 saveFloorDrawingRotation(state.currentBuildingId, prevFloor, state.rotationAngle || 0);
+                persistCurrentBuildingLocationMapLegend();
             }
             window.state.currentFloor = e.target.value;
             applyFloorMapStyleSettings(e.target.value, state.currentBuildingId);
@@ -31572,6 +31590,12 @@ document.addEventListener('DOMContentLoaded', () => {
         if (items && items.length) {
             bldg.locationMapLegend = cloneLocationMapLegendItems(items);
         }
+        if (state.locationMapLegendBox && _legendLayout && typeof _legendLayout.stampNormalized === 'function') {
+            const dims = (typeof getFloorPlanDisplayDims === 'function')
+                ? getFloorPlanDisplayDims()
+                : { w: 0, h: 0 };
+            _legendLayout.stampNormalized(state.locationMapLegendBox, dims.w, dims.h);
+        }
         bldg.locationMapLegendBox = state.locationMapLegendBox
             ? { ...state.locationMapLegendBox }
             : null;
@@ -31580,20 +31604,48 @@ document.addEventListener('DOMContentLoaded', () => {
     function applyBuildingLocationMapLegend(bldg, opts) {
         if (!bldg) return;
         const forceDefault = !!(opts && opts.forceDefault);
-        if (!forceDefault && bldg.locationMapLegend && bldg.locationMapLegend.length) {
+        const defaultItems = getDefaultLocationMapLegend(bldg);
+        if (_legendLayout && typeof _legendLayout.applyFromBuilding === 'function') {
+            const applied = _legendLayout.applyFromBuilding(bldg, {
+                items: state.locationMapLegend,
+                box: state.locationMapLegendBox
+            }, { forceDefault, defaultItems });
+            state.locationMapLegend = applied.items;
+            state.locationMapLegendBox = applied.box;
+            if (applied.writeItemsToBuilding !== undefined) {
+                bldg.locationMapLegend = applied.writeItemsToBuilding
+                    ? cloneLocationMapLegendItems(applied.writeItemsToBuilding)
+                    : applied.writeItemsToBuilding;
+            }
+            if (applied.writeBoxToBuilding !== undefined) {
+                bldg.locationMapLegendBox = applied.writeBoxToBuilding
+                    ? { ...applied.writeBoxToBuilding }
+                    : null;
+            }
+            syncLocationMapLegendLockButton();
+            return;
+        }
+        // 헬퍼 미로드 시 폴백 — 항목이 없어도 박스는 지우지 않는다
+        if (forceDefault) {
+            state.locationMapLegend = cloneLocationMapLegendItems(defaultItems);
+            state.locationMapLegendBox = null;
+            bldg.locationMapLegend = cloneLocationMapLegendItems(state.locationMapLegend);
+            bldg.locationMapLegendBox = null;
+            syncLocationMapLegendLockButton();
+            return;
+        }
+        if (bldg.locationMapLegend && bldg.locationMapLegend.length) {
             state.locationMapLegend = cloneLocationMapLegendItems(bldg.locationMapLegend);
-        state.locationMapLegendBox = bldg.locationMapLegendBox
-            ? { ...bldg.locationMapLegendBox }
-            : null;
+        } else {
+            state.locationMapLegend = cloneLocationMapLegendItems(defaultItems);
+        }
+        if (bldg.locationMapLegendBox) {
+            state.locationMapLegendBox = { ...bldg.locationMapLegendBox };
+        } else if (state.locationMapLegendBox) {
+            bldg.locationMapLegendBox = { ...state.locationMapLegendBox };
+        }
         syncLocationMapLegendLockButton();
-        return;
     }
-    state.locationMapLegend = getDefaultLocationMapLegend(bldg);
-    state.locationMapLegendBox = null;
-    bldg.locationMapLegend = cloneLocationMapLegendItems(state.locationMapLegend);
-    bldg.locationMapLegendBox = null;
-    syncLocationMapLegendLockButton();
-}
 
     function persistCurrentBuildingLocationMapLegend() {
         if (state.currentBuilding) saveBuildingLocationMapLegend(state.currentBuilding);
@@ -31924,8 +31976,20 @@ document.addEventListener('DOMContentLoaded', () => {
         const dims = measureLocationMapLegendTable(ctx, items, scale);
         const { col1W, col2W, boxW, boxH, rowH, headerRowH, fontSize, cellPadX, cellPadY } = dims;
         const margin = 16 * scale;
-        const boxX = (box.x !== undefined) ? box.x : margin;
-        const boxY = (box.y !== undefined) ? box.y : margin;
+        const origin = (_legendLayout && typeof _legendLayout.resolveOrigin === 'function')
+            ? _legendLayout.resolveOrigin(box, imgW, imgH, margin)
+            : {
+                x: (box.x !== undefined) ? box.x : margin,
+                y: (box.y !== undefined) ? box.y : margin
+            };
+        const boxX = origin.x;
+        const boxY = origin.y;
+        if (state.locationMapLegendBox && (state.locationMapLegendBox.nx == null || state.locationMapLegendBox.ny == null)
+            && _legendLayout && typeof _legendLayout.stampNormalized === 'function') {
+            state.locationMapLegendBox.x = boxX;
+            state.locationMapLegendBox.y = boxY;
+            _legendLayout.stampNormalized(state.locationMapLegendBox, imgW, imgH);
+        }
         const lineW = Math.max(1, 1.2 * scale);
         const legendRot = counterRotateDeg || 0;
 
@@ -32021,8 +32085,14 @@ document.addEventListener('DOMContentLoaded', () => {
         const scale = resolveLocationMapLegendDrawScale(box, imgW, imgH);
         const dims = measureLocationMapLegendTable(measureCtx || null, items, scale);
         const margin = 16 * scale;
-        const boxX = (box.x !== undefined) ? box.x : margin;
-        const boxY = (box.y !== undefined) ? box.y : margin;
+        const origin = (_legendLayout && typeof _legendLayout.resolveOrigin === 'function')
+            ? _legendLayout.resolveOrigin(box, imgW, imgH, margin)
+            : {
+                x: (box.x !== undefined) ? box.x : margin,
+                y: (box.y !== undefined) ? box.y : margin
+            };
+        const boxX = origin.x;
+        const boxY = origin.y;
         return {
             boxX, boxY,
             boxW: dims.boxW,
@@ -42487,6 +42557,9 @@ document.addEventListener('DOMContentLoaded', () => {
         mergedDeletedBuildings.forEach(purgeLocalStateForDeletedBuilding);
 
         if (data.buildings && Array.isArray(data.buildings)) {
+            if (typeof persistCurrentBuildingLocationMapLegend === 'function') {
+                persistCurrentBuildingLocationMapLegend();
+            }
             const prevAssets = captureBuildingDrawingAssetsById(window.state.buildings);
             window.state.buildings = mergeBuildingsForSync(
                 data.buildings,
@@ -42596,6 +42669,11 @@ document.addEventListener('DOMContentLoaded', () => {
         if (data.locationMapLegendBox) {
             window.state.locationMapLegendBox = data.locationMapLegendBox;
             isChanged = true;
+        }
+        // 회사 문서의 공용 범례 박스가 건물별 배치를 덮지 않게, 현재 건물 값을 다시 적용
+        if (typeof refreshCurrentBuildingFromState === 'function') refreshCurrentBuildingFromState();
+        if (typeof applyBuildingLocationMapLegend === 'function' && window.state.currentBuilding) {
+            applyBuildingLocationMapLegend(window.state.currentBuilding);
         }
         // companyDefectPresets는 더 이상 회사 공용이 아님 — 계정당 users/{uid}.defectPinPresets 사용
 
@@ -42845,6 +42923,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 window.state.deletedBuildingIds
             );
             window.state.deletedBuildingIds = mergedDeletedBuildings;
+            if (typeof persistCurrentBuildingLocationMapLegend === 'function') {
+                persistCurrentBuildingLocationMapLegend();
+            }
             let prevAssets = captureBuildingDrawingAssetsById(window.state.buildings);
             window.state.buildings = mergeBuildingsForSync(
                 serverData.buildings,
@@ -43021,6 +43102,9 @@ document.addEventListener('DOMContentLoaded', () => {
             });
             if (state.currentTab === 'tab-map' && state.currentBuildingId && state.currentFloor) {
                 refreshCurrentBuildingFromState();
+                if (typeof applyBuildingLocationMapLegend === 'function' && state.currentBuilding) {
+                    applyBuildingLocationMapLegend(state.currentBuilding);
+                }
                 if (state.bgImage && typeof syncFloorDrawingTierForView === 'function') {
                     syncFloorDrawingTierForView();
                 } else if (typeof loadFloorDrawing === 'function') {

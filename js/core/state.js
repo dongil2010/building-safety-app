@@ -29,7 +29,7 @@ if (!window.state) {
         surveyColumns: null, // 상태조사표 컬럼 순서/이름 커스터마이징 (미지정 시 DEFAULT_SURVEY_COLUMNS 사용)
         surveyColumnsGrade3: null, // 제3종시설물용 상태조사표 컬럼 커스터마이징 (미지정 시 GRADE3_SURVEY_COLUMNS 사용)
         locationMapLegend: null, // 결함위치도 범례 항목 커스터마이징 (미지정 시 스타일 설정 색상 기반 기본 범례 사용)
-        locationMapLegendBox: null, // 결함위치도 범례 박스 위치/크기 커스터마이징 {x, y, scale} - x/y는 결함 핀과 동일한 도면 원본 픽셀 좌표(미지정 시 좌하단 기본 위치·크기 사용)
+        locationMapLegendBox: null, // {x,y,scale,nx,ny,locked} x/y=도면픽셀, nx/ny=0..1 상대좌표(층·해상도 달라도 위치 유지)
         defectSizeMode: 'combined', // 'combined' | 'split' - 결함크기(균열폭/균열길이) 표시 방식
         bgImage: null,
         /** PDF 도면 4000px 미리보기 좌표계 — 핀·벡터 PDF 출력 기준 (표시 타일과 분리) */
