@@ -396,3 +396,14 @@
 > 완료 시에만 `areaPoints`/AABB 교체. 번호·사진·내용 유지. 취소는 원본 기하 유지.
 > 네모/타원도 버튼 활성 — 완료 시 다각형으로 변환 (미리 변환하지 않아 취소 안전).
 
+### ⚡ [Cursor] - 2026-09-16 01:20:00
+> **`[IN_PROGRESS]` 결함위치도 범례 크기·위치가 기본값으로 되돌아가던 문제**
+>
+> 원인 (코드 확인):
+> 1. `applyBuildingLocationMapLegend`가 범례 **항목**이 없으면 박스까지 `null`로 지움 (드래그/리사이즈만 한 경우)
+> 2. `saveStateToLocalStorage`가 persist보다 먼저 실행 → localStorage 건물 객체에 새 박스 없음 → 재진입 시 덮어씀
+> 3. `mergeBuildingsForSync`가 원격을 베이스로 써서 로컬 `locationMapLegendBox` 탈락
+> 4. 회사 문서 공용 `locationMapLegendBox`가 건물별 배치를 덮음
+>
+> 수정: `js/core/legend-layout.js` — 박스는 항목과 독립 복원, 로컬 박스 overlay, nx/ny 상대좌표로 층 전환 유지.
+
