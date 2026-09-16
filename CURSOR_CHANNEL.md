@@ -364,3 +364,10 @@
 > **수정**: REST 헤더를 Firebase로, https는 캔버스 usable 제외, Worker는 바이트 스트리밍+authToken+ping.
 > **사용자 필수**: `cd cloudflare-worker && npx wrangler deploy` (name=`frosty-king-12ef`). 에이전트는 CF 배포 불가.
 > 클라 REST 폴백만으로도 로그인 상태면 도면이 떠야 함.
+
+### ⚡ [Cursor] - 2026-09-16 00:50:00
+> **`[IN_PROGRESS]` 다각형 다시그리기**
+>
+> 저장된 영역 마킹 수정창에 「다각형 다시그리기」 추가. 기존 `AREA` + `pendingAreaPoly` 점찍기 UX 재사용.
+> 완료 시에만 `areaPoints`/AABB 교체. 번호·사진·내용 유지. 취소는 원본 기하 유지.
+> 네모/타원도 버튼 활성 — 완료 시 다각형으로 변환 (미리 변환하지 않아 취소 안전).

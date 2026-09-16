@@ -19991,9 +19991,11 @@ document.addEventListener('DOMContentLoaded', () => {
         const btn = document.getElementById('btnConvertDefectShape');
         const shapeRow = document.getElementById('defectAreaShapeConvertRow');
         if (!btn) return;
+        const redrawBtn = document.getElementById('btnRedrawDefectPolygon');
         if (!existingPin) {
             btn.hidden = true;
             if (shapeRow) shapeRow.hidden = true;
+            if (redrawBtn) redrawBtn.hidden = true;
             return;
         }
         btn.hidden = false;
@@ -20017,6 +20019,16 @@ document.addEventListener('DOMContentLoaded', () => {
                         ? `현재 모양: ${areaShapeLabelKo(t)}`
                         : `${areaShapeConvertPhrase(t)} 변경`;
                 });
+            }
+        }
+        if (redrawBtn) {
+            const bulk = typeof isDefectBulkEditMode === 'function' && isDefectBulkEditMode();
+            redrawBtn.hidden = !isArea || bulk;
+            if (isArea && !bulk) {
+                const cur = getAreaShape(existingPin);
+                redrawBtn.title = cur === 'polygon'
+                    ? '외곽 꼭짓점을 새로 찍습니다. 번호·사진·내용은 유지됩니다.'
+                    : '꼭짓점을 새로 찍어 다각형으로 바꿉니다. 번호·사진·내용은 유지됩니다.';
             }
         }
     }
@@ -24425,6 +24437,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let areaMoveLastImgX = 0;
     let areaMoveLastImgY = 0;
     let pendingAreaPoly = null; // 다각형 영역 생성 중 점들
+    let pendingAreaPolyRedraw = null; // { defectId } 기존 영역 외곽 다시그리기
     let isAreaInkDrag = false;
     let areaInkStroke = null;
     let pendingInkPoly = null; // 내부 다각형 그리기 점들
@@ -25120,14 +25133,14 @@ document.addEventListener('DOMContentLoaded', () => {
         // 범례 박스는 결함 핀과 동일한 도면 이미지 좌표계에 붙어있으므로, 핀 히트테스트와 같은
         // imgX/imgY(팬/줌/회전 역변환 좌표)로 판정한다 — 핀 히트테스트보다 우선.
         const legendHit = hitTestLegendBox(imgX, imgY);
-        if (legendHit && legendHit.part === 'handle') {
+        if (legendHit && !isAreaPolygonRedrawActive() && legendHit.part === 'handle') {
             isResizingLegend = true;
             legendResizeStartScale = getLocationMapLegendScale(state.locationMapLegendBox);
             legendResizeStartDist = Math.hypot(imgX - lastLegendBoxBounds.x, imgY - lastLegendBoxBounds.y) || 1;
             elements.planCanvas.style.cursor = legendHit.cursor || 'nwse-resize';
             return;
         }
-        if (legendHit && legendHit.part === 'body') {
+        if (legendHit && !isAreaPolygonRedrawActive() && legendHit.part === 'body') {
             isDraggingLegend = true;
             legendDragOffsetX = imgX - lastLegendBoxBounds.x;
             legendDragOffsetY = imgY - lastLegendBoxBounds.y;
@@ -25154,7 +25167,8 @@ document.addEventListener('DOMContentLoaded', () => {
             window._groupBoxCycle = { groupId: hitInfo.defect.groupId, lastId: hitInfo.defect.id };
         }
         if (hitInfo && state.areaInkTool && hitInfo.defect && hitInfo.defect.shapeType === 'area'
-            && (hitInfo.part === 'AREA_MOVE' || hitInfo.part === 'BOX')) {
+            && (hitInfo.part === 'AREA_MOVE' || hitInfo.part === 'BOX')
+            && !isAreaPolygonRedrawActive()) {
             selectedDefectIds = new Set([hitInfo.defect.id]);
             updateMapSelectionBar({ scrollToSelection: true });
             const tool = state.areaInkTool;
@@ -25181,7 +25195,7 @@ document.addEventListener('DOMContentLoaded', () => {
             drawCanvas();
             return;
         }
-        if (hitInfo) {
+        if (hitInfo && !isAreaPolygonRedrawActive()) {
             const useAdditive = additive || (isTouch && mobileAddSelectEnabled);
             pendingDragHit = { hitInfo, imgX, imgY, additive: useAdditive };
             pendingDragIsTouch = isTouch;
@@ -25251,6 +25265,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     return;
                 }
                 pendingAreaPoly.push({ x: areaCoords.x, y: areaCoords.y });
+                syncAreaPolygonRedrawBanner();
                 drawCanvas();
                 return;
             }
@@ -26237,6 +26252,8 @@ document.addEventListener('DOMContentLoaded', () => {
             const el = document.getElementById(id);
             if (el) el.style.display = isBulk ? 'none' : '';
         });
+        const redrawBtn = document.getElementById('btnRedrawDefectPolygon');
+        if (redrawBtn && isBulk) redrawBtn.hidden = true;
         if (typeof syncMobileAddMarkingFab === 'function') syncMobileAddMarkingFab();
         if (isBulk) updateDefectBulkEditBanner();
     }
@@ -27919,12 +27936,14 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         }
         // 영역 모드를 벗어날 때: 그리던 다각형이 있으면 그 모양으로 저장 (점 취소 없음)
-        if (mode !== 'AREA' && pendingAreaPoly && pendingAreaPoly.length) {
-            if (pendingAreaPoly.length >= 3) {
+        // 다시그리기는 점 3개 미만이면 원본 기하를 유지한 채 취소
+        if (mode !== 'AREA') {
+            if (pendingAreaPoly && pendingAreaPoly.length >= 3) {
                 finishPendingAreaPolygon({ skipModeSwitch: true });
-            } else {
-                pendingAreaPoly = null;
-                window.showToast?.('다각형은 점 3개 이상일 때 저장됩니다.', 'info', 2500);
+            } else if (isAreaPolygonRedrawActive()) {
+                cancelAreaPolygonRedraw({ silent: false, keepMode: true });
+            } else if (pendingAreaPoly && pendingAreaPoly.length) {
+                discardIncompleteAreaPolygon();
             }
         }
         if (mode === 'MARK' || mode === 'AREA') {
@@ -27955,15 +27974,137 @@ document.addEventListener('DOMContentLoaded', () => {
         return getCurrentFloorDefects().find((d) => ids.includes(d.id) && d.shapeType === 'area' && d.areaX1 !== undefined) || null;
     }
 
+    function isAreaPolygonRedrawActive() {
+        return !!(pendingAreaPolyRedraw && pendingAreaPolyRedraw.defectId);
+    }
+
+    function syncAreaPolygonRedrawBanner() {
+        const banner = document.getElementById('areaPolygonRedrawBanner');
+        const finishBtn = document.getElementById('btnFinishAreaPolygonRedraw');
+        const textEl = document.getElementById('areaPolygonRedrawText');
+        const active = isAreaPolygonRedrawActive();
+        if (banner) banner.hidden = !active;
+        const n = (pendingAreaPoly && pendingAreaPoly.length) || 0;
+        if (finishBtn) finishBtn.disabled = !active || n < 3;
+        if (textEl && active) {
+            textEl.textContent = n >= 3
+                ? `점 ${n}개 · 완료: 첫 점 근처 클릭 · 더블클릭 · Enter`
+                : '다각형 꼭짓점을 찍으세요. 완료: 첫 점 근처 클릭 · 더블클릭 · Enter';
+        }
+    }
+
+    function discardIncompleteAreaPolygon(options) {
+        const silent = !!(options && options.silent);
+        const wasRedraw = isAreaPolygonRedrawActive();
+        const hadPts = !!(pendingAreaPoly && pendingAreaPoly.length);
+        pendingAreaPoly = null;
+        pendingAreaPolyRedraw = null;
+        syncAreaPolygonRedrawBanner();
+        if (silent || !hadPts) return;
+        if (wasRedraw) window.showToast?.('다각형 다시그리기를 취소했습니다.', 'info');
+        else window.showToast?.('다각형은 점 3개 이상일 때 저장됩니다.', 'info', 2500);
+    }
+
+    function cancelAreaPolygonRedraw(options) {
+        const silent = !!(options && options.silent);
+        const keepMode = !!(options && options.keepMode);
+        const had = isAreaPolygonRedrawActive();
+        pendingAreaPoly = null;
+        pendingAreaPolyRedraw = null;
+        syncAreaPolygonRedrawBanner();
+        if (!keepMode && state.mode !== 'PAN') setDrawMode('PAN');
+        else drawCanvas();
+        if (had && !silent) window.showToast?.('다각형 다시그리기를 취소했습니다.', 'info');
+    }
+
+    function applyAreaPolygonRedraw(defectId, pts) {
+        if (!defectId || !Array.isArray(pts) || pts.length < 3) return false;
+        const defect = getCurrentFloorDefects().find((d) => d && d.id === defectId);
+        if (!defect || !(defect.shapeType === 'area' && defect.areaX1 !== undefined)) {
+            window.showToast?.('마킹을 찾을 수 없습니다.', 'warning');
+            return false;
+        }
+        if (typeof pushDefectHistory === 'function') pushDefectHistory();
+        defect.areaShape = 'polygon';
+        defect.areaPoints = pts.map((p) => ({ x: Number(p.x), y: Number(p.y) }));
+        defect.areaAngle = 0;
+        if (typeof syncAreaBboxFromPoints === 'function') syncAreaBboxFromPoints(defect);
+        if (typeof ensureAreaPinPlacement === 'function') ensureAreaPinPlacement(defect);
+        if (typeof touchDefectPositionUpdatedAt === 'function') touchDefectPositionUpdatedAt(defect);
+        defect.updatedAt = Date.now();
+        if (typeof discardStalePendingRemoteAfterLocalPinEdit === 'function') {
+            discardStalePendingRemoteAfterLocalPinEdit();
+        }
+        saveStateToLocalStorage();
+        if (typeof renderSurveyTable === 'function') renderSurveyTable();
+        if (typeof renderDefectListPanel === 'function') renderDefectListPanel();
+        if (typeof updateMapSelectionBar === 'function') {
+            updateMapSelectionBar({ scrollToSelection: false });
+        }
+        window.showToast?.('다각형을 다시 그렸습니다.', 'success');
+        return true;
+    }
+
+    function startAreaPolygonRedraw(defect) {
+        if (!defect || !(defect.shapeType === 'area' && defect.areaX1 !== undefined) || !defect.id) {
+            window.showToast?.('저장된 영역 마킹만 다시 그릴 수 있습니다.', 'warning');
+            return false;
+        }
+        if (pendingAreaPoly && pendingAreaPoly.length >= 3 && !isAreaPolygonRedrawActive()) {
+            finishPendingAreaPolygon({ skipModeSwitch: true });
+        } else if (pendingAreaPoly && pendingAreaPoly.length && !isAreaPolygonRedrawActive()) {
+            pendingAreaPoly = null;
+        }
+        pendingAreaPolyRedraw = { defectId: defect.id };
+        pendingAreaPoly = [];
+        state.areaInkTool = null;
+        pendingInkPoly = null;
+        isAreaInkDrag = false;
+        areaInkStroke = null;
+        state.areaCreateShape = 'polygon';
+        selectedDefectIds = new Set([defect.id]);
+        if (typeof updateMapSelectionBar === 'function') {
+            updateMapSelectionBar({ scrollToSelection: false });
+        }
+        if (state.mode !== 'AREA') setDrawMode('AREA');
+        else syncAreaToolPanelUi();
+        syncAreaPolygonRedrawBanner();
+        drawCanvas();
+        const alreadyPoly = getAreaShape(defect) === 'polygon';
+        window.showToast?.(
+            alreadyPoly
+                ? '다각형 꼭짓점을 다시 찍으세요. 완료: 첫 점 근처 클릭 · 더블클릭 · Enter'
+                : '꼭짓점을 찍어 다각형으로 바꿉니다. 완료: 첫 점 근처 클릭 · 더블클릭 · Enter',
+            'info',
+            4200
+        );
+        return true;
+    }
+
     function finishPendingAreaPolygon(options) {
         const skipModeSwitch = !!(options && options.skipModeSwitch);
         if (!pendingAreaPoly || pendingAreaPoly.length < 3) {
+            if (isAreaPolygonRedrawActive()) {
+                // 완료 제스처가 점 부족일 때는 세션 유지 (취소 버튼/Esc 미만만 종료)
+                window.showToast?.('다각형은 점 3개 이상일 때 저장됩니다. 점을 더 찍어 주세요.', 'info', 2800);
+                drawCanvas();
+                return false;
+            }
             pendingAreaPoly = null;
             drawCanvas();
             return false;
         }
         const pts = pendingAreaPoly.map((p) => ({ x: p.x, y: p.y }));
         pendingAreaPoly = null;
+        const redraw = pendingAreaPolyRedraw;
+        pendingAreaPolyRedraw = null;
+        syncAreaPolygonRedrawBanner();
+        if (redraw && redraw.defectId) {
+            applyAreaPolygonRedraw(redraw.defectId, pts);
+            if (!skipModeSwitch) setDrawMode('PAN');
+            drawCanvas();
+            return true;
+        }
         let x1 = pts[0].x, y1 = pts[0].y, x2 = pts[0].x, y2 = pts[0].y;
         pts.forEach((p) => {
             x1 = Math.min(x1, p.x); y1 = Math.min(y1, p.y);
@@ -28003,7 +28144,7 @@ document.addEventListener('DOMContentLoaded', () => {
         // 다른 도형 버튼으로 바꾸면 그리던 다각형은 그 모양으로 저장
         if (pendingAreaPoly && pendingAreaPoly.length && next !== 'polygon') {
             if (pendingAreaPoly.length >= 3) finishPendingAreaPolygon({ skipModeSwitch: true });
-            else pendingAreaPoly = null;
+            else discardIncompleteAreaPolygon();
         }
         state.areaCreateShape = next;
         state.areaInkTool = null;
@@ -28020,7 +28161,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         if (next && pendingAreaPoly && pendingAreaPoly.length) {
             if (pendingAreaPoly.length >= 3) finishPendingAreaPolygon({ skipModeSwitch: true });
-            else pendingAreaPoly = null;
+            else discardIncompleteAreaPolygon();
         }
         state.areaInkTool = next;
         pendingInkPoly = null;
@@ -28053,6 +28194,21 @@ document.addEventListener('DOMContentLoaded', () => {
         });
         const undoBtn = document.getElementById('btnAreaInkUndo');
         if (undoBtn) undoBtn.addEventListener('click', undoLastAreaInk);
+        const finishRedrawBtn = document.getElementById('btnFinishAreaPolygonRedraw');
+        if (finishRedrawBtn) {
+            finishRedrawBtn.addEventListener('click', () => {
+                if (!isAreaPolygonRedrawActive()) return;
+                if (!pendingAreaPoly || pendingAreaPoly.length < 3) {
+                    window.showToast?.('다각형은 점 3개 이상일 때 저장됩니다. 점을 더 찍어 주세요.', 'info', 2800);
+                    return;
+                }
+                finishPendingAreaPolygon();
+            });
+        }
+        const cancelRedrawBtn = document.getElementById('btnCancelAreaPolygonRedraw');
+        if (cancelRedrawBtn) {
+            cancelRedrawBtn.addEventListener('click', () => cancelAreaPolygonRedraw());
+        }
         const mobInk = document.getElementById('mobileBtnAreaInk');
         if (mobInk) {
             mobInk.addEventListener('click', () => {
@@ -28187,6 +28343,8 @@ document.addEventListener('DOMContentLoaded', () => {
             if (pendingAreaPoly && pendingAreaPoly.length) {
                 if (pendingAreaPoly.length >= 3) {
                     finishPendingAreaPolygon();
+                } else if (isAreaPolygonRedrawActive()) {
+                    cancelAreaPolygonRedraw();
                 } else {
                     window.showToast?.('다각형은 점 3개 이상일 때 저장됩니다. 점을 더 찍어 주세요.', 'info', 2800);
                 }
@@ -29280,6 +29438,39 @@ document.addEventListener('DOMContentLoaded', () => {
             window.showToast?.(`${areaShapeConvertPhrase(targetShape)} 변경했습니다.`, 'success');
         });
     });
+
+    const btnRedrawDefectPolygon = document.getElementById('btnRedrawDefectPolygon');
+    if (btnRedrawDefectPolygon) {
+        btnRedrawDefectPolygon.addEventListener('click', async () => {
+            const pinId = document.getElementById('defectPinId')?.value;
+            if (!pinId || !state.currentBuildingId) {
+                window.showToast?.('저장된 영역 마킹만 다시 그릴 수 있습니다.', 'warning');
+                return;
+            }
+            const key = `${state.currentBuildingId}_${state.currentFloor}`;
+            const list = (state.defects && state.defects[key]) || [];
+            const defect = list.find((d) => d && d.id === pinId);
+            if (!defect || !(defect.shapeType === 'area' && defect.areaX1 !== undefined)) {
+                window.showToast?.('영역 마킹만 다각형을 다시 그릴 수 있습니다.', 'warning');
+                return;
+            }
+            if (window._defectAutoApplyTimer) {
+                window.clearTimeout(window._defectAutoApplyTimer);
+                window._defectAutoApplyTimer = null;
+            }
+            if (typeof commitDefectFromForm === 'function' && isDefectModalOpen()) {
+                try {
+                    await commitDefectFromForm({
+                        pushHistory: !window._defectEditSessionHistoryPushed,
+                        uploadPhotos: !!window._defectPhotosDirty
+                    });
+                    window._defectEditSessionHistoryPushed = true;
+                } catch (_e) { /* 기하 다시그리기는 계속 */ }
+            }
+            closeDefectModal({ discardPending: true });
+            startAreaPolygonRedraw(defect);
+        });
+    }
 
     if (btnImportCadPins && inputImportCadPins) {
         btnImportCadPins.addEventListener('click', () => inputImportCadPins.click());
