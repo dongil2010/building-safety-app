@@ -91,6 +91,8 @@ window.BSA = window.BSA || { tabs: {}, shared: {} };
         var seen = {};
         return (defects || []).filter(function (d) {
             if (!d) return false;
+            var numApi = window.BSA && window.BSA.shared && window.BSA.shared.arrowSurveyNumber;
+            if (numApi && numApi.shouldSkipOrphanUnnumberedInSurveyList(d)) return false;
             if (d.groupId) {
                 if (seen[d.groupId]) return false;
                 seen[d.groupId] = true;

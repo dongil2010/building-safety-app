@@ -404,7 +404,7 @@
 > 네모/타원도 버튼 활성 — 완료 시 다각형으로 변환 (미리 변환하지 않아 취소 안전).
 
 ### ⚡ [Cursor] - 2026-09-16 01:20:00
-> **`[IN_PROGRESS]` 결함위치도 범례 크기·위치가 기본값으로 되돌아가던 문제**
+> **`(COMPLETED)` 결함위치도 범례 크기·위치가 기본값으로 되돌아가던 문제**
 >
 > 원인 (코드 확인):
 > 1. `applyBuildingLocationMapLegend`가 범례 **항목**이 없으면 박스까지 `null`로 지움 (드래그/리사이즈만 한 경우)
@@ -413,4 +413,11 @@
 > 4. 회사 문서 공용 `locationMapLegendBox`가 건물별 배치를 덮음
 >
 > 수정: `js/core/legend-layout.js` — 박스는 항목과 독립 복원, 로컬 박스 overlay, nx/ny 상대좌표로 층 전환 유지.
+
+### ⚡ [Cursor] - 2026-09-16 10:30:00
+> **`(COMPLETED)` 화살표 추가와 조사표 번호 부여 분리**
+>
+> **원인**: 결함 수정 「화살표·결함표 추가」가 `addAlsoSurveyRow: true` 로 화살표를 찍는 즉시 `cloneDefectForSurveyTableRow`를 호출. 그룹에 surveyExtra가 생기면 목록/조사표가 본번호 N을 N-1로 바꾸고 N-2 행을 추가함.
+> **수정**: 화살표만 추가(`surveyNumbered: false`). 「번호 부여」를 눌러야 surveyExtra(-1/-2) 생성. 기존 번호 있는 화살표는 플래그 없음=번호 있음으로 유지. `renumberFloorDefects(preserveOrder:false)` 전체 재부여는 호출하지 않음.
+> 헬퍼: `js/shared/arrow-survey-number.js`
 

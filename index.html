@@ -446,9 +446,13 @@
                                 <i class="fa-solid fa-trash-can"></i>
                                 <span id="mobileMapSelectionLabel">선택 삭제</span>
                             </button>
-                            <button type="button" class="mobile-fab-btn mobile-fab-add-marking" id="mobileBtnAddAnotherMarking" title="같은 번호에 화살표·결함표 추가" hidden disabled>
+                            <button type="button" class="mobile-fab-btn mobile-fab-add-marking" id="mobileBtnAddAnotherMarking" title="같은 번호칸에 화살표만 추가 (조사표 행은 만들지 않음)" hidden disabled>
                                 <i class="fa-solid fa-diagram-project"></i>
                                 <span>화살표추가</span>
+                            </button>
+                            <button type="button" class="mobile-fab-btn mobile-fab-assign-no" id="mobileBtnAssignSurveyNo" title="이 화살표에 조사표 번호를 부여합니다" hidden disabled>
+                                <i class="fa-solid fa-hashtag"></i>
+                                <span>번호부여</span>
                             </button>
                             <button type="button" class="mobile-fab-btn mobile-fab-toggle" id="mobileBtnToggleSize" aria-expanded="false" title="핀·화살표 크기">
                                 <i class="fa-solid fa-sliders"></i>
@@ -958,7 +962,7 @@
             <div class="modal-header defect-drawer-header">
                 <div class="defect-drawer-title-wrap">
                     <h3 id="defectModalTitle">📍 결함 핀 수정</h3>
-                    <div id="defectMarkingMemberFloat" class="defect-marking-member-float" hidden aria-label="번호 선택(7-1·7-2…) 및 화살표 방향"></div>
+                    <div id="defectMarkingMemberFloat" class="defect-marking-member-float" hidden aria-label="화살표 선택 및 번호 부여"></div>
                     <span class="defect-autosave-badge" id="defectAutosaveBadge" hidden aria-hidden="true"></span>
                 </div>
                 <button class="modal-close" id="btnCloseDefectModal" title="닫기">&times;</button>
@@ -1213,8 +1217,11 @@
             </div>
             <div class="modal-footer defect-drawer-footer defect-drawer-footer-desktop">
                 <button class="btn btn-danger-outline" id="btnDeleteDefect" title="이 결함 삭제"><i class="fa-solid fa-trash"></i></button>
-                <button class="btn btn-outline" id="btnAddAnotherMarking" title="같은 번호에 화살표를 추가하고 결함표 행(N-2…)도 함께 만듭니다. 도면에는 화살표 옆에 1·2… 번호가 표시됩니다(보고서 출력 제외).">
-                    <i class="fa-solid fa-diagram-project"></i> 화살표·결함표 추가
+                <button class="btn btn-outline" id="btnAddAnotherMarking" title="같은 번호칸에 화살표만 추가합니다. 조사표 -1/-2 행은 「번호 부여」를 눌러야 생깁니다.">
+                    <i class="fa-solid fa-diagram-project"></i> 화살표 추가
+                </button>
+                <button class="btn btn-outline" id="btnAssignSurveyNo" hidden title="이 화살표에 조사표 번호를 부여하고 -1/-2 행을 만듭니다.">
+                    <i class="fa-solid fa-hashtag"></i> 번호 부여
                 </button>
                 <button class="btn btn-primary" id="btnSaveDefect"><i class="fa-solid fa-check"></i> 닫기</button>
                 <button class="btn btn-outline" id="btnCancelDefect" style="display:none;">취소</button>
@@ -3182,6 +3189,7 @@
     <script src="js/shared/report.js?v=20260916_103836"></script>
     <script src="js/shared/hwpx-survey-slots.js?v=20260916_103836"></script>
     <script src="js/shared/cad-unmarked-place.js?v=20260916_103836"></script>
+    <script src="js/shared/arrow-survey-number.js?v=20260916_103836"></script>
     <script src="js/shared/hwpx-import.js?v=20260916_103836"></script>
     <script src="js/shared/auth.js?v=20260916_103836"></script>
     <script src="js/core/firebase-storage-assets.js?v=20260916_103836"></script>

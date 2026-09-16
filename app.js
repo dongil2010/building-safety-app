@@ -2995,6 +2995,22 @@ document.addEventListener('DOMContentLoaded', () => {
         return `NO.${String(Math.max(1, Number(n) || 1)).padStart(2, '0')}`;
     }
 
+    function arrowSurveyNumberApi() {
+        return (window.BSA && window.BSA.shared && window.BSA.shared.arrowSurveyNumber) || null;
+    }
+
+    function isUnnumberedArrowMarking(d) {
+        const api = arrowSurveyNumberApi();
+        return !!(api && api.isUnnumberedArrowMarking(d));
+    }
+
+    function canAssignSurveyNumberToDefect(d) {
+        const api = arrowSurveyNumberApi();
+        if (!api || !d) return false;
+        const members = d.groupId ? getDefectMarkingGroupMembers(d.groupId) : [d];
+        return api.canAssignSurveyNumber(d, members);
+    }
+
         /** 본번호(N) 슬롯: 그룹·화살표 여러 개는 1칸, 결함표 추가(-1)는 본번호에 포함.
      * 삭제 후 빈 번호가 있으면 가장 작은 빈 칸을 재사용(max+1만 쓰지 않음). */
     function getNextDefectMainNumber(defects) {
@@ -3189,6 +3205,7 @@ document.addEventListener('DOMContentLoaded', () => {
             delete d.groupId;
             delete d.groupNo;
             delete d.surveyExtra;
+            if (d.surveyNumbered === false) delete d.surveyNumbered;
         });
         normalizeAllDefectGroupNos(defects);
     }
@@ -3580,6 +3597,11 @@ document.addEventListener('DOMContentLoaded', () => {
         if (serverRec.groupId) merged.groupId = serverRec.groupId;
         else if (localRec.groupId) merged.groupId = localRec.groupId;
         if (serverRec.surveyExtra || localRec.surveyExtra) merged.surveyExtra = true;
+        if (Object.prototype.hasOwnProperty.call(noSource, 'surveyNumbered')) {
+            merged.surveyNumbered = !!noSource.surveyNumbered;
+        } else if (localRec.surveyNumbered === false || serverRec.surveyNumbered === false) {
+            merged.surveyNumbered = false;
+        }
 
         // 사진: 서버 photoIds를 먼저 두고 로컬에만 있는 id를 뒤에 추가 (합집합).
         const serverPhotoIds = Array.isArray(serverRec.photoIds) ? serverRec.photoIds : [];
@@ -16290,6 +16312,7 @@ document.addEventListener('DOMContentLoaded', () => {
             surveyRound: src.surveyRound || getCurrentSurveyRoundKey(),
             mapMarkedAt: Date.now(),
             mapUnregistered: false,
+            surveyNumbered: false,
             updatedAt: Date.now(),
             photos: [],
             prevRoundPhotos: [],
@@ -16351,9 +16374,9 @@ document.addEventListener('DOMContentLoaded', () => {
             );
         } else {
             window.showToast?.(
-                `같은 번호(${label})에 화살표${arrowNum != null ? ' ' + arrowNum : ''}를 추가했습니다`,
+                `같은 번호(${label})에 화살표${arrowNum != null ? ' ' + arrowNum : ''}를 추가했습니다. 조사표 번호는 「번호 부여」로 따로 줍니다.`,
                 'success',
-                2200
+                2800
             );
         }
         return newDefect;
@@ -16539,6 +16562,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const slotCount = extras.length > 0
             ? Math.max(markingMembers.length, extras.length + 1)
             : markingMembers.length;
+        const api = arrowSurveyNumberApi();
         const slots = [];
         for (let slot = 1; slot <= slotCount; slot++) {
             const formMember = slot === 1
@@ -16546,9 +16570,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 : (extras[slot - 2] || markingMembers[slot - 1] || null);
             const dirMember = markingMembers[slot - 1] || null;
             if (!formMember) continue;
+            const label = api && typeof api.floatSlotLabel === 'function'
+                ? api.floatSlotLabel(mainNo, slot, formMember, extras.length)
+                : `${mainNo}-${slot}`;
             slots.push({
                 slot,
-                label: `${mainNo}-${slot}`,
+                label,
                 formMember,
                 dirMember: (dirMember && !dirMember.surveyExtra) ? dirMember : null
             });
@@ -16574,6 +16601,7 @@ document.addEventListener('DOMContentLoaded', () => {
             el.hidden = true;
             el.innerHTML = '';
             document.getElementById('defectModal')?.classList.remove('has-marking-member-tabs');
+            if (typeof syncMobileAddMarkingFab === 'function') syncMobileAddMarkingFab();
             return;
         }
 
@@ -16599,12 +16627,25 @@ document.addEventListener('DOMContentLoaded', () => {
                     if (mid) window.cycleMarkingMemberArrowDir(mid);
                 });
             });
+            root.querySelectorAll('.defect-marking-assign-no-btn').forEach((btn) => {
+                btn.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    const mid = btn.getAttribute('data-marking-member-id');
+                    if (mid && typeof window.assignSurveyNumberToArrow === 'function') {
+                        window.assignSurveyNumberToArrow(mid);
+                    }
+                });
+            });
         };
 
         let html = '<div class="defect-marking-float-section">';
         slots.forEach(({ label, formMember, dirMember }) => {
             const active = formMember.id === defectOrNull.id ? ' is-active' : '';
             const noDirClass = dirMember ? '' : ' is-no-dir';
+            const assignTarget = (dirMember && canAssignSurveyNumberToDefect(dirMember))
+                ? dirMember
+                : (canAssignSurveyNumberToDefect(formMember) ? formMember : null);
             html += `<div class="defect-marking-arrow-row${noDirClass}${active}">`
                 + `<button type="button" class="defect-marking-float-btn defect-marking-arrow-select${active}"`
                 + ` data-marking-member-id="${escapeHtml(formMember.id)}"`
@@ -16616,12 +16657,18 @@ document.addEventListener('DOMContentLoaded', () => {
                 html += `<button type="button" class="defect-marking-arrow-dir-btn${forcedClass}"`
                     + ` data-marking-member-id="${escapeHtml(dirMember.id)}" title="${escapeHtml(dir.title)}">${dir.symbol}</button>`;
             }
+            if (assignTarget) {
+                html += `<button type="button" class="defect-marking-assign-no-btn"`
+                    + ` data-marking-member-id="${escapeHtml(assignTarget.id)}"`
+                    + ` title="이 화살표에 조사표 번호 부여">번호 부여</button>`;
+            }
             html += '</div>';
         });
         html += '</div>';
 
         el.innerHTML = html;
         bindRow(el);
+        if (typeof syncMobileAddMarkingFab === 'function') syncMobileAddMarkingFab();
     }
 
     function renderDefectMarkingTimeline(defectOrNull) {
@@ -18196,7 +18243,17 @@ document.addEventListener('DOMContentLoaded', () => {
         return (state.defects[key] || [])
             .filter((d) => d && d.groupId === groupId && !d.surveyExtra)
             .slice()
-            .sort((a, b) => parseDefectSortNoValue(a) - parseDefectSortNoValue(b));
+            .sort((a, b) => {
+                const api = arrowSurveyNumberApi();
+                if (api && typeof api.compareMarkingForRepresentative === 'function') {
+                    const u = api.compareMarkingForRepresentative(a, b);
+                    if (u !== 0) return u;
+                }
+                const na = parseDefectSortNoValue(a);
+                const nb = parseDefectSortNoValue(b);
+                if (na !== nb) return na - nb;
+                return String(a.id || '').localeCompare(String(b.id || ''));
+            });
     }
 
     /** 수정창 좌측 탭: 화살표 먼저, 결함표 다음 (41-1, 41-2 …) */
@@ -18892,6 +18949,8 @@ document.addEventListener('DOMContentLoaded', () => {
         });
 
         sorted.forEach((d) => {
+            const skipApi = arrowSurveyNumberApi();
+            if (skipApi && skipApi.shouldSkipOrphanUnnumberedInSurveyList(d)) return;
             if (d.surveyExtra) {
                 rows.push(d);
                 return;
@@ -20140,11 +20199,17 @@ document.addEventListener('DOMContentLoaded', () => {
     function pickDefectGroupRepresentative(members) {
         const list = (members || []).filter((m) => m && !m.surveyExtra);
         if (!list.length) return (members && members[0]) || null;
+        const api = arrowSurveyNumberApi();
         const scored = list.slice().sort((a, b) => {
+            if (api && typeof api.compareMarkingForRepresentative === 'function') {
+                const u = api.compareMarkingForRepresentative(a, b);
+                if (u !== 0) return u;
+            }
             const pa = parseDefectNoParts(a);
             const pb = parseDefectNoParts(b);
             if (pa.main !== pb.main) return pa.main - pb.main;
-            return pa.suffix - pb.suffix;
+            if (pa.suffix !== pb.suffix) return pa.suffix - pb.suffix;
+            return String(a.id || '').localeCompare(String(b.id || ''));
         });
         return scored[0];
     }
@@ -24585,15 +24650,36 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function syncMobileAddMarkingFab() {
         const btn = document.getElementById('mobileBtnAddAnotherMarking');
+        const assignBtn = document.getElementById('mobileBtnAssignSurveyNo');
         const fab = document.getElementById('mobileMapFabBar');
-        if (!btn) return;
         const bulk = typeof isDefectBulkEditMode === 'function' && isDefectBulkEditMode();
         const modalOpen = document.body.classList.contains('defect-modal-open');
-        const show = modalOpen && !bulk;
-        btn.hidden = !show;
-        btn.disabled = !show;
-        if (show) btn.style.display = '';
-        if (fab) fab.classList.toggle('has-add-marking', show);
+        const showAdd = modalOpen && !bulk;
+        if (btn) {
+            btn.hidden = !showAdd;
+            btn.disabled = !showAdd;
+            if (showAdd) btn.style.display = '';
+        }
+        const pinId = document.getElementById('defectPinId')?.value;
+        const current = pinId
+            ? (state.defects[`${state.currentBuildingId}_${state.currentFloor}`] || []).find((x) => x.id === pinId)
+            : null;
+        const showAssign = showAdd && canAssignSurveyNumberToDefect(current);
+        if (assignBtn) {
+            assignBtn.hidden = !showAssign;
+            assignBtn.disabled = !showAssign;
+            if (showAssign) assignBtn.style.display = '';
+            else assignBtn.style.display = 'none';
+        }
+        const desktopAssign = document.getElementById('btnAssignSurveyNo');
+        if (desktopAssign) {
+            desktopAssign.hidden = !showAssign;
+            desktopAssign.disabled = !showAssign;
+        }
+        if (fab) {
+            fab.classList.toggle('has-add-marking', showAdd);
+            fab.classList.toggle('has-assign-no', showAssign);
+        }
     }
     window.syncMobileAddMarkingFab = syncMobileAddMarkingFab;
 
@@ -25786,7 +25872,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 setDrawMode('PAN');
             } else if (shouldAddSurveyRowWithMarking()) {
                 window.showToast?.(
-                    '화살표·결함표 추가가 끊겼습니다. 결함 수정에서 「화살표·결함표 추가」를 다시 눌러 주세요.',
+                    '화살표 추가가 끊겼습니다. 결함 수정에서 「화살표 추가」를 다시 눌러 주세요.',
                     'warning',
                     3500
                 );
@@ -26331,7 +26417,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (badge) badge.textContent = isBulk ? '변경 항목만 적용' : '자동 적용';
         [
             'btnDeleteDefect', 'btnAddAnotherMarking',
-            'mobileBtnAddAnotherMarking',
+            'mobileBtnAddAnotherMarking', 'btnAssignSurveyNo', 'mobileBtnAssignSurveyNo',
         ].forEach(id => {
             const el = document.getElementById(id);
             if (el) el.style.display = isBulk ? 'none' : '';
@@ -27862,7 +27948,7 @@ document.addEventListener('DOMContentLoaded', () => {
         return copy;
     }
 
-    // 같은 결함 정보(부재/종류/원인/규모)를 유지한 채 위치만 바꿔서 여러 곳에 반복 마킹 + 결함표 행(N-2…) 자동 생성
+    // 같은 결함 정보(부재/종류/원인/규모)를 유지한 채 화살표/영역만 추가. 조사표 -1/-2 행은 「번호 부여」에서 만든다.
     async function handleAddAnotherMarking() {
         if (window._defectAutoApplyTimer) {
             window.clearTimeout(window._defectAutoApplyTimer);
@@ -27909,18 +27995,18 @@ document.addEventListener('DOMContentLoaded', () => {
                 boxX: boxSource.x,
                 boxY: boxSource.y,
                 chainIndex: nextChainIndex,
-                addAlsoSurveyRow: true
+                addAlsoSurveyRow: false
             };
             // closeDefectModal 전에 pending을 잡아 두면 싱글톤 groupId가 접히지 않음
-            snapshotMarkingGroupForCommit(markingTmpl, { addAlsoSurveyRow: true });
+            snapshotMarkingGroupForCommit(markingTmpl, { addAlsoSurveyRow: false });
             window._defectMarkingTemplate = markingTmpl;
-            window._markingAddAlsoSurveyRow = true;
+            window._markingAddAlsoSurveyRow = false;
         }
         closeDefectModal();
         if (saved && markingTmpl) {
             window._defectMarkingTemplate = markingTmpl;
-            window._markingAddAlsoSurveyRow = true;
-            snapshotMarkingGroupForCommit(markingTmpl, { addAlsoSurveyRow: true });
+            window._markingAddAlsoSurveyRow = false;
+            snapshotMarkingGroupForCommit(markingTmpl, { addAlsoSurveyRow: false });
             const floorKey = `${state.currentBuildingId}_${state.currentFloor}`;
             normalizeDefectGroupNos(state.defects[floorKey], markingTmpl.groupId);
             saveStateToLocalStorage();
@@ -27929,8 +28015,8 @@ document.addEventListener('DOMContentLoaded', () => {
             setDrawMode(isAreaMode ? 'AREA' : 'MARK');
             window.showToast(
                 isAreaMode
-                    ? '같은 번호에 영역·결함표 행을 추가합니다. 도면에서 영역을 그려 주세요.'
-                    : '같은 번호에 화살표·결함표 행을 추가합니다. 도면에서 위치를 한 번 클릭해 주세요. (화살표 옆 1·2…는 화면에만 표시)',
+                    ? '같은 번호칸에 영역만 추가합니다. 조사표 번호는 나중에 「번호 부여」로 줍니다.'
+                    : '같은 번호칸에 화살표만 추가합니다. 도면에서 위치를 한 번 클릭해 주세요. 조사표 -1/-2는 「번호 부여」를 눌러야 생깁니다.',
                 'info',
                 4000
             );
@@ -27939,6 +28025,40 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
     window.handleAddAnotherMarking = handleAddAnotherMarking;
+
+    window.assignSurveyNumberToArrow = async function(defectId) {
+        if (!state.currentBuildingId) return;
+        if (typeof flushDefectAutoApply === 'function') {
+            try { await flushDefectAutoApply(); } catch (_e) { /* ignore */ }
+        }
+        const key = `${state.currentBuildingId}_${state.currentFloor}`;
+        const pinId = defectId || document.getElementById('defectPinId')?.value;
+        const target = (state.defects[key] || []).find((x) => x && x.id === pinId);
+        if (!canAssignSurveyNumberToDefect(target)) {
+            window.showToast?.('번호를 부여할 화살표가 아닙니다. 같은 번호칸에 화살표를 먼저 추가해 주세요.', 'info', 2800);
+            return;
+        }
+        pushDefectHistory();
+        target.surveyNumbered = true;
+        touchDefectUpdatedAt(target);
+        ensureDefectMarkingGroup(target);
+        const extra = cloneDefectForSurveyTableRow(target);
+        saveStateToLocalStorage();
+        drawCanvas();
+        if (typeof renderDefectListPanel === 'function') renderDefectListPanel();
+        if (typeof renderSurveyTable === 'function') renderSurveyTable();
+        if (typeof renderDefectMarkingTimeline === 'function') renderDefectMarkingTimeline(target);
+        if (typeof syncMobileAddMarkingFab === 'function') syncMobileAddMarkingFab();
+        const rowNo = String((extra && extra.no) || '').replace(/^NO\.?\s*/i, '').trim();
+        const parentNo = String(target.groupNo || target.no || '').replace(/^NO\.?\s*/i, '').trim();
+        window.showToast?.(
+            rowNo
+                ? `화살표에 번호 부여 · 조사표 ${parentNo}-1, ${rowNo} 행 생성`
+                : '화살표에 조사표 번호를 부여했습니다',
+            'success',
+            3200
+        );
+    };
 
     const btnAddAnotherMarking = document.getElementById('btnAddAnotherMarking');
     if (btnAddAnotherMarking) {
@@ -27951,6 +28071,19 @@ document.addEventListener('DOMContentLoaded', () => {
             e.stopPropagation();
             if (mobileBtnAddAnotherMarking.disabled || mobileBtnAddAnotherMarking.hidden) return;
             handleAddAnotherMarking();
+        });
+    }
+    const btnAssignSurveyNo = document.getElementById('btnAssignSurveyNo');
+    if (btnAssignSurveyNo) {
+        btnAssignSurveyNo.addEventListener('click', () => { window.assignSurveyNumberToArrow(); });
+    }
+    const mobileBtnAssignSurveyNo = document.getElementById('mobileBtnAssignSurveyNo');
+    if (mobileBtnAssignSurveyNo) {
+        mobileBtnAssignSurveyNo.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            if (mobileBtnAssignSurveyNo.disabled || mobileBtnAssignSurveyNo.hidden) return;
+            window.assignSurveyNumberToArrow();
         });
     }
 
@@ -29889,8 +30022,8 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // 보고서(PDF/HWPX)·화면 상태조사표 행 구성:
-    // - "마킹 추가"(같은 번호 박스 + 화살표만 늘림) → 그룹을 한 행으로 합침 (도면과 동일)
-    // - "결함표 추가"(surveyExtra) → N-1, N-2 … 별도 행 (화살표 개수와 무관)
+    // - "화살표 추가"(같은 번호 박스 + 화살표만 늘림, surveyNumbered:false) → 그룹을 한 행으로 합침
+    // - 「번호 부여」/결함표 추가(surveyExtra) → N-1, N-2 … 별도 행
     // 표는 기본 15행, 결함표 추가분이 있으면 최대 17행까지 담고, 가능하면
     // 본번호가 15·30·45…에서 끝나도록 다음 표로 넘긴다.
     const SURVEY_REPORT_ROWS_BASE = 15;
@@ -29919,6 +30052,8 @@ document.addEventListener('DOMContentLoaded', () => {
         });
 
         sorted.forEach((d) => {
+            const skipApi = arrowSurveyNumberApi();
+            if (skipApi && skipApi.shouldSkipOrphanUnnumberedInSurveyList(d)) return;
             if (d.surveyExtra) {
                 result.push(d);
                 return;
@@ -38768,7 +38903,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 window.showToast('현재 층에 등록된 결함 데이터가 없습니다.', 'warning');
                 return;
             }
-            // 마킹 추가는 한 행, 결함표 추가(surveyExtra)만 N-1… 별도 행
+            // 마킹 추가는 한 행, 「번호 부여」(surveyExtra)만 N-1… 별도 행
             const defects = getSurveyRowsForReport(rawDefects);
 
             const floorCode = window.state.currentFloor;
