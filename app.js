@@ -16619,14 +16619,6 @@ document.addEventListener('DOMContentLoaded', () => {
                     if (mid) window.selectDefectMarkingMember(mid, displayLabel, focusId);
                 });
             });
-            root.querySelectorAll('.defect-marking-arrow-dir-btn').forEach((btn) => {
-                btn.addEventListener('click', (e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    const mid = btn.getAttribute('data-marking-member-id');
-                    if (mid) window.cycleMarkingMemberArrowDir(mid);
-                });
-            });
             root.querySelectorAll('.defect-marking-assign-no-btn').forEach((btn) => {
                 btn.addEventListener('click', (e) => {
                     e.preventDefault();
@@ -16642,21 +16634,15 @@ document.addEventListener('DOMContentLoaded', () => {
         let html = '<div class="defect-marking-float-section">';
         slots.forEach(({ label, formMember, dirMember }) => {
             const active = formMember.id === defectOrNull.id ? ' is-active' : '';
-            const noDirClass = dirMember ? '' : ' is-no-dir';
             const assignTarget = (dirMember && canAssignSurveyNumberToDefect(dirMember))
                 ? dirMember
                 : (canAssignSurveyNumberToDefect(formMember) ? formMember : null);
-            html += `<div class="defect-marking-arrow-row${noDirClass}${active}">`
+            const assignClass = assignTarget ? ' has-assign-btn' : ' no-assign-btn';
+            html += `<div class="defect-marking-arrow-row${assignClass}${active}">`
                 + `<button type="button" class="defect-marking-float-btn defect-marking-arrow-select${active}"`
                 + ` data-marking-member-id="${escapeHtml(formMember.id)}"`
                 + ` data-focus-member-id="${escapeHtml((dirMember || formMember).id)}"`
                 + ` data-display-label="${escapeHtml(label)}" title="${escapeHtml(label)}">${escapeHtml(label)}</button>`;
-            if (dirMember) {
-                const dir = getMarkingMemberDirDisplay(dirMember);
-                const forcedClass = dirMember.forceArrowDir ? ' is-forced' : '';
-                html += `<button type="button" class="defect-marking-arrow-dir-btn${forcedClass}"`
-                    + ` data-marking-member-id="${escapeHtml(dirMember.id)}" title="${escapeHtml(dir.title)}">${dir.symbol}</button>`;
-            }
             if (assignTarget) {
                 html += `<button type="button" class="defect-marking-assign-no-btn"`
                     + ` data-marking-member-id="${escapeHtml(assignTarget.id)}"`

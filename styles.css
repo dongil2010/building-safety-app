@@ -4537,9 +4537,21 @@ html:not(.layout-desktop) .survey-inline-select {
     gap: 4px;
     align-items: center;
 }
-.defect-marking-arrow-row.is-no-dir:not(:has(.defect-marking-assign-no-btn)) .defect-marking-arrow-select {
+.defect-marking-arrow-row.no-assign-btn .defect-marking-arrow-select,
+.defect-marking-arrow-row:not(:has(.defect-marking-assign-no-btn)) .defect-marking-arrow-select {
+    border-radius: 8px;
     border-right: 1px solid #cbd5e1;
     width: 100%;
+}
+.defect-marking-arrow-row.is-active.no-assign-btn .defect-marking-arrow-select,
+.defect-marking-arrow-row.is-active:not(:has(.defect-marking-assign-no-btn)) .defect-marking-arrow-select {
+    border-color: #2563eb;
+    border-right-color: #2563eb;
+}
+.defect-marking-arrow-row.has-assign-btn .defect-marking-arrow-select,
+.defect-marking-arrow-row:has(.defect-marking-assign-no-btn) .defect-marking-arrow-select {
+    border-radius: 8px 0 0 8px;
+    border-right: none;
 }
 .defect-marking-float-btn {
     appearance: none;
@@ -4564,40 +4576,12 @@ html:not(.layout-desktop) .survey-inline-select {
 .defect-marking-arrow-row .defect-marking-arrow-select {
     border-radius: 8px 0 0 8px;
 }
-.defect-marking-arrow-dir-btn {
-    appearance: none;
-    border: 1px solid #cbd5e1;
-    background: #fff;
-    color: #475569;
-    border-radius: 0;
-    min-width: 1.75rem;
-    min-height: 1.75rem;
-    padding: 0.18rem 0.28rem;
-    font-size: 0.88rem;
-    font-weight: 700;
-    line-height: 1;
-    cursor: pointer;
-    transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
-}
-.defect-marking-arrow-dir-btn.is-forced {
-    border-color: #6b6b6b;
-    background: #f1f5f9;
-    color: #0f172a;
-}
-.defect-marking-arrow-row.is-active .defect-marking-float-btn,
-.defect-marking-arrow-row.is-active .defect-marking-arrow-dir-btn {
-    border-color: #2563eb;
-}
 .defect-marking-arrow-row.is-active .defect-marking-float-btn {
+    border-color: #2563eb;
     background: #2563eb;
     color: #fff;
 }
-.defect-marking-arrow-row.is-active .defect-marking-arrow-dir-btn.is-forced {
-    background: #dbeafe;
-    color: #1d4ed8;
-}
-.defect-marking-float-btn:active,
-.defect-marking-arrow-dir-btn:active {
+.defect-marking-float-btn:active {
     filter: brightness(0.97);
 }
 
@@ -5215,8 +5199,6 @@ html:not(.layout-desktop) .survey-inline-select {
         box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
     }
     html:not(.layout-desktop) #defectModal .defect-drawer-title-wrap #defectMarkingMemberFloat:not([hidden]) .defect-marking-arrow-select {
-        border-radius: 8px 0 0 8px;
-        border-right: none;
         min-width: 2rem;
         min-height: 1.65rem;
         font-size: 0.7rem;
@@ -5224,12 +5206,20 @@ html:not(.layout-desktop) .survey-inline-select {
         letter-spacing: -0.02em;
         padding: 0 0.28rem;
     }
-    html:not(.layout-desktop) #defectModal .defect-drawer-title-wrap #defectMarkingMemberFloat:not([hidden]) .defect-marking-arrow-dir-btn {
-        border-radius: 0 8px 8px 0;
-        border-left: none;
-        min-width: 1.65rem;
-        min-height: 1.65rem;
-        font-size: 0.82rem;
+    html:not(.layout-desktop) #defectModal .defect-drawer-title-wrap #defectMarkingMemberFloat:not([hidden]) .defect-marking-arrow-row.no-assign-btn .defect-marking-arrow-select,
+    html:not(.layout-desktop) #defectModal .defect-drawer-title-wrap #defectMarkingMemberFloat:not([hidden]) .defect-marking-arrow-row:not(:has(.defect-marking-assign-no-btn)) .defect-marking-arrow-select {
+        border-radius: 8px;
+        border-right: 1px solid #cbd5e1;
+    }
+    html:not(.layout-desktop) #defectModal .defect-drawer-title-wrap #defectMarkingMemberFloat:not([hidden]) .defect-marking-arrow-row.is-active.no-assign-btn .defect-marking-arrow-select,
+    html:not(.layout-desktop) #defectModal .defect-drawer-title-wrap #defectMarkingMemberFloat:not([hidden]) .defect-marking-arrow-row.is-active:not(:has(.defect-marking-assign-no-btn)) .defect-marking-arrow-select {
+        border-color: #2563eb;
+        border-right-color: #2563eb;
+    }
+    html:not(.layout-desktop) #defectModal .defect-drawer-title-wrap #defectMarkingMemberFloat:not([hidden]) .defect-marking-arrow-row.has-assign-btn .defect-marking-arrow-select,
+    html:not(.layout-desktop) #defectModal .defect-drawer-title-wrap #defectMarkingMemberFloat:not([hidden]) .defect-marking-arrow-row:has(.defect-marking-assign-no-btn) .defect-marking-arrow-select {
+        border-radius: 8px 0 0 8px;
+        border-right: none;
     }
     html:not(.layout-desktop) #defectModal .defect-drawer-title-wrap #defectMarkingMemberFloat:not([hidden]) .defect-marking-arrow-row.is-active {
         box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.35);
@@ -5775,11 +5765,6 @@ html:not(.layout-desktop) .survey-inline-select {
         padding: 0 0.24rem;
     }
 
-    html:not(.layout-desktop) #defectModal .defect-drawer-title-wrap #defectMarkingMemberFloat:not([hidden]) .defect-marking-arrow-dir-btn {
-        min-width: 1.6rem;
-        min-height: 1.6rem;
-        font-size: 0.8rem;
-    }
 
     html:not(.layout-desktop) #defectModal.open .defect-drawer-card,
     html:not(.layout-desktop) #defectModal.open.defect-drawer-in-canvas .defect-drawer-card {
@@ -12228,17 +12213,25 @@ html.layout-desktop #defectModal .defect-drawer-title-wrap #defectMarkingMemberF
 html.layout-desktop #defectModal .defect-drawer-title-wrap #defectMarkingMemberFloat:not([hidden]) .defect-marking-arrow-select {
     min-width: 2.2rem;
     min-height: 1.8rem;
-    border-radius: 8px 0 0 8px;
-    border-right: none;
     font-size: 0.74rem;
     font-weight: 700;
     letter-spacing: -0.02em;
     padding: 0 0.32rem;
 }
-html.layout-desktop #defectModal .defect-drawer-title-wrap #defectMarkingMemberFloat:not([hidden]) .defect-marking-arrow-dir-btn {
-    min-width: 1.8rem;
-    min-height: 1.8rem;
-    border-radius: 0 8px 8px 0;
+html.layout-desktop #defectModal .defect-drawer-title-wrap #defectMarkingMemberFloat:not([hidden]) .defect-marking-arrow-row.no-assign-btn .defect-marking-arrow-select,
+html.layout-desktop #defectModal .defect-drawer-title-wrap #defectMarkingMemberFloat:not([hidden]) .defect-marking-arrow-row:not(:has(.defect-marking-assign-no-btn)) .defect-marking-arrow-select {
+    border-radius: 8px;
+    border-right: 1px solid #cbd5e1;
+}
+html.layout-desktop #defectModal .defect-drawer-title-wrap #defectMarkingMemberFloat:not([hidden]) .defect-marking-arrow-row.is-active.no-assign-btn .defect-marking-arrow-select,
+html.layout-desktop #defectModal .defect-drawer-title-wrap #defectMarkingMemberFloat:not([hidden]) .defect-marking-arrow-row.is-active:not(:has(.defect-marking-assign-no-btn)) .defect-marking-arrow-select {
+    border-color: #2563eb;
+    border-right-color: #2563eb;
+}
+html.layout-desktop #defectModal .defect-drawer-title-wrap #defectMarkingMemberFloat:not([hidden]) .defect-marking-arrow-row.has-assign-btn .defect-marking-arrow-select,
+html.layout-desktop #defectModal .defect-drawer-title-wrap #defectMarkingMemberFloat:not([hidden]) .defect-marking-arrow-row:has(.defect-marking-assign-no-btn) .defect-marking-arrow-select {
+    border-radius: 8px 0 0 8px;
+    border-right: none;
 }
 
 html.layout-desktop #defectModal .defect-drawer-card,
