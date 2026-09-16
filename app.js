@@ -21480,16 +21480,18 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!input) return;
             const v = input.value.trim();
             if (v) {
-                ensureDefectComboOption(select, v);
                 if (commitCustom) {
+                    ensureDefectComboOption(select, v);
                     rememberNdtCustomPick(v, spec.preset, spec.customKey);
                     if (!spec.preset.includes(v)) spec.populate(v);
                     else if (select) select.value = v;
                 } else if (select && spec.preset.includes(v)) {
                     select.value = v;
                 }
+                // 타이핑 중에는 중간 글자를 select 옵션으로 넣지 않음
             }
-            spec.refresh();
+            if (commitCustom) spec.refresh();
+            else if (select && v && spec.preset.includes(v)) spec.refresh();
             if (spec.selectId === 'ndtComponent') {
                 toggleNdtMeasureDimMode();
                 document.getElementById('ndtDesignWidth')?.dispatchEvent(new Event('input', { bubbles: true }));
@@ -21621,7 +21623,23 @@ document.addEventListener('DOMContentLoaded', () => {
         if (jointModeBtn) jointModeBtn.classList.toggle('active', jointMode);
         if (jointComposer) jointComposer.style.display = jointMode ? 'flex' : 'none';
 
-        let componentOptions = getQuickPickOptionsFromSelect(componentSelect);
+        // 칩은 select의 임시 타이핑 옵션이 아니라 프리셋+커스텀만 사용 (글자마다 버튼 생성 방지)
+        migrateDefectComponentStateShape();
+        if (!window.state.customDefectComponents) window.state.customDefectComponents = { '구조체': [], '비구조체': [], '마감재': [] };
+        if (!window.state.hiddenDefectComponents) window.state.hiddenDefectComponents = { '구조체': [], '비구조체': [], '마감재': [] };
+        if (!window.state.customDefectComponents[currentCategory]) window.state.customDefectComponents[currentCategory] = [];
+        if (!window.state.hiddenDefectComponents[currentCategory]) window.state.hiddenDefectComponents[currentCategory] = [];
+        const compPreset = DEFECT_COMPONENT_PRESET[currentCategory] || DEFECT_COMPONENT_PRESET['구조체'] || [];
+        const compHidden = window.state.hiddenDefectComponents[currentCategory];
+        const compCustom = window.state.customDefectComponents[currentCategory];
+        let componentOptions = applySavedOptionOrder(
+            getDefaultVisibleOptionTexts({
+                presetList: compPreset,
+                hiddenList: compHidden,
+                customList: compCustom
+            }),
+            ensureOptionOrderEntry('defectComponentOrder', currentCategory)
+        );
         if (jointMode) {
             const jointSet = new Set(DEFECT_JOINT_COMPONENT_PRESET);
             componentOptions = componentOptions.filter((v) => isJointComponentName(v) || jointSet.has(v));
@@ -21692,13 +21710,57 @@ document.addEventListener('DOMContentLoaded', () => {
             const input = document.getElementById(inputId);
             if (!select || !input || input.dataset.comboBound) return;
             input.dataset.comboBound = '1';
-            input.addEventListener('input', () => {
+
+            const commitTypedComboValue = () => {
                 const v = input.value.trim();
-                if (!v) return;
-                ensureDefectComboOption(select, v);
+                if (!v) {
+                    if (select && !isDefectComboCustomToken(select.value)) select.value = '';
+                    refreshDefectQuickPickBar();
+                    return;
+                }
+                if (selectId === 'defectComponent') {
+                    const cat = document.getElementById('defectCategory')?.value || '구조체';
+                    migrateDefectComponentStateShape();
+                    const preset = DEFECT_COMPONENT_PRESET[cat] || [];
+                    if (!preset.includes(v)) {
+                        if (!window.state.customDefectComponents) window.state.customDefectComponents = { '구조체': [], '비구조체': [], '마감재': [] };
+                        if (!window.state.customDefectComponents[cat]) window.state.customDefectComponents[cat] = [];
+                        if (!window.state.customDefectComponents[cat].includes(v)) {
+                            window.state.customDefectComponents[cat].push(v);
+                            const order = ensureOptionOrderEntry('defectComponentOrder', cat);
+                            if (!order.includes(v)) order.push(v);
+                            if (typeof saveStateToLocalStorage === 'function') saveStateToLocalStorage();
+                        }
+                    }
+                    populateDefectComponentDropdown(cat, v);
+                } else {
+                    ensureDefectComboOption(select, v);
+                }
                 if (onChange) onChange(v);
+                if (selectId === 'defectType' && typeof maybeReclassifyPlasterCrackToNonStructural === 'function') {
+                    if (maybeReclassifyPlasterCrackToNonStructural()) return;
+                }
                 refreshDefectQuickPickBar();
                 if (typeof scheduleDefectAutoApply === 'function') scheduleDefectAutoApply();
+            };
+
+            // 타이핑 중에는 중간 글자를 옵션/칩으로 넣지 않음 (blur·Enter에서만 확정)
+            input.addEventListener('input', () => {
+                const v = input.value.trim();
+                if (selectId === 'defectType') {
+                    if (onChange) onChange(v);
+                } else if (selectId === 'defectComponent' && onChange) {
+                    // 부재는 종류 목록만 미리 맞춰 두고, 칩 갱신·옵션 추가는 확정 시
+                    onChange();
+                }
+                if (typeof scheduleDefectAutoApply === 'function') scheduleDefectAutoApply();
+            });
+            input.addEventListener('blur', () => commitTypedComboValue());
+            input.addEventListener('keydown', (e) => {
+                if (e.key !== 'Enter') return;
+                e.preventDefault();
+                commitTypedComboValue();
+                input.blur();
             });
         });
         bindDefectCauseDirectInput();
@@ -21855,12 +21917,12 @@ document.addEventListener('DOMContentLoaded', () => {
     const COLUMN_CRACK_KINDS = ['수직균열', '수평균열', '경사균열', '망상균열'];
     const BEAM_CRACK_KINDS = ['수직균열', '수평균열', '경사균열', '망상균열', 'U자형균열'];
     const RC_COMMON_OTHER_DEFECTS = ['누수', '철근노출', '백태/유출', '콘크리트 박리', '콘크리트 박락', '박리/박락', '신축이음/재료분리 손상', '기타'];
-    const RC_WALL_DEFECTS = ['상태양호', ...WALL_CRACK_KINDS, ...RC_COMMON_OTHER_DEFECTS];
-    const RC_COLUMN_DEFECTS = ['상태양호', ...COLUMN_CRACK_KINDS, ...RC_COMMON_OTHER_DEFECTS];
-    const RC_BEAM_DEFECTS = ['상태양호', ...BEAM_CRACK_KINDS, ...RC_COMMON_OTHER_DEFECTS];
-    const RC_SLAB_DEFECTS = ['상태양호', '균열', ...RC_COMMON_OTHER_DEFECTS];
+    const RC_WALL_DEFECTS = ['상태양호', ...WALL_CRACK_KINDS, '미장균열', ...RC_COMMON_OTHER_DEFECTS];
+    const RC_COLUMN_DEFECTS = ['상태양호', ...COLUMN_CRACK_KINDS, '미장균열', ...RC_COMMON_OTHER_DEFECTS];
+    const RC_BEAM_DEFECTS = ['상태양호', ...BEAM_CRACK_KINDS, '미장균열', ...RC_COMMON_OTHER_DEFECTS];
+    const RC_SLAB_DEFECTS = ['상태양호', '균열', '미장균열', ...RC_COMMON_OTHER_DEFECTS];
     const JOINT_DEFECTS = [
-        '상태양호', ...WALL_CRACK_KINDS,
+        '상태양호', ...WALL_CRACK_KINDS, '미장균열',
         '누수', '철근노출', '백태/유출', '박리/박락',
         '볼트 이완/파손', '용접부 균열/불량', '접합부 손상',
         '부식/녹', '변형/좌굴', '기타'
@@ -22092,6 +22154,7 @@ document.addEventListener('DOMContentLoaded', () => {
         '구조체': [
             '상태양호',
             '균열',
+            '미장균열',
             '누수',
             '철근노출',
             '백태/유출',
@@ -22104,6 +22167,7 @@ document.addEventListener('DOMContentLoaded', () => {
         '비구조체': [
             '상태양호',
             '균열',
+            '미장균열',
             '이격/파손',
             '변형',
             '누수',
@@ -22258,6 +22322,45 @@ document.addEventListener('DOMContentLoaded', () => {
         toggleDefectTypeChip(value);
     }
 
+    function isPlasterCrackDefectType(label) {
+        return String(label || '').includes('미장균열');
+    }
+
+    function defectTypeListHasPlasterCrack(typeVal) {
+        return parseDefectTypeList(typeVal).some((t) => isPlasterCrackDefectType(t));
+    }
+
+    /**
+     * 구조체에서 미장균열을 고르면 비구조체로 옮긴다.
+     * (카테고리 change 핸들러가 종류를 비우지 않도록 preserve 플래그 사용)
+     */
+    function maybeReclassifyPlasterCrackToNonStructural() {
+        const catEl = document.getElementById('defectCategory');
+        if (!catEl || catEl.value !== '구조체') return false;
+        const typeSelect = document.getElementById('defectType');
+        const typeInput = document.getElementById('defectTypeInput');
+        const typeVal = getDefectComboValue(typeSelect, typeInput);
+        if (!defectTypeListHasPlasterCrack(typeVal)) return false;
+
+        const compSelect = document.getElementById('defectComponent');
+        const compInput = document.getElementById('defectComponentInput');
+        const compVal = getDefectComboValue(compSelect, compInput);
+
+        if (isDefectBulkEditMode()) {
+            markDefectBulkFieldChanged('category');
+            markDefectBulkFieldChanged('defectType');
+        }
+
+        window._preserveDefectTypeOnCategoryChange = typeVal;
+        window._preserveDefectComponentOnCategoryChange = compVal || '';
+        catEl.value = '비구조체';
+        catEl.dispatchEvent(new Event('change', { bubbles: true }));
+        if (typeof window.showToast === 'function') {
+            window.showToast('미장균열은 비구조체로 분류됩니다.', 'info', 2500);
+        }
+        return true;
+    }
+
     /** 결함 종류 칩 토글 — 균열·비균열 모두 복수 선택, 순서는 처음 고른 순 */
     function toggleDefectTypeChip(value) {
         const typeSelect = document.getElementById('defectType');
@@ -22287,6 +22390,7 @@ document.addEventListener('DOMContentLoaded', () => {
         syncDefectComboFields(typeSelect, typeInput, joined);
         updateDefectCauseDropdown(joined || '기타');
         toggleDefectSizeInputMode();
+        if (maybeReclassifyPlasterCrackToNonStructural()) return;
         if (typeof scheduleDefectAutoApply === 'function') scheduleDefectAutoApply();
         refreshDefectQuickPickBar();
     }
@@ -22299,7 +22403,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const typeInput = document.getElementById('defectTypeInput');
         const dType = getDefectComboValue(typeSelect, typeInput) || '';
         const kinds = getSelectedCrackKindsFromUi();
-        const isCrack = isCrackKindLabel(dType) || kinds.length > 0;
+        const isCrack = isCrackKindLabel(dType) || kinds.length > 0 || /균열/.test(String(dType));
         const isGood = isGoodDefectType(dType);
         const crackGroup = document.getElementById('defectCrackSizeGroup');
         const measureGroup = document.getElementById('quickMeasureGroup');
@@ -24004,15 +24108,26 @@ document.addEventListener('DOMContentLoaded', () => {
     if (defectCategorySelect) {
         defectCategorySelect.addEventListener('change', (e) => {
             // 구조 분류를 바꾸면 부재·종류는 새 분류 목록만 쓰도록 초기화
+            // (미장균열 → 비구조체 자동 전환 시에는 종류·부재를 유지)
             const cat = e.target.value;
+            const preserveType = window._preserveDefectTypeOnCategoryChange;
+            const preserveComp = window._preserveDefectComponentOnCategoryChange;
+            window._preserveDefectTypeOnCategoryChange = null;
+            window._preserveDefectComponentOnCategoryChange = null;
             const compInput = document.getElementById('defectComponentInput');
             const typeInput = document.getElementById('defectTypeInput');
-            if (compInput) compInput.value = '';
-            if (typeInput) typeInput.value = '';
-            populateDefectComponentDropdown(cat, '');
-            updateDefectTypeDropdown(cat, '');
+            if (preserveType) {
+                populateDefectComponentDropdown(cat, preserveComp || '');
+                updateDefectTypeDropdown(cat, preserveType);
+            } else {
+                if (compInput) compInput.value = '';
+                if (typeInput) typeInput.value = '';
+                populateDefectComponentDropdown(cat, '');
+                updateDefectTypeDropdown(cat, '');
+            }
             toggleDefectSizeInputMode();
             if (typeof scheduleDefectAutoApply === 'function') scheduleDefectAutoApply();
+            refreshDefectQuickPickBar();
         });
     }
 
@@ -24071,6 +24186,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         }
                     }
                     updateDefectTypeDropdown(cat, trimmed);
+                    maybeReclassifyPlasterCrackToNonStructural();
                 } else {
                     updateDefectTypeDropdown(cat);
                 }
@@ -24082,6 +24198,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 );
                 updateDefectCauseDropdown(e.target.value);
                 toggleDefectSizeInputMode();
+                if (maybeReclassifyPlasterCrackToNonStructural()) return;
+                if (typeof scheduleDefectAutoApply === 'function') scheduleDefectAutoApply();
+                refreshDefectQuickPickBar();
             }
         });
     }
