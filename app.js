@@ -7463,7 +7463,7 @@ document.addEventListener('DOMContentLoaded', () => {
             delete bldg.floorDrawingSources[floorCode];
         }
         clearLocalDrawingPersistFlags(bldg.id, floorCode);
-        clearFloorDrawingTierCacheForFloor(bldg.id, floorCode, true);
+        await clearFloorDrawingTierCacheForFloor(bldg.id, floorCode, true);
         clearFloorDrawingRotation(bldg.id, floorCode);
         if (typeof invalidateCloudDrawingFloorCodesCache === 'function') {
             invalidateCloudDrawingFloorCodesCache(bldg);
@@ -7675,14 +7675,10 @@ document.addEventListener('DOMContentLoaded', () => {
                                     ? window.prepareFloorDrawingUpload(item.file)
                                     : window.compressDrawingImage(item.file).then((rasterDataUrl) => ({ rasterDataUrl, pdfDataUrl: null }));
                                 const prepared = await withTimeout(preparePromise, 120000, 'prepare-drawing');
-                                _idbPersistedDrawingKeys.delete(`${bldg.id}_${item.floorCode}`);
-                                if (window._cloudSyncedDrawingKeys) window._cloudSyncedDrawingKeys.delete(`${bldg.id}_${item.floorCode}`);
-                                clearFloorDrawingTierCacheForFloor(bldg.id, item.floorCode);
+                                await invalidateFloorDrawingBeforeReplace(bldg, item.floorCode);
                                 clearFloorDrawingRotation(bldg.id, item.floorCode);
-                                if (window._cloudSyncedTierKeys) {
-                                    (window.FLOOR_DRAWING_TIER_DIMS || [4000, 8000, 16000]).forEach((d) => {
-                                        window._cloudSyncedTierKeys.delete(`${bldg.id}_${item.floorCode}_${d}`);
-                                    });
+                                if (prepared && prepared.pdfDataUrl && bldg.floorDrawingPdfs) {
+                                    delete bldg.floorDrawingPdfs[item.floorCode];
                                 }
                                 if (prepared && prepared.rasterDataUrl) {
                                     bldg.floorDrawings[item.floorCode] = prepared.rasterDataUrl;
@@ -7693,6 +7689,12 @@ document.addEventListener('DOMContentLoaded', () => {
                                     bldg.floorDrawingTiers[item.floorCode] = prepared.tiers;
                                     clearFloorTierPersistedFlags(bldg.id, item.floorCode);
                                     await uploadFloorDrawingTiers(bldg.id, item.floorCode, prepared.tiers);
+                                } else if (prepared && prepared.rasterDataUrl) {
+                                    // 티어 없이 압축만 된 경우에도 옛 티어가 남지 않게 4000만 심는다
+                                    if (!bldg.floorDrawingTiers) bldg.floorDrawingTiers = {};
+                                    bldg.floorDrawingTiers[item.floorCode] = { '4000': prepared.rasterDataUrl };
+                                    clearFloorTierPersistedFlags(bldg.id, item.floorCode);
+                                    await uploadFloorDrawingTiers(bldg.id, item.floorCode, bldg.floorDrawingTiers[item.floorCode]);
                                 }
                                 if (prepared && prepared.sourceDataUrl) {
                                     cacheFloorDrawingSourceToDevice(bldg, item.floorCode, prepared.sourceDataUrl);
@@ -7853,7 +7855,14 @@ document.addEventListener('DOMContentLoaded', () => {
             populateFloorSelectDropdown(bldg);
 
             if (window.state.currentBuildingId === bldg.id) {
-                window.selectBuildingAndInspect(bldg);
+                await window.selectBuildingAndInspect(bldg);
+                const replacedCodes = (Array.isArray(newFiles) ? newFiles : [])
+                    .map((it) => it && it.floorCode)
+                    .filter(Boolean);
+                const cur = window.state.currentFloor;
+                if (cur && replacedCodes.includes(cur) && typeof loadFloorDrawing === 'function') {
+                    loadFloorDrawing(cur, { forceClear: true });
+                }
             }
 
             const floorCount = (bldg.floorsList && bldg.floorsList.length)
@@ -8228,7 +8237,7 @@ document.addEventListener('DOMContentLoaded', () => {
         return true;
     }
 
-    function clearFloorDrawingTierCacheForFloor(bldgId, floorCode, includeSource = false) {
+    async function clearFloorDrawingTierCacheForFloor(bldgId, floorCode, includeSource = false) {
         if (!bldgId || !floorCode) return;
         const prefix = `${bldgId}_${floorCode}_`;
         if (typeof window.invalidatePdfPageCache === 'function') {
@@ -8239,18 +8248,63 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (k.startsWith(prefix)) delete state.floorDrawingTierImageCache[k];
             });
         }
+        if (state.floorImageCache) {
+            delete state.floorImageCache[`${bldgId}_${floorCode}`];
+        }
         _idbPersistedTierKeys.delete(`${bldgId}_${floorCode}`);
+        const deletes = [];
         (window.FLOOR_DRAWING_TIER_DIMS || [4000, 8000, 16000]).forEach((d) => {
             const tierKey = floorDrawingTierIdbKey(bldgId, floorCode, d);
             _idbPersistedTierKeys.delete(tierKey);
-            idbDelete('floorDrawingTiers', tierKey);
+            deletes.push(Promise.resolve(idbDelete('floorDrawingTiers', tierKey)));
         });
-        idbDelete('floorDrawingTiers', `${bldgId}_${floorCode}`);
+        deletes.push(Promise.resolve(idbDelete('floorDrawingTiers', `${bldgId}_${floorCode}`)));
         if (includeSource) {
             _idbPersistedSourceKeys.delete(`${bldgId}_${floorCode}`);
-            idbDelete('floorDrawingSources', `${bldgId}_${floorCode}`);
+            deletes.push(Promise.resolve(idbDelete('floorDrawingSources', `${bldgId}_${floorCode}`)));
         }
+        await Promise.all(deletes.map((p) => p.catch(() => {})));
     }
+
+    /** 도면 교체 직전: 메모리·IDB·클라우드 옛 티어/레스터를 비워 새 파일이 보이게 한다. */
+    async function invalidateFloorDrawingBeforeReplace(bldg, floorCode) {
+        if (!bldg || !bldg.id || !floorCode) return;
+        const bldgId = bldg.id;
+        const floorKey = `${bldgId}_${floorCode}`;
+        if (bldg.floorDrawingTiers && bldg.floorDrawingTiers[floorCode]) {
+            delete bldg.floorDrawingTiers[floorCode];
+        }
+        if (bldg.floorDrawings && Object.prototype.hasOwnProperty.call(bldg.floorDrawings, floorCode)) {
+            delete bldg.floorDrawings[floorCode];
+        }
+        if (bldg.floorDrawingSources && bldg.floorDrawingSources[floorCode]) {
+            delete bldg.floorDrawingSources[floorCode];
+        }
+        // PDF는 새 업로드에 pdf가 있을 때만 지움 — 호출부에서 처리. 교체 시 일단 비우지 않아도 됨.
+        clearLocalDrawingPersistFlags(bldgId, floorCode);
+        if (window._cloudSyncedDrawingKeys) window._cloudSyncedDrawingKeys.delete(floorKey);
+        if (window._cloudSyncedPdfKeys) window._cloudSyncedPdfKeys.delete(floorKey);
+        if (window._cloudSyncedTierKeys) {
+            (window.FLOOR_DRAWING_TIER_DIMS || [4000, 8000, 16000]).forEach((d) => {
+                window._cloudSyncedTierKeys.delete(`${bldgId}_${floorCode}_${d}`);
+            });
+        }
+        if (state.currentBuildingId === bldgId && state.currentFloor === floorCode) {
+            if (typeof cancelFloorDrawingBlend === 'function') cancelFloorDrawingBlend();
+            state.bgImage = null;
+            state.floorDrawingHiPatch = null;
+            if (typeof clearFloorDrawingHiPatch === 'function') clearFloorDrawingHiPatch(true);
+        }
+        await clearFloorDrawingTierCacheForFloor(bldgId, floorCode, true);
+        await Promise.all([
+            Promise.resolve(idbDelete('floorDrawings', floorKey)).catch(() => {}),
+            Promise.resolve(idbDelete('floorDrawingPdfs', floorKey)).catch(() => {}),
+            (typeof deleteFloorDrawingTiersFromCloud === 'function'
+                ? deleteFloorDrawingTiersFromCloud(bldgId, floorCode)
+                : Promise.resolve()).catch(() => {})
+        ]);
+    }
+    window.invalidateFloorDrawingBeforeReplace = invalidateFloorDrawingBeforeReplace;
 
     function prefetchFloorDrawingTiersForFloor(bldg, floorCode, dims) {
         if (!bldg || !floorCode || !Array.isArray(dims)) return;
