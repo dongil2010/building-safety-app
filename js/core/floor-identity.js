@@ -59,6 +59,8 @@
         const raw = asText(code);
         if (!raw) return 0;
         const c = raw.toUpperCase();
+        const extSerialRank = c.match(/^EXT_(\d+)$/) || raw.match(/^외부\s*(\d+)$/);
+        if (extSerialRank) return 10000 + parseInt(extSerialRank[1], 10);
         if (c.indexOf('EXT') >= 0 || raw.indexOf('외부') >= 0) return 10000;
         if (typeof root.resolveRoofFloorFromText === 'function') {
             const roof = root.resolveRoofFloorFromText(raw);
@@ -77,11 +79,16 @@
         const raw = asText(code);
         if (!raw) return '1F';
         const c = raw.toUpperCase();
+        const serial = c.match(/^EXT_(\d+)$/);
+        if (serial) return '외부' + serial[1] + ' (EXT_' + serial[1] + ')';
+        const extNum = raw.match(/^외부\s*(\d+)$/);
+        if (extNum) return '외부' + extNum[1] + ' (EXT_' + extNum[1] + ')';
         const defs = root.EXT_DIRECTION_DEFS || [];
         for (let i = 0; i < defs.length; i++) {
             if (defs[i] && defs[i].code === c) return defs[i].label;
         }
-        if (c === 'EXT' || raw.indexOf('외부') >= 0) return '건축물 외부 (EXT)';
+        if (c === 'EXT' || raw === '외부') return '건축물 외부 (EXT)';
+        if (raw.indexOf('외부') >= 0) return raw;
         if (typeof root.resolveRoofFloorFromText === 'function') {
             const roof = root.resolveRoofFloorFromText(raw);
             if (roof) return roof.label;
@@ -239,21 +246,77 @@
         return next;
     }
 
+    function isExteriorLikeCode(code) {
+        const raw = asText(code);
+        if (!raw) return false;
+        if (typeof root.isExteriorFloorCode === 'function') return !!root.isExteriorFloorCode(raw);
+        const c = raw.toUpperCase();
+        return c === 'EXT' || c.indexOf('EXT_') === 0 || raw.indexOf('외부') >= 0 || raw.indexOf('입면') >= 0;
+    }
+
+    function usedCodeSet(usedCodes) {
+        const used = new Set();
+        (usedCodes || []).forEach(function (c) {
+            if (c != null && String(c)) used.add(String(c));
+        });
+        return used;
+    }
+
+    /** 외부1·외부2… (코드 EXT_1·EXT_2). 정배좌우로 강제하지 않고 도면 장수대로 붙인다. */
+    function allocateNextExteriorSerial(usedCodes) {
+        const used = usedCodeSet(usedCodes);
+        var n;
+        for (n = 1; n <= 99; n++) {
+            var code = 'EXT_' + n;
+            var label = '외부' + n;
+            if (!used.has(code) && !used.has(label) && !used.has('외부 ' + n)) {
+                return { floorCode: code, floorLabel: label, rank: 10000 + n };
+            }
+        }
+        code = 'EXT_' + Date.now();
+        return { floorCode: code, floorLabel: code, rank: 10000 };
+    }
+
+    function parseExteriorSerialNumber(text) {
+        const raw = asText(text);
+        if (!raw) return null;
+        var m = raw.match(/외부\s*[_\-]?\s*(\d{1,2})(?!\d)/);
+        if (!m) m = raw.toUpperCase().match(/(?:^|[^A-Z0-9])EXT[_\s\-]*([0-9]{1,2})(?![A-Z0-9])/);
+        if (!m) return null;
+        var n = parseInt(m[1], 10);
+        if (!(n >= 1 && n <= 99)) return null;
+        return n;
+    }
+
     /**
      * 업로드 한 장의 층 코드를 확정.
      * 인식 실패(matched:false)만 기존·같은 배치 코드와 겹치지 않게 고유화한다.
+     * 외부는 정배좌우 강제 대신 EXT_1·EXT_2(표시: 외부1·2)로 붙이고, 같은 코드 충돌도 다음 번호로 넘긴다.
      */
     function assignParsedFloorForUpload(parsed, usedCodes) {
         const src = parsed || {};
         const matched = !!src.matched;
         var code = asText(src.floorCode) || '도면';
         var label = asText(src.floorLabel) || code;
+        var rank = typeof src.rank === 'number' ? src.rank : 0;
+        const used = usedCodeSet(usedCodes);
+
+        if (src.exteriorSerial || code === 'EXT_SERIAL') {
+            const alloc = allocateNextExteriorSerial(usedCodes);
+            return { rank: alloc.rank, floorCode: alloc.floorCode, floorLabel: alloc.floorLabel, matched: true };
+        }
+
+        if (isExteriorLikeCode(code) && used.has(code)) {
+            const alloc = allocateNextExteriorSerial(usedCodes);
+            return { rank: alloc.rank, floorCode: alloc.floorCode, floorLabel: alloc.floorLabel, matched: true };
+        }
+
         if (!matched) {
             code = uniquifyCustomFloorCode(code, usedCodes);
             label = code;
         }
         return {
-            rank: typeof src.rank === 'number' ? src.rank : 0,
+            rank: rank,
             floorCode: code,
             floorLabel: label,
             matched: matched
@@ -275,6 +338,9 @@
         parseCustomStemFromFilename: parseCustomStemFromFilename,
         unmatchedFloorFromFilename: unmatchedFloorFromFilename,
         uniquifyCustomFloorCode: uniquifyCustomFloorCode,
+        isExteriorLikeCode: isExteriorLikeCode,
+        allocateNextExteriorSerial: allocateNextExteriorSerial,
+        parseExteriorSerialNumber: parseExteriorSerialNumber,
         assignParsedFloorForUpload: assignParsedFloorForUpload
     };
 

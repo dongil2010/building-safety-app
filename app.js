@@ -3092,8 +3092,8 @@ document.addEventListener('DOMContentLoaded', () => {
         return formatDefectNoSeq(getNextDefectMainNumber(defects));
     }
 
-    /** 마킹 번호 풀: 일반 층은 해당 층만. 외부 입면(EXT_*)은 표가 하나이므로
-     * 모든 외부 도면 마킹을 한 번호 공간으로 본다(한 도면에서 빈 번호 = 다른 입면에 있음). */
+    /** 마킹 번호 풀: 일반 층은 해당 층만. 외부(EXT / EXT_1·EXT_2·입면)는 표가 하나이므로
+     * 모든 외부 도면 마킹을 한 번호 공간으로 본다(한 도면의 빈 번호 = 다른 외부 도면에 있음). */
     function getFloorDefectsForNumbering(floorKey) {
         const bldgId = state.currentBuildingId;
         let floorCode = state.currentFloor || '';
@@ -5252,9 +5252,14 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         if (!code) return '1F';
         const c = String(code).toUpperCase().trim();
+        const serial = c.match(/^EXT_(\d+)$/);
+        if (serial) return '외부' + serial[1] + ' (EXT_' + serial[1] + ')';
+        const extNum = String(code).trim().match(/^외부\s*(\d+)$/);
+        if (extNum) return '외부' + extNum[1] + ' (EXT_' + extNum[1] + ')';
         const dirDef = (window.EXT_DIRECTION_DEFS || []).find(d => d.code === c);
         if (dirDef) return dirDef.label;
-        if (c === 'EXT' || String(code).includes('외부')) return '건축물 외부 (EXT)';
+        if (c === 'EXT' || String(code).trim() === '외부') return '건축물 외부 (EXT)';
+        if (String(code).includes('외부')) return String(code).trim();
         const roofInfo = typeof window.resolveRoofFloorFromText === 'function' ? window.resolveRoofFloorFromText(code) : null;
         if (roofInfo) return roofInfo.label;
         const bMatch = c.match(/^B\s*([0-9]+)\s*F?$/);
@@ -30224,8 +30229,12 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         }
 
+        // 외부 도면끼리 번호가 겹치지 않도록, 외부면 전체 외부 번호 풀을 본다.
+        const poolForCadNos = (typeof getFloorDefectsForNumbering === 'function')
+            ? getFloorDefectsForNumbering(floorKey)
+            : (currentDefects || []);
         const existingNoKeys = new Set(
-            (currentDefects || []).map((d) => normalizeCadNoKey(d.cadNo || d.no || d.groupNo || ''))
+            (poolForCadNos || []).map((d) => normalizeCadNoKey(d.cadNo || d.no || d.groupNo || ''))
                 .filter(Boolean)
         );
 
@@ -30548,7 +30557,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 return;
             }
             const confirmMsg = exteriorPool
-                ? '외부 입면(정면·배면·좌·우) 전체를 한 번호로 보고 빈 칸을 뒤에서부터 앞으로 땡길까요?\n(한 도면의 빈 번호는 다른 입면에 있을 수 있습니다.)'
+                ? '외부 도면(외부1·2·…) 전체를 한 번호로 보고 빈 칸을 뒤에서부터 앞으로 땡길까요?\n(한 도면의 빈 번호는 다른 외부 도면에 있을 수 있습니다.)'
                 : '현재 층의 마킹번호 빈 칸을 뒤에서부터 앞으로 땡길까요?\n(예: 14,15,17,18 → 14,15,16,17)';
             if (!window.confirm(confirmMsg)) return;
             if (typeof pushDefectHistory === 'function') pushDefectHistory();
@@ -33573,7 +33582,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 // --- 1. 상태조사표 (신가병원 1·2종 / 칠산타워 3종 서식)
                 //     기본 15행, 결함표 추가(n-n)가 있으면 최대 17행. 본번호는 가능하면 15·30·45에서 끝낸다.
                 //     마킹 추가 그룹은 한 행으로 합치고, 결함표 추가(surveyExtra)만 별도 행으로 둔다.
-                //     외부 입면(EXT_*)은 도면별 표를 나누지 않고 한 표로 합치며, 위치에 정면/배면/좌·우를 넣는다. ---
+                //     외부(EXT / EXT_1·2…)는 도면별 표를 나누지 않고 한 표로 합치며, 위치에 방향 라벨이 있으면 넣는다. ---
                 const grade3Report = isGrade3Building(bldg);
                 const isExtFloor = exteriorFloorSetForReport.has(floorCode);
                 let surveyDefects;

@@ -661,8 +661,8 @@ window.compressDefectPhoto43 = function(file, targetW, quality) {
     });
 };
 
-// 건축물 외부는 보통 동서남북 4장의 입면도로 나뉘므로, 파일명에 방향이 있으면
-// 하나의 "건축물 외부"가 아니라 방향별로 별도 층(EXT_N/EXT_E/EXT_S/EXT_W)으로 인식한다.
+// 건축물 외부: 한 도면에 정·배 또는 좌·우가 같이 들어갈 수 있어 기본은 외부1·외부2(EXT_1·EXT_2)로 붙인다.
+// 파일명에 방향이 하나만 뚜렷하면 EXT_FRONT 등도 인식한다(직접 선택도 가능).
 // getFloorLabelFromCode/getFloorRankFromCode/parseFloorInfoFromFilename이 공통으로 사용.
 window.EXT_DIRECTION_DEFS = [
     // 입면도 2·4·6장: 정면/배면/좌·우 + 방위. 상태조사표는 합치고 위치에 shortLabel 사용
@@ -741,22 +741,45 @@ window.parseFloorInfoFromFilename = function(fileName) {
     }
 
     if (cleanName.includes('외부') || cleanName.includes('외벽') || cleanName.includes('파사드') || cleanName.includes('입면') || cleanName.includes('FACADE') || cleanName.includes('ELEVATION') || cleanName.includes('EXTERIOR')) {
-        // 방향이 뚜렷하게 적혀있으면(북측/NORTH 등) 그 방향 전용 층으로
+        // 외부1 / EXT_1 / 외부 2 등 번호가 있으면 그 번호로
+        const fi = window.BSA && window.BSA.floorIdentity;
+        const serialN = (fi && typeof fi.parseExteriorSerialNumber === 'function')
+            ? fi.parseExteriorSerialNumber(nameWithoutExt)
+            : (function () {
+                const m = nameWithoutExt.match(/외부\s*[_\-]?\s*(\d{1,2})(?!\d)/)
+                    || cleanName.match(/(?:^|[^A-Z0-9])EXT[_\s\-]*([0-9]{1,2})(?![A-Z0-9])/);
+                return m ? parseInt(m[1], 10) : null;
+            })();
+        if (serialN >= 1 && serialN <= 99) {
+            return {
+                rank: 10000 + serialN,
+                floorCode: 'EXT_' + serialN,
+                floorLabel: '외부' + serialN,
+                matched: true
+            };
+        }
+
+        // 방향 키워드가 몇 개인지 센다. 정면+배면처럼 2개 이상이면 한 도면에 입면이 같이 들어간 것으로 보고
+        // 정배좌우 전용 코드로 쪼개지 않고 외부1·2 일련번호로 넘긴다.
+        const dirHits = [];
         for (let i = 0; i < window.EXT_DIRECTION_DEFS.length; i++) {
             const d = window.EXT_DIRECTION_DEFS[i];
-            if (d.strongKeys.some(k => cleanName.includes(k))) {
-                return { rank: 1001 + i, floorCode: d.code, floorLabel: d.label, matched: true };
+            if (d.strongKeys.some(k => cleanName.includes(String(k).toUpperCase()) || nameWithoutExt.includes(k))) {
+                dirHits.push(d);
             }
         }
-        // "외부_북.jpg"처럼 방위 한 글자만 있는 경우도 보조로 인식
-        for (let i = 0; i < window.EXT_DIRECTION_DEFS.length; i++) {
-            const d = window.EXT_DIRECTION_DEFS[i];
-            if (cleanName.includes(d.soloChar)) {
-                return { rank: 1001 + i, floorCode: d.code, floorLabel: d.label, matched: true };
+        if (dirHits.length === 0) {
+            for (let i = 0; i < window.EXT_DIRECTION_DEFS.length; i++) {
+                const d = window.EXT_DIRECTION_DEFS[i];
+                if (d.soloChar && cleanName.includes(d.soloChar)) dirHits.push(d);
             }
         }
-        // 방향 표시가 없으면 통합 "건축물 외부" 한 층으로
-        return { rank: 1000, floorCode: 'EXT', floorLabel: '건축물 외부 (EXT)', matched: true };
+        if (dirHits.length === 1) {
+            const d = dirHits[0];
+            return { rank: 1001 + window.EXT_DIRECTION_DEFS.indexOf(d), floorCode: d.code, floorLabel: d.label, matched: true };
+        }
+        // 방향 없음 또는 여러 방향(정·배 / 좌·우 한 장) → 업로드 쪽에서 EXT_1, EXT_2… 부여
+        return { rank: 1000, floorCode: 'EXT_SERIAL', floorLabel: '외부', matched: false, exteriorSerial: true };
     }
 
     const parkingCustom = (window.BSA && window.BSA.floorIdentity
@@ -819,6 +842,7 @@ window.FLOOR_CODE_OPTION_LIST = (function() {
     list.push('PH');
     list.push('PH_ROOF');
     list.push('EXT');
+    for (let i = 1; i <= 12; i++) list.push('EXT_' + i);
     window.EXT_DIRECTION_DEFS.forEach(d => list.push(d.code));
     return list;
 })();
@@ -830,6 +854,8 @@ window.getFloorRankFromCode = function(code) {
     if (!code) return 0;
     const raw = String(code).trim();
     const c = raw.toUpperCase();
+    const extSerialRank = c.match(/^EXT_(\d+)$/) || raw.match(/^외부\s*(\d+)$/);
+    if (extSerialRank) return 10000 + parseInt(extSerialRank[1], 10);
     if (c.includes('EXT') || raw.includes('외부')) return 10000;
     const roofInfo = window.resolveRoofFloorFromText(raw);
     if (roofInfo) return roofInfo.rank;
