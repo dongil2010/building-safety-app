@@ -31432,7 +31432,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function buildReportSurveyTableHtml(sDefects, cellCtxFactory, isGrade3) {
-        const td = (text) => `<td style="padding:0.28rem 0.18rem; border:1px solid #94a3b8; white-space:pre-line;">${escapeReportHtml(text)}</td>`;
+        const td = (text) => `<td style="padding:0.28rem 0.18rem; border:1px solid #94a3b8; white-space:pre-line; word-break:keep-all; overflow-wrap:anywhere;">${escapeReportHtml(text)}</td>`;
         const th = (text, extra) => `<th style="padding:0.28rem 0.18rem; border:1px solid #64748b; background:#f8fafc; color:#1e293b; font-weight:700;${extra || ''}">${text}</th>`;
         const head = isGrade3
             ? `<tr>${th('No.', 'rowspan="2"')}${th('구분', 'rowspan="2"')}${th('부재 분류', 'colspan="2"')}${th('점검내용', 'rowspan="2"')}${th('발생원인', 'rowspan="2"')}${th('비고', 'rowspan="2"')}</tr><tr>${th('구조부재')}${th('비구조부재')}</tr>`
@@ -35350,6 +35350,12 @@ document.addEventListener('DOMContentLoaded', () => {
                     if (hasSecPr && !hasTbl && !hasPic && ch.parentNode) ch.parentNode.removeChild(ch);
                 });
             });
+        },
+        wrapHwpxCellText: (raw, maxChars, normalizeFn) => {
+            let s = String(raw == null ? '' : raw);
+            if (typeof normalizeFn === 'function') s = String(normalizeFn(s));
+            return s.replace(/\r\n|\r|\n/g, ' ').replace(/[ \t]{2,}/g, ' ')
+                .replace(/([^\s\n])[ \t]*-(\d+)\s*EA\b/gi, '$1\n-$2EA');
         }
     };
     window.exportHwpxSurveyTable = async function() {
@@ -35539,15 +35545,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 const seg = clonedPara.getElementsByTagNameNS(HP_NS, 'lineseg')[0];
                 if (seg) seg.setAttribute('vertpos', String(lineIndex * (baseVertsize + baseSpacing)));
             };
-            // 한글 셀: 자간은 절대 손대지 않는다. 가운데 쪼개기(줄나눔)도 하지 않는다.
-            // 칸 너비를 넘는 지점부터 다음 줄로 넘기고(띄어쓰기 있으면 그 앞, 없으면 글자 단위),
-            // 행 높이는 템플릿을 유지하다가 4줄 이상일 때만 내용에 맞게 확장한다.
+            // 한글 셀: 자간·장평은 절대 손대지 않는다. 가운데 쪼개기(줄나눔)도 하지 않는다.
+            // 칸 너비를 넘는 지점부터 다음 줄로 넘긴다(띄어쓰기·구분자, 없으면 한글 음절 단위).
+            // ASCII 측정값(Cw:0.15)은 한 토큰으로 유지. 행 높이는 4줄 이상일 때만 확장.
             const HWPX_CELL_EXPAND_FROM_LINES = 4;
-            const hwpxCharWidthUnits = (ch) => {
-                // 반각·ASCII는 대략 절반 폭으로 잡아 넘어가는 위치를 맞춤
-                if (/[\u0020-\u007E\uFF61-\uFF9F]/.test(ch)) return 0.55;
-                return 1;
-            };
             const estimateHwpxCellMaxChars = (tc, paras) => {
                 const DEFAULT_MAX = 16;
                 if (!tc) return DEFAULT_MAX;
@@ -35564,72 +35565,14 @@ document.addEventListener('DOMContentLoaded', () => {
                 const usable = Math.max(charW, cellW - ml - mr);
                 return Math.max(4, Math.floor(usable / charW));
             };
-            /** 칸을 넘는 위치부터 순차 줄바꿈. 가운데 분할(줄나눔) 없음. */
-            const wrapHwpxCellLine = (line, maxChars = 16) => {
-                const s = String(line == null ? '' : line);
-                const chars = Array.from(s);
-                if (!chars.length) return '';
-                const maxUnits = Math.max(4, Number(maxChars) || 16);
-                const lines = [];
-                let i = 0;
-                while (i < chars.length) {
-                    while (i < chars.length && (chars[i] === ' ' || chars[i] === '\t')) i++;
-                    if (i >= chars.length) break;
-                    let units = 0;
-                    let end = i;
-                    let lastBreak = -1; // 끊을 위치(이 인덱스부터 다음 줄)
-                    while (end < chars.length) {
-                        const ch = chars[end];
-                        const w = hwpxCharWidthUnits(ch);
-                        if (units + w > maxUnits && end > i) break;
-                        units += w;
-                        end++;
-                        if (ch === ' ' || ch === '\t') {
-                            // -nEA 앞 공백은 wrapHwpxCellText가 문단 분리한다.
-                            // 여기선 줄바꿈 후보로 쓰지 않음(측정값 중간 쪼개기 방지).
-                            const after = chars.slice(end).join('');
-                            if (!/^-\d+\s*EA\b/i.test(after)) lastBreak = end;
-                        } else if (/[,|·、，]/.test(ch)) {
-                            // . / 는 규모(0.15/1.5) 중간이라 끊지 않음. 여러 건 구분자(콤마)만.
-                            lastBreak = end;
-                        }
-                    }
-                    if (end >= chars.length) {
-                        lines.push(chars.slice(i).join(''));
-                        break;
-                    }
-                    // 공백/구분자 등 자연 끊김이 없으면 글자 중간을 강제 문단 분리하지 않는다.
-                    // (좁은 칸+ASCII 크기값에서 "Cw:0." / "15" 같은 엉터리 줄바꿈이 생기던 원인)
-                    // 한글 자동 줄바꿈에 맡기고, 높이 계산용 강제 문단은 자연 끊김에만 만든다.
-                    if (!(lastBreak > i)) {
-                        lines.push(chars.slice(i).join(''));
-                        break;
-                    }
-                    let cut = lastBreak;
-                    // lastBreak가 공백을 가리키면 공백은 다음 줄 선두에서 제거됨
-                    if (cut > i && (chars[cut - 1] === ' ' || chars[cut - 1] === '\t')) {
-                        lines.push(chars.slice(i, cut - 1).join(''));
-                        i = cut;
-                    } else {
-                        lines.push(chars.slice(i, cut).join(''));
-                        i = cut;
-                    }
-                    if (!lines[lines.length - 1]) lines.pop();
-                }
-                return lines.length ? lines.join('\n') : s;
-            };
             const wrapHwpxCellText = (raw, maxChars = 16) => {
-                // 입력값에 섞인 CR/LF는 강제 문단 분리로 이어져 칸 안에서 엉뚱한 줄바꿈이 된다.
-                // 공백으로 정리한 뒤, 칸 너비 줄바꿈만 적용한다.
+                if (hwpxSlotApi && typeof hwpxSlotApi.wrapHwpxCellText === 'function') {
+                    return hwpxSlotApi.wrapHwpxCellText(raw, maxChars, normalizeEaSpacingInText);
+                }
                 const flat = String(normalizeEaSpacingInText(raw == null ? '' : raw))
                     .replace(/\r\n|\r|\n/g, ' ')
                     .replace(/[ \t]{2,}/g, ' ');
-                // 갯수 접미사(-nEA)만 평탄화 뒤에 다시 문단 분리. fillCellParas가
-                // cloneNode(true)로 기존 문단을 복제해 다음 줄로 이어붙인다(한글 엔터와 동일).
-                return insertHwpxEaCountLineBreaks(flat)
-                    .split('\n')
-                    .map((line) => wrapHwpxCellLine(line, maxChars))
-                    .join('\n');
+                return insertHwpxEaCountLineBreaks(flat);
             };
             // rawVal의 실제 줄 수(lines.length)를 반환한다 — 호출부에서 행 높이를 실제 줄 수에
             // 맞춰 다시 계산하는 데 쓴다(표본 행이 다른 칸의 샘플 2줄 데이터 기준 키를 물려받아,
@@ -37835,15 +37778,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 const seg = clonedPara.getElementsByTagNameNS(HP_NS, 'lineseg')[0];
                 if (seg) seg.setAttribute('vertpos', String(lineIndex * (baseVertsize + baseSpacing)));
             };
-            // 한글 셀: 자간은 절대 손대지 않는다. 가운데 쪼개기(줄나눔)도 하지 않는다.
-            // 칸 너비를 넘는 지점부터 다음 줄로 넘기고(띄어쓰기 있으면 그 앞, 없으면 글자 단위),
-            // 행 높이는 템플릿을 유지하다가 4줄 이상일 때만 내용에 맞게 확장한다.
+            // 한글 셀: 자간·장평은 절대 손대지 않는다. 가운데 쪼개기(줄나눔)도 하지 않는다.
+            // 칸 너비를 넘는 지점부터 다음 줄로 넘긴다(띄어쓰기·구분자, 없으면 한글 음절 단위).
+            // ASCII 측정값(Cw:0.15)은 한 토큰으로 유지. 행 높이는 4줄 이상일 때만 확장.
             const HWPX_CELL_EXPAND_FROM_LINES = 4;
-            const hwpxCharWidthUnits = (ch) => {
-                // 반각·ASCII는 대략 절반 폭으로 잡아 넘어가는 위치를 맞춤
-                if (/[\u0020-\u007E\uFF61-\uFF9F]/.test(ch)) return 0.55;
-                return 1;
-            };
             const estimateHwpxCellMaxChars = (tc, paras) => {
                 const DEFAULT_MAX = 16;
                 if (!tc) return DEFAULT_MAX;
@@ -37860,72 +37798,14 @@ document.addEventListener('DOMContentLoaded', () => {
                 const usable = Math.max(charW, cellW - ml - mr);
                 return Math.max(4, Math.floor(usable / charW));
             };
-            /** 칸을 넘는 위치부터 순차 줄바꿈. 가운데 분할(줄나눔) 없음. */
-            const wrapHwpxCellLine = (line, maxChars = 16) => {
-                const s = String(line == null ? '' : line);
-                const chars = Array.from(s);
-                if (!chars.length) return '';
-                const maxUnits = Math.max(4, Number(maxChars) || 16);
-                const lines = [];
-                let i = 0;
-                while (i < chars.length) {
-                    while (i < chars.length && (chars[i] === ' ' || chars[i] === '\t')) i++;
-                    if (i >= chars.length) break;
-                    let units = 0;
-                    let end = i;
-                    let lastBreak = -1; // 끊을 위치(이 인덱스부터 다음 줄)
-                    while (end < chars.length) {
-                        const ch = chars[end];
-                        const w = hwpxCharWidthUnits(ch);
-                        if (units + w > maxUnits && end > i) break;
-                        units += w;
-                        end++;
-                        if (ch === ' ' || ch === '\t') {
-                            // -nEA 앞 공백은 wrapHwpxCellText가 문단 분리한다.
-                            // 여기선 줄바꿈 후보로 쓰지 않음(측정값 중간 쪼개기 방지).
-                            const after = chars.slice(end).join('');
-                            if (!/^-\d+\s*EA\b/i.test(after)) lastBreak = end;
-                        } else if (/[,|·、，]/.test(ch)) {
-                            // . / 는 규모(0.15/1.5) 중간이라 끊지 않음. 여러 건 구분자(콤마)만.
-                            lastBreak = end;
-                        }
-                    }
-                    if (end >= chars.length) {
-                        lines.push(chars.slice(i).join(''));
-                        break;
-                    }
-                    // 공백/구분자 등 자연 끊김이 없으면 글자 중간을 강제 문단 분리하지 않는다.
-                    // (좁은 칸+ASCII 크기값에서 "Cw:0." / "15" 같은 엉터리 줄바꿈이 생기던 원인)
-                    // 한글 자동 줄바꿈에 맡기고, 높이 계산용 강제 문단은 자연 끊김에만 만든다.
-                    if (!(lastBreak > i)) {
-                        lines.push(chars.slice(i).join(''));
-                        break;
-                    }
-                    let cut = lastBreak;
-                    // lastBreak가 공백을 가리키면 공백은 다음 줄 선두에서 제거됨
-                    if (cut > i && (chars[cut - 1] === ' ' || chars[cut - 1] === '\t')) {
-                        lines.push(chars.slice(i, cut - 1).join(''));
-                        i = cut;
-                    } else {
-                        lines.push(chars.slice(i, cut).join(''));
-                        i = cut;
-                    }
-                    if (!lines[lines.length - 1]) lines.pop();
-                }
-                return lines.length ? lines.join('\n') : s;
-            };
             const wrapHwpxCellText = (raw, maxChars = 16) => {
-                // 입력값에 섞인 CR/LF는 강제 문단 분리로 이어져 칸 안에서 엉뚱한 줄바꿈이 된다.
-                // 공백으로 정리한 뒤, 칸 너비 줄바꿈만 적용한다.
+                if (hwpxSlotApi && typeof hwpxSlotApi.wrapHwpxCellText === 'function') {
+                    return hwpxSlotApi.wrapHwpxCellText(raw, maxChars, normalizeEaSpacingInText);
+                }
                 const flat = String(normalizeEaSpacingInText(raw == null ? '' : raw))
                     .replace(/\r\n|\r|\n/g, ' ')
                     .replace(/[ \t]{2,}/g, ' ');
-                // 갯수 접미사(-nEA)만 평탄화 뒤에 다시 문단 분리. fillCellParas가
-                // cloneNode(true)로 기존 문단을 복제해 다음 줄로 이어붙인다(한글 엔터와 동일).
-                return insertHwpxEaCountLineBreaks(flat)
-                    .split('\n')
-                    .map((line) => wrapHwpxCellLine(line, maxChars))
-                    .join('\n');
+                return insertHwpxEaCountLineBreaks(flat);
             };
             // rawVal의 실제 줄 수(lines.length)를 반환한다 — 호출부에서 행 높이를 실제 줄 수에
             // 맞춰 다시 계산하는 데 쓴다(표본 행이 다른 칸의 샘플 2줄 데이터 기준 키를 물려받아,
@@ -40605,7 +40485,17 @@ document.addEventListener('DOMContentLoaded', () => {
                     <x:WorksheetOptions><x:DisplayGridlines/></x:WorksheetOptions>
                     </x:ExcelWorksheet></x:ExcelWorksheets></x:ExcelWorkbook></xml><![endif]-->
                     <style>
-                        td, th { border: 1px solid #cccccc; text-align: center; vertical-align: middle; padding: 6px; }
+                        td, th {
+                            border: 1px solid #cccccc;
+                            text-align: center;
+                            vertical-align: middle;
+                            padding: 6px;
+                            white-space: normal;
+                            word-break: keep-all;
+                            overflow-wrap: anywhere;
+                            mso-wrap-text: yes;
+                        }
+                        td { mso-fit-text: no; }
                         th { background-color: #1e293b; color: #ffffff; font-weight: bold; }
                     </style>
                 </head>
@@ -40638,7 +40528,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
                 tableHtml += `
                     <tr>
-                        ${activeColumns.map(c => `<td style="${getSurveyCellColorStyle(c.key, d, cellCtx)}">${getSurveyCellText(c.key, d, cellCtx).replace(/\n/g, '<br>')}</td>`).join('')}
+                        ${activeColumns.map(c => `<td style="white-space:normal;word-break:keep-all;overflow-wrap:anywhere;mso-wrap-text:yes;${getSurveyCellColorStyle(c.key, d, cellCtx)}">${getSurveyCellText(c.key, d, cellCtx).replace(/\n/g, '<br>')}</td>`).join('')}
                     </tr>
                 `;
             });
