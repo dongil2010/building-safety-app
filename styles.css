@@ -6353,6 +6353,22 @@ html:not(.layout-desktop) .survey-inline-select {
     color: #ffffff;
 }
 
+.defect-shape-convert-block .defect-area-shape-convert-row {
+    margin-top: 0.55rem;
+}
+.defect-area-shape-convert-btns {
+    flex-direction: row !important;
+    flex-wrap: wrap;
+}
+.defect-area-shape-convert-btns .defect-area-style-btn {
+    flex: 1 1 0;
+    min-width: 4.5rem;
+}
+.defect-area-shape-convert-btns .defect-area-style-btn:disabled {
+    opacity: 0.55;
+    cursor: default;
+}
+
 .defect-arrow-block .checkbox-chip {
     border-color: #6b6b6b !important;
     color: #efefef !important;

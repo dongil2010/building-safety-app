@@ -19842,11 +19842,85 @@ document.addEventListener('DOMContentLoaded', () => {
     window.convertDefectPinToArea = convertDefectPinToArea;
     window.convertDefectAreaToPin = convertDefectAreaToPin;
 
+    function areaShapeLabelKo(shape) {
+        const s = normalizeAreaShape(shape);
+        if (s === 'ellipse') return '타원';
+        if (s === 'polygon') return '다각형';
+        return '네모';
+    }
+
+    function areaShapeConvertPhrase(shape) {
+        const label = areaShapeLabelKo(shape);
+        // 네모로 / 다각형으로 / 타원으로
+        return label === '네모' ? `${label}로` : `${label}으로`;
+    }
+
+    /** 타원 → 다각형용: 회전 반영된 외곽 N점 근사 */
+    function approxEllipseAreaPoints(defect, n) {
+        const count = Math.max(8, Math.min(32, Number(n) || 12));
+        const { w, h } = getAreaAabb(defect);
+        const hw = w / 2;
+        const hh = h / 2;
+        const pts = [];
+        for (let i = 0; i < count; i++) {
+            const t = (Math.PI * 2 * i) / count;
+            const p = areaLocalToImg(defect, hw * Math.cos(t), hh * Math.sin(t));
+            pts.push({ x: Math.round(p.x), y: Math.round(p.y) });
+        }
+        return pts;
+    }
+
+    /**
+     * 영역 모양 변환: 네모(rect) / 다각형(polygon) / 타원(ellipse)
+     * 번호·사진·내용·층 키·동기화 필드는 유지. 기하만 합리적 범위에서 변환.
+     */
+    function convertDefectAreaShape(defect, targetShape) {
+        if (!defect) return false;
+        if (!(defect.shapeType === 'area' && defect.areaX1 !== undefined)) return false;
+        const next = normalizeAreaShape(targetShape);
+        const cur = getAreaShape(defect);
+        if (next === cur) return false;
+
+        if (next === 'polygon') {
+            let pts;
+            if (cur === 'ellipse') {
+                pts = approxEllipseAreaPoints(defect, 12);
+            } else {
+                pts = getAreaWorldCorners(defect).map((p) => ({
+                    x: Math.round(p.x),
+                    y: Math.round(p.y)
+                }));
+            }
+            defect.areaShape = 'polygon';
+            defect.areaPoints = pts;
+            defect.areaAngle = 0;
+            syncAreaBboxFromPoints(defect);
+        } else {
+            // polygon → rect/ellipse: 점 AABB. rect↔ellipse: bbox·각도 유지
+            if (cur === 'polygon') {
+                syncAreaBboxFromPoints(defect);
+                defect.areaAngle = 0;
+            }
+            defect.areaShape = next;
+            defect.areaPoints = undefined;
+        }
+
+        if (typeof ensureAreaPinPlacement === 'function') ensureAreaPinPlacement(defect);
+        if (typeof touchDefectPositionUpdatedAt === 'function') touchDefectPositionUpdatedAt(defect);
+        defect.updatedAt = Date.now();
+        defect.contentUpdatedAt = Date.now();
+        return true;
+    }
+
+    window.convertDefectAreaShape = convertDefectAreaShape;
+
     function syncDefectShapeConvertButton(existingPin) {
         const btn = document.getElementById('btnConvertDefectShape');
+        const shapeRow = document.getElementById('defectAreaShapeConvertRow');
         if (!btn) return;
         if (!existingPin) {
             btn.hidden = true;
+            if (shapeRow) shapeRow.hidden = true;
             return;
         }
         btn.hidden = false;
@@ -19856,6 +19930,22 @@ document.addEventListener('DOMContentLoaded', () => {
             ? '<i class="fa-solid fa-location-dot"></i> 핀 마킹으로 변경'
             : '<i class="fa-solid fa-draw-polygon"></i> 영역 마킹으로 변경';
         btn.title = isArea ? '영역 마킹을 핀(화살표) 마킹으로 바꿉니다' : '핀 마킹을 영역(사각형) 마킹으로 바꿉니다';
+        if (shapeRow) {
+            shapeRow.hidden = !isArea;
+            if (isArea) {
+                const cur = getAreaShape(existingPin);
+                shapeRow.querySelectorAll('[data-area-shape-convert]').forEach((b) => {
+                    const t = normalizeAreaShape(b.getAttribute('data-area-shape-convert'));
+                    const same = t === cur;
+                    b.classList.toggle('active', same);
+                    b.disabled = same;
+                    b.setAttribute('aria-pressed', same ? 'true' : 'false');
+                    b.title = same
+                        ? `현재 모양: ${areaShapeLabelKo(t)}`
+                        : `${areaShapeConvertPhrase(t)} 변경`;
+                });
+            }
+        }
     }
 
     function ensureAreaPinPlacement(defect) {
@@ -29063,6 +29153,60 @@ document.addEventListener('DOMContentLoaded', () => {
             window.showToast?.(toArea ? '영역 마킹으로 변경했습니다.' : '핀 마킹으로 변경했습니다.', 'success');
         });
     }
+
+    document.querySelectorAll('[data-area-shape-convert]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+            if (btn.disabled) return;
+            const targetShape = btn.getAttribute('data-area-shape-convert');
+            const pinId = document.getElementById('defectPinId')?.value;
+            if (!pinId || !state.currentBuildingId) {
+                window.showToast?.('저장된 마킹만 모양을 바꿀 수 있습니다.', 'warning');
+                return;
+            }
+            const key = `${state.currentBuildingId}_${state.currentFloor}`;
+            const list = (state.defects && state.defects[key]) || [];
+            const defect = list.find((d) => d && d.id === pinId);
+            if (!defect) {
+                window.showToast?.('마킹을 찾을 수 없습니다.', 'warning');
+                return;
+            }
+            if (!(defect.shapeType === 'area' && defect.areaX1 !== undefined)) {
+                window.showToast?.('영역 마킹만 모양을 바꿀 수 있습니다.', 'warning');
+                return;
+            }
+            if (typeof pushDefectHistory === 'function') pushDefectHistory();
+            const ok = convertDefectAreaShape(defect, targetShape);
+            if (!ok) {
+                window.showToast?.('모양 변경에 실패했습니다.', 'error');
+                return;
+            }
+            if (typeof discardStalePendingRemoteAfterLocalPinEdit === 'function') {
+                discardStalePendingRemoteAfterLocalPinEdit();
+            }
+            window._pendingAreaRect = {
+                x1: defect.areaX1, y1: defect.areaY1,
+                x2: defect.areaX2, y2: defect.areaY2,
+                areaShape: defect.areaShape || 'rect',
+                areaAngle: defect.areaAngle || 0,
+                areaPoints: defect.areaPoints
+            };
+            window._pendingPinCoords = {
+                x: defect.x, y: defect.y,
+                targetX: defect.targetX, targetY: defect.targetY
+            };
+            saveStateToLocalStorage();
+            if (typeof setDefectAreaStylePanelVisible === 'function') {
+                setDefectAreaStylePanelVisible(true, defect);
+            }
+            const angEl = document.getElementById('defectAreaAngle');
+            if (angEl) angEl.value = String(Math.round(Number(defect.areaAngle) || 0));
+            syncDefectShapeConvertButton(defect);
+            if (typeof drawCanvas === 'function') drawCanvas();
+            if (typeof renderSurveyTable === 'function') renderSurveyTable();
+            if (typeof renderDefectListPanel === 'function') renderDefectListPanel();
+            window.showToast?.(`${areaShapeConvertPhrase(targetShape)} 변경했습니다.`, 'success');
+        });
+    });
 
     if (btnImportCadPins && inputImportCadPins) {
         btnImportCadPins.addEventListener('click', () => inputImportCadPins.click());

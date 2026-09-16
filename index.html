@@ -1150,6 +1150,14 @@
                         <button type="button" id="btnConvertDefectShape" class="btn btn-outline btn-sm" style="width:100%; font-weight:700;" hidden>
                             <i class="fa-solid fa-draw-polygon"></i> 영역 마킹으로 변경
                         </button>
+                        <div id="defectAreaShapeConvertRow" class="defect-area-shape-convert-row" hidden>
+                            <span class="defect-area-style-label">영역 모양 변경:</span>
+                            <div class="defect-area-style-btns defect-area-shape-convert-btns" role="group" aria-label="영역 모양 변경">
+                                <button type="button" class="defect-area-style-btn" data-area-shape-convert="rect" title="네모">네모</button>
+                                <button type="button" class="defect-area-style-btn" data-area-shape-convert="polygon" title="다각형">다각형</button>
+                                <button type="button" class="defect-area-style-btn" data-area-shape-convert="ellipse" title="타원">타원</button>
+                            </div>
+                        </div>
                     </div>
                     <div class="form-group defect-area-style-block" id="defectAreaStyleBlock" style="display:none;">
                         <div class="defect-area-style-row">
