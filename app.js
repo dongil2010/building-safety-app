@@ -3037,7 +3037,54 @@ document.addEventListener('DOMContentLoaded', () => {
         return formatDefectNoSeq(getNextDefectMainNumber(defects));
     }
 
+    /** 마킹 번호 풀: 일반 층은 해당 층만. 외부 입면(EXT_*)은 표가 하나이므로
+     * 모든 외부 도면 마킹을 한 번호 공간으로 본다(한 도면에서 빈 번호 = 다른 입면에 있음). */
     function getFloorDefectsForNumbering(floorKey) {
+        const bldgId = state.currentBuildingId;
+        let floorCode = state.currentFloor || '';
+        if (bldgId && String(floorKey || '').startsWith(String(bldgId) + '_')) {
+            floorCode = String(floorKey).slice(String(bldgId).length + 1) || floorCode;
+        }
+        const exterior = (typeof isExteriorFloorCode === 'function')
+            ? isExteriorFloorCode(floorCode)
+            : (typeof window !== 'undefined' && typeof window.isExteriorFloorCode === 'function' && window.isExteriorFloorCode(floorCode));
+        if (bldgId && exterior) {
+            const codes = new Set();
+            const floors = (state.currentBuilding && state.currentBuilding.floorsList) || [];
+            floors.forEach((f) => {
+                if (!f || !f.floorCode) return;
+                const ok = (typeof isExteriorFloorCode === 'function')
+                    ? isExteriorFloorCode(f.floorCode)
+                    : (typeof window !== 'undefined' && typeof window.isExteriorFloorCode === 'function' && window.isExteriorFloorCode(f.floorCode));
+                if (ok) codes.add(f.floorCode);
+            });
+            Object.keys(state.defects || {}).forEach((k) => {
+                if (!String(k).startsWith(String(bldgId) + '_')) return;
+                const fc = String(k).slice(String(bldgId).length + 1);
+                const ok = (typeof isExteriorFloorCode === 'function')
+                    ? isExteriorFloorCode(fc)
+                    : (typeof window !== 'undefined' && typeof window.isExteriorFloorCode === 'function' && window.isExteriorFloorCode(fc));
+                if (ok) codes.add(fc);
+            });
+            const combined = [];
+            const seen = new Set();
+            codes.forEach((fc) => {
+                const key = bldgId + '_' + fc;
+                const arr = (state.defects && state.defects[key]) || [];
+                if (!isDefectMarkingGroupPending()) {
+                    normalizeFloorDefectGroupsInPlace(arr);
+                }
+                arr.forEach((d) => {
+                    if (!d) return;
+                    if (d.id != null) {
+                        if (seen.has(d.id)) return;
+                        seen.add(d.id);
+                    }
+                    combined.push(d);
+                });
+            });
+            return combined;
+        }
         const list = (state.defects && state.defects[floorKey]) || [];
         if (!isDefectMarkingGroupPending()) {
             normalizeFloorDefectGroupsInPlace(list);
@@ -30080,12 +30127,18 @@ document.addEventListener('DOMContentLoaded', () => {
     if (btnCompactMarkingGaps) {
         btnCompactMarkingGaps.addEventListener('click', () => {
             const key = `${state.currentBuildingId}_${state.currentFloor}`;
-            const list = (state.defects && state.defects[key]) || [];
+            const list = getFloorDefectsForNumbering(key);
+            const exteriorPool = (typeof isExteriorFloorCode === 'function')
+                ? isExteriorFloorCode(state.currentFloor)
+                : (typeof window.isExteriorFloorCode === 'function' && window.isExteriorFloorCode(state.currentFloor));
             if (!list.length) {
-                if (typeof window.showToast === 'function') window.showToast('현재 층에 마킹이 없습니다.', 'warning');
+                if (typeof window.showToast === 'function') window.showToast(exteriorPool ? '외부 입면에 마킹이 없습니다.' : '현재 층에 마킹이 없습니다.', 'warning');
                 return;
             }
-            if (!window.confirm('현재 층의 마킹번호 빈 칸을 뒤에서부터 앞으로 땡길까요?\n(예: 14,15,17,18 → 14,15,16,17)')) return;
+            const confirmMsg = exteriorPool
+                ? '외부 입면(정면·배면·좌·우) 전체를 한 번호로 보고 빈 칸을 뒤에서부터 앞으로 땡길까요?\n(한 도면의 빈 번호는 다른 입면에 있을 수 있습니다.)'
+                : '현재 층의 마킹번호 빈 칸을 뒤에서부터 앞으로 땡길까요?\n(예: 14,15,17,18 → 14,15,16,17)';
+            if (!window.confirm(confirmMsg)) return;
             if (typeof pushDefectHistory === 'function') pushDefectHistory();
             const result = compactDefectMarkingNumberGaps(list);
             if (!result || !result.moved) {
