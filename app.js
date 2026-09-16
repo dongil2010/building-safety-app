@@ -5467,22 +5467,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // 오프라인이거나 클라우드 조회가 안 되면, 아직 이 기기에 안 내려받았을 뿐일 수 있으니 보류
         if (typeof navigator !== 'undefined' && navigator.onLine === false) return tombstoneRemoved;
-        if (!db || !window.state.companyId || typeof discoverCloudDrawingFloorCodes !== 'function') return tombstoneRemoved;
 
-        // 업로드 직후 캐시가 옛 목록이면 방금 넣은 층을 유령으로 오인하므로 캐시 무효화
-        if (typeof invalidateCloudDrawingFloorCodesCache === 'function') {
-            invalidateCloudDrawingFloorCodesCache(bldg);
-        }
-
-        let cloudFound;
-        try {
-            cloudFound = await discoverCloudDrawingFloorCodes(bldg);
-        } catch (e) {
-            return tombstoneRemoved;
-        }
-
-        // 삭제 tombstone만 확실하면 제거.
-        // drawingFloorCodes에 명시 등록된 층은 저장 직후 IDB/클라우드 레이스 중이어도 유지.
         const registeredCodes = new Set(
             (bldg.drawingFloorCodes || []).map((c) => String(c || '').trim()).filter(Boolean)
         );
@@ -5490,7 +5475,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (isDeletedDrawingFloor(bldg, fc)) return true;
             if (registeredCodes.has(String(fc))) return false;
             if (hasSessionAssetTrace(fc)) return false;
-            return !cloudFound.has(fc);
+            return true;
         });
         if (ghosts.length === 0) return tombstoneRemoved;
 
@@ -18599,14 +18584,12 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     async function loadPhotoByIdWithCloudFallback(pid) {
         if (!pid) return null;
         if (window._photoCache && window._photoCache[pid]) {
-            maybeScheduleMigrateFromLocal(pid, window._photoCache[pid]);
             return window._photoCache[pid];
         }
         const fromIdb = await idbGet('photos', pid);
         if (fromIdb) {
             if (!window._photoCache) window._photoCache = {};
             window._photoCache[pid] = fromIdb;
-            maybeScheduleMigrateFromLocal(pid, fromIdb);
             return fromIdb;
         }
         if (!db || !window.state.companyId) return null;
@@ -18626,6 +18609,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
     async function ensureDefectPhotosLoaded(d) {
         if (!d) return;
+        seedPhotoCacheFromDefect(d);
         if ((!d.photos || d.photos.length === 0) && d.photoIds && d.photoIds.length > 0) {
             const filled = (await Promise.all(d.photoIds.map(loadPhotoByIdWithCloudFallback))).filter(Boolean);
             if (filled.length > 0) d.photos = filled;
@@ -42763,14 +42747,14 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             }
         }
         if (storagePath) await deleteFirebaseStoragePath(storagePath);
-        let partsDocs = [];
-        try {
-            const partsSnap = await docRef.collection('parts').get();
-            if (partsSnap && !partsSnap.empty) partsDocs = partsSnap.docs.slice();
-        } catch (_e) { /* floorDrawings 등 parts 규칙이 없는 컬렉션 */ }
-        if (partsDocs.length) {
+        const data = snap.exists ? (snap.data() || {}) : {};
+        const writeId = data.writeId ? String(data.writeId) : '';
+        const chunkCount = Math.min(Math.max(Number(data.chunkCount) || 0, 0), 16);
+        if (writeId && chunkCount > 0) {
             const batch = db.batch();
-            partsDocs.forEach((d) => batch.delete(d.ref));
+            for (let i = 0; i < chunkCount; i++) {
+                batch.delete(docRef.collection('parts').doc(writeId + '_' + i));
+            }
             batch.delete(docRef);
             await batch.commit();
         } else if (snap.exists) {
@@ -42947,10 +42931,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             const docRef = companyPhotos.doc(photoId);
             try {
                 let data = existingData;
-                if (data == null) {
-                    const snap = await docRef.get();
-                    data = snap.exists ? (snap.data() || {}) : {};
-                }
+                if (data == null) data = {};
                 if (hasFirebaseStorageMeta(data) && !snapNeedsSiteRoundMove(data)) {
                     markPhotoOnStorage(photoId);
                     return true;
@@ -43054,11 +43035,18 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (!photoId || isPhotoMarkedOnStorage(photoId)) return true;
         let url = (typeof inlineUrl === 'string' && inlineUrl.length > 32) ? inlineUrl : null;
         if (!url) url = await resolveLocalPhotoUrl(photoId);
-        if (typeof url === 'string' && url.length > 32
-            && (url.indexOf('data:') === 0 || isFirebaseStorageHttpUrl(url))) {
+        if (typeof url === 'string' && isFirebaseStorageHttpUrl(url)) {
+            markPhotoOnStorage(photoId);
+            if (!window._photoCache) window._photoCache = {};
+            window._photoCache[photoId] = url;
+            return true;
+        }
+        if (typeof url === 'string' && url.length > 32 && url.indexOf('data:') === 0) {
             return persistPhotoToCloud(photoId, url);
         }
-        return migrateLegacyCloudPhoto(photoId);
+        // 로컬 바이트가 없으면 Firestore photos.get()으로 이관하지 않는다.
+        // (동기화마다 전 사진 문서를 다시 읽어 할당량을 태움)
+        return true;
     }
 
     async function runPhotoJobsInBatches(items, worker, batchSize) {
@@ -43402,7 +43390,15 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
     async function discoverCloudDrawingFloorCodes(bldg) {
         const codes = new Set();
-        if (!bldg || !bldg.id || !db || !window.state.companyId) return codes;
+        if (!bldg || !bldg.id) return codes;
+        (bldg.drawingFloorCodes || []).forEach((fc) => {
+            if (fc && !isDeletedDrawingFloor(bldg, fc)) codes.add(fc);
+        });
+        (bldg.floorsList || []).forEach((f) => {
+            if (f && f.floorCode && !isDeletedDrawingFloor(bldg, f.floorCode)) codes.add(f.floorCode);
+        });
+        if (codes.size > 0) return codes;
+        if (!db || !window.state.companyId) return codes;
         const cacheKey = `${getCompanyDocId()}::${bldg.id}`;
         const cached = _cloudDrawingFloorCodesCache.get(cacheKey);
         if (cached && (Date.now() - cached.at) < CLOUD_DRAWING_FLOOR_CODES_TTL_MS) {
@@ -43626,6 +43622,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         return p;
     }
 
+    const _lastChunkWriteMeta = new Map();
+
     async function writeChunkedPdfToDocRef(docRef, pdfDataUrl, extraFields) {
         const payload = String(pdfDataUrl);
         const base = { ...(extraFields || {}), updatedAt: firebase.firestore.FieldValue.serverTimestamp() };
@@ -43643,7 +43641,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 })
             );
             rememberDecodedChunkPayload(docRef, { writeId: null, dataUrl: payload }, payload);
-            scheduleChunkPartsCleanup(docRef, null);
+            const prevMeta = _lastChunkWriteMeta.get(chunkDocCacheKey(docRef)) || null;
+            _lastChunkWriteMeta.set(chunkDocCacheKey(docRef), { writeId: null, chunkCount: 0 });
+            scheduleChunkPartsCleanup(docRef, null, prevMeta);
             return { writeId: null, dataUrl: payload, chunked: false, chunkCount: 0 };
         }
 
@@ -43655,12 +43655,16 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
         // 기존 ready 문서는 읽기 유지. 신규/깨진 문서만 uploading 마킹.
         let hadReady = false;
+        let prevWriteId = null;
+        let prevChunkCount = 0;
         try {
             const prevSnap = await docRef.get();
             const prev = prevSnap.exists ? (prevSnap.data() || {}) : {};
+            prevWriteId = prev.writeId ? String(prev.writeId) : null;
+            prevChunkCount = Number(prev.chunkCount) || 0;
             hadReady = prev.chunkStatus === 'ready'
                 || (!!prev.dataUrl && String(prev.dataUrl).length > 32)
-                || (prev.chunked === true && prev.chunkStatus !== 'failed' && prev.chunkStatus !== 'uploading' && Number(prev.chunkCount) > 0 && !!prev.writeId);
+                || (prev.chunked === true && prev.chunkStatus !== 'failed' && prev.chunkStatus !== 'uploading' && prevChunkCount > 0 && !!prevWriteId);
             if (!hadReady) {
                 await enqueueFirestoreWrite(() =>
                     docRef.set({
@@ -43706,7 +43710,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 }, { merge: true })
             );
             rememberDecodedChunkPayload(docRef, { writeId, chunked: true, chunkCount: parts.length }, payload);
-            scheduleChunkPartsCleanup(docRef, writeId);
+            _lastChunkWriteMeta.set(chunkDocCacheKey(docRef), { writeId, chunkCount: parts.length });
+            scheduleChunkPartsCleanup(docRef, writeId, { writeId: prevWriteId, chunkCount: prevChunkCount });
             return { writeId, chunked: true, chunkCount: parts.length };
         } catch (e) {
             try {
@@ -43722,45 +43727,49 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     }
 
     const _chunkCleanupTimers = new Map();
-    function scheduleChunkPartsCleanup(docRef, keepWriteId) {
+    function scheduleChunkPartsCleanup(docRef, keepWriteId, prevMeta) {
         const key = (docRef && docRef.path) ? String(docRef.path) : String(docRef);
         const prev = _chunkCleanupTimers.get(key);
         if (prev) clearTimeout(prev);
         const timer = setTimeout(() => {
             _chunkCleanupTimers.delete(key);
-            cleanupChunkPartsDeferred(docRef, keepWriteId).catch((e) =>
+            cleanupChunkPartsDeferred(docRef, keepWriteId, prevMeta).catch((e) =>
                 console.warn('청크 parts 정리 경고:', docRef.path, e)
             );
         }, 8000);
         _chunkCleanupTimers.set(key, timer);
     }
 
-    async function cleanupChunkPartsDeferred(docRef, keepWriteId) {
-        if (!db) return;
+    async function cleanupChunkPartsDeferred(docRef, keepWriteId, prevMeta) {
+        if (!db || !docRef) return;
         if (Date.now() < _fsWritePausedUntil) {
-            scheduleChunkPartsCleanup(docRef, keepWriteId);
+            scheduleChunkPartsCleanup(docRef, keepWriteId, prevMeta);
             return;
         }
-        const oldParts = await docRef.collection('parts').get();
-        if (oldParts.empty) return;
-        const toDelete = oldParts.docs.filter((d) => {
-            const id = String(d.id || '');
-            if (keepWriteId) return !id.startsWith(keepWriteId + '_');
-            return true; // non-chunked parent: drop all parts
-        });
+        const prevWriteId = prevMeta && prevMeta.writeId ? String(prevMeta.writeId) : '';
+        if (!prevWriteId || (keepWriteId && prevWriteId === String(keepWriteId))) return;
+        const prevCount = Math.min(Math.max(Number(prevMeta && prevMeta.chunkCount) || 0, 0), 16);
+        if (prevCount <= 0) return;
         const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+        const toDelete = [];
+        for (let i = 0; i < prevCount; i++) {
+            toDelete.push(docRef.collection('parts').doc(prevWriteId + '_' + i));
+        }
         for (let i = 0; i < toDelete.length; i += 40) {
             if (Date.now() < _fsWritePausedUntil) {
-                scheduleChunkPartsCleanup(docRef, keepWriteId);
+                scheduleChunkPartsCleanup(docRef, keepWriteId, {
+                    writeId: prevWriteId,
+                    chunkCount: prevCount - i
+                });
                 return;
             }
             const slice = toDelete.slice(i, i + 40);
             await enqueueFirestoreWrite(async () => {
                 const batch = db.batch();
-                slice.forEach((d) => batch.delete(d.ref));
+                slice.forEach((ref) => batch.delete(ref));
                 await batch.commit();
             });
-            await sleep(120);
+            if (i + 40 < toDelete.length) await sleep(120);
         }
     }
 
@@ -43875,55 +43884,20 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                         return targeted;
                     }
                 } catch (targetedErr) {
-                    console.warn('[PDF] writeId 지정 읽기 실패, parts 목록으로 폴백:', docRef && docRef.path, targetedErr);
+                    console.warn('[PDF] writeId 지정 읽기 실패:', docRef && docRef.path, targetedErr);
                 }
-            }
-            const partsSnap = await docRef.collection('parts').get();
-            if (partsSnap.empty) {
                 if (!_retried && status !== 'ready') {
                     await new Promise((r) => setTimeout(r, 800));
                     return readChunkedPdfFromDocRef(docRef, true);
                 }
-                if (status === 'ready') {
-                    console.warn('[PDF] ready인데 parts 없음(손상 문서):', docRef.path);
-                } else {
-                    console.warn('[PDF] chunked 문서인데 parts가 비어 있음:', docRef.path);
-                }
+                console.warn('[PDF] parts 지정 읽기 실패:', docRef.path, writeId, chunkCount);
                 return null;
             }
-            let docs = partsSnap.docs.slice();
-            if (writeId) {
-                docs = docs.filter((d) => String(d.id || '').startsWith(writeId + '_'));
-                docs.sort((a, b) => {
-                    const ia = Number(a.data()?.index);
-                    const ib = Number(b.data()?.index);
-                    if (Number.isFinite(ia) && Number.isFinite(ib)) return ia - ib;
-                    const na = Number(String(a.id).slice(writeId.length + 1));
-                    const nb = Number(String(b.id).slice(writeId.length + 1));
-                    return na - nb;
-                });
-            } else {
-                docs = docs
-                    .filter((d) => /^\d+$/.test(String(d.id || '')))
-                    .sort((a, b) => Number(a.id) - Number(b.id));
+            if (!_retried) {
+                await new Promise((r) => setTimeout(r, 800));
+                return readChunkedPdfFromDocRef(docRef, true);
             }
-            if (docs.length < chunkCount) {
-                if (!_retried) {
-                    await new Promise((r) => setTimeout(r, 1000));
-                    return readChunkedPdfFromDocRef(docRef, true);
-                }
-                console.warn('[PDF] parts 불완전:', docRef.path, docs.length, '/', chunkCount);
-                return null;
-            }
-            const joined = docs
-                .slice(0, chunkCount)
-                .map((d) => (d.data() && d.data().data) || '')
-                .join('');
-            if (joined.length > 32) {
-                rememberDecodedChunkPayload(docRef, data, joined);
-                return joined;
-            }
-            console.warn('[PDF] parts 합쳐도 내용이 비어 있음:', docRef.path);
+            console.warn('[PDF] chunked 문서에 writeId 없음 — parts 전체 목록은 읽지 않음:', docRef.path);
             return null;
         }
         return null;
@@ -44785,18 +44759,17 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 seedPhotoCacheFromDefect(d);
                 const loadIds = async (ids) => {
                     if (!ids || ids.length === 0) return [];
+                    const allowCloud = options.allowCloudPhotoFetch === true;
                     const photos = await Promise.all(ids.map(async pid => {
                         if (window._photoCache[pid]) {
-                            maybeScheduleMigrateFromLocal(pid, window._photoCache[pid]);
                             return window._photoCache[pid];
                         }
                         const fromIdb = await idbGet('photos', pid);
                         if (fromIdb) {
                             window._photoCache[pid] = fromIdb;
-                            maybeScheduleMigrateFromLocal(pid, fromIdb);
                             return fromIdb;
                         }
-                        if (!companyPhotos) return null;
+                        if (!allowCloud || !companyPhotos) return null;
                         if (Date.now() < _photoFetchQuotaPausedUntil) return null;
                         while (_photoFetchInflight >= PHOTO_FETCH_MAX_CONCURRENT) {
                             await new Promise((r) => setTimeout(r, 40));
