@@ -10829,11 +10829,15 @@ document.addEventListener('DOMContentLoaded', () => {
     // 따로 나눠 적어도 되게 한다. 폭 칸에 구분자(×,x,X,*)가 있으면 그걸 폭/춤으로 쪼개고,
     // 없으면 폭 칸은 숫자만 뽑아 폭으로, 춤 칸은 따로 파싱한다.
     function parseNdtDimensionPair(rawWidth, rawDepth) {
+        const dim = window.BSA && window.BSA.ndtMeasureDim;
+        if (dim && typeof dim.parseDimensionPair === 'function') {
+            return dim.parseDimensionPair(rawWidth, rawDepth);
+        }
         const wStr = (rawWidth || '').toString().trim();
-        const parts = wStr.split(/[×xX*]/).map(s => s.trim()).filter(Boolean);
-        if (parts.length >= 2) {
+        const parts = wStr.split(/[×xX*]/).map(s => s.trim());
+        if (parts.length >= 2 && /[×xX*]/.test(wStr)) {
             const w = parseFloat(parts[0]);
-            const d = parseFloat(parts[1]);
+            const d = parseFloat(String(parts[1]).replace(/[^0-9.]/g, ''));
             return { w: isNaN(w) ? null : w, d: isNaN(d) ? null : d };
         }
         const w = parseFloat(wStr.replace(/[^0-9.]/g, ''));
@@ -11024,6 +11028,18 @@ document.addEventListener('DOMContentLoaded', () => {
         return parts.map(v => (v === undefined || v === null || v === '') ? '-' : v).join(joiner);
     }
 
+    function formatNdtPairDimText(primary, secondary, joiner = ' × ') {
+        const dim = window.BSA && window.BSA.ndtMeasureDim;
+        if (dim && typeof dim.formatPairDimText === 'function') {
+            return dim.formatPairDimText(primary, secondary, joiner);
+        }
+        const filled = (v) => v !== undefined && v !== null && String(v).trim() !== '' && String(v).trim() !== '-';
+        const hasP = filled(primary);
+        const hasS = filled(secondary);
+        if (!hasP && !hasS) return '-';
+        return (hasP ? String(primary).trim() : '-') + joiner + (hasS ? String(secondary).trim() : '-');
+    }
+
     function formatNdtMeasureDimText(item, kind = 'design', joiner = ' × ') {
         if (!item) return '-';
         const dimMode = (item.measureDimMode === 'rc' || !item.measureDimMode)
@@ -11050,10 +11066,10 @@ document.addEventListener('DOMContentLoaded', () => {
             return measuredW != null && measuredW !== '' ? `Φ${measuredW}` : '-';
         }
         if (kind === 'design') {
-            return item.designWidth ? `${item.designWidth}${item.designDepth ? joiner + item.designDepth : ''}` : '-';
+            return formatNdtPairDimText(item.designWidth, item.designDepth, joiner);
         }
         const measuredW = (item.measuredWidth !== undefined && item.measuredWidth !== null) ? item.measuredWidth : item.avgValue;
-        return measuredW ? `${measuredW}${item.measuredDepth ? joiner + item.measuredDepth : ''}` : '-';
+        return formatNdtPairDimText(measuredW, item.measuredDepth, joiner);
     }
 
     // 콘크리트 부재단면의 규격: 시설물의 안전 및 유지관리 실시 세부지침(건축물편) [표 6.24]
@@ -11062,8 +11078,12 @@ document.addEventListener('DOMContentLoaded', () => {
     // 철골은 H형 단면적으로 동일 표 기준을 적용한다.
     function calcSectionGrade(designW, designD, measuredW, measuredD) {
         if (!(designW > 0) || !(measuredW > 0)) return null;
-        const designArea = designD > 0 ? designW * designD : designW;
-        const measuredArea = measuredD > 0 ? measuredW * measuredD : measuredW;
+        const designHasPair = designD > 0;
+        const measuredHasPair = measuredD > 0;
+        // 설계는 폭×춤인데 실측은 한쪽만이면 면적 비교가 성립하지 않음 — 등급은 비움
+        if (designHasPair !== measuredHasPair) return null;
+        const designArea = designHasPair ? designW * designD : designW;
+        const measuredArea = measuredHasPair ? measuredW * measuredD : measuredW;
         return gradeFromSectionRatio((measuredArea / designArea) * 100);
     }
 
