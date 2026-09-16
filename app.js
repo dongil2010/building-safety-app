@@ -1150,17 +1150,31 @@ document.addEventListener('DOMContentLoaded', () => {
             if (toBg) state.bgImage = toBg;
             state.floorDrawingHiPatch = toPatch;
             drawCanvas();
+            syncNdtBackgroundWithMapDrawing();
             return;
         }
 
         const fromBg = state.bgImage;
         const fromPatch = state.floorDrawingHiPatch;
         if (floorImagesEquivalent(fromBg, toBg) && floorPatchesEquivalent(fromPatch, toPatch)) return;
+        const bgChanged = !floorImagesEquivalent(fromBg, toBg);
 
         // 동기화 로직(줌 패치 재요청 방지)용으로는 즉시 반영, 화면만 크로스페이드
         if (toBg) state.bgImage = toBg;
         state.floorDrawingHiPatch = toPatch;
         startFloorDrawingBlend(fromBg, toBg, fromPatch, toPatch);
+        if (bgChanged) syncNdtBackgroundWithMapDrawing();
+    }
+
+    // 결함위치도(state.bgImage)가 실제로 바뀔 때(층 변경 등) 비파괴조사 탭의 도면(ndtBgImage)도
+    // 같이 갱신한다. 예전엔 층 선택 드롭다운 change 핸들러가 loadFloorDrawing()만 부르고
+    // 비파괴조사 쪽은 안 건드려서, 비파괴조사 탭에 머문 채로 점검층을 바꾸면 도면이 그대로
+    // 안 바뀌는 버그가 있었다(탭을 나갔다 다시 들어와야만 새로고침됨). 패치(줌 HD 조각)만
+    // 바뀐 경우는 배경 자체는 그대로라 다시 부르지 않는다(bgChanged로 걸러냄).
+    function syncNdtBackgroundWithMapDrawing() {
+        if (typeof loadFloorNdtDrawing === 'function' && document.getElementById('ndtCanvas')) {
+            loadFloorNdtDrawing();
+        }
     }
 
     function drawFloorPlanLayers(ctx, imgW, imgH) {
