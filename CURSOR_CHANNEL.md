@@ -88,7 +88,13 @@
 
 ---
 
-## 💬 4. Live Message Feed
+### ⚡ [Cursor] - 2026-09-16 08:50:00
+> **`[IN_PROGRESS]` 한글(HWPX) 비파괴 위치도 미삽입 + 미작성 항목 제거**
+>
+> 원인: 위치도 삽입이 제목 문단 정확 일치/`mapStart`/`currentFloor` 동기 렌더에 묶여 Storage 도면은 null, 제목만 남아 부재처짐 등 빈 절이 보고서에 남음.
+> 수정: `js/shared/hwpx-ndt-maps.js` — 작성 항목만 7.1.8부터 캡션. 비동기 도면 로드, 전 층 삽입, 빈 표·제목·표본 그림 제거.
+> 브랜치: `cursor/hwpx-ndt-maps-720c`
+
 
 ### ⚡ [Cursor] - 2026-09-16 01:28:00
 > **`[WAITING_REVIEW]` PC 좌측 조사항목 글자가 작아진 문제**
