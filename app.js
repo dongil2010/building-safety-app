@@ -2143,6 +2143,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 defectTypeOrder: window.state.defectTypeOrder || {},
                 defectCauseOrder: window.state.defectCauseOrder || {},
                 styleColors: window.state.styleColors || null,
+            styleColorsPaletteVersion: window.state.styleColorsPaletteVersion || 0,
                 styleSizes: window.state.styleSizes || null,
                 defectLeaderLineScale: (window.state.defectLeaderLineScale !== undefined ? window.state.defectLeaderLineScale : 1.0),
                 ndtLeaderLineScale: (window.state.ndtLeaderLineScale !== undefined ? window.state.ndtLeaderLineScale : 1.0),
@@ -2307,8 +2308,11 @@ document.addEventListener('DOMContentLoaded', () => {
                     window.state.defectCauseOrder = parsed.defectCauseOrder;
                 }
                 if (parsed.styleColors) {
-                    window.state.styleColors = parsed.styleColors;
-                }
+            window.state.styleColors = parsed.styleColors;
+        }
+        if (parsed.styleColorsPaletteVersion != null) {
+            window.state.styleColorsPaletteVersion = parsed.styleColorsPaletteVersion;
+        }
                 if (parsed.styleSizes) {
                     window.state.styleSizes = parsed.styleSizes;
                     window.state._globalStyleSizesFallback = parsed.styleSizes;
@@ -4068,12 +4072,15 @@ document.addEventListener('DOMContentLoaded', () => {
         let gotAny = false;
 
         // 8000 먼저 → 16000 (병렬 시 캐시가 서로를 덮어 모바일 LOD가 비는 경우 방지)
+        const replaceGuarded = isDrawingReplaceGuarded(bldg, floorCode);
         for (const dim of extraDims) {
             const dimKey = String(dim);
             if (isUsableRasterDrawingUrl(bldg.floorDrawingTiers[floorCode][dimKey])) {
                 gotAny = true;
                 continue;
             }
+            // 교체 직후에는 옛 8000/16000 티어를 IDB·클라우드에서 다시 붙이지 않음
+            if (replaceGuarded) continue;
             const cached = await idbGetFloorDrawingTier(bldg.id, floorCode, dim);
             if (isUsableRasterDrawingUrl(cached)) {
                 bldg.floorDrawingTiers[floorCode][dimKey] = cached;
@@ -7706,7 +7713,11 @@ document.addEventListener('DOMContentLoaded', () => {
                                     if (window._cloudSyncedPdfKeys) window._cloudSyncedPdfKeys.delete(`${bldg.id}_${item.floorCode}`);
                                     await uploadFloorDrawingPdf(bldg.id, item.floorCode, prepared.pdfDataUrl);
                                 }
-                                await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
+                                
+                                bumpDrawingEpoch(bldg, item.floorCode);
+                                bldg._drawingReplaceGuard = bldg._drawingReplaceGuard || {};
+                                bldg._drawingReplaceGuard[item.floorCode] = Date.now() + 120000;
+await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                                 syncBuildingDrawingFloorCodes(bldg);
                                 saveStateToLocalStorage();
                             } catch (err) {
@@ -8125,6 +8136,16 @@ document.addEventListener('DOMContentLoaded', () => {
     function cacheFloorDrawingTierToDevice(bldg, floorCode, tierDim, dataUrl) {
         if (!bldg || !floorCode || !dataUrl || !tierDim) return;
         if (typeof dataUrl === 'string' && /^https?:\/\//i.test(dataUrl)) return;
+        if (isDrawingReplaceGuarded(bldg, floorCode)) {
+            // 교체 직후: 메모리에 이미 새 티어가 있으면 클라우드/옛 IDB 값으로 덮지 않음
+            const dimKeyEarly = String(tierDim);
+            const existing = bldg.floorDrawingTiers
+                && bldg.floorDrawingTiers[floorCode]
+                && bldg.floorDrawingTiers[floorCode][dimKeyEarly];
+            if (isUsableRasterDrawingUrl(existing) || isUsableRasterDrawingUrl(bldg.floorDrawings && bldg.floorDrawings[floorCode])) {
+                return;
+            }
+        }
         const dimKey = String(tierDim);
         if (!bldg.floorDrawingTiers) bldg.floorDrawingTiers = {};
         if (!bldg.floorDrawingTiers[floorCode]) bldg.floorDrawingTiers[floorCode] = {};
@@ -8135,7 +8156,14 @@ document.addEventListener('DOMContentLoaded', () => {
             : 2000;
         if (Number(tierDim) <= baseTier) {
             if (!bldg.floorDrawings) bldg.floorDrawings = {};
-            bldg.floorDrawings[floorCode] = dataUrl;
+            const curRaster = bldg.floorDrawings[floorCode];
+            // 로컬 dataURL 새 도면을 옛 티어로 덮지 않음
+            if (!(isUsableRasterDrawingUrl(curRaster)
+                && String(curRaster).startsWith('data:')
+                && String(dataUrl) !== String(curRaster)
+                && isDrawingReplaceGuarded(bldg, floorCode))) {
+                bldg.floorDrawings[floorCode] = dataUrl;
+            }
             if (!_idbPersistedDrawingKeys.has(idbKey) && !_idbPendingDrawingKeys.has(idbKey)) {
                 _idbPendingDrawingKeys.add(idbKey);
                 idbSet('floorDrawings', idbKey, dataUrl).then((ok) => {
@@ -8271,6 +8299,23 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!bldg || !bldg.id || !floorCode) return;
         const bldgId = bldg.id;
         const floorKey = `${bldgId}_${floorCode}`;
+        // 교체 세대: 진행 중이던 클라우드/IDB 티어 fetch가 새 도면을 덮지 못하게 함
+        if (!bldg._drawingEpoch) bldg._drawingEpoch = {};
+        bldg._drawingEpoch[floorCode] = (bldg._drawingEpoch[floorCode] || 0) + 1;
+        bldg._drawingReplaceGuard = bldg._drawingReplaceGuard || {};
+        bldg._drawingReplaceGuard[floorCode] = Date.now() + 120000;
+        (window.FLOOR_DRAWING_TIER_DIMS || [4000, 8000, 16000]).forEach((d) => {
+            const ck = `${bldgId}_${floorCode}_${d}`;
+            if (typeof _floorTierCloudFetchPromises !== 'undefined' && _floorTierCloudFetchPromises) {
+                _floorTierCloudFetchPromises.delete(ck);
+            }
+            if (typeof _floorTierCloudFetchInFlight !== 'undefined' && _floorTierCloudFetchInFlight) {
+                _floorTierCloudFetchInFlight.delete(ck);
+            }
+            if (typeof _floorTierPrefetchInFlight !== 'undefined' && _floorTierPrefetchInFlight) {
+                _floorTierPrefetchInFlight.delete(ck);
+            }
+        });
         if (bldg.floorDrawingTiers && bldg.floorDrawingTiers[floorCode]) {
             delete bldg.floorDrawingTiers[floorCode];
         }
@@ -8280,7 +8325,6 @@ document.addEventListener('DOMContentLoaded', () => {
         if (bldg.floorDrawingSources && bldg.floorDrawingSources[floorCode]) {
             delete bldg.floorDrawingSources[floorCode];
         }
-        // PDF는 새 업로드에 pdf가 있을 때만 지움 — 호출부에서 처리. 교체 시 일단 비우지 않아도 됨.
         clearLocalDrawingPersistFlags(bldgId, floorCode);
         if (window._cloudSyncedDrawingKeys) window._cloudSyncedDrawingKeys.delete(floorKey);
         if (window._cloudSyncedPdfKeys) window._cloudSyncedPdfKeys.delete(floorKey);
@@ -8305,6 +8349,20 @@ document.addEventListener('DOMContentLoaded', () => {
         ]);
     }
     window.invalidateFloorDrawingBeforeReplace = invalidateFloorDrawingBeforeReplace;
+
+    function isDrawingReplaceGuarded(bldg, floorCode) {
+        if (!bldg || !floorCode) return false;
+        const until = bldg._drawingReplaceGuard && bldg._drawingReplaceGuard[floorCode];
+        return !!(until && Date.now() < until);
+    }
+
+    function bumpDrawingEpoch(bldg, floorCode) {
+        if (!bldg || !floorCode) return 0;
+        if (!bldg._drawingEpoch) bldg._drawingEpoch = {};
+        bldg._drawingEpoch[floorCode] = (bldg._drawingEpoch[floorCode] || 0) + 1;
+        return bldg._drawingEpoch[floorCode];
+    }
+
 
     function prefetchFloorDrawingTiersForFloor(bldg, floorCode, dims) {
         if (!bldg || !floorCode || !Array.isArray(dims)) return;
@@ -8621,10 +8679,16 @@ document.addEventListener('DOMContentLoaded', () => {
             : 4000;
         const baseTierKey = String(baseTier);
         const tierLookupKeys = [baseTierKey, '4000', '2000', '8000', '16000'];
-        let dataUrl = pickFirstTierUrl(bldg && bldg.floorDrawingTiers && bldg.floorDrawingTiers[floorCode], tierLookupKeys);
         const rawDrawing = bldg && bldg.floorDrawings && bldg.floorDrawings[floorCode];
-        if (!dataUrl && rawDrawing && isRasterDrawingUrl(rawDrawing)) {
+        let dataUrl = null;
+        if (isDrawingReplaceGuarded(bldg, floorCode) && rawDrawing && isUsableRasterDrawingUrl(rawDrawing)) {
+            // 교체 직후엔 옛 고해상도 티어보다 방금 넣은 래스터를 우선
             dataUrl = rawDrawing;
+        } else {
+            dataUrl = pickFirstTierUrl(bldg && bldg.floorDrawingTiers && bldg.floorDrawingTiers[floorCode], tierLookupKeys);
+            if (!dataUrl && rawDrawing && isRasterDrawingUrl(rawDrawing)) {
+                dataUrl = rawDrawing;
+            }
         }
 
         const shouldLoadDrawing = shouldAttemptFloorDrawingLoad(bldg, floorCode);
@@ -9972,7 +10036,21 @@ document.addEventListener('DOMContentLoaded', () => {
         return String(c || '').trim().toLowerCase();
     }
 
+    /** 순색(0/255) 기본 팔레트 버전 — 구 탁한 기본값이 저장돼 있어도 한 번 비운다 */
+    const STYLE_COLORS_PALETTE_VERSION = 3;
+
+    function migrateStyleColorsToPureDefaults() {
+        if (state.styleColorsPaletteVersion === STYLE_COLORS_PALETTE_VERSION) return;
+        // 한 번만: 저장된 마킹 색을 비워 순색(0/255) 기본 팔레트를 쓰게 함
+        state.styleColors = {};
+        state.styleColorsPaletteVersion = STYLE_COLORS_PALETTE_VERSION;
+        if (typeof saveStateToLocalStorage === 'function') {
+            try { saveStateToLocalStorage(); } catch (_e) { /* ignore */ }
+        }
+    }
+
     function getStyleColor(key) {
+        migrateStyleColorsToPureDefaults();
         const next = DEFAULT_STYLE_COLORS[key];
         const custom = state.styleColors && state.styleColors[key];
         if (!custom) return next;
@@ -24949,6 +25027,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function populateStyleColorModalControls() {
+        migrateStyleColorsToPureDefaults();
         STYLE_COLOR_FIELDS.forEach(([inputId, key]) => {
             const input = document.getElementById(inputId);
             if (input) input.value = getStyleColor(key);
@@ -25476,6 +25555,7 @@ document.addEventListener('DOMContentLoaded', () => {
             btnReset.addEventListener('click', () => {
                 if (!confirm('모든 색상/크기/모양 설정을 기본값으로 초기화하시겠습니까?\n(저장을 눌러야 반영됩니다)')) return;
                 state.styleColors = {};
+                state.styleColorsPaletteVersion = STYLE_COLORS_PALETTE_VERSION;
                 state.styleSizes = {};
                 state.styleShapes = {};
                 state.ndtLeaderLineScale = 1.0;
@@ -43014,13 +43094,19 @@ document.addEventListener('DOMContentLoaded', () => {
         if (_floorTierCloudFetchPromises.has(cloudKey)) {
             return _floorTierCloudFetchPromises.get(cloudKey);
         }
+        const epochAtStart = (bldg._drawingEpoch && bldg._drawingEpoch[floorCode]) || 0;
         const job = (async () => {
             _floorTierCloudFetchInFlight.add(cloudKey);
             try {
                 if (typeof updateMapZoomOverlay === 'function') updateMapZoomOverlay();
             } catch (_) { /* overlay optional */ }
             try {
+                if (isDrawingReplaceGuarded(bldg, floorCode)) return null;
                 const cloudTier = await fetchCloudFloorDrawingTier(bldg.id, floorCode, dim);
+                if (((bldg._drawingEpoch && bldg._drawingEpoch[floorCode]) || 0) !== epochAtStart) {
+                    return null;
+                }
+                if (isDrawingReplaceGuarded(bldg, floorCode)) return null;
                 if (cloudTier && isUsableRasterDrawingUrl(cloudTier)) {
                     cacheFloorDrawingTierToDevice(bldg, floorCode, dim, cloudTier);
                     return cloudTier;
