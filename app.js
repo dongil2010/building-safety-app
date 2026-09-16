@@ -9879,7 +9879,7 @@ document.addEventListener('DOMContentLoaded', () => {
         defectGood: '#0040c0',          // 결함위치도(1,2종) - 상태양호
         defectNewGrade3: '#0040c0',     // 결함위치도(3종) - 신규조사
         defectExistingGrade3: '#b30000', // 결함위치도(3종) - 기존조사(전회차)
-        defectGoodGrade3: '#000000',    // 결함위치도(3종) - 상태양호
+        defectGoodGrade3: '#000000',    // 결함위치도(3종) - 상태양호(전회차). 금회차 상태양호는 defectNewGrade3(청색)
         priorityManage: '#15803d',      // 결함위치도 - 중점관리
         ndtMeasure: '#1f1f1f',          // 부재 실측
         ndtStrength: '#b30000',         // 강도 (빨강)
@@ -9911,13 +9911,15 @@ document.addEventListener('DOMContentLoaded', () => {
     // 결함 핀 색상 — 카테고리(구조체/비구조체/마감재)가 아니라 등급·상태 기준.
     // 중점관리(체크)=녹색 (등급 무관 최우선)
     // 1,2종: 결함=빨강, 상태양호=파랑
-    // 3종: 상태양호=검정, 기존조사(전회차)=빨강, 신규조사=파랑
+    // 3종: 금회차(상태양호 포함)=파랑, 전회차 결함=빨강, 전회차 상태양호=검정
     function getDefectColor(defect) {
         if (defect.isPriorityManage) return getStyleColor('priorityManage');
         const isGood = isGoodDefectType(defect.defectType);
         if (isGrade3Building()) {
-            if (isGood) return getStyleColor('defectGoodGrade3');
-            return isPreviousRoundDefect(defect) ? getStyleColor('defectExistingGrade3') : getStyleColor('defectNewGrade3');
+            if (isPreviousRoundDefect(defect)) {
+                return isGood ? getStyleColor('defectGoodGrade3') : getStyleColor('defectExistingGrade3');
+            }
+            return getStyleColor('defectNewGrade3');
         }
         return isGood ? getStyleColor('defectGood') : getStyleColor('defectBad');
     }
@@ -32841,7 +32843,7 @@ document.addEventListener('DOMContentLoaded', () => {
         bldg = bldg || state.currentBuilding;
         if (isGrade3Building(bldg)) {
             return [
-                { colorName: '흑색', label: '상태양호', color: getStyleColor('defectGoodGrade3') },
+                { colorName: '흑색', label: '상태양호(전회차)', color: getStyleColor('defectGoodGrade3') },
                 { colorName: '적색', label: '기존조사', color: getStyleColor('defectExistingGrade3') },
                 { colorName: '청색', label: '신규조사', color: getStyleColor('defectNewGrade3') },
                 { colorName: '녹색', label: '중점관리', color: getStyleColor('priorityManage') }
