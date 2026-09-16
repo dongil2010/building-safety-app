@@ -10725,8 +10725,35 @@ document.addEventListener('DOMContentLoaded', () => {
         return groups;
     }
 
+    // 부동침하/부재변위 그룹 번호도 결함위치도·비파괴조사 NO.와 같은 이유로 건물 전체(층 무관,
+    // 카테고리별)로 센다 — 1층에서 NO.03까지 썼으면 5층은 NO.04부터 시작해야 한다.
+    function getAllFloorsDisplacementGroups(buildingId, cat = null) {
+        if (!buildingId || !state.ndtDisplacementGroups) return [];
+        const bldg = (state.buildings || []).find(b => b.id === buildingId);
+        const floorCodes = (bldg && Array.isArray(bldg.floorsList) && bldg.floorsList.length > 0)
+            ? bldg.floorsList.map(f => f.floorCode)
+            : Object.keys(state.ndtDisplacementGroups)
+                .filter(k => k.startsWith(buildingId + '_'))
+                .map(k => k.slice(buildingId.length + 1));
+        const targetCat = cat || currentNdtCategory || '변위';
+        const seen = new Set();
+        const out = [];
+        floorCodes.forEach(fc => {
+            if (seen.has(fc)) return;
+            seen.add(fc);
+            const groups = state.ndtDisplacementGroups[`${buildingId}_${fc}`] || [];
+            const filtered = targetCat === '부재변위'
+                ? groups.filter(g => g.category === '부재변위')
+                : targetCat === '변위'
+                    ? groups.filter(g => !g.category || g.category === '변위')
+                    : groups;
+            out.push(...filtered);
+        });
+        return out;
+    }
+
     function nextDisplacementGroupNo(cat = null) {
-        const groups = getCurrentFloorDisplacementGroups(cat);
+        const groups = getAllFloorsDisplacementGroups(state.currentBuildingId, cat);
         return `NO.${String(groups.length + 1).padStart(2, '0')}`;
     }
 
