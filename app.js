@@ -29741,7 +29741,7 @@ document.addEventListener('DOMContentLoaded', () => {
             replaceMode = confirm(
                 `현재 층(${state.currentFloor})에 이미 ${existingCount}개의 결함이 등록되어 있습니다.\n\n` +
                 `[확인] : 기존 결함을 모두 비우고 캐드 핀으로 새로 교체\n` +
-                `[취소] : 기존은 두고, 같은 번호는 건너뛰고 새 번호만 추가`
+                `[취소] : 기존은 두고, 조사내용은 유지하고, 같은 번호는 캐드 위치로 옮김(엑셀 먼저 불러온 경우 포함). 새 번호만 추가`
             );
         } else if (unmarkedList.length > 0 && placedOnlyCount > 0) {
             window.showToast?.(
@@ -29810,6 +29810,45 @@ document.addEventListener('DOMContentLoaded', () => {
                 placedUnmarkedCount++;
             });
             cadItemsToCreate = cadPlaceApi.leftoverNumberedCad(match.leftoverCad);
+        }
+
+        // 엑셀 먼저(임시 격자 배치·미표기 아님) → 캐드 나중: 같은 번호면 조사내용 유지하고 캐드 좌표만 덮어씀
+        if (!replaceMode && cadPlaceApi && typeof cadPlaceApi.matchNumberedDefectsToCadItems === 'function' && cadItemsToCreate.length) {
+            const alreadyPlacedIds = new Set(newDefectsList.map((d) => d && d.id).filter(Boolean));
+            const relocatable = (currentDefects || []).filter((d) => {
+                if (!d || !d.id || d.surveyExtra) return false;
+                if (alreadyPlacedIds.has(d.id)) return false;
+                return true;
+            });
+            if (relocatable.length) {
+                const matchPlaced = cadPlaceApi.matchNumberedDefectsToCadItems(relocatable, cadItemsToCreate);
+                if (matchPlaced.pairs.length) ensureCadImportHistory();
+                matchPlaced.pairs.forEach(({ defect, cad }) => {
+                    if (!defect || !cad) return;
+                    const box = cadToApp(Number(cad.cadBoxX), Number(cad.cadBoxY));
+                    const tip = cadToApp(Number(cad.cadTipX), Number(cad.cadTipY));
+                    defect.x = Math.round(box.x);
+                    defect.y = Math.round(box.y);
+                    defect.targetX = Math.round(tip.x);
+                    defect.targetY = Math.round(tip.y);
+                    defect.mapUnregistered = false;
+                    defect.mapMarkedAt = Date.now();
+                    defect.isCadImported = true;
+                    const rawCadNo = String(cad.no || '').trim();
+                    if (rawCadNo) defect.cadNo = rawCadNo;
+                    if (rawCadNo && !String(defect.no || '').trim()) {
+                        defect.no = rawCadNo;
+                        defect.groupNo = rawCadNo;
+                    }
+                    if (typeof touchDefectPositionUpdatedAt === 'function') {
+                        touchDefectPositionUpdatedAt(defect);
+                    }
+                    defect.updatedAt = Date.now();
+                    newDefectsList.push(defect);
+                    placedUnmarkedCount++;
+                });
+                cadItemsToCreate = cadPlaceApi.leftoverNumberedCad(matchPlaced.leftoverCad);
+            }
         }
 
         const existingNoKeys = new Set(
@@ -40049,7 +40088,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 // 번호가 같은 기존 핀(예: CAD 자동배치로 만든 위치 있는 핀)이 있으면
                 // 위치는 그대로 두고 내용만 채워넣는다 (병합 옵션이 켜져 있을 때만)
                 const existing = (mergeByNo && noRawTrimmed)
-                    ? state.defects[key].find(d => (d.no || '').trim() === noRawTrimmed)
+                    ? ((window.BSA && window.BSA.shared && window.BSA.shared.cadUnmarkedPlace
+                        && typeof window.BSA.shared.cadUnmarkedPlace.findDefectByNormalizedNo === 'function')
+                        ? window.BSA.shared.cadUnmarkedPlace.findDefectByNormalizedNo(state.defects[key], noRawTrimmed)
+                        : state.defects[key].find(d => (d.no || '').trim() === noRawTrimmed))
                     : null;
 
                 if (existing) {
