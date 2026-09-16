@@ -426,3 +426,9 @@
 >
 > 원인: preloadFloorDrawings가 getFloorDrawingSrc 폴백(첫 도면)으로 층 캐시를 오염시키고, HWPX illLocationMapForFloor가 그 캐시를 우선 사용. 성능 커밋이 층마다 캐시 삭제+재preload를 제거하며 재발.
 > 수정: 층 키 래스터만 hydrate/캐시, 렌더는 exact usable URL만, 위치도 채우기 전 해당 층 캐시 삭제.
+
+### ⚡ [Grok] - 2026-09-16 14:15:00
+> **(COMPLETED) 모바일 수정창 열릴 때 마킹 위치로 도면 이동**
+>
+> 기존 reveal 로직이 사진 hydrate 이후·좁은 shouldReveal 조건 때문에 안 움직이거나 늦게 보여 기능이 없는 것처럼 보임.
+> 수정: 모바일/컴팩트/하단 드로어에서는 수정창 오픈 직후(사진 로딩 전)부터 패닝, 드로어 레이아웃 확정 후 재정렬, pan 후 drawCanvas 누락 보완.

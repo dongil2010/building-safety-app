@@ -8667,6 +8667,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 state.view.offsetX = targetOffsetX;
                 state.view.offsetY = targetOffsetY;
                 if (elements.zoomScaleText) elements.zoomScaleText.textContent = `${Math.round(targetScale * 100)}%`;
+                if (typeof drawCanvas === 'function') drawCanvas({ immediate: true });
                 return true;
             }
             const duration = Number.isFinite(options.duration) ? options.duration : 260;
@@ -8699,18 +8700,30 @@ document.addEventListener('DOMContentLoaded', () => {
         state.view.offsetX = targetOffsetX;
         state.view.offsetY = targetOffsetY;
         if (elements.zoomScaleText) elements.zoomScaleText.textContent = `${Math.round(targetScale * 100)}%`;
+        if (typeof drawCanvas === 'function') drawCanvas({ immediate: true });
         return true;
     }
 
     function scheduleRevealMarkingAboveDrawer(defect, options = {}) {
         if (!defect) return;
         const animate = options.animate !== false;
-        panCanvasToDefectMarking(defect, { uncovered: true, keepScale: true, animate });
-        // 드로어 열림 CSS 트랜지션(0.28s) 완료 후 최종 레이아웃 기준으로 안정화
-        setTimeout(() => {
-            panCanvasToDefectMarking(defect, { uncovered: true, keepScale: true, animate: false });
-            if (typeof drawCanvas === 'function') drawCanvas();
-        }, 320);
+        const run = (doAnimate) => {
+            panCanvasToDefectMarking(defect, {
+                uncovered: true,
+                keepScale: options.keepScale !== false,
+                animate: !!doAnimate
+            });
+            if (typeof drawCanvas === 'function') drawCanvas({ immediate: !doAnimate });
+        };
+        // 드로어 높이 미확정 / 트랜지션 중 / 완료 후를 모두 맞춤
+        run(animate);
+        requestAnimationFrame(() => {
+            run(false);
+            requestAnimationFrame(() => run(false));
+        });
+        setTimeout(() => run(false), 180);
+        setTimeout(() => run(false), 360);
+        setTimeout(() => run(false), 520);
     }
     window.scheduleRevealMarkingAboveDrawer = scheduleRevealMarkingAboveDrawer;
     window.getUncoveredCanvasFocusPoint = getUncoveredCanvasFocusPoint;
@@ -27258,6 +27271,17 @@ document.addEventListener('DOMContentLoaded', () => {
                         renderDefectMarkingTimeline(createdPin);
                     }
                 }
+                const targetPinEarly = existingPin || createdPin;
+                const wantReveal = !(options && options.revealMarkingAboveDrawer === false);
+                const isBottom = typeof isDefectDrawerBottomLayout === 'function' && isDefectDrawerBottomLayout();
+                const isCompact = (typeof layoutIsCompactWidth === 'function' && layoutIsCompactWidth())
+                    || (typeof layoutIsMobileWidth === 'function' && layoutIsMobileWidth())
+                    || !layoutIsPcLike();
+                // 모바일·하단 드로어: 수정창이 뜨면 해당 마킹이 보이게 도면 이동 (사진 hydrate 전에 먼저)
+                if (targetPinEarly && wantReveal && (isCompact || isBottom || options.fromCanvas)) {
+                    scheduleRevealMarkingAboveDrawer(targetPinEarly, { animate: true });
+                }
+
                 await photoHydratePromise;
                 window._defectFormHydrating = false;
                 if (window._defectPhotosDirty) scheduleDefectAutoApply();
@@ -27267,19 +27291,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
                 scheduleRevealDefectListAboveDrawer();
 
-                const targetPin = existingPin || createdPin;
-                const isBottom = isDefectDrawerBottomLayout();
-                const isMobileOrTablet = !layoutIsPcLike();
-                const isCovered = targetPin && isDefectMarkingCoveredByDrawer(targetPin);
-
-                // 모바일/태블릿에서 수정창(하단 드로어)이 올라올 때 또는 마킹이 가려질 때 마킹이 보이는 위치로 도면 화면 이동
-                const shouldReveal = !!(
-                    (options && options.revealMarkingAboveDrawer && (options.fromCanvas ? (isMobileOrTablet || isCovered) : true)) ||
-                    (isBottom && targetPin) ||
-                    (isCovered)
-                );
-                if (targetPin && shouldReveal) {
-                    scheduleRevealMarkingAboveDrawer(targetPin, { animate: true });
+                const targetPin = existingPin || createdPin || targetPinEarly;
+                if (targetPin && wantReveal && (isCompact || isBottom || options.fromCanvas
+                    || (typeof isDefectMarkingCoveredByDrawer === 'function' && isDefectMarkingCoveredByDrawer(targetPin)))) {
+                    scheduleRevealMarkingAboveDrawer(targetPin, { animate: false });
                 }
                 resetDefectDrawerScroll();
             });
