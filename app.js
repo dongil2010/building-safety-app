@@ -2632,6 +2632,41 @@ document.addEventListener('DOMContentLoaded', () => {
                     ...(localMatch?.deletedDrawingFloorCodes || []),
                     ...(b.deletedDrawingFloorCodes || [])
                 ]));
+            // 로컬에서 다시 등록한 층은 원격 tombstone보다 우선한다.
+            // (전부 지운 뒤 1F만 넣고 2F를 추가하면, 서버에 남은 2F 삭제기록이
+            //  union merge로 되살아나 추가 층을 즉시 지워 버리던 버그)
+            const locallyResurrected = new Set();
+            const markPresent = (code) => {
+                const c = code == null ? '' : String(code).trim();
+                if (c) locallyResurrected.add(c);
+            };
+            (localMatch?.drawingFloorCodes || []).forEach(markPresent);
+            (localMatch?.floorsList || []).forEach((f) => { if (f) markPresent(f.floorCode); });
+            Object.keys(localMatch?.floorDrawings || {}).forEach(markPresent);
+            Object.keys(localMatch?.floorDrawingPdfs || {}).forEach(markPresent);
+            Object.keys(localMatch?.floorDrawingTiers || {}).forEach(markPresent);
+            Object.keys(localMatch?.floorDrawingSources || {}).forEach(markPresent);
+            Object.keys(assets[b.id]?.floorDrawings || {}).forEach(markPresent);
+            Object.keys(assets[b.id]?.floorDrawingPdfs || {}).forEach(markPresent);
+            Object.keys(assets[b.id]?.floorDrawingTiers || {}).forEach(markPresent);
+            Object.keys(assets[b.id]?.floorDrawingSources || {}).forEach(markPresent);
+            // 로컬 deleted 목록에 없는(= forgetDeleted 한) 층만 부활
+            const localDeleted = new Set(
+                (localMatch?.deletedDrawingFloorCodes || []).map((c) => String(c || '').trim()).filter(Boolean)
+            );
+            if (locallyResurrected.size) {
+                merged.deletedDrawingFloorCodes = (merged.deletedDrawingFloorCodes || []).filter((c) => {
+                    const code = String(c || '').trim();
+                    if (!code) return false;
+                    if (locallyResurrected.has(code) && !localDeleted.has(code)) {
+                        if (typeof forgetDeletedDrawingFloor === 'function') {
+                            forgetDeletedDrawingFloor(merged, code);
+                        }
+                        return false;
+                    }
+                    return true;
+                });
+            }
             stripDeletedDrawingFloorsFromBuilding(merged);
             // 원격이 옛 floorsList(1층만)를 갖고 와도, 로컬에서 추가한 층이 사라지지 않게 합친다
             merged.floorsList = mergeFloorMetaLists(localMatch?.floorsList, b.floorsList);
@@ -2641,6 +2676,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 merged.floorsList,
                 [merged.floorDrawings, merged.floorDrawingPdfs, merged.floorDrawingTiers, merged.floorDrawingSources]
             );
+            // 합친 뒤에도 로컬 재등록 층은 tombstone에서 한 번 더 제거
+            if (locallyResurrected.size) {
+                merged.deletedDrawingFloorCodes = (merged.deletedDrawingFloorCodes || []).filter((c) => {
+                    const code = String(c || '').trim();
+                    return !(code && locallyResurrected.has(code) && !localDeleted.has(code));
+                });
+            }
             stripDeletedDrawingFloorsFromBuilding(merged);
             if (merged.drawingFloorCodes.length) {
                 mergeDiscoveredFloorsIntoBuilding(merged, new Set(merged.drawingFloorCodes));
@@ -7682,6 +7724,17 @@ document.addEventListener('DOMContentLoaded', () => {
 
             // Save state & sync
             syncBuildingDrawingFloorCodes(bldg);
+            // 방금 저장한 층은 서버 tombstone에 남아 있어도 로컬에서 삭제목록을 비운다
+            (bldg.drawingFloorCodes || []).forEach((code) => {
+                if (code && typeof forgetDeletedDrawingFloor === 'function') {
+                    forgetDeletedDrawingFloor(bldg, code);
+                }
+            });
+            (bldg.floorsList || []).forEach((f) => {
+                if (f && f.floorCode && typeof forgetDeletedDrawingFloor === 'function') {
+                    forgetDeletedDrawingFloor(bldg, f.floorCode);
+                }
+            });
             const floorsForKeep = (bldg.floorsList && bldg.floorsList.length)
                 ? bldg.floorsList
                 : (bldg.drawingFloorCodes || []).map((c) => ({ floorCode: c }));
