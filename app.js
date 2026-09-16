@@ -5351,9 +5351,14 @@ document.addEventListener('DOMContentLoaded', () => {
             return tombstoneRemoved;
         }
 
-        // 클라우드에 있거나, 삭제 tombstone인 경우만 제거. 불확실하면 남긴다.
+        // 삭제 tombstone만 확실하면 제거.
+        // drawingFloorCodes에 명시 등록된 층은 저장 직후 IDB/클라우드 레이스 중이어도 유지.
+        const registeredCodes = new Set(
+            (bldg.drawingFloorCodes || []).map((c) => String(c || '').trim()).filter(Boolean)
+        );
         const ghosts = stillSuspect.filter((fc) => {
             if (isDeletedDrawingFloor(bldg, fc)) return true;
+            if (registeredCodes.has(String(fc))) return false;
             if (hasSessionAssetTrace(fc)) return false;
             return !cloudFound.has(fc);
         });
@@ -5371,13 +5376,26 @@ document.addEventListener('DOMContentLoaded', () => {
     function populateFloorSelectDropdown(bldg) {
         if (!elements.floorSelect) return;
         
-        const availableFloors = window.getBuildingAvailableFloors(bldg);
+        let availableFloors = window.getBuildingAvailableFloors(bldg);
+
+        // available이 비어도 drawingFloorCodes에 등록된 층이 있으면 복구 (유령정리 레이스 대비)
+        if ((!availableFloors || availableFloors.length === 0) && bldg && Array.isArray(bldg.drawingFloorCodes) && bldg.drawingFloorCodes.length) {
+            const fi = window.BSA && window.BSA.floorIdentity;
+            availableFloors = bldg.drawingFloorCodes
+                .filter((c) => c && !isDeletedDrawingFloor(bldg, c))
+                .map((c) => ({
+                    floorCode: c,
+                    floorLabel: (fi && typeof fi.labelFromCode === 'function')
+                        ? fi.labelFromCode(c)
+                        : (window.getFloorLabelFromCode ? window.getFloorLabelFromCode(c) : c)
+                }));
+        }
         
-        if (bldg) {
+        if (bldg && availableFloors && availableFloors.length > 0) {
             bldg.floorsList = availableFloors;
         }
 
-        if (availableFloors.length > 0) {
+        if (availableFloors && availableFloors.length > 0) {
             elements.floorSelect.innerHTML = availableFloors.map(f => 
                 `<option value="${f.floorCode}">${f.floorLabel}</option>`
             ).join('');
@@ -7063,13 +7081,26 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!bldg) return;
 
         let existingFloors = [];
-        if (bldg.floorsList && bldg.floorsList.length > 0) {
+        if (typeof window.getBuildingAvailableFloors === 'function') {
+            existingFloors = window.getBuildingAvailableFloors(bldg) || [];
+        }
+        if ((!existingFloors || existingFloors.length === 0) && bldg.floorsList && bldg.floorsList.length > 0) {
             existingFloors = bldg.floorsList.slice();
-        } else if (bldg.floorDrawings) {
+        }
+        if ((!existingFloors || existingFloors.length === 0) && Array.isArray(bldg.drawingFloorCodes) && bldg.drawingFloorCodes.length) {
+            const fi = window.BSA && window.BSA.floorIdentity;
+            existingFloors = bldg.drawingFloorCodes.map((code) => ({
+                floorCode: code,
+                floorLabel: (fi && typeof fi.labelFromCode === 'function')
+                    ? fi.labelFromCode(code)
+                    : code
+            }));
+        }
+        if ((!existingFloors || existingFloors.length === 0) && bldg.floorDrawings) {
             existingFloors = Object.keys(bldg.floorDrawings).map(code => ({ floorCode: code, floorLabel: code }));
         }
 
-        existingFloors = existingFloors.filter((f) => f && !isDeletedDrawingFloor(bldg, f.floorCode));
+        existingFloors = existingFloors.filter((f) => f && f.floorCode && !isDeletedDrawingFloor(bldg, f.floorCode));
 
         const newFiles = Array.isArray(window.selectedEditUploadedDrawings) ? window.selectedEditUploadedDrawings : [];
         const editGroups = groupDrawingItemsByFloor(newFiles);
@@ -7650,6 +7681,21 @@ document.addEventListener('DOMContentLoaded', () => {
             }
 
             // Save state & sync
+            syncBuildingDrawingFloorCodes(bldg);
+            const floorsForKeep = (bldg.floorsList && bldg.floorsList.length)
+                ? bldg.floorsList
+                : (bldg.drawingFloorCodes || []).map((c) => ({ floorCode: c }));
+            if (floorsForKeep.length) {
+                const preferNew = (window.selectedEditUploadedDrawings || [])
+                    .map((it) => it && it.floorCode)
+                    .filter(Boolean)
+                    .pop();
+                const keepCode = (preferNew && floorsForKeep.some((f) => f.floorCode === preferNew))
+                    ? preferNew
+                    : floorsForKeep[0].floorCode;
+                window.state.currentFloor = keepCode;
+                window.state.currentBuildingId = bldg.id;
+            }
             window.showLoading('도면 저장 중...');
             try {
                 await persistBuildingDrawingAssetsNow(bldg);
@@ -7676,7 +7722,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 window.selectBuildingAndInspect(bldg);
             }
 
-            window.showToast(`'${bldg.name}' 명칭 및 도면 저장이 완료되었습니다. (총 ${bldg.floorsList.length}개 층)`, 'success');
+            const floorCount = (bldg.floorsList && bldg.floorsList.length)
+                || (bldg.drawingFloorCodes && bldg.drawingFloorCodes.length)
+                || 0;
+            window.showToast(`'${bldg.name}' 명칭 및 도면 저장이 완료되었습니다. (총 ${floorCount}개 층)`, 'success');
         });
     }
 
