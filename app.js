@@ -28751,6 +28751,10 @@ document.addEventListener('DOMContentLoaded', () => {
             closeDefectModal({ discardPending: true });
             pushDefectHistory();
             defects.forEach(d => {
+                // deleteSelectedDefects/removeSingleDefectRecord와 동일하게 tombstone을 남겨야
+                // 몇 초 뒤 동기화 merge 때 서버에 남아있던(아직 삭제 전파 안 된) 결함이 되살아나지
+                // 않는다. 이게 빠져서 "전체 초기화"만 삭제 후 잠시 뒤 다시 나타나는 버그가 있었다.
+                trackDefectDeletion(key, d.id);
                 deleteAllPhotosForDefect(d);
             });
             state.defects[key] = [];
