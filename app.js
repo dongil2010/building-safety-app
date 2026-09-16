@@ -21887,56 +21887,44 @@ document.addEventListener('DOMContentLoaded', () => {
         form.dataset.handwriteTabBound = '1';
         form.addEventListener('keydown', (e) => {
             if (e.key !== 'Tab' || e.altKey || e.ctrlKey || e.metaKey) return;
-            // 터치 전용(휴대폰)에서는 네이티브 포커스 유지
-            if (window.matchMedia && window.matchMedia('(pointer: coarse)').matches
-                && window.matchMedia('(hover: none)').matches) {
-                return;
-            }
             const stops = getDefectHandwriteTabStops();
             if (stops.length < 2) return;
             const active = document.activeElement;
             let idx = stops.indexOf(active);
             if (idx < 0) {
-                // 칩/버튼에 있어도 수기 칸으로 점프 (DOM 순 다음 수기 칸)
+                // 칩/버튼에 있어도 수기 칸으로 점프 (DOM 순 다음 수기 칸). 끝에서는 네이티브 Tab 유지(랩 금지)
                 if (!form.contains(active)) return;
                 const all = Array.from(form.querySelectorAll('input, select, textarea, button, [tabindex]'));
                 const aIdx = all.indexOf(active);
                 if (aIdx < 0) return;
-                e.preventDefault();
                 if (e.shiftKey) {
                     for (let i = stops.length - 1; i >= 0; i -= 1) {
                         if (all.indexOf(stops[i]) < aIdx) {
+                            e.preventDefault();
                             stops[i].focus();
-                            if (typeof stops[i].select === 'function') stops[i].select();
                             return;
                         }
                     }
-                    const last = stops[stops.length - 1];
-                    last.focus();
-                    if (typeof last.select === 'function') last.select();
-                } else {
-                    for (let i = 0; i < stops.length; i += 1) {
-                        if (all.indexOf(stops[i]) > aIdx) {
-                            stops[i].focus();
-                            if (typeof stops[i].select === 'function') stops[i].select();
-                            return;
-                        }
+                    return;
+                }
+                for (let i = 0; i < stops.length; i += 1) {
+                    if (all.indexOf(stops[i]) > aIdx) {
+                        e.preventDefault();
+                        stops[i].focus();
+                        return;
                     }
-                    const first = stops[0];
-                    first.focus();
-                    if (typeof first.select === 'function') first.select();
                 }
                 return;
             }
-            // 양 끝에서는 폼의 다음/이전 컨트롤(체크 등)로 네이티브 탭 유지
+            // 양 끝에서는 폼의 다음/이전 컨트롤(체크 등)로 네이티브 탭 유지 (랩 금지)
             if (!e.shiftKey && idx === stops.length - 1) return;
             if (e.shiftKey && idx === 0) return;
             e.preventDefault();
             const nextIdx = e.shiftKey ? idx - 1 : idx + 1;
             const next = stops[nextIdx];
+            // select() 호출 금지 — 한국어 IME 조합이 깨짐
             next.focus();
-            if (typeof next.select === 'function') next.select();
-        });
+        }, true);
     }
 
 
@@ -25612,6 +25600,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let pendingDragIsTouch = false; // pendingDragHit이 터치로 시작됐는지 (임계값/유예시간을 마우스와 다르게 적용)
     let pendingDragHitStartTime = 0; // 터치로 핀을 짚은 시각(ms)
     let pendingDragArmed = false; // 길게 누름 완료 → 이후 이동 시 드래그 허용
+    let pendingDragOpenedModal = false; // PC 마우스: mousedown에서 이미 수정창을 연 경우 mouseup 중복 오픈 방지
     let pendingDragLongPressTimer = null;
     let activePointerIsTouch = false; // 현재 제스처가 터치인지 (합성 마우스 무시·돋보기용)
     let mapTouchStartedOnCanvas = false; // 도면에서 시작한 터치만 스크롤 잠금
@@ -25619,7 +25608,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let _mapLoupeRaf = 0;
     let _mapLoupePending = null;
     const TOUCH_DRAG_THRESHOLD = 10; // 터치 클릭 vs 드래그 구분 (너무 크면 돋보기만 움직이는 구간이 김)
-    const MOUSE_DRAG_THRESHOLD = 6;
+    const MOUSE_DRAG_THRESHOLD = 14;
     const TOUCH_LONG_PRESS_MS = 500; // 모바일·태블릿: 0.5초 홀딩 후 핀 이동
     const MAP_LOUPE_ID = 'mapTouchLoupe';
     const NDT_LOUPE_ID = 'ndtTouchLoupe';
@@ -26477,6 +26466,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const additive = !!(mods.ctrlKey || mods.metaKey);
         activePointerIsTouch = !!isTouch;
         clearPendingDragLongPress();
+        pendingDragOpenedModal = false;
         hideTouchLoupe(MAP_LOUPE_ID);
         if (typeof cancelCanvasPanAnimation === 'function') cancelCanvasPanAnimation();
 
@@ -26594,6 +26584,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 // 이미 다중 선택된 핀을 다시 누르면 선택 유지 → 그룹 드래그용
                 updateMapSelectionBar({ scrollToSelection: true });
                 drawCanvas();
+                // PC 마우스: 클릭 한 번에 선택+수정창 (미세 떨림이 드래그로 바뀌어도 모달이 이미 열림)
+                // 다중 선택(size>1)은 mouseup에서 일괄 수정창 — 터치 경로는 변경 없음
+                if (!isTouch && !useAdditive && selectedDefectIds.size <= 1) {
+                    const d = hitInfo.defect;
+                    openAddDefectModal(d.x, d.y, d.targetX, d.targetY, d, null, { revealMarkingAboveDrawer: true, fromCanvas: true });
+                    pendingDragOpenedModal = true;
+                }
             }
             if (isTouch) {
                 pendingDragLongPressTimer = setTimeout(() => {
@@ -27016,8 +27013,23 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             // Ctrl 토글 클릭이면 내용 수정 모달 열지 않음
             if (wasAdditive) {
+                pendingDragOpenedModal = false;
                 updateMapSelectionBar({ scrollToSelection: true });
                 drawCanvas();
+                return;
+            }
+            // PC 마우스: mousedown에서 이미 수정창을 연 경우 중복 오픈 방지
+            if (pendingDragOpenedModal) {
+                pendingDragOpenedModal = false;
+                updateMapSelectionBar({ scrollToSelection: true });
+                drawCanvas();
+                if (d?.groupId && getDefectMarkingGroupMembers(d.groupId).length > 1) {
+                    window.showToast?.(
+                        `마킹 ${formatDefectMemberChipLabel(d)} 선택 · NO.박스를 다시 누르면 다음 화살표`,
+                        'info',
+                        2200
+                    );
+                }
                 return;
             }
             // 다중 선택 상태에서 핀 클릭 → 일괄 수정창
@@ -27864,6 +27876,7 @@ document.addEventListener('DOMContentLoaded', () => {
     function openAddDefectModal(boxX, boxY, targetX, targetY, existingPin = null, areaRect = null, options = {}) {
         clearDefectBulkEditState();
         syncDefectBulkEditChrome(false);
+        if (typeof bindDefectHandwriteTabOrder === 'function') bindDefectHandwriteTabOrder();
         window._defectFormHydrating = true;
         window._defectPhotoHydrateToken = (window._defectPhotoHydrateToken || 0) + 1;
         window.clearTimeout(window._defectAutoApplyTimer);
