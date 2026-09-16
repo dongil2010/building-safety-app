@@ -1,21 +1,36 @@
-# Firebase Storage CORS (한글 출력·캔버스용)
+# Firebase Storage CORS · 도면/한글 바이트 로드
 
-점검 화면의 `<img>`는 CORS 없이 보이지만, 한글(HWPX) 임베드는 브라우저에서
-이미지 **바이트**를 읽어야 해서 Storage 버킷 CORS가 필요합니다.
+결함위치도 캔버스와 한글(HWPX) 임베드는 이미지 **바이트**(data URL)가 필요합니다.
+`<img src="https://…">` 만으로는 캔버스가 tainted 되거나 `crossOrigin=anonymous` 에서 실패합니다.
 
-## 적용 (PC에 Google Cloud SDK 설치 후)
+## 로드 순서 (클라이언트)
+
+1. Storage `downloadURL` + 로그인 토큰 (`Authorization: Firebase <idToken>`) fetch
+2. Storage REST `…/o/<path>?alt=media` 동일 헤더 (compat SDK에 `getBlob` 없음)
+3. Cloudflare Worker `proxyStorage` (운영: `https://frosty-king-12ef.dongilgujo2010.workers.dev`)
+4. 그래도 data URL이 아니면 도면 빈 화면: 「클라우드에서 도면을 받지 못했습니다」
+
+버킷 CORS가 없어도 1–2는 `firebasestorage.googleapis.com` 의 API CORS(`*`, `Authorization` 허용)로
+동작해야 합니다. 예전 코드는 `Bearer` 헤더를 써서 규칙이 있는 객체에서 실패했습니다.
+
+## 버킷 CORS (선택, gsutil)
 
 ```powershell
-# 버킷 이름은 Firebase 콘솔 Storage와 동일
 gsutil cors set storage-cors.json gs://building-safety-app-46821.firebasestorage.app
-
-# 구형 이름이면:
-# gsutil cors set storage-cors.json gs://building-safety-app-46821.appspot.com
-
 gsutil cors get gs://building-safety-app-46821.firebasestorage.app
 ```
 
-적용 후 브라우저 강력 새로고침(캐시에 실패한 CORS 응답이 남아 있을 수 있음).
+구형 이름이면 `gs://building-safety-app-46821.appspot.com` (이 프로젝트 GET 은 404).
 
-앱은 CORS가 없어도 Cloudflare Worker 프록시로 한글 출력이 되게 폴백합니다.
-(Worker 재배포: `cloudflare-worker/` 참고)
+## Worker 재배포 (프록시 폴백)
+
+에이전트는 Cloudflare 계정에 배포할 수 없습니다. 사용자가 실행:
+
+```bash
+cd cloudflare-worker
+npx wrangler login
+npx wrangler deploy
+```
+
+확인: `POST { "action": "ping" }` → `{"ok":true,"proxyStorage":true}`.
+자세한 절차는 `cloudflare-worker/README.md`.

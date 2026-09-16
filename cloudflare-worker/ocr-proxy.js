@@ -1,21 +1,23 @@
 // 콘크리트 강도 OCR 프록시 + Firebase Storage 이미지 프록시.
 // - OCR: { image: 'data:image/...' } → Cloud Vision → { values }
-// - Storage 프록시: { action: 'proxyStorage', url: 'https://firebasestorage...' }
-//   → 서버에서 받아 { dataUrl } (브라우저 CORS 우회, 한글 HWPX 임베드용)
+// - ping: { action: 'ping' } → { ok, proxyStorage: true } (구버전 Worker 판별)
+// - Storage 프록시: { action: 'proxyStorage', url, authToken? }
+//   → 기본: 원본 바이트 스트리밍 (CORS *). 도면처럼 수 MB면 JSON base64는 CPU 한도에 걸림.
+//   → format:'dataUrl' 이면 { dataUrl } JSON (작은 사진/구 클라).
 //
-// 배포: README.md 참고. Secret: GOOGLE_VISION_API_KEY
+// 배포: README.md. 운영 Worker 이름: frosty-king-12ef
+// Secret: GOOGLE_VISION_API_KEY (OCR 전용, 프록시에는 불필요)
 
-function isAllowedStorageUrl(url) {
-  try {
-    const u = new URL(url);
-    if (u.protocol !== 'https:') return false;
-    const h = u.hostname.toLowerCase();
-    return h === 'firebasestorage.googleapis.com'
-      || h.endsWith('.firebasestorage.app')
-      || h.endsWith('.googleapis.com');
-  } catch {
-    return false;
-  }
+import { isAllowedStorageUrl } from './storage-url-allowlist.js';
+
+function guessProxyMime(url, contentType) {
+  let mime = String(contentType || '').split(';')[0].trim().toLowerCase();
+  if (mime === 'image/jpg') mime = 'image/jpeg';
+  if (mime.startsWith('image/') || mime === 'application/pdf') return mime;
+  if (/\.pdf(\?|$)/i.test(url)) return 'application/pdf';
+  if (/\.png(\?|$)/i.test(url)) return 'image/png';
+  if (/\.webp(\?|$)/i.test(url)) return 'image/webp';
+  return 'image/jpeg';
 }
 
 function bytesToBase64(bytes) {
@@ -25,6 +27,14 @@ function bytesToBase64(bytes) {
     binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk));
   }
   return btoa(binary);
+}
+
+function sanitizeAuthToken(raw) {
+  if (typeof raw !== 'string') return '';
+  const token = raw.trim();
+  if (token.length < 20 || token.length > 8000) return '';
+  if (/[\s]/.test(token)) return '';
+  return token;
 }
 
 export default {
@@ -50,17 +60,28 @@ export default {
       return json({ error: '요청 본문이 JSON이 아닙니다.' }, 400, corsHeaders);
     }
 
+    if (body && body.action === 'ping') {
+      return json({ ok: true, proxyStorage: true }, 200, corsHeaders);
+    }
+
     // ── Storage 이미지 프록시 (OCR 키 불필요) ──
     if (body && body.action === 'proxyStorage') {
       const url = body.url;
       if (typeof url !== 'string' || !isAllowedStorageUrl(url)) {
         return json({ error: '허용되지 않은 Storage URL입니다.' }, 400, corsHeaders);
       }
+      const headers = { Accept: 'image/*,application/pdf,*/*' };
+      const token = sanitizeAuthToken(body.authToken);
+      if (token) {
+        // Firebase Storage REST는 Bearer가 아니라 "Firebase <idToken>"
+        headers.Authorization = 'Firebase ' + token;
+        headers['X-Firebase-Storage-Version'] = 'webjs/9.22.0';
+      }
       let upstream;
       try {
         upstream = await fetch(url, {
           method: 'GET',
-          headers: { Accept: 'image/*,*/*' },
+          headers,
           redirect: 'follow',
         });
       } catch (err) {
@@ -69,17 +90,28 @@ export default {
       if (!upstream.ok) {
         return json({ error: `Storage HTTP ${upstream.status}` }, 502, corsHeaders);
       }
+      const mime = guessProxyMime(url, upstream.headers.get('content-type'));
+      const wantDataUrl = body.format === 'dataUrl';
+      if (!wantDataUrl) {
+        return new Response(upstream.body, {
+          status: 200,
+          headers: {
+            ...corsHeaders,
+            'Content-Type': mime,
+            'Cache-Control': 'private, max-age=60',
+          },
+        });
+      }
       const buf = new Uint8Array(await upstream.arrayBuffer());
       if (!buf.length) {
         return json({ error: '빈 이미지 응답' }, 502, corsHeaders);
       }
-      let mime = (upstream.headers.get('content-type') || '').split(';')[0].trim().toLowerCase();
-      if (!mime.startsWith('image/') && mime !== 'application/pdf') {
-        if (/\.pdf(\?|$)/i.test(url)) mime = 'application/pdf';
-        else if (/\.png(\?|$)/i.test(url)) mime = 'image/png';
-        else mime = 'image/jpeg';
+      // 큰 도면 JSON base64는 Worker CPU 한도(무료 ~10–50ms)에 걸릴 수 있음
+      if (buf.length > 2 * 1024 * 1024) {
+        return json({
+          error: '파일이 커서 dataUrl 형식은 지원하지 않습니다. format을 생략하세요.',
+        }, 413, corsHeaders);
       }
-      if (mime === 'image/jpg') mime = 'image/jpeg';
       const dataUrl = `data:${mime};base64,${bytesToBase64(buf)}`;
       return json({ dataUrl, mime, size: buf.length }, 200, corsHeaders);
     }

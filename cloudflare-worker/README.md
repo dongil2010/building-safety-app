@@ -38,33 +38,77 @@
 (Secret 이름을 `GOOGLE_VISION_API_KEY`로 새로 추가 — 기존 `GEMINI_API_KEY`는 안 지워도 무방)만
 다시 하면 됩니다.
 
-## Storage 이미지 프록시 (한글 HWPX)
+## Storage 이미지 프록시 (도면 캔버스 + 한글 HWPX)
 
-같은 Worker가 `{ "action": "proxyStorage", "url": "https://firebasestorage..." }` POST도
-처리합니다. 브라우저 CORS로 Storage 바이트를 못 읽을 때 한글 출력이 이 경로로 폴백합니다.
-**ocr-proxy.js를 다시 Deploy**해야 프록시가 켜집니다. (OCR Secret은 그대로)
+같은 Worker가 Storage 바이트 프록시도 처리합니다. **이 코드가 배포돼 있지 않으면**
+결함위치도에서 「클라우드에서 도면을 받지 못했습니다」가 납니다.
+(2026-09-16 실측: 운영 `frosty-king-12ef` 는 아직 OCR 전용 — `proxyStorage` POST가
+「image 필드가 없거나…」로 거절됨.)
+
+요청:
+
+```json
+{ "action": "proxyStorage", "url": "https://firebasestorage.googleapis.com/v0/b/…/o/…", "authToken": "<Firebase ID 토큰, 선택>" }
+{ "action": "ping" }
+```
+
+- 기본 응답: 이미지/PDF **원본 바이트** + CORS (`Access-Control-Allow-Origin`)
+- `format: "dataUrl"`: `{ dataUrl }` JSON (2MB 이하, 구 클라)
+- `authToken`이 있으면 Storage REST에 `Authorization: Firebase <token>` 을 붙입니다
+  (버킷 규칙이 회사 멤버십을 요구하면 토큰 URL만으로는 403)
+
+**ocr-proxy.js를 운영 Worker에 다시 Deploy해야 프록시가 켜집니다.** OCR Secret은 그대로.
+
+앱 쪽은 Worker가 없어도 로그인 상태면 Storage REST(`Firebase` 헤더)로 dataURL을 만들도록
+폴백합니다. Worker는 CORS/REST가 막힐 때의 마지막 수단입니다.
 
 ## 3. 앱에 연결
 
-`app.js`에서 `CLOUD_OCR_ENDPOINT` 상수를 찾아 5번에서 복사한 URL로 채웁니다(이미 기존 Worker
-URL로 연결돼 있다면 그대로 두면 됩니다 — Worker 코드만 바뀌었을 뿐 URL은 그대로예요).
+`app.js`의 `CLOUD_OCR_ENDPOINT` 는 이미 운영 Worker URL입니다. URL을 바꾸지 말고 **코드만 재배포**하세요.
 
 ```js
-const CLOUD_OCR_ENDPOINT = 'https://concrete-ocr-proxy.your-subdomain.workers.dev';
+const CLOUD_OCR_ENDPOINT = 'https://frosty-king-12ef.dongilgujo2010.workers.dev';
 ```
 
-빈 문자열(`''`)로 두면 클라우드 시도 없이 기존 로컬 OCR만 사용합니다.
+빈 문자열(`''`)로 두면 클라우드 OCR은 안 쓰고, Storage 프록시도 같은 URL을 쓰므로 비우지 마세요.
 
-## 4. (선택) wrangler CLI로 배포하고 싶다면
+## 4. 운영 Worker 재배포 (필수)
 
-Node.js가 설치된 PC에서:
+클라우드 에이전트는 이 Cloudflare 계정에 배포할 수 없습니다. **현장 PC에서 한 번** 실행하세요.
+
+### wrangler CLI (권장)
+
+Node.js가 있는 PC, 저장소 루트에서:
 
 ```bash
 cd cloudflare-worker
 npx wrangler login
-npx wrangler secret put GOOGLE_VISION_API_KEY
+# wrangler.toml 의 name = "frosty-king-12ef" 인지 확인 (새 워커를 만들지 않음)
 npx wrangler deploy
 ```
+
+성공 시 `https://frosty-king-12ef.dongilgujo2010.workers.dev` 가 갱신됩니다.
+Secret `GOOGLE_VISION_API_KEY` 는 이미 있으면 다시 넣을 필요 없습니다.
+
+배포 확인:
+
+```bash
+curl -sS -X POST https://frosty-king-12ef.dongilgujo2010.workers.dev \
+  -H "Content-Type: application/json" \
+  --data "{\"action\":\"ping\"}"
+# → {"ok":true,"proxyStorage":true}
+```
+
+`{"error":"image 필드가 없거나 data URL 형식이 아닙니다."}` 가 나오면 **아직 구버전**입니다.
+
+### 대시보드 (CLI 없이)
+
+1. https://dash.cloudflare.com → Workers & Pages → **frosty-king-12ef** (새로 만들지 말 것)
+2. **Edit code** → 에디터 내용을 전부 지우고 이 폴더의 `ocr-proxy.js` + `storage-url-allowlist.js` 를
+   반영. 대시보드는 파일 하나라서, `ocr-proxy.js` 맨 위의
+   `import { isAllowedStorageUrl } from './storage-url-allowlist.js';` 를 지우고
+   `storage-url-allowlist.js` 의 `isAllowedStorageUrl` 함수를 **같은 파일 상단에 붙여 넣은 뒤** Deploy.
+3. Settings → Variables 의 `GOOGLE_VISION_API_KEY` Secret은 그대로.
 
 ## 참고
 

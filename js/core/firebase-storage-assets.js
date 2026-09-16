@@ -167,7 +167,32 @@
     function isFirebaseStorageHttpUrl(url) {
         if (typeof url !== 'string' || url.length < 12) return false;
         return /firebasestorage\.googleapis\.com/i.test(url)
-            || /\.firebasestorage\.app/i.test(url);
+            || /\.firebasestorage\.app/i.test(url)
+            || /\/\/storage\.googleapis\.com\//i.test(url);
+    }
+
+    /** Worker 프록시에 보낼 URL — cloudflare-worker/storage-url-allowlist.js 와 동기화 */
+    function isAllowedFirebaseStorageProxyUrl(url) {
+        try {
+            const u = new URL(url);
+            if (u.protocol !== 'https:') return false;
+            const h = u.hostname.toLowerCase();
+            const path = u.pathname || '';
+            if (h === 'firebasestorage.googleapis.com') {
+                return path.indexOf('/v0/b/') === 0 && path.indexOf('/o/') !== -1;
+            }
+            if (h === 'storage.googleapis.com') {
+                return path.indexOf('/download/storage/') === 0
+                    || path.indexOf('/storage/v1/b/') === 0
+                    || /^\/[^/]+\//.test(path);
+            }
+            if (h.endsWith('.firebasestorage.app') || h === 'firebasestorage.app') {
+                return path.indexOf('/o/') !== -1 || path.indexOf('/v0/b/') === 0;
+            }
+            return false;
+        } catch (e) {
+            return false;
+        }
     }
 
     function storagePathFromDownloadURL(url) {
@@ -179,10 +204,62 @@
             if (idx < 0) return null;
             const encoded = u.pathname.slice(idx + marker.length);
             if (!encoded) return null;
-            return decodeURIComponent(encoded);
+            return decodeURIComponent(encoded.split('?')[0]);
         } catch (e) {
             return null;
         }
+    }
+
+    /** Firebase JS SDK와 동일. Bearer 가 아님 — Storage REST는 `Firebase <idToken>`. */
+    function firebaseStorageAuthHeaders(idToken) {
+        const headers = {
+            'X-Firebase-Storage-Version': 'webjs/9.22.0'
+        };
+        const token = String(idToken || '').trim();
+        if (token) headers.Authorization = 'Firebase ' + token;
+        return headers;
+    }
+
+    function firebaseStorageRestMediaUrl(bucket, path) {
+        return 'https://firebasestorage.googleapis.com/v0/b/'
+            + encodeURIComponent(String(bucket || '').replace(/^\/+/, ''))
+            + '/o/'
+            + encodeURIComponent(String(path || '').replace(/^\/+/, ''))
+            + '?alt=media';
+    }
+
+    function getConfiguredStorageBucket() {
+        try {
+            const storage = getFirebaseStorage();
+            if (storage && storage.app && storage.app.options && storage.app.options.storageBucket) {
+                return String(storage.app.options.storageBucket);
+            }
+            if (typeof firebase !== 'undefined' && firebase.app) {
+                const opts = firebase.app().options || {};
+                if (opts.storageBucket) return String(opts.storageBucket);
+            }
+        } catch (_e) { /* ignore */ }
+        return '';
+    }
+
+    async function getFirebaseAuthIdToken() {
+        try {
+            if (typeof firebase === 'undefined' || !firebase.auth) return '';
+            const user = firebase.auth().currentUser;
+            if (!user || typeof user.getIdToken !== 'function') return '';
+            const token = await user.getIdToken();
+            return (typeof token === 'string' && token.length > 20) ? token : '';
+        } catch (_e) {
+            return '';
+        }
+    }
+
+    function coerceBlobType(blob, fallbackType) {
+        if (!blob) return blob;
+        if (fallbackType && (!blob.type || blob.type === 'application/octet-stream')) {
+            return new Blob([blob], { type: fallbackType });
+        }
+        return blob;
     }
 
     function hasFirebaseStorageMeta(data) {
@@ -287,7 +364,12 @@
     }
 
     async function fetchUrlAsDataUrl(url, fallbackType) {
-        const res = await fetch(url, { mode: 'cors' });
+        const headers = {};
+        if (isFirebaseStorageHttpUrl(url)) {
+            const token = await getFirebaseAuthIdToken();
+            if (token) Object.assign(headers, firebaseStorageAuthHeaders(token));
+        }
+        const res = await fetch(url, { mode: 'cors', headers: headers });
         if (!res.ok) throw new Error('asset fetch HTTP ' + res.status);
         let blob = await res.blob();
         const type = blob.type || fallbackType || 'application/octet-stream';
@@ -299,61 +381,69 @@
         return blobToDataUrl(blob);
     }
 
-    /** Storage SDK로 본문 받기 — 브라우저 CORS 우회(인증된 SDK/REST 경로) */
+    async function fetchStorageRestWithAuth(path, fallbackType) {
+        const token = await getFirebaseAuthIdToken();
+        if (!token) throw new Error('Storage REST: 로그인 토큰 없음');
+        const bucket = getConfiguredStorageBucket();
+        if (!bucket) throw new Error('Storage REST: bucket 없음');
+        const restUrl = firebaseStorageRestMediaUrl(bucket, path);
+        const res = await fetch(restUrl, {
+            mode: 'cors',
+            headers: firebaseStorageAuthHeaders(token)
+        });
+        if (!res.ok) throw new Error('Storage REST HTTP ' + res.status);
+        return coerceBlobType(await res.blob(), fallbackType);
+    }
+
+    /** Storage SDK/REST로 본문 받기. compat SDK는 getBlob이 없어 REST(Firebase 헤더)를 씀. */
     async function downloadStoragePathAsBlob(storagePath, fallbackType) {
         const storage = getFirebaseStorage();
-        if (!storage || !storagePath) throw new Error('Storage path 없음');
+        if (!storagePath) throw new Error('Storage path 없음');
         const path = String(storagePath).replace(/^\/+/, '');
-        const ref = storage.ref().child(path);
-        if (typeof ref.getBlob === 'function') {
-            const blob = await ref.getBlob();
-            if (fallbackType && (!blob.type || blob.type === 'application/octet-stream')) {
-                return new Blob([blob], { type: fallbackType });
-            }
-            return blob;
-        }
-        if (typeof ref.getBytes === 'function') {
-            const bytes = await ref.getBytes();
-            return new Blob([bytes], { type: fallbackType || 'application/octet-stream' });
-        }
-        // compat SDK에 getBlob이 없으면 Auth 토큰으로 Storage REST 다운로드 (CORS 회피)
-        try {
-            const user = (typeof firebase !== 'undefined' && firebase.auth && firebase.auth().currentUser)
-                ? firebase.auth().currentUser
-                : null;
-            if (user) {
-                const token = await user.getIdToken();
-                const bucket = (storage.app && storage.app.options && storage.app.options.storageBucket)
-                    || (typeof firebase !== 'undefined' && firebase.app && firebase.app().options.storageBucket)
-                    || '';
-                if (bucket) {
-                    const restUrl = 'https://firebasestorage.googleapis.com/v0/b/'
-                        + encodeURIComponent(bucket)
-                        + '/o/'
-                        + encodeURIComponent(path)
-                        + '?alt=media';
-                    const res = await fetch(restUrl, {
-                        headers: { Authorization: 'Bearer ' + token }
-                    });
-                    if (!res.ok) throw new Error('Storage REST HTTP ' + res.status);
-                    const blob = await res.blob();
-                    if (fallbackType && (!blob.type || blob.type === 'application/octet-stream')) {
-                        return new Blob([blob], { type: fallbackType });
-                    }
-                    return blob;
+        if (storage) {
+            const ref = storage.ref().child(path);
+            if (typeof ref.getBlob === 'function') {
+                try {
+                    return coerceBlobType(await ref.getBlob(), fallbackType);
+                } catch (e) {
+                    console.warn('Storage getBlob 실패, REST 시도:', path, e);
                 }
             }
+            if (typeof ref.getBytes === 'function') {
+                try {
+                    const bytes = await ref.getBytes();
+                    return new Blob([bytes], { type: fallbackType || 'application/octet-stream' });
+                } catch (e) {
+                    console.warn('Storage getBytes 실패, REST 시도:', path, e);
+                }
+            }
+        }
+        try {
+            return await fetchStorageRestWithAuth(path, fallbackType);
         } catch (restErr) {
-            console.warn('Storage REST 다운로드 실패, getDownloadURL+fetch 시도:', path, restErr);
+            console.warn('Storage REST 다운로드 실패, getDownloadURL+auth fetch 시도:', path, restErr);
         }
+        if (!storage) throw new Error('Firebase Storage unavailable');
+        const ref = storage.ref().child(path);
         const url = await ref.getDownloadURL();
-        const res = await fetch(url, { mode: 'cors' });
+        const token = await getFirebaseAuthIdToken();
+        const headers = token ? firebaseStorageAuthHeaders(token) : {};
+        const res = await fetch(url, { mode: 'cors', headers: headers });
         if (!res.ok) throw new Error('asset fetch HTTP ' + res.status);
-        const blob = await res.blob();
-        if (fallbackType && (!blob.type || blob.type === 'application/octet-stream')) {
-            return new Blob([blob], { type: fallbackType });
+        return coerceBlobType(await res.blob(), fallbackType);
+    }
+
+    async function tryProxyFetchDataUrl(url) {
+        if (typeof api.proxyFetch !== 'function') return null;
+        try {
+            const proxied = await api.proxyFetch(url);
+            if (proxied && String(proxied).indexOf('data:') === 0 && String(proxied).length > 32) {
+                return proxied;
+            }
+        } catch (e) {
+            console.warn('Storage proxyFetch 실패:', e);
         }
-        return blob;
+        return null;
     }
 
     async function materializeCloudAssetPayload(url, snapData) {
@@ -361,7 +451,8 @@
         if (url.indexOf('data:') === 0) return url;
         const ctype = String((snapData && snapData.contentType) || '');
         try {
-            return await fetchUrlAsDataUrl(url, ctype || undefined);
+            const local = await fetchUrlAsDataUrl(url, ctype || undefined);
+            if (local && String(local).indexOf('data:') === 0) return local;
         } catch (e) {
             const path = (snapData && snapData.storagePath)
                 || storagePathFromDownloadURL(url);
@@ -373,9 +464,18 @@
                     console.warn('Storage SDK 본문 받기 실패:', path, e2);
                 }
             }
-            console.warn('클라우드 파일 본문 받기 실패, URL 유지:', url.slice(0, 80), e);
-            return url;
+            const proxied = await tryProxyFetchDataUrl(url);
+            if (proxied) return proxied;
+            console.warn('클라우드 파일 본문 받기 실패:', url.slice(0, 80), e);
+            return null;
         }
+        const proxied = await tryProxyFetchDataUrl(url);
+        if (proxied) return proxied;
+        return null;
+    }
+
+    function setAssetProxy(fn) {
+        api.proxyFetch = (typeof fn === 'function') ? fn : null;
     }
 
     async function assetUrlToUploadBlob(url) {
@@ -404,7 +504,9 @@
                     };
                 } catch (_e) { /* fall through to fetch */ }
             }
-            const res = await fetch(url, { mode: 'cors' });
+            const token = isFirebaseStorageHttpUrl(url) ? await getFirebaseAuthIdToken() : '';
+            const headers = token ? firebaseStorageAuthHeaders(token) : {};
+            const res = await fetch(url, { mode: 'cors', headers: headers });
             if (!res.ok) throw new Error('asset fetch HTTP ' + res.status);
             const blob = await res.blob();
             return {
@@ -430,7 +532,10 @@
         storagePathPhoto: storagePathPhoto,
         parseDataUrl: parseDataUrl,
         isFirebaseStorageHttpUrl: isFirebaseStorageHttpUrl,
+        isAllowedFirebaseStorageProxyUrl: isAllowedFirebaseStorageProxyUrl,
         storagePathFromDownloadURL: storagePathFromDownloadURL,
+        firebaseStorageAuthHeaders: firebaseStorageAuthHeaders,
+        firebaseStorageRestMediaUrl: firebaseStorageRestMediaUrl,
         isSiteRoundScopedStoragePath: isSiteRoundScopedStoragePath,
         storagePathFromSnapData: storagePathFromSnapData,
         snapNeedsSiteRoundMove: snapNeedsSiteRoundMove,
@@ -444,7 +549,9 @@
         fetchUrlAsDataUrl: fetchUrlAsDataUrl,
         downloadStoragePathAsBlob: downloadStoragePathAsBlob,
         materializeCloudAssetPayload: materializeCloudAssetPayload,
-        assetUrlToUploadBlob: assetUrlToUploadBlob
+        assetUrlToUploadBlob: assetUrlToUploadBlob,
+        proxyFetch: null,
+        setAssetProxy: setAssetProxy
     };
 
     root.BSA = root.BSA || {};

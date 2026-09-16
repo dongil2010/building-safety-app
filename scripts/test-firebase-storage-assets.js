@@ -78,6 +78,41 @@ function testDownloadUrlPath() {
     assert.strictEqual(api.storagePathFromDownloadURL(url), 'companies/co/floorDrawings/a.jpg');
     assert.strictEqual(api.isFirebaseStorageHttpUrl(url), true);
     assert.strictEqual(api.isFirebaseStorageHttpUrl('https://example.com/x'), false);
+    const appHost = 'https://building-safety-app-46821.firebasestorage.app/v0/b/building-safety-app-46821.firebasestorage.app/o/companies%2Fco%2Fa.jpg?alt=media';
+    assert.strictEqual(api.isFirebaseStorageHttpUrl(appHost), true);
+    assert.strictEqual(api.storagePathFromDownloadURL(appHost), 'companies/co/a.jpg');
+}
+
+function testFirebaseStorageAuthHeaders() {
+    const h = api.firebaseStorageAuthHeaders('id-token-value');
+    assert.strictEqual(h.Authorization, 'Firebase id-token-value');
+    assert.ok(h.Authorization.indexOf('Bearer') === -1);
+    assert.strictEqual(h['X-Firebase-Storage-Version'], 'webjs/9.22.0');
+    const empty = api.firebaseStorageAuthHeaders('');
+    assert.ok(!empty.Authorization);
+}
+
+function testFirebaseStorageRestMediaUrl() {
+    const u = api.firebaseStorageRestMediaUrl(
+        'building-safety-app-46821.firebasestorage.app',
+        'companies/co/floorDrawings/a.jpg'
+    );
+    assert.ok(u.indexOf('https://firebasestorage.googleapis.com/v0/b/') === 0);
+    assert.ok(u.indexOf('alt=media') !== -1);
+    assert.ok(u.indexOf(encodeURIComponent('companies/co/floorDrawings/a.jpg')) !== -1);
+}
+
+function testProxyUrlAllowlist() {
+    const allow = api.isAllowedFirebaseStorageProxyUrl;
+    assert.strictEqual(allow(
+        'https://firebasestorage.googleapis.com/v0/b/building-safety-app-46821.firebasestorage.app/o/companies%2Fx.jpg?alt=media&token=abc'
+    ), true);
+    assert.strictEqual(allow(
+        'https://building-safety-app-46821.firebasestorage.app/v0/b/x/o/companies%2Fx.jpg'
+    ), true);
+    assert.strictEqual(allow('https://vision.googleapis.com/v1/images:annotate'), false);
+    assert.strictEqual(allow('https://example.com/o/x.jpg'), false);
+    assert.strictEqual(allow('http://firebasestorage.googleapis.com/v0/b/x/o/y'), false);
 }
 
 function testSiteRoundPathDetection() {
@@ -106,6 +141,29 @@ function testFlag() {
     assert.strictEqual(api.USE_FIREBASE_STORAGE_FOR_PHOTOS, true);
 }
 
+async function testMaterializeKeepsDataUrl() {
+    const d = 'data:image/jpeg;base64,' + 'A'.repeat(40);
+    const out = await api.materializeCloudAssetPayload(d, {});
+    assert.strictEqual(out, d);
+}
+
+async function testMaterializeUsesProxyNotRawHttps() {
+    const remote = 'https://firebasestorage.googleapis.com/v0/b/building-safety-app-46821.firebasestorage.app/o/companies%2Fx.jpg?alt=media';
+    api.setAssetProxy(async function () {
+        return 'data:image/jpeg;base64,' + 'C'.repeat(40);
+    });
+    const warn = console.warn;
+    console.warn = function () {};
+    try {
+        const out = await api.materializeCloudAssetPayload(remote, { storagePath: 'companies/x.jpg' });
+        assert.ok(out && out.indexOf('data:image/jpeg') === 0, 'proxy should yield data URL');
+        assert.ok(out.indexOf('https:') === -1);
+    } finally {
+        console.warn = warn;
+        api.setAssetProxy(null);
+    }
+}
+
 const tests = [
     testParseDataUrlJpeg,
     testParseDataUrlPdf,
@@ -114,22 +172,31 @@ const tests = [
     testMetaFields,
     testHasStorageMeta,
     testDownloadUrlPath,
+    testFirebaseStorageAuthHeaders,
+    testFirebaseStorageRestMediaUrl,
+    testProxyUrlAllowlist,
     testSiteRoundPathDetection,
-    testFlag
+    testFlag,
+    testMaterializeKeepsDataUrl,
+    testMaterializeUsesProxyNotRawHttps
 ];
 
-let failed = 0;
-for (const fn of tests) {
-    try {
-        fn();
-        console.log('ok', fn.name);
-    } catch (e) {
-        failed += 1;
-        console.error('FAIL', fn.name, e && e.message);
+async function run() {
+    let failed = 0;
+    for (const fn of tests) {
+        try {
+            await fn();
+            console.log('ok', fn.name);
+        } catch (e) {
+            failed += 1;
+            console.error('FAIL', fn.name, e && e.message);
+        }
     }
+    if (failed) {
+        console.error(failed + ' failed');
+        process.exit(1);
+    }
+    console.log('all ' + tests.length + ' tests passed');
 }
-if (failed) {
-    console.error(failed + ' failed');
-    process.exit(1);
-}
-console.log('all ' + tests.length + ' tests passed');
+
+run();

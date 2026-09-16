@@ -9,6 +9,7 @@ window.BSA.tabs['tab-map'] = {
         'PC: 선택·핀/영역 마킹·목록·크기·회전·줌 도구는 도면 안 오버레이 (상단 여백 확보)',
         'PC·현장 공통: 서버가 만든 일반·고해상도·초고해상도 레스터만 표시 (PDF는 최초 등록·벡터 출력만)',
         '도면·PDF·티어 파일 본문은 Firebase Storage, Firestore는 URL/메타만 (레거시 청크 호환)',
+        '클라우드 도면: Storage REST(Firebase 토큰) → dataURL, Worker 프록시는 CORS 폴백',
         '결함 사진 본문은 Firebase Storage, Firestore는 URL/메타만 (기존 Firestore dataUrl은 조회·동기화 시 이관)',
         'Storage 폴더는 현장 → 회차 → 사진/도면',
         '핀 마킹: 화살표·점은 마킹 전체 이동, 번호칸만 끌면 지시 위치 고정',

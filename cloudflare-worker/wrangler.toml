@@ -1,10 +1,12 @@
-name = "concrete-ocr-proxy"
+# 운영 URL: https://frosty-king-12ef.dongilgujo2010.workers.dev
+# 이 name 이 기존 Worker 와 같아야 `npx wrangler deploy` 가 새 워커를 만들지 않는다.
+name = "frosty-king-12ef"
 main = "ocr-proxy.js"
 compatibility_date = "2026-08-01"
 
-# GEMINI_API_KEY는 여기 적지 말고 secret으로 등록한다:
-#   wrangler secret put GEMINI_API_KEY
+# OCR Secret (프록시에는 불필요, OCR 유지):
+#   npx wrangler secret put GOOGLE_VISION_API_KEY
 #
-# 앱 도메인으로 CORS를 제한하고 싶으면 vars에 추가:
+# 앱 도메인으로 CORS를 제한하고 싶으면:
 # [vars]
-# ALLOWED_ORIGIN = "https://your-username.github.io"
+# ALLOWED_ORIGIN = "https://dongil2010.github.io"
