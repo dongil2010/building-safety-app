@@ -14307,10 +14307,22 @@ document.addEventListener('DOMContentLoaded', () => {
     const MAX_R_VALUES_PER_SLOT = 20;
     let ndtStrengthSlots = [{ location: '', readings: [] }];
 
-    // 클라우드 OCR(Gemini, Cloudflare Worker 프록시) 주소.
+    // 클라우드 OCR(Cloudflare Worker 프록시 → Cloud Vision) 주소.
     // 비워두면(빈 문자열) 클라우드 시도 없이 기존 Tesseract(로컬) 인식만 사용한다.
     // 배포 방법: cloudflare-worker/README.md 참고.
     const CLOUD_OCR_ENDPOINT = 'https://frosty-king-12ef.dongilgujo2010.workers.dev';
+
+    // 2026-09-16: Gemini를 Cloudflare Worker에서 부르면 Worker 엣지 서버 위치가 매번 달라지고
+    // 그중 일부가 Gemini API 미지원 지역이라 "User location is not supported"로 거의 항상
+    // 실패했다(유료 결제로도 해결 안 됨 — 위치 문제라 돈 문제가 아니었음). 실측 결과 Cloud
+    // Vision보다 Gemini가 도트프린터 숫자 인식률이 훨씬 높아서, Worker를 거치지 않고 사용자
+    // 브라우저(실제 국내 인터넷 회선)에서 직접 호출하기로 했다.
+    // 키는 절대 이 파일(소스)에 직접 적지 않는다 — GitHub Push Protection이 실제로 막았고,
+    // git 히스토리에 영원히 남는 문제도 있다. 대신 scripts/prepare-pages.py가 GitHub Actions의
+    // 리포지토리 Secret(GEMINI_API_KEY)을 배포 시점에만 window.GEMINI_DIRECT_API_KEY로 주입한다
+    // (.github/workflows/deploy-web.yml 참고). 로컬 개발 서버에는 이 값이 없어서 자동으로
+    // 빈 문자열이 되고, 그러면 기존 클라우드(Worker→Vision)로 그대로 폴백한다.
+    const GEMINI_DIRECT_API_KEY = (typeof window !== 'undefined' && window.GEMINI_DIRECT_API_KEY) || '';
 
     function rValueChipsHtml(slotIdx) {
         const readings = ndtStrengthSlots[slotIdx].readings;
@@ -14784,7 +14796,63 @@ document.addEventListener('DOMContentLoaded', () => {
         return (arr || []).filter(v => v !== null && v !== undefined && v !== '').length;
     }
 
-    // Cloudflare Worker 프록시 → Gemini Vision에 사진을 보내 R값 목록(JSON 배열)만 받는다.
+    // 브라우저에서 Gemini를 직접 호출한다(Cloudflare Worker를 거치지 않음 — GEMINI_DIRECT_API_KEY
+    // 선언부 주석 참고: Worker 엣지의 지역 차단을 피하기 위함). ocr-proxy.js의 scanWithGemini와
+    // 동일한 프롬프트/파싱: R번호 자리(rIdx-1)에 값을 채우고 못 읽은 자리는 null로 둔 고정 길이
+    // 20 배열을 돌려준다. 실패 시 예외를 던져서 호출부가 기존 클라우드(Worker→Vision)로 폴백한다.
+    async function scanRValuesFromImageGeminiDirect(file) {
+        const dataUrl = await fileToDataUrl(file);
+        const commaIdx = dataUrl.indexOf(',');
+        const meta = dataUrl.slice(0, commaIdx);
+        const base64Data = dataUrl.slice(commaIdx + 1);
+        const mimeType = (meta.match(/^data:(.*?);base64$/) || [])[1] || 'image/jpeg';
+
+        const prompt = `이 이미지는 콘크리트 비파괴 강도 측정지(반발경도/슈미트해머 측정 기록지)이다.
+표에는 R01~R20까지 번호가 매겨진 항목이 있고, 각 항목 옆에 10~80 사이의 정수 측정값이 있다.
+길이 20인 JSON 배열을 출력해라. 배열의 i번째(0-based) 값은 R(i+1)의 측정값이다.
+해당 번호의 측정값을 읽을 수 없거나 표에 아예 없으면 그 자리에 null을 넣어라.
+오직 JSON 배열만 출력하고, 설명·코드블록·다른 텍스트는 절대 붙이지 마라.
+예: [44,null,42,40,47,44,40,39,39,48,42,39,42,43,49,42,43,41,40,40]`;
+
+        const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent?key=${GEMINI_DIRECT_API_KEY}`;
+        const res = await fetch(geminiUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                contents: [{
+                    parts: [
+                        { text: prompt },
+                        { inline_data: { mime_type: mimeType, data: base64Data } },
+                    ],
+                }],
+                generationConfig: { temperature: 0, maxOutputTokens: 512 },
+            }),
+        });
+        if (!res.ok) {
+            const errText = await res.text();
+            throw new Error(`Gemini API 오류 (${res.status}): ${errText.slice(0, 300)}`);
+        }
+        const data = await res.json();
+        const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+        const match = text.match(/\[[\s\S]*\]/);
+        if (!match) throw new Error('Gemini 응답에서 JSON 배열을 찾지 못함: ' + text.slice(0, 200));
+        let arr;
+        try {
+            arr = JSON.parse(match[0]);
+        } catch (e) {
+            throw new Error('Gemini JSON 파싱 실패: ' + e.message);
+        }
+        if (!Array.isArray(arr)) throw new Error('Gemini 응답이 배열이 아님');
+
+        const slots = new Array(MAX_R_VALUES_PER_SLOT).fill(null);
+        for (let i = 0; i < MAX_R_VALUES_PER_SLOT; i++) {
+            const n = typeof arr[i] === 'number' ? arr[i] : parseInt(arr[i], 10);
+            slots[i] = (Number.isFinite(n) && n >= 10 && n <= 80) ? n : null;
+        }
+        return slots;
+    }
+
+    // Cloudflare Worker 프록시 → Cloud Vision에 사진을 보내 R값 목록(JSON 배열)만 받는다.
     // 실패 시 예외를 던져서, 호출부(scanRValuesFromImage)가 로컬 Tesseract로 폴백하게 한다.
     //
     // 2026-09-04 버그: Worker는 Gemini가 400/403/404 등 무엇으로 실패하든 자기 응답은 항상
@@ -14888,6 +14956,28 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // 인식 성공/실패와 무관하게 원본 사진은 저장해둔다(보고서 '측정 DATA' 표에 그대로 삽입).
         savePhotoForStrengthSlot(slotIdx, file);
+
+        // Gemini 직접 호출을 가장 먼저 시도한다 — Cloud Vision보다 인식률이 훨씬 높다(실측: 20개 중
+        // 9개 누락 → 거의 다 인식). GEMINI_DIRECT_API_KEY는 배포 시점에만 주입되므로(빌드 산출물
+        // 전용, git에는 없음) 로컬 개발 서버에서는 항상 비어있어 이 블록을 건너간다. 실패(오프라인/
+        // 주입 안 됨/일시 오류 등)하면 기존 클라우드(Worker→Cloud Vision)로 조용히 넘어간다.
+        if (GEMINI_DIRECT_API_KEY && navigator.onLine) {
+            if (statusEl) statusEl.textContent = '🔍 (Gemini) 사진에서 숫자를 인식하는 중입니다...';
+            try {
+                const geminiScanned = await scanRValuesFromImageGeminiDirect(file);
+                const geminiFoundCount = countFoundReadings(geminiScanned);
+                if (geminiFoundCount > 0) {
+                    applyScannedReadings(geminiScanned, slotIdx, statusEl, '✨ Gemini 인식');
+                    if (geminiFoundCount < MAX_R_VALUES_PER_SLOT && statusEl) {
+                        statusEl.textContent += ` — 총 ${MAX_R_VALUES_PER_SLOT}개 중 ${geminiFoundCount}개만 인식됐어요. 나머지는 사진 보고 직접 입력해주세요.`;
+                    }
+                    return;
+                }
+                console.warn('Gemini 직접 호출 0개 반환, 클라우드(Vision)로 대체');
+            } catch (err) {
+                console.warn('Gemini 직접 호출 실패, 클라우드(Vision)로 대체:', err);
+            }
+        }
 
         // 2026-09-04: 로컬(Tesseract)은 이런 도트프린터 글씨엔 원래 약해서, "클라우드가 너무
         // 적게 찾으면 로컬도 같이 돌려서 더 많이 찾은 쪽을 쓴다"고 했더니 로컬이 틀린 숫자를

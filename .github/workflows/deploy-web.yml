@@ -24,6 +24,8 @@ jobs:
       - uses: actions/checkout@v4
       - name: Prepare static site
         run: python3 scripts/prepare-pages.py
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
