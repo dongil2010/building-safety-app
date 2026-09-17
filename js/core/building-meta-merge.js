@@ -5,8 +5,13 @@
 (function (root) {
     'use strict';
 
+    // floorsOrderManual: 사용자가 층 순서를 직접 정했다는 표시. 빠져 있으면 병합 때
+    // 원격의 옛 값(없음)으로 되돌아가 건물 복제에서 저층→고층으로 다시 정렬된다.
+    // (floorsOrderUpdatedAt은 여기 넣지 않는다 — 순서와 무관한 메타 수정이 순서 시각을
+    //  덮어써서 "마지막에 저장한 기기가 이김"이 되어 버린다. app.js에서 따로 병합.)
     var KEYS = [
         'inspectionType', 'inspectionYear', 'inspectionPeriod', 'latestSurveyRoundKey',
+        'floorsOrderManual',
         'siteName', 'dong', 'multiDong', 'name', 'address', 'inspector', 'contactPhone',
         'floors', 'date', 'structureType', 'facilityGrade', 'completionDate', 'notes'
     ];

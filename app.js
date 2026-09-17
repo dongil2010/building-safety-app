@@ -2485,7 +2485,29 @@ document.addEventListener('DOMContentLoaded', () => {
      * 서버·로컬 건물 목록 병합 — 서버에 없는 로컬-only는 업로드 대기(_pendingCloudSync)일 때만 유지.
      * (다른 기기에서 삭제된 고아 레코드가 모바일에 4개·PC 2개처럼 남는 현상 방지)
      */
-    function mergeFloorMetaLists(localList, remoteList) {
+    /**
+     * 층 순서를 더 최근에 바꾼 쪽을 따른다.
+     * (예전엔 로컬 순서가 무조건 이겨서, 다른 기기에서 바꾼 순서가 영영 안 넘어오고
+     *  오히려 서버에 있던 새 순서를 옛 순서로 되덮었다.)
+     * 양쪽 다 기록이 없으면 기존처럼 로컬 우선.
+     */
+    function preferLocalFloorOrder(localMatch, remote) {
+        if (!localMatch) return false;
+        const localAt = Number(localMatch.floorsOrderUpdatedAt) || 0;
+        const remoteAt = Number(remote && remote.floorsOrderUpdatedAt) || 0;
+        if (localAt || remoteAt) return localAt >= remoteAt;
+        return true;
+    }
+
+    /** 층 순서를 사용자가 직접 정했다고 표시. touched=true면 순서를 실제로 만진 경우. */
+    function markFloorOrderManual(bldg, touched) {
+        if (!bldg) return;
+        const first = !bldg.floorsOrderManual;
+        bldg.floorsOrderManual = true;
+        if (touched || first) bldg.floorsOrderUpdatedAt = Date.now();
+    }
+
+    function mergeFloorMetaLists(localList, remoteList, localOrderWins) {
         const fi = window.BSA && window.BSA.floorIdentity;
         const map = {};
         const add = (f, overwriteLabel) => {
@@ -2504,8 +2526,12 @@ document.addEventListener('DOMContentLoaded', () => {
         };
         (remoteList || []).forEach((f) => add(f, false));
         (localList || []).forEach((f) => add(f, true));
+        // 순서 기준이 되는 쪽(preferred)만 바뀌고, 층 자체는 어느 쪽에 있든 다 살아남는다.
+        const preferred = (localOrderWins === false)
+            ? ((remoteList && remoteList.length) ? remoteList : localList)
+            : ((localList && localList.length) ? localList : remoteList);
         if (fi && typeof fi.assembleFloors === 'function') {
-            return fi.assembleFloors(localList && localList.length ? localList : remoteList, Object.values(map));
+            return fi.assembleFloors(preferred, Object.values(map));
         }
         const list = Object.values(map);
         return (typeof window.sortFloorsLowToHigh === 'function')
@@ -2515,9 +2541,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function mergeDrawingFloorCodeLists(localCodes, remoteCodes, floorsList, assetMaps) {
         const set = new Set();
-        (remoteCodes || []).forEach((c) => { if (c) set.add(String(c)); });
-        (localCodes || []).forEach((c) => { if (c) set.add(String(c)); });
+        // 병합이 끝난 floorsList가 확정된 층 순서이므로 이걸 먼저 넣는다.
+        // (원격 코드를 먼저 넣으면 드롭다운 복구 경로에서 원격 순서가 floorsList에 박제됐다)
         (floorsList || []).forEach((f) => { if (f && f.floorCode) set.add(String(f.floorCode)); });
+        (localCodes || []).forEach((c) => { if (c) set.add(String(c)); });
+        (remoteCodes || []).forEach((c) => { if (c) set.add(String(c)); });
         (assetMaps || []).forEach((m) => {
             Object.keys(m || {}).forEach((c) => { if (c) set.add(String(c)); });
         });
@@ -2673,7 +2701,15 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             stripDeletedDrawingFloorsFromBuilding(merged);
             // 원격이 옛 floorsList(1층만)를 갖고 와도, 로컬에서 추가한 층이 사라지지 않게 합친다
-            merged.floorsList = mergeFloorMetaLists(localMatch?.floorsList, b.floorsList);
+            const localFloorOrderWins = preferLocalFloorOrder(localMatch, b);
+            merged.floorsList = mergeFloorMetaLists(localMatch?.floorsList, b.floorsList, localFloorOrderWins);
+            // 순서를 가져온 쪽의 "직접 정한 순서" 표시·시각도 같이 따라가야 한다
+            const floorOrderSource = localFloorOrderWins ? localMatch : b;
+            if (floorOrderSource) {
+                if (floorOrderSource.floorsOrderManual) merged.floorsOrderManual = true;
+                const srcAt = Number(floorOrderSource.floorsOrderUpdatedAt) || 0;
+                if (srcAt > 0) merged.floorsOrderUpdatedAt = srcAt;
+            }
             merged.drawingFloorCodes = mergeDrawingFloorCodeLists(
                 localMatch?.drawingFloorCodes,
                 b.drawingFloorCodes,
@@ -5529,9 +5565,11 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!elements.floorSelect) return;
         
         let availableFloors = window.getBuildingAvailableFloors(bldg);
+        let recoveredFromCodes = false;
 
         // available이 비어도 drawingFloorCodes에 등록된 층이 있으면 복구 (유령정리 레이스 대비)
         if ((!availableFloors || availableFloors.length === 0) && bldg && Array.isArray(bldg.drawingFloorCodes) && bldg.drawingFloorCodes.length) {
+            recoveredFromCodes = true;
             const fi = window.BSA && window.BSA.floorIdentity;
             availableFloors = bldg.drawingFloorCodes
                 .filter((c) => c && !isDeletedDrawingFloor(bldg, c))
@@ -5544,11 +5582,15 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         
         if (bldg && availableFloors && availableFloors.length > 0) {
-            bldg.floorsList = availableFloors;
+            // 복구 경로로 만든 목록은 사용자가 정한 순서가 아니므로,
+            // 기존 floorsList가 살아 있으면 덮어쓰지 않는다
+            if (!recoveredFromCodes || !(bldg.floorsList && bldg.floorsList.length)) {
+                bldg.floorsList = availableFloors;
+            }
         }
 
         if (availableFloors && availableFloors.length > 0) {
-            elements.floorSelect.innerHTML = availableFloors.map(f => 
+            elements.floorSelect.innerHTML = availableFloors.map(f =>
                 `<option value="${f.floorCode}">${f.floorLabel}</option>`
             ).join('');
 
@@ -6371,7 +6413,7 @@ document.addEventListener('DOMContentLoaded', () => {
             item.rank = window.getFloorRankFromCode(trimmed);
             item.matched = true;
             const editing = window.currentEditingBuilding;
-            if (editing) editing.floorsOrderManual = true;
+            if (editing) markFloorOrderManual(editing, true);
             window.drawingPreviewManualOrder = true;
             window.editDrawingPreviewManualOrder = true;
             return true;
@@ -6989,6 +7031,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 floorsList: floorsList.length > 0 ? floorsList : null,
                 drawingFloorCodes: floorsList.map((f) => f.floorCode).filter(Boolean),
                 floorsOrderManual: !!(window.drawingPreviewManualOrder || newBldgHasCustom),
+                floorsOrderUpdatedAt: Date.now(),
                 floorDrawings: floorDrawingsMap,
                 floorDrawingPdfs: floorDrawingPdfsMap,
                 floorDrawingTiers: floorDrawingTiersMap,
@@ -7416,7 +7459,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     if (f && f.floorCode && !floorCodes.includes(f.floorCode)) next.push(f);
                 });
                 b.floorsList = next;
-                b.floorsOrderManual = true;
+                markFloorOrderManual(b, true);
                 b.drawingFloorCodes = next.map((f) => f.floorCode).filter(Boolean);
                 if (typeof markBuildingMetaDirty === 'function') markBuildingMetaDirty(b);
                 renderEditDrawingPreview();
@@ -7596,7 +7639,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const hasUnmatched = parsedItems.some((it) => it.matched === false);
         if (hasUnmatched) {
             window.editDrawingPreviewManualOrder = true;
-            if (bldg) bldg.floorsOrderManual = true;
+            if (bldg) markFloorOrderManual(bldg, true);
         } else if (!window.editDrawingPreviewManualOrder) {
             window.selectedEditUploadedDrawings = window.sortFloorsLowToHigh(window.selectedEditUploadedDrawings);
         }
@@ -7771,7 +7814,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     : false
             );
             if (hasCustomFloor || window.editDrawingPreviewManualOrder) {
-                bldg.floorsOrderManual = true;
+                // 순서를 실제로 만졌을 때만 시각을 갱신 — 점검자·현장명만 고친 저장이
+                // 다른 기기의 새 순서를 이기지 않게 한다
+                markFloorOrderManual(bldg, !!window.editDrawingPreviewManualOrder);
             }
 
             // Update building metadata
