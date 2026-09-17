@@ -18941,6 +18941,56 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         return !!defect?.mapUnregistered;
     }
 
+    /** 외부 도면에 있을 때: 모든 외부(입면·평면도)의 전차 미등록을 한 목록으로 */
+    function getExteriorMapUnregisteredDefects(bldgId) {
+        const id = bldgId || state.currentBuildingId;
+        if (!id || typeof listExteriorFloorCodesForBuilding !== 'function') return [];
+        const out = [];
+        const seen = new Set();
+        listExteriorFloorCodesForBuilding(id).forEach((fc) => {
+            const key = String(id) + '_' + fc;
+            const list = (state.defects && state.defects[key]) || [];
+            const forList = (typeof getDefectsForListPanel === 'function')
+                ? getDefectsForListPanel(list, list)
+                : list;
+            forList.forEach((d) => {
+                if (!d || d.id == null) return;
+                if (!isPreviousRoundDefect(d) || !isDefectMapUnregistered(d)) return;
+                if (seen.has(d.id)) return;
+                seen.add(d.id);
+                d._exteriorFloorCode = fc;
+                out.push(d);
+            });
+        });
+        return out;
+    }
+
+    function findDefectFloorKeyById(defectId) {
+        if (!defectId || !state.currentBuildingId) return null;
+        const id = state.currentBuildingId;
+        const preferExt = typeof isExteriorFloorCode === 'function' && isExteriorFloorCode(state.currentFloor);
+        const codes = preferExt && typeof listExteriorFloorCodesForBuilding === 'function'
+            ? listExteriorFloorCodesForBuilding(id)
+            : [state.currentFloor];
+        for (let i = 0; i < codes.length; i++) {
+            const fc = codes[i];
+            if (!fc) continue;
+            const key = String(id) + '_' + fc;
+            const list = (state.defects && state.defects[key]) || [];
+            if (list.some((d) => d && d.id === defectId)) return { floorKey: key, floorCode: fc };
+        }
+        // 외부 우선 검색 실패 시 건물 전체 키에서 한 번 더
+        const prefix = String(id) + '_';
+        for (const key of Object.keys(state.defects || {})) {
+            if (!String(key).startsWith(prefix)) continue;
+            const list = state.defects[key] || [];
+            if (list.some((d) => d && d.id === defectId)) {
+                return { floorKey: key, floorCode: String(key).slice(prefix.length) };
+            }
+        }
+        return null;
+    }
+
     function filterMapPlacedDefects(defects) {
         return (defects || []).filter(d => !isDefectMapUnregistered(d));
     }
@@ -19290,7 +19340,13 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     };
 
     function startMapRegisterForDefect(defectId) {
-        const defect = getCurrentFloorDefects().find(d => d.id === defectId);
+        let defect = getCurrentFloorDefects().find(d => d.id === defectId);
+        if (!defect) {
+            const located = findDefectFloorKeyById(defectId);
+            if (located) {
+                defect = (state.defects[located.floorKey] || []).find((d) => d && d.id === defectId);
+            }
+        }
         if (!defect || !isDefectMapUnregistered(defect)) return;
         window._pendingMapRegisterDefectId = defectId;
         setDrawMode('MARK');
@@ -19302,15 +19358,34 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     function commitMapRegisterFromMarking(boxX, boxY, targetX, targetY) {
         const defectId = window._pendingMapRegisterDefectId;
         if (!defectId) return false;
-        const key = getDefectHistoryKey();
-        if (!state.defects[key]) return false;
-        const idx = state.defects[key].findIndex(d => d.id === defectId);
+        const destKey = getDefectHistoryKey();
+        if (!destKey) return false;
+        if (!state.defects[destKey]) state.defects[destKey] = [];
+
+        let srcKey = destKey;
+        let idx = state.defects[destKey].findIndex(d => d.id === defectId);
         if (idx === -1) {
-            window._pendingMapRegisterDefectId = null;
-            return false;
+            const located = findDefectFloorKeyById(defectId);
+            if (!located) {
+                window._pendingMapRegisterDefectId = null;
+                return false;
+            }
+            srcKey = located.floorKey;
+            idx = (state.defects[srcKey] || []).findIndex(d => d.id === defectId);
+            if (idx === -1) {
+                window._pendingMapRegisterDefectId = null;
+                return false;
+            }
         }
+
         pushDefectHistory();
-        const defect = state.defects[key][idx];
+        let defect = state.defects[srcKey][idx];
+        // 다른 외부 도면에 있던 미등록을 지금 도면에 배치하면 그 도면 키로 옮긴다.
+        if (srcKey !== destKey) {
+            state.defects[srcKey].splice(idx, 1);
+            state.defects[destKey].push(defect);
+            if (defect) delete defect._exteriorFloorCode;
+        }
         defect.x = boxX;
         defect.y = boxY;
         defect.targetX = targetX;
@@ -19772,7 +19847,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
         const allFloorDefects = getCurrentFloorDefects();
         const allForList = getDefectsForListPanel(allFloorDefects, allFloorDefects);
-        const unregisteredItems = allForList.filter(d => isPreviousRoundDefect(d) && isDefectMapUnregistered(d));
+        const exteriorList = typeof isExteriorFloorCode === 'function' && isExteriorFloorCode(state.currentFloor);
+        const unregisteredItems = exteriorList
+            ? getExteriorMapUnregisteredDefects(state.currentBuildingId)
+            : allForList.filter(d => isPreviousRoundDefect(d) && isDefectMapUnregistered(d));
         const defects = getDefectsForListPanel(getCurrentFloorFilteredDefects(), allFloorDefects);
 
         if (summaryEl) {
@@ -41958,9 +42036,15 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                         });
                     // 엑셀 가져오기는 항상 전차(전회차) 조사내용으로 분류
                     existing.isCarriedOver = true;
-                    if (importPrevRound) {
+                    const importToExteriorExisting = typeof isExteriorFloorCode === 'function' && isExteriorFloorCode(floorCode);
+                    if (importPrevRound || importToExteriorExisting) {
                         const hasMapCoords = existing.x !== undefined && existing.y !== undefined;
-                        existing.mapUnregistered = !hasMapCoords;
+                        // 외부는 좌표가 있어도 「미등록」으로 두지 않음 — 이미 배치된 핀은 유지
+                        if (importToExteriorExisting && hasMapCoords && !existing.mapUnregistered) {
+                            /* keep placed */
+                        } else {
+                            existing.mapUnregistered = !hasMapCoords;
+                        }
                     } else if (existing.mapUnregistered) {
                         existing.mapUnregistered = false;
                     }
@@ -42001,7 +42085,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     applyParsedCrackMeasuresToDefect(newDefect, parsedMeasures, sizeRaw);
                 }
 
-                if (importPrevRound) {
+                const importToExterior = typeof isExteriorFloorCode === 'function' && isExteriorFloorCode(floorCode);
+                // 외부(입면·평면도)는 어느 도면에서나 「전차 미등록」으로 보이게 좌표 없이 등록.
+                // 배치할 때 보고 있는 외부 도면으로 옮긴다.
+                if (importPrevRound || importToExterior) {
                     newDefect.isCarriedOver = true;
                     newDefect.mapUnregistered = true;
                     totalUnregistered++;
@@ -42042,8 +42129,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
         const parts = [];
         if (totalMatched > 0) parts.push(`같은 번호 핀 ${totalMatched}건은 위치 유지하고 전차 조사내용만 업데이트`);
-        if (importPrevRound && totalUnregistered > 0) {
-            parts.push(`전차 ${totalUnregistered}건은 「전차 미등록」 목록에 추가(도면 미표시, 좌측에서 클릭 후 마킹)`);
+        if (totalUnregistered > 0) {
+            parts.push(`전차 ${totalUnregistered}건은 「전차 미등록」 목록에 추가(외부는 모든 입면·평면도에서 보임, 좌측에서 클릭 후 마킹)`);
         } else if (totalImported > 0) {
             parts.push(`전차 조사내용 ${totalImported}건 신규 등록(도면 좌측 상단 임시 배치, 직접 드래그 필요)`);
         }
