@@ -549,3 +549,14 @@
 > 다음 쪽으로 밀리는 것을 막기 위함. 한 제목 아래 여러 장이면 둘째 장부터는 표에 쪽 나눔 유지.
 >
 > **`origin/main` 적용됨** (`8c10642`). 3종·1·2종 템플릿 둘 다 실제 XML로 검증.
+
+### ⚡ [Cursor] - 2026-09-17 17:45:00
+> **`[COMPLETED]` 층 데이터를 JSON 한 묶음으로 읽고 씀**
+>
+> 4종 `docs/{markings|photos|ndt|drawing}` 실시간 구독은 요청한 묶음이 아님.
+> 이제 층 문서 1개에 `{markings, photos, ndt, drawing}` JSON. 1MB 넘으면 그 문서 `parts` 1~3청크.
+> 리스너도 `floors/{floor}` 하나. lease만 바뀌면 풀지 않음. 잠금 tx 스냅샷을 다시 get하지 않음.
+> 옛 4종 문서·회사 bulk는 층 묶음이 없을 때만 1회 이관. 회사 bulk 이중쓰기는 안 함.
+> `firestore.rules`에 `floors/{floor}/parts` 허용. **콘솔에 규칙 다시 게시 필요.**
+> PhotoUploadQueue·같은 층 merge·lease 유지. 작업자는 `users`/`members` 그대로.
+

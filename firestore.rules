@@ -10,9 +10,10 @@ rules_version = '2';
 //   companies/{companyId}/rejectedRequests/{uid}→ 가입 거절 이력
 //   joinCodes/{code}                            → 회사 검색·식별코드 조회용 (가입 전 미인증 상태에서도 읽기 가능)
 //   safety_app/{companyId}                      → 회사별 건물 목록/설정 메타데이터 (실시간 동기화 대상)
-//   safety_app/{companyId}/sites/{site}/rounds/{round}/floors/{floor}/docs/{kind}  (단동)
-//   safety_app/{companyId}/sites/{site}/rounds/{round}/dongs/{dong}/floors/{floor}/docs/{kind}  (다동)
-//     kind = markings | photos | ndt | drawing  (사진·도면은 Storage URL만)
+//   safety_app/{companyId}/sites/{site}/rounds/{round}/floors/{floor}  (단동 층 묶음 JSON)
+//   safety_app/{companyId}/sites/{site}/rounds/{round}/dongs/{dong}/floors/{floor}  (다동)
+//     층 문서 1개에 markings+photos+ndt+drawing JSON (1MB 넘으면 parts 청크)
+//     구버전: 같은 층 아래 docs/{kind} (kind = markings|photos|ndt|drawing) — 읽기 폴백만
 //   safety_app/{companyId}/bulkData/defectsAndNdt → 구버전 결함/NDT 묶음 (층 문서 없을 때만 읽기 폴백)
 //   safety_app/{companyId}/floorDrawings/{id}   → 층별 도면 이미지(dataUrl)
 //   safety_app/{companyId}/floorDrawingPdfs/{id} → 층별 PDF 원본(dataUrl 또는 parts 서브컬렉션)
@@ -174,6 +175,9 @@ service cloud.firestore {
           allow read, write: if isCompanyMember(companyId);
           match /floors/{floorCode} {
             allow read, write: if isCompanyMember(companyId);
+            match /parts/{partId} {
+              allow read, write: if isCompanyMember(companyId);
+            }
             match /docs/{kind} {
               allow read, write: if isCompanyMember(companyId);
               match /parts/{partId} {
@@ -185,6 +189,9 @@ service cloud.firestore {
             allow read, write: if isCompanyMember(companyId);
             match /floors/{floorCode} {
               allow read, write: if isCompanyMember(companyId);
+              match /parts/{partId} {
+                allow read, write: if isCompanyMember(companyId);
+              }
               match /docs/{kind} {
                 allow read, write: if isCompanyMember(companyId);
                 match /parts/{partId} {
