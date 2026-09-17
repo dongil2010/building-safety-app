@@ -482,3 +482,21 @@
 > 단동은 동 칸 생략. 사진·도면은 Storage URL만. 실시간은 지금 층만.
 > `firestore.rules`에 단동/다동 두 트리 허용. 콘솔 규칙 게시 필요.
 
+### ⚡ [Antigravity] - 2026-09-17 17:25:00
+> **`[COMPLETE]` Firestore 읽기 쿼터 폭증 차단 최적화 (오프라인 캐시, 도면/PDF 존재확인 영속화, 층 문서 폴백 루프 방지)**
+>
+> 1. **멀티 탭 오프라인 지속성(enablePersistence with synchronizeTabs)** 활성화:
+>    - `db.enablePersistence({ synchronizeTabs: true })` 적용. 변경되지 않은 문서는 로컬 IndexedDB 캐시에서 서빙되어 Firestore 서버 읽기 비용 0.
+> 2. **도면/티어/PDF 클라우드 존재 확인 키 `localStorage` 영속화**:
+>    - 기존 메모리 Set(`_cloudSyncedDrawingKeys`, `_cloudSyncedTierKeys`, `_cloudSyncedPdfKeys`)이 새로고침마다 증발하여 앱 기동 시마다 모든 층의 도면/PDF/티어 존재를 `.get()`으로 중복 확인하던 병목 제거.
+>    - 회사별 키(`bsa_cloud_synced_*_${companyId}`)로 `localStorage`에 영속화하고 삭제 시 동기화 처리.
+> 3. **신규 층 문서 실시간 리스너 폴백 폭증 방지**:
+>    - `subscribeCurrentFloorSync`에서 미존재 층에 대해 `readFloorSyncBundle` 호출 시 이미 부재가 확인된 `markings` 재조회 생략 (`knownMissing: { markings: true }`).
+>    - 세션 내 이미 구버전 이관 여부를 확인한 층은 `_floorsCheckedMigration`에 기록하여 매 층 이동/스냅샷마다 불필요하게 구버전 bulk를 재탐색하는 낭비 차단.
+> 4. **사진 로딩 및 HWPX 내보내기 중복 조회 제거**:
+>    - `_nonExistentPhotoIds` 캐시를 도입하여 `hydrateDefectPhotos` 및 `probePhotoDocExists`, `loadPhotoByIdWithCloudFallback`에서 부재/삭제된 사진 ID에 대해 반복적인 Firestore get 요청을 즉시 건너뜀.
+>    - HWPX 상태조사표 생성 시 사전 패스와 본 루프에서 이중으로 사진을 Firestore에서 get하던 루프를 `ensureDefectPhotosLoaded` 단일 패스로 정리.
+> 5. **규칙**:
+>    - Cursor의 `firestore.rules` (단동/다동 중첩 허용)와 완벽 호환 확인. 콘솔에 규칙 게시 필요 (`firebase deploy --only firestore:rules`).
+
+

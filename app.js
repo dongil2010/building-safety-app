@@ -18670,8 +18670,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     // 백그라운드 사진 로딩(hydrateDefectPhotos)이 아직 안 끝난 사이에 한글 내보내기를 누르면,
     // IDB·캐시 둘 다 아직 없어서(클라우드 재조회 없이) 사진이 "안 찍은 것처럼" 빠진 채로 나갔다
     // (사용자가 실제로 겪음).
+    const _nonExistentPhotoIds = new Set();
     async function loadPhotoByIdWithCloudFallback(pid) {
         if (!pid) return null;
+        if (_nonExistentPhotoIds.has(pid)) return null;
         if (window._photoCache && window._photoCache[pid]) {
             return window._photoCache[pid];
         }
@@ -18684,13 +18686,19 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (!db || !window.state.companyId) return null;
         try {
             const snap = await db.collection('safety_app').doc(getCompanyDocId()).collection('photos').doc(pid).get();
+            if (!snap.exists) {
+                _nonExistentPhotoIds.add(pid);
+                return null;
+            }
             const url = await photoUrlFromCloudSnap(snap, pid);
             if (url) {
                 if (!window._photoCache) window._photoCache = {};
                 window._photoCache[pid] = url;
                 idbSetPhotoPreferDataUrl(pid, url).then(ok => { if (ok && _idbPersistedPhotoKeys) _idbPersistedPhotoKeys.add(pid); });
+                return url;
             }
-            return url;
+            _nonExistentPhotoIds.add(pid);
+            return null;
         } catch (e) {
             return null;
         }
@@ -18714,13 +18722,16 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     // 컬렉션)에 그 id로 그대로 남아있을 가능성이 높다. photoIds가 비어있는 결함마다 0번부터 순서대로
     // 존재 여부를 확인해서, 실제로 남아있는 사진을 찾으면 photoIds를 복구해준다.
     async function probePhotoDocExists(pid) {
-        if (!db || !window.state.companyId) return false;
+        if (!db || !window.state.companyId || !pid) return false;
+        if (_nonExistentPhotoIds.has(pid)) return false;
         try {
             const snap = await db.collection('safety_app').doc(getCompanyDocId()).collection('photos').doc(pid).get();
-            return !!(snap.exists && snap.data() && (
+            const exists = !!(snap.exists && snap.data() && (
                 hasFirebaseStorageMeta(snap.data())
                 || snap.data().dataUrl
             ));
+            if (!exists) _nonExistentPhotoIds.add(pid);
+            return exists;
         } catch (e) {
             return false;
         }
@@ -36984,42 +36995,6 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 const { floorCode: preFloorCode, pageDefects: preDefects } = floorsData[preIdx];
                 await Promise.all(preDefects.map(async (d) => {
                     await ensureDefectPhotosLoaded(d);
-                    if ((!d.photos || d.photos.length === 0) && d.photoIds && d.photoIds.length > 0) {
-                        const photos = await Promise.all(d.photoIds.map(async pid => {
-                            const local = await idbGet('photos', pid);
-                            if (local) return local;
-                            if (window._photoCache[pid]) return window._photoCache[pid];
-                            if (companyPhotosCol) {
-                                try {
-                                    const snap = await companyPhotosCol.doc(pid).get();
-                                    const url = await photoUrlFromCloudSnap(snap, pid);
-                                    if (url) window._photoCache[pid] = url;
-                                    return url;
-                                } catch (e) { return null; }
-                            }
-                            return null;
-                        }));
-                        const filled = photos.filter(Boolean);
-                        if (filled.length > 0) d.photos = filled;
-                    }
-                    if ((!d.prevRoundPhotos || d.prevRoundPhotos.length === 0) && d.prevRoundPhotoIds && d.prevRoundPhotoIds.length > 0) {
-                        const prevPhotos = await Promise.all(d.prevRoundPhotoIds.map(async pid => {
-                            const local = await idbGet('photos', pid);
-                            if (local) return local;
-                            if (window._photoCache[pid]) return window._photoCache[pid];
-                            if (companyPhotosCol) {
-                                try {
-                                    const snap = await companyPhotosCol.doc(pid).get();
-                                    const url = await photoUrlFromCloudSnap(snap, pid);
-                                    if (url) window._photoCache[pid] = url;
-                                    return url;
-                                } catch (e) { return null; }
-                            }
-                            return null;
-                        }));
-                        const filledPrev = prevPhotos.filter(Boolean);
-                        if (filledPrev.length > 0) d.prevRoundPhotos = filledPrev;
-                    }
                 }));
                 preDefects.filter(d => getDefectOutputPhotos(d).length > 0).forEach((d) => {
                     globalPhotoEntries.push({ d, floorCode: preFloorCode });
@@ -39418,42 +39393,6 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
                 await Promise.all(pageDefects.map(async (d) => {
                     await ensureDefectPhotosLoaded(d);
-                    if ((!d.photos || d.photos.length === 0) && d.photoIds && d.photoIds.length > 0) {
-                        const photos = await Promise.all(d.photoIds.map(async pid => {
-                            const local = await idbGet('photos', pid);
-                            if (local) return local;
-                            if (window._photoCache[pid]) return window._photoCache[pid];
-                            if (companyPhotosCol) {
-                                try {
-                                    const snap = await companyPhotosCol.doc(pid).get();
-                                    const url = await photoUrlFromCloudSnap(snap, pid);
-                                    if (url) window._photoCache[pid] = url;
-                                    return url;
-                                } catch (e) { return null; }
-                            }
-                            return null;
-                        }));
-                        const filled = photos.filter(Boolean);
-                        if (filled.length > 0) d.photos = filled;
-                    }
-                    if ((!d.prevRoundPhotos || d.prevRoundPhotos.length === 0) && d.prevRoundPhotoIds && d.prevRoundPhotoIds.length > 0) {
-                        const prevPhotos = await Promise.all(d.prevRoundPhotoIds.map(async pid => {
-                            const local = await idbGet('photos', pid);
-                            if (local) return local;
-                            if (window._photoCache[pid]) return window._photoCache[pid];
-                            if (companyPhotosCol) {
-                                try {
-                                    const snap = await companyPhotosCol.doc(pid).get();
-                                    const url = await photoUrlFromCloudSnap(snap, pid);
-                                    if (url) window._photoCache[pid] = url;
-                                    return url;
-                                } catch (e) { return null; }
-                            }
-                            return null;
-                        }));
-                        const filledPrev = prevPhotos.filter(Boolean);
-                        if (filledPrev.length > 0) d.prevRoundPhotos = filledPrev;
-                    }
                 }));
                 const priorityCompareDefects = [];
                 const regularPhotoDefects = pageDefects.filter(d => {
@@ -42592,6 +42531,13 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     firebase.initializeApp(firebaseConfig);
                 }
                 db = firebase.firestore();
+                if (typeof db.enablePersistence === 'function') {
+                    db.enablePersistence({ synchronizeTabs: true }).catch((err) => {
+                        if (err && err.code !== 'failed-precondition' && err.code !== 'unimplemented') {
+                            console.warn('Firestore 오프라인 지속성 경고:', err);
+                        }
+                    });
+                }
                 if (firebase.auth) {
                     auth = firebase.auth();
                     auth.onAuthStateChanged(handleAuthStateChange);
@@ -43572,43 +43518,83 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         return ok;
     }
 
+    function getCloudSyncedStorageKey(kind) {
+        const cid = (typeof getCompanyDocId === 'function' ? getCompanyDocId() : (window.state && window.state.companyId)) || 'default';
+        return `bsa_cloud_synced_${kind}_${cid}`;
+    }
+
+    function initCloudSyncedKeySet(kind) {
+        const set = new Set();
+        try {
+            const raw = localStorage.getItem(getCloudSyncedStorageKey(kind));
+            if (raw) {
+                const arr = JSON.parse(raw);
+                if (Array.isArray(arr)) arr.forEach((k) => set.add(k));
+            }
+        } catch (_) {}
+        return set;
+    }
+
+    let _saveCloudSyncedDebounceTimer = null;
+    function scheduleSaveCloudSyncedKeys() {
+        if (_saveCloudSyncedDebounceTimer) return;
+        _saveCloudSyncedDebounceTimer = setTimeout(() => {
+            _saveCloudSyncedDebounceTimer = null;
+            try {
+                if (window._cloudSyncedDrawingKeys) {
+                    localStorage.setItem(getCloudSyncedStorageKey('drawings'), JSON.stringify(Array.from(window._cloudSyncedDrawingKeys)));
+                }
+                if (window._cloudSyncedTierKeys) {
+                    localStorage.setItem(getCloudSyncedStorageKey('tiers'), JSON.stringify(Array.from(window._cloudSyncedTierKeys)));
+                }
+                if (window._cloudSyncedPdfKeys) {
+                    localStorage.setItem(getCloudSyncedStorageKey('pdfs'), JSON.stringify(Array.from(window._cloudSyncedPdfKeys)));
+                }
+            } catch (_) {}
+        }, 800);
+    }
+
     async function cloudFloorDrawingTierExists(buildingId, floorCode, dim) {
         const docId = floorDrawingTierCloudDocId(buildingId, floorCode, dim);
-        if (window._cloudSyncedTierKeys && window._cloudSyncedTierKeys.has(docId)) return true;
+        if (!window._cloudSyncedTierKeys) window._cloudSyncedTierKeys = initCloudSyncedKeySet('tiers');
+        if (window._cloudSyncedTierKeys.has(docId)) return true;
         const col = getFloorDrawingTiersCollection();
         if (!col) return false;
         try {
             const snap = await col.doc(docId).get();
             if (!snap.exists) {
-                if (window._cloudSyncedTierKeys) window._cloudSyncedTierKeys.delete(docId);
+                window._cloudSyncedTierKeys.delete(docId);
+                scheduleSaveCloudSyncedKeys();
                 return false;
             }
             const data = snap.data() || {};
             if (snapNeedsSiteRoundMove(data)) {
-                if (window._cloudSyncedTierKeys) window._cloudSyncedTierKeys.delete(docId);
+                window._cloudSyncedTierKeys.delete(docId);
+                scheduleSaveCloudSyncedKeys();
                 return false;
             }
             if (hasFirebaseStorageMeta(data)
                 || (data.dataUrl && String(data.dataUrl).length > 32)) {
-                if (!window._cloudSyncedTierKeys) window._cloudSyncedTierKeys = new Set();
                 window._cloudSyncedTierKeys.add(docId);
+                scheduleSaveCloudSyncedKeys();
                 return true;
             }
             // ready 청크는 parts 전체를 list하지 않는다 (존재 확인만 필요, 읽기 폭증 방지)
             if (data.chunkStatus === 'ready' && data.chunked && Number(data.chunkCount) > 0) {
-                if (!window._cloudSyncedTierKeys) window._cloudSyncedTierKeys = new Set();
                 window._cloudSyncedTierKeys.add(docId);
+                scheduleSaveCloudSyncedKeys();
                 return true;
             }
             if (data.chunked && Number(data.chunkCount) > 0 && !data.chunkStatus) {
                 const url = await decodeChunkedPayloadFromData(data, col.doc(docId));
                 if (url && String(url).length > 32) {
-                    if (!window._cloudSyncedTierKeys) window._cloudSyncedTierKeys = new Set();
                     window._cloudSyncedTierKeys.add(docId);
+                    scheduleSaveCloudSyncedKeys();
                     return true;
                 }
             }
-            if (window._cloudSyncedTierKeys) window._cloudSyncedTierKeys.delete(docId);
+            window._cloudSyncedTierKeys.delete(docId);
+            scheduleSaveCloudSyncedKeys();
             return false;
         } catch (e) {
             console.warn('도면 티어 존재 확인 실패:', docId, e);
@@ -43628,7 +43614,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     storageScopeForBuildingId(buildingId)
                 );
                 await deleteCloudAssetDoc(col.doc(docId), fallback);
-                if (window._cloudSyncedTierKeys) window._cloudSyncedTierKeys.delete(docId);
+                if (window._cloudSyncedTierKeys) {
+                    window._cloudSyncedTierKeys.delete(docId);
+                    scheduleSaveCloudSyncedKeys();
+                }
             } catch (e) {
                 console.warn('도면 티어 서버 삭제 실패:', docId, e);
             }
@@ -43646,7 +43635,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 storageScopeForBuildingId(buildingId)
             );
             await deleteCloudAssetDoc(docRef, fallback);
-            if (window._cloudSyncedDrawingKeys) window._cloudSyncedDrawingKeys.delete(docId);
+            if (window._cloudSyncedDrawingKeys) {
+                window._cloudSyncedDrawingKeys.delete(docId);
+                scheduleSaveCloudSyncedKeys();
+            }
         } catch (e) {
             console.warn('도면 원본 서버 삭제 실패:', docId, e);
         }
@@ -43670,26 +43662,30 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     async function cloudFloorDrawingExists(buildingId, floorCode) {
         if (!db || !window.state.companyId || !buildingId || !floorCode) return false;
         const docId = `${buildingId}_${floorCode}`;
-        if (window._cloudSyncedDrawingKeys && window._cloudSyncedDrawingKeys.has(docId)) return true;
+        if (!window._cloudSyncedDrawingKeys) window._cloudSyncedDrawingKeys = initCloudSyncedKeySet('drawings');
+        if (window._cloudSyncedDrawingKeys.has(docId)) return true;
         try {
             const snap = await db.collection('safety_app').doc(getCompanyDocId())
                 .collection('floorDrawings').doc(docId).get();
             if (!snap.exists) {
-                if (window._cloudSyncedDrawingKeys) window._cloudSyncedDrawingKeys.delete(docId);
+                window._cloudSyncedDrawingKeys.delete(docId);
+                scheduleSaveCloudSyncedKeys();
                 return false;
             }
             const data = snap.data() || {};
             if (snapNeedsSiteRoundMove(data)) {
-                if (window._cloudSyncedDrawingKeys) window._cloudSyncedDrawingKeys.delete(docId);
+                window._cloudSyncedDrawingKeys.delete(docId);
+                scheduleSaveCloudSyncedKeys();
                 return false;
             }
             const ok = hasFirebaseStorageMeta(data) || isUsableRasterDrawingUrl(data.dataUrl);
             if (ok) {
-                if (!window._cloudSyncedDrawingKeys) window._cloudSyncedDrawingKeys = new Set();
                 window._cloudSyncedDrawingKeys.add(docId);
+                scheduleSaveCloudSyncedKeys();
                 return true;
             }
-            if (window._cloudSyncedDrawingKeys) window._cloudSyncedDrawingKeys.delete(docId);
+            window._cloudSyncedDrawingKeys.delete(docId);
+            scheduleSaveCloudSyncedKeys();
             return false;
         } catch (e) {
             console.warn('도면 존재 확인 실패:', docId, e);
@@ -44166,6 +44162,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     const _dirtyFloorKeys = new Set();
     let _legacyBulkCache = null;
     let _legacyBulkCacheTried = false;
+    const _floorsCheckedMigration = new Set();
     let currentFloorUnsubs = [];
     let _listeningFloorPath = '';
     let _lastFloorKindIdentity = { markings: '', photos: '', ndt: '', drawing: '' };
@@ -44497,12 +44494,13 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         };
     }
 
-    async function readFloorSyncBundle(bldg, floorCode) {
+    async function readFloorSyncBundle(bldg, floorCode, options) {
+        const knownMissing = (options && options.knownMissing) || {};
         const [markings, photos, ndt, drawing] = await Promise.all([
-            readFloorKindPayload(bldg, floorCode, 'markings'),
-            readFloorKindPayload(bldg, floorCode, 'photos'),
-            readFloorKindPayload(bldg, floorCode, 'ndt'),
-            readFloorKindPayload(bldg, floorCode, 'drawing')
+            knownMissing.markings ? Promise.resolve(null) : readFloorKindPayload(bldg, floorCode, 'markings'),
+            knownMissing.photos ? Promise.resolve(null) : readFloorKindPayload(bldg, floorCode, 'photos'),
+            knownMissing.ndt ? Promise.resolve(null) : readFloorKindPayload(bldg, floorCode, 'ndt'),
+            knownMissing.drawing ? Promise.resolve(null) : readFloorKindPayload(bldg, floorCode, 'drawing')
         ]);
         const missing = markings == null && photos == null && ndt == null;
         if (missing) {
@@ -44698,19 +44696,23 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 if (doc && doc.metadata && doc.metadata.hasPendingWrites) return;
                 if (!doc || !doc.exists) {
                     if (kind === 'markings') {
-                        try {
-                            const migrated = await readFloorSyncBundle(bldg, floorCode);
-                            _lastFloorBundle = {
-                                markings: migrated.markings,
-                                photos: migrated.photos,
-                                ndt: migrated.ndt,
-                                drawing: migrated.drawing
-                            };
-                            await mergeRemoteFloorBundle(bldg, floorCode, migrated);
-                        } catch (e) {
-                            console.warn('층 문서 폴백 이관 실패:', e);
+                        const floorKey = `${bldg.id}_${floorCode}`;
+                        if (!_floorsCheckedMigration.has(floorKey)) {
+                            _floorsCheckedMigration.add(floorKey);
+                            try {
+                                const migrated = await readFloorSyncBundle(bldg, floorCode, { knownMissing: { markings: true } });
+                                _lastFloorBundle = {
+                                    markings: migrated.markings,
+                                    photos: migrated.photos,
+                                    ndt: migrated.ndt,
+                                    drawing: migrated.drawing
+                                };
+                                await mergeRemoteFloorBundle(bldg, floorCode, migrated);
+                            } catch (e) {
+                                console.warn('층 문서 폴백 이관 실패:', e);
+                            }
+                            return;
                         }
-                        return;
                     }
                     const empty = emptyFloorBundle();
                     _lastFloorBundle[kind] = empty[kind] || {};
@@ -44875,8 +44877,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         await idbSet('floorDrawingPdfs', idbKey, pdf);
         _idbPersistedPdfKeys.add(idbKey);
         markFloorPdfKnown(bldg.id, floorCode, true);
-        if (!window._cloudSyncedPdfKeys) window._cloudSyncedPdfKeys = new Set();
+        if (!window._cloudSyncedPdfKeys) window._cloudSyncedPdfKeys = initCloudSyncedKeySet('pdfs');
         window._cloudSyncedPdfKeys.add(idbKey);
+        scheduleSaveCloudSyncedKeys();
         return true;
     }
 
@@ -45238,28 +45241,32 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     async function cloudFloorDrawingPdfExists(buildingId, floorCode) {
         if (!db || !window.state.companyId || !buildingId || !floorCode) return false;
         const docId = `${buildingId}_${floorCode}`;
-        if (window._cloudSyncedPdfKeys && window._cloudSyncedPdfKeys.has(docId)) return true;
+        if (!window._cloudSyncedPdfKeys) window._cloudSyncedPdfKeys = initCloudSyncedKeySet('pdfs');
+        if (window._cloudSyncedPdfKeys.has(docId)) return true;
         try {
             const snap = await db.collection('safety_app').doc(getCompanyDocId())
                 .collection('floorDrawingPdfs').doc(docId).get();
             if (!snap.exists) {
-                if (window._cloudSyncedPdfKeys) window._cloudSyncedPdfKeys.delete(docId);
+                window._cloudSyncedPdfKeys.delete(docId);
+                scheduleSaveCloudSyncedKeys();
                 return false;
             }
             const data = snap.data() || {};
             if (snapNeedsSiteRoundMove(data)) {
-                if (window._cloudSyncedPdfKeys) window._cloudSyncedPdfKeys.delete(docId);
+                window._cloudSyncedPdfKeys.delete(docId);
+                scheduleSaveCloudSyncedKeys();
                 return false;
             }
             const ok = hasFirebaseStorageMeta(data)
                 || (data.dataUrl && String(data.dataUrl).length > 32)
                 || (data.chunkStatus === 'ready' && data.chunked && Number(data.chunkCount) > 0);
             if (ok) {
-                if (!window._cloudSyncedPdfKeys) window._cloudSyncedPdfKeys = new Set();
                 window._cloudSyncedPdfKeys.add(docId);
+                scheduleSaveCloudSyncedKeys();
                 return true;
             }
-            if (window._cloudSyncedPdfKeys) window._cloudSyncedPdfKeys.delete(docId);
+            window._cloudSyncedPdfKeys.delete(docId);
+            scheduleSaveCloudSyncedKeys();
             return false;
         } catch (e) {
             console.warn('PDF 원본 존재 확인 실패:', docId, e);
@@ -45277,7 +45284,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 getCompanyDocId(), buildingId, floorCode, storageScopeForBuildingId(buildingId)
             );
             await deleteCloudAssetDoc(docRef, fallback);
-            if (window._cloudSyncedPdfKeys) window._cloudSyncedPdfKeys.delete(docId);
+            if (window._cloudSyncedPdfKeys) {
+                window._cloudSyncedPdfKeys.delete(docId);
+                scheduleSaveCloudSyncedKeys();
+            }
         } catch (e) {
             console.warn(`PDF 원본 서버 삭제 실패 (${docId}):`, e);
         }
@@ -45594,6 +45604,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                             return fromIdb;
                         }
                         if (!allowCloud || !companyPhotos) return null;
+                        if (_nonExistentPhotoIds.has(pid)) return null;
                         if (Date.now() < _photoFetchQuotaPausedUntil) return null;
                         while (_photoFetchInflight >= PHOTO_FETCH_MAX_CONCURRENT) {
                             await new Promise((r) => setTimeout(r, 40));
@@ -45602,8 +45613,13 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                         _photoFetchInflight += 1;
                         try {
                             const snap = await companyPhotos.doc(pid).get();
+                            if (!snap.exists) {
+                                _nonExistentPhotoIds.add(pid);
+                                return null;
+                            }
                             const url = await photoUrlFromCloudSnap(snap, pid);
                             if (url) window._photoCache[pid] = url;
+                            else _nonExistentPhotoIds.add(pid);
                             return url;
                         } catch (e) {
                             if (isFirestoreQuotaError(e)) {
@@ -46455,6 +46471,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             _lastBulkPayloadIdentity = '';
             _legacyBulkCache = null;
             _legacyBulkCacheTried = false;
+            _floorsCheckedMigration.clear();
         }
     }
 
