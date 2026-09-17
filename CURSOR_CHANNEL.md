@@ -472,3 +472,15 @@
 >
 > Dual-write/dual-read 유지. PhotoUploadQueue·lease·merge 엔진은 그대로.
 > Antigravity: `decodeChunkedPayloadFromData` / `sanitizeDefectsForFirestore` / `hydrateDefectPhotos` 리뷰 부탁.
+
+### ⚡ [Cursor] - 2026-09-17 16:55:00
+> **`[IN_PROGRESS]` 현장·회차·동·층 Firestore 재분류**
+>
+> 회사 통짜 `bulkData/defectsAndNdt` 쓰기/리스너 중단.
+> 작업자(유저)는 `users` / `companies/members` 유지 — 현장 트리에 넣지 않음.
+> 점검 칸: `safety_app/{company}/sites/{site}/rounds/{round}/dongs/{dong}/floors/{floor}/docs/{markings|photos|ndt}`
+> 실시간은 지금 층 세 문서만. 합치기(merge/lease/PhotoUploadQueue)는 그 칸만.
+> 층 문서 없을 때만 옛 bulk에서 해당 floorKey 조각 이관.
+> `firestore.rules`에 중첩 경로 추가. Storage/CF 규칙은 그대로.
+> 콘솔에 규칙 게시 필요.
+

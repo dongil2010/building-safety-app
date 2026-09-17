@@ -4449,6 +4449,13 @@ document.addEventListener('DOMContentLoaded', () => {
         } else if (targetTabId === 'tab-home' && typeof window.renderDashboard === 'function') {
             window.renderDashboard();
         }
+        if (typeof subscribeCurrentFloorSync === 'function') {
+            if (targetTabId === 'tab-home') {
+                markCurrentFloorDirty();
+                if (typeof scheduleSyncToFirebase === 'function') scheduleSyncToFirebase();
+            }
+            subscribeCurrentFloorSync();
+        }
         if (typeof syncMobileBackHistoryGuard === 'function') syncMobileBackHistoryGuard();
     };
 
@@ -8669,6 +8676,13 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const prevBuildingId = state.currentBuildingId;
         const prevFloor = state.currentFloor;
         state.currentFloor = floorCode;
+        if ((prevBuildingId !== state.currentBuildingId || prevFloor !== floorCode)
+            && typeof subscribeCurrentFloorSync === 'function') {
+            if (prevFloor && prevBuildingId) {
+                _dirtyFloorKeys.add(`${prevBuildingId}_${prevFloor}`);
+            }
+            subscribeCurrentFloorSync();
+        }
         if (state.floorPlanRef && state.floorPlanRef.floorCode !== floorCode) {
             state.floorPlanRef = null;
         }
@@ -43775,6 +43789,68 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         return id || 'unnamed';
     }
 
+    /** 회사 작업자(users/members)와 별개 — 점검 칸은 현장/회차/동/층이 전부 다른 문서 */
+    function getFirestoreSiteKey(bldg) {
+        return siteVaultDocId(getBuildingSiteName(bldg));
+    }
+
+    function getFirestoreRoundKey(bldg) {
+        const raw = (typeof getBuildingSurveyRoundKey === 'function')
+            ? getBuildingSurveyRoundKey(bldg)
+            : '';
+        return siteVaultDocId(raw || 'unknown');
+    }
+
+    function getFirestoreDongKey(bldg) {
+        const siteName = getBuildingSiteName(bldg);
+        const multi = typeof isSiteMultiDong === 'function' && isSiteMultiDong(siteName);
+        if (!multi) return '_';
+        const dong = getBuildingDongLabel(bldg);
+        return dong ? siteVaultDocId(dong) : '_';
+    }
+
+    function getFloorScopeRef(bldg, floorCode) {
+        if (!db || !window.state.companyId || !bldg || !floorCode) return null;
+        return db.collection('safety_app').doc(getCompanyDocId())
+            .collection('sites').doc(getFirestoreSiteKey(bldg))
+            .collection('rounds').doc(getFirestoreRoundKey(bldg))
+            .collection('dongs').doc(getFirestoreDongKey(bldg))
+            .collection('floors').doc(String(floorCode));
+    }
+
+    function getFloorKindDocRef(bldg, floorCode, kind) {
+        const floorRef = getFloorScopeRef(bldg, floorCode);
+        if (!floorRef || !kind) return null;
+        return floorRef.collection('docs').doc(String(kind));
+    }
+
+    function currentInspectionFloorKey() {
+        const id = window.state.currentBuildingId;
+        const fl = window.state.currentFloor;
+        if (!id || !fl) return null;
+        return `${id}_${fl}`;
+    }
+
+    function findBuildingForFloorKey(floorKey) {
+        const key = String(floorKey || '');
+        let best = null;
+        (window.state.buildings || []).forEach((b) => {
+            if (!b || !b.id) return;
+            const prefix = String(b.id) + '_';
+            if (key.indexOf(prefix) === 0) {
+                if (!best || String(b.id).length > String(best.id).length) best = b;
+            }
+        });
+        return best;
+    }
+
+    function floorCodeFromFloorKey(floorKey, bldg) {
+        if (!bldg || !bldg.id || !floorKey) return '';
+        const prefix = String(bldg.id) + '_';
+        if (String(floorKey).indexOf(prefix) !== 0) return '';
+        return String(floorKey).slice(prefix.length);
+    }
+
     function getSiteVaultKeyFromBuilding(bldg) {
         if (!bldg) return 'unnamed';
         if (bldg.siteVaultKey) return bldg.siteVaultKey;
@@ -43953,6 +44029,13 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     /** bulk JSON 등 텍스트 청크만 RAM 캐시. 도면 dataURL은 넣지 않는다. */
     const _decodedChunkPayloadCache = new Map();
     let _lastBulkPayloadIdentity = '';
+    const _dirtyFloorKeys = new Set();
+    let _legacyBulkCache = null;
+    let _legacyBulkCacheTried = false;
+    let currentFloorUnsubs = [];
+    let _listeningFloorPath = '';
+    let _lastFloorKindIdentity = { markings: '', photos: '', ndt: '' };
+    let _lastFloorBundle = { markings: null, photos: null, ndt: null };
 
     function chunkDocCacheKey(docRef) {
         return (docRef && docRef.path) ? String(docRef.path) : '';
@@ -44124,6 +44207,333 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     function getBulkSyncDocRef() {
         return db.collection('safety_app').doc(getCompanyDocId()).collection('bulkData').doc('defectsAndNdt');
     }
+
+    function markCurrentFloorDirty() {
+        const key = currentInspectionFloorKey();
+        if (key) _dirtyFloorKeys.add(key);
+    }
+
+    function collectFloorPhotoUrlMap(defectsArr) {
+        const map = {};
+        (defectsArr || []).forEach((d) => {
+            if (!d) return;
+            Object.assign(map, collectPackedPhotoUrlMap(d.photoIds, d.photoUrls, d.photos));
+            Object.assign(map, collectPackedPhotoUrlMap(d.prevRoundPhotoIds, d.prevRoundPhotoUrls, d.prevRoundPhotos));
+        });
+        return map;
+    }
+
+    function subsetDefectsMap(defectsMap, keys) {
+        const out = {};
+        (keys || []).forEach((k) => {
+            if (defectsMap && defectsMap[k]) out[k] = defectsMap[k];
+        });
+        return out;
+    }
+
+    async function writeFloorKindPayload(bldg, floorCode, kind, payload) {
+        const ref = getFloorKindDocRef(bldg, floorCode, kind);
+        if (!ref) return;
+        const json = JSON.stringify(payload == null ? {} : payload);
+        await writeChunkedPdfToDocRef(ref, json);
+    }
+
+    async function readFloorKindPayload(bldg, floorCode, kind) {
+        const ref = getFloorKindDocRef(bldg, floorCode, kind);
+        if (!ref) return null;
+        try {
+            const json = await readChunkedPdfFromDocRef(ref);
+            if (json == null) return null;
+            if (!json) return {};
+            return JSON.parse(json);
+        } catch (e) {
+            console.warn('층 문서 조회 실패:', kind, e);
+            return null;
+        }
+    }
+
+    async function decodeFloorKindFromSnap(bldg, floorCode, kind, snapData) {
+        const ref = getFloorKindDocRef(bldg, floorCode, kind);
+        if (!ref) return null;
+        try {
+            const json = await decodeChunkedPayloadFromData(snapData || {}, ref);
+            if (json == null) return null;
+            if (!json) return {};
+            return JSON.parse(json);
+        } catch (e) {
+            console.warn('층 스냅샷 파싱 실패:', kind, e);
+            return null;
+        }
+    }
+
+    function sliceLegacyBulkForFloor(bulk, floorKey) {
+        if (!bulk || !floorKey) return null;
+        const defects = bulk.defects && bulk.defects[floorKey];
+        const ndt = bulk.ndtData && bulk.ndtData[floorKey];
+        const disp = bulk.ndtDisplacementGroups && bulk.ndtDisplacementGroups[floorKey];
+        const delDef = bulk.deletedDefectIds && bulk.deletedDefectIds[floorKey];
+        const delNdt = bulk.deletedNdtIds && bulk.deletedNdtIds[floorKey];
+        if (!defects && !ndt && !disp && !delDef && !delNdt) return null;
+        const urlsById = collectFloorPhotoUrlMap(defects || []);
+        return {
+            markings: {
+                items: Array.isArray(defects) ? defects : [],
+                deletedIds: Array.isArray(delDef) ? delDef : [],
+                deletedAt: (bulk.deletedDefectAt && bulk.deletedDefectAt[floorKey]) || {}
+            },
+            photos: { urlsById },
+            ndt: {
+                items: Array.isArray(ndt) ? ndt : [],
+                deletedIds: Array.isArray(delNdt) ? delNdt : [],
+                deletedAt: (bulk.deletedNdtAt && bulk.deletedNdtAt[floorKey]) || {},
+                displacementGroups: Array.isArray(disp) ? disp : []
+            }
+        };
+    }
+
+    async function loadLegacyBulkCacheOnce() {
+        if (_legacyBulkCacheTried) return _legacyBulkCache;
+        _legacyBulkCacheTried = true;
+        try {
+            _legacyBulkCache = await fetchBulkSyncData();
+        } catch (e) {
+            console.warn('구버전 bulk 폴백 조회 실패:', e);
+            _legacyBulkCache = null;
+        }
+        return _legacyBulkCache;
+    }
+
+    function emptyFloorBundle() {
+        return {
+            markings: { items: [], deletedIds: [], deletedAt: {} },
+            photos: { urlsById: {} },
+            ndt: { items: [], deletedIds: [], deletedAt: {}, displacementGroups: [] }
+        };
+    }
+
+    async function readFloorSyncBundle(bldg, floorCode) {
+        const [markings, photos, ndt] = await Promise.all([
+            readFloorKindPayload(bldg, floorCode, 'markings'),
+            readFloorKindPayload(bldg, floorCode, 'photos'),
+            readFloorKindPayload(bldg, floorCode, 'ndt')
+        ]);
+        const missing = markings == null && photos == null && ndt == null;
+        if (missing) {
+            const bulk = await loadLegacyBulkCacheOnce();
+            const floorKey = `${bldg.id}_${floorCode}`;
+            const sliced = sliceLegacyBulkForFloor(bulk, floorKey);
+            if (sliced) return Object.assign({ fromLegacy: true }, sliced);
+            return Object.assign({ fromLegacy: false }, emptyFloorBundle());
+        }
+        const empty = emptyFloorBundle();
+        return {
+            fromLegacy: false,
+            markings: markings || empty.markings,
+            photos: photos || empty.photos,
+            ndt: ndt || empty.ndt
+        };
+    }
+
+    async function writeFloorSyncBundle(bldg, floorCode) {
+        if (!bldg || !bldg.id || !floorCode) return;
+        const floorKey = `${bldg.id}_${floorCode}`;
+        const sanitizedMap = sanitizeDefectsForFirestore({
+            [floorKey]: window.state.defects[floorKey] || []
+        });
+        const items = sanitizedMap[floorKey] || [];
+        const markings = {
+            items,
+            deletedIds: (window.state.deletedDefectIds || {})[floorKey] || [],
+            deletedAt: (window.state.deletedDefectAt || {})[floorKey] || {}
+        };
+        const photos = { urlsById: collectFloorPhotoUrlMap(window.state.defects[floorKey] || []) };
+        const ndt = {
+            items: window.state.ndtData[floorKey] || [],
+            deletedIds: (window.state.deletedNdtIds || {})[floorKey] || [],
+            deletedAt: (window.state.deletedNdtAt || {})[floorKey] || {},
+            displacementGroups: (window.state.ndtDisplacementGroups || {})[floorKey] || []
+        };
+        await Promise.all([
+            writeFloorKindPayload(bldg, floorCode, 'markings', markings),
+            writeFloorKindPayload(bldg, floorCode, 'photos', photos),
+            writeFloorKindPayload(bldg, floorCode, 'ndt', ndt)
+        ]);
+        _dirtyFloorKeys.delete(floorKey);
+    }
+
+    function seedPhotoCacheFromUrlMap(urlsById) {
+        if (!urlsById || typeof urlsById !== 'object') return;
+        if (!window._photoCache) window._photoCache = {};
+        Object.keys(urlsById).forEach((pid) => {
+            if (!pid || window._photoCache[pid]) return;
+            const url = urlsById[pid];
+            if (url) window._photoCache[pid] = url;
+        });
+    }
+
+    function mergeFloorBundleIntoState(bldg, floorCode, bundle) {
+        if (!bldg || !bldg.id || !floorCode || !bundle) return;
+        const floorKey = `${bldg.id}_${floorCode}`;
+        const empty = emptyFloorBundle();
+        const markings = bundle.markings || empty.markings;
+        const ndt = bundle.ndt || empty.ndt;
+        seedPhotoCacheFromUrlMap(bundle.photos && bundle.photos.urlsById);
+        const defectMerge = mergeDefectsMaps(
+            { [floorKey]: markings.items || [] },
+            window.state.defects || {},
+            { [floorKey]: markings.deletedIds || [] },
+            window.state.deletedDefectIds || {},
+            { [floorKey]: markings.deletedAt || {} },
+            window.state.deletedDefectAt || {}
+        );
+        window.state.defects = defectMerge.defects;
+        window.state.deletedDefectIds = defectMerge.deletedDefectIds;
+        window.state.deletedDefectAt = defectMerge.deletedDefectAt || {};
+        const ndtMerge = mergeNdtDataMaps(
+            { [floorKey]: ndt.items || [] },
+            window.state.ndtData || {},
+            { [floorKey]: ndt.deletedIds || [] },
+            window.state.deletedNdtIds || {},
+            { [floorKey]: ndt.deletedAt || {} },
+            window.state.deletedNdtAt || {}
+        );
+        window.state.ndtData = ndtMerge.ndtData;
+        window.state.deletedNdtIds = ndtMerge.deletedNdtIds;
+        window.state.deletedNdtAt = ndtMerge.deletedNdtAt || {};
+        const dispMerge = mergeNdtDataMaps(
+            { [floorKey]: ndt.displacementGroups || [] },
+            window.state.ndtDisplacementGroups || {},
+            {},
+            {}
+        );
+        window.state.ndtDisplacementGroups = dispMerge.ndtData;
+    }
+
+    async function applyFloorBundleToState(bldg, floorCode, bundle) {
+        if (!bldg || !bldg.id || !floorCode || !bundle) return;
+        mergeFloorBundleIntoState(bldg, floorCode, bundle);
+        await hydrateCurrentBuildingDefectPhotosIntoState();
+        if (_syncInFlight) return;
+        _suppressSyncOnSave = true;
+        if (typeof saveStateToLocalStorage === 'function') saveStateToLocalStorage();
+        _suppressSyncOnSave = false;
+        refreshCurrentBuildingFromState();
+        if (typeof renderBuildingSelector === 'function') renderBuildingSelector();
+        const activeTab = (window.state && window.state.currentTab) || 'tab-home';
+        if (activeTab === 'tab-map') {
+            if (typeof drawCanvas === 'function') drawCanvas();
+            if (typeof renderDefectListPanel === 'function') renderDefectListPanel();
+        } else if (activeTab === 'tab-survey') {
+            if (typeof renderSurveyTable === 'function') renderSurveyTable();
+        } else if (activeTab === 'tab-stats') {
+            if (typeof window.renderDefectStatsTab === 'function') window.renderDefectStatsTab();
+        } else if (activeTab === 'tab-ndt') {
+            if (typeof drawNdtCanvas === 'function') drawNdtCanvas();
+            if (typeof renderNdtSummaryTable === 'function') renderNdtSummaryTable();
+        }
+    }
+
+    async function mergeRemoteFloorBundle(bldg, floorCode, bundle) {
+        if (!bldg || !bundle) return;
+        await applyFloorBundleToState(bldg, floorCode, bundle);
+        if (bundle.fromLegacy) {
+            try { await writeFloorSyncBundle(bldg, floorCode); } catch (e) {
+                console.warn('구버전 층 이관 쓰기 실패:', e);
+            }
+        }
+    }
+
+    function stopFloorRealtimeListeners() {
+        (currentFloorUnsubs || []).forEach((u) => {
+            try { u(); } catch (_e) { /* ignore */ }
+        });
+        currentFloorUnsubs = [];
+        _listeningFloorPath = '';
+        _lastFloorKindIdentity = { markings: '', photos: '', ndt: '' };
+        _lastFloorBundle = { markings: null, photos: null, ndt: null };
+    }
+
+    async function subscribeCurrentFloorSync() {
+        if (!db || !window.state.companyId) {
+            stopFloorRealtimeListeners();
+            return;
+        }
+        if (window.state.currentTab === 'tab-home') {
+            stopFloorRealtimeListeners();
+            return;
+        }
+        const bldg = window.state.currentBuilding
+            || (window.state.buildings || []).find((b) => b && b.id === window.state.currentBuildingId);
+        const floorCode = window.state.currentFloor;
+        const floorRef = getFloorScopeRef(bldg, floorCode);
+        if (!floorRef) {
+            stopFloorRealtimeListeners();
+            return;
+        }
+        const path = floorRef.path;
+        if (_listeningFloorPath === path && currentFloorUnsubs.length) return;
+
+        stopFloorRealtimeListeners();
+        _listeningFloorPath = path;
+
+        const onFloorErr = (err) => {
+            console.warn('층 실시간 리스너 경고:', err);
+            _listenerNeedsResubscribe = true;
+        };
+
+        const kinds = ['markings', 'photos', 'ndt'];
+        let pending = { markings: false, photos: false, ndt: false };
+        const maybeApply = async () => {
+            if (!pending.markings || !pending.photos || !pending.ndt) return;
+            pending = { markings: false, photos: false, ndt: false };
+            const bundle = {
+                markings: _lastFloorBundle.markings || emptyFloorBundle().markings,
+                photos: _lastFloorBundle.photos || emptyFloorBundle().photos,
+                ndt: _lastFloorBundle.ndt || emptyFloorBundle().ndt,
+                fromLegacy: false
+            };
+            await applyFloorBundleToState(bldg, floorCode, bundle);
+        };
+
+        kinds.forEach((kind) => {
+            const ref = getFloorKindDocRef(bldg, floorCode, kind);
+            if (!ref) return;
+            const unsub = ref.onSnapshot(async (doc) => {
+                if (doc && doc.metadata && doc.metadata.hasPendingWrites) return;
+                if (!doc || !doc.exists) {
+                    if (kind === 'markings') {
+                        try {
+                            const migrated = await readFloorSyncBundle(bldg, floorCode);
+                            _lastFloorBundle = {
+                                markings: migrated.markings,
+                                photos: migrated.photos,
+                                ndt: migrated.ndt
+                            };
+                            await mergeRemoteFloorBundle(bldg, floorCode, migrated);
+                        } catch (e) {
+                            console.warn('층 문서 폴백 이관 실패:', e);
+                        }
+                    }
+                    return;
+                }
+                const snapData = doc.data() || {};
+                const ident = bulkPayloadIdentity(snapData);
+                if (ident && ident === _lastFloorKindIdentity[kind] && _lastFloorBundle[kind]) {
+                    pending[kind] = true;
+                    await maybeApply();
+                    return;
+                }
+                const parsed = await decodeFloorKindFromSnap(bldg, floorCode, kind, snapData);
+                if (parsed == null) return;
+                _lastFloorKindIdentity[kind] = ident;
+                _lastFloorBundle[kind] = parsed;
+                pending[kind] = true;
+                await maybeApply();
+            }, onFloorErr);
+            currentFloorUnsubs.push(unsub);
+        });
+    }
+    window.subscribeCurrentFloorSync = subscribeCurrentFloorSync;
 
     /** 결함/NDT 데이터를 회사 루트 문서(safety_app/{companyId})와 분리된 별도 문서에 저장한다.
         도면 PDF와 같은 청크 저장 방식을 재사용 — 결함이 계속 쌓이면 루트 문서 하나로는
@@ -45099,6 +45509,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             return;
         }
         if (_syncDebounceTimer) clearTimeout(_syncDebounceTimer);
+        markCurrentFloorDirty();
         const debounceMs = window.BSA?.performance?.getSyncDebounceMs?.() ?? 400;
         _syncDebounceTimer = setTimeout(() => {
             _syncDebounceTimer = null;
@@ -45295,7 +45706,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             isChanged = true;
         }
 
-        {
+        if (Object.prototype.hasOwnProperty.call(data, 'ndtData')
+            || Object.prototype.hasOwnProperty.call(data, 'deletedNdtIds')
+            || Object.prototype.hasOwnProperty.call(data, 'deletedNdtAt')) {
             const ndtMerge = mergeNdtDataMaps(
                 filterMapKeysByDeletedBuildings(data.ndtData || {}, mergedDeletedBuildings),
                 filterMapKeysByDeletedBuildings(window.state.ndtData || {}, mergedDeletedBuildings),
@@ -45316,7 +45729,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             isChanged = true;
         }
 
-        {
+        if (Object.prototype.hasOwnProperty.call(data, 'ndtDisplacementGroups')) {
             const dispMerge = mergeNdtDataMaps(
                 filterMapKeysByDeletedBuildings(data.ndtDisplacementGroups || {}, mergedDeletedBuildings),
                 filterMapKeysByDeletedBuildings(window.state.ndtDisplacementGroups || {}, mergedDeletedBuildings),
@@ -45592,35 +46005,35 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         let leaseHeartbeatTimer = null;
         const docId = getCompanyDocId();
         const docRef = db.collection('safety_app').doc(docId);
+        const inspectBldg = window.state.currentBuilding
+            || (window.state.buildings || []).find((b) => b && b.id === window.state.currentBuildingId);
+        const inspectFloor = window.state.currentFloor;
+        const inspectFloorRef = (inspectBldg && inspectFloor && window.state.currentTab !== 'tab-home')
+            ? getFloorScopeRef(inspectBldg, inspectFloor)
+            : null;
+        const leaseRef = inspectFloorRef || docRef;
         try {
             // 드래그 중이면 잠금을 잡기 전에 먼저 기다림 (잠금을 오래 쥐고 있지 않게)
             await waitForUiGestureIdle();
 
             // 다른 작업자가 올리는 중이면 잠금이 풀릴 때까지 대기 → 완료본을 받은 뒤 동기화
-            leaseInfo = await acquireCompanySyncLease(docRef);
+            leaseInfo = await acquireCompanySyncLease(leaseRef);
             leaseHeartbeatTimer = setInterval(() => {
-                heartbeatCompanySyncLease(docRef, leaseInfo);
+                heartbeatCompanySyncLease(leaseRef, leaseInfo);
             }, SYNC_LEASE_HEARTBEAT_MS);
 
             // 잠금 대기 중 사용자가 드래그를 시작했을 수 있음 — 상태 교체 전 다시 확인
             await waitForUiGestureIdle();
 
-            // 잠금 획득 트랜잭션에서 이미 최신 문서를 읽었으면 그걸 재사용 — 같은 문서를
-            // 곧바로 두 번 읽는 낭비(Firestore 읽기 할당량 절약)를 없앤다.
-            // 리스너 캐시가 있으면 source:'server' 재조회도 생략한다.
+            // 회사 루트(건물 목록)는 층 잠금 문서와 다르다. 층 lease.serverData를 회사 데이터로 쓰지 않는다.
             let serverData;
-            if (leaseInfo && leaseInfo.serverData) {
+            if (!inspectFloorRef && leaseInfo && leaseInfo.serverData) {
                 serverData = Object.assign({}, leaseInfo.serverData);
             } else if (_lastRootSnapshotData && Object.keys(_lastRootSnapshotData).length) {
                 serverData = Object.assign({}, _lastRootSnapshotData);
             } else {
                 const snap = await fetchCompanyDocSnap(docRef);
                 serverData = snap.exists ? snap.data() : {};
-            }
-            if (_bulkHydratedOnce && _lastBulkSnapshotData) {
-                Object.assign(serverData, _lastBulkSnapshotData);
-            } else {
-                Object.assign(serverData, await fetchBulkSyncDataReliable());
             }
 
             let mergedDeletedBuildings = mergeDeletedBuildingIds(
@@ -45640,34 +46053,22 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             );
             mergedDeletedBuildings.forEach(purgeLocalStateForDeletedBuilding);
 
-            let defectMerge = mergeDefectsMaps(
-                filterMapKeysByDeletedBuildings(serverData.defects || {}, mergedDeletedBuildings),
-                filterMapKeysByDeletedBuildings(window.state.defects || {}, mergedDeletedBuildings),
-                filterMapKeysByDeletedBuildings(serverData.deletedDefectIds || {}, mergedDeletedBuildings),
-                filterMapKeysByDeletedBuildings(window.state.deletedDefectIds || {}, mergedDeletedBuildings),
-                filterMapKeysByDeletedBuildings(serverData.deletedDefectAt || {}, mergedDeletedBuildings),
-                filterMapKeysByDeletedBuildings(window.state.deletedDefectAt || {}, mergedDeletedBuildings)
-            );
-            let ndtMerge = mergeNdtDataMaps(
-                filterMapKeysByDeletedBuildings(serverData.ndtData || {}, mergedDeletedBuildings),
-                filterMapKeysByDeletedBuildings(window.state.ndtData || {}, mergedDeletedBuildings),
-                filterMapKeysByDeletedBuildings(serverData.deletedNdtIds || {}, mergedDeletedBuildings),
-                filterMapKeysByDeletedBuildings(window.state.deletedNdtIds || {}, mergedDeletedBuildings),
-                filterMapKeysByDeletedBuildings(serverData.deletedNdtAt || {}, mergedDeletedBuildings),
-                filterMapKeysByDeletedBuildings(window.state.deletedNdtAt || {}, mergedDeletedBuildings)
-            );
-
             isRemoteSyncing = true;
-            window.state.defects = defectMerge.defects;
-            window.state.deletedDefectIds = defectMerge.deletedDefectIds;
-            window.state.deletedDefectAt = defectMerge.deletedDefectAt || {};
             window.state.confirmedDeletedIds = {};
-            window.state.ndtData = ndtMerge.ndtData;
-            window.state.deletedNdtIds = ndtMerge.deletedNdtIds;
-            window.state.deletedNdtAt = ndtMerge.deletedNdtAt || {};
+
+            const floorsToSync = new Set(_dirtyFloorKeys);
+            const currentKey = currentInspectionFloorKey();
+            if (currentKey) floorsToSync.add(currentKey);
+            for (const floorKey of floorsToSync) {
+                const floorBldg = findBuildingForFloorKey(floorKey);
+                const code = floorCodeFromFloorKey(floorKey, floorBldg);
+                if (!floorBldg || !code) continue;
+                const bundle = await readFloorSyncBundle(floorBldg, code);
+                mergeFloorBundleIntoState(floorBldg, code, bundle);
+            }
 
             // 사진/도면 업로드 (잠금 유지 + heartbeat)
-            await uploadInlineDefectPhotosForSync(window.state.defects);
+            await uploadInlineDefectPhotosForSync(subsetDefectsMap(window.state.defects, Array.from(floorsToSync)));
             const fieldRasterOnly = typeof isNativeAndroidApp === 'function' && isNativeAndroidApp() && !layoutIsPcLike();
             if (!fieldRasterOnly) {
                 await uploadFloorDrawingPdfsForSync(window.state.buildings);
@@ -45686,13 +46087,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             if (!leaseInfo) {
                 if (_lastRootSnapshotData && Object.keys(_lastRootSnapshotData).length) {
                     serverData = Object.assign({}, _lastRootSnapshotData);
-                    if (_bulkHydratedOnce && _lastBulkSnapshotData) {
-                        Object.assign(serverData, _lastBulkSnapshotData);
-                    }
                 } else {
                     const snapFresh = await fetchCompanyDocSnap(docRef);
                     serverData = snapFresh.exists ? snapFresh.data() : {};
-                    Object.assign(serverData, await fetchBulkSyncDataReliable());
                 }
                 mergedDeletedBuildings = mergeDeletedBuildingIds(
                     serverData.deletedBuildingIds,
@@ -45707,40 +46104,6 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     prevAssets
                 );
                 mergedDeletedBuildings.forEach(purgeLocalStateForDeletedBuilding);
-
-                defectMerge = mergeDefectsMaps(
-                    filterMapKeysByDeletedBuildings(serverData.defects || {}, mergedDeletedBuildings),
-                    filterMapKeysByDeletedBuildings(window.state.defects || {}, mergedDeletedBuildings),
-                    filterMapKeysByDeletedBuildings(serverData.deletedDefectIds || {}, mergedDeletedBuildings),
-                    filterMapKeysByDeletedBuildings(window.state.deletedDefectIds || {}, mergedDeletedBuildings),
-                    filterMapKeysByDeletedBuildings(serverData.deletedDefectAt || {}, mergedDeletedBuildings),
-                    filterMapKeysByDeletedBuildings(window.state.deletedDefectAt || {}, mergedDeletedBuildings)
-                );
-                ndtMerge = mergeNdtDataMaps(
-                    filterMapKeysByDeletedBuildings(serverData.ndtData || {}, mergedDeletedBuildings),
-                    filterMapKeysByDeletedBuildings(window.state.ndtData || {}, mergedDeletedBuildings),
-                    filterMapKeysByDeletedBuildings(serverData.deletedNdtIds || {}, mergedDeletedBuildings),
-                    filterMapKeysByDeletedBuildings(window.state.deletedNdtIds || {}, mergedDeletedBuildings),
-                    filterMapKeysByDeletedBuildings(serverData.deletedNdtAt || {}, mergedDeletedBuildings),
-                    filterMapKeysByDeletedBuildings(window.state.deletedNdtAt || {}, mergedDeletedBuildings)
-                );
-                window.state.defects = defectMerge.defects;
-                window.state.deletedDefectIds = defectMerge.deletedDefectIds;
-                window.state.deletedDefectAt = defectMerge.deletedDefectAt || {};
-                window.state.ndtData = ndtMerge.ndtData;
-                window.state.deletedNdtIds = ndtMerge.deletedNdtIds;
-                window.state.deletedNdtAt = ndtMerge.deletedNdtAt || {};
-                await hydrateCurrentBuildingDefectPhotosIntoState();
-
-                {
-                    const dispMerge = mergeNdtDataMaps(
-                        filterMapKeysByDeletedBuildings(serverData.ndtDisplacementGroups || {}, mergedDeletedBuildings),
-                        filterMapKeysByDeletedBuildings(window.state.ndtDisplacementGroups || {}, mergedDeletedBuildings),
-                        {},
-                        {}
-                    );
-                    window.state.ndtDisplacementGroups = dispMerge.ndtData;
-                }
             }
 
             _suppressSyncOnSave = true;
@@ -45754,21 +46117,12 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     return meta;
                 });
 
-            // 결함/NDT 데이터는 계속 쌓이면 회사 루트 문서 하나(1MB 한도)를 넘기므로
-            // 별도 문서(bulkData, 도면 PDF와 같은 청크 저장 방식 재사용)에 따로 쓴다.
-            const bulkFields = {
-                defects: sanitizeDefectsForFirestore(window.state.defects),
-                deletedDefectIds: defectMerge.deletedDefectIds,
-                deletedDefectAt: defectMerge.deletedDefectAt || {},
-                ndtData: window.state.ndtData || {},
-                deletedNdtIds: ndtMerge.deletedNdtIds,
-                deletedNdtAt: ndtMerge.deletedNdtAt || {},
-                ndtDisplacementGroups: window.state.ndtDisplacementGroups || {}
-            };
-            await writeBulkSyncData(bulkFields);
-            _lastBulkSnapshotData = bulkFields;
-            _bulkHydratedOnce = true;
-
+            for (const floorKey of floorsToSync) {
+                const floorBldg = findBuildingForFloorKey(floorKey);
+                const code = floorCodeFromFloorKey(floorKey, floorBldg);
+                if (!floorBldg || !code) continue;
+                await writeFloorSyncBundle(floorBldg, code);
+            }
             const dataToSync = {
                 // 예전 버전에서 루트 문서에 직접 쓰던 필드들 — bulkData로 이전했으니 루트에서는 제거
                 // (merge:true는 필드를 지우지 않으므로 FieldValue.delete()로 명시적으로 삭제해야
@@ -45848,7 +46202,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 leaseHeartbeatTimer = null;
             }
             if (leaseInfo) {
-                await releaseCompanySyncLease(docRef, leaseInfo);
+                await releaseCompanySyncLease(leaseRef, leaseInfo);
                 leaseInfo = null;
             }
             setTimeout(() => { isRemoteSyncing = false; }, 400);
@@ -45876,7 +46230,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     let _bulkHydratedOnce = false;
 
     function hasLiveFirestoreListeners() {
-        return !!(currentUnsubscribe && currentBulkUnsubscribe)
+        return !!currentUnsubscribe
             && _listeningCompanyId === getCompanyDocId()
             && !_listenerNeedsResubscribe;
     }
@@ -45890,12 +46244,15 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             try { currentBulkUnsubscribe(); } catch (e) { /* ignore */ }
             currentBulkUnsubscribe = null;
         }
+        stopFloorRealtimeListeners();
         _listeningCompanyId = null;
         if (opts && opts.clearCache) {
             _lastRootSnapshotData = {};
             _lastBulkSnapshotData = {};
             _bulkHydratedOnce = false;
             _lastBulkPayloadIdentity = '';
+            _legacyBulkCache = null;
+            _legacyBulkCacheTried = false;
         }
     }
 
@@ -45922,22 +46279,16 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
     function combineListenerSnapshotData() {
         const data = Object.assign({}, _lastRootSnapshotData);
-        const bulk = _lastBulkSnapshotData || {};
-        const BULK_KEYS = [
-            'defects', 'deletedDefectIds', 'deletedDefectAt',
+        ['defects', 'deletedDefectIds', 'deletedDefectAt',
             'ndtData', 'deletedNdtIds', 'deletedNdtAt',
-            'ndtDisplacementGroups'
-        ];
-        BULK_KEYS.forEach((k) => { delete data[k]; });
-        Object.assign(data, bulk);
+            'ndtDisplacementGroups'].forEach((k) => { delete data[k]; });
         return data;
     }
 
     async function applyCombinedSnapshot() {
         if (typeof updateOnlineBadge === 'function') updateOnlineBadge(true);
         const data = combineListenerSnapshotData();
-        const bulk = _lastBulkSnapshotData || {};
-        if (!Object.keys(data).length && !Object.keys(bulk).length) return;
+        if (!Object.keys(data).length) return;
         if (_syncInFlight) {
             _pendingRemoteData = data;
             return;
@@ -45955,18 +46306,17 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         try {
             const deadline = Date.now() + 2000;
             while (Date.now() < deadline) {
-                if (Object.keys(_lastRootSnapshotData).length || _bulkHydratedOnce) break;
+                if (Object.keys(_lastRootSnapshotData).length) break;
                 await sleepMs(50);
             }
-            if (Object.keys(_lastRootSnapshotData).length || Object.keys(_lastBulkSnapshotData || {}).length) {
+            if (Object.keys(_lastRootSnapshotData).length) {
                 await applyCombinedSnapshot();
                 return;
             }
             const docRef = db.collection('safety_app').doc(getCompanyDocId());
             const snap = await fetchCompanyDocSnap(docRef);
             const rootData = snap.exists ? snap.data() : {};
-            const bulkData = await fetchBulkSyncData();
-            await applyRemoteSnapshotFromListener(Object.assign({}, rootData, bulkData || {}));
+            await applyRemoteSnapshotFromListener(rootData);
         } catch (e) {
             console.warn('회사 데이터 초기 조회 실패:', e);
         }
@@ -46001,8 +46351,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             }
         };
 
-        // 결함/NDT는 별도 문서(bulkData)에 저장되므로, 루트 문서와 bulkData 문서 두 곳을
-        // 각각 구독해서 최신값을 합쳐 적용한다 (한쪽만 바뀌어도 최신 상태를 유지해야 함).
+        // 회사 루트는 건물 목록·설정만. 마킹/NDT는 지금 층 문서만 구독한다.
         currentUnsubscribe = db.collection('safety_app').doc(docId).onSnapshot(async (doc) => {
             const next = (doc && doc.exists && doc.data()) || {};
             if (doc && doc.metadata && doc.metadata.hasPendingWrites) {
@@ -46015,43 +46364,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             await applyCombinedSnapshot();
         }, onListenerErr);
 
-        currentBulkUnsubscribe = getBulkSyncDocRef().onSnapshot(async (doc) => {
-            if (doc && doc.metadata && doc.metadata.hasPendingWrites) {
-                return;
-            }
-            if (!doc || !doc.exists) {
-                if (!_bulkHydratedOnce) {
-                    _lastBulkSnapshotData = {};
-                    _bulkHydratedOnce = true;
-                    await applyCombinedSnapshot();
-                }
-                return;
-            }
-            const snapData = doc.data() || {};
-            const ident = bulkPayloadIdentity(snapData);
-            if (ident && ident === _lastBulkPayloadIdentity && _bulkHydratedOnce && _lastBulkSnapshotData
-                && Object.keys(_lastBulkSnapshotData).length) {
-                return;
-            }
-            let parsed = null;
-            try {
-                const json = await decodeChunkedPayloadFromData(snapData, getBulkSyncDocRef());
-                if (json == null) parsed = null;
-                else if (!json) parsed = {};
-                else parsed = JSON.parse(json);
-            } catch (e) {
-                console.warn('bulkData 스냅샷 파싱 실패:', e);
-                parsed = null;
-            }
-            if (parsed == null) {
-                console.warn('bulkData 불완전 읽기 — 이전 스냅샷 유지');
-                return;
-            }
-            _lastBulkSnapshotData = parsed;
-            _lastBulkPayloadIdentity = ident;
-            _bulkHydratedOnce = true;
-            await applyCombinedSnapshot();
-        }, onListenerErr);
+        subscribeCurrentFloorSync();
     }
 
     // ==========================================================================
