@@ -3,7 +3,7 @@
    앱 JS/CSS는 네트워크 전용(캐시 fallback 없음) — 모바일 웹 구버전 고착 방지
    ========================================================================== */
 
-const CACHE_NAME = 'building-safety-v20260917_174923';
+const CACHE_NAME = 'building-safety-v20260917_182356';
 
 /** 오프라인 셸·한글 템플릿만 선캐시 (app.js / js/* 는 제외) */
 const STATIC_ASSETS = [
@@ -64,6 +64,11 @@ self.addEventListener('fetch', (event) => {
     if (url.includes('firestore.googleapis.com') || url.includes('google.com/recaptcha')) {
         return;
     }
+    // 브라우저 확장(chrome-extension:) 등 http(s)가 아닌 요청은 Cache API에 못 넣는다.
+    // 그냥 두면 cache.put이 거부돼 "Uncaught (in promise) TypeError"가 콘솔에 남는다.
+    if (!url.startsWith('http:') && !url.startsWith('https:')) {
+        return;
+    }
 
     const isVersionCheck = url.includes('web-version.json');
     const isHtml = event.request.destination === 'document'
@@ -91,7 +96,10 @@ self.addEventListener('fetch', (event) => {
             .then((networkResponse) => {
                 if (networkResponse && networkResponse.status === 200 && networkResponse.type === 'basic') {
                     const clone = networkResponse.clone();
-                    caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
+                    // 캐시 저장 실패(용량 초과·저장 불가 스킴 등)는 응답 자체와 무관하므로 삼킨다
+                    caches.open(CACHE_NAME)
+                        .then((cache) => cache.put(event.request, clone))
+                        .catch(() => {});
                 }
                 return networkResponse;
             })

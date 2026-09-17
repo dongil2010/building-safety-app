@@ -42526,6 +42526,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     const SYNC_RETRY_MAX_MS = 60000;
     const SYNC_ERROR_TOAST_COOLDOWN_MS = 10000;
     const SYNC_QUOTA_COOLDOWN_MS = 120000;
+    // 권한 오류는 규칙을 다시 게시해야 풀린다 — 짧게 재시도해봐야 소용없으니 길게 쉰다.
+    // (0으로 두고 완전히 멈추지는 않는다. 관리자가 규칙을 올리면 새로고침 없이 스스로 회복)
+    const SYNC_PERMISSION_COOLDOWN_MS = 300000;
     let _photoFetchQuotaPausedUntil = 0;
     let _photoFetchInflight = 0;
     const PHOTO_FETCH_MAX_CONCURRENT = 4;
@@ -42538,6 +42541,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             || /Write stream exhausted|maximum allowed queued writes|using maximum backoff/i.test(msg);
     }
 
+    // 보안 규칙에 막힌 오류 판별은 isFirestorePermissionError(아래 도면 티어 쪽에 정의)를 쓴다.
+    // 할당량 초과와 달리 "기다리면 풀리는" 오류가 아니라, 규칙을 고치기 전까지 몇 번을 다시
+    // 시도해도 똑같이 실패한다. 그래서 재시도 루프에서 반드시 걸러내야 한다.
+
     function clearSyncErrorRetryTimer() {
         if (_syncRetryTimer) {
             clearTimeout(_syncRetryTimer);
@@ -42545,7 +42552,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         }
     }
 
-    /** 통신·할당량 오류 후 지수 백오프로 재시도 (429는 최소 2분 쉬고 한 번만 예약) */
+    /**
+     * 통신·할당량 오류 후 지수 백오프로 재시도
+     * (429는 최소 2분, 권한 오류는 최소 5분 쉬고 한 번만 예약)
+     */
     function scheduleSyncRetryAfterError(err) {
         if (_syncRetryTimer) return;
         const isQuota = isFirestoreQuotaError(err);
@@ -42556,6 +42566,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (isQuota) {
             delay = Math.max(delay, SYNC_QUOTA_COOLDOWN_MS);
             pauseFirestoreWrites(delay);
+        }
+        if (isFirestorePermissionError(err)) {
+            delay = Math.max(delay, SYNC_PERMISSION_COOLDOWN_MS);
         }
         _syncRetryFailCount = Math.min(_syncRetryFailCount + 1, 8);
         _syncRetryTimer = setTimeout(() => {
@@ -46428,6 +46441,11 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 // 같은 문서를 더 두드려서 오히려 제한이 안 풀리는 악순환이었다. 429는 여기서 계속
                 // 돌지 않고 바로 던져서, 호출부(syncStateToFirebase)의 지수 백오프가 처리하게 한다.
                 if (e && e.code === 'resource-exhausted') throw e;
+                // 2026-09-17: 보안 규칙에 막힌 경우(대개 규칙 미게시)도 여기서 계속 돌고 있었다 —
+                // 0.4초마다 45초(SYNC_LEASE_WAIT_MS)면 한 번 동기화할 때마다 실패 트랜잭션
+                // 100여 회. 규칙을 고치기 전엔 절대 성공하지 않는 오류라 재시도가 무의미하고,
+                // 콘솔 로그와 읽기 쿼터만 태운다. 바로 던져서 호출부가 길게 쉬게 한다.
+                if (isFirestorePermissionError(e)) throw e;
                 // 그 외 네트워크/경합 실패는 "다른 작업자 대기"가 아님 — 조용히 재시도
                 console.warn('동기화 잠금 획득 실패, 재시도:', e);
             }
@@ -46712,15 +46730,29 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             _syncPending = false;
             if (isFirestoreQuotaError(e)) pauseFirestoreWrites(SYNC_QUOTA_COOLDOWN_MS);
             const now = Date.now();
-            if (now - _syncErrorToastAt >= SYNC_ERROR_TOAST_COOLDOWN_MS) {
+            const isPermErr = isFirestorePermissionError(e);
+            // 권한 오류는 원인이 늘 같다(규칙 미게시) — 무슨 일인지·누가 뭘 해야 하는지
+            // 바로 알 수 있게 따로 안내하고, 10초가 아니라 재시도 주기에 맞춰 드물게 띄운다.
+            const toastCooldown = isPermErr ? SYNC_PERMISSION_COOLDOWN_MS : SYNC_ERROR_TOAST_COOLDOWN_MS;
+            if (now - _syncErrorToastAt >= toastCooldown) {
                 _syncErrorToastAt = now;
+                if (isPermErr) {
+                    console.error(
+                        '서버 접근 권한 없음 — Firestore 보안 규칙이 최신이 아닐 수 있습니다.\n'
+                        + '레포의 firestore.rules 내용을 Firebase 콘솔 → Firestore Database → 규칙 탭에 '
+                        + '붙여넣고 게시(Publish)하세요. (CLI: firebase deploy --only firestore:rules)',
+                        e
+                    );
+                }
                 if (typeof window.showToast === 'function') {
                     window.showToast(
-                        isFirestoreQuotaError(e)
-                            ? 'Firebase 읽기/쓰기 한도(429)에 걸렸습니다. 2분 후 자동 재시도합니다.'
-                            : '서버 동기화에 실패했습니다. 잠시 후 자동으로 재시도합니다.',
+                        isPermErr
+                            ? '서버 접근 권한이 없어 동기화를 멈췄습니다. 관리자에게 Firebase 보안 규칙 게시를 요청해 주세요. (5분 후 자동 재시도)'
+                            : isFirestoreQuotaError(e)
+                                ? 'Firebase 읽기/쓰기 한도(429)에 걸렸습니다. 2분 후 자동 재시도합니다.'
+                                : '서버 동기화에 실패했습니다. 잠시 후 자동으로 재시도합니다.',
                         'warning',
-                        isFirestoreQuotaError(e) ? 6000 : 4500
+                        isPermErr ? 8000 : (isFirestoreQuotaError(e) ? 6000 : 4500)
                     );
                 }
             }
