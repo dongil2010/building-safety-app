@@ -90,6 +90,10 @@
                     title: job.title,
                     imgIdPrefix: job.imgIdPrefix,
                     floorCode: fc,
+                    // floorLabel/manyFloors: 캡션을 부르는 쪽에서 다시 조립할 수 있게 같이 넘긴다.
+                    // (한글 템플릿의 개요번호 제목을 살려 쓰는 경우 캡션은 [도면 7-N]으로 따로 매긴다)
+                    floorLabel: floorLabel,
+                    manyFloors: many,
                     caption: formatCaption(seq, job.title, floorLabel, many)
                 });
             });

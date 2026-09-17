@@ -35104,6 +35104,24 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     const HWPX_HP_NS = 'http://www.hancom.co.kr/hwpml/2011/paragraph';
     const HWPX_HC_NS = 'http://www.hancom.co.kr/hwpml/2011/core';
 
+    // 위치도 캡션에 [도면 7-N] 번호를 매기기 위한 임시 표시. 캡션을 채울 때 앞에 붙여 두고,
+    // 문서를 다 만든 뒤 numberHwpxFigureCaptions가 문서 순서대로 실제 번호로 바꾼다.
+    // (채워 넣는 순서 ≠ 최종 문서 순서라서 — 3종은 결함위치도를 맨 뒤로 몰아넣는다 — 번호를
+    //  그때그때 매기면 뒤엉킨다. 반드시 마지막에 한 번에 매겨야 한다.)
+    const HWPX_FIG_MARK = '␟';
+
+    /** 표시가 붙은 위치도 캡션에 문서 순서대로 [도면 7-1], [도면 7-2] … 를 매긴다. */
+    function numberHwpxFigureCaptions(xmlDoc) {
+        let figNo = 0;
+        Array.from(xmlDoc.getElementsByTagNameNS(HWPX_HP_NS, 't')).forEach((t) => {
+            const txt = t.textContent || '';
+            if (txt.indexOf(HWPX_FIG_MARK) !== 0) return;
+            figNo++;
+            t.textContent = `[도면 7-${figNo}] ${txt.slice(HWPX_FIG_MARK.length)}`;
+        });
+        return figNo;
+    }
+
     const mergeGrade3CompareStampHeader = (mainHdr, stampHdr, stampParas) => {
         const ser = new XMLSerializer();
         let fragmentXml = '';
@@ -36936,7 +36954,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
                         const captionTc = locationMapTbl.getElementsByTagNameNS(HP_NS, 'tc')[1];
                         const captionT = captionTc.getElementsByTagNameNS(HP_NS, 't')[0];
-                        if (captionT) captionT.textContent = `${getFloorLabel(floorCode)} 결함위치도`;
+                        if (captionT) captionT.textContent = `${HWPX_FIG_MARK}${getFloorLabel(floorCode)} 결함위치도`;
                     } else {
                         window.showToast(`${getFloorLabel(floorCode)}에 등록된 도면이 없어 위치도는 제외하고 만듭니다.`, 'info', 4000);
                     }
@@ -38119,9 +38137,17 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                         // "콘크리트 강도측정"/"콘크리트 탄산화 시험"/"변위측정" 소제목 3개가 내용 없이
                         // 문단만 그대로 남아있었다(사용자가 실제 한글에서 열어 확인) — 위 5개와 같은
                         // 방식으로 찾아서 같이 지운다.
-                        const strengthBareHeadingPara = findHeading('콘크리트 강도측정');
-                        const carbBareHeadingPara = findHeading('콘크리트 탄산화 시험');
-                        const dispBareHeadingPara = findHeading('변위측정');
+                        // 이 잔재 3개는 부분일치로 찾으면 안 된다 — 공백을 무시하고 보면
+                        // '콘크리트강도측정'이 '비파괴장비조사위치도(콘크리트강도측정및탄산화측정)'
+                        // 안에 들어있어서, 살려 써야 할 위치도 제목이 잡힌다. 정확히 같은 문단만 찾는다.
+                        const findExactPara = (text) => {
+                            const want = String(text).replace(/\s+/g, '');
+                            return all.find(p => p.getElementsByTagNameNS(HP_NS, 'tbl').length === 0
+                                && paraText(p).replace(/\s+/g, '') === want);
+                        };
+                        const strengthBareHeadingPara = findExactPara('콘크리트 강도측정');
+                        const carbBareHeadingPara = findExactPara('콘크리트 탄산화 시험');
+                        const dispBareHeadingPara = findExactPara('변위측정');
                         const oldStrengthCarbTbl = findTblById('2137459495');
                         let oldStrengthCarbTblPara = oldStrengthCarbTbl;
                         while (oldStrengthCarbTblPara && oldStrengthCarbTblPara.localName !== 'p') oldStrengthCarbTblPara = oldStrengthCarbTblPara.parentNode;
@@ -38131,10 +38157,13 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                         const mapHeadingCandidates = [
                             measureHeadingPara, strengthCarbHeadingPara, fireproofHeadingPara, dispHeadingPara
                         ].filter(Boolean);
+                        // 위 4개는 템플릿의 개요번호 제목 문단이라 한글이 "7.1.6. 부재실측 위치도"처럼
+                        // 번호를 자동으로 붙여 준다. 지우지 말고 살려서 그 아래에 위치도를 넣는다.
+                        // (위치도가 하나도 안 들어간 제목만 나중에 개별적으로 지운다)
                         const headingsToRemove = [
-                            measureHeadingPara, strengthCarbHeadingPara, oldStrengthCarbTblPara, fireproofHeadingPara, dispHeadingPara, bareMeasurePara,
+                            oldStrengthCarbTblPara, bareMeasurePara,
                             strengthBareHeadingPara, carbBareHeadingPara, dispBareHeadingPara
-                        ];
+                        ].filter(p => p && mapHeadingCandidates.indexOf(p) < 0);
                         let mapInsertAfter = null;
                         if (mapHeadingCandidates.length > 0) {
                             const first = mapHeadingCandidates.reduce((a, b) => {
@@ -38215,11 +38244,14 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                                 .replace(/&/g, '&amp;')
                                 .replace(/</g, '&lt;')
                                 .replace(/>/g, '&gt;');
-                            const appendLocationMap = async (label, category, imgIdPrefix, floorForMap) => {
+                            // anchorOverride: 이 위치도가 붙을 제목 문단(또는 같은 제목 아래 앞 위치도).
+                            // keepWithAnchor: 표 높이가 거의 한 쪽이라, 제목 바로 아래 첫 장만 쪽 나눔을
+                            // 끄고 제목과 같은 쪽에 붙인다(제목만 앞 쪽에 남는 것 방지).
+                            const appendLocationMap = async (label, category, imgIdPrefix, floorForMap, anchorOverride, keepWithAnchor) => {
                                 const mapDataUrl = await renderNdtFloorPlanCanvasDataUrlAsync(floorForMap, category);
                                 if (!mapDataUrl) {
                                     console.warn('NDT 위치도 렌더 실패:', floorForMap, category);
-                                    return;
+                                    return null;
                                 }
                                 imgCounter++;
                                 const xml = LOC_MAP_TBL_PARA_XML
@@ -38229,14 +38261,16 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                                     .replace('CAPTION', escapeHwpxText(label));
                                 const doc = new DOMParser().parseFromString(`<root xmlns:hp="${HP_NS}" xmlns:hc="${HC_NS}">${xml}</root>`, 'application/xml');
                                 const newPara = xmlDoc.importNode(doc.documentElement.firstChild, true);
-                                if (mapAnchor && mapAnchor.parentNode) {
-                                    mapAnchor.parentNode.insertBefore(newPara, mapAnchor.nextSibling);
+                                newPara.setAttribute('pageBreak', keepWithAnchor ? '0' : '1');
+                                const anchor = (anchorOverride && anchorOverride.parentNode) ? anchorOverride : mapAnchor;
+                                if (anchor && anchor.parentNode) {
+                                    anchor.parentNode.insertBefore(newPara, anchor.nextSibling);
                                 } else if (mapInsertBefore && mapInsertBefore.parentNode) {
                                     mapInsertBefore.parentNode.insertBefore(newPara, mapInsertBefore);
                                 } else if (sec) {
                                     sec.appendChild(newPara);
                                 } else {
-                                    return;
+                                    return null;
                                 }
                                 mapAnchor = newPara;
 
@@ -38247,6 +38281,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                                 zip.file(`BinData/${imgId}.${ext}`, bytes);
                                 manifestAdds.push(`<opf:item id="${imgId}" href="BinData/${imgId}.${ext}" media-type="${mime}" isEmbeded="1"/>`);
                                 setPicImage(pic, imgId, size.w, size.h, LOC_MAP_MAX_W, LOC_MAP_MAX_H);
+                                return newPara;
                             };
 
                             const locMapInserts = (ndtMapsApi && typeof ndtMapsApi.expandLocationMapInserts === 'function')
@@ -38261,16 +38296,51 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                                 )
                                 : [];
                             if (locMapInserts.length === 0) {
-                                if (mapFlags.measure) locMapInserts.push({ caption: '7.1.8 부재실측 위치도', category: '실측', imgIdPrefix: 'ndtLocMapMeasure', floorCode });
-                                if (mapFlags.strengthCarb) locMapInserts.push({ caption: '7.1.9 비파괴장비조사 위치도', category: '일반비파괴', imgIdPrefix: 'ndtLocMapStrengthCarb', floorCode });
-                                if (mapFlags.fireproof) locMapInserts.push({ caption: '내화피복 측정 위치도', category: '내화피복', imgIdPrefix: 'ndtLocMapFireproof', floorCode });
-                                if (mapFlags.tilt) locMapInserts.push({ caption: '외벽 기울기 측정 위치도', category: '기울기', imgIdPrefix: 'ndtLocMapTilt', floorCode });
-                                if (mapFlags.settlement) locMapInserts.push({ caption: '부동침하 기울기 측정 위치도', category: '변위', imgIdPrefix: 'ndtLocMapSettlement', floorCode });
-                                if (mapFlags.memberDisp) locMapInserts.push({ caption: '7.1.10 변위측정 위치도', category: '부재변위', imgIdPrefix: 'ndtLocMapMemberDisp', floorCode });
+                                // 모듈을 못 불러온 경우의 대비책. 번호는 아래에서 [도면 7-N]으로 매기므로
+                                // 여기서는 제목만 넣는다(캡션에 7.1.8 같은 번호를 미리 박지 않는다).
+                                if (mapFlags.measure) locMapInserts.push({ title: '부재실측 위치도', category: '실측', imgIdPrefix: 'ndtLocMapMeasure', floorCode });
+                                if (mapFlags.strengthCarb) locMapInserts.push({ title: '비파괴장비조사 위치도', category: '일반비파괴', imgIdPrefix: 'ndtLocMapStrengthCarb', floorCode });
+                                if (mapFlags.fireproof) locMapInserts.push({ title: '내화피복 측정 위치도', category: '내화피복', imgIdPrefix: 'ndtLocMapFireproof', floorCode });
+                                if (mapFlags.tilt) locMapInserts.push({ title: '외벽 기울기 측정 위치도', category: '기울기', imgIdPrefix: 'ndtLocMapTilt', floorCode });
+                                if (mapFlags.settlement) locMapInserts.push({ title: '부동침하 기울기 측정 위치도', category: '변위', imgIdPrefix: 'ndtLocMapSettlement', floorCode });
+                                if (mapFlags.memberDisp) locMapInserts.push({ title: '변위측정 위치도', category: '부재변위', imgIdPrefix: 'ndtLocMapMemberDisp', floorCode });
                             }
+                            // 위치도를 템플릿 제목 문단별로 나눠 각 제목 바로 아래에 넣는다.
+                            // 번호는 캡션에 직접 쓰지 않고 표시만 붙여 두었다가, 문서를 다 만든 뒤
+                            // numberHwpxFigureCaptions가 결함위치도와 이어서 [도면 7-N]으로 매긴다.
+                            const headingForCategory = (cat) => {
+                                if (cat === '실측') return measureHeadingPara;
+                                if (cat === '일반비파괴') return strengthCarbHeadingPara;
+                                if (cat === '내화피복') return fireproofHeadingPara;
+                                return dispHeadingPara; // 기울기·부동침하·부재변위는 "변위조사 위치도" 아래로
+                            };
+                            const lastParaUnderHeading = new Map();
                             for (const job of locMapInserts) {
-                                await appendLocationMap(job.caption, job.category, job.imgIdPrefix, job.floorCode || floorCode);
+                                const heading = headingForCategory(job.category);
+                                const usable = (heading && heading.parentNode) ? heading : null;
+                                const prev = usable ? lastParaUnderHeading.get(usable) : null;
+                                const title = job.title || job.caption || '';
+                                const label = (job.manyFloors && job.floorLabel)
+                                    ? `${job.floorLabel} ${title}`
+                                    : title;
+                                const inserted = await appendLocationMap(
+                                    HWPX_FIG_MARK + label,
+                                    job.category,
+                                    job.imgIdPrefix,
+                                    job.floorCode || floorCode,
+                                    prev || usable,
+                                    // 제목 바로 아래 첫 장만 제목과 같은 쪽에 붙인다
+                                    !!(usable && !prev)
+                                );
+                                if (inserted && usable) lastParaUnderHeading.set(usable, inserted);
                             }
+                            // 위치도가 하나도 안 들어간 제목은 빈 제목만 남으므로 지운다.
+                            // 들어간 제목은 쪽 나눔을 켜서 위치도 묶음이 새 쪽에서 시작하게 한다.
+                            mapHeadingCandidates.forEach((p) => {
+                                if (!p || !p.parentNode) return;
+                                if (lastParaUnderHeading.has(p)) p.setAttribute('pageBreak', '1');
+                                else p.parentNode.removeChild(p);
+                            });
                         }
                     }
                 }
@@ -38591,6 +38661,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             }
 
             Array.from(xmlDoc.getElementsByTagNameNS(HP_NS, 'tbl')).forEach(ensureTblTreatAsChar);
+
+            // 결함위치도·비파괴 장비조사 위치도 캡션에 [도면 7-N]을 하나로 이어서 매긴다.
+            // 문서가 완성된 뒤라야 최종 배치 순서대로 번호가 맞는다.
+            numberHwpxFigureCaptions(xmlDoc);
 
             if (hwpxHeaderDirty && hwpxHeaderText) {
                 zip.file('Contents/header.xml', hwpxHeaderText);
@@ -39266,7 +39340,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
                         const captionTc = locationMapTbl.getElementsByTagNameNS(HP_NS, 'tc')[1];
                         const captionT = captionTc.getElementsByTagNameNS(HP_NS, 't')[0];
-                        if (captionT) captionT.textContent = `${getFloorLabel(floorCode)} 결함위치도`;
+                        if (captionT) captionT.textContent = `${HWPX_FIG_MARK}${getFloorLabel(floorCode)} 결함위치도`;
                     } else {
                         window.showToast(`${getFloorLabel(floorCode)}에 등록된 도면이 없어 위치도는 제외하고 만듭니다.`, 'info', 4000);
                     }
@@ -40314,9 +40388,17 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                         // "콘크리트 강도측정"/"콘크리트 탄산화 시험"/"변위측정" 소제목 3개가 내용 없이
                         // 문단만 그대로 남아있었다(사용자가 실제 한글에서 열어 확인) — 위 5개와 같은
                         // 방식으로 찾아서 같이 지운다.
-                        const strengthBareHeadingPara = findHeading('콘크리트 강도측정');
-                        const carbBareHeadingPara = findHeading('콘크리트 탄산화 시험');
-                        const dispBareHeadingPara = findHeading('변위측정');
+                        // 이 잔재 3개는 부분일치로 찾으면 안 된다 — 공백을 무시하고 보면
+                        // '콘크리트강도측정'이 '비파괴장비조사위치도(콘크리트강도측정및탄산화측정)'
+                        // 안에 들어있어서, 살려 써야 할 위치도 제목이 잡힌다. 정확히 같은 문단만 찾는다.
+                        const findExactPara = (text) => {
+                            const want = String(text).replace(/\s+/g, '');
+                            return all.find(p => p.getElementsByTagNameNS(HP_NS, 'tbl').length === 0
+                                && paraText(p).replace(/\s+/g, '') === want);
+                        };
+                        const strengthBareHeadingPara = findExactPara('콘크리트 강도측정');
+                        const carbBareHeadingPara = findExactPara('콘크리트 탄산화 시험');
+                        const dispBareHeadingPara = findExactPara('변위측정');
                         const oldStrengthCarbTbl = findTblById('2137459495');
                         let oldStrengthCarbTblPara = oldStrengthCarbTbl;
                         while (oldStrengthCarbTblPara && oldStrengthCarbTblPara.localName !== 'p') oldStrengthCarbTblPara = oldStrengthCarbTblPara.parentNode;
@@ -40326,10 +40408,13 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                         const mapHeadingCandidates = [
                             measureHeadingPara, strengthCarbHeadingPara, fireproofHeadingPara, dispHeadingPara
                         ].filter(Boolean);
+                        // 위 4개는 템플릿의 개요번호 제목 문단이라 한글이 "7.1.6. 부재실측 위치도"처럼
+                        // 번호를 자동으로 붙여 준다. 지우지 말고 살려서 그 아래에 위치도를 넣는다.
+                        // (위치도가 하나도 안 들어간 제목만 나중에 개별적으로 지운다)
                         const headingsToRemove = [
-                            measureHeadingPara, strengthCarbHeadingPara, oldStrengthCarbTblPara, fireproofHeadingPara, dispHeadingPara, bareMeasurePara,
+                            oldStrengthCarbTblPara, bareMeasurePara,
                             strengthBareHeadingPara, carbBareHeadingPara, dispBareHeadingPara
-                        ];
+                        ].filter(p => p && mapHeadingCandidates.indexOf(p) < 0);
                         let mapInsertAfter = null;
                         if (mapHeadingCandidates.length > 0) {
                             const first = mapHeadingCandidates.reduce((a, b) => {
@@ -40410,11 +40495,14 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                                 .replace(/&/g, '&amp;')
                                 .replace(/</g, '&lt;')
                                 .replace(/>/g, '&gt;');
-                            const appendLocationMap = async (label, category, imgIdPrefix, floorForMap) => {
+                            // anchorOverride: 이 위치도가 붙을 제목 문단(또는 같은 제목 아래 앞 위치도).
+                            // keepWithAnchor: 표 높이가 거의 한 쪽이라, 제목 바로 아래 첫 장만 쪽 나눔을
+                            // 끄고 제목과 같은 쪽에 붙인다(제목만 앞 쪽에 남는 것 방지).
+                            const appendLocationMap = async (label, category, imgIdPrefix, floorForMap, anchorOverride, keepWithAnchor) => {
                                 const mapDataUrl = await renderNdtFloorPlanCanvasDataUrlAsync(floorForMap, category);
                                 if (!mapDataUrl) {
                                     console.warn('NDT 위치도 렌더 실패:', floorForMap, category);
-                                    return;
+                                    return null;
                                 }
                                 imgCounter++;
                                 const xml = LOC_MAP_TBL_PARA_XML
@@ -40424,14 +40512,16 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                                     .replace('CAPTION', escapeHwpxText(label));
                                 const doc = new DOMParser().parseFromString(`<root xmlns:hp="${HP_NS}" xmlns:hc="${HC_NS}">${xml}</root>`, 'application/xml');
                                 const newPara = xmlDoc.importNode(doc.documentElement.firstChild, true);
-                                if (mapAnchor && mapAnchor.parentNode) {
-                                    mapAnchor.parentNode.insertBefore(newPara, mapAnchor.nextSibling);
+                                newPara.setAttribute('pageBreak', keepWithAnchor ? '0' : '1');
+                                const anchor = (anchorOverride && anchorOverride.parentNode) ? anchorOverride : mapAnchor;
+                                if (anchor && anchor.parentNode) {
+                                    anchor.parentNode.insertBefore(newPara, anchor.nextSibling);
                                 } else if (mapInsertBefore && mapInsertBefore.parentNode) {
                                     mapInsertBefore.parentNode.insertBefore(newPara, mapInsertBefore);
                                 } else if (sec) {
                                     sec.appendChild(newPara);
                                 } else {
-                                    return;
+                                    return null;
                                 }
                                 mapAnchor = newPara;
 
@@ -40442,6 +40532,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                                 zip.file(`BinData/${imgId}.${ext}`, bytes);
                                 manifestAdds.push(`<opf:item id="${imgId}" href="BinData/${imgId}.${ext}" media-type="${mime}" isEmbeded="1"/>`);
                                 setPicImage(pic, imgId, size.w, size.h, LOC_MAP_MAX_W, LOC_MAP_MAX_H);
+                                return newPara;
                             };
 
                             const locMapInserts = (ndtMapsApi && typeof ndtMapsApi.expandLocationMapInserts === 'function')
@@ -40456,16 +40547,51 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                                 )
                                 : [];
                             if (locMapInserts.length === 0) {
-                                if (mapFlags.measure) locMapInserts.push({ caption: '7.1.8 부재실측 위치도', category: '실측', imgIdPrefix: 'ndtLocMapMeasure', floorCode });
-                                if (mapFlags.strengthCarb) locMapInserts.push({ caption: '7.1.9 비파괴장비조사 위치도', category: '일반비파괴', imgIdPrefix: 'ndtLocMapStrengthCarb', floorCode });
-                                if (mapFlags.fireproof) locMapInserts.push({ caption: '내화피복 측정 위치도', category: '내화피복', imgIdPrefix: 'ndtLocMapFireproof', floorCode });
-                                if (mapFlags.tilt) locMapInserts.push({ caption: '외벽 기울기 측정 위치도', category: '기울기', imgIdPrefix: 'ndtLocMapTilt', floorCode });
-                                if (mapFlags.settlement) locMapInserts.push({ caption: '부동침하 기울기 측정 위치도', category: '변위', imgIdPrefix: 'ndtLocMapSettlement', floorCode });
-                                if (mapFlags.memberDisp) locMapInserts.push({ caption: '7.1.10 변위측정 위치도', category: '부재변위', imgIdPrefix: 'ndtLocMapMemberDisp', floorCode });
+                                // 모듈을 못 불러온 경우의 대비책. 번호는 아래에서 [도면 7-N]으로 매기므로
+                                // 여기서는 제목만 넣는다(캡션에 7.1.8 같은 번호를 미리 박지 않는다).
+                                if (mapFlags.measure) locMapInserts.push({ title: '부재실측 위치도', category: '실측', imgIdPrefix: 'ndtLocMapMeasure', floorCode });
+                                if (mapFlags.strengthCarb) locMapInserts.push({ title: '비파괴장비조사 위치도', category: '일반비파괴', imgIdPrefix: 'ndtLocMapStrengthCarb', floorCode });
+                                if (mapFlags.fireproof) locMapInserts.push({ title: '내화피복 측정 위치도', category: '내화피복', imgIdPrefix: 'ndtLocMapFireproof', floorCode });
+                                if (mapFlags.tilt) locMapInserts.push({ title: '외벽 기울기 측정 위치도', category: '기울기', imgIdPrefix: 'ndtLocMapTilt', floorCode });
+                                if (mapFlags.settlement) locMapInserts.push({ title: '부동침하 기울기 측정 위치도', category: '변위', imgIdPrefix: 'ndtLocMapSettlement', floorCode });
+                                if (mapFlags.memberDisp) locMapInserts.push({ title: '변위측정 위치도', category: '부재변위', imgIdPrefix: 'ndtLocMapMemberDisp', floorCode });
                             }
+                            // 위치도를 템플릿 제목 문단별로 나눠 각 제목 바로 아래에 넣는다.
+                            // 번호는 캡션에 직접 쓰지 않고 표시만 붙여 두었다가, 문서를 다 만든 뒤
+                            // numberHwpxFigureCaptions가 결함위치도와 이어서 [도면 7-N]으로 매긴다.
+                            const headingForCategory = (cat) => {
+                                if (cat === '실측') return measureHeadingPara;
+                                if (cat === '일반비파괴') return strengthCarbHeadingPara;
+                                if (cat === '내화피복') return fireproofHeadingPara;
+                                return dispHeadingPara; // 기울기·부동침하·부재변위는 "변위조사 위치도" 아래로
+                            };
+                            const lastParaUnderHeading = new Map();
                             for (const job of locMapInserts) {
-                                await appendLocationMap(job.caption, job.category, job.imgIdPrefix, job.floorCode || floorCode);
+                                const heading = headingForCategory(job.category);
+                                const usable = (heading && heading.parentNode) ? heading : null;
+                                const prev = usable ? lastParaUnderHeading.get(usable) : null;
+                                const title = job.title || job.caption || '';
+                                const label = (job.manyFloors && job.floorLabel)
+                                    ? `${job.floorLabel} ${title}`
+                                    : title;
+                                const inserted = await appendLocationMap(
+                                    HWPX_FIG_MARK + label,
+                                    job.category,
+                                    job.imgIdPrefix,
+                                    job.floorCode || floorCode,
+                                    prev || usable,
+                                    // 제목 바로 아래 첫 장만 제목과 같은 쪽에 붙인다
+                                    !!(usable && !prev)
+                                );
+                                if (inserted && usable) lastParaUnderHeading.set(usable, inserted);
                             }
+                            // 위치도가 하나도 안 들어간 제목은 빈 제목만 남으므로 지운다.
+                            // 들어간 제목은 쪽 나눔을 켜서 위치도 묶음이 새 쪽에서 시작하게 한다.
+                            mapHeadingCandidates.forEach((p) => {
+                                if (!p || !p.parentNode) return;
+                                if (lastParaUnderHeading.has(p)) p.setAttribute('pageBreak', '1');
+                                else p.parentNode.removeChild(p);
+                            });
                         }
                     }
                 }
@@ -40579,6 +40705,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             }
 
             Array.from(xmlDoc.getElementsByTagNameNS(HP_NS, 'tbl')).forEach(ensureTblTreatAsChar);
+
+            // 결함위치도·비파괴 장비조사 위치도 캡션에 [도면 7-N]을 하나로 이어서 매긴다.
+            // 문서가 완성된 뒤라야 최종 배치 순서대로 번호가 맞는다.
+            numberHwpxFigureCaptions(xmlDoc);
 
             if (hwpxHeaderDirty && hwpxHeaderText) {
                 zip.file('Contents/header.xml', hwpxHeaderText);
