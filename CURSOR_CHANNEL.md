@@ -478,9 +478,7 @@
 >
 > 회사 통짜 `bulkData/defectsAndNdt` 쓰기/리스너 중단.
 > 작업자(유저)는 `users` / `companies/members` 유지 — 현장 트리에 넣지 않음.
-> 점검 칸: `safety_app/{company}/sites/{site}/rounds/{round}/dongs/{dong}/floors/{floor}/docs/{markings|photos|ndt}`
-> 실시간은 지금 층 세 문서만. 합치기(merge/lease/PhotoUploadQueue)는 그 칸만.
-> 층 문서 없을 때만 옛 bulk에서 해당 floorKey 조각 이관.
-> `firestore.rules`에 중첩 경로 추가. Storage/CF 규칙은 그대로.
-> 콘솔에 규칙 게시 필요.
+> 점검 칸: `safety_app/{company}/sites/{site}/rounds/{round}/[dongs/{dong}/]floors/{floor}/docs/{markings|photos|ndt|drawing}`
+> 단동은 동 칸 생략. 사진·도면은 Storage URL만. 실시간은 지금 층만.
+> `firestore.rules`에 단동/다동 두 트리 허용. 콘솔 규칙 게시 필요.
 
