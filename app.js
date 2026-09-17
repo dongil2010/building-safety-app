@@ -3653,6 +3653,32 @@ document.addEventListener('DOMContentLoaded', () => {
         return out;
     }
 
+    /** ids[i] ↔ photos/urls[i] 쌍을 맵으로 모은다. 길이가 달라도 겹치는 인덱스만 신뢰. */
+    function collectPhotoSrcById(ids, photos, urls) {
+        const map = {};
+        if (!Array.isArray(ids) || !ids.length) return map;
+        ids.forEach((pid, i) => {
+            if (!pid) return;
+            const key = String(pid);
+            const cands = [
+                Array.isArray(urls) ? urls[i] : null,
+                Array.isArray(photos) ? photos[i] : null,
+                window._photoCache && window._photoCache[pid]
+            ];
+            for (let c = 0; c < cands.length; c++) {
+                const v = cands[c];
+                if (v) { map[key] = v; break; }
+            }
+        });
+        return map;
+    }
+
+    /** merged photoIds 순서에 맞춰 photos 배열을 다시 만든다(인덱스 어긋남 방지). */
+    function alignPhotoSrcArrayToIds(ids, srcById) {
+        if (!Array.isArray(ids) || !ids.length) return [];
+        return ids.map((pid) => (pid && srcById && srcById[String(pid)]) || null);
+    }
+
     /** Storage https/gs 만 bulk에 실음. dataURL(바이너리)은 1MB를 바로 넘긴다. */
     function isLightweightCloudPhotoRef(src) {
         const t = String(src || '').trim();
@@ -3767,17 +3793,19 @@ document.addEventListener('DOMContentLoaded', () => {
             merged.surveyNumbered = false;
         }
 
-        // 사진: 서버 photoIds를 먼저 두고 로컬에만 있는 id를 뒤에 추가 (합집합).
+        // 사진: photoIds는 합집합. photos/photoUrls는 반드시 그 ID 순서에 맞춰 재정렬한다.
         const serverPhotoIds = Array.isArray(serverRec.photoIds) ? serverRec.photoIds : [];
         const localPhotoIds = Array.isArray(localRec.photoIds) ? localRec.photoIds : [];
         const mergedPhotoIds = mergePhotoArrays(serverPhotoIds, localPhotoIds);
         if (mergedPhotoIds.length) {
             merged.photoIds = mergedPhotoIds;
-            const inlinePhotos = mergePhotoArrays(
-                extractInlinePhotos(serverRec),
-                extractInlinePhotos(localRec)
+            const srcById = Object.assign(
+                {},
+                collectPhotoSrcById(serverPhotoIds, serverRec.photos, serverRec.photoUrls),
+                collectPhotoSrcById(localPhotoIds, localRec.photos, localRec.photoUrls)
             );
-            if (inlinePhotos.length) merged.photos = inlinePhotos;
+            const alignedPhotos = alignPhotoSrcArrayToIds(mergedPhotoIds, srcById);
+            if (alignedPhotos.some(Boolean)) merged.photos = alignedPhotos;
             else delete merged.photos;
             const packedUrlMap = Object.assign(
                 {},
@@ -3801,11 +3829,13 @@ document.addEventListener('DOMContentLoaded', () => {
         const mergedPrevPhotoIds = mergePhotoArrays(serverPrevPhotoIds, localPrevPhotoIds);
         if (mergedPrevPhotoIds.length) {
             merged.prevRoundPhotoIds = mergedPrevPhotoIds;
-            const inlinePrev = mergePhotoArrays(
-                extractInlinePhotos(serverRec, 'prev'),
-                extractInlinePhotos(localRec, 'prev')
+            const prevSrcById = Object.assign(
+                {},
+                collectPhotoSrcById(serverPrevPhotoIds, serverRec.prevRoundPhotos, serverRec.prevRoundPhotoUrls),
+                collectPhotoSrcById(localPrevPhotoIds, localRec.prevRoundPhotos, localRec.prevRoundPhotoUrls)
             );
-            if (inlinePrev.length) merged.prevRoundPhotos = inlinePrev;
+            const alignedPrev = alignPhotoSrcArrayToIds(mergedPrevPhotoIds, prevSrcById);
+            if (alignedPrev.some(Boolean)) merged.prevRoundPhotos = alignedPrev;
             else delete merged.prevRoundPhotos;
             const packedPrevMap = Object.assign(
                 {},
@@ -43928,15 +43958,52 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         return (docRef && docRef.path) ? String(docRef.path) : '';
     }
 
+    function fingerprintBulkString(s) {
+        const str = String(s || '');
+        const len = str.length;
+        if (!len) return '0';
+        // 앞·중간(1/4·1/2·3/4)·뒤 샘플 + 성긴 롤링 해시로 중간만 바뀐 변경도 잡는다.
+        const sliceAt = (ratio, half) => {
+            const i = Math.min(len - 1, Math.max(0, Math.floor(len * ratio)));
+            const a = Math.max(0, i - half);
+            const b = Math.min(len, i + half);
+            return str.slice(a, b);
+        };
+        let h = 2166136261;
+        const step = Math.max(1, Math.floor(len / 512));
+        for (let i = 0; i < len; i += step) {
+            h ^= str.charCodeAt(i);
+            h = Math.imul(h, 16777619);
+        }
+        // 끝 구간도 한 번 더
+        for (let i = Math.max(0, len - 64); i < len; i++) {
+            h ^= str.charCodeAt(i);
+            h = Math.imul(h, 16777619);
+        }
+        return [
+            String(len),
+            str.slice(0, 24),
+            sliceAt(0.25, 12),
+            sliceAt(0.5, 12),
+            sliceAt(0.75, 12),
+            str.slice(-24),
+            (h >>> 0).toString(36)
+        ].join(':');
+    }
+
     function bulkPayloadIdentity(data) {
         if (!data) return '';
         if (data.writeId) return 'w:' + String(data.writeId);
         const u = data.dataUrl;
         if (typeof u === 'string' && u.length > 32) {
-            return 'u:' + u.length + ':' + u.slice(0, 32) + ':' + u.slice(-32);
+            return 'u:' + fingerprintBulkString(u);
         }
         const n = Number(data.chunkCount) || 0;
-        if (data.chunked && n > 0) return 'c:' + n + ':' + String(data.chunkStatus || '');
+        if (data.chunked && n > 0) {
+            // writeId 없이 chunked만 있으면 내용 지문이 없으므로 status+count만으로는 약함.
+            // 캐시 히트 방지용으로 약한 키를 쓰되, 스킵 판단에는 writeId/dataUrl을 우선한다.
+            return 'c:' + n + ':' + String(data.chunkStatus || '') + ':' + String(data.updatedAt || data.contentUpdatedAt || '');
+        }
         return '';
     }
 
@@ -44025,6 +44092,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             const writeId = data.writeId ? String(data.writeId) : null;
             if (writeId) {
                 try {
+                    // writeId 지정 get은 필요한 N개만 읽는다. 실패해도 parts 전체 목록/재시도로
+                    // 같은 N개를 한 번 더 치지 않는다(상위 fetchBulkSyncDataReliable가 재시도).
                     const targeted = await joinChunkPartsByWriteId(docRef, writeId, chunkCount);
                     if (targeted) {
                         rememberDecodedChunkPayload(docRef, data, targeted);
@@ -44033,16 +44102,12 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 } catch (targetedErr) {
                     console.warn('[PDF] writeId 지정 읽기 실패:', docRef && docRef.path, targetedErr);
                 }
-                if (!_retried && status !== 'ready') {
-                    await new Promise((r) => setTimeout(r, 800));
-                    return readChunkedPdfFromDocRef(docRef, true);
+                if (status !== 'ready') {
+                    // 업로드 중이면 불완전한 parts를 재조회하지 않고 상위에 맡긴다.
+                    return null;
                 }
                 console.warn('[PDF] parts 지정 읽기 실패:', docRef.path, writeId, chunkCount);
                 return null;
-            }
-            if (!_retried) {
-                await new Promise((r) => setTimeout(r, 800));
-                return readChunkedPdfFromDocRef(docRef, true);
             }
             console.warn('[PDF] chunked 문서에 writeId 없음 — parts 전체 목록은 읽지 않음:', docRef.path);
             return null;
@@ -44937,12 +45002,27 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                             _photoFetchInflight -= 1;
                         }
                     }));
-                    return photos.filter(Boolean);
+                    // photoIds와 같은 길이·순서를 유지한다(빈 칸은 null). filter하면 인덱스가 밀린다.
+                    return photos;
                 };
                 const loadedPhotos = await loadIds(d.photoIds);
                 const loadedPrev = await loadIds(d.prevRoundPhotoIds);
-                const photos = mergePhotoArrays(loadedPhotos, extractInlinePhotos(d));
-                const prevRoundPhotos = mergePhotoArrays(loadedPrev, extractInlinePhotos(d, 'prev'));
+                const curSrc = Object.assign(
+                    {},
+                    collectPhotoSrcById(d.photoIds, d.photos, d.photoUrls),
+                    collectPhotoSrcById(d.photoIds, loadedPhotos, null)
+                );
+                const prevSrc = Object.assign(
+                    {},
+                    collectPhotoSrcById(d.prevRoundPhotoIds, d.prevRoundPhotos, d.prevRoundPhotoUrls),
+                    collectPhotoSrcById(d.prevRoundPhotoIds, loadedPrev, null)
+                );
+                const photos = (d.photoIds && d.photoIds.length)
+                    ? alignPhotoSrcArrayToIds(d.photoIds, curSrc).map((v) => v || null)
+                    : mergePhotoArrays(loadedPhotos.filter(Boolean), extractInlinePhotos(d));
+                const prevRoundPhotos = (d.prevRoundPhotoIds && d.prevRoundPhotoIds.length)
+                    ? alignPhotoSrcArrayToIds(d.prevRoundPhotoIds, prevSrc).map((v) => v || null)
+                    : mergePhotoArrays(loadedPrev.filter(Boolean), extractInlinePhotos(d, 'prev'));
                 return { ...d, photos, prevRoundPhotos };
             }));
             return [key, hydratedArr];
