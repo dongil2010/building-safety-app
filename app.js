@@ -43804,18 +43804,20 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     function getFirestoreDongKey(bldg) {
         const siteName = getBuildingSiteName(bldg);
         const multi = typeof isSiteMultiDong === 'function' && isSiteMultiDong(siteName);
-        if (!multi) return '_';
+        if (!multi) return '';
         const dong = getBuildingDongLabel(bldg);
-        return dong ? siteVaultDocId(dong) : '_';
+        return dong ? siteVaultDocId(dong) : '';
     }
 
+    /** 회사 → 현장 → 회차 → (동 있으면) → 층. 단동은 동 칸을 만들지 않는다. */
     function getFloorScopeRef(bldg, floorCode) {
         if (!db || !window.state.companyId || !bldg || !floorCode) return null;
-        return db.collection('safety_app').doc(getCompanyDocId())
+        let ref = db.collection('safety_app').doc(getCompanyDocId())
             .collection('sites').doc(getFirestoreSiteKey(bldg))
-            .collection('rounds').doc(getFirestoreRoundKey(bldg))
-            .collection('dongs').doc(getFirestoreDongKey(bldg))
-            .collection('floors').doc(String(floorCode));
+            .collection('rounds').doc(getFirestoreRoundKey(bldg));
+        const dongKey = getFirestoreDongKey(bldg);
+        if (dongKey) ref = ref.collection('dongs').doc(dongKey);
+        return ref.collection('floors').doc(String(floorCode));
     }
 
     function getFloorKindDocRef(bldg, floorCode, kind) {
@@ -44034,8 +44036,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     let _legacyBulkCacheTried = false;
     let currentFloorUnsubs = [];
     let _listeningFloorPath = '';
-    let _lastFloorKindIdentity = { markings: '', photos: '', ndt: '' };
-    let _lastFloorBundle = { markings: null, photos: null, ndt: null };
+    let _lastFloorKindIdentity = { markings: '', photos: '', ndt: '', drawing: '' };
+    let _lastFloorBundle = { markings: null, photos: null, ndt: null, drawing: null };
 
     function chunkDocCacheKey(docRef) {
         return (docRef && docRef.path) ? String(docRef.path) : '';
@@ -44303,26 +44305,82 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         return _legacyBulkCache;
     }
 
+    function emptyFloorDrawingPayload() {
+        return { rasterUrl: '', pdfUrl: '', tiers: {} };
+    }
+
+    function collectFloorDrawingUrlPayload(bldg, floorCode) {
+        const out = emptyFloorDrawingPayload();
+        if (!bldg || !floorCode) return out;
+        const raster = bldg.floorDrawings && bldg.floorDrawings[floorCode];
+        const pdf = bldg.floorDrawingPdfs && bldg.floorDrawingPdfs[floorCode];
+        if (isLightweightCloudPhotoRef(raster)) out.rasterUrl = String(raster).trim();
+        if (isLightweightCloudPhotoRef(pdf)) out.pdfUrl = String(pdf).trim();
+        const tmap = bldg.floorDrawingTiers && bldg.floorDrawingTiers[floorCode];
+        if (tmap && typeof tmap === 'object') {
+            Object.keys(tmap).forEach((dim) => {
+                const u = tmap[dim];
+                if (isLightweightCloudPhotoRef(u)) out.tiers[String(dim)] = String(u).trim();
+            });
+        }
+        return out;
+    }
+
+    function applyFloorDrawingPayload(bldg, floorCode, drawing) {
+        if (!bldg || !floorCode || !drawing) return;
+        const keepLocal = (cur) => typeof cur === 'string' && cur.indexOf('data:') === 0 && cur.length > 32;
+        if (isLightweightCloudPhotoRef(drawing.rasterUrl)) {
+            if (!bldg.floorDrawings) bldg.floorDrawings = {};
+            if (!keepLocal(bldg.floorDrawings[floorCode])) {
+                bldg.floorDrawings[floorCode] = String(drawing.rasterUrl).trim();
+            }
+        }
+        if (isLightweightCloudPhotoRef(drawing.pdfUrl)) {
+            if (!bldg.floorDrawingPdfs) bldg.floorDrawingPdfs = {};
+            if (!keepLocal(bldg.floorDrawingPdfs[floorCode])) {
+                bldg.floorDrawingPdfs[floorCode] = String(drawing.pdfUrl).trim();
+            }
+        }
+        const tiers = drawing.tiers;
+        if (tiers && typeof tiers === 'object') {
+            if (!bldg.floorDrawingTiers) bldg.floorDrawingTiers = {};
+            if (!bldg.floorDrawingTiers[floorCode] || typeof bldg.floorDrawingTiers[floorCode] !== 'object') {
+                bldg.floorDrawingTiers[floorCode] = {};
+            }
+            Object.keys(tiers).forEach((dim) => {
+                const u = tiers[dim];
+                if (!isLightweightCloudPhotoRef(u)) return;
+                const cur = bldg.floorDrawingTiers[floorCode][dim];
+                if (!keepLocal(cur)) bldg.floorDrawingTiers[floorCode][dim] = String(u).trim();
+            });
+        }
+    }
+
     function emptyFloorBundle() {
         return {
             markings: { items: [], deletedIds: [], deletedAt: {} },
             photos: { urlsById: {} },
-            ndt: { items: [], deletedIds: [], deletedAt: {}, displacementGroups: [] }
+            ndt: { items: [], deletedIds: [], deletedAt: {}, displacementGroups: [] },
+            drawing: emptyFloorDrawingPayload()
         };
     }
 
     async function readFloorSyncBundle(bldg, floorCode) {
-        const [markings, photos, ndt] = await Promise.all([
+        const [markings, photos, ndt, drawing] = await Promise.all([
             readFloorKindPayload(bldg, floorCode, 'markings'),
             readFloorKindPayload(bldg, floorCode, 'photos'),
-            readFloorKindPayload(bldg, floorCode, 'ndt')
+            readFloorKindPayload(bldg, floorCode, 'ndt'),
+            readFloorKindPayload(bldg, floorCode, 'drawing')
         ]);
         const missing = markings == null && photos == null && ndt == null;
         if (missing) {
             const bulk = await loadLegacyBulkCacheOnce();
             const floorKey = `${bldg.id}_${floorCode}`;
             const sliced = sliceLegacyBulkForFloor(bulk, floorKey);
-            if (sliced) return Object.assign({ fromLegacy: true }, sliced);
+            if (sliced) {
+                sliced.drawing = drawing || emptyFloorDrawingPayload();
+                return Object.assign({ fromLegacy: true }, sliced);
+            }
             return Object.assign({ fromLegacy: false }, emptyFloorBundle());
         }
         const empty = emptyFloorBundle();
@@ -44330,7 +44388,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             fromLegacy: false,
             markings: markings || empty.markings,
             photos: photos || empty.photos,
-            ndt: ndt || empty.ndt
+            ndt: ndt || empty.ndt,
+            drawing: drawing || empty.drawing
         };
     }
 
@@ -44353,10 +44412,12 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             deletedAt: (window.state.deletedNdtAt || {})[floorKey] || {},
             displacementGroups: (window.state.ndtDisplacementGroups || {})[floorKey] || []
         };
+        const drawing = collectFloorDrawingUrlPayload(bldg, floorCode);
         await Promise.all([
             writeFloorKindPayload(bldg, floorCode, 'markings', markings),
             writeFloorKindPayload(bldg, floorCode, 'photos', photos),
-            writeFloorKindPayload(bldg, floorCode, 'ndt', ndt)
+            writeFloorKindPayload(bldg, floorCode, 'ndt', ndt),
+            writeFloorKindPayload(bldg, floorCode, 'drawing', drawing)
         ]);
         _dirtyFloorKeys.delete(floorKey);
     }
@@ -44378,6 +44439,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const markings = bundle.markings || empty.markings;
         const ndt = bundle.ndt || empty.ndt;
         seedPhotoCacheFromUrlMap(bundle.photos && bundle.photos.urlsById);
+        applyFloorDrawingPayload(bldg, floorCode, bundle.drawing || empty.drawing);
         const defectMerge = mergeDefectsMaps(
             { [floorKey]: markings.items || [] },
             window.state.defects || {},
@@ -44449,8 +44511,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         });
         currentFloorUnsubs = [];
         _listeningFloorPath = '';
-        _lastFloorKindIdentity = { markings: '', photos: '', ndt: '' };
-        _lastFloorBundle = { markings: null, photos: null, ndt: null };
+        _lastFloorKindIdentity = { markings: '', photos: '', ndt: '', drawing: '' };
+        _lastFloorBundle = { markings: null, photos: null, ndt: null, drawing: null };
     }
 
     async function subscribeCurrentFloorSync() {
@@ -44481,15 +44543,17 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             _listenerNeedsResubscribe = true;
         };
 
-        const kinds = ['markings', 'photos', 'ndt'];
-        let pending = { markings: false, photos: false, ndt: false };
+        const kinds = ['markings', 'photos', 'ndt', 'drawing'];
+        let pending = { markings: false, photos: false, ndt: false, drawing: false };
         const maybeApply = async () => {
-            if (!pending.markings || !pending.photos || !pending.ndt) return;
-            pending = { markings: false, photos: false, ndt: false };
+            if (!pending.markings || !pending.photos || !pending.ndt || !pending.drawing) return;
+            pending = { markings: false, photos: false, ndt: false, drawing: false };
+            const empty = emptyFloorBundle();
             const bundle = {
-                markings: _lastFloorBundle.markings || emptyFloorBundle().markings,
-                photos: _lastFloorBundle.photos || emptyFloorBundle().photos,
-                ndt: _lastFloorBundle.ndt || emptyFloorBundle().ndt,
+                markings: _lastFloorBundle.markings || empty.markings,
+                photos: _lastFloorBundle.photos || empty.photos,
+                ndt: _lastFloorBundle.ndt || empty.ndt,
+                drawing: _lastFloorBundle.drawing || empty.drawing,
                 fromLegacy: false
             };
             await applyFloorBundleToState(bldg, floorCode, bundle);
@@ -44507,13 +44571,19 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                             _lastFloorBundle = {
                                 markings: migrated.markings,
                                 photos: migrated.photos,
-                                ndt: migrated.ndt
+                                ndt: migrated.ndt,
+                                drawing: migrated.drawing
                             };
                             await mergeRemoteFloorBundle(bldg, floorCode, migrated);
                         } catch (e) {
                             console.warn('층 문서 폴백 이관 실패:', e);
                         }
+                        return;
                     }
+                    const empty = emptyFloorBundle();
+                    _lastFloorBundle[kind] = empty[kind] || {};
+                    pending[kind] = true;
+                    await maybeApply();
                     return;
                 }
                 const snapData = doc.data() || {};
