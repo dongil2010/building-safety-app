@@ -19002,6 +19002,73 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         return null;
     }
 
+    /** 해당 층(외부면 외부 전체 공유 목록) 전차 미등록 일괄 삭제 */
+    function collectMapUnregisteredTargetsForContext() {
+        const out = [];
+        if (!state.currentBuildingId) return out;
+        const exterior = typeof isExteriorFloorCode === 'function' && isExteriorFloorCode(state.currentFloor);
+        if (exterior && typeof listExteriorFloorCodesForBuilding === 'function') {
+            listExteriorFloorCodesForBuilding(state.currentBuildingId).forEach((fc) => {
+                const key = `${state.currentBuildingId}_${fc}`;
+                ((state.defects && state.defects[key]) || []).forEach((d) => {
+                    if (!d || !d.id) return;
+                    if (isPreviousRoundDefect(d) && isDefectMapUnregistered(d)) {
+                        out.push({ floorKey: key, id: d.id, no: d.no });
+                    }
+                });
+            });
+        } else {
+            const key = `${state.currentBuildingId}_${state.currentFloor}`;
+            ((state.defects && state.defects[key]) || []).forEach((d) => {
+                if (!d || !d.id) return;
+                if (isPreviousRoundDefect(d) && isDefectMapUnregistered(d)) {
+                    out.push({ floorKey: key, id: d.id, no: d.no });
+                }
+            });
+        }
+        return out;
+    }
+
+    window.clearMapUnregisteredDefects = function() {
+        if (!state.currentBuildingId) return;
+        const targets = collectMapUnregisteredTargetsForContext();
+        if (!targets.length) {
+            window.showToast('지울 전차 미등록(미마킹)이 없습니다.', 'info');
+            return;
+        }
+        const exterior = typeof isExteriorFloorCode === 'function' && isExteriorFloorCode(state.currentFloor);
+        const scopeLabel = exterior
+            ? '외부 전체 전차 미등록'
+            : `현재 층(${state.currentFloor}) 전차 미등록`;
+        if (!window.confirmDelete(`${scopeLabel} ${targets.length}건을 모두 삭제할까요? (되돌리기로 복원 가능)`)) return;
+        pushDefectHistory();
+        const byKey = new Map();
+        targets.forEach((t) => {
+            if (!byKey.has(t.floorKey)) byKey.set(t.floorKey, []);
+            byKey.get(t.floorKey).push(t.id);
+        });
+        byKey.forEach((idList, key) => {
+            if (!state.defects[key]) return;
+            idList.forEach((id) => removeSingleDefectRecord(key, id, { skipRenumber: true }));
+            normalizeAllDefectGroupNos(state.defects[key]);
+            collapseSingletonDefectGroups(state.defects[key]);
+        });
+        if (window._pendingMapRegisterDefectId) {
+            const still = targets.some((t) => t.id === window._pendingMapRegisterDefectId);
+            if (still) window._pendingMapRegisterDefectId = null;
+        }
+        if (typeof selectedDefectIds !== 'undefined') {
+            targets.forEach((t) => selectedDefectIds.delete(t.id));
+        }
+        if (typeof discardStalePendingRemoteAfterLocalPinEdit === 'function') discardStalePendingRemoteAfterLocalPinEdit();
+        saveStateToLocalStorage();
+        renderSurveyTable();
+        drawCanvas();
+        if (typeof updateMapSelectionBar === 'function') updateMapSelectionBar({ scrollToSelection: false });
+        else if (typeof renderDefectListPanel === 'function') renderDefectListPanel();
+        window.showToast(`${scopeLabel} ${targets.length}건 삭제됨`, 'success');
+    };
+
     function filterMapPlacedDefects(defects) {
         return (defects || []).filter(d => !isDefectMapUnregistered(d));
     }
@@ -20362,7 +20429,32 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
         const header = document.createElement('div');
         header.className = 'defect-list-section-title';
-        header.textContent = `${title} (${items.length})`;
+        header.style.display = 'flex';
+        header.style.alignItems = 'center';
+        header.style.justifyContent = 'space-between';
+        header.style.gap = '0.4rem';
+
+        const titleSpan = document.createElement('span');
+        titleSpan.textContent = `${title} (${items.length})`;
+        header.appendChild(titleSpan);
+
+        if (options.unregistered && typeof window.clearMapUnregisteredDefects === 'function') {
+            const clearBtn = document.createElement('button');
+            clearBtn.type = 'button';
+            clearBtn.className = 'btn btn-sm btn-danger-outline';
+            clearBtn.style.flexShrink = '0';
+            clearBtn.style.fontSize = '0.72rem';
+            clearBtn.style.padding = '0.15rem 0.45rem';
+            clearBtn.title = '전차 미등록 일괄 삭제';
+            clearBtn.textContent = '일괄 삭제';
+            clearBtn.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                window.clearMapUnregisteredDefects();
+            });
+            header.appendChild(clearBtn);
+        }
+
         section.appendChild(header);
 
         const scrollBox = document.createElement('div');
@@ -26221,19 +26313,34 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const ids = [...selectedDefectIds];
         if (!ids.length || !state.currentBuildingId) return;
         if (!window.confirmDelete(`선택한 결함 ${ids.length}건을 삭제할까요? (되돌리기로 복원 가능)`)) return;
-        const key = `${state.currentBuildingId}_${state.currentFloor}`;
-        if (!state.defects[key]) return;
+        const byKey = new Map();
+        ids.forEach((id) => {
+            const located = (typeof findDefectFloorKeyById === 'function') ? findDefectFloorKeyById(id) : null;
+            const key = located
+                ? located.floorKey
+                : `${state.currentBuildingId}_${state.currentFloor}`;
+            if (!byKey.has(key)) byKey.set(key, []);
+            byKey.get(key).push(id);
+        });
         pushDefectHistory();
-        ids.forEach(id => removeSingleDefectRecord(key, id, { skipRenumber: true }));
-        // 번호 재부여 없음 — 삭제된 번호만 비우고 나머지는 유지 (화살표/핀 동일)
-        normalizeAllDefectGroupNos(state.defects[key]);
-        collapseSingletonDefectGroups(state.defects[key]);
+        let removed = 0;
+        byKey.forEach((idList, key) => {
+            if (!state.defects[key]) return;
+            idList.forEach((id) => {
+                if ((state.defects[key] || []).some((d) => d && d.id === id)) {
+                    removeSingleDefectRecord(key, id, { skipRenumber: true });
+                    removed += 1;
+                }
+            });
+            normalizeAllDefectGroupNos(state.defects[key]);
+            collapseSingletonDefectGroups(state.defects[key]);
+        });
         selectedDefectIds.clear();
         updateMapSelectionBar();
         saveStateToLocalStorage();
         renderSurveyTable();
         drawCanvas();
-        window.showToast?.(`${ids.length}건 삭제됨`, 'success');
+        window.showToast?.(`${removed}건 삭제됨`, 'success');
     }
     window.deleteSelectedDefects = deleteSelectedDefects;
 
@@ -26257,7 +26364,13 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     function getLiveMarkPinPreviewMeta() {
         const pendingId = window._pendingMapRegisterDefectId;
         if (pendingId) {
-            const pendingDefect = getCurrentFloorDefects().find(d => d.id === pendingId);
+            let pendingDefect = getCurrentFloorDefects().find(d => d.id === pendingId);
+            if (!pendingDefect && typeof findDefectFloorKeyById === 'function') {
+                const located = findDefectFloorKeyById(pendingId);
+                if (located) {
+                    pendingDefect = (state.defects[located.floorKey] || []).find((d) => d && d.id === pendingId);
+                }
+            }
             if (pendingDefect) {
                 const label = pendingDefect.no || 'NO.??';
                 const scale = getStyleSize(getDefectStyleKey(pendingDefect.category, pendingDefect.defectType)).pin;
@@ -40864,25 +40977,29 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
     window.deleteDefectById = function(id, options) {
         if (!options?.skipConfirm && !window.confirmDelete('이 결함을 삭제할까요?')) return false;
-        const key = `${state.currentBuildingId}_${state.currentFloor}`;
-        if (state.defects[key]) {
-            pushDefectHistory();
-            removeSingleDefectRecord(key, id);
-            if (typeof discardStalePendingRemoteAfterLocalPinEdit === 'function') discardStalePendingRemoteAfterLocalPinEdit();
-            if (typeof selectedDefectIds !== 'undefined') {
-                selectedDefectIds.delete(id);
-            }
-            saveStateToLocalStorage();
-            renderSurveyTable();
-            drawCanvas();
-            if (typeof updateMapSelectionBar === 'function') {
-                updateMapSelectionBar({ scrollToSelection: false });
-            } else if (typeof renderDefectListPanel === 'function') {
-                renderDefectListPanel();
-            }
-            return true;
+        if (!id || !state.currentBuildingId) return false;
+        const located = (typeof findDefectFloorKeyById === 'function') ? findDefectFloorKeyById(id) : null;
+        const key = located
+            ? located.floorKey
+            : `${state.currentBuildingId}_${state.currentFloor}`;
+        if (!state.defects[key]) return false;
+        const exists = (state.defects[key] || []).some((d) => d && d.id === id);
+        if (!exists) return false;
+        pushDefectHistory();
+        removeSingleDefectRecord(key, id);
+        if (typeof discardStalePendingRemoteAfterLocalPinEdit === 'function') discardStalePendingRemoteAfterLocalPinEdit();
+        if (typeof selectedDefectIds !== 'undefined') {
+            selectedDefectIds.delete(id);
         }
-        return false;
+        saveStateToLocalStorage();
+        renderSurveyTable();
+        drawCanvas();
+        if (typeof updateMapSelectionBar === 'function') {
+            updateMapSelectionBar({ scrollToSelection: false });
+        } else if (typeof renderDefectListPanel === 'function') {
+            renderDefectListPanel();
+        }
+        return true;
     };
 
     // "마킹 추가"로 여러 위치에 묶인 결함 그룹 전체를 삭제
