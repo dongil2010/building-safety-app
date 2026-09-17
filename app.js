@@ -34968,6 +34968,138 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             remapAttrs: { borderFillIDRef: borderMap }
         };
     };
+
+    // 사진첩 스탬프는 border뿐 아니라 문단/글자 모양(가운데정렬·굴림·8pt)도 본문 header에
+    // 합쳐야 한다. ID만 남기면 정밀/정기 템플릿마다 다른 의미로 해석된다.
+    const mergeGrade3PhotoAlbumStampHeader = (mainHdr, stampHdr, stampParas) => {
+        const ser = new XMLSerializer();
+        let fragmentXml = '';
+        (stampParas || []).forEach((p) => { if (p) fragmentXml += ser.serializeToString(p); });
+        if (!fragmentXml || !stampHdr) return { header: mainHdr, remapAttrs: null };
+
+        const borderIds = new Set([...fragmentXml.matchAll(/borderFillIDRef="(\d+)"/g)].map(m => m[1]));
+        const paraIds = new Set([...fragmentXml.matchAll(/paraPrIDRef="(\d+)"/g)].map(m => m[1]));
+        const charIds = new Set([...fragmentXml.matchAll(/charPrIDRef="(\d+)"/g)].map(m => m[1]));
+        // 글자/문단 모양 안의 borderFill도 같이 가져와야 한다(표 셀에 안 나온 id 포함).
+        const collectInnerBorders = (tag, ids) => {
+            ids.forEach((id) => {
+                const re = new RegExp(`<hh:${tag} id="${id}"[\\s\\S]*?</hh:${tag}>`);
+                const m = stampHdr.match(re);
+                if (!m) return;
+                for (const bm of m[0].matchAll(/borderFillIDRef="(\d+)"/g)) borderIds.add(bm[1]);
+            });
+        };
+        collectInnerBorders('paraPr', paraIds);
+        collectInnerBorders('charPr', charIds);
+
+        const tagBlock = (hdr, tag, id) => {
+            const re = new RegExp(`<hh:${tag} id="${id}"[\\s\\S]*?</hh:${tag}>`);
+            const m = hdr.match(re);
+            return m ? m[0] : null;
+        };
+        const maxId = (hdr, tag) => {
+            const ids = [...hdr.matchAll(new RegExp(`<hh:${tag} id="(\\d+)"`, 'g'))].map(x => parseInt(x[1], 10));
+            return ids.length ? Math.max(...ids) : 0;
+        };
+        const hangulFonts = (hdr) => {
+            const faces = {};
+            const m = hdr.match(/<hh:fontface\b[^>]*lang="HANGUL"[^>]*>([\s\S]*?)<\/hh:fontface>/i);
+            if (!m) return faces;
+            for (const fm of m[1].matchAll(/<hh:font\b([^>]*)>/g)) {
+                const id = (fm[1].match(/\bid="(\d+)"/) || [])[1];
+                const face = (fm[1].match(/\bface="([^"]*)"/) || [])[1];
+                if (id && face) faces[id] = face;
+            }
+            return faces;
+        };
+        const stampFontById = hangulFonts(stampHdr);
+        const mainFaceToId = {};
+        Object.entries(hangulFonts(mainHdr)).forEach(([id, face]) => {
+            if (!(face in mainFaceToId)) mainFaceToId[face] = id;
+        });
+        const mapFontRef = (stampFontId) => {
+            const face = stampFontById[String(stampFontId)];
+            if (face && mainFaceToId[face] != null) return String(mainFaceToId[face]);
+            if (mainFaceToId['굴림'] != null) return String(mainFaceToId['굴림']);
+            return String(stampFontId);
+        };
+
+        let outHdr = mainHdr;
+        const borderMap = {};
+        let nxtBf = maxId(outHdr, 'borderFill') + 1;
+        [...borderIds].sort((a, b) => parseInt(a, 10) - parseInt(b, 10)).forEach((id) => {
+            borderMap[id] = String(nxtBf++);
+        });
+        [...borderIds].sort((a, b) => parseInt(a, 10) - parseInt(b, 10)).forEach((bid) => {
+            let b = tagBlock(stampHdr, 'borderFill', bid);
+            if (!b) return;
+            b = b.replace(/^<hh:borderFill id="\d+"/, `<hh:borderFill id="${borderMap[bid]}"`);
+            outHdr = outHdr.replace('</hh:borderFills>', b + '</hh:borderFills>');
+        });
+        if (borderIds.size) {
+            const bfCnt = (outHdr.match(/<hh:borderFill id="/g) || []).length;
+            outHdr = outHdr.replace(/(<hh:borderFills[^>]*itemCnt=")(\d+)(")/, `$1${bfCnt}$3`);
+        }
+
+        const remapInnerBorders = (xml) => xml.replace(/borderFillIDRef="(\d+)"/g, (_, id) => (
+            `borderFillIDRef="${borderMap[id] || id}"`
+        ));
+
+        const paraMap = {};
+        let nxtPara = maxId(outHdr, 'paraPr') + 1;
+        [...paraIds].sort((a, b) => parseInt(a, 10) - parseInt(b, 10)).forEach((id) => {
+            paraMap[id] = String(nxtPara++);
+        });
+        [...paraIds].sort((a, b) => parseInt(a, 10) - parseInt(b, 10)).forEach((pid) => {
+            let b = tagBlock(stampHdr, 'paraPr', pid);
+            if (!b) return;
+            b = b.replace(/^<hh:paraPr id="\d+"/, `<hh:paraPr id="${paraMap[pid]}"`);
+            b = remapInnerBorders(b);
+            outHdr = outHdr.replace('</hh:paraProperties>', b + '</hh:paraProperties>');
+        });
+        if (paraIds.size) {
+            const cnt = (outHdr.match(/<hh:paraPr id="/g) || []).length;
+            outHdr = outHdr.replace(/(<hh:paraProperties[^>]*itemCnt=")(\d+)(")/, `$1${cnt}$3`);
+        }
+
+        const charMap = {};
+        let nxtChar = maxId(outHdr, 'charPr') + 1;
+        [...charIds].sort((a, b) => parseInt(a, 10) - parseInt(b, 10)).forEach((id) => {
+            charMap[id] = String(nxtChar++);
+        });
+        [...charIds].sort((a, b) => parseInt(a, 10) - parseInt(b, 10)).forEach((cid) => {
+            let b = tagBlock(stampHdr, 'charPr', cid);
+            if (!b) return;
+            b = b.replace(/^<hh:charPr id="\d+"/, `<hh:charPr id="${charMap[cid]}"`);
+            b = remapInnerBorders(b);
+            b = b.replace(
+                /<hh:fontRef\b([^>]*)\/>/,
+                (full, attrs) => {
+                    let a = attrs;
+                    ['hangul', 'latin', 'hanja', 'japanese', 'other', 'symbol', 'user'].forEach((n) => {
+                        const m = a.match(new RegExp('\\b' + n + '="(\\d+)"'));
+                        if (m) a = a.replace(new RegExp('\\b' + n + '="' + m[1] + '"'), n + '="' + mapFontRef(m[1]) + '"');
+                    });
+                    return `<hh:fontRef${a}/>`;
+                }
+            );
+            outHdr = outHdr.replace('</hh:charProperties>', b + '</hh:charProperties>');
+        });
+        if (charIds.size) {
+            const cnt = (outHdr.match(/<hh:charPr id="/g) || []).length;
+            outHdr = outHdr.replace(/(<hh:charProperties[^>]*itemCnt=")(\d+)(")/, `$1${cnt}$3`);
+        }
+
+        return {
+            header: outHdr,
+            remapAttrs: {
+                borderFillIDRef: borderMap,
+                paraPrIDRef: paraMap,
+                charPrIDRef: charMap
+            }
+        };
+    };
+
     const stripHwpxParaRunBorderFill = (node) => {
         if (!node) return node;
         const walk = (el) => {
@@ -34983,14 +35115,23 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     const remapHwpxCompareNode = (node, remapAttrs) => {
         if (!node || !remapAttrs) return stripHwpxParaRunBorderFill(node);
         const borderMap = remapAttrs.borderFillIDRef;
+        const paraMap = remapAttrs.paraPrIDRef;
+        const charMap = remapAttrs.charPrIDRef;
         const walk = (el) => {
             if (!el || el.nodeType !== 1) return;
             if (el.localName === 'tbl' || el.localName === 'tc') {
                 const v = el.getAttribute('borderFillIDRef');
                 if (v && borderMap && borderMap[v]) el.setAttribute('borderFillIDRef', borderMap[v]);
             }
-            if (el.localName === 'p' || el.localName === 'run') {
+            if (el.localName === 'p') {
                 el.removeAttribute('borderFillIDRef');
+                const pv = el.getAttribute('paraPrIDRef');
+                if (pv && paraMap && paraMap[pv]) el.setAttribute('paraPrIDRef', paraMap[pv]);
+            }
+            if (el.localName === 'run') {
+                el.removeAttribute('borderFillIDRef');
+                const cv = el.getAttribute('charPrIDRef');
+                if (cv && charMap && charMap[cv]) el.setAttribute('charPrIDRef', charMap[cv]);
             }
             Array.from(el.children || []).forEach(walk);
         };
@@ -36648,7 +36789,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 try {
                     if (grade3PhotoAlbumHeaderText) {
                         if (!hwpxHeaderText) hwpxHeaderText = await zip.file('Contents/header.xml').async('string');
-                        const mergedAlbumHdr = mergeGrade3CompareStampHeader(
+                        const mergedAlbumHdr = mergeGrade3PhotoAlbumStampHeader(
                             hwpxHeaderText,
                             grade3PhotoAlbumHeaderText,
                             [grade3PhotoAlbumParaStamp]
@@ -37057,10 +37198,16 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                                 getSurveyCellText('inspectionContent', entry.d, { floorCode: entry.floorCode }),
                                 entry.d
                             );
-                            if (slot.labelTc) setTcText(slot.labelTc, globalPhotoLabelByDefect.get(entry.d));
+                            if (slot.labelTc) {
+                                setTcText(slot.labelTc, globalPhotoLabelByDefect.get(entry.d));
+                                centerCellContent(slot.labelTc);
+                            }
                             // 위치 칸에는 절대 쓰지 않는다(신규 템플릿에는 없음). 구형 스탬프 샘플 위치 문구만 비운다.
                             if (slot.locationTc) setTcText(slot.locationTc, '');
-                            if (slot.contentTc) setTcText(slot.contentTc, inspectionContent);
+                            if (slot.contentTc) {
+                                setTcText(slot.contentTc, inspectionContent);
+                                centerCellContent(slot.contentTc);
+                            }
                         };
 
                         imgCounter++;
