@@ -46651,12 +46651,18 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             if (!navigator.onLine) return;
             if (Date.now() < _photoFetchQuotaPausedUntil) return;
             if (reason === 'online') {
-                // 원격 스냅샷이 로컬 pending보다 먼저 적용되지 않게 — flush 끝날 때까지 차단
-                _blockRemoteApplyUntilLocalFlush = true;
+                // Local-first flush: only floors already marked dirty (persisted).
+                // Never expand to ALL inspection floors — that caused Firestore read storms.
                 restoreDirtyFloorKeys();
-                markCurrentFloorDirty();
+                if (_dirtyFloorKeys.size > 0 || hasOfflinePendingFlush()) {
+                    _blockRemoteApplyUntilLocalFlush = true;
+                    markCurrentFloorDirty();
+                }
+                // If pending flag stuck with empty dirty set, clear it rather than
+                // marking every defects/ndt key dirty (quota burn).
                 if (hasOfflinePendingFlush() && _dirtyFloorKeys.size === 0) {
-                    collectLocalInspectionFloorKeys().forEach((k) => markFloorKeyDirty(k));
+                    clearOfflinePendingFlush();
+                    _blockRemoteApplyUntilLocalFlush = false;
                 }
             }
             scheduleSyncToFirebase();
