@@ -1366,62 +1366,6 @@ document.addEventListener('DOMContentLoaded', () => {
         idbDelete('floorDrawings', idbKey);
     }
 
-
-    /** LS·RAM에 마킹/비파괴가 남아 있는데 deletedDrawingFloorCodes만 있으면 오탐 tombstone으로 보고 해제 */
-    function healFalseDrawingFloorTombstonesFromLocalEvidence(buildings) {
-        const list = buildings || (window.state && window.state.buildings) || [];
-        let healed = 0;
-        list.forEach((bldg) => {
-            if (!bldg || !bldg.id) return;
-            const deleted = (bldg.deletedDrawingFloorCodes || []).slice();
-            if (!deleted.length) return;
-            const pref = String(bldg.id) + '_';
-            let clearedHere = 0;
-            deleted.forEach((code) => {
-                const c = String(code || '').trim();
-                if (!c) return;
-                const fk = pref + c;
-                const hasDefects = (((window.state.defects || {})[fk]) || []).length > 0;
-                const hasNdt = (((window.state.ndtData || {})[fk]) || []).length > 0;
-                const hasDisp = (((window.state.ndtDisplacementGroups || {})[fk]) || []).length > 0;
-                const hasRamDraw = !!(bldg.floorDrawings && bldg.floorDrawings[c])
-                    || !!(bldg.floorDrawingPdfs && bldg.floorDrawingPdfs[c])
-                    || !!(bldg.floorDrawingTiers && bldg.floorDrawingTiers[c]);
-                if (!(hasDefects || hasNdt || hasDisp || hasRamDraw)) return;
-                forgetDeletedDrawingFloor(bldg, c);
-                clearedHere += 1;
-                healed += 1;
-            });
-            if (!clearedHere) return;
-            if (typeof window.getBuildingAvailableFloors !== 'function') return;
-            const want = new Set();
-            (bldg.drawingFloorCodes || []).forEach((x) => { if (x) want.add(x); });
-            Object.keys(bldg.floorDrawings || {}).forEach((x) => want.add(x));
-            Object.keys(window.state.defects || {}).forEach((k) => {
-                if (k.indexOf(pref) === 0) want.add(k.slice(pref.length));
-            });
-            Object.keys(window.state.ndtData || {}).forEach((k) => {
-                if (k.indexOf(pref) === 0) want.add(k.slice(pref.length));
-            });
-            if (!bldg.floorsList) bldg.floorsList = [];
-            if (!bldg.drawingFloorCodes) bldg.drawingFloorCodes = [];
-            want.forEach((c) => {
-                if (!c || isDeletedDrawingFloor(bldg, c)) return;
-                if (!(bldg.floorsList || []).some((f) => f && f.floorCode === c)) {
-                    const fi = window.BSA && window.BSA.floorIdentity;
-                    bldg.floorsList.push({
-                        floorCode: c,
-                        floorLabel: (fi && fi.labelFromCode) ? fi.labelFromCode(c) : c
-                    });
-                }
-                if (bldg.drawingFloorCodes.indexOf(c) < 0) bldg.drawingFloorCodes.push(c);
-            });
-            bldg.floorsList = window.getBuildingAvailableFloors(bldg);
-        });
-        if (healed) console.info('[tombstone-heal] cleared false deletedDrawingFloorCodes:', healed);
-        return healed;
-    }
-
     function isDeletedDrawingFloor(bldg, floorCode) {
         if (typeof _drawingFloorTombstone.isDeletedDrawingFloor === 'function') {
             return _drawingFloorTombstone.isDeletedDrawingFloor(bldg, floorCode, _sessionDeletedDrawingKeys);
@@ -2318,10 +2262,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (parsed.ndtDisplacementGroups) {
                     window.state.ndtDisplacementGroups = parsed.ndtDisplacementGroups;
                 }
-                if (typeof healFalseDrawingFloorTombstonesFromLocalEvidence === 'function') {
-                    const healedN = healFalseDrawingFloorTombstonesFromLocalEvidence(window.state.buildings);
-                    if (healedN) defectGroupRepairPending = true; // 저장 트리거 재사용
-                }
                 if (parsed.deletedDefectIds) {
                     window.state.deletedDefectIds = parsed.deletedDefectIds;
                 }
@@ -2743,23 +2683,6 @@ document.addEventListener('DOMContentLoaded', () => {
             Object.keys(assets[b.id]?.floorDrawingPdfs || {}).forEach(markPresent);
             Object.keys(assets[b.id]?.floorDrawingTiers || {}).forEach(markPresent);
             Object.keys(assets[b.id]?.floorDrawingSources || {}).forEach(markPresent);
-            // 마킹·비파괴가 남아 있으면 원격 tombstone만으로 층을 지우지 않는다.
-            // (이전 sync가 floorsList만 비운 뒤, union이 삭제를 고착시키던 경로)
-            if (localMatch && localMatch.id && window.state) {
-                const pref = String(localMatch.id) + '_';
-                const scanMap = (map) => {
-                    Object.keys(map || {}).forEach((k) => {
-                        if (!k || k.indexOf(pref) !== 0) return;
-                        const rest = k.slice(pref.length);
-                        if (!rest) return;
-                        const arr = map[k];
-                        if (Array.isArray(arr) ? arr.length > 0 : !!arr) markPresent(rest);
-                    });
-                };
-                scanMap(window.state.defects);
-                scanMap(window.state.ndtData);
-                scanMap(window.state.ndtDisplacementGroups);
-            }
             // 로컬 deleted 목록에 없는(= forgetDeleted 한) 층만 부활
             const localDeleted = new Set(
                 (localMatch?.deletedDrawingFloorCodes || []).map((c) => String(c || '').trim()).filter(Boolean)
@@ -4452,11 +4375,6 @@ document.addEventListener('DOMContentLoaded', () => {
         return floorList.length > 0;
     }
     window.hydrateSingleBuildingDrawings = hydrateSingleBuildingDrawings;
-    window.hydrateFloorDrawingFromCloud = hydrateFloorDrawingFromCloud;
-    window.forgetDeletedDrawingFloor = forgetDeletedDrawingFloor;
-    window.healFalseDrawingFloorTombstonesFromLocalEvidence = healFalseDrawingFloorTombstonesFromLocalEvidence;
-    window.saveStateToLocalStorage = saveStateToLocalStorage;
-    window.scheduleSyncToFirebase = scheduleSyncToFirebase;
 
     async function hydrateLocalImagesFromIndexedDb() {
         try {
