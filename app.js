@@ -18812,7 +18812,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         }
         if (!resp.ok) {
             const errText = (data && data.error) ? String(data.error) : ('Storage 프록시 HTTP ' + resp.status);
-            if (/image 필드가 없거나/.test(errText)) {
+            if (/image 필드가 없거나|아직 배포되지/.test(errText)) {
                 throw new Error(
                     'Storage 프록시가 Worker에 아직 배포되지 않았습니다. '
                     + 'cloudflare-worker/ 에서 wrangler deploy 하세요.'

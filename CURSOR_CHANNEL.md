@@ -570,4 +570,12 @@
 > 복구: 핀이 아직 보이는 기기에서 해당 층을 열면 로컬이 다시 올라감. 클라우드 bulk/옛 층
 > 문서에 남은 데이터도 다음 진입 때 합쳐짐.
 
+### ⚡ [Cursor] - 2026-09-18 18:05:00
+> **`[COMPLETED]` Storage REST/SDK 본문 받기 실패 반복**
+>
+> downloadURL(이미 token 쿼리)에 `Authorization: Firebase`를 붙여 CORS preflight가 막힘.
+> 수정: 토큰 URL은 헤더 없이 GET → 경로 REST는 URL 버킷(.app/.appspot) 별칭 → 404는 재시도 안 함.
+> Worker proxyStorage 미배포 경고는 한 번만.
+
+
 
