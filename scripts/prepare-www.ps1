@@ -1,4 +1,4 @@
-# 웹 앱 정적 파일을 Capacitor www/ 로 복사
+﻿# 웹 앱 정적 파일을 Capacitor www/ 로 복사
 $ErrorActionPreference = 'Stop'
 $Root = Split-Path -Parent $PSScriptRoot
 $Www = Join-Path $Root 'www'

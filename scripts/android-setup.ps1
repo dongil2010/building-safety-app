@@ -1,4 +1,4 @@
-# Android SDK 경로를 android/local.properties 에 기록 (git 제외)
+﻿# Android SDK 경로를 android/local.properties 에 기록 (git 제외)
 $ErrorActionPreference = 'Stop'
 $Root = Split-Path -Parent $PSScriptRoot
 $AndroidDir = Join-Path $Root 'android'
