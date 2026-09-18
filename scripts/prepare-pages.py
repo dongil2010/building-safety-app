@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 from datetime import datetime, timezone
 from pathlib import Path
@@ -23,6 +24,26 @@ FILES = [
     "web-version.json",
 ]
 DIRS = ["js", "templates"]
+
+
+def retoken(text: str, pattern: str, repl: str, label: str) -> str:
+    """캐시버스팅 토큰을 '지금 값이 뭐든' 정규식으로 갈아끼운다. 0건이면 빌드를 세운다.
+
+    2026-09-18: 예전엔 `?v=20260824_surveyLayout` 같은 '그때 그 값'을 문자열로 찾아 바꿨다.
+    로컬 git-sync.ps1이 그 값들을 이미 시각 토큰으로 갈아버린 뒤로는 찾을 게 없어서 치환이
+    전부 조용히 no-op이 됐고, 다른 기기에서 git-sync 없이 그냥 push하면 index.html의 `?v=`와
+    sw.js 캐시 이름이 어제 토큰 그대로 배포됐다. 그러면 신규 방문자만 새 코드를 받고 기존
+    사용자(=현장 전부)는 서비스워커 캐시의 옛 app.js를 계속 쓴다. 실제로 328329f 배포가
+    이 상태였다. 그래서 (1) 값이 뭐든 덮어쓰고 (2) 안 맞으면 소리내어 죽게 한다.
+    """
+    new, n = re.subn(pattern, repl, text)
+    if n == 0:
+        raise SystemExit(
+            f"[prepare-pages] 캐시 토큰 치환 실패: {label} — 패턴이 안 맞는다. "
+            f"파일 구조가 바뀌었는지 확인할 것. pattern={pattern}"
+        )
+    print(f"[prepare-pages] {label}: {n}건 -> {SHORT}")
+    return new
 
 
 def copytree(src: Path, dst: Path) -> None:
@@ -50,11 +71,14 @@ def main() -> None:
 
     index = OUT / "index.html"
     html = index.read_text(encoding="utf-8")
-    html = html.replace("?v=20260824_surveyLayout", f"?v={SHORT}")
-    html = html.replace("?v=20260821_land1", f"?v={SHORT}")
-    html = html.replace("?v=20260822_prevPhotoView", f"?v={SHORT}")
-    html = html.replace("?v=20260822_surveyInlineEdit", f"?v={SHORT}")
-    html = html.replace("?v=20260822_survey2dScroll", f"?v={SHORT}")
+    html = retoken(html, r'href="styles\.css\?v=[^"]+"',
+                   f'href="styles.css?v={SHORT}"', "styles.css")
+    html = retoken(html, r'(src="(?:app\.js|js/[^"]+\.js))\?v=[^"]+"',
+                   r'\g<1>?v=' + SHORT + '"', "app.js / js/*")
+    html = retoken(html, r"window\.BSA_APP_VERSION = '[^']*'",
+                   f"window.BSA_APP_VERSION = '{SHORT}'", "화면 표시 버전")
+    html = retoken(html, r"register\('\./sw\.js\?v=[^']+'\)",
+                   f"register('./sw.js?v={SHORT}')", "sw.js 등록 URL")
 
     # 2026-09-16: Gemini 키는 소스(app.js)에 절대 하드코딩하지 않는다 — 한 번 git 히스토리에
     # 들어가면 영원히 남고, 실제로 GitHub Push Protection이 이걸 막은 적도 있다. 대신 GitHub
@@ -72,7 +96,8 @@ def main() -> None:
     sw = OUT / "sw.js"
     if sw.exists():
         text = sw.read_text(encoding="utf-8")
-        text = text.replace("building-safety-v69.4", f"building-safety-{SHORT}")
+        text = retoken(text, r"const CACHE_NAME = '[^']*'",
+                       f"const CACHE_NAME = 'building-safety-v{SHORT}'", "SW 캐시 이름")
         sw.write_text(text, encoding="utf-8")
 
     version = {
