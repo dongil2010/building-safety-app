@@ -2384,6 +2384,7 @@ document.addEventListener('DOMContentLoaded', () => {
             // 도면/사진은 localStorage가 아니라 IndexedDB에서 비동기로 복원한다(위 저장 로직과 짝).
             // 화면은 먼저 그리고, 이미지는 도착하는 대로 다시 그려서 채워넣는다.
             hydrateLocalImagesFromIndexedDb();
+            if (typeof restoreDirtyFloorKeys === 'function') restoreDirtyFloorKeys();
             if (typeof window.purgeExpiredBuildingTrash === 'function') {
                 window.purgeExpiredBuildingTrash().catch(() => {});
             }
@@ -8743,7 +8744,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if ((prevBuildingId !== state.currentBuildingId || prevFloor !== floorCode)
             && typeof subscribeCurrentFloorSync === 'function') {
             if (prevFloor && prevBuildingId) {
-                _dirtyFloorKeys.add(`${prevBuildingId}_${prevFloor}`);
+                markFloorKeyDirty(`${prevBuildingId}_${prevFloor}`);
             }
             subscribeCurrentFloorSync();
         }
@@ -44888,6 +44889,59 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     const _decodedChunkPayloadCache = new Map();
     let _lastBulkPayloadIdentity = '';
     const _dirtyFloorKeys = new Set();
+    /** 오프라인 편집 후 새로고침해도 dirty 층이 살아남도록 회사별로 유지 */
+    let _blockRemoteApplyUntilLocalFlush = false;
+    function dirtyFloorsStorageKey() {
+        const cid = (window.state && window.state.companyId) || '';
+        return cid ? (`bsa_dirty_floors_v1_${cid}`) : 'bsa_dirty_floors_v1';
+    }
+    function offlinePendingFlushKey() {
+        const cid = (window.state && window.state.companyId) || '';
+        return cid ? (`bsa_offline_pending_flush_v1_${cid}`) : 'bsa_offline_pending_flush_v1';
+    }
+    function persistDirtyFloorKeys() {
+        try {
+            localStorage.setItem(dirtyFloorsStorageKey(), JSON.stringify(Array.from(_dirtyFloorKeys)));
+        } catch (_e) { /* ignore quota */ }
+    }
+    function restoreDirtyFloorKeys() {
+        try {
+            const raw = localStorage.getItem(dirtyFloorsStorageKey());
+            if (!raw) return;
+            const arr = JSON.parse(raw);
+            if (!Array.isArray(arr)) return;
+            arr.forEach((k) => { if (k) _dirtyFloorKeys.add(String(k)); });
+        } catch (_e) { /* ignore */ }
+    }
+    function markOfflinePendingFlush() {
+        try { localStorage.setItem(offlinePendingFlushKey(), '1'); } catch (_e) { /* ignore */ }
+    }
+    function clearOfflinePendingFlush() {
+        try { localStorage.removeItem(offlinePendingFlushKey()); } catch (_e) { /* ignore */ }
+    }
+    function hasOfflinePendingFlush() {
+        try { return localStorage.getItem(offlinePendingFlushKey()) === '1'; } catch (_e) { return false; }
+    }
+    function collectLocalInspectionFloorKeys() {
+        const keys = new Set();
+        const addFrom = (obj) => {
+            Object.keys(obj || {}).forEach((k) => {
+                if (k && String(k).indexOf('_') > 0) keys.add(String(k));
+            });
+        };
+        addFrom(window.state && window.state.defects);
+        addFrom(window.state && window.state.ndtData);
+        addFrom(window.state && window.state.deletedDefectIds);
+        addFrom(window.state && window.state.deletedNdtIds);
+        addFrom(window.state && window.state.ndtDisplacementGroups);
+        return keys;
+    }
+    function markFloorKeyDirty(key) {
+        if (!key) return;
+        _dirtyFloorKeys.add(String(key));
+        persistDirtyFloorKeys();
+    }
+
     let _legacyBulkCache = null;
     let _legacyBulkCacheTried = false;
     const _floorsCheckedMigration = new Set();
@@ -45070,8 +45124,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     }
 
     function markCurrentFloorDirty() {
-        const key = currentInspectionFloorKey();
-        if (key) _dirtyFloorKeys.add(key);
+        markFloorKeyDirty(currentInspectionFloorKey());
     }
 
     function collectFloorPhotoUrlMap(defectsArr) {
@@ -45351,6 +45404,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         };
         await writeChunkedPdfToDocRef(floorRef, JSON.stringify(pack));
         _dirtyFloorKeys.delete(floorKey);
+        persistDirtyFloorKeys();
     }
 
     function seedPhotoCacheFromUrlMap(urlsById) {
@@ -45404,6 +45458,12 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
     async function applyFloorBundleToState(bldg, floorCode, bundle) {
         if (!bldg || !bldg.id || !floorCode || !bundle) return;
+        const floorKeyForGuard = `${bldg.id}_${floorCode}`;
+        // 오프라인 편집이 아직 서버에 안 올라간 층: 원격 스냅샷이 더 신선한 로컬을 덮지 않게 스킵
+        // (flush 경로의 mergeFloorBundleIntoState는 이 함수를 거치지 않음)
+        if (_blockRemoteApplyUntilLocalFlush || _dirtyFloorKeys.has(floorKeyForGuard)) {
+            return;
+        }
         mergeFloorBundleIntoState(bldg, floorCode, bundle);
         await hydrateCurrentBuildingDefectPhotosIntoState();
         if (_syncInFlight) return;
@@ -46547,14 +46607,19 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
 
     function scheduleSyncToFirebase() {
-        if (!db || !window.state.companyId || !navigator.onLine) return;
+        if (!db || !window.state.companyId) return;
+        // 오프라인이어도 dirty 표시는 반드시 — 온라인 복귀 때 유실 없이 flush
+        markCurrentFloorDirty();
+        if (!navigator.onLine) {
+            markOfflinePendingFlush();
+            return;
+        }
         // 원격 적용/업로드 중이면 버리지 말고 끝나면 한 번 더 돌린다
         if (isRemoteSyncing || _syncInFlight) {
             _syncPending = true;
             return;
         }
         if (_syncDebounceTimer) clearTimeout(_syncDebounceTimer);
-        markCurrentFloorDirty();
         const debounceMs = window.BSA?.performance?.getSyncDebounceMs?.() ?? 400;
         _syncDebounceTimer = setTimeout(() => {
             _syncDebounceTimer = null;
@@ -46585,6 +46650,15 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             _reconnectSyncTimer = null;
             if (!navigator.onLine) return;
             if (Date.now() < _photoFetchQuotaPausedUntil) return;
+            if (reason === 'online') {
+                // 원격 스냅샷이 로컬 pending보다 먼저 적용되지 않게 — flush 끝날 때까지 차단
+                _blockRemoteApplyUntilLocalFlush = true;
+                restoreDirtyFloorKeys();
+                markCurrentFloorDirty();
+                if (hasOfflinePendingFlush() && _dirtyFloorKeys.size === 0) {
+                    collectLocalInspectionFloorKeys().forEach((k) => markFloorKeyDirty(k));
+                }
+            }
             scheduleSyncToFirebase();
         }, delay);
     }
@@ -47274,6 +47348,15 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             }
             setTimeout(() => { isRemoteSyncing = false; }, 400);
             _syncInFlight = false;
+            // 온라인 복귀 flush 시도가 끝나면 원격 적용 재개 (실패해도 무한 차단하지 않음.
+            // dirty 층은 applyFloorBundleToState 가드가 계속 보호)
+            if (_blockRemoteApplyUntilLocalFlush) {
+                _blockRemoteApplyUntilLocalFlush = false;
+            }
+            if (_dirtyFloorKeys.size === 0) {
+                clearOfflinePendingFlush();
+            }
+            persistDirtyFloorKeys();
             if (_syncPending && !_syncRetryTimer) {
                 _syncPending = false;
                 if (typeof _fsWritePausedUntil === 'number' && Date.now() < _fsWritePausedUntil) {
@@ -47357,7 +47440,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (typeof updateOnlineBadge === 'function') updateOnlineBadge(true);
         const data = combineListenerSnapshotData();
         if (!Object.keys(data).length) return;
-        if (_syncInFlight) {
+        if (_blockRemoteApplyUntilLocalFlush || _syncInFlight) {
             _pendingRemoteData = data;
             return;
         }
