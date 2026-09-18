@@ -19520,13 +19520,27 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         return !!defect?.mapUnregistered;
     }
 
-    /** 외부 도면에 있을 때: 모든 외부(입면·평면도)의 전차 미등록을 한 목록으로 */
+    /** 내부 층(1F/2F/B1F/옥상 등) 도면 코드 — 외부 미마킹 집계·가져오기에서 제외 */
+    function isInteriorFloorDrawingCode(code) {
+        const raw = String(code || '').trim();
+        const c = raw.toUpperCase();
+        if (!raw) return false;
+        if (/^B?\d+F$/.test(c)) return true;
+        if (c === 'ROOF' || c === 'PH' || c === 'PH_ROOF' || c === 'OT') return true;
+        if (/^(지상|지하)?\s*\d+\s*층$/.test(raw) && !/외부|입면/.test(raw)) return true;
+        return false;
+    }
+
+    /** 외부 도면에 있을 때: 모든 외부(입면·평면도)의 전차 미등록을 한 목록으로.
+     *  1F/2F 등 내부 층 키·내부 시트로 가져온 항목은 넣지 않는다(위치 칸 '외부'만으로 외부 풀에 넣지 않음). */
     function getExteriorMapUnregisteredDefects(bldgId) {
         const id = bldgId || state.currentBuildingId;
         if (!id || typeof listExteriorFloorCodesForBuilding !== 'function') return [];
         const out = [];
         const seen = new Set();
         listExteriorFloorCodesForBuilding(id).forEach((fc) => {
+            if (isInteriorFloorDrawingCode(fc)) return;
+            if (typeof isExteriorFloorCode === 'function' && !isExteriorFloorCode(fc)) return;
             const key = String(id) + '_' + fc;
             const list = (state.defects && state.defects[key]) || [];
             const forList = (typeof getDefectsForListPanel === 'function')
@@ -19535,6 +19549,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             forList.forEach((d) => {
                 if (!d || d.id == null) return;
                 if (!isPreviousRoundDefect(d) || !isDefectMapUnregistered(d)) return;
+                const srcFloor = d._importFloorCode || d.importFloorCode;
+                if (srcFloor && isInteriorFloorDrawingCode(srcFloor)) return;
                 if (seen.has(d.id)) return;
                 seen.add(d.id);
                 d._exteriorFloorCode = fc;
@@ -19570,20 +19586,20 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         return null;
     }
 
-    /** 해당 층(외부면 외부 전체 공유 목록) 전차 미등록 일괄 삭제 */
+    /** 해당 층(외부면 외부 전체 공유 목록) 전차 미등록 일괄 삭제 — 목록과 동일 필터 */
     function collectMapUnregisteredTargetsForContext() {
         const out = [];
         if (!state.currentBuildingId) return out;
         const exterior = typeof isExteriorFloorCode === 'function' && isExteriorFloorCode(state.currentFloor);
-        if (exterior && typeof listExteriorFloorCodesForBuilding === 'function') {
-            listExteriorFloorCodesForBuilding(state.currentBuildingId).forEach((fc) => {
-                const key = `${state.currentBuildingId}_${fc}`;
-                ((state.defects && state.defects[key]) || []).forEach((d) => {
-                    if (!d || !d.id) return;
-                    if (isPreviousRoundDefect(d) && isDefectMapUnregistered(d)) {
-                        out.push({ floorKey: key, id: d.id, no: d.no });
-                    }
-                });
+        if (exterior) {
+            (getExteriorMapUnregisteredDefects(state.currentBuildingId) || []).forEach((d) => {
+                if (!d || !d.id) return;
+                const fc = d._exteriorFloorCode;
+                const floorKey = fc
+                    ? `${state.currentBuildingId}_${fc}`
+                    : (findDefectFloorKeyById(d.id) || {}).floorKey;
+                if (!floorKey) return;
+                out.push({ floorKey, id: d.id, no: d.no });
             });
         } else {
             const key = `${state.currentBuildingId}_${state.currentFloor}`;
@@ -42424,16 +42440,79 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     }
 
     // 엑셀 시트 이름 ↔ 건축물의 실제 층(floorCode/floorLabel) 자동 매칭
+    // 주의: "1층"이 "지하 1층"·"1층외부" 라벨에 부분일치로 빨려 들어가지 않게 점수화한다.
+    function parseSheetFloorStoryHint(text) {
+        const raw = String(text || '').trim();
+        if (!raw) return null;
+        let m = raw.match(/지하\s*([0-9]{1,2})\s*층/);
+        if (m) return { basement: true, num: parseInt(m[1], 10) };
+        m = raw.match(/B\s*([0-9]{1,2})\s*F\b/i);
+        if (m) return { basement: true, num: parseInt(m[1], 10) };
+        m = raw.match(/지상\s*([0-9]{1,2})\s*층/);
+        if (m) return { basement: false, num: parseInt(m[1], 10) };
+        m = raw.match(/(?:^|[^A-Za-z0-9])([0-9]{1,2})\s*F\b/i);
+        if (m) return { basement: false, num: parseInt(m[1], 10) };
+        m = raw.match(/(?:^|[^0-9])([0-9]{1,2})\s*층/);
+        if (m) return { basement: false, num: parseInt(m[1], 10) };
+        return null;
+    }
+
+    function sheetNameLooksExterior(text) {
+        const raw = String(text || '');
+        const n = raw.toLowerCase();
+        return /외부|입면|외벽|파사드|facade|elevation|exterior/.test(raw)
+            || /(?:^|[^a-z0-9])ext(?:[^a-z0-9]|$)/i.test(n);
+    }
+
     function guessFloorForSheetName(sheetName, floors) {
         const norm = (s) => (s || '').toString().trim().toLowerCase().replace(/[\s()]/g, '');
         const n = norm(sheetName);
-        if (!n) return null;
+        if (!n || !floors || !floors.length) return null;
+
         let match = floors.find(f => norm(f.floorLabel) === n || norm(f.floorCode) === n);
         if (match) return match.floorCode;
-        match = floors.find(f => n.includes(norm(f.floorCode)) && norm(f.floorCode).length > 0);
-        if (match) return match.floorCode;
-        match = floors.find(f => n.includes(norm(f.floorLabel)) || norm(f.floorLabel).includes(n));
-        return match ? match.floorCode : null;
+
+        const sheetStory = parseSheetFloorStoryHint(sheetName);
+        const sheetExt = sheetNameLooksExterior(sheetName);
+        let best = null;
+        let bestScore = 0;
+
+        floors.forEach((f) => {
+            if (!f || !f.floorCode) return;
+            const fc = norm(f.floorCode);
+            const fl = norm(f.floorLabel);
+            const floorExt = (typeof isExteriorFloorCode === 'function' && isExteriorFloorCode(f.floorCode))
+                || sheetNameLooksExterior(f.floorLabel)
+                || sheetNameLooksExterior(f.floorCode);
+            let score = 0;
+
+            // 코드가 시트명에 포함 (단, "1"처럼 한 글자 코드는 "1층"에 오매칭되므로 제외)
+            if (fc && fc.length >= 2 && n.includes(fc)) score += 55;
+            if (fl && fl.length >= 2) {
+                if (n.includes(fl)) score += 35;
+                if (fl.includes(n)) score += 25;
+            }
+
+            const floorStory = parseSheetFloorStoryHint(`${f.floorCode} ${f.floorLabel || ''}`);
+            if (sheetStory && floorStory
+                && sheetStory.num === floorStory.num
+                && sheetStory.basement === floorStory.basement) {
+                score += floorExt ? 15 : 90;
+            }
+
+            // 시트명이 순수 층(1층/2F)인데 후보가 외부(1층외부·EXT)면 감점 — 1F 시트가 EXT 미마킹으로 새는 주원인
+            if (sheetStory && !sheetExt && floorExt) score -= 60;
+            if (sheetExt && floorExt) score += 45;
+            if (sheetExt && !floorExt) score -= 25;
+            if (sheetStory && !sheetExt && isInteriorFloorDrawingCode(f.floorCode)) score += 20;
+
+            if (score > bestScore) {
+                bestScore = score;
+                best = f;
+            }
+        });
+
+        return (best && bestScore > 0) ? best.floorCode : null;
     }
 
     window.handleImportDefectExcelFile = function(event) {
@@ -42856,7 +42935,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                         });
                     // 엑셀 가져오기는 항상 전차(전회차) 조사내용으로 분류
                     existing.isCarriedOver = true;
-                    const importToExteriorExisting = typeof isExteriorFloorCode === 'function' && isExteriorFloorCode(floorCode);
+                    // 위치 칸 '외부'만으로 외부 시트로 보내지 않음 — 시트↔층 배정(floorCode)만 본다.
+                    const importToExteriorExisting = !isInteriorFloorDrawingCode(floorCode)
+                        && typeof isExteriorFloorCode === 'function' && isExteriorFloorCode(floorCode);
+                    existing._importFloorCode = floorCode;
                     if (importPrevRound || importToExteriorExisting) {
                         const hasMapCoords = existing.x !== undefined && existing.y !== undefined;
                         // 외부는 좌표가 있어도 「미등록」으로 두지 않음 — 이미 배치된 핀은 유지
@@ -42905,7 +42987,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     applyParsedCrackMeasuresToDefect(newDefect, parsedMeasures, sizeRaw);
                 }
 
-                const importToExterior = typeof isExteriorFloorCode === 'function' && isExteriorFloorCode(floorCode);
+                // 1F 등 내부 층 시트는 위치 '외부'여도 외부 공유 미마킹으로 넣지 않음
+                const importToExterior = !isInteriorFloorDrawingCode(floorCode)
+                    && typeof isExteriorFloorCode === 'function' && isExteriorFloorCode(floorCode);
+                newDefect._importFloorCode = floorCode;
                 // 외부(입면·평면도)는 어느 도면에서나 「전차 미등록」으로 보이게 좌표 없이 등록.
                 // 배치할 때 보고 있는 외부 도면으로 옮긴다.
                 if (importPrevRound || importToExterior) {
