@@ -1390,6 +1390,95 @@ document.addEventListener('DOMContentLoaded', () => {
         return bldg;
     }
 
+    /** tombstone 무시 — RAM·IDB 플래그에 도면 페이로드가 있으면 true.
+     *  의도 삭제(deleteExistingFloorDrawing)는 IDB·클라우드까지 지운다. */
+    function floorHasDrawingPayloadEvidence(bldg, floorCode) {
+        if (!bldg || !floorCode) return false;
+        const c = String(floorCode).trim();
+        if (!c) return false;
+        const tiers = bldg.floorDrawingTiers && bldg.floorDrawingTiers[c];
+        if (tiers && typeof tiers === 'object' && Object.keys(tiers).some((k) => !!tiers[k])) return true;
+        if (bldg.floorDrawings && bldg.floorDrawings[c]) return true;
+        if (bldg.floorDrawingPdfs && bldg.floorDrawingPdfs[c]) return true;
+        if (bldg.floorDrawingSources && bldg.floorDrawingSources[c]) return true;
+        if (!bldg.id) return false;
+        const key = `${bldg.id}_${c}`;
+        if (_idbPersistedDrawingKeys && _idbPersistedDrawingKeys.has(key)) return true;
+        if (_idbPersistedPdfKeys && _idbPersistedPdfKeys.has(key)) return true;
+        if (_idbPersistedSourceKeys && _idbPersistedSourceKeys.has(key)) return true;
+        if (_idbPersistedTierKeys && (
+            _idbPersistedTierKeys.has(key)
+            || _idbPersistedTierKeys.has(`${key}_4000`)
+            || _idbPersistedTierKeys.has(`${key}_8000`)
+            || _idbPersistedTierKeys.has(`${key}_16000`)
+        )) return true;
+        return false;
+    }
+
+    /** 여러 맵·IDB 플래그에서 도면 증거 층 코드를 모은다 */
+    function collectDrawingPayloadEvidenceCodes(bldg, extraMaps) {
+        const out = new Set();
+        const takeMap = (map) => {
+            Object.keys(map || {}).forEach((code) => {
+                const c = String(code || '').trim();
+                if (c) out.add(c);
+            });
+        };
+        if (bldg) {
+            takeMap(bldg.floorDrawings);
+            takeMap(bldg.floorDrawingPdfs);
+            takeMap(bldg.floorDrawingTiers);
+            takeMap(bldg.floorDrawingSources);
+        }
+        (extraMaps || []).forEach(takeMap);
+        if (bldg && bldg.id) {
+            const pref = String(bldg.id) + '_';
+            const scanSet = (set) => {
+                if (!set || typeof set.forEach !== 'function') return;
+                set.forEach((key) => {
+                    if (!key || String(key).indexOf(pref) !== 0) return;
+                    let rest = String(key).slice(pref.length);
+                    const m = rest.match(/^(.*)_(4000|8000|16000)$/);
+                    if (m) rest = m[1];
+                    if (rest) out.add(rest);
+                });
+            };
+            scanSet(_idbPersistedDrawingKeys);
+            scanSet(_idbPersistedPdfKeys);
+            scanSet(_idbPersistedSourceKeys);
+            scanSet(_idbPersistedTierKeys);
+        }
+        return out;
+    }
+
+    /**
+     * 도면 페이로드 증거가 있는 층의 false tombstone을 해제한다.
+     * (의도 삭제는 증거를 지우므로 rememberDeleted는 그대로 유지된다)
+     */
+    function reconcileDrawingFloorTombstonesFromEvidence(bldg, extraEvidenceCodes) {
+        if (!bldg) return 0;
+        const evidence = collectDrawingPayloadEvidenceCodes(bldg);
+        (extraEvidenceCodes || []).forEach((c) => {
+            const code = c == null ? '' : String(c).trim();
+            if (code) evidence.add(code);
+        });
+        if (!evidence.size) return 0;
+        if (typeof _drawingFloorTombstone.forgetTombstonesWithDrawingEvidence === 'function') {
+            return _drawingFloorTombstone.forgetTombstonesWithDrawingEvidence(
+                bldg, _sessionDeletedDrawingKeys, evidence
+            );
+        }
+        let n = 0;
+        const deleted = (bldg.deletedDrawingFloorCodes || []).slice();
+        deleted.forEach((code) => {
+            const c = String(code || '').trim();
+            if (!c || !evidence.has(c)) return;
+            forgetDeletedDrawingFloor(bldg, c);
+            n += 1;
+        });
+        return n;
+    }
+
     function stripDeletedDrawingFloorsFromBuilding(bldg) {
         if (typeof _drawingFloorTombstone.stripDeletedDrawingFloorsFromBuilding === 'function') {
             _drawingFloorTombstone.stripDeletedDrawingFloorsFromBuilding(bldg, _sessionDeletedDrawingKeys);
@@ -2687,10 +2776,37 @@ document.addEventListener('DOMContentLoaded', () => {
             const localDeleted = new Set(
                 (localMatch?.deletedDrawingFloorCodes || []).map((c) => String(c || '').trim()).filter(Boolean)
             );
-            if (locallyResurrected.size) {
+            // 로컬/prevAssets/IDB 도면 페이로드가 남아 있으면 tombstone보다 우선한다.
+            // 원격 건물 문서의 도면 맵만으로는 해제하지 않는다 — 의도 삭제 직후
+            // 클라우드 문서 삭제 전에 merge가 오면 삭제가 풀릴 수 있음.
+            // (클라우드 컬렉션 증거는 discoverCloudDrawingFloorCodes / IDB enrich 경로)
+            const payloadEvidence = (typeof collectDrawingPayloadEvidenceCodes === 'function')
+                ? collectDrawingPayloadEvidenceCodes(
+                    {
+                        id: b.id,
+                        floorDrawings: localMatch?.floorDrawings,
+                        floorDrawingPdfs: localMatch?.floorDrawingPdfs,
+                        floorDrawingTiers: localMatch?.floorDrawingTiers,
+                        floorDrawingSources: localMatch?.floorDrawingSources
+                    },
+                    [
+                        assets[b.id]?.floorDrawings,
+                        assets[b.id]?.floorDrawingPdfs,
+                        assets[b.id]?.floorDrawingTiers,
+                        assets[b.id]?.floorDrawingSources
+                    ]
+                )
+                : new Set();
+            if (payloadEvidence.size || locallyResurrected.size) {
                 merged.deletedDrawingFloorCodes = (merged.deletedDrawingFloorCodes || []).filter((c) => {
                     const code = String(c || '').trim();
                     if (!code) return false;
+                    if (payloadEvidence.has(code)) {
+                        if (typeof forgetDeletedDrawingFloor === 'function') {
+                            forgetDeletedDrawingFloor(merged, code);
+                        }
+                        return false;
+                    }
                     if (locallyResurrected.has(code) && !localDeleted.has(code)) {
                         if (typeof forgetDeletedDrawingFloor === 'function') {
                             forgetDeletedDrawingFloor(merged, code);
@@ -2717,11 +2833,18 @@ document.addEventListener('DOMContentLoaded', () => {
                 merged.floorsList,
                 [merged.floorDrawings, merged.floorDrawingPdfs, merged.floorDrawingTiers, merged.floorDrawingSources]
             );
-            // 합친 뒤에도 로컬 재등록 층은 tombstone에서 한 번 더 제거
-            if (locallyResurrected.size) {
+            // 합친 뒤에도 도면 증거·로컬 재등록 층은 tombstone에서 한 번 더 제거
+            if (payloadEvidence.size || locallyResurrected.size) {
                 merged.deletedDrawingFloorCodes = (merged.deletedDrawingFloorCodes || []).filter((c) => {
                     const code = String(c || '').trim();
-                    return !(code && locallyResurrected.has(code) && !localDeleted.has(code));
+                    if (!code) return false;
+                    if (payloadEvidence.has(code)) {
+                        if (typeof forgetDeletedDrawingFloor === 'function') {
+                            forgetDeletedDrawingFloor(merged, code);
+                        }
+                        return false;
+                    }
+                    return !(locallyResurrected.has(code) && !localDeleted.has(code));
                 });
             }
             stripDeletedDrawingFloorsFromBuilding(merged);
@@ -4292,7 +4415,12 @@ document.addEventListener('DOMContentLoaded', () => {
             try {
                 const discovered = await withTimeout(discoverCloudDrawingFloorCodes(bldg), 8000, '도면 층 탐색 시간 초과');
                 discovered.forEach((fc) => {
-                    if (!isDeletedDrawingFloor(bldg, fc)) floors.add(fc);
+                    if (!fc) return;
+                    // discoverCloud가 클라우드 문서 증거로 tombstone을 이미 해제했을 수 있음
+                    if (isDeletedDrawingFloor(bldg, fc)) {
+                        forgetDeletedDrawingFloor(bldg, fc);
+                    }
+                    floors.add(fc);
                 });
             } catch (e) {
                 console.warn('서버 도면 층 탐색 실패:', bldg.id, e);
@@ -5209,6 +5337,17 @@ document.addEventListener('DOMContentLoaded', () => {
             advanceLatestSurveyRound(bldg, maxDefectRoundKey || `${bldg.inspectionYear || '2026년'}_${bldg.inspectionPeriod || '하반기'}`);
         }
 
+        // home→재진입 레이스: sync merge가 false tombstone을 다시 합치기 전에
+        // IDB 도면 증거로 tombstone을 먼저 해제한다. (의도 삭제는 IDB도 비움)
+        let enrichedOnEnter = false;
+        try {
+            if (typeof enrichFloorsListFromIndexedDb === 'function') {
+                enrichedOnEnter = !!(await enrichFloorsListFromIndexedDb(bldg));
+            }
+        } catch (e) {
+            console.warn('진입 전 IDB 층 보강 실패:', e);
+        }
+
         populateFloorSelectDropdown(bldg);
 
         const availableOnEnter = (typeof window.getBuildingAvailableFloors === 'function')
@@ -5244,8 +5383,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
         (async () => {
             try {
-                // IndexedDB에만 남아 있는 층도 점검층 목록에 복구
-                const enriched = await enrichFloorsListFromIndexedDb(bldg);
+                // 진입 전 enrich가 실패했거나 추가 키가 생긴 경우를 대비해 한 번 더
+                const enriched = enrichedOnEnter
+                    || (typeof enrichFloorsListFromIndexedDb === 'function'
+                        ? !!(await enrichFloorsListFromIndexedDb(bldg))
+                        : false);
                 // 반대로 로컬·클라우드 어디에도 실제 도면이 없는 유령 층은 정리
                 const pruned = await pruneGhostFloorEntries(bldg);
                 if (enriched || pruned) populateFloorSelectDropdown(bldg);
@@ -5451,6 +5593,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!bldg || !bldg.id || typeof idbGetAllKeys !== 'function') return false;
         const prefix = `${bldg.id}_`;
         const found = new Set();
+        let healedTombstones = 0;
         const takeKeys = (keys) => {
             (keys || []).forEach((key) => {
                 if (!key || !String(key).startsWith(prefix)) return;
@@ -5458,7 +5601,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (!rest) return;
                 const tierSuffix = rest.match(/^(.*)_(4000|8000|16000)$/);
                 const fc = tierSuffix ? tierSuffix[1] : rest;
-                if (!isDeletedDrawingFloor(bldg, fc)) found.add(fc);
+                if (!fc) return;
+                // IDB에 도면이 남아 있으면 오탐 tombstone — 의도 삭제는 IDB도 지운다
+                if (isDeletedDrawingFloor(bldg, fc)) {
+                    forgetDeletedDrawingFloor(bldg, fc);
+                    healedTombstones += 1;
+                }
+                found.add(fc);
             });
         };
         try {
@@ -5485,7 +5634,12 @@ document.addEventListener('DOMContentLoaded', () => {
         bldg.drawingFloorCodes = Array.from(codeSet).filter((c) => !isDeletedDrawingFloor(bldg, c));
         bldg.floorsList = window.getBuildingAvailableFloors(bldg);
         stripDeletedDrawingFloorsFromBuilding(bldg);
-        return (bldg.floorsList || []).length > before;
+        if (healedTombstones > 0) {
+            console.info('[tombstone] IDB 도면 증거로 false tombstone 해제:', bldg.id, healedTombstones);
+            bldg._pendingCloudSync = true;
+            if (typeof saveStateToLocalStorage === 'function') saveStateToLocalStorage();
+        }
+        return (bldg.floorsList || []).length > before || healedTombstones > 0;
     }
 
     /** 예전 삭제 버그 등으로 floorsList/drawingFloorCodes에만 남고 실제 도면은
@@ -44522,9 +44676,21 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         // PDF가 필요할 때는 resolveBuildingFloorPdf / hydrateBuildingPdfsFromSiteVault가
         // 이미 등록된 층 코드에 한해 보관함을 조회한다.
         _cloudDrawingFloorCodesCache.set(cacheKey, { at: Date.now(), codes: Array.from(codes) });
+        // 클라우드 floorDrawings/pdfs/tiers 문서가 있으면 오탐 tombstone 해제
+        // (의도 삭제는 해당 문서를 지우므로 discover에 안 잡힌다)
+        let healed = 0;
         Array.from(codes).forEach((fc) => {
-            if (isDeletedDrawingFloor(bldg, fc)) codes.delete(fc);
+            if (!fc) return;
+            if (isDeletedDrawingFloor(bldg, fc)) {
+                forgetDeletedDrawingFloor(bldg, fc);
+                healed += 1;
+            }
         });
+        if (healed > 0) {
+            console.info('[tombstone] 클라우드 도면 문서로 false tombstone 해제:', bldg.id, healed);
+            bldg._pendingCloudSync = true;
+            if (typeof saveStateToLocalStorage === 'function') saveStateToLocalStorage();
+        }
         return codes;
     }
     window.discoverCloudDrawingFloorCodes = discoverCloudDrawingFloorCodes;

@@ -69,7 +69,28 @@ function testForgetAllowsReupload() {
     assert.strictEqual(api.isDeletedDrawingFloor(bldg, '3F', session), false);
 }
 
+function testEvidenceClearsFalseTombstoneAndSession() {
+    const session = new Set();
+    const bldg = {
+        id: 'bldg-1',
+        deletedDrawingFloorCodes: ['1F', '2F', 'ROOF'],
+        floorsList: [{ floorCode: 'EXT', floorLabel: '외부' }],
+        drawingFloorCodes: ['EXT'],
+        floorDrawings: {}
+    };
+    session.add('bldg-1_1F');
+    session.add('bldg-1_2F');
+    const n = api.forgetTombstonesWithDrawingEvidence(bldg, session, ['1F', '2F']);
+    assert.strictEqual(n, 2);
+    assert.deepStrictEqual(bldg.deletedDrawingFloorCodes, ['ROOF']);
+    assert.strictEqual(session.has('bldg-1_1F'), false);
+    assert.strictEqual(session.has('bldg-1_2F'), false);
+    assert.strictEqual(api.isDeletedDrawingFloor(bldg, '1F', session), false);
+    assert.strictEqual(api.isDeletedDrawingFloor(bldg, 'ROOF', session), true);
+}
+
 testRememberAndStrip();
 testMergeKeepsLocalTombstoneAgainstRemoteRevival();
 testForgetAllowsReupload();
+testEvidenceClearsFalseTombstoneAndSession();
 console.log('drawing-floor-tombstone tests ok');

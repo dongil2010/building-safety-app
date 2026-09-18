@@ -115,6 +115,36 @@
         return uniqueCodes([remoteCodes, localCodes]);
     }
 
+    /**
+     * 살아 있는 도면 증거가 있는 층 코드는 tombstone에서 뺀다.
+     * (의도 삭제는 RAM·IDB·클라우드 도면을 함께 지우므로, 증거가 남으면 오탐으로 본다)
+     * evidenceCodes: string[] | Set
+     * returns number of forgotten codes
+     */
+    function forgetTombstonesWithDrawingEvidence(bldg, sessionKeys, evidenceCodes) {
+        if (!bldg) return 0;
+        const evidence = {};
+        const list = evidenceCodes
+            ? (typeof evidenceCodes.forEach === 'function' && !Array.isArray(evidenceCodes)
+                ? evidenceCodes
+                : Array.from(evidenceCodes))
+            : [];
+        if (list && typeof list.forEach === 'function') {
+            list.forEach(function (c) {
+                const code = asCode(c);
+                if (code) evidence[code] = true;
+            });
+        }
+        const deleted = getDeletedDrawingFloorCodes(bldg, sessionKeys);
+        let n = 0;
+        deleted.forEach(function (code) {
+            if (!evidence[code]) return;
+            forgetDeletedDrawingFloor(bldg, code, sessionKeys);
+            n += 1;
+        });
+        return n;
+    }
+
     function filterFloorCodes(codes, bldg, sessionKeys) {
         return (codes || []).filter(function (c) {
             return c && !isDeletedDrawingFloor(bldg, c, sessionKeys);
@@ -130,6 +160,7 @@
         forgetDeletedDrawingFloor: forgetDeletedDrawingFloor,
         stripDeletedDrawingFloorsFromBuilding: stripDeletedDrawingFloorsFromBuilding,
         mergeDeletedDrawingFloorCodes: mergeDeletedDrawingFloorCodes,
+        forgetTombstonesWithDrawingEvidence: forgetTombstonesWithDrawingEvidence,
         filterFloorCodes: filterFloorCodes
     };
 
