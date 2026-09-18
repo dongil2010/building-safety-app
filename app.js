@@ -10305,13 +10305,17 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         return String(c || '').trim().toLowerCase();
     }
 
-    /** 순색(0/255) 기본 팔레트 버전 — 구 탁한 기본값이 저장돼 있어도 한 번 비운다 */
+    /** 순색(0/255) 기본 팔레트 버전 */
     const STYLE_COLORS_PALETTE_VERSION = 3;
 
+    // 2026-09-18: 예전엔 여기서 state.styleColors를 통째로 비웠다. 구 탁한 기본값(#b30000 등)을
+    // 순색으로 갈아끼우려던 일회성 조치였는데, 사용자가 직접 고른 색까지 같이 날아갔다.
+    // 게다가 styleColorsPaletteVersion이 Firestore에 안 올라가서 다른 기기에서 받을 때마다
+    // 버전 0으로 보여 이 함수가 계속 재발동했다 → "색을 바꿔도 자꾸 원래대로 돌아감".
+    // 구 기본값 처리는 getStyleColor()가 읽는 시점에 이미 하고 있으므로(legacy → new 매핑)
+    // 비우는 동작은 불필요하고 해롭기만 하다. 버전 도장만 찍는다.
     function migrateStyleColorsToPureDefaults() {
         if (state.styleColorsPaletteVersion === STYLE_COLORS_PALETTE_VERSION) return;
-        // 한 번만: 저장된 마킹 색을 비워 순색(0/255) 기본 팔레트를 쓰게 함
-        state.styleColors = {};
         state.styleColorsPaletteVersion = STYLE_COLORS_PALETTE_VERSION;
         if (typeof saveStateToLocalStorage === 'function') {
             try { saveStateToLocalStorage(); } catch (_e) { /* ignore */ }
@@ -47151,6 +47155,13 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             window.state.styleColors = data.styleColors;
             isChanged = true;
         }
+        // styleColors와 반드시 함께 받아야 한다. 이 값이 빠지면 다른 기기에서 받은 순간
+        // 팔레트 버전이 0으로 보여 migrateStyleColorsToPureDefaults()가 재발동하고,
+        // 사용자가 지정한 색이 통째로 지워진 뒤 그 빈 값이 다시 올라가 모든 기기의 색을 날린다.
+        if (data.styleColorsPaletteVersion != null) {
+            window.state.styleColorsPaletteVersion = data.styleColorsPaletteVersion;
+            isChanged = true;
+        }
         if (data.styleSizes) {
             window.state.styleSizes = data.styleSizes;
             isChanged = true;
@@ -47553,6 +47564,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 buildings: sanitizedBuildings,
                 lastUsedBuildingId: window.state.currentBuildingId || null,
                 styleColors: window.state.styleColors || null,
+                styleColorsPaletteVersion: (window.state.styleColorsPaletteVersion || 0),
                 styleSizes: window.state.styleSizes || null,
                 defectLeaderLineScale: (window.state.defectLeaderLineScale !== undefined ? window.state.defectLeaderLineScale : 1.0),
                 ndtLeaderLineScale: (window.state.ndtLeaderLineScale !== undefined ? window.state.ndtLeaderLineScale : 1.0),
