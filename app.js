@@ -5297,9 +5297,11 @@ document.addEventListener('DOMContentLoaded', () => {
                     if (typeof hydrateDefectPhotos !== 'function') return;
                     if (Object.keys(currentFloorPhotoSubset).length) {
                         // 현재 층만 클라우드 photos get 허용 — 전 층/전 현장 일괄 get은 하지 않음
+                        const allowCloudPhotos = !!canFetchDrawings
+                            && !(typeof isFirestoreReadPaused === 'function' && isFirestoreReadPaused());
                         const loaded = await hydrateDefectPhotos(currentFloorPhotoSubset, {
                             buildingId: bldg.id,
-                            allowCloudPhotoFetch: canFetchDrawings
+                            allowCloudPhotoFetch: allowCloudPhotos
                         });
                         if (window.state.currentBuildingId !== entryBuildingId) return;
                         Object.assign(window.state.defects, loaded);
@@ -19086,6 +19088,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             return fromIdb;
         }
         if (!db || !window.state.companyId) return null;
+        // isFirestoreReadPaused / pauseFirestoreReads는 아래에서 function으로 선언되어 호이스팅됨
+        if (typeof isFirestoreReadPaused === 'function' && isFirestoreReadPaused()) return null;
         try {
             const snap = await db.collection('safety_app').doc(getCompanyDocId()).collection('photos').doc(pid).get();
             if (!snap.exists) {
@@ -19102,6 +19106,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             _nonExistentPhotoIds.add(pid);
             return null;
         } catch (e) {
+            if (typeof isFirestoreQuotaError === 'function' && isFirestoreQuotaError(e)
+                && typeof pauseFirestoreReads === 'function') {
+                pauseFirestoreReads(typeof SYNC_QUOTA_COOLDOWN_MS === 'number' ? SYNC_QUOTA_COOLDOWN_MS : 120000);
+            }
             return null;
         }
     }
@@ -30195,9 +30203,12 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             const photoKey = (state.currentBuildingId && fcNow) ? `${state.currentBuildingId}_${fcNow}` : '';
             if (photoKey && window.state.defects && window.state.defects[photoKey]
                 && typeof hydrateDefectPhotos === 'function') {
+                const canCloudPhoto = navigator.onLine !== false
+                    && typeof isFirestoreReadPaused === 'function'
+                    && !isFirestoreReadPaused();
                 hydrateDefectPhotos({ [photoKey]: window.state.defects[photoKey] }, {
                     buildingId: state.currentBuildingId,
-                    allowCloudPhotoFetch: navigator.onLine !== false
+                    allowCloudPhotoFetch: canCloudPhoto
                 })
                     .then((loaded) => {
                         if (state.currentFloor !== fcNow) return;
@@ -43001,6 +43012,21 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     let _photoFetchQuotaPausedUntil = 0;
     let _photoFetchInflight = 0;
     const PHOTO_FETCH_MAX_CONCURRENT = 4;
+    /** 한 hydrateDefectPhotos 호출당 클라우드 photos.doc.get 상한 (층에 사진 많을 때 폭주 방지) */
+    const PHOTO_FETCH_MAX_PER_HYDRATE = 24;
+    /** 세션 중 이미 클라우드 get을 시도한 photoId — 층전환/스냅샷마다 재조회 금지 */
+    const _cloudPhotoFetchAttempted = new Set();
+    /** 읽기 할당량 초과 시 모든 클라우드 사진/재구독 get을 잠시 중단 */
+    let _firestoreReadPausedUntil = 0;
+
+    function pauseFirestoreReads(ms) {
+        const until = Date.now() + Math.max(0, ms || 0);
+        _firestoreReadPausedUntil = Math.max(_firestoreReadPausedUntil, until);
+        _photoFetchQuotaPausedUntil = Math.max(_photoFetchQuotaPausedUntil, until);
+    }
+    function isFirestoreReadPaused() {
+        return Date.now() < _firestoreReadPausedUntil || Date.now() < _photoFetchQuotaPausedUntil;
+    }
 
     function isFirestoreQuotaError(err) {
         const msg = String((err && err.message) || err || '');
@@ -44910,9 +44936,6 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             const arr = raw ? JSON.parse(raw) : [];
             if (!Array.isArray(arr)) return;
             arr.forEach((k) => { if (k) _dirtyFloorKeys.add(String(k)); });
-            // Storm guard: a previous bug could persist hundreds of floor keys.
-            // Cap to current building floors (+ current key) so one reconnect
-            // cannot re-read the entire company.
             const MAX_DIRTY = 8;
             if (_dirtyFloorKeys.size > MAX_DIRTY) {
                 const keep = new Set();
@@ -46471,36 +46494,58 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 const loadIds = async (ids) => {
                     if (!ids || ids.length === 0) return [];
                     const allowCloud = options.allowCloudPhotoFetch === true;
-                    const photos = await Promise.all(ids.map(async pid => {
+                    // 1) 캐시·IDB 먼저 (읽기 과금 없음)
+                    const localResolved = await Promise.all(ids.map(async pid => {
+                        if (!pid) return { pid, url: null, needCloud: false };
                         if (window._photoCache[pid]) {
-                            return window._photoCache[pid];
+                            return { pid, url: window._photoCache[pid], needCloud: false };
                         }
                         const fromIdb = await idbGet('photos', pid);
                         if (fromIdb) {
                             window._photoCache[pid] = fromIdb;
-                            return fromIdb;
+                            return { pid, url: fromIdb, needCloud: false };
                         }
-                        if (!allowCloud || !companyPhotos) return null;
-                        if (_nonExistentPhotoIds.has(pid)) return null;
-                        if (Date.now() < _photoFetchQuotaPausedUntil) return null;
+                        const needCloud = !!(allowCloud && companyPhotos
+                            && !_nonExistentPhotoIds.has(pid)
+                            && !_cloudPhotoFetchAttempted.has(pid)
+                            && !isFirestoreReadPaused());
+                        return { pid, url: null, needCloud };
+                    }));
+                    // 2) 이 hydrate 호출에서 클라우드 get할 ID를 상한만큼만 고름 (병렬 레이스 없음)
+                    let cloudBudget = allowCloud ? PHOTO_FETCH_MAX_PER_HYDRATE : 0;
+                    const cloudPidSet = new Set();
+                    localResolved.forEach((row) => {
+                        if (!row.needCloud || cloudBudget <= 0) return;
+                        cloudBudget -= 1;
+                        cloudPidSet.add(row.pid);
+                        _cloudPhotoFetchAttempted.add(row.pid);
+                    });
+                    const photos = await Promise.all(localResolved.map(async (row) => {
+                        if (row.url) return row.url;
+                        if (!cloudPidSet.has(row.pid) || !companyPhotos) return null;
+                        if (isFirestoreReadPaused()) return null;
                         while (_photoFetchInflight >= PHOTO_FETCH_MAX_CONCURRENT) {
                             await new Promise((r) => setTimeout(r, 40));
-                            if (Date.now() < _photoFetchQuotaPausedUntil) return null;
+                            if (isFirestoreReadPaused()) return null;
                         }
                         _photoFetchInflight += 1;
                         try {
-                            const snap = await companyPhotos.doc(pid).get();
+                            const snap = await companyPhotos.doc(row.pid).get();
                             if (!snap.exists) {
-                                _nonExistentPhotoIds.add(pid);
+                                _nonExistentPhotoIds.add(row.pid);
                                 return null;
                             }
-                            const url = await photoUrlFromCloudSnap(snap, pid);
-                            if (url) window._photoCache[pid] = url;
-                            else _nonExistentPhotoIds.add(pid);
+                            const url = await photoUrlFromCloudSnap(snap, row.pid);
+                            if (url) {
+                                window._photoCache[row.pid] = url;
+                                try { idbSetPhotoPreferDataUrl(row.pid, url); } catch (_ie) { /* ignore */ }
+                            } else {
+                                _nonExistentPhotoIds.add(row.pid);
+                            }
                             return url;
                         } catch (e) {
                             if (isFirestoreQuotaError(e)) {
-                                _photoFetchQuotaPausedUntil = Date.now() + SYNC_QUOTA_COOLDOWN_MS;
+                                pauseFirestoreReads(SYNC_QUOTA_COOLDOWN_MS);
                             }
                             return null;
                         } finally {
@@ -46577,9 +46622,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         Object.values(subset).forEach((arr) => {
             (arr || []).forEach(seedPhotoCacheFromDefect);
         });
+        // 스냅샷/동기화 후 경로: IDB·메모리만. 클라우드 per-photo get은 진입/층전환에서만.
         const loaded = await hydrateDefectPhotos(subset, {
             buildingId: currentId,
-            allowCloudPhotoFetch: typeof navigator === 'undefined' || navigator.onLine !== false
+            allowCloudPhotoFetch: false
         });
         Object.assign(window.state.defects, loaded);
     }
@@ -46627,14 +46673,19 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     }
 
 
-    function scheduleSyncToFirebase() {
+    function scheduleSyncToFirebase(opts) {
         if (!db || !window.state.companyId) return;
+        const options = opts || {};
         // 오프라인이어도 dirty 표시는 반드시 — 온라인 복귀 때 유실 없이 flush
-        markCurrentFloorDirty();
+        // (reconnect가 이미 dirty만 들고 온 경우 skipMarkCurrent로 현재 층을 억지로 더럽히지 않음)
+        if (!options.skipMarkCurrent) {
+            markCurrentFloorDirty();
+        }
         if (!navigator.onLine) {
             markOfflinePendingFlush();
             return;
         }
+        if (isFirestoreReadPaused() && _dirtyFloorKeys.size === 0) return;
         // 원격 적용/업로드 중이면 버리지 말고 끝나면 한 번 더 돌린다
         if (isRemoteSyncing || _syncInFlight) {
             _syncPending = true;
@@ -46672,21 +46723,23 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             if (!navigator.onLine) return;
             if (Date.now() < _photoFetchQuotaPausedUntil) return;
             if (reason === 'online') {
-                // Local-first flush: only floors already marked dirty (persisted).
-                // Never expand to ALL inspection floors — that caused Firestore read storms.
                 restoreDirtyFloorKeys();
-                if (_dirtyFloorKeys.size > 0 || hasOfflinePendingFlush()) {
-                    _blockRemoteApplyUntilLocalFlush = true;
-                    markCurrentFloorDirty();
-                }
-                // If pending flag stuck with empty dirty set, clear it rather than
-                // marking every defects/ndt key dirty (quota burn).
+                // pending 플래그만 있고 dirty가 비면 "전 층 dirty"로 확장하지 않음(읽기 폭주 원인).
+                // 실제 오프라인 편집은 persistDirtyFloorKeys로 남아 있어야 한다.
                 if (hasOfflinePendingFlush() && _dirtyFloorKeys.size === 0) {
                     clearOfflinePendingFlush();
-                    _blockRemoteApplyUntilLocalFlush = false;
                 }
+                if (_dirtyFloorKeys.size > 0) {
+                    // 원격 스냅샷이 로컬 pending보다 먼저 적용되지 않게 — flush 끝날 때까지 차단
+                    _blockRemoteApplyUntilLocalFlush = true;
+                    scheduleSyncToFirebase({ skipMarkCurrent: true });
+                    return;
+                }
+                // dirty 없음: 전 현장/전 층 pull·업로드 하지 않음
+                return;
             }
-            scheduleSyncToFirebase();
+            if (isFirestoreReadPaused()) return;
+            scheduleSyncToFirebase({ skipMarkCurrent: reason === 'listener-error' });
         }, delay);
     }
     window.reconnectFirestoreSync = reconnectFirestoreSync;
@@ -47134,7 +47187,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 return await docRef.get({ source: 'server' });
             } catch (e) {
                 if (isFirestoreQuotaError(e)) {
-                    _photoFetchQuotaPausedUntil = Date.now() + SYNC_QUOTA_COOLDOWN_MS;
+                    pauseFirestoreReads(SYNC_QUOTA_COOLDOWN_MS);
                     throw e;
                 }
                 console.warn('서버 문서 조회 실패, 캐시/기본 조회로 재시도:', e);
@@ -47520,13 +47573,20 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             console.warn('Realtime listener warning:', err);
             _listenerNeedsResubscribe = true;
             if (typeof updateOnlineBadge === 'function') updateOnlineBadge(false);
-            if (navigator.onLine) {
-                setTimeout(() => {
-                    if (_listenerNeedsResubscribe && typeof reconnectFirestoreSync === 'function') {
-                        reconnectFirestoreSync('listener-error');
-                    }
-                }, 1500);
+            if (!navigator.onLine) return;
+            const quota = typeof isFirestoreQuotaError === 'function' && isFirestoreQuotaError(err);
+            if (quota && typeof pauseFirestoreReads === 'function') {
+                pauseFirestoreReads(SYNC_QUOTA_COOLDOWN_MS);
             }
+            // 할당량 오류면 1.5초 재구독 루프 금지 — 쿨다운 후에만 한 번
+            const delay = quota ? SYNC_QUOTA_COOLDOWN_MS : 1500;
+            setTimeout(() => {
+                if (!_listenerNeedsResubscribe) return;
+                if (typeof isFirestoreReadPaused === 'function' && isFirestoreReadPaused()) return;
+                if (typeof reconnectFirestoreSync === 'function') {
+                    reconnectFirestoreSync('listener-error');
+                }
+            }, delay);
         };
 
         // 회사 루트는 건물 목록·설정만. 마킹/NDT는 지금 층 문서만 구독한다.
