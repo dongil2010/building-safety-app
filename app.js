@@ -5295,7 +5295,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 const photosPromise = (async () => {
                     if (typeof hydrateDefectPhotos !== 'function') return;
                     if (Object.keys(currentFloorPhotoSubset).length) {
-                        const loaded = await hydrateDefectPhotos(currentFloorPhotoSubset, { buildingId: bldg.id });
+                        // 현재 층만 클라우드 photos get 허용 — 전 층/전 현장 일괄 get은 하지 않음
+                        const loaded = await hydrateDefectPhotos(currentFloorPhotoSubset, {
+                            buildingId: bldg.id,
+                            allowCloudPhotoFetch: canFetchDrawings
+                        });
                         if (window.state.currentBuildingId !== entryBuildingId) return;
                         Object.assign(window.state.defects, loaded);
                     }
@@ -5303,7 +5307,18 @@ document.addEventListener('DOMContentLoaded', () => {
                     if (typeof renderSurveyTable === 'function' && window.state.currentTab === 'tab-survey') renderSurveyTable();
                     if (typeof renderDefectListPanel === 'function') renderDefectListPanel();
 
-                    // 나머지 층 사진은 층 전환·조사표 열 때 복원. 진입 시 전 층 백그라운드 hydrate는 제거.
+                    // 나머지 층: IDB/캐시만 백그라운드 복원(클라우드 get 없음). 층 전환 때 클라우드 보강.
+                    if (Object.keys(restPhotoSubset).length) {
+                        hydrateDefectPhotos(restPhotoSubset, {
+                            buildingId: bldg.id,
+                            allowCloudPhotoFetch: false
+                        }).then((loaded) => {
+                            if (window.state.currentBuildingId !== entryBuildingId) return;
+                            Object.assign(window.state.defects, loaded);
+                            if (typeof renderSurveyTable === 'function' && window.state.currentTab === 'tab-survey') renderSurveyTable();
+                            if (typeof renderDefectListPanel === 'function') renderDefectListPanel();
+                        }).catch((e) => console.warn('나머지 층 사진 IDB 복원 실패:', e));
+                    }
                 })().catch((e) => console.warn('현재 층 사진 로드 실패:', e));
 
                 await Promise.all([drawingsPromise, photosPromise]);
@@ -19093,13 +19108,17 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     async function ensureDefectPhotosLoaded(d) {
         if (!d) return;
         seedPhotoCacheFromDefect(d);
-        if ((!d.photos || d.photos.length === 0) && d.photoIds && d.photoIds.length > 0) {
-            const filled = (await Promise.all(d.photoIds.map(loadPhotoByIdWithCloudFallback))).filter(Boolean);
-            if (filled.length > 0) d.photos = filled;
+        // hydrateDefectPhotos가 photoIds만 있고 소스가 없을 때 [null,…]을 넣을 수 있음.
+        // length>0만 보면 클라우드 폴백이 영구히 스킵되어 사진이 안 보인다.
+        const curVisible = Array.isArray(d.photos) && d.photos.some(Boolean);
+        if (!curVisible && d.photoIds && d.photoIds.length > 0) {
+            const filled = await Promise.all(d.photoIds.map(loadPhotoByIdWithCloudFallback));
+            if (filled.some(Boolean)) d.photos = filled;
         }
-        if ((!d.prevRoundPhotos || d.prevRoundPhotos.length === 0) && d.prevRoundPhotoIds && d.prevRoundPhotoIds.length > 0) {
-            const filled = (await Promise.all(d.prevRoundPhotoIds.map(loadPhotoByIdWithCloudFallback))).filter(Boolean);
-            if (filled.length > 0) d.prevRoundPhotos = filled;
+        const prevVisible = Array.isArray(d.prevRoundPhotos) && d.prevRoundPhotos.some(Boolean);
+        if (!prevVisible && d.prevRoundPhotoIds && d.prevRoundPhotoIds.length > 0) {
+            const filled = await Promise.all(d.prevRoundPhotoIds.map(loadPhotoByIdWithCloudFallback));
+            if (filled.some(Boolean)) d.prevRoundPhotos = filled;
         }
     }
 
@@ -30175,7 +30194,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             const photoKey = (state.currentBuildingId && fcNow) ? `${state.currentBuildingId}_${fcNow}` : '';
             if (photoKey && window.state.defects && window.state.defects[photoKey]
                 && typeof hydrateDefectPhotos === 'function') {
-                hydrateDefectPhotos({ [photoKey]: window.state.defects[photoKey] }, { buildingId: state.currentBuildingId })
+                hydrateDefectPhotos({ [photoKey]: window.state.defects[photoKey] }, {
+                    buildingId: state.currentBuildingId,
+                    allowCloudPhotoFetch: navigator.onLine !== false
+                })
                     .then((loaded) => {
                         if (state.currentFloor !== fcNow) return;
                         Object.assign(window.state.defects, loaded);
@@ -46419,12 +46441,34 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     collectPhotoSrcById(d.prevRoundPhotoIds, d.prevRoundPhotos, d.prevRoundPhotoUrls),
                     collectPhotoSrcById(d.prevRoundPhotoIds, loadedPrev, null)
                 );
-                const photos = (d.photoIds && d.photoIds.length)
-                    ? alignPhotoSrcArrayToIds(d.photoIds, curSrc).map((v) => v || null)
-                    : mergePhotoArrays(loadedPhotos.filter(Boolean), extractInlinePhotos(d));
-                const prevRoundPhotos = (d.prevRoundPhotoIds && d.prevRoundPhotoIds.length)
-                    ? alignPhotoSrcArrayToIds(d.prevRoundPhotoIds, prevSrc).map((v) => v || null)
-                    : mergePhotoArrays(loadedPrev.filter(Boolean), extractInlinePhotos(d, 'prev'));
+                // photoIds 정렬 결과가 전부 null이면 기존 인라인 photos를 지우지 않는다
+                // (업로드 직후·클라우드 미완료 시 빈 칸으로 덮어쓰는 회귀 방지).
+                let photos;
+                if (d.photoIds && d.photoIds.length) {
+                    const aligned = alignPhotoSrcArrayToIds(d.photoIds, curSrc).map((v) => v || null);
+                    if (aligned.some(Boolean)) {
+                        photos = aligned.map((v, i) => v || (Array.isArray(d.photos) && d.photos[i]) || null);
+                    } else if (Array.isArray(d.photos) && d.photos.some(Boolean)) {
+                        photos = d.photos.slice();
+                    } else {
+                        photos = aligned;
+                    }
+                } else {
+                    photos = mergePhotoArrays(loadedPhotos.filter(Boolean), extractInlinePhotos(d));
+                }
+                let prevRoundPhotos;
+                if (d.prevRoundPhotoIds && d.prevRoundPhotoIds.length) {
+                    const alignedPrev = alignPhotoSrcArrayToIds(d.prevRoundPhotoIds, prevSrc).map((v) => v || null);
+                    if (alignedPrev.some(Boolean)) {
+                        prevRoundPhotos = alignedPrev.map((v, i) => v || (Array.isArray(d.prevRoundPhotos) && d.prevRoundPhotos[i]) || null);
+                    } else if (Array.isArray(d.prevRoundPhotos) && d.prevRoundPhotos.some(Boolean)) {
+                        prevRoundPhotos = d.prevRoundPhotos.slice();
+                    } else {
+                        prevRoundPhotos = alignedPrev;
+                    }
+                } else {
+                    prevRoundPhotos = mergePhotoArrays(loadedPrev.filter(Boolean), extractInlinePhotos(d, 'prev'));
+                }
                 return { ...d, photos, prevRoundPhotos };
             }));
             return [key, hydratedArr];
@@ -46452,7 +46496,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         Object.values(subset).forEach((arr) => {
             (arr || []).forEach(seedPhotoCacheFromDefect);
         });
-        const loaded = await hydrateDefectPhotos(subset, { buildingId: currentId });
+        const loaded = await hydrateDefectPhotos(subset, {
+            buildingId: currentId,
+            allowCloudPhotoFetch: typeof navigator === 'undefined' || navigator.onLine !== false
+        });
         Object.assign(window.state.defects, loaded);
     }
 
