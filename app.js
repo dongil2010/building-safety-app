@@ -4251,6 +4251,8 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         return hydrated;
     }
+    window.hydrateFloorDrawingFromCloud = hydrateFloorDrawingFromCloud;
+    window.forgetDeletedDrawingFloor = forgetDeletedDrawingFloor;
 
     function withTimeout(promise, ms, label) {
         let timer = 0;
@@ -44696,6 +44698,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (dongKey) ref = ref.collection('dongs').doc(dongKey);
         return ref.collection('floors').doc(String(floorCode));
     }
+    window.getFloorScopeRef = getFloorScopeRef;
+    window.getFirestoreSiteKey = getFirestoreSiteKey;
+    window.getFirestoreRoundKey = getFirestoreRoundKey;
+    window.siteVaultDocId = siteVaultDocId;
 
     function getFloorKindDocRef(bldg, floorCode, kind) {
         const floorRef = getFloorScopeRef(bldg, floorCode);
@@ -45742,6 +45748,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             return null;
         }
     }
+    window.fetchSiteVaultPdf = fetchSiteVaultPdf;
 
     /** 현장 전체(모든 회차) 삭제 시 siteDrawingVault·로컬 vault 캐시 제거 */
     async function deleteSiteVaultCompletely(siteKey) {
@@ -45813,6 +45820,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         scheduleSaveCloudSyncedKeys();
         return true;
     }
+    window.applyResolvedPdfToBuilding = applyResolvedPdfToBuilding;
 
     async function resolveBuildingFloorPdf(bldg, floorCode, opts) {
         if (!bldg || !floorCode) return null;
