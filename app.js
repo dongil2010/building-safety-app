@@ -4132,6 +4132,9 @@ document.addEventListener('DOMContentLoaded', () => {
         const options = opts || {};
         if (!bldg || !bldg.id || !floorCode) return false;
         if (isDeletedDrawingFloor(bldg, floorCode)) return false;
+        // 점검 진입·유휴 시 고해상도(8000/16000)까지 미리 받으면 층마다 청크 get 폭주.
+        // 기본은 4000만; 줌 LOD(prefetchFloorDrawingTiersForFloor)가 필요할 때 올린다.
+        if (options.skipHiTiers || options.baseTierOnly) return false;
         const extraDims = (window.FLOOR_DRAWING_TIER_DIMS || [4000, 8000, 16000]).filter((d) => d > 4000);
         if (!bldg.floorDrawingTiers) bldg.floorDrawingTiers = {};
         if (!bldg.floorDrawingTiers[floorCode]) bldg.floorDrawingTiers[floorCode] = {};
@@ -4347,6 +4350,12 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         const skipFirst = (!priority && options.backgroundRest && floorList[0]) ? floorList[0] : priority;
+        // priorityOnly: 지금 보는 층만. 다른 층 floorDrawings/tiers/pdf get은 층 전환 때 한다.
+        // (예전 backgroundRest는 나머지 층을 백그라운드로 전부 받아 Spark 읽기 한도를 낭비)
+        if (options.priorityOnly || options.currentFloorOnly) {
+            await persistBuildingDrawingAssetsNow(bldg);
+            return floorList.length > 0;
+        }
         const rest = skipFirst ? floorList.filter((fc) => fc !== skipFirst) : floorList;
         const restWork = (async () => {
             // 현재 층 표시·네트워크를 먼저 쓰게 잠깐 양보
@@ -5277,7 +5286,9 @@ document.addEventListener('DOMContentLoaded', () => {
                     ? hydrateSingleBuildingDrawings(bldg, {
                         localOnly: !canFetchDrawings,
                         priorityFloor: targetFloor,
-                        backgroundRest: true
+                        priorityOnly: true,
+                        skipHiTiers: true,
+                        needPdf: false
                     }).catch((e) => console.warn('현재 층 도면 로드 실패:', e))
                     : Promise.resolve();
 
@@ -5292,14 +5303,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     if (typeof renderSurveyTable === 'function' && window.state.currentTab === 'tab-survey') renderSurveyTable();
                     if (typeof renderDefectListPanel === 'function') renderDefectListPanel();
 
-                    if (Object.keys(restPhotoSubset).length) {
-                        hydrateDefectPhotos(restPhotoSubset, { buildingId: bldg.id }).then((loaded) => {
-                            if (window.state.currentBuildingId !== entryBuildingId) return;
-                            Object.assign(window.state.defects, loaded);
-                            if (typeof renderSurveyTable === 'function' && window.state.currentTab === 'tab-survey') renderSurveyTable();
-                            if (typeof renderDefectListPanel === 'function') renderDefectListPanel();
-                        }).catch((e) => console.warn('나머지 층 사진 백그라운드 복원 실패:', e));
-                    }
+                    // 나머지 층 사진은 층 전환·조사표 열 때 복원. 진입 시 전 층 백그라운드 hydrate는 제거.
                 })().catch((e) => console.warn('현재 층 사진 로드 실패:', e));
 
                 await Promise.all([drawingsPromise, photosPromise]);
@@ -9108,6 +9112,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     }
 
     function panCanvasToDefectMarking(defect, options = {}) {
+        // 드래그 중 선택 팬/센터 고정이 반복되면 도면이 덜컥거림 — 드래그 종료 후 1회는 허용
+        if (typeof isMapPinDragActive === 'function' && isMapPinDragActive() && !options.forceDuringDrag) {
+            return false;
+        }
         if (!defect || !state.canvas) return false;
         const center = getDefectMarkingImgCenter(defect);
         if (!center) return false;
@@ -9175,10 +9183,19 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         return true;
     }
 
+    let _revealMarkingGen = 0;
+
     function scheduleRevealMarkingAboveDrawer(defect, options = {}) {
         if (!defect) return;
+        // 드래그 중에는 반복 pan이 센터 고정처럼 뷰를 흔듦 — mouseup 후 1회 호출은 OK
+        if (typeof isMapPinDragActive === 'function' && isMapPinDragActive() && !options.forceDuringDrag) {
+            return;
+        }
         const animate = options.animate !== false;
+        const gen = ++_revealMarkingGen;
         const run = (doAnimate) => {
+            if (gen !== _revealMarkingGen) return;
+            if (typeof isMapPinDragActive === 'function' && isMapPinDragActive() && !options.forceDuringDrag) return;
             panCanvasToDefectMarking(defect, {
                 uncovered: true,
                 keepScale: options.keepScale !== false,
@@ -9195,6 +9212,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         setTimeout(() => run(false), 180);
         setTimeout(() => run(false), 360);
         setTimeout(() => run(false), 520);
+    }
+    function cancelScheduledRevealMarkingAboveDrawer() {
+        _revealMarkingGen += 1;
+        if (typeof cancelCanvasPanAnimation === 'function') cancelCanvasPanAnimation();
     }
     window.scheduleRevealMarkingAboveDrawer = scheduleRevealMarkingAboveDrawer;
     window.getUncoveredCanvasFocusPoint = getUncoveredCanvasFocusPoint;
@@ -16827,6 +16848,341 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         return { group, point };
     }
 
+    // --- 측정점 이동 보정(다중 hop A→B→C…): 중복지점 Va/Vb로 새 측기 구간을 이전 기준으로 맞춤 ---
+    // delta = Vb - Va; 이번 구간(중복지점~끝, 이전 hop 제외) adjusted = raw - delta
+    // 여러 번 적용하면 누적되어 모든 점이 첫 측기(A) 데이텀에 맞춰짐
+    function getNdtDispGroupById(groupId) {
+        const key = `${state.currentBuildingId}_${state.currentFloor}`;
+        return ((state.ndtDisplacementGroups || {})[key] || []).find((g) => g && g.id === groupId) || null;
+    }
+
+    function computeNdtDispStationDelta(va, vb) {
+        const a = Number(va);
+        const b = Number(vb);
+        if (!Number.isFinite(a) || !Number.isFinite(b)) return null;
+        return b - a;
+    }
+
+    function applyNdtDispStationTransfer(group, overlapIndex, va, vb, options) {
+        if (!group || !Array.isArray(group.points) || !group.points.length) {
+            return { ok: false, reason: 'no-points' };
+        }
+        const idx = Number(overlapIndex);
+        if (!Number.isInteger(idx) || idx < 0 || idx >= group.points.length) {
+            return { ok: false, reason: 'bad-overlap' };
+        }
+        const delta = computeNdtDispStationDelta(va, vb);
+        if (delta == null) return { ok: false, reason: 'bad-levels' };
+        if (Math.abs(delta) < 1e-9) return { ok: false, reason: 'zero-delta' };
+
+        // 다중 이동(A→B→C…): 이전 hop에서 이미 보정된 구간은 다시 빼지 않음.
+        // - 중복지점(i===from): 새 측기에서 다시 잰 Vb이면 보정(이미 Va면 skip)
+        // - from 이후: 직전 transfer의 toIndex 이후 점만 보정(같은 측기에서 이어서 잰 점 포함)
+        const prevTo = (Array.isArray(group.stationTransfers) && group.stationTransfers.length)
+            ? Number(group.stationTransfers[group.stationTransfers.length - 1].toIndex)
+            : -1;
+        const fromIndex = idx;
+        const toIndex = group.points.length - 1;
+        const before = group.points.map((pt) => ({
+            id: pt.id,
+            level: pt.level,
+            levelRaw: pt.levelRaw
+        }));
+        let adjustedCount = 0;
+        for (let i = fromIndex; i <= toIndex; i++) {
+            const pt = group.points[i];
+            if (!pt || !isNdtDispLevelFilled(pt.level)) continue;
+            const alreadyAtVa = Math.abs(Number(pt.level) - Number(va)) < 1e-9;
+            if (i === fromIndex) {
+                if (alreadyAtVa) continue; // 이미 기준 측기 값
+            } else if (i <= prevTo) {
+                continue; // 이전 hop에서 처리됨
+            }
+            if (pt.levelRaw == null || pt.levelRaw === '') {
+                pt.levelRaw = pt.level;
+            }
+            pt.level = Number(pt.level) - delta;
+            adjustedCount += 1;
+        }
+        if (adjustedCount === 0) return { ok: false, reason: 'nothing-to-adjust' };
+        if (!Array.isArray(group.stationTransfers)) group.stationTransfers = [];
+        const hop = group.stationTransfers.length + 1;
+        group.stationTransfers.push({
+            hop,
+            overlapPointId: group.points[idx].id,
+            overlapIndex: idx,
+            fromIndex,
+            toIndex,
+            va: Number(va),
+            vb: Number(vb),
+            delta,
+            appliedAt: Date.now(),
+            before
+        });
+        // 다음 이동을 위해 중복지점 표시는 해제(새 이동점은 사용자가 다시 표시)
+        group.transferOverlapPointId = null;
+        if (group.points[idx]) {
+            group.points[idx].levelAtA = Number(va);
+            delete group.points[idx].stationMark;
+        }
+        // 누적 보정: 각 hop의 delta를 빼면 모든 점이 첫 측기(A) 기준으로 맞춰짐
+        group.stationDatumLabel = group.stationDatumLabel || '첫 측기(A) 기준';
+        return { ok: true, delta, fromIndex, toIndex, overlapIndex: idx, hop, adjustedCount };
+    }
+
+    function undoLastNdtDispStationTransfer(group) {
+        if (!group || !Array.isArray(group.stationTransfers) || !group.stationTransfers.length) {
+            return { ok: false, reason: 'none' };
+        }
+        const last = group.stationTransfers.pop();
+        const byId = {};
+        (last.before || []).forEach((row) => { byId[row.id] = row; });
+        (group.points || []).forEach((pt) => {
+            const prev = byId[pt.id];
+            if (!prev) return;
+            pt.level = prev.level;
+            if (prev.levelRaw == null || prev.levelRaw === '') delete pt.levelRaw;
+            else pt.levelRaw = prev.levelRaw;
+        });
+        return { ok: true, undone: last };
+    }
+
+    function markNdtDispStationMoveAtPoint(group, pointId) {
+        if (!group || !pointId) return false;
+        const pt = (group.points || []).find((p) => p.id === pointId);
+        if (!pt) return false;
+        if (!isNdtDispLevelFilled(pt.level)) return false;
+        (group.points || []).forEach((p) => {
+            if (p.stationMark === 'overlap' && p.id !== pointId) delete p.stationMark;
+        });
+        pt.stationMark = 'overlap';
+        pt.levelAtA = Number(pt.level);
+        group.transferOverlapPointId = pointId;
+        return true;
+    }
+
+    function ensureNdtDispStationTransferUi(group) {
+        const host = document.getElementById('ndtDispEditPointList');
+        if (!host || !host.parentElement) return;
+        let panel = document.getElementById('ndtDispStationTransferPanel');
+        if (!panel) {
+            panel = document.createElement('div');
+            panel.id = 'ndtDispStationTransferPanel';
+            panel.className = 'ndt-disp-station-transfer-panel';
+            panel.style.cssText = 'margin-top:0.75rem;padding:0.75rem;border:1px solid #334155;border-radius:8px;background:rgba(15,23,42,0.55);';
+            host.parentElement.appendChild(panel);
+        }
+        const overlapOpts = (group.points || []).map((pt, idx) => {
+            const lab = formatNdtDisplacementPointLabel(idx + 1);
+            const marked = (pt.stationMark === 'overlap' || group.transferOverlapPointId === pt.id) ? ' ★이동점' : '';
+            const lv = isNdtDispLevelFilled(pt.level) ? ` (${pt.level})` : '';
+            const sel = (group.transferOverlapPointId === pt.id) ? ' selected' : '';
+            return `<option value="${idx}"${sel}>${lab}${lv}${marked}</option>`;
+        }).join('');
+        const overlapIdx = (() => {
+            if (!group.transferOverlapPointId) return Math.max(0, (group.points || []).length - 1);
+            const i = (group.points || []).findIndex((p) => p.id === group.transferOverlapPointId);
+            return i >= 0 ? i : Math.max(0, (group.points || []).length - 1);
+        })();
+        const overlapPt = (group.points || [])[overlapIdx];
+        const vaDefault = (overlapPt && overlapPt.levelAtA != null && overlapPt.levelAtA !== '')
+            ? overlapPt.levelAtA
+            : '';
+        const vbDefault = (overlapPt && isNdtDispLevelFilled(overlapPt.level)) ? overlapPt.level : '';
+        const lastXfer = (group.stationTransfers && group.stationTransfers.length)
+            ? group.stationTransfers[group.stationTransfers.length - 1]
+            : null;
+        panel.innerHTML = `
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:0.5rem;flex-wrap:wrap;">
+                <strong style="font-size:0.9rem;"><i class="fa-solid fa-arrows-left-right"></i> 측정점 이동 보정</strong>
+                <button type="button" class="btn btn-outline" id="btnToggleNdtDispStationTransfer" style="font-size:0.78rem;padding:0.25rem 0.55rem;">
+                    ${panel.dataset.open === '1' ? '접기' : '열기'}
+                </button>
+            </div>
+            <div id="ndtDispStationTransferBody" style="display:${panel.dataset.open === '1' ? 'block' : 'none'};margin-top:0.65rem;">
+                <p style="margin:0 0 0.55rem;font-size:0.78rem;color:#94a3b8;line-height:1.45;">
+                    측기(측정점)를 여러 번 옮겨도 됩니다 (A→B→C…). 이동 전 구간을 잰 뒤
+                    <b>중복지점</b>을 「이동점으로 표시」하고, 새 위치에서 같은 점을 다시 잰 값(B)으로 보정하세요.<br>
+                    공식: Δ = Vb − Va → <b>이번 이동 구간</b>(중복지점~현재 끝, 이전 hop 제외)에 adjusted = raw − Δ.
+                    누적하면 모든 점이 첫 측기(A) 기준으로 맞춰집니다. 이동 없이 연속 측정만 하면 보정하지 않아도 됩니다.
+                </p>
+                <div class="form-group" style="margin-bottom:0.45rem;">
+                    <label class="form-label">중복지점 (A·B 모두 측정)</label>
+                    <select id="ndtDispTransferOverlap" class="form-select">${overlapOpts}</select>
+                </div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.45rem;">
+                    <div class="form-group" style="margin:0;">
+                        <label class="form-label">이전 측기 레벨 (Va)</label>
+                        <input type="number" id="ndtDispTransferVa" class="form-control" step="0.1" inputmode="decimal" value="${vaDefault}" placeholder="예: 12.3">
+                    </div>
+                    <div class="form-group" style="margin:0;">
+                        <label class="form-label">새 측기 레벨 (Vb)</label>
+                        <input type="number" id="ndtDispTransferVb" class="form-control" step="0.1" inputmode="decimal" value="${vbDefault}" placeholder="예: 18.1">
+                    </div>
+                </div>
+                <div id="ndtDispTransferPreview" style="margin:0.55rem 0;font-size:0.8rem;color:#cbd5e1;"></div>
+                <div style="display:flex;flex-wrap:wrap;gap:0.4rem;">
+                    <button type="button" class="btn btn-outline" id="btnMarkNdtDispStationMove" title="현재 중복지점의 레벨을 A기준으로 고정">
+                        <i class="fa-solid fa-location-crosshairs"></i> 이동점으로 표시
+                    </button>
+                    <button type="button" class="btn btn-primary" id="btnApplyNdtDispStationTransfer">
+                        <i class="fa-solid fa-calculator"></i> 이번 이동 구간 보정
+                    </button>
+                    <button type="button" class="btn btn-outline" id="btnUndoNdtDispStationTransfer" ${lastXfer ? '' : 'disabled'}>
+                        <i class="fa-solid fa-rotate-left"></i> 마지막 보정 취소
+                    </button>
+                </div>
+                ${(() => {
+                    const xs = group.stationTransfers || [];
+                    if (!xs.length) return '';
+                    const lines = xs.map((x, i) =>
+                        `${i + 1}회 Δ=${Number(x.delta).toFixed(3)} · ${formatNdtDisplacementPointLabel((x.fromIndex || 0) + 1)}~${formatNdtDisplacementPointLabel((x.toIndex || 0) + 1)}`
+                    ).join('<br>');
+                    return `<div style="margin-top:0.45rem;font-size:0.75rem;color:#64748b;line-height:1.45;">이동 보정 이력 (${xs.length}회, 첫 측기 기준 누적)<br>${lines}</div>`;
+                })()}
+            </div>`;
+
+        const syncPreview = () => {
+            const preview = document.getElementById('ndtDispTransferPreview');
+            const sel = document.getElementById('ndtDispTransferOverlap');
+            const vaEl = document.getElementById('ndtDispTransferVa');
+            const vbEl = document.getElementById('ndtDispTransferVb');
+            if (!preview || !sel) return;
+            const i = parseInt(sel.value, 10);
+            const delta = computeNdtDispStationDelta(vaEl && vaEl.value, vbEl && vbEl.value);
+            if (!Number.isInteger(i) || !group.points[i]) {
+                preview.textContent = '중복지점을 선택하세요.';
+                return;
+            }
+            const endLab = formatNdtDisplacementPointLabel(group.points.length);
+            const startLab = formatNdtDisplacementPointLabel(i + 1);
+            if (delta == null) {
+                preview.textContent = `보정 구간 ${startLab} ~ ${endLab} · A/B 레벨을 입력하세요.`;
+                return;
+            }
+            preview.innerHTML = `Δ = <b>${delta.toFixed(3)}</b> → ${startLab}~${endLab} 각 레벨에서 Δ를 뺍니다. (중복지점은 A레벨 ${Number(vaEl.value).toFixed(3)}으로 맞춰짐)`;
+        };
+
+        const btnToggle = document.getElementById('btnToggleNdtDispStationTransfer');
+        if (btnToggle) {
+            btnToggle.onclick = () => {
+                panel.dataset.open = panel.dataset.open === '1' ? '0' : '1';
+                ensureNdtDispStationTransferUi(group);
+            };
+        }
+        const sel = document.getElementById('ndtDispTransferOverlap');
+        if (sel) {
+            sel.value = String(overlapIdx);
+            sel.onchange = () => {
+                const i = parseInt(sel.value, 10);
+                const pt = group.points[i];
+                const vaEl = document.getElementById('ndtDispTransferVa');
+                const vbEl = document.getElementById('ndtDispTransferVb');
+                if (pt && vaEl) {
+                    vaEl.value = (pt.levelAtA != null && pt.levelAtA !== '') ? pt.levelAtA : '';
+                }
+                if (pt && vbEl) {
+                    vbEl.value = isNdtDispLevelFilled(pt.level) ? pt.level : '';
+                }
+                syncPreview();
+            };
+        }
+        ['ndtDispTransferVa', 'ndtDispTransferVb'].forEach((id) => {
+            const el = document.getElementById(id);
+            if (el) el.addEventListener('input', syncPreview);
+        });
+        syncPreview();
+
+        const btnMark = document.getElementById('btnMarkNdtDispStationMove');
+        if (btnMark) {
+            btnMark.onclick = () => {
+                const i = parseInt(document.getElementById('ndtDispTransferOverlap')?.value, 10);
+                const pt = group.points[i];
+                if (!pt) return;
+                // Prefer explicit Va field if typed; else current level
+                const vaEl = document.getElementById('ndtDispTransferVa');
+                const typedVa = vaEl && vaEl.value !== '' ? parseFloat(vaEl.value) : NaN;
+                if (Number.isFinite(typedVa)) pt.level = typedVa;
+                if (!markNdtDispStationMoveAtPoint(group, pt.id)) {
+                    window.showToast('중복지점에 A측 레벨을 먼저 입력하세요.', 'warning', 2800);
+                    return;
+                }
+                const vaField = document.getElementById('ndtDispTransferVa');
+                if (vaField) vaField.value = pt.levelAtA;
+                panel.dataset.open = '1';
+                saveStateToLocalStorage();
+                renderNdtDispGroupPointList(group);
+                ensureNdtDispStationTransferUi(group);
+                window.showToast(`${formatNdtDisplacementPointLabel(i + 1)}을 이동점(A기준)으로 표시했습니다. B에서 다시 잰 뒤 보정을 적용하세요.`, 'success', 4200);
+            };
+        }
+        const btnApply = document.getElementById('btnApplyNdtDispStationTransfer');
+        if (btnApply) {
+            btnApply.onclick = () => {
+                // Pull latest typed levels from the point list into group first
+                document.querySelectorAll('#ndtDispEditPointList .ndt-disp-edit-level-input').forEach((inp) => {
+                    const pt = group.points.find((x) => x.id === inp.dataset.pointId);
+                    if (!pt) return;
+                    if (inp.value === '' || inp.value == null) pt.level = null;
+                    else {
+                        const v = parseFloat(inp.value);
+                        if (!isNaN(v)) pt.level = v;
+                    }
+                });
+                const i = parseInt(document.getElementById('ndtDispTransferOverlap')?.value, 10);
+                const ptNow = group.points[i];
+                let va = document.getElementById('ndtDispTransferVa')?.value;
+                let vb = document.getElementById('ndtDispTransferVb')?.value;
+                if ((va === '' || va == null) && ptNow && ptNow.levelAtA != null && ptNow.levelAtA !== '') {
+                    va = ptNow.levelAtA;
+                }
+                if ((vb === '' || vb == null) && ptNow && isNdtDispLevelFilled(ptNow.level)) {
+                    vb = ptNow.level;
+                }
+                const result = applyNdtDispStationTransfer(group, i, va, vb);
+                if (!result.ok) {
+                    const msg = {
+                        'no-points': '측정 지점이 없습니다.',
+                        'bad-overlap': '중복지점을 확인하세요.',
+                        'bad-levels': 'Va/Vb 레벨을 숫자로 입력하세요.',
+                        'zero-delta': 'Va와 Vb가 같아 보정할 차이가 없습니다.',
+                        'nothing-to-adjust': '이미 보정된 구간입니다. 새 측기에서 점을 더 잰 뒤 다시 적용하세요.'
+                    }[result.reason] || '보정에 실패했습니다.';
+                    window.showToast(msg, 'warning', 3000);
+                    return;
+                }
+                panel.dataset.open = '1';
+                saveStateToLocalStorage();
+                renderNdtDispGroupPointList(group);
+                ensureNdtDispStationTransferUi(group);
+                if (typeof drawNdtCanvas === 'function') drawNdtCanvas();
+                if (typeof renderNdtSummaryTable === 'function') renderNdtSummaryTable();
+                window.showToast(
+                    `측정점 이동 보정 ${result.hop || ''}회 · Δ=${result.delta.toFixed(3)} · ${formatNdtDisplacementPointLabel(result.fromIndex + 1)}~${formatNdtDisplacementPointLabel(result.toIndex + 1)} (${result.adjustedCount}점) · 다음 이동 시 새 중복지점을 표시하세요`,
+                    'success',
+                    5200
+                );
+            };
+        }
+        const btnUndo = document.getElementById('btnUndoNdtDispStationTransfer');
+        if (btnUndo) {
+            btnUndo.onclick = () => {
+                const result = undoLastNdtDispStationTransfer(group);
+                if (!result.ok) {
+                    window.showToast('취소할 보정이 없습니다.', 'info', 2400);
+                    return;
+                }
+                panel.dataset.open = '1';
+                saveStateToLocalStorage();
+                renderNdtDispGroupPointList(group);
+                ensureNdtDispStationTransferUi(group);
+                if (typeof drawNdtCanvas === 'function') drawNdtCanvas();
+                if (typeof renderNdtSummaryTable === 'function') renderNdtSummaryTable();
+                window.showToast('마지막 측기 이동 보정을 취소했습니다.', 'success', 2800);
+            };
+        }
+    }
+
     function openNdtDisplacementGroupEditModal(group) {
         document.getElementById('ndtDispEditGroupId').value = group.id;
         document.getElementById('ndtDispGroupEditTitle').textContent = `${group.groupNo} 측정 구역 정보`;
@@ -16845,6 +17201,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             hintEl.textContent = '마킹한 지점 레벨을 한 창에서 입력·수정한 뒤 저장하세요. (위치·측정길이도 함께)';
         }
         renderNdtDispGroupPointList(group);
+        ensureNdtDispStationTransferUi(group);
         refreshNdtDispLocationChips('ndtDispEditLocationType', 'ndtDispEditLocationChips');
         const modal = document.getElementById('ndtDisplacementGroupEditModal');
         document.body.classList.add('ndt-modal-open');
@@ -16890,15 +17247,44 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 ? (idx === 0 ? ' 단부1' : (idx === group.points.length - 1 ? ' 단부2' : ' 중앙'))
                 : '';
             const val = isNdtDispLevelFilled(p.level) ? p.level : '';
+            const isOverlap = p.stationMark === 'overlap' || group.transferOverlapPointId === p.id;
+            const markBadge = isOverlap ? ' <span style="color:#38bdf8;font-weight:800;">이동점</span>' : '';
             return `
             <div class="option-manager-item ndt-disp-edit-point-row" data-point-id="${p.id}">
-                <span class="ndt-disp-edit-point-label">${formatNdtDisplacementPointLabel(idx + 1)}${role}</span>
+                <span class="ndt-disp-edit-point-label">${formatNdtDisplacementPointLabel(idx + 1)}${role}${markBadge}</span>
                 <input type="number" class="form-control ndt-disp-edit-level-input" data-point-id="${p.id}"
                     step="0.1" placeholder="레벨" value="${val}" inputmode="decimal" aria-label="${formatNdtDisplacementPointLabel(idx + 1)} 레벨">
+                <button type="button" class="btn btn-outline ndt-disp-mark-station-btn" title="이 지점을 측기 이동 중복지점으로 표시"
+                    data-group-id="${group.id}" data-point-id="${p.id}" style="font-size:0.7rem;padding:0.2rem 0.35rem;">이동</button>
                 <button type="button" class="option-manager-item-delete" title="지점 삭제"
                     onclick="window.deleteNdtDisplacementPoint('${group.id}','${p.id}')"><i class="fa-solid fa-trash"></i></button>
             </div>`;
         }).join('');
+        container.querySelectorAll('.ndt-disp-mark-station-btn').forEach((btn) => {
+            btn.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                const g = getNdtDispGroupById(btn.dataset.groupId);
+                if (!g) return;
+                // sync typed level for this point before freezing as A
+                const inp = container.querySelector(`.ndt-disp-edit-level-input[data-point-id="${btn.dataset.pointId}"]`);
+                const pt = (g.points || []).find((x) => x.id === btn.dataset.pointId);
+                if (pt && inp && inp.value !== '') {
+                    const v = parseFloat(inp.value);
+                    if (!isNaN(v)) pt.level = v;
+                }
+                if (!markNdtDispStationMoveAtPoint(g, btn.dataset.pointId)) {
+                    window.showToast('레벨을 입력한 뒤 이동점으로 표시하세요.', 'warning', 2600);
+                    return;
+                }
+                saveStateToLocalStorage();
+                renderNdtDispGroupPointList(g);
+                const panel = document.getElementById('ndtDispStationTransferPanel');
+                if (panel) panel.dataset.open = '1';
+                ensureNdtDispStationTransferUi(g);
+                window.showToast('이동점(A기준)으로 표시했습니다. B에서 같은 지점을 다시 잰 뒤 「B구간 보정 적용」을 누르세요.', 'success', 4200);
+            });
+        });
     }
 
     window.deleteNdtDisplacementPoint = function(groupId, pointId, options) {
@@ -19828,6 +20214,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
     function scrollDefectListRowIntoView(row, behavior, align) {
         if (!row) return;
+        // 마킹 드래그 중 center/nearest 스크롤이 반복되면 목록·뷰가 덜컥거림
+        if (typeof isMapPinDragActive === 'function' && isMapPinDragActive()) return;
         const scrollBehavior = behavior || 'smooth';
         // 도면에서 마킹 선택 시 조사표 스크롤 영역 가운데에 오도록 (기본 center)
         const alignMode = align || 'center';
@@ -19874,6 +20262,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     }
 
     function revealSelectedDefectListAboveDrawer() {
+        if (typeof isMapPinDragActive === 'function' && isMapPinDragActive()) return;
         const panel = document.getElementById('defectListPanel');
         if (!panel) return;
         const cluster = panel.querySelector('.defect-list-section.is-selected-cluster');
@@ -19892,6 +20281,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     }
 
     function scheduleRevealDefectListAboveDrawer() {
+        if (typeof isMapPinDragActive === 'function' && isMapPinDragActive()) return;
         const need = (typeof isMobilePortraitDefectDrawer === 'function' && isMobilePortraitDefectDrawer())
             || (typeof isDefectDrawerBottomLayout === 'function' && isDefectDrawerBottomLayout())
             || (typeof layoutIsCompactWidth === 'function' && layoutIsCompactWidth());
@@ -21785,7 +22175,11 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (!select || !input) return;
         const v = (value ?? '').trim();
         if (!v || isDefectComboCustomToken(v)) {
-            input.value = isDefectComboCustomToken(select.value) ? '' : (select.value || '');
+            // 공란으로 둘 때 select에 남은 이전값(예: 기둥)을 input에 되살리지 않음
+            if (select && !isDefectComboCustomToken(select.value)) {
+                try { select.value = ''; } catch (_e) { /* ignore */ }
+            }
+            input.value = '';
             return;
         }
         ensureDefectComboOption(select, v);
@@ -25107,8 +25501,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
         if (field === 'component') {
             const cat = document.getElementById('defectCategory')?.value || '구조체';
-            const defComp = (DEFECT_COMPONENT_PRESET[cat] || DEFECT_COMPONENT_PRESET['구조체'])[0] || '';
-            populateDefectComponentDropdown(cat, defComp);
+            populateDefectComponentDropdown(cat, '');
         } else if (field === 'type') {
             const cat = document.getElementById('defectCategory')?.value || '구조체';
             const component = getDefectComboValue(
@@ -25173,13 +25566,12 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         scheduleSyncUserDefectPinPresets();
 
         const cat = document.getElementById('defectCategory')?.value || '구조체';
-        const defComp = (DEFECT_COMPONENT_PRESET[cat] || DEFECT_COMPONENT_PRESET['구조체'])[0] || '';
-        populateDefectComponentDropdown(cat, defComp);
+        populateDefectComponentDropdown(cat, '');
 
         const component = getDefectComboValue(
             document.getElementById('defectComponent'),
             document.getElementById('defectComponentInput')
-        ) || defComp;
+        ) || '';
         const presetList = getDefectTypePresetFor(cat, component) || categoryDefectPreset[cat] || [];
         const defType = presetList.find(t => t !== '상태양호') || presetList[0] || '';
         updateDefectTypeDropdown(cat, defType);
@@ -25951,6 +26343,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     let mobileAddSelectEnabled = false; // 우측 레일 '추가' — 터치마다 선택 토글
     let isDraggingPin = false;
     let isDraggingPinGroup = false;
+    /** PC 마우스 마킹 드래그 중 — 목록 center 스크롤/선택 팬이 뷰를 흔들지 않게 */
+    function isMapPinDragActive() {
+        return !!(isDraggingPin || isDraggingPinGroup);
+    }
     let groupDragLastImgX = 0;
     let groupDragLastImgY = 0;
     let activeDragPin = null;
@@ -26151,8 +26547,11 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             bulkMobileBtn.title = n > 1 ? `선택한 결함 ${n}건 일괄 수정` : '2개 이상 선택 시 일괄 수정';
         }
         // 결함목록: 도면 선택 시만 스크롤 / 목록 클릭·필터 등은 스크롤 위치 유지
+        // 드래그 중 center 스크롤 금지(mouseup 후 1회는 호출측에서 scrollToSelection:true 허용)
         if (typeof renderDefectListPanel === 'function') {
-            renderDefectListPanel({ scrollToSelection: options.scrollToSelection === true });
+            const wantScroll = options.scrollToSelection === true
+                && !(typeof isMapPinDragActive === 'function' && isMapPinDragActive());
+            renderDefectListPanel({ scrollToSelection: wantScroll });
         }
         if (typeof syncAreaToolPanelUi === 'function') syncAreaToolPanelUi();
         // 조사항목 창 OFF: 좌상단 팝업으로 선택 결함 내용·폭 표시
@@ -26935,13 +27334,18 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     selectedDefectIds = new Set([id]);
                 }
                 // 이미 다중 선택된 핀을 다시 누르면 선택 유지 → 그룹 드래그용
-                updateMapSelectionBar({ scrollToSelection: true });
+                // PC: mousedown에서 center 스크롤하지 않음(드래그 시작 시 덜컥 방지). mouseup/드래그종료 시 1회.
+                updateMapSelectionBar({ scrollToSelection: !!isTouch });
                 drawCanvas();
                 // PC 마우스: 클릭 한 번에 선택+수정창 (미세 떨림이 드래그로 바뀌어도 모달이 이미 열림)
                 // 다중 선택(size>1)은 mouseup에서 일괄 수정창 — 터치 경로는 변경 없음
                 if (!isTouch && !useAdditive && selectedDefectIds.size <= 1) {
                     const d = hitInfo.defect;
-                    openAddDefectModal(d.x, d.y, d.targetX, d.targetY, d, null, { revealMarkingAboveDrawer: true, fromCanvas: true });
+                    // 드래그 가능하므로 열 때 reveal/pan 하지 않음 — 클릭(비드래그) mouseup 또는 드래그 종료 후 1회
+                    openAddDefectModal(d.x, d.y, d.targetX, d.targetY, d, null, {
+                        revealMarkingAboveDrawer: false,
+                        fromCanvas: true
+                    });
                     pendingDragOpenedModal = true;
                 }
             }
@@ -27150,6 +27554,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 }
                 document.body.classList.add('dragging-pin');
                 document.body.style.touchAction = 'none';
+                if (typeof cancelScheduledRevealMarkingAboveDrawer === 'function') {
+                    cancelScheduledRevealMarkingAboveDrawer();
+                }
                 refreshMapLoupe(clientX, clientY);
             } else {
                 return;
@@ -27375,6 +27782,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             if (pendingDragOpenedModal) {
                 pendingDragOpenedModal = false;
                 updateMapSelectionBar({ scrollToSelection: true });
+                if (d && typeof scheduleRevealMarkingAboveDrawer === 'function') {
+                    scheduleRevealMarkingAboveDrawer(d, { animate: true });
+                }
                 drawCanvas();
                 if (d?.groupId && getDefectMarkingGroupMembers(d.groupId).length > 1) {
                     window.showToast?.(
@@ -27425,7 +27835,14 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             endAreaRotateSession();
             saveStateToLocalStorage();
             hadPinDragSave = true;
-            updateMapSelectionBar();
+            // 드래그 중 막았던 목록 center·선택 팬을 mouseup 후 1회만
+            updateMapSelectionBar({ scrollToSelection: true });
+            const selId = selectedDefectIds.size === 1 ? [...selectedDefectIds][0] : null;
+            if (selId && typeof scheduleRevealMarkingAboveDrawer === 'function') {
+                const dPost = (typeof getCurrentFloorDefects === 'function' ? getCurrentFloorDefects() : [])
+                    .find((x) => x && x.id === selId);
+                if (dPost) scheduleRevealMarkingAboveDrawer(dPost, { animate: false });
+            }
             drawCanvas();
         }
 
@@ -28261,8 +28678,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             if (noEl) noEl.value = existingPin.no || 'NO.01';
             if (catEl) catEl.value = existingPin.category || '구조체';
             const compCatExisting = existingPin.category || '구조체';
-            const compDefaultExisting = (DEFECT_COMPONENT_PRESET[compCatExisting] || DEFECT_COMPONENT_PRESET['구조체'])[0];
-            populateDefectComponentDropdown(compCatExisting, existingPin.component || compDefaultExisting);
+            // 저장된 부재가 비어 있으면 공란 유지(과거처럼 기둥으로 채우지 않음)
+            populateDefectComponentDropdown(compCatExisting, existingPin.component || '');
             updateDefectTypeDropdown(existingPin.category || '구조체', existingPin.defectType);
             updateDefectCauseDropdown(existingPin.defectType || '균열', existingPin.cause);
             if (carriedOverEl) carriedOverEl.checked = !!existingPin.isCarriedOver;
@@ -28508,9 +28925,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 if (window._defectPhotosDirty) scheduleDefectAutoApply();
                 drawCanvas();
                 if (typeof renderDefectListPanel === 'function') {
-                    renderDefectListPanel({ scrollToSelection: true });
+                    renderDefectListPanel({ scrollToSelection: wantReveal });
                 }
-                scheduleRevealDefectListAboveDrawer();
+                if (wantReveal) scheduleRevealDefectListAboveDrawer();
 
                 const targetPin = existingPin || createdPin || targetPinEarly;
                 if (targetPin && wantReveal && (isCompact || isBottom || options.fromCanvas
@@ -29737,6 +30154,35 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             applyFloorMapStyleSettings(e.target.value, state.currentBuildingId);
             loadFloorDrawing(e.target.value);
             refreshFloorDependentUi();
+            // 진입 시 전 층 prefetch를 끊었으므로, 층 전환 때 해당 층만 필요 시 클라우드에서 보강
+            const bldgNow = state.currentBuilding
+                || (window.state.buildings || []).find((b) => b && b.id === state.currentBuildingId);
+            const fcNow = e.target.value;
+            if (bldgNow && fcNow && typeof hydrateFloorDrawingFromCloud === 'function'
+                && navigator.onLine !== false) {
+                const hasRaster = bldgNow.floorDrawings && isUsableRasterDrawingUrl(bldgNow.floorDrawings[fcNow]);
+                if (!hasRaster) {
+                    hydrateFloorDrawingFromCloud(bldgNow, fcNow, { skipHiTiers: true, needPdf: false })
+                        .then((ok) => {
+                            if (!ok || state.currentFloor !== fcNow) return;
+                            if (typeof loadFloorDrawing === 'function') {
+                                loadFloorDrawing(fcNow, { preserveView: true });
+                            }
+                        })
+                        .catch((err) => console.warn('층 전환 도면 보강 실패:', fcNow, err));
+                }
+            }
+            const photoKey = (state.currentBuildingId && fcNow) ? `${state.currentBuildingId}_${fcNow}` : '';
+            if (photoKey && window.state.defects && window.state.defects[photoKey]
+                && typeof hydrateDefectPhotos === 'function') {
+                hydrateDefectPhotos({ [photoKey]: window.state.defects[photoKey] }, { buildingId: state.currentBuildingId })
+                    .then((loaded) => {
+                        if (state.currentFloor !== fcNow) return;
+                        Object.assign(window.state.defects, loaded);
+                        if (typeof renderDefectListPanel === 'function') renderDefectListPanel();
+                    })
+                    .catch(() => {});
+            }
         });
     }
 
@@ -30943,7 +31389,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 cadNo: rawNo,
                 isCadImported: true,
                 category: cadItem.category || '구조체',
-                component: cadItem.component || '기둥',
+                component: cadItem.component || '',
                 location: state.currentFloor,
                 defectType: cadItem.defectType || '균열',
                 cause: cadItem.cause || '건조수축',
@@ -44806,11 +45252,14 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     async function readFloorSyncBundle(bldg, floorCode, preloadedOrOptions) {
         let preloadedSnapData = null;
         let knownMissing = {};
+        let allowLegacyBulk = false;
         if (preloadedOrOptions && typeof preloadedOrOptions === 'object') {
             if (Object.prototype.hasOwnProperty.call(preloadedOrOptions, 'knownMissing')
-                || Object.prototype.hasOwnProperty.call(preloadedOrOptions, 'preloadedSnapData')) {
+                || Object.prototype.hasOwnProperty.call(preloadedOrOptions, 'preloadedSnapData')
+                || Object.prototype.hasOwnProperty.call(preloadedOrOptions, 'allowLegacyBulk')) {
                 knownMissing = preloadedOrOptions.knownMissing || {};
                 preloadedSnapData = preloadedOrOptions.preloadedSnapData || null;
+                allowLegacyBulk = !!preloadedOrOptions.allowLegacyBulk;
             } else {
                 preloadedSnapData = preloadedOrOptions;
             }
@@ -44841,11 +45290,15 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const split = await readSplitFloorKindDocs(bldg, floorCode, knownMissing);
         if (split) return split;
 
-        const bulk = await loadLegacyBulkCacheOnce();
-        const sliced = sliceLegacyBulkForFloor(bulk, floorKey);
-        if (sliced) {
-            sliced.drawing = emptyFloorDrawingPayload();
-            return Object.assign({ fromLegacy: true }, sliced);
+        // 회사 전체 bulkData(defectsAndNdt) 청크 get은 점검 중 허수 읽기의 주범이었다.
+        // 층 팩/분리 문서가 없으면 빈 묶음으로 두고, 구버전 이관은 allowLegacyBulk일 때만.
+        if (allowLegacyBulk) {
+            const bulk = await loadLegacyBulkCacheOnce();
+            const sliced = sliceLegacyBulkForFloor(bulk, floorKey);
+            if (sliced) {
+                sliced.drawing = emptyFloorDrawingPayload();
+                return Object.assign({ fromLegacy: true }, sliced);
+            }
         }
         return Object.assign({ fromLegacy: false }, emptyFloorBundle());
     }
@@ -45985,9 +46438,15 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     async function hydrateCurrentBuildingDefectPhotosIntoState() {
         const currentId = window.state.currentBuildingId;
         if (!currentId) return;
+        const floorCode = window.state.currentFloor;
         const subset = {};
         Object.entries(window.state.defects || {}).forEach(([key, arr]) => {
-            if (key.startsWith(`${currentId}_`)) subset[key] = arr;
+            // 현재 층만 — 건물 전체 층 키를 매번 훑으면 동기화 스냅샷마다 불필요 작업
+            if (floorCode) {
+                if (key === `${currentId}_${floorCode}`) subset[key] = arr;
+            } else if (key.startsWith(`${currentId}_`)) {
+                subset[key] = arr;
+            }
         });
         if (!Object.keys(subset).length) return;
         Object.values(subset).forEach((arr) => {
