@@ -560,3 +560,14 @@
 > `firestore.rules`에 `floors/{floor}/parts` 허용. **콘솔에 규칙 다시 게시 필요.**
 > PhotoUploadQueue·같은 층 merge·lease 유지. 작업자는 `users`/`members` 그대로.
 
+### ⚡ [Cursor] - 2026-09-18 17:50:00
+> **`[COMPLETED]` 빈 층 묶음이 점검 데이터를 덮어쓰던 문제**
+>
+> 원인: `{markings,photos,ndt,drawing}` 키만 있어도 “데이터 있음”으로 보고 옛 bulk/4종 문서를
+> 건너뛴 뒤, 빈 JSON을 층 문서에 다시 올림. 이후 기기는 빈 묶음만 봄.
+> 수정: 실제 마킹·NDT·삭제목록·도면 URL이 있을 때만 묶음으로 인정. 빈 내용은 클라우드에
+> 올리지 않음. 빈 묶음이면 옛 `docs/{kind}` → `bulkData/defectsAndNdt` 폴백 유지.
+> 복구: 핀이 아직 보이는 기기에서 해당 층을 열면 로컬이 다시 올라감. 클라우드 bulk/옛 층
+> 문서에 남은 데이터도 다음 진입 때 합쳐짐.
+
+

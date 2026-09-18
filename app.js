@@ -45249,14 +45249,20 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
     async function loadLegacyBulkCacheOnce() {
         if (_legacyBulkCacheTried) return _legacyBulkCache;
-        _legacyBulkCacheTried = true;
         try {
-            _legacyBulkCache = await fetchBulkSyncData();
+            const json = await readChunkedPdfFromDocRef(getBulkSyncDocRef());
+            if (!json) {
+                _legacyBulkCacheTried = true;
+                _legacyBulkCache = null;
+                return null;
+            }
+            _legacyBulkCache = JSON.parse(json);
+            _legacyBulkCacheTried = true;
+            return _legacyBulkCache;
         } catch (e) {
             console.warn('구버전 bulk 폴백 조회 실패:', e);
-            _legacyBulkCache = null;
+            return undefined;
         }
-        return _legacyBulkCache;
     }
 
     function emptyFloorDrawingPayload() {
@@ -45319,6 +45325,25 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         };
     }
 
+    function floorBundleHasContent(bundle) {
+        if (!bundle || typeof bundle !== 'object') return false;
+        const markings = bundle.markings || {};
+        const ndt = bundle.ndt || {};
+        const photos = bundle.photos || {};
+        const drawing = bundle.drawing || {};
+        if (Array.isArray(markings.items) && markings.items.length) return true;
+        if (Array.isArray(markings.deletedIds) && markings.deletedIds.length) return true;
+        if (Array.isArray(ndt.items) && ndt.items.length) return true;
+        if (Array.isArray(ndt.deletedIds) && ndt.deletedIds.length) return true;
+        if (Array.isArray(ndt.displacementGroups) && ndt.displacementGroups.length) return true;
+        if (photos.urlsById && typeof photos.urlsById === 'object'
+            && Object.keys(photos.urlsById).some((k) => photos.urlsById[k])) return true;
+        if (drawing.rasterUrl || drawing.pdfUrl) return true;
+        if (drawing.tiers && typeof drawing.tiers === 'object'
+            && Object.keys(drawing.tiers).some((k) => drawing.tiers[k])) return true;
+        return false;
+    }
+
     function bundleFromPackObject(obj) {
         const empty = emptyFloorBundle();
         if (!obj || typeof obj !== 'object') return empty;
@@ -45331,7 +45356,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     }
 
     function packHasFloorData(obj) {
-        return !!(obj && (obj.markings || obj.photos || obj.ndt || obj.drawing));
+        return floorBundleHasContent(bundleFromPackObject(obj));
     }
 
     async function decodeFloorPackFromSnap(floorRef, snapData) {
@@ -45357,26 +45382,24 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         ]);
         if (markings == null && photos == null && ndt == null && drawing == null) return null;
         const empty = emptyFloorBundle();
-        return {
+        const split = {
             fromLegacy: true,
             markings: markings || empty.markings,
             photos: photos || empty.photos,
             ndt: ndt || empty.ndt,
             drawing: drawing || empty.drawing
         };
+        return floorBundleHasContent(split) ? split : null;
     }
 
     async function readFloorSyncBundle(bldg, floorCode, preloadedOrOptions) {
         let preloadedSnapData = null;
         let knownMissing = {};
-        let allowLegacyBulk = false;
         if (preloadedOrOptions && typeof preloadedOrOptions === 'object') {
             if (Object.prototype.hasOwnProperty.call(preloadedOrOptions, 'knownMissing')
-                || Object.prototype.hasOwnProperty.call(preloadedOrOptions, 'preloadedSnapData')
-                || Object.prototype.hasOwnProperty.call(preloadedOrOptions, 'allowLegacyBulk')) {
+                || Object.prototype.hasOwnProperty.call(preloadedOrOptions, 'preloadedSnapData')) {
                 knownMissing = preloadedOrOptions.knownMissing || {};
                 preloadedSnapData = preloadedOrOptions.preloadedSnapData || null;
-                allowLegacyBulk = !!preloadedOrOptions.allowLegacyBulk;
             } else {
                 preloadedSnapData = preloadedOrOptions;
             }
@@ -45402,20 +45425,24 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (_floorsCheckedMigration.has(floorKey)) {
             return Object.assign({ fromLegacy: false }, emptyFloorBundle());
         }
-        _floorsCheckedMigration.add(floorKey);
 
         const split = await readSplitFloorKindDocs(bldg, floorCode, knownMissing);
-        if (split) return split;
+        if (split) {
+            _floorsCheckedMigration.add(floorKey);
+            return split;
+        }
 
-        // 회사 전체 bulkData(defectsAndNdt) 청크 get은 점검 중 허수 읽기의 주범이었다.
-        // 층 팩/분리 문서가 없으면 빈 묶음으로 두고, 구버전 이관은 allowLegacyBulk일 때만.
-        if (allowLegacyBulk) {
-            const bulk = await loadLegacyBulkCacheOnce();
-            const sliced = sliceLegacyBulkForFloor(bulk, floorKey);
-            if (sliced) {
-                sliced.drawing = emptyFloorDrawingPayload();
-                return Object.assign({ fromLegacy: true }, sliced);
-            }
+        // 층 묶음·분리 문서가 모두 비었을 때만 구버전 회사 bulk를 1회 연다(세션 캐시).
+        // 빈 JSON 묶음을 “데이터 있음”으로 보면 이 폴백이 영구히 막혀 점검이 지워진다.
+        const bulk = await loadLegacyBulkCacheOnce();
+        if (bulk === undefined) {
+            return Object.assign({ fromLegacy: false }, emptyFloorBundle());
+        }
+        _floorsCheckedMigration.add(floorKey);
+        const sliced = sliceLegacyBulkForFloor(bulk, floorKey);
+        if (sliced && floorBundleHasContent(sliced)) {
+            sliced.drawing = emptyFloorDrawingPayload();
+            return Object.assign({ fromLegacy: true }, sliced);
         }
         return Object.assign({ fromLegacy: false }, emptyFloorBundle());
     }
@@ -45444,6 +45471,11 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             },
             drawing: collectFloorDrawingUrlPayload(bldg, floorCode)
         };
+        if (!floorBundleHasContent(pack)) {
+            console.warn('빈 층 묶음은 클라우드에 올리지 않음:', floorKey);
+            _dirtyFloorKeys.delete(floorKey);
+            return;
+        }
         await writeChunkedPdfToDocRef(floorRef, JSON.stringify(pack));
         _dirtyFloorKeys.delete(floorKey);
         persistDirtyFloorKeys();
@@ -45531,7 +45563,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     async function mergeRemoteFloorBundle(bldg, floorCode, bundle) {
         if (!bldg || !bundle) return;
         await applyFloorBundleToState(bldg, floorCode, bundle);
-        if (bundle.fromLegacy) {
+        if (bundle.fromLegacy && floorBundleHasContent(bundle)) {
             try { await writeFloorSyncBundle(bldg, floorCode); } catch (e) {
                 console.warn('구버전 층 이관 쓰기 실패:', e);
             }
@@ -45579,6 +45611,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         };
 
         const applyMigratedPack = async (migrated) => {
+            if (!migrated || !floorBundleHasContent(migrated)) return;
             _lastFloorBundle = migrated;
             await mergeRemoteFloorBundle(bldg, floorCode, migrated);
         };
@@ -45611,7 +45644,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 return;
             }
             const parsed = await decodeFloorPackFromSnap(floorRef, snapData);
-            if (parsed) {
+            if (parsed && floorBundleHasContent(parsed)) {
                 _lastFloorPackIdentity = ident;
                 _lastFloorSnapData = snapData;
                 const bundle = Object.assign({ fromLegacy: false }, bundleFromPackObject(parsed));
