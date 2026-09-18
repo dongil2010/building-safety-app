@@ -16723,6 +16723,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             btnDelete.style.display = '';
             if (btnAddAnother) btnAddAnother.style.display = 'none';
             if (btnNewZone) btnNewZone.style.display = '';
+            // 개별 마킹: 「이동 보정」 버튼 (복잡한 패널 대신)
+            const xferWrap = document.getElementById('ndtDispPointStationTransfer');
+            if (xferWrap) xferWrap.dataset.open = '0';
+            ensureNdtDispPointModalTransferUi(existingGroup, existingPoint);
         } else if (continueGroup || tmpl) {
             const group = continueGroup || getCurrentFloorDisplacementGroups(cat).find(g => g.id === tmpl.groupId);
             if (!group) {
@@ -16741,6 +16745,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             btnDelete.style.display = 'none';
             if (btnAddAnother) btnAddAnother.style.display = '';
             if (btnNewZone) btnNewZone.style.display = '';
+            ensureNdtDispPointModalTransferUi(null, null);
         } else {
             groupIdEl.value = '';
             pointIdEl.value = '';
@@ -16755,6 +16760,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             btnDelete.style.display = 'none';
             if (btnAddAnother) btnAddAnother.style.display = '';
             if (btnNewZone) btnNewZone.style.display = 'none';
+            ensureNdtDispPointModalTransferUi(null, null);
         }
 
         refreshNdtDispLocationChips('ndtDispLocationType', 'ndtDispLocationChips');
@@ -16772,6 +16778,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         // 활성 구역은 유지 — 다음 마킹에서 같은 구역 (02)(03)… 이어쓰기
         window._ndtDisplacementTemplate = null;
         refreshNdtDispActiveTemplate();
+        if (typeof ensureNdtDispPointModalTransferUi === 'function') {
+            ensureNdtDispPointModalTransferUi(null, null);
+        }
         const modal = document.getElementById('ndtDisplacementModal');
         if (modal) {
             modal.classList.remove('open');
@@ -16979,210 +16988,37 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         return true;
     }
 
+    function removeNdtDispStationTransferPanel() {
+        const panel = document.getElementById('ndtDispStationTransferPanel');
+        if (panel) panel.remove();
+    }
+
+    /** 복잡한 「측정점 이동 보정」 패널 제거 — 개별 마킹 「이동 보정」으로 대체 */
     function ensureNdtDispStationTransferUi(group) {
+        removeNdtDispStationTransferPanel();
         const host = document.getElementById('ndtDispEditPointList');
         if (!host || !host.parentElement) return;
-        let panel = document.getElementById('ndtDispStationTransferPanel');
-        if (!panel) {
-            panel = document.createElement('div');
-            panel.id = 'ndtDispStationTransferPanel';
-            panel.className = 'ndt-disp-station-transfer-panel';
-            panel.style.cssText = 'margin-top:0.75rem;padding:0.75rem;border:1px solid #334155;border-radius:8px;background:rgba(15,23,42,0.55);';
-            host.parentElement.appendChild(panel);
+        let undoBar = document.getElementById('ndtDispStationTransferUndoBar');
+        const hasXfer = !!(group && Array.isArray(group.stationTransfers) && group.stationTransfers.length);
+        if (!hasXfer) {
+            if (undoBar) undoBar.remove();
+            return;
         }
-        const overlapOpts = (group.points || []).map((pt, idx) => {
-            const lab = formatNdtDisplacementPointLabel(idx + 1);
-            const marked = (pt.stationMark === 'overlap' || group.transferOverlapPointId === pt.id) ? ' ★이동점' : '';
-            const lv = isNdtDispLevelFilled(pt.level) ? ` (${pt.level})` : '';
-            const sel = (group.transferOverlapPointId === pt.id) ? ' selected' : '';
-            return `<option value="${idx}"${sel}>${lab}${lv}${marked}</option>`;
-        }).join('');
-        const overlapIdx = (() => {
-            if (!group.transferOverlapPointId) return Math.max(0, (group.points || []).length - 1);
-            const i = (group.points || []).findIndex((p) => p.id === group.transferOverlapPointId);
-            return i >= 0 ? i : Math.max(0, (group.points || []).length - 1);
-        })();
-        const overlapPt = (group.points || [])[overlapIdx];
-        const vaDefault = (overlapPt && overlapPt.levelAtA != null && overlapPt.levelAtA !== '')
-            ? overlapPt.levelAtA
-            : '';
-        const vbDefault = (overlapPt && isNdtDispLevelFilled(overlapPt.level)) ? overlapPt.level : '';
-        const lastXfer = (group.stationTransfers && group.stationTransfers.length)
-            ? group.stationTransfers[group.stationTransfers.length - 1]
-            : null;
-        panel.innerHTML = `
-            <div style="display:flex;align-items:center;justify-content:space-between;gap:0.5rem;flex-wrap:wrap;">
-                <strong style="font-size:0.9rem;"><i class="fa-solid fa-arrows-left-right"></i> 측정점 이동 보정</strong>
-                <button type="button" class="btn btn-outline" id="btnToggleNdtDispStationTransfer" style="font-size:0.78rem;padding:0.25rem 0.55rem;">
-                    ${panel.dataset.open === '1' ? '접기' : '열기'}
-                </button>
-            </div>
-            <div id="ndtDispStationTransferBody" style="display:${panel.dataset.open === '1' ? 'block' : 'none'};margin-top:0.65rem;">
-                <p style="margin:0 0 0.55rem;font-size:0.78rem;color:#94a3b8;line-height:1.45;">
-                    측기(측정점)를 여러 번 옮겨도 됩니다 (A→B→C…). 이동 전 구간을 잰 뒤
-                    <b>중복지점</b>을 「이동점으로 표시」하고, 새 위치에서 같은 점을 다시 잰 값(B)으로 보정하세요.<br>
-                    공식: Δ = Vb − Va → <b>이번 이동 구간</b>(중복지점~현재 끝, 이전 hop 제외)에 adjusted = raw − Δ.
-                    누적하면 모든 점이 첫 측기(A) 기준으로 맞춰집니다. 이동 없이 연속 측정만 하면 보정하지 않아도 됩니다.
-                </p>
-                <div class="form-group" style="margin-bottom:0.45rem;">
-                    <label class="form-label">중복지점 (A·B 모두 측정)</label>
-                    <select id="ndtDispTransferOverlap" class="form-select">${overlapOpts}</select>
-                </div>
-                <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.45rem;">
-                    <div class="form-group" style="margin:0;">
-                        <label class="form-label">이전 측기 레벨 (Va)</label>
-                        <input type="number" id="ndtDispTransferVa" class="form-control" step="0.1" inputmode="decimal" value="${vaDefault}" placeholder="예: 12.3">
-                    </div>
-                    <div class="form-group" style="margin:0;">
-                        <label class="form-label">새 측기 레벨 (Vb)</label>
-                        <input type="number" id="ndtDispTransferVb" class="form-control" step="0.1" inputmode="decimal" value="${vbDefault}" placeholder="예: 18.1">
-                    </div>
-                </div>
-                <div id="ndtDispTransferPreview" style="margin:0.55rem 0;font-size:0.8rem;color:#cbd5e1;"></div>
-                <div style="display:flex;flex-wrap:wrap;gap:0.4rem;">
-                    <button type="button" class="btn btn-outline" id="btnMarkNdtDispStationMove" title="현재 중복지점의 레벨을 A기준으로 고정">
-                        <i class="fa-solid fa-location-crosshairs"></i> 이동점으로 표시
-                    </button>
-                    <button type="button" class="btn btn-primary" id="btnApplyNdtDispStationTransfer">
-                        <i class="fa-solid fa-calculator"></i> 이번 이동 구간 보정
-                    </button>
-                    <button type="button" class="btn btn-outline" id="btnUndoNdtDispStationTransfer" ${lastXfer ? '' : 'disabled'}>
-                        <i class="fa-solid fa-rotate-left"></i> 마지막 보정 취소
-                    </button>
-                </div>
-                ${(() => {
-                    const xs = group.stationTransfers || [];
-                    if (!xs.length) return '';
-                    const lines = xs.map((x, i) =>
-                        `${i + 1}회 Δ=${Number(x.delta).toFixed(3)} · ${formatNdtDisplacementPointLabel((x.fromIndex || 0) + 1)}~${formatNdtDisplacementPointLabel((x.toIndex || 0) + 1)}`
-                    ).join('<br>');
-                    return `<div style="margin-top:0.45rem;font-size:0.75rem;color:#64748b;line-height:1.45;">이동 보정 이력 (${xs.length}회, 첫 측기 기준 누적)<br>${lines}</div>`;
-                })()}
-            </div>`;
-
-        const syncPreview = () => {
-            const preview = document.getElementById('ndtDispTransferPreview');
-            const sel = document.getElementById('ndtDispTransferOverlap');
-            const vaEl = document.getElementById('ndtDispTransferVa');
-            const vbEl = document.getElementById('ndtDispTransferVb');
-            if (!preview || !sel) return;
-            const i = parseInt(sel.value, 10);
-            const delta = computeNdtDispStationDelta(vaEl && vaEl.value, vbEl && vbEl.value);
-            if (!Number.isInteger(i) || !group.points[i]) {
-                preview.textContent = '중복지점을 선택하세요.';
-                return;
-            }
-            const endLab = formatNdtDisplacementPointLabel(group.points.length);
-            const startLab = formatNdtDisplacementPointLabel(i + 1);
-            if (delta == null) {
-                preview.textContent = `보정 구간 ${startLab} ~ ${endLab} · A/B 레벨을 입력하세요.`;
-                return;
-            }
-            preview.innerHTML = `Δ = <b>${delta.toFixed(3)}</b> → ${startLab}~${endLab} 각 레벨에서 Δ를 뺍니다. (중복지점은 A레벨 ${Number(vaEl.value).toFixed(3)}으로 맞춰짐)`;
-        };
-
-        const btnToggle = document.getElementById('btnToggleNdtDispStationTransfer');
-        if (btnToggle) {
-            btnToggle.onclick = () => {
-                panel.dataset.open = panel.dataset.open === '1' ? '0' : '1';
-                ensureNdtDispStationTransferUi(group);
-            };
+        if (!undoBar) {
+            undoBar = document.createElement('div');
+            undoBar.id = 'ndtDispStationTransferUndoBar';
+            undoBar.style.cssText = 'margin-top:0.5rem;display:flex;align-items:center;justify-content:space-between;gap:0.5rem;flex-wrap:wrap;';
+            host.parentElement.appendChild(undoBar);
         }
-        const sel = document.getElementById('ndtDispTransferOverlap');
-        if (sel) {
-            sel.value = String(overlapIdx);
-            sel.onchange = () => {
-                const i = parseInt(sel.value, 10);
-                const pt = group.points[i];
-                const vaEl = document.getElementById('ndtDispTransferVa');
-                const vbEl = document.getElementById('ndtDispTransferVb');
-                if (pt && vaEl) {
-                    vaEl.value = (pt.levelAtA != null && pt.levelAtA !== '') ? pt.levelAtA : '';
-                }
-                if (pt && vbEl) {
-                    vbEl.value = isNdtDispLevelFilled(pt.level) ? pt.level : '';
-                }
-                syncPreview();
-            };
-        }
-        ['ndtDispTransferVa', 'ndtDispTransferVb'].forEach((id) => {
-            const el = document.getElementById(id);
-            if (el) el.addEventListener('input', syncPreview);
-        });
-        syncPreview();
-
-        const btnMark = document.getElementById('btnMarkNdtDispStationMove');
-        if (btnMark) {
-            btnMark.onclick = () => {
-                const i = parseInt(document.getElementById('ndtDispTransferOverlap')?.value, 10);
-                const pt = group.points[i];
-                if (!pt) return;
-                // Prefer explicit Va field if typed; else current level
-                const vaEl = document.getElementById('ndtDispTransferVa');
-                const typedVa = vaEl && vaEl.value !== '' ? parseFloat(vaEl.value) : NaN;
-                if (Number.isFinite(typedVa)) pt.level = typedVa;
-                if (!markNdtDispStationMoveAtPoint(group, pt.id)) {
-                    window.showToast('중복지점에 A측 레벨을 먼저 입력하세요.', 'warning', 2800);
-                    return;
-                }
-                const vaField = document.getElementById('ndtDispTransferVa');
-                if (vaField) vaField.value = pt.levelAtA;
-                panel.dataset.open = '1';
-                saveStateToLocalStorage();
-                renderNdtDispGroupPointList(group);
-                ensureNdtDispStationTransferUi(group);
-                window.showToast(`${formatNdtDisplacementPointLabel(i + 1)}을 이동점(A기준)으로 표시했습니다. B에서 다시 잰 뒤 보정을 적용하세요.`, 'success', 4200);
-            };
-        }
-        const btnApply = document.getElementById('btnApplyNdtDispStationTransfer');
-        if (btnApply) {
-            btnApply.onclick = () => {
-                // Pull latest typed levels from the point list into group first
-                document.querySelectorAll('#ndtDispEditPointList .ndt-disp-edit-level-input').forEach((inp) => {
-                    const pt = group.points.find((x) => x.id === inp.dataset.pointId);
-                    if (!pt) return;
-                    if (inp.value === '' || inp.value == null) pt.level = null;
-                    else {
-                        const v = parseFloat(inp.value);
-                        if (!isNaN(v)) pt.level = v;
-                    }
-                });
-                const i = parseInt(document.getElementById('ndtDispTransferOverlap')?.value, 10);
-                const ptNow = group.points[i];
-                let va = document.getElementById('ndtDispTransferVa')?.value;
-                let vb = document.getElementById('ndtDispTransferVb')?.value;
-                if ((va === '' || va == null) && ptNow && ptNow.levelAtA != null && ptNow.levelAtA !== '') {
-                    va = ptNow.levelAtA;
-                }
-                if ((vb === '' || vb == null) && ptNow && isNdtDispLevelFilled(ptNow.level)) {
-                    vb = ptNow.level;
-                }
-                const result = applyNdtDispStationTransfer(group, i, va, vb);
-                if (!result.ok) {
-                    const msg = {
-                        'no-points': '측정 지점이 없습니다.',
-                        'bad-overlap': '중복지점을 확인하세요.',
-                        'bad-levels': 'Va/Vb 레벨을 숫자로 입력하세요.',
-                        'zero-delta': 'Va와 Vb가 같아 보정할 차이가 없습니다.',
-                        'nothing-to-adjust': '이미 보정된 구간입니다. 새 측기에서 점을 더 잰 뒤 다시 적용하세요.'
-                    }[result.reason] || '보정에 실패했습니다.';
-                    window.showToast(msg, 'warning', 3000);
-                    return;
-                }
-                panel.dataset.open = '1';
-                saveStateToLocalStorage();
-                renderNdtDispGroupPointList(group);
-                ensureNdtDispStationTransferUi(group);
-                if (typeof drawNdtCanvas === 'function') drawNdtCanvas();
-                if (typeof renderNdtSummaryTable === 'function') renderNdtSummaryTable();
-                window.showToast(
-                    `측정점 이동 보정 ${result.hop || ''}회 · Δ=${result.delta.toFixed(3)} · ${formatNdtDisplacementPointLabel(result.fromIndex + 1)}~${formatNdtDisplacementPointLabel(result.toIndex + 1)} (${result.adjustedCount}점) · 다음 이동 시 새 중복지점을 표시하세요`,
-                    'success',
-                    5200
-                );
-            };
-        }
-        const btnUndo = document.getElementById('btnUndoNdtDispStationTransfer');
+        const hist = (group.stationTransfers || []).map((x, i) =>
+            `${i + 1}회 Δ=${Number(x.delta).toFixed(3)}`
+        ).join(' · ');
+        undoBar.innerHTML = `
+            <span style="font-size:0.75rem;color:#64748b;line-height:1.35;">이동 보정 ${group.stationTransfers.length}회 · ${hist}</span>
+            <button type="button" class="btn btn-outline" id="btnUndoNdtDispStationTransferSimple" style="font-size:0.75rem;padding:0.2rem 0.45rem;">
+                <i class="fa-solid fa-rotate-left"></i> 마지막 보정 취소
+            </button>`;
+        const btnUndo = document.getElementById('btnUndoNdtDispStationTransferSimple');
         if (btnUndo) {
             btnUndo.onclick = () => {
                 const result = undoLastNdtDispStationTransfer(group);
@@ -17190,7 +17026,6 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     window.showToast('취소할 보정이 없습니다.', 'info', 2400);
                     return;
                 }
-                panel.dataset.open = '1';
                 saveStateToLocalStorage();
                 renderNdtDispGroupPointList(group);
                 ensureNdtDispStationTransferUi(group);
@@ -17199,6 +17034,178 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 window.showToast('마지막 측기 이동 보정을 취소했습니다.', 'success', 2800);
             };
         }
+    }
+
+    function ndtDispStationTransferErrorMessage(reason) {
+        return ({
+            'no-points': '측정 지점이 없습니다.',
+            'bad-overlap': '중복지점을 확인하세요.',
+            'bad-levels': '이전값(Va)·이후값(Vb)을 숫자로 입력하세요.',
+            'zero-delta': '이전값과 이후값이 같아 보정할 차이가 없습니다.',
+            'nothing-to-adjust': '이미 보정된 구간입니다. 새 측기에서 점을 더 잰 뒤 다시 적용하세요.'
+        })[reason] || '보정에 실패했습니다.';
+    }
+
+    function runNdtDispStationTransferApply(group, overlapIndex, va, vb, options) {
+        const opts = options || {};
+        const result = applyNdtDispStationTransfer(group, overlapIndex, va, vb);
+        if (!result.ok) {
+            window.showToast(ndtDispStationTransferErrorMessage(result.reason), 'warning', 3000);
+            return result;
+        }
+        saveStateToLocalStorage();
+        if (opts.refreshEditList !== false && document.getElementById('ndtDispEditPointList')) {
+            renderNdtDispGroupPointList(group);
+            ensureNdtDispStationTransferUi(group);
+        }
+        if (typeof drawNdtCanvas === 'function') drawNdtCanvas();
+        if (typeof renderNdtSummaryTable === 'function') renderNdtSummaryTable();
+        if (opts.syncPointModal) {
+            const pt = group.points[overlapIndex];
+            const levelEl = document.getElementById('ndtDispLevel');
+            if (pt && levelEl && isNdtDispLevelFilled(pt.level)) levelEl.value = pt.level;
+            ensureNdtDispPointModalTransferUi(group, pt);
+        }
+        window.showToast(
+            `이동 보정 ${result.hop || ''}회 · Δ=${result.delta.toFixed(3)} · ${formatNdtDisplacementPointLabel(result.fromIndex + 1)}~${formatNdtDisplacementPointLabel(result.toIndex + 1)} (${result.adjustedCount}점) · 다음 번호는 그대로 마킹하세요`,
+            'success',
+            5200
+        );
+        return result;
+    }
+
+    /** 개별 지점 마킹 모달: 「이동 보정」 버튼 + Va/Vb 입력 */
+    function ensureNdtDispPointModalTransferUi(group, point) {
+        const levelEl = document.getElementById('ndtDispLevel');
+        if (!levelEl) return;
+        let wrap = document.getElementById('ndtDispPointStationTransfer');
+        if (!wrap) {
+            wrap = document.createElement('div');
+            wrap.id = 'ndtDispPointStationTransfer';
+            wrap.style.cssText = 'margin-top:0.65rem;padding:0.65rem;border:1px dashed #475569;border-radius:8px;background:rgba(15,23,42,0.4);';
+            const anchor = levelEl.closest('.form-group') || levelEl.parentElement;
+            if (anchor && anchor.parentElement) {
+                anchor.parentElement.insertBefore(wrap, anchor.nextSibling);
+            } else if (levelEl.parentElement) {
+                levelEl.parentElement.appendChild(wrap);
+            }
+        }
+        if (!group || !point) {
+            wrap.style.display = 'none';
+            wrap.innerHTML = '';
+            return;
+        }
+        const idx = group.points.indexOf(point);
+        if (idx < 0) {
+            wrap.style.display = 'none';
+            wrap.innerHTML = '';
+            return;
+        }
+        wrap.style.display = '';
+        const lab = formatNdtDisplacementPointLabel(idx + 1);
+        const vaDefault = (point.levelAtA != null && point.levelAtA !== '') ? point.levelAtA : '';
+        const open = wrap.dataset.open === '1';
+        wrap.innerHTML = `
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:0.4rem;flex-wrap:wrap;">
+                <span style="font-size:0.82rem;color:#cbd5e1;"><i class="fa-solid fa-arrows-left-right"></i> ${lab} 측기 이동</span>
+                <button type="button" class="btn btn-outline" id="btnToggleNdtDispPointTransfer" style="font-size:0.78rem;padding:0.25rem 0.55rem;">
+                    ${open ? '닫기' : '이동 보정'}
+                </button>
+            </div>
+            <div id="ndtDispPointTransferBody" style="display:${open ? 'block' : 'none'};margin-top:0.55rem;">
+                <p style="margin:0 0 0.45rem;font-size:0.75rem;color:#94a3b8;line-height:1.4;">
+                    이 지점(중복)에서 이전 측기 측정값(Va)과 이후 측기 측정값(Vb)을 넣고 적용하면
+                    Δ=Vb−Va 가 ${lab}부터 이후 번호에 자동 반영됩니다. 다음 번호 마킹은 그대로 이어가세요.
+                </p>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.4rem;">
+                    <div class="form-group" style="margin:0;">
+                        <label class="form-label" style="font-size:0.75rem;">이전 지점 측정값 (Va)</label>
+                        <input type="number" id="ndtDispPointTransferVa" class="form-control" step="0.1" inputmode="decimal" value="${vaDefault}" placeholder="이전">
+                    </div>
+                    <div class="form-group" style="margin:0;">
+                        <label class="form-label" style="font-size:0.75rem;">이후 지점 측정값 (Vb)</label>
+                        <input type="number" id="ndtDispPointTransferVb" class="form-control" step="0.1" inputmode="decimal" value="" placeholder="이후">
+                    </div>
+                </div>
+                <button type="button" class="btn btn-primary" id="btnApplyNdtDispPointTransfer" style="margin-top:0.5rem;width:100%;">
+                    <i class="fa-solid fa-calculator"></i> 적용 (이후 번호 자동 보정)
+                </button>
+            </div>`;
+        const btnToggle = document.getElementById('btnToggleNdtDispPointTransfer');
+        if (btnToggle) {
+            btnToggle.onclick = (e) => {
+                e.preventDefault();
+                wrap.dataset.open = wrap.dataset.open === '1' ? '0' : '1';
+                ensureNdtDispPointModalTransferUi(group, point);
+            };
+        }
+        const btnApply = document.getElementById('btnApplyNdtDispPointTransfer');
+        if (btnApply) {
+            btnApply.onclick = (e) => {
+                e.preventDefault();
+                const va = document.getElementById('ndtDispPointTransferVa')?.value;
+                const vb = document.getElementById('ndtDispPointTransferVb')?.value;
+                const levelElNow = document.getElementById('ndtDispLevel');
+                if (levelElNow && vb !== '' && vb != null) {
+                    const vbn = parseFloat(vb);
+                    if (!isNaN(vbn)) {
+                        point.level = vbn;
+                        levelElNow.value = vbn;
+                    }
+                }
+                runNdtDispStationTransferApply(group, idx, va, vb, { syncPointModal: true, refreshEditList: true });
+            };
+        }
+    }
+
+    /** 구역 편집 목록 행: 인라인 Va/Vb 「이동 보정」 */
+    function toggleNdtDispEditRowTransferForm(group, pointId) {
+        const row = document.querySelector(`#ndtDispEditPointList .ndt-disp-edit-point-row[data-point-id="${pointId}"]`);
+        if (!row) return;
+        let form = row.nextElementSibling;
+        if (form && form.classList && form.classList.contains('ndt-disp-row-transfer-form')) {
+            form.remove();
+            return;
+        }
+        document.querySelectorAll('#ndtDispEditPointList .ndt-disp-row-transfer-form').forEach((el) => el.remove());
+        const idx = (group.points || []).findIndex((p) => p.id === pointId);
+        if (idx < 0) return;
+        const pt = group.points[idx];
+        const lab = formatNdtDisplacementPointLabel(idx + 1);
+        const vaDefault = (pt.levelAtA != null && pt.levelAtA !== '') ? pt.levelAtA : '';
+        form = document.createElement('div');
+        form.className = 'ndt-disp-row-transfer-form';
+        form.dataset.pointId = pointId;
+        form.style.cssText = 'margin:0.15rem 0 0.55rem;padding:0.55rem;border:1px solid #334155;border-radius:8px;background:rgba(15,23,42,0.55);';
+        form.innerHTML = `
+            <div style="font-size:0.78rem;color:#cbd5e1;margin-bottom:0.35rem;"><b>${lab}</b> 이동 보정 · 이전값(Va) / 이후값(Vb)</div>
+            <div style="display:grid;grid-template-columns:1fr 1fr auto;gap:0.35rem;align-items:end;">
+                <div class="form-group" style="margin:0;">
+                    <label class="form-label" style="font-size:0.72rem;">이전 지점 (Va)</label>
+                    <input type="number" class="form-control ndt-disp-row-va" step="0.1" inputmode="decimal" value="${vaDefault}" placeholder="이전">
+                </div>
+                <div class="form-group" style="margin:0;">
+                    <label class="form-label" style="font-size:0.72rem;">이후 지점 (Vb)</label>
+                    <input type="number" class="form-control ndt-disp-row-vb" step="0.1" inputmode="decimal" value="" placeholder="이후">
+                </div>
+                <button type="button" class="btn btn-primary ndt-disp-row-apply" style="font-size:0.75rem;padding:0.35rem 0.55rem;white-space:nowrap;">적용</button>
+            </div>`;
+        row.after(form);
+        form.querySelector('.ndt-disp-row-apply').onclick = (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            const va = form.querySelector('.ndt-disp-row-va')?.value;
+            const vb = form.querySelector('.ndt-disp-row-vb')?.value;
+            const inp = document.querySelector(`#ndtDispEditPointList .ndt-disp-edit-level-input[data-point-id="${pointId}"]`);
+            if (inp && vb !== '' && vb != null) {
+                const vbn = parseFloat(vb);
+                if (!isNaN(vbn)) {
+                    pt.level = vbn;
+                    inp.value = vbn;
+                }
+            }
+            runNdtDispStationTransferApply(group, idx, va, vb, { refreshEditList: true });
+        };
     }
 
     function openNdtDisplacementGroupEditModal(group) {
@@ -17216,7 +17223,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (damageEl) damageEl.checked = !!group.hasMinorDamage;
         const hintEl = document.getElementById('ndtDispEditPointListHint');
         if (hintEl) {
-            hintEl.textContent = '마킹한 지점 레벨을 한 창에서 입력·수정한 뒤 저장하세요. (위치·측정길이도 함께)';
+            hintEl.textContent = '마킹한 지점 레벨을 입력·수정하세요. 측기 이동 시 해당 지점의 「이동 보정」에서 이전값·이후값만 넣으면 됩니다.';
         }
         renderNdtDispGroupPointList(group);
         ensureNdtDispStationTransferUi(group);
@@ -17256,8 +17263,12 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const container = document.getElementById('ndtDispEditPointList');
         if (!container) return;
         const isMemberDisp = group.category === '부재변위';
+        // 이전 복잡한 패널·인라인 폼 정리
+        removeNdtDispStationTransferPanel();
+        document.querySelectorAll('#ndtDispEditPointList .ndt-disp-row-transfer-form').forEach((el) => el.remove());
         if (!group.points || group.points.length === 0) {
             container.innerHTML = '<div style="color:#a3a3a3; font-size:0.85rem; padding:0.5rem;">측정 지점이 없습니다. MARK 모드로 도면을 클릭해 지점을 추가하세요.</div>';
+            ensureNdtDispStationTransferUi(group);
             return;
         }
         container.innerHTML = group.points.map((p, idx) => {
@@ -17265,15 +17276,13 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 ? (idx === 0 ? ' 단부1' : (idx === group.points.length - 1 ? ' 단부2' : ' 중앙'))
                 : '';
             const val = isNdtDispLevelFilled(p.level) ? p.level : '';
-            const isOverlap = p.stationMark === 'overlap' || group.transferOverlapPointId === p.id;
-            const markBadge = isOverlap ? ' <span style="color:#38bdf8;font-weight:800;">이동점</span>' : '';
             return `
             <div class="option-manager-item ndt-disp-edit-point-row" data-point-id="${p.id}">
-                <span class="ndt-disp-edit-point-label">${formatNdtDisplacementPointLabel(idx + 1)}${role}${markBadge}</span>
+                <span class="ndt-disp-edit-point-label">${formatNdtDisplacementPointLabel(idx + 1)}${role}</span>
                 <input type="number" class="form-control ndt-disp-edit-level-input" data-point-id="${p.id}"
                     step="0.1" placeholder="레벨" value="${val}" inputmode="decimal" aria-label="${formatNdtDisplacementPointLabel(idx + 1)} 레벨">
-                <button type="button" class="btn btn-outline ndt-disp-mark-station-btn" title="이 지점을 측기 이동 중복지점으로 표시"
-                    data-group-id="${group.id}" data-point-id="${p.id}" style="font-size:0.7rem;padding:0.2rem 0.35rem;">이동</button>
+                <button type="button" class="btn btn-outline ndt-disp-mark-station-btn" title="이 지점에서 측기 이동 보정(이전값·이후값)"
+                    data-group-id="${group.id}" data-point-id="${p.id}" style="font-size:0.7rem;padding:0.2rem 0.35rem;">이동 보정</button>
                 <button type="button" class="option-manager-item-delete" title="지점 삭제"
                     onclick="window.deleteNdtDisplacementPoint('${group.id}','${p.id}')"><i class="fa-solid fa-trash"></i></button>
             </div>`;
@@ -17284,25 +17293,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 e.stopPropagation();
                 const g = getNdtDispGroupById(btn.dataset.groupId);
                 if (!g) return;
-                // sync typed level for this point before freezing as A
-                const inp = container.querySelector(`.ndt-disp-edit-level-input[data-point-id="${btn.dataset.pointId}"]`);
-                const pt = (g.points || []).find((x) => x.id === btn.dataset.pointId);
-                if (pt && inp && inp.value !== '') {
-                    const v = parseFloat(inp.value);
-                    if (!isNaN(v)) pt.level = v;
-                }
-                if (!markNdtDispStationMoveAtPoint(g, btn.dataset.pointId)) {
-                    window.showToast('레벨을 입력한 뒤 이동점으로 표시하세요.', 'warning', 2600);
-                    return;
-                }
-                saveStateToLocalStorage();
-                renderNdtDispGroupPointList(g);
-                const panel = document.getElementById('ndtDispStationTransferPanel');
-                if (panel) panel.dataset.open = '1';
-                ensureNdtDispStationTransferUi(g);
-                window.showToast('이동점(A기준)으로 표시했습니다. B에서 같은 지점을 다시 잰 뒤 「B구간 보정 적용」을 누르세요.', 'success', 4200);
+                toggleNdtDispEditRowTransferForm(g, btn.dataset.pointId);
             });
         });
+        ensureNdtDispStationTransferUi(group);
     }
 
     window.deleteNdtDisplacementPoint = function(groupId, pointId, options) {
