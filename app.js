@@ -44930,26 +44930,30 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             const arr = raw ? JSON.parse(raw) : [];
             if (!Array.isArray(arr)) return;
             arr.forEach((k) => { if (k) _dirtyFloorKeys.add(String(k)); });
-            const MAX_DIRTY = 8;
-            if (_dirtyFloorKeys.size > MAX_DIRTY) {
-                const keep = new Set();
-                const curB = window.state && window.state.currentBuildingId;
-                const curF = window.state && window.state.currentFloor;
-                if (curB && curF) keep.add(`${curB}_${curF}`);
-                if (curB) {
-                    Array.from(_dirtyFloorKeys).forEach((k) => {
-                        if (String(k).startsWith(curB + '_') && keep.size < MAX_DIRTY) keep.add(k);
-                    });
-                }
-                if (keep.size === 0) {
-                    Array.from(_dirtyFloorKeys).slice(0, MAX_DIRTY).forEach((k) => keep.add(k));
-                }
-                _dirtyFloorKeys.clear();
-                keep.forEach((k) => _dirtyFloorKeys.add(k));
-                persistDirtyFloorKeys();
-                console.warn('[sync] dirty floor keys capped to', _dirtyFloorKeys.size, '(read-storm guard)');
-            }
+            // NOTE: 여기서 dirty 집합을 잘라 LS에 다시 쓰지 않는다.
+            // (과거 MAX_DIRTY=8 상한이 overflow 층을 dirty에서 영구 제거 → 원격 팩이
+            //  로컬 마킹을 덮을 수 있었음). 읽기 폭주 방지는 pickDirtyFloorsForSyncBatch.
         } catch (_e) { /* ignore */ }
+    }
+    /** 한 번의 sync에서 올릴 층만 고른다. 나머지는 dirty에 남겨 원격 덮어쓰기를 계속 막는다. */
+    function pickDirtyFloorsForSyncBatch(maxN) {
+        const MAX = Math.max(1, maxN || 8);
+        const keep = new Set();
+        const curB = window.state && window.state.currentBuildingId;
+        const curF = window.state && window.state.currentFloor;
+        if (curB && curF) keep.add(`${curB}_${curF}`);
+        if (curB) {
+            Array.from(_dirtyFloorKeys).forEach((k) => {
+                if (String(k).startsWith(curB + '_') && keep.size < MAX) keep.add(k);
+            });
+        }
+        Array.from(_dirtyFloorKeys).forEach((k) => {
+            if (keep.size < MAX) keep.add(k);
+        });
+        if (_dirtyFloorKeys.size > keep.size) {
+            console.info('[sync] dirty batch', keep.size, 'of', _dirtyFloorKeys.size, '(overflow stays protected)');
+        }
+        return keep;
     }
     function markOfflinePendingFlush() {
         try { localStorage.setItem(offlinePendingFlushKey(), '1'); } catch (_e) { /* ignore */ }
@@ -47254,7 +47258,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             isRemoteSyncing = true;
             window.state.confirmedDeletedIds = {};
 
-            const floorsToSync = new Set(_dirtyFloorKeys);
+            // 배치 상한: 한 번에 전 dirty를 읽지 않되, 미선택 층은 dirty에 남겨 원격 적용을 계속 차단
+            const floorsToSync = pickDirtyFloorsForSyncBatch(8);
             const currentKey = currentInspectionFloorKey();
             if (currentKey) floorsToSync.add(currentKey);
             for (const floorKey of floorsToSync) {
@@ -47429,6 +47434,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             }
             if (_dirtyFloorKeys.size === 0) {
                 clearOfflinePendingFlush();
+            } else if (!_syncPending && !_syncRetryTimer && navigator.onLine !== false) {
+                // 배치에 못 들어간 overflow dirty를 이어서 flush
+                _syncPending = true;
             }
             persistDirtyFloorKeys();
             if (_syncPending && !_syncRetryTimer) {
