@@ -44907,10 +44907,31 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     function restoreDirtyFloorKeys() {
         try {
             const raw = localStorage.getItem(dirtyFloorsStorageKey());
-            if (!raw) return;
-            const arr = JSON.parse(raw);
+            const arr = raw ? JSON.parse(raw) : [];
             if (!Array.isArray(arr)) return;
             arr.forEach((k) => { if (k) _dirtyFloorKeys.add(String(k)); });
+            // Storm guard: a previous bug could persist hundreds of floor keys.
+            // Cap to current building floors (+ current key) so one reconnect
+            // cannot re-read the entire company.
+            const MAX_DIRTY = 8;
+            if (_dirtyFloorKeys.size > MAX_DIRTY) {
+                const keep = new Set();
+                const curB = window.state && window.state.currentBuildingId;
+                const curF = window.state && window.state.currentFloor;
+                if (curB && curF) keep.add(`${curB}_${curF}`);
+                if (curB) {
+                    Array.from(_dirtyFloorKeys).forEach((k) => {
+                        if (String(k).startsWith(curB + '_') && keep.size < MAX_DIRTY) keep.add(k);
+                    });
+                }
+                if (keep.size === 0) {
+                    Array.from(_dirtyFloorKeys).slice(0, MAX_DIRTY).forEach((k) => keep.add(k));
+                }
+                _dirtyFloorKeys.clear();
+                keep.forEach((k) => _dirtyFloorKeys.add(k));
+                persistDirtyFloorKeys();
+                console.warn('[sync] dirty floor keys capped to', _dirtyFloorKeys.size, '(read-storm guard)');
+            }
         } catch (_e) { /* ignore */ }
     }
     function markOfflinePendingFlush() {
