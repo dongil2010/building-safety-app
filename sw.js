@@ -3,7 +3,7 @@
    앱 JS/CSS는 네트워크 전용(캐시 fallback 없음) — 모바일 웹 구버전 고착 방지
    ========================================================================== */
 
-const CACHE_NAME = 'building-safety-v20260918_180705';
+const CACHE_NAME = 'building-safety-v20260918_181826';
 
 /** 오프라인 셸·한글 템플릿만 선캐시 (app.js / js/* 는 제외) */
 const STATIC_ASSETS = [
@@ -61,6 +61,14 @@ self.addEventListener('fetch', (event) => {
     if (event.request.method !== 'GET') return;
 
     const url = event.request.url;
+    // 다른 출처(Storage·Firestore·Worker·CDN)는 가로채지 않는다.
+    // firebasestorage GET 응답에 CORS 헤더가 없으면 SW fetch가 실패하고
+    // 아래 catch가 status 503「오프라인」을 만들어 「Storage REST 503」처럼 보인다.
+    try {
+        if (new URL(url).origin !== self.location.origin) return;
+    } catch (_e) {
+        return;
+    }
     if (url.includes('firestore.googleapis.com') || url.includes('google.com/recaptcha')) {
         return;
     }

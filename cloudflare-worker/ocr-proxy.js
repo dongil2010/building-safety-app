@@ -15,6 +15,27 @@
 
 import { isAllowedStorageUrl } from './storage-url-allowlist.js';
 
+async function fetchStorageUpstream(url, headers) {
+  let lastErr = null;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const res = await fetch(url, {
+        method: 'GET',
+        headers,
+        redirect: 'follow',
+      });
+      if (res.ok) return res;
+      lastErr = res;
+      if (res.status !== 503 && res.status !== 429 && res.status !== 500) return res;
+    } catch (err) {
+      lastErr = err;
+    }
+    await new Promise((r) => setTimeout(r, 250 * (attempt + 1)));
+  }
+  if (lastErr && typeof lastErr.status === 'number') return lastErr;
+  throw lastErr || new Error('Storage 업스트림 실패');
+}
+
 function guessProxyMime(url, contentType) {
   let mime = String(contentType || '').split(';')[0].trim().toLowerCase();
   if (mime === 'image/jpg') mime = 'image/jpeg';
@@ -77,18 +98,15 @@ export default {
       }
       const headers = { Accept: 'image/*,application/pdf,*/*' };
       const token = sanitizeAuthToken(body.authToken);
-      if (token) {
+      const urlHasDownloadToken = /[?&]token=/.test(url);
+      if (token && !urlHasDownloadToken) {
         // Firebase Storage REST는 Bearer가 아니라 "Firebase <idToken>"
         headers.Authorization = 'Firebase ' + token;
         headers['X-Firebase-Storage-Version'] = 'webjs/9.22.0';
       }
       let upstream;
       try {
-        upstream = await fetch(url, {
-          method: 'GET',
-          headers,
-          redirect: 'follow',
-        });
+        upstream = await fetchStorageUpstream(url, headers);
       } catch (err) {
         return json({ error: `Storage 프록시 fetch 실패: ${err}` }, 502, corsHeaders);
       }

@@ -577,5 +577,13 @@
 > 수정: 토큰 URL은 헤더 없이 GET → 경로 REST는 URL 버킷(.app/.appspot) 별칭 → 404는 재시도 안 함.
 > Worker proxyStorage 미배포 경고는 한 번만.
 
+### ⚡ [Cursor] - 2026-09-18 18:20:00
+> **`[COMPLETED]` Storage 503/CORS — SW가 Storage GET을 가로채 가짜 503**
+>
+> 사진은 클라우드에 있음(토큰 URL curl 200). GET 본문에 ACAO 없음 + Service Worker가
+> firebasestorage를 가로채 fetch 실패 시 `503 오프라인`을 반환 → 콘솔에 CORS+503.
+> 수정: SW는 같은 출처만 처리. 브라우저 REST+Auth 중단. 본문은 Worker `proxyStorage` POST.
+> 앱 홈 새로고침 필요(sw.js).
+
 
 

@@ -18794,7 +18794,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             body: JSON.stringify({
                 action: 'proxyStorage',
                 url: String(url),
-                authToken: authToken || undefined
+                authToken: (/[?&]token=/.test(String(url)) ? undefined : (authToken || undefined))
             })
         });
         const ct = String(resp.headers.get('content-type') || '').toLowerCase();

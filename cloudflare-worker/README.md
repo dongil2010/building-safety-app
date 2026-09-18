@@ -68,8 +68,7 @@ Gemini API도 켜서 `GEMINI_API_KEY` Secret을 추가하세요. 무료 AI Studi
 
 같은 Worker가 Storage 바이트 프록시도 처리합니다. **이 코드가 배포돼 있지 않으면**
 결함위치도에서 「클라우드에서 도면을 받지 못했습니다」가 납니다.
-(2026-09-16 실측: 운영 `frosty-king-12ef` 는 아직 OCR 전용 — `proxyStorage` POST가
-「image 필드가 없거나…」로 거절됨.)
+운영 `frosty-king-12ef` 는 `{"action":"ping"}` → `{"ok":true,"proxyStorage":true}` 이면 프록시가 켜진 것이다.
 
 요청:
 
