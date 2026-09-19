@@ -90,6 +90,8 @@
 | Firestore 읽기 가드 6 (rules exists() → Auth claims) | Claude | `[ON_HOLD]` | 규칙·`functions/`는 반영됨. 클라는 `ENABLE_COMPANY_AUTH_CLAIMS = false` 로 꺼둠 |
 | Firestore 읽기 가드 8 잔여 (joinCodes list 축소) | Claude | `[COMPLETED]` | 목록 상한 50 + 식별코드 단건 get + 미로그인 가드. 규칙 게시 확인됨 |
 | 🔴 `syncLeases` 규칙 미게시로 동기화 전면 차단 | Claude | `[COMPLETED]` | Cursor 4번 코드만 배포되고 규칙이 없어 lease가 permission-denied. 규칙 게시로 해소 |
+| 🚨 층끼리 결함이 섞이던 사고 | Claude | `[COMPLETED]` | `_lastFloorSnapData`를 다른 층 preloaded로 쓰던 문제. `_listeningFloorPath` 확인 + 회귀 테스트 |
+| 🚨 섞인 운영 데이터 복구 | Claude | `[IN_PROGRESS]` | 오염 직전 스냅샷 2개 GCS 확보. **운영 층 문서 임의로 쓰지 말 것** |
 
 ---
 
@@ -718,3 +720,40 @@
 > 8번 완료: `joinCodes` 전체 `.get()` 제거. 회사가 적으면 5분 캐시 목록(`limit(50)`)이 더 싸고
 > 많으면 prefix 쿼리가 싸서 적응형으로 했습니다. 6자리 식별코드는 항상 `doc(code).get()` 1건.
 > 미로그인 상태에선 컬렉션 list를 아예 시도하지 않습니다.
+
+### 🔷 [Claude Code] - 2026-09-19 20:55:00
+> **`[COMPLETED]` 🚨 층끼리 결함이 섞이던 사고 — 원인·수정·회귀 테스트**
+>
+> **증상**: 점검 화면 도면 탭과 조사표에 **다른 층 결함이 섞여 보임**. 표시만이 아니라
+> 실제 데이터가 섞여 클라우드에 업로드됨.
+>
+> **원인 (`d3ac0da` 4번 lease 분리의 부작용, app.js 동기화 층 루프)**:
+> 바뀌기 전 `preloaded`는 `leaseInfo.serverData` — **그 동기화 안에서 그 층 문서에 잠금을
+> 걸며 읽은 값**이라 층이 어긋날 수가 없었다(자기 완결).
+> 바뀐 뒤는 `_lastFloorSnapData` — **리스너 캐시라 수명이 따로 돈다.**
+> 층을 바꾸면 `window.state.currentFloor`(=`currentKey`)는 즉시 바뀌지만
+> `subscribeCurrentFloorSync` 재구독은 비동기라, 그 사이 캐시는 아직 **이전 층** 것이다.
+> 그 상태로 동기화가 돌면 `readFloorSyncBundle`이 이전 층 내용을 새 층 묶음으로 돌려주고
+> → `mergeFloorBundleIntoState`가 새 층 키에 병합 → `writeFloorSyncBundle`이 새 층 문서로 업로드.
+>
+> **왜 어제 안 터지고 오늘 터졌나**: 이 코드는 19:33 KST에 Pages 배포됐지만 `syncLeases`
+> 규칙이 콘솔에 없어서 lease 획득이 permission-denied → **모든 동기화가 중단**돼 있었다.
+> 19:45쯤 규칙을 게시하는 순간 이 코드가 **처음으로 실제 실행**되면서 바로 터졌다.
+>
+> **수정**: `_listeningFloorPath`가 캐시의 주인 경로를 들고 있고 `_lastFloorSnapData`와
+> 같은 곳(`stopFloorRealtimeListeners`)에서 같이 초기화되므로, 경로가 일치할 때만 preloaded로 쓴다.
+> 읽기 절감(4·5번)은 그대로 유지된다.
+>
+> **회귀 테스트 추가** (`scripts/test-firestore-read-guards.js`):
+> 가드가 빠지면 실패하도록 단언 3개. 고친 코드는 통과, 옛 형태로 되돌리면 실패하는 것까지 확인함.
+> **이 단언을 지우거나 우회하지 마세요.** 지우면 같은 사고가 다시 납니다.
+>
+> ⚠️ **다른 에이전트에게 (중요)**:
+> 1. **`preloaded`/캐시를 넘길 때는 "그 데이터가 어느 층 것인지"를 반드시 같이 확인하세요.**
+>    층 묶음 pack에는 층 식별자가 안 들어 있어서 내용만으로는 검증이 안 됩니다.
+> 2. **규칙이 필요한 코드를 Pages에 먼저 올리지 마세요.** 규칙 게시가 선행돼야 합니다.
+>    이번엔 그 순서가 뒤바뀌어서 버그가 12시간 동안 가려져 있었습니다.
+>
+> **데이터 복구**: PITR을 켜고 오염 직전 스냅샷 2개를 GCS로 확보했습니다
+> (`gs://bsa-rescue-20260919/snap1935` = 19:35 KST, `snap-earliest` = 19:25 KST).
+> 운영 DB는 아직 건드리지 않았습니다. 복구 작업 중이니 **운영 층 문서를 임의로 쓰지 마세요.**

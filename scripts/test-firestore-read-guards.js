@@ -48,6 +48,29 @@ assert.match(app, /const leaseRef = getSyncLeaseDocRef\(inspectFloorRef \|\| doc
 assert.doesNotMatch(app, /leaseInfo\.serverData/);
 assert.match(rules, /match \/syncLeases\/\{leaseId\} \{[\s\S]*allow read, write: if isCompanyMember\(companyId\);/);
 
+// --- 회귀 방지: 층 스냅샷 캐시를 다른 층에 쓰면 결함이 층끼리 섞인다 (2026-09-19 사고) ---
+//
+// lease 분리(4번) 때 preloaded 출처가 leaseInfo.serverData(그 동기화 안에서 그 층 문서를
+// 잠그며 읽은 값 = 자기 완결)에서 _lastFloorSnapData(리스너 캐시 = 수명이 따로 돎)로 바뀌었다.
+// 층을 바꾸면 currentFloor는 즉시 바뀌지만 리스너 재구독은 비동기라, 그 사이 캐시는 아직
+// 이전 층 것이다. 그대로 쓰면 이전 층 결함이 새 층에 병합돼 새 층 문서로 업로드된다.
+// 실제로 현장 데이터가 섞였다. _listeningFloorPath로 캐시 주인을 확인해야 한다.
+assert.match(
+    app,
+    /const cacheBelongsToThisFloor = !!\(floorRefForKey[\s\S]{0,200}_listeningFloorPath === floorRefForKey\.path/,
+    '층 preloaded 캐시는 _listeningFloorPath로 주인 층을 확인해야 한다 (층끼리 결함 섞임 사고 재발 방지)'
+);
+assert.match(
+    app,
+    /const preloaded = \(floorKey === currentKey && cacheBelongsToThisFloor\)/,
+    'preloaded는 cacheBelongsToThisFloor 가드를 반드시 통과해야 한다'
+);
+assert.doesNotMatch(
+    app,
+    /const preloaded = \(floorKey === currentKey && _lastFloorSnapData && Object\.keys\(_lastFloorSnapData\)\.length\)/,
+    '가드 없는 옛 형태로 되돌리지 말 것 — 층 전환 직후 동기화에서 결함이 층끼리 섞인다'
+);
+
 // --- 6. 규칙 멤버십을 Auth custom claims로 (exists() 과금 제거) ---
 const storageRules = fs.readFileSync(path.join(__dirname, '..', 'storage.rules'), 'utf8');
 

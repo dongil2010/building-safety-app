@@ -47828,7 +47828,19 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 const floorBldg = findBuildingForFloorKey(floorKey);
                 const code = floorCodeFromFloorKey(floorKey, floorBldg);
                 if (!floorBldg || !code) continue;
-                const preloaded = (floorKey === currentKey && _lastFloorSnapData && Object.keys(_lastFloorSnapData).length)
+                // _lastFloorSnapData는 층 리스너가 마지막으로 받은 문서다. 층을 바꾸면
+                // window.state.currentFloor(=currentKey)는 즉시 바뀌지만 리스너 재구독
+                // (subscribeCurrentFloorSync)은 비동기라, 그 사이 이 캐시는 아직 "이전 층"
+                // 것이다. 그대로 preloaded로 넘기면 readFloorSyncBundle이 이전 층 내용을
+                // 새 층 묶음으로 돌려주고, mergeFloorBundleIntoState가 그걸 새 층 키에
+                // 병합한 뒤 새 층 문서로 업로드한다 — 층끼리 결함이 섞인다.
+                // _listeningFloorPath가 이 캐시의 주인 경로를 들고 있고 _lastFloorSnapData와
+                // 같은 곳에서 같이 설정·초기화되므로, 경로가 맞을 때만 쓴다.
+                const floorRefForKey = getFloorScopeRef(floorBldg, code);
+                const cacheBelongsToThisFloor = !!(floorRefForKey
+                    && _listeningFloorPath === floorRefForKey.path
+                    && _lastFloorSnapData && Object.keys(_lastFloorSnapData).length);
+                const preloaded = (floorKey === currentKey && cacheBelongsToThisFloor)
                     ? _lastFloorSnapData
                     : null;
                 const bundle = await readFloorSyncBundle(floorBldg, code, preloaded);
