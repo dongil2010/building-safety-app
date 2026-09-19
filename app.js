@@ -17470,6 +17470,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         group.points = group.points.filter(p => p.id !== pointId);
         if (group.points.length === 0) {
             state.ndtDisplacementGroups[key] = groups.filter(g => g.id !== groupId);
+            // 마지막 지점을 지워 구역까지 사라지는 경우도 묘비가 필요하다
+            trackNdtDeletion(key, groupId);
             closeNdtDisplacementGroupEditModal();
         } else {
             setActiveNdtDispGroup(group);
@@ -17484,6 +17486,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (!options?.skipConfirm && !window.confirmDelete('해당 측정 구역과 포함된 모든 지점을 삭제하시겠습니까?')) return;
         const key = `${state.currentBuildingId}_${state.currentFloor}`;
         state.ndtDisplacementGroups[key] = (state.ndtDisplacementGroups[key] || []).filter(g => g.id !== groupId);
+        // 묘비를 남기지 않으면 병합 때 서버에 남아있던 구역이 그대로 되살아난다
+        trackNdtDeletion(key, groupId);
         if (window._activeNdtDispGroupId === groupId) setActiveNdtDispGroup(null);
         saveStateToLocalStorage();
         drawNdtCanvas();
@@ -45788,11 +45792,15 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         window.state.ndtData = ndtMerge.ndtData;
         window.state.deletedNdtIds = ndtMerge.deletedNdtIds;
         window.state.deletedNdtAt = ndtMerge.deletedNdtAt || {};
+        // 삭제 목록을 빈 객체로 넘기면 지운 측정 구역이 서버본으로 되살아난다.
+        // 구역 묘비는 NDT 핀과 같은 deletedNdtIds를 쓴다(id 접두가 달라 서로 안 겹침).
         const dispMerge = mergeNdtDataMaps(
             { [floorKey]: ndt.displacementGroups || [] },
             window.state.ndtDisplacementGroups || {},
-            {},
-            {}
+            { [floorKey]: ndt.deletedIds || [] },
+            window.state.deletedNdtIds || {},
+            { [floorKey]: ndt.deletedAt || {} },
+            window.state.deletedNdtAt || {}
         );
         window.state.ndtDisplacementGroups = dispMerge.ndtData;
     }
