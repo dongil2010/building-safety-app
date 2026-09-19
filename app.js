@@ -422,7 +422,7 @@ document.addEventListener('DOMContentLoaded', () => {
         _lastSyncedUserDefectPinJson = json;
     }
 
-    async function loadAndApplyUserDefectPinPresets(uid) {
+    async function loadAndApplyUserDefectPinPresets(uid, userDocData) {
         if (!uid) return;
         let localWrap = null;
         try {
@@ -432,18 +432,21 @@ document.addEventListener('DOMContentLoaded', () => {
 
         let cloudPresets = null;
         let cloudUpdatedAt = 0;
-        if (db && navigator.onLine !== false) {
+        const applyFromUserData = (d) => {
+            if (!d || typeof d !== 'object') return;
+            if (d.defectPinPresets && typeof d.defectPinPresets === 'object') {
+                cloudPresets = d.defectPinPresets;
+            }
+            const ts = d.defectPinPresetsUpdatedAt;
+            if (ts && typeof ts.toMillis === 'function') cloudUpdatedAt = ts.toMillis();
+            else if (typeof ts === 'number') cloudUpdatedAt = ts;
+        };
+        if (userDocData && typeof userDocData === 'object') {
+            applyFromUserData(userDocData);
+        } else if (db && navigator.onLine !== false) {
             try {
                 const snap = await db.collection('users').doc(uid).get();
-                if (snap.exists) {
-                    const d = snap.data() || {};
-                    if (d.defectPinPresets && typeof d.defectPinPresets === 'object') {
-                        cloudPresets = d.defectPinPresets;
-                    }
-                    const ts = d.defectPinPresetsUpdatedAt;
-                    if (ts && typeof ts.toMillis === 'function') cloudUpdatedAt = ts.toMillis();
-                    else if (typeof ts === 'number') cloudUpdatedAt = ts;
-                }
+                if (snap.exists) applyFromUserData(snap.data() || {});
             } catch (e) {
                 console.warn('계정 결함 핀 설정 조회 실패:', e);
             }
@@ -6187,7 +6190,8 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         if (db && window.state.companyId) {
             try {
-                const snap = await db.collection('safety_app').doc(getCompanyDocId()).collection('photos').doc(pid).get();
+                const snap = await fetchPhotosDocIfAllowed(pid);
+                if (!snap) return null;
                 const url = await photoUrlFromCloudSnap(snap, pid);
                 if (url) {
                     if (!window._photoCache) window._photoCache = {};
@@ -19289,6 +19293,51 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     // IDB·캐시 둘 다 아직 없어서(클라우드 재조회 없이) 사진이 "안 찍은 것처럼" 빠진 채로 나갔다
     // (사용자가 실제로 겪음).
     const _nonExistentPhotoIds = new Set();
+
+    async function acquirePhotoFetchSlot() {
+        if (typeof isFirestoreReadPaused === 'function' && isFirestoreReadPaused()) return false;
+        const maxConc = (typeof PHOTO_FETCH_MAX_CONCURRENT === 'number') ? PHOTO_FETCH_MAX_CONCURRENT : 4;
+        while (typeof _photoFetchInflight === 'number' && _photoFetchInflight >= maxConc) {
+            await new Promise((r) => setTimeout(r, 40));
+            if (typeof isFirestoreReadPaused === 'function' && isFirestoreReadPaused()) return false;
+        }
+        if (typeof _photoFetchInflight === 'number') _photoFetchInflight += 1;
+        return true;
+    }
+    function releasePhotoFetchSlot() {
+        if (typeof _photoFetchInflight === 'number' && _photoFetchInflight > 0) _photoFetchInflight -= 1;
+    }
+    async function fetchPhotosDocIfAllowed(pid) {
+        if (!pid || !db || !window.state.companyId) return null;
+        if (typeof isFirestoreReadPaused === 'function' && isFirestoreReadPaused()) return null;
+        const ok = await acquirePhotoFetchSlot();
+        if (!ok) return null;
+        try {
+            return await db.collection('safety_app').doc(getCompanyDocId()).collection('photos').doc(pid).get();
+        } catch (e) {
+            if (typeof isFirestoreQuotaError === 'function' && isFirestoreQuotaError(e)
+                && typeof pauseFirestoreReads === 'function') {
+                pauseFirestoreReads(typeof SYNC_QUOTA_COOLDOWN_MS === 'number' ? SYNC_QUOTA_COOLDOWN_MS : 120000);
+            }
+            throw e;
+        } finally {
+            releasePhotoFetchSlot();
+        }
+    }
+    async function loadPhotoIdsWithCloudCap(ids) {
+        const list = Array.isArray(ids) ? ids : [];
+        if (!list.length) return [];
+        const cap = (typeof PHOTO_FETCH_MAX_PER_HYDRATE === 'number') ? PHOTO_FETCH_MAX_PER_HYDRATE : 24;
+        const out = new Array(list.length).fill(null);
+        for (let start = 0; start < list.length; start += cap) {
+            if (typeof isFirestoreReadPaused === 'function' && isFirestoreReadPaused()) break;
+            const slice = list.slice(start, start + cap);
+            const filled = await Promise.all(slice.map(loadPhotoByIdWithCloudFallback));
+            filled.forEach((url, j) => { out[start + j] = url; });
+        }
+        return out;
+    }
+
     async function loadPhotoByIdWithCloudFallback(pid) {
         if (!pid) return null;
         if (_nonExistentPhotoIds.has(pid)) return null;
@@ -19302,10 +19351,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             return fromIdb;
         }
         if (!db || !window.state.companyId) return null;
-        // isFirestoreReadPaused / pauseFirestoreReads는 아래에서 function으로 선언되어 호이스팅됨
-        if (typeof isFirestoreReadPaused === 'function' && isFirestoreReadPaused()) return null;
         try {
-            const snap = await db.collection('safety_app').doc(getCompanyDocId()).collection('photos').doc(pid).get();
+            const snap = await fetchPhotosDocIfAllowed(pid);
+            if (!snap) return null;
             if (!snap.exists) {
                 _nonExistentPhotoIds.add(pid);
                 return null;
@@ -19331,16 +19379,14 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     async function ensureDefectPhotosLoaded(d) {
         if (!d) return;
         seedPhotoCacheFromDefect(d);
-        // hydrateDefectPhotos가 photoIds만 있고 소스가 없을 때 [null,…]을 넣을 수 있음.
-        // length>0만 보면 클라우드 폴백이 영구히 스킵되어 사진이 안 보인다.
         const curVisible = Array.isArray(d.photos) && d.photos.some(Boolean);
         if (!curVisible && d.photoIds && d.photoIds.length > 0) {
-            const filled = await Promise.all(d.photoIds.map(loadPhotoByIdWithCloudFallback));
+            const filled = await loadPhotoIdsWithCloudCap(d.photoIds);
             if (filled.some(Boolean)) d.photos = filled;
         }
         const prevVisible = Array.isArray(d.prevRoundPhotos) && d.prevRoundPhotos.some(Boolean);
         if (!prevVisible && d.prevRoundPhotoIds && d.prevRoundPhotoIds.length > 0) {
-            const filled = await Promise.all(d.prevRoundPhotoIds.map(loadPhotoByIdWithCloudFallback));
+            const filled = await loadPhotoIdsWithCloudCap(d.prevRoundPhotoIds);
             if (filled.some(Boolean)) d.prevRoundPhotos = filled;
         }
     }
@@ -19353,7 +19399,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (!db || !window.state.companyId || !pid) return false;
         if (_nonExistentPhotoIds.has(pid)) return false;
         try {
-            const snap = await db.collection('safety_app').doc(getCompanyDocId()).collection('photos').doc(pid).get();
+            const snap = await fetchPhotosDocIfAllowed(pid);
+            if (!snap) return false;
             const exists = !!(snap.exists && snap.data() && (
                 hasFirebaseStorageMeta(snap.data())
                 || snap.data().dataUrl
@@ -29468,10 +29515,11 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         };
     }
 
-    // --- 📱 휴대폰 카메라 연동 (QR 한 번만 스캔 → 로그인 없이 촬영 → 작업 세션 내내 계속 연동) ---
-    // 결함 등록화면이 열려있으면 사진이 바로 그 결함에 추가되고, 닫혀있으면 대기함(_phoneRelayInbox)에
-    // 쌓였다가 다음에 여는 결함 등록화면에 자동으로 붙는다. 결함마다 QR을 다시 찍을 필요 없음.
+    // --- 📱 휴대폰 카메라 연동 (QR 스캔 → 로그인 없이 촬영)
+    // QR 창을 닫거나 30분이 지나면 구독을 끊어 읽기를 막는다. 다시 받으려면 QR을 연다.
     let phoneRelayUnsubscribe = null;
+    let phoneRelayTimeout = null;
+    const PHONE_RELAY_MAX_MS = 30 * 60 * 1000;
     window._phoneRelayInbox = window._phoneRelayInbox || [];
 
     function isDefectModalOpen() {
@@ -29548,21 +29596,38 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         updatePhoneRelayButtonLabel();
     }
 
+    function stopPhoneRelayListener(opts) {
+        if (phoneRelayTimeout) {
+            clearTimeout(phoneRelayTimeout);
+            phoneRelayTimeout = null;
+        }
+        if (phoneRelayUnsubscribe) {
+            try { phoneRelayUnsubscribe(); } catch (_e) { /* ignore */ }
+            phoneRelayUnsubscribe = null;
+        }
+        updatePhoneRelayButtonLabel();
+        if (opts && opts.toast && typeof window.showToast === 'function') {
+            window.showToast(opts.toast, 'info');
+        }
+    }
+
     function hidePhoneRelayModal() {
         if (elements.mobileQrModal) {
             elements.mobileQrModal.style.display = 'none';
             elements.mobileQrModal.classList.remove('open');
         }
+        stopPhoneRelayListener();
     }
 
     function disconnectPhoneRelay() {
-        if (phoneRelayUnsubscribe) { phoneRelayUnsubscribe(); phoneRelayUnsubscribe = null; }
+        stopPhoneRelayListener();
         window._phoneRelayInbox = [];
         updatePhoneRelayButtonLabel();
         window.showToast('휴대폰 연동이 해제되었습니다.', 'info');
     }
 
     function startPhoneRelaySession() {
+        stopPhoneRelayListener();
         const sessionId = `rel_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
         const captureUrl = new URL('photo-capture.html', window.location.href);
         captureUrl.searchParams.set('s', sessionId);
@@ -29574,7 +29639,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             new QRCode(qrContainer, { text: captureUrl.href, width: 200, height: 200 });
         }
         if (statusEl) {
-            statusEl.textContent = '휴대폰으로 QR을 스캔해 주세요. 한 번 연결하면 계속 유지됩니다.';
+            statusEl.textContent = '휴대폰으로 QR을 스캔해 주세요. 창을 닫으면 수신이 멈춥니다.';
             statusEl.style.color = '';
         }
 
@@ -29586,7 +29651,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                         if (data && data.dataUrl) {
                             receivePhoneRelayPhoto(data.dataUrl);
                             if (statusEl) {
-                                statusEl.textContent = '휴대폰과 연결되어 있습니다. 계속 촬영하셔도 됩니다.';
+                                statusEl.textContent = '휴대폰과 연결되어 있습니다. 창을 닫으면 수신이 멈춥니다.';
                                 statusEl.style.color = '#4ade80';
                             }
                         }
@@ -29595,6 +29660,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             }, (err) => {
                 console.error('휴대폰 연동 사진 수신 오류:', err);
             });
+        phoneRelayTimeout = setTimeout(() => {
+            stopPhoneRelayListener({ toast: '휴대폰 연동을 30분 후 자동 해제했습니다. 다시 받으려면 QR을 열어 주세요.' });
+        }, PHONE_RELAY_MAX_MS);
 
         updatePhoneRelayButtonLabel();
     }
@@ -43542,7 +43610,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 isRemoteSyncing = false;
                 if (_syncPending) {
                     _syncPending = false;
-                    if (typeof syncStateToFirebase === 'function') syncStateToFirebase();
+                    if (typeof scheduleSyncToFirebase === 'function') {
+                        scheduleSyncToFirebase({ skipMarkCurrent: true });
+                    }
                 } else if (typeof scheduleFlushPendingRemoteSync === 'function') {
                     scheduleFlushPendingRemoteSync();
                 }
@@ -43649,6 +43719,41 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (typeof initMobileBackButton === 'function') initMobileBackButton();
     })();
 
+    function startSingleTabHeartbeat() {
+        if (window._bsaSingleTabHeartbeatStarted) return;
+        window._bsaSingleTabHeartbeatStarted = true;
+        const KEY = 'bsa_live_tab_beats';
+        const tabId = `t_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+        const beat = () => {
+            try {
+                const now = Date.now();
+                const prev = JSON.parse(localStorage.getItem(KEY) || '{}');
+                let otherLive = 0;
+                Object.keys(prev).forEach((id) => {
+                    if (now - Number(prev[id] || 0) > 12000) delete prev[id];
+                    else if (id !== tabId) otherLive += 1;
+                });
+                prev[tabId] = now;
+                localStorage.setItem(KEY, JSON.stringify(prev));
+                if (otherLive > 0 && !window._bsaMultiTabWarned) {
+                    window._bsaMultiTabWarned = true;
+                    if (typeof window.showToast === 'function') {
+                        window.showToast('같은 앱이 다른 탭에서도 열려 있습니다. 읽기 할당량을 아끼려면 탭을 하나만 남겨 주세요.', 'warning', 8000);
+                    }
+                }
+            } catch (_e) { /* ignore */ }
+        };
+        beat();
+        setInterval(beat, 4000);
+        window.addEventListener('beforeunload', () => {
+            try {
+                const prev = JSON.parse(localStorage.getItem(KEY) || '{}');
+                delete prev[tabId];
+                localStorage.setItem(KEY, JSON.stringify(prev));
+            } catch (_e) { /* ignore */ }
+        });
+    }
+
     function initFirebaseSync() {
         try {
             if (typeof firebase !== 'undefined') {
@@ -43658,11 +43763,16 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 db = firebase.firestore();
                 if (typeof db.enablePersistence === 'function') {
                     db.enablePersistence({ synchronizeTabs: true }).catch((err) => {
-                        if (err && err.code !== 'failed-precondition' && err.code !== 'unimplemented') {
+                        if (err && err.code === 'failed-precondition') {
+                            if (typeof window.showToast === 'function') {
+                                window.showToast('다른 탭에서 이미 앱이 열려 있습니다. Firestore 읽기가 탭마다 나가니 하나만 남겨 주세요.', 'warning', 8000);
+                            }
+                        } else if (err && err.code !== 'unimplemented') {
                             console.warn('Firestore 오프라인 지속성 경고:', err);
                         }
                     });
                 }
+                startSingleTabHeartbeat();
                 if (firebase.auth) {
                     auth = firebase.auth();
                     auth.onAuthStateChanged(handleAuthStateChange);
@@ -43751,8 +43861,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         } catch (_) { /* ignore */ }
         if (db && window.state.companyId) {
             try {
-                const snap = await db.collection('safety_app').doc(getCompanyDocId())
-                    .collection('photos').doc(key).get();
+                const snap = await fetchPhotosDocIfAllowed(key);
+                if (!snap) return null;
                 const url = await photoUrlFromCloudSnap(snap, key);
                 if (typeof url === 'string' && url.length > 32) {
                     if (!window._photoCache) window._photoCache = {};
@@ -43793,8 +43903,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         } catch (_) { /* ignore */ }
         if (db && window.state.companyId) {
             try {
-                const snap = await db.collection('safety_app').doc(getCompanyDocId())
-                    .collection('photos').doc(key).get();
+                const snap = await fetchPhotosDocIfAllowed(key);
+                if (!snap) return null;
                 const url = await photoUrlFromCloudSnap(snap, key);
                 if (typeof url === 'string' && url.length > 32) {
                     if (!window._photoCache) window._photoCache = {};
@@ -44408,7 +44518,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const companyPhotos = getCompanyPhotosCollection();
         if (!companyPhotos) return false;
         try {
-            const snap = await companyPhotos.doc(photoId).get();
+            const snap = await fetchPhotosDocIfAllowed(photoId);
+            if (!snap) return false;
             if (!snap.exists) return false;
             const data = snap.data() || {};
             if (hasFirebaseStorageMeta(data)) {
@@ -46952,14 +47063,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     const photos = await Promise.all(localResolved.map(async (row) => {
                         if (row.url) return row.url;
                         if (!cloudPidSet.has(row.pid) || !companyPhotos) return null;
-                        if (isFirestoreReadPaused()) return null;
-                        while (_photoFetchInflight >= PHOTO_FETCH_MAX_CONCURRENT) {
-                            await new Promise((r) => setTimeout(r, 40));
-                            if (isFirestoreReadPaused()) return null;
-                        }
-                        _photoFetchInflight += 1;
                         try {
-                            const snap = await companyPhotos.doc(row.pid).get();
+                            const snap = await fetchPhotosDocIfAllowed(row.pid);
+                            if (!snap) return null;
                             if (!snap.exists) {
                                 _nonExistentPhotoIds.add(row.pid);
                                 return null;
@@ -46977,8 +47083,6 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                                 pauseFirestoreReads(SYNC_QUOTA_COOLDOWN_MS);
                             }
                             return null;
-                        } finally {
-                            _photoFetchInflight -= 1;
                         }
                     }));
                     // photoIds와 같은 길이·순서를 유지한다(빈 칸은 null). filter하면 인덱스가 밀린다.
@@ -47121,7 +47225,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             return;
         }
         if (_syncDebounceTimer) clearTimeout(_syncDebounceTimer);
-        const debounceMs = window.BSA?.performance?.getSyncDebounceMs?.() ?? 400;
+        const debounceMs = window.BSA?.performance?.getSyncDebounceMs?.() ?? 3000;
         _syncDebounceTimer = setTimeout(() => {
             _syncDebounceTimer = null;
             syncStateToFirebase();
@@ -47899,7 +48003,12 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 if (typeof _fsWritePausedUntil === 'number' && Date.now() < _fsWritePausedUntil) {
                     scheduleSyncRetryAfterError({ code: 'resource-exhausted', message: 'Write stream cooling down' });
                 } else {
-                    syncStateToFirebase();
+                    // isRemoteSyncing이 400ms 뒤에 풀리므로, 즉시 재호출하지 않고 디바운스로 이어간다.
+                    setTimeout(() => {
+                        if (typeof scheduleSyncToFirebase === 'function') {
+                            scheduleSyncToFirebase({ skipMarkCurrent: true });
+                        }
+                    }, 450);
                 }
             } else if (!_syncPending && !_syncRetryTimer && typeof scheduleFlushPendingRemoteSync === 'function') {
                 scheduleFlushPendingRemoteSync();
@@ -47932,6 +48041,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             currentBulkUnsubscribe = null;
         }
         stopFloorRealtimeListeners();
+        if (typeof stopPhoneRelayListener === 'function') stopPhoneRelayListener();
         _listeningCompanyId = null;
         if (opts && opts.clearCache) {
             _lastRootSnapshotData = {};
@@ -48427,7 +48537,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
         await switchCompanyLocalDataContext(profile.companyId, profile.uid);
         if (typeof loadAndApplyUserDefectPinPresets === 'function') {
-            await loadAndApplyUserDefectPinPresets(profile.uid);
+            await loadAndApplyUserDefectPinPresets(profile.uid, profile.userDocData);
         }
         if (typeof listenToRealtimeUpdates === 'function') listenToRealtimeUpdates();
         if (typeof pullCompanySnapshotOnce === 'function') {
@@ -48512,7 +48622,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     name: data.name,
                     companyId: companyId || activeCompanyId,
                     companyName: data.companyName,
-                    role: status
+                    role: status,
+                    userDocData: data
                 });
             } else {
                 window.state.uid = user.uid;
@@ -48654,7 +48765,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             await db.collection('users').doc(uid).set({
                 name, email, companyId: companyRef.id, companyName, role: 'admin'
             });
-            await enterAppAsUser({ uid, name, companyId: companyRef.id, companyName, role: 'admin' });
+            await enterAppAsUser({
+                uid, name, companyId: companyRef.id, companyName, role: 'admin',
+                userDocData: { name, email, companyId: companyRef.id, companyName, role: 'admin' }
+            });
         } catch (err) {
             showAuthError(err);
             if (cred && cred.user) { try { await cred.user.delete(); } catch (e) {} }
@@ -48981,7 +49095,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const companyRef = db.collection('companies').doc(window.state.companyId);
 
         try {
-            const pendingSnap = await companyRef.collection('pendingRequests').orderBy('requestedAt', 'desc').get();
+            const pendingSnap = await companyRef.collection('pendingRequests').orderBy('requestedAt', 'desc').limit(50).get();
             if (pendingBox) {
                 if (pendingSnap.empty) {
                     pendingBox.innerHTML = '<div style="font-size:0.82rem; color:#a3a3a3; padding:0.6rem; text-align:center; border:1px dashed #cbd5e1; border-radius:6px;">대기중인 신청이 없습니다.</div>';
@@ -48997,6 +49111,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                                 </div>
                             </div>`;
                     }).join('');
+                    if (pendingSnap.size >= 50) {
+                        pendingBox.innerHTML += '<div style="font-size:0.75rem; color:#94a3b8; text-align:center; padding:0.35rem;">대기 신청은 최근 50건까지 표시합니다.</div>';
+                    }
                 }
             }
         } catch (e) {
@@ -49005,7 +49122,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         }
 
         try {
-            const membersSnap = await companyRef.collection('members').get();
+            const membersSnap = await companyRef.collection('members').limit(100).get();
             if (membersBox) {
                 const myUid = window.state.uid;
                 membersBox.innerHTML = membersSnap.docs.map(docSnap => {
@@ -49025,6 +49142,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                             </div>
                         </div>`;
                 }).join('');
+                if (membersSnap.size >= 100) {
+                    membersBox.innerHTML += '<div style="font-size:0.75rem; color:#94a3b8; text-align:center; padding:0.35rem;">멤버는 100명까지 표시합니다.</div>';
+                }
             }
         } catch (e) {
             console.error('멤버 목록 로드 오류:', e);

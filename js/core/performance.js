@@ -90,7 +90,8 @@
     }
 
     function getSyncDebounceMs() {
-        return isLowEnd() ? 900 : 400;
+        // 필드 입력 간격(1~3초)보다 짧으면 저장마다 동기화가 나간다.
+        return isLowEnd() ? 5000 : 3000;
     }
 
     function getFloorSnapshotDelayMs() {
