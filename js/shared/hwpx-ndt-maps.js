@@ -52,7 +52,7 @@
             } else if (category === '변위') {
                 if (it.category && it.category !== '변위') return;
             } else if (it.category && it.category !== category) return;
-            const c = it._ndtFloorCode;
+            const c = it._ndtFloorCode || it.floorCode;
             if (c && codes.indexOf(c) < 0) codes.push(c);
         });
         return codes;

@@ -154,6 +154,37 @@ function testNdtOnlyFloorKeysAreIncluded() {
     assert.ok(codes.includes('캣워크층'));
 }
 
+function testMeasure5FPayloadIsListedEvenIfFloorsListIs1F() {
+    const bldg = {
+        id: 'mustard',
+        floorsList: [{ floorCode: '1F', floorLabel: '지상 1층 (1F)' }]
+    };
+    const codes = api.listFloorCodesForNdtReport(bldg, [
+        {
+            mustard_1F: [{ category: '실측' }],
+            mustard_5F: [{ category: '실측' }]
+        }
+    ]);
+    assert.ok(codes.includes('1F'));
+    assert.ok(codes.includes('5F'));
+    const payload = api.listNdtPayloadFloorCodes('mustard', [
+        {
+            mustard_1F: [{ category: '실측' }],
+            mustard_5F: [{ category: '실측' }],
+            mustard_empty: []
+        }
+    ]);
+    assert.ok(payload.includes('5F'));
+    assert.ok(!payload.includes('empty'));
+}
+
+function testKeepNdtFloorDespiteDeletedDrawing() {
+    assert.strictEqual(api.keepNdtFloorCode('5F', true, true), true);
+    assert.strictEqual(api.keepNdtFloorCode('5F', true, false), false);
+    assert.strictEqual(api.keepNdtFloorCode('5F', false, false), true);
+    assert.strictEqual(api.keepNdtFloorCode('', true, true), false);
+}
+
 testParkingIsNotBasement();
 testCustomLabelNotRewritten();
 testUserOrderPreserved();
@@ -167,4 +198,6 @@ testAssignParsedFloorForUpload();
 testExtraDrawingsDoNotCollapseTo1F();
 testCatwalkIsIncludedWhenMissingFromFloorsList();
 testNdtOnlyFloorKeysAreIncluded();
+testMeasure5FPayloadIsListedEvenIfFloorsListIs1F();
+testKeepNdtFloorDespiteDeletedDrawing();
 console.log('test-floor-identity: ok');

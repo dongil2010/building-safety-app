@@ -186,6 +186,40 @@
         return codes;
     }
 
+    function mapEntryHasNdtPayload(val) {
+        if (Array.isArray(val)) return val.length > 0;
+        return !!val;
+    }
+
+    /**
+     * ndtData/변위/ndtImages에 실제로 내용이 있는 층만.
+     * 빈 배열 키는 빼고, 도면 톰스톤과 무관하게 보고서 합본에 넣어야 하는 잔여 키를 찾는다.
+     */
+    function listNdtPayloadFloorCodes(buildingId, extraKeyMaps) {
+        const prefix = buildingId ? String(buildingId) + '_' : '';
+        const out = [];
+        const seen = {};
+        if (!prefix) return out;
+        (extraKeyMaps || []).forEach(function (map) {
+            Object.keys(map || {}).forEach(function (k) {
+                if (String(k).indexOf(prefix) !== 0) return;
+                const c = String(k).slice(prefix.length);
+                if (!c || seen[c]) return;
+                if (!mapEntryHasNdtPayload(map[k])) return;
+                seen[c] = true;
+                out.push(c);
+            });
+        });
+        return out;
+    }
+
+    /** 도면을 지워도 그 층 비파괴 데이터가 있으면 보고서에서 빼지 않는다. */
+    function keepNdtFloorCode(code, isDeletedDrawing, hasNdtPayload) {
+        if (!code) return false;
+        if (hasNdtPayload) return true;
+        return !isDeletedDrawing;
+    }
+
     /**
      * preferred(사용자가 저장한 floorsList) 순서를 최우선.
      * 목록에 없는 새 표준 층만 뒤에 저층→고층으로 붙인다.
@@ -364,6 +398,8 @@
         sortFloorsLowToHigh: sortFloorsLowToHigh,
         assembleFloors: assembleFloors,
         listFloorCodesForNdtReport: listFloorCodesForNdtReport,
+        listNdtPayloadFloorCodes: listNdtPayloadFloorCodes,
+        keepNdtFloorCode: keepNdtFloorCode,
         stemFromFilename: stemFromFilename,
         parseCustomStemFromFilename: parseCustomStemFromFilename,
         unmatchedFloorFromFilename: unmatchedFloorFromFilename,

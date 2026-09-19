@@ -10206,17 +10206,34 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         return state.ndtData[key];
     }
 
+    function floorHasNdtPayload(buildingId, floorCode) {
+        if (!buildingId || !floorCode) return false;
+        const key = `${buildingId}_${floorCode}`;
+        if (state.ndtData && Array.isArray(state.ndtData[key]) && state.ndtData[key].length) return true;
+        if (state.ndtDisplacementGroups && Array.isArray(state.ndtDisplacementGroups[key]) && state.ndtDisplacementGroups[key].length) return true;
+        if (state.ndtImages && state.ndtImages[key]) return true;
+        return false;
+    }
+
     // 점검층 드롭다운(getBuildingAvailableFloors)과 같이, floorsList에 없는 추가 도면 층
     // (캣워크 등)과 ndtData/변위 맵에만 있는 층도 포함한다. floorsList만 보면 지상1층만 나온다.
+    // 도면을 지운 층이어도 부재실측 등 비파괴 데이터가 있으면 보고서에서 빼지 않는다.
     function listNdtFloorCodesForBuilding(buildingId) {
         const bldg = (state.buildings || []).find((b) => b && b.id === buildingId) || null;
         const seen = new Set();
         const out = [];
+        const fi = window.BSA && window.BSA.floorIdentity;
+        const extraMaps = [state.ndtData, state.ndtDisplacementGroups, state.ndtImages];
         const add = (fc) => {
             if (!fc) return;
             const code = String(fc);
             if (seen.has(code)) return;
-            if (bldg && typeof isDeletedDrawingFloor === 'function' && isDeletedDrawingFloor(bldg, code)) return;
+            const deleted = !!(bldg && typeof isDeletedDrawingFloor === 'function' && isDeletedDrawingFloor(bldg, code));
+            const hasNdt = floorHasNdtPayload(buildingId, code);
+            const keep = (fi && typeof fi.keepNdtFloorCode === 'function')
+                ? fi.keepNdtFloorCode(code, deleted, hasNdt)
+                : (hasNdt || !deleted);
+            if (!keep) return;
             seen.add(code);
             out.push(code);
         };
@@ -10225,8 +10242,6 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         } else if (bldg && Array.isArray(bldg.floorsList)) {
             bldg.floorsList.forEach((f) => add(f && f.floorCode));
         }
-        const fi = window.BSA && window.BSA.floorIdentity;
-        const extraMaps = [state.ndtData, state.ndtDisplacementGroups, state.ndtImages];
         if (fi && typeof fi.listFloorCodesForNdtReport === 'function') {
             fi.listFloorCodesForNdtReport(bldg || { id: buildingId }, extraMaps).forEach(add);
         } else {
@@ -10236,6 +10251,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     if (k.startsWith(prefix)) add(k.slice(prefix.length));
                 });
             });
+        }
+        if (fi && typeof fi.listNdtPayloadFloorCodes === 'function') {
+            fi.listNdtPayloadFloorCodes(buildingId, extraMaps).forEach(add);
         }
         return out;
     }
@@ -32594,6 +32612,17 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         return pages;
     }
 
+    const NDT_MEASURE_ROWS_PER_PAGE = 18;
+
+    function paginateNdtReportItems(list, perPage) {
+        const n = Math.max(1, perPage || NDT_MEASURE_ROWS_PER_PAGE);
+        const src = Array.isArray(list) ? list : [];
+        if (!src.length) return [[]];
+        const pages = [];
+        for (let i = 0; i < src.length; i += n) pages.push(src.slice(i, i + n));
+        return pages;
+    }
+
     function formatSurveyReportNo(d, isGrade3, floorCode) {
         let raw = String(d.no || '').replace(/^NO\.?\s*/i, '').trim();
         if (!d.surveyExtra && !d._groupHasSurveyExtras) {
@@ -34135,18 +34164,35 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         return null;
     }
 
-    /** 비파괴 위치도: 해당 층 도면만. 1F 폴백을 쓰면 캣워크가 지상1층 도면으로 나간다. */
+    /** 비파괴 위치도: 해당 층 도면만. 1F 폴백을 쓰면 캣워크가 지상1층 도면으로 나간다.
+     *  floorDrawings https는 CORS로 캔버스에 바로 못 쓰지만, 티어 data URL·클라우드 재질화
+     *  (async)가 지상5층처럼 현재 층이 아닌 위치도를 살린다. */
     function getNdtFloorDrawingSrc(bldg, floorCode) {
         const currentBldgId = (bldg && bldg.id) || (state && state.currentBuildingId);
         const key = (currentBldgId && floorCode) ? `${currentBldgId}_${floorCode}` : '';
         if (key && state.ndtImages && state.ndtImages[key]) return state.ndtImages[key];
-        const exact = bldg && bldg.floorDrawings && bldg.floorDrawings[floorCode];
-        if (exact) {
+        const takeRaster = (url) => {
+            if (!url) return null;
             if (typeof isUsableRasterDrawingUrl === 'function') {
-                if (isUsableRasterDrawingUrl(exact)) return exact;
-            } else {
-                return exact;
+                if (isUsableRasterDrawingUrl(url)) return url;
+                if (typeof isRasterDrawingUrl === 'function' && isRasterDrawingUrl(url)
+                    && /^https?:\/\//i.test(url)) {
+                    return url;
+                }
+                return null;
             }
+            return url;
+        };
+        const exact = takeRaster(bldg && bldg.floorDrawings && bldg.floorDrawings[floorCode]);
+        if (exact) return exact;
+        const tiers = bldg && bldg.floorDrawingTiers && bldg.floorDrawingTiers[floorCode];
+        if (typeof pickFirstTierUrl === 'function') {
+            const tierUrl = takeRaster(pickFirstTierUrl(tiers, ['4000', '2000', '8000', '16000']));
+            if (tierUrl) return tierUrl;
+        } else if (tiers && typeof tiers === 'object') {
+            const vals = Object.values(tiers).filter(Boolean);
+            const tierUrl = takeRaster(vals.length ? vals[0] : null);
+            if (tierUrl) return tierUrl;
         }
         if (state.currentFloor === floorCode && state.ndtBgImage && state.ndtBgImage.src) {
             return state.ndtBgImage.src;
@@ -34189,9 +34235,12 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             return new Promise((resolve) => {
                 const cacheKey = `${bldg.id}_${floorCode}`;
                 const exact = bldg.floorDrawings && bldg.floorDrawings[floorCode];
-                const src = (typeof isUsableRasterDrawingUrl === 'function' && isUsableRasterDrawingUrl(exact))
-                    ? exact
+                const tierUrl = (typeof pickFirstTierUrl === 'function')
+                    ? pickFirstTierUrl(bldg.floorDrawingTiers && bldg.floorDrawingTiers[floorCode], ['4000', '2000', '8000', '16000'])
                     : null;
+                const src = (typeof isUsableRasterDrawingUrl === 'function')
+                    ? ([exact, tierUrl].find((u) => isUsableRasterDrawingUrl(u)) || null)
+                    : (exact || tierUrl || null);
                 if (!src) {
                     if (state.floorImageCache[cacheKey]) delete state.floorImageCache[cacheKey];
                     return resolve();
@@ -35347,7 +35396,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     // 위치도는 아래에서 그대로 층별로 계속 낸다.
                     if (!ndtTableEmitted.measure && measureNdtItemsCombined.length > 0) {
                     ndtTableEmitted.measure = true;
+                    const measurePages = paginateNdtReportItems(measureNdtItemsCombined, NDT_MEASURE_ROWS_PER_PAGE);
+                    measurePages.forEach((pageItems, pageIdx) => {
                     const curSecNo1 = sectionNo++;
+                    const pageNote = measurePages.length > 1 ? ` (${pageIdx + 1}/${measurePages.length})` : '';
                     reportPagesHtml += `
                         <div class="report-page-block" style="background:#ffffff; color:#0f172a; padding: 10mm 14mm 10mm 14mm; margin-bottom: 2rem; font-family: sans-serif; font-size:0.9rem; border-radius:4px; box-shadow: 0 4px 20px rgba(0,0,0,0.1); page-break-after: always; break-after: page; page-break-inside: avoid !important; break-inside: avoid !important; box-sizing: border-box; width: 210mm; height: 295mm; max-height: 295mm; overflow: hidden; display: flex; flex-direction: column; position: relative;">
                             <div style="text-align:center; border-bottom: 1px solid #cbd5e1; padding-bottom: 0.3rem; margin-bottom: 0.6rem;">
@@ -35355,7 +35407,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                             </div>
 
                             <h2 style="font-size:1.02rem; font-weight:800; color:#0f172a; border-left: 4px solid #2a2a2a; padding-left: 0.5rem; margin-bottom: 0.5rem;">
-                                ${curSecNo1}. 비파괴 장비 조사 (부재 실측) 결과표
+                                ${curSecNo1}. 비파괴 장비 조사 (부재 실측) 결과표${pageNote}
                             </h2>
 
                             <table style="width: 100%; border-collapse: collapse; font-size: 0.81rem; text-align: center; margin-bottom: 0.4rem;">
@@ -35372,7 +35424,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    ${measureNdtItemsCombined.length > 0 ? measureNdtItemsCombined.map(item => {
+                                    ${pageItems.length > 0 ? pageItems.map(item => {
                                         const designText = formatNdtMeasureDimText(item, 'design');
                                         const measuredText = formatNdtMeasureDimText(item, 'measured');
                                         const ratioText = (item.sectionRatio !== undefined && item.sectionRatio !== null) ? `${item.sectionRatio.toFixed(1)}%` : '-';
@@ -35400,10 +35452,11 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                             </div>
                         </div>
                     `;
+                    });
                     }
 
                     if (measureNdtItems.length > 0) {
-                    const measureDrawingUrl = renderNdtFloorPlanCanvasDataUrl(floorCode, '실측');
+                    const measureDrawingUrl = await renderNdtFloorPlanCanvasDataUrlAsync(floorCode, '실측');
                     const curSecNo2 = sectionNo++;
                     reportPagesHtml += `
                         <div class="report-page-block" style="background:#ffffff; color:#0f172a; padding: 10mm 14mm 10mm 14mm; margin-bottom: 2rem; font-family: sans-serif; font-size:0.9rem; border-radius:4px; box-shadow: 0 4px 20px rgba(0,0,0,0.1); page-break-after: always; break-after: page; page-break-inside: avoid !important; break-inside: avoid !important; box-sizing: border-box; width: 210mm; height: 295mm; max-height: 295mm; overflow: hidden; display: flex; flex-direction: column; position: relative;">
@@ -35489,7 +35542,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
                 // --- 4-3. 🔬 강도·탄산화 공통 측정 위치도 (표만 분리하고 위치도는 하나로 유지) ---
                 if (strengthNdtItems.length > 0 || carbNdtItems.length > 0) {
-                    const stdDrawingUrl = renderNdtFloorPlanCanvasDataUrl(floorCode, '일반비파괴');
+                    const stdDrawingUrl = await renderNdtFloorPlanCanvasDataUrlAsync(floorCode, '일반비파괴');
                     const curSecNo2 = sectionNo++;
                     reportPagesHtml += `
                         <div class="report-page-block" style="background:#ffffff; color:#0f172a; padding: 10mm 14mm 10mm 14mm; margin-bottom: 2rem; font-family: sans-serif; font-size:0.9rem; border-radius:4px; box-shadow: 0 4px 20px rgba(0,0,0,0.1); page-break-after: always; break-after: page; page-break-inside: avoid !important; break-inside: avoid !important; box-sizing: border-box; width: 210mm; height: 295mm; max-height: 295mm; overflow: hidden; display: flex; flex-direction: column; position: relative;">
@@ -35580,7 +35633,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     }
 
                     if (tiltNdtItems.length > 0) {
-                    const tiltDrawingUrl = renderNdtFloorPlanCanvasDataUrl(floorCode, '기울기');
+                    const tiltDrawingUrl = await renderNdtFloorPlanCanvasDataUrlAsync(floorCode, '기울기');
                     const curSecNo2 = sectionNo++;
                     reportPagesHtml += `
                         <div class="report-page-block" style="background:#ffffff; color:#0f172a; padding: 10mm 14mm 10mm 14mm; margin-bottom: 2rem; font-family: sans-serif; font-size:0.9rem; border-radius:4px; box-shadow: 0 4px 20px rgba(0,0,0,0.1); page-break-after: always; break-after: page; page-break-inside: avoid !important; break-inside: avoid !important; box-sizing: border-box; width: 210mm; height: 295mm; max-height: 295mm; overflow: hidden; display: flex; flex-direction: column; position: relative;">
@@ -35692,7 +35745,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     }
 
                     if (settlementGroups.length > 0) {
-                    const settlementDrawingUrl = renderNdtFloorPlanCanvasDataUrl(floorCode, '변위');
+                    const settlementDrawingUrl = await renderNdtFloorPlanCanvasDataUrlAsync(floorCode, '변위');
                     const curSecNo2 = sectionNo++;
                     reportPagesHtml += `
                         <div class="report-page-block" style="background:#ffffff; color:#0f172a; padding: 10mm 14mm 10mm 14mm; margin-bottom: 2rem; font-family: sans-serif; font-size:0.9rem; border-radius:4px; box-shadow: 0 4px 20px rgba(0,0,0,0.1); page-break-after: always; break-after: page; page-break-inside: avoid !important; break-inside: avoid !important; box-sizing: border-box; width: 210mm; height: 295mm; max-height: 295mm; overflow: hidden; display: flex; flex-direction: column; position: relative;">
@@ -35799,7 +35852,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     }
 
                     if (memberDispGroups.length > 0) {
-                    const memberDispDrawingUrl = renderNdtFloorPlanCanvasDataUrl(floorCode, '부재변위');
+                    const memberDispDrawingUrl = await renderNdtFloorPlanCanvasDataUrlAsync(floorCode, '부재변위');
                     const curSecNo2 = sectionNo++;
                     reportPagesHtml += `
                         <div class="report-page-block" style="background:#ffffff; color:#0f172a; padding: 10mm 14mm 10mm 14mm; margin-bottom: 2rem; font-family: sans-serif; font-size:0.9rem; border-radius:4px; box-shadow: 0 4px 20px rgba(0,0,0,0.1); page-break-after: always; break-after: page; page-break-inside: avoid !important; break-inside: avoid !important; box-sizing: border-box; width: 210mm; height: 295mm; max-height: 295mm; overflow: hidden; display: flex; flex-direction: column; position: relative;">

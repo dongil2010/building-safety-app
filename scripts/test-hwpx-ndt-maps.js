@@ -93,4 +93,29 @@ testUniqueFloors();
 testExpandCaptions718();
 testDropEmptyMemberDisp();
 testStrengthMapIncludesCatwalk();
+
+function testMeasureMapsInclude5F() {
+    const inserts = api.expandLocationMapInserts(
+        { measure: true },
+        [
+            { category: '실측', _ndtFloorCode: '1F', _ndtFloorLabel: '지상 1층' },
+            { category: '실측', _ndtFloorCode: '5F', _ndtFloorLabel: '지상 5층' }
+        ],
+        [],
+        '1F'
+    );
+    assert.deepStrictEqual(inserts.map((i) => i.floorCode), ['1F', '5F']);
+    assert.ok(inserts[1].manyFloors);
+    assert.ok(inserts[1].caption.indexOf('지상 5층') >= 0);
+}
+
+function testUniqueFloorsAcceptsFloorCodeFallback() {
+    const items = [
+        { category: '실측', floorCode: '5F' }
+    ];
+    assert.deepStrictEqual(api.uniqueFloorCodes(items, '실측'), ['5F']);
+}
+
+testMeasureMapsInclude5F();
+testUniqueFloorsAcceptsFloorCodeFallback();
 console.log('test-hwpx-ndt-maps: ok');
