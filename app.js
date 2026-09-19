@@ -45438,9 +45438,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             //  로컬 마킹을 덮을 수 있었음). 읽기 폭주 방지는 pickDirtyFloorsForSyncBatch.
         } catch (_e) { /* ignore */ }
     }
-    /** 한 번의 sync에서 올릴 층만 고른다. 나머지는 dirty에 남겨 원격 덮어쓰기를 계속 막는다. */
+    /** 한 번의 sync에서 올릴 층 수. 나머지는 dirty에 남겨 원격 덮어쓰기를 막고 다음 디바운스에서 이어서 올린다. */
+    const SYNC_DIRTY_FLOOR_BATCH_MAX = 3;
     function pickDirtyFloorsForSyncBatch(maxN) {
-        const MAX = Math.max(1, maxN || 8);
+        const MAX = Math.max(1, maxN || SYNC_DIRTY_FLOOR_BATCH_MAX);
         const keep = new Set();
         const curB = window.state && window.state.currentBuildingId;
         const curF = window.state && window.state.currentFloor;
@@ -45979,7 +45980,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             _dirtyFloorKeys.delete(floorKey);
             return;
         }
-        await writeChunkedPdfToDocRef(floorRef, JSON.stringify(pack));
+        await writeChunkedPdfToDocRef(floorRef, JSON.stringify(pack), {
+            syncLease: firebase.firestore.FieldValue.delete()
+        });
         _dirtyFloorKeys.delete(floorKey);
         persistDirtyFloorKeys();
     }
@@ -47584,6 +47587,23 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         return window.state.uid || (`anon_${getSyncLeaseDeviceId()}`);
     }
 
+    /**
+     * heartbeat가 회사 루트·층 묶음 문서를 고치면 구독 중인 모든 기기가 큰 문서를 다시 과금한다.
+     * 잠금은 작은 syncLeases/{id}에만 쓴다. id는 회사 전체면 company, 층이면 상대 경로.
+     */
+    function getSyncLeaseDocRef(scopeRef) {
+        if (!db || !window.state.companyId) return null;
+        const companyRef = db.collection('safety_app').doc(getCompanyDocId());
+        if (!scopeRef || scopeRef.path === companyRef.path) {
+            return companyRef.collection('syncLeases').doc('company');
+        }
+        const prefix = companyRef.path + '/';
+        let rel = String(scopeRef.path || '');
+        if (rel.indexOf(prefix) === 0) rel = rel.slice(prefix.length);
+        const id = String(rel || 'company').replace(/\//g, '__').slice(0, 700) || 'company';
+        return companyRef.collection('syncLeases').doc(id);
+    }
+
     function isSyncLeaseFresh(lease, now) {
         if (!lease || !lease.token) return false;
         const beat = Number(lease.heartbeatAt || lease.startedAt) || 0;
@@ -47601,6 +47621,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     }
 
     async function acquireCompanySyncLease(docRef) {
+        if (!docRef) return null;
         const ownerId = getSyncLeaseOwnerId();
         const token = `${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
         const deviceId = getSyncLeaseDeviceId();
@@ -47611,7 +47632,6 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             let acquired = false;
             let sawForeign = false;
             let holderName = '';
-            let acquiredServerData = null;
             try {
                 await db.runTransaction(async (tx) => {
                     const snap = await tx.get(docRef);
@@ -47634,10 +47654,6 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                         }
                     }, { merge: true });
                     acquired = true;
-                    // 잠금을 잡은 이 스냅샷을 그대로 재사용하면, 바로 이어서 같은 문서를
-                    // 또 읽는(fetchCompanyDocSnap) 중복 읽기 1회를 아낄 수 있다 — 잠금을
-                    // 잡은 순간부터는 다른 기기가 끼어들 수 없으므로 최신값이기도 하다.
-                    acquiredServerData = data;
                 });
             } catch (e) {
                 // 2026-09-04: 429(resource-exhausted, 할당량/속도 초과)까지 "일시적 네트워크 문제"로
@@ -47653,7 +47669,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 // 그 외 네트워크/경합 실패는 "다른 작업자 대기"가 아님 — 조용히 재시도
                 console.warn('동기화 잠금 획득 실패, 재시도:', e);
             }
-            if (acquired) return { ownerId, token, deviceId, serverData: acquiredServerData };
+            if (acquired) return { ownerId, token, deviceId };
 
             if (Date.now() >= waitDeadline) {
                 console.warn('동기화 잠금 대기 시간 초과 — 강제 획득');
@@ -47759,25 +47775,25 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const inspectFloorRef = (inspectBldg && inspectFloor && window.state.currentTab !== 'tab-home')
             ? getFloorScopeRef(inspectBldg, inspectFloor)
             : null;
-        const leaseRef = inspectFloorRef || docRef;
+        const leaseRef = getSyncLeaseDocRef(inspectFloorRef || docRef);
         try {
             // 드래그 중이면 잠금을 잡기 전에 먼저 기다림 (잠금을 오래 쥐고 있지 않게)
             await waitForUiGestureIdle();
 
             // 다른 작업자가 올리는 중이면 잠금이 풀릴 때까지 대기 → 완료본을 받은 뒤 동기화
             leaseInfo = await acquireCompanySyncLease(leaseRef);
-            leaseHeartbeatTimer = setInterval(() => {
-                heartbeatCompanySyncLease(leaseRef, leaseInfo);
-            }, SYNC_LEASE_HEARTBEAT_MS);
+            if (leaseInfo) {
+                leaseHeartbeatTimer = setInterval(() => {
+                    heartbeatCompanySyncLease(leaseRef, leaseInfo);
+                }, SYNC_LEASE_HEARTBEAT_MS);
+            }
 
             // 잠금 대기 중 사용자가 드래그를 시작했을 수 있음 — 상태 교체 전 다시 확인
             await waitForUiGestureIdle();
 
-            // 회사 루트(건물 목록)는 층 잠금 문서와 다르다. 층 lease.serverData를 회사 데이터로 쓰지 않는다.
+            // 잠금 문서는 더 이상 회사/층 페이로드가 아니다. 리스너 캐시 → 없으면 루트 get.
             let serverData;
-            if (!inspectFloorRef && leaseInfo && leaseInfo.serverData) {
-                serverData = Object.assign({}, leaseInfo.serverData);
-            } else if (_lastRootSnapshotData && Object.keys(_lastRootSnapshotData).length) {
+            if (_lastRootSnapshotData && Object.keys(_lastRootSnapshotData).length) {
                 serverData = Object.assign({}, _lastRootSnapshotData);
             } else {
                 const snap = await fetchCompanyDocSnap(docRef);
@@ -47805,15 +47821,15 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             window.state.confirmedDeletedIds = {};
 
             // 배치 상한: 한 번에 전 dirty를 읽지 않되, 미선택 층은 dirty에 남겨 원격 적용을 계속 차단
-            const floorsToSync = pickDirtyFloorsForSyncBatch(8);
+            const floorsToSync = pickDirtyFloorsForSyncBatch(SYNC_DIRTY_FLOOR_BATCH_MAX);
             const currentKey = currentInspectionFloorKey();
             if (currentKey) floorsToSync.add(currentKey);
             for (const floorKey of floorsToSync) {
                 const floorBldg = findBuildingForFloorKey(floorKey);
                 const code = floorCodeFromFloorKey(floorKey, floorBldg);
                 if (!floorBldg || !code) continue;
-                const preloaded = (inspectFloorRef && floorKey === currentKey && leaseInfo && leaseInfo.serverData)
-                    ? leaseInfo.serverData
+                const preloaded = (floorKey === currentKey && _lastFloorSnapData && Object.keys(_lastFloorSnapData).length)
+                    ? _lastFloorSnapData
                     : null;
                 const bundle = await readFloorSyncBundle(floorBldg, code, preloaded);
                 mergeFloorBundleIntoState(floorBldg, code, bundle);
@@ -47906,6 +47922,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 companyName: window.state.companyName || localStorage.getItem('building_company_name'),
                 updatedAt: firebase.firestore.FieldValue.serverTimestamp()
             };
+            if (serverData && serverData.syncLease) {
+                dataToSync.syncLease = firebase.firestore.FieldValue.delete();
+            }
             await docRef.set(dataToSync, { merge: true });
             clearSyncErrorRetryTimer();
             _syncRetryFailCount = 0;

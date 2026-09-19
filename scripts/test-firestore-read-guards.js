@@ -40,4 +40,12 @@ assert.match(app, /function startSingleTabHeartbeat/);
 assert.match(app, /window\._bsaSingleTabHeartbeatStarted/);
 assert.match(app, /failed-precondition/);
 
+assert.match(app, /const SYNC_DIRTY_FLOOR_BATCH_MAX = 3;/);
+assert.match(app, /pickDirtyFloorsForSyncBatch\(SYNC_DIRTY_FLOOR_BATCH_MAX\)/);
+assert.match(app, /function getSyncLeaseDocRef/);
+assert.match(app, /collection\('syncLeases'\)\.doc\(/);
+assert.match(app, /const leaseRef = getSyncLeaseDocRef\(inspectFloorRef \|\| docRef\);/);
+assert.doesNotMatch(app, /leaseInfo\.serverData/);
+assert.match(rules, /match \/syncLeases\/\{leaseId\} \{[\s\S]*allow read, write: if isCompanyMember\(companyId\);/);
+
 console.log('test-firestore-read-guards: ok');

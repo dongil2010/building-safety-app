@@ -18,7 +18,7 @@ rules_version = '2';
 //   safety_app/{companyId}/floorDrawings/{id}   → 층별 도면 이미지(dataUrl)
 //   safety_app/{companyId}/floorDrawingPdfs/{id} → 층별 PDF 원본(dataUrl 또는 parts 서브컬렉션)
 //   safety_app/{companyId}/siteDrawingVault/{siteKey}/floors/{floorCode} → 현장명 기준 PDF 보관함(건물 삭제 후에도 유지)
-//   safety_app/{companyId}/photos/{id}          → 결함 사진(dataUrl)
+//   safety_app/{companyId}/syncLeases/{id}      → 동기화 잠금(heartbeat). 회사 루트/층 문서와 분리
 //
 // 배포 방법: Firebase 콘솔 → Firestore Database → 규칙(Rules) 탭에 이 파일 내용을 붙여넣고 게시(Publish).
 // (Firebase CLI를 쓴다면: firebase deploy --only firestore:rules)
@@ -155,6 +155,11 @@ service cloud.firestore {
       }
 
       match /photos/{docId} {
+        allow read, write: if isCompanyMember(companyId);
+      }
+
+      // 동기화 잠금 — 회사 루트/층 묶음과 분리 (heartbeat가 큰 문서를 다시 과금하지 않게)
+      match /syncLeases/{leaseId} {
         allow read, write: if isCompanyMember(companyId);
       }
 
