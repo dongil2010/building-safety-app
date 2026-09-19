@@ -6490,7 +6490,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 const destKey = `${newId}_${floorCode}`;
                 const cloned = JSON.parse(JSON.stringify(window.state.ndtData[k]));
                 if (merge && window.state.ndtData[destKey]) {
-                    window.state.ndtData[destKey] = { ...window.state.ndtData[destKey], ...cloned };
+                    // 객체 스프레드를 쓰면 배열이 {0:…,1:…} 객체로 바뀌고 같은 인덱스가 덮어써진다
+                    window.state.ndtData[destKey] =
+                        (window.state.ndtData[destKey] || []).concat(cloned);
                 } else {
                     window.state.ndtData[destKey] = cloned;
                 }
@@ -36768,6 +36770,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     };
 
     async function exportHwpxSurveyTable3(bldg, bldgId, floorsData, getFloorLabel) {
+            // 직전 보고서의 이미지 바이트가 계속 남아 사진이 많을수록 메모리가 누적된다
+            _hwpxBytesByUrl.clear();
             // 정기안전점검은 비파괴 장비조사 섹션(DATA·결과표/위치도/사진첩)이 통째로 빠진 전용
             // 템플릿을 쓴다. 프로그램으로 표/제목 문단을 골라 지우는 방식은 목차 번호·캡션·이미지
             // 슬롯이 얽혀있어 완전히 지우기가 어려워서(제목만 빈 채로 남는 문제 있었음), 애초에
@@ -39487,6 +39491,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     }
 
     async function exportHwpxSurveyTable12(bldg, bldgId, floorsData, getFloorLabel) {
+            // 직전 보고서의 이미지 바이트가 계속 남아 사진이 많을수록 메모리가 누적된다
+            _hwpxBytesByUrl.clear();
             // 정기안전점검은 비파괴 장비조사 섹션(DATA·결과표/위치도/사진첩)이 통째로 빠진 전용
             // 템플릿을 쓴다. 프로그램으로 표/제목 문단을 골라 지우는 방식은 목차 번호·캡션·이미지
             // 슬롯이 얽혀있어 완전히 지우기가 어려워서(제목만 빈 채로 남는 문제 있었음), 애초에
@@ -40519,17 +40525,17 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                         const addr = tc.getElementsByTagNameNS(HP_NS, 'cellAddr')[0];
                         return addr && addr.getAttribute('colAddr') === '0';
                     });
-                    // 강도/탄산화 표는 첫 데이터 행에만 세로 병합(rowSpan)된 숨은 0번 칸(예: 회사명
-                    // 라벨)이 있고 그 아래 행들엔 그 칸이 아예 없다. 예전엔 첫 행까지 통째로 지우고
-                    // normalStyleRow(0번 칸 없음)로만 다시 채워서, 표 전체에 0번 칸이 하나도 안 남는
-                    // "구멍 뚫린" 구조가 됐다 — 한글이 이런 표를 열다가 그대로 죽는 원인이었다. 새로
-                    // 만드는 첫 행에 그 칸을 그대로 옮겨 붙이고 rowSpan만 실제 데이터 행 수에 맞춘다.
+                    // 강도/탄산화/기울기/변위 표는 첫 데이터 행에만 세로 병합(rowSpan)된 숨은 0번 칸
+                    // (예: 회사명 라벨)이 있고 그 아래 행들엔 그 칸이 아예 없다. 예전엔 첫 행까지
+                    // 통째로 지우고 normalStyleRow(0번 칸 없음)로만 다시 채워서, 표 전체에 0번 칸이
+                    // 하나도 안 남는 "구멍 뚫린" 구조가 됐다 — 한글이 이런 표를 열다가 그대로 죽는
+                    // 원인이었다. 새로 만드는 행마다 그 칸을 하나씩 옮겨 붙이되 rowSpan은 항상 1로
+                    // 둔다 — 여러 행에 걸친 병합 칸 하나로 만들면 그 칸의 높이를 "일반 행 높이 ×
+                    // 행 수"로 미리 계산해둬야 하는데, 위치/부재명이 길어 줄바꿈되는 행이 하나라도
+                    // 있으면 실제 필요한 높이보다 모자라져서 줄 간격이 들쭉날쭉해진다. 행마다 독립된
+                    // 칸으로 두면 각 행이 내용에 맞게 알아서 늘어나도 서로 영향을 안 준다.
                     const firstCol0 = findCol0(firstStyleRow);
                     const normalHasCol0 = !!findCol0(normalStyleRow);
-                    // 0번 칸의 원래 높이는 표본 문서의 원래 행 수(예: 16행) 전체를 합친 값이라, rowSpan만
-                    // 실제 행 수로 줄이고 높이를 그대로 두면 남은 행들이 그 큰 높이를 채우려고 줄이 통째로
-                    // 늘어난다. 일반 행 하나의 높이 × 실제 행 수로 다시 계산해서 자연스러운 줄 높이가
-                    // 되게 한다.
                     const normalRowCellSz = normalStyleRow.getElementsByTagNameNS(HP_NS, 'tc')[0]
                         ?.getElementsByTagNameNS(HP_NS, 'cellSz')[0];
                     const normalRowHeight = normalRowCellSz ? parseInt(normalRowCellSz.getAttribute('height'), 10) : null;
@@ -40537,15 +40543,15 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     rowsValues.forEach((values, idx) => {
                         const styleMap = idx === 0 ? styleMaps.first : (idx === rowsValues.length - 1 ? styleMaps.last : styleMaps.normal);
                         const newRow = normalStyleRow.cloneNode(true);
-                        if (idx === 0 && firstCol0 && !normalHasCol0) {
+                        if (firstCol0 && !normalHasCol0) {
                             const col0Clone = firstCol0.cloneNode(true);
                             const span = col0Clone.getElementsByTagNameNS(HP_NS, 'cellSpan')[0];
-                            if (span) span.setAttribute('rowSpan', String(rowsValues.length));
+                            if (span) span.setAttribute('rowSpan', '1');
                             const col0Addr = col0Clone.getElementsByTagNameNS(HP_NS, 'cellAddr')[0];
-                            if (col0Addr) col0Addr.setAttribute('rowAddr', String(headerRowCount));
+                            if (col0Addr) col0Addr.setAttribute('rowAddr', String(headerRowCount + idx));
                             if (normalRowHeight) {
                                 const col0Sz = col0Clone.getElementsByTagNameNS(HP_NS, 'cellSz')[0];
-                                if (col0Sz) col0Sz.setAttribute('height', String(normalRowHeight * rowsValues.length));
+                                if (col0Sz) col0Sz.setAttribute('height', String(normalRowHeight));
                             }
                             // 표본 문서에 남아있던 회사명 등 샘플 글자(세로 병합 칸이라 한 글자씩
                             // 위아래로 쪼개져 나온다) — 우리 데이터로 채우는 칸이 아니라 그대로 지운다.
@@ -47666,9 +47672,21 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             await docRef.set(dataToSync, { merge: true });
             clearSyncErrorRetryTimer();
             _syncRetryFailCount = 0;
+            let clearedPendingCloudSync = false;
             (window.state.buildings || []).forEach((b) => {
-                if (b && b._pendingCloudSync) delete b._pendingCloudSync;
+                if (b && b._pendingCloudSync) {
+                    delete b._pendingCloudSync;
+                    clearedPendingCloudSync = true;
+                }
             });
+            // 해제를 로컬에도 반영한다. 직전 저장(업로드 전)은 플래그가 true인 상태로 기록돼
+            // 있어서, 여기서 다시 쓰지 않으면 다음 실행 때 shouldKeepLocal()이 무조건 로컬을
+            // 이기게 해 다른 기기의 더 최신 건물 메타 수정을 되돌린다.
+            if (clearedPendingCloudSync && typeof saveStateToLocalStorage === 'function') {
+                _suppressSyncOnSave = true;
+                saveStateToLocalStorage();
+                _suppressSyncOnSave = false;
+            }
             if (state.currentTab === 'tab-map' && state.currentBuildingId && state.currentFloor) {
                 refreshCurrentBuildingFromState();
                 if (typeof applyBuildingLocationMapLegend === 'function' && state.currentBuilding) {

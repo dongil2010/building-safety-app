@@ -194,7 +194,23 @@
       }
     }
     if (!candIdx.length) return null;
-    if (candIdx.length > MAX_CANDIDATES) candIdx.length = MAX_CANDIDATES;
+    if (candIdx.length > MAX_CANDIDATES) {
+      // 예전엔 그리드 순회 순서(좌상단 셀 우선) 그대로 잘라서, 커서 바로 옆 우·하단 선이
+      // 후보에서 빠지고 멀리 있는 좌상단 선에 스냅되는 일이 있었다. 커서까지의 실제
+      // 거리순으로 추려야 가장 가까운 선이 남는다.
+      const scored = candIdx.map((i) => {
+        const s = segments[i];
+        const sdx = s[2] - s[0], sdy = s[3] - s[1];
+        const len2 = sdx * sdx + sdy * sdy;
+        let t = len2 > 0 ? ((x - s[0]) * sdx + (y - s[1]) * sdy) / len2 : 0;
+        t = Math.max(0, Math.min(1, t));
+        const px = s[0] + sdx * t - x, py = s[1] + sdy * t - y;
+        return { i: i, d: px * px + py * py };
+      });
+      scored.sort((a, b) => a.d - b.d);
+      candIdx.length = 0;
+      for (let k = 0; k < MAX_CANDIDATES; k++) candIdx.push(scored[k].i);
+    }
 
     let best = null;
     const consider = (px, py, type, weight) => {

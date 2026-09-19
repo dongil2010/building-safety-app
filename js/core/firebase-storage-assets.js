@@ -14,11 +14,40 @@
         floorDrawingTiers: 'floorDrawingTiers',
         photos: 'photos'
     };
-    const _missingStoragePaths = new Set();
+    // path -> 404를 받은 시각. 터널·엘리베이터 등 순간 끊김으로 잘못 기록됐거나 다른 기기가
+    // 나중에 올린 파일이 영영 안 보이지 않게, 일정 시간이 지나면 다시 시도한다.
+    const _missingStoragePaths = new Map();
+    const MISSING_PATH_TTL_MS = 5 * 60 * 1000;
     let _proxyStorageUnavailable = false;
     // GitHub Pages에서 Storage GET 본문에는 ACAO가 없고, SW가 그 fetch를 가로채면 503이 난다.
-    // 한 번이라도 CORS/503이면 이번 세션은 Worker 프록시만 쓴다.
-    let _directStorageBlocked = false;
+    // CORS/503이면 Worker 프록시만 쓰되, 네트워크가 돌아오면 direct 경로도 다시 살려야 한다
+    // (예전엔 true로만 바뀌고 되돌리는 코드가 없어 새로고침 전까지 영구 차단됐다).
+    let _directStorageBlockedAt = 0;
+    const DIRECT_STORAGE_BLOCK_MS = 60 * 1000;
+
+    function blockDirectStorage() {
+        _directStorageBlockedAt = Date.now();
+    }
+
+    function isDirectStorageBlocked() {
+        return _directStorageBlockedAt > 0
+            && (Date.now() - _directStorageBlockedAt) < DIRECT_STORAGE_BLOCK_MS;
+    }
+
+    function markStoragePathMissing(path) {
+        if (path) _missingStoragePaths.set(String(path).replace(/^\/+/, ''), Date.now());
+    }
+
+    function isStoragePathMissing(path) {
+        const key = String(path == null ? '' : path).replace(/^\/+/, '');
+        const at = _missingStoragePaths.get(key);
+        if (!at) return false;
+        if ((Date.now() - at) >= MISSING_PATH_TTL_MS) {
+            _missingStoragePaths.delete(key);
+            return false;
+        }
+        return true;
+    }
     let _assetDownloadInflight = 0;
     const _assetDownloadWaiters = [];
     const ASSET_DOWNLOAD_MAX = 3;
@@ -385,7 +414,7 @@
         const size = (typeof blob.size === 'number')
             ? blob.size
             : (snap && snap.totalBytes) || null;
-        _missingStoragePaths.delete(path);
+        _missingStoragePaths.delete(String(path).replace(/^\/+/, ''));
         return {
             storagePath: path,
             downloadURL: downloadURL,
@@ -486,7 +515,7 @@
         const storage = getFirebaseStorage();
         if (!storagePath) throw new Error('Storage path 없음');
         const path = String(storagePath).replace(/^\/+/, '');
-        if (_missingStoragePaths.has(path)) {
+        if (isStoragePathMissing(path)) {
             const miss = new Error('Storage REST HTTP 404');
             miss.code = 'storage/object-not-found';
             throw miss;
@@ -498,10 +527,10 @@
                     return coerceBlobType(await ref.getBlob(), fallbackType);
                 } catch (e) {
                     if (isStorageNotFoundError(e)) {
-                        _missingStoragePaths.add(path);
+                        markStoragePathMissing(path);
                         throw e;
                     }
-                    if (isBrowserStorageBlockedError(e)) _directStorageBlocked = true;
+                    if (isBrowserStorageBlockedError(e)) blockDirectStorage();
                 }
             }
             if (typeof ref.getBytes === 'function') {
@@ -510,14 +539,14 @@
                     return new Blob([bytes], { type: fallbackType || 'application/octet-stream' });
                 } catch (e) {
                     if (isStorageNotFoundError(e)) {
-                        _missingStoragePaths.add(path);
+                        markStoragePathMissing(path);
                         throw e;
                     }
-                    if (isBrowserStorageBlockedError(e)) _directStorageBlocked = true;
+                    if (isBrowserStorageBlockedError(e)) blockDirectStorage();
                 }
             }
         }
-        if (_directStorageBlocked) {
+        if (isDirectStorageBlocked()) {
             throw new Error('asset fetch HTTP 503');
         }
         if (!storage) throw new Error('Firebase Storage unavailable');
@@ -529,9 +558,9 @@
             return coerceBlobType(await res.blob(), fallbackType);
         } catch (e) {
             if (isStorageNotFoundError(e)) {
-                _missingStoragePaths.add(path);
+                markStoragePathMissing(path);
             } else if (isBrowserStorageBlockedError(e)) {
-                _directStorageBlocked = true;
+                blockDirectStorage();
             }
             throw e;
         }
@@ -576,20 +605,20 @@
                 return null;
             }
 
-            if (!_directStorageBlocked) {
+            if (!isDirectStorageBlocked()) {
                 try {
                     const local = await fetchUrlAsDataUrl(url, ctype || undefined);
                     if (local && String(local).indexOf('data:') === 0) return local;
                 } catch (e1) {
                     if (isStorageNotFoundError(e1) && path) {
-                        _missingStoragePaths.add(String(path).replace(/^\/+/, ''));
+                        markStoragePathMissing(path);
                         return null;
                     }
-                    if (isBrowserStorageBlockedError(e1)) _directStorageBlocked = true;
+                    if (isBrowserStorageBlockedError(e1)) blockDirectStorage();
                 }
             }
 
-            if (path && !_missingStoragePaths.has(String(path).replace(/^\/+/, '')) && !_directStorageBlocked) {
+            if (path && !isStoragePathMissing(path) && !isDirectStorageBlocked()) {
                 try {
                     const blob = await downloadStoragePathAsBlob(path, ctype || 'image/jpeg', {
                         bucket: (parsed && parsed.bucket) || ''
@@ -630,7 +659,7 @@
                 if (parsedProxied) return parsedProxied;
             }
             const path = storagePathFromDownloadURL(url);
-            if (path && !_directStorageBlocked) {
+            if (path && !isDirectStorageBlocked()) {
                 try {
                     const blob = await downloadStoragePathAsBlob(path, 'image/jpeg');
                     return {
