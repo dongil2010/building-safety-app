@@ -585,5 +585,22 @@
 > 수정: SW는 같은 출처만 처리. 브라우저 REST+Auth 중단. 본문은 Worker `proxyStorage` POST.
 > 앱 홈 새로고침 필요(sw.js).
 
+### ⚡ [Cursor] - 2026-09-19 08:20:00
+> **`[IN_PROGRESS]` 감사 즉시 수정 (데이터 유실·동기화 가드)**
+>
+> R-08 프록시 빈 응답 시 direct/SDK 폴백, O-12 사진 교체 시 클라우드 마크 해제,
+> O-05 래스터 교체 시 옛 PDF 삭제, R-03 사진 실패 시 dirty 유지, R-04 동기화 실패 뱃지,
+> O-20 변위 tombstone+updatedAt, NDT 전용 도면 IDB, O-22 appStateChange 저장,
+> R-10 층 전환 전 모달 커밋, N-02 전차 사진 IDB 복사.
+> 브랜치: `cursor/audit-immediate-fixes-720c`
+
+### ⚡ [Cursor] - 2026-09-19 17:20:00
+> **`[WAITING_REVIEW]` 감사 즉시 수정 브랜치를 origin/main 위로 리베이스 후 푸시**
+>
+> `3e7dd70` 변위 tombstone과 합침: `mergeFloorBundleIntoState`는 층 묶음
+> `deletedIds`/`deletedDisplacementIds`와 로컬 `deletedNdtIds`/`deletedNdtDisplacementIds`를
+> 현재 층만 합집합. PR #23 (`cursor/audit-immediate-fixes-720c`). main 배포(버전 토큰)는 아직 안 함.
+
+
 
 

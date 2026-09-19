@@ -56,7 +56,7 @@ window.appState = window.state;
 // IndexedDB는 보통 수백MB~수GB까지 쓸 수 있으므로, 무거운 이미지 데이터는 여기로 옮기고
 // localStorage에는 가벼운 텍스트 데이터만 남긴다.
 const LOCAL_IMAGE_DB_NAME = 'building_safety_local_images';
-const LOCAL_IMAGE_DB_VERSION = 4; // v4: floorDrawingSources (이미지 LOD 원본)
+const LOCAL_IMAGE_DB_VERSION = 5; // v5: ndtImages (NDT 전용 도면)
 let _localImageDbPromise = null;
 
 function openLocalImageDb() {
@@ -71,6 +71,7 @@ function openLocalImageDb() {
             if (!db.objectStoreNames.contains('floorDrawingPdfs')) db.createObjectStore('floorDrawingPdfs');
             if (!db.objectStoreNames.contains('floorDrawingTiers')) db.createObjectStore('floorDrawingTiers');
             if (!db.objectStoreNames.contains('floorDrawingSources')) db.createObjectStore('floorDrawingSources');
+            if (!db.objectStoreNames.contains('ndtImages')) db.createObjectStore('ndtImages');
         };
         req.onsuccess = () => resolve(req.result);
         req.onerror = () => reject(req.error);
