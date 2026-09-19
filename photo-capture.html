@@ -150,6 +150,23 @@
         });
     }
 
+    // Firestore 문서 한도는 약 1MiB. base64 dataUrl을 그대로 담으므로 여유를 두고 자른다.
+    // (예전엔 크기 검사 없이 2000px·q0.85 결과를 그대로 add 해서, 균열 근접 사진처럼
+    //  텍스처가 복잡한 사진은 한도를 넘어 조용히 계속 실패했다)
+    const MAX_RELAY_DATAURL = 900000;
+
+    async function compressPhotoUnderLimit(file) {
+        const steps = [[2000, 0.85], [1600, 0.8], [1280, 0.75], [1024, 0.7]];
+        let last = null;
+        for (const [w, q] of steps) {
+            const out = await compressPhoto43(file, w, q);
+            if (!out) return null;
+            last = out;
+            if (out.length <= MAX_RELAY_DATAURL) return out;
+        }
+        return last;
+    }
+
     let db = null;
 
     firebase.initializeApp(firebaseConfig);
@@ -189,7 +206,11 @@
         thumbsEl.appendChild(wrap);
 
         try {
-            const dataUrl = await compressPhoto43(file, 2000, 0.85);
+            const dataUrl = await compressPhotoUnderLimit(file);
+            if (!dataUrl) throw new Error('사진을 읽지 못했습니다. 다시 촬영해 주세요.');
+            if (dataUrl.length > MAX_RELAY_DATAURL) {
+                throw new Error('사진 용량이 너무 커서 전송할 수 없습니다. 조금 더 멀리서 다시 촬영해 주세요.');
+            }
             img.src = dataUrl;
             await db.collection('photoRelay').doc(sessionId).collection('photos').add({
                 dataUrl: dataUrl,
@@ -202,7 +223,7 @@
             console.error(err);
             badge.textContent = '실패';
             badge.style.color = '#f87171';
-            statusEl.textContent = '전송에 실패했습니다. 다시 시도해 주세요.';
+            statusEl.textContent = (err && err.message) ? err.message : '전송에 실패했습니다. 다시 시도해 주세요.';
             statusEl.className = 'err';
         } finally {
             btnShoot.disabled = false;
