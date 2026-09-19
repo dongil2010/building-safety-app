@@ -594,6 +594,13 @@
 > R-10 층 전환 전 모달 커밋, N-02 전차 사진 IDB 복사.
 > 브랜치: `cursor/audit-immediate-fixes-720c`
 
+### ⚡ [Cursor] - 2026-09-19 17:20:00
+> **`[WAITING_REVIEW]` 감사 즉시 수정 브랜치를 origin/main 위로 리베이스 후 푸시**
+>
+> `3e7dd70` 변위 tombstone과 합침: `mergeFloorBundleIntoState`는 층 묶음
+> `deletedIds`/`deletedDisplacementIds`와 로컬 `deletedNdtIds`/`deletedNdtDisplacementIds`를
+> 현재 층만 합집합. PR #23 (`cursor/audit-immediate-fixes-720c`). main 배포(버전 토큰)는 아직 안 함.
+
 
 
 
