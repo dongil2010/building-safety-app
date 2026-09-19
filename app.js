@@ -1378,7 +1378,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function rememberDeletedDrawingFloor(bldg, floorCode) {
         if (typeof _drawingFloorTombstone.rememberDeletedDrawingFloor === 'function') {
-            _drawingFloorTombstone.rememberDeletedDrawingFloor(bldg, floorCode, _sessionDeletedDrawingKeys);
+            // 삭제 시각을 같이 남긴다 — 이게 있어야 "내가 방금 지운 것"과
+            // "남이 나중에 다시 올린 것"을 구분할 수 있다.
+            _drawingFloorTombstone.rememberDeletedDrawingFloor(
+                bldg, floorCode, _sessionDeletedDrawingKeys, Date.now()
+            );
         }
         if (typeof _drawingFloorTombstone.stripDeletedDrawingFloorsFromBuilding === 'function') {
             _drawingFloorTombstone.stripDeletedDrawingFloorsFromBuilding(bldg, _sessionDeletedDrawingKeys);
@@ -1386,11 +1390,29 @@ document.addEventListener('DOMContentLoaded', () => {
         return bldg;
     }
 
-    function forgetDeletedDrawingFloor(bldg, floorCode) {
+    /**
+     * 묘비 해제. 기본적으로 "삭제 시각이 찍힌 묘비"는 풀지 않는다.
+     *
+     * 해제 호출이 앱 곳곳(클라우드 조회·IDB 증거·병합)에 흩어져 있는데, 그 대부분은
+     * "도면이 아직 어딘가 남아 있다"는 추측이다. 그게 바로 묘비가 막으려던 상황이라
+     * 추측으로 풀면 지운 도면이 되살아난다.
+     *
+     * 사용자가 직접 도면을 다시 올린 경우처럼 확실한 행동만 { force: true }로 푼다.
+     * remoteMetaAt을 주면, 원격이 내 삭제보다 나중에 갱신됐을 때만 풀어준다.
+     *
+     * @returns {boolean} 실제로 해제했으면 true
+     */
+    function forgetDeletedDrawingFloor(bldg, floorCode, opts) {
+        const options = opts || {};
+        if (!options.force
+            && typeof _drawingFloorTombstone.isConfirmedDeletion === 'function'
+            && _drawingFloorTombstone.isConfirmedDeletion(bldg, floorCode, options.remoteMetaAt || 0)) {
+            return false;
+        }
         if (typeof _drawingFloorTombstone.forgetDeletedDrawingFloor === 'function') {
             _drawingFloorTombstone.forgetDeletedDrawingFloor(bldg, floorCode, _sessionDeletedDrawingKeys);
         }
-        return bldg;
+        return true;
     }
 
     /** tombstone 무시 — RAM·IDB 플래그에 도면 페이로드가 있으면 true.
@@ -2823,21 +2845,33 @@ document.addEventListener('DOMContentLoaded', () => {
                     ]
                 )
                 : new Set();
+            // 층별 삭제 시각은 양쪽 중 더 나중 것을 남긴다(없으면 옛 묘비 = 예전 동작).
+            merged.deletedDrawingFloorAt = (typeof _drawingFloorTombstone.mergeDeletedDrawingFloorAt === 'function')
+                ? _drawingFloorTombstone.mergeDeletedDrawingFloorAt(
+                    localMatch?.deletedDrawingFloorAt,
+                    b?.deletedDrawingFloorAt
+                )
+                : Object.assign({}, b?.deletedDrawingFloorAt, localMatch?.deletedDrawingFloorAt);
+            const remoteMetaAtForMerge = Number(b?.metaUpdatedAt) || 0;
             let clearedFalseTombstones = 0;
             if (payloadEvidence.size || locallyResurrected.size || remotelyAlive.size) {
                 merged.deletedDrawingFloorCodes = (merged.deletedDrawingFloorCodes || []).filter((c) => {
                     const code = String(c || '').trim();
                     if (!code) return false;
+                    // 해제가 거부되면(삭제 시각이 원격 meta보다 나중이면) 묘비를 유지한다.
+                    // 원격에 도면이 남아 있다는 건 아직 내 삭제를 못 받았다는 뜻이다.
                     if (payloadEvidence.has(code) || remotelyAlive.has(code)) {
-                        if (typeof forgetDeletedDrawingFloor === 'function') {
-                            forgetDeletedDrawingFloor(merged, code);
+                        if (typeof forgetDeletedDrawingFloor === 'function'
+                            && !forgetDeletedDrawingFloor(merged, code, { remoteMetaAt: remoteMetaAtForMerge })) {
+                            return true;
                         }
                         clearedFalseTombstones += 1;
                         return false;
                     }
                     if (locallyResurrected.has(code) && !localDeleted.has(code)) {
-                        if (typeof forgetDeletedDrawingFloor === 'function') {
-                            forgetDeletedDrawingFloor(merged, code);
+                        if (typeof forgetDeletedDrawingFloor === 'function'
+                            && !forgetDeletedDrawingFloor(merged, code, { remoteMetaAt: remoteMetaAtForMerge })) {
+                            return true;
                         }
                         clearedFalseTombstones += 1;
                         return false;
@@ -2871,12 +2905,18 @@ document.addEventListener('DOMContentLoaded', () => {
                     const code = String(c || '').trim();
                     if (!code) return false;
                     if (payloadEvidence.has(code) || remotelyAlive.has(code)) {
-                        if (typeof forgetDeletedDrawingFloor === 'function') {
-                            forgetDeletedDrawingFloor(merged, code);
+                        if (typeof forgetDeletedDrawingFloor === 'function'
+                            && !forgetDeletedDrawingFloor(merged, code, { remoteMetaAt: remoteMetaAtForMerge })) {
+                            return true;
                         }
                         return false;
                     }
-                    return !(locallyResurrected.has(code) && !localDeleted.has(code));
+                    if (!(locallyResurrected.has(code) && !localDeleted.has(code))) return true;
+                    if (typeof forgetDeletedDrawingFloor === 'function'
+                        && !forgetDeletedDrawingFloor(merged, code, { remoteMetaAt: remoteMetaAtForMerge })) {
+                        return true;
+                    }
+                    return false;
                 });
             }
             stripDeletedDrawingFloorsFromBuilding(merged);
@@ -7621,7 +7661,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 try {
                     for (let i = 0; i < newFiles.length; i++) {
                         const item = newFiles[i];
-                        forgetDeletedDrawingFloor(bldg, item.floorCode);
+                        // 사용자가 이 층 도면을 직접 다시 올렸다 — 확실한 재등록이므로 묘비를 푼다
+                        forgetDeletedDrawingFloor(bldg, item.floorCode, { force: true });
                         // Check if floor already exists in floorsList, if not add it
                         const existingIdx = bldg.floorsList.findIndex(f => f.floorCode === item.floorCode);
                         if (existingIdx < 0) {
@@ -7780,14 +7821,15 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             // Save state & sync
             syncBuildingDrawingFloorCodes(bldg);
             // 방금 저장한 층은 서버 tombstone에 남아 있어도 로컬에서 삭제목록을 비운다
+            // (사용자가 직접 저장한 결과라 force)
             (bldg.drawingFloorCodes || []).forEach((code) => {
                 if (code && typeof forgetDeletedDrawingFloor === 'function') {
-                    forgetDeletedDrawingFloor(bldg, code);
+                    forgetDeletedDrawingFloor(bldg, code, { force: true });
                 }
             });
             (bldg.floorsList || []).forEach((f) => {
                 if (f && f.floorCode && typeof forgetDeletedDrawingFloor === 'function') {
-                    forgetDeletedDrawingFloor(bldg, f.floorCode);
+                    forgetDeletedDrawingFloor(bldg, f.floorCode, { force: true });
                 }
             });
             const floorsForKeep = (bldg.floorsList && bldg.floorsList.length)

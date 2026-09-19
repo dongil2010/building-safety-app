@@ -56,11 +56,63 @@
         return false;
     }
 
-    function rememberDeletedDrawingFloor(bldg, floorCode, sessionKeys) {
+    /**
+     * 삭제 시각. 이게 있으면 "사용자가 실제로 지운 것"으로 보고, 클라우드·IDB에
+     * 도면이 남아 있다는 이유만으로는 묘비를 풀지 않는다.
+     *
+     * 시각이 없는 옛 묘비는 예전 동작(증거 있으면 해제) 그대로 둔다. 이미 현장
+     * 기기에 깔려 있는 false tombstone 때문에 층이 통째로 사라지던 문제가
+     * 재발하면 안 되기 때문이다.
+     */
+    function getDeletedDrawingFloorAt(bldg, floorCode) {
+        const code = asCode(floorCode);
+        if (!bldg || !code) return 0;
+        const map = bldg.deletedDrawingFloorAt;
+        if (!map || typeof map !== 'object') return 0;
+        const n = Number(map[code]);
+        return Number.isFinite(n) && n > 0 ? n : 0;
+    }
+
+    /**
+     * 이 묘비를 "도면이 남아 있다"는 증거만으로 풀면 안 되는가?
+     * remoteMetaAt: 원격 건물 meta가 갱신된 시각(모르면 0).
+     * 내 삭제보다 원격이 나중에 갱신됐다면 누가 진짜로 다시 올린 것이므로 풀어준다.
+     */
+    function isConfirmedDeletion(bldg, floorCode, remoteMetaAt) {
+        const at = getDeletedDrawingFloorAt(bldg, floorCode);
+        if (!at) return false;
+        const remote = Number(remoteMetaAt);
+        if (Number.isFinite(remote) && remote > at) return false;
+        return true;
+    }
+
+    /** 층별 삭제 시각은 양쪽 중 더 나중 것을 남긴다. */
+    function mergeDeletedDrawingFloorAt(localAt, remoteAt) {
+        const out = {};
+        [remoteAt, localAt].forEach(function (map) {
+            if (!map || typeof map !== 'object') return;
+            Object.keys(map).forEach(function (k) {
+                const code = asCode(k);
+                const n = Number(map[k]);
+                if (!code || !Number.isFinite(n) || n <= 0) return;
+                if (!out[code] || n > out[code]) out[code] = n;
+            });
+        });
+        return out;
+    }
+
+    function rememberDeletedDrawingFloor(bldg, floorCode, sessionKeys, nowMs) {
         if (!bldg || !floorCode) return bldg;
         const code = asCode(floorCode);
         if (!code) return bldg;
         bldg.deletedDrawingFloorCodes = uniqueCodes([bldg.deletedDrawingFloorCodes, [code]]);
+        const at = Number(nowMs);
+        if (Number.isFinite(at) && at > 0) {
+            if (!bldg.deletedDrawingFloorAt || typeof bldg.deletedDrawingFloorAt !== 'object') {
+                bldg.deletedDrawingFloorAt = {};
+            }
+            bldg.deletedDrawingFloorAt[code] = at;
+        }
         if (bldg.id && sessionKeys && typeof sessionKeys.add === 'function') {
             sessionKeys.add(drawingFloorKey(bldg.id, code));
         }
@@ -73,6 +125,9 @@
         bldg.deletedDrawingFloorCodes = (bldg.deletedDrawingFloorCodes || []).filter(function (c) {
             return asCode(c) !== code;
         });
+        if (bldg.deletedDrawingFloorAt && typeof bldg.deletedDrawingFloorAt === 'object') {
+            delete bldg.deletedDrawingFloorAt[code];
+        }
         if (bldg.id && sessionKeys && typeof sessionKeys.delete === 'function') {
             sessionKeys.delete(drawingFloorKey(bldg.id, code));
         }
@@ -139,6 +194,10 @@
         let n = 0;
         deleted.forEach(function (code) {
             if (!evidence[code]) return;
+            // 삭제 시각이 찍힌 묘비는 "도면이 아직 남아 있다"는 이유로 풀지 않는다.
+            // 그게 바로 묘비가 막으려던 상황이다(클라우드 정리가 늦거나 다른 기기가
+            // 아직 들고 있는 경우). 시각 없는 옛 묘비는 예전대로 해제한다.
+            if (isConfirmedDeletion(bldg, code, 0)) return;
             forgetDeletedDrawingFloor(bldg, code, sessionKeys);
             n += 1;
         });
@@ -179,9 +238,13 @@
     function forgetTombstonesClearedByRemoteMeta(bldg, sessionKeys, remoteBldg) {
         if (!bldg || !remoteBldg) return 0;
         const alive = collectRemotelyAliveFloorCodes(remoteBldg);
+        // 원격 meta가 내 삭제보다 나중에 갱신됐을 때만 "누가 진짜 다시 올렸다"로 본다.
+        // 그렇지 않으면 원격은 아직 내 삭제를 못 받은 상태이므로 묘비를 지킨다.
+        const remoteAt = Number(remoteBldg.metaUpdatedAt) || 0;
         let n = 0;
         alive.forEach(function (code) {
             if (!isDeletedDrawingFloor(bldg, code, sessionKeys)) return;
+            if (isConfirmedDeletion(bldg, code, remoteAt)) return;
             forgetDeletedDrawingFloor(bldg, code, sessionKeys);
             n += 1;
         });
@@ -204,6 +267,9 @@
         forgetDeletedDrawingFloor: forgetDeletedDrawingFloor,
         stripDeletedDrawingFloorsFromBuilding: stripDeletedDrawingFloorsFromBuilding,
         mergeDeletedDrawingFloorCodes: mergeDeletedDrawingFloorCodes,
+        getDeletedDrawingFloorAt: getDeletedDrawingFloorAt,
+        isConfirmedDeletion: isConfirmedDeletion,
+        mergeDeletedDrawingFloorAt: mergeDeletedDrawingFloorAt,
         forgetTombstonesWithDrawingEvidence: forgetTombstonesWithDrawingEvidence,
         collectRemotelyAliveFloorCodes: collectRemotelyAliveFloorCodes,
         forgetTombstonesClearedByRemoteMeta: forgetTombstonesClearedByRemoteMeta,
