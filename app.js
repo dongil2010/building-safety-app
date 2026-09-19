@@ -3740,31 +3740,15 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function getRecordUpdatedAt(rec, kind) {
-        if (!rec) return 0;
-        if (rec.updatedAt) return Number(rec.updatedAt) || 0;
-        const id = rec.id || '';
-        if (kind === 'pin') {
-            const m = /^pin-(\d+)/.exec(id);
-            if (m) return Number(m[1]) || 0;
-        }
-        if (kind === 'ndt') {
-            const m = /^(?:ndt_|ndtg_|ndtp_)(\d+)/.exec(id);
-            if (m) return Number(m[1]) || 0;
-        }
-        return 0;
+        return window.BSA.syncMerge.getRecordUpdatedAt(rec, kind);
     }
 
-    /** 내용·사진 기준 시각 (위치 이동은 포함하지 않음) */
     function getDefectContentUpdatedAt(rec) {
-        if (!rec) return 0;
-        if (rec.contentUpdatedAt) return Number(rec.contentUpdatedAt) || 0;
-        // 구데이터: contentUpdatedAt 없으면 updatedAt을 내용 변경으로 간주
-        return getRecordUpdatedAt(rec, 'pin');
+        return window.BSA.syncMerge.getDefectContentUpdatedAt(rec);
     }
 
     function getDefectPositionUpdatedAt(rec) {
-        if (!rec) return 0;
-        return Number(rec.positionUpdatedAt) || 0;
+        return window.BSA.syncMerge.getDefectPositionUpdatedAt(rec);
     }
 
     function trackDefectDeletion(floorKey, defectId) {
@@ -3788,121 +3772,35 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function mergeDeletedIdsMaps(serverMap, localMap) {
-        const out = { ...(serverMap || {}) };
-        Object.entries(localMap || {}).forEach(([key, ids]) => {
-            const set = new Set([...(out[key] || []), ...(ids || [])]);
-            if (set.size > 0) out[key] = Array.from(set);
-        });
-        return out;
+        return window.BSA.syncMerge.mergeDeletedIdsMaps(serverMap, localMap);
     }
 
-    /** floorKey → { id → deletedAt } 합치기 (같은 id는 더 늦은 삭제 시각) */
     function mergeDeletedAtMaps(serverMap, localMap) {
-        const out = {};
-        const keys = new Set([
-            ...Object.keys(serverMap || {}),
-            ...Object.keys(localMap || {})
-        ]);
-        keys.forEach((key) => {
-            const sm = (serverMap && serverMap[key]) || {};
-            const lm = (localMap && localMap[key]) || {};
-            const ids = new Set([...Object.keys(sm), ...Object.keys(lm)]);
-            const merged = {};
-            ids.forEach((id) => {
-                const t = Math.max(Number(sm[id]) || 0, Number(lm[id]) || 0);
-                if (t > 0) merged[id] = t;
-            });
-            if (Object.keys(merged).length) out[key] = merged;
-        });
-        return out;
+        return window.BSA.syncMerge.mergeDeletedAtMaps(serverMap, localMap);
     }
 
-    /**
-     * 삭제보다 늦은 내용·사진 수정이 있으면 부활.
-     * 도면 공간 부족으로 마킹 위치만 옮긴 경우(positionUpdatedAt)는 부활하지 않고 삭제 유지.
-     * deletedAt이 없는 구버전 tombstone(0)은 기존처럼 삭제 유지.
-     */
     function recordSurvivesDelete(rec, deletedAt, kind) {
-        if (!rec || !rec.id) return false;
-        const ts = Number(deletedAt) || 0;
-        if (ts <= 0) return false;
-        if (kind === 'ndt') return getRecordUpdatedAt(rec, 'ndt') > ts;
-        return getDefectContentUpdatedAt(rec) > ts;
+        return window.BSA.syncMerge.recordSurvivesDelete(rec, deletedAt, kind);
     }
 
     function mergePhotoArrays(primaryArr, secondaryArr) {
-        const seen = new Set();
-        const out = [];
-        const add = (p) => {
-            if (!p) return;
-            const key = String(p);
-            if (seen.has(key)) return;
-            seen.add(key);
-            out.push(p);
-        };
-        (primaryArr || []).forEach(add);
-        (secondaryArr || []).forEach(add);
-        return out;
+        return window.BSA.syncMerge.mergePhotoArrays(primaryArr, secondaryArr);
     }
 
-    /** ids[i] ↔ photos/urls[i] 쌍을 맵으로 모은다. 길이가 달라도 겹치는 인덱스만 신뢰. */
     function collectPhotoSrcById(ids, photos, urls) {
-        const map = {};
-        if (!Array.isArray(ids) || !ids.length) return map;
-        ids.forEach((pid, i) => {
-            if (!pid) return;
-            const key = String(pid);
-            const cands = [
-                Array.isArray(urls) ? urls[i] : null,
-                Array.isArray(photos) ? photos[i] : null,
-                window._photoCache && window._photoCache[pid]
-            ];
-            for (let c = 0; c < cands.length; c++) {
-                const v = cands[c];
-                if (v) { map[key] = v; break; }
-            }
-        });
-        return map;
+        return window.BSA.syncMerge.collectPhotoSrcById(ids, photos, urls, window._photoCache);
     }
 
-    /** merged photoIds 순서에 맞춰 photos 배열을 다시 만든다(인덱스 어긋남 방지). */
     function alignPhotoSrcArrayToIds(ids, srcById) {
-        if (!Array.isArray(ids) || !ids.length) return [];
-        return ids.map((pid) => (pid && srcById && srcById[String(pid)]) || null);
+        return window.BSA.syncMerge.alignPhotoSrcArrayToIds(ids, srcById);
     }
 
-    /** Storage https/gs 만 bulk에 실음. dataURL(바이너리)은 1MB를 바로 넘긴다. */
     function isLightweightCloudPhotoRef(src) {
-        const t = String(src || '').trim();
-        if (!t || t.length < 12 || t.length > 4096) return false;
-        if (t.indexOf('data:') === 0) return false;
-        return /^https?:\/\//i.test(t) || /^gs:\/\//i.test(t);
+        return window.BSA.syncMerge.isLightweightCloudPhotoRef(src);
     }
 
     function collectPackedPhotoUrlMap(ids, urls, photos) {
-        const map = {};
-        const n = Math.max(
-            Array.isArray(ids) ? ids.length : 0,
-            Array.isArray(urls) ? urls.length : 0,
-            Array.isArray(photos) ? photos.length : 0
-        );
-        for (let i = 0; i < n; i++) {
-            const pid = ids && ids[i];
-            const cands = [
-                urls && urls[i],
-                photos && photos[i],
-                pid && window._photoCache && window._photoCache[pid]
-            ];
-            let picked = '';
-            for (let c = 0; c < cands.length; c++) {
-                if (isLightweightCloudPhotoRef(cands[c])) {
-                    picked = String(cands[c]).trim();
-                    break;
-                }
-            }
-            if (pid && picked) map[String(pid)] = picked;
-        }
-        return map;
+        return window.BSA.syncMerge.collectPackedPhotoUrlMap(ids, urls, photos, window._photoCache);
     }
 
     function collectPackedPhotoUrlsFrom(ids, photos, existingUrls) {
@@ -3928,251 +3826,29 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function extractInlinePhotos(defect, kind) {
-        if (!defect) return [];
-        if (kind === 'prev') {
-            return (Array.isArray(defect.prevRoundPhotos) ? defect.prevRoundPhotos : []).filter(Boolean);
-        }
-        return (Array.isArray(defect.photos) ? defect.photos : []).filter(Boolean);
+        return window.BSA.syncMerge.extractInlinePhotos(defect, kind);
     }
 
-    /** 같은 결함 고유코드 — 서버 기준 + 로컬 추가. 내용은 content 시각, 좌표는 position 시각, 사진은 합집합. */
     function mergeDefectRecord(serverRec, localRec) {
-        if (!serverRec) return localRec ? { ...localRec } : null;
-        if (!localRec) return { ...serverRec };
-
-        const serverContentTs = getDefectContentUpdatedAt(serverRec);
-        const localContentTs = getDefectContentUpdatedAt(localRec);
-        const contentNewer = localContentTs >= serverContentTs ? localRec : serverRec;
-        const contentOlder = localContentTs >= serverContentTs ? serverRec : localRec;
-        const merged = { ...contentOlder, ...contentNewer };
-
-        // 위치만 옮긴 쪽의 좌표를 내용 승자 위에 덮어씀
-        const DEFECT_POSITION_FIELDS = [
-            'x', 'y', 'targetX', 'targetY', 'mapMarkedAt', 'mapUnregistered',
-            'vertices', 'points', 'areaAngle', 'width', 'height', 'rotation',
-            'shapeType', 'areaX1', 'areaY1', 'areaX2', 'areaY2', 'areaShape',
-            'areaPoints', 'areaDrawings', 'areaFillStyle', 'areaBorderStyle'
-        ];
-        const serverPosTs = getDefectPositionUpdatedAt(serverRec);
-        const localPosTs = getDefectPositionUpdatedAt(localRec);
-        if (serverPosTs > 0 || localPosTs > 0) {
-            const posNewer = localPosTs >= serverPosTs ? localRec : serverRec;
-            DEFECT_POSITION_FIELDS.forEach((field) => {
-                if (posNewer[field] !== undefined) merged[field] = posNewer[field];
-            });
-        }
-
-        // 표시 번호: 더 최근 updatedAt(또는 contentUpdatedAt) 쪽을 따른다.
-        // (예전: 항상 서버 no → 빈칸 땡기기 결과가 동기화 직후 뒷번호로 되돌아감)
-        const serverNoTs = Math.max(serverContentTs, Number(serverRec.updatedAt) || 0);
-        const localNoTs = Math.max(localContentTs, Number(localRec.updatedAt) || 0);
-        const noSource = localNoTs >= serverNoTs ? localRec : serverRec;
-        if (noSource.no != null && noSource.no !== '') merged.no = noSource.no;
-        else if (serverRec.no) merged.no = serverRec.no;
-        else if (localRec.no) merged.no = localRec.no;
-        if (noSource.groupNo != null && noSource.groupNo !== '') merged.groupNo = noSource.groupNo;
-        else if (serverRec.groupNo) merged.groupNo = serverRec.groupNo;
-        else if (localRec.groupNo) merged.groupNo = localRec.groupNo;
-        if (noSource.cadNo != null && noSource.cadNo !== '') merged.cadNo = noSource.cadNo;
-        if (noSource.isCadImported != null) merged.isCadImported = noSource.isCadImported;
-        // groupId는 묶음 구조 안정성을 위해 서버 우선(있으면), 없으면 로컬
-        if (serverRec.groupId) merged.groupId = serverRec.groupId;
-        else if (localRec.groupId) merged.groupId = localRec.groupId;
-        if (serverRec.surveyExtra || localRec.surveyExtra) merged.surveyExtra = true;
-        if (Object.prototype.hasOwnProperty.call(noSource, 'surveyNumbered')) {
-            merged.surveyNumbered = !!noSource.surveyNumbered;
-        } else if (localRec.surveyNumbered === false || serverRec.surveyNumbered === false) {
-            merged.surveyNumbered = false;
-        }
-
-        // 사진: photoIds는 합집합. photos/photoUrls는 반드시 그 ID 순서에 맞춰 재정렬한다.
-        const serverPhotoIds = Array.isArray(serverRec.photoIds) ? serverRec.photoIds : [];
-        const localPhotoIds = Array.isArray(localRec.photoIds) ? localRec.photoIds : [];
-        const mergedPhotoIds = mergePhotoArrays(serverPhotoIds, localPhotoIds);
-        if (mergedPhotoIds.length) {
-            merged.photoIds = mergedPhotoIds;
-            const srcById = Object.assign(
-                {},
-                collectPhotoSrcById(serverPhotoIds, serverRec.photos, serverRec.photoUrls),
-                collectPhotoSrcById(localPhotoIds, localRec.photos, localRec.photoUrls)
-            );
-            const alignedPhotos = alignPhotoSrcArrayToIds(mergedPhotoIds, srcById);
-            if (alignedPhotos.some(Boolean)) merged.photos = alignedPhotos;
-            else delete merged.photos;
-            const packedUrlMap = Object.assign(
-                {},
-                collectPackedPhotoUrlMap(serverPhotoIds, serverRec.photoUrls, extractInlinePhotos(serverRec)),
-                collectPackedPhotoUrlMap(localPhotoIds, localRec.photoUrls, extractInlinePhotos(localRec))
-            );
-            const packedUrls = mergedPhotoIds.map((pid) => (pid && packedUrlMap[String(pid)]) || '');
-            if (packedUrls.some(Boolean)) merged.photoUrls = packedUrls;
-            else delete merged.photoUrls;
-        } else {
-            merged.photos = mergePhotoArrays(
-                extractInlinePhotos(serverRec),
-                extractInlinePhotos(localRec)
-            );
-            delete merged.photoIds;
-            delete merged.photoUrls;
-        }
-
-        const serverPrevPhotoIds = Array.isArray(serverRec.prevRoundPhotoIds) ? serverRec.prevRoundPhotoIds : [];
-        const localPrevPhotoIds = Array.isArray(localRec.prevRoundPhotoIds) ? localRec.prevRoundPhotoIds : [];
-        const mergedPrevPhotoIds = mergePhotoArrays(serverPrevPhotoIds, localPrevPhotoIds);
-        if (mergedPrevPhotoIds.length) {
-            merged.prevRoundPhotoIds = mergedPrevPhotoIds;
-            const prevSrcById = Object.assign(
-                {},
-                collectPhotoSrcById(serverPrevPhotoIds, serverRec.prevRoundPhotos, serverRec.prevRoundPhotoUrls),
-                collectPhotoSrcById(localPrevPhotoIds, localRec.prevRoundPhotos, localRec.prevRoundPhotoUrls)
-            );
-            const alignedPrev = alignPhotoSrcArrayToIds(mergedPrevPhotoIds, prevSrcById);
-            if (alignedPrev.some(Boolean)) merged.prevRoundPhotos = alignedPrev;
-            else delete merged.prevRoundPhotos;
-            const packedPrevMap = Object.assign(
-                {},
-                collectPackedPhotoUrlMap(serverPrevPhotoIds, serverRec.prevRoundPhotoUrls, extractInlinePhotos(serverRec, 'prev')),
-                collectPackedPhotoUrlMap(localPrevPhotoIds, localRec.prevRoundPhotoUrls, extractInlinePhotos(localRec, 'prev'))
-            );
-            const packedPrev = mergedPrevPhotoIds.map((pid) => (pid && packedPrevMap[String(pid)]) || '');
-            if (packedPrev.some(Boolean)) merged.prevRoundPhotoUrls = packedPrev;
-            else delete merged.prevRoundPhotoUrls;
-        } else {
-            merged.prevRoundPhotos = mergePhotoArrays(
-                extractInlinePhotos(serverRec, 'prev'),
-                extractInlinePhotos(localRec, 'prev')
-            );
-            delete merged.prevRoundPhotoIds;
-            delete merged.prevRoundPhotoUrls;
-        }
-
-        merged.contentUpdatedAt = Math.max(serverContentTs, localContentTs, Number(merged.contentUpdatedAt) || 0);
-        merged.positionUpdatedAt = Math.max(serverPosTs, localPosTs, Number(merged.positionUpdatedAt) || 0);
-        merged.updatedAt = Math.max(
-            getRecordUpdatedAt(serverRec, 'pin'),
-            getRecordUpdatedAt(localRec, 'pin'),
-            merged.contentUpdatedAt,
-            merged.positionUpdatedAt,
-            Number(merged.updatedAt) || 0
-        );
-        return merged;
+        return window.BSA.syncMerge.mergeDefectRecord(serverRec, localRec, window._photoCache);
     }
 
     function mergeNdtRecord(serverRec, localRec) {
-        const serverTs = getRecordUpdatedAt(serverRec, 'ndt');
-        const localTs = getRecordUpdatedAt(localRec, 'ndt');
-        const newer = localTs >= serverTs ? localRec : serverRec;
-        const older = localTs >= serverTs ? serverRec : localRec;
-        // 서버(older/newer 중 서버 쪽)를 깔고 최신 필드로 덮되, 결과는 updatedAt 기준
-        return { ...older, ...newer };
+        return window.BSA.syncMerge.mergeNdtRecord(serverRec, localRec);
     }
 
     function mergeIdRecordArrays(serverArr, localArr, deletedIds, kind, deletedAtById) {
-        const deleted = new Set(deletedIds || []);
-        const delAt = deletedAtById || {};
-        const byId = new Map();
-        const localById = new Map((localArr || []).filter((r) => r?.id).map((r) => [r.id, r]));
-        // 서버 먼저
-        (serverArr || []).forEach((rec) => {
-            if (!rec?.id) return;
-            const localMatch = localById.get(rec.id);
-            const at = Number(delAt[rec.id]) || 0;
-            if (deleted.has(rec.id)
-                && !recordSurvivesDelete(rec, at, kind)
-                && !recordSurvivesDelete(localMatch, at, kind)) {
-                return;
-            }
-            if (localMatch) {
-                if (kind === 'pin') byId.set(rec.id, mergeDefectRecord(rec, localMatch));
-                else if (kind === 'ndt') byId.set(rec.id, mergeNdtRecord(rec, localMatch));
-                else {
-                    byId.set(rec.id,
-                        getRecordUpdatedAt(localMatch, kind) >= getRecordUpdatedAt(rec, kind) ? localMatch : rec
-                    );
-                }
-            } else {
-                byId.set(rec.id, { ...rec });
-            }
-        });
-        // 로컬 전용 추가
-        (localArr || []).forEach((rec) => {
-            if (!rec?.id || byId.has(rec.id)) return;
-            const at = Number(delAt[rec.id]) || 0;
-            if (deleted.has(rec.id) && !recordSurvivesDelete(rec, at, kind)) return;
-            byId.set(rec.id, { ...rec });
-        });
-        return Array.from(byId.values());
+        return window.BSA.syncMerge.mergeIdRecordArrays(
+            serverArr, localArr, deletedIds, kind, deletedAtById, window._photoCache
+        );
     }
 
-    /**
-     * 결함 병합: 서버 순서 유지 → 로컬 전용(신규) 맨 뒤 → NO. 연속 재부여.
-     * 삭제보다 늦은 내용·사진 수정이 있으면 tombstone을 무시하고 부활.
-     * 마킹 위치만 옮긴 경우(positionUpdatedAt)는 부활하지 않음.
-     */
     function mergeDefectsMaps(serverMap, localMap, serverDeleted, localDeleted, serverDeletedAt, localDeletedAt) {
         ensureSyncMetaState();
-        const mergedDeleted = mergeDeletedIdsMaps(serverDeleted, localDeleted);
-        const mergedDeletedAt = mergeDeletedAtMaps(serverDeletedAt, localDeletedAt);
-        Object.entries(mergedDeleted).forEach(([key, ids]) => {
-            if (!mergedDeletedAt[key]) mergedDeletedAt[key] = {};
-            (ids || []).forEach((id) => {
-                if (mergedDeletedAt[key][id] == null) mergedDeletedAt[key][id] = 0;
-            });
-        });
-        const keys = new Set([
-            ...Object.keys(serverMap || {}),
-            ...Object.keys(localMap || {}),
-            ...Object.keys(mergedDeleted || {})
-        ]);
-        const defects = {};
-
-        keys.forEach((key) => {
-            const delAt = mergedDeletedAt[key] || {};
-            const deletedSet = new Set(mergedDeleted[key] || []);
-            const serverArr = serverMap?.[key] || [];
-            const localArr = localMap?.[key] || [];
-            const serverById = new Map((serverArr || []).filter((r) => r?.id).map((r) => [r.id, r]));
-            const localById = new Map((localArr || []).filter((r) => r?.id).map((r) => [r.id, r]));
-
-            const ordered = [];
-            // 1) 서버에 있는 것 먼저 (서버 기준)
-            serverArr.forEach((sRec) => {
-                if (!sRec?.id) return;
-                const lRec = localById.get(sRec.id);
-                const at = Number(delAt[sRec.id]) || 0;
-                if (deletedSet.has(sRec.id)
-                    && !recordSurvivesDelete(sRec, at, 'pin')
-                    && !recordSurvivesDelete(lRec, at, 'pin')) {
-                    return;
-                }
-                ordered.push(lRec ? mergeDefectRecord(sRec, lRec) : { ...sRec });
-            });
-            // 2) 로컬에만 있는 신규(오프라인 신규) 맨 뒤
-            localArr.forEach((lRec) => {
-                if (!lRec?.id || serverById.has(lRec.id)) return;
-                const at = Number(delAt[lRec.id]) || 0;
-                if (deletedSet.has(lRec.id) && !recordSurvivesDelete(lRec, at, 'pin')) return;
-                ordered.push({ ...lRec });
-            });
-
-            renumberFloorDefects(ordered, { preserveOrder: true });
-            defects[key] = ordered;
-
-            const activeIds = new Set(ordered.map((d) => d.id));
-            const stillDeleted = [];
-            const stillDeletedAt = {};
-            deletedSet.forEach((id) => {
-                if (activeIds.has(id)) return; // 부활 → tombstone 제거
-                stillDeleted.push(id);
-                stillDeletedAt[id] = Number(delAt[id]) || 0;
-            });
-            if (stillDeleted.length > 0) mergedDeleted[key] = stillDeleted;
-            else delete mergedDeleted[key];
-            if (Object.keys(stillDeletedAt).length > 0) mergedDeletedAt[key] = stillDeletedAt;
-            else delete mergedDeletedAt[key];
-        });
-
-        return { defects, deletedDefectIds: mergedDeleted, deletedDefectAt: mergedDeletedAt };
+        return window.BSA.syncMerge.mergeDefectsMaps(
+            serverMap, localMap, serverDeleted, localDeleted, serverDeletedAt, localDeletedAt,
+            { photoCache: window._photoCache, renumberFloorDefects: renumberFloorDefects }
+        );
     }
 
     /** 동기화 병합용 — photoIds·인라인 사진만으로 병합(클라우드 사진 fetch 없음) */
@@ -4222,43 +3898,9 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     function mergeNdtDataMaps(serverMap, localMap, serverDeleted, localDeleted, serverDeletedAt, localDeletedAt) {
-        const mergedDeleted = mergeDeletedIdsMaps(serverDeleted, localDeleted);
-        const mergedDeletedAt = mergeDeletedAtMaps(serverDeletedAt, localDeletedAt);
-        Object.entries(mergedDeleted).forEach(([key, ids]) => {
-            if (!mergedDeletedAt[key]) mergedDeletedAt[key] = {};
-            (ids || []).forEach((id) => {
-                if (mergedDeletedAt[key][id] == null) mergedDeletedAt[key][id] = 0;
-            });
-        });
-        const keys = new Set([
-            ...Object.keys(serverMap || {}),
-            ...Object.keys(localMap || {}),
-            ...Object.keys(mergedDeleted || {})
-        ]);
-        const ndtData = {};
-        keys.forEach((key) => {
-            ndtData[key] = mergeIdRecordArrays(
-                serverMap?.[key],
-                localMap?.[key],
-                mergedDeleted[key],
-                'ndt',
-                mergedDeletedAt[key]
-            );
-            const activeIds = new Set((ndtData[key] || []).map((d) => d?.id).filter(Boolean));
-            const stillDeleted = (mergedDeleted[key] || []).filter((id) => !activeIds.has(id));
-            if (stillDeleted.length) {
-                mergedDeleted[key] = stillDeleted;
-                const stillAt = {};
-                stillDeleted.forEach((id) => {
-                    stillAt[id] = Number(mergedDeletedAt[key]?.[id]) || 0;
-                });
-                mergedDeletedAt[key] = stillAt;
-            } else {
-                delete mergedDeleted[key];
-                delete mergedDeletedAt[key];
-            }
-        });
-        return { ndtData, deletedNdtIds: mergedDeleted, deletedNdtAt: mergedDeletedAt };
+        return window.BSA.syncMerge.mergeNdtDataMaps(
+            serverMap, localMap, serverDeleted, localDeleted, serverDeletedAt, localDeletedAt
+        );
     }
 
     // saveStateToLocalStorage에서 IndexedDB로 옮겨 저장한 도면/사진을 다시 불러와
