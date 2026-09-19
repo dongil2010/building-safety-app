@@ -707,6 +707,8 @@ document.addEventListener('DOMContentLoaded', () => {
         window.state.deletedDefectAt = {};
         window.state.deletedNdtIds = {};
         window.state.deletedNdtAt = {};
+        window.state.deletedNdtDisplacementIds = {};
+        window.state.deletedNdtDisplacementAt = {};
         window.state.deletedBuildingIds = [];
         window.state.confirmedDeletedIds = {};
         window.state.currentBuildingId = null;
@@ -1905,6 +1907,9 @@ document.addEventListener('DOMContentLoaded', () => {
         const bump = (k) => {
             _idbPersistedPhotoKeys.delete(k);
             _idbPhotoWriteGen.set(k, (_idbPhotoWriteGen.get(k) || 0) + 1);
+            // 같은 슬롯(defectId_0)을 교체해도 클라우드 "이미 올림" 표시가 남으면
+            // persistPhotoToCloud가 새 바이트를 안 올려 다른 기기·보고서에 옛 사진이 나간다.
+            if (typeof unmarkPhotoOnStorage === 'function') unmarkPhotoOnStorage(k);
         };
         Array.from(_idbPersistedPhotoKeys).forEach((k) => {
             if (k.startsWith(prefix)) bump(k);
@@ -2164,6 +2169,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 persistPhotoUrlToIdb(key, p.dataUrl);
             });
         });
+        Object.entries((window.state && window.state.ndtImages) || {}).forEach(([key, dataUrl]) => {
+            if (!key || typeof dataUrl !== 'string' || dataUrl.length < 32) return;
+            idbSet('ndtImages', key, dataUrl).then((ok) => {
+                if (!ok && typeof notifyIndexedDbSaveFailure === 'function') notifyIndexedDbSaveFailure();
+            });
+        });
     }
 
     function saveStateToLocalStorage() {
@@ -2219,6 +2230,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 confirmedDeletedIds: window.state.confirmedDeletedIds || {},
                 deletedNdtIds: window.state.deletedNdtIds || {},
                 deletedNdtAt: window.state.deletedNdtAt || {},
+                deletedNdtDisplacementIds: window.state.deletedNdtDisplacementIds || {},
+                deletedNdtDisplacementAt: window.state.deletedNdtDisplacementAt || {},
                 deletedBuildingIds: window.state.deletedBuildingIds || [],
                 buildings: sanitizedBuildings,
                 lastUsedBuildingId: window.state.currentBuildingId || null,
@@ -2366,6 +2379,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (parsed.deletedNdtAt) {
                     window.state.deletedNdtAt = parsed.deletedNdtAt;
                 }
+                if (parsed.deletedNdtDisplacementIds) {
+                    window.state.deletedNdtDisplacementIds = parsed.deletedNdtDisplacementIds;
+                }
+                if (parsed.deletedNdtDisplacementAt) {
+                    window.state.deletedNdtDisplacementAt = parsed.deletedNdtDisplacementAt;
+                }
                 if (parsed.deletedBuildingIds) {
                     window.state.deletedBuildingIds = parsed.deletedBuildingIds;
                 }
@@ -2473,6 +2492,9 @@ document.addEventListener('DOMContentLoaded', () => {
             // 도면/사진은 localStorage가 아니라 IndexedDB에서 비동기로 복원한다(위 저장 로직과 짝).
             // 화면은 먼저 그리고, 이미지는 도착하는 대로 다시 그려서 채워넣는다.
             hydrateLocalImagesFromIndexedDb();
+            if (typeof hydrateNdtImagesFromIndexedDb === 'function') {
+                hydrateNdtImagesFromIndexedDb().catch((e) => console.warn('NDT 전용 도면 복원 실패:', e));
+            }
             if (typeof restoreDirtyFloorKeys === 'function') restoreDirtyFloorKeys();
             if (typeof window.purgeExpiredBuildingTrash === 'function') {
                 window.purgeExpiredBuildingTrash().catch(() => {});
@@ -2495,6 +2517,8 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!window.state.confirmedDeletedIds) window.state.confirmedDeletedIds = {};
         if (!window.state.deletedNdtIds) window.state.deletedNdtIds = {};
         if (!window.state.deletedNdtAt) window.state.deletedNdtAt = {};
+        if (!window.state.deletedNdtDisplacementIds) window.state.deletedNdtDisplacementIds = {};
+        if (!window.state.deletedNdtDisplacementAt) window.state.deletedNdtDisplacementAt = {};
         if (!window.state.deletedBuildingIds) window.state.deletedBuildingIds = [];
     }
 
@@ -3208,6 +3232,18 @@ document.addEventListener('DOMContentLoaded', () => {
         Object.keys(window.state.ndtDisplacementGroups || {}).forEach(k => {
             if (k.startsWith(`${buildingId}_`)) delete window.state.ndtDisplacementGroups[k];
         });
+        Object.keys(window.state.deletedNdtDisplacementIds || {}).forEach(k => {
+            if (k.startsWith(`${buildingId}_`)) delete window.state.deletedNdtDisplacementIds[k];
+        });
+        Object.keys(window.state.deletedNdtDisplacementAt || {}).forEach(k => {
+            if (k.startsWith(`${buildingId}_`)) delete window.state.deletedNdtDisplacementAt[k];
+        });
+        Object.keys(window.state.ndtImages || {}).forEach(k => {
+            if (k.startsWith(`${buildingId}_`)) {
+                delete window.state.ndtImages[k];
+                if (typeof idbDelete === 'function') idbDelete('ndtImages', k);
+            }
+        });
     }
 
     function formatDefectNoSeq(n) {
@@ -3753,6 +3789,18 @@ document.addEventListener('DOMContentLoaded', () => {
         window.state.deletedNdtIds[floorKey] = Array.from(set);
         if (!window.state.deletedNdtAt[floorKey]) window.state.deletedNdtAt[floorKey] = {};
         window.state.deletedNdtAt[floorKey][itemId] = Date.now();
+    }
+
+    function trackNdtDisplacementDeletion(floorKey, groupId) {
+        if (!floorKey || !groupId) return;
+        ensureSyncMetaState();
+        if (!window.state.deletedNdtDisplacementIds) window.state.deletedNdtDisplacementIds = {};
+        if (!window.state.deletedNdtDisplacementAt) window.state.deletedNdtDisplacementAt = {};
+        const set = new Set(window.state.deletedNdtDisplacementIds[floorKey] || []);
+        set.add(groupId);
+        window.state.deletedNdtDisplacementIds[floorKey] = Array.from(set);
+        if (!window.state.deletedNdtDisplacementAt[floorKey]) window.state.deletedNdtDisplacementAt[floorKey] = {};
+        window.state.deletedNdtDisplacementAt[floorKey][groupId] = Date.now();
     }
 
     function mergeDeletedIdsMaps(serverMap, localMap) {
@@ -4506,6 +4554,29 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     window.hydrateSingleBuildingDrawings = hydrateSingleBuildingDrawings;
 
+    async function hydrateNdtImagesFromIndexedDb() {
+        if (!window.state.ndtImages) window.state.ndtImages = {};
+        const currentId = window.state.currentBuildingId;
+        if (!currentId || typeof idbGet !== 'function') return;
+        const bldg = (window.state.buildings || []).find((b) => b && b.id === currentId);
+        const floors = (typeof window.getBuildingAvailableFloors === 'function' && bldg)
+            ? window.getBuildingAvailableFloors(bldg)
+            : ((bldg && bldg.floorsList) || []);
+        await Promise.all((floors || []).map(async (f) => {
+            const fc = f && (f.floorCode || f);
+            if (!fc) return;
+            const key = `${currentId}_${fc}`;
+            if (window.state.ndtImages[key]) return;
+            const url = await idbGet('ndtImages', key);
+            if (typeof url === 'string' && url.length > 32) {
+                window.state.ndtImages[key] = url;
+            }
+        }));
+        if (typeof loadFloorNdtDrawing === 'function' && window.state.currentTab === 'tab-ndt') {
+            loadFloorNdtDrawing();
+        }
+    }
+
     async function hydrateLocalImagesFromIndexedDb() {
         try {
             // 도면·PDF·전 건물 사진은 올리지 않는다. 점검 중인 건물 사진만 복원.
@@ -4759,6 +4830,17 @@ document.addEventListener('DOMContentLoaded', () => {
                 CapApp.addListener('backButton', () => {
                     if (handleAppBackPress()) return;
                     if (typeof CapApp.exitApp === 'function') CapApp.exitApp();
+                });
+                CapApp.addListener('appStateChange', (appState) => {
+                    if (appState && appState.isActive) return;
+                    if (typeof flushLocalPhotoPersistBeforeUnload === 'function') {
+                        void flushLocalPhotoPersistBeforeUnload();
+                    } else {
+                        try {
+                            if (typeof flushDefectAutoApply === 'function') flushDefectAutoApply();
+                            if (typeof saveStateToLocalStorage === 'function') saveStateToLocalStorage();
+                        } catch (_e) { /* ignore */ }
+                    }
                 });
             }
         } catch (_e) { /* ignore */ }
@@ -6491,8 +6573,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 const cloned = JSON.parse(JSON.stringify(window.state.ndtData[k]));
                 if (merge && window.state.ndtData[destKey]) {
                     // 객체 스프레드를 쓰면 배열이 {0:…,1:…} 객체로 바뀌고 같은 인덱스가 덮어써진다
-                    window.state.ndtData[destKey] =
-                        (window.state.ndtData[destKey] || []).concat(cloned);
+                    const existingNdt = window.state.ndtData[destKey];
+                    const existingNdtArr = Array.isArray(existingNdt)
+                        ? existingNdt
+                        : Object.values(existingNdt || {});
+                    window.state.ndtData[destKey] = existingNdtArr.concat(
+                        Array.isArray(cloned) ? cloned : Object.values(cloned || {})
+                    );
                 } else {
                     window.state.ndtData[destKey] = cloned;
                 }
@@ -6504,8 +6591,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 const destKey = `${newId}_${floorCode}`;
                 const cloned = JSON.parse(JSON.stringify(window.state.ndtDisplacementGroups[k]));
                 if (merge && window.state.ndtDisplacementGroups[destKey]) {
-                    window.state.ndtDisplacementGroups[destKey] =
-                        (window.state.ndtDisplacementGroups[destKey] || []).concat(cloned);
+                    const existingDisp = window.state.ndtDisplacementGroups[destKey];
+                    const existingDispArr = Array.isArray(existingDisp)
+                        ? existingDisp
+                        : Object.values(existingDisp || {});
+                    window.state.ndtDisplacementGroups[destKey] = existingDispArr.concat(
+                        Array.isArray(cloned) ? cloned : Object.values(cloned || {})
+                    );
                 } else {
                     window.state.ndtDisplacementGroups[destKey] = cloned;
                 }
@@ -7742,6 +7834,11 @@ document.addEventListener('DOMContentLoaded', () => {
             delete window.state.ndtData[floorKey];
         }
         if (window.state.ndtDisplacementGroups && window.state.ndtDisplacementGroups[floorKey]) {
+            (window.state.ndtDisplacementGroups[floorKey] || []).forEach((g) => {
+                if (g && g.id && typeof trackNdtDisplacementDeletion === 'function') {
+                    trackNdtDisplacementDeletion(floorKey, g.id);
+                }
+            });
             delete window.state.ndtDisplacementGroups[floorKey];
         }
 
@@ -8572,6 +8669,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (bldg.floorDrawingSources && bldg.floorDrawingSources[floorCode]) {
             delete bldg.floorDrawingSources[floorCode];
         }
+        // 래스터만 새로 넣어도 옛 PDF가 남으면 floorPlanRef가 옛 PDF 기준이 되어 핀이 어긋난다
+        if (bldg.floorDrawingPdfs && Object.prototype.hasOwnProperty.call(bldg.floorDrawingPdfs, floorCode)) {
+            delete bldg.floorDrawingPdfs[floorCode];
+        }
         clearLocalDrawingPersistFlags(bldgId, floorCode);
         if (window._cloudSyncedDrawingKeys) window._cloudSyncedDrawingKeys.delete(floorKey);
         if (window._cloudSyncedPdfKeys) window._cloudSyncedPdfKeys.delete(floorKey);
@@ -8592,6 +8693,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             Promise.resolve(idbDelete('floorDrawingPdfs', floorKey)).catch(() => {}),
             (typeof deleteFloorDrawingTiersFromCloud === 'function'
                 ? deleteFloorDrawingTiersFromCloud(bldgId, floorCode)
+                : Promise.resolve()).catch(() => {}),
+            (typeof deleteFloorDrawingPdfFromCloud === 'function'
+                ? deleteFloorDrawingPdfFromCloud(bldgId, floorCode)
                 : Promise.resolve()).catch(() => {})
         ]);
     }
@@ -16814,6 +16918,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 const key = `${state.currentBuildingId}_${state.currentFloor}`;
                 if (state.ndtImages && state.ndtImages[key]) {
                     delete state.ndtImages[key];
+                    if (typeof idbDelete === 'function') idbDelete('ndtImages', key);
                     saveStateToLocalStorage();
                 }
                 loadFloorNdtDrawing();
@@ -16996,6 +17101,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             if (!group) return null;
             const point = group.points.find(p => p.id === pointId);
             point.level = level;
+            group.updatedAt = Date.now();
             saveStateToLocalStorage();
             return { group, point };
         }
@@ -17005,6 +17111,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             if (!group) return null;
             const point = { id: `ndtp_${Date.now()}`, x: coords.x, y: coords.y, level };
             group.points.push(point);
+            group.updatedAt = Date.now();
             saveStateToLocalStorage();
             return { group, point };
         }
@@ -17030,7 +17137,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             color,
             boxX: coords.x - 40,
             boxY: coords.y - 50,
-            points: [point]
+            points: [point],
+            updatedAt: Date.now()
         };
         groups.push(group);
         saveStateToLocalStorage();
@@ -17469,15 +17577,20 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (!group) return;
         group.points = group.points.filter(p => p.id !== pointId);
         if (group.points.length === 0) {
+            if (typeof trackNdtDisplacementDeletion === 'function') {
+                trackNdtDisplacementDeletion(key, groupId);
+            }
             state.ndtDisplacementGroups[key] = groups.filter(g => g.id !== groupId);
             // 마지막 지점을 지워 구역까지 사라지는 경우도 묘비가 필요하다
             trackNdtDeletion(key, groupId);
             closeNdtDisplacementGroupEditModal();
         } else {
+            group.updatedAt = Date.now();
             setActiveNdtDispGroup(group);
             renderNdtDispGroupPointList(group);
         }
         saveStateToLocalStorage();
+        if (typeof markFloorKeyDirty === 'function') markFloorKeyDirty(key);
         drawNdtCanvas();
         renderNdtSummaryTable();
     };
@@ -17485,10 +17598,14 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     window.deleteNdtDisplacementGroup = function(groupId, options) {
         if (!options?.skipConfirm && !window.confirmDelete('해당 측정 구역과 포함된 모든 지점을 삭제하시겠습니까?')) return;
         const key = `${state.currentBuildingId}_${state.currentFloor}`;
+        if (typeof trackNdtDisplacementDeletion === 'function') {
+            trackNdtDisplacementDeletion(key, groupId);
+        }
         state.ndtDisplacementGroups[key] = (state.ndtDisplacementGroups[key] || []).filter(g => g.id !== groupId);
         // 묘비를 남기지 않으면 병합 때 서버에 남아있던 구역이 그대로 되살아난다
         trackNdtDeletion(key, groupId);
         if (window._activeNdtDispGroupId === groupId) setActiveNdtDispGroup(null);
+        if (typeof markFloorKeyDirty === 'function') markFloorKeyDirty(key);
         saveStateToLocalStorage();
         drawNdtCanvas();
         renderNdtSummaryTable();
@@ -19368,16 +19485,25 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             d.prevRoundPhotos = archived.concat(current);
         }
         const oldPhotoCount = (d.photoIds && d.photoIds.length) || oldCount;
+        const newPrev = Array.isArray(d.prevRoundPhotos) ? d.prevRoundPhotos.filter(Boolean) : [];
+        d.prevRoundPhotoIds = newPrev.map((_, i) => getPhotoDocId(d.id, i, 'prev'));
+        if (!window._photoCache) window._photoCache = {};
+        for (let i = 0; i < newPrev.length; i++) {
+            const pid = d.prevRoundPhotoIds[i];
+            const url = newPrev[i];
+            if (!url) continue;
+            window._photoCache[pid] = url;
+            await idbSetPhotoPreferDataUrl(pid, url);
+            _idbPersistedPhotoKeys.add(pid);
+        }
         d.photos = [];
         delete d.photoIds;
-        if (typeof invalidatePersistedPhotoCacheForDefect === 'function') {
-            invalidatePersistedPhotoCacheForDefect(d.id);
-        }
-        // 예전 인덱스 키(defectId_0 …)는 현회차와 충돌하므로 IDB에서 제거
+        // 현차 키(defectId_0 …)만 지운다. 전차 키로 복사한 뒤에 지워야 새로고침 시 전차 사진이 안 사라진다.
         if (oldPhotoCount > 0) {
             for (let i = 0; i < oldPhotoCount; i++) {
                 const pid = getPhotoDocId(d.id, i);
                 _idbPersistedPhotoKeys.delete(pid);
+                if (typeof unmarkPhotoOnStorage === 'function') unmarkPhotoOnStorage(pid);
                 idbDelete('photos', pid);
             }
         }
@@ -30349,6 +30475,12 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     if (elements.floorSelect) {
         elements.floorSelect.addEventListener('change', (e) => {
             const prevFloor = window.state.currentFloor;
+            // 층을 바꾸기 전에 열린 결함 모달을 현재 층으로 커밋한다.
+            // (currentFloor를 먼저 바꾸면 신규 핀은 새 층에 생기고, 기존 핀은 저장이 조용히 실패한다)
+            if (typeof isDefectModalOpen === 'function' && isDefectModalOpen()
+                && typeof closeDefectModal === 'function') {
+                closeDefectModal();
+            }
             if (prevFloor && state.currentBuildingId) {
                 saveFloorMapStyleSettings(prevFloor, state.currentBuildingId);
                 saveFloorDrawingRotation(state.currentBuildingId, prevFloor, state.rotationAngle || 0);
@@ -32826,6 +32958,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         targetIds.forEach(id => {
             const defect = list.find(d => d.id === id);
             if (!defect) return;
+            if (typeof touchDefectUpdatedAt === 'function') touchDefectUpdatedAt(defect);
             switch (field) {
                 case 'category':
                     defect.category = value || '구조체';
@@ -32912,6 +33045,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             }
         });
 
+        if (typeof markFloorKeyDirty === 'function') markFloorKeyDirty(key);
         saveStateToLocalStorage();
         if (typeof drawCanvas === 'function') drawCanvas();
         if (typeof renderDefectListPanel === 'function') renderDefectListPanel();
@@ -33604,8 +33738,13 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
     function renderPhotoAlbum() {
         if (!elements.photoAlbumGrid) return;
-        const defects = getCurrentFloorDefects();
-        if (elements.albumFloorTitle) elements.albumFloorTitle.textContent = state.currentFloor;
+        const defects = (typeof getSurveyTableSourceDefects === 'function')
+            ? getSurveyTableSourceDefects()
+            : getCurrentFloorDefects();
+        if (elements.albumFloorTitle) {
+            const exterior = typeof isExteriorFloorCode === 'function' && isExteriorFloorCode(state.currentFloor);
+            elements.albumFloorTitle.textContent = exterior ? '외부 전체' : state.currentFloor;
+        }
 
         renderSurveyPriorityCompareSection(defects);
         scheduleSurveyPriorityCompareHydrate(defects);
@@ -42316,9 +42455,11 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 return;
             }
 
-            const rawDefects = getCurrentFloorDefects();
+            const rawDefects = (typeof getSurveyTableSourceDefects === 'function')
+                ? getSurveyTableSourceDefects()
+                : getCurrentFloorDefects();
             if (!rawDefects || rawDefects.length === 0) {
-                window.showToast('현재 층에 등록된 결함 데이터가 없습니다.', 'warning');
+                window.showToast('내보낼 결함 데이터가 없습니다.', 'warning');
                 return;
             }
             // 마킹 추가는 한 행, 「번호 부여」(surveyExtra)만 N-1… 별도 행
@@ -43559,10 +43700,15 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         }
     }
 
-    function updateOnlineBadge(isOnline) {
+    function updateOnlineBadge(isOnline, syncState) {
         const badge = document.getElementById('onlineStatusBadge');
         if (badge) {
-            if (isOnline) {
+            if (isOnline && syncState === 'error') {
+                badge.style.background = 'rgba(245, 158, 11, 0.18)';
+                badge.style.color = '#fbbf24';
+                badge.style.borderColor = 'rgba(245, 158, 11, 0.4)';
+                badge.innerHTML = '<i class="fa-solid fa-wifi"></i> 온라인 (동기화 실패·재시도 중)';
+            } else if (isOnline) {
                 badge.style.background = 'rgba(34, 197, 94, 0.15)';
                 badge.style.color = '#4ade80';
                 badge.style.borderColor = 'rgba(34, 197, 94, 0.3)';
@@ -45247,6 +45393,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         addFrom(window.state && window.state.deletedDefectIds);
         addFrom(window.state && window.state.deletedNdtIds);
         addFrom(window.state && window.state.ndtDisplacementGroups);
+        addFrom(window.state && window.state.deletedNdtDisplacementIds);
         return keys;
     }
     function markFloorKeyDirty(key) {
@@ -45566,7 +45713,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 bldg.floorDrawings[floorCode] = String(drawing.rasterUrl).trim();
             }
         }
-        if (isLightweightCloudPhotoRef(drawing.pdfUrl)) {
+        if (isLightweightCloudPhotoRef(drawing.pdfUrl)
+            && !(typeof isDrawingReplaceGuarded === 'function' && isDrawingReplaceGuarded(bldg, floorCode))) {
             if (!bldg.floorDrawingPdfs) bldg.floorDrawingPdfs = {};
             if (!keepLocal(bldg.floorDrawingPdfs[floorCode])) {
                 bldg.floorDrawingPdfs[floorCode] = String(drawing.pdfUrl).trim();
@@ -45591,7 +45739,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         return {
             markings: { items: [], deletedIds: [], deletedAt: {} },
             photos: { urlsById: {} },
-            ndt: { items: [], deletedIds: [], deletedAt: {}, displacementGroups: [] },
+            ndt: { items: [], deletedIds: [], deletedAt: {}, displacementGroups: [], deletedDisplacementIds: [], deletedDisplacementAt: {} },
             drawing: emptyFloorDrawingPayload()
         };
     }
@@ -45607,6 +45755,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (Array.isArray(ndt.items) && ndt.items.length) return true;
         if (Array.isArray(ndt.deletedIds) && ndt.deletedIds.length) return true;
         if (Array.isArray(ndt.displacementGroups) && ndt.displacementGroups.length) return true;
+        if (Array.isArray(ndt.deletedDisplacementIds) && ndt.deletedDisplacementIds.length) return true;
         if (photos.urlsById && typeof photos.urlsById === 'object'
             && Object.keys(photos.urlsById).some((k) => photos.urlsById[k])) return true;
         if (drawing.rasterUrl || drawing.pdfUrl) return true;
@@ -45738,7 +45887,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 items: window.state.ndtData[floorKey] || [],
                 deletedIds: (window.state.deletedNdtIds || {})[floorKey] || [],
                 deletedAt: (window.state.deletedNdtAt || {})[floorKey] || {},
-                displacementGroups: (window.state.ndtDisplacementGroups || {})[floorKey] || []
+                displacementGroups: (window.state.ndtDisplacementGroups || {})[floorKey] || [],
+                deletedDisplacementIds: (window.state.deletedNdtDisplacementIds || {})[floorKey] || [],
+                deletedDisplacementAt: (window.state.deletedNdtDisplacementAt || {})[floorKey] || {}
             },
             drawing: collectFloorDrawingUrlPayload(bldg, floorCode)
         };
@@ -45797,12 +45948,30 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const dispMerge = mergeNdtDataMaps(
             { [floorKey]: ndt.displacementGroups || [] },
             window.state.ndtDisplacementGroups || {},
-            { [floorKey]: ndt.deletedIds || [] },
-            window.state.deletedNdtIds || {},
-            { [floorKey]: ndt.deletedAt || {} },
-            window.state.deletedNdtAt || {}
+            { [floorKey]: [].concat(ndt.deletedIds || [], ndt.deletedDisplacementIds || []) },
+            { [floorKey]: [].concat(
+                (window.state.deletedNdtIds || {})[floorKey] || [],
+                (window.state.deletedNdtDisplacementIds || {})[floorKey] || []
+            ) },
+            { [floorKey]: Object.assign({}, ndt.deletedAt || {}, ndt.deletedDisplacementAt || {}) },
+            { [floorKey]: Object.assign({},
+                (window.state.deletedNdtAt || {})[floorKey] || {},
+                (window.state.deletedNdtDisplacementAt || {})[floorKey] || {}
+            ) }
         );
         window.state.ndtDisplacementGroups = dispMerge.ndtData;
+        if (!window.state.deletedNdtDisplacementIds) window.state.deletedNdtDisplacementIds = {};
+        if (!window.state.deletedNdtDisplacementAt) window.state.deletedNdtDisplacementAt = {};
+        if (dispMerge.deletedNdtIds && dispMerge.deletedNdtIds[floorKey]) {
+            window.state.deletedNdtDisplacementIds[floorKey] = dispMerge.deletedNdtIds[floorKey];
+        } else {
+            delete window.state.deletedNdtDisplacementIds[floorKey];
+        }
+        if (dispMerge.deletedNdtAt && dispMerge.deletedNdtAt[floorKey]) {
+            window.state.deletedNdtDisplacementAt[floorKey] = dispMerge.deletedNdtAt[floorKey];
+        } else {
+            delete window.state.deletedNdtDisplacementAt[floorKey];
+        }
     }
 
     async function applyFloorBundleToState(bldg, floorCode, bundle) {
@@ -46649,7 +46818,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
     /** 동기화 시 로컬·레거시 Firestore dataUrl 사진을 Storage로 올려 웹↔폰 표시가 맞도록 함 */
     async function uploadInlineDefectPhotosForSync(defectsMap) {
-        if (!db || !window.state.companyId) return;
+        if (!db || !window.state.companyId) return true;
         const jobs = [];
         const pushJob = (photoId, inlineUrl) => {
             if (!photoId) return;
@@ -46699,7 +46868,12 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             seen.add(job.photoId);
             unique.push(job);
         });
-        await runPhotoJobsInBatches(unique, (job) => ensurePhotoPersistedToStorage(job.photoId, job.inlineUrl));
+        let allOk = true;
+        await runPhotoJobsInBatches(unique, async (job) => {
+            const ok = await ensurePhotoPersistedToStorage(job.photoId, job.inlineUrl);
+            if (!ok) allOk = false;
+        });
+        return allOk;
     }
 
     /** 회사 문서 저장 후 사진·도면 업로드(메타데이터 업로드와 분리) */
@@ -47591,7 +47765,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             }
 
             // 사진/도면 업로드 (잠금 유지 + heartbeat)
-            await uploadInlineDefectPhotosForSync(subsetDefectsMap(window.state.defects, Array.from(floorsToSync)));
+            const photosOk = await uploadInlineDefectPhotosForSync(subsetDefectsMap(window.state.defects, Array.from(floorsToSync)));
             const fieldRasterOnly = typeof isNativeAndroidApp === 'function' && isNativeAndroidApp() && !layoutIsPcLike();
             if (!fieldRasterOnly) {
                 await uploadFloorDrawingPdfsForSync(window.state.buildings);
@@ -47646,6 +47820,11 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 if (!floorBldg || !code) continue;
                 await writeFloorSyncBundle(floorBldg, code);
             }
+            // 사진 업로드가 실패한 층은 dirty를 되살려 다음에 다시 올린다.
+            // (writeFloorSyncBundle이 성공 시 dirty를 지워 재시도 대상에서 빠지던 문제)
+            if (photosOk === false) {
+                floorsToSync.forEach((k) => markFloorKeyDirty(k));
+            }
             const dataToSync = {
                 // 예전 버전에서 루트 문서에 직접 쓰던 필드들 — bulkData로 이전했으니 루트에서는 제거
                 // (merge:true는 필드를 지우지 않으므로 FieldValue.delete()로 명시적으로 삭제해야
@@ -47680,6 +47859,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             await docRef.set(dataToSync, { merge: true });
             clearSyncErrorRetryTimer();
             _syncRetryFailCount = 0;
+            if (typeof updateOnlineBadge === 'function' && navigator.onLine !== false) {
+                updateOnlineBadge(true);
+            }
             let clearedPendingCloudSync = false;
             (window.state.buildings || []).forEach((b) => {
                 if (b && b._pendingCloudSync) {
@@ -47717,6 +47899,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         } catch (e) {
             console.warn('Firebase Sync Error:', e);
             _syncPending = false;
+            if (typeof updateOnlineBadge === 'function' && navigator.onLine !== false) {
+                updateOnlineBadge(true, 'error');
+            }
             if (isFirestoreQuotaError(e)) pauseFirestoreWrites(SYNC_QUOTA_COOLDOWN_MS);
             const now = Date.now();
             const isPermErr = isFirestorePermissionError(e);

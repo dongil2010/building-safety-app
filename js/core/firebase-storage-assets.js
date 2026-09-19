@@ -599,11 +599,10 @@
                 || storagePathFromDownloadURL(url);
 
             // Pages 출처는 Storage GET 본문을 못 읽는다. Worker(POST)가 CORS를 붙인다.
+            // 프록시가 빈 응답·일시 실패여도 여기서 끝내지 않는다. (예전엔 return null이라
+            // 같은 출처 direct fetch / SDK 다운로드에 도달하지 못했다)
             const proxiedFirst = await tryProxyFetchDataUrl(url);
             if (proxiedFirst) return proxiedFirst;
-            if (typeof api.proxyFetch === 'function' && !_proxyStorageUnavailable) {
-                return null;
-            }
 
             if (!isDirectStorageBlocked()) {
                 try {

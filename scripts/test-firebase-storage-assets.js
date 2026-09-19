@@ -147,6 +147,25 @@ async function testMaterializeKeepsDataUrl() {
     assert.strictEqual(out, d);
 }
 
+async function testMaterializeFallsThroughWhenProxyEmpty() {
+    const remote = 'https://firebasestorage.googleapis.com/v0/b/building-safety-app-46821.firebasestorage.app/o/companies%2Fx.jpg?alt=media';
+    let n = 0;
+    api.setAssetProxy(async function () {
+        n += 1;
+        return null;
+    });
+    const warn = console.warn;
+    console.warn = function () {};
+    try {
+        const out = await api.materializeCloudAssetPayload(remote, { storagePath: 'companies/x.jpg' });
+        assert.strictEqual(out, null);
+        assert.ok(n >= 2, 'empty proxy must fall through to direct/SDK then retry proxy, not return on first miss');
+    } finally {
+        console.warn = warn;
+        api.setAssetProxy(null);
+    }
+}
+
 async function testMaterializeUsesProxyNotRawHttps() {
     const remote = 'https://firebasestorage.googleapis.com/v0/b/building-safety-app-46821.firebasestorage.app/o/companies%2Fx.jpg?alt=media';
     api.setAssetProxy(async function () {
@@ -178,6 +197,7 @@ const tests = [
     testSiteRoundPathDetection,
     testFlag,
     testMaterializeKeepsDataUrl,
+    testMaterializeFallsThroughWhenProxyEmpty,
     testMaterializeUsesProxyNotRawHttps
 ];
 
