@@ -20315,22 +20315,15 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     }
 
     function revealSelectedDefectListAboveDrawer() {
+        // 선택됨은 #defectListSelectedSlot(스크롤 밖)에 고정 표시 — 아래 목록 scrollTop을 건드리지 않음
         if (typeof isMapPinDragActive === 'function' && isMapPinDragActive()) return;
+        const slot = document.getElementById('defectListSelectedSlot');
+        if (slot && !slot.hidden) return;
+        // 슬롯이 비어 있을 때만(레거시) 하이라이트 행 nearest — center 정렬·맨위 점프 금지
         const panel = document.getElementById('defectListPanel');
         if (!panel) return;
-        const cluster = panel.querySelector('.defect-list-section.is-selected-cluster');
-        if (cluster) {
-            // 선택됨 구역을 패널 맨 위로 — 하단 수정창에 조사표가 잘려도 선택 마킹이 보이게
-            panel.scrollTop = 0;
-            try {
-                cluster.scrollIntoView({ behavior: 'auto', block: 'start', inline: 'nearest' });
-            } catch (_e) { /* ignore */ }
-            const row = cluster.querySelector('.defect-list-item');
-            if (row) scrollDefectListRowIntoView(row, 'auto', 'start');
-            return;
-        }
         const row = panel.querySelector('.defect-list-item.is-map-selected');
-        if (row) scrollDefectListRowIntoView(row, 'auto', 'start');
+        if (row) scrollDefectListRowIntoView(row, 'auto', 'nearest');
     }
 
     function scheduleRevealDefectListAboveDrawer() {
@@ -20348,6 +20341,31 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         setTimeout(run, 520);
     }
 
+    // 선택됨 칸: 스크롤 목록(#defectListPanel) 바깥에 고정 렌더 — 선택 변경이 목록 드래그 위치를 밀지 않음
+    function renderDefectListSelectedSlot(selectedCluster) {
+        const slot = document.getElementById('defectListSelectedSlot');
+        if (!slot) return;
+        slot.innerHTML = '';
+        if (!selectedCluster || selectedCluster.length === 0) {
+            slot.hidden = true;
+            slot.setAttribute('aria-hidden', 'true');
+            return;
+        }
+        const selTitle = selectedCluster.length === 1
+            ? '✅ 선택됨'
+            : `✅ 선택됨 (${selectedCluster.length})`;
+        const selSection = renderDefectListSection(selTitle, selectedCluster, { mapSelected: true });
+        if (!selSection) {
+            slot.hidden = true;
+            slot.setAttribute('aria-hidden', 'true');
+            return;
+        }
+        selSection.classList.add('is-selected-cluster');
+        slot.appendChild(selSection);
+        slot.hidden = false;
+        slot.removeAttribute('aria-hidden');
+    }
+
     // 좌측 사이드바에 표시되는 "현재 층에 등록된 결함" 간단 목록 렌더링
     function renderDefectListPanel(options = {}) {
         const panel = document.getElementById('defectListPanel');
@@ -20355,11 +20373,13 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (!panel) return;
 
         const scrollSnapshot = captureDefectListScroll(panel);
-        const scrollToSelection = options.scrollToSelection === true;
+        // options.scrollToSelection: 레거시 호환(선택됨 칸 분리 후 목록 점프에 미사용)
+        void options.scrollToSelection;
 
         if (!state.currentBuildingId) {
             panel.innerHTML = '';
             if (summaryEl) summaryEl.innerHTML = '';
+            if (typeof renderDefectListSelectedSlot === 'function') renderDefectListSelectedSlot([]);
             return;
         }
 
@@ -20443,6 +20463,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             } else {
                 panel.innerHTML = '<div class="defect-list-empty">아직 등록된 결함이 없습니다.<br>도면에서 핀을 찍어보세요.</div>';
             }
+            if (typeof renderDefectListSelectedSlot === 'function') renderDefectListSelectedSlot([]);
             return;
         }
 
@@ -20450,7 +20471,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const previousItemsRaw = defects.filter(d => isPreviousRoundDefect(d) && !isDefectMapUnregistered(d));
         const currentItemsRaw = defects.filter(d => !isPreviousRoundDefect(d));
 
-        // 도면에서 선택된 결함 → 목록 하이라이트 / 2개 이상이면 상단 "선택됨"으로 묶음
+        // 도면에서 선택된 결함 → 바깥 "선택됨" 칸 + 본 목록은 자리 유지(하이라이트만)
         const selectedCluster = [];
         const seenSelectedKey = new Set();
         const collectSelected = (list) => {
@@ -20466,26 +20487,13 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         collectSelected(previousItemsRaw);
         collectSelected(currentItemsRaw);
 
-        const pinSelectedToTop = selectedCluster.length >= 1;
-        const previousItems = pinSelectedToTop
-            ? previousItemsRaw.filter(d => !isDefectListItemSelected(d))
-            : previousItemsRaw;
-        const currentItems = pinSelectedToTop
-            ? currentItemsRaw.filter(d => !isDefectListItemSelected(d))
-            : currentItemsRaw;
-        const unregForList = pinSelectedToTop
-            ? unregisteredItems.filter(d => !isDefectListItemSelected(d))
-            : unregisteredItems;
+        // 선택 항목을 본 목록에서 빼지 않음 — 빼면 스크롤/드래그 위치가 위로 당겨짐
+        const previousItems = previousItemsRaw;
+        const currentItems = currentItemsRaw;
+        const unregForList = unregisteredItems;
 
-        if (pinSelectedToTop) {
-            const selTitle = selectedCluster.length === 1
-                ? '✅ 선택됨'
-                : `✅ 선택됨 (${selectedCluster.length})`;
-            const selSection = renderDefectListSection(selTitle, selectedCluster, { mapSelected: true });
-            if (selSection) {
-                selSection.classList.add('is-selected-cluster');
-                panel.appendChild(selSection);
-            }
+        if (typeof renderDefectListSelectedSlot === 'function') {
+            renderDefectListSelectedSlot(selectedCluster);
         }
 
         if (showPrevRoundRegister) {
@@ -20497,28 +20505,15 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const curSection = renderDefectListSection('🆕 금회차 조사항목', currentItems);
         if (curSection) panel.appendChild(curSection);
 
-        // 다중 선택: 상단 묶음으로 스크롤 / 단일 선택(도면): 원래 위치 행으로 스크롤
-        if (scrollToSelection && selectedCluster.length > 0) {
-            const scrollKey = selectedCluster.length >= 2
+        // 선택 변경 시 본 목록을 center/scrollIntoView 하지 않음 — 선택됨 칸이 대체 UI
+        _defectListScrollGen += 1;
+        restoreDefectListScroll(panel, scrollSnapshot || _lastDefectListScrollSnapshot);
+        if (selectedCluster.length === 0) {
+            window._defectListScrollSelectedId = null;
+        } else {
+            window._defectListScrollSelectedId = selectedCluster.length >= 2
                 ? selectedCluster.map(d => d.id || d.groupId).join(',')
                 : `single:${selectedCluster[0].id || selectedCluster[0].groupId}`;
-            window._defectListScrollSelectedId = scrollKey;
-            _defectListScrollGen += 1;
-            const gen = _defectListScrollGen;
-            const doScroll = () => {
-                if (gen !== _defectListScrollGen) return;
-                const targetRow = findDefectListRowForSelection(panel, selectedCluster, pinSelectedToTop);
-                if (targetRow) scrollDefectListRowIntoView(targetRow, 'smooth', 'center');
-            };
-            requestAnimationFrame(() => {
-                requestAnimationFrame(doScroll);
-            });
-            setTimeout(doScroll, 120);
-        } else if (!scrollToSelection) {
-            restoreDefectListScroll(panel, scrollSnapshot || _lastDefectListScrollSnapshot);
-            if (selectedCluster.length === 0) window._defectListScrollSelectedId = null;
-        } else {
-            window._defectListScrollSelectedId = null;
         }
 
         updateUndoRedoButtons();
@@ -26599,12 +26594,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             bulkMobileBtn.disabled = n < 2;
             bulkMobileBtn.title = n > 1 ? `선택한 결함 ${n}건 일괄 수정` : '2개 이상 선택 시 일괄 수정';
         }
-        // 결함목록: 도면 선택 시만 스크롤 / 목록 클릭·필터 등은 스크롤 위치 유지
-        // 드래그 중 center 스크롤 금지(mouseup 후 1회는 호출측에서 scrollToSelection:true 허용)
+        // 결함목록: 선택됨은 바깥 고정 칸 — 본 목록 scrollTop은 선택 변경으로 움직이지 않음
+        // scrollToSelection 플래그는 호환용(렌더러가 목록 점프에 쓰지 않음)
         if (typeof renderDefectListPanel === 'function') {
-            const wantScroll = options.scrollToSelection === true
-                && !(typeof isMapPinDragActive === 'function' && isMapPinDragActive());
-            renderDefectListPanel({ scrollToSelection: wantScroll });
+            renderDefectListPanel({ scrollToSelection: false });
         }
         if (typeof syncAreaToolPanelUi === 'function') syncAreaToolPanelUi();
         // 조사항목 창 OFF: 좌상단 팝업으로 선택 결함 내용·폭 표시
