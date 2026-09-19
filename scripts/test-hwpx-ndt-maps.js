@@ -71,10 +71,26 @@ function testDropEmptyMemberDisp() {
     assert.ok(!api.shouldDropEmptyHeading('비파괴 장비조사 사진첩', { measure: false }));
 }
 
+function testStrengthMapIncludesCatwalk() {
+    const inserts = api.expandLocationMapInserts(
+        { strengthCarb: true },
+        [
+            { category: '강도', _ndtFloorCode: '1F', _ndtFloorLabel: '지상 1층' },
+            { category: '탄산화', _ndtFloorCode: '캣워크', _ndtFloorLabel: '캣워크' }
+        ],
+        [],
+        '1F'
+    );
+    assert.deepStrictEqual(inserts.map((i) => i.floorCode), ['1F', '캣워크']);
+    assert.strictEqual(inserts[0].title, '비파괴장비조사 위치도');
+    assert.ok(inserts[1].manyFloors);
+}
+
 testJobsSkipEmpty();
 testCaptionStartsAt718();
 testHeadingContainsIgnoresNumber();
 testUniqueFloors();
 testExpandCaptions718();
 testDropEmptyMemberDisp();
+testStrengthMapIncludesCatwalk();
 console.log('test-hwpx-ndt-maps: ok');

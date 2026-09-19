@@ -129,6 +129,31 @@ function testExtraDrawingsDoNotCollapseTo1F() {
     assert.ok(!assigned.includes('1F'));
 }
 
+function testCatwalkIsIncludedWhenMissingFromFloorsList() {
+    const bldg = {
+        id: 'mustard',
+        floorsList: [{ floorCode: '1F', floorLabel: '지상 1층 (1F)' }],
+        floorDrawings: { '1F': 'data:1', '캣워크': 'data:c' }
+    };
+    const codes = api.listFloorCodesForNdtReport(bldg, [
+        { mustard_1F: [{}], mustard_캣워크: [{ category: '강도' }] }
+    ]);
+    assert.deepStrictEqual(codes, ['1F', '캣워크']);
+}
+
+function testNdtOnlyFloorKeysAreIncluded() {
+    const bldg = {
+        id: 'b1',
+        floorsList: [{ floorCode: '1F', floorLabel: '지상 1층 (1F)' }]
+    };
+    const codes = api.listFloorCodesForNdtReport(bldg, [
+        { b1_1F: [] },
+        { b1_캣워크층: [{ id: 'ndtg_1' }] }
+    ]);
+    assert.ok(codes.includes('1F'));
+    assert.ok(codes.includes('캣워크층'));
+}
+
 testParkingIsNotBasement();
 testCustomLabelNotRewritten();
 testUserOrderPreserved();
@@ -140,4 +165,6 @@ testUnmatchedFilenameIsNot1F();
 testUniquifyCustomOnly();
 testAssignParsedFloorForUpload();
 testExtraDrawingsDoNotCollapseTo1F();
+testCatwalkIsIncludedWhenMissingFromFloorsList();
+testNdtOnlyFloorKeysAreIncluded();
 console.log('test-floor-identity: ok');

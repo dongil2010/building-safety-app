@@ -585,5 +585,13 @@
 > 수정: SW는 같은 출처만 처리. 브라우저 REST+Auth 중단. 본문은 Worker `proxyStorage` POST.
 > 앱 홈 새로고침 필요(sw.js).
 
+### ⚡ [Cursor] - 2026-09-19 17:35:00
+> **`[IN_PROGRESS]` 캣워크 NDT 누락 + 부동침하 삭제 부활**
+>
+> 보고서/HWPX가 `floorsList`만 봐서 드롭다운에 있는 캣워크 층이 빠짐.
+> 부동침하·부재변위는 선택 삭제 때 묘비를 안 남겨 동기화 후 번호가 되살아남.
+> 실측·강도·탄산화·기울기·내화피복은 표/선택 삭제 모두 `deletedNdtIds`를 씀.
+> 브랜치: `cursor/ndt-catwalk-disp-revive-720c`
+
 
 

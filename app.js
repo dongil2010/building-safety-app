@@ -1550,6 +1550,12 @@ document.addEventListener('DOMContentLoaded', () => {
         Object.keys(window.state.ndtData || {}).forEach((k) => {
             if (k.startsWith(prefix)) codes.add(k.slice(prefix.length));
         });
+        Object.keys(window.state.ndtDisplacementGroups || {}).forEach((k) => {
+            if (k.startsWith(prefix)) codes.add(k.slice(prefix.length));
+        });
+        Object.keys(window.state.ndtImages || {}).forEach((k) => {
+            if (k.startsWith(prefix)) codes.add(k.slice(prefix.length));
+        });
         if (window.state.currentBuildingId === bldg.id && window.state.currentFloor) {
             codes.add(window.state.currentFloor);
         }
@@ -3716,7 +3722,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (m) return Number(m[1]) || 0;
         }
         if (kind === 'ndt') {
-            const m = /^ndt_(\d+)/.exec(id);
+            const m = /^(?:ndt_|ndtg_|ndtp_)(\d+)/.exec(id);
             if (m) return Number(m[1]) || 0;
         }
         return 0;
@@ -9986,11 +9992,13 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         }
         if (dispIds.length) {
             if (!state.ndtDisplacementGroups[key]) state.ndtDisplacementGroups[key] = [];
+            dispIds.forEach((id) => trackNdtDeletion(key, id));
             state.ndtDisplacementGroups[key] = state.ndtDisplacementGroups[key].filter(g => !dispIds.includes(g.id));
             if (window._activeNdtDispGroupId && dispIds.includes(window._activeNdtDispGroupId)) {
                 setActiveNdtDispGroup(null);
             }
         }
+        if (typeof markFloorKeyDirty === 'function') markFloorKeyDirty(key);
         selectedNdtIds.clear();
         updateNdtSelectionBar();
         saveStateToLocalStorage();
@@ -10198,18 +10206,48 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         return state.ndtData[key];
     }
 
+    // 점검층 드롭다운(getBuildingAvailableFloors)과 같이, floorsList에 없는 추가 도면 층
+    // (캣워크 등)과 ndtData/변위 맵에만 있는 층도 포함한다. floorsList만 보면 지상1층만 나온다.
+    function listNdtFloorCodesForBuilding(buildingId) {
+        const bldg = (state.buildings || []).find((b) => b && b.id === buildingId) || null;
+        const seen = new Set();
+        const out = [];
+        const add = (fc) => {
+            if (!fc) return;
+            const code = String(fc);
+            if (seen.has(code)) return;
+            if (bldg && typeof isDeletedDrawingFloor === 'function' && isDeletedDrawingFloor(bldg, code)) return;
+            seen.add(code);
+            out.push(code);
+        };
+        if (bldg && typeof window.getBuildingAvailableFloors === 'function') {
+            (window.getBuildingAvailableFloors(bldg) || []).forEach((f) => add(f && (f.floorCode || f)));
+        } else if (bldg && Array.isArray(bldg.floorsList)) {
+            bldg.floorsList.forEach((f) => add(f && f.floorCode));
+        }
+        const fi = window.BSA && window.BSA.floorIdentity;
+        const extraMaps = [state.ndtData, state.ndtDisplacementGroups, state.ndtImages];
+        if (fi && typeof fi.listFloorCodesForNdtReport === 'function') {
+            fi.listFloorCodesForNdtReport(bldg || { id: buildingId }, extraMaps).forEach(add);
+        } else {
+            const prefix = `${buildingId}_`;
+            extraMaps.forEach((map) => {
+                Object.keys(map || {}).forEach((k) => {
+                    if (k.startsWith(prefix)) add(k.slice(prefix.length));
+                });
+            });
+        }
+        return out;
+    }
+    window.listNdtFloorCodesForBuilding = listNdtFloorCodesForBuilding;
+
     // 비파괴조사 NO.는 층별이 아니라 건물 전체(카테고리별)로 이어지게 한다 — 1층에서
     // NO.06까지 썼으면 5층은 NO.07부터 시작해야 해서, 번호 매길 땐 현재 층뿐 아니라
     // 이 건물의 모든 층 항목을 모아서 세야 한다. floorsList 순서대로 모아서, 결과표를
     // 합칠 때도(건물 전체 결과표) 같은 순서를 쓸 수 있게 한다.
     function getAllFloorsNdtData(buildingId) {
         if (!buildingId || !state.ndtData) return [];
-        const bldg = (state.buildings || []).find(b => b.id === buildingId);
-        const floorCodes = (bldg && Array.isArray(bldg.floorsList) && bldg.floorsList.length > 0)
-            ? bldg.floorsList.map(f => f.floorCode)
-            : Object.keys(state.ndtData)
-                .filter(k => k.startsWith(buildingId + '_'))
-                .map(k => k.slice(buildingId.length + 1));
+        const floorCodes = listNdtFloorCodesForBuilding(buildingId);
         const seen = new Set();
         const out = [];
         floorCodes.forEach(fc => {
@@ -10228,12 +10266,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     // 기존 방식(현재 보고 있는 층 등) 그대로 쓴다.
     function buildCombinedNdtDataForReport(buildingId) {
         if (!buildingId) return { allItems: [], allDispGroups: [] };
-        const bldg = (state.buildings || []).find(b => b.id === buildingId);
-        const floorCodes = (bldg && Array.isArray(bldg.floorsList) && bldg.floorsList.length > 0)
-            ? bldg.floorsList.map(f => f.floorCode)
-            : Object.keys(state.ndtData || {})
-                .filter(k => k.startsWith(buildingId + '_'))
-                .map(k => k.slice(buildingId.length + 1));
+        const floorCodes = listNdtFloorCodesForBuilding(buildingId);
         const allItems = [];
         const allDispGroups = [];
         const seen = new Set();
@@ -11174,12 +11207,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     // 카테고리별)로 센다 — 1층에서 NO.03까지 썼으면 5층은 NO.04부터 시작해야 한다.
     function getAllFloorsDisplacementGroups(buildingId, cat = null) {
         if (!buildingId || !state.ndtDisplacementGroups) return [];
-        const bldg = (state.buildings || []).find(b => b.id === buildingId);
-        const floorCodes = (bldg && Array.isArray(bldg.floorsList) && bldg.floorsList.length > 0)
-            ? bldg.floorsList.map(f => f.floorCode)
-            : Object.keys(state.ndtDisplacementGroups)
-                .filter(k => k.startsWith(buildingId + '_'))
-                .map(k => k.slice(buildingId.length + 1));
+        const floorCodes = listNdtFloorCodesForBuilding(buildingId);
         const targetCat = cat || currentNdtCategory || '변위';
         const seen = new Set();
         const out = [];
@@ -11630,11 +11658,13 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
         if (group) {
             group.points.push(point);
+            group.updatedAt = Date.now();
             setActiveNdtDispGroup(group);
             recordNdtDispMarkUndo({
                 key, groupId: group.id, pointId: point.id, createdGroup: false
             });
             saveStateToLocalStorage();
+            if (typeof markFloorKeyDirty === 'function') markFloorKeyDirty(key);
             drawNdtCanvas();
             renderNdtSummaryTable();
             const seq = formatNdtDisplacementPointLabel(group.points.length);
@@ -11653,7 +11683,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             color,
             boxX: imgX - 40,
             boxY: imgY - 50,
-            points: [point]
+            points: [point],
+            updatedAt: Date.now()
         };
         groups.push(group);
         setActiveNdtDispGroup(group);
@@ -11661,6 +11692,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             key, groupId: group.id, pointId: point.id, createdGroup: true
         });
         saveStateToLocalStorage();
+        if (typeof markFloorKeyDirty === 'function') markFloorKeyDirty(key);
         drawNdtCanvas();
         renderNdtSummaryTable();
         window.showToast(`${group.groupNo} 구역 시작 · 계속 마킹 후 NO.박스를 눌러 위치·길이·레벨 입력`, 'info', 3600);
@@ -14518,6 +14550,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const key = `${state.currentBuildingId}_${state.currentFloor}`;
         trackNdtDeletion(key, id);
         state.ndtData[key] = (state.ndtData[key] || []).filter(x => x.id !== id);
+        if (typeof markFloorKeyDirty === 'function') markFloorKeyDirty(key);
         saveStateToLocalStorage();
         drawNdtCanvas();
         renderNdtSummaryTable();
@@ -17474,9 +17507,11 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             trackNdtDeletion(key, groupId);
             closeNdtDisplacementGroupEditModal();
         } else {
+            group.updatedAt = Date.now();
             setActiveNdtDispGroup(group);
             renderNdtDispGroupPointList(group);
         }
+        if (typeof markFloorKeyDirty === 'function') markFloorKeyDirty(key);
         saveStateToLocalStorage();
         drawNdtCanvas();
         renderNdtSummaryTable();
@@ -17489,6 +17524,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         // 묘비를 남기지 않으면 병합 때 서버에 남아있던 구역이 그대로 되살아난다
         trackNdtDeletion(key, groupId);
         if (window._activeNdtDispGroupId === groupId) setActiveNdtDispGroup(null);
+        if (typeof markFloorKeyDirty === 'function') markFloorKeyDirty(key);
         saveStateToLocalStorage();
         drawNdtCanvas();
         renderNdtSummaryTable();
@@ -34099,12 +34135,38 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         return null;
     }
 
+    /** 비파괴 위치도: 해당 층 도면만. 1F 폴백을 쓰면 캣워크가 지상1층 도면으로 나간다. */
+    function getNdtFloorDrawingSrc(bldg, floorCode) {
+        const currentBldgId = (bldg && bldg.id) || (state && state.currentBuildingId);
+        const key = (currentBldgId && floorCode) ? `${currentBldgId}_${floorCode}` : '';
+        if (key && state.ndtImages && state.ndtImages[key]) return state.ndtImages[key];
+        const exact = bldg && bldg.floorDrawings && bldg.floorDrawings[floorCode];
+        if (exact) {
+            if (typeof isUsableRasterDrawingUrl === 'function') {
+                if (isUsableRasterDrawingUrl(exact)) return exact;
+            } else {
+                return exact;
+            }
+        }
+        if (state.currentFloor === floorCode && state.ndtBgImage && state.ndtBgImage.src) {
+            return state.ndtBgImage.src;
+        }
+        if (state.currentFloor === floorCode && state.bgImage && state.bgImage.src) {
+            return state.bgImage.src;
+        }
+        return null;
+    }
+
     async function preloadFloorDrawings(bldg) {
         if (!state.floorImageCache) state.floorImageCache = {};
         if (!bldg) return;
 
         let availableFloors = [];
-        if (bldg.floorsList && bldg.floorsList.length > 0) {
+        if (bldg && bldg.id && typeof listNdtFloorCodesForBuilding === 'function') {
+            availableFloors = listNdtFloorCodesForBuilding(bldg.id);
+        } else if (typeof window.getBuildingAvailableFloors === 'function' && bldg) {
+            availableFloors = (window.getBuildingAvailableFloors(bldg) || []).map((f) => f && f.floorCode).filter(Boolean);
+        } else if (bldg.floorsList && bldg.floorsList.length > 0) {
             availableFloors = bldg.floorsList.map(f => f.floorCode);
         } else if (bldg.floorDrawings) {
             availableFloors = Object.keys(bldg.floorDrawings);
@@ -34835,13 +34897,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             }
 
             let loadedImg = state.floorImageCache ? state.floorImageCache[`${currentBldgId}_${floorCode}`] : null;
-            let floorDrawingSrc = getFloorDrawingSrc(bldg, floorCode);
-            if (!floorDrawingSrc && state.currentFloor === floorCode && state.ndtBgImage && state.ndtBgImage.src) {
-                floorDrawingSrc = state.ndtBgImage.src;
-            }
-            if (!floorDrawingSrc && state.currentFloor === floorCode && state.bgImage && state.bgImage.src) {
-                floorDrawingSrc = state.bgImage.src;
-            }
+            let floorDrawingSrc = getNdtFloorDrawingSrc(bldg, floorCode);
 
             if (loadedImg || floorDrawingSrc) {
                 const drawImageOnPureWhiteCanvas = (imgObj) => {
@@ -34929,10 +34985,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             if (typeof hydrateFloorDrawingFromCloud === 'function' && bldg.id && floorCode) {
                 try { await hydrateFloorDrawingFromCloud(bldg, floorCode, { localOnly: false }); } catch (_e) { /* ignore */ }
             }
-            const exact = bldg.floorDrawings && bldg.floorDrawings[floorCode];
-            const src = (typeof isUsableRasterDrawingUrl === 'function')
-                ? (isUsableRasterDrawingUrl(exact) ? exact : null)
-                : (exact || getFloorDrawingSrc(bldg, floorCode));
+            const src = (typeof getNdtFloorDrawingSrc === 'function')
+                ? getNdtFloorDrawingSrc(bldg, floorCode)
+                : (bldg.floorDrawings && bldg.floorDrawings[floorCode]);
             if (!src) return renderNdtFloorPlanCanvasDataUrl(floorCode, categoryFilter);
             let img = null;
             try {
@@ -35036,7 +35091,11 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             await preloadFloorDrawings(bldg);
 
             let availableFloors = [];
-            if (bldg.floorsList && bldg.floorsList.length > 0) {
+            if (bldg && bldg.id && typeof listNdtFloorCodesForBuilding === 'function') {
+                availableFloors = listNdtFloorCodesForBuilding(bldg.id);
+            } else if (typeof window.getBuildingAvailableFloors === 'function') {
+                availableFloors = (window.getBuildingAvailableFloors(bldg) || []).map((f) => f && f.floorCode).filter(Boolean);
+            } else if (bldg.floorsList && bldg.floorsList.length > 0) {
                 availableFloors = bldg.floorsList.map(f => f.floorCode);
             } else if (bldg.floorDrawings && Object.keys(bldg.floorDrawings).length > 0) {
                 availableFloors = Object.keys(bldg.floorDrawings);
@@ -36717,15 +36776,24 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (!bldg || !bldgId) { window.showToast('건축물을 먼저 선택해주세요.', 'warning'); return; }
 
         const getFloorLabel = (floorCode) => {
-            const f = (bldg.floorsList || []).find(f => f.floorCode === floorCode);
+            const fromList = (bldg.floorsList || []).find(f => f.floorCode === floorCode);
+            const raw = fromList
+                ? fromList.floorLabel
+                : (typeof window.getFloorLabelFromCode === 'function'
+                    ? window.getFloorLabelFromCode(floorCode, bldg)
+                    : floorCode);
             // "지하 1층"처럼 "지하/지상"과 숫자 사이에 띄어쓰기가 들어간 라벨을 표본 문서와 같은
             // "지하1층" 붙여쓰기 형식으로 맞춘다.
-            return stripFloorCodeSuffix(f ? f.floorLabel : floorCode).replace(/\s+(?=\d)/g, '');
+            return stripFloorCodeSuffix(raw || floorCode).replace(/\s+(?=\d)/g, '');
         };
 
         // PDF 보고서와 동일하게, 현재 층 하나가 아니라 건물에 등록된 모든 층을 대상으로 한다.
         let availableFloors = [];
-        if (bldg.floorsList && bldg.floorsList.length > 0) {
+        if (bldg && bldg.id && typeof listNdtFloorCodesForBuilding === 'function') {
+            availableFloors = listNdtFloorCodesForBuilding(bldg.id);
+        } else if (typeof window.getBuildingAvailableFloors === 'function') {
+            availableFloors = (window.getBuildingAvailableFloors(bldg) || []).map((f) => f && f.floorCode).filter(Boolean);
+        } else if (bldg.floorsList && bldg.floorsList.length > 0) {
             availableFloors = bldg.floorsList.map(f => f.floorCode);
         } else if (window.state.currentFloor) {
             availableFloors = [window.state.currentFloor];
@@ -47236,12 +47304,16 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             isChanged = true;
         }
 
-        if (Object.prototype.hasOwnProperty.call(data, 'ndtDisplacementGroups')) {
+        if (Object.prototype.hasOwnProperty.call(data, 'ndtDisplacementGroups')
+            || Object.prototype.hasOwnProperty.call(data, 'deletedNdtIds')
+            || Object.prototype.hasOwnProperty.call(data, 'deletedNdtAt')) {
             const dispMerge = mergeNdtDataMaps(
                 filterMapKeysByDeletedBuildings(data.ndtDisplacementGroups || {}, mergedDeletedBuildings),
                 filterMapKeysByDeletedBuildings(window.state.ndtDisplacementGroups || {}, mergedDeletedBuildings),
-                {},
-                {}
+                filterMapKeysByDeletedBuildings(data.deletedNdtIds || {}, mergedDeletedBuildings),
+                filterMapKeysByDeletedBuildings(window.state.deletedNdtIds || {}, mergedDeletedBuildings),
+                filterMapKeysByDeletedBuildings(data.deletedNdtAt || {}, mergedDeletedBuildings),
+                filterMapKeysByDeletedBuildings(window.state.deletedNdtAt || {}, mergedDeletedBuildings)
             );
             window.state.ndtDisplacementGroups = dispMerge.ndtData;
             isChanged = true;

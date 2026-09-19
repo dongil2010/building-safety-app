@@ -158,6 +158,35 @@
     }
 
     /**
+     * 비파괴조사 결과표·위치도에 넣을 층 코드.
+     * floorsList만 보면 드롭다운에는 있는 캣워크 같은 추가 도면 층이 빠진다.
+     */
+    function listFloorCodesForNdtReport(bldg, extraKeyMaps) {
+        const codes = [];
+        const seen = {};
+        const add = function (fc) {
+            const c = asText(typeof fc === 'string' ? fc : (fc && fc.floorCode));
+            if (!c || seen[c]) return;
+            seen[c] = true;
+            codes.push(c);
+        };
+        (bldg && bldg.floorsList || []).forEach(add);
+        (bldg && bldg.drawingFloorCodes || []).forEach(add);
+        Object.keys((bldg && bldg.floorDrawings) || {}).forEach(add);
+        Object.keys((bldg && bldg.floorDrawingPdfs) || {}).forEach(add);
+        Object.keys((bldg && bldg.floorDrawingTiers) || {}).forEach(add);
+        Object.keys((bldg && bldg.floorDrawingSources) || {}).forEach(add);
+        const prefix = (bldg && bldg.id) ? String(bldg.id) + '_' : '';
+        (extraKeyMaps || []).forEach(function (map) {
+            Object.keys(map || {}).forEach(function (k) {
+                if (!prefix) return;
+                if (String(k).indexOf(prefix) === 0) add(String(k).slice(prefix.length));
+            });
+        });
+        return codes;
+    }
+
+    /**
      * preferred(사용자가 저장한 floorsList) 순서를 최우선.
      * 목록에 없는 새 표준 층만 뒤에 저층→고층으로 붙인다.
      */
@@ -334,6 +363,7 @@
         lookupFloorLabel: lookupFloorLabel,
         sortFloorsLowToHigh: sortFloorsLowToHigh,
         assembleFloors: assembleFloors,
+        listFloorCodesForNdtReport: listFloorCodesForNdtReport,
         stemFromFilename: stemFromFilename,
         parseCustomStemFromFilename: parseCustomStemFromFilename,
         unmatchedFloorFromFilename: unmatchedFloorFromFilename,
