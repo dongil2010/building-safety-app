@@ -1,11 +1,11 @@
 /* ==========================================================================
-   건축물 안전점검 — Service Worker (PWA)
-   앱 JS/CSS는 네트워크 전용(캐시 fallback 없음) — 모바일 웹 구버전 고착 방지
+   건축�??�전?��? ??Service Worker (PWA)
+   ??JS/CSS???�트?�크 ?�용(캐시 fallback ?�음) ??모바????구버??고착 방�?
    ========================================================================== */
 
-const CACHE_NAME = 'building-safety-v20260919_205931';
+const CACHE_NAME = 'building-safety-v20260919_210319';
 
-/** 오프라인 셸·한글 템플릿만 선캐시 (app.js / js/* 는 제외) */
+/** ?�프?�인 ?�·한글 ?�플릿만 ?�캐??(app.js / js/* ???�외) */
 const STATIC_ASSETS = [
     './manifest.json',
     './web-version.json',
@@ -61,9 +61,9 @@ self.addEventListener('fetch', (event) => {
     if (event.request.method !== 'GET') return;
 
     const url = event.request.url;
-    // 다른 출처(Storage·Firestore·Worker·CDN)는 가로채지 않는다.
-    // firebasestorage GET 응답에 CORS 헤더가 없으면 SW fetch가 실패하고
-    // 아래 catch가 status 503「오프라인」을 만들어 「Storage REST 503」처럼 보인다.
+    // ?�른 출처(Storage·Firestore·Worker·CDN)??가로채지 ?�는??
+    // firebasestorage GET ?�답??CORS ?�더가 ?�으�?SW fetch가 ?�패?�고
+    // ?�래 catch가 status 503?�오?�라?�」을 만들???�Storage REST 503?�처??보인??
     try {
         if (new URL(url).origin !== self.location.origin) return;
     } catch (_e) {
@@ -72,8 +72,8 @@ self.addEventListener('fetch', (event) => {
     if (url.includes('firestore.googleapis.com') || url.includes('google.com/recaptcha')) {
         return;
     }
-    // 브라우저 확장(chrome-extension:) 등 http(s)가 아닌 요청은 Cache API에 못 넣는다.
-    // 그냥 두면 cache.put이 거부돼 "Uncaught (in promise) TypeError"가 콘솔에 남는다.
+    // 브라?��? ?�장(chrome-extension:) ??http(s)가 ?�닌 ?�청?� Cache API??�??�는??
+    // 그냥 ?�면 cache.put??거�???"Uncaught (in promise) TypeError"가 콘솔???�는??
     if (!url.startsWith('http:') && !url.startsWith('https:')) {
         return;
     }
@@ -88,9 +88,9 @@ self.addEventListener('fetch', (event) => {
         event.respondWith(
             fetch(event.request, { cache: 'no-store' }).catch(() => {
                 if (isHtml) {
-                    return caches.match('./index.html').then((r) => r || new Response('오프라인', { status: 503 }));
+                    return caches.match('./index.html').then((r) => r || new Response('?�프?�인', { status: 503 }));
                 }
-                return new Response('오프라인 — 네트워크 연결 후 새로고침해 주세요.', {
+                return new Response('?�프?�인 ???�트?�크 ?�결 ???�로고침??주세??', {
                     status: 503,
                     headers: { 'Content-Type': 'text/plain; charset=utf-8' }
                 });
@@ -104,7 +104,7 @@ self.addEventListener('fetch', (event) => {
             .then((networkResponse) => {
                 if (networkResponse && networkResponse.status === 200 && networkResponse.type === 'basic') {
                     const clone = networkResponse.clone();
-                    // 캐시 저장 실패(용량 초과·저장 불가 스킴 등)는 응답 자체와 무관하므로 삼킨다
+                    // 캐시 ?�???�패(?�량 초과·?�??불�? ?�킴 ?????�답 ?�체?� 무�??��?�??�킨??
                     caches.open(CACHE_NAME)
                         .then((cache) => cache.put(event.request, clone))
                         .catch(() => {});
@@ -113,7 +113,7 @@ self.addEventListener('fetch', (event) => {
             })
             .catch(() => caches.match(event.request).then((cached) => {
                 if (cached) return cached;
-                return new Response('오프라인', { status: 503 });
+                return new Response('?�프?�인', { status: 503 });
             }))
     );
 });
