@@ -593,5 +593,11 @@
 > 실측·강도·탄산화·기울기·내화피복은 표/선택 삭제 모두 `deletedNdtIds`를 씀.
 > 브랜치: `cursor/ndt-catwalk-disp-revive-720c`
 
+### ⚡ [Cursor] - 2026-09-19 17:42:00
+> **`[COMPLETED]` 캣워크 NDT 누락 + 부동침하 삭제 부활 — main 배포**
+>
+> 보고서/HWPX가 추가 도면 층(캣워크)까지 포함. 부동침하·부재변위 선택 삭제에 묘비.
+> GitHub Pages 반영 후 홈 새로고침.
+
 
 
