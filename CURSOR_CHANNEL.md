@@ -87,6 +87,9 @@
 | Local E2E verification on `localhost:8000` | Antigravity & Cursor | `[IN_PROGRESS]` | Testing local server |
 | Firestore 읽기 가드 1·2·3·7·8·9·10 | Cursor | `[COMPLETED]` | debounce 3–5s, photo get 한도, QR 구독 해제, joinCodes list 인증, 로그인 중복 get, 다중탭 경고. main 배포 |
 | Firestore 읽기 가드 4·5 | Cursor | `[COMPLETED]` | syncLease → syncLeases 문서, dirty 배치 8→3. 6 rules exists()는 Claude. joinCodes 규칙 게시는 콘솔 |
+| Firestore 읽기 가드 6 (rules exists() → Auth claims) | Claude | `[ON_HOLD]` | 규칙·`functions/`는 반영됨. 클라는 `ENABLE_COMPANY_AUTH_CLAIMS = false` 로 꺼둠 |
+| Firestore 읽기 가드 8 잔여 (joinCodes list 축소) | Claude | `[COMPLETED]` | 목록 상한 50 + 식별코드 단건 get + 미로그인 가드. 규칙 게시 확인됨 |
+| 🔴 `syncLeases` 규칙 미게시로 동기화 전면 차단 | Claude | `[COMPLETED]` | Cursor 4번 코드만 배포되고 규칙이 없어 lease가 permission-denied. 규칙 게시로 해소 |
 
 ---
 
@@ -641,3 +644,77 @@
 
 
 
+
+### 🔷 [Claude Code] - 2026-09-19 20:05:00
+> **`[WAITING_REVIEW]` 읽기 가드 6 (규칙 exists() → Auth custom claims) + 8 잔여 (joinCodes list 축소)**
+>
+> **Cursor 4·5와 겹치지 않았습니다.** `getSyncLeaseDocRef`, `SYNC_DIRTY_FLOOR_BATCH_MAX = 3`,
+> lease 경로(`safety_app/{company}/syncLeases/{id}`), 사진 동시 4·hydrate 24, photoRelay 해제,
+> 디바운스 3초 — 전부 그대로 두고 확인만 했습니다(`scripts/test-firestore-read-guards.js` 기존 단언 전부 통과).
+>
+> **6번 — 왜 필요한지 근거**: 규칙 안의 `exists()`/`get()`도 문서 읽기로 과금되고, **실시간 리스너는
+> 스냅샷이 갱신될 때마다 규칙을 다시 평가**합니다. 즉 층 문서 1건을 받을 때마다 `members` 문서가
+> 같이 과금돼 읽기가 사실상 2배였습니다. Storage 사진 GET도 `firestore.exists`로 매번 1읽기.
+>
+> 수정:
+> 1. `firestore.rules` / `storage.rules` — `isCompanyMember`를 `hasCompanyClaim(companyId) || exists(...)`
+>    로. 규칙의 `||`는 **단락 평가**라 클레임이 맞으면 `exists()`가 실행되지 않습니다.
+>    `isCompanyAdmin`도 `hasCompanyAdminClaim || get(...)`. **폴백을 일부러 남겼습니다** —
+>    클레임 없는 기존 세션이 한 번에 잠기면 안 되기 때문입니다.
+> 2. `functions/index.js` (신규) — `onCompanyMemberWrite` 트리거가
+>    `companies/{companyId}/members/{uid}` 생성/삭제/변경에 반응해 클레임을 심고 지웁니다.
+>    회사 생성·가입 승인·거절·추방·탈퇴가 전부 이 문서 하나로 끝나서 **클라이언트 흐름을 고칠 필요가
+>    없었습니다.** 삭제 때는 현재 클레임이 그 회사를 가리킬 때만 지웁니다.
+>    이미 멤버인 기존 계정은 트리거가 영영 안 도니까 `syncCompanyClaims`(HTTPS)로 로그인 때 1회 교정.
+>    이 엔드포인트는 호출자가 보낸 companyId를 믿지 않고 **토큰 uid로 서버가 `members`를 다시 확인**합니다.
+> 3. `app.js` `ensureCompanyAuthClaims` — 토큰이 이미 맞으면 **네트워크 호출 0회**.
+>    다르면 함수 호출 후 `getIdToken(true)`. 리스너 붙기 전에 실행됩니다.
+>    미배포·오프라인이면 조용히 건너뛰고 폴백 규칙으로 정상 동작(세션당 1회만 시도, 6초 타임아웃).
+>
+> ⚠️ **알고 써야 할 보안 트레이드오프**: 클레임은 ID 토큰에 담기므로, **멤버를 추방해도 그 사람의
+> 기존 토큰이 만료될 때까지(최대 1시간) 접근이 남습니다.** 예전 `exists()` 방식은 즉시 차단이었습니다.
+> 즉시 차단이 필요하면 6번을 되돌리거나 추방 시 별도 차단 목록을 둬야 합니다.
+>
+> **8번 잔여**: `joinCodes` 전체 `.get()` 제거.
+> 회사가 적을 땐 5분 캐시된 전체 목록이 더 싸고, 많을 땐 prefix 쿼리가 싸서 **적응형**으로 했습니다 —
+> 목록을 `limit(50)`으로 받아 상한에 안 걸리면(=목록이 완전) 예전처럼 캐시 부분일치, 걸리면
+> `orderBy('companyName')` prefix 20건을 추가로 씁니다. 6자리 식별코드는 어느 경우에도 `doc(code).get()`
+> 1건. 미로그인 상태에서는 컬렉션 list를 아예 시도하지 않습니다(`isJoinDirectoryReadable`).
+> 검색 UX(이름 일부 일치, 동명 회사 식별코드 표시)는 그대로입니다. 색인 추가 불필요(단일 필드 자동 색인).
+>
+> 🚨 **실측 확인: `firestore.rules`가 아직 프로덕션에 게시되지 않았습니다.**
+> 토큰 없이 REST로 `joinCodes` list를 호출하니 **HTTP 200 + 문서 반환**이었습니다.
+> GitHub만 바꿔서는 안 바뀝니다 — Firebase 콘솔에 붙여넣고 **게시(Publish)** 해야 합니다.
+>
+> **배포 필요(사용자)**: ① Firestore 규칙 게시 ② Storage 규칙 게시 ③ `firebase deploy --only functions`.
+> ①②를 안 하면 읽기가 안 줄고, ③을 안 하면 클레임이 안 생겨 계속 `exists()` 폴백으로 돕니다.
+> **셋 다 안 해도 앱은 지금처럼 동작합니다.**
+>
+> 검증: 이 PC에 node가 없어 `scripts/test-firestore-read-guards.js`의 단언 전부(기존 + 신규 24개)를
+> 브라우저에서 동일 재현 — 실패 0. `app.js` 전체 파싱 확인(`window.BSA` 19개 모듈, 끝부분 함수 정의됨).
+> `functions/index.js` 구문 검사 통과. **Pages 배포는 사용자 "동기화" 지시 전까지 하지 않았습니다.**
+
+### 🔷 [Claude Code] - 2026-09-19 20:40:00
+> **`[COMPLETED]` 규칙 게시 완료 — `syncLeases` 누락으로 동기화가 막혀 있던 것 해소 / 6번은 보류**
+>
+> 🔴 **Cursor·다른 에이전트 필독**: 4번(lease 분리) 코드는 `fa97e80` 로 Pages에 배포됐는데
+> `firestore.rules` 의 `match /syncLeases/{leaseId}` 가 **콘솔에 게시되지 않았습니다.**
+> `safety_app/{companyId}` 의 `allow read, write` 는 서브컬렉션을 덮지 않으므로
+> lease 문서가 맨 아래 `match /{document=**} { allow read, write: if false }` 에 걸렸고,
+> `acquireCompanySyncLease` 는 권한 오류를 재시도 없이 그대로 던집니다(app.js `isFirestorePermissionError`).
+> → **모든 동기화가 업로드 시작 전에 중단되고 있었습니다.**
+> **교훈: 규칙이 필요한 코드를 Pages에 먼저 올리면 안 됩니다. 규칙 게시가 선행돼야 합니다.**
+>
+> 사용자가 Firestore·Storage 규칙을 모두 게시했고, 미인증 REST로 실측 확인했습니다:
+> `joinCodes` 컬렉션 list **403**(게시 전 200), `joinCodes` 단건 get **404**(가입 화면 정상),
+> `safety_app` **403**.
+>
+> **6번은 사용자 지시로 보류**합니다. 규칙의 `hasCompanyClaim(...) || exists(...)` 와 `functions/` 는
+> 그대로 두되, 클라이언트는 `ENABLE_COMPANY_AUTH_CLAIMS = false` 로 꺼뒀습니다.
+> 함수가 없는데 호출하면 로그인마다 실패 요청이 붙어 현장 망에서 로그인이 늦어지기 때문입니다.
+> 재개 방법: `firebase deploy --only functions` 후 이 상수만 `true` 로.
+> **꺼져 있어도 규칙은 exists() 폴백으로 흐르므로 동작에 문제 없습니다.**
+>
+> 8번 완료: `joinCodes` 전체 `.get()` 제거. 회사가 적으면 5분 캐시 목록(`limit(50)`)이 더 싸고
+> 많으면 prefix 쿼리가 싸서 적응형으로 했습니다. 6자리 식별코드는 항상 `doc(code).get()` 1건.
+> 미로그인 상태에선 컬렉션 list를 아예 시도하지 않습니다.

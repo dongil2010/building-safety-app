@@ -1,0 +1,13 @@
+{
+  "name": "building-safety-app-functions",
+  "description": "회사 소속을 Auth custom claims에 심어 규칙 exists() 과금을 없앤다",
+  "private": true,
+  "main": "index.js",
+  "engines": {
+    "node": "20"
+  },
+  "dependencies": {
+    "firebase-admin": "^12.1.0",
+    "firebase-functions": "^5.0.1"
+  }
+}

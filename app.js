@@ -48217,6 +48217,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
     let _joinCodesDirectoryCache = null;
     let _joinCodesDirectoryCacheAt = 0;
+    let _joinCodesDirectoryComplete = false;
     const JOIN_CODES_DIRECTORY_CACHE_MS = 5 * 60 * 1000;
     let _selectedJoinCompany = null;
     let _companyJoinSearchTimer = null;
@@ -48236,19 +48237,47 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         return `${name} <span class="company-join-search-code">${code}</span>`;
     }
 
+    // joinCodes 전체 list 는 회사가 늘수록 검색 1회당 읽기가 비례해서 커진다.
+    //
+    // 다만 회사가 적을 때는 "5분 캐시된 전체 목록"이 오히려 가장 싸다.
+    // (키를 칠 때마다 서버 prefix 쿼리를 던지면 20건 × 글자수가 되어 더 비싸다)
+    // 그래서 목록을 상한까지만 받고, 상한에 걸리지 않았으면(= 목록이 완전하면)
+    // 예전처럼 캐시로 부분일치하고, 상한에 걸렸을 때만 서버 prefix 쿼리로 넘어간다.
+    // 6자리 식별코드는 어느 경우에도 문서 1건만 읽는다.
+    const JOIN_CODES_DIRECTORY_MAX = 50;
+    const JOIN_CODE_PATTERN = /^[A-HJ-NP-Z2-9]{6}$/; // generateJoinCode 와 같은 문자셋
+
+    function joinCodeRowFromSnap(docSnap) {
+        const data = docSnap.data() || {};
+        return {
+            joinCode: docSnap.id,
+            companyId: data.companyId || '',
+            companyName: data.companyName || ''
+        };
+    }
+
+    function sortCompanyRowsByName(rows) {
+        return (rows || [])
+            .sort((a, b) => String(a.companyName || '').localeCompare(String(b.companyName || ''), 'ko'))
+            .slice(0, 20);
+    }
+
+    function isJoinDirectoryReadable() {
+        // 규칙상 joinCodes 컬렉션 list 는 로그인 사용자만 — 미로그인 호출은
+        // permission-denied 가 되므로 아예 시도하지 않는다.
+        return !!(db && auth && auth.currentUser);
+    }
+
     async function fetchJoinCodesDirectory(forceRefresh) {
-        if (!db) return [];
+        if (!isJoinDirectoryReadable()) return [];
         const stale = !_joinCodesDirectoryCache || (Date.now() - _joinCodesDirectoryCacheAt) > JOIN_CODES_DIRECTORY_CACHE_MS;
         if (!forceRefresh && !stale) return _joinCodesDirectoryCache;
-        const snap = await db.collection('joinCodes').get();
-        _joinCodesDirectoryCache = snap.docs.map((docSnap) => {
-            const data = docSnap.data() || {};
-            return {
-                joinCode: docSnap.id,
-                companyId: data.companyId || '',
-                companyName: data.companyName || ''
-            };
-        }).filter((row) => row.companyId && row.companyName);
+        const snap = await db.collection('joinCodes').limit(JOIN_CODES_DIRECTORY_MAX).get();
+        _joinCodesDirectoryCache = snap.docs
+            .map(joinCodeRowFromSnap)
+            .filter((row) => row.companyId && row.companyName);
+        // 상한만큼 꽉 찼다면 뒤에 더 있을 수 있다 = 이 목록만으로 검색하면 누락된다
+        _joinCodesDirectoryComplete = snap.size < JOIN_CODES_DIRECTORY_MAX;
         _joinCodesDirectoryCacheAt = Date.now();
         return _joinCodesDirectoryCache;
     }
@@ -48256,14 +48285,69 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     function searchCompaniesInDirectory(query, directory) {
         const q = String(query || '').trim().toLowerCase();
         if (!q || q.length < 1) return [];
-        return (directory || [])
+        return sortCompanyRowsByName((directory || [])
             .filter((row) => {
                 const name = String(row.companyName || '').toLowerCase();
                 const code = String(row.joinCode || '').toLowerCase();
                 return name.includes(q) || code.includes(q);
-            })
-            .sort((a, b) => String(a.companyName || '').localeCompare(String(b.companyName || ''), 'ko'))
-            .slice(0, 20);
+            }));
+    }
+
+    /** 식별코드 1건만 읽는다 (컬렉션 list 없음 — 미로그인도 규칙상 허용). */
+    async function lookupCompanyByJoinCode(code) {
+        if (!db) return [];
+        const snap = await db.collection('joinCodes').doc(code).get();
+        if (!snap.exists) return [];
+        const row = joinCodeRowFromSnap(snap);
+        return (row.companyId && row.companyName) ? [row] : [];
+    }
+
+    /** 회사명 앞부분 일치 — 서버에서 20건만 받는다. companyName 단일 필드 자동 색인 사용. */
+    async function searchCompaniesByNamePrefix(query) {
+        if (!isJoinDirectoryReadable()) return [];
+        const snap = await db.collection('joinCodes')
+            .orderBy('companyName')
+            .startAt(query)
+            .endAt(query + '')
+            .limit(20)
+            .get();
+        return snap.docs
+            .map(joinCodeRowFromSnap)
+            .filter((row) => row.companyId && row.companyName);
+    }
+
+    async function searchCompaniesForJoin(query) {
+        const raw = String(query || '').trim();
+        if (!raw || !db) return [];
+
+        const upper = raw.toUpperCase();
+        if (JOIN_CODE_PATTERN.test(upper)) {
+            try {
+                const hit = await lookupCompanyByJoinCode(upper);
+                if (hit.length) return hit;
+            } catch (e) {
+                console.warn('식별코드 조회 실패:', e);
+            }
+        }
+
+        // 5분 캐시된 목록. 회사가 상한보다 적으면 이것만으로 부분일치가 완전하다.
+        const directory = await fetchJoinCodesDirectory(false);
+        const local = searchCompaniesInDirectory(raw, directory);
+        if (_joinCodesDirectoryComplete) return local;
+
+        // 목록이 잘렸다 = 회사가 많다. 이때만 서버 prefix 쿼리를 더 던진다.
+        try {
+            const prefix = await searchCompaniesByNamePrefix(raw);
+            if (prefix.length) {
+                const seen = new Set(local.map((row) => row.joinCode));
+                return sortCompanyRowsByName(
+                    local.concat(prefix.filter((row) => !seen.has(row.joinCode)))
+                );
+            }
+        } catch (e) {
+            console.warn('회사명 prefix 검색 실패:', e);
+        }
+        return local;
     }
 
     function getSelectedJoinCompany() {
@@ -48311,8 +48395,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         resultsBox.hidden = false;
         resultsBox.innerHTML = '<div class="company-join-search-empty">검색 중...</div>';
         try {
-            const directory = await fetchJoinCodesDirectory(false);
-            const matches = searchCompaniesInDirectory(q, directory);
+            const matches = await searchCompaniesForJoin(q);
             if (!matches.length) {
                 resultsBox.innerHTML = '<div class="company-join-search-empty">일치하는 회사가 없습니다. 이름을 다시 확인해 주세요.</div>';
                 return;
@@ -48514,6 +48597,83 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         });
     }
 
+    // ------------------------------------------------------------------
+    // Auth custom claims (회사 소속) — 규칙 exists() 과금 제거용
+    //
+    // firestore.rules / storage.rules 는 token.companyId 를 먼저 보고, 맞으면
+    // members 문서 exists() 를 타지 않는다. 클레임이 없으면 예전처럼 exists()로
+    // 폴백하므로 아래가 실패해도 앱은 그대로 동작한다(읽기만 안 줄어듦).
+    //
+    // 클레임을 심는 쪽은 functions/index.js (Admin SDK). 새 승인·탈퇴는
+    // members 문서 트리거가 자동 처리하고, 이미 멤버인 기존 계정만 여기서 한 번
+    // 맞춰준다.
+    // ------------------------------------------------------------------
+    // ⚠️ 6번(클레임)은 보류 중이라 꺼져 있다.
+    // functions/ 를 `firebase deploy --only functions` 로 올린 뒤 이 값을 true 로 바꾸면
+    // 그때부터 규칙이 exists() 대신 토큰을 보게 되어 읽기가 줄어든다.
+    // 켜기 전에 확인할 것: 멤버를 추방해도 그 사람 토큰이 만료될 때까지(최대 1시간)
+    // 접근이 남는다. 즉시 차단이 필요하면 6번을 아예 쓰지 않는 게 맞다.
+    // 규칙(firestore.rules/storage.rules)은 이미 게시됐지만 클레임 없는 토큰은
+    // exists() 폴백으로 흐르므로, 꺼져 있어도 동작에 문제가 없다.
+    const ENABLE_COMPANY_AUTH_CLAIMS = false;
+    const CLAIMS_FUNCTION_REGION = 'us-central1';
+    const CLAIMS_SYNC_TIMEOUT_MS = 6000;
+    let _claimsSyncAttempted = null; // `${uid}:${companyId}` — 세션당 1회만 시도
+
+    function companyClaimsAlreadyMatch(claims, companyId, role) {
+        if (!claims || !companyId) return false;
+        if (claims.companyId !== companyId) return false;
+        // role 은 admin 판정에만 쓰이므로 member/admin 이 정확히 일치해야 한다
+        return (claims.role || 'member') === (role || 'member');
+    }
+
+    async function ensureCompanyAuthClaims(uid, companyId, role) {
+        if (!ENABLE_COMPANY_AUTH_CLAIMS) return;
+        if (!auth || !auth.currentUser || !companyId) return;
+
+        let claims = null;
+        try {
+            const tokenResult = await auth.currentUser.getIdTokenResult();
+            claims = (tokenResult && tokenResult.claims) || null;
+        } catch (e) {
+            return; // 토큰을 못 읽으면 폴백 규칙으로 계속 간다
+        }
+        // 이미 맞으면 네트워크 호출 0회
+        if (companyClaimsAlreadyMatch(claims, companyId, role)) return;
+
+        // 함수가 아직 배포되지 않았을 수 있다. 로그인이 매번 6초씩 늦어지지 않게
+        // 같은 계정·회사 조합은 세션당 한 번만 시도한다.
+        const attemptKey = `${uid}:${companyId}`;
+        if (_claimsSyncAttempted === attemptKey) return;
+        _claimsSyncAttempted = attemptKey;
+
+        const projectId = (firebase.app().options || {}).projectId;
+        if (!projectId) return;
+
+        const controller = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+        const timer = controller ? setTimeout(() => controller.abort(), CLAIMS_SYNC_TIMEOUT_MS) : null;
+        try {
+            const idToken = await auth.currentUser.getIdToken();
+            const url = `https://${CLAIMS_FUNCTION_REGION}-${projectId}.cloudfunctions.net/syncCompanyClaims`;
+            const resp = await fetch(url, {
+                method: 'POST',
+                headers: { Authorization: `Bearer ${idToken}` },
+                signal: controller ? controller.signal : undefined
+            });
+            if (!resp.ok) return;
+            const body = await resp.json();
+            if (!body || !body.ok) return;
+            // 여기까지 왔다는 건 현재 토큰에 클레임이 없거나 달랐다는 뜻이므로,
+            // 서버가 새로 심었든(changed) 이미 있었든(오래된 토큰) 재발급이 필요하다.
+            await auth.currentUser.getIdToken(true);
+        } catch (e) {
+            // 미배포·오프라인·타임아웃 — exists() 폴백으로 정상 동작한다
+            console.warn('회사 클레임 동기화 생략:', e && e.name ? e.name : e);
+        } finally {
+            if (timer) clearTimeout(timer);
+        }
+    }
+
     async function enterAppAsUser(profile) {
         window.state.uid = profile.uid;
         window.state.userName = profile.name;
@@ -48553,6 +48713,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 if (companyDoc.exists) window.state.companyJoinCode = companyDoc.data().joinCode || null;
             } catch (e) { console.warn('회사 코드 조회 실패:', e); }
         }
+
+        // 리스너를 붙이기 전에 토큰에 회사 클레임을 넣어야, 이후 스냅샷마다
+        // 규칙이 members 문서를 다시 읽지 않는다.
+        await ensureCompanyAuthClaims(profile.uid, profile.companyId, profile.role);
 
         await switchCompanyLocalDataContext(profile.companyId, profile.uid);
         if (typeof loadAndApplyUserDefectPinPresets === 'function') {
@@ -48777,6 +48941,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 companyId: companyRef.id, companyName
             });
             _joinCodesDirectoryCache = null;
+            _joinCodesDirectoryComplete = false;
+            // members 문서가 생기면 onCompanyMemberWrite 트리거가 admin 클레임을 심는다.
+            // 아래 enterAppAsUser 안의 ensureCompanyAuthClaims 가 토큰을 새로 받아간다.
             await companyRef.collection('members').doc(uid).set({
                 name, email, role: 'admin',
                 approvedAt: firebase.firestore.FieldValue.serverTimestamp()

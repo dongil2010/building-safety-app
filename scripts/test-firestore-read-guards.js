@@ -48,4 +48,54 @@ assert.match(app, /const leaseRef = getSyncLeaseDocRef\(inspectFloorRef \|\| doc
 assert.doesNotMatch(app, /leaseInfo\.serverData/);
 assert.match(rules, /match \/syncLeases\/\{leaseId\} \{[\s\S]*allow read, write: if isCompanyMember\(companyId\);/);
 
+// --- 6. 규칙 멤버십을 Auth custom claims로 (exists() 과금 제거) ---
+const storageRules = fs.readFileSync(path.join(__dirname, '..', 'storage.rules'), 'utf8');
+
+// 클레임을 먼저 보고, 실패할 때만 exists()로 폴백해야 한다.
+// ||는 단락 평가라 클레임이 맞으면 exists()가 아예 실행되지 않는다.
+assert.match(rules, /function hasCompanyClaim\(companyId\)/);
+assert.match(rules, /request\.auth\.token\.companyId == companyId/);
+assert.match(
+    rules,
+    /function isCompanyMember\(companyId\) \{\s*return hasCompanyClaim\(companyId\) \|\| \(/,
+    'isCompanyMember는 클레임을 먼저 보고 exists()로 폴백해야 한다'
+);
+assert.match(
+    rules,
+    /function isCompanyAdmin\(companyId\) \{\s*return hasCompanyAdminClaim\(companyId\) \|\| \(/,
+    'isCompanyAdmin은 클레임을 먼저 보고 get()으로 폴백해야 한다'
+);
+// 폴백은 반드시 남아 있어야 한다 — 클레임 없는 기존 세션이 잠기면 안 된다
+assert.match(rules, /exists\(\/databases\/\$\(database\)\/documents\/companies\/\$\(companyId\)\/members\/\$\(request\.auth\.uid\)\)/);
+
+assert.match(storageRules, /function hasCompanyClaim\(companyId\)/);
+assert.match(
+    storageRules,
+    /function isCompanyMember\(companyId\) \{\s*return hasCompanyClaim\(companyId\) \|\| \(/,
+    'storage.rules도 클레임 우선이어야 사진 GET마다 과금되지 않는다'
+);
+assert.match(storageRules, /firestore\.exists\(/);
+
+// 클레임을 쓰는 쪽은 Admin SDK만 — 클라이언트에 setCustomUserClaims가 있으면 안 된다
+const fnSource = fs.readFileSync(path.join(__dirname, '..', 'functions', 'index.js'), 'utf8');
+assert.match(fnSource, /setCustomUserClaims/);
+assert.match(fnSource, /document\('companies\/\{companyId\}\/members\/\{uid\}'\)/);
+assert.match(fnSource, /verifyIdToken/);
+assert.doesNotMatch(app, /setCustomUserClaims/);
+
+// 클라이언트는 토큰이 이미 맞으면 네트워크 호출을 하지 않고, 바뀌면 재발급받는다
+assert.match(app, /function ensureCompanyAuthClaims/);
+assert.match(app, /await ensureCompanyAuthClaims\(profile\.uid, profile\.companyId, profile\.role\)/);
+assert.match(app, /getIdToken\(true\)/);
+
+// --- 8. joinCodes 전체 list 축소 ---
+assert.match(app, /const JOIN_CODES_DIRECTORY_MAX = 50;/);
+assert.match(app, /collection\('joinCodes'\)\.limit\(JOIN_CODES_DIRECTORY_MAX\)\.get\(\)/);
+assert.doesNotMatch(app, /db\.collection\('joinCodes'\)\.get\(\)/);
+// 미로그인 상태에서 컬렉션 list를 시도하면 permission-denied가 된다
+assert.match(app, /function isJoinDirectoryReadable[\s\S]{0,200}auth\.currentUser/);
+assert.match(app, /function searchCompaniesForJoin/);
+// 6자리 식별코드는 컬렉션을 훑지 않고 문서 1건만 읽는다
+assert.match(app, /function lookupCompanyByJoinCode[\s\S]{0,200}collection\('joinCodes'\)\.doc\(code\)\.get\(\)/);
+
 console.log('test-firestore-read-guards: ok');

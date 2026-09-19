@@ -12,9 +12,22 @@ service firebase.storage {
         firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.get('otaPublisher', false) == true;
     }
 
-    function isCompanyMember(companyId) {
+    // ⚠️ firestore.exists()는 Storage 요청 1건마다 Firestore 문서 1회 읽기로 과금된다.
+    // 사진/도면을 한 장 받을 때마다 members 문서가 같이 과금되던 부분.
+    // → Auth custom claims를 먼저 본다. ||는 단락 평가라 클레임이 맞으면 조회가 안 일어난다.
+    // 클레임이 없는 기존 세션은 아래 exists() 폴백으로 그대로 동작한다.
+    // 클레임을 쓰는 쪽은 functions/index.js (Admin SDK) — 클라이언트는 못 바꾼다.
+    function hasCompanyClaim(companyId) {
       return request.auth != null &&
-        firestore.exists(/databases/(default)/documents/companies/$(companyId)/members/$(request.auth.uid));
+        'companyId' in request.auth.token &&
+        request.auth.token.companyId == companyId;
+    }
+
+    function isCompanyMember(companyId) {
+      return hasCompanyClaim(companyId) || (
+        request.auth != null &&
+        firestore.exists(/databases/(default)/documents/companies/$(companyId)/members/$(request.auth.uid))
+      );
     }
 
     function isCompanyAssetType(assetType) {

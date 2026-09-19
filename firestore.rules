@@ -22,20 +22,50 @@ rules_version = '2';
 //
 // 배포 방법: Firebase 콘솔 → Firestore Database → 규칙(Rules) 탭에 이 파일 내용을 붙여넣고 게시(Publish).
 // (Firebase CLI를 쓴다면: firebase deploy --only firestore:rules)
+// ⚠️ GitHub에 push하는 것만으로는 규칙이 바뀌지 않는다. 반드시 게시해야 적용된다.
+//
+// 이 파일의 멤버십 판정은 Auth custom claims(companyId/role)를 먼저 본다.
+// 클레임을 심는 쪽은 functions/ — `firebase deploy --only functions` 가 같이 필요하다.
+// 함수를 배포하지 않아도 아래 exists()/get() 폴백으로 동작한다(읽기만 안 줄어듦).
 
 service cloud.firestore {
   match /databases/{database}/documents {
 
+    // ⚠️ 규칙 안의 exists()/get()은 "요청마다 문서 1회 읽기"로 과금된다.
+    // 리스너는 스냅샷이 갱신될 때마다 규칙을 다시 평가하므로, 층 문서 1건을 받을 때마다
+    // members 문서까지 같이 과금돼 읽기가 사실상 2배가 됐다.
+    // → Auth custom claims(companyId/role)를 먼저 보고, 맞으면 exists()를 타지 않는다.
+    //   Firebase 규칙의 ||는 단락 평가라서 앞이 true면 뒤 조회가 실행되지 않는다.
+    //
+    // 클레임은 Admin SDK(functions/index.js)만 쓸 수 있어 클라이언트가 위조할 수 없다.
+    // 아직 클레임이 없는 기존 세션은 뒤의 exists() 폴백으로 그대로 동작한다.
+
+    function hasCompanyClaim(companyId) {
+      return request.auth != null &&
+        'companyId' in request.auth.token &&
+        request.auth.token.companyId == companyId;
+    }
+
+    function hasCompanyAdminClaim(companyId) {
+      return hasCompanyClaim(companyId) &&
+        'role' in request.auth.token &&
+        request.auth.token.role == 'admin';
+    }
+
     // 요청자가 해당 회사의 승인된 멤버(admin 또는 member)인지 확인
     function isCompanyMember(companyId) {
-      return request.auth != null &&
-        exists(/databases/$(database)/documents/companies/$(companyId)/members/$(request.auth.uid));
+      return hasCompanyClaim(companyId) || (
+        request.auth != null &&
+        exists(/databases/$(database)/documents/companies/$(companyId)/members/$(request.auth.uid))
+      );
     }
 
     // 요청자가 해당 회사의 admin인지 확인
     function isCompanyAdmin(companyId) {
-      return request.auth != null &&
-        get(/databases/$(database)/documents/companies/$(companyId)/members/$(request.auth.uid)).data.role == 'admin';
+      return hasCompanyAdminClaim(companyId) || (
+        request.auth != null &&
+        get(/databases/$(database)/documents/companies/$(companyId)/members/$(request.auth.uid)).data.role == 'admin'
+      );
     }
 
     // --- users/{uid}: 본인만 읽고 쓸 수 있음 ---
