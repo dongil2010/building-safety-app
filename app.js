@@ -9360,7 +9360,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     }
 
     function panCanvasToDefectMarking(defect, options = {}) {
-        // 드래그 중 선택 팬/센터 고정이 반복되면 도면이 덜컥거림 — 드래그 종료 후 1회는 허용
+        // 드래그 중 선택 팬/센터 고정이 반복되면 도면이 덜컥거림 — 드래그 중 차단.
+        // 드래그 종료 후 재팬은 handleDragEnd에서 호출하지 않음(조사표 선택만 카메라 이동).
         if (typeof isMapPinDragActive === 'function' && isMapPinDragActive() && !options.forceDuringDrag) {
             return false;
         }
@@ -9435,7 +9436,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
     function scheduleRevealMarkingAboveDrawer(defect, options = {}) {
         if (!defect) return;
-        // 드래그 중에는 반복 pan이 센터 고정처럼 뷰를 흔듦 — mouseup 후 1회 호출은 OK
+        // 드래그 중에는 반복 pan이 센터 고정처럼 뷰를 흔듦 — 드래그 중 차단.
+        // 핀 드래그 종료 경로에서는 호출하지 않음(조사표 선택·명시적 reveal만).
         if (typeof isMapPinDragActive === 'function' && isMapPinDragActive() && !options.forceDuringDrag) {
             return;
         }
@@ -26710,7 +26712,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     let mobileAddSelectEnabled = false; // 우측 레일 '추가' — 터치마다 선택 토글
     let isDraggingPin = false;
     let isDraggingPinGroup = false;
-    /** PC 마우스 마킹 드래그 중 — 목록 center 스크롤/선택 팬이 뷰를 흔들지 않게 */
+    /** 마킹 핀 드래그 중(터치·마우스) — 목록 center 스크롤/선택 팬이 뷰를 흔들지 않게 */
     function isMapPinDragActive() {
         return !!(isDraggingPin || isDraggingPinGroup);
     }
@@ -27708,7 +27710,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 // 다중 선택(size>1)은 mouseup에서 일괄 수정창 — 터치 경로는 변경 없음
                 if (!isTouch && !useAdditive && selectedDefectIds.size <= 1) {
                     const d = hitInfo.defect;
-                    // 드래그 가능하므로 열 때 reveal/pan 하지 않음 — 클릭(비드래그) mouseup 또는 드래그 종료 후 1회
+                    // 드래그 가능하므로 열 때 reveal/pan 하지 않음 — 클릭(비드래그) mouseup에서만 1회(드래그 종료는 재팬 안 함)
                     openAddDefectModal(d.x, d.y, d.targetX, d.targetY, d, null, {
                         revealMarkingAboveDrawer: false,
                         fromCanvas: true
@@ -28202,14 +28204,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             endAreaRotateSession();
             saveStateToLocalStorage();
             hadPinDragSave = true;
-            // 드래그 중 막았던 목록 center·선택 팬을 mouseup 후 1회만
-            updateMapSelectionBar({ scrollToSelection: true });
-            const selId = selectedDefectIds.size === 1 ? [...selectedDefectIds][0] : null;
-            if (selId && typeof scheduleRevealMarkingAboveDrawer === 'function') {
-                const dPost = (typeof getCurrentFloorDefects === 'function' ? getCurrentFloorDefects() : [])
-                    .find((x) => x && x.id === selId);
-                if (dPost) scheduleRevealMarkingAboveDrawer(dPost, { animate: false });
-            }
+            // 마킹 드래그 종료 후 뷰포트/카메라를 마킹으로 재팬하지 않는다.
+            // (조사표 행 클릭·터치 → viewDefectOnMapFromSurvey → focusDefectOnCanvas 만 이동)
+            // 목록 UI만 갱신하고 center 스크롤도 생략 — 드래그 직후 화면 튐 방지
+            updateMapSelectionBar({ scrollToSelection: false });
             drawCanvas();
         }
 
