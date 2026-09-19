@@ -145,7 +145,51 @@
         return n;
     }
 
+    /**
+     * 원격 건물 meta가 "살아 있음"으로 선언한 층.
+     * floorsList/drawingFloorCodes에 있고 remote.deletedDrawingFloorCodes에는 없는 코드.
+     * (서버에서 복구한 층을 로컬·세션 false tombstone이 다시 지우지 않게 할 때 사용)
+     */
+    function collectRemotelyAliveFloorCodes(remoteBldg) {
+        const alive = {};
+        const out = [];
+        if (!remoteBldg) return out;
+        const remoteDeleted = {};
+        (remoteBldg.deletedDrawingFloorCodes || []).forEach(function (c) {
+            const code = asCode(c);
+            if (code) remoteDeleted[code] = true;
+        });
+        const mark = function (c) {
+            const code = asCode(c);
+            if (!code || remoteDeleted[code] || alive[code]) return;
+            alive[code] = true;
+            out.push(code);
+        };
+        (remoteBldg.drawingFloorCodes || []).forEach(mark);
+        (remoteBldg.floorsList || []).forEach(function (f) {
+            if (f) mark(f.floorCode);
+        });
+        return out;
+    }
+
+    /**
+     * 원격 meta가 살아있다고 한 층의 tombstone·세션 키를 해제한다.
+     * returns number forgotten
+     */
+    function forgetTombstonesClearedByRemoteMeta(bldg, sessionKeys, remoteBldg) {
+        if (!bldg || !remoteBldg) return 0;
+        const alive = collectRemotelyAliveFloorCodes(remoteBldg);
+        let n = 0;
+        alive.forEach(function (code) {
+            if (!isDeletedDrawingFloor(bldg, code, sessionKeys)) return;
+            forgetDeletedDrawingFloor(bldg, code, sessionKeys);
+            n += 1;
+        });
+        return n;
+    }
+
     function filterFloorCodes(codes, bldg, sessionKeys) {
+
         return (codes || []).filter(function (c) {
             return c && !isDeletedDrawingFloor(bldg, c, sessionKeys);
         });
@@ -161,6 +205,8 @@
         stripDeletedDrawingFloorsFromBuilding: stripDeletedDrawingFloorsFromBuilding,
         mergeDeletedDrawingFloorCodes: mergeDeletedDrawingFloorCodes,
         forgetTombstonesWithDrawingEvidence: forgetTombstonesWithDrawingEvidence,
+        collectRemotelyAliveFloorCodes: collectRemotelyAliveFloorCodes,
+        forgetTombstonesClearedByRemoteMeta: forgetTombstonesClearedByRemoteMeta,
         filterFloorCodes: filterFloorCodes
     };
 
