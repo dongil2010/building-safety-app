@@ -3801,6 +3801,26 @@ document.addEventListener('DOMContentLoaded', () => {
         window.state.deletedDefectAt[floorKey][defectId] = Date.now();
     }
 
+    /**
+     * 결함 삭제 묘비를 푼다. 결함을 다른 층으로 옮겼다가 되돌려 찍는 경우,
+     * 예전에 남긴 묘비가 그대로면 병합이 그 결함을 다시 지워버린다.
+     */
+    function untrackDefectDeletion(floorKey, defectId) {
+        if (!floorKey || !defectId) return;
+        ensureSyncMetaState();
+        const arr = window.state.deletedDefectIds[floorKey];
+        if (Array.isArray(arr)) {
+            const next = arr.filter((id) => id !== defectId);
+            if (next.length) window.state.deletedDefectIds[floorKey] = next;
+            else delete window.state.deletedDefectIds[floorKey];
+        }
+        const atMap = window.state.deletedDefectAt && window.state.deletedDefectAt[floorKey];
+        if (atMap) {
+            delete atMap[defectId];
+            if (!Object.keys(atMap).length) delete window.state.deletedDefectAt[floorKey];
+        }
+    }
+
     function trackNdtDeletion(floorKey, itemId) {
         if (!floorKey || !itemId) return;
         ensureSyncMetaState();
@@ -19905,6 +19925,20 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             state.defects[srcKey].splice(idx, 1);
             state.defects[destKey].push(defect);
             if (defect) delete defect._exteriorFloorCode;
+            // 옮긴 것은 "원래 층에서는 삭제"다. 묘비를 안 남기면 다음 동기화에서
+            // sync-merge가 서버에 남아 있던 원본을 그대로 되살린다(서버에만 있고
+            // 로컬에 없는 결함은 묘비가 없으면 복원하는 규칙). 그러면 같은 결함이
+            // 두 층에 동시에 존재하고, 외부(EXT)는 도면이 여러 개라도 조사표를
+            // 하나로 합치므로 같은 결함이 표에 두 번 나온다.
+            // (2026-09-20: 외부 조사표가 다시 생기던 원인)
+            trackDefectDeletion(srcKey, defect.id);
+            // 반대로 도착 층에 옛 묘비가 남아 있으면 되돌려 찍을 때 사라진다.
+            // 사용자가 방금 여기에 찍었으므로 묘비를 풀고, 서버가 들고 있는
+            // 묘비보다 나중임을 알 수 있게 내용 시각도 올린다.
+            untrackDefectDeletion(destKey, defect.id);
+            touchDefectUpdatedAt(defect);
+            markFloorKeyDirty(srcKey);
+            markFloorKeyDirty(destKey);
         }
         defect.x = boxX;
         defect.y = boxY;
