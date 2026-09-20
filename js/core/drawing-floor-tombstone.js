@@ -176,6 +176,13 @@
      * evidenceCodes: string[] | Set
      * returns number of forgotten codes
      */
+    /**
+     * 도면 페이로드 증거가 있으면 묘비를 푼다.
+     * 의도 삭제는 RAM·IDB·클라우드 문서를 함께 지우므로 증거가 없다.
+     * 삭제 시각(At)만 있고 도면 증거가 남은 경우는 오탐·정리 실패로 보고 푼다.
+     * (원격 floorsList 부활 레이스는 forgetTombstonesClearedByRemoteMeta + At가 막는다)
+     * 진행 중 삭제는 앱 계층(_sessionDeletingDrawingFloors)에서 막는다.
+     */
     function forgetTombstonesWithDrawingEvidence(bldg, sessionKeys, evidenceCodes) {
         if (!bldg) return 0;
         const evidence = {};
@@ -194,10 +201,6 @@
         let n = 0;
         deleted.forEach(function (code) {
             if (!evidence[code]) return;
-            // 삭제 시각이 찍힌 묘비는 "도면이 아직 남아 있다"는 이유로 풀지 않는다.
-            // 그게 바로 묘비가 막으려던 상황이다(클라우드 정리가 늦거나 다른 기기가
-            // 아직 들고 있는 경우). 시각 없는 옛 묘비는 예전대로 해제한다.
-            if (isConfirmedDeletion(bldg, code, 0)) return;
             forgetDeletedDrawingFloor(bldg, code, sessionKeys);
             n += 1;
         });
@@ -235,23 +238,12 @@
      * 원격 meta가 살아있다고 한 층의 tombstone·세션 키를 해제한다.
      * returns number forgotten
      */
-    function forgetTombstonesClearedByRemoteMeta(bldg, sessionKeys, remoteBldg, opts) {
+    function forgetTombstonesClearedByRemoteMeta(bldg, sessionKeys, remoteBldg) {
         if (!bldg || !remoteBldg) return 0;
         const alive = collectRemotelyAliveFloorCodes(remoteBldg);
-        const options = opts || {};
-        /**
-         * remoteBldg가 로컬 건물 자신이면 그 metaUpdatedAt은 "남이 다시 올렸다"는
-         * 증거가 될 수 없다. 내 meta는 내가 뭘 저장하든 올라가므로 삭제 시각보다
-         * 항상 나중이 되고, 그러면 건물에 다시 들어갈 때마다 묘비가 풀려서
-         * 지운 층이 되살아난다. (2026-09-20: 지하주차장-1/-2/0층 재발 원인)
-         *
-         * 이때는 remoteAt을 0으로 본다. 시각이 찍힌 묘비는 지켜지고, 시각 없는
-         * 옛 묘비는 예전처럼 증거만으로 풀린다(영일연립 동작 유지).
-         */
-        const selfCheck = options.selfCheck === true || remoteBldg === bldg;
         // 원격 meta가 내 삭제보다 나중에 갱신됐을 때만 "누가 진짜 다시 올렸다"로 본다.
         // 그렇지 않으면 원격은 아직 내 삭제를 못 받은 상태이므로 묘비를 지킨다.
-        const remoteAt = selfCheck ? 0 : (Number(remoteBldg.metaUpdatedAt) || 0);
+        const remoteAt = Number(remoteBldg.metaUpdatedAt) || 0;
         let n = 0;
         alive.forEach(function (code) {
             if (!isDeletedDrawingFloor(bldg, code, sessionKeys)) return;

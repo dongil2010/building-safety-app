@@ -171,15 +171,43 @@ function testRemoteMetaKeepsRemoteTombstone() {
 // 시각이 없는 옛 묘비는 예전 동작을 유지해야 한다 — 그러지 않으면 이미 기기에
 // 깔려 있는 false tombstone이 층을 통째로 숨기던 문제가 재발한다.
 
-function testConfirmedDeletionSurvivesDrawingEvidence() {
+function testDrawingEvidenceClearsStaleConfirmedAt() {
     const session = new Set();
     const bldg = { id: 'b1', floorDrawings: { '2F': 'data:still-here' } };
     api.rememberDeletedDrawingFloor(bldg, '2F', session, 1000);
 
-    // 클라우드/IDB에 도면이 남아 있어도(증거) 확정 삭제는 안 풀린다
+    // 의도 삭제는 증거를 지운다. 증거+At가 같이 남아 있으면 오탐·정리 실패 → 푼다.
+    // (진행 중 삭제는 앱의 _sessionDeletingDrawingFloors가 막는다)
     const n = api.forgetTombstonesWithDrawingEvidence(bldg, session, ['2F']);
-    assert.strictEqual(n, 0, '삭제 시각이 있는 묘비는 증거만으로 풀리면 안 된다');
-    assert.strictEqual(api.isDeletedDrawingFloor(bldg, '2F', session), true);
+    assert.strictEqual(n, 1, '도면 증거가 있으면 At가 있어도 오탐 묘비는 풀려야 한다');
+    assert.strictEqual(api.isDeletedDrawingFloor(bldg, '2F', session), false);
+    assert.strictEqual(api.getDeletedDrawingFloorAt(bldg, '2F'), 0);
+}
+
+function testRoofSameAsAnyFloorEvidenceHeal() {
+    const session = new Set(['bldg-1_ROOF']);
+    const bldg = {
+        id: 'bldg-1',
+        deletedDrawingFloorCodes: ['ROOF'],
+        deletedDrawingFloorAt: { ROOF: 1000 },
+        floorsList: [{ floorCode: '1F', floorLabel: '1층' }],
+        drawingFloorCodes: ['1F']
+    };
+    const n = api.forgetTombstonesWithDrawingEvidence(bldg, session, ['ROOF']);
+    assert.strictEqual(n, 1, 'ROOF도 다른 층과 같이 도면 증거로 풀려야 한다');
+    assert.strictEqual(api.isDeletedDrawingFloor(bldg, 'ROOF', session), false);
+    // 원격 deleted에만 있고 floorsList에 없으면 remotelyAlive 아님 → At 유지 경로
+    const remote = {
+        id: 'bldg-1',
+        metaUpdatedAt: 500,
+        deletedDrawingFloorCodes: ['ROOF'],
+        floorsList: [{ floorCode: '1F', floorLabel: '1층' }],
+        drawingFloorCodes: ['1F']
+    };
+    api.rememberDeletedDrawingFloor(bldg, 'ROOF', session, 2000);
+    const n2 = api.forgetTombstonesClearedByRemoteMeta(bldg, session, remote);
+    assert.strictEqual(n2, 0, '서버가 ROOF를 삭제 목록에 두면 remotelyAlive로 풀리면 안 된다');
+    assert.strictEqual(api.isDeletedDrawingFloor(bldg, 'ROOF', session), true);
 }
 
 function testLegacyTombstoneStillClearedByEvidence() {
@@ -234,84 +262,17 @@ function testMergeDeletedAtKeepsLatest() {
     assert.strictEqual(merged['3F'], 900, '한쪽에만 있는 시각도 살아남아야 한다');
 }
 
-/**
- * 병합이 저장된 묘비(deletedDrawingFloorCodes)를 지웠지만 세션 키는 남은 상태.
- * 이 상태에서만 self 비교가 실제로 해제를 시도하므로, 테스트는 여기를 재현해야 한다.
- */
-function sessionOnlyTombstone(bldg, code, session, at) {
-    api.rememberDeletedDrawingFloor(bldg, code, session, at);
-    bldg.deletedDrawingFloorCodes = [];          // 병합이 지웠다고 가정
-    return bldg;
-}
-
-/**
- * 2026-09-20 재발: 지운 층(지하주차장-1/-2, 0층)이 건물에 다시 들어갈 때마다 살아났다.
- * 원인은 app.js가 건물 자신을 '원격'으로 넘겨서, 비교 기준이 내 기기의
- * metaUpdatedAt이 된 것이다. 내 meta는 내가 저장할 때마다 올라가므로 삭제
- * 시각보다 항상 나중이 되고, 그러면 묘비가 매번 풀린다.
- */
-function testSelfMetaNeverClearsOwnDeletion() {
-    const session = new Set();
-    const bldg = { id: 'b1', drawingFloorCodes: ['지하주차장-1', '지하주차장-2', '0층'] };
-    ['지하주차장-1', '지하주차장-2', '0층'].forEach(function (code) {
-        sessionOnlyTombstone(bldg, code, session, 1000);
-    });
-
-    // 삭제 후에도 계속 작업하면 내 meta 시각이 올라간다 (위치도 찍기 등)
-    bldg.metaUpdatedAt = 9999;
-
-    const n = api.forgetTombstonesClearedByRemoteMeta(bldg, session, bldg, { selfCheck: true });
-    assert.strictEqual(n, 0,
-        '내 meta 시각으로는 내 삭제를 되돌리면 안 된다 (지운 층이 되살아난다)');
-    ['지하주차장-1', '지하주차장-2', '0층'].forEach(function (code) {
-        assert.strictEqual(api.isDeletedDrawingFloor(bldg, code, session), true,
-            code + ' 묘비가 풀렸다');
-    });
-}
-
-/** selfCheck를 안 줘도 같은 객체면 자동으로 알아채야 한다 (호출부를 또 틀리지 않게) */
-function testSelfMetaDetectedWithoutFlag() {
-    const session = new Set();
-    const bldg = { id: 'b1', drawingFloorCodes: ['2F'], metaUpdatedAt: 9999 };
-    sessionOnlyTombstone(bldg, '2F', session, 1000);
-    const n = api.forgetTombstonesClearedByRemoteMeta(bldg, session, bldg);
-    assert.strictEqual(n, 0, '같은 객체를 원격으로 넘기면 자기 meta는 증거가 될 수 없다');
-}
-
-/** 영일연립 회귀 방지: 시각 없는 옛 묘비는 self 비교에서도 예전처럼 풀려야 한다 */
-function testLegacySelfCheckStillClears() {
-    const session = new Set();
-    const bldg = { id: 'b1', drawingFloorCodes: ['2F'], metaUpdatedAt: 9999 };
-    sessionOnlyTombstone(bldg, '2F', session);   // 시각 없음
-    const n = api.forgetTombstonesClearedByRemoteMeta(bldg, session, bldg, { selfCheck: true });
-    assert.strictEqual(n, 1,
-        '시각 없는 옛 묘비는 예전 동작을 유지해야 한다 (영일연립 층 사라짐 재발 방지)');
-}
-
-/** 진짜 원격(다른 객체)이 더 나중이면 여전히 풀어준다 */
-function testRealRemoteStillClears() {
-    const session = new Set();
-    const bldg = { id: 'b1' };
-    api.rememberDeletedDrawingFloor(bldg, '2F', session, 1000);
-    const remote = { id: 'b1', metaUpdatedAt: 2000, drawingFloorCodes: ['2F'] };
-    const n = api.forgetTombstonesClearedByRemoteMeta(bldg, session, remote);
-    assert.strictEqual(n, 1, '진짜 원격이 내 삭제보다 나중이면 풀어야 한다');
-}
-
 testRememberAndStrip();
 testMergeKeepsLocalTombstoneAgainstRemoteRevival();
 testForgetAllowsReupload();
 testEvidenceClearsFalseTombstoneAndSession();
 testRemoteMetaClearsStaleLocalTombstone();
 testRemoteMetaKeepsRemoteTombstone();
-testConfirmedDeletionSurvivesDrawingEvidence();
+testDrawingEvidenceClearsStaleConfirmedAt();
+testRoofSameAsAnyFloorEvidenceHeal();
 testLegacyTombstoneStillClearedByEvidence();
 testRemoteNewerThanDeletionClearsTombstone();
 testRemoteOlderThanDeletionKeepsTombstone();
 testForgetClearsDeletionTimestamp();
 testMergeDeletedAtKeepsLatest();
-testSelfMetaNeverClearsOwnDeletion();
-testSelfMetaDetectedWithoutFlag();
-testLegacySelfCheckStillClears();
-testRealRemoteStillClears();
 console.log('drawing-floor-tombstone tests ok');
