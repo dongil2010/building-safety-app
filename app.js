@@ -5064,8 +5064,11 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             // 서버 floorsList에 있는데 로컬 tombstone만 남은 경우(폰 오프라인 캐시) 즉시 해제
             if (typeof _drawingFloorTombstone.forgetTombstonesClearedByRemoteMeta === 'function') {
+                // 세 번째 인자가 bldg 자신이다 — 내 meta 시각은 "남이 다시 올렸다"는
+                // 증거가 못 되므로 selfCheck로 명시한다. 이걸 빼면 내가 저장할 때마다
+                // metaUpdatedAt이 삭제 시각을 넘어서서, 재진입할 때마다 지운 층이 되살아난다.
                 const n = _drawingFloorTombstone.forgetTombstonesClearedByRemoteMeta(
-                    bldg, _sessionDeletedDrawingKeys, bldg
+                    bldg, _sessionDeletedDrawingKeys, bldg, { selfCheck: true }
                 );
                 // bldg 자신 meta만으로는 이미 strip된 floorsList가 증거 없음 → 클라우드 조회
                 if (n > 0) {
@@ -47380,7 +47383,17 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (!lease || !lease.token) return false;
         const beat = Number(lease.heartbeatAt || lease.startedAt) || 0;
         if (!beat) return false;
-        return (now - beat) < SYNC_LEASE_STALE_MS;
+        const age = now - beat;
+        // 시계가 많이 틀어진 기기가 미래 시각으로 heartbeat를 써두면 이 잠금은 영원히
+        // "살아있음"이 돼서 모두의 동기화를 막는다. 현장 태블릿은 시계가 틀어지는 일이
+        // 실제로 있으므로, 말이 안 되게 미래면 만료된 것으로 본다.
+        if (age < -SYNC_LEASE_STALE_MS) return false;
+        return age < SYNC_LEASE_STALE_MS;
+    }
+
+    /** 다른 기기가 실제로 동기화 중이라 이번 회차를 양보한 경우 (오류가 아니다) */
+    function isSyncLeaseBusyError(err) {
+        return !!(err && err.syncLeaseBusy);
     }
 
     /** 진짜 다른 기기의 유효 잠금만 대기로 본다. 내 계정/기기·만료 잠금은 즉시 회수. */
@@ -47444,20 +47457,42 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             if (acquired) return { ownerId, token, deviceId };
 
             if (Date.now() >= waitDeadline) {
-                console.warn('동기화 잠금 대기 시간 초과 — 강제 획득');
-                const now = Date.now();
-                await docRef.set({
-                    syncLease: {
-                        ownerId,
-                        ownerName: window.state.userName || '',
-                        deviceId,
-                        token,
-                        startedAt: now,
-                        heartbeatAt: now,
-                        forced: true
+                // 예전에는 여기서 잠금을 **다시 읽지도 않고** 덮어썼다. 그런데 죽은 기기의
+                // 잠금은 heartbeat가 끊겨 SYNC_LEASE_STALE_MS(60초)면 저절로 만료되므로,
+                // 45초를 버틴 보유자는 대개 '살아서 실제로 업로드 중'이다. 하필 그때
+                // 뺏으면 두 기기가 동시에 쓰게 된다 — 2026-09-19에 층끼리 결함이 섞인
+                // 사고와 같은 종류의 경합이다.
+                //
+                // 그래서 마지막으로 한 번 더 확인한다. 그 사이 풀렸거나 만료됐으면
+                // 정상적으로 가져가고, 아직 살아 있으면 이번 회차는 양보한다.
+                let taken = false;
+                await db.runTransaction(async (tx) => {
+                    const snap = await tx.get(docRef);
+                    const data = snap.exists ? (snap.data() || {}) : {};
+                    const lease = data.syncLease || null;
+                    const now = Date.now();
+                    if (isForeignSyncLease(lease, token, ownerId, deviceId, now)) {
+                        holderName = (lease && (lease.ownerName || lease.ownerId)) || '다른 작업자';
+                        return;
                     }
-                }, { merge: true });
-                return { ownerId, token, deviceId };
+                    tx.set(docRef, {
+                        syncLease: {
+                            ownerId,
+                            ownerName: window.state.userName || '',
+                            deviceId,
+                            token,
+                            startedAt: now,
+                            heartbeatAt: now
+                        }
+                    }, { merge: true });
+                    taken = true;
+                });
+                if (taken) return { ownerId, token, deviceId };
+
+                console.info('동기화 잠금 양보 — 다른 기기가 계속 올리는 중:', holderName);
+                const busy = new Error('다른 기기(' + (holderName || '다른 작업자') + ')가 동기화 중입니다.');
+                busy.syncLeaseBusy = true;
+                throw busy;
             }
 
             // 토스트는 실제로 타인 잠금을 본 경우에만, 자주 울리지 않게 (드래그 중엔 띄우지 않음)
@@ -47747,6 +47782,13 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 window.purgeExpiredBuildingTrash().catch(() => {});
             }
         } catch (e) {
+            // 다른 기기가 올리는 중이라 양보한 것은 실패가 아니다. 경고 토스트를 띄우거나
+            // 지수 백오프를 키우면 안 된다 — finally가 다음 회차를 예약한다.
+            if (isSyncLeaseBusyError(e)) {
+                console.info('동기화 양보:', e.message);
+                _syncPending = true;
+                return;   // finally는 그대로 실행된다 — 잠금 해제·다음 회차 예약
+            }
             console.warn('Firebase Sync Error:', e);
             _syncPending = false;
             if (isFirestoreQuotaError(e)) pauseFirestoreWrites(SYNC_QUOTA_COOLDOWN_MS);

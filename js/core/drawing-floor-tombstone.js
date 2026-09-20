@@ -235,12 +235,23 @@
      * 원격 meta가 살아있다고 한 층의 tombstone·세션 키를 해제한다.
      * returns number forgotten
      */
-    function forgetTombstonesClearedByRemoteMeta(bldg, sessionKeys, remoteBldg) {
+    function forgetTombstonesClearedByRemoteMeta(bldg, sessionKeys, remoteBldg, opts) {
         if (!bldg || !remoteBldg) return 0;
         const alive = collectRemotelyAliveFloorCodes(remoteBldg);
+        const options = opts || {};
+        /**
+         * remoteBldg가 로컬 건물 자신이면 그 metaUpdatedAt은 "남이 다시 올렸다"는
+         * 증거가 될 수 없다. 내 meta는 내가 뭘 저장하든 올라가므로 삭제 시각보다
+         * 항상 나중이 되고, 그러면 건물에 다시 들어갈 때마다 묘비가 풀려서
+         * 지운 층이 되살아난다. (2026-09-20: 지하주차장-1/-2/0층 재발 원인)
+         *
+         * 이때는 remoteAt을 0으로 본다. 시각이 찍힌 묘비는 지켜지고, 시각 없는
+         * 옛 묘비는 예전처럼 증거만으로 풀린다(영일연립 동작 유지).
+         */
+        const selfCheck = options.selfCheck === true || remoteBldg === bldg;
         // 원격 meta가 내 삭제보다 나중에 갱신됐을 때만 "누가 진짜 다시 올렸다"로 본다.
         // 그렇지 않으면 원격은 아직 내 삭제를 못 받은 상태이므로 묘비를 지킨다.
-        const remoteAt = Number(remoteBldg.metaUpdatedAt) || 0;
+        const remoteAt = selfCheck ? 0 : (Number(remoteBldg.metaUpdatedAt) || 0);
         let n = 0;
         alive.forEach(function (code) {
             if (!isDeletedDrawingFloor(bldg, code, sessionKeys)) return;
