@@ -1,4 +1,4 @@
-﻿/**
+/**
  * 영일 ONLY — 복구 후 tombstone 해제 + 영일 층을 dirty로 올려 서버에 최신 고정
  * copy(await __yeongilRestoreAndPinLatest())
  */

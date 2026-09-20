@@ -1,4 +1,4 @@
-﻿/** 영일 1F/2F/3F 도면을 클라우드 floorDrawings에서 RAM+IDB로 채움 */
+/** 영일 1F/2F/3F 도면을 클라우드 floorDrawings에서 RAM+IDB로 채움 */
 (function () {
   const BLDG_ID = 'bldg-1789540910476';
   const FLOORS = ['1F', '2F', '3F'];

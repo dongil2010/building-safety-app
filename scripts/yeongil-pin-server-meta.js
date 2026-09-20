@@ -1,4 +1,4 @@
-﻿/**
+/**
  * 영일 ONLY — Firestore 회사 문서의 건물 메타에서 1F/2F/3F tombstone 제거 + floorsList 고정
  * (폰 등 다른 기기가 서버 기준으로 층을 보게 함)
  * copy(await __yeongilPinServerMeta())

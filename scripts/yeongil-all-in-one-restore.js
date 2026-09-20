@@ -1,4 +1,4 @@
-﻿/**
+/**
  * 영일연립 ONLY — 층+도면+마킹 한 번에 복구
  * getBuildingAvailableFloors 로 1F/2F/3F가 다시 지워지는 함정 회피
  *
