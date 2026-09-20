@@ -45304,6 +45304,16 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     let _listeningFloorPath = '';
     let _lastFloorPackIdentity = '';
     let _lastFloorSnapData = {};
+    /**
+     * _lastFloorSnapData를 실제로 채워 넣은 층의 경로.
+     *
+     * _listeningFloorPath로 주인을 판단하면 안 된다. 스냅샷 콜백 중간에 await가 있어서,
+     * 이전 층의 콜백이 뒤늦게 깨어나 이 캐시를 덮어쓸 때는 _listeningFloorPath가 이미
+     * 새 층을 가리킨다. 그러면 "캐시 주인이 맞다"고 잘못 판정해 이전 층 데이터를 새 층에
+     * 쓰게 된다 — 2026-09-19 층끼리 결함이 섞인 사고와 같은 결과다.
+     * 그래서 데이터와 같은 자리에서 그 데이터의 출처 경로를 같이 적어둔다.
+     */
+    let _lastFloorSnapPath = '';
     let _lastFloorBundle = { markings: null, photos: null, ndt: null, drawing: null };
     let _floorPackFallbackTried = false;
 
@@ -45897,6 +45907,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         _listeningFloorPath = '';
         _lastFloorPackIdentity = '';
         _lastFloorSnapData = {};
+        _lastFloorSnapPath = '';
         _lastFloorBundle = { markings: null, photos: null, ndt: null, drawing: null };
         _floorPackFallbackTried = false;
     }
@@ -45935,7 +45946,13 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             await mergeRemoteFloorBundle(bldg, floorCode, migrated);
         };
 
+        /** 이 구독이 아직 현재 층인가. await 뒤에는 층이 바뀌었을 수 있다. */
+        const isStillCurrent = () => _listeningFloorPath === path;
+
         const unsub = floorRef.onSnapshot(async (doc) => {
+            // unsubscribe 직전에 들어와 처리 중이던 콜백은 층을 바꾼 뒤에 깨어날 수 있다.
+            // 그 상태로 전역 캐시를 건드리면 새 층이 이전 층 데이터를 자기 것으로 쓴다.
+            if (!isStillCurrent()) return;
             if (doc && doc.metadata && doc.metadata.hasPendingWrites) return;
             if (!doc || !doc.exists) {
                 if (_floorPackFallbackTried) return;
@@ -45950,22 +45967,28 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             const snapData = doc.data() || {};
             if (isOnlySyncLeaseChange(_lastFloorSnapData, snapData)) {
                 _lastFloorSnapData = snapData;
+            _lastFloorSnapPath = path;
                 return;
             }
             const status = snapData.chunkStatus || null;
             if (status === 'uploading' || status === 'failed') {
                 _lastFloorSnapData = snapData;
+            _lastFloorSnapPath = path;
                 return;
             }
             const ident = bulkPayloadIdentity(snapData);
             if (ident && ident === _lastFloorPackIdentity) {
                 _lastFloorSnapData = snapData;
+            _lastFloorSnapPath = path;
                 return;
             }
             const parsed = await decodeFloorPackFromSnap(floorRef, snapData);
+            // 위 await 동안 사용자가 층을 바꿨을 수 있다. 그러면 이 결과는 이전 층 것이다.
+            if (!isStillCurrent()) return;
             if (parsed && floorBundleHasContent(parsed)) {
                 _lastFloorPackIdentity = ident;
                 _lastFloorSnapData = snapData;
+            _lastFloorSnapPath = path;
                 const bundle = Object.assign({ fromLegacy: false }, bundleFromPackObject(parsed));
                 _lastFloorBundle = bundle;
                 await applyFloorBundleToState(bldg, floorCode, bundle);
@@ -45973,12 +45996,14 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             }
             if (_floorPackFallbackTried) {
                 _lastFloorSnapData = snapData;
+            _lastFloorSnapPath = path;
                 return;
             }
             _floorPackFallbackTried = true;
             try {
                 const migrated = await readFloorSyncBundle(bldg, floorCode, snapData);
                 _lastFloorSnapData = snapData;
+            _lastFloorSnapPath = path;
                 if (ident) _lastFloorPackIdentity = ident;
                 await applyMigratedPack(migrated);
             } catch (e) {
@@ -47675,11 +47700,13 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 // 것이다. 그대로 preloaded로 넘기면 readFloorSyncBundle이 이전 층 내용을
                 // 새 층 묶음으로 돌려주고, mergeFloorBundleIntoState가 그걸 새 층 키에
                 // 병합한 뒤 새 층 문서로 업로드한다 — 층끼리 결함이 섞인다.
-                // _listeningFloorPath가 이 캐시의 주인 경로를 들고 있고 _lastFloorSnapData와
-                // 같은 곳에서 같이 설정·초기화되므로, 경로가 맞을 때만 쓴다.
+                // 주인 판단은 _lastFloorSnapPath로 한다. _listeningFloorPath를 쓰면 안 된다 —
+                // 스냅샷 콜백 중간에 await가 있어서 이전 층 콜백이 뒤늦게 캐시를 덮어쓸 때는
+                // _listeningFloorPath가 이미 새 층을 가리키고, 그러면 이 가드가 통과해 버린다.
+                // _lastFloorSnapPath는 데이터를 넣은 그 자리에서 같이 적히므로 항상 맞다.
                 const floorRefForKey = getFloorScopeRef(floorBldg, code);
                 const cacheBelongsToThisFloor = !!(floorRefForKey
-                    && _listeningFloorPath === floorRefForKey.path
+                    && _lastFloorSnapPath === floorRefForKey.path
                     && _lastFloorSnapData && Object.keys(_lastFloorSnapData).length);
                 const preloaded = (floorKey === currentKey && cacheBelongsToThisFloor)
                     ? _lastFloorSnapData

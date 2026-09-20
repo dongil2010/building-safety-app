@@ -54,12 +54,37 @@ assert.match(rules, /match \/syncLeases\/\{leaseId\} \{[\s\S]*allow read, write:
 // 잠그며 읽은 값 = 자기 완결)에서 _lastFloorSnapData(리스너 캐시 = 수명이 따로 돎)로 바뀌었다.
 // 층을 바꾸면 currentFloor는 즉시 바뀌지만 리스너 재구독은 비동기라, 그 사이 캐시는 아직
 // 이전 층 것이다. 그대로 쓰면 이전 층 결함이 새 층에 병합돼 새 층 문서로 업로드된다.
-// 실제로 현장 데이터가 섞였다. _listeningFloorPath로 캐시 주인을 확인해야 한다.
+// 실제로 현장 데이터가 섞였다. 캐시 주인 층을 반드시 확인해야 한다.
+//
+// 2026-09-20 보강: 처음엔 _listeningFloorPath로 확인했는데 그걸로는 부족했다.
+// 스냅샷 콜백 중간에 await(decodeFloorPackFromSnap)가 있어서, 이전 층 콜백이 뒤늦게
+// 깨어나 캐시를 덮어쓸 때는 _listeningFloorPath가 이미 새 층을 가리킨다. 그러면 이
+// 가드가 통과해 버리고 같은 사고가 다시 난다.
+// 그래서 캐시를 넣는 자리에서 출처 경로(_lastFloorSnapPath)를 같이 적고 그걸로 본다.
 assert.match(
     app,
-    /const cacheBelongsToThisFloor = !!\(floorRefForKey[\s\S]{0,200}_listeningFloorPath === floorRefForKey\.path/,
-    '층 preloaded 캐시는 _listeningFloorPath로 주인 층을 확인해야 한다 (층끼리 결함 섞임 사고 재발 방지)'
+    /const cacheBelongsToThisFloor = !!\(floorRefForKey[\s\S]{0,300}_lastFloorSnapPath === floorRefForKey\.path/,
+    '층 preloaded 캐시는 _lastFloorSnapPath(데이터와 함께 적힌 출처)로 주인 층을 확인해야 한다'
 );
+assert.doesNotMatch(
+    app,
+    /const cacheBelongsToThisFloor = !!\(floorRefForKey[\s\S]{0,300}_listeningFloorPath === floorRefForKey\.path/,
+    '_listeningFloorPath로는 주인을 판단할 수 없다 — 이전 층 콜백이 뒤늦게 캐시를 덮어쓰면 통과한다'
+);
+// 캐시를 채우는 모든 자리에서 출처 경로를 같이 적어야 한다 (한 곳이라도 빠지면 가드가 뚫린다)
+const snapAssigns = (app.match(/_lastFloorSnapData = snapData;/g) || []).length;
+const pathAssigns = (app.match(/_lastFloorSnapPath = path;/g) || []).length;
+assert.strictEqual(pathAssigns, snapAssigns,
+    '_lastFloorSnapData를 넣는 곳(' + snapAssigns + ')마다 _lastFloorSnapPath도 적어야 한다 (현재 '
+    + pathAssigns + '곳)');
+// 층이 바뀐 뒤 깨어난 콜백은 전역 캐시를 건드리면 안 된다
+assert.match(
+    app,
+    /const isStillCurrent = \(\) => _listeningFloorPath === path;/,
+    '구독이 아직 현재 층인지 확인하는 장치가 있어야 한다');
+assert.ok(
+    (app.match(/if \(!isStillCurrent\(\)\) return;/g) || []).length >= 2,
+    '콜백 진입 시점과 await 직후 두 곳에서 현재 층인지 확인해야 한다');
 assert.match(
     app,
     /const preloaded = \(floorKey === currentKey && cacheBelongsToThisFloor\)/,
