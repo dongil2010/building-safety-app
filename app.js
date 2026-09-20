@@ -32031,8 +32031,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         return g === '제3종시설물' || g.includes('3종');
     }
 
-    // 3종 상태조사표 번호(예: B1-1, 1-3, R-2)용 층코드→접두사 매핑.
-    // 범례: B{n}F→B{n}(지하n층), {n}F→{n}(지상n층), ROOF→R(옥상/옥탑), EXT/EXT_*→A(부대시설·외부)
+    // 3종 상태조사표 번호(예: B1-1, 1-3, R-2, O-1)용 층코드→접두사 매핑.
+    // 범례: B{n}F→B{n}(지하n층), {n}F→{n}(지상n층), ROOF→R(옥상/옥탑), EXT/EXT_*→O(외부)
+    // (hwpx_priority_compare_grade3.hwpx 범례: O-외부 — A 아님)
     function getGrade3FloorPrefix(floorCode) {
         const raw = String(floorCode || '');
         const c = raw.toUpperCase().trim();
@@ -32044,7 +32045,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (bMatch) return `B${bMatch[1]}`;
         const fMatch = c.match(/^(\d+)F$/);
         if (fMatch) return fMatch[1];
-        if (c.startsWith('EXT') || raw.includes('외부') || raw.includes('부대')) return 'A';
+        if (c.startsWith('EXT') || raw.includes('외부') || raw.includes('부대')) return 'O';
         return floorCode || '';
     }
 
@@ -35846,47 +35847,11 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         return figNo;
     }
 
+    // 중점관리 비교표 스탬프도 사진첩과 같이 paraPr/charPr/border를 본문 header에 합친다.
+    // border만 옮기면 스탬프 charPrIDRef(0/10 등)가 정밀·정기 템플릿의 다른 글꼴·크기로 해석된다
+    // (정기 템플릿 charPr 10 = 2700/굴림체 → 회차 라벨·범례가 비정상적으로 커짐).
     const mergeGrade3CompareStampHeader = (mainHdr, stampHdr, stampParas) => {
-        const ser = new XMLSerializer();
-        let fragmentXml = '';
-        (stampParas || []).forEach((p) => { if (p) fragmentXml += ser.serializeToString(p); });
-        if (!fragmentXml || !stampHdr) return { header: mainHdr, remapAttrs: null };
-
-        const borderIds = new Set();
-        for (const m of fragmentXml.matchAll(/<hp:(?:tbl|tc)\b[^>]*borderFillIDRef="(\d+)"/g)) {
-            borderIds.add(m[1]);
-        }
-        if (!borderIds.size) return { header: mainHdr, remapAttrs: null };
-
-        const tagBlock = (hdr, tag, id) => {
-            const re = new RegExp(`<hh:${tag} id="${id}"[\\s\\S]*?</hh:${tag}>`);
-            const m = hdr.match(re);
-            return m ? m[0] : null;
-        };
-        const maxId = (hdr, tag) => {
-            const ids = [...hdr.matchAll(new RegExp(`<hh:${tag} id="(\\d+)"`, 'g'))].map(x => parseInt(x[1], 10));
-            return ids.length ? Math.max(...ids) : 0;
-        };
-        let nxt = maxId(mainHdr, 'borderFill') + 1;
-        const borderMap = {};
-        [...borderIds].sort((a, b) => parseInt(a, 10) - parseInt(b, 10)).forEach((id) => {
-            borderMap[id] = String(nxt++);
-        });
-
-        let outHdr = mainHdr;
-        [...borderIds].sort((a, b) => parseInt(a, 10) - parseInt(b, 10)).forEach((bid) => {
-            let b = tagBlock(stampHdr, 'borderFill', bid);
-            if (!b) return;
-            b = b.replace(/^<hh:borderFill id="\d+"/, `<hh:borderFill id="${borderMap[bid]}"`);
-            outHdr = outHdr.replace('</hh:borderFills>', b + '</hh:borderFills>');
-        });
-        const bfCnt = (outHdr.match(/<hh:borderFill id="/g) || []).length;
-        outHdr = outHdr.replace(/(<hh:borderFills[^>]*itemCnt=")(\d+)(")/, `$1${bfCnt}$3`);
-
-        return {
-            header: outHdr,
-            remapAttrs: { borderFillIDRef: borderMap }
-        };
+        return mergeGrade3PhotoAlbumStampHeader(mainHdr, stampHdr, stampParas);
     };
 
     // 사진첩 스탬프는 border뿐 아니라 문단/글자 모양(가운데정렬·굴림·8pt)도 본문 header에
@@ -36777,7 +36742,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             const paraText = (p) => Array.from(p.getElementsByTagNameNS(HP_NS, 't')).map(t => t.textContent).join('');
             const secChildren = () => Array.from(sec.children).filter(c => c.localName === 'p');
 
-            // 비교표 borderFill만 본문 header에 추가한다. paraPr/charPr/style(문단모양)은 건드리지 않는다.
+            // 비교표 스탬프 border/paraPr/charPr를 본문 header에 합친다(사진첩과 동일 — ID 충돌 방지).
             let hwpxHeaderText = null;
             let hwpxHeaderDirty = false;
 
@@ -39150,7 +39115,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                             if (!hwpxHeaderText) hwpxHeaderText = await zip.file('Contents/header.xml').async('string');
                             const mergedHdr = mergeGrade3CompareStampHeader(hwpxHeaderText, grade3CompareHeaderText, [
                                 grade3CompareTableStamp.compareTblPara,
-                                grade3CompareTableStamp.legendPara
+                                grade3CompareTableStamp.legendPara,
+                                grade3CompareTableStamp.titlePara
                             ]);
                             hwpxHeaderText = mergedHdr.header;
                             compareRemapAttrs = mergedHdr.remapAttrs;
@@ -39231,15 +39197,17 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                             if (t) t.textContent = '1.2. 중점관리 항목';
                             appendComparePara(titleP);
                         } else if (grade3CompareTableStamp.titlePara) {
-                            const titleP = grade3CompareTableStamp.titlePara.cloneNode(true);
-                            titleP.setAttribute('pageBreak', '1');
-                            Array.from(titleP.getElementsByTagNameNS(HP_NS, 't')).forEach(t => {
-                                const txt = (t.textContent || '').trim();
-                                if (txt.includes('사진') || txt.includes('외관') || txt.includes('중점')) {
-                                    t.textContent = '1.2. 중점관리 항목';
-                                }
-                            });
-                            appendComparePara(titleP);
+                            const titleP = cloneCompareStampPara(grade3CompareTableStamp.titlePara);
+                            if (titleP) {
+                                titleP.setAttribute('pageBreak', '1');
+                                Array.from(titleP.getElementsByTagNameNS(HP_NS, 't')).forEach(t => {
+                                    const txt = (t.textContent || '').trim();
+                                    if (txt.includes('사진') || txt.includes('외관') || txt.includes('중점')) {
+                                        t.textContent = '1.2. 중점관리 항목';
+                                    }
+                                });
+                                appendComparePara(titleP);
+                            }
                         }
 
                         let compareDefectsOnPage = 0;
