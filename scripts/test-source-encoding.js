@@ -9,7 +9,7 @@
  * 보여서 리뷰로는 못 잡는다. 그래서 CI에서 기계가 막는다.
  *
  * 깨지는 경로는 셋이다:
- *   1) UTF-8 파일을 CP949로 읽어 저장  → 한글이 ìŠ¤ë§ˆíŠ¸ 같은 라틴 글자로 바뀜
+ *   1) UTF-8 파일을 CP949로 읽어 저장  → 한글이 라틴 확장 문자로 바뀜
  *   2) CP949 파일을 UTF-8로 읽어 저장  → U+FFFD(<?>)가 박힘
  *   3) CP949 바이트가 그대로 커밋됨     → UTF-8로 디코딩 자체가 안 됨
  *
@@ -39,12 +39,15 @@ const BOM_ALLOWED_EXT = /\.ps1$/i;
  * (·°±² 같은 건 U+00C0보다 아래라 애초에 검사 대상이 아니다)
  *
  * 새 기호를 정말 써야 하면 여기에 추가하면 된다. 단, 알파벳처럼 생긴 글자
- * (Ã ì í ë ê Â 등)는 절대 추가하지 마라 — 그게 바로 깨진 한글이다.
+ * (A/I/E 계열에 물결이나 점이 붙은 라틴 알파벳)는 절대 추가하지 마라 —
+ * 그게 바로 깨진 한글이다.
  */
 const ALLOWED_LATIN = new Set(['×', '÷']);
 
 /** 깨진 한글이 나타나는 구간. 여기 글자가 생기면 사고다. */
-const MOJIBAKE_RANGE = /[À-ɏ]/g;
+const MOJIBAKE_RANGE = new RegExp(
+    '[' + String.fromCharCode(0x00C0) + '-' + String.fromCharCode(0x024F) + ']', 'g'
+);
 
 /**
  * 한글이 통째로 날아간 걸 잡는 최후 방어선.
@@ -58,9 +61,16 @@ const HANGUL_FLOOR = {
 
 const HANGUL = /[가-힣]/g;
 
+/**
+ * 깨진 자리에 박히는 U+FFFD.
+ * 이 파일 안에 그 글자를 그대로 적으면 이 검사가 자기 자신을 잡으므로 코드로 만든다.
+ */
+const REPLACEMENT_CHAR = String.fromCharCode(0xFFFD);
+function replacementRe() { return new RegExp(REPLACEMENT_CHAR, 'g'); }
+
 function listTrackedFiles() {
     try {
-        const out = execFileSync('git', ['ls-files', '-z'], {
+        const out = execFileSync('git', ['ls-files', '-z', '--cached', '--others', '--exclude-standard'], {
             cwd: REPO_ROOT,
             maxBuffer: 1024 * 1024 * 64
         });
@@ -123,9 +133,9 @@ listTrackedFiles().forEach(function (rel) {
     const text = buf.toString('utf8');
 
     // (2) 깨진 자리에 박히는 U+FFFD
-    const fffd = text.indexOf('�');
+    const fffd = text.indexOf(REPLACEMENT_CHAR);
     if (fffd >= 0) {
-        const count = (text.match(/�/g) || []).length;
+        const count = (text.match(replacementRe()) || []).length;
         report(rel, '한글 깨짐(U+FFFD)',
             count + '군데가 깨졌습니다. 첫 위치 ' + rel + ':' + lineOf(text, fffd)
                 + ' 근처 → ' + snippet(text, fffd),
@@ -133,7 +143,7 @@ listTrackedFiles().forEach(function (rel) {
                 + '이 파일은 되살릴 수 없으니 git에서 이전 버전을 복구하세요.');
     }
 
-    // (1) UTF-8을 CP949/CP1252로 읽어서 생긴 라틴 글자 (ìŠ¤ë§ˆíŠ¸ …)
+    // (1) UTF-8을 CP949/CP1252로 읽어서 생긴 라틴 글자
     MOJIBAKE_RANGE.lastIndex = 0;
     let m;
     let firstBad = -1;
