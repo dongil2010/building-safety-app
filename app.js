@@ -5125,6 +5125,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         populateFloorSelectDropdown(bldg);
+        warnIfBuildingDataLooksHollow(bldg);
 
         const availableOnEnter = (typeof window.getBuildingAvailableFloors === 'function')
             ? window.getBuildingAvailableFloors(bldg)
@@ -46013,6 +46014,65 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         currentFloorUnsubs.push(unsub);
     }
     window.subscribeCurrentFloorSync = subscribeCurrentFloorSync;
+
+    /**
+     * 층별 결함 데이터가 껍데기인지 점검한다.
+     *
+     * 2026-09-20: 「지하1층 주차장-2」 결함 15개가 전부 기둥/균열에 크기·폭이 없는
+     * 상태로 남아 있었는데, 복구 때 개수만 맞는지 보고 넘어가서 하루 넘게 아무도
+     * 몰랐다. 데이터가 망가지는 것보다 망가진 걸 모르는 게 더 나쁘다.
+     *
+     * 사용법(F12 콘솔): checkDataHealth()          — 지금 열어둔 건물
+     *                  checkDataHealth('bldg-…')  — 특정 건물
+     * 읽기만 하고 아무것도 바꾸지 않는다.
+     */
+    window.checkDataHealth = function (buildingId) {
+        const health = window.BSA && window.BSA.dataHealth;
+        if (!health) {
+            console.warn('데이터 점검 모듈을 불러오지 못했습니다.');
+            return [];
+        }
+        const id = buildingId || window.state.currentBuildingId;
+        if (!id) {
+            console.warn('건물을 먼저 열어 주세요.');
+            return [];
+        }
+        const rows = health.analyzeBuilding(window.state.defects, id);
+        console.table(rows.map((r) => ({
+            층: r.floorCode,
+            결함수: r.count,
+            부재종류: r.components.length,
+            결함종류: r.defectTypes.length,
+            실측있음: r.withMeasure,
+            의심: r.suspicious ? r.reason : ''
+        })));
+        const bad = rows.filter((r) => r.suspicious);
+        if (bad.length) {
+            console.warn('확인이 필요한 층 ' + bad.length + '개: '
+                + bad.map((r) => r.floorCode).join(', '));
+        } else {
+            console.log('이상 없음 — 층 ' + rows.length + '개 확인');
+        }
+        return bad;
+    };
+
+    /** 건물에 들어갈 때 조용히 한 번 확인해서 콘솔에 남긴다 (화면은 건드리지 않음) */
+    const _dataHealthWarned = new Set();
+    function warnIfBuildingDataLooksHollow(bldg) {
+        try {
+            const health = window.BSA && window.BSA.dataHealth;
+            if (!health || !bldg || !bldg.id || _dataHealthWarned.has(bldg.id)) return;
+            const bad = health.suspiciousFloors(window.state.defects, bldg.id);
+            if (!bad.length) return;
+            _dataHealthWarned.add(bldg.id);
+            console.warn('[데이터 점검] ' + (bldg.name || bldg.id)
+                + ' — 내용이 비어 보이는 층이 있습니다: '
+                + bad.map((r) => r.floorCode + '(' + r.reason + ')').join(' / ')
+                + '\n자세히 보려면 콘솔에 checkDataHealth() 를 입력하세요.');
+        } catch (e) {
+            /* 점검이 앱을 막으면 안 된다 */
+        }
+    }
 
     /** 결함/NDT 데이터를 회사 루트 문서(safety_app/{companyId})와 분리된 별도 문서에 저장한다.
         도면 PDF와 같은 청크 저장 방식을 재사용 — 결함이 계속 쌓이면 루트 문서 하나로는
