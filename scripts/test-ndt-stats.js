@@ -113,6 +113,62 @@ function testFloorAndGroupPayload() {
     assert.ok(groupLine.indexOf('평균 21.6') >= 0, groupLine);
 }
 
+/** 층묶음 평균은 층별 평균을 또 평균하지 않고, 측정값 전체(지상1층 4개 + 지상5층 4개 = 8개)로 낸다.
+ * 층 코드가 "1F"와 "지상5층"처럼 섞여 있어도 같은 지상층으로 묶여야 8개가 된다. */
+function testGroupPoolsAllMeasurements() {
+    const ndtData = {};
+    ndtData[floorKey('1F')] = [20.1, 20.3, 20.5, 20.7].map((v) => ({
+        category: '강도', strengthFinal: v, strengthRatio: v * 4, strengthGrade: 'c'
+    }));
+    ndtData[floorKey('지상5층')] = [30.1, 30.3, 30.5, 30.7].map((v) => ({
+        category: '강도', strengthFinal: v, strengthRatio: v * 4, strengthGrade: 'a'
+    }));
+
+    const payload = api.buildNdtStatsPayload(ndtData, {
+        buildingId: BLDG,
+        getFloorLabel: (code) => ({ '1F': '지상 1층', 지상5층: '지상 5층' }[code] || code)
+    });
+
+    const ground = payload.groupRows.find((g) => g.key === 'ground_all');
+    assert.ok(ground, '"지상5층" 같은 한글 층 코드가 지상층 묶음에서 빠졌다');
+    assert.strictEqual(ground.strength.count, 8, '층묶음 건수가 8개가 아니다');
+    assert.strictEqual(api.formatRange(ground.strength.min, ground.strength.max, 1), '20.1~30.7');
+    assert.strictEqual(api.formatFixed(ground.strength.avg, 1), '25.4', '8개 전체 평균이어야 한다');
+    assert.deepStrictEqual(ground.strength.grades.c, 4);
+    assert.deepStrictEqual(ground.strength.grades.a, 4);
+    assert.strictEqual(payload.groupRows.length, 1, '지상층 하나로 묶여야 한다');
+}
+
+/** 건수가 다른 층을 묶을 때도 층별 평균의 평균이 되면 안 된다 */
+function testGroupAverageIsNotAverageOfFloorAverages() {
+    const ndtData = {};
+    ndtData[floorKey('1F')] = [10, 10, 10].map((v) => ({ category: '강도', strengthFinal: v }));
+    ndtData[floorKey('2F')] = [30].map((v) => ({ category: '강도', strengthFinal: v }));
+
+    const payload = api.buildNdtStatsPayload(ndtData, { buildingId: BLDG });
+    const ground = payload.groupRows.find((g) => g.key === 'ground_all');
+    assert.strictEqual(ground.strength.count, 4);
+    // 측정값 전체 평균 = (10+10+10+30)/4 = 15. 층별 평균의 평균이면 (10+30)/2 = 20.
+    assert.strictEqual(api.formatFixed(ground.strength.avg, 1), '15.0');
+    assert.strictEqual(api.formatFixed(payload.overall.strength.avg, 1), '15.0');
+}
+
+/** 탄산화도 같은 규칙 */
+function testCarbGroupPoolsAllMeasurements() {
+    const ndtData = {};
+    ndtData[floorKey('1F')] = [10, 12, 14, 16].map((v) => ({
+        category: '탄산화', carbDepth: v, carbCover: 40, carbRemainMm: 40 - v
+    }));
+    ndtData[floorKey('지상 5층')] = [20, 22].map((v) => ({
+        category: '탄산화', carbDepth: v, carbCover: 40, carbRemainMm: 40 - v
+    }));
+    const payload = api.buildNdtStatsPayload(ndtData, { buildingId: BLDG });
+    const ground = payload.groupRows.find((g) => g.key === 'ground_all');
+    assert.strictEqual(ground.carbonation.count, 6, '한글 층 코드까지 6개로 묶여야 한다');
+    // (10+12+14+16+20+22)/6 = 15.667 — 층별 평균의 평균이면 (13+21)/2 = 17
+    assert.strictEqual(api.formatFixed(ground.carbonation.depthAvg, 1), '15.7');
+}
+
 function testCarbonationHeadlineAndRisk() {
     const samples = [
         { depth: 12.4, remainMm: 27.6, remainingLifeYears: 32 },
@@ -163,7 +219,43 @@ function testOverallParticle() {
     );
 }
 
+/** 대분류를 고르면 상태조사 표와 비파괴 표가 섞이지 않아야 한다 */
+function testCategoryVisibility() {
+    assert.deepStrictEqual(api.STATS_CATEGORIES.map((c) => c.key), ['defect', 'ndt']);
+    assert.strictEqual(api.normalizeStatsCategory(undefined), 'defect');
+    assert.strictEqual(api.normalizeStatsCategory('ndt'), 'ndt');
+    assert.strictEqual(api.normalizeStatsCategory('없는값'), 'defect');
+
+    const defect = api.getStatsSectionVisibility('defect');
+    assert.deepStrictEqual(defect, {
+        summaryCards: true,
+        componentCrack: true,
+        defectMatrix: true,
+        defectFilters: true,
+        ndtStrength: false,
+        ndtCarb: false
+    });
+
+    const ndt = api.getStatsSectionVisibility('ndt');
+    assert.deepStrictEqual(ndt, {
+        summaryCards: false,
+        componentCrack: false,
+        defectMatrix: false,
+        defectFilters: false,
+        ndtStrength: true,
+        ndtCarb: true
+    });
+
+    Object.keys(defect).forEach((key) => {
+        assert.notStrictEqual(defect[key], ndt[key], key + '가 두 대분류에서 같이 보인다');
+    });
+}
+
 function main() {
+    testCategoryVisibility();
+    testGroupPoolsAllMeasurements();
+    testGroupAverageIsNotAverageOfFloorAverages();
+    testCarbGroupPoolsAllMeasurements();
     testUserExampleStrengthHeadline();
     testSlotsCountSeparatelyAndSkipIncomplete();
     testLegacyItemWithoutSlots();

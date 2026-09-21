@@ -9010,6 +9010,26 @@ body:not(.bsa-tab-home) .home-fab-add-building {
     line-height: 1.45;
 }
 
+/* 요약 카드(grid)·필터 줄(flex)은 display 규칙이 있어 hidden만으로는 안 숨는다 */
+.stats-page [hidden] {
+    display: none !important;
+}
+
+.stats-category-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    padding-bottom: 0.6rem;
+    margin-bottom: 0.65rem;
+    border-bottom: 1px solid #e2e8f0;
+}
+
+.stats-page .stats-category-chip {
+    font-size: 0.98rem;
+    font-weight: 700;
+    padding: 0.55rem 1.15rem;
+}
+
 .stats-ndt-panel .stats-table-wrap {
     max-height: none;
     overflow-x: auto;
