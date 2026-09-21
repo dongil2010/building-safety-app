@@ -37501,7 +37501,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 pushCurrent();
                 return lines.length ? lines.join('\n') : s;
             };
-;
+
             const wrapHwpxCellText = (raw, maxChars = 16) => {
                 // 입력값에 섞인 CR/LF는 강제 문단 분리로 이어져 칸 안에서 엉뚱한 줄바꿈이 된다.
                 // 공백으로 정리한 뒤, 칸 너비 줄바꿈만 적용한다.
@@ -40003,7 +40003,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 pushCurrent();
                 return lines.length ? lines.join('\n') : s;
             };
-;
+
             const wrapHwpxCellText = (raw, maxChars = 16) => {
                 // 입력값에 섞인 CR/LF는 강제 문단 분리로 이어져 칸 안에서 엉뚱한 줄바꿈이 된다.
                 // 공백으로 정리한 뒤, 칸 너비 줄바꿈만 적용한다.
