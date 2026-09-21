@@ -14294,8 +14294,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     <td style="font-weight:700; color:#6b6b6b;">${item.no || (idx + 1)}</td>
                     <td style="font-weight:700;">${item.location || '-'}</td>
                     <td style="font-weight:700; color:#6b6b6b;">${formatHeightValue(item.height) || '-'}</td>
-                    <td style="font-weight:800; color:#f8fafc;">${item.avgValue || '-'}</td>
-                    <td style="font-weight:800; color:#c084fc;">${item.tiltRatio || '-'}</td>
+                    <td class="ndt-col-disp-value">${item.avgValue || '-'}</td>
+                    <td class="ndt-col-disp-ratio">${item.tiltRatio || '-'}</td>
                     <td>${gradeBadges[item.grade] || '-'}</td>
                     <td class="ndt-row-actions">
                         <button type="button" class="btn btn-sm btn-outline ndt-btn-edit" onclick="window.editNdtItem('${item.id}')">수정</button>
@@ -14428,8 +14428,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     <td style="font-weight:800; color:${group.color || getStyleColor(isMemberDisp ? 'ndtMemberDisp' : 'ndtSettlement')};">${group.groupNo}</td>
                     <td style="font-weight:700;">${group.locationType || '보'} (${group.points.length}개 지점)</td>
                     <td style="font-weight:700; color:#6b6b6b;">${lenText}</td>
-                    <td style="font-weight:800; color:#f8fafc;">${deltaText}</td>
-                    <td style="font-weight:800; color:#c084fc;">${ratioText}</td>
+                    <td class="ndt-col-disp-value">${deltaText}</td>
+                    <td class="ndt-col-disp-ratio">${ratioText}</td>
                     <td>${gradeHtml}</td>
                     <td class="ndt-row-actions ndt-row-actions-wide">
                         <button type="button" class="btn btn-sm btn-outline" onclick="window.showNdtDisplacementChart('${group.id}')">그래프</button>

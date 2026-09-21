@@ -1238,6 +1238,17 @@ html.layout-desktop #tab-ndt .ndt-top-canvas-tools {
     min-width: 7.25rem;
 }
 
+/* 외벽 기울기·부동침하·부재처짐 결과표의 변위량과 기울기(처짐비).
+   예전 어두운 화면용 색(#f8fafc 거의 흰색)이 남아 있어 흰 바탕에서 변위량이 안 보였다(2026-09-21). */
+#tab-ndt #ndtSummaryTable td.ndt-col-disp-value {
+    font-weight: 800;
+    color: #1e293b;
+}
+#tab-ndt #ndtSummaryTable td.ndt-col-disp-ratio {
+    font-weight: 800;
+    color: #7e22ce;
+}
+
 #tab-ndt #ndtSummaryTable .ndt-row-actions .btn {
     font-size: 0.72rem;
     font-weight: 700;
