@@ -1,4 +1,4 @@
-﻿/**
+/**
  * korean-text-wrap smoke tests (node)
  */
 const assert = require('assert');
