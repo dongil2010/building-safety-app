@@ -33344,17 +33344,38 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const colMetrics = computeSurveyColumnMetrics(columns, defects, buildRowCtx);
         window._surveyColMetrics = colMetrics;
 
+        // 부재·조사내용을 빠뜨린 행을 현장에서 바로 보이게 칠한다(보고서에 빈 줄로 나가는 것 방지).
+        // 기준은 checkDataHealth()와 같다 — BSA.dataHealth.isBlankContentDefect.
+        // 3종은 부재·조사내용이 「점검내용」 한 칸으로 합쳐져 있어 그 칸을 짚는다.
+        const health = window.BSA && window.BSA.dataHealth;
+        const blankFieldsOf = (d) => (health && typeof health.blankContentFields === 'function')
+            ? health.blankContentFields(d)
+            : [];
+        const MISSING_CELL_KEYS = { component: ['component', 'inspectionContent'], defectType: ['defectType', 'inspectionContent'] };
+        let blankRowCount = 0;
+
         elements.surveyTableBody.innerHTML = defects.map((d, dIdx) => {
             const ctx = buildRowCtx(d, dIdx);
             const mapHint = d.surveyExtra ? ' (도면 번호는 본번호)' : '';
             const safeId = String(d.id || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
-            const rowTitle = exteriorSurvey
+            const blankFields = blankFieldsOf(d);
+            const missingCols = new Set();
+            blankFields.forEach((f) => (MISSING_CELL_KEYS[f] || []).forEach((k) => missingCols.add(k)));
+            if (blankFields.length) blankRowCount += 1;
+            // 조사: 조사내용(받침 있음) → '이', 부재종류만(받침 없음) → '가'
+            const blankTitle = blankFields.length
+                ? (blankFields.indexOf('defectType') >= 0
+                    ? `${blankFields.length > 1 ? '부재종류·' : ''}조사내용이 비어 있습니다 — `
+                    : '부재종류가 비어 있습니다 — ')
+                : '';
+            const rowTitle = blankTitle + (exteriorSurvey
                 ? `클릭하면 ${(ctx.floorDisplayLabel || d._exteriorFloorCode || '해당')} 도면으로 이동`
-                : '클릭하면 도면에서 마킹 위치로 이동';
+                : '클릭하면 도면에서 마킹 위치로 이동');
+            const rowClass = blankFields.length ? 'survey-row-clickable survey-row-blank' : 'survey-row-clickable';
 
             return `
-                <tr class="survey-row-clickable" style="cursor:pointer;" title="${rowTitle}" onclick="window.viewDefectOnMapFromSurvey('${safeId}')">
-                    ${columns.map(c => `<td data-col="${c.key}">${renderInlineSurveyCellHtml(c.key, d, ctx, colMetrics)}</td>`).join('')}
+                <tr class="${rowClass}" style="cursor:pointer;" title="${rowTitle}" onclick="window.viewDefectOnMapFromSurvey('${safeId}')">
+                    ${columns.map(c => `<td data-col="${c.key}"${missingCols.has(c.key) ? ' class="survey-cell-missing"' : ''}>${renderInlineSurveyCellHtml(c.key, d, ctx, colMetrics)}</td>`).join('')}
                     <td data-col="actions" class="survey-row-actions">
                         <button type="button" class="btn btn-sm btn-outline" onclick="event.stopPropagation(); window.openSurveyRowEditModal('${safeId}')" title="상세 모달">상세</button>
                         <button type="button" class="btn btn-sm btn-outline survey-btn-map-view" onclick="event.stopPropagation(); window.viewDefectOnMapFromSurvey('${safeId}')" title="결함위치도에서 마킹 선택${mapHint}"><i class="fa-solid fa-map-location-dot"></i> 도면</button>
@@ -33363,6 +33384,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             `;
         }).join('');
         applySurveyColumnMetrics(columns, colMetrics);
+        if (elements.surveyFloorTitle && blankRowCount > 0) {
+            elements.surveyFloorTitle.textContent += ` · 내용 빠진 행 ${blankRowCount}건`;
+        }
         if (typeof renderPhotoAlbum === 'function') {
             if (window.BSA?.performance?.deferHeavyWork?.()) {
                 window.BSA.performance.runWhenIdle(() => renderPhotoAlbum(), 1200);

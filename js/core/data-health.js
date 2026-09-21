@@ -42,14 +42,31 @@
         return !!(textOf(d.size) || textOf(d.crackWidth) || textOf(d.crackLength));
     }
 
+    /**
+     * 부재나 조사내용이 비어 있는 결함인가.
+     * 현장에서 위치만 찍고 내용을 빠뜨린 행 — 보고서에 빈 줄로 나간다.
+     * 조사표 화면 표시(renderSurveyTable)와 checkDataHealth()가 같은 기준을 쓴다.
+     */
+    function isBlankContentDefect(d) {
+        if (!d) return false;
+        return !textOf(d.component) || !textOf(d.defectType);
+    }
+
+    /** 비어 있는 칸 이름들 ('component' / 'defectType') — 화면에서 그 칸만 짚어주려고 */
+    function blankContentFields(d) {
+        const out = [];
+        if (!d) return out;
+        if (!textOf(d.component)) out.push('component');
+        if (!textOf(d.defectType)) out.push('defectType');
+        return out;
+    }
+
     function analyzeFloor(floorCode, defects) {
         const arr = Array.isArray(defects) ? defects.filter(Boolean) : [];
         const components = uniqueNonEmpty(arr.map(function (d) { return d.component; }));
         const defectTypes = uniqueNonEmpty(arr.map(function (d) { return d.defectType; }));
         const withMeasure = arr.filter(hasMeasurement).length;
-        const blankContent = arr.filter(function (d) {
-            return !textOf(d.component) || !textOf(d.defectType);
-        }).length;
+        const blankContent = arr.filter(isBlankContentDefect).length;
 
         const row = {
             floorCode: floorCode,
@@ -201,6 +218,8 @@
     const api = {
         MIN_DEFECTS_TO_JUDGE: MIN_DEFECTS_TO_JUDGE,
         hasMeasurement: hasMeasurement,
+        isBlankContentDefect: isBlankContentDefect,
+        blankContentFields: blankContentFields,
         analyzeFloor: analyzeFloor,
         analyzeBuilding: analyzeBuilding,
         suspiciousFloors: suspiciousFloors,

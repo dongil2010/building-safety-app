@@ -216,6 +216,41 @@ function testAppExposesCleanup() {
         '정리 도구가 측정 구역(부동침하)도 봐야 한다');
 }
 
+/**
+ * 조사표 화면에서 부재·조사내용을 빠뜨린 행을 칠한다. 기준은 checkDataHealth()와 같아야
+ * 콘솔 점검과 화면 표시가 서로 다른 말을 하지 않는다.
+ */
+function testBlankRowRuleSharedWithScreen() {
+    assert.strictEqual(api.isBlankContentDefect({ component: '', defectType: '균열' }), true);
+    assert.strictEqual(api.isBlankContentDefect({ component: '기둥', defectType: '  ' }), true);
+    assert.strictEqual(api.isBlankContentDefect({ component: '기둥', defectType: '균열' }), false);
+    assert.strictEqual(api.isBlankContentDefect(null), false);
+    assert.deepStrictEqual(api.blankContentFields({ component: '', defectType: '' }), ['component', 'defectType']);
+    assert.deepStrictEqual(api.blankContentFields({ component: '보', defectType: '' }), ['defectType'],
+        '비어 있는 칸만 짚어야 한다');
+    assert.deepStrictEqual(api.blankContentFields({ component: '보', defectType: '균열' }), []);
+
+    // 콘솔 점검의 blankContent 개수와 같은 기준인지
+    const row = api.analyzeFloor('1F', [
+        { component: '', defectType: '균열' },
+        { component: '기둥', defectType: '균열', size: '0.3' },
+        { component: '보', defectType: '' }
+    ]);
+    assert.strictEqual(row.blankContent, 2);
+
+    const fs = require('fs');
+    const app = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8');
+    const start = app.indexOf('function renderSurveyTable()');
+    const block = app.slice(start, start + 7000);
+    assert.ok(block.indexOf('health.blankContentFields(d)') >= 0,
+        '조사표는 같은 모듈 기준으로 빈 행을 골라야 한다');
+    assert.ok(block.indexOf('survey-row-blank') >= 0 && block.indexOf('survey-cell-missing') >= 0,
+        '빈 행과 빈 칸을 표시해야 한다');
+    const css = fs.readFileSync(path.join(__dirname, '..', 'styles.css'), 'utf8');
+    assert.ok(css.indexOf('tr.survey-row-blank') >= 0 && css.indexOf('td.survey-cell-missing') >= 0,
+        '표시 스타일이 있어야 한다');
+}
+
 testDetectsPlaceholderFloor();
 testHealthyFloorNotFlagged();
 testBlankContentFlagged();
@@ -229,4 +264,5 @@ testOnlyDuplicatesAreCleanupCandidates();
 testOtherBuildingNotMixedIn();
 testReportDedupesByItemId();
 testAppExposesCleanup();
+testBlankRowRuleSharedWithScreen();
 console.log('test-data-health: ok');

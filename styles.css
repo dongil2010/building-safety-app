@@ -4032,6 +4032,18 @@ html:not(.layout-tablet) #tab-map .inspect-sidebar-left .defect-badge-no {
     margin-right: 0.12rem;
 }
 
+/* 부재·조사내용을 빠뜨린 행 — 현장에서 바로 보이게 (보고서에 빈 줄로 나가는 것 방지) */
+#tab-survey tr.survey-row-blank > td {
+    background: #fffbeb;
+}
+#tab-survey tr.survey-row-blank:hover > td {
+    background: #fef3c7;
+}
+#tab-survey tr.survey-row-blank > td.survey-cell-missing {
+    background: #fef3c7;
+    box-shadow: inset 0 0 0 2px #f59e0b;
+}
+
 /* Badges & Tag styling */
 .badge {
     display: inline-block;
