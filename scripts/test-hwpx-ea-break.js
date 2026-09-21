@@ -15,14 +15,12 @@ function extractFunction(name) {
     return eval(`(${m[0]})`);
 }
 
+const slots = require(path.join(__dirname, '..', 'js', 'shared', 'hwpx-survey-slots.js'));
 const normalizeEaSpacingInText = extractFunction('normalizeEaSpacingInText');
 const insertHwpxEaCountLineBreaks = extractFunction('insertHwpxEaCountLineBreaks');
 
 function simulateWrapHwpxCellText(raw) {
-    const flat = String(normalizeEaSpacingInText(raw == null ? '' : raw))
-        .replace(/\r\n|\r|\n/g, ' ')
-        .replace(/[ \t]{2,}/g, ' ');
-    return insertHwpxEaCountLineBreaks(flat);
+    return slots.wrapHwpxCellText(raw, 80, normalizeEaSpacingInText);
 }
 
 function testScreenshotCase() {
