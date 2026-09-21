@@ -9066,6 +9066,13 @@ body:not(.bsa-tab-home) .home-fab-add-building {
     background: #fff;
 }
 
+.stats-ndt-table tr.stats-ndt-total th,
+.stats-ndt-table tr.stats-ndt-total td {
+    background: #f1f5f9;
+    font-weight: 800;
+    border-top: 2px solid #cbd5e1;
+}
+
 .stats-ndt-sub {
     color: #64748b;
     font-weight: 600;
