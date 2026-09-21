@@ -2866,17 +2866,25 @@ document.addEventListener('DOMContentLoaded', () => {
                     b?.deletedDrawingFloorAt
                 )
                 : Object.assign({}, b?.deletedDrawingFloorAt, localMatch?.deletedDrawingFloorAt);
-            const remoteMetaAtForMerge = Number(b?.metaUpdatedAt) || 0;
+            // 병합의 증거(payloadEvidence·locallyResurrected)는 전부 내 기기 로컬에서 나온 것이다.
+            // 원격이 그 층 묘비를 들고 있으면 0 → 삭제 시각이 있는 묘비는 로컬 증거로 풀지 않는다.
+            // (옛 데이터를 든 기기가 접속하면 지운 층을 다시 올리던 문제, 2026-09-21 지하1층 주차장-2)
+            // 서버 도면 문서가 남은 오탐 묘비(옥상 등)는 클라우드 조회 경로가 fromEvidence로 푼다.
+            const remoteMetaAtForMerge = (code) => (
+                typeof _drawingFloorTombstone.remoteMetaAtForRelease === 'function'
+                    ? _drawingFloorTombstone.remoteMetaAtForRelease(b, code)
+                    : 0
+            );
             let clearedFalseTombstones = 0;
             if (payloadEvidence.size || locallyResurrected.size || remotelyAlive.size) {
                 merged.deletedDrawingFloorCodes = (merged.deletedDrawingFloorCodes || []).filter((c) => {
                     const code = String(c || '').trim();
                     if (!code) return false;
-                    // 도면 증거(fromEvidence)는 At보다 우선(의도 삭제는 증거를 지움).
+                    // 로컬 도면 증거·원격 생존 모두 remoteMetaAtForMerge(code)로 판단한다.
                     // 원격 floorsList 생존만으로는 At가 더 나중이면 묘비 유지.
                     if (payloadEvidence.has(code)) {
                         if (typeof forgetDeletedDrawingFloor === 'function'
-                            && !forgetDeletedDrawingFloor(merged, code, { fromEvidence: true })) {
+                            && !forgetDeletedDrawingFloor(merged, code, { remoteMetaAt: remoteMetaAtForMerge(code) })) {
                             return true;
                         }
                         clearedFalseTombstones += 1;
@@ -2884,7 +2892,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     }
                     if (remotelyAlive.has(code)) {
                         if (typeof forgetDeletedDrawingFloor === 'function'
-                            && !forgetDeletedDrawingFloor(merged, code, { remoteMetaAt: remoteMetaAtForMerge })) {
+                            && !forgetDeletedDrawingFloor(merged, code, { remoteMetaAt: remoteMetaAtForMerge(code) })) {
                             return true;
                         }
                         clearedFalseTombstones += 1;
@@ -2892,7 +2900,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     }
                     if (locallyResurrected.has(code) && !localDeleted.has(code)) {
                         if (typeof forgetDeletedDrawingFloor === 'function'
-                            && !forgetDeletedDrawingFloor(merged, code, { fromEvidence: true })) {
+                            && !forgetDeletedDrawingFloor(merged, code, { remoteMetaAt: remoteMetaAtForMerge(code) })) {
                             return true;
                         }
                         clearedFalseTombstones += 1;
@@ -2928,21 +2936,21 @@ document.addEventListener('DOMContentLoaded', () => {
                     if (!code) return false;
                     if (payloadEvidence.has(code)) {
                         if (typeof forgetDeletedDrawingFloor === 'function'
-                            && !forgetDeletedDrawingFloor(merged, code, { fromEvidence: true })) {
+                            && !forgetDeletedDrawingFloor(merged, code, { remoteMetaAt: remoteMetaAtForMerge(code) })) {
                             return true;
                         }
                         return false;
                     }
                     if (remotelyAlive.has(code)) {
                         if (typeof forgetDeletedDrawingFloor === 'function'
-                            && !forgetDeletedDrawingFloor(merged, code, { remoteMetaAt: remoteMetaAtForMerge })) {
+                            && !forgetDeletedDrawingFloor(merged, code, { remoteMetaAt: remoteMetaAtForMerge(code) })) {
                             return true;
                         }
                         return false;
                     }
                     if (!(locallyResurrected.has(code) && !localDeleted.has(code))) return true;
                     if (typeof forgetDeletedDrawingFloor === 'function'
-                        && !forgetDeletedDrawingFloor(merged, code, { fromEvidence: true })) {
+                        && !forgetDeletedDrawingFloor(merged, code, { remoteMetaAt: remoteMetaAtForMerge(code) })) {
                         return true;
                     }
                     return false;
@@ -7507,6 +7515,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // 동기화·hydrate가 클라우드/IDB에서 되살리기 전에 tombstone을 먼저 남긴다
         rememberDeletedDrawingFloor(bldg, floorCode);
+        // 클라우드·IDB 정리가 끝날 때까지는 남아 있는 도면이 "증거"가 되면 안 된다.
+        // (b924940이 이 가드를 만들었지만 넣는 곳이 없어 동작하지 않았다)
+        _sessionDeletingDrawingFloors.add(floorKey);
         bldg._pendingCloudSync = true;
 
         if (bldg.floorDrawings && bldg.floorDrawings[floorCode]) {

@@ -262,6 +262,128 @@ function testMergeDeletedAtKeepsLatest() {
     assert.strictEqual(merged['3F'], 900, '한쪽에만 있는 시각도 살아남아야 한다');
 }
 
+/**
+ * 병합이 저장된 묘비(deletedDrawingFloorCodes)를 지웠지만 세션 키는 남은 상태.
+ * 이 상태에서만 self 비교가 실제로 해제를 시도하므로, 테스트는 여기를 재현해야 한다.
+ */
+function sessionOnlyTombstone(bldg, code, session, at) {
+    api.rememberDeletedDrawingFloor(bldg, code, session, at);
+    bldg.deletedDrawingFloorCodes = [];          // 병합이 지웠다고 가정
+    return bldg;
+}
+
+/**
+ * 2026-09-20: 지운 층(지하주차장-1/-2, 0층)이 건물에 다시 들어갈 때마다 살아났다.
+ * 원인은 app.js가 건물 자신을 '원격'으로 넘겨서, 비교 기준이 내 기기의
+ * metaUpdatedAt이 된 것이다. 내 meta는 저장할 때마다 올라가므로 삭제 시각보다
+ * 항상 나중이 되고, 그러면 묘비가 매번 풀린다.
+ * (09-21 b924940에서 selfCheck가 빠졌다가 복구 — app.js는 계속 넘기고 있었다)
+ */
+function testSelfMetaNeverClearsOwnDeletion() {
+    const session = new Set();
+    const bldg = { id: 'b1', drawingFloorCodes: ['지하주차장-1', '지하주차장-2', '0층'] };
+    ['지하주차장-1', '지하주차장-2', '0층'].forEach(function (code) {
+        sessionOnlyTombstone(bldg, code, session, 1000);
+    });
+    bldg.metaUpdatedAt = 9999;   // 삭제 후에도 작업하면 내 meta 시각이 올라간다
+
+    const n = api.forgetTombstonesClearedByRemoteMeta(bldg, session, bldg, { selfCheck: true });
+    assert.strictEqual(n, 0,
+        '내 meta 시각으로는 내 삭제를 되돌리면 안 된다 (지운 층이 되살아난다)');
+    ['지하주차장-1', '지하주차장-2', '0층'].forEach(function (code) {
+        assert.strictEqual(api.isDeletedDrawingFloor(bldg, code, session), true,
+            code + ' 묘비가 풀렸다');
+    });
+}
+
+/** selfCheck를 안 줘도 같은 객체면 자동으로 알아채야 한다 (호출부를 또 틀리지 않게) */
+function testSelfMetaDetectedWithoutFlag() {
+    const session = new Set();
+    const bldg = { id: 'b1', drawingFloorCodes: ['2F'], metaUpdatedAt: 9999 };
+    sessionOnlyTombstone(bldg, '2F', session, 1000);
+    const n = api.forgetTombstonesClearedByRemoteMeta(bldg, session, bldg);
+    assert.strictEqual(n, 0, '같은 객체를 원격으로 넘기면 자기 meta는 증거가 될 수 없다');
+}
+
+/** 영일연립 회귀 방지: 시각 없는 옛 묘비는 self 비교에서도 예전처럼 풀려야 한다 */
+function testLegacySelfCheckStillClears() {
+    const session = new Set();
+    const bldg = { id: 'b1', drawingFloorCodes: ['2F'], metaUpdatedAt: 9999 };
+    sessionOnlyTombstone(bldg, '2F', session);   // 시각 없음
+    const n = api.forgetTombstonesClearedByRemoteMeta(bldg, session, bldg, { selfCheck: true });
+    assert.strictEqual(n, 1,
+        '시각 없는 옛 묘비는 예전 동작을 유지해야 한다 (영일연립 층 사라짐 재발 방지)');
+}
+
+/**
+ * 2026-09-21 재발: 태블릿에서 지운 「지하1층 주차장-2」가 회사 PC 접속 후 되살아났다.
+ * 회사 PC는 삭제 전 데이터(층 목록·IDB 도면)를 들고 있어 병합에서 로컬 증거가 나온다.
+ * 이때 원격 건물 metaUpdatedAt(삭제 뒤 편집창 저장으로 올라감)이 삭제 시각보다
+ * 나중이라는 이유로 묘비를 풀고 층을 다시 올렸다. 서버가 묘비를 들고 있으면
+ * 건물 meta 시각은 해제 근거가 될 수 없다.
+ */
+function testRemoteTombstoneBlocksLocalEvidenceRelease() {
+    const session = new Set();
+    const remote = {
+        id: 'b1',
+        metaUpdatedAt: 5000,                       // 삭제(1000) 뒤 저장으로 올라감
+        deletedDrawingFloorCodes: ['지하1층 주차장-2'],
+        deletedDrawingFloorAt: { '지하1층 주차장-2': 1000 }
+    };
+    assert.strictEqual(api.remoteMetaAtForRelease(remote, '지하1층 주차장-2'), 0,
+        '원격이 묘비를 들고 있으면 meta 시각을 해제 근거로 쓰면 안 된다');
+
+    // 회사 PC 병합 재현: 묘비는 원격에서 넘어오고, 회사 PC엔 로컬 도면 증거가 있다
+    const merged = {
+        id: 'b1',
+        deletedDrawingFloorCodes: api.mergeDeletedDrawingFloorCodes([], remote.deletedDrawingFloorCodes),
+        deletedDrawingFloorAt: api.mergeDeletedDrawingFloorAt({}, remote.deletedDrawingFloorAt)
+    };
+    const at = api.remoteMetaAtForRelease(remote, '지하1층 주차장-2');
+    assert.strictEqual(api.isConfirmedDeletion(merged, '지하1층 주차장-2', at), true,
+        '옛 데이터를 든 기기가 접속해도 지운 층이 되살아나면 안 된다');
+    assert.strictEqual(api.isDeletedDrawingFloor(merged, '지하1층 주차장-2', session), true);
+}
+
+/** 원격이 묘비를 이미 풀었다면(누가 도면을 다시 올림) 예전처럼 meta 시각으로 판단한다 */
+function testRemoteWithoutTombstoneUsesMeta() {
+    const remote = { id: 'b1', metaUpdatedAt: 5000, drawingFloorCodes: ['2F'] };
+    assert.strictEqual(api.remoteMetaAtForRelease(remote, '2F'), 5000);
+    const local = { id: 'b1' };
+    api.rememberDeletedDrawingFloor(local, '2F', new Set(), 1000);
+    assert.strictEqual(
+        api.isConfirmedDeletion(local, '2F', api.remoteMetaAtForRelease(remote, '2F')),
+        false,
+        '원격에서 다시 올린 도면은 옛 묘비를 풀어야 한다'
+    );
+}
+
+/**
+ * 서버 증거(클라우드 도면 문서)와 로컬 증거는 app.js에서 다르게 다뤄야 한다.
+ * - 클라우드 조회 경로: fromEvidence로 푼다 (옥상 등 오탐 묘비 해소, b924940)
+ * - 병합(로컬 IDB·옛 층 목록): remoteMetaAtForRelease로 판단 (되살아남 방지)
+ */
+function testAppSeparatesCloudAndLocalEvidence() {
+    const fs = require('fs');
+    const src = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8');
+    const mergeStart = src.indexOf('const remoteMetaAtForMerge');
+    const mergeEnd = src.indexOf('mergeDiscoveredFloorsIntoBuilding(merged', mergeStart);
+    assert.ok(mergeStart > 0 && mergeEnd > mergeStart, '병합 구간을 찾지 못했다');
+    const mergeBlock = src.slice(mergeStart, mergeEnd);
+    assert.ok(src.includes('remoteMetaAtForRelease(b, code)'),
+        '병합은 remoteMetaAtForRelease로 층별 원격 시각을 구해야 한다');
+    assert.ok(!mergeBlock.includes('fromEvidence'),
+        '병합 증거는 내 기기 로컬에서 나온 것이라 fromEvidence로 풀면 지운 층이 되살아난다');
+    assert.ok(!/remoteMetaAtForMerge\s*=\s*Number\(b\?\.metaUpdatedAt\)/.test(src),
+        '건물 metaUpdatedAt을 그대로 해제 기준으로 쓰면 지운 층이 되살아난다');
+    // 클라우드 조회 경로는 서버 증거이므로 그대로 둔다
+    assert.ok(src.includes('{ fromEvidence: true }'),
+        '클라우드 도면 문서 증거로 오탐 묘비를 푸는 경로는 유지돼야 한다 (옥상)');
+    // 진행 중 삭제 가드는 넣는 곳이 있어야 동작한다
+    assert.ok(/_sessionDeletingDrawingFloors\.add\(/.test(src),
+        '삭제를 시작할 때 진행 중 표시를 넣어야 정리 레이스를 막는다');
+}
+
 testRememberAndStrip();
 testMergeKeepsLocalTombstoneAgainstRemoteRevival();
 testForgetAllowsReupload();
@@ -275,4 +397,10 @@ testRemoteNewerThanDeletionClearsTombstone();
 testRemoteOlderThanDeletionKeepsTombstone();
 testForgetClearsDeletionTimestamp();
 testMergeDeletedAtKeepsLatest();
+testSelfMetaNeverClearsOwnDeletion();
+testSelfMetaDetectedWithoutFlag();
+testLegacySelfCheckStillClears();
+testRemoteTombstoneBlocksLocalEvidenceRelease();
+testRemoteWithoutTombstoneUsesMeta();
+testAppSeparatesCloudAndLocalEvidence();
 console.log('drawing-floor-tombstone tests ok');

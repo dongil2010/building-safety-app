@@ -86,6 +86,30 @@
         return true;
     }
 
+    /**
+     * 병합에서 "내 기기 로컬 증거"로 묘비를 풀지 판단할 때 쓸 원격 시각.
+     *
+     * 원격 문서가 그 층의 묘비를 아직 들고 있으면 0을 돌려준다. 서버가 "지워졌다"고
+     * 말하고 있는데 건물 metaUpdatedAt이 삭제보다 나중이라는 이유로 풀면 안 된다.
+     * metaUpdatedAt은 건물 단위라 삭제한 기기가 편집창을 저장하기만 해도 올라가므로
+     * 거의 항상 삭제 시각보다 나중이다. 그러면 옛 데이터를 들고 있던 다른 기기(회사 PC
+     * 등)가 접속하는 순간 묘비를 풀고 층을 다시 올려버린다.
+     * (2026-09-21: 지하1층 주차장-2가 회사 PC 접속 후 되살아난 원인)
+     *
+     * 원격에 묘비가 없을 때(누가 도면을 다시 올려 force로 푼 경우)만 원격 시각을 쓴다.
+     * 서버 쪽 도면 문서가 남아 있는 오탐 묘비(옥상 등)는 app.js 클라우드 조회 경로가
+     * 서버 증거로 푼다 — 여기서 막는 건 로컬 증거뿐이다.
+     */
+    function remoteMetaAtForRelease(remoteBldg, floorCode) {
+        const code = asCode(floorCode);
+        if (!remoteBldg || !code) return 0;
+        const remoteDeleted = uniqueCodes([remoteBldg.deletedDrawingFloorCodes]);
+        if (remoteDeleted.indexOf(code) >= 0) return 0;
+        if (getDeletedDrawingFloorAt(remoteBldg, code)) return 0;
+        const n = Number(remoteBldg.metaUpdatedAt);
+        return Number.isFinite(n) && n > 0 ? n : 0;
+    }
+
     /** 층별 삭제 시각은 양쪽 중 더 나중 것을 남긴다. */
     function mergeDeletedDrawingFloorAt(localAt, remoteAt) {
         const out = {};
@@ -182,6 +206,11 @@
      * 삭제 시각(At)만 있고 도면 증거가 남은 경우는 오탐·정리 실패로 보고 푼다.
      * (원격 floorsList 부활 레이스는 forgetTombstonesClearedByRemoteMeta + At가 막는다)
      * 진행 중 삭제는 앱 계층(_sessionDeletingDrawingFloors)에서 막는다.
+     *
+     * ⚠️ evidenceCodes는 서버(클라우드 도면 문서)에서 나온 증거여야 한다.
+     * 내 기기 로컬(IDB·옛 층 목록) 증거로 부르면, 삭제 전 데이터를 들고 있던 기기가
+     * 접속하는 순간 지운 층을 되살린다. 로컬 증거는 app.js 병합에서
+     * remoteMetaAtForRelease로 판단한다. (2026-09-21 지하1층 주차장-2)
      */
     function forgetTombstonesWithDrawingEvidence(bldg, sessionKeys, evidenceCodes) {
         if (!bldg) return 0;
@@ -238,12 +267,24 @@
      * 원격 meta가 살아있다고 한 층의 tombstone·세션 키를 해제한다.
      * returns number forgotten
      */
-    function forgetTombstonesClearedByRemoteMeta(bldg, sessionKeys, remoteBldg) {
+    function forgetTombstonesClearedByRemoteMeta(bldg, sessionKeys, remoteBldg, opts) {
         if (!bldg || !remoteBldg) return 0;
         const alive = collectRemotelyAliveFloorCodes(remoteBldg);
+        const options = opts || {};
+        /**
+         * remoteBldg가 로컬 건물 자신이면 그 metaUpdatedAt은 "남이 다시 올렸다"는
+         * 증거가 될 수 없다. 내 meta는 내가 뭘 저장하든 올라가므로 삭제 시각보다
+         * 항상 나중이 되고, 그러면 건물에 다시 들어갈 때마다 묘비가 풀려서
+         * 지운 층이 되살아난다. (2026-09-20: 지하주차장-1/-2/0층 재발 원인.
+         * 09-21 b924940에서 빠졌다가 복구 — app.js는 계속 selfCheck: true를 넘긴다)
+         *
+         * 이때는 remoteAt을 0으로 본다. 시각이 찍힌 묘비는 지켜지고, 시각 없는
+         * 옛 묘비는 예전처럼 풀린다(영일연립 동작 유지).
+         */
+        const selfCheck = options.selfCheck === true || remoteBldg === bldg;
         // 원격 meta가 내 삭제보다 나중에 갱신됐을 때만 "누가 진짜 다시 올렸다"로 본다.
         // 그렇지 않으면 원격은 아직 내 삭제를 못 받은 상태이므로 묘비를 지킨다.
-        const remoteAt = Number(remoteBldg.metaUpdatedAt) || 0;
+        const remoteAt = selfCheck ? 0 : (Number(remoteBldg.metaUpdatedAt) || 0);
         let n = 0;
         alive.forEach(function (code) {
             if (!isDeletedDrawingFloor(bldg, code, sessionKeys)) return;
@@ -273,6 +314,7 @@
         getDeletedDrawingFloorAt: getDeletedDrawingFloorAt,
         isConfirmedDeletion: isConfirmedDeletion,
         mergeDeletedDrawingFloorAt: mergeDeletedDrawingFloorAt,
+        remoteMetaAtForRelease: remoteMetaAtForRelease,
         forgetTombstonesWithDrawingEvidence: forgetTombstonesWithDrawingEvidence,
         collectRemotelyAliveFloorCodes: collectRemotelyAliveFloorCodes,
         forgetTombstonesClearedByRemoteMeta: forgetTombstonesClearedByRemoteMeta,
