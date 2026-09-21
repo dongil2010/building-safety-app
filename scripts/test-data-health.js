@@ -114,6 +114,103 @@ function testAppExposesCheck() {
         'index.html이 data-health.js를 불러와야 한다');
 }
 
+/**
+ * 2026-09-21: 지상1층(1F) 비파괴 20건이 「지하1층 주차장-2」에 같은 id로 복사돼 있었다.
+ * 앱은 한 층씩만 보여줘 안 보였고, 모든 층을 합치는 한글 보고서에서 같은 측정이
+ * 두 번 나와 드러났다.
+ */
+function testFindsSameIdOnTwoFloors() {
+    const map = {
+        [`${BLDG}_1F`]: [
+            { id: 'ndt_1', category: '탄산화', location: '지상1층' },
+            { id: 'ndt_2', category: '강도', location: '지상1층' }
+        ],
+        [`${BLDG}_지하1층 주차장-2`]: [
+            { id: 'ndt_1', category: '탄산화', location: '지상1층' },
+            { id: 'ndt_2', category: '강도', location: '지상1층' }
+        ],
+        [`${BLDG}_5F`]: [{ id: 'ndt_9', category: '실측', location: '예배당' }]
+    };
+    const dup = api.crossFloorDuplicateIds(map, BLDG);
+    assert.strictEqual(dup.length, 2, '두 층에 같은 번호로 있는 항목을 찾아야 한다');
+    assert.deepStrictEqual(dup.map((d) => d.id).sort(), ['ndt_1', 'ndt_2']);
+    assert.deepStrictEqual(dup[0].floorCodes.slice().sort(), ['1F', '지하1층 주차장-2'].sort());
+}
+
+/** 한 층에만 있는 항목은 절대 정리 후보가 되면 안 된다 (지우면 진짜 데이터가 날아간다) */
+function testOnlyDuplicatesAreCleanupCandidates() {
+    const map = {
+        [`${BLDG}_1F`]: [
+            { id: 'ndt_1', category: '탄산화', location: '지상1층' }
+        ],
+        [`${BLDG}_지하1층 주차장-2`]: [
+            { id: 'ndt_1', category: '탄산화', location: '지상1층' },
+            { id: 'ndt_only', category: '실측', location: '주차장 기둥' }
+        ]
+    };
+    const targets = api.duplicatedRecordsOnFloor(map, BLDG, '지하1층 주차장-2');
+    assert.strictEqual(targets.length, 1, '겹치는 항목만 골라야 한다');
+    assert.strictEqual(targets[0].id, 'ndt_1');
+
+    // 원본 층에서 부르면 그쪽 사본이 후보가 된다 — 어느 쪽을 지울지는 사람이 고른다
+    const onSource = api.duplicatedRecordsOnFloor(map, BLDG, '1F');
+    assert.strictEqual(onSource.length, 1);
+}
+
+/** 다른 건물의 같은 id는 중복이 아니다 */
+function testOtherBuildingNotMixedIn() {
+    const map = {
+        [`${BLDG}_1F`]: [{ id: 'ndt_1', category: '강도' }],
+        ['other_1F']: [{ id: 'ndt_1', category: '강도' }]
+    };
+    assert.strictEqual(api.crossFloorDuplicateIds(map, BLDG).length, 0);
+}
+
+/** 보고서는 같은 번호를 두 번 넣지 않아야 한다 (실제 동작 확인) */
+function testReportDedupesByItemId() {
+    const map = {
+        [`${BLDG}_지하1층 주차장-2`]: [
+            { id: 'ndt_1', category: '탄산화', carbDepth: 34.57 },
+            { id: 'ndt_2', category: '강도' }
+        ],
+        [`${BLDG}_1F`]: [
+            { id: 'ndt_1', category: '탄산화', carbDepth: 34.57 },
+            { id: 'ndt_2', category: '강도' }
+        ],
+        [`${BLDG}_5F`]: [{ id: 'ndt_9', category: '실측' }]
+    };
+    const floors = ['지하1층 주차장-2', '1F', '5F'];
+    const picked = api.collectFirstByIdAcrossFloors(map, BLDG, floors);
+    assert.strictEqual(picked.kept.length, 3,
+        '같은 번호는 한 번만 — 5건이 아니라 3건이어야 한다');
+    assert.strictEqual(picked.duplicates.length, 2, '건너뛴 중복을 알려줘야 한다');
+    assert.strictEqual(picked.duplicates[0].firstFloorCode, '지하1층 주차장-2');
+    assert.strictEqual(picked.duplicates[0].floorCode, '1F');
+    // 같은 층을 두 번 넘겨도 두 번 넣지 않는다
+    const twice = api.collectFirstByIdAcrossFloors(map, BLDG, ['5F', '5F']);
+    assert.strictEqual(twice.kept.length, 1);
+    // 번호 없는 항목은 그대로 살린다 (예전 데이터)
+    const noIdMap = { [`${BLDG}_1F`]: [{ category: '강도' }, { category: '강도' }] };
+    const noId = api.collectFirstByIdAcrossFloors(noIdMap, BLDG, ['1F']);
+    assert.strictEqual(noId.kept.length, 2, '번호 없는 옛 항목을 중복으로 지우면 안 된다');
+    // 같은 층이 목록에 두 번 들어와도 번호 없는 항목이 두 배가 되면 안 된다
+    const noIdTwice = api.collectFirstByIdAcrossFloors(noIdMap, BLDG, ['1F', '1F']);
+    assert.strictEqual(noIdTwice.kept.length, 2,
+        '같은 층을 두 번 훑으면 번호 없는 항목이 두 배가 된다');
+}
+
+/** 콘솔 도구가 노출돼 있어야 현장에서 정리할 수 있다 */
+function testAppExposesCleanup() {
+    const fs = require('fs');
+    const app = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8');
+    assert.ok(app.indexOf('window.cleanDuplicateNdt') >= 0,
+        'app.js가 window.cleanDuplicateNdt를 노출해야 콘솔에서 정리할 수 있다');
+    const start = app.indexOf('function buildCombinedNdtDataForReport');
+    const block = app.slice(start, start + 3000);
+    assert.ok(block.indexOf('health.collectFirstByIdAcrossFloors(map, buildingId, floorCodes)') >= 0,
+        '보고서 합치기는 중복 제거 모듈을 실제로 호출해야 한다');
+}
+
 testDetectsPlaceholderFloor();
 testHealthyFloorNotFlagged();
 testBlankContentFlagged();
@@ -122,4 +219,9 @@ testEmptyFloorNotFlagged();
 testMeasurementCountsAnyField();
 testBuildingScanPicksOnlyThisBuilding();
 testAppExposesCheck();
+testFindsSameIdOnTwoFloors();
+testOnlyDuplicatesAreCleanupCandidates();
+testOtherBuildingNotMixedIn();
+testReportDedupesByItemId();
+testAppExposesCleanup();
 console.log('test-data-health: ok');

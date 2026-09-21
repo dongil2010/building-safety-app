@@ -10105,25 +10105,46 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const floorCodes = listNdtFloorCodesForBuilding(buildingId);
         const allItems = [];
         const allDispGroups = [];
-        const seen = new Set();
-        floorCodes.forEach(fc => {
-            if (seen.has(fc)) return;
-            seen.add(fc);
-            const floorLabel = stripFloorCodeSuffix(window.getFloorLabelFromCode(fc));
-            const key = `${buildingId}_${fc}`;
-            ((state.ndtData && state.ndtData[key]) || []).forEach(item => {
-                if (!item) return;
-                allItems.push(Object.assign({}, item, {
-                    location: item.location ? `${floorLabel} ${item.location}` : floorLabel,
-                    _ndtFloorCode: fc,
-                    _ndtFloorLabel: floorLabel
-                }));
-            });
-            ((state.ndtDisplacementGroups && state.ndtDisplacementGroups[key]) || []).forEach(g => {
-                if (!g) return;
-                allDispGroups.push(Object.assign({}, g, { _ndtFloorCode: fc, _ndtFloorLabel: floorLabel }));
-            });
+        // 같은 번호(id)는 보고서에 한 번만 넣는다. 층 섞임 사고로 같은 항목이 두 층에
+        // 들어가 있으면(2026-09-21 지상1층 비파괴가 「지하1층 주차장-2」에 복사된 건)
+        // 결과표에 같은 측정이 두 번 나온다. 데이터를 고치는 게 먼저지만(cleanDuplicateNdt),
+        // 보고서가 조용히 두 배로 나가는 것은 막는다.
+        const health = (window.BSA && window.BSA.dataHealth) || null;
+        const pick = (map) => (health && typeof health.collectFirstByIdAcrossFloors === 'function')
+            ? health.collectFirstByIdAcrossFloors(map, buildingId, floorCodes)
+            : { kept: [], duplicates: [] };
+        const labelCache = new Map();
+        const labelOf = (fc) => {
+            if (!labelCache.has(fc)) {
+                labelCache.set(fc, stripFloorCodeSuffix(window.getFloorLabelFromCode(fc)));
+            }
+            return labelCache.get(fc);
+        };
+
+        const itemsPicked = pick(state.ndtData);
+        itemsPicked.kept.forEach(({ floorCode, record }) => {
+            const floorLabel = labelOf(floorCode);
+            allItems.push(Object.assign({}, record, {
+                location: record.location ? `${floorLabel} ${record.location}` : floorLabel,
+                _ndtFloorCode: floorCode,
+                _ndtFloorLabel: floorLabel
+            }));
         });
+
+        const groupsPicked = pick(state.ndtDisplacementGroups);
+        groupsPicked.kept.forEach(({ floorCode, record }) => {
+            allDispGroups.push(Object.assign({}, record, {
+                _ndtFloorCode: floorCode,
+                _ndtFloorLabel: labelOf(floorCode)
+            }));
+        });
+
+        const dupes = itemsPicked.duplicates.concat(groupsPicked.duplicates);
+        if (dupes.length) {
+            console.warn('[비파괴] 같은 번호가 여러 층에 있어 보고서에는 한 번만 넣었습니다 ('
+                + dupes.length + '건). cleanDuplicateNdt()로 정리하세요.\n'
+                + dupes.map((d) => `${d.id}: ${d.firstFloorCode} / ${d.floorCode}`).join('\n'));
+        }
         return { allItems, allDispGroups };
     }
 
@@ -46064,7 +46085,76 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         } else {
             console.log('이상 없음 — 층 ' + rows.length + '개 확인');
         }
+        const ndtDup = (typeof health.crossFloorDuplicateIds === 'function')
+            ? health.crossFloorDuplicateIds(window.state.ndtData, id)
+            : [];
+        if (ndtDup.length) {
+            console.warn('[비파괴] 같은 번호가 여러 층에 있는 항목 ' + ndtDup.length + '건 — '
+                + '한글 보고서에 같은 측정이 두 번 나옵니다. cleanDuplicateNdt(\'<층코드>\')로 확인하세요.');
+            console.table(ndtDup.map((d) => ({ 번호: d.id, 층들: d.floorCodes.join(' + ') })));
+        }
         return bad;
+    };
+
+    /**
+     * 층 섞임으로 다른 층에 복사된 비파괴 항목을 그 층에서만 지운다.
+     *
+     * 2026-09-21: 지상1층(1F) 비파괴 20건이 「지하1층 주차장-2」에 같은 id로 복사돼
+     * 있었다. 앱은 한 번에 한 층만 보여줘 눈에 안 띄고, 모든 층을 합치는 한글
+     * 보고서에서 같은 측정이 두 번 나왔다.
+     *
+     * **다른 층에도 있는 항목만** 지운다. 그 층에만 있는 항목은 진짜 데이터이므로
+     * 건드리지 않는다. 삭제 기록은 층별로 남으므로(deletedNdtIds[floorKey]) 원본
+     * 층의 같은 번호는 영향을 받지 않는다.
+     *
+     * 사용법(F12 콘솔):
+     *   cleanDuplicateNdt('지하1층 주차장-2')                 — 무엇을 지울지 보기만 함
+     *   cleanDuplicateNdt('지하1층 주차장-2', { apply: true }) — 실제로 지움
+     */
+    window.cleanDuplicateNdt = function (floorCode, opts) {
+        const options = opts || {};
+        const health = window.BSA && window.BSA.dataHealth;
+        if (!health || typeof health.duplicatedRecordsOnFloor !== 'function') {
+            console.warn('데이터 점검 모듈을 불러오지 못했습니다.');
+            return [];
+        }
+        const id = options.buildingId || window.state.currentBuildingId;
+        if (!id) {
+            console.warn('건물을 먼저 열어 주세요.');
+            return [];
+        }
+        const code = String(floorCode || '').trim();
+        if (!code) {
+            const dup = health.crossFloorDuplicateIds(window.state.ndtData, id);
+            console.warn('층코드를 주세요. 예: cleanDuplicateNdt(\'지하1층 주차장-2\')');
+            console.table(dup.map((d) => ({ 번호: d.id, 층들: d.floorCodes.join(' + ') })));
+            return [];
+        }
+        const floorKey = `${id}_${code}`;
+        const targets = health.duplicatedRecordsOnFloor(window.state.ndtData, id, code);
+        if (!targets.length) {
+            console.log(`${code}: 다른 층과 겹치는 비파괴 항목이 없습니다.`);
+            return [];
+        }
+        console.table(targets.map((t) => ({ 번호: t.id, 분류: t.category, 위치: t.location })));
+        if (!options.apply) {
+            console.warn(`${code}에서 지울 후보 ${targets.length}건입니다. 실제로 지우려면 `
+                + `cleanDuplicateNdt('${code}', { apply: true })`);
+            return targets;
+        }
+        const targetIds = new Set(targets.map((t) => t.id));
+        targetIds.forEach((itemId) => trackNdtDeletion(floorKey, itemId));
+        const rest = (window.state.ndtData[floorKey] || []).filter((it) => !(it && targetIds.has(it.id)));
+        if (rest.length) {
+            window.state.ndtData[floorKey] = rest;
+        } else {
+            delete window.state.ndtData[floorKey];
+        }
+        if (typeof markFloorKeyDirty === 'function') markFloorKeyDirty(floorKey);
+        if (typeof saveStateToLocalStorage === 'function') saveStateToLocalStorage();
+        console.log(`${code}에서 비파괴 ${targetIds.size}건을 지웠습니다. `
+            + '동기화하면 다른 기기에도 반영됩니다.');
+        return targets;
     };
 
     /** 건물에 들어갈 때 조용히 한 번 확인해서 콘솔에 남긴다 (화면은 건드리지 않음) */
