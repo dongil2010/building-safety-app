@@ -4,10 +4,28 @@
 
     root.BSA = root.BSA || { tabs: {}, shared: {} };
 
+    /** "1F"·"지상5층"·"5층"처럼 표기가 달라도 같은 지상층으로 본다 —
+     * 층묶음 평균이 표기 차이로 쪼개지면 지상1층 4개 + 지상5층 4개가 8개로 합쳐지지 않는다 */
+    function parseGroundFloorNumber(floorCode) {
+        var fi = root.BSA && root.BSA.floorIdentity;
+        if (fi && typeof fi.parseGroundNumber === 'function') {
+            var n = fi.parseGroundNumber(floorCode);
+            if (n != null) return n;
+        }
+        var raw = String(floorCode || '').trim();
+        var m = raw.toUpperCase().match(/^([0-9]{1,2})\s*F$/);
+        if (m) return parseInt(m[1], 10);
+        m = raw.match(/^지상\s*([0-9]{1,2})\s*층?$/);
+        if (m) return parseInt(m[1], 10);
+        m = raw.match(/^([0-9]{1,2})\s*층$/);
+        if (m) return parseInt(m[1], 10);
+        return null;
+    }
+
     function classifyFloorGroup(floorCode) {
         var c = String(floorCode || '').toUpperCase().trim();
         var raw = String(floorCode || '');
-        if (/^B\d+F$/i.test(c) || raw.indexOf('지하') >= 0) {
+        if (/^B\s*\d+\s*F?$/i.test(c) || raw.indexOf('지하') >= 0) {
             return { key: 'basement', label: '지하층', sort: 100 };
         }
         if (c === 'ROOF' || raw.indexOf('옥상') >= 0) {
@@ -19,9 +37,9 @@
         if (c.indexOf('EXT') === 0 || raw.indexOf('외부') >= 0 || raw.indexOf('부대') >= 0) {
             return { key: 'external', label: '부대·외부', sort: 9200 };
         }
-        var m = c.match(/^(\d+)F$/);
-        if (m) {
-            return { key: 'ground', label: '지상층', sort: 1000 + parseInt(m[1], 10), sub: m[1] + 'F' };
+        var ground = parseGroundFloorNumber(raw);
+        if (ground != null) {
+            return { key: 'ground', label: '지상층', sort: 1000 + ground, sub: ground + 'F' };
         }
         return { key: 'other', label: '기타', sort: 8000 };
     }
@@ -434,7 +452,32 @@
         };
     }
 
+    // 통계 대분류 — 상태조사(결함)와 비파괴조사를 섞어 보면 표가 길어져 현장에서 못 읽는다.
+    var STATS_CATEGORIES = [
+        { key: 'defect', label: '상태조사' },
+        { key: 'ndt', label: '비파괴조사' }
+    ];
+
+    function normalizeStatsCategory(key) {
+        return key === 'ndt' ? 'ndt' : 'defect';
+    }
+
+    function getStatsSectionVisibility(category) {
+        var isNdt = normalizeStatsCategory(category) === 'ndt';
+        return {
+            summaryCards: !isNdt,
+            componentCrack: !isNdt,
+            defectMatrix: !isNdt,
+            defectFilters: !isNdt,
+            ndtStrength: isNdt,
+            ndtCarb: isNdt
+        };
+    }
+
     var api = {
+        STATS_CATEGORIES: STATS_CATEGORIES,
+        normalizeStatsCategory: normalizeStatsCategory,
+        getStatsSectionVisibility: getStatsSectionVisibility,
         classifyFloorGroup: classifyFloorGroup,
         getCoarseFloorGroup: getCoarseFloorGroup,
         toNum: toNum,
@@ -465,6 +508,7 @@
     if (typeof document === 'undefined') return;
 
     var statsView = 'floor';
+    var statsCategory = 'defect';
     var statsBound = false;
     var selectedComponentGroup = null;
     var ndtStats = (window.BSA && window.BSA.ndtStats) || {};
@@ -604,36 +648,9 @@
         return keys;
     }
 
-    function classifyFloorGroup(floorCode) {
-        var c = String(floorCode || '').toUpperCase().trim();
-        var raw = String(floorCode || '');
-        if (/^B\d+F$/i.test(c) || raw.indexOf('지하') >= 0) {
-            return { key: 'basement', label: '지하층', sort: 100 };
-        }
-        if (c === 'ROOF' || raw.indexOf('옥상') >= 0) {
-            return { key: 'roof', label: '옥상층', sort: 9000 };
-        }
-        if (c === 'PH' || c === 'PH_ROOF' || raw.indexOf('옥탑') >= 0) {
-            return { key: 'penthouse', label: '옥탑층', sort: 9100 };
-        }
-        if (c.indexOf('EXT') === 0 || raw.indexOf('외부') >= 0 || raw.indexOf('부대') >= 0) {
-            return { key: 'external', label: '부대·외부', sort: 9200 };
-        }
-        var m = c.match(/^(\d+)F$/);
-        if (m) {
-            return { key: 'ground', label: '지상층', sort: 1000 + parseInt(m[1], 10), sub: m[1] + 'F' };
-        }
-        return { key: 'other', label: '기타', sort: 8000 };
-    }
-
-    function getCoarseFloorGroup(floorCode) {
-        var info = classifyFloorGroup(floorCode);
-        if (info.key === 'ground') return { key: 'ground_all', label: '지상층', sort: 2000 };
-        if (info.key === 'basement') return { key: 'basement_all', label: '지하층', sort: 100 };
-        if (info.key === 'roof' || info.key === 'penthouse') return { key: 'roof_all', label: '옥상·옥탑', sort: 9000 };
-        if (info.key === 'external') return { key: 'external_all', label: '부대·외부', sort: 9100 };
-        return { key: 'other_all', label: '기타', sort: 8000 };
-    }
+    // 층 구역 분류는 결함·비파괴가 같은 규칙을 써야 층묶음 집계가 갈라지지 않는다
+    var classifyFloorGroup = ndtStats.classifyFloorGroup;
+    var getCoarseFloorGroup = ndtStats.getCoarseFloorGroup;
 
     function getFloorLabel(floorCode, bldg) {
         if (typeof window.getFloorLabelFromCode === 'function') {
@@ -880,14 +897,23 @@
         var hint = document.getElementById('statsViewHint');
         if (!hint) return;
         var isPrecise = bldg && bldg.inspectionType === '정밀안전점검';
+        var isNdt = statsCategory === 'ndt';
         if (view === 'group') {
-            hint.textContent = isPrecise
-                ? '정밀안전점검: 지하·지상·옥상·부대 등 층 구역별로 결함 종류와 강도·탄산화를 묶어 봅니다.'
-                : '층을 구역(지하·지상·옥상·부대)별로 묶어 결함 종류와 강도·탄산화를 집계합니다.';
+            if (isNdt) {
+                hint.textContent = '층을 구역(지하·지상·옥상·부대)별로 묶어 강도·탄산화를 집계합니다.';
+            } else {
+                hint.textContent = isPrecise
+                    ? '정밀안전점검: 지하·지상·옥상·부대 등 층 구역별로 결함 종류를 묶어 봅니다.'
+                    : '층을 구역(지하·지상·옥상·부대)별로 묶어 결함 종류를 집계합니다.';
+            }
         } else if (view === 'floor') {
-            hint.textContent = '각 층별 결함 종류와 강도(범위·평균·측정/설계)·탄산화입니다. 현재 선택 층은 강조 표시됩니다.';
+            hint.textContent = isNdt
+                ? '각 층별 콘크리트 강도(범위·층별 평균·측정/설계)와 탄산화입니다. 현재 선택 층은 강조 표시됩니다.'
+                : '각 층별 결함 종류 건수입니다. 현재 선택 층은 강조 표시됩니다.';
         } else {
-            hint.textContent = '건물 전체 결함 종류와 강도·탄산화 합계입니다.';
+            hint.textContent = isNdt
+                ? '건물 전체 강도·탄산화 합계입니다.'
+                : '건물 전체 결함 종류 합계입니다.';
         }
     }
 
@@ -896,6 +922,69 @@
             excludeGood: !!document.getElementById('statsExcludeGood')?.checked,
             currentRoundOnly: !!document.getElementById('statsCurrentRoundOnly')?.checked
         };
+    }
+
+    /** 대분류 칩(상태조사·비파괴조사)은 index.html을 건드리지 않고 여기서 만들어 붙인다 */
+    function ensureCategoryChips() {
+        var page = document.querySelector('#tab-stats .stats-page');
+        if (!page) return null;
+        var host = document.getElementById('statsCategoryChips');
+        if (host) return host;
+        host = document.createElement('div');
+        host.id = 'statsCategoryChips';
+        host.className = 'stats-category-chips';
+        host.setAttribute('role', 'tablist');
+        host.setAttribute('aria-label', '통계 대분류');
+        var cats = (ndtStats.STATS_CATEGORIES || [
+            { key: 'defect', label: '상태조사' },
+            { key: 'ndt', label: '비파괴조사' }
+        ]);
+        host.innerHTML = cats.map(function (cat) {
+            var on = cat.key === statsCategory;
+            return '<button type="button" class="chip stats-category-chip' + (on ? ' active' : '')
+                + '" data-stats-category="' + esc(cat.key) + '" aria-pressed="' + (on ? 'true' : 'false')
+                + '">' + esc(cat.label) + '</button>';
+        }).join('');
+        var toolbar = page.querySelector('.stats-toolbar');
+        if (toolbar) page.insertBefore(host, toolbar);
+        else page.appendChild(host);
+        host.querySelectorAll('[data-stats-category]').forEach(function (btn) {
+            btn.addEventListener('click', function () {
+                statsCategory = (ndtStats.normalizeStatsCategory || function (k) { return k; })(
+                    btn.getAttribute('data-stats-category')
+                );
+                if (typeof window.renderDefectStatsTab === 'function') window.renderDefectStatsTab();
+            });
+        });
+        return host;
+    }
+
+    function syncCategoryChips() {
+        var host = ensureCategoryChips();
+        if (!host) return;
+        host.querySelectorAll('[data-stats-category]').forEach(function (btn) {
+            var on = btn.getAttribute('data-stats-category') === statsCategory;
+            btn.classList.toggle('active', on);
+            btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+        });
+    }
+
+    function applyCategoryVisibility() {
+        var vis = (ndtStats.getStatsSectionVisibility || function () { return null; })(statsCategory);
+        if (!vis) return;
+        var matrixTable = document.getElementById('statsMatrixTable');
+        var defectPanel = matrixTable ? matrixTable.closest('.stats-panel') : null;
+        var toggles = [
+            [document.getElementById('statsSummaryCards'), vis.summaryCards],
+            [document.getElementById('statsComponentSection'), vis.componentCrack],
+            [defectPanel, vis.defectMatrix],
+            [document.querySelector('#tab-stats .stats-filter-row'), vis.defectFilters],
+            [document.getElementById('statsNdtStrengthSection'), vis.ndtStrength],
+            [document.getElementById('statsNdtCarbSection'), vis.ndtCarb]
+        ];
+        toggles.forEach(function (pair) {
+            if (pair[0]) pair[0].hidden = !pair[1];
+        });
     }
 
     function ensureNdtStatsMount() {
@@ -992,7 +1081,6 @@
             lead = ndtStats.formatStrengthHeadline(leadRow.floorLabel || leadRow.label, leadRow.strength, avgWord);
         }
         if (!rows.length) {
-            root.hidden = false;
             root.innerHTML = '<div class="stats-panel-head"><h3 class="stats-panel-title">' + esc(title) + '</h3></div>'
                 + '<p class="stats-empty">표시할 강도 측정값이 없습니다.</p>';
             return;
@@ -1018,7 +1106,6 @@
                 + '<td>' + esc(formatGrade(s.grades)) + '</td>'
                 + '</tr>';
         }).join('');
-        root.hidden = false;
         root.innerHTML = '<div class="stats-panel-head"><h3 class="stats-panel-title">' + esc(title) + '</h3>'
             + (lead ? '<p class="stats-ndt-lead">' + esc(lead) + '</p>' : '')
             + '</div>'
@@ -1041,7 +1128,6 @@
             lead = ndtStats.formatCarbHeadline(leadRow.floorLabel || leadRow.label, leadRow.carbonation, avgWord);
         }
         if (!rows.length) {
-            root.hidden = false;
             root.innerHTML = '<div class="stats-panel-head"><h3 class="stats-panel-title">' + esc(title) + '</h3></div>'
                 + '<p class="stats-empty">표시할 탄산화 측정값이 없습니다.</p>';
             return;
@@ -1066,7 +1152,6 @@
                 + '<td class="' + cautionCls + '">' + esc(caution) + '</td>'
                 + '</tr>';
         }).join('');
-        root.hidden = false;
         root.innerHTML = '<div class="stats-panel-head"><h3 class="stats-panel-title">' + esc(title) + '</h3>'
             + (lead ? '<p class="stats-ndt-lead">' + esc(lead) + '</p>' : '')
             + '</div>'
@@ -1080,10 +1165,10 @@
         var mount = ensureNdtStatsMount();
         if (!mount) return;
         if (!bldg || !ndtStats.buildNdtStatsPayload) {
-            mount.strength.innerHTML = '';
-            mount.carb.innerHTML = '';
-            mount.strength.hidden = true;
-            mount.carb.hidden = true;
+            mount.strength.innerHTML = '<div class="stats-panel-head"><h3 class="stats-panel-title">콘크리트 강도</h3></div>'
+                + '<p class="stats-empty">건물을 선택하면 강도 통계를 볼 수 있습니다.</p>';
+            mount.carb.innerHTML = '<div class="stats-panel-head"><h3 class="stats-panel-title">탄산화</h3></div>'
+                + '<p class="stats-empty">건물을 선택하면 탄산화 통계를 볼 수 있습니다.</p>';
             return;
         }
         var payload = ndtStats.buildNdtStatsPayload((window.state && window.state.ndtData) || {}, {
@@ -1109,17 +1194,20 @@
             }
         }
 
+        syncCategoryChips();
         var payload = buildStatsPayload(bldg, getStatsOptions());
         renderSummaryCards(payload, document.getElementById('statsSummaryCards'));
         renderComponentCrackPanel(payload, document.getElementById('statsComponentSection'));
         renderMatrixTable(payload, statsView);
         renderNdtStatsPanels(bldg);
         updateHint(statsView, bldg);
+        applyCategoryVisibility();
     };
 
     function bindStatsControlsOnce() {
         if (statsBound) return;
         statsBound = true;
+        ensureCategoryChips();
         document.querySelectorAll('[data-stats-view]').forEach(function (btn) {
             btn.addEventListener('click', function () {
                 statsView = btn.getAttribute('data-stats-view') || 'floor';
@@ -1141,6 +1229,7 @@
         id: 'tab-stats',
         title: '통계',
         features: [
+            '대분류: 상태조사 / 비파괴조사 — 층별·층묶음·전체는 고른 대분류 안에서 움직임',
             '건물 전체 결함 종류 집계',
             '층별 결함 종류 표 (현재 선택 층 강조)',
             '층묶음 보기: 지하·지상·옥상·부대 구역별 집계',
