@@ -15364,3 +15364,9 @@ html:not(.layout-desktop) .crack-monitor-photo-slots {
 #btnRestoreBulkSnapshot {
     white-space: nowrap;
 }
+
+/* 상태조사표: 한글 어절 단위 줄바꿈 (keep-all), 넘치면 글자 단위 허용 */
+#tab-survey .survey-table td {
+    word-break: keep-all;
+    overflow-wrap: break-word;
+}

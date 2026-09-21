@@ -37373,7 +37373,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 if (seg) seg.setAttribute('vertpos', String(lineIndex * (baseVertsize + baseSpacing)));
             };
             // 한글 셀: charPr 자간 속성은 건드리지 않는다(템플릿 값 유지).
-            // 칸 너비를 넘는 지점부터 다음 줄로 넘긴다(띄어쓰기·콤마 우선, 없으면 글자 단위).
+            // 줄바꿈은 어절(공백) 우선(keep-all), 금칙·조사 분리 방지, 긴 어절만 글자 단위 Fallback.
             // 한 문단으로 두면 한글이 자간을 줄여 한 줄에 욱여넣으므로 강제 문단 분리를 쓴다.
             // 행 높이는 템플릿을 유지하다가 4줄 이상일 때만 내용에 맞게 확장한다.
             const HWPX_CELL_EXPAND_FROM_LINES = 4;
@@ -37398,76 +37398,110 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 const usable = Math.max(charW, cellW - ml - mr);
                 return Math.max(4, Math.floor(usable / charW));
             };
-            /** 칸을 넘는 위치부터 순차 줄바꿈. 가운데 분할(줄나눔) 없음. */
-            const wrapHwpxCellLine = (line, maxChars = 16) => {
-                const s = String(line == null ? '' : line);
-                const chars = Array.from(s);
-                if (!chars.length) return '';
-                const maxUnits = Math.max(4, Number(maxChars) || 16);
-                const lines = [];
+            /** 한글 칸 줄바꿈: 어절(공백) 우선, 금칙, 긴 어절만 글자 단위 Fallback.
+             *  (web keep-all + overflow-wrap:break-word 와 같은 취지. 가운데 줄나눔 없음.) */
+            const HWPX_LINE_START_FORBIDDEN = /[)\]}.!?,:;~，。、》〉』」]/
+            const HWPX_LINE_END_FORBIDDEN = /[(\[{$₩《〈『「]/
+            const hwpxMeasureUnits = (str) => Array.from(String(str || '')).reduce((n, ch) => n + hwpxCharWidthUnits(ch), 0);
+            const wrapHwpxLongWord = (word, maxUnits) => {
+                const chars = Array.from(String(word || ''));
+                if (!chars.length) return [];
+                const isAsciiTokenChar = (ch) => /[0-9A-Za-z.:~\/xXmM\-]/.test(ch);
+                const out = [];
                 let i = 0;
                 while (i < chars.length) {
-                    while (i < chars.length && (chars[i] === ' ' || chars[i] === '\t')) i++;
-                    if (i >= chars.length) break;
                     let units = 0;
                     let end = i;
-                    let lastBreak = -1; // 끊을 위치(이 인덱스부터 다음 줄)
                     while (end < chars.length) {
-                        const ch = chars[end];
-                        const w = hwpxCharWidthUnits(ch);
+                        const w = hwpxCharWidthUnits(chars[end]);
                         if (units + w > maxUnits && end > i) break;
                         units += w;
                         end++;
-                        if (ch === ' ' || ch === '\t') {
-                            // -nEA 앞 공백은 wrapHwpxCellText가 문단 분리한다.
-                            // 여기선 줄바꿈 후보로 쓰지 않음(측정값 중간 쪼개기 방지).
-                            const after = chars.slice(end).join('');
-                            if (!/^-\d+\s*EA\b/i.test(after)) lastBreak = end;
-                        } else if (/[,|·、，]/.test(ch)) {
-                            // . / 는 규모(0.15/1.5) 중간이라 끊지 않음. 여러 건 구분자(콤마)만.
-                            lastBreak = end;
-                        }
                     }
                     if (end >= chars.length) {
-                        lines.push(chars.slice(i).join(''));
+                        out.push(chars.slice(i).join(''));
                         break;
                     }
-                    // 자연 끊김(띄어쓰기·콤마)이 없으면 칸 너비(end)에서 강제 줄바꿈한다.
-                    // 한 문단으로 두면 한글이 자간을 줄여 한 줄에 욱여넣는 경우가 많다.
-                    // ASCII 규모값(Cw:0.15, 0.3/1.2 등)은 토큰 중간에서 끊지 않는다.
-                    let cut;
-                    if (lastBreak > i) {
-                        cut = lastBreak;
-                    } else {
-                        const isAsciiTokenChar = (ch) => /[0-9A-Za-z.:~\/xXmM\-]/.test(ch);
-                        cut = end;
-                        if (end < chars.length && isAsciiTokenChar(chars[end - 1]) && isAsciiTokenChar(chars[end])) {
-                            let tokenStart = end - 1;
-                            while (tokenStart > i && isAsciiTokenChar(chars[tokenStart - 1])) tokenStart--;
-                            if (tokenStart > i) {
-                                cut = tokenStart;
-                            } else {
-                                let tokenEnd = end;
-                                while (tokenEnd < chars.length && isAsciiTokenChar(chars[tokenEnd])) tokenEnd++;
-                                lines.push(chars.slice(i, tokenEnd).join(''));
-                                i = tokenEnd;
-                                if (!lines[lines.length - 1]) lines.pop();
-                                continue;
-                            }
+                    let cut = end;
+                    // ASCII 규모값(Cw:0.15 등)은 토큰 중간에서 끊지 않음
+                    if (end < chars.length && isAsciiTokenChar(chars[end - 1]) && isAsciiTokenChar(chars[end])) {
+                        let tokenStart = end - 1;
+                        while (tokenStart > i && isAsciiTokenChar(chars[tokenStart - 1])) tokenStart--;
+                        if (tokenStart > i) {
+                            cut = tokenStart;
+                        } else {
+                            let tokenEnd = end;
+                            while (tokenEnd < chars.length && isAsciiTokenChar(chars[tokenEnd])) tokenEnd++;
+                            out.push(chars.slice(i, tokenEnd).join(''));
+                            i = tokenEnd;
+                            continue;
                         }
                     }
-                    // cut이 공백을 가리키면 공백은 다음 줄 선두에서 제거됨
-                    if (cut > i && (chars[cut - 1] === ' ' || chars[cut - 1] === '\t')) {
-                        lines.push(chars.slice(i, cut - 1).join(''));
-                        i = cut;
-                    } else {
-                        lines.push(chars.slice(i, cut).join(''));
-                        i = cut;
+                    // 행두 금칙: 다음 줄 머리에 오면 안 되는 문자는 가능하면 이 줄로
+                    while (cut < chars.length && HWPX_LINE_START_FORBIDDEN.test(chars[cut])) {
+                        const extra = hwpxCharWidthUnits(chars[cut]);
+                        if (units + extra > maxUnits && cut > i + 1) break;
+                        units += extra;
+                        cut++;
                     }
-                    if (!lines[lines.length - 1]) lines.pop();
+                    // 행미 금칙: 여는 괄호·통화기호로 줄이 끝나지 않게
+                    while (cut > i + 1 && HWPX_LINE_END_FORBIDDEN.test(chars[cut - 1])) cut--;
+                    // 조사·어미가 다음 줄 머리로 밀리지 않게(붙여 쓴 한글)
+                    const rest = chars.slice(cut).join('');
+                    const jm = rest.match(/^(은|는|이|가|을|를|의|에|에서|에게|으로|로써|로|와|과|도|만|부터|까지|이나|나)/);
+                    if (jm) {
+                        const ju = hwpxMeasureUnits(jm[1]);
+                        if (units + ju <= maxUnits) cut += jm[1].length;
+                    }
+                    if (cut <= i) cut = Math.min(chars.length, i + 1);
+                    out.push(chars.slice(i, cut).join(''));
+                    i = cut;
                 }
+                return out;
+            };
+            const wrapHwpxCellLine = (line, maxChars = 16) => {
+                const s = String(line == null ? '' : line);
+                if (!s) return '';
+                const maxUnits = Math.max(4, Number(maxChars) || 16);
+                // 어절 단위(공백 기준). -nEA 접미사는 앞 어절에 붙임(측정값 중간 쪼개기 방지).
+                const parts = s.trim().split(/[ \t]+/).filter(Boolean);
+                const words = [];
+                parts.forEach((p) => {
+                    if (/^-\d+\s*EA$/i.test(p) && words.length) {
+                        words[words.length - 1] = `${words[words.length - 1]} ${p.replace(/\s+/g, '')}`;
+                    } else {
+                        words.push(p);
+                    }
+                });
+                if (!words.length) return s;
+                const lines = [];
+                let current = '';
+                const pushCurrent = () => {
+                    if (current) lines.push(current);
+                    current = '';
+                };
+                words.forEach((word) => {
+                    const test = current ? `${current} ${word}` : word;
+                    if (hwpxMeasureUnits(test) <= maxUnits) {
+                        current = test;
+                        return;
+                    }
+                    pushCurrent();
+                    if (hwpxMeasureUnits(word) <= maxUnits) {
+                        current = word;
+                        return;
+                    }
+                    // 한 어절이 칸보다 길면 글자 단위 Fallback
+                    const chunks = wrapHwpxLongWord(word, maxUnits);
+                    chunks.forEach((chunk, idx) => {
+                        if (idx < chunks.length - 1) lines.push(chunk);
+                        else current = chunk;
+                    });
+                });
+                pushCurrent();
                 return lines.length ? lines.join('\n') : s;
             };
+;
             const wrapHwpxCellText = (raw, maxChars = 16) => {
                 // 입력값에 섞인 CR/LF는 강제 문단 분리로 이어져 칸 안에서 엉뚱한 줄바꿈이 된다.
                 // 공백으로 정리한 뒤, 칸 너비 줄바꿈만 적용한다.
@@ -39841,7 +39875,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 if (seg) seg.setAttribute('vertpos', String(lineIndex * (baseVertsize + baseSpacing)));
             };
             // 한글 셀: charPr 자간 속성은 건드리지 않는다(템플릿 값 유지).
-            // 칸 너비를 넘는 지점부터 다음 줄로 넘긴다(띄어쓰기·콤마 우선, 없으면 글자 단위).
+            // 줄바꿈은 어절(공백) 우선(keep-all), 금칙·조사 분리 방지, 긴 어절만 글자 단위 Fallback.
             // 한 문단으로 두면 한글이 자간을 줄여 한 줄에 욱여넣으므로 강제 문단 분리를 쓴다.
             // 행 높이는 템플릿을 유지하다가 4줄 이상일 때만 내용에 맞게 확장한다.
             const HWPX_CELL_EXPAND_FROM_LINES = 4;
@@ -39866,76 +39900,110 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 const usable = Math.max(charW, cellW - ml - mr);
                 return Math.max(4, Math.floor(usable / charW));
             };
-            /** 칸을 넘는 위치부터 순차 줄바꿈. 가운데 분할(줄나눔) 없음. */
-            const wrapHwpxCellLine = (line, maxChars = 16) => {
-                const s = String(line == null ? '' : line);
-                const chars = Array.from(s);
-                if (!chars.length) return '';
-                const maxUnits = Math.max(4, Number(maxChars) || 16);
-                const lines = [];
+            /** 한글 칸 줄바꿈: 어절(공백) 우선, 금칙, 긴 어절만 글자 단위 Fallback.
+             *  (web keep-all + overflow-wrap:break-word 와 같은 취지. 가운데 줄나눔 없음.) */
+            const HWPX_LINE_START_FORBIDDEN = /[)\]}.!?,:;~，。、》〉』」]/
+            const HWPX_LINE_END_FORBIDDEN = /[(\[{$₩《〈『「]/
+            const hwpxMeasureUnits = (str) => Array.from(String(str || '')).reduce((n, ch) => n + hwpxCharWidthUnits(ch), 0);
+            const wrapHwpxLongWord = (word, maxUnits) => {
+                const chars = Array.from(String(word || ''));
+                if (!chars.length) return [];
+                const isAsciiTokenChar = (ch) => /[0-9A-Za-z.:~\/xXmM\-]/.test(ch);
+                const out = [];
                 let i = 0;
                 while (i < chars.length) {
-                    while (i < chars.length && (chars[i] === ' ' || chars[i] === '\t')) i++;
-                    if (i >= chars.length) break;
                     let units = 0;
                     let end = i;
-                    let lastBreak = -1; // 끊을 위치(이 인덱스부터 다음 줄)
                     while (end < chars.length) {
-                        const ch = chars[end];
-                        const w = hwpxCharWidthUnits(ch);
+                        const w = hwpxCharWidthUnits(chars[end]);
                         if (units + w > maxUnits && end > i) break;
                         units += w;
                         end++;
-                        if (ch === ' ' || ch === '\t') {
-                            // -nEA 앞 공백은 wrapHwpxCellText가 문단 분리한다.
-                            // 여기선 줄바꿈 후보로 쓰지 않음(측정값 중간 쪼개기 방지).
-                            const after = chars.slice(end).join('');
-                            if (!/^-\d+\s*EA\b/i.test(after)) lastBreak = end;
-                        } else if (/[,|·、，]/.test(ch)) {
-                            // . / 는 규모(0.15/1.5) 중간이라 끊지 않음. 여러 건 구분자(콤마)만.
-                            lastBreak = end;
-                        }
                     }
                     if (end >= chars.length) {
-                        lines.push(chars.slice(i).join(''));
+                        out.push(chars.slice(i).join(''));
                         break;
                     }
-                    // 자연 끊김(띄어쓰기·콤마)이 없으면 칸 너비(end)에서 강제 줄바꿈한다.
-                    // 한 문단으로 두면 한글이 자간을 줄여 한 줄에 욱여넣는 경우가 많다.
-                    // ASCII 규모값(Cw:0.15, 0.3/1.2 등)은 토큰 중간에서 끊지 않는다.
-                    let cut;
-                    if (lastBreak > i) {
-                        cut = lastBreak;
-                    } else {
-                        const isAsciiTokenChar = (ch) => /[0-9A-Za-z.:~\/xXmM\-]/.test(ch);
-                        cut = end;
-                        if (end < chars.length && isAsciiTokenChar(chars[end - 1]) && isAsciiTokenChar(chars[end])) {
-                            let tokenStart = end - 1;
-                            while (tokenStart > i && isAsciiTokenChar(chars[tokenStart - 1])) tokenStart--;
-                            if (tokenStart > i) {
-                                cut = tokenStart;
-                            } else {
-                                let tokenEnd = end;
-                                while (tokenEnd < chars.length && isAsciiTokenChar(chars[tokenEnd])) tokenEnd++;
-                                lines.push(chars.slice(i, tokenEnd).join(''));
-                                i = tokenEnd;
-                                if (!lines[lines.length - 1]) lines.pop();
-                                continue;
-                            }
+                    let cut = end;
+                    // ASCII 규모값(Cw:0.15 등)은 토큰 중간에서 끊지 않음
+                    if (end < chars.length && isAsciiTokenChar(chars[end - 1]) && isAsciiTokenChar(chars[end])) {
+                        let tokenStart = end - 1;
+                        while (tokenStart > i && isAsciiTokenChar(chars[tokenStart - 1])) tokenStart--;
+                        if (tokenStart > i) {
+                            cut = tokenStart;
+                        } else {
+                            let tokenEnd = end;
+                            while (tokenEnd < chars.length && isAsciiTokenChar(chars[tokenEnd])) tokenEnd++;
+                            out.push(chars.slice(i, tokenEnd).join(''));
+                            i = tokenEnd;
+                            continue;
                         }
                     }
-                    // cut이 공백을 가리키면 공백은 다음 줄 선두에서 제거됨
-                    if (cut > i && (chars[cut - 1] === ' ' || chars[cut - 1] === '\t')) {
-                        lines.push(chars.slice(i, cut - 1).join(''));
-                        i = cut;
-                    } else {
-                        lines.push(chars.slice(i, cut).join(''));
-                        i = cut;
+                    // 행두 금칙: 다음 줄 머리에 오면 안 되는 문자는 가능하면 이 줄로
+                    while (cut < chars.length && HWPX_LINE_START_FORBIDDEN.test(chars[cut])) {
+                        const extra = hwpxCharWidthUnits(chars[cut]);
+                        if (units + extra > maxUnits && cut > i + 1) break;
+                        units += extra;
+                        cut++;
                     }
-                    if (!lines[lines.length - 1]) lines.pop();
+                    // 행미 금칙: 여는 괄호·통화기호로 줄이 끝나지 않게
+                    while (cut > i + 1 && HWPX_LINE_END_FORBIDDEN.test(chars[cut - 1])) cut--;
+                    // 조사·어미가 다음 줄 머리로 밀리지 않게(붙여 쓴 한글)
+                    const rest = chars.slice(cut).join('');
+                    const jm = rest.match(/^(은|는|이|가|을|를|의|에|에서|에게|으로|로써|로|와|과|도|만|부터|까지|이나|나)/);
+                    if (jm) {
+                        const ju = hwpxMeasureUnits(jm[1]);
+                        if (units + ju <= maxUnits) cut += jm[1].length;
+                    }
+                    if (cut <= i) cut = Math.min(chars.length, i + 1);
+                    out.push(chars.slice(i, cut).join(''));
+                    i = cut;
                 }
+                return out;
+            };
+            const wrapHwpxCellLine = (line, maxChars = 16) => {
+                const s = String(line == null ? '' : line);
+                if (!s) return '';
+                const maxUnits = Math.max(4, Number(maxChars) || 16);
+                // 어절 단위(공백 기준). -nEA 접미사는 앞 어절에 붙임(측정값 중간 쪼개기 방지).
+                const parts = s.trim().split(/[ \t]+/).filter(Boolean);
+                const words = [];
+                parts.forEach((p) => {
+                    if (/^-\d+\s*EA$/i.test(p) && words.length) {
+                        words[words.length - 1] = `${words[words.length - 1]} ${p.replace(/\s+/g, '')}`;
+                    } else {
+                        words.push(p);
+                    }
+                });
+                if (!words.length) return s;
+                const lines = [];
+                let current = '';
+                const pushCurrent = () => {
+                    if (current) lines.push(current);
+                    current = '';
+                };
+                words.forEach((word) => {
+                    const test = current ? `${current} ${word}` : word;
+                    if (hwpxMeasureUnits(test) <= maxUnits) {
+                        current = test;
+                        return;
+                    }
+                    pushCurrent();
+                    if (hwpxMeasureUnits(word) <= maxUnits) {
+                        current = word;
+                        return;
+                    }
+                    // 한 어절이 칸보다 길면 글자 단위 Fallback
+                    const chunks = wrapHwpxLongWord(word, maxUnits);
+                    chunks.forEach((chunk, idx) => {
+                        if (idx < chunks.length - 1) lines.push(chunk);
+                        else current = chunk;
+                    });
+                });
+                pushCurrent();
                 return lines.length ? lines.join('\n') : s;
             };
+;
             const wrapHwpxCellText = (raw, maxChars = 16) => {
                 // 입력값에 섞인 CR/LF는 강제 문단 분리로 이어져 칸 안에서 엉뚱한 줄바꿈이 된다.
                 // 공백으로 정리한 뒤, 칸 너비 줄바꿈만 적용한다.
