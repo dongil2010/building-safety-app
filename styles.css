@@ -8990,6 +8990,39 @@ body:not(.bsa-tab-home) .home-fab-add-building {
     text-align: right;
 }
 
+.stats-ndt-panel {
+    margin-top: 0.85rem;
+}
+
+.stats-ndt-lead {
+    margin: 0.4rem 0 0;
+    font-size: 0.94rem;
+    font-weight: 650;
+    color: #1e3a5f;
+    line-height: 1.45;
+}
+
+.stats-ndt-table th,
+.stats-ndt-table td {
+    font-size: 0.95rem;
+}
+
+.stats-ndt-sub {
+    color: #64748b;
+    font-weight: 600;
+    font-size: 0.85rem;
+}
+
+.stats-ndt-warn {
+    color: #b91c1c;
+    font-weight: 800;
+}
+
+.stats-ndt-caution {
+    color: #b45309;
+    font-weight: 700;
+}
+
 body.bsa-tab-stats .app-content {
     overflow-y: auto;
 }
