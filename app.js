@@ -2038,6 +2038,8 @@ document.addEventListener('DOMContentLoaded', () => {
             d.photos = photosVal.slice();
             d.prevRoundPhotos = prevVal.slice();
             syncDefectPhotoRefs(d, d.photos, d.prevRoundPhotos);
+            // 사용자가 사진을 바꿨다 — 병합이 이 목록을 통째로 따르게 시각을 찍는다(합집합이면 지운 사진이 돌아옴)
+            stampDefectPhotosChangedIfSafe(d);
             if (typeof touchDefectUpdatedAt === 'function') touchDefectUpdatedAt(d);
             if (typeof saveStateToLocalStorage === 'function') saveStateToLocalStorage();
             await persistDefectPhotosNow(d);
@@ -28909,6 +28911,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         syncDefectBulkEditChrome(false);
         if (typeof bindDefectHandwriteTabOrder === 'function') bindDefectHandwriteTabOrder();
         window._defectFormHydrating = true;
+        // 사진이 다 내려왔는지는 폼을 다 채운 뒤에 판단한다. 그 전에 사진을 바꾸면 시각을 안 찍는다.
+        window._defectPhotosComplete = false;
         window._defectPhotoHydrateToken = (window._defectPhotoHydrateToken || 0) + 1;
         window.clearTimeout(window._defectAutoApplyTimer);
         window._defectAutoApplyTimer = null;
@@ -29184,6 +29188,12 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 await photoHydratePromise;
                 // 폼이 보여준 값을 기준으로 기록 — 저장 때 이 값 그대로면 "안 건드린 칸"
                 captureDefectFormBaseline(existingPin || null);
+                // 사진이 다 내려왔는지. 덜 내려온 상태에서 사진을 바꾸면 못 받은 사진까지 "지운 것"이
+                // 되므로, 그때는 사진 변경 시각(photosUpdatedAt)을 찍지 않는다(병합이 예전처럼 합침).
+                window._defectPhotosComplete = !existingPin || (
+                    (Array.isArray(window._pendingPhotos) ? window._pendingPhotos.filter(Boolean).length : 0)
+                    >= (Array.isArray(existingPin.photoIds) ? existingPin.photoIds.length : 0)
+                );
                 window._defectFormHydrating = false;
                 if (window._defectPhotosDirty) scheduleDefectAutoApply();
                 drawCanvas();
@@ -29727,6 +29737,20 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         });
     }
 
+    /**
+     * 사진 변경 시각 — 병합이 사진 목록을 합집합 대신 "나중에 바꾼 쪽 통째로" 따르게 하는 근거.
+     * 사진이 다 내려오지 않은 창에서는 찍지 않는다(못 받은 사진이 지워진 것으로 퍼지면 안 됨).
+     */
+    function stampDefectPhotosChangedIfSafe(defect) {
+        if (!defect) return false;
+        if (window._defectPhotosComplete === false) {
+            console.warn('[사진] 사진을 다 받지 못한 상태라 사진 변경 시각을 찍지 않습니다(병합은 합집합 유지):', defect.id);
+            return false;
+        }
+        defect.photosUpdatedAt = Date.now();
+        return true;
+    }
+
     function syncDefectPhotoRefs(defect, photosVal, prevVal) {
         if (!defect) return;
         const photos = Array.isArray(photosVal) ? photosVal.filter(Boolean) : [];
@@ -30030,6 +30054,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     photosVal,
                     keepExistingPrev ? state.defects[key][idx].prevRoundPhotos : pendingPrev
                 );
+                // 이 창에서 사용자가 사진을 바꿨을 때만 시각을 찍는다. 다른 칸만 고친 저장은
+                // 사진 목록을 "결정"한 게 아니다(덜 내려온 사진을 지운 것으로 만들면 안 됨).
+                if (window._defectPhotosDirty) stampDefectPhotosChangedIfSafe(state.defects[key][idx]);
                 if (!state.defects[key][idx].inspectorName) {
                     state.defects[key][idx].inspectorName = window.state.userName || '';
                 }

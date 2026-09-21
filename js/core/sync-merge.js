@@ -244,6 +244,32 @@
         return map;
     }
 
+    /**
+     * 사진 목록을 어느 쪽에서 통째로 가져올지 정한다. 'server' | 'local' | null(합집합).
+     *
+     * 2026-09-21: 사진은 서버·기기 photoIds의 **합집합**으로 병합돼, 지운 사진이 되살아났다.
+     * 옛 기기뿐 아니라 **같은 기기에서도** — 동기화는 "서버+기기"를 합친 뒤 올리는데,
+     * 지운 직후엔 서버에 아직 그 사진이 있기 때문이다.
+     *
+     * 사진 번호는 사진 고유 번호가 아니라 **자리 번호**(결함id_0, _1, …)라서 가운데를 지우면
+     * 뒤 사진이 당겨진다. 그래서 번호별 삭제 기록은 맞지 않는다(다시 추가한 사진이 같은 자리를
+     * 써서 막힘). 대신 사용자가 사진을 바꿀 때 photosUpdatedAt을 찍고, 나중에 바꾼 쪽 목록을
+     * 통째로 따른다.
+     *
+     * - 둘 다 찍힘 → 나중 쪽
+     * - 한쪽만 찍힘 → 반대쪽이 그 뒤에 따로 바뀐 게 없을 때만 찍힌 쪽. 반대쪽이 더 나중에
+     *   바뀌었으면 사진이 추가됐을 수 있어 합집합(사진을 잃는 것보다 되살아나는 게 덜 나쁘다)
+     * - 둘 다 없음(옛 데이터) → 합집합(예전 동작)
+     */
+    function pickPhotoListSide(serverRec, localRec) {
+        var sp = Number(serverRec && serverRec.photosUpdatedAt) || 0;
+        var lp = Number(localRec && localRec.photosUpdatedAt) || 0;
+        if (!sp && !lp) return null;
+        if (sp && lp) return lp >= sp ? 'local' : 'server';
+        if (lp) return getDefectContentUpdatedAt(serverRec) > lp ? null : 'local';
+        return getDefectContentUpdatedAt(localRec) > sp ? null : 'server';
+    }
+
     function extractInlinePhotos(defect, kind) {
         if (!defect) return [];
         if (kind === 'prev') {
@@ -293,8 +319,38 @@
 
         var serverPhotoIds = Array.isArray(serverRec.photoIds) ? serverRec.photoIds : [];
         var localPhotoIds = Array.isArray(localRec.photoIds) ? localRec.photoIds : [];
-        var mergedPhotoIds = mergePhotoArrays(serverPhotoIds, localPhotoIds);
-        if (mergedPhotoIds.length) {
+        var photoSide = pickPhotoListSide(serverRec, localRec);
+        if (photoSide) {
+            // 나중에 사진을 바꾼 쪽 목록을 통째로 따른다. 이미지·URL도 **그쪽 것만** 쓴다 —
+            // 자리 번호라 반대쪽의 같은 번호는 다른 사진일 수 있다(가운데 삭제로 당겨졌을 때).
+            var src = photoSide === 'local' ? localRec : serverRec;
+            var srcIds = Array.isArray(src.photoIds) ? src.photoIds.slice() : [];
+            merged.photosUpdatedAt = Math.max(
+                Number(serverRec.photosUpdatedAt) || 0,
+                Number(localRec.photosUpdatedAt) || 0
+            );
+            if (srcIds.length) {
+                merged.photoIds = srcIds;
+                var sideSrcById = collectPhotoSrcById(srcIds, src.photos, src.photoUrls, photoCache);
+                var sidePhotos = alignPhotoSrcArrayToIds(srcIds, sideSrcById);
+                if (sidePhotos.some(Boolean)) merged.photos = sidePhotos;
+                else delete merged.photos;
+                var sideUrlMap = collectPackedPhotoUrlMap(srcIds, src.photoUrls, extractInlinePhotos(src), photoCache);
+                var sideUrls = srcIds.map(function (pid) { return (pid && sideUrlMap[String(pid)]) || ''; });
+                if (sideUrls.some(Boolean)) merged.photoUrls = sideUrls;
+                else delete merged.photoUrls;
+            } else {
+                var inline = extractInlinePhotos(src);
+                if (inline.length) merged.photos = inline.slice();
+                else delete merged.photos;
+                delete merged.photoIds;
+                delete merged.photoUrls;
+            }
+        }
+        var mergedPhotoIds = photoSide ? [] : mergePhotoArrays(serverPhotoIds, localPhotoIds);
+        if (photoSide) {
+            // 위에서 처리함
+        } else if (mergedPhotoIds.length) {
             merged.photoIds = mergedPhotoIds;
             var srcById = Object.assign(
                 {},
@@ -535,6 +591,7 @@
         mergeDeletedAtMaps: mergeDeletedAtMaps,
         pickImportedText: pickImportedText,
         keepStoredIfUntouched: keepStoredIfUntouched,
+        pickPhotoListSide: pickPhotoListSide,
         isOutdatedBuild: isOutdatedBuild,
         countKeptExistingOnImport: countKeptExistingOnImport,
         recordSurvivesDelete: recordSurvivesDelete,
