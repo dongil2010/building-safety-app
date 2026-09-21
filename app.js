@@ -32264,7 +32264,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
     // 제3종시설물 상태조사표 컬럼(실제 3종 점검보고서 서식 기준) — 부재종류/조사내용/결함크기를
     // "점검내용" 한 칸으로 합치고, 구조체 여부 하나로 구조/비구조 구분을 대신한다.
-    // 진행中·누수中는 화면에서 토글하고, 한글/PDF는 점검내용 끝에 붙여 표기한다.
+    // 진행 中·누수 中는 화면에서 토글하고, 한글/PDF는 점검내용 끝에 붙여 표기한다.
     const GRADE3_SURVEY_COLUMNS = [
         { key: 'no', label: '번호' },
         { key: 'floorGroup', label: '구분' },
@@ -32278,17 +32278,17 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     ];
 
     function getSurveyProgressLabel(isGrade3) {
-        return isGrade3 ? '진행中' : '진행중';
+        return isGrade3 ? '진행 中' : '진행중';
     }
 
     function getSurveyLeakLabel(isGrade3) {
-        return isGrade3 ? '누수中' : '누수중';
+        return isGrade3 ? '누수 中' : '누수중';
     }
 
     function appendGrade3ProgressLeakToContent(content, d) {
         const flags = [];
-        if (d && d.isProgress) flags.push('진행中');
-        if (d && d.isLeak) flags.push('누수中');
+        if (d && d.isProgress) flags.push('진행 中');
+        if (d && d.isLeak) flags.push('누수 中');
         if (!flags.length) return content;
         const base = String(content == null ? '' : content).trim();
         if (!base || base === '-') return flags.join(' ');
@@ -32758,8 +32758,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         ctx = ctx || {};
         const marks = getSurveyStructMarks(d, isGrade3);
         // 한글/PDF 상태조사표: 진행·누수는 ○ 대신 진행中 / 누수中
-        const progress = d.isProgress ? '진행中' : '-';
-        const leak = d.isLeak ? '누수中' : '-';
+        const progress = d.isProgress ? '진행 中' : '-';
+        const leak = d.isLeak ? '누수 中' : '-';
         const no = formatSurveyReportNo(d, isGrade3, ctx.floorCode);
         if (isGrade3) {
             const content = appendGrade3ProgressLeakToContent(
@@ -32839,8 +32839,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             case 'category': return `<span style="font-weight:800; font-size:1.15rem; color:${text === '○' ? '#ef4444' : '#a3a3a3'};">${text}</span>`;
             case 'openingCrack': return `<span style="font-weight:800; font-size:1.15rem; color:${text === '○' ? '#0d9488' : '#a3a3a3'};">${text}</span>`;
             case 'size': case 'crackWidth': case 'crackLength': return text;
-            case 'progress': return `<span style="font-weight:800; font-size:0.92rem; color:${(text === '진행중' || text === '진행中') ? '#dc2626' : '#a3a3a3'};">${text}</span>`;
-            case 'leak': return `<span style="font-weight:800; font-size:0.92rem; color:${(text === '누수중' || text === '누수中') ? '#2a2a2a' : '#a3a3a3'};">${text}</span>`;
+            case 'progress': return `<span style="font-weight:800; font-size:0.92rem; color:${(text === '진행중' || text === '진행中' || text === '진행 中') ? '#dc2626' : '#a3a3a3'};">${text}</span>`;
+            case 'leak': return `<span style="font-weight:800; font-size:0.92rem; color:${(text === '누수중' || text === '누수中' || text === '누수 中') ? '#2a2a2a' : '#a3a3a3'};">${text}</span>`;
             case 'cause': return `<span style="font-weight:700; color:#334155;">🔍 ${text}</span>`;
             case 'priorityManage': return `<span style="font-weight:800; font-size:0.92rem; color:${text === '중점관리' ? getStyleColor('priorityManage') : '#a3a3a3'};">${text}</span>`;
             case 'remark': return `<span style="font-weight:700; color:${text !== '-' ? '#2563eb' : '#a3a3a3'};">${text}</span>`;
@@ -33011,13 +33011,13 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     defect.category = value || '구조체';
                     break;
                 case 'progress':
-                    defect.isProgress = value === '1' || value === '진행중' || value === '진행中';
+                    defect.isProgress = value === '1' || value === '진행중' || value === '진행中' || value === '진행 中';
                     break;
                 case 'openingCrack':
                     defect.isOpeningCrack = value === '1' || value === '개구부' || value === '○';
                     break;
                 case 'leak':
-                    defect.isLeak = value === '1' || value === '누수중' || value === '누수中';
+                    defect.isLeak = value === '1' || value === '누수중' || value === '누수中' || value === '누수 中';
                     break;
                 case 'priorityManage':
                     defect.isPriorityManage = value === '1' || value === '중점관리';
@@ -33298,8 +33298,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             case 'component': return 'font-weight:700;';
             case 'defectType': return 'font-weight:700; color:#1f1f1f;';
             case 'category': return `font-weight:800; color:${text === '○' ? '#ef4444' : '#a3a3a3'};`;
-            case 'progress': return `font-weight:800; color:${(text === '진행중' || text === '진행中') ? '#dc2626' : '#a3a3a3'};`;
-            case 'leak': return `font-weight:800; color:${(text === '누수중' || text === '누수中') ? '#2a2a2a' : '#a3a3a3'};`;
+            case 'progress': return `font-weight:800; color:${(text === '진행중' || text === '진행中' || text === '진행 中') ? '#dc2626' : '#a3a3a3'};`;
+            case 'leak': return `font-weight:800; color:${(text === '누수중' || text === '누수中' || text === '누수 中') ? '#2a2a2a' : '#a3a3a3'};`;
             case 'cause': return 'font-weight:700;';
             case 'priorityManage': return `font-weight:800; color:${text === '중점관리' ? getStyleColor('priorityManage') : '#a3a3a3'};`;
             case 'remark': return `font-weight:700; color:${text !== '-' ? '#2563eb' : '#a3a3a3'};`;
