@@ -32757,9 +32757,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     function getReportSurveyRowValues(d, ctx, isGrade3, colCount) {
         ctx = ctx || {};
         const marks = getSurveyStructMarks(d, isGrade3);
-        const markOn = isGrade3 ? 'O' : '○';
-        const progress = d.isProgress ? markOn : '-';
-        const leak = d.isLeak ? markOn : '-';
+        // 한글/PDF 상태조사표: 진행·누수는 ○ 대신 진행中 / 누수中
+        const progress = d.isProgress ? '진행中' : '-';
+        const leak = d.isLeak ? '누수中' : '-';
         const no = formatSurveyReportNo(d, isGrade3, ctx.floorCode);
         if (isGrade3) {
             const content = appendGrade3ProgressLeakToContent(
