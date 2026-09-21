@@ -3085,26 +3085,30 @@ document.addEventListener('DOMContentLoaded', () => {
         window.state.deletedBuildingIds = (window.state.deletedBuildingIds || []).filter((id) => id !== buildingId);
     }
 
-    /** 건물을 휴지통으로 이동 (약 30일 보관 후 자동 영구 삭제) */
-    window.moveBuildingToTrash = function(bldg) {
+    /** 건물을 휴지통으로 이동 (약 30일 보관 후 자동 영구 삭제)
+     * opts.skipUi: 회차 일괄 삭제 등에서 UI·동기화를 한 번만 하도록 중간 갱신을 생략 */
+    window.moveBuildingToTrash = function(bldg, opts) {
+        opts = opts || {};
         if (!bldg || !bldg.id) return false;
         bldg.trashedAt = new Date().toISOString();
         delete bldg._trashRestoredAt;
         bldg._pendingCloudSync = true;
 
-        if (window.currentEditingBuilding && window.currentEditingBuilding.id === bldg.id) {
-            if (typeof window.closeEditBuildingModalFunc === 'function') window.closeEditBuildingModalFunc();
-        }
-        if (window.state.currentBuildingId === bldg.id) {
-            window.state.currentBuilding = null;
-            window.state.currentBuildingId = null;
-            if (typeof window.switchTab === 'function') window.switchTab('tab-home');
-        }
+        if (!opts.skipUi) {
+            if (window.currentEditingBuilding && window.currentEditingBuilding.id === bldg.id) {
+                if (typeof window.closeEditBuildingModalFunc === 'function') window.closeEditBuildingModalFunc();
+            }
+            if (window.state.currentBuildingId === bldg.id) {
+                window.state.currentBuilding = null;
+                window.state.currentBuildingId = null;
+                if (typeof window.switchTab === 'function') window.switchTab('tab-home');
+            }
 
-        saveStateToLocalStorage();
-        if (typeof syncStateToFirebase === 'function') syncStateToFirebase();
-        if (typeof renderDashboard === 'function') renderDashboard();
-        if (typeof window.updateBuildingTrashBadge === 'function') window.updateBuildingTrashBadge();
+            saveStateToLocalStorage();
+            if (typeof syncStateToFirebase === 'function') syncStateToFirebase();
+            if (typeof renderDashboard === 'function') renderDashboard();
+            if (typeof window.updateBuildingTrashBadge === 'function') window.updateBuildingTrashBadge();
+        }
         return true;
     };
 
@@ -4727,6 +4731,18 @@ document.addEventListener('DOMContentLoaded', () => {
                     if (id && typeof window.openOverviewPhotosModal === 'function') window.openOverviewPhotosModal(id);
                 });
             });
+            grid.querySelectorAll('[data-action="delete-round"]').forEach((el) => {
+                ['click', 'pointerdown', 'touchstart'].forEach((ev) => el.addEventListener(ev, (e) => e.stopPropagation()));
+                el.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    const site = el.getAttribute('data-site-key');
+                    const round = el.getAttribute('data-round-key');
+                    if (site && round && typeof window.deleteSurveyRound === 'function') {
+                        window.deleteSurveyRound(site, round);
+                    }
+                });
+            });
             syncInspectionTypeSelectOptionLabels(grid);
         };
 
@@ -4854,7 +4870,12 @@ document.addEventListener('DOMContentLoaded', () => {
                                 <span class="building-row-name">${escapeHtml(roundLabel)}</span>
                                 <span class="building-row-meta">${escapeHtml(metaHint)} · 동 선택</span>
                             </div>
-                            <div class="building-row-actions building-row-actions-compact">${typeSelect}</div>
+                            <div class="building-row-actions building-row-actions-compact">
+                                ${typeSelect}
+                                <button type="button" class="icon-btn icon-btn-trash" title="이 회차 삭제(휴지통)" data-action="delete-round" data-site-key="${safeSite}" data-round-key="${safeRound}" aria-label="회차 삭제">
+                                    <i class="fa-solid fa-trash"></i>
+                                </button>
+                            </div>
                         </div>
                     `;
                 }
@@ -4880,6 +4901,9 @@ document.addEventListener('DOMContentLoaded', () => {
                             <button type="button" class="icon-btn icon-btn-overview" title="전경사진" data-action="overview" data-bldg-id="${safeId}" aria-label="전경">
                                 <i class="fa-solid fa-panorama"></i>
                                 <span class="icon-btn-label">전경</span>
+                            </button>
+                            <button type="button" class="icon-btn icon-btn-trash" title="이 회차 삭제(휴지통)" data-action="delete-round" data-site-key="${safeSite}" data-round-key="${safeRound}" aria-label="회차 삭제">
+                                <i class="fa-solid fa-trash"></i>
                             </button>
                         </div>
                     </div>
@@ -18429,6 +18453,72 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const modal = document.getElementById('addSurveyRoundModal');
         if (modal) modal.classList.remove('open');
         window._addSurveyRoundSourceId = null;
+    };
+
+    /**
+     * 현장의 특정 회차(해당 연도_기간의 모든 동)를 휴지통으로 보낸다.
+     * 다른 회차는 유지. 마지막 회차도 삭제 가능(확인 후 빈 회차 목록 → 회차 추가).
+     * 동기화: trashedAt + _pendingCloudSync → mergeBuildingTrashState로 타 기기에 반영, 복원 전엔 재등장하지 않음.
+     */
+    window.deleteSurveyRound = function(siteKey, roundKey) {
+        if (!siteKey || !roundKey) return false;
+        const members = getSiteBuildingsSorted(siteKey).filter(
+            (b) => getBuildingSurveyRoundKey(b) === roundKey
+        );
+        if (!members.length) {
+            window.showToast('삭제할 회차 건물을 찾을 수 없습니다.', 'warning');
+            return false;
+        }
+        const roundLabel = formatSurveyRoundLabel(roundKey);
+        const defectCount = members.reduce((n, b) => n + countBuildingDefects(b), 0);
+        const dongHint = members.length > 1
+            ? `\n· 포함 동: ${members.map(formatDongRowLabel).join(', ')} (${members.length}개)`
+            : '';
+        const remaining = getSiteBuildingsSorted(siteKey).filter(
+            (b) => getBuildingSurveyRoundKey(b) !== roundKey
+        );
+        const lastRoundHint = remaining.length === 0
+            ? '\n\n※ 이 현장의 마지막 회차입니다. 삭제 후 회차 목록이 비며, 「회차 추가하기」로 다시 만들 수 있습니다.'
+            : '';
+        if (!window.confirmDelete(
+            `회차 「${roundLabel}」을(를) 휴지통으로 보낼까요?\n\n` +
+            `· 현장: ${siteKey}\n` +
+            `· 점검(동) ${members.length}개 · 결함 ${defectCount}건` +
+            dongHint + '\n\n' +
+            `· 약 30일간 보관되며 그 안에 복원할 수 있습니다.\n` +
+            `· 다른 회차 데이터는 그대로 둡니다.` +
+            lastRoundHint
+        )) return false;
+
+        const memberIds = new Set(members.map((b) => b.id));
+        const wasCurrent = !!(window.state.currentBuildingId && memberIds.has(window.state.currentBuildingId));
+        const wasEditing = !!(window.currentEditingBuilding && memberIds.has(window.currentEditingBuilding.id));
+
+        members.forEach((b) => window.moveBuildingToTrash(b, { skipUi: true }));
+
+        if (wasEditing && typeof window.closeEditBuildingModalFunc === 'function') {
+            window.closeEditBuildingModalFunc();
+        }
+        if (wasCurrent) {
+            window.state.currentBuilding = null;
+            window.state.currentBuildingId = null;
+            if (typeof window.switchTab === 'function') window.switchTab('tab-home');
+        }
+        if (window.state.dashboardRoundKey === roundKey) {
+            window.state.dashboardRoundKey = null;
+        }
+        window.state.dashboardSiteKey = siteKey;
+
+        saveStateToLocalStorage();
+        if (typeof syncStateToFirebase === 'function') syncStateToFirebase();
+        if (typeof renderDashboard === 'function') renderDashboard();
+        if (typeof window.updateBuildingTrashBadge === 'function') window.updateBuildingTrashBadge();
+        window.showToast(
+            `「${roundLabel}」 회차를 휴지통으로 옮겼습니다. 30일 내 복원 가능`,
+            'success',
+            5000
+        );
+        return true;
     };
 
     window.openAddDongModal = function() {

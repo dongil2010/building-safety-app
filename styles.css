@@ -10374,6 +10374,16 @@ body.bsa-tab-stats .app-content {
     color: #ffffff;
 }
 
+.icon-btn-trash {
+    border-color: #fca5a5;
+    color: #dc2626;
+}
+.icon-btn-trash:hover {
+    background: #dc2626;
+    color: #ffffff;
+    border-color: #b91c1c;
+}
+
 @media (max-width: 480px) {
     .building-row-name { font-size: 0.9rem; }
     .building-row-meta { font-size: 0.72rem; }
