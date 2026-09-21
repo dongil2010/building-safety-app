@@ -180,7 +180,7 @@ function testCarbonationHeadlineAndRisk() {
     const line = api.formatCarbHeadline('지상 1층', summary, '층별 평균');
     assert.strictEqual(
         line,
-        '지상 1층은 탄산화깊이 12.4~18.2 층별 평균 15.1 잔여피복 평균 24.90 잔존수명 평균 32년',
+        '지상 1층은 탄산화깊이 12.4~18.2 층별 평균 15.1 잔여피복 21.80~27.60 평균 24.90 잔존수명 28~36년 평균 32년',
         line
     );
 
@@ -234,7 +234,8 @@ function testCategoryVisibility() {
         defectFilters: true,
         viewChips: true,
         ndtStrength: false,
-        ndtCarb: false
+        ndtCarb: false,
+        ndtFireproof: false
     });
 
     const ndt = api.getStatsSectionVisibility('ndt');
@@ -245,7 +246,8 @@ function testCategoryVisibility() {
         defectFilters: false,
         viewChips: false,
         ndtStrength: true,
-        ndtCarb: true
+        ndtCarb: true,
+        ndtFireproof: true
     });
 
     Object.keys(defect).forEach((key) => {
@@ -274,6 +276,72 @@ function testNdtPageCombinesFloorAndOverall() {
     assert.ok(!comb.floors.some((r) => r.key === 'ground_all'), '층묶음 행이 한 페이지에 들어가면 안 된다');
 }
 
+/** 플렌지 3 + 웨브 3 = 한 부재 6개소 평균. 부위별 평균을 또 평균하면 안 된다 */
+function testFireproofSixPointMemberAvg() {
+    const item = {
+        category: '내화피복',
+        fpFlange: { readings: [20, 21, 22], avg: 21, unavailable: false },
+        fpWeb: { readings: [24, 25, 26], avg: 25, unavailable: false }
+    };
+    assert.strictEqual(api.fireproofMemberAvg(item), 23);
+    const samples = api.collectFireproofReadings(item);
+    assert.strictEqual(samples.length, 6);
+
+    const uneven = {
+        category: '내화피복',
+        fpFlange: { readings: [10, 10, 10], avg: 10 },
+        fpWeb: { readings: [30], avg: 30 }
+    };
+    // 4개소 전체 평균 15. 부위 평균의 평균이면 (10+30)/2 = 20.
+    assert.strictEqual(api.fireproofMemberAvg(uneven), 15);
+}
+
+function testFireproofSkipUnavailablePart() {
+    const item = {
+        category: '내화피복',
+        fpFlange: { readings: [20, 21, 22], avg: 21, unavailable: true },
+        fpWeb: { readings: [24, 25, 26], avg: 25, unavailable: false }
+    };
+    assert.strictEqual(api.fireproofMemberAvg(item), 25);
+    assert.deepStrictEqual(api.collectFireproofReadings(item), [24, 25, 26]);
+}
+
+function testFireproofStatsOnCombinedPage() {
+    const ndtData = {};
+    ndtData[floorKey('1F')] = [{
+        category: '내화피복',
+        fpFlange: { readings: [20, 21, 22] },
+        fpWeb: { readings: [24, 25, 26] }
+    }];
+    ndtData[floorKey('지상5층')] = [{
+        category: '내화피복',
+        fpFlange: { readings: [30, 30, 30] },
+        fpWeb: { readings: [30, 30, 30] }
+    }];
+    const payload = api.buildNdtStatsPayload(ndtData, {
+        buildingId: BLDG,
+        getFloorLabel: (code) => ({ '1F': '지상 1층', 지상5층: '지상 5층' }[code] || code)
+    });
+    const oneF = payload.floorRows.find((r) => r.floorCode === '1F');
+    assert.ok(oneF, '내화피복만 있는 층이 빠졌다');
+    assert.strictEqual(oneF.fireproof.count, 1);
+    assert.strictEqual(oneF.fireproof.readingCount, 6);
+    assert.strictEqual(api.formatFixed(oneF.fireproof.avg, 2), '23.00');
+    assert.strictEqual(payload.overall.fireproof.count, 2);
+    assert.strictEqual(api.formatFixed(payload.overall.fireproof.avg, 2), '26.50');
+    const comb = api.ndtCombinedRows(payload, 'fireproof');
+    assert.strictEqual(comb.floors.length, 2);
+    assert.strictEqual(comb.overall.fireproof.count, 2);
+    const line = api.formatFireproofHeadline('전체', payload.overall.fireproof, '평균');
+    assert.strictEqual(line, '전체는 내화피복두께 23.00~30.00 평균 26.50', line);
+}
+
+function testCarbRemainAndLifeShowRangeAndAvg() {
+    assert.strictEqual(api.formatRangeWithAvg(5, 10, 7.5, 1), '5.0~10.0 평균 7.5');
+    assert.strictEqual(api.formatRangeWithAvg(5, 5, 5, 0), '5');
+    assert.strictEqual(api.formatRangeWithAvg(28, 36, 32, 0, '년'), '28~36년 평균 32년');
+}
+
 function main() {
     testCategoryVisibility();
     testNdtPageCombinesFloorAndOverall();
@@ -286,6 +354,10 @@ function main() {
     testFloorAndGroupPayload();
     testCarbonationHeadlineAndRisk();
     testOverallParticle();
+    testFireproofSixPointMemberAvg();
+    testFireproofSkipUnavailablePart();
+    testFireproofStatsOnCombinedPage();
+    testCarbRemainAndLifeShowRangeAndAvg();
     console.log('OK test-ndt-stats.js');
 }
 

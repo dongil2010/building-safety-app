@@ -1,4 +1,4 @@
-/* 탭: 통계 — 층별·전체·층묶음 결함 종류 집계 + 강도·탄산화 */
+/* 탭: 통계 — 층별·전체·층묶음 결함 종류 집계 + 강도·탄산화·내화피복 */
 (function (root) {
     'use strict';
 
@@ -112,6 +112,17 @@
         };
     }
 
+    function emptyFireproofSummary() {
+        return {
+            count: 0,
+            min: null,
+            max: null,
+            avg: null,
+            sum: 0,
+            readingCount: 0
+        };
+    }
+
     function minOf(a, b) {
         if (a == null) return b;
         if (b == null) return a;
@@ -169,6 +180,51 @@
         };
     }
 
+    /** 측정불가 부위는 빼고, 한 부재의 플렌지+웨브 실측값(최대 6개소)을 모은다 */
+    function collectFireproofReadings(item) {
+        var out = [];
+        function addPart(part) {
+            if (!part || part.unavailable) return;
+            var arr = Array.isArray(part.readings) ? part.readings : [];
+            arr.forEach(function (v) {
+                var n = toNum(v);
+                if (n != null) out.push(n);
+            });
+        }
+        addPart(item && item.fpFlange);
+        addPart(item && item.fpWeb);
+        return out;
+    }
+
+    /** 한 부재 평균: 플렌지/웨브 나눠 평균하지 않고 유효 개소 전체를 한 번 평균 */
+    function fireproofMemberAvg(item) {
+        var readings = collectFireproofReadings(item);
+        if (readings.length) {
+            var sum = 0;
+            readings.forEach(function (n) { sum += n; });
+            return sum / readings.length;
+        }
+        var stored = toNum(item && item.fpAvg);
+        if (stored != null) return stored;
+        var partAvgs = [];
+        [item && item.fpFlange, item && item.fpWeb].forEach(function (part) {
+            if (!part || part.unavailable) return;
+            var a = toNum(part.avg);
+            if (a != null) partAvgs.push(a);
+        });
+        if (!partAvgs.length) return null;
+        var partSum = 0;
+        partAvgs.forEach(function (n) { partSum += n; });
+        return partSum / partAvgs.length;
+    }
+
+    function collectFireproofSample(item) {
+        var avg = fireproofMemberAvg(item);
+        if (avg == null) return null;
+        var readings = collectFireproofReadings(item);
+        return { avg: avg, readingCount: readings.length || 0 };
+    }
+
     function looksLikeStrength(item) {
         if (!item) return false;
         if (item.category === '강도') return true;
@@ -181,6 +237,13 @@
         if (item.category === '탄산화') return true;
         if (item.category) return false;
         return collectCarbSample(item) != null;
+    }
+
+    function looksLikeFireproof(item) {
+        if (!item) return false;
+        if (item.category === '내화피복') return true;
+        if (item.category) return false;
+        return fireproofMemberAvg(item) != null;
     }
 
     function summarizeStrengthSamples(samples) {
@@ -237,6 +300,20 @@
         return out;
     }
 
+    function summarizeFireproofSamples(samples) {
+        var out = emptyFireproofSummary();
+        (samples || []).forEach(function (s) {
+            if (!s || s.avg == null) return;
+            out.count += 1;
+            out.sum += s.avg;
+            out.min = minOf(out.min, s.avg);
+            out.max = maxOf(out.max, s.avg);
+            out.readingCount += s.readingCount || 0;
+        });
+        if (out.count) out.avg = out.sum / out.count;
+        return out;
+    }
+
     function mergeStrengthSummary(a, b) {
         a = a || emptyStrengthSummary();
         b = b || emptyStrengthSummary();
@@ -289,6 +366,20 @@
         };
     }
 
+    function mergeFireproofSummary(a, b) {
+        a = a || emptyFireproofSummary();
+        b = b || emptyFireproofSummary();
+        var count = a.count + b.count;
+        return {
+            count: count,
+            min: minOf(a.min, b.min),
+            max: maxOf(a.max, b.max),
+            sum: a.sum + b.sum,
+            avg: count ? (a.sum + b.sum) / count : null,
+            readingCount: (a.readingCount || 0) + (b.readingCount || 0)
+        };
+    }
+
     function formatFixed(n, digits) {
         if (n == null || !isFinite(n)) return '-';
         return Number(n).toFixed(digits);
@@ -298,6 +389,17 @@
         if (min == null) return '-';
         if (max == null || min === max) return formatFixed(min, digits);
         return formatFixed(min, digits) + '~' + formatFixed(max, digits);
+    }
+
+    /** "5~10 평균 7.5" — 값이 하나면 범위만, 여러 개면 범위와 평균을 같이 쓴다 */
+    function formatRangeWithAvg(min, max, avg, digits, suffix) {
+        suffix = suffix || '';
+        if (min == null && avg == null) return '';
+        if (min == null) return '평균 ' + formatFixed(avg, digits) + suffix;
+        var range = formatRange(min, max, digits) + suffix;
+        if (max == null || min === max) return range;
+        if (avg == null || !isFinite(avg)) return range;
+        return range + ' 평균 ' + formatFixed(avg, digits) + suffix;
     }
 
     function eunNeun(label) {
@@ -331,12 +433,20 @@
             word + ' ' + formatFixed(summary.depthAvg, 1)
         ];
         if (summary.remainCount) {
-            parts.push('잔여피복 평균 ' + formatFixed(summary.remainAvg, 2));
+            parts.push('잔여피복 ' + formatRangeWithAvg(summary.remainMin, summary.remainMax, summary.remainAvg, 2));
         }
         if (summary.lifeCount) {
-            parts.push('잔존수명 평균 ' + Math.round(summary.lifeAvg) + '년');
+            parts.push('잔존수명 ' + formatRangeWithAvg(summary.lifeMin, summary.lifeMax, summary.lifeAvg, 0, '년'));
         }
         return parts.join(' ');
+    }
+
+    function formatFireproofHeadline(label, summary, avgWord) {
+        if (!summary || !summary.count) return '';
+        var word = avgWord || '층별 평균';
+        return String(label || '') + eunNeun(label) + ' 내화피복두께 '
+            + formatRange(summary.min, summary.max, 2) + ' '
+            + word + ' ' + formatFixed(summary.avg, 2);
     }
 
     function formatGradeCounts(grades) {
@@ -387,6 +497,7 @@
             if (!Array.isArray(items)) items = [];
             var strengthSamples = [];
             var carbSamples = [];
+            var fireproofSamples = [];
             items.forEach(function (item) {
                 if (!item) return;
                 if (looksLikeStrength(item)) {
@@ -396,16 +507,22 @@
                     var carb = collectCarbSample(item);
                     if (carb) carbSamples.push(carb);
                 }
+                if (looksLikeFireproof(item)) {
+                    var fp = collectFireproofSample(item);
+                    if (fp) fireproofSamples.push(fp);
+                }
             });
             var strength = summarizeStrengthSamples(strengthSamples);
             var carbonation = summarizeCarbSamples(carbSamples);
-            if (!strength.count && !carbonation.count) return;
+            var fireproof = summarizeFireproofSamples(fireproofSamples);
+            if (!strength.count && !carbonation.count && !fireproof.count) return;
             floorRows.push({
                 floorCode: floorCode,
                 floorLabel: getFloorLabel(floorCode),
                 coarseGroup: getCoarseFloorGroup(floorCode),
                 strength: strength,
-                carbonation: carbonation
+                carbonation: carbonation,
+                fireproof: fireproof
             });
         });
 
@@ -420,13 +537,15 @@
                     sort: g.sort,
                     floors: [],
                     strength: emptyStrengthSummary(),
-                    carbonation: emptyCarbSummary()
+                    carbonation: emptyCarbSummary(),
+                    fireproof: emptyFireproofSummary()
                 };
             }
             var bucket = groupMap[g.key];
             bucket.floors.push(fr.floorLabel);
             bucket.strength = mergeStrengthSummary(bucket.strength, fr.strength);
             bucket.carbonation = mergeCarbSummary(bucket.carbonation, fr.carbonation);
+            bucket.fireproof = mergeFireproofSummary(bucket.fireproof, fr.fireproof);
         });
         var groupRows = Object.keys(groupMap).map(function (k) { return groupMap[k]; });
         groupRows.sort(function (a, b) { return a.sort - b.sort; });
@@ -437,11 +556,13 @@
             floorLabel: '전체',
             floors: floorRows.map(function (fr) { return fr.floorLabel; }),
             strength: emptyStrengthSummary(),
-            carbonation: emptyCarbSummary()
+            carbonation: emptyCarbSummary(),
+            fireproof: emptyFireproofSummary()
         };
         floorRows.forEach(function (fr) {
             overall.strength = mergeStrengthSummary(overall.strength, fr.strength);
             overall.carbonation = mergeCarbSummary(overall.carbonation, fr.carbonation);
+            overall.fireproof = mergeFireproofSummary(overall.fireproof, fr.fireproof);
         });
 
         return {
@@ -471,14 +592,17 @@
             defectFilters: !isNdt,
             viewChips: !isNdt,
             ndtStrength: isNdt,
-            ndtCarb: isNdt
+            ndtCarb: isNdt,
+            ndtFireproof: isNdt
         };
     }
 
     /** 비파괴 한 페이지: 층 행 + 전체 행. 층묶음은 안 넣는다 */
     function ndtCombinedRows(payload, kind) {
         payload = payload || {};
-        var field = kind === 'carbonation' ? 'carbonation' : 'strength';
+        var field = 'strength';
+        if (kind === 'carbonation') field = 'carbonation';
+        else if (kind === 'fireproof') field = 'fireproof';
         var floors = (payload.floorRows || []).filter(function (row) {
             return row[field] && row[field].count;
         });
@@ -498,19 +622,27 @@
         toNum: toNum,
         collectStrengthSamples: collectStrengthSamples,
         collectCarbSample: collectCarbSample,
+        collectFireproofReadings: collectFireproofReadings,
+        collectFireproofSample: collectFireproofSample,
+        fireproofMemberAvg: fireproofMemberAvg,
         summarizeStrengthSamples: summarizeStrengthSamples,
         summarizeCarbSamples: summarizeCarbSamples,
+        summarizeFireproofSamples: summarizeFireproofSamples,
         mergeStrengthSummary: mergeStrengthSummary,
         mergeCarbSummary: mergeCarbSummary,
+        mergeFireproofSummary: mergeFireproofSummary,
         buildNdtStatsPayload: buildNdtStatsPayload,
         formatFixed: formatFixed,
         formatRange: formatRange,
+        formatRangeWithAvg: formatRangeWithAvg,
         formatStrengthHeadline: formatStrengthHeadline,
         formatCarbHeadline: formatCarbHeadline,
+        formatFireproofHeadline: formatFireproofHeadline,
         formatGradeCounts: formatGradeCounts,
         formatCarbCaution: formatCarbCaution,
         emptyStrengthSummary: emptyStrengthSummary,
-        emptyCarbSummary: emptyCarbSummary
+        emptyCarbSummary: emptyCarbSummary,
+        emptyFireproofSummary: emptyFireproofSummary
     };
 
     root.BSA.ndtStats = api;
@@ -994,7 +1126,8 @@
             [viewChips, vis.viewChips],
             [toolbar, vis.viewChips || vis.defectFilters],
             [document.getElementById('statsNdtStrengthSection'), vis.ndtStrength],
-            [document.getElementById('statsNdtCarbSection'), vis.ndtCarb]
+            [document.getElementById('statsNdtCarbSection'), vis.ndtCarb],
+            [document.getElementById('statsNdtFireproofSection'), vis.ndtFireproof]
         ];
         toggles.forEach(function (pair) {
             if (pair[0]) pair[0].hidden = !pair[1];
@@ -1018,7 +1151,14 @@
             carb.className = 'stats-panel stats-ndt-panel';
             page.appendChild(carb);
         }
-        return { strength: strength, carb: carb };
+        var fireproof = document.getElementById('statsNdtFireproofSection');
+        if (!fireproof) {
+            fireproof = document.createElement('div');
+            fireproof.id = 'statsNdtFireproofSection';
+            fireproof.className = 'stats-panel stats-ndt-panel';
+            page.appendChild(fireproof);
+        }
+        return { strength: strength, carb: carb, fireproof: fireproof };
     }
 
     function listNdtFloorCodes(bldg) {
@@ -1113,17 +1253,23 @@
         }
         var formatRange = ndtStats.formatRange;
         var formatFixed = ndtStats.formatFixed;
+        var formatRangeWithAvg = ndtStats.formatRangeWithAvg;
         var formatCaution = ndtStats.formatCarbCaution;
         var rowHtml = function (label, c, trCls) {
             var caution = formatCaution(c);
             var cautionCls = (c.depleted || c.lifeOver) ? 'stats-ndt-warn' : ((c.remainLow || c.lifeShort) ? 'stats-ndt-caution' : '');
-            var lifeCell = c.lifeCount ? (Math.round(c.lifeAvg) + '년') : '-';
+            var remainCell = c.remainCount
+                ? formatRangeWithAvg(c.remainMin, c.remainMax, c.remainAvg, 2)
+                : '-';
+            var lifeCell = c.lifeCount
+                ? formatRangeWithAvg(c.lifeMin, c.lifeMax, c.lifeAvg, 0, '년')
+                : '-';
             return '<tr' + (trCls ? ' class="' + trCls + '"' : '') + '>'
                 + '<th scope="row">' + esc(label) + '</th>'
                 + '<td>' + esc(c.count) + '</td>'
                 + '<td class="stats-cell-hit">' + esc(formatRange(c.depthMin, c.depthMax, 1)) + '</td>'
                 + '<td class="stats-cell-sum">' + esc(formatFixed(c.depthAvg, 1)) + '</td>'
-                + '<td>' + (c.remainCount ? esc(formatFixed(c.remainAvg, 2)) : '-') + '</td>'
+                + '<td>' + esc(remainCell) + '</td>'
                 + '<td>' + esc(lifeCell) + '</td>'
                 + '<td class="' + cautionCls + '">' + esc(caution) + '</td>'
                 + '</tr>';
@@ -1137,7 +1283,46 @@
             + (lead ? '<p class="stats-ndt-lead">' + esc(lead) + '</p>' : '')
             + '</div>'
             + '<div class="table-responsive stats-table-wrap"><table class="data-table stats-matrix-table stats-ndt-table">'
-            + '<thead><tr><th>층</th><th>건수</th><th>깊이(mm)</th><th>평균</th><th>잔여피복 평균</th><th>잔존수명 평균</th><th>주의</th></tr></thead>'
+            + '<thead><tr><th>층</th><th>건수</th><th>깊이(mm)</th><th>평균</th><th>잔여피복(mm)</th><th>잔존수명</th><th>주의</th></tr></thead>'
+            + '<tbody>' + body + '</tbody></table></div>';
+    }
+
+    function renderNdtFireproofSection(root, payload) {
+        if (!root) return;
+        var combined = (ndtStats.ndtCombinedRows || function () { return { floors: [], overall: null }; })(payload, 'fireproof');
+        var floors = combined.floors || [];
+        var overall = combined.overall;
+        var title = '내화피복두께';
+        var lead = '';
+        if (overall && ndtStats.formatFireproofHeadline) {
+            lead = ndtStats.formatFireproofHeadline('전체', overall.fireproof, '평균');
+        }
+        if (!floors.length && !overall) {
+            root.innerHTML = '<div class="stats-panel-head"><h3 class="stats-panel-title">' + esc(title) + '</h3></div>'
+                + '<p class="stats-empty">표시할 내화피복 측정값이 없습니다.</p>';
+            return;
+        }
+        var formatRange = ndtStats.formatRange;
+        var formatFixed = ndtStats.formatFixed;
+        var rowHtml = function (label, s, trCls) {
+            var countLabel = s.count + (s.readingCount ? ' <span class="stats-ndt-sub">(' + s.readingCount + '개소)</span>' : '');
+            return '<tr' + (trCls ? ' class="' + trCls + '"' : '') + '>'
+                + '<th scope="row">' + esc(label) + '</th>'
+                + '<td>' + countLabel + '</td>'
+                + '<td class="stats-cell-hit">' + esc(formatRange(s.min, s.max, 2)) + '</td>'
+                + '<td class="stats-cell-sum">' + esc(formatFixed(s.avg, 2)) + '</td>'
+                + '</tr>';
+        };
+        var body = floors.map(function (row) {
+            var isCurrent = row.floorCode === payload.currentFloor;
+            return rowHtml(row.floorLabel || row.label, row.fireproof, isCurrent ? 'stats-row-current' : '');
+        }).join('');
+        if (overall) body += rowHtml('전체', overall.fireproof, 'stats-ndt-total');
+        root.innerHTML = '<div class="stats-panel-head"><h3 class="stats-panel-title">' + esc(title) + '</h3>'
+            + (lead ? '<p class="stats-ndt-lead">' + esc(lead) + '</p>' : '')
+            + '</div>'
+            + '<div class="table-responsive stats-table-wrap"><table class="data-table stats-matrix-table stats-ndt-table">'
+            + '<thead><tr><th>층</th><th>건수</th><th>두께(mm)</th><th>평균</th></tr></thead>'
             + '<tbody>' + body + '</tbody></table></div>';
     }
 
@@ -1149,6 +1334,10 @@
                 + '<p class="stats-empty">건물을 선택하면 강도 통계를 볼 수 있습니다.</p>';
             mount.carb.innerHTML = '<div class="stats-panel-head"><h3 class="stats-panel-title">탄산화</h3></div>'
                 + '<p class="stats-empty">건물을 선택하면 탄산화 통계를 볼 수 있습니다.</p>';
+            if (mount.fireproof) {
+                mount.fireproof.innerHTML = '<div class="stats-panel-head"><h3 class="stats-panel-title">내화피복두께</h3></div>'
+                    + '<p class="stats-empty">건물을 선택하면 내화피복 통계를 볼 수 있습니다.</p>';
+            }
             return;
         }
         var payload = ndtStats.buildNdtStatsPayload((window.state && window.state.ndtData) || {}, {
@@ -1159,6 +1348,7 @@
         });
         renderNdtStrengthSection(mount.strength, payload);
         renderNdtCarbSection(mount.carb, payload);
+        renderNdtFireproofSection(mount.fireproof, payload);
     }
 
     window.renderDefectStatsTab = function () {
@@ -1221,7 +1411,8 @@
             '경사·수직·수평균열은 "균열"로 통합 집계',
             '비파괴조사: 층별과 전체를 한 표에 (층묶음·보기 칩 없음)',
             '콘크리트 강도: 범위·평균·측정강도/설계강도 평균·등급',
-            '탄산화: 깊이 범위·평균·잔여피복·잔존수명·피복소진 주의'
+            '탄산화: 깊이 범위·평균, 잔여피복·잔존수명은 범위와 평균',
+            '내화피복두께: 부재당 최대 6개소 한 평균, 층별·전체 범위·평균'
         ],
         ownerHint: 'js/tabs/stats.js',
         enter: function () {

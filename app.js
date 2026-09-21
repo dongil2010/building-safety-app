@@ -14245,8 +14245,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     <th>측정위치</th>
                     <th>부재명</th>
                     <th>설계치</th>
-                    <th>플렌지 평균(mm)</th>
-                    <th>웨브 평균(mm)</th>
+                    <th>평균(mm)</th>
                     <th>비고</th>
                     <th>관리</th>
                 `;
@@ -14369,8 +14368,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             `).join('');
         } else if (currentCat === '내화피복') {
             tbody.innerHTML = items.map((item, idx) => {
-                const flangeText = (item.fpFlange && item.fpFlange.unavailable) ? '측정불가' : ((item.fpFlange && item.fpFlange.avg != null) ? item.fpFlange.avg : '-');
-                const webText = (item.fpWeb && item.fpWeb.unavailable) ? '측정불가' : ((item.fpWeb && item.fpWeb.avg != null) ? item.fpWeb.avg : '-');
+                const memberAvg = (window.BSA && window.BSA.ndtStats && typeof window.BSA.ndtStats.fireproofMemberAvg === 'function')
+                    ? window.BSA.ndtStats.fireproofMemberAvg(item)
+                    : (item.fpAvg != null ? item.fpAvg : null);
+                const avgText = (memberAvg == null || !Number.isFinite(Number(memberAvg))) ? '-' : Number(memberAvg).toFixed(2);
                 const note = ((item.fpFlange && item.fpFlange.unavailable) || (item.fpWeb && item.fpWeb.unavailable)) ? '측정불가 있음' : '-';
                 return `
                 <tr>
@@ -14378,8 +14379,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     <td style="font-weight:700;">${item.location || '-'}</td>
                     <td>${item.component || '-'}</td>
                     <td style="font-family:monospace; font-size:0.88rem;">${item.fireproofDesign || '-'}</td>
-                    <td style="font-weight:800; color:#4ade80;">${flangeText}</td>
-                    <td style="font-weight:800; color:#4ade80;">${webText}</td>
+                    <td style="font-weight:800; color:#4ade80;">${avgText}</td>
                     <td>${note}</td>
                     <td class="ndt-row-actions">
                         <button type="button" class="btn btn-sm btn-outline ndt-btn-edit" onclick="window.editNdtItem('${item.id}')">수정</button>
@@ -14493,12 +14493,16 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         }
         if (fireproofItems.length > 0) {
             if (measureItems.length > 0) csvContent += "\n";
-            csvContent += "조사번호,측정위치,부재명,설계치,플렌지1,플렌지2,플렌지3,플렌지평균,웨브1,웨브2,웨브3,웨브평균\n";
+            csvContent += "조사번호,측정위치,부재명,설계치,플렌지1,플렌지2,플렌지3,웨브1,웨브2,웨브3,부재평균\n";
             fireproofItems.forEach(item => {
                 const fl = item.fpFlange || {}; const web = item.fpWeb || {};
-                const flVals = fl.unavailable ? ['측정불가', '', '', '측정불가'] : [fl.readings?.[0] ?? '', fl.readings?.[1] ?? '', fl.readings?.[2] ?? '', fl.avg ?? ''];
-                const webVals = web.unavailable ? ['측정불가', '', '', '측정불가'] : [web.readings?.[0] ?? '', web.readings?.[1] ?? '', web.readings?.[2] ?? '', web.avg ?? ''];
-                csvContent += `"${item.no}","${item.location}","${item.component}","${item.fireproofDesign || ''}","${flVals[0]}","${flVals[1]}","${flVals[2]}","${flVals[3]}","${webVals[0]}","${webVals[1]}","${webVals[2]}","${webVals[3]}"\n`;
+                const memberAvg = (window.BSA && window.BSA.ndtStats && typeof window.BSA.ndtStats.fireproofMemberAvg === 'function')
+                    ? window.BSA.ndtStats.fireproofMemberAvg(item)
+                    : (item.fpAvg != null ? item.fpAvg : null);
+                const avgText = (memberAvg == null || !Number.isFinite(Number(memberAvg))) ? '' : Number(memberAvg).toFixed(2);
+                const flVals = fl.unavailable ? ['측정불가', '', ''] : [fl.readings?.[0] ?? '', fl.readings?.[1] ?? '', fl.readings?.[2] ?? ''];
+                const webVals = web.unavailable ? ['측정불가', '', ''] : [web.readings?.[0] ?? '', web.readings?.[1] ?? '', web.readings?.[2] ?? ''];
+                csvContent += `"${item.no}","${item.location}","${item.component}","${item.fireproofDesign || ''}","${flVals[0]}","${flVals[1]}","${flVals[2]}","${webVals[0]}","${webVals[1]}","${webVals[2]}","${avgText}"\n`;
             });
         }
         if (standardItems.length > 0) {
@@ -15012,7 +15016,20 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         }
         if (sectionResultGrp) sectionResultGrp.style.display = (cat === '실측') ? 'block' : 'none';
         if (avgValueGrp) avgValueGrp.style.display = (cat === '실측' || cat === '내화피복') ? 'none' : 'block';
-        if (fireproofGrp) fireproofGrp.style.display = (cat === '내화피복') ? 'flex' : 'none';
+        if (fireproofGrp) {
+            fireproofGrp.style.display = (cat === '내화피복') ? 'flex' : 'none';
+            if (!document.getElementById('ndtFpMemberAvgHint')) {
+                const hint = document.createElement('p');
+                hint.id = 'ndtFpMemberAvgHint';
+                hint.style.cssText = 'margin:0; font-size:0.82rem; color:rgba(40,40,40,0.72);';
+                hint.textContent = '플렌지·웨브 최대 6개소를 한 부재 평균으로 냅니다.';
+                fireproofGrp.insertBefore(hint, fireproofGrp.firstChild);
+            }
+            ['ndtFpFlangeAvg', 'ndtFpWebAvg'].forEach(id => {
+                const el = document.getElementById(id);
+                if (el) el.placeholder = '부재평균';
+            });
+        }
         if (cat === '실측' && !document.getElementById('ndtFinishState')?.options.length) populateNdtFinishStateDropdown(NDT_FINISH_STATE_PRESET[0]);
         if (typeof toggleNdtMeasureDimMode === 'function') toggleNdtMeasureDimMode();
         if (typeof refreshNdtComponentPickBar === 'function') refreshNdtComponentPickBar();
@@ -15995,10 +16012,16 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     const el = document.getElementById(`ndtFp${part}${n}`);
                     if (el) el.value = readings[i] !== undefined && readings[i] !== null ? readings[i] : '';
                 });
-                const avgElExisting = document.getElementById(`ndtFp${part}Avg`);
-                if (avgElExisting) avgElExisting.value = (existingItem[key] && existingItem[key].avg !== undefined && existingItem[key].avg !== null) ? existingItem[key].avg : '';
                 const unavailElExisting = document.getElementById(`ndtFp${part}Unavailable`);
                 if (unavailElExisting) unavailElExisting.checked = !!(existingItem[key] && existingItem[key].unavailable);
+            });
+            const existingMemberAvg = (window.BSA && window.BSA.ndtStats && typeof window.BSA.ndtStats.fireproofMemberAvg === 'function')
+                ? window.BSA.ndtStats.fireproofMemberAvg(existingItem)
+                : (existingItem.fpAvg != null ? existingItem.fpAvg : null);
+            const existingAvgStr = (existingMemberAvg == null || !Number.isFinite(Number(existingMemberAvg))) ? '' : Number(existingMemberAvg).toFixed(2);
+            ['ndtFpFlangeAvg', 'ndtFpWebAvg'].forEach(id => {
+                const el = document.getElementById(id);
+                if (el) el.value = existingAvgStr;
             });
 
             window._pendingNdtExtra = {
@@ -16383,22 +16406,39 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 sectionRatio: null, sectionGrade: null
             };
 
-        // 내화피복 두께: 부재당 플렌지/웨브 각 3회 실측 + 평균, "측정불가" 체크 시 실측값 없이 표시만.
+        // 내화피복 두께: 플렌지/웨브 실측값을 모으고, 평균은 한 부재(최대 6개소) 기준으로 저장.
         const buildFireproofPart = (part) => {
             const unavailable = document.getElementById(`ndtFp${part}Unavailable`)?.checked || false;
             const readings = [1, 2, 3]
                 .map(n => parseFloat(document.getElementById(`ndtFp${part}${n}`)?.value))
                 .filter(v => Number.isFinite(v));
-            const avgStr = document.getElementById(`ndtFp${part}Avg`)?.value || '';
-            return { readings, avg: avgStr !== '' ? parseFloat(avgStr) : null, unavailable };
+            return { readings, avg: null, unavailable };
         };
+        const fpFlange = (cat === '내화피복') ? buildFireproofPart('Flange') : null;
+        const fpWeb = (cat === '내화피복') ? buildFireproofPart('Web') : null;
+        let fpMemberAvg = null;
+        if (cat === '내화피복') {
+            if (window.BSA && window.BSA.ndtStats && typeof window.BSA.ndtStats.fireproofMemberAvg === 'function') {
+                fpMemberAvg = window.BSA.ndtStats.fireproofMemberAvg({ fpFlange, fpWeb });
+            } else {
+                const vals = [];
+                [fpFlange, fpWeb].forEach(part => {
+                    if (!part || part.unavailable) return;
+                    (part.readings || []).forEach(v => { if (Number.isFinite(v)) vals.push(v); });
+                });
+                if (vals.length) fpMemberAvg = vals.reduce((a, b) => a + b, 0) / vals.length;
+            }
+        }
+        if (fpFlange) fpFlange.avg = fpMemberAvg;
+        if (fpWeb) fpWeb.avg = fpMemberAvg;
         const fireproofExtra = (cat === '내화피복')
             ? {
                 fireproofDesign: document.getElementById('ndtFireproofDesign')?.value || '',
-                fpFlange: buildFireproofPart('Flange'),
-                fpWeb: buildFireproofPart('Web')
+                fpFlange,
+                fpWeb,
+                fpAvg: fpMemberAvg
             }
-            : { fireproofDesign: null, fpFlange: null, fpWeb: null };
+            : { fireproofDesign: null, fpFlange: null, fpWeb: null, fpAvg: null };
 
         let savedItem = null;
         if (pinId) {
@@ -16610,14 +16650,31 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             }
         }
 
-        // --- 내화피복 두께: 플렌지/웨브 각 3회 실측값 평균 자동 연산 ---
+        // --- 내화피복 두께: 플렌지+웨브 유효 개소(최대 6)를 한 부재 평균으로 ---
         function calcFireproofAuto() {
             const cat = document.getElementById('ndtCategory')?.value || '강도';
             if (cat !== '내화피복') return;
+            const partOf = (part) => {
+                const unavailable = document.getElementById(`ndtFp${part}Unavailable`)?.checked || false;
+                const readings = [1, 2, 3].map(n => parseFloat(document.getElementById(`ndtFp${part}${n}`)?.value)).filter(v => Number.isFinite(v));
+                return { readings, unavailable };
+            };
+            const item = { fpFlange: partOf('Flange'), fpWeb: partOf('Web') };
+            let avg = (window.BSA && window.BSA.ndtStats && typeof window.BSA.ndtStats.fireproofMemberAvg === 'function')
+                ? window.BSA.ndtStats.fireproofMemberAvg(item)
+                : null;
+            if (avg == null) {
+                const vals = [];
+                [item.fpFlange, item.fpWeb].forEach(part => {
+                    if (!part || part.unavailable) return;
+                    (part.readings || []).forEach(v => { if (Number.isFinite(v)) vals.push(v); });
+                });
+                if (vals.length) avg = vals.reduce((a, b) => a + b, 0) / vals.length;
+            }
+            const avgStr = (avg == null || !Number.isFinite(avg)) ? '' : Number(avg).toFixed(2);
             ['Flange', 'Web'].forEach(part => {
-                const vals = [1, 2, 3].map(n => parseFloat(document.getElementById(`ndtFp${part}${n}`)?.value)).filter(v => Number.isFinite(v));
                 const avgEl2 = document.getElementById(`ndtFp${part}Avg`);
-                if (avgEl2) avgEl2.value = vals.length ? (vals.reduce((a, b) => a + b, 0) / vals.length).toFixed(2) : '';
+                if (avgEl2) avgEl2.value = avgStr;
             });
         }
 
@@ -16675,10 +16732,11 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             if (el) el.addEventListener('input', calcSectionAuto);
         });
 
-        // --- 내화피복: 실측값 입력 시 평균 자동 재계산 ---
-        ['ndtFpFlange1', 'ndtFpFlange2', 'ndtFpFlange3', 'ndtFpWeb1', 'ndtFpWeb2', 'ndtFpWeb3'].forEach(id => {
+        // --- 내화피복: 실측값·측정불가 변경 시 부재 평균 자동 재계산 ---
+        ['ndtFpFlange1', 'ndtFpFlange2', 'ndtFpFlange3', 'ndtFpWeb1', 'ndtFpWeb2', 'ndtFpWeb3',
+            'ndtFpFlangeUnavailable', 'ndtFpWebUnavailable'].forEach(id => {
             const el = document.getElementById(id);
-            if (el) el.addEventListener('input', calcFireproofAuto);
+            if (el) el.addEventListener(el.type === 'checkbox' ? 'change' : 'input', calcFireproofAuto);
         });
 
         // --- 콘크리트 강도 위치 슬롯/각도 UI ---
@@ -38697,6 +38755,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                         const web = item.fpWeb || {};
                         const flVal = (i) => fl.unavailable ? '-' : ((fl.readings && fl.readings[i] !== undefined) ? fl.readings[i] : '-');
                         const webVal = (i) => web.unavailable ? '-' : ((web.readings && web.readings[i] !== undefined) ? web.readings[i] : '-');
+                        const memberAvg = (window.BSA && window.BSA.ndtStats && typeof window.BSA.ndtStats.fireproofMemberAvg === 'function')
+                            ? window.BSA.ndtStats.fireproofMemberAvg(item)
+                            : (item.fpAvg != null ? item.fpAvg : null);
+                        const avgText = (memberAvg == null || !Number.isFinite(Number(memberAvg))) ? '-' : Number(Number(memberAvg).toFixed(2));
 
                         const heightA = fillRowCells(newA, [
                             [0, item.no || String(idx + 1)],
@@ -38706,7 +38768,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                             [4, flVal(0)],
                             [5, flVal(1)],
                             [6, flVal(2)],
-                            [7, (fl.unavailable || fl.avg === null || fl.avg === undefined) ? '-' : fl.avg],
+                            [7, avgText],
                             [8, fl.unavailable ? '측정불가' : '-']
                         ]);
 
@@ -38715,7 +38777,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                             [4, webVal(0)],
                             [5, webVal(1)],
                             [6, webVal(2)],
-                            [7, (web.unavailable || web.avg === null || web.avg === undefined) ? '-' : web.avg],
+                            [7, avgText],
                             [8, web.unavailable ? '측정불가' : '-']
                         ]);
 
@@ -40975,6 +41037,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                         const web = item.fpWeb || {};
                         const flVal = (i) => fl.unavailable ? '-' : ((fl.readings && fl.readings[i] !== undefined) ? fl.readings[i] : '-');
                         const webVal = (i) => web.unavailable ? '-' : ((web.readings && web.readings[i] !== undefined) ? web.readings[i] : '-');
+                        const memberAvg = (window.BSA && window.BSA.ndtStats && typeof window.BSA.ndtStats.fireproofMemberAvg === 'function')
+                            ? window.BSA.ndtStats.fireproofMemberAvg(item)
+                            : (item.fpAvg != null ? item.fpAvg : null);
+                        const avgText = (memberAvg == null || !Number.isFinite(Number(memberAvg))) ? '-' : Number(Number(memberAvg).toFixed(2));
 
                         const heightA = fillRowCells(newA, [
                             [0, item.no || String(idx + 1)],
@@ -40984,7 +41050,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                             [4, flVal(0)],
                             [5, flVal(1)],
                             [6, flVal(2)],
-                            [7, (fl.unavailable || fl.avg === null || fl.avg === undefined) ? '-' : fl.avg],
+                            [7, avgText],
                             [8, fl.unavailable ? '측정불가' : '-']
                         ]);
 
@@ -40993,7 +41059,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                             [4, webVal(0)],
                             [5, webVal(1)],
                             [6, webVal(2)],
-                            [7, (web.unavailable || web.avg === null || web.avg === undefined) ? '-' : web.avg],
+                            [7, avgText],
                             [8, web.unavailable ? '측정불가' : '-']
                         ]);
 
