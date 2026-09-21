@@ -227,6 +227,56 @@ async function testNdtRestoreUntracksTombstone() {
     assert.ok(slice.ndtData[0].updatedAt > snap.createdAt);
 }
 
+async function testMissingNdtRestoredWithoutFlag() {
+    const state = makeState([healthyDefect(1)]);
+    state.ndtData[KEY] = [{ id: 'ndt-1', category: '탄산화', updatedAt: 100 }];
+    const snap = api.buildFloorSnapshot(state, KEY, '층 도면 삭제', SNAP_AT);
+    const slice = emptyFloorState([healthyDefect(1)]);
+    slice.deletedNdtIds = ['ndt-1'];
+    slice.deletedNdtAt = { 'ndt-1': 1500 };
+
+    api.applyRestoreToFloor(slice, snap, { ids: ['def-1'], now: RESTORE_AT });
+    assert.ok(slice.ndtData.some((n) => n.id === 'ndt-1'),
+        '층 도면 삭제 뒤에 빠진 비파괴는 restoreNdt 없이도 되살아야 한다');
+    assert.ok(slice.deletedNdtIds.indexOf('ndt-1') < 0);
+    assert.ok(slice.ndtData[0].updatedAt > snap.createdAt);
+}
+
+async function testExistingNdtNotOverwrittenOnDefectRestore() {
+    const state = makeState([healthyDefect(1)]);
+    state.ndtData[KEY] = [{ id: 'ndt-1', category: '탄산화', updatedAt: 100 }];
+    const snap = api.buildFloorSnapshot(state, KEY, '조사표 가져오기', SNAP_AT);
+    const slice = emptyFloorState([Object.assign({}, healthyDefect(1), { component: '기타' })]);
+    slice.ndtData = [{ id: 'ndt-1', category: '탄산화', updatedAt: 100, carbDepth: 9 }];
+
+    api.applyRestoreToFloor(slice, snap, { ids: ['def-1'], now: RESTORE_AT });
+    assert.strictEqual(slice.ndtData[0].carbDepth, 9,
+        '조사표 가져오기처럼 비파괴를 안 지운 작업은 있는 비파괴를 덮으면 안 된다');
+    assert.strictEqual(slice.ndtData[0].updatedAt, 100);
+}
+
+function testCollectFloorKeysFromState() {
+    const st = {
+        defects: { a_1F: [], a_2F: [{ id: 'd' }] },
+        ndtData: { a_2F: [{ id: 'n' }], a_B1: [] },
+        ndtDisplacementGroups: { a_PH: [{ id: 'g' }] },
+        deletedDefectIds: { a_EXT: ['x'] },
+        deletedNdtIds: {}
+    };
+    const keys = api.collectFloorKeysFromState(st).sort();
+    assert.deepStrictEqual(keys, ['a_1F', 'a_2F', 'a_B1', 'a_EXT', 'a_PH'].sort());
+}
+
+function assertSnapshotsBefore(app, startNeedle, opName, mutateNeedle, span) {
+    const start = app.indexOf(startNeedle);
+    assert.ok(start >= 0, startNeedle + ' 를 찾지 못했다');
+    const fn = app.slice(start, start + (span || 8000));
+    const cap = fn.indexOf("snapshotBeforeBulkOp('" + opName + "'");
+    assert.ok(cap >= 0, opName + ' 직전에 스냅샷을 안 남긴다');
+    const mut = fn.indexOf(mutateNeedle);
+    assert.ok(mut > cap, opName + ': 스냅샷 저장이 데이터 변경보다 앞에 있어야 한다');
+}
+
 function testSourceWiring() {
     const root = path.join(__dirname, '..');
     const app = fs.readFileSync(path.join(root, 'app.js'), 'utf8');
@@ -248,13 +298,29 @@ function testSourceWiring() {
     const fnStart = app.indexOf('window.confirmImportDefectExcel');
     assert.ok(fnStart > 0, 'confirmImportDefectExcel을 찾지 못했다');
     const fn = app.slice(fnStart, fnStart + 20000);
-    assert.ok(fn.indexOf('captureBulkSnapshots') >= 0,
-        '가져오기 적용 직전에 captureBulkSnapshots를 호출해야 한다');
-    assert.ok(fn.indexOf('조사표 가져오기') >= 0);
-    const captureAt = fn.indexOf('captureBulkSnapshots');
+    assert.ok(fn.indexOf("snapshotBeforeBulkOp('조사표 가져오기'") >= 0,
+        '가져오기 적용 직전에 snapshotBeforeBulkOp를 호출해야 한다');
+    const captureAt = fn.indexOf("snapshotBeforeBulkOp('조사표 가져오기'");
     const mutateAt = fn.indexOf('pushDefectHistoryForKey(key)');
     assert.ok(captureAt >= 0 && mutateAt > captureAt,
         '스냅샷 저장이 결함 덮어쓰기보다 앞에 있어야 한다');
+
+    assertSnapshotsBefore(app, 'window.deleteExistingFloorDrawing = async function', '층 도면 삭제', 'rememberDeletedDrawingFloor', 2500);
+    assertSnapshotsBefore(app, 'async function commitBulkDefectFromForm', '일괄 수정', 'if (pushHistory) pushDefectHistory()', 2500);
+    assertSnapshotsBefore(app, 'async function finishCad2PointCalibration', 'CAD 가져오기', 'const toClear =', 20000);
+    assertSnapshotsBefore(app, 'window.importBackupJSON = function', 'JSON 백업 불러오기', 'window.state.buildings = data.state.buildings', 4000);
+
+    const cleanStart = app.indexOf('window.cleanDuplicateNdt');
+    assert.ok(cleanStart > 0, 'cleanDuplicateNdt를 찾지 못했다');
+    const cleanFn = app.slice(cleanStart, cleanStart + 4000);
+    const applyGuard = cleanFn.indexOf('if (!options.apply)');
+    const cleanCap = cleanFn.indexOf("snapshotBeforeBulkOp('비파괴 중복 정리'");
+    assert.ok(cleanCap > applyGuard && applyGuard >= 0,
+        '미리보기(apply 없음)에서도 스냅샷을 남기면 안 된다');
+    const cleanMut = cleanFn.indexOf('const purge');
+    assert.ok(cleanMut > cleanCap, '비파괴 중복 정리: 스냅샷이 삭제보다 뒤에 있다');
+
+    assert.ok(app.indexOf('async function snapshotBeforeBulkOp') >= 0);
 
     const restoreStart = app.indexOf('window.restoreBulkSnapshot');
     const restoreFn = app.slice(restoreStart, restoreStart + 8000);
@@ -271,7 +337,7 @@ function testSourceWiring() {
         '되살리기 직전에도 스냅샷을 남겨야 되살리기를 되돌릴 수 있다');
 
     assert.ok(app.indexOf('btnRestoreBulkSnapshot') >= 0
-        || app.indexOf('가져오기 전으로 되살리기') >= 0,
+        || app.indexOf('전으로 되살리기') >= 0,
         '조사표에 되살리기 버튼이 없다');
     assert.ok(index.indexOf('js/core/data-health.js') >= 0);
 }
@@ -292,6 +358,9 @@ async function main() {
     await testSnapshotDropsPhotoDataUrls();
     await testKeepsFivePerFloor();
     await testNdtRestoreUntracksTombstone();
+    await testMissingNdtRestoredWithoutFlag();
+    await testExistingNdtNotOverwrittenOnDefectRestore();
+    testCollectFloorKeysFromState();
     testSourceWiring();
     testIndexHtmlUntouched();
     console.log('OK test-bulk-snapshot.js');

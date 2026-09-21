@@ -7557,6 +7557,11 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         if (!window.confirmDelete(msg)) return;
 
+        // 마킹·비파괴를 지우기 전에 이 층을 기기에 남긴다. 실패해도 삭제는 막지 않는다.
+        if (typeof snapshotBeforeBulkOp === 'function') {
+            await snapshotBeforeBulkOp('층 도면 삭제', [floorKey]);
+        }
+
         // 동기화·hydrate가 클라우드/IDB에서 되살리기 전에 tombstone을 먼저 남긴다
         rememberDeletedDrawingFloor(bldg, floorCode);
         // 클라우드·IDB 정리가 끝날 때까지는 남아 있는 도면이 "증거"가 되면 안 된다.
@@ -29762,6 +29767,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
         const defects = getDefectsForBulkEdit();
         if (!defects.length) return null;
+        const bulkFloorKey = `${state.currentBuildingId}_${state.currentFloor}`;
+        if (typeof snapshotBeforeBulkOp === 'function') {
+            await snapshotBeforeBulkOp('일괄 수정', [bulkFloorKey]);
+        }
         if (pushHistory) pushDefectHistory();
 
         // 일괄 수정도 단건과 같은 방식으로 읽는다 — 칩 정리 중 버려지는 말이 없게.
@@ -31410,7 +31419,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         drawCanvas();
     }
 
-    function finishCad2PointCalibration() {
+    async function finishCad2PointCalibration() {
         const calib = window.cadCalibrationState;
         if (!calib) return;
 
@@ -31570,6 +31579,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 'info',
                 4000
             );
+        }
+
+        if (typeof snapshotBeforeBulkOp === 'function') {
+            await snapshotBeforeBulkOp('CAD 가져오기', [floorKey]);
         }
 
         if (replaceMode) {
@@ -42153,6 +42166,14 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     throw new Error('유효한 백업 JSON 파일이 아닙니다.');
                 }
 
+                const health = window.BSA && window.BSA.dataHealth;
+                const keysToSnap = (health && typeof health.collectFloorKeysFromState === 'function')
+                    ? health.collectFloorKeysFromState(window.state)
+                    : Object.keys((window.state && window.state.defects) || {});
+                if (typeof snapshotBeforeBulkOp === 'function') {
+                    await snapshotBeforeBulkOp('JSON 백업 불러오기', keysToSnap);
+                }
+
                 window.state.buildings = data.state.buildings || [];
                 window.state.defects = data.state.defects || {};
                 window.state.ndtData = data.state.ndtData || {};
@@ -43101,13 +43122,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             return;
         }
         // 적용 직전에 배정된 층만 기기에 남긴다. 실패해도 가져오기는 막지 않는다.
-        if (typeof window.captureBulkSnapshots === 'function') {
-            try {
-                await window.captureBulkSnapshots('조사표 가져오기', keysToSnap);
-            } catch (e) {
-                console.warn('[일괄 백업] 가져오기 전 저장 실패 — 가져오기는 계속합니다.', e);
-                window.showToast('가져오기 전 자동 백업에 실패했습니다. 가져오기는 그대로 진행합니다.', 'warning', 6000);
-            }
+        if (typeof snapshotBeforeBulkOp === 'function') {
+            await snapshotBeforeBulkOp('조사표 가져오기', keysToSnap);
         }
 
         const mapSelects = document.querySelectorAll('.import-defect-field-map');
@@ -46470,7 +46486,24 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
     /**
      * 작업 이름 + 층 키 목록만 넘기면 그 층 데이터를 기기에 저장한다.
-     * 2단계에서 층 도면 삭제·일괄 수정 등에도 이 함수만 호출하면 된다.
+     * 실패해도 본 작업은 막지 않는다. 함수 선언이라 이 콜백 안의 앞선 코드에서도 호출된다.
+     */
+    async function snapshotBeforeBulkOp(opName, floorKeys) {
+        if (typeof window.captureBulkSnapshots !== 'function') return [];
+        try {
+            return await window.captureBulkSnapshots(opName, floorKeys);
+        } catch (e) {
+            console.warn('[일괄 백업] ' + (opName || '일괄 작업') + ' 전 저장 실패 — 작업은 계속합니다.', e);
+            if (typeof window.showToast === 'function') {
+                window.showToast('작업 전 자동 백업에 실패했습니다. 작업은 그대로 진행합니다.', 'warning', 6000);
+            }
+            return [];
+        }
+    }
+
+    /**
+     * 작업 이름 + 층 키 목록만 넘기면 그 층 데이터를 기기에 저장한다.
+     * 조사표 가져오기·층 도면 삭제·일괄 수정·CAD 가져오기·비파괴 중복 정리·JSON 백업 불러오기가 이걸 탄다.
      */
     window.captureBulkSnapshots = async function (opName, floorKeys) {
         const health = bulkSnapshotApi();
@@ -46619,7 +46652,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         wrap.innerHTML = `
             <div class="modal-card bulk-restore-card">
                 <div class="modal-header">
-                    <h3>가져오기 전으로 되살리기</h3>
+                    <h3>일괄 작업 전으로 되살리기</h3>
                     <button type="button" class="modal-close" id="btnCloseBulkRestoreModal" title="닫기">&times;</button>
                 </div>
                 <div class="modal-body">
@@ -46737,8 +46770,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         btn.type = 'button';
         btn.className = 'btn btn-outline btn-sm';
         btn.style.cssText = 'border-color:#b45309;color:#b45309;display:none;';
-        btn.innerHTML = '<i class="fa-solid fa-clock-rotate-left"></i> 가져오기 전으로 되살리기';
-        btn.title = '이 층을 가져오기 직전 백업과 비교해 고른 행만 되살립니다';
+        btn.innerHTML = '<i class="fa-solid fa-clock-rotate-left"></i> 일괄 작업 전으로 되살리기';
+        btn.title = '이 층의 최근 일괄 작업 직전 백업과 비교해 고른 행만 되살립니다';
         btn.addEventListener('click', () => { openBulkRestorePreviewForCurrentFloor(); });
         const importBtn = document.getElementById('btnImportDefectExcel');
         if (importBtn && importBtn.parentNode === actions) {
@@ -46762,7 +46795,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             const snaps = await store.listByFloor(floorKey);
             if (snaps && snaps.length) {
                 btn.style.display = '';
-                btn.title = '이 층 백업 ' + snaps.length + '개 · 가장 최근과 비교합니다';
+                const latest = snaps.slice().sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))[0];
+                const op = (latest && latest.opName) ? String(latest.opName) : '일괄 작업';
+                btn.innerHTML = '<i class="fa-solid fa-clock-rotate-left"></i> ' + op + ' 전으로 되살리기';
+                btn.title = '이 층 백업 ' + snaps.length + '개 · 가장 최근(' + op + ')과 비교합니다';
             } else {
                 btn.style.display = 'none';
             }
@@ -46836,7 +46872,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
      *   cleanDuplicateNdt('지하1층 주차장-2')                 — 무엇을 지울지 보기만 함
      *   cleanDuplicateNdt('지하1층 주차장-2', { apply: true }) — 실제로 지움
      */
-    window.cleanDuplicateNdt = function (floorCode, opts) {
+    window.cleanDuplicateNdt = async function (floorCode, opts) {
         const options = opts || {};
         const health = window.BSA && window.BSA.dataHealth;
         if (!health || typeof health.duplicatedRecordsOnFloor !== 'function') {
@@ -46874,6 +46910,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 + (groupTargets.length ? ` (측정 구역 ${groupTargets.length}건 포함)` : '')
                 + `. 실제로 지우려면 cleanDuplicateNdt('${code}', { apply: true })`);
             return targets;
+        }
+        if (typeof snapshotBeforeBulkOp === 'function') {
+            await snapshotBeforeBulkOp('비파괴 중복 정리', [floorKey]);
         }
         const purge = (map, list) => {
             if (!map || !list.length) return 0;

@@ -95,6 +95,7 @@
 | 0단계 테스트 안전망 | Cursor | `[COMPLETED]` | `npm test` + GitHub Actions. main 배포. Firebase 게시 없음 |
 | 1단계 결함/NDT 병합 분리 | Cursor | `[COMPLETED]` | `js/core/sync-merge.js` main 배포. 건물 도면 병합·lease는 app.js. Firebase 게시 없음 |
 | 일괄 작업 전 자동 백업 1단계 (조사표 가져오기) | Cursor | `[WAITING_REVIEW]` | 별도 IDB `building_safety_bulk_snapshots`. 기존 이미지 DB v4 유지. index.html 미변경 |
+| 일괄 작업 전 자동 백업 2단계 (나머지 일괄 작업) | Cursor | `[WAITING_REVIEW]` | 층 도면 삭제·일괄 수정·CAD 가져오기·비파괴 중복 정리·JSON 백업 불러오기. 같은 PR 브랜치 |
 
 ---
 
@@ -1290,3 +1291,23 @@
 > 5. JSON 백업 불러오기 `window.importBackupJSON`
 >
 > **main 동기화**: 커밋 요약 확인 후 `scripts/git-sync.ps1` — 아직 실행하지 않음.
+
+---
+
+### ⚡ [Cursor] - 2026-09-21 14:15:00
+> **`[WAITING_REVIEW]` 일괄 작업 전 자동 백업 2단계 — 나머지 일괄 작업에 공용 저장 연결**
+>
+> 1단계(`captureBulkSnapshots`)에 아래 작업을 붙였습니다. 적용 직전에만 저장하고, 미리보기·확인 취소는 안 남깁니다.
+>
+> 1. 층 도면 삭제 `deleteExistingFloorDrawing` — 확인 후, 마킹·비파괴 지우기 전
+> 2. 일괄 수정 `commitBulkDefectFromForm` — 바뀐 칸을 쓰기 전
+> 3. CAD 가져오기 `finishCad2PointCalibration` — 기준점 찍고 교체 확인 후, 핀을 넣기 전
+> 4. `cleanDuplicateNdt(..., { apply: true })` — 미리보기만 할 때는 저장하지 않음
+> 5. JSON 백업 불러오기 `importBackupJSON` — 기기에 있던 모든 층 키를 저장한 뒤 덮음
+>
+> 층 도면 삭제처럼 비파괴가 같이 사라진 경우, 되살리기가 **빠진 비파괴만** 묘비를 풀고 되돌립니다. 조사표 가져오기처럼 비파괴를 안 건드린 작업은 있는 비파괴를 덮지 않습니다.
+> 조사표 버튼 글자는 최근 작업 이름에 맞춰 「층 도면 삭제 전으로 되살리기」처럼 바뀝니다.
+>
+> **검증**: `npm test` 25개 통과. 빠진 비파괴 자동복구를 끄면 `testMissingNdtRestoredWithoutFlag` 실패 확인. Chrome+IndexedDB: 층 도면 삭제 스냅샷 → 결함·비파괴 되살림, 묘비 해제.
+>
+> **main 동기화**: 아직 `git-sync.ps1` 실행 안 함.

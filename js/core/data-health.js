@@ -308,6 +308,21 @@
         return out;
     }
 
+    /**
+     * 지금 state에 데이터가 있는 층 키. JSON 백업 불러오기처럼 건물 전체를
+     * 바꾸기 전에, 기기에 남아 있는 층을 모두 저장할 때 쓴다.
+     */
+    function collectFloorKeysFromState(state) {
+        const st = state || {};
+        return uniqueKeys([].concat(
+            Object.keys(st.defects || {}),
+            Object.keys(st.ndtData || {}),
+            Object.keys(st.ndtDisplacementGroups || {}),
+            Object.keys(st.deletedDefectIds || {}),
+            Object.keys(st.deletedNdtIds || {})
+        ));
+    }
+
     function splitFloorKey(floorKey, buildingId) {
         const key = textOf(floorKey);
         const bid = textOf(buildingId);
@@ -562,28 +577,41 @@
         });
 
         const restoredNdt = [];
-        if (options.restoreNdt) {
-            const ndtBy = indexById(snap.ndtData);
-            const groupBy = indexById(snap.ndtDisplacementGroups);
-            const ndtIds = Array.isArray(options.ndtIds)
-                ? options.ndtIds.map(textOf).filter(Boolean)
-                : Object.keys(ndtBy).concat(Object.keys(groupBy));
-            ndtIds.forEach(function (id) {
-                if (ndtBy[id]) {
-                    const rec = cloneWithoutDataUrls(ndtBy[id]);
-                    stampRestoredNdt(rec, now);
-                    slice.ndtData = replaceOrInsertById(slice.ndtData, rec);
-                    untrackOnFloorSlice(slice, 'deletedNdtIds', 'deletedNdtAt', id);
-                    restoredNdt.push(rec);
-                } else if (groupBy[id]) {
-                    const rec = cloneWithoutDataUrls(groupBy[id]);
-                    stampRestoredNdt(rec, now);
-                    slice.ndtDisplacementGroups = replaceOrInsertById(slice.ndtDisplacementGroups, rec);
-                    untrackOnFloorSlice(slice, 'deletedNdtIds', 'deletedNdtAt', id);
-                    restoredNdt.push(rec);
-                }
+        const ndtBy = indexById(snap.ndtData);
+        const groupBy = indexById(snap.ndtDisplacementGroups);
+        const curNdtBy = indexById(slice.ndtData);
+        const curGroupBy = indexById(slice.ndtDisplacementGroups);
+        let ndtIds;
+        if (Array.isArray(options.ndtIds)) {
+            ndtIds = options.ndtIds.map(textOf).filter(Boolean);
+        } else if (options.restoreNdt) {
+            ndtIds = Object.keys(ndtBy).concat(Object.keys(groupBy));
+        } else {
+            // 층 도면 삭제·중복 정리처럼 스냅샷 이후 사라진 비파괴만 되살린다.
+            // 조사표 가져오기처럼 비파괴를 안 건드린 작업은 기존 값을 덮지 않는다.
+            ndtIds = [];
+            Object.keys(ndtBy).forEach(function (id) {
+                if (!curNdtBy[id]) ndtIds.push(id);
+            });
+            Object.keys(groupBy).forEach(function (id) {
+                if (!curGroupBy[id]) ndtIds.push(id);
             });
         }
+        ndtIds.forEach(function (id) {
+            if (ndtBy[id]) {
+                const rec = cloneWithoutDataUrls(ndtBy[id]);
+                stampRestoredNdt(rec, now);
+                slice.ndtData = replaceOrInsertById(slice.ndtData, rec);
+                untrackOnFloorSlice(slice, 'deletedNdtIds', 'deletedNdtAt', id);
+                restoredNdt.push(rec);
+            } else if (groupBy[id]) {
+                const rec = cloneWithoutDataUrls(groupBy[id]);
+                stampRestoredNdt(rec, now);
+                slice.ndtDisplacementGroups = replaceOrInsertById(slice.ndtDisplacementGroups, rec);
+                untrackOnFloorSlice(slice, 'deletedNdtIds', 'deletedNdtAt', id);
+                restoredNdt.push(rec);
+            }
+        });
 
         return {
             restored: restored,
@@ -772,6 +800,7 @@
         defaultSelectedIds: defaultSelectedIds,
         applyRestoreToFloor: applyRestoreToFloor,
         pruneSnapshots: pruneSnapshots,
+        collectFloorKeysFromState: collectFloorKeysFromState,
         createMemorySnapshotStore: createMemorySnapshotStore,
         createIdbSnapshotStore: createIdbSnapshotStore,
         saveSnapshotsWithStore: saveSnapshotsWithStore
