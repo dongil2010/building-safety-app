@@ -37733,7 +37733,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             // 도면에 결함 핀이 찍힌 위치도 이미지를 만들어 locationMapTbl 한 칸에 채워 넣는다. 1,2종은
             // 층 블록 안에서(아래 본 루프에서) 바로 호출하고, 3종은 모든 층 처리가 끝난 뒤 별도로 몰아서
             // 호출한다(fillLocationMapForFloor 자체는 어느 쪽이든 동일).
-            const fillLocationMapForFloor = async (locationMapTbl, floorCode, imgSeq) => {
+            // 도면이 없어 못 넣었으면 false를 돌려준다(외부처럼 면이 여러 개일 때 빈 칸 정리용).
+            const fillLocationMapForFloor = async (locationMapTbl, floorCode, imgSeq, opts) => {
                 try {
                     const bldgForMap = window.state.currentBuilding || {};
 
@@ -37808,13 +37809,31 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                         const captionTc = locationMapTbl.getElementsByTagNameNS(HP_NS, 'tc')[1];
                         const captionT = captionTc.getElementsByTagNameNS(HP_NS, 't')[0];
                         if (captionT) captionT.textContent = `${HWPX_FIG_MARK}${getFloorLabel(floorCode)} 결함위치도`;
-                    } else {
+                        return true;
+                    }
+                    if (!(opts && opts.silent)) {
                         window.showToast(`${getFloorLabel(floorCode)}에 등록된 도면이 없어 위치도는 제외하고 만듭니다.`, 'info', 4000);
                     }
+                    return false;
                 } catch (mapErr) {
                     console.error(`${floorCode} 위치도 삽입 실패(나머지는 계속 진행):`, mapErr);
                     window.showToast(`${getFloorLabel(floorCode)} 위치도 삽입 중 오류가 있어 위치도는 제외하고 만듭니다.`, 'warning', 4000);
+                    return false;
                 }
+            };
+
+            /** 건축물 외부는 배치도 한 장이든 입면도 여러 장이든, 핀이 있는 도면마다 위치도를 넣는다. */
+            const locationMapCodesForPage = (entry, fallbackCode) => {
+                if (!entry || !entry.exteriorCombined) return [fallbackCode];
+                const fi = window.BSA && window.BSA.floorIdentity;
+                const hasDefects = (code) => {
+                    const arr = (window.state.defects || {})[`${bldgId}_${code}`];
+                    return Array.isArray(arr) && arr.length > 0;
+                };
+                const codes = (fi && typeof fi.exteriorLocationMapCodes === 'function')
+                    ? fi.exteriorLocationMapCodes(fallbackCode, entry.exteriorFloorCodes, hasDefects)
+                    : [fallbackCode];
+                return codes.length ? codes : [fallbackCode];
             };
 
             let grade3HwpxCompareAnchorPara = null;
@@ -39428,12 +39447,23 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             if (grade3LocMapStampPara) {
                 for (let i = 0; i < floorsData.length; i++) {
                     const { floorCode } = floorsData[i];
-                    const clonedPara = grade3LocMapStampPara.cloneNode(true);
-                    clonedPara.setAttribute('pageBreak', '1');
-                    reassignClonedIds([clonedPara]);
-                    sec.appendChild(clonedPara);
-                    const locationMapTbl = clonedPara.getElementsByTagNameNS(HP_NS, 'tbl')[0];
-                    await fillLocationMapForFloor(locationMapTbl, floorCode, i + 1);
+                    // 외부는 배치도 한 장일 수도, 입면도 여러 장일 수도 있다 — 도면마다 한 장씩.
+                    const mapCodes = locationMapCodesForPage(floorsData[i], floorCode);
+                    let mapSeq = 0;
+                    for (const mapCode of mapCodes) {
+                        const clonedPara = grade3LocMapStampPara.cloneNode(true);
+                        clonedPara.setAttribute('pageBreak', '1');
+                        reassignClonedIds([clonedPara]);
+                        sec.appendChild(clonedPara);
+                        const locationMapTbl = clonedPara.getElementsByTagNameNS(HP_NS, 'tbl')[0];
+                        mapSeq += 1;
+                        const ok = await fillLocationMapForFloor(
+                            locationMapTbl, mapCode, `${i + 1}_${mapSeq}`,
+                            { silent: mapCodes.length > 1 }
+                        );
+                        // 도면이 없는 면은 빈 틀을 남기지 않는다
+                        if (!ok && clonedPara.parentNode) clonedPara.parentNode.removeChild(clonedPara);
+                    }
                 }
             }
 
@@ -40124,7 +40154,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             // 도면에 결함 핀이 찍힌 위치도 이미지를 만들어 locationMapTbl 한 칸에 채워 넣는다. 1,2종은
             // 층 블록 안에서(아래 본 루프에서) 바로 호출하고, 3종은 모든 층 처리가 끝난 뒤 별도로 몰아서
             // 호출한다(fillLocationMapForFloor 자체는 어느 쪽이든 동일).
-            const fillLocationMapForFloor = async (locationMapTbl, floorCode, imgSeq) => {
+            // 도면이 없어 못 넣었으면 false를 돌려준다(외부처럼 면이 여러 개일 때 빈 칸 정리용).
+            const fillLocationMapForFloor = async (locationMapTbl, floorCode, imgSeq, opts) => {
                 try {
                     const bldgForMap = window.state.currentBuilding || {};
 
@@ -40199,13 +40230,40 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                         const captionTc = locationMapTbl.getElementsByTagNameNS(HP_NS, 'tc')[1];
                         const captionT = captionTc.getElementsByTagNameNS(HP_NS, 't')[0];
                         if (captionT) captionT.textContent = `${HWPX_FIG_MARK}${getFloorLabel(floorCode)} 결함위치도`;
-                    } else {
+                        return true;
+                    }
+                    if (!(opts && opts.silent)) {
                         window.showToast(`${getFloorLabel(floorCode)}에 등록된 도면이 없어 위치도는 제외하고 만듭니다.`, 'info', 4000);
                     }
+                    return false;
                 } catch (mapErr) {
                     console.error(`${floorCode} 위치도 삽입 실패(나머지는 계속 진행):`, mapErr);
                     window.showToast(`${getFloorLabel(floorCode)} 위치도 삽입 중 오류가 있어 위치도는 제외하고 만듭니다.`, 'warning', 4000);
+                    return false;
                 }
+            };
+
+            /**
+             * 이 페이지에 넣을 위치도의 층 코드들.
+             *
+             * 건축물 외부는 상태조사표가 하나(EXT)지만 도면은 현장마다 다르게 쓴다.
+             *  - 배치도 한 장에 몰아서 찍는 경우 → 핀이 EXT에 있다
+             *  - 입면도(정면·배면·좌측·우측)에 나눠 찍는 경우 → 핀이 EXT_S·EXT_BACK… 에 있다
+             * 그런데 위치도는 층 코드 하나로만 도면을 찾아서, EXT에 도면이 없으면 외부
+             * 위치도가 통째로 빠졌다. 두 방식 모두 되도록 **핀이 있는 코드마다** 넣는다.
+             * (2026-09-21)
+             */
+            const locationMapCodesForPage = (entry, fallbackCode) => {
+                if (!entry || !entry.exteriorCombined) return [fallbackCode];
+                const fi = window.BSA && window.BSA.floorIdentity;
+                const hasDefects = (code) => {
+                    const arr = (window.state.defects || {})[`${bldgId}_${code}`];
+                    return Array.isArray(arr) && arr.length > 0;
+                };
+                const codes = (fi && typeof fi.exteriorLocationMapCodes === 'function')
+                    ? fi.exteriorLocationMapCodes(fallbackCode, entry.exteriorFloorCodes, hasDefects)
+                    : [fallbackCode];
+                return codes.length ? codes : [fallbackCode];
             };
 
             for (let slotIdx = 0; slotIdx < floorsData.length; slotIdx++) {
@@ -40507,7 +40565,39 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     let locPara = slot.locationMapTbl && slot.locationMapTbl.parentNode;
                     while (locPara && locPara.localName !== 'p') locPara = locPara.parentNode;
                     if (locPara) locPara.setAttribute('pageBreak', '1');
-                    await fillLocationMapForFloor(slot.locationMapTbl, floorCode, slotIdx + 1);
+                    // 건축물 외부는 면(정면·배면·좌측·우측)마다 도면이 따로 있어 위치도도 면마다 넣는다.
+                    // 도면이 없는 면은 복제한 틀째로 걷어내 빈 위치도가 남지 않게 한다.
+                    const mapCodes = locationMapCodesForPage(floorsData[slotIdx], floorCode);
+                    let mapSeq = 0;
+                    let baseUsed = false;
+                    for (const mapCode of mapCodes) {
+                        const isBase = !baseUsed;
+                        let targetPara = locPara;
+                        let targetTbl = slot.locationMapTbl;
+                        if (!isBase) {
+                            if (!locPara || !locPara.parentNode) break;
+                            targetPara = locPara.cloneNode(true);
+                            reassignClonedIds([targetPara]);
+                            locPara.parentNode.insertBefore(targetPara, locPara.nextSibling);
+                            targetTbl = targetPara.getElementsByTagNameNS(HP_NS, 'tbl')[0];
+                            if (!targetTbl) {
+                                targetPara.parentNode.removeChild(targetPara);
+                                continue;
+                            }
+                        }
+                        mapSeq += 1;
+                        const ok = await fillLocationMapForFloor(
+                            targetTbl, mapCode, `${slotIdx + 1}_${mapSeq}`,
+                            // 외부는 면이 여러 개라 없는 면마다 안내를 띄우면 시끄럽다
+                            { silent: mapCodes.length > 1 }
+                        );
+                        if (ok) {
+                            baseUsed = true;
+                            if (!isBase) locPara = targetPara;   // 다음 면은 이 뒤에 붙인다
+                        } else if (!isBase) {
+                            targetPara.parentNode.removeChild(targetPara);
+                        }
+                    }
             }
 
             // 실제로 채운 블록 다음에 남은 표본 층 블록은 (비파괴조사 섹션 정리와 함께) 뒤에서 지운다.

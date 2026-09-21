@@ -185,6 +185,43 @@ function testKeepNdtFloorDespiteDeletedDrawing() {
     assert.strictEqual(api.keepNdtFloorCode('', true, true), false);
 }
 
+/**
+ * 2026-09-21: 외부 결함위치도가 안 나오던 문제.
+ * 상태조사표는 EXT 하나로 합치지만 도면은 현장마다 다르다 —
+ * 배치도 한 장에 몰아 찍기도 하고, 입면도(정면·배면…)에 나눠 찍기도 한다.
+ * 예전에는 EXT 코드 하나만 봐서 입면도에 나눠 찍으면 위치도가 통째로 빠졌다.
+ */
+function testExteriorMapsSplitAcrossElevations() {
+    const pinned = { 'EXT_S': 5, 'EXT_BACK': 1, 'EXT_RIGHT': 8 };
+    const codes = api.exteriorLocationMapCodes(
+        'EXT',
+        ['EXT', 'EXT_S', 'EXT_BACK', 'EXT_LEFT', 'EXT_RIGHT'],
+        (c) => !!pinned[c]
+    );
+    assert.deepStrictEqual(codes, ['EXT_S', 'EXT_BACK', 'EXT_RIGHT'],
+        '핀이 찍힌 면만 위치도로 넣어야 한다 (빈 면 제외)');
+}
+
+function testExteriorMapsOnSinglePlan() {
+    // 배치도 한 장(EXT)에 몰아 찍는 현장
+    const codes = api.exteriorLocationMapCodes(
+        'EXT',
+        ['EXT', 'EXT_S', 'EXT_BACK'],
+        (c) => c === 'EXT'
+    );
+    assert.deepStrictEqual(codes, ['EXT'], '배치도에 몰아 찍으면 한 장만 넣는다');
+}
+
+function testExteriorMapsFallBackWhenNoPins() {
+    // 결함이 아직 어느 면에도 없으면 후보를 그대로 준다(도면만 있어도 넣게)
+    const codes = api.exteriorLocationMapCodes('EXT', ['EXT_S'], () => false);
+    assert.deepStrictEqual(codes, ['EXT', 'EXT_S']);
+    // 판정 함수를 안 주면 후보 전체
+    assert.deepStrictEqual(api.exteriorLocationMapCodes('EXT', ['EXT_S']), ['EXT', 'EXT_S']);
+    // 외부가 아닌 층은 호출하지 않지만, 중복·빈 코드는 걸러야 한다
+    assert.deepStrictEqual(api.exteriorLocationMapCodes('EXT', ['EXT', '', null]), ['EXT']);
+}
+
 testParkingIsNotBasement();
 testCustomLabelNotRewritten();
 testUserOrderPreserved();
@@ -200,4 +237,7 @@ testCatwalkIsIncludedWhenMissingFromFloorsList();
 testNdtOnlyFloorKeysAreIncluded();
 testMeasure5FPayloadIsListedEvenIfFloorsListIs1F();
 testKeepNdtFloorDespiteDeletedDrawing();
+testExteriorMapsSplitAcrossElevations();
+testExteriorMapsOnSinglePlan();
+testExteriorMapsFallBackWhenNoPins();
 console.log('test-floor-identity: ok');

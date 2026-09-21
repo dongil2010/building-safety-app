@@ -317,6 +317,34 @@
         return c === 'EXT' || c.indexOf('EXT_') === 0 || raw.indexOf('외부') >= 0 || raw.indexOf('입면') >= 0;
     }
 
+    /**
+     * 건축물 외부 결함위치도에 넣을 도면 코드들.
+     *
+     * 상태조사표는 외부 하나(EXT)로 합치지만 도면은 현장마다 다르게 쓴다.
+     *  - 배치도 한 장에 몰아서 찍는 경우 → 핀이 EXT에 있다
+     *  - 입면도(정면·배면·좌측·우측)에 나눠 찍는 경우 → 핀이 EXT_S·EXT_BACK… 에 있다
+     * 예전에는 위치도가 EXT 코드 하나만 봐서, 입면도에 나눠 찍으면 외부 위치도가
+     * 통째로 빠졌다. 두 방식 모두 되도록 결함이 있는 코드를 전부 돌려준다.
+     *
+     * hasDefects: (code) => boolean — 그 코드에 결함(핀)이 있는지
+     * 결함이 있는 코드가 하나도 없으면 후보를 그대로 돌려준다(도면만 있어도 넣게).
+     */
+    function exteriorLocationMapCodes(baseCode, exteriorCodes, hasDefects) {
+        const codes = [];
+        const push = function (c) {
+            const code = asText(c);
+            if (code && codes.indexOf(code) < 0) codes.push(code);
+        };
+        push(baseCode);
+        (exteriorCodes || []).forEach(push);
+        if (!codes.length) return [];
+        if (typeof hasDefects !== 'function') return codes;
+        const withDefects = codes.filter(function (code) {
+            try { return !!hasDefects(code); } catch (_e) { return false; }
+        });
+        return withDefects.length ? withDefects : codes;
+    }
+
     function usedCodeSet(usedCodes) {
         const used = new Set();
         (usedCodes || []).forEach(function (c) {
@@ -405,6 +433,7 @@
         unmatchedFloorFromFilename: unmatchedFloorFromFilename,
         uniquifyCustomFloorCode: uniquifyCustomFloorCode,
         isExteriorLikeCode: isExteriorLikeCode,
+        exteriorLocationMapCodes: exteriorLocationMapCodes,
         allocateNextExteriorSerial: allocateNextExteriorSerial,
         parseExteriorSerialNumber: parseExteriorSerialNumber,
         assignParsedFloorForUpload: assignParsedFloorForUpload
