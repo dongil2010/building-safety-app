@@ -32264,7 +32264,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
     // 제3종시설물 상태조사표 컬럼(실제 3종 점검보고서 서식 기준) — 부재종류/조사내용/결함크기를
     // "점검내용" 한 칸으로 합치고, 구조체 여부 하나로 구조/비구조 구분을 대신한다.
-    // 진행 中·누수 中는 화면에서 토글하고, 한글/PDF는 점검내용 끝에 붙여 표기한다.
+    // 진행中·누수中는 화면에서 토글하고, 한글/PDF는 점검내용 끝에 붙여 표기한다.
     const GRADE3_SURVEY_COLUMNS = [
         { key: 'no', label: '번호' },
         { key: 'floorGroup', label: '구분' },
@@ -32278,17 +32278,17 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     ];
 
     function getSurveyProgressLabel(isGrade3) {
-        return isGrade3 ? '진행 中' : '진행중';
+        return isGrade3 ? '진행中' : '진행중';
     }
 
     function getSurveyLeakLabel(isGrade3) {
-        return isGrade3 ? '누수 中' : '누수중';
+        return isGrade3 ? '누수中' : '누수중';
     }
 
     function appendGrade3ProgressLeakToContent(content, d) {
         const flags = [];
-        if (d && d.isProgress) flags.push('진행 中');
-        if (d && d.isLeak) flags.push('누수 中');
+        if (d && d.isProgress) flags.push('진행中');
+        if (d && d.isLeak) flags.push('누수中');
         if (!flags.length) return content;
         const base = String(content == null ? '' : content).trim();
         if (!base || base === '-') return flags.join(' ');
@@ -32757,9 +32757,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     function getReportSurveyRowValues(d, ctx, isGrade3, colCount) {
         ctx = ctx || {};
         const marks = getSurveyStructMarks(d, isGrade3);
-        // 한글/PDF 상태조사표: 진행·누수는 ○ 대신 진행中 / 누수中
-        const progress = d.isProgress ? '진행 中' : '-';
-        const leak = d.isLeak ? '누수 中' : '-';
+        // 한글/PDF 상태조사표: 진행中 / 누수中 — 칸 안에서는 줄바꿈(진행\n中)
+        const progress = d.isProgress ? '진행\n中' : '-';
+        const leak = d.isLeak ? '누수\n中' : '-';
         const no = formatSurveyReportNo(d, isGrade3, ctx.floorCode);
         if (isGrade3) {
             const content = appendGrade3ProgressLeakToContent(
@@ -33011,13 +33011,13 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     defect.category = value || '구조체';
                     break;
                 case 'progress':
-                    defect.isProgress = value === '1' || value === '진행중' || value === '진행中' || value === '진행 中';
+                    defect.isProgress = value === '1' || value === '진행중' || value === '진행中' || value === '진행 中' || value === '진행\n中';
                     break;
                 case 'openingCrack':
                     defect.isOpeningCrack = value === '1' || value === '개구부' || value === '○';
                     break;
                 case 'leak':
-                    defect.isLeak = value === '1' || value === '누수중' || value === '누수中' || value === '누수 中';
+                    defect.isLeak = value === '1' || value === '누수중' || value === '누수中' || value === '누수 中' || value === '누수\n中';
                     break;
                 case 'priorityManage':
                     defect.isPriorityManage = value === '1' || value === '중점관리';
@@ -37486,7 +37486,12 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             // 1줄로 줄어든 칸의 글자가 위로 뜬 것처럼 보이던 문제 — 한글에서 직접 확인됨).
             const fillCellParas = (subList, paras, rawVal, tc) => {
                 const maxChars = estimateHwpxCellMaxChars(tc, paras);
-                const lines = wrapHwpxCellText(rawVal, maxChars).split('\n');
+                // wrapHwpxCellText는 입력 \n을 공백으로 평탄화한다.
+                // 진행\n中 / 누수\n中 은 의도적 2줄이므로 그대로 문단 분리한다.
+                const rawStr = String(rawVal == null ? '' : rawVal);
+                const lines = (rawStr === '진행\n中' || rawStr === '누수\n中')
+                    ? rawStr.split('\n')
+                    : wrapHwpxCellText(rawVal, maxChars).split('\n');
                 const baseSeg = paras[0].getElementsByTagNameNS(HP_NS, 'lineseg')[0];
                 const baseVertsize = baseSeg ? parseInt(baseSeg.getAttribute('vertsize'), 10) || 0 : 0;
                 const baseSpacing = baseSeg ? parseInt(baseSeg.getAttribute('spacing'), 10) || 0 : 0;
@@ -39949,7 +39954,12 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             // 1줄로 줄어든 칸의 글자가 위로 뜬 것처럼 보이던 문제 — 한글에서 직접 확인됨).
             const fillCellParas = (subList, paras, rawVal, tc) => {
                 const maxChars = estimateHwpxCellMaxChars(tc, paras);
-                const lines = wrapHwpxCellText(rawVal, maxChars).split('\n');
+                // wrapHwpxCellText는 입력 \n을 공백으로 평탄화한다.
+                // 진행\n中 / 누수\n中 은 의도적 2줄이므로 그대로 문단 분리한다.
+                const rawStr = String(rawVal == null ? '' : rawVal);
+                const lines = (rawStr === '진행\n中' || rawStr === '누수\n中')
+                    ? rawStr.split('\n')
+                    : wrapHwpxCellText(rawVal, maxChars).split('\n');
                 const baseSeg = paras[0].getElementsByTagNameNS(HP_NS, 'lineseg')[0];
                 const baseVertsize = baseSeg ? parseInt(baseSeg.getAttribute('vertsize'), 10) || 0 : 0;
                 const baseSpacing = baseSeg ? parseInt(baseSeg.getAttribute('spacing'), 10) || 0 : 0;
