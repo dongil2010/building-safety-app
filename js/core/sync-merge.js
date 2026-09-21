@@ -38,6 +38,42 @@
         return Number(rec.positionUpdatedAt) || 0;
     }
 
+    /**
+     * 조사표 가져오기(엑셀/한글) — 번호가 같은 기존 결함에 내용을 채울 때의 규칙.
+     *
+     * 2026-09-21 사고: 「지하1층 주차장-1」 NO.01~NO.10이 부재·결함 '기타',
+     * 원인 '건조수축'으로 한꺼번에 바뀌었다. 가져오기가 번호로 기존 결함을 찾아 내용을
+     * 채우는데, **가져온 칸이 비어 있어도 기본값으로 덮어썼기** 때문이다
+     * (`componentRaw || '기타'`, `causeRaw || '건조수축'`). 헤더가 안 맞거나 번호만 있는
+     * 시트를 불러오면 현장에서 작성한 내용이 통째로 사라진다.
+     *
+     * 규칙: **가져온 값이 있을 때만 덮어쓴다.** 비어 있으면 기존 내용을 그대로 두고,
+     * 기존도 비어 있을 때만 기본값을 쓴다(새로 만드는 행과 같아짐).
+     */
+    function pickImportedText(incoming, existing, fallback) {
+        var inc = incoming == null ? '' : String(incoming).trim();
+        if (inc) return inc;
+        var cur = existing == null ? '' : String(existing).trim();
+        if (cur) return cur;
+        return fallback == null ? '' : String(fallback).trim();
+    }
+
+    /**
+     * 가져온 빈 칸이 기존 내용을 지울 뻔한 횟수.
+     * 0이 아니면 헤더 불일치·내용 없는 시트일 수 있어 사용자에게 알린다.
+     * pairs: [{ incoming, existing }, …]
+     */
+    function countKeptExistingOnImport(pairs) {
+        var n = 0;
+        (pairs || []).forEach(function (p) {
+            if (!p) return;
+            var inc = p.incoming == null ? '' : String(p.incoming).trim();
+            var cur = p.existing == null ? '' : String(p.existing).trim();
+            if (!inc && cur) n += 1;
+        });
+        return n;
+    }
+
     function mergeDeletedIdsMaps(serverMap, localMap) {
         var out = Object.assign({}, serverMap || {});
         Object.entries(localMap || {}).forEach(function (entry) {
@@ -439,6 +475,8 @@
         getDefectPositionUpdatedAt: getDefectPositionUpdatedAt,
         mergeDeletedIdsMaps: mergeDeletedIdsMaps,
         mergeDeletedAtMaps: mergeDeletedAtMaps,
+        pickImportedText: pickImportedText,
+        countKeptExistingOnImport: countKeptExistingOnImport,
         recordSurvivesDelete: recordSurvivesDelete,
         mergePhotoArrays: mergePhotoArrays,
         collectPhotoSrcById: collectPhotoSrcById,

@@ -43021,6 +43021,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         let totalMatched = 0;
         let totalUnregistered = 0;
         let floorsTouched = 0;
+        // 가져온 칸이 비어 있어 기존 내용을 지키기만 한 횟수(부재·결함·원인 칸 단위).
+        // 0이 아니면 헤더가 안 맞거나 내용 칸이 빈 시트일 수 있어 사용자에게 알린다.
+        let keptExistingOnImport = 0;
 
         sheets.forEach(sheetInfo => {
             const floorCode = noFloorInfo ? state.currentFloor : floorBySheetName[sheetInfo.sheetName];
@@ -43094,29 +43097,45 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     : null;
 
                 if (existing) {
+                    // 가져온 칸이 비었다고 기본값('기타'·'건조수축')으로 덮어쓰면 현장에서
+                    // 작성한 내용이 사라진다. 값이 있을 때만 덮어쓴다.
+                    // (2026-09-21 지하1층 주차장-1 NO.01~10 사고)
+                    const importMerge = (window.BSA && window.BSA.syncMerge) || null;
+                    const pick = (incoming, current, fallback) => (importMerge && typeof importMerge.pickImportedText === 'function'
+                        ? importMerge.pickImportedText(incoming, current, fallback)
+                        : (String(incoming || '').trim() || String(current || '').trim() || String(fallback || '').trim()));
+                    if (importMerge && typeof importMerge.countKeptExistingOnImport === 'function') {
+                        keptExistingOnImport += importMerge.countKeptExistingOnImport([
+                            { incoming: getCell(row, 'component'), existing: existing.component },
+                            { incoming: defectTypeRaw, existing: existing.defectType },
+                            { incoming: causeRaw, existing: existing.cause }
+                        ]);
+                    }
                     existing.category = category;
-                    existing.component = componentRaw;
+                    existing.component = pick(getCell(row, 'component'), existing.component, '기타');
                     if (locationRaw) existing.location = locationRaw;
-                    existing.defectType = defectType;
-                    existing.cause = isGood ? '-' : (causeRaw || '건조수축');
-                    existing.size = isGood ? '' : sizeRaw;
-                    existing.crackWidth = isGood ? '' : crackWidthRaw;
-                    existing.crackLength = isGood ? '' : crackLengthRaw;
-                    if (!isGood && parsedMeasures.length) {
+                    existing.defectType = pick(defectTypeRaw, existing.defectType, '기타');
+                    // 합친 결과로 다시 판정한다 — 빈 가져오기 값으로 '기타'가 되어 있으면 안 된다
+                    const isGoodMerged = isGoodDefectType(existing.defectType);
+                    existing.cause = isGoodMerged ? '-' : pick(causeRaw, existing.cause, '건조수축');
+                    existing.size = isGoodMerged ? '' : pick(sizeRaw, existing.size, '');
+                    existing.crackWidth = isGoodMerged ? '' : pick(crackWidthRaw, existing.crackWidth, '');
+                    existing.crackLength = isGoodMerged ? '' : pick(crackLengthRaw, existing.crackLength, '');
+                    if (!isGoodMerged && parsedMeasures.length) {
                         applyParsedCrackMeasuresToDefect(existing, parsedMeasures, sizeRaw);
-                    } else if (isGood) {
+                    } else if (isGoodMerged) {
                         existing.crackMeasures = [];
                     }
-                    existing.isProgress = isGood ? false : resolveImportFlag(progressRaw);
-                    existing.isLeak = isGood ? false : resolveImportFlag(leakRaw);
-                    existing.isOpeningCrack = isGood
+                    existing.isProgress = isGoodMerged ? false : resolveImportFlag(progressRaw);
+                    existing.isLeak = isGoodMerged ? false : resolveImportFlag(leakRaw);
+                    existing.isOpeningCrack = isGoodMerged
                         ? false
                         : detectImportOpeningCrack({
                             location: locationRaw || existing.location,
-                            defectType,
-                            component: componentRaw,
-                            size: sizeRaw,
-                            isGood
+                            defectType: existing.defectType,
+                            component: existing.component,
+                            size: existing.size,
+                            isGood: isGoodMerged
                         });
                     // 엑셀 가져오기는 항상 전차(전회차) 조사내용으로 분류
                     existing.isCarriedOver = true;
@@ -43225,6 +43244,15 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             parts.push(`전차 조사내용 ${totalImported}건 신규 등록(도면 좌측 상단 임시 배치, 직접 드래그 필요)`);
         }
         window.showToast(`${floorsTouched}개 층 반영 완료 — ${parts.join(' / ')}`, 'success', 8000);
+        if (keptExistingOnImport > 0) {
+            // 예전에는 이 경우 '기타'·'건조수축'으로 덮어써서 작성한 내용이 사라졌다.
+            window.showToast(
+                `가져온 파일에 부재·결함·원인이 비어 있는 칸이 ${keptExistingOnImport}개 있어 기존 내용을 그대로 두었습니다. `
+                + '파일의 열 제목이 맞는지 확인해 주세요.',
+                'warning', 10000
+            );
+            console.warn('[가져오기] 빈 칸으로 기존 내용을 덮어쓰지 않았습니다:', keptExistingOnImport);
+        }
     };
 
     const btnImportDefectExcel = document.getElementById('btnImportDefectExcel');
