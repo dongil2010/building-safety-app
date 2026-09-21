@@ -970,6 +970,12 @@
                 if (rows[i].floorCode === payload.currentFloor) return rows[i];
             }
         }
+        if (view === 'group' && payload && payload.currentFloor && ndtStats.getCoarseFloorGroup) {
+            var want = ndtStats.getCoarseFloorGroup(payload.currentFloor).key;
+            for (var j = 0; j < rows.length; j++) {
+                if (rows[j].key === want) return rows[j];
+            }
+        }
         return rows[0] || null;
     }
 
