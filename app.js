@@ -37372,8 +37372,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 const seg = clonedPara.getElementsByTagNameNS(HP_NS, 'lineseg')[0];
                 if (seg) seg.setAttribute('vertpos', String(lineIndex * (baseVertsize + baseSpacing)));
             };
-            // 한글 셀: 자간은 절대 손대지 않는다. 가운데 쪼개기(줄나눔)도 하지 않는다.
-            // 칸 너비를 넘는 지점부터 다음 줄로 넘기고(띄어쓰기 있으면 그 앞, 없으면 글자 단위),
+            // 한글 셀: charPr 자간 속성은 건드리지 않는다(템플릿 값 유지).
+            // 칸 너비를 넘는 지점부터 다음 줄로 넘긴다(띄어쓰기·콤마 우선, 없으면 글자 단위).
+            // 한 문단으로 두면 한글이 자간을 줄여 한 줄에 욱여넣으므로 강제 문단 분리를 쓴다.
             // 행 높이는 템플릿을 유지하다가 4줄 이상일 때만 내용에 맞게 확장한다.
             const HWPX_CELL_EXPAND_FROM_LINES = 4;
             const hwpxCharWidthUnits = (ch) => {
@@ -37431,15 +37432,31 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                         lines.push(chars.slice(i).join(''));
                         break;
                     }
-                    // 공백/구분자 등 자연 끊김이 없으면 글자 중간을 강제 문단 분리하지 않는다.
-                    // (좁은 칸+ASCII 크기값에서 "Cw:0." / "15" 같은 엉터리 줄바꿈이 생기던 원인)
-                    // 한글 자동 줄바꿈에 맡기고, 높이 계산용 강제 문단은 자연 끊김에만 만든다.
-                    if (!(lastBreak > i)) {
-                        lines.push(chars.slice(i).join(''));
-                        break;
+                    // 자연 끊김(띄어쓰기·콤마)이 없으면 칸 너비(end)에서 강제 줄바꿈한다.
+                    // 한 문단으로 두면 한글이 자간을 줄여 한 줄에 욱여넣는 경우가 많다.
+                    // ASCII 규모값(Cw:0.15, 0.3/1.2 등)은 토큰 중간에서 끊지 않는다.
+                    let cut;
+                    if (lastBreak > i) {
+                        cut = lastBreak;
+                    } else {
+                        const isAsciiTokenChar = (ch) => /[0-9A-Za-z.:~\/xXmM\-]/.test(ch);
+                        cut = end;
+                        if (end < chars.length && isAsciiTokenChar(chars[end - 1]) && isAsciiTokenChar(chars[end])) {
+                            let tokenStart = end - 1;
+                            while (tokenStart > i && isAsciiTokenChar(chars[tokenStart - 1])) tokenStart--;
+                            if (tokenStart > i) {
+                                cut = tokenStart;
+                            } else {
+                                let tokenEnd = end;
+                                while (tokenEnd < chars.length && isAsciiTokenChar(chars[tokenEnd])) tokenEnd++;
+                                lines.push(chars.slice(i, tokenEnd).join(''));
+                                i = tokenEnd;
+                                if (!lines[lines.length - 1]) lines.pop();
+                                continue;
+                            }
+                        }
                     }
-                    let cut = lastBreak;
-                    // lastBreak가 공백을 가리키면 공백은 다음 줄 선두에서 제거됨
+                    // cut이 공백을 가리키면 공백은 다음 줄 선두에서 제거됨
                     if (cut > i && (chars[cut - 1] === ' ' || chars[cut - 1] === '\t')) {
                         lines.push(chars.slice(i, cut - 1).join(''));
                         i = cut;
@@ -39818,8 +39835,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 const seg = clonedPara.getElementsByTagNameNS(HP_NS, 'lineseg')[0];
                 if (seg) seg.setAttribute('vertpos', String(lineIndex * (baseVertsize + baseSpacing)));
             };
-            // 한글 셀: 자간은 절대 손대지 않는다. 가운데 쪼개기(줄나눔)도 하지 않는다.
-            // 칸 너비를 넘는 지점부터 다음 줄로 넘기고(띄어쓰기 있으면 그 앞, 없으면 글자 단위),
+            // 한글 셀: charPr 자간 속성은 건드리지 않는다(템플릿 값 유지).
+            // 칸 너비를 넘는 지점부터 다음 줄로 넘긴다(띄어쓰기·콤마 우선, 없으면 글자 단위).
+            // 한 문단으로 두면 한글이 자간을 줄여 한 줄에 욱여넣으므로 강제 문단 분리를 쓴다.
             // 행 높이는 템플릿을 유지하다가 4줄 이상일 때만 내용에 맞게 확장한다.
             const HWPX_CELL_EXPAND_FROM_LINES = 4;
             const hwpxCharWidthUnits = (ch) => {
@@ -39877,15 +39895,31 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                         lines.push(chars.slice(i).join(''));
                         break;
                     }
-                    // 공백/구분자 등 자연 끊김이 없으면 글자 중간을 강제 문단 분리하지 않는다.
-                    // (좁은 칸+ASCII 크기값에서 "Cw:0." / "15" 같은 엉터리 줄바꿈이 생기던 원인)
-                    // 한글 자동 줄바꿈에 맡기고, 높이 계산용 강제 문단은 자연 끊김에만 만든다.
-                    if (!(lastBreak > i)) {
-                        lines.push(chars.slice(i).join(''));
-                        break;
+                    // 자연 끊김(띄어쓰기·콤마)이 없으면 칸 너비(end)에서 강제 줄바꿈한다.
+                    // 한 문단으로 두면 한글이 자간을 줄여 한 줄에 욱여넣는 경우가 많다.
+                    // ASCII 규모값(Cw:0.15, 0.3/1.2 등)은 토큰 중간에서 끊지 않는다.
+                    let cut;
+                    if (lastBreak > i) {
+                        cut = lastBreak;
+                    } else {
+                        const isAsciiTokenChar = (ch) => /[0-9A-Za-z.:~\/xXmM\-]/.test(ch);
+                        cut = end;
+                        if (end < chars.length && isAsciiTokenChar(chars[end - 1]) && isAsciiTokenChar(chars[end])) {
+                            let tokenStart = end - 1;
+                            while (tokenStart > i && isAsciiTokenChar(chars[tokenStart - 1])) tokenStart--;
+                            if (tokenStart > i) {
+                                cut = tokenStart;
+                            } else {
+                                let tokenEnd = end;
+                                while (tokenEnd < chars.length && isAsciiTokenChar(chars[tokenEnd])) tokenEnd++;
+                                lines.push(chars.slice(i, tokenEnd).join(''));
+                                i = tokenEnd;
+                                if (!lines[lines.length - 1]) lines.pop();
+                                continue;
+                            }
+                        }
                     }
-                    let cut = lastBreak;
-                    // lastBreak가 공백을 가리키면 공백은 다음 줄 선두에서 제거됨
+                    // cut이 공백을 가리키면 공백은 다음 줄 선두에서 제거됨
                     if (cut > i && (chars[cut - 1] === ' ' || chars[cut - 1] === '\t')) {
                         lines.push(chars.slice(i, cut - 1).join(''));
                         i = cut;
