@@ -84,6 +84,7 @@ window.BSA.tabs['tab-survey'] = {
         '3종 중점관리 전·현차 비교사진 (조사표 사진 앨범 상단)',
         '3종 균열 게이지·팁 누적 측정 요약 (작성은 비파괴조사 탭)',
         '결함 직접 등록 / 행 인라인 수정',
+        '조사표 가져오기 전 자동 백업 · 가져오기 전으로 되살리기',
         '마킹 N → 화살표 추가는 도형만, 「번호 부여」 후에야 결함표 N-1·N-2 행',
         '모바일: 조사목록 영역 상하·좌우 스크롤 (헤더 sticky)',
         '모바일 세로: 표 패딩만 축소(글자 미절단)',
@@ -95,6 +96,9 @@ window.BSA.tabs['tab-survey'] = {
     enter: function () {
         function refreshSurvey() {
             if (typeof window.renderSurveyTable === 'function') window.renderSurveyTable();
+            if (typeof window.refreshSurveyBulkRestoreButton === 'function') {
+                window.refreshSurveyBulkRestoreButton();
+            }
         }
         if (window.BSA && window.BSA.performance && typeof window.BSA.performance.scheduleTabRefresh === 'function') {
             window.BSA.performance.scheduleTabRefresh(function () { refreshSurvey(); });

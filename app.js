@@ -3872,6 +3872,26 @@ document.addEventListener('DOMContentLoaded', () => {
         window.state.deletedNdtAt[floorKey][itemId] = Date.now();
     }
 
+    /**
+     * 비파괴 삭제 묘비를 푼다. 스냅샷에서 되살린 항목이 다음 동기화에서
+     * 다시 지워지지 않게 한다. (결함 쪽 untrackDefectDeletion과 같은 역할)
+     */
+    function untrackNdtDeletion(floorKey, itemId) {
+        if (!floorKey || !itemId) return;
+        ensureSyncMetaState();
+        const arr = window.state.deletedNdtIds[floorKey];
+        if (Array.isArray(arr)) {
+            const next = arr.filter((id) => id !== itemId);
+            if (next.length) window.state.deletedNdtIds[floorKey] = next;
+            else delete window.state.deletedNdtIds[floorKey];
+        }
+        const atMap = window.state.deletedNdtAt && window.state.deletedNdtAt[floorKey];
+        if (atMap) {
+            delete atMap[itemId];
+            if (!Object.keys(atMap).length) delete window.state.deletedNdtAt[floorKey];
+        }
+    }
+
     function mergeDeletedIdsMaps(serverMap, localMap) {
         return window.BSA.syncMerge.mergeDeletedIdsMaps(serverMap, localMap);
     }
@@ -33338,6 +33358,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (defects.length === 0) {
             elements.surveyTableBody.innerHTML = `<tr><td colspan="${columns.length + 1}" style="text-align:center; padding: 2.5rem; color:#64748b; font-weight:600;">등록된 결함이 없습니다. 도면 점검 탭에서 결함을 마킹해 보세요.</td></tr>`;
             window._surveyColMetrics = {};
+            if (typeof window.refreshSurveyBulkRestoreButton === 'function') {
+                window.refreshSurveyBulkRestoreButton();
+            }
             return;
         }
 
@@ -33432,6 +33455,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         }
         if (state.currentTab === 'tab-stats' && typeof window.renderDefectStatsTab === 'function') {
             window.renderDefectStatsTab();
+        }
+        if (typeof window.refreshSurveyBulkRestoreButton === 'function') {
+            window.refreshSurveyBulkRestoreButton();
         }
     }
 
@@ -43049,7 +43075,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         h.redo = [];
     }
 
-    window.confirmImportDefectExcel = function() {
+    window.confirmImportDefectExcel = async function() {
         if (!state.currentBuildingId) {
             window.showToast('가져올 건축물이 선택되지 않았습니다.', 'warning');
             return;
@@ -43062,6 +43088,27 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         sheetSelects.forEach(sel => { floorBySheetName[sel.dataset.sheet] = sel.value; });
         // 층 정보가 아예 없는 건축물은 매칭 UI 자체가 없으므로 모든 시트를 현재 층으로 간주
         const noFloorInfo = (window._importExcelFloors || []).length === 0;
+
+        const keysToSnap = [];
+        sheets.forEach((sheetInfo) => {
+            const floorCode = noFloorInfo ? state.currentFloor : floorBySheetName[sheetInfo.sheetName];
+            if (!floorCode) return;
+            const key = `${state.currentBuildingId}_${floorCode}`;
+            if (keysToSnap.indexOf(key) < 0) keysToSnap.push(key);
+        });
+        if (!keysToSnap.length) {
+            window.showToast('가져올 시트가 선택되지 않았습니다. 시트별 층 배정을 확인해주세요.', 'warning', 5000);
+            return;
+        }
+        // 적용 직전에 배정된 층만 기기에 남긴다. 실패해도 가져오기는 막지 않는다.
+        if (typeof window.captureBulkSnapshots === 'function') {
+            try {
+                await window.captureBulkSnapshots('조사표 가져오기', keysToSnap);
+            } catch (e) {
+                console.warn('[일괄 백업] 가져오기 전 저장 실패 — 가져오기는 계속합니다.', e);
+                window.showToast('가져오기 전 자동 백업에 실패했습니다. 가져오기는 그대로 진행합니다.', 'warning', 6000);
+            }
+        }
 
         const mapSelects = document.querySelectorAll('.import-defect-field-map');
         const colIdxByField = {};
@@ -46318,6 +46365,411 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         currentFloorUnsubs.push(unsub);
     }
     window.subscribeCurrentFloorSync = subscribeCurrentFloorSync;
+
+    /* ------------------------------------------------------------------
+     * 일괄 작업 전 자동 백업 (1단계: 조사표 가져오기)
+     * 순수 비교·복원 규칙은 js/core/data-health.js. 여기선 IndexedDB 저장과
+     * 조사표 화면·콘솔 API만 연결한다.
+     * ------------------------------------------------------------------ */
+    function bulkSnapshotApi() {
+        return (window.BSA && window.BSA.dataHealth) || null;
+    }
+
+    let _bulkSnapStore = null;
+    function getBulkSnapshotStore() {
+        const health = bulkSnapshotApi();
+        if (!health || typeof health.createIdbSnapshotStore !== 'function') return null;
+        if (!_bulkSnapStore) {
+            try { _bulkSnapStore = health.createIdbSnapshotStore(); }
+            catch (e) {
+                console.warn('[일괄 백업] 저장소를 열지 못했습니다.', e);
+                return null;
+            }
+        }
+        return _bulkSnapStore;
+    }
+
+    function currentBulkFloorKey() {
+        if (!state.currentBuildingId || !state.currentFloor) return '';
+        return `${state.currentBuildingId}_${state.currentFloor}`;
+    }
+
+    function cloneAtMapLocal(map) {
+        const out = {};
+        if (!map || typeof map !== 'object') return out;
+        Object.keys(map).forEach((k) => { out[k] = map[k]; });
+        return out;
+    }
+
+    function readBulkFloorSlice(floorKey) {
+        if (typeof ensureSyncMetaState === 'function') ensureSyncMetaState();
+        return {
+            defects: (state.defects[floorKey] || []).slice(),
+            ndtData: ((state.ndtData && state.ndtData[floorKey]) || []).slice(),
+            ndtDisplacementGroups: ((state.ndtDisplacementGroups && state.ndtDisplacementGroups[floorKey]) || []).slice(),
+            deletedDefectIds: ((state.deletedDefectIds && state.deletedDefectIds[floorKey]) || []).slice(),
+            deletedDefectAt: cloneAtMapLocal(state.deletedDefectAt && state.deletedDefectAt[floorKey]),
+            deletedNdtIds: ((state.deletedNdtIds && state.deletedNdtIds[floorKey]) || []).slice(),
+            deletedNdtAt: cloneAtMapLocal(state.deletedNdtAt && state.deletedNdtAt[floorKey])
+        };
+    }
+
+    function writeBulkFloorSlice(floorKey, slice) {
+        if (typeof ensureSyncMetaState === 'function') ensureSyncMetaState();
+        state.defects[floorKey] = slice.defects || [];
+        if (!state.ndtData) state.ndtData = {};
+        state.ndtData[floorKey] = slice.ndtData || [];
+        if (!state.ndtDisplacementGroups) state.ndtDisplacementGroups = {};
+        state.ndtDisplacementGroups[floorKey] = slice.ndtDisplacementGroups || [];
+        if (slice.deletedDefectIds && slice.deletedDefectIds.length) {
+            state.deletedDefectIds[floorKey] = slice.deletedDefectIds;
+        } else if (state.deletedDefectIds) {
+            delete state.deletedDefectIds[floorKey];
+        }
+        if (slice.deletedDefectAt && Object.keys(slice.deletedDefectAt).length) {
+            state.deletedDefectAt[floorKey] = slice.deletedDefectAt;
+        } else if (state.deletedDefectAt) {
+            delete state.deletedDefectAt[floorKey];
+        }
+        if (slice.deletedNdtIds && slice.deletedNdtIds.length) {
+            state.deletedNdtIds[floorKey] = slice.deletedNdtIds;
+        } else if (state.deletedNdtIds) {
+            delete state.deletedNdtIds[floorKey];
+        }
+        if (slice.deletedNdtAt && Object.keys(slice.deletedNdtAt).length) {
+            state.deletedNdtAt[floorKey] = slice.deletedNdtAt;
+        } else if (state.deletedNdtAt) {
+            delete state.deletedNdtAt[floorKey];
+        }
+    }
+
+    function escapeBulkRestoreHtml(value) {
+        return String(value == null ? '' : value)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    }
+
+    function summarizeDefectForRestore(d) {
+        if (!d) return '(없음)';
+        const bits = [d.no || d.id, d.component, d.defectType, d.cause, d.size, d.crackWidth, d.crackLength]
+            .map((v) => String(v || '').trim())
+            .filter(Boolean);
+        return bits.join(' / ') || '(내용 없음)';
+    }
+
+    function formatBulkSnapTime(ts) {
+        try {
+            return new Date(ts).toLocaleString('ko-KR');
+        } catch (_e) {
+            return String(ts || '');
+        }
+    }
+
+    /**
+     * 작업 이름 + 층 키 목록만 넘기면 그 층 데이터를 기기에 저장한다.
+     * 2단계에서 층 도면 삭제·일괄 수정 등에도 이 함수만 호출하면 된다.
+     */
+    window.captureBulkSnapshots = async function (opName, floorKeys) {
+        const health = bulkSnapshotApi();
+        const store = getBulkSnapshotStore();
+        if (!health || !store || typeof health.saveSnapshotsWithStore !== 'function') {
+            console.warn('[일괄 백업] 모듈을 불러오지 못해 저장하지 않았습니다.');
+            return [];
+        }
+        const keys = Array.isArray(floorKeys) ? floorKeys.filter(Boolean) : [];
+        if (!keys.length) return [];
+        const saved = await health.saveSnapshotsWithStore(window.state, opName, keys, store, Date.now());
+        console.log('[일괄 백업] ' + (opName || '일괄 작업') + ' — '
+            + saved.map((s) => (s.floorCode || s.floorKey) + ' ' + s.defectCount + '건').join(', '));
+        if (typeof window.refreshSurveyBulkRestoreButton === 'function') {
+            window.refreshSurveyBulkRestoreButton();
+        }
+        return saved;
+    };
+
+    window.listBulkSnapshots = async function (floorCode) {
+        const store = getBulkSnapshotStore();
+        if (!store) {
+            console.warn('일괄 백업 저장소를 열지 못했습니다.');
+            return [];
+        }
+        let rows = await store.getAll();
+        const code = String(floorCode || '').trim();
+        if (code) {
+            const id = window.state.currentBuildingId;
+            const key = id ? `${id}_${code}` : '';
+            rows = rows.filter((s) => s && (s.floorCode === code || s.floorKey === key));
+        }
+        rows.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+        console.table(rows.map((s) => ({
+            id: s.id,
+            작업: s.opName,
+            층: s.floorCode,
+            시각: formatBulkSnapTime(s.createdAt),
+            결함: s.defectCount,
+            비파괴: s.ndtCount
+        })));
+        if (!rows.length) console.log('저장된 백업이 없습니다.');
+        return rows;
+    };
+
+    function previewBulkSnapshotDiff(snap) {
+        const health = bulkSnapshotApi();
+        if (!health || !snap) return null;
+        const cur = (window.state.defects && window.state.defects[snap.floorKey]) || [];
+        return health.compareDefects(snap.defects, cur);
+    }
+
+    window.previewBulkSnapshot = async function (snapshotId) {
+        const store = getBulkSnapshotStore();
+        const health = bulkSnapshotApi();
+        if (!store || !health) {
+            console.warn('일괄 백업 모듈을 불러오지 못했습니다.');
+            return null;
+        }
+        const snap = await store.get(snapshotId);
+        if (!snap) {
+            console.warn('백업을 찾지 못했습니다: ' + snapshotId);
+            return null;
+        }
+        const diff = previewBulkSnapshotDiff(snap);
+        const selected = health.defaultSelectedIds(diff);
+        console.log('[일괄 백업 미리보기] ' + snap.opName + ' / ' + snap.floorCode
+            + ' (' + formatBulkSnapTime(snap.createdAt) + ')');
+        console.table((diff.changed || []).concat(diff.deletedAfter || []).map((r) => ({
+            id: r.id,
+            번호: (r.snapshot && r.snapshot.no) || (r.current && r.current.no) || '',
+            구분: r.kind === 'deleted' ? '스냅샷 이후 삭제' : '내용 변경',
+            기본선택: selected.indexOf(r.id) >= 0 ? '예' : '',
+            지금: summarizeDefectForRestore(r.current),
+            백업: summarizeDefectForRestore(r.snapshot)
+        })));
+        if (diff.addedAfter && diff.addedAfter.length) {
+            console.log('스냅샷 이후 새로 생긴 결함 ' + diff.addedAfter.length
+                + '건은 되살리기에서 지우지 않습니다: '
+                + diff.addedAfter.map((r) => r.current && (r.current.no || r.id)).join(', '));
+        }
+        return { snapshot: snap, diff: diff, ids: selected };
+    };
+
+    window.restoreBulkSnapshot = async function (snapshotId, opts) {
+        const options = opts || {};
+        const store = getBulkSnapshotStore();
+        const health = bulkSnapshotApi();
+        if (!store || !health) {
+            console.warn('일괄 백업 모듈을 불러오지 못했습니다.');
+            return null;
+        }
+        const snap = await store.get(snapshotId);
+        if (!snap) {
+            console.warn('백업을 찾지 못했습니다: ' + snapshotId);
+            return null;
+        }
+        const diff = previewBulkSnapshotDiff(snap);
+        const ids = Array.isArray(options.ids) ? options.ids.filter(Boolean) : health.defaultSelectedIds(diff);
+        if (!options.apply) {
+            console.log('[일괄 백업] 미리보기 — 대상 ' + ids.length + '건. 적용하려면 { apply: true }');
+            return { preview: true, snapshot: snap, diff: diff, ids: ids };
+        }
+        if (!ids.length) {
+            window.showToast('되살릴 행이 없습니다.', 'warning');
+            return { preview: false, restoredIds: [] };
+        }
+        try {
+            await window.captureBulkSnapshots('되살리기', [snap.floorKey]);
+        } catch (e) {
+            console.warn('[일괄 백업] 되살리기 전 저장 실패 — 되살리기는 계속합니다.', e);
+        }
+        const slice = readBulkFloorSlice(snap.floorKey);
+        const result = health.applyRestoreToFloor(slice, snap, {
+            ids: ids,
+            now: Date.now(),
+            restoreNdt: options.restoreNdt === true,
+            ndtIds: options.ndtIds
+        });
+        writeBulkFloorSlice(snap.floorKey, slice);
+        (result.restored || []).forEach((d) => {
+            if (typeof touchDefectUpdatedAt === 'function') touchDefectUpdatedAt(d);
+            if (typeof touchDefectPositionUpdatedAt === 'function') touchDefectPositionUpdatedAt(d);
+        });
+        (result.restoredIds || []).forEach((id) => untrackDefectDeletion(snap.floorKey, id));
+        (result.restoredNdtIds || []).forEach((id) => untrackNdtDeletion(snap.floorKey, id));
+        markFloorKeyDirty(snap.floorKey);
+        saveStateToLocalStorage();
+        if (typeof renderSurveyTable === 'function') renderSurveyTable();
+        if (typeof drawCanvas === 'function') drawCanvas();
+        if (typeof renderDefectListPanel === 'function') renderDefectListPanel();
+        if (typeof window.refreshSurveyBulkRestoreButton === 'function') {
+            window.refreshSurveyBulkRestoreButton();
+        }
+        const n = (result.restoredIds || []).length;
+        window.showToast(snap.floorCode + '에서 ' + n + '건을 백업 내용으로 되살렸습니다. 동기화 대상에 넣었습니다.', 'success', 6000);
+        console.log('[일괄 백업] 되살리기 적용 ' + n + '건', result.restoredIds);
+        return result;
+    };
+
+    function ensureBulkRestoreModal() {
+        if (document.getElementById('bulkRestoreModal')) return;
+        const wrap = document.createElement('div');
+        wrap.id = 'bulkRestoreModal';
+        wrap.className = 'modal-overlay';
+        wrap.innerHTML = `
+            <div class="modal-card bulk-restore-card">
+                <div class="modal-header">
+                    <h3>가져오기 전으로 되살리기</h3>
+                    <button type="button" class="modal-close" id="btnCloseBulkRestoreModal" title="닫기">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <p id="bulkRestoreMeta" class="bulk-restore-meta"></p>
+                    <div class="bulk-restore-table-wrap">
+                        <table class="bulk-restore-table">
+                            <thead>
+                                <tr>
+                                    <th><input type="checkbox" id="bulkRestoreCheckAll" title="바뀐 행·삭제된 행 모두 선택"></th>
+                                    <th>번호</th>
+                                    <th>구분</th>
+                                    <th>지금</th>
+                                    <th>백업</th>
+                                </tr>
+                            </thead>
+                            <tbody id="bulkRestoreTableBody"></tbody>
+                        </table>
+                    </div>
+                    <p class="bulk-restore-note">스냅샷 이후 새로 생긴 결함은 지우지 않습니다. 고른 행만 백업 내용으로 덮습니다.</p>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline" id="btnBulkRestoreCancel">취소</button>
+                    <button type="button" class="btn btn-primary" id="btnBulkRestoreApply">선택한 행 되살리기</button>
+                </div>
+            </div>`;
+        document.body.appendChild(wrap);
+        const close = () => wrap.classList.remove('open');
+        document.getElementById('btnCloseBulkRestoreModal').addEventListener('click', close);
+        document.getElementById('btnBulkRestoreCancel').addEventListener('click', close);
+        wrap.addEventListener('click', (e) => { if (e.target === wrap) close(); });
+        document.getElementById('bulkRestoreCheckAll').addEventListener('change', (e) => {
+            wrap.querySelectorAll('.bulk-restore-row-check').forEach((cb) => {
+                cb.checked = e.target.checked;
+            });
+        });
+        document.getElementById('btnBulkRestoreApply').addEventListener('click', async () => {
+            const snapId = wrap.getAttribute('data-snapshot-id');
+            const ids = Array.from(wrap.querySelectorAll('.bulk-restore-row-check:checked'))
+                .map((cb) => cb.value)
+                .filter(Boolean);
+            if (!ids.length) {
+                window.showToast('되살릴 행을 선택해 주세요.', 'warning');
+                return;
+            }
+            const ok = window.confirm('선택한 ' + ids.length + '건을 백업 내용으로 되돌립니다. 계속할까요?');
+            if (!ok) return;
+            close();
+            await window.restoreBulkSnapshot(snapId, { ids: ids, apply: true });
+        });
+    }
+
+    async function openBulkRestorePreviewForCurrentFloor() {
+        const health = bulkSnapshotApi();
+        const store = getBulkSnapshotStore();
+        const floorKey = currentBulkFloorKey();
+        if (!health || !store || !floorKey) {
+            window.showToast('이 층의 백업을 열 수 없습니다.', 'warning');
+            return;
+        }
+        const snaps = (await store.listByFloor(floorKey)).slice().sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+        if (!snaps.length) {
+            window.showToast('이 층에 저장된 가져오기 전 백업이 없습니다.', 'warning');
+            return;
+        }
+        const snap = snaps[0];
+        const diff = health.compareDefects(snap.defects, (state.defects[floorKey] || []));
+        const selected = new Set(health.defaultSelectedIds(diff));
+        ensureBulkRestoreModal();
+        const modal = document.getElementById('bulkRestoreModal');
+        modal.setAttribute('data-snapshot-id', snap.id);
+        const meta = document.getElementById('bulkRestoreMeta');
+        meta.textContent = snap.opName + ' · ' + snap.floorCode + ' · ' + formatBulkSnapTime(snap.createdAt)
+            + (snaps.length > 1 ? ' (이 층 백업 ' + snaps.length + '개 중 가장 최근)' : '');
+        const rows = (diff.changed || []).concat(diff.deletedAfter || []);
+        const added = diff.addedAfter || [];
+        const body = document.getElementById('bulkRestoreTableBody');
+        const rowHtml = rows.map((r) => {
+            const no = (r.snapshot && r.snapshot.no) || (r.current && r.current.no) || r.id;
+            const kind = r.kind === 'deleted' ? '스냅샷 이후 삭제' : '내용 변경';
+            const checked = selected.has(r.id) ? ' checked' : '';
+            return `<tr>
+                <td><input type="checkbox" class="bulk-restore-row-check" value="${escapeBulkRestoreHtml(r.id)}"${checked}></td>
+                <td>${escapeBulkRestoreHtml(no)}</td>
+                <td>${kind}</td>
+                <td>${escapeBulkRestoreHtml(summarizeDefectForRestore(r.current))}</td>
+                <td>${escapeBulkRestoreHtml(summarizeDefectForRestore(r.snapshot))}</td>
+            </tr>`;
+        }).join('');
+        const addedHtml = added.map((r) => {
+            const no = (r.current && r.current.no) || r.id;
+            return `<tr class="bulk-restore-added">
+                <td></td>
+                <td>${escapeBulkRestoreHtml(no)}</td>
+                <td>이후 추가(유지)</td>
+                <td>${escapeBulkRestoreHtml(summarizeDefectForRestore(r.current))}</td>
+                <td>—</td>
+            </tr>`;
+        }).join('');
+        body.innerHTML = rowHtml || addedHtml
+            ? (rowHtml + addedHtml)
+            : '<tr><td colspan="5" style="text-align:center;padding:1.5rem;color:#64748b;">백업과 지금이 같습니다. 되살릴 변경이 없습니다.</td></tr>';
+        const checkAll = document.getElementById('bulkRestoreCheckAll');
+        const boxes = modal.querySelectorAll('.bulk-restore-row-check');
+        checkAll.checked = boxes.length > 0 && Array.from(boxes).every((cb) => cb.checked);
+        modal.classList.add('open');
+    }
+
+    function ensureSurveyRestoreButton() {
+        const actions = document.querySelector('#tab-survey .section-header .actions');
+        if (!actions) return null;
+        let btn = document.getElementById('btnRestoreBulkSnapshot');
+        if (btn) return btn;
+        btn = document.createElement('button');
+        btn.id = 'btnRestoreBulkSnapshot';
+        btn.type = 'button';
+        btn.className = 'btn btn-outline btn-sm';
+        btn.style.cssText = 'border-color:#b45309;color:#b45309;display:none;';
+        btn.innerHTML = '<i class="fa-solid fa-clock-rotate-left"></i> 가져오기 전으로 되살리기';
+        btn.title = '이 층을 가져오기 직전 백업과 비교해 고른 행만 되살립니다';
+        btn.addEventListener('click', () => { openBulkRestorePreviewForCurrentFloor(); });
+        const importBtn = document.getElementById('btnImportDefectExcel');
+        if (importBtn && importBtn.parentNode === actions) {
+            actions.insertBefore(btn, importBtn);
+        } else {
+            actions.appendChild(btn);
+        }
+        return btn;
+    }
+
+    window.refreshSurveyBulkRestoreButton = async function () {
+        const btn = ensureSurveyRestoreButton();
+        if (!btn) return;
+        const floorKey = currentBulkFloorKey();
+        const store = getBulkSnapshotStore();
+        if (!floorKey || !store) {
+            btn.style.display = 'none';
+            return;
+        }
+        try {
+            const snaps = await store.listByFloor(floorKey);
+            if (snaps && snaps.length) {
+                btn.style.display = '';
+                btn.title = '이 층 백업 ' + snaps.length + '개 · 가장 최근과 비교합니다';
+            } else {
+                btn.style.display = 'none';
+            }
+        } catch (e) {
+            btn.style.display = 'none';
+        }
+    };
 
     /**
      * 층별 결함 데이터가 껍데기인지 점검한다.

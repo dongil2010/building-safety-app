@@ -215,6 +215,541 @@
         });
     }
 
+    /* ------------------------------------------------------------------
+     * 일괄 작업 전 층 스냅샷 (기기 영구 저장)
+     *
+     * 2026-09-21 광주겨자씨교회: 조사표 가져오기가 NO.01~10을 덮어썼는데
+     * 서버에는 이전 값이 없어, 동기화 안 된 기기를 비행기모드로 열어
+     * 되살려야 했다. 한 번에 많이 바꾸기 직전에 그 층만 기기에 남겨 둔다.
+     *
+     * RAM 되돌리기(pushDefectHistory)와 별개. 사진은 photoIds/URL만 남기고
+     * dataURL은 넣지 않는다. IndexedDB 기존 DB(building_safety_local_images)
+     * 버전은 올리지 않고, 아래 별도 DB를 쓴다.
+     * ------------------------------------------------------------------ */
+    const BULK_SNAPSHOT_MAX_PER_FLOOR = 5;
+    const BULK_SNAPSHOT_DB_NAME = 'building_safety_bulk_snapshots';
+    const BULK_SNAPSHOT_DB_VERSION = 1;
+    const BULK_SNAPSHOT_STORE = 'snapshots';
+
+    const DEFECT_COMPARE_FIELDS = [
+        'component', 'defectType', 'cause', 'size',
+        'crackWidth', 'crackLength', 'location'
+    ];
+    const DEFECT_POSITION_FIELDS = ['x', 'y', 'targetX', 'targetY'];
+
+    function isDataUrl(value) {
+        if (typeof value !== 'string') return false;
+        const s = value.trim();
+        return s.length >= 5 && s.slice(0, 5).toLowerCase() === 'data:';
+    }
+
+    function hasDataUrlAnywhere(value) {
+        if (value == null) return false;
+        if (typeof value === 'string') return isDataUrl(value);
+        if (Array.isArray(value)) {
+            for (let i = 0; i < value.length; i += 1) {
+                if (hasDataUrlAnywhere(value[i])) return true;
+            }
+            return false;
+        }
+        if (typeof value === 'object') {
+            const keys = Object.keys(value);
+            for (let i = 0; i < keys.length; i += 1) {
+                if (hasDataUrlAnywhere(value[keys[i]])) return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * dataURL을 빼고 복제한다. JSON.stringify 전에 걸러야 용량이 안 터진다.
+     * photos 배열의 dataURL 칸은 버리고, photoIds·http(s) URL은 남긴다.
+     */
+    function cloneWithoutDataUrls(value) {
+        if (value == null) return value;
+        const t = typeof value;
+        if (t === 'string') return isDataUrl(value) ? '' : value;
+        if (t === 'number' || t === 'boolean') return value;
+        if (t === 'function') return undefined;
+        if (Array.isArray(value)) {
+            const out = [];
+            for (let i = 0; i < value.length; i += 1) {
+                const src = value[i];
+                if (typeof src === 'string' && isDataUrl(src)) continue;
+                const cloned = cloneWithoutDataUrls(src);
+                if (cloned === undefined) continue;
+                out.push(cloned);
+            }
+            return out;
+        }
+        if (t === 'object') {
+            const out = {};
+            Object.keys(value).forEach(function (k) {
+                const src = value[k];
+                if (typeof src === 'string' && isDataUrl(src)) return;
+                const cloned = cloneWithoutDataUrls(src);
+                if (cloned === undefined) return;
+                out[k] = cloned;
+            });
+            return out;
+        }
+        return undefined;
+    }
+
+    function uniqueKeys(keys) {
+        const seen = Object.create(null);
+        const out = [];
+        (keys || []).forEach(function (k) {
+            const s = textOf(k);
+            if (!s || seen[s]) return;
+            seen[s] = true;
+            out.push(s);
+        });
+        return out;
+    }
+
+    function splitFloorKey(floorKey, buildingId) {
+        const key = textOf(floorKey);
+        const bid = textOf(buildingId);
+        if (bid && key.indexOf(bid + '_') === 0) {
+            return { buildingId: bid, floorCode: key.slice(bid.length + 1) };
+        }
+        const i = key.indexOf('_');
+        if (i < 0) return { buildingId: '', floorCode: key };
+        return { buildingId: key.slice(0, i), floorCode: key.slice(i + 1) };
+    }
+
+    function cloneIdList(list) {
+        return Array.isArray(list) ? list.map(function (id) { return id; }) : [];
+    }
+
+    function cloneAtMap(map) {
+        const out = {};
+        if (!map || typeof map !== 'object') return out;
+        Object.keys(map).forEach(function (k) {
+            out[k] = map[k];
+        });
+        return out;
+    }
+
+    function indexById(list) {
+        const out = Object.create(null);
+        (Array.isArray(list) ? list : []).forEach(function (rec) {
+            if (!rec) return;
+            const id = textOf(rec.id);
+            if (!id) return;
+            out[id] = rec;
+        });
+        return out;
+    }
+
+    function fieldText(value) {
+        return value == null ? '' : String(value).trim();
+    }
+
+    function positionValue(value) {
+        if (value == null || value === '') return null;
+        const n = Number(value);
+        return Number.isFinite(n) ? n : String(value);
+    }
+
+    function defectsDiffer(a, b) {
+        if (!a && !b) return false;
+        if (!a || !b) return true;
+        let i;
+        for (i = 0; i < DEFECT_COMPARE_FIELDS.length; i += 1) {
+            const f = DEFECT_COMPARE_FIELDS[i];
+            if (fieldText(a[f]) !== fieldText(b[f])) return true;
+        }
+        for (i = 0; i < DEFECT_POSITION_FIELDS.length; i += 1) {
+            const f = DEFECT_POSITION_FIELDS[i];
+            if (positionValue(a[f]) !== positionValue(b[f])) return true;
+        }
+        return false;
+    }
+
+    function newSnapshotId(now, seq) {
+        const n = now || Date.now();
+        const extra = seq == null ? Math.random().toString(36).slice(2, 8) : String(seq);
+        return 'bs_' + n + '_' + extra;
+    }
+
+    function arrayLen(v) {
+        return Array.isArray(v) ? v.length : 0;
+    }
+
+    /**
+     * 층 키 하나의 스냅샷. state는 window.state와 같은 모양이면 된다.
+     */
+    function buildFloorSnapshot(state, floorKey, opName, now) {
+        const st = state || {};
+        const key = textOf(floorKey);
+        const parts = splitFloorKey(key, st.currentBuildingId);
+        const ts = now || Date.now();
+        const defects = cloneWithoutDataUrls(st.defects && st.defects[key] ? st.defects[key] : []);
+        const ndtData = cloneWithoutDataUrls(st.ndtData && st.ndtData[key] ? st.ndtData[key] : []);
+        const ndtDisplacementGroups = cloneWithoutDataUrls(
+            st.ndtDisplacementGroups && st.ndtDisplacementGroups[key]
+                ? st.ndtDisplacementGroups[key]
+                : []
+        );
+        const deletedDefectIds = cloneIdList(st.deletedDefectIds && st.deletedDefectIds[key]);
+        const deletedDefectAt = cloneAtMap(st.deletedDefectAt && st.deletedDefectAt[key]);
+        const deletedNdtIds = cloneIdList(st.deletedNdtIds && st.deletedNdtIds[key]);
+        const deletedNdtAt = cloneAtMap(st.deletedNdtAt && st.deletedNdtAt[key]);
+        return {
+            id: newSnapshotId(ts),
+            floorKey: key,
+            buildingId: parts.buildingId,
+            floorCode: parts.floorCode,
+            opName: textOf(opName) || '일괄 작업',
+            createdAt: ts,
+            defectCount: arrayLen(defects),
+            ndtCount: arrayLen(ndtData) + arrayLen(ndtDisplacementGroups),
+            defects: Array.isArray(defects) ? defects : [],
+            ndtData: Array.isArray(ndtData) ? ndtData : [],
+            ndtDisplacementGroups: Array.isArray(ndtDisplacementGroups) ? ndtDisplacementGroups : [],
+            deletedDefectIds: deletedDefectIds,
+            deletedDefectAt: deletedDefectAt,
+            deletedNdtIds: deletedNdtIds,
+            deletedNdtAt: deletedNdtAt
+        };
+    }
+
+    /**
+     * 스냅샷 vs 현재를 결함 id 기준으로 비교.
+     * changed: 부재·조사내용·원인·크기·균열·위치가 다른 행
+     * deletedAfter: 스냅샷에는 있는데 지금은 없음 (이후 지워진 것)
+     * addedAfter: 스냅샷 이후 새로 생긴 것 (되살리기가 지우지 않음)
+     */
+    function compareDefects(snapshotDefects, currentDefects) {
+        const snapBy = indexById(snapshotDefects);
+        const curBy = indexById(currentDefects);
+        const changed = [];
+        const deletedAfter = [];
+        const addedAfter = [];
+        const unchanged = [];
+        Object.keys(snapBy).forEach(function (id) {
+            if (!curBy[id]) {
+                deletedAfter.push({
+                    id: id,
+                    kind: 'deleted',
+                    snapshot: snapBy[id],
+                    current: null
+                });
+                return;
+            }
+            if (defectsDiffer(snapBy[id], curBy[id])) {
+                changed.push({
+                    id: id,
+                    kind: 'changed',
+                    snapshot: snapBy[id],
+                    current: curBy[id]
+                });
+            } else {
+                unchanged.push({
+                    id: id,
+                    kind: 'unchanged',
+                    snapshot: snapBy[id],
+                    current: curBy[id]
+                });
+            }
+        });
+        Object.keys(curBy).forEach(function (id) {
+            if (snapBy[id]) return;
+            addedAfter.push({
+                id: id,
+                kind: 'added',
+                snapshot: null,
+                current: curBy[id]
+            });
+        });
+        return {
+            changed: changed,
+            deletedAfter: deletedAfter,
+            addedAfter: addedAfter,
+            unchanged: unchanged
+        };
+    }
+
+    function defaultSelectedIds(diff) {
+        const out = [];
+        if (!diff) return out;
+        (diff.changed || []).forEach(function (r) { out.push(r.id); });
+        (diff.deletedAfter || []).forEach(function (r) { out.push(r.id); });
+        return out;
+    }
+
+    function untrackOnFloorSlice(slice, idListKey, atMapKey, id) {
+        const ids = Array.isArray(slice[idListKey]) ? slice[idListKey] : [];
+        slice[idListKey] = ids.filter(function (x) { return x !== id; });
+        const at = slice[atMapKey] && typeof slice[atMapKey] === 'object' ? slice[atMapKey] : {};
+        if (Object.prototype.hasOwnProperty.call(at, id)) delete at[id];
+        slice[atMapKey] = at;
+    }
+
+    function replaceOrInsertById(list, rec) {
+        const arr = Array.isArray(list) ? list : [];
+        const id = rec && textOf(rec.id);
+        if (!id) {
+            arr.push(rec);
+            return arr;
+        }
+        let found = false;
+        for (let i = 0; i < arr.length; i += 1) {
+            if (arr[i] && textOf(arr[i].id) === id) {
+                arr[i] = rec;
+                found = true;
+                break;
+            }
+        }
+        if (!found) arr.push(rec);
+        return arr;
+    }
+
+    function stampRestoredDefect(rec, now) {
+        if (!rec) return rec;
+        const ts = now || Date.now();
+        rec.updatedAt = ts;
+        rec.contentUpdatedAt = ts;
+        rec.positionUpdatedAt = ts;
+        return rec;
+    }
+
+    function stampRestoredNdt(rec, now) {
+        if (!rec) return rec;
+        rec.updatedAt = now || Date.now();
+        return rec;
+    }
+
+    /**
+     * 고른 결함 id만 스냅샷 값으로 덮어쓴다.
+     * - 스냅샷에 없는(이후에 생긴) 결함은 지우지 않는다
+     * - 되살린 id는 묘비 목록에서 뺀다
+     * - 시각은 지금으로 찍어서 서버의 망가진 값보다 늦게 만든다
+     */
+    function applyRestoreToFloor(floorSlice, snapshot, opts) {
+        const options = opts || {};
+        const now = options.now || Date.now();
+        const slice = floorSlice || {};
+        if (!Array.isArray(slice.defects)) slice.defects = [];
+        if (!Array.isArray(slice.ndtData)) slice.ndtData = [];
+        if (!Array.isArray(slice.ndtDisplacementGroups)) slice.ndtDisplacementGroups = [];
+        if (!Array.isArray(slice.deletedDefectIds)) slice.deletedDefectIds = [];
+        if (!slice.deletedDefectAt) slice.deletedDefectAt = {};
+        if (!Array.isArray(slice.deletedNdtIds)) slice.deletedNdtIds = [];
+        if (!slice.deletedNdtAt) slice.deletedNdtAt = {};
+
+        const snap = snapshot || {};
+        const snapBy = indexById(snap.defects);
+        const selected = Array.isArray(options.ids)
+            ? options.ids.map(textOf).filter(Boolean)
+            : defaultSelectedIds(compareDefects(snap.defects, slice.defects));
+
+        const restored = [];
+        const skipped = [];
+        selected.forEach(function (id) {
+            const src = snapBy[id];
+            if (!src) {
+                skipped.push(id);
+                return;
+            }
+            const rec = cloneWithoutDataUrls(src);
+            stampRestoredDefect(rec, now);
+            slice.defects = replaceOrInsertById(slice.defects, rec);
+            untrackOnFloorSlice(slice, 'deletedDefectIds', 'deletedDefectAt', id);
+            restored.push(rec);
+        });
+
+        const restoredNdt = [];
+        if (options.restoreNdt) {
+            const ndtBy = indexById(snap.ndtData);
+            const groupBy = indexById(snap.ndtDisplacementGroups);
+            const ndtIds = Array.isArray(options.ndtIds)
+                ? options.ndtIds.map(textOf).filter(Boolean)
+                : Object.keys(ndtBy).concat(Object.keys(groupBy));
+            ndtIds.forEach(function (id) {
+                if (ndtBy[id]) {
+                    const rec = cloneWithoutDataUrls(ndtBy[id]);
+                    stampRestoredNdt(rec, now);
+                    slice.ndtData = replaceOrInsertById(slice.ndtData, rec);
+                    untrackOnFloorSlice(slice, 'deletedNdtIds', 'deletedNdtAt', id);
+                    restoredNdt.push(rec);
+                } else if (groupBy[id]) {
+                    const rec = cloneWithoutDataUrls(groupBy[id]);
+                    stampRestoredNdt(rec, now);
+                    slice.ndtDisplacementGroups = replaceOrInsertById(slice.ndtDisplacementGroups, rec);
+                    untrackOnFloorSlice(slice, 'deletedNdtIds', 'deletedNdtAt', id);
+                    restoredNdt.push(rec);
+                }
+            });
+        }
+
+        return {
+            restored: restored,
+            restoredNdt: restoredNdt,
+            skipped: skipped,
+            restoredIds: restored.map(function (d) { return d.id; }),
+            restoredNdtIds: restoredNdt.map(function (d) { return d.id; })
+        };
+    }
+
+    /**
+     * 같은 층 스냅샷을 새것부터 max개만 남기고, 버릴 id를 돌려준다.
+     */
+    function pruneSnapshots(list, maxPerFloor) {
+        const max = maxPerFloor == null ? BULK_SNAPSHOT_MAX_PER_FLOOR : maxPerFloor;
+        const grouped = Object.create(null);
+        (list || []).forEach(function (s) {
+            if (!s) return;
+            const k = textOf(s.floorKey) || '_';
+            if (!grouped[k]) grouped[k] = [];
+            grouped[k].push(s);
+        });
+        const drop = [];
+        Object.keys(grouped).forEach(function (k) {
+            const arr = grouped[k].slice().sort(function (a, b) {
+                return (b.createdAt || 0) - (a.createdAt || 0);
+            });
+            arr.slice(max).forEach(function (s) { drop.push(s); });
+        });
+        return drop;
+    }
+
+    function createMemorySnapshotStore() {
+        const map = Object.create(null);
+        return {
+            put: function (snap) {
+                if (!snap || !snap.id) return Promise.resolve(false);
+                map[snap.id] = snap;
+                return Promise.resolve(true);
+            },
+            get: function (id) {
+                return Promise.resolve(map[id] || null);
+            },
+            delete: function (id) {
+                delete map[id];
+                return Promise.resolve(true);
+            },
+            getAll: function () {
+                return Promise.resolve(Object.keys(map).map(function (k) { return map[k]; }));
+            },
+            listByFloor: function (floorKey) {
+                const key = textOf(floorKey);
+                const out = [];
+                Object.keys(map).forEach(function (k) {
+                    if (map[k] && map[k].floorKey === key) out.push(map[k]);
+                });
+                return Promise.resolve(out);
+            }
+        };
+    }
+
+    let _bulkSnapDbPromise = null;
+
+    function openBulkSnapshotDb() {
+        if (typeof indexedDB === 'undefined') {
+            return Promise.reject(new Error('이 환경은 IndexedDB를 지원하지 않습니다.'));
+        }
+        if (_bulkSnapDbPromise) return _bulkSnapDbPromise;
+        _bulkSnapDbPromise = new Promise(function (resolve, reject) {
+            const req = indexedDB.open(BULK_SNAPSHOT_DB_NAME, BULK_SNAPSHOT_DB_VERSION);
+            req.onupgradeneeded = function () {
+                const db = req.result;
+                if (!db.objectStoreNames.contains(BULK_SNAPSHOT_STORE)) {
+                    const store = db.createObjectStore(BULK_SNAPSHOT_STORE, { keyPath: 'id' });
+                    store.createIndex('floorKey', 'floorKey', { unique: false });
+                    store.createIndex('createdAt', 'createdAt', { unique: false });
+                }
+            };
+            req.onsuccess = function () { resolve(req.result); };
+            req.onerror = function () {
+                _bulkSnapDbPromise = null;
+                reject(req.error);
+            };
+        });
+        return _bulkSnapDbPromise;
+    }
+
+    function createIdbSnapshotStore() {
+        function withStore(mode, fn) {
+            return openBulkSnapshotDb().then(function (db) {
+                return new Promise(function (resolve, reject) {
+                    const tx = db.transaction(BULK_SNAPSHOT_STORE, mode);
+                    const store = tx.objectStore(BULK_SNAPSHOT_STORE);
+                    let req;
+                    try {
+                        req = fn(store);
+                    } catch (e) {
+                        reject(e);
+                        return;
+                    }
+                    tx.onerror = function () { reject(tx.error); };
+                    req.onsuccess = function () { resolve(req.result); };
+                    req.onerror = function () { reject(req.error); };
+                });
+            });
+        }
+        return {
+            put: function (snap) {
+                return withStore('readwrite', function (store) { return store.put(snap); })
+                    .then(function () { return true; });
+            },
+            get: function (id) {
+                return withStore('readonly', function (store) { return store.get(id); })
+                    .then(function (v) { return v || null; });
+            },
+            delete: function (id) {
+                return withStore('readwrite', function (store) { return store.delete(id); })
+                    .then(function () { return true; });
+            },
+            getAll: function () {
+                return withStore('readonly', function (store) { return store.getAll(); })
+                    .then(function (v) { return Array.isArray(v) ? v : []; });
+            },
+            listByFloor: function (floorKey) {
+                return withStore('readonly', function (store) {
+                    if (store.indexNames && store.indexNames.contains('floorKey')) {
+                        return store.index('floorKey').getAll(floorKey);
+                    }
+                    return store.getAll();
+                }).then(function (v) {
+                    const arr = Array.isArray(v) ? v : [];
+                    const key = textOf(floorKey);
+                    return arr.filter(function (s) { return s && s.floorKey === key; });
+                });
+            }
+        };
+    }
+
+    function saveSnapshotsWithStore(state, opName, floorKeys, store, now, maxPerFloor) {
+        const keys = uniqueKeys(floorKeys);
+        const ts = now || Date.now();
+        const max = maxPerFloor == null ? BULK_SNAPSHOT_MAX_PER_FLOOR : maxPerFloor;
+        const saved = [];
+        let chain = Promise.resolve();
+        keys.forEach(function (key, idx) {
+            chain = chain.then(function () {
+                const snap = buildFloorSnapshot(state, key, opName, ts + idx);
+                snap.id = newSnapshotId(ts, idx + '_' + Math.random().toString(36).slice(2, 6));
+                return store.put(snap).then(function () {
+                    return store.listByFloor(key);
+                }).then(function (existing) {
+                    const drop = pruneSnapshots(existing, max);
+                    let del = Promise.resolve();
+                    drop.forEach(function (s) {
+                        if (!s || s.id === snap.id) return;
+                        del = del.then(function () { return store.delete(s.id); });
+                    });
+                    return del.then(function () {
+                        saved.push(snap);
+                    });
+                });
+            });
+        });
+        return chain.then(function () { return saved; });
+    }
+
     const api = {
         MIN_DEFECTS_TO_JUDGE: MIN_DEFECTS_TO_JUDGE,
         hasMeasurement: hasMeasurement,
@@ -225,7 +760,21 @@
         suspiciousFloors: suspiciousFloors,
         crossFloorDuplicateIds: crossFloorDuplicateIds,
         collectFirstByIdAcrossFloors: collectFirstByIdAcrossFloors,
-        duplicatedRecordsOnFloor: duplicatedRecordsOnFloor
+        duplicatedRecordsOnFloor: duplicatedRecordsOnFloor,
+        BULK_SNAPSHOT_MAX_PER_FLOOR: BULK_SNAPSHOT_MAX_PER_FLOOR,
+        BULK_SNAPSHOT_DB_NAME: BULK_SNAPSHOT_DB_NAME,
+        isDataUrl: isDataUrl,
+        hasDataUrlAnywhere: hasDataUrlAnywhere,
+        cloneWithoutDataUrls: cloneWithoutDataUrls,
+        splitFloorKey: splitFloorKey,
+        buildFloorSnapshot: buildFloorSnapshot,
+        compareDefects: compareDefects,
+        defaultSelectedIds: defaultSelectedIds,
+        applyRestoreToFloor: applyRestoreToFloor,
+        pruneSnapshots: pruneSnapshots,
+        createMemorySnapshotStore: createMemorySnapshotStore,
+        createIdbSnapshotStore: createIdbSnapshotStore,
+        saveSnapshotsWithStore: saveSnapshotsWithStore
     };
 
     root.BSA = root.BSA || {};

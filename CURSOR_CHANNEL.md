@@ -94,6 +94,7 @@
 | 🚨 섞인 운영 데이터 복구 | Claude | `[IN_PROGRESS]` | 오염 직전 스냅샷 2개 GCS 확보. **운영 층 문서 임의로 쓰지 말 것** |
 | 0단계 테스트 안전망 | Cursor | `[COMPLETED]` | `npm test` + GitHub Actions. main 배포. Firebase 게시 없음 |
 | 1단계 결함/NDT 병합 분리 | Cursor | `[COMPLETED]` | `js/core/sync-merge.js` main 배포. 건물 도면 병합·lease는 app.js. Firebase 게시 없음 |
+| 일괄 작업 전 자동 백업 1단계 (조사표 가져오기) | Cursor | `[WAITING_REVIEW]` | 별도 IDB `building_safety_bulk_snapshots`. 기존 이미지 DB v4 유지. index.html 미변경 |
 
 ---
 
@@ -1257,3 +1258,35 @@
 >
 > **검증**: `npm test` 24개 파일 통과. `test-app-version-gate.js` 신규 6건, 변형 4종 모두 실패 확인.
 > 로컬 앱에서 판정만 강제로 뒤집어 띠 표시·해제 확인(로컬에선 원래 막히지 않음).
+
+---
+
+### ⚡ [Cursor] - 2026-09-21 13:50:00
+> **`[WAITING_REVIEW]` 일괄 작업 전 자동 백업 1단계 — 조사표 가져오기에만 적용**
+>
+> 2026-09-21 광주겨자씨교회: 가져오기(번호 병합)가 「지하1층 주차장-1」 NO.01~10을 기타/기타/건조수축으로 덮었고, 서버에 이전 값이 없어 비행기모드 옛 기기로 되살려야 했다.
+>
+> **한 일**
+> - 공용 저장: `window.captureBulkSnapshots(작업이름, 층키목록)` — 2단계에서 층 도면 삭제·일괄 수정·CAD 가져오기·`cleanDuplicateNdt`·JSON 백업 불러오기에도 이 함수만 붙이면 된다.
+> - 순수 로직은 이미 로드되는 `js/core/data-health.js` (`module.exports`). **index.html 스크립트 태그 추가 없음.**
+> - 저장소는 **별도 IndexedDB** `building_safety_bulk_snapshots` (v1). 기존 `building_safety_local_images` **v4를 올리지 않음**.
+> - 층 키마다 defects / ndtData / ndtDisplacementGroups / 묘비 4종 + 메타. **사진 dataURL 제외**(photoIds·URL만). 층당 최근 5개.
+> - 가져오기 적용 직전 `confirmImportDefectExcel`이 시트 배정 층만 저장. 한글(HWPX) 가져오기도 같은 함수.
+> - 되살리기: 기본 미리보기. 번호(id) 비교로 부재·조사내용·원인·크기·균열·위치가 바뀐 행 + 스냅샷 이후 삭제 행만 기본 선택. 새 결함은 안 지움.
+> - 적용 시 `touchDefectUpdatedAt` + `touchDefectPositionUpdatedAt`(지금 시각 — 아니면 서버의 망가진 값이 이김), `untrackDefectDeletion` / **`untrackNdtDeletion` 신설**, `markFloorKeyDirty` + `saveStateToLocalStorage`. 되살리기 직전에도 스냅샷을 남김.
+> - 조사표 「가져오기 전으로 되살리기」 → 비교표 체크 → 건수 확인. 콘솔: `listBulkSnapshots` / `previewBulkSnapshot` / `restoreBulkSnapshot(id, { ids, apply: true })`.
+> - RAM `pushDefectHistory`는 그대로 둠. `refreshAppVersionGate`는 건드리지 않음.
+>
+> **검증**
+> - `npm test` 25개 파일 통과. `scripts/test-bulk-snapshot.js` — 오늘 사고 재현(NO.01~10만 되살림, NO.28 유지), 묘비 해제, 새 결함 보존, dataURL 미포함, 층당 5개.
+> - 규칙을 하나씩 되돌린 변형: 시각 미기입 → `testIncidentRestoreOnlyTouchedRows` 실패 / 묘비 미해제 → `testRestoringDeletedUntracksTombstone` 실패 / 새 결함 삭제 → `testNewDefectsAreKept` 실패. 원상 복구 후 통과.
+> - 로컬 `python3 -m http.server 8000` + Chrome: 실제 IndexedDB에 저장되고, 가져오기 사고 모양에서 NO.01~10만 기본 선택, 되살리면 원래 값·updatedAt이 스냅샷보다 나중, 버튼·비교 모달 표시.
+>
+> **2단계에서 붙일 작업**
+> 1. 층 도면 삭제 `window.deleteExistingFloorDrawing`
+> 2. 일괄 수정 `commitBulkDefectFromForm`
+> 3. CAD 가져오기
+> 4. `cleanDuplicateNdt`
+> 5. JSON 백업 불러오기 `window.importBackupJSON`
+>
+> **main 동기화**: 커밋 요약 확인 후 `scripts/git-sync.ps1` — 아직 실행하지 않음.

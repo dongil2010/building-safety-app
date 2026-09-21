@@ -15234,3 +15234,50 @@ html:not(.layout-desktop) .crack-monitor-photo-slots {
         margin-top: 0.08rem !important;
     }
 }
+
+/* 조사표 가져오기 전 백업 되살리기 (index.html은 건드리지 않고 JS로 모달을 붙인다) */
+.bulk-restore-card {
+    max-width: 920px;
+}
+.bulk-restore-meta {
+    margin: 0 0 0.75rem;
+    color: #57534e;
+    font-size: 0.9rem;
+    font-weight: 600;
+}
+.bulk-restore-table-wrap {
+    overflow: auto;
+    max-height: 50vh;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+}
+.bulk-restore-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.85rem;
+}
+.bulk-restore-table th,
+.bulk-restore-table td {
+    padding: 0.45rem 0.55rem;
+    border-bottom: 1px solid #e7e5e4;
+    text-align: left;
+    vertical-align: top;
+}
+.bulk-restore-table th {
+    position: sticky;
+    top: 0;
+    background: #fafaf9;
+    font-weight: 700;
+    color: #44403c;
+}
+.bulk-restore-table tr.bulk-restore-added td {
+    color: #78716c;
+}
+.bulk-restore-note {
+    margin: 0.75rem 0 0;
+    color: #78716c;
+    font-size: 0.82rem;
+}
+#btnRestoreBulkSnapshot {
+    white-space: nowrap;
+}
