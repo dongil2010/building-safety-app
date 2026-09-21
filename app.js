@@ -2590,6 +2590,17 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function mergeBuildingTrashState(merged, localMatch, remoteB) {
         if (!merged) return;
+        const trashApi = window.BSA && window.BSA.syncMerge;
+        if (trashApi && typeof trashApi.resolveBuildingTrashState === 'function') {
+            // 복원 시각도 서버에 올려 다른 기기가 휴지통으로 되돌리지 않게 한다(2026-09-21)
+            const resolved = trashApi.resolveBuildingTrashState(localMatch, remoteB);
+            if (resolved.trashedAt) merged.trashedAt = resolved.trashedAt;
+            else delete merged.trashedAt;
+            if (resolved.trashRestoredAt) merged.trashRestoredAt = resolved.trashRestoredAt;
+            else delete merged.trashRestoredAt;
+            delete merged._trashRestoredAt;
+            return;
+        }
         const localTrashed = localMatch && localMatch.trashedAt ? String(localMatch.trashedAt) : '';
         const remoteTrashed = remoteB && remoteB.trashedAt ? String(remoteB.trashedAt) : '';
         const localRestoredAt = localMatch && localMatch._trashRestoredAt
@@ -3123,6 +3134,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         delete bldg.trashedAt;
         bldg._trashRestoredAt = new Date().toISOString();
+        bldg.trashRestoredAt = bldg._trashRestoredAt;
         bldg._pendingCloudSync = true;
         unrecordBuildingDeleted(bldg.id);
 
@@ -3820,6 +3832,45 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function touchNdtUpdatedAt(item) {
         if (item) item.updatedAt = Date.now();
+    }
+
+    /**
+     * 부동침하·부재처짐 측정 구역을 바꿨다 — 수정 시각을 올리고 이 층을 동기화 대상에 넣는다.
+     *
+     * 2026-09-21 감사: 지점 레벨 수정·기존 구역에 지점 추가·구역 정보 저장·측기 이동 보정·
+     * 지점 끌어 옮기기가 updatedAt을 안 올렸다. 병합(mergeNdtRecord)은 시각이 같으면 기기 쪽이
+     * 이겨서, 수정한 기기에서는 괜찮아도 **다른 기기가 동기화할 때 그 기기의 옛 값이 이겨**
+     * 수정이 되돌아갈 수 있었다.
+     */
+    /**
+     * 비파괴 핀을 도면에서 끌어 옮겼다 — 시각을 올리고 층을 동기화 대상에 넣는다.
+     * (폼 저장만 touchNdtUpdatedAt을 불러서, 끌어 옮긴 위치는 다른 기기의 옛 위치에 질 수 있었다)
+     * 여러 개를 함께 옮기면 선택된 항목·구역을 모두 올린다.
+     */
+    function touchMovedNdtItems(single) {
+        const key = (state.currentBuildingId && state.currentFloor)
+            ? `${state.currentBuildingId}_${state.currentFloor}`
+            : '';
+        if (single) {
+            touchNdtUpdatedAt(single);
+        } else if (key && typeof selectedNdtIds !== 'undefined' && selectedNdtIds && selectedNdtIds.size) {
+            ((state.ndtData && state.ndtData[key]) || []).forEach((it) => {
+                if (it && selectedNdtIds.has(it.id)) touchNdtUpdatedAt(it);
+            });
+            ((state.ndtDisplacementGroups && state.ndtDisplacementGroups[key]) || []).forEach((g) => {
+                if (g && selectedNdtIds.has(g.id)) g.updatedAt = Date.now();
+            });
+        }
+        if (key && typeof markFloorKeyDirty === 'function') markFloorKeyDirty(key);
+    }
+
+    function touchNdtDispGroup(group) {
+        if (!group) return;
+        group.updatedAt = Date.now();
+        const key = (state.currentBuildingId && state.currentFloor)
+            ? `${state.currentBuildingId}_${state.currentFloor}`
+            : '';
+        if (key && typeof markFloorKeyDirty === 'function') markFloorKeyDirty(key);
     }
 
     function getRecordUpdatedAt(rec, kind) {
@@ -7612,6 +7663,11 @@ document.addEventListener('DOMContentLoaded', () => {
             delete window.state.ndtData[floorKey];
         }
         if (window.state.ndtDisplacementGroups && window.state.ndtDisplacementGroups[floorKey]) {
+            // 부동침하·부재처짐 구역도 묘비를 남긴다 — 안 남기면 서버에 있던 구역이 다음 동기화에서
+            // 되살아난다(2026-09-21 감사). 구역 묘비는 비파괴 핀과 같은 deletedNdtIds를 쓴다.
+            (window.state.ndtDisplacementGroups[floorKey] || []).forEach((g) => {
+                if (g && g.id && typeof trackNdtDeletion === 'function') trackNdtDeletion(floorKey, g.id);
+            });
             delete window.state.ndtDisplacementGroups[floorKey];
         }
 
@@ -9634,6 +9690,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         isDraggingNdtDisplacement = false;
         activeDragNdtDisplacementGroup = null;
         activeDragNdtDisplacementPoint = null;
+        if (activeDragNdtPin) touchMovedNdtItems(activeDragNdtPin);   // 끌어 옮긴 위치가 다른 기기의 옛 위치에 지지 않게
         isDraggingNdtPin = false;
         activeDragNdtPin = null;
         dragNdtPart = 'box';
@@ -13403,6 +13460,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             }
             pendingNdtDispHit = null;
             if (isDraggingNdtDisplacement) {
+                // 지점을 끌어 옮긴 것도 구역 수정이다 — 시각을 올려야 다른 기기의 옛 위치가 이기지 않는다
+                touchNdtDispGroup(activeDragNdtDisplacementGroup);
                 isDraggingNdtDisplacement = false;
                 activeDragNdtDisplacementGroup = null;
                 activeDragNdtDisplacementPoint = null;
@@ -13417,6 +13476,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 placeNdtDisplacementMarkAt(coords.x, coords.y);
             }
             if (isDraggingNdtPinGroup) {
+                touchMovedNdtItems(null);   // 함께 옮긴 핀·구역의 시각을 올린다
                 isDraggingNdtPinGroup = false;
                 saveStateToLocalStorage();
                 const canvas = document.getElementById('ndtCanvas');
@@ -13433,6 +13493,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     };
                 }
                 endNdtTiltRotateSession();
+                if (activeDragNdtPin) touchMovedNdtItems(activeDragNdtPin);   // 끌어 옮긴 위치가 다른 기기의 옛 위치에 지지 않게
                 isDraggingNdtPin = false;
                 activeDragNdtPin = null;
                 dragNdtPart = 'box';
@@ -14008,6 +14069,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             }
             pendingNdtDispHit = null;
             if (isDraggingNdtDisplacement) {
+                // 지점을 끌어 옮긴 것도 구역 수정이다 — 시각을 올려야 다른 기기의 옛 위치가 이기지 않는다
+                touchNdtDispGroup(activeDragNdtDisplacementGroup);
                 isDraggingNdtDisplacement = false;
                 activeDragNdtDisplacementGroup = null;
                 activeDragNdtDisplacementPoint = null;
@@ -14032,6 +14095,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             }
             if (e.touches.length === 0) ndtGestureCancelledByPinch = false;
             if (isDraggingNdtPinGroup) {
+                touchMovedNdtItems(null);   // 함께 옮긴 핀·구역의 시각을 올린다
                 isDraggingNdtPinGroup = false;
                 saveStateToLocalStorage();
                 drawNdtCanvas();
@@ -14046,6 +14110,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     };
                 }
                 endNdtTiltRotateSession();
+                if (activeDragNdtPin) touchMovedNdtItems(activeDragNdtPin);   // 끌어 옮긴 위치가 다른 기기의 옛 위치에 지지 않게
                 isDraggingNdtPin = false;
                 activeDragNdtPin = null;
                 dragNdtPart = 'box';
@@ -15409,11 +15474,15 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const enabledNames = getEnabledStrengthFormulaNames(window.state.currentBuilding);
         const readings = ndtStrengthSlots[slotIdx] ? ndtStrengthSlots[slotIdx].readings : [];
         const calc = calcConcreteStrength(readings, angle, ageDays, enabledNames);
+        // 평균값 칸(ndtAvgValue)은 분류마다 뜻이 다르다(기울기·부재변위=변위량, 실측=실측폭).
+        // 창을 열 때 분류와 상관없이 이 함수가 돌아서, 강도가 아닌 항목의 변위량을 비웠고
+        // 그 상태로 저장되면 외벽 기울기의 기울기·등급이 지워졌다(2026-09-21). 강도일 때만 쓴다.
+        const isStrengthCat = (document.getElementById('ndtCategory')?.value || '') === '강도';
 
         if (!calc) {
             summaryEl.textContent = 'R값을 입력하면 자동으로 계산됩니다.';
             resultsEl.innerHTML = '';
-            if (avgEl && slotIdx === 0) avgEl.value = '';
+            if (avgEl && slotIdx === 0 && isStrengthCat) avgEl.value = '';
             return;
         }
 
@@ -15459,7 +15528,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
         // #ndtAvgValue는 강도 카테고리에선 화면에 안 보이지만(다른 카테고리와 공용 필드), 저장 시
         // 하위호환용 최상위 값으로 쓰이므로 위치 1(슬롯 0) 결과로만 채워둔다.
-        if (avgEl && slotIdx === 0) avgEl.value = `${calc.finalStrength.toFixed(1)} MPa (R=${calc.finalAvg.toFixed(1)}, Ro=${calc.ro.toFixed(1)})`;
+        if (avgEl && slotIdx === 0 && isStrengthCat) avgEl.value = `${calc.finalStrength.toFixed(1)} MPa (R=${calc.finalAvg.toFixed(1)}, Ro=${calc.ro.toFixed(1)})`;
     }
 
     // --- 콘크리트 탄산화(중성화) 계산 엔진 ---
@@ -15487,11 +15556,14 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const ageDays = getConcreteAgeInDays();
         const ageYears = ageDays !== null ? ageDays / 365 : null;
         const calc = calcCarbonation(depth, cover, ageYears);
+        // 평균값 칸은 분류마다 뜻이 다르다 — 탄산화일 때만 쓴다(recalcStrengthSlot과 같은 이유).
+        // 창을 열 때 분류와 상관없이 이 함수가 돌아 외벽 기울기의 변위량을 비웠다(2026-09-21).
+        const isCarbCat = (document.getElementById('ndtCategory')?.value || '') === '탄산화';
 
         if (!calc) {
             resultsEl.innerHTML = '<tr><td style="padding:0.4rem; color:var(--text-muted);">탄산화 깊이와 피복두께를 입력하면 자동으로 계산됩니다.</td></tr>';
             const avgElCarb = document.getElementById('ndtAvgValue');
-            if (avgElCarb) avgElCarb.value = '';
+            if (avgElCarb && isCarbCat) avgElCarb.value = '';
             return;
         }
 
@@ -15518,7 +15590,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         resultsEl.innerHTML = html;
 
         const avgElCarb = document.getElementById('ndtAvgValue');
-        if (avgElCarb) {
+        if (avgElCarb && isCarbCat) {
             avgElCarb.value = calc.remainingLifeYears !== null
                 ? `잔존수명 ${Math.round(calc.remainingLifeYears)}년 (깊이${depth}mm/피복${cover}mm)`
                 : `깊이${depth}mm/피복${cover}mm (잔여${calc.remainMm.toFixed(1)}mm)`;
@@ -16366,7 +16438,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const strengthExtra = (cat === '강도') ? {
             strengthSlots: strengthSlotResults,
             strengthReadings: firstSlotResult ? firstSlotResult.readings : [],
-            strengthAngle: parseFloat(strengthAngle) || null,
+            // 0°(수평 타격)도 정상 값이다. `|| null`이면 0이 빈 값이 됐다(2026-09-21).
+            strengthAngle: Number.isFinite(parseFloat(strengthAngle)) ? parseFloat(strengthAngle) : null,
             strengthResults: firstSlotResult ? firstSlotResult.results : [],
             strengthRo: firstSlotResult ? firstSlotResult.ro : null,
             strengthAgeDays: firstSlotResult ? firstSlotResult.ageDays : null,
@@ -16998,6 +17071,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             if (!group) return null;
             const point = group.points.find(p => p.id === pointId);
             point.level = level;
+            touchNdtDispGroup(group);
             saveStateToLocalStorage();
             return { group, point };
         }
@@ -17007,6 +17081,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             if (!group) return null;
             const point = { id: `ndtp_${Date.now()}`, x: coords.x, y: coords.y, level };
             group.points.push(point);
+            touchNdtDispGroup(group);
             saveStateToLocalStorage();
             return { group, point };
         }
@@ -17035,6 +17110,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             points: [point]
         };
         groups.push(group);
+        touchNdtDispGroup(group);
         saveStateToLocalStorage();
         return { group, point };
     }
@@ -17190,6 +17266,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     window.showToast('취소할 보정이 없습니다.', 'info', 2400);
                     return;
                 }
+                touchNdtDispGroup(group);
                 saveStateToLocalStorage();
                 renderNdtDispGroupPointList(group);
                 ensureNdtDispStationTransferUi(group);
@@ -17217,6 +17294,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             window.showToast(ndtDispStationTransferErrorMessage(result.reason), 'warning', 3000);
             return result;
         }
+        touchNdtDispGroup(group);
         saveStateToLocalStorage();
         if (opts.refreshEditList !== false && document.getElementById('ndtDispEditPointList')) {
             renderNdtDispGroupPointList(group);
@@ -17596,6 +17674,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 if (group.category === '부재변위') {
                     group.hasMinorDamage = !!document.getElementById('ndtDispEditHasMinorDamage')?.checked;
                 }
+                touchNdtDispGroup(group);
                 setActiveNdtDispGroup(group);
                 saveStateToLocalStorage();
                 drawNdtCanvas();
@@ -20434,13 +20513,85 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         updateUndoRedoButtons();
     }
 
+    /**
+     * 되돌리기·다시 실행으로 결함 목록이 바뀐 뒤, 동기화 기록(묘비·수정 시각)을 맞춘다.
+     *
+     * 2026-09-21 감사: 결함 삭제 확인창은 "되돌리기로 복원 가능"이라고 하지만, 되돌리기는
+     * 목록만 돌리고 삭제 때 남긴 묘비를 그대로 뒀다. 그래서 되돌린 결함이 다음 동기화에서
+     * 다시 지워졌다. 또 되돌린 내용은 수정 시각이 옛날이라 서버 값에 졌다.
+     *  - 되살아난 결함 → 묘비를 풀고 시각을 지금으로(동기화에서 이기게)
+     *  - 사라진 결함(삭제를 다시 실행) → 묘비를 남기고 사진도 지운다(처음 삭제와 같게)
+     *  - 내용이 바뀐 결함 → 시각을 지금으로
+     * 삭제 때 사진은 클라우드·기기에서 즉시 지워진다. 되살린 결함에 사진 데이터가 남아
+     * 있으면(되돌리기 기록·메모리 캐시) 다시 올리고, 없으면 몇 장이 복원 안 됐는지 알린다.
+     */
+    /**
+     * 되살린 결함의 사진(kind ''=이번 회차, 'prev'=이전 회차)을 기기·클라우드에 다시 저장한다.
+     * 사진 데이터(data:)가 되돌리기 기록이나 메모리 캐시에 남은 것만 가능하다 — 클라우드 주소(https)는
+     * 이미 지워진 파일을 가리키므로 쓰지 않는다. 삭제가 아직 진행 중이면 끝난 뒤에 올린다
+     * (먼저 올리면 뒤이어 도는 삭제가 방금 올린 사진을 지운다). 반환: 복원하지 못한 장 수.
+     */
+    function restoreDefectPhotosAfterUndo(d, kind) {
+        const ids = Array.isArray(kind ? d.prevRoundPhotoIds : d.photoIds) ? (kind ? d.prevRoundPhotoIds : d.photoIds) : [];
+        const inline = Array.isArray(kind ? d.prevRoundPhotos : d.photos) ? (kind ? d.prevRoundPhotos : d.photos) : [];
+        const count = Math.max(ids.length, inline.length);
+        if (!count) return 0;
+        const isData = (v) => typeof v === 'string' && v.indexOf('data:') === 0 && v.length > 32;
+        const cache = window._photoCache || {};
+        const srcs = [];
+        for (let i = 0; i < count; i++) {
+            const slotId = getPhotoDocId(d.id, i, kind);
+            const cand = [inline[i], ids[i] && cache[ids[i]], cache[slotId]].find(isData);
+            srcs.push(cand || null);
+        }
+        const usable = srcs.filter(Boolean).length;
+        if (usable) {
+            const pending = (window._defectPhotoDeleteJobs && window._defectPhotoDeleteJobs.get(d.id)) || Promise.resolve();
+            Promise.resolve(pending).catch(() => {}).then(async () => {
+                await Promise.all(srcs.map((src, i) => (src ? persistPhotoUrlToIdb(getPhotoDocId(d.id, i, kind), src) : null)));
+                await uploadDefectPhotos(d.id, srcs, kind || undefined);
+            }).catch((e) => console.warn('[되돌리기] 사진 다시 저장 실패:', d.id, kind, e));
+        }
+        return count - usable;
+    }
+
+    function reconcileDefectHistoryJump(key, beforeList, afterList) {
+        const beforeById = new Map((beforeList || []).filter((d) => d && d.id).map((d) => [d.id, d]));
+        const afterById = new Map((afterList || []).filter((d) => d && d.id).map((d) => [d.id, d]));
+        let photosNotRestored = 0;
+        afterById.forEach((d, id) => {
+            const prev = beforeById.get(id);
+            if (!prev) {
+                if (typeof untrackDefectDeletion === 'function') untrackDefectDeletion(key, id);
+                touchDefectUpdatedAt(d);
+                touchDefectPositionUpdatedAt(d);
+                photosNotRestored += restoreDefectPhotosAfterUndo(d, '');
+                photosNotRestored += restoreDefectPhotosAfterUndo(d, 'prev');
+            } else if (JSON.stringify(prev) !== JSON.stringify(d)) {
+                touchDefectUpdatedAt(d);
+                touchDefectPositionUpdatedAt(d);
+            }
+        });
+        beforeById.forEach((d, id) => {
+            if (afterById.has(id)) return;
+            trackDefectDeletion(key, id);
+            deleteAllPhotosForDefect(d).catch(() => {});
+        });
+        if (typeof markFloorKeyDirty === 'function') markFloorKeyDirty(key);
+        if (photosNotRestored > 0) {
+            window.showToast(`결함은 되살렸지만 이미 지워진 사진 ${photosNotRestored}장은 복원하지 못했습니다.`, 'warning', 6000);
+        }
+    }
+
     function undoDefectChange() {
         const key = getDefectHistoryKey();
         const h = defectHistory[key];
         if (!h || h.undo.length === 0) return;
         const prevSnapshot = h.undo.pop();
-        h.redo.push(JSON.stringify(state.defects[key] || []));
+        const before = state.defects[key] || [];
+        h.redo.push(JSON.stringify(before));
         state.defects[key] = JSON.parse(prevSnapshot);
+        reconcileDefectHistoryJump(key, before, state.defects[key]);
         saveStateToLocalStorage();
         renderSurveyTable();
         drawCanvas();
@@ -20452,8 +20603,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const h = defectHistory[key];
         if (!h || h.redo.length === 0) return;
         const nextSnapshot = h.redo.pop();
-        h.undo.push(JSON.stringify(state.defects[key] || []));
+        const before = state.defects[key] || [];
+        h.undo.push(JSON.stringify(before));
         state.defects[key] = JSON.parse(nextSnapshot);
+        reconcileDefectHistoryJump(key, before, state.defects[key]);
         saveStateToLocalStorage();
         renderSurveyTable();
         drawCanvas();
@@ -28971,6 +29124,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         window._defectFormHydrating = true;
         // 사진이 다 내려왔는지는 폼을 다 채운 뒤에 판단한다. 그 전에 사진을 바꾸면 시각을 안 찍는다.
         window._defectPhotosComplete = false;
+        // 이 창 열기의 번호. 사진을 기다리는 사이 다른 결함 창이 열리면, 옛 창의 마무리
+        // (채우기 완료·기준값·사진 완전성)가 새 창에 덮이지 않게 번호로 가린다(2026-09-21 감사).
+        const defectModalOpenSeq = (window._defectModalOpenSeq = (window._defectModalOpenSeq || 0) + 1);
         window._defectPhotoHydrateToken = (window._defectPhotoHydrateToken || 0) + 1;
         window.clearTimeout(window._defectAutoApplyTimer);
         window._defectAutoApplyTimer = null;
@@ -29218,6 +29374,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             document.body.classList.add('defect-modal-open');
             if (typeof syncMobileAddMarkingFab === 'function') syncMobileAddMarkingFab();
             window.requestAnimationFrame(async () => {
+                // 그 사이 다른 결함 창이 열렸으면 이 창은 이미 바뀌었다 — 새 핀을 만들거나 마무리하지 않는다
+                if (defectModalOpenSeq !== window._defectModalOpenSeq) return;
                 syncDefectDrawerToCanvasArea();
                 resetDefectDrawerScroll();
                 if (elements.defectModal) elements.defectModal.classList.add('open');
@@ -29244,6 +29402,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 }
 
                 await photoHydratePromise;
+                // 기다리는 사이 다른 결함 창이 열렸으면 그 창의 마무리가 따로 돈다 — 여기서 손대지 않는다.
+                // (안 막으면 새 창이 아직 채워지는 중인데 "완료"로 바뀌어 덜 채운 값이 자동 저장될 수 있다)
+                if (defectModalOpenSeq !== window._defectModalOpenSeq) return;
                 // 폼이 보여준 값을 기준으로 기록 — 저장 때 이 값 그대로면 "안 건드린 칸"
                 captureDefectFormBaseline(existingPin || null);
                 // 사진이 다 내려왔는지. 덜 내려온 상태에서 사진을 바꾸면 못 받은 사진까지 "지운 것"이
@@ -43158,6 +43319,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const importPrevRound = document.getElementById('importDefectExcelPrevRound')?.checked === true;
 
         // 적용 직전에 배정된 층만 기기에 남긴다. 실패해도 가져오기는 막지 않는다.
+        // 누른 순간의 건물·층 — 백업을 기다리는 사이 층을 바꿔도 가져오기가 다른 층에 들어가지 않게(2026-09-21 감사)
+        const importBuildingAtClick = state.currentBuildingId;
+        const importFloorAtClick = state.currentFloor;
         let excelImportSnaps = [];
         if (typeof snapshotBeforeBulkOp === 'function') {
             excelImportSnaps = await snapshotBeforeBulkOp('조사표 가져오기', keysToSnap);
@@ -43172,10 +43336,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         let keptExistingOnImport = 0;
 
         sheets.forEach(sheetInfo => {
-            const floorCode = noFloorInfo ? state.currentFloor : floorBySheetName[sheetInfo.sheetName];
+            const floorCode = noFloorInfo ? importFloorAtClick : floorBySheetName[sheetInfo.sheetName];
             if (!floorCode) return; // "(가져오지 않음)"으로 지정된 시트는 건너뜀
 
-            const key = `${state.currentBuildingId}_${floorCode}`;
+            const key = `${importBuildingAtClick}_${floorCode}`;
             if (!state.defects[key]) state.defects[key] = [];
             pushDefectHistoryForKey(key);
 
@@ -43187,7 +43351,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
             // 도면 크기는 현재 화면에 열려있는 층일 때만 실제 이미지 크기를 알 수 있고,
             // 그 외 층은 도면이 로드되어 있지 않으므로 기본 캔버스 크기로 배치한다
-            const img = (floorCode === state.currentFloor) ? state.bgImage : null;
+            const img = (importBuildingAtClick === state.currentBuildingId && floorCode === state.currentFloor) ? state.bgImage : null;
             const imgW = img ? (img.naturalWidth || img.width || 1200) : 1200;
             const imgH = img ? (img.naturalHeight || img.height || 700) : 700;
             const marginX = Math.max(80, imgW * 0.06);
@@ -43309,7 +43473,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 const no = noRawTrimmed || `NO.${seqStr}`;
 
                 const newDefect = {
-                    id: generateDefectUniqueId(`${window.state.currentBuildingId}_${floorCode}`),
+                    id: generateDefectUniqueId(`${importBuildingAtClick}_${floorCode}`),
                     no,
                     category,
                     component: componentRaw,
@@ -47862,8 +48026,19 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         return failCount;
     }
 
-    async function deleteAllPhotosForDefect(d) {
-        if (!d) return 0;
+    // 진행 중인 결함 사진 삭제 — 되돌리기로 되살린 사진은 삭제가 끝난 뒤 다시 올린다(restoreDefectPhotosAfterUndo)
+    function deleteAllPhotosForDefect(d) {
+        if (!d) return Promise.resolve(0);
+        const jobs = window._defectPhotoDeleteJobs || (window._defectPhotoDeleteJobs = new Map());
+        const prevJob = jobs.get(d.id) || Promise.resolve();
+        const job = Promise.resolve(prevJob).catch(() => {}).then(() => runDeleteAllPhotosForDefect(d));
+        jobs.set(d.id, job);
+        const clear = () => { if (jobs.get(d.id) === job) jobs.delete(d.id); };
+        job.then(clear, clear);
+        return job;
+    }
+
+    async function runDeleteAllPhotosForDefect(d) {
         let fail = 0;
         const curCount = (d.photos && d.photos.length) || (d.photoIds && d.photoIds.length) || 0;
         const prevCount = (d.prevRoundPhotos && d.prevRoundPhotos.length) || (d.prevRoundPhotoIds && d.prevRoundPhotoIds.length) || 0;

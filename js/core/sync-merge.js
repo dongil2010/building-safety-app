@@ -261,6 +261,40 @@
      *   바뀌었으면 사진이 추가됐을 수 있어 합집합(사진을 잃는 것보다 되살아나는 게 덜 나쁘다)
      * - 둘 다 없음(옛 데이터) → 합집합(예전 동작)
      */
+    /**
+     * 건물(회차) 휴지통 상태 병합 — 2026-09-21.
+     * 예전엔 복원 표시(_trashRestoredAt)가 복원한 기기에만 있고 서버로 안 올라가서,
+     * 휴지통 상태를 들고 있던 다른 기기가 동기화 때 휴지통으로 되돌렸다(→ 30일 뒤 그 기기가
+     * 영구 삭제하면 모든 기기에서 사라짐). 복원 시각(trashRestoredAt)을 서버에도 올리고,
+     * 휴지통 시각과 복원 시각 중 나중 것을 따른다.
+     * 반환: { trashedAt: string|null, trashRestoredAt: string|null }
+     */
+    function resolveBuildingTrashState(localB, remoteB) {
+        function at(v) {
+            var t = v ? Date.parse(String(v)) : NaN;
+            return isFinite(t) ? t : 0;
+        }
+        function latest(list) {
+            var best = null;
+            var bestAt = 0;
+            list.forEach(function (v) {
+                var t = at(v);
+                if (t > bestAt) { bestAt = t; best = String(v); }
+            });
+            return { value: best, at: bestAt };
+        }
+        var trash = latest([localB && localB.trashedAt, remoteB && remoteB.trashedAt]);
+        var restore = latest([
+            localB && localB._trashRestoredAt,
+            localB && localB.trashRestoredAt,
+            remoteB && remoteB.trashRestoredAt
+        ]);
+        if (trash.at && trash.at > restore.at) {
+            return { trashedAt: trash.value, trashRestoredAt: restore.value };
+        }
+        return { trashedAt: null, trashRestoredAt: restore.value };
+    }
+
     function pickPhotoListSide(serverRec, localRec) {
         var sp = Number(serverRec && serverRec.photosUpdatedAt) || 0;
         var lp = Number(localRec && localRec.photosUpdatedAt) || 0;
@@ -592,6 +626,7 @@
         pickImportedText: pickImportedText,
         keepStoredIfUntouched: keepStoredIfUntouched,
         pickPhotoListSide: pickPhotoListSide,
+        resolveBuildingTrashState: resolveBuildingTrashState,
         isOutdatedBuild: isOutdatedBuild,
         countKeptExistingOnImport: countKeptExistingOnImport,
         recordSurvivesDelete: recordSurvivesDelete,
