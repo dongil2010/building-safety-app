@@ -231,15 +231,119 @@ async function testMissingNdtRestoredWithoutFlag() {
     const state = makeState([healthyDefect(1)]);
     state.ndtData[KEY] = [{ id: 'ndt-1', category: '탄산화', updatedAt: 100 }];
     const snap = api.buildFloorSnapshot(state, KEY, '층 도면 삭제', SNAP_AT);
+    // 층 도면 삭제가 비파괴를 지운 직후 상태
+    state.ndtData[KEY] = [];
+    snap.after = api.buildAfterState(state, KEY, SNAP_AT + 1);
     const slice = emptyFloorState([healthyDefect(1)]);
     slice.deletedNdtIds = ['ndt-1'];
     slice.deletedNdtAt = { 'ndt-1': 1500 };
 
     api.applyRestoreToFloor(slice, snap, { ids: ['def-1'], now: RESTORE_AT });
     assert.ok(slice.ndtData.some((n) => n.id === 'ndt-1'),
-        '층 도면 삭제 뒤에 빠진 비파괴는 restoreNdt 없이도 되살아야 한다');
+        '층 도면 삭제가 지운 비파괴는 restoreNdt 없이도 되살아야 한다');
     assert.ok(slice.deletedNdtIds.indexOf('ndt-1') < 0);
     assert.ok(slice.ndtData[0].updatedAt > snap.createdAt);
+}
+
+/**
+ * 2026-09-21 검토: 예전에는 "지금 없는 비파괴"를 전부 되살려서, 작업 뒤에 사람이
+ * 일부러 지운 비파괴까지 살아났다. 작업이 지운 것만 되살려야 한다.
+ */
+async function testNdtDeletedByUserAfterOpNotRestored() {
+    const state = makeState([healthyDefect(1)]);
+    state.ndtData[KEY] = [{ id: 'ndt-1', category: '탄산화', updatedAt: 100 }];
+    const snap = api.buildFloorSnapshot(state, KEY, '조사표 가져오기', SNAP_AT);
+    snap.after = api.buildAfterState(state, KEY, SNAP_AT + 1);   // 가져오기는 비파괴를 안 건드림
+    // 그 뒤 사람이 ndt-1을 일부러 지움
+    const slice = emptyFloorState([healthyDefect(1)]);
+    slice.deletedNdtIds = ['ndt-1'];
+    slice.deletedNdtAt = { 'ndt-1': 1800 };
+
+    api.applyRestoreToFloor(slice, snap, { ids: ['def-1'], now: RESTORE_AT });
+    assert.ok(!slice.ndtData.some((n) => n.id === 'ndt-1'),
+        '작업 뒤 사람이 일부러 지운 비파괴를 되살리면 안 된다');
+    assert.ok(slice.deletedNdtIds.indexOf('ndt-1') >= 0, '묘비도 그대로 둬야 한다');
+}
+
+/** 작업 직후 기록이 없는 옛 백업은 비파괴를 자동으로 되살리지 않는다(판단 근거가 없음) */
+async function testNoAfterStateNoAutoNdt() {
+    const state = makeState([healthyDefect(1)]);
+    state.ndtData[KEY] = [{ id: 'ndt-1', category: '탄산화', updatedAt: 100 }];
+    const snap = api.buildFloorSnapshot(state, KEY, '층 도면 삭제', SNAP_AT);
+    const slice = emptyFloorState([healthyDefect(1)]);
+    api.applyRestoreToFloor(slice, snap, { ids: ['def-1'], now: RESTORE_AT });
+    assert.strictEqual(slice.ndtData.length, 0);
+    // 명시적으로 고르면 여전히 된다
+    api.applyRestoreToFloor(slice, snap, { ids: [], ndtIds: ['ndt-1'], now: RESTORE_AT });
+    assert.ok(slice.ndtData.some((n) => n.id === 'ndt-1'));
+}
+
+/**
+ * 2026-09-21 검토: 되살리기 기본 선택이 "백업 이후 바뀐 모든 행 + 지워진 모든 행"이라
+ * 10시 가져오기 → 11시 정상 수정(NO.50)·중복 행 삭제(NO.60) → 12시 되살리기 때
+ * 11시 작업까지 되돌렸다. 작업이 바꾼 행 중 이후 아무도 안 건드린 행만 골라야 한다.
+ */
+async function testSelectionOnlyRowsChangedByOp() {
+    const list = [];
+    for (let i = 1; i <= 10; i += 1) list.push(healthyDefect(i));
+    list.push(healthyDefect(50), healthyDefect(60), healthyDefect(70));
+    const state = makeState(list.map((d) => Object.assign({}, d)));
+    const store = api.createMemorySnapshotStore();
+    const [snap] = await api.saveSnapshotsWithStore(state, '조사표 가져오기', [KEY], store, SNAP_AT);
+
+    // 10시 가져오기: NO.01~10 망가뜨림 + NO.70 은 가져오기가 정상 갱신
+    overwriteLikeImport(state.defects[KEY]);
+    state.defects[KEY].find((d) => d.id === 'def-70').size = '300x200';
+    snap.after = api.buildAfterState(state, KEY, SNAP_AT + 5);
+
+    // 11시 사람 작업: NO.50 정상 수정, NO.60 삭제, 망가진 NO.03은 사람이 직접 다시 고침
+    state.defects[KEY].find((d) => d.id === 'def-50').cause = '누수';
+    state.defects[KEY] = state.defects[KEY].filter((d) => d.id !== 'def-60');
+    state.defects[KEY].find((d) => d.id === 'def-3').component = '보';
+
+    const sel = api.restoreSelection(snap, state.defects[KEY]);
+    assert.strictEqual(sel.hasAfter, true);
+    const expected = ['def-1', 'def-2', 'def-4', 'def-5', 'def-6', 'def-7', 'def-8', 'def-9', 'def-10', 'def-70'];
+    assert.deepStrictEqual(sel.selected.slice().sort(), expected.sort(),
+        '작업이 바꾼 행 중 이후 아무도 안 건드린 행만 골라야 한다');
+    assert.ok(sel.selected.indexOf('def-50') < 0, '11시 정상 수정(NO.50)을 되돌리면 안 된다');
+    assert.ok(sel.selected.indexOf('def-60') < 0, '11시에 지운 행(NO.60)을 되살리면 안 된다');
+    assert.ok(sel.editedAfterOp.indexOf('def-3') >= 0,
+        '작업이 망가뜨렸지만 사람이 다시 고친 행은 기본 선택하지 않고 따로 보여준다');
+    assert.ok(sel.unrelated.indexOf('def-50') >= 0 && sel.unrelated.indexOf('def-60') >= 0);
+
+    // 기본값으로 되살려도 같은 결과여야 한다
+    const slice = emptyFloorState(state.defects[KEY]);
+    const result = api.applyRestoreToFloor(slice, snap, { now: RESTORE_AT });
+    assert.deepStrictEqual(result.restoredIds.slice().sort(), expected.sort());
+    assert.strictEqual(slice.defects.find((d) => d.id === 'def-50').cause, '누수');
+    assert.ok(!slice.defects.some((d) => d.id === 'def-60'));
+}
+
+/** 작업 직후 기록이 없는 옛 백업은 자동으로 고르지 않는다(사람이 고른다) */
+async function testNoAfterStateSelectsNothing() {
+    const state = makeState([healthyDefect(1), healthyDefect(2)]);
+    const snap = api.buildFloorSnapshot(state, KEY, '조사표 가져오기', SNAP_AT);
+    overwriteLikeImport(state.defects[KEY]);
+    const sel = api.restoreSelection(snap, state.defects[KEY]);
+    assert.strictEqual(sel.hasAfter, false);
+    assert.deepStrictEqual(sel.selected, []);
+    assert.strictEqual(sel.unrelated.length, 2, '바뀐 행은 보여주되 체크는 안 한다');
+}
+
+/**
+ * 복사는 저장 함수를 부른 **그 순간** 해야 한다. 예전에는 저장 체인(.then) 안에서 복사해서,
+ * 부른 쪽이 기다리지 않고 바로 데이터를 바꾸면 "바뀐 뒤" 상태가 백업됐다.
+ */
+async function testSnapshotCopiesImmediately() {
+    const state = makeState([healthyDefect(1)]);
+    const store = api.createMemorySnapshotStore();
+    const pending = api.saveSnapshotsWithStore(state, '조사표 가져오기', [KEY], store, SNAP_AT);
+    // await 없이 바로 망가뜨린다
+    overwriteLikeImport(state.defects[KEY]);
+    const [snap] = await pending;
+    assert.strictEqual(snap.defects[0].component, '기둥',
+        '부른 뒤 바로 바뀐 값이 백업되면 안 된다(백업은 부른 순간의 상태)');
 }
 
 async function testExistingNdtNotOverwrittenOnDefectRestore() {
@@ -306,7 +410,43 @@ function testSourceWiring() {
         '스냅샷 저장이 결함 덮어쓰기보다 앞에 있어야 한다');
 
     assertSnapshotsBefore(app, 'window.deleteExistingFloorDrawing = async function', '층 도면 삭제', 'rememberDeletedDrawingFloor', 2500);
-    assertSnapshotsBefore(app, 'async function commitBulkDefectFromForm', '일괄 수정', 'if (pushHistory) pushDefectHistory()', 2500);
+    assertSnapshotsBefore(app, 'async function commitBulkDefectFromForm', '일괄 수정', 'defects.forEach((d) => {', 6000);
+
+    // 2026-09-21 검토에서 재현한 사고: 일괄 수정이 백업을 기다린 **뒤에** 화면을 읽어서,
+    // 그 사이 다른 결함 창이 열리면 그 결함 값이 선택한 결함 전부에 저장됐다.
+    const bulkStart = app.indexOf('async function commitBulkDefectFromForm');
+    const bulkFn = app.slice(bulkStart, bulkStart + 6000);
+    const readAt = bulkFn.indexOf('readDefectGuardedFieldsFromUi()');
+    const awaitAt = bulkFn.indexOf('await session.promise');
+    assert.ok(readAt > 0 && awaitAt > readAt,
+        '일괄 수정은 화면 값을 먼저 읽고 그다음에 백업을 기다려야 한다');
+    assert.ok(bulkFn.indexOf('new Set(changed)') > 0 && bulkFn.indexOf('changed.has(') < 0,
+        '바뀐 칸 목록도 기다리기 전에 복사해 써야 한다(창을 닫으면 원본이 비워질 수 있음)');
+    assert.ok(bulkFn.indexOf('session.key !== changed') > 0,
+        '일괄 수정 백업은 창 하나당 한 번만 — 입력마다 남기면 다른 백업을 밀어낸다');
+
+    // 작업 직후 상태 기록 — 되살리기가 그 작업이 바꾼 행만 고르는 근거
+    [
+        ['window.deleteExistingFloorDrawing = async function', 'recordAfterBulkOp(drawingDeleteSnaps)', 9000],
+        ['async function commitBulkDefectFromForm', 'recordAfterBulkOp(bulkSnaps)', 7000],
+        ['async function finishCad2PointCalibration', 'recordAfterBulkOp(cadImportSnaps)', 20000],
+        ['window.importBackupJSON = function', 'recordAfterBulkOp(jsonImportSnaps)', 5000],
+        ['window.confirmImportDefectExcel = async function', 'recordAfterBulkOp(excelImportSnaps)', 20000],
+        ['window.cleanDuplicateNdt', 'recordAfterBulkOp(ndtCleanSnaps)', 5000],
+        ['window.restoreBulkSnapshot', 'recordAfterBulkOp(restoreSnaps)', 6000]
+    ].forEach(([start, needle, span]) => {
+        const at = app.indexOf(start);
+        assert.ok(at > 0, start + ' 를 찾지 못했다');
+        assert.ok(app.slice(at, at + span).indexOf(needle) > 0, start + ': 작업 직후 상태를 기록해야 한다');
+    });
+
+    // 중복 실행 방지
+    assert.ok(app.indexOf('function guardConfirmImportDefectExcel') > 0,
+        '가져오기가 백업을 기다리는 사이 다시 누르면 두 번 돈다 — 진행 중엔 막아야 한다');
+    const guardAt = app.indexOf('function guardConfirmImportDefectExcel');
+    const bindAt = app.indexOf("addEventListener('click', window.confirmImportDefectExcel)");
+    assert.ok(bindAt > guardAt, '버튼 연결은 방지 장치를 씌운 뒤여야 보호된 함수가 연결된다');
+    assert.ok(app.indexOf('_bulkRestoreInFlight') > 0, '되살리기도 중복 실행을 막아야 한다');
     assertSnapshotsBefore(app, 'async function finishCad2PointCalibration', 'CAD 가져오기', 'const toClear =', 20000);
     assertSnapshotsBefore(app, 'window.importBackupJSON = function', 'JSON 백업 불러오기', 'window.state.buildings = data.state.buildings', 4000);
 
@@ -359,6 +499,11 @@ async function main() {
     await testKeepsFivePerFloor();
     await testNdtRestoreUntracksTombstone();
     await testMissingNdtRestoredWithoutFlag();
+    await testNdtDeletedByUserAfterOpNotRestored();
+    await testNoAfterStateNoAutoNdt();
+    await testSelectionOnlyRowsChangedByOp();
+    await testNoAfterStateSelectsNothing();
+    await testSnapshotCopiesImmediately();
     await testExistingNdtNotOverwrittenOnDefectRestore();
     testCollectFloorKeysFromState();
     testSourceWiring();

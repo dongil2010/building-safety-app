@@ -7558,8 +7558,9 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!window.confirmDelete(msg)) return;
 
         // 마킹·비파괴를 지우기 전에 이 층을 기기에 남긴다. 실패해도 삭제는 막지 않는다.
+        let drawingDeleteSnaps = [];
         if (typeof snapshotBeforeBulkOp === 'function') {
-            await snapshotBeforeBulkOp('층 도면 삭제', [floorKey]);
+            drawingDeleteSnaps = await snapshotBeforeBulkOp('층 도면 삭제', [floorKey]);
         }
 
         // 동기화·hydrate가 클라우드/IDB에서 되살리기 전에 tombstone을 먼저 남긴다
@@ -7635,6 +7636,8 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         if (typeof populateFloorSelectDropdown === 'function') populateFloorSelectDropdown(bldg);
         if (typeof saveStateToLocalStorage === 'function') saveStateToLocalStorage();
+        // 작업 직후 상태 — 되살리기가 "이 삭제가 지운 것"만 골라내는 기준
+        if (typeof recordAfterBulkOp === 'function') recordAfterBulkOp(drawingDeleteSnaps);
         if (typeof drawCanvas === 'function') drawCanvas();
         if (typeof renderSurveyTable === 'function') renderSurveyTable();
         renderEditDrawingPreview();
@@ -29768,9 +29771,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const defects = getDefectsForBulkEdit();
         if (!defects.length) return null;
         const bulkFloorKey = `${state.currentBuildingId}_${state.currentFloor}`;
-        if (typeof snapshotBeforeBulkOp === 'function') {
-            await snapshotBeforeBulkOp('일괄 수정', [bulkFloorKey]);
-        }
+        // ⚠️ 화면 값과 "바뀐 칸" 목록은 await 전에 전부 읽는다.
+        // 2026-09-21 검토에서 재현: 백업을 기다린 뒤에 화면을 읽었더니, 그 사이 창을 닫고 다른
+        // 결함 창이 열리면서 칸이 그 결함 값으로 바뀌어 **선택한 결함 전부에 엉뚱한 값**이 저장됐다.
+        const changedFields = new Set(changed);
         if (pushHistory) pushDefectHistory();
 
         // 일괄 수정도 단건과 같은 방식으로 읽는다 — 칩 정리 중 버려지는 말이 없게.
@@ -29797,10 +29801,24 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const areaBorderVal = getSelectedAreaBorderFromUi();
         const categoryVal = uiFieldsBulk.category;
 
+        // 백업은 **이 일괄 수정 창에서 처음 한 번만** 남긴다(바뀐 칸 목록 Set이 창마다 새로 생김).
+        // 예전에는 입력할 때마다 남겨서 층당 5개 한도가 타이핑 중간 상태로 차고, 조사표 가져오기
+        // 백업과 "일괄 수정 전 원래 상태"가 밀려나 사라졌다. 같은 창의 이어지는 저장은 같은
+        // 백업(promise)을 기다린다 — 그래야 첫 저장이 끝나기 전 두 번째 저장이 끼어들어도 순서가 지켜진다.
+        let bulkSnaps = [];
+        if (typeof snapshotBeforeBulkOp === 'function') {
+            let session = window._bulkEditSnapSession;
+            if (!session || session.key !== changed || session.floorKey !== bulkFloorKey) {
+                session = { key: changed, floorKey: bulkFloorKey, promise: snapshotBeforeBulkOp('일괄 수정', [bulkFloorKey]) };
+                window._bulkEditSnapSession = session;
+            }
+            bulkSnaps = (await session.promise) || [];
+        }
+
         defects.forEach((d) => {
-            if (changed.has('category')) d.category = categoryVal;
-            if (changed.has('component')) d.component = compVal;
-            if (changed.has('defectType')) {
+            if (changedFields.has('category')) d.category = categoryVal;
+            if (changedFields.has('component')) d.component = compVal;
+            if (changedFields.has('defectType')) {
                 d.defectType = dTypeVal;
                 if (isGoodType) {
                     d.cause = '';
@@ -29811,30 +29829,32 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     d.itemCount = '';
                 }
             }
-            if (changed.has('cause') && !isGoodType) d.cause = causeSaveVal;
-            if (changed.has('location')) d.location = locVal;
-            if (changed.has('size') && !isGoodType) d.size = sizeVal;
-            if (changed.has('crackMeasures') && !isGoodType) {
+            if (changedFields.has('cause') && !isGoodType) d.cause = causeSaveVal;
+            if (changedFields.has('location')) d.location = locVal;
+            if (changedFields.has('size') && !isGoodType) d.size = sizeVal;
+            if (changedFields.has('crackMeasures') && !isGoodType) {
                 d.crackMeasures = crackMeasuresVal;
                 d.crackWidth = crackWidthVal;
                 d.crackLength = crackLengthVal;
                 d.itemCount = itemCountVal;
                 d.size = sizeVal;
             }
-            if (changed.has('isProgress')) d.isProgress = isProgress;
-            if (changed.has('isLeak')) d.isLeak = isLeak;
-            if (changed.has('isOpeningCrack')) d.isOpeningCrack = isOpeningCrack;
-            if (changed.has('isCarriedOver')) d.isCarriedOver = isCarriedOver;
-            if (changed.has('isBookmark')) d.isBookmark = isBookmark;
-            if (changed.has('isPriorityManage')) d.isPriorityManage = isPriorityManage;
+            if (changedFields.has('isProgress')) d.isProgress = isProgress;
+            if (changedFields.has('isLeak')) d.isLeak = isLeak;
+            if (changedFields.has('isOpeningCrack')) d.isOpeningCrack = isOpeningCrack;
+            if (changedFields.has('isCarriedOver')) d.isCarriedOver = isCarriedOver;
+            if (changedFields.has('isBookmark')) d.isBookmark = isBookmark;
+            if (changedFields.has('isPriorityManage')) d.isPriorityManage = isPriorityManage;
             if (d.shapeType === 'area') {
-                if (changed.has('areaFillStyle')) d.areaFillStyle = areaFillVal;
-                if (changed.has('areaBorderStyle')) d.areaBorderStyle = areaBorderVal;
+                if (changedFields.has('areaFillStyle')) d.areaFillStyle = areaFillVal;
+                if (changedFields.has('areaBorderStyle')) d.areaBorderStyle = areaBorderVal;
             }
             touchDefectUpdatedAt(d);
         });
 
         saveStateToLocalStorage();
+        // 작업 직후 상태를 백업에 붙인다(되살리기가 이 일괄 수정이 바꾼 행만 고르게). 복사는 즉시 한다.
+        if (typeof recordAfterBulkOp === 'function') recordAfterBulkOp(bulkSnaps);
         return defects[0];
     }
 
@@ -31581,8 +31601,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             );
         }
 
+        let cadImportSnaps = [];
         if (typeof snapshotBeforeBulkOp === 'function') {
-            await snapshotBeforeBulkOp('CAD 가져오기', [floorKey]);
+            cadImportSnaps = await snapshotBeforeBulkOp('CAD 가져오기', [floorKey]);
         }
 
         if (replaceMode) {
@@ -31764,6 +31785,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         }
 
         saveStateToLocalStorage();
+        if (typeof recordAfterBulkOp === 'function') recordAfterBulkOp(cadImportSnaps);
         cancelCadCalibration();
         drawCanvas();
         if (typeof renderDefectListPanel === 'function') renderDefectListPanel();
@@ -42170,8 +42192,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 const keysToSnap = (health && typeof health.collectFloorKeysFromState === 'function')
                     ? health.collectFloorKeysFromState(window.state)
                     : Object.keys((window.state && window.state.defects) || {});
+                let jsonImportSnaps = [];
                 if (typeof snapshotBeforeBulkOp === 'function') {
-                    await snapshotBeforeBulkOp('JSON 백업 불러오기', keysToSnap);
+                    jsonImportSnaps = await snapshotBeforeBulkOp('JSON 백업 불러오기', keysToSnap);
                 }
 
                 window.state.buildings = data.state.buildings || [];
@@ -42180,6 +42203,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 window.state.ndtDisplacementGroups = data.state.ndtDisplacementGroups || {};
                 window.state.grids = data.state.grids || {};
                 window.state.floorSnapshots = data.state.floorSnapshots || {};
+                // 바꾼 직후 바로 기록한다(아래 사진·도면 업로드는 오래 걸려 그 사이 동기화가 끼어들 수 있음)
+                if (typeof recordAfterBulkOp === 'function') recordAfterBulkOp(jsonImportSnaps);
 
                 // 백업 파일 안의 도면/사진을 개별 문서 구조로 업로드
                 if (db && window.state.companyId) {
@@ -43121,11 +43146,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             window.showToast('가져올 시트가 선택되지 않았습니다. 시트별 층 배정을 확인해주세요.', 'warning', 5000);
             return;
         }
-        // 적용 직전에 배정된 층만 기기에 남긴다. 실패해도 가져오기는 막지 않는다.
-        if (typeof snapshotBeforeBulkOp === 'function') {
-            await snapshotBeforeBulkOp('조사표 가져오기', keysToSnap);
-        }
-
+        // 화면 선택값(열 매칭·병합 옵션)은 백업을 기다리기 **전에** 읽는다 — 기다리는 사이 창이
+        // 바뀌어도 사용자가 누른 순간의 값으로 가져온다(일괄 수정에서 실제로 겪은 문제와 같은 원리).
         const mapSelects = document.querySelectorAll('.import-defect-field-map');
         const colIdxByField = {};
         mapSelects.forEach(sel => {
@@ -43139,6 +43161,12 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
         const mergeByNo = document.getElementById('importDefectExcelMergeByNo')?.checked !== false;
         const importPrevRound = document.getElementById('importDefectExcelPrevRound')?.checked === true;
+
+        // 적용 직전에 배정된 층만 기기에 남긴다. 실패해도 가져오기는 막지 않는다.
+        let excelImportSnaps = [];
+        if (typeof snapshotBeforeBulkOp === 'function') {
+            excelImportSnaps = await snapshotBeforeBulkOp('조사표 가져오기', keysToSnap);
+        }
 
         let totalImported = 0;
         let totalMatched = 0;
@@ -43354,6 +43382,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
         updateUndoRedoButtons();
         saveStateToLocalStorage();
+        // 가져오기 직후 상태 — 되살리기가 "이 가져오기가 바꾼 행"만 고르는 기준
+        if (typeof recordAfterBulkOp === 'function') recordAfterBulkOp(excelImportSnaps);
         renderSurveyTable();
         drawCanvas();
         if (typeof renderDefectListPanel === 'function') renderDefectListPanel();
@@ -43377,6 +43407,31 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             console.warn('[가져오기] 빈 칸으로 기존 내용을 덮어쓰지 않았습니다:', keptExistingOnImport);
         }
     };
+
+    /**
+     * 가져오기 중복 실행 방지.
+     * 백업을 기다리게 바뀌면서, 그 사이 「가져오기」를 한 번 더 누르면 두 번 돌 수 있었다
+     * (번호가 안 맞는 행은 결함이 두 번 생김). 진행 중이면 두 번째 누름은 무시한다.
+     */
+    (function guardConfirmImportDefectExcel() {
+        const run = window.confirmImportDefectExcel;
+        if (typeof run !== 'function' || run._bsaGuarded) return;
+        let inFlight = false;
+        const guarded = async function (...args) {
+            if (inFlight) {
+                window.showToast?.('가져오기를 진행하고 있습니다. 잠시만 기다려 주세요.', 'info', 2500);
+                return undefined;
+            }
+            inFlight = true;
+            try {
+                return await run.apply(this, args);
+            } finally {
+                inFlight = false;
+            }
+        };
+        guarded._bsaGuarded = true;
+        window.confirmImportDefectExcel = guarded;
+    })();
 
     const btnImportDefectExcel = document.getElementById('btnImportDefectExcel');
     const inputImportDefectExcel = document.getElementById('inputImportDefectExcel');
@@ -46502,6 +46557,26 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     }
 
     /**
+     * 작업 직후 상태를 그 작업의 백업에 붙인다. 되살리기가 "이 작업이 바꾼 행"만 고르는 기준이다.
+     * 상태 복사는 **호출 즉시**(동기) 하고, 저장만 뒤에서 한다 — 호출한 쪽이 기다리지 않아도
+     * 그 순간의 상태가 기록된다. 실패해도 본 작업에는 영향 없음.
+     */
+    function recordAfterBulkOp(savedSnaps) {
+        const list = Array.isArray(savedSnaps) ? savedSnaps.filter((s) => s && s.floorKey) : [];
+        if (!list.length) return Promise.resolve();
+        const health = bulkSnapshotApi();
+        const store = getBulkSnapshotStore();
+        if (!health || !store || typeof health.buildAfterState !== 'function') return Promise.resolve();
+        const now = Date.now();
+        list.forEach((snap) => { snap.after = health.buildAfterState(window.state, snap.floorKey, now); });
+        let chain = Promise.resolve();
+        list.forEach((snap) => { chain = chain.then(() => store.put(snap)); });
+        return chain.catch((e) => {
+            console.warn('[일괄 백업] 작업 직후 기록 실패 — 되살리기 자동 선택이 꺼집니다.', e);
+        });
+    }
+
+    /**
      * 작업 이름 + 층 키 목록만 넘기면 그 층 데이터를 기기에 저장한다.
      * 조사표 가져오기·층 도면 삭제·일괄 수정·CAD 가져오기·비파괴 중복 정리·JSON 백업 불러오기가 이걸 탄다.
      */
@@ -46569,13 +46644,15 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             return null;
         }
         const diff = previewBulkSnapshotDiff(snap);
-        const selected = health.defaultSelectedIds(diff);
+        const sel = bulkRestoreSelectionFor(snap);
+        const selected = sel.selected;
         console.log('[일괄 백업 미리보기] ' + snap.opName + ' / ' + snap.floorCode
-            + ' (' + formatBulkSnapTime(snap.createdAt) + ')');
+            + ' (' + formatBulkSnapTime(snap.createdAt) + ')'
+            + (sel.hasAfter ? '' : ' — 작업 직후 기록이 없는 옛 백업이라 자동 선택을 하지 않습니다.'));
         console.table((diff.changed || []).concat(diff.deletedAfter || []).map((r) => ({
             id: r.id,
             번호: (r.snapshot && r.snapshot.no) || (r.current && r.current.no) || '',
-            구분: r.kind === 'deleted' ? '스냅샷 이후 삭제' : '내용 변경',
+            구분: bulkRestoreRowLabel(r, sel),
             기본선택: selected.indexOf(r.id) >= 0 ? '예' : '',
             지금: summarizeDefectForRestore(r.current),
             백업: summarizeDefectForRestore(r.snapshot)
@@ -46602,7 +46679,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             return null;
         }
         const diff = previewBulkSnapshotDiff(snap);
-        const ids = Array.isArray(options.ids) ? options.ids.filter(Boolean) : health.defaultSelectedIds(diff);
+        const ids = Array.isArray(options.ids) ? options.ids.filter(Boolean) : bulkRestoreSelectionFor(snap).selected;
         if (!options.apply) {
             console.log('[일괄 백업] 미리보기 — 대상 ' + ids.length + '건. 적용하려면 { apply: true }');
             return { preview: true, snapshot: snap, diff: diff, ids: ids };
@@ -46611,8 +46688,16 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             window.showToast('되살릴 행이 없습니다.', 'warning');
             return { preview: false, restoredIds: [] };
         }
+        // 되살리기 중복 실행 방지(백업을 기다리는 사이 버튼을 또 누르면 두 번 돌 수 있음)
+        if (_bulkRestoreInFlight) {
+            window.showToast('되살리기를 진행하고 있습니다. 잠시만 기다려 주세요.', 'info', 2500);
+            return null;
+        }
+        _bulkRestoreInFlight = true;
         try {
-            await window.captureBulkSnapshots('되살리기', [snap.floorKey]);
+        let restoreSnaps = [];
+        try {
+            restoreSnaps = await window.captureBulkSnapshots('되살리기', [snap.floorKey]);
         } catch (e) {
             console.warn('[일괄 백업] 되살리기 전 저장 실패 — 되살리기는 계속합니다.', e);
         }
@@ -46632,6 +46717,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         (result.restoredNdtIds || []).forEach((id) => untrackNdtDeletion(snap.floorKey, id));
         markFloorKeyDirty(snap.floorKey);
         saveStateToLocalStorage();
+        // 되살리기도 일괄 작업 — 직후 상태를 붙여야 "되살리기를 되돌릴 때" 이 되살리기가 바꾼 행만 고른다
+        recordAfterBulkOp(restoreSnaps);
         if (typeof renderSurveyTable === 'function') renderSurveyTable();
         if (typeof drawCanvas === 'function') drawCanvas();
         if (typeof renderDefectListPanel === 'function') renderDefectListPanel();
@@ -46642,7 +46729,30 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         window.showToast(snap.floorCode + '에서 ' + n + '건을 백업 내용으로 되살렸습니다. 동기화 대상에 넣었습니다.', 'success', 6000);
         console.log('[일괄 백업] 되살리기 적용 ' + n + '건', result.restoredIds);
         return result;
+        } finally {
+            _bulkRestoreInFlight = false;
+        }
     };
+
+    let _bulkRestoreInFlight = false;
+
+    /** 되살리기 기본 선택 — 그 작업이 바꾼 행 중 이후 아무도 안 건드린 행만 (data-health 규칙) */
+    function bulkRestoreSelectionFor(snap) {
+        const health = bulkSnapshotApi();
+        const cur = (window.state.defects && snap && window.state.defects[snap.floorKey]) || [];
+        if (!health || typeof health.restoreSelection !== 'function' || !snap) {
+            return { hasAfter: false, selected: [], opTouched: [], editedAfterOp: [], unrelated: [] };
+        }
+        return health.restoreSelection(snap, cur);
+    }
+
+    function bulkRestoreRowLabel(r, sel) {
+        const id = r && r.id;
+        const deleted = r && r.kind === 'deleted';
+        if (sel && sel.selected.indexOf(id) >= 0) return deleted ? '작업이 지움' : '작업이 바꿈';
+        if (sel && sel.editedAfterOp.indexOf(id) >= 0) return '작업 뒤 다시 고침(확인)';
+        return deleted ? '작업과 무관하게 이후 삭제' : '작업과 무관하게 이후 변경';
+    }
 
     function ensureBulkRestoreModal() {
         if (document.getElementById('bulkRestoreModal')) return;
@@ -46719,19 +46829,25 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         }
         const snap = snaps[0];
         const diff = health.compareDefects(snap.defects, (state.defects[floorKey] || []));
-        const selected = new Set(health.defaultSelectedIds(diff));
+        // 기본 선택은 "그 작업이 바꾼 행 중 이후 아무도 안 건드린 행"만.
+        // 작업 뒤 정상적으로 고치거나 지운 행까지 되돌리지 않게 한다(2026-09-21 검토).
+        const sel = bulkRestoreSelectionFor(snap);
+        const selected = new Set(sel.selected);
         ensureBulkRestoreModal();
         const modal = document.getElementById('bulkRestoreModal');
         modal.setAttribute('data-snapshot-id', snap.id);
         const meta = document.getElementById('bulkRestoreMeta');
         meta.textContent = snap.opName + ' · ' + snap.floorCode + ' · ' + formatBulkSnapTime(snap.createdAt)
-            + (snaps.length > 1 ? ' (이 층 백업 ' + snaps.length + '개 중 가장 최근)' : '');
+            + (snaps.length > 1 ? ' (이 층 백업 ' + snaps.length + '개 중 가장 최근)' : '')
+            + (sel.hasAfter
+                ? ''
+                : ' — 작업 직후 기록이 없는 옛 백업이라 자동으로 고르지 않았습니다. 되살릴 행을 직접 골라 주세요.');
         const rows = (diff.changed || []).concat(diff.deletedAfter || []);
         const added = diff.addedAfter || [];
         const body = document.getElementById('bulkRestoreTableBody');
         const rowHtml = rows.map((r) => {
             const no = (r.snapshot && r.snapshot.no) || (r.current && r.current.no) || r.id;
-            const kind = r.kind === 'deleted' ? '스냅샷 이후 삭제' : '내용 변경';
+            const kind = bulkRestoreRowLabel(r, sel);
             const checked = selected.has(r.id) ? ' checked' : '';
             return `<tr>
                 <td><input type="checkbox" class="bulk-restore-row-check" value="${escapeBulkRestoreHtml(r.id)}"${checked}></td>
@@ -46911,8 +47027,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 + `. 실제로 지우려면 cleanDuplicateNdt('${code}', { apply: true })`);
             return targets;
         }
+        let ndtCleanSnaps = [];
         if (typeof snapshotBeforeBulkOp === 'function') {
-            await snapshotBeforeBulkOp('비파괴 중복 정리', [floorKey]);
+            ndtCleanSnaps = await snapshotBeforeBulkOp('비파괴 중복 정리', [floorKey]);
         }
         const purge = (map, list) => {
             if (!map || !list.length) return 0;
@@ -46930,6 +47047,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const nGroups = purge(window.state.ndtDisplacementGroups, groupTargets);
         if (typeof markFloorKeyDirty === 'function') markFloorKeyDirty(floorKey);
         if (typeof saveStateToLocalStorage === 'function') saveStateToLocalStorage();
+        if (typeof recordAfterBulkOp === 'function') recordAfterBulkOp(ndtCleanSnaps);
         console.log(`${code}에서 비파괴 ${nItems}건`
             + (nGroups ? `, 측정 구역 ${nGroups}건` : '')
             + '을 지웠습니다. 동기화하면 다른 기기에도 반영됩니다.');

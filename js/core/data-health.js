@@ -495,6 +495,91 @@
         return out;
     }
 
+    /**
+     * 작업 직후 상태. 되살리기가 "그 작업이 바꾼 행"을 가려내는 기준이다.
+     * 작업 직전(스냅샷 본문)과 이것을 비교하면 작업이 건드린 행만 나온다.
+     */
+    function buildAfterState(state, floorKey, now) {
+        const st = state || {};
+        const key = textOf(floorKey);
+        return {
+            at: now || Date.now(),
+            defects: cloneWithoutDataUrls(st.defects && st.defects[key] ? st.defects[key] : []) || [],
+            ndtData: cloneWithoutDataUrls(st.ndtData && st.ndtData[key] ? st.ndtData[key] : []) || [],
+            ndtDisplacementGroups: cloneWithoutDataUrls(
+                st.ndtDisplacementGroups && st.ndtDisplacementGroups[key]
+                    ? st.ndtDisplacementGroups[key]
+                    : []
+            ) || []
+        };
+    }
+
+    /**
+     * 되살리기 기본 선택 — **그 작업이 바꾼 행 중, 작업 이후 아무도 안 건드린 행만**.
+     *
+     * 2026-09-21 검토: 예전 기본 선택은 "스냅샷 이후 바뀐 모든 행 + 지워진 모든 행"이었다.
+     * 10시 가져오기 → 11시에 NO.50을 정상적으로 고치고 중복 행을 지움 → 12시에 되살리기를
+     * 누르면 11시 수정이 되돌아가고 지운 행이 되살아났다. 작업 직후 상태(snapshot.after)와
+     * 비교해 작업이 바꾼 행만 고른다.
+     *
+     * - opTouched: 작업이 바꾸거나 지운 행
+     * - selected: 그중 지금도 작업 직후 그대로인 행(= 기본 선택)
+     * - editedAfterOp: 작업이 바꿨는데 그 뒤 사람이 다시 고친/지운 행(기본 선택 안 함, 보여만 줌)
+     * - unrelated: 작업과 무관하게 이후 바뀐 행(기본 선택 안 함)
+     * 작업 직후 기록이 없는 옛 백업은 아무것도 고르지 않는다(사람이 직접 고른다).
+     */
+    function restoreSelection(snapshot, currentDefects) {
+        const snap = snapshot || {};
+        const before = indexById(snap.defects);
+        const cur = indexById(currentDefects);
+        const hasAfter = !!(snap.after && Array.isArray(snap.after.defects));
+        const out = { hasAfter: hasAfter, selected: [], opTouched: [], editedAfterOp: [], unrelated: [] };
+        const diff = compareDefects(snap.defects, currentDefects);
+        const diffIds = (diff.changed || []).concat(diff.deletedAfter || []).map(function (r) { return r.id; });
+        if (!hasAfter) {
+            out.unrelated = diffIds.slice();
+            return out;
+        }
+        const after = indexById(snap.after.defects);
+        Object.keys(before).forEach(function (id) {
+            const opDeleted = !after[id];
+            const opChanged = !opDeleted && defectsDiffer(before[id], after[id]);
+            if (!opDeleted && !opChanged) return;
+            out.opTouched.push(id);
+            if (opDeleted) {
+                if (!cur[id]) out.selected.push(id);          // 작업이 지웠고 지금도 없음
+                else out.editedAfterOp.push(id);               // 그 뒤 누가 다시 만듦
+                return;
+            }
+            if (cur[id] && !defectsDiffer(cur[id], after[id])) out.selected.push(id);
+            else out.editedAfterOp.push(id);                   // 그 뒤 다시 고쳤거나 지움
+        });
+        const touched = Object.create(null);
+        out.opTouched.forEach(function (id) { touched[id] = true; });
+        out.unrelated = diffIds.filter(function (id) { return !touched[id]; });
+        return out;
+    }
+
+    /**
+     * 자동으로 되살릴 비파괴 — 작업이 지웠고(직전엔 있고 직후엔 없음) 지금도 없는 것만.
+     * 작업 뒤에 사람이 일부러 지운 비파괴는 되살리지 않는다. 작업 직후 기록이 없으면 없음.
+     */
+    function ndtIdsRemovedByOp(snapshot, floorSlice) {
+        const snap = snapshot || {};
+        if (!snap.after) return [];
+        const slice = floorSlice || {};
+        const out = [];
+        [['ndtData', 'ndtData'], ['ndtDisplacementGroups', 'ndtDisplacementGroups']].forEach(function (pair) {
+            const beforeBy = indexById(snap[pair[0]]);
+            const afterBy = indexById(snap.after[pair[0]]);
+            const curBy = indexById(slice[pair[1]]);
+            Object.keys(beforeBy).forEach(function (id) {
+                if (!afterBy[id] && !curBy[id]) out.push(id);
+            });
+        });
+        return out;
+    }
+
     function untrackOnFloorSlice(slice, idListKey, atMapKey, id) {
         const ids = Array.isArray(slice[idListKey]) ? slice[idListKey] : [];
         slice[idListKey] = ids.filter(function (x) { return x !== id; });
@@ -559,7 +644,7 @@
         const snapBy = indexById(snap.defects);
         const selected = Array.isArray(options.ids)
             ? options.ids.map(textOf).filter(Boolean)
-            : defaultSelectedIds(compareDefects(snap.defects, slice.defects));
+            : restoreSelection(snap, slice.defects).selected;
 
         const restored = [];
         const skipped = [];
@@ -587,15 +672,10 @@
         } else if (options.restoreNdt) {
             ndtIds = Object.keys(ndtBy).concat(Object.keys(groupBy));
         } else {
-            // 층 도면 삭제·중복 정리처럼 스냅샷 이후 사라진 비파괴만 되살린다.
-            // 조사표 가져오기처럼 비파괴를 안 건드린 작업은 기존 값을 덮지 않는다.
-            ndtIds = [];
-            Object.keys(ndtBy).forEach(function (id) {
-                if (!curNdtBy[id]) ndtIds.push(id);
-            });
-            Object.keys(groupBy).forEach(function (id) {
-                if (!curGroupBy[id]) ndtIds.push(id);
-            });
+            // 층 도면 삭제·중복 정리처럼 **그 작업이 지운** 비파괴만 되살린다.
+            // 예전에는 "지금 없는 비파괴"를 전부 되살려서, 작업 뒤 사람이 일부러 지운 것까지
+            // 살아났다. 조사표 가져오기처럼 비파괴를 안 건드린 작업은 기존 값을 덮지 않는다.
+            ndtIds = ndtIdsRemovedByOp(snap, slice);
         }
         ndtIds.forEach(function (id) {
             if (ndtBy[id]) {
@@ -755,11 +835,17 @@
         const ts = now || Date.now();
         const max = maxPerFloor == null ? BULK_SNAPSHOT_MAX_PER_FLOOR : maxPerFloor;
         const saved = [];
+        // 복사는 **지금 바로** 한다. 예전에는 저장 체인(.then) 안에서 복사해서, 호출한 쪽이
+        // await 없이 바로 데이터를 바꾸면 "바뀐 뒤" 상태가 백업됐다. 저장(I/O)만 뒤로 미룬다.
+        const snaps = keys.map(function (key, idx) {
+            const snap = buildFloorSnapshot(state, key, opName, ts + idx);
+            snap.id = newSnapshotId(ts, idx + '_' + Math.random().toString(36).slice(2, 6));
+            return snap;
+        });
         let chain = Promise.resolve();
-        keys.forEach(function (key, idx) {
+        snaps.forEach(function (snap) {
+            const key = snap.floorKey;
             chain = chain.then(function () {
-                const snap = buildFloorSnapshot(state, key, opName, ts + idx);
-                snap.id = newSnapshotId(ts, idx + '_' + Math.random().toString(36).slice(2, 6));
                 return store.put(snap).then(function () {
                     return store.listByFloor(key);
                 }).then(function (existing) {
@@ -796,6 +882,9 @@
         cloneWithoutDataUrls: cloneWithoutDataUrls,
         splitFloorKey: splitFloorKey,
         buildFloorSnapshot: buildFloorSnapshot,
+        buildAfterState: buildAfterState,
+        restoreSelection: restoreSelection,
+        ndtIdsRemovedByOp: ndtIdsRemovedByOp,
         compareDefects: compareDefects,
         defaultSelectedIds: defaultSelectedIds,
         applyRestoreToFloor: applyRestoreToFloor,
