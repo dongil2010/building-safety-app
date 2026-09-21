@@ -38073,7 +38073,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     if (t) {
                         const extCombined = !!(floorsData[slotIdx] && floorsData[slotIdx].exteriorCombined);
                         const titleFloor = extCombined ? '건축물 외부' : getFloorLabel(floorCode);
-                        t.textContent = `${slotIdx + 1}) ${titleFloor} 상태조사표`;
+                        t.textContent = `${slotIdx + 1}) ${titleFloor} 상태조사표 `; // 제목 글자와 표 사이 스페이스 1
                     }
                     if (slotIdx === 0) {
                         // 첫 페이지 표 제목 바로 위에 표본 문서의 "A동" 같은 동 이름 문단 + 빈 문단
@@ -40464,7 +40464,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     if (t) {
                         const extCombined = !!(floorsData[slotIdx] && floorsData[slotIdx].exteriorCombined);
                         const titleFloor = extCombined ? '건축물 외부' : getFloorLabel(floorCode);
-                        t.textContent = `${slotIdx + 1}) ${titleFloor}`;
+                        t.textContent = `${slotIdx + 1}) ${titleFloor} `; // 제목 글자와 표 사이 스페이스 1
                     }
                     if (slotIdx === 0) {
                         const dongPara = slot.titlePara.previousElementSibling;
