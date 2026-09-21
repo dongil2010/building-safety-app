@@ -209,6 +209,11 @@ function testAppExposesCleanup() {
     const block = app.slice(start, start + 3000);
     assert.ok(block.indexOf('health.collectFirstByIdAcrossFloors(map, buildingId, floorCodes)') >= 0,
         '보고서 합치기는 중복 제거 모듈을 실제로 호출해야 한다');
+    // 부동침하·부재변위 측정 구역도 같은 방식으로 복사되므로 정리 대상에 들어가야 한다
+    const cleanStart = app.indexOf('window.cleanDuplicateNdt');
+    const cleanBlock = app.slice(cleanStart, cleanStart + 3000);
+    assert.ok(cleanBlock.indexOf('window.state.ndtDisplacementGroups') >= 0,
+        '정리 도구가 측정 구역(부동침하)도 봐야 한다');
 }
 
 testDetectsPlaceholderFloor();

@@ -46177,6 +46177,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         }
         const ndtDup = (typeof health.crossFloorDuplicateIds === 'function')
             ? health.crossFloorDuplicateIds(window.state.ndtData, id)
+                .concat(health.crossFloorDuplicateIds(window.state.ndtDisplacementGroups, id))
             : [];
         if (ndtDup.length) {
             console.warn('[비파괴] 같은 번호가 여러 층에 있는 항목 ' + ndtDup.length + '건 — '
@@ -46221,29 +46222,44 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             return [];
         }
         const floorKey = `${id}_${code}`;
-        const targets = health.duplicatedRecordsOnFloor(window.state.ndtData, id, code);
+        // 부동침하·부재변위 측정 구역(ndtDisplacementGroups)도 같이 본다.
+        // 구역 묘비는 NDT 핀과 같은 deletedNdtIds를 쓴다(id 접두가 달라 서로 안 겹침).
+        const itemTargets = health.duplicatedRecordsOnFloor(window.state.ndtData, id, code);
+        const groupTargets = health.duplicatedRecordsOnFloor(window.state.ndtDisplacementGroups, id, code);
+        const targets = itemTargets.concat(groupTargets);
         if (!targets.length) {
             console.log(`${code}: 다른 층과 겹치는 비파괴 항목이 없습니다.`);
             return [];
         }
-        console.table(targets.map((t) => ({ 번호: t.id, 분류: t.category, 위치: t.location })));
+        console.table(itemTargets.map((t) => ({ 번호: t.id, 분류: t.category, 위치: t.location })));
+        if (groupTargets.length) {
+            console.table(groupTargets.map((g) => ({ 번호: g.id, 분류: g.category || '변위', 이름: g.name || '' })));
+        }
         if (!options.apply) {
-            console.warn(`${code}에서 지울 후보 ${targets.length}건입니다. 실제로 지우려면 `
-                + `cleanDuplicateNdt('${code}', { apply: true })`);
+            console.warn(`${code}에서 지울 후보 ${targets.length}건입니다`
+                + (groupTargets.length ? ` (측정 구역 ${groupTargets.length}건 포함)` : '')
+                + `. 실제로 지우려면 cleanDuplicateNdt('${code}', { apply: true })`);
             return targets;
         }
-        const targetIds = new Set(targets.map((t) => t.id));
-        targetIds.forEach((itemId) => trackNdtDeletion(floorKey, itemId));
-        const rest = (window.state.ndtData[floorKey] || []).filter((it) => !(it && targetIds.has(it.id)));
-        if (rest.length) {
-            window.state.ndtData[floorKey] = rest;
-        } else {
-            delete window.state.ndtData[floorKey];
-        }
+        const purge = (map, list) => {
+            if (!map || !list.length) return 0;
+            const ids = new Set(list.map((t) => t.id));
+            ids.forEach((recId) => trackNdtDeletion(floorKey, recId));
+            const rest = (map[floorKey] || []).filter((it) => !(it && ids.has(it.id)));
+            if (rest.length) {
+                map[floorKey] = rest;
+            } else {
+                delete map[floorKey];
+            }
+            return ids.size;
+        };
+        const nItems = purge(window.state.ndtData, itemTargets);
+        const nGroups = purge(window.state.ndtDisplacementGroups, groupTargets);
         if (typeof markFloorKeyDirty === 'function') markFloorKeyDirty(floorKey);
         if (typeof saveStateToLocalStorage === 'function') saveStateToLocalStorage();
-        console.log(`${code}에서 비파괴 ${targetIds.size}건을 지웠습니다. `
-            + '동기화하면 다른 기기에도 반영됩니다.');
+        console.log(`${code}에서 비파괴 ${nItems}건`
+            + (nGroups ? `, 측정 구역 ${nGroups}건` : '')
+            + '을 지웠습니다. 동기화하면 다른 기기에도 반영됩니다.');
         return targets;
     };
 
