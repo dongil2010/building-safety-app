@@ -49692,6 +49692,93 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         }
     }
 
+    /** 화면·상태에 회사 이름을 반영한다(상단 표시, 점검 수행회사명 칸, 보고서용 값). */
+    function applyCompanyNameLocally(name) {
+        const next = String(name == null ? '' : name).trim();
+        if (!next) return;
+        window.state.companyName = next;
+        try { localStorage.setItem('building_company_name', next); } catch (_e) { /* ignore */ }
+        const lblCompany = document.getElementById('lblUserCompany');
+        if (lblCompany) lblCompany.textContent = next;
+        const inputHomeCompany = document.getElementById('inputHomeCompanyName');
+        if (inputHomeCompany) inputHomeCompany.value = next;
+    }
+
+    /**
+     * 회사 정보의 이름을 기준으로 화면을 맞추고, 본인 사용자 정보가 옛 이름이면 고쳐 둔다.
+     * 본인 문서의 companyName은 보안 규칙상 본인이 고칠 수 있다(membershipFieldsOnly).
+     */
+    function applyCompanyNameFromCompanyDoc(profile, companyDocName) {
+        const next = String(companyDocName == null ? '' : companyDocName).trim();
+        if (!next || !profile) return;
+        // 읽는 사이 회사를 나갔거나 바꿨으면 손대지 않는다
+        if (window.state.companyId !== profile.companyId || window.state.uid !== profile.uid) return;
+        if (next !== String(window.state.companyName || '').trim()) applyCompanyNameLocally(next);
+        const stored = String(profile.companyName == null ? '' : profile.companyName).trim();
+        if (stored !== next && db && auth && auth.currentUser && auth.currentUser.uid === profile.uid) {
+            db.collection('users').doc(profile.uid).update({ companyName: next })
+                .catch((e) => console.warn('사용자 정보의 회사 이름 갱신 실패(다음 로그인 때 다시 시도):', e));
+        }
+    }
+
+    /** 관리자 전용 「회사 이름」 버튼 — index.html은 건드리지 않고 가입 승인 버튼 옆에 만든다. */
+    function setCompanyRenameButtonVisible(show) {
+        let btn = document.getElementById('btnRenameCompany');
+        if (!btn) {
+            const approval = document.getElementById('btnOpenMemberApproval');
+            const host = approval && approval.parentNode;
+            if (!host) return;
+            btn = document.createElement('button');
+            btn.type = 'button';
+            btn.id = 'btnRenameCompany';
+            btn.className = 'btn btn-sm btn-outline hero-btn-rename-company';
+            btn.title = '회사 이름 바꾸기 (관리자)';
+            btn.innerHTML = '<i class="fa-solid fa-pen"></i> 회사 이름';
+            btn.addEventListener('click', () => { window.renameCompanyAsAdmin(); });
+            host.insertBefore(btn, approval.nextSibling);
+        }
+        btn.style.display = show ? 'inline-flex' : 'none';
+    }
+
+    /**
+     * 관리자가 회사 이름을 바꾼다. 점검 데이터는 회사 고유 번호(companyId)로 연결돼 있어
+     * 이름을 바꿔도 끊기지 않는다. 회사 정보(companies)의 이름을 바꾸면 다른 직원은 다음
+     * 로그인 때 applyCompanyNameFromCompanyDoc가 새 이름으로 맞춘다.
+     * 가입 코드(joinCodes)의 이름은 보안 규칙상 앱에서 못 바꾼다(Firebase 콘솔에서 수정).
+     */
+    window.renameCompanyAsAdmin = async function () {
+        if (window.state.role !== 'admin' || !db || !window.state.companyId || !window.state.uid) {
+            window.showToast('회사 이름은 관리자만 바꿀 수 있습니다.', 'warning');
+            return;
+        }
+        const cur = String(window.state.companyName || '').trim();
+        const input = window.prompt('새 회사 이름을 입력하세요.\n(점검 데이터는 그대로 연결됩니다)', cur);
+        if (input == null) return;
+        const next = input.trim();
+        if (!next) {
+            window.showToast('회사 이름을 비울 수 없습니다.', 'warning');
+            return;
+        }
+        if (next.length > 60) {
+            window.showToast('회사 이름이 너무 깁니다(60자 이내).', 'warning');
+            return;
+        }
+        if (next === cur) return;
+        if (!window.confirm(`회사 이름을 바꿉니다.\n\n${cur || '(없음)'}  →  ${next}\n\n다른 직원은 다음 로그인 때 새 이름으로 보입니다. 계속할까요?`)) return;
+        window.showLoading('회사 이름을 바꾸는 중입니다...');
+        try {
+            await db.collection('companies').doc(window.state.companyId).update({ name: next });
+            await db.collection('users').doc(window.state.uid).update({ companyName: next });
+            applyCompanyNameLocally(next);
+            window.showToast(`회사 이름을 '${next}'(으)로 바꿨습니다. 회사 검색 화면의 이름은 Firebase 콘솔의 가입 코드(joinCodes)에서 따로 바꿔야 합니다.`, 'success', 9000);
+        } catch (e) {
+            console.error('회사 이름 변경 실패:', e);
+            window.showToast('회사 이름을 바꾸지 못했습니다: ' + (e && e.message ? e.message : e), 'error', 6000);
+        } finally {
+            window.hideLoading();
+        }
+    };
+
     async function enterAppAsUser(profile) {
         window.state.uid = profile.uid;
         window.state.userName = profile.name;
@@ -49724,12 +49811,28 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (btnApproval) btnApproval.style.display = (profile.role === 'admin') ? 'inline-flex' : 'none';
         const btnLeaveCompany = document.getElementById('btnLeaveCompany');
         if (btnLeaveCompany) btnLeaveCompany.style.display = (profile.role === 'admin' || profile.role === 'member') ? 'inline-flex' : 'none';
+        setCompanyRenameButtonVisible(profile.role === 'admin');
 
+        // 회사 이름은 회사 정보(companies/{id}.name)가 기준이다. 사용자 정보(users/{uid}.companyName)는
+        // 가입 당시 이름을 복사해 둔 것이라, 관리자가 이름을 바꿔도 직원마다 옛 이름이 남았다.
+        // 로그인 때 회사 정보의 이름으로 화면을 맞추고 본인 사용자 정보도 고쳐 둔다(2026-09-21).
+        let companyDocData = null;
         if (profile.role === 'admin' && db) {
             try {
                 const companyDoc = await db.collection('companies').doc(profile.companyId).get();
-                if (companyDoc.exists) window.state.companyJoinCode = companyDoc.data().joinCode || null;
+                if (companyDoc.exists) {
+                    companyDocData = companyDoc.data() || {};
+                    window.state.companyJoinCode = companyDocData.joinCode || null;
+                }
             } catch (e) { console.warn('회사 코드 조회 실패:', e); }
+        }
+        if (companyDocData) {
+            applyCompanyNameFromCompanyDoc(profile, companyDocData.name);
+        } else if (db && profile.companyId) {
+            // 직원은 로그인을 늦추지 않게 뒤에서 읽는다(못 읽으면 사용자 정보의 이름을 그대로 씀)
+            db.collection('companies').doc(profile.companyId).get()
+                .then((doc) => { if (doc.exists) applyCompanyNameFromCompanyDoc(profile, (doc.data() || {}).name); })
+                .catch((e) => console.warn('회사 이름 조회 실패(사용자 정보의 이름을 씁니다):', e));
         }
 
         // 리스너를 붙이기 전에 토큰에 회사 클레임을 넣어야, 이후 스냅샷마다
@@ -50129,6 +50232,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             if (btnApproval) btnApproval.style.display = 'none';
             const btnLeaveCompany = document.getElementById('btnLeaveCompany');
             if (btnLeaveCompany) btnLeaveCompany.style.display = 'none';
+            setCompanyRenameButtonVisible(false);
             window.showToast('회사에서 나왔습니다.', 'info', 4000);
             showCompanyJoinOverlay('다른 회사를 검색해 다시 소속을 신청할 수 있습니다.');
         } catch (err) {

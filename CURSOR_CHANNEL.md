@@ -1374,3 +1374,29 @@
 >
 > **검증**: `npm test` 26개 파일 통과. `test-ndt-summary-colors.js` 신규 — 결과표 칸에 #f8fafc·#c084fc 금지,
 > 두 칸 모두 흰 바탕 대비 4.5:1 이상. 흰 글씨로 되돌리면 실패 확인.
+
+---
+
+### 🔷 [Claude Code] - 2026-09-22 01:10:00
+> **`[WAITING_REVIEW]` 회사 이름 바꾸기 (관리자) + 로그인 때 회사 정보의 이름을 기준으로**
+>
+> 요청: 상단 「아인테크 (이수근)」을 「(주)동일구조」로. 점검 데이터는 `companyId`(companies 자동 id)로
+> 연결돼 이름을 바꿔도 끊기지 않습니다. 다만 이름이 **세 군데에 복사**돼 있습니다:
+> `companies/{id}.name`, 직원별 `users/{uid}.companyName`(상단 표시의 출처), `joinCodes/{code}.companyName`.
+>
+> 1. **로그인 때 회사 정보 이름 기준** — `enterAppAsUser`가 `companies/{id}.name`으로 화면·`state.companyName`을
+>    맞추고, 본인 `users` 문서가 옛 이름이면 고칩니다(본인 companyName 수정은 `membershipFieldsOnly`로 허용).
+>    관리자는 이미 읽던 회사 문서를 재사용(추가 읽기 없음), 직원은 로그인을 늦추지 않게 뒤에서 1회 읽습니다.
+> 2. **관리자 전용 「회사 이름」 버튼** — 가입 승인 옆에 JS로 생성(index.html 미변경). 입력·확인 후
+>    `companies/{id}.name`과 본인 `users` 문서를 바꿉니다. 다른 직원은 다음 로그인 때 1번이 맞춥니다.
+>
+> ⚠️ 관리자가 **다른 직원** `users` 문서를 고치는 규칙(`adminCompanyIdForUserUpdate`)은 승인된 직원의
+> `pendingCompanyId`가 `null`로 남아 판정이 실패할 가능성이 있어 쓰지 않았습니다(각자 로그인 때 본인이 고침).
+> ⚠️ `joinCodes`는 `allow update: if false`라 앱에서 못 바꿉니다 — 회사 검색·가입 신청 화면 이름은 콘솔에서 수정.
+> 참고: 설정의 「점검 수행회사명」도 같은 `state.companyName`이고 로그인 때마다 계정의 회사 이름으로 덮여서,
+> 보고서 회사명도 이제 새 이름을 따라갑니다.
+>
+> **검증**: `npm test` 27개 파일 통과. `test-company-rename.js` 신규(로그인 기준·본인만 수정·관리자만 변경·
+> index.html 미변경·규칙 전제). 관리자 확인 제거/회사 바뀜 확인 제거/직원 버튼 노출 변형 모두 실패 확인.
+> 로컬: 페이지 오류 없음, 직원 역할로 부르면 "관리자만" 안내. **Firebase 실제 쓰기는 로그인이 필요해 미확인**
+> — 배포 후 관리자 계정으로 확인 필요.
