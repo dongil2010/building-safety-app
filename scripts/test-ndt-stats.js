@@ -232,6 +232,7 @@ function testCategoryVisibility() {
         componentCrack: true,
         defectMatrix: true,
         defectFilters: true,
+        viewChips: true,
         ndtStrength: false,
         ndtCarb: false
     });
@@ -242,6 +243,7 @@ function testCategoryVisibility() {
         componentCrack: false,
         defectMatrix: false,
         defectFilters: false,
+        viewChips: false,
         ndtStrength: true,
         ndtCarb: true
     });
@@ -251,8 +253,30 @@ function testCategoryVisibility() {
     });
 }
 
+/** 비파괴 한 페이지는 층 행 + 전체 행이고 층묶음 행은 없다 */
+function testNdtPageCombinesFloorAndOverall() {
+    const ndtData = {};
+    ndtData[floorKey('1F')] = [20.1, 20.3, 20.5, 20.7].map((v) => ({
+        category: '강도', strengthFinal: v
+    }));
+    ndtData[floorKey('지상5층')] = [30.1, 30.3, 30.5, 30.7].map((v) => ({
+        category: '강도', strengthFinal: v
+    }));
+    const payload = api.buildNdtStatsPayload(ndtData, {
+        buildingId: BLDG,
+        getFloorLabel: (code) => ({ '1F': '지상 1층', 지상5층: '지상 5층' }[code] || code)
+    });
+    const comb = api.ndtCombinedRows(payload, 'strength');
+    assert.strictEqual(comb.floors.length, 2);
+    assert.ok(comb.floors.every((r) => r.floorCode !== 'overall' && r.key !== 'ground_all'));
+    assert.strictEqual(comb.overall.strength.count, 8);
+    assert.strictEqual(api.formatFixed(comb.overall.strength.avg, 1), '25.4');
+    assert.ok(!comb.floors.some((r) => r.key === 'ground_all'), '층묶음 행이 한 페이지에 들어가면 안 된다');
+}
+
 function main() {
     testCategoryVisibility();
+    testNdtPageCombinesFloorAndOverall();
     testGroupPoolsAllMeasurements();
     testGroupAverageIsNotAverageOfFloorAverages();
     testCarbGroupPoolsAllMeasurements();

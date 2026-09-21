@@ -469,15 +469,30 @@
             componentCrack: !isNdt,
             defectMatrix: !isNdt,
             defectFilters: !isNdt,
+            viewChips: !isNdt,
             ndtStrength: isNdt,
             ndtCarb: isNdt
         };
+    }
+
+    /** 비파괴 한 페이지: 층 행 + 전체 행. 층묶음은 안 넣는다 */
+    function ndtCombinedRows(payload, kind) {
+        payload = payload || {};
+        var field = kind === 'carbonation' ? 'carbonation' : 'strength';
+        var floors = (payload.floorRows || []).filter(function (row) {
+            return row[field] && row[field].count;
+        });
+        var overall = payload.overall && payload.overall[field] && payload.overall[field].count
+            ? payload.overall
+            : null;
+        return { floors: floors, overall: overall };
     }
 
     var api = {
         STATS_CATEGORIES: STATS_CATEGORIES,
         normalizeStatsCategory: normalizeStatsCategory,
         getStatsSectionVisibility: getStatsSectionVisibility,
+        ndtCombinedRows: ndtCombinedRows,
         classifyFloorGroup: classifyFloorGroup,
         getCoarseFloorGroup: getCoarseFloorGroup,
         toNum: toNum,
@@ -897,23 +912,18 @@
         var hint = document.getElementById('statsViewHint');
         if (!hint) return;
         var isPrecise = bldg && bldg.inspectionType === '정밀안전점검';
-        var isNdt = statsCategory === 'ndt';
+        if (statsCategory === 'ndt') {
+            hint.textContent = '층별과 건물 전체를 한 표에 보여 줍니다. 현재 선택 층은 강조됩니다.';
+            return;
+        }
         if (view === 'group') {
-            if (isNdt) {
-                hint.textContent = '층을 구역(지하·지상·옥상·부대)별로 묶어 강도·탄산화를 집계합니다.';
-            } else {
-                hint.textContent = isPrecise
-                    ? '정밀안전점검: 지하·지상·옥상·부대 등 층 구역별로 결함 종류를 묶어 봅니다.'
-                    : '층을 구역(지하·지상·옥상·부대)별로 묶어 결함 종류를 집계합니다.';
-            }
+            hint.textContent = isPrecise
+                ? '정밀안전점검: 지하·지상·옥상·부대 등 층 구역별로 결함 종류를 묶어 봅니다.'
+                : '층을 구역(지하·지상·옥상·부대)별로 묶어 결함 종류를 집계합니다.';
         } else if (view === 'floor') {
-            hint.textContent = isNdt
-                ? '각 층별 콘크리트 강도(범위·층별 평균·측정/설계)와 탄산화입니다. 현재 선택 층은 강조 표시됩니다.'
-                : '각 층별 결함 종류 건수입니다. 현재 선택 층은 강조 표시됩니다.';
+            hint.textContent = '각 층별 결함 종류 건수입니다. 현재 선택 층은 강조 표시됩니다.';
         } else {
-            hint.textContent = isNdt
-                ? '건물 전체 강도·탄산화 합계입니다.'
-                : '건물 전체 결함 종류 합계입니다.';
+            hint.textContent = '건물 전체 결함 종류 합계입니다.';
         }
     }
 
@@ -974,11 +984,15 @@
         if (!vis) return;
         var matrixTable = document.getElementById('statsMatrixTable');
         var defectPanel = matrixTable ? matrixTable.closest('.stats-panel') : null;
+        var viewChips = document.querySelector('#tab-stats .stats-view-chips');
+        var toolbar = document.querySelector('#tab-stats .stats-toolbar');
         var toggles = [
             [document.getElementById('statsSummaryCards'), vis.summaryCards],
             [document.getElementById('statsComponentSection'), vis.componentCrack],
             [defectPanel, vis.defectMatrix],
             [document.querySelector('#tab-stats .stats-filter-row'), vis.defectFilters],
+            [viewChips, vis.viewChips],
+            [toolbar, vis.viewChips || vis.defectFilters],
             [document.getElementById('statsNdtStrengthSection'), vis.ndtStrength],
             [document.getElementById('statsNdtCarbSection'), vis.ndtCarb]
         ];
@@ -1034,53 +1048,24 @@
         return floorCodes;
     }
 
-    function ndtRowsForView(payload, view) {
-        if (!payload) return [];
-        if (view === 'group') return payload.groupRows || [];
-        if (view === 'overall') return payload.overall ? [payload.overall] : [];
-        return payload.floorRows || [];
+    function ndtStrengthRatioCell(s) {
+        if (!s || !s.ratioCount) return '-';
+        return Math.round(s.ratioAvg) + '%' + (s.ratioMin != null && s.ratioMax != null && s.ratioMin !== s.ratioMax
+            ? ' <span class="stats-ndt-sub">(' + Math.round(s.ratioMin) + '~' + Math.round(s.ratioMax) + '%)</span>'
+            : '');
     }
 
-    function ndtRowLabel(row, view) {
-        var label = row.floorLabel || row.label || '';
-        if (view === 'group' && row.floors && row.floors.length) {
-            label = (row.label || label) + ' (' + row.floors.join(', ') + ')';
-        }
-        return label;
-    }
-
-    function ndtAvgWord(view) {
-        return view === 'floor' ? '층별 평균' : '평균';
-    }
-
-    function pickNdtLeadRow(rows, payload, view) {
-        if (view === 'floor' && payload && payload.currentFloor) {
-            for (var i = 0; i < rows.length; i++) {
-                if (rows[i].floorCode === payload.currentFloor) return rows[i];
-            }
-        }
-        if (view === 'group' && payload && payload.currentFloor && ndtStats.getCoarseFloorGroup) {
-            var want = ndtStats.getCoarseFloorGroup(payload.currentFloor).key;
-            for (var j = 0; j < rows.length; j++) {
-                if (rows[j].key === want) return rows[j];
-            }
-        }
-        return rows[0] || null;
-    }
-
-    function renderNdtStrengthSection(root, payload, view) {
+    function renderNdtStrengthSection(root, payload) {
         if (!root) return;
-        var rows = ndtRowsForView(payload, view).filter(function (row) {
-            return row.strength && row.strength.count;
-        });
-        var title = view === 'floor' ? '층별 콘크리트 강도' : (view === 'group' ? '층묶음별 콘크리트 강도' : '전체 콘크리트 강도');
-        var avgWord = ndtAvgWord(view);
+        var combined = (ndtStats.ndtCombinedRows || function () { return { floors: [], overall: null }; })(payload, 'strength');
+        var floors = combined.floors || [];
+        var overall = combined.overall;
+        var title = '콘크리트 강도';
         var lead = '';
-        var leadRow = pickNdtLeadRow(rows, payload, view);
-        if (leadRow && ndtStats.formatStrengthHeadline) {
-            lead = ndtStats.formatStrengthHeadline(leadRow.floorLabel || leadRow.label, leadRow.strength, avgWord);
+        if (overall && ndtStats.formatStrengthHeadline) {
+            lead = ndtStats.formatStrengthHeadline('전체', overall.strength, '평균');
         }
-        if (!rows.length) {
+        if (!floors.length && !overall) {
             root.innerHTML = '<div class="stats-panel-head"><h3 class="stats-panel-title">' + esc(title) + '</h3></div>'
                 + '<p class="stats-empty">표시할 강도 측정값이 없습니다.</p>';
             return;
@@ -1088,46 +1073,40 @@
         var formatRange = ndtStats.formatRange;
         var formatFixed = ndtStats.formatFixed;
         var formatGrade = ndtStats.formatGradeCounts;
-        var body = rows.map(function (row) {
-            var s = row.strength;
-            var isCurrent = view === 'floor' && row.floorCode === payload.currentFloor;
-            var trCls = isCurrent ? ' class="stats-row-current"' : '';
-            var ratioCell = s.ratioCount
-                ? (Math.round(s.ratioAvg) + '%' + (s.ratioMin != null && s.ratioMax != null && s.ratioMin !== s.ratioMax
-                    ? ' <span class="stats-ndt-sub">(' + Math.round(s.ratioMin) + '~' + Math.round(s.ratioMax) + '%)</span>'
-                    : ''))
-                : '-';
-            return '<tr' + trCls + '>'
-                + '<th scope="row">' + esc(ndtRowLabel(row, view)) + '</th>'
+        var rowHtml = function (label, s, trCls) {
+            return '<tr' + (trCls ? ' class="' + trCls + '"' : '') + '>'
+                + '<th scope="row">' + esc(label) + '</th>'
                 + '<td>' + esc(s.count) + '</td>'
                 + '<td class="stats-cell-hit">' + esc(formatRange(s.min, s.max, 1)) + '</td>'
                 + '<td class="stats-cell-sum">' + esc(formatFixed(s.avg, 1)) + '</td>'
-                + '<td>' + ratioCell + '</td>'
+                + '<td>' + ndtStrengthRatioCell(s) + '</td>'
                 + '<td>' + esc(formatGrade(s.grades)) + '</td>'
                 + '</tr>';
+        };
+        var body = floors.map(function (row) {
+            var isCurrent = row.floorCode === payload.currentFloor;
+            return rowHtml(row.floorLabel || row.label, row.strength, isCurrent ? 'stats-row-current' : '');
         }).join('');
+        if (overall) body += rowHtml('전체', overall.strength, 'stats-ndt-total');
         root.innerHTML = '<div class="stats-panel-head"><h3 class="stats-panel-title">' + esc(title) + '</h3>'
             + (lead ? '<p class="stats-ndt-lead">' + esc(lead) + '</p>' : '')
             + '</div>'
             + '<div class="table-responsive stats-table-wrap"><table class="data-table stats-matrix-table stats-ndt-table">'
-            + '<thead><tr><th>' + esc(view === 'group' ? '층묶음' : (view === 'overall' ? '전체' : '층'))
-            + '</th><th>건수</th><th>강도(MPa)</th><th>' + esc(avgWord) + '</th><th>측정/설계 평균</th><th>등급</th></tr></thead>'
+            + '<thead><tr><th>층</th><th>건수</th><th>강도(MPa)</th><th>평균</th><th>측정/설계 평균</th><th>등급</th></tr></thead>'
             + '<tbody>' + body + '</tbody></table></div>';
     }
 
-    function renderNdtCarbSection(root, payload, view) {
+    function renderNdtCarbSection(root, payload) {
         if (!root) return;
-        var rows = ndtRowsForView(payload, view).filter(function (row) {
-            return row.carbonation && row.carbonation.count;
-        });
-        var title = view === 'floor' ? '층별 탄산화' : (view === 'group' ? '층묶음별 탄산화' : '전체 탄산화');
-        var avgWord = ndtAvgWord(view);
+        var combined = (ndtStats.ndtCombinedRows || function () { return { floors: [], overall: null }; })(payload, 'carbonation');
+        var floors = combined.floors || [];
+        var overall = combined.overall;
+        var title = '탄산화';
         var lead = '';
-        var leadRow = pickNdtLeadRow(rows, payload, view);
-        if (leadRow && ndtStats.formatCarbHeadline) {
-            lead = ndtStats.formatCarbHeadline(leadRow.floorLabel || leadRow.label, leadRow.carbonation, avgWord);
+        if (overall && ndtStats.formatCarbHeadline) {
+            lead = ndtStats.formatCarbHeadline('전체', overall.carbonation, '평균');
         }
-        if (!rows.length) {
+        if (!floors.length && !overall) {
             root.innerHTML = '<div class="stats-panel-head"><h3 class="stats-panel-title">' + esc(title) + '</h3></div>'
                 + '<p class="stats-empty">표시할 탄산화 측정값이 없습니다.</p>';
             return;
@@ -1135,15 +1114,12 @@
         var formatRange = ndtStats.formatRange;
         var formatFixed = ndtStats.formatFixed;
         var formatCaution = ndtStats.formatCarbCaution;
-        var body = rows.map(function (row) {
-            var c = row.carbonation;
-            var isCurrent = view === 'floor' && row.floorCode === payload.currentFloor;
-            var trCls = isCurrent ? ' class="stats-row-current"' : '';
+        var rowHtml = function (label, c, trCls) {
             var caution = formatCaution(c);
             var cautionCls = (c.depleted || c.lifeOver) ? 'stats-ndt-warn' : ((c.remainLow || c.lifeShort) ? 'stats-ndt-caution' : '');
             var lifeCell = c.lifeCount ? (Math.round(c.lifeAvg) + '년') : '-';
-            return '<tr' + trCls + '>'
-                + '<th scope="row">' + esc(ndtRowLabel(row, view)) + '</th>'
+            return '<tr' + (trCls ? ' class="' + trCls + '"' : '') + '>'
+                + '<th scope="row">' + esc(label) + '</th>'
                 + '<td>' + esc(c.count) + '</td>'
                 + '<td class="stats-cell-hit">' + esc(formatRange(c.depthMin, c.depthMax, 1)) + '</td>'
                 + '<td class="stats-cell-sum">' + esc(formatFixed(c.depthAvg, 1)) + '</td>'
@@ -1151,13 +1127,17 @@
                 + '<td>' + esc(lifeCell) + '</td>'
                 + '<td class="' + cautionCls + '">' + esc(caution) + '</td>'
                 + '</tr>';
+        };
+        var body = floors.map(function (row) {
+            var isCurrent = row.floorCode === payload.currentFloor;
+            return rowHtml(row.floorLabel || row.label, row.carbonation, isCurrent ? 'stats-row-current' : '');
         }).join('');
+        if (overall) body += rowHtml('전체', overall.carbonation, 'stats-ndt-total');
         root.innerHTML = '<div class="stats-panel-head"><h3 class="stats-panel-title">' + esc(title) + '</h3>'
             + (lead ? '<p class="stats-ndt-lead">' + esc(lead) + '</p>' : '')
             + '</div>'
             + '<div class="table-responsive stats-table-wrap"><table class="data-table stats-matrix-table stats-ndt-table">'
-            + '<thead><tr><th>' + esc(view === 'group' ? '층묶음' : (view === 'overall' ? '전체' : '층'))
-            + '</th><th>건수</th><th>깊이(mm)</th><th>' + esc(avgWord) + '</th><th>잔여피복 평균</th><th>잔존수명 평균</th><th>주의</th></tr></thead>'
+            + '<thead><tr><th>층</th><th>건수</th><th>깊이(mm)</th><th>평균</th><th>잔여피복 평균</th><th>잔존수명 평균</th><th>주의</th></tr></thead>'
             + '<tbody>' + body + '</tbody></table></div>';
     }
 
@@ -1177,8 +1157,8 @@
             getFloorLabel: function (code) { return getFloorLabel(code, bldg); },
             currentFloor: window.state && window.state.currentFloor
         });
-        renderNdtStrengthSection(mount.strength, payload, statsView);
-        renderNdtCarbSection(mount.carb, payload, statsView);
+        renderNdtStrengthSection(mount.strength, payload);
+        renderNdtCarbSection(mount.carb, payload);
     }
 
     window.renderDefectStatsTab = function () {
@@ -1229,7 +1209,7 @@
         id: 'tab-stats',
         title: '통계',
         features: [
-            '대분류: 상태조사 / 비파괴조사 — 층별·층묶음·전체는 고른 대분류 안에서 움직임',
+            '대분류: 상태조사 / 비파괴조사',
             '건물 전체 결함 종류 집계',
             '층별 결함 종류 표 (현재 선택 층 강조)',
             '층묶음 보기: 지하·지상·옥상·부대 구역별 집계',
@@ -1239,8 +1219,9 @@
             '구조체/비구조체/마감재 요약 카드',
             '구조 부재(기둥·큰보·작은보·상부 보·슬래브·RC벽체·조적벽체) 클릭 시 층별 최대 균열폭 표시',
             '경사·수직·수평균열은 "균열"로 통합 집계',
-            '층별·층묶음·전체 콘크리트 강도: 범위·층별 평균·측정강도/설계강도 평균·등급',
-            '층별·층묶음·전체 탄산화: 깊이 범위·평균·잔여피복·잔존수명·피복소진 주의'
+            '비파괴조사: 층별과 전체를 한 표에 (층묶음·보기 칩 없음)',
+            '콘크리트 강도: 범위·평균·측정강도/설계강도 평균·등급',
+            '탄산화: 깊이 범위·평균·잔여피복·잔존수명·피복소진 주의'
         ],
         ownerHint: 'js/tabs/stats.js',
         enter: function () {
