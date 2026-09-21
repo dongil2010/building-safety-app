@@ -4032,6 +4032,37 @@ html:not(.layout-tablet) #tab-map .inspect-sidebar-left .defect-badge-no {
     margin-right: 0.12rem;
 }
 
+/* 옛 버전 앱 — 클라우드 동기화를 멈추고 새로고침을 안내하는 띠 */
+.bsa-outdated-banner {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 100000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+    padding: 0.6rem 1rem;
+    background: #fef3c7;
+    color: #78350f;
+    border-bottom: 2px solid #f59e0b;
+    font-size: 0.95rem;
+    line-height: 1.4;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+}
+.bsa-outdated-banner .bsa-outdated-banner-btn {
+    background: #d97706;
+    border: 1px solid #b45309;
+    color: #fff;
+    font-weight: 700;
+    white-space: nowrap;
+}
+.bsa-outdated-banner .bsa-outdated-banner-btn:hover {
+    background: #b45309;
+}
+
 /* 부재·조사내용을 빠뜨린 행 — 현장에서 바로 보이게 (보고서에 빈 줄로 나가는 것 방지) */
 #tab-survey tr.survey-row-blank > td {
     background: #fffbeb;

@@ -29154,6 +29154,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 }
 
                 await photoHydratePromise;
+                // 폼이 보여준 값을 기준으로 기록 — 저장 때 이 값 그대로면 "안 건드린 칸"
+                captureDefectFormBaseline(existingPin || null);
                 window._defectFormHydrating = false;
                 if (window._defectPhotosDirty) scheduleDefectAutoApply();
                 drawCanvas();
@@ -29742,25 +29744,12 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (!defects.length) return null;
         if (pushHistory) pushDefectHistory();
 
-        const compVal = getDefectComboValue(
-            document.getElementById('defectComponent'),
-            document.getElementById('defectComponentInput')
-        ) || '';
-        const kindsSelected = getSelectedCrackKindsFromUi();
-        let dTypeVal = kindsSelected.length
-            ? joinDefectTypeList(kindsSelected)
-            : (getDefectComboValue(
-                document.getElementById('defectType'),
-                document.getElementById('defectTypeInput')
-            ) || '');
-        const causesSelected = getSelectedCausesFromUi();
-        let causeVal = causesSelected.length
-            ? joinCauseList(causesSelected)
-            : (getDefectComboValue(
-                document.getElementById('defectCause'),
-                document.getElementById('defectCauseInput')
-            ) || '');
-        const locVal = composeDefectLocation(document.getElementById('defectLocation')?.value || '');
+        // 일괄 수정도 단건과 같은 방식으로 읽는다 — 칩 정리 중 버려지는 말이 없게.
+        const uiFieldsBulk = readDefectGuardedFieldsFromUi();
+        const compVal = uiFieldsBulk.component;
+        let dTypeVal = uiFieldsBulk.defectType;
+        let causeVal = uiFieldsBulk.cause;
+        const locVal = uiFieldsBulk.location;
         const isProgress = document.getElementById('defectProgressCheck')?.checked || false;
         const isLeak = document.getElementById('defectLeakCheck')?.checked || false;
         const isOpeningCrack = document.getElementById('defectOpeningCrackCheck')?.checked || false;
@@ -29777,7 +29766,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const causeSaveVal = isGoodType ? '' : causeVal;
         const areaFillVal = getSelectedAreaFillFromUi();
         const areaBorderVal = getSelectedAreaBorderFromUi();
-        const categoryVal = document.getElementById('defectCategory')?.value || '구조체';
+        const categoryVal = uiFieldsBulk.category;
 
         defects.forEach((d) => {
             if (changed.has('category')) d.category = categoryVal;
@@ -29820,6 +29809,53 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         return defects[0];
     }
 
+    /**
+     * 결함 폼의 글자 칸을 저장할 때와 똑같은 방식으로 읽는다.
+     * 폼을 연 직후 이 값을 기준(baseline)으로 기록하고, 저장 때 같으면 "안 건드린 칸"으로 본다.
+     * 저장(commitDefectFromForm)과 기준 기록이 반드시 같은 함수를 써야 비교가 맞는다.
+     */
+    /**
+     * 화면의 조사내용. 균열 칩으로 정리할 수 있으면 정리하되, 그러다 **버려지는 말이 있으면**
+     * 입력한 그대로 쓴다. 예전에는 칩 목록에 없는 조각('경사', '누수')을 조용히 버렸다.
+     */
+    function readDefectTypeFromUi() {
+        const raw = getDefectComboValue(
+            document.getElementById('defectType'),
+            document.getElementById('defectTypeInput')
+        ) || '';
+        const kindsSelected = getSelectedCrackKindsFromUi();
+        if (!kindsSelected.length) return raw;
+        const rawParts = parseDefectTypeList(raw);
+        return kindsSelected.length === rawParts.length ? joinDefectTypeList(kindsSelected) : raw;
+    }
+
+    function readDefectGuardedFieldsFromUi() {
+        const causesSelected = getSelectedCausesFromUi();
+        return {
+            no: document.getElementById('defectNo')?.value || 'NO.01',
+            category: document.getElementById('defectCategory')?.value || '구조체',
+            component: getDefectComboValue(
+                document.getElementById('defectComponent'),
+                document.getElementById('defectComponentInput')
+            ) || '',
+            defectType: readDefectTypeFromUi(),
+            cause: causesSelected.length
+                ? joinCauseList(causesSelected)
+                : (getDefectComboValue(
+                    document.getElementById('defectCause'),
+                    document.getElementById('defectCauseInput')
+                ) || ''),
+            location: composeDefectLocation(document.getElementById('defectLocation')?.value || '')
+        };
+    }
+
+    /** 폼을 연 직후 화면이 보여준 값. pinId가 맞을 때만 쓴다. */
+    function captureDefectFormBaseline(pin) {
+        window._defectFormBaseline = (pin && pin.id)
+            ? { pinId: pin.id, values: readDefectGuardedFieldsFromUi() }
+            : null;
+    }
+
     async function commitDefectFromForm(options = {}) {
         const opts = (typeof options === 'object' && options) ? options : {};
         if (isDefectBulkEditMode()) {
@@ -29849,25 +29885,25 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             }
         }
 
-        const compVal = getDefectComboValue(
-            document.getElementById('defectComponent'),
-            document.getElementById('defectComponentInput')
-        ) || '';
-        const kindsSelected = getSelectedCrackKindsFromUi();
-        let dTypeVal = kindsSelected.length
-            ? joinDefectTypeList(kindsSelected)
-            : (getDefectComboValue(
-                document.getElementById('defectType'),
-                document.getElementById('defectTypeInput')
-            ) || '');
-        const causesSelected = getSelectedCausesFromUi();
-        let causeVal = causesSelected.length
-            ? joinCauseList(causesSelected)
-            : (getDefectComboValue(
-                document.getElementById('defectCause'),
-                document.getElementById('defectCauseInput')
-            ) || '');
-        const locVal = composeDefectLocation(document.getElementById('defectLocation')?.value || '');
+        // 사용자가 안 건드린 칸은 저장된 원래 값을 쓴다. 폼은 값 하나만 바꿔도(또는 창을 닫기만
+        // 해도) 모든 칸을 다시 저장하는데, 조사내용·원인은 화면 칩에서 다시 조립되며 값이 샜다
+        // ('경사,수직균열'→'수직균열', '부식·팽창'→'부식, 팽창'). 2026-09-21
+        const uiFields = readDefectGuardedFieldsFromUi();
+        const storedForGuard = pinId ? (state.defects[key] || []).find((d) => d.id === pinId) : null;
+        const baseline = (storedForGuard && window._defectFormBaseline
+            && window._defectFormBaseline.pinId === pinId) ? window._defectFormBaseline.values : null;
+        const syncMergeApi = window.BSA && window.BSA.syncMerge;
+        const guardField = (field) => {
+            const uiVal = uiFields[field];
+            if (!baseline || !syncMergeApi || typeof syncMergeApi.keepStoredIfUntouched !== 'function') return uiVal;
+            return syncMergeApi.keepStoredIfUntouched(uiVal, baseline[field], storedForGuard[field]);
+        };
+        const compVal = guardField('component');
+        let dTypeVal = guardField('defectType');
+        let causeVal = guardField('cause');
+        const locVal = guardField('location');
+        const noVal = guardField('no');
+        const categoryGuardedVal = guardField('category');
         const isProgress = document.getElementById('defectProgressCheck')?.checked || false;
         const isLeak = document.getElementById('defectLeakCheck')?.checked || false;
         const isOpeningCrack = document.getElementById('defectOpeningCrackCheck')?.checked || false;
@@ -29897,8 +29933,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             // Update existing defect
             const idx = state.defects[key].findIndex(d => d.id === pinId);
             if (idx !== -1) {
-                state.defects[key][idx].no = document.getElementById('defectNo')?.value || 'NO.01';
-                state.defects[key][idx].category = document.getElementById('defectCategory')?.value || '구조체';
+                state.defects[key][idx].no = noVal;
+                state.defects[key][idx].category = categoryGuardedVal;
                 state.defects[key][idx].component = compVal;
                 state.defects[key][idx].location = locVal;
                 state.defects[key][idx].defectType = dTypeVal;
@@ -43730,6 +43766,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         }
         async function checkRemoteWebVersion() {
             if (window._authSubmitInFlight || window._justRegistering || isLoginOverlayOpen()) return;
+            // 창에 돌아올 때 옛 버전인지 먼저 판단해 안내 띠를 띄운다(동기화 차단과 같은 기준)
+            if (typeof window.refreshAppVersionGate === 'function') {
+                try { await window.refreshAppVersionGate(true); } catch (_e) { /* ignore */ }
+            }
             try {
                 const meta = await fetchWebVersionMeta();
                 const sha = meta && (meta.sha || meta.short);
@@ -48031,8 +48071,81 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         return await docRef.get();
     }
 
+    // --- 옛 버전 앱의 동기화 차단 (2026-09-21) ---
+    // 지운 층이 되살아나고 옛 데이터가 새 데이터를 덮은 사고는 모두 업데이트 안 된 기기가
+    // 옛 코드로 동기화하면서 생겼다. 지금 돌고 있는 코드가 배포된 최신본과 다르면 클라우드에
+    // 쓰지 않고 새로고침을 안내한다. 작업 중이던 내용은 기기에 남아 있고(dirty 층 목록도
+    // localStorage에 유지), 새로고침 후 새 코드가 올린다.
+    const APP_VERSION_GATE_TTL_MS = 60 * 1000;
+    let _appOutdatedForSync = false;
+    let _appVersionGateCheckedAt = 0;
+
+    function renderOutdatedAppBanner(show) {
+        let bar = document.getElementById('bsaOutdatedBanner');
+        if (!show) {
+            if (bar) bar.remove();
+            document.body && document.body.classList.remove('bsa-outdated-app');
+            return;
+        }
+        if (bar) return;
+        bar = document.createElement('div');
+        bar.id = 'bsaOutdatedBanner';
+        bar.className = 'bsa-outdated-banner';
+        bar.setAttribute('role', 'alert');
+        bar.innerHTML = '<span class="bsa-outdated-banner-text">'
+            + '새 버전이 배포됐습니다. <b>새로고침해야 클라우드 동기화가 다시 됩니다.</b> '
+            + '지금까지 작업한 내용은 이 기기에 저장돼 있어요.'
+            + '</span>'
+            + '<button type="button" class="btn btn-sm bsa-outdated-banner-btn">새로고침</button>';
+        bar.querySelector('button').addEventListener('click', () => {
+            if (typeof window.reloadWebAppFromServer === 'function') window.reloadWebAppFromServer();
+            else window.location.reload();
+        });
+        document.body.appendChild(bar);
+        document.body.classList.add('bsa-outdated-app');
+    }
+
+    /** 배포된 버전과 지금 코드를 비교해 차단 여부를 갱신한다. 모르면 이전 판단을 유지한다. */
+    async function refreshAppVersionGate(force) {
+        if (!force && (Date.now() - _appVersionGateCheckedAt) < APP_VERSION_GATE_TTL_MS) {
+            return _appOutdatedForSync;
+        }
+        _appVersionGateCheckedAt = Date.now();
+        const api = window.BSA && window.BSA.syncMerge;
+        if (!api || typeof api.isOutdatedBuild !== 'function') return _appOutdatedForSync;
+        try {
+            const ctrl = (typeof AbortController === 'function') ? new AbortController() : null;
+            const timer = ctrl ? window.setTimeout(() => ctrl.abort(), 4000) : null;
+            const r = await fetch('web-version.json?t=' + Date.now(), {
+                cache: 'no-store',
+                signal: ctrl ? ctrl.signal : undefined
+            });
+            if (timer) window.clearTimeout(timer);
+            if (!r.ok) return _appOutdatedForSync;
+            const text = (await r.text()).replace(/^﻿/, '').trim();
+            const meta = text ? JSON.parse(text) : null;
+            const outdated = !!api.isOutdatedBuild(window.BSA_APP_VERSION, meta, window.location.hostname);
+            if (outdated !== _appOutdatedForSync) {
+                _appOutdatedForSync = outdated;
+                if (outdated) {
+                    console.warn('[sync] 옛 버전 앱이라 클라우드 동기화를 멈춥니다:',
+                        window.BSA_APP_VERSION, '→ 배포본', meta && (meta.short || meta.sha));
+                }
+            }
+            renderOutdatedAppBanner(_appOutdatedForSync);
+        } catch (_e) { /* 오프라인·시간 초과 — 이전 판단 유지 */ }
+        return _appOutdatedForSync;
+    }
+    window.refreshAppVersionGate = refreshAppVersionGate;
+
     async function syncStateToFirebase() {
         if (!db || !window.state.companyId || !navigator.onLine) return;
+        // 옛 버전 코드로는 클라우드에 쓰지 않는다. (확인은 await 뒤에 하고, 아래 in-flight
+        // 확인·설정은 동기로 붙여 둬야 동시 호출이 둘 다 통과하지 않는다)
+        if (await refreshAppVersionGate(false)) {
+            renderOutdatedAppBanner(true);
+            return;
+        }
         if (isRemoteSyncing || _syncInFlight) {
             _syncPending = true;
             return;

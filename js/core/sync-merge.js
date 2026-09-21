@@ -74,6 +74,64 @@
         return n;
     }
 
+    /**
+     * 결함 수정 폼 저장 — 사용자가 안 건드린 칸은 저장된 원래 값을 그대로 쓴다.
+     *
+     * 2026-09-21: 폼은 값 하나만 바꿔도(또는 창을 닫거나 페이지를 떠나도) 모든 칸을 다시
+     * 저장한다. 그런데 조사내용·원인은 화면 칩에서 다시 조립되면서 값이 샜다.
+     *  - '경사,수직균열' → '수직균열' ('경사'가 칩 목록에 없어 버려짐)
+     *  - '철근의 부식·팽창에 의한 …' → '철근의 부식, 팽창에 의한 …' (구분자 바뀜)
+     * 둘 다 실제 「지하1층 주차장-1」 값이다. 조립 규칙을 하나씩 고치면 또 다른 값에서 샌다.
+     *
+     * 규칙: 폼을 열었을 때 화면이 보여준 값(baseline)과 지금 화면 값이 같으면 사용자가
+     * 안 바꾼 것이므로 저장값(stored)을 쓴다. 다르면 사용자가 바꾼 것이므로 화면 값을 쓴다.
+     * baseline을 모르면(새 핀 등) 화면 값을 쓴다 — 예전 동작 그대로라 안전하다.
+     */
+    function keepStoredIfUntouched(uiValue, baselineValue, storedValue) {
+        if (baselineValue === undefined) return uiValue;
+        if (uiValue !== baselineValue) return uiValue;
+        return storedValue == null ? uiValue : storedValue;
+    }
+
+    /**
+     * 지금 돌고 있는 코드가 배포된 최신본과 다른가 — 다르면 클라우드에 쓰면 안 된다.
+     *
+     * 2026-09-21: 지운 층이 되살아나고, 옛 데이터가 새 데이터를 덮은 사고들은 모두
+     * **업데이트 안 된 기기**가 옛 코드로 동기화하면서 생겼다. 고친 코드를 배포해도 그
+     * 기기에서 새로고침하기 전까지는 옛 규칙으로 계속 쓴다.
+     *
+     * running: window.BSA_APP_VERSION (배포 때 prepare-pages.py가 커밋 짧은 해시로 박는다)
+     * deployed: web-version.json 내용 ({ sha, short })
+     * host: location.hostname
+     *
+     * **확실할 때만 true.** 오프라인·로컬 개발·값을 모름·형식이 달라 비교 불가 → false.
+     * 잘못 막으면 전원의 동기화가 멈추므로, 애매하면 막지 않는 쪽으로 둔다.
+     */
+    function isOutdatedBuild(running, deployed, host) {
+        var h = host == null ? '' : String(host).toLowerCase();
+        if (!h || h === 'localhost' || h === '127.0.0.1' || h === '[::1]') return false;
+        if (!deployed || typeof deployed !== 'object') return false;
+        var short = deployed.short == null ? '' : String(deployed.short).trim().toLowerCase();
+        var sha = deployed.sha == null ? '' : String(deployed.sha).trim().toLowerCase();
+        if (!short && !sha) return false;
+        if (short === 'local' || sha === 'local') return false;
+        var run = running == null ? '' : String(running).trim().toLowerCase();
+        if (!run) return false;
+        var HEX = /^[0-9a-f]{7,40}$/;
+        // 둘 다 커밋 해시 모양일 때만 비교한다. 한쪽이 시각 라벨(20260921_111044) 같은
+        // 다른 형식이면 배포 경로가 바뀐 것이므로 판단하지 않는다(전원 차단 방지).
+        if (!HEX.test(run)) return false;
+        if (short && HEX.test(short)) {
+            if (run === short) return false;
+            if (short.indexOf(run) === 0 || run.indexOf(short) === 0) return false;
+        }
+        if (sha && HEX.test(sha)) {
+            if (sha.indexOf(run) === 0) return false;
+        }
+        if (!(short && HEX.test(short)) && !(sha && HEX.test(sha))) return false;
+        return true;
+    }
+
     function mergeDeletedIdsMaps(serverMap, localMap) {
         var out = Object.assign({}, serverMap || {});
         Object.entries(localMap || {}).forEach(function (entry) {
@@ -476,6 +534,8 @@
         mergeDeletedIdsMaps: mergeDeletedIdsMaps,
         mergeDeletedAtMaps: mergeDeletedAtMaps,
         pickImportedText: pickImportedText,
+        keepStoredIfUntouched: keepStoredIfUntouched,
+        isOutdatedBuild: isOutdatedBuild,
         countKeptExistingOnImport: countKeptExistingOnImport,
         recordSurvivesDelete: recordSurvivesDelete,
         mergePhotoArrays: mergePhotoArrays,
