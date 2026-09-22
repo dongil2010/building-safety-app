@@ -4612,6 +4612,63 @@ html:not(.layout-desktop) .survey-inline-select {
     white-space: nowrap;
 }
 
+.defect-edit-history {
+    margin: 0 0.85rem 0.7rem;
+    padding: 0.4rem 0.55rem;
+    border: 1px solid rgba(148, 163, 184, 0.35);
+    border-radius: 0.45rem;
+    font-size: 0.72rem;
+    color: #64748b;
+}
+
+.defect-edit-history > summary {
+    cursor: pointer;
+    font-weight: 700;
+    list-style: none;
+}
+
+.defect-edit-history > summary::-webkit-details-marker {
+    display: none;
+}
+
+.defect-edit-history-list {
+    margin: 0.5rem 0 0;
+    padding: 0;
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+}
+
+.defect-edit-history-list li {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 0.2rem 0.45rem;
+    padding-top: 0.3rem;
+    border-top: 1px dashed rgba(148, 163, 184, 0.3);
+}
+
+.defect-edit-history-list li:first-child {
+    padding-top: 0;
+    border-top: 0;
+}
+
+.defect-edit-history-when {
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+}
+
+.defect-edit-history-who {
+    font-weight: 700;
+    color: #475569;
+}
+
+.defect-edit-history-what {
+    color: #0f172a;
+    font-weight: 600;
+}
+
 .defect-timeline-members {
     flex-wrap: wrap;
     gap: 0.35rem;

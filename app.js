@@ -18518,9 +18518,37 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (typeof syncMobileAddMarkingFab === 'function') syncMobileAddMarkingFab();
     }
 
+    /** 결함 수정 이력 — 최근 것이 위. 균열 진전 여부를 이 줄들로 읽는다. */
+    function renderDefectEditHistory(defectOrNull) {
+        const box = document.getElementById('defectEditHistory');
+        const list = document.getElementById('defectEditHistoryList');
+        const count = document.getElementById('defectEditHistoryCount');
+        if (!box || !list) return;
+        const api = window.BSA && window.BSA.editHistory;
+        const entries = api ? api.readHistory(defectOrNull) : [];
+        if (!entries.length) {
+            box.hidden = true;
+            list.innerHTML = '';
+            if (count) count.textContent = '';
+            return;
+        }
+        box.hidden = false;
+        if (count) count.textContent = `(${entries.length}건)`;
+        list.innerHTML = entries.slice().reverse().map((e) => {
+            const when = formatDefectMarkingTimestamp(e.at) || '시각 미기록';
+            const who = String(e.by || '').trim();
+            return `<li>
+                <span class="defect-edit-history-when">${escapeHtml(when)}</span>
+                ${who ? `<span class="defect-edit-history-who">${escapeHtml(who)}</span>` : ''}
+                <span class="defect-edit-history-what">${escapeHtml(api.describeChanges(e.changes))}</span>
+            </li>`;
+        }).join('');
+    }
+
     function renderDefectMarkingTimeline(defectOrNull) {
         const el = document.getElementById('defectMarkingTimeline');
         renderDefectMarkingMemberFloat(defectOrNull);
+        renderDefectEditHistory(defectOrNull);
         if (!el) return;
 
         if (!defectOrNull) {
@@ -30656,6 +30684,15 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const baseline = (storedForGuard && window._defectFormBaseline
             && window._defectFormBaseline.pinId === pinId) ? window._defectFormBaseline.values : null;
         const syncMergeApi = window.BSA && window.BSA.syncMerge;
+        // 고치기 전 값을 찍어 둔다 — 아래에서 state.defects[key][idx]를 제자리에서 바꾸므로
+        // storedForGuard는 같은 객체다. 지금 복사하지 않으면 "이전 값"이 남지 않는다.
+        const editHistoryApi = window.BSA && window.BSA.editHistory;
+        const historyBefore = (editHistoryApi && storedForGuard)
+            ? editHistoryApi.TRACKED_FIELDS.reduce((acc, f) => {
+                acc[f] = storedForGuard[f];
+                return acc;
+            }, {})
+            : null;
         const guardField = (field) => {
             const uiVal = uiFields[field];
             if (!baseline || !syncMergeApi || typeof syncMergeApi.keepStoredIfUntouched !== 'function') return uiVal;
@@ -30751,6 +30788,15 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     state.defects[key][idx].inspectorName = window.state.userName || '';
                 }
                 touchDefectUpdatedAt(state.defects[key][idx]);
+                if (historyBefore) {
+                    const changed = editHistoryApi.diffTracked(historyBefore, state.defects[key][idx]);
+                    if (changed) {
+                        state.defects[key][idx].editHistory = editHistoryApi.appendEntry(
+                            editHistoryApi.readHistory(state.defects[key][idx]),
+                            { at: Date.now(), by: window.state.userName || '', changes: changed }
+                        );
+                    }
+                }
                 savedDefect = state.defects[key][idx];
             }
         } else {

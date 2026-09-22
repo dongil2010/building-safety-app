@@ -5,6 +5,11 @@
 (function (root) {
     'use strict';
 
+    // 수정 이력 합치기. 브라우저는 index.html이 edit-history.js를 먼저 싣고,
+    // Node 테스트는 require로 가져온다 (로드 순서는 test-edit-history.js가 지킨다).
+    var editHistory = (root.BSA && root.BSA.editHistory)
+        || (typeof require === 'function' ? require('./edit-history.js') : null);
+
     var DEFECT_POSITION_FIELDS = [
         'x', 'y', 'targetX', 'targetY', 'mapMarkedAt', 'mapUnregistered',
         'vertices', 'points', 'areaAngle', 'width', 'height', 'rotation',
@@ -443,6 +448,14 @@
             );
             delete merged.prevRoundPhotoIds;
             delete merged.prevRoundPhotoUrls;
+        }
+
+        // 수정 이력은 **합집합**이다. Object.assign이 덮어쓴 결과를 그대로 두면 오프라인에서
+        // 각자 고친 기기 한쪽의 이력이 통째로 날아간다 — 균열 진전 기록이라 복구가 안 된다.
+        if (editHistory) {
+            var mergedHistory = editHistory.mergeHistories(serverRec.editHistory, localRec.editHistory);
+            if (mergedHistory.length) merged.editHistory = mergedHistory;
+            else delete merged.editHistory;
         }
 
         merged.contentUpdatedAt = Math.max(serverContentTs, localContentTs, Number(merged.contentUpdatedAt) || 0);

@@ -1216,6 +1216,10 @@
                     </div>
                 </form>
                 <div id="defectMarkingTimeline" class="defect-marking-timeline" aria-live="polite"></div>
+                <details id="defectEditHistory" class="defect-edit-history" hidden>
+                    <summary><i class="fa-solid fa-clock-rotate-left"></i> 수정 이력 <span id="defectEditHistoryCount"></span></summary>
+                    <ul id="defectEditHistoryList" class="defect-edit-history-list"></ul>
+                </details>
             </div>
             <div class="modal-footer defect-drawer-footer defect-drawer-footer-desktop">
                 <button class="btn btn-danger-outline" id="btnDeleteDefect" title="이 결함 삭제"><i class="fa-solid fa-trash"></i></button>
@@ -3205,6 +3209,7 @@
     <script src="js/core/drawing-floor-tombstone.js?v=20260922_175524"></script>
     <script src="js/core/data-health.js?v=20260922_175524"></script>
     <script src="js/core/building-meta-merge.js?v=20260922_175524"></script>
+    <script src="js/core/edit-history.js?v=20260922_175524"></script>
     <script src="js/core/sync-merge.js?v=20260922_175524"></script>
     <script src="js/core/legend-layout.js?v=20260922_175524"></script>
     <script src="app.js?v=20260922_175524"></script>
