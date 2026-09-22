@@ -14996,6 +14996,28 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     // 한 표에 가로로 다 펼치므로 개수가 늘수록 칸이 좁아짐)에 따라 매번 달라져서, 호출부가 실제
     // 칸 비율을 넘겨주면 캔버스를 그 비율에 딱 맞게 그린다(=축소 없이 칸을 꽉 채움). 줄 수(20개
     // 고정이 아니라 실제 입력된 개수)에 맞춰 줄 높이·글자 크기도 매번 다시 계산한다.
+    /**
+     * 한글 표의 각 행(tr) 안 칸(tc)을 칸 주소(colAddr) 순서로 다시 놓는다.
+     * 기울기·부동침하·부재변위 결과표(501~503) 템플릿은 XML 속 칸 순서가 0,1,3,4,2,5,6(제목행 0,3,2,5,6)으로
+     * 뒤섞여 있다. 한글은 칸 주소대로 그려서 겉모양은 맞지만, 칸을 누르면 커서가 엉뚱한 칸에서 깜빡이고
+     * 복사해 엑셀에 붙이면 열이 틀어졌다(2026-09-22). 내용·서식은 그대로 두고 순서만 바꾼다.
+     */
+    function sortHwpxRowCellsByColAddr(tbl, hpNs) {
+        if (!tbl) return;
+        Array.from(tbl.childNodes).filter(tr => tr.localName === 'tr').forEach(tr => {
+            const tcs = Array.from(tr.childNodes).filter(c => c.localName === 'tc');
+            const colOf = (tc) => {
+                const addr = tc.getElementsByTagNameNS(hpNs, 'cellAddr')[0];
+                const v = addr ? parseInt(addr.getAttribute('colAddr'), 10) : NaN;
+                return Number.isFinite(v) ? v : 0;
+            };
+            const sorted = tcs.map((tc, i) => ({ tc, i, col: colOf(tc) }))
+                .sort((a, b) => (a.col - b.col) || (a.i - b.i));
+            if (sorted.every((x, i) => x.i === i)) return;
+            sorted.forEach(x => tr.appendChild(x.tc));
+        });
+    }
+
     function renderStrengthDataRowCanvas(pt, aspect) {
         const nums = pt.readings.map(v => parseFloat(v)).filter(v => !isNaN(v) && v >= 0);
         const avg = nums.length > 0 ? nums.reduce((a, b) => a + b, 0) / nums.length : 0;
@@ -39569,6 +39591,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                                 : { tiltRatio: '', grade: '' };
                             return [item.no || (i + 1), item.location || '-', heightText, '-', avgText, item.tiltRatio || calc.tiltRatio || '-', item.grade || calc.grade || '-'];
                         }), true);
+                        if (tbl) sortHwpxRowCellsByColAddr(tbl, HP_NS);
                     } else {
                         removeNdtTableById(TILT_TBL_ID);
                     }
@@ -39583,6 +39606,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                             const lengthMmText = group.measureLength ? `${(group.measureLength * 1000).toLocaleString()}mm` : '-';
                             return [i + 1, group.locationType || '-', lengthMmText, '-', fmt.deltaCm, fmt.tiltRatio, fmt.grade];
                         }), true);
+                        if (tbl) sortHwpxRowCellsByColAddr(tbl, HP_NS);
                         // 2026-08-24: 결과표 밑에 그룹별 요약박스+꺾은선 그래프를 한 쌍씩 이어붙임(사용자 요청).
                         if (tbl) await insertGroupResultImages(tbl, settlementGroupsHwpx);
                     } else {
@@ -39597,6 +39621,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                             const lengthMmText = group.measureLength ? `${(group.measureLength * 1000).toLocaleString()}mm` : '-';
                             return [i + 1, group.locationType || '-', lengthMmText, '-', fmt.deltaCm, fmt.tiltRatio, fmt.grade];
                         }), true);
+                        if (tbl) sortHwpxRowCellsByColAddr(tbl, HP_NS);
                         if (tbl) await insertGroupResultImages(tbl, memberDispGroupsHwpx);
                     } else {
                         removeNdtTableById(MEMBER_DISP_TBL_ID);
@@ -41871,6 +41896,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                                 : { tiltRatio: '', grade: '' };
                             return [item.no || (i + 1), item.location || '-', heightText, '-', avgText, item.tiltRatio || calc.tiltRatio || '-', item.grade || calc.grade || '-'];
                         }), true);
+                        if (tbl) sortHwpxRowCellsByColAddr(tbl, HP_NS);
                     } else {
                         removeNdtTableById(TILT_TBL_ID);
                     }
@@ -41885,6 +41911,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                             const lengthMmText = group.measureLength ? `${(group.measureLength * 1000).toLocaleString()}mm` : '-';
                             return [i + 1, group.locationType || '-', lengthMmText, '-', fmt.deltaCm, fmt.tiltRatio, fmt.grade];
                         }), true);
+                        if (tbl) sortHwpxRowCellsByColAddr(tbl, HP_NS);
                         // 2026-08-24: 결과표 밑에 그룹별 요약박스+꺾은선 그래프를 한 쌍씩 이어붙임(사용자 요청).
                         if (tbl) await insertGroupResultImages(tbl, settlementGroupsHwpx);
                     } else {
@@ -41899,6 +41926,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                             const lengthMmText = group.measureLength ? `${(group.measureLength * 1000).toLocaleString()}mm` : '-';
                             return [i + 1, group.locationType || '-', lengthMmText, '-', fmt.deltaCm, fmt.tiltRatio, fmt.grade];
                         }), true);
+                        if (tbl) sortHwpxRowCellsByColAddr(tbl, HP_NS);
                         if (tbl) await insertGroupResultImages(tbl, memberDispGroupsHwpx);
                     } else {
                         removeNdtTableById(MEMBER_DISP_TBL_ID);
