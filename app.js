@@ -15018,6 +15018,38 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         });
     }
 
+    /**
+     * 반발경도 성과표 — 한 쪽에 들어가는 NO. 개수. bodyH·imgW는 한글 단위(HWPUNIT), 그림은 폭 imgW로 넣는다.
+     * 제목 한 줄·문단 여백 몫으로 1500을 남긴다. 최소 1개.
+     */
+    function getStrengthPerfPerPage(bodyH, imgW, pxW, pxH, gapPx) {
+        if (!(bodyH > 0) || !(imgW > 0) || !(pxW > 0) || !(pxH > 0)) return 1;
+        const unit = imgW / pxW;
+        const noH = pxH * unit;
+        const gapH = (gapPx || 0) * unit;
+        return Math.max(1, Math.floor((bodyH - 1500 + gapH) / (noH + gapH)));
+    }
+
+    /** 캔버스 여러 장을 폭 그대로 위아래로 이어 붙인 새 캔버스(사이 흰 여백 gapPx) */
+    function stackCanvasesVertically(canvases, gapPx) {
+        const list = (canvases || []).filter(Boolean);
+        const out = document.createElement('canvas');
+        const w = list.reduce((m, c) => Math.max(m, c.width), 1);
+        const gap = gapPx || 0;
+        const h = Math.max(1, list.reduce((sum, c) => sum + c.height, 0) + gap * Math.max(0, list.length - 1));
+        out.width = w;
+        out.height = h;
+        const ctx = out.getContext('2d');
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, w, h);
+        let y = 0;
+        list.forEach((c) => {
+            ctx.drawImage(c, 0, y);
+            y += c.height + gap;
+        });
+        return out;
+    }
+
     function renderStrengthDataRowCanvas(pt, aspect) {
         const nums = pt.readings.map(v => parseFloat(v)).filter(v => !isNaN(v) && v >= 0);
         const avg = nums.length > 0 ? nums.reduce((a, b) => a + b, 0) / nums.length : 0;
@@ -39123,7 +39155,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     if (!anchorPara || anchorPara.localName !== 'p') return;
                     for (let i = 0; i < groups.length; i++) {
                         const group = groups[i];
-                        const combinedUrl = renderNdtDisplacementCombinedCanvas(group, floorCode, i + 1);
+                        // 그래프 제목의 층은 그 그룹이 조사된 층 — 예전엔 지금 화면에 연 층(currentFloor)이 찍혀
+                        // 지상1층 부동침하가 "지하1층 주차장"으로 나왔다(2026-09-22)
+                        const combinedUrl = renderNdtDisplacementCombinedCanvas(group, group._ndtFloorCode || floorCode, i + 1);
                         anchorPara = await insertImageParaAfter(anchorPara, combinedUrl, 'ndtDispResultAuto', 42520, GROUP_IMG_MAX_H);
                     }
                 };
@@ -39133,6 +39167,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 // 아니라서(항목 하나 = NO./구분/설계치가 두 행에 걸쳐 세로병합) fillNdtTable을
                 // 그대로 못 쓰고 전용 채움 함수를 따로 둔다. 원본 표는 2026-08-24 신설.
                 const FIREPROOF_TBL_ID = '504', FIREPROOF_HEADER_ROWS = 1;
+                const FIREPROOF_DATA_ROW_H = 2776;
                 const fillFireproofTable = (tbl, items) => {
                     const allTrs = Array.from(tbl.getElementsByTagNameNS(HP_NS, 'tr')).filter(tr => tr.parentNode === tbl);
                     const oldDataRows = allTrs.slice(FIREPROOF_HEADER_ROWS);
@@ -39219,6 +39254,14 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                         setRowAddr(newB, rowAddrA + 1);
                         applyBorder(newA, styleMapsA[which]);
                         applyBorder(newB, styleMapsB[which]);
+
+                        // 템플릿 데이터 행 높이(6559, 약 2.3cm)가 한 줄 글자에 비해 너무 커서 부재 몇 개만 넣어도
+                        // 표가 한 쪽을 넘었다(2026-09-22). 다른 결과표(기울기·부재실측, 2776)와 같은 높이로 먼저
+                        // 줄여 두고, 글자가 넘치면 fillRowCells가 필요한 만큼 늘린다. 병합 칸은 아래 mergedHeight가 맞춘다.
+                        [newA, newB].forEach(row => Array.from(row.getElementsByTagNameNS(HP_NS, 'tc')).forEach(tc => {
+                            const sz = tc.getElementsByTagNameNS(HP_NS, 'cellSz')[0];
+                            if (sz) sz.setAttribute('height', String(FIREPROOF_DATA_ROW_H));
+                        }));
 
                         const fl = item.fpFlange || {};
                         const web = item.fpWeb || {};
@@ -39499,7 +39542,6 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                                 }
                             }
                             if (picParas.length > 0) {
-                                const picParaTemplate = picParas[0].cloneNode(true);
                                 const stopNode = allParasForPerf[headingIdx + 1 + picParas.length] || null;
                                 removeParaRange(picParas[0], stopNode);
 
@@ -39512,6 +39554,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                                 });
 
                                 const perfAgeDays = getConcreteStrengthAgeDays(bldg);
+                                const perfCanvases = [];
                                 const perfEnabledNames = getEnabledStrengthFormulaNames(bldg);
                                 for (let seq = 0; seq < perfPoints.length; seq++) {
                                     const pt = perfPoints[seq];
@@ -39519,18 +39562,27 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                                     if (readings.length === 0) continue;
                                     const calc = calcConcreteStrength(readings, parseFloat(pt.item.strengthAngle), perfAgeDays, perfEnabledNames);
                                     if (!calc) continue;
-                                    const canvas = renderStrengthPerfPointCanvas(seq + 1, pt.item, pt.slot, readings, calc);
-                                    const dataUrl = canvas.toDataURL('image/png');
-                                    const { bytes, mime, ext } = await dataUrlToBytes(dataUrl);
-                                    imgCounter++;
-                                    const imgId = `strengthPerfAuto${imgCounter}`;
-                                    zip.file(`BinData/${imgId}.${ext}`, bytes);
-                                    manifestAdds.push(`<opf:item id="${imgId}" href="BinData/${imgId}.${ext}" media-type="${mime}" isEmbeded="1"/>`);
+                                    perfCanvases.push(renderStrengthPerfPointCanvas(seq + 1, pt.item, pt.slot, readings, calc));
+                                }
 
-                                    const newPara = picParaTemplate.cloneNode(true);
-                                    const pic = newPara.getElementsByTagNameNS(HP_NS, 'pic')[0];
-                                    setPicImage(pic, imgId, canvas.width, canvas.height, 42520, 999999999);
-                                    sec.insertBefore(newPara, stopNode);
+                                // 2026-09-22 사용자 요청: NO.마다 따로 떠 있던 그림(글자처럼 취급 아님)을, 한 쪽에 들어가는
+                                // NO.끼리 그림 한 장으로 이어 붙여 "글자처럼 취급"으로 넣는다(쪽마다 한 덩어리).
+                                // 한 쪽 개수 = 문서 본문 높이(쪽 높이 - 위·아래·머리말·꼬리말 여백) ÷ NO. 한 칸 높이.
+                                const PERF_IMG_W = 42520;
+                                const PERF_GAP_PX = 24;
+                                const pagePrEl = xmlDoc.getElementsByTagNameNS(HP_NS, 'pagePr')[0];
+                                const marginEl = xmlDoc.getElementsByTagNameNS(HP_NS, 'margin')[0];
+                                const attrNum = (el, k, d) => { const v = el ? parseInt(el.getAttribute(k), 10) : NaN; return Number.isFinite(v) ? v : d; };
+                                const bodyH = attrNum(pagePrEl, 'height', 83340)
+                                    - attrNum(marginEl, 'top', 5669) - attrNum(marginEl, 'bottom', 4252)
+                                    - attrNum(marginEl, 'header', 4331) - attrNum(marginEl, 'footer', 4252);
+                                const perPage = perfCanvases.length
+                                    ? getStrengthPerfPerPage(bodyH, PERF_IMG_W, perfCanvases[0].width, perfCanvases[0].height, PERF_GAP_PX)
+                                    : 1;
+                                let perfAnchor = perfHeadingPara;
+                                for (let i = 0; i < perfCanvases.length; i += perPage) {
+                                    const pageCanvas = stackCanvasesVertically(perfCanvases.slice(i, i + perPage), PERF_GAP_PX);
+                                    perfAnchor = await insertImageParaAfter(perfAnchor, pageCanvas.toDataURL('image/png'), 'strengthPerfAuto', PERF_IMG_W, 999999999);
                                 }
                             }
                         }
@@ -41428,7 +41480,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     if (!anchorPara || anchorPara.localName !== 'p') return;
                     for (let i = 0; i < groups.length; i++) {
                         const group = groups[i];
-                        const combinedUrl = renderNdtDisplacementCombinedCanvas(group, floorCode, i + 1);
+                        // 그래프 제목의 층은 그 그룹이 조사된 층 — 예전엔 지금 화면에 연 층(currentFloor)이 찍혀
+                        // 지상1층 부동침하가 "지하1층 주차장"으로 나왔다(2026-09-22)
+                        const combinedUrl = renderNdtDisplacementCombinedCanvas(group, group._ndtFloorCode || floorCode, i + 1);
                         anchorPara = await insertImageParaAfter(anchorPara, combinedUrl, 'ndtDispResultAuto', 42520, GROUP_IMG_MAX_H);
                     }
                 };
@@ -41438,6 +41492,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 // 아니라서(항목 하나 = NO./구분/설계치가 두 행에 걸쳐 세로병합) fillNdtTable을
                 // 그대로 못 쓰고 전용 채움 함수를 따로 둔다. 원본 표는 2026-08-24 신설.
                 const FIREPROOF_TBL_ID = '504', FIREPROOF_HEADER_ROWS = 1;
+                const FIREPROOF_DATA_ROW_H = 2776;
                 const fillFireproofTable = (tbl, items) => {
                     const allTrs = Array.from(tbl.getElementsByTagNameNS(HP_NS, 'tr')).filter(tr => tr.parentNode === tbl);
                     const oldDataRows = allTrs.slice(FIREPROOF_HEADER_ROWS);
@@ -41524,6 +41579,14 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                         setRowAddr(newB, rowAddrA + 1);
                         applyBorder(newA, styleMapsA[which]);
                         applyBorder(newB, styleMapsB[which]);
+
+                        // 템플릿 데이터 행 높이(6559, 약 2.3cm)가 한 줄 글자에 비해 너무 커서 부재 몇 개만 넣어도
+                        // 표가 한 쪽을 넘었다(2026-09-22). 다른 결과표(기울기·부재실측, 2776)와 같은 높이로 먼저
+                        // 줄여 두고, 글자가 넘치면 fillRowCells가 필요한 만큼 늘린다. 병합 칸은 아래 mergedHeight가 맞춘다.
+                        [newA, newB].forEach(row => Array.from(row.getElementsByTagNameNS(HP_NS, 'tc')).forEach(tc => {
+                            const sz = tc.getElementsByTagNameNS(HP_NS, 'cellSz')[0];
+                            if (sz) sz.setAttribute('height', String(FIREPROOF_DATA_ROW_H));
+                        }));
 
                         const fl = item.fpFlange || {};
                         const web = item.fpWeb || {};
@@ -41804,7 +41867,6 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                                 }
                             }
                             if (picParas.length > 0) {
-                                const picParaTemplate = picParas[0].cloneNode(true);
                                 const stopNode = allParasForPerf[headingIdx + 1 + picParas.length] || null;
                                 removeParaRange(picParas[0], stopNode);
 
@@ -41817,6 +41879,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                                 });
 
                                 const perfAgeDays = getConcreteStrengthAgeDays(bldg);
+                                const perfCanvases = [];
                                 const perfEnabledNames = getEnabledStrengthFormulaNames(bldg);
                                 for (let seq = 0; seq < perfPoints.length; seq++) {
                                     const pt = perfPoints[seq];
@@ -41824,18 +41887,27 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                                     if (readings.length === 0) continue;
                                     const calc = calcConcreteStrength(readings, parseFloat(pt.item.strengthAngle), perfAgeDays, perfEnabledNames);
                                     if (!calc) continue;
-                                    const canvas = renderStrengthPerfPointCanvas(seq + 1, pt.item, pt.slot, readings, calc);
-                                    const dataUrl = canvas.toDataURL('image/png');
-                                    const { bytes, mime, ext } = await dataUrlToBytes(dataUrl);
-                                    imgCounter++;
-                                    const imgId = `strengthPerfAuto${imgCounter}`;
-                                    zip.file(`BinData/${imgId}.${ext}`, bytes);
-                                    manifestAdds.push(`<opf:item id="${imgId}" href="BinData/${imgId}.${ext}" media-type="${mime}" isEmbeded="1"/>`);
+                                    perfCanvases.push(renderStrengthPerfPointCanvas(seq + 1, pt.item, pt.slot, readings, calc));
+                                }
 
-                                    const newPara = picParaTemplate.cloneNode(true);
-                                    const pic = newPara.getElementsByTagNameNS(HP_NS, 'pic')[0];
-                                    setPicImage(pic, imgId, canvas.width, canvas.height, 42520, 999999999);
-                                    sec.insertBefore(newPara, stopNode);
+                                // 2026-09-22 사용자 요청: NO.마다 따로 떠 있던 그림(글자처럼 취급 아님)을, 한 쪽에 들어가는
+                                // NO.끼리 그림 한 장으로 이어 붙여 "글자처럼 취급"으로 넣는다(쪽마다 한 덩어리).
+                                // 한 쪽 개수 = 문서 본문 높이(쪽 높이 - 위·아래·머리말·꼬리말 여백) ÷ NO. 한 칸 높이.
+                                const PERF_IMG_W = 42520;
+                                const PERF_GAP_PX = 24;
+                                const pagePrEl = xmlDoc.getElementsByTagNameNS(HP_NS, 'pagePr')[0];
+                                const marginEl = xmlDoc.getElementsByTagNameNS(HP_NS, 'margin')[0];
+                                const attrNum = (el, k, d) => { const v = el ? parseInt(el.getAttribute(k), 10) : NaN; return Number.isFinite(v) ? v : d; };
+                                const bodyH = attrNum(pagePrEl, 'height', 83340)
+                                    - attrNum(marginEl, 'top', 5669) - attrNum(marginEl, 'bottom', 4252)
+                                    - attrNum(marginEl, 'header', 4331) - attrNum(marginEl, 'footer', 4252);
+                                const perPage = perfCanvases.length
+                                    ? getStrengthPerfPerPage(bodyH, PERF_IMG_W, perfCanvases[0].width, perfCanvases[0].height, PERF_GAP_PX)
+                                    : 1;
+                                let perfAnchor = perfHeadingPara;
+                                for (let i = 0; i < perfCanvases.length; i += perPage) {
+                                    const pageCanvas = stackCanvasesVertically(perfCanvases.slice(i, i + perPage), PERF_GAP_PX);
+                                    perfAnchor = await insertImageParaAfter(perfAnchor, pageCanvas.toDataURL('image/png'), 'strengthPerfAuto', PERF_IMG_W, 999999999);
                                 }
                             }
                         }
