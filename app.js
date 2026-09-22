@@ -7715,6 +7715,7 @@ document.addEventListener('DOMContentLoaded', () => {
         } finally {
             // 클라우드·IDB 정리 끝 — 이후부터는 증거가 다시 생기면(재업로드) heal 가능
             _sessionDeletingDrawingFloors.delete(floorKey);
+            clearPendingDrawingUpload(floorKey);
             if (window._cloudSyncedPdfKeys) window._cloudSyncedPdfKeys.delete(floorKey);
             if (window._cloudSyncedDrawingKeys) window._cloudSyncedDrawingKeys.delete(floorKey);
             if (window._cloudSyncedTierKeys) {
@@ -44918,9 +44919,29 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         }
     }
 
-    async function uploadFloorDrawing(buildingId, floorCode, dataUrl) {
+    /**
+     * opts.fromSync: 동기화가 대신 올리는 것(새로 넣은 도면이 아님) — "올려야 함" 표시를 새로 찍지 않는다.
+     * 그 외 호출(도면 등록·교체·복사·백업 불러오기)은 사용자가 넣은 새 도면이므로 먼저 표시를 찍고,
+     * 올리기에 성공하면 지운다. 실패하면 표시가 남아 다음 동기화가 다시 올린다.
+     */
+    async function uploadFloorDrawing(buildingId, floorCode, dataUrl, opts) {
+        if (!dataUrl || isPdfDrawingUrl(dataUrl)) return false;
+        const docId = `${buildingId}_${floorCode}`;
+        const fromSync = !!(opts && opts.fromSync);
+        let pendingAt = 0;
+        if (!fromSync) {
+            pendingAt = Date.now();
+            markPendingDrawingUpload(docId, pendingAt);
+        }
+        const ok = await uploadFloorDrawingNow(buildingId, floorCode, dataUrl);
+        // 동기화가 표시 없이 올린 것(클라우드에 없던 층)은 표시를 건드리지 않는다 — 그 사이 새로 넣은 도면 표시를 지우면 안 됨
+        const clearAt = fromSync ? (Number(opts.pendingAt) || 0) : pendingAt;
+        if (ok && clearAt) clearPendingDrawingUpload(docId, clearAt);
+        return ok;
+    }
+
+    async function uploadFloorDrawingNow(buildingId, floorCode, dataUrl) {
         if (!db || !window.state.companyId || !dataUrl) return false;
-        if (isPdfDrawingUrl(dataUrl)) return false;
         const docId = `${buildingId}_${floorCode}`;
         const docRef = db.collection('safety_app').doc(getCompanyDocId())
             .collection('floorDrawings').doc(docId);
@@ -44943,8 +44964,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     round: scope.round,
                     previousStoragePath
                 });
-                if (!window._cloudSyncedDrawingKeys) window._cloudSyncedDrawingKeys = new Set();
+                ensureCloudSyncedDrawingKeys();
                 window._cloudSyncedDrawingKeys.add(docId);
+                scheduleSaveCloudSyncedKeys();
                 return true;
             } catch (e) {
                 console.warn('도면 Storage 업로드 실패:', buildingId, floorCode, e);
@@ -44961,9 +44983,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             if (payload.length > maxChars && typeof window.resizeDataUrlToMaxDim === 'function') {
                 payload = await window.resizeDataUrlToMaxDim(payload, 2400, 0.8);
             }
-            await docRef.set({ dataUrl: payload });
-            if (!window._cloudSyncedDrawingKeys) window._cloudSyncedDrawingKeys = new Set();
+            await docRef.set({ dataUrl: payload, updatedAt: firebase.firestore.FieldValue.serverTimestamp() });
+            ensureCloudSyncedDrawingKeys();
             window._cloudSyncedDrawingKeys.add(docId);
+            scheduleSaveCloudSyncedKeys();
             return true;
         } catch (e) {
             console.warn('도면 업로드 실패:', buildingId, floorCode, e);
@@ -45143,6 +45166,71 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 }
             } catch (_) {}
         }, 800);
+    }
+
+    function ensureCloudSyncedDrawingKeys() {
+        if (!window._cloudSyncedDrawingKeys) window._cloudSyncedDrawingKeys = initCloudSyncedKeySet('drawings');
+        return window._cloudSyncedDrawingKeys;
+    }
+
+    // 사용자가 도면을 새로 넣었는데 아직 클라우드에 못 올린 층 { floorKey: 넣은 시각(ms) }.
+    // 동기화는 이 표시가 있는 층과 클라우드에 도면이 아예 없는 층만 올린다.
+    // (예전에는 "이번 실행에서 올렸나"만 봐서, 현장 앱이 켤 때마다 기기의 옛 도면으로
+    //  클라우드의 새 도면을 덮었다 — 2026-09-22 GPT 감사 2번)
+    function readPendingDrawingUploads() {
+        try {
+            const raw = localStorage.getItem(getCloudSyncedStorageKey('drawing_upload_pending'));
+            const obj = raw ? JSON.parse(raw) : null;
+            return (obj && typeof obj === 'object' && !Array.isArray(obj)) ? obj : {};
+        } catch (_) {
+            return {};
+        }
+    }
+
+    function writePendingDrawingUploads(map) {
+        try {
+            localStorage.setItem(getCloudSyncedStorageKey('drawing_upload_pending'), JSON.stringify(map || {}));
+        } catch (_) {}
+    }
+
+    function markPendingDrawingUpload(floorKey, atMs) {
+        if (!floorKey) return;
+        const map = readPendingDrawingUploads();
+        map[floorKey] = atMs || Date.now();
+        writePendingDrawingUploads(map);
+    }
+
+    function clearPendingDrawingUpload(floorKey, onlyIfAtMs) {
+        if (!floorKey) return;
+        const map = readPendingDrawingUploads();
+        if (!Object.prototype.hasOwnProperty.call(map, floorKey)) return;
+        // 올리는 사이 같은 층 도면을 또 바꿨으면 새 표시는 남긴다
+        if (onlyIfAtMs && map[floorKey] !== onlyIfAtMs) return;
+        delete map[floorKey];
+        writePendingDrawingUploads(map);
+    }
+
+    /** 클라우드 도면 문서 상태. 조회 실패는 error:true — 모르면 올리지 않는다. */
+    async function readCloudFloorDrawingState(buildingId, floorCode) {
+        if (!db || !window.state.companyId || !buildingId || !floorCode) return { error: true };
+        const docId = `${buildingId}_${floorCode}`;
+        try {
+            const snap = await db.collection('safety_app').doc(getCompanyDocId())
+                .collection('floorDrawings').doc(docId).get();
+            if (!snap.exists) return { exists: false, usable: false, needsMove: false, updatedAtMs: 0 };
+            const data = snap.data() || {};
+            const ts = data.updatedAt;
+            const updatedAtMs = (ts && typeof ts.toMillis === 'function') ? ts.toMillis() : 0;
+            return {
+                exists: true,
+                usable: hasFirebaseStorageMeta(data) || isUsableRasterDrawingUrl(data.dataUrl),
+                needsMove: snapNeedsSiteRoundMove(data),
+                updatedAtMs
+            };
+        } catch (e) {
+            console.warn('도면 상태 확인 실패:', docId, e);
+            return { error: true };
+        }
     }
 
     async function cloudFloorDrawingTierExists(buildingId, floorCode, dim) {
@@ -47788,22 +47876,52 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     }
 
     /** 동기화 시 로컬 래스터 미리보기를 Firestore에 올려 PC↔모바일 도면 표시 동기화 */
+    /**
+     * 동기화 때 기기의 레스터 도면을 클라우드에 올린다. 올리는 경우는 둘뿐이다.
+     *  1) 이 기기에서 새로 넣었는데 아직 못 올린 도면("올려야 함" 표시) — 단, 클라우드 도면이
+     *     그보다 나중에 올라간 것이면 이 기기 것이 옛 도면이므로 올리지 않는다.
+     *  2) 클라우드에 도면이 아예 없거나 옛 경로라 옮겨야 하는 층.
+     * 클라우드 상태를 모르면(조회 실패) 올리지 않는다 — 옛 도면으로 새 도면을 덮는 것보다 낫다.
+     */
     async function uploadFloorDrawingsForSync(buildings) {
         if (!db || !window.state.companyId) return;
-        if (!window._cloudSyncedDrawingKeys) window._cloudSyncedDrawingKeys = new Set();
+        const synced = ensureCloudSyncedDrawingKeys();
+        const pending = readPendingDrawingUploads();
         for (const b of (buildings || [])) {
             if (!b || !b.id) continue;
             const floorCodes = collectKnownFloorCodesForBuilding(b);
             for (const floorCode of floorCodes) {
-                if (isDeletedDrawingFloor(b, floorCode)) continue;
                 const docId = `${b.id}_${floorCode}`;
-                if (window._cloudSyncedDrawingKeys.has(docId)) continue;
+                if (isDeletedDrawingFloor(b, floorCode)) {
+                    clearPendingDrawingUpload(docId);
+                    continue;
+                }
+                const pendingAt = Number(pending[docId]) || 0;
+                if (!pendingAt && synced.has(docId)) continue;
                 let raster = b.floorDrawings && b.floorDrawings[floorCode];
                 if ((!raster || !isUsableRasterDrawingUrl(raster) || isPdfDrawingUrl(raster)) && typeof idbGet === 'function') {
                     raster = await idbGet('floorDrawings', docId);
                 }
                 if (!raster || isPdfDrawingUrl(raster) || !isUsableRasterDrawingUrl(raster)) continue;
-                await uploadFloorDrawing(b.id, floorCode, raster);
+                const cloud = await readCloudFloorDrawingState(b.id, floorCode);
+                if (cloud.error) continue;
+                if (pendingAt) {
+                    if (cloud.exists && cloud.usable && cloud.updatedAtMs > pendingAt) {
+                        // 다른 기기가 이 기기보다 나중에 도면을 올렸다 — 이 기기 것은 옛 도면
+                        clearPendingDrawingUpload(docId, pendingAt);
+                        synced.add(docId);
+                        scheduleSaveCloudSyncedKeys();
+                        continue;
+                    }
+                    await uploadFloorDrawing(b.id, floorCode, raster, { fromSync: true, pendingAt });
+                    continue;
+                }
+                if (cloud.exists && cloud.usable && !cloud.needsMove) {
+                    synced.add(docId);
+                    scheduleSaveCloudSyncedKeys();
+                    continue;
+                }
+                await uploadFloorDrawing(b.id, floorCode, raster, { fromSync: true });
             }
         }
     }
@@ -47881,9 +47999,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     if (window._cloudSyncedDrawingKeys && window._cloudSyncedDrawingKeys.has(rasterDocId)) {
                         /* already uploaded this session */
                     } else if (!(await cloudFloorDrawingExists(b.id, floorCode))) {
-                        await uploadFloorDrawing(b.id, floorCode, b.floorDrawings[floorCode] || raster4000);
+                        await uploadFloorDrawing(b.id, floorCode, b.floorDrawings[floorCode] || raster4000, { fromSync: true });
                     } else {
-                        if (!window._cloudSyncedDrawingKeys) window._cloudSyncedDrawingKeys = new Set();
+                        ensureCloudSyncedDrawingKeys();
                         window._cloudSyncedDrawingKeys.add(rasterDocId);
                     }
                 }
