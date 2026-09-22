@@ -39228,6 +39228,25 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                             [8, web.unavailable ? '측정불가' : '-']
                         ]);
 
+                        // 평균값은 부재 하나(플렌지·웨브 최대 6개소)의 평균이라 두 행에 같은 값이 찍혔다 —
+                        // 설계치 칸처럼 두 행을 한 칸으로 세로 병합한다(2026-09-22 사용자 요청).
+                        // 테두리는 같은 쌍의 병합 칸(설계치, 3번 열) 것을 따른다 — 마지막 부재의 굵은 아랫선 포함.
+                        const tcAtCol = (row, col) => Array.from(row.getElementsByTagNameNS(HP_NS, 'tc')).find(t => {
+                            const addr = t.getElementsByTagNameNS(HP_NS, 'cellAddr')[0];
+                            return addr && addr.getAttribute('colAddr') === String(col);
+                        });
+                        const avgTcA = tcAtCol(newA, 7);
+                        const avgTcB = tcAtCol(newB, 7);
+                        const avgSpanA = avgTcA && avgTcA.getElementsByTagNameNS(HP_NS, 'cellSpan')[0];
+                        if (avgTcA && avgSpanA && avgTcB) {
+                            avgSpanA.setAttribute('rowSpan', '2');
+                            const designTcA = tcAtCol(newA, 3);
+                            if (designTcA && designTcA.getAttribute('borderFillIDRef')) {
+                                avgTcA.setAttribute('borderFillIDRef', designTcA.getAttribute('borderFillIDRef'));
+                            }
+                            newB.removeChild(avgTcB);
+                        }
+
                         // NO./위치/설계치 칸은 플렌지·웨브 두 행에 걸쳐 세로 병합(rowSpan=2)돼 있어
                         // applyRowHeightFromLines가 건드리지 않는다 — 두 행 높이를 합친 값으로 따로
                         // 맞춰줘야 병합 칸만 예전 높이 그대로 남아 두 행을 도로 벌리는 걸 막는다.
@@ -41510,6 +41529,25 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                             [7, avgText],
                             [8, web.unavailable ? '측정불가' : '-']
                         ]);
+
+                        // 평균값은 부재 하나(플렌지·웨브 최대 6개소)의 평균이라 두 행에 같은 값이 찍혔다 —
+                        // 설계치 칸처럼 두 행을 한 칸으로 세로 병합한다(2026-09-22 사용자 요청).
+                        // 테두리는 같은 쌍의 병합 칸(설계치, 3번 열) 것을 따른다 — 마지막 부재의 굵은 아랫선 포함.
+                        const tcAtCol = (row, col) => Array.from(row.getElementsByTagNameNS(HP_NS, 'tc')).find(t => {
+                            const addr = t.getElementsByTagNameNS(HP_NS, 'cellAddr')[0];
+                            return addr && addr.getAttribute('colAddr') === String(col);
+                        });
+                        const avgTcA = tcAtCol(newA, 7);
+                        const avgTcB = tcAtCol(newB, 7);
+                        const avgSpanA = avgTcA && avgTcA.getElementsByTagNameNS(HP_NS, 'cellSpan')[0];
+                        if (avgTcA && avgSpanA && avgTcB) {
+                            avgSpanA.setAttribute('rowSpan', '2');
+                            const designTcA = tcAtCol(newA, 3);
+                            if (designTcA && designTcA.getAttribute('borderFillIDRef')) {
+                                avgTcA.setAttribute('borderFillIDRef', designTcA.getAttribute('borderFillIDRef'));
+                            }
+                            newB.removeChild(avgTcB);
+                        }
 
                         // NO./위치/설계치 칸은 플렌지·웨브 두 행에 걸쳐 세로 병합(rowSpan=2)돼 있어
                         // applyRowHeightFromLines가 건드리지 않는다 — 두 행 높이를 합친 값으로 따로
