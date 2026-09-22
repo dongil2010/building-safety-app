@@ -1702,3 +1702,44 @@
 > - 예약 백업: **매주 금요일, 90일 보관**으로 사용자가 새로 켬. 백업 복원은 새 데이터베이스로 쓰이므로, 사고 시
 >   새 DB에서 필요한 층 문서만 골라 운영 DB로 옮긴다(운영 문서 통째 덮어쓰기 금지).
 > - 정리: 파일(사진·도면)=Storage soft delete 30일 / 데이터 최근 7일=PITR / 그 이전~90일=주간 백업.
+
+
+---
+
+## 2026-09-22 Claude — GPT 감사 6번(사진 자리 번호 캐시)·9번(보고서 직전 점검)
+
+> **6번 사진 자리 번호 캐시**: 사진은 기기에 `결함id_0/_1…`(자리 번호)로 캐시(메모리 `_photoCache`·IndexedDB `photos`).
+> 다른 기기가 가운데 사진을 지워 뒤 사진이 당겨지면, 이 기기 hydrate가 병합 결과(새 주소)보다 **캐시를 먼저** 써서
+> 당겨진 자리에 지운 사진이 보였다. → `dropStaleDefectPhotoSlotCache(serverMap, localMap)`를 `mergeDefectsMaps` 앞에서 호출:
+> 서버 `photosUpdatedAt`이 더 나중이고 `pickPhotoListSide`가 'server'인 결함만, 그 결함 자리 번호의 메모리·IndexedDB 캐시,
+> 쓰기 세대, `_cloudPhotoFetchAttempted`/`_nonExistentPhotoIds`를 비워 클라우드에서 다시 받게 한다.
+> 이 기기가 더 나중에 바꿨거나 시각 없는 옛 데이터는 안 건드림(병합도 그쪽 목록만 쓰므로 잃는 사진 없음).
+> Storage 응답은 기본 `private, max-age=0`이라 같은 경로 재다운로드 시 브라우저 캐시 문제는 없다고 판단.
+>
+> **9번 보고서 직전 점검**: 개수 비교는 화면·보고서가 같은 `getSurveyRowsForReport`라 의미 없음 → 사고 유형을 직접 점검.
+> `data-health.js` `checkReportData` / `describeReportIssues`: 결함이 있는데 보고서 층 목록에서 빠지는 층, 묘비가 있는데
+> 보고서 행에 든 결함, 같은 결함·비파괴 번호가 두 층 이상. `exportHwpxSurveyTable`이 파일 만들기 전에 돌려 문제가 있으면
+> `confirm`으로 알리고 취소 시 만들지 않음(콘솔에 상세). 외부 통합 층(EXT)은 묘비 대조에서 제외.
+>
+> **검증**: `test-photo-slot-cache.js`(실제 sync-merge로 재현·수정 확인, 변이 5종 중 4 실패·1은 등가 변이),
+> `test-report-data-check.js` 신규. `npm test` 41개 통과, `node --check` 통과, 로컬 앱 로드·콘솔 오류 없음.
+> 운영 데이터에서 점검 창이 매번 뜨는지(오탐)는 사용자 출력으로 확인 필요.
+
+
+---
+
+## 2026-09-22 Claude — 반발경도 측정지 사진 정리 · 앤빌 보정
+
+> **측정지 사진 고아 정리**: `str_건물_사진`이 비파괴 항목·층·건물을 지워도 클라우드에 남았다(09-21 감사 3단계에서 "보고만" 한 건).
+> `releaseStrengthPhotosOfItems(bldgId, removedItems, { keepLocal })` — state에서 항목을 뺀 **뒤** 호출.
+> 남은 항목(층 섞임 복제 등)이 같은 사진 번호를 쓰면 안 지움. `deleteStrengthPhotoStorage(..., { keepLocal })`.
+> - 항목 삭제(`deleteNdtItem`)·층 삭제: keepLocal(클라우드만) — 되돌리기·일괄 복원으로 항목이 살아나면
+>   `ensurePhotoPersistedToStorage`가 이 기기 사본을 다시 올림(`deleteCloudPhoto`가 클라우드 표시도 지움).
+> - 건물 영구 삭제: 사본까지. 실수는 Storage soft delete 30일로 콘솔 복원.
+>
+> **앤빌 보정(엑셀 출력 시트 L열)**: `Ro = ROUND(R × 82/장비앤빌평균 + 각도보정(보정 전 R 행), 1)`.
+> 건물 설정 `strengthAnvilAvg`(비우면 ×1) — 건물 병합 로컬 우선 키에 추가 + 입력 시 `markBuildingMetaDirty`.
+> 입력칸은 **index.html 수정 금지 규칙**(test-survey-round-delete) 때문에 `ensureAnvilInputRow()`가 설계강도 줄 아래에 JS로 생성.
+> 저장·목록/통계 재계산·한글 성과표 모두 반영. 성과표 그림에 1.00이 아닐 때 "앤빌 82/x = 계수" 표시, Ro 표시는 소수 1자리로.
+> **검증**: `test-strength-photo-release-anvil.js` 신규, `test-strength-excel-match.js`에 앤빌 사례 추가(38.7·장비80 → Ro 39.7, 강도 22.7,
+> +90°는 보정 전 R 39행 -3.98 → 35.7). 엑셀 파일 채워진 8블록 재대조 불일치 0. `npm test` 42개 통과, 로컬 앱에서 입력칸 생성 확인.

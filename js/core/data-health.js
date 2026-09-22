@@ -150,6 +150,74 @@
     }
 
     /**
+     * 보고서(한글 출력) 직전 점검 — GPT 감사 9번(2026-09-22).
+     * 개수만 비교하면 앱 화면과 보고서가 같은 함수로 행을 세서 늘 같다. 대신 지난 사고 유형을 직접 짚는다.
+     *  - missingFloor: 결함이 있는데 보고서 층 목록에 없어 통째로 빠지는 층
+     *  - deletedInReport: 삭제 기록(묘비)이 있는데 보고서 행에 들어간 결함
+     *  - defectOnTwoFloors / ndtOnTwoFloors: 같은 번호가 여러 층에 있음(층 섞임 사고 유형).
+     *    비파괴는 보고서에 한 번만 넣지만(collectFirstByIdAcrossFloors) 사용자는 모르고 지나갔다.
+     * input: { buildingId, defectsMap, deletedDefectIds, ndtMap, dispMap,
+     *          reportFloorCodes: [보고서가 다루는 층 코드], reportDefectsByFloor: { 층코드: [보고서 행 결함] } }
+     */
+    function checkReportData(input) {
+        const o = input || {};
+        const id = textOf(o.buildingId);
+        const issues = [];
+        if (!id) return issues;
+        const prefix = id + '_';
+        const covered = Object.create(null);
+        (o.reportFloorCodes || []).forEach(function (fc) { covered[textOf(fc)] = true; });
+        const deletedByFloor = o.deletedDefectIds || {};
+
+        Object.keys(o.defectsMap || {}).forEach(function (key) {
+            if (String(key).indexOf(prefix) !== 0) return;
+            const floorCode = String(key).slice(prefix.length);
+            const tomb = Object.create(null);
+            (Array.isArray(deletedByFloor[key]) ? deletedByFloor[key] : []).forEach(function (d) { tomb[textOf(d)] = true; });
+            const live = (Array.isArray(o.defectsMap[key]) ? o.defectsMap[key] : [])
+                .filter(function (d) { return d && !tomb[textOf(d.id)]; });
+            if (live.length && !covered[floorCode]) {
+                issues.push({ kind: 'missingFloor', floorCode: floorCode, count: live.length });
+            }
+        });
+
+        Object.keys(o.reportDefectsByFloor || {}).forEach(function (floorCode) {
+            const tomb = deletedByFloor[prefix + floorCode];
+            if (!Array.isArray(tomb) || !tomb.length) return;
+            const tset = Object.create(null);
+            tomb.forEach(function (d) { tset[textOf(d)] = true; });
+            (o.reportDefectsByFloor[floorCode] || []).forEach(function (d) {
+                if (d && tset[textOf(d.id)]) issues.push({ kind: 'deletedInReport', floorCode: floorCode, id: textOf(d.id) });
+            });
+        });
+
+        crossFloorDuplicateIds(o.defectsMap, id).forEach(function (dup) {
+            issues.push({ kind: 'defectOnTwoFloors', id: dup.id, floorCodes: dup.floorCodes });
+        });
+        crossFloorDuplicateIds(o.ndtMap, id).concat(crossFloorDuplicateIds(o.dispMap, id)).forEach(function (dup) {
+            issues.push({ kind: 'ndtOnTwoFloors', id: dup.id, floorCodes: dup.floorCodes });
+        });
+        return issues;
+    }
+
+    /** checkReportData 결과를 사용자에게 보여 줄 짧은 문장 목록(층 코드는 labelOf로 바꿈) */
+    function describeReportIssues(issues, labelOf) {
+        const label = typeof labelOf === 'function' ? labelOf : function (c) { return c; };
+        const lines = [];
+        const byKind = function (k) { return (issues || []).filter(function (x) { return x.kind === k; }); };
+        byKind('missingFloor').forEach(function (x) {
+            lines.push('· ' + label(x.floorCode) + ': 결함 ' + x.count + '개가 있는데 보고서 층 목록에 없어 빠집니다');
+        });
+        const del = byKind('deletedInReport');
+        if (del.length) lines.push('· 지운 결함 ' + del.length + '개가 보고서에 들어갑니다 (' + del.slice(0, 3).map(function (x) { return label(x.floorCode) + ' ' + x.id; }).join(', ') + (del.length > 3 ? ' …' : '') + ')');
+        const dd = byKind('defectOnTwoFloors');
+        if (dd.length) lines.push('· 같은 결함 ' + dd.length + '개가 두 층 이상에 있습니다 (' + dd.slice(0, 3).map(function (x) { return x.floorCodes.map(label).join('·'); }).join(', ') + (dd.length > 3 ? ' …' : '') + ')');
+        const nd = byKind('ndtOnTwoFloors');
+        if (nd.length) lines.push('· 같은 비파괴 항목 ' + nd.length + '개가 두 층 이상에 있어 보고서에는 한 번만 넣습니다');
+        return lines;
+    }
+
+    /**
      * 한 층에서 "다른 층에도 있는" 번호만 골라낸다(정리 대상 후보).
      * 그 층에만 있는 항목은 절대 고르지 않는다 — 지우면 안 되는 데이터다.
      */
@@ -873,6 +941,8 @@
         analyzeBuilding: analyzeBuilding,
         suspiciousFloors: suspiciousFloors,
         crossFloorDuplicateIds: crossFloorDuplicateIds,
+        checkReportData: checkReportData,
+        describeReportIssues: describeReportIssues,
         collectFirstByIdAcrossFloors: collectFirstByIdAcrossFloors,
         duplicatedRecordsOnFloor: duplicatedRecordsOnFloor,
         BULK_SNAPSHOT_MAX_PER_FLOOR: BULK_SNAPSHOT_MAX_PER_FLOOR,

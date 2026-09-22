@@ -15,7 +15,9 @@
         'siteName', 'dong', 'multiDong', 'name', 'address', 'inspector', 'contactPhone',
         'floors', 'date', 'structureType', 'facilityGrade', 'completionDate', 'notes',
         // 반발경도 평균에 넣을 추정식 — 빠져 있어 동기화 때마다 서버 옛 값으로 초기화됐다(2026-09-22)
-        'enabledStrengthFormulas'
+        'enabledStrengthFormulas',
+        // 반발경도 장비 앤빌 평균(기준 82) — 같은 이유로 로컬 수정이 서버 옛 값에 덮이지 않게
+        'strengthAnvilAvg'
     ];
 
     function metaUpdatedAt(bldg) {

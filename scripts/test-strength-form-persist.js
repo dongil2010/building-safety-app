@@ -43,7 +43,7 @@ function extractStatement(header) {
 
 function testFormulaSelectionSurvivesSync() {
     assert.ok(metaMerge.KEYS.includes('enabledStrengthFormulas'), '추정식 선택은 건물 병합에서 로컬 값을 지켜야 한다');
-    assert.ok(/'notes',\s*'enabledStrengthFormulas'\s*\]/.test(extractStatement('const BUILDING_LOCAL_META_KEYS =')),
+    assert.ok(/'notes',\s*'enabledStrengthFormulas'[\s,'A-Za-z]*\]/.test(extractStatement('const BUILDING_LOCAL_META_KEYS =')),
         'app.js 예비 키 목록에도 있어야 한다');
 
     // 이 기기에서 추정식을 바꿈 → 서버 건물(옛 값)과 병합해도 내 선택이 남는다

@@ -2707,7 +2707,7 @@ document.addEventListener('DOMContentLoaded', () => {
         'floorsOrderManual',
         'siteName', 'dong', 'multiDong', 'name', 'address', 'inspector', 'contactPhone',
         'floors', 'date', 'structureType', 'facilityGrade', 'completionDate', 'notes',
-        'enabledStrengthFormulas'
+        'enabledStrengthFormulas', 'strengthAnvilAvg'
     ];
 
     function buildingMetaUpdatedAt(bldg) {
@@ -3173,9 +3173,14 @@ document.addEventListener('DOMContentLoaded', () => {
                 delete window.state.defects[k];
             }
         });
+        const removedNdtItems = [];
         Object.keys(window.state.ndtData || {}).forEach((k) => {
-            if (k.startsWith(bldg.id + '_')) delete window.state.ndtData[k];
+            if (!k.startsWith(bldg.id + '_')) return;
+            (window.state.ndtData[k] || []).forEach((it) => removedNdtItems.push(it));
+            delete window.state.ndtData[k];
         });
+        // 영구 삭제는 되돌릴 수 없다 — 측정지 사진도 이 기기 사본까지 지운다
+        releaseStrengthPhotosOfItems(bldg.id, removedNdtItems, { keepLocal: false });
         Object.keys(window.state.ndtDisplacementGroups || {}).forEach((k) => {
             if (k.startsWith(bldg.id + '_')) delete window.state.ndtDisplacementGroups[k];
         });
@@ -4018,8 +4023,54 @@ document.addEventListener('DOMContentLoaded', () => {
         );
     }
 
+    /**
+     * 사진은 기기에 자리 번호(결함id_0, _1 …)로 캐시된다. 다른 기기가 가운데 사진을 지워 뒤 사진이
+     * 한 칸씩 당겨지면, 이 기기 캐시의 같은 번호에는 예전 사진이 남아 엉뚱한 자리에 보였다
+     * (GPT 감사 6번, 2026-09-22). 병합에서 서버 쪽 사진 목록이 이기는 결함 — 서버가 더 나중에 사진을
+     * 바꿈(photosUpdatedAt) — 은 병합 전에 이 기기의 그 결함 사진 캐시(메모리·IndexedDB)를 비워,
+     * 새 목록 기준으로 클라우드에서 다시 받게 한다. 병합도 그쪽 목록만 쓰므로 잃는 사진은 없다.
+     * 이 기기가 더 나중에 바꿨거나(내 쪽이 이김) 시각이 없는 옛 데이터는 건드리지 않는다.
+     */
+    function dropStaleDefectPhotoSlotCache(serverMap, localMap) {
+        const pick = window.BSA && window.BSA.syncMerge && window.BSA.syncMerge.pickPhotoListSide;
+        if (typeof pick !== 'function') return 0;
+        let dropped = 0;
+        Object.keys(serverMap || {}).forEach((floorKey) => {
+            const localArr = (localMap && localMap[floorKey]) || [];
+            if (!Array.isArray(localArr) || !localArr.length) return;
+            const localById = new Map(localArr.filter((d) => d && d.id).map((d) => [d.id, d]));
+            (serverMap[floorKey] || []).forEach((s) => {
+                const l = s && s.id ? localById.get(s.id) : null;
+                if (!l) return;
+                const sp = Number(s.photosUpdatedAt) || 0;
+                const lp = Number(l.photosUpdatedAt) || 0;
+                if (!(sp > lp) || pick(s, l) !== 'server') return;
+                const pids = new Set([].concat(s.photoIds || [], l.photoIds || []).filter(Boolean));
+                const slotCount = Math.max(
+                    (s.photoIds || []).length, (l.photoIds || []).length, (Array.isArray(l.photos) ? l.photos.length : 0)
+                );
+                for (let i = 0; i < slotCount; i++) pids.add(getPhotoDocId(s.id, i));
+                pids.forEach((pid) => {
+                    if (window._photoCache) delete window._photoCache[pid];
+                    // 진행 중이던 IndexedDB 쓰기가 끝나며 옛 사진을 캐시에 다시 넣지 않게 세대를 올린다
+                    _idbPhotoWriteGen.set(pid, (_idbPhotoWriteGen.get(pid) || 0) + 1);
+                    _idbPendingPhotoKeys.delete(pid);
+                    _idbPersistedPhotoKeys.delete(pid);
+                    idbDelete('photos', pid);
+                    // 이번 실행에서 이미 한 번 받았거나 "없음"으로 본 번호도 새 사진으로 다시 받게 한다
+                    _cloudPhotoFetchAttempted.delete(pid);
+                    _nonExistentPhotoIds.delete(pid);
+                });
+                dropped++;
+            });
+        });
+        if (dropped) console.info('[사진] 다른 기기가 사진을 바꾼 결함 ' + dropped + '건 — 이 기기의 자리 번호 캐시를 비우고 다시 받습니다.');
+        return dropped;
+    }
+
     function mergeDefectsMaps(serverMap, localMap, serverDeleted, localDeleted, serverDeletedAt, localDeletedAt) {
         ensureSyncMetaState();
+        dropStaleDefectPhotoSlotCache(serverMap, localMap);
         return window.BSA.syncMerge.mergeDefectsMaps(
             serverMap, localMap, serverDeleted, localDeleted, serverDeletedAt, localDeletedAt,
             { photoCache: window._photoCache, renumberFloorDefects: renumberFloorDefects }
@@ -7669,6 +7720,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (typeof trackNdtDeletion === 'function') trackNdtDeletion(floorKey, item.id);
             });
             delete window.state.ndtData[floorKey];
+            // 층 삭제 전 자동 백업으로 되살릴 수 있으니 이 기기 사본은 남기고 클라우드만 정리
+            releaseStrengthPhotosOfItems(bldg.id, ndtItems.slice(), { keepLocal: true });
         }
         if (window.state.ndtDisplacementGroups && window.state.ndtDisplacementGroups[floorKey]) {
             // 부동침하·부재처짐 구역도 묘비를 남긴다 — 안 남기면 서버에 있던 구역이 다음 동기화에서
@@ -14536,7 +14589,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (!options?.skipConfirm && !window.confirmDelete('해당 비파괴 조사 측정 항목을 삭제하시겠습니까?')) return false;
         const key = `${state.currentBuildingId}_${state.currentFloor}`;
         trackNdtDeletion(key, id);
+        const removedNdt = (state.ndtData[key] || []).filter(x => x.id === id);
         state.ndtData[key] = (state.ndtData[key] || []).filter(x => x.id !== id);
+        // 측정지 사진 클라우드 사본 정리 — 되돌리기·일괄 복원 대비로 이 기기 사본은 남긴다
+        releaseStrengthPhotosOfItems(state.currentBuildingId, removedNdt, { keepLocal: true });
         if (typeof markFloorKeyDirty === 'function') markFloorKeyDirty(key);
         saveStateToLocalStorage();
         drawNdtCanvas();
@@ -14691,6 +14747,13 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         return (x < 0 ? -1 : 1) * Math.round(v) / f;
     }
 
+    // 반발경도 앤빌 검정 기준값(엑셀 출력 시트 L6 = 82). 장비 앤빌 평균은 건물 설정(strengthAnvilAvg).
+    const STRENGTH_ANVIL_STANDARD = 82;
+    function getStrengthAnvilAvg(bldg) {
+        const v = parseFloat(bldg && bldg.strengthAnvilAvg);
+        return Number.isFinite(v) && v > 0 ? v : null;
+    }
+
     // 화면·출력 숫자도 엑셀처럼 반올림해 보여 준다(toFixed는 30.35를 30.3으로 내림)
     function fmtExcel(x, digits) {
         return Number.isFinite(x) ? excelRound(x, digits).toFixed(digits) : '-';
@@ -14755,7 +14818,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     //  ① 입력한 R값 평균(직접 입력한 0도 포함, 빈칸은 제외) → ② 평균×0.8 < R < 평균×1.2 만 남겨 재평균
     //  ③ 각도보정 = 재평균을 반올림한 R 행의 보정값(보간 없음) → ④ Ro = ROUND(재평균+보정, 1)
     //  ⑤ 추정식에 Ro 대입 → 고른 식 평균 → ⑥ 최종 강도 = ROUND(평균 × α, 1)
-    function calcConcreteStrength(readings, angleDeg, ageDays, enabledFormulaNames) {
+    //  앤빌 보정(엑셀 출력 시트 L열): 재평균 × (기준 82 ÷ 장비 앤빌 평균). 각도보정 행은 보정 전 재평균으로 찾는다.
+    //  anvilAvg가 없거나 0 이하면 보정 없음(×1).
+    function calcConcreteStrength(readings, angleDeg, ageDays, enabledFormulaNames, anvilAvg) {
         const nums = (readings || []).map(v => parseFloat(v)).filter(v => !isNaN(v) && v >= 0);
         if (nums.length === 0) return null;
 
@@ -14767,8 +14832,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const finalSet = kept.length > 0 ? kept : nums.filter(v => v > 0);
         const finalAvg = finalSet.reduce((a, b) => a + b, 0) / finalSet.length;
 
+        const anvil = Number(anvilAvg);
+        const anvilFactor = (Number.isFinite(anvil) && anvil > 0) ? STRENGTH_ANVIL_STANDARD / anvil : 1;
         const correction = getAngleCorrection(finalAvg, angleDeg);
-        const ro = excelRound(finalAvg + correction, 1);
+        const ro = excelRound(finalAvg * anvilFactor + correction, 1);
 
         const enabledNames = (enabledFormulaNames && enabledFormulaNames.length > 0)
             ? enabledFormulaNames
@@ -14793,6 +14860,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             excludedCount,
             rawAvg,
             finalAvg,
+            anvilAvg: anvilFactor !== 1 ? anvil : null,
+            anvilFactor,
             correction,
             ro,
             results,
@@ -14810,7 +14879,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
     /** 위치 슬롯 하나의 강도 결과 — 저장·다시 계산이 같은 식을 쓴다 */
     function computeStrengthSlotResult(slot, opts) {
-        const calc = calcConcreteStrength(slot.readings, opts.angle, opts.ageDays, opts.enabledNames);
+        const calc = calcConcreteStrength(slot.readings, opts.angle, opts.ageDays, opts.enabledNames, opts.anvilAvg);
         const ds = opts.designStrength;
         const ratio = (calc && Number.isFinite(ds) && ds > 0) ? (calc.finalStrength / ds) * 100 : null;
         const gradeObj = ratio !== null ? getStrengthGrade(ratio, opts.hasDamage) : null;
@@ -14848,6 +14917,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             angle: parseFloat(item.strengthAngle),
             ageDays: getConcreteStrengthAgeDays(bldg),
             enabledNames: getEnabledStrengthFormulaNames(bldg),
+            anvilAvg: getStrengthAnvilAvg(bldg),
             designStrength: Number.isFinite(ds) ? ds : NaN,
             hasDamage: item.damageStatus === '균열발생'
         };
@@ -14937,7 +15007,13 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         ctx.font = '32px sans-serif'; ctx.fillStyle = '#555555';
         ctx.fillText(`각도보정 ${calc.correction >= 0 ? '+' : ''}${calc.correction.toFixed(2)}`, c3x, 165);
         ctx.font = 'bold 32px sans-serif'; ctx.fillStyle = '#0369a1';
-        ctx.fillText(`Ro = ${calc.ro.toFixed(2)}`, c3x, 225);
+        // Ro는 엑셀처럼 소수 1자리로 반올림된 값이다(2026-09-22)
+        ctx.fillText(`Ro = ${calc.ro.toFixed(1)}`, c3x, 225);
+        if (calc.anvilFactor && calc.anvilFactor !== 1) {
+            // 앤빌 보정(엑셀 "Anvil기준 82 / 장비평균 = 보정" 칸)은 1.00이 아닐 때만 적는다
+            ctx.font = '28px sans-serif'; ctx.fillStyle = '#555555';
+            ctx.fillText(`앤빌 82/${calc.anvilAvg} = ${calc.anvilFactor.toFixed(3)}`, c3x, 285);
+        }
 
         // 4) 재령 · α(재령보정계수)
         const c4x = (colX[3] + colX[4]) / 2;
@@ -15664,7 +15740,61 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         try { localStorage.setItem(LAST_STRENGTH_ANGLE_KEY, normalizeStrengthAngleValue(v)); } catch (_) {}
     }
 
+    // 앤빌 장비평균 입력칸 — index.html은 손으로 고치지 않는 규칙(UTF-8 깨짐 위험, test-survey-round-delete)이라
+    // 설계강도 칸이 있는 줄 바로 아래에 JS로 한 번 만들어 넣는다.
+    function ensureAnvilInputRow() {
+        if (document.getElementById('ndtAnvilAvg')) return document.getElementById('ndtAnvilAvg');
+        const design = document.getElementById('ndtDesignStrength');
+        const designRow = design && design.closest('.form-row');
+        if (!designRow || !designRow.parentNode) return null;
+        const row = document.createElement('div');
+        row.className = 'form-row';
+        row.style.cssText = 'display:flex; gap:0.8rem; align-items:flex-end;';
+        row.innerHTML = '<div class="form-group" style="flex:1;">'
+            + '<label class="form-label" for="ndtAnvilAvg">🔨 앤빌 장비평균 (기준 82, 건물 공통)</label>'
+            + '<input type="number" step="0.1" min="1" id="ndtAnvilAvg" class="form-control" placeholder="비우면 보정 없음 (예: 80)">'
+            + '</div>'
+            + '<div class="form-group" style="flex:1;">'
+            + '<div id="ndtAnvilFactorHint" style="font-size:0.82rem; color:var(--text-muted); padding-bottom:0.55rem;">보정 없음 (×1.00)</div>'
+            + '</div>';
+        designRow.parentNode.insertBefore(row, designRow.nextSibling);
+        const input = row.querySelector('#ndtAnvilAvg');
+        input.addEventListener('change', applyAnvilInputToBuilding);
+        return input;
+    }
+
+    // 앤빌 장비평균 입력칸 ↔ 건물 설정(strengthAnvilAvg). 입력 중(포커스)에는 칸을 덮어쓰지 않는다.
+    function syncAnvilInputFromBuilding() {
+        const el = ensureAnvilInputRow();
+        const hint = document.getElementById('ndtAnvilFactorHint');
+        const anvil = getStrengthAnvilAvg(window.state.currentBuilding);
+        if (el && document.activeElement !== el) el.value = anvil != null ? String(anvil) : '';
+        if (hint) {
+            hint.textContent = anvil != null
+                ? `보정 ×${(STRENGTH_ANVIL_STANDARD / anvil).toFixed(3)} (82 ÷ ${anvil})`
+                : '보정 없음 (×1.00)';
+        }
+    }
+
+    function applyAnvilInputToBuilding() {
+        const bldg = window.state.currentBuilding;
+        const el = document.getElementById('ndtAnvilAvg');
+        if (!bldg || !el) return;
+        const v = parseFloat(el.value);
+        const next = Number.isFinite(v) && v > 0 ? v : null;
+        const prev = getStrengthAnvilAvg(bldg);
+        if (next === prev) { syncAnvilInputFromBuilding(); return; }
+        if (next == null) delete bldg.strengthAnvilAvg;
+        else bldg.strengthAnvilAvg = next;
+        // 수정 표시를 찍어야 동기화 병합에서 서버의 옛 값에 덮이지 않는다
+        markBuildingMetaDirty(bldg);
+        saveStateToLocalStorage();
+        syncAnvilInputFromBuilding();
+        recalcAllStrengthSlots();
+    }
+
     function recalcAllStrengthSlots() {
+        syncAnvilInputFromBuilding();
         ndtStrengthSlots.forEach((_, idx) => recalcStrengthSlot(idx));
     }
 
@@ -15679,7 +15809,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const ageDays = getConcreteStrengthAgeDays();
         const enabledNames = getEnabledStrengthFormulaNames(window.state.currentBuilding);
         const readings = ndtStrengthSlots[slotIdx] ? ndtStrengthSlots[slotIdx].readings : [];
-        const calc = calcConcreteStrength(readings, angle, ageDays, enabledNames);
+        const calc = calcConcreteStrength(readings, angle, ageDays, enabledNames, getStrengthAnvilAvg(window.state.currentBuilding));
         // 평균값 칸(ndtAvgValue)은 분류마다 뜻이 다르다(기울기·부재변위=변위량, 실측=실측폭).
         // 창을 열 때 분류와 상관없이 이 함수가 돌아서, 강도가 아닌 항목의 변위량을 비웠고
         // 그 상태로 저장되면 외벽 기울기의 기울기·등급이 지워졌다(2026-09-21). 강도일 때만 쓴다.
@@ -15694,7 +15824,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
         const ageInfo = getConcreteAgeInDaysText();
         summaryEl.innerHTML = (ageInfo ? `${ageInfo}<br>` : '준공일을 입력하지 않아 α 없이(=1) 계산됩니다.<br>') +
-            `측정 ${calc.totalCount}개 중 ${calc.excludedCount}개 제외(±20% 초과) → 평균 R = <b>${fmtExcel(calc.finalAvg, 1)}</b> → 각도보정(${angle > 0 ? '+' : ''}${angle}°) ${calc.correction >= 0 ? '+' : ''}${calc.correction.toFixed(2)} → <b>Ro = ${calc.ro.toFixed(1)}</b>`;
+            `측정 ${calc.totalCount}개 중 ${calc.excludedCount}개 제외(±20% 초과) → 평균 R = <b>${fmtExcel(calc.finalAvg, 1)}</b>${calc.anvilFactor !== 1 ? ` → 앤빌 ×${calc.anvilFactor.toFixed(3)}` : ''} → 각도보정(${angle > 0 ? '+' : ''}${angle}°) ${calc.correction >= 0 ? '+' : ''}${calc.correction.toFixed(2)} → <b>Ro = ${calc.ro.toFixed(1)}</b>`;
         resultsEl.innerHTML = calc.results.map(r => `
             <tr>
                 <td style="padding:0.3rem 0.4rem; border-top:1px solid rgba(2,132,199,0.15); text-align:center;">
@@ -16611,6 +16741,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             angle: parseFloat(strengthAngle),
             ageDays: strengthAgeDays,
             enabledNames: enabledFormulaNames,
+            anvilAvg: getStrengthAnvilAvg(window.state.currentBuilding),
             designStrength: designStrengthVal,
             hasDamage
         });
@@ -17022,6 +17153,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
         const ndtAngleEl = document.getElementById('ndtAngle');
         if (ndtAngleEl) ndtAngleEl.addEventListener('change', recalcAllStrengthSlots);
+        ensureAnvilInputRow();
 
         const ndtDesignStrengthEl = document.getElementById('ndtDesignStrength');
         if (ndtDesignStrengthEl) ndtDesignStrengthEl.addEventListener('input', recalcAllStrengthSlots);
@@ -37542,6 +37674,31 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         });
         if (!floorsData.length) { window.showToast('등록된 결함이 없습니다.', 'warning'); return; }
 
+        // 보고서 직전 점검(GPT 감사 9번, 2026-09-22): 빠지는 층·지운 결함·두 층에 있는 번호를 먼저 알린다.
+        // 조용히 이상한 보고서가 나가는 것보다, 만들기 전에 한 번 멈추는 게 낫다(취소하면 고친 뒤 다시 출력).
+        const health = window.BSA && window.BSA.dataHealth;
+        if (health && typeof health.checkReportData === 'function') {
+            const reportDefectsByFloor = {};
+            floorsData.forEach((f) => { if (!f.exteriorCombined) reportDefectsByFloor[f.floorCode] = f.pageDefects; });
+            const reportIssues = health.checkReportData({
+                buildingId: bldgId,
+                defectsMap: window.state.defects,
+                deletedDefectIds: window.state.deletedDefectIds,
+                ndtMap: window.state.ndtData,
+                dispMap: window.state.ndtDisplacementGroups,
+                reportFloorCodes: availableFloors,
+                reportDefectsByFloor
+            });
+            if (reportIssues.length) {
+                console.warn('[보고서 점검]', reportIssues);
+                const lines = health.describeReportIssues(reportIssues, getFloorLabel);
+                const go = window.confirm('보고서를 만들기 전에 확인이 필요한 데이터가 있습니다.\n\n'
+                    + lines.join('\n')
+                    + '\n\n그래도 한글 파일을 만들까요?\n(취소하면 만들지 않습니다)');
+                if (!go) return;
+            }
+        }
+
         window.showLoading('한글(hwpx) 상태조사표를 생성하는 중입니다...');
         try {
             if (typeof JSZip === 'undefined') throw new Error('JSZip 라이브러리를 불러오지 못했습니다.');
@@ -39560,7 +39717,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                                     const pt = perfPoints[seq];
                                     const readings = (pt.slot.readings || []).filter(v => v !== '' && v !== null && v !== undefined);
                                     if (readings.length === 0) continue;
-                                    const calc = calcConcreteStrength(readings, parseFloat(pt.item.strengthAngle), perfAgeDays, perfEnabledNames);
+                                    const calc = calcConcreteStrength(readings, parseFloat(pt.item.strengthAngle), perfAgeDays, perfEnabledNames, getStrengthAnvilAvg(bldg));
                                     if (!calc) continue;
                                     perfCanvases.push(renderStrengthPerfPointCanvas(seq + 1, pt.item, pt.slot, readings, calc));
                                 }
@@ -41885,7 +42042,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                                     const pt = perfPoints[seq];
                                     const readings = (pt.slot.readings || []).filter(v => v !== '' && v !== null && v !== undefined);
                                     if (readings.length === 0) continue;
-                                    const calc = calcConcreteStrength(readings, parseFloat(pt.item.strengthAngle), perfAgeDays, perfEnabledNames);
+                                    const calc = calcConcreteStrength(readings, parseFloat(pt.item.strengthAngle), perfAgeDays, perfEnabledNames, getStrengthAnvilAvg(bldg));
                                     if (!calc) continue;
                                     perfCanvases.push(renderStrengthPerfPointCanvas(seq + 1, pt.item, pt.slot, readings, calc));
                                 }
@@ -44715,16 +44872,60 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         });
     }
 
-    async function deleteStrengthPhotoStorage(bldgId, photoId) {
+    // opts.keepLocal: 클라우드 사본만 지우고 이 기기 사본(메모리·IndexedDB)은 남긴다 — 되살릴 수 있는 삭제용.
+    // 항목이 되살아나면 동기화(ensurePhotoPersistedToStorage)가 이 사본을 다시 올린다(클라우드 표시는 deleteCloudPhoto가 지움).
+    async function deleteStrengthPhotoStorage(bldgId, photoId, opts) {
         if (!bldgId || !photoId) return;
         const key = getStrengthPhotoDocId(bldgId, photoId);
-        if (window._photoCache) delete window._photoCache[key];
-        await idbDelete('photos', key);
+        if (!(opts && opts.keepLocal)) {
+            if (window._photoCache) delete window._photoCache[key];
+            await idbDelete('photos', key);
+        }
         try {
             await deleteCloudPhoto(key);
         } catch (e) {
             console.warn('반발경도 측정지 사진 클라우드 삭제 실패:', key, e);
         }
+    }
+
+    function strengthPhotoIdsOfItem(item) {
+        const slots = (item && Array.isArray(item.strengthSlots)) ? item.strengthSlots : [];
+        return slots.map((s) => s && s.photoId).filter(Boolean);
+    }
+
+    function collectStrengthPhotoIdsInBuilding(bldgId) {
+        const used = new Set();
+        const prefix = `${bldgId}_`;
+        Object.keys(window.state.ndtData || {}).forEach((k) => {
+            if (!k.startsWith(prefix)) return;
+            (window.state.ndtData[k] || []).forEach((item) => strengthPhotoIdsOfItem(item).forEach((p) => used.add(p)));
+        });
+        return used;
+    }
+
+    /**
+     * 비파괴 항목이 사라질 때 반발경도 측정지 사진의 클라우드 사본을 지운다(2026-09-22 — 예전엔 항목·건물을
+     * 지워도 클라우드에 고아로 남아 용량만 차지했다). 반드시 state에서 항목을 뺀 **뒤에** 부른다.
+     * - opts.keepLocal: 되살릴 수 있는 삭제(항목·층 삭제 → 되돌리기·일괄 복원)는 이 기기 사본을 남겨,
+     *   항목이 살아나면 동기화가 다시 올린다. 건물 영구 삭제는 사본까지 지운다.
+     * - 남은 다른 항목(층 섞임으로 복제된 항목 등)이 같은 사진을 쓰면 지우지 않는다.
+     * 실수로 지워도 Storage 삭제 파일 보관(30일)으로 콘솔에서 되살릴 수 있다.
+     */
+    function releaseStrengthPhotosOfItems(bldgId, removedItems, opts) {
+        if (!bldgId || !Array.isArray(removedItems) || !removedItems.length) return 0;
+        const pids = new Set();
+        removedItems.forEach((it) => strengthPhotoIdsOfItem(it).forEach((p) => pids.add(p)));
+        if (!pids.size) return 0;
+        const stillUsed = collectStrengthPhotoIdsInBuilding(bldgId);
+        let released = 0;
+        pids.forEach((pid) => {
+            if (stillUsed.has(pid)) return;
+            released++;
+            deleteStrengthPhotoStorage(bldgId, pid, { keepLocal: !!(opts && opts.keepLocal) }).catch((e) => {
+                console.warn('반발경도 측정지 사진 정리 실패:', pid, e);
+            });
+        });
+        return released;
     }
 
     async function hydrateBuildingOverviewPhotos(bldg) {

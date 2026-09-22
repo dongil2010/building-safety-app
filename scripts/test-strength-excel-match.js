@@ -53,6 +53,8 @@ vm.runInContext([
     extractFunction('function getStrengthGrade('),
     'const DEFAULT_STRENGTH_FORMULA_NAMES = ' + /const DEFAULT_STRENGTH_FORMULA_NAMES = (\[[^\]]*\]);/.exec(app)[1] + ';',
     extractFunction('function getEnabledStrengthFormulaNames('),
+    'const STRENGTH_ANVIL_STANDARD = ' + /const STRENGTH_ANVIL_STANDARD = (\d+);/.exec(app)[1] + ';',
+    extractFunction('function getStrengthAnvilAvg('),
     extractFunction('function calcConcreteStrength('),
     extractArray('const AGE_CORRECTION_BREAKPOINTS = ['),
     extractFunction('function getAgeCorrectionFactor('),
@@ -95,6 +97,27 @@ function testMatchesExcelPrintout() {
         assert.strictEqual(api.excelRound(c.formulaAvg, 2), row.avg, row.no + ' 평균');
         assert.strictEqual(c.finalStrength, row.fc, row.no + ' 최종 강도');
     });
+}
+
+function testAnvilCorrection() {
+    // 엑셀 출력 시트: L10 = R × (82 ÷ 장비평균), M7 = 각도보정(보정 전 R 행), Ro = ROUND(L10 + M7, 1)
+    const r = EXCEL_ROWS[1].r.map(String); // R 38.7
+    const same = api.calcConcreteStrength(r, 0, ALPHA_063_DAYS, NAMES, 82);
+    assert.strictEqual(same.ro, 38.7, '장비평균 82면 보정 ×1');
+    assert.strictEqual(same.finalStrength, 22.1);
+    const none = api.calcConcreteStrength(r, 0, ALPHA_063_DAYS, NAMES, null);
+    assert.strictEqual(none.anvilFactor, 1, '비우면 보정 없음');
+    assert.strictEqual(none.finalStrength, 22.1);
+    const c = api.calcConcreteStrength(r, 0, ALPHA_063_DAYS, NAMES, 80);
+    assert.strictEqual(c.anvilFactor, 82 / 80);
+    assert.strictEqual(c.anvilAvg, 80);
+    assert.strictEqual(c.ro, 39.7, '38.7 × 82/80 = 39.6675 → 39.7');
+    assert.strictEqual(c.finalStrength, 22.7, '(33.21 + 38.981)/2 × 0.63 = 22.74 → 22.7');
+    // 각도보정 행은 보정 전 R(38.7 → 39행, +90° = -3.98)
+    const up = api.calcConcreteStrength(r, 90, ALPHA_063_DAYS, NAMES, 80);
+    assert.strictEqual(up.correction, -3.98);
+    assert.strictEqual(up.ro, 35.7, 'ROUND(39.6675 - 3.98, 1)');
+    assert.strictEqual(api.calcConcreteStrength(r, 0, ALPHA_063_DAYS, NAMES, 0).anvilFactor, 1, '0 이하는 보정 없음');
 }
 
 function testExcelRoundHalfUp() {
@@ -187,6 +210,7 @@ function testCallSites() {
 
 [
     testMatchesExcelPrintout,
+    testAnvilCorrection,
     testExcelRoundHalfUp,
     testOutlierBoundaryExcluded,
     testAngleUsesRoundedRow,
