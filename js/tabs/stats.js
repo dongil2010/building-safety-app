@@ -491,10 +491,21 @@
             if (code && floorCodes.indexOf(code) < 0) floorCodes.push(code);
         });
 
+        // 강도는 저장값이 아니라 지금 계산식으로 다시 계산한다(2026-09-22 엑셀 방식으로 계산식 변경)
+        var refreshStrength = (typeof window !== 'undefined' && typeof window.refreshStrengthItemResults === 'function')
+            ? window.refreshStrengthItemResults
+            : null;
+        var statsBldg = (refreshStrength && window.state && Array.isArray(window.state.buildings))
+            ? (window.state.buildings.find(function (b) { return b && b.id === buildingId; }) || null)
+            : null;
+
         var floorRows = [];
         floorCodes.forEach(function (floorCode) {
             var items = (ndtData && ndtData[prefix + floorCode]) || [];
             if (!Array.isArray(items)) items = [];
+            if (refreshStrength) {
+                items = items.map(function (item) { return refreshStrength(item, statsBldg); });
+            }
             var strengthSamples = [];
             var carbSamples = [];
             var fireproofSamples = [];

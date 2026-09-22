@@ -14401,7 +14401,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             `;
             }).join('');
         } else if (currentCat === '강도') {
-            tbody.innerHTML = items.map((item, idx) => {
+            tbody.innerHTML = items.map((rawItem, idx) => {
+                // 저장값이 아니라 지금 계산식으로 다시 계산해 보여 준다(계산식 변경 후 옛 값 방지)
+                const item = refreshStrengthItemResults(rawItem);
                 const locText = Array.isArray(item.strengthSlots) && item.strengthSlots.length > 1
                     ? item.strengthSlots.map(s => s.location || item.location || '-').join(', ')
                     : (item.location || '-');
@@ -14658,27 +14660,46 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     ];
     const CONCRETE_ANGLE_COLUMN_INDEX = { '0': 1, '90': 2, '45': 3, '-45': 4, '-90': 5 };
 
-    // 각도별 보정값 표에서 R값에 해당하는 보정값을 찾는다. 표에 없는 R(정수 아닌 평균값 등)은
-    // 앞뒤 정수 R행 사이를 선형보간하고, 표 범위(10~80) 밖이면 가장 가까운 끝 행 값을 그대로 쓴다.
+    // 각도별 보정값 표에서 R값에 해당하는 보정값을 찾는다. R은 정수로 반올림해 그 행을 쓰고,
+    // 표 범위(10~80) 밖이면 가장 가까운 끝 행 값을 그대로 쓴다.
     function getAngleCorrection(rValue, angleDeg) {
         const colIdx = CONCRETE_ANGLE_COLUMN_INDEX[String(angleDeg)];
         if (colIdx === undefined) return 0;
         const table = CONCRETE_ANGLE_CORRECTION_TABLE;
-        if (rValue <= table[0][0]) return table[0][colIdx];
-        if (rValue >= table[table.length - 1][0]) return table[table.length - 1][colIdx];
-        const lowIdx = Math.floor(rValue) - table[0][0];
-        const rowLow = table[lowIdx];
-        const rowHigh = table[Math.min(lowIdx + 1, table.length - 1)];
-        const frac = rValue - rowLow[0];
-        return rowLow[colIdx] + (rowHigh[colIdx] - rowLow[colIdx]) * frac;
+        // 엑셀과 같이 R을 반올림한 행의 값을 그대로 쓴다: INDEX(각도보정, ROUND(R-9,0), 각도열)
+        // (예전엔 앞뒤 행 사이를 보간해 엑셀과 소수점이 어긋났다, 2026-09-22)
+        const r = Math.min(Math.max(excelRound(rValue, 0), table[0][0]), table[table.length - 1][0]);
+        const row = table[r - table[0][0]];
+        return row ? row[colIdx] : 0;
     }
 
     // 압축강도 추정식 3가지 (사용자 회사 자료 기준)
+    // kgf/cm² → MPa 환산은 회사 엑셀(정밀점검 평가 통합 — 출력 시트 P열)과 같이 ×0.1.
+    // 예전엔 ×0.098이라 식마다 약 0.7MPa, 최종 강도가 0.5MPa 가량 낮게 나왔다(2026-09-22).
     const CONCRETE_STRENGTH_FORMULAS = [
-        { name: '일본재료학회식', calc: (ro) => -18.0 + 1.27 * ro },
-        { name: '일본건축학회 제안식', calc: (ro) => (7.3 * ro + 100) * 0.098 },
+        { name: '일본재료학회식', calc: (ro) => (13 * ro - 184) * 0.1 },
+        { name: '일본건축학회 제안식', calc: (ro) => (7.3 * ro + 100) * 0.1 },
         { name: '과학기술부식', calc: (ro) => (15.2 * ro - 112.8) * 0.1 }
     ];
+
+    // 엑셀 ROUND와 같은 반올림(0.5는 0에서 먼 쪽). 37.65×10이 376.4999…로 떨어져 내려 반올림되는
+    // 부동소수 오차를 엑셀처럼 15자리에서 한 번 정리한 뒤 반올림한다.
+    function excelRound(x, digits) {
+        if (!Number.isFinite(x)) return x;
+        const f = Math.pow(10, digits || 0);
+        const v = Number((Math.abs(x) * f).toPrecision(15));
+        return (x < 0 ? -1 : 1) * Math.round(v) / f;
+    }
+
+    // 화면·출력 숫자도 엑셀처럼 반올림해 보여 준다(toFixed는 30.35를 30.3으로 내림)
+    function fmtExcel(x, digits) {
+        return Number.isFinite(x) ? excelRound(x, digits).toFixed(digits) : '-';
+    }
+
+    // ±20% 제외 — 엑셀 강도입력 시트: 평균×0.8 < R < 평균×1.2 인 값만 남긴다(경계값과 같으면 제외)
+    function isStrengthOutlierValue(v, rawAvg) {
+        return !(v > rawAvg * 0.8 && v < rawAvg * 1.2);
+    }
 
     // R값 목록(최대 20개) → ±20% 이상 벗어난 값 제외(KS F 2732 관례) → 재평균 → 각도보정(Ro) →
     // 3개 추정식 결과까지 한 번에 계산한다.
@@ -14730,20 +14751,24 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         recalcAllStrengthSlots();
     };
 
+    // 계산 순서는 회사 엑셀(강도입력·출력 시트)과 똑같이 맞춘다(2026-09-22):
+    //  ① 입력한 R값 평균(직접 입력한 0도 포함, 빈칸은 제외) → ② 평균×0.8 < R < 평균×1.2 만 남겨 재평균
+    //  ③ 각도보정 = 재평균을 반올림한 R 행의 보정값(보간 없음) → ④ Ro = ROUND(재평균+보정, 1)
+    //  ⑤ 추정식에 Ro 대입 → 고른 식 평균 → ⑥ 최종 강도 = ROUND(평균 × α, 1)
     function calcConcreteStrength(readings, angleDeg, ageDays, enabledFormulaNames) {
-        const nums = (readings || []).map(v => parseFloat(v)).filter(v => !isNaN(v) && v > 0);
+        const nums = (readings || []).map(v => parseFloat(v)).filter(v => !isNaN(v) && v >= 0);
         if (nums.length === 0) return null;
 
         const rawAvg = nums.reduce((a, b) => a + b, 0) / nums.length;
-        const threshold = rawAvg * 0.2;
-        const kept = nums.filter(v => Math.abs(v - rawAvg) <= threshold);
+        if (!(rawAvg > 0)) return null;
+        const kept = nums.filter(v => !isStrengthOutlierValue(v, rawAvg));
         const excludedCount = nums.length - kept.length;
-        // 전부 제외되는 극단적인 경우(이론상 거의 없음) 방지용 안전장치
-        const finalSet = kept.length > 0 ? kept : nums;
+        // 전부 제외되는 극단적인 경우(엑셀은 #DIV/0!) 방지용 안전장치 — 0 아닌 값으로 평균
+        const finalSet = kept.length > 0 ? kept : nums.filter(v => v > 0);
         const finalAvg = finalSet.reduce((a, b) => a + b, 0) / finalSet.length;
 
         const correction = getAngleCorrection(finalAvg, angleDeg);
-        const ro = finalAvg + correction;
+        const ro = excelRound(finalAvg + correction, 1);
 
         const enabledNames = (enabledFormulaNames && enabledFormulaNames.length > 0)
             ? enabledFormulaNames
@@ -14761,7 +14786,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const avgSource = includedResults.length > 0 ? includedResults : results;
         const formulaAvg = avgSource.reduce((a, r) => a + r.value, 0) / avgSource.length;
         const alpha = getAgeCorrectionFactor(ageDays);
-        const finalStrength = formulaAvg * (alpha !== null ? alpha : 1);
+        const finalStrength = excelRound(formulaAvg * (alpha !== null ? alpha : 1), 1);
 
         return {
             totalCount: nums.length,
@@ -14777,6 +14802,72 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             finalStrength
         };
     }
+
+    function strengthSlotHasReadings(slot) {
+        return !!(slot && Array.isArray(slot.readings)
+            && slot.readings.some(v => v !== '' && v !== null && v !== undefined));
+    }
+
+    /** 위치 슬롯 하나의 강도 결과 — 저장·다시 계산이 같은 식을 쓴다 */
+    function computeStrengthSlotResult(slot, opts) {
+        const calc = calcConcreteStrength(slot.readings, opts.angle, opts.ageDays, opts.enabledNames);
+        const ds = opts.designStrength;
+        const ratio = (calc && Number.isFinite(ds) && ds > 0) ? (calc.finalStrength / ds) * 100 : null;
+        const gradeObj = ratio !== null ? getStrengthGrade(ratio, opts.hasDamage) : null;
+        return {
+            location: slot.location || '',
+            readings: (slot.readings || []).slice(),
+            photoId: slot.photoId || null,
+            results: calc ? calc.results : [],
+            ro: calc ? calc.ro : null,
+            ageDays: calc ? calc.ageDays : null,
+            alpha: calc ? calc.alpha : null,
+            formulaAvg: calc ? calc.formulaAvg : null,
+            finalStrength: calc ? calc.finalStrength : null,
+            ratio,
+            grade: gradeObj ? gradeObj.code : null
+        };
+    }
+
+    /**
+     * 저장된 강도 항목을 지금 계산식으로 다시 계산한 사본(원본·저장 데이터는 안 바꾼다).
+     * 계산식이 바뀌어도(2026-09-22 엑셀 방식) 목록·통계·한글 출력이 옛 저장값을 쓰지 않게 한다.
+     * R값이 없는 슬롯은 저장된 결과를 그대로 둔다.
+     */
+    function refreshStrengthItemResults(item, bldg) {
+        if (!item || item.category !== '강도') return item;
+        const slots = Array.isArray(item.strengthSlots) && item.strengthSlots.length > 0
+            ? item.strengthSlots
+            : (Array.isArray(item.strengthReadings) && item.strengthReadings.length > 0
+                ? [{ location: item.location || '', readings: item.strengthReadings }]
+                : []);
+        if (!slots.some(strengthSlotHasReadings)) return item;
+        bldg = bldg || window.state.currentBuilding;
+        const ds = parseFloat(item.designStrength);
+        const opts = {
+            angle: parseFloat(item.strengthAngle),
+            ageDays: getConcreteStrengthAgeDays(bldg),
+            enabledNames: getEnabledStrengthFormulaNames(bldg),
+            designStrength: Number.isFinite(ds) ? ds : NaN,
+            hasDamage: item.damageStatus === '균열발생'
+        };
+        const fresh = slots.map(s => (strengthSlotHasReadings(s)
+            ? Object.assign({}, s, computeStrengthSlotResult(s, opts))
+            : s));
+        const first = fresh[0] || {};
+        return Object.assign({}, item, {
+            strengthSlots: fresh,
+            strengthResults: first.results || [],
+            strengthRo: first.ro != null ? first.ro : null,
+            strengthAgeDays: first.ageDays != null ? first.ageDays : null,
+            strengthAlpha: first.alpha != null ? first.alpha : null,
+            strengthFormulaAvg: first.formulaAvg != null ? first.formulaAvg : null,
+            strengthFinal: first.finalStrength != null ? first.finalStrength : null,
+            strengthRatio: first.ratio != null ? first.ratio : null,
+            strengthGrade: first.grade != null ? first.grade : null
+        });
+    }
+    window.refreshStrengthItemResults = refreshStrengthItemResults;
 
     // 콘크리트 반발경도 성과표(hwpx 내보내기 전용) — NO. 하나(위치 슬롯 하나)의 반발치 원시값
     // 5행×4열 그리드, 평균경도(R)·각도보정·Ro, 재령·α, 압축강도(식별 1식/2식/3식)+최종강도,
@@ -14804,8 +14895,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         }
 
         const rawAvg = calc.rawAvg;
-        const threshold = rawAvg * 0.2;
-        const isOutlier = (v) => Math.abs(v - rawAvg) > threshold;
+        const isOutlier = (v) => isStrengthOutlierValue(v, rawAvg);
 
         // 1) 측정위치
         ctx.textBaseline = 'middle';
@@ -14843,7 +14933,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         ctx.font = '32px sans-serif'; ctx.fillStyle = '#555555';
         ctx.fillText('평균경도(R)', c3x, 45);
         ctx.font = 'bold 42px sans-serif'; ctx.fillStyle = '#111111';
-        ctx.fillText(calc.finalAvg.toFixed(1), c3x, 105);
+        ctx.fillText(fmtExcel(calc.finalAvg, 1), c3x, 105);
         ctx.font = '32px sans-serif'; ctx.fillStyle = '#555555';
         ctx.fillText(`각도보정 ${calc.correction >= 0 ? '+' : ''}${calc.correction.toFixed(2)}`, c3x, 165);
         ctx.font = 'bold 32px sans-serif'; ctx.fillStyle = '#0369a1';
@@ -14870,7 +14960,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             ctx.font = '32px sans-serif'; ctx.fillStyle = '#333333'; ctx.textAlign = 'left';
             ctx.fillText(`${i + 1}식`, c5x0, fy);
             ctx.font = 'bold 32px sans-serif'; ctx.fillStyle = '#111111'; ctx.textAlign = 'right';
-            ctx.fillText(r.value.toFixed(1), c5x1, fy);
+            ctx.fillText(fmtExcel(r.value, 1), c5x1, fy);
             fy += 54;
         });
         ctx.strokeStyle = '#94a3b8'; ctx.lineWidth = 1.5;
@@ -14907,10 +14997,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     // 칸 비율을 넘겨주면 캔버스를 그 비율에 딱 맞게 그린다(=축소 없이 칸을 꽉 채움). 줄 수(20개
     // 고정이 아니라 실제 입력된 개수)에 맞춰 줄 높이·글자 크기도 매번 다시 계산한다.
     function renderStrengthDataRowCanvas(pt, aspect) {
-        const nums = pt.readings.map(v => parseFloat(v)).filter(v => !isNaN(v));
+        const nums = pt.readings.map(v => parseFloat(v)).filter(v => !isNaN(v) && v >= 0);
         const avg = nums.length > 0 ? nums.reduce((a, b) => a + b, 0) / nums.length : 0;
-        const threshold = avg * 0.2;
-        const isOutlier = (v) => avg > 0 && Math.abs(v - avg) > threshold;
+        // 제외 판정은 calcConcreteStrength와 같은 규칙(엑셀: 평균×0.8 < R < 평균×1.2)
+        const isOutlier = (v) => avg > 0 && isStrengthOutlierValue(v, avg);
 
         const H = 1400;
         const W = Math.max(140, Math.round(H * (aspect || 0.43)));
@@ -15437,6 +15527,39 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         return days >= 0 ? days : null;
     }
 
+    function parseYmdParts(v) {
+        const m = /^(\d{4})-(\d{1,2})-(\d{1,2})/.exec(String(v == null ? '' : v).trim());
+        if (m) return { y: +m[1], m: +m[2], d: +m[3] };
+        const dt = v ? new Date(v) : null;
+        if (!dt || isNaN(dt.getTime())) return null;
+        return { y: dt.getFullYear(), m: dt.getMonth() + 1, d: dt.getDate() };
+    }
+
+    // 엑셀 DAYS360(시작, 끝) — 미국식(기본값). 1년 = 360일, 한 달 = 30일로 센다.
+    function excelDays360(a, b) {
+        let d1 = a.d;
+        let d2 = b.d;
+        const lastDayOfStartMonth = new Date(a.y, a.m, 0).getDate();
+        if (d1 === 31 || (a.m === 2 && d1 === lastDayOfStartMonth)) d1 = 30;
+        if (d2 === 31 && d1 >= 30) d2 = 30;
+        return (b.y - a.y) * 360 + (b.m - a.m) * 30 + (d2 - d1);
+    }
+
+    /**
+     * 반발경도 재령일수 — 회사 엑셀과 같이 DAYS360(준공일, 점검일)로 센다(2026-09-22).
+     * 탄산화 등 다른 계산은 실제 날짜 차이(getConcreteAgeInDays)를 그대로 쓴다.
+     */
+    function getConcreteStrengthAgeDays(bldg) {
+        bldg = bldg || window.state.currentBuilding;
+        if (!bldg || !bldg.completionDate) return null;
+        const start = parseYmdParts(bldg.completionDate);
+        const now = new Date();
+        const end = bldg.date ? parseYmdParts(bldg.date) : { y: now.getFullYear(), m: now.getMonth() + 1, d: now.getDate() };
+        if (!start || !end) return null;
+        const days = excelDays360(start, end);
+        return days >= 0 ? days : null;
+    }
+
     // 재령일수 → α(재령보정계수) 구간표. 회사 자료 원본은 하루 단위로 값이 있지만,
     // 값이 바뀌는 지점(day)만 기록해 압축했다 — 예: day=250이면 다음 구간(day=300)
     // 전까지 α=0.71을 그대로 쓴다. 원본 표는 day 1~3이 공란("-")이었는데(타설 직후라
@@ -15464,11 +15587,11 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     }
 
     function getConcreteAgeInDaysText() {
-        const days = getConcreteAgeInDays();
+        const days = getConcreteStrengthAgeDays();
         const bldg = window.state.currentBuilding;
         if (days === null || !bldg) return '';
         const alpha = getAgeCorrectionFactor(days);
-        return `📅 재령일수: 준공일(${bldg.completionDate}) ~ 점검일(${bldg.date || '오늘'}) = <b>${days}일</b> → α(재령보정계수) = <b>${alpha !== null ? alpha.toFixed(2) : '-'}</b>`;
+        return `📅 재령일수: 준공일(${bldg.completionDate}) ~ 점검일(${bldg.date || '오늘'}) = <b>${days}일</b>(1년 360일 기준) → α(재령보정계수) = <b>${alpha !== null ? alpha.toFixed(2) : '-'}</b>`;
     }
 
     // 측정 각도 선택지(index.html #ndtAngle)에 있는 값만 쓴다. 그 밖(빈 값 포함)은 0°.
@@ -15499,7 +15622,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (!summaryEl || !resultsEl) return;
 
         const angle = angleEl ? parseFloat(angleEl.value) : 0;
-        const ageDays = getConcreteAgeInDays();
+        const ageDays = getConcreteStrengthAgeDays();
         const enabledNames = getEnabledStrengthFormulaNames(window.state.currentBuilding);
         const readings = ndtStrengthSlots[slotIdx] ? ndtStrengthSlots[slotIdx].readings : [];
         const calc = calcConcreteStrength(readings, angle, ageDays, enabledNames);
@@ -15517,19 +15640,19 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
         const ageInfo = getConcreteAgeInDaysText();
         summaryEl.innerHTML = (ageInfo ? `${ageInfo}<br>` : '준공일을 입력하지 않아 α 없이(=1) 계산됩니다.<br>') +
-            `측정 ${calc.totalCount}개 중 ${calc.excludedCount}개 제외(±20% 초과) → 평균 R = <b>${calc.finalAvg.toFixed(1)}</b> → 각도보정(${angle > 0 ? '+' : ''}${angle}°) ${calc.correction >= 0 ? '+' : ''}${calc.correction.toFixed(2)} → <b>Ro = ${calc.ro.toFixed(1)}</b>`;
+            `측정 ${calc.totalCount}개 중 ${calc.excludedCount}개 제외(±20% 초과) → 평균 R = <b>${fmtExcel(calc.finalAvg, 1)}</b> → 각도보정(${angle > 0 ? '+' : ''}${angle}°) ${calc.correction >= 0 ? '+' : ''}${calc.correction.toFixed(2)} → <b>Ro = ${calc.ro.toFixed(1)}</b>`;
         resultsEl.innerHTML = calc.results.map(r => `
             <tr>
                 <td style="padding:0.3rem 0.4rem; border-top:1px solid rgba(2,132,199,0.15); text-align:center;">
                     <input type="checkbox" class="ndt-strength-formula-toggle" data-formula="${r.name}" ${r.enabled ? 'checked' : ''} onchange="window.toggleStrengthFormula('${r.name}')" style="cursor:pointer;">
                 </td>
                 <td style="padding:0.3rem 0.4rem; border-top:1px solid rgba(2,132,199,0.15); ${r.enabled ? '' : 'color:var(--text-muted); text-decoration:line-through;'}">${r.name}</td>
-                <td style="padding:0.3rem 0.4rem; border-top:1px solid rgba(2,132,199,0.15); text-align:right; font-weight:800; color:${r.enabled ? '#2a2a2a' : 'var(--text-muted)'};">${r.value.toFixed(1)}</td>
+                <td style="padding:0.3rem 0.4rem; border-top:1px solid rgba(2,132,199,0.15); text-align:right; font-weight:800; color:${r.enabled ? '#2a2a2a' : 'var(--text-muted)'};">${fmtExcel(r.value, 1)}</td>
             </tr>
         `).join('') + `
             <tr>
                 <td colspan="2" style="padding:0.3rem 0.4rem; border-top:1px solid rgba(2,132,199,0.4);">평균 (체크된 식만)</td>
-                <td style="padding:0.3rem 0.4rem; border-top:1px solid rgba(2,132,199,0.4); text-align:right; font-weight:800;">${calc.formulaAvg.toFixed(1)}</td>
+                <td style="padding:0.3rem 0.4rem; border-top:1px solid rgba(2,132,199,0.4); text-align:right; font-weight:800;">${fmtExcel(calc.formulaAvg, 2)}</td>
             </tr>
             <tr>
                 <td colspan="2" style="padding:0.35rem 0.4rem; border-top:1px solid rgba(2,132,199,0.4); font-weight:800; color:#16a34a;">최종 강도 (평균 × α${calc.alpha !== null ? '=' + calc.alpha.toFixed(2) : '(미적용)'})</td>
@@ -15557,7 +15680,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
         // #ndtAvgValue는 강도 카테고리에선 화면에 안 보이지만(다른 카테고리와 공용 필드), 저장 시
         // 하위호환용 최상위 값으로 쓰이므로 위치 1(슬롯 0) 결과로만 채워둔다.
-        if (avgEl && slotIdx === 0 && isStrengthCat) avgEl.value = `${calc.finalStrength.toFixed(1)} MPa (R=${calc.finalAvg.toFixed(1)}, Ro=${calc.ro.toFixed(1)})`;
+        if (avgEl && slotIdx === 0 && isStrengthCat) avgEl.value = `${calc.finalStrength.toFixed(1)} MPa (R=${fmtExcel(calc.finalAvg, 1)}, Ro=${calc.ro.toFixed(1)})`;
     }
 
     // --- 콘크리트 탄산화(중성화) 계산 엔진 ---
@@ -16423,31 +16546,20 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         // 콘크리트 강도(반발경도)는 위치 슬롯별로(최대 3개) R값 목록 + 각도보정 + 추정식 3개
         // 결과를 각각 저장한다. 최상위 strength* 필드들은 하위호환용으로 첫 슬롯 결과만 담는다.
         const strengthAngle = document.getElementById('ndtAngle')?.value;
-        const strengthAgeDays = (cat === '강도') ? getConcreteAgeInDays() : null;
+        const strengthAgeDays = (cat === '강도') ? getConcreteStrengthAgeDays() : null;
         if (cat === '강도') rememberLastStrengthAngle(strengthAngle);
         const enabledFormulaNames = getEnabledStrengthFormulaNames(window.state.currentBuilding);
         const designStrengthVal = (cat === '강도') ? parseFloat(document.getElementById('ndtDesignStrength')?.value) : NaN;
         const damageStatus = (cat === '강도') ? (document.getElementById('ndtDamageStatus')?.value || '') : null;
         const hasDamage = damageStatus === '균열발생';
 
-        const computeSlotResult = (slot) => {
-            const calc = calcConcreteStrength(slot.readings, parseFloat(strengthAngle), strengthAgeDays, enabledFormulaNames);
-            const ratio = (calc && !isNaN(designStrengthVal) && designStrengthVal > 0) ? (calc.finalStrength / designStrengthVal) * 100 : null;
-            const gradeObj = ratio !== null ? getStrengthGrade(ratio, hasDamage) : null;
-            return {
-                location: slot.location || '',
-                readings: (slot.readings || []).slice(),
-                photoId: slot.photoId || null,
-                results: calc ? calc.results : [],
-                ro: calc ? calc.ro : null,
-                ageDays: calc ? calc.ageDays : null,
-                alpha: calc ? calc.alpha : null,
-                formulaAvg: calc ? calc.formulaAvg : null,
-                finalStrength: calc ? calc.finalStrength : null,
-                ratio,
-                grade: gradeObj ? gradeObj.code : null
-            };
-        };
+        const computeSlotResult = (slot) => computeStrengthSlotResult(slot, {
+            angle: parseFloat(strengthAngle),
+            ageDays: strengthAgeDays,
+            enabledNames: enabledFormulaNames,
+            designStrength: designStrengthVal,
+            hasDamage
+        });
 
         const strengthSlotResults = (cat === '강도')
             ? ndtStrengthSlots
@@ -38785,7 +38897,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
                 const measureItemsHwpx = allNdtItemsForHwpx.filter(item => item.category === '실측');
                 const fireproofItemsHwpx = allNdtItemsForHwpx.filter(item => item.category === '내화피복');
-                const strengthItemsHwpx = allNdtItemsForHwpx.filter(item => item.category === '강도');
+                const strengthItemsHwpx = allNdtItemsForHwpx.filter(item => item.category === '강도')
+                    .map(item => refreshStrengthItemResults(item, bldg));
                 const carbItemsHwpx = allNdtItemsForHwpx.filter(item => item.category === '탄산화');
                 const tiltItemsHwpx = allNdtItemsForHwpx.filter(item => item.category === '기울기');
                 const settlementGroupsHwpx = allDispGroupsForHwpx.filter(g => !g.category || g.category === '변위');
@@ -39357,7 +39470,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                                     slots.forEach(slot => perfPoints.push({ item, slot }));
                                 });
 
-                                const perfAgeDays = getConcreteAgeInDays();
+                                const perfAgeDays = getConcreteStrengthAgeDays(bldg);
                                 const perfEnabledNames = getEnabledStrengthFormulaNames(bldg);
                                 for (let seq = 0; seq < perfPoints.length; seq++) {
                                     const pt = perfPoints[seq];
@@ -41067,7 +41180,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
                 const measureItemsHwpx = allNdtItemsForHwpx.filter(item => item.category === '실측');
                 const fireproofItemsHwpx = allNdtItemsForHwpx.filter(item => item.category === '내화피복');
-                const strengthItemsHwpx = allNdtItemsForHwpx.filter(item => item.category === '강도');
+                const strengthItemsHwpx = allNdtItemsForHwpx.filter(item => item.category === '강도')
+                    .map(item => refreshStrengthItemResults(item, bldg));
                 const carbItemsHwpx = allNdtItemsForHwpx.filter(item => item.category === '탄산화');
                 const tiltItemsHwpx = allNdtItemsForHwpx.filter(item => item.category === '기울기');
                 const settlementGroupsHwpx = allDispGroupsForHwpx.filter(g => !g.category || g.category === '변위');
@@ -41639,7 +41753,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                                     slots.forEach(slot => perfPoints.push({ item, slot }));
                                 });
 
-                                const perfAgeDays = getConcreteAgeInDays();
+                                const perfAgeDays = getConcreteStrengthAgeDays(bldg);
                                 const perfEnabledNames = getEnabledStrengthFormulaNames(bldg);
                                 for (let seq = 0; seq < perfPoints.length; seq++) {
                                     const pt = perfPoints[seq];
