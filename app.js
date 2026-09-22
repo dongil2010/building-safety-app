@@ -6369,6 +6369,13 @@ document.addEventListener('DOMContentLoaded', () => {
                     delete copy.prevRoundPhotos;
                     delete copy.photoIds;
                     delete copy.prevRoundPhotoIds;
+                    if (roundMode === 'carryOver') {
+                        const srcRound = getBuildingSurveyRoundKey(sourceBldg);
+                        const dstRound = getBuildingSurveyRoundKey(targetBldg);
+                        if (srcRound && (!copy.surveyRound || copy.surveyRound === dstRound)) {
+                            copy.surveyRound = srcRound;
+                        }
+                    }
                     applyDefectRoundModeToClone(copy, roundMode, targetBldg);
                     const photoFields = await cloneDefectPhotosForNewId(d, copy.id, (pi, pt) => {
                         onProgress?.(`사진 ${pi}/${pt} (결함 ${defectDone}/${defectTotal})…`);
@@ -18368,6 +18375,90 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         return n;
     }
 
+    function defectRoundNoKey(d) {
+        const raw = String((d && (d.groupNo || d.no)) || '').replace(/^NO\.?\s*/i, '').trim();
+        const m = raw.match(/(\d+)(?:-(\d+))?/);
+        if (!m) return raw.toUpperCase();
+        const suffix = m[2] ? ('-' + parseInt(m[2], 10)) : '';
+        return String(parseInt(m[1], 10)) + suffix;
+    }
+
+    function defectRoundAnchor(d) {
+        const x = Number(d && (d.targetX != null ? d.targetX : d.x));
+        const y = Number(d && (d.targetY != null ? d.targetY : d.y));
+        if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+        return { x: x, y: y };
+    }
+
+    function anchorsNear(a, b, maxDist) {
+        if (!a || !b) return false;
+        const dx = a.x - b.x;
+        const dy = a.y - b.y;
+        return (dx * dx + dy * dy) <= maxDist * maxDist;
+    }
+
+    /**
+     * 같은 번호·가까운 위치의 전회차/현회차 쌍은 복제로 본다.
+     * keepPrevious=true 이면 전회차만 남기고 현회차 복사를 뺀다.
+     */
+    function dropOverlappingRoundTwins(bldg, keepPrevious, floorCode) {
+        if (!bldg || !bldg.id || !state.defects) return 0;
+        const prefix = `${bldg.id}_`;
+        const onlyKey = floorCode ? `${bldg.id}_${floorCode}` : '';
+        let removed = 0;
+        Object.keys(state.defects).forEach((k) => {
+            if (!k.startsWith(prefix)) return;
+            if (onlyKey && k !== onlyKey) return;
+            const arr = state.defects[k] || [];
+            const drop = new Set();
+            for (let i = 0; i < arr.length; i++) {
+                const a = arr[i];
+                if (!a || drop.has(a.id)) continue;
+                const noA = defectRoundNoKey(a);
+                const ptA = defectRoundAnchor(a);
+                if (!noA || !ptA) continue;
+                for (let j = i + 1; j < arr.length; j++) {
+                    const b = arr[j];
+                    if (!b || drop.has(b.id)) continue;
+                    if (defectRoundNoKey(b) !== noA) continue;
+                    if (!anchorsNear(ptA, defectRoundAnchor(b), 120)) continue;
+                    const aPrev = isPreviousRoundDefect(a);
+                    const bPrev = isPreviousRoundDefect(b);
+                    if (aPrev === bPrev) continue;
+                    const dropRec = keepPrevious
+                        ? (aPrev ? b : a)
+                        : (aPrev ? a : b);
+                    if (dropRec && dropRec.id) drop.add(dropRec.id);
+                }
+            }
+            if (!drop.size) return;
+            if (typeof pushDefectHistoryForKey === 'function') pushDefectHistoryForKey(k);
+            state.defects[k] = arr.filter((d) => d && !drop.has(d.id));
+            removed += drop.size;
+            if (typeof markFloorKeyDirty === 'function') markFloorKeyDirty(k);
+        });
+        return removed;
+    }
+
+    /** 회차를 올리기 전 결함에 떠나기 회차를 찍어, 회차 없는 핀이 현회차(파랑)로 남지 않게 한다. */
+    function stampDefectsLeavingRound(bldg, fromKey, toKey) {
+        if (!bldg || !bldg.id) return;
+        const prefix = `${bldg.id}_`;
+        const toRank = getSurveyRoundOrderRank(toKey);
+        Object.keys(state.defects || {}).forEach((k) => {
+            if (!k.startsWith(prefix)) return;
+            (state.defects[k] || []).forEach((d) => {
+                if (!d) return;
+                if (d.surveyRound === toKey) return;
+                const rank = getSurveyRoundOrderRank(d.surveyRound);
+                if (d.surveyRound && toRank !== null && rank !== null && rank >= toRank) return;
+                d.surveyRound = fromKey;
+                d.isCarriedOver = false;
+            });
+            if (typeof markFloorKeyDirty === 'function') markFloorKeyDirty(k);
+        });
+    }
+
     /**
      * 다음 회차 점검 시작 — 건물·층·도면·결함·비파괴는 그대로 두고
      * 점검 연도/기간만 다음 회차로 올린다. 기존 결함은 전회차로 분류된다.
@@ -18385,7 +18476,17 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             || bldg.inspectionPeriod || '하반기';
         const next = getNextSurveyRoundParts(curYear, curPeriod);
         const toKey = `${next.year}_${next.period}`;
+        const fromKey = `${curYear}_${curPeriod}`;
         const defectCount = countBuildingDefects(bldg);
+        const siteKey = getBuildingSiteName(bldg);
+        if (siteAlreadyHasRound(siteKey, next.year, next.period)) {
+            window.showToast(
+                `${next.year} ${next.period} 현장이 이미 있습니다. 그 현장을 여세요. 이 건물 회차를 그쪽으로 옮기면 마킹이 겹칩니다.`,
+                'warning',
+                6000
+            );
+            return;
+        }
 
         if (!window.confirm(
             `다음 회차 점검을 시작할까요?\n\n` +
@@ -18406,9 +18507,12 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         bldg.inspectionPeriod = next.period;
 
         const toRank = getSurveyRoundOrderRank(toKey);
+        let droppedTwins = 0;
         if (toRank !== null) {
-            // 정규 회차: 최신 회차 기준점을 새 회차로 올려 기존 결함을 전회차로 전환
+            // 기준점을 먼저 올려 기존 회차는 전회차(빨강)로 가른 뒤, 같은 번호로 겹친 현회차 복사를 뺀다.
             bldg.latestSurveyRoundKey = toKey;
+            droppedTwins = dropOverlappingRoundTwins(bldg, true);
+            stampDefectsLeavingRound(bldg, fromKey, toKey);
         } else {
             // 수시점검: 순서 비교가 불가하므로 기존 결함에 전회차 체크를 켠다
             const prefix = `${bldg.id}_`;
@@ -18418,6 +18522,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     if (d && d.surveyRound !== toKey) d.isCarriedOver = true;
                 });
             });
+            droppedTwins = dropOverlappingRoundTwins(bldg, true);
         }
 
         saveStateToLocalStorage();
@@ -18426,8 +18531,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (typeof drawCanvas === 'function') drawCanvas();
         if (typeof renderNdtSummaryTable === 'function') renderNdtSummaryTable();
 
+        const twinNote = droppedTwins > 0 ? ` · 겹친 현회차 ${droppedTwins}건 제거` : '';
         window.showToast(
-            `${next.year} ${next.period} 점검 시작 · 기존 ${defectCount}건은 전회차로 유지`,
+            `${next.year} ${next.period} 점검 시작 · 기존 ${defectCount}건은 전회차로 유지${twinNote}`,
             'success',
             5500
         );
@@ -19028,21 +19134,32 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             (state.defects[k] || []).forEach(d => {
                 if (d.surveyRound === fromKey) {
                     d.surveyRound = toKey;
+                    d.isCarriedOver = false;
                     changed++;
                 }
             });
+            if (typeof markFloorKeyDirty === 'function') markFloorKeyDirty(k);
         });
 
         // 재지정 이후의 실제 데이터를 기준으로 "최신 회차" 기준점을 다시 계산한다
         // (관리자의 명시적 정정 작업이므로 예외적으로 전진뿐 아니라 재계산을 허용).
         bldg.latestSurveyRoundKey = getMaxSurveyRoundKeyForBuilding(bldg);
+        const toRank = getSurveyRoundOrderRank(toKey);
+        const latestRank = getSurveyRoundOrderRank(bldg.latestSurveyRoundKey);
+        const keepPrevious = toRank !== null && latestRank !== null && toRank < latestRank;
+        const droppedTwins = dropOverlappingRoundTwins(
+            bldg,
+            keepPrevious,
+            wholeBuilding ? '' : state.currentFloor
+        );
 
         saveStateToLocalStorage();
         if (typeof renderDefectListPanel === 'function') renderDefectListPanel();
         if (typeof renderSurveyTable === 'function') renderSurveyTable();
         if (typeof drawCanvas === 'function') drawCanvas();
 
-        window.showToast(`결함 ${changed}건을 "${toLabel}"(으)로 재지정했습니다.`, 'success', 5000);
+        const twinNote = droppedTwins > 0 ? ` · 겹친 마킹 ${droppedTwins}건 제거` : '';
+        window.showToast(`결함 ${changed}건을 "${toLabel}"(으)로 재지정했습니다.${twinNote}`, 'success', 5000);
         updateSurveyReassignPreview();
     }
 
