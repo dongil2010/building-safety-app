@@ -20,9 +20,12 @@ rules_version = '2';
 //   safety_app/{companyId}/siteDrawingVault/{siteKey}/floors/{floorCode} → 현장명 기준 PDF 보관함(건물 삭제 후에도 유지)
 //   safety_app/{companyId}/syncLeases/{id}      → 동기화 잠금(heartbeat). 회사 루트/층 문서와 분리
 //
-// 배포 방법: Firebase 콘솔 → Firestore Database → 규칙(Rules) 탭에 이 파일 내용을 붙여넣고 게시(Publish).
-// (Firebase CLI를 쓴다면: firebase deploy --only firestore:rules)
-// ⚠️ GitHub에 push하는 것만으로는 규칙이 바뀌지 않는다. 반드시 게시해야 적용된다.
+// 배포 방법: main에 push하면 .github/workflows/deploy-web.yml의 `rules` 작업이 이 파일을
+// 자동으로 게시한다. 게시에 실패하면 사이트 배포(Pages)도 같이 멈춘다 — 코드만 올라가고
+// 규칙은 옛 버전인 상태(2026-09-11·09-17 사고)를 만들지 않으려는 것이다.
+// 설정: GitHub Secret `FIREBASE_SERVICE_ACCOUNT` — docs/firebase-rules-ci.md 참고.
+// ⚠️ 시크릿 등록 전이거나 급할 때는 Firebase 콘솔 → Firestore Database → 규칙(Rules) 탭에
+//    이 파일 내용을 붙여넣고 게시(Publish). 콘솔에 게시 이력이 있다고 최신인 건 아니다.
 //
 // 이 파일의 멤버십 판정은 Auth custom claims(companyId/role)를 먼저 본다.
 // 클레임을 심는 쪽은 functions/ — `firebase deploy --only functions` 가 같이 필요하다.
@@ -266,6 +269,34 @@ service cloud.firestore {
       allow read: if request.auth != null;
       allow create, update: if docId == 'android_release' && isOtaPublisher();
       allow delete: if false;
+    }
+
+    // --- errorLogs/{logId}: 현장 오류 자동 기록 (js/core/error-log.js) ---
+    // 태블릿이 남기기만 하는 쓰기 전용 컬렉션. 고치거나 지울 수는 없다(사후 조작 방지).
+    // 길이 제한은 js/core/error-log.js의 LIMITS와 같은 값 — 한쪽만 늘리면 쓰기가 거부된다.
+    function errorLogShapeOk() {
+      let d = request.resource.data;
+      return d.keys().hasOnly([
+          'at', 'atLocal', 'kind', 'message', 'stack', 'source', 'url',
+          'device', 'deviceId', 'appVersion', 'uid', 'userName',
+          'companyId', 'companyName', 'online', 'sameErrorToday'
+        ]) &&
+        d.keys().hasAll(['at', 'kind', 'message']) &&
+        d.at == request.time &&
+        d.kind is string && d.kind.size() <= 40 &&
+        d.message is string && d.message.size() <= 500 &&
+        (!('stack' in d) || (d.stack is string && d.stack.size() <= 2000)) &&
+        (!('source' in d) || (d.source is string && d.source.size() <= 300)) &&
+        (!('url' in d) || (d.url is string && d.url.size() <= 300)) &&
+        (!('device' in d) || (d.device is string && d.device.size() <= 300));
+    }
+
+    match /errorLogs/{logId} {
+      // 읽기는 회사 계정으로 로그인한 사람만. photoRelay용 익명 로그인은 제외한다.
+      allow read: if request.auth != null &&
+        request.auth.token.firebase.sign_in_provider != 'anonymous';
+      allow create: if request.auth != null && errorLogShapeOk();
+      allow update, delete: if false;
     }
 
     // 그 외 모든 경로는 기본 차단

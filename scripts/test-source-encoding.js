@@ -14,6 +14,11 @@
  *   3) CP949 바이트가 그대로 커밋됨     → UTF-8로 디코딩 자체가 안 됨
  *
  * 세 경우 모두 여기서 걸린다.
+ *
+ * 2026-09-23: 예전엔 test-bulk-snapshot / test-survey-round-delete가 "index.html을
+ * 아예 건드리지 마라"로 막고 있었다. 스크립트 한 줄 추가까지 막혀서 화면 요소를 JS로
+ * 우회 생성하는 편법이 늘었다. 진짜 막아야 할 건 인코딩 사고이고 그건 여기서 잡으므로
+ * 그 가드는 지웠다. 다시 넣지 말 것.
  */
 
 const { execFileSync } = require('child_process');

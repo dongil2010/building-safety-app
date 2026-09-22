@@ -79,22 +79,11 @@ function testLastRoundAllowed() {
     assert.strictEqual(remaining.length, 0, 'last round may be deleted (empty remaining)');
 }
 
-function testIndexHtmlUntouched() {
-    // Feature must not rewrite index.html (UTF-8 risk preference)
-    const st = spawnSync('git', ['diff', '--name-only', '--', 'index.html'], {
-        cwd: root,
-        encoding: 'utf8'
-    });
-    const names = (st.stdout || '').trim();
-    assert.strictEqual(names, '', `index.html should be untouched, got: ${names}`);
-}
-
 function main() {
     testSourceMarkers();
     testNodeSyntax();
     testTrashBatchLeavesOtherRounds();
     testLastRoundAllowed();
-    testIndexHtmlUntouched();
     console.log('OK test-survey-round-delete.js');
 }
 
