@@ -39,7 +39,7 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <meta name="apple-mobile-web-app-title" content="스마트 안전점검">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css">
-    <link rel="stylesheet" href="styles.css?v=20260922_155028">
+    <link rel="stylesheet" href="styles.css?v=20260922_155444">
 
     <!-- FontAwesome icons for clean engineering UI -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
@@ -1571,6 +1571,9 @@
                 </label>
 
                 <div id="surveyReassignPreviewCount" style="margin-top:0.8rem; padding:0.6rem 0.8rem; border-radius:8px; background:rgba(40,40,40,0.08); border:1px solid rgba(40,40,40,0.25); font-size:0.85rem; font-weight:700; color:#2a2a2a;"></div>
+
+                <p style="font-size: 0.78rem; color: #a3a3a3; margin: 0.9rem 0 0.4rem;">빨강(전회차)과 파랑(현회차)이 같은 번호로 가까이 겹쳐 있으면, 전회차만 남기고 현회차 복사를 지웁니다. 회차 값은 바꾸지 않습니다.</p>
+                <button type="button" id="btnCleanupOverlappingRoundMarks" class="btn btn-outline" style="width:100%;">겹친 전·현회차 마킹 정리</button>
             </div>
             <div class="modal-footer" style="justify-content: space-between;">
                 <button type="button" id="btnCloseSurveyRoundReassignModal2" class="btn btn-outline">닫기</button>
@@ -3175,37 +3178,37 @@
     </div>
 
     <!-- Core → 탭 분류 → 기존 엔진(app.js) -->
-    <script src="js/core/floor-identity.js?v=20260922_155028"></script>
-    <script src="js/core/state.js?v=20260922_155028"></script>
-    <script src="js/tabs/registry.js?v=20260922_155028"></script>
-    <script src="js/pdf-vector-bridge.js?v=20260922_155028"></script>
-    <script src="js/pdf-vector-snap.js?v=20260922_155028"></script>
-    <script src="js/core/layout-mode.js?v=20260922_155028"></script>
-    <script src="js/core/performance.js?v=20260922_155028"></script>
-    <script src="js/core/mobile-keyboard.js?v=20260922_155028"></script>
-    <script src="js/tabs/home.js?v=20260922_155028"></script>
-    <script src="js/tabs/map.js?v=20260922_155028"></script>
-    <script src="js/tabs/survey.js?v=20260922_155028"></script>
-    <script src="js/tabs/stats.js?v=20260922_155028"></script>
-    <script src="js/tabs/ndt.js?v=20260922_155028"></script>
-    <script src="js/shared/report.js?v=20260922_155028"></script>
-    <script src="js/shared/hwpx-survey-slots.js?v=20260922_155028"></script>
-    <script src="js/shared/hwpx-ndt-maps.js?v=20260922_155028"></script>
-    <script src="js/shared/cad-unmarked-place.js?v=20260922_155028"></script>
-    <script src="js/shared/arrow-survey-number.js?v=20260922_155028"></script>
-    <script src="js/shared/korean-text-wrap.js?v=20260922_155028"></script>
-    <script src="js/shared/hwpx-import.js?v=20260922_155028"></script>
-    <script src="js/shared/auth.js?v=20260922_155028"></script>
-    <script src="js/core/firebase-storage-assets.js?v=20260922_155028"></script>
-    <script src="js/core/drawing-floor-tombstone.js?v=20260922_155028"></script>
-    <script src="js/core/data-health.js?v=20260922_155028"></script>
-    <script src="js/core/building-meta-merge.js?v=20260922_155028"></script>
-    <script src="js/core/sync-merge.js?v=20260922_155028"></script>
-    <script src="js/core/legend-layout.js?v=20260922_155028"></script>
-    <script src="app.js?v=20260922_155028"></script>
+    <script src="js/core/floor-identity.js?v=20260922_155444"></script>
+    <script src="js/core/state.js?v=20260922_155444"></script>
+    <script src="js/tabs/registry.js?v=20260922_155444"></script>
+    <script src="js/pdf-vector-bridge.js?v=20260922_155444"></script>
+    <script src="js/pdf-vector-snap.js?v=20260922_155444"></script>
+    <script src="js/core/layout-mode.js?v=20260922_155444"></script>
+    <script src="js/core/performance.js?v=20260922_155444"></script>
+    <script src="js/core/mobile-keyboard.js?v=20260922_155444"></script>
+    <script src="js/tabs/home.js?v=20260922_155444"></script>
+    <script src="js/tabs/map.js?v=20260922_155444"></script>
+    <script src="js/tabs/survey.js?v=20260922_155444"></script>
+    <script src="js/tabs/stats.js?v=20260922_155444"></script>
+    <script src="js/tabs/ndt.js?v=20260922_155444"></script>
+    <script src="js/shared/report.js?v=20260922_155444"></script>
+    <script src="js/shared/hwpx-survey-slots.js?v=20260922_155444"></script>
+    <script src="js/shared/hwpx-ndt-maps.js?v=20260922_155444"></script>
+    <script src="js/shared/cad-unmarked-place.js?v=20260922_155444"></script>
+    <script src="js/shared/arrow-survey-number.js?v=20260922_155444"></script>
+    <script src="js/shared/korean-text-wrap.js?v=20260922_155444"></script>
+    <script src="js/shared/hwpx-import.js?v=20260922_155444"></script>
+    <script src="js/shared/auth.js?v=20260922_155444"></script>
+    <script src="js/core/firebase-storage-assets.js?v=20260922_155444"></script>
+    <script src="js/core/drawing-floor-tombstone.js?v=20260922_155444"></script>
+    <script src="js/core/data-health.js?v=20260922_155444"></script>
+    <script src="js/core/building-meta-merge.js?v=20260922_155444"></script>
+    <script src="js/core/sync-merge.js?v=20260922_155444"></script>
+    <script src="js/core/legend-layout.js?v=20260922_155444"></script>
+    <script src="app.js?v=20260922_155444"></script>
 
     <script>
-        window.BSA_APP_VERSION = '20260922_155028';
+        window.BSA_APP_VERSION = '20260922_155444';
 
         (function () {
             var el = document.getElementById('appVersionText');
@@ -3230,7 +3233,7 @@
                     native = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
                 } catch (e) {}
                 if (native) return;
-                navigator.serviceWorker.register('./sw.js?v=20260922_155028')
+                navigator.serviceWorker.register('./sw.js?v=20260922_155444')
 
                     .then(function(registration) {
                         console.log('✅ ServiceWorker Registered Successfully with scope:', registration.scope);

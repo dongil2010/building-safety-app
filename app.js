@@ -19163,6 +19163,34 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         updateSurveyReassignPreview();
     }
 
+    function cleanupOverlappingRoundMarks() {
+        const bldg = state.currentBuilding;
+        if (!bldg) {
+            window.showToast('먼저 건물을 선택해 주세요.', 'warning', 4000);
+            return;
+        }
+        const wholeBuilding = !!document.getElementById('surveyReassignScopeBuilding')?.checked;
+        const scopeLabel = wholeBuilding ? '이 건물 전체 층' : `${state.currentFloor || '현재 층'}만`;
+        const ok = window.confirm(
+            `같은 번호가 가까이 빨강(전회차)과 파랑(현회차)으로 겹친 마킹 중, 파랑만 지웁니다.\n대상: ${scopeLabel}\n\n회차 값은 바꾸지 않습니다.\n다시 조사해서 일부러 찍은 파랑 핀이 전회차와 120px 안이면 같이 지워질 수 있습니다. 해당 층 실행 취소로 되돌릴 수 있습니다.`
+        );
+        if (!ok) return;
+        const dropped = dropOverlappingRoundTwins(
+            bldg,
+            true,
+            wholeBuilding ? '' : state.currentFloor
+        );
+        saveStateToLocalStorage();
+        if (typeof renderDefectListPanel === 'function') renderDefectListPanel();
+        if (typeof renderSurveyTable === 'function') renderSurveyTable();
+        if (typeof drawCanvas === 'function') drawCanvas();
+        window.showToast(
+            dropped > 0 ? `겹친 현회차 마킹 ${dropped}건을 지웠습니다.` : '가까이 겹친 전·현회차 쌍이 없습니다.',
+            dropped > 0 ? 'success' : 'warning',
+            5000
+        );
+    }
+
     function setupSurveyRoundReassignModalEvents() {
         const btnOpen = document.getElementById('btnOpenSurveyRoundReassignModal');
         if (btnOpen) btnOpen.addEventListener('click', window.openSurveyRoundReassignModal);
@@ -19183,6 +19211,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
         const btnExecute = document.getElementById('btnExecuteSurveyRoundReassign');
         if (btnExecute) btnExecute.addEventListener('click', executeSurveyRoundReassign);
+        const btnCleanupTwins = document.getElementById('btnCleanupOverlappingRoundMarks');
+        if (btnCleanupTwins) btnCleanupTwins.addEventListener('click', cleanupOverlappingRoundMarks);
     }
 
     // 엑셀 전차 가져오기 등으로 isCarriedOver(전회차 체크)가 켜진 결함을 PC에서 일괄 해제

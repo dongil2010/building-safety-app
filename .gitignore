@@ -20,3 +20,7 @@ android/.idea/
 
 # GitHub Pages build output
 _site/
+
+# 한글 양식 작업 백업 (배포 대상 아님)
+templates/*.bak
+templates/*.hwpx.bak*
