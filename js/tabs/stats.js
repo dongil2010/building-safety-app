@@ -691,7 +691,7 @@
         { key: 'masonryWall', label: '조적벽체', sort: 7 },
         { key: 'other', label: '기타 부재', sort: 99 }
     ];
-    function classifyComponentGroup(component) {
+    function classifyComponentGroup(component, category) {
         var key = String(component || '').replace(/\s+/g, '');
         if (!key) return 'other';
         if (key.indexOf('접합') >= 0) return 'other';
@@ -700,7 +700,9 @@
         if (key.indexOf('큰보') >= 0) return 'bigBeam';
         if (key.indexOf('작은보') >= 0) return 'smallBeam';
         if (key.indexOf('슬래브') >= 0) return 'slab';
-        if (key === 'RC벽체' || key === '벽체' || key === '내력벽') return 'rcWall';
+        // 2026-09-22: 'RC벽체'/'내력벽'은 항상 RC벽체로, 그냥 '벽체'는 카테고리가 구조체(미기재 포함)일 때만 RC벽체로 집계
+        if (key === 'RC벽체' || key === '내력벽') return 'rcWall';
+        if (key === '벽체' && (category || '구조체') === '구조체') return 'rcWall';
         if (key.indexOf('기둥') >= 0) return 'column';
         return 'other';
     }
@@ -853,7 +855,7 @@
                 else if (cat === '마감재') categoryCounts.finishing += 1;
                 else if (cat === '구조체') categoryCounts.structural += 1;
                 else categoryCounts.other += 1;
-                var compGroup = classifyComponentGroup(d.component);
+                var compGroup = classifyComponentGroup(d.component, cat);
                 componentCounts[compGroup] = (componentCounts[compGroup] || 0) + 1;
                 floorComponentCounts[compGroup] = (floorComponentCounts[compGroup] || 0) + 1;
                 getCrackWidthNumbers(d).forEach(function (w) {

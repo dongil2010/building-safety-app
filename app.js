@@ -2706,7 +2706,8 @@ document.addEventListener('DOMContentLoaded', () => {
         'inspectionType', 'inspectionYear', 'inspectionPeriod', 'latestSurveyRoundKey',
         'floorsOrderManual',
         'siteName', 'dong', 'multiDong', 'name', 'address', 'inspector', 'contactPhone',
-        'floors', 'date', 'structureType', 'facilityGrade', 'completionDate', 'notes'
+        'floors', 'date', 'structureType', 'facilityGrade', 'completionDate', 'notes',
+        'enabledStrengthFormulas'
     ];
 
     function buildingMetaUpdatedAt(bldg) {
@@ -14689,12 +14690,14 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     }
 
     // 건물별로 평균에 포함할 추정식을 고를 수 있게 한다. 아직 한 번도 고르지 않은 건물(설정값
-    // 없음)은 기존 동작 그대로 3개 다 포함한다.
+    // 없음)은 일본재료학회식·일본건축학회 제안식 2개를 기본으로 쓴다(2026-09-22 사용자 요청,
+    // 예전에는 3개 전부였다).
+    const DEFAULT_STRENGTH_FORMULA_NAMES = ['일본재료학회식', '일본건축학회 제안식'];
     function getEnabledStrengthFormulaNames(bldg) {
         const all = CONCRETE_STRENGTH_FORMULAS.map(f => f.name);
         const saved = bldg && Array.isArray(bldg.enabledStrengthFormulas) ? bldg.enabledStrengthFormulas : null;
-        if (!saved) return all;
-        return all.filter(name => saved.includes(name));
+        const picked = all.filter(name => (saved || DEFAULT_STRENGTH_FORMULA_NAMES).includes(name));
+        return picked.length ? picked : all;
     }
 
     // 추정식 포함/제외 체크박스 클릭 시 건물 설정에 저장하고 다시 계산한다.
@@ -14714,6 +14717,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         }
         const next = isCurrentlyEnabled ? current.filter(n => n !== formulaName) : [...current, formulaName];
         bldg.enabledStrengthFormulas = next;
+        // 수정 표시를 찍어야 동기화 병합에서 서버의 옛 값에 덮이지 않는다
+        markBuildingMetaDirty(bldg);
         saveStateToLocalStorage();
         recalcAllStrengthSlots();
     };
@@ -15459,6 +15464,22 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         return `📅 재령일수: 준공일(${bldg.completionDate}) ~ 점검일(${bldg.date || '오늘'}) = <b>${days}일</b> → α(재령보정계수) = <b>${alpha !== null ? alpha.toFixed(2) : '-'}</b>`;
     }
 
+    // 측정 각도 선택지(index.html #ndtAngle)에 있는 값만 쓴다. 그 밖(빈 값 포함)은 0°.
+    const STRENGTH_ANGLE_OPTIONS = ['0', '90', '45', '-45', '-90'];
+    const LAST_STRENGTH_ANGLE_KEY = 'bsa_ndt_last_strength_angle';
+    function normalizeStrengthAngleValue(v) {
+        if (v === undefined || v === null || v === '') return '0';
+        const n = parseFloat(v);
+        const s = Number.isFinite(n) ? String(n) : '';
+        return STRENGTH_ANGLE_OPTIONS.includes(s) ? s : '0';
+    }
+    function readLastStrengthAngle() {
+        try { return localStorage.getItem(LAST_STRENGTH_ANGLE_KEY); } catch (_) { return null; }
+    }
+    function rememberLastStrengthAngle(v) {
+        try { localStorage.setItem(LAST_STRENGTH_ANGLE_KEY, normalizeStrengthAngleValue(v)); } catch (_) {}
+    }
+
     function recalcAllStrengthSlots() {
         ndtStrengthSlots.forEach((_, idx) => recalcStrengthSlot(idx));
     }
@@ -16034,7 +16055,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 ndtStrengthSlots = [{ location: '', readings: [] }];
             }
             const angleElExisting = document.getElementById('ndtAngle');
-            if (angleElExisting) angleElExisting.value = (existingItem.strengthAngle !== undefined && existingItem.strengthAngle !== null) ? String(existingItem.strengthAngle) : '';
+            // 빈 값(null)은 2026-09-21 전까지 0°가 `|| null`로 지워져 저장된 것이다 — 0°로 보여 준다
+            // (빈칸이면 목록에 없는 값이라 "각도가 초기화"돼 보였다)
+            if (angleElExisting) angleElExisting.value = normalizeStrengthAngleValue(existingItem.strengthAngle);
             const designStrengthElExisting = document.getElementById('ndtDesignStrength');
             if (designStrengthElExisting) designStrengthElExisting.value = (existingItem.designStrength !== undefined && existingItem.designStrength !== null) ? existingItem.designStrength : '';
             const carbDepthElExisting = document.getElementById('ndtCarbDepth');
@@ -16127,7 +16150,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             if (damageStatusEl) damageStatusEl.value = '';
             ndtStrengthSlots = [{ location: '', readings: [] }];
             const angleElNew = document.getElementById('ndtAngle');
-            if (angleElNew) angleElNew.value = '';
+            // 새 항목은 이 기기에서 마지막에 쓴 각도로 시작한다(없으면 0°)
+            if (angleElNew) angleElNew.value = normalizeStrengthAngleValue(readLastStrengthAngle());
             const designStrengthElNew = document.getElementById('ndtDesignStrength');
             if (designStrengthElNew) designStrengthElNew.value = '';
             const carbDepthElNew = document.getElementById('ndtCarbDepth');
@@ -16393,6 +16417,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         // 결과를 각각 저장한다. 최상위 strength* 필드들은 하위호환용으로 첫 슬롯 결과만 담는다.
         const strengthAngle = document.getElementById('ndtAngle')?.value;
         const strengthAgeDays = (cat === '강도') ? getConcreteAgeInDays() : null;
+        if (cat === '강도') rememberLastStrengthAngle(strengthAngle);
         const enabledFormulaNames = getEnabledStrengthFormulaNames(window.state.currentBuilding);
         const designStrengthVal = (cat === '강도') ? parseFloat(document.getElementById('ndtDesignStrength')?.value) : NaN;
         const damageStatus = (cat === '강도') ? (document.getElementById('ndtDamageStatus')?.value || '') : null;

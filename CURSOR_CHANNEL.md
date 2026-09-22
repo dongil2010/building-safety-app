@@ -1576,3 +1576,25 @@
 >
 > **검증**: `scripts/test-drawing-stale-upload.js` 신규(실제 함수를 가짜 클라우드로 실행, 8건). 변이 8종 모두 실패 확인.
 > `npm test` 32개 파일 통과. 로컬 앱 로드·콘솔 오류 없음. 로그인 후 실제 클라우드 업로드는 운영 데이터라 미실행.
+
+
+---
+
+## 2026-09-22 Claude — 강도 입력창 각도·추정식 초기화, 통계 비구조체 벽체
+
+> **추정식이 초기화되던 원인**: `bldg.enabledStrengthFormulas`가 건물 병합의 로컬 우선 키(`building-meta-merge.js` KEYS,
+> app.js `BUILDING_LOCAL_META_KEYS`)에 없고, `toggleStrengthFormula`가 `markBuildingMetaDirty`를 안 찍어서
+> 동기화 병합 때마다 서버 건물의 옛 값(없음=3개 전부)으로 덮였다. → 키 추가 + 수정 표시.
+> **기본 추정식 변경(사용자 요청)**: 고른 적 없는 건물은 일본재료학회식·일본건축학회 제안식 2개(`DEFAULT_STRENGTH_FORMULA_NAMES`).
+> 예전 기본은 3개 전부 → **고른 적 없는 건물은 화면·한글 출력의 강도 평균이 바뀐다**(의도).
+>
+> **측정 각도**: 새 항목은 각도를 `''`로 비웠는데 `#ndtAngle` 선택지에 빈 값이 없어 빈칸으로 보였다.
+> 또 09-21 전에는 0°가 `|| null`로 지워져 저장돼 다시 열면 빈칸. → 새 항목은 이 기기에서 마지막에 쓴 각도
+> (localStorage `bsa_ndt_last_strength_angle`, 없으면 0°), 기존 항목의 null은 0°로 표시(`normalizeStrengthAngleValue`).
+> 계산은 원래 빈 값을 보정 0(=0°)으로 처리해서 값은 안 바뀐다.
+>
+> **통계(소넷 위임, 검토 완료)**: `classifyComponentGroup`이 카테고리를 안 봐서 비구조체·마감재의 그냥 "벽체"도 RC벽체로 셌다.
+> → 'RC벽체'·'내력벽'은 항상 RC벽체, 그냥 '벽체'는 구조체(미기재 포함)일 때만 RC벽체, 그 외는 기타 부재.
+>
+> **검증**: `test-strength-form-persist.js`, `test-stats-wall-category.js` 신규. 변이(병합 키·수정 표시·기본값·빈 각도·각도 기억,
+> 통계 옛 분류) 모두 실패 확인. `npm test` 34개 파일 통과. 실제 입력창 조작은 로그인 필요해 미실행.
