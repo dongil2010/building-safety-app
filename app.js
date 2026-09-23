@@ -41,10 +41,6 @@ document.addEventListener('DOMContentLoaded', () => {
         albumFloorTitle: document.getElementById('albumFloorTitle')
     };
 
-    /** 모바일 브라우저 "데스크톱 사이트" — PC 레이아웃 강제 */
-    function isDesktopSiteLayout() {
-        return !!(window.BSA && typeof window.BSA.isDesktopSiteMode === 'function' && window.BSA.isDesktopSiteMode());
-    }
     /** 데스크톱 사이트 · 태블릿 — PC와 동일 레이아웃·LOD */
     function layoutIsPcLike() {
         return !!(window.BSA && typeof window.BSA.isPcLikeLayout === 'function' && window.BSA.isPcLikeLayout());
@@ -351,11 +347,6 @@ document.addEventListener('DOMContentLoaded', () => {
         };
     }
 
-    /** @deprecated 회사 공용 → 계정당 설정으로 이전. 호환용 별칭 */
-    function getCompanyDefectPresetsPayload() {
-        return getUserDefectPinPresetsPayload();
-    }
-
     const DEFECT_PIN_PRESET_FIELDS = [
         'customDefectTypes', 'customDefectCauses', 'customDefectComponents',
         'hiddenDefectComponents', 'hiddenDefectTypes', 'hiddenDefectCauses',
@@ -372,10 +363,6 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
         return changed;
-    }
-
-    function applyCompanyDefectPresetsFromRemote(presets) {
-        return applyDefectPinPresets(presets);
     }
 
     function userDefectPinLocalKey(uid) {
@@ -1245,56 +1232,9 @@ document.addEventListener('DOMContentLoaded', () => {
         _floorPdfKnown.clear();
     }
 
-    function canFetchPdfFromCloudNow() {
-        return !!(db && window.state.companyId && navigator.onLine !== false);
-    }
-
     function markFloorPdfKnown(bldgId, floorCode, hasPdf) {
         if (!bldgId || !floorCode) return;
         _floorPdfKnown.set(`${bldgId}_${floorCode}`, !!hasPdf);
-    }
-
-    function floorPdfKnownUnavailable(bldgId, floorCode) {
-        return _floorPdfKnown.get(floorPdfCacheKey(bldgId, floorCode)) === false;
-    }
-
-    function isPdfFetchInFlight(bldgId, floorCode) {
-        return _pdfFetchInFlight.has(floorPdfCacheKey(bldgId, floorCode));
-    }
-
-    async function ensurePdfSourceForFloor(bldg, floorCode) {
-        if (!bldg || !floorCode) return null;
-        const key = floorPdfCacheKey(bldg.id, floorCode);
-        if (floorHasPdfSourceSync(bldg, floorCode)) {
-            markFloorPdfKnown(bldg.id, floorCode, true);
-            return (typeof window.getFloorPdfDataUrl === 'function')
-                ? window.getFloorPdfDataUrl(bldg, floorCode)
-                : null;
-        }
-        // 이미 서버·로컬 모두 확인했고 없음 — 불필요한 재조회·"PDF조회중" 표시 방지
-        if (floorPdfKnownUnavailable(bldg.id, floorCode)) {
-            return null;
-        }
-        if (_pdfFetchInFlight.has(key)) return null;
-        if (typeof resolveBuildingFloorPdf !== 'function') return null;
-
-        _pdfFetchInFlight.add(key);
-        updateMapZoomOverlay();
-        try {
-            const pdf = await resolveBuildingFloorPdf(bldg, floorCode, { localOnly: true });
-            if (pdf) {
-                await applyResolvedPdfToBuilding(bldg, floorCode, pdf);
-                markFloorPdfKnown(bldg.id, floorCode, true);
-                return pdf;
-            }
-        } catch (e) {
-            console.warn('PDF 원본 조회 실패:', e);
-        } finally {
-            _pdfFetchInFlight.delete(key);
-            updateMapZoomOverlay();
-        }
-        markFloorPdfKnown(bldg.id, floorCode, false);
-        return null;
     }
 
     window.preloadCurrentFloorPdfSource = async function preloadCurrentFloorPdfSource() {
@@ -1336,28 +1276,6 @@ document.addEventListener('DOMContentLoaded', () => {
         if (url.startsWith('data:image/')) return url.length >= 2000;
         if (url.startsWith('http://') || url.startsWith('https://')) return false;
         return true;
-    }
-
-    async function loadPdfDrawingForFloor(bldg, floorCode, tryLoadImage, loadToken) {
-        if (!bldg || !floorCode) return false;
-        let pdfUrl = (bldg.floorDrawingPdfs && bldg.floorDrawingPdfs[floorCode]) || null;
-        if (!pdfUrl && typeof resolveBuildingFloorPdf === 'function') {
-            pdfUrl = await resolveBuildingFloorPdf(bldg, floorCode, { localOnly: true });
-            if (pdfUrl) await applyResolvedPdfToBuilding(bldg, floorCode, pdfUrl);
-        }
-        if (!pdfUrl) return false;
-        try {
-            const rendered = await renderPdfFloorWithPreview(bldg, floorCode, pdfUrl, tryLoadImage, loadToken);
-            if (loadToken !== floorDrawingTierLoadToken || state.currentFloor !== floorCode) return !!state.bgImage;
-            if (rendered && isUsableRasterDrawingUrl(rendered)) {
-                tryLoadImage(rendered);
-                return true;
-            }
-            return !!state.bgImage;
-        } catch (e) {
-            console.warn('PDF 도면 렌더 실패:', bldg.id, floorCode, e);
-            return false;
-        }
     }
 
     function clearBrokenRasterDrawingCache(bldg, floorCode) {
@@ -1424,31 +1342,6 @@ document.addEventListener('DOMContentLoaded', () => {
         return true;
     }
 
-    /** tombstone 무시 — RAM·IDB 플래그에 도면 페이로드가 있으면 true.
-     *  의도 삭제(deleteExistingFloorDrawing)는 IDB·클라우드까지 지운다. */
-    function floorHasDrawingPayloadEvidence(bldg, floorCode) {
-        if (!bldg || !floorCode) return false;
-        const c = String(floorCode).trim();
-        if (!c) return false;
-        const tiers = bldg.floorDrawingTiers && bldg.floorDrawingTiers[c];
-        if (tiers && typeof tiers === 'object' && Object.keys(tiers).some((k) => !!tiers[k])) return true;
-        if (bldg.floorDrawings && bldg.floorDrawings[c]) return true;
-        if (bldg.floorDrawingPdfs && bldg.floorDrawingPdfs[c]) return true;
-        if (bldg.floorDrawingSources && bldg.floorDrawingSources[c]) return true;
-        if (!bldg.id) return false;
-        const key = `${bldg.id}_${c}`;
-        if (_idbPersistedDrawingKeys && _idbPersistedDrawingKeys.has(key)) return true;
-        if (_idbPersistedPdfKeys && _idbPersistedPdfKeys.has(key)) return true;
-        if (_idbPersistedSourceKeys && _idbPersistedSourceKeys.has(key)) return true;
-        if (_idbPersistedTierKeys && (
-            _idbPersistedTierKeys.has(key)
-            || _idbPersistedTierKeys.has(`${key}_4000`)
-            || _idbPersistedTierKeys.has(`${key}_8000`)
-            || _idbPersistedTierKeys.has(`${key}_16000`)
-        )) return true;
-        return false;
-    }
-
     /** 여러 맵·IDB 플래그에서 도면 증거 층 코드를 모은다 */
     function collectDrawingPayloadEvidenceCodes(bldg, extraMaps) {
         const out = new Set();
@@ -1483,39 +1376,6 @@ document.addEventListener('DOMContentLoaded', () => {
             scanSet(_idbPersistedTierKeys);
         }
         return out;
-    }
-
-    /**
-     * 도면 페이로드 증거가 있는 층의 false tombstone을 해제한다.
-     * (의도 삭제는 증거를 지우므로 rememberDeleted는 그대로 유지된다)
-     */
-    function reconcileDrawingFloorTombstonesFromEvidence(bldg, extraEvidenceCodes) {
-        if (!bldg) return 0;
-        const evidence = collectDrawingPayloadEvidenceCodes(bldg);
-        (extraEvidenceCodes || []).forEach((c) => {
-            const code = c == null ? '' : String(c).trim();
-            if (code) evidence.add(code);
-        });
-        // 방금 삭제 중인 층은 정리 레이스 동안 증거 heal 제외
-        if (bldg.id && _sessionDeletingDrawingFloors.size) {
-            Array.from(evidence).forEach((c) => {
-                if (_sessionDeletingDrawingFloors.has(`${bldg.id}_${c}`)) evidence.delete(c);
-            });
-        }
-        if (!evidence.size) return 0;
-        if (typeof _drawingFloorTombstone.forgetTombstonesWithDrawingEvidence === 'function') {
-            return _drawingFloorTombstone.forgetTombstonesWithDrawingEvidence(
-                bldg, _sessionDeletedDrawingKeys, evidence
-            );
-        }
-        let n = 0;
-        const deleted = (bldg.deletedDrawingFloorCodes || []).slice();
-        deleted.forEach((code) => {
-            const c = String(code || '').trim();
-            if (!c || !evidence.has(c)) return;
-            if (forgetDeletedDrawingFloor(bldg, c, { fromEvidence: true })) n += 1;
-        });
-        return n;
     }
 
     function stripDeletedDrawingFloorsFromBuilding(bldg) {
@@ -1766,14 +1626,6 @@ document.addEventListener('DOMContentLoaded', () => {
             viewportHiPatchTimer = null;
         }
         syncViewportHiPatch();
-    }
-
-    function shouldSkipTierBgSwapForZoomedPatch(bldg, fc) {
-        if (!bldg || !fc) return false;
-        if (getMapZoomVsFitPercent() < 400) return false;
-        if (hasActiveFloorHiPatch()) return true;
-        if (viewportHiPatchInFlight) return true;
-        return floorMayHavePdfSource(bldg, fc) || _floorPdfKnown.get(`${bldg.id}_${fc}`) !== false;
     }
 
     async function syncViewportHiPatch() {
@@ -3816,11 +3668,6 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     window.compactDefectMarkingNumberGaps = compactDefectMarkingNumberGaps;
-
-    function renumberDefectsForFloorKey(floorKey) {
-        if (!floorKey || !window.state.defects?.[floorKey]) return;
-        renumberFloorDefects(window.state.defects[floorKey], { preserveOrder: false });
-    }
 
     function touchDefectUpdatedAt(defect) {
         if (!defect) return;
@@ -8274,12 +8121,6 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         return Math.round((scale / Math.max(fit, 0.001)) * 100);
     }
 
-    function getMapZoomVsFitRange() {
-        const lim = getMapViewScaleLimits();
-        const fit = Math.max(getMapFitScale(), 0.05);
-        return { min: lim.min / fit, max: lim.max / fit };
-    }
-
     function getMapZoomVsFit() {
         const fit = Math.max(getMapFitScale(), 0.05);
         return Math.max(state.view.scale || 1, 0.001) / fit;
@@ -8368,10 +8209,6 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         view.offsetX = focalX - imgX * newScale;
         view.offsetY = focalY - imgY * newScale;
         return newScale;
-    }
-
-    function pickFloorDrawingTierDimForView() {
-        return pickFloorDrawingTierDimForCurrentView();
     }
 
     function cacheFloorDrawingTierToDevice(bldg, floorCode, tierDim, dataUrl) {
@@ -8835,47 +8672,6 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (typeof window.showToast === 'function') {
             window.showToast(offlineHint, 'warning', 4500);
         }
-    }
-
-    async function renderPdfFloorWithPreview(bldg, floorCode, pdfUrl, tryLoadImage, loadToken) {
-        if (!pdfUrl || !bldg || !floorCode) return null;
-        await ensureFloorPlanRefForPdf(bldg, floorCode);
-        const pdfCacheKey = `${bldg.id}_${floorCode}`;
-        const previewDim = isMobileDrawingContext()
-            ? 2800
-            : (window.FLOOR_DRAWING_PDF_PREVIEW_DIM || 4000);
-        const maxPreviewBytes = isMobileDrawingContext()
-            ? 650000
-            : 900000;
-        const has4000 = (bldg.floorDrawingTiers && bldg.floorDrawingTiers[floorCode] && bldg.floorDrawingTiers[floorCode]['4000'])
-            || isUsableRasterDrawingUrl(bldg.floorDrawings && bldg.floorDrawings[floorCode]);
-        if (!has4000 && typeof window.renderPdfDataUrlToImage === 'function') {
-            const previewAttempts = [
-                { dim: previewDim, maxBytes: maxPreviewBytes },
-                { dim: 1800, maxBytes: 480000 },
-                { dim: 1400, maxBytes: 360000 },
-            ];
-            for (const attempt of previewAttempts) {
-                if (loadToken !== floorDrawingTierLoadToken || state.currentFloor !== floorCode) break;
-                try {
-                    const preview = await window.renderPdfDataUrlToImage(pdfUrl, attempt.dim, attempt.maxBytes, pdfCacheKey);
-                    if (preview && isUsableRasterDrawingUrl(preview)) {
-                        if (!bldg.floorDrawings) bldg.floorDrawings = {};
-                        bldg.floorDrawings[floorCode] = preview;
-                        cacheFloorDrawingTierToDevice(bldg, floorCode, previewDim, preview);
-                        if (loadToken === floorDrawingTierLoadToken && state.currentFloor === floorCode) {
-                            tryLoadImage(preview);
-                        }
-                        break;
-                    }
-                } catch (e) {
-                    console.warn('도면 PDF 미리보기 렌더 실패:', attempt.dim, e);
-                }
-            }
-        }
-        return resolveFloorDrawingTierDataUrl(bldg, floorCode, (typeof window.getFloorDrawingBaseTierDim === 'function')
-            ? window.getFloorDrawingBaseTierDim()
-            : 2000);
     }
 
     function pickFirstTierUrl(tiers, preferredKeys) {
@@ -11112,10 +10908,6 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         return { x: img.x, y: img.y, octant: screen.octant };
     }
 
-    function getArrowOctantUnitVector(octant) {
-        return getArrowOctantScreenUnitVector(octant);
-    }
-
     function resolveForcedArrowDirection(arrowItem, defect, rotationDeg) {
         const forceFlag = (arrowItem && arrowItem.forceArrowDir !== undefined)
             ? !!arrowItem.forceArrowDir
@@ -11182,11 +10974,6 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (getStyleShape(styleKey).numberFormat !== 'plain') return rawText;
         const m = String(rawText || '').match(/(\d+)/);
         return m ? m[1] : (rawText || '');
-    }
-
-    // 결함 종류 미입력 여부 (폼 기본값용 — 도면 마킹 모양은 항상 네모+NO.)
-    function isUnsetDefect(defect) {
-        return !defect || !String(defect.defectType || '').trim();
     }
 
     function getDefectPinShapeCfg(defect, styleKey) {
@@ -17545,20 +17332,6 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         return { ok: true, undone: last };
     }
 
-    function markNdtDispStationMoveAtPoint(group, pointId) {
-        if (!group || !pointId) return false;
-        const pt = (group.points || []).find((p) => p.id === pointId);
-        if (!pt) return false;
-        if (!isNdtDispLevelFilled(pt.level)) return false;
-        (group.points || []).forEach((p) => {
-            if (p.stationMark === 'overlap' && p.id !== pointId) delete p.stationMark;
-        });
-        pt.stationMark = 'overlap';
-        pt.levelAtA = Number(pt.level);
-        group.transferOverlapPointId = pointId;
-        return true;
-    }
-
     function removeNdtDispStationTransferPanel() {
         const panel = document.getElementById('ndtDispStationTransferPanel');
         if (panel) panel.remove();
@@ -18358,29 +18131,6 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (defect.mapMarkedAt) return Number(defect.mapMarkedAt) || 0;
         if (!isDefectMapUnregistered(defect)) return getRecordUpdatedAt(defect, 'pin');
         return 0;
-    }
-
-    function formatMarkingArrowIndexLabel(index) {
-        return `화살표 ${index + 1}`;
-    }
-
-    function getMarkingMemberDirDisplay(m) {
-        if (!m || !m.forceArrowDir) {
-            return { symbol: '·', title: '자동(클릭 방향) · 누르면 방향 지정' };
-        }
-        const oct = ((parseInt(m.arrowOctant, 10) || 0) % 8 + 8) % 8;
-        const table = [
-            { symbol: '→', name: '동' },
-            { symbol: '↘', name: '남동' },
-            { symbol: '↓', name: '남' },
-            { symbol: '↙', name: '남서' },
-            { symbol: '←', name: '서' },
-            { symbol: '↖', name: '북서' },
-            { symbol: '↑', name: '북' },
-            { symbol: '↗', name: '북동' }
-        ];
-        const meta = table[oct] || table[0];
-        return { symbol: meta.symbol, title: `${meta.name} · 누르면 다음 방향` };
     }
 
     function syncDefectArrowFormFromMember(m) {
@@ -19560,18 +19310,6 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             });
         });
         return n;
-    }
-
-    /**
-     * Firestore photos 문서에서 실제 이미지 소스 추출.
-     * Storage 이전 후: { url, storagePath } / 구형: { dataUrl }
-     */
-    function getPhotoUrlFromDocData(data) {
-        if (!data || typeof data !== 'object') return null;
-        const u = data.url || data.dataUrl || data.downloadUrl || null;
-        if (typeof u !== 'string') return null;
-        const trimmed = u.trim();
-        return trimmed ? trimmed : null;
     }
 
     // 한글(HWPX)·도면 캔버스용 Storage 이미지 프록시 — OCR Worker와 동일 엔드포인트(action=proxyStorage).
@@ -20891,17 +20629,6 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         return result;
     }
 
-    // #rrggbb 색상을 amount(0~1)만큼 어둡게 만들어 전회차 결함 강조에 사용
-    function darkenHexColor(hex, amount) {
-        const clean = (hex || '#ef4444').replace('#', '');
-        const num = parseInt(clean, 16);
-        const dec = Math.round(255 * amount);
-        const r = Math.max(0, (num >> 16) - dec);
-        const g = Math.max(0, ((num >> 8) & 0xff) - dec);
-        const b = Math.max(0, (num & 0xff) - dec);
-        return `#${((r << 16) | (g << 8) | b).toString(16).padStart(6, '0')}`;
-    }
-
     // 손상 유형 필터링이 적용된 현재 층 결함 목록 반환
     function getCurrentFloorFilteredDefects() {
         let list = getCurrentFloorDefects();
@@ -21174,26 +20901,6 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             applyDefectListScrollSnapshot(panel, snap);
             requestAnimationFrame(() => applyDefectListScrollSnapshot(panel, snap));
         });
-    }
-
-    function findDefectListRowForSelection(panel, selectedCluster, pinSelectedToTop) {
-        if (!panel || !selectedCluster || selectedCluster.length === 0) return null;
-        if (pinSelectedToTop) {
-            const sec = panel.querySelector('.defect-list-section.is-selected-cluster');
-            return sec ? sec.querySelector('.defect-list-item') : null;
-        }
-        const d = selectedCluster[0];
-        const id = d && (d.id || d.groupId);
-        if (id) {
-            try {
-                const byId = panel.querySelector(`.defect-list-item[data-defect-id="${CSS.escape(String(id))}"]`);
-                if (byId) return byId;
-            } catch (_e) {
-                const byId = panel.querySelector(`.defect-list-item[data-defect-id="${String(id).replace(/"/g, '\\"')}"]`);
-                if (byId) return byId;
-            }
-        }
-        return panel.querySelector('.defect-list-item.is-map-selected');
     }
 
     function scrollDefectListRowIntoView(row, behavior, align) {
@@ -21896,35 +21603,6 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (isArea) syncDefectAreaAngleRowVisible(shapeHint);
     }
 
-    function paintAreaInterior(ctx, x1, y1, x2, y2, color, fillStyle) {
-        const w = x2 - x1;
-        const h = y2 - y1;
-        if (w <= 0 || h <= 0 || fillStyle === 'none') return;
-        if (fillStyle === 'solid') {
-            ctx.globalAlpha = 0.28;
-            ctx.fillStyle = color;
-            ctx.fillRect(x1, y1, w, h);
-            ctx.globalAlpha = 1;
-            return;
-        }
-        ctx.save();
-        ctx.beginPath();
-        ctx.rect(x1, y1, w, h);
-        ctx.clip();
-        ctx.strokeStyle = color;
-        ctx.globalAlpha = 0.7;
-        ctx.lineWidth = 1.2;
-        ctx.setLineDash([]);
-        const step = 9;
-        for (let i = -h; i <= w + h; i += step) {
-            ctx.beginPath();
-            ctx.moveTo(x1 + i, y1);
-            ctx.lineTo(x1 + i + h, y2);
-            ctx.stroke();
-        }
-        ctx.restore();
-    }
-
     function normalizeAreaShape(v) {
         return (v === 'ellipse' || v === 'polygon') ? v : 'rect';
     }
@@ -22420,98 +22098,6 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         ctx.restore();
     }
 
-    // 바깥 점(from)에서 목표점(to) 방향으로 직사각형 테두리에 처음 닿는 점 — 영역 내부를 관통하지 않음
-    function getRectBorderAttachPoint(fromX, fromY, toX, toY, areaX1, areaY1, areaX2, areaY2) {
-        const x1 = Math.min(areaX1, areaX2);
-        const y1 = Math.min(areaY1, areaY2);
-        const x2 = Math.max(areaX1, areaX2);
-        const y2 = Math.max(areaY1, areaY2);
-        const cx = (x1 + x2) / 2;
-        const cy = (y1 + y2) / 2;
-        let aimX = (toX === undefined || toX === null || Number.isNaN(Number(toX))) ? cx : Number(toX);
-        let aimY = (toY === undefined || toY === null || Number.isNaN(Number(toY))) ? cy : Number(toY);
-
-        const eps = 1e-6;
-        let dx = aimX - fromX;
-        let dy = aimY - fromY;
-        if (Math.abs(dx) < eps && Math.abs(dy) < eps) {
-            dx = cx - fromX;
-            dy = cy - fromY;
-        }
-        if (Math.abs(dx) < eps && Math.abs(dy) < eps) {
-            return { x: cx, y: y1 };
-        }
-
-        const insideFrom = fromX >= x1 - eps && fromX <= x2 + eps && fromY >= y1 - eps && fromY <= y2 + eps;
-        if (insideFrom) {
-            // 번호칸이 영역 안이면 가장 가까운 변으로 투영
-            const dl = Math.abs(fromX - x1);
-            const dr = Math.abs(x2 - fromX);
-            const dt = Math.abs(fromY - y1);
-            const db = Math.abs(y2 - fromY);
-            const m = Math.min(dl, dr, dt, db);
-            if (m === dl) return { x: x1, y: Math.min(y2, Math.max(y1, fromY)) };
-            if (m === dr) return { x: x2, y: Math.min(y2, Math.max(y1, fromY)) };
-            if (m === dt) return { x: Math.min(x2, Math.max(x1, fromX)), y: y1 };
-            return { x: Math.min(x2, Math.max(x1, fromX)), y: y2 };
-        }
-
-        const hits = [];
-        const pushHit = (t, x, y) => {
-            if (t > eps && t <= 1 + eps) hits.push({ t, x, y });
-        };
-        // 선분 from→aim 을 충분히 연장해 테두리 교차점 중 from에 가장 가까운 것 선택
-        const farScale = 50;
-        const endX = fromX + dx * farScale;
-        const endY = fromY + dy * farScale;
-        const segDx = endX - fromX;
-        const segDy = endY - fromY;
-
-        if (Math.abs(segDx) > eps) {
-            let t = (x1 - fromX) / segDx;
-            let y = fromY + t * segDy;
-            if (y >= y1 - eps && y <= y2 + eps) pushHit(t, x1, Math.min(y2, Math.max(y1, y)));
-            t = (x2 - fromX) / segDx;
-            y = fromY + t * segDy;
-            if (y >= y1 - eps && y <= y2 + eps) pushHit(t, x2, Math.min(y2, Math.max(y1, y)));
-        }
-        if (Math.abs(segDy) > eps) {
-            let t = (y1 - fromY) / segDy;
-            let x = fromX + t * segDx;
-            if (x >= x1 - eps && x <= x2 + eps) pushHit(t, Math.min(x2, Math.max(x1, x)), y1);
-            t = (y2 - fromY) / segDy;
-            x = fromX + t * segDx;
-            if (x >= x1 - eps && x <= x2 + eps) pushHit(t, Math.min(x2, Math.max(x1, x)), y2);
-        }
-
-        if (!hits.length) return { x: cx, y: y1 };
-        hits.sort((a, b) => a.t - b.t);
-        return { x: hits[0].x, y: hits[0].y };
-    }
-
-    // 영역 마킹: 번호칸에서 가장 가까운 변 중앙(상·하·좌·우)에 선을 꽂음
-    function getAreaCenterBorderAttach(fromX, fromY, areaX1, areaY1, areaX2, areaY2) {
-        const x1 = Math.min(areaX1, areaX2);
-        const y1 = Math.min(areaY1, areaY2);
-        const x2 = Math.max(areaX1, areaX2);
-        const y2 = Math.max(areaY1, areaY2);
-        const cx = (x1 + x2) / 2;
-        const cy = (y1 + y2) / 2;
-        const candidates = [
-            { x: cx, y: y1 },
-            { x: cx, y: y2 },
-            { x: x1, y: cy },
-            { x: x2, y: cy }
-        ];
-        let best = candidates[0];
-        let bestD = Infinity;
-        candidates.forEach((c) => {
-            const d = (c.x - fromX) ** 2 + (c.y - fromY) ** 2;
-            if (d < bestD) { bestD = d; best = c; }
-        });
-        return best;
-    }
-
     function getAreaEdgeMidpoints(defect) {
         if (getAreaShape(defect) === 'polygon') {
             const pts = getAreaPolyPoints(defect);
@@ -22526,42 +22112,6 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     function getAreaCenterBorderAttachDefect(fromX, fromY, defect) {
         // 번호칸(from)에서 유클리드 거리가 가장 가까운 변 중앙에 꽂음 (방향 dot 아님)
         return projectPointToAreaEdgeCenterDefect(fromX, fromY, defect);
-    }
-
-    // 선분이 영역 내부(테두리 제외)를 지나는지 검사 — 지시선이 면적 안을 침범하지 않게
-    function segmentCrossesOpenRect(xa, ya, xb, yb, rx1, ry1, rx2, ry2) {
-        const eps = 1e-6;
-        const ix1 = Math.min(rx1, rx2) + eps;
-        const iy1 = Math.min(ry1, ry2) + eps;
-        const ix2 = Math.max(rx1, rx2) - eps;
-        const iy2 = Math.max(ry1, ry2) - eps;
-        if (ix2 <= ix1 || iy2 <= iy1) return false;
-        let t0 = 0;
-        let t1 = 1;
-        const dx = xb - xa;
-        const dy = yb - ya;
-        const clip = (p, q) => {
-            if (Math.abs(p) < eps) return q >= -eps;
-            const r = q / p;
-            if (p < 0) {
-                if (r > t1) return false;
-                if (r > t0) t0 = r;
-            } else {
-                if (r < t0) return false;
-                if (r < t1) t1 = r;
-            }
-            return true;
-        };
-        if (!clip(-dx, xa - ix1)) return false;
-        if (!clip(dx, ix2 - xa)) return false;
-        if (!clip(-dy, ya - iy1)) return false;
-        if (!clip(dy, iy2 - ya)) return false;
-        return t0 < t1 - eps;
-    }
-
-    // 영역 지시선: 번호칸에서 테두리 부착점까지 직선 (과거 L자 경로는 사용하지 않음)
-    function buildAreaLeaderRoute(anchor, attach) {
-        return [anchor, attach];
     }
 
     function projectPointToAreaEdgeCenter(px, py, areaX1, areaY1, areaX2, areaY2) {
@@ -22601,29 +22151,6 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             if (d < bestD) { bestD = d; best = c; }
         });
         return best;
-    }
-
-    function projectPointToRectBorder(px, py, areaX1, areaY1, areaX2, areaY2) {
-        const x1 = Math.min(areaX1, areaX2);
-        const y1 = Math.min(areaY1, areaY2);
-        const x2 = Math.max(areaX1, areaX2);
-        const y2 = Math.max(areaY1, areaY2);
-        const cx = (x1 + x2) / 2;
-        const cy = (y1 + y2) / 2;
-        const inside = px > x1 && px < x2 && py > y1 && py < y2;
-        if (!inside) {
-            // 바깥이면 중심 쪽으로 끌어 테두리에 붙임
-            return getRectBorderAttachPoint(px, py, cx, cy, x1, y1, x2, y2);
-        }
-        const dl = px - x1;
-        const dr = x2 - px;
-        const dt = py - y1;
-        const db = y2 - py;
-        const m = Math.min(dl, dr, dt, db);
-        if (m === dl) return { x: x1, y: py };
-        if (m === dr) return { x: x2, y: py };
-        if (m === dt) return { x: px, y: y1 };
-        return { x: px, y: y2 };
     }
 
     // 구버전 영역 마킹(번호가 좌상단 고정, tip 없음)을 일반 핀처럼 지시선 연결 좌표로 보정
@@ -24180,14 +23707,6 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         return parseDefectTypeList(typeVal).filter(t => crackKinds.includes(t));
     }
 
-    function toggleCrackKindChip(kind) {
-        toggleDefectTypeChip(kind);
-    }
-
-    function applyExclusiveDefectTypeChip(value) {
-        toggleDefectTypeChip(value);
-    }
-
     function isPlasterCrackDefectType(label) {
         return String(label || '').includes('미장균열');
     }
@@ -25239,11 +24758,6 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         renderCrackMonitorPhotoFrames();
     }
 
-    function getCrackMonitorPhotoState(kind, slot) {
-        if (kind === 'gauge') return slot === 'prev' ? (window._crackGaugePrevPhoto || '') : (window._crackGaugeCurrPhoto || '');
-        return slot === 'prev' ? (window._crackTipPrevPhoto || '') : (window._crackTipCurrPhoto || '');
-    }
-
     function setCrackMonitorPhotoState(kind, slot, dataUrl) {
         const val = dataUrl || '';
         if (kind === 'gauge') {
@@ -25407,18 +24921,6 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 }
             });
         }
-    }
-
-    function summarizeCrackGaugeLog(log) {
-        log = normalizeCrackGaugeLog(log);
-        const last = log.readings.length ? log.readings[log.readings.length - 1] : null;
-        if (!last) return log.gaugeNo ? `No.${log.gaugeNo}` : '-';
-        const d = computeGaugeDeltas(log, last);
-        const xy = [last.xMm, last.yMm].filter(Boolean).join('/') || '-';
-        const delta = (d.dx != null || d.dy != null)
-            ? ` (Δ${formatMonitorDelta(d.dx)}/${formatMonitorDelta(d.dy)})`
-            : '';
-        return `${log.gaugeNo ? log.gaugeNo + ' · ' : ''}${xy}${delta}`;
     }
 
     function summarizeCrackTipLog(log) {
@@ -33877,10 +33379,6 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         return String(str == null ? '' : str).trim().length;
     }
 
-    function isSurveyMobileLayout() {
-        return layoutIsCompactWidth();
-    }
-
     function surveyColumnWidthCh(maxLen) {
         const len = Math.max(maxLen, 2);
         if (len <= SURVEY_INLINE_WRAP_THRESHOLD) return len;
@@ -35947,47 +35445,6 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         } catch (err) {
             console.error('NDT 위치도 비동기 렌더 실패:', err);
             return renderNdtFloorPlanCanvasDataUrl(floorCode, categoryFilter);
-        }
-    }
-
-    // 상태조사표 페이지(.report-page-block[data-role="survey-page"])는 처음에 "한 페이지당
-    // SURVEY_ROWS_PER_PAGE개"로 고정 배치해서 만든다(빈 페이지 없이 빠르게 초안을 만들기 위함).
-    // 하지만 조사내용/원인추정 같은 칸이 길어서 줄바꿈이 많이 되는 결함이 섞여 있으면, 고정
-    // 개수로는 실제 페이지 높이(295mm, 여백 포함)를 넘어서 꼬릿말이 밀려나거나 표가 페이지
-    // 밑으로 잘려 나가는 문제가 있었다. 개수를 미리 정하는 대신, 실제로 그려진 다음 각 페이지의
-    // 실측 높이(scrollHeight)가 페이지 박스 높이(clientHeight, overflow:hidden으로 잘리는 기준)를
-    // 넘는지 직접 재서, 넘치면 그 페이지의 마지막 행부터 하나씩 다음 페이지로 자연스럽게 넘긴다.
-    // 넘겨받을 다음 페이지가 같은 층의 상태조사표 페이지가 아니면(마지막 페이지였거나 다음이 다른
-    // 층/다른 섹션이면) 지금 페이지를 복제해서 빈 표로 만든 새 페이지를 그 사이에 끼워 넣는다.
-    function rebalanceOverflowingSurveyPages(root) {
-        const pages = Array.from(root.querySelectorAll('[data-role="survey-page"]'));
-        let guard = 0;
-        let changed = true;
-        while (changed && guard < 5000) {
-            changed = false;
-            guard++;
-            for (let i = 0; i < pages.length; i++) {
-                const page = pages[i];
-                if (page.scrollHeight <= page.clientHeight + 1) continue;
-                const tbody = page.querySelector('table tbody');
-                if (!tbody) continue;
-                const rows = Array.from(tbody.children).filter(tr => tr.tagName === 'TR');
-                if (rows.length <= 1) continue; // 행이 1개뿐이면(예: "결함 없음" 안내행) 더 줄일 수 없다
-                let nextPage = pages[i + 1];
-                const sameFloorNextSurveyPage = nextPage && nextPage.dataset.role === 'survey-page' && nextPage.dataset.floor === page.dataset.floor;
-                if (!sameFloorNextSurveyPage) {
-                    nextPage = page.cloneNode(true);
-                    const nextTbody = nextPage.querySelector('table tbody');
-                    Array.from(nextTbody.children).forEach(tr => nextTbody.removeChild(tr));
-                    page.parentNode.insertBefore(nextPage, page.nextSibling);
-                    pages.splice(i + 1, 0, nextPage);
-                }
-                const nextTbody = nextPage.querySelector('table tbody');
-                const lastRow = rows[rows.length - 1];
-                tbody.removeChild(lastRow);
-                nextTbody.insertBefore(lastRow, nextTbody.firstChild || null);
-                changed = true;
-            }
         }
     }
 
@@ -45498,6 +44955,29 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         }
     }
 
+    async function migrateLegacyCloudPhoto(photoId) {
+        if (!photoId || isPhotoMarkedOnStorage(photoId)) return true;
+        const companyPhotos = getCompanyPhotosCollection();
+        if (!companyPhotos) return false;
+        try {
+            const snap = await fetchPhotosDocIfAllowed(photoId);
+            if (!snap) return false;
+            if (!snap.exists) return false;
+            const data = snap.data() || {};
+            if (hasFirebaseStorageMeta(data)) {
+                markPhotoOnStorage(photoId);
+                return true;
+            }
+            if (typeof data.dataUrl === 'string' && data.dataUrl.length > 32) {
+                return persistPhotoToCloud(photoId, data.dataUrl, data);
+            }
+            return false;
+        } catch (e) {
+            console.warn('레거시 사진 Storage 이관 조회 실패:', photoId, e);
+            return false;
+        }
+    }
+
     function scheduleLegacyPhotoMigrate(photoId, sourceUrl) {
         if (!photoId || !sourceUrl) return;
         if (isPhotoMarkedOnStorage(photoId)) return;
@@ -45538,29 +45018,6 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             if (typeof fromIdb === 'string' && fromIdb.length > 32) return fromIdb;
         } catch (_e) { /* ignore */ }
         return null;
-    }
-
-    async function migrateLegacyCloudPhoto(photoId) {
-        if (!photoId || isPhotoMarkedOnStorage(photoId)) return true;
-        const companyPhotos = getCompanyPhotosCollection();
-        if (!companyPhotos) return false;
-        try {
-            const snap = await fetchPhotosDocIfAllowed(photoId);
-            if (!snap) return false;
-            if (!snap.exists) return false;
-            const data = snap.data() || {};
-            if (hasFirebaseStorageMeta(data)) {
-                markPhotoOnStorage(photoId);
-                return true;
-            }
-            if (typeof data.dataUrl === 'string' && data.dataUrl.length > 32) {
-                return persistPhotoToCloud(photoId, data.dataUrl, data);
-            }
-            return false;
-        } catch (e) {
-            console.warn('레거시 사진 Storage 이관 조회 실패:', photoId, e);
-            return false;
-        }
     }
 
     async function ensurePhotoPersistedToStorage(photoId, inlineUrl) {
@@ -46383,12 +45840,6 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         return String(floorKey).slice(prefix.length);
     }
 
-    function getSiteVaultKeyFromBuilding(bldg) {
-        if (!bldg) return 'unnamed';
-        if (bldg.siteVaultKey) return bldg.siteVaultKey;
-        return siteVaultDocId(getBuildingSiteName(bldg));
-    }
-
     /** Firestore client write stream overload guard */
     let _fsWriteChain = Promise.resolve();
     let _fsWritePausedUntil = 0;
@@ -46618,20 +46069,6 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     function hasOfflinePendingFlush() {
         try { return localStorage.getItem(offlinePendingFlushKey()) === '1'; } catch (_e) { return false; }
     }
-    function collectLocalInspectionFloorKeys() {
-        const keys = new Set();
-        const addFrom = (obj) => {
-            Object.keys(obj || {}).forEach((k) => {
-                if (k && String(k).indexOf('_') > 0) keys.add(String(k));
-            });
-        };
-        addFrom(window.state && window.state.defects);
-        addFrom(window.state && window.state.ndtData);
-        addFrom(window.state && window.state.deletedDefectIds);
-        addFrom(window.state && window.state.deletedNdtIds);
-        addFrom(window.state && window.state.ndtDisplacementGroups);
-        return keys;
-    }
     function markFloorKeyDirty(key) {
         if (!key) return;
         _dirtyFloorKeys.add(String(key));
@@ -46851,13 +46288,6 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         return out;
     }
 
-    async function writeFloorKindPayload(bldg, floorCode, kind, payload) {
-        const ref = getFloorKindDocRef(bldg, floorCode, kind);
-        if (!ref) return;
-        const json = JSON.stringify(payload == null ? {} : payload);
-        await writeChunkedPdfToDocRef(ref, json);
-    }
-
     async function readFloorKindPayload(bldg, floorCode, kind) {
         const ref = getFloorKindDocRef(bldg, floorCode, kind);
         if (!ref) return null;
@@ -46868,20 +46298,6 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             return JSON.parse(json);
         } catch (e) {
             console.warn('층 문서 조회 실패:', kind, e);
-            return null;
-        }
-    }
-
-    async function decodeFloorKindFromSnap(bldg, floorCode, kind, snapData) {
-        const ref = getFloorKindDocRef(bldg, floorCode, kind);
-        if (!ref) return null;
-        try {
-            const json = await decodeChunkedPayloadFromData(snapData || {}, ref);
-            if (json == null) return null;
-            if (!json) return {};
-            return JSON.parse(json);
-        } catch (e) {
-            console.warn('층 스냅샷 파싱 실패:', kind, e);
             return null;
         }
     }
@@ -47990,16 +47406,6 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         }
     }
 
-    /** 결함/NDT 데이터를 회사 루트 문서(safety_app/{companyId})와 분리된 별도 문서에 저장한다.
-        도면 PDF와 같은 청크 저장 방식을 재사용 — 결함이 계속 쌓이면 루트 문서 하나로는
-        Firestore 1MB 문서 한도에 걸리기 때문에 분리한다. */
-    async function writeBulkSyncData(fields) {
-        if (!db || !window.state.companyId) return;
-        const json = JSON.stringify(fields || {});
-        const meta = await writeChunkedPdfToDocRef(getBulkSyncDocRef(), json);
-        _lastBulkPayloadIdentity = bulkPayloadIdentity(meta || { dataUrl: json });
-    }
-
     async function fetchBulkSyncDataReliable(maxAttempts = 4) {
         let last = null;
         for (let i = 0; i < maxAttempts; i++) {
@@ -48678,10 +48084,6 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 }
             }
         }
-    }
-
-    async function ensureMobileRasterPreviewsForSync(buildings) {
-        return ensureRasterTiersForSync(buildings);
     }
 
     /** 동기화 시 로컬 PDF 원본을 Firestore에 올려 기기 간 벡터 출력·고해상도 줌 유지 */
