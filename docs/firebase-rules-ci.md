@@ -34,10 +34,11 @@ GitHub에 맡겨 두는 것이다.
 3. JSON 파일이 다운로드된다. 끝.
 
 여기서 받는 키는 `firebase-adminsdk-…@building-safety-app-46821.iam.gserviceaccount.com`
-계정의 것이다. 이 계정은 보통 규칙 게시 권한을 이미 갖고 있다.
+계정의 것이다.
 
-> 나중에 Actions에서 `PERMISSION_DENIED` 나 `Missing required permission` 이 보이면
-> 권한이 모자란 것이다. 그때 아래 **1-C**로 역할만 추가하면 된다. 키를 다시 만들 필요는 없다.
+> ⚠️ **이 계정은 규칙 게시 권한이 없다** — 2026-09-23에 확인했다. 키만 넣고 돌리면
+> `Permission denied to get service [firebasestorage.googleapis.com]` 로 실패한다.
+> 그러니 키를 받은 뒤 **1-C로 역할 두 개를 반드시 추가**할 것. 키를 다시 만들 필요는 없다.
 
 ## 1-B. 직접 만들기 (1-A가 막혔을 때만)
 
@@ -46,8 +47,8 @@ GitHub에 맡겨 두는 것이다.
 3. **1단계 서비스 계정 세부정보** — 이름에 `github-rules-deploy` 입력 (ID는 자동으로 채워진다)
    → **`만들고 계속하기`**
 4. **2단계 액세스 권한 부여** — `역할 선택` 드롭다운에서 아래 둘을 **각각 `+ 다른 역할 추가`로** 넣는다
-   - `Firebase Rules 관리자` (검색창에 **rules** 입력하면 나온다)
-   - `Service Usage 소비자` (검색창에 **service usage** 입력)
+   - `Firebase 규칙 관리` (검색창에 **rules** 입력하면 나온다)
+   - `서비스 사용량 소비자` (검색창에 **service usage** 입력)
    → **`계속`** → 3단계는 비워 두고 **`완료`**
 5. 목록에서 방금 만든 계정의 **이메일을 클릭** → 위쪽 **`키`** 탭
 6. **`키 추가`** → **`새 키 만들기`** → 형식 **JSON** 선택 → **`만들기`** → 파일이 다운로드된다
@@ -57,11 +58,16 @@ GitHub에 맡겨 두는 것이다.
 https://console.cloud.google.com/iam-admin/iam?project=building-safety-app-46821 접속 →
 해당 서비스 계정 줄의 **연필(수정)** 아이콘 → **`+ 다른 역할 추가`** 로 아래를 넣고 저장:
 
-| 역할 | 왜 필요한가 |
+2026-09-23에 셋 다 필요하다는 걸 한 번에 하나씩 실패해 가며 확인했다. 처음부터 셋을 넣을 것.
+
+| 역할 (검색어) | 왜 필요한가 |
 |------|-------------|
-| `Firebase Rules 관리자` | 규칙을 올리고 게시 |
-| `Service Usage 소비자` | firebase CLI가 게시 전에 API 활성 상태를 확인함 |
-| `Firebase Develop 관리자` | 위 둘로도 안 되면 이것 하나로 대체 (더 넓은 권한) |
+| `서비스 사용량 소비자` (service usage) | CLI가 게시 전에 API가 켜져 있는지 조회 |
+| `Firebase Storage 뷰어` (firebase storage) | 기본 버킷 정보 읽기. `Firebase 규칙 관리`에는 `firebasestorage.defaultBucket.get`이 없다 |
+| `Firebase 규칙 관리` (rules) | 실제 규칙 게시 |
+
+`Firebase Storage 관리자`가 아니라 **뷰어**다. 관리자는 버킷 생성·삭제까지 되는데 배포용
+키에 그 권한을 줄 이유가 없다.
 
 > **이 JSON 파일은 비밀번호와 같다.** 채팅·메일·깃에 올리지 말 것. 아래 3번까지 끝내면 지운다.
 > (회사 정책으로 키 생성이 막혀 있으면 `서비스 계정 키 생성이 사용 중지됨` 같은 메시지가
@@ -96,6 +102,8 @@ https://github.com/dongil2010/building-safety-app/actions
 | 로그에 보이는 말 | 뜻 / 할 일 |
 |---|---|
 | `FIREBASE_SERVICE_ACCOUNT 시크릿이 없다` | 2번을 안 했거나 이름 오타. 이름은 정확히 `FIREBASE_SERVICE_ACCOUNT` |
+| `Permission denied to get service [firebasestorage.googleapis.com]` | 규칙을 올리기 전에 CLI가 "이 API가 켜져 있나"를 먼저 묻는데 그 조회 권한이 없다. → `서비스 사용량 소비자` 추가 |
+| `Permission 'firebasestorage.defaultBucket.get' denied` | `Firebase 규칙 관리`에 없는 권한이다. → `Firebase Storage 뷰어` 추가 |
 | `PERMISSION_DENIED`, `Missing required permission` | 역할 부족 → 위 **1-C** |
 | `Failed to get Firebase project` | 키가 다른 프로젝트 것이거나 JSON을 일부만 붙여넣음. `{`~`}` 전체인지 확인 |
 | `Unexpected token … in JSON` | 붙여넣을 때 앞뒤 따옴표를 넣었거나 줄이 잘림. 파일 내용 그대로여야 한다 |
