@@ -9136,6 +9136,15 @@ body:not(.bsa-tab-home) .home-fab-add-building {
     font-size: 0.85rem;
 }
 
+/* 등급별 개소. 숫자 색을 세게 주면 오히려 안 읽혀서 담백하게 둔다. */
+.stats-ndt-grades {
+    color: #1e293b;
+    font-weight: 600;
+    font-size: 0.86rem;
+    line-height: 1.5;
+    white-space: normal;
+}
+
 .stats-ndt-warn {
     color: #b91c1c;
     font-weight: 800;

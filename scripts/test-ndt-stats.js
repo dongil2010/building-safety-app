@@ -65,7 +65,11 @@ function testLegacyItemWithoutSlots() {
     });
     assert.strictEqual(samples.length, 1);
     assert.strictEqual(samples[0].grade, 'a_or_b');
+    // 나온 등급만 적는다 — d·e가 0개소면 자리만 차지한다(2026-09-23 사용자 확정)
     assert.strictEqual(api.formatGradeCounts({ a_or_b: 1 }), 'a/b 1');
+    assert.strictEqual(api.formatGradeCounts({ a: 2, c: 1 }), 'a 2 · c 1');
+    assert.strictEqual(api.formatGradeCounts({ a: 2 }, '개소'), 'a 2개소');
+    assert.strictEqual(api.formatGradeCounts({}), '-');
 }
 
 function testFloorAndGroupPayload() {
@@ -235,7 +239,10 @@ function testCategoryVisibility() {
         viewChips: true,
         ndtStrength: false,
         ndtCarb: false,
-        ndtFireproof: false
+        ndtFireproof: false,
+        ndtTilt: false,
+        ndtSettlement: false,
+        ndtMemberDisp: false
     });
 
     const ndt = api.getStatsSectionVisibility('ndt');
@@ -247,7 +254,10 @@ function testCategoryVisibility() {
         viewChips: false,
         ndtStrength: true,
         ndtCarb: true,
-        ndtFireproof: true
+        ndtFireproof: true,
+        ndtTilt: true,
+        ndtSettlement: true,
+        ndtMemberDisp: true
     });
 
     Object.keys(defect).forEach((key) => {

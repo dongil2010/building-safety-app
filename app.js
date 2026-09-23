@@ -11085,34 +11085,14 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
     // 외벽 기울기: 높이 H(mm) 대비 변위량(mm)으로 1/H 기울기 비율과 기울기 안전등급 산정
     // H·변위가 없으면 비율/등급을 채우지 않음 (기본 H=3000 등 가정값 사용 안 함)
+    // 등급 계산식은 js/core/ndt-grade.js에 있다 — 통계 탭도 같은 식을 써야 해서 옮겼다.
+    // 두 벌로 두면 기준이 어긋나도 알아채기 어렵다.
     function calcTiltGrade(lengthMm, deltaMm) {
-        const h = Number(lengthMm);
-        const delta = Math.abs(Number(deltaMm) || 0);
-        if (!Number.isFinite(h) || h <= 0 || delta <= 0) return { tiltRatio: '', grade: '' };
-        const ratioInv = Math.round(h / delta);
-        let grade = 'e등급';
-        if (ratioInv >= 750) grade = 'a등급';
-        else if (ratioInv >= 500) grade = 'b등급';
-        else if (ratioInv >= 250) grade = 'c등급';
-        else if (ratioInv >= 150) grade = 'd등급';
-        return { tiltRatio: `1/${ratioInv}`, grade };
+        return window.BSA.ndtGrade.calcTiltGrade(lengthMm, deltaMm);
     }
 
-    // 부재변위(처짐): 시설물의 안전 및 유지관리 실시 세부지침(건축물편) [표 6.34] 부재의 변위·변형에 대한 상태평가기준
-    // 보/슬래브 처짐 δ, 경간길이 L → a·b: L/480 이하(육안상 경미한 손상 동반 시 b), c: L/240 이하, d: L/150 이하, e: L/150 초과
-    // 기울기(calcTiltGrade)와 달리 등급 구간이 480/240/150 3단계뿐이며 360 구간이 없음
-    // hasMinorDamage: 균열 등 경미한 손상 동반 여부(육안 확인, 체크박스 입력) — 처짐비가 L/480 이내여도 손상이 있으면 a 대신 b등급
     function calcMemberDispGrade(lengthMm, deltaMm, hasMinorDamage = false) {
-        const l = Number(lengthMm);
-        const delta = Math.abs(Number(deltaMm) || 0);
-        const bestGrade = hasMinorDamage ? 'b등급' : 'a등급';
-        if (!Number.isFinite(l) || l <= 0 || delta <= 0) return { tiltRatio: '', grade: '' };
-        const ratioInv = Math.round(l / delta);
-        let grade = 'e등급';
-        if (ratioInv >= 480) grade = bestGrade;
-        else if (ratioInv >= 240) grade = 'c등급';
-        else if (ratioInv >= 150) grade = 'd등급';
-        return { tiltRatio: `1/${ratioInv}`, grade };
+        return window.BSA.ndtGrade.calcMemberDispGrade(lengthMm, deltaMm, hasMinorDamage);
     }
 
     // 설계/실측 치수 입력칸 하나에 "400*400"처럼 폭*춤을 한번에 적어도 되고, 폭/춤 칸을
@@ -11384,58 +11364,15 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
     // 레벨 미입력(null/빈값) 허용 — 마크 우선 UX에서 먼저 지점만 찍고 나중에 일괄 입력
     function isNdtDispLevelFilled(level) {
-        if (level === null || level === undefined || level === '') return false;
-        return Number.isFinite(Number(level));
+        return window.BSA.ndtGrade.isLevelFilled(level);
     }
 
     function ndtDispGroupLevelsComplete(group) {
-        const pts = (group && group.points) || [];
-        return pts.length > 0 && pts.every((p) => isNdtDispLevelFilled(p.level));
+        return window.BSA.ndtGrade.groupLevelsComplete(group);
     }
 
-    // 그룹(부동침하 또는 부재처짐) 변위량/처짐량 및 안전등급 연산.
-    // group.points[].level은 cm 단위로 입력받는다(화면 입력칸 라벨은 "mm"로 잘못 표시돼 있지만
-    // 실제 현장 입력 관행은 cm) — calcTiltGrade/calcMemberDispGrade는 delta를 mm로 받으므로
-    // 등급 계산 직전에만 ×10으로 mm 환산한다. 반환하는 delta/absDelta 자체는 화면 표시용 원래
-    // cm 값 그대로 둔다(호출부에서 "cm" 단위로 그대로 출력).
     function calcGroupDisplacement(group) {
-        const points = group.points || [];
-        if (points.length === 0) {
-            return { delta: 0, absDelta: 0, tiltRatio: '-', grade: '', incomplete: true };
-        }
-        if (!ndtDispGroupLevelsComplete(group) || !(Number(group.measureLength) > 0)) {
-            return { delta: 0, absDelta: 0, tiltRatio: '-', grade: '', incomplete: true };
-        }
-
-        const isMemberDisp = group.category === '부재변위';
-        const lengthMm = (group.measureLength || 0) * 1000;
-        const lv = (p) => Number(p.level);
-
-        if (isMemberDisp) {
-            let delta = 0;
-            if (points.length >= 3) {
-                const first = lv(points[0]);
-                const last = lv(points[points.length - 1]);
-                const midIdx = Math.floor(points.length / 2);
-                const mid = lv(points[midIdx]);
-                const endAvg = (first + last) / 2.0;
-                delta = endAvg - mid;
-            } else if (points.length === 2) {
-                delta = lv(points[0]) - lv(points[1]);
-            } else {
-                delta = lv(points[0]);
-            }
-            const absDelta = Math.abs(delta);
-            const calc = calcMemberDispGrade(lengthMm, absDelta * 10, group.hasMinorDamage);
-            return { delta, absDelta, tiltRatio: calc.tiltRatio, grade: calc.grade, incomplete: false };
-        } else {
-            const first = points[0];
-            const last = points[points.length - 1];
-            const delta = (first && last) ? (lv(first) - lv(last)) : 0;
-            const absDelta = Math.abs(delta);
-            const calc = calcTiltGrade(lengthMm, absDelta * 10);
-            return { delta, absDelta, tiltRatio: calc.tiltRatio, grade: calc.grade, incomplete: false };
-        }
+        return window.BSA.ndtGrade.calcGroupDisplacement(group);
     }
 
     function formatDispCalcForExport(calc) {

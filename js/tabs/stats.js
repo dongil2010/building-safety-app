@@ -1,8 +1,12 @@
-/* 탭: 통계 — 층별·전체·층묶음 결함 종류 집계 + 강도·탄산화·내화피복 */
+/* 탭: 통계 — 층별·전체·층묶음 결함 종류 집계 + 강도·탄산화·내화피복·기울기·부동침하·부재처짐 */
 (function (root) {
     'use strict';
 
     root.BSA = root.BSA || { tabs: {}, shared: {} };
+
+    // 등급 계산식은 app.js와 같은 것을 쓴다. 두 벌로 두면 화면마다 등급이 달라져도 모른다.
+    var ndtGrade = (root.BSA && root.BSA.ndtGrade)
+        || (typeof require === 'function' ? require('../core/ndt-grade.js') : null);
 
     /** "1F"·"지상5층"·"5층"처럼 표기가 달라도 같은 지상층으로 본다 —
      * 층묶음 평균이 표기 차이로 쪼개지면 지상1층 4개 + 지상5층 4개가 8개로 합쳐지지 않는다 */
@@ -95,6 +99,17 @@
             depthMax: null,
             depthAvg: null,
             depthSum: 0,
+            // 피복두께(D) 자체와, 탄산화깊이가 그 몇 배인지(0.75D 같은 표기의 근거)
+            coverCount: 0,
+            coverMin: null,
+            coverMax: null,
+            coverAvg: null,
+            coverSum: 0,
+            ratioCount: 0,
+            ratioMin: null,
+            ratioMax: null,
+            ratioAvg: null,
+            ratioSum: 0,
             remainCount: 0,
             remainMin: null,
             remainMax: null,
@@ -120,6 +135,66 @@
             avg: null,
             sum: 0,
             readingCount: 0
+        };
+    }
+
+    /**
+     * 기울기·부동침하·부재처짐 집계.
+     * 이 셋은 "얼마였나"보다 **등급이 몇 개소냐**가 보고서에 들어간다.
+     */
+    function emptyGradeSpotSummary() {
+        return {
+            count: 0,
+            pending: 0, // 레벨 미입력 등으로 등급이 안 나온 구역
+            grades: { a: 0, b: 0, a_or_b: 0, c: 0, d: 0, e: 0 },
+            invMin: null, // 1/N 의 N — 작을수록 기울기가 크다(나쁘다)
+            invMax: null
+        };
+    }
+
+    /** "1/250" → 250. 형식이 다르면 null. */
+    function parseRatioInv(tiltRatio) {
+        var m = String(tiltRatio == null ? '' : tiltRatio).match(/^1\s*\/\s*(\d+(?:\.\d+)?)$/);
+        return m ? Number(m[1]) : null;
+    }
+
+    function gradeLetterOf(grade) {
+        if (ndtGrade && typeof ndtGrade.gradeLetter === 'function') return ndtGrade.gradeLetter(grade);
+        return normalizeGrade(grade);
+    }
+
+    /**
+     * 등급도 비(比)도 없는 항목은 아직 잰 게 아니므로 아예 세지 않는다.
+     * 비는 나왔는데 등급을 못 읽으면 "미산출"로 남긴다 — 그건 빠뜨리면 안 되는 측정이다.
+     */
+    function addGradeSpot(out, grade, tiltRatio) {
+        var letter = gradeLetterOf(grade);
+        if (!letter) {
+            if (parseRatioInv(tiltRatio) != null) out.pending += 1;
+            return out;
+        }
+        out.count += 1;
+        out.grades[letter] = (out.grades[letter] || 0) + 1;
+        var inv = parseRatioInv(tiltRatio);
+        if (inv != null) {
+            out.invMin = minOf(out.invMin, inv);
+            out.invMax = maxOf(out.invMax, inv);
+        }
+        return out;
+    }
+
+    function mergeGradeSpotSummary(a, b) {
+        a = a || emptyGradeSpotSummary();
+        b = b || emptyGradeSpotSummary();
+        var grades = cloneGrades(a.grades);
+        var bg = cloneGrades(b.grades);
+        Object.keys(grades).forEach(function (k) { grades[k] += bg[k] || 0; });
+        return {
+            count: a.count + b.count,
+            pending: (a.pending || 0) + (b.pending || 0),
+            grades: grades,
+            invMin: minOf(a.invMin, b.invMin),
+            invMax: maxOf(a.invMax, b.invMax)
         };
     }
 
@@ -239,6 +314,18 @@
         return collectCarbSample(item) != null;
     }
 
+    /**
+     * 기울기·부재변위 항목은 저장할 때 tiltRatio·grade를 같이 써 둔다(app.js 저장 경로).
+     * 그래서 통계에서는 다시 계산하지 않고 저장된 값을 읽는다.
+     */
+    function looksLikeTilt(item) {
+        return !!item && item.category === '기울기';
+    }
+
+    function looksLikeMemberDispItem(item) {
+        return !!item && item.category === '부재변위';
+    }
+
     function looksLikeFireproof(item) {
         if (!item) return false;
         if (item.category === '내화피복') return true;
@@ -277,6 +364,17 @@
             out.depthSum += s.depth;
             out.depthMin = minOf(out.depthMin, s.depth);
             out.depthMax = maxOf(out.depthMax, s.depth);
+            if (s.cover != null && s.cover > 0) {
+                out.coverCount += 1;
+                out.coverSum += s.cover;
+                out.coverMin = minOf(out.coverMin, s.cover);
+                out.coverMax = maxOf(out.coverMax, s.cover);
+                var ratio = s.depth / s.cover;
+                out.ratioCount += 1;
+                out.ratioSum += ratio;
+                out.ratioMin = minOf(out.ratioMin, ratio);
+                out.ratioMax = maxOf(out.ratioMax, ratio);
+            }
             if (s.remainMm != null) {
                 out.remainCount += 1;
                 out.remainSum += s.remainMm;
@@ -295,6 +393,8 @@
             }
         });
         if (out.count) out.depthAvg = out.depthSum / out.count;
+        if (out.coverCount) out.coverAvg = out.coverSum / out.coverCount;
+        if (out.ratioCount) out.ratioAvg = out.ratioSum / out.ratioCount;
         if (out.remainCount) out.remainAvg = out.remainSum / out.remainCount;
         if (out.lifeCount) out.lifeAvg = out.lifeSum / out.lifeCount;
         return out;
@@ -343,12 +443,26 @@
         var count = a.count + b.count;
         var remainCount = a.remainCount + b.remainCount;
         var lifeCount = a.lifeCount + b.lifeCount;
+        var coverCount = (a.coverCount || 0) + (b.coverCount || 0);
+        var ratioCount = (a.ratioCount || 0) + (b.ratioCount || 0);
+        var coverSum = (a.coverSum || 0) + (b.coverSum || 0);
+        var ratioSum = (a.ratioSum || 0) + (b.ratioSum || 0);
         return {
             count: count,
             depthMin: minOf(a.depthMin, b.depthMin),
             depthMax: maxOf(a.depthMax, b.depthMax),
             depthSum: a.depthSum + b.depthSum,
             depthAvg: count ? (a.depthSum + b.depthSum) / count : null,
+            coverCount: coverCount,
+            coverMin: minOf(a.coverMin, b.coverMin),
+            coverMax: maxOf(a.coverMax, b.coverMax),
+            coverSum: coverSum,
+            coverAvg: coverCount ? coverSum / coverCount : null,
+            ratioCount: ratioCount,
+            ratioMin: minOf(a.ratioMin, b.ratioMin),
+            ratioMax: maxOf(a.ratioMax, b.ratioMax),
+            ratioSum: ratioSum,
+            ratioAvg: ratioCount ? ratioSum / ratioCount : null,
             remainCount: remainCount,
             remainMin: minOf(a.remainMin, b.remainMin),
             remainMax: maxOf(a.remainMax, b.remainMax),
@@ -432,6 +546,11 @@
             String(label || '') + eunNeun(label) + ' 탄산화깊이 ' + formatRange(summary.depthMin, summary.depthMax, 1),
             word + ' ' + formatFixed(summary.depthAvg, 1)
         ];
+        var ratioText = formatCoverRatioRange(summary);
+        if (ratioText) parts.push('(' + ratioText + ')');
+        if (summary.coverCount) {
+            parts.push('피복두께 ' + formatRangeWithAvg(summary.coverMin, summary.coverMax, summary.coverAvg, 1));
+        }
         if (summary.remainCount) {
             parts.push('잔여피복 ' + formatRangeWithAvg(summary.remainMin, summary.remainMax, summary.remainAvg, 2));
         }
@@ -449,22 +568,69 @@
             + word + ' ' + formatFixed(summary.avg, 2);
     }
 
-    function formatGradeCounts(grades) {
+    /**
+     * 등급별 개수. **0건인 등급도 찍는다** — 보고서에서 "c등급이 0개소"인 것과
+     * "c등급을 아예 안 셌다"는 뜻이 다른데, 빼버리면 구분이 안 된다.
+     * a/b는 강도에만 있는 애매등급이라 값이 있을 때만 끼워 넣는다.
+     */
+    function formatGradeSpotHeadline(label, kindLabel, summary) {
+        if (!summary || (!summary.count && !summary.pending)) return '';
+        var parts = [String(label || '') + eunNeun(label) + ' ' + kindLabel + ' ' + summary.count + '개소'];
+        var range = formatTiltRatioRange(summary);
+        if (range !== '-') parts.push(range);
+        parts.push(formatGradeSpotCounts(summary));
+        return parts.join(' ');
+    }
+
+    var GRADE_ORDER = ['a', 'b', 'a_or_b', 'c', 'd', 'e'];
+
+    function gradeLabelOf(key) {
+        return key === 'a_or_b' ? 'a/b' : key;
+    }
+
+    /**
+     * 등급별 개수. **나온 등급만 적는다** — d·e가 0개소면 자리를 차지할 이유가 없고,
+     * 빼야 실제로 나온 등급이 눈에 들어온다(2026-09-23 사용자 확정).
+     */
+    function formatGradeCounts(grades, unit) {
         grades = grades || {};
-        var order = [
-            { key: 'a', label: 'a' },
-            { key: 'b', label: 'b' },
-            { key: 'a_or_b', label: 'a/b' },
-            { key: 'c', label: 'c' },
-            { key: 'd', label: 'd' },
-            { key: 'e', label: 'e' }
-        ];
+        var suffix = unit || '';
         var parts = [];
-        order.forEach(function (g) {
-            var n = grades[g.key] || 0;
-            if (n) parts.push(g.label + ' ' + n);
+        GRADE_ORDER.forEach(function (key) {
+            var n = grades[key] || 0;
+            if (!n) return;
+            parts.push(gradeLabelOf(key) + ' ' + n + suffix);
         });
         return parts.join(' · ') || '-';
+    }
+
+    /** 기울기·처짐용: "a등급 3개소 · c등급 1개소" — 0개소인 등급은 뺀다 */
+    function formatGradeSpotCounts(summary) {
+        if (!summary) return '-';
+        var grades = summary.grades || {};
+        var parts = [];
+        GRADE_ORDER.forEach(function (k) {
+            var n = grades[k] || 0;
+            if (!n) return;
+            parts.push(gradeLabelOf(k) + '등급 ' + n + '개소');
+        });
+        if (summary.pending) parts.push('미산출 ' + summary.pending + '개소');
+        return parts.join(' · ') || '-';
+    }
+
+    /** "1/210~1/980" — N이 작을수록 나쁜 쪽이라 나쁜 것부터 적는다 */
+    function formatTiltRatioRange(summary) {
+        if (!summary || summary.invMin == null) return '-';
+        if (summary.invMin === summary.invMax) return '1/' + Math.round(summary.invMin);
+        return '1/' + Math.round(summary.invMin) + '~1/' + Math.round(summary.invMax);
+    }
+
+    /** 탄산화깊이가 피복두께의 몇 배인지 — "0.31D~0.45D" */
+    function formatCoverRatioRange(summary) {
+        if (!summary || !summary.ratioCount || summary.ratioMin == null) return '';
+        var lo = Number(summary.ratioMin).toFixed(2);
+        var hi = Number(summary.ratioMax).toFixed(2);
+        return lo === hi ? lo + 'D' : lo + 'D~' + hi + 'D';
     }
 
     function formatCarbCaution(summary) {
@@ -499,6 +665,19 @@
             ? (window.state.buildings.find(function (b) { return b && b.id === buildingId; }) || null)
             : null;
 
+        // 부동침하·부재처짐 구역. 층 코드가 구역에만 있는 경우도 있어 층 목록에 먼저 합친다.
+        var dispGroups = opts.displacementGroups
+            || (typeof window !== 'undefined' && window.state && window.state.ndtDisplacementGroups)
+            || {};
+        Object.keys(dispGroups).forEach(function (key) {
+            if (key.indexOf(prefix) !== 0) return;
+            var code = key.slice(prefix.length);
+            if (code && floorCodes.indexOf(code) < 0) floorCodes.push(code);
+        });
+        var calcGroupDisp = (ndtGrade && typeof ndtGrade.calcGroupDisplacement === 'function')
+            ? ndtGrade.calcGroupDisplacement
+            : function () { return { incomplete: true }; };
+
         var floorRows = [];
         floorCodes.forEach(function (floorCode) {
             var items = (ndtData && ndtData[prefix + floorCode]) || [];
@@ -509,6 +688,9 @@
             var strengthSamples = [];
             var carbSamples = [];
             var fireproofSamples = [];
+            var tilt = emptyGradeSpotSummary();
+            var memberDisp = emptyGradeSpotSummary();
+            var settlement = emptyGradeSpotSummary();
             items.forEach(function (item) {
                 if (!item) return;
                 if (looksLikeStrength(item)) {
@@ -522,18 +704,35 @@
                     var fp = collectFireproofSample(item);
                     if (fp) fireproofSamples.push(fp);
                 }
+                if (looksLikeTilt(item)) addGradeSpot(tilt, item.grade, item.tiltRatio);
+                if (looksLikeMemberDispItem(item)) addGradeSpot(memberDisp, item.grade, item.tiltRatio);
             });
+
+            // 부동침하·부재처짐은 구역(그룹)으로도 잰다. 등급이 저장돼 있지 않아 지금 계산한다.
+            (dispGroups[prefix + floorCode] || []).forEach(function (group) {
+                if (!group) return;
+                var calc = calcGroupDisp(group);
+                var bucket = group.category === '부재변위' ? memberDisp : settlement;
+                if (!calc || calc.incomplete) bucket.pending += 1;
+                else addGradeSpot(bucket, calc.grade, calc.tiltRatio);
+            });
+
             var strength = summarizeStrengthSamples(strengthSamples);
             var carbonation = summarizeCarbSamples(carbSamples);
             var fireproof = summarizeFireproofSamples(fireproofSamples);
-            if (!strength.count && !carbonation.count && !fireproof.count) return;
+            var hasSpot = tilt.count || tilt.pending || memberDisp.count || memberDisp.pending
+                || settlement.count || settlement.pending;
+            if (!strength.count && !carbonation.count && !fireproof.count && !hasSpot) return;
             floorRows.push({
                 floorCode: floorCode,
                 floorLabel: getFloorLabel(floorCode),
                 coarseGroup: getCoarseFloorGroup(floorCode),
                 strength: strength,
                 carbonation: carbonation,
-                fireproof: fireproof
+                fireproof: fireproof,
+                tilt: tilt,
+                memberDisp: memberDisp,
+                settlement: settlement
             });
         });
 
@@ -549,7 +748,10 @@
                     floors: [],
                     strength: emptyStrengthSummary(),
                     carbonation: emptyCarbSummary(),
-                    fireproof: emptyFireproofSummary()
+                    fireproof: emptyFireproofSummary(),
+                    tilt: emptyGradeSpotSummary(),
+                    memberDisp: emptyGradeSpotSummary(),
+                    settlement: emptyGradeSpotSummary()
                 };
             }
             var bucket = groupMap[g.key];
@@ -557,6 +759,9 @@
             bucket.strength = mergeStrengthSummary(bucket.strength, fr.strength);
             bucket.carbonation = mergeCarbSummary(bucket.carbonation, fr.carbonation);
             bucket.fireproof = mergeFireproofSummary(bucket.fireproof, fr.fireproof);
+            bucket.tilt = mergeGradeSpotSummary(bucket.tilt, fr.tilt);
+            bucket.memberDisp = mergeGradeSpotSummary(bucket.memberDisp, fr.memberDisp);
+            bucket.settlement = mergeGradeSpotSummary(bucket.settlement, fr.settlement);
         });
         var groupRows = Object.keys(groupMap).map(function (k) { return groupMap[k]; });
         groupRows.sort(function (a, b) { return a.sort - b.sort; });
@@ -568,12 +773,18 @@
             floors: floorRows.map(function (fr) { return fr.floorLabel; }),
             strength: emptyStrengthSummary(),
             carbonation: emptyCarbSummary(),
-            fireproof: emptyFireproofSummary()
+            fireproof: emptyFireproofSummary(),
+            tilt: emptyGradeSpotSummary(),
+            memberDisp: emptyGradeSpotSummary(),
+            settlement: emptyGradeSpotSummary()
         };
         floorRows.forEach(function (fr) {
             overall.strength = mergeStrengthSummary(overall.strength, fr.strength);
             overall.carbonation = mergeCarbSummary(overall.carbonation, fr.carbonation);
             overall.fireproof = mergeFireproofSummary(overall.fireproof, fr.fireproof);
+            overall.tilt = mergeGradeSpotSummary(overall.tilt, fr.tilt);
+            overall.memberDisp = mergeGradeSpotSummary(overall.memberDisp, fr.memberDisp);
+            overall.settlement = mergeGradeSpotSummary(overall.settlement, fr.settlement);
         });
 
         return {
@@ -604,20 +815,29 @@
             viewChips: !isNdt,
             ndtStrength: isNdt,
             ndtCarb: isNdt,
-            ndtFireproof: isNdt
+            ndtFireproof: isNdt,
+            ndtTilt: isNdt,
+            ndtSettlement: isNdt,
+            ndtMemberDisp: isNdt
         };
+    }
+
+    var NDT_KINDS = ['strength', 'carbonation', 'fireproof', 'tilt', 'memberDisp', 'settlement'];
+
+    /** 미산출(레벨 미입력) 구역만 있는 층도 표에 남긴다 — 빼면 "잰 적 없음"과 구별이 안 된다 */
+    function hasNdtValue(summary) {
+        if (!summary) return false;
+        return !!(summary.count || summary.pending);
     }
 
     /** 비파괴 한 페이지: 층 행 + 전체 행. 층묶음은 안 넣는다 */
     function ndtCombinedRows(payload, kind) {
         payload = payload || {};
-        var field = 'strength';
-        if (kind === 'carbonation') field = 'carbonation';
-        else if (kind === 'fireproof') field = 'fireproof';
+        var field = NDT_KINDS.indexOf(kind) >= 0 ? kind : 'strength';
         var floors = (payload.floorRows || []).filter(function (row) {
-            return row[field] && row[field].count;
+            return hasNdtValue(row[field]);
         });
-        var overall = payload.overall && payload.overall[field] && payload.overall[field].count
+        var overall = payload.overall && hasNdtValue(payload.overall[field])
             ? payload.overall
             : null;
         return { floors: floors, overall: overall };
@@ -639,6 +859,14 @@
         summarizeStrengthSamples: summarizeStrengthSamples,
         summarizeCarbSamples: summarizeCarbSamples,
         summarizeFireproofSamples: summarizeFireproofSamples,
+        emptyGradeSpotSummary: emptyGradeSpotSummary,
+        addGradeSpot: addGradeSpot,
+        mergeGradeSpotSummary: mergeGradeSpotSummary,
+        parseRatioInv: parseRatioInv,
+        formatGradeSpotCounts: formatGradeSpotCounts,
+        formatGradeSpotHeadline: formatGradeSpotHeadline,
+        formatTiltRatioRange: formatTiltRatioRange,
+        formatCoverRatioRange: formatCoverRatioRange,
         mergeStrengthSummary: mergeStrengthSummary,
         mergeCarbSummary: mergeCarbSummary,
         mergeFireproofSummary: mergeFireproofSummary,
@@ -1171,7 +1399,29 @@
             fireproof.className = 'stats-panel stats-ndt-panel';
             page.appendChild(fireproof);
         }
-        return { strength: strength, carb: carb, fireproof: fireproof };
+        var spots = {};
+        [
+            { key: 'tilt', id: 'statsNdtTiltSection' },
+            { key: 'settlement', id: 'statsNdtSettlementSection' },
+            { key: 'memberDisp', id: 'statsNdtMemberDispSection' }
+        ].forEach(function (s) {
+            var el = document.getElementById(s.id);
+            if (!el) {
+                el = document.createElement('div');
+                el.id = s.id;
+                el.className = 'stats-panel stats-ndt-panel';
+                page.appendChild(el);
+            }
+            spots[s.key] = el;
+        });
+        return {
+            strength: strength,
+            carb: carb,
+            fireproof: fireproof,
+            tilt: spots.tilt,
+            settlement: spots.settlement,
+            memberDisp: spots.memberDisp
+        };
     }
 
     function listNdtFloorCodes(bldg) {
@@ -1267,24 +1517,27 @@
         var formatRange = ndtStats.formatRange;
         var formatFixed = ndtStats.formatFixed;
         var formatRangeWithAvg = ndtStats.formatRangeWithAvg;
-        var formatCaution = ndtStats.formatCarbCaution;
         var rowHtml = function (label, c, trCls) {
-            var caution = formatCaution(c);
-            var cautionCls = (c.depleted || c.lifeOver) ? 'stats-ndt-warn' : ((c.remainLow || c.lifeShort) ? 'stats-ndt-caution' : '');
             var remainCell = c.remainCount
                 ? formatRangeWithAvg(c.remainMin, c.remainMax, c.remainAvg, 2)
                 : '-';
             var lifeCell = c.lifeCount
                 ? formatRangeWithAvg(c.lifeMin, c.lifeMax, c.lifeAvg, 0, '년')
                 : '-';
+            var coverCell = c.coverCount
+                ? formatRangeWithAvg(c.coverMin, c.coverMax, c.coverAvg, 1)
+                : '-';
+            // 깊이가 피복의 몇 배인지 — 세부지침 등급표가 0.5D·0.75D·0.9D·1.0D로 나뉜다
+            var ratioCell = ndtStats.formatCoverRatioRange(c) || '-';
             return '<tr' + (trCls ? ' class="' + trCls + '"' : '') + '>'
                 + '<th scope="row">' + esc(label) + '</th>'
                 + '<td>' + esc(c.count) + '</td>'
                 + '<td class="stats-cell-hit">' + esc(formatRange(c.depthMin, c.depthMax, 1)) + '</td>'
                 + '<td class="stats-cell-sum">' + esc(formatFixed(c.depthAvg, 1)) + '</td>'
+                + '<td>' + esc(coverCell) + '</td>'
+                + '<td class="stats-cell-hit">' + esc(ratioCell) + '</td>'
                 + '<td>' + esc(remainCell) + '</td>'
                 + '<td>' + esc(lifeCell) + '</td>'
-                + '<td class="' + cautionCls + '">' + esc(caution) + '</td>'
                 + '</tr>';
         };
         var body = floors.map(function (row) {
@@ -1296,7 +1549,7 @@
             + (lead ? '<p class="stats-ndt-lead">' + esc(lead) + '</p>' : '')
             + '</div>'
             + '<div class="table-responsive stats-table-wrap"><table class="data-table stats-matrix-table stats-ndt-table">'
-            + '<thead><tr><th>층</th><th>건수</th><th>깊이(mm)</th><th>평균</th><th>잔여피복(mm)</th><th>잔존수명</th><th>주의</th></tr></thead>'
+            + '<thead><tr><th>층</th><th>건수</th><th>깊이(mm)</th><th>평균</th><th>피복두께(mm)</th><th>깊이/피복</th><th>잔여피복(mm)</th><th>잔존수명</th></tr></thead>'
             + '<tbody>' + body + '</tbody></table></div>';
     }
 
@@ -1339,6 +1592,48 @@
             + '<tbody>' + body + '</tbody></table></div>';
     }
 
+    /**
+     * 기울기·부동침하·부재처짐 공통 표.
+     * 이 셋은 값의 범위보다 **등급이 몇 개소냐**가 보고서에 들어가므로 등급 칸을 크게 잡는다.
+     */
+    function renderNdtGradeSpotSection(root, payload, kind, opts) {
+        if (!root) return;
+        opts = opts || {};
+        var title = opts.title || '';
+        var ratioHead = opts.ratioHead || '기울기(1/L)';
+        var combined = (ndtStats.ndtCombinedRows || function () { return { floors: [], overall: null }; })(payload, kind);
+        var floors = combined.floors || [];
+        var overall = combined.overall;
+        if (!floors.length && !overall) {
+            root.innerHTML = '<div class="stats-panel-head"><h3 class="stats-panel-title">' + esc(title) + '</h3></div>'
+                + '<p class="stats-empty">' + esc(opts.emptyText || ('표시할 ' + title + ' 측정값이 없습니다.')) + '</p>';
+            return;
+        }
+        var lead = overall && ndtStats.formatGradeSpotHeadline
+            ? ndtStats.formatGradeSpotHeadline('전체', opts.kindLabel || title, overall[kind])
+            : '';
+        var rowHtml = function (label, s, trCls) {
+            var countLabel = s.count + (s.pending ? ' <span class="stats-ndt-sub">(미산출 ' + s.pending + ')</span>' : '');
+            return '<tr' + (trCls ? ' class="' + trCls + '"' : '') + '>'
+                + '<th scope="row">' + esc(label) + '</th>'
+                + '<td>' + countLabel + '</td>'
+                + '<td class="stats-cell-hit">' + esc(ndtStats.formatTiltRatioRange(s)) + '</td>'
+                + '<td class="stats-cell-sum stats-ndt-grades">' + esc(ndtStats.formatGradeSpotCounts(s)) + '</td>'
+                + '</tr>';
+        };
+        var body = floors.map(function (row) {
+            var isCurrent = row.floorCode === payload.currentFloor;
+            return rowHtml(row.floorLabel || row.label, row[kind], isCurrent ? 'stats-row-current' : '');
+        }).join('');
+        if (overall) body += rowHtml('전체', overall[kind], 'stats-ndt-total');
+        root.innerHTML = '<div class="stats-panel-head"><h3 class="stats-panel-title">' + esc(title) + '</h3>'
+            + (lead ? '<p class="stats-ndt-lead">' + esc(lead) + '</p>' : '')
+            + '</div>'
+            + '<div class="table-responsive stats-table-wrap"><table class="data-table stats-matrix-table stats-ndt-table">'
+            + '<thead><tr><th>층</th><th>개소</th><th>' + esc(ratioHead) + '</th><th>등급별 개소</th></tr></thead>'
+            + '<tbody>' + body + '</tbody></table></div>';
+    }
+
     function renderNdtStatsPanels(bldg) {
         var mount = ensureNdtStatsMount();
         if (!mount) return;
@@ -1362,6 +1657,15 @@
         renderNdtStrengthSection(mount.strength, payload);
         renderNdtCarbSection(mount.carb, payload);
         renderNdtFireproofSection(mount.fireproof, payload);
+        renderNdtGradeSpotSection(mount.tilt, payload, 'tilt', {
+            title: '외벽 기울기', kindLabel: '기울기', ratioHead: '기울기(1/L)'
+        });
+        renderNdtGradeSpotSection(mount.settlement, payload, 'settlement', {
+            title: '부동침하 기울기', kindLabel: '부동침하', ratioHead: '기울기(1/L)'
+        });
+        renderNdtGradeSpotSection(mount.memberDisp, payload, 'memberDisp', {
+            title: '부재처짐', kindLabel: '부재처짐', ratioHead: '처짐비(1/L)'
+        });
     }
 
     window.renderDefectStatsTab = function () {
