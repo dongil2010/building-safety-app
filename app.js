@@ -44884,6 +44884,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const companyPhotos = getCompanyPhotosCollection();
         if (!companyPhotos) return false;
         if (isPhotoMarkedOnStorage(photoId)) return true;
+        if (await isCloudPhotoWriteBlocked()) return false;
         if (_photoPersistInflight[photoId]) return _photoPersistInflight[photoId];
         const job = (async () => {
             if (isPhotoMarkedOnStorage(photoId)) return true;
@@ -44966,6 +44967,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
     async function deleteCloudPhoto(photoId) {
         if (!photoId) return;
+        // 막힌 옛 코드는 클라우드 사진을 그대로 둔다(표시도 안 바꾼다) — 새 방식에서 아직 쓰는 사진일 수 있다
+        if (await isCloudPhotoWriteBlocked()) return;
         unmarkPhotoOnStorage(photoId);
         const companyPhotos = getCompanyPhotosCollection();
         if (!companyPhotos) return;
@@ -49024,6 +49027,16 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     const APP_VERSION_GATE_TTL_MS = 60 * 1000;
     let _appOutdatedForSync = false;
     let _appVersionGateCheckedAt = 0;
+    let _appVersionGateInflight = null;
+
+    // 사진 ID 방식 번호 (사진 고유 ID 전환 2단계, 2026-09-23). 3단계(고유 ID)에서 2로 올린다.
+    // 배포할 때 scripts/prepare-pages.py가 이 값을 web-version.json의 photoIdScheme에 적는다.
+    // 배포본 번호가 이 코드보다 크면 이 코드는 옛 방식(자리 번호)이라 클라우드 사진을 쓰거나
+    // 지우면 안 된다 — 새 방식에서 계속 쓰이는 사진을 자리 번호 이사로 덮어쓰거나 지운다.
+    // 3단계 전(둘 다 1)에는 아무것도 막지 않는다. 지금 막으면 옛 앱이 기기 안에서만 이사하고
+    // 클라우드는 이사 전으로 남아 오히려 지운 사진이 되살아난다.
+    const PHOTO_ID_SCHEME = 1;
+    let _deployedPhotoIdScheme = PHOTO_ID_SCHEME;
 
     function renderOutdatedAppBanner(show) {
         let bar = document.getElementById('bsaOutdatedBanner');
@@ -49052,9 +49065,21 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
     /** 배포된 버전과 지금 코드를 비교해 차단 여부를 갱신한다. 모르면 이전 판단을 유지한다. */
     async function refreshAppVersionGate(force) {
+        // 동시에 여러 곳이 물으면 한 번만 받아서 다 같이 기다린다. 안 그러면 첫 확인이 끝나기 전에
+        // 들어온 호출(사진 여러 장 동시 업로드 등)이 "막지 않음"이라는 옛 판단을 받아 그대로 써 버린다.
+        if (_appVersionGateInflight) return _appVersionGateInflight;
         if (!force && (Date.now() - _appVersionGateCheckedAt) < APP_VERSION_GATE_TTL_MS) {
             return _appOutdatedForSync;
         }
+        _appVersionGateInflight = checkAppVersionGateNow();
+        try {
+            return await _appVersionGateInflight;
+        } finally {
+            _appVersionGateInflight = null;
+        }
+    }
+
+    async function checkAppVersionGateNow() {
         _appVersionGateCheckedAt = Date.now();
         const api = window.BSA && window.BSA.syncMerge;
         if (!api || typeof api.isOutdatedBuild !== 'function') return _appOutdatedForSync;
@@ -49069,6 +49094,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             if (!r.ok) return _appOutdatedForSync;
             const text = (await r.text()).replace(/^﻿/, '').trim();
             const meta = text ? JSON.parse(text) : null;
+            // 적혀 있지 않으면(2단계 전 배포본) 1 — 옛 방식
+            _deployedPhotoIdScheme = Number(meta && meta.photoIdScheme) || 1;
             const outdated = !!api.isOutdatedBuild(window.BSA_APP_VERSION, meta, window.location.hostname);
             if (outdated !== _appOutdatedForSync) {
                 _appOutdatedForSync = outdated;
@@ -49082,6 +49109,15 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         return _appOutdatedForSync;
     }
     window.refreshAppVersionGate = refreshAppVersionGate;
+
+    /**
+     * 배포본이 더 새로운 사진 ID 방식이면, 이 코드로는 클라우드 사진을 올리거나 지우지 않는다.
+     * 사진은 이 기기에 그대로 남고, 새로고침해서 새 코드가 되면 그때 올라간다.
+     */
+    async function isCloudPhotoWriteBlocked() {
+        await refreshAppVersionGate(false);
+        return _deployedPhotoIdScheme > PHOTO_ID_SCHEME;
+    }
 
     async function syncStateToFirebase() {
         if (!db || !window.state.companyId || !navigator.onLine) return;

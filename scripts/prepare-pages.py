@@ -100,10 +100,24 @@ def main() -> None:
                        f"const CACHE_NAME = 'building-safety-v{SHORT}'", "SW 캐시 이름")
         sw.write_text(text, encoding="utf-8")
 
+    # 2026-09-23 사진 고유 ID 전환 2단계: 배포본의 사진 ID 방식 번호를 적는다. 태블릿의 앱 코드가
+    # 이보다 옛 방식이면 클라우드 사진을 쓰지도 지우지도 않는다(app.js isCloudPhotoWriteBlocked).
+    # 못 찾으면 빌드를 세운다 — 조용히 빠지면 3단계 때 옛 앱을 못 막는데 아무도 모른다.
+    app_text = (ROOT / "app.js").read_text(encoding="utf-8")
+    scheme = re.search(r"const PHOTO_ID_SCHEME = (\d+);", app_text)
+    if not scheme:
+        raise SystemExit(
+            "[prepare-pages] app.js에서 PHOTO_ID_SCHEME을 못 찾았다 — "
+            "옛 사진 방식 앱을 막는 안전장치가 빠진다. 선언 모양이 바뀌었는지 확인할 것."
+        )
+    photo_id_scheme = int(scheme.group(1))
+    print(f"[prepare-pages] photoIdScheme: {photo_id_scheme}")
+
     version = {
         "sha": SHA,
         "short": SHORT,
         "builtAt": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "photoIdScheme": photo_id_scheme,
     }
     (OUT / "web-version.json").write_text(
         json.dumps(version, ensure_ascii=False, indent=2) + "\n",
