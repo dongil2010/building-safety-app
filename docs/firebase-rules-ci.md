@@ -12,19 +12,60 @@ CI는 초록불이라 원인을 찾는 데 한참 걸렸다.
 
 ---
 
-## 1. 서비스 계정 키 만들기
+## 서비스 계정이란 / 어디에 있나
+
+사람 계정이 아니라 **프로그램이 쓰는 계정**이다. GitHub Actions에는 사람이 로그인할 수
+없으니, "규칙을 게시할 수 있는 권한만 가진 가짜 사용자"를 하나 만들어 그 열쇠(JSON 파일)를
+GitHub에 맡겨 두는 것이다.
+
+사는 곳은 **Google Cloud 콘솔**이다(Firebase 콘솔이 아니다). Firebase 프로젝트는 실제로는
+같은 이름의 Google Cloud 프로젝트라서, 두 콘솔이 같은 프로젝트를 다른 화면으로 보여 준다.
+
+다만 Firebase 콘솔에 **이미 만들어져 있는 서비스 계정의 키를 바로 받는 지름길**이 있다.
+아래 1-A가 그 길이고, 안 되면 1-B로 직접 만든다.
+
+---
+
+## 1-A. 지름길 — Firebase 콘솔에서 키 받기 (먼저 이것부터)
+
+1. https://console.firebase.google.com/project/building-safety-app-46821/settings/serviceaccounts/adminsdk 접속
+   (또는 Firebase 콘솔 → 왼쪽 위 **톱니바퀴 ⚙️** → **프로젝트 설정** → 위쪽 **서비스 계정** 탭)
+2. 화면 아래 **`새 비공개 키 생성`** 버튼 클릭 → 경고창에서 **`키 생성`**
+3. JSON 파일이 다운로드된다. 끝.
+
+여기서 받는 키는 `firebase-adminsdk-…@building-safety-app-46821.iam.gserviceaccount.com`
+계정의 것이다. 이 계정은 보통 규칙 게시 권한을 이미 갖고 있다.
+
+> 나중에 Actions에서 `PERMISSION_DENIED` 나 `Missing required permission` 이 보이면
+> 권한이 모자란 것이다. 그때 아래 **1-C**로 역할만 추가하면 된다. 키를 다시 만들 필요는 없다.
+
+## 1-B. 직접 만들기 (1-A가 막혔을 때만)
 
 1. https://console.cloud.google.com/iam-admin/serviceaccounts?project=building-safety-app-46821 접속
-2. **서비스 계정 만들기**
-   - 이름: `github-rules-deploy` (아무거나 상관없음)
-   - 만들고 나면 이메일이 생긴다: `github-rules-deploy@building-safety-app-46821.iam.gserviceaccount.com`
-3. **역할(권한) 부여** — 다음 두 가지만 준다. 그 이상은 주지 않는다.
-   - `Firebase Rules 관리자` (Firebase Rules Admin)
-   - `Firebase 규칙 시스템` 이 안 보이면 `Firebase 관리자` 대신 **`Firebase Develop 관리자`**
-     (roles/firebase.developAdmin) 하나로도 된다
-4. 만든 서비스 계정 클릭 → **키** 탭 → **키 추가 → 새 키 만들기 → JSON** → 파일이 내려받아진다
+2. 위쪽 **`+ 서비스 계정 만들기`** 클릭
+3. **1단계 서비스 계정 세부정보** — 이름에 `github-rules-deploy` 입력 (ID는 자동으로 채워진다)
+   → **`만들고 계속하기`**
+4. **2단계 액세스 권한 부여** — `역할 선택` 드롭다운에서 아래 둘을 **각각 `+ 다른 역할 추가`로** 넣는다
+   - `Firebase Rules 관리자` (검색창에 **rules** 입력하면 나온다)
+   - `Service Usage 소비자` (검색창에 **service usage** 입력)
+   → **`계속`** → 3단계는 비워 두고 **`완료`**
+5. 목록에서 방금 만든 계정의 **이메일을 클릭** → 위쪽 **`키`** 탭
+6. **`키 추가`** → **`새 키 만들기`** → 형식 **JSON** 선택 → **`만들기`** → 파일이 다운로드된다
 
-> 이 JSON 파일은 비밀번호와 같다. 채팅·메일·깃에 올리지 말 것. 아래 3번까지 끝내면 지운다.
+## 1-C. 권한이 모자랄 때만 — 역할 추가
+
+https://console.cloud.google.com/iam-admin/iam?project=building-safety-app-46821 접속 →
+해당 서비스 계정 줄의 **연필(수정)** 아이콘 → **`+ 다른 역할 추가`** 로 아래를 넣고 저장:
+
+| 역할 | 왜 필요한가 |
+|------|-------------|
+| `Firebase Rules 관리자` | 규칙을 올리고 게시 |
+| `Service Usage 소비자` | firebase CLI가 게시 전에 API 활성 상태를 확인함 |
+| `Firebase Develop 관리자` | 위 둘로도 안 되면 이것 하나로 대체 (더 넓은 권한) |
+
+> **이 JSON 파일은 비밀번호와 같다.** 채팅·메일·깃에 올리지 말 것. 아래 3번까지 끝내면 지운다.
+> (회사 정책으로 키 생성이 막혀 있으면 `서비스 계정 키 생성이 사용 중지됨` 같은 메시지가
+> 뜬다. 그때는 조직 관리자에게 문의하거나, 지금처럼 콘솔 수동 게시를 계속 쓰면 된다.)
 
 ## 2. GitHub Secret에 넣기
 
@@ -43,10 +84,22 @@ CI는 초록불이라 원인을 찾는 데 한참 걸렸다.
 ## 4. 확인
 
 규칙 파일을 건드린 커밋을 push하면 Actions에 **rules** 작업이 뜬다.
+https://github.com/dongil2010/building-safety-app/actions
 
 - 초록 → 콘솔에 자동 게시됨. Firebase 콘솔 규칙 탭에서 최신인지 한 번만 눈으로 확인.
 - 빨강 → 로그를 보고 고칠 때까지 **사이트 배포도 안 나간다**(의도한 동작이다).
   급하면 Firebase 콘솔에 손으로 붙여넣어 게시하면 현장은 즉시 복구된다.
+  고친 뒤에는 실패한 작업 화면의 **`Re-run jobs`** 로 다시 돌리면 된다(다시 push 안 해도 된다).
+
+### 자주 나오는 실패
+
+| 로그에 보이는 말 | 뜻 / 할 일 |
+|---|---|
+| `FIREBASE_SERVICE_ACCOUNT 시크릿이 없다` | 2번을 안 했거나 이름 오타. 이름은 정확히 `FIREBASE_SERVICE_ACCOUNT` |
+| `PERMISSION_DENIED`, `Missing required permission` | 역할 부족 → 위 **1-C** |
+| `Failed to get Firebase project` | 키가 다른 프로젝트 것이거나 JSON을 일부만 붙여넣음. `{`~`}` 전체인지 확인 |
+| `Unexpected token … in JSON` | 붙여넣을 때 앞뒤 따옴표를 넣었거나 줄이 잘림. 파일 내용 그대로여야 한다 |
+| 규칙 문법 오류 | 줄 번호가 찍힌다. `firestore.rules` 고쳐서 다시 push |
 
 ---
 
