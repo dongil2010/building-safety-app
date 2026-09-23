@@ -37010,6 +37010,23 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     // "N) 층명" 블록(상태조사표+사진첩+위치도)을 표 ID 하드코딩 대신 문단 구조로 자동 탐지해
     // 건물에 등록된 층 수만큼 채우고, 남는 표본 블록은 뒤에서 지운다.
     // 슬롯 정리/정밀·정기 판별은 js/shared/hwpx-survey-slots.js (PWA에서 스크립트 누락 대비 폴백).
+    // 방금 만든 한글 파일의 표 구조를 검사해서 문제가 있으면 현장 오류 기록에 남긴다.
+    // 2026-09-22 501~503 칸 순서처럼 "한글은 열리는데 구조가 틀린" 문제를 몇 주 몰랐다.
+    // 읽기만 한다 — 검사가 실패하든 문제가 나오든 출력은 그대로 나간다.
+    async function reportHwpxStructure(zip, sectionPath, sectionXml, bldg) {
+        const api = window.BSA && window.BSA.hwpxValidate;
+        if (!api) return;
+        try {
+            const hpf = zip.file('Contents/content.hpf');
+            api.reportGeneratedHwpx({
+                sectionXml,
+                hpfText: hpf ? await hpf.async('string') : null,
+                fileNames: Object.keys(zip.files),
+                label: `한글 출력(${isGrade3Building(bldg) ? '3종' : '1·2종'}) ${sectionPath}`
+            });
+        } catch (_e) { /* 검사 실패로 출력을 막지 않는다 */ }
+    }
+
     const _hwpxTemplateBuf = Object.create(null);
     async function loadHwpxZipFromPath(templatePath) {
         if (!_hwpxTemplateBuf[templatePath]) {
@@ -39883,6 +39900,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             // 쓰면 안 되고, 내부 맵(zip.files)에서 그 폴더 키 하나만 직접 지운다.
             Object.keys(zip.files).forEach(name => { if (zip.files[name].dir) delete zip.files[name]; });
 
+            await reportHwpxStructure(zip, sectionPath, newXml, bldg);
+
             if (typeof window.updateLoadingText === 'function') {
                 window.updateLoadingText('한글(hwpx) 파일 압축 중...');
             }
@@ -41986,6 +42005,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             // 맞춘다. zip.remove()는 폴더 지정 시 그 안의 파일까지 재귀적으로 지워버리므로 절대
             // 쓰면 안 되고, 내부 맵(zip.files)에서 그 폴더 키 하나만 직접 지운다.
             Object.keys(zip.files).forEach(name => { if (zip.files[name].dir) delete zip.files[name]; });
+
+            await reportHwpxStructure(zip, sectionPath, newXml, bldg);
 
             if (typeof window.updateLoadingText === 'function') {
                 window.updateLoadingText('한글(hwpx) 파일 압축 중...');
