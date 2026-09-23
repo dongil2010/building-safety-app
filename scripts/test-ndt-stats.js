@@ -343,7 +343,8 @@ function testFireproofStatsOnCombinedPage() {
     assert.strictEqual(comb.floors.length, 2);
     assert.strictEqual(comb.overall.fireproof.count, 2);
     const line = api.formatFireproofHeadline('전체', payload.overall.fireproof, '평균');
-    assert.strictEqual(line, '전체는 내화피복두께 23.00~30.00 평균 26.50', line);
+    // 2026-09-23: 단위를 붙인다 — mm인지 cm인지 현장에서 헷갈렸다
+    assert.strictEqual(line, '전체는 내화피복두께 23.00mm~30.00mm 평균 26.50', line);
 }
 
 function testCarbRemainAndLifeShowRangeAndAvg() {

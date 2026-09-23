@@ -134,7 +134,13 @@
             max: null,
             avg: null,
             sum: 0,
-            readingCount: 0
+            readingCount: 0,
+            // Cf(%) = 측정두께 ÷ 설계기준두께 × 100. 설계치를 안 적은 부재는 빠진다.
+            cfCount: 0,
+            cfMin: null,
+            cfMax: null,
+            cfAvg: null,
+            cfSum: 0
         };
     }
 
@@ -148,7 +154,13 @@
             pending: 0, // 레벨 미입력 등으로 등급이 안 나온 구역
             grades: { a: 0, b: 0, a_or_b: 0, c: 0, d: 0, e: 0 },
             invMin: null, // 1/N 의 N — 작을수록 기울기가 크다(나쁘다)
-            invMax: null
+            invMax: null,
+            // 변위량·처짐량. 항목은 mm로, 구역은 cm로 저장돼 있어 **여기서는 mm로 통일**한다.
+            deltaCount: 0,
+            deltaMin: null,
+            deltaMax: null,
+            deltaAvg: null,
+            deltaSum: 0
         };
     }
 
@@ -167,7 +179,7 @@
      * 등급도 비(比)도 없는 항목은 아직 잰 게 아니므로 아예 세지 않는다.
      * 비는 나왔는데 등급을 못 읽으면 "미산출"로 남긴다 — 그건 빠뜨리면 안 되는 측정이다.
      */
-    function addGradeSpot(out, grade, tiltRatio) {
+    function addGradeSpot(out, grade, tiltRatio, deltaMm) {
         var letter = gradeLetterOf(grade);
         if (!letter) {
             if (parseRatioInv(tiltRatio) != null) out.pending += 1;
@@ -180,6 +192,15 @@
             out.invMin = minOf(out.invMin, inv);
             out.invMax = maxOf(out.invMax, inv);
         }
+        var d = toNum(deltaMm);
+        if (d != null) {
+            d = Math.abs(d);
+            out.deltaCount += 1;
+            out.deltaSum += d;
+            out.deltaMin = minOf(out.deltaMin, d);
+            out.deltaMax = maxOf(out.deltaMax, d);
+            out.deltaAvg = out.deltaSum / out.deltaCount;
+        }
         return out;
     }
 
@@ -189,12 +210,19 @@
         var grades = cloneGrades(a.grades);
         var bg = cloneGrades(b.grades);
         Object.keys(grades).forEach(function (k) { grades[k] += bg[k] || 0; });
+        var deltaCount = (a.deltaCount || 0) + (b.deltaCount || 0);
+        var deltaSum = (a.deltaSum || 0) + (b.deltaSum || 0);
         return {
             count: a.count + b.count,
             pending: (a.pending || 0) + (b.pending || 0),
             grades: grades,
             invMin: minOf(a.invMin, b.invMin),
-            invMax: maxOf(a.invMax, b.invMax)
+            invMax: maxOf(a.invMax, b.invMax),
+            deltaCount: deltaCount,
+            deltaMin: minOf(a.deltaMin, b.deltaMin),
+            deltaMax: maxOf(a.deltaMax, b.deltaMax),
+            deltaSum: deltaSum,
+            deltaAvg: deltaCount ? deltaSum / deltaCount : null
         };
     }
 
@@ -297,7 +325,10 @@
         var avg = fireproofMemberAvg(item);
         if (avg == null) return null;
         var readings = collectFireproofReadings(item);
-        return { avg: avg, readingCount: readings.length || 0 };
+        // 설계치는 "THK 25 에스코트 뿜칠"처럼 자유 텍스트라 거기서 두께만 뽑는다
+        var design = ndtGrade ? ndtGrade.parseFireproofDesignThickness(item && item.fireproofDesign) : null;
+        var cf = (ndtGrade && design != null) ? ndtGrade.fireproofCf(avg, design) : null;
+        return { avg: avg, readingCount: readings.length || 0, design: design, cf: cf };
     }
 
     function looksLikeStrength(item) {
@@ -324,6 +355,14 @@
 
     function looksLikeMemberDispItem(item) {
         return !!item && item.category === '부재변위';
+    }
+
+    /** 기울기·부재변위 항목의 실측 변위량(mm). "1.2mm"처럼 단위가 붙어 있을 수 있다. */
+    function parseMeasuredDelta(item) {
+        var raw = item && item.avgValue;
+        if (raw == null || raw === '') return null;
+        var digits = String(raw).replace(/[^0-9.-]/g, '');
+        return toNum(digits);
     }
 
     function looksLikeFireproof(item) {
@@ -409,8 +448,15 @@
             out.min = minOf(out.min, s.avg);
             out.max = maxOf(out.max, s.avg);
             out.readingCount += s.readingCount || 0;
+            if (s.cf != null) {
+                out.cfCount += 1;
+                out.cfSum += s.cf;
+                out.cfMin = minOf(out.cfMin, s.cf);
+                out.cfMax = maxOf(out.cfMax, s.cf);
+            }
         });
         if (out.count) out.avg = out.sum / out.count;
+        if (out.cfCount) out.cfAvg = out.cfSum / out.cfCount;
         return out;
     }
 
@@ -484,13 +530,20 @@
         a = a || emptyFireproofSummary();
         b = b || emptyFireproofSummary();
         var count = a.count + b.count;
+        var cfCount = (a.cfCount || 0) + (b.cfCount || 0);
+        var cfSum = (a.cfSum || 0) + (b.cfSum || 0);
         return {
             count: count,
             min: minOf(a.min, b.min),
             max: maxOf(a.max, b.max),
             sum: a.sum + b.sum,
             avg: count ? (a.sum + b.sum) / count : null,
-            readingCount: (a.readingCount || 0) + (b.readingCount || 0)
+            readingCount: (a.readingCount || 0) + (b.readingCount || 0),
+            cfCount: cfCount,
+            cfMin: minOf(a.cfMin, b.cfMin),
+            cfMax: maxOf(a.cfMax, b.cfMax),
+            cfSum: cfSum,
+            cfAvg: cfCount ? cfSum / cfCount : null
         };
     }
 
@@ -549,7 +602,7 @@
         var ratioText = formatCoverRatioRange(summary);
         if (ratioText) parts.push('(' + ratioText + ')');
         if (summary.coverCount) {
-            parts.push('피복두께 ' + formatRangeWithAvg(summary.coverMin, summary.coverMax, summary.coverAvg, 1));
+            parts.push('피복두께 ' + formatMmRange(summary.coverMin, summary.coverMax, 2));
         }
         if (summary.remainCount) {
             parts.push('잔여피복 ' + formatRangeWithAvg(summary.remainMin, summary.remainMax, summary.remainAvg, 2));
@@ -563,9 +616,11 @@
     function formatFireproofHeadline(label, summary, avgWord) {
         if (!summary || !summary.count) return '';
         var word = avgWord || '층별 평균';
-        return String(label || '') + eunNeun(label) + ' 내화피복두께 '
-            + formatRange(summary.min, summary.max, 2) + ' '
+        var text = String(label || '') + eunNeun(label) + ' 내화피복두께 '
+            + formatMmRange(summary.min, summary.max, 2) + ' '
             + word + ' ' + formatFixed(summary.avg, 2);
+        if (summary.cfCount) text += ' ' + formatCfRange(summary);
+        return text;
     }
 
     /**
@@ -573,9 +628,11 @@
      * "c등급을 아예 안 셌다"는 뜻이 다른데, 빼버리면 구분이 안 된다.
      * a/b는 강도에만 있는 애매등급이라 값이 있을 때만 끼워 넣는다.
      */
-    function formatGradeSpotHeadline(label, kindLabel, summary) {
+    function formatGradeSpotHeadline(label, kindLabel, summary, deltaLabel) {
         if (!summary || (!summary.count && !summary.pending)) return '';
         var parts = [String(label || '') + eunNeun(label) + ' ' + kindLabel + ' ' + summary.count + '개소'];
+        var delta = formatDeltaRange(summary);
+        if (delta !== '-') parts.push((deltaLabel || '변위량') + ' ' + delta);
         var range = formatTiltRatioRange(summary);
         if (range !== '-') parts.push(range);
         parts.push(formatGradeSpotCounts(summary));
@@ -623,6 +680,29 @@
         if (!summary || summary.invMin == null) return '-';
         if (summary.invMin === summary.invMax) return '1/' + Math.round(summary.invMin);
         return '1/' + Math.round(summary.invMin) + '~1/' + Math.round(summary.invMax);
+    }
+
+    /** "15.11mm~34.54mm" — 단위를 붙여야 현장에서 cm과 헷갈리지 않는다 */
+    function formatMmRange(min, max, digits) {
+        if (min == null) return '-';
+        var d = digits == null ? 2 : digits;
+        var lo = Number(min).toFixed(d);
+        var hi = Number(max).toFixed(d);
+        return lo === hi ? lo + 'mm' : lo + 'mm~' + hi + 'mm';
+    }
+
+    /** "Cf=68.5~91.5" */
+    function formatCfRange(summary) {
+        if (!summary || !summary.cfCount || summary.cfMin == null) return '-';
+        var lo = Number(summary.cfMin).toFixed(1);
+        var hi = Number(summary.cfMax).toFixed(1);
+        return 'Cf=' + (lo === hi ? lo : lo + '~' + hi);
+    }
+
+    /** 변위량·처짐량 범위(mm) */
+    function formatDeltaRange(summary) {
+        if (!summary || !summary.deltaCount || summary.deltaMin == null) return '-';
+        return formatMmRange(summary.deltaMin, summary.deltaMax, 2);
     }
 
     /** 탄산화깊이가 피복두께의 몇 배인지 — "0.31D~0.45D" */
@@ -704,8 +784,9 @@
                     var fp = collectFireproofSample(item);
                     if (fp) fireproofSamples.push(fp);
                 }
-                if (looksLikeTilt(item)) addGradeSpot(tilt, item.grade, item.tiltRatio);
-                if (looksLikeMemberDispItem(item)) addGradeSpot(memberDisp, item.grade, item.tiltRatio);
+                // 항목의 avgValue는 "1.2" 같은 문자열이고 단위는 mm다
+                if (looksLikeTilt(item)) addGradeSpot(tilt, item.grade, item.tiltRatio, parseMeasuredDelta(item));
+                if (looksLikeMemberDispItem(item)) addGradeSpot(memberDisp, item.grade, item.tiltRatio, parseMeasuredDelta(item));
             });
 
             // 부동침하·부재처짐은 구역(그룹)으로도 잰다. 등급이 저장돼 있지 않아 지금 계산한다.
@@ -714,7 +795,8 @@
                 var calc = calcGroupDisp(group);
                 var bucket = group.category === '부재변위' ? memberDisp : settlement;
                 if (!calc || calc.incomplete) bucket.pending += 1;
-                else addGradeSpot(bucket, calc.grade, calc.tiltRatio);
+                // 구역의 absDelta는 cm라서 ×10으로 mm에 맞춘다(항목과 단위를 섞으면 안 된다)
+                else addGradeSpot(bucket, calc.grade, calc.tiltRatio, calc.absDelta * 10);
             });
 
             var strength = summarizeStrengthSamples(strengthSamples);
@@ -863,6 +945,10 @@
         addGradeSpot: addGradeSpot,
         mergeGradeSpotSummary: mergeGradeSpotSummary,
         parseRatioInv: parseRatioInv,
+        parseMeasuredDelta: parseMeasuredDelta,
+        formatMmRange: formatMmRange,
+        formatCfRange: formatCfRange,
+        formatDeltaRange: formatDeltaRange,
         formatGradeSpotCounts: formatGradeSpotCounts,
         formatGradeSpotHeadline: formatGradeSpotHeadline,
         formatTiltRatioRange: formatTiltRatioRange,
@@ -1524,9 +1610,7 @@
             var lifeCell = c.lifeCount
                 ? formatRangeWithAvg(c.lifeMin, c.lifeMax, c.lifeAvg, 0, '년')
                 : '-';
-            var coverCell = c.coverCount
-                ? formatRangeWithAvg(c.coverMin, c.coverMax, c.coverAvg, 1)
-                : '-';
+            var coverCell = c.coverCount ? ndtStats.formatMmRange(c.coverMin, c.coverMax, 2) : '-';
             // 깊이가 피복의 몇 배인지 — 세부지침 등급표가 0.5D·0.75D·0.9D·1.0D로 나뉜다
             var ratioCell = ndtStats.formatCoverRatioRange(c) || '-';
             return '<tr' + (trCls ? ' class="' + trCls + '"' : '') + '>'
@@ -1549,7 +1633,7 @@
             + (lead ? '<p class="stats-ndt-lead">' + esc(lead) + '</p>' : '')
             + '</div>'
             + '<div class="table-responsive stats-table-wrap"><table class="data-table stats-matrix-table stats-ndt-table">'
-            + '<thead><tr><th>층</th><th>건수</th><th>깊이(mm)</th><th>평균</th><th>피복두께(mm)</th><th>깊이/피복</th><th>잔여피복(mm)</th><th>잔존수명</th></tr></thead>'
+            + '<thead><tr><th>층</th><th>건수</th><th>깊이(mm)</th><th>평균</th><th>피복두께</th><th>깊이/피복</th><th>잔여피복(mm)</th><th>잔존수명</th></tr></thead>'
             + '<tbody>' + body + '</tbody></table></div>';
     }
 
@@ -1575,8 +1659,9 @@
             return '<tr' + (trCls ? ' class="' + trCls + '"' : '') + '>'
                 + '<th scope="row">' + esc(label) + '</th>'
                 + '<td>' + countLabel + '</td>'
-                + '<td class="stats-cell-hit">' + esc(formatRange(s.min, s.max, 2)) + '</td>'
+                + '<td class="stats-cell-hit">' + esc(ndtStats.formatMmRange(s.min, s.max, 2)) + '</td>'
                 + '<td class="stats-cell-sum">' + esc(formatFixed(s.avg, 2)) + '</td>'
+                + '<td class="stats-cell-hit">' + esc(ndtStats.formatCfRange(s)) + '</td>'
                 + '</tr>';
         };
         var body = floors.map(function (row) {
@@ -1588,7 +1673,7 @@
             + (lead ? '<p class="stats-ndt-lead">' + esc(lead) + '</p>' : '')
             + '</div>'
             + '<div class="table-responsive stats-table-wrap"><table class="data-table stats-matrix-table stats-ndt-table">'
-            + '<thead><tr><th>층</th><th>건수</th><th>두께(mm)</th><th>평균</th></tr></thead>'
+            + '<thead><tr><th>층</th><th>건수</th><th>두께</th><th>평균</th><th>Cf(측정/설계·%)</th></tr></thead>'
             + '<tbody>' + body + '</tbody></table></div>';
     }
 
@@ -1610,13 +1695,14 @@
             return;
         }
         var lead = overall && ndtStats.formatGradeSpotHeadline
-            ? ndtStats.formatGradeSpotHeadline('전체', opts.kindLabel || title, overall[kind])
+            ? ndtStats.formatGradeSpotHeadline('전체', opts.kindLabel || title, overall[kind], opts.deltaHead)
             : '';
         var rowHtml = function (label, s, trCls) {
             var countLabel = s.count + (s.pending ? ' <span class="stats-ndt-sub">(미산출 ' + s.pending + ')</span>' : '');
             return '<tr' + (trCls ? ' class="' + trCls + '"' : '') + '>'
                 + '<th scope="row">' + esc(label) + '</th>'
                 + '<td>' + countLabel + '</td>'
+                + '<td class="stats-cell-hit">' + esc(ndtStats.formatDeltaRange(s)) + '</td>'
                 + '<td class="stats-cell-hit">' + esc(ndtStats.formatTiltRatioRange(s)) + '</td>'
                 + '<td class="stats-cell-sum stats-ndt-grades">' + esc(ndtStats.formatGradeSpotCounts(s)) + '</td>'
                 + '</tr>';
@@ -1630,7 +1716,7 @@
             + (lead ? '<p class="stats-ndt-lead">' + esc(lead) + '</p>' : '')
             + '</div>'
             + '<div class="table-responsive stats-table-wrap"><table class="data-table stats-matrix-table stats-ndt-table">'
-            + '<thead><tr><th>층</th><th>개소</th><th>' + esc(ratioHead) + '</th><th>등급별 개소</th></tr></thead>'
+            + '<thead><tr><th>층</th><th>개소</th><th>' + esc(opts.deltaHead || '변위량') + '</th><th>' + esc(ratioHead) + '</th><th>등급별 개소</th></tr></thead>'
             + '<tbody>' + body + '</tbody></table></div>';
     }
 
@@ -1658,13 +1744,13 @@
         renderNdtCarbSection(mount.carb, payload);
         renderNdtFireproofSection(mount.fireproof, payload);
         renderNdtGradeSpotSection(mount.tilt, payload, 'tilt', {
-            title: '외벽 기울기', kindLabel: '기울기', ratioHead: '기울기(1/L)'
+            title: '외벽 기울기', kindLabel: '기울기', ratioHead: '기울기(1/L)', deltaHead: '변위량'
         });
         renderNdtGradeSpotSection(mount.settlement, payload, 'settlement', {
-            title: '부동침하 기울기', kindLabel: '부동침하', ratioHead: '기울기(1/L)'
+            title: '부동침하 기울기', kindLabel: '부동침하', ratioHead: '기울기(1/L)', deltaHead: '변위량'
         });
         renderNdtGradeSpotSection(mount.memberDisp, payload, 'memberDisp', {
-            title: '부재처짐', kindLabel: '부재처짐', ratioHead: '처짐비(1/L)'
+            title: '부재처짐', kindLabel: '부재처짐', ratioHead: '처짐비(1/L)', deltaHead: '처짐량'
         });
     }
 

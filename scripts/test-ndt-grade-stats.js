@@ -232,6 +232,98 @@ const fk = (code) => BLDG + '_' + code;
     assert.strictEqual(comb.floors[0].settlement.pending, 1);
 })();
 
+// --- 내화피복 설계치는 자유 텍스트다. 거기서 두께만 뽑는다 ---
+(function parseDesignThickness() {
+    const p = grade.parseFireproofDesignThickness;
+    assert.strictEqual(p('THK 25 에스코트 뿜칠'), 25);
+    assert.strictEqual(p('THK25'), 25);
+    assert.strictEqual(p('T=30 뿜칠'), 30);
+    assert.strictEqual(p('25mm 뿜칠'), 25);
+    assert.strictEqual(p('22.5mm'), 22.5);
+    // 제품명에 숫자가 먼저 나와도 THK 뒤 값을 쓴다
+    assert.strictEqual(p('SK-100 THK 25'), 25);
+    assert.strictEqual(p('에스코트 뿜칠'), null, '숫자가 없으면 Cf를 만들 수 없다');
+    assert.strictEqual(p(''), null);
+    assert.strictEqual(p(null), null);
+    assert.strictEqual(p('THK 0'), null, '0으로 나누면 안 된다');
+})();
+
+// --- Cf = 측정두께 ÷ 설계기준두께 × 100 ---
+(function cfFormula() {
+    assert.strictEqual(grade.fireproofCf(25, 25), 100);
+    assert.strictEqual(grade.fireproofCf(20, 25), 80);
+    assert.strictEqual(Number(grade.fireproofCf(17.125, 25).toFixed(1)), 68.5);
+    assert.strictEqual(grade.fireproofCf(20, 0), null);
+    assert.strictEqual(grade.fireproofCf(20, null), null);
+})();
+
+// --- 내화피복 통계에 Cf 범위가 들어간다 ---
+(function fireproofCfSummary() {
+    const s = stats.summarizeFireproofSamples([
+        // 설계 25mm에 평균 17.125mm → Cf 68.5
+        stats.collectFireproofSample({
+            category: '내화피복', fireproofDesign: 'THK 25 에스코트 뿜칠',
+            fpFlange: { readings: [17.125, 17.125, 17.125], unavailable: false },
+            fpWeb: { readings: [17.125, 17.125, 17.125], unavailable: false }
+        }),
+        // 평균 22.875mm → Cf 91.5
+        stats.collectFireproofSample({
+            category: '내화피복', fireproofDesign: 'THK 25 에스코트 뿜칠',
+            fpFlange: { readings: [22.875, 22.875, 22.875], unavailable: false },
+            fpWeb: { readings: [22.875, 22.875, 22.875], unavailable: false }
+        })
+    ]);
+    assert.strictEqual(s.count, 2);
+    assert.strictEqual(s.cfCount, 2, 'Cf가 안 잡혔다');
+    assert.strictEqual(stats.formatCfRange(s), 'Cf=68.5~91.5');
+
+    // 설계치를 안 적은 부재는 두께만 세고 Cf에서는 빠진다
+    const noDesign = stats.summarizeFireproofSamples([
+        stats.collectFireproofSample({
+            category: '내화피복', fireproofDesign: '',
+            fpFlange: { readings: [20, 20, 20], unavailable: false },
+            fpWeb: { readings: [20, 20, 20], unavailable: false }
+        })
+    ]);
+    assert.strictEqual(noDesign.count, 1);
+    assert.strictEqual(noDesign.cfCount, 0);
+    assert.strictEqual(stats.formatCfRange(noDesign), '-');
+})();
+
+// --- 변위량: 항목은 mm, 구역은 cm → mm로 통일해서 섞는다 ---
+(function deltaUnitsUnified() {
+    const ndtData = {};
+    ndtData[fk('1F')] = [
+        // 항목의 avgValue는 mm 문자열
+        { category: '기울기', grade: 'a등급', tiltRatio: '1/800', avgValue: '9.4' }
+    ];
+    const displacementGroups = {};
+    displacementGroups[fk('1F')] = [
+        // 구역 level은 cm — 2cm 차이 = 20mm
+        { category: '변위', measureLength: 10, points: [{ level: 2 }, { level: 0 }] }
+    ];
+    const payload = stats.buildNdtStatsPayload(ndtData, {
+        buildingId: BLDG, floorCodes: ['1F'], displacementGroups: displacementGroups
+    });
+    const row = payload.floorRows[0];
+    assert.strictEqual(row.tilt.deltaMin, 9.4, '항목 변위량은 mm 그대로');
+    assert.strictEqual(row.settlement.deltaMin, 20, '구역 변위량은 cm→mm 환산이어야 한다');
+    assert.strictEqual(stats.formatDeltaRange(row.settlement), '20.00mm');
+    assert.strictEqual(stats.formatDeltaRange(row.tilt), '9.40mm');
+    assert.strictEqual(stats.formatDeltaRange(stats.emptyGradeSpotSummary()), '-');
+})();
+
+// --- 피복두께는 mm 단위로 범위 표기 ---
+(function coverRangeWithUnit() {
+    const summary = stats.summarizeCarbSamples([
+        { depth: 10, cover: 15.11, remainMm: 5.11 },
+        { depth: 12, cover: 34.54, remainMm: 22.54 }
+    ]);
+    assert.strictEqual(stats.formatMmRange(summary.coverMin, summary.coverMax, 2), '15.11mm~34.54mm');
+    // 값이 하나뿐이면 범위로 적지 않는다
+    assert.strictEqual(stats.formatMmRange(20, 20, 2), '20.00mm');
+})();
+
 // --- app.js가 등급식을 따로 갖고 있지 않은지 (두 벌이면 기준이 갈라진다) ---
 (function appDelegatesToModule() {
     const app = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8');

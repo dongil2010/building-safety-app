@@ -120,6 +120,31 @@
         return d / c;
     }
 
+    /**
+     * 내화피복 설계치는 "THK 25 에스코트 뿜칠"처럼 자유 텍스트로 적는다.
+     * 거기서 설계기준 두께(mm)만 뽑는다 — Cf = 측정두께 ÷ 설계기준두께 × 100.
+     *
+     * 제품명에 숫자가 먼저 나오는 경우("SK-100 THK 25")가 있어서 THK/T= 뒤의 숫자를
+     * 먼저 찾고, 없을 때만 첫 숫자를 쓴다.
+     */
+    function parseFireproofDesignThickness(text) {
+        var s = String(text == null ? '' : text);
+        var m = s.match(/(?:THK|TH|T)\s*[=:]?\s*(\d+(?:\.\d+)?)/i);
+        if (!m) m = s.match(/(\d+(?:\.\d+)?)\s*mm/i);
+        if (!m) m = s.match(/(\d+(?:\.\d+)?)/);
+        if (!m) return null;
+        var n = Number(m[1]);
+        return Number.isFinite(n) && n > 0 ? n : null;
+    }
+
+    /** Cf(%) = 측정두께 ÷ 설계기준두께 × 100 */
+    function fireproofCf(measuredMm, designMm) {
+        var m = Number(measuredMm);
+        var d = Number(designMm);
+        if (!Number.isFinite(m) || !Number.isFinite(d) || d <= 0 || m < 0) return null;
+        return (m / d) * 100;
+    }
+
     /** 0.7543 → "0.75D". 범위 표기는 stats 쪽에서 둘을 이어 붙인다. */
     function formatCoverRatio(ratio) {
         if (ratio == null || !Number.isFinite(Number(ratio))) return '';
@@ -133,6 +158,8 @@
         calcMemberDispGrade: calcMemberDispGrade,
         calcGroupDisplacement: calcGroupDisplacement,
         gradeLetter: gradeLetter,
+        parseFireproofDesignThickness: parseFireproofDesignThickness,
+        fireproofCf: fireproofCf,
         carbCoverRatio: carbCoverRatio,
         formatCoverRatio: formatCoverRatio
     };
