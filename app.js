@@ -528,24 +528,17 @@ document.addEventListener('DOMContentLoaded', () => {
         const prev = (Array.isArray(d.prevRoundPhotos) ? d.prevRoundPhotos : []).filter(Boolean);
         const oldCurIdCount = (d.photoIds && d.photoIds.length) || current.length;
         const oldPrevIdCount = (d.prevRoundPhotoIds && d.prevRoundPhotoIds.length) || prev.length;
+        // 목록을 지우기 전에 옛 사진 ID를 받아 둔다
+        const oldCurIds = defectPhotoIdList(d, oldCurIdCount);
+        const oldPrevIds = defectPhotoIdList(d, oldPrevIdCount, 'prev');
 
         d.photos = [];
         delete d.photoIds;
 
-        if (oldPrevIdCount > 0) {
-            for (let i = 0; i < oldPrevIdCount; i++) {
-                const pid = getPhotoDocId(d.id, i, 'prev');
-                _idbPersistedPhotoKeys.delete(pid);
-                idbDelete('photos', pid);
-            }
-        }
-        if (oldCurIdCount > 0) {
-            for (let i = 0; i < oldCurIdCount; i++) {
-                const pid = getPhotoDocId(d.id, i);
-                _idbPersistedPhotoKeys.delete(pid);
-                idbDelete('photos', pid);
-            }
-        }
+        oldPrevIds.concat(oldCurIds).forEach((pid) => {
+            _idbPersistedPhotoKeys.delete(pid);
+            idbDelete('photos', pid);
+        });
 
         if (current.length > 0) {
             d.prevRoundPhotos = current.slice();
@@ -1848,11 +1841,11 @@ document.addEventListener('DOMContentLoaded', () => {
         const jobs = [];
         (Array.isArray(defect.photos) ? defect.photos : []).forEach((url, i) => {
             if (!url) return;
-            jobs.push(persistPhotoUrlToIdb(getPhotoDocId(defect.id, i), url));
+            jobs.push(persistPhotoUrlToIdb(defectPhotoIdAt(defect, i), url));
         });
         (Array.isArray(defect.prevRoundPhotos) ? defect.prevRoundPhotos : []).forEach((url, i) => {
             if (!url) return;
-            jobs.push(persistPhotoUrlToIdb(getPhotoDocId(defect.id, i, 'prev'), url));
+            jobs.push(persistPhotoUrlToIdb(defectPhotoIdAt(defect, i, 'prev'), url));
         });
         if (jobs.length) await Promise.all(jobs);
     }
@@ -2039,7 +2032,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (d.photos && d.photos.length > 0) {
                     d.photos.forEach((url, i) => {
                         if (!url) return;
-                        const key = getPhotoDocId(d.id, i);
+                        const key = defectPhotoIdAt(d, i);
                         if (_idbPersistedPhotoKeys.has(key)) return;
                         persistPhotoUrlToIdb(key, url);
                     });
@@ -2047,7 +2040,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (d.prevRoundPhotos && d.prevRoundPhotos.length > 0) {
                     d.prevRoundPhotos.forEach((url, i) => {
                         if (!url) return;
-                        const key = getPhotoDocId(d.id, i, 'prev');
+                        const key = defectPhotoIdAt(d, i, 'prev');
                         if (_idbPersistedPhotoKeys.has(key)) return;
                         persistPhotoUrlToIdb(key, url);
                     });
@@ -2098,10 +2091,10 @@ document.addEventListener('DOMContentLoaded', () => {
                     const { photos, prevRoundPhotos, photoIds, prevRoundPhotoIds, ...rest } = d;
                     const out = { ...rest };
                     const curIds = (photos && photos.length > 0)
-                        ? photos.map((_, i) => getPhotoDocId(d.id, i))
+                        ? photos.map((_, i) => defectPhotoIdAt(d, i))
                         : (photoIds && photoIds.length ? photoIds.slice() : null);
                     const prevIds = (prevRoundPhotos && prevRoundPhotos.length > 0)
-                        ? prevRoundPhotos.map((_, i) => getPhotoDocId(d.id, i, 'prev'))
+                        ? prevRoundPhotos.map((_, i) => defectPhotoIdAt(d, i, 'prev'))
                         : (prevRoundPhotoIds && prevRoundPhotoIds.length ? prevRoundPhotoIds.slice() : null);
                     if (curIds && curIds.length) out.photoIds = curIds;
                     if (prevIds && prevIds.length) out.prevRoundPhotoIds = prevIds;
@@ -19735,19 +19728,18 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             d.prevRoundPhotos = archived.concat(current);
         }
         const oldPhotoCount = (d.photoIds && d.photoIds.length) || oldCount;
+        // 목록을 지우기 전에 옛 사진 ID를 받아 둔다
+        const oldPhotoIds = defectPhotoIdList(d, oldPhotoCount);
         d.photos = [];
         delete d.photoIds;
         if (typeof invalidatePersistedPhotoCacheForDefect === 'function') {
             invalidatePersistedPhotoCacheForDefect(d.id);
         }
         // 예전 인덱스 키(defectId_0 …)는 현회차와 충돌하므로 IDB에서 제거
-        if (oldPhotoCount > 0) {
-            for (let i = 0; i < oldPhotoCount; i++) {
-                const pid = getPhotoDocId(d.id, i);
-                _idbPersistedPhotoKeys.delete(pid);
-                idbDelete('photos', pid);
-            }
-        }
+        oldPhotoIds.forEach((pid) => {
+            _idbPersistedPhotoKeys.delete(pid);
+            idbDelete('photos', pid);
+        });
         return oldCount;
     }
 
@@ -19792,7 +19784,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 d.isCarriedOver = false;
                 d.surveyRound = toKey;
                 if (d.prevRoundPhotos && d.prevRoundPhotos.length > 0) {
-                    uploadDefectPhotos(d.id, d.prevRoundPhotos, 'prev');
+                    uploadDefectPhotos(d.id, d.prevRoundPhotos, 'prev', d.prevRoundPhotoIds);
                 }
                 changed++;
             }
@@ -20702,17 +20694,17 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const isData = (v) => typeof v === 'string' && v.indexOf('data:') === 0 && v.length > 32;
         const cache = window._photoCache || {};
         const srcs = [];
+        const slotIds = defectPhotoIdList(d, count, kind);
         for (let i = 0; i < count; i++) {
-            const slotId = getPhotoDocId(d.id, i, kind);
-            const cand = [inline[i], ids[i] && cache[ids[i]], cache[slotId]].find(isData);
+            const cand = [inline[i], ids[i] && cache[ids[i]], cache[slotIds[i]]].find(isData);
             srcs.push(cand || null);
         }
         const usable = srcs.filter(Boolean).length;
         if (usable) {
             const pending = (window._defectPhotoDeleteJobs && window._defectPhotoDeleteJobs.get(d.id)) || Promise.resolve();
             Promise.resolve(pending).catch(() => {}).then(async () => {
-                await Promise.all(srcs.map((src, i) => (src ? persistPhotoUrlToIdb(getPhotoDocId(d.id, i, kind), src) : null)));
-                await uploadDefectPhotos(d.id, srcs, kind || undefined);
+                await Promise.all(srcs.map((src, i) => (src ? persistPhotoUrlToIdb(slotIds[i], src) : null)));
+                await uploadDefectPhotos(d.id, srcs, kind || undefined, slotIds);
             }).catch((e) => console.warn('[되돌리기] 사진 다시 저장 실패:', d.id, kind, e));
         }
         return count - usable;
@@ -30339,10 +30331,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             window._defectPhotosDirty = false;
             const defectId = savedDefect.id;
             if (currPhotos.length > 0) {
-                uploadDefectPhotos(defectId, currPhotos).catch((e) => console.warn('사진 업로드 실패:', e));
+                uploadDefectPhotos(defectId, currPhotos, undefined, savedDefect.photoIds).catch((e) => console.warn('사진 업로드 실패:', e));
             }
             if (prevPhotos.length > 0) {
-                uploadDefectPhotos(defectId, prevPhotos, 'prev').catch((e) => console.warn('전차 사진 업로드 실패:', e));
+                uploadDefectPhotos(defectId, prevPhotos, 'prev', savedDefect.prevRoundPhotoIds).catch((e) => console.warn('전차 사진 업로드 실패:', e));
             }
         }
         return savedDefect;
@@ -42416,9 +42408,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     }
                     for (const arr of Object.values(window.state.defects)) {
                         for (const d of (arr || [])) {
-                            if (d.photos && d.photos.length > 0) await uploadDefectPhotos(d.id, d.photos);
+                            if (d.photos && d.photos.length > 0) await uploadDefectPhotos(d.id, d.photos, undefined, d.photoIds);
                             if (d.prevRoundPhotos && d.prevRoundPhotos.length > 0) {
-                                await uploadDefectPhotos(d.id, d.prevRoundPhotos, 'prev');
+                                await uploadDefectPhotos(d.id, d.prevRoundPhotos, 'prev', d.prevRoundPhotoIds);
                             }
                         }
                     }
@@ -44209,9 +44201,30 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     // Firestore 문서 1개 1MB 한도 대응: 도면/사진은 각자 별도 문서에 저장하고,
     // 회사 메타데이터 문서(safety_app/{companyId})에는 참조(ID)만 남긴다.
 
+    // 사진 ID를 **새로 매길 때만** 쓴다. 이미 있는 사진의 ID가 필요하면 defectPhotoIdAt.
     function getPhotoDocId(defectId, index, kind) {
         if (kind === 'prev') return `${defectId}_prev_${index}`;
         return `${defectId}_${index}`;
+    }
+
+    /**
+     * 결함의 i번째 사진 ID — 저장된 목록(photoIds / prevRoundPhotoIds)을 먼저 본다.
+     * 목록에 없으면(옛 데이터) 예전처럼 자리 번호로 만든다.
+     *
+     * 사진 고유 ID 전환 1단계(2026-09-23). 지금은 목록 자체가 자리 번호로 매겨져서 결과가
+     * 똑같다. 3단계에서 새 사진이 고유 ID를 받으면 이 함수를 거치는 곳은 손대지 않아도
+     * 그 ID를 따라간다. 자리 번호가 사진 ID면 가운데 사진을 지울 때 뒤 사진이 ID를 물려받아
+     * 네 저장소(IndexedDB·Firestore·Storage·캐시)가 다 따라 바뀌어야 했다 — 09-21·22 사고.
+     */
+    function defectPhotoIdAt(d, i, kind) {
+        const ids = kind === 'prev' ? (d && d.prevRoundPhotoIds) : (d && d.photoIds);
+        return (Array.isArray(ids) && ids[i]) || getPhotoDocId(d && d.id, i, kind);
+    }
+
+    function defectPhotoIdList(d, count, kind) {
+        const out = [];
+        for (let i = 0; i < count; i++) out.push(defectPhotoIdAt(d, i, kind));
+        return out;
     }
 
     function getOverviewPhotoDocId(buildingId, photoId) {
@@ -48066,11 +48079,12 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         }
     }
 
-    async function uploadDefectPhotos(defectId, photosArray, kind) {
+    // ids: 결함의 사진 ID 목록(photoIds / prevRoundPhotoIds). 없으면 옛 자리 번호로 만든다.
+    async function uploadDefectPhotos(defectId, photosArray, kind, ids) {
         if (!Array.isArray(photosArray) || photosArray.length === 0) return [];
         if (!window._photoCache) window._photoCache = {};
         if (!window._cloudSyncedPhotoIds) window._cloudSyncedPhotoIds = new Set();
-        const photoIds = photosArray.map((_, i) => getPhotoDocId(defectId, i, kind));
+        const photoIds = photosArray.map((_, i) => (Array.isArray(ids) && ids[i]) || getPhotoDocId(defectId, i, kind));
         photosArray.forEach((url, i) => { window._photoCache[photoIds[i]] = url; });
         if (db && window.state.companyId) {
             await Promise.all(photosArray.map((url, i) => {
@@ -48140,7 +48154,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     /** 회사 문서 저장 후 사진·도면 업로드(메타데이터 업로드와 분리) */
 
     // 반환값: 삭제 실패 건수. 실패해도 예외를 던지지 않지만, 호출부에서 사용자에게 알릴 수 있도록 건수를 반환한다.
-    async function deletePhotosForDefect(defectId, count, kind) {
+    // ids: 결함의 사진 ID 목록. 옛 자리 번호 0..count도 같이 지운다 — 목록이 덜 내려온 기기에서도
+    // 남는 사진이 없게.
+    async function deletePhotosForDefect(defectId, count, kind, ids) {
         if (!count) return 0;
         const companyPhotos = (db && window.state.companyId)
             ? db.collection('safety_app').doc(getCompanyDocId()).collection('photos')
@@ -48148,8 +48164,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         let failCount = 0;
         const localJobs = [];
         const cloudIds = [];
-        for (let i = 0; i < count; i++) {
-            const photoDocId = getPhotoDocId(defectId, i, kind);
+        const targets = new Set((Array.isArray(ids) ? ids : []).filter(Boolean));
+        for (let i = 0; i < count; i++) targets.add(getPhotoDocId(defectId, i, kind));
+        for (const photoDocId of targets) {
             _idbPersistedPhotoKeys.delete(photoDocId);
             if (window._cloudSyncedPhotoIds) window._cloudSyncedPhotoIds.delete(photoDocId);
             localJobs.push(idbDelete('photos', photoDocId));
@@ -48191,8 +48208,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         let fail = 0;
         const curCount = (d.photos && d.photos.length) || (d.photoIds && d.photoIds.length) || 0;
         const prevCount = (d.prevRoundPhotos && d.prevRoundPhotos.length) || (d.prevRoundPhotoIds && d.prevRoundPhotoIds.length) || 0;
-        if (curCount > 0) fail += await deletePhotosForDefect(d.id, curCount);
-        if (prevCount > 0) fail += await deletePhotosForDefect(d.id, prevCount, 'prev');
+        if (curCount > 0) fail += await deletePhotosForDefect(d.id, curCount, undefined, d.photoIds);
+        if (prevCount > 0) fail += await deletePhotosForDefect(d.id, prevCount, 'prev', d.prevRoundPhotoIds);
         return fail;
     }
 
@@ -48385,10 +48402,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 const out = { ...rest };
                 // photos가 아직 hydrate 전(빈 배열)이어도 기존 photoIds는 유지 — 다른 기기 사진 참조가 끊기지 않게
                 const curIds = (photos && photos.length > 0)
-                    ? photos.map((_, i) => getPhotoDocId(d.id, i))
+                    ? photos.map((_, i) => defectPhotoIdAt(d, i))
                     : (photoIds && photoIds.length ? photoIds.slice() : null);
                 const prevIds = (prevRoundPhotos && prevRoundPhotos.length > 0)
-                    ? prevRoundPhotos.map((_, i) => getPhotoDocId(d.id, i, 'prev'))
+                    ? prevRoundPhotos.map((_, i) => defectPhotoIdAt(d, i, 'prev'))
                     : (prevRoundPhotoIds && prevRoundPhotoIds.length ? prevRoundPhotoIds.slice() : null);
                 if (curIds && curIds.length) out.photoIds = curIds;
                 if (prevIds && prevIds.length) out.prevRoundPhotoIds = prevIds;

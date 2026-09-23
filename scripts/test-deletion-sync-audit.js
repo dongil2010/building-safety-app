@@ -110,7 +110,9 @@ function testFloorDeleteTombstonesDispGroups() {
 }
 
 async function testUndoRedoReconcile() {
-    const src = extractFunction('function restoreDefectPhotosAfterUndo(') + '\n' + extractFunction('function reconcileDefectHistoryJump(');
+    const src = extractFunction('function restoreDefectPhotosAfterUndo(') + '\n' + extractFunction('function reconcileDefectHistoryJump(')
+        // 사진 ID는 결함 목록에서 읽는다(사진 고유 ID 전환 1단계) — app.js의 진짜 함수를 같이 싣는다
+        + '\n' + extractFunction('function defectPhotoIdAt(') + '\n' + extractFunction('function defectPhotoIdList(');
     const log = [];
     const dataOf = (ch) => 'data:image/jpeg;base64,' + ch.repeat(40);
     let releaseDelete;
