@@ -50,6 +50,12 @@ Actions 배포 시점에만 주입, [cloudflare-worker/README.md](cloudflare-wor
 
 - **상시 동기화**: 의미 있는 코드 변경을 마치면 별도 지시 없이도 표준 루틴(커밋 확인 → pull → commit → push 전 pull → push)을 수행
 - push 전에 **커밋 요약 + 커밋 메시지**를 짧게 알리고, **항상 pull로 원격 확인 후** `git push origin main` (사용자가 "푸시 하지 마" / `-NoPush` 한 경우만 생략)
+- ⚠️ **보안 규칙 파일은 자동 push 대상이 아니다.** `firestore.rules` / `storage.rules` / `firebase.json`이
+  바뀐 변경은 **커밋까지만 하고 멈춰서 사람에게 확인받는다.** 무엇이 어떻게 바뀌는지(누가 무엇을
+  읽고 쓸 수 있게 되는지) 먼저 설명하고, 사람이 "올려"라고 해야 push한다.
+  이유: 2026-09-23부터 `main`에 push하면 `.github/workflows/deploy-web.yml`이 규칙을 **운영에 자동
+  게시**한다. 규칙은 회사 데이터 전체를 지키는 문지기인데, 느슨해져도 앱은 멀쩡히 돌아가서 티가
+  안 난다 — 다른 버그와 달리 조용히 나간다. 설정 절차는 [docs/firebase-rules-ci.md](docs/firebase-rules-ci.md).
 - 사용자가 **깃 커밋/푸시**라고 하면 작업 브랜치만이 아니라 **`main`에 합쳐 GitHub Pages 배포까지** 한다
 - `git status`만 단독 요청이면 순수 상태 조회만 (동기화 절차 실행 안 함)
 - 임시 폴더(`_tmp_*`, `experiments/` 등)는 커밋하지 않음
