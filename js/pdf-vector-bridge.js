@@ -10,7 +10,7 @@
 
   window.BSA_PDF_VECTOR = {
     enabled: true,
-    version: 'main-9',
+    version: 'main-10',
     /** PDF 도면: 전체 페이지 티어 교체 대신 뷰포트 고해상도 패치 (벡터 PDF 출력은 별도) */
     useViewportTiles: true
   };
@@ -754,6 +754,64 @@
     setTimeout(() => URL.revokeObjectURL(url), 2000);
   };
 
+  /** 한 층 결함위치도 벡터 PDF Blob 생성 (다운로드는 호출측) */
+  window.buildFloorDefectVectorPdfBlob = async function (bldg, floorCode, buildingId) {
+    if (!bldg || !floorCode) throw new Error('층 정보가 없습니다.');
+    const pdfDataUrl = await window.resolveFloorPdfDataUrlAsync(bldg, floorCode);
+    if (!pdfDataUrl) {
+      const err = new Error('NO_PDF');
+      err.code = 'NO_PDF';
+      throw err;
+    }
+    const id = buildingId || bldg.id || (window.state && window.state.currentBuildingId) || '';
+    const key = `${id}_${floorCode}`;
+    const defects = (window.state && window.state.defects && window.state.defects[key]) || [];
+    let imgW;
+    let imgH;
+    const stRef = window.state && window.state.floorPlanRef;
+    if (stRef && bldg && stRef.bldgId === bldg.id && stRef.floorCode === floorCode && stRef.w > 0 && stRef.h > 0) {
+      imgW = stRef.w;
+      imgH = stRef.h;
+    } else if (typeof window.getPdfRefPixelSize === 'function') {
+      const dim = window.FLOOR_DRAWING_PDF_PREVIEW_DIM || 4000;
+      const size = await window.getPdfRefPixelSize(pdfDataUrl, dim, key);
+      imgW = size.w;
+      imgH = size.h;
+    } else {
+      const dims = window.getFloorPlanRefDimensions(bldg, floorCode);
+      imgW = dims.w;
+      imgH = dims.h;
+    }
+    const measureCanvas = document.createElement('canvas');
+    const measureCtx = measureCanvas.getContext('2d');
+    const legendPlan = (typeof window.buildVectorLegendDrawPlan === 'function')
+      ? window.buildVectorLegendDrawPlan(measureCtx, imgW, imgH)
+      : null;
+    return window.exportFloorPlanVectorPdf(pdfDataUrl, defects, imgW, imgH, { legendPlan });
+  };
+
+  /** 건물 층 코드 목록 (드롭다운과 동일 기준) */
+  window.listFloorsForVectorPdfExport = function (bldg) {
+    if (!bldg) return [];
+    let floors = [];
+    if (typeof window.getBuildingAvailableFloors === 'function') {
+      floors = window.getBuildingAvailableFloors(bldg) || [];
+    } else if (Array.isArray(bldg.floorsList)) {
+      floors = bldg.floorsList.slice();
+    }
+    const codes = [];
+    const seen = new Set();
+    floors.forEach((f) => {
+      const code = f && (f.floorCode || f);
+      if (!code) return;
+      const s = String(code);
+      if (seen.has(s)) return;
+      seen.add(s);
+      codes.push(s);
+    });
+    return codes;
+  };
+
   window.exportCurrentFloorVectorPdf = async function () {
     const state = window.state;
     if (!state || !state.currentBuildingId) {
@@ -763,31 +821,8 @@
     const bldg = state.currentBuilding;
     const floorCode = state.currentFloor;
     if (typeof window.showLoading === 'function') window.showLoading('서버에서 PDF 원본 불러오는 중...');
-    let pdfDataUrl = null;
     try {
-      pdfDataUrl = await window.resolveFloorPdfDataUrlAsync(bldg, floorCode);
-    } finally {
-      if (typeof window.hideLoading === 'function') window.hideLoading();
-    }
-    if (!pdfDataUrl) {
-      if (typeof window.showToast === 'function') {
-        window.showToast('PDF 원본을 서버에서 불러오지 못했습니다. 동기화·로그인 상태를 확인하거나 PC에서 PDF를 다시 등록해 주세요.', 'warning', 6000);
-      }
-      return;
-    }
-
-    const key = `${state.currentBuildingId}_${floorCode}`;
-    const defects = (state.defects && state.defects[key]) || [];
-    const { w: imgW, h: imgH } = window.getFloorPlanRefDimensions(bldg, floorCode);
-
-    if (typeof window.showLoading === 'function') window.showLoading('벡터 PDF 합성 중...');
-    try {
-      const measureCanvas = document.createElement('canvas');
-      const measureCtx = measureCanvas.getContext('2d');
-      const legendPlan = (typeof window.buildVectorLegendDrawPlan === 'function')
-        ? window.buildVectorLegendDrawPlan(measureCtx, imgW, imgH)
-        : null;
-      const blob = await window.exportFloorPlanVectorPdf(pdfDataUrl, defects, imgW, imgH, { legendPlan });
+      const blob = await window.buildFloorDefectVectorPdfBlob(bldg, floorCode, state.currentBuildingId);
       const safeFloor = String(floorCode || 'floor').replace(/[\\/:*?"<>|]/g, '_');
       window.downloadBlobFile(blob, `결함위치도_벡터_${safeFloor}_${Date.now()}.pdf`);
       if (typeof window.showToast === 'function') {
@@ -795,12 +830,108 @@
       }
     } catch (err) {
       console.error(err);
-      if (typeof window.showToast === 'function') {
+      if (err && err.code === 'NO_PDF') {
+        if (typeof window.showToast === 'function') {
+          window.showToast('PDF 원본을 서버에서 불러오지 못했습니다. 동기화·로그인 상태를 확인하거나 PC에서 PDF를 다시 등록해 주세요.', 'warning', 6000);
+        }
+      } else if (typeof window.showToast === 'function') {
         window.showToast(`벡터 PDF 내보내기 실패: ${err.message || err}`, 'error', 6000);
       }
     } finally {
       if (typeof window.hideLoading === 'function') window.hideLoading();
     }
+  };
+
+  /** 각 층 벡터 PDF를 한 파일로 이어 붙임 (층 순서 = 점검층 목록) */
+  window.exportAllFloorsVectorPdf = async function () {
+    const state = window.state;
+    if (!state || !state.currentBuildingId) {
+      if (typeof window.showToast === 'function') window.showToast('건물을 먼저 선택하세요.', 'warning');
+      return;
+    }
+    if (typeof PDFLib === 'undefined') {
+      if (typeof window.showToast === 'function') window.showToast('pdf-lib가 로드되지 않았습니다.', 'error');
+      return;
+    }
+    const bldg = state.currentBuilding;
+    const floorCodes = window.listFloorsForVectorPdfExport(bldg);
+    if (!floorCodes.length) {
+      if (typeof window.showToast === 'function') window.showToast('내보낼 층이 없습니다.', 'warning');
+      return;
+    }
+
+    const { PDFDocument } = PDFLib;
+    const merged = await PDFDocument.create();
+    let ok = 0;
+    const skipped = [];
+
+    if (typeof window.showLoading === 'function') {
+      window.showLoading(`전층 벡터 PDF 준비 중 (0/${floorCodes.length})...`);
+    }
+    try {
+      for (let i = 0; i < floorCodes.length; i++) {
+        const floorCode = floorCodes[i];
+        if (typeof window.showLoading === 'function') {
+          window.showLoading(`전층 벡터 PDF (${i + 1}/${floorCodes.length}) ${floorCode}...`);
+        }
+        try {
+          const blob = await window.buildFloorDefectVectorPdfBlob(bldg, floorCode, state.currentBuildingId);
+          const bytes = new Uint8Array(await blob.arrayBuffer());
+          const src = await PDFDocument.load(bytes);
+          const pages = await merged.copyPages(src, src.getPageIndices());
+          pages.forEach((p) => merged.addPage(p));
+          ok += 1;
+        } catch (e) {
+          console.warn('[exportAllFloorsVectorPdf] skip', floorCode, e);
+          skipped.push(floorCode);
+        }
+      }
+      if (!ok) {
+        if (typeof window.showToast === 'function') {
+          window.showToast('PDF 원본이 있는 층이 없어 전층 벡터 PDF를 만들지 못했습니다.', 'warning', 6000);
+        }
+        return;
+      }
+      const pdfBytes = await merged.save();
+      const outBlob = new Blob([pdfBytes], { type: 'application/pdf' });
+      const bldgName = String((bldg && (bldg.name || bldg.buildingName)) || state.currentBuildingId || 'building')
+        .replace(/[\\/:*?"<>|]/g, '_');
+      window.downloadBlobFile(outBlob, `결함위치도_벡터_전층_${bldgName}_${Date.now()}.pdf`);
+      if (typeof window.showToast === 'function') {
+        const skipMsg = skipped.length ? ` (제외 ${skipped.length}층: PDF 없음 등)` : '';
+        window.showToast(`전층 벡터 PDF 완료 — ${ok}층 묶음${skipMsg}`, 'success', 5000);
+      }
+    } catch (err) {
+      console.error(err);
+      if (typeof window.showToast === 'function') {
+        window.showToast(`전층 벡터 PDF 실패: ${err.message || err}`, 'error', 6000);
+      }
+    } finally {
+      if (typeof window.hideLoading === 'function') window.hideLoading();
+    }
+  };
+
+  /** 벡터 PDF: 현재 층 / 전층 한 PDF 선택 */
+  window.exportVectorPdfWithScopeChoice = async function () {
+    const state = window.state;
+    if (!state || !state.currentBuildingId) {
+      if (typeof window.showToast === 'function') window.showToast('건물을 먼저 선택하세요.', 'warning');
+      return;
+    }
+    const floors = window.listFloorsForVectorPdfExport(state.currentBuilding);
+    if (floors.length <= 1) {
+      return window.exportCurrentFloorVectorPdf();
+    }
+    const choice = window.prompt(
+      '벡터 PDF 범위 선택\n\n1 = 현재 층만 (' + (state.currentFloor || '-') + ')\n2 = 각 층 전부 한 PDF로 (' + floors.length + '층)\n\n숫자 입력 후 확인',
+      '2'
+    );
+    if (choice === null) return;
+    const v = String(choice).trim();
+    if (v === '2' || v === '전층' || v.toLowerCase() === 'all') {
+      return window.exportAllFloorsVectorPdf();
+    }
+    return window.exportCurrentFloorVectorPdf();
   };
 
   /** NDT 마킹을 결함위치도와 동일 핀 스타일로 벡터 PDF 출력 */
