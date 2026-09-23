@@ -39,7 +39,7 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <meta name="apple-mobile-web-app-title" content="스마트 안전점검">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css">
-    <link rel="stylesheet" href="styles.css?v=20260922_175524">
+    <link rel="stylesheet" href="styles.css?v=20260923_112051">
 
     <!-- FontAwesome icons for clean engineering UI -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
@@ -327,7 +327,7 @@
                                     <span id="zoomScaleText" class="zoom-pill-badge">100%</span>
                                     <button id="btnZoomOut" class="zoom-pill-btn" title="축소 (-)"><i class="fa-solid fa-minus"></i></button>
                                     <button id="btnZoomFit" class="zoom-pill-btn text-btn" title="화면에 맞추기"><i class="fa-solid fa-expand"></i> 맞춤</button>
-                                    <button type="button" id="btnExportVectorPdf" class="zoom-pill-btn text-btn" title="원본 PDF 벡터 + 마킹 벡터로 내보내기" style="border-color:#525252;color:#2a2a2a;">
+                                    <button type="button" id="btnExportVectorPdf" class="zoom-pill-btn text-btn" title="원본 PDF 벡터 + 마킹 벡터 · 현재 층 또는 전층을 한 PDF로" style="border-color:#525252;color:#2a2a2a;">
                                         <i class="fa-solid fa-file-pdf"></i> 벡터 PDF
                                     </button>
                                 </div>
@@ -3183,40 +3183,40 @@
 
     <!-- Core → 탭 분류 → 기존 엔진(app.js) -->
     <!-- 오류 기록은 맨 먼저 — 아래 스크립트들이 읽히다 터져도 잡아야 한다 -->
-    <script src="js/core/error-log.js?v=20260922_175524"></script>
-    <script src="js/core/floor-identity.js?v=20260922_175524"></script>
-    <script src="js/core/state.js?v=20260922_175524"></script>
-    <script src="js/core/ndt-grade.js?v=20260922_175524"></script>
-    <script src="js/tabs/registry.js?v=20260922_175524"></script>
-    <script src="js/pdf-vector-bridge.js?v=20260922_175524"></script>
-    <script src="js/pdf-vector-snap.js?v=20260922_175524"></script>
-    <script src="js/core/layout-mode.js?v=20260922_175524"></script>
-    <script src="js/core/performance.js?v=20260922_175524"></script>
-    <script src="js/core/mobile-keyboard.js?v=20260922_175524"></script>
-    <script src="js/tabs/home.js?v=20260922_175524"></script>
-    <script src="js/tabs/map.js?v=20260922_175524"></script>
-    <script src="js/tabs/survey.js?v=20260922_175524"></script>
-    <script src="js/tabs/stats.js?v=20260922_175524"></script>
-    <script src="js/tabs/ndt.js?v=20260922_175524"></script>
-    <script src="js/shared/report.js?v=20260922_175524"></script>
-    <script src="js/shared/hwpx-survey-slots.js?v=20260922_175524"></script>
-    <script src="js/shared/hwpx-ndt-maps.js?v=20260922_175524"></script>
-    <script src="js/shared/cad-unmarked-place.js?v=20260922_175524"></script>
-    <script src="js/shared/arrow-survey-number.js?v=20260922_175524"></script>
-    <script src="js/shared/korean-text-wrap.js?v=20260922_175524"></script>
-    <script src="js/shared/hwpx-import.js?v=20260922_175524"></script>
-    <script src="js/shared/auth.js?v=20260922_175524"></script>
-    <script src="js/core/firebase-storage-assets.js?v=20260922_175524"></script>
-    <script src="js/core/drawing-floor-tombstone.js?v=20260922_175524"></script>
-    <script src="js/core/data-health.js?v=20260922_175524"></script>
-    <script src="js/core/building-meta-merge.js?v=20260922_175524"></script>
-    <script src="js/core/edit-history.js?v=20260922_175524"></script>
-    <script src="js/core/sync-merge.js?v=20260922_175524"></script>
-    <script src="js/core/legend-layout.js?v=20260922_175524"></script>
-    <script src="app.js?v=20260922_175524"></script>
+    <script src="js/core/error-log.js?v=20260923_112051"></script>
+    <script src="js/core/floor-identity.js?v=20260923_112051"></script>
+    <script src="js/core/state.js?v=20260923_112051"></script>
+    <script src="js/core/ndt-grade.js?v=20260923_112051"></script>
+    <script src="js/tabs/registry.js?v=20260923_112051"></script>
+    <script src="js/pdf-vector-bridge.js?v=20260923_112051"></script>
+    <script src="js/pdf-vector-snap.js?v=20260923_112051"></script>
+    <script src="js/core/layout-mode.js?v=20260923_112051"></script>
+    <script src="js/core/performance.js?v=20260923_112051"></script>
+    <script src="js/core/mobile-keyboard.js?v=20260923_112051"></script>
+    <script src="js/tabs/home.js?v=20260923_112051"></script>
+    <script src="js/tabs/map.js?v=20260923_112051"></script>
+    <script src="js/tabs/survey.js?v=20260923_112051"></script>
+    <script src="js/tabs/stats.js?v=20260923_112051"></script>
+    <script src="js/tabs/ndt.js?v=20260923_112051"></script>
+    <script src="js/shared/report.js?v=20260923_112051"></script>
+    <script src="js/shared/hwpx-survey-slots.js?v=20260923_112051"></script>
+    <script src="js/shared/hwpx-ndt-maps.js?v=20260923_112051"></script>
+    <script src="js/shared/cad-unmarked-place.js?v=20260923_112051"></script>
+    <script src="js/shared/arrow-survey-number.js?v=20260923_112051"></script>
+    <script src="js/shared/korean-text-wrap.js?v=20260923_112051"></script>
+    <script src="js/shared/hwpx-import.js?v=20260923_112051"></script>
+    <script src="js/shared/auth.js?v=20260923_112051"></script>
+    <script src="js/core/firebase-storage-assets.js?v=20260923_112051"></script>
+    <script src="js/core/drawing-floor-tombstone.js?v=20260923_112051"></script>
+    <script src="js/core/data-health.js?v=20260923_112051"></script>
+    <script src="js/core/building-meta-merge.js?v=20260923_112051"></script>
+    <script src="js/core/edit-history.js?v=20260923_112051"></script>
+    <script src="js/core/sync-merge.js?v=20260923_112051"></script>
+    <script src="js/core/legend-layout.js?v=20260923_112051"></script>
+    <script src="app.js?v=20260923_112051"></script>
 
     <script>
-        window.BSA_APP_VERSION = '20260922_175524';
+        window.BSA_APP_VERSION = '20260923_112051';
 
         (function () {
             var el = document.getElementById('appVersionText');
@@ -3227,7 +3227,9 @@
         document.addEventListener('DOMContentLoaded', function () {
             const btn = document.getElementById('btnExportVectorPdf');
             if (btn) btn.addEventListener('click', function () {
-                if (typeof window.exportCurrentFloorVectorPdf === 'function') {
+                if (typeof window.exportVectorPdfWithScopeChoice === 'function') {
+                    window.exportVectorPdfWithScopeChoice();
+                } else if (typeof window.exportCurrentFloorVectorPdf === 'function') {
                     window.exportCurrentFloorVectorPdf();
                 } else {
                     alert('벡터 PDF 모듈이 로드되지 않았습니다. Ctrl+F5로 새로고침 후 다시 시도하세요.');
@@ -3241,7 +3243,7 @@
                     native = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
                 } catch (e) {}
                 if (native) return;
-                navigator.serviceWorker.register('./sw.js?v=20260922_175524')
+                navigator.serviceWorker.register('./sw.js?v=20260923_112051')
 
                     .then(function(registration) {
                         console.log('✅ ServiceWorker Registered Successfully with scope:', registration.scope);
