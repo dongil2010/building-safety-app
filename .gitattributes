@@ -1,0 +1,34 @@
+# 줄바꿈 고정 (2026-09-23)
+#
+# 저장소 안은 이미 전부 LF였다. 문제는 작업 폴더였다 — PC마다 core.autocrlf가 달라서
+# git이 꺼낸 파일은 CRLF, 새로 만든 파일은 LF로 섞였고, 동기화할 때마다 뒤바뀌어
+# 편집 도구의 문자열 찾기가 헛돌았다. 작업 폴더도 LF로 고정해서 어느 PC·어느
+# 도구에서 열어도 같은 바이트가 되게 한다.
+* text=auto eol=lf
+
+# Windows 배치 파일만 CRLF. cmd.exe는 LF 배치에서 레이블·goto를 잘못 읽는다.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# 바이너리 — 줄바꿈 변환도, 텍스트 병합도 하면 안 된다.
+# 한글 템플릿(.hwpx)은 zip이라 한 바이트만 바뀌어도 한글이 못 연다. 지금은 git이
+# 알아서 바이너리로 보지만, 추측에 맡기지 않고 못박아 둔다.
+*.hwpx binary
+*.hwp binary
+*.xlsx binary
+*.docx binary
+*.pdf binary
+*.zip binary
+*.jar binary
+*.keystore binary
+*.jks binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.ico binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.otf binary
