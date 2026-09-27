@@ -475,11 +475,13 @@
         return merged;
     }
 
+    // 비파괴 기록·부동침하 구역. 결함과 같은 이유로 시각이 같으면 서버 (2026-09-27)
     function mergeNdtRecord(serverRec, localRec) {
         var serverTs = getRecordUpdatedAt(serverRec, 'ndt');
         var localTs = getRecordUpdatedAt(localRec, 'ndt');
-        var newer = localTs >= serverTs ? localRec : serverRec;
-        var older = localTs >= serverTs ? serverRec : localRec;
+        var localWins = localTs > serverTs;
+        var newer = localWins ? localRec : serverRec;
+        var older = localWins ? serverRec : localRec;
         return Object.assign({}, older, newer);
     }
 

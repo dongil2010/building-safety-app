@@ -9590,20 +9590,22 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             return false;
         }
         const group = groups[gi];
-        if (entry.createdGroup) {
+        // 이미 동기화된 구역일 수 있다 — 지우면 묘비, 지점만 빼면 시각을 올려야 서버의 옛 구역이 이기지 않는다
+        const removeGroup = () => {
             groups.splice(gi, 1);
+            trackNdtDeletion(entry.key, entry.groupId);
             if (getActiveNdtDispGroup() && getActiveNdtDispGroup().id === entry.groupId) {
                 setActiveNdtDispGroup(null);
             }
+        };
+        if (entry.createdGroup) {
+            removeGroup();
         } else {
             group.points = (group.points || []).filter((p) => p && p.id !== entry.pointId);
-            if (!group.points.length) {
-                groups.splice(gi, 1);
-                if (getActiveNdtDispGroup() && getActiveNdtDispGroup().id === entry.groupId) {
-                    setActiveNdtDispGroup(null);
-                }
-            }
+            if (!group.points.length) removeGroup();
+            else group.updatedAt = Date.now();
         }
+        if (typeof markFloorKeyDirty === 'function') markFloorKeyDirty(entry.key);
         const selKey = ndtDispSelKey(entry.groupId);
         if (selectedNdtIds.has(selKey) && !groups.some((g) => g && g.id === entry.groupId)) {
             selectedNdtIds.delete(selKey);

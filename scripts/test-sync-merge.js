@@ -244,4 +244,25 @@ testAppJsMoveWritesTombstone();
     assert.ok(/touchDefectUpdatedAt\(existing\)/.test(impTail), '엑셀 가져오기가 기존 결함 수정 시각을 안 올린다');
 })();
 
+// 비파괴 기록·부동침하 구역도 동점이면 서버 — 결함과 같은 이유
+(function testNdtTieKeepsServer() {
+    const T = 1789517586000;
+    const server = { id: 'ndt_1', avgValue: '32.1', grade: 'B', updatedAt: T };
+    const stale = { id: 'ndt_1', avgValue: '', grade: '', updatedAt: T };
+    const merged = api.mergeNdtRecord(server, stale);
+    assert.strictEqual(merged.avgValue, '32.1', '동점이면 옛 기기의 빈 측정값이 서버 값을 덮으면 안 된다');
+    const edited = Object.assign({}, stale, { avgValue: '30.0', updatedAt: T + 1 });
+    assert.strictEqual(api.mergeNdtRecord(server, edited).avgValue, '30.0');
+})();
+
+// 부동침하 "마지막 지점 되돌리기": 지점만 빼면 시각을 올리고, 구역이 없어지면 묘비를 남긴다
+(function testNdtDispUndoTouchesAndTombstones() {
+    const app = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8');
+    const at = app.indexOf('function undoLastNdtDisplacementMark()');
+    assert.ok(at > 0);
+    const body = app.slice(at, app.indexOf('window.undoLastNdtDisplacementMark', at));
+    assert.ok(/trackNdtDeletion\(entry\.key, entry\.groupId\)/.test(body), '되돌리기로 구역을 지울 때 묘비가 없다 — 서버 구역이 되살아난다');
+    assert.ok(/group\.updatedAt = Date\.now\(\)/.test(body), '되돌리기로 지점을 뺄 때 시각을 안 올린다');
+})();
+
 console.log('test-sync-merge: ok');
