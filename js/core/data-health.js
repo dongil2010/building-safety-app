@@ -421,6 +421,11 @@
         return Number.isFinite(n) ? n : String(value);
     }
 
+    // 사진 목록도 비교한다 — 사진만 지우거나 바꾼 결함도 되살릴 대상으로 보이게 (건물 백업, 2026-09-27)
+    function photoListText(list) {
+        return (Array.isArray(list) ? list : []).filter(Boolean).join('|');
+    }
+
     function defectsDiffer(a, b) {
         if (!a && !b) return false;
         if (!a || !b) return true;
@@ -433,6 +438,8 @@
             const f = DEFECT_POSITION_FIELDS[i];
             if (positionValue(a[f]) !== positionValue(b[f])) return true;
         }
+        if (photoListText(a.photoIds) !== photoListText(b.photoIds)) return true;
+        if (photoListText(a.prevRoundPhotoIds) !== photoListText(b.prevRoundPhotoIds)) return true;
         return false;
     }
 
@@ -666,6 +673,8 @@
         rec.updatedAt = ts;
         rec.contentUpdatedAt = ts;
         rec.positionUpdatedAt = ts;
+        // 사진 목록도 되살린 쪽이 이기게 — 안 찍으면 병합이 서버의 (사진을 지운) 목록을 택한다
+        rec.photosUpdatedAt = ts;
         return rec;
     }
 
@@ -917,6 +926,117 @@
         return chain.then(function () { return saved; });
     }
 
+    /* ------------------------------------------------------------------
+     * 건물 백업(체크포인트) — 2026-09-27
+     *
+     * 사용자가 작업 중간에 건물 전체를 서버에 저장해 두고, 나중에 그 시점으로 골라서 되돌린다.
+     * 층마다 위의 층 스냅샷과 같은 모양을 쓰므로 비교·되살리기(applyRestoreToFloor)를 그대로 쓴다.
+     * 백업이 쓰는 사진은 클라우드에서 지우지 않는다(app.js deleteCloudPhoto) — 그래서 photoIds를 따로 모은다.
+     * ------------------------------------------------------------------ */
+
+    /** 결함 하나가 쓰는 사진 문서 id. 목록이 짧거나 없으면(옛 데이터) 자리 번호로 채운다 — app.js defectPhotoIdAt과 같은 규칙. */
+    function defectPhotoDocIds(d) {
+        const out = [];
+        if (!d || !d.id) return out;
+        [['photoIds', 'photos', ''], ['prevRoundPhotoIds', 'prevRoundPhotos', 'prev_']].forEach(function (k) {
+            const ids = Array.isArray(d[k[0]]) ? d[k[0]] : [];
+            const n = Math.max(ids.length, Array.isArray(d[k[1]]) ? d[k[1]].length : 0);
+            for (let i = 0; i < n; i += 1) out.push(ids[i] || (d.id + '_' + k[2] + i));
+        });
+        return out;
+    }
+
+    /**
+     * 층 묶음들로 건물 백업 본문을 만든다.
+     * floorBundles: [{ floorCode, bundle }] — bundle은 서버 층 문서 모양 { markings, ndt }
+     */
+    function buildBuildingBackup(buildingId, floorBundles, now) {
+        const bid = textOf(buildingId);
+        const ts = now || Date.now();
+        const floors = [];
+        const photoIds = Object.create(null);
+        let defectCount = 0;
+        let ndtCount = 0;
+        (floorBundles || []).forEach(function (fb) {
+            if (!fb || !textOf(fb.floorCode)) return;
+            const key = bid + '_' + textOf(fb.floorCode);
+            const b = fb.bundle || {};
+            const m = b.markings || {};
+            const n = b.ndt || {};
+            const pseudo = {
+                currentBuildingId: bid,
+                defects: { [key]: Array.isArray(m.items) ? m.items : [] },
+                ndtData: { [key]: Array.isArray(n.items) ? n.items : [] },
+                ndtDisplacementGroups: { [key]: Array.isArray(n.displacementGroups) ? n.displacementGroups : [] },
+                deletedDefectIds: { [key]: m.deletedIds || [] },
+                deletedDefectAt: { [key]: m.deletedAt || {} },
+                deletedNdtIds: { [key]: n.deletedIds || [] },
+                deletedNdtAt: { [key]: n.deletedAt || {} }
+            };
+            const snap = buildFloorSnapshot(pseudo, key, '건물 백업', ts);
+            delete snap.id;
+            floors.push(snap);
+            defectCount += snap.defects.length;
+            ndtCount += snap.ndtData.length + snap.ndtDisplacementGroups.length;
+            // 사진 id는 원본에서 모은다 — 복사본은 dataURL 사진 칸을 버려서 목록 없는 옛 결함의 사진 수가 줄어든다
+            pseudo.defects[key].forEach(function (d) {
+                defectPhotoDocIds(d).forEach(function (p) { photoIds[p] = true; });
+            });
+            snap.ndtData.forEach(function (it) {
+                (Array.isArray(it && it.strengthSlots) ? it.strengthSlots : []).forEach(function (s) {
+                    if (s && s.photoId) photoIds['str_' + bid + '_' + s.photoId] = true;
+                });
+            });
+        });
+        return {
+            payload: { version: 1, buildingId: bid, createdAt: ts, floors: floors },
+            photoIds: Object.keys(photoIds),
+            floorCodes: floors.map(function (f) { return f.floorCode; }),
+            defectCount: defectCount,
+            ndtCount: ndtCount
+        };
+    }
+
+    function ndtRecordText(rec) {
+        if (!rec) return '';
+        const copy = {};
+        Object.keys(rec).sort().forEach(function (k) {
+            if (k === 'updatedAt') return;
+            copy[k] = rec[k];
+        });
+        return JSON.stringify(copy);
+    }
+
+    /**
+     * 백업 층 하나 vs 지금(서버) 층 하나. 되살리기 창이 보여줄 행과 기본 선택.
+     * 사용자가 직접 "그 시점으로" 돌아가려는 것이라 바뀐 행·지워진 행을 모두 기본 선택한다.
+     * 이후 새로 생긴 결함은 지우지 않는다(보여만 준다).
+     */
+    function planFloorRestore(backupFloor, currentBundle) {
+        const snap = backupFloor || {};
+        const b = currentBundle || {};
+        const curDefects = ((b.markings || {}).items) || [];
+        const curNdt = ((b.ndt || {}).items) || [];
+        const curGroups = ((b.ndt || {}).displacementGroups) || [];
+        const diff = compareDefects(snap.defects, curDefects);
+        const ndtIds = [];
+        [[snap.ndtData, curNdt], [snap.ndtDisplacementGroups, curGroups]].forEach(function (pair) {
+            const curBy = indexById(pair[1]);
+            (Array.isArray(pair[0]) ? pair[0] : []).forEach(function (rec) {
+                const id = rec && textOf(rec.id);
+                if (!id) return;
+                if (ndtRecordText(rec) !== ndtRecordText(curBy[id])) ndtIds.push(id);
+            });
+        });
+        return {
+            floorCode: snap.floorCode,
+            floorKey: snap.floorKey,
+            diff: diff,
+            defectIds: defaultSelectedIds(diff),
+            ndtIds: ndtIds
+        };
+    }
+
     const api = {
         MIN_DEFECTS_TO_JUDGE: MIN_DEFECTS_TO_JUDGE,
         hasMeasurement: hasMeasurement,
@@ -941,12 +1061,16 @@
         restoreSelection: restoreSelection,
         ndtIdsRemovedByOp: ndtIdsRemovedByOp,
         compareDefects: compareDefects,
+        defectsDiffer: defectsDiffer,
         defaultSelectedIds: defaultSelectedIds,
         applyRestoreToFloor: applyRestoreToFloor,
         pruneSnapshots: pruneSnapshots,
         createMemorySnapshotStore: createMemorySnapshotStore,
         createIdbSnapshotStore: createIdbSnapshotStore,
-        saveSnapshotsWithStore: saveSnapshotsWithStore
+        saveSnapshotsWithStore: saveSnapshotsWithStore,
+        defectPhotoDocIds: defectPhotoDocIds,
+        buildBuildingBackup: buildBuildingBackup,
+        planFloorRestore: planFloorRestore
     };
 
     root.BSA = root.BSA || {};

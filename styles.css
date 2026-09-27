@@ -7865,7 +7865,8 @@ body.add-building-modal-open .app-content {
     flex-shrink: 0;
 }
 
-.edit-building-footer-actions {
+.edit-building-footer-actions,
+.edit-building-footer-left {
     display: flex;
     gap: 0.5rem;
 }

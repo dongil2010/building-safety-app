@@ -3003,6 +3003,12 @@ document.addEventListener('DOMContentLoaded', () => {
     window.permanentlyDeleteBuilding = async function(bldg, opts) {
         opts = opts || {};
         if (!bldg || !bldg.id) return false;
+        // 백업을 먼저 지운다 — 남아 있으면 아래 사진 삭제가 "백업이 쓰는 사진"으로 보고 지우지 않는다
+        try {
+            await deleteAllBuildingBackups(bldg.id);
+        } catch (e) {
+            console.warn('[건물 백업] 영구 삭제 전 백업 정리 실패 — 백업이 쓰던 사진은 클라우드에 남습니다:', bldg.id, e);
+        }
         const siteKey = normalizeSiteVaultKey(bldg.name);
         recordBuildingDeleted(bldg.id);
         window.state.buildings = (window.state.buildings || []).filter((b) => b.id !== bldg.id);
@@ -7983,6 +7989,13 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             if (window.moveBuildingToTrash(bldg)) {
                 window.showToast(`'${bldg.name}'을(를) 휴지통으로 옮겼습니다. 30일 내 복원 가능`, 'success', 5000);
             }
+        });
+    }
+
+    const btnOpenBuildingBackup = document.getElementById('btnOpenBuildingBackup');
+    if (btnOpenBuildingBackup) {
+        btnOpenBuildingBackup.addEventListener('click', () => {
+            if (window.currentEditingBuilding) window.openBuildingBackupModal(window.currentEditingBuilding);
         });
     }
 
@@ -44879,6 +44892,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (!photoId) return;
         // 막힌 옛 코드는 클라우드 사진을 그대로 둔다(표시도 안 바꾼다) — 새 방식에서 아직 쓰는 사진일 수 있다
         if (await isCloudPhotoWriteBlocked()) return;
+        // 건물 백업이 쓰는 사진은 클라우드에 남긴다 — 되살리기로 다시 필요해진다(이 기기 사본은 호출한 쪽이 지운다)
+        if (await isPhotoKeptByBuildingBackup(photoId)) return;
         unmarkPhotoOnStorage(photoId);
         const companyPhotos = getCompanyPhotosCollection();
         if (!companyPhotos) return;
@@ -47139,6 +47154,426 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         } catch (e) {
             btn.style.display = 'none';
         }
+    };
+
+    // ==========================================================================
+    // 건물 백업(체크포인트) — 2026-09-27
+    // safety_app/{회사}/buildingCheckpoints/{id}          요약 + 이 백업이 쓰는 사진 id(photoIds)
+    // safety_app/{회사}/buildingCheckpoints/{id}/data/payload  층별 스냅샷 JSON (크면 parts 조각)
+    // 백업은 서버에서 모든 층을 읽어 만든다. 기기 state는 지금 층·고친 층만 서버와 맞춰져
+    // 안 연 층은 옛 데이터일 수 있다(2026-09-27 겨자씨 사고가 그 옛 데이터였다).
+    // ==========================================================================
+    function buildingBackupsCollection() {
+        if (!db || !window.state.companyId) return null;
+        return db.collection('safety_app').doc(getCompanyDocId()).collection('buildingCheckpoints');
+    }
+
+    function buildingBackupPayloadRef(backupId) {
+        const coll = buildingBackupsCollection();
+        return coll ? coll.doc(backupId).collection('data').doc('payload') : null;
+    }
+
+    /**
+     * 백업이 쓰는 사진이면 클라우드 사본을 지우지 않는다 — 되살리기로 다시 필요해진다.
+     * 서버에 직접 묻는다(다른 기기가 만든 백업도 봐야 한다). 확인을 못 하면 지우지 않는다.
+     */
+    async function isPhotoKeptByBuildingBackup(photoId) {
+        const coll = buildingBackupsCollection();
+        if (!coll || !photoId) return false;
+        try {
+            const snap = await coll.where('photoIds', 'array-contains', String(photoId)).limit(1).get({ source: 'server' });
+            return !snap.empty;
+        } catch (e) {
+            console.warn('[건물 백업] 사진 보존 여부를 확인하지 못해 지우지 않고 둡니다:', photoId, e);
+            return true;
+        }
+    }
+
+    function buildingFloorCodesForBackup(bldg) {
+        const codes = new Set(((bldg && bldg.floorsList) || []).map((f) => f && f.floorCode).filter(Boolean));
+        const prefix = `${bldg.id}_`;
+        [window.state.defects, window.state.ndtData, window.state.ndtDisplacementGroups].forEach((map) => {
+            Object.keys(map || {}).forEach((k) => {
+                if (!k.startsWith(prefix)) return;
+                const code = floorCodeFromFloorKey(k, bldg);
+                if (code) codes.add(code);
+            });
+        });
+        return Array.from(codes);
+    }
+
+    /** 서버의 층 묶음을 읽는다. 읽기 실패·저장 중인 층은 조용히 빈 층으로 두지 않고 멈춘다. */
+    async function readFloorBundleStrict(bldg, floorCode) {
+        const ref = getFloorScopeRef(bldg, floorCode);
+        if (!ref) throw new Error('로그인 상태를 확인해 주세요.');
+        const snap = await ref.get({ source: 'server' });
+        if (!snap.exists) return await readFloorSyncBundle(bldg, floorCode);   // 옛 저장 방식 층
+        const json = await decodeChunkedPayloadFromData(snap.data() || {}, ref);
+        if (!json) throw new Error(`${floorCode} 층을 다른 기기가 저장하는 중입니다. 잠시 뒤 다시 시도해 주세요.`);
+        return bundleFromPackObject(JSON.parse(json));
+    }
+
+    /** 이 건물의 안 올라간 수정을 먼저 서버에 올린다. 못 올리면 백업·되살리기를 하지 않는다. */
+    async function flushBuildingEditsToServer(bldg) {
+        const prefix = `${bldg.id}_`;
+        const dirty = () => Array.from(_dirtyFloorKeys).some((k) => String(k).startsWith(prefix));
+        for (let i = 0; i < 12 && dirty(); i++) {
+            if (_syncInFlight || isRemoteSyncing) {
+                await new Promise((r) => setTimeout(r, 700));
+                continue;
+            }
+            await syncStateToFirebase();
+        }
+        if (dirty()) {
+            throw new Error('이 건물에 아직 서버로 올라가지 않은 수정이 있습니다. 인터넷 연결을 확인하고 새로고침한 뒤 다시 시도해 주세요.');
+        }
+    }
+
+    async function readBuildingBundlesFromServer(bldg) {
+        const out = [];
+        for (const code of buildingFloorCodesForBackup(bldg)) {
+            out.push({ floorCode: code, bundle: await readFloorBundleStrict(bldg, code) });
+        }
+        return out;
+    }
+
+    async function listBuildingBackups(bldgId) {
+        const coll = buildingBackupsCollection();
+        if (!coll) return [];
+        const snap = await coll.where('buildingId', '==', String(bldgId)).get({ source: 'server' });
+        return snap.docs.map((d) => Object.assign({ id: d.id }, d.data()))
+            .sort((a, b) => (Number(b.createdAt) || 0) - (Number(a.createdAt) || 0));
+    }
+
+    async function createBuildingBackup(bldg, memo) {
+        const health = bulkSnapshotApi();
+        const coll = buildingBackupsCollection();
+        if (!health || !coll) throw new Error('로그인 상태를 확인해 주세요.');
+        if (!navigator.onLine) throw new Error('인터넷에 연결된 상태에서만 백업할 수 있습니다.');
+        await flushBuildingEditsToServer(bldg);
+        const now = Date.now();
+        const built = health.buildBuildingBackup(bldg.id, await readBuildingBundlesFromServer(bldg), now);
+        const ref = coll.doc();
+        // 본문을 먼저 쓰고 요약을 나중에 쓴다 — 목록에 보이는 백업은 항상 본문이 있다
+        await writeChunkedPdfToDocRef(buildingBackupPayloadRef(ref.id), JSON.stringify(built.payload), {});
+        await ref.set({
+            buildingId: String(bldg.id),
+            buildingName: String(bldg.name || ''),
+            createdAt: now,
+            createdBy: window.state.userName || '',
+            memo: String(memo || '').slice(0, 200),
+            floorCodes: built.floorCodes,
+            defectCount: built.defectCount,
+            ndtCount: built.ndtCount,
+            photoCount: built.photoIds.length,
+            photoIds: built.photoIds
+        });
+        return Object.assign({ id: ref.id }, built);
+    }
+
+    async function readBuildingBackupPayload(backupId) {
+        const json = await readChunkedPdfFromDocRef(buildingBackupPayloadRef(backupId));
+        if (!json) throw new Error('백업 본문을 읽지 못했습니다.');
+        return JSON.parse(json);
+    }
+
+    async function deleteBuildingBackupDocs(backupId) {
+        const coll = buildingBackupsCollection();
+        const payloadRef = buildingBackupPayloadRef(backupId);
+        const parts = await payloadRef.collection('parts').get({ source: 'server' });
+        for (let i = 0; i < parts.docs.length; i += 400) {
+            const batch = db.batch();
+            parts.docs.slice(i, i + 400).forEach((d) => batch.delete(d.ref));
+            await batch.commit();
+        }
+        await payloadRef.delete();
+        await coll.doc(backupId).delete();
+    }
+
+    /** 이 건물이 지금 쓰는 사진 id — 서버의 모든 층 + 이 기기의 아직 안 올라간 것 */
+    async function collectBuildingPhotoIdsInUse(bldg) {
+        const health = bulkSnapshotApi();
+        const inUse = new Set(health.buildBuildingBackup(bldg.id, await readBuildingBundlesFromServer(bldg)).photoIds);
+        const local = buildingFloorCodesForBackup(bldg).map((code) => {
+            const key = `${bldg.id}_${code}`;
+            return {
+                floorCode: code,
+                bundle: {
+                    markings: { items: window.state.defects[key] || [] },
+                    ndt: { items: (window.state.ndtData || {})[key] || [] }
+                }
+            };
+        });
+        health.buildBuildingBackup(bldg.id, local).photoIds.forEach((p) => inUse.add(p));
+        return inUse;
+    }
+
+    /**
+     * 백업을 지운다. 그 백업만 붙잡고 있던 사진(지금 건물도, 다른 백업도 안 쓰는 사진)은 클라우드에서 정리한다.
+     * bldg가 없으면(건물 영구 삭제) 백업이 쓰던 사진을 모두 정리한다.
+     */
+    async function deleteBuildingBackup(backup, bldg) {
+        await deleteBuildingBackupDocs(backup.id);
+        const ids = Array.isArray(backup.photoIds) ? backup.photoIds : [];
+        if (!ids.length) return 0;
+        let keep = new Set();
+        if (bldg) {
+            keep = await collectBuildingPhotoIdsInUse(bldg);
+            (await listBuildingBackups(backup.buildingId)).forEach((b) => (b.photoIds || []).forEach((p) => keep.add(p)));
+        }
+        let removed = 0;
+        for (const pid of ids) {
+            if (keep.has(pid)) continue;
+            try {
+                await deleteCloudPhoto(pid);
+                removed++;
+            } catch (e) {
+                console.warn('[건물 백업] 사진 정리 실패:', pid, e);
+            }
+        }
+        return removed;
+    }
+
+    /** 건물 영구 삭제 — 사진을 지우기 전에 백업부터 지워야 사진 보존에 걸리지 않는다 */
+    async function deleteAllBuildingBackups(bldgId) {
+        const list = await listBuildingBackups(bldgId);
+        for (const b of list) await deleteBuildingBackup(b, null);
+        return list.length;
+    }
+
+    function clearNegativePhotoCaches(photoIds) {
+        (photoIds || []).forEach((pid) => {
+            _cloudPhotoFetchAttempted.delete(pid);
+            _nonExistentPhotoIds.delete(pid);
+        });
+    }
+
+    /**
+     * 고른 결함·비파괴를 백업 값으로 되돌린다. 되돌리기 직전 상태를 먼저 자동 백업한다.
+     * selections: [{ floorCode, defectIds: [], ndtIds: [] }]
+     */
+    async function restoreBuildingBackup(bldg, payload, selections) {
+        const health = bulkSnapshotApi();
+        await createBuildingBackup(bldg, '되살리기 직전 자동 백업');
+        const floorsByCode = {};
+        (payload.floors || []).forEach((f) => { floorsByCode[f.floorCode] = f; });
+        const now = Date.now();
+        let defectN = 0;
+        let ndtN = 0;
+        (selections || []).forEach((sel) => {
+            const snap = floorsByCode[sel.floorCode];
+            if (!snap || (!sel.defectIds.length && !sel.ndtIds.length)) return;
+            const key = `${bldg.id}_${sel.floorCode}`;
+            const slice = readBulkFloorSlice(key);
+            const result = health.applyRestoreToFloor(slice, snap, { ids: sel.defectIds, ndtIds: sel.ndtIds, now });
+            writeBulkFloorSlice(key, slice);
+            (result.restoredIds || []).forEach((id) => untrackDefectDeletion(key, id));
+            (result.restoredNdtIds || []).forEach((id) => untrackNdtDeletion(key, id));
+            (result.restored || []).forEach((d) => clearNegativePhotoCaches(health.defectPhotoDocIds(d)));
+            markFloorKeyDirty(key);
+            defectN += (result.restoredIds || []).length;
+            ndtN += (result.restoredNdtIds || []).length;
+        });
+        saveStateToLocalStorage();
+        syncStateToFirebase();
+        if (typeof renderSurveyTable === 'function') renderSurveyTable();
+        if (typeof drawCanvas === 'function') drawCanvas();
+        if (typeof renderDefectListPanel === 'function') renderDefectListPanel();
+        if (typeof drawNdtCanvas === 'function') drawNdtCanvas();
+        if (typeof renderNdtSummaryTable === 'function') renderNdtSummaryTable();
+        return { defectN, ndtN };
+    }
+
+    function ensureBuildingBackupModal() {
+        let wrap = document.getElementById('buildingBackupModal');
+        if (wrap) return wrap;
+        wrap = document.createElement('div');
+        wrap.id = 'buildingBackupModal';
+        wrap.className = 'modal-overlay';
+        wrap.innerHTML = `
+            <div class="modal-card bulk-restore-card building-backup-card">
+                <div class="modal-header">
+                    <h3 id="buildingBackupTitle">건물 백업</h3>
+                    <button type="button" class="modal-close" data-bb-close title="닫기">&times;</button>
+                </div>
+                <div class="modal-body" id="buildingBackupBody"></div>
+                <div class="modal-footer" id="buildingBackupFooter"></div>
+            </div>`;
+        document.body.appendChild(wrap);
+        wrap.addEventListener('click', (e) => {
+            if (e.target === wrap || e.target.closest('[data-bb-close]')) wrap.classList.remove('open');
+        });
+        return wrap;
+    }
+
+    async function renderBuildingBackupList(bldg) {
+        const wrap = ensureBuildingBackupModal();
+        const body = wrap.querySelector('#buildingBackupBody');
+        const footer = wrap.querySelector('#buildingBackupFooter');
+        wrap.querySelector('#buildingBackupTitle').textContent = `건물 백업 · ${bldg.name || ''}`;
+        footer.innerHTML = '<button type="button" class="btn btn-outline" data-bb-close>닫기</button>';
+        body.innerHTML = '<p class="bulk-restore-meta">백업 목록을 불러오는 중…</p>';
+        let list = [];
+        try {
+            list = await listBuildingBackups(bldg.id);
+        } catch (e) {
+            body.innerHTML = `<p class="bulk-restore-meta">백업 목록을 불러오지 못했습니다. 인터넷 연결을 확인해 주세요. (${escapeBulkRestoreHtml(e.message)})</p>`;
+            return;
+        }
+        const rows = list.map((b) => `<tr>
+                <td>${escapeBulkRestoreHtml(formatBulkSnapTime(b.createdAt))}</td>
+                <td>${escapeBulkRestoreHtml(b.createdBy || '')}</td>
+                <td>${escapeBulkRestoreHtml(b.memo || '')}</td>
+                <td>결함 ${Number(b.defectCount) || 0} · 비파괴 ${Number(b.ndtCount) || 0} · 사진 ${Number(b.photoCount) || 0}</td>
+                <td style="white-space:nowrap;">
+                    <button type="button" class="btn btn-outline btn-sm" data-bb-open="${escapeBulkRestoreHtml(b.id)}">비교·되살리기</button>
+                    <button type="button" class="btn btn-outline btn-sm" data-bb-delete="${escapeBulkRestoreHtml(b.id)}">삭제</button>
+                </td>
+            </tr>`).join('');
+        body.innerHTML = `
+            <p class="bulk-restore-meta">지금 이 건물의 모든 층(결함·비파괴·사진 목록)을 서버에 저장해 두고, 나중에 그 시점으로 골라서 되돌릴 수 있습니다. 백업이 쓰는 사진은 지워도 클라우드에 남아 되살릴 수 있습니다.</p>
+            <div style="display:flex;gap:0.5rem;margin:0.6rem 0 0.9rem;">
+                <input type="text" id="buildingBackupMemo" class="form-control" maxlength="200" placeholder="메모 (예: 2층 조사 끝, 보고서 작성 전)">
+                <button type="button" class="btn btn-primary" id="btnCreateBuildingBackup" style="white-space:nowrap;"><i class="fa-solid fa-floppy-disk"></i> 지금 상태 백업</button>
+            </div>
+            <div class="bulk-restore-table-wrap">
+                <table class="bulk-restore-table">
+                    <thead><tr><th>시각</th><th>만든 사람</th><th>메모</th><th>내용</th><th></th></tr></thead>
+                    <tbody>${rows || '<tr><td colspan="5" style="text-align:center;padding:1.2rem;color:#64748b;">아직 백업이 없습니다.</td></tr>'}</tbody>
+                </table>
+            </div>`;
+        body.querySelector('#btnCreateBuildingBackup').addEventListener('click', async (e) => {
+            const btn = e.currentTarget;
+            btn.disabled = true;
+            window.showLoading('건물 전체를 백업하는 중입니다...');
+            try {
+                const made = await createBuildingBackup(bldg, body.querySelector('#buildingBackupMemo').value);
+                window.showToast(`백업했습니다. (결함 ${made.defectCount} · 비파괴 ${made.ndtCount} · 사진 ${made.photoIds.length})`, 'success', 5000);
+                await renderBuildingBackupList(bldg);
+            } catch (err) {
+                window.showToast('백업하지 못했습니다: ' + err.message, 'error', 7000);
+                btn.disabled = false;
+            } finally {
+                window.hideLoading();
+            }
+        });
+        body.querySelectorAll('[data-bb-open]').forEach((btn) => btn.addEventListener('click', () => {
+            const b = list.find((x) => x.id === btn.getAttribute('data-bb-open'));
+            if (b) renderBuildingBackupCompare(bldg, b);
+        }));
+        body.querySelectorAll('[data-bb-delete]').forEach((btn) => btn.addEventListener('click', async () => {
+            const b = list.find((x) => x.id === btn.getAttribute('data-bb-delete'));
+            if (!b || !window.confirmDelete(`${formatBulkSnapTime(b.createdAt)} 백업을 지울까요?\n\n이 백업만 붙잡고 있던 사진(지금 건물에도 다른 백업에도 없는 사진)은 클라우드에서 정리됩니다.`)) return;
+            window.showLoading('백업을 지우는 중입니다...');
+            try {
+                const removed = await deleteBuildingBackup(b, bldg);
+                window.showToast(`백업을 지웠습니다.${removed ? ` (정리한 사진 ${removed}장)` : ''}`, 'success', 4500);
+            } catch (err) {
+                window.showToast('백업을 지우지 못했습니다: ' + err.message, 'error', 7000);
+            } finally {
+                window.hideLoading();
+                await renderBuildingBackupList(bldg);
+            }
+        }));
+    }
+
+    async function renderBuildingBackupCompare(bldg, backup) {
+        const health = bulkSnapshotApi();
+        const wrap = ensureBuildingBackupModal();
+        const body = wrap.querySelector('#buildingBackupBody');
+        const footer = wrap.querySelector('#buildingBackupFooter');
+        body.innerHTML = '<p class="bulk-restore-meta">백업과 지금 서버 데이터를 비교하는 중…</p>';
+        footer.innerHTML = '';
+        let payload;
+        let plans;
+        window.showLoading('백업과 지금을 비교하는 중입니다...');
+        try {
+            await flushBuildingEditsToServer(bldg);
+            payload = await readBuildingBackupPayload(backup.id);
+            const current = {};
+            for (const fb of await readBuildingBundlesFromServer(bldg)) current[fb.floorCode] = fb.bundle;
+            plans = (payload.floors || []).map((f) => health.planFloorRestore(f, current[f.floorCode] || {}));
+        } catch (err) {
+            body.innerHTML = `<p class="bulk-restore-meta">비교하지 못했습니다: ${escapeBulkRestoreHtml(err.message)}</p>`;
+            footer.innerHTML = '<button type="button" class="btn btn-outline" id="btnBuildingBackupBack">목록으로</button>';
+            footer.querySelector('#btnBuildingBackupBack').addEventListener('click', () => renderBuildingBackupList(bldg));
+            return;
+        } finally {
+            window.hideLoading();
+        }
+        const floorLabel = (code) => (typeof window.getFloorLabelFromCode === 'function' ? window.getFloorLabelFromCode(code) : code) || code;
+        const changedPlans = plans.filter((p) => p.defectIds.length || p.ndtIds.length || (p.diff.addedAfter || []).length);
+        const sections = changedPlans.map((p) => {
+            const rows = (p.diff.changed || []).concat(p.diff.deletedAfter || []).map((r) => `<tr>
+                    <td><input type="checkbox" class="bb-defect-check" data-floor="${escapeBulkRestoreHtml(p.floorCode)}" value="${escapeBulkRestoreHtml(r.id)}" checked></td>
+                    <td>${escapeBulkRestoreHtml((r.snapshot && r.snapshot.no) || (r.current && r.current.no) || r.id)}</td>
+                    <td>${r.kind === 'deleted' ? '이후 삭제됨' : '바뀜'}</td>
+                    <td>${escapeBulkRestoreHtml(summarizeDefectForRestore(r.current))}${r.current ? ` · 사진 ${health.defectPhotoDocIds(r.current).length}` : ''}</td>
+                    <td>${escapeBulkRestoreHtml(summarizeDefectForRestore(r.snapshot))} · 사진 ${health.defectPhotoDocIds(r.snapshot).length}</td>
+                </tr>`).join('');
+            const added = (p.diff.addedAfter || []).map((r) => `<tr class="bulk-restore-added">
+                    <td></td><td>${escapeBulkRestoreHtml((r.current && r.current.no) || r.id)}</td><td>이후 추가(유지)</td>
+                    <td>${escapeBulkRestoreHtml(summarizeDefectForRestore(r.current))}</td><td>—</td>
+                </tr>`).join('');
+            const ndtRow = p.ndtIds.length
+                ? `<tr><td><input type="checkbox" class="bb-ndt-check" data-floor="${escapeBulkRestoreHtml(p.floorCode)}" checked></td>
+                    <td colspan="4">비파괴 측정값·구역 ${p.ndtIds.length}건을 백업 값으로 되돌리기</td></tr>`
+                : '';
+            return `<tr><th colspan="5" style="text-align:left;background:#f1f5f9;">${escapeBulkRestoreHtml(floorLabel(p.floorCode))}</th></tr>${rows}${ndtRow}${added}`;
+        }).join('');
+        body.innerHTML = `
+            <p class="bulk-restore-meta">${escapeBulkRestoreHtml(formatBulkSnapTime(backup.createdAt))} 백업${backup.memo ? ` (${escapeBulkRestoreHtml(backup.memo)})` : ''} ↔ 지금 서버 데이터.
+                체크한 항목만 백업 값(사진 목록 포함)으로 되돌립니다. 백업 이후 새로 생긴 결함은 지우지 않습니다.</p>
+            <div class="bulk-restore-table-wrap">
+                <table class="bulk-restore-table">
+                    <thead><tr><th></th><th>번호</th><th>구분</th><th>지금</th><th>백업</th></tr></thead>
+                    <tbody>${sections || '<tr><td colspan="5" style="text-align:center;padding:1.2rem;color:#64748b;">백업과 지금이 같습니다. 되돌릴 것이 없습니다.</td></tr>'}</tbody>
+                </table>
+            </div>
+            <p class="bulk-restore-note">되돌리기 직전 상태를 자동으로 한 번 더 백업하므로, 되돌린 뒤에도 다시 원래대로 돌아올 수 있습니다.</p>`;
+        footer.innerHTML = `<button type="button" class="btn btn-outline" id="btnBuildingBackupBack">목록으로</button>
+            ${sections ? '<button type="button" class="btn btn-primary" id="btnBuildingBackupApply">체크한 항목 되돌리기</button>' : ''}`;
+        footer.querySelector('#btnBuildingBackupBack').addEventListener('click', () => renderBuildingBackupList(bldg));
+        const applyBtn = footer.querySelector('#btnBuildingBackupApply');
+        if (!applyBtn) return;
+        applyBtn.addEventListener('click', async () => {
+            const selections = plans.map((p) => ({
+                floorCode: p.floorCode,
+                defectIds: Array.from(body.querySelectorAll('.bb-defect-check:checked'))
+                    .filter((cb) => cb.getAttribute('data-floor') === p.floorCode).map((cb) => cb.value),
+                ndtIds: body.querySelector(`.bb-ndt-check[data-floor="${CSS.escape(p.floorCode)}"]:checked`) ? p.ndtIds : []
+            }));
+            const nDef = selections.reduce((s, x) => s + x.defectIds.length, 0);
+            const nNdt = selections.reduce((s, x) => s + x.ndtIds.length, 0);
+            if (!nDef && !nNdt) {
+                window.showToast('되돌릴 항목을 체크해 주세요.', 'warning');
+                return;
+            }
+            if (!window.confirm(`결함 ${nDef}건, 비파괴 ${nNdt}건을 백업 값으로 되돌립니다. 계속할까요?`)) return;
+            applyBtn.disabled = true;
+            window.showLoading('백업 값으로 되돌리는 중입니다...');
+            try {
+                const r = await restoreBuildingBackup(bldg, payload, selections);
+                window.showToast(`결함 ${r.defectN}건, 비파괴 ${r.ndtN}건을 되돌렸습니다. 다른 기기에도 동기화됩니다.`, 'success', 6000);
+                wrap.classList.remove('open');
+            } catch (err) {
+                window.showToast('되돌리지 못했습니다: ' + err.message, 'error', 7000);
+                applyBtn.disabled = false;
+            } finally {
+                window.hideLoading();
+            }
+        });
+    }
+
+    window.openBuildingBackupModal = function (bldg) {
+        if (!bldg || !bldg.id) return;
+        if (!buildingBackupsCollection()) {
+            window.showToast('로그인한 뒤에 쓸 수 있습니다.', 'warning');
+            return;
+        }
+        const wrap = ensureBuildingBackupModal();
+        wrap.classList.add('open');
+        renderBuildingBackupList(bldg);
     };
 
     /**
