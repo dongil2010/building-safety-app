@@ -531,18 +531,26 @@ document.addEventListener('DOMContentLoaded', () => {
         // 목록을 지우기 전에 옛 사진 ID를 받아 둔다
         const oldCurIds = defectPhotoIdList(d, oldCurIdCount);
         const oldPrevIds = defectPhotoIdList(d, oldPrevIdCount, 'prev');
+        const prevBefore = captureDefectPhotoPairs(d, 'prev');
+
+        // 새 목록을 먼저 매긴다 — 그대로 남는 전회차 사진은 ID를 유지해서 아래에서 지우지 않는다
+        let newPrevIds = [];
+        if (current.length > 0) newPrevIds = assignDefectPhotoIds(d.id, current, null, 'prev');
+        else if (prev.length > 0) newPrevIds = assignDefectPhotoIds(d.id, prev, prevBefore, 'prev');
+        const keepIds = new Set(newPrevIds);
 
         d.photos = [];
         delete d.photoIds;
 
         oldPrevIds.concat(oldCurIds).forEach((pid) => {
+            if (keepIds.has(pid)) return;
             _idbPersistedPhotoKeys.delete(pid);
             idbDelete('photos', pid);
         });
 
         if (current.length > 0) {
             d.prevRoundPhotos = current.slice();
-            d.prevRoundPhotoIds = d.prevRoundPhotos.map((_, i) => getPhotoDocId(d.id, i, 'prev'));
+            d.prevRoundPhotoIds = newPrevIds;
             d.prevRoundPhotos.forEach((url, i) => {
                 const pid = d.prevRoundPhotoIds[i];
                 if (!window._photoCache) window._photoCache = {};
@@ -551,7 +559,7 @@ document.addEventListener('DOMContentLoaded', () => {
             });
         } else if (prev.length > 0) {
             d.prevRoundPhotos = prev;
-            d.prevRoundPhotoIds = prev.map((_, i) => getPhotoDocId(d.id, i, 'prev'));
+            d.prevRoundPhotoIds = newPrevIds;
             prev.forEach((url, i) => {
                 const pid = d.prevRoundPhotoIds[i];
                 if (!window._photoCache) window._photoCache = {};
@@ -1873,23 +1881,18 @@ document.addEventListener('DOMContentLoaded', () => {
             const prevVal = Array.isArray(window._pendingPrevRoundPhotos)
                 ? window._pendingPrevRoundPhotos.filter(Boolean)
                 : [];
-            const oldCurr = (Array.isArray(d.photos) && d.photos.length)
-                || (Array.isArray(d.photoIds) && d.photoIds.length)
-                || 0;
-            const oldPrev = (Array.isArray(d.prevRoundPhotos) && d.prevRoundPhotos.length)
-                || (Array.isArray(d.prevRoundPhotoIds) && d.prevRoundPhotoIds.length)
-                || 0;
+            const before = captureDefectPhotoIdsBefore(d);
             invalidatePersistedPhotoCacheForDefect(d.id);
             d.photos = photosVal.slice();
             d.prevRoundPhotos = prevVal.slice();
-            syncDefectPhotoRefs(d, d.photos, d.prevRoundPhotos);
+            syncDefectPhotoRefs(d, d.photos, d.prevRoundPhotos, before);
             // 사용자가 사진을 바꿨다 — 병합이 이 목록을 통째로 따르게 시각을 찍는다(합집합이면 지운 사진이 돌아옴)
             stampDefectPhotosChangedIfSafe(d);
             if (typeof touchDefectUpdatedAt === 'function') touchDefectUpdatedAt(d);
             if (typeof saveStateToLocalStorage === 'function') saveStateToLocalStorage();
             await persistDefectPhotosNow(d);
-            await pruneExtraDefectPhotos(d.id, photosVal.length, oldCurr);
-            await pruneExtraDefectPhotos(d.id, prevVal.length, oldPrev, 'prev');
+            await pruneRemovedDefectPhotos(before.cur.visibleIds, d.photoIds);
+            await pruneRemovedDefectPhotos(before.prev.visibleIds, d.prevRoundPhotoIds);
         } catch (e) {
             console.warn('사진 즉시 저장 실패:', e);
         }
@@ -6016,7 +6019,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (validCur.length > 0) {
             cloned.photos = validCur;
-            cloned.photoIds = validCur.map((_, i) => getPhotoDocId(newDefectId, i));
+            cloned.photoIds = assignDefectPhotoIds(newDefectId, validCur, null);
             validCur.forEach((url, i) => {
                 photoIdx++;
                 onPhotoProgress?.(photoIdx, totalPhotos);
@@ -6028,7 +6031,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         if (validPrev.length > 0) {
             cloned.prevRoundPhotos = validPrev;
-            cloned.prevRoundPhotoIds = validPrev.map((_, i) => getPhotoDocId(newDefectId, i, 'prev'));
+            cloned.prevRoundPhotoIds = assignDefectPhotoIds(newDefectId, validPrev, null, 'prev');
             validPrev.forEach((url, i) => {
                 photoIdx++;
                 onPhotoProgress?.(photoIdx, totalPhotos);
@@ -19725,7 +19728,11 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const oldCount = current.length;
         if (oldCount > 0) {
             const archived = Array.isArray(d.prevRoundPhotos) ? d.prevRoundPhotos.slice() : [];
+            // 전회차 목록도 같이 늘린다. 안 늘리면 옮긴 사진이 자리 번호(_prev_2 …)로 떨어져, 예전에 쓰던
+            // 같은 이름의 옛 사진이 클라우드에 남아 있으면 그 사진이 대신 보인다.
+            const archivedIds = defectPhotoIdList(d, archived.length, 'prev');
             d.prevRoundPhotos = archived.concat(current);
+            d.prevRoundPhotoIds = archivedIds.concat(assignDefectPhotoIds(d.id, current, null, 'prev'));
         }
         const oldPhotoCount = (d.photoIds && d.photoIds.length) || oldCount;
         // 목록을 지우기 전에 옛 사진 ID를 받아 둔다
@@ -29900,35 +29907,34 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         return true;
     }
 
-    function syncDefectPhotoRefs(defect, photosVal, prevVal) {
+    // before: 결함 사진을 바꾸기 전에 captureDefectPhotoIdsBefore로 받아 둔 것. 없으면(새 결함) 전부 새 ID.
+    function syncDefectPhotoRefs(defect, photosVal, prevVal, before) {
         if (!defect) return;
         const photos = Array.isArray(photosVal) ? photosVal.filter(Boolean) : [];
         const prev = Array.isArray(prevVal) ? prevVal.filter(Boolean) : [];
         if (photos.length > 0) {
-            defect.photoIds = photos.map((_, i) => getPhotoDocId(defect.id, i));
+            defect.photoIds = assignDefectPhotoIds(defect.id, photos, before && before.cur);
         } else {
             delete defect.photoIds;
         }
         if (prev.length > 0) {
-            defect.prevRoundPhotoIds = prev.map((_, i) => getPhotoDocId(defect.id, i, 'prev'));
+            defect.prevRoundPhotoIds = assignDefectPhotoIds(defect.id, prev, before && before.prev, 'prev');
         } else if (prevVal !== undefined) {
             delete defect.prevRoundPhotoIds;
         }
     }
 
-    /** 줄인 사진 개수 뒤쪽 슬롯(IndexedDB/클라우드/캐시)을 지운다. 삭제 후 다시 살아나는 원인 차단. */
-    async function pruneExtraDefectPhotos(defectId, keepCount, oldCount, kind) {
-        const keep = Math.max(0, Number(keepCount) || 0);
-        const old = Math.max(0, Number(oldCount) || 0);
-        if (!defectId || old <= keep) return;
+    /** 목록에서 빠진 사진(IndexedDB/클라우드/캐시)만 지운다. 남은 사진은 ID가 그대로라 건드리지 않는다. */
+    async function pruneRemovedDefectPhotos(oldIds, newIds) {
+        const keep = new Set((Array.isArray(newIds) ? newIds : []).filter(Boolean));
         const jobs = [];
-        for (let i = keep; i < old; i++) {
-            const photoDocId = getPhotoDocId(defectId, i, kind);
+        for (const photoDocId of new Set((Array.isArray(oldIds) ? oldIds : []).filter(Boolean))) {
+            if (keep.has(photoDocId)) continue;
             if (window._photoCache) delete window._photoCache[photoDocId];
             _idbPersistedPhotoKeys.delete(photoDocId);
             jobs.push(idbDelete('photos', photoDocId));
             jobs.push(deleteCloudPhoto(photoDocId).catch((e) => {
-                console.warn(`사진 슬롯 정리 실패 (${photoDocId}):`, e);
+                console.warn(`지운 사진 정리 실패 (${photoDocId}):`, e);
             }));
         }
         await Promise.all(jobs);
@@ -30093,18 +30099,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const pinId = document.getElementById('defectPinId').value;
         const coords = window._pendingPinCoords || { x: 200, y: 200, targetX: 165, targetY: 235 };
 
-        let oldCurrPhotoCount = 0;
-        let oldPrevPhotoCount = 0;
+        let photoIdsBefore = null;
         if (pinId) {
             const existing = (state.defects[key] || []).find(d => d.id === pinId);
-            if (existing) {
-                oldCurrPhotoCount = (Array.isArray(existing.photos) && existing.photos.length)
-                    || (Array.isArray(existing.photoIds) && existing.photoIds.length)
-                    || 0;
-                oldPrevPhotoCount = (Array.isArray(existing.prevRoundPhotos) && existing.prevRoundPhotos.length)
-                    || (Array.isArray(existing.prevRoundPhotoIds) && existing.prevRoundPhotoIds.length)
-                    || 0;
-            }
+            if (existing) photoIdsBefore = captureDefectPhotoIdsBefore(existing);
         }
 
         // 사용자가 안 건드린 칸은 저장된 원래 값을 쓴다. 폼은 값 하나만 바꿔도(또는 창을 닫기만
@@ -30196,9 +30194,11 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     state.areaBorderStyle = areaBorderVal;
                 }
                 invalidatePersistedPhotoCacheForDefect(state.defects[key][idx].id);
-                state.defects[key][idx].photos = photosVal;
+                // 화면 배열(_pendingPhotos)을 그대로 넣으면 사진을 지울 때 결함 배열이 ID 목록보다 먼저
+                // 줄어, 다음 저장이 남은 사진에 지운 사진의 ID를 물려준다(고유 ID 짝맞춤이 어긋남).
+                state.defects[key][idx].photos = photosVal.filter(Boolean);
                 const pendingPrev = Array.isArray(window._pendingPrevRoundPhotos)
-                    ? window._pendingPrevRoundPhotos.slice()
+                    ? window._pendingPrevRoundPhotos.filter(Boolean)
                     : [];
                 const keepExistingPrev = !!(window._defectFormHydrating
                     && pendingPrev.length === 0
@@ -30210,7 +30210,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 syncDefectPhotoRefs(
                     state.defects[key][idx],
                     photosVal,
-                    keepExistingPrev ? state.defects[key][idx].prevRoundPhotos : pendingPrev
+                    keepExistingPrev ? state.defects[key][idx].prevRoundPhotos : pendingPrev,
+                    photoIdsBefore
                 );
                 // 이 창에서 사용자가 사진을 바꿨을 때만 시각을 찍는다. 다른 칸만 고친 저장은
                 // 사진 목록을 "결정"한 게 아니다(덜 내려온 사진을 지운 것으로 만들면 안 됨).
@@ -30261,9 +30262,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 surveyRound: newDefectSurveyRound,
                 mapMarkedAt: Date.now(),
                 updatedAt: Date.now(),
-                photos: photosVal,
+                photos: photosVal.filter(Boolean),
                 prevRoundPhotos: Array.isArray(window._pendingPrevRoundPhotos)
-                    ? window._pendingPrevRoundPhotos.slice()
+                    ? window._pendingPrevRoundPhotos.filter(Boolean)
                     : [],
                 inspectorName: window.state.userName || '',
                 x: coords.x,
@@ -30322,8 +30323,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             // photoIds는 localStorage에 먼저 남기고, 원본은 IndexedDB에 넣은 뒤 서버는 백그라운드.
             saveStateToLocalStorage();
             await persistDefectPhotosNow(savedDefect);
-            await pruneExtraDefectPhotos(savedDefect.id, currPhotos.length, oldCurrPhotoCount);
-            await pruneExtraDefectPhotos(savedDefect.id, prevPhotos.length, oldPrevPhotoCount, 'prev');
+            if (photoIdsBefore) {
+                await pruneRemovedDefectPhotos(photoIdsBefore.cur.visibleIds, savedDefect.photoIds);
+                await pruneRemovedDefectPhotos(photoIdsBefore.prev.visibleIds, savedDefect.prevRoundPhotoIds);
+            }
         } else {
             saveStateToLocalStorage();
         }
@@ -44201,10 +44204,66 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     // Firestore 문서 1개 1MB 한도 대응: 도면/사진은 각자 별도 문서에 저장하고,
     // 회사 메타데이터 문서(safety_app/{companyId})에는 참조(ID)만 남긴다.
 
-    // 사진 ID를 **새로 매길 때만** 쓴다. 이미 있는 사진의 ID가 필요하면 defectPhotoIdAt.
+    // 옛 자리 번호 ID. 목록 없는 옛 데이터를 읽거나 쓸어낼 때만 쓴다 — 새 사진은 createDefectPhotoId.
     function getPhotoDocId(defectId, index, kind) {
         if (kind === 'prev') return `${defectId}_prev_${index}`;
         return `${defectId}_${index}`;
+    }
+
+    /**
+     * 새 사진 고유 ID (사진 고유 ID 전환 3단계, 2026-09-27). 한 번 받으면 사진이 지워질 때까지 안 바뀐다.
+     * `결함id_` 접두어는 지킨다 — 캐시 무효화·건물 찾기가 접두어로 사진을 찾는다.
+     * 꼬리는 u로 시작해 옛 자리 번호(_0, _prev_0)와 절대 겹치지 않는다.
+     */
+    function createDefectPhotoId(defectId, kind) {
+        const tail = 'u' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+        return kind === 'prev' ? `${defectId}_prev_${tail}` : `${defectId}_${tail}`;
+    }
+
+    /** 저장 전 결함의 사진 목록을 [{ id, url }]로 받아 둔다. visibleIds는 지울 후보(예전과 같은 개수 규칙). */
+    function captureDefectPhotoPairs(d, kind) {
+        const photos = kind === 'prev' ? (d && d.prevRoundPhotos) : (d && d.photos);
+        const ids = kind === 'prev' ? (d && d.prevRoundPhotoIds) : (d && d.photoIds);
+        const photoLen = Array.isArray(photos) ? photos.length : 0;
+        const idLen = Array.isArray(ids) ? ids.length : 0;
+        const pairs = [];
+        for (let i = 0; i < Math.max(photoLen, idLen); i++) {
+            const id = defectPhotoIdAt(d, i, kind);
+            const url = (Array.isArray(photos) && photos[i]) || (window._photoCache && window._photoCache[id]) || null;
+            pairs.push({ id, url });
+        }
+        const visibleCount = photoLen || idLen;
+        return { pairs, visibleIds: pairs.slice(0, visibleCount).map((p) => p.id) };
+    }
+
+    function captureDefectPhotoIdsBefore(d) {
+        return { cur: captureDefectPhotoPairs(d), prev: captureDefectPhotoPairs(d, 'prev') };
+    }
+
+    /**
+     * 사진 목록에 ID를 매긴다. 저장 전에 있던 사진(같은 URL)은 원래 ID를 그대로 쓰고, 새 사진만 새 ID.
+     * 가운데 사진을 지워도 뒤 사진 ID가 안 바뀌어서 네 저장소가 따라 바뀔 일이 없다.
+     * 그림을 그려 넣은 사진은 URL이 바뀌므로 새 ID — 다른 기기의 옛 그림 캐시가 남을 수 없다.
+     */
+    function assignDefectPhotoIds(defectId, photos, before, kind) {
+        const pool = new Map();
+        ((before && before.pairs) || []).forEach((p) => {
+            if (!p || !p.id || !p.url) return;
+            if (!pool.has(p.url)) pool.set(p.url, []);
+            pool.get(p.url).push(p.id);
+        });
+        const used = new Set();
+        return photos.map((url) => {
+            const candidates = pool.get(url);
+            while (candidates && candidates.length) {
+                const id = candidates.shift();
+                if (!used.has(id)) { used.add(id); return id; }
+            }
+            let id = createDefectPhotoId(defectId, kind);
+            while (used.has(id)) id = createDefectPhotoId(defectId, kind);
+            used.add(id);
+            return id;
+        });
     }
 
     /**
@@ -44848,10 +44907,11 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             if (match) return match.id;
         }
         let defectId = photoId;
-        const prev = photoId.match(/^(.*)_prev_\d+$/);
+        // 꼬리: 옛 자리 번호(숫자) 또는 고유 ID(u…, createDefectPhotoId). 못 읽으면 Storage 폴더가 틀어진다.
+        const prev = photoId.match(/^(.*)_prev_(?:\d+|u[0-9a-z]+)$/);
         if (prev) defectId = prev[1];
         else {
-            const cur = photoId.match(/^(.*)_\d+$/);
+            const cur = photoId.match(/^(.*)_(?:\d+|u[0-9a-z]+)$/);
             if (cur) defectId = cur[1];
         }
         return findBuildingIdForDefectId(defectId);
@@ -49029,13 +49089,12 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     let _appVersionGateCheckedAt = 0;
     let _appVersionGateInflight = null;
 
-    // 사진 ID 방식 번호 (사진 고유 ID 전환 2단계, 2026-09-23). 3단계(고유 ID)에서 2로 올린다.
+    // 사진 ID 방식 번호. 1 = 자리 번호(결함id_0 …), 2 = 고유 ID(3단계, 2026-09-27, createDefectPhotoId).
     // 배포할 때 scripts/prepare-pages.py가 이 값을 web-version.json의 photoIdScheme에 적는다.
-    // 배포본 번호가 이 코드보다 크면 이 코드는 옛 방식(자리 번호)이라 클라우드 사진을 쓰거나
-    // 지우면 안 된다 — 새 방식에서 계속 쓰이는 사진을 자리 번호 이사로 덮어쓰거나 지운다.
-    // 3단계 전(둘 다 1)에는 아무것도 막지 않는다. 지금 막으면 옛 앱이 기기 안에서만 이사하고
-    // 클라우드는 이사 전으로 남아 오히려 지운 사진이 되살아난다.
-    const PHOTO_ID_SCHEME = 1;
+    // 배포본 번호가 이 코드보다 크면 이 코드는 옛 방식이라 클라우드 사진을 쓰거나 지우면 안 된다 —
+    // 옛 앱은 가운데 사진을 지울 때 뒤 사진을 앞 번호로 이사시키는데, 새 방식에서는 옛 번호도
+    // 계속 쓰이는 사진 이름이라 멀쩡한 사진을 덮어쓰거나 지운다.
+    const PHOTO_ID_SCHEME = 2;
     let _deployedPhotoIdScheme = PHOTO_ID_SCHEME;
 
     function renderOutdatedAppBanner(show) {

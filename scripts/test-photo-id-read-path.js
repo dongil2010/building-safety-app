@@ -83,13 +83,9 @@ vm.runInContext([
  * 여기 있는 함수 말고 다른 곳에서 getPhotoDocId를 부르면 실패한다.
  * 이미 있는 사진의 ID가 필요하면 defectPhotoIdAt / defectPhotoIdList를 쓸 것.
  */
+// 3단계(2026-09-27)부터 새로 매기기는 assignDefectPhotoIds(고유 ID, test-photo-unique-id.js)로 가고
+// 지우기는 pruneRemovedDefectPhotos(빠진 ID만)로 가서 여기서 빠졌다.
 const ALLOWED = {
-    // 새로 매기기 — 3단계에서 고유 ID로 바뀔 곳
-    syncDefectPhotoRefs: '저장할 때 목록 매기기',
-    cloneDefectPhotosForNewId: '결함 복제 시 새 결함 기준으로 매기기',
-    applyImportedCarryOverPhotos: '가져오기 전회차 표시 시 전회차 목록 매기기',
-    // 자리 번호 꼬리 지우기 — 3단계에서 "빠진 ID만 지우기"로 바뀔 곳
-    pruneExtraDefectPhotos: '줄어든 개수 뒤쪽 슬롯 지우기',
     // 옛 데이터 복구 — 자리 번호로 찔러보는 게 목적
     repairMissingPhotoIds: '목록 없는 옛 결함의 클라우드 사진 찾기',
     // 목록부터 쓰고 자리 번호는 보조(덜 내려온 목록 대비 쓸어내기)

@@ -49,9 +49,11 @@ function extractFunction(header) {
     assert.match(pages, /"photoIdScheme": photo_id_scheme/, 'web-version.json에 적어야 태블릿이 읽는다');
 })();
 
-// --- 2단계는 아직 옛 방식(1)이다. 3단계에서 2로 올린다 ---
-(function schemeStillOne() {
-    assert.match(app, /const PHOTO_ID_SCHEME = 1;/, '3단계 전에는 1이어야 한다 — 올리는 순간 옛 앱의 사진 쓰기가 멈춘다');
+// --- 3단계(고유 ID)는 2다. 새 사진 ID를 createDefectPhotoId로 만들면서 번호를 안 올리면 옛 앱이
+// 자리 번호 이사로 새 방식 사진을 덮어쓴다. 거꾸로 번호만 올리고 ID 방식을 안 바꾸면 옛 앱만 괜히 멈춘다.
+(function schemeIsTwoWithUniqueIds() {
+    assert.match(app, /const PHOTO_ID_SCHEME = 2;/, '3단계는 2여야 한다');
+    assert.ok(/function createDefectPhotoId\(/.test(app), '고유 ID를 만드는 함수가 없는데 방식 번호만 2다');
 })();
 
 // --- 클라우드 사진을 쓰는 입구·지우는 입구 모두 먼저 확인한다 ---
