@@ -2735,9 +2735,13 @@ html:not(.layout-tablet) #tab-map .inspect-sidebar-left .defect-badge-no {
         -webkit-overflow-scrolling: touch;
     }
 
+    /* 목록 전체를 패널 하나로 스크롤 — 구역은 내용 높이만큼. (min-width:769 규칙의 flex:1·min-height:0이
+       남아 있으면 구역이 패널 높이를 나눠 갖게 줄고, 넘친 전회차 목록이 금회차 목록 위에 포개졌다. 2026-09-27 태블릿) */
     #tab-map .defect-list-section {
         min-width: 0;
         width: 100%;
+        flex: 0 0 auto;
+        min-height: auto;
     }
 
     #tab-map .defect-list-section-scroll {
