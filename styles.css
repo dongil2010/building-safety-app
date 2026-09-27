@@ -13870,6 +13870,16 @@ html.layout-tablet body.defect-modal-open #tab-map #mobileMapFabBar.has-add-mark
     }
 }
 
+/* 태블릿 가로(1025px~): 결함 창은 아래 시트가 아니라 도면 오른쪽 서랍이다. 위의 "시트 위 60dvh"
+   규칙을 그대로 받으면 바가 도면 한가운데 떠서 핀을 가린다 → 도면 아래, 서랍 왼쪽까지만. */
+@media (orientation: landscape) and (min-width: 1025px) {
+    html.layout-tablet body.defect-modal-open #tab-map #mobileMapDock.mobile-canvas-dock {
+        position: absolute !important;
+        bottom: max(0.14rem, env(safe-area-inset-bottom, 0px)) !important;
+        right: calc(min(420px, 38vw) + 0.4rem) !important;
+    }
+}
+
 /* 건축물 등록·수정 모달 — 화면 정중앙 (하위 규칙 최종 우선) */
 @media (min-width: 769px) {
     #addBuildingModal.modal-overlay.open,
