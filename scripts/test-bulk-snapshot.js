@@ -358,18 +358,6 @@ async function testExistingNdtNotOverwrittenOnDefectRestore() {
     assert.strictEqual(slice.ndtData[0].updatedAt, 100);
 }
 
-function testCollectFloorKeysFromState() {
-    const st = {
-        defects: { a_1F: [], a_2F: [{ id: 'd' }] },
-        ndtData: { a_2F: [{ id: 'n' }], a_B1: [] },
-        ndtDisplacementGroups: { a_PH: [{ id: 'g' }] },
-        deletedDefectIds: { a_EXT: ['x'] },
-        deletedNdtIds: {}
-    };
-    const keys = api.collectFloorKeysFromState(st).sort();
-    assert.deepStrictEqual(keys, ['a_1F', 'a_2F', 'a_B1', 'a_EXT', 'a_PH'].sort());
-}
-
 function assertSnapshotsBefore(app, startNeedle, opName, mutateNeedle, span) {
     const start = app.indexOf(startNeedle);
     assert.ok(start >= 0, startNeedle + ' 를 찾지 못했다');
@@ -429,7 +417,6 @@ function testSourceWiring() {
         ['window.deleteExistingFloorDrawing = async function', 'recordAfterBulkOp(drawingDeleteSnaps)', 9000],
         ['async function commitBulkDefectFromForm', 'recordAfterBulkOp(bulkSnaps)', 7000],
         ['async function finishCad2PointCalibration', 'recordAfterBulkOp(cadImportSnaps)', 20000],
-        ['window.importBackupJSON = function', 'recordAfterBulkOp(jsonImportSnaps)', 5000],
         ['window.confirmImportDefectExcel = async function', 'recordAfterBulkOp(excelImportSnaps)', 20000],
         ['window.cleanDuplicateNdt', 'recordAfterBulkOp(ndtCleanSnaps)', 5000],
         ['window.restoreBulkSnapshot', 'recordAfterBulkOp(restoreSnaps)', 6000]
@@ -447,7 +434,6 @@ function testSourceWiring() {
     assert.ok(bindAt > guardAt, '버튼 연결은 방지 장치를 씌운 뒤여야 보호된 함수가 연결된다');
     assert.ok(app.indexOf('_bulkRestoreInFlight') > 0, '되살리기도 중복 실행을 막아야 한다');
     assertSnapshotsBefore(app, 'async function finishCad2PointCalibration', 'CAD 가져오기', 'const toClear =', 20000);
-    assertSnapshotsBefore(app, 'window.importBackupJSON = function', 'JSON 백업 불러오기', 'window.state.buildings = data.state.buildings', 4000);
 
     const cleanStart = app.indexOf('window.cleanDuplicateNdt');
     assert.ok(cleanStart > 0, 'cleanDuplicateNdt를 찾지 못했다');
@@ -495,7 +481,6 @@ async function main() {
     await testNoAfterStateSelectsNothing();
     await testSnapshotCopiesImmediately();
     await testExistingNdtNotOverwrittenOnDefectRestore();
-    testCollectFloorKeysFromState();
     testSourceWiring();
     console.log('OK test-bulk-snapshot.js');
 }

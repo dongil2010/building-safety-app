@@ -376,21 +376,6 @@
         return out;
     }
 
-    /**
-     * 지금 state에 데이터가 있는 층 키. JSON 백업 불러오기처럼 건물 전체를
-     * 바꾸기 전에, 기기에 남아 있는 층을 모두 저장할 때 쓴다.
-     */
-    function collectFloorKeysFromState(state) {
-        const st = state || {};
-        return uniqueKeys([].concat(
-            Object.keys(st.defects || {}),
-            Object.keys(st.ndtData || {}),
-            Object.keys(st.ndtDisplacementGroups || {}),
-            Object.keys(st.deletedDefectIds || {}),
-            Object.keys(st.deletedNdtIds || {})
-        ));
-    }
-
     function splitFloorKey(floorKey, buildingId) {
         const key = textOf(floorKey);
         const bid = textOf(buildingId);
@@ -959,7 +944,6 @@
         defaultSelectedIds: defaultSelectedIds,
         applyRestoreToFloor: applyRestoreToFloor,
         pruneSnapshots: pruneSnapshots,
-        collectFloorKeysFromState: collectFloorKeysFromState,
         createMemorySnapshotStore: createMemorySnapshotStore,
         createIdbSnapshotStore: createIdbSnapshotStore,
         saveSnapshotsWithStore: saveSnapshotsWithStore

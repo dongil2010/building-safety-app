@@ -116,7 +116,8 @@ const ALLOWED = {
 // --- 올리기·지우기는 결함의 목록을 넘긴다 (안 넘기면 3단계에서 고유 ID 사진이 엉뚱한 이름으로 올라간다) ---
 (function uploadsAndDeletesPassIds() {
     const uploads = [...app.matchAll(/(?<!function )uploadDefectPhotos\(([^;]*?)\)(?:\.catch|;)/g)].map((m) => m[1]);
-    assert.ok(uploads.length >= 6, '업로드 호출을 못 찾았다: ' + uploads.length);
+    // 4곳: 결함 저장 2(현회차·전회차), 전회차로 보관 1, 되돌리기 사진 복원 1 (JSON 백업 불러오기는 2026-09-27 삭제)
+    assert.ok(uploads.length >= 4, '업로드 호출을 못 찾았다: ' + uploads.length);
     uploads.forEach((args) => {
         const parts = args.split(',').length;
         assert.ok(parts >= 4, 'ID 목록 없이 올리는 곳: uploadDefectPhotos(' + args + ')');
