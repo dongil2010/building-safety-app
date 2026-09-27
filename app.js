@@ -33173,9 +33173,15 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const targetIds = (field === 'location' && isGroup) ? [defectId] : memberIds;
         const value = (rawValue == null) ? '' : String(rawValue).replace(/\s*\n+\s*/g, ' ').trim();
 
+        // 조사표에서 고친 값도 수정 시각을 올려야 동기화에서 이긴다 — 병합은 시각이 같으면 서버를 따른다
+        const inlineSig = (d) => JSON.stringify([
+            d.category, d.isProgress, d.isOpeningCrack, d.isLeak, d.isPriorityManage, d.location, d.component,
+            d.defectType, d.cause, d.size, d.crackWidth, d.crackLength, d.itemCount, d.crackMeasures
+        ]);
         targetIds.forEach(id => {
             const defect = list.find(d => d.id === id);
             if (!defect) return;
+            const sigBefore = inlineSig(defect);
             switch (field) {
                 case 'category':
                     defect.category = value || '구조체';
@@ -33260,6 +33266,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 default:
                     break;
             }
+            if (inlineSig(defect) !== sigBefore) touchDefectUpdatedAt(defect);
         });
 
         saveStateToLocalStorage();
@@ -43502,6 +43509,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     } else if (existing.mapUnregistered) {
                         existing.mapUnregistered = false;
                     }
+                    // 가져온 내용이 동기화에서 이기도록 수정 시각을 올린다 — 병합은 시각이 같으면 서버를 따른다
+                    touchDefectUpdatedAt(existing);
                     matchedThisFloor++;
                     return;
                 }

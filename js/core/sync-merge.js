@@ -321,10 +321,14 @@
         if (!serverRec) return localRec ? Object.assign({}, localRec) : null;
         if (!localRec) return Object.assign({}, serverRec);
 
+        // 시각이 같으면 **서버**를 따른다. 앱에서 고치면 시각이 항상 올라가므로, 같은 시각에 내용이
+        // 다른 건 서버에 직접 넣은 복구뿐이다. 2026-09-27 겨자씨 「지하1층 주차장-2」: 9/21 서버 복구가
+        // 시각을 안 올렸고, 9/19 껍데기를 든 옛 기기가 동점으로 이겨 9개를 되돌렸다.
         var serverContentTs = getDefectContentUpdatedAt(serverRec);
         var localContentTs = getDefectContentUpdatedAt(localRec);
-        var contentNewer = localContentTs >= serverContentTs ? localRec : serverRec;
-        var contentOlder = localContentTs >= serverContentTs ? serverRec : localRec;
+        var localContentWins = localContentTs > serverContentTs;
+        var contentNewer = localContentWins ? localRec : serverRec;
+        var contentOlder = localContentWins ? serverRec : localRec;
         var merged = Object.assign({}, contentOlder, contentNewer);
 
         var serverPosTs = getDefectPositionUpdatedAt(serverRec);
@@ -338,7 +342,8 @@
 
         var serverNoTs = Math.max(serverContentTs, Number(serverRec.updatedAt) || 0);
         var localNoTs = Math.max(localContentTs, Number(localRec.updatedAt) || 0);
-        var noSource = localNoTs >= serverNoTs ? localRec : serverRec;
+        // 번호도 동점이면 서버 — 같은 날 창평 B1F에서 옛 기기의 옛 번호가 이겨 번호가 겹쳤다
+        var noSource = localNoTs > serverNoTs ? localRec : serverRec;
         if (noSource.no != null && noSource.no !== '') merged.no = noSource.no;
         else if (serverRec.no) merged.no = serverRec.no;
         else if (localRec.no) merged.no = localRec.no;

@@ -202,4 +202,46 @@ testAppJsDelegatesMerge();
 testMovedExteriorDefectDoesNotComeBack();
 testMoveBackSurvivesOldTombstone();
 testAppJsMoveWritesTombstone();
+
+/**
+ * 2026-09-27 겨자씨 「지하1층 주차장-2」: 9/21 서버 복구가 수정 시각을 안 올렸고(09-16 그대로),
+ * 9/19 껍데기(기둥/균열/건조수축)를 든 옛 기기가 동기화하며 **시각 동점**으로 이겨 9개를 되돌렸다.
+ * 앱에서 고치면 시각이 올라가므로, 동점에 내용이 다르면 서버를 따른다.
+ */
+(function testTieKeepsServerContent() {
+    const T = 1789517586000; // 09-16 09:13:06
+    const server = { id: '1077ca1', no: 'NO.02', component: '보 및 데크슬래브', defectType: '녹 발생', size: '1.0x1.0', contentUpdatedAt: T, updatedAt: T };
+    const stale = { id: '1077ca1', no: 'NO.02', component: '기둥', defectType: '균열', size: '', contentUpdatedAt: T, updatedAt: T };
+    const merged = api.mergeDefectRecord(server, stale, {});
+    assert.strictEqual(merged.component, '보 및 데크슬래브', '동점이면 옛 기기의 껍데기가 서버 복구값을 덮으면 안 된다');
+    assert.strictEqual(merged.defectType, '녹 발생');
+    assert.strictEqual(merged.size, '1.0x1.0');
+
+    // 기기에서 나중에 고친 건 그대로 이긴다
+    const edited = Object.assign({}, stale, { component: '철골 보', contentUpdatedAt: T + 1, updatedAt: T + 1 });
+    assert.strictEqual(api.mergeDefectRecord(server, edited, {}).component, '철골 보');
+})();
+
+// 같은 날 창평 B1F: 옛 기기의 옛 번호가 동점으로 이겨 NO.16·NO.22가 두 개씩 됐다
+(function testTieKeepsServerNo() {
+    const T = 1789517586000;
+    const server = { id: 'p15', no: 'NO.15', contentUpdatedAt: T, updatedAt: T };
+    const stale = { id: 'p15', no: 'NO.16', contentUpdatedAt: T, updatedAt: T };
+    assert.strictEqual(api.mergeDefectRecord(server, stale, {}).no, 'NO.15');
+    const renumbered = Object.assign({}, stale, { updatedAt: T + 5 });
+    assert.strictEqual(api.mergeDefectRecord(server, renumbered, {}).no, 'NO.16', '기기에서 번호를 다시 매겼으면 기기 번호');
+})();
+
+// 동점을 서버로 바꿨으니, 결함 내용을 고치는 곳은 전부 시각을 올려야 한다(안 올리면 다음 동기화에 되돌아감)
+(function testContentEditPathsTouchTimestamp() {
+    const app = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8');
+    const inline = app.slice(app.indexOf('window.updateSurveyInlineField = function'));
+    const inlineBody = inline.slice(0, inline.indexOf('saveStateToLocalStorage();'));
+    assert.ok(/touchDefectUpdatedAt\(defect\)/.test(inlineBody), '조사표 칸 직접 수정이 수정 시각을 안 올린다');
+    const imp = app.indexOf('existing.isCarriedOver = true;');
+    assert.ok(imp > 0);
+    const impTail = app.slice(imp, app.indexOf('matchedThisFloor++;', imp));
+    assert.ok(/touchDefectUpdatedAt\(existing\)/.test(impTail), '엑셀 가져오기가 기존 결함 수정 시각을 안 올린다');
+})();
+
 console.log('test-sync-merge: ok');
