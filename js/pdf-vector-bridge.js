@@ -97,8 +97,15 @@
     return { rasterDataUrl, tiers, pdfDataUrl, isPdf: true };
   };
 
+  // 층 도면을 PDF 없는 그림으로 바꿨다는 표시(app.js markFloorPdfRemoved). 이 기기에 옛 PDF가 남아 있어도
+  // 쓰지 않는다 — 쓰면 핀 좌표 기준을 옛 PDF 크기로 잡아 그 층 핀이 전부 어긋난다(감사 O-05).
+  window.isFloorPdfRemoved = function (bldg, floorCode) {
+    return Number(bldg && bldg.floorPdfRemovedAt && bldg.floorPdfRemovedAt[floorCode]) > 0;
+  };
+
   window.getFloorPdfDataUrl = function (bldg, floorCode) {
     if (!bldg || !floorCode) return null;
+    if (window.isFloorPdfRemoved(bldg, floorCode)) return null;
     const map = bldg.floorDrawingPdfs;
     if (map && map[floorCode]) return map[floorCode];
     const drawing = bldg.floorDrawings && bldg.floorDrawings[floorCode];
@@ -186,6 +193,7 @@
   /** 메모리 → IndexedDB → Firestore floorDrawingPdfs·siteDrawingVault 순 PDF 원본 조회 */
   window.resolveFloorPdfDataUrlAsync = async function (bldg, floorCode) {
     if (!bldg || !floorCode) return null;
+    if (window.isFloorPdfRemoved(bldg, floorCode)) return null;
     let pdfDataUrl = window.getFloorPdfDataUrl(bldg, floorCode);
     if (pdfDataUrl) return pdfDataUrl;
     if (typeof idbGet === 'function') {

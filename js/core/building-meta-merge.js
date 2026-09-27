@@ -17,7 +17,9 @@
         // 반발경도 평균에 넣을 추정식 — 빠져 있어 동기화 때마다 서버 옛 값으로 초기화됐다(2026-09-22)
         'enabledStrengthFormulas',
         // 반발경도 장비 앤빌 평균(기준 82) — 같은 이유로 로컬 수정이 서버 옛 값에 덮이지 않게
-        'strengthAnvilAvg'
+        'strengthAnvilAvg',
+        // 층별 "PDF를 뺀 시각" — 도면을 그림으로 바꾼 층의 옛 PDF를 다른 기기도 버리게(감사 O-05, 2026-09-28)
+        'floorPdfRemovedAt'
     ];
 
     function metaUpdatedAt(bldg) {

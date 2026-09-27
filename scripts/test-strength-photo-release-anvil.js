@@ -93,7 +93,7 @@ function device(ndtData) {
 
 // ---- 5) 앤빌 ----
 assert.ok(metaMerge.KEYS.includes('strengthAnvilAvg'), '앤빌 장비평균은 건물 병합에서 로컬 값을 지킨다');
-assert.ok(/'enabledStrengthFormulas', 'strengthAnvilAvg'\n\s*\];/.test(app), 'app.js 예비 키 목록에도');
+assert.ok(/'enabledStrengthFormulas', 'strengthAnvilAvg'(, '[A-Za-z]+')*\n\s*\];/.test(app), 'app.js 예비 키 목록에도');
 {
     const local = { id: 'b1', strengthAnvilAvg: 80 };
     metaMerge.markDirty(local, 2000);
