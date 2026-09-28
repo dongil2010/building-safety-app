@@ -50,23 +50,32 @@ function extractConstLiteral(name, open) {
 }
 
 // ---------- 1) 종류 → 원인 ----------
-const causePreset = new Function(
-    extractConstLiteral('CORE_CRACK_CAUSE_PRESET', '[') + '\n' +
-    extractConstLiteral('defectCausePreset', '{') + '\nreturn defectCausePreset;'
-)();
+// 원인 매핑 구역(@@DEFECT_CAUSE_MAP_START ~ END)을 통째로 떼어 실행
+function loadCauseMap() {
+    const a = src.indexOf('// @@DEFECT_CAUSE_MAP_START');
+    const b = src.indexOf('// @@DEFECT_CAUSE_MAP_END');
+    assert.ok(a >= 0 && b > a, 'missing cause map markers');
+    return new Function(
+        extractFunction('normalizeComponentKey') + '\n' + src.slice(a, b) +
+        '\nreturn { defectCausePreset, getDefaultCausePresetList };'
+    )();
+}
+const causeMap = loadCauseMap();
+const causePreset = causeMap.defectCausePreset;
 
 function testTypeToCauseMapping() {
     const top = (key) => q.pickCausesAfterTypeChange({ groupOptions: [causePreset[key]], selected: [] }).selected;
-    assert.deepStrictEqual(top('균열'), ['건조수축']);
+    // 2026-09-28 과거 보고서 14건 집계 기준 맨 위 원인
+    assert.deepStrictEqual(top('균열'), ['건조수축 및 재료적 특성']);
     assert.deepStrictEqual(top('누수'), ['방수층 파손']);
     assert.deepStrictEqual(top('철근노출'), ['피복두께 부족']);
     assert.deepStrictEqual(top('박리/박락'), ['철근 부식 팽창']);
-    assert.deepStrictEqual(top('부식'), ['방청 불량']);
-    assert.deepStrictEqual(top('파손'), ['외부 충격']);
+    assert.deepStrictEqual(top('부식/녹'), ['방청 불량']);
+    assert.deepStrictEqual(top('부식'), ['노후화']);
+    assert.deepStrictEqual(top('파손'), ['시공미흡']);
     assert.ok(causePreset['균열'].includes('부등침하') && causePreset['균열'].includes('철근 부식 팽창'));
-    // 기존 원인 문자열은 그대로(보고서·기존 데이터 호환)
-    ['건조수축', '재료적 특성', '수화열·온도균열', '내력부족', '과하중'].forEach((c) => {
-        assert.ok(causePreset['균열'].includes(c), 'kept crack cause ' + c);
+    ['과하중', '개구부 주위 응력집중', '주변부재의 구속'].forEach((c) => {
+        assert.ok(causePreset['균열'].includes(c), 'crack cause ' + c);
     });
 
     // ★원인이 있으면 ★가 자동 체크
@@ -79,12 +88,12 @@ function testTypeToCauseMapping() {
     r = q.pickCausesAfterTypeChange({ groupOptions: [causePreset['균열']], selected: ['지하수 유입(직접)'], autoPicked: [] });
     assert.deepStrictEqual(r.selected, ['지하수 유입(직접)']);
     r = q.pickCausesAfterTypeChange({ groupOptions: [causePreset['균열']], selected: ['방수층 파손'], autoPicked: ['방수층 파손'] });
-    assert.deepStrictEqual(r.selected, ['건조수축']);
+    assert.deepStrictEqual(r.selected, ['건조수축 및 재료적 특성']);
     // 기타만 있으면 자동 체크하지 않음
     r = q.pickCausesAfterTypeChange({ groupOptions: [['기타']], selected: [] });
     assert.deepStrictEqual(r.selected, []);
     // 자동 원인만 있을 때 다른 원인을 켜면 바꿔 끼움, 그 뒤는 복수 선택
-    let m = q.applyManualCauseToggle({ value: '과하중', checked: true, selected: ['건조수축', '과하중'], autoPicked: ['건조수축'] });
+    let m = q.applyManualCauseToggle({ value: '과하중', checked: true, selected: ['건조수축 및 재료적 특성', '과하중'], autoPicked: ['건조수축 및 재료적 특성'] });
     assert.deepStrictEqual(m.selected, ['과하중']);
     assert.deepStrictEqual(m.autoPicked, []);
     m = q.applyManualCauseToggle({ value: '내력부족', checked: true, selected: ['과하중', '내력부족'], autoPicked: [] });

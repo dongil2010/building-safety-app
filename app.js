@@ -23140,7 +23140,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             if (isDefectBulkEditMode()) markDefectBulkFieldChanged('component');
             if (value && value !== currentComponent) recordDefectPickUsage('component', currentCategory, value);
             syncDefectComboFields(componentSelect, componentInput, value);
-            updateDefectTypeDropdown(currentCategory, getDefectComboValue(typeSelect, typeInput));
+            refreshDefectTypeAfterComponentChange(currentCategory);
             if (typeof scheduleDefectAutoApply === 'function') scheduleDefectAutoApply();
             refreshDefectQuickPickBar();
         };
@@ -23181,10 +23181,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 inputId: 'defectComponentInput',
                 onChange: () => {
                     const cat = document.getElementById('defectCategory')?.value || '구조체';
-                    updateDefectTypeDropdown(cat, getDefectComboValue(
-                        document.getElementById('defectType'),
-                        document.getElementById('defectTypeInput')
-                    ));
+                    refreshDefectTypeAfterComponentChange(cat);
                 }
             },
             {
@@ -23567,10 +23564,6 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     const NONSTRUCT_WALL_JOINT_DEFECTS = [
         '상태양호', ...WALL_CRACK_KINDS, '이격', '줄눈 손상/탈락', '파손/결손', '누수', '백태/유출', '기타'
     ];
-    const NONSTRUCT_WALL_JOINT_CAUSES = [
-        '이질재료 거동차이', '시공미흡', '온도·수축팽창', '구조체 변위', '부등침하',
-        '지진·진동', '이음·줄눈 불량', '습기·동결', '기타'
-    ];
 
     // ── 마감재: 부재별 결함 종류 ──
     const EXT_TILE_DEFECTS = [
@@ -23911,6 +23904,30 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         refreshDefectQuickPickBar();
     }
 
+    /**
+     * 부재를 바꾼 뒤 결함 종류 목록·발생 원인 다시 맞추기(2026-09-28).
+     * 예전에는 부재를 바꾸면 체크한 원인이 지워졌음 → 직접 고른 원인은 유지,
+     * 자동으로 붙은 원인만 새 부재 기준 기본값으로 바꿈. 일괄 수정은 원인을 그대로 둠.
+     */
+    function refreshDefectTypeAfterComponentChange(category) {
+        const typeSelect = document.getElementById('defectType');
+        const typeInput = document.getElementById('defectTypeInput');
+        const causesBefore = getSelectedCausesFromUi();
+        const typeNow = getDefectComboValue(typeSelect, typeInput);
+        updateDefectTypeDropdown(category, typeNow);
+        if (!hasActionableDefectType(typeNow)) return;
+        if (isDefectBulkEditMode()) {
+            updateDefectCauseDropdown(typeNow, joinCauseList(causesBefore));
+            return;
+        }
+        const auto = new Set(window._defectAutoCauses || []);
+        if (auto.size) {
+            applyCauseAutoPickForType(typeNow, causesBefore.filter(c => !auto.has(c)));
+        } else {
+            updateDefectCauseDropdown(typeNow, joinCauseList(causesBefore));
+        }
+    }
+
     function getSelectedCrackKindsFromUi() {
         const component = getDefectComboValue(
             document.getElementById('defectComponent'),
@@ -23979,7 +23996,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         }
         const groups = getCauseDisplayGroups(t);
         const res = q.pickCausesAfterTypeChange({
-            groupOptions: groups.map((g) => getCauseOptionsForKey(g.key)),
+            groupOptions: groups.map((g) => getCauseOptionsForKey(g.key, g.types)),
             groupFavorites: groups.map((g) => getDefectFavoriteList('cause', g.key)),
             selected: Array.isArray(selectedOverride) ? selectedOverride : getSelectedCausesFromUi(),
             autoPicked: window._defectAutoCauses || [],
@@ -25457,78 +25474,163 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     window.openSurveyCrackMonitorDefect = window.openNdtCrackMonitorDefect;
 
     // --- Dynamic Defect Cause Presets & Custom Adding ---
-    // 균열 원인: 기존 5종 + 부등침하·철근 부식 팽창(2026-09-28). 맨 위(건조수축)가 기본 자동 체크.
-    const CORE_CRACK_CAUSE_PRESET = [
-        '건조수축', '재료적 특성', '수화열·온도균열', '내력부족', '과하중', '부등침하', '철근 부식 팽창'
-    ];
+    // @@DEFECT_CAUSE_MAP_START (scripts/test-defect-cause-mapping.js가 이 구간을 떼어 시험함 — 표시 지우지 말 것)
+    /*
+     * 결함 종류 → 발생 원인 기본 목록 (2026-09-28 개정). 맨 위 원인이 기본 자동 체크.
+     * 근거: 회사 과거 결함표 14개(결함 3,581행) 원인 빈도 + 점검 실무 기준. 회사가 늘 쓰는 표현
+     *   (「건조수축 및 재료적 특성」·「개구부 주위 응력집중」·「결함부위 수분유입」·「상부 배관 누수」 등)을 그대로 씀.
+     * 저장 키는 그대로(균열은 방향·부재가 달라도 '균열' 한 키) — 계정이 추가/숨김/순서/★로 바꾼 설정이 항상 우선.
+     * 기존 원인 문자열은 이름을 바꾸지 않음(목록에서 빠져도 예전 결함에 적힌 원인은 그대로 표시).
+     */
+    const C_DS = '건조수축 및 재료적 특성';
+    const C_OPEN = '개구부 주위 응력집중';
+    const C_RESTR = '주변부재의 구속';
+    const C_CORNER = '코너부위 응력집중';
+    const C_POUR = '이어치기 시공미흡';
+    const C_SHORE = '동바리 존치기간 미준수';
+    const C_WET = '결함부위 수분유입';
+    const C_PIPE = '상부 배관 누수';
+    const C_MISM = '이질재료 거동차이';
+    const C_MISM_WORK = '이질재료 접합부 시공미흡';
+    const C_WORK = '시공미흡';
+    const C_SRC = 'SRC기둥 이질재료 간 인장변형률 상이';
+    const C_PLASTER = '미장 시공미흡';
+    const C_POST = '후속 공정에 의한 인위적 손상';
+    const C_MBAR = 'M-bar 클립 고정미흡';
+    const C_CODE = '현행기준 미달';
+    const C_MASONRY = '조적 쌓기 불량';
+    const C_EARTH = '토압 작용';
+
+    // 균열 원인(부재·방향과 모를 때 쓰는 기본) — 회사 결함표 균열 2,470행 중 88%가 「건조수축 및 재료적 특성」
+    const CORE_CRACK_CAUSE_PRESET = [C_DS, C_OPEN, C_RESTR, '과하중', '부등침하', '철근 부식 팽창'];
+    const CRACK_MESH_CAUSES = [C_DS, C_PLASTER, '동결융해 반복', C_WORK];
+    const CRACK_MASONRY_CAUSES = [C_DS, C_OPEN, C_RESTR, C_MISM, C_MASONRY];
+    const CRACK_SLAB_CAUSES = [C_DS, C_RESTR, '과하중', C_SHORE, '철근 부식 팽창'];
+    const CRACK_NONSTRUCT_CAUSES = [C_MISM, C_DS, C_WORK, '외부 충격'];
+    const CRACK_FINISH_CAUSES = ['바탕 균열 전달', C_WORK, C_DS];
+
+    /** 균열: 부재군 → { 균열 방향 → 원인 } ('*' = 방향 모름·기타 방향) */
+    const CRACK_CAUSE_BY_MEMBER = {
+        '기둥': {
+            '수직균열': [C_DS, '철근 부식 팽창', '과하중', C_RESTR],
+            '수평균열': [C_DS, C_POUR, '철근 부식 팽창', '부등침하'],
+            '경사균열': [C_DS, '과하중', '부등침하', C_RESTR],
+            '망상균열': CRACK_MESH_CAUSES,
+            '*': [C_DS, '과하중', '철근 부식 팽창', '부등침하']
+        },
+        'SRC기둥': {
+            '망상균열': [C_SRC, C_DS, C_PLASTER],
+            '*': [C_SRC, C_DS, C_MISM, '과하중']
+        },
+        '보': {
+            '수직균열': [C_DS, '과하중', C_SHORE, '철근 부식 팽창'],
+            '수평균열': [C_DS, '철근 부식 팽창', C_POUR, '과하중'],
+            '경사균열': [C_DS, '과하중', C_SHORE, '부등침하'],
+            'U자형균열': [C_DS, '과하중', C_RESTR],
+            '망상균열': CRACK_MESH_CAUSES,
+            '*': [C_DS, '과하중', C_SHORE, '철근 부식 팽창']
+        },
+        '슬래브': { '망상균열': CRACK_MESH_CAUSES, '*': CRACK_SLAB_CAUSES },
+        '데크슬래브': { '망상균열': CRACK_MESH_CAUSES, '*': CRACK_SLAB_CAUSES },
+        '기초': { '*': [C_DS, '부등침하', '과하중', C_RESTR] },
+        '벽체': {
+            '수직균열': [C_DS, C_OPEN, C_RESTR, C_CORNER, '부등침하'],
+            '수평균열': [C_DS, C_OPEN, C_POUR, C_RESTR, '부등침하'],
+            '경사균열': [C_DS, C_OPEN, C_RESTR, '부등침하'],
+            '망상균열': CRACK_MESH_CAUSES,
+            '*': [C_DS, C_OPEN, C_RESTR, '부등침하']
+        },
+        '옹벽': { '망상균열': CRACK_MESH_CAUSES, '*': [C_DS, C_EARTH, '부등침하', '철근 부식 팽창'] },
+        '파라펫': { '망상균열': CRACK_MESH_CAUSES, '*': [C_DS, '온도변화 수축팽창', '철근 부식 팽창', C_RESTR] },
+        'RC접합부': { '*': [C_DS, C_MISM, C_POUR, '부등침하'] },
+        '조적벽체': {
+            '경사균열': [C_DS, C_OPEN, '부등침하', C_MISM, C_MASONRY],
+            '망상균열': [C_DS, C_PLASTER, C_WORK],
+            '*': CRACK_MASONRY_CAUSES
+        },
+        '벽체접합부': { '*': [C_MISM, C_DS, C_MISM_WORK, C_WORK] },
+        'ALC벽': { '*': CRACK_NONSTRUCT_CAUSES },
+        '칸막이벽': { '*': CRACK_NONSTRUCT_CAUSES },
+        '비구조기타': { '*': [C_DS, C_MISM, C_WORK, '외부 충격'] },
+        '타일': { '*': [C_WORK, '바탕 균열 전달', C_DS, '외부 충격'] },
+        '석재': { '*': [C_WORK, '바탕 균열 전달', C_DS, '외부 충격'] },
+        '도장': { '*': ['바탕 균열 전달', C_DS, C_WORK, '노후화'] },
+        '내장도장': { '*': ['바탕 균열 전달', C_DS, C_WORK, '노후화'] },
+        '바닥마감': { '*': [C_DS, '신축줄눈 불량', '바탕 균열 전달', C_WORK] },
+        '마감기타': { '*': CRACK_FINISH_CAUSES },
+        '구조기타': { '*': [C_DS, C_RESTR, '과하중', '부등침하', '철근 부식 팽창'] }
+    };
+
+    /** 균열 외 종류: 부재군에 따라 순서·내용이 달라지는 것만 (없으면 defectCausePreset[키]) */
+    const DEFECT_CAUSE_BY_MEMBER = {
+        '누수': {
+            '벽체': ['방수층 파손', C_WET, '창호 주변 밀봉 불량', '외벽 조인트 파손', '기타'],
+            '조적벽체': ['방수층 파손', C_WET, '창호 주변 밀봉 불량', '외벽 조인트 파손', '기타'],
+            'ALC벽': ['방수층 파손', C_WET, '창호 주변 밀봉 불량', '외벽 조인트 파손', '기타'],
+            '옹벽': ['지하수 유입', C_WET, '방수층 파손', '콘크리트 투수', '기타'],
+            '기초': ['지하수 유입', C_WET, '방수층 파손', '콘크리트 투수', '기타'],
+            '파라펫': ['방수층 파손', C_WET, '이음부 실런트 노후', '기타'],
+            '창호': ['창호 주변 밀봉 불량', C_WET, '이음부 실런트 노후', '방수층 파손', '기타'],
+            '패널': [C_WET, '노후화', '이음부 실런트 노후', '부식 천공', '기타'],
+            '금속패널': [C_WET, '노후화', '이음부 실런트 노후', '부식 천공', '기타'],
+            '벽체접합부': ['방수층 파손', C_WET, '외벽 조인트 파손', '이음부 실런트 노후', '기타']
+        },
+        '처짐': {
+            '천장': [C_WORK, C_MBAR, '수분 흡수 팽창', C_PIPE, '노후화', '기타']
+        },
+        '들뜸/탈락': {
+            '천장': [C_WORK, '노후화', C_PIPE, C_MBAR, '사용자 부주의', '기타'],
+            '석재': [C_WORK, '철물 부식 팽창', '노후화', '사용자 부주의', '기타'],
+            '수장': [C_WORK, '노후화', '습기 침투', '부착력 저하', '기타']
+        },
+        '파손': {
+            '천장': [C_WORK, C_PIPE, '사용자 부주의', C_MBAR, '기타'],
+            '타일': [C_WORK, '사용자 부주의', '바탕 균열 전달', '외부 충격', '기타']
+        },
+        '변형·기울음': {
+            '난간': ['외부 충격', '체결 이완', '지지 불량', '사용자 부주의', '과하중', '기타']
+        },
+        '박리/탈락': {
+            '내장도장': [C_WET, '결로', '노후화', '바탕 처리 불량', '기타']
+        }
+    };
+
     const defectCausePreset = {
-        // ── 구조체·조적벽체 균열 공통 (5종) ──
+        // ── 균열 (부재·방향별 목록은 CRACK_CAUSE_BY_MEMBER) ──
         '균열': CORE_CRACK_CAUSE_PRESET.slice(),
-        '누수': [
-            '방수층 파손', '방수층 시공불량', '배관 파손/연결부 누수', '균열부 침투',
-            '지하수 유입', '외벽 조인트 파손', '창호 주변 밀봉 불량', '드레인·배수 불량',
-            '옥상·파라펫 손상', '이음부 실런트 노후', '콘크리트 투수', '기타'
-        ],
-        '철근노출': [
-            '피복두께 부족', '콘크리트 중성화', '염해 손상', '철근 부식 팽창',
-            '시공 다짐 불량', '거푸집 변형', '박리·박락 동반', '누수·습기', '기타'
-        ],
-        '백태/유출': [
-            '수분 침투 및 염류 용해', '방수층 손상', '콘크리트 투수성 증가',
-            '배수 불량', '균열부 침투', '지하수 상승', '기타'
-        ],
-        '박리/박락': [
-            '철근 부식 팽창', '동결융해 반복', '부착력 저하', '시공 불량',
-            '과하중 충격', '중성화', '염해', '화재 손상', '기타'
-        ],
-        '콘크리트 박리': [
-            '철근 부식 팽창', '동결융해 반복', '부착력 저하', '시공 불량',
-            '과하중 충격', '중성화', '염해', '화재 손상', '기타'
-        ],
-        '콘크리트 박락': [
-            '철근 부식 팽창', '동결융해 반복', '부착력 저하', '시공 불량',
-            '과하중 충격', '중성화', '염해', '화재 손상', '기타'
-        ],
-        '신축이음/재료분리 손상': [
-            '신축이음 노후화', '온도변화 수축팽창', '시공 불량', '구조체 변위',
-            '지진·진동', '이음재 탈락', '재료분리(골재 노출)', '기타'
-        ],
-        // ── 비구조체 결함 (구·신 라벨 모두) ──
-        '조적벽체 균열': CORE_CRACK_CAUSE_PRESET.slice(),
-        '이격': [
-            '이질재료 거동차이', '구조체 변위', '부등침하', '온도·열팽창', '시공미흡', '이음 불량',
-            '외력·충격', '지진·진동', '기타'
-        ],
+        '미장균열': [C_DS, C_PLASTER, '바탕 균열 전달', C_RESTR, C_WORK],
+        '조적벽체 균열': CRACK_MASONRY_CAUSES.slice(),
+        // ── 구조체 공통 ──
+        '누수': ['방수층 파손', C_WET, C_PIPE, '배수 불량', '노후화', '기타'],
+        '철근노출': ['피복두께 부족', '철근 부식 팽창', C_WORK, '시공 다짐 불량', C_POST, '콘크리트 중성화', '기타'],
+        '백태/유출': [C_WET, '방수층 파손', '배수 불량', '콘크리트 투수성 증가', C_WORK, '기타'],
+        '박리/박락': ['철근 부식 팽창', C_WORK, '노후화', '염해', C_POST, '동결융해 반복', '기타'],
+        '콘크리트 박리': ['철근 부식 팽창', C_WORK, C_WET, '피복두께 부족', '동결융해 반복', '기타'],
+        '콘크리트 박락': ['철근 부식 팽창', C_WORK, '노후화', '염해', C_POST, '기타'],
+        '신축이음/재료분리 손상': ['시공 다짐 불량', C_POUR, '피복두께 부족', '신축이음 노후화', '온도변화 수축팽창', '기타'],
+        // ── 비구조체 ──
+        '이격': [C_MISM, C_DS, C_WORK, C_MISM_WORK, '부등침하', '기타'],
         '줄눈 손상/탈락': [
             '몰탈 노후화', '온도·수축', '시공 불량', '진동·충격', '누수·동결', '기타'
         ],
-        '배부름·전도 징후': [
-            '기초 부등침하', '과하중', '지진·진동', '벽체 두께·지지 부족', '누수·동결', '기타'
-        ],
-        '파손/결손': [
-            '충격·외력', '시공 불량', '노후화', '동결융해', '기타'
-        ],
+        '배부름·전도 징후': [C_WORK, C_MASONRY, '기초 부등침하', '과하중', '누수·동결', '기타'],
+        '파손/결손': [C_WORK, '사용자 부주의', '바탕 균열 전달', '외부 충격', '노후화', '기타'],
         '이격/파손': [
             '구조체 변위', '온도·열팽창', '시공 불량', '지진·진동', '이음 불량', '기타'
         ],
         '변형·기울음': [
             '지지 불량', '과하중', '지진·진동', '시공 오차', '습기 변형', '기타'
         ],
+        '변형': [C_WORK, '외부 충격', '지지 불량', '과하중', '기타'],
         '마감 손상': [
             '충격', '습기', '시공 불량', '노후화', '기타'
         ],
-        '줄눈 손상': [
-            '줄눈재 노후화', '온도변화', '시공 불량', '진동', '누수', '기타'
-        ],
-        '백태': [
-            '수분 침투', '염류 용해', '배수 불량', '방수 불량', '기타'
-        ],
+        '줄눈 손상': [C_WORK, '줄눈재 노후화', '바탕 균열 전달', '온도변화', '기타'],
+        '백태': [C_WET, '방수층 파손', '줄눈재 노후화', '배수 불량', '기타'],
         '이격/개방불량': [
             '실런트 노후화', '프레임 변형', '시공 불량', '온도·열팽창', '하드웨어 이완', '기타'
         ],
-        '유리 파손·금': [
-            '충격', '열응력', '시공 응력', '프레임 변형', '풍압', '기타'
-        ],
+        '유리 파손·금': ['외부 충격', '사용자 부주의', '열응력', '프레임 변형', '노후화', '기타'],
         '프레임 변형/부식': [
             '부식', '과하중', '시공 불량', '습기·결로', '충격', '기타'
         ],
@@ -25556,18 +25658,14 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         '패널 변형/파손': [
             '충격', '풍압', '부식', '시공 불량', '기타'
         ],
-        '파손/천공': [
-            '충격', '부식 천공', '시공 손상', '낙하물', '기타'
-        ],
+        '파손/천공': ['노후화', C_WET, C_WORK, '외부 충격', '부식 천공', '기타'],
         '이음부 손상': [
             '실런트·가스켓 노후', '체결 이완', '온도변형', '시공 불량', '누수', '기타'
         ],
         '들뜸/변형': [
             '체결 이완', '풍압', '온도변형', '시공 불량', '부식', '기타'
         ],
-        '체결부 이완': [
-            '진동', '시공 토크 부족', '부식', '반복 하중', '기타'
-        ],
+        '체결부 이완': [C_WORK, '유지관리 부족', '진동', '부식', '노후화', '기타'],
         // ── 난간 ──
         '이격/흔들림': [
             '시공미흡', '체결 이완', '사용자 부주의', '외력·충격', '부식', '노후화', '기타'
@@ -25575,12 +25673,11 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         '낙하·탈락 위험': [
             '시공미흡', '체결 이완', '부식', '외력·충격', '과하중', '사용자 부주의', '노후화', '기타'
         ],
-        '높이·간격 불량': [
-            '시공미흡', '설계·시공 오차', '개조·임의 변경', '유지관리 부족', '기타'
-        ],
+        '높이·간격 불량': [C_CODE, C_WORK, '개조·임의 변경', '기타'],
         '변형/들뜸': [
             '체결 이완', '온도·열변형', '풍압', '시공 불량', '부식', '기타'
         ],
+        // ── 예전 결함 종류 이름(옛 데이터·직접 입력 호환) ──
         '조인트 이격/파손': [
             '실런트 노후화', '구조체 변위', '온도·열팽창', '시공 불량',
             '이음폭 부족', '지진·진동', '기타'
@@ -25597,38 +25694,21 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             '실런트 노후화', '시공 불량', '구조체 변위', '온도·열팽창',
             '프레임 변형', '지진·진동', '기타'
         ],
-        // ── 마감재 결함 ──
-        '들뜸/탈락': [
-            '접착·부착력 저하', '시공 불량(바탕 미흡)', '습기 침투', '온도·열팽창',
-            '진동·충격', '바탕 균열 전달', '동결융해', '기타'
-        ],
-        '파손/팟칭': [
-            '충격', '철물 부식 팽창', '동결융해', '시공 불량', '기타'
-        ],
-        '철물 노출·녹': [
-            '피복·마감 손상', '습기', '부식', '시공 불량', '유지관리 부족', '기타'
-        ],
-        '변색/오염': [
-            '자외선', '대기오염', '습기·결로', '도료·마감 노후', '유지관리 부족', '기타'
-        ],
-        '박리/탈락': [
-            '바탕 처리 불량', '습기', '도료 노후', '자외선', '재도장 주기 초과', '기타'
-        ],
+        // ── 마감재 ──
+        '들뜸/탈락': [C_WORK, '노후화', '부착력 저하', '온도변화 수축팽창', '바탕 균열 전달', '기타'],
+        '파손/팟칭': [C_WORK, '사용자 부주의', '외부 충격', '철물 부식 팽창', '동결융해', '기타'],
+        '철물 노출·녹': ['피복·마감 손상', '습기', '시공 불량', '유지관리 부족', '기타'],
+        '변색/오염': ['방수층 파손', C_WET, '결로', C_PIPE, '자외선', '대기오염', '기타'],
+        '박리/탈락': [C_WET, '노후화', '바탕 처리 불량', C_WORK, '방수층 파손', '기타'],
         '부풀음': [
             '습기 침투', '바탕 수분', '시공 불량', '결로', '기타'
         ],
         '곰팡이·결로 흔적': [
             '환기 부족', '단열 불량', '누수·습기', '결로', '기타'
         ],
-        '오염/변색': [
-            '누수', '결로', '오염', '노후화', '기타'
-        ],
-        '누수 흔적': [
-            '상부 누수', '배관 누수', '방수 불량', '결로', '기타'
-        ],
-        '균열/파손': [
-            '충격', '바탕 침하', '과하중', '시공 불량', '동결융해', '기타'
-        ],
+        '오염/변색': [C_PIPE, '방수층 파손', '결로', '상부 누수', '기타'],
+        '누수 흔적': [C_PIPE, '방수층 파손', '결로', C_WET, '기타'],
+        '균열/파손': ['충격', '바탕 균열 전달', '바탕 침하', '과하중', '시공 불량', '기타'],
         '마모': [
             '통행 마모', '유지관리 부족', '재료 내구성', '기타'
         ],
@@ -25660,47 +25740,22 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         '석재 팟칭': [
             '충격 손상', '철물 부식 팽창', '접착력 저하', '동결융해', '기타'
         ],
-        '부식/녹': [
-            '도장 손상', '습기·누수', '염해', '유지관리 부족', '결로', '기타'
-        ],
-        '부식': [
-            '방청 불량', '수분 노출', '도막 노후화', '염해', '결로·습기', '기타'
-        ],
-        '파손': [
-            '외부 충격', '노후화', '시공 불량', '진동', '기타'
-        ],
-        '변형/좌굴': [
-            '과하중', '좌굴', '시공 불량', '충돌·충격', '온도변형', '기타'
-        ],
-        '볼트 이완/파손': [
-            '체결 불량', '진동', '과하중', '부식', '피로', '기타'
-        ],
-        '용접부 균열/불량': [
-            '용접 불량', '피로', '잔류응력', '과하중', '시공관리 미흡', '기타'
-        ],
-        '도장 박리': [
-            '도장 노후화', '습기', '바탕 처리 불량', '자외선', '기타'
-        ],
-        '뿜칠 박락': [
-            '부착력 저하', '시공 불량', '습기·누수', '진동·충격',
-            '두께 부족', '바탕면 처리 불량', '노후화', '기타'
-        ],
-        '뿜칠 미시공': [
-            '시공 누락', '피복 두께 부족', '부위 미처리', '시공관리 미흡',
-            '접합부·볼트부 미시공', '기타'
-        ],
-        '접합부 손상': [
-            '볼트 이완', '용접 불량', '과하중', '시공 불량', '부식', '기타'
-        ],
+        // ── 철골·데크 ──
+        '부식/녹': ['방청 불량', '노후화', C_WET, '방수층 파손', C_WORK, '기타'],
+        '부식': ['노후화', '방청 불량', C_WET, '결로·습기', '염해', '기타'],
+        '파손': [C_WORK, '사용자 부주의', '외부 충격', '바탕 균열 전달', '노후화', '기타'],
+        '변형/좌굴': [C_WORK, '과하중', '외부 충격', '강성 부족', '온도변형', '기타'],
+        '볼트 이완/파손': [C_WORK, '체결 불량', '진동', '부식', '피로', '기타'],
+        '용접부 균열/불량': ['용접 불량', '피로', '잔류응력', '과하중', '기타'],
+        '도장 박리': ['도장 노후화', '바탕 처리 불량', '습기', '자외선', '기타'],
+        '뿜칠 박락': [C_WORK, C_POST, '노후화', C_WET, '방수층 파손', '부착력 저하', '기타'],
+        '뿜칠 미시공': [C_WORK, C_POST, '시공 누락', '피복 두께 부족', '기타'],
+        '접합부 손상': ['볼트 이완', '용접 불량', '부식', '과하중', '시공 불량', '기타'],
         '단면 손실': [
             '부식', '화재', '충돌', '마모', '기타'
         ],
-        '처짐': [
-            '과하중', '강성 부족', '시공 불량', '장기 크리프', '부등침하', '기타'
-        ],
-        '데크플레이트 부식': [
-            '습기·누수', '도장 손상', '염해', '결로', '기타'
-        ],
+        '처짐': ['과하중', '강성 부족', '장기 크리프', C_WORK, '기타'],
+        '데크플레이트 부식': ['방수층 파손', '방청 불량', C_WET, '결로', '기타'],
         // ── 공통 fallback ──
         '기타': [
             '노후화', '시공 불량', '외력·충격', '환경 요인', '유지관리 부족',
@@ -25708,11 +25763,133 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         ]
     };
 
+    /** 원인 목록을 고를 부재군 (부재 명칭 → 기둥/보/벽체/…, 모르면 분류별 기타) */
+    function getCauseMemberGroup(category, component) {
+        const k = normalizeComponentKey(component);
+        if (k) {
+            if ((k.includes('벽체') && k.includes('접합')) || k === '벽체접합부') return '벽체접합부';
+            if (k.includes('철골')) return '철골';
+            if (k.includes('데크')) return '데크슬래브';
+            if (k.includes('접합')) return 'RC접합부';
+            if (k.includes('SRC') || k.includes('src')) return 'SRC기둥';
+            if (k.includes('조적')) return '조적벽체';
+            if (k.includes('ALC') || k.includes('alc')) return 'ALC벽';
+            if (k.includes('칸막이')) return '칸막이벽';
+            if (k.includes('천장')) return '천장';
+            if (k.includes('타일')) return '타일';
+            if (k.includes('석재')) return '석재';
+            if (k.includes('내장도장')) return '내장도장';
+            if (k.includes('도장') || k.includes('페인트')) return '도장';
+            if (k.includes('금속') && k.includes('패널')) return '금속패널';
+            if (k.includes('지붕') || k.includes('패널')) return '패널';
+            if (k.includes('수장')) return '수장';
+            if (k.includes('바닥')) return '바닥마감';
+            if (k.includes('창') && !k.includes('천장')) return '창호';
+            if (k.includes('셔터')) return '셔터';
+            if (k.includes('난간')) return '난간';
+            if (k.includes('옹벽')) return '옹벽';
+            if (k.includes('파라펫')) return '파라펫';
+            if (k.includes('기둥')) return '기둥';
+            if (k.includes('벽')) return '벽체';
+            if (k.includes('기초')) return '기초';
+            if (k.includes('계단') || k.includes('슬래브')) return '슬래브';
+            if (k.includes('보') || k.includes('거더') || k.includes('빔')) return '보';
+            if (k === '문' || k.includes('도어')) return '문';
+        }
+        if (category === '마감재') return '마감기타';
+        if (category === '비구조체') return '비구조기타';
+        return '구조기타';
+    }
+
+    function uniqCauseList(list) {
+        const out = [];
+        (list || []).forEach((c) => {
+            const t = String(c || '').trim();
+            if (t && !out.includes(t)) out.push(t);
+        });
+        return out;
+    }
+
+    /**
+     * 앱 기본 원인 목록(계정 설정 반영 전). 맨 위가 자동 체크 후보.
+     * @param {string} key  getCauseKey / getCauseDisplayGroups의 키
+     * @param {string[]} [types] 그 그룹의 결함 종류(균열이면 수직균열·경사균열 …, 고른 순)
+     * @param {string} [category] 구조체/비구조체/마감재
+     * @param {string} [component] 부재 명칭
+     */
+    function getDefaultCausePresetList(key, types, category, component) {
+        const k = String(key || '').trim() || '기타';
+        const group = getCauseMemberGroup(category, component);
+        if (k === '균열') {
+            const byMember = CRACK_CAUSE_BY_MEMBER[group] || null;
+            if (!byMember) return CORE_CRACK_CAUSE_PRESET.slice();
+            const kinds = (Array.isArray(types) && types.length ? types : ['균열'])
+                .map((t) => String(t || '').trim()).filter(Boolean);
+            const merged = [];
+            kinds.forEach((t) => { merged.push(...(byMember[t] || byMember['*'] || CORE_CRACK_CAUSE_PRESET)); });
+            return uniqCauseList(merged);
+        }
+        const byMember = DEFECT_CAUSE_BY_MEMBER[k];
+        if (byMember && byMember[group]) return byMember[group].slice();
+        return (defectCausePreset[k] || defectCausePreset['기타']).slice();
+    }
+
+    /** 이 키에서 앱 기본으로 나올 수 있는 모든 원인(부재·방향 전부) — 계정 순서가 의미 있는지 판단용 */
+    function getAllDefaultCausesForKey(key) {
+        const k = String(key || '').trim() || '기타';
+        const all = [...(defectCausePreset[k] || [])];
+        if (k === '균열') {
+            Object.values(CRACK_CAUSE_BY_MEMBER).forEach((m) => Object.values(m).forEach((l) => all.push(...l)));
+        }
+        if (DEFECT_CAUSE_BY_MEMBER[k]) Object.values(DEFECT_CAUSE_BY_MEMBER[k]).forEach((l) => all.push(...l));
+        return uniqCauseList(all);
+    }
+
+    /**
+     * 계정 원인 순서 중 실제로 쓸 것. 기본 원인이 하나도 없는 순서(직접 추가한 원인만 뒤에 붙어 쌓인 것)는
+     * 사용자가 끌어서 정한 순서가 아니므로 무시 — 직접 추가한 원인이 맨 위로 올라와 매번 자동 체크되던 문제(2026-09-28).
+     */
+    function getEffectiveCauseOrder(key, orderList) {
+        if (!Array.isArray(orderList) || !orderList.length) return [];
+        const defaults = new Set(getAllDefaultCausesForKey(key));
+        return orderList.some((t) => defaults.has(t)) ? orderList : [];
+    }
+    // @@DEFECT_CAUSE_MAP_END
+
+    let _knownDefaultCauseSet = null;
+    /** 예전 기본 목록에 있던 가운뎃점·빗금 이름. 기존 결함 기록을 열 때 쪼개지지 않게 */
+    const LEGACY_CAUSE_LABELS = [
+        '수화열·온도균열', '배관 파손/연결부 누수', '드레인·배수 불량', '옥상·파라펫 손상', '박리·박락 동반',
+        '벽체 두께·지지 부족', '충격·외력', '접착·부착력 저하', '도료·마감 노후', '습기·누수', '충돌·충격',
+        '접합부·볼트부 미시공'
+    ];
+    /** 원인 목록에 있는 원인 이름(가운뎃점·빗금이 들어간 이름도 한 개로 유지하려고) */
+    function isKnownCauseLabel(text) {
+        const t = String(text || '').trim();
+        if (!t) return false;
+        if (!_knownDefaultCauseSet) {
+            _knownDefaultCauseSet = new Set();
+            Object.keys(defectCausePreset).forEach((k) => getAllDefaultCausesForKey(k).forEach((c) => _knownDefaultCauseSet.add(c)));
+            LEGACY_CAUSE_LABELS.forEach((c) => _knownDefaultCauseSet.add(c));
+        }
+        if (_knownDefaultCauseSet.has(t)) return true;
+        const customs = (window.state && window.state.customDefectCauses) || {};
+        return Object.keys(customs).some((k) => Array.isArray(customs[k]) && customs[k].includes(t));
+    }
+
     function parseCauseList(raw) {
-        return String(raw == null ? '' : raw)
-            .split(/[,，/·•|]+/)
-            .map(s => s.trim())
-            .filter(Boolean);
+        const out = [];
+        String(raw == null ? '' : raw).split(/[,，]+/).forEach((part) => {
+            const t = part.trim();
+            if (!t) return;
+            // 목록에 있는 이름(수화열·온도균열, 배관 파손/연결부 누수 등)은 그대로, 모르는 옛 표기만 · / 로 나눔
+            if (!/[/·•|]/.test(t) || isKnownCauseLabel(t)) {
+                out.push(t);
+                return;
+            }
+            t.split(/[/·•|]+/).map(s => s.trim()).filter(Boolean).forEach(s => out.push(s));
+        });
+        return out;
     }
     function joinCauseList(list) {
         return (list || []).map(s => String(s || '').trim()).filter(Boolean).join(', ');
@@ -25787,36 +25964,47 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         { border: '#0891b2', bg: '#ecfeff', text: '#0e7490', accent: '#06b6d4' }
     ];
 
-    function getExtraCausesForCurrentComponent() {
-        const component = getDefectComboValue(
-            document.getElementById('defectComponent'),
-            document.getElementById('defectComponentInput')
-        );
-        const key = normalizeComponentKey(component);
-        if ((key.includes('벽체') && key.includes('접합')) || key === '벽체접합부') {
-            return NONSTRUCT_WALL_JOINT_CAUSES.slice();
-        }
-        return [];
+    /** 결함 수정창의 지금 분류·부재 (원인 기본 목록 문맥) */
+    function getCurrentDefectCauseContext() {
+        return {
+            category: document.getElementById('defectCategory')?.value || '',
+            component: getDefectComboValue(
+                document.getElementById('defectComponent'),
+                document.getElementById('defectComponentInput')
+            ) || ''
+        };
     }
 
-    function getCauseOptionsForKey(key) {
+    /**
+     * 화면에 보일 원인 목록 = 앱 기본(부재·균열 방향별) − 숨김 + 계정이 추가한 원인, 계정 순서 적용.
+     * (2026-09-28: 벽체 접합부 원인을 모든 종류 앞에 끼워 넣던 것 제거 — 접합부는 문맥별 목록으로)
+     */
+    function getCauseOptionsForKey(key, types) {
         if (!window.state.customDefectCauses) window.state.customDefectCauses = {};
         if (!window.state.hiddenDefectCauses) window.state.hiddenDefectCauses = {};
         const hidden = window.state.hiddenDefectCauses[key] || [];
-        const presetList = (defectCausePreset[key] || defectCausePreset['기타']).filter(c => !hidden.includes(c));
+        const ctx = getCurrentDefectCauseContext();
+        const presetList = getDefaultCausePresetList(key, types, ctx.category, ctx.component)
+            .filter(c => !hidden.includes(c));
         const customList = window.state.customDefectCauses[key] || [];
-        const extras = getExtraCausesForCurrentComponent().filter(c => !hidden.includes(c));
         const merged = [];
         const seen = new Set();
-        [...extras, ...presetList, ...customList].forEach((item) => {
+        [...presetList, ...customList].forEach((item) => {
             if (!item || seen.has(item)) return;
             seen.add(item);
             merged.push(item);
         });
         return applySavedOptionOrder(
             merged,
-            ensureOptionOrderEntry('defectCauseOrder', key)
+            getEffectiveCauseOrder(key, ensureOptionOrderEntry('defectCauseOrder', key))
         );
+    }
+
+    /** 종류의 기본 자동 체크 원인(첫 그룹 맨 위, '기타' 제외) */
+    function getDefaultFirstCauseFor(defectTypeStr) {
+        const g = getCauseDisplayGroups(defectTypeStr)[0];
+        if (!g) return '';
+        return getCauseOptionsForKey(g.key, g.types).filter(c => c && c !== '기타')[0] || '';
     }
 
     function renderMultiTypeCauseChecks(defectTypeStr, causeVal) {
@@ -25842,7 +26030,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const seenCauses = new Set();
         groups.forEach((g, gi) => {
             const tone = CAUSE_GROUP_TONES[gi % CAUSE_GROUP_TONES.length];
-            const options = getCauseOptionsForKey(g.key).slice();
+            const options = getCauseOptionsForKey(g.key, g.types).slice();
             parseCauseList(causeVal).forEach(c => {
                 if (c && !options.includes(c)) options.push(c);
             });
@@ -25955,7 +26143,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         }
 
         const key = getCauseKey(defectType);
-        const allOptions = getCauseOptionsForKey(key);
+        const keyGroup = getCauseDisplayGroups(defectType).find(g => g.key === key);
+        const allOptions = getCauseOptionsForKey(key, keyGroup ? keyGroup.types : undefined);
 
         let html = `<option value="" ${!currentVal ? 'selected' : ''}>—</option>`;
         allOptions.forEach(item => {
@@ -26045,10 +26234,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     e.target.value
                 );
                 const cat = document.getElementById('defectCategory')?.value || '구조체';
-                updateDefectTypeDropdown(cat, getDefectComboValue(
-                    document.getElementById('defectType'),
-                    document.getElementById('defectTypeInput')
-                ));
+                refreshDefectTypeAfterComponentChange(cat);
             }
         });
     }
@@ -26227,7 +26413,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     }
 
     function getOrderedVisibleOptionItems(ctx) {
-        const texts = applySavedOptionOrder(getDefaultVisibleOptionTexts(ctx), ctx.orderList);
+        const order = ctx.favField === 'cause' ? getEffectiveCauseOrder(ctx.favBucket, ctx.orderList) : ctx.orderList;
+        const texts = applySavedOptionOrder(getDefaultVisibleOptionTexts(ctx), order);
         return texts.map((text) => ({
             text,
             isPreset: (ctx.presetList || []).includes(text) && !(ctx.hiddenList || []).includes(text)
@@ -26302,7 +26489,11 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 title: `발생 원인 세팅 (${key})`,
                 favField: 'cause',
                 favBucket: key,
-                presetList: defectCausePreset[key] || [],
+                presetList: (() => {
+                    const cctx = getCurrentDefectCauseContext();
+                    const g = getCauseDisplayGroups(dType).find(x => x.key === key);
+                    return getDefaultCausePresetList(key, g ? g.types : undefined, cctx.category, cctx.component);
+                })(),
                 hiddenList: window.state.hiddenDefectCauses[key],
                 customList: window.state.customDefectCauses[key],
                 orderList: ensureOptionOrderEntry('defectCauseOrder', key),
@@ -26558,8 +26749,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (Array.isArray(ctx.hiddenList)) ctx.hiddenList.length = 0;
         if (Array.isArray(ctx.customList)) ctx.customList.length = 0;
         if (Array.isArray(ctx.orderList)) {
+            // 빈 순서 = 앱 기본 순서. 기본 목록을 복사해 두면 나중에 기본값을 고쳐도 이 계정만 옛 순서에 묶임
             ctx.orderList.length = 0;
-            (ctx.presetList || []).forEach((t) => ctx.orderList.push(t));
         }
         if (ctx.favField && ctx.favBucket) {
             const favKey = ctx.favField === 'component' ? 'favoriteDefectComponents'
@@ -26583,8 +26774,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             const defType = presetList.find(t => t !== '상태양호') || presetList[0] || '';
             updateDefectTypeDropdown(cat, defType);
             if (defType) {
-                const causeKey = getCauseKey(defType);
-                const defCause = (defectCausePreset[causeKey] || [])[0] || '';
+                const defCause = getDefaultFirstCauseFor(defType);
                 updateDefectCauseDropdown(defType, defCause);
             }
         } else if (field === 'cause') {
@@ -26592,8 +26782,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 document.getElementById('defectType'),
                 document.getElementById('defectTypeInput')
             ) || '균열';
-            const causeKey = getCauseKey(typeVal);
-            const defCause = (defectCausePreset[causeKey] || [])[0] || '';
+            const defCause = getDefaultFirstCauseFor(typeVal);
             updateDefectCauseDropdown(typeVal, defCause);
         }
 
@@ -26652,8 +26841,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         updateDefectTypeDropdown(cat, defType);
 
         if (defType) {
-            const causeKey = getCauseKey(defType);
-            const defCause = (defectCausePreset[causeKey] || [])[0] || '';
+            const defCause = getDefaultFirstCauseFor(defType);
             updateDefectCauseDropdown(defType, defCause);
         }
 
