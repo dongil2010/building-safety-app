@@ -6,6 +6,9 @@
  *
  * - 좌표: 선 꼭짓점은 **이미지 좌표**(결함 x/y와 같은 좌표계, 회전 전)로 저장한다.
  *   번호 순서(왼→오른, 위→아래)는 도면을 **화면에 보이는 회전** 기준으로 매긴다.
+ * - 번호는 **먼저 그은 선이 작은 번호**(그룹마다 seq = 그은 순서). 옮기거나 돌려도 번호는 그대로,
+ *   선을 지우면 뒤 번호가 하나씩 당겨진다(빈 번호 없음). 「위치 순서로 다시 매기기」로 한 번에 왼→오른/위→아래 순서로.
+ *   위치 찾기(이웃 선)는 여전히 공간 기준이고, 범위는 작은 번호~큰 번호로 쓴다(X3·X1 이웃 → X1~X3).
  * - 선은 꼭짓점 2개 이상인 꺾은선. 각도 자유(꺾인 열·날개동). 같은 축에 그룹을 여러 개 둘 수 있다
  *   (그룹마다 머리글·시작 번호·방향·기본 폭).
  * - 폭(band): 선에서 수직 거리 ≤ 폭/2 안이면 그 선 하나(X2), 아니면 이웃 두 선 사이(X1~X2).
@@ -69,11 +72,45 @@
             axis: ax,
             prefix: o.prefix != null ? String(o.prefix) : DEFAULT_PREFIX[ax],
             start: Math.round(num(o.start, 1)),
-            reverse: !!o.reverse,
             angle: num(o.angle, 0),
             band: Math.max(0, num(o.band, 0)),
             lines: Array.isArray(o.lines) ? o.lines : []
         };
+    }
+
+    /** seq 없는 선(예전 실험 데이터 등)은 저장된 배열 순서(= 그은 순서)대로 뒤에 붙임 */
+    function assignMissingSeq(group) {
+        const lines = group.lines || [];
+        let max = 0;
+        lines.forEach((ln) => { if (Number.isFinite(ln.seq)) max = Math.max(max, ln.seq); });
+        lines.forEach((ln) => { if (!Number.isFinite(ln.seq)) ln.seq = ++max; });
+        return group;
+    }
+
+    function nextSeq(group) {
+        let max = 0;
+        (group.lines || []).forEach((ln) => { if (Number.isFinite(Number(ln.seq))) max = Math.max(max, Number(ln.seq)); });
+        return max + 1;
+    }
+
+    /** 그은 순서대로 선 추가(번호 = 시작 번호 + 그은 순서) */
+    function addLineToGroup(group, line) {
+        assignMissingSeq(group);
+        line.seq = nextSeq(group);
+        group.lines.push(line);
+        return line;
+    }
+
+    /** 번호 순서(seq, 없거나 같으면 배열 순서) → 선별 0부터의 번호 칸 */
+    function numberRanks(lines) {
+        const arr = (lines || []).map((ln, i) => ({ ln, i }));
+        let max = 0;
+        arr.forEach(({ ln }) => { if (Number.isFinite(ln.seq)) max = Math.max(max, ln.seq); });
+        const key = ({ ln, i }) => (Number.isFinite(ln.seq) ? ln.seq : max + 1 + i);
+        arr.sort((a, b) => key(a) - key(b) || a.i - b.i);
+        const map = new Map();
+        arr.forEach(({ ln }, k) => map.set(ln, k));
+        return map;
     }
 
     function normalizeGrid(raw) {
@@ -84,10 +121,12 @@
                 const pts = sanitizePts(ln && ln.pts);
                 if (pts.length < 2) return null;
                 const line = { id: (ln && ln.id) || uid('gl'), pts };
+                if (ln && ln.seq !== null && ln.seq !== '' && Number.isFinite(Number(ln.seq))) line.seq = Number(ln.seq);
                 if (ln && ln.label != null && String(ln.label).trim()) line.label = String(ln.label).trim();
                 if (ln && ln.band != null && ln.band !== '' && Number.isFinite(Number(ln.band))) line.band = Math.max(0, Number(ln.band));
                 return line;
             }).filter(Boolean);
+            assignMissingSeq(out);
             return out;
         });
         return {
@@ -197,7 +236,7 @@
         return best ? best.sd : Infinity;
     }
 
-    /** 공간 순서(왼→오른 / 위→아래)로 정렬한 선 + 이름 */
+    /** 공간 순서(왼→오른 / 위→아래)로 정렬한 선 + 이름(번호는 그은 순서) */
     function orderedLines(group, ctx) {
         const D = groupDir(group, ctx);
         const N = normalOf(D, group.axis);
@@ -206,10 +245,11 @@
             const c = pd.reduce((acc, p) => ({ x: acc.x + p.x / pd.length, y: acc.y + p.y / pd.length }), { x: 0, y: 0 });
             return { line: ln, ptsDisp: pd, offset: c.x * N.x + c.y * N.y };
         });
+        // 번호 칸은 배열 순서(그은 순서) 기준으로 먼저 매기고, 그다음 공간 순서로 정렬
+        const ranks = numberRanks(items.map((it) => it.line));
         items.sort((a, b) => a.offset - b.offset);
-        const n = items.length;
-        items.forEach((it, i) => {
-            const k = group.reverse ? (n - 1 - i) : i;
+        items.forEach((it) => {
+            const k = ranks.get(it.line);
             it.numberIndex = k;
             it.autoName = `${group.prefix}${group.start + k}`;
             it.name = it.line.label || it.autoName;
@@ -254,9 +294,13 @@
         const inExtent = pa >= aMin - margin && pa <= aMax + margin;
         const nearest = Math.min(...sds.map(Math.abs));
         if (onIdx >= 0 && forceRange && n > 1) {
-            // 범위 전용 부재가 선 위에 딱 걸침 → 번호가 작은 쪽 칸(그쪽이 없으면 반대쪽)
-            const lowerNumSide = group.reverse ? onIdx + 1 : onIdx - 1;
-            const side = (lowerNumSide >= 0 && lowerNumSide < n) ? lowerNumSide : (group.reverse ? onIdx - 1 : onIdx + 1);
+            // 범위 전용 부재가 선 위에 딱 걸침 → 이웃 칸 중 반대편 선 번호가 더 작은 쪽(이웃이 하나면 그쪽)
+            const a = onIdx - 1;
+            const b = onIdx + 1;
+            let side;
+            if (a < 0) side = b;
+            else if (b >= n) side = a;
+            else side = items[a].numberIndex <= items[b].numberIndex ? a : b;
             return { pos: (onIdx + side) / 2, n, inExtent, bracket: 0, nearest, bounded: true };
         }
         if (onIdx >= 0) return { pos: onIdx, n, inExtent, bracket: 0, nearest, bounded: true };
@@ -393,6 +437,15 @@
         };
     }
 
+    /** 한 번만: 지금 화면 기준 위치 순서(왼→오른 / 위→아래)로 번호를 다시 매김 */
+    function renumberBySpatialOrder(group, ctx) {
+        const od = orderedLines(group, ctx);
+        od.items.forEach((it, i) => { it.line.seq = i + 1; });
+        const order = new Map(od.items.map((it, i) => [it.line, i]));
+        group.lines.sort((x, y) => (order.has(x) ? order.get(x) : 1e9) - (order.has(y) ? order.get(y) : 1e9));
+        return group;
+    }
+
     function lineAngle(line, axis, ctx) {
         const pts = line.pts || [];
         if (pts.length < 2) return 0;
@@ -499,6 +552,9 @@
         computeGridLocation,
         applyAutoLocation,
         makeLineThrough,
+        addLineToGroup,
+        nextSeq,
+        renumberBySpatialOrder,
         lineAngle,
         setLineAngle,
         hitTest,

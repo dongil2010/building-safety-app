@@ -33342,7 +33342,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const grid = getCurrentFloorGrid(true);
         const g = gridEnsureGroup(grid, axis);
         const ln = G.makeLineThrough(p, axis, g.angle, getGridCtx());
-        g.lines.push(ln);
+        G.addLineToGroup(g, ln); // 번호 = 그은 순서(먼저 그은 선이 작은 번호)
         gridSelectLine(grid, ln.id, null);
         gridEditState().lastAddAt = Date.now();
         gridChanged();
@@ -33579,7 +33579,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const axisKo = (ax) => (ax === 'row' ? '행' : '열');
         const groupOpts = groups.map((g) => {
             const od = G.orderedLines(g, gctx);
-            const names = od.items.length ? `${od.items[0].name}…${od.items[od.items.length - 1].name}` : `${g.prefix}${g.start}…`;
+            const names = od.items.length > 1 ? `${g.prefix}${g.start}…${g.prefix}${g.start + od.items.length - 1}` : `${g.prefix}${g.start}`;
             const ang = Math.abs(g.angle) > 0.01 ? ` · ${g.angle}°` : '';
             return `<option value="${gridEsc(g.id)}"${eg && g.id === eg.id ? ' selected' : ''}>${axisKo(g.axis)} ${gridEsc(names)} (${od.items.length}개${ang})</option>`;
         }).join('');
@@ -33587,7 +33587,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             ? '꺾을 자리를 선 위에서 누르세요. 생긴 점을 끌어 모양을 맞춥니다.'
             : (ge.tool === 'select'
                 ? '선을 눌러 고르고 끌어서 옮기세요. 끝점을 끌면 기울어집니다. 빈 곳을 끌면 화면 이동.'
-                : `도면을 누르면 ${ge.tool === 'row' ? '가로 행(Y)' : '세로 열(X)'} 선이 생깁니다. 있는 선·끝점은 끌어서 옮기고, 빈 곳을 끌면 화면 이동.`);
+                : `도면을 누르면 ${ge.tool === 'row' ? '가로 행(Y)' : '세로 열(X)'} 선이 생깁니다(먼저 그은 선이 작은 번호). 있는 선·끝점은 끌어서 옮기고, 빈 곳을 끌면 화면 이동.`);
         const lineBandDefault = selF ? G.lineBand({}, selF.group, gctx) : 0;
         const vi = ge.sel ? ge.sel.vertexIndex : null;
         const canDelVertex = !!(selF && vi != null && vi > 0 && vi < selF.line.pts.length - 1);
@@ -33622,7 +33622,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                         <label>시작 번호 <input type="number" data-f="start" value="${eg.start}" step="1" style="width:56px"></label>
                     </div>
                     <div class="grid-panel-row">
-                        <label><input type="checkbox" data-f="reverse" ${eg.reverse ? 'checked' : ''}> 번호 반대로 (${eg.axis === 'row' ? '아래→위' : '오른→왼'})</label>
+                        <button type="button" data-act="renumber" title="지금 보이는 위치 순서(열: 왼→오른, 행: 위→아래)로 번호를 한 번만 다시 매김. 그 뒤로 새로 긋는 선은 다시 맨 끝 번호">위치 순서로 다시 매기기</button>
                     </div>
                     <div class="grid-panel-row">
                         <label>새 선 각도 <input type="number" data-f="gangle" value="${eg.angle}" step="0.5" style="width:60px">°</label>
@@ -33707,6 +33707,14 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             gridChanged();
             return;
         }
+        if (act === 'renumber' && eg) {
+            if (eg.lines.length < 2) return;
+            if (!confirm(`이 그룹 선 ${eg.lines.length}개의 번호를 지금 보이는 위치 순서(${eg.axis === 'row' ? '위→아래' : '왼→오른'})로 다시 매길까요?\n개별 이름을 준 선은 이름 그대로입니다. 이미 넣은 마킹 위치는 「이 층 마킹에 위치 채우기」로 다시 맞춥니다.`)) return;
+            G.renumberBySpatialOrder(eg, gctx);
+            gridChanged();
+            window.showToast?.('위치 순서로 번호를 다시 매겼습니다.', 'success', 2000);
+            return;
+        }
         if (act === 'angleAll' && eg) {
             eg.lines.forEach((ln) => G.setLineAngle(ln, eg.axis, eg.angle, gctx));
             gridChanged();
@@ -33761,7 +33769,6 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             }
             case 'prefix': if (eg) eg.prefix = String(el.value || '').trim(); break;
             case 'start': if (eg) eg.start = Math.round(numOr(el.value, eg.start)); break;
-            case 'reverse': if (eg) eg.reverse = !!el.checked; break;
             case 'gangle': if (eg) eg.angle = Math.max(-89, Math.min(89, numOr(el.value, eg.angle))); break;
             case 'gband': if (eg) eg.band = Math.max(0, numOr(el.value, eg.band)); break;
             case 'label':
