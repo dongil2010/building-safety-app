@@ -356,6 +356,103 @@ if (fs.existsSync(appPath)) {
     assert.strictEqual(locCell({ location: '1F', gridLoc: 'X1~X2, Y2' }), 'X1~X2, Y2', '실 이름 없으면 행·열 한 줄');
     assert.strictEqual(locCell({ location: '1F 거실' }), '거실', '행·열 없으면 예전 그대로');
     assert.strictEqual(locCell({ location: '1F X2, Y3 거실', gridLocAuto: 'X2, Y3' }), 'X2, Y3\n거실', '예전 실험 데이터도 두 줄');
+
+    // ---- 앱 흐름(같은 함수): 거더 부재를 나중에 정해도 가까운 선에 붙음 ----
+    const QP = require(path.join(__dirname, '..', 'js', 'shared', 'defect-quick-presets.js'));
+    const floorDefects = [];
+    const saves = { n: 0 };
+    const timers = [];
+    const flow = {
+        G,
+        state: {
+            currentBuildingId: 'b1', currentFloor: '1F', rotationAngle: 0, currentTab: 'tab-map',
+            floorGridLines: {
+                b1_1F: {
+                    groups: [
+                        { axis: 'col', prefix: 'A', start: 1, band: 20, lines: [vline(1000), vline(2000), vline(3000)] },
+                        { axis: 'row', prefix: 'Y', start: 1, band: 20, lines: [hline(500), hline(1500)] }
+                    ]
+                }
+            }
+        },
+        window: { BSA: { gridLines: G, defectQuickPresets: QP } },
+        document: { getElementById: () => null },
+        elements: { defectModal: null },
+        console,
+        WeakMap,
+        setTimeout: (fn) => { timers.push(fn); return timers.length; },
+        getFloorMapStyleKey: (b, f) => `${b}_${f}`,
+        getFloorPlanDisplayDims: () => ({ w: 4000, h: 3000 }),
+        extractDefectLocationDetail: (loc) => String(loc || '').replace(/^1F\s*/, ''),
+        composeDefectLocation: (room) => `1F ${room}`.trim(),
+        touchDefectUpdatedAt: (d) => { d.updatedAt = (d.updatedAt || 0) + 1; },
+        filterMapPlacedDefects: (list) => list,
+        getCurrentFloorDefects: () => floorDefects,
+        saveStateToLocalStorage: () => { saves.n += 1; },
+        isDraggingPin: false,
+        isDraggingPinGroup: false
+    };
+    vm.createContext(flow);
+    const fnNames = ['gridLib', 'getMemberNameApi', 'memberNameOut', 'getGridFloorKey', 'getGridCtx', 'getCurrentFloorGrid', 'gridHasLines',
+        'currentGridHasLines', 'gridMemberName', 'computeGridAutoLocationForPoints', 'gridNum', 'getDefectGridPoints',
+        'migrateLegacyGridLocation', 'refreshGridLocHintInModal', 'applyGridAutoLocationToDefect', 'gridLocStampOf',
+        'scheduleGridLocFreshness', 'refreshStaleGridLocForCurrentFloor', 'gridModalMember', 'refreshGridAutoLocationInModal'];
+    vm.runInContext(`const gridLocStampMap = new WeakMap();\n${fnNames.map(takeFn).join('\n')}\n`
+        + `this.api = { applyGridAutoLocationToDefect, refreshStaleGridLocForCurrentFloor, computeGridAutoLocationForPoints };`, flow);
+    const A = flow.api;
+    // 1) 핀을 찍을 때는 부재가 비어 있음 → 보통 규칙(폭 밖 → 두 축 범위)
+    const pin = { id: 'p1', x: 1400, y: 900, targetX: 1300, targetY: 1000, component: '', location: '1F 거실' };
+    floorDefects.push(pin);
+    A.applyGridAutoLocationToDefect(pin);
+    assert.strictEqual(pin.gridLoc, 'A1~A2, Y1~Y2', '부재 없음: 범위');
+    assert.strictEqual(A.refreshStaleGridLocForCurrentFloor(), 0, '방금 계산한 값은 다시 안 바꿈');
+    // 2) 부재를 조사표 칸/일괄 수정/다른 기기에서 보(G)로 → 다음 그리기 때 거더 규칙(가까운 A1 = 300 < Y 500)
+    pin.component = '보(G)';
+    assert.strictEqual(A.refreshStaleGridLocForCurrentFloor(), 1, '부재가 바뀐 마킹만 다시 계산');
+    assert.strictEqual(pin.gridLoc, 'A1, Y1~Y2', '거더: 폭 밖이면 가까운 열 하나');
+    assert.strictEqual(pin.location, '1F 거실', '상세 위치(실 이름)는 그대로');
+    assert.strictEqual(A.refreshStaleGridLocForCurrentFloor(), 0);
+    // 3) 이름 표기 여러 가지
+    [['보 (G)', 'A1, Y1~Y2'], ['보（G）', 'A1, Y1~Y2'], ['큰보', 'A1, Y1~Y2'], ['철골거더', 'A1, Y1~Y2'], ['철골보(G)', 'A1, Y1~Y2'],
+        ['보', 'A1~A2, Y1~Y2'], ['슬래브', 'A1~A2, Y1~Y2'], ['보(B)', 'A1~A2, Y1~Y2']].forEach(([m, want]) => {
+        pin.component = m;
+        A.refreshStaleGridLocForCurrentFloor();
+        assert.strictEqual(pin.gridLoc, want, `부재 ${m}`);
+    });
+    // 4) 폭 안이면 거더도 보통 규칙
+    const inBand = { id: 'p2', targetX: 1995, targetY: 1000, component: '보(G)' };
+    floorDefects.push(inBand);
+    A.refreshStaleGridLocForCurrentFloor();
+    assert.strictEqual(inBand.gridLoc, 'A2, Y1~Y2', '거더 폭 안');
+    // 5) 예전 규칙으로 저장된 옛값(지문 없음)도 고침 — 예: 새로고침 뒤
+    const stale = { id: 'p3', targetX: 2600, targetY: 1400, component: '철골보(G)', gridLoc: 'A2~A3, Y1~Y2' };
+    floorDefects.push(stale);
+    A.refreshStaleGridLocForCurrentFloor();
+    assert.strictEqual(stale.gridLoc, 'A2~A3, Y2', '옛 범위값 → 가까운 행 선(100 < 400)');
+    // 6) 마킹 추가(묶음)로 생긴 화살표는 gridLoc 없이 생김 → 채워짐
+    const member2 = { id: 'p4', groupId: 'p3', targetX: 3300, targetY: 600, component: '철골보(G)' };
+    floorDefects.push(member2);
+    A.refreshStaleGridLocForCurrentFloor();
+    assert.strictEqual(member2.gridLoc, 'A3 외측, Y1', '묶음 화살표도 계산(Y1까지 100 < A3까지 300)');
+    // 7) 선을 옮기면 다시 계산
+    flow.state.floorGridLines.b1_1F.groups[0].lines[0].pts.forEach((p) => { p.x = 1350; });
+    assert.ok(A.refreshStaleGridLocForCurrentFloor() >= 1, '선 이동 → 다시 계산');
+    assert.strictEqual(pin.gridLoc, 'A1 외측, Y1~Y2', '보(B) 핀(1300)이 옮긴 A1(1350) 바깥');
+    pin.component = '보(G)';
+    A.refreshStaleGridLocForCurrentFloor();
+    assert.strictEqual(pin.gridLoc, 'A1, Y1~Y2', '거더: 옮긴 A1까지 50');
+    // 8) 자동 입력 끄면 안 건드림
+    flow.state.floorGridLines.b1_1F.autoLocation = false;
+    pin.component = '';
+    assert.strictEqual(A.refreshStaleGridLocForCurrentFloor(), 0, '자동 입력 꺼짐');
+    assert.strictEqual(pin.gridLoc, 'A1, Y1~Y2');
+    flow.state.floorGridLines.b1_1F.autoLocation = true;
+    // 연결: 조사표 칸·일괄 수정·수정창 칩(G/B 버튼)에서 부재를 바꾸면 다시 계산, 그릴 때 옛값 확인
+    assert.ok(app.includes("if (field === 'component' && key === `${state.currentBuildingId}_${state.currentFloor}` && typeof applyGridAutoLocationToDefect === 'function') {"), '조사표 부재 칸');
+    assert.ok(app.includes("if (changedFields.has('component') && bulkFloorKey === `${state.currentBuildingId}_${state.currentFloor}` && typeof applyGridAutoLocationToDefect === 'function') {"), '일괄 수정 부재');
+    assert.ok(takeFn('syncDefectComboFields').includes('setTimeout(refreshGridAutoLocationInModal, 0);'), '수정창 칩·G/B 버튼');
+    assert.ok(takeFn('drawFloorGridOverlay').includes('scheduleGridLocFreshness();'), '그릴 때 옛값 갱신 예약');
+    assert.ok(takeFn('applyGridAutoLocationToModal').includes('const live = computeGridAutoLocationForPoints(window._gridModalPts'), '수정창은 지금 선·부재로 계산해 표시');
 }
 
 console.log('test-grid-lines: OK');

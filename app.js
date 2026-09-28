@@ -23278,7 +23278,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 : null;
             defect.component = value;
             touchDefectUpdatedAt(defect);
-            // G/B를 정하면 행·열 위치도 다시(보(B)는 늘 범위, 보(G)는 폭 안이면 선 이름) — 자동으로 넣은 위치만
+            // G/B를 정하면 행·열 위치도 다시(보(G)는 거더 규칙 — 폭 밖이면 가까운 선 하나)
             if (key === `${state.currentBuildingId}_${state.currentFloor}` && typeof applyGridAutoLocationToDefect === 'function') {
                 try { applyGridAutoLocationToDefect(defect); } catch (gridErr) { console.warn('[grid-lines] gb', gridErr); }
             }
@@ -23351,6 +23351,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         }
         ensureDefectComboOption(select, v);
         input.value = v;
+        // 행·열: 칩·G/B 버튼은 change 이벤트가 없어 여기서 거더 규칙 등 다시 계산(표시만, 저장 때 결함에 반영)
+        if (input.id === 'defectComponentInput' && typeof refreshGridAutoLocationInModal === 'function') {
+            setTimeout(refreshGridAutoLocationInModal, 0);
+        }
     }
 
     function getDefectComboValue(select, input) {
@@ -32090,6 +32094,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 if (changedFields.has('areaBorderStyle')) d.areaBorderStyle = areaBorderVal;
             }
             touchDefectUpdatedAt(d);
+            if (changedFields.has('component') && bulkFloorKey === `${state.currentBuildingId}_${state.currentFloor}` && typeof applyGridAutoLocationToDefect === 'function') {
+                try { applyGridAutoLocationToDefect(d); } catch (gridErr) { console.warn('[grid-lines] bulk', gridErr); }
+            }
         });
 
         saveStateToLocalStorage();
@@ -33215,6 +33222,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     function drawFloorGridOverlay(ctx, imgW, imgH) {
         const G = gridLib();
         if (!G) return;
+        scheduleGridLocFreshness();
         const ge = window.BSA_gridEdit;
         const editing = !!(ge && ge.active);
         const key = getGridFloorKey();
@@ -33966,6 +33974,62 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         hint.hidden = !t;
     }
 
+    // ---- 오래된 행·열 위치 자동 갱신 ----
+    // 부재를 조사표·일괄 수정·다른 기기에서 바꾸거나, 선을 옮기거나, 계산 규칙이 바뀌면 저장된 gridLoc가 옛값으로 남는다.
+    // 결함마다 「계산 입력 지문(규칙+선+부재+점)」을 메모리에 두고, 도면을 그릴 때 지문이 다른 것만 다시 계산한다.
+    const gridLocStampMap = new WeakMap();
+
+    function gridLocStampOf(d, sig) {
+        const G = gridLib();
+        return G.gridLocStamp(sig, getDefectGridPoints(d), gridMemberName(d && d.component));
+    }
+
+    function scheduleGridLocFreshness() {
+        if (window._bsaGridFreshTimer) return;
+        window._bsaGridFreshTimer = setTimeout(() => {
+            window._bsaGridFreshTimer = null;
+            try {
+                refreshStaleGridLocForCurrentFloor();
+            } catch (e) {
+                console.warn('[grid-lines] fresh', e);
+            }
+        }, 600);
+    }
+
+    /** 지금 층 마킹 중 지문이 바뀐 것만 행·열 위치 다시 계산. 바뀐 개수 */
+    function refreshStaleGridLocForCurrentFloor() {
+        const G = gridLib();
+        if (!G) return 0;
+        let dragging = false;
+        try { dragging = !!(isDraggingPin || isDraggingPinGroup); } catch (_e) { dragging = false; }
+        if (dragging) {
+            scheduleGridLocFreshness();
+            return 0;
+        }
+        const grid = getCurrentFloorGrid(false);
+        if (!grid) return 0;
+        if (gridHasLines(grid) && grid.autoLocation === false) return 0;
+        const list = filterMapPlacedDefects(getCurrentFloorDefects());
+        const sig = G.gridSignature(grid);
+        const modalOpen = !!(elements.defectModal && elements.defectModal.classList.contains('open'));
+        const openId = modalOpen ? (document.getElementById('defectPinId')?.value || '') : '';
+        let n = 0;
+        list.forEach((d) => {
+            if (!d || (openId && d.id === openId)) return; // 수정 중인 결함은 저장 때 맞춤
+            const st = gridLocStampOf(d, sig);
+            if (gridLocStampMap.get(d) === st) return;
+            if (applyGridAutoLocationToDefect(d)) n += 1;
+            gridLocStampMap.set(d, st);
+        });
+        if (n) {
+            saveStateToLocalStorage();
+            if (typeof renderDefectListPanel === 'function') renderDefectListPanel();
+            if (typeof renderSurveyTable === 'function' && state.currentTab === 'tab-survey') renderSurveyTable();
+        }
+        return n;
+    }
+    window.refreshStaleGridLocForCurrentFloor = refreshStaleGridLocForCurrentFloor;
+
     /** 결함 하나의 행·열 칸 이름(gridLoc)을 지금 선·부재 기준으로 맞춤. 상세 위치는 안 건드림. 바뀌면 true */
     function applyGridAutoLocationToDefect(d, floorCode, opts) {
         const G = gridLib();
@@ -34101,7 +34165,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     grid = grid || sp.grid;
                 }
             }
-            refreshGridLocHintInModal(grid);
+            const live = computeGridAutoLocationForPoints(window._gridModalPts, gridModalMember() || existingPin.component);
+            refreshGridLocHintInModal(live != null ? live : grid);
             return;
         }
         let pts = [];
@@ -36367,6 +36432,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     break;
             }
             if (inlineSig(defect) !== sigBefore) touchDefectUpdatedAt(defect);
+            // 행·열: 부재가 바뀌면(거더 ↔ 그 밖) 위치 다시 계산 — 지금 보는 층만(선 데이터가 그 층 것)
+            if (field === 'component' && key === `${state.currentBuildingId}_${state.currentFloor}` && typeof applyGridAutoLocationToDefect === 'function') {
+                try { applyGridAutoLocationToDefect(defect); } catch (gridErr) { console.warn('[grid-lines] inline', gridErr); }
+            }
         });
 
         saveStateToLocalStorage();

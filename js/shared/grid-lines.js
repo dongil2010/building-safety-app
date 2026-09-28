@@ -36,7 +36,8 @@
     };
 
     function matchMemberRules(name, r) {
-        const n = String(name == null ? '' : name).replace(/\s+/g, '').toUpperCase();
+        // 전각 괄호 （G） ·［G］도 (G)로
+        const n = String(name == null ? '' : name).replace(/[（［]/g, '(').replace(/[）］]/g, ')').replace(/\s+/g, '').toUpperCase();
         if (!n) return false;
         if ((r.exclude || []).some((k) => n.includes(k.toUpperCase()))) return false;
         if ((r.contains || []).some((k) => n.includes(k.toUpperCase()))) return true;
@@ -387,6 +388,42 @@
         return best;
     }
 
+    /** 부재 규칙 이름: 'girder'(거더 규칙) | 'normal'(보통 폭 규칙) */
+    function memberRule(name) {
+        return isGirderMember(name) ? 'girder' : 'normal';
+    }
+
+    /** 계산 방식이 바뀌면 올림 → 화면이 저장된 행·열 위치를 다시 계산함 */
+    const GRID_LOC_ALGO = 3;
+
+    function roundPts(pts) {
+        return pts.map((p) => `${Math.round(p.x * 10)},${Math.round(p.y * 10)}`).join(';');
+    }
+
+    /** 행·열 선 내용 지문(선 추가·삭제·이동·이름·번호·폭·머리글이 바뀌면 달라짐) */
+    function gridSignature(rawGrid) {
+        const grid = normalizeGrid(rawGrid);
+        const parts = [];
+        (grid.groups || []).forEach((g) => {
+            parts.push(`g${g.axis}|${g.prefix}|${g.start}|${g.band}`);
+            (g.lines || []).forEach((ln) => {
+                parts.push(`l${ln.seq}|${ln.label || ''}|${ln.band != null ? ln.band : ''}|${roundPts(ln.pts)}`);
+            });
+        });
+        const str = parts.join('#');
+        let h = 2166136261;
+        for (let i = 0; i < str.length; i++) {
+            h ^= str.charCodeAt(i);
+            h = Math.imul(h, 16777619) >>> 0;
+        }
+        return `${grid.groups.length}.${str.length}.${h.toString(36)}`;
+    }
+
+    /** 결함 하나의 계산 입력 지문(계산 방식 + 선 지문 + 부재 규칙 + 점) — 같으면 다시 계산할 필요 없음 */
+    function gridLocStamp(sig, pointsImg, member) {
+        return `${GRID_LOC_ALGO}|${sig}|${memberRule(member)}|${roundPts(sanitizePts(pointsImg))}`;
+    }
+
     /** 거더: 한 축은 가장 가까운 선 이름 하나, 다른 축은 범위 */
     function girderLocation(grid, pts, ctx) {
         const center = pts.reduce((a, p) => ({ x: a.x + p.x / pts.length, y: a.y + p.y / pts.length }), { x: 0, y: 0 });
@@ -630,6 +667,10 @@
         DEFAULT_PREFIX,
         GIRDER_MEMBER_RULES,
         isGirderMember,
+        memberRule,
+        GRID_LOC_ALGO,
+        gridSignature,
+        gridLocStamp,
         defaultBand,
         createGroup,
         normalizeGrid,
