@@ -1008,9 +1008,10 @@
 
     var COMPONENT_GROUP_ORDER = [
         { key: 'column', label: '기둥', sort: 1 },
-        { key: 'bigBeam', label: '큰보', sort: 2 },
-        { key: 'smallBeam', label: '작은보', sort: 3 },
-        { key: 'upperBeam', label: '상부 보', sort: 4 },
+        // 2026-09-28 부재 명칭 변경: 큰보→보(G), 작은보→보(B), '상부' 접두어 삭제 → 예전 '상부 보'·그냥 '보'는 G/B 미지정
+        { key: 'bigBeam', label: '보(G)', sort: 2 },
+        { key: 'smallBeam', label: '보(B)', sort: 3 },
+        { key: 'upperBeam', label: '보(G/B 미지정)', sort: 4 },
         { key: 'slab', label: '슬래브', sort: 5 },
         { key: 'rcWall', label: 'RC벽체', sort: 6 },
         { key: 'masonryWall', label: '조적벽체', sort: 7 },
@@ -1021,9 +1022,11 @@
         if (!key) return 'other';
         if (key.indexOf('접합') >= 0) return 'other';
         if (key.indexOf('조적') >= 0) return 'masonryWall';
-        if (key.indexOf('상부보') >= 0) return 'upperBeam';
-        if (key.indexOf('큰보') >= 0) return 'bigBeam';
-        if (key.indexOf('작은보') >= 0) return 'smallBeam';
+        // 철골보(G)/(B)는 예전 철골거더·철골빔처럼 기타 부재로 둔다
+        var isSteel = key.indexOf('철골') >= 0;
+        if (key.indexOf('큰보') >= 0 || (!isSteel && key.indexOf('보(G)') >= 0)) return 'bigBeam';
+        if (key.indexOf('작은보') >= 0 || (!isSteel && key.indexOf('보(B)') >= 0)) return 'smallBeam';
+        if (key.indexOf('상부보') >= 0 || /^(?:RC|SRC)?보$/.test(key)) return 'upperBeam';
         if (key.indexOf('슬래브') >= 0) return 'slab';
         // 2026-09-22: 'RC벽체'/'내력벽'은 항상 RC벽체로, 그냥 '벽체'는 카테고리가 구조체(미기재 포함)일 때만 RC벽체로 집계
         if (key === 'RC벽체' || key === '내력벽') return 'rcWall';
@@ -1810,7 +1813,7 @@
             '정밀안전점검 시 층 구역 묶음 분석',
             '상태양호 제외 · 금회차만 필터',
             '구조체/비구조체/마감재 요약 카드',
-            '구조 부재(기둥·큰보·작은보·상부 보·슬래브·RC벽체·조적벽체) 클릭 시 층별 최대 균열폭 표시',
+            '구조 부재(기둥·보(G)·보(B)·G/B 미지정 보·슬래브·RC벽체·조적벽체) 클릭 시 층별 최대 균열폭 표시',
             '경사·수직·수평균열은 "균열"로 통합 집계',
             '비파괴조사: 층별과 전체를 한 표에 (층묶음·보기 칩 없음)',
             '콘크리트 강도: 범위·평균·측정강도/설계강도 평균·등급',

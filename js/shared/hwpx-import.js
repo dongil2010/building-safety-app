@@ -64,6 +64,13 @@
         return joined.includes('구조부재') && joined.includes('비구조');
     }
 
+    /** 2026-09-28 부재 명칭 정리: '상부' 접두어 삭제, 큰보→보(G) 등 (defect-quick-presets.normalizeMemberName) */
+    function normalizeImportedMember(c) {
+        const q = (typeof window !== 'undefined' && window.BSA && window.BSA.defectQuickPresets) || null;
+        if (q && typeof q.normalizeMemberName === 'function') return q.normalizeMemberName(c);
+        return String(c == null ? '' : c).replace(/^\s*상부\s*(?=\S)/, '');
+    }
+
     function splitInspectionContent(content) {
         const text = (content || '').trim();
         if (!text || text === '-') return { component: '기타', defectType: '기타', size: '' };
@@ -101,7 +108,7 @@
         return {
             no,
             location: floorLbl,
-            component: parsed.component,
+            component: normalizeImportedMember(parsed.component),
             category,
             defectType: parsed.defectType,
             size: good ? '' : parsed.size,
@@ -158,7 +165,7 @@
         return {
             no,
             location,
-            component,
+            component: normalizeImportedMember(component),
             category,
             defectType,
             size: good ? '' : size,

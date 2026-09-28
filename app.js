@@ -463,6 +463,11 @@ document.addEventListener('DOMContentLoaded', () => {
             scheduleSyncUserDefectPinPresets();
         }
         if (typeof migrateDefectComponentStateShape === 'function') migrateDefectComponentStateShape();
+        // 2026-09-28 부재 이름 변경(큰보→보(G) 등)으로 계정 목록이 바뀌었으면 한 번 올림
+        if (window._bsaMemberNamePresetsDirty && window.state.uid === uid) {
+            window._bsaMemberNamePresetsDirty = false;
+            scheduleSyncUserDefectPinPresets();
+        }
     }
 
     function resetDefectPinPresetsToDefaults() {
@@ -9410,6 +9415,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
             const currentDefects = getCurrentFloorMapPlacedDefects();
             renderDefectsGrouped(ctx, currentDefects, drawPin);
+            drawMemberGbNeededMarkers(ctx, currentDefects);
 
             if (typeof drawLocationMapLegend === 'function') {
                 drawLocationMapLegend(ctx, imgW, imgH, true, state.rotationAngle || 0);
@@ -9550,6 +9556,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         ctx.restore(); // Restore view offset & scale
 
         scheduleFloorSnapshotCapture();
+        syncMemberGbOverlay(window._bsaMemberGbEntries || []);
+        window._bsaMemberGbEntries = null;
 
         // 결함 목록 DOM은 drawCanvas마다 재생성하지 않음 (선택 스크롤·하이라이트가 즉시 undo됨).
         // 목록 갱신은 updateMapSelectionBar / 필터 / 저장 등 명시적 호출에서만.
@@ -9568,8 +9576,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     const NDT_FINISH_STATE_PRESET = ['노출', '몰탈마감', '석재마감', '타일마감', '기타'];
     // 부재 구분 기본 목록 — 직접 입력·추가 항목은 state.customNdtComponents에 저장
     const NDT_COMPONENT_PRESET = [
-        '기둥', '원형기둥', '철골기둥', 'SRC기둥', '큰보',
-        '작은보', '철골거더', '철골빔', '캔틸레버보',
+        // 2026-09-28 큰보→보(G), 작은보→보(B), 철골거더→철골보(G), 철골빔→철골보(B)
+        '기둥', '원형기둥', '철골기둥', 'SRC기둥', '보(G)',
+        '보(B)', '철골보(G)', '철골보(B)', '캔틸레버보',
         '슬래브', '데크슬래브', 'RC벽체', '조적벽체'
     ];
     let ndtView = { offsetX: 0, offsetY: 0, scale: 1.0 };
@@ -10096,7 +10105,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 boxW = dims.boxW;
                 boxH = dims.boxH;
             } else {
-                const boxDim = measurePinBoxDimensions(measureCtx, noStr, pinScale, 1);
+                const boxDim = measurePinBoxDimensions(measureCtx, noStr, pinScale, 1, itemSize.font);
                 boxW = boxDim.w;
                 boxH = boxDim.h;
             }
@@ -10369,7 +10378,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         ndtSettlement: { pin: 1.0, arrow: 1.0, leader: 1.0 },
         ndtMemberDisp: { pin: 1.0, arrow: 1.0, leader: 1.0 },
         ndtFireproof: { pin: 1.0, arrow: 1.0, leader: 1.0 },
-        ndtCrackGauge: { pin: 1.0, arrow: 1.0, leader: 1.0 }
+        // 균열 게이지만 번호 글자 크기(font)를 따로 조절 — 다른 항목은 핀 크기에 따라감(font 1.0)
+        ndtCrackGauge: { pin: 1.0, arrow: 1.0, leader: 1.0, font: 1.0 }
     };
 
     // 보고서 등 다른 층 렌더 시 해당 층 스타일을 쓰기 위한 임시 컨텍스트
@@ -10515,7 +10525,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         return {
             pin: (custom && custom.pin != null) ? custom.pin : def.pin,
             arrow: (custom && custom.arrow != null) ? custom.arrow : def.arrow,
-            leader
+            leader,
+            font: (custom && custom.font != null && Number(custom.font) > 0)
+                ? Number(custom.font)
+                : (def.font != null ? def.font : 1.0)
         };
     }
 
@@ -10635,7 +10648,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         ctx.fillText(label, x, y);
     }
 
-    function drawPinBoxLabel(ctx, text, fillColor, scale, shapeCfg) {
+    function drawPinBoxLabel(ctx, text, fillColor, scale, shapeCfg, fontMul) {
         const lightText = String(fillColor).toLowerCase() === '#ffffff' || String(fillColor).toLowerCase() === '#fff';
         const outline = (shapeCfg && shapeCfg.fill && lightText) ? 'rgba(0,0,0,0.45)' : '#ffffff';
         drawOutlinedPinText(
@@ -10644,7 +10657,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             0,
             0,
             fillColor,
-            `bold ${getPinBoxFontSize(scale)}px sans-serif`,
+            `bold ${getPinBoxFontSizeWithMul(scale, fontMul)}px sans-serif`,
             outline
         );
     }
@@ -10796,8 +10809,21 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         return map[cat] || cat || '비파괴';
     }
 
-    function measurePinBoxDimensions(ctx, labelText, scale, roundLineMul) {
-        const fontSize = getPinBoxFontSize(scale);
+    /** 번호 글자 배율(균열 게이지 스타일의 '글자') — 없거나 이상하면 1 */
+    function normalizePinFontMul(fontMul) {
+        const n = Number(fontMul);
+        if (!(n > 0) || !Number.isFinite(n)) return 1;
+        return Math.min(4, Math.max(0.3, n));
+    }
+
+    function getPinBoxFontSizeWithMul(scale, fontMul) {
+        const base = getPinBoxFontSize(scale);
+        const m = normalizePinFontMul(fontMul);
+        return m === 1 ? base : Math.round(base * m * 10) / 10;
+    }
+
+    function measurePinBoxDimensions(ctx, labelText, scale, roundLineMul, fontMul) {
+        const fontSize = getPinBoxFontSizeWithMul(scale, fontMul);
         const text = String(labelText || 'NO.01');
         const borderW = getPinBoxBorderWidth(scale, roundLineMul, false);
         let textWidth = text.length * fontSize * 0.58;
@@ -12177,7 +12203,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             w = dims.boxW;
             h = dims.boxH;
         } else {
-            const dims = measurePinBoxDimensions(ctx, noStr, pinScale, 1);
+            const dims = measurePinBoxDimensions(ctx, noStr, pinScale, 1, getStyleSize(ndtStyleKey).font);
             w = dims.w;
             h = dims.h;
         }
@@ -12493,7 +12519,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const boxX = baseBoxX;
         const boxY = baseBoxY;
         const color = isBeingDragged ? '#facc15' : getStyleColor(ndtStyleKey);
-        const { w, h } = measurePinBoxDimensions(ctx, noStr, pinScale, 1);
+        const { w, h } = measurePinBoxDimensions(ctx, noStr, pinScale, 1, ndtSize.font);
 
         const anchor = getPinLeaderBoxAnchor(boxX, boxY, targetX, targetY, w, h, ndtRotationAngle || 0, { shape: ndtShapeCfg.shape, scale: pinScale });
         const headLen = (isBeingDragged ? 13 : 10) * arrowScale;
@@ -12548,7 +12574,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
         // 비파괴 실측: 투명 배경 + 색 테두리/글자 (결함위치도와 동일)
         paintPinBox(ctx, w, h, ndtShapeCfg, color, pinScale, 1, isBeingDragged, getNdtLeaderLineScale(ndtStyleKey));
-        drawPinBoxLabel(ctx, noStr, getPinBoxTextColor(color, ndtShapeCfg, isBeingDragged), pinScale, ndtShapeCfg);
+        drawPinBoxLabel(ctx, noStr, getPinBoxTextColor(color, ndtShapeCfg, isBeingDragged), pinScale, ndtShapeCfg, ndtSize.font);
         ctx.restore();
     }
 
@@ -14306,7 +14332,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 <tr>
                     <td class="ndt-col-no">${item.no || (idx + 1)}</td>
                     <td class="ndt-col-location">${item.location || '-'}</td>
-                    <td>${item.component || '-'}</td>
+                    <td>${memberNameOut(item.component) || '-'}</td>
                     <td class="ndt-col-dim">${designText}</td>
                     <td class="ndt-col-dim">${measuredText}</td>
                     <td>${item.finishState || '-'}</td>
@@ -14333,7 +14359,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 <tr>
                     <td style="font-weight:700; color:#6b6b6b;">${item.no || (idx + 1)}</td>
                     <td style="font-weight:700;">${locText}</td>
-                    <td>${item.component || '-'}</td>
+                    <td>${memberNameOut(item.component) || '-'}</td>
                     <td style="font-family:monospace; font-size:0.88rem;">${item.designStrength != null ? item.designStrength : '-'}</td>
                     <td style="font-family:monospace; font-size:0.88rem;">${measuredText}</td>
                     <td style="font-weight:800; color:#4ade80;">${ratioText}</td>
@@ -14350,7 +14376,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 <tr>
                     <td style="font-weight:700; color:#6b6b6b;">${item.no || (idx + 1)}</td>
                     <td style="font-weight:700;">${item.location || '-'}</td>
-                    <td>${item.component || '-'}</td>
+                    <td>${memberNameOut(item.component) || '-'}</td>
                     <td style="font-family:monospace; font-size:0.88rem;">${item.carbDepth != null ? item.carbDepth : '-'}</td>
                     <td style="font-family:monospace; font-size:0.88rem;">${item.carbCover != null ? item.carbCover : '-'}</td>
                     <td style="font-family:monospace; font-size:0.88rem;">${typeof item.carbRemainMm === 'number' ? item.carbRemainMm.toFixed(2) : '-'}</td>
@@ -14372,7 +14398,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 <tr>
                     <td style="font-weight:700; color:#6b6b6b;">${item.no || (idx + 1)}</td>
                     <td style="font-weight:700;">${item.location || '-'}</td>
-                    <td>${item.component || '-'}</td>
+                    <td>${memberNameOut(item.component) || '-'}</td>
                     <td style="font-family:monospace; font-size:0.88rem;">${item.fireproofDesign || '-'}</td>
                     <td style="font-weight:800; color:#4ade80;">${avgText}</td>
                     <td>${note}</td>
@@ -14486,7 +14512,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 const designText = formatNdtMeasureDimText(item, 'design', ' x ');
                 const measuredText = formatNdtMeasureDimText(item, 'measured', ' x ');
                 const ratioText = (item.sectionRatio !== undefined && item.sectionRatio !== null) ? item.sectionRatio.toFixed(1) + '%' : '';
-                csvContent += `"${item.no}","${item.location}","${item.component}","${designText === '-' ? '' : designText}","${measuredText === '-' ? '' : measuredText}","${item.finishState || ''}","${ratioText}","${item.sectionGrade || ''}"\n`;
+                csvContent += `"${item.no}","${item.location}","${memberNameOut(item.component)}","${designText === '-' ? '' : designText}","${measuredText === '-' ? '' : measuredText}","${item.finishState || ''}","${ratioText}","${item.sectionGrade || ''}"\n`;
             });
         }
         if (fireproofItems.length > 0) {
@@ -14500,14 +14526,14 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 const avgText = (memberAvg == null || !Number.isFinite(Number(memberAvg))) ? '' : Number(memberAvg).toFixed(2);
                 const flVals = fl.unavailable ? ['측정불가', '', ''] : [fl.readings?.[0] ?? '', fl.readings?.[1] ?? '', fl.readings?.[2] ?? ''];
                 const webVals = web.unavailable ? ['측정불가', '', ''] : [web.readings?.[0] ?? '', web.readings?.[1] ?? '', web.readings?.[2] ?? ''];
-                csvContent += `"${item.no}","${item.location}","${item.component}","${item.fireproofDesign || ''}","${flVals[0]}","${flVals[1]}","${flVals[2]}","${webVals[0]}","${webVals[1]}","${webVals[2]}","${avgText}"\n`;
+                csvContent += `"${item.no}","${item.location}","${memberNameOut(item.component)}","${item.fireproofDesign || ''}","${flVals[0]}","${flVals[1]}","${flVals[2]}","${webVals[0]}","${webVals[1]}","${webVals[2]}","${avgText}"\n`;
             });
         }
         if (standardItems.length > 0) {
             if (measureItems.length > 0 || fireproofItems.length > 0) csvContent += "\n";
             csvContent += "조사번호,조사항목,측정위치,부재명,측정수치,평균결과,상태판정\n";
             standardItems.forEach(item => {
-                csvContent += `"${item.no}","${item.category}","${item.location}","${item.component}","${item.valuesText || ''}","${item.avgValue || ''}","${item.status}"\n`;
+                csvContent += `"${item.no}","${item.category}","${item.location}","${memberNameOut(item.component)}","${item.valuesText || ''}","${item.avgValue || ''}","${item.status}"\n`;
             });
         }
         if (tiltItems.length > 0) {
@@ -14841,7 +14867,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         ctx.fillText(`NO.${String(seq).padStart(2, '0')}`, (colX[0] + colX[1]) / 2, 75);
         // 2026-09-04 사용자 요청: 위치 글씨가 너무 작아 안 보인다고 해서 NO.와 같은 글꼴/크기로 맞춤.
         ctx.font = 'bold 34px sans-serif';
-        [slot.location || item.location || '', item.component || ''].filter(Boolean).forEach((line, i) => {
+        [slot.location || item.location || '', memberNameOut(item.component) || ''].filter(Boolean).forEach((line, i) => {
             ctx.fillText(line, (colX[0] + colX[1]) / 2, 150 + i * 42);
         });
 
@@ -16398,8 +16424,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             if (pinIdEl) pinIdEl.value = existingItem.id;
             if (noEl) noEl.value = existingItem.no;
             if (catEl) catEl.value = existingItem.category || '강도';
-            if (compEl) compEl.value = existingItem.component || '';
-            populateNdtComponentDropdown(existingItem.component || '');
+            if (compEl) compEl.value = memberNameOut(existingItem.component) || '';
+            populateNdtComponentDropdown(memberNameOut(existingItem.component) || '');
             if (locEl) locEl.value = existingItem.location || '';
             if (heightEl) heightEl.value = existingItem.height || '';
             setNdtDispDirection(existingItem.dispDirection || '-', { silent: true });
@@ -20511,7 +20537,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     const isActive = s.slot === activeSlotNum;
                     const badgeNo = s.label;
 
-                    const comp = ((formMember.shapeType === 'area' ? '🟧 ' : '') + (formMember.component || rep.component || donor.component || '')).trim();
+                    const comp = ((formMember.shapeType === 'area' ? '🟧 ' : '') + (memberNameOut(formMember.component || rep.component || donor.component) || '')).trim();
                     const typeText = (formMember.defectType || formMember.cause || (s.slot === 1 ? (donor.defectType || donor.cause) : '') || '').trim();
                     const isGood = isGoodDefectType(typeText);
                     const measureText = typeof formatDefectListMeasure === 'function' ? formatDefectListMeasure(formMember) : '';
@@ -20639,7 +20665,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 + escapeHtml(measureDisplay).replace(/\n/g, '<br>')
                 + '</span>';
         }
-        const comp = (shapeIcon + (d.component || '')).trim();
+        const comp = (shapeIcon + (memberNameOut(d.component) || '')).trim();
         const typeText = (d.defectType || d.cause || '').trim();
         let typeHtml = '';
         if (typeText) {
@@ -21667,7 +21693,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const lines = document.createElement('div');
         lines.className = 'defect-list-item-lines';
 
-        const compText = `${shapeIcon}${d.component || ''}`.trim();
+        const compText = `${shapeIcon}${memberNameOut(d.component) || ''}`.trim();
+        const memberGbChoices = getAmbiguousMemberChoices(d.component);
         const typeText = d.defectType || '';
         const compLine = document.createElement('span');
         compLine.className = 'defect-list-item-component';
@@ -21701,6 +21728,13 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         row.title = isUnregistered
             ? '클릭 후 도면에서 마킹 위치를 지정하세요'
             : (summaryBits.join(' ') || d.location || '');
+        if (memberGbChoices) {
+            const gbHint = `${memberGbChoices.join('/')} 지정 필요`;
+            row.classList.add('bsa-member-gb-needed');
+            compLine.classList.add('bsa-member-gb-needed-text');
+            compLine.title = gbHint;
+            row.title = `${gbHint} — ${row.title}`;
+        }
 
         const prevPhotoCount = (Array.isArray(d.prevRoundPhotos) ? d.prevRoundPhotos.filter(Boolean).length : 0)
             || (Array.isArray(d.prevRoundPhotoIds) ? d.prevRoundPhotoIds.length : 0);
@@ -22900,8 +22934,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     }
 
     // --- Dynamic Defect Component(부재 명칭) — 분류별 플랫 프리셋 ---
-    const DEFECT_JOINT_LEFT = ['기둥', 'RC기둥', '철골기둥', 'SRC기둥', '큰보', '작은보', '벽체', 'RC벽체', '내력벽', '슬래브', '기초'];
-    const DEFECT_JOINT_RIGHT = ['보', '큰보', '작은보', '철골거더', '철골빔', '기둥', '슬래브', '데크슬래브', '벽체', '기초'];
+    // 2026-09-28 접합부는 거더/빔 구분이 필요 없음 — 큰보·작은보 → 보, 철골거더·철골빔 → 철골보
+    const DEFECT_JOINT_LEFT = ['기둥', 'RC기둥', '철골기둥', 'SRC기둥', '보', '벽체', 'RC벽체', '내력벽', '슬래브', '기초'];
+    const DEFECT_JOINT_RIGHT = ['보', '철골보', '기둥', '슬래브', '데크슬래브', '벽체', '기초'];
     const DEFECT_JOINT_COMPONENT_PRESET = [
         '기둥-보 접합부',
         '기둥-슬래브 접합부',
@@ -22915,7 +22950,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         '구조체': [
             // 2026-09-28: 현장에서 주로 쓰는 이름(보·벽체·옹벽·파라펫) 추가 — 기존 이름은 그대로(★ 밖은 「더보기」)
             '기둥', 'RC기둥', '철골기둥', 'SRC기둥',
-            '보', '큰보', '작은보', '철골거더', '철골빔', '캔틸레버보',
+            // 2026-09-28: 큰보→보(G), 작은보→보(B), 철골거더→철골보(G), 철골빔→철골보(B). 그냥 '보'는 G/B를 몰라 목록에서 뺌
+            // (예전 이름·그냥 '보'로 저장된 결함은 화면·출력에서 새 이름으로 보이고, '보'는 보라색으로 지정 필요 표시)
+            '보(G)', '보(B)', '철골보(G)', '철골보(B)', '캔틸레버보',
             '슬래브', '데크슬래브', '벽체', 'RC벽체', '내력벽', '옹벽', '파라펫',
             '계단', '계단참', '계단슬래브',
             '기초', '독립기초', '매트기초',
@@ -22928,6 +22965,334 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     };
 
     // 예전 버전(카테고리 구분 없는 배열)으로 저장된 부재 명칭 커스텀/숨김 목록을 카테고리별 객체로 변환
+    // ---- 2026-09-28 부재 명칭 정리 (큰보→보(G)·작은보→보(B)·철골거더→철골보(G)·철골빔→철골보(B), '상부' 삭제) ----
+    // 저장된 결함은 일괄로 고쳐 쓰지 않는다. 화면·출력·수정창에 보여 줄 때만 memberNameOut()으로 새 이름.
+    // 수정창에서 실제로 고쳐 저장하면 그 결함만 새 이름으로 저장된다(손대지 않으면 저장값 유지 — 폼 가드).
+    function getMemberNameApi() {
+        return (window.BSA && window.BSA.defectQuickPresets) || null;
+    }
+
+    function memberNameOut(v) {
+        const q = getMemberNameApi();
+        if (q && typeof q.normalizeMemberName === 'function') return q.normalizeMemberName(v);
+        return v;
+    }
+
+    /** 거더(G)/빔(B)을 아직 안 정한 보면 ['보(G)','보(B)'] 같은 선택지, 아니면 null (접합부 등은 null) */
+    function getAmbiguousMemberChoices(v) {
+        const q = getMemberNameApi();
+        if (!q || typeof q.getAmbiguousBeamChoices !== 'function') return null;
+        return q.getAmbiguousBeamChoices(v);
+    }
+
+    function getMemberGbHintText(v) {
+        const c = getAmbiguousMemberChoices(v);
+        return c ? `${c.join('/')} 지정 필요` : '';
+    }
+
+    function memberGbClass(v) {
+        return getAmbiguousMemberChoices(v) ? 'bsa-member-gb-needed' : '';
+    }
+
+    /** 상태조사표 입력칸 HTML에 툴팁(지정 필요)을 붙인다 */
+    function withMemberGbHint(html, raw) {
+        const hint = getMemberGbHintText(raw);
+        if (!hint || typeof html !== 'string') return html;
+        return html.replace(/^<(input|textarea) /, `<$1 title="${escapeSurveyAttr(hint)}" `);
+    }
+
+    /** 계정 부재 목록(직접 추가·숨김·순서·★·사용 횟수, 비파괴 부재)을 새 이름으로 — 여러 번 돌려도 같다 */
+    function migrateLegacyMemberNamesInState() {
+        const q = getMemberNameApi();
+        const st = window.state;
+        if (!q || typeof q.migrateMemberNameList !== 'function' || !st) return false;
+        let changed = false;
+        const migrateMap = (key, expand) => {
+            const m = st[key];
+            if (!m || typeof m !== 'object' || Array.isArray(m)) return;
+            Object.keys(m).forEach((bucket) => {
+                if (!Array.isArray(m[bucket])) return;
+                const r = q.migrateMemberNameList(m[bucket], { expandPlainBeam: expand });
+                if (r.changed) {
+                    m[bucket] = r.list;
+                    changed = true;
+                }
+            });
+        };
+        migrateMap('customDefectComponents', false);
+        migrateMap('hiddenDefectComponents', false);
+        // ★·순서에 있던 그냥 '보'는 같은 자리에 보(G)·보(B) 두 개로
+        migrateMap('defectComponentOrder', true);
+        migrateMap('favoriteDefectComponents', true);
+        const usage = st.defectPickUsage && st.defectPickUsage.component;
+        if (usage && typeof usage === 'object' && typeof q.migrateMemberUsageCounts === 'function') {
+            Object.keys(usage).forEach((b) => {
+                const r = q.migrateMemberUsageCounts(usage[b]);
+                if (r.changed) {
+                    usage[b] = r.counts;
+                    changed = true;
+                }
+            });
+        }
+        if (Array.isArray(st.customNdtComponents)) {
+            const r = q.migrateMemberNameList(st.customNdtComponents, {});
+            if (r.changed) {
+                st.customNdtComponents = r.list;
+                changed = true;
+            }
+        }
+        // 계정 동기화는 클라우드 설정을 받은 뒤(loadAndApplyUserDefectPinPresets)에만 — 받기 전에 올리면 새 설정을 덮는다
+        if (changed) window._bsaMemberNamePresetsDirty = true;
+        return changed;
+    }
+
+    /** 결함 수정창 부재 칸: 지정 필요 강조 + 바로 고르는 보(G)/보(B) 칩 */
+    function renderMemberGbHint(component, onPick) {
+        const input = document.getElementById('defectComponentInput');
+        const bulk = (typeof isDefectBulkEditMode === 'function') && isDefectBulkEditMode();
+        const choices = bulk ? null : getAmbiguousMemberChoices(component);
+        if (input) {
+            input.classList.toggle('bsa-member-gb-needed', !!choices);
+            if (choices) {
+                input.title = getMemberGbHintText(component);
+                input.dataset.gbHint = '1';
+            } else if (input.dataset.gbHint) {
+                input.removeAttribute('title');
+                delete input.dataset.gbHint;
+            }
+        }
+        let hint = document.getElementById('defectMemberGbHint');
+        if (!choices) {
+            if (hint) hint.hidden = true;
+            return;
+        }
+        if (!hint && input && input.parentNode) {
+            hint = document.createElement('div');
+            hint.id = 'defectMemberGbHint';
+            hint.className = 'bsa-member-gb-hint';
+            hint.setAttribute('role', 'note');
+            input.insertAdjacentElement('afterend', hint);
+        }
+        if (!hint) return;
+        hint.hidden = false;
+        hint.innerHTML = '';
+        const label = document.createElement('span');
+        label.className = 'bsa-member-gb-hint-text';
+        label.textContent = `${getMemberGbHintText(component)} — 거더(G)·빔(B) 중 고르세요`;
+        hint.appendChild(label);
+        choices.forEach((name) => {
+            const b = document.createElement('button');
+            b.type = 'button';
+            b.className = 'bsa-member-gb-chip';
+            b.tabIndex = -1;
+            b.textContent = name;
+            b.title = `${name} ${/\(G\)$/.test(name) ? '거더' : '빔'}`;
+            b.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                if (typeof onPick === 'function') onPick(name);
+            });
+            hint.appendChild(b);
+        });
+    }
+
+    // ---- 도면: 지정 필요 보의 번호 네모칸 강조 + 그 위 「G」「B」 버튼 (화면 전용 — 보고서·출력 캔버스는 drawPinSafe라 안 그림) ----
+    const MEMBER_GB_COLOR = '#c026d3';
+
+    function drawMemberGbNeededMarkers(ctx, defects) {
+        const entries = [];
+        window._bsaMemberGbEntries = entries;
+        if (!ctx || !Array.isArray(defects) || !defects.length) return entries;
+        const dragging = (typeof activeDragPin !== 'undefined' && !!activeDragPin);
+        const dpr = state.canvasDpr || 1;
+        const seenGroups = new Set();
+        defects.forEach((d) => {
+            if (!d || d.surveyExtra) return;
+            let members = [d];
+            let rep = d;
+            if (d.groupId) {
+                if (seenGroups.has(d.groupId)) return;
+                const gm = defects.filter((m) => m && m.groupId === d.groupId);
+                if (gm.length > 1) {
+                    seenGroups.add(d.groupId);
+                    members = gm;
+                    rep = pickDefectGroupRepresentative(gm) || d;
+                }
+            }
+            const amb = members.filter((m) => m && !m.surveyExtra && getAmbiguousMemberChoices(m.component));
+            if (!amb.length) return;
+            const choices = getAmbiguousMemberChoices(amb[0].component);
+            const ids = amb.filter((m) => {
+                const c = getAmbiguousMemberChoices(m.component);
+                return c && c[0] === choices[0];
+            }).map((m) => m.id).filter(Boolean);
+            const boxX = rep.x || 100;
+            const boxY = rep.y || 100;
+            const styleKey = getDefectStyleKey(rep.category, rep.defectType);
+            const scale = getStyleSize(styleKey).pin;
+            let dims;
+            try {
+                dims = measurePinBoxDimensions(ctx, formatDefectPinLabel(rep, styleKey), scale, 1.0);
+            } catch (_e) {
+                return;
+            }
+            const w = dims.w;
+            const h = dims.h;
+            ctx.save();
+            ctx.translate(boxX, boxY);
+            const rot = state.rotationAngle || 0;
+            if (rot) ctx.rotate((-rot * Math.PI) / 180);
+            ctx.strokeStyle = MEMBER_GB_COLOR;
+            ctx.lineWidth = Math.max(2, 2.2 * scale);
+            ctx.setLineDash([6 * scale, 4 * scale]);
+            ctx.strokeRect(-w / 2 - 7 * scale, -h / 2 - 7 * scale, w + 14 * scale, h + 14 * scale);
+            ctx.setLineDash([]);
+            let m = null;
+            try { m = ctx.getTransform(); } catch (_e) { m = null; }
+            ctx.restore();
+            if (!m || dragging || !ids.length) return;
+            const zoom = Math.hypot(m.a, m.b) / dpr;
+            entries.push({
+                key: ids.join('|'),
+                ids,
+                choices,
+                cx: m.e / dpr,
+                cy: m.f / dpr,
+                halfH: (h / 2 + 7 * scale) * zoom
+            });
+        });
+        return entries;
+    }
+
+    function getMemberGbOverlay() {
+        const canvas = state.canvas || document.getElementById('planCanvas');
+        const host = canvas && canvas.parentElement;
+        if (!host) return null;
+        let ov = document.getElementById('mapMemberGbOverlay');
+        if (!ov) {
+            ov = document.createElement('div');
+            ov.id = 'mapMemberGbOverlay';
+            ov.className = 'map-member-gb-overlay';
+            ov.setAttribute('aria-label', '보 거더/빔 지정');
+            const stop = (e) => { e.stopPropagation(); };
+            ['pointerdown', 'pointerup', 'mousedown', 'mouseup', 'touchstart', 'touchend', 'dblclick', 'contextmenu'].forEach((t) => {
+                ov.addEventListener(t, (e) => {
+                    if (e.target && e.target.closest && e.target.closest('.map-member-gb-pick')) stop(e);
+                }, { passive: true });
+            });
+            ov.addEventListener('click', (e) => {
+                const btn = e.target && e.target.closest ? e.target.closest('.map-member-gb-btn') : null;
+                if (!btn) return;
+                e.preventDefault();
+                e.stopPropagation();
+                const wrap = btn.closest('.map-member-gb-pick');
+                const ids = String((wrap && wrap.dataset.ids) || '').split('|').filter(Boolean);
+                applyMemberGbChoice(ids, btn.dataset.value || '');
+            });
+            host.appendChild(ov);
+        } else if (ov.parentElement !== host) {
+            host.appendChild(ov);
+        }
+        ov.style.left = `${canvas.offsetLeft}px`;
+        ov.style.top = `${canvas.offsetTop}px`;
+        ov.style.width = `${canvas.clientWidth}px`;
+        ov.style.height = `${canvas.clientHeight}px`;
+        return ov;
+    }
+
+    function syncMemberGbOverlay(entries) {
+        const list = Array.isArray(entries) ? entries : [];
+        let ov = document.getElementById('mapMemberGbOverlay');
+        if (!list.length) {
+            if (ov) ov.replaceChildren();
+            return;
+        }
+        ov = getMemberGbOverlay();
+        if (!ov) return;
+        const vw = ov.clientWidth || 0;
+        const vh = ov.clientHeight || 0;
+        const coarse = !!(window.matchMedia && window.matchMedia('(pointer: coarse)').matches);
+        const btnH = coarse ? 32 : 28;
+        const existing = new Map();
+        Array.from(ov.children).forEach((el) => existing.set(el.dataset.key, el));
+        const keep = new Set();
+        list.forEach((en) => {
+            if (en.cx < -60 || en.cy < -60 || (vw && en.cx > vw + 60) || (vh && en.cy > vh + 60)) return;
+            let el = existing.get(en.key);
+            const sig = en.choices.join('|');
+            if (!el || el.dataset.sig !== sig) {
+                if (el) el.remove();
+                el = document.createElement('div');
+                el.className = 'map-member-gb-pick';
+                el.dataset.key = en.key;
+                el.dataset.ids = en.ids.join('|');
+                el.dataset.sig = sig;
+                el.title = `${en.choices.join('/')} 지정 필요`;
+                en.choices.forEach((name) => {
+                    const b = document.createElement('button');
+                    b.type = 'button';
+                    b.className = 'map-member-gb-btn';
+                    b.dataset.value = name;
+                    b.textContent = /\(G\)$/.test(name) ? 'G' : 'B';
+                    b.title = `${name} ${/\(G\)$/.test(name) ? '거더' : '빔'}`;
+                    b.setAttribute('aria-label', b.title);
+                    el.appendChild(b);
+                });
+                ov.appendChild(el);
+            }
+            keep.add(en.key);
+            let top = en.cy - en.halfH - 4 - btnH;
+            if (top < 2) top = en.cy + en.halfH + 4; // 위쪽 끝이면 박스 아래로
+            el.style.transform = `translate(${Math.round(en.cx)}px, ${Math.round(top)}px) translateX(-50%)`;
+        });
+        existing.forEach((el, key) => { if (!keep.has(key)) el.remove(); });
+    }
+
+    /** 도면 「G」「B」 버튼: 부재 명칭만 바꿔 저장 (원인·종류는 그대로, 수정창은 안 연다) */
+    function applyMemberGbChoice(defectIds, value) {
+        const ids = (defectIds || []).filter(Boolean);
+        if (!ids.length || !value) return 0;
+        const editHistoryApi = window.BSA && window.BSA.editHistory;
+        let changedCount = 0;
+        ids.forEach((id) => {
+            const located = findDefectAcrossBuildingFloors(id);
+            const key = located ? located.floorKey : `${state.currentBuildingId}_${state.currentFloor}`;
+            const list = (state.defects && state.defects[key]) || [];
+            const defect = list.find((x) => x && x.id === id);
+            if (!defect) return;
+            const choices = getAmbiguousMemberChoices(defect.component);
+            if (!choices || choices.indexOf(value) < 0) return;
+            const before = (editHistoryApi && Array.isArray(editHistoryApi.TRACKED_FIELDS))
+                ? editHistoryApi.TRACKED_FIELDS.reduce((acc, f) => { acc[f] = defect[f]; return acc; }, {})
+                : null;
+            defect.component = value;
+            touchDefectUpdatedAt(defect);
+            if (before) {
+                try {
+                    const diff = editHistoryApi.diffTracked(before, defect);
+                    if (diff) {
+                        defect.editHistory = editHistoryApi.appendEntry(editHistoryApi.readHistory(defect),
+                            { at: Date.now(), by: window.state.userName || '', changes: diff });
+                    }
+                } catch (_e) { /* 이력은 부가 기능 */ }
+            }
+            changedCount++;
+        });
+        if (!changedCount) return 0;
+        saveStateToLocalStorage();
+        // 같은 결함 수정창이 열려 있으면 부재 칸도 맞춘다
+        const openPinId = document.getElementById('defectPinId')?.value;
+        if (openPinId && ids.indexOf(openPinId) >= 0) {
+            syncDefectComboFields(document.getElementById('defectComponent'), document.getElementById('defectComponentInput'), value);
+            if (typeof refreshDefectQuickPickBar === 'function') refreshDefectQuickPickBar();
+        }
+        drawCanvas();
+        if (typeof renderDefectListPanel === 'function') renderDefectListPanel();
+        if (typeof renderSurveyTable === 'function' && window.state.currentTab === 'tab-survey') renderSurveyTable();
+        window.showToast?.(`부재 명칭 → ${value}${changedCount > 1 ? ` (${changedCount}건)` : ''}`, 'success', 1600);
+        return changedCount;
+    }
+
     function migrateDefectComponentStateShape() {
         if (Array.isArray(window.state.customDefectComponents)) {
             const legacy = window.state.customDefectComponents;
@@ -22937,6 +23302,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             const legacy = window.state.hiddenDefectComponents;
             window.state.hiddenDefectComponents = { '구조체': [...legacy], '비구조체': [...legacy], '마감재': [...legacy] };
         }
+        migrateLegacyMemberNamesInState();
     }
 
     function isDefectComboCustomToken(val) {
@@ -23365,6 +23731,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 onComponentPick, 'component', refreshDefectQuickPickBar);
         }
 
+        renderMemberGbHint(jointMode ? '' : currentComponent, onComponentPick);
         const selectedTypeParts = parseDefectTypeList(currentType);
         const selectedTypeSet = new Set(selectedTypeParts);
         const typeChipOptions = getPinnedDefectTypeChips(currentCategory, currentComponent);
@@ -23814,6 +24181,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         '철골기둥': STEEL_MEMBER_DEFECTS,
         '철골거더': STEEL_MEMBER_DEFECTS,
         '철골빔': STEEL_MEMBER_DEFECTS,
+        '철골보(G)': STEEL_MEMBER_DEFECTS,
+        '철골보(B)': STEEL_MEMBER_DEFECTS,
         '데크슬래브': DECK_SLAB_DEFECTS,
         'RC벽체': RC_WALL_DEFECTS,
         '벽체': RC_WALL_DEFECTS,
@@ -23826,6 +24195,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         'SRC기둥': RC_COLUMN_DEFECTS,
         '큰보': RC_BEAM_DEFECTS,
         '작은보': RC_BEAM_DEFECTS,
+        '보(G)': RC_BEAM_DEFECTS,
+        '보(B)': RC_BEAM_DEFECTS,
         '캔틸레버보': RC_BEAM_DEFECTS,
         '슬래브': RC_SLAB_DEFECTS,
         '계단슬래브': RC_SLAB_DEFECTS,
@@ -25043,7 +25414,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (delBtn) delBtn.hidden = !isMark;
         const comp = document.getElementById('crackGaugeMarkComponent');
         const loc = document.getElementById('crackGaugeMarkLocation');
-        if (comp) comp.value = isMark ? String(rec.defect.component || '') : '';
+        if (comp) comp.value = isMark ? String(memberNameOut(rec.defect.component) || '') : '';
         if (loc) loc.value = isMark ? String(rec.defect.location || '') : '';
     }
 
@@ -25189,7 +25560,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (meta) {
             meta.textContent = rec.kind === 'ndt'
                 ? '도면에 직접 찍은 게이지 마킹'
-                : `기존 균열 결함에 연결된 기록 · ${rec.defect.component || '부재'} ${rec.defect.defectType || ''}`.trim();
+                : `기존 균열 결함에 연결된 기록 · ${memberNameOut(rec.defect.component) || '부재'} ${rec.defect.defectType || ''}`.trim();
         }
     }
 
@@ -25203,7 +25574,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 floorDisplayLabel: getGrade3FloorDisplayLabel(floorCode, bldg)
             };
             const no = getSurveyCellText('no', d, ctx) || (d.no || '').replace(/^NO\.?\s*/i, '');
-            const title = `${d.component || '부재'} ${d.defectType || ''}`.trim();
+            const title = `${memberNameOut(d.component) || '부재'} ${d.defectType || ''}`.trim();
             const gauge = normalizeCrackGaugeLog(d.crackGaugeLog);
             const gaugeLabel = gauge.gaugeNo ? `No.${gauge.gaugeNo}` : '-';
             const lastGauge = gauge.readings.length ? gauge.readings[gauge.readings.length - 1] : null;
@@ -25225,7 +25596,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
     function renderCrackGaugeMarkSummaryRow(item, btnClass) {
         const no = getCrackGaugeMarkDisplayNo(item) || '-';
-        const title = [item.component, item.location].filter((s) => s && String(s).trim()).join(' ') || '균열 게이지';
+        const title = [memberNameOut(item.component), item.location].filter((s) => s && String(s).trim()).join(' ') || '균열 게이지';
         const gauge = normalizeCrackGaugeLog(item.crackGaugeLog);
         const gaugeLabel = gauge.gaugeNo ? `No.${gauge.gaugeNo}` : '-';
         const lastGauge = gauge.readings.length ? gauge.readings[gauge.readings.length - 1] : null;
@@ -25479,6 +25850,12 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         renderCrackMonitorPhotoFrame('crackGaugeCurrPhotoFrame', window._crackGaugeCurrPhoto, '게이지 현차');
         renderCrackMonitorPhotoFrame('crackTipPrevPhotoFrame', window._crackTipPrevPhoto, '팁 전차');
         renderCrackMonitorPhotoFrame('crackTipCurrPhotoFrame', window._crackTipCurrPhoto, '팁 현차');
+        if (typeof document.querySelectorAll === 'function') {
+            document.querySelectorAll('[data-cm-photo-rotate]').forEach((btn) => {
+                const [k, s] = String(btn.getAttribute('data-cm-photo-rotate') || '').split(':');
+                btn.disabled = !getCrackMonitorPhotoState(k, s);
+            });
+        }
     }
 
     async function pickCrackMonitorPhoto(kind, slot, mode) {
@@ -25617,6 +25994,14 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     if (kind && slot) pickCrackMonitorPhoto(kind, slot, mode || 'gallery');
                     return;
                 }
+                const rotateBtn = e.target && e.target.closest && e.target.closest('[data-cm-photo-rotate]');
+                if (rotateBtn) {
+                    e.preventDefault();
+                    const raw = rotateBtn.getAttribute('data-cm-photo-rotate') || '';
+                    const [kind, slot, dir] = raw.split(':');
+                    if (kind && slot) rotateCrackMonitorPhoto(kind, slot, Number(dir) < 0 ? -1 : 1);
+                    return;
+                }
                 const clearBtn = e.target && e.target.closest && e.target.closest('[data-cm-photo-clear]');
                 if (clearBtn) {
                     e.preventDefault();
@@ -25668,7 +26053,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 floorDisplayLabel: getGrade3FloorDisplayLabel(floorCode, state.currentBuilding)
             };
             const no = getSurveyCellText('no', d, ctx) || (d.no || '').replace(/^NO\.?\s*/i, '');
-            const title = `${d.component || '부재'} ${d.defectType || ''}`.trim();
+            const title = `${memberNameOut(d.component) || '부재'} ${d.defectType || ''}`.trim();
             const gauge = normalizeCrackGaugeLog(d.crackGaugeLog);
             const gaugeLabel = gauge.gaugeNo ? `No.${gauge.gaugeNo}` : '-';
             const lastGauge = gauge.readings.length ? gauge.readings[gauge.readings.length - 1] : null;
@@ -27112,7 +27497,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         ['styleColorNdtTilt', 'ndtTilt'],
         ['styleColorNdtSettlement', 'ndtSettlement'],
         ['styleColorNdtMemberDisp', 'ndtMemberDisp'],
-        ['styleColorNdtFireproof', 'ndtFireproof']
+        ['styleColorNdtFireproof', 'ndtFireproof'],
+        ['styleColorNdtCrackGauge', 'ndtCrackGauge']
     ];
 
     // [ID 접미사, styleSizes 키] — stylePinSize{suffix}/styleArrowSize{suffix} 슬라이더에 사용
@@ -27131,7 +27517,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         ['NdtTilt', 'ndtTilt'],
         ['NdtSettlement', 'ndtSettlement'],
         ['NdtMemberDisp', 'ndtMemberDisp'],
-        ['NdtFireproof', 'ndtFireproof']
+        ['NdtFireproof', 'ndtFireproof'],
+        ['NdtCrackGauge', 'ndtCrackGauge']
     ];
     const STYLE_SIZE_FIELDS = DEFECT_STYLE_SIZE_FIELDS.concat(NDT_STYLE_SIZE_FIELDS);
 
@@ -27180,6 +27567,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             if (arrowLabel) arrowLabel.textContent = `${Math.round(sz.arrow * 100)}%`;
             if (leaderInput) leaderInput.value = sz.leader;
             if (leaderLabel) leaderLabel.textContent = `${Math.round(sz.leader * 100)}%`;
+            const fontInput = document.getElementById(`styleFontSize${suffix}`);
+            const fontLabel = document.getElementById(`styleFontSize${suffix}Label`);
+            if (fontInput) fontInput.value = sz.font;
+            if (fontLabel) fontLabel.textContent = `${Math.round(sz.font * 100)}%`;
         });
         STYLE_SHAPE_FIELDS.forEach(([suffix, key]) => {
             const sh = getStyleShape(key);
@@ -27485,6 +27876,16 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     if (leaderLabel) leaderLabel.textContent = `${Math.round(v * 100)}%`;
                     if (key === 'ndtStrength' || key === 'ndtCarbonation') syncNdtStrengthCarbSizeControlsUi();
                     if (typeof window.syncBulkStyleSlidersUi === 'function') window.syncBulkStyleSlidersUi();
+                    refreshAllStyleColoredCanvases();
+                });
+            }
+            const fontInput = document.getElementById(`styleFontSize${suffix}`);
+            const fontLabel = document.getElementById(`styleFontSize${suffix}Label`);
+            if (fontInput) {
+                fontInput.addEventListener('input', () => {
+                    const v = normalizePinFontMul(parseFloat(fontInput.value));
+                    setStyleSizeFields(key, { font: v });
+                    if (fontLabel) fontLabel.textContent = `${Math.round(v * 100)}%`;
                     refreshAllStyleColoredCanvases();
                 });
             }
@@ -30161,7 +30562,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     function getBulkMixedFieldLabels(defects) {
         const labels = [];
         if (bulkFieldConsensus(defects, d => d.category || '구조체').mixed) labels.push('구조 분류');
-        if (bulkFieldConsensus(defects, d => d.component || '').mixed) labels.push('부재 명칭');
+        if (bulkFieldConsensus(defects, d => memberNameOut(d.component) || '').mixed) labels.push('부재 명칭');
         if (bulkFieldConsensus(defects, d => d.defectType || '').mixed) labels.push('결함 종류');
         if (bulkFieldConsensus(defects, d => d.cause || '').mixed) labels.push('발생 원인');
         if (bulkFieldConsensus(defects, d => extractDefectLocationDetail(d.location || '')).mixed) labels.push('상세 위치');
@@ -30247,7 +30648,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (noEl) noEl.value = `선택 ${defects.length}건`;
 
         const cat = bulkFieldConsensus(defects, d => d.category || '구조체');
-        const comp = bulkFieldConsensus(defects, d => d.component || '');
+        const comp = bulkFieldConsensus(defects, d => memberNameOut(d.component) || '');
         const type = bulkFieldConsensus(defects, d => d.defectType || '');
         const cause = bulkFieldConsensus(defects, d => d.cause || '');
         const loc = bulkFieldConsensus(defects, d => extractDefectLocationDetail(d.location || ''));
@@ -30490,7 +30891,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             if (catEl) catEl.value = existingPin.category || '구조체';
             const compCatExisting = existingPin.category || '구조체';
             // 저장된 부재가 비어 있으면 공란 유지(과거처럼 기둥으로 채우지 않음)
-            populateDefectComponentDropdown(compCatExisting, existingPin.component || '');
+            populateDefectComponentDropdown(compCatExisting, memberNameOut(existingPin.component) || '');
             updateDefectTypeDropdown(existingPin.category || '구조체', existingPin.defectType);
             updateDefectCauseDropdown(existingPin.defectType || '균열', existingPin.cause);
             if (carriedOverEl) carriedOverEl.checked = !!existingPin.isCarriedOver;
@@ -30585,7 +30986,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             if (noEl) noEl.value = (tmpl && tmpl.groupId) ? (tmpl.groupNo || defectNoStr) : defectNoStr;
             const defaultCat = (tmpl && tmpl.category) || '구조체';
             if (catEl) catEl.value = defaultCat;
-            populateDefectComponentDropdown(defaultCat, tmpl ? (tmpl.component || '') : '');
+            populateDefectComponentDropdown(defaultCat, tmpl ? (memberNameOut(tmpl.component) || '') : '');
             updateDefectTypeDropdown(defaultCat, tmpl ? (tmpl.defectType || '') : '');
             updateDefectCauseDropdown(tmpl ? (tmpl.defectType || '') : '', tmpl ? (tmpl.cause || '') : '');
             if (carriedOverEl) carriedOverEl.checked = false;
@@ -30809,12 +31210,14 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
         frame.classList.add('has-photo');
         const removeMainBtn = isPrev ? '' : `<button type="button" class="defect-photo-frame-remove" onclick="window.${removeFn}(0)" title="${label} 대표 삭제">×</button>`;
+        const rotateMainBtns = isPrev ? '' : buildPhotoRotateButtonsHtml('onclick="window.rotatePendingPhoto(0, -1)"', 'onclick="window.rotatePendingPhoto(0, 1)"');
         frame.innerHTML = `
             <button type="button" class="defect-photo-thumb-btn" onclick="window.${openFn}(0)" title="${label} 대표 — 탭하여 확대">
                 <img src="${list[0]}" alt="${label} 대표">
             </button>
             <span class="defect-photo-rep-badge">대표</span>
             ${removeMainBtn}
+            ${rotateMainBtns}
         `;
 
         if (!extra) return;
@@ -30833,6 +31236,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                         <img src="${src}" alt="${label} ${idx + 1}">
                     </button>
                     ${removeExtraBtn}
+                    ${isPrev ? '' : buildPhotoRotateButtonsHtml(`onclick="window.rotatePendingPhoto(${idx}, -1)"`, `onclick="window.rotatePendingPhoto(${idx}, 1)"`, 'photo-rotate-group-sm')}
                 </div>
             `;
         }).join('');
@@ -30928,6 +31332,220 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             scheduleDefectAutoApply();
         }
     };
+
+    // @@PHOTO_ROTATE_START
+    // 2026-09-28 사진 90° 회전 (결함 현차 사진·균열 게이지/팁 비교 사진·전경사진).
+    // 회전 값을 따로 저장하지 않고 **회전된 그림으로 다시 만들어** 기존 사진 교체 경로(그림 그려 넣기와 같은 길)로
+    // 저장한다 → URL이 바뀌어 새 사진 ID를 받고, 로컬(IndexedDB)·클라우드 업로드·PDF/한글/사진첩 출력이
+    // 모두 새 그림을 그대로 쓴다. 브라우저는 <img>/캔버스에 그릴 때 EXIF 방향을 이미 적용하므로(화면에
+    // 보이는 그대로가 캔버스에 들어감) 그 위에서 90°만 돌리고, 새 JPEG에는 EXIF가 없어 두 번 돌지 않는다.
+    // 크기는 줄이지 않는다(캔버스 한계 대비 장축 PHOTO_ROTATE_MAX_EDGE 넘는 사진만 맞춤). 화질은 사진 추가와 같은 JPEG 품질.
+    const PHOTO_ROTATE_MAX_EDGE = 4096;
+    let _photoRotateBusy = false;
+
+    function normalizePhotoRotateDir(dir) {
+        return Number(dir) < 0 ? -1 : 1;
+    }
+
+    /** 회전 후 캔버스 크기 — 가로·세로 교체, 너무 큰 사진만 장축을 maxEdge로 맞춤 */
+    function computePhotoRotateCanvasSize(w, h, maxEdge) {
+        const srcW = Math.max(1, Math.round(Number(w) || 0));
+        const srcH = Math.max(1, Math.round(Number(h) || 0));
+        const cap = Number(maxEdge) > 0 ? Number(maxEdge) : PHOTO_ROTATE_MAX_EDGE;
+        const long = Math.max(srcW, srcH);
+        const k = long > cap ? cap / long : 1;
+        const drawW = Math.max(1, Math.round(srcW * k));
+        const drawH = Math.max(1, Math.round(srcH * k));
+        return { canvasW: drawH, canvasH: drawW, drawW, drawH };
+    }
+
+    function photoRotateOutputMime(src) {
+        return /^data:image\/png[;,]/i.test(String(src || '')) ? 'image/png' : 'image/jpeg';
+    }
+
+    function photoRotateJpegQuality() {
+        return (typeof window.getPhotoJpegQuality === 'function') ? window.getPhotoJpegQuality() : 0.85;
+    }
+
+    /** dataURL은 그대로, Storage https·blob 주소는 바이트로 받아(한글 출력과 같은 CORS/프록시 경로) 그림으로 연다 */
+    async function loadImageForPhotoRotate(src) {
+        const raw = String(src || '').trim();
+        if (!raw) throw new Error('사진이 없습니다.');
+        let url = raw;
+        let objUrl = null;
+        if (!/^data:/i.test(raw)) {
+            const pack = await imageSrcToBytes(raw);
+            if (!pack || !pack.bytes) throw new Error('사진을 불러오지 못했습니다.');
+            objUrl = URL.createObjectURL(new Blob([pack.bytes], { type: pack.mime || 'image/jpeg' }));
+            url = objUrl;
+        }
+        try {
+            return await new Promise((resolve, reject) => {
+                const img = new Image();
+                img.onload = () => resolve(img);
+                img.onerror = () => reject(new Error('사진을 불러오지 못했습니다.'));
+                img.src = url;
+            });
+        } finally {
+            if (objUrl) {
+                try { URL.revokeObjectURL(objUrl); } catch (_e) { /* ignore */ }
+            }
+        }
+    }
+
+    /** 사진을 90° 돌린 새 dataURL. dir: -1 = 왼쪽(반시계), 1 = 오른쪽(시계) */
+    async function rotatePhotoSrc90(src, dir) {
+        const d = normalizePhotoRotateDir(dir);
+        const img = await loadImageForPhotoRotate(src);
+        const w = img.naturalWidth || img.width;
+        const h = img.naturalHeight || img.height;
+        if (!w || !h) throw new Error('사진 크기를 알 수 없습니다.');
+        const size = computePhotoRotateCanvasSize(w, h, PHOTO_ROTATE_MAX_EDGE);
+        const canvas = document.createElement('canvas');
+        canvas.width = size.canvasW;
+        canvas.height = size.canvasH;
+        const ctx = canvas.getContext('2d');
+        const mime = photoRotateOutputMime(src);
+        if (mime === 'image/jpeg') {
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+        }
+        ctx.save();
+        ctx.translate(canvas.width / 2, canvas.height / 2);
+        ctx.rotate(d * Math.PI / 2);
+        ctx.imageSmoothingEnabled = true;
+        if ('imageSmoothingQuality' in ctx) ctx.imageSmoothingQuality = 'high';
+        ctx.drawImage(img, -size.drawW / 2, -size.drawH / 2, size.drawW, size.drawH);
+        ctx.restore();
+        const out = mime === 'image/png'
+            ? canvas.toDataURL('image/png')
+            : canvas.toDataURL('image/jpeg', photoRotateJpegQuality());
+        if (!out || !/^data:image\//.test(out)) throw new Error('회전한 사진을 만들지 못했습니다.');
+        return out;
+    }
+
+    /** 공용: 회전 한 번에 하나만(연타로 옛 그림 위에 돌리는 일 방지). 끝나고 여전히 같은 사진일 때만 교체 */
+    async function runPhotoRotate(opts) {
+        if (!opts || typeof opts.getSrc !== 'function' || typeof opts.apply !== 'function') return false;
+        const src = opts.getSrc();
+        if (!src) return false;
+        if (_photoRotateBusy) {
+            if (typeof window.showToast === 'function') window.showToast('사진을 돌리는 중입니다. 잠시만 기다려 주세요.', 'info', 1500);
+            return false;
+        }
+        _photoRotateBusy = true;
+        try {
+            const rotated = await rotatePhotoSrc90(src, opts.dir);
+            if (opts.getSrc() !== src || (typeof opts.stillValid === 'function' && !opts.stillValid())) {
+                if (typeof window.showToast === 'function') window.showToast('그 사이 사진이 바뀌어 회전을 취소했습니다.', 'info');
+                return false;
+            }
+            await opts.apply(rotated, src);
+            return true;
+        } catch (e) {
+            console.warn('사진 회전 실패:', e);
+            if (typeof window.showToast === 'function') window.showToast('사진 회전에 실패했습니다. 사진을 다시 불러온 뒤 시도해 주세요.', 'error');
+            return false;
+        } finally {
+            _photoRotateBusy = false;
+        }
+    }
+
+    /** 사진 위 ⟲ ⟳ 버튼 HTML — onLeft/onRight는 인라인 onclick 문자열 또는 data 속성 문자열 */
+    function buildPhotoRotateButtonsHtml(attrLeft, attrRight, extraClass) {
+        return `<div class="photo-rotate-group${extraClass ? ` ${extraClass}` : ''}">`
+            + `<button type="button" class="photo-rotate-btn" ${attrLeft} title="왼쪽으로 90° 회전" aria-label="왼쪽으로 90° 회전"><i class="fa-solid fa-rotate-left"></i></button>`
+            + `<button type="button" class="photo-rotate-btn" ${attrRight} title="오른쪽으로 90° 회전" aria-label="오른쪽으로 90° 회전"><i class="fa-solid fa-rotate-right"></i></button>`
+            + '</div>';
+    }
+
+    /** 결함 현차 사진 회전 — 그림 그려 넣기(annotatePendingPhoto)와 같은 저장 경로 */
+    window.rotatePendingPhoto = function(idx, dir) {
+        const list = window._pendingPhotos;
+        const i = Number(idx);
+        if (!Array.isArray(list) || !list[i]) return Promise.resolve(false);
+        const pinAtStart = document.getElementById('defectPinId')?.value || '';
+        return runPhotoRotate({
+            dir,
+            getSrc: () => (window._pendingPhotos === list ? list[i] : null),
+            stillValid: () => {
+                if (typeof isDefectModalOpen === 'function' && !isDefectModalOpen()) return false;
+                const pinNow = document.getElementById('defectPinId')?.value || '';
+                return !pinAtStart || pinNow === pinAtStart;
+            },
+            apply: (rotated) => {
+                list[i] = rotated;
+                window._defectPhotosDirty = true;
+                renderDefectPhotoSection();
+                void persistOpenDefectPhotosNow();
+                scheduleDefectAutoApply();
+            }
+        });
+    };
+
+    /** 균열 게이지/팁 비교 사진 회전 — 사진 고르기와 같은 저장 경로(scheduleNdtCrackMonitorSave) */
+    function getCrackMonitorPhotoState(kind, slot) {
+        if (kind === 'gauge') return slot === 'prev' ? (window._crackGaugePrevPhoto || '') : (window._crackGaugeCurrPhoto || '');
+        return slot === 'prev' ? (window._crackTipPrevPhoto || '') : (window._crackTipCurrPhoto || '');
+    }
+
+    function rotateCrackMonitorPhoto(kind, slot, dir) {
+        const recAtStart = window._ndtCrackMonitorDefectId || '';
+        return runPhotoRotate({
+            dir,
+            getSrc: () => getCrackMonitorPhotoState(kind, slot),
+            stillValid: () => (window._ndtCrackMonitorDefectId || '') === recAtStart,
+            apply: (rotated) => {
+                setCrackMonitorPhotoState(kind, slot, rotated);
+                renderCrackMonitorPhotoFrames();
+                if (typeof scheduleNdtCrackMonitorSave === 'function') scheduleNdtCrackMonitorSave();
+            }
+        });
+    }
+
+    /**
+     * 전경사진 회전 — 같은 ID로 덮으면 이미 올라간 사진은 다시 안 올라가고(isPhotoMarkedOnStorage)
+     * 다른 기기 캐시도 옛 그림이 남는다. 그래서 새 ID로 추가(사진 추가와 같은 길) + 옛 사진 삭제(삭제와 같은 길).
+     * 자리·설명은 그대로 둔다.
+     */
+    function rotateOverviewPhoto(photoId, dir) {
+        const bldgId = window._overviewPhotosBuildingId;
+        const findLive = () => {
+            const b = (window.state.buildings || []).find((x) => x.id === bldgId);
+            if (!b) return null;
+            const list = getBuildingOverviewPhotos(b);
+            const idx = list.findIndex((x) => x && x.id === photoId);
+            if (idx < 0) return null;
+            return { bldg: b, list, idx, item: list[idx] };
+        };
+        const srcOf = () => {
+            const hit = findLive();
+            if (!hit) return null;
+            return hit.item.dataUrl || (window._photoCache && window._photoCache[getOverviewPhotoDocId(bldgId, photoId)]) || null;
+        };
+        if (typeof flushOverviewCaptionsFromDom === 'function') flushOverviewCaptionsFromDom();
+        return runPhotoRotate({
+            dir,
+            getSrc: srcOf,
+            stillValid: () => window._overviewPhotosBuildingId === bldgId,
+            apply: async (rotated) => {
+                const hit = findLive();
+                if (!hit) return;
+                const newItem = { ...hit.item, id: createOverviewPhotoId(), dataUrl: rotated };
+                hit.list[hit.idx] = newItem;
+                const newKey = getOverviewPhotoDocId(hit.bldg.id, newItem.id);
+                if (!window._photoCache) window._photoCache = {};
+                window._photoCache[newKey] = rotated;
+                if (typeof saveStateToLocalStorage === 'function') saveStateToLocalStorage();
+                await persistPhotoUrlToIdb(newKey, rotated);
+                uploadOverviewPhotos(hit.bldg);
+                renderOverviewPhotosList({ force: true });
+                await deleteOverviewPhotoStorage(hit.bldg.id, photoId);
+            }
+        });
+    }
+    window.rotateOverviewPhoto = rotateOverviewPhoto;
+    // @@PHOTO_ROTATE_END
 
     // 전회차 사진은 수동 추가·삭제 불가 (가져오기·차수 전환으로만 설정)
 
@@ -33334,7 +33952,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 cadNo: rawNo,
                 isCadImported: true,
                 category: cadItem.category || '구조체',
-                component: cadItem.component || '',
+                component: memberNameOut(cadItem.component) || '',
                 location: state.currentFloor,
                 defectType: cadItem.defectType || '균열',
                 cause: cadItem.cause || '건조수축',
@@ -34115,8 +34733,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 if (!head) return sizeText;
                 return `${head} ${sizeText}`;
             }
-            case 'location': return d.location || ((ctx.floorCode || state.currentFloor) + ' ' + (d.component || '기둥'));
-            case 'component': return d.component || '기둥';
+            case 'location': return d.location || ((ctx.floorCode || state.currentFloor) + ' ' + (memberNameOut(d.component) || '기둥'));
+            case 'component': return memberNameOut(d.component) || '기둥';
             case 'defectType': return formatOpeningAwareDefectType(d) || '';
             case 'category': return d.category === '구조체' ? '○' : '-';
             case 'openingCrack': return d.isOpeningCrack ? '○' : '-';
@@ -34488,7 +35106,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             case 'location':
                 return textInput('location', d.location || '', '위치');
             case 'component':
-                return textInput('component', d.component || '', '부재종류');
+                return withMemberGbHint(textInput('component', memberNameOut(d.component) || '', '부재종류', memberGbClass(d.component)), d.component);
             case 'defectType':
                 return textInput('defectType', d.defectType || '', '조사내용');
             case 'cause':
@@ -34514,7 +35132,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     ? ''
                     : String(getSurveyCellText('size', d, {}) || '').replace(/^-$/, '');
                 return `<div class="survey-inline-stack survey-inline-stack-one-line" ${stop}>` +
-                    textInput('component', d.component || '', '부재', 'survey-inline-narrow') +
+                    withMemberGbHint(textInput('component', memberNameOut(d.component) || '', '부재', `survey-inline-narrow${memberGbClass(d.component) ? ' ' + memberGbClass(d.component) : ''}`), d.component) +
                     textInput('defectType', d.defectType || '', '조사내용', 'survey-inline-narrow') +
                     textInput('size', sizeDisp, '크기', 'survey-inline-narrow') +
                     `</div>`;
@@ -35328,7 +35946,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 floorDisplayLabel: getGrade3FloorDisplayLabel(floorCode, bldg)
             };
             const defectNo = getSurveyCellText('no', d, ctx) || (d.no || '').replace(/^NO\.?\s*/i, '');
-            const title = `${d.component || '부재'} ${d.defectType || '결함'}`.trim();
+            const title = `${memberNameOut(d.component) || '부재'} ${d.defectType || '결함'}`.trim();
             const roundLabels = getDefectHwpxCompareRoundLabels(d, bldg);
             const prevLabel = roundLabels.prev ? `전차 · ${roundLabels.prev}` : '전차';
             const currLabel = roundLabels.curr ? `현차 · ${roundLabels.curr}` : '현차';
@@ -35400,7 +36018,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 pCounter++;
                 const pNumStr = pCounter < 10 ? `0${pCounter}` : `${pCounter}`;
                 const photoLabel = `사진${pNumStr}`;
-                const componentDefectTitle = `${d.no ? d.no + ' ' : ''}${d.component || '부재'} ${d.defectType || '결함'}`;
+                const componentDefectTitle = `${d.no ? d.no + ' ' : ''}${memberNameOut(d.component) || '부재'} ${d.defectType || '결함'}`;
                 photoItems.push({
                     label: photoLabel,
                     title: componentDefectTitle,
@@ -35771,8 +36389,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             fontSize = dims.fontType;
             col1W = dims.col1W;
         } else {
-            boxDim = measurePinBoxDimensions(measureCtx || null, label, pinScale, 1);
-            fontSize = getPinBoxFontSize(pinScale);
+            boxDim = measurePinBoxDimensions(measureCtx || null, label, pinScale, 1, sizes.font);
+            fontSize = getPinBoxFontSizeWithMul(pinScale, sizes.font);
         }
         const borderW = getPinBoxBorderWidth(pinScale, 1, false, getNdtLeaderLineScale(ndtStyleKey));
         const lineW = getNdtLeaderLineWidth(pinScale, false, ndtStyleKey);
@@ -36658,7 +37276,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const td = 'border:1px solid #334155; padding:3px 4px; font-size:0.72rem; text-align:center; word-break:keep-all;';
         const placeOf = (it) => {
             const d = it.defect || {};
-            return `${it.floorLabel || ''} ${d.component || ''} ${d.locationDetail || ''}`.replace(/\s+/g, ' ').trim() || '-';
+            return `${it.floorLabel || ''} ${memberNameOut(d.component) || ''} ${d.locationDetail || ''}`.replace(/\s+/g, ' ').trim() || '-';
         };
         const noOf = (it) => (it.gauge && it.gauge.gaugeNo) || (it.defect && it.defect.no) || '-';
         const rows = [];
@@ -37030,12 +37648,12 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                         const label = `사진${pNumStr}`;
                         defectPhotoLabels[defectKey].push(label);
 
-                        const componentDefectTitle = `${d.no ? d.no + ' ' : ''}${d.component || '부재'} ${d.defectType || '결함'}`;
+                        const componentDefectTitle = `${d.no ? d.no + ' ' : ''}${memberNameOut(d.component) || '부재'} ${d.defectType || '결함'}`;
                         photoItems.push({
                             label: label,
                             title: componentDefectTitle,
                             defectNo: d.no,
-                            location: d.location || `${floorDisplayLabel} ${d.component || ''}`,
+                            location: d.location || `${floorDisplayLabel} ${memberNameOut(d.component) || ''}`,
                             cause: isGoodDefectType(d.defectType) ? '-' : (d.cause || '건조수축'),
                             size: isGoodDefectType(d.defectType) ? '-' : ((d.size && String(d.size).trim()) || '-'),
                             src: src
@@ -37264,7 +37882,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                                         <tr>
                                             <td style="padding:0.4rem 0.3rem; border:1px solid #e2e8f0; font-weight:800; color:#2a2a2a;">${item.no || 'NO.01'}</td>
                                             <td style="padding:0.4rem 0.3rem; border:1px solid #e2e8f0;">${item.location || '위치미지정'}</td>
-                                            <td style="padding:0.4rem 0.3rem; border:1px solid #e2e8f0;">${item.component || '기둥'}</td>
+                                            <td style="padding:0.4rem 0.3rem; border:1px solid #e2e8f0;">${memberNameOut(item.component) || '기둥'}</td>
                                             <td style="padding:0.4rem 0.3rem; border:1px solid #e2e8f0; font-family:monospace;">${designText}</td>
                                             <td style="padding:0.4rem 0.3rem; border:1px solid #e2e8f0; font-family:monospace;">${measuredText}</td>
                                             <td style="padding:0.4rem 0.3rem; border:1px solid #e2e8f0;">${item.finishState || '-'}</td>
@@ -37355,7 +37973,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                                         <tr>
                                             <td style="padding:0.4rem 0.3rem; border:1px solid #e2e8f0; font-weight:800; color:#2a2a2a;">${item.no || 'NO.01'}</td>
                                             <td style="padding:0.4rem 0.3rem; border:1px solid #e2e8f0;">${item.location || '위치미지정'}</td>
-                                            <td style="padding:0.4rem 0.3rem; border:1px solid #e2e8f0;">${item.component || '기둥'}</td>
+                                            <td style="padding:0.4rem 0.3rem; border:1px solid #e2e8f0;">${memberNameOut(item.component) || '기둥'}</td>
                                             <td style="padding:0.4rem 0.3rem; border:1px solid #e2e8f0; font-family:monospace;">${item.valuesText || '-'}</td>
                                             <td style="padding:0.4rem 0.3rem; border:1px solid #e2e8f0; font-weight:800; color:#16a34a;">${item.avgValue || '-'}</td>
                                             <td style="padding:0.4rem 0.3rem; border:1px solid #e2e8f0; font-weight:700;">${item.status || '양호'}</td>
@@ -38256,7 +38874,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         return {
             id: item.id,
             no: getCrackGaugeMarkDisplayNo(item),
-            component: item.component || '',
+            component: memberNameOut(item.component) || '',
             locationDetail: item.location || '',
             defectType: '균열',
             _crackGaugeMark: true
@@ -38348,7 +38966,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (!tbl || !slots || !slots.length) return;
         slots.forEach((slot) => {
             const col = slot.col;
-            const header = `NO.${slot.col}${slot.floorLabel || ''} ${slot.defect.component || ''}`.trim();
+            const header = `NO.${slot.col}${slot.floorLabel || ''} ${memberNameOut(slot.defect.component) || ''}`.trim();
             setTcText(getHwpxTblCellByAddr(tbl, 1, col), header);
             setTcText(getHwpxTblCellByAddr(tbl, 2, col), slot.kind === 'tip' ? '균열팁' : '크랙모니터');
             if (slot.kind === 'tip') {
@@ -38674,7 +39292,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             const currSrc = cmpPhotos.curr || '';
             const roundLabels = getCrackMonitorItemRoundLabels(item, bldg);
             setTcText(getHwpxTblCellByAddr(tbl, 1, 0), String(photoNo));
-            setTcText(getHwpxTblCellByAddr(tbl, 1, 1), d.component || '');
+            setTcText(getHwpxTblCellByAddr(tbl, 1, 1), memberNameOut(d.component) || '');
             setTcText(getHwpxTblCellByAddr(tbl, 1, 2), `${item.floorLabel || ''} ${d.locationDetail || ''}`.trim());
             setTcText(getHwpxTblCellByAddr(tbl, 1, 4), formatHwpxCrackSummaryChangeText(item));
             setTcText(getHwpxTblCellByAddr(tbl, 1, 5), '-');
@@ -40719,7 +41337,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                             const ratioText = (item.sectionRatio !== undefined && item.sectionRatio !== null) ? item.sectionRatio.toFixed(1) + '%' : '-';
                             return [
                                 item.no || (i + 1),
-                                `${item.location || '위치미지정'}\n(${item.component || ''})`,
+                                `${item.location || '위치미지정'}\n(${memberNameOut(item.component) || ''})`,
                                 designText,
                                 measuredText,
                                 item.finishState || '-',
@@ -40761,7 +41379,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                                 const grade = slot.grade != null ? slot.grade : item.strengthGrade;
                                 strengthRows.push([
                                     strengthRows.length + 1,
-                                    `${slot.location || item.location || ''}${item.component || ''}`,
+                                    `${slot.location || item.location || ''}${memberNameOut(item.component) || ''}`,
                                     item.designStrength != null ? item.designStrength : '-',
                                     typeof finalStrength === 'number' ? finalStrength.toFixed(1) : (finalStrength || '-'),
                                     ratio != null ? `${Math.round(ratio)}%` : '-',
@@ -40798,7 +41416,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                                     if (readings.length === 0 && !slot.photoId) return;
                                     dataPoints.push({
                                         location: slot.location || item.location || '',
-                                        component: item.component || '',
+                                        component: memberNameOut(item.component) || '',
                                         readings,
                                         photoId: slot.photoId || null
                                     });
@@ -40873,7 +41491,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                                         try {
                                             const noCol = 1 + idx * 2;
                                             setTcText(tcAtAddr(tbl, noCol, 0), `NO. ${pt.seq}`);
-                                            setTcText(tcAtAddr(tbl, noCol, 1), [pt.location, pt.component].filter(Boolean).join(' ') || '-');
+                                            setTcText(tcAtAddr(tbl, noCol, 1), [pt.location, memberNameOut(pt.component)].filter(Boolean).join(' ') || '-');
                                             setTcText(tcAtAddr(tbl, noCol, 2), pt._avgText);
                                             const pic = pics[idx];
                                             const { bytes, mime, ext } = await dataUrlToBytes(pt._imgUrl);
@@ -40978,7 +41596,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                         const tbl = findTblById(CARB_TBL_ID);
                         if (tbl) fillNdtTable(tbl, CARB_HEADER_ROWS, carbItemsHwpx.map((item, i) => [
                             item.no || (i + 1),
-                            `${item.location || ''}${item.component || ''}`,
+                            `${item.location || ''}${memberNameOut(item.component) || ''}`,
                             item.carbDepth != null ? item.carbDepth : '-',
                             item.carbCover != null ? item.carbCover : '-',
                             typeof item.carbRemainMm === 'number' ? item.carbRemainMm.toFixed(2) : '-',
@@ -43145,7 +43763,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                             const ratioText = (item.sectionRatio !== undefined && item.sectionRatio !== null) ? item.sectionRatio.toFixed(1) + '%' : '-';
                             return [
                                 item.no || (i + 1),
-                                `${item.location || '위치미지정'}\n(${item.component || ''})`,
+                                `${item.location || '위치미지정'}\n(${memberNameOut(item.component) || ''})`,
                                 designText,
                                 measuredText,
                                 item.finishState || '-',
@@ -43187,7 +43805,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                                 const grade = slot.grade != null ? slot.grade : item.strengthGrade;
                                 strengthRows.push([
                                     strengthRows.length + 1,
-                                    `${slot.location || item.location || ''}${item.component || ''}`,
+                                    `${slot.location || item.location || ''}${memberNameOut(item.component) || ''}`,
                                     item.designStrength != null ? item.designStrength : '-',
                                     typeof finalStrength === 'number' ? finalStrength.toFixed(1) : (finalStrength || '-'),
                                     ratio != null ? `${Math.round(ratio)}%` : '-',
@@ -43224,7 +43842,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                                     if (readings.length === 0 && !slot.photoId) return;
                                     dataPoints.push({
                                         location: slot.location || item.location || '',
-                                        component: item.component || '',
+                                        component: memberNameOut(item.component) || '',
                                         readings,
                                         photoId: slot.photoId || null
                                     });
@@ -43299,7 +43917,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                                         try {
                                             const noCol = 1 + idx * 2;
                                             setTcText(tcAtAddr(tbl, noCol, 0), `NO. ${pt.seq}`);
-                                            setTcText(tcAtAddr(tbl, noCol, 1), [pt.location, pt.component].filter(Boolean).join(' ') || '-');
+                                            setTcText(tcAtAddr(tbl, noCol, 1), [pt.location, memberNameOut(pt.component)].filter(Boolean).join(' ') || '-');
                                             setTcText(tcAtAddr(tbl, noCol, 2), pt._avgText);
                                             const pic = pics[idx];
                                             const { bytes, mime, ext } = await dataUrlToBytes(pt._imgUrl);
@@ -43404,7 +44022,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                         const tbl = findTblById(CARB_TBL_ID);
                         if (tbl) fillNdtTable(tbl, CARB_HEADER_ROWS, carbItemsHwpx.map((item, i) => [
                             item.no || (i + 1),
-                            `${item.location || ''}${item.component || ''}`,
+                            `${item.location || ''}${memberNameOut(item.component) || ''}`,
                             item.carbDepth != null ? item.carbDepth : '-',
                             item.carbCover != null ? item.carbCover : '-',
                             typeof item.carbRemainMm === 'number' ? item.carbRemainMm.toFixed(2) : '-',
@@ -45125,7 +45743,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const getCell = (row, field) => {
             const idx = colIdxByField[field];
             if (idx === undefined || idx === -1) return '';
-            return (row[idx] !== undefined && row[idx] !== null) ? row[idx].toString().trim() : '';
+            const cellVal = (row[idx] !== undefined && row[idx] !== null) ? row[idx].toString().trim() : '';
+            // 2026-09-28 부재 명칭 정리('상부' 삭제, 큰보→보(G) 등)는 가져올 때부터 적용
+            return field === 'component' ? (memberNameOut(cellVal) || '') : cellVal;
         };
 
         const mergeByNo = document.getElementById('importDefectExcelMergeByNo')?.checked !== false;
@@ -46457,6 +47077,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     <div class="overview-photo-thumb-wrap">
                         ${src ? `<img src="${src}" alt="전경사진 ${idx + 1}">` : '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:#94a3b8;">불러오는 중…</div>'}
                         <button type="button" class="overview-photo-delete" data-action="delete-overview" data-overview-id="${escapeHtml(p.id)}" title="삭제"><i class="fa-solid fa-trash"></i></button>
+                        ${src ? buildPhotoRotateButtonsHtml(`data-action="rotate-overview" data-overview-id="${escapeHtml(p.id)}" data-rotate-dir="-1"`, `data-action="rotate-overview" data-overview-id="${escapeHtml(p.id)}" data-rotate-dir="1"`) : ''}
                     </div>
                     <input type="text" class="overview-photo-caption" maxlength="120" placeholder="무슨 전경인지 한 줄로 입력 (예: 건물 정면, 옥상 전경)" value="${cap}" data-overview-id="${escapeHtml(p.id)}">
                 </div>
@@ -46535,6 +47156,14 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 if (typeof saveStateToLocalStorage === 'function') saveStateToLocalStorage();
                 renderOverviewPhotosList({ force: true });
                 if (typeof window.showToast === 'function') window.showToast('전경사진을 삭제했습니다.', 'info');
+            });
+        });
+        listEl.querySelectorAll('[data-action="rotate-overview"]').forEach((btn) => {
+            btn.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                const id = btn.getAttribute('data-overview-id');
+                if (id) rotateOverviewPhoto(id, Number(btn.getAttribute('data-rotate-dir')) < 0 ? -1 : 1);
             });
         });
     }

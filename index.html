@@ -39,7 +39,7 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <meta name="apple-mobile-web-app-title" content="스마트 안전점검">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css">
-    <link rel="stylesheet" href="styles.css?v=20260928_162731">
+    <link rel="stylesheet" href="styles.css?v=20260928_171858">
 
     <!-- FontAwesome icons for clean engineering UI -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
@@ -1116,10 +1116,10 @@
                                 <select id="defectComponent" class="form-select defect-combo-select" title="목록에서 선택">
                                     <option value="기둥">기둥</option>
                                     <option value="철골기둥">철골기둥</option>
-                                    <option value="큰보">큰보</option>
-                                    <option value="작은보">작은보</option>
-                                    <option value="철골거더">철골거더</option>
-                                    <option value="철골빔">철골빔</option>
+                                    <option value="보(G)">보(G)</option>
+                                    <option value="보(B)">보(B)</option>
+                                    <option value="철골보(G)">철골보(G)</option>
+                                    <option value="철골보(B)">철골보(B)</option>
                                     <option value="슬래브">슬래브</option>
                                     <option value="데크슬래브">데크슬래브</option>
                                     <option value="RC벽체">RC벽체</option>
@@ -1502,6 +1502,23 @@
                         <select id="styleShapeNdtFireproof"><option value="rect">직사각형</option><option value="rounded">둥근 사각형</option><option value="circle">원형</option></select>
                         <label class="style-fill-check"><input type="checkbox" id="styleFillNdtFireproof"> 채우기</label>
                         <select id="styleNumFmtNdtFireproof"><option value="no">NO.01</option><option value="plain">01</option></select>
+                    </div>
+                </div>
+                <div class="style-cat-card" id="styleCatCardNdtCrackGauge">
+                    <div class="style-color-row">
+                        <span>균열 게이지</span>
+                        <input type="color" id="styleColorNdtCrackGauge">
+                    </div>
+                    <div class="style-size-row">
+                        <label>핀 <input type="range" id="stylePinSizeNdtCrackGauge" min="0.5" max="4.4" step="0.1" value="1.0"> <span id="stylePinSizeNdtCrackGaugeLabel">100%</span></label>
+                        <label>화살표 <input type="range" id="styleArrowSizeNdtCrackGauge" min="0.5" max="5.0" step="0.1" value="1.0"> <span id="styleArrowSizeNdtCrackGaugeLabel">100%</span></label>
+                        <label>선 굵기 <input type="range" id="styleLeaderSizeNdtCrackGauge" min="0.1" max="3.0" step="0.1" value="1.0"> <span id="styleLeaderSizeNdtCrackGaugeLabel">100%</span></label>
+                        <label>글자 <input type="range" id="styleFontSizeNdtCrackGauge" min="0.5" max="3.0" step="0.1" value="1.0"> <span id="styleFontSizeNdtCrackGaugeLabel">100%</span></label>
+                    </div>
+                    <div class="style-shape-row">
+                        <select id="styleShapeNdtCrackGauge"><option value="rect">직사각형</option><option value="rounded">둥근 사각형</option><option value="circle">원형</option></select>
+                        <label class="style-fill-check"><input type="checkbox" id="styleFillNdtCrackGauge"> 채우기</label>
+                        <select id="styleNumFmtNdtCrackGauge"><option value="no">G-01</option><option value="plain">01</option></select>
                     </div>
                 </div>
             </div>
@@ -2027,6 +2044,7 @@
                                 <tbody id="crackGaugeReadingBody"></tbody>
                             </table>
                         </div>
+                        <button type="button" class="btn btn-sm btn-outline defect-crack-monitor-add" id="btnAddCrackGaugeReading"><i class="fa-solid fa-plus"></i> 게이지 측정 행 추가</button>
                         <div class="crack-monitor-photo-compare" id="crackGaugePhotoCompare" data-log-kind="gauge">
                             <div class="crack-monitor-photo-label">비교 사진 (전차 / 현차)</div>
                             <div class="crack-monitor-photo-slots">
@@ -2036,6 +2054,8 @@
                                     <div class="crack-monitor-photo-actions">
                                         <button type="button" class="btn btn-sm btn-outline" data-cm-photo-pick="gauge:prev:gallery" title="갤러리"><i class="fa-solid fa-image"></i></button>
                                         <button type="button" class="btn btn-sm btn-outline" data-cm-photo-pick="gauge:prev:camera" title="카메라"><i class="fa-solid fa-camera"></i></button>
+                                        <button type="button" class="btn btn-sm btn-outline crack-monitor-photo-rotate" data-cm-photo-rotate="gauge:prev:-1" title="왼쪽으로 90° 회전" disabled><i class="fa-solid fa-rotate-left"></i></button>
+                                        <button type="button" class="btn btn-sm btn-outline crack-monitor-photo-rotate" data-cm-photo-rotate="gauge:prev:1" title="오른쪽으로 90° 회전" disabled><i class="fa-solid fa-rotate-right"></i></button>
                                         <button type="button" class="btn btn-sm btn-outline crack-monitor-photo-clear" data-cm-photo-clear="gauge:prev" title="삭제"><i class="fa-solid fa-trash"></i></button>
                                     </div>
                                 </div>
@@ -2045,12 +2065,13 @@
                                     <div class="crack-monitor-photo-actions">
                                         <button type="button" class="btn btn-sm btn-outline" data-cm-photo-pick="gauge:curr:gallery" title="갤러리"><i class="fa-solid fa-image"></i></button>
                                         <button type="button" class="btn btn-sm btn-outline" data-cm-photo-pick="gauge:curr:camera" title="카메라"><i class="fa-solid fa-camera"></i></button>
+                                        <button type="button" class="btn btn-sm btn-outline crack-monitor-photo-rotate" data-cm-photo-rotate="gauge:curr:-1" title="왼쪽으로 90° 회전" disabled><i class="fa-solid fa-rotate-left"></i></button>
+                                        <button type="button" class="btn btn-sm btn-outline crack-monitor-photo-rotate" data-cm-photo-rotate="gauge:curr:1" title="오른쪽으로 90° 회전" disabled><i class="fa-solid fa-rotate-right"></i></button>
                                         <button type="button" class="btn btn-sm btn-outline crack-monitor-photo-clear" data-cm-photo-clear="gauge:curr" title="삭제"><i class="fa-solid fa-trash"></i></button>
                                     </div>
                                 </div>
                             </div>
                         </div>
-                        <button type="button" class="btn btn-sm btn-outline defect-crack-monitor-add" id="btnAddCrackGaugeReading"><i class="fa-solid fa-plus"></i> 게이지 측정 행 추가</button>
                     </div>
                     <div class="defect-crack-monitor-block">
                         <div class="defect-crack-monitor-head">균열 팁 누적</div>
@@ -2063,6 +2084,7 @@
                                 <tbody id="crackTipReadingBody"></tbody>
                             </table>
                         </div>
+                        <button type="button" class="btn btn-sm btn-outline defect-crack-monitor-add" id="btnAddCrackTipReading"><i class="fa-solid fa-plus"></i> 팁 측정 행 추가</button>
                         <div class="crack-monitor-photo-compare" id="crackTipPhotoCompare" data-log-kind="tip">
                             <div class="crack-monitor-photo-label">비교 사진 (전차 / 현차)</div>
                             <div class="crack-monitor-photo-slots">
@@ -2072,6 +2094,8 @@
                                     <div class="crack-monitor-photo-actions">
                                         <button type="button" class="btn btn-sm btn-outline" data-cm-photo-pick="tip:prev:gallery" title="갤러리"><i class="fa-solid fa-image"></i></button>
                                         <button type="button" class="btn btn-sm btn-outline" data-cm-photo-pick="tip:prev:camera" title="카메라"><i class="fa-solid fa-camera"></i></button>
+                                        <button type="button" class="btn btn-sm btn-outline crack-monitor-photo-rotate" data-cm-photo-rotate="tip:prev:-1" title="왼쪽으로 90° 회전" disabled><i class="fa-solid fa-rotate-left"></i></button>
+                                        <button type="button" class="btn btn-sm btn-outline crack-monitor-photo-rotate" data-cm-photo-rotate="tip:prev:1" title="오른쪽으로 90° 회전" disabled><i class="fa-solid fa-rotate-right"></i></button>
                                         <button type="button" class="btn btn-sm btn-outline crack-monitor-photo-clear" data-cm-photo-clear="tip:prev" title="삭제"><i class="fa-solid fa-trash"></i></button>
                                     </div>
                                 </div>
@@ -2081,12 +2105,13 @@
                                     <div class="crack-monitor-photo-actions">
                                         <button type="button" class="btn btn-sm btn-outline" data-cm-photo-pick="tip:curr:gallery" title="갤러리"><i class="fa-solid fa-image"></i></button>
                                         <button type="button" class="btn btn-sm btn-outline" data-cm-photo-pick="tip:curr:camera" title="카메라"><i class="fa-solid fa-camera"></i></button>
+                                        <button type="button" class="btn btn-sm btn-outline crack-monitor-photo-rotate" data-cm-photo-rotate="tip:curr:-1" title="왼쪽으로 90° 회전" disabled><i class="fa-solid fa-rotate-left"></i></button>
+                                        <button type="button" class="btn btn-sm btn-outline crack-monitor-photo-rotate" data-cm-photo-rotate="tip:curr:1" title="오른쪽으로 90° 회전" disabled><i class="fa-solid fa-rotate-right"></i></button>
                                         <button type="button" class="btn btn-sm btn-outline crack-monitor-photo-clear" data-cm-photo-clear="tip:curr" title="삭제"><i class="fa-solid fa-trash"></i></button>
                                     </div>
                                 </div>
                             </div>
                         </div>
-                        <button type="button" class="btn btn-sm btn-outline defect-crack-monitor-add" id="btnAddCrackTipReading"><i class="fa-solid fa-plus"></i> 팁 측정 행 추가</button>
                     </div>
                 </div>
             </div>
@@ -3209,42 +3234,42 @@
 
     <!-- Core → 탭 분류 → 기존 엔진(app.js) -->
     <!-- 오류 기록은 맨 먼저 — 아래 스크립트들이 읽히다 터져도 잡아야 한다 -->
-    <script src="js/core/error-log.js?v=20260928_162731"></script>
-    <script src="js/core/floor-identity.js?v=20260928_162731"></script>
-    <script src="js/core/state.js?v=20260928_162731"></script>
-    <script src="js/core/ndt-grade.js?v=20260928_162731"></script>
-    <script src="js/tabs/registry.js?v=20260928_162731"></script>
-    <script src="js/pdf-vector-bridge.js?v=20260928_162731"></script>
-    <script src="js/pdf-vector-snap.js?v=20260928_162731"></script>
-    <script src="js/core/layout-mode.js?v=20260928_162731"></script>
-    <script src="js/core/performance.js?v=20260928_162731"></script>
-    <script src="js/core/mobile-keyboard.js?v=20260928_162731"></script>
-    <script src="js/tabs/home.js?v=20260928_162731"></script>
-    <script src="js/tabs/map.js?v=20260928_162731"></script>
-    <script src="js/tabs/survey.js?v=20260928_162731"></script>
-    <script src="js/tabs/stats.js?v=20260928_162731"></script>
-    <script src="js/tabs/ndt.js?v=20260928_162731"></script>
-    <script src="js/shared/report.js?v=20260928_162731"></script>
-    <script src="js/shared/hwpx-survey-slots.js?v=20260928_162731"></script>
-    <script src="js/shared/hwpx-ndt-maps.js?v=20260928_162731"></script>
-    <script src="js/shared/cad-unmarked-place.js?v=20260928_162731"></script>
-    <script src="js/shared/arrow-survey-number.js?v=20260928_162731"></script>
-    <script src="js/shared/korean-text-wrap.js?v=20260928_162731"></script>
-    <script src="js/shared/hwpx-import.js?v=20260928_162731"></script>
-    <script src="js/shared/hwpx-validate.js?v=20260928_162731"></script>
-    <script src="js/shared/auth.js?v=20260928_162731"></script>
-    <script src="js/core/firebase-storage-assets.js?v=20260928_162731"></script>
-    <script src="js/core/drawing-floor-tombstone.js?v=20260928_162731"></script>
-    <script src="js/core/data-health.js?v=20260928_162731"></script>
-    <script src="js/core/building-meta-merge.js?v=20260928_162731"></script>
-    <script src="js/core/edit-history.js?v=20260928_162731"></script>
-    <script src="js/core/sync-merge.js?v=20260928_162731"></script>
-    <script src="js/shared/defect-quick-presets.js?v=20260928_162731"></script>
-    <script src="js/core/legend-layout.js?v=20260928_162731"></script>
-    <script src="app.js?v=20260928_162731"></script>
+    <script src="js/core/error-log.js?v=20260928_171858"></script>
+    <script src="js/core/floor-identity.js?v=20260928_171858"></script>
+    <script src="js/core/state.js?v=20260928_171858"></script>
+    <script src="js/core/ndt-grade.js?v=20260928_171858"></script>
+    <script src="js/tabs/registry.js?v=20260928_171858"></script>
+    <script src="js/pdf-vector-bridge.js?v=20260928_171858"></script>
+    <script src="js/pdf-vector-snap.js?v=20260928_171858"></script>
+    <script src="js/core/layout-mode.js?v=20260928_171858"></script>
+    <script src="js/core/performance.js?v=20260928_171858"></script>
+    <script src="js/core/mobile-keyboard.js?v=20260928_171858"></script>
+    <script src="js/tabs/home.js?v=20260928_171858"></script>
+    <script src="js/tabs/map.js?v=20260928_171858"></script>
+    <script src="js/tabs/survey.js?v=20260928_171858"></script>
+    <script src="js/tabs/stats.js?v=20260928_171858"></script>
+    <script src="js/tabs/ndt.js?v=20260928_171858"></script>
+    <script src="js/shared/report.js?v=20260928_171858"></script>
+    <script src="js/shared/hwpx-survey-slots.js?v=20260928_171858"></script>
+    <script src="js/shared/hwpx-ndt-maps.js?v=20260928_171858"></script>
+    <script src="js/shared/cad-unmarked-place.js?v=20260928_171858"></script>
+    <script src="js/shared/arrow-survey-number.js?v=20260928_171858"></script>
+    <script src="js/shared/korean-text-wrap.js?v=20260928_171858"></script>
+    <script src="js/shared/hwpx-import.js?v=20260928_171858"></script>
+    <script src="js/shared/hwpx-validate.js?v=20260928_171858"></script>
+    <script src="js/shared/auth.js?v=20260928_171858"></script>
+    <script src="js/core/firebase-storage-assets.js?v=20260928_171858"></script>
+    <script src="js/core/drawing-floor-tombstone.js?v=20260928_171858"></script>
+    <script src="js/core/data-health.js?v=20260928_171858"></script>
+    <script src="js/core/building-meta-merge.js?v=20260928_171858"></script>
+    <script src="js/core/edit-history.js?v=20260928_171858"></script>
+    <script src="js/core/sync-merge.js?v=20260928_171858"></script>
+    <script src="js/shared/defect-quick-presets.js?v=20260928_171858"></script>
+    <script src="js/core/legend-layout.js?v=20260928_171858"></script>
+    <script src="app.js?v=20260928_171858"></script>
 
     <script>
-        window.BSA_APP_VERSION = '20260928_162731';
+        window.BSA_APP_VERSION = '20260928_171858';
 
         (function () {
             var el = document.getElementById('appVersionText');
@@ -3271,7 +3296,7 @@
                     native = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
                 } catch (e) {}
                 if (native) return;
-                navigator.serviceWorker.register('./sw.js?v=20260928_162731')
+                navigator.serviceWorker.register('./sw.js?v=20260928_171858')
 
                     .then(function(registration) {
                         console.log('✅ ServiceWorker Registered Successfully with scope:', registration.scope);

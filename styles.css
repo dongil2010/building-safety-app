@@ -15582,3 +15582,194 @@ html:not(.layout-desktop) .crack-monitor-photo-slots {
         display: none !important;
     }
 }
+
+/* @@PHOTO_ROTATE_CSS */
+/* 2026-09-28 사진 90° 회전 버튼 (결함 현차 사진·전경사진 위, 균열 게이지/팁 비교 사진 버튼줄) */
+.photo-rotate-group {
+    position: absolute;
+    right: 0.3rem;
+    bottom: 0.3rem;
+    z-index: 2;
+    display: flex;
+    gap: 0.25rem;
+}
+.photo-rotate-btn {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    border: none;
+    background: rgba(15, 23, 42, 0.72);
+    color: #fff;
+    font-size: 13px;
+    line-height: 28px;
+    padding: 0;
+    cursor: pointer;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+}
+.photo-rotate-btn:hover {
+    background: rgba(37, 99, 235, 0.9);
+}
+.photo-rotate-group-sm .photo-rotate-btn {
+    width: 24px;
+    height: 24px;
+    font-size: 11px;
+    line-height: 24px;
+}
+.overview-photo-thumb-wrap .photo-rotate-group {
+    right: 0.4rem;
+    bottom: 0.4rem;
+}
+.overview-photo-thumb-wrap .photo-rotate-btn {
+    width: 2rem;
+    height: 2rem;
+    line-height: 2rem;
+}
+@media (pointer: coarse) {
+    .photo-rotate-btn {
+        width: 34px;
+        height: 34px;
+        line-height: 34px;
+        font-size: 15px;
+    }
+    .photo-rotate-group-sm .photo-rotate-btn {
+        width: 30px;
+        height: 30px;
+        line-height: 30px;
+        font-size: 13px;
+    }
+}
+.crack-monitor-photo-actions .crack-monitor-photo-rotate:disabled {
+    opacity: 0.4;
+    cursor: default;
+}
+/* 돌린 세로 사진도 잘리지 않게 — 4:3 사진은 그대로 꽉 참 */
+.defect-photo-frame img,
+.defect-photo-extra-item img,
+.overview-photo-thumb-wrap img,
+.crack-monitor-photo-frame.has-photo img {
+    object-fit: contain;
+    background: #0f172a0d;
+}
+/* 게이지/팁 측정 행 추가 버튼 — 수기 입력 표 바로 아래에 붙임 */
+.defect-crack-monitor-table-wrap + .defect-crack-monitor-add {
+    margin-top: 0;
+    margin-bottom: 0.2rem;
+}
+
+/* @@MEMBER_GB_CSS */
+/* 2026-09-28 거더(G)/빔(B) 미지정 보 표시 — 자홍 #c026d3 (선택 파랑·도면 미등록 보라 #5b21b6·경고 노랑·원인 톤과 겹치지 않게), 점선 */
+.defect-list-item.bsa-member-gb-needed {
+    outline: 2px dashed #c026d3;
+    outline-offset: -2px;
+    background: #fdf4ff;
+}
+.defect-list-item .bsa-member-gb-needed-text {
+    color: #86198f;
+    font-weight: 700;
+}
+.defect-list-item .bsa-member-gb-needed-text::after {
+    content: 'G/B 지정';
+    display: inline-block;
+    margin-left: 0.3rem;
+    padding: 0 0.3rem;
+    border: 1px dashed #c026d3;
+    border-radius: 999px;
+    font-size: 0.66rem;
+    font-weight: 700;
+    line-height: 1.4;
+    color: #86198f;
+    background: #ffffff;
+    vertical-align: middle;
+}
+.survey-inline-input.bsa-member-gb-needed,
+#tab-survey .survey-table .survey-inline-input.bsa-member-gb-needed,
+#defectComponentInput.bsa-member-gb-needed {
+    border: 2px dashed #c026d3 !important;
+    background: #fdf4ff !important;
+    color: #86198f;
+    font-weight: 700;
+}
+.bsa-member-gb-hint {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.35rem;
+    margin: 0.3rem 0 0.2rem;
+    padding: 0.3rem 0.45rem;
+    border: 1px dashed #c026d3;
+    border-radius: 8px;
+    background: #fdf4ff;
+}
+.bsa-member-gb-hint[hidden] { display: none; }
+.bsa-member-gb-hint-text {
+    font-size: 0.74rem;
+    font-weight: 700;
+    color: #86198f;
+    margin-right: 0.2rem;
+}
+.bsa-member-gb-chip {
+    min-height: 30px;
+    padding: 0.2rem 0.65rem;
+    border: 1.5px solid #c026d3;
+    border-radius: 999px;
+    background: #ffffff;
+    color: #86198f;
+    font-weight: 800;
+    font-size: 0.8rem;
+    cursor: pointer;
+}
+.bsa-member-gb-chip:hover,
+.bsa-member-gb-chip:focus-visible {
+    background: #c026d3;
+    color: #ffffff;
+}
+/* 도면 위 「G」「B」 버튼 — 화면 전용 DOM (캔버스에 그리지 않으므로 보고서·인쇄에 안 나옴) */
+.map-member-gb-overlay {
+    position: absolute;
+    left: 0;
+    top: 0;
+    z-index: 11;
+    pointer-events: none;
+    overflow: hidden;
+}
+.map-member-gb-pick {
+    position: absolute;
+    left: 0;
+    top: 0;
+    display: flex;
+    gap: 3px;
+    pointer-events: auto;
+    touch-action: manipulation;
+    will-change: transform;
+}
+.map-member-gb-btn {
+    min-width: 28px;
+    height: 28px;
+    padding: 0 6px;
+    border: 1.5px solid #c026d3;
+    border-radius: 7px;
+    background: rgba(255, 255, 255, 0.95);
+    color: #86198f;
+    font-size: 0.8rem;
+    font-weight: 800;
+    line-height: 1;
+    cursor: pointer;
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.25);
+}
+.map-member-gb-btn:hover,
+.map-member-gb-btn:focus-visible {
+    background: #c026d3;
+    color: #ffffff;
+}
+@media (pointer: coarse) {
+    .map-member-gb-btn {
+        min-width: 32px;
+        height: 32px;
+        font-size: 0.86rem;
+    }
+}
+@media print {
+    .map-member-gb-overlay { display: none !important; }
+}

@@ -110,9 +110,11 @@ function testVisibleChips() {
             assert.ok(compPreset[cat].includes(name), `default favorite component ${cat}/${name} must exist in preset`);
         });
     });
-    ['기둥', '보', '슬래브', '벽체', '계단', '옹벽', '파라펫', '기초'].forEach((n) => assert.ok(compPreset['구조체'].includes(n)));
+    ['기둥', '보(G)', '보(B)', '슬래브', '벽체', '계단', '옹벽', '파라펫', '기초'].forEach((n) => assert.ok(compPreset['구조체'].includes(n)));
+    // 2026-09-28 그냥 '보'와 예전 이름(큰보·작은보·철골거더·철골빔)은 목록에서 빠짐
+    ['보', '큰보', '작은보', '철골거더', '철골빔'].forEach((n) => assert.ok(!compPreset['구조체'].includes(n), 'renamed/removed ' + n));
     // 기존 이름 유지
-    ['RC기둥', '큰보', '작은보', 'RC벽체', '데크슬래브'].forEach((n) => assert.ok(compPreset['구조체'].includes(n), 'kept ' + n));
+    ['RC기둥', '보(G)', '보(B)', '철골보(G)', '철골보(B)', 'RC벽체', '데크슬래브'].forEach((n) => assert.ok(compPreset['구조체'].includes(n), 'kept ' + n));
     // 기본 결함 종류 즐겨찾기는 앱에 실제 있는 라벨만 (오타 방지)
     Object.values(q.DEFAULT_FAVORITES.type).forEach((list) => list.forEach((t) => {
         assert.ok(src.includes(`'${t}'`), 'default favorite type label exists in app.js: ' + t);
@@ -125,11 +127,11 @@ function testVisibleChips() {
     const split = q.computeVisibleChips(compPreset['구조체'], {
         limit: 8,
         favorites: q.getEffectiveFavorites(undefined, 'component', '구조체', [], []),
-        selected: ['큰보']
+        selected: ['철골보(B)']
     });
-    assert.deepStrictEqual(split.visible.slice(0, 8), ['기둥', '보', '슬래브', '벽체', '옹벽', '파라펫', '계단', '기초']);
-    assert.ok(split.visible.includes('큰보'), 'selected value always visible');
-    assert.ok(split.hidden.includes('RC기둥') && !split.hidden.includes('큰보'));
+    assert.deepStrictEqual(split.visible.slice(0, 9), ['기둥', '보(G)', '보(B)', '슬래브', '벽체', '옹벽', '파라펫', '계단', '기초']);
+    assert.ok(split.visible.includes('철골보(B)'), 'selected value always visible');
+    assert.ok(split.hidden.includes('RC기둥') && !split.hidden.includes('철골보(B)'));
 
     // 사용 빈도: ★ 없으면 많이 쓴 것이 보이는 칸을 채움, 보이는 순서는 목록 순
     let usage = {};

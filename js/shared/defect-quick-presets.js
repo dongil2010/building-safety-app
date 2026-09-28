@@ -23,7 +23,8 @@
      */
     const DEFAULT_FAVORITES = {
         component: {
-            '구조체': ['기둥', '보', '슬래브', '벽체', '계단', '옹벽', '파라펫', '기초'],
+            // 2026-09-28: '보'는 거더/빔 구분이 안 돼서 보(G)·보(B)로 나눔
+            '구조체': ['기둥', '보(G)', '보(B)', '슬래브', '벽체', '계단', '옹벽', '파라펫', '기초'],
             '비구조체': ['조적벽체', '칸막이벽', 'ALC벽', '벽체 접합부', '창호', '문', '난간', '중량물'],
             '마감재': ['외장타일', '도장', '내장도장', '천장 마감재', '바닥마감', '내장타일']
         },
@@ -185,6 +186,87 @@
         return { selected, autoPicked: [] };
     }
 
+    // ---- 2026-09-28 부재 명칭 정리 ----
+    // 큰보→보(G), 작은보→보(B), 철골거더→철골보(G), 철골빔→철골보(B), 앞에 붙은 '상부'는 뺌.
+    // 접합부 이름은 거더/빔 구분이 필요 없어서 G/B 없이 '보'/'철골보'로만 바꾼다 (예: 큰보 접합부 → 보 접합부).
+    // 저장된 결함은 일괄로 고쳐 쓰지 않고, 화면·출력·수정창에서 이 함수로 새 이름을 보여 준다.
+    const MEMBER_NAME_RENAMES = Object.freeze({
+        '큰보': '보(G)',
+        '작은보': '보(B)',
+        '철골거더': '철골보(G)',
+        '철골빔': '철골보(B)'
+    });
+    const MEMBER_JOINT_RENAMES = Object.freeze({
+        '큰보': '보',
+        '작은보': '보',
+        '철골거더': '철골보',
+        '철골빔': '철골보'
+    });
+    const LEGACY_MEMBER_TOKEN_RE = /(^|-)(큰보|작은보|철골거더|철골빔)(?=$|-|\s)/g;
+
+    function normalizeMemberName(v) {
+        if (v == null) return v;
+        const raw = String(v);
+        const trimmed = raw.trim();
+        if (!trimmed) return raw;
+        let t = trimmed.replace(/^상부\s*(?=\S)/, '');
+        const isJoint = t.indexOf('접합') >= 0;
+        const map = isJoint ? MEMBER_JOINT_RENAMES : MEMBER_NAME_RENAMES;
+        t = t.replace(LEGACY_MEMBER_TOKEN_RE, (m, pre, name) => pre + map[name]);
+        return t === trimmed ? raw : t;
+    }
+
+    /**
+     * 거더(G)인지 빔(B)인지 모르는 보 이름이면 고를 수 있는 이름 2개, 아니면 null.
+     * 그냥 '보'(예전 '상부 보' 포함)·RC보·SRC보·거더·빔 → 보(G)/보(B), G/B 없는 그냥 '철골보' → 철골보(G)/(B).
+     * 접합부·캔틸레버보·계단보 등 다른 이름은 대상이 아니다. G/B는 절대 추측하지 않는다.
+     */
+    function getAmbiguousBeamChoices(v) {
+        const key = str(normalizeMemberName(v)).replace(/\s+/g, '');
+        if (!key) return null;
+        if (/^(?:RC|SRC)?(?:보|거더|빔)$/i.test(key)) return ['보(G)', '보(B)'];
+        if (/^철골(?:보|거더|빔)$/.test(key)) return ['철골보(G)', '철골보(B)'];
+        return null;
+    }
+
+    /** 계정에 저장된 부재 목록(★·순서·숨김·직접 추가) 이름 이전 — 중복은 앞의 것만 남김. */
+    function migrateMemberNameList(list, opts) {
+        if (!Array.isArray(list)) return { list, changed: false };
+        const expand = !!(opts && opts.expandPlainBeam);
+        const out = [];
+        const seen = new Set();
+        let changed = false;
+        list.forEach((v) => {
+            const s = str(v);
+            const n = str(normalizeMemberName(s));
+            const names = (expand && n === '보') ? ['보(G)', '보(B)'] : [n];
+            if (names.length !== 1 || names[0] !== s || s !== v) changed = true;
+            names.forEach((name) => {
+                if (!name || seen.has(name)) {
+                    changed = true;
+                    return;
+                }
+                seen.add(name);
+                out.push(name);
+            });
+        });
+        return { list: changed ? out : list, changed };
+    }
+
+    /** 부재 칩 사용 횟수 — 예전 이름 횟수는 새 이름에 더한다. */
+    function migrateMemberUsageCounts(counts) {
+        if (!counts || typeof counts !== 'object') return { counts, changed: false };
+        const out = {};
+        let changed = false;
+        Object.keys(counts).forEach((k) => {
+            const n = str(normalizeMemberName(k));
+            if (n !== k) changed = true;
+            if (!n) return;
+            out[n] = (Number(out[n]) || 0) + (Number(counts[k]) || 0);
+        });
+        return { counts: changed ? out : counts, changed };
+    }
+
     const api = {
         VISIBLE_LIMIT,
         DEFAULT_FAVORITES,
@@ -194,7 +276,12 @@
         getUsageCounts,
         computeVisibleChips,
         pickCausesAfterTypeChange,
-        applyManualCauseToggle
+        applyManualCauseToggle,
+        MEMBER_NAME_RENAMES,
+        normalizeMemberName,
+        getAmbiguousBeamChoices,
+        migrateMemberNameList,
+        migrateMemberUsageCounts
     };
 
     root.BSA = root.BSA || {};
