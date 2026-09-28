@@ -10625,7 +10625,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             ctx.fill();
         }
         ctx.strokeStyle = borderColor;
-        ctx.lineWidth = getPinBoxBorderWidth(scale, roundLineMul, isBeingDragged, leaderScaleOverride);
+        // 드래그 중에도 테두리 두께는 그대로 — 노란색 강조만 (2026-09-28)
+        ctx.lineWidth = getPinBoxBorderWidth(scale, roundLineMul, false, leaderScaleOverride);
         ctx.stroke();
     }
 
@@ -10679,7 +10680,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const len = Math.hypot(ux, uy) || 1;
         const nx = ux / len;
         const ny = uy / len;
-        const along = (isBeingDragged ? 14 : 11) * arrowScale;
+        const along = 11 * arrowScale;
         const perp = 9 * arrowScale;
         const px = -ny;
         const py = nx;
@@ -12325,8 +12326,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const col1W = 52 * pinScale;
         const col2W = 58 * pinScale;
         const col3W = boxW - col1W - col2W;
-        const lineW = Math.max(1.1, getNdtLeaderLineWidth(pinScale, isBeingDragged, getNdtStyleKey(cat || '기울기')) * 0.85);
-        const headLen = (isBeingDragged ? 18 : 15) * arrowScale;
+        const lineW = Math.max(1.1, getNdtLeaderLineWidth(pinScale, false, getNdtStyleKey(cat || '기울기')) * 0.85);
+        const headLen = 15 * arrowScale;
         const itemRot = getNdtTiltItemRotation(item, cat);
 
         const arrowGeom = (cat === '기울기') ? getNdtTiltArrowGeometry(item, cat) : null;
@@ -12471,11 +12472,11 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
             // 지시선: 콜아웃 박스 모서리 → 측정점 (항상 원 끝)
             const anchor = getPinLeaderBoxAnchor(boxX, boxY, targetX, targetY, dims.boxW, dims.boxH, ndtRotationAngle || 0);
-            const tipR = (isBeingDragged ? 5.5 : 4) * arrowScale;
+            const tipR = 4 * arrowScale;
             ctx.save();
             ctx.strokeStyle = color;
             ctx.fillStyle = color;
-            ctx.lineWidth = getNdtLeaderLineWidth(pinScale, isBeingDragged, ndtStyleKey);
+            ctx.lineWidth = getNdtLeaderLineWidth(pinScale, false, ndtStyleKey);
             ctx.lineJoin = 'round';
             ctx.lineCap = 'round';
             if (Math.hypot(targetX - anchor.x, targetY - anchor.y) > 3) {
@@ -12506,7 +12507,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
             const { boxW, boxH, col1W, fontNo, fontType } = dims;
             ctx.strokeStyle = color;
-            ctx.lineWidth = getNdtLeaderLineWidth(pinScale, isBeingDragged, ndtStyleKey);
+            ctx.lineWidth = getNdtLeaderLineWidth(pinScale, false, ndtStyleKey);
             ctx.beginPath();
             ctx.rect(-boxW / 2, -boxH / 2, boxW, boxH);
             ctx.stroke();
@@ -12532,9 +12533,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const { w, h } = measurePinBoxDimensions(ctx, noStr, pinScale, 1, ndtSize.font);
 
         const anchor = getPinLeaderBoxAnchor(boxX, boxY, targetX, targetY, w, h, ndtRotationAngle || 0, { shape: ndtShapeCfg.shape, scale: pinScale });
-        const headLen = (isBeingDragged ? 13 : 10) * arrowScale;
+        const headLen = 10 * arrowScale;
         const stemInset = useCircleTip
-            ? (isBeingDragged ? 6 : 4.5) * arrowScale
+            ? 4.5 * arrowScale
             : headLen * Math.cos(Math.PI / 6);
         const ux = targetX - anchor.x;
         const uy = targetY - anchor.y;
@@ -12546,7 +12547,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             ctx.save();
             ctx.strokeStyle = color;
             ctx.fillStyle = color;
-            ctx.lineWidth = getNdtLeaderLineWidth(pinScale, isBeingDragged, ndtStyleKey);
+            ctx.lineWidth = getNdtLeaderLineWidth(pinScale, false, ndtStyleKey);
             ctx.lineJoin = 'round';
             ctx.lineCap = 'round';
             ctx.beginPath();
@@ -12558,7 +12559,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
             if (useCircleTip) {
                 ctx.beginPath();
-                ctx.arc(targetX, targetY, (isBeingDragged ? 6 : 4.5) * arrowScale, 0, Math.PI * 2);
+                ctx.arc(targetX, targetY, 4.5 * arrowScale, 0, Math.PI * 2);
                 ctx.fill();
             } else {
                 const angle = Math.atan2(uy, ux);
@@ -12607,7 +12608,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         // 측정점: 작은 원 + 바로 아래 (01)(02)… (그룹 내 1부터 1씩 증가)
         group.points.forEach((p, idx) => {
             const isPtDragged = activeDragNdtDisplacementGroup === group && activeDragNdtDisplacementPoint === p;
-            const r = (isPtDragged ? 7 : 5) * pinScale;
+            const r = 5 * pinScale;
             const seqLabel = formatNdtDisplacementPointLabel(idx + 1);
             const fontSize = Math.max(9, Math.round(11 * pinScale));
 
@@ -12645,7 +12646,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const boxColor = isGroupDragged ? '#facc15' : (isActiveZone ? '#ea580c' : color);
         // 투명 배경 + 색 테두리/글자
         ctx.strokeStyle = boxColor;
-        ctx.lineWidth = getNdtLeaderLineWidth(pinScale, isGroupDragged || isActiveZone, groupStyleKey);
+        ctx.lineWidth = getNdtLeaderLineWidth(pinScale, !!isActiveZone, groupStyleKey);
         ctx.beginPath();
         ctx.rect(-groupDim.w / 2, -groupDim.h / 2, groupDim.w, groupDim.h);
         ctx.stroke();
@@ -22379,7 +22380,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         paintAreaShapeInterior(ctx, defect, activeColor, fillStyle);
         drawAreaInkStrokes(ctx, defect, activeColor);
         ctx.strokeStyle = activeColor;
-        ctx.lineWidth = getDefectLeaderLineWidth(areaPinScale, roundLineMul, isBeingDragged);
+        ctx.lineWidth = getDefectLeaderLineWidth(areaPinScale, roundLineMul, false);
         if (isPreview || borderStyle === 'dashed') ctx.setLineDash([5, 4]);
         else ctx.setLineDash([]);
         strokeAreaShape(ctx, defect);
@@ -22837,9 +22838,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             const lineColor = activeColor;
             const leaderAnchorOpts = { shape: shapeCfg.shape, scale };
             const anchor = getPinLeaderBoxAnchor(boxX, boxY, targetX, targetY, w, h, state.rotationAngle || 0, leaderAnchorOpts);
-            const headLen = (isBeingDragged ? 13 : 10) * arrowScale;
+            const headLen = 10 * arrowScale;
             const stemInset = useCircleTip
-                ? (isBeingDragged ? 6 : 4.5) * arrowScale
+                ? 4.5 * arrowScale
                 : headLen * Math.cos(Math.PI / 6);
             const forcedDir = tipIsArea ? { enabled: false } : resolveForcedArrowDirection(t, defect, state.rotationAngle || 0);
             const leader = forcedDir.enabled
@@ -22873,7 +22874,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             ctx.moveTo(leader.route[0].x, leader.route[0].y);
             for (let i = 1; i < leader.route.length; i++) ctx.lineTo(leader.route[i].x, leader.route[i].y);
             ctx.strokeStyle = lineColor;
-            ctx.lineWidth = getDefectLeaderLineWidth(scale, roundLineMul, isBeingDragged);
+            ctx.lineWidth = getDefectLeaderLineWidth(scale, roundLineMul, false);
             ctx.lineCap = 'butt';
             ctx.setLineDash([]);
             ctx.stroke();
@@ -22883,7 +22884,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 ctx.fillStyle = lineColor;
                 if (useCircleTip) {
                     ctx.beginPath();
-                    ctx.arc(targetX, targetY, (isBeingDragged ? 6 : 4.5) * arrowScale, 0, Math.PI * 2);
+                    ctx.arc(targetX, targetY, 4.5 * arrowScale, 0, Math.PI * 2);
                     ctx.fill();
                 } else {
                     const angle = Math.atan2(leader.uy, leader.ux);
