@@ -15861,3 +15861,21 @@ html:not(.layout-desktop) .crack-monitor-photo-slots {
 .defect-grid-loc-hint { margin-top: 4px; font-size: 12px; color: #0e7490; font-weight: 700; }
 .defect-grid-loc-hint[hidden] { display: none; }
 .survey-grid-loc { font-size: 0.78em; font-weight: 800; color: #0e7490; line-height: 1.2; margin-bottom: 2px; white-space: nowrap; }
+
+/* 행·열 선 「다른 층으로 복사」 창 (실험 exp/grid-lines) */
+.grid-copy-card { width: min(96vw, 440px); }
+.grid-copy-card .grid-copy-lead { margin: 0 0 0.7rem; font-size: 0.9rem; line-height: 1.5; color: #334155; }
+.grid-copy-card .grid-copy-all { display: flex; align-items: center; gap: 0.5rem; padding: 0.45rem 0.2rem; font-weight: 700; border-bottom: 1px solid #e2e8f0; cursor: pointer; }
+.grid-copy-card .grid-copy-all small { font-weight: 400; color: #64748b; }
+.grid-copy-card .grid-copy-list { display: flex; flex-direction: column; max-height: 46vh; overflow-y: auto; margin: 0.3rem 0 0.6rem; }
+.grid-copy-card .grid-copy-row { display: flex; align-items: center; gap: 0.55rem; padding: 0.5rem 0.2rem; min-height: 40px; border-bottom: 1px solid #f1f5f9; cursor: pointer; }
+.grid-copy-card .grid-copy-row:hover { background: #f8fafc; }
+.grid-copy-card input[type="checkbox"] { width: 18px; height: 18px; flex: 0 0 auto; accent-color: #0e7490; }
+.grid-copy-card .grid-copy-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.grid-copy-card .grid-copy-badge { flex: 0 0 auto; font-size: 0.78rem; color: #94a3b8; padding: 1px 7px; border-radius: 999px; border: 1px solid #e2e8f0; }
+.grid-copy-card .grid-copy-badge.has { color: #b45309; background: #fffbeb; border-color: #fde68a; font-weight: 700; }
+.grid-copy-card .grid-copy-note { margin: 0; font-size: 0.8rem; line-height: 1.45; color: #64748b; }
+@media (max-width: 768px) {
+    .grid-copy-card .grid-copy-row { min-height: 46px; }
+    .grid-copy-card .modal-footer .btn { flex: 1 1 0; min-height: 42px; }
+}

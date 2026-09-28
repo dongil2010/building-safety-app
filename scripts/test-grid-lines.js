@@ -525,6 +525,121 @@ if (fs.existsSync(appPath)) {
     assert.ok(takeFn('syncDefectComboFields').includes('setTimeout(refreshGridAutoLocationInModal, 0);'), '수정창 칩·G/B 버튼');
     assert.ok(takeFn('drawFloorGridOverlay').includes('scheduleGridLocFreshness();'), '그릴 때 옛값 갱신 예약');
     assert.ok(takeFn('applyGridAutoLocationToModal').includes('const live = computeGridAutoLocationForPoints(window._gridModalPts'), '수정창은 지금 선·부재로 계산해 표시');
+
+    // ---- 「다른 층으로 복사」(앱 함수 그대로) ----
+    assert.ok(app.includes('data-act="copyFloors"') && app.includes('>다른 층으로 복사</button>'), '패널 버튼');
+    assert.ok(app.includes("if (act === 'copyFloors') { openGridCopyModal(); return; }"), '버튼 연결');
+    assert.ok(takeFn('drawFloorGridOverlay').includes('resolvePendingGridScaleForCurrentFloor();'), '그릴 때 복사해 온 선을 도면 크기에 맞춤');
+    assert.ok(takeFn('refreshStaleGridLocForCurrentFloor').includes('grid.pendingScale && !resolvePendingGridScaleForCurrentFloor()'), '크기 맞추기 전에는 위치 계산 미룸');
+    assert.ok(takeFn('confirmGridCopyModal').includes('confirm(') && takeFn('confirmGridCopyModal').includes('덮어쓸까요?'), '선 있는 층은 덮어쓰기 확인');
+    assert.ok(takeFn('confirmGridCopyModal').includes('개 층에 행·열 복사 완료'), '완료 알림');
+    assert.ok(!/fetch|firestore|db\.|readFloorSyncBundle|\.get\(\)/i.test(takeFn('copyCurrentGridToFloors')), '복사는 서버를 읽지 않음');
+    {
+        const cst = { saves: 0 };
+        const cctx = {
+            G,
+            console,
+            window: { BSA: { gridLines: G }, getBuildingAvailableFloors: (b) => b.floorsList },
+            state: {
+                currentBuildingId: 'b1',
+                currentFloor: '1F',
+                currentBuilding: { id: 'b1', floorsList: [
+                    { floorCode: '1F', floorLabel: '지상 1층' }, { floorCode: '2F', floorLabel: '지상 2층' },
+                    { floorCode: '3F', floorLabel: '지상 3층' }, { floorCode: '외부', floorLabel: '외부' }
+                ] },
+                bgImage: {},
+                floorPlanRef: { bldgId: 'b1', floorCode: '1F', w: 4000, h: 3000 },
+                floorGridLines: {
+                    b1_1F: { autoLocation: false, groups: [
+                        { axis: 'col', prefix: 'A', start: 0, band: 24, lines: [vline(1000, { label: 'C1', band: 30 }), vline(2000)] },
+                        { axis: 'row', prefix: 'Y', start: 1, band: 20, lines: [hline(600)] }
+                    ] },
+                    b1_2F: { refW: 2000, refH: 3000, groups: [{ axis: 'col', lines: [vline(10)] }] }
+                }
+            },
+            getFloorMapStyleKey: (b, f) => `${b}_${f}`,
+            getFloorPlanDisplayDims: () => ({ w: 4000, h: 3000 }),
+            saveStateToLocalStorage: () => { cst.saves += 1; }
+        };
+        vm.createContext(cctx);
+        vm.runInContext(['gridLib', 'getGridFloorKey', 'getCurrentFloorGrid', 'gridHasLines', 'getGridReliableDims', 'getGridSourceDims',
+            'listGridCopyTargetFloors', 'copyCurrentGridToFloors'].map(takeFn).join('\n')
+            + '\nthis.cp = { list: listGridCopyTargetFloors, copy: copyCurrentGridToFloors };', cctx);
+        const lst = cctx.cp.list();
+        assert.strictEqual(lst.map((f) => `${f.floorCode}:${f.lineCount}`).join(','), '2F:1,3F:0,외부:0', '지금 층 빼고 같은 건물 층 + 선 개수');
+        const r = cctx.cp.copy(['2F', '3F', '1F', '2F']);
+        assert.strictEqual(r.n, 2, '지금 층·중복 제외');
+        assert.strictEqual(r.pending, 1, '크기 모르는 층(3F)은 나중에 맞춤');
+        assert.strictEqual(cst.saves, 1, '선 고칠 때와 같은 저장(한 번)');
+        const fl = cctx.state.floorGridLines;
+        const f2 = G.normalizeGrid(fl.b1_2F);
+        assert.strictEqual(f2.groups.length, 2, '덮어쓰기(예전 선 1개 없어짐)');
+        assert.strictEqual(f2.autoLocation, false, '자동 입력 설정도 복사');
+        assert.strictEqual(f2.groups[0].prefix, 'A');
+        assert.strictEqual(f2.groups[0].start, 0);
+        assert.strictEqual(f2.groups[0].band, G.defaultBand(2000, 3000), '기본 폭(원본 도면 기본값) → 대상 도면 기본값');
+        assert.strictEqual(f2.groups[1].band, 13.3, '직접 준 그룹 폭은 짧은 변 비율');
+        assert.strictEqual(f2.groups[0].lines[0].label, 'C1', '선 이름');
+        assert.strictEqual(f2.groups[0].lines[0].band, 20, '선 폭(30 × 2000/3000)');
+        assert.deepStrictEqual(f2.groups[0].lines[0].pts, [{ x: 500, y: 0 }, { x: 500, y: 3000 }], '가로만 절반');
+        assert.deepStrictEqual(f2.groups[1].lines[0].pts, [{ x: 0, y: 600 }, { x: 2000, y: 600 }]);
+        assert.deepStrictEqual(f2.groups.map((g) => g.lines.map((l) => l.seq)), [[1, 2], [1]], '번호 순서(seq)');
+        assert.ok(f2.groups[0].lines[0].id !== 'v1000' && f2.groups[0].id !== fl.b1_1F.groups[0].id, '새 id');
+        assert.strictEqual(fl.b1_1F.groups[0].lines[0].id, 'v1000', '원본은 그대로');
+        const f3 = G.normalizeGrid(fl.b1_3F);
+        assert.deepStrictEqual(f3.pendingScale, { w: 4000, h: 3000 }, '대상 크기 모름 → 원본 크기 기록');
+        assert.deepStrictEqual(f3.groups[0].lines[0].pts, [{ x: 1000, y: 0 }, { x: 1000, y: 3000 }], '좌표 그대로');
+        assert.ok(!fl.b1_외부, '고르지 않은 층은 안 건드림');
+    }
+}
+
+// ---- 다른 층으로 복사: 순수 함수 ----
+{
+    const src = G.normalizeGrid({ groups: [
+        { axis: 'col', prefix: 'X', start: 1, band: G.defaultBand(W, H), angle: 2, lines: [vline(1000), vline(3000, { label: 'X9' })] },
+        { axis: 'row', prefix: 'AY', start: 5, band: 40, lines: [hline(1500, { band: 12 })] }
+    ] });
+    assert.strictEqual(G.countGridLines(src), 3);
+    // 같은 크기: 좌표 그대로, refW 기록
+    const same = G.cloneGridForFloor(src, { srcW: W, srcH: H, dstW: W, dstH: H });
+    assert.deepStrictEqual(same.groups[0].lines[0].pts, src.groups[0].lines[0].pts);
+    assert.strictEqual(same.refW, W);
+    assert.ok(!same.pendingScale);
+    assert.strictEqual(same.groups[0].angle, 2, '각도 복사');
+    assert.strictEqual(same.groups[1].prefix, 'AY');
+    assert.strictEqual(same.groups[1].start, 5);
+    const ids = new Set();
+    [src, same].forEach((g) => g.groups.forEach((gr) => { ids.add(gr.id); gr.lines.forEach((l) => ids.add(l.id)); }));
+    assert.strictEqual(ids.size, 10, '그룹·선 id 모두 새로');
+    // 크기 다름: 가로·세로 따로, 폭은 짧은 변 비율
+    const big = G.cloneGridForFloor(src, { srcW: W, srcH: H, dstW: 8000, dstH: 4500 });
+    assert.deepStrictEqual(big.groups[0].lines[1].pts, [{ x: 6000, y: 0 }, { x: 6000, y: 4500 }]);
+    assert.strictEqual(big.groups[0].lines[1].label, 'X9');
+    assert.strictEqual(big.groups[0].band, G.defaultBand(8000, 4500), '기본 폭 → 대상 기본값');
+    assert.strictEqual(big.groups[1].band, 60, '직접 준 폭 40 × 1.5');
+    assert.strictEqual(big.groups[1].lines[0].band, 18, '선 폭 12 × 1.5');
+    assert.strictEqual(G.computeGridLocation(big, [{ x: 4000, y: 2400 }], { rot: 0, w: 8000, h: 4500 }),
+        G.computeGridLocation(src, [{ x: 2000, y: 1600 }], ctx0), '비율대로 맞춘 선 → 같은 칸');
+    // 대상 크기 모름: 그대로 + pendingScale → 저장/불러오기(normalize)에도 남고 → 그 층을 열 때 맞춤
+    const pend = G.normalizeGrid(JSON.parse(JSON.stringify(G.cloneGridForFloor(src, { srcW: W, srcH: H }))));
+    assert.deepStrictEqual(pend.pendingScale, { w: W, h: H });
+    assert.deepStrictEqual(pend.groups[0].lines[0].pts, src.groups[0].lines[0].pts);
+    const sig0 = G.gridSignature(pend);
+    assert.strictEqual(G.resolvePendingScale(pend, 2000, 1500), true);
+    assert.ok(!pend.pendingScale && pend.refW === 2000 && pend.refH === 1500);
+    assert.deepStrictEqual(pend.groups[0].lines[0].pts, [{ x: 500, y: 0 }, { x: 500, y: 1500 }]);
+    assert.notStrictEqual(G.gridSignature(pend), sig0, '맞추면 선 지문이 바뀜 → 마킹 위치 다시 계산');
+    assert.strictEqual(G.resolvePendingScale(pend, 100, 100), false, '한 번만');
+    // 원본 크기도 모르면 그대로(표시 없음)
+    const unk = G.cloneGridForFloor(src, {});
+    assert.ok(!unk.pendingScale && !unk.refW);
+    assert.deepStrictEqual(unk.groups[1].lines[0].pts, src.groups[1].lines[0].pts);
+    // 복사본을 다시 복사(아직 못 맞춘 것) → 그 원본 크기 기준
+    const again = G.cloneGridForFloor(G.cloneGridForFloor(src, { srcW: W, srcH: H }), { srcW: 1, srcH: 1, dstW: 2000, dstH: 1500 });
+    assert.deepStrictEqual(again.groups[0].lines[0].pts, [{ x: 500, y: 0 }, { x: 500, y: 1500 }]);
+    // Firestore: undefined 값 없음
+    const hasUndef = (o) => o && typeof o === 'object' && Object.keys(o).some((k) => o[k] === undefined || hasUndef(o[k]));
+    [same, big, pend, unk].forEach((g) => assert.ok(!hasUndef(g), 'undefined 없음'));
 }
 
 console.log('test-grid-lines: OK');

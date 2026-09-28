@@ -137,12 +137,22 @@
             assignMissingSeq(out);
             return out;
         });
-        return {
+        const out = {
             version: 1,
             visible: g.visible !== false,
             autoLocation: g.autoLocation !== false,
             groups
         };
+        // 도면 크기(선 좌표 기준) · 다른 층에서 복사해 와서 아직 이 층 도면 크기에 못 맞춘 원본 크기 — 있을 때만(Firestore에 undefined 금지)
+        const rw = num(g.refW, 0);
+        const rh = num(g.refH, 0);
+        if (rw > 0 && rh > 0) {
+            out.refW = rw;
+            out.refH = rh;
+        }
+        const ps = g.pendingScale;
+        if (ps && num(ps.w, 0) > 0 && num(ps.h, 0) > 0) out.pendingScale = { w: num(ps.w, 0), h: num(ps.h, 0) };
+        return out;
     }
 
     // ---- 회전(화면에 보이는 방향) ----
@@ -671,6 +681,100 @@
         return null;
     }
 
+    // ---- 다른 층으로 복사 (2026-09-28) ----
+    function roundTo(v, digits) {
+        const m = Math.pow(10, digits);
+        return Math.round(v * m) / m;
+    }
+
+    function countGridLines(rawGrid) {
+        return normalizeGrid(rawGrid).groups.reduce((s, g) => s + (g.lines || []).length, 0);
+    }
+
+    /**
+     * 선 좌표·폭을 도면 크기 비율대로 맞춤(제자리). 좌표는 이미지 px — 가로는 dstW/srcW, 세로는 dstH/srcH.
+     * 폭(띠)은 짧은 변 비율. 그룹 기본 폭이 원본 도면의 기본값(짧은 변 0.8%)이면 대상 도면의 기본값으로.
+     * 크기 하나라도 모르거나 같으면 그대로. 바뀌면 true
+     */
+    function scaleGridInPlace(grid, srcW, srcH, dstW, dstH) {
+        const sw = num(srcW, 0);
+        const sh = num(srcH, 0);
+        const dw = num(dstW, 0);
+        const dh = num(dstH, 0);
+        if (!(sw > 0 && sh > 0 && dw > 0 && dh > 0) || !grid) return false;
+        const sx = dw / sw;
+        const sy = dh / sh;
+        if (Math.abs(sx - 1) < 1e-9 && Math.abs(sy - 1) < 1e-9) return false;
+        const sb = Math.min(dw, dh) / Math.min(sw, sh);
+        const srcDefault = defaultBand(sw, sh);
+        (grid.groups || []).forEach((g) => {
+            (g.lines || []).forEach((ln) => {
+                ln.pts = sanitizePts(ln.pts).map((p) => ({ x: roundTo(p.x * sx, 2), y: roundTo(p.y * sy, 2) }));
+                if (ln.band != null && ln.band !== '' && Number.isFinite(Number(ln.band))) ln.band = roundTo(Math.max(0, Number(ln.band)) * sb, 1);
+            });
+            const gb = num(g.band, 0);
+            if (gb > 0) g.band = gb === srcDefault ? defaultBand(dw, dh) : roundTo(gb * sb, 1);
+        });
+        return true;
+    }
+
+    /**
+     * 다른 층으로 복사할 행·열 설정 — 선(꺾은 점 포함)·그룹·머리글·시작 번호·각도·기본 폭·선 이름·선 폭·번호 순서(seq)·
+     * 보이기/자동 입력 설정을 모두 복사하고 그룹·선 id는 새로 만든다(원본과 겹치지 않게).
+     * o: { srcW, srcH, dstW, dstH } 도면 크기(이미지 좌표계).
+     *  - 둘 다 알면 비율대로 맞추고 refW/refH를 대상 크기로.
+     *  - 대상 크기를 모르면 좌표는 그대로 두고 pendingScale(원본 크기)을 남김 → 그 층을 열어 도면 크기를 알 때 resolvePendingScale.
+     *  - 원본 크기도 모르면 그대로.
+     */
+    function cloneGridForFloor(rawSrc, o) {
+        const opt = o || {};
+        const src = normalizeGrid(rawSrc);
+        const out = {
+            version: 1,
+            visible: src.visible,
+            autoLocation: src.autoLocation,
+            groups: src.groups.map((g) => {
+                const ng = createGroup(g.axis, { prefix: g.prefix, start: g.start, angle: g.angle, band: g.band });
+                ng.lines = (g.lines || []).map((ln) => {
+                    const line = { id: uid('gl'), pts: ln.pts.map((p) => ({ x: p.x, y: p.y })) };
+                    if (Number.isFinite(ln.seq)) line.seq = ln.seq;
+                    if (ln.label) line.label = ln.label;
+                    if (ln.band != null) line.band = ln.band;
+                    return line;
+                });
+                return ng;
+            })
+        };
+        // 원본이 아직 자기 도면 크기에 못 맞춘 복사본이면 그 좌표 기준은 pendingScale 크기
+        const sw = src.pendingScale ? src.pendingScale.w : num(opt.srcW, 0);
+        const sh = src.pendingScale ? src.pendingScale.h : num(opt.srcH, 0);
+        const dw = num(opt.dstW, 0);
+        const dh = num(opt.dstH, 0);
+        const srcKnown = sw > 0 && sh > 0;
+        const dstKnown = dw > 0 && dh > 0;
+        if (srcKnown && dstKnown) {
+            scaleGridInPlace(out, sw, sh, dw, dh);
+            out.refW = dw;
+            out.refH = dh;
+        } else if (srcKnown) {
+            out.pendingScale = { w: sw, h: sh };
+        }
+        return out;
+    }
+
+    /** 복사해 온 선(pendingScale)을 이 층 도면 크기에 맞춤(제자리). 맞췄으면 true */
+    function resolvePendingScale(grid, dstW, dstH) {
+        if (!grid || !grid.pendingScale) return false;
+        const dw = num(dstW, 0);
+        const dh = num(dstH, 0);
+        if (!(dw > 0 && dh > 0)) return false;
+        scaleGridInPlace(grid, grid.pendingScale.w, grid.pendingScale.h, dw, dh);
+        delete grid.pendingScale;
+        grid.refW = dw;
+        grid.refH = dh;
+        return true;
+    }
+
     const api = {
         DEFAULT_PREFIX,
         AXIS_SEP,
@@ -704,7 +808,11 @@
         insertVertex,
         removeVertex,
         findLine,
-        signedDistance
+        signedDistance,
+        countGridLines,
+        scaleGridInPlace,
+        cloneGridForFloor,
+        resolvePendingScale
     };
     root.BSA = root.BSA || {};
     root.BSA.gridLines = api;

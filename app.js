@@ -33223,6 +33223,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     function drawFloorGridOverlay(ctx, imgW, imgH) {
         const G = gridLib();
         if (!G) return;
+        resolvePendingGridScaleForCurrentFloor(); // 다른 층에서 복사해 온 선 → 이 층 도면 크기에 맞춤(한 번)
         scheduleGridLocFreshness();
         const ge = window.BSA_gridEdit;
         const editing = !!(ge && ge.active);
@@ -33661,6 +33662,11 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     </div>` : '<div class="grid-panel-row grid-panel-muted">선을 누르면 이름·각도·폭을 바꿀 수 있습니다.</div>'}
                 </div>
                 <div class="grid-panel-sec">
+                    <div class="grid-panel-row">
+                        <button type="button" data-act="copyFloors" title="이 층의 행·열 선·그룹·머리글·시작 번호·이름·폭·자동 입력 설정을 같은 건물의 다른 층에 복사(이미 선이 있으면 덮어쓰기)">다른 층으로 복사</button>
+                    </div>
+                </div>
+                <div class="grid-panel-sec">
                     <label class="grid-panel-row"><input type="checkbox" data-f="auto" ${grid.autoLocation ? 'checked' : ''}> 마킹에 행·열 위치 자동 입력</label>
                     <div class="grid-panel-row">
                         <button type="button" data-act="fillExisting" title="행·열 위치가 없는 마킹만 채움(상세 위치·실 이름은 그대로)">이 층 마킹에 위치 채우기</button>
@@ -33693,6 +33699,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (!act) return;
         if (act === 'close') { setGridEditActive(false); return; }
         if (act === 'collapse') { ge.collapsed = !ge.collapsed; renderGridPanel(); return; }
+        if (act === 'copyFloors') { openGridCopyModal(); return; }
         const grid = getCurrentFloorGrid(true);
         const gctx = getGridCtx();
         const eg = gridFindGroup(grid, ge.editGroupId);
@@ -34009,6 +34016,11 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         }
         const grid = getCurrentFloorGrid(false);
         if (!grid) return 0;
+        if (grid.pendingScale && !resolvePendingGridScaleForCurrentFloor()) {
+            // 복사해 온 선을 이 층 도면 크기에 맞추기 전 — 도면 크기를 알게 되면 그때 계산
+            if (state.bgImage) scheduleGridLocFreshness();
+            return 0;
+        }
         if (gridHasLines(grid) && grid.autoLocation === false) return 0;
         const list = filterMapPlacedDefects(getCurrentFloorDefects());
         const sig = G.gridSignature(grid);
@@ -34225,6 +34237,230 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         } catch (e) {
             console.warn('[grid-lines] commit', e);
         }
+    }
+    // ---- 다른 층으로 복사 (2026-09-28) ----
+    // 선 좌표는 이미지 좌표(도면 px, 마킹 x/y와 같은 기준)로 저장된다. 복사할 때 대상 층 도면 크기를 알면(그 층 grid.refW/refH)
+    // 가로·세로 비율대로 맞추고, 모르면 좌표를 그대로 두고 pendingScale(원본 도면 크기)을 남겨 그 층을 열어 도면 크기를 알 때 한 번 맞춘다.
+    // 저장은 선을 고칠 때와 같은 길: state.floorGridLines → saveStateToLocalStorage → scheduleSyncToFirebase(루트 문서 floorGridLines).
+    // 층 문서를 따로 읽거나 현장 전체를 불러오지 않는다.
+    // 대상 층 마킹의 행·열 위치(gridLoc)는 그 층을 열어 도면을 그릴 때 refreshStaleGridLocForCurrentFloor가 다시 계산한다
+    // (선 지문이 바뀌므로 반드시 감지 · 자동 입력 꺼진 층·수정 중인 마킹 제외 · 실 이름(location)은 안 건드림).
+    const gridPendingSince = {};
+
+    /** 지금 층 도면의 좌표 기준 크기 — 도면이 뜨고 좌표 기준(floorPlanRef)이 이 층 것일 때만 */
+    function getGridReliableDims() {
+        const bId = state.currentBuildingId;
+        const fc = state.currentFloor;
+        if (!state.bgImage || !bId || !fc) return null;
+        const ref = state.floorPlanRef;
+        if (ref && ref.bldgId === bId && ref.floorCode === fc && ref.w > 0 && ref.h > 0) return { w: ref.w, h: ref.h };
+        return null;
+    }
+
+    /**
+     * 지금 층 선에 도면 크기 기록(refW/refH — 다음에 이 층으로 복사해 올 때 비율 계산용)과,
+     * 복사해 온 선(pendingScale)을 이 층 도면 크기에 맞춤. 맞출 것이 남아 있으면 false
+     */
+    function resolvePendingGridScaleForCurrentFloor() {
+        const G = gridLib();
+        const grid = getCurrentFloorGrid(false);
+        if (!G || !grid) return true;
+        let dims = getGridReliableDims();
+        if (!grid.pendingScale) {
+            if (dims && gridHasLines(grid) && (grid.refW !== dims.w || grid.refH !== dims.h)) {
+                grid.refW = dims.w;
+                grid.refH = dims.h;
+            }
+            return true;
+        }
+        const key = getGridFloorKey();
+        if (!dims && state.bgImage) {
+            // PDF 좌표 기준을 못 잡는 층 — 잠깐 기다렸다가 마킹과 같은 화면 좌표계 크기로
+            const since = gridPendingSince[key] || (gridPendingSince[key] = Date.now());
+            if (Date.now() - since > 4000) {
+                const d = getFloorPlanDisplayDims();
+                if (d && d.w > 1 && d.h > 1) dims = { w: d.w, h: d.h };
+            }
+        }
+        if (!dims) return false;
+        delete gridPendingSince[key];
+        if (G.resolvePendingScale(grid, dims.w, dims.h)) gridChanged();
+        return true;
+    }
+
+    /** 복사 원본(지금 층) 선 좌표의 기준 도면 크기 */
+    function getGridSourceDims(grid) {
+        if (grid && grid.pendingScale) return { w: grid.pendingScale.w, h: grid.pendingScale.h };
+        const d = getGridReliableDims();
+        if (d) return d;
+        if (grid && grid.refW > 0 && grid.refH > 0) return { w: grid.refW, h: grid.refH };
+        return state.bgImage ? getFloorPlanDisplayDims() : null;
+    }
+
+    /** 같은 건물의 다른 층(점검 층 목록과 같은 getBuildingAvailableFloors — 외부 도면도 목록에 있으면 포함) + 선 개수 */
+    function listGridCopyTargetFloors() {
+        const G = gridLib();
+        const bId = state.currentBuildingId;
+        const bldg = state.currentBuilding || (state.buildings || []).find((b) => b && b.id === bId);
+        if (!G || !bId || !bldg) return [];
+        const floors = (typeof window.getBuildingAvailableFloors === 'function')
+            ? (window.getBuildingAvailableFloors(bldg) || [])
+            : (bldg.floorsList || []);
+        const seen = new Set();
+        const out = [];
+        floors.forEach((f) => {
+            const code = f && f.floorCode ? String(f.floorCode) : '';
+            if (!code || code === state.currentFloor || seen.has(code)) return;
+            seen.add(code);
+            const raw = state.floorGridLines && state.floorGridLines[getFloorMapStyleKey(bId, code)];
+            out.push({ floorCode: code, floorLabel: String((f && f.floorLabel) || code), lineCount: raw ? G.countGridLines(raw) : 0 });
+        });
+        return out;
+    }
+
+    /** 지금 층 행·열 설정을 고른 층에 통째로 복사(덮어쓰기). → { n: 복사한 층 수, pending: 도면 크기를 나중에 맞출 층 수 } */
+    function copyCurrentGridToFloors(codes) {
+        const G = gridLib();
+        const bId = state.currentBuildingId;
+        const src = getCurrentFloorGrid(false);
+        const res = { n: 0, pending: 0 };
+        if (!G || !bId || !gridHasLines(src)) return res;
+        const sd = getGridSourceDims(src);
+        if (!state.floorGridLines || typeof state.floorGridLines !== 'object') state.floorGridLines = {};
+        const done = new Set();
+        (codes || []).forEach((fc) => {
+            const code = String(fc || '');
+            if (!code || code === state.currentFloor || done.has(code)) return;
+            done.add(code);
+            const key = getFloorMapStyleKey(bId, code);
+            const prev = state.floorGridLines[key] ? G.normalizeGrid(state.floorGridLines[key]) : null;
+            const dd = (prev && !prev.pendingScale && prev.refW > 0 && prev.refH > 0) ? { w: prev.refW, h: prev.refH } : null;
+            const next = G.cloneGridForFloor(src, {
+                srcW: sd ? sd.w : 0,
+                srcH: sd ? sd.h : 0,
+                dstW: dd ? dd.w : 0,
+                dstH: dd ? dd.h : 0
+            });
+            state.floorGridLines[key] = next; // 덮어쓰기 — 그 층의 예전 선·그룹은 모두 바뀜
+            res.n += 1;
+            if (next.pendingScale) res.pending += 1;
+        });
+        if (res.n) saveStateToLocalStorage();
+        return res;
+    }
+
+    function ensureGridCopyModal() {
+        let wrap = document.getElementById('gridCopyModal');
+        if (wrap) return wrap;
+        wrap = document.createElement('div');
+        wrap.id = 'gridCopyModal';
+        wrap.className = 'modal-overlay grid-copy-modal';
+        wrap.innerHTML = `
+            <div class="modal-card modal-sm grid-copy-card" role="dialog" aria-modal="true" aria-labelledby="gridCopyTitle">
+                <div class="modal-header">
+                    <h3 id="gridCopyTitle">행·열 선 다른 층으로 복사</h3>
+                    <button type="button" class="modal-close" data-gc-close title="닫기">&times;</button>
+                </div>
+                <div class="modal-body" id="gridCopyBody"></div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline" data-gc-close>취소</button>
+                    <button type="button" class="btn btn-primary" id="gridCopyConfirm" disabled>복사</button>
+                </div>
+            </div>`;
+        document.body.appendChild(wrap);
+        const close = () => wrap.classList.remove('open');
+        wrap.addEventListener('click', (e) => {
+            if (e.target === wrap || (e.target.closest && e.target.closest('[data-gc-close]'))) close();
+        });
+        wrap.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') {
+                e.stopPropagation();
+                close();
+            }
+        });
+        wrap.addEventListener('change', (e) => {
+            const t = e.target;
+            if (!t || t.type !== 'checkbox') return;
+            if (t.hasAttribute('data-gc-all')) {
+                wrap.querySelectorAll('input[data-gc-floor]').forEach((b) => { b.checked = t.checked; });
+            }
+            syncGridCopyModalState(wrap);
+        });
+        wrap.querySelector('#gridCopyConfirm').addEventListener('click', () => confirmGridCopyModal(wrap));
+        return wrap;
+    }
+
+    function syncGridCopyModalState(wrap) {
+        const boxes = Array.from(wrap.querySelectorAll('input[data-gc-floor]'));
+        const sel = boxes.filter((b) => b.checked);
+        const all = wrap.querySelector('input[data-gc-all]');
+        if (all) {
+            all.checked = boxes.length > 0 && sel.length === boxes.length;
+            all.indeterminate = sel.length > 0 && sel.length < boxes.length;
+        }
+        const btn = wrap.querySelector('#gridCopyConfirm');
+        if (btn) {
+            btn.disabled = !sel.length;
+            btn.textContent = sel.length ? `${sel.length}개 층에 복사` : '복사';
+        }
+    }
+
+    /** 「다른 층으로 복사」 창 — 같은 건물 다른 층 목록(체크·전체 선택, 층마다 선 개수) */
+    function openGridCopyModal() {
+        const G = gridLib();
+        const src = getCurrentFloorGrid(false);
+        if (!G || !gridHasLines(src)) {
+            window.showToast?.('먼저 이 층에 행·열 선을 그어 주세요.', 'info', 2000);
+            return;
+        }
+        const floors = listGridCopyTargetFloors();
+        if (!floors.length) {
+            window.showToast?.('이 건물에 복사할 다른 층이 없습니다.', 'info', 2200);
+            return;
+        }
+        const wrap = ensureGridCopyModal();
+        const body = wrap.querySelector('#gridCopyBody');
+        const bldg = state.currentBuilding;
+        const all = (bldg && typeof window.getBuildingAvailableFloors === 'function') ? (window.getBuildingAvailableFloors(bldg) || []) : [];
+        const cur = all.find((f) => f && f.floorCode === state.currentFloor);
+        const curLabel = (cur && cur.floorLabel) || state.currentFloor;
+        body.innerHTML = `
+            <p class="grid-copy-lead">지금 층 <b>${gridEsc(curLabel)}</b>의 행·열 선 ${G.countGridLines(src)}개(그룹 ${(src.groups || []).length}개)를 고른 층에 복사합니다. 머리글·시작 번호·선 이름·폭·번호 순서·자동 입력 설정도 같이 복사하며, 이미 선이 있는 층은 통째로 덮어씁니다.</p>
+            <label class="grid-copy-all"><input type="checkbox" data-gc-all> 전체 선택 <small>(${floors.length}개 층)</small></label>
+            <div class="grid-copy-list">${floors.map((f) => `
+                <label class="grid-copy-row">
+                    <input type="checkbox" data-gc-floor value="${gridEsc(f.floorCode)}">
+                    <span class="grid-copy-name">${gridEsc(f.floorLabel)}</span>
+                    <span class="grid-copy-badge${f.lineCount ? ' has' : ''}">${f.lineCount ? `선 ${f.lineCount}개 있음` : '선 없음'}</span>
+                </label>`).join('')}
+            </div>
+            <p class="grid-copy-note">도면 크기가 다른 층은 선 위치를 도면 가로·세로 비율대로 맞춥니다(그 층 도면 크기를 아직 모르면 그 층을 열 때 맞춤). 대상 층 마킹의 행·열 위치는 그 층을 열 때 새 선 기준으로 다시 채워집니다(자동 입력이 켜진 경우 · 실 이름은 그대로).</p>`;
+        syncGridCopyModalState(wrap);
+        wrap.classList.add('open');
+    }
+
+    function confirmGridCopyModal(wrap) {
+        const floors = listGridCopyTargetFloors();
+        const byCode = new Map(floors.map((f) => [f.floorCode, f]));
+        const codes = Array.from(wrap.querySelectorAll('input[data-gc-floor]'))
+            .filter((b) => b.checked)
+            .map((b) => b.value)
+            .filter((c) => byCode.has(c));
+        if (!codes.length) return;
+        const withLines = codes.map((c) => byCode.get(c)).filter((f) => f.lineCount > 0);
+        if (withLines.length) {
+            const names = withLines.slice(0, 6).map((f) => `${f.floorLabel}(선 ${f.lineCount}개)`).join(', ')
+                + (withLines.length > 6 ? ` 외 ${withLines.length - 6}개 층` : '');
+            if (!confirm(`고른 층 중 ${withLines.length}개 층에 이미 행·열 선이 있습니다.\n${names}\n\n덮어쓰면 그 층의 선·그룹·이름·폭이 모두 지금 층 것으로 바뀝니다. 덮어쓸까요?`)) return;
+        }
+        const res = copyCurrentGridToFloors(codes);
+        wrap.classList.remove('open');
+        if (!res.n) {
+            window.showToast?.('행·열 선을 복사하지 못했습니다.', 'error', 2500);
+            return;
+        }
+        renderGridPanel();
+        window.showToast?.(`${res.n}개 층에 행·열 복사 완료 (마킹 위치는 그 층을 열 때 다시 계산)`, 'success', 3500);
     }
     // @@GRID_LINES_END
 
