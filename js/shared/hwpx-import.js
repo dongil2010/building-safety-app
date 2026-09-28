@@ -36,6 +36,31 @@
         return t === '○' || t === 'O' || t === 'o';
     }
 
+    /**
+     * 2026-09-28 진행여부·누수여부 칸: ○ 말고 이 앱이 2026-09-21부터 쓰는 표기(진행中 / 진행\n中 / 누수中)와
+     * 진행중·누수중도 켜짐으로 읽는다. word: '진행' | '누수'
+     */
+    function isFlagCellOn(v, word) {
+        if (isMarkOn(v)) return true;
+        const t = String(v || '').replace(/\s+/g, '');
+        return t === word + '中' || t === word + '중';
+    }
+
+    /**
+     * 3종 점검내용 끝에 붙은 진행中·누수中 표기를 떼어 낸다(이 앱이 출력할 때 붙이는 표기).
+     * '누수 흔적'·'백태' 같은 조사내용 글자만으로는 켜지 않는다 — 표기가 있을 때만 true.
+     */
+    function extractProgressLeakMarkers(content) {
+        let progress = false;
+        let leak = false;
+        const text = String(content || '').replace(/(^|\s)(진행|누수)\s*(?:中|중)(?=\s|$)/g, (m, pre, word) => {
+            if (word === '진행') progress = true;
+            else leak = true;
+            return pre;
+        }).replace(/\s{2,}/g, ' ').trim();
+        return { text, progress, leak };
+    }
+
     function isGrade3Header(row) {
         const joined = row.join('').replace(/\s+/g, '');
         return joined.includes('점검내용') && joined.includes('발생원인')
@@ -98,7 +123,9 @@
         const floorLbl = (cells[1] || '').trim();
         const structMk = cells[2] || '';
         const nonStructMk = cells[3] || '';
-        const inspection = (cells[4] || '').trim();
+        // 점검내용 끝의 진행中·누수中 표기는 떼어서 여부로 (글자는 조사내용에 남기지 않음)
+        const markers = extractProgressLeakMarkers(cells[4] || '');
+        const inspection = markers.text;
         const cause = (cells[5] || '').trim();
         const remark = (cells[6] || '').trim();
         let category = '구조체';
@@ -114,8 +141,9 @@
             size: good ? '' : parsed.size,
             cause: cause || (good ? '-' : '건조수축'),
             remark,
-            isProgress: false,
-            isLeak: inspection.includes('누수'),
+            // 2026-09-28: 예전에는 점검내용에 '누수' 글자만 있어도 누수여부를 켰다(누수 흔적·백태도) — 표기가 있을 때만
+            isProgress: good ? false : markers.progress,
+            isLeak: good ? false : markers.leak,
         };
     }
 
@@ -147,8 +175,8 @@
             defectType = parsed.defectType;
             size = (c3 || parsed.size || '').trim();
             if (isMarkOn(c5) && !isMarkOn(c4)) category = '비구조체';
-            progress = isMarkOn(c6);
-            leak = isMarkOn(c7);
+            progress = isFlagCellOn(c6, '진행');
+            leak = isFlagCellOn(c7, '누수');
             cause = (c8 || '').trim();
         } else {
             // 구형: 부재종류 + 조사내용 분리
@@ -156,8 +184,8 @@
             defectType = c3 || '기타';
             size = c4 || '';
             if (isMarkOn(c6) && !isMarkOn(c5)) category = '비구조체';
-            progress = isMarkOn(c7);
-            leak = isMarkOn(c8);
+            progress = isFlagCellOn(c7, '진행');
+            leak = isFlagCellOn(c8, '누수');
             cause = (cells[8] || '').trim();
         }
 

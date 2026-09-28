@@ -34473,10 +34473,12 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
     function appendGrade3ProgressLeakToContent(content, d) {
         const flags = [];
-        if (d && d.isProgress) flags.push('진행中');
-        if (d && d.isLeak) flags.push('누수中');
-        if (!flags.length) return content;
         const base = String(content == null ? '' : content).trim();
+        // 여부는 저장된 값(체크)만 따른다. 조사내용 글자에 같은 표기가 이미 있으면 두 번 붙이지 않음
+        const hasMarker = (word) => new RegExp(`(^|\\s)${word}\\s*中(?=\\s|$)`).test(base);
+        if (d && d.isProgress && !hasMarker('진행')) flags.push('진행中');
+        if (d && d.isLeak && !hasMarker('누수')) flags.push('누수中');
+        if (!flags.length) return content;
         if (!base || base === '-') return flags.join(' ');
         return `${base} ${flags.join(' ')}`;
     }
@@ -35152,19 +35154,26 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const list = state.defects[key] || [];
         const defect = list.find(d => d.id === defectId);
         if (!defect) return;
+        // 2026-09-28 그룹(마킹 추가) 줄은 멤버 중 하나라도 켜져 있으면 「진행중」으로 보인다.
+        // 예전엔 누른 결함 하나의 값으로 다음 값을 정해서, 보이는 「진행중」을 눌러도 한 번에 안 꺼졌다.
+        const shownRow = (typeof consolidateDefectGroups === 'function')
+            ? consolidateDefectGroups(list).find((g) => g.id === defectId
+                || (g._groupMemberIds && g._groupMemberIds.indexOf(defectId) !== -1))
+            : null;
+        const cur = shownRow || defect;
         let next = '0';
         switch (field) {
             case 'progress':
-                next = defect.isProgress ? '0' : '1';
+                next = cur.isProgress ? '0' : '1';
                 break;
             case 'openingCrack':
-                next = defect.isOpeningCrack ? '0' : '1';
+                next = cur.isOpeningCrack ? '0' : '1';
                 break;
             case 'leak':
-                next = defect.isLeak ? '0' : '1';
+                next = cur.isLeak ? '0' : '1';
                 break;
             case 'priorityManage':
-                next = defect.isPriorityManage ? '0' : '1';
+                next = cur.isPriorityManage ? '0' : '1';
                 break;
             default:
                 return;
@@ -45323,12 +45332,16 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         { key: 'size', label: '결함크기(규모)', aliases: ['결함크기', '규모', '크기', '규모 및 상태'] },
         { key: 'crackWidth', label: '균열폭', aliases: ['균열폭'] },
         { key: 'crackLength', label: '균열길이', aliases: ['균열길이'] },
-        { key: 'progress', label: '진행여부', aliases: ['진행여부', '진행중'] },
-        { key: 'leak', label: '누수여부', aliases: ['누수여부', '누수중'] },
+        // 2026-09-28 '진행'·'누수' 추가 — 한글 가져오기 머리글(HWPX_IMPORT_HEADERS)이 이 이름이라 여부가 빠지고 있었다
+        { key: 'progress', label: '진행여부', aliases: ['진행여부', '진행중', '진행'] },
+        { key: 'leak', label: '누수여부', aliases: ['누수여부', '누수중', '누수'] },
         { key: 'cause', label: '결함원인추정', aliases: ['결함원인추정', '결함원인', '원인'] }
     ];
 
-    const IMPORT_NEGATIVE_FLAG_VALUES = ['-', 'x', '아니오', '아니요', 'no', 'n', '0', '없음', ''];
+    const IMPORT_NEGATIVE_FLAG_VALUES = ['-', 'x', '아니오', '아니요', 'no', 'n', '0', '없음', '',
+        // 2026-09-28: '미진행'·'해당없음' 등이 켜짐으로 들어가던 것
+        '×', '✕', '✗', '–', '—', '－', 'false', 'none', 'n/a', 'na', '무', '해당없음', '미해당', '비해당', '정지', '안정'];
+    const IMPORT_NEGATIVE_FLAG_PATTERNS = [/^(?:미|비|무)(?:진행|누수)$/, /^(?:진행|누수)(?:없음|아님|안함|x|×)$/, /^없/];
 
     function guessImportColumnForField(headers, aliases) {
         const norm = (s) => (s || '').toString().trim().toLowerCase().replace(/\s+/g, '');
@@ -45680,7 +45693,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
     function resolveImportFlag(raw) {
         const v = (raw || '').toString().trim().toLowerCase();
-        return v !== '' && !IMPORT_NEGATIVE_FLAG_VALUES.includes(v);
+        if (v === '' || IMPORT_NEGATIVE_FLAG_VALUES.includes(v)) return false;
+        const compact = v.replace(/\s+/g, '');
+        if (IMPORT_NEGATIVE_FLAG_VALUES.includes(compact)) return false;
+        return !IMPORT_NEGATIVE_FLAG_PATTERNS.some((re) => re.test(compact));
     }
 
     /** 엑셀/한글 가져오기: 문상부·창하부·창측면 등 개구부 위치·내용이면 개구부 균열 체크 */
