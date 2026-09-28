@@ -668,7 +668,98 @@
             }
         }
         if (!grid) return '';
+        if (Number(x.maxUnits) > 0) grid = splitGridLocLines(grid, x.maxUnits, x.measure).join('\n');
         return formatLocationCell(grid, room);
+    }
+
+    // ---- 한글/PDF 위치 칸 줄나눔: 행·열이 칸 폭을 넘을 때만 '/' 뒤(여러 쌍이면 ', ' 뒤 먼저)에서 줄바꿈 ----
+    /** 글자 폭 어림(em, 1 = 글자 크기): 영문 대문자 0.62 · 그 밖의 영문·숫자·~·/ 0.55 · 공백 0.3 · 한글 등 1 */
+    function gridLocTextEm(text) {
+        let n = 0;
+        Array.from(String(text == null ? '' : text)).forEach((ch) => {
+            if (ch === ' ') n += 0.3;
+            else if (/[A-Z]/.test(ch)) n += 0.62;
+            else if (/[\u0021-\u007E]/.test(ch)) n += 0.55;
+            else n += 1;
+        });
+        return n;
+    }
+
+    /**
+     * 칸 한 줄에 들어가는 폭(em). o: { cellWidth, marginLeft, marginRight, fontHeight(HWPUNIT), safety }
+     * (칸 폭 − 좌우 여백) ÷ 글자 크기 × 안전 여유(기본 0.92). 알 수 없으면 0
+     */
+    function cellTextUnits(o) {
+        const x = o || {};
+        const w = Number(x.cellWidth) || 0;
+        const fh = Number(x.fontHeight) || 0;
+        if (w <= 0 || fh <= 0) return 0;
+        const usable = w - (Number(x.marginLeft) || 0) - (Number(x.marginRight) || 0);
+        if (usable <= 0) return 0;
+        const safety = Number(x.safety) > 0 ? Number(x.safety) : 0.92;
+        return (usable / fh) * safety;
+    }
+
+    /**
+     * 행·열 글자를 칸 폭(maxUnits em)에 맞춰 줄 배열로. 들어가면 한 줄 그대로.
+     * 넘치면: 쌍(', ' 구분)을 통째로 먼저 옮기고, 한 쌍이 혼자서도 넘치면 그 쌍만 '/' 뒤에서 나눔.
+     * 'A1~A2' 같은 토큰 중간은 절대 안 자름('/'는 윗줄 끝, ','도 윗줄 끝에 남김). 빈 줄 없음
+     */
+    function splitGridLocLines(grid, maxUnits, measure) {
+        const g = String(grid == null ? '' : grid).replace(/\s+/g, ' ').trim();
+        if (!g) return [];
+        const m = typeof measure === 'function' ? measure : gridLocTextEm;
+        const max = Number(maxUnits);
+        if (!(max > 0) || m(g) <= max) return [g];
+        const pairs = g.split(/\s*,\s*/).filter(Boolean);
+        const atoms = [];
+        pairs.forEach((p, pi) => {
+            const lastPair = pi === pairs.length - 1;
+            const tail = lastPair ? '' : ',';
+            if (m(p + tail) <= max || p.indexOf('/') < 0) {
+                atoms.push({ text: p + tail, pairEnd: !lastPair });
+                return;
+            }
+            const segs = p.split('/').map((x) => x.trim());
+            segs.forEach((s, si) => {
+                const segLast = si === segs.length - 1;
+                const text = s + (segLast ? tail : '/');
+                if (text) atoms.push({ text, pairEnd: segLast && !lastPair });
+            });
+        });
+        const lines = [];
+        let cur = '';
+        let prevPairEnd = false;
+        atoms.forEach((a) => {
+            if (!cur) {
+                cur = a.text;
+            } else {
+                const cand = cur + (prevPairEnd ? ' ' : '') + a.text;
+                if (m(cand) <= max) cur = cand;
+                else {
+                    lines.push(cur);
+                    cur = a.text;
+                }
+            }
+            prevPairEnd = a.pairEnd;
+        });
+        if (cur) lines.push(cur);
+        return lines;
+    }
+
+    /**
+     * PDF(HTML) 위치 칸 첫 줄: 쌍마다 inline-block(쉼표 뒤에서 먼저 넘어감), 쌍 안은 '/' 뒤에만 줄바꿈 허용(<wbr>)
+     * esc: HTML 이스케이프 함수
+     */
+    function gridLocBreakableHtml(grid, esc) {
+        const e = typeof esc === 'function' ? esc : (s) => String(s);
+        const g = String(grid == null ? '' : grid).replace(/\s+/g, ' ').trim();
+        if (!g) return '';
+        const pairs = g.split(/\s*,\s*/).filter(Boolean);
+        return pairs.map((p, i) => {
+            const text = p + (i < pairs.length - 1 ? ',' : '');
+            return `<span style="display:inline-block;">${text.split('/').map((s) => e(s)).join('/<wbr>')}</span>`;
+        }).join(' ');
     }
 
     // ---- 편집 ----
@@ -939,6 +1030,10 @@
         splitLegacyGridLocation,
         formatLocationCell,
         reportLocationCell,
+        gridLocTextEm,
+        cellTextUnits,
+        splitGridLocLines,
+        gridLocBreakableHtml,
         makeLineThrough,
         addLineToGroup,
         nextSeq,

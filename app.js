@@ -34130,13 +34130,15 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
      * 한글/PDF 상태조사표 위치 칸: 행·열이 있으면 「행·열\n실 이름(상세 위치)」, 행·열이 없으면 ''(→ 예전 출력 그대로)
      * 예전 실험 데이터(상세 위치 앞에 칸 이름)도 나눠서 출력
      */
-    function getDefectGridRoomForReport(d, floorCode) {
+    function getDefectGridRoomForReport(d, floorCode, maxUnits) {
         const G = gridLib();
         if (!G || !d) return '';
         return G.reportLocationCell({
             gridLoc: d.gridLoc,
             legacyAuto: d.gridLocAuto,
-            detail: extractDefectLocationDetail(d.location || '', floorCode)
+            detail: extractDefectLocationDetail(d.location || '', floorCode),
+            // 한글 칸 폭(em) — 주면 행·열이 넘칠 때만 '/' 뒤에서 줄바꿈
+            maxUnits
         });
     }
 
@@ -36701,6 +36703,13 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
     function buildReportSurveyTableHtml(sDefects, cellCtxFactory, isGrade3) {
         const td = (text) => `<td style="padding:0.28rem 0.18rem; border:1px solid #94a3b8; white-space:pre-line;">${escapeReportHtml(text)}</td>`;
+        const tdGridLoc = (text) => {
+            const G = gridLib();
+            const lines = String(text || '').split('\n');
+            if (!G || typeof G.gridLocBreakableHtml !== 'function') return td(text);
+            const rest = lines.slice(1).map(escapeReportHtml).join('\n');
+            return `<td style="padding:0.28rem 0.18rem; border:1px solid #94a3b8; white-space:pre-line;">${G.gridLocBreakableHtml(lines[0], escapeReportHtml)}${rest ? '\n' + rest : ''}</td>`;
+        };
         const th = (text, extra) => `<th style="padding:0.28rem 0.18rem; border:1px solid #64748b; background:#f8fafc; color:#1e293b; font-weight:700;${extra || ''}">${text}</th>`;
         const head = isGrade3
             ? `<tr>${th('No.', 'rowspan="2"')}${th('구분', 'rowspan="2"')}${th('부재 분류', 'colspan="2"')}${th('점검내용', 'rowspan="2"')}${th('발생원인', 'rowspan="2"')}${th('비고', 'rowspan="2"')}</tr><tr>${th('구조부재')}${th('비구조부재')}</tr>`
@@ -36709,7 +36718,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const body = sDefects.length > 0
             ? sDefects.map((d, dSubIdx) => {
                 const ctx = cellCtxFactory(d, dSubIdx);
-                return `<tr>${getReportSurveyRowValues(d, ctx, isGrade3).map(v => td(v)).join('')}</tr>`;
+                // 1·2종 위치 칸(행·열): 쌍 뒤·'/' 뒤에서만 줄바꿈되게, 실 이름은 다음 줄
+                const gridCell = !isGrade3 && typeof getDefectGridRoomForReport === 'function'
+                    ? getDefectGridRoomForReport(d, ctx.floorCode) : '';
+                return `<tr>${getReportSurveyRowValues(d, ctx, isGrade3).map((v, ci) => ((ci === 1 && gridCell && v === gridCell) ? tdGridLoc(v) : td(v))).join('')}</tr>`;
             }).join('')
             : `<tr><td colspan="${colSpan}" style="padding:2rem; color:#a3a3a3;">등록된 결함이 없습니다.</td></tr>`;
         return `<table style="width:100%; border-collapse:collapse; font-size:0.72rem; text-align:center; margin-bottom:0.4rem;"><thead>${head}</thead><tbody>${body}</tbody></table>`;
@@ -44139,6 +44151,18 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             const xmlText = await zip.file(sectionPath).async('string');
             const xmlDoc = new DOMParser().parseFromString(xmlText, 'application/xml');
             if (xmlDoc.querySelector('parsererror')) throw new Error('템플릿 ' + sectionPath + ' 파싱에 실패했습니다.');
+            // 칸 글자 크기(charPr height, HWPUNIT) — 위치 칸(행·열) 줄바꿈 폭 계산용
+            const hwpxCharPrHeightById = {};
+            try {
+                const hdrForSize = await zip.file('Contents/header.xml').async('string');
+                const reCharPr = /<hh:charPr\b[^>]*>/g;
+                let mCharPr;
+                while ((mCharPr = reCharPr.exec(hdrForSize))) {
+                    const idM = /\bid="(\d+)"/.exec(mCharPr[0]);
+                    const hM = /\bheight="(\d+)"/.exec(mCharPr[0]);
+                    if (idM && hM) hwpxCharPrHeightById[idM[1]] = parseInt(hM[1], 10) || 0;
+                }
+            } catch (_charPrErr) { /* 없으면 줄 높이(lineseg)로 어림 */ }
 
             const sec = xmlDoc.getElementsByTagName('hs:sec')[0];
             if (!sec) throw new Error('템플릿 문서 구조(hs:sec)를 찾지 못했습니다.');
@@ -44215,8 +44239,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             // rawVal의 실제 줄 수(lines.length)를 반환한다 — 호출부에서 행 높이를 실제 줄 수에
             // 맞춰 다시 계산하는 데 쓴다(표본 행이 다른 칸의 샘플 2줄 데이터 기준 키를 물려받아,
             // 1줄로 줄어든 칸의 글자가 위로 뜬 것처럼 보이던 문제 — 한글에서 직접 확인됨).
-            const fillCellParas = (subList, paras, rawVal, tc) => {
-                const maxChars = estimateHwpxCellMaxChars(tc, paras);
+            // minMaxChars: 이미 칸 폭에 맞춰 나눈 줄(위치 칸 행·열)을 공용 래퍼가 다시 쪼개지 않게 하는 최소 폭
+            const fillCellParas = (subList, paras, rawVal, tc, minMaxChars) => {
+                const maxChars = Math.max(estimateHwpxCellMaxChars(tc, paras), Number(minMaxChars) || 0);
                 const lines = wrapHwpxCellText(rawVal, maxChars).split('\n');
                 const baseSeg = paras[0].getElementsByTagNameNS(HP_NS, 'lineseg')[0];
                 const baseVertsize = baseSeg ? parseInt(baseSeg.getAttribute('vertsize'), 10) || 0 : 0;
@@ -44301,17 +44326,59 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     if (seg) seg.setAttribute('vertpos', String(offset + i * (vertsize + spacing)));
                 });
             };
-            const setTcText = (tc, rawVal) => {
+            const setTcText = (tc, rawVal, minMaxChars) => {
                 if (!tc) return;
                 const subList = tc.getElementsByTagNameNS(HP_NS, 'subList')[0];
                 const paras = subList
                     ? Array.from(subList.getElementsByTagNameNS(HP_NS, 'p')).filter(p => p.parentNode === subList)
                     : [];
-                if (paras.length > 0) fillCellParas(subList, paras, rawVal, tc);
+                if (paras.length > 0) fillCellParas(subList, paras, rawVal, tc, minMaxChars);
                 else {
                     const t = tc.getElementsByTagNameNS(HP_NS, 't')[0];
                     if (t) t.textContent = wrapHwpxCellText(rawVal).split('\n').join(' ');
                 }
+            };
+            /**
+             * 한글 칸 한 줄 폭(em): (cellSz 폭 − 좌우 여백) ÷ 칸 글자 크기(charPr height) × 안전 여유.
+             * 여백은 hasMargin="1"이면 칸의 cellMargin, 아니면 표의 inMargin. 알 수 없으면 0
+             */
+            const hwpxCellTextUnits = (tc, paras) => {
+                const G = window.BSA && window.BSA.gridLines;
+                if (!tc || !G || typeof G.cellTextUnits !== 'function') return 0;
+                const sz = tc.getElementsByTagNameNS(HP_NS, 'cellSz')[0];
+                const cellWidth = sz ? (parseInt(sz.getAttribute('width'), 10) || 0) : 0;
+                let marginEl = null;
+                if (tc.getAttribute('hasMargin') === '1') {
+                    marginEl = tc.getElementsByTagNameNS(HP_NS, 'cellMargin')[0] || null;
+                } else {
+                    let tblEl = tc.parentNode;
+                    while (tblEl && tblEl.localName !== 'tbl') tblEl = tblEl.parentNode;
+                    marginEl = tblEl ? (Array.from(tblEl.children).find(c => c.localName === 'inMargin') || null) : null;
+                }
+                const ml = marginEl ? (parseInt(marginEl.getAttribute('left'), 10) || 0) : 141;
+                const mr = marginEl ? (parseInt(marginEl.getAttribute('right'), 10) || 0) : 141;
+                const p0 = paras && paras[0];
+                const run = p0 ? p0.getElementsByTagNameNS(HP_NS, 'run')[0] : null;
+                const cpId = run ? run.getAttribute('charPrIDRef') : null;
+                let fontHeight = cpId != null ? (hwpxCharPrHeightById[cpId] || 0) : 0;
+                if (!fontHeight && p0) {
+                    const seg = p0.getElementsByTagNameNS(HP_NS, 'lineseg')[0];
+                    fontHeight = seg ? (parseInt(seg.getAttribute('textheight'), 10) || parseInt(seg.getAttribute('vertsize'), 10) || 0) : 0;
+                }
+                return G.cellTextUnits({ cellWidth, marginLeft: ml, marginRight: mr, fontHeight });
+            };
+            /** 사진표 위치 칸: 행·열이 있으면 상태조사표 위치 칸과 같은 규칙(행·열 → 다음 줄 실 이름), 없으면 예전 그대로 */
+            const setHwpxPhotoLocText = (tc, d, fc) => {
+                if (!tc) return;
+                const raw = getDefectGridRoomForReport(d, fc);
+                if (!raw) {
+                    setTcText(tc, getSurveyCellText('location', d, { floorCode: fc }));
+                    return;
+                }
+                const subList = tc.getElementsByTagNameNS(HP_NS, 'subList')[0];
+                const paras = subList ? Array.from(subList.getElementsByTagNameNS(HP_NS, 'p')).filter(p => p.parentNode === subList) : [];
+                const units = hwpxCellTextUnits(tc, paras);
+                setTcText(tc, units > 0 ? (getDefectGridRoomForReport(d, fc, units) || raw) : raw, units);
             };
             const ensureTblTreatAsChar = (tbl) => {
                 if (!tbl) return;
@@ -44862,6 +44929,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                         };
                         const colCount = Array.from(normalStyleRow.getElementsByTagNameNS(HP_NS, 'tc')).length;
                         const values = getReportSurveyRowValues(d, rowCtx, isGrade3, colCount);
+                        const gridLocCellRaw = getDefectGridRoomForReport(d, floorCode);
                         const styleMap = localIdx === 0 ? styleMaps.first : (isLastOnPage ? styleMaps.last : styleMaps.normal);
 
                         const newRow = normalStyleRow.cloneNode(true);
@@ -44878,7 +44946,17 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                             const subList = tc.getElementsByTagNameNS(HP_NS, 'subList')[0];
                             const paras = subList ? Array.from(subList.getElementsByTagNameNS(HP_NS, 'p')).filter(p => p.parentNode === subList) : [];
                             if (paras.length > 0) {
-                                const fillInfo = fillCellParas(subList, paras, values[colIdx] !== undefined ? values[colIdx] : '', tc);
+                                let cellVal = values[colIdx] !== undefined ? values[colIdx] : '';
+                                let cellMinChars = 0;
+                                // 1·2종 위치 칸(행·열): 칸 폭에 들어가면 한 줄, 넘치면 '/' 뒤에서 줄바꿈 → 다음 줄 실 이름
+                                if (colIdx === 1 && gridLocCellRaw && cellVal === gridLocCellRaw) {
+                                    const locUnits = hwpxCellTextUnits(tc, paras);
+                                    if (locUnits > 0) {
+                                        cellVal = getDefectGridRoomForReport(d, floorCode, locUnits) || cellVal;
+                                        cellMinChars = locUnits;
+                                    }
+                                }
+                                const fillInfo = fillCellParas(subList, paras, cellVal, tc, cellMinChars);
                                 if (fillInfo.lineCount > rowMaxLines) rowMaxLines = fillInfo.lineCount;
                                 if (!rowLineMetric && fillInfo.vertsize) {
                                     const marginEl = tc.getElementsByTagNameNS(HP_NS, 'cellMargin')[0];
@@ -44991,7 +45069,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                         manifestAdds.push(`<opf:item id="${imgId1}" href="BinData/${imgId1}.${slot1.ext}" media-type="${slot1.mime}" isEmbeded="1"/>`);
                         setPicImage(pics[0], imgId1, slot1.w, slot1.h, maxW, maxH);
                         setTcText(capTcs[0], photoLabelByDefect.get(slot1.d));
-                        setTcText(capTcs[2], getSurveyCellText('location', slot1.d, { floorCode }));
+                        setHwpxPhotoLocText(capTcs[2], slot1.d, floorCode);
                         setTcText(descTcs[1], [getSurveyCellText('component', slot1.d), getSurveyCellText('defectType', slot1.d)].map(t => (t || '').trim()).filter(t => t && t !== '-').join(' ') || '-');
 
                         if (slot2) {
@@ -45001,7 +45079,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                             manifestAdds.push(`<opf:item id="${imgId2}" href="BinData/${imgId2}.${slot2.ext}" media-type="${slot2.mime}" isEmbeded="1"/>`);
                             setPicImage(pics[1], imgId2, slot2.w, slot2.h, maxW, maxH);
                             setTcText(capTcs[4], photoLabelByDefect.get(slot2.d));
-                            setTcText(capTcs[6], getSurveyCellText('location', slot2.d, { floorCode }));
+                            setHwpxPhotoLocText(capTcs[6], slot2.d, floorCode);
                             setTcText(descTcs[3], [getSurveyCellText('component', slot2.d), getSurveyCellText('defectType', slot2.d)].map(t => (t || '').trim()).filter(t => t && t !== '-').join(' ') || '-');
                         } else {
                             stripPhotoTblRightHalf(newTbl);
