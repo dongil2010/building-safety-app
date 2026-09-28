@@ -12,7 +12,8 @@
  * - 선은 꼭짓점 2개 이상인 꺾은선. 각도 자유(꺾인 열·날개동). 같은 축에 그룹을 여러 개 둘 수 있다
  *   (그룹마다 머리글·시작 번호·방향·기본 폭).
  * - 폭(band): 선에서 수직 거리 ≤ 폭/2 안이면 그 선 하나(X2), 아니면 이웃 두 선 사이(X1~X2).
- * - 바깥: 맨 끝 선 밖이면 「X1 외측」.
+ * - 바깥: 맨 끝 선 밖이면 바깥 쪽을 비운 범위 — 번호가 작은 쪽 끝이면 「~X1」, 큰 쪽 끝이면 「X7~」
+ *   (범위를 작은 번호~큰 번호로 쓰는 것과 같은 방향. 끝 선과 안쪽 이웃 선의 번호를 비교, 선이 하나면 왼쪽/위 바깥 「~X1」, 오른쪽/아래 「X1~」).
  * - 슬래브·보(B)·철골보(B)·빔도 보통 폭 규칙(폭 안이면 X2) — 2026-09-28 「늘 범위」 규칙은 없앰.
  * - 거더(보(G)·철골보(G)·거더·철골거더·큰보): 먼저 보통 폭 규칙. 한 축이라도 폭 안이면 보통 규칙 그대로.
  *   어느 축의 폭에도 안 들면 선 하나에 붙인다: 가장 가까운 열 선과 행 선까지 거리를 재서
@@ -347,7 +348,12 @@
         const allHigh = positions.every((q) => q > n - 1);
         if (allLow || allHigh) {
             const edge = allLow ? 0 : n - 1;
-            return `${nameAt(items, edge)} 외측`;
+            const name = nameAt(items, edge);
+            // 끝 선이 안쪽 이웃보다 번호가 작으면 바깥은 「작은 쪽」 → ~X1, 크면 X7~ (선 하나면 공간 방향)
+            const tildeFirst = n === 1
+                ? allLow
+                : items[edge].numberIndex < items[allLow ? 1 : n - 2].numberIndex;
+            return tildeFirst ? `~${name}` : `${name}~`;
         }
         const minP = Math.min(...positions);
         const maxP = Math.max(...positions);
@@ -394,7 +400,7 @@
     }
 
     /** 계산 방식이 바뀌면 올림 → 화면이 저장된 행·열 위치를 다시 계산함 */
-    const GRID_LOC_ALGO = 3;
+    const GRID_LOC_ALGO = 4; // 4: 끝 선 바깥 표기를 ~X1 / X7~ 로
 
     function roundPts(pts) {
         return pts.map((p) => `${Math.round(p.x * 10)},${Math.round(p.y * 10)}`).join(';');

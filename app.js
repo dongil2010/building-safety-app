@@ -34117,7 +34117,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
     /**
      * 「행·열 위치 다시 채우기」 — 이 층 마킹 전부의 행·열 위치를 지금 선 기준으로 다시 씀(있던 값 덮어씀).
-     * 상세 위치(실 이름)는 지우지 않는다. 선 밖은 보통 규칙(X1 외측). 되돌리기 한 번으로 전체 취소.
+     * 상세 위치(실 이름)는 지우지 않는다. 선 밖은 보통 규칙(~X1 / X7~). 되돌리기 한 번으로 전체 취소.
      */
     function resetGridLocationForCurrentFloor() {
         if (!currentGridHasLines()) {
