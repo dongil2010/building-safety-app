@@ -21,6 +21,10 @@
  *   (영역은 영역 전체가 한 선의 폭 안에 들어야 「폭 안」)
  *   영역 거더는 긴 쪽 방향(가로로 길면 행 선 위 → Y 하나, 세로로 길면 X 하나, 1.5배 이상일 때), 아니면 가운데 점 기준.
  * - G/B 안 정한 그냥 「보」·「철골보」, 접합부, 그 밖의 부재는 보통 규칙(폭 안이면 X2).
+ * - 구역(zones, 2026-09-28): 한 도면에 여러 층이 그려진 경우 사각형 구역마다 따로 번호를 매긴다.
+ *   그룹은 zoneId로 한 구역에 속하고(없으면 「구역 밖」 그룹), 마킹 위치는 마킹 점들의 가운데가 든 구역의 그룹만으로 계산한다
+ *   (구역이 겹치면 작은 구역 우선, 어느 구역에도 없으면 구역 밖 그룹). 구역이 없는 도면은 예전과 똑같다.
+ *   구역 floorLabel(층 이름)은 저장만 — 위치/층 글자는 아직 안 바꿈.
  */
 (function (root) {
     'use strict';
@@ -75,7 +79,7 @@
     function createGroup(axis, opts) {
         const o = opts || {};
         const ax = axis === 'row' ? 'row' : 'col';
-        return {
+        const out = {
             id: o.id || uid('gg'),
             axis: ax,
             prefix: o.prefix != null ? String(o.prefix) : DEFAULT_PREFIX[ax],
@@ -84,6 +88,114 @@
             band: Math.max(0, num(o.band, 0)),
             lines: Array.isArray(o.lines) ? o.lines : []
         };
+        if (o.zoneId) out.zoneId = String(o.zoneId); // 구역에 속한 그룹만(없으면 키 자체가 없음)
+        return out;
+    }
+
+    // ---- 구역(한 도면에 여러 층) ----
+    function rectFromPoints(a, b) {
+        return {
+            x1: Math.min(a.x, b.x),
+            y1: Math.min(a.y, b.y),
+            x2: Math.max(a.x, b.x),
+            y2: Math.max(a.y, b.y)
+        };
+    }
+
+    function normalizeZone(z) {
+        if (!z || typeof z !== 'object') return null;
+        const r = z.rect && typeof z.rect === 'object' ? z.rect : z;
+        const xs = [num(r.x1, NaN), num(r.x2, NaN)];
+        const ys = [num(r.y1, NaN), num(r.y2, NaN)];
+        if (![...xs, ...ys].every(Number.isFinite)) return null;
+        const rect = rectFromPoints({ x: xs[0], y: ys[0] }, { x: xs[1], y: ys[1] });
+        if (rect.x2 - rect.x1 < 1 || rect.y2 - rect.y1 < 1) return null;
+        const out = {
+            id: z.id ? String(z.id) : uid('gz'),
+            name: String(z.name == null ? '' : z.name).trim() || '구역',
+            rect
+        };
+        const fl = String(z.floorLabel == null ? '' : z.floorLabel).trim();
+        if (fl) out.floorLabel = fl;
+        return out;
+    }
+
+    function createZone(opts) {
+        const o = opts || {};
+        return normalizeZone({ id: o.id || uid('gz'), name: o.name, floorLabel: o.floorLabel, rect: o.rect });
+    }
+
+    function findZone(grid, id) {
+        if (!id) return null;
+        return ((grid && grid.zones) || []).find((z) => z.id === id) || null;
+    }
+
+    function rectContains(r, p) {
+        return p.x >= r.x1 && p.x <= r.x2 && p.y >= r.y1 && p.y <= r.y2;
+    }
+
+    /** 점이 든 구역(겹치면 넓이가 작은 구역) — 없으면 null */
+    function zoneAt(grid, p) {
+        let best = null;
+        let bestA = Infinity;
+        ((grid && grid.zones) || []).forEach((z) => {
+            if (!z || !z.rect || !rectContains(z.rect, p)) return;
+            const a = (z.rect.x2 - z.rect.x1) * (z.rect.y2 - z.rect.y1);
+            if (a < bestA) {
+                best = z;
+                bestA = a;
+            }
+        });
+        return best;
+    }
+
+    /** 마킹 점들(핀은 화살표 끝 한 점, 영역은 네 모서리)의 가운데가 든 구역 */
+    function zoneForPoints(grid, pointsImg) {
+        const pts = sanitizePts(pointsImg);
+        if (!pts.length) return null;
+        const c = pts.reduce((a, p) => ({ x: a.x + p.x / pts.length, y: a.y + p.y / pts.length }), { x: 0, y: 0 });
+        return zoneAt(grid, c);
+    }
+
+    /** 구역이 있으면: 점들이 든 구역의 그룹만(구역 밖이면 구역 없는 그룹만) 남긴 grid */
+    function restrictGridToZone(grid, pointsImg) {
+        if (!grid || !(grid.zones || []).length) return grid;
+        const z = zoneForPoints(grid, pointsImg);
+        const zid = z ? z.id : null;
+        return Object.assign({}, grid, { groups: (grid.groups || []).filter((gr) => (gr.zoneId || null) === zid) });
+    }
+
+    /** 구역 모서리(corner 0~3: 왼위·오른위·오른아래·왼아래) 또는 테두리(corner null) 누름 */
+    function hitZone(grid, p, tol) {
+        let best = null;
+        ((grid && grid.zones) || []).forEach((z) => {
+            const r = z.rect;
+            [[r.x1, r.y1], [r.x2, r.y1], [r.x2, r.y2], [r.x1, r.y2]].forEach(([x, y], i) => {
+                const d = Math.hypot(p.x - x, p.y - y);
+                if (d <= tol * 1.5 && (!best || best.corner == null || d < best.dist)) best = { zoneId: z.id, corner: i, dist: d };
+            });
+            const inX = p.x >= r.x1 - tol && p.x <= r.x2 + tol;
+            const inY = p.y >= r.y1 - tol && p.y <= r.y2 + tol;
+            const de = Math.min(
+                inY ? Math.abs(p.x - r.x1) : Infinity,
+                inY ? Math.abs(p.x - r.x2) : Infinity,
+                inX ? Math.abs(p.y - r.y1) : Infinity,
+                inX ? Math.abs(p.y - r.y2) : Infinity
+            );
+            if (de <= tol && (!best || (best.corner == null && de < best.dist))) best = { zoneId: z.id, corner: null, dist: de };
+        });
+        return best;
+    }
+
+    function moveRect(r, dx, dy) {
+        return { x1: r.x1 + dx, y1: r.y1 + dy, x2: r.x2 + dx, y2: r.y2 + dy };
+    }
+
+    /** 모서리 하나를 p로(맞은편 모서리는 그대로) */
+    function resizeRectCorner(r, corner, p) {
+        const cs = [{ x: r.x1, y: r.y1 }, { x: r.x2, y: r.y1 }, { x: r.x2, y: r.y2 }, { x: r.x1, y: r.y2 }];
+        const opp = cs[(((Number(corner) || 0) % 4) + 6) % 4];
+        return rectFromPoints(opp, p);
     }
 
     /** seq 없는 선(예전 실험 데이터 등)은 저장된 배열 순서(= 그은 순서)대로 뒤에 붙임 */
@@ -123,8 +235,11 @@
 
     function normalizeGrid(raw) {
         const g = raw && typeof raw === 'object' ? raw : {};
+        const zones = (Array.isArray(g.zones) ? g.zones : []).map(normalizeZone).filter(Boolean);
+        const zoneIds = new Set(zones.map((z) => z.id));
         const groups = (Array.isArray(g.groups) ? g.groups : []).map((gr) => {
             const out = createGroup(gr && gr.axis, gr || {});
+            if (out.zoneId && !zoneIds.has(out.zoneId)) delete out.zoneId; // 없는 구역 → 구역 밖 그룹
             out.lines = (Array.isArray(gr && gr.lines) ? gr.lines : []).map((ln) => {
                 const pts = sanitizePts(ln && ln.pts);
                 if (pts.length < 2) return null;
@@ -143,6 +258,7 @@
             autoLocation: g.autoLocation !== false,
             groups
         };
+        if (zones.length) out.zones = zones; // 구역 없는 도면은 예전 모양 그대로
         // 도면 크기(선 좌표 기준) · 다른 층에서 복사해 와서 아직 이 층 도면 크기에 못 맞춘 원본 크기 — 있을 때만(Firestore에 undefined 금지)
         const rw = num(g.refW, 0);
         const rh = num(g.refH, 0);
@@ -412,7 +528,7 @@
     }
 
     /** 계산 방식이 바뀌면 올림 → 화면이 저장된 행·열 위치를 다시 계산함 */
-    const GRID_LOC_ALGO = 5; // 4: 끝 선 바깥 ~X1 / X7~, 5: 열/행 구분 「/」
+    const GRID_LOC_ALGO = 6; // 4: 끝 선 바깥 ~X1 / X7~, 5: 열/행 구분 「/」, 6: 구역(한 도면 여러 층)마다 따로
 
     function roundPts(pts) {
         return pts.map((p) => `${Math.round(p.x * 10)},${Math.round(p.y * 10)}`).join(';');
@@ -422,8 +538,10 @@
     function gridSignature(rawGrid) {
         const grid = normalizeGrid(rawGrid);
         const parts = [];
+        const zones = grid.zones || [];
+        zones.forEach((z) => parts.push(`z|${roundPts([{ x: z.rect.x1, y: z.rect.y1 }, { x: z.rect.x2, y: z.rect.y2 }])}`));
         (grid.groups || []).forEach((g) => {
-            parts.push(`g${g.axis}|${g.prefix}|${g.start}|${g.band}`);
+            parts.push(`g${g.axis}|${g.prefix}|${g.start}|${g.band}${g.zoneId ? `|z${zones.findIndex((z) => z.id === g.zoneId)}` : ''}`);
             (g.lines || []).forEach((ln) => {
                 parts.push(`l${ln.seq}|${ln.label || ''}|${ln.band != null ? ln.band : ''}|${roundPts(ln.pts)}`);
             });
@@ -477,9 +595,10 @@
      *   — 거더면 폭 먼저, 어느 폭에도 안 들 때만 가까운 선 하나 + 다른 축 범위. 그 밖의 부재(슬래브·보(B) 포함)는 보통 폭 규칙
      */
     function computeGridLocation(rawGrid, pointsImg, ctx, opts) {
-        const grid = normalizeGrid(rawGrid);
         const pts = sanitizePts(pointsImg);
         if (!pts.length) return '';
+        // 구역이 있으면 마킹이 든 구역의 선만(구역 밖이면 구역 없는 선만) — 번호도 구역마다 따로
+        const grid = restrictGridToZone(normalizeGrid(rawGrid), pts);
         const c = { rot: num(ctx && ctx.rot, 0), w: num(ctx && ctx.w, 4000), h: num(ctx && ctx.h, 3000) };
         const o = opts || {};
         const girder = o.girder != null ? !!o.girder : (o.forceRange == null && isGirderMember(o.member));
@@ -554,17 +673,21 @@
 
     // ---- 편집 ----
     /** 점 p를 지나는 선(화면 각도 angle)을 도면 경계까지 */
-    function makeLineThrough(pImg, axis, angleDeg, ctx) {
+    /** bounds(선택): 구역 사각형 { x1, y1, x2, y2 } — 주면 도면 경계 대신 구역 경계까지 */
+    function makeLineThrough(pImg, axis, angleDeg, ctx, bounds) {
         const dDisp = dirFromAngle(axis, angleDeg);
         const d = norm(vecToImage(dDisp, ctx.rot));
-        const w = ctx.w;
-        const h = ctx.h;
+        const bx = bounds && [bounds.x1, bounds.y1, bounds.x2, bounds.y2].every((v) => Number.isFinite(Number(v)))
+            ? { x1: Number(bounds.x1), y1: Number(bounds.y1), x2: Number(bounds.x2), y2: Number(bounds.y2) }
+            : { x1: 0, y1: 0, x2: ctx.w, y2: ctx.h };
+        const w = bx.x2 - bx.x1;
+        const h = bx.y2 - bx.y1;
         let t0 = -Infinity;
         let t1 = Infinity;
-        [[pImg.x, d.x, w], [pImg.y, d.y, h]].forEach(([p0, dv, lim]) => {
+        [[pImg.x, d.x, bx.x1, bx.x2], [pImg.y, d.y, bx.y1, bx.y2]].forEach(([p0, dv, lo, hi]) => {
             if (Math.abs(dv) < 1e-9) return;
-            const a = (0 - p0) / dv;
-            const b = (lim - p0) / dv;
+            const a = (lo - p0) / dv;
+            const b = (hi - p0) / dv;
             t0 = Math.max(t0, Math.min(a, b));
             t1 = Math.min(t1, Math.max(a, b));
         });
@@ -707,6 +830,15 @@
         if (Math.abs(sx - 1) < 1e-9 && Math.abs(sy - 1) < 1e-9) return false;
         const sb = Math.min(dw, dh) / Math.min(sw, sh);
         const srcDefault = defaultBand(sw, sh);
+        (grid.zones || []).forEach((z) => {
+            if (!z || !z.rect) return;
+            z.rect = {
+                x1: roundTo(z.rect.x1 * sx, 2),
+                y1: roundTo(z.rect.y1 * sy, 2),
+                x2: roundTo(z.rect.x2 * sx, 2),
+                y2: roundTo(z.rect.y2 * sy, 2)
+            };
+        });
         (grid.groups || []).forEach((g) => {
             (g.lines || []).forEach((ln) => {
                 ln.pts = sanitizePts(ln.pts).map((p) => ({ x: roundTo(p.x * sx, 2), y: roundTo(p.y * sy, 2) }));
@@ -729,12 +861,20 @@
     function cloneGridForFloor(rawSrc, o) {
         const opt = o || {};
         const src = normalizeGrid(rawSrc);
+        // 구역도 새 id로(그룹의 zoneId는 새 구역 id로 이어 줌)
+        const zoneMap = {};
+        const zones = (src.zones || []).map((z) => {
+            const nz = { id: uid('gz'), name: z.name, rect: { x1: z.rect.x1, y1: z.rect.y1, x2: z.rect.x2, y2: z.rect.y2 } };
+            if (z.floorLabel) nz.floorLabel = z.floorLabel;
+            zoneMap[z.id] = nz.id;
+            return nz;
+        });
         const out = {
             version: 1,
             visible: src.visible,
             autoLocation: src.autoLocation,
             groups: src.groups.map((g) => {
-                const ng = createGroup(g.axis, { prefix: g.prefix, start: g.start, angle: g.angle, band: g.band });
+                const ng = createGroup(g.axis, { prefix: g.prefix, start: g.start, angle: g.angle, band: g.band, zoneId: g.zoneId ? zoneMap[g.zoneId] : '' });
                 ng.lines = (g.lines || []).map((ln) => {
                     const line = { id: uid('gl'), pts: ln.pts.map((p) => ({ x: p.x, y: p.y })) };
                     if (Number.isFinite(ln.seq)) line.seq = ln.seq;
@@ -745,6 +885,7 @@
                 return ng;
             })
         };
+        if (zones.length) out.zones = zones;
         // 원본이 아직 자기 도면 크기에 못 맞춘 복사본이면 그 좌표 기준은 pendingScale 크기
         const sw = src.pendingScale ? src.pendingScale.w : num(opt.srcW, 0);
         const sh = src.pendingScale ? src.pendingScale.h : num(opt.srcH, 0);
@@ -812,7 +953,16 @@
         countGridLines,
         scaleGridInPlace,
         cloneGridForFloor,
-        resolvePendingScale
+        resolvePendingScale,
+        rectFromPoints,
+        createZone,
+        findZone,
+        zoneAt,
+        zoneForPoints,
+        restrictGridToZone,
+        hitZone,
+        moveRect,
+        resizeRectCorner
     };
     root.BSA = root.BSA || {};
     root.BSA.gridLines = api;

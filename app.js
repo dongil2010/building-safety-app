@@ -33184,6 +33184,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 sel: null,
                 activeGroup: { col: null, row: null },
                 editGroupId: null,
+                zoneId: null, // 고른 구역(null = 구역 밖)
+                zoneRedrawId: null, // 「범위 다시 그리기」 중인 구역
                 drag: null,
                 bendArmed: false,
                 lastAddAt: 0,
@@ -33232,12 +33234,18 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             ge.renderedKey = key;
             ge.sel = null;
             ge.bendArmed = false;
+            ge.zoneId = null;
+            ge.zoneRedrawId = null;
             setTimeout(renderGridPanel, 0);
         }
         const grid = getCurrentFloorGrid(false);
         // 2026-09-28: 행·열 설정 중에만 보임 — 설정이 끝나면 선·이름·폭 모두 숨김(저장된 visible 값은 무시).
         // 위치 자동 입력은 숨겨져 있어도 계속 동작한다.
-        if (!editing || !grid || !gridHasLines(grid)) return;
+        if (!editing) return;
+        // 구역 사각형(설정 중에만) — 선보다 먼저(아래)
+        const zoneDraft = (ge.drag && ge.drag.kind === 'zoneNew' && ge.drag.moved && ge.drag.cur) ? ge.drag : null;
+        if (zoneDraft || (grid && (grid.zones || []).length)) drawGridZones(ctx, grid, zoneDraft);
+        if (!grid || !gridHasLines(grid)) return;
         const gctx = { rot: state.rotationAngle || 0, w: imgW, h: imgH };
         const s = state.view.scale || 1;
         const rotRad = (gctx.rot * Math.PI) / 180;
@@ -33332,17 +33340,24 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         ge.sel = { groupId: f.group.id, lineId, vertexIndex: vertexIndex == null ? null : vertexIndex };
         ge.activeGroup[f.group.axis] = f.group.id;
         ge.editGroupId = f.group.id;
+        ge.zoneId = f.group.zoneId || null;
         return f;
     }
 
-    function gridEnsureGroup(grid, axis) {
+    /** 이 축·이 구역(zoneId, null = 구역 밖)의 그룹 — 없으면 새로(구역마다 번호 따로: 머리글 기본값·시작 1) */
+    function gridEnsureGroup(grid, axis, zoneId) {
         const G = gridLib();
         const ge = gridEditState();
+        const zid = zoneId || null;
+        const inZone = (x) => (x.zoneId || null) === zid;
         let g = gridFindGroup(grid, ge.activeGroup[axis]);
-        if (!g || g.axis !== axis) g = (grid.groups || []).find((x) => x.axis === axis) || null;
+        if (!g || g.axis !== axis || !inZone(g)) {
+            const eg = gridFindGroup(grid, ge.editGroupId);
+            g = (eg && eg.axis === axis && inZone(eg)) ? eg : ((grid.groups || []).find((x) => x.axis === axis && inZone(x)) || null);
+        }
         if (!g) {
             const c = getGridCtx();
-            g = G.createGroup(axis, { band: G.defaultBand(c.w, c.h) });
+            g = G.createGroup(axis, { band: G.defaultBand(c.w, c.h), zoneId: zid });
             grid.groups.push(g);
         }
         ge.activeGroup[axis] = g.id;
@@ -33353,8 +33368,11 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     function gridAddLineAt(axis, p) {
         const G = gridLib();
         const grid = getCurrentFloorGrid(true);
-        const g = gridEnsureGroup(grid, axis);
-        const ln = G.makeLineThrough(p, axis, g.angle, getGridCtx());
+        // 선은 누른 자리의 구역에 속함(구역 경계까지만 그음). 구역 밖이면 구역 없는 선
+        const zone = G.zoneAt(grid, p);
+        gridEditState().zoneId = zone ? zone.id : null;
+        const g = gridEnsureGroup(grid, axis, zone ? zone.id : null);
+        const ln = G.makeLineThrough(p, axis, g.angle, getGridCtx(), zone ? zone.rect : null);
         G.addLineToGroup(g, ln); // 번호 = 그은 순서(먼저 그은 선이 작은 번호)
         gridSelectLine(grid, ln.id, null);
         gridEditState().lastAddAt = Date.now();
@@ -33384,6 +33402,28 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             renderGridPanel();
         }
         const hit = G.hitTest(grid, p, tol);
+        // 구역: 「선택·이동」·「구역」 도구에서만 모서리(크기)·테두리(옮기기)를 끔. 선 꼭짓점이 먼저
+        const zh = (ge.tool === 'select' || ge.tool === 'zone') ? G.hitZone(grid, p, tol) : null;
+        if (zh && (zh.corner != null ? !(hit && hit.vertexIndex != null) : !hit)) {
+            const z = G.findZone(grid, zh.zoneId);
+            if (z) {
+                ge.zoneId = z.id;
+                ge.sel = null;
+                gridStartDrag({
+                    kind: zh.corner != null ? 'zoneCorner' : 'zoneMove',
+                    zoneId: z.id,
+                    corner: zh.corner,
+                    orig: { x1: z.rect.x1, y1: z.rect.y1, x2: z.rect.x2, y2: z.rect.y2 },
+                    start: p,
+                    clientX,
+                    clientY,
+                    isTouch
+                });
+                renderGridPanel();
+                drawCanvas();
+                return;
+            }
+        }
         if (hit) {
             const f = gridSelectLine(grid, hit.lineId, hit.vertexIndex);
             gridStartDrag({
@@ -33398,6 +33438,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             });
             renderGridPanel();
             drawCanvas();
+            return;
+        }
+        if (ge.tool === 'zone') {
+            gridStartDrag({ kind: 'zoneNew', start: gridSnap(p), cur: null, clientX, clientY, isTouch });
             return;
         }
         gridStartDrag({ kind: 'empty', start: p, clientX, clientY, isTouch, offX: state.view.offsetX, offY: state.view.offsetY });
@@ -33416,6 +33460,17 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             state.view.offsetY = d.offY + (clientY - d.clientY);
             drawCanvas();
             if (typeof updateMapZoomOverlay === 'function') updateMapZoomOverlay();
+            return;
+        }
+        if (d.kind === 'zoneNew' || d.kind === 'zoneCorner' || d.kind === 'zoneMove') {
+            const zp = gridSnap(clientToImgCoords(clientX, clientY));
+            if (d.kind === 'zoneNew') {
+                d.cur = zp;
+            } else {
+                const z = G.findZone(getCurrentFloorGrid(true), d.zoneId);
+                if (z) z.rect = d.kind === 'zoneMove' ? G.moveRect(d.orig, zp.x - d.start.x, zp.y - d.start.y) : G.resizeRectCorner(d.orig, d.corner, zp);
+            }
+            drawCanvas();
             return;
         }
         const grid = getCurrentFloorGrid(true);
@@ -33451,9 +33506,23 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 gridAddLineAt(ge.tool, gridSnap(d.start));
             } else {
                 ge.sel = null;
+                if (ge.tool === 'select') {
+                    const zz = gridLib().zoneAt(getCurrentFloorGrid(true), d.start);
+                    ge.zoneId = zz ? zz.id : null; // 빈 곳 누름 = 그 자리 구역 고르기
+                }
                 renderGridPanel();
                 drawCanvas();
             }
+            return;
+        }
+        if (d.kind === 'zoneNew') {
+            finishGridZoneDraw(d);
+            return;
+        }
+        if ((d.kind === 'zoneCorner' || d.kind === 'zoneMove') && !d.moved) {
+            ge.zoneId = d.zoneId;
+            renderGridPanel();
+            drawCanvas();
             return;
         }
         if (d.moved) gridChanged();
@@ -33578,6 +33647,18 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const grid = getCurrentFloorGrid(false) || G.normalizeGrid({});
         const gctx = getGridCtx();
         const groups = grid.groups || [];
+        const zones = grid.zones || [];
+        if (ge.zoneId && !zones.some((z) => z.id === ge.zoneId)) ge.zoneId = null;
+        const ez = ge.zoneId ? zones.find((z) => z.id === ge.zoneId) : null;
+        const zoneName = (z) => `${z.name}${z.floorLabel ? ` · ${z.floorLabel}` : ''}`;
+        const zoneTag = (g) => {
+            const z = g.zoneId ? zones.find((x) => x.id === g.zoneId) : null;
+            return z ? `[${z.name}] ` : (zones.length ? '[구역 밖] ' : '');
+        };
+        const zoneOpts = `<option value="">구역 밖 (구역 없는 선)</option>` + zones.map((z) => {
+            const n = groups.filter((g) => g.zoneId === z.id).reduce((s, g) => s + (g.lines || []).length, 0);
+            return `<option value="${gridEsc(z.id)}"${ez && ez.id === z.id ? ' selected' : ''}>${gridEsc(zoneName(z))} (선 ${n}개)</option>`;
+        }).join('');
         let eg = gridFindGroup(grid, ge.editGroupId) || groups[0] || null;
         if (eg) ge.editGroupId = eg.id;
         const selF = ge.sel ? G.findLine(grid, ge.sel.lineId) : null;
@@ -33594,9 +33675,13 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             const od = G.orderedLines(g, gctx);
             const names = od.items.length > 1 ? `${g.prefix}${g.start}…${g.prefix}${g.start + od.items.length - 1}` : `${g.prefix}${g.start}`;
             const ang = Math.abs(g.angle) > 0.01 ? ` · ${g.angle}°` : '';
-            return `<option value="${gridEsc(g.id)}"${eg && g.id === eg.id ? ' selected' : ''}>${axisKo(g.axis)} ${gridEsc(names)} (${od.items.length}개${ang})</option>`;
+            return `<option value="${gridEsc(g.id)}"${eg && g.id === eg.id ? ' selected' : ''}>${gridEsc(zoneTag(g))}${axisKo(g.axis)} ${gridEsc(names)} (${od.items.length}개${ang})</option>`;
         }).join('');
-        const hint = ge.bendArmed
+        const hint = ge.tool === 'zone'
+            ? (ge.zoneRedrawId
+                ? '구역의 새 범위를 도면에서 사각형으로 끌어 그리세요.'
+                : '도면에서 사각형을 끌어 구역을 만드세요(예: 한 장에 그린 1층·2층). 구역마다 선 번호가 따로 매겨집니다. 구역 모서리를 끌면 크기, 테두리를 끌면 이동.')
+            : ge.bendArmed
             ? '꺾을 자리를 선 위에서 누르세요. 생긴 점을 끌어 모양을 맞춥니다.'
             : (ge.tool === 'select'
                 ? '선을 눌러 고르고 끌어서 옮기세요. 끝점을 끌면 기울어집니다. 빈 곳을 끌면 화면 이동.'
@@ -33618,8 +33703,24 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     <button type="button" data-tool="col" class="${ge.tool === 'col' ? 'active' : ''}">│ 열 추가</button>
                     <button type="button" data-tool="row" class="${ge.tool === 'row' ? 'active' : ''}">─ 행 추가</button>
                     <button type="button" data-tool="select" class="${ge.tool === 'select' ? 'active' : ''}">✥ 선택·이동</button>
+                    <button type="button" data-tool="zone" class="${ge.tool === 'zone' ? 'active' : ''}" title="한 도면에 여러 층이 있을 때 — 사각형 구역마다 번호를 따로">▭ 구역</button>
                 </div>
                 <div class="grid-panel-hint">${hint}</div>
+                <div class="grid-panel-sec">
+                    <div class="grid-panel-row"><b>구역</b> <small class="grid-panel-muted">한 도면에 여러 층 — 구역마다 번호 따로</small></div>
+                    <div class="grid-panel-row">
+                        <select data-f="zone" title="선을 그으면 누른 자리의 구역에 들어갑니다">${zoneOpts}</select>
+                    </div>
+                    <div class="grid-panel-row">
+                        <button type="button" data-act="zoneAdd">+ 구역 추가</button>
+                        ${ez ? '<button type="button" data-act="zoneRedraw">범위 다시 그리기</button><button type="button" data-act="zoneDel" class="danger">구역 삭제</button>' : ''}
+                    </div>
+                    ${ez ? `
+                    <div class="grid-panel-row">
+                        <label>이름 <input type="text" data-f="zname" value="${gridEsc(ez.name)}" maxlength="20" style="width:80px"></label>
+                        <label>층 <input type="text" data-f="zfloor" value="${gridEsc(ez.floorLabel || '')}" placeholder="예: 2F" maxlength="12" style="width:56px" title="이 구역이 어느 층인지(저장만 — 위치 글자는 아직 안 바뀜)"></label>
+                    </div>` : ''}
+                </div>
                 <div class="grid-panel-sec">
                     <div class="grid-panel-row">
                         <select data-f="group" ${groups.length ? '' : 'disabled'}>${groupOpts || '<option>그룹 없음 — 선을 그으면 생깁니다</option>'}</select>
@@ -33687,6 +33788,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (tool) {
             ge.tool = tool;
             ge.bendArmed = false;
+            ge.zoneRedrawId = null;
             if (tool === 'col' || tool === 'row') {
                 const grid = getCurrentFloorGrid(false);
                 const g = grid && gridFindGroup(grid, ge.activeGroup[tool]);
@@ -33700,15 +33802,37 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (act === 'close') { setGridEditActive(false); return; }
         if (act === 'collapse') { ge.collapsed = !ge.collapsed; renderGridPanel(); return; }
         if (act === 'copyFloors') { openGridCopyModal(); return; }
+        if (act === 'zoneAdd') {
+            ge.tool = 'zone';
+            ge.zoneRedrawId = null;
+            ge.bendArmed = false;
+            renderGridPanel();
+            window.showToast?.('도면에서 구역 사각형을 끌어 그리세요.', 'info', 2200);
+            return;
+        }
         const grid = getCurrentFloorGrid(true);
         const gctx = getGridCtx();
         const eg = gridFindGroup(grid, ge.editGroupId);
         const selF = ge.sel ? G.findLine(grid, ge.sel.lineId) : null;
+        const ez = ge.zoneId ? G.findZone(grid, ge.zoneId) : null;
+        if (act === 'zoneRedraw' && ez) {
+            ge.tool = 'zone';
+            ge.zoneRedrawId = ez.id;
+            ge.bendArmed = false;
+            renderGridPanel();
+            window.showToast?.(`구역 「${ez.name}」의 새 범위를 끌어 그리세요.`, 'info', 2200);
+            return;
+        }
+        if (act === 'zoneDel' && ez) {
+            deleteGridZone(grid, ez);
+            return;
+        }
         if (act === 'addGroup-col' || act === 'addGroup-row') {
             const axis = act === 'addGroup-row' ? 'row' : 'col';
-            const same = grid.groups.filter((g) => g.axis === axis).length;
+            const zid = ez ? ez.id : null; // 고른 구역에 그룹 추가(구역마다 번호 따로)
+            const same = grid.groups.filter((g) => g.axis === axis && (g.zoneId || null) === zid).length;
             const base = G.DEFAULT_PREFIX[axis];
-            const g = G.createGroup(axis, { prefix: same ? `${String.fromCharCode(65 + same)}${base}` : base, band: G.defaultBand(gctx.w, gctx.h) });
+            const g = G.createGroup(axis, { prefix: same ? `${String.fromCharCode(65 + same)}${base}` : base, band: G.defaultBand(gctx.w, gctx.h), zoneId: zid });
             grid.groups.push(g);
             ge.activeGroup[axis] = g.id;
             ge.editGroupId = g.id;
@@ -33783,11 +33907,35 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 const g = gridFindGroup(grid, el.value);
                 if (g) {
                     ge.editGroupId = g.id;
+                    ge.zoneId = g.zoneId || null;
                     ge.activeGroup[g.axis] = g.id;
                     if (ge.tool !== 'select') ge.tool = g.axis;
                 }
                 renderGridPanel();
                 return;
+            }
+            case 'zone': {
+                ge.zoneId = el.value || null;
+                const zg = (grid.groups || []).find((g) => (g.zoneId || null) === ge.zoneId);
+                if (zg) ge.editGroupId = zg.id;
+                ge.sel = null;
+                renderGridPanel();
+                drawCanvas();
+                return;
+            }
+            case 'zname': {
+                const z = G.findZone(grid, ge.zoneId);
+                const v = String(el.value || '').trim();
+                if (z && v) z.name = v;
+                break;
+            }
+            case 'zfloor': {
+                const z = G.findZone(grid, ge.zoneId);
+                const v = String(el.value || '').trim();
+                if (z) {
+                    if (v) z.floorLabel = v; else delete z.floorLabel;
+                }
+                break;
             }
             case 'prefix': if (eg) eg.prefix = String(el.value || '').trim(); break;
             case 'start': if (eg) eg.start = Math.round(numOr(el.value, eg.start)); break;
@@ -34238,6 +34386,121 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             console.warn('[grid-lines] commit', e);
         }
     }
+    // ---- 구역(한 도면에 여러 층, 2026-09-28) ----
+    // 사각형 구역마다 그룹(zoneId)을 따로 두어 번호가 구역마다 새로 시작한다. 계산은 grid-lines.js(restrictGridToZone).
+    function gridHasContent(grid) {
+        return gridHasLines(grid) || !!(grid && (grid.zones || []).length);
+    }
+
+    /** 구역 사각형·이름(설정 중에만). draft: 끌어 그리는 중인 새 사각형 */
+    function drawGridZones(ctx, grid, draft) {
+        const G = gridLib();
+        const ge = gridEditState();
+        const s = state.view.scale || 1;
+        const rotRad = ((state.rotationAngle || 0) * Math.PI) / 180;
+        const drawRect = (r, sel, name) => {
+            const w = r.x2 - r.x1;
+            const h = r.y2 - r.y1;
+            ctx.setLineDash([8 / s, 5 / s]);
+            ctx.lineWidth = (sel ? 2.4 : 1.6) / s;
+            ctx.strokeStyle = sel ? '#7c3aed' : 'rgba(124, 58, 237, 0.75)';
+            ctx.fillStyle = sel ? 'rgba(124, 58, 237, 0.07)' : 'rgba(124, 58, 237, 0.03)';
+            ctx.fillRect(r.x1, r.y1, w, h);
+            ctx.strokeRect(r.x1, r.y1, w, h);
+            ctx.setLineDash([]);
+            if (sel) {
+                const hs = 5 / s;
+                [[r.x1, r.y1], [r.x2, r.y1], [r.x2, r.y2], [r.x1, r.y2]].forEach(([x, y]) => {
+                    ctx.fillStyle = '#ffffff';
+                    ctx.strokeStyle = '#7c3aed';
+                    ctx.lineWidth = 1.4 / s;
+                    ctx.fillRect(x - hs, y - hs, hs * 2, hs * 2);
+                    ctx.strokeRect(x - hs, y - hs, hs * 2, hs * 2);
+                });
+            }
+            if (name) {
+                ctx.save();
+                ctx.translate(r.x1, r.y1);
+                ctx.rotate(-rotRad);
+                const fontPx = 12 / s;
+                ctx.font = `700 ${fontPx}px "Malgun Gothic", sans-serif`;
+                const tw = ctx.measureText(name).width;
+                const pad = 4 / s;
+                ctx.fillStyle = sel ? '#7c3aed' : 'rgba(124, 58, 237, 0.85)';
+                ctx.fillRect(pad, pad, tw + pad * 2, fontPx + pad * 2);
+                ctx.fillStyle = '#ffffff';
+                ctx.textAlign = 'left';
+                ctx.textBaseline = 'top';
+                ctx.fillText(name, pad * 2, pad * 2);
+                ctx.restore();
+            }
+        };
+        ctx.save();
+        ((grid && grid.zones) || []).forEach((z) => {
+            if (z && z.rect) drawRect(z.rect, z.id === ge.zoneId, `${z.name}${z.floorLabel ? ` (${z.floorLabel})` : ''}`);
+        });
+        if (draft && G) drawRect(G.rectFromPoints(draft.start, draft.cur), true, '');
+        ctx.restore();
+    }
+
+    /** 끌어 그린 사각형 → 새 구역(또는 「범위 다시 그리기」 중인 구역의 새 범위) */
+    function finishGridZoneDraw(d) {
+        const G = gridLib();
+        const ge = gridEditState();
+        const s = state.view.scale || 1;
+        if (!G || !d.moved || !d.cur) {
+            drawCanvas();
+            return;
+        }
+        const rect = G.rectFromPoints(d.start, d.cur);
+        if (rect.x2 - rect.x1 < 12 / s || rect.y2 - rect.y1 < 12 / s) {
+            window.showToast?.('구역이 너무 작습니다. 사각형을 크게 끌어 그리세요.', 'info', 2000);
+            drawCanvas();
+            return;
+        }
+        const grid = getCurrentFloorGrid(true);
+        if (!Array.isArray(grid.zones)) grid.zones = [];
+        let z = ge.zoneRedrawId ? G.findZone(grid, ge.zoneRedrawId) : null;
+        if (z) {
+            z.rect = rect;
+            window.showToast?.(`구역 「${z.name}」 범위를 다시 그렸습니다.`, 'success', 2000);
+        } else {
+            z = G.createZone({ name: `구역 ${grid.zones.length + 1}`, rect });
+            grid.zones.push(z);
+            window.showToast?.(`「${z.name}」을 만들었습니다. 이름(예: 1F)을 바꾸고 구역 안에 선을 그으세요 — 번호는 이 구역에서 새로 시작합니다.`, 'success', 3500);
+        }
+        ge.zoneRedrawId = null;
+        ge.zoneId = z.id;
+        ge.tool = 'col';
+        ge.sel = null;
+        const zg = (grid.groups || []).find((g) => g.zoneId === z.id);
+        if (zg) ge.editGroupId = zg.id;
+        gridChanged();
+    }
+
+    /** 구역 삭제 — 안의 선은 같이 지우거나(확인) 구역 밖 선으로 옮김(취소) */
+    function deleteGridZone(grid, z) {
+        const G = gridLib();
+        const ge = gridEditState();
+        const zg = (grid.groups || []).filter((g) => g.zoneId === z.id);
+        const n = zg.reduce((sum, g) => sum + (g.lines || []).length, 0);
+        if (!confirm(`구역 「${z.name}」을(를) 지울까요?`)) return;
+        let delLines = false;
+        if (n) {
+            delLines = confirm(`구역 「${z.name}」 안의 행·열 선 ${n}개도 같이 지울까요?\n\n확인: 선도 삭제\n취소: 선은 남기고 구역 밖 선(구역 없음)으로 옮김`);
+        }
+        if (delLines) grid.groups = grid.groups.filter((g) => g.zoneId !== z.id);
+        else zg.forEach((g) => { delete g.zoneId; });
+        grid.zones = (grid.zones || []).filter((x) => x.id !== z.id);
+        if (!grid.zones.length) delete grid.zones; // 구역 없는 도면과 같은 모양
+        ge.zoneId = null;
+        ge.zoneRedrawId = null;
+        if (ge.sel && !G.findLine(grid, ge.sel.lineId)) ge.sel = null;
+        if (ge.editGroupId && !gridFindGroup(grid, ge.editGroupId)) ge.editGroupId = null;
+        gridChanged();
+        window.showToast?.(delLines ? `구역과 선 ${n}개를 지웠습니다.` : (n ? `구역을 지우고 선 ${n}개는 구역 밖 선으로 옮겼습니다.` : '구역을 지웠습니다.'), 'success', 2500);
+    }
+
     // ---- 다른 층으로 복사 (2026-09-28) ----
     // 선 좌표는 이미지 좌표(도면 px, 마킹 x/y와 같은 기준)로 저장된다. 복사할 때 대상 층 도면 크기를 알면(그 층 grid.refW/refH)
     // 가로·세로 비율대로 맞추고, 모르면 좌표를 그대로 두고 pendingScale(원본 도면 크기)을 남겨 그 층을 열어 도면 크기를 알 때 한 번 맞춘다.
@@ -34324,7 +34587,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const bId = state.currentBuildingId;
         const src = getCurrentFloorGrid(false);
         const res = { n: 0, pending: 0 };
-        if (!G || !bId || !gridHasLines(src)) return res;
+        if (!G || !bId || !gridHasContent(src)) return res;
         const sd = getGridSourceDims(src);
         if (!state.floorGridLines || typeof state.floorGridLines !== 'object') state.floorGridLines = {};
         const done = new Set();
@@ -34409,7 +34672,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     function openGridCopyModal() {
         const G = gridLib();
         const src = getCurrentFloorGrid(false);
-        if (!G || !gridHasLines(src)) {
+        if (!G || !gridHasContent(src)) {
             window.showToast?.('먼저 이 층에 행·열 선을 그어 주세요.', 'info', 2000);
             return;
         }
@@ -34425,7 +34688,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const cur = all.find((f) => f && f.floorCode === state.currentFloor);
         const curLabel = (cur && cur.floorLabel) || state.currentFloor;
         body.innerHTML = `
-            <p class="grid-copy-lead">지금 층 <b>${gridEsc(curLabel)}</b>의 행·열 선 ${G.countGridLines(src)}개(그룹 ${(src.groups || []).length}개)를 고른 층에 복사합니다. 머리글·시작 번호·선 이름·폭·번호 순서·자동 입력 설정도 같이 복사하며, 이미 선이 있는 층은 통째로 덮어씁니다.</p>
+            <p class="grid-copy-lead">지금 층 <b>${gridEsc(curLabel)}</b>의 행·열 선 ${G.countGridLines(src)}개(그룹 ${(src.groups || []).length}개${(src.zones || []).length ? ` · 구역 ${src.zones.length}개` : ''})를 고른 층에 복사합니다. 머리글·시작 번호·선 이름·폭·번호 순서·자동 입력 설정도 같이 복사하며, 이미 선이 있는 층은 통째로 덮어씁니다.</p>
             <label class="grid-copy-all"><input type="checkbox" data-gc-all> 전체 선택 <small>(${floors.length}개 층)</small></label>
             <div class="grid-copy-list">${floors.map((f) => `
                 <label class="grid-copy-row">

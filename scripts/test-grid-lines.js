@@ -184,7 +184,7 @@ assert.ok(G.GRID_LOC_ALGO >= 4, '규칙 버전 올림 → 저장된 「외측」
 // ---- 열/행 구분자: '/' (공백 없음) ----
 assert.strictEqual(G.AXIS_SEP, '/');
 assert.ok(!/, /.test(loc(base, [{ x: 1500, y: 1000 }])), '쉼표 안 씀');
-assert.strictEqual(G.GRID_LOC_ALGO, 5, '규칙 버전 5 → 저장된 「X1~X2, Y1~Y2」도 자동 다시 계산');
+assert.ok(G.GRID_LOC_ALGO >= 5, '규칙 버전 5 → 저장된 「X1~X2, Y1~Y2」도 자동 다시 계산');
 
 // ---- 회전된 도면: 번호는 화면 기준 왼→오른 / 위→아래 ----
 // 이미지의 가로선(y=500,1500)은 90° 회전 화면에서 세로선이 된다 → 열로 쓰면 화면 왼쪽부터 X1
@@ -318,7 +318,7 @@ if (fs.existsSync(appPath)) {
     assert.ok(/gridLocAuto/.test(app), '자동 입력 표시');
     // 설정(편집) 중에만 보임 — 저장된 visible 값과 무관, 설정 밖에서는 도면 누르기를 가로채지 않음
     const drawFn = app.slice(app.indexOf('function drawFloorGridOverlay('), app.indexOf('// ---- 편집: 누르기 · 끌기 ----'));
-    assert.ok(drawFn.includes('if (!editing || !grid || !gridHasLines(grid)) return;'), '설정 밖이면 안 그림');
+    assert.ok(drawFn.includes('if (!editing) return;') && drawFn.includes('if (!grid || !gridHasLines(grid)) return;'), '설정 밖이면 안 그림');
     assert.ok(!drawFn.includes('grid.visible'), '저장된 표시 설정은 무시');
     assert.ok(!app.includes('data-f="visible"'), '「편집 끝나도 표시」 체크 없음');
     assert.ok(app.includes('if (window.BSA_gridEdit && window.BSA_gridEdit.active && e.button === 0) {'), '마우스: 설정 중에만');
@@ -562,7 +562,7 @@ if (fs.existsSync(appPath)) {
             saveStateToLocalStorage: () => { cst.saves += 1; }
         };
         vm.createContext(cctx);
-        vm.runInContext(['gridLib', 'getGridFloorKey', 'getCurrentFloorGrid', 'gridHasLines', 'getGridReliableDims', 'getGridSourceDims',
+        vm.runInContext(['gridLib', 'getGridFloorKey', 'getCurrentFloorGrid', 'gridHasLines', 'gridHasContent', 'getGridReliableDims', 'getGridSourceDims',
             'listGridCopyTargetFloors', 'copyCurrentGridToFloors'].map(takeFn).join('\n')
             + '\nthis.cp = { list: listGridCopyTargetFloors, copy: copyCurrentGridToFloors };', cctx);
         const lst = cctx.cp.list();
@@ -590,6 +590,54 @@ if (fs.existsSync(appPath)) {
         assert.deepStrictEqual(f3.pendingScale, { w: 4000, h: 3000 }, '대상 크기 모름 → 원본 크기 기록');
         assert.deepStrictEqual(f3.groups[0].lines[0].pts, [{ x: 1000, y: 0 }, { x: 1000, y: 3000 }], '좌표 그대로');
         assert.ok(!fl.b1_외부, '고르지 않은 층은 안 건드림');
+    }
+
+    // ---- 구역(한 도면에 여러 층): 앱에서 선 긋기 → 누른 자리 구역의 그룹, 구역 경계까지, 번호 새로 ----
+    assert.ok(app.includes('data-tool="zone"') && app.includes('data-act="zoneAdd"') && app.includes('data-act="zoneRedraw"') && app.includes('data-act="zoneDel"'), '구역 도구·버튼');
+    {
+        const delFn = takeFn('deleteGridZone');
+        assert.strictEqual((delFn.match(/confirm\(/g) || []).length, 2, '구역 삭제: 지울지 + 선도 지울지(아니면 구역 밖으로)');
+        assert.ok(delFn.includes('delete g.zoneId;') && delFn.includes('delete grid.zones;'), '선 옮기기 · 구역 없으면 키 삭제');
+        assert.ok(takeFn('drawFloorGridOverlay').includes('drawGridZones(ctx, grid, zoneDraft)'), '구역은 설정 중에만 그림');
+        const zst = { changed: 0 };
+        const zctx = {
+            G,
+            console,
+            window: { BSA: { gridLines: G } },
+            state: {
+                currentBuildingId: 'b1', currentFloor: '1F', rotationAngle: 0,
+                floorGridLines: { b1_1F: { groups: [], zones: [
+                    { id: 'zA', name: '1F', floorLabel: '1F', rect: { x1: 0, y1: 0, x2: 1900, y2: 3000 } },
+                    { id: 'zB', name: '2F', rect: { x1: 2100, y1: 0, x2: 4000, y2: 3000 } }
+                ] } }
+            },
+            getFloorMapStyleKey: (b, f) => `${b}_${f}`,
+            getFloorPlanDisplayDims: () => ({ w: 4000, h: 3000 }),
+            gridChanged: () => { zst.changed += 1; },
+            gridPointerDown() {},
+            gridDblClick() {},
+            gridCancelDrag() {}
+        };
+        vm.createContext(zctx);
+        vm.runInContext(['gridLib', 'gridEditState', 'getGridFloorKey', 'getGridCtx', 'getCurrentFloorGrid', 'gridFindGroup', 'gridSelectLine',
+            'gridEnsureGroup', 'gridAddLineAt'].map(takeFn).join('\n')
+            + '\nthis.z = { add: gridAddLineAt, grid: () => getCurrentFloorGrid(false), ge: () => gridEditState() };', zctx);
+        [[500, 'zA'], [1500, 'zA'], [2500, 'zB'], [3500, 'zB'], [2000, null]].forEach(([x, want]) => {
+            zctx.z.add('col', { x, y: 100 });
+            assert.strictEqual(zctx.z.ge().zoneId, want, `x=${x} → 구역 ${want}`);
+        });
+        zctx.z.add('row', { x: 3000, y: 1000 });
+        const zg = zctx.z.grid();
+        const cols = zg.groups.filter((g) => g.axis === 'col');
+        assert.strictEqual(cols.length, 3, '구역마다 열 그룹 하나 + 구역 밖 하나');
+        assert.deepStrictEqual(cols.map((g) => `${g.zoneId || '-'}:${g.lines.length}`), ['zA:2', 'zB:2', '-:1']);
+        const rowLine = zg.groups.find((g) => g.axis === 'row').lines[0];
+        assert.deepStrictEqual(rowLine.pts.map((q) => [Math.round(q.x), Math.round(q.y)]), [[2100, 1000], [4000, 1000]], '구역 경계까지만 그음');
+        assert.strictEqual(zg.groups.find((g) => g.axis === 'row').zoneId, 'zB');
+        assert.strictEqual(G.computeGridLocation(zg, [{ x: 1000, y: 500 }], ctx0), 'X1~X2', '1F 구역: X1~X2');
+        assert.strictEqual(G.computeGridLocation(zg, [{ x: 3000, y: 500 }], ctx0), 'X1~X2/~Y1', '2F 구역: 번호 새로 X1부터');
+        assert.strictEqual(G.computeGridLocation(zg, [{ x: 3800, y: 1500 }], ctx0), 'X2~/Y1~', '2F 구역 끝 밖: X3로 이어지지 않음');
+        assert.strictEqual(zst.changed, 6);
     }
 }
 
@@ -640,6 +688,77 @@ if (fs.existsSync(appPath)) {
     // Firestore: undefined 값 없음
     const hasUndef = (o) => o && typeof o === 'object' && Object.keys(o).some((k) => o[k] === undefined || hasUndef(o[k]));
     [same, big, pend, unk].forEach((g) => assert.ok(!hasUndef(g), 'undefined 없음'));
+}
+
+// ---- 구역(한 도면에 여러 층): 순수 함수 ----
+{
+    const zoned = G.normalizeGrid({
+        zones: [
+            { id: 'z1', name: '1F', floorLabel: '1F', rect: { x1: 1900, y1: 3000, x2: 0, y2: 0 } }, // 뒤집혀 있어도 정리
+            { id: 'z2', name: '2F', rect: { x1: 2100, y1: 0, x2: 4000, y2: 3000 } },
+            { id: 'z3', name: '빈 구역', rect: { x1: 3000, y1: 2000, x2: 3900, y2: 2900 } },
+            { id: 'bad', name: 'x', rect: { x1: 5, y1: 5, x2: 5, y2: 900 } } // 너비 0 → 버림
+        ],
+        groups: [
+            { axis: 'col', prefix: 'X', start: 1, band: 20, zoneId: 'z1', lines: [vline(500), vline(1500)] },
+            { axis: 'col', prefix: 'X', start: 1, band: 20, zoneId: 'z2', lines: [vline(2500), vline(3500)] },
+            { axis: 'row', prefix: 'Y', start: 1, band: 20, zoneId: 'z2', lines: [hline(1000)] },
+            { axis: 'col', prefix: 'U', start: 1, band: 20, lines: [vline(1950), vline(2050)] },
+            { axis: 'col', prefix: 'Q', start: 1, band: 20, zoneId: 'nope', lines: [vline(10)] } // 없는 구역 → 구역 밖
+        ]
+    });
+    assert.strictEqual(zoned.zones.length, 3, '잘못된 구역은 버림');
+    assert.deepStrictEqual(zoned.zones[0].rect, { x1: 0, y1: 0, x2: 1900, y2: 3000 });
+    assert.strictEqual(zoned.zones[0].floorLabel, '1F', '층 이름 저장');
+    assert.ok(!('floorLabel' in zoned.zones[1]), '층 이름 없으면 키 없음');
+    assert.ok(!('zoneId' in zoned.groups[3]) && !('zoneId' in zoned.groups[4]), '구역 밖 그룹 · 없는 구역 id 정리');
+    assert.strictEqual(loc(zoned, [{ x: 1000, y: 100 }]), 'X1~X2', '1F 구역 선만');
+    assert.strictEqual(loc(zoned, [{ x: 3000, y: 100 }]), 'X1~X2/~Y1', '2F 구역: 번호가 X1부터 다시');
+    assert.strictEqual(loc(zoned, [{ x: 2600, y: 1500 }]), 'X1~X2/Y1~');
+    assert.strictEqual(loc(zoned, [{ x: 3600, y: 100 }]), 'X2~/~Y1', '구역 끝 선 밖 — X3로 이어지지 않음');
+    assert.strictEqual(loc(zoned, [{ x: 2000, y: 100 }]), 'U1~U2', '어느 구역에도 없음 → 구역 없는 선');
+    assert.strictEqual(loc(zoned, [{ x: 1700, y: 100 }, { x: 2300, y: 100 }, { x: 1700, y: 200 }, { x: 2300, y: 200 }]), 'U1~U2', '영역은 가운데 점 기준');
+    assert.strictEqual(loc(zoned, [{ x: 3500, y: 2500 }]), '', '선 없는 구역(작은 구역 우선) → 비움');
+    assert.strictEqual(G.zoneAt(zoned, { x: 3500, y: 2500 }).id, 'z3', '겹치면 작은 구역');
+    assert.strictEqual(G.zoneForPoints(zoned, [{ x: 0, y: 0 }, { x: 1000, y: 1000 }]).id, 'z1');
+    assert.strictEqual(G.computeGridLocation(zoned, [{ x: 2600, y: 1200 }], ctx0, { member: '보(G)' }), 'X1/Y1~', '거더 규칙도 구역 안 선만(가까운 X1 = 100)');
+    // 구역 없는 도면은 예전과 같음
+    assert.ok(!('zones' in G.normalizeGrid({ groups: [] })), '구역 없으면 zones 키 없음');
+    assert.strictEqual(loc(base, [{ x: 1500, y: 1000 }]), 'X1~X2/Y1~Y2');
+    // 지문: 구역 범위·소속이 바뀌면 달라짐
+    const sigZ = G.gridSignature(zoned);
+    const moved = G.normalizeGrid(JSON.parse(JSON.stringify(zoned)));
+    moved.zones[1].rect.x1 = 2200;
+    assert.notStrictEqual(G.gridSignature(moved), sigZ, '구역 범위 → 지문');
+    const unz = G.normalizeGrid(JSON.parse(JSON.stringify(zoned)));
+    delete unz.groups[1].zoneId;
+    assert.notStrictEqual(G.gridSignature(unz), sigZ, '그룹 소속 → 지문');
+    assert.strictEqual(G.GRID_LOC_ALGO, 6, '규칙 버전 6 → 구역 도입 뒤 저장된 값 자동 다시 계산');
+    // 편집 도우미
+    assert.deepStrictEqual(G.hitZone(zoned, { x: 2103, y: 4 }, 8), { zoneId: 'z2', corner: 0, dist: Math.hypot(3, 4) }, '모서리');
+    assert.strictEqual(G.hitZone(zoned, { x: 2104, y: 1500 }, 8).corner, null, '테두리');
+    assert.strictEqual(G.hitZone(zoned, { x: 2600, y: 1500 }, 8), null, '안쪽은 안 잡음');
+    assert.deepStrictEqual(G.resizeRectCorner({ x1: 0, y1: 0, x2: 10, y2: 10 }, 2, { x: 20, y: 30 }), { x1: 0, y1: 0, x2: 20, y2: 30 });
+    assert.deepStrictEqual(G.resizeRectCorner({ x1: 0, y1: 0, x2: 10, y2: 10 }, 0, { x: 15, y: 12 }), { x1: 10, y1: 10, x2: 15, y2: 12 }, '넘어가면 뒤집어 정리');
+    assert.deepStrictEqual(G.moveRect({ x1: 0, y1: 0, x2: 10, y2: 10 }, 5, -2), { x1: 5, y1: -2, x2: 15, y2: 8 });
+    const clipped = G.makeLineThrough({ x: 3000, y: 1000 }, 'row', 0, ctx0, zoned.zones[1].rect);
+    assert.deepStrictEqual(clipped.pts.map((q) => [Math.round(q.x), Math.round(q.y)]), [[2100, 1000], [4000, 1000]], '구역 경계까지');
+    // 다른 층으로 복사: 구역도 새 id·같은 비율로
+    const zc = G.cloneGridForFloor(zoned, { srcW: W, srcH: H, dstW: 2000, dstH: 3000 });
+    assert.strictEqual(zc.zones.length, 3);
+    assert.ok(zc.zones.every((z, i) => z.id !== zoned.zones[i].id), '구역 id 새로');
+    assert.deepStrictEqual(zc.zones[1].rect, { x1: 1050, y1: 0, x2: 2000, y2: 3000 }, '구역도 가로 절반');
+    assert.strictEqual(zc.zones[0].floorLabel, '1F');
+    assert.strictEqual(zc.groups[1].zoneId, zc.zones[1].id, '그룹 소속은 새 구역 id로');
+    assert.ok(!('zoneId' in zc.groups[3]));
+    const zctx2 = { rot: 0, w: 2000, h: 3000 };
+    assert.strictEqual(G.computeGridLocation(zc, [{ x: 1300, y: 500 }], zctx2), loc(zoned, [{ x: 2600, y: 500 }]), '복사한 층에서도 같은 칸');
+    const zp = G.normalizeGrid(JSON.parse(JSON.stringify(G.cloneGridForFloor(zoned, { srcW: W, srcH: H }))));
+    assert.ok(zp.pendingScale && zp.zones.length === 3 && zp.groups[0].zoneId === zp.zones[0].id, '크기 모름: 구역 그대로 + 나중에 맞춤');
+    G.resolvePendingScale(zp, 2000, 3000);
+    assert.deepStrictEqual(zp.zones[1].rect, { x1: 1050, y1: 0, x2: 2000, y2: 3000 }, '열 때 구역도 맞춤');
+    const hasUndef = (o) => o && typeof o === 'object' && Object.keys(o).some((k) => o[k] === undefined || hasUndef(o[k]));
+    [zoned, zc, zp].forEach((g) => assert.ok(!hasUndef(g), 'Firestore: undefined 없음'));
 }
 
 console.log('test-grid-lines: OK');
