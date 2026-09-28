@@ -33873,7 +33873,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
     /**
      * 행·열 선이 있고 자동 입력이 켜져 있으면 칸 이름, 아니면 null(아무것도 안 건드림).
-     * member: 부재 명칭 — 거더/슬래브·보(B) 등 부재별 규칙은 grid-lines.js
+     * member: 부재 명칭 — 거더 규칙은 grid-lines.js(슬래브·보(B) 등은 보통 폭 규칙)
      */
     function computeGridAutoLocationForPoints(pts, member) {
         const G = gridLib();
@@ -34121,7 +34121,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         return (inp && String(inp.value || '').trim()) || (sel && sel.value) || '';
     }
 
-    /** 수정창에서 부재를 바꿨을 때(슬래브·보(B)·거더 등) — 행·열 위치 표시만 다시 계산(저장 때 결함에 반영) */
+    /** 수정창에서 부재를 바꿨을 때(거더 ↔ 그 밖) — 행·열 위치 표시만 다시 계산(저장 때 결함에 반영) */
     function refreshGridAutoLocationInModal() {
         const pts = window._gridModalPts;
         if (!pts || !pts.length) return;

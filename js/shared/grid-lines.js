@@ -13,8 +13,7 @@
  *   (그룹마다 머리글·시작 번호·방향·기본 폭).
  * - 폭(band): 선에서 수직 거리 ≤ 폭/2 안이면 그 선 하나(X2), 아니면 이웃 두 선 사이(X1~X2).
  * - 바깥: 맨 끝 선 밖이면 「X1 외측」.
- * - 부재에 따라(슬래브·보(B)·철골보(B)·빔 — 보통 한 선 위에 안 놓임) 폭을 무시하고 늘 「X1~X2」 범위로 쓴다.
- *   선 폭 안이면 점이 실제로 있는 쪽 칸, 선 위에 딱 걸치면 번호가 작은 쪽 칸(X2 위 → X1~X2, 첫 선이면 X1~X2).
+ * - 슬래브·보(B)·철골보(B)·빔도 보통 폭 규칙(폭 안이면 X2) — 2026-09-28 「늘 범위」 규칙은 없앰.
  * - 거더(보(G)·철골보(G)·거더·철골거더·큰보): 먼저 보통 폭 규칙. 한 축이라도 폭 안이면 보통 규칙 그대로.
  *   어느 축의 폭에도 안 들면 선 하나에 붙인다: 가장 가까운 열 선과 행 선까지 거리를 재서
  *   더 가까운 축은 선 이름 하나, 다른 축은 늘 범위(X2, Y1~Y2 / X1~X3, Y3). 같으면 열(X) 우선.
@@ -27,17 +26,6 @@
 
     const AXES = ['col', 'row'];
     const DEFAULT_PREFIX = { col: 'X', row: 'Y' };
-
-    /**
-     * 늘 범위로 쓸 부재 — 목록만 고치면 된다(나중에 설정으로 뺄 수 있게 한곳에 둠).
-     * 이름은 공백을 빼고 비교. 접합부는 항상 제외.
-     */
-    const RANGE_ONLY_MEMBER_RULES = {
-        exclude: ['접합부'],
-        contains: ['슬래브', '슬라브', 'SLAB'],
-        endsWith: ['(B)', '빔', 'BEAM'],
-        exact: ['작은보']
-    };
 
     /** 거더 — 가까운 열/행 선 하나에 붙임(다른 축은 범위). 접합부는 제외 */
     const GIRDER_MEMBER_RULES = {
@@ -58,16 +46,6 @@
 
     function isGirderMember(name, rules) {
         return matchMemberRules(name, rules || GIRDER_MEMBER_RULES);
-    }
-
-    function isRangeOnlyMember(name, rules) {
-        const r = rules || RANGE_ONLY_MEMBER_RULES;
-        const n = String(name == null ? '' : name).replace(/\s+/g, '').toUpperCase();
-        if (!n) return false;
-        if ((r.exclude || []).some((k) => n.includes(k.toUpperCase()))) return false;
-        if ((r.contains || []).some((k) => n.includes(k.toUpperCase()))) return true;
-        if ((r.endsWith || []).some((k) => n.endsWith(k.toUpperCase()))) return true;
-        return (r.exact || []).some((k) => n === k.toUpperCase());
     }
 
     function num(v, d) {
@@ -322,7 +300,7 @@
         sds.forEach((sd, i) => { if (Math.abs(sd) < Math.abs(sds[nearestIdx])) nearestIdx = i; });
         const nearest = Math.abs(sds[nearestIdx]);
         if (onIdx >= 0 && forceRange && n > 1) {
-            // 범위 전용 부재가 선 위에 딱 걸침 → 이웃 칸 중 반대편 선 번호가 더 작은 쪽(이웃이 하나면 그쪽)
+            // 늘 범위(forceRange — 거더의 다른 축)인데 선 위에 딱 걸침 → 이웃 칸 중 반대편 선 번호가 더 작은 쪽(이웃이 하나면 그쪽)
             const a = onIdx - 1;
             const b = onIdx + 1;
             let side;
@@ -440,8 +418,8 @@
 
     /**
      * 마킹 점(들) → 「X1~X2, Y1~Y2」. ctx: { rot, w, h }
-     * opts: { member: 부재 명칭 } 또는 { forceRange: true } / { girder: true }
-     *   — 거더면 가까운 선 하나 + 다른 축 범위, 범위 전용 부재면 폭 무시
+     * opts: { member: 부재 명칭 } 또는 { girder: true } / { forceRange: true }(폭 무시·늘 범위 — 거더 규칙 안에서만 씀)
+     *   — 거더면 폭 먼저, 어느 폭에도 안 들 때만 가까운 선 하나 + 다른 축 범위. 그 밖의 부재(슬래브·보(B) 포함)는 보통 폭 규칙
      */
     function computeGridLocation(rawGrid, pointsImg, ctx, opts) {
         const grid = normalizeGrid(rawGrid);
@@ -462,7 +440,7 @@
             if (girderInBand) return AXES.map((ax) => normal[ax]).filter(Boolean).join(', ');
             return girderLocation(grid, pts, c);
         }
-        const lo = { forceRange: o.forceRange != null ? !!o.forceRange : isRangeOnlyMember(o.member) };
+        const lo = { forceRange: !!o.forceRange };
         return AXES.map((ax) => locateAxis(grid, ax, pts, c, lo)).filter(Boolean).join(', ');
     }
 
@@ -650,8 +628,6 @@
 
     const api = {
         DEFAULT_PREFIX,
-        RANGE_ONLY_MEMBER_RULES,
-        isRangeOnlyMember,
         GIRDER_MEMBER_RULES,
         isGirderMember,
         defaultBand,

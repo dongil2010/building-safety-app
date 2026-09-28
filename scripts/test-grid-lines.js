@@ -89,11 +89,12 @@ assert.strictEqual(G.orderedLines(gAdd, ctx0).items.find((it) => it.line === mv)
 G.renumberBySpatialOrder(placed.groups[0], ctx0);
 assert.deepStrictEqual(G.orderedLines(placed.groups[0], ctx0).items.map((it) => it.name), ['X1', 'X2', 'X3'], '다시 매기기');
 assert.deepStrictEqual(placed.groups[0].lines.map((l) => l.pts[0].x), [1000, 2000, 3000], '배열도 번호 순서로');
-// 범위 전용 부재가 선 위: 이웃 칸 중 반대편 선 번호가 작은 쪽
+// 늘 범위(forceRange — 거더 다른 축에서 씀)인데 선 위: 이웃 칸 중 반대편 선 번호가 작은 쪽
 const onA = grid([G.createGroup('col', { lines: [vline(2000), vline(1000), vline(3000)] })]);
-assert.strictEqual(G.computeGridLocation(onA, [{ x: 2000, y: 9 }], ctx0, { member: '슬래브' }), 'X1~X2', 'X1 위 → 이웃 X2(1000)·X3(3000) 중 X2 쪽');
+assert.strictEqual(G.computeGridLocation(onA, [{ x: 2000, y: 9 }], ctx0, { forceRange: true }), 'X1~X2', 'X1 위 → 이웃 X2(1000)·X3(3000) 중 X2 쪽');
 const onB = grid([G.createGroup('col', { lines: [vline(1000), vline(3000), vline(2000)] })]);
-assert.strictEqual(G.computeGridLocation(onB, [{ x: 2000, y: 9 }], ctx0, { member: '보(B)' }), 'X1~X3', 'X3 위 → 이웃 X1·X2 중 X1 쪽');
+assert.strictEqual(G.computeGridLocation(onB, [{ x: 2000, y: 9 }], ctx0, { forceRange: true }), 'X1~X3', 'X3 위 → 이웃 X1·X2 중 X1 쪽');
+assert.strictEqual(G.computeGridLocation(onB, [{ x: 2000, y: 9 }], ctx0, { member: '슬래브' }), 'X3', '슬래브도 선 위(폭 안)면 선 이름 하나');
 assert.strictEqual(G.computeGridLocation(onB, [{ x: 2000, y: 9 }], ctx0, { member: '보(G)' }), 'X3', '거더는 가까운 선 이름');
 
 // ---- 폭: 선마다 다른 폭 ----
@@ -198,26 +199,26 @@ assert.ok(!('label' in n.groups[0].lines[0]) && !('band' in n.groups[0].lines[0]
 assert.strictEqual(n.visible, true);
 assert.strictEqual(n.autoLocation, true);
 
-// ---- 부재별: 슬래브·보(B)·철골보(B)·빔은 폭 무시하고 늘 범위 ----
-const M = G.isRangeOnlyMember;
-['슬래브', '데크슬래브', '계단슬래브', '슬라브', '보(B)', '보 (B)', '철골보(B)', 'RC보(B)', '빔', '철골빔', '작은보', 'slab'].forEach((m) => assert.strictEqual(M(m), true, `범위 전용: ${m}`));
-['보(G)', '철골보(G)', '거더', '철골거더', '큰보', '보', '철골보', '캔틸레버보', '기둥', '벽체', '보-슬래브 접합부', '기둥-슬래브 접합부', '벽체-보 접합부', '철골 접합부', '', null].forEach((m) => assert.strictEqual(M(m), false, `보통 규칙: ${m}`));
+// ---- 부재별: 슬래브·보(B)·철골보(B)·빔도 보통 폭 규칙(2026-09-28 「늘 범위」 없앰) ----
+assert.strictEqual(G.isRangeOnlyMember, undefined, '늘 범위 부재 목록은 없앰');
+assert.strictEqual(G.RANGE_ONLY_MEMBER_RULES, undefined);
 const locM = (pts, member, g) => G.computeGridLocation(g || base, pts, ctx0, { member });
 assert.strictEqual(locM([{ x: 2005, y: 1495 }], '보(G)'), 'X2, Y2', '거더: 폭 안이면 보통 규칙 그대로(두 축 다 폭 안)');
 assert.strictEqual(locM([{ x: 2005, y: 1495 }], '보'), 'X2, Y2', 'G/B 안 정한 보는 보통 규칙');
 assert.strictEqual(locM([{ x: 2005, y: 1495 }], '보-슬래브 접합부'), 'X2, Y2', '접합부는 보통 규칙');
-assert.strictEqual(locM([{ x: 2005, y: 1495 }], '슬래브'), 'X2~X3, Y1~Y2', '슬래브: 폭 안이어도 점이 있는 쪽 칸');
-assert.strictEqual(locM([{ x: 1995, y: 1505 }], '보(B)'), 'X1~X2, Y2 외측', '보(B): 선 왼쪽·아래쪽');
-assert.strictEqual(locM([{ x: 2000, y: 1500 }], '철골보(B)'), 'X1~X2, Y1~Y2', '선 위에 딱 걸치면 번호 작은 쪽');
-assert.strictEqual(locM([{ x: 1000, y: 500 }], '빔'), 'X1~X2, Y1~Y2', '첫 선 위면 안쪽 칸');
-assert.strictEqual(locM([{ x: 1500, y: 1000 }], '슬래브'), 'X1~X2, Y1~Y2', '칸 안은 같음');
-assert.strictEqual(locM([{ x: 500, y: 1000 }], '슬래브'), 'X1 외측, Y1~Y2', '바깥은 그대로');
-// 아래부터 그은 행: Y2 선 위 → 반대편 번호가 작은 Y1 쪽 칸
-assert.strictEqual(locM([{ x: 1500, y: 1500 }], '슬래브', named), 'x0~x1, Y1~Y2', '반대편 선 번호가 작은 쪽');
+['슬래브', '데크슬래브', '계단슬래브', '슬라브', '보(B)', '보 (B)', '철골보(B)', 'RC보(B)', '빔', '철골빔', '작은보', 'slab'].forEach((m) => {
+    assert.strictEqual(locM([{ x: 2005, y: 1495 }], m), 'X2, Y2', `폭 안이면 선 이름 하나: ${m}`);
+    assert.strictEqual(locM([{ x: 2005, y: 1000 }], m), 'X2, Y1~Y2', `한 축만 폭 안: ${m}`);
+    assert.strictEqual(locM([{ x: 1500, y: 1000 }], m), 'X1~X2, Y1~Y2', `폭 밖이면 범위: ${m}`);
+    assert.strictEqual(locM([{ x: 500, y: 1000 }], m), 'X1 외측, Y1~Y2', `바깥: ${m}`);
+});
+assert.strictEqual(locM([{ x: 1995, y: 1505 }], '보(B)'), 'X2, Y2', '보(B): 선 왼쪽·아래쪽이어도 폭 안이면 선 이름');
+assert.strictEqual(locM([{ x: 2011, y: 1000 }], '슬래브'), 'X2~X3, Y1~Y2', '폭(20) 밖 11px → 범위');
 assert.strictEqual(G.computeGridLocation(base, [{ x: 2005, y: 1000 }], ctx0, { forceRange: true }), 'X2~X3, Y1~Y2', 'forceRange 직접');
-// 영역: 슬래브가 X2 폭 안에만 있어도 선을 걸치면 X1~X3
-assert.strictEqual(locM(area(1995, 600, 2008, 1400), '슬래브'), 'X1~X3, Y1~Y2', '선을 걸친 슬래브 영역');
-assert.strictEqual(locM(area(2002, 600, 2008, 1400), '데크슬래브'), 'X2~X3, Y1~Y2', '선 한쪽 폭 안 영역은 그쪽 칸');
+// 영역: 전체가 X2 폭 안이면 X2, 선 폭을 벗어나 걸치면 범위
+assert.strictEqual(locM(area(1995, 600, 2008, 1400), '슬래브'), 'X2, Y1~Y2', '영역 전체가 X2 폭 안 → X2');
+assert.strictEqual(locM(area(1995, 600, 2300, 1400), '데크슬래브'), 'X2~X3, Y1~Y2', '폭 안에서 칸 안으로 → X2~X3');
+assert.strictEqual(locM(area(1500, 600, 2300, 1400), '슬래브'), 'X1~X3, Y1~Y2', '선을 넘어 걸치면 X1~X3');
 
 // ---- 거더: 폭 안이면 보통 규칙, 어느 폭에도 안 들면 가까운 열/행 선 하나 + 다른 축은 범위 ----
 const Gd = G.isGirderMember;
