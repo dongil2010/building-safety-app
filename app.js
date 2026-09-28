@@ -35085,7 +35085,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 isCadImported: true,
                 category: cadItem.category || '구조체',
                 component: memberNameOut(cadItem.component) || '',
-                location: state.currentFloor,
+                location: defectLocationUsesFloor() ? state.currentFloor : '',
                 defectType: cadItem.defectType || '균열',
                 cause: cadItem.cause || '건조수축',
                 size: cadItem.size || '',
@@ -35800,14 +35800,20 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         return stripFloorCodeSuffix(raw).replace(/\s+(?=\d)/g, '');
     }
 
-    // 결함 상세위치: 공란이면 층수만, 입력 있으면 "지상1층 XXX"
+    // 결함 상세위치(3종): 공란이면 층수만, 입력 있으면 "지상1층 XXX"
+    // 2026-09-28: 1·2종은 층을 자동으로 넣지 않음 — 공란, 실 이름을 쓰면 그 값만(행·열은 gridLoc 따로)
+    function defectLocationUsesFloor(bldg) {
+        return isGrade3Building(bldg);
+    }
+
     function getDefectLocationFloorLabel(floorCode) {
         return getGrade3FloorDisplayLabel(floorCode || state.currentFloor, state.currentBuilding);
     }
 
     function composeDefectLocation(detailText, floorCode) {
-        const floor = getDefectLocationFloorLabel(floorCode);
         const detail = String(detailText || '').trim();
+        if (!defectLocationUsesFloor()) return detail; // 1·2종: 적은 그대로(없으면 공란)
+        const floor = getDefectLocationFloorLabel(floorCode);
         if (!detail) return floor;
         if (detail === floor) return floor;
         if (detail.startsWith(`${floor} `) || detail.startsWith(`${floor}(`)) return detail;
@@ -35867,7 +35873,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 if (!head) return sizeText;
                 return `${head} ${sizeText}`;
             }
-            case 'location': return d.location || ((ctx.floorCode || state.currentFloor) + ' ' + (memberNameOut(d.component) || '기둥'));
+            case 'location':
+                if (d.location) return d.location;
+                // 1·2종: 비어 있으면 공란(층을 끼워 넣지 않음)
+                return defectLocationUsesFloor() ? ((ctx.floorCode || state.currentFloor) + ' ' + (memberNameOut(d.component) || '기둥')) : '';
             case 'component': return memberNameOut(d.component) || '기둥';
             case 'defectType': return formatOpeningAwareDefectType(d) || '';
             case 'category': return d.category === '구조체' ? '○' : '-';
@@ -38806,7 +38815,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                             label: label,
                             title: componentDefectTitle,
                             defectNo: d.no,
-                            location: d.location || `${floorDisplayLabel} ${memberNameOut(d.component) || ''}`,
+                            location: d.location || (defectLocationUsesFloor() ? `${floorDisplayLabel} ${memberNameOut(d.component) || ''}` : ''),
                             cause: isGoodDefectType(d.defectType) ? '-' : (d.cause || '건조수축'),
                             size: isGoodDefectType(d.defectType) ? '-' : ((d.size && String(d.size).trim()) || '-'),
                             src: src
