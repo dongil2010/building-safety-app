@@ -3069,11 +3069,14 @@ document.addEventListener('DOMContentLoaded', () => {
             (window.state.ndtData[k] || []).forEach((it) => removedNdtItems.push(it));
             delete window.state.ndtData[k];
         });
-        // 영구 삭제는 되돌릴 수 없다 — 측정지 사진도 이 기기 사본까지 지운다
-        releaseStrengthPhotosOfItems(bldg.id, removedNdtItems, { keepLocal: false });
+        // 부동침하 구역의 현장 사진도 같이 — 구역을 state에서 먼저 빼야 "아직 쓰는 사진"으로 안 잡힌다
         Object.keys(window.state.ndtDisplacementGroups || {}).forEach((k) => {
-            if (k.startsWith(bldg.id + '_')) delete window.state.ndtDisplacementGroups[k];
+            if (!k.startsWith(bldg.id + '_')) return;
+            (window.state.ndtDisplacementGroups[k] || []).forEach((g) => removedNdtItems.push(g));
+            delete window.state.ndtDisplacementGroups[k];
         });
+        // 영구 삭제는 되돌릴 수 없다 — 측정지·현장 사진도 이 기기 사본까지 지운다
+        releaseStrengthPhotosOfItems(bldg.id, removedNdtItems, { keepLocal: false });
         (bldg.overviewPhotos || []).forEach((p) => {
             if (p && p.id) photoDeleteJobs.push(deleteOverviewPhotoStorage(bldg.id, p.id));
         });
@@ -7611,10 +7614,13 @@ document.addEventListener('DOMContentLoaded', () => {
         if (window.state.ndtDisplacementGroups && window.state.ndtDisplacementGroups[floorKey]) {
             // 부동침하·부재처짐 구역도 묘비를 남긴다 — 안 남기면 서버에 있던 구역이 다음 동기화에서
             // 되살아난다(2026-09-21 감사). 구역 묘비는 비파괴 핀과 같은 deletedNdtIds를 쓴다.
-            (window.state.ndtDisplacementGroups[floorKey] || []).forEach((g) => {
+            const removedGroups = (window.state.ndtDisplacementGroups[floorKey] || []).slice();
+            removedGroups.forEach((g) => {
                 if (g && g.id && typeof trackNdtDeletion === 'function') trackNdtDeletion(floorKey, g.id);
             });
             delete window.state.ndtDisplacementGroups[floorKey];
+            // 구역 현장 사진 — 비파괴 항목과 같이 이 기기 사본은 남기고 클라우드만 정리
+            releaseStrengthPhotosOfItems(bldg.id, removedGroups, { keepLocal: true });
         }
 
         if (bldg.floorsList) {
@@ -9884,19 +9890,24 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const pinIds = ids.filter(id => !String(id).startsWith('disp_'));
         const dispIds = ids.filter(id => String(id).startsWith('disp_')).map(id => id.slice(5));
 
+        // 지운 항목·구역의 사진(측정지·현장) 클라우드 정리 — 한 건씩 지울 때와 같게, 이 기기 사본은 남긴다
+        const removedRecs = [];
         if (pinIds.length) {
             if (!state.ndtData[key]) state.ndtData[key] = [];
             pinIds.forEach((id) => trackNdtDeletion(key, id));
+            state.ndtData[key].forEach((x) => { if (pinIds.includes(x.id)) removedRecs.push(x); });
             state.ndtData[key] = state.ndtData[key].filter(x => !pinIds.includes(x.id));
         }
         if (dispIds.length) {
             if (!state.ndtDisplacementGroups[key]) state.ndtDisplacementGroups[key] = [];
             dispIds.forEach((id) => trackNdtDeletion(key, id));
+            state.ndtDisplacementGroups[key].forEach((g) => { if (dispIds.includes(g.id)) removedRecs.push(g); });
             state.ndtDisplacementGroups[key] = state.ndtDisplacementGroups[key].filter(g => !dispIds.includes(g.id));
             if (window._activeNdtDispGroupId && dispIds.includes(window._activeNdtDispGroupId)) {
                 setActiveNdtDispGroup(null);
             }
         }
+        releaseStrengthPhotosOfItems(state.currentBuildingId, removedRecs, { keepLocal: true });
         if (typeof markFloorKeyDirty === 'function') markFloorKeyDirty(key);
         selectedNdtIds.clear();
         updateNdtSelectionBar();
@@ -15250,6 +15261,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     const MAX_STRENGTH_SLOTS = 3;
     const MAX_R_VALUES_PER_SLOT = 20;
     let ndtStrengthSlots = [{ location: '', readings: [] }];
+    // 비파괴 입력창에 열려 있는 항목의 현장 사진 id 목록(commitNdtFromForm이 item.photoIds로 저장)
+    let ndtItemPhotoIds = [];
 
     // 클라우드 OCR(Cloudflare Worker 프록시 → Cloud Vision) 주소.
     // 비워두면(빈 문자열) 클라우드 시도 없이 기존 Tesseract(로컬) 인식만 사용한다.
@@ -15499,6 +15512,189 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         } catch (e) {
             console.error('R값 측정지 사진 저장 실패:', e);
         }
+    }
+
+    // ---------------------------------------------------------------------------
+    // 비파괴 장비조사 현장 사진 (2026-09-28)
+    // 항목(item.photoIds)·부동침하 구역(group.photoIds)마다 여러 장. 한글 보고서 "비파괴 장비조사 사진첩"에 들어간다.
+    // 저장은 측정지 사진과 같은 str_건물_id(IndexedDB + 클라우드). 사진을 넣고 빼는 건 입력창의 자동 저장을
+    // 기다리지 않고 state의 항목에 바로 적는다 — 사진 압축이 끝나기 전에 창을 닫아도 사진이 빠지지 않게.
+    // ---------------------------------------------------------------------------
+    async function saveNdtFieldPhotoFile(bldgId, file) {
+        if (!bldgId || !file) return null;
+        const dataUrl = (typeof window.compressDefectPhoto43 === 'function')
+            ? await window.compressDefectPhoto43(file)
+            : await fileToDataUrl(file);
+        if (!dataUrl) return null;
+        const photoId = createOverviewPhotoId();
+        await saveStrengthPhotoDataUrl(bldgId, photoId, dataUrl);
+        return photoId;
+    }
+
+    /** rec(항목·구역)의 사진 목록을 바꾸고 동기화 표시를 남긴다 */
+    function setNdtRecordPhotoIds(floorKey, rec, ids) {
+        rec.photoIds = ids.slice();
+        rec.updatedAt = Date.now();
+        if (typeof markFloorKeyDirty === 'function') markFloorKeyDirty(floorKey);
+        saveStateToLocalStorage();
+    }
+
+    async function renderNdtFieldPhotoList(containerId, ids, onRemove) {
+        const box = document.getElementById(containerId);
+        const bldg = window.state.currentBuilding;
+        if (!box) return;
+        const list = Array.isArray(ids) ? ids : [];
+        if (!list.length || !bldg || !bldg.id) {
+            box.innerHTML = '<div style="font-size:0.78rem; color:var(--text-muted);">사진 없음 — 보고서 "비파괴 장비조사 사진첩"에 들어갑니다.</div>';
+            return;
+        }
+        box.innerHTML = list.map((pid, i) => `
+            <div class="ndt-field-photo-thumb" data-photo-id="${pid}" style="position:relative; width:72px; height:54px; border-radius:6px; overflow:hidden; background:#eee; display:flex; align-items:center; justify-content:center; font-size:0.65rem; color:#999;">
+                <span>${i + 1}</span>
+                <button type="button" class="ndt-field-photo-remove" data-photo-id="${pid}" title="사진 삭제"
+                    style="position:absolute; top:2px; right:2px; width:20px; height:20px; border-radius:50%; border:none; background:rgba(239,68,68,0.9); color:#fff; font-size:0.7rem; line-height:20px; padding:0; cursor:pointer;">&times;</button>
+            </div>`).join('');
+        box.querySelectorAll('.ndt-field-photo-remove').forEach((btn) => {
+            btn.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                onRemove(btn.dataset.photoId);
+            });
+        });
+        await Promise.all(list.map(async (pid) => {
+            const url = await loadStrengthPhotoDataUrl(bldg.id, pid);
+            const cell = box.querySelector(`.ndt-field-photo-thumb[data-photo-id="${pid}"]`);
+            const label = cell && cell.querySelector('span');
+            if (url && label) label.outerHTML = `<img src="${url}" style="width:100%; height:100%; object-fit:cover;">`;
+        }));
+    }
+
+    function findNdtItemInFloor(floorKey, id) {
+        return ((window.state.ndtData || {})[floorKey] || []).find((x) => x && x.id === id) || null;
+    }
+
+    function findNdtDispGroupInFloor(floorKey, id) {
+        return ((window.state.ndtDisplacementGroups || {})[floorKey] || []).find((g) => g && g.id === id) || null;
+    }
+
+    /**
+     * 사진 추가·삭제를 항목·구역 하나에 적용한다.
+     * getRec(): 지금 state의 레코드(없으면 null — 그 사이 지워짐), after(ids): 화면 갱신
+     */
+    async function addNdtFieldPhotos(files, floorKey, getRec, after) {
+        const bldgId = window.state.currentBuildingId;
+        const picked = Array.from(files || []).filter(Boolean);
+        if (!bldgId || !picked.length) return;
+        for (const file of picked) {
+            let pid = null;
+            try {
+                pid = await saveNdtFieldPhotoFile(bldgId, file);
+            } catch (e) {
+                console.error('비파괴 현장 사진 저장 실패:', e);
+            }
+            if (!pid) continue;
+            const rec = getRec();
+            if (!rec) {
+                // 사진을 저장하는 사이 항목이 지워졌다 — 붙일 곳이 없으니 방금 올린 사진도 정리
+                deleteStrengthPhotoStorage(bldgId, pid);
+                return;
+            }
+            setNdtRecordPhotoIds(floorKey, rec, ndtFieldPhotoIdsOf(rec).concat(pid));
+            after(rec.photoIds);
+        }
+    }
+
+    function removeNdtFieldPhoto(pid, floorKey, getRec, after) {
+        const rec = getRec();
+        if (!rec || !pid) return;
+        if (!window.confirmDelete('이 사진을 삭제할까요?')) return;
+        setNdtRecordPhotoIds(floorKey, rec, ndtFieldPhotoIdsOf(rec).filter((p) => p !== pid));
+        // 클라우드만 정리하고 이 기기 사본은 남긴다(되돌리기·백업 되살리기 대비). 다른 항목이 같은 사진을 쓰면 안 지운다.
+        releaseStrengthPhotosOfItems(window.state.currentBuildingId, [{ photoIds: [pid] }], { keepLocal: true });
+        after(rec.photoIds);
+    }
+
+    /** 비파괴 입력창(항목) 사진 */
+    function renderNdtItemPhotoList() {
+        renderNdtFieldPhotoList('ndtPhotoPreviewList', ndtItemPhotoIds, (pid) => {
+            const floorKey = `${state.currentBuildingId}_${state.currentFloor}`;
+            const pinId = document.getElementById('ndtPinId')?.value;
+            removeNdtFieldPhoto(pid, floorKey, () => findNdtItemInFloor(floorKey, pinId), (ids) => {
+                ndtItemPhotoIds = ids.slice();
+                renderNdtItemPhotoList();
+            });
+        });
+    }
+
+    function bindNdtItemPhotoInputs() {
+        const onFiles = async (input) => {
+            const files = Array.from(input.files || []);
+            input.value = '';
+            const floorKey = `${state.currentBuildingId}_${state.currentFloor}`;
+            let pinId = document.getElementById('ndtPinId')?.value;
+            if (!pinId) {
+                // 아직 저장 전인 새 항목이면 먼저 확정해 사진을 붙일 곳을 만든다
+                const created = commitNdtFromForm();
+                if (!created) return;
+                pinId = created.id;
+                const pinIdEl = document.getElementById('ndtPinId');
+                if (pinIdEl) pinIdEl.value = pinId;
+            }
+            await addNdtFieldPhotos(files, floorKey, () => findNdtItemInFloor(floorKey, pinId), (ids) => {
+                // 창이 그 사이 다른 항목으로 바뀌었으면 화면 목록은 건드리지 않는다
+                if (document.getElementById('ndtPinId')?.value !== pinId) return;
+                ndtItemPhotoIds = ids.slice();
+                renderNdtItemPhotoList();
+            });
+        };
+        [['btnTriggerNdtCamera', 'inputNdtCamera'], ['btnTriggerNdtGallery', 'inputNdtPhoto']].forEach(([btnId, inputId]) => {
+            const btn = document.getElementById(btnId);
+            const input = document.getElementById(inputId);
+            if (!btn || !input || btn.dataset.bound === '1') return;
+            btn.dataset.bound = '1';
+            btn.addEventListener('click', (e) => {
+                e.preventDefault();
+                input.click();
+            });
+            input.addEventListener('change', () => onFiles(input));
+        });
+    }
+
+    /** 부동침하·부재변위 구역(NO.01, NO.02 …) 사진 — 구역 정보 창 */
+    function renderNdtDispGroupPhotoList(groupId) {
+        const floorKey = `${state.currentBuildingId}_${state.currentFloor}`;
+        const group = findNdtDispGroupInFloor(floorKey, groupId);
+        renderNdtFieldPhotoList('ndtDispEditPhotoList', ndtFieldPhotoIdsOf(group), (pid) => {
+            removeNdtFieldPhoto(pid, floorKey, () => findNdtDispGroupInFloor(floorKey, groupId), () => {
+                renderNdtDispGroupPhotoList(groupId);
+            });
+        });
+    }
+
+    function bindNdtDispGroupPhotoInputs() {
+        const onFiles = async (input) => {
+            const files = Array.from(input.files || []);
+            input.value = '';
+            const groupId = document.getElementById('ndtDispEditGroupId')?.value;
+            if (!groupId) return;
+            const floorKey = `${state.currentBuildingId}_${state.currentFloor}`;
+            await addNdtFieldPhotos(files, floorKey, () => findNdtDispGroupInFloor(floorKey, groupId), () => {
+                if (document.getElementById('ndtDispEditGroupId')?.value !== groupId) return;
+                renderNdtDispGroupPhotoList(groupId);
+                if (typeof renderNdtSummaryTable === 'function') renderNdtSummaryTable();
+            });
+        };
+        [['btnNdtDispEditCamera', 'inputNdtDispEditCamera'], ['btnNdtDispEditGallery', 'inputNdtDispEditPhoto']].forEach(([btnId, inputId]) => {
+            const btn = document.getElementById(btnId);
+            const input = document.getElementById(inputId);
+            if (!btn || !input || btn.dataset.bound === '1') return;
+            btn.dataset.bound = '1';
+            btn.addEventListener('click', (e) => {
+                e.preventDefault();
+                input.click();
+            });
+            input.addEventListener('change', () => onFiles(input));
+        });
     }
 
     // 준공일(건축물 개요) ~ 점검일 사이 재령일수를 구한다. null이면 계산 불가(준공일 미입력 등).
@@ -16368,6 +16564,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             };
         }
 
+        ndtItemPhotoIds = ndtFieldPhotoIdsOf(existingItem);
+        bindNdtItemPhotoInputs();
+        renderNdtItemPhotoList();
+
         window.toggleNdtModalFields();
         toggleNdtMeasureDimMode();
         renderNdtStrengthSlots();
@@ -16733,6 +16933,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     ...carbExtra,
                     ...measureExtra,
                     ...fireproofExtra,
+                    photoIds: ndtItemPhotoIds.slice(),
                     inspectorName: existing.inspectorName || window.state.userName || ''
                 };
                 touchNdtUpdatedAt(state.ndtData[key][idx]);
@@ -16767,6 +16968,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 ...carbExtra,
                 ...measureExtra,
                 ...fireproofExtra,
+                photoIds: ndtItemPhotoIds.slice(),
                 inspectorName: window.state.userName || '',
                 updatedAt: Date.now(),
                 x: extra.targetX,
@@ -17640,6 +17842,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         }
         renderNdtDispGroupPointList(group);
         ensureNdtDispStationTransferUi(group);
+        bindNdtDispGroupPhotoInputs();
+        renderNdtDispGroupPhotoList(group.id);
         refreshNdtDispLocationChips('ndtDispEditLocationType', 'ndtDispEditLocationChips');
         const modal = document.getElementById('ndtDisplacementGroupEditModal');
         document.body.classList.add('ndt-modal-open');
@@ -17723,6 +17927,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             state.ndtDisplacementGroups[key] = groups.filter(g => g.id !== groupId);
             // 마지막 지점을 지워 구역까지 사라지는 경우도 묘비가 필요하다
             trackNdtDeletion(key, groupId);
+            releaseStrengthPhotosOfItems(state.currentBuildingId, [group], { keepLocal: true });
             closeNdtDisplacementGroupEditModal();
         } else {
             group.updatedAt = Date.now();
@@ -17738,9 +17943,12 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     window.deleteNdtDisplacementGroup = function(groupId, options) {
         if (!options?.skipConfirm && !window.confirmDelete('해당 측정 구역과 포함된 모든 지점을 삭제하시겠습니까?')) return;
         const key = `${state.currentBuildingId}_${state.currentFloor}`;
+        const removedGroups = (state.ndtDisplacementGroups[key] || []).filter(g => g.id === groupId);
         state.ndtDisplacementGroups[key] = (state.ndtDisplacementGroups[key] || []).filter(g => g.id !== groupId);
         // 묘비를 남기지 않으면 병합 때 서버에 남아있던 구역이 그대로 되살아난다
         trackNdtDeletion(key, groupId);
+        // 구역 현장 사진 클라우드 정리 — 되돌리기 대비로 이 기기 사본은 남긴다
+        releaseStrengthPhotosOfItems(state.currentBuildingId, removedGroups, { keepLocal: true });
         if (window._activeNdtDispGroupId === groupId) setActiveNdtDispGroup(null);
         if (typeof markFloorKeyDirty === 'function') markFloorKeyDirty(key);
         saveStateToLocalStorage();
@@ -37820,6 +38028,136 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         return Array.from(secEl.childNodes).filter((n) => n.nodeType === 1 && (n.localName === 'p' || n.nodeName === 'hp:p'));
     }
 
+    /**
+     * 제목 문단(stamp)의 서식을 그대로 두고 글자만 바꾼 새 문단. 표·그림·조판 부호는 떼고, 첫 글자 칸 하나만 남긴다.
+     * (템플릿 제목을 복제해 쓰므로 개요 번호·글꼴이 템플릿과 같다 — 새 서식 id를 만들지 않는다)
+     */
+    function makeHwpxTextParaFromStamp(stamp, text, hpNs, pageBreak) {
+        const p = stamp.cloneNode(true);
+        p.setAttribute('pageBreak', pageBreak ? '1' : '0');
+        ['tbl', 'pic', 'ctrl', 'secPr', 'container', 'rect', 'line', 'equation'].forEach((tag) => {
+            Array.from(p.getElementsByTagNameNS(hpNs, tag)).forEach((el) => { if (el.parentNode) el.parentNode.removeChild(el); });
+        });
+        const runs = Array.from(p.children).filter((c) => c.localName === 'run');
+        let keepRun = runs.find((r) => r.getElementsByTagNameNS(hpNs, 't').length > 0) || runs[0] || null;
+        runs.forEach((r) => { if (r !== keepRun && r.parentNode) r.parentNode.removeChild(r); });
+        if (!keepRun) {
+            keepRun = p.ownerDocument.createElementNS(hpNs, 'hp:run');
+            keepRun.setAttribute('charPrIDRef', '0');
+            p.insertBefore(keepRun, p.firstChild);
+        }
+        const ts = Array.from(keepRun.getElementsByTagNameNS(hpNs, 't'));
+        let t = ts[0];
+        ts.slice(1).forEach((x) => { if (x.parentNode) x.parentNode.removeChild(x); });
+        if (!t) {
+            t = p.ownerDocument.createElementNS(hpNs, 'hp:t');
+            keepRun.appendChild(t);
+        }
+        while (t.firstChild) t.removeChild(t.firstChild);
+        t.textContent = text;
+        // 줄 배치 정보는 첫 줄만 남긴다(한글이 열 때 다시 잡는다) — 옛 글자 수에 맞춘 줄이 남으면 겹쳐 보인다
+        const segArr = Array.from(p.children).find((c) => c.localName === 'linesegarray');
+        if (segArr) {
+            const segs = Array.from(segArr.children).filter((c) => c.localName === 'lineseg');
+            segs.slice(1).forEach((s) => segArr.removeChild(s));
+            if (segs[0]) {
+                segs[0].setAttribute('textpos', '0');
+                segs[0].setAttribute('vertpos', '0');
+            }
+        }
+        return p;
+    }
+
+    /**
+     * 한글 보고서 "비파괴 장비조사 사진첩" (2026-09-28) — 1·2종/3종 공용 뼈대.
+     * anchorPara 뒤에 제목 → "1) 부재실측" 소제목 → 사진표(표 1개 = 사진 2장) … 순서로 넣는다.
+     * - 소제목마다 새 쪽에서 시작한다(첫 소제목은 제목과 같은 쪽). 소제목이 있는 쪽은 표 2개(사진 4장),
+     *   이어지는 쪽은 표 3개(사진 6장) — 결함 사진첩과 같은 표 크기라 제목까지 3개는 한 쪽을 넘는다.
+     * - ctx.buildPairTbl(e1, e2 | null) → 채운 hp:tbl (못 만들면 null). 사진 파일·목록 등록은 부르는 쪽이 한다.
+     * 반환: { titlePara, lastPara } (아무것도 못 넣었으면 null — 넣었던 제목도 걷어낸다).
+     * titlePara는 부르는 쪽의 "표본 사진첩 지우기" 정리가 우리 사진첩을 지우지 않게 알려 주는 데 쓴다.
+     */
+    async function insertHwpxNdtPhotoAlbum(ctx) {
+        const { hpNs, sections, anchorPara, headingStamp, subHeadingStamp, photoParaStamp, buildPairTbl, ensureTblTreatAsChar } = ctx;
+        if (!anchorPara || !anchorPara.parentNode || !headingStamp || !subHeadingStamp || !photoParaStamp) return null;
+        if (!Array.isArray(sections) || !sections.length) return null;
+        const TABLES_FIRST_PAGE = 2;
+        const TABLES_PER_PAGE = 3;
+        const inserted = [];
+        let cursor = anchorPara;
+        const putAfterCursor = (node) => {
+            cursor.parentNode.insertBefore(node, cursor.nextSibling);
+            cursor = node;
+            inserted.push(node);
+        };
+        const newPhotoPara = (pageBreak) => {
+            const p = photoParaStamp.cloneNode(true);
+            Array.from(p.getElementsByTagNameNS(hpNs, 'tbl')).forEach((t) => { if (t.parentNode) t.parentNode.removeChild(t); });
+            p.setAttribute('pageBreak', pageBreak ? '1' : '0');
+            const run = Array.from(p.children).find((c) => c.localName === 'run') || p.getElementsByTagNameNS(hpNs, 'run')[0];
+            return { p, run };
+        };
+
+        const titlePara = makeHwpxTextParaFromStamp(headingStamp, '비파괴 장비조사 사진첩', hpNs, true);
+        putAfterCursor(titlePara);
+        let tableCount = 0;
+        let secNo = 0;
+        for (const sec of sections) {
+            const entries = (sec && Array.isArray(sec.entries)) ? sec.entries : [];
+            if (!entries.length) continue;
+            secNo += 1;
+            const cursorBeforeSection = cursor;
+            const sub = makeHwpxTextParaFromStamp(subHeadingStamp, `${secNo}) ${sec.title}`, hpNs, secNo > 1);
+            putAfterCursor(sub);
+            let holder = null;
+            let onPage = 0;
+            let cap = TABLES_FIRST_PAGE;
+            let tablesInSection = 0;
+            for (let i = 0; i < entries.length; i += 2) {
+                const tbl = await buildPairTbl(entries[i], entries[i + 1] || null);
+                if (!tbl) continue;
+                if (!holder || onPage >= cap) {
+                    if (holder) cap = TABLES_PER_PAGE;
+                    holder = newPhotoPara(!!(holder));
+                    if (!holder.run) {
+                        inserted.forEach((n) => { if (n.parentNode) n.parentNode.removeChild(n); });
+                        throw new Error('사진첩 문단 틀에 글자 칸(hp:run)이 없습니다.');
+                    }
+                    putAfterCursor(holder.p);
+                    onPage = 0;
+                }
+                if (typeof ensureTblTreatAsChar === 'function') ensureTblTreatAsChar(tbl);
+                const trail = Array.from(holder.run.children).find((c) => c.localName === 't') || null;
+                if (trail) holder.run.insertBefore(tbl, trail);
+                else holder.run.appendChild(tbl);
+                onPage += 1;
+                tablesInSection += 1;
+                tableCount += 1;
+            }
+            // 사진을 한 장도 못 넣은 소제목은 걷어낸다(번호는 다음 소제목이 이어받게 되돌린다)
+            if (!tablesInSection) {
+                if (sub.parentNode) sub.parentNode.removeChild(sub);
+                inserted.splice(inserted.indexOf(sub), 1);
+                cursor = cursorBeforeSection;
+                secNo -= 1;
+            }
+        }
+        if (!tableCount) {
+            inserted.forEach((n) => { if (n.parentNode) n.parentNode.removeChild(n); });
+            return null;
+        }
+        // 사진첩 다음 내용(상태조사표 등)은 새 쪽에서 — 마지막 쪽이 덜 차도 이어 붙지 않게
+        let next = cursor.nextElementSibling;
+        while (next && next.localName === 'p'
+            && !next.getElementsByTagNameNS(hpNs, 'tbl').length
+            && !next.getElementsByTagNameNS(hpNs, 'pic').length
+            && !Array.from(next.getElementsByTagNameNS(hpNs, 't')).map((t) => t.textContent || '').join('').trim()) {
+            next = next.nextElementSibling;
+        }
+        if (next && next.localName === 'p') next.setAttribute('pageBreak', '1');
+        return { titlePara, lastPara: cursor };
+    }
+
     function formatHwpxCrackMonitorDate(dateStr) {
         const s = String(dateStr || '').trim();
         const m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
@@ -39341,6 +39679,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             }
             let floorSlots = discoverFloorSlots();
             if (!floorSlots.length) throw new Error('템플릿에서 상태조사표 블록을 찾지 못했습니다.');
+            // 비파괴 장비조사 사진첩(2026-09-28) 소제목 틀 — "1) 층" 제목 문단을 채우기 전에 떠 둔다
+            // (사진 표·문단은 3종 결함 사진첩과 같은 grade3GlobalPhoto*Stamp를 쓴다)
+            const ndtAlbumSubHeadingStamp = floorSlots[0].titlePara.cloneNode(true);
+            let ndtAlbumTitlePara = null;   // 우리가 넣은 사진첩 제목 — 아래 "표본 사진첩 지우기"가 건드리지 않게
 
             // 신가병원/칠산타워 서식은 칸 너비가 이미 맞춰져 있어, 옛 10칸(부재종류/결함크기)용
             // 폭 재배분은 적용하지 않는다.
@@ -40934,6 +41276,97 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                                 );
                                 if (inserted && usable) lastParaUnderHeading.set(usable, inserted);
                             }
+                            // ---- 비파괴 장비조사 사진첩 (2026-09-28) ----
+                            // 위치도 묶음 바로 뒤에. 3종 사진 표(사진N + 내용)는 위치 칸이 없어 내용 칸에
+                            // "위치 · 항목"을 같이 적는다. 표·문단 틀은 3종 결함 사진첩과 같은 것을 쓴다.
+                            try {
+                                const albumSections = (ndtMapsApi && typeof ndtMapsApi.buildPhotoAlbumSections === 'function')
+                                    ? ndtMapsApi.buildPhotoAlbumSections(allNdtItemsForHwpx, allDispGroupsForHwpx)
+                                    : [];
+                                const albumHeadingSrc = measureHeadingPara || strengthCarbHeadingPara || fireproofHeadingPara || dispHeadingPara;
+                                if (albumSections.length && albumHeadingSrc && grade3GlobalPhotoTblStamp && grade3GlobalPhotoParaStamp) {
+                                    if (typeof window.updateLoadingText === 'function') {
+                                        window.updateLoadingText('한글(hwpx) 비파괴 장비조사 사진첩 생성 중...');
+                                    }
+                                    const albumDonorPic = findGrade3PhotoDonorPic();
+                                    let albumMaxW = 0;
+                                    let albumMaxH = 0;
+                                    const tplPics = grade3GlobalPhotoTblStamp.getElementsByTagNameNS(HP_NS, 'pic');
+                                    if (tplPics.length) {
+                                        albumMaxW = parseInt(tplPics[0].getElementsByTagNameNS(HP_NS, 'curSz')[0].getAttribute('width'), 10) || 0;
+                                        albumMaxH = parseInt(tplPics[0].getElementsByTagNameNS(HP_NS, 'curSz')[0].getAttribute('height'), 10) || 0;
+                                    }
+                                    if (!tplPics.length && !albumDonorPic) throw new Error('사진첩 표에 사진 칸이 없고 복제할 사진도 없습니다.');
+                                    const decodeAlbumPhoto = async (entry) => {
+                                        if (!entry) return null;
+                                        try {
+                                            const url = await loadStrengthPhotoDataUrl(ndtBldgId, entry.photoId);
+                                            if (!url) return null;
+                                            const { bytes, mime, ext } = await dataUrlToBytes(url);
+                                            const size = await loadImageNaturalSizeFromBytes(bytes, mime);
+                                            return { entry, bytes, mime, ext, w: size.w, h: size.h };
+                                        } catch (onePhotoErr) {
+                                            console.warn('비파괴 사진 1장 임베드 실패(해당 컷만 생략):', entry.photoId, onePhotoErr);
+                                            return null;
+                                        }
+                                    };
+                                    const album = await insertHwpxNdtPhotoAlbum({
+                                        hpNs: HP_NS,
+                                        sections: albumSections,
+                                        anchorPara: (mapAnchor && mapAnchor.parentNode) ? mapAnchor
+                                            : (mapInsertBefore ? mapInsertBefore.previousElementSibling : null),
+                                        headingStamp: albumHeadingSrc,
+                                        subHeadingStamp: ndtAlbumSubHeadingStamp,
+                                        photoParaStamp: grade3GlobalPhotoParaStamp,
+                                        ensureTblTreatAsChar,
+                                        buildPairTbl: async (e1, e2) => {
+                                            let s1 = await decodeAlbumPhoto(e1);
+                                            let s2 = await decodeAlbumPhoto(e2);
+                                            if (!s1) { s1 = s2; s2 = null; }
+                                            if (!s1) return null;
+                                            photoTblCounter++;
+                                            const newTbl = grade3GlobalPhotoTblStamp.cloneNode(true);
+                                            newTbl.setAttribute('id', String(9500000 + photoTblCounter));
+                                            let slots = resolveGrade3HwpxPhotoAlbumSlots(newTbl);
+                                            if (!slots.slots.length) throw new Error('사진첩 표에서 사진N 칸을 찾지 못했습니다.');
+                                            const sizeInfo = ensureGrade3PhotoPicsInTbl(newTbl, slots.slots, albumDonorPic);
+                                            const fitW = sizeInfo.maxW || albumMaxW || 20000;
+                                            const fitH = sizeInfo.maxH || albumMaxH || 15000;
+                                            slots = resolveGrade3HwpxPhotoAlbumSlots(newTbl);
+                                            slots.slots.map(s => s.pic).filter(Boolean).forEach((p, pIdx) => {
+                                                p.setAttribute('id', String(9600000 + photoTblCounter * 2 + pIdx));
+                                                p.setAttribute('instid', String(9700000 + photoTblCounter * 2 + pIdx));
+                                            });
+                                            const place = (slot, s) => {
+                                                if (!slot || !slot.pic) throw new Error('사진첩 표에 사진 칸이 모자랍니다.');
+                                                imgCounter++;
+                                                const imgId = `ndtAlbum${imgCounter}`;
+                                                zip.file(`BinData/${imgId}.${s.ext}`, s.bytes);
+                                                manifestAdds.push(`<opf:item id="${imgId}" href="BinData/${imgId}.${s.ext}" media-type="${s.mime}" isEmbeded="1"/>`);
+                                                setPicImage(slot.pic, imgId, s.w, s.h, fitW, fitH);
+                                                if (slot.labelTc) {
+                                                    setTcText(slot.labelTc, s.entry.label);
+                                                    centerCellContent(slot.labelTc);
+                                                }
+                                                if (slot.locationTc) setTcText(slot.locationTc, '');
+                                                if (slot.contentTc) {
+                                                    const loc = s.entry.location && s.entry.location !== '-' ? s.entry.location : '';
+                                                    setTcText(slot.contentTc, loc ? `${loc} · ${s.entry.content}` : s.entry.content);
+                                                    centerCellContent(slot.contentTc);
+                                                }
+                                            };
+                                            place(slots.slots[0], s1);
+                                            if (s2) place(slots.slots[1], s2);
+                                            else stripGrade3UnusedPhotoSlots(newTbl, 1);
+                                            return newTbl;
+                                        }
+                                    });
+                                    if (album) ndtAlbumTitlePara = album.titlePara;
+                                }
+                            } catch (albumErr) {
+                                console.error('비파괴 장비조사 사진첩 삽입 실패(나머지는 계속 진행):', albumErr);
+                                window.showToast('비파괴 장비조사 사진첩을 넣지 못했습니다: ' + albumErr.message, 'warning', 5000);
+                            }
                             // 위치도가 하나도 안 들어간 제목은 빈 제목만 남으므로 지운다.
                             // 들어간 제목은 쪽 나눔을 켜서 위치도 묶음이 새 쪽에서 시작하게 한다.
                             mapHeadingCandidates.forEach((p) => {
@@ -40964,7 +41397,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 // 찾아둔다. "비파괴 장비조사 위치도" 섹션 자체는 NDT try 블록 끝에서 이미 정리·
                 // 재구성했으므로(모든 결과표 뒤에 위치도를 한꺼번에 모아 넣는 단계) 여기서는
                 // 사진첩만 처리한다.
-                const albumStart = secChildren().find(p => /^비파괴 장비조사 사진첩/.test(paraText(p).trim()));
+                const albumStart = secChildren().find(p => p !== ndtAlbumTitlePara && /^비파괴 장비조사 사진첩/.test(paraText(p).trim()));
                 const surveyHeading = secChildren().find(p => /^주요 상태조사표, 사진 및 위치도/.test(paraText(p).trim()));
 
                 // 2) "비파괴 장비조사 사진첩" 섹션 전체 삭제
@@ -41776,6 +42209,14 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             }
             let floorSlots = discoverFloorSlots();
             if (!floorSlots.length) throw new Error('템플릿에서 상태조사표 블록을 찾지 못했습니다.');
+            // 비파괴 장비조사 사진첩(2026-09-28)의 틀 — 층 블록을 채우기 전에 떠 둔다
+            // (소제목 = "1) 층" 제목 문단, 사진 표·문단 = 결함 사진첩의 사진 2장짜리 표)
+            const ndtAlbumSubHeadingStamp = floorSlots[0].titlePara.cloneNode(true);
+            const ndtAlbumPhotoTblStamp = floorSlots[0].photoTbl ? floorSlots[0].photoTbl.cloneNode(true) : null;
+            let ndtAlbumPhotoParaStamp = floorSlots[0].photoTbl ? floorSlots[0].photoTbl.parentNode : null;
+            while (ndtAlbumPhotoParaStamp && ndtAlbumPhotoParaStamp.localName !== 'p') ndtAlbumPhotoParaStamp = ndtAlbumPhotoParaStamp.parentNode;
+            if (ndtAlbumPhotoParaStamp) ndtAlbumPhotoParaStamp = ndtAlbumPhotoParaStamp.cloneNode(true);
+            let ndtAlbumTitlePara = null;   // 우리가 넣은 사진첩 제목 — 아래 "표본 사진첩 지우기"가 건드리지 않게
 
             // 신가병원/칠산타워 서식은 칸 너비가 이미 맞춰져 있어, 옛 10칸(부재종류/결함크기)용
             // 폭 재배분은 적용하지 않는다.
@@ -43261,6 +43702,86 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                                 );
                                 if (inserted && usable) lastParaUnderHeading.set(usable, inserted);
                             }
+                            // ---- 비파괴 장비조사 사진첩 (2026-09-28) ----
+                            // 위치도 묶음 바로 뒤에. 제목은 위치도 제목(개요 7.N.)을, 소제목은 "1) 층" 제목을,
+                            // 사진 표는 결함 사진첩의 사진 2장짜리 표(사진N·위치·내용)를 복제해 쓴다.
+                            try {
+                                const albumSections = (ndtMapsApi && typeof ndtMapsApi.buildPhotoAlbumSections === 'function')
+                                    ? ndtMapsApi.buildPhotoAlbumSections(allNdtItemsForHwpx, allDispGroupsForHwpx)
+                                    : [];
+                                const albumHeadingSrc = measureHeadingPara || strengthCarbHeadingPara || fireproofHeadingPara || dispHeadingPara;
+                                if (albumSections.length && albumHeadingSrc && ndtAlbumPhotoTblStamp && ndtAlbumPhotoParaStamp) {
+                                    if (typeof window.updateLoadingText === 'function') {
+                                        window.updateLoadingText('한글(hwpx) 비파괴 장비조사 사진첩 생성 중...');
+                                    }
+                                    const tplPic = ndtAlbumPhotoTblStamp.getElementsByTagNameNS(HP_NS, 'pic')[0];
+                                    const tplCur = tplPic && tplPic.getElementsByTagNameNS(HP_NS, 'curSz')[0];
+                                    const albumMaxW = tplCur ? parseInt(tplCur.getAttribute('width'), 10) : 0;
+                                    const albumMaxH = tplCur ? parseInt(tplCur.getAttribute('height'), 10) : 0;
+                                    if (!albumMaxW || !albumMaxH) throw new Error('사진첩 표에 사진 칸이 없습니다.');
+                                    const decodeAlbumPhoto = async (entry) => {
+                                        if (!entry) return null;
+                                        try {
+                                            const url = await loadStrengthPhotoDataUrl(ndtBldgId, entry.photoId);
+                                            if (!url) return null;
+                                            const { bytes, mime, ext } = await dataUrlToBytes(url);
+                                            const size = await loadImageNaturalSizeFromBytes(bytes, mime);
+                                            return { entry, bytes, mime, ext, w: size.w, h: size.h };
+                                        } catch (onePhotoErr) {
+                                            console.warn('비파괴 사진 1장 임베드 실패(해당 컷만 생략):', entry.photoId, onePhotoErr);
+                                            return null;
+                                        }
+                                    };
+                                    const album = await insertHwpxNdtPhotoAlbum({
+                                        hpNs: HP_NS,
+                                        sections: albumSections,
+                                        anchorPara: (mapAnchor && mapAnchor.parentNode) ? mapAnchor
+                                            : (mapInsertBefore ? mapInsertBefore.previousElementSibling : null),
+                                        headingStamp: albumHeadingSrc,
+                                        subHeadingStamp: ndtAlbumSubHeadingStamp,
+                                        photoParaStamp: ndtAlbumPhotoParaStamp,
+                                        ensureTblTreatAsChar,
+                                        buildPairTbl: async (e1, e2) => {
+                                            let s1 = await decodeAlbumPhoto(e1);
+                                            let s2 = await decodeAlbumPhoto(e2);
+                                            if (!s1) { s1 = s2; s2 = null; }
+                                            if (!s1) return null;
+                                            photoTblCounter++;
+                                            const newTbl = ndtAlbumPhotoTblStamp.cloneNode(true);
+                                            newTbl.setAttribute('id', String(9500000 + photoTblCounter));
+                                            const pics = Array.from(newTbl.getElementsByTagNameNS(HP_NS, 'pic'));
+                                            pics.forEach((p, pIdx) => {
+                                                p.setAttribute('id', String(9600000 + photoTblCounter * 2 + pIdx));
+                                                p.setAttribute('instid', String(9700000 + photoTblCounter * 2 + pIdx));
+                                            });
+                                            const rows = Array.from(newTbl.getElementsByTagNameNS(HP_NS, 'tr')).filter(tr => tr.parentNode === newTbl);
+                                            const capTcs = rows[1] ? rows[1].getElementsByTagNameNS(HP_NS, 'tc') : [];
+                                            const descTcs = rows[2] ? rows[2].getElementsByTagNameNS(HP_NS, 'tc') : [];
+                                            if (pics.length < 2 || capTcs.length < 7 || descTcs.length < 4) {
+                                                throw new Error('사진첩 표 모양이 예상(사진 2장·사진N/위치/내용)과 다릅니다.');
+                                            }
+                                            const place = (slot, pic, labelTc, locTc, descTc) => {
+                                                imgCounter++;
+                                                const imgId = `ndtAlbum${imgCounter}`;
+                                                zip.file(`BinData/${imgId}.${slot.ext}`, slot.bytes);
+                                                manifestAdds.push(`<opf:item id="${imgId}" href="BinData/${imgId}.${slot.ext}" media-type="${slot.mime}" isEmbeded="1"/>`);
+                                                setPicImage(pic, imgId, slot.w, slot.h, albumMaxW, albumMaxH);
+                                                setTcText(labelTc, slot.entry.label);
+                                                setTcText(locTc, slot.entry.location);
+                                                setTcText(descTc, slot.entry.content);
+                                            };
+                                            place(s1, pics[0], capTcs[0], capTcs[2], descTcs[1]);
+                                            if (s2) place(s2, pics[1], capTcs[4], capTcs[6], descTcs[3]);
+                                            else stripPhotoTblRightHalf(newTbl);
+                                            return newTbl;
+                                        }
+                                    });
+                                    if (album) ndtAlbumTitlePara = album.titlePara;
+                                }
+                            } catch (albumErr) {
+                                console.error('비파괴 장비조사 사진첩 삽입 실패(나머지는 계속 진행):', albumErr);
+                                window.showToast('비파괴 장비조사 사진첩을 넣지 못했습니다: ' + albumErr.message, 'warning', 5000);
+                            }
                             // 위치도가 하나도 안 들어간 제목은 빈 제목만 남으므로 지운다.
                             // 들어간 제목은 쪽 나눔을 켜서 위치도 묶음이 새 쪽에서 시작하게 한다.
                             mapHeadingCandidates.forEach((p) => {
@@ -43291,7 +43812,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 // 찾아둔다. "비파괴 장비조사 위치도" 섹션 자체는 NDT try 블록 끝에서 이미 정리·
                 // 재구성했으므로(모든 결과표 뒤에 위치도를 한꺼번에 모아 넣는 단계) 여기서는
                 // 사진첩만 처리한다.
-                const albumStart = secChildren().find(p => /^비파괴 장비조사 사진첩/.test(paraText(p).trim()));
+                const albumStart = secChildren().find(p => p !== ndtAlbumTitlePara && /^비파괴 장비조사 사진첩/.test(paraText(p).trim()));
                 const surveyHeading = secChildren().find(p => /^주요 상태조사표, 사진 및 위치도/.test(paraText(p).trim()));
 
                 // 2) "비파괴 장비조사 사진첩" 섹션 전체 삭제
@@ -45677,17 +46198,26 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         }
     }
 
+    // 비파괴 장비조사 현장 사진(2026-09-28) — 항목(item.photoIds)과 부동침하·부재변위 구역(group.photoIds)에
+    // 여러 장씩 든다. 측정지 사진과 같은 저장(str_건물_id)·동기화 재업로드·정리·백업 보호 길을 탄다.
+    function ndtFieldPhotoIdsOf(rec) {
+        return (rec && Array.isArray(rec.photoIds)) ? rec.photoIds.filter(Boolean) : [];
+    }
+
+    /** 비파괴 항목·구역이 쓰는 사진 id 전부 — 측정지 사진 + 현장 사진 */
     function strengthPhotoIdsOfItem(item) {
         const slots = (item && Array.isArray(item.strengthSlots)) ? item.strengthSlots : [];
-        return slots.map((s) => s && s.photoId).filter(Boolean);
+        return slots.map((s) => s && s.photoId).filter(Boolean).concat(ndtFieldPhotoIdsOf(item));
     }
 
     function collectStrengthPhotoIdsInBuilding(bldgId) {
         const used = new Set();
         const prefix = `${bldgId}_`;
-        Object.keys(window.state.ndtData || {}).forEach((k) => {
-            if (!k.startsWith(prefix)) return;
-            (window.state.ndtData[k] || []).forEach((item) => strengthPhotoIdsOfItem(item).forEach((p) => used.add(p)));
+        [window.state.ndtData || {}, window.state.ndtDisplacementGroups || {}].forEach((map) => {
+            Object.keys(map).forEach((k) => {
+                if (!k.startsWith(prefix)) return;
+                (map[k] || []).forEach((item) => strengthPhotoIdsOfItem(item).forEach((p) => used.add(p)));
+            });
         });
         return used;
     }
@@ -48821,7 +49351,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 floorCode: code,
                 bundle: {
                     markings: { items: window.state.defects[key] || [] },
-                    ndt: { items: (window.state.ndtData || {})[key] || [] }
+                    ndt: {
+                        items: (window.state.ndtData || {})[key] || [],
+                        displacementGroups: (window.state.ndtDisplacementGroups || {})[key] || []
+                    }
                 }
             };
         });
@@ -50024,6 +50557,17 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     slots.forEach((s) => {
                         if (!s || !s.photoId) return;
                         pushJob(getStrengthPhotoDocId(b.id, s.photoId), null, k);
+                    });
+                });
+            });
+            // 비파괴 장비조사 현장 사진 — 항목과 부동침하·부재변위 구역(2026-09-28)
+            [ndt, window.state.ndtDisplacementGroups || {}].forEach((map) => {
+                Object.keys(map).forEach((k) => {
+                    if (!k.startsWith(prefix)) return;
+                    (map[k] || []).forEach((rec) => {
+                        ((rec && Array.isArray(rec.photoIds)) ? rec.photoIds : []).forEach((pid) => {
+                            if (pid) pushJob(getStrengthPhotoDocId(b.id, pid), null, k);
+                        });
                     });
                 });
             });

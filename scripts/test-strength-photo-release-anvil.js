@@ -45,6 +45,7 @@ function device(ndtData) {
     };
     vm.createContext(ctx);
     vm.runInContext([
+        extractFunction('function ndtFieldPhotoIdsOf('),
         extractFunction('function strengthPhotoIdsOfItem('),
         extractFunction('function collectStrengthPhotoIdsInBuilding('),
         extractFunction('function releaseStrengthPhotosOfItems('),

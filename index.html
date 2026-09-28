@@ -1976,7 +1976,7 @@
                         <button type="button" id="btnTriggerNdtGallery" class="btn btn-outline" style="flex: 1; border-color: #6b6b6b; color: #6b6b6b; font-size: 0.85rem;">
                             <i class="fa-solid fa-images"></i> 🖼️ 갤러리 선택
                         </button>
-                        <input type="file" id="inputNdtPhoto" accept="image/*" style="display:none;">
+                        <input type="file" id="inputNdtPhoto" accept="image/*" multiple style="display:none;">
                         <input type="file" id="inputNdtCamera" accept="image/*" capture="environment" style="display:none;">
                     </div>
                     <div id="ndtPhotoPreviewList" style="display: flex; gap: 0.5rem; flex-wrap: wrap;"></div>
@@ -2192,6 +2192,20 @@
                     <label class="form-label">📊 측정 지점 레벨</label>
                     <div id="ndtDispEditPointListHint" class="ndt-disp-modal-hint" style="margin-bottom:0.5rem;">마킹한 지점 레벨을 한 창에서 입력·수정하세요.</div>
                     <div id="ndtDispEditPointList" class="option-manager-list ndt-disp-edit-point-list"></div>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">📷 장비 측정 현장 사진</label>
+                    <div style="display: flex; gap: 0.5rem; margin-bottom: 0.4rem;">
+                        <button type="button" id="btnNdtDispEditCamera" class="btn" style="flex: 1; background: linear-gradient(135deg, #2a2a2a, #1f1f1f); color: white; font-size: 0.85rem;">
+                            <i class="fa-solid fa-camera"></i> 📷 즉시 촬영
+                        </button>
+                        <button type="button" id="btnNdtDispEditGallery" class="btn btn-outline" style="flex: 1; border-color: #6b6b6b; color: #6b6b6b; font-size: 0.85rem;">
+                            <i class="fa-solid fa-images"></i> 🖼️ 갤러리 선택
+                        </button>
+                        <input type="file" id="inputNdtDispEditPhoto" accept="image/*" multiple style="display:none;">
+                        <input type="file" id="inputNdtDispEditCamera" accept="image/*" capture="environment" style="display:none;">
+                    </div>
+                    <div id="ndtDispEditPhotoList" style="display: flex; gap: 0.5rem; flex-wrap: wrap;"></div>
                 </div>
             </div>
             <div class="modal-footer defect-drawer-footer" style="justify-content: space-between; flex-wrap: wrap; gap: 0.4rem;">

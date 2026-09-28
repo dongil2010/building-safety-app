@@ -120,13 +120,76 @@
         return false;
     }
 
+    /**
+     * "비파괴 장비조사 사진첩" 소제목 순서(2026-09-28). from: 비파괴 항목(items) / 부동침하·부재처짐 구역(groups).
+     * 구역의 category가 비어 있으면 옛 부동침하 구역이다.
+     */
+    var PHOTO_ALBUM_SECTIONS = [
+        { from: 'items', category: '실측', title: '부재실측' },
+        { from: 'items', category: '강도', title: '콘크리트 강도' },
+        { from: 'items', category: '탄산화', title: '콘크리트 탄산화' },
+        { from: 'items', category: '내화피복', title: '내화피복 두께' },
+        { from: 'items', category: '기울기', title: '외벽 기울기' },
+        { from: 'items', category: '부재변위', title: '부재 변위' },
+        { from: 'groups', category: '변위', title: '바닥 부동침하' },
+        { from: 'groups', category: '부재변위', title: '부재 처짐(변위)' }
+    ];
+
+    function text(v) {
+        return String(v == null ? '' : v).trim();
+    }
+
+    /**
+     * 사진이 있는 항목·구역만 소제목별로 모은다. 사진 번호(사진1…)는 사진첩 전체에 이어서 매긴다.
+     * items: buildCombinedNdtDataForReport의 allItems(location에 층 이름이 이미 붙어 있다)
+     * groups: allDispGroups(_ndtFloorLabel)
+     * 반환: [{ title, entries: [{ photoId, label, location, content }] }]
+     */
+    function buildPhotoAlbumSections(items, groups) {
+        var seq = 0;
+        var out = [];
+        PHOTO_ALBUM_SECTIONS.forEach(function (sec) {
+            var source = sec.from === 'groups' ? (groups || []) : (items || []);
+            var entries = [];
+            source.forEach(function (rec) {
+                if (!rec) return;
+                var cat = sec.from === 'groups' ? (rec.category || '변위') : rec.category;
+                if (cat !== sec.category) return;
+                var ids = Array.isArray(rec.photoIds) ? rec.photoIds.filter(Boolean) : [];
+                if (!ids.length) return;
+                var location;
+                var no;
+                if (sec.from === 'groups') {
+                    location = [text(rec._ndtFloorLabel), text(rec.locationType)].filter(Boolean).join(' ');
+                    no = text(rec.groupNo);
+                } else {
+                    location = text(rec.location);
+                    var comp = text(rec.component);
+                    if (comp && location.replace(/\s+/g, '').indexOf(comp.replace(/\s+/g, '')) < 0) {
+                        location = location ? location + ' ' + comp : comp;
+                    }
+                    no = text(rec.no);
+                }
+                var content = no ? sec.title + ' ' + no : sec.title;
+                ids.forEach(function (pid) {
+                    seq += 1;
+                    entries.push({ photoId: pid, label: '사진' + seq, location: location || '-', content: content });
+                });
+            });
+            if (entries.length) out.push({ title: sec.title, entries: entries });
+        });
+        return out;
+    }
+
     var api = {
         headingContains: headingContains,
         listLocationMapJobs: listLocationMapJobs,
         formatCaption: formatCaption,
         uniqueFloorCodes: uniqueFloorCodes,
         expandLocationMapInserts: expandLocationMapInserts,
-        shouldDropEmptyHeading: shouldDropEmptyHeading
+        shouldDropEmptyHeading: shouldDropEmptyHeading,
+        PHOTO_ALBUM_SECTIONS: PHOTO_ALBUM_SECTIONS,
+        buildPhotoAlbumSections: buildPhotoAlbumSections
     };
 
     root.BSA = root.BSA || {};

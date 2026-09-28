@@ -987,6 +987,12 @@
                     if (s && s.photoId) photoIds['str_' + bid + '_' + s.photoId] = true;
                 });
             });
+            // 비파괴 장비조사 현장 사진(항목·부동침하 구역, 2026-09-28) — 측정지 사진과 같은 str_ 저장
+            snap.ndtData.concat(snap.ndtDisplacementGroups).forEach(function (rec) {
+                (Array.isArray(rec && rec.photoIds) ? rec.photoIds : []).forEach(function (p) {
+                    if (p) photoIds['str_' + bid + '_' + p] = true;
+                });
+            });
         });
         return {
             payload: { version: 1, buildingId: bid, createdAt: ts, floors: floors },
