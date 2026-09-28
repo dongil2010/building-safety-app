@@ -15471,3 +15471,71 @@ html:not(.layout-desktop) .crack-monitor-photo-slots {
     word-break: keep-all;
     overflow-wrap: break-word;
 }
+
+/* ── 2026-09-28 빠른 선택 최적화: 더보기 칩 · 맛도리 세팅(★) ── */
+.defect-quick-chip.defect-quick-more {
+    border-style: dashed;
+    background: transparent;
+    color: #64748b;
+    font-weight: 700;
+}
+.defect-quick-chip.defect-quick-more:hover {
+    color: #334155;
+    border-color: #94a3b8;
+}
+.defect-cause-checks-host .defect-cause-more {
+    grid-column: 1 / -1;
+    justify-self: stretch;
+}
+.defect-quick-label .defect-quick-sub {
+    font-size: 0.66rem;
+    font-weight: 600;
+    color: #94a3b8;
+    margin-left: 0.25rem;
+}
+.option-manager-extra {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    margin-bottom: 0.7rem;
+}
+.option-manager-extra:empty {
+    display: none;
+}
+.option-manager-extra-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.8rem;
+    font-weight: 700;
+}
+.option-manager-extra-row select {
+    flex: 1;
+    min-width: 0;
+}
+.option-manager-extra-check input {
+    width: 1rem;
+    height: 1rem;
+}
+.option-manager-note {
+    margin: 0;
+    font-size: 0.72rem;
+    line-height: 1.45;
+    color: #64748b;
+}
+.option-manager-note span {
+    color: #94a3b8;
+}
+.option-manager-item-star {
+    border: none;
+    background: transparent;
+    color: #cbd5e1;
+    font-size: 1.05rem;
+    line-height: 1;
+    padding: 0 0.25rem;
+    cursor: pointer;
+    flex-shrink: 0;
+}
+.option-manager-item-star.is-on {
+    color: #f59e0b;
+}

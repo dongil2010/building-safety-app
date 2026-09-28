@@ -39,7 +39,7 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <meta name="apple-mobile-web-app-title" content="스마트 안전점검">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css">
-    <link rel="stylesheet" href="styles.css?v=20260928_140929">
+    <link rel="stylesheet" href="styles.css?v=20260928_143124">
 
     <!-- FontAwesome icons for clean engineering UI -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
@@ -1032,7 +1032,7 @@
                             <div class="defect-quick-label">
                                 <i class="fa-solid fa-building-columns"></i> 부재 명칭
                                 <span class="defect-quick-hint">⚙ 으로 순서·항목 편집 (계정별 저장)</span>
-                                <button type="button" id="btnManageComponent" class="btn-option-manage" tabindex="-1" title="부재 명칭 항목 관리"><i class="fa-solid fa-gear"></i></button>
+                                <button type="button" id="btnManageComponent" class="btn-option-manage" tabindex="-1" title="부재 명칭 세팅 — ★즐겨찾기·순서·숨김·추가 (계정별 저장)"><i class="fa-solid fa-gear"></i></button>
                             </div>
                             <input type="text" id="defectComponentInput" class="form-control defect-combo-input defect-quick-direct-input" placeholder="부재 명칭 직접 입력" autocomplete="off">
                             <div class="defect-joint-toolbar" id="defectJointToolbar" style="display:none;">
@@ -1051,7 +1051,7 @@
                             <div class="defect-quick-label">
                                 <i class="fa-solid fa-triangle-exclamation"></i> 결함 종류
                                 <span class="defect-quick-hint">눌러서 여러 개 선택 (선택 순) · ⚙ 계정별 편집</span>
-                                <button type="button" id="btnManageDefectType" class="btn-option-manage" tabindex="-1" title="결함 종류 항목 관리"><i class="fa-solid fa-gear"></i></button>
+                                <button type="button" id="btnManageDefectType" class="btn-option-manage" tabindex="-1" title="결함 종류 세팅 — ★즐겨찾기·순서·숨김·추가 (계정별 저장)"><i class="fa-solid fa-gear"></i></button>
                             </div>
                             <input type="text" id="defectTypeInput" class="form-control defect-combo-input defect-quick-direct-input" placeholder="결함 종류 직접 입력" autocomplete="off">
                             <div class="defect-quick-chip-grid dqg-type" id="quickDefectTypeChips"></div>
@@ -1069,8 +1069,8 @@
                         </div>
                         <div class="defect-quick-group" id="quickCauseGroup">
                             <div class="defect-quick-label">
-                                <i class="fa-solid fa-magnifying-glass"></i> 발생 원인 (복수 선택)
-                                <button type="button" id="btnManageCause" class="btn-option-manage" tabindex="-1" title="결함 원인 항목 관리"><i class="fa-solid fa-gear"></i></button>
+                                <i class="fa-solid fa-magnifying-glass"></i> 발생 원인 <span class="defect-quick-sub">종류에 맞춰 자동 체크 · 복수 선택</span>
+                                <button type="button" id="btnManageCause" class="btn-option-manage" tabindex="-1" title="발생 원인 세팅 — 종류별 원인·★자동 체크·순서 (계정별 저장)"><i class="fa-solid fa-gear"></i></button>
                             </div>
                             <div class="defect-cause-custom-row">
                                 <input type="text" id="defectCauseInput" class="form-control defect-combo-input defect-quick-direct-input" placeholder="발생 원인 직접 입력 후 Enter (이번 결함만)" autocomplete="off">
@@ -1232,7 +1232,7 @@
     <div class="modal-overlay" id="optionManagerModal">
         <div class="modal-card" style="max-width: 420px; width: 92%;">
             <div class="modal-header">
-                <h3 id="optionManagerTitle"><i class="fa-solid fa-list-check"></i> 항목 관리</h3>
+                <h3 id="optionManagerTitle"><i class="fa-solid fa-list-check"></i> 맛도리 세팅</h3>
                 <button type="button" class="modal-close" id="btnCloseOptionManager">&times;</button>
             </div>
             <div class="modal-body">
@@ -1248,6 +1248,7 @@
                     <input type="text" id="optionManagerNewInput" class="form-control" placeholder="새 항목 입력...">
                     <button type="button" id="btnOptionManagerAdd" class="btn btn-primary btn-sm" style="white-space:nowrap;"><i class="fa-solid fa-plus"></i> 추가</button>
                 </div>
+                <div id="optionManagerExtra" class="option-manager-extra"></div>
                 <div id="optionManagerList" class="option-manager-list"></div>
             </div>
         </div>
@@ -3180,41 +3181,42 @@
 
     <!-- Core → 탭 분류 → 기존 엔진(app.js) -->
     <!-- 오류 기록은 맨 먼저 — 아래 스크립트들이 읽히다 터져도 잡아야 한다 -->
-    <script src="js/core/error-log.js?v=20260928_140929"></script>
-    <script src="js/core/floor-identity.js?v=20260928_140929"></script>
-    <script src="js/core/state.js?v=20260928_140929"></script>
-    <script src="js/core/ndt-grade.js?v=20260928_140929"></script>
-    <script src="js/tabs/registry.js?v=20260928_140929"></script>
-    <script src="js/pdf-vector-bridge.js?v=20260928_140929"></script>
-    <script src="js/pdf-vector-snap.js?v=20260928_140929"></script>
-    <script src="js/core/layout-mode.js?v=20260928_140929"></script>
-    <script src="js/core/performance.js?v=20260928_140929"></script>
-    <script src="js/core/mobile-keyboard.js?v=20260928_140929"></script>
-    <script src="js/tabs/home.js?v=20260928_140929"></script>
-    <script src="js/tabs/map.js?v=20260928_140929"></script>
-    <script src="js/tabs/survey.js?v=20260928_140929"></script>
-    <script src="js/tabs/stats.js?v=20260928_140929"></script>
-    <script src="js/tabs/ndt.js?v=20260928_140929"></script>
-    <script src="js/shared/report.js?v=20260928_140929"></script>
-    <script src="js/shared/hwpx-survey-slots.js?v=20260928_140929"></script>
-    <script src="js/shared/hwpx-ndt-maps.js?v=20260928_140929"></script>
-    <script src="js/shared/cad-unmarked-place.js?v=20260928_140929"></script>
-    <script src="js/shared/arrow-survey-number.js?v=20260928_140929"></script>
-    <script src="js/shared/korean-text-wrap.js?v=20260928_140929"></script>
-    <script src="js/shared/hwpx-import.js?v=20260928_140929"></script>
-    <script src="js/shared/hwpx-validate.js?v=20260928_140929"></script>
-    <script src="js/shared/auth.js?v=20260928_140929"></script>
-    <script src="js/core/firebase-storage-assets.js?v=20260928_140929"></script>
-    <script src="js/core/drawing-floor-tombstone.js?v=20260928_140929"></script>
-    <script src="js/core/data-health.js?v=20260928_140929"></script>
-    <script src="js/core/building-meta-merge.js?v=20260928_140929"></script>
-    <script src="js/core/edit-history.js?v=20260928_140929"></script>
-    <script src="js/core/sync-merge.js?v=20260928_140929"></script>
-    <script src="js/core/legend-layout.js?v=20260928_140929"></script>
-    <script src="app.js?v=20260928_140929"></script>
+    <script src="js/core/error-log.js?v=20260928_143124"></script>
+    <script src="js/core/floor-identity.js?v=20260928_143124"></script>
+    <script src="js/core/state.js?v=20260928_143124"></script>
+    <script src="js/core/ndt-grade.js?v=20260928_143124"></script>
+    <script src="js/tabs/registry.js?v=20260928_143124"></script>
+    <script src="js/pdf-vector-bridge.js?v=20260928_143124"></script>
+    <script src="js/pdf-vector-snap.js?v=20260928_143124"></script>
+    <script src="js/core/layout-mode.js?v=20260928_143124"></script>
+    <script src="js/core/performance.js?v=20260928_143124"></script>
+    <script src="js/core/mobile-keyboard.js?v=20260928_143124"></script>
+    <script src="js/tabs/home.js?v=20260928_143124"></script>
+    <script src="js/tabs/map.js?v=20260928_143124"></script>
+    <script src="js/tabs/survey.js?v=20260928_143124"></script>
+    <script src="js/tabs/stats.js?v=20260928_143124"></script>
+    <script src="js/tabs/ndt.js?v=20260928_143124"></script>
+    <script src="js/shared/report.js?v=20260928_143124"></script>
+    <script src="js/shared/hwpx-survey-slots.js?v=20260928_143124"></script>
+    <script src="js/shared/hwpx-ndt-maps.js?v=20260928_143124"></script>
+    <script src="js/shared/cad-unmarked-place.js?v=20260928_143124"></script>
+    <script src="js/shared/arrow-survey-number.js?v=20260928_143124"></script>
+    <script src="js/shared/korean-text-wrap.js?v=20260928_143124"></script>
+    <script src="js/shared/hwpx-import.js?v=20260928_143124"></script>
+    <script src="js/shared/hwpx-validate.js?v=20260928_143124"></script>
+    <script src="js/shared/auth.js?v=20260928_143124"></script>
+    <script src="js/core/firebase-storage-assets.js?v=20260928_143124"></script>
+    <script src="js/core/drawing-floor-tombstone.js?v=20260928_143124"></script>
+    <script src="js/core/data-health.js?v=20260928_143124"></script>
+    <script src="js/core/building-meta-merge.js?v=20260928_143124"></script>
+    <script src="js/core/edit-history.js?v=20260928_143124"></script>
+    <script src="js/core/sync-merge.js?v=20260928_143124"></script>
+    <script src="js/shared/defect-quick-presets.js?v=20260928_143124"></script>
+    <script src="js/core/legend-layout.js?v=20260928_143124"></script>
+    <script src="app.js?v=20260928_143124"></script>
 
     <script>
-        window.BSA_APP_VERSION = '20260928_140929';
+        window.BSA_APP_VERSION = '20260928_143124';
 
         (function () {
             var el = document.getElementById('appVersionText');
@@ -3241,7 +3243,7 @@
                     native = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
                 } catch (e) {}
                 if (native) return;
-                navigator.serviceWorker.register('./sw.js?v=20260928_140929')
+                navigator.serviceWorker.register('./sw.js?v=20260928_143124')
 
                     .then(function(registration) {
                         console.log('✅ ServiceWorker Registered Successfully with scope:', registration.scope);

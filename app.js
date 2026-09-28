@@ -343,14 +343,22 @@ document.addEventListener('DOMContentLoaded', () => {
             hiddenDefectCauses: window.state.hiddenDefectCauses || {},
             defectComponentOrder: window.state.defectComponentOrder || {},
             defectTypeOrder: window.state.defectTypeOrder || {},
-            defectCauseOrder: window.state.defectCauseOrder || {}
+            defectCauseOrder: window.state.defectCauseOrder || {},
+            // 2026-09-28 맛도리 세팅: ★즐겨찾기 · 사용 빈도 · 원인 자동 체크 (계정별)
+            favoriteDefectComponents: window.state.favoriteDefectComponents || {},
+            favoriteDefectTypes: window.state.favoriteDefectTypes || {},
+            favoriteDefectCauses: window.state.favoriteDefectCauses || {},
+            defectPickUsage: window.state.defectPickUsage || {},
+            defectCauseAutoCheck: window.state.defectCauseAutoCheck !== false
         };
     }
 
     const DEFECT_PIN_PRESET_FIELDS = [
         'customDefectTypes', 'customDefectCauses', 'customDefectComponents',
         'hiddenDefectComponents', 'hiddenDefectTypes', 'hiddenDefectCauses',
-        'defectComponentOrder', 'defectTypeOrder', 'defectCauseOrder'
+        'defectComponentOrder', 'defectTypeOrder', 'defectCauseOrder',
+        'favoriteDefectComponents', 'favoriteDefectTypes', 'favoriteDefectCauses',
+        'defectPickUsage', 'defectCauseAutoCheck'
     ];
 
     function applyDefectPinPresets(presets) {
@@ -468,6 +476,11 @@ document.addEventListener('DOMContentLoaded', () => {
         window.state.defectComponentOrder = {};
         window.state.defectTypeOrder = {};
         window.state.defectCauseOrder = {};
+        window.state.favoriteDefectComponents = {};
+        window.state.favoriteDefectTypes = {};
+        window.state.favoriteDefectCauses = {};
+        window.state.defectPickUsage = {};
+        window.state.defectCauseAutoCheck = true;
     }
 
     async function syncAfterImportWithRetry(label) {
@@ -2137,6 +2150,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 defectComponentOrder: window.state.defectComponentOrder || {},
                 defectTypeOrder: window.state.defectTypeOrder || {},
                 defectCauseOrder: window.state.defectCauseOrder || {},
+                favoriteDefectComponents: window.state.favoriteDefectComponents || {},
+                favoriteDefectTypes: window.state.favoriteDefectTypes || {},
+                favoriteDefectCauses: window.state.favoriteDefectCauses || {},
+                defectPickUsage: window.state.defectPickUsage || {},
+                defectCauseAutoCheck: window.state.defectCauseAutoCheck !== false,
                 styleColors: window.state.styleColors || null,
             styleColorsPaletteVersion: window.state.styleColorsPaletteVersion || 0,
                 styleSizes: window.state.styleSizes || null,
@@ -2305,6 +2323,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (parsed.defectCauseOrder) {
                     window.state.defectCauseOrder = parsed.defectCauseOrder;
                 }
+                ['favoriteDefectComponents', 'favoriteDefectTypes', 'favoriteDefectCauses', 'defectPickUsage'].forEach((f) => {
+                    if (parsed[f] && typeof parsed[f] === 'object') window.state[f] = parsed[f];
+                });
+                if (parsed.defectCauseAutoCheck === false) window.state.defectCauseAutoCheck = false;
                 if (parsed.styleColors) {
             window.state.styleColors = parsed.styleColors;
         }
@@ -22681,9 +22703,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     ];
     const DEFECT_COMPONENT_PRESET = {
         '구조체': [
+            // 2026-09-28: 현장에서 주로 쓰는 이름(보·벽체·옹벽·파라펫) 추가 — 기존 이름은 그대로(★ 밖은 「더보기」)
             '기둥', 'RC기둥', '철골기둥', 'SRC기둥',
-            '큰보', '작은보', '철골거더', '철골빔', '캔틸레버보',
-            '슬래브', '데크슬래브', 'RC벽체', '내력벽',
+            '보', '큰보', '작은보', '철골거더', '철골빔', '캔틸레버보',
+            '슬래브', '데크슬래브', '벽체', 'RC벽체', '내력벽', '옹벽', '파라펫',
             '계단', '계단참', '계단슬래브',
             '기초', '독립기초', '매트기초',
             ...DEFECT_JOINT_COMPONENT_PRESET,
@@ -22764,6 +22787,100 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         }).join('');
         container.querySelectorAll('.defect-quick-chip').forEach(btn => {
             btn.addEventListener('click', () => onPick(btn.dataset.value || ''));
+        });
+    }
+
+    // ── 2026-09-28 빠른 선택 최적화: ★즐겨찾기·사용 빈도로 먼저 보일 칩만, 나머지는 「더보기」 ──
+    function getDefectQuickPresetsApi() {
+        return (window.BSA && window.BSA.defectQuickPresets) || null;
+    }
+
+    function getDefectFavoriteList(field, bucket) {
+        const q = getDefectQuickPresetsApi();
+        if (!q) return [];
+        if (field === 'component') {
+            migrateDefectComponentStateShape();
+            return q.getEffectiveFavorites(window.state.favoriteDefectComponents, 'component', bucket,
+                (window.state.customDefectComponents || {})[bucket] || [],
+                (window.state.hiddenDefectComponents || {})[bucket] || []);
+        }
+        if (field === 'type') {
+            return q.getEffectiveFavorites(window.state.favoriteDefectTypes, 'type', bucket,
+                (window.state.customDefectTypes || {})[bucket] || [],
+                (window.state.hiddenDefectTypes || {})[bucket] || []);
+        }
+        // 원인 ★ = 이 종류를 고르면 자동 체크. 기본값 없음(없으면 맨 위 원인).
+        return q.getEffectiveFavorites(window.state.favoriteDefectCauses, 'cause', bucket, [],
+            (window.state.hiddenDefectCauses || {})[bucket] || []);
+    }
+
+    function toggleDefectFavorite(field, bucket, value) {
+        const q = getDefectQuickPresetsApi();
+        if (!q || !bucket || !value) return;
+        const stateKey = field === 'component' ? 'favoriteDefectComponents'
+            : (field === 'type' ? 'favoriteDefectTypes' : 'favoriteDefectCauses');
+        const customList = field === 'component' ? ((window.state.customDefectComponents || {})[bucket] || [])
+            : (field === 'type' ? ((window.state.customDefectTypes || {})[bucket] || []) : []);
+        const hiddenKey = field === 'component' ? 'hiddenDefectComponents'
+            : (field === 'type' ? 'hiddenDefectTypes' : 'hiddenDefectCauses');
+        window.state[stateKey] = q.toggleFavorite(window.state[stateKey] || {}, field, bucket, value,
+            customList, (window.state[hiddenKey] || {})[bucket] || []);
+        if (typeof saveStateToLocalStorage === 'function') saveStateToLocalStorage();
+    }
+
+    function recordDefectPickUsage(field, bucket, value) {
+        const q = getDefectQuickPresetsApi();
+        if (!q || !value) return;
+        window.state.defectPickUsage = q.recordUsage(window.state.defectPickUsage || {}, field, bucket, value);
+        // 결함 자동 저장이 곧 로컬에 쓰므로 여기서는 계정 설정 동기화만 예약
+        if (window.state.uid && typeof scheduleSyncUserDefectPinPresets === 'function') scheduleSyncUserDefectPinPresets();
+    }
+
+    function computeDefectVisibleChips(field, bucket, ordered, selected, pinned) {
+        const q = getDefectQuickPresetsApi();
+        if (!q) return { visible: (ordered || []).slice(), hidden: [] };
+        return q.computeVisibleChips(ordered, {
+            limit: (q.VISIBLE_LIMIT && q.VISIBLE_LIMIT[field]) || 8,
+            favorites: getDefectFavoriteList(field, bucket),
+            usage: q.getUsageCounts(window.state.defectPickUsage, field, bucket),
+            selected: selected || [],
+            pinned: pinned || []
+        });
+    }
+
+    function isDefectChipMoreOpen(key) {
+        return !!(window._defectChipMoreOpen && window._defectChipMoreOpen[key]);
+    }
+
+    function toggleDefectChipMore(key) {
+        if (!window._defectChipMoreOpen) window._defectChipMoreOpen = {};
+        window._defectChipMoreOpen[key] = !window._defectChipMoreOpen[key];
+    }
+
+    /** 칩 + 「더보기 N」/「접기」 — 선택된 칩은 항상 보이는 쪽에 들어 있다 */
+    function renderDefectChipsWithMore(containerId, split, isActive, onPick, moreKey, onMoreToggled) {
+        const container = document.getElementById(containerId);
+        if (!container) return;
+        const open = isDefectChipMoreOpen(moreKey);
+        const hidden = (split && split.hidden) || [];
+        const list = ((split && split.visible) || []).concat(open ? hidden : []);
+        let html = list.map((value) => {
+            const active = isActive(value);
+            return `<button type="button" class="defect-quick-chip${active ? ' active' : ''}" tabindex="-1" data-value="${escapeHtml(value)}">${escapeHtml(value)}</button>`;
+        }).join('');
+        if (hidden.length) {
+            html += `<button type="button" class="defect-quick-chip defect-quick-more" tabindex="-1" data-more="1" title="${open ? '자주 쓰는 것만 보기' : '나머지 항목 보기'}">${open ? '접기 ▲' : `더보기 ${hidden.length} ▼`}</button>`;
+        }
+        container.innerHTML = html;
+        container.querySelectorAll('.defect-quick-chip').forEach((btn) => {
+            btn.addEventListener('click', () => {
+                if (btn.dataset.more) {
+                    toggleDefectChipMore(moreKey);
+                    if (typeof onMoreToggled === 'function') onMoreToggled();
+                    return;
+                }
+                onPick(btn.dataset.value || '');
+            });
         });
     }
 
@@ -23018,30 +23135,35 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             if (currentComponent && isJointComponentName(currentComponent) && !componentOptions.includes(currentComponent)) {
                 componentOptions.unshift(currentComponent);
             }
-        } else {
-            componentOptions = componentOptions.slice(0, 18);
         }
-        renderQuickPickChipGroup('quickComponentChips', componentOptions, currentComponent, (value) => {
+        const onComponentPick = (value) => {
             if (isDefectBulkEditMode()) markDefectBulkFieldChanged('component');
+            if (value && value !== currentComponent) recordDefectPickUsage('component', currentCategory, value);
             syncDefectComboFields(componentSelect, componentInput, value);
             updateDefectTypeDropdown(currentCategory, getDefectComboValue(typeSelect, typeInput));
             if (typeof scheduleDefectAutoApply === 'function') scheduleDefectAutoApply();
             refreshDefectQuickPickBar();
-        });
+        };
+        if (jointMode) {
+            renderQuickPickChipGroup('quickComponentChips', componentOptions, currentComponent, onComponentPick);
+        } else {
+            // ★즐겨찾기 + 많이 쓴 순으로 8개만, 나머지는 「더보기」
+            const compSplit = computeDefectVisibleChips('component', currentCategory, componentOptions,
+                currentComponent ? [currentComponent] : []);
+            renderDefectChipsWithMore('quickComponentChips', compSplit, (v) => v === currentComponent,
+                onComponentPick, 'component', refreshDefectQuickPickBar);
+        }
 
         const selectedTypeParts = parseDefectTypeList(currentType);
         const selectedTypeSet = new Set(selectedTypeParts);
         const typeChipOptions = getPinnedDefectTypeChips(currentCategory, currentComponent);
-        const typeContainer = document.getElementById('quickDefectTypeChips');
-        if (typeContainer) {
-            typeContainer.innerHTML = typeChipOptions.map(value => {
-                const active = selectedTypeSet.has(value);
-                return `<button type="button" class="defect-quick-chip${active ? ' active' : ''}" tabindex="-1" data-value="${escapeHtml(value)}">${escapeHtml(value)}</button>`;
-            }).join('');
-            typeContainer.querySelectorAll('.defect-quick-chip').forEach(btn => {
-                btn.addEventListener('click', () => toggleDefectTypeChip(btn.dataset.value || ''));
-            });
-        }
+        const typeSplit = computeDefectVisibleChips('type', currentCategory, typeChipOptions, selectedTypeParts, ['상태양호']);
+        renderDefectChipsWithMore('quickDefectTypeChips', typeSplit, (v) => selectedTypeSet.has(v), (value) => {
+            if (value && value !== '상태양호' && !selectedTypeSet.has(value)) {
+                recordDefectPickUsage('type', currentCategory, value);
+            }
+            toggleDefectTypeChip(value);
+        }, 'type', refreshDefectQuickPickBar);
 
         const causeGroup = document.getElementById('quickCauseGroup');
         if (causeGroup) causeGroup.style.display = hasActionableDefectType(currentType) ? '' : 'none';
@@ -23101,6 +23223,19 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     ensureDefectComboOption(select, v);
                 }
                 if (onChange) onChange(v);
+                if (selectId === 'defectType') {
+                    // 타이핑 중 onChange가 원인을 비우므로, 칸에 들어올 때 기억한 원인을 기준으로 맞춘다.
+                    // 종류가 그대로면(탭으로 지나가기만 함) 원래 원인을 되살리고, 바뀌었으면 자동 체크.
+                    const atFocus = input.dataset.valueAtFocus;
+                    const causesAtFocus = input.dataset.causesAtFocus != null ? parseCauseList(input.dataset.causesAtFocus) : null;
+                    delete input.dataset.valueAtFocus;
+                    delete input.dataset.causesAtFocus;
+                    if (atFocus != null && atFocus === v && causesAtFocus) {
+                        updateDefectCauseDropdown(v, joinCauseList(causesAtFocus));
+                    } else {
+                        applyCauseAutoPickForType(v, causesAtFocus || undefined);
+                    }
+                }
                 if (selectId === 'defectType' && typeof maybeReclassifyPlasterCrackToNonStructural === 'function') {
                     if (maybeReclassifyPlasterCrackToNonStructural()) return;
                 }
@@ -23119,6 +23254,12 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 }
                 if (typeof scheduleDefectAutoApply === 'function') scheduleDefectAutoApply();
             });
+            if (selectId === 'defectType') {
+                input.addEventListener('focus', () => {
+                    input.dataset.valueAtFocus = input.value.trim();
+                    input.dataset.causesAtFocus = joinCauseList(getSelectedCausesFromUi());
+                });
+            }
             input.addEventListener('blur', () => commitTypedComboValue());
             input.addEventListener('keydown', (e) => {
                 if (e.key !== 'Enter') return;
@@ -23471,6 +23612,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         'RC벽체': RC_WALL_DEFECTS,
         '벽체': RC_WALL_DEFECTS,
         '내력벽': RC_WALL_DEFECTS,
+        '옹벽': RC_WALL_DEFECTS,
+        '파라펫': RC_WALL_DEFECTS,
+        '보': RC_BEAM_DEFECTS,
         '기둥': RC_COLUMN_DEFECTS,
         'RC기둥': RC_COLUMN_DEFECTS,
         'SRC기둥': RC_COLUMN_DEFECTS,
@@ -23531,6 +23675,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (key.includes('타일') || key.includes('석재') || key.includes('도장') || key.includes('수장')) return null;
         if (key.includes('천장') || key.includes('바닥') || key === '문') return null;
         if (key.includes('벽체') || key === '내력벽') return WALL_CRACK_KINDS.slice();
+        if (key.includes('옹벽') || key.includes('파라펫')) return WALL_CRACK_KINDS.slice();
         if (key.includes('기둥')) return COLUMN_CRACK_KINDS.slice();
         if (key.includes('보') || key.includes('거더') || key.includes('빔')) return BEAM_CRACK_KINDS.slice();
         return null;
@@ -23607,6 +23752,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 }
                 if (key.includes('철골')) return STEEL_MEMBER_DEFECTS;
                 if ((key.includes('벽체') || key === '내력벽') && !key.includes('조적')) return RC_WALL_DEFECTS;
+                if (key.includes('옹벽') || key.includes('파라펫')) return RC_WALL_DEFECTS;
                 if (key.includes('기둥')) return RC_COLUMN_DEFECTS;
                 if (key.includes('보') || key.includes('거더') || key.includes('빔')) return RC_BEAM_DEFECTS;
                 if (key.includes('슬래브') && !key.includes('데크')) return RC_SLAB_DEFECTS;
@@ -23818,6 +23964,31 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         return true;
     }
 
+    /**
+     * 결함 종류를 사용자가 바꿨을 때 발생 원인 다시 맞추기(2026-09-28).
+     * 직접 고른 원인은 유지, 비어 있으면 그 종류의 ★원인(없으면 맨 위 원인)을 자동 체크.
+     * 결함을 열 때(기존 값 표시)나 일괄 수정에서는 쓰지 않는다 — 저장된 값을 몰래 바꾸지 않게.
+     */
+    function applyCauseAutoPickForType(typeStr, selectedOverride) {
+        const t = String(typeStr || '').trim();
+        const q = getDefectQuickPresetsApi();
+        if (!q || !t || !hasActionableDefectType(t) || isDefectBulkEditMode()) {
+            window._defectAutoCauses = [];
+            updateDefectCauseDropdown(t || '기타');
+            return;
+        }
+        const groups = getCauseDisplayGroups(t);
+        const res = q.pickCausesAfterTypeChange({
+            groupOptions: groups.map((g) => getCauseOptionsForKey(g.key)),
+            groupFavorites: groups.map((g) => getDefectFavoriteList('cause', g.key)),
+            selected: Array.isArray(selectedOverride) ? selectedOverride : getSelectedCausesFromUi(),
+            autoPicked: window._defectAutoCauses || [],
+            autoCheck: window.state.defectCauseAutoCheck !== false
+        });
+        window._defectAutoCauses = res.autoPicked;
+        updateDefectCauseDropdown(t, joinCauseList(res.selected));
+    }
+
     /** 결함 종류 칩 토글 — 균열·비균열 모두 복수 선택, 순서는 처음 고른 순 */
     function toggleDefectTypeChip(value) {
         const typeSelect = document.getElementById('defectType');
@@ -23845,7 +24016,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
         const joined = joinDefectTypeList(parts);
         syncDefectComboFields(typeSelect, typeInput, joined);
-        updateDefectCauseDropdown(joined || '기타');
+        applyCauseAutoPickForType(joined);
         toggleDefectSizeInputMode();
         if (maybeReclassifyPlasterCrackToNonStructural()) return;
         if (typeof scheduleDefectAutoApply === 'function') scheduleDefectAutoApply();
@@ -25286,8 +25457,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     window.openSurveyCrackMonitorDefect = window.openNdtCrackMonitorDefect;
 
     // --- Dynamic Defect Cause Presets & Custom Adding ---
+    // 균열 원인: 기존 5종 + 부등침하·철근 부식 팽창(2026-09-28). 맨 위(건조수축)가 기본 자동 체크.
     const CORE_CRACK_CAUSE_PRESET = [
-        '건조수축', '재료적 특성', '수화열·온도균열', '내력부족', '과하중'
+        '건조수축', '재료적 특성', '수화열·온도균열', '내력부족', '과하중', '부등침하', '철근 부식 팽창'
     ];
     const defectCausePreset = {
         // ── 구조체·조적벽체 균열 공통 (5종) ──
@@ -25491,6 +25663,12 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         '부식/녹': [
             '도장 손상', '습기·누수', '염해', '유지관리 부족', '결로', '기타'
         ],
+        '부식': [
+            '방청 불량', '수분 노출', '도막 노후화', '염해', '결로·습기', '기타'
+        ],
+        '파손': [
+            '외부 충격', '노후화', '시공 불량', '진동', '기타'
+        ],
         '변형/좌굴': [
             '과하중', '좌굴', '시공 불량', '충돌·충격', '온도변형', '기타'
         ],
@@ -25681,6 +25859,19 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             return;
         }
 
+        // 원인은 목록 순(계정 순서)대로 8개만 먼저 — 체크된 것은 항상 보임, 나머지는 「더보기」
+        const causeLimit = ((getDefectQuickPresetsApi() || {}).VISIBLE_LIMIT || {}).cause || 8;
+        const causeMoreOpen = isDefectChipMoreOpen('cause');
+        let hiddenCauseCount = 0;
+        if (!causeMoreOpen && flatItems.length > causeLimit) {
+            const keepIdx = new Set();
+            flatItems.forEach((it, i) => { if (i < causeLimit || selected.has(it.cause)) keepIdx.add(i); });
+            hiddenCauseCount = flatItems.length - keepIdx.size;
+            const kept = flatItems.filter((_it, i) => keepIdx.has(i));
+            flatItems.length = 0;
+            kept.forEach((it) => flatItems.push(it));
+        }
+
         box.innerHTML = flatItems.map(({ cause, tone }, idx) => {
             const id = `causeCheck_${idx}_${String(cause).replace(/[^a-zA-Z0-9가-힣]/g, '_')}`;
             const checked = selected.has(cause) ? 'checked' : '';
@@ -25690,10 +25881,37 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 <input type="checkbox" id="${id}" value="${safe}" tabindex="-1" ${checked}>
                 <span>${cause}</span>
             </label>`;
-        }).join('');
+        }).join('') + (hiddenCauseCount > 0
+            ? `<button type="button" class="defect-quick-chip defect-quick-more defect-cause-more" tabindex="-1" data-cause-more="1">더보기 ${hiddenCauseCount} ▼</button>`
+            : ((causeMoreOpen && flatItems.length > causeLimit)
+                ? `<button type="button" class="defect-quick-chip defect-quick-more defect-cause-more" tabindex="-1" data-cause-more="1">접기 ▲</button>`
+                : ''));
+
+        const causeMoreBtn = box.querySelector('[data-cause-more]');
+        if (causeMoreBtn) {
+            causeMoreBtn.addEventListener('click', () => {
+                toggleDefectChipMore('cause');
+                renderMultiTypeCauseChecks(defectTypeStr, joinCauseList(getSelectedCausesFromUi()));
+            });
+        }
 
         box.querySelectorAll('input[type="checkbox"]').forEach(inp => {
             inp.addEventListener('change', () => {
+                // 자동으로 붙은 원인만 있을 때 다른 원인을 켜면 자동 원인을 빼고 바꿔 끼움
+                const qp = getDefectQuickPresetsApi();
+                if (qp && Array.isArray(window._defectAutoCauses) && window._defectAutoCauses.length) {
+                    const res = qp.applyManualCauseToggle({
+                        value: inp.value,
+                        checked: inp.checked,
+                        selected: getSelectedCausesFromUi(),
+                        autoPicked: window._defectAutoCauses
+                    });
+                    window._defectAutoCauses = res.autoPicked;
+                    const keepSet = new Set(res.selected);
+                    box.querySelectorAll('input[type="checkbox"]').forEach((c) => {
+                        if (c.checked && !keepSet.has(c.value)) c.checked = false;
+                    });
+                }
                 if (isDefectBulkEditMode()) markDefectBulkFieldChanged('cause');
                 const causes = getSelectedCausesFromUi();
                 const joined = joinCauseList(causes);
@@ -25864,7 +26082,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     document.getElementById('defectTypeInput'),
                     e.target.value
                 );
-                updateDefectCauseDropdown(e.target.value);
+                applyCauseAutoPickForType(e.target.value);
                 toggleDefectSizeInputMode();
                 if (maybeReclassifyPlasterCrackToNonStructural()) return;
                 if (typeof scheduleDefectAutoApply === 'function') scheduleDefectAutoApply();
@@ -26028,7 +26246,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             if (!window.state.customDefectComponents[compCat]) window.state.customDefectComponents[compCat] = [];
             if (!window.state.hiddenDefectComponents[compCat]) window.state.hiddenDefectComponents[compCat] = [];
             return {
-                title: `부재 명칭 관리 (${compCat})`,
+                title: `부재 명칭 세팅 (${compCat})`,
+                favField: 'component',
+                favBucket: compCat,
                 presetList: DEFECT_COMPONENT_PRESET[compCat] || DEFECT_COMPONENT_PRESET['구조체'],
                 hiddenList: window.state.hiddenDefectComponents[compCat],
                 customList: window.state.customDefectComponents[compCat],
@@ -26052,7 +26272,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             if (!window.state.hiddenDefectTypes[cat]) window.state.hiddenDefectTypes[cat] = [];
             if (!window.state.customDefectTypes[cat]) window.state.customDefectTypes[cat] = [];
             return {
-                title: `결함 종류 관리 (${cat})`,
+                title: `결함 종류 세팅 (${cat})`,
+                favField: 'type',
+                favBucket: cat,
                 presetList: getDefectTypePresetFor(cat, component),
                 hiddenList: window.state.hiddenDefectTypes[cat],
                 customList: window.state.customDefectTypes[cat],
@@ -26070,13 +26292,16 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 document.getElementById('defectType'),
                 document.getElementById('defectTypeInput')
             ) || '균열';
-            const key = getCauseKey(dType);
+            // 세팅 창의 「결함 종류」 선택으로 다른 종류의 원인 목록도 바로 편집
+            const key = window._optionManagerCauseKey || getCauseDisplayGroups(dType)[0]?.key || getCauseKey(dType);
             if (!window.state.customDefectCauses) window.state.customDefectCauses = {};
             if (!window.state.hiddenDefectCauses) window.state.hiddenDefectCauses = {};
             if (!window.state.hiddenDefectCauses[key]) window.state.hiddenDefectCauses[key] = [];
             if (!window.state.customDefectCauses[key]) window.state.customDefectCauses[key] = [];
             return {
-                title: `결함 원인 관리 (${key})`,
+                title: `발생 원인 세팅 (${key})`,
+                favField: 'cause',
+                favBucket: key,
                 presetList: defectCausePreset[key] || [],
                 hiddenList: window.state.hiddenDefectCauses[key],
                 customList: window.state.customDefectCauses[key],
@@ -26190,8 +26415,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (!ctx || !listEl) return;
 
         if (titleEl) titleEl.innerHTML = `<i class="fa-solid fa-list-check"></i> ${ctx.title}`;
+        renderOptionManagerExtra(ctx);
 
         const visibleItems = getOrderedVisibleOptionItems(ctx);
+        const favSet = new Set(ctx.favField ? getDefectFavoriteList(ctx.favField, ctx.favBucket) : []);
 
         listEl.innerHTML = '';
         if (visibleItems.length === 0) {
@@ -26213,6 +26440,24 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             handle.innerHTML = '<i class="fa-solid fa-grip-vertical"></i>';
             row.appendChild(handle);
 
+            if (ctx.favField) {
+                const isFav = favSet.has(text);
+                const star = document.createElement('button');
+                star.type = 'button';
+                star.className = 'option-manager-item-star' + (isFav ? ' is-on' : '');
+                star.textContent = isFav ? '★' : '☆';
+                star.title = ctx.favField === 'cause'
+                    ? (isFav ? '자동 체크 해제' : '이 종류를 고르면 자동 체크')
+                    : (isFav ? '즐겨찾기 해제' : '즐겨찾기 — 결함 수정창에 항상 먼저 보임');
+                star.setAttribute('aria-pressed', isFav ? 'true' : 'false');
+                star.addEventListener('click', () => {
+                    toggleDefectFavorite(ctx.favField, ctx.favBucket, text);
+                    renderOptionManagerList();
+                    if (typeof refreshDefectQuickPickBar === 'function') refreshDefectQuickPickBar();
+                });
+                row.appendChild(star);
+            }
+
             const label = document.createElement('span');
             label.className = 'option-manager-item-label';
             label.textContent = ctx.labelFor(text);
@@ -26230,6 +26475,46 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             listEl.appendChild(row);
         });
         bindOptionManagerDrag(listEl);
+    }
+
+    /** 세팅 창 위쪽: 안내 + (원인) 결함 종류 고르기 · 자동 체크 켜기/끄기 */
+    function renderOptionManagerExtra(ctx) {
+        const host = document.getElementById('optionManagerExtra');
+        if (!host) return;
+        const who = window.state.uid ? '로그인한 계정에 저장 (다른 기기에서도 같음)' : '이 기기에 저장 (로그인하면 계정에 저장)';
+        if (ctx.favField !== 'cause') {
+            host.innerHTML = `<p class="option-manager-note">★ = 결함 수정창에 항상 먼저 보임 · 나머지는 많이 쓴 순으로 채우고 「더보기」로 접힘 · 끌어서 순서 변경<br><span>${escapeHtml(who)}</span></p>`;
+            return;
+        }
+        const keys = [];
+        const seen = new Set();
+        const pushKey = (k) => { if (k && !seen.has(k)) { seen.add(k); keys.push(k); } };
+        pushKey(ctx.favBucket);
+        Object.keys(defectCausePreset).forEach(pushKey);
+        Object.keys(window.state.customDefectCauses || {}).forEach(pushKey);
+        const autoOn = window.state.defectCauseAutoCheck !== false;
+        host.innerHTML = `
+            <label class="option-manager-extra-row">결함 종류
+                <select id="optionManagerCauseKey" class="form-select">${keys.map((k) => `<option value="${escapeHtml(k)}"${k === ctx.favBucket ? ' selected' : ''}>${escapeHtml(k)}</option>`).join('')}</select>
+            </label>
+            <label class="option-manager-extra-row option-manager-extra-check">
+                <input type="checkbox" id="optionManagerCauseAuto"${autoOn ? ' checked' : ''}> 결함 종류를 고르면 원인 자동 체크
+            </label>
+            <p class="option-manager-note">★ 원인이 자동 체크됩니다(★ 없으면 맨 위 원인). 다른 원인을 누르면 자동 원인과 바꿔 끼워요 · 끌어서 순서 = 결함 수정창 순서<br><span>${escapeHtml(who)}</span></p>`;
+        const sel = host.querySelector('#optionManagerCauseKey');
+        if (sel) {
+            sel.addEventListener('change', () => {
+                window._optionManagerCauseKey = sel.value || null;
+                renderOptionManagerList();
+            });
+        }
+        const chk = host.querySelector('#optionManagerCauseAuto');
+        if (chk) {
+            chk.addEventListener('change', () => {
+                window.state.defectCauseAutoCheck = !!chk.checked;
+                if (typeof saveStateToLocalStorage === 'function') saveStateToLocalStorage();
+            });
+        }
     }
 
     function deleteOptionItem(item, isPreset) {
@@ -26275,6 +26560,11 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (Array.isArray(ctx.orderList)) {
             ctx.orderList.length = 0;
             (ctx.presetList || []).forEach((t) => ctx.orderList.push(t));
+        }
+        if (ctx.favField && ctx.favBucket) {
+            const favKey = ctx.favField === 'component' ? 'favoriteDefectComponents'
+                : (ctx.favField === 'type' ? 'favoriteDefectTypes' : 'favoriteDefectCauses');
+            if (window.state[favKey] && typeof window.state[favKey] === 'object') delete window.state[favKey][ctx.favBucket];
         }
         saveStateToLocalStorage();
         _lastSyncedUserDefectPinJson = '';
@@ -26335,6 +26625,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         window.state.hiddenDefectCauses = {};
         window.state.customDefectCauses = {};
         window.state.defectCauseOrder = {};
+        window.state.favoriteDefectComponents = {};
+        window.state.favoriteDefectTypes = {};
+        window.state.favoriteDefectCauses = {};
+        window.state.defectCauseAutoCheck = true;
     }
 
     function resetOptionManagerAll() {
@@ -26372,6 +26666,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
     window.openOptionManagerModal = function(fieldType) {
         window._optionManagerField = fieldType;
+        window._optionManagerCauseKey = null;
         const modal = document.getElementById('optionManagerModal');
         const input = document.getElementById('optionManagerNewInput');
         if (input) input.value = '';
@@ -29451,6 +29746,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const forceArrowDirEl = document.getElementById('defectForceArrowDir');
 
         if (forceArrowDirEl) forceArrowDirEl.disabled = false;
+        // 새로 연 창은 자주 쓰는 칩만(더보기 접힘), 자동 원인 기록 없음
+        window._defectAutoCauses = [];
+        window._defectChipMoreOpen = {};
 
         let photoHydratePromise = Promise.resolve();
         if (existingPin) {
