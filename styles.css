@@ -15856,3 +15856,8 @@ html:not(.layout-desktop) .crack-monitor-photo-slots {
     }
     .grid-lines-panel button { min-height: 32px; }
 }
+
+/* 행·열(통심) 위치 표시 — 결함 창 상세 위치 아래 · 상태조사표 위치 칸 첫 줄 (실험 exp/grid-lines) */
+.defect-grid-loc-hint { margin-top: 4px; font-size: 12px; color: #0e7490; font-weight: 700; }
+.defect-grid-loc-hint[hidden] { display: none; }
+.survey-grid-loc { font-size: 0.78em; font-weight: 800; color: #0e7490; line-height: 1.2; margin-bottom: 2px; white-space: nowrap; }

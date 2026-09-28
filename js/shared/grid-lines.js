@@ -483,6 +483,42 @@
         return { detail: rest ? `${next} ${rest}` : next, auto: next };
     }
 
+    // ---- 결함 칸 구조: 행·열(gridLoc)과 상세 위치(실 이름) ----
+    /** 예전 실험 데이터: 상세 위치 앞에 붙은 자동 칸 이름을 떼어냄 → { grid, room } */
+    function splitLegacyGridLocation(detail, legacyAuto) {
+        const cur = String(detail == null ? '' : detail).trim();
+        const auto = String(legacyAuto == null ? '' : legacyAuto).trim();
+        if (auto && (cur === auto || cur.startsWith(auto + ' '))) return { grid: auto, room: cur.slice(auto.length).trim() };
+        return { grid: '', room: cur };
+    }
+
+    /** 위치 칸 두 줄: 행·열 → 다음 줄 실 이름. 하나만 있으면 한 줄 */
+    function formatLocationCell(grid, room) {
+        const g = String(grid == null ? '' : grid).trim();
+        const r = String(room == null ? '' : room).trim();
+        if (g && r) return `${g}\n${r}`;
+        return g || r;
+    }
+
+    /**
+     * 한글/PDF 상태조사표 위치 칸. 행·열이 없으면 ''(→ 부르는 쪽이 예전 출력 그대로)
+     * o: { gridLoc, legacyAuto, detail(층을 뺀 상세 위치) }
+     */
+    function reportLocationCell(o) {
+        const x = o || {};
+        let grid = String(x.gridLoc == null ? '' : x.gridLoc).trim();
+        let room = String(x.detail == null ? '' : x.detail).trim();
+        if (x.legacyAuto) {
+            const sp = splitLegacyGridLocation(room, x.legacyAuto);
+            if (sp.grid) {
+                room = sp.room;
+                if (!grid) grid = sp.grid;
+            }
+        }
+        if (!grid) return '';
+        return formatLocationCell(grid, room);
+    }
+
     // ---- 편집 ----
     /** 점 p를 지나는 선(화면 각도 angle)을 도면 경계까지 */
     function makeLineThrough(pImg, axis, angleDeg, ctx) {
@@ -629,6 +665,9 @@
         locateInGroup,
         computeGridLocation,
         applyAutoLocation,
+        splitLegacyGridLocation,
+        formatLocationCell,
+        reportLocationCell,
         makeLineThrough,
         addLineToGroup,
         nextSeq,

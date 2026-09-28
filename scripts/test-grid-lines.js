@@ -255,6 +255,20 @@ assert.strictEqual(G.computeGridLocation(base, [{ x: 1990, y: 1000 }], ctx0, { m
 assert.strictEqual(G.computeGridLocation(base, [{ x: 1990, y: 1000 }], ctx0, { member: '보' }), 'X2, Y1~Y2', 'G/B 안 정한 보: 폭 안이라 X2');
 assert.strictEqual(G.computeGridLocation(base, [{ x: 1300, y: 1000 }], ctx0, { member: '보' }), 'X1~X2, Y1~Y2', 'G/B 안 정한 보: 폭 밖은 범위(거더 규칙 아님)');
 
+// ---- 칸 구조: 행·열(gridLoc) + 상세 위치(실 이름), 한글/PDF 위치 칸 두 줄 ----
+assert.strictEqual(G.formatLocationCell('X1~X2, Y2', '거실'), 'X1~X2, Y2\n거실', '행·열 다음 줄 실 이름');
+assert.strictEqual(G.formatLocationCell('X1~X2, Y2', ''), 'X1~X2, Y2', '실 이름 없으면 한 줄');
+assert.strictEqual(G.formatLocationCell('', '거실'), '거실');
+assert.strictEqual(G.reportLocationCell({ gridLoc: 'X2, Y3', detail: '거실' }), 'X2, Y3\n거실');
+assert.strictEqual(G.reportLocationCell({ gridLoc: 'X2, Y3', detail: '' }), 'X2, Y3');
+assert.strictEqual(G.reportLocationCell({ detail: '거실' }), '', '행·열 없으면 빈 값 → 예전 출력 그대로');
+assert.strictEqual(G.reportLocationCell({ detail: 'X2, Y3 거실', legacyAuto: 'X2, Y3' }), 'X2, Y3\n거실', '예전 실험 데이터도 두 줄로');
+assert.strictEqual(G.reportLocationCell({ detail: 'X2, Y3', legacyAuto: 'X2, Y3' }), 'X2, Y3');
+assert.strictEqual(G.reportLocationCell({ gridLoc: 'X9', detail: 'X2, Y3 거실', legacyAuto: 'X2, Y3' }), 'X9\n거실', '새 칸 값이 우선');
+assert.deepStrictEqual(G.splitLegacyGridLocation('X2, Y3 거실 천장', 'X2, Y3'), { grid: 'X2, Y3', room: '거실 천장' });
+assert.deepStrictEqual(G.splitLegacyGridLocation('거실', 'X2, Y3'), { grid: '', room: '거실' }, '직접 쓴 글은 그대로');
+assert.deepStrictEqual(G.splitLegacyGridLocation('X2, Y3', ''), { grid: '', room: 'X2, Y3' });
+
 // ---- 위치 자동 입력 규칙 ----
 const A = G.applyAutoLocation;
 assert.deepStrictEqual(A('', '', 'X1~X2, Y1~Y2'), { detail: 'X1~X2, Y1~Y2', auto: 'X1~X2, Y1~Y2' }, '빈칸이면 채움');
@@ -288,15 +302,59 @@ if (fs.existsSync(appPath)) {
     assert.ok(app.includes("if (window.BSA_gridEdit && window.BSA_gridEdit.active) {\n                window.BSA_gridEdit.onDblClick"), '더블클릭: 설정 중에만');
     const autoFn = app.slice(app.indexOf('function computeGridAutoLocationForPoints('), app.indexOf('function gridNum('));
     assert.ok(!autoFn.includes('visible') && !autoFn.includes('.active'), '숨겨져 있어도 위치 자동 입력');
-    // 「위치 비우고 행·열로 다시 채우기」: 직접 쓴 글도 지우고 칸 이름 + 자동 표시, 되돌리기 한 번, 동기화 시각
-    assert.ok(app.includes('data-act="resetFill"'), '다시 채우기 버튼');
+    // 행·열 위치는 gridLoc 칸, 상세 위치(location)는 실 이름 — 자동 입력은 location을 쓰지 않음
+    const autoSec = app.slice(app.indexOf('    // ---- 마킹 위치 자동 입력 ----'), app.indexOf('    // @@GRID_LINES_END'));
+    const applyFn = autoSec.slice(autoSec.indexOf('function applyGridAutoLocationToDefect('), autoSec.indexOf('function applyGridAutoLocationAfterDrag('));
+    assert.ok(applyFn.includes('d.gridLoc = next;'), '칸 이름은 gridLoc에');
+    assert.ok(!/d\.location\s*=/.test(applyFn), '자동 입력이 상세 위치(location)를 쓰지 않음');
+    const legacyFn = autoSec.slice(autoSec.indexOf('function migrateLegacyGridLocation('), autoSec.indexOf('function refreshGridLocHintInModal('));
+    assert.ok(legacyFn.includes('splitLegacyGridLocation') && legacyFn.includes('delete d.gridLocAuto;'), '예전 실험 데이터만 옮김(칸 이름 떼고 실 이름 남김)');
+    const modalFn = autoSec.slice(autoSec.indexOf('function applyGridAutoLocationToModal('), autoSec.indexOf('function gridModalMember('));
+    assert.ok(!/locEl\.value\s*=\s*(r\.|next|computeGrid)/.test(modalFn), '새 마킹 창에서 상세 위치 입력칸에 칸 이름을 안 넣음');
+    // 「행·열 위치 다시 채우기」: 상세 위치는 그대로, 되돌리기 한 번, 동기화 시각
+    assert.ok(app.includes('data-act="resetFill"') && app.includes('행·열 위치 다시 채우기</button>'), '다시 채우기 버튼');
     assert.ok(app.includes("if (act === 'resetFill') {\n            resetGridLocationForCurrentFloor();"), '버튼 연결');
-    const resetFn = app.slice(app.indexOf('function resetGridLocationForCurrentFloor('), app.indexOf('/** 결함 창 열 때: 새 마킹이면'));
-    assert.ok(resetFn.includes('confirm('), '확인창');
-    assert.ok(resetFn.indexOf('pushDefectHistory()') > 0 && resetFn.indexOf('pushDefectHistory()') < resetFn.indexOf('d.location = nextLoc;'), '바꾸기 전에 되돌리기 기록 한 번');
+    const resetFn = autoSec.slice(autoSec.indexOf('function resetGridLocationForCurrentFloor('), autoSec.indexOf('function applyGridAutoLocationToModal('));
+    assert.ok(resetFn.includes('confirm(') && resetFn.includes('상세 위치(실 이름)는 지우지 않고'), '확인창: 실 이름은 안 지움');
     assert.strictEqual((resetFn.match(/pushDefectHistory\(\)/g) || []).length, 1, '되돌리기 기록은 한 번만');
-    assert.ok(resetFn.includes('d.gridLocAuto = next;') && resetFn.includes('touchDefectUpdatedAt(d);') && resetFn.includes('saveStateToLocalStorage();'), '자동 표시·수정 시각·저장');
-    assert.ok(!resetFn.includes('applyAutoLocation'), '직접 쓴 글 보존 규칙을 쓰지 않음(전부 덮어씀)');
+    assert.ok(resetFn.indexOf('pushDefectHistory()') < resetFn.indexOf('applyGridAutoLocationToDefect(d)'), '바꾸기 전에 기록');
+    assert.ok(!/d\.location\s*=/.test(resetFn), '다시 채우기가 상세 위치를 안 지움');
+    assert.ok(applyFn.includes('touchDefectUpdatedAt(d);') && autoSec.includes('saveStateToLocalStorage();'), '수정 시각·저장');
+    // 한글/PDF 상태조사표 위치 칸: 행·열 → 다음 줄 실 이름
+    const rowFn = app.slice(app.indexOf('function getReportSurveyRowValues('), app.indexOf('function buildReportSurveyTableHtml('));
+    assert.ok(rowFn.includes('const loc = gridLocCell || extractDefectLocationDetail(d.location, ctx.floorCode)'), '1·2종 위치 칸: 행·열 있으면 두 줄, 없으면 예전 그대로');
+    assert.ok(autoSec.includes('G.reportLocationCell({'), '위치 칸은 모듈 규칙으로');
+    assert.ok(app.includes('white-space:pre-line;">${escapeReportHtml(text)}</td>'), 'PDF 표는 줄바꿈 유지');
+    assert.strictEqual((app.match(/mergeGroupGridLocProp\(members\) : \{\}/g) || []).length, 2, '묶음 마킹도 행·열 모음');
+    assert.ok(app.includes('<div class="survey-grid-loc"'), '화면 상태조사표 위치 칸 첫 줄');
+    // 실제 행 값 함수로 확인(1·2종 위치 칸 = values[1])
+    const takeFn = (name) => {
+        const st = app.indexOf(`function ${name}(`);
+        let i = app.indexOf('{', st);
+        let depth = 0;
+        for (; i < app.length; i++) {
+            if (app[i] === '{') depth++;
+            else if (app[i] === '}') { depth--; if (depth === 0) return app.slice(st, i + 1); }
+        }
+        throw new Error(name);
+    };
+    const vm = require('vm');
+    const sandbox = {
+        G,
+        gridLib: () => G,
+        extractDefectLocationDetail: (loc) => String(loc || '').replace(/^1F\s*/, '').replace(/^1F$/, ''),
+        getSurveyStructMarks: () => ({ struct: '○', nonstruct: '-' }),
+        formatSurveyReportNo: () => '1',
+        getSurveyCellText: (k, d) => (k === 'location' ? (d.location || '1F 기둥') : (k === 'component' ? '벽체' : (k === 'defectType' ? '균열' : '-'))),
+        appendGrade3ProgressLeakToContent: (x) => x
+    };
+    vm.createContext(sandbox);
+    vm.runInContext(`${takeFn('getDefectGridRoomForReport')}\n${takeFn('getReportSurveyRowValues')}\nthis.rowVals = getReportSurveyRowValues;`, sandbox);
+    const locCell = (d) => sandbox.rowVals(d, { floorCode: '1F' }, false)[1];
+    assert.strictEqual(locCell({ location: '1F 거실', gridLoc: 'X1~X2, Y2' }), 'X1~X2, Y2\n거실', '한글/PDF: 행·열 다음 줄 실 이름');
+    assert.strictEqual(locCell({ location: '1F', gridLoc: 'X1~X2, Y2' }), 'X1~X2, Y2', '실 이름 없으면 행·열 한 줄');
+    assert.strictEqual(locCell({ location: '1F 거실' }), '거실', '행·열 없으면 예전 그대로');
+    assert.strictEqual(locCell({ location: '1F X2, Y3 거실', gridLocAuto: 'X2, Y3' }), 'X2, Y3\n거실', '예전 실험 데이터도 두 줄');
 }
 
 console.log('test-grid-lines: OK');

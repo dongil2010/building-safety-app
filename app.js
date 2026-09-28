@@ -21639,6 +21639,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     ...rep,
                     no: listNo,
                     location: uniqLoc.length > 0 ? uniqLoc.join(' / ') : rep.location,
+                    ...((typeof mergeGroupGridLocProp === 'function') ? mergeGroupGridLocProp(members) : {}),
                     isProgress: markingMembers.some((m) => m.isProgress),
                     isLeak: markingMembers.some((m) => m.isLeak),
                     isOpeningCrack: markingMembers.some((m) => m.isOpeningCrack),
@@ -33651,10 +33652,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     </div>` : '<div class="grid-panel-row grid-panel-muted">선을 누르면 이름·각도·폭을 바꿀 수 있습니다.</div>'}
                 </div>
                 <div class="grid-panel-sec">
-                    <label class="grid-panel-row"><input type="checkbox" data-f="auto" ${grid.autoLocation ? 'checked' : ''}> 마킹 위치에 칸 이름 자동 입력</label>
+                    <label class="grid-panel-row"><input type="checkbox" data-f="auto" ${grid.autoLocation ? 'checked' : ''}> 마킹에 행·열 위치 자동 입력</label>
                     <div class="grid-panel-row">
-                        <button type="button" data-act="fillExisting" title="이 층 마킹 중 위치가 비었거나 자동으로 넣은 것만 채움">이 층 마킹에 위치 채우기</button>
-                        <button type="button" data-act="resetFill" class="danger" title="이 층 마킹 전부의 위치를 지우고(직접 쓴 글 포함) 행·열 칸 이름으로 다시 씀">위치 비우고 행·열로 다시 채우기</button>
+                        <button type="button" data-act="fillExisting" title="행·열 위치가 없는 마킹만 채움(상세 위치·실 이름은 그대로)">이 층 마킹에 위치 채우기</button>
+                        <button type="button" data-act="resetFill" title="이 층 마킹 전부의 행·열 위치를 지금 선 기준으로 다시 씀(상세 위치·실 이름은 그대로)">행·열 위치 다시 채우기</button>
                         <button type="button" data-act="clearAll" class="danger">이 층 선 모두 지우기</button>
                     </div>
                 </div>
@@ -33854,6 +33855,13 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     }, true);
 
     // ---- 마킹 위치 자동 입력 ----
+    // 2026-09-28 구조 변경: 행·열 칸 이름은 결함의 **gridLoc** 칸에 따로 저장(시스템이 계산해 채움).
+    // location(= 층 + 상세 위치)은 실 이름 등 사람이 쓰는 칸으로 두고 절대 건드리지 않는다.
+    // 예전 실험 데이터(상세 위치 앞에 칸 이름을 붙이고 gridLocAuto로 표시)는 만날 때 gridLoc으로 옮기고 상세 위치에는 실 이름만 남긴다.
+    function currentGridHasLines() {
+        return gridHasLines(getCurrentFloorGrid(false));
+    }
+
     /** 부재 명칭(예전 이름은 새 이름으로 — 작은보→보(B) 등) */
     function gridMemberName(v) {
         try {
@@ -33865,7 +33873,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
     /**
      * 행·열 선이 있고 자동 입력이 켜져 있으면 칸 이름, 아니면 null(아무것도 안 건드림).
-     * member: 부재 명칭 — 슬래브·보(B)·철골보(B)·빔이면 폭을 무시하고 늘 X1~X2 (grid-lines.js RANGE_ONLY_MEMBER_RULES)
+     * member: 부재 명칭 — 거더/슬래브·보(B) 등 부재별 규칙은 grid-lines.js
      */
     function computeGridAutoLocationForPoints(pts, member) {
         const G = gridLib();
@@ -33898,35 +33906,93 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         return Number.isFinite(x) && Number.isFinite(y) ? [{ x, y }] : [];
     }
 
-    /** 결함 하나의 위치를 칸 이름으로 맞춤 — 직접 쓴 글은 안 덮음. 바뀌면 true */
-    function applyGridAutoLocationToDefect(d, floorCode) {
+    /** 묶음 마킹(한 행으로 합침): 멤버 행·열 위치를 모아 ' / '로 */
+    function mergeGroupGridLocProp(members) {
+        const uniq = [];
+        (members || []).forEach((m) => {
+            const g = String((m && m.gridLoc) || '').trim();
+            if (g && uniq.indexOf(g) === -1) uniq.push(g);
+        });
+        return uniq.length ? { gridLoc: uniq.join(' / ') } : {};
+    }
+
+    /** 결함의 행·열 칸 이름(없으면 '') — 화면 표시용 */
+    function getDefectGridLocText(d) {
+        return String((d && d.gridLoc) || '').trim();
+    }
+    window.getDefectGridLocText = getDefectGridLocText;
+
+    /**
+     * 한글/PDF 상태조사표 위치 칸: 행·열이 있으면 「행·열\n실 이름(상세 위치)」, 행·열이 없으면 ''(→ 예전 출력 그대로)
+     * 예전 실험 데이터(상세 위치 앞에 칸 이름)도 나눠서 출력
+     */
+    function getDefectGridRoomForReport(d, floorCode) {
         const G = gridLib();
-        if (!G || !d) return false;
-        const next = computeGridAutoLocationForPoints(getDefectGridPoints(d), d.component);
-        if (next == null) return false;
+        if (!G || !d) return '';
+        return G.reportLocationCell({
+            gridLoc: d.gridLoc,
+            legacyAuto: d.gridLocAuto,
+            detail: extractDefectLocationDetail(d.location || '', floorCode)
+        });
+    }
+
+    /** 예전 실험 데이터 → gridLoc + 실 이름만 남긴 상세 위치. 바뀌면 true */
+    function migrateLegacyGridLocation(d, floorCode) {
+        const G = gridLib();
+        if (!G || !d || !d.gridLocAuto) return false;
         const fc = floorCode || state.currentFloor;
         const detail = extractDefectLocationDetail(d.location || '', fc);
-        const r = G.applyAutoLocation(detail, d.gridLocAuto || '', next);
-        let changed = false;
-        if (r.detail !== detail) {
-            d.location = composeDefectLocation(r.detail, fc);
-            changed = true;
+        const sp = G.splitLegacyGridLocation(detail, d.gridLocAuto);
+        if (sp.grid) {
+            d.location = composeDefectLocation(sp.room, fc);
+            if (!d.gridLoc) d.gridLoc = sp.grid;
         }
-        if (r.auto) {
-            if (d.gridLocAuto !== r.auto) { d.gridLocAuto = r.auto; changed = true; }
-        } else if (d.gridLocAuto) {
-            delete d.gridLocAuto;
+        delete d.gridLocAuto;
+        return true;
+    }
+
+    function refreshGridLocHintInModal(text) {
+        const locEl = document.getElementById('defectLocation');
+        if (!locEl) return;
+        let hint = document.getElementById('defectGridLocHint');
+        if (!hint) {
+            hint = document.createElement('div');
+            hint.id = 'defectGridLocHint';
+            hint.className = 'defect-grid-loc-hint';
+            locEl.insertAdjacentElement('afterend', hint);
+        }
+        const t = String(text || '').trim();
+        hint.textContent = t ? `행·열: ${t}  (상세 위치에는 실 이름을 적으세요)` : '';
+        hint.hidden = !t;
+    }
+
+    /** 결함 하나의 행·열 칸 이름(gridLoc)을 지금 선·부재 기준으로 맞춤. 상세 위치는 안 건드림. 바뀌면 true */
+    function applyGridAutoLocationToDefect(d, floorCode, opts) {
+        const G = gridLib();
+        if (!G || !d) return false;
+        const fc = floorCode || state.currentFloor;
+        let changed = migrateLegacyGridLocation(d, fc);
+        const next = computeGridAutoLocationForPoints(getDefectGridPoints(d), d.component);
+        if (next == null) {
+            // 선을 모두 지웠으면 칸 이름도 지움(자동 입력만 꺼 둔 경우는 그대로)
+            if (!currentGridHasLines() && d.gridLoc) {
+                delete d.gridLoc;
+                changed = true;
+            }
+        } else if (next && d.gridLoc !== next) {
+            if (!(opts && opts.onlyIfEmpty && d.gridLoc)) {
+                d.gridLoc = next;
+                changed = true;
+            }
+        } else if (!next && d.gridLoc) {
+            delete d.gridLoc;
             changed = true;
         }
         if (changed) {
             touchDefectUpdatedAt(d);
-            // 같은 결함 수정창이 열려 있으면 위치 칸도 맞춤(입력 중이면 건드리지 않음)
-            const locEl = document.getElementById('defectLocation');
             const openId = document.getElementById('defectPinId')?.value;
-            if (locEl && openId && openId === d.id && document.activeElement !== locEl
-                && elements.defectModal && elements.defectModal.classList.contains('open')) {
-                locEl.value = extractDefectLocationDetail(d.location || '', fc);
-                locEl.dataset.gridAuto = d.gridLocAuto || '';
+            if (openId && openId === d.id && elements.defectModal && elements.defectModal.classList.contains('open')) {
+                refreshGridLocHintInModal(d.gridLoc || '');
             }
         }
         return changed;
@@ -33945,102 +34011,99 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         return n;
     }
 
-    function fillGridLocationForCurrentFloor() {
-        const grid = getCurrentFloorGrid(false);
-        if (!gridHasLines(grid)) {
-            window.showToast?.('먼저 행·열 선을 그어 주세요.', 'info', 2000);
-            return;
-        }
-        if (grid.autoLocation === false) {
-            window.showToast?.('「마킹 위치에 칸 이름 자동 입력」을 켜 주세요.', 'info', 2500);
-            return;
-        }
-        const list = filterMapPlacedDefects(getCurrentFloorDefects());
-        // 먼저 복사본으로 몇 개가 바뀌는지 셈(원본은 그대로)
-        const probe = list.filter((d) => {
-            const copy = { ...d };
-            return applyGridAutoLocationToDefect(copy) && copy.location !== d.location;
-        }).length;
-        if (!probe) {
-            window.showToast?.('바꿀 마킹이 없습니다. (직접 쓴 위치는 그대로 둡니다)', 'info', 2500);
-            return;
-        }
-        if (!confirm(`이 층 마킹 ${probe}개의 위치를 칸 이름으로 채웁니다.\n위치가 비었거나 전에 자동으로 넣은 것만 바꾸고, 직접 쓴 위치는 그대로 둡니다.\n(되돌리기로 취소할 수 있습니다)`)) return;
-        if (typeof pushDefectHistory === 'function') pushDefectHistory();
-        let n = 0;
-        list.forEach((d) => { if (applyGridAutoLocationToDefect(d)) n += 1; });
-        saveStateToLocalStorage();
-        if (typeof updateMapSelectionBar === 'function') updateMapSelectionBar({ scrollToSelection: false });
-        drawCanvas();
-        window.showToast?.(`마킹 ${n}개의 위치를 채웠습니다.`, 'success', 2500);
-    }
-
-    function gridModalMember() {
-        const inp = document.getElementById('defectComponentInput');
-        const sel = document.getElementById('defectComponent');
-        return (inp && String(inp.value || '').trim()) || (sel && sel.value) || '';
-    }
-
-    /**
-     * 「위치 비우고 행·열로 다시 채우기」 — 이 층 도면 마킹 전부의 위치를 지우고(직접 쓴 글·덧붙인 글 포함)
-     * 행·열 칸 이름으로 다시 씀. 자동 표시(gridLocAuto)를 붙여 이후 옮기면 따라 바뀜.
-     * 선 밖 마킹은 보통 채우기와 같은 규칙(X1 외측). 자동 입력 체크와 무관하게(직접 누른 명령) 동작.
-     * 되돌리기 한 번으로 전체 취소(pushDefectHistory), 바뀐 결함은 updatedAt을 올려 동기화.
-     */
-    function resetGridLocationForCurrentFloor() {
-        const G = gridLib();
-        const grid = getCurrentFloorGrid(false);
-        if (!G || !gridHasLines(grid)) {
-            window.showToast?.('먼저 행·열 선을 그어 주세요.', 'info', 2000);
-            return;
-        }
-        const fc = state.currentFloor;
-        const gctx = getGridCtx();
-        const plan = [];
-        let manual = 0;
-        filterMapPlacedDefects(getCurrentFloorDefects()).forEach((d) => {
-            const pts = getDefectGridPoints(d);
-            if (!pts.length) return;
-            const next = G.computeGridLocation(grid, pts, gctx, { member: gridMemberName(d.component) });
-            if (!next) return;
-            const detail = extractDefectLocationDetail(d.location || '', fc);
-            const nextLoc = composeDefectLocation(next, fc);
-            if (detail && detail !== (d.gridLocAuto || '')) manual += 1;
-            if (nextLoc === (d.location || '') && d.gridLocAuto === next) return;
-            plan.push({ d, next, nextLoc });
-        });
-        if (!plan.length) {
-            window.showToast?.('바꿀 마킹이 없습니다. (모두 이미 행·열 칸 이름입니다)', 'info', 2500);
-            return;
-        }
-        const manualMsg = manual ? `\n직접 쓴 위치(덧붙인 글 포함) ${manual}개도 지워집니다.` : '';
-        if (!confirm(`이 층 마킹 ${plan.length}개의 위치를 모두 지우고 행·열 칸 이름으로 다시 씁니다.${manualMsg}\n(되돌리기로 한 번에 취소할 수 있습니다)`)) return;
-        if (typeof pushDefectHistory === 'function') pushDefectHistory();
-        plan.forEach(({ d, next, nextLoc }) => {
-            d.location = nextLoc;
-            d.gridLocAuto = next;
-            touchDefectUpdatedAt(d);
-        });
+    function afterGridBulkChange(msg) {
         saveStateToLocalStorage();
         if (typeof updateMapSelectionBar === 'function') updateMapSelectionBar({ scrollToSelection: false });
         if (typeof renderDefectListPanel === 'function') renderDefectListPanel();
         if (typeof renderSurveyTable === 'function' && state.currentTab === 'tab-survey') renderSurveyTable();
         drawCanvas();
-        window.showToast?.(`마킹 ${plan.length}개의 위치를 행·열 칸 이름으로 다시 썼습니다.`, 'success', 2500);
+        window.showToast?.(msg, 'success', 2500);
     }
 
-    /** 결함 창 열 때: 새 마킹이면 칸 이름을 넣고, 자동 여부를 입력칸에 기억 */
+    function countGridBulkChanges(opts) {
+        const list = filterMapPlacedDefects(getCurrentFloorDefects());
+        const n = list.filter((d) => {
+            const copy = { ...d };
+            return applyGridAutoLocationToDefect(copy, null, opts);
+        }).length;
+        return { list, n };
+    }
+
+    /** 「이 층 마킹에 위치 채우기」 — 행·열 칸 이름이 없는 마킹만 채움(상세 위치 그대로) */
+    function fillGridLocationForCurrentFloor() {
+        if (!currentGridHasLines()) {
+            window.showToast?.('먼저 행·열 선을 그어 주세요.', 'info', 2000);
+            return;
+        }
+        if (getCurrentFloorGrid(false).autoLocation === false) {
+            window.showToast?.('「마킹 위치에 칸 이름 자동 입력」을 켜 주세요.', 'info', 2500);
+            return;
+        }
+        const { list, n } = countGridBulkChanges({ onlyIfEmpty: true });
+        if (!n) {
+            window.showToast?.('채울 마킹이 없습니다. (이미 행·열 위치가 있습니다)', 'info', 2500);
+            return;
+        }
+        if (!confirm(`이 층 마킹 ${n}개에 행·열 위치를 채웁니다.\n행·열 위치가 없는 마킹만 채우고, 상세 위치(실 이름)는 그대로 둡니다.\n(되돌리기로 취소할 수 있습니다)`)) return;
+        if (typeof pushDefectHistory === 'function') pushDefectHistory();
+        let done = 0;
+        list.forEach((d) => { if (applyGridAutoLocationToDefect(d, null, { onlyIfEmpty: true })) done += 1; });
+        afterGridBulkChange(`마킹 ${done}개에 행·열 위치를 채웠습니다.`);
+    }
+
+    /**
+     * 「행·열 위치 다시 채우기」 — 이 층 마킹 전부의 행·열 위치를 지금 선 기준으로 다시 씀(있던 값 덮어씀).
+     * 상세 위치(실 이름)는 지우지 않는다. 선 밖은 보통 규칙(X1 외측). 되돌리기 한 번으로 전체 취소.
+     */
+    function resetGridLocationForCurrentFloor() {
+        if (!currentGridHasLines()) {
+            window.showToast?.('먼저 행·열 선을 그어 주세요.', 'info', 2000);
+            return;
+        }
+        const grid = getCurrentFloorGrid(false);
+        const wasAuto = grid.autoLocation !== false;
+        grid.autoLocation = true; // 직접 누른 명령 — 자동 입력 체크와 무관하게 계산
+        let res;
+        try {
+            res = countGridBulkChanges();
+        } finally {
+            grid.autoLocation = wasAuto;
+        }
+        if (!res.n) {
+            window.showToast?.('바꿀 마킹이 없습니다. (모두 지금 선 기준 행·열 위치입니다)', 'info', 2500);
+            return;
+        }
+        if (!confirm(`이 층 마킹 ${res.n}개의 행·열 위치를 지금 선 기준으로 다시 씁니다.\n상세 위치(실 이름)는 지우지 않고 그대로 둡니다.\n(되돌리기로 한 번에 취소할 수 있습니다)`)) return;
+        if (typeof pushDefectHistory === 'function') pushDefectHistory();
+        let done = 0;
+        grid.autoLocation = true;
+        try {
+            res.list.forEach((d) => { if (applyGridAutoLocationToDefect(d)) done += 1; });
+        } finally {
+            grid.autoLocation = wasAuto;
+        }
+        afterGridBulkChange(`마킹 ${done}개의 행·열 위치를 다시 썼습니다.`);
+    }
+
+    /** 결함 창 열 때: 행·열 위치를 입력칸 아래에 보여 줌(상세 위치 입력칸은 실 이름용 — 건드리지 않음) */
     function applyGridAutoLocationToModal(locEl, existingPin) {
         window._gridModalPts = null;
         if (!locEl) return;
+        const G = gridLib();
         if (existingPin) {
-            locEl.dataset.gridAuto = existingPin.gridLocAuto || '';
             window._gridModalPts = getDefectGridPoints(existingPin);
+            let grid = existingPin.gridLoc || '';
+            if (G && existingPin.gridLocAuto) {
+                // 예전 실험 데이터: 입력칸에는 실 이름만, 칸 이름은 아래 표시(저장하면 옮겨짐)
+                const sp = G.splitLegacyGridLocation(locEl.value, existingPin.gridLocAuto);
+                if (sp.grid) {
+                    locEl.value = sp.room;
+                    grid = grid || sp.grid;
+                }
+            }
+            refreshGridLocHintInModal(grid);
             return;
         }
-        locEl.dataset.gridAuto = '';
-        const G = gridLib();
-        if (!G) return;
         let pts = [];
         const ar = window._pendingAreaRect;
         if (ar && [ar.x1, ar.y1, ar.x2, ar.y2].every((v) => Number.isFinite(Number(v)))) {
@@ -34049,45 +34112,37 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             pts = getDefectGridPoints(window._pendingPinCoords);
         }
         window._gridModalPts = pts;
-        const next = computeGridAutoLocationForPoints(pts, gridModalMember());
-        if (next == null) return;
-        const r = G.applyAutoLocation(locEl.value, '', next);
-        locEl.value = r.detail;
-        locEl.dataset.gridAuto = r.auto;
+        refreshGridLocHintInModal(computeGridAutoLocationForPoints(pts, gridModalMember()) || '');
     }
 
-    /** 수정창에서 부재를 바꿨을 때(슬래브·보(B) 고르기 등) — 위치가 아직 자동 글자면 다시 계산 */
+    function gridModalMember() {
+        const inp = document.getElementById('defectComponentInput');
+        const sel = document.getElementById('defectComponent');
+        return (inp && String(inp.value || '').trim()) || (sel && sel.value) || '';
+    }
+
+    /** 수정창에서 부재를 바꿨을 때(슬래브·보(B)·거더 등) — 행·열 위치 표시만 다시 계산(저장 때 결함에 반영) */
     function refreshGridAutoLocationInModal() {
-        const G = gridLib();
-        const locEl = document.getElementById('defectLocation');
         const pts = window._gridModalPts;
-        if (!G || !locEl || !pts || !pts.length) return;
+        if (!pts || !pts.length) return;
         if (!elements.defectModal || !elements.defectModal.classList.contains('open')) return;
-        if (document.activeElement === locEl) return;
-        const prev = locEl.dataset.gridAuto || '';
-        if (!prev && String(locEl.value || '').trim()) return;
         const next = computeGridAutoLocationForPoints(pts, gridModalMember());
         if (next == null) return;
-        const r = G.applyAutoLocation(locEl.value, prev, next);
-        locEl.value = r.detail;
-        locEl.dataset.gridAuto = r.auto;
+        refreshGridLocHintInModal(next);
     }
     [['defectComponent', 'change'], ['defectComponentInput', 'change'], ['defectComponentInput', 'input']].forEach(([id, ev]) => {
         const el = document.getElementById(id);
         if (el) el.addEventListener(ev, () => setTimeout(refreshGridAutoLocationInModal, 0));
     });
 
-    /** 결함 저장 때: 입력칸 글이 아직 자동 글자로 시작하면 자동 표시 유지, 아니면 지움 */
+    /** 결함 저장 때: 행·열 위치(gridLoc)를 지금 위치·부재로 맞춤. 상세 위치(실 이름)는 입력한 그대로 */
     function syncGridAutoFlagOnCommit(defect) {
         if (!defect) return;
-        const locEl = document.getElementById('defectLocation');
-        const auto = String((locEl && locEl.dataset.gridAuto) || '').trim();
-        const detail = extractDefectLocationDetail(defect.location || '', state.currentFloor);
-        if (auto && (detail === auto || detail.startsWith(auto + ' '))) {
-            defect.gridLocAuto = auto;
-            // 부재가 바뀌었을 수 있으니(슬래브·보(B) ↔ 거더) 지금 부재·위치로 다시 맞춤
-            try { applyGridAutoLocationToDefect(defect); } catch (e) { console.warn('[grid-lines] commit', e); }
-        } else if (defect.gridLocAuto) delete defect.gridLocAuto;
+        try {
+            applyGridAutoLocationToDefect(defect);
+        } catch (e) {
+            console.warn('[grid-lines] commit', e);
+        }
     }
     // @@GRID_LINES_END
 
@@ -35865,6 +35920,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     ...rep,
                     no: listNo,
                     location: uniqLoc.length > 0 ? uniqLoc.join(' / ') : rep.location,
+                    ...((typeof mergeGroupGridLocProp === 'function') ? mergeGroupGridLocProp(members) : {}),
                     isProgress: members.some((m) => m.isProgress),
                     isLeak: members.some((m) => m.isLeak),
                     isOpeningCrack: members.some((m) => m.isOpeningCrack),
@@ -35986,7 +36042,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 getSurveyCellText('remark', d, ctx)
             ];
         }
-        const loc = extractDefectLocationDetail(d.location, ctx.floorCode)
+        // 행·열(통심) 위치가 있으면 「행·열\n실 이름(상세 위치)」 두 줄, 없으면 예전 그대로
+        const gridLocCell = (typeof getDefectGridRoomForReport === 'function') ? getDefectGridRoomForReport(d, ctx.floorCode) : '';
+        const loc = gridLocCell || extractDefectLocationDetail(d.location, ctx.floorCode)
             || getSurveyCellText('location', d, { floorCode: ctx.floorCode });
         const content = [getSurveyCellText('component', d), getSurveyCellText('defectType', d)]
             .map(s => (s || '').trim()).filter(s => s && s !== '-').join(' ') || '-';
@@ -36032,7 +36090,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const text = getSurveyCellText(colKey, d, ctx);
         switch (colKey) {
             case 'no': return `<strong style="color:#2a2a2a; font-size:0.95rem;">${text}</strong>`;
-            case 'location': return `<span style="font-weight:700; color:#1e293b;">${text}</span>`;
+            case 'location': {
+                const gl = (typeof getDefectGridLocText === 'function') ? getDefectGridLocText(d) : '';
+                return (gl ? `<div class="survey-grid-loc">${escapeSurveyAttr(gl)}</div>` : '') + `<span style="font-weight:700; color:#1e293b;">${text}</span>`;
+            }
             case 'component': return `<span style="font-weight:700; color:#1e293b;">${text}</span>`;
             case 'defectType': return `<span style="font-weight:700; color:#1f1f1f;">${text}</span>`;
             case 'inspectionContent': return `<span style="font-weight:700; color:#1e293b; white-space:pre-line;">${text}</span>`;
@@ -36117,8 +36178,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 return renderSurveyFlagToggle(id, 'leak', !!d.isLeak, getSurveyLeakLabel(isGrade3Building()));
             case 'priorityManage':
                 return renderSurveyFlagToggle(id, 'priorityManage', !!d.isPriorityManage, '중점관리', 'survey-toggle-priority');
-            case 'location':
-                return textInput('location', d.location || '', '위치');
+            case 'location': {
+                const gl = (typeof getDefectGridLocText === 'function') ? getDefectGridLocText(d) : '';
+                return (gl ? `<div class="survey-grid-loc" title="행·열(통심) 위치 — 도면 행·열 선 기준 자동">${escapeSurveyAttr(gl)}</div>` : '') + textInput('location', d.location || '', '위치');
+            }
             case 'component':
                 return withMemberGbHint(textInput('component', memberNameOut(d.component) || '', '부재종류', memberGbClass(d.component)), d.component);
             case 'defectType':
