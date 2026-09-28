@@ -39,7 +39,7 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <meta name="apple-mobile-web-app-title" content="스마트 안전점검">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css">
-    <link rel="stylesheet" href="styles.css?v=20260928_074056">
+    <link rel="stylesheet" href="styles.css?v=20260928_121223">
 
     <!-- FontAwesome icons for clean engineering UI -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
@@ -1977,7 +1977,7 @@
         </div>
     </div>
 
-    <!-- MODAL: 균열 게이지·팁 누적 측정 (도면 핀 클릭 시 팝업) -->
+    <!-- MODAL: 균열 게이지·팁 누적 측정 (도면에 게이지 마킹 → 팝업, 예전 균열 결함 연결 기록도 이 창) -->
     <div class="modal-overlay modal-drawer-overlay" id="ndtCrackMonitorModal">
         <div class="modal-card defect-drawer-card ndt-drawer-card ndt-crack-drawer-card">
             <div class="modal-header defect-drawer-header">
@@ -1988,13 +1988,14 @@
                 <button type="button" class="modal-close" id="btnCloseNdtCrackMonitorModal" title="닫기 (Esc)">&times;</button>
             </div>
             <div class="modal-body defect-drawer-body ndt-crack-monitor-modal-body">
-                <p class="ndt-crack-monitor-hint" id="ndtCrackMonitorHint">균열 결함의 회차별 X/Y·균열길이·누적(초기치 대비)·전차 대비와 전차/현차 비교 사진을 기록합니다.</p>
+                <p class="ndt-crack-monitor-hint" id="ndtCrackMonitorHint">도면에 찍은 균열 게이지의 회차별 X/Y·균열길이·누적(초기치 대비)·전차 대비와 전차/현차 비교 사진을 기록합니다.</p>
                 <div class="ndt-crack-monitor-editor-bar">
-                    <label class="ndt-crack-monitor-select-label">
-                        <span>결함</span>
-                        <select id="ndtCrackMonitorDefectSelect" class="form-select"></select>
-                    </label>
                     <span id="ndtCrackMonitorDefectMeta" class="ndt-crack-monitor-defect-meta"></span>
+                    <button type="button" class="btn btn-sm btn-outline" id="btnDeleteNdtCrackGaugeMark" hidden title="이 게이지 마킹과 기록을 삭제"><i class="fa-solid fa-trash"></i> 마킹 삭제</button>
+                </div>
+                <div class="defect-crack-monitor-meta" id="ndtCrackGaugeMarkFields" style="display:none;">
+                    <label>부재<input type="text" id="crackGaugeMarkComponent" class="form-control" placeholder="예: 기둥 C1" autocomplete="off"></label>
+                    <label>위치<input type="text" id="crackGaugeMarkLocation" class="form-control" placeholder="예: X1-Y2 북측면" autocomplete="off"></label>
                 </div>
                 <div class="ndt-crack-monitor-form">
                     <div class="defect-crack-monitor-block">
@@ -3179,41 +3180,41 @@
 
     <!-- Core → 탭 분류 → 기존 엔진(app.js) -->
     <!-- 오류 기록은 맨 먼저 — 아래 스크립트들이 읽히다 터져도 잡아야 한다 -->
-    <script src="js/core/error-log.js?v=20260928_074056"></script>
-    <script src="js/core/floor-identity.js?v=20260928_074056"></script>
-    <script src="js/core/state.js?v=20260928_074056"></script>
-    <script src="js/core/ndt-grade.js?v=20260928_074056"></script>
-    <script src="js/tabs/registry.js?v=20260928_074056"></script>
-    <script src="js/pdf-vector-bridge.js?v=20260928_074056"></script>
-    <script src="js/pdf-vector-snap.js?v=20260928_074056"></script>
-    <script src="js/core/layout-mode.js?v=20260928_074056"></script>
-    <script src="js/core/performance.js?v=20260928_074056"></script>
-    <script src="js/core/mobile-keyboard.js?v=20260928_074056"></script>
-    <script src="js/tabs/home.js?v=20260928_074056"></script>
-    <script src="js/tabs/map.js?v=20260928_074056"></script>
-    <script src="js/tabs/survey.js?v=20260928_074056"></script>
-    <script src="js/tabs/stats.js?v=20260928_074056"></script>
-    <script src="js/tabs/ndt.js?v=20260928_074056"></script>
-    <script src="js/shared/report.js?v=20260928_074056"></script>
-    <script src="js/shared/hwpx-survey-slots.js?v=20260928_074056"></script>
-    <script src="js/shared/hwpx-ndt-maps.js?v=20260928_074056"></script>
-    <script src="js/shared/cad-unmarked-place.js?v=20260928_074056"></script>
-    <script src="js/shared/arrow-survey-number.js?v=20260928_074056"></script>
-    <script src="js/shared/korean-text-wrap.js?v=20260928_074056"></script>
-    <script src="js/shared/hwpx-import.js?v=20260928_074056"></script>
-    <script src="js/shared/hwpx-validate.js?v=20260928_074056"></script>
-    <script src="js/shared/auth.js?v=20260928_074056"></script>
-    <script src="js/core/firebase-storage-assets.js?v=20260928_074056"></script>
-    <script src="js/core/drawing-floor-tombstone.js?v=20260928_074056"></script>
-    <script src="js/core/data-health.js?v=20260928_074056"></script>
-    <script src="js/core/building-meta-merge.js?v=20260928_074056"></script>
-    <script src="js/core/edit-history.js?v=20260928_074056"></script>
-    <script src="js/core/sync-merge.js?v=20260928_074056"></script>
-    <script src="js/core/legend-layout.js?v=20260928_074056"></script>
-    <script src="app.js?v=20260928_074056"></script>
+    <script src="js/core/error-log.js?v=20260928_121223"></script>
+    <script src="js/core/floor-identity.js?v=20260928_121223"></script>
+    <script src="js/core/state.js?v=20260928_121223"></script>
+    <script src="js/core/ndt-grade.js?v=20260928_121223"></script>
+    <script src="js/tabs/registry.js?v=20260928_121223"></script>
+    <script src="js/pdf-vector-bridge.js?v=20260928_121223"></script>
+    <script src="js/pdf-vector-snap.js?v=20260928_121223"></script>
+    <script src="js/core/layout-mode.js?v=20260928_121223"></script>
+    <script src="js/core/performance.js?v=20260928_121223"></script>
+    <script src="js/core/mobile-keyboard.js?v=20260928_121223"></script>
+    <script src="js/tabs/home.js?v=20260928_121223"></script>
+    <script src="js/tabs/map.js?v=20260928_121223"></script>
+    <script src="js/tabs/survey.js?v=20260928_121223"></script>
+    <script src="js/tabs/stats.js?v=20260928_121223"></script>
+    <script src="js/tabs/ndt.js?v=20260928_121223"></script>
+    <script src="js/shared/report.js?v=20260928_121223"></script>
+    <script src="js/shared/hwpx-survey-slots.js?v=20260928_121223"></script>
+    <script src="js/shared/hwpx-ndt-maps.js?v=20260928_121223"></script>
+    <script src="js/shared/cad-unmarked-place.js?v=20260928_121223"></script>
+    <script src="js/shared/arrow-survey-number.js?v=20260928_121223"></script>
+    <script src="js/shared/korean-text-wrap.js?v=20260928_121223"></script>
+    <script src="js/shared/hwpx-import.js?v=20260928_121223"></script>
+    <script src="js/shared/hwpx-validate.js?v=20260928_121223"></script>
+    <script src="js/shared/auth.js?v=20260928_121223"></script>
+    <script src="js/core/firebase-storage-assets.js?v=20260928_121223"></script>
+    <script src="js/core/drawing-floor-tombstone.js?v=20260928_121223"></script>
+    <script src="js/core/data-health.js?v=20260928_121223"></script>
+    <script src="js/core/building-meta-merge.js?v=20260928_121223"></script>
+    <script src="js/core/edit-history.js?v=20260928_121223"></script>
+    <script src="js/core/sync-merge.js?v=20260928_121223"></script>
+    <script src="js/core/legend-layout.js?v=20260928_121223"></script>
+    <script src="app.js?v=20260928_121223"></script>
 
     <script>
-        window.BSA_APP_VERSION = '20260928_074056';
+        window.BSA_APP_VERSION = '20260928_121223';
 
         (function () {
             var el = document.getElementById('appVersionText');
@@ -3240,7 +3241,7 @@
                     native = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
                 } catch (e) {}
                 if (native) return;
-                navigator.serviceWorker.register('./sw.js?v=20260928_074056')
+                navigator.serviceWorker.register('./sw.js?v=20260928_121223')
 
                     .then(function(registration) {
                         console.log('✅ ServiceWorker Registered Successfully with scope:', registration.scope);

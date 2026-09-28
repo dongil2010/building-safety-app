@@ -9793,6 +9793,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (currentCat === '변위' || currentCat === '부재변위') return [];
         if (currentCat === '실측') return items.filter(item => item.category === '실측');
         if (currentCat === '내화피복') return items.filter(item => item.category === '내화피복');
+        if (currentCat === '균열모니터') return items.filter(isCrackGaugeNdtItem);
         return items.filter(item => ['강도', '탄산화'].includes(item.category));
     }
 
@@ -9971,6 +9972,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             filtered = items.filter(item => item.category === '실측');
         } else if (currentCat === '내화피복') {
             filtered = items.filter(item => item.category === '내화피복');
+        } else if (currentCat === '균열모니터') {
+            // 도면에 직접 찍은 균열 게이지 마킹만 (기존 균열 결함 연결분은 결함 핀 히트로 따로 처리)
+            filtered = items.filter(isCrackGaugeNdtItem);
         } else {
             // 강도 / 탄산화 탭: 같은 도면에 함께 표시되는 항목만 히트테스트 (타 카테고리 간섭 배제)
             filtered = items.filter(item => item.category === '강도' || item.category === '탄산화');
@@ -10232,7 +10236,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         ndtTilt: '#ff0000',
         ndtSettlement: '#ff00ff',
         ndtMemberDisp: '#00ff00',
-        ndtFireproof: '#ffff00'
+        ndtFireproof: '#ffff00',
+        ndtCrackGauge: '#ff6600'
     };
     const LEGACY_DEFAULT_STYLE_COLORS = {
         defectStructural: '#b30000',
@@ -10329,7 +10334,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         ndtTilt: { pin: 1.0, arrow: 1.0, leader: 1.0 },
         ndtSettlement: { pin: 1.0, arrow: 1.0, leader: 1.0 },
         ndtMemberDisp: { pin: 1.0, arrow: 1.0, leader: 1.0 },
-        ndtFireproof: { pin: 1.0, arrow: 1.0, leader: 1.0 }
+        ndtFireproof: { pin: 1.0, arrow: 1.0, leader: 1.0 },
+        ndtCrackGauge: { pin: 1.0, arrow: 1.0, leader: 1.0 }
     };
 
     // 보고서 등 다른 층 렌더 시 해당 층 스타일을 쓰기 위한 임시 컨텍스트
@@ -10408,7 +10414,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     ];
     const NDT_STYLE_SIZE_KEYS = [
         'ndtMeasure', 'ndtStrength', 'ndtCarbonation',
-        'ndtTilt', 'ndtSettlement', 'ndtMemberDisp', 'ndtFireproof'
+        'ndtTilt', 'ndtSettlement', 'ndtMemberDisp', 'ndtFireproof', 'ndtCrackGauge'
     ];
 
     function cloneStyleSizesSubset(src, keys) {
@@ -10526,7 +10532,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         ndtTilt: { shape: 'rect', fill: false, numberFormat: 'no' },
         ndtSettlement: { shape: 'rect', fill: false, numberFormat: 'no' },
         ndtMemberDisp: { shape: 'rect', fill: false, numberFormat: 'no' },
-        ndtFireproof: { shape: 'rect', fill: false, numberFormat: 'no' }
+        ndtFireproof: { shape: 'rect', fill: false, numberFormat: 'no' },
+        ndtCrackGauge: { shape: 'rect', fill: false, numberFormat: 'no' }
     };
 
     function getStyleShape(key) {
@@ -11086,6 +11093,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (cat === '실측') return 'ndtMeasure';
         if (cat === '탄산화') return 'ndtCarbonation';
         if (cat === '내화피복') return 'ndtFireproof';
+        if (cat === '균열모니터') return 'ndtCrackGauge';
         return 'ndtStrength';
     }
 
@@ -11807,7 +11815,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const hintSpan = document.querySelector('#ndtCanvasHintText span');
         if (hintSpan) {
             if (cat === '균열모니터') {
-                hintSpan.textContent = '결함위치도에 등록된 균열 핀을 클릭하면 게이지·팁 측정 팝업이 열립니다';
+                hintSpan.textContent = '[📍 마킹] 모드에서 게이지 설치 위치를 도면에 찍으면 새 균열 게이지가 만들어지고 측정 팝업이 열립니다 (드래그하면 지시선)';
             } else {
                 hintSpan.textContent = '[📍 NDT 위치 마킹] 6대 비파괴 조사 측정 위치를 도면 상에 핀으로 표시하세요';
             }
@@ -11867,10 +11875,12 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         } else if (currentCat === '변위' || currentCat === '부재변위') {
             ndtItems = [];
         } else if (currentCat === '균열모니터') {
-            ndtItems = [];
+            // 예전 방식(균열 결함에 연결)으로 기록된 게이지는 그 결함 핀으로 계속 보여 준다.
             getCurrentFloorCrackMonitorDefects().forEach((defect) => {
                 drawPin(ctx, defect);
             });
+            // 새 방식: 도면에 직접 찍은 게이지 마킹
+            ndtItems = ndtItems.filter(isCrackGaugeNdtItem);
         } else if (currentCat === '실측') {
             ndtItems = ndtItems.filter(item => item.category === '실측');
         } else if (currentCat === '내화피복') {
@@ -13025,10 +13035,11 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             ndtInitialOffsetX = ndtView.offsetX;
             ndtInitialOffsetY = ndtView.offsetY;
 
-            // 바닥 수직변위 및 부재변위: 전용 그룹/포인트 히트
-            if (currentNdtCategory === '균열모니터') {
+            // 균열모니터: 도면에 찍은 게이지 마킹(아래 일반 핀 처리)이 우선, 없으면 예전 방식의
+            // 균열 결함 연결 게이지 핀. 빈 곳은 MARK면 새 게이지 마킹, PAN이면 열린 팝업 닫기.
+            if (currentNdtCategory === '균열모니터' && !findNdtPinAt(vx, vy)) {
                 const crackHit = findHitPinPart(vx, vy);
-                if (crackHit && crackHit.defect && defectNeedsCrackMonitorUi(crackHit.defect)) {
+                if (crackHit && crackHit.defect && isLegacyCrackMonitorDefect(crackHit.defect)) {
                     pendingNdtCrackDefectHit = { defect: crackHit.defect, grabX: vx, grabY: vy };
                     return;
                 }
@@ -13036,13 +13047,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     closeNdtCrackMonitorModal();
                     return;
                 }
-                if (ndtMode === 'MARK') {
-                    if (typeof window.showToast === 'function') {
-                        window.showToast('결함위치도에 등록된 균열 핀을 클릭하세요.', 'info');
-                    }
-                    return;
-                }
-            } else if (currentNdtCategory === '변위' || currentNdtCategory === '부재변위') {
+            }
+            // 바닥 수직변위 및 부재변위: 전용 그룹/포인트 히트
+            if (currentNdtCategory === '변위' || currentNdtCategory === '부재변위') {
                 const hitDisp = findNdtDisplacementHit(vx, vy);
                 if (hitDisp) {
                     const gid = hitDisp.group && hitDisp.group.id;
@@ -13098,6 +13105,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             }
 
             // 빈 곳 클릭 + 등록창 열려 있으면 닫기 (결함위치도와 동일)
+            if (ndtMode === 'PAN' && currentNdtCategory === '균열모니터' && isNdtCrackMonitorModalOpen()) {
+                closeNdtCrackMonitorModal();
+                return;
+            }
             if (ndtMode === 'PAN' && isNdtModalOpen()) {
                 closeNdtModal();
                 if (!additive) {
@@ -13115,12 +13126,11 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     window._ndtDispMarkCoords = { x: vx, y: vy };
                     return;
                 }
-            } else if (currentNdtCategory !== '균열모니터' && ndtMode === 'MARK') {
+            } else if (ndtMode === 'MARK') {
+                // 균열모니터도 일반 마킹과 같이 찍기/끌기 → 놓을 때 게이지 마킹 생성
                 isNdtMarkingDrag = true;
                 window._ndtMarkStartCoords = { x: vx, y: vy };
                 window._ndtMarkCurrentCoords = { x: vx, y: vy };
-            } else if (ndtMode === 'MARK') {
-                // 균열모니터 MARK는 위에서 처리
             } else {
                 // 좌클릭 빈 곳 = 마퀴 선택 (화면 이동은 휠클릭)
                 isNdtMarqueeSelecting = true;
@@ -13295,8 +13305,11 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                         canvas.style.cursor = 'default';
                     }
                 } else if (currentNdtCategory === '균열모니터') {
-                    const crackHit = findHitPinPart(vx, vy);
-                    if (crackHit && crackHit.defect && defectNeedsCrackMonitorUi(crackHit.defect)) {
+                    const gaugeHit = findNdtPinAt(vx, vy);
+                    const crackHit = gaugeHit ? null : findHitPinPart(vx, vy);
+                    if (gaugeHit) {
+                        canvas.style.cursor = gaugeHit.part === 'target' ? 'pointer' : 'move';
+                    } else if (crackHit && crackHit.defect && isLegacyCrackMonitorDefect(crackHit.defect)) {
                         canvas.style.cursor = 'pointer';
                     } else {
                         canvas.style.cursor = 'default';
@@ -13327,7 +13340,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 const part = pendingNdtPinHit.part;
                 pendingNdtPinHit = null;
                 if (part === 'rotate') return;
-                if (item && !wasAdditive) openNdtModal(item.x || item.boxX || 0, item.y || item.boxY || 0, item);
+                if (item && !wasAdditive) openNdtItemEditor(item);
                 return;
             }
             if (pendingNdtDispHit && !isDraggingNdtDisplacement) {
@@ -13444,7 +13457,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 const boxX = distMoved > 10 ? end.x : start.x;
                 const boxY = distMoved > 10 ? end.y : (start.y + 60);
 
-                openNdtModal(start.x, start.y, null, {
+                if (currentNdtCategory === '균열모니터') {
+                    createCrackGaugeMarkAt({ targetX, targetY, boxX, boxY });
+                } else openNdtModal(start.x, start.y, null, {
                     targetX,
                     targetY,
                     boxX,
@@ -13534,9 +13549,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 isNdtMarqueeSelecting = false;
                 clearPendingNdtLongPress();
 
-                if (currentNdtCategory === '균열모니터') {
+                if (currentNdtCategory === '균열모니터' && !findNdtPinAt(vx, vy)) {
                     const crackHit = findHitPinPart(vx, vy);
-                    if (crackHit && crackHit.defect && defectNeedsCrackMonitorUi(crackHit.defect)) {
+                    if (crackHit && crackHit.defect && isLegacyCrackMonitorDefect(crackHit.defect)) {
                         if (e.cancelable) e.preventDefault();
                         pendingNdtCrackDefectHit = { defect: crackHit.defect, grabX: vx, grabY: vy };
                         return;
@@ -13544,13 +13559,6 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     if (ndtMode === 'PAN' && isNdtCrackMonitorModalOpen()) {
                         if (e.cancelable) e.preventDefault();
                         closeNdtCrackMonitorModal();
-                        return;
-                    }
-                    if (ndtMode === 'MARK') {
-                        if (e.cancelable) e.preventDefault();
-                        if (typeof window.showToast === 'function') {
-                            window.showToast('결함위치도에 등록된 균열 핀을 클릭하세요.', 'info');
-                        }
                         return;
                     }
                 }
@@ -13615,15 +13623,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
                 if (ndtMode === 'MARK') {
                     if (e.cancelable) e.preventDefault();
-                    if (currentNdtCategory === '균열모니터') {
-                        if (typeof window.showToast === 'function') {
-                            window.showToast('결함위치도에 등록된 균열 핀을 클릭하세요.', 'info');
-                        }
-                    } else {
-                        isNdtMarkingDrag = true;
-                        window._ndtMarkStartCoords = { x: vx, y: vy };
-                        window._ndtMarkCurrentCoords = { x: vx, y: vy };
-                    }
+                    // 균열모니터도 일반 마킹과 같이 찍기/끌기 → 손을 떼면 게이지 마킹 생성
+                    isNdtMarkingDrag = true;
+                    window._ndtMarkStartCoords = { x: vx, y: vy };
+                    window._ndtMarkCurrentCoords = { x: vx, y: vy };
                 } else if (ndtMarqueeSelectEnabled && ndtMode === 'PAN') {
                     if (e.cancelable) e.preventDefault();
                     isNdtMarqueeSelecting = true;
@@ -13938,7 +13941,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 const part = pendingNdtPinHit.part;
                 pendingNdtPinHit = null;
                 if (part === 'rotate') return;
-                if (item) openNdtModal(item.x || item.boxX || 0, item.y || item.boxY || 0, item);
+                if (item) openNdtItemEditor(item);
                 return;
             }
             if (pendingNdtDispHit && !isDraggingNdtDisplacement) {
@@ -14030,7 +14033,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 const boxX = distMoved > 10 ? end.x : start.x;
                 const boxY = distMoved > 10 ? end.y : (start.y + 60);
 
-                openNdtModal(start.x, start.y, null, {
+                if (currentNdtCategory === '균열모니터') {
+                    createCrackGaugeMarkAt({ targetX, targetY, boxX, boxY });
+                } else openNdtModal(start.x, start.y, null, {
                     targetX,
                     targetY,
                     boxX,
@@ -14110,6 +14115,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
         if (currentCat === '균열모니터') {
             const crackDefects = getCurrentFloorCrackMonitorDefects();
+            const gaugeMarks = getCurrentFloorCrackGaugeMarks();
             if (thead) {
                 thead.innerHTML = `
                     <th>번호</th>
@@ -14120,11 +14126,11 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     <th>관리</th>
                 `;
             }
-            if (!crackDefects.length) {
-                tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:#a3a3a3;padding:1.5rem;">이 층에 균열 결함이 없습니다. 결함위치도에서 균열 종류 결함을 등록한 뒤, 도면의 핀을 클릭해 기록하세요.</td></tr>';
+            if (!crackDefects.length && !gaugeMarks.length) {
+                tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:#a3a3a3;padding:1.5rem;">이 층에 균열 게이지가 없습니다. [📍 마킹] 모드에서 게이지 위치를 도면에 찍으면 새 게이지가 만들어집니다.</td></tr>';
                 return;
             }
-            tbody.innerHTML = renderNdtCrackMonitorSummaryRows(crackDefects);
+            tbody.innerHTML = renderNdtCrackMonitorSummaryRows(crackDefects) + renderNdtCrackGaugeMarkSummaryRows(gaugeMarks);
             return;
         }
 
@@ -14426,7 +14432,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     };
 
     window.exportNdtTableExcel = function() {
-        const items = getCurrentFloorNdtData();
+        const items = getCurrentFloorNdtData().filter((item) => !isCrackGaugeNdtItem(item));
         const dispGroups = getCurrentFloorDisplacementGroups();
         if (items.length === 0 && dispGroups.length === 0) {
             window.showToast('엑셀로 출력할 비파괴 조사 측정 데이터가 없습니다.', 'warning');
@@ -24393,8 +24399,168 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         return type.includes('균열');
     }
 
+    // 2026-09-28: 균열 게이지는 균열 결함에서 고르지 않고 비파괴 탭 「균열 게이지·팁」에서 도면에
+    // 직접 찍는다. 찍은 게이지는 비파괴 항목(state.ndtData, category '균열모니터')으로 저장되어
+    // 층 동기화·묘비·백업을 그대로 탄다. 예전처럼 균열 결함(crackGaugeLog/crackTipLog)에 붙어
+    // 있는 기록은 지우거나 옮기지 않고 그 결함 핀으로 계속 열고 고치고 내보낸다.
+    // (카테고리 문자열은 const로 빼지 않는다 — 초기화 전에 동기화 병합 등에서 불려도 TDZ 오류가 나지 않게)
+    function isCrackGaugeNdtItem(item) {
+        return !!item && item.category === '균열모니터';
+    }
+
+    function crackMonitorLogsHaveData(rec) {
+        if (!rec) return false;
+        const gRaw = rec.crackGaugeLog;
+        const tRaw = rec.crackTipLog;
+        const gauge = normalizeCrackGaugeLog(gRaw);
+        const tip = normalizeCrackTipLog(tRaw);
+        const flag = (raw) => !!(raw && typeof raw === 'object' && (raw.hasPrevPhoto || raw.hasCurrPhoto));
+        const hasGauge = !!(gauge.gaugeNo || gauge.initialX || gauge.initialY || gauge.prevPhoto || gauge.currPhoto
+            || (gauge.readings && gauge.readings.length) || flag(gRaw));
+        const hasTip = !!(tip.initialLengthMm || tip.prevPhoto || tip.currPhoto
+            || (tip.readings && tip.readings.length) || flag(tRaw));
+        return hasGauge || hasTip;
+    }
+
+    /** 예전 방식: 균열 결함에 게이지·팁 기록이 붙어 있는 것 (새로 고르는 목록은 더 없음) */
+    function isLegacyCrackMonitorDefect(defect) {
+        return defectNeedsCrackMonitorUi(defect) && crackMonitorLogsHaveData(defect);
+    }
+
     function getCurrentFloorCrackMonitorDefects() {
-        return filterMapPlacedDefects(getCurrentFloorDefects()).filter(defectNeedsCrackMonitorUi);
+        return filterMapPlacedDefects(getCurrentFloorDefects()).filter(isLegacyCrackMonitorDefect);
+    }
+
+    function getCurrentFloorCrackGaugeMarks() {
+        return getCurrentFloorNdtData().filter(isCrackGaugeNdtItem);
+    }
+
+    function getCrackGaugeMarkDisplayNo(item) {
+        if (!item) return '';
+        const g = item.crackGaugeLog && item.crackGaugeLog.gaugeNo != null ? String(item.crackGaugeLog.gaugeNo).trim() : '';
+        return g || String(item.no || '').trim();
+    }
+
+    /** 새 게이지 번호 G-01, G-02 … — 건물 전체(모든 층)의 게이지 마킹·예전 결함 게이지 번호 다음 */
+    function getNextCrackGaugeLabel() {
+        const bid = state.currentBuildingId;
+        let maxN = 0;
+        const bump = (raw) => {
+            const m = String(raw || '').match(/(\d+)/);
+            if (m) maxN = Math.max(maxN, parseInt(m[1], 10) || 0);
+        };
+        if (bid) {
+            const prefix = `${bid}_`;
+            Object.keys(state.ndtData || {}).forEach((k) => {
+                if (!k.startsWith(prefix)) return;
+                (state.ndtData[k] || []).forEach((it) => {
+                    if (!isCrackGaugeNdtItem(it)) return;
+                    bump(it.no);
+                    if (it.crackGaugeLog) bump(it.crackGaugeLog.gaugeNo);
+                });
+            });
+            Object.keys(state.defects || {}).forEach((k) => {
+                if (!k.startsWith(prefix)) return;
+                (state.defects[k] || []).forEach((d) => {
+                    if (d && d.crackGaugeLog && d.crackGaugeLog.gaugeNo) bump(d.crackGaugeLog.gaugeNo);
+                });
+            });
+        }
+        return `G-${String(maxN + 1).padStart(2, '0')}`;
+    }
+
+    /** 도면에 찍은 위치로 균열 게이지 마킹을 만들고 측정 팝업을 연다 */
+    function createCrackGaugeMarkAt(pos) {
+        if (!state.currentBuildingId || !pos) return null;
+        const key = `${state.currentBuildingId}_${state.currentFloor}`;
+        if (!state.ndtData) state.ndtData = {};
+        if (!state.ndtData[key]) state.ndtData[key] = [];
+        const label = getNextCrackGaugeLabel();
+        const now = Date.now();
+        const gauge = emptyCrackGaugeLog();
+        gauge.gaugeNo = label;
+        const item = {
+            id: `ndt_${now}_${Math.random().toString(36).slice(2, 6)}`,
+            no: label,
+            category: '균열모니터',
+            component: '',
+            location: '',
+            targetX: pos.targetX,
+            targetY: pos.targetY,
+            boxX: pos.boxX,
+            boxY: pos.boxY,
+            x: pos.targetX,
+            y: pos.targetY,
+            crackGaugeLog: gauge,
+            crackTipLog: emptyCrackTipLog(),
+            inspectorName: window.state.userName || '',
+            createdAt: now,
+            updatedAt: now
+        };
+        state.ndtData[key].push(item);
+        selectedNdtIds = new Set([item.id]);
+        updateNdtSelectionBar();
+        if (typeof saveStateToLocalStorage === 'function') saveStateToLocalStorage();
+        if (typeof syncStateToFirebase === 'function') syncStateToFirebase();
+        if (typeof renderNdtSummaryTable === 'function') renderNdtSummaryTable();
+        drawNdtCanvas();
+        openNdtCrackMonitorModal(item.id, state.currentFloor);
+        return item;
+    }
+
+    /** 비파괴 핀 클릭: 균열 게이지 마킹은 게이지·팁 팝업, 나머지는 기존 비파괴 등록창 */
+    function openNdtItemEditor(item) {
+        if (!item) return;
+        if (isCrackGaugeNdtItem(item)) {
+            openNdtCrackMonitorModal(item.id, state.currentFloor);
+            return;
+        }
+        openNdtModal(item.x || item.boxX || 0, item.y || item.boxY || 0, item);
+    }
+
+    /** 클라우드에 올릴 비파괴 항목 — 균열 게이지 비교사진 dataURL은 빼고 있음 표시만 (결함과 같은 규칙) */
+    function stripCrackMonitorPhotosForCloud(items) {
+        return (items || []).map((it) => {
+            if (!isCrackGaugeNdtItem(it)) return it;
+            const out = { ...it };
+            ['crackGaugeLog', 'crackTipLog'].forEach((field) => {
+                const log = out[field];
+                if (!log || typeof log !== 'object') return;
+                const { prevPhoto, currPhoto, ...rest } = log;
+                out[field] = {
+                    ...rest,
+                    hasPrevPhoto: !!(prevPhoto && String(prevPhoto).trim()),
+                    hasCurrPhoto: !!(currPhoto && String(currPhoto).trim())
+                };
+            });
+            return out;
+        });
+    }
+
+    /** 원격 병합 뒤 이 기기에만 있는 게이지 비교사진을 살린다 (원격이 지운 표시면 살리지 않음) */
+    function carryLocalCrackMonitorPhotos(prevMap, nextMap) {
+        if (!prevMap || !nextMap) return nextMap;
+        Object.keys(nextMap).forEach((key) => {
+            const prevArr = prevMap[key];
+            const nextArr = nextMap[key];
+            if (!Array.isArray(prevArr) || !prevArr.length || !Array.isArray(nextArr)) return;
+            const byId = new Map();
+            prevArr.forEach((x) => { if (x && x.id) byId.set(x.id, x); });
+            nextArr.forEach((item) => {
+                if (!isCrackGaugeNdtItem(item)) return;
+                const old = byId.get(item.id);
+                if (!old || old === item) return;
+                ['crackGaugeLog', 'crackTipLog'].forEach((field) => {
+                    const o = old[field];
+                    const n = item[field];
+                    if (!o || typeof o !== 'object' || !n || typeof n !== 'object') return;
+                    [['prevPhoto', 'hasPrevPhoto'], ['currPhoto', 'hasCurrPhoto']].forEach(([slot, flag]) => {
+                        if (!n[slot] && o[slot] && n[flag] !== false) n[slot] = o[slot];
+                    });
+                });
+            });
+        });
+        return nextMap;
     }
 
     function getCrackMonitorDefectFloorCode(defectId, fallbackFloor) {
@@ -24404,52 +24570,50 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         return fallbackFloor || state.currentFloor;
     }
 
+    /**
+     * 게이지 기록 대상 찾기 — 도면에 찍은 게이지 마킹(kind 'ndt', state.ndtData)과 예전 방식의
+     * 균열 결함(kind 'defect', state.defects) 둘 다. 반환의 defect 필드는 호환을 위해 이름만
+     * 유지하며, kind 'ndt'면 그 게이지 마킹 항목이다.
+     */
     function findCrackMonitorDefectRecord(defectId, floorCode) {
         if (!defectId || !state.currentBuildingId) return null;
-        const bldg = state.currentBuilding;
         const tryFloor = floorCode || getCrackMonitorDefectFloorCode(defectId);
-        if (tryFloor) {
-            const key = `${state.currentBuildingId}_${tryFloor}`;
-            const hit = (state.defects[key] || []).find((d) => d.id === defectId);
-            if (hit) return { defect: hit, floorCode: tryFloor, key };
-        }
         const prefix = `${state.currentBuildingId}_`;
+        if (tryFloor) {
+            const key = `${prefix}${tryFloor}`;
+            const hit = (state.defects[key] || []).find((d) => d.id === defectId);
+            if (hit) return { defect: hit, floorCode: tryFloor, key, kind: 'defect' };
+            const mark = ((state.ndtData && state.ndtData[key]) || []).find((it) => it && it.id === defectId && isCrackGaugeNdtItem(it));
+            if (mark) return { defect: mark, floorCode: tryFloor, key, kind: 'ndt' };
+        }
         for (const key of Object.keys(state.defects || {})) {
             if (!key.startsWith(prefix)) continue;
             const hit = (state.defects[key] || []).find((d) => d.id === defectId);
-            if (hit) return { defect: hit, floorCode: key.slice(prefix.length), key };
+            if (hit) return { defect: hit, floorCode: key.slice(prefix.length), key, kind: 'defect' };
+        }
+        for (const key of Object.keys(state.ndtData || {})) {
+            if (!key.startsWith(prefix)) continue;
+            const mark = (state.ndtData[key] || []).find((it) => it && it.id === defectId && isCrackGaugeNdtItem(it));
+            if (mark) return { defect: mark, floorCode: key.slice(prefix.length), key, kind: 'ndt' };
         }
         return null;
     }
 
-    function getCrackMonitorEligibleDefects(defects, floorCode) {
-        return (defects || [])
-            .filter((d) => defectNeedsCrackMonitorUi(d))
-            .map((d) => ({ defect: d, floorCode: floorCode || state.currentFloor }));
+    function crackMonitorRecordIsEditable(rec) {
+        if (!rec || !rec.defect) return false;
+        return rec.kind === 'ndt' ? isCrackGaugeNdtItem(rec.defect) : defectNeedsCrackMonitorUi(rec.defect);
     }
 
-    function populateNdtCrackMonitorDefectSelect(floorCode, defectId) {
-        const select = document.getElementById('ndtCrackMonitorDefectSelect');
-        if (!select) return;
-        const fc = floorCode || state.currentFloor;
-        const items = getCrackMonitorEligibleDefects(getCurrentFloorDefects(), fc);
-        const bldg = state.currentBuilding;
-        if (!items.length) {
-            select.innerHTML = '<option value="">— 균열 결함 없음 —</option>';
-            return;
-        }
-        select.innerHTML = items.map(({ defect: d, floorCode: itemFloor }) => {
-            const ctx = {
-                floorCode: itemFloor,
-                gradeNo: formatSurveyReportNo(d, true, itemFloor),
-                floorDisplayLabel: getGrade3FloorDisplayLabel(itemFloor, bldg)
-            };
-            const no = getSurveyCellText('no', d, ctx) || (d.no || '').replace(/^NO\.?\s*/i, '');
-            const title = `${d.component || '부재'} ${d.defectType || ''}`.trim();
-            const val = `${itemFloor}::${d.id}`;
-            return `<option value="${escapeSurveyAttr(val)}">${escapeSurveyAttr(no)} · ${escapeSurveyAttr(title)}</option>`;
-        }).join('');
-        if (defectId) select.value = `${fc}::${defectId}`;
+    function setNdtCrackGaugeMarkFieldsUi(rec) {
+        const wrap = document.getElementById('ndtCrackGaugeMarkFields');
+        const delBtn = document.getElementById('btnDeleteNdtCrackGaugeMark');
+        const isMark = !!(rec && rec.kind === 'ndt');
+        if (wrap) wrap.style.display = isMark ? '' : 'none';
+        if (delBtn) delBtn.hidden = !isMark;
+        const comp = document.getElementById('crackGaugeMarkComponent');
+        const loc = document.getElementById('crackGaugeMarkLocation');
+        if (comp) comp.value = isMark ? String(rec.defect.component || '') : '';
+        if (loc) loc.value = isMark ? String(rec.defect.location || '') : '';
     }
 
     function isNdtCrackMonitorModalOpen() {
@@ -24463,13 +24627,14 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (window._ndtCrackMonitorDefectId && window._ndtCrackMonitorDefectId !== defectId) {
             saveNdtCrackMonitorForSelectedDefect({ silent: true });
         }
-        populateNdtCrackMonitorDefectSelect(floorCode, defectId);
         selectNdtCrackMonitorDefect(defectId, floorCode);
         const modal = document.getElementById('ndtCrackMonitorModal');
         if (!modal) return;
         const title = document.getElementById('ndtCrackMonitorModalTitle');
         const rec = findCrackMonitorDefectRecord(defectId, floorCode);
-        if (title && rec) {
+        if (title && rec && rec.kind === 'ndt') {
+            title.innerHTML = `<i class="fa-solid fa-chart-line"></i> ${escapeSurveyAttr(getCrackGaugeMarkDisplayNo(rec.defect) || '게이지')} · 균열 게이지·팁`;
+        } else if (title && rec) {
             const ctx = {
                 floorCode: rec.floorCode,
                 gradeNo: formatSurveyReportNo(rec.defect, true, rec.floorCode),
@@ -24521,8 +24686,40 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (!defectId || !state.currentBuildingId) return false;
         const rec = findCrackMonitorDefectRecord(defectId, window._ndtCrackMonitorFloorCode);
         if (!rec) return false;
-        const { defect, key, floorCode } = rec;
-        if (!defectNeedsCrackMonitorUi(defect)) return false;
+        const { key, floorCode } = rec;
+        if (!crackMonitorRecordIsEditable(rec)) return false;
+        if (rec.kind === 'ndt') {
+            const arr = (state.ndtData && state.ndtData[key]) || [];
+            const nIdx = arr.findIndex((it) => it && it.id === defectId);
+            if (nIdx < 0) return false;
+            const mark = arr[nIdx];
+            const gaugeLog = getCrackGaugeLogFromUi();
+            mark.crackGaugeLog = gaugeLog;
+            mark.crackTipLog = getCrackTipLogFromUi();
+            const compEl = document.getElementById('crackGaugeMarkComponent');
+            const locEl = document.getElementById('crackGaugeMarkLocation');
+            if (compEl) mark.component = compEl.value.trim();
+            if (locEl) mark.location = locEl.value.trim();
+            // 도면 박스 라벨 = 게이지 No. (비우면 처음 붙인 번호 유지)
+            const gNo = String(gaugeLog.gaugeNo || '').trim();
+            if (gNo) mark.no = gNo;
+            touchNdtUpdatedAt(mark);
+            window._ndtCrackMonitorFloorCode = floorCode;
+            if (typeof markFloorKeyDirty === 'function') markFloorKeyDirty(key);
+            if (typeof saveStateToLocalStorage === 'function') saveStateToLocalStorage();
+            if (typeof syncStateToFirebase === 'function') syncStateToFirebase();
+            if (typeof renderNdtSummaryTable === 'function') renderNdtSummaryTable();
+            if (typeof renderSurveyCrackMonitorSection === 'function') {
+                renderSurveyCrackMonitorSection(state.defects[`${state.currentBuildingId}_${state.currentFloor}`] || []);
+            }
+            const title = document.getElementById('ndtCrackMonitorModalTitle');
+            if (title && isNdtCrackMonitorModalOpen()) {
+                title.innerHTML = `<i class="fa-solid fa-chart-line"></i> ${escapeSurveyAttr(getCrackGaugeMarkDisplayNo(mark) || '게이지')} · 균열 게이지·팁`;
+            }
+            if (typeof drawNdtCanvas === 'function') drawNdtCanvas();
+            if (!opts.silent && typeof window.showToast === 'function') window.showToast('균열 게이지·팁 측정을 저장했습니다.', 'success');
+            return true;
+        }
         const idx = (state.defects[key] || []).findIndex((d) => d.id === defectId);
         if (idx < 0) return false;
         state.defects[key][idx].crackGaugeLog = getCrackGaugeLogFromUi();
@@ -24546,20 +24743,22 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             window._ndtCrackMonitorFloorCode = null;
             const meta = document.getElementById('ndtCrackMonitorDefectMeta');
             if (meta) meta.textContent = '';
+            setNdtCrackGaugeMarkFieldsUi(null);
             return;
         }
         const rec = findCrackMonitorDefectRecord(defectId, floorCode);
-        if (!rec || !defectNeedsCrackMonitorUi(rec.defect)) return;
+        if (!rec || !crackMonitorRecordIsEditable(rec)) return;
         window._ndtCrackMonitorDefectId = defectId;
         window._ndtCrackMonitorFloorCode = rec.floorCode;
         window._ndtCrackMonitorHydrating = true;
         setCrackMonitorLogsToUi(rec.defect);
+        setNdtCrackGaugeMarkFieldsUi(rec);
         window._ndtCrackMonitorHydrating = false;
-        const select = document.getElementById('ndtCrackMonitorDefectSelect');
-        if (select) select.value = `${rec.floorCode}::${defectId}`;
         const meta = document.getElementById('ndtCrackMonitorDefectMeta');
         if (meta) {
-            meta.textContent = `${rec.defect.component || '부재'} ${rec.defect.defectType || ''}`.trim();
+            meta.textContent = rec.kind === 'ndt'
+                ? '도면에 직접 찍은 게이지 마킹'
+                : `기존 균열 결함에 연결된 기록 · ${rec.defect.component || '부재'} ${rec.defect.defectType || ''}`.trim();
         }
     }
 
@@ -24593,15 +24792,33 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         }).join('');
     }
 
-    function renderNdtCrackMonitorSection() {
-        /* 하단 고정 섹션 제거 — 도면 핀 클릭 시 모달로 대체 */
+    function renderCrackGaugeMarkSummaryRow(item, btnClass) {
+        const no = getCrackGaugeMarkDisplayNo(item) || '-';
+        const title = [item.component, item.location].filter((s) => s && String(s).trim()).join(' ') || '균열 게이지';
+        const gauge = normalizeCrackGaugeLog(item.crackGaugeLog);
+        const gaugeLabel = gauge.gaugeNo ? `No.${gauge.gaugeNo}` : '-';
+        const lastGauge = gauge.readings.length ? gauge.readings[gauge.readings.length - 1] : null;
+        const gDelta = lastGauge ? computeGaugeDeltas(gauge, lastGauge) : { dx: null, dy: null };
+        const xyText = lastGauge
+            ? `${lastGauge.xMm || '-'}/${lastGauge.yMm || '-'} (Δ${formatMonitorDelta(gDelta.dx)}/${formatMonitorDelta(gDelta.dy)})`
+            : '-';
+        const tipSum = summarizeCrackTipLog(item.crackTipLog);
+        return `<tr>
+                <td>${escapeSurveyAttr(no)}</td>
+                <td>${escapeSurveyAttr(title)}</td>
+                <td>${escapeSurveyAttr(gaugeLabel)}</td>
+                <td>${escapeSurveyAttr(xyText)}</td>
+                <td>${escapeSurveyAttr(tipSum)}</td>
+                <td><button type="button" class="btn btn-sm btn-outline ${btnClass}" onclick="window.openNdtCrackMonitorDefect('${escapeSurveyAttr(item.id)}')">기록</button></td>
+            </tr>`;
     }
 
-    function parseNdtCrackMonitorSelectValue(raw) {
-        const s = String(raw || '');
-        const sep = s.indexOf('::');
-        if (sep >= 0) return { floorCode: s.slice(0, sep), defectId: s.slice(sep + 2) };
-        return { floorCode: state.currentFloor, defectId: s };
+    function renderNdtCrackGaugeMarkSummaryRows(items) {
+        return (items || []).map((it) => renderCrackGaugeMarkSummaryRow(it, 'ndt-crack-monitor-open')).join('');
+    }
+
+    function renderNdtCrackMonitorSection() {
+        /* 하단 고정 섹션 제거 — 도면 핀 클릭 시 모달로 대체 */
     }
 
     window.openNdtCrackMonitorDefect = function(defectId, floorCode) {
@@ -24914,19 +25131,36 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 if (typeof scheduleNdtCrackMonitorSave === 'function') scheduleNdtCrackMonitorSave();
             });
         });
-        const select = document.getElementById('ndtCrackMonitorDefectSelect');
-        if (select && !select.dataset.bound) {
-            select.dataset.bound = '1';
-            select.addEventListener('change', () => {
-                const parsed = parseNdtCrackMonitorSelectValue(select.value);
-                if (!parsed.defectId) {
-                    selectNdtCrackMonitorDefect(null);
-                    return;
+        ['crackGaugeMarkComponent', 'crackGaugeMarkLocation'].forEach((id) => {
+            const el = document.getElementById(id);
+            if (!el || el.dataset.monitorBound) return;
+            el.dataset.monitorBound = '1';
+            el.addEventListener('input', () => {
+                if (typeof scheduleNdtCrackMonitorSave === 'function') scheduleNdtCrackMonitorSave();
+            });
+            el.addEventListener('change', () => {
+                if (typeof scheduleNdtCrackMonitorSave === 'function') scheduleNdtCrackMonitorSave();
+            });
+        });
+        const delMarkBtn = document.getElementById('btnDeleteNdtCrackGaugeMark');
+        if (delMarkBtn && !delMarkBtn.dataset.bound) {
+            delMarkBtn.dataset.bound = '1';
+            delMarkBtn.addEventListener('click', () => {
+                const id = window._ndtCrackMonitorDefectId;
+                const rec = id ? findCrackMonitorDefectRecord(id, window._ndtCrackMonitorFloorCode) : null;
+                if (!rec || rec.kind !== 'ndt') return;
+                if (rec.floorCode !== state.currentFloor) return;
+                if (typeof window.deleteNdtItem !== 'function') return;
+                if (!window.deleteNdtItem(id)) return;
+                window.clearTimeout(window._ndtCrackMonitorSaveTimer);
+                window._ndtCrackMonitorDefectId = null;
+                window._ndtCrackMonitorFloorCode = null;
+                selectedNdtIds.delete(id);
+                updateNdtSelectionBar();
+                closeNdtCrackMonitorModal({ save: false });
+                if (typeof renderSurveyCrackMonitorSection === 'function') {
+                    renderSurveyCrackMonitorSection(state.defects[`${state.currentBuildingId}_${state.currentFloor}`] || []);
                 }
-                if (window._ndtCrackMonitorDefectId && window._ndtCrackMonitorDefectId !== parsed.defectId) {
-                    saveNdtCrackMonitorForSelectedDefect({ silent: true });
-                }
-                selectNdtCrackMonitorDefect(parsed.defectId, parsed.floorCode);
             });
         }
         const closeBtn = document.getElementById('btnCloseNdtCrackMonitorModal');
@@ -24977,19 +25211,19 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const section = document.getElementById('surveyCrackMonitorSection');
         const body = document.getElementById('surveyCrackMonitorBody');
         if (!section || !body) return;
-        if (!isGrade3Building()) {
-            section.hidden = true;
-            body.innerHTML = '';
-            return;
-        }
+        // 점검 종류·시설 등급과 무관하게 게이지 기록이 있으면 보여 준다 (3종은 예전처럼 중점관리 균열도)
+        const grade3 = isGrade3Building();
         const items = (defects || []).filter((d) => {
             if (!d || !String(d.defectType || '').includes('균열')) return false;
-            if (d.isPriorityManage) return true;
+            if (grade3 && d.isPriorityManage) return true;
             const g = normalizeCrackGaugeLog(d.crackGaugeLog);
             const t = normalizeCrackTipLog(d.crackTipLog);
             return g.readings.length > 0 || t.readings.length > 0 || g.gaugeNo;
         });
-        if (!items.length) {
+        const gaugeMarks = state.currentBuildingId
+            ? (((state.ndtData || {})[`${state.currentBuildingId}_${state.currentFloor}`]) || []).filter(isCrackGaugeNdtItem)
+            : [];
+        if (!items.length && !gaugeMarks.length) {
             section.hidden = true;
             body.innerHTML = '';
             return;
@@ -25020,7 +25254,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 <td>${escapeSurveyAttr(tipSum)}</td>
                 <td><button type="button" class="btn btn-sm btn-outline survey-crack-monitor-open" onclick="window.openNdtCrackMonitorDefect('${escapeSurveyAttr(d.id)}')">기록</button></td>
             </tr>`;
-        }).join('');
+        }).join('') + gaugeMarks.map((it) => renderCrackGaugeMarkSummaryRow(it, 'survey-crack-monitor-open')).join('');
     }
 
     window.openSurveyCrackMonitorDefect = window.openNdtCrackMonitorDefect;
@@ -35340,12 +35574,129 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         }
     }
 
+    /**
+     * PDF 보고서용 균열 게이지·팁 페이지. 도면에 찍은 게이지 마킹과 예전 균열 결함 연결 기록을
+     * 모두 모아(한글 내보내기와 같은 수집 함수) 점검 종류와 무관하게 낸다. 기록이 없으면 ''.
+     */
+    function buildReportCrackMonitorPagesHtml(bldg, bldgId, reportTitleHeader, compName) {
+        if (!bldg || !bldgId) return '';
+        const labelOf = (fc) => stripFloorCodeSuffix(window.getFloorLabelFromCode(fc));
+        const floorsData = buildHwpxCrackMonitorFloorsData(bldg, bldgId);
+        const { items } = collectHwpxCrackMonitorExportItems(bldg, bldgId, floorsData, labelOf);
+        if (!items.length) return '';
+        const esc = (v) => escapeSurveyAttr(v == null ? '' : String(v));
+        const pageOpen = `
+                        <div class="report-page-block" style="background:#ffffff; color:#0f172a; padding: 10mm 14mm 10mm 14mm; margin-bottom: 2rem; font-family: sans-serif; font-size:0.9rem; border-radius:4px; box-shadow: 0 4px 20px rgba(0,0,0,0.1); page-break-after: always; break-after: page; page-break-inside: avoid !important; break-inside: avoid !important; box-sizing: border-box; width: 210mm; height: 295mm; max-height: 295mm; overflow: hidden; display: flex; flex-direction: column; position: relative;">
+                            <div style="text-align:center; border-bottom: 1px solid #cbd5e1; padding-bottom: 0.3rem; margin-bottom: 0.6rem;">
+                                <h1 style="font-size:0.75rem; font-weight:700; color:#000000; margin:0;">${reportTitleHeader}</h1>
+                            </div>`;
+        const pageClose = `
+                            <div style="margin-top: auto; padding-top: 0.6rem; border-top: 1px solid #e2e8f0; display: flex; justify-content: space-between; align-items: center; font-size: 0.8rem; color: #475569;">
+                                <span>🏢 점검수행기관: <strong style="color: #1f1f1f; font-weight: 800;">${compName}</strong></span>
+                                <span>📄 스마트 건축물 안전점검 시스템</span>
+                            </div>
+                        </div>`;
+        const th = 'border:1px solid #334155; padding:3px 4px; background:#f1f5f9; font-weight:700; font-size:0.72rem;';
+        const td = 'border:1px solid #334155; padding:3px 4px; font-size:0.72rem; text-align:center; word-break:keep-all;';
+        const placeOf = (it) => {
+            const d = it.defect || {};
+            return `${it.floorLabel || ''} ${d.component || ''} ${d.locationDetail || ''}`.replace(/\s+/g, ' ').trim() || '-';
+        };
+        const noOf = (it) => (it.gauge && it.gauge.gaugeNo) || (it.defect && it.defect.no) || '-';
+        const rows = [];
+        items.forEach((it) => {
+            const place = placeOf(it);
+            if (it.hasGauge) {
+                const g = it.gauge;
+                const lastIdx = g.readings.length - 1;
+                const last = lastIdx >= 0 ? g.readings[lastIdx] : null;
+                const cum = last ? computeGaugeDeltas(g, last) : { dx: null, dy: null };
+                const prevD = lastIdx > 0 ? computeGaugePrevDeltas(g, lastIdx) : { dx: null, dy: null };
+                rows.push([
+                    noOf(it), place, '게이지',
+                    `${g.initialX || '-'} / ${g.initialY || '-'}`,
+                    last ? (formatHwpxCrackMonitorDate(last.date) || last.roundKey || '-') : '-',
+                    last ? `${last.xMm || '-'} / ${last.yMm || '-'}` : '-',
+                    `${formatMonitorDelta(cum.dx)} / ${formatMonitorDelta(cum.dy)}`,
+                    `${formatMonitorDelta(prevD.dx)} / ${formatMonitorDelta(prevD.dy)}`
+                ]);
+            }
+            if (it.hasTip) {
+                const t = it.tip;
+                const lastIdx = t.readings.length - 1;
+                const last = lastIdx >= 0 ? t.readings[lastIdx] : null;
+                rows.push([
+                    noOf(it), place, '균열팁',
+                    t.initialLengthMm || '-',
+                    last ? (formatHwpxCrackMonitorDate(last.date) || last.roundKey || '-') : '-',
+                    last ? (last.lengthMm || '-') : '-',
+                    last ? formatMonitorDelta(computeTipCumulative(t, lastIdx)) : '-',
+                    lastIdx > 0 ? formatMonitorDelta(computeTipPrevDelta(t, lastIdx)) : '-'
+                ]);
+            }
+        });
+        const ROWS_PER_PAGE = 24;
+        let html = '';
+        const tablePages = Math.max(1, Math.ceil(rows.length / ROWS_PER_PAGE));
+        for (let p = 0; p < tablePages; p += 1) {
+            const slice = rows.slice(p * ROWS_PER_PAGE, (p + 1) * ROWS_PER_PAGE);
+            const note = tablePages > 1 ? ` (${p + 1}/${tablePages})` : '';
+            html += `${pageOpen}
+                            <h2 style="font-size:1.02rem; font-weight:800; color:#0f172a; border-left: 4px solid #2a2a2a; padding-left: 0.5rem; margin-bottom: 0.5rem;">균열 게이지·팁 누적 측정 결과${note}</h2>
+                            <table style="width:100%; border-collapse:collapse; table-layout:fixed;">
+                                <thead><tr>
+                                    <th style="${th} width:9%;">No.</th><th style="${th} width:25%;">위치</th><th style="${th} width:8%;">구분</th>
+                                    <th style="${th} width:12%;">초기값</th><th style="${th} width:11%;">최근 측정일</th>
+                                    <th style="${th} width:12%;">최근 측정값</th><th style="${th} width:12%;">누적 (초기 대비)</th><th style="${th} width:11%;">전차 대비</th>
+                                </tr></thead>
+                                <tbody>${slice.map((r) => `<tr>${r.map((c) => `<td style="${td}">${esc(c)}</td>`).join('')}</tr>`).join('')}</tbody>
+                            </table>
+                            <p style="font-size:0.68rem; color:#475569; margin-top:0.4rem;">※ 게이지는 X / Y(mm), 균열팁은 길이(mm). 누적 = 최근 측정 − 초기값, 전차 대비 = 최근 측정 − 직전 측정.</p>
+                            ${pageClose}`;
+        }
+        // 비교 사진 (전차 / 현차) — 사진이 있는 항목만, 한 페이지 3건
+        const photoItems = [];
+        items.forEach((it) => {
+            [[it.hasGauge ? it.gauge : null, '게이지'], [it.hasTip ? it.tip : null, '균열팁']].forEach(([log, kindLabel]) => {
+                if (!log || (!log.prevPhoto && !log.currPhoto)) return;
+                const labels = getCrackMonitorItemRoundLabels(it, bldg);
+                photoItems.push({
+                    title: `${noOf(it)} ${kindLabel} · ${placeOf(it)}`,
+                    prev: log.prevPhoto || '',
+                    curr: log.currPhoto || '',
+                    prevLabel: labels.prev || '전차',
+                    currLabel: labels.curr || '현차'
+                });
+            });
+        });
+        const PHOTOS_PER_PAGE = 3;
+        const photoCell = (src, label) => `
+                                        <div style="flex:1; display:flex; flex-direction:column; border:1px solid #334155;">
+                                            <div style="height:62mm; display:flex; align-items:center; justify-content:center; background:#ffffff; overflow:hidden;">
+                                                ${src ? `<img src="${esc(src)}" style="max-width:100%; max-height:100%; object-fit:contain; display:block;">` : '<span style="color:#94a3b8; font-size:0.75rem;">사진 없음</span>'}
+                                            </div>
+                                            <div style="border-top:1px solid #334155; text-align:center; font-size:0.72rem; padding:2px;">${esc(label)}</div>
+                                        </div>`;
+        for (let p = 0; p * PHOTOS_PER_PAGE < photoItems.length; p += 1) {
+            const slice = photoItems.slice(p * PHOTOS_PER_PAGE, (p + 1) * PHOTOS_PER_PAGE);
+            html += `${pageOpen}
+                            <h2 style="font-size:1.02rem; font-weight:800; color:#0f172a; border-left: 4px solid #2a2a2a; padding-left: 0.5rem; margin-bottom: 0.5rem;">균열 게이지·팁 비교 사진 (전차 / 현차)</h2>
+                            ${slice.map((ph) => `
+                                <div style="margin-bottom:0.5rem;">
+                                    <div style="font-size:0.78rem; font-weight:700; margin-bottom:2px;">${esc(ph.title)}</div>
+                                    <div style="display:flex; gap:4mm;">${photoCell(ph.prev, ph.prevLabel)}${photoCell(ph.curr, ph.currLabel)}</div>
+                                </div>`).join('')}
+                            ${pageClose}`;
+        }
+        return html;
+    }
+
     function renderNdtFloorPlanCanvasDataUrl(floorCode, categoryFilter = null) {
         try {
             const bldg = window.state.currentBuilding || {};
             const currentBldgId = bldg.id || state.currentBuildingId || 'default';
             const key = `${currentBldgId}_${floorCode}`;
-            let ndtItems = state.ndtData ? (state.ndtData[key] || []) : [];
+            let ndtItems = (state.ndtData ? (state.ndtData[key] || []) : []).filter((item) => !isCrackGaugeNdtItem(item));
             let displacementGroups = state.ndtDisplacementGroups ? (state.ndtDisplacementGroups[key] || []) : [];
 
             if (categoryFilter) {
@@ -36307,6 +36658,17 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 await yieldToUi();
             }
 
+            // --- 균열 게이지·팁 누적 측정 (정밀·정기·진단, 1·2·3종 모두 — 기록이 있을 때만, 한글과 같이 맨 뒤) ---
+            try {
+                const crackPagesHtml = buildReportCrackMonitorPagesHtml(bldg, currentBldgId, reportTitleHeader, compName);
+                if (crackPagesHtml) {
+                    reportPagesHtml += crackPagesHtml;
+                    if (reportArea) reportArea.insertAdjacentHTML('beforeend', crackPagesHtml);
+                }
+            } catch (crackPdfErr) {
+                console.error('균열 게이지·팁 보고서 섹션 생성 실패(나머지는 유지):', crackPdfErr);
+            }
+
             // 상태조사표는 15/17행·15배수 마감 규칙을 유지한다. 높이 넘침으로 행을 다음 페이지로
             // 흘리면 끝 번호가 15·30에서 어긋나므로 재배치는 하지 않는다.
         } catch (err) {
@@ -36676,22 +37038,57 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     }
 
     function buildHwpxCrackMonitorFloorsData(bldg, bldgId) {
+        // 보고서 본문과 같은 층 목록(추가 도면 층·비파괴에만 있는 층 포함) — floorsList만 보면 빠지는 층이 있다
         let floorCodes = [];
-        if (bldg.floorsList && bldg.floorsList.length) {
-            floorCodes = bldg.floorsList.map((f) => f.floorCode);
-        } else if (window.state.currentFloor) {
-            floorCodes = [window.state.currentFloor];
+        if (bldgId && typeof listNdtFloorCodesForBuilding === 'function') {
+            floorCodes = listNdtFloorCodesForBuilding(bldgId);
         }
-        return floorCodes.map((floorCode) => {
+        if (!floorCodes.length) {
+            if (bldg.floorsList && bldg.floorsList.length) {
+                floorCodes = bldg.floorsList.map((f) => f.floorCode);
+            } else if (window.state.currentFloor) {
+                floorCodes = [window.state.currentFloor];
+            }
+        }
+        const seen = new Set();
+        return floorCodes.filter((fc) => {
+            if (!fc || seen.has(fc)) return false;
+            seen.add(fc);
+            return true;
+        }).map((floorCode) => {
             const key = `${bldgId}_${floorCode}`;
             const pageDefects = window.state.defects[key] || (window.state.currentFloor === floorCode ? getCurrentFloorDefects() : []);
-            return { floorCode, pageDefects };
-        }).filter((row) => row.pageDefects && row.pageDefects.length);
+            const gaugeMarks = ((window.state.ndtData && window.state.ndtData[key]) || []).filter(isCrackGaugeNdtItem);
+            return { floorCode, pageDefects, gaugeMarks };
+        }).filter((row) => (row.pageDefects && row.pageDefects.length) || (row.gaugeMarks && row.gaugeMarks.length));
+    }
+
+    /** 게이지 마킹(비파괴 항목)을 내보내기용 결함 모양으로 — 부재·위치는 마킹 자신의 값 */
+    function crackGaugeMarkAsExportDefect(item) {
+        return {
+            id: item.id,
+            no: getCrackGaugeMarkDisplayNo(item),
+            component: item.component || '',
+            locationDetail: item.location || '',
+            defectType: '균열',
+            _crackGaugeMark: true
+        };
+    }
+
+    function getCrackMonitorItemRoundLabels(item, bldg) {
+        if (item && item.defect && !item.defect._crackGaugeMark && typeof getDefectHwpxCompareRoundLabelsFull === 'function') {
+            return getDefectHwpxCompareRoundLabelsFull(item.defect, bldg);
+        }
+        const currKey = (typeof getBuildingSurveyRoundKey === 'function') ? getBuildingSurveyRoundKey(bldg) : '';
+        const prevKey = currKey && typeof getPreviousSurveyRoundKey === 'function' ? getPreviousSurveyRoundKey(currKey) : '';
+        const fmt = (k) => (k && typeof formatSurveyRoundLabelHwpxCompare === 'function') ? formatSurveyRoundLabelHwpxCompare(k) : '';
+        return { prev: fmt(prevKey), curr: fmt(currKey) };
     }
 
     function collectHwpxCrackMonitorExportItems(bldg, bldgId, floorsData, getFloorLabel) {
         const items = [];
-        (floorsData || []).forEach(({ floorCode, pageDefects }) => {
+        (floorsData || []).forEach(({ floorCode, pageDefects, gaugeMarks }) => {
+            // 예전 방식: 균열 결함에 붙은 기록 (위치 정보는 연결된 균열 결함) — 기존 출력 순서 유지를 위해 먼저
             (pageDefects || []).forEach((defect) => {
                 if (!defectNeedsCrackMonitorUi(defect)) return;
                 const gauge = normalizeCrackGaugeLog(defect.crackGaugeLog);
@@ -36701,6 +37098,23 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 if (!hasGauge && !hasTip) return;
                 items.push({
                     defect,
+                    floorCode,
+                    floorLabel: getFloorLabel(floorCode),
+                    gauge,
+                    tip,
+                    hasGauge,
+                    hasTip
+                });
+            });
+            // 도면에 직접 찍은 게이지 (위치 정보는 게이지 마킹 자신의 부재·위치·층)
+            (gaugeMarks || []).forEach((mark) => {
+                const gauge = normalizeCrackGaugeLog(mark.crackGaugeLog);
+                const tip = normalizeCrackTipLog(mark.crackTipLog);
+                const hasGauge = !!(gauge.gaugeNo || gauge.initialX || gauge.initialY || gauge.prevPhoto || gauge.currPhoto || (gauge.readings && gauge.readings.length));
+                const hasTip = !!(tip.initialLengthMm || tip.prevPhoto || tip.currPhoto || (tip.readings && tip.readings.length));
+                if (!hasGauge && !hasTip) return;
+                items.push({
+                    defect: crackGaugeMarkAsExportDefect(mark),
                     floorCode,
                     floorLabel: getFloorLabel(floorCode),
                     gauge,
@@ -37070,9 +37484,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             const cmpPhotos = getCrackMonitorComparePhotos(item);
             const prevSrc = cmpPhotos.prev || '';
             const currSrc = cmpPhotos.curr || '';
-            const roundLabels = (typeof getDefectHwpxCompareRoundLabelsFull === 'function')
-                ? getDefectHwpxCompareRoundLabelsFull(d, bldg)
-                : { prev: '전회 측정', curr: '금회 측정' };
+            const roundLabels = getCrackMonitorItemRoundLabels(item, bldg);
             setTcText(getHwpxTblCellByAddr(tbl, 1, 0), String(photoNo));
             setTcText(getHwpxTblCellByAddr(tbl, 1, 1), d.component || '');
             setTcText(getHwpxTblCellByAddr(tbl, 1, 2), `${item.floorLabel || ''} ${d.locationDetail || ''}`.trim());
@@ -46698,7 +47110,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             },
             photos: { urlsById: collectFloorPhotoUrlMap(window.state.defects[floorKey] || []) },
             ndt: {
-                items: window.state.ndtData[floorKey] || [],
+                items: stripCrackMonitorPhotosForCloud(window.state.ndtData[floorKey] || []),
                 deletedIds: (window.state.deletedNdtIds || {})[floorKey] || [],
                 deletedAt: (window.state.deletedNdtAt || {})[floorKey] || {},
                 displacementGroups: (window.state.ndtDisplacementGroups || {})[floorKey] || [],
@@ -46748,6 +47160,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         window.state.defects = defectMerge.defects;
         window.state.deletedDefectIds = defectMerge.deletedDefectIds;
         window.state.deletedDefectAt = defectMerge.deletedDefectAt || {};
+        const ndtPrevForPhotos = window.state.ndtData || {};
         const ndtMerge = mergeNdtDataMaps(
             { [floorKey]: ndt.items || [] },
             window.state.ndtData || {},
@@ -46756,7 +47169,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             { [floorKey]: ndt.deletedAt || {} },
             window.state.deletedNdtAt || {}
         );
-        window.state.ndtData = ndtMerge.ndtData;
+        window.state.ndtData = carryLocalCrackMonitorPhotos(ndtPrevForPhotos, ndtMerge.ndtData);
         window.state.deletedNdtIds = ndtMerge.deletedNdtIds;
         window.state.deletedNdtAt = ndtMerge.deletedNdtAt || {};
         // 삭제 목록을 빈 객체로 넘기면 지운 측정 구역이 서버본으로 되살아난다.
@@ -49323,7 +49736,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 filterMapKeysByDeletedBuildings(data.deletedNdtAt || {}, mergedDeletedBuildings),
                 filterMapKeysByDeletedBuildings(window.state.deletedNdtAt || {}, mergedDeletedBuildings)
             );
-            window.state.ndtData = ndtMerge.ndtData;
+            window.state.ndtData = carryLocalCrackMonitorPhotos(window.state.ndtData || {}, ndtMerge.ndtData);
             window.state.deletedNdtIds = ndtMerge.deletedNdtIds;
             window.state.deletedNdtAt = ndtMerge.deletedNdtAt || {};
             isChanged = true;
