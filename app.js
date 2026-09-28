@@ -33663,7 +33663,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     <label class="grid-panel-row"><input type="checkbox" data-f="auto" ${grid.autoLocation ? 'checked' : ''}> 마킹에 행·열 위치 자동 입력</label>
                     <div class="grid-panel-row">
                         <button type="button" data-act="fillExisting" title="행·열 위치가 없는 마킹만 채움(상세 위치·실 이름은 그대로)">이 층 마킹에 위치 채우기</button>
-                        <button type="button" data-act="resetFill" title="이 층 마킹 전부의 행·열 위치를 지금 선 기준으로 다시 씀(상세 위치·실 이름은 그대로)">행·열 위치 다시 채우기</button>
+                        <button type="button" data-act="resetFill" class="danger" title="이 층 마킹 전부의 위치칸(상세 위치·실 이름·예전 글자)을 비우고 행·열 위치를 지금 선 기준으로 다시 씀. 3종은 위치칸에 층만 남김. 되돌리기 한 번으로 취소">위치칸 비우고 행·열 다시 채우기</button>
                         <button type="button" data-act="clearAll" class="danger">이 층 선 모두 지우기</button>
                     </div>
                 </div>
@@ -34116,8 +34116,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     }
 
     /**
-     * 「행·열 위치 다시 채우기」 — 이 층 마킹 전부의 행·열 위치를 지금 선 기준으로 다시 씀(있던 값 덮어씀).
-     * 상세 위치(실 이름)는 지우지 않는다. 선 밖은 보통 규칙(~X1 / X7~). 되돌리기 한 번으로 전체 취소.
+     * 「위치칸 비우고 행·열 다시 채우기」 — 이 층 마킹 전부의 위치칸(location: 실 이름·층 이름·예전 행·열 글자·CAD '1F' 등)을
+     * 비우고 행·열 위치(gridLoc)를 지금 선 기준으로 다시 씀. 3종은 위치칸 층 규칙대로 층만 남김(composeDefectLocation('')).
+     * 선 밖은 보통 규칙(~X1 / X7~). 되돌리기 한 번으로 전체 취소.
+     * (2026-09-28 e59845f에서 실 이름을 지키도록 바뀌며 위치칸을 안 비우게 됐던 것을 사용자 요청으로 되돌림)
      */
     function resetGridLocationForCurrentFloor() {
         if (!currentGridHasLines()) {
@@ -34126,27 +34128,41 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         }
         const grid = getCurrentFloorGrid(false);
         const wasAuto = grid.autoLocation !== false;
-        grid.autoLocation = true; // 직접 누른 명령 — 자동 입력 체크와 무관하게 계산
-        let res;
-        try {
-            res = countGridBulkChanges();
-        } finally {
-            grid.autoLocation = wasAuto;
-        }
-        if (!res.n) {
-            window.showToast?.('바꿀 마킹이 없습니다. (모두 지금 선 기준 행·열 위치입니다)', 'info', 2500);
+        const fc = state.currentFloor;
+        const emptyLoc = composeDefectLocation('', fc); // 1·2종 '' · 3종 층 이름
+        const list = filterMapPlacedDefects(getCurrentFloorDefects());
+        if (!list.length) {
+            window.showToast?.('이 층에 마킹이 없습니다.', 'info', 2000);
             return;
         }
-        if (!confirm(`이 층 마킹 ${res.n}개의 행·열 위치를 지금 선 기준으로 다시 씁니다.\n상세 위치(실 이름)는 지우지 않고 그대로 둡니다.\n(되돌리기로 한 번에 취소할 수 있습니다)`)) return;
+        const withText = list.filter((d) => String(d.location || '').trim() !== emptyLoc).length;
+        const floorNote = emptyLoc ? `(3종 시설물: 위치칸에는 층 「${emptyLoc}」만 남깁니다)\n` : '';
+        if (!confirm(`이 층 마킹 ${list.length}개의 위치칸을 비우고 행·열 위치를 지금 선 기준으로 다시 넣습니다.\n`
+            + `위치칸에 적힌 글(실 이름·층 이름·예전 위치) ${withText}개가 지워집니다.\n${floorNote}(되돌리기로 한 번에 취소할 수 있습니다)`)) return;
         if (typeof pushDefectHistory === 'function') pushDefectHistory();
         let done = 0;
-        grid.autoLocation = true;
+        grid.autoLocation = true; // 직접 누른 명령 — 자동 입력 체크와 무관하게 계산
         try {
-            res.list.forEach((d) => { if (applyGridAutoLocationToDefect(d)) done += 1; });
+            list.forEach((d) => {
+                let changed = false;
+                if (String(d.location || '') !== emptyLoc) {
+                    d.location = emptyLoc;
+                    changed = true;
+                }
+                if (d.gridLocAuto) {
+                    delete d.gridLocAuto; // 예전 실험 데이터 표시도 정리(위치칸을 비웠으니 옮길 것 없음)
+                    changed = true;
+                }
+                if (applyGridAutoLocationToDefect(d, fc)) changed = true;
+                if (changed) {
+                    touchDefectUpdatedAt(d);
+                    done += 1;
+                }
+            });
         } finally {
             grid.autoLocation = wasAuto;
         }
-        afterGridBulkChange(`마킹 ${done}개의 행·열 위치를 다시 썼습니다.`);
+        afterGridBulkChange(`마킹 ${done}개: 위치칸을 비우고 행·열 위치를 다시 넣었습니다.`);
     }
 
     /** 결함 창 열 때: 행·열 위치를 입력칸 아래에 보여 줌(상세 위치 입력칸은 실 이름용 — 건드리지 않음) */
