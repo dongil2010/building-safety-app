@@ -9350,6 +9350,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
     function drawCanvas(opts) {
         opts = opts || {};
+        requestDrawingCrosshairUpdate();
         if (opts.immediate) {
             if (_mapDrawRafId) {
                 cancelAnimationFrame(_mapDrawRafId);
@@ -11846,6 +11847,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
     let _ndtDrawRafId = 0;
     function drawNdtCanvas() {
+        requestDrawingCrosshairUpdate();
         if (_ndtDrawRafId) return;
         _ndtDrawRafId = requestAnimationFrame(() => {
             _ndtDrawRafId = 0;
@@ -29219,6 +29221,327 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         }
     }
 
+    // @@DRAWING_CROSSHAIR_START
+    // ── CAD 커서식 십자선 ─────────────────────────────────────────────────────────
+    // PC 마우스: 도면 위에 올리면 커서를 지나는 가로·세로 전체 길이 선(AutoCAD 커서처럼).
+    // 터치·마우스 공통: 마킹을 끌어 옮기는 동안에는 마킹의 실제 위치(손가락 접점이 아님)를 지나는 선.
+    // 도면 팬·핀치 줌만 할 때는 표시하지 않음. 캔버스에 그리지 않는 DOM 오버레이(pointer-events: none)라
+    // 클릭·드래그를 막지 않고 PDF·HWPX·벡터 출력에도 들어가지 않는다.
+    const DRAWING_CROSSHAIR_STORAGE_KEY = 'bsa_drawing_crosshair_v1';
+    const DRAWING_CROSSHAIR_GAP_PX = 6; // 가운데 빈칸 — 원래 커서·마킹이 선에 가리지 않게
+    let drawingCrosshairEnabled = (function readDrawingCrosshairPref() {
+        try { return localStorage.getItem(DRAWING_CROSSHAIR_STORAGE_KEY) !== '0'; } catch (_e) { return true; }
+    })();
+    let drawingCrosshairLastClient = null; // 마지막 포인터 위치(터치 포함) — 크기 조절 손잡이처럼 손가락을 그대로 따라가는 부분용
+
+    function isFiniteCrosshairPoint(p) {
+        return !!p && Number.isFinite(p.x) && Number.isFinite(p.y);
+    }
+
+    function createDrawingCrosshair(cfg) {
+        let root = null;
+        let segs = null;
+        let hover = null; // { clientX, clientY } — 마우스가 도면 캔버스 위에 있을 때만
+        let raf = 0;
+        let shown = false;
+        let lastBox = '';
+        let lastPos = '';
+
+        function ensure(container) {
+            if (root && root.parentElement === container) return;
+            if (root && root.parentElement) root.parentElement.removeChild(root);
+            root = document.createElement('div');
+            root.className = 'drawing-crosshair';
+            root.setAttribute('aria-hidden', 'true');
+            root.setAttribute('data-html2canvas-ignore', 'true');
+            root.hidden = true;
+            segs = ['h', 'h', 'v', 'v'].map((axis) => {
+                const s = document.createElement('div');
+                s.className = 'drawing-crosshair-seg drawing-crosshair-' + axis;
+                root.appendChild(s);
+                return s;
+            });
+            container.appendChild(root);
+            shown = false;
+            lastBox = '';
+            lastPos = '';
+        }
+
+        function hide() {
+            if (root && shown) {
+                root.hidden = true;
+                shown = false;
+            }
+        }
+
+        function frame() {
+            raf = 0;
+            if (!drawingCrosshairEnabled) { hide(); return; }
+            const st = window.state;
+            if (st && st.currentTab && st.currentTab !== cfg.tabId) { hide(); return; }
+            const canvas = document.getElementById(cfg.canvasId);
+            const container = document.getElementById(cfg.containerId);
+            if (!canvas || !container) { hide(); return; }
+            const cr = canvas.getBoundingClientRect();
+            if (!(cr.width > 0 && cr.height > 0)) { hide(); return; }
+
+            let p = null;
+            let dragging = false;
+            let dp = null;
+            try { dp = cfg.getDragPoint(); } catch (_e) { dp = null; }
+            if (isFiniteCrosshairPoint(dp)) {
+                p = dp;
+                dragging = true;
+            } else if (hover) {
+                let blocked = false;
+                try { blocked = !!(cfg.isHoverBlocked && cfg.isHoverBlocked(hover.clientX, hover.clientY)); } catch (_e) { blocked = false; }
+                if (!blocked) p = { x: hover.clientX - cr.left, y: hover.clientY - cr.top };
+            }
+            if (!p || p.x < 0 || p.y < 0 || p.x > cr.width || p.y > cr.height) { hide(); return; }
+
+            ensure(container);
+            const kr = container.getBoundingClientRect();
+            const left = Math.round(cr.left - kr.left - container.clientLeft);
+            const top = Math.round(cr.top - kr.top - container.clientTop);
+            const w = Math.round(cr.width);
+            const h = Math.round(cr.height);
+            const box = left + ',' + top + ',' + w + ',' + h;
+            if (box !== lastBox) {
+                root.style.left = left + 'px';
+                root.style.top = top + 'px';
+                root.style.width = w + 'px';
+                root.style.height = h + 'px';
+                lastBox = box;
+                lastPos = '';
+            }
+            const x = Math.round(p.x);
+            const y = Math.round(p.y);
+            const pos = x + ',' + y;
+            if (pos !== lastPos) {
+                const g = DRAWING_CROSSHAIR_GAP_PX;
+                // 선 길이는 오버레이 전체(100%) — 위치만 transform 으로 옮김(레이아웃 없음)
+                segs[0].style.transform = 'translate3d(' + (x - g - w) + 'px,' + y + 'px,0)';
+                segs[1].style.transform = 'translate3d(' + (x + g + 1) + 'px,' + y + 'px,0)';
+                segs[2].style.transform = 'translate3d(' + x + 'px,' + (y - g - h) + 'px,0)';
+                segs[3].style.transform = 'translate3d(' + x + 'px,' + (y + g + 1) + 'px,0)';
+                lastPos = pos;
+            }
+            root.classList.toggle('is-dragging', dragging);
+            if (!shown) {
+                root.hidden = false;
+                shown = true;
+            }
+        }
+
+        function request() {
+            if (raf) return;
+            raf = requestAnimationFrame(frame);
+        }
+
+        function onMousePointerMove(e) {
+            const canvas = document.getElementById(cfg.canvasId);
+            const over = !!canvas && e.target === canvas;
+            if (!over && !hover) return;
+            hover = over ? { clientX: e.clientX, clientY: e.clientY } : null;
+            request();
+        }
+
+        function clearHover() {
+            if (!hover) return;
+            hover = null;
+            request();
+        }
+
+        return { request, onMousePointerMove, clearHover, isShown: () => shown };
+    }
+
+    function mapImgToCanvasLocal(imgX, imgY) {
+        if (!Number.isFinite(imgX) || !Number.isFinite(imgY)) return null;
+        const v = imgToViewCoords(imgX, imgY);
+        return { x: state.view.offsetX + v.x * state.view.scale, y: state.view.offsetY + v.y * state.view.scale };
+    }
+
+    function clientToCanvasLocal(canvasId, client) {
+        const canvas = document.getElementById(canvasId);
+        if (!canvas || !client) return null;
+        const r = canvas.getBoundingClientRect();
+        return { x: client.clientX - r.left, y: client.clientY - r.top };
+    }
+
+    /** 결함위치도 마킹의 끌리는 부분 실제 위치(도면 이미지 좌표 → 캔버스 CSS px) */
+    function getMapMarkingPartCanvasPoint(d, part) {
+        if (!d) return null;
+        if (part === 'AREA_ROTATE') return null;
+        if (part === 'TIP') {
+            const tx = Number(d.targetX !== undefined ? d.targetX : d.x);
+            const ty = Number(d.targetY !== undefined ? d.targetY : d.y);
+            return mapImgToCanvasLocal(tx, ty);
+        }
+        if (part === 'AREA_MOVE') {
+            const c = getDefectMarkingImgCenter(d);
+            return c ? mapImgToCanvasLocal(c.x, c.y) : null;
+        }
+        if (part === 'AREA_RESIZE' || part === 'AREA_VERTEX') {
+            // 손잡이·꼭짓점은 포인터를 그대로 따라감(오프셋 없음)
+            return clientToCanvasLocal('planCanvas', drawingCrosshairLastClient);
+        }
+        return mapImgToCanvasLocal(Number(d.x), Number(d.y));
+    }
+
+    function getMapCrosshairDragPoint() {
+        if (isPinching || isDragging || isDraggingLegend || isResizingLegend) return null;
+        if (isDraggingPinGroup) return mapImgToCanvasLocal(groupDragLastImgX, groupDragLastImgY);
+        if (isDraggingPin && activeDragPin) return getMapMarkingPartCanvasPoint(activeDragPin, activeDragPart);
+        if (isMarkingDrag) return mapImgToCanvasLocal(markPreviewTargetX, markPreviewTargetY);
+        if (isAreaDrag) return mapImgToCanvasLocal(areaCurImgX, areaCurImgY);
+        // 터치: 길게 눌러 잡은 뒤(아직 움직이기 전)부터 표시
+        if (pendingDragHit && pendingDragArmed && pendingDragIsTouch && pendingDragHit.hitInfo) {
+            const hi = pendingDragHit.hitInfo;
+            if (hi.part === 'AREA_RESIZE' || hi.part === 'AREA_VERTEX') {
+                return mapImgToCanvasLocal(pendingDragHit.imgX, pendingDragHit.imgY);
+            }
+            return getMapMarkingPartCanvasPoint(hi.defect, hi.part);
+        }
+        return null;
+    }
+
+    function isMapCrosshairHoverBlocked(clientX, clientY) {
+        if (isPinching) return true;
+        // 범례 위에서는 숨김(범례 이동·크기 조절 커서가 보이게)
+        const c = clientToImgCoords(clientX, clientY);
+        return !!hitTestLegendBox(c.x, c.y);
+    }
+
+    function ndtImgToCanvasLocal(imgX, imgY) {
+        if (!Number.isFinite(imgX) || !Number.isFinite(imgY)) return null;
+        const angle = ndtRotationAngle || 0;
+        const img = ndtBgImage;
+        const imgW = img ? (img.naturalWidth || img.width || 1200) : 1200;
+        const imgH = img ? (img.naturalHeight || img.height || 700) : 700;
+        let vx = imgX;
+        let vy = imgY;
+        // viewToNdtImgCoords 의 역변환
+        if (angle === 90) { vx = imgH - imgY; vy = imgX; }
+        else if (angle === 180) { vx = imgW - imgX; vy = imgH - imgY; }
+        else if (angle === 270) { vx = imgY; vy = imgW - imgX; }
+        return { x: ndtView.offsetX + vx * ndtView.scale, y: ndtView.offsetY + vy * ndtView.scale };
+    }
+
+    function getNdtPinPartCanvasPoint(item, part) {
+        if (!item || part === 'rotate') return null;
+        if (part === 'target') {
+            return ndtImgToCanvasLocal(Number(item.targetX !== undefined ? item.targetX : item.x),
+                Number(item.targetY !== undefined ? item.targetY : item.y));
+        }
+        if (part === 'box') {
+            return ndtImgToCanvasLocal(Number(item.boxX !== undefined ? item.boxX : item.x),
+                Number(item.boxY !== undefined ? item.boxY : item.y));
+        }
+        return ndtImgToCanvasLocal(Number(item.x), Number(item.y));
+    }
+
+    function getNdtCrosshairDragPoint() {
+        if (isNdtPinching || isNdtDragging) return null;
+        if (isDraggingNdtDisplacement && activeDragNdtDisplacementGroup) {
+            const pt = activeDragNdtDisplacementPoint;
+            if (pt) return ndtImgToCanvasLocal(Number(pt.x), Number(pt.y));
+            const g = activeDragNdtDisplacementGroup;
+            return ndtImgToCanvasLocal(Number(g.boxX), Number(g.boxY));
+        }
+        if (isDraggingNdtPinGroup) return ndtImgToCanvasLocal(ndtGroupDragLastX, ndtGroupDragLastY);
+        if (isDraggingNdtPin && activeDragNdtPin) return getNdtPinPartCanvasPoint(activeDragNdtPin, dragNdtPart);
+        if (isNdtMarkingDrag && window._ndtMarkCurrentCoords) {
+            return ndtImgToCanvasLocal(Number(window._ndtMarkCurrentCoords.x), Number(window._ndtMarkCurrentCoords.y));
+        }
+        if (pendingNdtPinHit && pendingNdtPinArmed && pendingNdtPinIsTouch) {
+            return getNdtPinPartCanvasPoint(pendingNdtPinHit.item, pendingNdtPinHit.part);
+        }
+        return null;
+    }
+
+    const mapDrawingCrosshair = createDrawingCrosshair({
+        tabId: 'tab-map',
+        containerId: 'canvasContainer',
+        canvasId: 'planCanvas',
+        getDragPoint: getMapCrosshairDragPoint,
+        isHoverBlocked: isMapCrosshairHoverBlocked
+    });
+    const ndtDrawingCrosshair = createDrawingCrosshair({
+        tabId: 'tab-ndt',
+        containerId: 'ndtCanvasContainer',
+        canvasId: 'ndtCanvas',
+        getDragPoint: getNdtCrosshairDragPoint,
+        isHoverBlocked: () => isNdtPinching
+    });
+    // var: drawCanvas 가 이 줄보다 먼저 불려도(초기화 중) undefined 로 읽히게 — let/const 는 TDZ 오류
+    var drawingCrosshairs = [mapDrawingCrosshair, ndtDrawingCrosshair];
+
+    function requestDrawingCrosshairUpdate() {
+        if (!drawingCrosshairs) return;
+        for (let i = 0; i < drawingCrosshairs.length; i++) drawingCrosshairs[i].request();
+    }
+
+    (function bindDrawingCrosshairGlobalEvents() {
+        if (window._bsaDrawingCrosshairBound) return;
+        window._bsaDrawingCrosshairBound = true;
+        const cap = { capture: true, passive: true };
+        const clearAllHover = () => drawingCrosshairs.forEach((x) => x.clearHover());
+        window.addEventListener('pointermove', (e) => {
+            drawingCrosshairLastClient = { clientX: e.clientX, clientY: e.clientY };
+            // 호버 십자선은 실제 마우스만 — 터치·펜은 끌 때만
+            if (e.pointerType !== 'mouse') return;
+            drawingCrosshairs.forEach((x) => x.onMousePointerMove(e));
+        }, cap);
+        window.addEventListener('pointerdown', (e) => {
+            drawingCrosshairLastClient = { clientX: e.clientX, clientY: e.clientY };
+            if (e.pointerType !== 'mouse') clearAllHover();
+            requestDrawingCrosshairUpdate();
+        }, cap);
+        window.addEventListener('touchmove', (e) => {
+            const t = e.touches && e.touches[0];
+            if (t) drawingCrosshairLastClient = { clientX: t.clientX, clientY: t.clientY };
+        }, cap);
+        ['pointerup', 'pointercancel', 'touchend', 'touchcancel', 'resize', 'scroll'].forEach((type) => {
+            window.addEventListener(type, requestDrawingCrosshairUpdate, cap);
+        });
+        window.addEventListener('blur', clearAllHover);
+        document.addEventListener('mouseleave', clearAllHover);
+        document.documentElement.addEventListener('pointerleave', (e) => {
+            if (e.pointerType === 'mouse') clearAllHover();
+        });
+    })();
+
+    function syncDrawingCrosshairButtons() {
+        ['btnToggleCrosshair', 'mobileBtnCrosshair', 'btnToggleCrosshairNdt', 'mobileNdtBtnCrosshair'].forEach((id) => {
+            const b = document.getElementById(id);
+            if (!b) return;
+            b.classList.toggle('active', drawingCrosshairEnabled);
+            b.setAttribute('aria-pressed', drawingCrosshairEnabled ? 'true' : 'false');
+        });
+    }
+
+    function setDrawingCrosshairEnabled(on) {
+        drawingCrosshairEnabled = !!on;
+        try { localStorage.setItem(DRAWING_CROSSHAIR_STORAGE_KEY, drawingCrosshairEnabled ? '1' : '0'); } catch (_e) { /* ignore */ }
+        syncDrawingCrosshairButtons();
+        requestDrawingCrosshairUpdate();
+    }
+
+    function setupDrawingCrosshairToggleButtons() {
+        ['btnToggleCrosshair', 'mobileBtnCrosshair', 'btnToggleCrosshairNdt', 'mobileNdtBtnCrosshair'].forEach((id) => {
+            const b = document.getElementById(id);
+            if (!b || b._crosshairBound) return;
+            b._crosshairBound = true;
+            b.addEventListener('click', () => {
+                setDrawingCrosshairEnabled(!drawingCrosshairEnabled);
+                window.showToast?.(drawingCrosshairEnabled ? '십자선 켜짐' : '십자선 꺼짐', 'info', 1500);
+            });
+        });
+        syncDrawingCrosshairButtons();
+    }
+    window.setDrawingCrosshairEnabled = setDrawingCrosshairEnabled;
+    // @@DRAWING_CROSSHAIR_END
+
     function getMapCanvasCursor() {
         if (state.mode === 'MARK' || state.mode === 'AREA' || state.areaInkTool) return 'crosshair';
         return 'default';
@@ -31914,6 +32237,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     syncSnapToCadButtons();
     if (btnSnapToCad) btnSnapToCad.addEventListener('click', toggleSnapToCad);
     if (mobileBtnSnapToCad) mobileBtnSnapToCad.addEventListener('click', toggleSnapToCad);
+    setupDrawingCrosshairToggleButtons();
 
     // 도면 탭 단축키: D=핀 마킹, A=영역 마킹, Esc=수정창 닫기+선택모드
     // 비파괴 탭: D=NDT 마킹, Esc=등록창 닫기+이동모드

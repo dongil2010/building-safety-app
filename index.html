@@ -39,7 +39,7 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <meta name="apple-mobile-web-app-title" content="스마트 안전점검">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css">
-    <link rel="stylesheet" href="styles.css?v=20260928_160240">
+    <link rel="stylesheet" href="styles.css?v=20260928_160926">
 
     <!-- FontAwesome icons for clean engineering UI -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
@@ -283,6 +283,9 @@
                                 <button type="button" id="btnSnapToCad" class="mode-btn btn-snap-toggle active" title="CAD 벡터 스냅 — 핀 마킹 시 근처 CAD 선/끝점/교차점에 자동으로 붙습니다 (PDF 벡터 도면에서만 동작)">
                                     <i class="fa-solid fa-magnet"></i> 스냅
                                 </button>
+                                <button type="button" id="btnToggleCrosshair" class="mode-btn btn-crosshair-toggle active" aria-pressed="true" title="CAD 커서식 십자선 — PC는 마우스를 도면 위에 올리면, 폰·태블릿은 마킹을 끌어 옮길 때 가로·세로 선 표시">
+                                    <i class="fa-solid fa-crosshairs"></i> 십자선
+                                </button>
                             </div>
                             <div class="area-tool-panel" id="areaToolPanel" hidden>
                                 <span class="area-tool-kicker">영역 모양</span>
@@ -392,6 +395,10 @@
                             <button type="button" class="mobile-rail-btn active" id="mobileBtnSnapToCad" title="CAD 벡터 스냅 — 핀 마킹 시 근처 CAD 선/끝점/교차점에 자동으로 붙습니다 (PDF 벡터 도면에서만 동작)">
                                 <i class="fa-solid fa-magnet"></i>
                                 <span>스냅</span>
+                            </button>
+                            <button type="button" class="mobile-rail-btn active" id="mobileBtnCrosshair" aria-pressed="true" title="CAD 커서식 십자선 — PC는 마우스를 도면 위에 올리면, 폰·태블릿은 마킹을 끌어 옮길 때 가로·세로 선 표시">
+                                <i class="fa-solid fa-crosshairs"></i>
+                                <span>십자선</span>
                             </button>
                             </div>
                         </aside>
@@ -714,6 +721,9 @@
                         <button type="button" id="btnNdtModeMark" class="mode-btn btn-mark-mode" onclick="window.setNdtMode('MARK')" title="NDT 위치 마킹 (D)">
                             <i class="fa-solid fa-location-dot"></i> 📍 [NDT 위치 마킹] <span class="mode-shortcut">D</span>
                         </button>
+                        <button type="button" id="btnToggleCrosshairNdt" class="mode-btn btn-crosshair-toggle active" aria-pressed="true" title="CAD 커서식 십자선 — PC는 마우스를 도면 위에 올리면, 폰·태블릿은 마킹을 끌어 옮길 때 가로·세로 선 표시">
+                            <i class="fa-solid fa-crosshairs"></i> 십자선
+                        </button>
                     </div>
 
                     <div class="toolbar-action-group">
@@ -818,6 +828,10 @@
                     <button type="button" class="mobile-rail-btn" id="mobileNdtBtnAddSelect" title="켜면 터치마다 선택 추가/해제" aria-pressed="false">
                         <i class="fa-solid fa-object-ungroup"></i>
                         <span>추가</span>
+                    </button>
+                    <button type="button" class="mobile-rail-btn active" id="mobileNdtBtnCrosshair" aria-pressed="true" title="CAD 커서식 십자선 — PC는 마우스를 도면 위에 올리면, 폰·태블릿은 마킹을 끌어 옮길 때 가로·세로 선 표시">
+                        <i class="fa-solid fa-crosshairs"></i>
+                        <span>십자선</span>
                     </button>
                     </div>
                     <div class="ndt-rail-sep" aria-hidden="true"></div>
@@ -3181,42 +3195,42 @@
 
     <!-- Core → 탭 분류 → 기존 엔진(app.js) -->
     <!-- 오류 기록은 맨 먼저 — 아래 스크립트들이 읽히다 터져도 잡아야 한다 -->
-    <script src="js/core/error-log.js?v=20260928_160240"></script>
-    <script src="js/core/floor-identity.js?v=20260928_160240"></script>
-    <script src="js/core/state.js?v=20260928_160240"></script>
-    <script src="js/core/ndt-grade.js?v=20260928_160240"></script>
-    <script src="js/tabs/registry.js?v=20260928_160240"></script>
-    <script src="js/pdf-vector-bridge.js?v=20260928_160240"></script>
-    <script src="js/pdf-vector-snap.js?v=20260928_160240"></script>
-    <script src="js/core/layout-mode.js?v=20260928_160240"></script>
-    <script src="js/core/performance.js?v=20260928_160240"></script>
-    <script src="js/core/mobile-keyboard.js?v=20260928_160240"></script>
-    <script src="js/tabs/home.js?v=20260928_160240"></script>
-    <script src="js/tabs/map.js?v=20260928_160240"></script>
-    <script src="js/tabs/survey.js?v=20260928_160240"></script>
-    <script src="js/tabs/stats.js?v=20260928_160240"></script>
-    <script src="js/tabs/ndt.js?v=20260928_160240"></script>
-    <script src="js/shared/report.js?v=20260928_160240"></script>
-    <script src="js/shared/hwpx-survey-slots.js?v=20260928_160240"></script>
-    <script src="js/shared/hwpx-ndt-maps.js?v=20260928_160240"></script>
-    <script src="js/shared/cad-unmarked-place.js?v=20260928_160240"></script>
-    <script src="js/shared/arrow-survey-number.js?v=20260928_160240"></script>
-    <script src="js/shared/korean-text-wrap.js?v=20260928_160240"></script>
-    <script src="js/shared/hwpx-import.js?v=20260928_160240"></script>
-    <script src="js/shared/hwpx-validate.js?v=20260928_160240"></script>
-    <script src="js/shared/auth.js?v=20260928_160240"></script>
-    <script src="js/core/firebase-storage-assets.js?v=20260928_160240"></script>
-    <script src="js/core/drawing-floor-tombstone.js?v=20260928_160240"></script>
-    <script src="js/core/data-health.js?v=20260928_160240"></script>
-    <script src="js/core/building-meta-merge.js?v=20260928_160240"></script>
-    <script src="js/core/edit-history.js?v=20260928_160240"></script>
-    <script src="js/core/sync-merge.js?v=20260928_160240"></script>
-    <script src="js/shared/defect-quick-presets.js?v=20260928_160240"></script>
-    <script src="js/core/legend-layout.js?v=20260928_160240"></script>
-    <script src="app.js?v=20260928_160240"></script>
+    <script src="js/core/error-log.js?v=20260928_160926"></script>
+    <script src="js/core/floor-identity.js?v=20260928_160926"></script>
+    <script src="js/core/state.js?v=20260928_160926"></script>
+    <script src="js/core/ndt-grade.js?v=20260928_160926"></script>
+    <script src="js/tabs/registry.js?v=20260928_160926"></script>
+    <script src="js/pdf-vector-bridge.js?v=20260928_160926"></script>
+    <script src="js/pdf-vector-snap.js?v=20260928_160926"></script>
+    <script src="js/core/layout-mode.js?v=20260928_160926"></script>
+    <script src="js/core/performance.js?v=20260928_160926"></script>
+    <script src="js/core/mobile-keyboard.js?v=20260928_160926"></script>
+    <script src="js/tabs/home.js?v=20260928_160926"></script>
+    <script src="js/tabs/map.js?v=20260928_160926"></script>
+    <script src="js/tabs/survey.js?v=20260928_160926"></script>
+    <script src="js/tabs/stats.js?v=20260928_160926"></script>
+    <script src="js/tabs/ndt.js?v=20260928_160926"></script>
+    <script src="js/shared/report.js?v=20260928_160926"></script>
+    <script src="js/shared/hwpx-survey-slots.js?v=20260928_160926"></script>
+    <script src="js/shared/hwpx-ndt-maps.js?v=20260928_160926"></script>
+    <script src="js/shared/cad-unmarked-place.js?v=20260928_160926"></script>
+    <script src="js/shared/arrow-survey-number.js?v=20260928_160926"></script>
+    <script src="js/shared/korean-text-wrap.js?v=20260928_160926"></script>
+    <script src="js/shared/hwpx-import.js?v=20260928_160926"></script>
+    <script src="js/shared/hwpx-validate.js?v=20260928_160926"></script>
+    <script src="js/shared/auth.js?v=20260928_160926"></script>
+    <script src="js/core/firebase-storage-assets.js?v=20260928_160926"></script>
+    <script src="js/core/drawing-floor-tombstone.js?v=20260928_160926"></script>
+    <script src="js/core/data-health.js?v=20260928_160926"></script>
+    <script src="js/core/building-meta-merge.js?v=20260928_160926"></script>
+    <script src="js/core/edit-history.js?v=20260928_160926"></script>
+    <script src="js/core/sync-merge.js?v=20260928_160926"></script>
+    <script src="js/shared/defect-quick-presets.js?v=20260928_160926"></script>
+    <script src="js/core/legend-layout.js?v=20260928_160926"></script>
+    <script src="app.js?v=20260928_160926"></script>
 
     <script>
-        window.BSA_APP_VERSION = '20260928_160240';
+        window.BSA_APP_VERSION = '20260928_160926';
 
         (function () {
             var el = document.getElementById('appVersionText');
@@ -3243,7 +3257,7 @@
                     native = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
                 } catch (e) {}
                 if (native) return;
-                navigator.serviceWorker.register('./sw.js?v=20260928_160240')
+                navigator.serviceWorker.register('./sw.js?v=20260928_160926')
 
                     .then(function(registration) {
                         console.log('✅ ServiceWorker Registered Successfully with scope:', registration.scope);
