@@ -203,7 +203,7 @@ const M = G.isRangeOnlyMember;
 ['슬래브', '데크슬래브', '계단슬래브', '슬라브', '보(B)', '보 (B)', '철골보(B)', 'RC보(B)', '빔', '철골빔', '작은보', 'slab'].forEach((m) => assert.strictEqual(M(m), true, `범위 전용: ${m}`));
 ['보(G)', '철골보(G)', '거더', '철골거더', '큰보', '보', '철골보', '캔틸레버보', '기둥', '벽체', '보-슬래브 접합부', '기둥-슬래브 접합부', '벽체-보 접합부', '철골 접합부', '', null].forEach((m) => assert.strictEqual(M(m), false, `보통 규칙: ${m}`));
 const locM = (pts, member, g) => G.computeGridLocation(g || base, pts, ctx0, { member });
-assert.strictEqual(locM([{ x: 2005, y: 1495 }], '보(G)'), 'X2, Y1~Y2', '거더: 둘 다 5px면 열(X) 우선 하나, 행은 범위');
+assert.strictEqual(locM([{ x: 2005, y: 1495 }], '보(G)'), 'X2, Y2', '거더: 폭 안이면 보통 규칙 그대로(두 축 다 폭 안)');
 assert.strictEqual(locM([{ x: 2005, y: 1495 }], '보'), 'X2, Y2', 'G/B 안 정한 보는 보통 규칙');
 assert.strictEqual(locM([{ x: 2005, y: 1495 }], '보-슬래브 접합부'), 'X2, Y2', '접합부는 보통 규칙');
 assert.strictEqual(locM([{ x: 2005, y: 1495 }], '슬래브'), 'X2~X3, Y1~Y2', '슬래브: 폭 안이어도 점이 있는 쪽 칸');
@@ -219,15 +219,22 @@ assert.strictEqual(G.computeGridLocation(base, [{ x: 2005, y: 1000 }], ctx0, { f
 assert.strictEqual(locM(area(1995, 600, 2008, 1400), '슬래브'), 'X1~X3, Y1~Y2', '선을 걸친 슬래브 영역');
 assert.strictEqual(locM(area(2002, 600, 2008, 1400), '데크슬래브'), 'X2~X3, Y1~Y2', '선 한쪽 폭 안 영역은 그쪽 칸');
 
-// ---- 거더: 가까운 열/행 선 하나 + 다른 축은 범위(폭 무관) ----
+// ---- 거더: 폭 안이면 보통 규칙, 어느 폭에도 안 들면 가까운 열/행 선 하나 + 다른 축은 범위 ----
 const Gd = G.isGirderMember;
 ['보(G)', '철골보(G)', 'RC보(G)', '거더', '철골거더', '큰보', '보 (G)'].forEach((m) => assert.strictEqual(Gd(m), true, `거더: ${m}`));
 ['보', '철골보', '보(B)', '철골보(B)', '빔', '슬래브', '캔틸레버보', '보-거더 접합부', '기둥-보 접합부', '', null].forEach((m) => assert.strictEqual(Gd(m), false, `거더 아님: ${m}`));
 const locG = (pts, member, g) => G.computeGridLocation(g || base, pts, ctx0, { member: member || '보(G)' });
-assert.strictEqual(locG([{ x: 1990, y: 1000 }]), 'X2, Y1~Y2', '열 선이 더 가까움(10 < 500)');
-assert.strictEqual(locG([{ x: 1500, y: 1480 }]), 'X1~X2, Y2', '행 선이 더 가까움 — 폭(20) 밖이어도 붙임');
+assert.strictEqual(locG([{ x: 1990, y: 1000 }]), 'X2, Y1~Y2', 'X2 폭 안 → 보통 규칙');
+assert.strictEqual(locG([{ x: 1300, y: 1505 }]), 'X1~X2, Y2', 'Y2 폭 안 → 보통 규칙(X는 범위)');
+assert.strictEqual(locG([{ x: 1995, y: 1300 }], '철골보(G)'), 'X2, Y1~Y2', 'X 폭 안');
+assert.strictEqual(locG(area(1995, 600, 2005, 1400)), 'X2, Y1~Y2', '영역 전체가 X2 폭 안 → 보통 규칙');
+assert.strictEqual(locG([{ x: 1100, y: 9 }], '거더', bands), 'X1', '폭 밖 → 가까운 X1(100 < 900)');
+assert.strictEqual(locG([{ x: 1600, y: 9 }], '거더', bands), 'X2', '폭 밖 → 가까운 X2(400 < 600)');
+assert.strictEqual(locG([{ x: 1910, y: 9 }], '거더', bands), 'X2', '개별 폭(200) 안 → 보통 규칙 X2');
+assert.strictEqual(locG([{ x: 1500, y: 1480 }]), 'X1~X2, Y2', '폭(20) 밖 → 행 선이 더 가까워(20 < 500) Y 하나');
 assert.strictEqual(locG([{ x: 1300, y: 1000 }], '철골거더'), 'X1, Y1~Y2', '폭 밖 300px여도 가까운 선 하나');
-assert.strictEqual(locG([{ x: 2010, y: 2500 }], '철골보(G)'), 'X2, Y2 외측', '다른 축이 바깥이면 외측 규칙');
+assert.strictEqual(locG([{ x: 2010, y: 2500 }], '철골보(G)'), 'X2, Y2 외측', 'X2 폭 안(10) → 보통 규칙, Y는 외측');
+assert.strictEqual(locG([{ x: 2030, y: 2500 }], '철골보(G)'), 'X2, Y2 외측', '폭 밖 → 가까운 X2 하나, 다른 축 바깥은 외측');
 assert.strictEqual(locG([{ x: 500, y: 1000 }], '큰보'), 'X1, Y1~Y2', '바깥이어도 붙는 축은 끝 선 이름');
 assert.strictEqual(locG([{ x: 1750, y: 1250 }]), 'X2, Y1~Y2', '거리가 같으면(250) 열(X) 우선');
 assert.strictEqual(locG([{ x: 1990, y: 9 }], '거더', grid([G.createGroup('col', { lines: [vline(1000), vline(2000)] })])), 'X2', '열만 있으면 열 선 하나');

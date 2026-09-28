@@ -15,8 +15,10 @@
  * - 바깥: 맨 끝 선 밖이면 「X1 외측」.
  * - 부재에 따라(슬래브·보(B)·철골보(B)·빔 — 보통 한 선 위에 안 놓임) 폭을 무시하고 늘 「X1~X2」 범위로 쓴다.
  *   선 폭 안이면 점이 실제로 있는 쪽 칸, 선 위에 딱 걸치면 번호가 작은 쪽 칸(X2 위 → X1~X2, 첫 선이면 X1~X2).
- * - 거더(보(G)·철골보(G)·거더·철골거더·큰보)는 폭과 상관없이 선 하나에 붙인다: 가장 가까운 열 선과 행 선까지
- *   거리를 재서 더 가까운 축은 선 이름 하나, 다른 축은 늘 범위(X2, Y1~Y2 / X1~X3, Y3). 같으면 열(X) 우선.
+ * - 거더(보(G)·철골보(G)·거더·철골거더·큰보): 먼저 보통 폭 규칙. 한 축이라도 폭 안이면 보통 규칙 그대로.
+ *   어느 축의 폭에도 안 들면 선 하나에 붙인다: 가장 가까운 열 선과 행 선까지 거리를 재서
+ *   더 가까운 축은 선 이름 하나, 다른 축은 늘 범위(X2, Y1~Y2 / X1~X3, Y3). 같으면 열(X) 우선.
+ *   (영역은 영역 전체가 한 선의 폭 안에 들어야 「폭 안」)
  *   영역 거더는 긴 쪽 방향(가로로 길면 행 선 위 → Y 하나, 세로로 길면 X 하나, 1.5배 이상일 때), 아니면 가운데 점 기준.
  * - G/B 안 정한 그냥 「보」·「철골보」, 접합부, 그 밖의 부재는 보통 규칙(폭 안이면 X2).
  */
@@ -448,7 +450,18 @@
         const c = { rot: num(ctx && ctx.rot, 0), w: num(ctx && ctx.w, 4000), h: num(ctx && ctx.h, 3000) };
         const o = opts || {};
         const girder = o.girder != null ? !!o.girder : (o.forceRange == null && isGirderMember(o.member));
-        if (girder) return girderLocation(grid, pts, c);
+        if (girder) {
+            // 폭 안(영역은 전체가 한 선 폭 안)인 축이 하나라도 있으면 보통 규칙 그대로, 아니면 가까운 선에 붙임
+            const normal = {};
+            let girderInBand = false;
+            AXES.forEach((ax) => {
+                const b = pickAxis(grid, ax, pts, c, { forceRange: false });
+                normal[ax] = b ? b.label : '';
+                if (b && b.results.length && b.results.every((r) => Number.isInteger(r.pos) && r.pos === b.results[0].pos)) girderInBand = true;
+            });
+            if (girderInBand) return AXES.map((ax) => normal[ax]).filter(Boolean).join(', ');
+            return girderLocation(grid, pts, c);
+        }
         const lo = { forceRange: o.forceRange != null ? !!o.forceRange : isRangeOnlyMember(o.member) };
         return AXES.map((ax) => locateAxis(grid, ax, pts, c, lo)).filter(Boolean).join(', ');
     }
