@@ -49203,6 +49203,14 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     });
                 });
             });
+            // NDT 전용 도면 — 넣을 때 올리기가 실패하면(오프라인 등) 참조만 동기화되고 그림은 영영 안 올라가
+            // 다른 기기가 층 도면으로 조용히 대신 그렸다(2026-09-28 점검). 기기에 남은 그림을 여기서 다시 올린다.
+            const refs = window.state.ndtDrawingRefs || {};
+            Object.keys(refs).forEach((k) => {
+                if (!k.startsWith(prefix)) return;
+                const ref = refs[k];
+                if (ref && ref.id) pushJob(ref.id, null, k);
+            });
         }
         const seen = new Set();
         const unique = [];

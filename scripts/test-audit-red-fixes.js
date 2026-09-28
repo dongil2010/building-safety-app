@@ -105,6 +105,23 @@ function extractFunction(header) {
     const write = sync.indexOf('await writeFloorSyncBundle(floorBldg, code);');
     const remark = sync.indexOf('photoFailedFloors.forEach((k) => markFloorKeyDirty(k))');
     assert.ok(write > 0 && remark > write, '층 쓰기가 표시를 지운 뒤에 다시 남겨야 한다');
+
+    // NDT 전용 도면도 동기화가 다시 올린다 — 넣을 때 실패하면 그림이 영영 안 올라갔다(2026-09-28)
+    const tried = [];
+    const ctx2 = Object.assign({}, ctx, {
+        window: { state: { companyId: 'c', buildings: [{ id: 'bld' }], ndtData: {},
+            ndtDrawingRefs: { bld_1F: { id: 'ndtimg_x', at: 1 }, bld_2F: { id: '', at: 2 }, other_1F: { id: 'ndtimg_y', at: 3 } } } },
+        ensurePhotoPersistedToStorage: async (pid) => { tried.push(pid); return pid !== 'ndtimg_x'; }
+    });
+    vm.createContext(ctx2);
+    vm.runInContext([
+        'const PHOTO_SYNC_UPLOAD_MAX_RETRY = 5; const _photoSyncUploadFailCount = new Map();',
+        extractFunction('async function uploadInlineDefectPhotosForSync('),
+        'this.run = uploadInlineDefectPhotosForSync;'
+    ].join('\n'), ctx2);
+    const failed2 = await ctx2.run({});
+    assert.deepStrictEqual(tried, ['ndtimg_x'], '이 건물의 전용 도면만, 빈 id(원본 도면 연동)는 빼고');
+    assert.deepStrictEqual(Array.from(failed2), ['bld_1F'], '못 올리면 그 층을 다시 올릴 것으로');
 })().catch((e) => { console.error(e); process.exit(1); });
 
 // ---- O-20-C: NDT 전용 도면은 기기·클라우드에 저장하고 참조를 동기화 ----
