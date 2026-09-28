@@ -22837,10 +22837,13 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 refresh: refreshNdtFinishStatePickBar
             }
         ];
-        const applyTypedValue = (spec, commitCustom) => {
+        // mode: false = 타이핑 중, 'enter' = Enter로 이번 항목 값만 확정(목록 저장 안 함),
+        //       true = '추가' 버튼으로 명시적으로 목록(customNdt*)에 저장
+        const applyTypedValue = (spec, mode) => {
             const input = document.getElementById(spec.inputId);
             const select = document.getElementById(spec.selectId);
             if (!input) return;
+            const commitCustom = mode === true;
             const v = input.value.trim();
             if (v) {
                 if (commitCustom) {
@@ -22848,12 +22851,14 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     rememberNdtCustomPick(v, spec.preset, spec.customKey);
                     if (!spec.preset.includes(v)) spec.populate(v);
                     else if (select) select.value = v;
+                } else if (mode === 'enter') {
+                    ensureDefectComboOption(select, v);
                 } else if (select && spec.preset.includes(v)) {
                     select.value = v;
                 }
                 // 타이핑 중에는 중간 글자를 select 옵션으로 넣지 않음
             }
-            if (commitCustom) spec.refresh();
+            if (mode) spec.refresh();
             else if (select && v && spec.preset.includes(v)) spec.refresh();
             if (spec.selectId === 'ndtComponent') {
                 toggleNdtMeasureDimMode();
@@ -22871,7 +22876,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 input.addEventListener('keydown', (e) => {
                     if (e.key !== 'Enter') return;
                     e.preventDefault();
-                    applyTypedValue(spec, true);
+                    // Enter는 이번 항목 값만. 목록/칩 저장은 '추가' 버튼으로만.
+                    applyTypedValue(spec, 'enter');
                 });
             }
             if (addBtn && !addBtn.dataset.ndtPickBound) {
@@ -23216,8 +23222,14 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         ensureDefectComboOption(causeSelect, v);
     }
 
-    /** 발생 원인 직접 입력 → 커스텀 목록·체크 선택에 합침 (선택 순 유지) */
-    function addCustomDefectCause(rawText) {
+    /**
+     * 발생 원인 → 이번 결함의 체크 선택에 합침 (선택 순 유지).
+     * persist=false(기본): 원인 목록·칩(customDefectCauses)에는 저장하지 않는다 — 입력칸 Enter,
+     *   셀렉트에서 기존 항목 고르기. 목록에 없는 수기 원인은 이번 결함에만 체크된 칩으로 보인다.
+     * persist=true: 사용자가 명시적으로 '추가' 버튼 / '➕ 결함 원인 직접 추가'를 고른 경우만.
+     * (2026-09-28 "발생원인에 엔터쳐서 입력하면 발생원인이 추가가 되버리던데" — 09-16 부재 명칭과 같은 처리)
+     */
+    function selectDefectCauseForCurrentDefect(rawText, persist) {
         const trimmed = String(rawText || '').trim();
         if (!trimmed) return false;
         const dType = getDefectComboValue(
@@ -23230,14 +23242,20 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             }
             return false;
         }
-        const key = getCauseDisplayGroups(dType)[0]?.key || getCauseKey(dType);
-        if (!window.state.customDefectCauses) window.state.customDefectCauses = {};
-        if (!window.state.customDefectCauses[key]) window.state.customDefectCauses[key] = [];
-        if (!window.state.customDefectCauses[key].includes(trimmed)) {
-            window.state.customDefectCauses[key].push(trimmed);
-            const order = ensureOptionOrderEntry('defectCauseOrder', key);
-            if (!order.includes(trimmed)) order.push(trimmed);
-            if (typeof saveStateToLocalStorage === 'function') saveStateToLocalStorage();
+        if (persist) {
+            const key = getCauseDisplayGroups(dType)[0]?.key || getCauseKey(dType);
+            if (!window.state.customDefectCauses) window.state.customDefectCauses = {};
+            if (!window.state.customDefectCauses[key]) window.state.customDefectCauses[key] = [];
+            if (!window.state.customDefectCauses[key].includes(trimmed)) {
+                window.state.customDefectCauses[key].push(trimmed);
+                const order = ensureOptionOrderEntry('defectCauseOrder', key);
+                if (!order.includes(trimmed)) order.push(trimmed);
+                if (typeof saveStateToLocalStorage === 'function') saveStateToLocalStorage();
+            }
+        }
+        if (typeof isDefectBulkEditMode === 'function' && isDefectBulkEditMode()
+            && typeof markDefectBulkFieldChanged === 'function') {
+            markDefectBulkFieldChanged('cause');
         }
         const selected = getSelectedCausesFromUi().filter(c => c && c !== trimmed);
         selected.push(trimmed);
@@ -23247,14 +23265,20 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         return true;
     }
 
-    function commitDefectCauseDirectInput() {
+    /** 명시적 '원인 목록에 추가' (추가 버튼 · ➕ 직접 추가 프롬프트) */
+    function addCustomDefectCause(rawText) {
+        return selectDefectCauseForCurrentDefect(rawText, true);
+    }
+
+    /** persist=true는 '추가' 버튼만. Enter는 이번 결함 값만 확정(목록에 저장 안 함). */
+    function commitDefectCauseDirectInput(persist) {
         const input = document.getElementById('defectCauseInput');
         if (!input) return;
         const parts = parseCauseList(input.value);
         if (!parts.length) return;
         let ok = false;
         parts.forEach((p) => {
-            if (addCustomDefectCause(p)) ok = true;
+            if (selectDefectCauseForCurrentDefect(p, persist === true)) ok = true;
         });
         if (ok) input.value = '';
     }
@@ -23267,7 +23291,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             input.addEventListener('keydown', (e) => {
                 if (e.key === 'Enter') {
                     e.preventDefault();
-                    commitDefectCauseDirectInput();
+                    // Enter = 이번 결함에만 반영. 원인 목록/칩에는 넣지 않는다.
+                    commitDefectCauseDirectInput(false);
                 }
             });
         }
@@ -23275,7 +23300,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             btn.dataset.causeDirectBound = '1';
             btn.addEventListener('click', (e) => {
                 e.preventDefault();
-                commitDefectCauseDirectInput();
+                // '추가' 버튼 = 명시적으로 원인 목록에 저장 (다음 결함에도 칩으로 보임)
+                commitDefectCauseDirectInput(true);
             });
         }
     }
@@ -25867,8 +25893,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     syncCauseComboValue('');
                     syncCauseChecksFromValue('', getQuickPickOptionsFromSelect(e.target));
                 } else {
-                    // 셀렉트 단일은 기존 선택에 합침
-                    addCustomDefectCause(picked);
+                    // 셀렉트 단일은 기존 선택에 합침 (목록 저장 없이 — 프리셋/이번 결함 수기값이 커스텀으로 복제되지 않게)
+                    selectDefectCauseForCurrentDefect(picked, false);
                 }
             }
         });
