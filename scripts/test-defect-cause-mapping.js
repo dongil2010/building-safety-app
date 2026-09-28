@@ -9,6 +9,7 @@
  *  4) '앱 기본 세팅으로' 는 순서를 비워 둠(기본 목록을 복사해 얼려 두지 않음)
  *  5) 원인 문자열 파싱: 목록에 있는 가운뎃점·빗금 이름은 한 개로 유지
  *  6) 부재 명칭을 바꿔도 직접 고른 원인은 유지, 자동 원인만 새 부재 기준으로 다시 체크
+ *  7) 비구조체 '중량물'(중량물 적치·중량물 설치) — 목록·키워드·원인·예전 계정 저장 순서에서도 보임
  */
 
 const assert = require('assert');
@@ -63,7 +64,7 @@ const PRESET_CONSTS = ['DEFECT_JOINT_LEFT', 'DEFECT_JOINT_RIGHT', 'DEFECT_JOINT_
     'STEEL_MEMBER_DEFECTS', 'DECK_SLAB_DEFECTS', 'WALL_CRACK_KINDS', 'COLUMN_CRACK_KINDS', 'BEAM_CRACK_KINDS',
     'RC_COMMON_OTHER_DEFECTS', 'RC_WALL_DEFECTS', 'RC_COLUMN_DEFECTS', 'RC_BEAM_DEFECTS', 'RC_SLAB_DEFECTS', 'JOINT_DEFECTS',
     'MASONRY_WALL_DEFECTS', 'PARTITION_WALL_DEFECTS', 'ALC_WALL_DEFECTS', 'WINDOW_DEFECTS', 'DOOR_DEFECTS', 'SHUTTER_DEFECTS',
-    'ROOF_PANEL_DEFECTS', 'PANEL_DEFECTS', 'RAILING_DEFECTS', 'NONSTRUCT_WALL_JOINT_DEFECTS', 'EXT_TILE_DEFECTS',
+    'ROOF_PANEL_DEFECTS', 'PANEL_DEFECTS', 'RAILING_DEFECTS', 'NONSTRUCT_WALL_JOINT_DEFECTS', 'HEAVY_LOAD_DEFECTS', 'EXT_TILE_DEFECTS',
     'EXT_STONE_DEFECTS', 'EXT_PAINT_DEFECTS', 'METAL_PANEL_FINISH_DEFECTS', 'INT_TILE_DEFECTS', 'INTERIOR_FINISH_DEFECTS',
     'INT_PAINT_DEFECTS', 'CEILING_FINISH_DEFECTS', 'FLOOR_TILE_DEFECTS', 'FLOOR_FINISH_DEFECTS', 'componentDefectPreset',
     'categoryDefectPreset'];
@@ -81,13 +82,13 @@ function buildEnv() {
     ['normalizeComponentKey', 'isRcStructuralCrackKind', 'parseDefectTypeList', 'getDefectTypePresetFor', 'getCauseKey',
         'getCauseDisplayGroups', 'parseCauseList', 'getCurrentDefectCauseContext', 'getCauseOptionsForKey',
         'getDefaultFirstCauseFor', 'resetOptionManagerCurrent', 'refreshDefectTypeAfterComponentChange',
-        'applyCauseAutoPickForType'].forEach((f) => { code += extractFunction(f) + '\n'; });
+        'applyCauseAutoPickForType', 'applySavedOptionOrder'].forEach((f) => { code += extractFunction(f) + '\n'; });
     code += 'return { DEFECT_COMPONENT_PRESET, defectCausePreset, getDefectTypePresetFor, getCauseDisplayGroups, ' +
         'getDefaultCausePresetList, getAllDefaultCausesForKey, getEffectiveCauseOrder, parseCauseList, ' +
         'getCauseOptionsForKey, getDefaultFirstCauseFor, resetOptionManagerCurrent, refreshDefectTypeAfterComponentChange, ' +
-        'getCauseMemberGroup };';
+        'getCauseMemberGroup, applySavedOptionOrder, categoryDefectPreset };';
     const env = { window: { state: {}, showToast: () => {} }, document: null, fields: {} };
-    const stubNames = ['getDefectComboValue', 'applySavedOptionOrder', 'ensureOptionOrderEntry', 'getOptionManagerContext',
+    const stubNames = ['getDefectComboValue', 'ensureOptionOrderEntry', 'getOptionManagerContext',
         'confirm', 'saveStateToLocalStorage', 'scheduleSyncUserDefectPinPresets', 'populateDefectComponentDropdown',
         'updateDefectTypeDropdown', 'updateDefectCauseDropdown', 'renderOptionManagerList', 'getSelectedCausesFromUi',
         'hasActionableDefectType', 'isDefectBulkEditMode', 'joinCauseList', 'getDefectQuickPresetsApi',
@@ -102,16 +103,6 @@ function buildEnv() {
     const api = new Function('env', 'stubs', header + code)(env, stubs);
     env.stubs = {
         getDefectComboValue: (sel, inp) => (sel && sel.value) || (inp && inp.value) || '',
-        applySavedOptionOrder: (items, order) => {
-            const list = items.slice();
-            if (!Array.isArray(order) || !order.length) return list;
-            const pos = new Map(order.map((t, i) => [t, i]));
-            return list.map((t, i) => ({ t, i })).sort((x, y) => {
-                const px = pos.has(x.t) ? pos.get(x.t) : Infinity;
-                const py = pos.has(y.t) ? pos.get(y.t) : Infinity;
-                return px === py ? x.i - y.i : px - py;
-            }).map((o) => o.t);
-        },
         ensureOptionOrderEntry: (field, key) => {
             const st = env.window.state;
             if (!st[field]) st[field] = {};
@@ -308,6 +299,50 @@ function testComponentChangeKeepsManualCauses() {
     env.bulk = false;
 }
 
+// ---------- 7) 중량물 ----------
+function testHeavyLoadItems() {
+    env.window.state = {};
+    const HEAVY = ['상태양호', '중량물 적치', '중량물 설치', '기타'];
+    const comps = api.DEFECT_COMPONENT_PRESET['비구조체'];
+    assert.ok(comps.includes('중량물'), '비구조체 부재에 중량물');
+    assert.strictEqual(comps[comps.length - 1], '기타');
+    assert.ok(!api.DEFECT_COMPONENT_PRESET['구조체'].includes('중량물'));
+    assert.deepStrictEqual(api.getDefectTypePresetFor('비구조체', '중량물'), HEAVY);
+    // 직접 입력 부재명(물탱크·실외기·태양광 패널 등)도 중량물 목록
+    ['옥상 물탱크', '실외기', '태양광 패널', '냉각탑', '쿨링타워', '중량물(창고)'].forEach((c) => {
+        assert.deepStrictEqual(api.getDefectTypePresetFor('비구조체', c), HEAVY, c);
+    });
+    assert.notDeepStrictEqual(api.getDefectTypePresetFor('비구조체', '패널'), HEAVY);
+    // 부재를 안 고른 비구조체(회사 결함표는 부재명칭 빈칸이 많음)에도 보임
+    const cat = api.categoryDefectPreset['비구조체'];
+    assert.ok(cat.includes('중량물 적치') && cat.includes('중량물 설치'));
+    assert.strictEqual(cat[cat.length - 1], '기타');
+    // 원인 자동 체크 = 회사 결함원인추정 표현
+    assert.strictEqual(firstFor('비구조체', '중량물', '중량물 적치'), '중량물 적치');
+    assert.strictEqual(firstFor('비구조체', '중량물', '중량물 설치'), '중량물 설치');
+    assert.strictEqual(firstFor('비구조체', '', '중량물 적치'), '중량물 적치');
+    setContext('비구조체', '중량물', '중량물 적치');
+    const list = api.getCauseOptionsForKey('중량물 적치', ['중량물 적치']);
+    ['추가하중 적치', '실 변경으로 인한 하중증가', '사용자 부주의'].forEach((c) => assert.ok(list.includes(c), c));
+    assert.strictEqual(api.getCauseDisplayGroups('중량물 설치')[0].key, '중량물 설치');
+    // 예전에 순서를 저장한 계정: 새 항목이 '기타' 앞에 들어가 보임(숨지 않음)
+    const savedOld = ['조적벽체', '칸막이벽', 'ALC벽', '벽체 접합부', '창호', '문', '셔터', '난간', '지붕 패널', '패널', '기타'];
+    const merged = api.applySavedOptionOrder(comps, savedOld);
+    assert.deepStrictEqual(merged.slice(-2), ['중량물', '기타']);
+    assert.strictEqual(merged.length, comps.length);
+    // 사용자가 '기타'를 중간에 둔 순서는 건드리지 않고 새 항목은 끝에
+    assert.deepStrictEqual(api.applySavedOptionOrder(['a', '기타', 'b', 'new'], ['기타', 'a', 'b']), ['기타', 'a', 'b', 'new']);
+    assert.deepStrictEqual(api.applySavedOptionOrder(['a', 'b', 'new', '기타'], ['b', 'a', '기타']), ['b', 'a', 'new', '기타']);
+    assert.deepStrictEqual(api.applySavedOptionOrder(['a', 'b'], []), ['a', 'b']);
+    // '앱 기본 세팅으로 전체' 로 굳힌 종류 순서(분류 목록)에서도 중량물 목록이 기타 앞
+    const frozen = api.categoryDefectPreset['비구조체'].slice();
+    assert.deepStrictEqual(api.applySavedOptionOrder(HEAVY, frozen), HEAVY);
+    // 기본 ★: 비구조체 부재 칩 첫 줄에 중량물
+    assert.ok(q.DEFAULT_FAVORITES.component['비구조체'].includes('중량물'));
+    assert.ok(q.DEFAULT_FAVORITES.component['비구조체'].length <= q.VISIBLE_LIMIT.component);
+}
+
+testHeavyLoadItems();
 testEveryTypeHasCause();
 testAutoCheckedCause();
 testCustomOrderRules();

@@ -22714,7 +22714,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             ...DEFECT_JOINT_COMPONENT_PRESET,
             '기타'
         ],
-        '비구조체': ['조적벽체', '칸막이벽', 'ALC벽', '벽체 접합부', '창호', '문', '셔터', '난간', '지붕 패널', '패널', '기타'],
+        // 2026-09-28: '중량물'(물탱크·실외기·창고·태양광 설비 등 적치·설치) — 회사 보고서는 구분 비구조체로 적음
+        '비구조체': ['조적벽체', '칸막이벽', 'ALC벽', '벽체 접합부', '창호', '문', '셔터', '난간', '지붕 패널', '패널', '중량물', '기타'],
         '마감재': ['외장타일', '외장석재', '도장', '금속패널', '내장타일', '수장', '내장도장', '천장 마감재', '바닥타일', '바닥마감', '기타']
     };
 
@@ -23566,6 +23567,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     const NONSTRUCT_WALL_JOINT_DEFECTS = [
         '상태양호', ...WALL_CRACK_KINDS, '이격', '줄눈 손상/탈락', '파손/결손', '누수', '백태/유출', '기타'
     ];
+    // 중량물 — 회사 결함표: 조사내용 '창고 설치'·'물탱크 설치'·'실외기 설치'·'적치', 원인 '중량물 적치'·'중량물 설치'
+    const HEAVY_LOAD_DEFECTS = ['상태양호', '중량물 적치', '중량물 설치', '기타'];
 
     // ── 마감재: 부재별 결함 종류 ──
     const EXT_TILE_DEFECTS = [
@@ -23639,6 +23642,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         '지붕패널': ROOF_PANEL_DEFECTS,
         '지붕 패널': ROOF_PANEL_DEFECTS,
         '패널': PANEL_DEFECTS,
+        '중량물': HEAVY_LOAD_DEFECTS,
         // ── 마감재 ──
         '외장타일': EXT_TILE_DEFECTS,
         '외장석재': EXT_STONE_DEFECTS,
@@ -23715,6 +23719,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         // 키워드 매칭 (직접 입력 부재명)
         if (key) {
             if (category === '비구조체') {
+                if (['중량물', '물탱크', '실외기', '냉각탑', '쿨링타워', '태양광', '적치'].some((w) => key.includes(w))) return HEAVY_LOAD_DEFECTS;
                 if (key.includes('조적')) return MASONRY_WALL_DEFECTS;
                 if (key.includes('칸막이')) return PARTITION_WALL_DEFECTS;
                 if (key.includes('ALC') || key.includes('alc')) return ALC_WALL_DEFECTS;
@@ -23779,6 +23784,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             '누수',
             '부식',
             '파손',
+            '중량물 적치',
+            '중량물 설치',
             '기타'
         ],
         '마감재': [
@@ -25624,6 +25631,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             '지지 불량', '과하중', '지진·진동', '시공 오차', '습기 변형', '기타'
         ],
         '변형': [C_WORK, '외부 충격', '지지 불량', '과하중', '기타'],
+        // 중량물: 회사 보고서는 원인 칸에 '중량물 적치'/'중량물 설치'를 그대로 씀(조사내용엔 창고·물탱크 설치 등)
+        '중량물 적치': ['중량물 적치', '추가하중 적치', '실 변경으로 인한 하중증가', '사용자 부주의', '유지관리 부족', '기타'],
+        '중량물 설치': ['중량물 설치', '추가하중 설치', '실 변경으로 인한 하중증가', C_WORK, '사용자 부주의', '기타'],
         '마감 손상': [
             '충격', '습기', '시공 불량', '노후화', '기타'
         ],
@@ -26392,9 +26402,13 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 remaining.delete(t);
             }
         });
-        items.forEach((t) => {
-            if (remaining.has(t)) out.push(t);
-        });
+        const extra = items.filter((t) => remaining.has(t));
+        // 저장된 순서에 없는 항목(앱에 새로 들어간 기본 항목 등)은 '기타' 가 맨 끝이면 그 앞에 끼움
+        if (extra.length && out.length && out[out.length - 1] === '기타') {
+            out.splice(out.length - 1, 0, ...extra);
+        } else {
+            out.push(...extra);
+        }
         return out;
     }
 
