@@ -252,6 +252,15 @@ if (fs.existsSync(appPath)) {
     assert.ok(app.includes("if (window.BSA_gridEdit && window.BSA_gridEdit.active) {\n                window.BSA_gridEdit.onDblClick"), '더블클릭: 설정 중에만');
     const autoFn = app.slice(app.indexOf('function computeGridAutoLocationForPoints('), app.indexOf('function gridNum('));
     assert.ok(!autoFn.includes('visible') && !autoFn.includes('.active'), '숨겨져 있어도 위치 자동 입력');
+    // 「위치 비우고 행·열로 다시 채우기」: 직접 쓴 글도 지우고 칸 이름 + 자동 표시, 되돌리기 한 번, 동기화 시각
+    assert.ok(app.includes('data-act="resetFill"'), '다시 채우기 버튼');
+    assert.ok(app.includes("if (act === 'resetFill') {\n            resetGridLocationForCurrentFloor();"), '버튼 연결');
+    const resetFn = app.slice(app.indexOf('function resetGridLocationForCurrentFloor('), app.indexOf('/** 결함 창 열 때: 새 마킹이면'));
+    assert.ok(resetFn.includes('confirm('), '확인창');
+    assert.ok(resetFn.indexOf('pushDefectHistory()') > 0 && resetFn.indexOf('pushDefectHistory()') < resetFn.indexOf('d.location = nextLoc;'), '바꾸기 전에 되돌리기 기록 한 번');
+    assert.strictEqual((resetFn.match(/pushDefectHistory\(\)/g) || []).length, 1, '되돌리기 기록은 한 번만');
+    assert.ok(resetFn.includes('d.gridLocAuto = next;') && resetFn.includes('touchDefectUpdatedAt(d);') && resetFn.includes('saveStateToLocalStorage();'), '자동 표시·수정 시각·저장');
+    assert.ok(!resetFn.includes('applyAutoLocation'), '직접 쓴 글 보존 규칙을 쓰지 않음(전부 덮어씀)');
 }
 
 console.log('test-grid-lines: OK');

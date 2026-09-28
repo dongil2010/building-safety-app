@@ -33654,6 +33654,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     <label class="grid-panel-row"><input type="checkbox" data-f="auto" ${grid.autoLocation ? 'checked' : ''}> 마킹 위치에 칸 이름 자동 입력</label>
                     <div class="grid-panel-row">
                         <button type="button" data-act="fillExisting" title="이 층 마킹 중 위치가 비었거나 자동으로 넣은 것만 채움">이 층 마킹에 위치 채우기</button>
+                        <button type="button" data-act="resetFill" class="danger" title="이 층 마킹 전부의 위치를 지우고(직접 쓴 글 포함) 행·열 칸 이름으로 다시 씀">위치 비우고 행·열로 다시 채우기</button>
                         <button type="button" data-act="clearAll" class="danger">이 층 선 모두 지우기</button>
                     </div>
                 </div>
@@ -33742,6 +33743,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         }
         if (act === 'fillExisting') {
             fillGridLocationForCurrentFloor();
+        }
+        if (act === 'resetFill') {
+            resetGridLocationForCurrentFloor();
         }
     }
 
@@ -33975,6 +33979,54 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const inp = document.getElementById('defectComponentInput');
         const sel = document.getElementById('defectComponent');
         return (inp && String(inp.value || '').trim()) || (sel && sel.value) || '';
+    }
+
+    /**
+     * 「위치 비우고 행·열로 다시 채우기」 — 이 층 도면 마킹 전부의 위치를 지우고(직접 쓴 글·덧붙인 글 포함)
+     * 행·열 칸 이름으로 다시 씀. 자동 표시(gridLocAuto)를 붙여 이후 옮기면 따라 바뀜.
+     * 선 밖 마킹은 보통 채우기와 같은 규칙(X1 외측). 자동 입력 체크와 무관하게(직접 누른 명령) 동작.
+     * 되돌리기 한 번으로 전체 취소(pushDefectHistory), 바뀐 결함은 updatedAt을 올려 동기화.
+     */
+    function resetGridLocationForCurrentFloor() {
+        const G = gridLib();
+        const grid = getCurrentFloorGrid(false);
+        if (!G || !gridHasLines(grid)) {
+            window.showToast?.('먼저 행·열 선을 그어 주세요.', 'info', 2000);
+            return;
+        }
+        const fc = state.currentFloor;
+        const gctx = getGridCtx();
+        const plan = [];
+        let manual = 0;
+        filterMapPlacedDefects(getCurrentFloorDefects()).forEach((d) => {
+            const pts = getDefectGridPoints(d);
+            if (!pts.length) return;
+            const next = G.computeGridLocation(grid, pts, gctx, { member: gridMemberName(d.component) });
+            if (!next) return;
+            const detail = extractDefectLocationDetail(d.location || '', fc);
+            const nextLoc = composeDefectLocation(next, fc);
+            if (detail && detail !== (d.gridLocAuto || '')) manual += 1;
+            if (nextLoc === (d.location || '') && d.gridLocAuto === next) return;
+            plan.push({ d, next, nextLoc });
+        });
+        if (!plan.length) {
+            window.showToast?.('바꿀 마킹이 없습니다. (모두 이미 행·열 칸 이름입니다)', 'info', 2500);
+            return;
+        }
+        const manualMsg = manual ? `\n직접 쓴 위치(덧붙인 글 포함) ${manual}개도 지워집니다.` : '';
+        if (!confirm(`이 층 마킹 ${plan.length}개의 위치를 모두 지우고 행·열 칸 이름으로 다시 씁니다.${manualMsg}\n(되돌리기로 한 번에 취소할 수 있습니다)`)) return;
+        if (typeof pushDefectHistory === 'function') pushDefectHistory();
+        plan.forEach(({ d, next, nextLoc }) => {
+            d.location = nextLoc;
+            d.gridLocAuto = next;
+            touchDefectUpdatedAt(d);
+        });
+        saveStateToLocalStorage();
+        if (typeof updateMapSelectionBar === 'function') updateMapSelectionBar({ scrollToSelection: false });
+        if (typeof renderDefectListPanel === 'function') renderDefectListPanel();
+        if (typeof renderSurveyTable === 'function' && state.currentTab === 'tab-survey') renderSurveyTable();
+        drawCanvas();
+        window.showToast?.(`마킹 ${plan.length}개의 위치를 행·열 칸 이름으로 다시 썼습니다.`, 'success', 2500);
     }
 
     /** 결함 창 열 때: 새 마킹이면 칸 이름을 넣고, 자동 여부를 입력칸에 기억 */
