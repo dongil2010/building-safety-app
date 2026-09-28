@@ -33970,7 +33970,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             locEl.insertAdjacentElement('afterend', hint);
         }
         const t = String(text || '').trim();
-        hint.textContent = t ? `행·열: ${t}  (상세 위치에는 실 이름을 적으세요)` : '';
+        hint.textContent = t ? `행·열: ${t}` : '';
         hint.hidden = !t;
     }
 
