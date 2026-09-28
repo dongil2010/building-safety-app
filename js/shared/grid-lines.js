@@ -15,7 +15,10 @@
  * - 바깥: 맨 끝 선 밖이면 「X1 외측」.
  * - 부재에 따라(슬래브·보(B)·철골보(B)·빔 — 보통 한 선 위에 안 놓임) 폭을 무시하고 늘 「X1~X2」 범위로 쓴다.
  *   선 폭 안이면 점이 실제로 있는 쪽 칸, 선 위에 딱 걸치면 번호가 작은 쪽 칸(X2 위 → X1~X2, 첫 선이면 X1~X2).
- *   거더(보(G)·철골보(G)·거더)와 G/B 안 정한 그냥 「보」, 접합부는 보통 규칙(폭 안이면 X2).
+ * - 거더(보(G)·철골보(G)·거더·철골거더·큰보)는 폭과 상관없이 선 하나에 붙인다: 가장 가까운 열 선과 행 선까지
+ *   거리를 재서 더 가까운 축은 선 이름 하나, 다른 축은 늘 범위(X2, Y1~Y2 / X1~X3, Y3). 같으면 열(X) 우선.
+ *   영역 거더는 긴 쪽 방향(가로로 길면 행 선 위 → Y 하나, 세로로 길면 X 하나, 1.5배 이상일 때), 아니면 가운데 점 기준.
+ * - G/B 안 정한 그냥 「보」·「철골보」, 접합부, 그 밖의 부재는 보통 규칙(폭 안이면 X2).
  */
 (function (root) {
     'use strict';
@@ -33,6 +36,27 @@
         endsWith: ['(B)', '빔', 'BEAM'],
         exact: ['작은보']
     };
+
+    /** 거더 — 가까운 열/행 선 하나에 붙임(다른 축은 범위). 접합부는 제외 */
+    const GIRDER_MEMBER_RULES = {
+        exclude: ['접합부'],
+        contains: ['거더', 'GIRDER'],
+        endsWith: ['(G)'],
+        exact: ['큰보']
+    };
+
+    function matchMemberRules(name, r) {
+        const n = String(name == null ? '' : name).replace(/\s+/g, '').toUpperCase();
+        if (!n) return false;
+        if ((r.exclude || []).some((k) => n.includes(k.toUpperCase()))) return false;
+        if ((r.contains || []).some((k) => n.includes(k.toUpperCase()))) return true;
+        if ((r.endsWith || []).some((k) => n.endsWith(k.toUpperCase()))) return true;
+        return (r.exact || []).some((k) => n === k.toUpperCase());
+    }
+
+    function isGirderMember(name, rules) {
+        return matchMemberRules(name, rules || GIRDER_MEMBER_RULES);
+    }
 
     function isRangeOnlyMember(name, rules) {
         const r = rules || RANGE_ONLY_MEMBER_RULES;
@@ -292,7 +316,9 @@
         const aMax = Math.max(...alongs);
         const margin = Math.max(8, (aMax - aMin) * 0.03);
         const inExtent = pa >= aMin - margin && pa <= aMax + margin;
-        const nearest = Math.min(...sds.map(Math.abs));
+        let nearestIdx = 0;
+        sds.forEach((sd, i) => { if (Math.abs(sd) < Math.abs(sds[nearestIdx])) nearestIdx = i; });
+        const nearest = Math.abs(sds[nearestIdx]);
         if (onIdx >= 0 && forceRange && n > 1) {
             // 범위 전용 부재가 선 위에 딱 걸침 → 이웃 칸 중 반대편 선 번호가 더 작은 쪽(이웃이 하나면 그쪽)
             const a = onIdx - 1;
@@ -301,9 +327,9 @@
             if (a < 0) side = b;
             else if (b >= n) side = a;
             else side = items[a].numberIndex <= items[b].numberIndex ? a : b;
-            return { pos: (onIdx + side) / 2, n, inExtent, bracket: 0, nearest, bounded: true };
+            return { pos: (onIdx + side) / 2, n, inExtent, bracket: 0, nearest, nearestIdx, bounded: true };
         }
-        if (onIdx >= 0) return { pos: onIdx, n, inExtent, bracket: 0, nearest, bounded: true };
+        if (onIdx >= 0) return { pos: onIdx, n, inExtent, bracket: 0, nearest, nearestIdx, bounded: true };
         let lower = -1;
         let upper = -1;
         sds.forEach((sd, i) => {
@@ -314,10 +340,10 @@
             const lo = Math.min(lower, upper);
             const hi = Math.max(lower, upper);
             const pos = (hi - lo === 1) ? lo + 0.5 : (lower < upper ? lower + 0.5 : lower - 0.5);
-            return { pos, n, inExtent, bracket: Math.abs(sds[lower]) + Math.abs(sds[upper]), nearest, bounded: true };
+            return { pos, n, inExtent, bracket: Math.abs(sds[lower]) + Math.abs(sds[upper]), nearest, nearestIdx, bounded: true };
         }
-        if (lower >= 0) return { pos: n - 0.5, n, inExtent, bracket: Infinity, nearest, bounded: false };
-        return { pos: -0.5, n, inExtent, bracket: Infinity, nearest, bounded: false };
+        if (lower >= 0) return { pos: n - 0.5, n, inExtent, bracket: Infinity, nearest, nearestIdx, bounded: false };
+        return { pos: -0.5, n, inExtent, bracket: Infinity, nearest, nearestIdx, bounded: false };
     }
 
     function nameAt(items, idx) {
@@ -360,8 +386,13 @@
 
     /** 축 하나: 그룹이 여럿이면 양쪽으로 감싸는 그룹 → 선 범위 안 → 가까운 그룹 순 */
     function locateAxis(grid, axis, pointsImg, ctx, opts) {
+        const best = pickAxis(grid, axis, pointsImg, ctx, opts);
+        return best ? best.label : '';
+    }
+
+    function pickAxis(grid, axis, pointsImg, ctx, opts) {
         const groups = (grid.groups || []).filter((g) => g.axis === axis && (g.lines || []).length);
-        if (!groups.length || !pointsImg.length) return '';
+        if (!groups.length || !pointsImg.length) return null;
         let best = null;
         groups.forEach((g) => {
             const od = orderedLines(g, ctx);
@@ -370,15 +401,45 @@
             const rank = Math.max(...results.map(rankLocate));
             const score = results.reduce((s, r) => s + (Number.isFinite(r.bracket) ? r.bracket : r.nearest * 4), 0);
             if (!best || rank < best.rank || (rank === best.rank && score < best.score)) {
-                best = { rank, score, label: labelForPositions(od.items, results.map((r) => r.pos)) };
+                best = { rank, score, od, results, label: labelForPositions(od.items, results.map((r) => r.pos)) };
             }
         });
-        return best ? best.label : '';
+        return best;
+    }
+
+    /** 거더: 한 축은 가장 가까운 선 이름 하나, 다른 축은 범위 */
+    function girderLocation(grid, pts, ctx) {
+        const center = pts.reduce((a, p) => ({ x: a.x + p.x / pts.length, y: a.y + p.y / pts.length }), { x: 0, y: 0 });
+        const info = {};
+        AXES.forEach((ax) => { info[ax] = pickAxis(grid, ax, [center], ctx, { forceRange: true }); });
+        if (!info.col && !info.row) return '';
+        let snap = null;
+        if (pts.length > 1) {
+            const dp = pts.map((p) => toDisplay(p, ctx.rot, ctx.w, ctx.h));
+            const w = Math.max(...dp.map((q) => q.x)) - Math.min(...dp.map((q) => q.x));
+            const h = Math.max(...dp.map((q) => q.y)) - Math.min(...dp.map((q) => q.y));
+            if (w > h * 1.5 && info.row) snap = 'row';
+            else if (h > w * 1.5 && info.col) snap = 'col';
+        }
+        if (!snap) {
+            if (info.col && info.row) snap = info.col.results[0].nearest <= info.row.results[0].nearest ? 'col' : 'row';
+            else snap = info.col ? 'col' : 'row';
+        }
+        return AXES.map((ax) => {
+            const b = info[ax];
+            if (!b) return '';
+            if (ax === snap) {
+                const r = b.results[0];
+                return b.od.items[r.nearestIdx].name;
+            }
+            return locateAxis(grid, ax, pts, ctx, { forceRange: true });
+        }).filter(Boolean).join(', ');
     }
 
     /**
      * 마킹 점(들) → 「X1~X2, Y1~Y2」. ctx: { rot, w, h }
-     * opts: { member: 부재 명칭 } 또는 { forceRange: true } — 범위 전용 부재면 폭 무시
+     * opts: { member: 부재 명칭 } 또는 { forceRange: true } / { girder: true }
+     *   — 거더면 가까운 선 하나 + 다른 축 범위, 범위 전용 부재면 폭 무시
      */
     function computeGridLocation(rawGrid, pointsImg, ctx, opts) {
         const grid = normalizeGrid(rawGrid);
@@ -386,6 +447,8 @@
         if (!pts.length) return '';
         const c = { rot: num(ctx && ctx.rot, 0), w: num(ctx && ctx.w, 4000), h: num(ctx && ctx.h, 3000) };
         const o = opts || {};
+        const girder = o.girder != null ? !!o.girder : (o.forceRange == null && isGirderMember(o.member));
+        if (girder) return girderLocation(grid, pts, c);
         const lo = { forceRange: o.forceRange != null ? !!o.forceRange : isRangeOnlyMember(o.member) };
         return AXES.map((ax) => locateAxis(grid, ax, pts, c, lo)).filter(Boolean).join(', ');
     }
@@ -540,6 +603,8 @@
         DEFAULT_PREFIX,
         RANGE_ONLY_MEMBER_RULES,
         isRangeOnlyMember,
+        GIRDER_MEMBER_RULES,
+        isGirderMember,
         defaultBand,
         createGroup,
         normalizeGrid,

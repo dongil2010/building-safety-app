@@ -94,7 +94,7 @@ const onA = grid([G.createGroup('col', { lines: [vline(2000), vline(1000), vline
 assert.strictEqual(G.computeGridLocation(onA, [{ x: 2000, y: 9 }], ctx0, { member: '슬래브' }), 'X1~X2', 'X1 위 → 이웃 X2(1000)·X3(3000) 중 X2 쪽');
 const onB = grid([G.createGroup('col', { lines: [vline(1000), vline(3000), vline(2000)] })]);
 assert.strictEqual(G.computeGridLocation(onB, [{ x: 2000, y: 9 }], ctx0, { member: '보(B)' }), 'X1~X3', 'X3 위 → 이웃 X1·X2 중 X1 쪽');
-assert.strictEqual(G.computeGridLocation(onB, [{ x: 2000, y: 9 }], ctx0, { member: '보(G)' }), 'X3', '거더는 선 이름');
+assert.strictEqual(G.computeGridLocation(onB, [{ x: 2000, y: 9 }], ctx0, { member: '보(G)' }), 'X3', '거더는 가까운 선 이름');
 
 // ---- 폭: 선마다 다른 폭 ----
 const bands = grid([G.createGroup('col', { band: 10, lines: [vline(1000), vline(2000, { band: 200 })] })]);
@@ -203,7 +203,7 @@ const M = G.isRangeOnlyMember;
 ['슬래브', '데크슬래브', '계단슬래브', '슬라브', '보(B)', '보 (B)', '철골보(B)', 'RC보(B)', '빔', '철골빔', '작은보', 'slab'].forEach((m) => assert.strictEqual(M(m), true, `범위 전용: ${m}`));
 ['보(G)', '철골보(G)', '거더', '철골거더', '큰보', '보', '철골보', '캔틸레버보', '기둥', '벽체', '보-슬래브 접합부', '기둥-슬래브 접합부', '벽체-보 접합부', '철골 접합부', '', null].forEach((m) => assert.strictEqual(M(m), false, `보통 규칙: ${m}`));
 const locM = (pts, member, g) => G.computeGridLocation(g || base, pts, ctx0, { member });
-assert.strictEqual(locM([{ x: 2005, y: 1495 }], '보(G)'), 'X2, Y2', '거더는 폭 안이면 선 이름');
+assert.strictEqual(locM([{ x: 2005, y: 1495 }], '보(G)'), 'X2, Y1~Y2', '거더: 둘 다 5px면 열(X) 우선 하나, 행은 범위');
 assert.strictEqual(locM([{ x: 2005, y: 1495 }], '보'), 'X2, Y2', 'G/B 안 정한 보는 보통 규칙');
 assert.strictEqual(locM([{ x: 2005, y: 1495 }], '보-슬래브 접합부'), 'X2, Y2', '접합부는 보통 규칙');
 assert.strictEqual(locM([{ x: 2005, y: 1495 }], '슬래브'), 'X2~X3, Y1~Y2', '슬래브: 폭 안이어도 점이 있는 쪽 칸');
@@ -218,6 +218,35 @@ assert.strictEqual(G.computeGridLocation(base, [{ x: 2005, y: 1000 }], ctx0, { f
 // 영역: 슬래브가 X2 폭 안에만 있어도 선을 걸치면 X1~X3
 assert.strictEqual(locM(area(1995, 600, 2008, 1400), '슬래브'), 'X1~X3, Y1~Y2', '선을 걸친 슬래브 영역');
 assert.strictEqual(locM(area(2002, 600, 2008, 1400), '데크슬래브'), 'X2~X3, Y1~Y2', '선 한쪽 폭 안 영역은 그쪽 칸');
+
+// ---- 거더: 가까운 열/행 선 하나 + 다른 축은 범위(폭 무관) ----
+const Gd = G.isGirderMember;
+['보(G)', '철골보(G)', 'RC보(G)', '거더', '철골거더', '큰보', '보 (G)'].forEach((m) => assert.strictEqual(Gd(m), true, `거더: ${m}`));
+['보', '철골보', '보(B)', '철골보(B)', '빔', '슬래브', '캔틸레버보', '보-거더 접합부', '기둥-보 접합부', '', null].forEach((m) => assert.strictEqual(Gd(m), false, `거더 아님: ${m}`));
+const locG = (pts, member, g) => G.computeGridLocation(g || base, pts, ctx0, { member: member || '보(G)' });
+assert.strictEqual(locG([{ x: 1990, y: 1000 }]), 'X2, Y1~Y2', '열 선이 더 가까움(10 < 500)');
+assert.strictEqual(locG([{ x: 1500, y: 1480 }]), 'X1~X2, Y2', '행 선이 더 가까움 — 폭(20) 밖이어도 붙임');
+assert.strictEqual(locG([{ x: 1300, y: 1000 }], '철골거더'), 'X1, Y1~Y2', '폭 밖 300px여도 가까운 선 하나');
+assert.strictEqual(locG([{ x: 2010, y: 2500 }], '철골보(G)'), 'X2, Y2 외측', '다른 축이 바깥이면 외측 규칙');
+assert.strictEqual(locG([{ x: 500, y: 1000 }], '큰보'), 'X1, Y1~Y2', '바깥이어도 붙는 축은 끝 선 이름');
+assert.strictEqual(locG([{ x: 1750, y: 1250 }]), 'X2, Y1~Y2', '거리가 같으면(250) 열(X) 우선');
+assert.strictEqual(locG([{ x: 1990, y: 9 }], '거더', grid([G.createGroup('col', { lines: [vline(1000), vline(2000)] })])), 'X2', '열만 있으면 열 선 하나');
+assert.strictEqual(locG([{ x: 9, y: 1400 }], '거더', grid([G.createGroup('row', { lines: [hline(500), hline(1500)] })])), 'Y2', '행만 있으면 행 선 하나');
+// 영역 거더: 긴 쪽 방향
+assert.strictEqual(locG(area(1200, 1480, 2800, 1530)), 'X1~X3, Y2', '가로로 긴 영역 → 행 선 하나, 열은 범위');
+assert.strictEqual(locG(area(1980, 600, 2030, 1400)), 'X2, Y1~Y2', '세로로 긴 영역 → 열 선 하나');
+assert.strictEqual(locG(area(1900, 1400, 2000, 1500)), 'X2, Y1~Y2', '정사각형 → 가운데 점, 같으면 X 우선');
+// 회전 도면: 화면에서 가로로 긴 영역(= 이미지에서 세로로 긴 영역)은 화면 행 선
+const rotGrid = grid([
+    G.createGroup('col', { lines: [hline(1500), hline(500)] }),
+    G.createGroup('row', { lines: [vline(1000), vline(2000)] })
+]);
+assert.strictEqual(G.computeGridLocation(rotGrid, area(1980, 600, 2030, 1400), rot90, { member: '보(G)' }), 'X1~X2, Y2', '90°: 화면 가로로 긴 영역 → 행(Y) 하나');
+// 수동 지정
+assert.strictEqual(G.computeGridLocation(base, [{ x: 1990, y: 1000 }], ctx0, { girder: true }), 'X2, Y1~Y2', 'girder 직접');
+assert.strictEqual(G.computeGridLocation(base, [{ x: 1990, y: 1000 }], ctx0, { member: '보(G)', girder: false }), 'X2, Y1~Y2', 'girder 끄면 보통 규칙(폭 안)');
+assert.strictEqual(G.computeGridLocation(base, [{ x: 1990, y: 1000 }], ctx0, { member: '보' }), 'X2, Y1~Y2', 'G/B 안 정한 보: 폭 안이라 X2');
+assert.strictEqual(G.computeGridLocation(base, [{ x: 1300, y: 1000 }], ctx0, { member: '보' }), 'X1~X2, Y1~Y2', 'G/B 안 정한 보: 폭 밖은 범위(거더 규칙 아님)');
 
 // ---- 위치 자동 입력 규칙 ----
 const A = G.applyAutoLocation;
