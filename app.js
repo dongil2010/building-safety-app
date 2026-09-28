@@ -4490,7 +4490,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 window.closeAddBuildingModalFunc();
                 return true;
             }
-            const plainIds = ['optionManagerModal', 'reportPreviewModal', 'mobileQrModal', 'buildingTrashModal'];
+            const plainIds = ['optionManagerModal', 'reportPreviewModal', 'mobileQrModal', 'buildingTrashModal', 'errorLogModal'];
             for (let j = 0; j < plainIds.length; j++) {
                 const m = document.getElementById(plainIds[j]);
                 if (isModalElOpen(m)) {

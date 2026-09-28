@@ -10039,6 +10039,70 @@ body.bsa-tab-stats .app-content {
     overflow: auto;
 }
 
+/* 현장 오류 기록 (js/core/error-log-view.js) */
+.error-log-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.45rem;
+    max-height: min(60vh, 560px);
+    overflow: auto;
+}
+.error-log-group {
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    background: #fff;
+}
+.error-log-group > summary {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 0.15rem 0.6rem;
+    padding: 0.55rem 0.7rem;
+    cursor: pointer;
+    list-style: none;
+}
+.error-log-group > summary::-webkit-details-marker { display: none; }
+.error-log-count {
+    grid-row: span 2;
+    align-self: center;
+    min-width: 3rem;
+    text-align: center;
+    font-weight: 800;
+    font-size: 0.85rem;
+    color: #b91c1c;
+    background: #fee2e2;
+    border-radius: 6px;
+    padding: 0.2rem 0.4rem;
+}
+.error-log-msg {
+    font-weight: 700;
+    font-size: 0.85rem;
+    color: #1e293b;
+    word-break: break-all;
+}
+.error-log-meta {
+    font-size: 0.74rem;
+    color: #64748b;
+}
+.error-log-sample {
+    border-top: 1px dashed #e2e8f0;
+    padding: 0.45rem 0.7rem;
+    font-size: 0.74rem;
+    color: #334155;
+}
+.error-log-sample-head { font-weight: 700; }
+.error-log-sample-line { word-break: break-all; color: #64748b; }
+.error-log-stack {
+    margin: 0.3rem 0 0;
+    padding: 0.4rem 0.5rem;
+    max-height: 160px;
+    overflow: auto;
+    background: #f8fafc;
+    border-radius: 6px;
+    font-size: 0.7rem;
+    white-space: pre-wrap;
+    word-break: break-all;
+}
+
 .building-trash-item {
     display: flex;
     align-items: flex-start;

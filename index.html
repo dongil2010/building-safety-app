@@ -216,6 +216,9 @@
                             <button type="button" class="btn btn-outline hero-btn-trash" id="btnOpenBuildingTrash" title="삭제한 건물을 약 30일간 보관·복원">
                                 <i class="fa-solid fa-trash-can"></i> 휴지통 <span id="buildingTrashBadge" class="building-trash-badge" hidden></span>
                             </button>
+                            <button type="button" class="btn btn-outline hero-btn-error-logs" id="btnOpenErrorLogs" title="현장 태블릿에서 난 오류 기록 보기">
+                                <i class="fa-solid fa-bug"></i> 오류 기록
+                            </button>
                             <button type="button" class="btn btn-outline pc-only-chrome hero-btn-purge" id="btnPurgeDeletedCodes" title="전원 동기화 확인 후에만 — 삭제 tombstone을 비워 고유코드 재사용">
                                 <i class="fa-solid fa-recycle"></i> 삭제 코드 정리
                             </button>
@@ -2263,6 +2266,35 @@
     </div>
 
     <!-- MODAL: 건물 휴지통 (약 30일 보관·복원) -->
+    <!-- MODAL: 현장 오류 기록 (js/core/error-log-view.js) -->
+    <div class="modal-overlay" id="errorLogModal">
+        <div class="modal-card" style="max-width: 760px; width: 96%;">
+            <div class="modal-header">
+                <h3><i class="fa-solid fa-bug"></i> 현장 오류 기록</h3>
+                <button type="button" class="modal-close" id="btnCloseErrorLogModal">&times;</button>
+            </div>
+            <div class="modal-body" style="display:flex; flex-direction:column; gap:0.6rem;">
+                <p style="font-size:0.8rem; color:#64748b; margin:0;">
+                    태블릿·PC에서 앱이 오류를 내면 자동으로 남습니다. 같은 오류는 한 줄로 묶었고, 누르면 언제·누가·어느 기기에서 났는지 보입니다.
+                </p>
+                <div style="display:flex; gap:0.5rem; align-items:center; flex-wrap:wrap;">
+                    <select id="errorLogRange" class="form-select" style="width:auto;">
+                        <option value="1">오늘부터 24시간</option>
+                        <option value="7" selected>최근 7일</option>
+                        <option value="30">최근 30일</option>
+                        <option value="3650">전체</option>
+                    </select>
+                    <button type="button" class="btn btn-outline btn-sm" id="btnReloadErrorLogs"><i class="fa-solid fa-rotate"></i> 다시 불러오기</button>
+                    <span id="errorLogStatus" style="font-size:0.8rem; color:#475569;"></span>
+                </div>
+                <div id="errorLogList" class="error-log-list"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline" id="btnCloseErrorLogFooter">닫기</button>
+            </div>
+        </div>
+    </div>
+
     <div class="modal-overlay" id="buildingTrashModal">
         <div class="modal-card" style="max-width: 560px; width: 94%;">
             <div class="modal-header">
@@ -3266,6 +3298,7 @@
     <script src="js/core/sync-merge.js?v=20260928_174259"></script>
     <script src="js/shared/defect-quick-presets.js?v=20260928_174259"></script>
     <script src="js/core/legend-layout.js?v=20260928_174259"></script>
+    <script src="js/core/error-log-view.js?v=20260928_174259"></script>
     <script src="app.js?v=20260928_174259"></script>
 
     <script>
