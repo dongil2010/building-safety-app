@@ -2169,6 +2169,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 styleSizeBarLockedNdt: window.state.styleSizeBarLockedNdt !== false,
                 floorMapStyleSettings: window.state.floorMapStyleSettings || null,
                 floorDrawingRotations: window.state.floorDrawingRotations || null,
+                floorGridLines: window.state.floorGridLines || null,
                 styleShapes: window.state.styleShapes || null,
                 surveyColumns: window.state.surveyColumns || null,
                 surveyColumnsGrade3: window.state.surveyColumnsGrade3 || null,
@@ -2360,6 +2361,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
                 if (parsed.floorDrawingRotations) {
                     window.state.floorDrawingRotations = parsed.floorDrawingRotations;
+                }
+                if (parsed.floorGridLines) {
+                    window.state.floorGridLines = parsed.floorGridLines;
                 }
                 if (parsed.styleShapes) {
                     window.state.styleShapes = parsed.styleShapes;
@@ -9412,6 +9416,12 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
         if (state.bgImage) {
             drawFloorPlanLayers(ctx, imgW, imgH);
+            // 행·열(통심) 선 — 도면 바로 위, 마킹보다 아래 (화면 전용)
+            try {
+                if (typeof drawFloorGridOverlay === 'function') drawFloorGridOverlay(ctx, imgW, imgH);
+            } catch (gridErr) {
+                console.warn('[grid-lines] draw', gridErr);
+            }
 
             const currentDefects = getCurrentFloorMapPlacedDefects();
             renderDefectsGrouped(ctx, currentDefects, drawPin);
@@ -23267,6 +23277,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 : null;
             defect.component = value;
             touchDefectUpdatedAt(defect);
+            // G/B를 정하면 행·열 위치도 다시(보(B)는 늘 범위, 보(G)는 폭 안이면 선 이름) — 자동으로 넣은 위치만
+            if (key === `${state.currentBuildingId}_${state.currentFloor}` && typeof applyGridAutoLocationToDefect === 'function') {
+                try { applyGridAutoLocationToDefect(defect); } catch (gridErr) { console.warn('[grid-lines] gb', gridErr); }
+            }
             if (before) {
                 try {
                     const diff = editHistoryApi.diffTracked(before, defect);
@@ -29713,6 +29727,15 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     if (selectedDefectIds.has(d.id)) touchDefectPositionUpdatedAt(d);
                 });
             }
+            // 행·열 선이 있으면 옮긴 마킹 위치를 칸 이름으로 (비었거나 자동으로 넣은 위치만 — 직접 쓴 글은 그대로)
+            try {
+                const movedForGrid = isDraggingPinGroup
+                    ? filterMapPlacedDefects(getCurrentFloorDefects()).filter(d => selectedDefectIds.has(d.id))
+                    : (activeDragPin ? [activeDragPin] : []);
+                if (typeof applyGridAutoLocationAfterDrag === 'function') applyGridAutoLocationAfterDrag(movedForGrid);
+            } catch (gridErr) {
+                console.warn('[grid-lines] drag', gridErr);
+            }
             isDraggingPin = false;
             isDraggingPinGroup = false;
             activeDragPin = null;
@@ -30183,6 +30206,13 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 }
                 return;
             }
+            // 행·열(통심) 선 편집 중에는 선 긋기·옮기기만 (마킹 안 함)
+            if (window.BSA_gridEdit && window.BSA_gridEdit.active && e.button === 0) {
+                e.preventDefault();
+                e.stopPropagation();
+                window.BSA_gridEdit.onPointerDown(e.clientX, e.clientY, false);
+                return;
+            }
             if (e.button === 1) {
                 e.preventDefault();
                 handleDragStart(e.clientX, e.clientY, false, true);
@@ -30226,6 +30256,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         elements.planCanvas.addEventListener('dblclick', (e) => {
             if (activePointerIsTouch) return;
             e.preventDefault();
+            if (window.BSA_gridEdit && window.BSA_gridEdit.active) {
+                window.BSA_gridEdit.onDblClick(e.clientX, e.clientY);
+                return;
+            }
             if (pendingAreaPoly && pendingAreaPoly.length >= 3) {
                 finishPendingAreaPolygon();
                 return;
@@ -30259,6 +30293,13 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 }
                 return;
             }
+            if (window.BSA_gridEdit && window.BSA_gridEdit.active && e.touches.length === 1 && !isPinching) {
+                if (e.cancelable) e.preventDefault();
+                e.stopPropagation();
+                window.BSA_gridEdit.onPointerDown(e.touches[0].clientX, e.touches[0].clientY, true);
+                return;
+            }
+            if (window.BSA_gridEdit && window.BSA_gridEdit.drag && e.touches.length >= 2) window.BSA_gridEdit.cancelDrag();
             if (e.touches.length === 1 && !isPinching) {
                 if (e.cancelable) e.preventDefault();
                 handleDragStart(e.touches[0].clientX, e.touches[0].clientY, true);
@@ -31064,6 +31105,12 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     targetY: tY
                 };
             }
+        }
+
+        try {
+            if (typeof applyGridAutoLocationToModal === 'function') applyGridAutoLocationToModal(locEl, existingPin || null);
+        } catch (gridErr) {
+            console.warn('[grid-lines] modal', gridErr);
         }
 
         renderDefectMarkingTimeline(existingPin || null);
@@ -32243,6 +32290,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     }
                 }
                 savedDefect = state.defects[key][idx];
+                if (typeof syncGridAutoFlagOnCommit === 'function') syncGridAutoFlagOnCommit(savedDefect);
             }
         } else {
             // Add new defect
@@ -32319,6 +32367,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             if (groupedNew) finishMarkingGroupCommit();
             syncDefectPhotoRefs(newDefect, photosVal, window._pendingPrevRoundPhotos);
             savedDefect = newDefect;
+            if (typeof syncGridAutoFlagOnCommit === 'function') syncGridAutoFlagOnCommit(savedDefect);
             if (!pinId) {
                 const pinIdEl = document.getElementById('defectPinId');
                 if (pinIdEl && !pinIdEl.value) pinIdEl.value = savedDefect.id;
@@ -33078,6 +33127,910 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     if (btnSnapToCad) btnSnapToCad.addEventListener('click', toggleSnapToCad);
     if (mobileBtnSnapToCad) mobileBtnSnapToCad.addEventListener('click', toggleSnapToCad);
     setupDrawingCrosshairToggleButtons();
+
+    // @@GRID_LINES_START — 도면 행·열(통심) 선 (실험 exp/grid-lines, 2026-09-28)
+    // 계산은 js/shared/grid-lines.js(window.BSA.gridLines). 여기서는 저장·그리기·편집 화면·위치 자동 입력만.
+    function gridLib() {
+        return (window.BSA && window.BSA.gridLines) || null;
+    }
+
+    function gridEsc(v) {
+        return String(v == null ? '' : v).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    }
+
+    function getGridFloorKey() {
+        if (!state.currentBuildingId || !state.currentFloor) return '';
+        return getFloorMapStyleKey(state.currentBuildingId, state.currentFloor);
+    }
+
+    function getGridCtx() {
+        const dims = getFloorPlanDisplayDims();
+        return { rot: state.rotationAngle || 0, w: dims.w, h: dims.h };
+    }
+
+    /** 지금 층의 행·열 선 데이터(없으면 create일 때만 새로 만듦). 저장 형식은 한 번 정리해서 제자리에 둔다 */
+    function getCurrentFloorGrid(create) {
+        const G = gridLib();
+        const key = getGridFloorKey();
+        if (!G || !key) return null;
+        let raw = state.floorGridLines && state.floorGridLines[key];
+        if (!raw && !create) return null;
+        if (raw && raw.__gridNorm) return raw;
+        const norm = G.normalizeGrid(raw || {});
+        Object.defineProperty(norm, '__gridNorm', { value: true, enumerable: false });
+        if (!state.floorGridLines || typeof state.floorGridLines !== 'object') state.floorGridLines = {};
+        state.floorGridLines[key] = norm;
+        return norm;
+    }
+
+    function gridHasLines(grid) {
+        return !!(grid && (grid.groups || []).some((g) => (g.lines || []).length));
+    }
+
+    function gridEditState() {
+        if (!window.BSA_gridEdit) {
+            window.BSA_gridEdit = {
+                active: false,
+                tool: 'col',
+                sel: null,
+                activeGroup: { col: null, row: null },
+                editGroupId: null,
+                drag: null,
+                bendArmed: false,
+                lastAddAt: 0,
+                renderedKey: '',
+                collapsed: false,
+                onPointerDown: gridPointerDown,
+                onDblClick: gridDblClick,
+                cancelDrag: gridCancelDrag
+            };
+        }
+        return window.BSA_gridEdit;
+    }
+
+    function gridSnap(p) {
+        if (state.snapToCad === false || !window.BSA_PDF_SNAP) return p;
+        const bldg = state.currentBuilding;
+        const fc = state.currentFloor;
+        if (!bldg || !fc) return p;
+        try {
+            const hit = window.BSA_PDF_SNAP.snap(bldg.id, fc, p.x, p.y, SNAP_SCREEN_RADIUS_PX / (state.view.scale || 1));
+            return hit ? { x: hit.x, y: hit.y } : p;
+        } catch (e) {
+            return p;
+        }
+    }
+
+    function gridChanged(opts) {
+        drawCanvas();
+        if (!opts || opts.panel !== false) renderGridPanel();
+        clearTimeout(window._bsaGridSaveTimer);
+        window._bsaGridSaveTimer = setTimeout(() => {
+            if (typeof saveStateToLocalStorage === 'function') saveStateToLocalStorage();
+        }, 500);
+    }
+
+    // ---- 그리기(화면 전용 — 내보내기에는 안 들어감) ----
+    function drawFloorGridOverlay(ctx, imgW, imgH) {
+        const G = gridLib();
+        if (!G) return;
+        const ge = window.BSA_gridEdit;
+        const editing = !!(ge && ge.active);
+        const key = getGridFloorKey();
+        if (editing && ge.renderedKey !== key) {
+            ge.renderedKey = key;
+            ge.sel = null;
+            ge.bendArmed = false;
+            setTimeout(renderGridPanel, 0);
+        }
+        const grid = getCurrentFloorGrid(false);
+        if (!grid || !gridHasLines(grid) || (!grid.visible && !editing)) return;
+        const gctx = { rot: state.rotationAngle || 0, w: imgW, h: imgH };
+        const s = state.view.scale || 1;
+        const rotRad = (gctx.rot * Math.PI) / 180;
+        const sel = editing ? ge.sel : null;
+        const tracePath = (pts) => {
+            ctx.beginPath();
+            pts.forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)));
+        };
+        ctx.save();
+        grid.groups.forEach((g) => {
+            const od = G.orderedLines(g, gctx);
+            od.items.forEach((it) => {
+                const ln = it.line;
+                const pts = ln.pts;
+                const isSel = !!(sel && sel.lineId === ln.id);
+                if (editing) {
+                    const band = G.lineBand(ln, g, gctx);
+                    if (band > 0) {
+                        ctx.setLineDash([]);
+                        ctx.lineCap = 'butt';
+                        ctx.lineJoin = 'miter';
+                        ctx.strokeStyle = isSel ? 'rgba(249, 115, 22, 0.16)' : 'rgba(14, 116, 144, 0.12)';
+                        ctx.lineWidth = band;
+                        tracePath(pts);
+                        ctx.stroke();
+                    }
+                }
+                ctx.setLineDash([10 / s, 4 / s, 2 / s, 4 / s]);
+                ctx.lineCap = 'round';
+                ctx.strokeStyle = isSel ? '#f97316' : (editing ? 'rgba(14, 116, 144, 0.9)' : 'rgba(14, 116, 144, 0.55)');
+                ctx.lineWidth = (isSel ? 2 : 1.2) / s;
+                tracePath(pts);
+                ctx.stroke();
+                ctx.setLineDash([]);
+                if (editing) {
+                    const hs = (isSel ? 5 : 3.5) / s;
+                    pts.forEach((p, vi) => {
+                        const vSel = isSel && sel.vertexIndex === vi;
+                        ctx.fillStyle = vSel ? '#f97316' : '#ffffff';
+                        ctx.strokeStyle = isSel ? '#f97316' : 'rgba(14, 116, 144, 0.9)';
+                        ctx.lineWidth = 1.2 / s;
+                        ctx.fillRect(p.x - hs, p.y - hs, hs * 2, hs * 2);
+                        ctx.strokeRect(p.x - hs, p.y - hs, hs * 2, hs * 2);
+                    });
+                }
+                // 이름 풍선 — 양 끝(도면 안쪽), 글자는 화면 기준으로 똑바로
+                const fontPx = 11 / s;
+                ctx.font = `700 ${fontPx}px "Malgun Gothic", sans-serif`;
+                const tw = ctx.measureText(it.name).width;
+                const r = Math.max(10 / s, tw / 2 + 4 / s);
+                const ends = [[pts[0], pts[1]], [pts[pts.length - 1], pts[pts.length - 2]]];
+                ends.forEach(([endP, nextP]) => {
+                    const dx = nextP.x - endP.x;
+                    const dy = nextP.y - endP.y;
+                    const L = Math.hypot(dx, dy) || 1;
+                    const cx = endP.x + (dx / L) * (r + 2 / s);
+                    const cy = endP.y + (dy / L) * (r + 2 / s);
+                    ctx.beginPath();
+                    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+                    ctx.fillStyle = 'rgba(255, 255, 255, 0.95)';
+                    ctx.fill();
+                    ctx.lineWidth = 1.2 / s;
+                    ctx.strokeStyle = isSel ? '#f97316' : '#0e7490';
+                    ctx.stroke();
+                    ctx.save();
+                    ctx.translate(cx, cy);
+                    ctx.rotate(-rotRad);
+                    ctx.fillStyle = isSel ? '#c2410c' : '#0e7490';
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'middle';
+                    ctx.fillText(it.name, 0, 0);
+                    ctx.restore();
+                });
+            });
+        });
+        ctx.restore();
+    }
+
+    // ---- 편집: 누르기 · 끌기 ----
+    function gridFindGroup(grid, id) {
+        return (grid.groups || []).find((g) => g.id === id) || null;
+    }
+
+    function gridSelectLine(grid, lineId, vertexIndex) {
+        const ge = gridEditState();
+        const G = gridLib();
+        const f = G.findLine(grid, lineId);
+        if (!f) {
+            ge.sel = null;
+            return null;
+        }
+        ge.sel = { groupId: f.group.id, lineId, vertexIndex: vertexIndex == null ? null : vertexIndex };
+        ge.activeGroup[f.group.axis] = f.group.id;
+        ge.editGroupId = f.group.id;
+        return f;
+    }
+
+    function gridEnsureGroup(grid, axis) {
+        const G = gridLib();
+        const ge = gridEditState();
+        let g = gridFindGroup(grid, ge.activeGroup[axis]);
+        if (!g || g.axis !== axis) g = (grid.groups || []).find((x) => x.axis === axis) || null;
+        if (!g) {
+            const c = getGridCtx();
+            g = G.createGroup(axis, { band: G.defaultBand(c.w, c.h) });
+            grid.groups.push(g);
+        }
+        ge.activeGroup[axis] = g.id;
+        ge.editGroupId = g.id;
+        return g;
+    }
+
+    function gridAddLineAt(axis, p) {
+        const G = gridLib();
+        const grid = getCurrentFloorGrid(true);
+        const g = gridEnsureGroup(grid, axis);
+        const ln = G.makeLineThrough(p, axis, g.angle, getGridCtx());
+        g.lines.push(ln);
+        gridSelectLine(grid, ln.id, null);
+        gridEditState().lastAddAt = Date.now();
+        gridChanged();
+    }
+
+    function gridPointerDown(clientX, clientY, isTouch) {
+        const G = gridLib();
+        const ge = gridEditState();
+        if (!G || !state.bgImage) return;
+        const p = clientToImgCoords(clientX, clientY);
+        const tol = (isTouch ? 18 : 8) / (state.view.scale || 1);
+        const grid = getCurrentFloorGrid(true);
+        if (ge.bendArmed && ge.sel) {
+            const f = G.findLine(grid, ge.sel.lineId);
+            ge.bendArmed = false;
+            if (f) {
+                const hitLine = G.hitTest({ groups: [{ id: f.group.id, lines: [f.line] }] }, p, tol * 2);
+                if (hitLine) {
+                    const vi = G.insertVertex(f.line, p);
+                    gridSelectLine(grid, f.line.id, vi);
+                    gridStartDrag({ kind: 'vertex', lineId: f.line.id, vi, start: p, clientX, clientY, isTouch });
+                    gridChanged();
+                    return;
+                }
+            }
+            renderGridPanel();
+        }
+        const hit = G.hitTest(grid, p, tol);
+        if (hit) {
+            const f = gridSelectLine(grid, hit.lineId, hit.vertexIndex);
+            gridStartDrag({
+                kind: hit.vertexIndex != null ? 'vertex' : 'line',
+                lineId: hit.lineId,
+                vi: hit.vertexIndex,
+                start: p,
+                orig: f ? f.line.pts.map((q) => ({ x: q.x, y: q.y })) : [],
+                clientX,
+                clientY,
+                isTouch
+            });
+            renderGridPanel();
+            drawCanvas();
+            return;
+        }
+        gridStartDrag({ kind: 'empty', start: p, clientX, clientY, isTouch, offX: state.view.offsetX, offY: state.view.offsetY });
+    }
+
+    function gridOnMove(clientX, clientY) {
+        const ge = gridEditState();
+        const d = ge.drag;
+        if (!d) return;
+        const G = gridLib();
+        const thr = d.isTouch ? 8 : 4;
+        if (!d.moved && Math.hypot(clientX - d.clientX, clientY - d.clientY) < thr) return;
+        d.moved = true;
+        if (d.kind === 'empty') {
+            state.view.offsetX = d.offX + (clientX - d.clientX);
+            state.view.offsetY = d.offY + (clientY - d.clientY);
+            drawCanvas();
+            if (typeof updateMapZoomOverlay === 'function') updateMapZoomOverlay();
+            return;
+        }
+        const grid = getCurrentFloorGrid(true);
+        const f = G.findLine(grid, d.lineId);
+        if (!f) return;
+        const p = clientToImgCoords(clientX, clientY);
+        if (d.kind === 'vertex') {
+            const sp = gridSnap(p);
+            if (f.line.pts[d.vi]) f.line.pts[d.vi] = { x: sp.x, y: sp.y };
+        } else if (d.kind === 'line') {
+            const grab = { x: d.start.x + (p.x - d.start.x), y: d.start.y + (p.y - d.start.y) };
+            const sp = gridSnap(grab);
+            const dx = sp.x - d.start.x;
+            const dy = sp.y - d.start.y;
+            f.line.pts = d.orig.map((q) => ({ x: q.x + dx, y: q.y + dy }));
+        }
+        drawCanvas();
+    }
+
+    function gridOnEnd() {
+        const ge = gridEditState();
+        const d = ge.drag;
+        gridDetachDragListeners();
+        ge.drag = null;
+        if (!d) return;
+        if (d.kind === 'empty') {
+            if (d.moved) {
+                if (typeof scheduleFloorDrawingTierSync === 'function') scheduleFloorDrawingTierSync();
+                if (typeof shouldUseViewportTilesForCurrentFloor === 'function' && shouldUseViewportTilesForCurrentFloor() && typeof scheduleViewportHiPatchSync === 'function') scheduleViewportHiPatchSync();
+                return;
+            }
+            if (ge.tool === 'col' || ge.tool === 'row') {
+                gridAddLineAt(ge.tool, gridSnap(d.start));
+            } else {
+                ge.sel = null;
+                renderGridPanel();
+                drawCanvas();
+            }
+            return;
+        }
+        if (d.moved) gridChanged();
+    }
+
+    function gridMouseMove(e) { gridOnMove(e.clientX, e.clientY); }
+    function gridMouseUp() { gridOnEnd(); }
+    function gridTouchMove(e) {
+        if (!e.touches || e.touches.length !== 1) return;
+        if (e.cancelable) e.preventDefault();
+        gridOnMove(e.touches[0].clientX, e.touches[0].clientY);
+    }
+    function gridTouchEnd(e) {
+        if (e.touches && e.touches.length) return;
+        gridOnEnd();
+    }
+
+    function gridStartDrag(d) {
+        const ge = gridEditState();
+        gridDetachDragListeners();
+        ge.drag = Object.assign({ moved: false }, d);
+        window.addEventListener('mousemove', gridMouseMove);
+        window.addEventListener('mouseup', gridMouseUp);
+        window.addEventListener('touchmove', gridTouchMove, { passive: false });
+        window.addEventListener('touchend', gridTouchEnd);
+        window.addEventListener('touchcancel', gridTouchEnd);
+    }
+
+    function gridDetachDragListeners() {
+        window.removeEventListener('mousemove', gridMouseMove);
+        window.removeEventListener('mouseup', gridMouseUp);
+        window.removeEventListener('touchmove', gridTouchMove);
+        window.removeEventListener('touchend', gridTouchEnd);
+        window.removeEventListener('touchcancel', gridTouchEnd);
+    }
+
+    /** 두 손가락(확대) 시작 등 — 끌던 것을 그 자리에서 멈춤(빈 곳 누름은 선 추가 안 함) */
+    function gridCancelDrag() {
+        const ge = gridEditState();
+        const d = ge.drag;
+        gridDetachDragListeners();
+        ge.drag = null;
+        if (d && d.moved && d.kind !== 'empty') gridChanged();
+    }
+
+    function gridDblClick(clientX, clientY) {
+        const G = gridLib();
+        const ge = gridEditState();
+        if (!G || Date.now() - ge.lastAddAt < 700) return;
+        const p = clientToImgCoords(clientX, clientY);
+        const grid = getCurrentFloorGrid(true);
+        const hit = G.hitTest(grid, p, 8 / (state.view.scale || 1));
+        if (!hit) return;
+        const f = G.findLine(grid, hit.lineId);
+        if (!f) return;
+        if (hit.vertexIndex != null) {
+            if (G.removeVertex(f.line, hit.vertexIndex)) {
+                gridSelectLine(grid, f.line.id, null);
+                gridChanged();
+            }
+            return;
+        }
+        const vi = G.insertVertex(f.line, p);
+        gridSelectLine(grid, f.line.id, vi);
+        gridChanged();
+    }
+
+    function gridDeleteSelected() {
+        const ge = gridEditState();
+        const grid = getCurrentFloorGrid(false);
+        if (!grid || !ge.sel) return false;
+        const G = gridLib();
+        const f = G.findLine(grid, ge.sel.lineId);
+        if (!f) return false;
+        const vi = ge.sel.vertexIndex;
+        if (vi != null && vi > 0 && vi < f.line.pts.length - 1) {
+            G.removeVertex(f.line, vi);
+            ge.sel.vertexIndex = null;
+        } else {
+            f.group.lines = f.group.lines.filter((l) => l.id !== f.line.id);
+            ge.sel = null;
+        }
+        gridChanged();
+        return true;
+    }
+
+    // ---- 편집 창 ----
+    function ensureGridPanel() {
+        let panel = document.getElementById('gridLinesPanel');
+        if (panel) return panel;
+        const host = elements.planCanvas && elements.planCanvas.parentElement;
+        if (!host) return null;
+        panel = document.createElement('div');
+        panel.id = 'gridLinesPanel';
+        panel.className = 'grid-lines-panel';
+        panel.hidden = true;
+        host.appendChild(panel);
+        ['mousedown', 'touchstart', 'wheel', 'dblclick'].forEach((ev) => panel.addEventListener(ev, (e) => e.stopPropagation(), { passive: true }));
+        panel.addEventListener('click', onGridPanelClick);
+        panel.addEventListener('change', onGridPanelChange);
+        panel.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' && e.target && e.target.tagName === 'INPUT') {
+                e.preventDefault();
+                e.target.blur();
+            }
+        });
+        return panel;
+    }
+
+    function renderGridPanel() {
+        const ge = gridEditState();
+        const panel = ensureGridPanel();
+        if (!panel) return;
+        panel.hidden = !ge.active;
+        if (!ge.active) return;
+        const G = gridLib();
+        if (!G) {
+            panel.innerHTML = '<div class="grid-panel-hint">행·열 모듈을 불러오지 못했습니다. Ctrl+F5로 새로고침해 주세요.</div>';
+            return;
+        }
+        ge.renderedKey = getGridFloorKey();
+        const grid = getCurrentFloorGrid(false) || G.normalizeGrid({});
+        const gctx = getGridCtx();
+        const groups = grid.groups || [];
+        let eg = gridFindGroup(grid, ge.editGroupId) || groups[0] || null;
+        if (eg) ge.editGroupId = eg.id;
+        const selF = ge.sel ? G.findLine(grid, ge.sel.lineId) : null;
+        if (ge.sel && !selF) ge.sel = null;
+        let selName = '';
+        let selAuto = '';
+        if (selF) {
+            const it = G.orderedLines(selF.group, gctx).items.find((x) => x.line.id === selF.line.id);
+            selName = it ? it.name : '';
+            selAuto = it ? it.autoName : '';
+        }
+        const axisKo = (ax) => (ax === 'row' ? '행' : '열');
+        const groupOpts = groups.map((g) => {
+            const od = G.orderedLines(g, gctx);
+            const names = od.items.length ? `${od.items[0].name}…${od.items[od.items.length - 1].name}` : `${g.prefix}${g.start}…`;
+            const ang = Math.abs(g.angle) > 0.01 ? ` · ${g.angle}°` : '';
+            return `<option value="${gridEsc(g.id)}"${eg && g.id === eg.id ? ' selected' : ''}>${axisKo(g.axis)} ${gridEsc(names)} (${od.items.length}개${ang})</option>`;
+        }).join('');
+        const hint = ge.bendArmed
+            ? '꺾을 자리를 선 위에서 누르세요. 생긴 점을 끌어 모양을 맞춥니다.'
+            : (ge.tool === 'select'
+                ? '선을 눌러 고르고 끌어서 옮기세요. 끝점을 끌면 기울어집니다. 빈 곳을 끌면 화면 이동.'
+                : `도면을 누르면 ${ge.tool === 'row' ? '가로 행(Y)' : '세로 열(X)'} 선이 생깁니다. 있는 선·끝점은 끌어서 옮기고, 빈 곳을 끌면 화면 이동.`);
+        const lineBandDefault = selF ? G.lineBand({}, selF.group, gctx) : 0;
+        const vi = ge.sel ? ge.sel.vertexIndex : null;
+        const canDelVertex = !!(selF && vi != null && vi > 0 && vi < selF.line.pts.length - 1);
+        panel.classList.toggle('collapsed', !!ge.collapsed);
+        panel.innerHTML = `
+            <div class="grid-panel-head">
+                <b>행·열(통심) 선</b>
+                <span class="grid-panel-head-btns">
+                    <button type="button" data-act="collapse" title="접기/펴기">${ge.collapsed ? '▾' : '▴'}</button>
+                    <button type="button" data-act="close" title="행·열 편집 끝내기">✕</button>
+                </span>
+            </div>
+            <div class="grid-panel-body">
+                <div class="grid-panel-tools">
+                    <button type="button" data-tool="col" class="${ge.tool === 'col' ? 'active' : ''}">│ 열 추가</button>
+                    <button type="button" data-tool="row" class="${ge.tool === 'row' ? 'active' : ''}">─ 행 추가</button>
+                    <button type="button" data-tool="select" class="${ge.tool === 'select' ? 'active' : ''}">✥ 선택·이동</button>
+                </div>
+                <div class="grid-panel-hint">${hint}</div>
+                <div class="grid-panel-sec">
+                    <div class="grid-panel-row">
+                        <select data-f="group" ${groups.length ? '' : 'disabled'}>${groupOpts || '<option>그룹 없음 — 선을 그으면 생깁니다</option>'}</select>
+                    </div>
+                    <div class="grid-panel-row">
+                        <button type="button" data-act="addGroup-col" title="날개동 등 번호를 따로 매길 열 묶음">+ 열 그룹</button>
+                        <button type="button" data-act="addGroup-row" title="날개동 등 번호를 따로 매길 행 묶음">+ 행 그룹</button>
+                        ${eg ? '<button type="button" data-act="delGroup" class="danger">그룹 삭제</button>' : ''}
+                    </div>
+                    ${eg ? `
+                    <div class="grid-panel-row">
+                        <label>머리글 <input type="text" data-f="prefix" value="${gridEsc(eg.prefix)}" maxlength="6" style="width:52px"></label>
+                        <label>시작 번호 <input type="number" data-f="start" value="${eg.start}" step="1" style="width:56px"></label>
+                    </div>
+                    <div class="grid-panel-row">
+                        <label><input type="checkbox" data-f="reverse" ${eg.reverse ? 'checked' : ''}> 번호 반대로 (${eg.axis === 'row' ? '아래→위' : '오른→왼'})</label>
+                    </div>
+                    <div class="grid-panel-row">
+                        <label>새 선 각도 <input type="number" data-f="gangle" value="${eg.angle}" step="0.5" style="width:60px">°</label>
+                        <button type="button" data-act="angleAll" title="이 그룹의 모든 선을 이 각도로">모든 선에 적용</button>
+                    </div>
+                    <div class="grid-panel-row">
+                        <label>기본 폭 <input type="number" data-f="gband" value="${Math.round(G.lineBand({}, eg, gctx) * 10) / 10}" min="0" step="1" style="width:64px"> <small>도면 px</small></label>
+                    </div>` : ''}
+                </div>
+                <div class="grid-panel-sec">
+                    ${selF ? `
+                    <div class="grid-panel-row"><b>선택한 선: ${gridEsc(selName)}</b></div>
+                    <div class="grid-panel-row">
+                        <label>이름 <input type="text" data-f="label" value="${gridEsc(selF.line.label || '')}" placeholder="자동 ${gridEsc(selAuto)}" maxlength="10" style="width:70px"></label>
+                        <label>각도 <input type="number" data-f="langle" value="${G.lineAngle(selF.line, selF.group.axis, gctx)}" step="0.5" style="width:60px">°</label>
+                    </div>
+                    <div class="grid-panel-row">
+                        <label>폭 <input type="number" data-f="lband" value="${selF.line.band != null ? selF.line.band : ''}" placeholder="기본 ${Math.round(lineBandDefault)}" min="0" step="1" style="width:64px"></label>
+                    </div>
+                    <div class="grid-panel-row">
+                        <button type="button" data-act="bend" class="${ge.bendArmed ? 'active' : ''}">꺾기 추가</button>
+                        ${canDelVertex ? '<button type="button" data-act="delVertex">꺾인 점 삭제</button>' : ''}
+                        <button type="button" data-act="delLine" class="danger">선 삭제</button>
+                    </div>` : '<div class="grid-panel-row grid-panel-muted">선을 누르면 이름·각도·폭을 바꿀 수 있습니다.</div>'}
+                </div>
+                <div class="grid-panel-sec">
+                    <label class="grid-panel-row"><input type="checkbox" data-f="visible" ${grid.visible ? 'checked' : ''}> 편집 끝나도 도면에 선 표시</label>
+                    <label class="grid-panel-row"><input type="checkbox" data-f="auto" ${grid.autoLocation ? 'checked' : ''}> 마킹 위치에 칸 이름 자동 입력</label>
+                    <div class="grid-panel-row">
+                        <button type="button" data-act="fillExisting" title="이 층 마킹 중 위치가 비었거나 자동으로 넣은 것만 채움">이 층 마킹에 위치 채우기</button>
+                        <button type="button" data-act="clearAll" class="danger">이 층 선 모두 지우기</button>
+                    </div>
+                </div>
+            </div>`;
+    }
+
+    function onGridPanelClick(e) {
+        const btn = e.target.closest('button');
+        if (!btn) return;
+        const ge = gridEditState();
+        const G = gridLib();
+        if (!G) return;
+        const tool = btn.getAttribute('data-tool');
+        if (tool) {
+            ge.tool = tool;
+            ge.bendArmed = false;
+            if (tool === 'col' || tool === 'row') {
+                const grid = getCurrentFloorGrid(false);
+                const g = grid && gridFindGroup(grid, ge.activeGroup[tool]);
+                if (g) ge.editGroupId = g.id;
+            }
+            renderGridPanel();
+            return;
+        }
+        const act = btn.getAttribute('data-act');
+        if (!act) return;
+        if (act === 'close') { setGridEditActive(false); return; }
+        if (act === 'collapse') { ge.collapsed = !ge.collapsed; renderGridPanel(); return; }
+        const grid = getCurrentFloorGrid(true);
+        const gctx = getGridCtx();
+        const eg = gridFindGroup(grid, ge.editGroupId);
+        const selF = ge.sel ? G.findLine(grid, ge.sel.lineId) : null;
+        if (act === 'addGroup-col' || act === 'addGroup-row') {
+            const axis = act === 'addGroup-row' ? 'row' : 'col';
+            const same = grid.groups.filter((g) => g.axis === axis).length;
+            const base = G.DEFAULT_PREFIX[axis];
+            const g = G.createGroup(axis, { prefix: same ? `${String.fromCharCode(65 + same)}${base}` : base, band: G.defaultBand(gctx.w, gctx.h) });
+            grid.groups.push(g);
+            ge.activeGroup[axis] = g.id;
+            ge.editGroupId = g.id;
+            ge.tool = axis;
+            ge.sel = null;
+            gridChanged();
+            window.showToast?.(`${axis === 'row' ? '행' : '열'} 그룹을 만들었습니다. 머리글을 바꾸고 도면을 눌러 선을 그으세요.`, 'info', 2500);
+            return;
+        }
+        if (act === 'delGroup' && eg) {
+            if (eg.lines.length && !confirm(`이 그룹의 선 ${eg.lines.length}개를 모두 지울까요?`)) return;
+            grid.groups = grid.groups.filter((g) => g.id !== eg.id);
+            ge.editGroupId = null;
+            if (ge.sel && ge.sel.groupId === eg.id) ge.sel = null;
+            gridChanged();
+            return;
+        }
+        if (act === 'angleAll' && eg) {
+            eg.lines.forEach((ln) => G.setLineAngle(ln, eg.axis, eg.angle, gctx));
+            gridChanged();
+            return;
+        }
+        if (act === 'bend' && selF) {
+            ge.bendArmed = !ge.bendArmed;
+            renderGridPanel();
+            return;
+        }
+        if (act === 'delVertex' || act === 'delLine') {
+            if (act === 'delLine' && ge.sel) ge.sel.vertexIndex = null;
+            gridDeleteSelected();
+            return;
+        }
+        if (act === 'clearAll') {
+            const n = grid.groups.reduce((s, g) => s + g.lines.length, 0);
+            if (!n || !confirm(`이 층의 행·열 선 ${n}개를 모두 지울까요?`)) return;
+            grid.groups = [];
+            ge.sel = null;
+            ge.editGroupId = null;
+            gridChanged();
+            return;
+        }
+        if (act === 'fillExisting') {
+            fillGridLocationForCurrentFloor();
+        }
+    }
+
+    function onGridPanelChange(e) {
+        const el = e.target;
+        const f = el && el.getAttribute('data-f');
+        if (!f) return;
+        const ge = gridEditState();
+        const G = gridLib();
+        if (!G) return;
+        const grid = getCurrentFloorGrid(true);
+        const gctx = getGridCtx();
+        const eg = gridFindGroup(grid, ge.editGroupId);
+        const selF = ge.sel ? G.findLine(grid, ge.sel.lineId) : null;
+        const numOr = (v, d) => (v === '' || !Number.isFinite(Number(v)) ? d : Number(v));
+        switch (f) {
+            case 'group': {
+                const g = gridFindGroup(grid, el.value);
+                if (g) {
+                    ge.editGroupId = g.id;
+                    ge.activeGroup[g.axis] = g.id;
+                    if (ge.tool !== 'select') ge.tool = g.axis;
+                }
+                renderGridPanel();
+                return;
+            }
+            case 'prefix': if (eg) eg.prefix = String(el.value || '').trim(); break;
+            case 'start': if (eg) eg.start = Math.round(numOr(el.value, eg.start)); break;
+            case 'reverse': if (eg) eg.reverse = !!el.checked; break;
+            case 'gangle': if (eg) eg.angle = Math.max(-89, Math.min(89, numOr(el.value, eg.angle))); break;
+            case 'gband': if (eg) eg.band = Math.max(0, numOr(el.value, eg.band)); break;
+            case 'label':
+                if (selF) {
+                    const v = String(el.value || '').trim();
+                    if (v) selF.line.label = v; else delete selF.line.label;
+                }
+                break;
+            case 'langle': if (selF) G.setLineAngle(selF.line, selF.group.axis, Math.max(-89, Math.min(89, numOr(el.value, 0))), gctx); break;
+            case 'lband':
+                if (selF) {
+                    if (el.value === '' || !Number.isFinite(Number(el.value))) delete selF.line.band;
+                    else selF.line.band = Math.max(0, Number(el.value));
+                }
+                break;
+            case 'visible': grid.visible = !!el.checked; break;
+            case 'auto': grid.autoLocation = !!el.checked; break;
+            default: return;
+        }
+        gridChanged();
+    }
+
+    function syncGridButtons() {
+        const on = !!(window.BSA_gridEdit && window.BSA_gridEdit.active);
+        ['btnGridLines', 'mobileBtnGridLines'].forEach((id) => {
+            const b = document.getElementById(id);
+            if (!b) return;
+            b.classList.toggle('active', on);
+            b.setAttribute('aria-pressed', on ? 'true' : 'false');
+        });
+    }
+
+    function setGridEditActive(on) {
+        const ge = gridEditState();
+        if (on && !gridLib()) {
+            window.showToast?.('행·열 모듈을 불러오지 못했습니다. Ctrl+F5로 새로고침해 주세요.', 'error', 3000);
+            return;
+        }
+        if (on && (!state.bgImage || !state.currentBuildingId)) {
+            window.showToast?.('도면이 있는 층에서 쓸 수 있습니다.', 'info', 2000);
+            return;
+        }
+        gridCancelDrag();
+        ge.active = !!on;
+        ge.bendArmed = false;
+        if (!on) ge.sel = null;
+        syncGridButtons();
+        renderGridPanel();
+        drawCanvas();
+    }
+    window.setGridEditActive = setGridEditActive;
+
+    ['btnGridLines', 'mobileBtnGridLines'].forEach((id) => {
+        const b = document.getElementById(id);
+        if (b) b.addEventListener('click', () => setGridEditActive(!gridEditState().active));
+    });
+
+    // 행·열 편집 중: Delete=선택한 선(꺾인 점) 삭제, Esc=꺾기 취소 → 선택 해제 → 편집 끝 (다른 단축키보다 먼저)
+    window.addEventListener('keydown', (e) => {
+        const ge = window.BSA_gridEdit;
+        if (!ge || !ge.active) return;
+        const t = e.target;
+        const tag = t && t.tagName;
+        if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || (t && t.isContentEditable)) return;
+        if (document.querySelector('.modal-overlay.open')) return;
+        if ((e.key === 'Delete' || e.key === 'Backspace') && ge.sel) {
+            e.preventDefault();
+            e.stopImmediatePropagation();
+            gridDeleteSelected();
+        } else if (e.key === 'Escape') {
+            e.preventDefault();
+            e.stopImmediatePropagation();
+            if (ge.bendArmed) ge.bendArmed = false;
+            else if (ge.sel) ge.sel = null;
+            else { setGridEditActive(false); return; }
+            renderGridPanel();
+            drawCanvas();
+        }
+    }, true);
+
+    // ---- 마킹 위치 자동 입력 ----
+    /** 부재 명칭(예전 이름은 새 이름으로 — 작은보→보(B) 등) */
+    function gridMemberName(v) {
+        try {
+            return String(memberNameOut(v) || '');
+        } catch (e) {
+            return String(v || '');
+        }
+    }
+
+    /**
+     * 행·열 선이 있고 자동 입력이 켜져 있으면 칸 이름, 아니면 null(아무것도 안 건드림).
+     * member: 부재 명칭 — 슬래브·보(B)·철골보(B)·빔이면 폭을 무시하고 늘 X1~X2 (grid-lines.js RANGE_ONLY_MEMBER_RULES)
+     */
+    function computeGridAutoLocationForPoints(pts, member) {
+        const G = gridLib();
+        const grid = getCurrentFloorGrid(false);
+        if (!G || !grid || grid.autoLocation === false || !gridHasLines(grid)) return null;
+        const clean = (pts || []).filter((p) => p && Number.isFinite(p.x) && Number.isFinite(p.y));
+        if (!clean.length) return null;
+        return G.computeGridLocation(grid, clean, getGridCtx(), { member: gridMemberName(member) });
+    }
+
+    function gridNum(v) {
+        return (v === null || v === undefined || v === '') ? NaN : Number(v);
+    }
+
+    /** 영역은 네 모서리, 핀은 화살표 끝(없으면 박스 위치) */
+    function getDefectGridPoints(d) {
+        if (!d) return [];
+        const ax1 = gridNum(d.areaX1);
+        const ay1 = gridNum(d.areaY1);
+        const ax2 = gridNum(d.areaX2);
+        const ay2 = gridNum(d.areaY2);
+        if (d.shapeType === 'area' && [ax1, ay1, ax2, ay2].every(Number.isFinite)) {
+            return [{ x: ax1, y: ay1 }, { x: ax2, y: ay1 }, { x: ax1, y: ay2 }, { x: ax2, y: ay2 }];
+        }
+        const tx = gridNum(d.targetX);
+        const ty = gridNum(d.targetY);
+        if (Number.isFinite(tx) && Number.isFinite(ty)) return [{ x: tx, y: ty }];
+        const x = gridNum(d.x);
+        const y = gridNum(d.y);
+        return Number.isFinite(x) && Number.isFinite(y) ? [{ x, y }] : [];
+    }
+
+    /** 결함 하나의 위치를 칸 이름으로 맞춤 — 직접 쓴 글은 안 덮음. 바뀌면 true */
+    function applyGridAutoLocationToDefect(d, floorCode) {
+        const G = gridLib();
+        if (!G || !d) return false;
+        const next = computeGridAutoLocationForPoints(getDefectGridPoints(d), d.component);
+        if (next == null) return false;
+        const fc = floorCode || state.currentFloor;
+        const detail = extractDefectLocationDetail(d.location || '', fc);
+        const r = G.applyAutoLocation(detail, d.gridLocAuto || '', next);
+        let changed = false;
+        if (r.detail !== detail) {
+            d.location = composeDefectLocation(r.detail, fc);
+            changed = true;
+        }
+        if (r.auto) {
+            if (d.gridLocAuto !== r.auto) { d.gridLocAuto = r.auto; changed = true; }
+        } else if (d.gridLocAuto) {
+            delete d.gridLocAuto;
+            changed = true;
+        }
+        if (changed) {
+            touchDefectUpdatedAt(d);
+            // 같은 결함 수정창이 열려 있으면 위치 칸도 맞춤(입력 중이면 건드리지 않음)
+            const locEl = document.getElementById('defectLocation');
+            const openId = document.getElementById('defectPinId')?.value;
+            if (locEl && openId && openId === d.id && document.activeElement !== locEl
+                && elements.defectModal && elements.defectModal.classList.contains('open')) {
+                locEl.value = extractDefectLocationDetail(d.location || '', fc);
+                locEl.dataset.gridAuto = d.gridLocAuto || '';
+            }
+        }
+        return changed;
+    }
+
+    function applyGridAutoLocationAfterDrag(defects) {
+        let n = 0;
+        (defects || []).forEach((d) => {
+            try {
+                if (applyGridAutoLocationToDefect(d)) n += 1;
+            } catch (e) {
+                console.warn('[grid-lines] auto location', e);
+            }
+        });
+        if (n && typeof renderSurveyTable === 'function' && state.currentTab === 'tab-survey') renderSurveyTable();
+        return n;
+    }
+
+    function fillGridLocationForCurrentFloor() {
+        const grid = getCurrentFloorGrid(false);
+        if (!gridHasLines(grid)) {
+            window.showToast?.('먼저 행·열 선을 그어 주세요.', 'info', 2000);
+            return;
+        }
+        if (grid.autoLocation === false) {
+            window.showToast?.('「마킹 위치에 칸 이름 자동 입력」을 켜 주세요.', 'info', 2500);
+            return;
+        }
+        const list = filterMapPlacedDefects(getCurrentFloorDefects());
+        // 먼저 복사본으로 몇 개가 바뀌는지 셈(원본은 그대로)
+        const probe = list.filter((d) => {
+            const copy = { ...d };
+            return applyGridAutoLocationToDefect(copy) && copy.location !== d.location;
+        }).length;
+        if (!probe) {
+            window.showToast?.('바꿀 마킹이 없습니다. (직접 쓴 위치는 그대로 둡니다)', 'info', 2500);
+            return;
+        }
+        if (!confirm(`이 층 마킹 ${probe}개의 위치를 칸 이름으로 채웁니다.\n위치가 비었거나 전에 자동으로 넣은 것만 바꾸고, 직접 쓴 위치는 그대로 둡니다.\n(되돌리기로 취소할 수 있습니다)`)) return;
+        if (typeof pushDefectHistory === 'function') pushDefectHistory();
+        let n = 0;
+        list.forEach((d) => { if (applyGridAutoLocationToDefect(d)) n += 1; });
+        saveStateToLocalStorage();
+        if (typeof updateMapSelectionBar === 'function') updateMapSelectionBar({ scrollToSelection: false });
+        drawCanvas();
+        window.showToast?.(`마킹 ${n}개의 위치를 채웠습니다.`, 'success', 2500);
+    }
+
+    function gridModalMember() {
+        const inp = document.getElementById('defectComponentInput');
+        const sel = document.getElementById('defectComponent');
+        return (inp && String(inp.value || '').trim()) || (sel && sel.value) || '';
+    }
+
+    /** 결함 창 열 때: 새 마킹이면 칸 이름을 넣고, 자동 여부를 입력칸에 기억 */
+    function applyGridAutoLocationToModal(locEl, existingPin) {
+        window._gridModalPts = null;
+        if (!locEl) return;
+        if (existingPin) {
+            locEl.dataset.gridAuto = existingPin.gridLocAuto || '';
+            window._gridModalPts = getDefectGridPoints(existingPin);
+            return;
+        }
+        locEl.dataset.gridAuto = '';
+        const G = gridLib();
+        if (!G) return;
+        let pts = [];
+        const ar = window._pendingAreaRect;
+        if (ar && [ar.x1, ar.y1, ar.x2, ar.y2].every((v) => Number.isFinite(Number(v)))) {
+            pts = [{ x: ar.x1, y: ar.y1 }, { x: ar.x2, y: ar.y1 }, { x: ar.x1, y: ar.y2 }, { x: ar.x2, y: ar.y2 }];
+        } else if (window._pendingPinCoords) {
+            pts = getDefectGridPoints(window._pendingPinCoords);
+        }
+        window._gridModalPts = pts;
+        const next = computeGridAutoLocationForPoints(pts, gridModalMember());
+        if (next == null) return;
+        const r = G.applyAutoLocation(locEl.value, '', next);
+        locEl.value = r.detail;
+        locEl.dataset.gridAuto = r.auto;
+    }
+
+    /** 수정창에서 부재를 바꿨을 때(슬래브·보(B) 고르기 등) — 위치가 아직 자동 글자면 다시 계산 */
+    function refreshGridAutoLocationInModal() {
+        const G = gridLib();
+        const locEl = document.getElementById('defectLocation');
+        const pts = window._gridModalPts;
+        if (!G || !locEl || !pts || !pts.length) return;
+        if (!elements.defectModal || !elements.defectModal.classList.contains('open')) return;
+        if (document.activeElement === locEl) return;
+        const prev = locEl.dataset.gridAuto || '';
+        if (!prev && String(locEl.value || '').trim()) return;
+        const next = computeGridAutoLocationForPoints(pts, gridModalMember());
+        if (next == null) return;
+        const r = G.applyAutoLocation(locEl.value, prev, next);
+        locEl.value = r.detail;
+        locEl.dataset.gridAuto = r.auto;
+    }
+    [['defectComponent', 'change'], ['defectComponentInput', 'change'], ['defectComponentInput', 'input']].forEach(([id, ev]) => {
+        const el = document.getElementById(id);
+        if (el) el.addEventListener(ev, () => setTimeout(refreshGridAutoLocationInModal, 0));
+    });
+
+    /** 결함 저장 때: 입력칸 글이 아직 자동 글자로 시작하면 자동 표시 유지, 아니면 지움 */
+    function syncGridAutoFlagOnCommit(defect) {
+        if (!defect) return;
+        const locEl = document.getElementById('defectLocation');
+        const auto = String((locEl && locEl.dataset.gridAuto) || '').trim();
+        const detail = extractDefectLocationDetail(defect.location || '', state.currentFloor);
+        if (auto && (detail === auto || detail.startsWith(auto + ' '))) {
+            defect.gridLocAuto = auto;
+            // 부재가 바뀌었을 수 있으니(슬래브·보(B) ↔ 거더) 지금 부재·위치로 다시 맞춤
+            try { applyGridAutoLocationToDefect(defect); } catch (e) { console.warn('[grid-lines] commit', e); }
+        } else if (defect.gridLocAuto) delete defect.gridLocAuto;
+    }
+    // @@GRID_LINES_END
 
     // 도면 탭 단축키: D=핀 마킹, A=영역 마킹, Esc=수정창 닫기+선택모드
     // 비파괴 탭: D=NDT 마킹, Esc=등록창 닫기+이동모드
@@ -51853,6 +52806,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             window.state.floorDrawingRotations = data.floorDrawingRotations;
             isChanged = true;
         }
+        if (data.floorGridLines) {
+            window.state.floorGridLines = data.floorGridLines;
+            isChanged = true;
+        }
         if (data.styleShapes) {
             window.state.styleShapes = data.styleShapes;
             isChanged = true;
@@ -52403,6 +53360,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 styleSizeBarLockedNdt: window.state.styleSizeBarLockedNdt !== false,
                 floorMapStyleSettings: window.state.floorMapStyleSettings || null,
                 floorDrawingRotations: window.state.floorDrawingRotations || null,
+                floorGridLines: window.state.floorGridLines || null,
                 styleShapes: window.state.styleShapes || null,
                 locationMapLegend: window.state.locationMapLegend || null,
                 locationMapLegendBox: window.state.locationMapLegendBox || null,

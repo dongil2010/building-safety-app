@@ -1,0 +1,202 @@
+#!/usr/bin/env node
+'use strict';
+
+/**
+ * 2026-09-28 (실험 exp/grid-lines) 도면 행·열(통심) 선 — 순수 계산 회귀 테스트
+ *  - 이름(머리글·시작 번호 0·번호 반대·개별 이름), 세로/가로/비스듬/꺾은선 위치 찾기
+ *  - 폭(띠) 안이면 한 이름, 사이면 X1~X2, 바깥이면 「X1 외측」
+ *  - 같은 축 그룹 여러 개(날개동), 회전된 도면 번호 순서, 영역 마킹 범위
+ *  - 위치 글자 자동 입력 규칙(직접 쓴 글은 안 덮음)
+ */
+
+const assert = require('assert');
+const fs = require('fs');
+const path = require('path');
+
+const G = require(path.join(__dirname, '..', 'js', 'shared', 'grid-lines.js'));
+const read = (rel) => fs.readFileSync(path.join(__dirname, '..', rel), 'utf8').replace(/\r\n/g, '\n');
+
+const W = 4000;
+const H = 3000;
+const ctx0 = { rot: 0, w: W, h: H };
+
+function vline(x, extra) {
+    return Object.assign({ id: `v${x}`, pts: [{ x, y: 0 }, { x, y: H }] }, extra || {});
+}
+function hline(y, extra) {
+    return Object.assign({ id: `h${y}`, pts: [{ x: 0, y }, { x: W, y }] }, extra || {});
+}
+function grid(groups) {
+    return G.normalizeGrid({ groups });
+}
+const loc = (g, pts, ctx) => G.computeGridLocation(g, pts, ctx || ctx0);
+
+// ---- 기본: 세로 열 3개 + 가로 행 2개, 폭 20 ----
+const base = grid([
+    G.createGroup('col', { band: 20, lines: [vline(3000), vline(1000), vline(2000)] }),
+    G.createGroup('row', { band: 20, lines: [hline(500), hline(1500)] })
+]);
+assert.strictEqual(loc(base, [{ x: 1500, y: 1000 }]), 'X1~X2, Y1~Y2', '칸 안');
+assert.strictEqual(loc(base, [{ x: 2005, y: 1495 }]), 'X2, Y2', '폭 안이면 선 이름 하나');
+assert.strictEqual(loc(base, [{ x: 2011, y: 1000 }]), 'X2~X3, Y1~Y2', '폭(20) 밖 11px이면 사이');
+assert.strictEqual(loc(base, [{ x: 500, y: 200 }]), 'X1 외측, Y1 외측', '맨 앞 선 밖');
+assert.strictEqual(loc(base, [{ x: 3500, y: 2500 }]), 'X3 외측, Y2 외측', '맨 뒤 선 밖');
+
+// ---- 이름: 시작 번호 0, 머리글, 번호 반대, 개별 이름 ----
+const named = grid([
+    G.createGroup('col', { prefix: 'x', start: 0, lines: [vline(1000), vline(2000), vline(3000, { label: 'X3a' })] }),
+    G.createGroup('row', { prefix: 'Y', start: 1, reverse: true, lines: [hline(500), hline(1500), hline(2500)] })
+]);
+assert.strictEqual(loc(named, [{ x: 1500, y: 600 }]), 'x0~x1, Y2~Y3', '시작 0 · 반대 번호는 작은 번호 먼저');
+assert.strictEqual(loc(named, [{ x: 2500, y: 2400 }]), 'x1~X3a, Y1~Y2', '개별 이름');
+const od = G.orderedLines(named.groups[1], ctx0);
+assert.deepStrictEqual(od.items.map((it) => it.name), ['Y3', 'Y2', 'Y1'], '반대 번호: 위에서부터 Y3');
+
+// ---- 폭: 선마다 다른 폭 ----
+const bands = grid([G.createGroup('col', { band: 10, lines: [vline(1000), vline(2000, { band: 200 })] })]);
+assert.strictEqual(loc(bands, [{ x: 1090, y: 10 }]), 'X1~X2', '기본 폭 10 → 사이');
+assert.strictEqual(loc(bands, [{ x: 1910, y: 10 }]), 'X2', '개별 폭 200 → 선 위');
+assert.strictEqual(loc(bands, [{ x: 1004, y: 10 }]), 'X1');
+
+// ---- 행/열 한 축만 있으면 그 축만 ----
+assert.strictEqual(loc(grid([G.createGroup('row', { lines: [hline(500), hline(1500)] })]), [{ x: 9, y: 900 }]), 'Y1~Y2');
+assert.strictEqual(loc(grid([]), [{ x: 9, y: 900 }]), '');
+
+// ---- 비스듬한 선(30°) ----
+const angled = G.createGroup('col', { angle: 30, band: 20 });
+[1000, 2000, 3000].forEach((x) => angled.lines.push(G.makeLineThrough({ x, y: 1500 }, 'col', 30, ctx0)));
+const gA = grid([angled]);
+assert.ok(Math.abs(G.lineAngle(gA.groups[0].lines[0], 'col', ctx0) - 30) < 0.5, '만든 선 각도 30°');
+// 선 위를 따라가면 같은 이름
+const dir = G.dirFromAngle('col', 30);
+assert.strictEqual(loc(gA, [{ x: 2000 + dir.x * 800, y: 1500 + dir.y * 800 }]), 'X2', '비스듬한 선 위');
+assert.strictEqual(loc(gA, [{ x: 1500 + dir.x * -600, y: 1500 + dir.y * -600 }]), 'X1~X2', '비스듬한 선 사이');
+// 세로선이라면 X2 오른쪽이지만, 30° 기울어 X1~X2 사이인 점
+assert.strictEqual(loc(gA, [{ x: 2100, y: 500 }]), 'X1~X2', '기울기 반영');
+// setLineAngle 되돌리기
+const ln0 = gA.groups[0].lines[0];
+G.setLineAngle(ln0, 'col', 0, ctx0);
+assert.ok(Math.abs(G.lineAngle(ln0, 'col', ctx0)) < 0.5, '각도 0으로');
+assert.ok(Math.abs(ln0.pts[0].x - ln0.pts[1].x) < 1e-6, '세로가 됨');
+
+// ---- 꺾은선: 위 절반은 x=1000, 아래는 x=1500 쪽으로 꺾임 ----
+const bent = grid([G.createGroup('col', { band: 20, lines: [
+    { id: 'b1', pts: [{ x: 1000, y: 0 }, { x: 1000, y: 1500 }, { x: 1500, y: 3000 }] },
+    vline(2500)
+] })]);
+assert.strictEqual(loc(bent, [{ x: 1003, y: 700 }]), 'X1', '꺾은선 위 구간');
+assert.strictEqual(loc(bent, [{ x: 1250, y: 2250 }]), 'X1', '꺾은선 아래 구간(비스듬) 위');
+assert.strictEqual(loc(bent, [{ x: 1200, y: 700 }]), 'X1~X2', '위 구간 오른쪽');
+assert.strictEqual(loc(bent, [{ x: 1200, y: 2800 }]), 'X1 외측', '아래 구간에서는 꺾은선 왼쪽');
+// 꺾인 점 추가/삭제
+const ln = { id: 't', pts: [{ x: 0, y: 0 }, { x: 0, y: 1000 }] };
+assert.strictEqual(G.insertVertex(ln, { x: 5, y: 400 }), 1);
+assert.deepStrictEqual(ln.pts[1], { x: 0, y: 400 });
+assert.strictEqual(G.removeVertex(ln, 0), false, '끝점은 지우지 않음');
+assert.strictEqual(G.removeVertex(ln, 1), true);
+assert.strictEqual(ln.pts.length, 2);
+
+// ---- 영역 마킹 ----
+const area = (x1, y1, x2, y2) => [{ x: x1, y: y1 }, { x: x2, y: y1 }, { x: x1, y: y2 }, { x: x2, y: y2 }];
+assert.strictEqual(loc(base, area(1200, 600, 2600, 1400)), 'X1~X3, Y1~Y2', '여러 칸 걸친 영역');
+assert.strictEqual(loc(base, area(1995, 600, 2008, 1400)), 'X2, Y1~Y2', '폭 안에 다 들어간 영역');
+assert.strictEqual(loc(base, area(100, 100, 300, 300)), 'X1 외측, Y1 외측');
+assert.strictEqual(loc(base, area(100, 600, 1500, 1400)), 'X1~X2, Y1~Y2', '바깥에서 걸친 영역은 가장자리 선부터');
+
+// ---- 같은 축 그룹 여러 개(날개동): 감싸는 그룹 우선 ----
+const wingA = G.createGroup('col', { prefix: 'A', band: 20, lines: [
+    { id: 'a1', pts: [{ x: 500, y: 0 }, { x: 500, y: 1400 }] },
+    { id: 'a2', pts: [{ x: 1500, y: 0 }, { x: 1500, y: 1400 }] }
+] });
+const wingB = G.createGroup('col', { prefix: 'B', band: 20, lines: [
+    { id: 'b1', pts: [{ x: 2500, y: 1600 }, { x: 2500, y: 3000 }] },
+    { id: 'b2', pts: [{ x: 3500, y: 1600 }, { x: 3500, y: 3000 }] }
+] });
+const wings = grid([wingA, wingB]);
+assert.strictEqual(loc(wings, [{ x: 1000, y: 700 }]), 'A1~A2');
+assert.strictEqual(loc(wings, [{ x: 3000, y: 2500 }]), 'B1~B2');
+assert.strictEqual(loc(wings, [{ x: 1000, y: 2500 }]), 'A1~A2', '양쪽으로 감싸는 그룹 우선');
+assert.strictEqual(loc(wings, [{ x: 3800, y: 2500 }]), 'B2 외측', '감싸는 그룹 없으면 선 범위 안·가까운 그룹');
+
+// ---- 회전된 도면: 번호는 화면 기준 왼→오른 / 위→아래 ----
+// 이미지의 가로선(y=500,1500)은 90° 회전 화면에서 세로선이 된다 → 열로 쓰면 화면 왼쪽부터 X1
+const rot90 = { rot: 90, w: W, h: H };
+const rg = grid([G.createGroup('col', { band: 20, lines: [hline(500), hline(1500)] })]);
+const disp = G.toDisplay({ x: 0, y: 1500 }, 90, W, H);
+assert.strictEqual(disp.x, 1500, '90° 표시 좌표');
+assert.deepStrictEqual(G.toImage(disp, 90, W, H), { x: 0, y: 1500 }, '역변환');
+const odr = G.orderedLines(rg.groups[0], rot90);
+assert.deepStrictEqual(odr.items.map((it) => it.line.id), ['h1500', 'h500'], '90° 화면 왼쪽 = 이미지 아래쪽 선이 X1');
+assert.strictEqual(loc(rg, [{ x: 100, y: 1000 }], rot90), 'X1~X2');
+assert.strictEqual(loc(rg, [{ x: 100, y: 2000 }], rot90), 'X1 외측', '이미지 아래 = 90° 화면 왼쪽 바깥');
+[180, 270].forEach((r) => {
+    const c = { rot: r, w: W, h: H };
+    [{ x: 10, y: 20 }, { x: 3999, y: 5 }].forEach((p) => assert.deepStrictEqual(G.toImage(G.toDisplay(p, r, W, H), r, W, H), p));
+});
+// 회전 화면에서 새 열 선 만들기 → 화면에서 세로(=이미지에서 가로)
+const made = G.makeLineThrough({ x: 2000, y: 1200 }, 'col', 0, rot90);
+assert.ok(Math.abs(made.pts[0].y - made.pts[1].y) < 1e-6, '90° 화면 열 선 = 이미지 가로선');
+assert.ok(Math.abs(Math.abs(made.pts[0].x - made.pts[1].x) - W) < 1e-6, '도면 경계까지');
+
+// ---- 잡기(hitTest) ----
+const hit = G.hitTest(base, { x: 2004, y: 1000 }, 8);
+assert.ok(hit && hit.lineId === 'v2000' && hit.vertexIndex == null, '선 잡기');
+const hitV = G.hitTest(base, { x: 2003, y: 2996 }, 8);
+assert.ok(hitV && hitV.vertexIndex === 1, '끝점 잡기 우선');
+assert.strictEqual(G.hitTest(base, { x: 2500, y: 1000 }, 8), null);
+
+// ---- 저장 형식 정리 ----
+const n = G.normalizeGrid({ groups: [{ axis: 'row', lines: [{ pts: [{ x: 1, y: 1 }] }, { id: 'ok', pts: [{ x: 0, y: 0 }, { x: 5, y: 0 }], label: '  ', band: '' }] }] });
+assert.strictEqual(n.groups[0].prefix, 'Y');
+assert.strictEqual(n.groups[0].lines.length, 1, '꼭짓점 1개짜리 선은 버림');
+assert.ok(!('label' in n.groups[0].lines[0]) && !('band' in n.groups[0].lines[0]));
+assert.strictEqual(n.visible, true);
+assert.strictEqual(n.autoLocation, true);
+
+// ---- 부재별: 슬래브·보(B)·철골보(B)·빔은 폭 무시하고 늘 범위 ----
+const M = G.isRangeOnlyMember;
+['슬래브', '데크슬래브', '계단슬래브', '슬라브', '보(B)', '보 (B)', '철골보(B)', 'RC보(B)', '빔', '철골빔', '작은보', 'slab'].forEach((m) => assert.strictEqual(M(m), true, `범위 전용: ${m}`));
+['보(G)', '철골보(G)', '거더', '철골거더', '큰보', '보', '철골보', '캔틸레버보', '기둥', '벽체', '보-슬래브 접합부', '기둥-슬래브 접합부', '벽체-보 접합부', '철골 접합부', '', null].forEach((m) => assert.strictEqual(M(m), false, `보통 규칙: ${m}`));
+const locM = (pts, member, g) => G.computeGridLocation(g || base, pts, ctx0, { member });
+assert.strictEqual(locM([{ x: 2005, y: 1495 }], '보(G)'), 'X2, Y2', '거더는 폭 안이면 선 이름');
+assert.strictEqual(locM([{ x: 2005, y: 1495 }], '보'), 'X2, Y2', 'G/B 안 정한 보는 보통 규칙');
+assert.strictEqual(locM([{ x: 2005, y: 1495 }], '보-슬래브 접합부'), 'X2, Y2', '접합부는 보통 규칙');
+assert.strictEqual(locM([{ x: 2005, y: 1495 }], '슬래브'), 'X2~X3, Y1~Y2', '슬래브: 폭 안이어도 점이 있는 쪽 칸');
+assert.strictEqual(locM([{ x: 1995, y: 1505 }], '보(B)'), 'X1~X2, Y2 외측', '보(B): 선 왼쪽·아래쪽');
+assert.strictEqual(locM([{ x: 2000, y: 1500 }], '철골보(B)'), 'X1~X2, Y1~Y2', '선 위에 딱 걸치면 번호 작은 쪽');
+assert.strictEqual(locM([{ x: 1000, y: 500 }], '빔'), 'X1~X2, Y1~Y2', '첫 선 위면 안쪽 칸');
+assert.strictEqual(locM([{ x: 1500, y: 1000 }], '슬래브'), 'X1~X2, Y1~Y2', '칸 안은 같음');
+assert.strictEqual(locM([{ x: 500, y: 1000 }], '슬래브'), 'X1 외측, Y1~Y2', '바깥은 그대로');
+// 번호 반대 그룹: 선 위 → 번호 작은 쪽(Y1 쪽)
+assert.strictEqual(locM([{ x: 1500, y: 1500 }], '슬래브', named), 'x0~x1, Y1~Y2', '반대 번호에서도 작은 번호 쪽');
+assert.strictEqual(G.computeGridLocation(base, [{ x: 2005, y: 1000 }], ctx0, { forceRange: true }), 'X2~X3, Y1~Y2', 'forceRange 직접');
+// 영역: 슬래브가 X2 폭 안에만 있어도 선을 걸치면 X1~X3
+assert.strictEqual(locM(area(1995, 600, 2008, 1400), '슬래브'), 'X1~X3, Y1~Y2', '선을 걸친 슬래브 영역');
+assert.strictEqual(locM(area(2002, 600, 2008, 1400), '데크슬래브'), 'X2~X3, Y1~Y2', '선 한쪽 폭 안 영역은 그쪽 칸');
+
+// ---- 위치 자동 입력 규칙 ----
+const A = G.applyAutoLocation;
+assert.deepStrictEqual(A('', '', 'X1~X2, Y1~Y2'), { detail: 'X1~X2, Y1~Y2', auto: 'X1~X2, Y1~Y2' }, '빈칸이면 채움');
+assert.deepStrictEqual(A('X1~X2, Y1~Y2', 'X1~X2, Y1~Y2', 'X2, Y2'), { detail: 'X2, Y2', auto: 'X2, Y2' }, '자동 글자면 바꿈');
+assert.deepStrictEqual(A('X1~X2, Y1~Y2 거실', 'X1~X2, Y1~Y2', 'X2, Y2'), { detail: 'X2, Y2 거실', auto: 'X2, Y2' }, '뒤에 덧붙인 글은 살림');
+assert.deepStrictEqual(A('거실 천장', 'X1~X2, Y1~Y2', 'X2, Y2'), { detail: '거실 천장', auto: '' }, '직접 쓴 글은 안 덮음');
+assert.deepStrictEqual(A('거실 천장', '', 'X2, Y2'), { detail: '거실 천장', auto: '' });
+assert.deepStrictEqual(A('X2, Y2', 'X2, Y2', ''), { detail: '', auto: '' }, '선이 없어지면 자동 글자만 지움');
+assert.deepStrictEqual(A('X2, Y2 거실', 'X2, Y2', ''), { detail: '거실', auto: '' });
+assert.deepStrictEqual(A('', '', ''), { detail: '', auto: '' });
+
+// ---- app.js / index.html 연결(파일이 있을 때만) ----
+const appPath = path.join(__dirname, '..', 'app.js');
+if (fs.existsSync(appPath)) {
+    const app = read('app.js');
+    const idx = read('index.html');
+    assert.ok(idx.includes('js/shared/grid-lines.js'), 'index.html에서 모듈 로드');
+    assert.ok(idx.indexOf('js/shared/grid-lines.js') < idx.indexOf('src="app.js'), 'app.js보다 먼저 로드');
+    assert.ok(idx.includes('id="btnGridLines"') && idx.includes('id="mobileBtnGridLines"'), 'PC·모바일 버튼');
+    assert.ok(app.includes('floorGridLines: window.state.floorGridLines || null'), '로컬/클라우드 저장');
+    assert.ok(app.includes('if (data.floorGridLines)'), '클라우드 불러오기');
+    assert.ok(app.includes('drawFloorGridOverlay(ctx, imgW, imgH);'), '화면 그리기');
+    assert.ok(/gridLocAuto/.test(app), '자동 입력 표시');
+}
+
+console.log('test-grid-lines: OK');
