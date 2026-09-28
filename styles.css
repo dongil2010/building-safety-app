@@ -15835,11 +15835,46 @@ html:not(.layout-desktop) .crack-monitor-photo-slots {
     background: #c026d3;
     color: #ffffff;
 }
+/* 모바일(터치): 도면을 덜 가리게 보이는 버튼은 작게(24px), 누르는 칸은 ::after로 넓힘(약 28×34px).
+   2026-09-28 「모바일에서 거더 빔 고르는 버튼 너무 커」 — 예전 32×32px·0.86rem */
 @media (pointer: coarse) {
+    .map-member-gb-pick {
+        gap: 5px;
+    }
     .map-member-gb-btn {
-        min-width: 32px;
-        height: 32px;
-        font-size: 0.86rem;
+        position: relative;
+        min-width: 24px;
+        height: 24px;
+        padding: 0 4px;
+        border-width: 1px;
+        border-radius: 6px;
+        font-size: 0.72rem;
+        box-shadow: 0 1px 2px rgba(15, 23, 42, 0.22);
+    }
+    .map-member-gb-btn::after {
+        content: '';
+        position: absolute;
+        inset: -5px -2px;
+    }
+    .bsa-member-gb-hint {
+        gap: 0.25rem;
+        margin: 0.2rem 0 0.15rem;
+        padding: 0.2rem 0.35rem;
+    }
+    .bsa-member-gb-hint-text {
+        font-size: 0.68rem;
+    }
+    .bsa-member-gb-chip {
+        position: relative;
+        min-height: 24px;
+        padding: 0.1rem 0.5rem;
+        border-width: 1px;
+        font-size: 0.72rem;
+    }
+    .bsa-member-gb-chip::after {
+        content: '';
+        position: absolute;
+        inset: -5px -2px;
     }
 }
 @media print {

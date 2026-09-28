@@ -23335,7 +23335,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const vw = ov.clientWidth || 0;
         const vh = ov.clientHeight || 0;
         const coarse = !!(window.matchMedia && window.matchMedia('(pointer: coarse)').matches);
-        const btnH = coarse ? 32 : 28;
+        const btnH = coarse ? 24 : 28; // styles.css .map-member-gb-btn 높이와 같게(모바일 24px)
         const existing = new Map();
         Array.from(ov.children).forEach((el) => existing.set(el.dataset.key, el));
         const keep = new Set();
