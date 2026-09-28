@@ -242,6 +242,16 @@ if (fs.existsSync(appPath)) {
     assert.ok(app.includes('if (data.floorGridLines)'), '클라우드 불러오기');
     assert.ok(app.includes('drawFloorGridOverlay(ctx, imgW, imgH);'), '화면 그리기');
     assert.ok(/gridLocAuto/.test(app), '자동 입력 표시');
+    // 설정(편집) 중에만 보임 — 저장된 visible 값과 무관, 설정 밖에서는 도면 누르기를 가로채지 않음
+    const drawFn = app.slice(app.indexOf('function drawFloorGridOverlay('), app.indexOf('// ---- 편집: 누르기 · 끌기 ----'));
+    assert.ok(drawFn.includes('if (!editing || !grid || !gridHasLines(grid)) return;'), '설정 밖이면 안 그림');
+    assert.ok(!drawFn.includes('grid.visible'), '저장된 표시 설정은 무시');
+    assert.ok(!app.includes('data-f="visible"'), '「편집 끝나도 표시」 체크 없음');
+    assert.ok(app.includes('if (window.BSA_gridEdit && window.BSA_gridEdit.active && e.button === 0) {'), '마우스: 설정 중에만');
+    assert.ok(app.includes('if (window.BSA_gridEdit && window.BSA_gridEdit.active && e.touches.length === 1 && !isPinching) {'), '터치: 설정 중에만');
+    assert.ok(app.includes("if (window.BSA_gridEdit && window.BSA_gridEdit.active) {\n                window.BSA_gridEdit.onDblClick"), '더블클릭: 설정 중에만');
+    const autoFn = app.slice(app.indexOf('function computeGridAutoLocationForPoints('), app.indexOf('function gridNum('));
+    assert.ok(!autoFn.includes('visible') && !autoFn.includes('.active'), '숨겨져 있어도 위치 자동 입력');
 }
 
 console.log('test-grid-lines: OK');

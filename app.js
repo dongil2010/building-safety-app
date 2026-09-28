@@ -33224,7 +33224,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             setTimeout(renderGridPanel, 0);
         }
         const grid = getCurrentFloorGrid(false);
-        if (!grid || !gridHasLines(grid) || (!grid.visible && !editing)) return;
+        // 2026-09-28: 행·열 설정 중에만 보임 — 설정이 끝나면 선·이름·폭 모두 숨김(저장된 visible 값은 무시).
+        // 위치 자동 입력은 숨겨져 있어도 계속 동작한다.
+        if (!editing || !grid || !gridHasLines(grid)) return;
         const gctx = { rot: state.rotationAngle || 0, w: imgW, h: imgH };
         const s = state.view.scale || 1;
         const rotRad = (gctx.rot * Math.PI) / 180;
@@ -33649,7 +33651,6 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     </div>` : '<div class="grid-panel-row grid-panel-muted">선을 누르면 이름·각도·폭을 바꿀 수 있습니다.</div>'}
                 </div>
                 <div class="grid-panel-sec">
-                    <label class="grid-panel-row"><input type="checkbox" data-f="visible" ${grid.visible ? 'checked' : ''}> 편집 끝나도 도면에 선 표시</label>
                     <label class="grid-panel-row"><input type="checkbox" data-f="auto" ${grid.autoLocation ? 'checked' : ''}> 마킹 위치에 칸 이름 자동 입력</label>
                     <div class="grid-panel-row">
                         <button type="button" data-act="fillExisting" title="이 층 마킹 중 위치가 비었거나 자동으로 넣은 것만 채움">이 층 마킹에 위치 채우기</button>
@@ -33784,7 +33785,6 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     else selF.line.band = Math.max(0, Number(el.value));
                 }
                 break;
-            case 'visible': grid.visible = !!el.checked; break;
             case 'auto': grid.autoLocation = !!el.checked; break;
             default: return;
         }
