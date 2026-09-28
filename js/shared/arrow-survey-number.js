@@ -75,6 +75,28 @@
         return `${mainNo}-${n}`;
     }
 
+    /**
+     * 공유 NO.박스를 누를 때 다음으로 고를 마킹(화살표). members는 대표 순 정렬된 마킹 목록.
+     * 처음 누르면 대표(X-1), 다시 누르면 X-2, X-3 … 순환. 결함표 행(번호 부여·결함 통합)이 있어도 같다
+     * (2026-09-28: 예전엔 결함표 행이 있으면 늘 대표로 돌아가 통합 마킹의 -2로 못 넘어갔다).
+     * cycle: { groupId, lastId } (앞 클릭), selectedIds: 지금 선택 id Set
+     */
+    function nextGroupMemberOnBoxClick(members, groupId, cycle, selectedIds) {
+        const list = (members || []).filter((m) => m && !m.surveyExtra);
+        if (!list.length) return null;
+        if (list.length === 1) return list[0];
+        const st = cycle || {};
+        let idx = 0;
+        if (st.groupId === groupId && st.lastId) {
+            const cur = list.findIndex((m) => m.id === st.lastId);
+            idx = cur >= 0 ? (cur + 1) % list.length : 0;
+        } else if (selectedIds && typeof selectedIds.has === 'function') {
+            const sel = list.findIndex((m) => selectedIds.has(m.id));
+            idx = sel >= 0 ? (sel + 1) % list.length : 0;
+        }
+        return list[idx] || list[0];
+    }
+
     /** 그룹 없는 미번호 화살표는 조사표/좌측 목록에 단독 행으로 넣지 않는다. */
     function shouldSkipOrphanUnnumberedInSurveyList(d) {
         return isUnnumberedArrowMarking(d) && !d.groupId;
@@ -92,6 +114,7 @@
         preferNumberedMarkingRepresentative,
         canAssignSurveyNumber,
         floatSlotLabel,
+        nextGroupMemberOnBoxClick,
         shouldSkipOrphanUnnumberedInSurveyList
     };
 

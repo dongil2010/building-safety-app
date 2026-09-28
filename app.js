@@ -20968,14 +20968,23 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         return main;
     }
 
-    /** 공유 NO.박스 클릭: 결함표 있으면 41-1(대표 마킹), 화살표만 여러 개면 1→2→… 순환 */
+    /**
+     * 공유 NO.박스 클릭: 처음은 대표(41-1), 다시 누르면 41-2, 41-3 … 순환(화살표만 여러 개여도 1→2→…).
+     * 결함표 행(번호 부여·결함 통합)이 있어도 순환한다 — 예전엔 늘 대표로 돌아가 통합 마킹의 -2로 못 넘어갔다.
+     */
     function cycleMarkingGroupMemberOnBoxClick(defect) {
         if (!defect || !defect.groupId) return defect;
-        const key = `${state.currentBuildingId}_${state.currentFloor}`;
-        const extras = (state.defects[key] || []).filter((d) => d && d.groupId === defect.groupId && d.surveyExtra);
         const members = getDefectMarkingGroupMembers(defect.groupId);
-        if (extras.length > 0) {
-            return pickDefectGroupRepresentative(members) || members[0] || defect;
+        const asnApi = arrowSurveyNumberApi();
+        if (asnApi && typeof asnApi.nextGroupMemberOnBoxClick === 'function') {
+            const picked = asnApi.nextGroupMemberOnBoxClick(
+                members,
+                defect.groupId,
+                window._groupBoxCycle,
+                typeof selectedDefectIds !== 'undefined' ? selectedDefectIds : null
+            ) || defect;
+            window._groupBoxCycle = { groupId: defect.groupId, lastId: picked.id };
+            return picked;
         }
         if (members.length <= 1) return defect;
         const st = window._groupBoxCycle || { groupId: null, lastId: null };
@@ -21767,6 +21776,16 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         return compactWithSuffix(d.no || d.groupNo);
     }
 
+    /**
+     * 목록 행 → 수정창에 넘길 실제 결함. 결함 통합 X-k 행은 보고서용 사본(surveyExtra·번호 X-k)이라
+     * 그대로 넘기면 원래 마킹이 아닌 사본을 연다 → 같은 id의 실제 마킹(통합 화살표)을 연다.
+     */
+    function liveDefectForListRow(d) {
+        if (!d || !d._mergeExtraId) return d;
+        const live = (getCurrentFloorDefects() || []).find((x) => x && x.id === d.id);
+        return live || d;
+    }
+
     // 결함 1건의 목록 카드(DOM row) 생성 — renderDefectListSection에서 재사용
     function buildDefectRow(d, options = {}) {
         const isUnregistered = options.unregistered || isDefectMapUnregistered(d);
@@ -21888,17 +21907,20 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 }
             }
             window.focusDefectOnCanvas(d.id, { uncovered: true });
+            if (d.groupId) window._groupBoxCycle = { groupId: d.groupId, lastId: d.id };
             const modalOpen = document.body.classList.contains('defect-modal-open')
                 || (typeof isDefectModalOpen === 'function' && isDefectModalOpen());
             const mobileField = layoutIsCompactWidth();
             if ((modalOpen || mobileField) && typeof openAddDefectModal === 'function') {
-                openAddDefectModal(d.x, d.y, d.targetX, d.targetY, d, null, { revealMarkingAboveDrawer: true });
+                const live = liveDefectForListRow(d);
+                openAddDefectModal(live.x, live.y, live.targetX, live.targetY, live, null, { revealMarkingAboveDrawer: true });
             }
         });
         editBtn.addEventListener('click', (e) => {
             e.stopPropagation();
             if (d.id) window.focusDefectOnCanvas(d.id, { uncovered: true });
-            openAddDefectModal(d.x, d.y, d.targetX, d.targetY, d, null, { revealMarkingAboveDrawer: true });
+            const live = liveDefectForListRow(d);
+            openAddDefectModal(live.x, live.y, live.targetX, live.targetY, live, null, { revealMarkingAboveDrawer: true });
         });
         deleteBtn.addEventListener('click', (e) => {
             e.stopPropagation();
@@ -29317,13 +29339,14 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         // 터치: 즉시 선택만 하고, 약 0.3초 길게 누른 뒤에야 드래그 시작.
         const hitInfoRaw = findHitPinPart(imgX, imgY);
         let hitInfo = hitInfoRaw;
-        // 공유 NO.박스 클릭: 결함표 있으면 41-1(대표), 화살표만 여러 개면 1→2→… 순환
-        if (hitInfo && (hitInfo.part === 'BOX' || hitInfo.part === 'AREA_MOVE') && hitInfo.defect && hitInfo.defect.groupId) {
+        // 공유 NO.박스 클릭: 처음 41-1(대표), 다시 누르면 41-2 … 순환.
+        // 영역 안쪽(AREA_MOVE)은 그 영역의 마킹 자체를 고른다(통합 마킹은 영역이 원래 자리에 따로 있다)
+        if (hitInfo && hitInfo.part === 'BOX' && hitInfo.defect && hitInfo.defect.groupId) {
             const cycled = cycleMarkingGroupMemberOnBoxClick(hitInfo.defect);
             if (cycled) {
                 hitInfo = { ...hitInfo, defect: cycled };
             }
-        } else if (hitInfo && hitInfo.part === 'TIP' && hitInfo.defect && hitInfo.defect.groupId) {
+        } else if (hitInfo && (hitInfo.part === 'TIP' || hitInfo.part === 'AREA_MOVE') && hitInfo.defect && hitInfo.defect.groupId) {
             window._groupBoxCycle = { groupId: hitInfo.defect.groupId, lastId: hitInfo.defect.id };
         }
         if (hitInfo && state.areaInkTool && hitInfo.defect && hitInfo.defect.shapeType === 'area'
