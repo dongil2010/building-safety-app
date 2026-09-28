@@ -33914,14 +33914,14 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         return Number.isFinite(x) && Number.isFinite(y) ? [{ x, y }] : [];
     }
 
-    /** 묶음 마킹(한 행으로 합침): 멤버 행·열 위치를 모아 ' / '로 */
+    /** 묶음 마킹(한 행으로 합침): 멤버 행·열 위치를 모아 ', '로(한 쌍 안의 열/행은 '/') */
     function mergeGroupGridLocProp(members) {
         const uniq = [];
         (members || []).forEach((m) => {
             const g = String((m && m.gridLoc) || '').trim();
             if (g && uniq.indexOf(g) === -1) uniq.push(g);
         });
-        return uniq.length ? { gridLoc: uniq.join(' / ') } : {};
+        return uniq.length ? { gridLoc: uniq.join(', ') } : {};
     }
 
     /** 결함의 행·열 칸 이름(없으면 '') — 화면 표시용 */

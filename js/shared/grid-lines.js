@@ -2,7 +2,7 @@
  * 도면 행·열(통심) 선 — 순수 계산 모듈 (DOM 없음)
  *
  * 2026-09-28 실험(exp/grid-lines). 도면(층)마다 열(X)·행(Y) 선을 두고, 마킹 점이 어느 칸에 있는지
- * 「X1~X2, Y1~Y2」처럼 위치 글자를 만든다.
+ * 「X1~X2/Y1~Y2」처럼 위치 글자를 만든다(열/행 사이는 「/」, 공백 없음).
  *
  * - 좌표: 선 꼭짓점은 **이미지 좌표**(결함 x/y와 같은 좌표계, 회전 전)로 저장한다.
  *   번호 순서(왼→오른, 위→아래)는 도면을 **화면에 보이는 회전** 기준으로 매긴다.
@@ -17,7 +17,7 @@
  * - 슬래브·보(B)·철골보(B)·빔도 보통 폭 규칙(폭 안이면 X2) — 2026-09-28 「늘 범위」 규칙은 없앰.
  * - 거더(보(G)·철골보(G)·거더·철골거더·큰보): 먼저 보통 폭 규칙. 한 축이라도 폭 안이면 보통 규칙 그대로.
  *   어느 축의 폭에도 안 들면 선 하나에 붙인다: 가장 가까운 열 선과 행 선까지 거리를 재서
- *   더 가까운 축은 선 이름 하나, 다른 축은 늘 범위(X2, Y1~Y2 / X1~X3, Y3). 같으면 열(X) 우선.
+ *   더 가까운 축은 선 이름 하나, 다른 축은 늘 범위(X2/Y1~Y2, X1~X3/Y3). 같으면 열(X) 우선.
  *   (영역은 영역 전체가 한 선의 폭 안에 들어야 「폭 안」)
  *   영역 거더는 긴 쪽 방향(가로로 길면 행 선 위 → Y 하나, 세로로 길면 X 하나, 1.5배 이상일 때), 아니면 가운데 점 기준.
  * - G/B 안 정한 그냥 「보」·「철골보」, 접합부, 그 밖의 부재는 보통 규칙(폭 안이면 X2).
@@ -26,6 +26,8 @@
     'use strict';
 
     const AXES = ['col', 'row'];
+    /** 열 축과 행 축 사이 구분(2026-09-28 사용자 요청: 「An/Xn」) */
+    const AXIS_SEP = '/';
     const DEFAULT_PREFIX = { col: 'X', row: 'Y' };
 
     /** 거더 — 가까운 열/행 선 하나에 붙임(다른 축은 범위). 접합부는 제외 */
@@ -400,7 +402,7 @@
     }
 
     /** 계산 방식이 바뀌면 올림 → 화면이 저장된 행·열 위치를 다시 계산함 */
-    const GRID_LOC_ALGO = 4; // 4: 끝 선 바깥 표기를 ~X1 / X7~ 로
+    const GRID_LOC_ALGO = 5; // 4: 끝 선 바깥 ~X1 / X7~, 5: 열/행 구분 「/」
 
     function roundPts(pts) {
         return pts.map((p) => `${Math.round(p.x * 10)},${Math.round(p.y * 10)}`).join(';');
@@ -456,11 +458,11 @@
                 return b.od.items[r.nearestIdx].name;
             }
             return locateAxis(grid, ax, pts, ctx, { forceRange: true });
-        }).filter(Boolean).join(', ');
+        }).filter(Boolean).join(AXIS_SEP);
     }
 
     /**
-     * 마킹 점(들) → 「X1~X2, Y1~Y2」. ctx: { rot, w, h }
+     * 마킹 점(들) → 「X1~X2/Y1~Y2」. ctx: { rot, w, h }
      * opts: { member: 부재 명칭 } 또는 { girder: true } / { forceRange: true }(폭 무시·늘 범위 — 거더 규칙 안에서만 씀)
      *   — 거더면 폭 먼저, 어느 폭에도 안 들 때만 가까운 선 하나 + 다른 축 범위. 그 밖의 부재(슬래브·보(B) 포함)는 보통 폭 규칙
      */
@@ -480,11 +482,11 @@
                 normal[ax] = b ? b.label : '';
                 if (b && b.results.length && b.results.every((r) => Number.isInteger(r.pos) && r.pos === b.results[0].pos)) girderInBand = true;
             });
-            if (girderInBand) return AXES.map((ax) => normal[ax]).filter(Boolean).join(', ');
+            if (girderInBand) return AXES.map((ax) => normal[ax]).filter(Boolean).join(AXIS_SEP);
             return girderLocation(grid, pts, c);
         }
         const lo = { forceRange: !!o.forceRange };
-        return AXES.map((ax) => locateAxis(grid, ax, pts, c, lo)).filter(Boolean).join(', ');
+        return AXES.map((ax) => locateAxis(grid, ax, pts, c, lo)).filter(Boolean).join(AXIS_SEP);
     }
 
     /**
@@ -671,6 +673,7 @@
 
     const api = {
         DEFAULT_PREFIX,
+        AXIS_SEP,
         GIRDER_MEMBER_RULES,
         isGirderMember,
         memberRule,

@@ -4,7 +4,7 @@
 /**
  * 2026-09-28 (실험 exp/grid-lines) 도면 행·열(통심) 선 — 순수 계산 회귀 테스트
  *  - 이름: 먼저 그은 선이 작은 번호(그은 순서), 시작 번호 0, 개별 이름, 지우면 당겨짐, 위치 순서로 다시 매기기, 세로/가로/비스듬/꺾은선 위치 찾기
- *  - 폭(띠) 안이면 한 이름, 사이면 X1~X2, 바깥이면 「~X1」/「X3~」(바깥 쪽을 비운 범위)
+ *  - 열/행은 「/」로 이어 씀(X1~X2/Y1~Y2). 폭(띠) 안이면 한 이름, 사이면 X1~X2, 바깥이면 「~X1」/「X3~」(바깥 쪽을 비운 범위)
  *  - 같은 축 그룹 여러 개(날개동), 회전된 도면 번호 순서, 영역 마킹 범위
  *  - 위치 글자 자동 입력 규칙(직접 쓴 글은 안 덮음)
  */
@@ -36,19 +36,19 @@ const base = grid([
     G.createGroup('col', { band: 20, lines: [vline(1000), vline(2000), vline(3000)] }),
     G.createGroup('row', { band: 20, lines: [hline(500), hline(1500)] })
 ]);
-assert.strictEqual(loc(base, [{ x: 1500, y: 1000 }]), 'X1~X2, Y1~Y2', '칸 안');
-assert.strictEqual(loc(base, [{ x: 2005, y: 1495 }]), 'X2, Y2', '폭 안이면 선 이름 하나');
-assert.strictEqual(loc(base, [{ x: 2011, y: 1000 }]), 'X2~X3, Y1~Y2', '폭(20) 밖 11px이면 사이');
-assert.strictEqual(loc(base, [{ x: 500, y: 200 }]), '~X1, ~Y1', '맨 앞 선 밖(번호 작은 끝) → ~X1');
-assert.strictEqual(loc(base, [{ x: 3500, y: 2500 }]), 'X3~, Y2~', '맨 뒤 선 밖(번호 큰 끝) → X3~');
+assert.strictEqual(loc(base, [{ x: 1500, y: 1000 }]), 'X1~X2/Y1~Y2', '칸 안');
+assert.strictEqual(loc(base, [{ x: 2005, y: 1495 }]), 'X2/Y2', '폭 안이면 선 이름 하나');
+assert.strictEqual(loc(base, [{ x: 2011, y: 1000 }]), 'X2~X3/Y1~Y2', '폭(20) 밖 11px이면 사이');
+assert.strictEqual(loc(base, [{ x: 500, y: 200 }]), '~X1/~Y1', '맨 앞 선 밖(번호 작은 끝) → ~X1');
+assert.strictEqual(loc(base, [{ x: 3500, y: 2500 }]), 'X3~/Y2~', '맨 뒤 선 밖(번호 큰 끝) → X3~');
 
 // ---- 이름: 시작 번호 0, 머리글, 개별 이름, 아래에서부터 그은 행 ----
 const named = grid([
     G.createGroup('col', { prefix: 'x', start: 0, lines: [vline(1000), vline(2000), vline(3000, { label: 'X3a' })] }),
     G.createGroup('row', { prefix: 'Y', start: 1, lines: [hline(2500), hline(1500), hline(500)] })
 ]);
-assert.strictEqual(loc(named, [{ x: 1500, y: 600 }]), 'x0~x1, Y2~Y3', '시작 0 · 범위는 작은 번호 먼저');
-assert.strictEqual(loc(named, [{ x: 2500, y: 2400 }]), 'x1~X3a, Y1~Y2', '개별 이름');
+assert.strictEqual(loc(named, [{ x: 1500, y: 600 }]), 'x0~x1/Y2~Y3', '시작 0 · 범위는 작은 번호 먼저');
+assert.strictEqual(loc(named, [{ x: 2500, y: 2400 }]), 'x1~X3a/Y1~Y2', '개별 이름');
 const od = G.orderedLines(named.groups[1], ctx0);
 assert.deepStrictEqual(od.items.map((it) => it.name), ['Y3', 'Y2', 'Y1'], '아래부터 그었으면 맨 위가 Y3');
 
@@ -143,10 +143,10 @@ assert.strictEqual(ln.pts.length, 2);
 
 // ---- 영역 마킹 ----
 const area = (x1, y1, x2, y2) => [{ x: x1, y: y1 }, { x: x2, y: y1 }, { x: x1, y: y2 }, { x: x2, y: y2 }];
-assert.strictEqual(loc(base, area(1200, 600, 2600, 1400)), 'X1~X3, Y1~Y2', '여러 칸 걸친 영역');
-assert.strictEqual(loc(base, area(1995, 600, 2008, 1400)), 'X2, Y1~Y2', '폭 안에 다 들어간 영역');
-assert.strictEqual(loc(base, area(100, 100, 300, 300)), '~X1, ~Y1');
-assert.strictEqual(loc(base, area(100, 600, 1500, 1400)), 'X1~X2, Y1~Y2', '바깥에서 걸친 영역은 가장자리 선부터');
+assert.strictEqual(loc(base, area(1200, 600, 2600, 1400)), 'X1~X3/Y1~Y2', '여러 칸 걸친 영역');
+assert.strictEqual(loc(base, area(1995, 600, 2008, 1400)), 'X2/Y1~Y2', '폭 안에 다 들어간 영역');
+assert.strictEqual(loc(base, area(100, 100, 300, 300)), '~X1/~Y1');
+assert.strictEqual(loc(base, area(100, 600, 1500, 1400)), 'X1~X2/Y1~Y2', '바깥에서 걸친 영역은 가장자리 선부터');
 
 // ---- 같은 축 그룹 여러 개(날개동): 감싸는 그룹 우선 ----
 const wingA = G.createGroup('col', { prefix: 'A', band: 20, lines: [
@@ -179,7 +179,12 @@ assert.strictEqual(loc(one, [{ x: 3000, y: 9 }]), 'A1~', '선 하나: 오른쪽 
 assert.strictEqual(loc(out7, area(3850, 100, 3950, 200)), 'A7~', '영역 전체가 바깥');
 assert.strictEqual(loc(out7, area(3600, 100, 3950, 200)), 'A6~A7', '안에서 바깥으로 걸친 영역은 예전처럼 끝 선까지 범위');
 assert.ok(!/외측/.test(require('fs').readFileSync(require('path').join(__dirname, '..', 'js', 'shared', 'grid-lines.js'), 'utf8').replace(/^ \*.*$/gm, '')), '「외측」 만드는 코드 없음');
-assert.strictEqual(G.GRID_LOC_ALGO, 4, '규칙 버전 올림 → 저장된 「외측」 값 자동 다시 계산');
+assert.ok(G.GRID_LOC_ALGO >= 4, '규칙 버전 올림 → 저장된 「외측」 값 자동 다시 계산');
+
+// ---- 열/행 구분자: '/' (공백 없음) ----
+assert.strictEqual(G.AXIS_SEP, '/');
+assert.ok(!/, /.test(loc(base, [{ x: 1500, y: 1000 }])), '쉼표 안 씀');
+assert.strictEqual(G.GRID_LOC_ALGO, 5, '규칙 버전 5 → 저장된 「X1~X2, Y1~Y2」도 자동 다시 계산');
 
 // ---- 회전된 도면: 번호는 화면 기준 왼→오른 / 위→아래 ----
 // 이미지의 가로선(y=500,1500)은 90° 회전 화면에서 세로선이 된다 → 열로 쓰면 화면 왼쪽부터 X1
@@ -221,65 +226,65 @@ assert.strictEqual(n.autoLocation, true);
 assert.strictEqual(G.isRangeOnlyMember, undefined, '늘 범위 부재 목록은 없앰');
 assert.strictEqual(G.RANGE_ONLY_MEMBER_RULES, undefined);
 const locM = (pts, member, g) => G.computeGridLocation(g || base, pts, ctx0, { member });
-assert.strictEqual(locM([{ x: 2005, y: 1495 }], '보(G)'), 'X2, Y2', '거더: 폭 안이면 보통 규칙 그대로(두 축 다 폭 안)');
-assert.strictEqual(locM([{ x: 2005, y: 1495 }], '보'), 'X2, Y2', 'G/B 안 정한 보는 보통 규칙');
-assert.strictEqual(locM([{ x: 2005, y: 1495 }], '보-슬래브 접합부'), 'X2, Y2', '접합부는 보통 규칙');
+assert.strictEqual(locM([{ x: 2005, y: 1495 }], '보(G)'), 'X2/Y2', '거더: 폭 안이면 보통 규칙 그대로(두 축 다 폭 안)');
+assert.strictEqual(locM([{ x: 2005, y: 1495 }], '보'), 'X2/Y2', 'G/B 안 정한 보는 보통 규칙');
+assert.strictEqual(locM([{ x: 2005, y: 1495 }], '보-슬래브 접합부'), 'X2/Y2', '접합부는 보통 규칙');
 ['슬래브', '데크슬래브', '계단슬래브', '슬라브', '보(B)', '보 (B)', '철골보(B)', 'RC보(B)', '빔', '철골빔', '작은보', 'slab'].forEach((m) => {
-    assert.strictEqual(locM([{ x: 2005, y: 1495 }], m), 'X2, Y2', `폭 안이면 선 이름 하나: ${m}`);
-    assert.strictEqual(locM([{ x: 2005, y: 1000 }], m), 'X2, Y1~Y2', `한 축만 폭 안: ${m}`);
-    assert.strictEqual(locM([{ x: 1500, y: 1000 }], m), 'X1~X2, Y1~Y2', `폭 밖이면 범위: ${m}`);
-    assert.strictEqual(locM([{ x: 500, y: 1000 }], m), '~X1, Y1~Y2', `바깥: ${m}`);
+    assert.strictEqual(locM([{ x: 2005, y: 1495 }], m), 'X2/Y2', `폭 안이면 선 이름 하나: ${m}`);
+    assert.strictEqual(locM([{ x: 2005, y: 1000 }], m), 'X2/Y1~Y2', `한 축만 폭 안: ${m}`);
+    assert.strictEqual(locM([{ x: 1500, y: 1000 }], m), 'X1~X2/Y1~Y2', `폭 밖이면 범위: ${m}`);
+    assert.strictEqual(locM([{ x: 500, y: 1000 }], m), '~X1/Y1~Y2', `바깥: ${m}`);
 });
-assert.strictEqual(locM([{ x: 1995, y: 1505 }], '보(B)'), 'X2, Y2', '보(B): 선 왼쪽·아래쪽이어도 폭 안이면 선 이름');
-assert.strictEqual(locM([{ x: 2011, y: 1000 }], '슬래브'), 'X2~X3, Y1~Y2', '폭(20) 밖 11px → 범위');
-assert.strictEqual(G.computeGridLocation(base, [{ x: 2005, y: 1000 }], ctx0, { forceRange: true }), 'X2~X3, Y1~Y2', 'forceRange 직접');
+assert.strictEqual(locM([{ x: 1995, y: 1505 }], '보(B)'), 'X2/Y2', '보(B): 선 왼쪽·아래쪽이어도 폭 안이면 선 이름');
+assert.strictEqual(locM([{ x: 2011, y: 1000 }], '슬래브'), 'X2~X3/Y1~Y2', '폭(20) 밖 11px → 범위');
+assert.strictEqual(G.computeGridLocation(base, [{ x: 2005, y: 1000 }], ctx0, { forceRange: true }), 'X2~X3/Y1~Y2', 'forceRange 직접');
 // 영역: 전체가 X2 폭 안이면 X2, 선 폭을 벗어나 걸치면 범위
-assert.strictEqual(locM(area(1995, 600, 2008, 1400), '슬래브'), 'X2, Y1~Y2', '영역 전체가 X2 폭 안 → X2');
-assert.strictEqual(locM(area(1995, 600, 2300, 1400), '데크슬래브'), 'X2~X3, Y1~Y2', '폭 안에서 칸 안으로 → X2~X3');
-assert.strictEqual(locM(area(1500, 600, 2300, 1400), '슬래브'), 'X1~X3, Y1~Y2', '선을 넘어 걸치면 X1~X3');
+assert.strictEqual(locM(area(1995, 600, 2008, 1400), '슬래브'), 'X2/Y1~Y2', '영역 전체가 X2 폭 안 → X2');
+assert.strictEqual(locM(area(1995, 600, 2300, 1400), '데크슬래브'), 'X2~X3/Y1~Y2', '폭 안에서 칸 안으로 → X2~X3');
+assert.strictEqual(locM(area(1500, 600, 2300, 1400), '슬래브'), 'X1~X3/Y1~Y2', '선을 넘어 걸치면 X1~X3');
 
 // ---- 거더: 폭 안이면 보통 규칙, 어느 폭에도 안 들면 가까운 열/행 선 하나 + 다른 축은 범위 ----
 const Gd = G.isGirderMember;
 ['보(G)', '철골보(G)', 'RC보(G)', '거더', '철골거더', '큰보', '보 (G)'].forEach((m) => assert.strictEqual(Gd(m), true, `거더: ${m}`));
 ['보', '철골보', '보(B)', '철골보(B)', '빔', '슬래브', '캔틸레버보', '보-거더 접합부', '기둥-보 접합부', '', null].forEach((m) => assert.strictEqual(Gd(m), false, `거더 아님: ${m}`));
 const locG = (pts, member, g) => G.computeGridLocation(g || base, pts, ctx0, { member: member || '보(G)' });
-assert.strictEqual(locG([{ x: 1990, y: 1000 }]), 'X2, Y1~Y2', 'X2 폭 안 → 보통 규칙');
-assert.strictEqual(locG([{ x: 1300, y: 1505 }]), 'X1~X2, Y2', 'Y2 폭 안 → 보통 규칙(X는 범위)');
-assert.strictEqual(locG([{ x: 1995, y: 1300 }], '철골보(G)'), 'X2, Y1~Y2', 'X 폭 안');
-assert.strictEqual(locG(area(1995, 600, 2005, 1400)), 'X2, Y1~Y2', '영역 전체가 X2 폭 안 → 보통 규칙');
+assert.strictEqual(locG([{ x: 1990, y: 1000 }]), 'X2/Y1~Y2', 'X2 폭 안 → 보통 규칙');
+assert.strictEqual(locG([{ x: 1300, y: 1505 }]), 'X1~X2/Y2', 'Y2 폭 안 → 보통 규칙(X는 범위)');
+assert.strictEqual(locG([{ x: 1995, y: 1300 }], '철골보(G)'), 'X2/Y1~Y2', 'X 폭 안');
+assert.strictEqual(locG(area(1995, 600, 2005, 1400)), 'X2/Y1~Y2', '영역 전체가 X2 폭 안 → 보통 규칙');
 assert.strictEqual(locG([{ x: 1100, y: 9 }], '거더', bands), 'X1', '폭 밖 → 가까운 X1(100 < 900)');
 assert.strictEqual(locG([{ x: 1600, y: 9 }], '거더', bands), 'X2', '폭 밖 → 가까운 X2(400 < 600)');
 assert.strictEqual(locG([{ x: 1910, y: 9 }], '거더', bands), 'X2', '개별 폭(200) 안 → 보통 규칙 X2');
-assert.strictEqual(locG([{ x: 1500, y: 1480 }]), 'X1~X2, Y2', '폭(20) 밖 → 행 선이 더 가까워(20 < 500) Y 하나');
-assert.strictEqual(locG([{ x: 1300, y: 1000 }], '철골거더'), 'X1, Y1~Y2', '폭 밖 300px여도 가까운 선 하나');
-assert.strictEqual(locG([{ x: 2010, y: 2500 }], '철골보(G)'), 'X2, Y2~', 'X2 폭 안(10) → 보통 규칙, Y는 바깥 Y2~');
-assert.strictEqual(locG([{ x: 2030, y: 2500 }], '철골보(G)'), 'X2, Y2~', '폭 밖 → 가까운 X2 하나, 다른 축 바깥은 Y2~');
-assert.strictEqual(locG([{ x: 500, y: 1000 }], '큰보'), 'X1, Y1~Y2', '바깥이어도 붙는 축은 끝 선 이름');
-assert.strictEqual(locG([{ x: 1750, y: 1250 }]), 'X2, Y1~Y2', '거리가 같으면(250) 열(X) 우선');
+assert.strictEqual(locG([{ x: 1500, y: 1480 }]), 'X1~X2/Y2', '폭(20) 밖 → 행 선이 더 가까워(20 < 500) Y 하나');
+assert.strictEqual(locG([{ x: 1300, y: 1000 }], '철골거더'), 'X1/Y1~Y2', '폭 밖 300px여도 가까운 선 하나');
+assert.strictEqual(locG([{ x: 2010, y: 2500 }], '철골보(G)'), 'X2/Y2~', 'X2 폭 안(10) → 보통 규칙, Y는 바깥 Y2~');
+assert.strictEqual(locG([{ x: 2030, y: 2500 }], '철골보(G)'), 'X2/Y2~', '폭 밖 → 가까운 X2 하나, 다른 축 바깥은 Y2~');
+assert.strictEqual(locG([{ x: 500, y: 1000 }], '큰보'), 'X1/Y1~Y2', '바깥이어도 붙는 축은 끝 선 이름');
+assert.strictEqual(locG([{ x: 1750, y: 1250 }]), 'X2/Y1~Y2', '거리가 같으면(250) 열(X) 우선');
 assert.strictEqual(locG([{ x: 1990, y: 9 }], '거더', grid([G.createGroup('col', { lines: [vline(1000), vline(2000)] })])), 'X2', '열만 있으면 열 선 하나');
 assert.strictEqual(locG([{ x: 9, y: 1400 }], '거더', grid([G.createGroup('row', { lines: [hline(500), hline(1500)] })])), 'Y2', '행만 있으면 행 선 하나');
 // 영역 거더: 긴 쪽 방향
-assert.strictEqual(locG(area(1200, 1480, 2800, 1530)), 'X1~X3, Y2', '가로로 긴 영역 → 행 선 하나, 열은 범위');
-assert.strictEqual(locG(area(1980, 600, 2030, 1400)), 'X2, Y1~Y2', '세로로 긴 영역 → 열 선 하나');
-assert.strictEqual(locG(area(1900, 1400, 2000, 1500)), 'X2, Y1~Y2', '정사각형 → 가운데 점, 같으면 X 우선');
+assert.strictEqual(locG(area(1200, 1480, 2800, 1530)), 'X1~X3/Y2', '가로로 긴 영역 → 행 선 하나, 열은 범위');
+assert.strictEqual(locG(area(1980, 600, 2030, 1400)), 'X2/Y1~Y2', '세로로 긴 영역 → 열 선 하나');
+assert.strictEqual(locG(area(1900, 1400, 2000, 1500)), 'X2/Y1~Y2', '정사각형 → 가운데 점, 같으면 X 우선');
 // 회전 도면: 화면에서 가로로 긴 영역(= 이미지에서 세로로 긴 영역)은 화면 행 선
 const rotGrid = grid([
     G.createGroup('col', { lines: [hline(1500), hline(500)] }),
     G.createGroup('row', { lines: [vline(1000), vline(2000)] })
 ]);
-assert.strictEqual(G.computeGridLocation(rotGrid, area(1980, 600, 2030, 1400), rot90, { member: '보(G)' }), 'X1~X2, Y2', '90°: 화면 가로로 긴 영역 → 행(Y) 하나');
+assert.strictEqual(G.computeGridLocation(rotGrid, area(1980, 600, 2030, 1400), rot90, { member: '보(G)' }), 'X1~X2/Y2', '90°: 화면 가로로 긴 영역 → 행(Y) 하나');
 // 수동 지정
-assert.strictEqual(G.computeGridLocation(base, [{ x: 1990, y: 1000 }], ctx0, { girder: true }), 'X2, Y1~Y2', 'girder 직접');
-assert.strictEqual(G.computeGridLocation(base, [{ x: 1990, y: 1000 }], ctx0, { member: '보(G)', girder: false }), 'X2, Y1~Y2', 'girder 끄면 보통 규칙(폭 안)');
-assert.strictEqual(G.computeGridLocation(base, [{ x: 1990, y: 1000 }], ctx0, { member: '보' }), 'X2, Y1~Y2', 'G/B 안 정한 보: 폭 안이라 X2');
-assert.strictEqual(G.computeGridLocation(base, [{ x: 1300, y: 1000 }], ctx0, { member: '보' }), 'X1~X2, Y1~Y2', 'G/B 안 정한 보: 폭 밖은 범위(거더 규칙 아님)');
+assert.strictEqual(G.computeGridLocation(base, [{ x: 1990, y: 1000 }], ctx0, { girder: true }), 'X2/Y1~Y2', 'girder 직접');
+assert.strictEqual(G.computeGridLocation(base, [{ x: 1990, y: 1000 }], ctx0, { member: '보(G)', girder: false }), 'X2/Y1~Y2', 'girder 끄면 보통 규칙(폭 안)');
+assert.strictEqual(G.computeGridLocation(base, [{ x: 1990, y: 1000 }], ctx0, { member: '보' }), 'X2/Y1~Y2', 'G/B 안 정한 보: 폭 안이라 X2');
+assert.strictEqual(G.computeGridLocation(base, [{ x: 1300, y: 1000 }], ctx0, { member: '보' }), 'X1~X2/Y1~Y2', 'G/B 안 정한 보: 폭 밖은 범위(거더 규칙 아님)');
 
 // ---- 칸 구조: 행·열(gridLoc) + 상세 위치(실 이름), 한글/PDF 위치 칸 두 줄 ----
-assert.strictEqual(G.formatLocationCell('X1~X2, Y2', '거실'), 'X1~X2, Y2\n거실', '행·열 다음 줄 실 이름');
-assert.strictEqual(G.formatLocationCell('X1~X2, Y2', ''), 'X1~X2, Y2', '실 이름 없으면 한 줄');
+assert.strictEqual(G.formatLocationCell('X1~X2/Y2', '거실'), 'X1~X2/Y2\n거실', '행·열 다음 줄 실 이름');
+assert.strictEqual(G.formatLocationCell('X1~X2/Y2', ''), 'X1~X2/Y2', '실 이름 없으면 한 줄');
 assert.strictEqual(G.formatLocationCell('', '거실'), '거실');
-assert.strictEqual(G.reportLocationCell({ gridLoc: 'X2, Y3', detail: '거실' }), 'X2, Y3\n거실');
-assert.strictEqual(G.reportLocationCell({ gridLoc: 'X2, Y3', detail: '' }), 'X2, Y3');
+assert.strictEqual(G.reportLocationCell({ gridLoc: 'X2/Y3', detail: '거실' }), 'X2/Y3\n거실');
+assert.strictEqual(G.reportLocationCell({ gridLoc: 'X2/Y3', detail: '' }), 'X2/Y3');
 assert.strictEqual(G.reportLocationCell({ detail: '거실' }), '', '행·열 없으면 빈 값 → 예전 출력 그대로');
 assert.strictEqual(G.reportLocationCell({ detail: 'X2, Y3 거실', legacyAuto: 'X2, Y3' }), 'X2, Y3\n거실', '예전 실험 데이터도 두 줄로');
 assert.strictEqual(G.reportLocationCell({ detail: 'X2, Y3', legacyAuto: 'X2, Y3' }), 'X2, Y3');
@@ -358,6 +363,13 @@ if (fs.existsSync(appPath)) {
         throw new Error(name);
     };
     const vm = require('vm');
+    {
+        const mctx = { G };
+        vm.createContext(mctx);
+        vm.runInContext(`${takeFn('mergeGroupGridLocProp')}\nthis.merge = mergeGroupGridLocProp;`, mctx);
+        assert.strictEqual(JSON.stringify(mctx.merge([{ gridLoc: 'A1~A2/Y1' }, { gridLoc: 'A3/Y2~' }, { gridLoc: 'A1~A2/Y1' }, {}])), JSON.stringify({ gridLoc: 'A1~A2/Y1, A3/Y2~' }), '묶음 화살표 여러 개: 쌍 사이는 쉼표');
+        assert.strictEqual(JSON.stringify(mctx.merge([{}])), '{}');
+    }
     const sandbox = {
         G,
         gridLib: () => G,
@@ -370,8 +382,8 @@ if (fs.existsSync(appPath)) {
     vm.createContext(sandbox);
     vm.runInContext(`${takeFn('getDefectGridRoomForReport')}\n${takeFn('getReportSurveyRowValues')}\nthis.rowVals = getReportSurveyRowValues;`, sandbox);
     const locCell = (d) => sandbox.rowVals(d, { floorCode: '1F' }, false)[1];
-    assert.strictEqual(locCell({ location: '1F 거실', gridLoc: 'X1~X2, Y2' }), 'X1~X2, Y2\n거실', '한글/PDF: 행·열 다음 줄 실 이름');
-    assert.strictEqual(locCell({ location: '1F', gridLoc: 'X1~X2, Y2' }), 'X1~X2, Y2', '실 이름 없으면 행·열 한 줄');
+    assert.strictEqual(locCell({ location: '1F 거실', gridLoc: 'X1~X2/Y2' }), 'X1~X2/Y2\n거실', '한글/PDF: 행·열 다음 줄 실 이름');
+    assert.strictEqual(locCell({ location: '1F', gridLoc: 'X1~X2/Y2' }), 'X1~X2/Y2', '실 이름 없으면 행·열 한 줄');
     assert.strictEqual(locCell({ location: '1F 거실' }), '거실', '행·열 없으면 예전 그대로');
     assert.strictEqual(locCell({ location: '1F X2, Y3 거실', gridLocAuto: 'X2, Y3' }), 'X2, Y3\n거실', '예전 실험 데이터도 두 줄');
 
@@ -422,17 +434,17 @@ if (fs.existsSync(appPath)) {
     const pin = { id: 'p1', x: 1400, y: 900, targetX: 1300, targetY: 1000, component: '', location: '1F 거실' };
     floorDefects.push(pin);
     A.applyGridAutoLocationToDefect(pin);
-    assert.strictEqual(pin.gridLoc, 'A1~A2, Y1~Y2', '부재 없음: 범위');
+    assert.strictEqual(pin.gridLoc, 'A1~A2/Y1~Y2', '부재 없음: 범위');
     assert.strictEqual(A.refreshStaleGridLocForCurrentFloor(), 0, '방금 계산한 값은 다시 안 바꿈');
     // 2) 부재를 조사표 칸/일괄 수정/다른 기기에서 보(G)로 → 다음 그리기 때 거더 규칙(가까운 A1 = 300 < Y 500)
     pin.component = '보(G)';
     assert.strictEqual(A.refreshStaleGridLocForCurrentFloor(), 1, '부재가 바뀐 마킹만 다시 계산');
-    assert.strictEqual(pin.gridLoc, 'A1, Y1~Y2', '거더: 폭 밖이면 가까운 열 하나');
+    assert.strictEqual(pin.gridLoc, 'A1/Y1~Y2', '거더: 폭 밖이면 가까운 열 하나');
     assert.strictEqual(pin.location, '1F 거실', '상세 위치(실 이름)는 그대로');
     assert.strictEqual(A.refreshStaleGridLocForCurrentFloor(), 0);
     // 3) 이름 표기 여러 가지
-    [['보 (G)', 'A1, Y1~Y2'], ['보（G）', 'A1, Y1~Y2'], ['큰보', 'A1, Y1~Y2'], ['철골거더', 'A1, Y1~Y2'], ['철골보(G)', 'A1, Y1~Y2'],
-        ['보', 'A1~A2, Y1~Y2'], ['슬래브', 'A1~A2, Y1~Y2'], ['보(B)', 'A1~A2, Y1~Y2']].forEach(([m, want]) => {
+    [['보 (G)', 'A1/Y1~Y2'], ['보（G）', 'A1/Y1~Y2'], ['큰보', 'A1/Y1~Y2'], ['철골거더', 'A1/Y1~Y2'], ['철골보(G)', 'A1/Y1~Y2'],
+        ['보', 'A1~A2/Y1~Y2'], ['슬래브', 'A1~A2/Y1~Y2'], ['보(B)', 'A1~A2/Y1~Y2']].forEach(([m, want]) => {
         pin.component = m;
         A.refreshStaleGridLocForCurrentFloor();
         assert.strictEqual(pin.gridLoc, want, `부재 ${m}`);
@@ -441,29 +453,29 @@ if (fs.existsSync(appPath)) {
     const inBand = { id: 'p2', targetX: 1995, targetY: 1000, component: '보(G)' };
     floorDefects.push(inBand);
     A.refreshStaleGridLocForCurrentFloor();
-    assert.strictEqual(inBand.gridLoc, 'A2, Y1~Y2', '거더 폭 안');
+    assert.strictEqual(inBand.gridLoc, 'A2/Y1~Y2', '거더 폭 안');
     // 5) 예전 규칙으로 저장된 옛값(지문 없음)도 고침 — 예: 새로고침 뒤
     const stale = { id: 'p3', targetX: 2600, targetY: 1400, component: '철골보(G)', gridLoc: 'A2~A3, Y1~Y2' };
     floorDefects.push(stale);
     A.refreshStaleGridLocForCurrentFloor();
-    assert.strictEqual(stale.gridLoc, 'A2~A3, Y2', '옛 범위값 → 가까운 행 선(100 < 400)');
+    assert.strictEqual(stale.gridLoc, 'A2~A3/Y2', '옛 범위값 → 가까운 행 선(100 < 400)');
     // 6) 마킹 추가(묶음)로 생긴 화살표는 gridLoc 없이 생김 → 채워짐
     const member2 = { id: 'p4', groupId: 'p3', targetX: 3300, targetY: 600, component: '철골보(G)' };
     floorDefects.push(member2);
     A.refreshStaleGridLocForCurrentFloor();
-    assert.strictEqual(member2.gridLoc, 'A3~, Y1', '묶음 화살표도 계산(Y1까지 100 < A3까지 300)');
+    assert.strictEqual(member2.gridLoc, 'A3~/Y1', '묶음 화살표도 계산(Y1까지 100 < A3까지 300)');
     // 7) 선을 옮기면 다시 계산
     flow.state.floorGridLines.b1_1F.groups[0].lines[0].pts.forEach((p) => { p.x = 1350; });
     assert.ok(A.refreshStaleGridLocForCurrentFloor() >= 1, '선 이동 → 다시 계산');
-    assert.strictEqual(pin.gridLoc, '~A1, Y1~Y2', '보(B) 핀(1300)이 옮긴 A1(1350) 바깥');
+    assert.strictEqual(pin.gridLoc, '~A1/Y1~Y2', '보(B) 핀(1300)이 옮긴 A1(1350) 바깥');
     pin.component = '보(G)';
     A.refreshStaleGridLocForCurrentFloor();
-    assert.strictEqual(pin.gridLoc, 'A1, Y1~Y2', '거더: 옮긴 A1까지 50');
+    assert.strictEqual(pin.gridLoc, 'A1/Y1~Y2', '거더: 옮긴 A1까지 50');
     // 8) 자동 입력 끄면 안 건드림
     flow.state.floorGridLines.b1_1F.autoLocation = false;
     pin.component = '';
     assert.strictEqual(A.refreshStaleGridLocForCurrentFloor(), 0, '자동 입력 꺼짐');
-    assert.strictEqual(pin.gridLoc, 'A1, Y1~Y2');
+    assert.strictEqual(pin.gridLoc, 'A1/Y1~Y2');
     flow.state.floorGridLines.b1_1F.autoLocation = true;
     // 연결: 조사표 칸·일괄 수정·수정창 칩(G/B 버튼)에서 부재를 바꾸면 다시 계산, 그릴 때 옛값 확인
     assert.ok(app.includes("if (field === 'component' && key === `${state.currentBuildingId}_${state.currentFloor}` && typeof applyGridAutoLocationToDefect === 'function') {"), '조사표 부재 칸');
