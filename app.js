@@ -11488,6 +11488,50 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         return measuredW ? `${measuredW}${item.measuredDepth ? joiner + item.measuredDepth : ''}` : '-';
     }
 
+    /**
+     * 부재실측 단면적(mm²) — 결과표에서 규격 아래 괄호로 보여 준다(2026-09-28 요청).
+     * 등급 계산(calcSectionGrade 등)과 같은 식: 사각=폭×춤, 원형=π(d/2)², 철골=H형 단면적.
+     * 두께 하나뿐인 부재(슬래브·벽체)나 치수가 모자라면 null — 면적이 아니라서 표시하지 않는다.
+     */
+    function calcNdtMeasureSectionArea(item, kind = 'design') {
+        if (!item) return null;
+        const num = (v) => {
+            const n = parseFloat(String(v == null ? '' : v).replace(/[^0-9.]/g, ''));
+            return Number.isFinite(n) && n > 0 ? n : null;
+        };
+        const dimMode = (item.measureDimMode === 'rc' || !item.measureDimMode)
+            ? getNdtMeasureDimKind(item.component)
+            : item.measureDimMode;
+        if (dimMode === 'thickness') return null;
+        if (dimMode === 'steel') {
+            const d = kind === 'design'
+                ? { web: item.designWeb, flange: item.designFlange, webWidth: item.designWebWidth, flangeWidth: item.designFlangeWidth }
+                : resolveNdtSteelMeasuredFromItem(item);
+            const a = calcSteelSectionArea(num(d.web), num(d.flange), num(d.webWidth), num(d.flangeWidth));
+            return a > 0 ? a : null;
+        }
+        const w = kind === 'design'
+            ? num(item.designWidth)
+            : num((item.measuredWidth !== undefined && item.measuredWidth !== null) ? item.measuredWidth : item.avgValue);
+        if (!w) return null;
+        if (dimMode === 'circle') return Math.PI * (w / 2) ** 2;
+        const dep = num(kind === 'design' ? item.designDepth : item.measuredDepth);
+        return dep ? w * dep : null;
+    }
+
+    /** "(560,000mm²)" — 면적을 못 구하면 빈 글자 */
+    function formatNdtMeasureAreaText(item, kind = 'design') {
+        const a = calcNdtMeasureSectionArea(item, kind);
+        return a ? `(${Math.round(a).toLocaleString('ko-KR')}mm²)` : '';
+    }
+
+    /** 규격 글자 + 줄바꿈 + 단면적 괄호 (면적이 없으면 규격만) */
+    function formatNdtMeasureDimWithArea(item, kind, joiner, lineBreak = '\n') {
+        const dim = formatNdtMeasureDimText(item, kind, joiner);
+        const area = dim && dim !== '-' ? formatNdtMeasureAreaText(item, kind) : '';
+        return area ? `${dim}${lineBreak}${area}` : dim;
+    }
+
     // 콘크리트 부재단면의 규격: 시설물의 안전 및 유지관리 실시 세부지침(건축물편) [표 6.24]
     // c(%) = (측정단면적 ÷ 설계단면적) × 100. a: 100%이상, b: 95%이상, c: 90%이상, d: 75%이상, e: 75%미만.
     // 춤(depth)이 없는 단일치수 부재(슬래브 두께 등)는 면적 대신 그 치수 자체의 비율로 계산한다.
@@ -14325,8 +14369,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             `).join('');
         } else if (currentCat === '실측') {
             tbody.innerHTML = items.map((item, idx) => {
-                const designText = formatNdtMeasureDimText(item, 'design');
-                const measuredText = formatNdtMeasureDimText(item, 'measured');
+                const designText = formatNdtMeasureDimWithArea(item, 'design', ' × ', '<br>');
+                const measuredText = formatNdtMeasureDimWithArea(item, 'measured', ' × ', '<br>');
                 const ratioText = (item.sectionRatio !== undefined && item.sectionRatio !== null) ? `${item.sectionRatio.toFixed(1)}%` : '-';
                 return `
                 <tr>
@@ -37884,8 +37928,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                                 </thead>
                                 <tbody>
                                     ${pageItems.length > 0 ? pageItems.map(item => {
-                                        const designText = formatNdtMeasureDimText(item, 'design');
-                                        const measuredText = formatNdtMeasureDimText(item, 'measured');
+                                        const designText = formatNdtMeasureDimWithArea(item, 'design', ' × ', '<br>');
+                                        const measuredText = formatNdtMeasureDimWithArea(item, 'measured', ' × ', '<br>');
                                         const ratioText = (item.sectionRatio !== undefined && item.sectionRatio !== null) ? `${item.sectionRatio.toFixed(1)}%` : '-';
                                         return `
                                         <tr>
@@ -41341,8 +41385,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     if (measureItemsHwpx.length > 0) {
                         const tbl = findTblById(MEASURE_TBL_ID, ['마감상태', '설계', '실측']);
                         if (tbl) fillNdtTable(tbl, MEASURE_HEADER_ROWS, measureItemsHwpx.map((item, i) => {
-                            const designText = formatNdtMeasureDimText(item, 'design', '×');
-                            const measuredText = formatNdtMeasureDimText(item, 'measured', '×');
+                            const designText = formatNdtMeasureDimWithArea(item, 'design', '×');
+                            const measuredText = formatNdtMeasureDimWithArea(item, 'measured', '×');
                             const ratioText = (item.sectionRatio !== undefined && item.sectionRatio !== null) ? item.sectionRatio.toFixed(1) + '%' : '-';
                             return [
                                 item.no || (i + 1),
@@ -43767,8 +43811,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     if (measureItemsHwpx.length > 0) {
                         const tbl = findTblById(MEASURE_TBL_ID, ['마감상태', '설계', '실측']);
                         if (tbl) fillNdtTable(tbl, MEASURE_HEADER_ROWS, measureItemsHwpx.map((item, i) => {
-                            const designText = formatNdtMeasureDimText(item, 'design', '×');
-                            const measuredText = formatNdtMeasureDimText(item, 'measured', '×');
+                            const designText = formatNdtMeasureDimWithArea(item, 'design', '×');
+                            const measuredText = formatNdtMeasureDimWithArea(item, 'measured', '×');
                             const ratioText = (item.sectionRatio !== undefined && item.sectionRatio !== null) ? item.sectionRatio.toFixed(1) + '%' : '-';
                             return [
                                 item.no || (i + 1),
