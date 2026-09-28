@@ -100,6 +100,21 @@
         return { delta: delta, absDelta: absTilt, tiltRatio: tcalc.tiltRatio, grade: tcalc.grade, incomplete: false };
     }
 
+    /**
+     * 부재실측(단면 규격): s = (측정 단면적 ÷ 설계 단면적) × 100 — [표 6.24]
+     * a: 100% ≤ s, b: 95% ≤ s < 100%, c: 90% ≤ s < 95%, d: 75% ≤ s < 90%, e: s < 75%
+     */
+    function sectionRatioGrade(ratio) {
+        var r = Number(ratio);
+        if (ratio === null || ratio === undefined || ratio === '' || !Number.isFinite(r)) return null;
+        var code = 'e';
+        if (r >= 100) code = 'a';
+        else if (r >= 95) code = 'b';
+        else if (r >= 90) code = 'c';
+        else if (r >= 75) code = 'd';
+        return { ratio: r, code: code };
+    }
+
     /** 'a등급' / 'a' / 'A등급' 을 전부 'a'로 맞춘다. 못 읽으면 빈 문자열. */
     function gradeLetter(grade) {
         var s = String(grade == null ? '' : grade).trim().toLowerCase();
@@ -157,6 +172,7 @@
         calcTiltGrade: calcTiltGrade,
         calcMemberDispGrade: calcMemberDispGrade,
         calcGroupDisplacement: calcGroupDisplacement,
+        sectionRatioGrade: sectionRatioGrade,
         gradeLetter: gradeLetter,
         parseFireproofDesignThickness: parseFireproofDesignThickness,
         fireproofCf: fireproofCf,

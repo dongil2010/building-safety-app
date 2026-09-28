@@ -9064,6 +9064,14 @@ body:not(.bsa-tab-home) .home-fab-add-building {
     margin-top: 0.85rem;
 }
 
+/* 부재실측 평가 기준 (a: 100% ≤ s …) */
+.stats-ndt-note {
+    margin: 0.45rem 0 0;
+    font-size: 0.78rem;
+    color: #64748b;
+    line-height: 1.5;
+}
+
 .stats-ndt-lead {
     margin: 0.4rem 0 0;
     font-size: 0.94rem;

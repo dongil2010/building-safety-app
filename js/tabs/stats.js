@@ -164,6 +164,92 @@
         };
     }
 
+    /**
+     * 부재실측(단면 규격) 집계 — s = 측정 단면적 ÷ 설계 단면적 × 100 의 범위·평균과 등급별 개소.
+     * 등급 기준은 ndt-grade.js sectionRatioGrade 하나(부재실측 입력창과 같은 식).
+     */
+    function emptyMeasureSummary() {
+        return {
+            count: 0,
+            pending: 0, // 설계치는 적었는데 실측치가 없어 s를 못 구한 부재
+            grades: { a: 0, b: 0, a_or_b: 0, c: 0, d: 0, e: 0 },
+            ratioCount: 0,
+            ratioMin: null,
+            ratioMax: null,
+            ratioAvg: null,
+            ratioSum: 0
+        };
+    }
+
+    function looksLikeMeasure(item) {
+        return !!item && item.category === '실측';
+    }
+
+    /** 설계치를 하나라도 적었는지 — 적었는데 s가 없으면 "미산출"로 센다 */
+    function hasMeasureDesign(item) {
+        return ['designWidth', 'designDepth', 'designWeb', 'designFlange', 'designWebWidth', 'designFlangeWidth']
+            .some(function (k) { return toNum(item && item[k]) != null; });
+    }
+
+    function addMeasureSpot(out, item) {
+        var ratio = toNum(item && item.sectionRatio);
+        if (ratio == null) {
+            if (hasMeasureDesign(item)) out.pending += 1;
+            return out;
+        }
+        var g = ndtGrade && typeof ndtGrade.sectionRatioGrade === 'function' ? ndtGrade.sectionRatioGrade(ratio) : null;
+        var letter = g ? g.code : normalizeGrade(item.sectionGrade);
+        out.count += 1;
+        if (letter) out.grades[letter] = (out.grades[letter] || 0) + 1;
+        out.ratioCount += 1;
+        out.ratioSum += ratio;
+        out.ratioMin = minOf(out.ratioMin, ratio);
+        out.ratioMax = maxOf(out.ratioMax, ratio);
+        out.ratioAvg = out.ratioSum / out.ratioCount;
+        return out;
+    }
+
+    function mergeMeasureSummary(a, b) {
+        a = a || emptyMeasureSummary();
+        b = b || emptyMeasureSummary();
+        var grades = cloneGrades(a.grades);
+        var bg = cloneGrades(b.grades);
+        Object.keys(grades).forEach(function (k) { grades[k] += bg[k] || 0; });
+        delete grades.unknown;
+        var ratioCount = (a.ratioCount || 0) + (b.ratioCount || 0);
+        var ratioSum = (a.ratioSum || 0) + (b.ratioSum || 0);
+        return {
+            count: a.count + b.count,
+            pending: (a.pending || 0) + (b.pending || 0),
+            grades: grades,
+            ratioCount: ratioCount,
+            ratioMin: minOf(a.ratioMin, b.ratioMin),
+            ratioMax: maxOf(a.ratioMax, b.ratioMax),
+            ratioSum: ratioSum,
+            ratioAvg: ratioCount ? ratioSum / ratioCount : null
+        };
+    }
+
+    /** "s=92.1~101.3%" */
+    function formatSectionRatioRange(summary) {
+        if (!summary || !summary.ratioCount || summary.ratioMin == null) return '-';
+        var lo = Number(summary.ratioMin).toFixed(1);
+        var hi = Number(summary.ratioMax).toFixed(1);
+        return 's=' + (lo === hi ? lo : lo + '~' + hi) + '%';
+    }
+
+    function formatMeasureHeadline(label, summary) {
+        if (!summary || (!summary.count && !summary.pending)) return '';
+        var parts = [String(label || '') + eunNeun(label) + ' 부재실측 ' + summary.count + '개소'];
+        var range = formatSectionRatioRange(summary);
+        if (range !== '-') {
+            parts.push(range);
+            if (summary.ratioCount > 1) parts.push('평균 ' + Number(summary.ratioAvg).toFixed(1) + '%');
+        }
+        parts.push(formatGradeSpotCounts(summary));
+        return parts.join(' ');
+    }
+
     /** "1/250" → 250. 형식이 다르면 null. */
     function parseRatioInv(tiltRatio) {
         var m = String(tiltRatio == null ? '' : tiltRatio).match(/^1\s*\/\s*(\d+(?:\.\d+)?)$/);
@@ -768,11 +854,13 @@
             var strengthSamples = [];
             var carbSamples = [];
             var fireproofSamples = [];
+            var measure = emptyMeasureSummary();
             var tilt = emptyGradeSpotSummary();
             var memberDisp = emptyGradeSpotSummary();
             var settlement = emptyGradeSpotSummary();
             items.forEach(function (item) {
                 if (!item) return;
+                if (looksLikeMeasure(item)) addMeasureSpot(measure, item);
                 if (looksLikeStrength(item)) {
                     collectStrengthSamples(item).forEach(function (s) { strengthSamples.push(s); });
                 }
@@ -803,12 +891,13 @@
             var carbonation = summarizeCarbSamples(carbSamples);
             var fireproof = summarizeFireproofSamples(fireproofSamples);
             var hasSpot = tilt.count || tilt.pending || memberDisp.count || memberDisp.pending
-                || settlement.count || settlement.pending;
+                || settlement.count || settlement.pending || measure.count || measure.pending;
             if (!strength.count && !carbonation.count && !fireproof.count && !hasSpot) return;
             floorRows.push({
                 floorCode: floorCode,
                 floorLabel: getFloorLabel(floorCode),
                 coarseGroup: getCoarseFloorGroup(floorCode),
+                measure: measure,
                 strength: strength,
                 carbonation: carbonation,
                 fireproof: fireproof,
@@ -828,6 +917,7 @@
                     floorLabel: g.label,
                     sort: g.sort,
                     floors: [],
+                    measure: emptyMeasureSummary(),
                     strength: emptyStrengthSummary(),
                     carbonation: emptyCarbSummary(),
                     fireproof: emptyFireproofSummary(),
@@ -838,6 +928,7 @@
             }
             var bucket = groupMap[g.key];
             bucket.floors.push(fr.floorLabel);
+            bucket.measure = mergeMeasureSummary(bucket.measure, fr.measure);
             bucket.strength = mergeStrengthSummary(bucket.strength, fr.strength);
             bucket.carbonation = mergeCarbSummary(bucket.carbonation, fr.carbonation);
             bucket.fireproof = mergeFireproofSummary(bucket.fireproof, fr.fireproof);
@@ -853,6 +944,7 @@
             label: '전체',
             floorLabel: '전체',
             floors: floorRows.map(function (fr) { return fr.floorLabel; }),
+            measure: emptyMeasureSummary(),
             strength: emptyStrengthSummary(),
             carbonation: emptyCarbSummary(),
             fireproof: emptyFireproofSummary(),
@@ -861,6 +953,7 @@
             settlement: emptyGradeSpotSummary()
         };
         floorRows.forEach(function (fr) {
+            overall.measure = mergeMeasureSummary(overall.measure, fr.measure);
             overall.strength = mergeStrengthSummary(overall.strength, fr.strength);
             overall.carbonation = mergeCarbSummary(overall.carbonation, fr.carbonation);
             overall.fireproof = mergeFireproofSummary(overall.fireproof, fr.fireproof);
@@ -895,6 +988,7 @@
             defectMatrix: !isNdt,
             defectFilters: !isNdt,
             viewChips: !isNdt,
+            ndtMeasure: isNdt,
             ndtStrength: isNdt,
             ndtCarb: isNdt,
             ndtFireproof: isNdt,
@@ -904,7 +998,7 @@
         };
     }
 
-    var NDT_KINDS = ['strength', 'carbonation', 'fireproof', 'tilt', 'memberDisp', 'settlement'];
+    var NDT_KINDS = ['measure', 'strength', 'carbonation', 'fireproof', 'tilt', 'memberDisp', 'settlement'];
 
     /** 미산출(레벨 미입력) 구역만 있는 층도 표에 남긴다 — 빼면 "잰 적 없음"과 구별이 안 된다 */
     function hasNdtValue(summary) {
@@ -943,6 +1037,11 @@
         summarizeFireproofSamples: summarizeFireproofSamples,
         emptyGradeSpotSummary: emptyGradeSpotSummary,
         addGradeSpot: addGradeSpot,
+        emptyMeasureSummary: emptyMeasureSummary,
+        addMeasureSpot: addMeasureSpot,
+        mergeMeasureSummary: mergeMeasureSummary,
+        formatSectionRatioRange: formatSectionRatioRange,
+        formatMeasureHeadline: formatMeasureHeadline,
         mergeGradeSpotSummary: mergeGradeSpotSummary,
         parseRatioInv: parseRatioInv,
         parseMeasuredDelta: parseMeasuredDelta,
@@ -1455,9 +1554,14 @@
             [document.querySelector('#tab-stats .stats-filter-row'), vis.defectFilters],
             [viewChips, vis.viewChips],
             [toolbar, vis.viewChips || vis.defectFilters],
+            [document.getElementById('statsNdtMeasureSection'), vis.ndtMeasure],
             [document.getElementById('statsNdtStrengthSection'), vis.ndtStrength],
             [document.getElementById('statsNdtCarbSection'), vis.ndtCarb],
-            [document.getElementById('statsNdtFireproofSection'), vis.ndtFireproof]
+            [document.getElementById('statsNdtFireproofSection'), vis.ndtFireproof],
+            // 기울기·부동침하·부재처짐도 비파괴 쪽에서만 — 빠져 있어서 상태조사 화면 아래에도 보였다
+            [document.getElementById('statsNdtTiltSection'), vis.ndtTilt],
+            [document.getElementById('statsNdtSettlementSection'), vis.ndtSettlement],
+            [document.getElementById('statsNdtMemberDispSection'), vis.ndtMemberDisp]
         ];
         toggles.forEach(function (pair) {
             if (pair[0]) pair[0].hidden = !pair[1];
@@ -1473,6 +1577,14 @@
             strength.id = 'statsNdtStrengthSection';
             strength.className = 'stats-panel stats-ndt-panel';
             page.appendChild(strength);
+        }
+        // 부재실측은 보고서 순서대로 강도보다 먼저
+        var measure = document.getElementById('statsNdtMeasureSection');
+        if (!measure) {
+            measure = document.createElement('div');
+            measure.id = 'statsNdtMeasureSection';
+            measure.className = 'stats-panel stats-ndt-panel';
+            page.insertBefore(measure, strength);
         }
         var carb = document.getElementById('statsNdtCarbSection');
         if (!carb) {
@@ -1504,6 +1616,7 @@
             spots[s.key] = el;
         });
         return {
+            measure: measure,
             strength: strength,
             carb: carb,
             fireproof: fireproof,
@@ -1545,6 +1658,45 @@
         return Math.round(s.ratioAvg) + '%' + (s.ratioMin != null && s.ratioMax != null && s.ratioMin !== s.ratioMax
             ? ' <span class="stats-ndt-sub">(' + Math.round(s.ratioMin) + '~' + Math.round(s.ratioMax) + '%)</span>'
             : '');
+    }
+
+    /** 부재실측: s(측정/설계 단면적) 범위·평균 + 등급별 개소, 아래에 평가 기준 */
+    function renderNdtMeasureSection(root, payload) {
+        if (!root) return;
+        var combined = (ndtStats.ndtCombinedRows || function () { return { floors: [], overall: null }; })(payload, 'measure');
+        var floors = combined.floors || [];
+        var overall = combined.overall;
+        var title = '부재실측';
+        if (!floors.length && !overall) {
+            root.innerHTML = '<div class="stats-panel-head"><h3 class="stats-panel-title">' + esc(title) + '</h3></div>'
+                + '<p class="stats-empty">표시할 부재실측 측정값이 없습니다.</p>';
+            return;
+        }
+        var lead = overall && ndtStats.formatMeasureHeadline ? ndtStats.formatMeasureHeadline('전체', overall.measure) : '';
+        var rowHtml = function (label, s, trCls) {
+            var countLabel = s.count + (s.pending ? ' <span class="stats-ndt-sub">(미산출 ' + s.pending + ')</span>' : '');
+            var avg = s.ratioCount ? Number(s.ratioAvg).toFixed(1) + '%' : '-';
+            return '<tr' + (trCls ? ' class="' + trCls + '"' : '') + '>'
+                + '<th scope="row">' + esc(label) + '</th>'
+                + '<td>' + countLabel + '</td>'
+                + '<td class="stats-cell-hit">' + esc(ndtStats.formatSectionRatioRange(s)) + '</td>'
+                + '<td class="stats-cell-sum">' + esc(avg) + '</td>'
+                + '<td class="stats-cell-sum stats-ndt-grades">' + esc(ndtStats.formatGradeSpotCounts(s)) + '</td>'
+                + '</tr>';
+        };
+        var body = floors.map(function (row) {
+            var isCurrent = row.floorCode === payload.currentFloor;
+            return rowHtml(row.floorLabel || row.label, row.measure, isCurrent ? 'stats-row-current' : '');
+        }).join('');
+        if (overall) body += rowHtml('전체', overall.measure, 'stats-ndt-total');
+        root.innerHTML = '<div class="stats-panel-head"><h3 class="stats-panel-title">' + esc(title) + '</h3>'
+            + (lead ? '<p class="stats-ndt-lead">' + esc(lead) + '</p>' : '')
+            + '</div>'
+            + '<div class="table-responsive stats-table-wrap"><table class="data-table stats-matrix-table stats-ndt-table">'
+            + '<thead><tr><th>층</th><th>개소</th><th>s(측정/설계 단면적)</th><th>평균</th><th>등급별 개소</th></tr></thead>'
+            + '<tbody>' + body + '</tbody></table></div>'
+            + '<p class="stats-ndt-note">a: 100% ≤ s · b: 95% ≤ s &lt; 100% · c: 90% ≤ s &lt; 95% · d: 75% ≤ s &lt; 90% · e: s &lt; 75%'
+            + '<br>* s = (측정 단면적 ÷ 설계 단면적) × 100%</p>';
     }
 
     function renderNdtStrengthSection(root, payload) {
@@ -1727,6 +1879,10 @@
         var mount = ensureNdtStatsMount();
         if (!mount) return;
         if (!bldg || !ndtStats.buildNdtStatsPayload) {
+            if (mount.measure) {
+                mount.measure.innerHTML = '<div class="stats-panel-head"><h3 class="stats-panel-title">부재실측</h3></div>'
+                    + '<p class="stats-empty">건물을 선택하면 부재실측 통계를 볼 수 있습니다.</p>';
+            }
             mount.strength.innerHTML = '<div class="stats-panel-head"><h3 class="stats-panel-title">콘크리트 강도</h3></div>'
                 + '<p class="stats-empty">건물을 선택하면 강도 통계를 볼 수 있습니다.</p>';
             mount.carb.innerHTML = '<div class="stats-panel-head"><h3 class="stats-panel-title">탄산화</h3></div>'
@@ -1743,6 +1899,7 @@
             getFloorLabel: function (code) { return getFloorLabel(code, bldg); },
             currentFloor: window.state && window.state.currentFloor
         });
+        renderNdtMeasureSection(mount.measure, payload);
         renderNdtStrengthSection(mount.strength, payload);
         renderNdtCarbSection(mount.carb, payload);
         renderNdtFireproofSection(mount.fireproof, payload);
@@ -1816,6 +1973,7 @@
             '구조 부재(기둥·보(G)·보(B)·G/B 미지정 보·슬래브·RC벽체·조적벽체) 클릭 시 층별 최대 균열폭 표시',
             '경사·수직·수평균열은 "균열"로 통합 집계',
             '비파괴조사: 층별과 전체를 한 표에 (층묶음·보기 칩 없음)',
+            '부재실측: s(측정/설계 단면적) 범위·평균, a~e 등급별 개소',
             '콘크리트 강도: 범위·평균·측정강도/설계강도 평균·등급',
             '탄산화: 깊이 범위·평균, 잔여피복·잔존수명은 범위와 평균',
             '내화피복두께: 부재당 최대 6개소 한 평균, 층별·전체 범위·평균'

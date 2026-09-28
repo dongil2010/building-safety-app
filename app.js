@@ -11559,13 +11559,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         return gradeFromSectionRatio((measuredArea / designArea) * 100);
     }
 
+    // 등급 기준은 통계와 같이 쓰려고 js/core/ndt-grade.js 한 곳에 둔다
     function gradeFromSectionRatio(ratio) {
-        let code = 'e';
-        if (ratio >= 100) code = 'a';
-        else if (ratio >= 95) code = 'b';
-        else if (ratio >= 90) code = 'c';
-        else if (ratio >= 75) code = 'd';
-        return { ratio, code };
+        return window.BSA.ndtGrade.sectionRatioGrade(ratio) || { ratio, code: 'e' };
     }
 
     // 레벨 미입력(null/빈값) 허용 — 마크 우선 UX에서 먼저 지점만 찍고 나중에 일괄 입력
