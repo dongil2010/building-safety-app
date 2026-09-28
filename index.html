@@ -427,6 +427,14 @@
                                 <i class="fa-solid fa-pen-to-square"></i>
                                 <span id="mapBulkEditToolbarLabel">일괄 수정</span>
                             </button>
+                            <button type="button" id="btnMergeSelectedDefects" class="icon-pill-btn map-toolbar-merge" title="선택한 마킹을 가장 작은 번호칸 하나로 통합" hidden disabled>
+                                <i class="fa-solid fa-object-group"></i>
+                                <span>통합</span>
+                            </button>
+                            <button type="button" id="btnUnmergeSelectedDefects" class="icon-pill-btn map-toolbar-merge" title="통합한 마킹을 원래 번호·위치로 되돌림" hidden disabled>
+                                <i class="fa-solid fa-object-ungroup"></i>
+                                <span>통합 해제</span>
+                            </button>
                             <button type="button" id="btnDeleteSelectedDefects" class="icon-pill-btn icon-pill-danger map-toolbar-delete-selected" title="선택한 결함 삭제" hidden disabled>
                                 <i class="fa-solid fa-trash-can"></i>
                                 <span id="mapSelectionToolbarLabel">선택 삭제</span>
@@ -452,6 +460,14 @@
                             <button type="button" class="mobile-fab-btn" id="mobileBtnBulkEditSelected" title="선택한 결함 일괄 수정" hidden disabled>
                                 <i class="fa-solid fa-pen-to-square"></i>
                                 <span id="mobileMapBulkEditLabel">일괄 수정</span>
+                            </button>
+                            <button type="button" class="mobile-fab-btn mobile-fab-merge" id="mobileBtnMergeSelected" title="선택한 마킹을 가장 작은 번호칸 하나로 통합" hidden disabled>
+                                <i class="fa-solid fa-object-group"></i>
+                                <span>통합</span>
+                            </button>
+                            <button type="button" class="mobile-fab-btn mobile-fab-merge" id="mobileBtnUnmergeSelected" title="통합한 마킹을 원래 번호·위치로 되돌림" hidden disabled>
+                                <i class="fa-solid fa-object-ungroup"></i>
+                                <span>통합해제</span>
                             </button>
                             <button type="button" class="mobile-fab-btn mobile-fab-danger" id="mobileBtnDeleteSelected" title="선택한 결함 삭제" hidden disabled>
                                 <i class="fa-solid fa-trash-can"></i>
@@ -3293,6 +3309,7 @@
     <script src="js/shared/hwpx-ndt-maps.js?v=20260928_200232"></script>
     <script src="js/shared/cad-unmarked-place.js?v=20260928_200232"></script>
     <script src="js/shared/arrow-survey-number.js?v=20260928_200232"></script>
+    <script src="js/shared/defect-merge.js?v=20260928_200232"></script>
     <script src="js/shared/korean-text-wrap.js?v=20260928_200232"></script>
     <script src="js/shared/hwpx-import.js?v=20260928_200232"></script>
     <script src="js/shared/hwpx-validate.js?v=20260928_200232"></script>

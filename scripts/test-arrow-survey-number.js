@@ -88,7 +88,19 @@ function testAddingArrowDoesNotAddSuffixRows() {
     assert.strictEqual(countSurveyTableRows([parent, numberedArrow, numberedExtra]), 2);
 }
 
+function testMergedArrowsAfterOriginals() {
+    const parent = { id: 'zzz', groupId: 'g', no: 'NO.03' };
+    const m2 = { id: 'aaa', groupId: 'g', no: 'NO.03', surveyNumbered: true, mergedFrom: { no: 'NO.09', order: 2 } };
+    const m1 = { id: 'bbb', groupId: 'g', no: 'NO.03', surveyNumbered: true, mergedFrom: { no: 'NO.05', order: 1 } };
+    const unnumbered = { id: 'ccc', groupId: 'g', no: 'NO.03', surveyNumbered: false };
+    const sorted = [m2, unnumbered, m1, parent].sort(api.compareMarkingForRepresentative);
+    assert.deepStrictEqual(sorted.map((d) => d.id), ['zzz', 'bbb', 'aaa', 'ccc']);
+    assert.strictEqual(api.preferNumberedMarkingRepresentative([m1, m2, parent]).id, 'zzz');
+    assert.strictEqual(api.compareMarkingForRepresentative({ id: 'x', mergedFrom: null }, parent), 0);
+}
+
 testLegacyIsNumbered();
+testMergedArrowsAfterOriginals();
 testNewExtraArrowIsUnnumbered();
 testAssignOnlyOnExtraUnnumbered();
 testPreferNumberedRepresentative();

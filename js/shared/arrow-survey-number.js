@@ -30,8 +30,20 @@
         return isUnnumberedArrowMarking(d) ? 1 : 0;
     }
 
+    /** 결함 통합으로 들어온 화살표(mergedFrom)는 원래 화살표 뒤, 통합 순서(원래 번호 순)대로 */
+    function mergedSortRank(d) {
+        return (d && !d.surveyExtra && d.mergedFrom && typeof d.mergedFrom === 'object') ? 1 : 0;
+    }
+
     function compareMarkingForRepresentative(a, b) {
-        return unnumberedSortRank(a) - unnumberedSortRank(b);
+        const u = unnumberedSortRank(a) - unnumberedSortRank(b);
+        if (u !== 0) return u;
+        const m = mergedSortRank(a) - mergedSortRank(b);
+        if (m !== 0) return m;
+        if (mergedSortRank(a) && mergedSortRank(b)) {
+            return (Number(a.mergedFrom.order) || 0) - (Number(b.mergedFrom.order) || 0);
+        }
+        return 0;
     }
 
     function preferNumberedMarkingRepresentative(members, tieBreak) {
@@ -75,6 +87,7 @@
         extraArrowCreateFields,
         markingMembersOf,
         unnumberedSortRank,
+        mergedSortRank,
         compareMarkingForRepresentative,
         preferNumberedMarkingRepresentative,
         canAssignSurveyNumber,

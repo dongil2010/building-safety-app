@@ -364,7 +364,7 @@ if (fs.existsSync(appPath)) {
     assert.ok(rowFn.includes('const loc = gridLocCell || extractDefectLocationDetail(d.location, ctx.floorCode)'), '1·2종 위치 칸: 행·열 있으면 두 줄, 없으면 예전 그대로');
     assert.ok(autoSec.includes('G.reportLocationCell({'), '위치 칸은 모듈 규칙으로');
     assert.ok(app.includes('white-space:pre-line;">${escapeReportHtml(text)}</td>'), 'PDF 표는 줄바꿈 유지');
-    assert.strictEqual((app.match(/mergeGroupGridLocProp\(members\) : \{\}/g) || []).length, 2, '묶음 마킹도 행·열 모음');
+    assert.strictEqual((app.match(/mergeGroupGridLocProp\((?:members|markingMembers)\) : \{\}/g) || []).length, 2, '묶음 마킹도 행·열 모음');
     assert.ok(app.includes('<div class="survey-grid-loc"'), '화면 상태조사표 위치 칸 첫 줄');
     // 실제 행 값 함수로 확인(1·2종 위치 칸 = values[1])
     const takeFn = (name) => {

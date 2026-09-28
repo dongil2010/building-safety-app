@@ -18528,9 +18528,15 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const api = arrowSurveyNumberApi();
         const slots = [];
         for (let slot = 1; slot <= slotCount; slot++) {
-            const formMember = slot === 1
+            let formMember = slot === 1
                 ? markingMembers[0]
                 : (extras[slot - 2] || markingMembers[slot - 1] || null);
+            // 결함 통합으로 생긴 결함표 행은 내용·사진이 원래 마킹(통합 화살표)에 있다 → 그 마킹을 연다
+            if (formMember && formMember.surveyExtra && formMember.mergeSourceId) {
+                const mApi = defectMergeApi();
+                const src = mApi ? mApi.findMergeSource(markingMembers, formMember) : null;
+                if (src) formMember = src;
+            }
             const dirMember = markingMembers[slot - 1] || null;
             if (!formMember) continue;
             const label = api && typeof api.floatSlotLabel === 'function'
@@ -20871,6 +20877,26 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
     // "마킹 추가"로 같은 결함을 여러 위치에 표시한 그룹(groupId 공유)을 목록/보고서용으로 한 행으로 합친다.
     // 위치는 지점별 위치를 ' / '로 이어붙이고, 진행/누수/전회차 여부는 멤버 중 하나라도 해당되면 true로 간주.
+    // --- 결함 통합(여러 마킹 → 가장 작은 번호칸 하나, 기존 「화살표 추가 + 번호 부여」 모델) ---
+    function defectMergeApi() {
+        return (window.BSA && window.BSA.shared && window.BSA.shared.defectMerge) || null;
+    }
+
+    /** 그룹 X-1 행에 넣을 마킹: 자기 결함표 행(X-k)이 따로 있는 통합 화살표는 뺀다 */
+    function markingMembersForGroupRow(list, members) {
+        const api = defectMergeApi();
+        if (!api || !Array.isArray(members)) return members;
+        const kept = members.filter((m) => !api.hasLinkedMergeRow(list, m));
+        return kept.length ? kept : members;
+    }
+
+    /** 통합으로 생긴 결함표 행(X-k) → 원래 마킹의 내용·사진으로 만든 보고서 행(행 id = 원래 마킹 id) */
+    function surveyExtraRowFor(list, d) {
+        const api = defectMergeApi();
+        if (!api || !d || !d.surveyExtra || !d.mergeSourceId) return d;
+        return api.mergedExtraReportRow(list, d) || d;
+    }
+
     function getDefectMarkingGroupMembers(groupId) {
         if (!groupId || !state.currentBuildingId) return [];
         const key = `${state.currentBuildingId}_${state.currentFloor}`;
@@ -21650,7 +21676,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             const skipApi = arrowSurveyNumberApi();
             if (skipApi && skipApi.shouldSkipOrphanUnnumberedInSurveyList(d)) return;
             if (d.surveyExtra) {
-                rows.push(d);
+                rows.push(surveyExtraRowFor(full, d));
                 return;
             }
             const parts = parseDefectNoParts(d);
@@ -21663,7 +21689,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 if (seenMarkingGroups.has(d.groupId)) return;
                 seenMarkingGroups.add(d.groupId);
                 if (parts.main !== Number.MAX_SAFE_INTEGER) seenMainMarking.add(parts.main);
-                const markingMembers = full.filter((m) => m.groupId === d.groupId && !m.surveyExtra);
+                const markingMembers = markingMembersForGroupRow(full, full.filter((m) => m.groupId === d.groupId && !m.surveyExtra));
                 if (!markingMembers.length) return;
                 const extrasInGroup = full.filter((m) => m.groupId === d.groupId && m.surveyExtra);
                 const rep = pickDefectGroupRepresentative(markingMembers) || d;
@@ -21680,7 +21706,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     ...rep,
                     no: listNo,
                     location: uniqLoc.length > 0 ? uniqLoc.join(' / ') : rep.location,
-                    ...((typeof mergeGroupGridLocProp === 'function') ? mergeGroupGridLocProp(members) : {}),
+                    ...((typeof mergeGroupGridLocProp === 'function') ? mergeGroupGridLocProp(markingMembers) : {}),
                     isProgress: markingMembers.some((m) => m.isProgress),
                     isLeak: markingMembers.some((m) => m.isLeak),
                     isOpeningCrack: markingMembers.some((m) => m.isOpeningCrack),
@@ -28495,6 +28521,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             bulkMobileBtn.disabled = n < 2;
             bulkMobileBtn.title = n > 1 ? `선택한 결함 ${n}건 일괄 수정` : '2개 이상 선택 시 일괄 수정';
         }
+        syncDefectMergeButtons();
         // 결함목록: 선택됨은 바깥 고정 칸 — 본 목록 scrollTop은 선택 변경으로 움직이지 않음
         // scrollToSelection 플래그는 호환용(렌더러가 목록 점프에 쓰지 않음)
         if (typeof renderDefectListPanel === 'function') {
@@ -28504,6 +28531,53 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         // 조사항목 창 OFF: 좌상단 팝업으로 선택 결함 내용·폭 표시
         if (typeof updateMapSelectedDefectPopup === 'function') updateMapSelectedDefectPopup();
         if (typeof syncMobileAddMarkingFab === 'function') syncMobileAddMarkingFab();
+    }
+
+    /** 선택 상태 → 「통합」(마킹 2개 이상) · 「통합 해제」(통합된 번호칸 하나) */
+    function getDefectMergeSelectionState() {
+        const out = { units: 0, plan: null, unmergeGroupId: null, list: null, key: null };
+        const api = defectMergeApi();
+        if (!api || !state.currentBuildingId || !selectedDefectIds.size) return out;
+        const key = `${state.currentBuildingId}_${state.currentFloor}`;
+        const list = state.defects[key] || [];
+        const ids = [...selectedDefectIds];
+        if (!ids.every((id) => list.some((d) => d && d.id === id))) return out;
+        const units = api.collectMergeUnits(list, ids);
+        out.units = units.length;
+        out.list = list;
+        out.key = key;
+        if (units.length >= 2) out.plan = api.planMerge(list, ids);
+        if (units.length === 1) {
+            const gids = api.mergedGroupIdsInSelection(list, ids);
+            if (gids.length === 1) out.unmergeGroupId = gids[0];
+        }
+        return out;
+    }
+
+    function syncDefectMergeButtons() {
+        const st = getDefectMergeSelectionState();
+        const showMerge = st.units >= 2;
+        const showUnmerge = !!st.unmergeGroupId;
+        const mergeTitle = showMerge
+            ? (st.plan && st.plan.ok
+                ? `선택한 마킹 ${st.units}개를 가장 작은 번호칸 하나로 통합`
+                : ((st.plan && st.plan.reason) || '통합할 수 없습니다'))
+            : '마킹 2개 이상 선택 시 통합';
+        ['btnMergeSelectedDefects', 'mobileBtnMergeSelected'].forEach((id) => {
+            const b = document.getElementById(id);
+            if (!b) return;
+            b.hidden = !showMerge;
+            b.disabled = !showMerge;
+            b.title = mergeTitle;
+        });
+        ['btnUnmergeSelectedDefects', 'mobileBtnUnmergeSelected'].forEach((id) => {
+            const b = document.getElementById(id);
+            if (!b) return;
+            b.hidden = !showUnmerge;
+            b.disabled = !showUnmerge;
+        });
+        const fab = document.getElementById('mobileMapFabBar');
+        if (fab) fab.classList.toggle('has-merge', showMerge || showUnmerge);
     }
 
     function syncMobileAddMarkingFab() {
@@ -32727,6 +32801,133 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         );
     };
 
+    function mergeNoLabel(n) {
+        return formatDefectNoSeq(n).replace(/^NO\.?\s*/i, '');
+    }
+
+    function touchMergedDefect(d) {
+        touchDefectUpdatedAt(d);
+        touchDefectPositionUpdatedAt(d);
+    }
+
+    /** 결함 통합: 선택한 마킹들을 가장 작은 번호칸 하나로(나머지는 화살표 + 번호 부여 → X-2, X-3 …) */
+    async function mergeSelectedDefects() {
+        const api = defectMergeApi();
+        if (!api || !state.currentBuildingId) return;
+        if (typeof flushDefectAutoApply === 'function') {
+            try { await flushDefectAutoApply(); } catch (_e) { /* ignore */ }
+        }
+        const st = getDefectMergeSelectionState();
+        if (!st.list) {
+            window.showToast?.('현재 도면(같은 층)의 마킹만 통합할 수 있습니다.', 'info', 3000);
+            return;
+        }
+        const plan = st.plan || api.planMerge(st.list, [...selectedDefectIds]);
+        if (!plan.ok) {
+            window.showToast?.(plan.reason || '통합할 수 없습니다.', 'info', 4000);
+            return;
+        }
+        const list = st.list;
+        const baseLabel = mergeNoLabel(plan.baseMain);
+        const existingExtras = plan.base.members.filter((m) => m && m.surveyExtra).length;
+        const newRows = plan.others.map((u, i) => `${baseLabel}-${existingExtras + 2 + i}(원래 ${mergeNoLabel(u.main)})`);
+        const msg = `선택한 마킹 ${plan.others.length + 1}개를 NO.${baseLabel} 번호칸 하나로 통합할까요?\n\n`
+            + `· NO.${baseLabel} 번호칸 하나에서 화살표가 각 결함 자리를 가리킵니다.\n`
+            + `· 조사표·한글·PDF·엑셀: ${baseLabel}-1, ${newRows.join(', ')}\n`
+            + `· 내용·사진은 각 결함에 그대로 남습니다.\n`
+            + `· 비는 번호(${plan.others.map((u) => mergeNoLabel(u.main)).join(', ')})는 당기지 않습니다(필요하면 「빈 칸 땡기기」).\n`
+            + `· 되돌리기 또는 「통합 해제」로 되돌릴 수 있습니다.`;
+        if (!window.confirm(msg)) return;
+        pushDefectHistory();
+        const res = api.applyMerge(list, plan, {
+            boxOf: (unit) => {
+                const repM = pickDefectGroupRepresentative(unit.marking) || unit.defect;
+                ensureDefectMarkingGroup(repM);
+                return { x: repM.x, y: repM.y, groupId: repM.groupId, groupNo: repM.groupNo };
+            },
+            cloneExtra: (src) => cloneDefectForSurveyTableRow(src),
+            areaAttach: (bx, by, d) => (typeof getAreaCenterBorderAttachDefect === 'function'
+                ? getAreaCenterBorderAttachDefect(bx, by, d)
+                : null),
+            touch: touchMergedDefect
+        });
+        const gid = res.base && res.base.groupId;
+        if (gid) normalizeDefectGroupNos(list, gid);
+        selectedDefectIds.clear();
+        if (gid) {
+            list.forEach((d) => { if (d && d.groupId === gid && !d.surveyExtra) selectedDefectIds.add(d.id); });
+        }
+        saveStateToLocalStorage();
+        if (typeof renderSurveyTable === 'function') renderSurveyTable();
+        drawCanvas();
+        updateMapSelectionBar({ scrollToSelection: false });
+        const rows = res.extras.map((e) => String(e.no || '').replace(/^NO\.?\s*/i, '')).filter(Boolean);
+        window.showToast?.(
+            `NO.${baseLabel}에 통합 · 조사표 ${baseLabel}-1${rows.length ? ', ' + rows.join(', ') : ''} 행`,
+            'success',
+            3600
+        );
+    }
+    window.mergeSelectedDefects = mergeSelectedDefects;
+
+    /** 통합 해제: 통합된 화살표를 원래 번호(비었으면)·위치로 되돌리고 X-k 결함표 행을 지운다 */
+    async function unmergeSelectedDefects() {
+        const api = defectMergeApi();
+        if (!api || !state.currentBuildingId) return;
+        if (typeof flushDefectAutoApply === 'function') {
+            try { await flushDefectAutoApply(); } catch (_e) { /* ignore */ }
+        }
+        const st = getDefectMergeSelectionState();
+        if (!st.list || !st.unmergeGroupId) {
+            window.showToast?.('통합 해제할 번호칸(통합된 마킹) 하나를 선택하세요.', 'info', 3000);
+            return;
+        }
+        const list = st.list;
+        const key = st.key;
+        const gid = st.unmergeGroupId;
+        const plan = api.planUnmerge(list, gid);
+        if (!plan.ok) {
+            window.showToast?.(plan.reason || '통합 해제할 수 없습니다.', 'info', 4000);
+            return;
+        }
+        const baseAny = list.find((d) => d && d.groupId === gid && !d.surveyExtra);
+        const baseLabel = mergeNoLabel(api.mainNoOf(baseAny));
+        const origs = plan.pairs.map((p) => mergeNoLabel(api.mainNoOf({ no: (p.arrow.mergedFrom || {}).no })));
+        const msg = `NO.${baseLabel}에 통합된 마킹 ${plan.pairs.length}개(원래 ${origs.join(', ')})를 원래 번호·위치로 되돌릴까요?\n\n`
+            + '· 원래 번호를 이미 다른 마킹이 쓰고 있으면 가장 작은 빈 번호를 씁니다.\n'
+            + '· 되돌리기로 다시 통합 상태로 돌아갈 수 있습니다.';
+        if (!window.confirm(msg)) return;
+        pushDefectHistory();
+        const removeIds = new Set();
+        const restored = api.applyUnmerge(list, plan, {
+            formatNo: (n) => formatDefectNoSeq(n),
+            removeExtra: (e) => {
+                removeIds.add(e.id);
+                trackDefectDeletion(key, e.id);
+            },
+            touch: touchMergedDefect
+        });
+        for (let i = list.length - 1; i >= 0; i--) {
+            if (list[i] && removeIds.has(list[i].id)) list.splice(i, 1);
+        }
+        normalizeDefectGroupNos(list, gid);
+        collapseSingletonDefectGroups(list);
+        selectedDefectIds.clear();
+        restored.forEach((r) => selectedDefectIds.add(r.id));
+        list.forEach((d) => { if (d && d.groupId === gid && !d.surveyExtra) selectedDefectIds.add(d.id); });
+        if (baseAny && !baseAny.groupId) selectedDefectIds.add(baseAny.id);
+        saveStateToLocalStorage();
+        if (typeof renderSurveyTable === 'function') renderSurveyTable();
+        drawCanvas();
+        updateMapSelectionBar({ scrollToSelection: false });
+        window.showToast?.(
+            `통합 해제 · ${restored.map((r) => String(r.no || '').replace(/^NO\.?\s*/i, '')).join(', ')} 복원`,
+            'success',
+            3200
+        );
+    }
+    window.unmergeSelectedDefects = unmergeSelectedDefects;
+
     const btnAddAnotherMarking = document.getElementById('btnAddAnotherMarking');
     if (btnAddAnotherMarking) {
         btnAddAnotherMarking.addEventListener('click', () => { handleAddAnotherMarking(); });
@@ -35237,6 +35438,21 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             openBulkDefectEditModal();
         });
     }
+    [
+        ['btnMergeSelectedDefects', () => mergeSelectedDefects()],
+        ['mobileBtnMergeSelected', () => mergeSelectedDefects()],
+        ['btnUnmergeSelectedDefects', () => unmergeSelectedDefects()],
+        ['mobileBtnUnmergeSelected', () => unmergeSelectedDefects()]
+    ].forEach(([id, fn]) => {
+        const b = document.getElementById(id);
+        if (!b) return;
+        b.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            if (b.disabled || b.hidden) return;
+            fn();
+        });
+    });
 
     // Ctrl+Z / Ctrl+Y 키보드 단축키 (입력 필드에 포커스가 있을 때는 무시)
     // Delete/Backspace 삭제는 위 도면·비파괴 단축키 핸들러에서 처리 (수정창 열린 상태 포함)
@@ -36524,7 +36740,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             const skipApi = arrowSurveyNumberApi();
             if (skipApi && skipApi.shouldSkipOrphanUnnumberedInSurveyList(d)) return;
             if (d.surveyExtra) {
-                result.push(d);
+                result.push(surveyExtraRowFor(list, d));
                 return;
             }
             const parts = parseDefectNoParts(d);
@@ -36537,7 +36753,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 if (seenMarkingGroups.has(d.groupId)) return;
                 seenMarkingGroups.add(d.groupId);
                 if (parts.main !== Number.MAX_SAFE_INTEGER) seenMainMarking.add(parts.main);
-                const members = list.filter((m) => m.groupId === d.groupId && !m.surveyExtra);
+                const members = markingMembersForGroupRow(list, list.filter((m) => m.groupId === d.groupId && !m.surveyExtra));
                 if (!members.length) return;
                 const extrasInGroup = list.filter((m) => m.groupId === d.groupId && m.surveyExtra);
                 const rep = pickDefectGroupRepresentative(members) || members[0];
@@ -36912,7 +37128,23 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             ? consolidated._groupMemberIds.slice()
             : [defectId];
         const isGroup = memberIds.length > 1;
-        const targetIds = (field === 'location' && isGroup) ? [defectId] : memberIds;
+        let targetIds = (field === 'location' && isGroup) ? [defectId] : memberIds;
+        // 결함 통합: X-k 행(원래 마킹)은 자기만 고치고, X-1 행 수정은 X-k 쪽(통합 화살표·결함표 행)에 번지지 않게
+        const mergeApiInline = defectMergeApi();
+        if (mergeApiInline) {
+            const self = list.find((d) => d && d.id === defectId);
+            if (self && ((self.surveyExtra && self.mergeSourceId) || mergeApiInline.hasLinkedMergeRow(list, self))) {
+                targetIds = [defectId];
+            } else {
+                targetIds = targetIds.filter((id) => {
+                    const m = list.find((d) => d && d.id === id);
+                    if (!m) return false;
+                    if (m.surveyExtra && m.mergeSourceId && mergeApiInline.findMergeSource(list, m)) return false;
+                    return !mergeApiInline.hasLinkedMergeRow(list, m);
+                });
+                if (!targetIds.length) targetIds = [defectId];
+            }
+        }
         const value = (rawValue == null) ? '' : String(rawValue).replace(/\s*\n+\s*/g, ' ').trim();
 
         // 조사표에서 고친 값도 수정 시각을 올려야 동기화에서 이긴다 — 병합은 시각이 같으면 서버를 따른다
@@ -46459,7 +46691,17 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 }
             });
         }
-        state.defects[key] = state.defects[key].filter(d => d.id !== id);
+        // 결함 통합 화살표를 지우면 그 화살표의 결함표 행(X-k)도 함께 지운다(행 내용·사진은 화살표 쪽)
+        const mergeApiDel = defectMergeApi();
+        const linkedMergeExtras = (target && mergeApiDel && mergeApiDel.isMergedArrow(target))
+            ? state.defects[key].filter((e) => e && e.surveyExtra && e.mergeSourceId === id && e.groupId === target.groupId)
+            : [];
+        linkedMergeExtras.forEach((e) => {
+            trackDefectDeletion(key, e.id);
+            deleteAllPhotosForDefect(e).catch(() => {});
+        });
+        const linkedMergeExtraIds = new Set(linkedMergeExtras.map((e) => e.id));
+        state.defects[key] = state.defects[key].filter(d => d.id !== id && !linkedMergeExtraIds.has(d.id));
         // 같은 그룹 남은 마킹의 -2,-3… 접미사를 앞으로 당김 (2 삭제 → 옛 3이 2가 됨)
         if (affectedGroupId) {
             normalizeDefectGroupNos(state.defects[key], affectedGroupId);

@@ -15951,3 +15951,21 @@ html:not(.layout-desktop) .crack-monitor-photo-slots {
     .grid-copy-card .grid-copy-row { min-height: 46px; }
     .grid-copy-card .modal-footer .btn { flex: 1 1 0; min-height: 42px; }
 }
+
+/* 결함 통합 · 통합 해제 버튼 (feature/defect-merge) */
+.map-toolbar-merge:not([hidden]) {
+    color: #6d28d9;
+    border-color: #c4b5fd;
+}
+.mobile-fab-btn.mobile-fab-merge,
+.mobile-fab-btn.mobile-fab-merge i {
+    color: #6d28d9;
+}
+.mobile-map-fab.has-merge,
+#tab-map .mobile-map-fab.has-merge {
+    grid-template-columns: repeat(7, 1fr);
+}
+.mobile-map-fab.has-merge.has-add-marking,
+#tab-map .mobile-map-fab.has-merge.has-add-marking {
+    grid-template-columns: repeat(8, 1fr);
+}
