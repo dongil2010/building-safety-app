@@ -17,6 +17,17 @@
         'areaPoints', 'areaDrawings', 'areaFillStyle', 'areaBorderStyle'
     ];
 
+    /**
+     * 묶음(그룹) 소속 칸. 2026-09-28: 「통합 해제」 뒤 다시 통합됨 — 병합이 groupId를 항상 서버 것으로
+     * 되살렸다(기기에서 지운 칸은 Object.assign에 안 남음). 묶기·풀기 때 groupUpdatedAt을 찍고,
+     * 둘 중 하나라도 찍혀 있으면 나중 쪽의 소속을 통째로 따른다(없는 칸은 지움).
+     */
+    var DEFECT_GROUP_FIELDS = ['groupId', 'groupNo', 'mergedFrom', 'surveyNumbered'];
+
+    function getDefectGroupUpdatedAt(rec) {
+        return Number(rec && rec.groupUpdatedAt) || 0;
+    }
+
     function getRecordUpdatedAt(rec, kind) {
         if (!rec) return 0;
         if (rec.updatedAt) return Number(rec.updatedAt) || 0;
@@ -360,6 +371,22 @@
         } else if (localRec.surveyNumbered === false || serverRec.surveyNumbered === false) {
             merged.surveyNumbered = false;
         }
+        var serverGroupTs = getDefectGroupUpdatedAt(serverRec);
+        var localGroupTs = getDefectGroupUpdatedAt(localRec);
+        if (serverGroupTs > 0 || localGroupTs > 0) {
+            // 동점이면 서버(다른 칸과 같은 규칙)
+            var groupSide = localGroupTs > serverGroupTs ? localRec : serverRec;
+            DEFECT_GROUP_FIELDS.forEach(function (field) {
+                if (groupSide[field] === undefined) delete merged[field];
+                else merged[field] = groupSide[field];
+            });
+            // 소속이 바뀐 경우 번호도 그쪽 것(묶이면 대표 번호, 풀리면 원래 번호)
+            if (String(serverRec.groupId || '') !== String(localRec.groupId || '')
+                && groupSide.no != null && groupSide.no !== '') {
+                merged.no = groupSide.no;
+            }
+            merged.groupUpdatedAt = Math.max(serverGroupTs, localGroupTs);
+        }
 
         var serverPhotoIds = Array.isArray(serverRec.photoIds) ? serverRec.photoIds : [];
         var localPhotoIds = Array.isArray(localRec.photoIds) ? localRec.photoIds : [];
@@ -641,6 +668,7 @@
         getRecordUpdatedAt: getRecordUpdatedAt,
         getDefectContentUpdatedAt: getDefectContentUpdatedAt,
         getDefectPositionUpdatedAt: getDefectPositionUpdatedAt,
+        getDefectGroupUpdatedAt: getDefectGroupUpdatedAt,
         mergeDeletedIdsMaps: mergeDeletedIdsMaps,
         mergeDeletedAtMaps: mergeDeletedAtMaps,
         pickImportedText: pickImportedText,

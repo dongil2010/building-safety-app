@@ -116,6 +116,7 @@
             d.groupNo = box.groupNo;
             d.no = box.groupNo;
             d.surveyNumbered = true;
+            d.groupUpdatedAt = now; // 동기화: 소속은 나중에 바꾼 쪽(sync-merge)
             d.x = box.x;
             d.y = box.y;
             d.targetX = tipX;
@@ -191,6 +192,7 @@
     function applyUnmerge(list, plan, ops) {
         const o = ops || {};
         const fmt = typeof o.formatNo === 'function' ? o.formatNo : (n) => `NO.${String(n).padStart(2, '0')}`;
+        const now = typeof o.now === 'function' ? o.now() : Date.now();
         const exclude = new Set(plan.pairs.map((p) => p.arrow.id));
         const used = usedMainNumbers(list, exclude);
         const out = [];
@@ -220,6 +222,8 @@
             }
             // delete 대신 null: 동기화 병합(Object.assign 옛값+새값)에서 옛 mergedFrom이 되살아나지 않게
             a.mergedFrom = null;
+            // 동기화: 서버에 남은 옛 groupId(통합 상태)가 이기지 않게 소속 변경 시각을 찍는다
+            a.groupUpdatedAt = now;
             if (typeof o.touch === 'function') o.touch(a);
             out.push({ id: a.id, no: a.no });
         });
@@ -243,7 +247,54 @@
         });
     }
 
+    /**
+     * 2026-09-28 복구: 고치기 전 판에서 「통합 해제」한 마킹이 동기화로 옛 묶음(groupId)에 되돌아간 경우.
+     * 통합 해제만 mergedFrom을 null로 남기므로(다른 곳은 안 씀), mergedFrom === null 인데 남의 묶음에
+     * 들어 있고 소속 변경 시각(groupUpdatedAt)이 없으면 되돌아간 것이다 → 다시 풀고 가장 작은 빈 번호.
+     * 혼자 남은 대표 묶음도 푼다. 반환: 고친 결함 id 목록.
+     */
+    function repairStaleRemergedArrows(list, ops) {
+        const arr = list || [];
+        const o = ops || {};
+        const fmt = typeof o.formatNo === 'function' ? o.formatNo : (n) => `NO.${String(n).padStart(2, '0')}`;
+        const now = typeof o.now === 'function' ? o.now() : Date.now();
+        const stale = arr.filter((d) => d && !d.surveyExtra && d.mergedFrom === null
+            && d.groupId && d.groupId !== d.id && !(Number(d.groupUpdatedAt) > 0));
+        if (!stale.length) return [];
+        const staleIds = new Set(stale.map((d) => d.id));
+        const used = usedMainNumbers(arr, staleIds);
+        const groups = new Set();
+        const out = [];
+        stale.forEach((d) => {
+            groups.add(d.groupId);
+            let n = 1;
+            while (used.has(n)) n += 1;
+            used.add(n);
+            delete d.groupId;
+            delete d.groupNo;
+            delete d.surveyNumbered;
+            d.no = fmt(n);
+            d.groupUpdatedAt = now;
+            d.updatedAt = Math.max(Number(d.updatedAt) || 0, now);
+            out.push(d.id);
+        });
+        groups.forEach((gid) => {
+            const left = arr.filter((m) => m && m.groupId === gid);
+            if (left.length !== 1 || left[0].surveyExtra) return;
+            const only = left[0];
+            only.no = String(only.groupNo || only.no || '').replace(/-\d+$/, '') || only.no;
+            delete only.groupId;
+            delete only.groupNo;
+            if (only.surveyNumbered === false) delete only.surveyNumbered;
+            only.groupUpdatedAt = now;
+            only.updatedAt = Math.max(Number(only.updatedAt) || 0, now);
+            out.push(only.id);
+        });
+        return out;
+    }
+
     const api = {
+        repairStaleRemergedArrows,
         mainNoOf,
         isMergedArrow,
         findMergeSource,

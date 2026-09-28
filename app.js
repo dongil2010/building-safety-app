@@ -3370,6 +3370,8 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!defect.groupId) {
             defect.groupId = defect.id;
             defect.groupNo = stripDefectNoSuffix(defect.no || formatDefectNoSeq(1));
+            // 동기화: 묶기·풀기는 groupUpdatedAt이 나중인 쪽을 따른다(sync-merge DEFECT_GROUP_FIELDS)
+            defect.groupUpdatedAt = Date.now();
             // 멤버가 1개일 때는 접미사 없음. 2개 이상일 때만 -1,-2 (normalizeDefectGroupNos)
             defect.no = defect.groupNo;
         } else if (!defect.groupNo) {
@@ -3483,11 +3485,28 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function normalizeFloorDefectGroupsInPlace(defects) {
         if (!Array.isArray(defects)) return false;
-        const repaired = repairLegacyMarkingSuffixGroups(defects);
+        // 고치기 전 판에서 통합 해제한 마킹이 동기화로 다시 묶인 것 복구(defect-merge.js)
+        const mergeApiRepair = (window.BSA && window.BSA.shared && window.BSA.shared.defectMerge) || null;
+        const remergeFixed = mergeApiRepair && typeof mergeApiRepair.repairStaleRemergedArrows === 'function'
+            ? mergeApiRepair.repairStaleRemergedArrows(defects, { formatNo: formatDefectNoSeq }).length > 0
+            : false;
+        const repaired = repairLegacyMarkingSuffixGroups(defects) || remergeFixed;
         const snap = defects.map((d) => (d ? `${d.id}|${d.groupId || ''}|${d.no || ''}|${d.surveyExtra ? 1 : 0}` : '')).join(';');
         normalizeAllDefectGroupNos(defects);
         const snap2 = defects.map((d) => (d ? `${d.id}|${d.groupId || ''}|${d.no || ''}|${d.surveyExtra ? 1 : 0}` : '')).join(';');
         return repaired || snap !== snap2;
+    }
+
+    /** 사용자 작업으로 묶음이 풀린 결함에 소속 변경 시각(동기화에서 서버의 옛 groupId가 되살아나지 않게) */
+    function stampDefectsLeftGroup(defects, groupId, idsBefore) {
+        if (!Array.isArray(defects) || !groupId || !idsBefore) return;
+        const now = Date.now();
+        defects.forEach((d) => {
+            if (d && idsBefore.has(d.id) && d.groupId !== groupId) {
+                d.groupUpdatedAt = now;
+                d.updatedAt = Math.max(Number(d.updatedAt) || 0, now);
+            }
+        });
     }
 
     function collapseSingletonDefectGroups(defects) {
@@ -21172,11 +21191,15 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 if (typeof untrackDefectDeletion === 'function') untrackDefectDeletion(key, id);
                 touchDefectUpdatedAt(d);
                 touchDefectPositionUpdatedAt(d);
+                if (d.groupId) d.groupUpdatedAt = Date.now();
                 photosNotRestored += restoreDefectPhotosAfterUndo(d, '');
                 photosNotRestored += restoreDefectPhotosAfterUndo(d, 'prev');
             } else if (JSON.stringify(prev) !== JSON.stringify(d)) {
                 touchDefectUpdatedAt(d);
                 touchDefectPositionUpdatedAt(d);
+                // 통합·통합 해제·묶음을 되돌린 경우 소속도 이 기기 것이 이기게
+                const groupSig = (x) => JSON.stringify([x.groupId || null, x.groupNo || null, x.mergedFrom || null, x.surveyNumbered]);
+                if (groupSig(prev) !== groupSig(d)) d.groupUpdatedAt = Date.now();
             }
         });
         beforeById.forEach((d, id) => {
@@ -32911,7 +32934,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             if (list[i] && removeIds.has(list[i].id)) list.splice(i, 1);
         }
         normalizeDefectGroupNos(list, gid);
+        const baseIdsBefore = new Set(list.filter((d) => d && d.groupId === gid).map((d) => d.id));
         collapseSingletonDefectGroups(list);
+        stampDefectsLeftGroup(list, gid, baseIdsBefore);
         selectedDefectIds.clear();
         restored.forEach((r) => selectedDefectIds.add(r.id));
         list.forEach((d) => { if (d && d.groupId === gid && !d.surveyExtra) selectedDefectIds.add(d.id); });
@@ -46683,6 +46708,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const skipRenumber = !!(options && options.skipRenumber);
         const target = state.defects[key].find(d => d.id === id);
         const affectedGroupId = target && target.groupId ? target.groupId : null;
+        const groupIdsBefore = affectedGroupId
+            ? new Set(state.defects[key].filter((d) => d && d.groupId === affectedGroupId && d.id !== id).map((d) => d.id))
+            : null;
         if (target) {
             trackDefectDeletion(key, id);
             deleteAllPhotosForDefect(target).then(failCount => {
@@ -46707,6 +46735,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             normalizeDefectGroupNos(state.defects[key], affectedGroupId);
         }
         collapseSingletonDefectGroups(state.defects[key]);
+        stampDefectsLeftGroup(state.defects[key], affectedGroupId, groupIdsBefore);
         // 삭제 후 층 전체 재부여(renumberFloorDefects)는 하지 않는다.
         // CAD 최대번호 다음으로 수동 마킹을 밀어 기존 번호가 공란이 되고
         // 마지막 번호가 +1 되는 버그가 난다. 남은 마킹 번호는 유지하고,
