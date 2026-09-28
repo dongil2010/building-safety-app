@@ -39,7 +39,7 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <meta name="apple-mobile-web-app-title" content="스마트 안전점검">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css">
-    <link rel="stylesheet" href="styles.css?v=20260928_191359">
+    <link rel="stylesheet" href="styles.css?v=20260928_195131">
 
     <!-- FontAwesome icons for clean engineering UI -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
@@ -289,6 +289,9 @@
                                 <button type="button" id="btnToggleCrosshair" class="mode-btn btn-crosshair-toggle active" aria-pressed="true" title="CAD 커서식 십자선 — PC는 마우스를 도면 위에 올리면, 폰·태블릿은 마킹을 끌어 옮길 때 가로·세로 선 표시">
                                     <i class="fa-solid fa-crosshairs"></i> 십자선
                                 </button>
+                                <button type="button" id="btnGridLines" class="mode-btn btn-grid-lines-toggle" aria-pressed="false" title="행·열(통심) 선 — 도면에 X·Y 선을 긋고, 마킹 위치를 「X1~X2/Y1~Y2」로 자동 입력 (실험)">
+                                    <i class="fa-solid fa-table-cells"></i> 행·열
+                                </button>
                             </div>
                             <div class="area-tool-panel" id="areaToolPanel" hidden>
                                 <span class="area-tool-kicker">영역 모양</span>
@@ -402,6 +405,10 @@
                             <button type="button" class="mobile-rail-btn active" id="mobileBtnCrosshair" aria-pressed="true" title="CAD 커서식 십자선 — PC는 마우스를 도면 위에 올리면, 폰·태블릿은 마킹을 끌어 옮길 때 가로·세로 선 표시">
                                 <i class="fa-solid fa-crosshairs"></i>
                                 <span>십자선</span>
+                            </button>
+                            <button type="button" class="mobile-rail-btn" id="mobileBtnGridLines" aria-pressed="false" title="행·열(통심) 선 — 도면에 X·Y 선을 긋고, 마킹 위치를 「X1~X2/Y1~Y2」로 자동 입력 (실험)">
+                                <i class="fa-solid fa-table-cells"></i>
+                                <span>행·열</span>
                             </button>
                             </div>
                         </aside>
@@ -3266,43 +3273,44 @@
 
     <!-- Core → 탭 분류 → 기존 엔진(app.js) -->
     <!-- 오류 기록은 맨 먼저 — 아래 스크립트들이 읽히다 터져도 잡아야 한다 -->
-    <script src="js/core/error-log.js?v=20260928_191359"></script>
-    <script src="js/core/floor-identity.js?v=20260928_191359"></script>
-    <script src="js/core/state.js?v=20260928_191359"></script>
-    <script src="js/core/ndt-grade.js?v=20260928_191359"></script>
-    <script src="js/tabs/registry.js?v=20260928_191359"></script>
-    <script src="js/pdf-vector-bridge.js?v=20260928_191359"></script>
-    <script src="js/pdf-vector-snap.js?v=20260928_191359"></script>
-    <script src="js/core/layout-mode.js?v=20260928_191359"></script>
-    <script src="js/core/performance.js?v=20260928_191359"></script>
-    <script src="js/core/mobile-keyboard.js?v=20260928_191359"></script>
-    <script src="js/tabs/home.js?v=20260928_191359"></script>
-    <script src="js/tabs/map.js?v=20260928_191359"></script>
-    <script src="js/tabs/survey.js?v=20260928_191359"></script>
-    <script src="js/tabs/stats.js?v=20260928_191359"></script>
-    <script src="js/tabs/ndt.js?v=20260928_191359"></script>
-    <script src="js/shared/report.js?v=20260928_191359"></script>
-    <script src="js/shared/hwpx-survey-slots.js?v=20260928_191359"></script>
-    <script src="js/shared/hwpx-ndt-maps.js?v=20260928_191359"></script>
-    <script src="js/shared/cad-unmarked-place.js?v=20260928_191359"></script>
-    <script src="js/shared/arrow-survey-number.js?v=20260928_191359"></script>
-    <script src="js/shared/korean-text-wrap.js?v=20260928_191359"></script>
-    <script src="js/shared/hwpx-import.js?v=20260928_191359"></script>
-    <script src="js/shared/hwpx-validate.js?v=20260928_191359"></script>
-    <script src="js/shared/auth.js?v=20260928_191359"></script>
-    <script src="js/core/firebase-storage-assets.js?v=20260928_191359"></script>
-    <script src="js/core/drawing-floor-tombstone.js?v=20260928_191359"></script>
-    <script src="js/core/data-health.js?v=20260928_191359"></script>
-    <script src="js/core/building-meta-merge.js?v=20260928_191359"></script>
-    <script src="js/core/edit-history.js?v=20260928_191359"></script>
-    <script src="js/core/sync-merge.js?v=20260928_191359"></script>
-    <script src="js/shared/defect-quick-presets.js?v=20260928_191359"></script>
-    <script src="js/core/legend-layout.js?v=20260928_191359"></script>
-    <script src="js/core/error-log-view.js?v=20260928_191359"></script>
-    <script src="app.js?v=20260928_191359"></script>
+    <script src="js/core/error-log.js?v=20260928_195131"></script>
+    <script src="js/core/floor-identity.js?v=20260928_195131"></script>
+    <script src="js/core/state.js?v=20260928_195131"></script>
+    <script src="js/core/ndt-grade.js?v=20260928_195131"></script>
+    <script src="js/tabs/registry.js?v=20260928_195131"></script>
+    <script src="js/pdf-vector-bridge.js?v=20260928_195131"></script>
+    <script src="js/pdf-vector-snap.js?v=20260928_195131"></script>
+    <script src="js/core/layout-mode.js?v=20260928_195131"></script>
+    <script src="js/core/performance.js?v=20260928_195131"></script>
+    <script src="js/core/mobile-keyboard.js?v=20260928_195131"></script>
+    <script src="js/tabs/home.js?v=20260928_195131"></script>
+    <script src="js/tabs/map.js?v=20260928_195131"></script>
+    <script src="js/tabs/survey.js?v=20260928_195131"></script>
+    <script src="js/tabs/stats.js?v=20260928_195131"></script>
+    <script src="js/tabs/ndt.js?v=20260928_195131"></script>
+    <script src="js/shared/report.js?v=20260928_195131"></script>
+    <script src="js/shared/hwpx-survey-slots.js?v=20260928_195131"></script>
+    <script src="js/shared/hwpx-ndt-maps.js?v=20260928_195131"></script>
+    <script src="js/shared/cad-unmarked-place.js?v=20260928_195131"></script>
+    <script src="js/shared/arrow-survey-number.js?v=20260928_195131"></script>
+    <script src="js/shared/korean-text-wrap.js?v=20260928_195131"></script>
+    <script src="js/shared/hwpx-import.js?v=20260928_195131"></script>
+    <script src="js/shared/hwpx-validate.js?v=20260928_195131"></script>
+    <script src="js/shared/auth.js?v=20260928_195131"></script>
+    <script src="js/core/firebase-storage-assets.js?v=20260928_195131"></script>
+    <script src="js/core/drawing-floor-tombstone.js?v=20260928_195131"></script>
+    <script src="js/core/data-health.js?v=20260928_195131"></script>
+    <script src="js/core/building-meta-merge.js?v=20260928_195131"></script>
+    <script src="js/core/edit-history.js?v=20260928_195131"></script>
+    <script src="js/core/sync-merge.js?v=20260928_195131"></script>
+    <script src="js/shared/defect-quick-presets.js?v=20260928_195131"></script>
+    <script src="js/shared/grid-lines.js?v=20260928_195131"></script>
+    <script src="js/core/legend-layout.js?v=20260928_195131"></script>
+    <script src="js/core/error-log-view.js?v=20260928_195131"></script>
+    <script src="app.js?v=20260928_195131"></script>
 
     <script>
-        window.BSA_APP_VERSION = '20260928_191359';
+        window.BSA_APP_VERSION = '20260928_195131';
 
         (function () {
             var el = document.getElementById('appVersionText');
@@ -3329,7 +3337,13 @@
                     native = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
                 } catch (e) {}
                 if (native) return;
-                navigator.serviceWorker.register('./sw.js?v=20260928_191359')
+                // 로컬 개발 서버(localhost·127.0.0.1)에서만 서비스 워커를 쓰지 않음 — 옛 캐시로 예전 화면이 뜨는 것 방지
+                if (/^(localhost|127\.0\.0\.1)$/.test(location.hostname)) {
+                    navigator.serviceWorker.getRegistrations().then(function(rs) { rs.forEach(function(r) { r.unregister(); }); }).catch(function() {});
+                    if (window.caches && caches.keys) caches.keys().then(function(ks) { ks.forEach(function(k) { caches.delete(k); }); }).catch(function() {});
+                    return;
+                }
+                navigator.serviceWorker.register('./sw.js?v=20260928_195131')
 
                     .then(function(registration) {
                         console.log('✅ ServiceWorker Registered Successfully with scope:', registration.scope);
