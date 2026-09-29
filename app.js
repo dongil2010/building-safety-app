@@ -37113,13 +37113,14 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const colCh = colMetrics.widthCh || 6;
         const colWrap = !!colMetrics.wrap;
 
-        const textInput = (field, value, placeholder, extraClass) => {
+        const textInput = (field, value, placeholder, extraClass, extraAttrs) => {
             const raw = String(value == null ? '' : value);
             const useTextarea = colWrap;
             const displayVal = colWrap ? surveyWrapAtSpace(raw, colCh) : raw;
             const cls = `survey-inline-input${extraClass ? ' ' + extraClass : ''}${useTextarea ? ' survey-inline-textarea survey-inline-multiline' : ''}`;
             const rows = colWrap && surveyCharLen(raw) > colCh ? 2 : 1;
             const common = `${stop}` +
+                (extraAttrs ? ` ${extraAttrs}` : '') +
                 ` placeholder="${escapeSurveyAttr(placeholder || '')}"` +
                 ` onchange="window.updateSurveyInlineField('${id}','${field}',this.value)"` +
                 ` oninput="window.resizeSurveyInlineInput(this)"` +
@@ -37175,11 +37176,11 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             }
             case 'crackWidth':
                 return (d.defectType === '균열')
-                    ? textInput('crackWidth', d.crackWidth != null ? d.crackWidth : '', 'mm')
+                    ? textInput('crackWidth', d.crackWidth != null ? d.crackWidth : '', 'mm', '', 'data-measure-keypad="crackWidth" inputmode="decimal" autocomplete="off"')
                     : '<span style="color:#a3a3a3;">-</span>';
             case 'crackLength':
                 return (d.defectType === '균열')
-                    ? textInput('crackLength', d.crackLength != null ? d.crackLength : '', 'm')
+                    ? textInput('crackLength', d.crackLength != null ? d.crackLength : '', 'm', '', 'data-measure-keypad="crackLength" inputmode="decimal" autocomplete="off"')
                     : '<span style="color:#a3a3a3;">-</span>';
             case 'inspectionContent': {
                 // 한 줄: 부재 | 조사내용 | 크기

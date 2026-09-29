@@ -16060,3 +16060,57 @@ html:not(.layout-desktop) .crack-monitor-photo-slots {
 #tab-map .mobile-map-fab.has-merge.has-add-marking {
     grid-template-columns: repeat(8, 1fr);
 }
+
+/* ==========================================================================
+   폭·길이·개수 전용 숫자 키패드 (js/shared/measure-keypad.js) — 터치 기기만
+   칸 위/아래에 붙고, 자리가 없으면 화면 아래에 붙인 뒤 칸을 위로 스크롤한다.
+   ========================================================================== */
+.bsa-mkp {
+    position: fixed;
+    z-index: 2147483000;
+    display: grid;
+    grid-template-columns: repeat(var(--mkp-cols, 4), minmax(0, 1fr));
+    gap: 5px;
+    padding: 6px;
+    background: #eef1f5;
+    border: 1px solid #c9d0da;
+    border-radius: 12px;
+    box-shadow: 0 8px 24px rgba(15, 23, 42, 0.22);
+    touch-action: none;
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-touch-callout: none;
+    -webkit-tap-highlight-color: transparent;
+    box-sizing: border-box;
+}
+.bsa-mkp[hidden] { display: none !important; }
+.bsa-mkp-portrait { width: min(248px, calc(100vw - 8px)); }
+.bsa-mkp-landscape { width: min(460px, calc(100vw - 8px)); }
+.bsa-mkp-key {
+    height: 44px;
+    min-width: 0;
+    margin: 0;
+    padding: 0;
+    border: 1px solid #d5dbe3;
+    border-radius: 8px;
+    background: #fff;
+    color: #111827;
+    font-family: inherit;
+    font-size: 20px;
+    font-weight: 600;
+    line-height: 1;
+    touch-action: none;
+    cursor: pointer;
+}
+.bsa-mkp-landscape .bsa-mkp-key { height: 38px; font-size: 18px; }
+.bsa-mkp-key:active { background: #dbe4f0; }
+.bsa-mkp-sym { background: #f6f7f9; color: #374151; font-size: 24px; }
+.bsa-mkp-bs { font-size: 20px; }
+.bsa-mkp-landscape .bsa-mkp-sym:not(.bsa-mkp-ok) { font-size: 22px; }
+.bsa-mkp-ok { background: #2563eb; border-color: #2563eb; color: #fff; font-size: 16px; }
+.bsa-mkp-ok:active { background: #1d4ed8; }
+input.bsa-mkp-active, textarea.bsa-mkp-active {
+    outline: 2px solid #2563eb !important;
+    outline-offset: 0;
+    caret-color: #2563eb;
+}
