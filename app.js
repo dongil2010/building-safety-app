@@ -7312,6 +7312,7 @@ document.addEventListener('DOMContentLoaded', () => {
     window.openEditBuildingModalFunc = function(bldgId, focusSection = 'info') {
         const modal = document.getElementById('editBuildingModal');
         if (!modal) return;
+        if (typeof ensurePrevRoundPhotoImportSection === 'function') ensurePrevRoundPhotoImportSection();
         if (document.body?.classList.contains('auth-gate-active')) return;
 
         const bldgs = window.state.buildings || [];
@@ -20449,6 +20450,290 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         window.showToast(`모든 층 전회차 ${changed}건 → 현회차(${toLabel}) 완료${photoNote}`, 'success', 5500);
     }
     window.promotePreviousRoundToCurrentBulk = promotePreviousRoundToCurrentBulk;
+
+    // --- 전차 사진 가져오기 (2026-09-30) ---
+    // 같은 현장의 이전 회차 점검(별도 점검)에 있던 결함 사진을, 이 점검에서 맞는 결함의 「전차 사진」 칸으로 복사한다.
+    // 맞추기: js/core/prev-round-photo-match.js (같은 층 + 같은 번호, 없으면 마킹 위치). 미리보기 → 확인 뒤에만 바꾼다.
+    // - 이미 전차 사진이 있는 결함은 덮어쓰지 않는다.
+    // - 사진은 새 ID로 복사하고 Storage에도 새로 올린다(회차 추가하기와 같은 방식) — 전차 점검을 지워도 남는다.
+    // - 서버 읽기: 두 점검의 층 문서(층마다 1회, 최근에 받았으면 생략) + 복사할 사진마다 사진 문서 1회(기기에 있으면 생략).
+    //   미리보기는 사진 ID 개수만 세므로 사진을 읽지 않는다.
+    function prevRoundPhotoMatchApi() {
+        return (window.BSA && window.BSA.prevRoundPhotoMatch) || null;
+    }
+
+    function getPrevRoundPhotoSourceCandidates(bldg) {
+        if (!bldg) return [];
+        const site = getBuildingSiteName(bldg);
+        const curKey = getBuildingSurveyRoundKey(bldg);
+        const curRank = getSurveyRoundOrderRank(curKey);
+        const dong = formatDongRowLabel(bldg);
+        return getSiteBuildingsSorted(site).filter((b) => {
+            if (!b || b.id === bldg.id) return false;
+            if (formatDongRowLabel(b) !== dong) return false;
+            const key = getBuildingSurveyRoundKey(b);
+            if (key === curKey) return false;
+            const rank = getSurveyRoundOrderRank(key);
+            if (curRank !== null && rank !== null) return rank < curRank;
+            return true;
+        });
+    }
+
+    function prevRoundPhotoFloorLabel(code, bldg) {
+        try {
+            return stripFloorCodeSuffix(window.getFloorLabelFromCode(code, bldg)) || code;
+        } catch (_e) {
+            return code;
+        }
+    }
+
+    function prevRoundPhotoDefectLabel(d, floorCode, bldg) {
+        const api = prevRoundPhotoMatchApi();
+        const no = api ? api.noKey(d) : String(d && (d.groupNo || d.no) || '');
+        const what = [d && d.component, d && d.defectType].filter(Boolean).join(' ');
+        return `${prevRoundPhotoFloorLabel(floorCode, bldg)} NO.${no}${what ? ` (${what})` : ''}`;
+    }
+
+    /** 전차 점검 층 → 현차 층 (같은 층 코드, 없으면 같은 층 이름) */
+    function mapPrevRoundFloorsToTarget(srcBldg, tgtBldg) {
+        const tgtCodes = buildingFloorCodesForBackup(tgtBldg);
+        const tgtSet = new Set(tgtCodes);
+        const byLabel = new Map();
+        tgtCodes.forEach((c) => {
+            const label = prevRoundPhotoFloorLabel(c, tgtBldg);
+            if (label && !byLabel.has(label)) byLabel.set(label, c);
+        });
+        const map = {};
+        buildingFloorCodesForBackup(srcBldg).forEach((code) => {
+            if (tgtSet.has(code)) { map[code] = code; return; }
+            const viaLabel = byLabel.get(prevRoundPhotoFloorLabel(code, srcBldg));
+            map[code] = viaLabel || code;
+        });
+        return map;
+    }
+
+    async function loadPrevRoundSourcePhotos(src) {
+        const api = prevRoundPhotoMatchApi();
+        const count = api ? api.photoCount(src) : 0;
+        const inline = Array.isArray(src.photos) ? src.photos : [];
+        const ids = defectPhotoIdList(src, count);
+        const urls = [];
+        let failed = 0;
+        for (let i = 0; i < count; i++) {
+            let url = inline[i] || null;
+            if (!url && ids[i]) {
+                try { url = await loadPhotoBlobForClone(ids[i]); } catch (_e) { url = null; }
+            }
+            if (url) urls.push(url);
+            else failed++;
+        }
+        return { urls, failed };
+    }
+
+    window.openPrevRoundPhotoImport = async function(bldgId) {
+        const api = prevRoundPhotoMatchApi();
+        const bldg = (window.state.buildings || []).find((b) => b && b.id === bldgId)
+            || window.currentEditingBuilding || state.currentBuilding;
+        if (!api || !bldg) {
+            window.showToast('점검을 찾을 수 없습니다.', 'warning', 3500);
+            return;
+        }
+        const curKey = getBuildingSurveyRoundKey(bldg);
+        const candidates = getPrevRoundPhotoSourceCandidates(bldg);
+        if (!candidates.length) {
+            await window.appAlert(
+                `같은 현장(${getBuildingSiteName(bldg)} · ${formatDongRowLabel(bldg)})에 ${formatSurveyRoundLabel(curKey)}보다 앞선 회차 점검이 없습니다.\n\n` +
+                '전차 점검이 따로 등록되어 있어야 사진을 가져올 수 있습니다.',
+                { title: '전차 사진 가져오기' }
+            );
+            return;
+        }
+        let src = candidates[0];
+        if (candidates.length > 1) {
+            const shown = candidates.slice(0, 9);
+            const lines = shown.map((b, i) => `${i + 1} = ${formatSurveyRoundLabel(getBuildingSurveyRoundKey(b))} · ${b.inspectionType || '점검'}${i === 0 ? ' (바로 전 회차)' : ''}`);
+            const pick = await window.appPrompt(
+                `어느 회차 사진을 가져올까요?\n\n${lines.join('\n')}\n\n번호를 입력하세요.`,
+                '1',
+                { title: '전차 사진 가져오기 · 회차 선택', okText: '다음' }
+            );
+            if (pick == null) return;
+            const idx = parseInt(String(pick).trim(), 10) - 1;
+            if (!(idx >= 0 && idx < shown.length)) {
+                window.showToast('회차 번호를 다시 확인해 주세요.', 'warning', 3500);
+                return;
+            }
+            src = shown[idx];
+        }
+        const srcKey = getBuildingSurveyRoundKey(src);
+        const srcLabel = formatSurveyRoundLabel(srcKey);
+        const curLabel = formatSurveyRoundLabel(curKey);
+
+        // 두 점검 모든 층을 서버 최신으로(최근에 받았으면 생략) — 안 열어 본 층도 맞추려고
+        window.showLoading('전차·현차 결함 받는 중…');
+        let freshNote = '';
+        try {
+            const results = [];
+            for (const b of [src, bldg]) {
+                let res;
+                try { res = await refreshBuildingFloorsFromServer(b); } catch (_e) { res = { ok: false, skipped: null, failed: ['?'] }; }
+                results.push(res);
+            }
+            if (results.some((r) => r && r.skipped === 'offline')) {
+                freshNote = '\n※ 인터넷이 끊겨 이 기기에 있는 자료로만 맞췄습니다.';
+            } else if (results.some((r) => r && !r.ok && !r.skipped)) {
+                freshNote = '\n※ 서버에서 받지 못한 층이 있어 이 기기 자료로 맞췄습니다(빠진 결함이 있을 수 있음).';
+            }
+        } finally {
+            window.hideLoading();
+        }
+
+        const floorMap = mapPrevRoundFloorsToTarget(src, bldg);
+        const srcByFloor = {};
+        Object.keys(floorMap).forEach((code) => {
+            const list = state.defects[`${src.id}_${code}`] || [];
+            const to = floorMap[code];
+            srcByFloor[to] = (srcByFloor[to] || []).concat(list);
+        });
+        const tgtByFloor = {};
+        buildingFloorCodesForBackup(bldg).forEach((code) => {
+            tgtByFloor[code] = state.defects[`${bldg.id}_${code}`] || [];
+        });
+        const plan = api.plan(srcByFloor, tgtByFloor, { maxDist: 120 });
+        const srcPhotoDefects = plan.matches.length + plan.skippedHasPrev.length + plan.unmatched.length;
+        if (!srcPhotoDefects) {
+            await window.appAlert(`${srcLabel} 점검에 사진이 있는 결함이 없습니다.${freshNote}`, { title: '전차 사진 가져오기' });
+            return;
+        }
+        const byNo = plan.matches.filter((m) => m.by === 'no').length;
+        const byPos = plan.matches.length - byNo;
+        const unmatchedPhotos = plan.unmatched.reduce((n, u) => n + u.photos, 0);
+        const LIST_MAX = 30;
+        const listLines = (arr, fmt) => {
+            const lines = arr.slice(0, LIST_MAX).map(fmt);
+            if (arr.length > LIST_MAX) lines.push(`  … 외 ${arr.length - LIST_MAX}건`);
+            return lines.join('\n');
+        };
+        let msg = `${srcLabel} → ${curLabel} (${formatDongRowLabel(bldg)})\n\n` +
+            `· 사진을 넣을 결함 ${plan.matches.length}건 · 사진 ${plan.photoTotal}장` +
+            (plan.matches.length ? ` (번호로 ${byNo}건${byPos ? `, 위치로 ${byPos}건` : ''})` : '') + '\n' +
+            `· 이미 전차 사진이 있어 건너뜀 ${plan.skippedHasPrev.length}건\n` +
+            `· 맞는 결함을 못 찾음 ${plan.unmatched.length}건 · 사진 ${unmatchedPhotos}장`;
+        if (byPos) {
+            msg += `\n\n[위치로 맞춘 결함 — 번호가 다름, 확인해 주세요]\n` + listLines(
+                plan.matches.filter((m) => m.by === 'pos'),
+                (m) => `  ${prevRoundPhotoDefectLabel(m.src, m.floor, bldg)} → 현차 NO.${api.noKey(m.tgt)}`
+            );
+        }
+        if (plan.unmatched.length) {
+            msg += `\n\n[못 찾음 — 가져오지 않음]\n` + listLines(
+                plan.unmatched,
+                (u) => `  ${prevRoundPhotoDefectLabel(u.src, u.floor, bldg)} · ${u.photos}장 — ${u.reason}`
+            );
+        }
+        msg += `\n\n사진은 현차 결함의 「전차 사진」 칸에 복사됩니다(현차 출력에는 안 나옴, 전·금회차 비교사진에 쓰임).` +
+            `\n기존 전차 사진은 덮어쓰지 않습니다. 사진을 새로 복사하므로 서버 저장공간을 씁니다.` +
+            `\n되돌리기로는 취소되지 않습니다 — 잘못 들어간 사진은 결함 수정에서 지워 주세요.` + freshNote;
+        if (!plan.matches.length) {
+            await window.appAlert(msg, { title: '전차 사진 가져오기 · 가져올 사진 없음' });
+            return;
+        }
+        if (!await window.appConfirm(msg, { title: '전차 사진 가져오기 · 미리보기', okText: `${plan.photoTotal}장 가져오기`, danger: false })) return;
+
+        window.showLoading('전차 사진 복사 중…');
+        let doneDefects = 0;
+        let donePhotos = 0;
+        let uploadFailed = 0;
+        const loadFailed = [];
+        const changedKeys = new Set();
+        try {
+            for (let i = 0; i < plan.matches.length; i++) {
+                const m = plan.matches[i];
+                const t = m.tgt;
+                if (typeof window.updateLoadingText === 'function') {
+                    window.updateLoadingText(`전차 사진 복사 ${i + 1}/${plan.matches.length}…`);
+                }
+                // 기다리는 사이 다른 창에서 전차 사진이 들어왔으면 덮어쓰지 않는다
+                if (api.photoCount(t, 'prev') > 0) continue;
+                const got = await loadPrevRoundSourcePhotos(m.src);
+                if (got.failed) loadFailed.push({ m, failed: got.failed, total: m.photos });
+                if (!got.urls.length) continue;
+                if (api.photoCount(t, 'prev') > 0) continue;
+                const ids = assignDefectPhotoIds(t.id, got.urls, null, 'prev');
+                t.prevRoundPhotos = got.urls.slice();
+                t.prevRoundPhotoIds = ids;
+                if (!t.prevSurveyRound) t.prevSurveyRound = srcKey;
+                if (!window._photoCache) window._photoCache = {};
+                got.urls.forEach((url, pi) => {
+                    window._photoCache[ids[pi]] = url;
+                    idbSetPhotoPreferDataUrl(ids[pi], url);
+                });
+                touchDefectUpdatedAt(t);
+                const key = `${bldg.id}_${m.floor}`;
+                changedKeys.add(key);
+                markFloorKeyDirty(key);
+                doneDefects++;
+                donePhotos += got.urls.length;
+                try {
+                    await uploadDefectPhotos(t.id, got.urls, 'prev', ids);
+                } catch (e) {
+                    uploadFailed += got.urls.length;
+                    console.warn('[전차 사진 가져오기] 업로드 실패(동기화 때 다시 올림):', t.id, e);
+                }
+                if (doneDefects % 10 === 0) saveStateToLocalStorage();
+            }
+        } finally {
+            saveStateToLocalStorage();
+            window.hideLoading();
+        }
+        if (typeof renderDefectListPanel === 'function' && state.currentBuildingId === bldg.id) renderDefectListPanel();
+        if (typeof renderSurveyTable === 'function' && state.currentBuildingId === bldg.id) renderSurveyTable();
+        if (changedKeys.size && typeof syncStateToFirebase === 'function') {
+            try { syncStateToFirebase(); } catch (_e) { /* 다음 동기화 때 */ }
+        }
+        const failedPhotos = loadFailed.reduce((n, f) => n + f.failed, 0);
+        let result = `결함 ${doneDefects}건에 전차 사진 ${donePhotos}장을 넣었습니다.`;
+        if (failedPhotos) {
+            result += `\n\n[불러오지 못한 사진 ${failedPhotos}장 — 전차 점검에서 사진이 열리는지 확인해 주세요]\n` + listLines(
+                loadFailed,
+                (f) => `  ${prevRoundPhotoDefectLabel(f.m.src, f.m.floor, bldg)} · ${f.failed}/${f.total}장`
+            );
+        }
+        if (uploadFailed) result += `\n\n※ 서버에 아직 못 올린 사진 ${uploadFailed}장 — 다음 동기화 때 다시 올립니다.`;
+        await window.appAlert(result, { title: '전차 사진 가져오기 완료' });
+    };
+
+    /** 건물 수정 창(정보 모드)에 「전차 사진 가져오기」 칸 — index.html 은 그대로 두고 JS 로 만든다 */
+    function ensurePrevRoundPhotoImportSection() {
+        const modal = document.getElementById('editBuildingModal');
+        if (!modal || document.getElementById('btnPrevRoundPhotoImport')) return;
+        const anchorEl = modal.querySelector('.edit-next-round-section');
+        if (!anchorEl || !anchorEl.parentNode) return;
+        const box = document.createElement('div');
+        box.className = 'edit-next-round-section edit-only-info edit-prev-photo-section';
+        box.innerHTML = `
+            <div class="edit-next-round-head">
+                <div>
+                    <h4 class="edit-next-round-title"><i class="fa-solid fa-images"></i> 전차 사진 가져오기</h4>
+                    <p class="edit-next-round-desc">같은 현장의 이전 회차 점검 사진을, 이 점검에서 같은 층·같은 번호(없으면 마킹 위치)인 결함의 「전차 사진」으로 복사합니다. 먼저 미리보기를 보여 주고, 이미 전차 사진이 있는 결함은 건너뜁니다.</p>
+                </div>
+                <button type="button" class="btn btn-primary btn-sm edit-next-round-btn" id="btnPrevRoundPhotoImport">
+                    <i class="fa-solid fa-clock-rotate-left"></i> 전차 사진 가져오기
+                </button>
+            </div>`;
+        anchorEl.parentNode.insertBefore(box, anchorEl.nextSibling);
+        box.querySelector('#btnPrevRoundPhotoImport').addEventListener('click', () => {
+            const id = document.getElementById('inputEditBuildingId')?.value
+                || (window.currentEditingBuilding && window.currentEditingBuilding.id);
+            window.openPrevRoundPhotoImport(id);
+        });
+    }
+    window.ensurePrevRoundPhotoImportSection = ensurePrevRoundPhotoImportSection;
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', ensurePrevRoundPhotoImportSection);
+    } else {
+        ensurePrevRoundPhotoImportSection();
+    }
 
     async function clearCarriedOverBulk() {
         const bldg = state.currentBuilding;

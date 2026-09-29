@@ -2192,11 +2192,9 @@ html:not(.layout-tablet) #tab-map .inspect-sidebar-left .defect-badge-no {
 }
 
 /* 2026-09-29: 노란 원(번호를 가림) → 작은 「중요」 배지. 번호칸 왼쪽 위 바깥(번호칸 위)에 두어 번호를 가리지 않는다.
-   줄 안쪽 여백이 좁아(번호칸 위 6px) 중요 줄만 번호칸을 5px 내려 자리를 만든다 — 레이아웃(margin)이 아닌 relative 이동이라
-   PC·태블릿·폰 레이아웃별 margin/align 규칙과 부딪히지 않는다. */
+   배지 자리는 중요 줄의 위쪽 안쪽 여백으로 만든다(파일 끝 「결함 목록 줄 간격」) — 윗줄에 겹치지 않는다. */
 .defect-list-item.is-important .defect-badge-no {
     position: relative;
-    top: 5px;
 }
 .defect-list-item.is-important .defect-badge-no::before {
     content: '중요';
@@ -16370,4 +16368,28 @@ html.bsa-touch-ui button#mobileBtnGridLines#mobileBtnGridLines {
 .bsa-dialog-danger:hover, .bsa-dialog-danger:focus-visible { background: #b91c1c; border-color: #b91c1c; color: #fff; }
 @media (max-width: 480px) {
     .bsa-dialog-footer .btn { flex: 1 1 0; min-height: 44px; }
+}
+
+/* ------------------------------------------------------------------
+   2026-09-30: 결함 목록(도면 옆) 줄 간격 — 번호칸 사이 빈 공간을 약 1/4로.
+   (예전: 줄 간격 5.6px + 위아래 안쪽 여백 4px씩 → 번호 동그라미 사이 약 16px)
+   PC·태블릿·폰 레이아웃마다 !important 규칙이 따로 있어 같은 무게 선택자로 파일 끝에서 덮는다.
+   중요 줄은 「중요」 배지(높이 약 10px)가 들어갈 만큼만 위 여백을 더 준다 — 윗줄과 겹치지 않게.
+   ------------------------------------------------------------------ */
+html #tab-map .defect-list-section-scroll,
+html #tab-map .defect-list-section .defect-list-section-scroll {
+    gap: 1px !important;
+}
+html #tab-map .defect-list-section-scroll > .defect-list-item {
+    margin-top: 0 !important;
+    margin-bottom: 0 !important;
+    padding-top: 1px !important;
+    padding-bottom: 1px !important;
+    min-height: 0 !important;
+}
+html #tab-map .defect-list-section-scroll > .defect-list-item .defect-badge-no {
+    margin-top: 0 !important;
+}
+html #tab-map .defect-list-section-scroll > .defect-list-item.is-important {
+    padding-top: 11px !important;
 }

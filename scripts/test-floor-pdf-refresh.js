@@ -54,8 +54,10 @@ assert.ok(css.includes('.defect-list-item.is-important'));
     assert.ok(at > 0 && rule.includes("content: '중요';"), '결함표: 중요 글자');
     assert.ok(rule.includes('bottom: calc(100% + 1px);'), '번호칸 위(번호를 가리지 않음)');
     assert.ok(!rule.includes('border-radius: 50%'), '원 아님');
-    const badgeAt = css.indexOf('.defect-list-item.is-important .defect-badge-no {');
-    assert.ok(css.slice(badgeAt, css.indexOf('}', badgeAt)).includes('top: 5px;'), '배지 자리만큼 번호칸을 내림');
+    // 2026-09-30: 배지 자리는 중요 줄 위 안쪽 여백으로(윗줄과 안 겹침), 줄 간격은 약 1/4
+    assert.ok(css.includes('html #tab-map .defect-list-section-scroll > .defect-list-item.is-important {\n    padding-top: 11px !important;'), '중요 줄 위 여백 = 배지 자리');
+    assert.ok(css.includes('html #tab-map .defect-list-section-scroll,') && css.includes('    gap: 1px !important;'), '줄 사이 1px');
+    assert.ok(css.includes('    padding-top: 1px !important;\n    padding-bottom: 1px !important;'), '줄 위아래 여백 1px');
 }
 
 console.log('test-floor-pdf-refresh: ok');
