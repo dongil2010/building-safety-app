@@ -51290,6 +51290,67 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         );
         window.state.ndtDisplacementGroups = dispMerge.ndtData;
         mergeNdtDrawingRef(floorKey, ndt.customDrawing);
+        resolveOfflineNoConflicts(bldg, floorCode, markings, ndt);
+    }
+
+    /**
+     * 오프라인 동시 작업으로 겹친 번호를 자동으로 옮기고 알린다 (2026-09-29, js/core/no-conflict.js).
+     * 서버 층 문서에 아직 없는 것(이 기기가 오프라인에서 새로 만든 것)만 바꾼다 — 먼저 올린 사람 번호는 그대로.
+     */
+    function resolveOfflineNoConflicts(bldg, floorCode, markings, ndt) {
+        const api = window.BSA && window.BSA.noConflict;
+        if (!api || !bldg || !bldg.id) return [];
+        const floorKey = `${bldg.id}_${floorCode}`;
+        const prefix = `${bldg.id}_`;
+        const idsOf = (arr) => new Set((arr || []).filter((r) => r && r.id).map((r) => r.id));
+        const othersOf = (map, samePool) => {
+            const out = [];
+            Object.keys(map || {}).forEach((k) => {
+                if (k === floorKey || !k.startsWith(prefix)) return;
+                if (samePool && !samePool(k.slice(prefix.length))) return;
+                (map[k] || []).forEach((r) => out.push(r));
+            });
+            return out;
+        };
+        const now = Date.now();
+        const changes = [];
+        try {
+            // 결함: 번호 공간은 층 하나. 외부(EXT·입면)는 외부 도면 전체가 한 공간(getFloorDefectsForNumbering)
+            const isExt = (code) => (typeof isExteriorFloorCode === 'function') && isExteriorFloorCode(code);
+            const floorDefects = (window.state.defects || {})[floorKey];
+            if (Array.isArray(floorDefects)) {
+                const pool = isExt(floorCode) ? othersOf(window.state.defects, isExt) : [];
+                api.resolveDefectNoConflicts(floorDefects, pool, idsOf(markings && markings.items), now)
+                    .forEach((c) => changes.push(c));
+            }
+            // 비파괴 항목·구역: 번호 공간은 건물 전체, 분류별
+            const floorNdt = (window.state.ndtData || {})[floorKey];
+            if (Array.isArray(floorNdt)) {
+                api.resolveRecordNoConflicts(floorNdt, othersOf(window.state.ndtData), idsOf(ndt && ndt.items), {
+                    field: 'no', kind: 'ndt', now
+                }).forEach((c) => changes.push(c));
+            }
+            const floorGroups = (window.state.ndtDisplacementGroups || {})[floorKey];
+            if (Array.isArray(floorGroups)) {
+                api.resolveRecordNoConflicts(floorGroups, othersOf(window.state.ndtDisplacementGroups), idsOf(ndt && ndt.displacementGroups), {
+                    field: 'groupNo', kind: 'group', now,
+                    categoryOf: (g) => (g.category === '부재변위' ? '부재변위' : '변위')
+                }).forEach((c) => changes.push(c));
+            }
+        } catch (e) {
+            console.warn('[번호 겹침] 정리 실패(번호는 그대로 둠):', e);
+            return [];
+        }
+        if (!changes.length) return changes;
+        if (typeof markFloorKeyDirty === 'function') markFloorKeyDirty(floorKey);
+        let floorLabel = floorCode;
+        try { floorLabel = stripFloorCodeSuffix(window.getFloorLabelFromCode(floorCode)) || floorCode; } catch (_e) { /* 코드 그대로 */ }
+        const text = api.describeChanges(changes);
+        console.info(`[번호 겹침] ${bldg.name || bldg.id} ${floorLabel}: 다른 기기가 먼저 올린 번호와 겹쳐 옮김 — ${text}`, changes);
+        if (typeof window.showToast === 'function') {
+            window.showToast(`${floorLabel}: 다른 기기와 번호가 겹쳐 바꿨습니다 — ${text}`, 'warning', 12000);
+        }
+        return changes;
     }
 
     async function applyFloorBundleToState(bldg, floorCode, bundle) {
