@@ -23067,19 +23067,18 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         return getDefectMarkingGroupMembers(defect.groupId).some((m) => m && m.isBookmark);
     }
 
-    /** 중요(즐겨찾기) 마킹 — 번호 박스 금색 테두리와 별. 결함 색은 그대로 둔다. */
+    /** 중요 마킹 — 번호 박스 색은 그대로 두고, 좌상단에 노란 원만 붙인다. */
     function drawBookmarkChrome(ctx, w, h, scale) {
         const s = Math.max(0.85, Number(scale) || 1);
+        const r = Math.max(5.5, 7 * s);
         ctx.save();
-        ctx.strokeStyle = '#eab308';
-        ctx.lineWidth = Math.max(2.6, 3.4 * s);
-        ctx.setLineDash([]);
-        ctx.strokeRect(-w / 2 - 4 * s, -h / 2 - 4 * s, w + 8 * s, h + 8 * s);
-        ctx.fillStyle = '#eab308';
-        ctx.font = `700 ${Math.round(12 * s)}px sans-serif`;
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText('★', w / 2 + 1 * s, -h / 2 - 1 * s);
+        ctx.beginPath();
+        ctx.arc(-w / 2, -h / 2, r, 0, Math.PI * 2);
+        ctx.fillStyle = '#facc15';
+        ctx.fill();
+        ctx.lineWidth = Math.max(1.2, 1.5 * s);
+        ctx.strokeStyle = '#854d0e';
+        ctx.stroke();
         ctx.restore();
     }
 

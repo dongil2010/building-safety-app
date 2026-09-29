@@ -2191,16 +2191,21 @@ html:not(.layout-tablet) #tab-map .inspect-sidebar-left .defect-badge-no {
     box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.28);
 }
 
-.defect-list-item.is-important {
-    border-color: #eab308;
-    background: #fffbeb;
-    box-shadow: inset 4px 0 0 #eab308;
+.defect-list-item.is-important .defect-badge-no {
+    position: relative;
 }
 
 .defect-list-item.is-important .defect-badge-no::before {
-    content: '★';
-    margin-right: 0.15rem;
-    color: #ca8a04;
+    content: '';
+    position: absolute;
+    top: 1px;
+    left: 1px;
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    background: #facc15;
+    border: 1.5px solid #854d0e;
+    box-sizing: border-box;
 }
 
 .defect-list-section.is-selected-cluster {
