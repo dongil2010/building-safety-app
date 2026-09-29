@@ -1,5 +1,15 @@
 apply plugin: 'com.android.application'
 
+// 앱 번호는 웹 앱을 따른다(앱은 GitHub Pages를 내부 브라우저로 여는 껍데기라 웹이 곧 앱).
+// 단일 출처: app.js 의 window.BSA_APP_BUILD = { versionCode: N, versionName: 'x.y.z' } (홈 배지 v번호와 같음)
+def readWebAppBuild() {
+    def src = rootProject.file('../app.js')
+    def m = (src.getText('UTF-8') =~ /window\.BSA_APP_BUILD\s*=\s*\{\s*versionCode:\s*(\d+)\s*,\s*versionName:\s*'([^']+)'/)
+    if (!m.find()) throw new GradleException("app.js 에서 window.BSA_APP_BUILD 를 찾지 못했습니다 (앱 번호 단일 출처)")
+    return [code: m.group(1) as Integer, name: m.group(2)]
+}
+def webAppBuild = readWebAppBuild()
+
 android {
     namespace "kr.buildingsafety.inspection"
     compileSdk rootProject.ext.compileSdkVersion
@@ -7,8 +17,8 @@ android {
         applicationId "kr.buildingsafety.inspection"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 8
-        versionName "1.3.0"
+        versionCode webAppBuild.code
+        versionName webAppBuild.name
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.

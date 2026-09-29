@@ -58,4 +58,4 @@ Android Studio에서 **Run** (실기기 또는 에뮬레이터).
 
 - 로그인·동기화·원격 웹 로드는 **인터넷 연결**이 필요합니다.
 - 네이티브 앱에서는 Service Worker를 등록하지 않습니다. 웹 캐시는 홈 **새로고침**으로 비울 수 있습니다.
-- 카메라 플러그인 등 네이티브 코드를 바꾼 뒤에만 `versionCode` / `versionName`을 올리고 APK를 다시 설치하세요.
+- 앱 번호(`versionCode` / `versionName`)는 **웹 앱을 따릅니다** — `android/app/build.gradle`이 빌드 때 `app.js`의 `window.BSA_APP_BUILD = { versionCode, versionName }`(홈 배지의 v번호)를 읽습니다. 번호를 올릴 땐 그 한 줄만 고치고(`versionCode`는 늘 이전보다 크게) APK를 다시 빌드하세요. `build.gradle`의 숫자를 직접 고치지 마세요.
