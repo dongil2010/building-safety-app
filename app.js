@@ -48867,7 +48867,11 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (!badge) return;
         const name = (window.BSA_APP_BUILD && window.BSA_APP_BUILD.versionName) || '1.3.0';
         const label = isNativeAndroidApp() ? '웹뷰 (GitHub Pages)' : '웹';
-        badge.innerHTML = `<i class="fa-solid fa-globe"></i> v${name} · ${label}`;
+        // 실제 코드 버전(배포 때 커밋 해시가 박힌다)도 같이 — v1.3.2는 앱 껍데기 번호라 배포해도 안 바뀌어서
+        // 태블릿이 최신 코드인지 화면으로 확인할 방법이 없었다(2026-09-29). web-version.json의 short와 비교하면 된다.
+        const code = String(window.BSA_APP_VERSION || '').trim();
+        const codeHtml = code ? ` · <span class="app-code-version" title="코드 버전 — 설정의 새로고침으로 최신이 됩니다">${code.replace(/[^0-9A-Za-z_.-]/g, '')}</span>` : '';
+        badge.innerHTML = `<i class="fa-solid fa-globe"></i> v${name} · ${label}${codeHtml}`;
     }
     applyWebViewBadge();
 
