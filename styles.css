@@ -3361,6 +3361,51 @@ html:not(.layout-tablet) #tab-map .inspect-sidebar-left .defect-badge-no {
     overscroll-behavior-x: contain;
 }
 
+/* 태블릿 조사표 세로 스와이프 먹통 (2026-09-29): 위 .table-container 기본값 touch-action: pan-x가
+   조사표에도 그대로 남아 있었다. 폰(≤768)은 아래 모바일 규칙이 pan-x pan-y로 덮어서 괜찮았지만
+   태블릿(769px 이상, iPad·안드로이드 탭)은 pan-x 그대로라 표 위에서 세로로 밀면 표도 페이지도
+   안 움직였다. 조사표 표는 자체가 상하·좌우 스크롤이므로 터치 기기에선 두 축 다 허용한다.
+   태블릿 세로(표가 늘어나고 페이지가 스크롤)에서는 표에 걸린 overscroll-behavior: contain(PC split용)이
+   세로 제스처를 페이지로 넘기지 않아 역시 먹통이었다 → 세로는 넘기고(auto) 가로만 가둔다.
+   화면 폭이 아니라 터치 여부로 정한다(layout-tablet, 또는 769px 이상·높이 600px 이상 손가락 포인터). 폰(가로 포함)·PC 마우스는 그대로. */
+html.layout-tablet #tab-survey .table-container {
+    touch-action: pan-x pan-y;
+    overscroll-behavior-x: contain;
+    overscroll-behavior-y: auto;
+}
+
+/* 태블릿 가로 1025~1200px(예: iPad Air 1180×820)에서는 PC split 규칙이 .app-content를 overflow:hidden으로
+   막는데 표·앨범 높이는 화면에 맞춰지지 않아(표 2298px, 화면 820px) 아래쪽 행·앨범에 닿을 수 없었다.
+   터치 기기에선 페이지도 세로 스크롤을 허용한다(화면에 맞게 줄어든 split이면 넘칠 게 없어 그대로). */
+html.layout-tablet body.bsa-tab-survey .app-content {
+    overflow-x: hidden !important;
+    overflow-y: auto !important;
+    -webkit-overflow-scrolling: touch;
+}
+
+/* 같은 이유로 사진 앨범(태블릿에서 표 아래·옆): contain이면 앨범 위 세로 스와이프가 페이지로 안 넘어간다 */
+html.layout-tablet #tab-survey .survey-album-grid {
+    overscroll-behavior-y: auto;
+}
+
+@media (hover: none) and (pointer: coarse) and (min-width: 769px) and (min-height: 600px) {
+    html body.bsa-tab-survey .app-content {
+        overflow-x: hidden !important;
+        overflow-y: auto !important;
+        -webkit-overflow-scrolling: touch;
+    }
+
+    html #tab-survey .survey-album-grid {
+        overscroll-behavior-y: auto;
+    }
+
+    html #tab-survey .table-container {
+        touch-action: pan-x pan-y;
+        overscroll-behavior-x: contain;
+        overscroll-behavior-y: auto;
+    }
+}
+
 #tab-survey .survey-table {
     table-layout: fixed;
     width: max-content;
