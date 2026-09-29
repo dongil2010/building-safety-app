@@ -305,9 +305,15 @@ service cloud.firestore {
     }
 
     match /errorLogs/{logId} {
-      // 읽기는 회사 계정으로 로그인한 사람만. photoRelay용 익명 로그인은 제외한다.
+      // 읽기는 **그 기록의 회사 직원만** (2026-09-29). 예전엔 로그인만 하면 다른 회사 기록
+      // (직원 이름·회사명·화면 주소·기기 정보)까지 읽을 수 있었다. 앱 조회 화면은
+      // where('companyId','==',우리회사)로 좁혀 읽어야 이 규칙을 통과한다(규칙은 거르개가 아니다).
+      // 로그인 전 오류(companyId 빈 값)는 앱에서 못 본다 — Firebase 콘솔에서만.
       allow read: if request.auth != null &&
-        request.auth.token.firebase.sign_in_provider != 'anonymous';
+        request.auth.token.firebase.sign_in_provider != 'anonymous' &&
+        resource.data.companyId is string &&
+        resource.data.companyId != '' &&
+        isCompanyMember(resource.data.companyId);
       allow create: if request.auth != null && errorLogShapeOk();
       allow update, delete: if false;
     }

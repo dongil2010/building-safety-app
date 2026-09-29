@@ -6,13 +6,15 @@
  *
  * - 읽기만 한다. 규칙상 errorLogs는 고치거나 지울 수 없다(firestore.rules).
  * - 같은 오류(숫자만 다른 것 포함 — error-log.js signatureOf)는 한 줄로 묶어 "몇 번·몇 대·언제"를 보인다.
- * - errorLogs는 회사 구분 없는 컬렉션이라 우리 회사 것(과 로그인 전이라 회사가 빈 것)만 보인다.
- * - 쿼리는 at 내림차순 한 가지만 쓴다 — where를 섞으면 복합 색인이 필요해 콘솔 작업이 생긴다.
+ * - errorLogs는 회사 구분 없는 컬렉션이다. 규칙이 "그 기록의 회사 직원만 읽기"라서(2026-09-29)
+ *   쿼리도 반드시 where('companyId','==',우리회사)로 좁힌다 — 안 좁히면 규칙이 쿼리 전체를 거부한다.
+ * - 정렬(orderBy at)은 서버에서 하지 않는다. where와 섞으면 복합 색인이 필요한데 CI는 규칙만 게시한다.
+ *   오류는 기기당 하루 30건으로 막혀 있어 회사 전체를 받아 화면에서 정렬해도 양이 적다(FETCH_LIMIT가 안전장치).
  */
 (function (root) {
     'use strict';
 
-    const FETCH_LIMIT = 500;
+    const FETCH_LIMIT = 2000;
     const DAY_MS = 24 * 60 * 60 * 1000;
 
     function timeOf(log) {
@@ -109,8 +111,14 @@
         return String(kind || '오류');
     }
 
+    /** 규칙(그 회사 직원만)을 통과하는 쿼리 — 회사로 좁히고, 정렬은 받은 뒤 화면에서 */
+    function buildQuery(db, companyId) {
+        return db.collection('errorLogs').where('companyId', '==', companyId).limit(FETCH_LIMIT);
+    }
+
     const api = {
         FETCH_LIMIT: FETCH_LIMIT,
+        buildQuery: buildQuery,
         timeOf: timeOf,
         deviceLabel: deviceLabel,
         filterLogs: filterLogs,
@@ -152,7 +160,7 @@
             const devices = new Set(logs.map(function (l) { return l.deviceId || l.device || '?'; }));
             setStatus(logs.length
                 ? '오류 ' + logs.length + '건 · 종류 ' + groups.length + '가지 · 기기 ' + devices.size + '대'
-                    + (cache.length >= FETCH_LIMIT ? ' (최근 ' + FETCH_LIMIT + '건까지만 받음)' : '')
+                    + (cache.length >= FETCH_LIMIT ? ' (기록이 ' + FETCH_LIMIT + '건을 넘어 일부만 받았습니다 — 최근 것이 빠졌을 수 있음)' : '')
                 : '이 기간에 기록된 오류가 없습니다. 👍');
             list.innerHTML = groups.map(function (g, i) {
                 const users = g.users.length ? g.users.slice(0, 3).join(', ') + (g.users.length > 3 ? ' 외' : '') : '로그인 전';
@@ -190,11 +198,17 @@
                 setStatus('오프라인입니다. 인터넷에 연결된 뒤 다시 열어 주세요.');
                 return;
             }
+            const companyId = (root.state && root.state.companyId) || '';
+            if (!companyId) {
+                setStatus('회사에 소속된 계정만 볼 수 있습니다.');
+                return;
+            }
             loading = true;
             setStatus('불러오는 중…');
             try {
-                const snap = await fb.firestore().collection('errorLogs').orderBy('at', 'desc').limit(FETCH_LIMIT).get();
+                const snap = await buildQuery(fb.firestore(), companyId).get();
                 cache = snap.docs.map(function (d) { return Object.assign({ _id: d.id }, d.data()); });
+                cache.sort(function (a, b) { return timeOf(b) - timeOf(a); });
                 render();
             } catch (e) {
                 setStatus('불러오지 못했습니다: ' + ((e && e.message) || e));

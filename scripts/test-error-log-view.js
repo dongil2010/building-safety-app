@@ -62,5 +62,22 @@ const rules = fs.readFileSync(path.join(root, 'firestore.rules'), 'utf8');
 const block = rules.slice(rules.indexOf('match /errorLogs/{logId}'));
 assert.ok(/allow read: if request\.auth != null/.test(block));
 assert.ok(/allow update, delete: if false;/.test(block));
+// 2026-09-29: 읽기는 그 기록의 회사 직원만 — 로그인만 하면 다른 회사 기록까지 읽히던 것
+const readRule = block.slice(block.indexOf('allow read:'), block.indexOf('allow create:'));
+assert.ok(/isCompanyMember\(resource\.data\.companyId\)/.test(readRule), '읽기 규칙이 회사를 확인한다');
+assert.ok(/resource\.data\.companyId != ''/.test(readRule), '회사 빈 기록(로그인 전)은 앱에서 못 읽는다');
+
+// 조회 쿼리는 규칙을 통과하도록 반드시 회사로 좁힌다(규칙은 거르개가 아니라 안 좁히면 전체 거부)
+{
+    const calls = [];
+    const q = {
+        where(f, op, v) { calls.push(['where', f, op, v]); return q; },
+        orderBy(f, d) { calls.push(['orderBy', f, d]); return q; },
+        limit(n) { calls.push(['limit', n]); return q; }
+    };
+    view.buildQuery({ collection(name) { calls.push(['collection', name]); return q; } }, 'c1');
+    assert.deepStrictEqual(calls, [['collection', 'errorLogs'], ['where', 'companyId', '==', 'c1'], ['limit', view.FETCH_LIMIT]],
+        'where + orderBy는 복합 색인이 필요해 쓰지 않는다(정렬은 화면에서)');
+}
 
 console.log('test-error-log-view: ok');
