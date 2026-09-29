@@ -16248,3 +16248,20 @@ input.bsa-mkp-active, textarea.bsa-mkp-active {
         overscroll-behavior-y: auto; /* 표 끝(또는 표가 화면보다 낮을 때) 세로는 페이지로 */
     }
 }
+
+/* ==========================================================================
+   폰·태블릿(터치) 도면 도구줄 정리 (2026-09-29): CAD 스냅·십자선·행·열 버튼 없음.
+   십자선은 늘 켬, 스냅은 기본(켬), 행·열 선 편집은 PC 전용(그어 둔 선·위치 자동 입력은 그대로).
+   html.bsa-touch-ui = js/core/mobile-keyboard.js isTouchToolbarUi (손가락 포인터·layout-tablet, PC 마우스 제외)
+   (#id#id 두 번 — html.layout-tablet #tab-ndt .ndt-unified-rail .mobile-rail-btn { display:flex !important } 등보다 우선)
+   ========================================================================== */
+html.bsa-touch-ui button#btnSnapToCad#btnSnapToCad,
+html.bsa-touch-ui button#mobileBtnSnapToCad#mobileBtnSnapToCad,
+html.bsa-touch-ui button#btnToggleCrosshair#btnToggleCrosshair,
+html.bsa-touch-ui button#mobileBtnCrosshair#mobileBtnCrosshair,
+html.bsa-touch-ui button#btnToggleCrosshairNdt#btnToggleCrosshairNdt,
+html.bsa-touch-ui button#mobileNdtBtnCrosshair#mobileNdtBtnCrosshair,
+html.bsa-touch-ui button#btnGridLines#btnGridLines,
+html.bsa-touch-ui button#mobileBtnGridLines#mobileBtnGridLines {
+    display: none !important;
+}

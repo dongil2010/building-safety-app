@@ -39,7 +39,7 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <meta name="apple-mobile-web-app-title" content="스마트 안전점검">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css">
-    <link rel="stylesheet" href="styles.css?v=20260929_185512">
+    <link rel="stylesheet" href="styles.css?v=20260929_190255">
 
     <!-- FontAwesome icons for clean engineering UI -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
@@ -390,9 +390,9 @@
                                 <i class="fa-solid fa-pen"></i>
                                 <span>그리기</span>
                             </button>
-                            <button type="button" class="mobile-rail-btn" id="mobileBtnQuickDrag" title="켜면 빈 곳 드래그로 결함 다중 선택 (핀·화살표 이동은 0.3초 길게 누름)" aria-pressed="false">
+                            <button type="button" class="mobile-rail-btn" id="mobileBtnQuickDrag" title="범위 선택 — 켜면 도면 빈 곳을 손가락으로 끌어 그린 네모 안의 결함을 한꺼번에 선택합니다(여러 개 이동·일괄 수정용). 끄면 빈 곳 끌기는 도면 이동. 핀·화살표 옮기기는 0.3초 길게 누른 뒤 끌기" aria-label="범위 선택" aria-pressed="false">
                                 <i class="fa-solid fa-square-dashed"></i>
-                                <span>박스</span>
+                                <span>범위선택</span>
                             </button>
                             <button type="button" class="mobile-rail-btn" id="mobileBtnAddSelect" title="켜면 터치마다 선택 추가/해제" aria-pressed="false">
                                 <i class="fa-solid fa-object-ungroup"></i>
@@ -847,9 +847,9 @@
                         <span>더보기</span>
                     </button>
                     <div class="mobile-rail-secondary" id="mobileNdtRailSecondary" hidden>
-                    <button type="button" class="mobile-rail-btn" id="mobileNdtBtnQuickDrag" title="켜면 빈 곳 드래그로 항목 다중 선택" aria-pressed="false">
+                    <button type="button" class="mobile-rail-btn" id="mobileNdtBtnQuickDrag" title="범위 선택 — 켜면 도면 빈 곳을 손가락으로 끌어 그린 네모 안의 측정 항목을 한꺼번에 선택합니다. 끄면 빈 곳 끌기는 도면 이동" aria-label="범위 선택" aria-pressed="false">
                         <i class="fa-solid fa-square-dashed"></i>
-                        <span>박스</span>
+                        <span>범위선택</span>
                     </button>
                     <button type="button" class="mobile-rail-btn" id="mobileNdtBtnAddSelect" title="켜면 터치마다 선택 추가/해제" aria-pressed="false">
                         <i class="fa-solid fa-object-ungroup"></i>
@@ -3289,48 +3289,48 @@
 
     <!-- Core → 탭 분류 → 기존 엔진(app.js) -->
     <!-- 오류 기록은 맨 먼저 — 아래 스크립트들이 읽히다 터져도 잡아야 한다 -->
-    <script src="js/core/error-log.js?v=20260929_185512"></script>
-    <script src="js/core/floor-identity.js?v=20260929_185512"></script>
-    <script src="js/core/state.js?v=20260929_185512"></script>
-    <script src="js/core/ndt-grade.js?v=20260929_185512"></script>
-    <script src="js/tabs/registry.js?v=20260929_185512"></script>
-    <script src="js/pdf-vector-bridge.js?v=20260929_185512"></script>
-    <script src="js/pdf-vector-snap.js?v=20260929_185512"></script>
-    <script src="js/core/layout-mode.js?v=20260929_185512"></script>
-    <script src="js/core/performance.js?v=20260929_185512"></script>
-    <script src="js/shared/measure-keypad.js?v=20260929_185512"></script>
-    <script src="js/core/mobile-keyboard.js?v=20260929_185512"></script>
-    <script src="js/tabs/home.js?v=20260929_185512"></script>
-    <script src="js/tabs/map.js?v=20260929_185512"></script>
-    <script src="js/tabs/survey.js?v=20260929_185512"></script>
-    <script src="js/tabs/stats.js?v=20260929_185512"></script>
-    <script src="js/tabs/ndt.js?v=20260929_185512"></script>
-    <script src="js/shared/report.js?v=20260929_185512"></script>
-    <script src="js/shared/hwpx-survey-slots.js?v=20260929_185512"></script>
-    <script src="js/shared/hwpx-ndt-maps.js?v=20260929_185512"></script>
-    <script src="js/shared/cad-unmarked-place.js?v=20260929_185512"></script>
-    <script src="js/shared/arrow-survey-number.js?v=20260929_185512"></script>
-    <script src="js/shared/defect-merge.js?v=20260929_185512"></script>
-    <script src="js/shared/korean-text-wrap.js?v=20260929_185512"></script>
-    <script src="js/shared/hwpx-import.js?v=20260929_185512"></script>
-    <script src="js/shared/hwpx-validate.js?v=20260929_185512"></script>
-    <script src="js/shared/hwpx-crack-monitor.js?v=20260929_185512"></script>
-    <script src="js/shared/auth.js?v=20260929_185512"></script>
-    <script src="js/core/firebase-storage-assets.js?v=20260929_185512"></script>
-    <script src="js/core/drawing-floor-tombstone.js?v=20260929_185512"></script>
-    <script src="js/core/data-health.js?v=20260929_185512"></script>
-    <script src="js/core/building-meta-merge.js?v=20260929_185512"></script>
-    <script src="js/core/edit-history.js?v=20260929_185512"></script>
-    <script src="js/core/no-conflict.js?v=20260929_185512"></script>
-    <script src="js/core/sync-merge.js?v=20260929_185512"></script>
-    <script src="js/shared/defect-quick-presets.js?v=20260929_185512"></script>
-    <script src="js/shared/grid-lines.js?v=20260929_185512"></script>
-    <script src="js/core/legend-layout.js?v=20260929_185512"></script>
-    <script src="js/core/error-log-view.js?v=20260929_185512"></script>
-    <script src="app.js?v=20260929_185512"></script>
+    <script src="js/core/error-log.js?v=20260929_190255"></script>
+    <script src="js/core/floor-identity.js?v=20260929_190255"></script>
+    <script src="js/core/state.js?v=20260929_190255"></script>
+    <script src="js/core/ndt-grade.js?v=20260929_190255"></script>
+    <script src="js/tabs/registry.js?v=20260929_190255"></script>
+    <script src="js/pdf-vector-bridge.js?v=20260929_190255"></script>
+    <script src="js/pdf-vector-snap.js?v=20260929_190255"></script>
+    <script src="js/core/layout-mode.js?v=20260929_190255"></script>
+    <script src="js/core/performance.js?v=20260929_190255"></script>
+    <script src="js/shared/measure-keypad.js?v=20260929_190255"></script>
+    <script src="js/core/mobile-keyboard.js?v=20260929_190255"></script>
+    <script src="js/tabs/home.js?v=20260929_190255"></script>
+    <script src="js/tabs/map.js?v=20260929_190255"></script>
+    <script src="js/tabs/survey.js?v=20260929_190255"></script>
+    <script src="js/tabs/stats.js?v=20260929_190255"></script>
+    <script src="js/tabs/ndt.js?v=20260929_190255"></script>
+    <script src="js/shared/report.js?v=20260929_190255"></script>
+    <script src="js/shared/hwpx-survey-slots.js?v=20260929_190255"></script>
+    <script src="js/shared/hwpx-ndt-maps.js?v=20260929_190255"></script>
+    <script src="js/shared/cad-unmarked-place.js?v=20260929_190255"></script>
+    <script src="js/shared/arrow-survey-number.js?v=20260929_190255"></script>
+    <script src="js/shared/defect-merge.js?v=20260929_190255"></script>
+    <script src="js/shared/korean-text-wrap.js?v=20260929_190255"></script>
+    <script src="js/shared/hwpx-import.js?v=20260929_190255"></script>
+    <script src="js/shared/hwpx-validate.js?v=20260929_190255"></script>
+    <script src="js/shared/hwpx-crack-monitor.js?v=20260929_190255"></script>
+    <script src="js/shared/auth.js?v=20260929_190255"></script>
+    <script src="js/core/firebase-storage-assets.js?v=20260929_190255"></script>
+    <script src="js/core/drawing-floor-tombstone.js?v=20260929_190255"></script>
+    <script src="js/core/data-health.js?v=20260929_190255"></script>
+    <script src="js/core/building-meta-merge.js?v=20260929_190255"></script>
+    <script src="js/core/edit-history.js?v=20260929_190255"></script>
+    <script src="js/core/no-conflict.js?v=20260929_190255"></script>
+    <script src="js/core/sync-merge.js?v=20260929_190255"></script>
+    <script src="js/shared/defect-quick-presets.js?v=20260929_190255"></script>
+    <script src="js/shared/grid-lines.js?v=20260929_190255"></script>
+    <script src="js/core/legend-layout.js?v=20260929_190255"></script>
+    <script src="js/core/error-log-view.js?v=20260929_190255"></script>
+    <script src="app.js?v=20260929_190255"></script>
 
     <script>
-        window.BSA_APP_VERSION = '20260929_185512';
+        window.BSA_APP_VERSION = '20260929_190255';
 
         (function () {
             var el = document.getElementById('appVersionText');
@@ -3363,7 +3363,7 @@
                     if (window.caches && caches.keys) caches.keys().then(function(ks) { ks.forEach(function(k) { caches.delete(k); }); }).catch(function() {});
                     return;
                 }
-                navigator.serviceWorker.register('./sw.js?v=20260929_185512')
+                navigator.serviceWorker.register('./sw.js?v=20260929_190255')
 
                     .then(function(registration) {
                         console.log('✅ ServiceWorker Registered Successfully with scope:', registration.scope);

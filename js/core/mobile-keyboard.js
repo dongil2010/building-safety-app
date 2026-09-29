@@ -53,6 +53,23 @@
         return w <= 1024;
     }
 
+    /**
+     * 도면 도구줄용 「터치 기기」 판정 — 키보드 들어올림과 같은 손가락 포인터·layout-tablet 기준.
+     * 단, 창 폭(≤1024) 대체 판정과 「터치스크린 달린 마우스 PC」(주 포인터 fine)는 빼서 PC는 그대로 둔다.
+     */
+    function isTouchToolbarUi() {
+        var root = document.documentElement;
+        var coarse = isCoarsePointer();
+        if (window.BSA.isPcLikeLayout && window.BSA.isPcLikeLayout() && !coarse) return false;
+        if (root && root.classList.contains('layout-tablet')) return true;
+        return coarse;
+    }
+
+    function applyTouchToolbarClass() {
+        var root = document.documentElement;
+        if (root) root.classList.toggle('bsa-touch-ui', isTouchToolbarUi());
+    }
+
     function isTextField(el) {
         if (!el || el.disabled || el.readOnly) return false;
         if (el.closest && el.closest('[data-bsa-kb-skip]')) return false;
@@ -385,6 +402,7 @@
     }
 
     function init() {
+        applyTouchToolbarClass();
         initScrollDrags();
         if (!isTouchKeyboardUi()) return;
 
@@ -400,6 +418,9 @@
             setTimeout(function () { updateLayout(true); }, 320);
         });
     }
+
+    window.BSA.isTouchToolbarUi = isTouchToolbarUi;
+    applyTouchToolbarClass(); // 첫 그리기 전에(깜빡임 없이) — DOMContentLoaded에서 한 번 더
 
     window.BSA.mobileKeyboard = {
         isActive: isTouchKeyboardUi,

@@ -29849,7 +29849,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
     /** 결함 마킹 중일 때만, 근처 CAD 벡터 선/끝점/교차점에 좌표를 스냅한다 (없으면 원래 좌표 그대로) */
     function snapImgCoordsForMarking(x, y) {
-        if (state.snapToCad === false) return { x, y, snapped: false };
+        if (state.snapToCad === false && !isTouchToolbarUi()) return { x, y, snapped: false };
         if (state.mode !== 'MARK') return { x, y, snapped: false };
         const bldg = state.currentBuilding;
         const fc = state.currentFloor;
@@ -30115,7 +30115,20 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     // 클릭·드래그를 막지 않고 PDF·HWPX·벡터 출력에도 들어가지 않는다.
     const DRAWING_CROSSHAIR_STORAGE_KEY = 'bsa_drawing_crosshair_v1';
     const DRAWING_CROSSHAIR_GAP_PX = 6; // 가운데 빈칸 — 원래 커서·마킹이 선에 가리지 않게
+    /**
+     * 폰·태블릿(터치 도구줄): 도면 도구줄에서 스냅·십자선·행·열 버튼을 뺀다(2026-09-29).
+     * 판정은 mobile-keyboard.js의 isTouchToolbarUi(손가락 포인터·layout-tablet, PC 마우스 제외).
+     */
+    function isTouchToolbarUi() {
+        try {
+            if (window.BSA && typeof window.BSA.isTouchToolbarUi === 'function') return !!window.BSA.isTouchToolbarUi();
+            const root = document.documentElement;
+            return !!(root && root.classList && root.classList.contains('bsa-touch-ui'));
+        } catch (_e) { return false; }
+    }
+    // 터치 기기는 십자선 늘 켬(끄는 버튼 없음). PC는 저장한 켜기/끄기 그대로.
     let drawingCrosshairEnabled = (function readDrawingCrosshairPref() {
+        if (isTouchToolbarUi()) return true;
         try { return localStorage.getItem(DRAWING_CROSSHAIR_STORAGE_KEY) !== '0'; } catch (_e) { return true; }
     })();
     let drawingCrosshairLastClient = null; // 마지막 포인터 위치(터치 포함) — 크기 조절 손잡이처럼 손가락을 그대로 따라가는 부분용
@@ -30407,6 +30420,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     }
 
     function setDrawingCrosshairEnabled(on) {
+        if (isTouchToolbarUi()) on = true; // 터치 기기: 늘 켬
         drawingCrosshairEnabled = !!on;
         try { localStorage.setItem(DRAWING_CROSSHAIR_STORAGE_KEY, drawingCrosshairEnabled ? '1' : '0'); } catch (_e) { /* ignore */ }
         syncDrawingCrosshairButtons();
@@ -33519,6 +33533,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     const btnSnapToCad = document.getElementById('btnSnapToCad');
     const mobileBtnSnapToCad = document.getElementById('mobileBtnSnapToCad');
     if (state.snapToCad === undefined) state.snapToCad = true;
+    // 터치 기기는 스냅 버튼이 없다 — 예전에 꺼 둔 채로 숨어 버리지 않게 기본값(켬)으로
+    if (isTouchToolbarUi()) state.snapToCad = true;
     function syncSnapToCadButtons() {
         const on = state.snapToCad !== false;
         if (btnSnapToCad) btnSnapToCad.classList.toggle('active', on);
@@ -33598,7 +33614,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     }
 
     function gridSnap(p) {
-        if (state.snapToCad === false || !window.BSA_PDF_SNAP) return p;
+        if ((state.snapToCad === false && !isTouchToolbarUi()) || !window.BSA_PDF_SNAP) return p;
         const bldg = state.currentBuilding;
         const fc = state.currentFloor;
         if (!bldg || !fc) return p;
@@ -34370,6 +34386,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
     function setGridEditActive(on) {
         const ge = gridEditState();
+        // 행·열 선 편집은 PC 전용(터치 기기엔 버튼 없음). 이미 그어 둔 선·위치 자동 입력은 그대로 동작
+        if (on && isTouchToolbarUi()) return;
         if (on && !gridLib()) {
             window.showToast?.('행·열 모듈을 불러오지 못했습니다. Ctrl+F5로 새로고침해 주세요.', 'error', 3000);
             return;
@@ -35397,8 +35415,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             syncMobileToggleBtn(mobileBtnQuickDrag, mobileMarqueeSelectEnabled);
             window.showToast(
                 mobileMarqueeSelectEnabled
-                    ? '선택 모드: 빈 곳 드래그로 결함 선택 (핀 이동은 0.3초 길게 누름)'
-                    : '선택 모드 OFF — 빈 곳 드래그는 도면 이동',
+                    ? '범위 선택 켜짐: 빈 곳을 끌어 네모 안 결함 선택 (핀 이동은 0.3초 길게 누름)'
+                    : '범위 선택 꺼짐 — 빈 곳 끌기는 도면 이동',
                 'info',
                 2600
             );
@@ -35471,8 +35489,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             syncMobileToggleBtn(mobileNdtBtnQuickDrag, ndtMarqueeSelectEnabled);
             window.showToast(
                 ndtMarqueeSelectEnabled
-                    ? '선택 모드: 빈 곳 드래그로 항목 선택 (핀 이동은 0.3초 길게 누름)'
-                    : '선택 모드 OFF — 빈 곳 드래그는 도면 이동',
+                    ? '범위 선택 켜짐: 빈 곳을 끌어 네모 안 항목 선택 (핀 이동은 0.3초 길게 누름)'
+                    : '범위 선택 꺼짐 — 빈 곳 끌기는 도면 이동',
                 'info',
                 2600
             );
