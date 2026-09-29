@@ -40805,8 +40805,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         else if (prevVal != null && String(prevVal).trim() !== '') {
             const pn = parseMonitorNumber(prevVal);
             if (pn != null && pn !== n) {
-                const d = Math.round(Math.abs(n - pn) * 10) / 10;
-                s += ` ←${d}`;
+                const d = Math.round(Math.abs(n - pn) * 100) / 100;
+                if (d > 0) s += ` ←${d}`;
             }
         }
         return s;
@@ -40940,14 +40940,12 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 });
             });
         });
+        // 게이지·팁 전부 (2026-09-29 전엔 3개까지만). 게이지 먼저, 팁은 뒤 — 양식 순서.
+        // no = 표·사진의 NO. 번호, col = 예전 16줄 표 칸 번호(공용 규칙이 없을 때만 씀)
         const slots = [];
-        const gaugeItems = items.filter((it) => it.hasGauge);
-        const tipItems = items.filter((it) => it.hasTip && !it.hasGauge);
-        gaugeItems.slice(0, 2).forEach((item, idx) => slots.push({ ...item, col: idx + 1, kind: 'gauge' }));
-        const third = gaugeItems[2] || tipItems[0] || items.find((it) => it.hasTip);
-        if (third && slots.length < 3) {
-            slots.push({ ...third, col: 3, kind: third.hasTip && !third.hasGauge ? 'tip' : (third.hasTip ? 'tip' : 'gauge') });
-        }
+        items.filter((it) => it.hasGauge).forEach((item) => slots.push({ ...item, kind: 'gauge' }));
+        items.filter((it) => it.hasTip).forEach((item) => slots.push({ ...item, kind: 'tip' }));
+        slots.forEach((slot, idx) => { slot.no = idx + 1; slot.col = idx + 1; });
         return { items, slots };
     }
 
@@ -40979,7 +40977,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     function hwpxCrackMonitorFormatters(bldg) {
         return {
             // 'NO.1' 뒤에 띄어쓰기 — 층 이름이 숫자로 시작하면 'NO.11층'처럼 붙어 읽혔다
-            header: (slot) => `NO.${slot.col} ${slot.floorLabel || ''} ${memberNameOut(slot.defect.component) || ''}`.replace(/\s+/g, ' ').trim(),
+            header: (slot) => `NO.${slot.no || slot.col} ${slot.floorLabel || ''} ${memberNameOut(slot.defect.component) || ''}`.replace(/\s+/g, ' ').trim(),
             typeLabel: (slot) => (slot.kind === 'tip' ? '균열팁' : '크랙모니터'),
             gaugeAxis: formatHwpxGaugeAxisCell,
             tipLength: formatHwpxTipLengthCell,
@@ -41001,12 +40999,124 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         });
     }
 
+    /**
+     * 측정표를 게이지 수(열)·측정 달 수(줄)에 맞게 다시 짠다. 양식 줄을 원본으로 쓴다:
+     * 0~2줄 머리글, 3줄 초기값, 4줄 측정(달마다 복제), 마지막 줄 변화량.
+     * 게이지 열 너비는 양식의 게이지 칸 전체 너비를 나눠 쓰고, 측정일·비고 열은 그대로.
+     * 글자를 줄이면(layout.scale<1) 줄 높이도 같은 비율로 줄인다.
+     */
+    function reshapeHwpxCrackMonitorTable(tbl, layout) {
+        const HP = HWPX_HP_NS;
+        const trs = Array.from(tbl.children).filter((c) => c.localName === 'tr');
+        if (trs.length < 6) return false;
+        const tcsOf = (tr) => Array.from(tr.children).filter((c) => c.localName === 'tc');
+        const child = (tc, name) => Array.from(tc.children).find((c) => c.localName === name);
+        const colOf = (tc) => parseInt(child(tc, 'cellAddr').getAttribute('colAddr'), 10);
+        const byCol = (tr, c) => tcsOf(tr).find((tc) => colOf(tc) === c) || null;
+        const szOf = (tc) => child(tc, 'cellSz');
+        const tplNote = parseInt(tbl.getAttribute('colCnt') || '5', 10) - 1;
+        const head0 = trs[0]; const head1 = trs[1]; const head2 = trs[2];
+        const initRow = trs[3]; const dataRow = trs[4]; const changeRow = trs[trs.length - 1];
+        const need = [byCol(head0, 0), byCol(head0, 1), byCol(head0, tplNote), byCol(head1, 1), byCol(head2, 1),
+            byCol(initRow, 0), byCol(initRow, 1), byCol(initRow, tplNote), byCol(dataRow, 0), byCol(dataRow, 1), byCol(dataRow, tplNote),
+            byCol(changeRow, 0), byCol(changeRow, 1), byCol(changeRow, tplNote)];
+        if (need.some((x) => !x || !szOf(x) || !child(x, 'cellAddr'))) return false;
+        const W = (tc) => parseInt(szOf(tc).getAttribute('width'), 10) || 0;
+        const H = (tc) => parseInt(szOf(tc).getAttribute('height'), 10) || 0;
+        const n = layout.nSlots;
+        const noteCol = n + 1;
+        const dateW = W(byCol(initRow, 0));
+        const noteW = W(byCol(initRow, tplNote));
+        const slotTotal = W(byCol(head0, 1));
+        const baseSlotW = Math.floor(slotTotal / n);
+        const slotW = (i) => (i < n - 1 ? baseSlotW : slotTotal - baseSlotW * (n - 1));
+        const scale = layout.scale || 1;
+        const rowH = (tr) => Math.max(1, Math.round(H(byCol(tr, 1)) * scale));
+        const place = (tc, r, c, width, height, colSpan) => {
+            const a = child(tc, 'cellAddr');
+            a.setAttribute('rowAddr', String(r));
+            a.setAttribute('colAddr', String(c));
+            if (width != null) szOf(tc).setAttribute('width', String(width));
+            if (height != null) szOf(tc).setAttribute('height', String(height));
+            if (colSpan != null) child(tc, 'cellSpan').setAttribute('colSpan', String(colSpan));
+            return tc;
+        };
+        const header = (tc) => { tc.setAttribute('header', '1'); return tc; }; // 쪽이 넘어가면 머리글 반복
+        const out = [];
+        // 0줄
+        const r0 = head0.cloneNode(false);
+        r0.appendChild(header(place(byCol(head0, 0).cloneNode(true), 0, 0, null, null)));
+        r0.appendChild(header(place(byCol(head0, 1).cloneNode(true), 0, 1, slotTotal, null, n)));
+        r0.appendChild(header(place(byCol(head0, tplNote).cloneNode(true), 0, noteCol, null, null)));
+        out.push(r0);
+        // 1·2줄 (게이지 이름·종류)
+        [head1, head2].forEach((proto, k) => {
+            const tr = proto.cloneNode(false);
+            for (let i = 0; i < n; i += 1) tr.appendChild(header(place(byCol(proto, 1).cloneNode(true), k + 1, i + 1, slotW(i), null)));
+            out.push(tr);
+        });
+        const fullRow = (proto, r) => {
+            const tr = proto.cloneNode(false);
+            const h = rowH(proto);
+            tr.appendChild(place(byCol(proto, 0).cloneNode(true), r, 0, dateW, h));
+            for (let i = 0; i < n; i += 1) tr.appendChild(place(byCol(proto, 1).cloneNode(true), r, i + 1, slotW(i), h));
+            tr.appendChild(place(byCol(proto, tplNote).cloneNode(true), r, noteCol, noteW, h));
+            return tr;
+        };
+        out.push(fullRow(initRow, 3));
+        for (let k = 0; k < layout.dataRows; k += 1) out.push(fullRow(dataRow, 4 + k));
+        out.push(fullRow(changeRow, layout.changeRow));
+        trs.forEach((tr) => tbl.removeChild(tr));
+        out.forEach((tr) => tbl.appendChild(tr));
+        tbl.setAttribute('rowCnt', String(layout.rowCnt));
+        tbl.setAttribute('colCnt', String(layout.colCnt));
+        const headH = H(byCol(head0, 0));
+        const total = headH + rowH(initRow) + rowH(dataRow) * layout.dataRows + rowH(changeRow);
+        const sz = child(tbl, 'sz');
+        if (sz) sz.setAttribute('height', String(total));
+        return true;
+    }
+
+    /** 글자 줄이기: 기준 글자 모양(charPr)을 복제해 크기만 바꾼 새 id (같은 크기는 재사용) */
+    function ensureHwpxScaledCharPr(hwpxHeaderState, baseId, scale) {
+        if (!hwpxHeaderState || !hwpxHeaderState.text || !baseId || !(scale < 1)) return null;
+        hwpxHeaderState.scaledCharPr = hwpxHeaderState.scaledCharPr || {};
+        const cacheKey = `${baseId}@${scale}`;
+        if (hwpxHeaderState.scaledCharPr[cacheKey]) return hwpxHeaderState.scaledCharPr[cacheKey];
+        let hdr = hwpxHeaderState.text;
+        const m = hdr.match(new RegExp(`<hh:charPr id="${baseId}"[^>]*>[\\s\\S]*?</hh:charPr>`));
+        if (!m) return null;
+        const ids = [...hdr.matchAll(/<hh:charPr id="(\d+)"/g)].map((x) => parseInt(x[1], 10));
+        const newId = String((ids.length ? Math.max(...ids) : 0) + 1);
+        const block = m[0].replace(/^<hh:charPr id="\d+"/, `<hh:charPr id="${newId}"`)
+            .replace(/(<hh:charPr[^>]*\bheight=")(\d+)(")/, (all, a, h, b) => `${a}${Math.max(400, Math.round(parseInt(h, 10) * scale / 10) * 10)}${b}`);
+        if (!hdr.includes('</hh:charProperties>')) return null;
+        hdr = hdr.replace('</hh:charProperties>', block + '</hh:charProperties>');
+        const cnt = (hdr.match(/<hh:charPr id="/g) || []).length;
+        hdr = hdr.replace(/(<hh:charProperties[^>]*itemCnt=")(\d+)(")/, `$1${cnt}$3`);
+        hwpxHeaderState.text = hdr;
+        hwpxHeaderState.dirty = true;
+        hwpxHeaderState.scaledCharPr[cacheKey] = newId;
+        return newId;
+    }
+
+    function scaleHwpxTableText(tbl, charPrId, scale) {
+        if (!tbl || !charPrId) return;
+        Array.from(tbl.getElementsByTagNameNS(HWPX_HP_NS, 'run')).forEach((run) => run.setAttribute('charPrIDRef', charPrId));
+        Array.from(tbl.getElementsByTagNameNS(HWPX_HP_NS, 'lineseg')).forEach((seg) => {
+            ['vertpos', 'vertsize', 'textheight', 'baseline', 'spacing'].forEach((k) => {
+                const v = parseInt(seg.getAttribute(k) || '', 10);
+                if (Number.isFinite(v)) seg.setAttribute(k, String(Math.round(v * scale)));
+            });
+        });
+    }
+
     // 2026-09-29 입력 안 한 측정값이 튀어나오던 문제: 양식 속 다른 건물 예시값이 남지 않게
     // 모든 칸을 먼저 비우고 입력한 값만 넣는다 (규칙은 js/shared/hwpx-crack-monitor.js, 테스트 있음)
     function fillHwpxCrackMonitorCurrentTable(tbl, slots, setTcText, bldg) {
         if (!tbl || !slots || !slots.length) return;
         const api = getHwpxCrackMonitorApi();
-        if (api) {
+        if (api && api.buildCurrentTableCells) {
             applyHwpxCellMap(tbl, api.buildCurrentTableCells(slots, hwpxCrackMonitorFormatters(bldg)), setTcText);
             return;
         }
@@ -41400,7 +41510,34 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 sec.appendChild(titlePara);
             }
 
-            const dataPara = cloneStampPara(stamp.topParas[stampPlan ? stampPlan.data : 1]);
+            const tableGroups = cmPlanApi ? cmPlanApi.groupSlots(slots) : [];
+            if (stampPlan && cmPlanApi && tableGroups.length) {
+                const cmFmt = hwpxCrackMonitorFormatters(bldg);
+                tableGroups.forEach((group) => {
+                    const para = cloneStampPara(stamp.topParas[stampPlan.data]);
+                    if (!para) return;
+                    reassignStampIds(para);
+                    const tops = topTablesOfPara(para);
+                    const tbl = tops.find((t) => parseInt(t.getAttribute('rowCnt') || '0', 10) >= 5);
+                    if (!tbl) return;
+                    // 같은 문단의 다른 표(예전 양식의 예시 이력표)는 지운다
+                    tops.forEach((t) => { if (t !== tbl && t.parentNode) t.parentNode.removeChild(t); });
+                    const layout = cmPlanApi.buildTableLayout(group, cmFmt);
+                    if (!reshapeHwpxCrackMonitorTable(tbl, layout)) {
+                        console.warn('균열게이지 측정표 모양을 알아보지 못했습니다(양식 확인 필요).');
+                        return;
+                    }
+                    applyHwpxCellMap(tbl, layout.cells, setTcText);
+                    polishHwpxCrackMonitorNode(tbl, crackStyleIds, purpleBfIds);
+                    if (layout.scale < 1) {
+                        const scaledId = ensureHwpxScaledCharPr(hwpxHeaderState, crackStyleIds.gulimCharPrId, layout.scale);
+                        scaleHwpxTableText(tbl, scaledId, layout.scale);
+                    }
+                    ensureTblTreatAsChar(tbl);
+                    sec.appendChild(para);
+                });
+            }
+            const dataPara = (stampPlan && cmPlanApi) ? null : cloneStampPara(stamp.topParas[1]);
             if (dataPara) {
                 reassignStampIds(dataPara);
                 const currentTbl = findHwpxTblByRowCount(dataPara, 16);
@@ -41427,6 +41564,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 const proto = summaryProtos[si] || summaryProtos[summaryProtos.length - 1];
                 const sumPara = cloneStampPara(proto);
                 if (!sumPara) continue;
+                if (stampPlan) sumPara.setAttribute('pageBreak', si % 2 === 0 ? '1' : '0');
                 reassignStampIds(sumPara);
                 const sumTbl = sumPara.getElementsByTagNameNS(HWPX_HP_NS, 'tbl')[0];
                 if (sumTbl) {

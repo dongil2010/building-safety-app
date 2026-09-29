@@ -7,6 +7,8 @@
  * 2026-09-29 신고: "입력 안 한 측정값이 튀어나온다". 양식에 다른 건물의 예시 측정값이
  * 들어 있고 앱은 입력한 칸만 덮어써서, 빈 칸에 예시값(2014~2026년 날짜, ↓0.5(초기값),
  * 29.05, 옥탑층 벽체…)이 그대로 나갔다. 같은 날 쪽 번호가 로마 숫자(Ⅰ, Ⅱ)로 나온다는 신고도.
+ * 같은 날 새 양식 + 요청: 표에는 년·월만(같은 달은 한 줄, 그 달 가장 늦은 측정), 측정·게이지
+ * 수 제한 없음(많으면 글자 줄임), 변화량 = 초기값 − 금회 측정값.
  */
 const assert = require('assert');
 const fs = require('fs');
@@ -23,15 +25,6 @@ const fmt = {
     typeLabel: (s) => (s.kind === 'tip' ? '균열팁' : '크랙모니터'),
     gaugeAxis: (axis, v, prev, o) => (v == null || String(v).trim() === '' ? '-' : (axis === 'y' ? '↓ ' : '→ ') + v + (o && o.isInitial ? '(초기값)' : '')),
     tipLength: (v, o) => (v == null || String(v).trim() === '' ? '-' : String(v) + (o && o.isInitial ? '(초기값)' : '')),
-    change: (s) => {
-        const list = (s.kind === 'tip' ? s.tip : s.gauge).readings;
-        return list.length ? 'CHG' + list.length : '-';
-    },
-    summaryChange: (s) => {
-        const list = (s.kind === 'tip' ? s.tip : s.gauge).readings;
-        return list.length ? 'SUM' + list.length : '-';
-    },
-    date: (r) => r.date || r.roundKey || '',
     member: (it) => it.name,
     location: (it) => it.loc,
     roundLabels: () => ({ prev: '', curr: '' })
@@ -85,114 +78,135 @@ function topParaInfos(xml) {
 
 const crackXml = sectionXml('hwpx_crack_monitor.hwpx');
 const infos = topParaInfos(crackXml);
-const currentTbl = infos.map((i) => i.tables.find((t) => t.rows === 16)).find(Boolean);
-assert.ok(currentTbl, '균열게이지 양식에 16줄 현재표가 없다');
-const summaryTbl = infos.map((i) => i.tables.find((t) => t.rows === 4 && t.pics === 2)).find(Boolean);
-assert.ok(summaryTbl, '균열게이지 양식에 사진 2장짜리 요약표가 없다');
+const plan = cm.planStampParas(infos.map((i) => ({ tables: i.tables.map((t) => ({ rows: t.rows, pics: t.pics })), text: i.text })));
+assert.ok(plan, '균열게이지 양식 문단을 못 골랐다');
+const measureTbl = infos[plan.data].tables.find((t) => t.rows >= 5);
+assert.ok(measureTbl, '균열게이지 양식에 측정표가 없다');
+const summaryTbl = infos[plan.summaryProto].tables.find((t) => t.rows === 4);
+assert.strictEqual(summaryTbl.pics, 2, '요약표 원본은 사진 2장짜리여야 한다');
 
-// 양식 칸 중 1행 이하(머리글 0행 제외)는 전부 앱이 값을 정해야 예시값이 안 남는다
-function assertCoversTemplate(cells, tbl, label) {
-    tbl.cells.filter(([r]) => r >= 1).forEach(([r, c, text]) => {
-        assert.ok(Object.prototype.hasOwnProperty.call(cells, r + ',' + c),
-            label + ' ' + r + ',' + c + ' 칸(양식 예시 "' + text.trim().slice(0, 20) + '")을 앱이 안 덮는다');
+// --- 양식 자체에 예시값이 없다 (다른 건물 자료가 새 나가지 않게) ---
+(function templateClean() {
+    ['옥탑층', '2021. 06. 18', '29.05', '↓ 0.5', 'DSCF', '기독병원', '바닥(균열모니터)', 'A5~6', '변화無', '2025년 하반기', '도면 6-14'].forEach((word) => {
+        assert.ok(!crackXml.includes(word), '균열게이지 양식에 예시값 "' + word + '"이 남아 있다');
     });
+    const m = infos[plan.data].tables.find((t) => t.rows >= 5);
+    const header = m.cells.filter(([r]) => r === 0).map(([, , t]) => t.trim());
+    assert.deepStrictEqual(header, ['측정일', '위치/측정값(㎜)', '비고']);
+})();
+
+// 칸 주소 → 있어야 할 칸 목록 (행 0: 측정일·게이지 묶음·비고 / 1·2: 게이지 / 나머지: 전부)
+function expectedAddrs(layout) {
+    const out = ['0,0', '0,1', '0,' + layout.noteCol];
+    for (let r = 1; r <= 2; r += 1) for (let c = 1; c <= layout.nSlots; c += 1) out.push(r + ',' + c);
+    for (let r = 3; r < layout.rowCnt; r += 1) for (let c = 0; c <= layout.noteCol; c += 1) out.push(r + ',' + c);
+    return out;
 }
+function assertComplete(layout) {
+    expectedAddrs(layout).forEach((k) => assert.ok(Object.prototype.hasOwnProperty.call(layout.cells, k), k + ' 칸 값이 없다'));
+}
+const g = (no, log, name) => ({ no, kind: 'gauge', name: name || ('G' + no), gauge: log });
 
-// --- 게이지 하나, 초기값 Y만, 측정 둘 + 날짜만 있고 값이 빈 행 하나 ---
-(function oneGauge() {
-    const slot = {
-        col: 1, kind: 'gauge', name: '1층 벽체',
-        gauge: { initialY: '0.4', initialX: '', readings: [
-            { date: '2026. 03. 02', yMm: '0.5', xMm: '' },
-            { date: '2026. 09. 01', yMm: '0.6', xMm: '0.1' },
-            { date: '2026. 09. 20', yMm: '', xMm: '' }
-        ] }
-    };
-    const cells = cm.buildCurrentTableCells([slot], fmt);
-    assertCoversTemplate(cells, currentTbl, '현재표');
-    assert.strictEqual(cells['1,1'], 'NO.1 1층 벽체');
-    assert.strictEqual(cells['2,1'], '크랙모니터');
-    assert.strictEqual(cells['3,1'], '↓ 0.4(초기값)', 'X 초기값이 없으면 "- / →"가 붙으면 안 된다');
-    assert.strictEqual(cells['4,0'], '2026. 03. 02');
-    assert.strictEqual(cells['4,1'], '↓ 0.5');
-    assert.strictEqual(cells['5,1'], '↓ 0.6 / → 0.1');
-    // 값을 안 넣은 측정 행은 줄로 나오지 않는다
-    assert.strictEqual(cells['6,0'], '');
-    assert.strictEqual(cells['6,1'], '');
-    // 쓰지 않는 2·3번 열과 남는 줄은 빈칸 (예시값도 '-'도 아님)
-    [2, 3].forEach((c) => {
-        for (let r = 1; r <= 15; r += 1) assert.strictEqual(cells[r + ',' + c], '', r + ',' + c + ' 칸이 비어야 한다');
-    });
-    for (let r = 6; r <= 14; r += 1) {
-        for (let c = 0; c <= 4; c += 1) assert.strictEqual(cells[r + ',' + c], '', r + ',' + c + ' 칸이 비어야 한다');
-    }
-    assert.strictEqual(cells['3,0'], '초기 부착 data');
-    assert.strictEqual(cells['15,0'], '변화량(금회측정-초기값)');
-    assert.strictEqual(cells['15,1'], 'CHG2', '변화량은 값 있는 측정 행만 본다');
+// --- 달 읽기 ---
+(function months() {
+    assert.deepStrictEqual(cm.monthOf({ date: '2026-09-28' }).key, '2026. 09');
+    assert.deepStrictEqual(cm.monthOf({ date: '2026. 9. 3' }).key, '2026. 09');
+    assert.strictEqual(cm.monthOf({ date: '', roundKey: '' }), null);
 })();
 
-// --- 아무것도 입력 안 한 게이지(번호만) → 값 칸이 전부 빈칸 ---
-(function emptyGauge() {
-    const slot = { col: 1, kind: 'gauge', name: '2층 기둥', gauge: { gaugeNo: 'G-1', readings: [{ date: '', roundKey: '2026-2', yMm: '', xMm: '' }] } };
-    const cells = cm.buildCurrentTableCells([slot], fmt);
-    for (let r = 3; r <= 15; r += 1) {
-        [1, 2, 3, 4].forEach((c) => assert.strictEqual(cells[r + ',' + c], '', r + ',' + c + ' 칸이 비어야 한다'));
-    }
-    const sum = cm.buildSummaryCells(slot, 1, fmt);
-    assert.strictEqual(sum['1,4'], '', '측정값이 없으면 요약표 변화량도 빈칸');
-    assertCoversTemplate(Object.assign({ '2,0': '', '2,3': '' }, sum), summaryTbl, '요약표');
+// --- 같은 달 두 번 → 그 달 가장 늦은 날짜 (입력 순서와 무관), 같은 날이면 나중 입력 ---
+(function sameMonth() {
+    const slot = g(1, { initialY: '0.3', readings: [
+        { date: '2026-09-28', yMm: '0.6' },
+        { date: '2026-09-10', yMm: '0.5' },
+        { date: '2026-08-01', yMm: '0.4' },
+        { date: '2026-08-01', yMm: '0.45' },
+        { date: '2026-10-02', yMm: '' } // 값 없음 → 무시
+    ] });
+    const list = cm.monthlyReadings(slot);
+    assert.deepStrictEqual(list.map((e) => e.key), ['2026. 08', '2026. 09']);
+    assert.strictEqual(list[0].reading.yMm, '0.45');
+    assert.strictEqual(list[1].reading.yMm, '0.6');
+    const lay = cm.buildTableLayout([slot], fmt);
+    assert.strictEqual(lay.cells['4,0'], '2026. 08');
+    assert.strictEqual(lay.cells['5,0'], '2026. 09');
+    assert.strictEqual(lay.cells['5,1'], '↓ 0.6');
+    assert.strictEqual(lay.rowCnt, 7, '머리글3 + 초기1 + 달2 + 변화량1');
 })();
 
-// --- 게이지 둘 + 팁 하나, 날짜가 겹치고 어긋남 ---
-(function threeSlots() {
-    const slots = [
-        { col: 1, kind: 'gauge', name: 'A', gauge: { initialY: '0.2', initialX: '0.1', readings: [{ date: 'd1', yMm: '0.3' }] } },
-        { col: 2, kind: 'gauge', name: 'B', gauge: { initialY: '', initialX: '', readings: [{ date: 'd2', yMm: '0.1' }] } },
-        { col: 3, kind: 'tip', name: 'C', tip: { initialLengthMm: '30', readings: [{ date: 'd1', lengthMm: '31' }] } }
-    ];
-    const cells = cm.buildCurrentTableCells(slots, fmt);
-    assert.strictEqual(cells['3,1'], '↓ 0.2(초기값) / → 0.1(초기값)');
-    assert.strictEqual(cells['3,2'], '', '초기값을 안 넣으면 빈칸');
-    assert.strictEqual(cells['3,3'], '30(초기값)');
-    assert.strictEqual(cells['2,3'], '균열팁');
-    assert.strictEqual(cells['4,0'], 'd1');
-    assert.strictEqual(cells['4,2'], '', 'd1에 B는 측정 안 함 → 빈칸');
-    assert.strictEqual(cells['4,3'], '31');
-    assert.strictEqual(cells['5,0'], 'd2');
-    assert.strictEqual(cells['5,1'], '');
-    assert.strictEqual(cells['5,2'], '↓ 0.1');
+// --- 변화량 = 초기값 − 금회 측정값, 성분별, 없으면 빈칸 ---
+(function change() {
+    const a = cm.changeOf(g(1, { initialY: '0.3', initialX: '0.1', readings: [{ date: '2026-01-05', yMm: '0.5', xMm: '0.4' }] }));
+    assert.strictEqual(a.text, '↓ -0.2mm / → -0.3mm');
+    const b = cm.changeOf(g(1, { initialY: '0.3', initialX: '', readings: [{ date: '2026-01-05', yMm: '0.1', xMm: '0.2' }] }));
+    assert.strictEqual(b.text, '↓ 0.2mm', 'X 초기값이 없으면 X 변화량은 빼야 한다');
+    const c = cm.changeOf(g(1, { initialY: '', initialX: '', readings: [{ date: '2026-01-05', yMm: '0.1' }] }));
+    assert.strictEqual(c.text, '');
+    const d = cm.changeOf({ no: 1, kind: 'tip', tip: { initialLengthMm: '29.05', readings: [{ date: '2026-01-05', lengthMm: '29.12' }] } });
+    assert.strictEqual(d.text, '-0.07mm');
+    const e = cm.changeOf(g(1, { initialY: '0.3', readings: [{ date: '2026-01-05', yMm: '0.3' }] }));
+    assert.strictEqual(e.allZero, true);
+    const sum = cm.buildSummaryCells(g(1, { initialY: '0.3', readings: [{ date: '2026-01-05', yMm: '0.3' }] }), 1,
+        Object.assign({}, fmt, { member: () => '벽체', location: () => '1층' }));
+    assert.strictEqual(sum['1,4'], '↓ 0.3');
+    assert.strictEqual(sum['1,5'], '변화無');
 })();
 
-// --- 측정이 11번을 넘으면 최근 것을 남긴다 (금회 측정이 잘리지 않게) ---
-(function manyReadings() {
+// --- 양식 크기(게이지 3, 달 11)면 양식 격자와 똑같고, 양식 칸 전부를 앱이 정한다 ---
+(function templateSize() {
     const readings = [];
-    for (let i = 1; i <= 13; i += 1) readings.push({ date: 'r' + String(i).padStart(2, '0'), yMm: String(i) });
-    const cells = cm.buildCurrentTableCells([{ col: 1, kind: 'gauge', name: 'A', gauge: { readings } }], fmt);
-    assert.strictEqual(cells['4,0'], 'r03');
-    assert.strictEqual(cells['14,0'], 'r13');
+    for (let i = 1; i <= 11; i += 1) readings.push({ date: '2025-' + String(i).padStart(2, '0') + '-15', yMm: String(i / 10) });
+    const lay = cm.buildTableLayout([g(1, { readings }), g(2, { readings }), g(3, { readings })], fmt);
+    assert.strictEqual(lay.rowCnt, measureTbl.rows);
+    assert.strictEqual(lay.colCnt, 5);
+    assert.strictEqual(lay.scale, 1);
+    measureTbl.cells.forEach(([r, c]) => assert.ok(Object.prototype.hasOwnProperty.call(lay.cells, r + ',' + c), '양식 ' + r + ',' + c + ' 칸을 앱이 안 덮는다'));
+    assertComplete(lay);
 })();
 
-// --- 양식 문단 고르기: 예시 이력표·예시 요약표·예시 위치도는 안 쓴다 ---
-(function plan() {
-    const plan = cm.planStampParas(infos.map((i) => ({ tables: i.tables.map((t) => ({ rows: t.rows, pics: t.pics })), text: i.text })));
-    assert.ok(plan, '양식 문단을 못 골랐다');
-    const dataTables = infos[plan.data].tables.map((t) => t.rows).sort((a, b) => a - b);
-    assert.ok(dataTables.includes(16));
-    const summary = infos[plan.summaryProto].tables.find((t) => t.rows === 4);
-    assert.strictEqual(summary.pics, 2, '요약표 원본은 사진 2장짜리여야 한다');
-    plan.tail.forEach((i) => {
-        assert.strictEqual(infos[i].tables.length, 0, '맺음말 뒤에 표(예시 요약표·위치도)가 붙으면 안 된다: 문단 ' + i);
-    });
+// --- 많을 때: 줄·열이 늘고 글자가 줄어든다 ---
+(function many() {
+    const readings = [];
+    for (let i = 0; i < 20; i += 1) readings.push({ date: (2024 + Math.floor(i / 12)) + '-' + String((i % 12) + 1).padStart(2, '0') + '-10', yMm: '0.' + i });
+    const slots = [1, 2, 3, 4, 5].map((no) => g(no, { initialY: '0.1', readings }));
+    const lay = cm.buildTableLayout(slots, fmt);
+    assert.strictEqual(lay.rowCnt, 3 + 1 + 20 + 1);
+    assert.strictEqual(lay.colCnt, 7);
+    assert.ok(lay.scale < 1 && lay.scale >= 0.6, 'scale ' + lay.scale);
+    assertComplete(lay);
+    assert.strictEqual(cm.fontScale(3, 11), 1);
+    assert.strictEqual(cm.fontScale(4, 14), 0.75);
+    assert.strictEqual(cm.fontScale(6, 40), 0.6, '최소 배율 0.6');
+    assert.deepStrictEqual(cm.groupSlots([1, 2, 3, 4, 5, 6, 7]).map((x) => x.length), [4, 3]);
+    assert.deepStrictEqual(cm.groupSlots([1, 2, 3, 4, 5, 6]).map((x) => x.length), [6]);
+    assert.deepStrictEqual(cm.groupSlots(new Array(13).fill(0)).map((x) => x.length), [5, 5, 3]);
+})();
+
+// --- 입력 안 한 게이지 → 값 칸 전부 빈칸 ---
+(function emptyGauge() {
+    const lay = cm.buildTableLayout([g(1, { gaugeNo: 'G-1', readings: [{ date: '', roundKey: '', yMm: '' }] }), g(2, { initialY: '0.2', readings: [{ date: '2026-02-02', yMm: '0.3' }] })], fmt);
+    for (let r = 3; r < lay.rowCnt; r += 1) assert.strictEqual(lay.cells[r + ',1'], '', r + ',1 칸이 비어야 한다');
+    assert.strictEqual(lay.cells['4,2'], '↓ 0.3');
+    const sum = cm.buildSummaryCells(g(1, { readings: [] }), 1, Object.assign({}, fmt, { member: () => '', location: () => '' }));
+    assert.strictEqual(sum['1,4'], '');
+    assert.strictEqual(sum['1,5'], '');
+})();
+
+// --- 양식 문단: 예시 위치도는 안 쓰고 맺음말만 ---
+(function planTail() {
+    plan.tail.forEach((i) => assert.strictEqual(infos[i].tables.length, 0, '맺음말 뒤에 표가 붙으면 안 된다: 문단 ' + i));
     assert.ok(plan.tail.some((i) => infos[i].text.includes('균열게이지')), '맺음말 문단이 빠졌다');
 })();
 
-// --- app.js가 공용 규칙을 쓰고, 예시 이력표를 지운다 ---
+// --- app.js 연결 ---
 (function appWiring() {
     const app = fs.readFileSync(path.join(ROOT, 'app.js'), 'utf8');
-    assert.ok(app.includes('api.buildCurrentTableCells(slots'), '현재표를 공용 규칙으로 채우지 않는다');
+    assert.ok(app.includes('cmPlanApi.buildTableLayout(group'), '측정표를 공용 규칙으로 만들지 않는다');
+    assert.ok(app.includes('cmPlanApi.groupSlots(slots)'), '게이지가 많을 때 표를 나누지 않는다');
+    assert.ok(app.includes('reshapeHwpxCrackMonitorTable(tbl, layout)'), '측정표 줄·열을 바꾸지 않는다');
+    assert.ok(app.includes('ensureHwpxScaledCharPr(hwpxHeaderState'), '많을 때 글자를 줄이지 않는다');
     assert.ok(app.includes('cmApi.buildSummaryCells(item'), '요약표를 공용 규칙으로 채우지 않는다');
-    assert.ok(app.includes('planStampParas('), '양식 문단을 공용 규칙으로 고르지 않는다');
-    assert.ok(/tbl !== currentTbl && tbl\.parentNode\) tbl\.parentNode\.removeChild\(tbl\)/.test(app), '예시 이력표를 지우지 않는다');
+    assert.ok(!app.includes('gaugeItems.slice(0, 2)'), '게이지 3개 제한이 남아 있다');
     const html = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
     const mine = html.indexOf('js/shared/hwpx-crack-monitor.js');
     assert.ok(mine > 0, 'index.html에 hwpx-crack-monitor.js가 없다');
