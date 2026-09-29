@@ -31,13 +31,17 @@ assert.ok(resolveBody.includes('floorDrawingRefreshDue(bldg, floorCode)'));
 assert.ok(resolveBody.includes('if (!refreshDue && bldg.floorDrawingPdfs'));
 
 assert.ok(app.includes('function drawBookmarkChrome('));
-// 2026-09-29: 중요 마킹 노란 원은 예전(반지름 max(8,10s))의 1/3 — 화면·보고서 공용 함수 한 곳
+// 2026-09-29: 중요 마킹 표시 = 「중요」 글자(노란 원 대신). 글자 높이 ≈ 1/3로 줄인 원의 지름 — 화면·보고서 공용 함수 한 곳
 assert.ok(app.includes('const BOOKMARK_CHROME_SIZE_RATIO = 1 / 3;'));
+assert.ok(app.includes("const BOOKMARK_CHROME_TEXT = '중요';"));
 {
-    const at = app.indexOf('function drawBookmarkChrome(');
-    const body = app.slice(at, at + 700);
-    assert.ok(body.includes('const r = Math.max(8, 10 * s) * BOOKMARK_CHROME_SIZE_RATIO;'), '노란 원 반지름 1/3');
-    assert.ok(body.includes('ctx.lineWidth = Math.max(1.2, 1.5 * s) * BOOKMARK_CHROME_SIZE_RATIO;'), '테두리도 1/3');
+    const at = app.indexOf('function getBookmarkChromeGlyphHeight(');
+    const body = app.slice(at, app.indexOf('ctx.restore();', at));
+    assert.ok(body.includes('return 2 * Math.max(8, 10 * s) * BOOKMARK_CHROME_SIZE_RATIO;'), '글자 높이 = 예전 1/3 원 지름');
+    assert.ok(body.includes('fontPx = fontPx * glyphH / mh'), '실제 글자 높이로 맞춤');
+    assert.ok(body.includes('const cx = -w / 2;') && body.includes('let cy = -h / 2;'), '원 자리(좌상단 모서리)');
+    assert.ok(body.includes('ctx.strokeText(BOOKMARK_CHROME_TEXT') && body.includes('ctx.fillText(BOOKMARK_CHROME_TEXT'), '테두리 + 글자');
+    assert.ok(!body.includes('ctx.arc('), '원은 더 안 그림');
     assert.strictEqual((app.match(/defectHasCornerMark\(defect\)\) drawBookmarkChrome\(ctx,/g) || []).length, 2, '화면(drawPin)·보고서(drawPinSafe) 두 곳이 같은 함수');
 }
 assert.ok(app.includes("row.classList.add('is-important')"));

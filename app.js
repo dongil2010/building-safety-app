@@ -23080,22 +23080,47 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     }
 
     /**
-     * 중요 마킹 — 번호 박스 색은 그대로 두고, 좌상단에 노란 원만 붙인다.
+     * 중요 마킹 — 번호 박스 색은 그대로 두고, 좌상단 모서리에 「중요」 글자를 붙인다.
      * 화면(drawPin)·보고서/PDF·한글·이미지(drawPinSafe) 공용.
-     * 2026-09-29: 원이 너무 커서 지름(반지름)·테두리를 예전의 1/3로 (BOOKMARK_CHROME_SIZE_RATIO).
+     * 2026-09-29: 노란 원(예전의 1/3 크기) → 「중요」 글자. 글자 높이 ≈ 그 원의 지름, 자리도 원 자리(박스 좌상단 모서리 중심).
+     *             노란 글자 + 얇은 진한 갈색 테두리(도면 위에서 읽히게).
      */
     const BOOKMARK_CHROME_SIZE_RATIO = 1 / 3;
-    function drawBookmarkChrome(ctx, w, h, scale) {
+    const BOOKMARK_CHROME_TEXT = '중요';
+    function getBookmarkChromeGlyphHeight(scale) {
         const s = Math.max(0.85, Number(scale) || 1);
-        const r = Math.max(8, 10 * s) * BOOKMARK_CHROME_SIZE_RATIO;
+        return 2 * Math.max(8, 10 * s) * BOOKMARK_CHROME_SIZE_RATIO; // 예전 원 지름
+    }
+    function drawBookmarkChrome(ctx, w, h, scale) {
+        const glyphH = getBookmarkChromeGlyphHeight(scale);
+        const family = '"Malgun Gothic", "Apple SD Gothic Neo", "Noto Sans KR", sans-serif';
         ctx.save();
-        ctx.beginPath();
-        ctx.arc(-w / 2, -h / 2, r, 0, Math.PI * 2);
+        // 글꼴마다 한글 글자 높이가 달라 실제 글자 높이를 재서 맞춘다
+        let fontPx = glyphH;
+        ctx.font = `900 ${fontPx}px ${family}`;
+        try {
+            const m = ctx.measureText(BOOKMARK_CHROME_TEXT);
+            const mh = (m.actualBoundingBoxAscent || 0) + (m.actualBoundingBoxDescent || 0);
+            if (mh > 0) fontPx = fontPx * glyphH / mh;
+        } catch (_e) { /* 옛 브라우저: 글꼴 크기 = 글자 높이 */ }
+        ctx.font = `900 ${fontPx}px ${family}`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        const cx = -w / 2;
+        let cy = -h / 2;
+        try {
+            const m2 = ctx.measureText(BOOKMARK_CHROME_TEXT);
+            if (m2.actualBoundingBoxAscent || m2.actualBoundingBoxDescent) {
+                // middle 기준선과 실제 글자 가운데의 차이 보정 → 글자 가운데가 모서리에
+                cy += (m2.actualBoundingBoxAscent - m2.actualBoundingBoxDescent) / 2;
+            }
+        } catch (_e) { /* ignore */ }
+        ctx.lineJoin = 'round';
+        ctx.lineWidth = Math.max(0.5, fontPx * 0.11);
+        ctx.strokeStyle = '#713f12';
+        ctx.strokeText(BOOKMARK_CHROME_TEXT, cx, cy);
         ctx.fillStyle = '#facc15';
-        ctx.fill();
-        ctx.lineWidth = Math.max(1.2, 1.5 * s) * BOOKMARK_CHROME_SIZE_RATIO;
-        ctx.strokeStyle = '#854d0e';
-        ctx.stroke();
+        ctx.fillText(BOOKMARK_CHROME_TEXT, cx, cy);
         ctx.restore();
     }
 
