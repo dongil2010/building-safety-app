@@ -23079,16 +23079,21 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         return getDefectMarkingGroupMembers(defect.groupId).some((m) => m && (m.isBookmark || m.isPriorityManage));
     }
 
-    /** 중요 마킹 — 번호 박스 색은 그대로 두고, 좌상단에 노란 원만 붙인다. */
+    /**
+     * 중요 마킹 — 번호 박스 색은 그대로 두고, 좌상단에 노란 원만 붙인다.
+     * 화면(drawPin)·보고서/PDF·한글·이미지(drawPinSafe) 공용.
+     * 2026-09-29: 원이 너무 커서 지름(반지름)·테두리를 예전의 1/3로 (BOOKMARK_CHROME_SIZE_RATIO).
+     */
+    const BOOKMARK_CHROME_SIZE_RATIO = 1 / 3;
     function drawBookmarkChrome(ctx, w, h, scale) {
         const s = Math.max(0.85, Number(scale) || 1);
-        const r = Math.max(8, 10 * s);
+        const r = Math.max(8, 10 * s) * BOOKMARK_CHROME_SIZE_RATIO;
         ctx.save();
         ctx.beginPath();
         ctx.arc(-w / 2, -h / 2, r, 0, Math.PI * 2);
         ctx.fillStyle = '#facc15';
         ctx.fill();
-        ctx.lineWidth = Math.max(1.2, 1.5 * s);
+        ctx.lineWidth = Math.max(1.2, 1.5 * s) * BOOKMARK_CHROME_SIZE_RATIO;
         ctx.strokeStyle = '#854d0e';
         ctx.stroke();
         ctx.restore();
