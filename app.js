@@ -40972,8 +40972,45 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         return tbls.find((tbl) => parseInt(tbl.getAttribute('rowCnt') || '0', 10) === rowCnt) || null;
     }
 
-    function fillHwpxCrackMonitorCurrentTable(tbl, slots, setTcText) {
+    function getHwpxCrackMonitorApi() {
+        return (window.BSA && window.BSA.hwpxCrackMonitor) || null;
+    }
+
+    function hwpxCrackMonitorFormatters(bldg) {
+        return {
+            // 'NO.1' 뒤에 띄어쓰기 — 층 이름이 숫자로 시작하면 'NO.11층'처럼 붙어 읽혔다
+            header: (slot) => `NO.${slot.col} ${slot.floorLabel || ''} ${memberNameOut(slot.defect.component) || ''}`.replace(/\s+/g, ' ').trim(),
+            typeLabel: (slot) => (slot.kind === 'tip' ? '균열팁' : '크랙모니터'),
+            gaugeAxis: formatHwpxGaugeAxisCell,
+            tipLength: formatHwpxTipLengthCell,
+            change: formatHwpxCrackChangeSummary,
+            summaryChange: formatHwpxCrackSummaryChangeText,
+            date: (r) => formatHwpxCrackMonitorDate(r && r.date) || (r && r.roundKey) || '',
+            member: (item) => memberNameOut(item.defect.component) || '',
+            location: (item) => `${item.floorLabel || ''} ${item.defect.locationDetail || ''}`.trim(),
+            roundLabels: (item) => getCrackMonitorItemRoundLabels(item, bldg)
+        };
+    }
+
+    /** 표 칸 값 묶음("행,열" → 글자)을 표에 넣는다 */
+    function applyHwpxCellMap(tbl, cells, setTcText) {
+        Object.keys(cells || {}).forEach((key) => {
+            const parts = key.split(',');
+            const tc = getHwpxTblCellByAddr(tbl, parseInt(parts[0], 10), parseInt(parts[1], 10));
+            if (tc) setTcText(tc, cells[key]);
+        });
+    }
+
+    // 2026-09-29 입력 안 한 측정값이 튀어나오던 문제: 양식 속 다른 건물 예시값이 남지 않게
+    // 모든 칸을 먼저 비우고 입력한 값만 넣는다 (규칙은 js/shared/hwpx-crack-monitor.js, 테스트 있음)
+    function fillHwpxCrackMonitorCurrentTable(tbl, slots, setTcText, bldg) {
         if (!tbl || !slots || !slots.length) return;
+        const api = getHwpxCrackMonitorApi();
+        if (api) {
+            applyHwpxCellMap(tbl, api.buildCurrentTableCells(slots, hwpxCrackMonitorFormatters(bldg)), setTcText);
+            return;
+        }
+        console.warn('hwpx-crack-monitor.js가 없어 예전 방식으로 균열게이지 표를 채웁니다.');
         slots.forEach((slot) => {
             const col = slot.col;
             const header = `NO.${slot.col}${slot.floorLabel || ''} ${memberNameOut(slot.defect.component) || ''}`.trim();
@@ -41296,16 +41333,23 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const fillSummaryPhotoTable = async (tbl, item, photoNo) => {
             if (!tbl || !item) return;
             const d = item.defect;
+            // 양식 사진에 붙은 원본 파일 이름(다른 건물 사진 이름) 설명은 지운다
+            Array.from(tbl.getElementsByTagNameNS(HWPX_HP_NS, 'shapeComment')).forEach((el) => { el.textContent = ''; });
             // 균열 게이지/팁 전용 비교사진 (결함 일반 사진 슬롯에 넣지 않음)
             const cmpPhotos = getCrackMonitorComparePhotos(item);
             const prevSrc = cmpPhotos.prev || '';
             const currSrc = cmpPhotos.curr || '';
             const roundLabels = getCrackMonitorItemRoundLabels(item, bldg);
-            setTcText(getHwpxTblCellByAddr(tbl, 1, 0), String(photoNo));
-            setTcText(getHwpxTblCellByAddr(tbl, 1, 1), memberNameOut(d.component) || '');
-            setTcText(getHwpxTblCellByAddr(tbl, 1, 2), `${item.floorLabel || ''} ${d.locationDetail || ''}`.trim());
-            setTcText(getHwpxTblCellByAddr(tbl, 1, 4), formatHwpxCrackSummaryChangeText(item));
-            setTcText(getHwpxTblCellByAddr(tbl, 1, 5), '-');
+            const cmApi = getHwpxCrackMonitorApi();
+            if (cmApi) {
+                applyHwpxCellMap(tbl, cmApi.buildSummaryCells(item, photoNo, hwpxCrackMonitorFormatters(bldg)), setTcText);
+            } else {
+                setTcText(getHwpxTblCellByAddr(tbl, 1, 0), String(photoNo));
+                setTcText(getHwpxTblCellByAddr(tbl, 1, 1), memberNameOut(d.component) || '');
+                setTcText(getHwpxTblCellByAddr(tbl, 1, 2), `${item.floorLabel || ''} ${d.locationDetail || ''}`.trim());
+                setTcText(getHwpxTblCellByAddr(tbl, 1, 4), formatHwpxCrackSummaryChangeText(item));
+                setTcText(getHwpxTblCellByAddr(tbl, 1, 5), '-');
+            }
             const pics = Array.from(tbl.getElementsByTagNameNS(HWPX_HP_NS, 'pic'));
             const stampPic = pics[0];
             const maxW = stampPic ? parseInt(stampPic.getElementsByTagNameNS(HWPX_HP_NS, 'curSz')[0]?.getAttribute('width') || '0', 10) : 0;
@@ -41327,9 +41371,26 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             };
             await fillPic(pics[0], prevSrc);
             await fillPic(pics[1], currSrc);
-            setTcText(getHwpxTblCellByAddr(tbl, 3, 0), roundLabels.prev || '전회 측정');
-            setTcText(getHwpxTblCellByAddr(tbl, 3, 3), roundLabels.curr || '금회 측정');
+            if (!cmApi) {
+                setTcText(getHwpxTblCellByAddr(tbl, 3, 0), roundLabels.prev || '전회 측정');
+                setTcText(getHwpxTblCellByAddr(tbl, 3, 3), roundLabels.curr || '금회 측정');
+            }
         };
+
+        // 문단 안의 맨 바깥 표만 (칸 속 표 제외)
+        const topTablesOfPara = (para) => Array.from(para.getElementsByTagNameNS(HWPX_HP_NS, 'tbl')).filter((tbl) => {
+            let n = tbl.parentNode;
+            while (n && n.localName !== 'p') n = n.parentNode;
+            return n === para;
+        });
+        const cmPlanApi = getHwpxCrackMonitorApi();
+        const stampPlan = cmPlanApi ? cmPlanApi.planStampParas(stamp.topParas.map((para) => ({
+            tables: topTablesOfPara(para).map((tbl) => ({
+                rows: parseInt(tbl.getAttribute('rowCnt') || '0', 10),
+                pics: tbl.getElementsByTagNameNS(HWPX_HP_NS, 'pic').length
+            })),
+            text: para.textContent || ''
+        }))) : null;
 
         try {
             const titlePara = cloneStampPara(stamp.topParas[0]);
@@ -41339,19 +41400,29 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 sec.appendChild(titlePara);
             }
 
-            const dataPara = cloneStampPara(stamp.topParas[1]);
+            const dataPara = cloneStampPara(stamp.topParas[stampPlan ? stampPlan.data : 1]);
             if (dataPara) {
                 reassignStampIds(dataPara);
                 const currentTbl = findHwpxTblByRowCount(dataPara, 16);
+                if (currentTbl && stampPlan) {
+                    // 같은 문단의 다른 표(2014~2020 예시 이력표, 채우는 코드 없음)는 지운다
+                    topTablesOfPara(dataPara).forEach((tbl) => {
+                        if (tbl !== currentTbl && tbl.parentNode) tbl.parentNode.removeChild(tbl);
+                    });
+                }
                 if (currentTbl) {
-                    fillHwpxCrackMonitorCurrentTable(currentTbl, slots, setTcText);
+                    fillHwpxCrackMonitorCurrentTable(currentTbl, slots, setTcText, bldg);
                     polishHwpxCrackMonitorNode(currentTbl, crackStyleIds, purpleBfIds);
                     ensureTblTreatAsChar(currentTbl);
                 }
                 sec.appendChild(dataPara);
             }
 
-            const summaryProtos = [stamp.topParas[2], stamp.topParas[3], stamp.topParas[4]].filter(Boolean);
+            // 요약 사진표는 모든 게이지에 같은 원본(사진 2장짜리)을 쓴다. 예전엔 [2,3,4]번 문단을 골랐는데
+            // 3번은 빈 문단이라 두 번째 게이지 표가 빠지고, 채우지 않은 예시 요약표(5번)가 따로 붙었다.
+            const summaryProtos = stampPlan
+                ? [stamp.topParas[stampPlan.summaryProto]]
+                : [stamp.topParas[2], stamp.topParas[3], stamp.topParas[4]].filter(Boolean);
             for (let si = 0; si < slots.length; si += 1) {
                 const proto = summaryProtos[si] || summaryProtos[summaryProtos.length - 1];
                 const sumPara = cloneStampPara(proto);
@@ -41366,7 +41437,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 sec.appendChild(sumPara);
             }
 
-            [stamp.topParas[5], stamp.topParas[6], stamp.topParas[7]].forEach((proto) => {
+            (stampPlan ? stampPlan.tail.map((i) => stamp.topParas[i]) : [stamp.topParas[5], stamp.topParas[6], stamp.topParas[7]]).forEach((proto) => {
                 const p = cloneStampPara(proto);
                 if (!p) return;
                 reassignStampIds(p);
@@ -41389,6 +41460,12 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     // 방금 만든 한글 파일의 표 구조를 검사해서 문제가 있으면 현장 오류 기록에 남긴다.
     // 2026-09-22 501~503 칸 순서처럼 "한글은 열리는데 구조가 틀린" 문제를 몇 주 몰랐다.
     // 읽기만 한다 — 검사가 실패하든 문제가 나오든 출력은 그대로 나간다.
+    // 쪽 번호는 아라비아 숫자(1, 2, 3). 2026-09-29 본문 양식 4개가 로마 숫자(Ⅰ, Ⅱ, Ⅲ)로
+    // 되어 있었다. 양식을 고쳤고, 혹시 캐시에 남은 옛 양식도 여기서 바로잡는다.
+    function forceHwpxArabicPageNumbers(xml) {
+        return String(xml).replace(/(<hp:pageNum\b[^>]*\bformatType=")[A-Z_]+(")/g, '$1DIGIT$2');
+    }
+
     async function reportHwpxStructure(zip, sectionPath, sectionXml, bldg) {
         const api = window.BSA && window.BSA.hwpxValidate;
         if (!api) return;
@@ -44359,6 +44436,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             if (!newXml.startsWith('<?xml')) {
                 newXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes" ?>' + newXml;
             }
+            newXml = forceHwpxArabicPageNumbers(newXml);
             zip.file(sectionPath, newXml);
 
             // 원본처럼 mimetype/version.xml은 무압축(Store)으로 유지
@@ -46619,6 +46697,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             if (!newXml.startsWith('<?xml')) {
                 newXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes" ?>' + newXml;
             }
+            newXml = forceHwpxArabicPageNumbers(newXml);
             zip.file(sectionPath, newXml);
 
             // 원본처럼 mimetype/version.xml은 무압축(Store)으로 유지
