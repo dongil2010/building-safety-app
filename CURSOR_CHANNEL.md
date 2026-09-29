@@ -676,6 +676,13 @@
 > 조사표 칸(input/textarea/select)에 포커스가 있으면 그리기를 미루고, 칸을 떠난 뒤 한 번만 그린다.
 > 병합·저장 경로는 그대로. 테스트: scripts/test-survey-sync-keyboard.js.
 
+### ⚡ [Cursor] - 2026-09-29 19:50:00
+> **`[COMPLETED]` 새 PDF가 다른 기기의 옛 PDF를 교체 + 중요 마킹 표시**
+>
+> 도면을 다시 올리고 서버 업로드가 되면 `floorPdfUpdatedAt`을 남긴다. 다른 기기는 그 시각이 더 새로우면
+> 받아 둔 PDF·화면 그림을 건너뛰고 서버에서 다시 받는다. 층마다 더 나중 시각을 남긴다.
+> 중요(isBookmark) 마킹은 번호 박스 금색 테두리·별, 결함 목록은 노란 줄. 테스트: scripts/test-floor-pdf-refresh.js.
+
 
 
 

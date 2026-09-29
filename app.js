@@ -2648,7 +2648,7 @@ document.addEventListener('DOMContentLoaded', () => {
         'floorsOrderManual',
         'siteName', 'dong', 'multiDong', 'name', 'address', 'inspector', 'contactPhone',
         'floors', 'date', 'structureType', 'facilityGrade', 'completionDate', 'notes',
-        'enabledStrengthFormulas', 'strengthAnvilAvg', 'floorPdfRemovedAt'
+        'enabledStrengthFormulas', 'strengthAnvilAvg', 'floorPdfRemovedAt', 'floorPdfUpdatedAt'
     ];
 
     function buildingMetaUpdatedAt(bldg) {
@@ -2928,6 +2928,14 @@ document.addEventListener('DOMContentLoaded', () => {
                     applyLocalBuildingMeta(merged, localMatch);
                 }
                 if (localMatch && localMatch._pendingCloudSync) merged._pendingCloudSync = true;
+            }
+            if (_buildingMetaMerge && typeof _buildingMetaMerge.mergeFloorStampMaps === 'function') {
+                // 도면을 다시 넣은 시각만 층마다 더 나중 것을 남긴다.
+                // (PDF를 뺀 시각은 0으로 푸는 값이 있어서 최대값으로 합치면 안 된다)
+                merged.floorPdfUpdatedAt = _buildingMetaMerge.mergeFloorStampMaps(
+                    localMatch && localMatch.floorPdfUpdatedAt,
+                    b.floorPdfUpdatedAt
+                );
             }
             if (_legendLayout && typeof _legendLayout.overlayOnMerged === 'function') {
                 _legendLayout.overlayOnMerged(merged, localMatch);
@@ -4216,9 +4224,19 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!bldg.floorDrawingSources) bldg.floorDrawingSources = {};
         const idbKey = `${bldg.id}_${floorCode}`;
         let hydrated = false;
+        // 다른 기기가 이 층 도면을 다시 넣었으면 받아 둔 옛 그림·PDF는 건너뛴다
+        const refreshDue = !options.localOnly && floorDrawingRefreshDue(bldg, floorCode);
+        if (refreshDue) {
+            delete bldg.floorDrawings[floorCode];
+            delete bldg.floorDrawingTiers[floorCode];
+            delete bldg.floorDrawingPdfs[floorCode];
+            if (window._cloudSyncedPdfKeys) window._cloudSyncedPdfKeys.delete(idbKey);
+            if (window._cloudSyncedDrawingKeys) window._cloudSyncedDrawingKeys.delete(idbKey);
+            clearFloorTierPersistedFlags(bldg.id, floorCode);
+        }
 
         // 1) 로컬 레스터 먼저 (네트워크 전에 IDB 티어·미리보기)
-        if (!isUsableRasterDrawingUrl(bldg.floorDrawings[floorCode])) {
+        if (!refreshDue && !isUsableRasterDrawingUrl(bldg.floorDrawings[floorCode])) {
             if (bldg.floorDrawings[floorCode]) delete bldg.floorDrawings[floorCode];
             const cached = await idbGet('floorDrawings', idbKey);
             if (isUsableRasterDrawingUrl(cached)) {
@@ -4231,7 +4249,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         }
 
-        if (!isUsableRasterDrawingUrl(bldg.floorDrawings[floorCode])) {
+        if (!refreshDue && !isUsableRasterDrawingUrl(bldg.floorDrawings[floorCode])) {
             const t4000 = await idbGetFloorDrawingTier(bldg.id, floorCode, 4000);
             if (isUsableRasterDrawingUrl(t4000)) {
                 if (!bldg.floorDrawingTiers) bldg.floorDrawingTiers = {};
@@ -4249,6 +4267,13 @@ document.addEventListener('DOMContentLoaded', () => {
             if (isUsableRasterDrawingUrl(cloud4000)) {
                 bldg.floorDrawings[floorCode] = cloud4000;
                 hydrated = true;
+                if (refreshDue) {
+                    idbSet('floorDrawings', idbKey, cloud4000);
+                    _idbPersistedDrawingKeys.add(idbKey);
+                    [8000, 16000].forEach((d) => {
+                        idbDelete('floorDrawingTiers', floorDrawingTierIdbKey(bldg.id, floorCode, d));
+                    });
+                }
             } else if (typeof fetchCloudFloorDrawingDataUrl === 'function') {
                 const cloudRaster = await fetchCloudFloorDrawingDataUrl(bldg.id, floorCode);
                 if (cloudRaster && isUsableRasterDrawingUrl(cloudRaster) && !isPdfDrawingUrl(cloudRaster)) {
@@ -4263,7 +4288,20 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         }
 
+        if (refreshDue && !isUsableRasterDrawingUrl(bldg.floorDrawings[floorCode])) {
+            const cached = await idbGet('floorDrawings', idbKey);
+            if (isUsableRasterDrawingUrl(cached)) bldg.floorDrawings[floorCode] = cached;
+        }
+
         const hasRaster = isUsableRasterDrawingUrl(bldg.floorDrawings[floorCode]);
+        if (refreshDue && !options.localOnly) {
+            const refreshedPdf = await resolveBuildingFloorPdf(bldg, floorCode, { forceCloud: true });
+            if (refreshedPdf) hydrated = true;
+            if (bldg._pdfRefreshFromCloud && bldg._pdfRefreshFromCloud[floorCode]) {
+                markFloorDrawingApplied(bldg.id, floorCode, floorPdfUpdatedAtOf(bldg, floorCode));
+                delete bldg._pdfRefreshFromCloud[floorCode];
+            }
+        }
         // PDF 원본은 벡터 내보내기 등 needPdf일 때만
         if (!hasRaster && !bldg.floorDrawingPdfs[floorCode] && options.needPdf) {
             const resolvedPdf = await resolveBuildingFloorPdf(
@@ -7970,7 +8008,8 @@ document.addEventListener('DOMContentLoaded', () => {
                                     bldg.floorDrawingPdfs[item.floorCode] = prepared.pdfDataUrl;
                                     _idbPersistedPdfKeys.delete(`${bldg.id}_${item.floorCode}`);
                                     if (window._cloudSyncedPdfKeys) window._cloudSyncedPdfKeys.delete(`${bldg.id}_${item.floorCode}`);
-                                    await uploadFloorDrawingPdf(bldg.id, item.floorCode, prepared.pdfDataUrl);
+                                    const pdfUploaded = await uploadFloorDrawingPdf(bldg.id, item.floorCode, prepared.pdfDataUrl);
+                                    if (pdfUploaded) stampFloorDrawingUpdated(bldg, item.floorCode);
                                 } else if (prepared && prepared.rasterDataUrl) {
                                     // PDF 없는 그림으로 바꿈 — 옛 PDF가 남으면 그 층 핀이 옛 PDF 비율로 어긋난다
                                     await markFloorPdfRemoved(bldg, item.floorCode);
@@ -8557,6 +8596,52 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     }
 
     /** 도면 교체 직전: 메모리·IDB·클라우드 옛 티어/레스터를 비워 새 파일이 보이게 한다. */
+    const FLOOR_DRAWING_APPLIED_KEY = 'bsa_floor_drawing_applied_at';
+
+    function readFloorDrawingAppliedMap() {
+        try {
+            const raw = localStorage.getItem(FLOOR_DRAWING_APPLIED_KEY);
+            const obj = raw ? JSON.parse(raw) : {};
+            return obj && typeof obj === 'object' ? obj : {};
+        } catch (_e) {
+            return {};
+        }
+    }
+
+    function floorDrawingAppliedAt(bldgId, floorCode) {
+        if (!bldgId || !floorCode) return 0;
+        return Number(readFloorDrawingAppliedMap()[`${bldgId}_${floorCode}`]) || 0;
+    }
+
+    function markFloorDrawingApplied(bldgId, floorCode, ts) {
+        if (!bldgId || !floorCode) return;
+        const map = readFloorDrawingAppliedMap();
+        map[`${bldgId}_${floorCode}`] = Number(ts) || Date.now();
+        try { localStorage.setItem(FLOOR_DRAWING_APPLIED_KEY, JSON.stringify(map)); } catch (_e) { /* ignore */ }
+    }
+
+    function floorPdfUpdatedAtOf(bldg, floorCode) {
+        return Number(bldg && bldg.floorPdfUpdatedAt && bldg.floorPdfUpdatedAt[floorCode]) || 0;
+    }
+
+    /** 서버에 더 나중에 올린 도면이 있으면 이 기기의 옛 PDF·그림은 쓰지 않는다. */
+    function floorDrawingRefreshDue(bldg, floorCode) {
+        if (!bldg || !bldg.id || !floorCode) return false;
+        const stamp = floorPdfUpdatedAtOf(bldg, floorCode);
+        if (!stamp) return false;
+        return stamp > floorDrawingAppliedAt(bldg.id, floorCode);
+    }
+
+    /** 이 기기에서 도면을 다시 넣었다. 다른 기기는 이 시각을 보고 옛 PDF를 버린다. */
+    function stampFloorDrawingUpdated(bldg, floorCode) {
+        if (!bldg || !floorCode) return 0;
+        const now = Date.now();
+        bldg.floorPdfUpdatedAt = Object.assign({}, bldg.floorPdfUpdatedAt, { [floorCode]: now });
+        markBuildingMetaDirty(bldg);
+        markFloorDrawingApplied(bldg.id, floorCode, now);
+        return now;
+    }
+
     async function invalidateFloorDrawingBeforeReplace(bldg, floorCode) {
         if (!bldg || !bldg.id || !floorCode) return;
         const bldgId = bldg.id;
@@ -21904,6 +21989,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             row.classList.add('map-unregistered');
             if (window._pendingMapRegisterDefectId === d.id) row.classList.add('is-pending-map-register');
         }
+        if (d.isBookmark) row.classList.add('is-important');
         const badge = document.createElement('span');
         badge.className = 'defect-badge-no';
         if (isUnregistered) badge.classList.add('badge-unregistered');
@@ -22974,6 +23060,29 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     }
 
     // arrows: "마킹 추가"로 묶인 그룹을 하나의 박스+여러 화살표로 그릴 때 전달하는 {targetX,targetY}[] (없으면 defect 자신의 화살표 1개만 그림, 기존과 동일)
+    function defectIsBookmarked(defect) {
+        if (!defect) return false;
+        if (defect.isBookmark) return true;
+        if (!defect.groupId || typeof getDefectMarkingGroupMembers !== 'function') return false;
+        return getDefectMarkingGroupMembers(defect.groupId).some((m) => m && m.isBookmark);
+    }
+
+    /** 중요(즐겨찾기) 마킹 — 번호 박스 금색 테두리와 별. 결함 색은 그대로 둔다. */
+    function drawBookmarkChrome(ctx, w, h, scale) {
+        const s = Math.max(0.85, Number(scale) || 1);
+        ctx.save();
+        ctx.strokeStyle = '#eab308';
+        ctx.lineWidth = Math.max(2.6, 3.4 * s);
+        ctx.setLineDash([]);
+        ctx.strokeRect(-w / 2 - 4 * s, -h / 2 - 4 * s, w + 8 * s, h + 8 * s);
+        ctx.fillStyle = '#eab308';
+        ctx.font = `700 ${Math.round(12 * s)}px sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('★', w / 2 + 1 * s, -h / 2 - 1 * s);
+        ctx.restore();
+    }
+
     function drawPin(ctx, defect, arrows) {
         const groupAreaSources = [];
         if (arrows && arrows.length) {
@@ -23150,6 +23259,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         }
 
         drawPinBoxLabel(ctx, pinLabel, getPinBoxTextColor(activeColor, shapeCfg, isBeingDragged), scale, shapeCfg);
+        if (defectIsBookmarked(defect)) drawBookmarkChrome(ctx, w, h, scale);
 
         ctx.restore();
     }
@@ -38598,6 +38708,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             paintPinBox(ctx, safeBoxW, safeBoxH, safeShapeCfg, color, safeScale, 1, false);
 
             drawPinBoxLabel(ctx, safeLabel, getPinBoxTextColor(color, safeShapeCfg, false), safeScale, safeShapeCfg);
+            if (defectIsBookmarked(defect)) drawBookmarkChrome(ctx, safeBoxW, safeBoxH, safeScale);
             ctx.restore();
         } catch(e) {
             console.warn('drawPinSafe error:', e);
@@ -53386,17 +53497,19 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 || (typeof window.isPdfDrawingDataUrl === 'function' && window.isPdfDrawingDataUrl(url))
             )
         );
+        const refreshDue = !options.localOnly && floorDrawingRefreshDue(bldg, floorCode);
+        if (refreshDue && bldg.floorDrawingPdfs) delete bldg.floorDrawingPdfs[floorCode];
 
-        if (bldg.floorDrawingPdfs && bldg.floorDrawingPdfs[floorCode]) {
+        if (!refreshDue && bldg.floorDrawingPdfs && bldg.floorDrawingPdfs[floorCode]) {
             return bldg.floorDrawingPdfs[floorCode];
         }
 
-        if (typeof window.getFloorPdfDataUrl === 'function') {
+        if (!refreshDue && typeof window.getFloorPdfDataUrl === 'function') {
             const mem = window.getFloorPdfDataUrl(bldg, floorCode);
             if (mem) return mem;
         }
 
-        let cached = await idbGet('floorDrawingPdfs', idbKey);
+        let cached = refreshDue ? null : await idbGet('floorDrawingPdfs', idbKey);
         if (cached) {
             if (typeof window.ensureFloorDrawingPdfs === 'function') window.ensureFloorDrawingPdfs(bldg);
             else if (!bldg.floorDrawingPdfs) bldg.floorDrawingPdfs = {};
@@ -53405,21 +53518,22 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             return cached;
         }
 
-        const src = await getFloorDrawingSourceDataUrl(bldg, floorCode);
-        if (isPdfUrl(src)) {
-            await applyResolvedPdfToBuilding(bldg, floorCode, src);
-            return src;
+        if (!refreshDue) {
+            const src = await getFloorDrawingSourceDataUrl(bldg, floorCode);
+            if (isPdfUrl(src)) {
+                await applyResolvedPdfToBuilding(bldg, floorCode, src);
+                return src;
+            }
+
+            const drawing = bldg.floorDrawings && bldg.floorDrawings[floorCode];
+            if (isPdfUrl(drawing)) {
+                await applyResolvedPdfToBuilding(bldg, floorCode, drawing);
+                return drawing;
+            }
         }
 
-        const drawing = bldg.floorDrawings && bldg.floorDrawings[floorCode];
-        if (isPdfUrl(drawing)) {
-            await applyResolvedPdfToBuilding(bldg, floorCode, drawing);
-            return drawing;
-        }
-
-        // 자동 경로(층 전환·확대·동기화)는 레스터만 쓴다. PDF 원본은 벡터 내보내기처럼
-        // forceCloud를 명시한 경우에만 서버에서 받는다.
-        if (db && window.state.companyId && options.forceCloud && !options.localOnly) {
+        // 자동 경로는 레스터만 쓴다. PDF 원본은 forceCloud, 또는 더 나중에 올린 도면이 있을 때만 서버에서 받는다.
+        if (db && window.state.companyId && (options.forceCloud || refreshDue) && !options.localOnly) {
             const siteKey = normalizeSiteVaultKey(bldg.name);
             const [cloudPdf, vaultPdf] = await Promise.all([
                 fetchFloorDrawingPdfFromCloud(bldg.id, floorCode),
@@ -53429,10 +53543,23 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             if (remotePdf) {
                 await applyResolvedPdfToBuilding(bldg, floorCode, remotePdf);
                 markFloorPdfKnown(bldg.id, floorCode, true);
+                if (refreshDue) {
+                    if (!bldg._pdfRefreshFromCloud) bldg._pdfRefreshFromCloud = {};
+                    bldg._pdfRefreshFromCloud[floorCode] = true;
+                }
                 return remotePdf;
             }
-            if (options.forceCloud) {
+            if (options.forceCloud || refreshDue) {
                 console.warn('[PDF] 서버 조회 결과 없음:', idbKey, 'company=', window.state.companyId);
+            }
+        }
+
+        if (refreshDue) {
+            cached = await idbGet('floorDrawingPdfs', idbKey);
+            if (cached) {
+                if (!bldg.floorDrawingPdfs) bldg.floorDrawingPdfs = {};
+                bldg.floorDrawingPdfs[floorCode] = cached;
+                return cached;
             }
         }
 

@@ -19,7 +19,9 @@
         // 반발경도 장비 앤빌 평균(기준 82) — 같은 이유로 로컬 수정이 서버 옛 값에 덮이지 않게
         'strengthAnvilAvg',
         // 층별 "PDF를 뺀 시각" — 도면을 그림으로 바꾼 층의 옛 PDF를 다른 기기도 버리게(감사 O-05, 2026-09-28)
-        'floorPdfRemovedAt'
+        'floorPdfRemovedAt',
+        // 층별 "도면을 다시 넣은 시각" — 다른 기기가 받아 둔 옛 PDF를 버리고 새 파일을 받게
+        'floorPdfUpdatedAt'
     ];
 
     function metaUpdatedAt(bldg) {
@@ -59,6 +61,21 @@
         return merged;
     }
 
+    /** 층별 시각 맵. 키가 겹치면 더 나중 시각. 한쪽 메타가 통째로 이겨도 다른 층의 새 시각은 남긴다. */
+    function mergeFloorStampMaps(localMap, remoteMap) {
+        var out = {};
+        function take(map) {
+            if (!map || typeof map !== 'object') return;
+            Object.keys(map).forEach(function (k) {
+                var n = Number(map[k]) || 0;
+                if (n > (Number(out[k]) || 0)) out[k] = n;
+            });
+        }
+        take(remoteMap);
+        take(localMap);
+        return out;
+    }
+
     function overlay(merged, localMatch, remote) {
         if (shouldKeepLocal(localMatch, remote)) applyLocal(merged, localMatch);
         if (localMatch && localMatch._pendingCloudSync) merged._pendingCloudSync = true;
@@ -69,6 +86,7 @@
         KEYS: KEYS,
         metaUpdatedAt: metaUpdatedAt,
         markDirty: markDirty,
+        mergeFloorStampMaps: mergeFloorStampMaps,
         shouldKeepLocal: shouldKeepLocal,
         applyLocal: applyLocal,
         overlay: overlay
