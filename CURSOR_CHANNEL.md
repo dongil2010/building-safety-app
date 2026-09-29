@@ -669,6 +669,13 @@
 > 그쪽 모든 칸을 그 시각으로 본다(예전 통째 병합과 같음). touchDefectUpdatedAt·번호 이동(no-conflict, 번호 당기기)이 함께 찍는다.
 > 테스트: scripts/test-field-photo-merge.js 11번.
 
+### ⚡ [Cursor] - 2026-09-29 19:20:00
+> **`[COMPLETED]` 조사표 입력 중 동기화가 표를 다시 그려 키보드가 내려가던 문제**
+>
+> `renderSurveyTable`이 tbody를 통째로 갈아끼우면 포커스된 칸이 사라져 OS 키보드·숫자 키패드가 닫힌다.
+> 조사표 칸(input/textarea/select)에 포커스가 있으면 그리기를 미루고, 칸을 떠난 뒤 한 번만 그린다.
+> 병합·저장 경로는 그대로. 테스트: scripts/test-survey-sync-keyboard.js.
+
 
 
 

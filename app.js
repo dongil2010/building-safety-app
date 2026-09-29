@@ -37718,8 +37718,45 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         openAddDefectModal(defect.x, defect.y, defect.targetX, defect.targetY, defect, null, { revealMarkingAboveDrawer: true });
     };
 
+    // 동기화·다른 화면 갱신이 조사표 tbody를 통째로 다시 그리면, 입력 중이던 칸이
+    // DOM에서 빠져 포커스가 풀리고 키보드(OS·숫자 키패드)가 내려간다.
+    // 칸에 포커스가 있는 동안은 그리기를 미루고, 그 칸을 떠난 뒤에 한 번만 그린다.
+    let _surveyTableRenderDeferred = false;
+    let _surveyTableRenderTimer = null;
+
+    function surveyTableEditFocused() {
+        const ae = document.activeElement;
+        if (!ae || !ae.closest) return false;
+        if (!ae.closest('#surveyTableBody')) return false;
+        const tag = ae.tagName;
+        return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT';
+    }
+
+    function scheduleDeferredSurveyTableRender() {
+        if (_surveyTableRenderTimer) return;
+        _surveyTableRenderTimer = setTimeout(() => {
+            _surveyTableRenderTimer = null;
+            if (!_surveyTableRenderDeferred) return;
+            if (surveyTableEditFocused()) return;
+            _surveyTableRenderDeferred = false;
+            renderSurveyTable();
+        }, 120);
+    }
+
+    document.addEventListener('focusout', (e) => {
+        if (!_surveyTableRenderDeferred) return;
+        const t = e.target;
+        if (!t || !t.closest || !t.closest('#surveyTableBody')) return;
+        scheduleDeferredSurveyTableRender();
+    }, true);
+
     function renderSurveyTable() {
         if (!elements.surveyTableBody) return;
+        if (surveyTableEditFocused()) {
+            _surveyTableRenderDeferred = true;
+            return;
+        }
+        _surveyTableRenderDeferred = false;
         const floorKey = state.currentBuildingId && state.currentFloor
             ? `${state.currentBuildingId}_${state.currentFloor}`
             : null;
