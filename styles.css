@@ -2191,21 +2191,31 @@ html:not(.layout-tablet) #tab-map .inspect-sidebar-left .defect-badge-no {
     box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.28);
 }
 
+/* 2026-09-29: 노란 원(번호를 가림) → 작은 「중요」 배지. 번호칸 왼쪽 위 바깥(번호칸 위)에 두어 번호를 가리지 않는다.
+   줄 안쪽 여백이 좁아(번호칸 위 6px) 중요 줄만 번호칸을 5px 내려 자리를 만든다 — 레이아웃(margin)이 아닌 relative 이동이라
+   PC·태블릿·폰 레이아웃별 margin/align 규칙과 부딪히지 않는다. */
 .defect-list-item.is-important .defect-badge-no {
     position: relative;
+    top: 5px;
 }
-
 .defect-list-item.is-important .defect-badge-no::before {
-    content: '';
+    content: '중요';
     position: absolute;
-    top: 1px;
-    left: 1px;
-    width: 9px;
-    height: 9px;
-    border-radius: 50%;
+    left: -3px;
+    bottom: calc(100% + 1px);
+    z-index: 2;
+    padding: 0 2px;
+    border-radius: 3px;
     background: #facc15;
-    border: 1.5px solid #854d0e;
+    border: 1px solid #854d0e;
+    color: #713f12;
+    font-size: 7.5px;
+    line-height: 1;
+    font-weight: 800;
+    letter-spacing: -0.03em;
+    white-space: nowrap;
     box-sizing: border-box;
+    pointer-events: none;
 }
 
 .defect-list-section.is-selected-cluster {

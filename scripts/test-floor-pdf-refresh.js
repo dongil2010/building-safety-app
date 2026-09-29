@@ -47,5 +47,15 @@ assert.ok(app.includes("const BOOKMARK_CHROME_TEXT = '중요';"));
 assert.ok(app.includes("row.classList.add('is-important')"));
 const css = fs.readFileSync(path.join(root, 'styles.css'), 'utf8');
 assert.ok(css.includes('.defect-list-item.is-important'));
+// 2026-09-29: 결함표 목록의 노란 원(번호를 가림) → 번호칸 위 작은 「중요」 배지
+{
+    const at = css.indexOf('.defect-list-item.is-important .defect-badge-no::before {');
+    const rule = css.slice(at, css.indexOf('}', at));
+    assert.ok(at > 0 && rule.includes("content: '중요';"), '결함표: 중요 글자');
+    assert.ok(rule.includes('bottom: calc(100% + 1px);'), '번호칸 위(번호를 가리지 않음)');
+    assert.ok(!rule.includes('border-radius: 50%'), '원 아님');
+    const badgeAt = css.indexOf('.defect-list-item.is-important .defect-badge-no {');
+    assert.ok(css.slice(badgeAt, css.indexOf('}', badgeAt)).includes('top: 5px;'), '배지 자리만큼 번호칸을 내림');
+}
 
 console.log('test-floor-pdf-refresh: ok');
