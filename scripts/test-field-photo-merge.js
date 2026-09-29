@@ -185,7 +185,26 @@ function deviceEdit(rec, at, fn) {
 }
 
 // ---- 내용 칸 구분: 위치·번호·사진·시각은 내용이 아니다 ----
-['x', 'no', 'groupId', 'photoIds', 'photos', 'fieldAt', 'photoState', 'updatedAt', '_representative']
+// ---- 11) 칸 기록을 모르는 기기(옛 코드)·되살리기가 fieldAt을 달고 나중에 고치면 그 수정이 이긴다 ----
+{
+    const A = deviceEdit(clone(base), 250, (d) => { d.remark = 'A 비고'; });
+    // 옛 코드 기기 B: A 것을 받아 defectType을 400에 고침 — fieldAt은 A 것 그대로, 내용 시각만 오른다
+    const oldB = Object.assign(clone(A), { defectType: 'B가 고친 결함', contentUpdatedAt: 400, updatedAt: 400 });
+    // 그 사이 A는 defectType을 300에 고쳐 두고 아직 못 올림
+    const A2 = deviceEdit(clone(A), 300, (d) => { d.defectType = 'A가 먼저 고친 결함'; });
+    const m = sm.mergeDefectRecord(clone(oldB), clone(A2));
+    assert.strictEqual(m.defectType, 'B가 고친 결함', '옛 기기의 나중 수정이 옛 fieldAt 때문에 지면 안 된다');
+    assert.strictEqual(m.remark, 'A 비고');
+    const back = sm.mergeDefectRecord(clone(A2), clone(oldB));
+    assert.strictEqual(back.defectType, 'B가 고친 결함', '기기 쪽(되살리기 등)이 나중이어도 이긴다');
+    assert.strictEqual(m.fieldAtThrough, m.contentUpdatedAt);
+    // 새 기기가 내용 없이 시각만 찍어도(사진만 바꿈 등) 통째로 이기지 않는다
+    const A3 = deviceEdit(clone(A), 500, () => {});
+    const B3 = deviceEdit(clone(A), 450, (d) => { d.crackWidth = '0.9'; });
+    assert.strictEqual(sm.mergeDefectRecord(clone(B3), clone(A3)).crackWidth, '0.9');
+}
+
+['x', 'no', 'groupId', 'photoIds', 'photos', 'fieldAt', 'fieldAtThrough', 'photoState', 'updatedAt', '_representative']
     .forEach((k) => assert.strictEqual(sm.isDefectContentField(k), false, k));
 ['remark', 'location', 'crackWidth', 'defectType', 'isProgress'].forEach((k) => assert.strictEqual(sm.isDefectContentField(k), true, k));
 

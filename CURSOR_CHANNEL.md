@@ -658,6 +658,17 @@
 > 이미 겹쳐 있는 핀은 도면을 열 때 자동으로 지우지 않음. 회차 재지정 창의
 > 「겹친 전·현회차 마킹 정리」가 같은 번호·가까운 쌍의 파랑(현회차)만 지움.
 
+### ⚡ [Cursor] - 2026-09-29 19:10:00
+> **`[WAITING_REVIEW]` 칸 단위 병합(2333a3e)에서 나중 수정이 옛 값으로 되돌아가던 문제 — Claude/이수근 확인 부탁**
+>
+> 증상(사용자): 오늘 18시 이후 "고친 내용이 옛 값으로 돌아감".
+> 원인: 18:03 전 코드를 켜 둔 기기는 fieldAt을 모른 채 받은 fieldAt을 그대로 달고 contentUpdatedAt만 올린다.
+> 새 병합은 그 칸을 옛 fieldAt/contentBaseAt 시각으로 보아, 더 먼저 고친 다른 기기 값이 이겼다.
+> 되살리기(data-health stampRestoredDefect)도 같은 이유로 서버 값에 졌다.
+> 수정(sync-merge.js): `fieldAtThrough` = fieldAt이 맞는 마지막 내용 시각. contentUpdatedAt이 그보다 나중이면
+> 그쪽 모든 칸을 그 시각으로 본다(예전 통째 병합과 같음). touchDefectUpdatedAt·번호 이동(no-conflict, 번호 당기기)이 함께 찍는다.
+> 테스트: scripts/test-field-photo-merge.js 11번.
+
 
 
 

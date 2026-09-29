@@ -344,7 +344,7 @@
     var NON_CONTENT_FIELDS = new Set([
         'id', 'no', 'groupNo', 'cadNo', 'isCadImported', 'groupId', 'surveyExtra', 'surveyNumbered', 'mergedFrom',
         'updatedAt', 'contentUpdatedAt', 'positionUpdatedAt', 'groupUpdatedAt', 'photosUpdatedAt',
-        'fieldAt', 'contentBaseAt', 'photoState',
+        'fieldAt', 'contentBaseAt', 'fieldAtThrough', 'photoState',
         'photos', 'photoIds', 'photoUrls', 'prevRoundPhotos', 'prevRoundPhotoIds', 'prevRoundPhotoUrls'
     ].concat(DEFECT_POSITION_FIELDS, DEFECT_GROUP_FIELDS));
 
@@ -391,10 +391,30 @@
         return getDefectContentUpdatedAt(rec);
     }
 
+    /**
+     * fieldAt이 맞는 마지막 내용 시각. 칸 기록을 모르는 기기(18:03 전 코드를 켜 둔 기기)나 되살리기는
+     * fieldAt을 그대로 둔 채 contentUpdatedAt만 올린다 — 그 시각이 이보다 나중이면 무엇이 바뀌었는지
+     * 모르므로 그 기기 쪽 모든 칸을 그 시각으로 본다(예전 통째 병합과 같다). 안 그러면 나중에 고친
+     * 칸이 옛 fieldAt을 달고 져서 되돌아간다(2026-09-29 저녁 "고친 게 옛 값으로 돌아감").
+     */
+    function fieldTrackedThrough(rec) {
+        var t = Number(rec.fieldAtThrough) || 0;
+        if (t > 0) return t;
+        t = Number(rec.contentBaseAt) || 0;
+        var fa = rec.fieldAt || {};
+        Object.keys(fa).forEach(function (k) { t = Math.max(t, Number(fa[k]) || 0); });
+        return t;
+    }
+
     function fieldTs(rec, key) {
         var fa = rec && rec.fieldAt;
         var t = fa && Number(fa[key]);
-        return t > 0 ? t : contentBaseOf(rec);
+        var own = t > 0 ? t : contentBaseOf(rec);
+        if (isFieldTracked(rec)) {
+            var untracked = getDefectContentUpdatedAt(rec);
+            if (untracked > fieldTrackedThrough(rec)) return Math.max(own, untracked);
+        }
+        return own;
     }
 
     /** merged(통째 병합 결과)의 내용 칸을 칸별로 다시 고른다. 동점이면 서버. */
@@ -675,6 +695,7 @@
         }
 
         merged.contentUpdatedAt = Math.max(serverContentTs, localContentTs, Number(merged.contentUpdatedAt) || 0);
+        if (isFieldTracked(merged)) merged.fieldAtThrough = merged.contentUpdatedAt;
         merged.positionUpdatedAt = Math.max(serverPosTs, localPosTs, Number(merged.positionUpdatedAt) || 0);
         merged.updatedAt = Math.max(
             getRecordUpdatedAt(serverRec, 'pin'),

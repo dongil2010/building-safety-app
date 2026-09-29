@@ -3717,6 +3717,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     if (prev !== String(nextNo || '')) {
                         m.updatedAt = now;
                         m.contentUpdatedAt = now;
+                        if (m.fieldAt) m.fieldAtThrough = now;
                     }
                 });
             } else if (victim.defect) {
@@ -3727,6 +3728,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (prev !== baseStr) {
                     victim.defect.updatedAt = now;
                     victim.defect.contentUpdatedAt = now;
+                    if (victim.defect.fieldAt) victim.defect.fieldAtThrough = now;
                 }
             }
             moved += 1;
@@ -3785,6 +3787,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 defect.contentBaseAt = now;
             }
             defectContentSnap().set(defect.id, diff.hashes);
+            if (defect.fieldAt && typeof defect.fieldAt === 'object') defect.fieldAtThrough = now;
         }
         defect.updatedAt = now;
         // 내용·사진 변경 시각 — 삭제 부활 판정에 사용 (위치만 옮긴 경우는 제외)

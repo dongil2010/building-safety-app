@@ -35,6 +35,8 @@
     function stampNow(rec, now, content) {
         rec.updatedAt = now;
         if (content) rec.contentUpdatedAt = now;
+        // 번호만 바꿨다 — 칸별 기록(fieldAt)은 그대로 맞다(sync-merge fieldTrackedThrough)
+        if (content && rec.fieldAt) rec.fieldAtThrough = now;
     }
 
     /**
