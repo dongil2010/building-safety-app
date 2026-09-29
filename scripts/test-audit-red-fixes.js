@@ -36,7 +36,7 @@ function extractFunction(header) {
     const loop = app.slice(app.indexOf('await invalidateFloorDrawingBeforeReplace(bldg, item.floorCode);'));
     const pdfBranch = loop.indexOf('if (prepared && prepared.pdfDataUrl) {');
     const rasterBranch = loop.indexOf('await markFloorPdfRemoved(bldg, item.floorCode);');
-    assert.ok(pdfBranch > 0 && rasterBranch > pdfBranch && rasterBranch < pdfBranch + 900,
+    assert.ok(pdfBranch > 0 && rasterBranch > pdfBranch && rasterBranch < pdfBranch + 1500, // PDF 분기가 길어져 900→1500 (2026-09-29)
         'JPG로 바꿀 때 옛 PDF를 버리지 않으면 그 층 핀이 옛 PDF 비율로 어긋난다');
     assert.ok(loop.slice(pdfBranch, rasterBranch).includes('clearFloorPdfRemoved(bldg, item.floorCode)'),
         '다시 PDF를 넣으면 표시를 풀어야 한다');
