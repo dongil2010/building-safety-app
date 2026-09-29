@@ -131,4 +131,37 @@ assert.ok(/\.bsa-mkp\s*\{[^}]*position:\s*fixed/.test(css));
 assert.ok(/\.bsa-mkp\[hidden\]\s*\{\s*display:\s*none/.test(css));
 assert.ok(/\.bsa-mkp-landscape/.test(css));
 
+// ---- 2026-09-29 핫픽스: 키를 누르면 아무것도 안 들어가고 결함핀 수정창이 닫혔다.
+// 문서 캡처 단계 pointerdown(창 밖 누르기 → closeDefectModal)이 body에 붙은 키패드를 창 밖으로 봤다.
+{
+    const keepFn = app.slice(app.indexOf('function shouldKeepDefectModalForTarget('), app.indexOf("document.addEventListener('pointerdown'", app.indexOf('function shouldKeepDefectModalForTarget(')));
+    assert.ok(/isMeasureKeypadTarget\(target\)\) return true/.test(keepFn), '키패드 누르기는 결함 수정창을 닫지 않는다');
+    assert.ok(/function isMeasureKeypadTarget\(target\)[\s\S]{0,300}isKeypadElement[\s\S]{0,200}#bsaMeasureKeypad, \.bsa-measure-keypad/.test(app), '키패드 판정(모듈 없을 때 선택자)');
+    assert.ok(/api\.isKeypadElement = function/.test(js));
+    assert.ok(/var swallow = function \(e\) \{\s*if \(e\.cancelable\) e\.preventDefault\(\);[^\n]*\n\s*e\.stopPropagation\(\);/.test(js), '키패드 이벤트는 기본동작·전파 차단');
+    ['mousedown', 'touchstart', 'touchend', 'click'].forEach((t) => {
+        assert.ok(new RegExp("pad\\.addEventListener\\('" + t + "', swallow").test(js), t + ' 삼킴');
+    });
+    assert.ok(/pad\.addEventListener\('pointerdown', press\)/.test(js) && /swallow\(e\); \/\/ 칸 포커스 유지/.test(js), 'pointerdown도 삼킴');
+    assert.ok(/'bsa-mkp bsa-measure-keypad'/.test(js), '키패드 클래스');
+}
+
+// 모의: 캡처 핸들러가 키패드 안 요소를 창 밖으로 보지 않는지
+{
+    const pad = { id: 'bsaMeasureKeypad' };
+    const key = { parent: pad };
+    const fakeClosest = (el) => (sel) => {
+        for (let n = el; n; n = n.parent) {
+            if (sel.split(',').some((s) => s.trim() === '#' + n.id || (n.cls && s.trim() === '.' + n.cls))) return n;
+        }
+        return null;
+    };
+    key.closest = fakeClosest(key);
+    const src = app.slice(app.indexOf('function isMeasureKeypadTarget('), app.indexOf('function shouldKeepDefectModalForTarget('));
+    const fn = new Function('window', src + '\nreturn isMeasureKeypadTarget;')({});
+    assert.strictEqual(fn(key), true, '키패드 키');
+    const other = { id: 'x' }; other.closest = fakeClosest(other);
+    assert.strictEqual(fn(other), false, '다른 곳');
+}
+
 console.log('test-measure-keypad: ok');

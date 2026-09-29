@@ -31075,10 +31075,18 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     }
     window.closeDefectModal = closeDefectModal;
 
+    function isMeasureKeypadTarget(target) {
+        const kp = window.BsaMeasureKeypad;
+        if (kp && typeof kp.isKeypadElement === 'function') return kp.isKeypadElement(target);
+        return !!(target && typeof target.closest === 'function' && target.closest('#bsaMeasureKeypad, .bsa-measure-keypad'));
+    }
+
     // 도면 밖(목록·헤더 등) 터치/클릭 시에도 결함 입력창 닫기
     function shouldKeepDefectModalForTarget(target) {
         if (!target || typeof target.closest !== 'function') return false;
         if (target.closest('#defectModal .defect-drawer-card')) return true;
+        // 폭·길이·개수 키패드는 body에 붙어 있어 창 밖으로 보인다 — 키를 누를 때 창이 닫히던 문제(2026-09-29)
+        if (isMeasureKeypadTarget(target)) return true;
         if (target.closest('#defectMarkingMemberFloat')) return true;
         if (target.closest('#mobileMapDock')) return true;
         if (target.closest('.defect-list-item')) return true; // 목록에서 다른 결함 열기

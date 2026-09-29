@@ -204,15 +204,21 @@
         if (state.pad) return state.pad;
         var pad = document.createElement('div');
         pad.id = 'bsaMeasureKeypad';
-        pad.className = 'bsa-mkp';
+        pad.className = 'bsa-mkp bsa-measure-keypad';
         pad.setAttribute('role', 'group');
         pad.setAttribute('aria-label', '숫자 키패드');
         pad.hidden = true;
         document.body.appendChild(pad);
 
+        // 키패드 안의 누르기는 여기서 끝낸다 — 바깥 누르기로 창을 닫는 다른 핸들러(버블 단계)에 안 가게.
+        // (문서 캡처 단계 핸들러는 isKeypadElement로 키패드를 건너뛰어야 한다: 결함 수정창 닫기 등)
+        var swallow = function (e) {
+            if (e.cancelable) e.preventDefault(); // 칸 포커스 유지 · 합성 mouse/click 억제
+            e.stopPropagation();
+        };
         var press = function (e) {
             var btn = e.target && e.target.closest ? e.target.closest('[data-mkp-key]') : null;
-            if (e.cancelable) e.preventDefault(); // 칸 포커스 유지 (키보드도 안 뜸)
+            swallow(e); // 칸 포커스 유지 (키보드도 안 뜸)
             if (!btn) return;
             var k = btn.getAttribute('data-mkp-key');
             pressKey(k);
@@ -220,8 +226,11 @@
         };
         if (window.PointerEvent) {
             pad.addEventListener('pointerdown', press);
-            pad.addEventListener('mousedown', function (e) { e.preventDefault(); });
-            pad.addEventListener('touchstart', function (e) { if (e.cancelable) e.preventDefault(); }, { passive: false });
+            pad.addEventListener('mousedown', swallow);
+            pad.addEventListener('touchstart', swallow, { passive: false });
+            pad.addEventListener('touchend', swallow, { passive: false });
+            pad.addEventListener('pointerup', function (e) { e.stopPropagation(); });
+            pad.addEventListener('mouseup', function (e) { e.stopPropagation(); });
         } else {
             pad.addEventListener('touchstart', press, { passive: false });
             pad.addEventListener('mousedown', press);
@@ -229,7 +238,7 @@
         ['pointerup', 'pointercancel', 'pointerleave', 'touchend', 'touchcancel', 'mouseup'].forEach(function (t) {
             pad.addEventListener(t, stopRepeat);
         });
-        pad.addEventListener('click', function (e) { e.preventDefault(); e.stopPropagation(); });
+        pad.addEventListener('click', swallow);
         pad.addEventListener('contextmenu', function (e) { e.preventDefault(); });
         state.pad = pad;
         return pad;
@@ -248,7 +257,7 @@
         if (state.orientation === orient && pad.firstChild) return;
         state.orientation = orient;
         var layout = orient === 'landscape' ? LAYOUT_LANDSCAPE : LAYOUT_PORTRAIT;
-        pad.className = 'bsa-mkp bsa-mkp-' + orient;
+        pad.className = 'bsa-mkp bsa-measure-keypad bsa-mkp-' + orient;
         pad.style.setProperty('--mkp-cols', String(layout[0].length));
         var html = '';
         layout.forEach(function (row) {
@@ -465,6 +474,10 @@
         }
     }
 
+    /** 키패드(또는 그 안) 요소인가 — 바깥 누르기로 창을 닫는 코드가 키패드를 건너뛸 때 쓴다 */
+    api.isKeypadElement = function (el) {
+        return !!(el && state.pad && (el === state.pad || (typeof state.pad.contains === 'function' && state.pad.contains(el))));
+    };
     api.open = function (el) { if (isTarget(el)) open(el); };
     api.close = function () { close(true, false); };
     api.isOpen = function () { return !!(state.field && state.pad && !state.pad.hidden); };
