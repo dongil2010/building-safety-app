@@ -9109,6 +9109,17 @@ body:not(.bsa-tab-home) .home-fab-add-building {
     margin-top: 0.85rem;
 }
 
+/* 통계: 모든 층을 서버에서 받는 중 / 못 받음 안내 */
+.stats-fresh-note {
+    margin-top: 0.3rem;
+    font-size: 0.8rem;
+    color: #475569;
+}
+.stats-fresh-note.is-warning {
+    color: #b45309;
+    font-weight: 700;
+}
+
 /* 부재실측 평가 기준 (a: 100% ≤ s …) */
 .stats-ndt-note {
     margin: 0.45rem 0 0;

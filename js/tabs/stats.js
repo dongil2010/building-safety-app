@@ -1914,6 +1914,49 @@
         });
     }
 
+    /**
+     * 통계는 이 기기에 있는 층 데이터로 센다. 동기화는 "지금 보는 층 + 고친 층"만 서버에서 받아서
+     * 태블릿에서 안 열어 본 층은 빠지거나 옛 값이었다(2026-09-29 사용자 제보). 탭에 들어오면 먼저 있는
+     * 값으로 그리고, 모든 층을 서버에서 받은 뒤 다시 그린다. 못 받으면 그 사실을 제목 아래에 적는다.
+     */
+    var statsFreshNote = '';
+    var statsFreshBusy = false;
+
+    function renderStatsFreshNote(metaEl) {
+        var note = document.getElementById('statsFreshNote');
+        if (!note && metaEl && metaEl.parentNode) {
+            note = document.createElement('div');
+            note.id = 'statsFreshNote';
+            note.className = 'stats-fresh-note';
+            metaEl.parentNode.insertBefore(note, metaEl.nextSibling);
+        }
+        if (!note) return;
+        note.textContent = statsFreshNote;
+        note.hidden = !statsFreshNote;
+        note.classList.toggle('is-warning', statsFreshNote.indexOf('⚠') === 0);
+    }
+
+    function refreshStatsFloorsFromServer() {
+        var bldg = window.state && window.state.currentBuilding;
+        if (!bldg || !bldg.id || statsFreshBusy || typeof window.refreshBuildingFloorsFromServer !== 'function') return;
+        var bldgId = bldg.id;
+        statsFreshBusy = true;
+        statsFreshNote = '모든 층 최신 데이터 받는 중…';
+        renderStatsFreshNote(document.getElementById('statsBuildingMeta'));
+        window.refreshBuildingFloorsFromServer(bldg).then(function (res) {
+            if (res.ok || res.skipped === 'nologin' || res.skipped === 'nobuilding') statsFreshNote = '';
+            else if (res.skipped === 'offline') statsFreshNote = '⚠ 오프라인이라 이 기기에 있는 층만 집계했습니다 — 안 열어 본 층은 빠지거나 예전 값일 수 있습니다.';
+            else statsFreshNote = '⚠ 일부 층을 서버에서 받지 못했습니다(' + res.failed.map(function (c) { return getFloorLabel(c, bldg); }).join(', ') + ') — 그 층은 이 기기 값입니다.';
+        }).catch(function (e) {
+            console.warn('[통계] 전 층 받기 실패:', e);
+            statsFreshNote = '⚠ 서버에서 층 데이터를 받지 못해 이 기기 값으로 집계했습니다.';
+        }).then(function () {
+            statsFreshBusy = false;
+            var cur = window.state && window.state.currentBuilding;
+            if (cur && cur.id === bldgId && window.state.currentTab === 'tab-stats') window.renderDefectStatsTab();
+        });
+    }
+
     window.renderDefectStatsTab = function () {
         var bldg = window.state.currentBuilding;
         var titleEl = document.getElementById('statsBuildingTitle');
@@ -1927,6 +1970,7 @@
             }
         }
 
+        renderStatsFreshNote(metaEl);
         syncCategoryChips();
         var payload = buildStatsPayload(bldg, getStatsOptions());
         renderSummaryCards(payload, document.getElementById('statsSummaryCards'));
@@ -1990,6 +2034,8 @@
                 refreshStats();
                 setTimeout(refreshStats, 120);
             }
+            // 있는 값으로 먼저 그리고, 모든 층을 서버에서 받은 뒤 다시 그린다
+            refreshStatsFloorsFromServer();
         }
     };
 

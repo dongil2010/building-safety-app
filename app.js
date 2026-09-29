@@ -39657,6 +39657,13 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 window.showLoading('보고서 미리보기를 생성하는 중입니다...');
             }
 
+            // 안 열어 본 층이 빠지거나 옛 값으로 나가지 않게 모든 층을 서버에서 먼저 받는다(2026-09-29)
+            if (window.state.currentBuilding && !(await ensureBuildingFloorsFreshForReport(window.state.currentBuilding, 'PDF 보고서'))) {
+                modal.classList.remove('open');
+                modal.style.display = 'none';
+                if (manageLoading && typeof window.hideLoading === 'function') window.hideLoading();
+                return false;
+            }
             const bldg = window.state.currentBuilding || { id: 'default', name: '건축물', address: '서울특별시 강남구', inspector: '홍길동', date: '2026-07-29' };
             const currentBldgId = bldg.id || state.currentBuildingId || 'default';
 
@@ -40449,7 +40456,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         window.showLoading('PDF 보고서를 생성하는 중입니다...');
         try {
             // 1. Ensure report preview content is fully generated and preloaded
-            await window.openReportPreviewModalFunc({ skipLoading: true });
+            if ((await window.openReportPreviewModalFunc({ skipLoading: true })) === false) {
+                if (typeof window.hideLoading === 'function') window.hideLoading();
+                return;
+            }
             await new Promise(r => setTimeout(r, 250));
 
             const bldg = window.state.currentBuilding || { name: '건축물_점검보고서' };
@@ -41746,6 +41756,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const bldg = window.state.currentBuilding;
         const bldgId = (bldg && bldg.id) || window.state.currentBuildingId;
         if (!bldg || !bldgId) { window.showToast('건축물을 먼저 선택해주세요.', 'warning'); return; }
+        // 안 열어 본 층이 빠지거나 옛 값으로 나가지 않게 모든 층을 서버에서 먼저 받는다(2026-09-29)
+        if (!(await ensureBuildingFloorsFreshForReport(bldg, '한글 보고서'))) return;
 
         const getFloorLabel = (floorCode) => {
             const fromList = (bldg.floorsList || []).find(f => f.floorCode === floorCode);
@@ -52362,6 +52374,71 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             out.push({ floorCode: code, bundle: await readFloorBundleStrict(bldg, code) });
         }
         return out;
+    }
+
+    /**
+     * 이 건물의 **모든 층**을 서버에서 받아 기기 데이터에 합친다 (2026-09-29).
+     *
+     * 동기화는 "지금 보는 층 + 이 기기에서 고친 층"만 서버에서 읽는다. 그래서 태블릿에서 안 열어 본 층은
+     * 결함이 0개이거나 옛 숫자로 남아, 통계·한글·PDF 보고서가 그 층을 빼먹거나 옛 값으로 냈다
+     * (사용자 제보: 태블릿 통계에서 가끔 층이 빠짐). 합치기는 동기화와 같은 mergeFloorBundleIntoState라
+     * 이 기기의 안 올라간 수정은 그대로 남는다(나중 것이 이김).
+     * 반환: { ok, skipped: 'offline'|'nologin'|'recent'|null, failed: [층코드] }
+     */
+    const _buildingFloorsFreshAt = new Map();
+    const BUILDING_FLOORS_FRESH_MS = 2 * 60 * 1000;
+    async function refreshBuildingFloorsFromServer(bldg, opts) {
+        const o = opts || {};
+        if (!bldg || !bldg.id) return { ok: false, skipped: 'nobuilding', failed: [] };
+        if (!db || !window.state.companyId) return { ok: false, skipped: 'nologin', failed: [] };
+        if (typeof navigator !== 'undefined' && navigator.onLine === false) return { ok: false, skipped: 'offline', failed: [] };
+        if (!o.force && Date.now() - (_buildingFloorsFreshAt.get(bldg.id) || 0) < BUILDING_FLOORS_FRESH_MS) {
+            return { ok: true, skipped: 'recent', failed: [] };
+        }
+        // 동기화가 도는 중이면 잠깐 기다린다 — 같은 층을 동시에 합치지 않게
+        for (let i = 0; i < 10 && (_syncInFlight || isRemoteSyncing); i++) {
+            await new Promise((r) => setTimeout(r, 500));
+        }
+        const failed = [];
+        let merged = 0;
+        for (const code of buildingFloorCodesForBackup(bldg)) {
+            try {
+                const bundle = await readFloorBundleStrict(bldg, code);
+                if (bundle) {
+                    mergeFloorBundleIntoState(bldg, code, bundle);
+                    merged++;
+                }
+            } catch (e) {
+                console.warn(`[전 층 받기] ${code} 층을 받지 못함:`, e);
+                failed.push(code);
+            }
+        }
+        if (merged && typeof saveStateToLocalStorage === 'function') saveStateToLocalStorage();
+        if (!failed.length) _buildingFloorsFreshAt.set(bldg.id, Date.now());
+        return { ok: !failed.length, skipped: null, failed };
+    }
+    window.refreshBuildingFloorsFromServer = refreshBuildingFloorsFromServer;
+
+    /**
+     * 보고서(한글·PDF)를 만들기 전에 모든 층을 최신으로. 못 받으면 이 기기 데이터로 만들지 묻는다.
+     * 반환: true = 계속, false = 사용자가 취소
+     */
+    async function ensureBuildingFloorsFreshForReport(bldg, reportLabel) {
+        if (typeof window.updateLoadingText === 'function') window.updateLoadingText('모든 층 최신 데이터 받는 중…');
+        let res;
+        try {
+            res = await refreshBuildingFloorsFromServer(bldg);
+        } catch (e) {
+            res = { ok: false, skipped: null, failed: ['?'] };
+        }
+        if (res.ok || res.skipped === 'nologin' || res.skipped === 'nobuilding') return true;
+        const label = (code) => {
+            try { return stripFloorCodeSuffix(window.getFloorLabelFromCode(code, bldg)) || code; } catch (_e) { return code; }
+        };
+        const why = res.skipped === 'offline'
+            ? '인터넷이 연결되지 않아 다른 기기가 올린 최신 데이터를 받지 못했습니다.'
+            : `다음 층을 서버에서 받지 못했습니다: ${res.failed.map(label).join(', ')}`;
+        return window.confirm(`${why}\n\n이 기기에 있는 데이터로 ${reportLabel}를 만들까요?\n(안 열어 본 층은 빠지거나 예전 값일 수 있습니다)`);
     }
 
     async function listBuildingBackups(bldgId) {
