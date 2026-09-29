@@ -328,6 +328,156 @@
         return (Array.isArray(defect.photos) ? defect.photos : []).filter(Boolean);
     }
 
+    // -----------------------------------------------------------------------------------------
+    // 칸 단위·사진 ID 단위 병합 (2026-09-29)
+    //
+    // 두 사람이 오프라인에서 같은 결함을 고치면(A는 비고, B는 폭) 결함 한 건을 통째로 "나중에 고친 쪽"이
+    // 이겨서 A의 비고가 사라졌다. 사진도 목록 통째라, A가 지우고 B가 추가하면 한쪽이 사라지거나 지운
+    // 사진이 (파일은 이미 지워져) 깨진 채 되살아났다.
+    //
+    // - fieldAt { 칸: 시각 }: touchDefectUpdatedAt이 직전 값과 비교해 **바뀐 칸만** 찍는다.
+    //   contentBaseAt: 칸별 기록을 시작하기 전(또는 무엇이 바뀌었는지 모를 때) 모든 칸의 시각.
+    //   칸 시각 = fieldAt[칸] || contentBaseAt || contentUpdatedAt(옛 데이터 → 예전처럼 통째).
+    // - photoState { 사진ID: 시각 }: +시각 = 그때 지움, -시각 = 그때 다시 넣음(되돌리기). 사진마다
+    //   절댓값이 큰 쪽을 따르고, 기록이 없는 사진은 양쪽 목록을 합친다.
+    // -----------------------------------------------------------------------------------------
+    var NON_CONTENT_FIELDS = new Set([
+        'id', 'no', 'groupNo', 'cadNo', 'isCadImported', 'groupId', 'surveyExtra', 'surveyNumbered', 'mergedFrom',
+        'updatedAt', 'contentUpdatedAt', 'positionUpdatedAt', 'groupUpdatedAt', 'photosUpdatedAt',
+        'fieldAt', 'contentBaseAt', 'photoState',
+        'photos', 'photoIds', 'photoUrls', 'prevRoundPhotos', 'prevRoundPhotoIds', 'prevRoundPhotoUrls'
+    ].concat(DEFECT_POSITION_FIELDS, DEFECT_GROUP_FIELDS));
+
+    function isDefectContentField(key) {
+        return !!key && key.charAt(0) !== '_' && !NON_CONTENT_FIELDS.has(key);
+    }
+
+    /** 값 비교용 짧은 해시(기기 메모리에만 둔다 — 서버에 안 올라감) */
+    function hashValue(v) {
+        var s;
+        try { s = JSON.stringify(v === undefined ? null : v); } catch (_e) { s = String(v); }
+        var h = 5381;
+        for (var i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) | 0;
+        return h.toString(36) + ':' + s.length;
+    }
+
+    /** 결함 내용 칸 → 해시. touchDefectUpdatedAt이 직전 것과 비교해 바뀐 칸을 찾는다. */
+    function defectContentHashes(rec) {
+        var out = {};
+        if (!rec) return out;
+        Object.keys(rec).forEach(function (k) {
+            if (isDefectContentField(k)) out[k] = hashValue(rec[k]);
+        });
+        return out;
+    }
+
+    /** 직전 해시(prev)와 지금 결함을 비교해 바뀐 칸 이름 */
+    function changedContentFields(prevHashes, rec) {
+        var cur = defectContentHashes(rec);
+        var keys = new Set(Object.keys(prevHashes || {}).concat(Object.keys(cur)));
+        var out = [];
+        keys.forEach(function (k) {
+            if ((prevHashes || {})[k] !== cur[k]) out.push(k);
+        });
+        return { changed: out, hashes: cur };
+    }
+
+    function isFieldTracked(rec) {
+        return !!(rec && rec.fieldAt && typeof rec.fieldAt === 'object');
+    }
+
+    function contentBaseOf(rec) {
+        if (rec && rec.contentBaseAt != null && isFinite(Number(rec.contentBaseAt))) return Number(rec.contentBaseAt);
+        return getDefectContentUpdatedAt(rec);
+    }
+
+    function fieldTs(rec, key) {
+        var fa = rec && rec.fieldAt;
+        var t = fa && Number(fa[key]);
+        return t > 0 ? t : contentBaseOf(rec);
+    }
+
+    /** merged(통째 병합 결과)의 내용 칸을 칸별로 다시 고른다. 동점이면 서버. */
+    function applyFieldLevelContent(merged, serverRec, localRec) {
+        if (!isFieldTracked(serverRec) && !isFieldTracked(localRec)) return;
+        var keys = new Set();
+        Object.keys(serverRec).concat(Object.keys(localRec)).forEach(function (k) {
+            if (isDefectContentField(k)) keys.add(k);
+        });
+        var base = Math.max(contentBaseOf(serverRec), contentBaseOf(localRec));
+        var fieldAt = {};
+        keys.forEach(function (k) {
+            var ts = fieldTs(serverRec, k);
+            var tl = fieldTs(localRec, k);
+            var win = tl > ts ? localRec : serverRec;
+            var lose = win === localRec ? serverRec : localRec;
+            if (win[k] !== undefined) merged[k] = win[k];
+            else if (lose[k] !== undefined) merged[k] = lose[k];
+            var t = Math.max(ts, tl);
+            if (t > base) fieldAt[k] = t;
+        });
+        merged.fieldAt = fieldAt;
+        merged.contentBaseAt = base;
+    }
+
+    function photoStateOf(rec) {
+        return (rec && rec.photoState && typeof rec.photoState === 'object') ? rec.photoState : null;
+    }
+
+    /** 사진 ID에 박힌 생성 시각(고유 ID 꼬리 u + 36진 시각). 옛 자리 번호면 0. */
+    function photoIdCreatedAt(pid) {
+        // createDefectPhotoId: 'u' + Date.now().toString(36)(8자리, 2059년까지) + 난수
+        var m = /_u([0-9a-z]{8})[0-9a-z]*$/.exec(String(pid || ''));
+        if (!m) return 0;
+        var t = parseInt(m[1], 36);
+        return isFinite(t) ? t : 0;
+    }
+
+    /**
+     * 사진 ID 단위 병합. 반환: 합친 ID 순서 + 합친 photoState. 한쪽이라도 photoState가 있어야 쓴다.
+     * 기록이 없는 사진이 한쪽에만 있으면:
+     *   - 사진을 나중에 바꾼 쪽이 photoState를 가진 새 기기면 → 그쪽은 모르는 사진(상대가 새로 넣음) → 살린다
+     *   - 아니면(옛 기기가 나중) 예전 규칙: 나중 쪽 목록을 따르되, 그 뒤에 만든 고유 ID 사진은 살린다
+     */
+    function mergePhotoIdLists(serverRec, localRec) {
+        var sIds = Array.isArray(serverRec.photoIds) ? serverRec.photoIds.filter(Boolean) : [];
+        var lIds = Array.isArray(localRec.photoIds) ? localRec.photoIds.filter(Boolean) : [];
+        var sState = photoStateOf(serverRec) || {};
+        var lState = photoStateOf(localRec) || {};
+        var sp = Number(serverRec.photosUpdatedAt) || 0;
+        var lp = Number(localRec.photosUpdatedAt) || 0;
+        var newer = lp > sp ? localRec : serverRec;
+        var newerIds = newer === localRec ? lIds : sIds;
+        var olderIds = newer === localRec ? sIds : lIds;
+        var newerTracked = !!photoStateOf(newer);
+        var newerAt = Math.max(sp, lp);
+
+        var state = {};
+        Object.keys(sState).concat(Object.keys(lState)).forEach(function (pid) {
+            var a = Number(sState[pid]) || 0;
+            var b = Number(lState[pid]) || 0;
+            state[pid] = Math.abs(b) > Math.abs(a) ? b : a;
+        });
+
+        var inNewer = new Set(newerIds);
+        var out = [];
+        var seen = new Set();
+        function keep(pid) {
+            if (seen.has(pid)) return;
+            var st = state[pid];
+            if (st > 0) return;                       // 지운 기록이 더 나중
+            if (!st && !inNewer.has(pid)) {
+                // 한쪽(옛 쪽)에만 있고 기록 없음
+                if (!newerTracked && !(photoIdCreatedAt(pid) > newerAt)) return;
+            }
+            seen.add(pid);
+            out.push(pid);
+        }
+        newerIds.forEach(keep);
+        olderIds.forEach(keep);
+        return { ids: out, state: state };
+    }
+
     function mergeDefectRecord(serverRec, localRec, photoCache) {
         if (!serverRec) return localRec ? Object.assign({}, localRec) : null;
         if (!localRec) return Object.assign({}, serverRec);
@@ -341,6 +491,8 @@
         var contentNewer = localContentWins ? localRec : serverRec;
         var contentOlder = localContentWins ? serverRec : localRec;
         var merged = Object.assign({}, contentOlder, contentNewer);
+        // 칸별 기록이 있으면 내용 칸은 칸마다 나중 것(2026-09-29). 없으면 위 통째 결과 그대로.
+        applyFieldLevelContent(merged, serverRec, localRec);
 
         var serverPosTs = getDefectPositionUpdatedAt(serverRec);
         var localPosTs = getDefectPositionUpdatedAt(localRec);
@@ -390,8 +542,40 @@
 
         var serverPhotoIds = Array.isArray(serverRec.photoIds) ? serverRec.photoIds : [];
         var localPhotoIds = Array.isArray(localRec.photoIds) ? localRec.photoIds : [];
-        var photoSide = pickPhotoListSide(serverRec, localRec);
-        if (photoSide) {
+        var idMerged = null;
+        if ((photoStateOf(serverRec) || photoStateOf(localRec)) && (serverPhotoIds.length || localPhotoIds.length)) {
+            // 사진 ID 단위(2026-09-29) — 고유 ID라 양쪽 이미지·URL을 섞어 써도 된다
+            idMerged = mergePhotoIdLists(serverRec, localRec);
+            merged.photoState = idMerged.state;
+            merged.photosUpdatedAt = Math.max(Number(serverRec.photosUpdatedAt) || 0, Number(localRec.photosUpdatedAt) || 0);
+            if (idMerged.ids.length) {
+                merged.photoIds = idMerged.ids;
+                var idSrc = Object.assign(
+                    {},
+                    collectPhotoSrcById(serverPhotoIds, serverRec.photos, serverRec.photoUrls, photoCache),
+                    collectPhotoSrcById(localPhotoIds, localRec.photos, localRec.photoUrls, photoCache)
+                );
+                var idPhotos = alignPhotoSrcArrayToIds(idMerged.ids, idSrc);
+                if (idPhotos.some(Boolean)) merged.photos = idPhotos;
+                else delete merged.photos;
+                var idUrlMap = Object.assign(
+                    {},
+                    collectPackedPhotoUrlMap(serverPhotoIds, serverRec.photoUrls, extractInlinePhotos(serverRec), photoCache),
+                    collectPackedPhotoUrlMap(localPhotoIds, localRec.photoUrls, extractInlinePhotos(localRec), photoCache)
+                );
+                var idUrls = idMerged.ids.map(function (pid) { return idUrlMap[String(pid)] || ''; });
+                if (idUrls.some(Boolean)) merged.photoUrls = idUrls;
+                else delete merged.photoUrls;
+            } else {
+                delete merged.photoIds;
+                delete merged.photos;
+                delete merged.photoUrls;
+            }
+        }
+        var photoSide = idMerged ? null : pickPhotoListSide(serverRec, localRec);
+        if (idMerged) {
+            // 위에서 처리함
+        } else if (photoSide) {
             // 나중에 사진을 바꾼 쪽 목록을 통째로 따른다. 이미지·URL도 **그쪽 것만** 쓴다 —
             // 자리 번호라 반대쪽의 같은 번호는 다른 사진일 수 있다(가운데 삭제로 당겨졌을 때).
             var src = photoSide === 'local' ? localRec : serverRec;
@@ -418,8 +602,8 @@
                 delete merged.photoUrls;
             }
         }
-        var mergedPhotoIds = photoSide ? [] : mergePhotoArrays(serverPhotoIds, localPhotoIds);
-        if (photoSide) {
+        var mergedPhotoIds = (photoSide || idMerged) ? [] : mergePhotoArrays(serverPhotoIds, localPhotoIds);
+        if (photoSide || idMerged) {
             // 위에서 처리함
         } else if (mergedPhotoIds.length) {
             merged.photoIds = mergedPhotoIds;
@@ -674,6 +858,12 @@
         pickImportedText: pickImportedText,
         keepStoredIfUntouched: keepStoredIfUntouched,
         pickPhotoListSide: pickPhotoListSide,
+        isDefectContentField: isDefectContentField,
+        defectContentHashes: defectContentHashes,
+        changedContentFields: changedContentFields,
+        applyFieldLevelContent: applyFieldLevelContent,
+        mergePhotoIdLists: mergePhotoIdLists,
+        photoIdCreatedAt: photoIdCreatedAt,
         resolveBuildingTrashState: resolveBuildingTrashState,
         isOutdatedBuild: isOutdatedBuild,
         countKeptExistingOnImport: countKeptExistingOnImport,

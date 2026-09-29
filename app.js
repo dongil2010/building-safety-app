@@ -2274,6 +2274,8 @@ document.addEventListener('DOMContentLoaded', () => {
                             defectGroupRepairPending = true;
                         }
                     });
+                    // 칸 단위 병합: 다음 수정 때 무엇이 바뀌었는지 비교할 기준
+                    seedDefectContentSnaps(window.state.defects);
                 }
                 if (parsed.ndtData) {
                     window.state.ndtData = parsed.ndtData;
@@ -3738,9 +3740,52 @@ document.addEventListener('DOMContentLoaded', () => {
 
     window.compactDefectMarkingNumberGaps = compactDefectMarkingNumberGaps;
 
+    /**
+     * 결함 내용 칸의 직전 값(해시) — touchDefectUpdatedAt이 비교해 **바뀐 칸만** fieldAt에 시각을 찍는다
+     * (칸 단위 병합, 2026-09-29, sync-merge.js). 기기 메모리에만 두고 서버에 안 올린다.
+     * 앱을 켤 때·동기화로 결함이 바뀔 때 채운다(seedDefectContentSnaps). 없으면(새 결함 등) 무엇이 바뀌었는지
+     * 모르므로 모든 칸이 지금 바뀐 것으로 본다(contentBaseAt = 지금).
+     */
+    function defectContentSnap() {
+        if (!window.__bsaDefectContentSnap) window.__bsaDefectContentSnap = new Map();
+        return window.__bsaDefectContentSnap;
+    }
+
+    function seedDefectContentSnaps(defectsMap, onlyKeys) {
+        const sm = window.BSA && window.BSA.syncMerge;
+        if (!sm || typeof sm.defectContentHashes !== 'function') return;
+        const keys = onlyKeys ? Array.from(onlyKeys) : Object.keys(defectsMap || {});
+        keys.forEach((k) => {
+            ((defectsMap || {})[k] || []).forEach((d) => {
+                if (d && d.id) defectContentSnap().set(d.id, sm.defectContentHashes(d));
+            });
+        });
+    }
+
     function touchDefectUpdatedAt(defect) {
         if (!defect) return;
         const now = Date.now();
+        const sm = window.BSA && window.BSA.syncMerge;
+        if (sm && typeof sm.changedContentFields === 'function' && defect.id) {
+            const prevContentTs = Number(defect.contentUpdatedAt) || Number(defect.updatedAt) || 0;
+            const snap = defectContentSnap().get(defect.id);
+            const diff = sm.changedContentFields(snap || {}, defect);
+            if (snap) {
+                if (diff.changed.length) {
+                    if (!defect.fieldAt || typeof defect.fieldAt !== 'object') {
+                        defect.fieldAt = {};
+                        // 칸별 기록 시작 전 모든 칸의 시각 = 지금까지의 내용 수정 시각
+                        if (defect.contentBaseAt == null) defect.contentBaseAt = prevContentTs;
+                    }
+                    diff.changed.forEach((k) => { defect.fieldAt[k] = now; });
+                }
+            } else {
+                // 무엇이 바뀌었는지 모름 — 모든 칸을 지금 바뀐 것으로(예전 통째 병합과 같은 결과)
+                defect.fieldAt = {};
+                defect.contentBaseAt = now;
+            }
+            defectContentSnap().set(defect.id, diff.hashes);
+        }
         defect.updatedAt = now;
         // 내용·사진 변경 시각 — 삭제 부활 판정에 사용 (위치만 옮긴 경우는 제외)
         defect.contentUpdatedAt = now;
@@ -3987,10 +4032,13 @@ document.addEventListener('DOMContentLoaded', () => {
     function mergeDefectsMaps(serverMap, localMap, serverDeleted, localDeleted, serverDeletedAt, localDeletedAt) {
         ensureSyncMetaState();
         dropStaleDefectPhotoSlotCache(serverMap, localMap);
-        return window.BSA.syncMerge.mergeDefectsMaps(
+        const result = window.BSA.syncMerge.mergeDefectsMaps(
             serverMap, localMap, serverDeleted, localDeleted, serverDeletedAt, localDeletedAt,
             { photoCache: window._photoCache, renumberFloorDefects: renumberFloorDefects }
         );
+        // 합친 층의 결함은 새 객체 — 칸 비교 기준을 합친 값으로 다시 잡는다(서버에서 온 값을 내 수정으로 오인하지 않게)
+        seedDefectContentSnaps(result.defects, Object.keys(serverMap || {}));
+        return result;
     }
 
     /** 동기화 병합용 — photoIds·인라인 사진만으로 병합(클라우드 사진 fetch 없음) */
@@ -22613,8 +22661,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         defect.areaBorderStyle = defect.areaBorderStyle || state.areaBorderStyle || 'solid';
         if (typeof ensureAreaPinPlacement === 'function') ensureAreaPinPlacement(defect);
         if (typeof touchDefectPositionUpdatedAt === 'function') touchDefectPositionUpdatedAt(defect);
-        defect.updatedAt = Date.now();
-        defect.contentUpdatedAt = Date.now();
+        touchDefectUpdatedAt(defect);
         return true;
     }
 
@@ -22657,8 +22704,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         delete defect.areaFillStyle;
         delete defect.areaBorderStyle;
         if (typeof touchDefectPositionUpdatedAt === 'function') touchDefectPositionUpdatedAt(defect);
-        defect.updatedAt = Date.now();
-        defect.contentUpdatedAt = Date.now();
+        touchDefectUpdatedAt(defect);
         return true;
     }
 
@@ -22730,8 +22776,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
         if (typeof ensureAreaPinPlacement === 'function') ensureAreaPinPlacement(defect);
         if (typeof touchDefectPositionUpdatedAt === 'function') touchDefectPositionUpdatedAt(defect);
-        defect.updatedAt = Date.now();
-        defect.contentUpdatedAt = Date.now();
+        touchDefectUpdatedAt(defect);
         return true;
     }
 
@@ -32133,6 +32178,32 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         return true;
     }
 
+    /**
+     * 사진 ID별 지움/다시 넣음 기록 (사진 ID 단위 병합, 2026-09-29 — sync-merge.js mergePhotoIdLists).
+     * photoState[ID] = +시각(그때 지움) / -시각(그때 다시 넣음, 되돌리기 등). 빈 {}라도 두면
+     * "이 기기는 사진마다 기록한다"는 표시가 되어, 상대 목록에만 있는 사진을 새로 넣은 것으로 살린다.
+     * 사진을 다 못 받은 창에서는 빠진 사진을 지운 것으로 적지 않는다(stampDefectPhotosChangedIfSafe와 같은 이유).
+     */
+    function recordDefectPhotoState(defect, beforeIds, afterIds) {
+        if (!defect) return;
+        const state = (defect.photoState && typeof defect.photoState === 'object') ? defect.photoState : {};
+        const now = Date.now();
+        const after = new Set((Array.isArray(afterIds) ? afterIds : []).filter(Boolean));
+        after.forEach((pid) => {
+            if (Number(state[pid]) > 0) state[pid] = -now;   // 지웠던 사진을 다시 넣음
+        });
+        if (window._defectPhotosComplete !== false) {
+            (Array.isArray(beforeIds) ? beforeIds : []).forEach((pid) => {
+                if (pid && !after.has(pid)) state[pid] = now;
+            });
+        }
+        // 오래 쌓이지 않게: 지금 목록에 없는 기록은 최근 60개만
+        const gone = Object.keys(state).filter((pid) => !after.has(pid))
+            .sort((a, b) => Math.abs(Number(state[b])) - Math.abs(Number(state[a])));
+        gone.slice(60).forEach((pid) => { delete state[pid]; });
+        defect.photoState = state;
+    }
+
     // before: 결함 사진을 바꾸기 전에 captureDefectPhotoIdsBefore로 받아 둔 것. 없으면(새 결함) 전부 새 ID.
     function syncDefectPhotoRefs(defect, photosVal, prevVal, before) {
         if (!defect) return;
@@ -32143,6 +32214,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         } else {
             delete defect.photoIds;
         }
+        recordDefectPhotoState(defect, before && before.cur && before.cur.visibleIds, defect.photoIds);
         if (prev.length > 0) {
             defect.prevRoundPhotoIds = assignDefectPhotoIds(defect.id, prev, before && before.prev, 'prev');
         } else if (prevVal !== undefined) {

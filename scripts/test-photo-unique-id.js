@@ -49,6 +49,7 @@ function makeCtx() {
         extractFunction('function assignDefectPhotoIds('),
         extractFunction('function defectPhotoIdAt('),
         extractFunction('function defectPhotoIdList('),
+        extractFunction('function recordDefectPhotoState('),
         extractFunction('function syncDefectPhotoRefs('),
         extractFunction('async function pruneRemovedDefectPhotos('),
         extractFunction('function findBuildingIdForDefectId('),
