@@ -16173,8 +16173,7 @@ html:not(.layout-desktop) .crack-monitor-photo-slots {
     box-sizing: border-box;
 }
 .bsa-mkp[hidden] { display: none !important; }
-.bsa-mkp-portrait { width: min(248px, calc(100vw - 8px)); }
-.bsa-mkp-landscape { width: min(460px, calc(100vw - 8px)); }
+.bsa-mkp-grid { width: min(248px, calc(100vw - 8px)); } /* 늘 4×4 (16키) */
 .bsa-mkp-key {
     height: 44px;
     min-width: 0;
@@ -16191,11 +16190,11 @@ html:not(.layout-desktop) .crack-monitor-photo-slots {
     touch-action: none;
     cursor: pointer;
 }
-.bsa-mkp-landscape .bsa-mkp-key { height: 38px; font-size: 18px; }
+.bsa-mkp-short .bsa-mkp-key { height: 34px; font-size: 18px; } /* 폰 가로: 4×4 그대로, 키만 낮게 */
 .bsa-mkp-key:active { background: #dbe4f0; }
 .bsa-mkp-sym { background: #f6f7f9; color: #374151; font-size: 24px; }
 .bsa-mkp-bs { font-size: 20px; }
-.bsa-mkp-landscape .bsa-mkp-sym:not(.bsa-mkp-ok) { font-size: 22px; }
+.bsa-mkp-short .bsa-mkp-sym:not(.bsa-mkp-ok) { font-size: 22px; }
 .bsa-mkp-ok { background: #2563eb; border-color: #2563eb; color: #fff; font-size: 16px; }
 .bsa-mkp-ok:active { background: #1d4ed8; }
 input.bsa-mkp-active, textarea.bsa-mkp-active {
@@ -16265,3 +16264,32 @@ html.bsa-touch-ui button#btnGridLines#btnGridLines,
 html.bsa-touch-ui button#mobileBtnGridLines#mobileBtnGridLines {
     display: none !important;
 }
+
+/* ==========================================================================
+   조사표 「결함 크기」 칸 = 버튼 → 폭·길이·개수 팝업 (#surveySizeModal, 2026-09-29)
+   편집 행은 결함 수정창과 같은 .defect-crack-measure-row (터치는 전용 키패드)
+   ========================================================================== */
+.survey-size-open {
+    cursor: pointer;
+    min-height: 1.9rem;
+    white-space: normal;
+    word-break: keep-all;
+    overflow-wrap: anywhere;
+}
+.survey-size-open:empty::before {
+    content: attr(data-placeholder);
+    color: #a3a3a3;
+    font-weight: 500;
+}
+.survey-size-open:hover { border-color: #2563eb; background: #f8fbff; }
+.survey-size-card {
+    max-width: 520px;
+    width: 94%;
+}
+.survey-size-card .modal-header h3 { font-size: 1rem; display: flex; align-items: baseline; gap: 0.4rem; flex-wrap: wrap; }
+.survey-size-sub { font-size: 0.8rem; font-weight: 600; color: #64748b; }
+.survey-size-card .defect-quick-label { font-weight: 800; font-size: 0.85rem; margin-bottom: 0.35rem; color: #334155; }
+.survey-size-card .defect-quick-hint { font-weight: 500; color: #94a3b8; font-size: 0.75rem; }
+.survey-size-preview { margin-top: 0.45rem; font-size: 0.85rem; color: #475569; }
+.survey-size-preview b { color: #0f172a; }
+.survey-size-card .modal-footer { display: flex; justify-content: flex-end; gap: 0.5rem; }

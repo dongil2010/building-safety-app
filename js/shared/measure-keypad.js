@@ -16,17 +16,17 @@
 
     var TARGET_SELECTOR = 'input[data-crack-w], input[data-crack-l], input[data-crack-n], [data-measure-keypad]';
 
-    /** 세로(4×4)·가로(8×2) 배열. 'BS' = 지우기, 'OK' = 완료, ' ' = 띄어쓰기 */
+    /**
+     * 늘 4×4 한 가지(16키) — 폰·태블릿, 세로·가로 모두 (2026-09-29: 가로 8×2 없앰, 띄어쓰기↔점 자리 바꿈).
+     * 'BS' = 지우기, 'OK' = 완료, ' ' = 띄어쓰기
+     */
     var LAYOUT_PORTRAIT = [
         ['7', '8', '9', 'BS'],
         ['4', '5', '6', '~'],
         ['1', '2', '3', ','],
-        ['.', '0', ' ', 'OK']
+        [' ', '0', '.', 'OK']
     ];
-    var LAYOUT_LANDSCAPE = [
-        ['1', '2', '3', '4', '5', '6', '.', 'BS'],
-        ['7', '8', '9', '0', '~', ',', ' ', 'OK']
-    ];
+    var LAYOUT_LANDSCAPE = LAYOUT_PORTRAIT; // 예전 이름 호환 — 같은 4×4
 
     function allKeys() {
         var out = [];
@@ -253,11 +253,12 @@
 
     function renderKeys() {
         var pad = buildPad();
-        var orient = isLandscape() ? 'landscape' : 'portrait';
+        // 배열은 늘 4×4. 폰 가로(키 높이가 모자람)만 키를 낮춘다(bsa-mkp-short)
+        var orient = isLandscape() ? 'short' : 'grid';
         if (state.orientation === orient && pad.firstChild) return;
         state.orientation = orient;
-        var layout = orient === 'landscape' ? LAYOUT_LANDSCAPE : LAYOUT_PORTRAIT;
-        pad.className = 'bsa-mkp bsa-measure-keypad bsa-mkp-' + orient;
+        var layout = LAYOUT_PORTRAIT;
+        pad.className = 'bsa-mkp bsa-measure-keypad bsa-mkp-grid' + (orient === 'short' ? ' bsa-mkp-short' : '');
         pad.style.setProperty('--mkp-cols', String(layout[0].length));
         var html = '';
         layout.forEach(function (row) {

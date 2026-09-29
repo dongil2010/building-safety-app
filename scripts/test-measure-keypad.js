@@ -16,9 +16,15 @@ const kp = require(path.join(ROOT, 'js/shared/measure-keypad.js'));
 const keys = kp.allKeys().slice().sort();
 const want = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '.', '~', ',', ' ', 'BS', 'OK'].sort();
 assert.deepStrictEqual(keys, want, '세로 배열 키 구성');
-const land = [].concat(...kp.LAYOUT_LANDSCAPE).sort();
-assert.deepStrictEqual(land, want, '가로 배열 키 구성');
-assert.ok(kp.LAYOUT_LANDSCAPE.length === 2, '가로(태블릿·폰 가로)는 2줄로 납작하게');
+// 2026-09-29: 늘 4×4 한 가지(16키), 띄어쓰기 ↔ 점 자리 바꿈 (마지막 줄 ␣ 0 . 완료)
+assert.deepStrictEqual(kp.LAYOUT_PORTRAIT, [
+    ['7', '8', '9', 'BS'],
+    ['4', '5', '6', '~'],
+    ['1', '2', '3', ','],
+    [' ', '0', '.', 'OK']
+], '4×4 배열');
+assert.strictEqual(kp.LAYOUT_LANDSCAPE, kp.LAYOUT_PORTRAIT, '가로도 같은 4×4 (8×2 없음)');
+assert.strictEqual(kp.allKeys().length, 16);
 
 // ---- 커서 자리 삽입
 assert.deepStrictEqual(kp.insertAtCaret('', 0, 0, '3'), { value: '3', caret: 1 });
@@ -129,7 +135,8 @@ assert.ok(/onchange="window\.updateSurveyInlineField\(/.test(app), '인라인 �
 const css = fs.readFileSync(path.join(ROOT, 'styles.css'), 'utf8');
 assert.ok(/\.bsa-mkp\s*\{[^}]*position:\s*fixed/.test(css));
 assert.ok(/\.bsa-mkp\[hidden\]\s*\{\s*display:\s*none/.test(css));
-assert.ok(/\.bsa-mkp-landscape/.test(css));
+assert.ok(/\.bsa-mkp-grid\s*\{/.test(css) && /\.bsa-mkp-short \.bsa-mkp-key/.test(css));
+assert.ok(!/\.bsa-mkp-landscape/.test(css), '가로 8×2 스타일 없음');
 
 // ---- 2026-09-29 핫픽스: 키를 누르면 아무것도 안 들어가고 결함핀 수정창이 닫혔다.
 // 문서 캡처 단계 pointerdown(창 밖 누르기 → closeDefectModal)이 body에 붙은 키패드를 창 밖으로 봤다.

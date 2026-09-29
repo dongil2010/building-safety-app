@@ -4564,6 +4564,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 window.closeAddBuildingModalFunc();
                 return true;
             }
+            if (isModalElOpen(document.getElementById('surveySizeModal')) && typeof window.closeSurveySizeEditor === 'function') {
+                window.closeSurveySizeEditor();
+                return true;
+            }
             const plainIds = ['optionManagerModal', 'reportPreviewModal', 'mobileQrModal', 'buildingTrashModal', 'errorLogModal'];
             for (let j = 0; j < plainIds.length; j++) {
                 const m = document.getElementById(plainIds[j]);
@@ -25001,7 +25005,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
     function formatCrackMeasurePair(m) {
         const join = normalizeMeasureJoin(m && m.join);
-        const w = normalizeCrackDecimalText((m && m.width) || '');
+        // 폭 칸에 "Cw:0.3"이 그대로 들어간 예전 값 → "Cw:Cw:0.3" 으로 두 번 붙지 않게
+        const w = normalizeCrackDecimalText(String((m && m.width) || '').replace(/^\s*Cw\s*[:=]\s*/i, ''));
         const l = normalizeCrackDecimalText((m && m.length) || '');
         const n = String((m && m.count) || '').trim();
         // 한 칸 띄움: 화면/엑셀용. HWPX는 wrapHwpxCellText가 -nEA 앞을 문단 분리.
@@ -25023,8 +25028,13 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         return '';
     }
 
-    function getCrackMeasuresFromUi() {
-        const list = document.getElementById('defectCrackMeasureList');
+    /** 폭·길이·개수 행 목록 — 기본은 결함 수정창, 조사표 크기 팝업은 자기 목록을 넘긴다 */
+    function crackMeasureListEl(listEl) {
+        return listEl || document.getElementById('defectCrackMeasureList');
+    }
+
+    function getCrackMeasuresFromUi(listEl) {
+        const list = crackMeasureListEl(listEl);
         if (!list) return [];
         return Array.from(list.querySelectorAll('.defect-crack-measure-row')).map(row => {
             const w = normalizeCrackDecimalText(row.querySelector('[data-crack-w]')?.value || '');
@@ -25035,8 +25045,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         }).filter(m => m.width || m.length || m.count);
     }
 
-    function readCrackMeasureRowsFromDom() {
-        const list = document.getElementById('defectCrackMeasureList');
+    function readCrackMeasureRowsFromDom(listEl) {
+        const list = crackMeasureListEl(listEl);
         if (!list) return [];
         return Array.from(list.querySelectorAll('.defect-crack-measure-row')).map(row => ({
             width: (row.querySelector('[data-crack-w]')?.value || '').trim(),
@@ -25096,9 +25106,20 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (wUnit) wUnit.textContent = mode === 'x' ? 'm' : 'mm';
     }
 
-    function renderCrackMeasureRows(measures) {
-        const list = document.getElementById('defectCrackMeasureList');
+    /**
+     * opts.list: 다른 목록(조사표 크기 팝업)에 그린다. opts.onChange: 그때는 결함 수정창 자동 저장 대신 이걸 부른다.
+     */
+    function renderCrackMeasureRows(measures, opts) {
+        const list = crackMeasureListEl(opts && opts.list);
         if (!list) return;
+        const onChange = (opts && typeof opts.onChange === 'function') ? opts.onChange : null;
+        const isModalList = !(opts && opts.list);
+        const afterEdit = () => {
+            if (onChange) { onChange(); return; }
+            if (isDefectBulkEditMode()) markDefectBulkFieldChanged('crackMeasures');
+            syncSizeFromMeasureInputs();
+            if (typeof scheduleDefectAutoApply === 'function') scheduleDefectAutoApply();
+        };
         const rows = (Array.isArray(measures) && measures.length)
             ? measures.map(m => ({
                 width: m.width || m.w || '',
@@ -25131,51 +25152,62 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             </div>
         `).join('');
         list.querySelectorAll('input').forEach(inp => {
-            inp.addEventListener('input', () => {
-                if (isDefectBulkEditMode()) markDefectBulkFieldChanged('crackMeasures');
-                syncSizeFromMeasureInputs();
-                if (typeof scheduleDefectAutoApply === 'function') scheduleDefectAutoApply();
-            });
+            inp.addEventListener('input', afterEdit);
             // 폭·길이: 정수만 입력하면 포커스 아웃 시 .0 표시
             if (inp.hasAttribute('data-crack-w') || inp.hasAttribute('data-crack-l')) {
                 inp.addEventListener('blur', () => {
                     const next = normalizeCrackDecimalText(inp.value);
                     if (next !== inp.value) inp.value = next;
-                    if (isDefectBulkEditMode()) markDefectBulkFieldChanged('crackMeasures');
-                    syncSizeFromMeasureInputs();
-                    if (typeof scheduleDefectAutoApply === 'function') scheduleDefectAutoApply();
+                    afterEdit();
                 });
             }
         });
         list.querySelectorAll('[data-crack-join]').forEach(btn => {
             btn.addEventListener('click', () => {
-                if (isDefectBulkEditMode()) markDefectBulkFieldChanged('crackMeasures');
                 const row = btn.closest('.defect-crack-measure-row');
                 const next = normalizeMeasureJoin(btn.dataset.join) === 'x' ? '/' : 'x';
                 applyCrackMeasureJoinToRow(row, next);
-                syncSizeFromMeasureInputs();
-                if (typeof scheduleDefectAutoApply === 'function') scheduleDefectAutoApply();
+                afterEdit();
             });
         });
         list.querySelectorAll('.defect-crack-measure-del').forEach(btn => {
             btn.addEventListener('click', () => {
                 if (!window.confirmDelete('이 규격(폭·길이·개수) 행을 삭제할까요?')) return;
-                if (isDefectBulkEditMode()) markDefectBulkFieldChanged('crackMeasures');
                 const row = btn.closest('.defect-crack-measure-row');
                 const idx = row ? parseInt(row.getAttribute('data-row-idx') || '0', 10) : -1;
-                const allRows = readCrackMeasureRowsFromDom();
+                const allRows = readCrackMeasureRowsFromDom(list);
                 if (idx >= 0 && allRows.length > 1) {
                     allRows.splice(idx, 1);
-                    renderCrackMeasureRows(allRows.length ? allRows : [{ width: '', length: '', count: '', join: '/' }]);
-                    syncSizeFromMeasureInputs();
-                    if (typeof scheduleDefectAutoApply === 'function') scheduleDefectAutoApply();
+                    renderCrackMeasureRows(allRows.length ? allRows : [{ width: '', length: '', count: '', join: '/' }], opts);
+                    afterEdit();
                 }
             });
         });
-        syncHiddenCrackFieldsFromMeasures(getCrackMeasuresFromUi());
+        if (isModalList) syncHiddenCrackFieldsFromMeasures(getCrackMeasuresFromUi());
     }
 
-    function setCrackMeasuresToUi(defect) {
+    /**
+     * 편집용 한 행 정리: 폭 칸에 "Cw:0.3" / "Cw:0.3 -2EA" / "0.3mm" 처럼 규모 글자가 들어가 있으면
+     * (엑셀·한글 가져오기·예전 조사표 입력) 숫자로 풀어 키패드로 고칠 수 있게 한다.
+     */
+    function normalizeCrackMeasureForEdit(m) {
+        const out = { width: String(m.width || '').trim(), length: String(m.length || '').trim(), count: String(m.count || '').trim(), join: m.join };
+        if (out.width && !/^[\d.~,\s]*$/.test(out.width)) {
+            const parsed = parseSizeTextToCrackMeasures(out.width);
+            if (parsed.length === 1) {
+                out.width = parsed[0].width || '';
+                if (!out.length && parsed[0].length) { out.length = parsed[0].length; out.join = parsed[0].join; }
+                if (!out.count && parsed[0].count) out.count = parsed[0].count;
+            } else {
+                out.width = out.width.replace(/^Cw\s*[:=]\s*/i, '').replace(/\s*(mm|㎜)$/i, '');
+            }
+        }
+        if (out.length && /m$/i.test(out.length)) out.length = out.length.replace(/\s*m$/i, '');
+        return out;
+    }
+
+    /** 결함 → 폭·길이·개수 편집 행 (결함 수정창·조사표 크기 팝업 공용) */
+    function getDefectCrackMeasureRowsForEdit(defect) {
         let measures = [];
         if (defect && Array.isArray(defect.crackMeasures) && defect.crackMeasures.length) {
             const hasRowCount = defect.crackMeasures.some(m => m && m.count != null && String(m.count).trim() !== '');
@@ -25205,8 +25237,120 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 measures.push({ width: '', length: '', count: String(defect.itemCount).trim(), join });
             }
         }
+        // 폭·길이·개수가 비었는데 규모 글자만 있으면("Cw:0.3", "0.3/2.0 -2EA", "0.3/3.00.2/3.0") 그걸 풀어 쓴다
+        if (!measures.length && defect && String(defect.size || '').trim()) {
+            measures = parseSizeTextToCrackMeasures(defect.size);
+        }
+        return measures.map(normalizeCrackMeasureForEdit);
+    }
+
+    function setCrackMeasuresToUi(defect) {
+        const measures = getDefectCrackMeasureRowsForEdit(defect);
         renderCrackMeasureRows(measures.length ? measures : [{ width: '', length: '', count: '', join: '/' }]);
     }
+
+    /**
+     * 폭·길이·개수 행 → 결함 (결함 수정창 저장과 같은 모양):
+     * crackMeasures 행, crackWidth/crackLength/itemCount = " / " 연결, size = 행별 규모 글자 ", " 연결(Cw:0.3 등)
+     */
+    function applyCrackMeasuresEditToDefect(defect, measures) {
+        if (!defect) return;
+        const rows = (Array.isArray(measures) ? measures : []).map((m) => ({
+            width: normalizeCrackDecimalText(String((m && m.width) || '').trim()),
+            length: normalizeCrackDecimalText(String((m && m.length) || '').trim()),
+            count: String((m && m.count) || '').trim(),
+            join: normalizeMeasureJoin(m && m.join)
+        })).filter((m) => m.width || m.length || m.count);
+        defect.crackMeasures = rows;
+        defect.crackWidth = rows.map((m) => m.width).filter(Boolean).join(' / ');
+        defect.crackLength = rows.map((m) => m.length).filter(Boolean).join(' / ');
+        defect.itemCount = rows.map((m) => m.count).filter(Boolean).join(' / ');
+        defect.size = rows.map(formatCrackMeasurePair).filter(Boolean).join(', ');
+    }
+
+    // ---------- 조사표 「결함 크기」 팝업: 결함 수정창과 같은 폭·길이·개수 편집(터치는 전용 키패드) ----------
+    const surveySizeEditState = { defectId: null };
+
+    function surveySizePreviewUpdate() {
+        const list = document.getElementById('surveySizeMeasureList');
+        const out = document.getElementById('surveySizePreview');
+        if (!list || !out) return;
+        const text = getCrackMeasuresFromUi(list).map(formatCrackMeasurePair).filter(Boolean).join(', ');
+        out.textContent = text || '-';
+    }
+
+    function closeSurveySizeEditor() {
+        const modal = document.getElementById('surveySizeModal');
+        if (window.BsaMeasureKeypad && typeof window.BsaMeasureKeypad.isOpen === 'function' && window.BsaMeasureKeypad.isOpen()) {
+            window.BsaMeasureKeypad.close();
+        }
+        surveySizeEditState.defectId = null;
+        if (!modal) return;
+        modal.classList.remove('open');
+        modal.style.display = 'none';
+        modal.setAttribute('aria-hidden', 'true');
+    }
+    window.closeSurveySizeEditor = closeSurveySizeEditor;
+
+    function saveSurveySizeEditor() {
+        const id = surveySizeEditState.defectId;
+        const list = document.getElementById('surveySizeMeasureList');
+        // 키패드로 치던 칸의 마지막 값까지(완료 안 눌러도) 반영
+        if (window.BsaMeasureKeypad && typeof window.BsaMeasureKeypad.isOpen === 'function' && window.BsaMeasureKeypad.isOpen()) {
+            window.BsaMeasureKeypad.close();
+        }
+        const rows = list ? getCrackMeasuresFromUi(list) : [];
+        closeSurveySizeEditor();
+        if (!id) return;
+        window.updateSurveyInlineField(id, 'crackMeasures', JSON.stringify(rows));
+    }
+
+    function bindSurveySizeEditor() {
+        const modal = document.getElementById('surveySizeModal');
+        if (!modal || modal.dataset.bound === '1') return modal;
+        modal.dataset.bound = '1';
+        const list = document.getElementById('surveySizeMeasureList');
+        document.getElementById('btnSurveySizeAdd')?.addEventListener('click', () => {
+            const rows = readCrackMeasureRowsFromDom(list);
+            rows.push({ width: '', length: '', count: '', join: '/' });
+            renderCrackMeasureRows(rows, { list, onChange: surveySizePreviewUpdate });
+            surveySizePreviewUpdate();
+            const last = list.querySelector('.defect-crack-measure-row:last-child [data-crack-w]');
+            if (last) try { last.focus(); } catch (_e) { /* ignore */ }
+        });
+        document.getElementById('btnSurveySizeSave')?.addEventListener('click', saveSurveySizeEditor);
+        document.getElementById('btnSurveySizeCancel')?.addEventListener('click', closeSurveySizeEditor);
+        document.getElementById('btnCloseSurveySize')?.addEventListener('click', closeSurveySizeEditor);
+        // 바깥(어두운 곳) 누르기 = 닫기. 키패드는 body에 붙어 있고 자기 누르기를 삼키므로 여기 안 온다.
+        modal.addEventListener('click', (e) => { if (e.target === modal) closeSurveySizeEditor(); });
+        return modal;
+    }
+
+    window.openSurveySizeEditor = function(defectId) {
+        if (window.event && window.event.stopPropagation) window.event.stopPropagation();
+        const located = findDefectAcrossBuildingFloors(defectId);
+        const key = located ? located.floorKey : `${state.currentBuildingId}_${state.currentFloor}`;
+        const all = state.defects[key] || [];
+        const self = all.find((d) => d && d.id === defectId);
+        // 그룹(마킹 추가) 줄은 표에 보이는 값(묶음 대표)으로 연다 — 저장은 updateSurveyInlineField가 멤버에 나눠 쓴다
+        const shown = (typeof consolidateDefectGroups === 'function')
+            ? consolidateDefectGroups(all).find((g) => g.id === defectId || (g._groupMemberIds && g._groupMemberIds.indexOf(defectId) !== -1))
+            : null;
+        const src = shown || self;
+        if (!src || isGoodDefectType(src.defectType)) return;
+        const modal = bindSurveySizeEditor();
+        const list = document.getElementById('surveySizeMeasureList');
+        if (!modal || !list) return;
+        surveySizeEditState.defectId = defectId;
+        const rows = getDefectCrackMeasureRowsForEdit(src);
+        renderCrackMeasureRows(rows.length ? rows : [{ width: '', length: '', count: '', join: '/' }], { list, onChange: surveySizePreviewUpdate });
+        const sub = document.getElementById('surveySizeSub');
+        if (sub) sub.textContent = [src.no ? `No.${src.no}` : '', memberNameOut(src.component) || '', src.defectType || ''].filter(Boolean).join(' · ');
+        surveySizePreviewUpdate();
+        modal.classList.add('open');
+        modal.style.display = 'flex';
+        modal.setAttribute('aria-hidden', 'false');
+    };
 
     function bindDefectMeasureInputs() {
         const addBtn = document.getElementById('btnAddCrackMeasure');
@@ -37187,6 +37331,14 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 ` value="${escapeSurveyAttr(displayVal)}">`;
         };
 
+        // 결함 크기 칸 = 버튼 → 폭·길이·개수 팝업 (결함 수정창과 같은 편집기, 터치는 키패드)
+        const sizeOpenBtn = (display, placeholder, extraClass) =>
+            `<button type="button" class="survey-inline-input survey-size-open${extraClass ? ' ' + extraClass : ''}"` +
+            ` data-survey-size-open="${escapeSurveyAttr(id)}" data-placeholder="${escapeSurveyAttr(placeholder || '')}"` +
+            ` title="눌러서 폭·길이·개수 편집"` +
+            ` onclick="event.stopPropagation(); window.openSurveySizeEditor('${id}')" onmousedown="event.stopPropagation()">` +
+            `${escapeSurveyAttr(display || '')}</button>`;
+
         switch (colKey) {
             case 'no':
             case 'floorGroup':
@@ -37227,7 +37379,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 if (isGood) return '<span style="color:#a3a3a3;">-</span>';
                 const val = getSurveyCellText('size', d, {}) || '';
                 const display = val === '-' ? '' : val;
-                return textInput('size', display, '규모');
+                return sizeOpenBtn(display, '규모');
             }
             case 'crackWidth':
                 return (d.defectType === '균열')
@@ -37245,7 +37397,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 return `<div class="survey-inline-stack survey-inline-stack-one-line" ${stop}>` +
                     withMemberGbHint(textInput('component', memberNameOut(d.component) || '', '부재', `survey-inline-narrow${memberGbClass(d.component) ? ' ' + memberGbClass(d.component) : ''}`), d.component) +
                     textInput('defectType', d.defectType || '', '조사내용', 'survey-inline-narrow') +
-                    textInput('size', sizeDisp, '크기', 'survey-inline-narrow') +
+                    sizeOpenBtn(sizeDisp, '크기', 'survey-inline-narrow') +
                     `</div>`;
             }
             default:
@@ -37407,6 +37559,13 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     defect.size = value;
                     break;
                 }
+                case 'crackMeasures': {
+                    // 조사표 크기 팝업(폭·길이·개수 행, JSON) — 결함 수정창 저장과 같은 모양으로 쓴다
+                    let rows = null;
+                    try { rows = JSON.parse(value || '[]'); } catch (_e) { rows = null; }
+                    if (Array.isArray(rows)) applyCrackMeasuresEditToDefect(defect, rows);
+                    break;
+                }
                 case 'crackWidth':
                     defect.crackWidth = value.replace(/mm$/i, '').trim();
                     break;
@@ -37438,6 +37597,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         } else if (field === 'progress' || field === 'leak' || field === 'priorityManage') {
             renderSurveyTable();
             if (field === 'priorityManage' && typeof renderPhotoAlbum === 'function') renderPhotoAlbum();
+        } else if (field === 'crackMeasures') {
+            // 크기 칸(버튼) 글자·폭·길이 칸을 새 값으로
+            renderSurveyTable();
         }
     };
 
