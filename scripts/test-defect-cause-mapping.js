@@ -87,7 +87,7 @@ function buildEnv() {
         'getDefaultCausePresetList, getAllDefaultCausesForKey, getEffectiveCauseOrder, parseCauseList, ' +
         'getCauseOptionsForKey, getDefaultFirstCauseFor, resetOptionManagerCurrent, refreshDefectTypeAfterComponentChange, ' +
         'getCauseMemberGroup, applySavedOptionOrder, categoryDefectPreset };';
-    const env = { window: { state: {}, showToast: () => {} }, document: null, fields: {} };
+    const env = { window: { state: {}, showToast: () => {}, appConfirm: async () => true }, document: null, fields: {} };
     const stubNames = ['getDefectComboValue', 'ensureOptionOrderEntry', 'getOptionManagerContext',
         'confirm', 'saveStateToLocalStorage', 'scheduleSyncUserDefectPinPresets', 'populateDefectComponentDropdown',
         'updateDefectTypeDropdown', 'updateDefectCauseDropdown', 'renderOptionManagerList', 'getSelectedCausesFromUi',
@@ -234,7 +234,7 @@ function testCustomOrderRules() {
 }
 
 // ---------- 4) 앱 기본 세팅으로 ----------
-function testResetKeepsOrderEmpty() {
+async function testResetKeepsOrderEmpty() {
     const order = ['과하중', '부등침하'];
     const hidden = ['철근 부식 팽창'];
     const custom = ['내가 넣은 원인'];
@@ -242,7 +242,7 @@ function testResetKeepsOrderEmpty() {
     env.window._optionManagerField = 'cause';
     env.ctx = { orderList: order, hiddenList: hidden, customList: custom, favField: 'cause', favBucket: '균열' };
     setContext('구조체', '기둥', '수직균열');
-    api.resetOptionManagerCurrent();
+    await api.resetOptionManagerCurrent(); // 2026-09-29: 앱 확인 창(await)
     assert.deepStrictEqual(order, []);
     assert.deepStrictEqual(hidden, []);
     assert.deepStrictEqual(custom, []);
@@ -346,7 +346,9 @@ testHeavyLoadItems();
 testEveryTypeHasCause();
 testAutoCheckedCause();
 testCustomOrderRules();
-testResetKeepsOrderEmpty();
-testParseCauseList();
-testComponentChangeKeepsManualCauses();
-console.log('test-defect-cause-mapping: ok');
+(async () => {
+    await testResetKeepsOrderEmpty();
+    testParseCauseList();
+    testComponentChangeKeepsManualCauses();
+    console.log('test-defect-cause-mapping: ok');
+})().catch((err) => { console.error(err); process.exit(1); });

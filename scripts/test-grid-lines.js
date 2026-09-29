@@ -354,7 +354,7 @@ if (fs.existsSync(appPath)) {
     }
     assert.ok(app.includes("if (act === 'resetFill') {\n            resetGridLocationForCurrentFloor();"), '버튼 연결');
     const resetFn = autoSec.slice(autoSec.indexOf('function resetGridLocationForCurrentFloor('), autoSec.indexOf('function applyGridAutoLocationToModal('));
-    assert.ok(resetFn.includes('confirm(') && resetFn.includes('위치칸을 비우고') && resetFn.includes('지워집니다'), '확인창: 위치칸을 비운다고 알림');
+    assert.ok(resetFn.includes('await window.appConfirm(') && resetFn.includes('위치칸을 비우고') && resetFn.includes('지워집니다'), '확인창: 위치칸을 비운다고 알림');
     assert.strictEqual((resetFn.match(/pushDefectHistory\(\)/g) || []).length, 1, '되돌리기 기록은 한 번만');
     assert.ok(resetFn.indexOf('pushDefectHistory()') < resetFn.indexOf('d.location = emptyLoc;') && resetFn.indexOf('pushDefectHistory()') < resetFn.indexOf('applyGridAutoLocationToDefect(d, fc)'), '바꾸기 전에 기록');
     assert.ok(resetFn.includes("const emptyLoc = composeDefectLocation('', fc);") && resetFn.includes('d.location = emptyLoc;'), '위치칸 비움(3종은 층 규칙대로 층만)');
@@ -501,7 +501,8 @@ if (fs.existsSync(appPath)) {
             afterGridBulkChange: (m) => { rctx._done = m; },
             composeDefectLocation: (room) => (rctx._grade3 ? `지상1층${room ? ' ' + room : ''}` : String(room || '').trim())
         });
-        vm.runInContext(`${takeFn('resetGridLocationForCurrentFloor')}\nthis.api.reset = resetGridLocationForCurrentFloor;`, rctx);
+        // 앱은 `await window.appConfirm(` (앱 확인 창) — 여기서는 같은 흐름을 동기 확인 스텁으로 돌림
+        vm.runInContext(`${takeFn('resetGridLocationForCurrentFloor').replace('await window.appConfirm(', 'confirm(')}\nthis.api.reset = resetGridLocationForCurrentFloor;`, rctx);
         pin.location = '지상1층 거실';
         inBand.location = 'X2, Y3 옛글';
         stale.location = '1F';
@@ -531,7 +532,7 @@ if (fs.existsSync(appPath)) {
     assert.ok(app.includes("if (act === 'copyFloors') { openGridCopyModal(); return; }"), '버튼 연결');
     assert.ok(takeFn('drawFloorGridOverlay').includes('resolvePendingGridScaleForCurrentFloor();'), '그릴 때 복사해 온 선을 도면 크기에 맞춤');
     assert.ok(takeFn('refreshStaleGridLocForCurrentFloor').includes('grid.pendingScale && !resolvePendingGridScaleForCurrentFloor()'), '크기 맞추기 전에는 위치 계산 미룸');
-    assert.ok(takeFn('confirmGridCopyModal').includes('confirm(') && takeFn('confirmGridCopyModal').includes('덮어쓸까요?'), '선 있는 층은 덮어쓰기 확인');
+    assert.ok(takeFn('confirmGridCopyModal').includes('await window.appConfirm(') && takeFn('confirmGridCopyModal').includes('덮어쓸까요?'), '선 있는 층은 덮어쓰기 확인');
     assert.ok(takeFn('confirmGridCopyModal').includes('개 층에 행·열 복사 완료'), '완료 알림');
     assert.ok(!/fetch|firestore|db\.|readFloorSyncBundle|\.get\(\)/i.test(takeFn('copyCurrentGridToFloors')), '복사는 서버를 읽지 않음');
     {
@@ -596,7 +597,7 @@ if (fs.existsSync(appPath)) {
     assert.ok(app.includes('data-tool="zone"') && app.includes('data-act="zoneAdd"') && app.includes('data-act="zoneRedraw"') && app.includes('data-act="zoneDel"'), '구역 도구·버튼');
     {
         const delFn = takeFn('deleteGridZone');
-        assert.strictEqual((delFn.match(/confirm\(/g) || []).length, 2, '구역 삭제: 지울지 + 선도 지울지(아니면 구역 밖으로)');
+        assert.strictEqual((delFn.match(/await window\.appConfirm\(/g) || []).length, 2, '구역 삭제: 지울지 + 선도 지울지(아니면 구역 밖으로)');
         assert.ok(delFn.includes('delete g.zoneId;') && delFn.includes('delete grid.zones;'), '선 옮기기 · 구역 없으면 키 삭제');
         assert.ok(takeFn('drawFloorGridOverlay').includes('drawGridZones(ctx, grid, zoneDraft)'), '구역은 설정 중에만 그림');
         const zst = { changed: 0 };

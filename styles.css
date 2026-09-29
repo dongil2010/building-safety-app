@@ -16310,3 +16310,54 @@ html.bsa-touch-ui button#mobileBtnGridLines#mobileBtnGridLines {
 .survey-size-preview { margin-top: 0.45rem; font-size: 0.85rem; color: #475569; }
 .survey-size-preview b { color: #0f172a; }
 .survey-size-card .modal-footer { display: flex; justify-content: flex-end; gap: 0.5rem; }
+
+/* ==========================================================================
+   앱 공용 확인·알림·입력 창 (js/shared/app-dialog.js, 2026-09-29)
+   기본 confirm/alert 대신 — 모달 카드(.modal-card) 모양 그대로. 모든 창·키패드·선택 시트보다 위
+   ========================================================================== */
+.bsa-dialog-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 2147483200;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    padding: 1rem;
+    background: rgba(15, 23, 42, 0.45);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    box-sizing: border-box;
+}
+.bsa-dialog-overlay.open { display: flex; }
+.bsa-dialog-overlay[hidden] { display: none !important; }
+.bsa-dialog-card {
+    max-width: 420px;
+    width: 100%;
+    max-height: calc(100vh - 2rem);
+    max-height: calc(100dvh - 2rem);
+}
+.bsa-dialog-card .modal-header h3 { font-size: 1.02rem; display: flex; align-items: center; gap: 0.45rem; }
+.bsa-dialog-card .modal-header h3 i { color: #2563eb; }
+.bsa-dialog-card.is-danger .modal-header h3 i { color: #dc2626; }
+.bsa-dialog-card .modal-body { overflow-y: auto; }
+.bsa-dialog-message {
+    margin: 0;
+    white-space: pre-line;
+    word-break: keep-all;
+    overflow-wrap: anywhere;
+    line-height: 1.55;
+    font-size: 0.93rem;
+    color: #1f2937;
+}
+.bsa-dialog-input { margin-top: 0.75rem; width: 100%; box-sizing: border-box; }
+.bsa-dialog-footer { display: flex; justify-content: flex-end; gap: 0.5rem; }
+.bsa-dialog-footer .btn { min-width: 5.2rem; justify-content: center; }
+.bsa-dialog-danger {
+    background: #dc2626;
+    border: 1px solid #dc2626;
+    color: #fff;
+}
+.bsa-dialog-danger:hover, .bsa-dialog-danger:focus-visible { background: #b91c1c; border-color: #b91c1c; color: #fff; }
+@media (max-width: 480px) {
+    .bsa-dialog-footer .btn { flex: 1 1 0; min-height: 44px; }
+}

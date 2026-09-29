@@ -84,7 +84,7 @@ function device(ndtData) {
 
 // 세 삭제 경로 연결 — 항목을 state에서 뺀 뒤에 부른다
 {
-    const del = extractFunction('window.deleteNdtItem = function(');
+    const del = extractFunction('window.deleteNdtItem = async function(');
     assert.ok(del.indexOf('releaseStrengthPhotosOfItems(state.currentBuildingId, removedNdt, { keepLocal: true })')
         > del.indexOf("state.ndtData[key] = (state.ndtData[key] || []).filter(x => x.id !== id);"), '항목 삭제: 뺀 뒤 정리, 사본 유지');
     assert.ok(/delete window\.state\.ndtData\[floorKey\];\n\s*\/\/[^\n]*\n\s*releaseStrengthPhotosOfItems\(bldg\.id, ndtItems\.slice\(\), \{ keepLocal: true \}\);/.test(app), '층 삭제: 사본 유지');

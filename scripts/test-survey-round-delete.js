@@ -21,7 +21,7 @@ function read(p) {
 function testSourceMarkers() {
     const app = read(appJs);
     const css = read(stylesCss);
-    assert.ok(app.includes('window.deleteSurveyRound = function'), 'deleteSurveyRound exported');
+    assert.ok(app.includes('window.deleteSurveyRound = async function'), 'deleteSurveyRound exported');
     assert.ok(app.includes('data-action="delete-round"'), 'delete-round action in UI');
     assert.ok(app.includes('moveBuildingToTrash(b, { skipUi: true })'), 'batch trash uses skipUi');
     assert.ok(app.includes('opts.skipUi'), 'moveBuildingToTrash supports skipUi');

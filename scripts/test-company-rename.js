@@ -54,7 +54,7 @@ function testAdminRename() {
         '기준인 회사 정보의 이름을 바꿔야 한다');
     assert.ok(fn.indexOf("db.collection('users').doc(window.state.uid).update({ companyName: next })") > 0);
     assert.ok(fn.indexOf('applyCompanyNameLocally(next)') > 0, '바꾼 즉시 화면·보고서 값도 맞춰야 한다');
-    assert.ok(fn.indexOf('window.confirm(') > 0, '바꾸기 전에 확인해야 한다');
+    assert.ok(fn.indexOf('await window.appConfirm(') > 0, '바꾸기 전에 확인해야 한다(앱 확인 창)');
 }
 
 function testButtonNotInIndexHtml() {

@@ -328,10 +328,16 @@ document.addEventListener('DOMContentLoaded', () => {
         return toast;
     };
 
-    /** 삭제 전 확인 팝업 — 작업창 전역에서 동일하게 사용 */
+    /**
+     * 삭제 전 확인 팝업 — 작업창 전역에서 동일하게 사용.
+     * 2026-09-29: 기본 confirm 창 대신 앱 창(js/shared/app-dialog.js). Promise<boolean> — 반드시 await 로 쓴다.
+     */
     window.confirmDelete = function(message) {
         const msg = (message && String(message).trim()) || '정말 삭제하시겠습니까?';
-        return window.confirm(msg);
+        if (window.appDialog && typeof window.appDialog.confirm === 'function') {
+            return window.appDialog.confirm(msg, { title: '삭제 확인', okText: '삭제', danger: true });
+        }
+        return Promise.resolve(window.confirm(msg));
     };
 
     let _loadingDepth = 0;
@@ -3249,7 +3255,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     return;
                 }
                 if (action === 'purge') {
-                    if (!window.confirmDelete(`'${bldg.name}'을(를) 영구 삭제할까요?\n도면·결함·첨부파일이 삭제되며 복구할 수 없습니다.`)) return;
+                    if (!await window.confirmDelete(`'${bldg.name}'을(를) 영구 삭제할까요?\n도면·결함·첨부파일이 삭제되며 복구할 수 없습니다.`)) return;
                     await window.permanentlyDeleteBuilding(bldg);
                     window.renderBuildingTrashModal();
                 }
@@ -4675,13 +4681,19 @@ document.addEventListener('DOMContentLoaded', () => {
      * @returns {boolean} true면 시스템이 앱 종료/이전 페이지로 가지 않음
      */
     function handleAppBackPress() {
+        // 앱 확인·알림 창이 떠 있으면 뒤로가기 = 취소
+        if (window.appDialog && window.appDialog.isOpen()) {
+            window.appDialog.cancel();
+            return true;
+        }
         if (!shouldHandleAppBack()) return false;
         if (tryCloseTopOverlayForBack()) return true;
         const tab = (window.state && window.state.currentTab) || 'tab-home';
         if (tab !== 'tab-home') {
-            if (window.confirm('홈으로 나가시겠습니까?')) {
-                if (typeof window.switchTab === 'function') window.switchTab('tab-home');
-            }
+            // 뒤로가기 처리는 바로 true(앱 종료 안 함), 홈 이동은 확인 뒤에
+            window.appConfirm('홈으로 나가시겠습니까?', { title: '홈으로', okText: '나가기', danger: false }).then((ok) => {
+                if (ok && typeof window.switchTab === 'function') window.switchTab('tab-home');
+            });
             return true;
         }
         return false;
@@ -6609,9 +6621,9 @@ document.addEventListener('DOMContentLoaded', () => {
     // 도면 파일에 지정할 층을 드롭다운에서 고를 때 호출. "➕ 직접 입력"을 고르면 사용자가 입력한
     // 이름을 그대로 floorCode/floorLabel로 써서, 필로티·기계실·중2층처럼 정해진 목록에 없는
     // 층 이름도 자유롭게 등록할 수 있게 한다. 취소/빈 입력이면 이전 값 그대로 둔다.
-    function applyFloorSelectValue(item, code) {
+    async function applyFloorSelectValue(item, code) {
         if (code === '__CUSTOM_FLOOR__') {
-            const typed = prompt('층 이름을 직접 입력하세요 (예: 필로티층, 기계실, 중2층):', item.floorLabel || '');
+            const typed = await window.appPrompt('층 이름을 직접 입력하세요 (예: 필로티층, 기계실, 중2층):', item.floorLabel || '');
             if (!typed || !typed.trim()) return false;
             const trimmed = typed.trim();
             item.floorCode = trimmed;
@@ -6833,11 +6845,11 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         preview.querySelectorAll('.drawing-floor-select').forEach(sel => {
-            sel.addEventListener('change', (ev) => {
+            sel.addEventListener('change', async (ev) => {
                 const idx = parseInt(ev.target.dataset.idx, 10);
                 const item = (window.selectedUploadedDrawings || [])[idx];
                 if (!item) return;
-                applyFloorSelectValue(item, ev.target.value);
+                await applyFloorSelectValue(item, ev.target.value);
                 updateNewBuildingFloorsSummary();
                 renderNewBuildingDrawingPreview();
             });
@@ -7068,7 +7080,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 window.showToast('가져올 항목을 하나 이상 선택해 주세요.', 'warning');
                 return;
             }
-            if (!confirm(`「${(sourceBldg.name || '').replace(/^🏢\s*/, '')}」에서 선택 항목을 이 건물에 병합할까요?`)) return;
+            if (!await window.appConfirm(`「${(sourceBldg.name || '').replace(/^🏢\s*/, '')}」에서 선택 항목을 이 건물에 병합할까요?`)) return;
             try {
                 await runBuildingImport(sourceBldg, targetBldg, importOpts, '가져오기');
                 targetBldg.floorsList = window.getBuildingAvailableFloors(targetBldg);
@@ -7129,7 +7141,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const similar = findSimilarBuildings(name, address);
             if (similar.length > 0) {
                 const names = similar.map(b => (b.name || '').replace(/^🏢\s*/, '')).join(', ');
-                if (!confirm(`비슷한 건축물이 이미 있습니다 (${names}).\n그래도 새로 등록하시겠습니까?`)) return;
+                if (!await window.appConfirm(`비슷한 건축물이 이미 있습니다 (${names}).\n그래도 새로 등록하시겠습니까?`)) return;
             }
 
             const date = document.getElementById('inputBuildingDate')?.value || new Date().toISOString().split('T')[0];
@@ -7150,7 +7162,7 @@ document.addEventListener('DOMContentLoaded', () => {
             safeUploadedDrawings.forEach(it => { dupCounts[it.floorCode] = (dupCounts[it.floorCode] || 0) + 1; });
             const dupCodes = Object.keys(dupCounts).filter(c => dupCounts[c] > 1);
             if (dupCodes.length > 0) {
-                const proceed = confirm(`⚠️ 같은 층으로 지정된 도면이 있습니다 (${dupCodes.join(', ')}).\n계속 저장하면 같은 층끼리는 마지막 파일만 남고 나머지는 사라집니다.\n계속하시겠습니까?`);
+                const proceed = await window.appConfirm(`⚠️ 같은 층으로 지정된 도면이 있습니다 (${dupCodes.join(', ')}).\n계속 저장하면 같은 층끼리는 마지막 파일만 남고 나머지는 사라집니다.\n계속하시겠습니까?`);
                 if (!proceed) return;
             }
 
@@ -7685,11 +7697,11 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         preview.querySelectorAll('.edit-drawing-floor-select').forEach(sel => {
-            sel.addEventListener('change', (ev) => {
+            sel.addEventListener('change', async (ev) => {
                 const idx = parseInt(ev.target.dataset.idx, 10);
                 const item = (window.selectedEditUploadedDrawings || [])[idx];
                 if (!item) return;
-                applyFloorSelectValue(item, ev.target.value);
+                await applyFloorSelectValue(item, ev.target.value);
                 renderEditDrawingPreview();
             });
         });
@@ -7722,7 +7734,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (ndtCount > 0) msg += `, 비파괴 ${ndtCount}건`;
             msg += '도 함께 삭제됩니다.';
         }
-        if (!window.confirmDelete(msg)) return;
+        if (!await window.confirmDelete(msg)) return;
 
         // 마킹·비파괴를 지우기 전에 이 층을 기기에 남긴다. 실패해도 삭제는 막지 않는다.
         let drawingDeleteSnaps = [];
@@ -7947,7 +7959,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 newFiles.forEach(it => { dupCounts[it.floorCode] = (dupCounts[it.floorCode] || 0) + 1; });
                 const dupCodes = Object.keys(dupCounts).filter(c => dupCounts[c] > 1);
                 if (dupCodes.length > 0) {
-                    const proceed = confirm(`⚠️ 같은 층으로 지정된 도면이 있습니다 (${dupCodes.join(', ')}).\n계속 저장하면 같은 층끼리는 마지막 파일만 남고 나머지는 사라집니다.\n계속하시겠습니까?`);
+                    const proceed = await window.appConfirm(`⚠️ 같은 층으로 지정된 도면이 있습니다 (${dupCodes.join(', ')}).\n계속 저장하면 같은 층끼리는 마지막 파일만 남고 나머지는 사라집니다.\n계속하시겠습니까?`);
                     if (!proceed) return;
                 }
             }
@@ -8190,11 +8202,11 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     // Delete Building Action → 휴지통(약 30일) 후 영구 삭제
     const btnDeleteBuilding = document.getElementById('btnDeleteBuilding');
     if (btnDeleteBuilding) {
-        btnDeleteBuilding.addEventListener('click', () => {
+        btnDeleteBuilding.addEventListener('click', async () => {
             const bldg = window.currentEditingBuilding;
             if (!bldg) return;
 
-            if (!window.confirmDelete(
+            if (!await window.confirmDelete(
                 `건축물 '${bldg.name}'을(를) 휴지통으로 보낼까요?\n\n` +
                 `· 약 30일간 보관되며 그 안에 복원할 수 있습니다.\n` +
                 `· 30일이 지나면 도면·결함과 함께 영구 삭제됩니다.`
@@ -10099,7 +10111,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         });
     }
 
-    function deleteSelectedNdtMarks() {
+    async function deleteSelectedNdtMarks() {
         pruneSelectedNdtIds();
         const ids = [...selectedNdtIds];
         if (!ids.length || !state.currentBuildingId) {
@@ -10109,7 +10121,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             }
             return;
         }
-        if (!window.confirmDelete(`선택한 비파괴 마킹 ${ids.length}건을 삭제할까요?`)) return;
+        if (!await window.confirmDelete(`선택한 비파괴 마킹 ${ids.length}건을 삭제할까요?`)) return;
         const key = `${state.currentBuildingId}_${state.currentFloor}`;
         const pinIds = ids.filter(id => !String(id).startsWith('disp_'));
         const dispIds = ids.filter(id => String(id).startsWith('disp_')).map(id => id.slice(5));
@@ -14733,8 +14745,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         }
     };
 
-    window.deleteNdtItem = function(id, options) {
-        if (!options?.skipConfirm && !window.confirmDelete('해당 비파괴 조사 측정 항목을 삭제하시겠습니까?')) return false;
+    window.deleteNdtItem = async function(id, options) {
+        if (!options?.skipConfirm && !await window.confirmDelete('해당 비파괴 조사 측정 항목을 삭제하시겠습니까?')) return false;
         const key = `${state.currentBuildingId}_${state.currentFloor}`;
         trackNdtDeletion(key, id);
         const removedNdt = (state.ndtData[key] || []).filter(x => x.id === id);
@@ -15628,11 +15640,11 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         scheduleNdtAutoApply();
     }
 
-    function clearRValuesInSlot(slotIdx) {
+    async function clearRValuesInSlot(slotIdx) {
         const slot = ndtStrengthSlots[slotIdx];
         if (!slot) return;
         const hasValues = (slot.readings || []).some(v => v !== '' && v !== null && v !== undefined);
-        if (hasValues && !window.confirmDelete('이 위치의 R값을 모두 지울까요?')) return;
+        if (hasValues && !await window.confirmDelete('이 위치의 R값을 모두 지울까요?')) return;
         slot.readings = [];
         const listContainer = document.getElementById(`ndtRValuesList-${slotIdx}`);
         if (listContainer) {
@@ -15702,8 +15714,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             });
         });
         container.querySelectorAll('.ndt-strength-slot-remove').forEach(el => {
-            el.addEventListener('click', (e) => {
-                if (!window.confirmDelete('이 측정 위치와 입력한 R값을 삭제할까요?')) return;
+            el.addEventListener('click', async (e) => {
+                if (!await window.confirmDelete('이 측정 위치와 입력한 R값을 삭제할까요?')) return;
                 const idx = parseInt(e.currentTarget.dataset.slot, 10);
                 const bldgForRemove = window.state.currentBuilding;
                 const removedPhotoId = ndtStrengthSlots[idx] && ndtStrengthSlots[idx].photoId;
@@ -15756,10 +15768,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (url && thumb) thumb.innerHTML = `<img src="${url}" style="width:100%; height:100%; object-fit:cover;">`;
     }
 
-    function removeStrengthSlotPhoto(slotIdx) {
+    async function removeStrengthSlotPhoto(slotIdx) {
         const slot = ndtStrengthSlots[slotIdx];
         if (!slot || !slot.photoId) return;
-        if (!window.confirmDelete('저장된 측정지 사진을 삭제할까요?')) return;
+        if (!await window.confirmDelete('저장된 측정지 사진을 삭제할까요?')) return;
         const bldg = window.state.currentBuilding;
         if (bldg && bldg.id) deleteStrengthPhotoStorage(bldg.id, slot.photoId);
         slot.photoId = null;
@@ -15886,10 +15898,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         }
     }
 
-    function removeNdtFieldPhoto(pid, floorKey, getRec, after) {
+    async function removeNdtFieldPhoto(pid, floorKey, getRec, after) {
         const rec = getRec();
         if (!rec || !pid) return;
-        if (!window.confirmDelete('이 사진을 삭제할까요?')) return;
+        if (!await window.confirmDelete('이 사진을 삭제할까요?')) return;
         setNdtRecordPhotoIds(floorKey, rec, ndtFieldPhotoIdsOf(rec).filter((p) => p !== pid));
         // 클라우드만 정리하고 이 기기 사본은 남긴다(되돌리기·백업 되살리기 대비). 다른 항목이 같은 사진을 쓰면 안 지운다.
         releaseStrengthPhotosOfItems(window.state.currentBuildingId, [{ photoIds: [pid] }], { keepLocal: true });
@@ -17519,7 +17531,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         }
 
         if (btnDelete) {
-            btnDelete.addEventListener('click', () => {
+            btnDelete.addEventListener('click', async () => {
                 const pinId = document.getElementById('ndtPinId')?.value;
                 if (!pinId) {
                     closeNdtModal();
@@ -17527,7 +17539,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 }
                 window.clearTimeout(window._ndtAutoApplyTimer);
                 window._ndtAutoApplyTimer = null;
-                if (window.deleteNdtItem(pinId)) {
+                if (await window.deleteNdtItem(pinId)) {
                     closeNdtModal();
                 }
             });
@@ -18198,8 +18210,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         ensureNdtDispStationTransferUi(group);
     }
 
-    window.deleteNdtDisplacementPoint = function(groupId, pointId, options) {
-        if (!options?.skipConfirm && !window.confirmDelete('해당 측정 지점을 삭제하시겠습니까?')) return;
+    window.deleteNdtDisplacementPoint = async function(groupId, pointId, options) {
+        if (!options?.skipConfirm && !await window.confirmDelete('해당 측정 지점을 삭제하시겠습니까?')) return;
         const key = `${state.currentBuildingId}_${state.currentFloor}`;
         const groups = state.ndtDisplacementGroups[key] || [];
         const group = groups.find(g => g.id === groupId);
@@ -18222,8 +18234,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         renderNdtSummaryTable();
     };
 
-    window.deleteNdtDisplacementGroup = function(groupId, options) {
-        if (!options?.skipConfirm && !window.confirmDelete('해당 측정 구역과 포함된 모든 지점을 삭제하시겠습니까?')) return;
+    window.deleteNdtDisplacementGroup = async function(groupId, options) {
+        if (!options?.skipConfirm && !await window.confirmDelete('해당 측정 구역과 포함된 모든 지점을 삭제하시겠습니까?')) return;
         const key = `${state.currentBuildingId}_${state.currentFloor}`;
         const removedGroups = (state.ndtDisplacementGroups[key] || []).filter(g => g.id === groupId);
         state.ndtDisplacementGroups[key] = (state.ndtDisplacementGroups[key] || []).filter(g => g.id !== groupId);
@@ -19103,7 +19115,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
      * 점검 연도/기간만 다음 회차로 올린다. 기존 결함은 전회차로 분류된다.
      * (결함을 복제하지 않음: 같은 건물 데이터를 이어 쓰는 방식)
      */
-    window.startNextSurveyRound = function() {
+    window.startNextSurveyRound = async function() {
         const bldg = state.currentBuilding;
         if (!bldg || !state.currentBuildingId) {
             window.showToast('건물을 먼저 선택해 주세요.', 'warning');
@@ -19127,7 +19139,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             return;
         }
 
-        if (!window.confirm(
+        if (!await window.appConfirm(
             `다음 회차 점검을 시작할까요?\n\n` +
             `· 현재: ${curYear} ${curPeriod}\n` +
             `· 다음: ${next.year} ${next.period}\n\n` +
@@ -19195,7 +19207,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const defectCount = countBuildingDefects(sourceBldg);
         const siteLabel = normalizeSiteVaultKey(sourceBldg.name);
 
-        if (!window.confirm(
+        if (!await window.appConfirm(
             `다음 회차 점검 현장을 새로 만들까요?\n\n` +
             `· 현재: ${curYear} ${curPeriod} (${sourceBldg.name || '현장'})\n` +
             `· 새 현장: ${next.year} ${next.period}\n\n` +
@@ -19398,7 +19410,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
      * 다른 회차는 유지. 마지막 회차도 삭제 가능(확인 후 빈 회차 목록 → 회차 추가).
      * 동기화: trashedAt + _pendingCloudSync → mergeBuildingTrashState로 타 기기에 반영, 복원 전엔 재등장하지 않음.
      */
-    window.deleteSurveyRound = function(siteKey, roundKey) {
+    window.deleteSurveyRound = async function(siteKey, roundKey) {
         if (!siteKey || !roundKey) return false;
         const members = getSiteBuildingsSorted(siteKey).filter(
             (b) => getBuildingSurveyRoundKey(b) === roundKey
@@ -19418,7 +19430,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const lastRoundHint = remaining.length === 0
             ? '\n\n※ 이 현장의 마지막 회차입니다. 삭제 후 회차 목록이 비며, 「회차 추가하기」로 다시 만들 수 있습니다.'
             : '';
-        if (!window.confirmDelete(
+        if (!await window.confirmDelete(
             `회차 「${roundLabel}」을(를) 휴지통으로 보낼까요?\n\n` +
             `· 현장: ${siteKey}\n` +
             `· 점검(동) ${members.length}개 · 결함 ${defectCount}건` +
@@ -19613,7 +19625,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const dongHint = sources.length > 1
             ? `\n· 포함 동: ${sources.map(formatDongRowLabel).join(', ')} (${sources.length}개 동 모두 복사)`
             : '';
-        if (!window.confirm(
+        if (!await window.appConfirm(
             `회차를 추가할까요?\n\n` +
             `· 현장: ${siteKey}\n` +
             `· 기준: ${formatSurveyRoundLabel(latestKey)}\n` +
@@ -19746,7 +19758,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         }
     }
 
-    function executeSurveyRoundReassign() {
+    async function executeSurveyRoundReassign() {
         const bldg = state.currentBuilding;
         if (!bldg) return;
         const fromKey = `${document.getElementById('surveyReassignFromYear').value}_${document.getElementById('surveyReassignFromPeriod').value}`;
@@ -19764,7 +19776,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const fromLabel = fromKey.replace('_', ' ');
         const toLabel = toKey.replace('_', ' ');
         const scopeLabel = wholeBuilding ? '이 건물 전체 층' : `${state.currentFloor}만`;
-        const ok = window.confirm(`"${fromLabel}"로 등록된 결함 ${count}건을 "${toLabel}"(으)로 재지정합니다.\n대상: ${scopeLabel}\n\n이 작업은 되돌릴 수 없습니다. 계속할까요?`);
+        const ok = await window.appConfirm(`"${fromLabel}"로 등록된 결함 ${count}건을 "${toLabel}"(으)로 재지정합니다.\n대상: ${scopeLabel}\n\n이 작업은 되돌릴 수 없습니다. 계속할까요?`);
         if (!ok) return;
 
         const keys = getSurveyReassignScopeKeys(bldg, wholeBuilding);
@@ -19802,7 +19814,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         updateSurveyReassignPreview();
     }
 
-    function cleanupOverlappingRoundMarks() {
+    async function cleanupOverlappingRoundMarks() {
         const bldg = state.currentBuilding;
         if (!bldg) {
             window.showToast('먼저 건물을 선택해 주세요.', 'warning', 4000);
@@ -19810,7 +19822,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         }
         const wholeBuilding = !!document.getElementById('surveyReassignScopeBuilding')?.checked;
         const scopeLabel = wholeBuilding ? '이 건물 전체 층' : `${state.currentFloor || '현재 층'}만`;
-        const ok = window.confirm(
+        const ok = await window.appConfirm(
             `같은 번호가 가까이 빨강(전회차)과 파랑(현회차)으로 겹친 마킹 중, 파랑만 지웁니다.\n대상: ${scopeLabel}\n\n회차 값은 바꾸지 않습니다.\n다시 조사해서 일부러 찍은 파랑 핀이 전회차와 120px 안이면 같이 지워질 수 있습니다. 해당 층 실행 취소로 되돌릴 수 있습니다.`
         );
         if (!ok) return;
@@ -20401,7 +20413,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         }
         const toKey = (bldg.latestSurveyRoundKey) || getCurrentSurveyRoundKey();
         const toLabel = toKey.replace('_', ' ');
-        if (!window.confirm(
+        if (!await window.appConfirm(
             `모든 층의 전회차 조사항목 ${count}건을 현회차(${toLabel})로 가져올까요?\n\n` +
             `· 전회차 체크 해제\n` +
             `· 조사 회차를 현회차로 변경\n` +
@@ -20438,7 +20450,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     }
     window.promotePreviousRoundToCurrentBulk = promotePreviousRoundToCurrentBulk;
 
-    function clearCarriedOverBulk() {
+    async function clearCarriedOverBulk() {
         const bldg = state.currentBuilding;
         if (!bldg || !state.currentBuildingId) {
             window.showToast('건물을 먼저 선택하세요.', 'warning', 3500);
@@ -20454,7 +20466,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             return;
         }
 
-        const mode = window.prompt(
+        const mode = await window.appPrompt(
             `전회차(이월) 체크 일괄 해제\n\n· 현재 층(${state.currentFloor}): ${floorCount}건\n· 건물 전체: ${buildingCount}건\n\n1 = 현재 층만\n2 = 건물 전체\n(취소하려면 빈칸)`,
             '1'
         );
@@ -20472,7 +20484,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             return;
         }
         const scopeLabel = wholeBuilding ? '건물 전체 층' : `현재 층(${state.currentFloor})`;
-        if (!window.confirm(`${scopeLabel}에서 전회차 체크 ${count}건을 해제할까요?\n\n결함 내용·도면 위치는 그대로 두고,「전회차」표시만 끕니다.`)) {
+        if (!await window.appConfirm(`${scopeLabel}에서 전회차 체크 ${count}건을 해제할까요?\n\n결함 내용·도면 위치는 그대로 두고,「전회차」표시만 끕니다.`)) {
             return;
         }
 
@@ -20615,7 +20627,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         return out;
     }
 
-    window.clearMapUnregisteredDefects = function() {
+    window.clearMapUnregisteredDefects = async function() {
         if (!state.currentBuildingId) return;
         const targets = collectMapUnregisteredTargetsForContext();
         if (!targets.length) {
@@ -20626,7 +20638,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const scopeLabel = exterior
             ? '외부 전체 전차 미등록'
             : `현재 층(${state.currentFloor}) 전차 미등록`;
-        if (!window.confirmDelete(`${scopeLabel} ${targets.length}건을 모두 삭제할까요? (되돌리기로 복원 가능)`)) return;
+        if (!await window.confirmDelete(`${scopeLabel} ${targets.length}건을 모두 삭제할까요? (되돌리기로 복원 가능)`)) return;
         pushDefectHistory();
         const byKey = new Map();
         targets.forEach((t) => {
@@ -25326,8 +25338,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             });
         });
         list.querySelectorAll('.defect-crack-measure-del').forEach(btn => {
-            btn.addEventListener('click', () => {
-                if (!window.confirmDelete('이 규격(폭·길이·개수) 행을 삭제할까요?')) return;
+            btn.addEventListener('click', async () => {
+                if (!await window.confirmDelete('이 규격(폭·길이·개수) 행을 삭제할까요?')) return;
                 const row = btn.closest('.defect-crack-measure-row');
                 const idx = row ? parseInt(row.getAttribute('data-row-idx') || '0', 10) : -1;
                 const allRows = readCrackMeasureRowsFromDom(list);
@@ -26431,13 +26443,13 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const delMarkBtn = document.getElementById('btnDeleteNdtCrackGaugeMark');
         if (delMarkBtn && !delMarkBtn.dataset.bound) {
             delMarkBtn.dataset.bound = '1';
-            delMarkBtn.addEventListener('click', () => {
+            delMarkBtn.addEventListener('click', async () => {
                 const id = window._ndtCrackMonitorDefectId;
                 const rec = id ? findCrackMonitorDefectRecord(id, window._ndtCrackMonitorFloorCode) : null;
                 if (!rec || rec.kind !== 'ndt') return;
                 if (rec.floorCode !== state.currentFloor) return;
                 if (typeof window.deleteNdtItem !== 'function') return;
-                if (!window.deleteNdtItem(id)) return;
+                if (!(await window.deleteNdtItem(id))) return;
                 window.clearTimeout(window._ndtCrackMonitorSaveTimer);
                 window._ndtCrackMonitorDefectId = null;
                 window._ndtCrackMonitorFloorCode = null;
@@ -27291,9 +27303,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
     const defectComponentSelect = document.getElementById('defectComponent');
     if (defectComponentSelect) {
-        defectComponentSelect.addEventListener('change', (e) => {
+        defectComponentSelect.addEventListener('change', async (e) => {
             if (e.target.value === '__ADD_CUSTOM_COMPONENT__') {
-                const newComp = prompt('추가하실 부재 명칭을 입력하세요 (예: 옹벽):');
+                const newComp = await window.appPrompt('추가하실 부재 명칭을 입력하세요 (예: 옹벽):');
                 const cat = document.getElementById('defectCategory')?.value || '구조체';
                 if (newComp && newComp.trim()) {
                     const trimmed = newComp.trim();
@@ -27324,9 +27336,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
     const defectTypeSelect = document.getElementById('defectType');
     if (defectTypeSelect) {
-        defectTypeSelect.addEventListener('change', (e) => {
+        defectTypeSelect.addEventListener('change', async (e) => {
             if (e.target.value === '__ADD_CUSTOM__') {
-                const newType = prompt('추가하실 결함 종류를 입력하세요 (예: 에어컨 배관 이격):');
+                const newType = await window.appPrompt('추가하실 결함 종류를 입력하세요 (예: 에어컨 배관 이격):');
                 const cat = document.getElementById('defectCategory')?.value || '구조체';
                 if (newType && newType.trim()) {
                     const trimmed = newType.trim();
@@ -27362,9 +27374,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
     const defectCauseSelect = document.getElementById('defectCause');
     if (defectCauseSelect) {
-        defectCauseSelect.addEventListener('change', (e) => {
+        defectCauseSelect.addEventListener('change', async (e) => {
             if (e.target.value === '__ADD_CUSTOM_CAUSE__') {
-                const newCause = prompt('추가하실 결함 원인 추정 내용을 입력하세요 (예: 지하수관 수압 유입):');
+                const newCause = await window.appPrompt('추가하실 결함 원인 추정 내용을 입력하세요 (예: 지하수관 수압 유입):');
                 const dType = getDefectComboValue(
                     document.getElementById('defectType'),
                     document.getElementById('defectTypeInput')
@@ -27795,7 +27807,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         }
     }
 
-    function deleteOptionItem(item, isPreset) {
+    async function deleteOptionItem(item, isPreset) {
         const ctx = getOptionManagerContext();
         if (!ctx) return;
 
@@ -27806,7 +27818,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         }
 
         const label = ctx.labelFor ? ctx.labelFor(item) : item;
-        if (!window.confirmDelete(`「${label}」 항목을 삭제할까요?`)) return;
+        if (!await window.confirmDelete(`「${label}」 항목을 삭제할까요?`)) return;
 
         if (isPreset) {
             if (!ctx.hiddenList.includes(item)) ctx.hiddenList.push(item);
@@ -27824,13 +27836,13 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         ctx.refresh();
     }
 
-    function resetOptionManagerCurrent() {
+    async function resetOptionManagerCurrent() {
         const field = window._optionManagerField;
         if (!field) return;
         const ctx = getOptionManagerContext();
         if (!ctx) return;
 
-        const ok = confirm('현재 항목을 앱 기본 세팅으로 되돌릴까요?\n(숨긴 항목 복원 · 직접 추가한 항목 삭제 · 순서는 기본 순서)');
+        const ok = await window.appConfirm('현재 항목을 앱 기본 세팅으로 되돌릴까요?\n(숨긴 항목 복원 · 직접 추가한 항목 삭제 · 순서는 기본 순서)');
         if (!ok) return;
 
         if (Array.isArray(ctx.hiddenList)) ctx.hiddenList.length = 0;
@@ -27907,8 +27919,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         window.state.defectCauseAutoCheck = true;
     }
 
-    function resetOptionManagerAll() {
-        const ok = confirm('부재·결함종류·발생원인 전체를 앱 기본 세팅으로 되돌릴까요?\n(숨긴 항목 복원 · 직접 추가 전부 삭제 · 순서는 기본 순서)');
+    async function resetOptionManagerAll() {
+        const ok = await window.appConfirm('부재·결함종류·발생원인 전체를 앱 기본 세팅으로 되돌릴까요?\n(숨긴 항목 복원 · 직접 추가 전부 삭제 · 순서는 기본 순서)');
         if (!ok) return;
 
         applyBuiltInDefectPinDefaults();
@@ -28565,8 +28577,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
         const btnReset = document.getElementById('btnResetStyleColors');
         if (btnReset) {
-            btnReset.addEventListener('click', () => {
-                if (!confirm('모든 색상/크기/모양 설정을 기본값으로 초기화하시겠습니까?\n(저장을 눌러야 반영됩니다)')) return;
+            btnReset.addEventListener('click', async () => {
+                if (!await window.appConfirm('모든 색상/크기/모양 설정을 기본값으로 초기화하시겠습니까?\n(저장을 눌러야 반영됩니다)')) return;
                 state.styleColors = {};
                 state.styleColorsPaletteVersion = STYLE_COLORS_PALETTE_VERSION;
                 state.styleSizes = {};
@@ -29121,10 +29133,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         return hits;
     }
 
-    function deleteSelectedDefects() {
+    async function deleteSelectedDefects() {
         const ids = [...selectedDefectIds];
         if (!ids.length || !state.currentBuildingId) return;
-        if (!window.confirmDelete(`선택한 결함 ${ids.length}건을 삭제할까요? (되돌리기로 복원 가능)`)) return;
+        if (!await window.confirmDelete(`선택한 결함 ${ids.length}건을 삭제할까요? (되돌리기로 복원 가능)`)) return;
         const byKey = new Map();
         ids.forEach((id) => {
             const located = (typeof findDefectFloorKeyById === 'function') ? findDefectFloorKeyById(id) : null;
@@ -31426,6 +31438,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (target.closest('#defectModal .defect-drawer-card')) return true;
         // 폭·길이·개수 키패드는 body에 붙어 있어 창 밖으로 보인다 — 키를 누를 때 창이 닫히던 문제(2026-09-29)
         if (isMeasureKeypadTarget(target)) return true;
+        // 앱 확인 창(삭제 확인 등)도 body에 붙는다 — 확인/취소 누를 때 결함 창이 닫히지 않게
+        if (target.closest('#bsaAppDialog')) return true;
         if (target.closest('#defectMarkingMemberFloat')) return true;
         if (target.closest('#mobileMapDock')) return true;
         if (target.closest('.defect-list-item')) return true; // 목록에서 다른 결함 열기
@@ -31930,8 +31944,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         }
     };
 
-    window.removePendingPhoto = function(idx) {
-        if (!window.confirmDelete('이 사진을 삭제할까요?')) return;
+    window.removePendingPhoto = async function(idx) {
+        if (!await window.confirmDelete('이 사진을 삭제할까요?')) return;
         if (window._pendingPhotos) {
             window._pendingPhotos.splice(idx, 1);
             window._defectPhotosDirty = true;
@@ -32502,10 +32516,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
     const btnDeleteDefect = document.getElementById('btnDeleteDefect');
     if (btnDeleteDefect) {
-        btnDeleteDefect.addEventListener('click', () => {
+        btnDeleteDefect.addEventListener('click', async () => {
             const pinId = document.getElementById('defectPinId')?.value;
             if (pinId) {
-                if (window.deleteDefectById(pinId)) {
+                if (await window.deleteDefectById(pinId)) {
                     closeDefectModal({ discardPending: true });
                 }
             } else {
@@ -33305,7 +33319,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             + `· 내용·사진은 각 결함에 그대로 남습니다.\n`
             + `· 비는 번호(${plan.others.map((u) => mergeNoLabel(u.main)).join(', ')})는 당기지 않습니다(필요하면 「빈 칸 땡기기」).\n`
             + `· 되돌리기 또는 「통합 해제」로 되돌릴 수 있습니다.`;
-        if (!window.confirm(msg)) return;
+        if (!await window.appConfirm(msg, { title: '결함 통합', okText: '통합', danger: false })) return;
         pushDefectHistory();
         const res = api.applyMerge(list, plan, {
             boxOf: (unit) => {
@@ -33364,7 +33378,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const msg = `NO.${baseLabel}에 통합된 마킹 ${plan.pairs.length}개(원래 ${origs.join(', ')})를 원래 번호·위치로 되돌릴까요?\n\n`
             + '· 원래 번호를 이미 다른 마킹이 쓰고 있으면 가장 작은 빈 번호를 씁니다.\n'
             + '· 되돌리기로 다시 통합 상태로 돌아갈 수 있습니다.';
-        if (!window.confirm(msg)) return;
+        if (!await window.appConfirm(msg, { title: '통합 해제', okText: '해제', danger: false })) return;
         pushDefectHistory();
         const removeIds = new Set();
         const restored = api.applyUnmerge(list, plan, {
@@ -34491,7 +34505,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             </div>`;
     }
 
-    function onGridPanelClick(e) {
+    async function onGridPanelClick(e) {
         const btn = e.target.closest('button');
         if (!btn) return;
         const ge = gridEditState();
@@ -34556,7 +34570,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             return;
         }
         if (act === 'delGroup' && eg) {
-            if (eg.lines.length && !confirm(`이 그룹의 선 ${eg.lines.length}개를 모두 지울까요?`)) return;
+            if (eg.lines.length && !await window.appConfirm(`이 그룹의 선 ${eg.lines.length}개를 모두 지울까요?`)) return;
             grid.groups = grid.groups.filter((g) => g.id !== eg.id);
             ge.editGroupId = null;
             if (ge.sel && ge.sel.groupId === eg.id) ge.sel = null;
@@ -34565,7 +34579,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         }
         if (act === 'renumber' && eg) {
             if (eg.lines.length < 2) return;
-            if (!confirm(`이 그룹 선 ${eg.lines.length}개의 번호를 지금 보이는 위치 순서(${eg.axis === 'row' ? '위→아래' : '왼→오른'})로 다시 매길까요?\n개별 이름을 준 선은 이름 그대로입니다. 이미 넣은 마킹 위치는 「이 층 마킹에 위치 채우기」로 다시 맞춥니다.`)) return;
+            if (!await window.appConfirm(`이 그룹 선 ${eg.lines.length}개의 번호를 지금 보이는 위치 순서(${eg.axis === 'row' ? '위→아래' : '왼→오른'})로 다시 매길까요?\n개별 이름을 준 선은 이름 그대로입니다. 이미 넣은 마킹 위치는 「이 층 마킹에 위치 채우기」로 다시 맞춥니다.`)) return;
             G.renumberBySpatialOrder(eg, gctx);
             gridChanged();
             window.showToast?.('위치 순서로 번호를 다시 매겼습니다.', 'success', 2000);
@@ -34588,7 +34602,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         }
         if (act === 'clearAll') {
             const n = grid.groups.reduce((s, g) => s + g.lines.length, 0);
-            if (!n || !confirm(`이 층의 행·열 선 ${n}개를 모두 지울까요?`)) return;
+            if (!n || !await window.appConfirm(`이 층의 행·열 선 ${n}개를 모두 지울까요?`)) return;
             grid.groups = [];
             ge.sel = null;
             ge.editGroupId = null;
@@ -34972,7 +34986,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     }
 
     /** 「이 층 마킹에 위치 채우기」 — 행·열 칸 이름이 없는 마킹만 채움(상세 위치 그대로) */
-    function fillGridLocationForCurrentFloor() {
+    async function fillGridLocationForCurrentFloor() {
         if (!currentGridHasLines()) {
             window.showToast?.('먼저 행·열 선을 그어 주세요.', 'info', 2000);
             return;
@@ -34986,7 +35000,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             window.showToast?.('채울 마킹이 없습니다. (이미 행·열 위치가 있습니다)', 'info', 2500);
             return;
         }
-        if (!confirm(`이 층 마킹 ${n}개에 행·열 위치를 채웁니다.\n행·열 위치가 없는 마킹만 채우고, 상세 위치(실 이름)는 그대로 둡니다.\n(되돌리기로 취소할 수 있습니다)`)) return;
+        if (!await window.appConfirm(`이 층 마킹 ${n}개에 행·열 위치를 채웁니다.\n행·열 위치가 없는 마킹만 채우고, 상세 위치(실 이름)는 그대로 둡니다.\n(되돌리기로 취소할 수 있습니다)`)) return;
         if (typeof pushDefectHistory === 'function') pushDefectHistory();
         let done = 0;
         list.forEach((d) => { if (applyGridAutoLocationToDefect(d, null, { onlyIfEmpty: true })) done += 1; });
@@ -34999,7 +35013,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
      * 선 밖은 보통 규칙(~X1 / X7~). 되돌리기 한 번으로 전체 취소.
      * (2026-09-28 e59845f에서 실 이름을 지키도록 바뀌며 위치칸을 안 비우게 됐던 것을 사용자 요청으로 되돌림)
      */
-    function resetGridLocationForCurrentFloor() {
+    async function resetGridLocationForCurrentFloor() {
         if (!currentGridHasLines()) {
             window.showToast?.('먼저 행·열 선을 그어 주세요.', 'info', 2000);
             return;
@@ -35015,7 +35029,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         }
         const withText = list.filter((d) => String(d.location || '').trim() !== emptyLoc).length;
         const floorNote = emptyLoc ? `(3종 시설물: 위치칸에는 층 「${emptyLoc}」만 남깁니다)\n` : '';
-        if (!confirm(`이 층 마킹 ${list.length}개의 위치칸을 비우고 행·열 위치를 지금 선 기준으로 다시 넣습니다.\n`
+        if (!await window.appConfirm(`이 층 마킹 ${list.length}개의 위치칸을 비우고 행·열 위치를 지금 선 기준으로 다시 넣습니다.\n`
             + `위치칸에 적힌 글(실 이름·층 이름·예전 위치) ${withText}개가 지워집니다.\n${floorNote}(되돌리기로 한 번에 취소할 수 있습니다)`)) return;
         if (typeof pushDefectHistory === 'function') pushDefectHistory();
         let done = 0;
@@ -35196,15 +35210,15 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     }
 
     /** 구역 삭제 — 안의 선은 같이 지우거나(확인) 구역 밖 선으로 옮김(취소) */
-    function deleteGridZone(grid, z) {
+    async function deleteGridZone(grid, z) {
         const G = gridLib();
         const ge = gridEditState();
         const zg = (grid.groups || []).filter((g) => g.zoneId === z.id);
         const n = zg.reduce((sum, g) => sum + (g.lines || []).length, 0);
-        if (!confirm(`구역 「${z.name}」을(를) 지울까요?`)) return;
+        if (!await window.appConfirm(`구역 「${z.name}」을(를) 지울까요?`)) return;
         let delLines = false;
         if (n) {
-            delLines = confirm(`구역 「${z.name}」 안의 행·열 선 ${n}개도 같이 지울까요?\n\n확인: 선도 삭제\n취소: 선은 남기고 구역 밖 선(구역 없음)으로 옮김`);
+            delLines = await window.appConfirm(`구역 「${z.name}」 안의 행·열 선 ${n}개도 같이 지울까요?\n\n선도 삭제: 선까지 지움\n선은 남기기: 구역 밖 선(구역 없음)으로 옮김`, { title: '구역 안 선', okText: '선도 삭제', cancelText: '선은 남기기', danger: true });
         }
         if (delLines) grid.groups = grid.groups.filter((g) => g.zoneId !== z.id);
         else zg.forEach((g) => { delete g.zoneId; });
@@ -35419,7 +35433,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         wrap.classList.add('open');
     }
 
-    function confirmGridCopyModal(wrap) {
+    async function confirmGridCopyModal(wrap) {
         const floors = listGridCopyTargetFloors();
         const byCode = new Map(floors.map((f) => [f.floorCode, f]));
         const codes = Array.from(wrap.querySelectorAll('input[data-gc-floor]'))
@@ -35431,7 +35445,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (withLines.length) {
             const names = withLines.slice(0, 6).map((f) => `${f.floorLabel}(선 ${f.lineCount}개)`).join(', ')
                 + (withLines.length > 6 ? ` 외 ${withLines.length - 6}개 층` : '');
-            if (!confirm(`고른 층 중 ${withLines.length}개 층에 이미 행·열 선이 있습니다.\n${names}\n\n덮어쓰면 그 층의 선·그룹·이름·폭이 모두 지금 층 것으로 바뀝니다. 덮어쓸까요?`)) return;
+            if (!await window.appConfirm(`고른 층 중 ${withLines.length}개 층에 이미 행·열 선이 있습니다.\n${names}\n\n덮어쓰면 그 층의 선·그룹·이름·폭이 모두 지금 층 것으로 바뀝니다. 덮어쓸까요?`)) return;
         }
         const res = copyCurrentGridToFloors(codes);
         wrap.classList.remove('open');
@@ -35446,7 +35460,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
     // 도면 탭 단축키: D=핀 마킹, A=영역 마킹, Esc=수정창 닫기+선택모드
     // 비파괴 탭: D=NDT 마킹, Esc=등록창 닫기+이동모드
-    window.addEventListener('keydown', (e) => {
+    window.addEventListener('keydown', async (e) => {
         const tag = (e.target && e.target.tagName) ? e.target.tagName.toLowerCase() : '';
         const typing = (tag === 'input' || tag === 'textarea' || tag === 'select' || e.target?.isContentEditable);
         const k = e.key ? e.key.toLowerCase() : '';
@@ -35483,7 +35497,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     if (pinId) {
                         window.clearTimeout(window._ndtAutoApplyTimer);
                         window._ndtAutoApplyTimer = null;
-                        if (window.deleteNdtItem(pinId)) {
+                        if (await window.deleteNdtItem(pinId)) {
                             selectedNdtIds.delete(pinId);
                             updateNdtSelectionBar();
                             closeNdtModal();
@@ -35514,7 +35528,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             if (typeof isDefectModalOpen === 'function' && isDefectModalOpen()) {
                 const pinId = document.getElementById('defectPinId')?.value;
                 if (pinId) {
-                    if (window.deleteDefectById(pinId)) {
+                    if (await window.deleteDefectById(pinId)) {
                         selectedDefectIds.delete(pinId);
                         updateMapSelectionBar();
                         closeDefectModal({ discardPending: true });
@@ -35861,7 +35875,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
     const btnClearPinsEl = document.getElementById('btnClearPins');
     if (btnClearPinsEl) {
-        btnClearPinsEl.addEventListener('click', () => {
+        btnClearPinsEl.addEventListener('click', async () => {
             if (!state.currentBuildingId) return;
             const key = `${state.currentBuildingId}_${state.currentFloor}`;
             const defects = state.defects[key] || [];
@@ -35869,7 +35883,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 window.showToast('현재 층에 등록된 결함이 없습니다.', 'info');
                 return;
             }
-        if (!window.confirmDelete(`현재 층의 결함 ${defects.length}건을 모두 삭제할까요? (되돌리기로 복원 가능)`)) return;
+        if (!await window.confirmDelete(`현재 층의 결함 ${defects.length}건을 모두 삭제할까요? (되돌리기로 복원 가능)`)) return;
 
             closeDefectModal({ discardPending: true });
             pushDefectHistory();
@@ -36181,10 +36195,11 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         // 미표기(전차 미등록)가 있으면 조사내용은 유지하고 캐드 위치만 붙인다.
         // 전체 교체 확인을 띄우면 미표기 데이터가 지워진다.
         if (unmarkedList.length === 0 && existingCount > 0) {
-            replaceMode = confirm(
+            replaceMode = await window.appConfirm(
                 `현재 층(${state.currentFloor})에 이미 ${existingCount}개의 결함이 등록되어 있습니다.\n\n` +
-                `[확인] : 기존 결함을 모두 비우고 캐드 핀으로 새로 교체\n` +
-                `[취소] : 기존은 두고, 조사내용은 유지하고, 같은 번호는 캐드 위치로 옮김(엑셀 먼저 불러온 경우 포함). 새 번호만 추가`
+                `[모두 교체] : 기존 결함을 모두 비우고 캐드 핀으로 새로 교체\n` +
+                `[기존 유지] : 기존은 두고, 조사내용은 유지하고, 같은 번호는 캐드 위치로 옮김(엑셀 먼저 불러온 경우 포함). 새 번호만 추가`,
+                { title: 'CAD 가져오기', okText: '모두 교체', cancelText: '기존 유지', danger: true }
             );
         } else if (unmarkedList.length > 0 && placedOnlyCount > 0) {
             window.showToast?.(
@@ -36617,7 +36632,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     
     const btnCompactMarkingGaps = document.getElementById('btnCompactMarkingGaps');
     if (btnCompactMarkingGaps) {
-        btnCompactMarkingGaps.addEventListener('click', () => {
+        btnCompactMarkingGaps.addEventListener('click', async () => {
             const key = `${state.currentBuildingId}_${state.currentFloor}`;
             const list = getFloorDefectsForNumbering(key);
             const exteriorPool = (typeof isExteriorFloorCode === 'function')
@@ -36630,7 +36645,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             const confirmMsg = exteriorPool
                 ? '외부 도면(외부1·2·…) 전체를 한 번호로 보고 빈 칸을 뒤에서부터 앞으로 땡길까요?\n(한 도면의 빈 번호는 다른 외부 도면에 있을 수 있습니다.)'
                 : '현재 층의 마킹번호 빈 칸을 뒤에서부터 앞으로 땡길까요?\n(예: 1번 삭제 후 2,3,4 → 1,2,3 / 14,15,17,18 → 14,15,16,17)';
-            if (!window.confirm(confirmMsg)) return;
+            if (!await window.appConfirm(confirmMsg)) return;
             if (typeof pushDefectHistory === 'function') pushDefectHistory();
             const result = compactDefectMarkingNumberGaps(list);
             if (!result || !result.moved) {
@@ -36674,7 +36689,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             const msg = toArea
                 ? '이 핀 마킹을 영역(사각형) 마킹으로 바꿀까요?\n(중심 tip 기준으로 기본 영역이 생깁니다. 이후 크기·위치는 도면에서 조절하세요.)'
                 : '이 영역 마킹을 핀(화살표) 마킹으로 바꿀까요?\n(영역 중심이 tip이 됩니다.)';
-            if (!window.confirm(msg)) return;
+            if (!await window.appConfirm(msg)) return;
             if (typeof pushDefectHistory === 'function') pushDefectHistory();
             const ok = toArea ? convertDefectPinToArea(defect) : convertDefectAreaToPin(defect);
             if (!ok) {
@@ -38387,8 +38402,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
         const btnReset = document.getElementById('btnResetSurveyColumns');
         if (btnReset) {
-            btnReset.addEventListener('click', () => {
-                if (!confirm('컬럼 순서와 이름을 기본값으로 초기화하시겠습니까?')) return;
+            btnReset.addEventListener('click', async () => {
+                if (!await window.appConfirm('컬럼 순서와 이름을 기본값으로 초기화하시겠습니까?')) return;
                 resetSurveyColumns();
             });
         }
@@ -39334,8 +39349,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         persistCurrentBuildingLocationMapLegend();
     };
 
-    window.removeLocationMapLegendItem = function(idx) {
-        if (!window.confirmDelete('이 범례 항목을 삭제할까요?')) return;
+    window.removeLocationMapLegendItem = async function(idx) {
+        if (!await window.confirmDelete('이 범례 항목을 삭제할까요?')) return;
         const items = ensureLocationMapLegendInitialized();
         items.splice(idx, 1);
         renderLocationMapLegendModalList();
@@ -39368,8 +39383,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         });
 
         const btnReset = document.getElementById('btnResetLocationMapLegend');
-        if (btnReset) btnReset.addEventListener('click', () => {
-            if (!confirm('범례를 기본값으로 초기화하시겠습니까? (내용, 위치, 크기 모두 초기화됩니다)')) return;
+        if (btnReset) btnReset.addEventListener('click', async () => {
+            if (!await window.appConfirm('범례를 기본값으로 초기화하시겠습니까? (내용, 위치, 크기 모두 초기화됩니다)')) return;
             applyBuildingLocationMapLegend(state.currentBuilding, { forceDefault: true });
             renderLocationMapLegendModalList();
             saveStateToLocalStorage();
@@ -42237,7 +42252,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             if (reportIssues.length) {
                 console.warn('[보고서 점검]', reportIssues);
                 const lines = health.describeReportIssues(reportIssues, getFloorLabel);
-                const go = window.confirm('보고서를 만들기 전에 확인이 필요한 데이터가 있습니다.\n\n'
+                const go = await window.appConfirm('보고서를 만들기 전에 확인이 필요한 데이터가 있습니다.\n\n'
                     + lines.join('\n')
                     + '\n\n그래도 한글 파일을 만들까요?\n(취소하면 만들지 않습니다)');
                 if (!go) return;
@@ -47483,8 +47498,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         }
     }
 
-    window.deleteDefectById = function(id, options) {
-        if (!options?.skipConfirm && !window.confirmDelete('이 결함을 삭제할까요?')) return false;
+    window.deleteDefectById = async function(id, options) {
+        if (!options?.skipConfirm && !await window.confirmDelete('이 결함을 삭제할까요?')) return false;
         if (!id || !state.currentBuildingId) return false;
         const located = (typeof findDefectFloorKeyById === 'function') ? findDefectFloorKeyById(id) : null;
         const key = located
@@ -47511,14 +47526,14 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     };
 
     // "마킹 추가"로 여러 위치에 묶인 결함 그룹 전체를 삭제
-    window.deleteDefectGroup = function(groupId, options) {
+    window.deleteDefectGroup = async function(groupId, options) {
         const key = `${state.currentBuildingId}_${state.currentFloor}`;
         if (!options?.skipConfirm) {
             const count = (state.defects[key] || []).filter(d => d.groupId === groupId).length;
             const msg = count > 1
                 ? `묶인 결함 ${count}개 위치를 모두 삭제할까요?`
                 : '이 결함을 삭제할까요?';
-            if (!window.confirmDelete(msg)) return;
+            if (!await window.confirmDelete(msg)) return;
         }
         if (state.defects[key]) {
             pushDefectHistory();
@@ -47547,8 +47562,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
     const btnPurgeDeletedCodes = document.getElementById('btnPurgeDeletedCodes');
     if (btnPurgeDeletedCodes) {
-        btnPurgeDeletedCodes.addEventListener('click', () => {
-            if (!confirm('전원(5명 이상 포함)이 온라인 동기화를 끝낸 뒤에만 실행하세요.\n\n아직 동기화하지 않은 기기가 있으면, 정리된 코드로 옛 결함이 다시 살아날 수 있습니다.\n삭제된 고유코드를 비워 재사용 가능하게 할까요?')) return;
+        btnPurgeDeletedCodes.addEventListener('click', async () => {
+            if (!await window.appConfirm('전원(5명 이상 포함)이 온라인 동기화를 끝낸 뒤에만 실행하세요.\n\n아직 동기화하지 않은 기기가 있으면, 정리된 코드로 옛 결함이 다시 살아날 수 있습니다.\n삭제된 고유코드를 비워 재사용 가능하게 할까요?')) return;
             const n = typeof window.purgeDeletedDefectCodes === 'function'
                 ? window.purgeDeletedDefectCodes()
                 : (typeof window.purgeConfirmedDeletedDefectCodes === 'function'
@@ -47606,7 +47621,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     const btnClearPdfCache = document.getElementById('btnClearPdfCache');
     if (btnClearPdfCache) {
         btnClearPdfCache.addEventListener('click', async () => {
-            if (!confirm(
+            if (!await window.appConfirm(
                 '기기에 저장된 도면 PDF 원본 캐시를 지울까요?\n\n'
                 + '· 서버(Firestore)에 있는 PDF는 그대로입니다.\n'
                 + '· 화면용 4000px 도면·결함 데이터는 유지됩니다.\n'
@@ -47836,12 +47851,12 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             }
         };
 
-        const endDraw = (e) => {
+        const endDraw = async (e) => {
             if (!isDrawingAnnotation) return;
             isDrawingAnnotation = false;
             if (currentAnnotationTool === 'text') {
                 const pos = getPos(e);
-                const text = prompt('사진 위에 입력할 결함 설명 문구를 입력하세요:', '손상 부위');
+                const text = await window.appPrompt('사진 위에 입력할 결함 설명 문구를 입력하세요:', '손상 부위');
                 if (text) {
                     const color = document.getElementById('annotationColorPicker')?.value || '#ef4444';
                     const fontSize = parseInt(document.getElementById('annotationLineWidth')?.value || '4') * 3 + 12;
@@ -47886,8 +47901,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             }
         });
 
-        document.getElementById('btnClearAnnotation')?.addEventListener('click', () => {
-            if (!window.confirmDelete('사진 위 마킹을 모두 지울까요?')) return;
+        document.getElementById('btnClearAnnotation')?.addEventListener('click', async () => {
+            if (!await window.confirmDelete('사진 위 마킹을 모두 지울까요?')) return;
             redrawAnnotationCanvas();
             saveAnnotationHistory();
         });
@@ -49965,7 +49980,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 const id = btn.getAttribute('data-overview-id');
                 const liveBldg = (window.state.buildings || []).find((b) => b.id === window._overviewPhotosBuildingId);
                 if (!id || !liveBldg) return;
-                if (!window.confirmDelete('이 전경사진을 삭제할까요?')) return;
+                if (!await window.confirmDelete('이 전경사진을 삭제할까요?')) return;
                 liveBldg.overviewPhotos = getBuildingOverviewPhotos(liveBldg).filter((p) => p.id !== id);
                 await deleteOverviewPhotoStorage(liveBldg.id, id);
                 if (typeof saveStateToLocalStorage === 'function') saveStateToLocalStorage();
@@ -52596,7 +52611,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 window.showToast('되살릴 행을 선택해 주세요.', 'warning');
                 return;
             }
-            const ok = window.confirm('선택한 ' + ids.length + '건을 백업 내용으로 되돌립니다. 계속할까요?');
+            const ok = await window.appConfirm('선택한 ' + ids.length + '건을 백업 내용으로 되돌립니다. 계속할까요?');
             if (!ok) return;
             close();
             await window.restoreBulkSnapshot(snapId, { ids: ids, apply: true });
@@ -52855,7 +52870,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const why = res.skipped === 'offline'
             ? '인터넷이 연결되지 않아 다른 기기가 올린 최신 데이터를 받지 못했습니다.'
             : `다음 층을 서버에서 받지 못했습니다: ${res.failed.map(label).join(', ')}`;
-        return window.confirm(`${why}\n\n이 기기에 있는 데이터로 ${reportLabel}를 만들까요?\n(안 열어 본 층은 빠지거나 예전 값일 수 있습니다)`);
+        return await window.appConfirm(`${why}\n\n이 기기에 있는 데이터로 ${reportLabel}를 만들까요?\n(안 열어 본 층은 빠지거나 예전 값일 수 있습니다)`);
     }
 
     async function listBuildingBackups(bldgId) {
@@ -53087,7 +53102,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         }));
         body.querySelectorAll('[data-bb-delete]').forEach((btn) => btn.addEventListener('click', async () => {
             const b = list.find((x) => x.id === btn.getAttribute('data-bb-delete'));
-            if (!b || !window.confirmDelete(`${formatBulkSnapTime(b.createdAt)} 백업을 지울까요?\n\n이 백업만 붙잡고 있던 사진(지금 건물에도 다른 백업에도 없는 사진)은 클라우드에서 정리됩니다.`)) return;
+            if (!b || !await window.confirmDelete(`${formatBulkSnapTime(b.createdAt)} 백업을 지울까요?\n\n이 백업만 붙잡고 있던 사진(지금 건물에도 다른 백업에도 없는 사진)은 클라우드에서 정리됩니다.`)) return;
             window.showLoading('백업을 지우는 중입니다...');
             try {
                 const removed = await deleteBuildingBackup(b, bldg);
@@ -53173,7 +53188,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 window.showToast('되돌릴 항목을 체크해 주세요.', 'warning');
                 return;
             }
-            if (!window.confirm(`결함 ${nDef}건, 비파괴 ${nNdt}건을 백업 값으로 되돌립니다. 계속할까요?`)) return;
+            if (!await window.appConfirm(`결함 ${nDef}건, 비파괴 ${nNdt}건을 백업 값으로 되돌립니다. 계속할까요?`)) return;
             applyBtn.disabled = true;
             window.showLoading('백업 값으로 되돌리는 중입니다...');
             try {
@@ -56174,7 +56189,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             return;
         }
         const cur = String(window.state.companyName || '').trim();
-        const input = window.prompt('새 회사 이름을 입력하세요.\n(점검 데이터는 그대로 연결됩니다)', cur);
+        const input = await window.appPrompt('새 회사 이름을 입력하세요.\n(점검 데이터는 그대로 연결됩니다)', cur);
         if (input == null) return;
         const next = input.trim();
         if (!next) {
@@ -56186,7 +56201,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             return;
         }
         if (next === cur) return;
-        if (!window.confirm(`회사 이름을 바꿉니다.\n\n${cur || '(없음)'}  →  ${next}\n\n다른 직원은 다음 로그인 때 새 이름으로 보입니다. 계속할까요?`)) return;
+        if (!await window.appConfirm(`회사 이름을 바꿉니다.\n\n${cur || '(없음)'}  →  ${next}\n\n다른 직원은 다음 로그인 때 새 이름으로 보입니다. 계속할까요?`)) return;
         window.showLoading('회사 이름을 바꾸는 중입니다...');
         try {
             await db.collection('companies').doc(window.state.companyId).update({ name: next });
@@ -56613,7 +56628,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     window.cancelCompanyApplication = async function() {
         const user = auth && auth.currentUser;
         if (!user || !db) return;
-        if (!confirm('가입 신청을 취소하고 다른 회사로 다시 신청하시겠습니까?')) return;
+        if (!await window.appConfirm('가입 신청을 취소하고 다른 회사로 다시 신청하시겠습니까?')) return;
         window.showLoading('신청을 취소하는 중입니다...');
         try {
             const ctx = await getUserMembershipContext(user.uid);
@@ -56639,7 +56654,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const uid = window.state.uid;
         const companyId = window.state.companyId;
         if (!uid || !companyId || !db) return;
-        if (!confirm('회사에서 나가시겠습니까?\n\n나간 뒤에는 점검 데이터에 접근할 수 없습니다.')) return;
+        if (!await window.appConfirm('회사에서 나가시겠습니까?\n\n나간 뒤에는 점검 데이터에 접근할 수 없습니다.')) return;
         window.showLoading('회사에서 나가는 중입니다...');
         try {
             await assertCanLeaveCompany(uid, companyId);
@@ -56666,7 +56681,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     };
 
     window.logout = async function() {
-        if (!confirm('🔒 정말 로그아웃 하시겠습니까?')) return;
+        if (!await window.appConfirm('🔒 정말 로그아웃 하시겠습니까?')) return;
         try { if (auth) await auth.signOut(); } catch (e) {}
         showLoginOverlay();
     };
@@ -56763,7 +56778,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             showDeleteAccountError({ message: '비밀번호를 입력해 주세요.' });
             return;
         }
-        if (!confirm('정말 계정을 삭제하시겠습니까?\n\n삭제 후에는 복구할 수 없습니다.')) return;
+        if (!await window.appConfirm('정말 계정을 삭제하시겠습니까?\n\n삭제 후에는 복구할 수 없습니다.')) return;
 
         window._deletingAccount = true;
         window.showLoading('계정을 삭제하는 중입니다...');
@@ -56912,7 +56927,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
     window.rejectMember = async function(uid) {
         if (!db || !window.state.companyId) return;
-        if (!confirm('정말 이 가입 신청을 거절하시겠습니까?')) return;
+        if (!await window.appConfirm('정말 이 가입 신청을 거절하시겠습니까?')) return;
         try {
             const companyRef = db.collection('companies').doc(window.state.companyId);
             const pendingDoc = await companyRef.collection('pendingRequests').doc(uid).get();
@@ -56943,7 +56958,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             await window.leaveCompany();
             return;
         }
-        if (!confirm('이 팀원을 회사에서 보내시겠습니까?')) return;
+        if (!await window.appConfirm('이 팀원을 회사에서 보내시겠습니까?')) return;
         try {
             const companyRef = db.collection('companies').doc(window.state.companyId);
             const memberDoc = await companyRef.collection('members').doc(uid).get();
