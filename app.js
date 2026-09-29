@@ -187,20 +187,66 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!sheet || sheet.dataset.bound === '1') return;
         sheet.dataset.bound = '1';
 
+        const sheetSelectFor = (target) => {
+            const sel = target && target.closest ? target.closest('select') : null;
+            if (!sel || sel.disabled || sel.multiple) return null;
+            if (sel.dataset.nativeSelect === '1') return null;
+            if (sel.closest('#bsaSelectSheet')) return null;
+            return sel;
+        };
         const intercept = (e) => {
             if (!shouldUseBsaSelectSheet()) return;
-            const sel = e.target && e.target.closest ? e.target.closest('select') : null;
-            if (!sel || sel.disabled || sel.multiple) return;
-            if (sel.dataset.nativeSelect === '1') return;
-            if (sel.closest('#bsaSelectSheet')) return;
+            const sel = sheetSelectFor(e.target);
+            if (!sel) return;
             e.preventDefault();
             e.stopPropagation();
             try { sel.blur(); } catch (_err) { /* ignore */ }
             openBsaSelectSheet(sel);
         };
 
-        // 안드로이드 네이티브 피커가 뜨기 전에 차단
-        document.addEventListener('touchstart', intercept, { capture: true, passive: false });
+        // 2026-09-29: 손가락이 닿는 순간(touchstart)에 열던 것을 「제자리 탭」이 끝날 때(touchend)로.
+        // 표를 스크롤·드래그하다 구조체/비구조체/마감재 칸을 스치기만 해도 시트가 떠서 값이 바뀌던 문제.
+        // touchstart는 막지 않으므로(passive) 그 위에서 시작한 스크롤도 된다.
+        // touchend에서 preventDefault → 합성 mousedown/click·네이티브 피커가 안 뜬다.
+        const SELECT_TAP_SLOP_PX = 10;
+        const SELECT_TAP_MAX_MS = 800;
+        let selectTouch = null;
+        document.addEventListener('touchstart', (e) => {
+            selectTouch = null;
+            if (!shouldUseBsaSelectSheet()) return;
+            const t = e.touches && e.touches[0];
+            if (!t || e.touches.length !== 1) return;
+            const sel = sheetSelectFor(e.target);
+            if (!sel) return;
+            selectTouch = { sel, x: t.clientX, y: t.clientY, at: Date.now(), moved: false };
+        }, { capture: true, passive: true });
+        document.addEventListener('touchmove', (e) => {
+            if (!selectTouch || selectTouch.moved) return;
+            const t = e.touches && e.touches[0];
+            if (!t || e.touches.length !== 1
+                || Math.abs(t.clientX - selectTouch.x) > SELECT_TAP_SLOP_PX
+                || Math.abs(t.clientY - selectTouch.y) > SELECT_TAP_SLOP_PX) {
+                selectTouch.moved = true;
+            }
+        }, { capture: true, passive: true });
+        document.addEventListener('touchcancel', () => { selectTouch = null; }, true);
+        document.addEventListener('touchend', (e) => {
+            const st = selectTouch;
+            selectTouch = null;
+            if (!st) return;
+            const t = e.changedTouches && e.changedTouches[0];
+            const far = !t || Math.abs(t.clientX - st.x) > SELECT_TAP_SLOP_PX || Math.abs(t.clientY - st.y) > SELECT_TAP_SLOP_PX;
+            if (st.moved || far || (Date.now() - st.at) > SELECT_TAP_MAX_MS) {
+                // 스크롤·드래그·길게 누름: 아무것도 열지 않음(합성 클릭도 막아 네이티브 피커도 안 뜨게)
+                if (e.cancelable) e.preventDefault();
+                return;
+            }
+            if (!st.sel.isConnected || !shouldUseBsaSelectSheet()) return;
+            if (e.cancelable) e.preventDefault();
+            e.stopPropagation();
+            try { st.sel.blur(); } catch (_err) { /* ignore */ }
+            openBsaSelectSheet(st.sel);
+        }, { capture: true, passive: false });
         document.addEventListener('mousedown', intercept, true);
         document.addEventListener('click', intercept, true);
         document.addEventListener('focusin', (e) => {
