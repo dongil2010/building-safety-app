@@ -21989,7 +21989,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             row.classList.add('map-unregistered');
             if (window._pendingMapRegisterDefectId === d.id) row.classList.add('is-pending-map-register');
         }
-        if (d.isBookmark) row.classList.add('is-important');
+        if (d.isBookmark || d.isPriorityManage) row.classList.add('is-important');
         const badge = document.createElement('span');
         badge.className = 'defect-badge-no';
         if (isUnregistered) badge.classList.add('badge-unregistered');
@@ -23060,17 +23060,17 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     }
 
     // arrows: "마킹 추가"로 묶인 그룹을 하나의 박스+여러 화살표로 그릴 때 전달하는 {targetX,targetY}[] (없으면 defect 자신의 화살표 1개만 그림, 기존과 동일)
-    function defectIsBookmarked(defect) {
+    function defectHasCornerMark(defect) {
         if (!defect) return false;
-        if (defect.isBookmark) return true;
+        if (defect.isBookmark || defect.isPriorityManage) return true;
         if (!defect.groupId || typeof getDefectMarkingGroupMembers !== 'function') return false;
-        return getDefectMarkingGroupMembers(defect.groupId).some((m) => m && m.isBookmark);
+        return getDefectMarkingGroupMembers(defect.groupId).some((m) => m && (m.isBookmark || m.isPriorityManage));
     }
 
     /** 중요 마킹 — 번호 박스 색은 그대로 두고, 좌상단에 노란 원만 붙인다. */
     function drawBookmarkChrome(ctx, w, h, scale) {
         const s = Math.max(0.85, Number(scale) || 1);
-        const r = Math.max(5.5, 7 * s);
+        const r = Math.max(8, 10 * s);
         ctx.save();
         ctx.beginPath();
         ctx.arc(-w / 2, -h / 2, r, 0, Math.PI * 2);
@@ -23258,7 +23258,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         }
 
         drawPinBoxLabel(ctx, pinLabel, getPinBoxTextColor(activeColor, shapeCfg, isBeingDragged), scale, shapeCfg);
-        if (defectIsBookmarked(defect)) drawBookmarkChrome(ctx, w, h, scale);
+        if (defectHasCornerMark(defect)) drawBookmarkChrome(ctx, w, h, scale);
 
         ctx.restore();
     }
@@ -38707,7 +38707,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             paintPinBox(ctx, safeBoxW, safeBoxH, safeShapeCfg, color, safeScale, 1, false);
 
             drawPinBoxLabel(ctx, safeLabel, getPinBoxTextColor(color, safeShapeCfg, false), safeScale, safeShapeCfg);
-            if (defectIsBookmarked(defect)) drawBookmarkChrome(ctx, safeBoxW, safeBoxH, safeScale);
+            if (defectHasCornerMark(defect)) drawBookmarkChrome(ctx, safeBoxW, safeBoxH, safeScale);
             ctx.restore();
         } catch(e) {
             console.warn('drawPinSafe error:', e);
