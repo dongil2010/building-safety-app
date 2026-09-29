@@ -97,6 +97,62 @@
         return list[idx] || list[0];
     }
 
+    function idsOf(selectedIds) {
+        if (!selectedIds) return [];
+        if (typeof selectedIds.forEach === 'function' && !Array.isArray(selectedIds)) {
+            const out = [];
+            selectedIds.forEach((id) => out.push(id));
+            return out;
+        }
+        return Array.isArray(selectedIds) ? selectedIds.slice() : [];
+    }
+
+    /**
+     * 선택이 「마킹 하나(공유 NO.박스 묶음)」의 구성원뿐인가.
+     * 결함 통합 직후·조사표에서 묶음 행을 눌렀을 때는 묶음 전체가 선택된다 — 이건 여러 마킹을
+     * 고른 게 아니라 마킹 하나를 고른 것이다.
+     */
+    function isSelectionWithinMarkingGroup(list, groupId, selectedIds) {
+        if (!groupId) return false;
+        const ids = idsOf(selectedIds);
+        if (!ids.length) return false;
+        const byId = new Map();
+        (list || []).forEach((d) => { if (d && d.id != null) byId.set(d.id, d); });
+        return ids.every((id) => {
+            const d = byId.get(id);
+            return !!(d && d.groupId === groupId);
+        });
+    }
+
+    /**
+     * 도면에서 마킹을 끌 때 무엇을 움직이나.
+     * 'GROUP' = 선택한 여러 마킹을 통째로(박스·화살표 끝·영역 모두), 그 밖엔 누른 부분(part) 그대로
+     *  - BOX: 공유 번호칸만(묶음 모두 같은 자리로) — 화살표 끝·영역은 제자리, 화살표는 새 박스에서 다시 그림
+     *  - TIP / AREA_MOVE: 그 결함 하나만
+     * 2026-09-29: 결함 통합 뒤엔 묶음 전체가 선택돼 있어 NO.박스를 끌면 'GROUP'이 되어 통째로 움직였다.
+     * 선택이 한 묶음 안뿐이면 여러 마킹 선택으로 보지 않는다.
+     */
+    function pinDragMode(hit, selectedIds, list) {
+        const part = (hit && hit.part) || 'BOX';
+        const d = hit && hit.defect;
+        if (!d || d.id == null) return part;
+        if (part === 'AREA_RESIZE' || part === 'AREA_ROTATE' || part === 'AREA_VERTEX') return part;
+        const ids = idsOf(selectedIds);
+        if (ids.length <= 1 || ids.indexOf(d.id) === -1) return part;
+        if (d.groupId && isSelectionWithinMarkingGroup(list, d.groupId, ids)) return part;
+        return 'GROUP';
+    }
+
+    /**
+     * 화살표 끝(TIP)을 끌 때 번호칸도 같이 옮기나.
+     * 혼자인 마킹: 예전처럼 박스+끝 함께(모양 유지). 박스를 나눠 쓰는 묶음(화살표 추가·번호 부여·결함 통합):
+     * 끝만 — 박스를 옮기면 다른 결함 화살표까지 딸려 움직인다.
+     */
+    function tipDragMovesSharedBox(list, defect) {
+        if (!defect || !defect.groupId) return true;
+        return markingMembersOf(list, defect.groupId).length <= 1;
+    }
+
     /** 그룹 없는 미번호 화살표는 조사표/좌측 목록에 단독 행으로 넣지 않는다. */
     function shouldSkipOrphanUnnumberedInSurveyList(d) {
         return isUnnumberedArrowMarking(d) && !d.groupId;
@@ -115,6 +171,9 @@
         canAssignSurveyNumber,
         floatSlotLabel,
         nextGroupMemberOnBoxClick,
+        isSelectionWithinMarkingGroup,
+        pinDragMode,
+        tipDragMovesSharedBox,
         shouldSkipOrphanUnnumberedInSurveyList
     };
 

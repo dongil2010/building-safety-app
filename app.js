@@ -29610,12 +29610,17 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 pushDefectHistory();
                 const hitDefect = pendingDragHit.hitInfo.defect;
                 const hitPart = pendingDragHit.hitInfo.part;
-                const multiGroup = hitDefect && hitDefect.id
-                    && selectedDefectIds.size > 1
-                    && selectedDefectIds.has(hitDefect.id)
-                    && hitPart !== 'AREA_RESIZE'
-                    && hitPart !== 'AREA_ROTATE'
-                    && hitPart !== 'AREA_VERTEX';
+                // 여러 마킹 통째 이동은 「서로 다른 마킹」을 골랐을 때만.
+                // 결함 통합·화살표 추가 묶음 하나만 선택된 상태(통합 직후 등)에서 NO.박스를 끌면 박스만 움직인다.
+                const asnDrag = arrowSurveyNumberApi();
+                const multiGroup = (asnDrag && typeof asnDrag.pinDragMode === 'function')
+                    ? asnDrag.pinDragMode(pendingDragHit.hitInfo, selectedDefectIds, getCurrentFloorDefects()) === 'GROUP'
+                    : (hitDefect && hitDefect.id
+                        && selectedDefectIds.size > 1
+                        && selectedDefectIds.has(hitDefect.id)
+                        && hitPart !== 'AREA_RESIZE'
+                        && hitPart !== 'AREA_ROTATE'
+                        && hitPart !== 'AREA_VERTEX');
                 const grabX = pendingDragHit.imgX;
                 const grabY = pendingDragHit.imgY;
                 clearPendingDragLongPress();
@@ -29710,7 +29715,17 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     const newTipY = currentImgY - pinDragOffsetY;
                     const prevTipX = (activeDragPin.targetX !== undefined) ? activeDragPin.targetX : newTipX;
                     const prevTipY = (activeDragPin.targetY !== undefined) ? activeDragPin.targetY : newTipY;
-                    translatePinMarkingRigid(activeDragPin, newTipX - prevTipX, newTipY - prevTipY);
+                    const asnTip = arrowSurveyNumberApi();
+                    const tipMovesBox = (asnTip && typeof asnTip.tipDragMovesSharedBox === 'function')
+                        ? asnTip.tipDragMovesSharedBox(getCurrentFloorDefects(), activeDragPin)
+                        : true;
+                    if (tipMovesBox) {
+                        translatePinMarkingRigid(activeDragPin, newTipX - prevTipX, newTipY - prevTipY);
+                    } else {
+                        // 공유 번호칸 묶음: 이 결함의 화살표 끝만 — 박스·다른 화살표는 제자리
+                        activeDragPin.targetX = newTipX;
+                        activeDragPin.targetY = newTipY;
+                    }
                 }
             } else if (activeDragPart === 'AREA_MOVE') {
                 const dx = currentImgX - areaMoveLastImgX;
@@ -29936,6 +29951,17 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (isDraggingPin || isDraggingPinGroup) {
             rebindActiveDragPinFromState();
             if (activeDragPin) touchDefectPositionUpdatedAt(activeDragPin);
+            // 공유 NO.박스를 옮겼으면 묶음 모두의 x·y가 바뀌었다 → 모두 위치 시각을 올려야
+            // 다른 기기와 칸 단위 병합할 때 옛 박스 자리로 되돌아가지 않는다
+            if (activeDragPin && activeDragPin.groupId && !isDraggingPinGroup) {
+                const gidMoved = activeDragPin.groupId;
+                getCurrentFloorDefects().forEach(d => {
+                    if (d && d !== activeDragPin && d.groupId === gidMoved
+                        && d.x === activeDragPin.x && d.y === activeDragPin.y) {
+                        touchDefectPositionUpdatedAt(d);
+                    }
+                });
+            }
             if (isDraggingPinGroup) {
                 filterMapPlacedDefects(getCurrentFloorDefects()).forEach(d => {
                     if (selectedDefectIds.has(d.id)) touchDefectPositionUpdatedAt(d);
@@ -37772,13 +37798,15 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     ? `${blankFields.length > 1 ? '부재종류·' : ''}조사내용이 비어 있습니다 — `
                     : '부재종류가 비어 있습니다 — ')
                 : '';
+            // 2026-09-29: 행의 빈 곳을 누르면 도면으로 튀던 것 제거 — 도면 이동은 행 끝 「도면」 버튼만
+            // (폰에서 가로로 밀다가·칸을 고치려다 도면으로 넘어갔다. PC도 같은 코드라 같이 적용)
             const rowTitle = blankTitle + (exteriorSurvey
-                ? `클릭하면 ${(ctx.floorDisplayLabel || d._exteriorFloorCode || '해당')} 도면으로 이동`
-                : '클릭하면 도면에서 마킹 위치로 이동');
-            const rowClass = blankFields.length ? 'survey-row-clickable survey-row-blank' : 'survey-row-clickable';
+                ? `「도면」 버튼: ${(ctx.floorDisplayLabel || d._exteriorFloorCode || '해당')} 도면으로 이동`
+                : '「도면」 버튼: 도면에서 마킹 위치로 이동');
+            const rowClass = blankFields.length ? 'survey-row survey-row-blank' : 'survey-row';
 
             return `
-                <tr class="${rowClass}" style="cursor:pointer;" title="${rowTitle}" onclick="window.viewDefectOnMapFromSurvey('${safeId}')">
+                <tr class="${rowClass}" title="${rowTitle}">
                     ${columns.map(c => `<td data-col="${c.key}"${missingCols.has(c.key) ? ' class="survey-cell-missing"' : ''}>${renderInlineSurveyCellHtml(c.key, d, ctx, colMetrics)}</td>`).join('')}
                     <td data-col="actions" class="survey-row-actions">
                         <button type="button" class="btn btn-sm btn-outline" onclick="event.stopPropagation(); window.openSurveyRowEditModal('${safeId}')" title="상세 모달">상세</button>

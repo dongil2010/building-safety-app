@@ -32,8 +32,20 @@
         blurTimer: null
     };
 
+    function isCoarsePointer() {
+        try {
+            return !!(window.matchMedia && (window.matchMedia('(pointer: coarse)').matches
+                || (window.matchMedia('(hover: none)').matches && navigator.maxTouchPoints > 0)));
+        } catch (_e) { return false; }
+    }
+
+    /**
+     * 소프트 키보드 들어올림을 쓸지 — 폭이 아니라 터치로 정한다(2026-09-29).
+     * 태블릿(세로·가로, iPad Safari·안드로이드 — 「데스크톱 사이트」 UA로 PC형 판정이 나도)은 손가락 포인터면 켠다.
+     * PC 마우스(주 포인터 fine)는 그대로 끔.
+     */
     function isTouchKeyboardUi() {
-        if (window.BSA.isPcLikeLayout && window.BSA.isPcLikeLayout()) return false;
+        if (window.BSA.isPcLikeLayout && window.BSA.isPcLikeLayout() && !isCoarsePointer()) return false;
         if (navigator.maxTouchPoints > 0) return true;
         if (window.matchMedia && window.matchMedia('(pointer: coarse)').matches) return true;
         if (document.documentElement.classList.contains('layout-tablet')) return true;
