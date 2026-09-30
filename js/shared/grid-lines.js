@@ -33,6 +33,37 @@
     /** 열 축과 행 축 사이 구분(2026-09-28 사용자 요청: 「An/Xn」) */
     const AXIS_SEP = '/';
     const DEFAULT_PREFIX = { col: 'X', row: 'Y' };
+    /**
+     * 번호 방식(2026-09-30): 없음/'num' = 숫자(1, 2, 3 — 예전 그대로), 'upper' = A, B, C, 'lower' = a, b, c.
+     * 글자는 엑셀 열 이름처럼 이어짐(z 다음 aa, ab …). 시작 번호 1 = a, 2 = b.
+     * 숫자 그룹은 저장할 때 numbering 키가 아예 없다(예전 데이터 모양 그대로).
+     */
+    const NUMBERINGS = ['num', 'upper', 'lower'];
+
+    function normalizeNumbering(v) {
+        return v === 'upper' || v === 'lower' ? v : 'num';
+    }
+
+    /** 1 → a, 26 → z, 27 → aa (lower=false면 대문자). 1보다 작으면 숫자 그대로 */
+    function seqToLetters(n, lower) {
+        let k = Math.round(Number(n));
+        if (!Number.isFinite(k) || k < 1) return String(Number.isFinite(k) ? k : '');
+        let s = '';
+        while (k > 0) {
+            const r = (k - 1) % 26;
+            s = String.fromCharCode(65 + r) + s;
+            k = Math.floor((k - 1) / 26);
+        }
+        return lower ? s.toLowerCase() : s;
+    }
+
+    /** 그룹의 n번째(시작 번호 포함한 값) 선 이름 — 머리글 + 번호/글자 */
+    function groupSeqLabel(group, n) {
+        const g = group || {};
+        const mode = normalizeNumbering(g.numbering);
+        const body = mode === 'num' ? String(n) : seqToLetters(n, mode === 'lower');
+        return `${g.prefix == null ? '' : g.prefix}${body}`;
+    }
 
     /** 거더 — 가까운 열/행 선 하나에 붙임(다른 축은 범위). 접합부는 제외 */
     const GIRDER_MEMBER_RULES = {
@@ -89,6 +120,8 @@
             lines: Array.isArray(o.lines) ? o.lines : []
         };
         if (o.zoneId) out.zoneId = String(o.zoneId); // 구역에 속한 그룹만(없으면 키 자체가 없음)
+        const nb = normalizeNumbering(o.numbering);
+        if (nb !== 'num') out.numbering = nb; // 숫자는 키 없음(예전 데이터 그대로)
         return out;
     }
 
@@ -385,7 +418,7 @@
         items.forEach((it) => {
             const k = ranks.get(it.line);
             it.numberIndex = k;
-            it.autoName = `${group.prefix}${group.start + k}`;
+            it.autoName = groupSeqLabel(group, group.start + k);
             it.name = it.line.label || it.autoName;
         });
         return { items, D, N };
@@ -541,7 +574,8 @@
         const zones = grid.zones || [];
         zones.forEach((z) => parts.push(`z|${roundPts([{ x: z.rect.x1, y: z.rect.y1 }, { x: z.rect.x2, y: z.rect.y2 }])}`));
         (grid.groups || []).forEach((g) => {
-            parts.push(`g${g.axis}|${g.prefix}|${g.start}|${g.band}${g.zoneId ? `|z${zones.findIndex((z) => z.id === g.zoneId)}` : ''}`);
+            // 번호 방식은 글자일 때만 붙임(숫자 그룹 지문은 예전과 같아 저장된 위치를 다시 계산하지 않음)
+            parts.push(`g${g.axis}|${g.prefix}|${g.start}|${g.band}${g.zoneId ? `|z${zones.findIndex((z) => z.id === g.zoneId)}` : ''}${g.numbering ? `|n${g.numbering}` : ''}`);
             (g.lines || []).forEach((ln) => {
                 parts.push(`l${ln.seq}|${ln.label || ''}|${ln.band != null ? ln.band : ''}|${roundPts(ln.pts)}`);
             });
@@ -965,7 +999,7 @@
             visible: src.visible,
             autoLocation: src.autoLocation,
             groups: src.groups.map((g) => {
-                const ng = createGroup(g.axis, { prefix: g.prefix, start: g.start, angle: g.angle, band: g.band, zoneId: g.zoneId ? zoneMap[g.zoneId] : '' });
+                const ng = createGroup(g.axis, { prefix: g.prefix, start: g.start, angle: g.angle, band: g.band, numbering: g.numbering, zoneId: g.zoneId ? zoneMap[g.zoneId] : '' });
                 ng.lines = (g.lines || []).map((ln) => {
                     const line = { id: uid('gl'), pts: ln.pts.map((p) => ({ x: p.x, y: p.y })) };
                     if (Number.isFinite(ln.seq)) line.seq = ln.seq;
@@ -1009,6 +1043,10 @@
 
     const api = {
         DEFAULT_PREFIX,
+        NUMBERINGS,
+        normalizeNumbering,
+        seqToLetters,
+        groupSeqLabel,
         AXIS_SEP,
         GIRDER_MEMBER_RULES,
         isGirderMember,

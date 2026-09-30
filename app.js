@@ -34643,7 +34643,11 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         }
         if (!g) {
             const c = getGridCtx();
-            g = G.createGroup(axis, { band: G.defaultBand(c.w, c.h), zoneId: zid });
+            // 새 구역: 번호는 1부터 따로. 같은 축 다른 그룹이 글자 번호(a, b …)면 번호 방식·머리글을 이어받음
+            const tpl = (grid.groups || []).find((x) => x.axis === axis && x.numbering);
+            g = G.createGroup(axis, tpl
+                ? { band: G.defaultBand(c.w, c.h), zoneId: zid, numbering: tpl.numbering, prefix: tpl.prefix }
+                : { band: G.defaultBand(c.w, c.h), zoneId: zid });
             grid.groups.push(g);
         }
         ge.activeGroup[axis] = g.id;
@@ -34959,7 +34963,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const axisKo = (ax) => (ax === 'row' ? '행' : '열');
         const groupOpts = groups.map((g) => {
             const od = G.orderedLines(g, gctx);
-            const names = od.items.length > 1 ? `${g.prefix}${g.start}…${g.prefix}${g.start + od.items.length - 1}` : `${g.prefix}${g.start}`;
+            const names = od.items.length > 1 ? `${G.groupSeqLabel(g, g.start)}…${G.groupSeqLabel(g, g.start + od.items.length - 1)}` : G.groupSeqLabel(g, g.start);
             const ang = Math.abs(g.angle) > 0.01 ? ` · ${g.angle}°` : '';
             return `<option value="${gridEsc(g.id)}"${eg && g.id === eg.id ? ' selected' : ''}>${gridEsc(zoneTag(g))}${axisKo(g.axis)} ${gridEsc(names)} (${od.items.length}개${ang})</option>`;
         }).join('');
@@ -35019,7 +35023,14 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     ${eg ? `
                     <div class="grid-panel-row">
                         <label>머리글 <input type="text" data-f="prefix" value="${gridEsc(eg.prefix)}" maxlength="6" style="width:52px"></label>
-                        <label>시작 번호 <input type="number" data-f="start" value="${eg.start}" step="1" style="width:56px"></label>
+                        <label>시작 번호 <input type="number" data-f="start" value="${eg.start}" step="1" style="width:56px" title="글자 번호면 1 = a(A), 2 = b(B)"></label>
+                    </div>
+                    <div class="grid-panel-row">
+                        <label>번호 <select data-f="numbering" title="선 이름 번호 방식 — 글자는 z 다음 aa, ab …">
+                            <option value="num"${G.normalizeNumbering(eg.numbering) === 'num' ? ' selected' : ''}>숫자 1, 2, 3</option>
+                            <option value="upper"${eg.numbering === 'upper' ? ' selected' : ''}>대문자 A, B, C</option>
+                            <option value="lower"${eg.numbering === 'lower' ? ' selected' : ''}>소문자 a, b, c</option>
+                        </select></label>
                     </div>
                     <div class="grid-panel-row">
                         <button type="button" data-act="renumber" title="지금 보이는 위치 순서(열: 왼→오른, 행: 위→아래)로 번호를 한 번만 다시 매김. 그 뒤로 새로 긋는 선은 다시 맨 끝 번호">위치 순서로 다시 매기기</button>
@@ -35225,6 +35236,20 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             }
             case 'prefix': if (eg) eg.prefix = String(el.value || '').trim(); break;
             case 'start': if (eg) eg.start = Math.round(numOr(el.value, eg.start)); break;
+            case 'numbering': {
+                if (!eg) break;
+                const nb = G.normalizeNumbering(el.value);
+                const dflt = G.DEFAULT_PREFIX[eg.axis];
+                if (nb === 'num') {
+                    delete eg.numbering;
+                    if (!eg.prefix) eg.prefix = dflt; // 머리글 없는 숫자(1, 2)로 남지 않게 기본 X/Y로
+                } else {
+                    eg.numbering = nb;
+                    if (eg.prefix === dflt) eg.prefix = ''; // 도면 표기 그대로 a, b, c(머리글이 필요하면 다시 입력)
+                }
+                if (eg.start < 1) eg.start = 1;
+                break;
+            }
             case 'gangle': if (eg) eg.angle = Math.max(-89, Math.min(89, numOr(el.value, eg.angle))); break;
             case 'gband': if (eg) eg.band = Math.max(0, numOr(el.value, eg.band)); break;
             case 'label':
