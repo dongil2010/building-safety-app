@@ -2168,6 +2168,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
                 return rest;
             });
+            // 균열게이지·팁 비교사진: IndexedDB에 확인된 것만 빼고, 남은 data URL은 저장 뒤 옮긴다
+            const gaugeSaveStats = { stripped: 0, inlineLeft: 0 };
+            const sanitizedNdt = {};
+            Object.entries(window.state.ndtData || {}).forEach(([key, arr]) => {
+                sanitizedNdt[key] = Array.isArray(arr) ? arr.map((it) => gaugeStripForLocal(it, gaugeSaveStats)) : arr;
+            });
             const sanitizedDefects = {};
             Object.entries(rawDefects).forEach(([key, arr]) => {
                 sanitizedDefects[key] = (arr || []).map(d => {
@@ -2181,13 +2187,13 @@ document.addEventListener('DOMContentLoaded', () => {
                         : (prevRoundPhotoIds && prevRoundPhotoIds.length ? prevRoundPhotoIds.slice() : null);
                     if (curIds && curIds.length) out.photoIds = curIds;
                     if (prevIds && prevIds.length) out.prevRoundPhotoIds = prevIds;
-                    return out;
+                    return gaugeStripForLocal(out, gaugeSaveStats);
                 });
             });
 
             const dataToSave = {
                 defects: sanitizedDefects,
-                ndtData: window.state.ndtData || {},
+                ndtData: sanitizedNdt,
                 ndtDisplacementGroups: window.state.ndtDisplacementGroups || {},
                 // 층별 NDT 전용 도면 참조 { id, at } — 그림 자체는 사진처럼 IndexedDB·클라우드에 있다
                 ndtDrawingRefs: window.state.ndtDrawingRefs || {},
@@ -2239,6 +2245,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 try { localStorage.setItem('bsa_last_active_company_id', window.state.companyId); } catch (_e) { /* ignore */ }
             }
             _localStorageSaveFailedNotified = false;
+            if (gaugeSaveStats.inlineLeft > 0 && typeof scheduleGaugePhotoMigrate === 'function') scheduleGaugePhotoMigrate();
             if (window.state.uid) persistUserDefectPinPresetsLocal(window.state.uid);
             if (!_suppressSyncOnSave && typeof scheduleSyncToFirebase === 'function') {
                 scheduleSyncToFirebase();
@@ -2252,6 +2259,8 @@ document.addEventListener('DOMContentLoaded', () => {
             // 기기에도 서버에도 안 남고, 새로고침하면 사라졌다. 기기 저장이 실패해도 메모리의 최신 상태는
             // 서버로 올린다(층 dirty 표시 + 예약). 서버에 올라가면 다시 들어올 때 병합으로 돌아온다.
             let cloudQueued = false;
+            // 저장 공간이 찼으면 비교사진을 IndexedDB로 옮겨 자리를 만든다(옮긴 뒤 다시 저장)
+            if (typeof scheduleGaugePhotoMigrate === 'function') scheduleGaugePhotoMigrate();
             if (!_suppressSyncOnSave && typeof scheduleSyncToFirebase === 'function') {
                 try {
                     scheduleSyncToFirebase();
@@ -2487,6 +2496,8 @@ document.addEventListener('DOMContentLoaded', () => {
             // 도면/사진은 localStorage가 아니라 IndexedDB에서 비동기로 복원한다(위 저장 로직과 짝).
             // 화면은 먼저 그리고, 이미지는 도착하는 대로 다시 그려서 채워넣는다.
             hydrateLocalImagesFromIndexedDb();
+            // 균열게이지·팁 비교사진: 번호만 남은 사진은 IndexedDB에서 채우고, 저장본에 남은 data URL은 옮긴다
+            if (typeof scheduleGaugePhotoStartup === 'function') scheduleGaugePhotoStartup();
             if (typeof restoreDirtyFloorKeys === 'function') restoreDirtyFloorKeys();
             if (typeof window.purgeExpiredBuildingTrash === 'function') {
                 window.purgeExpiredBuildingTrash().catch(() => {});
@@ -26146,6 +26157,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         base.initialY = raw.initialY != null ? String(raw.initialY) : '';
         base.prevPhoto = normalizeCrackMonitorPhoto(raw.prevPhoto);
         base.currPhoto = normalizeCrackMonitorPhoto(raw.currPhoto);
+        // 사진 번호(IndexedDB·클라우드 사진 — js/core/gauge-photo-store.js). 있으면 그대로 둔다.
+        if (raw.prevPhotoId) base.prevPhotoId = String(raw.prevPhotoId);
+        if (raw.currPhotoId) base.currPhotoId = String(raw.currPhotoId);
         base.readings = Array.isArray(raw.readings)
             ? raw.readings.map((r) => ({
                 roundKey: r && r.roundKey != null ? String(r.roundKey) : '',
@@ -26164,6 +26178,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         base.initialLengthMm = raw.initialLengthMm != null ? String(raw.initialLengthMm) : '';
         base.prevPhoto = normalizeCrackMonitorPhoto(raw.prevPhoto);
         base.currPhoto = normalizeCrackMonitorPhoto(raw.currPhoto);
+        // 사진 번호(IndexedDB·클라우드 사진 — js/core/gauge-photo-store.js). 있으면 그대로 둔다.
+        if (raw.prevPhotoId) base.prevPhotoId = String(raw.prevPhotoId);
+        if (raw.currPhotoId) base.currPhotoId = String(raw.currPhotoId);
         base.readings = Array.isArray(raw.readings)
             ? raw.readings.map((r) => ({
                 roundKey: r && r.roundKey != null ? String(r.roundKey) : '',
@@ -26422,11 +26439,15 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     const n = item[field];
                     if (!o || typeof o !== 'object' || !n || typeof n !== 'object') return;
                     [['prevPhoto', 'hasPrevPhoto'], ['currPhoto', 'hasCurrPhoto']].forEach(([slot, flag]) => {
-                        if (!n[slot] && o[slot] && n[flag] !== false) n[slot] = o[slot];
+                        const gp = window.BSA && window.BSA.gaugePhotos;
+                        // 번호가 다르면 다른 기기가 사진을 바꾼 것 — 옛 사진을 붙이지 않고 새 번호 사진을 받는다
+                        const ok = gp ? gp.canCarryLocalPhoto(o, n, slot) : (!n[slot] && o[slot] && n[flag] !== false);
+                        if (ok) n[slot] = o[slot];
                     });
                 });
             });
         });
+        if (typeof scheduleGaugePhotoHydrate === 'function') scheduleGaugePhotoHydrate();
         return nextMap;
     }
 
@@ -26838,6 +26859,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             initialY: document.getElementById('crackGaugeInitialY')?.value || '',
             prevPhoto: window._crackGaugePrevPhoto || '',
             currPhoto: window._crackGaugeCurrPhoto || '',
+            prevPhotoId: crackMonitorUiPhotoId('gauge', 'prev'),
+            currPhotoId: crackMonitorUiPhotoId('gauge', 'curr'),
             readings
         });
     }
@@ -26857,6 +26880,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             initialLengthMm: document.getElementById('crackTipInitialLength')?.value || '',
             prevPhoto: window._crackTipPrevPhoto || '',
             currPhoto: window._crackTipCurrPhoto || '',
+            prevPhotoId: crackMonitorUiPhotoId('tip', 'prev'),
+            currPhotoId: crackMonitorUiPhotoId('tip', 'curr'),
             readings
         });
     }
@@ -26877,9 +26902,50 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         window._crackGaugeCurrPhoto = gauge.currPhoto || '';
         window._crackTipPrevPhoto = tip.prevPhoto || '';
         window._crackTipCurrPhoto = tip.currPhoto || '';
+        // 불러온 사진과 번호 — 사진을 안 바꾸고 저장하면 번호를 이어 쓴다(crackMonitorUiPhotoId)
+        window._crackMonitorUiPhotoIds = {
+            'gauge:prev': { id: gauge.prevPhotoId || '', src: gauge.prevPhoto || '' },
+            'gauge:curr': { id: gauge.currPhotoId || '', src: gauge.currPhoto || '' },
+            'tip:prev': { id: tip.prevPhotoId || '', src: tip.prevPhoto || '' },
+            'tip:curr': { id: tip.currPhotoId || '', src: tip.currPhoto || '' }
+        };
         renderCrackGaugeReadingRows(gauge.readings);
         renderCrackTipReadingRows(tip.readings);
         renderCrackMonitorPhotoFrames();
+        // 번호만 있고 사진이 아직 안 올라온 칸 — IndexedDB·클라우드에서 받아 채운다
+        if (defect && typeof ensureGaugePhotosLoadedFor === 'function') {
+            const want = Object.values(window._crackMonitorUiPhotoIds).some((v) => v.id && !v.src);
+            if (want) {
+                ensureGaugePhotosLoadedFor(defect).then((n) => {
+                    if (!n) return;
+                    const ids = window._crackMonitorUiPhotoIds || {};
+                    const g2 = normalizeCrackGaugeLog(defect.crackGaugeLog);
+                    const t2 = normalizeCrackTipLog(defect.crackTipLog);
+                    const fill = (k, varName, log, slot) => {
+                        const cur = ids[k];
+                        if (!cur || !cur.id || cur.src || window[varName]) return;
+                        if (log[slot + 'Id'] !== cur.id || !log[slot]) return;
+                        cur.src = log[slot];
+                        window[varName] = log[slot];
+                    };
+                    fill('gauge:prev', '_crackGaugePrevPhoto', g2, 'prevPhoto');
+                    fill('gauge:curr', '_crackGaugeCurrPhoto', g2, 'currPhoto');
+                    fill('tip:prev', '_crackTipPrevPhoto', t2, 'prevPhoto');
+                    fill('tip:curr', '_crackTipCurrPhoto', t2, 'currPhoto');
+                    renderCrackMonitorPhotoFrames();
+                }).catch(() => {});
+            }
+        }
+    }
+
+    /** 창의 사진이 불러온 그대로면 그 번호, 바꿨거나 지웠으면 '' (새 사진은 저장 뒤 IndexedDB로 옮기며 번호를 받는다) */
+    function crackMonitorUiPhotoId(kind, slot) {
+        const cur = (window._crackMonitorUiPhotoIds || {})[kind + ':' + slot];
+        if (!cur || !cur.id) return '';
+        const now = kind === 'gauge'
+            ? (slot === 'prev' ? window._crackGaugePrevPhoto : window._crackGaugeCurrPhoto)
+            : (slot === 'prev' ? window._crackTipPrevPhoto : window._crackTipCurrPhoto);
+        return (now || '') === (cur.src || '') ? cur.id : '';
     }
 
     function setCrackMonitorPhotoState(kind, slot, dataUrl) {
@@ -41638,6 +41704,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
             // --- 균열 게이지·팁 누적 측정 (정밀·정기·진단, 1·2·3종 모두 — 기록이 있을 때만, 한글과 같이 맨 뒤) ---
             try {
+                if (typeof ensureGaugePhotosLoaded === 'function') await ensureGaugePhotosLoaded(currentBldgId);
                 const crackPagesHtml = buildReportCrackMonitorPagesHtml(bldg, currentBldgId, reportTitleHeader, compName);
                 if (crackPagesHtml) {
                     reportPagesHtml += crackPagesHtml;
@@ -42646,6 +42713,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             ensureDefectPhotosLoaded, manifestAdds, counters,
             mergeStampHeader, remapStampNode, hwpxHeaderState
         } = ctx;
+        // 비교사진은 IndexedDB·클라우드에 있다 — 한글에 넣기 전에 메모리로 채운다
+        if (typeof ensureGaugePhotosLoaded === 'function') await ensureGaugePhotosLoaded(bldgId);
         const crackFloorsData = buildHwpxCrackMonitorFloorsData(bldg, bldgId);
         const { items, slots } = collectHwpxCrackMonitorExportItems(bldg, bldgId, crackFloorsData, getFloorLabel);
         if (!items.length || !slots.length) return;
@@ -50363,6 +50432,289 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         return null;
     }
 
+    // --- 균열게이지·팁 비교사진: localStorage 저장본 밖으로(IndexedDB + 클라우드), 2026-09-30 ---
+    // 순수 규칙은 js/core/gauge-photo-store.js. 사진은 측정지 사진과 같은 저장(str_건물_번호)을 쓴다.
+    // 상태 변수는 window에 둔다 — 앱 초기화 중(TDZ) 저장·불러오기에서 불려도 안전하게.
+    function gaugePhotoApi() {
+        return (window.BSA && window.BSA.gaugePhotos) || null;
+    }
+
+    function gaugeVerifiedSet() {
+        if (!window.__bsaGaugeVerified) window.__bsaGaugeVerified = new Set();
+        return window.__bsaGaugeVerified;
+    }
+
+    /** 기기 저장용 — IndexedDB에 확인된 비교사진만 빼고 번호만 남긴다(확인 전 사진은 그대로) */
+    function gaugeStripForLocal(rec, stats) {
+        const gp = gaugePhotoApi();
+        if (!gp || !rec || (!rec.crackGaugeLog && !rec.crackTipLog)) return rec;
+        const verified = gaugeVerifiedSet();
+        const r = gp.stripForLocalSave(rec, (pid) => verified.has(pid));
+        if (stats) {
+            stats.stripped += r.stripped;
+            stats.inlineLeft += r.inlineLeft;
+        }
+        if (gp.hydrateTasksOf(rec).length) scheduleGaugePhotoHydrate();
+        return r.rec;
+    }
+
+    /** 게이지 기록이 있는 모든 결함·비파괴 항목 — cb(rec, floorKey, bldgId, kind) */
+    function forEachGaugePhotoRecord(cb, onlyBldgId) {
+        const visit = (map, kind) => {
+            Object.keys(map || {}).forEach((key) => {
+                if (onlyBldgId && !key.startsWith(onlyBldgId + '_')) return;
+                const bldg = findBuildingOfFloorKey(key);
+                const bldgId = bldg ? bldg.id : (onlyBldgId || String(key).split('_')[0]);
+                (map[key] || []).forEach((rec) => {
+                    if (rec && (rec.crackGaugeLog || rec.crackTipLog)) cb(rec, key, bldgId, kind);
+                });
+            });
+        };
+        visit(window.state.ndtData, 'ndt');
+        visit(window.state.defects, 'pin');
+    }
+
+    // 이름은 문자열 그대로 쓴다(const는 초기화 전에 불리면 TDZ 오류)
+    function openLocalBackupDb() {
+        if (window.__bsaLocalBackupDb) return window.__bsaLocalBackupDb;
+        window.__bsaLocalBackupDb = new Promise((resolve, reject) => {
+            if (!window.indexedDB) { reject(new Error('IndexedDB 없음')); return; }
+            const req = indexedDB.open('bsa-local-backups', 1);
+            req.onupgradeneeded = () => {
+                const d = req.result;
+                if (!d.objectStoreNames.contains('blobs')) d.createObjectStore('blobs');
+            };
+            req.onsuccess = () => resolve(req.result);
+            req.onerror = () => reject(req.error);
+        });
+        window.__bsaLocalBackupDb.catch(() => { window.__bsaLocalBackupDb = null; });
+        return window.__bsaLocalBackupDb;
+    }
+    async function localBackupGet(key) {
+        const d = await openLocalBackupDb();
+        return new Promise((resolve, reject) => {
+            const req = d.transaction('blobs', 'readonly').objectStore('blobs').get(key);
+            req.onsuccess = () => resolve(req.result || null);
+            req.onerror = () => reject(req.error);
+        });
+    }
+    async function localBackupPut(key, value) {
+        const d = await openLocalBackupDb();
+        return new Promise((resolve, reject) => {
+            const tx = d.transaction('blobs', 'readwrite');
+            tx.objectStore('blobs').put(value, key);
+            tx.oncomplete = () => resolve(true);
+            tx.onerror = () => reject(tx.error);
+        });
+    }
+
+    /**
+     * 옮기기 전 기기 저장본 1회 백업(IndexedDB bsa-local-backups/blobs, 'pre-gauge-photo-migration:회사').
+     * 이미 있으면 그대로. 쓰고 다시 읽어 같아야 true — 아니면 옮기지 않는다.
+     * 되살리기(콘솔): window.restorePreGaugePhotoMigrationBackup()
+     */
+    async function ensurePreGaugeMigrationBackup() {
+        const cid = window.state.companyId || '';
+        const key = 'pre-gauge-photo-migration:' + (cid || 'local');
+        try {
+            const have = await localBackupGet(key);
+            if (have && typeof have.raw === 'string') return true;
+            const raw = localStorage.getItem(getLocalStorageStateKey(cid));
+            if (typeof raw !== 'string' || !raw) return true; // 저장본이 없으면 백업할 것도 없다
+            const entry = { raw, savedAt: Date.now(), companyId: cid, storageKey: getLocalStorageStateKey(cid) };
+            await localBackupPut(key, entry);
+            const back = await localBackupGet(key);
+            const ok = !!(back && back.raw === raw);
+            if (ok) console.info('[비교사진] 옮기기 전 기기 저장본을 백업했습니다:', key, raw.length + '자');
+            return ok;
+        } catch (e) {
+            console.warn('[비교사진] 옮기기 전 백업 실패 — 옮기지 않습니다:', e);
+            return false;
+        }
+    }
+
+    window.restorePreGaugePhotoMigrationBackup = async function () {
+        const cid = window.state.companyId || '';
+        const entry = await localBackupGet('pre-gauge-photo-migration:' + (cid || 'local'));
+        if (!entry || typeof entry.raw !== 'string') { console.warn('백업 없음'); return false; }
+        localStorage.setItem(entry.storageKey || getLocalStorageStateKey(cid), entry.raw);
+        console.info('옮기기 전 저장본을 되돌렸습니다. 새로고침하세요.');
+        return true;
+    };
+
+    function gaugePhotoKeyOf(bldgId, pid) {
+        return getStrengthPhotoDocId(bldgId, pid);
+    }
+
+    function uploadGaugePhotoToCloud(bldgId, pid, url) {
+        if (typeof persistPhotoToCloud !== 'function' || !pid || !gaugePhotoApi().isInlineImage(url)) return;
+        try {
+            if (!db || !window.state.companyId) return;
+        } catch (_e) { return; }
+        persistPhotoToCloud(gaugePhotoKeyOf(bldgId, pid), url).catch((e) => {
+            console.warn('[비교사진] 클라우드 올리기 실패(다음 실행 때 다시):', pid, e);
+        });
+    }
+
+    /**
+     * 저장본의 data URL 비교사진을 IndexedDB로 옮긴다. 쓰고 → 다시 읽어 같으면 → 번호를 붙이고 확인 표시.
+     * 확인이 안 되면 data URL을 그대로 둔다(저장본에 남음). 옮긴 게 있으면 다시 저장해 자리를 비운다.
+     */
+    async function migrateInlineGaugePhotos() {
+        const gp = gaugePhotoApi();
+        if (!gp || typeof idbSet !== 'function' || typeof idbGet !== 'function') return 0;
+        if (window.__bsaGaugeMigrating) { window.__bsaGaugeMigrateAgain = true; return 0; }
+        window.__bsaGaugeMigrating = true;
+        let moved = 0;
+        try {
+            const verified = gaugeVerifiedSet();
+            const tasks = [];
+            forEachGaugePhotoRecord((rec, key, bldgId, kind) => {
+                gp.migrationTasksOf(rec, (pid) => verified.has(pid)).forEach((slot) => tasks.push({ rec, key, bldgId, kind, slot }));
+            });
+            if (!tasks.length) return 0;
+            if (!(await ensurePreGaugeMigrationBackup())) return 0;
+            const touched = new Map();
+            for (const t of tasks) {
+                const log = t.rec[t.slot.log];
+                const url = t.slot.url;
+                if (!log || log[t.slot.slot] !== url) continue;
+                const pid = log[t.slot.idField] || gp.newPhotoId();
+                const docKey = gaugePhotoKeyOf(t.bldgId, pid);
+                const wrote = await idbSet('photos', docKey, url);
+                const back = wrote ? await idbGet('photos', docKey) : null;
+                if (back !== url) {
+                    console.warn('[비교사진] IndexedDB 확인 실패 — 저장본에 그대로 둡니다:', docKey);
+                    continue;
+                }
+                if (log[t.slot.slot] !== url) continue; // 쓰는 사이 사용자가 사진을 바꿈
+                if (log[t.slot.idField] !== pid) {
+                    log[t.slot.idField] = pid;
+                    touched.set(t.rec, t);
+                }
+                verified.add(pid);
+                if (!window._photoCache) window._photoCache = {};
+                window._photoCache[docKey] = url;
+                try { _idbPersistedPhotoKeys.add(docKey); } catch (_e) { /* 초기화 전 */ }
+                uploadGaugePhotoToCloud(t.bldgId, pid, url);
+                moved += 1;
+            }
+            touched.forEach((t) => {
+                // 번호가 다른 기기로 가도록 수정 시각을 올리고 층을 올린다
+                if (t.kind === 'ndt') touchNdtUpdatedAt(t.rec);
+                else touchDefectUpdatedAt(t.rec);
+                if (typeof markFloorKeyDirty === 'function') markFloorKeyDirty(t.key);
+            });
+            if (moved) {
+                console.info('[비교사진] 사진 ' + moved + '장을 IndexedDB로 옮겼습니다(기기 저장본에서 뺌).');
+                saveStateToLocalStorage();
+            }
+            return moved;
+        } catch (e) {
+            console.warn('[비교사진] 옮기기 실패(저장본은 그대로):', e);
+            return moved;
+        } finally {
+            window.__bsaGaugeMigrating = false;
+            if (window.__bsaGaugeMigrateAgain) {
+                window.__bsaGaugeMigrateAgain = false;
+                scheduleGaugePhotoMigrate();
+            }
+        }
+    }
+    window.migrateInlineGaugePhotos = migrateInlineGaugePhotos;
+
+    function scheduleGaugePhotoMigrate() {
+        if (window.__bsaGaugeMigrateTimer) return;
+        window.__bsaGaugeMigrateTimer = setTimeout(() => {
+            window.__bsaGaugeMigrateTimer = null;
+            migrateInlineGaugePhotos();
+        }, 400);
+    }
+
+    /** 번호만 있고 메모리에 없는 비교사진을 IndexedDB(없으면 클라우드)에서 채운다. 채운 장수 반환 */
+    async function ensureGaugePhotosLoadedFor(rec, bldgIdHint) {
+        const gp = gaugePhotoApi();
+        if (!gp || !rec) return 0;
+        const tasks = gp.hydrateTasksOf(rec);
+        if (!tasks.length) return 0;
+        let bldgId = bldgIdHint || '';
+        if (!bldgId) {
+            forEachGaugePhotoRecord((r, key, bid) => { if (r === rec) bldgId = bid; });
+        }
+        if (!bldgId) return 0;
+        const verified = gaugeVerifiedSet();
+        let filled = 0;
+        for (const t of tasks) {
+            const docKey = gaugePhotoKeyOf(bldgId, t.pid);
+            let url = null;
+            let fromIdb = false;
+            try {
+                const local = await idbGet('photos', docKey);
+                if (typeof local === 'string' && local.length > 32) { url = local; fromIdb = true; }
+            } catch (_e) { /* 아래 클라우드 */ }
+            if (!url) url = await loadStrengthPhotoDataUrl(bldgId, t.pid);
+            if (!url) continue;
+            const log = rec[t.log];
+            if (!log || log[t.idField] !== t.pid || log[t.slot]) continue;
+            log[t.slot] = url;
+            filled += 1;
+            if (fromIdb) {
+                verified.add(t.pid);
+                uploadGaugePhotoToCloud(bldgId, t.pid, url);
+            } else if (gp.isInlineImage(url)) {
+                const ok = await idbSet('photos', docKey, url);
+                if (ok && (await idbGet('photos', docKey)) === url) verified.add(t.pid);
+            }
+        }
+        return filled;
+    }
+
+    /** 한 건물(없으면 전부)의 비교사진을 메모리로 — 한글·PDF 내보내기 전에 기다린다 */
+    async function ensureGaugePhotosLoaded(bldgId) {
+        const list = [];
+        forEachGaugePhotoRecord((rec, key, bid) => list.push([rec, bid]), bldgId || null);
+        let filled = 0;
+        for (const [rec, bid] of list) {
+            try { filled += await ensureGaugePhotosLoadedFor(rec, bid); } catch (e) {
+                console.warn('[비교사진] 불러오기 실패:', e);
+            }
+        }
+        return filled;
+    }
+    window.ensureGaugePhotosLoaded = ensureGaugePhotosLoaded;
+
+    function scheduleGaugePhotoHydrate() {
+        if (window.__bsaGaugeHydrateTimer) return;
+        window.__bsaGaugeHydrateTimer = setTimeout(async () => {
+            window.__bsaGaugeHydrateTimer = null;
+            const n = await ensureGaugePhotosLoaded(null).catch(() => 0);
+            if (!n) return;
+            try {
+                if (typeof renderCrackMonitorPhotoFrames === 'function' && typeof isNdtCrackMonitorModalOpen === 'function'
+                    && isNdtCrackMonitorModalOpen()) renderCrackMonitorPhotoFrames();
+                if (state.currentTab === 'tab-ndt' && typeof renderNdtSummaryTable === 'function') renderNdtSummaryTable();
+            } catch (_e) { /* 화면 갱신만 */ }
+        }, 300);
+    }
+
+    /** 앱 시작: 번호만 남은 사진 채우기 → 저장본 data URL 옮기기 → 아직 안 올라간 사진 클라우드로 */
+    function scheduleGaugePhotoStartup() {
+        setTimeout(async () => {
+            try {
+                await ensureGaugePhotosLoaded(null);
+                await migrateInlineGaugePhotos();
+                const verified = gaugeVerifiedSet();
+                forEachGaugePhotoRecord((rec, key, bid) => {
+                    gaugePhotoApi().slotsOf(rec).forEach((sl) => {
+                        if (sl.pid && verified.has(sl.pid)) uploadGaugePhotoToCloud(bid, sl.pid, sl.url);
+                    });
+                });
+            } catch (e) {
+                console.warn('[비교사진] 시작 정리 실패:', e);
+            }
+        }, 1500);
+    }
+
     // --- 콘크리트 반발경도 R값 측정지 사진 저장(전경사진과 동일한 패턴: IndexedDB + 클라우드) ---
     // 위치 슬롯(strengthSlots[i])마다 photoId 하나만 들고, 실제 사진 데이터는 여기 저장한다.
     function getStrengthPhotoDocId(bldgId, photoId) {
@@ -50444,7 +50796,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     /** 비파괴 항목·구역이 쓰는 사진 id 전부 — 측정지 사진 + 현장 사진 */
     function strengthPhotoIdsOfItem(item) {
         const slots = (item && Array.isArray(item.strengthSlots)) ? item.strengthSlots : [];
-        return slots.map((s) => s && s.photoId).filter(Boolean).concat(ndtFieldPhotoIdsOf(item));
+        const gp = window.BSA && window.BSA.gaugePhotos;
+        // 균열게이지·팁 비교사진도 같은 저장(str_건물_번호) — 삭제 보류·되살리기 재업로드·백업 보호를 같이 탄다
+        const gauge = gp ? gp.photoIdsOf(item) : [];
+        return slots.map((s) => s && s.photoId).filter(Boolean).concat(ndtFieldPhotoIdsOf(item), gauge);
     }
 
     function collectStrengthPhotoIdsInBuilding(bldgId) {
@@ -50456,6 +50811,14 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 (map[k] || []).forEach((item) => strengthPhotoIdsOfItem(item).forEach((p) => used.add(p)));
             });
         });
+        // 예전 방식(균열 결함에 붙은 게이지 기록)의 비교사진도 쓰는 중으로 센다
+        const gp = window.BSA && window.BSA.gaugePhotos;
+        if (gp) {
+            Object.keys(window.state.defects || {}).forEach((k) => {
+                if (!k.startsWith(prefix)) return;
+                (window.state.defects[k] || []).forEach((d) => gp.photoIdsOf(d).forEach((p) => used.add(p)));
+            });
+        }
         return used;
     }
 

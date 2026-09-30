@@ -55,6 +55,8 @@ function run({ quota, now }) {
         function persistUserDefectPinPresetsLocal() {}
         function scheduleSyncUserDefectPinPresets() {}
         function scheduleSyncToFirebase() { ctx.calls.sync++; }
+        function gaugeStripForLocal(r) { return r; }
+        function scheduleGaugePhotoMigrate() {}
         ${fnSrc}
         saveStateToLocalStorage();
         return { notified: _localStorageSaveFailedNotified, failedAt: _localStorageSaveFailedAt };
