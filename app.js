@@ -33115,6 +33115,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     /** 목록에서 빠진 사진(IndexedDB/클라우드/캐시)만 지운다. 남은 사진은 ID가 그대로라 건드리지 않는다. */
     async function pruneRemovedDefectPhotos(oldIds, newIds) {
         const keep = new Set((Array.isArray(newIds) ? newIds : []).filter(Boolean));
+        // 다른 결함(다른 점검의 같은 id 결함 등)이 아직 쓰는 사진은 남긴다(2026-09-30)
+        if (typeof photoIdsUsedByOtherDefects === 'function' && (Array.isArray(oldIds) ? oldIds : []).some((pid) => pid && !keep.has(pid))) {
+            photoIdsUsedByOtherDefects(null).forEach((pid) => keep.add(pid));
+        }
         const jobs = [];
         for (const photoDocId of new Set((Array.isArray(oldIds) ? oldIds : []).filter(Boolean))) {
             if (keep.has(photoDocId)) continue;
@@ -54741,7 +54745,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     // 반환값: 삭제 실패 건수. 실패해도 예외를 던지지 않지만, 호출부에서 사용자에게 알릴 수 있도록 건수를 반환한다.
     // ids: 결함의 사진 ID 목록. 옛 자리 번호 0..count도 같이 지운다 — 목록이 덜 내려온 기기에서도
     // 남는 사진이 없게.
-    async function deletePhotosForDefect(defectId, count, kind, ids) {
+    async function deletePhotosForDefect(defectId, count, kind, ids, keepIds) {
         if (!count) return 0;
         const companyPhotos = (db && window.state.companyId)
             ? db.collection('safety_app').doc(getCompanyDocId()).collection('photos')
@@ -54751,6 +54755,16 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const cloudIds = [];
         const targets = new Set((Array.isArray(ids) ? ids : []).filter(Boolean));
         for (let i = 0; i < count; i++) targets.add(getPhotoDocId(defectId, i, kind));
+        // 다른 결함이 아직 쓰는 사진은 지우지 않는다(2026-09-30 영일연립: 두 점검에 같은 id 결함이 있어,
+        // 금회차 쪽 복제 행을 지우자 같은 사진 번호(결함id_0)를 쓰던 전차 사진이 서버에서 지워짐)
+        if (keepIds && keepIds.size) {
+            for (const pid of Array.from(targets)) {
+                if (keepIds.has(pid)) {
+                    targets.delete(pid);
+                    console.warn('[사진] 다른 결함이 쓰는 사진이라 지우지 않음:', pid);
+                }
+            }
+        }
         for (const photoDocId of targets) {
             _idbPersistedPhotoKeys.delete(photoDocId);
             if (window._cloudSyncedPhotoIds) window._cloudSyncedPhotoIds.delete(photoDocId);
@@ -54789,12 +54803,29 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         return job;
     }
 
+    /** 이 기기에 있는 결함 중 d(같은 객체) 말고 다른 결함이 쓰는 사진 ID — 모든 점검·층 */
+    function photoIdsUsedByOtherDefects(d) {
+        const used = new Set();
+        const defects = (window.state && window.state.defects) || {};
+        Object.keys(defects).forEach((k) => {
+            (defects[k] || []).forEach((e) => {
+                if (!e || e === d) return;
+                const nCur = Math.max((e.photoIds || []).length, (e.photos || []).length);
+                const nPrev = Math.max((e.prevRoundPhotoIds || []).length, (e.prevRoundPhotos || []).length);
+                defectPhotoIdList(e, nCur).forEach((pid) => { if (pid) used.add(pid); });
+                defectPhotoIdList(e, nPrev, 'prev').forEach((pid) => { if (pid) used.add(pid); });
+            });
+        });
+        return used;
+    }
+
     async function runDeleteAllPhotosForDefect(d) {
         let fail = 0;
+        const keepIds = photoIdsUsedByOtherDefects(d);
         const curCount = (d.photos && d.photos.length) || (d.photoIds && d.photoIds.length) || 0;
         const prevCount = (d.prevRoundPhotos && d.prevRoundPhotos.length) || (d.prevRoundPhotoIds && d.prevRoundPhotoIds.length) || 0;
-        if (curCount > 0) fail += await deletePhotosForDefect(d.id, curCount, undefined, d.photoIds);
-        if (prevCount > 0) fail += await deletePhotosForDefect(d.id, prevCount, 'prev', d.prevRoundPhotoIds);
+        if (curCount > 0) fail += await deletePhotosForDefect(d.id, curCount, undefined, d.photoIds, keepIds);
+        if (prevCount > 0) fail += await deletePhotosForDefect(d.id, prevCount, 'prev', d.prevRoundPhotoIds, keepIds);
         return fail;
     }
 
