@@ -5144,8 +5144,8 @@ document.addEventListener('DOMContentLoaded', () => {
             if (inspector) contactBits.push(inspector);
             if (phone) contactBits.push(phone);
             const contactLine = contactBits.length
-                ? `담당 ${contactBits.join(' · ')}`
-                : '담당자·연락처 미등록';
+                ? `현장 담당자 ${contactBits.join(' · ')}`
+                : '현장 담당자·연락처 미등록';
             const addrLine = addr || '주소 미등록';
             const safeSite = escapeHtml(siteKey);
             // 최신 회차 건물(목록 정렬 기준) — 현장 목록에서 바로 수정 가능
