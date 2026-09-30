@@ -34,14 +34,15 @@
     const AXIS_SEP = '/';
     const DEFAULT_PREFIX = { col: 'X', row: 'Y' };
     /**
-     * 번호 방식(2026-09-30): 없음/'num' = 숫자(1, 2, 3 — 예전 그대로), 'upper' = A, B, C, 'lower' = a, b, c.
-     * 글자는 엑셀 열 이름처럼 이어짐(z 다음 aa, ab …). 시작 번호 1 = a, 2 = b.
+     * 번호 방식(2026-09-30): 없음/'num' = 숫자(1, 2, 3 — 예전 그대로), 'upper' = A, B, C.
+     * 글자는 엑셀 열 이름처럼 이어짐(Z 다음 AA, AB …). 시작 번호 1 = A, 2 = B.
+     * 소문자(a, b, c)는 잠깐 있다가 뺌(사용자 요청: 대문자) — 저장된 'lower'는 대문자로 읽는다.
      * 숫자 그룹은 저장할 때 numbering 키가 아예 없다(예전 데이터 모양 그대로).
      */
-    const NUMBERINGS = ['num', 'upper', 'lower'];
+    const NUMBERINGS = ['num', 'upper'];
 
     function normalizeNumbering(v) {
-        return v === 'upper' || v === 'lower' ? v : 'num';
+        return v === 'upper' || v === 'lower' ? 'upper' : 'num'; // 옛 'lower' → 대문자
     }
 
     /** 1 → a, 26 → z, 27 → aa (lower=false면 대문자). 1보다 작으면 숫자 그대로 */
@@ -61,7 +62,7 @@
     function groupSeqLabel(group, n) {
         const g = group || {};
         const mode = normalizeNumbering(g.numbering);
-        const body = mode === 'num' ? String(n) : seqToLetters(n, mode === 'lower');
+        const body = mode === 'num' ? String(n) : seqToLetters(n, false);
         return `${g.prefix == null ? '' : g.prefix}${body}`;
     }
 

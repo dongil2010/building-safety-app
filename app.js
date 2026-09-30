@@ -35023,13 +35023,12 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     ${eg ? `
                     <div class="grid-panel-row">
                         <label>머리글 <input type="text" data-f="prefix" value="${gridEsc(eg.prefix)}" maxlength="6" style="width:52px"></label>
-                        <label>시작 번호 <input type="number" data-f="start" value="${eg.start}" step="1" style="width:56px" title="글자 번호면 1 = a(A), 2 = b(B)"></label>
+                        <label>시작 번호 <input type="number" data-f="start" value="${eg.start}" step="1" style="width:56px" title="글자 번호면 1 = A, 2 = B"></label>
                     </div>
                     <div class="grid-panel-row">
-                        <label>번호 <select data-f="numbering" title="선 이름 번호 방식 — 글자는 z 다음 aa, ab …">
+                        <label>번호 <select data-f="numbering" title="선 이름 번호 방식 — 글자는 Z 다음 AA, AB …">
                             <option value="num"${G.normalizeNumbering(eg.numbering) === 'num' ? ' selected' : ''}>숫자 1, 2, 3</option>
-                            <option value="upper"${eg.numbering === 'upper' ? ' selected' : ''}>대문자 A, B, C</option>
-                            <option value="lower"${eg.numbering === 'lower' ? ' selected' : ''}>소문자 a, b, c</option>
+                            <option value="upper"${G.normalizeNumbering(eg.numbering) === 'upper' ? ' selected' : ''}>대문자 A, B, C</option>
                         </select></label>
                     </div>
                     <div class="grid-panel-row">
