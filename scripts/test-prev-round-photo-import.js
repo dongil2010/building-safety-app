@@ -134,6 +134,15 @@ const writeAt = fn.indexOf('ids = appendCurrentRoundPhotosToDefect(t, urls, keys
 assert.ok(writeAt > reAt && !/await /.test(fn.slice(reAt, writeAt)), '다시 찾은 뒤 쓰기까지 기다림 없음');
 assert.ok(fn.includes('const notLanded = written.filter(') && fn.includes('넣지 못한 결함'), '끝나고 목록에 들어갔는지 확인·보고');
 assert.ok(!fn.includes('const t = m.tgt;'), '계획 때 잡은 옛 객체를 그대로 쓰지 않음');
+// 전차(가져올 회차)는 읽기만: 기기 데이터에 합치지 않음, 복사본으로 맞춤
+assert.ok(!/refreshBuildingFloorsFromServer\(\s*src\b/.test(fn) && !fn.includes('for (const b of [src, bldg])'), '전차 층을 기기 데이터에 합치지 않음');
+assert.ok(fn.includes('srcView = await readPrevRoundSourceFloorsReadOnly(src);') && fn.includes('const list = srcView.byCode[code] || [];'), '전차는 읽기 전용 복사본');
+const ro = app.slice(app.indexOf('async function readPrevRoundSourceFloorsReadOnly('), at);
+assert.ok(!/mergeFloorBundleIntoState|markFloorKeyDirty|saveStateToLocalStorage|state\.defects\[[^\]]+\]\s*=/.test(ro), '읽기 전용 함수는 아무것도 쓰지 않음');
+assert.ok(ro.includes('JSON.parse(JSON.stringify(d))'), '복사본');
+// 기존 사진 빈 칸 금지(결함 수정 창 저장 때 기존 사진이 지워짐)
+assert.ok(fn.includes('if (mode !== \'prev\' && !currentPhotosAllResolvable(t)) {') && fn.includes('기존 사진 보호'), '기존 사진을 못 불러오면 건너뜀');
+assert.ok(app.includes("if (existingSrc.some((u) => !u)) throw new Error("), '빈 칸이면 쓰지 않음');
 // app-dialog: 고르기 창
 const dlg = fs.readFileSync(path.join(root, 'js/shared/app-dialog.js'), 'utf8');
 const AD = require(path.join(root, 'js/shared/app-dialog.js'));

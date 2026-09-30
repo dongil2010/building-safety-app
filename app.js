@@ -20570,6 +20570,16 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
      * 현차 결함 t의 사진(출력되는 사진) 맨 뒤에 붙인다. 기존 사진 ID·순서는 그대로.
      * 사진 ID 단위 병합(photoState)·사진 변경 시각을 결함 수정 창과 같은 방식으로 남긴다.
      */
+    /** 기존 현차 사진이 모두 이미지로 있는가(인라인 또는 캐시) — 빈 칸이 있으면 붙이지 않는다 */
+    function currentPhotosAllResolvable(t) {
+        const api = prevRoundPhotoMatchApi();
+        const n = api.photoCount(t);
+        const ids = defectPhotoIdList(t, n);
+        const inline = Array.isArray(t.photos) ? t.photos : [];
+        const cache = window._photoCache || {};
+        return ids.every((pid, i) => !!(inline[i] || cache[pid]));
+    }
+
     function appendCurrentRoundPhotosToDefect(t, urls, srcKeys) {
         const api = prevRoundPhotoMatchApi();
         const n = api.photoCount(t);
@@ -20577,7 +20587,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const cache = window._photoCache || {};
         const inline = Array.isArray(t.photos) ? t.photos : [];
         const newIds = assignDefectPhotoIds(t.id, urls, null);
-        const photos = beforeIds.map((pid, i) => inline[i] || cache[pid] || null).concat(urls);
+        const existingSrc = beforeIds.map((pid, i) => inline[i] || cache[pid] || null);
+        if (existingSrc.some((u) => !u)) throw new Error('기존 사진을 불러오지 못함');   // currentPhotosAllResolvable 로 먼저 거름
+        const photos = existingSrc.concat(urls);
         t.photoIds = beforeIds.concat(newIds);
         t.photos = photos;
         if (Array.isArray(t.photoUrls)) {
@@ -20591,6 +20603,45 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         (srcKeys || []).forEach((k) => { if (k && !done.includes(k)) done.push(k); });
         t.copiedPhotoSrcIds = done;
         return newIds;
+    }
+
+    /**
+     * 가져올 회차(전차) 결함을 **읽기 전용 복사본**으로 받는다. 서버 층 문서를 읽되 기기 데이터(state)에
+     * 합치지 않고, 이 기기에만 있는 결함은 복사본으로 덧붙인다. 전차 쪽에는 아무것도 쓰지 않는다.
+     * 사진 주소(urlsById)만 사진 캐시에 넣는다(읽기용).
+     */
+    async function readPrevRoundSourceFloorsReadOnly(src) {
+        const byCode = {};
+        const failed = [];
+        const clone = (d) => JSON.parse(JSON.stringify(d));
+        const canServer = !!(db && window.state.companyId) && !(typeof navigator !== 'undefined' && navigator.onLine === false);
+        for (const code of buildingFloorCodesForBackup(src)) {
+            const local = (state.defects[`${src.id}_${code}`] || []).filter((d) => d && d.id);
+            let server = null;
+            if (canServer) {
+                try {
+                    const bundle = await readFloorBundleStrict(src, code);
+                    if (bundle) {
+                        seedPhotoCacheFromUrlMap(bundle.photos && bundle.photos.urlsById);
+                        const deleted = new Set(((bundle.markings && bundle.markings.deletedIds) || []).map(String));
+                        server = ((bundle.markings && bundle.markings.items) || []).filter((d) => d && d.id && !deleted.has(String(d.id)));
+                    }
+                } catch (e) {
+                    console.warn('[전차 사진 옮기기] 전차 층을 받지 못함(기기 자료로 맞춤):', code, e);
+                    failed.push(code);
+                }
+            }
+            if (server) {
+                const seen = new Set(server.map((d) => d.id));
+                byCode[code] = server.map(clone).concat(local.filter((d) => !seen.has(d.id)).map(clone));
+            } else {
+                byCode[code] = local.map(clone);
+            }
+        }
+        const res = !canServer
+            ? { ok: false, skipped: (typeof navigator !== 'undefined' && navigator.onLine === false) ? 'offline' : 'nologin', failed: [] }
+            : { ok: !failed.length, skipped: null, failed };
+        return { byCode, res };
     }
 
     window.openPrevRoundPhotoImport = async function(bldgId, modeArg) {
@@ -20638,16 +20689,18 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const srcLabel = formatSurveyRoundLabel(srcKey);
         const curLabel = formatSurveyRoundLabel(curKey);
 
-        // 두 점검 모든 층을 서버 최신으로(최근에 받았으면 생략) — 안 열어 본 층도 맞추려고
+        // 현차: 모든 층을 서버 최신으로(최근에 받았으면 생략) — 안 열어 본 층도 맞추려고.
+        // 전차(가져올 회차)는 **읽기만** 한다 — 기기 데이터에 합치지도, 동기화 표시도 하지 않는다(2026-09-30).
         window.showLoading('전차·현차 결함 받는 중…');
         let freshNote = '';
+        let srcView = null;
         try {
             const results = [];
-            for (const b of [src, bldg]) {
-                let res;
-                try { res = await refreshBuildingFloorsFromServer(b); } catch (_e) { res = { ok: false, skipped: null, failed: ['?'] }; }
-                results.push(res);
-            }
+            srcView = await readPrevRoundSourceFloorsReadOnly(src);
+            results.push(srcView.res);
+            let res;
+            try { res = await refreshBuildingFloorsFromServer(bldg); } catch (_e) { res = { ok: false, skipped: null, failed: ['?'] }; }
+            results.push(res);
             if (results.some((r) => r && r.skipped === 'offline')) {
                 freshNote = '\n※ 인터넷이 끊겨 이 기기에 있는 자료로만 맞췄습니다.';
             } else if (results.some((r) => r && !r.ok && !r.skipped)) {
@@ -20660,7 +20713,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const floorMap = mapPrevRoundFloorsToTarget(src, bldg);
         const srcByFloor = {};
         Object.keys(floorMap).forEach((code) => {
-            const list = state.defects[`${src.id}_${code}`] || [];
+            const list = srcView.byCode[code] || [];
             const to = floorMap[code];
             srcByFloor[to] = (srcByFloor[to] || []).concat(list);
         });
@@ -20735,6 +20788,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const changedKeys = new Set();
         const lost = [];
         const written = [];
+        const existingUnloaded = [];
         // ⚠️ 결함 객체는 기다리는 사이(사진 불러오기·올리기) 동기화·서버 받기가 state.defects 를 새 객체로
         // 바꿔 끼우면 목록에서 떨어져 나간다 — 옛 객체에 쓰면 사진이 사라지고 「넣었습니다」만 뜬다
         // (2026-09-30 실데이터 「금회차 조사항목에 사진이 없음」). 쓰기 직전에 id로 지금 목록의 결함을 다시 찾는다.
@@ -20758,8 +20812,26 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 const got = await loadPrevRoundSourcePhotos(m.src, indexes);
                 if (got.failed) loadFailed.push({ m, failed: got.failed, total: indexes.length });
                 if (!got.urls.length) continue;
+                if (mode !== 'prev') {
+                    // 기존 사진을 먼저 다 불러 둔다 — 빈 칸(null)이 남으면 결함 수정 창이 기존 사진을 못 보여 주고,
+                    // 저장하면 그 사진이 지워진다(2026-09-30). 다 못 불러오면 이 결함은 건드리지 않는다.
+                    const pre = liveTarget(m);
+                    if (pre) {
+                        const n0 = api.photoCount(pre);
+                        const ids0 = defectPhotoIdList(pre, n0);
+                        const inl0 = Array.isArray(pre.photos) ? pre.photos : [];
+                        for (let k = 0; k < n0; k++) {
+                            if (inl0[k] || (window._photoCache && window._photoCache[ids0[k]])) continue;
+                            try { await loadPhotoByIdWithCloudFallback(ids0[k]); } catch (_e) { /* 아래에서 확인 */ }
+                        }
+                    }
+                }
                 t = liveTarget(m);   // 여기서부터 쓰기까지는 기다리지 않는다
                 if (!t) { lost.push(m); continue; }
+                if (mode !== 'prev' && !currentPhotosAllResolvable(t)) {
+                    existingUnloaded.push(m);
+                    continue;
+                }
                 let ids;
                 if (mode === 'prev') {
                     if (api.photoCount(t, 'prev') > 0) continue;
@@ -20824,6 +20896,12 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             result += `\n\n[불러오지 못한 사진 ${failedPhotos}장 — 전차 점검에서 사진이 열리는지 확인해 주세요${mode === 'cur' ? '. 다시 누르면 이 사진만 다시 시도합니다' : ''}]\n` + listLines(
                 loadFailed,
                 (f) => `  ${prevRoundPhotoDefectLabel(f.m.src, f.m.floor, bldg)} · ${f.failed}/${f.total}장`
+            );
+        }
+        if (existingUnloaded.length) {
+            result += `\n\n[건너뛴 결함 ${existingUnloaded.length}건 — 기존 현차 사진을 불러오지 못해 건드리지 않음(기존 사진 보호). 인터넷 연결 뒤 다시 눌러 주세요]\n` + listLines(
+                existingUnloaded,
+                (m) => `  현차 NO.${api.noKey(m.tgt)} (${prevRoundPhotoFloorLabel(m.floor, bldg)})`
             );
         }
         if (lost.length) {
