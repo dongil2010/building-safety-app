@@ -63,7 +63,8 @@ function testStrengthAngleZeroKept() {
 
 function testNdtEditsBumpUpdatedAt() {
     const group = extractFunction('function touchNdtDispGroup(');
-    assert.ok(/group\.updatedAt = Date\.now\(\)/.test(group));
+    // 늘 앞으로만 가는 시각(삭제 vs 수정 판정, 2026-09-30 test-delete-vs-edit)
+    assert.ok(/group\.updatedAt = nextRecordStamp\(group\)/.test(group));
     assert.ok(/markFloorKeyDirty\(key\)/.test(group), '구역 수정은 층을 동기화 대상에 넣어야 한다');
     const moved = extractFunction('function touchMovedNdtItems(');
     assert.ok(/touchNdtUpdatedAt\(single\)/.test(moved) && /selectedNdtIds\.has\(g\.id\)\) g\.updatedAt/.test(moved));
@@ -104,7 +105,7 @@ function testImportUsesFloorAtClick() {
 
 function testFloorDeleteTombstonesDispGroups() {
     const fn = extractFunction('window.deleteExistingFloorDrawing = async function');
-    const tomb = fn.indexOf('trackNdtDeletion(floorKey, g.id)');
+    const tomb = fn.indexOf('trackNdtDeletion(floorKey, g.id, g, { wallClock: true })');
     const del = fn.indexOf('delete window.state.ndtDisplacementGroups[floorKey]');
     assert.ok(tomb > 0 && del > tomb, '구역을 지우기 전에 묘비를 남겨야 한다');
 }

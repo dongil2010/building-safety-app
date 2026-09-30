@@ -3850,8 +3850,9 @@ document.addEventListener('DOMContentLoaded', () => {
             if (defect.fieldAt && typeof defect.fieldAt === 'object') defect.fieldAtThrough = now;
         }
         defect.updatedAt = now;
-        // 내용·사진 변경 시각 — 삭제 부활 판정에 사용 (위치만 옮긴 경우는 제외)
-        defect.contentUpdatedAt = now;
+        // 내용·사진 변경 시각 — 삭제 부활 판정에 사용 (위치만 옮긴 경우는 제외).
+        // 늘 앞으로만 간다: 시계가 빠른 기기가 찍은 값보다 작으면, 이 수정을 본 뒤 지운 것으로 오판된다.
+        defect.contentUpdatedAt = Math.max(now, (Number(defect.contentUpdatedAt) || 0) + 1);
     }
 
     /** 도면 위 마킹 위치/꼭짓점만 옮김 — 삭제보다 늦어도 부활시키지 않음 */
@@ -3860,8 +3861,13 @@ document.addEventListener('DOMContentLoaded', () => {
         defect.positionUpdatedAt = Date.now();
     }
 
+    // 늘 앞으로만 — touchDefectUpdatedAt의 contentUpdatedAt과 같은 이유(삭제 vs 수정 판정)
+    function nextRecordStamp(rec) {
+        return Math.max(Date.now(), (Number(rec && rec.updatedAt) || 0) + 1);
+    }
+
     function touchNdtUpdatedAt(item) {
-        if (item) item.updatedAt = Date.now();
+        if (item) item.updatedAt = nextRecordStamp(item);
     }
 
     /**
@@ -3896,7 +3902,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function touchNdtDispGroup(group) {
         if (!group) return;
-        group.updatedAt = Date.now();
+        group.updatedAt = nextRecordStamp(group);
         const key = (state.currentBuildingId && state.currentFloor)
             ? `${state.currentBuildingId}_${state.currentFloor}`
             : '';
@@ -3915,14 +3921,27 @@ document.addEventListener('DOMContentLoaded', () => {
         return window.BSA.syncMerge.getDefectPositionUpdatedAt(rec);
     }
 
-    function trackDefectDeletion(floorKey, defectId) {
+    /**
+     * 묘비 값 — 지울 때 본 기록의 마지막 수정 시각(sync-merge tombstoneStampFor). 다른 사람이 그 뒤에
+     * 고친 사본은 병합에서 살아난다(삭제 vs 수정 = 수정 우선, 2026-09-30).
+     * rec: 지운 기록. 목록에서 이미 뺀 뒤 부르는 곳은 넘겨야 한다(안 넘기면 층에서 찾는다).
+     * opts.wallClock: 지운 시각을 쓴다(예전 규칙 — 그 뒤 수정만 살림). 층 삭제·다른 층으로 옮김처럼
+     *   "기록이 틀려서"가 아니라 자리를 치우는 삭제에 쓴다. 기록을 못 찾아도 이 규칙으로 떨어진다.
+     */
+    function tombstoneValue(rec, kind, opts) {
+        if (!rec || (opts && opts.wallClock)) return Date.now();
+        return window.BSA.syncMerge.tombstoneStampFor(rec, kind);
+    }
+
+    function trackDefectDeletion(floorKey, defectId, rec, opts) {
         if (!floorKey || !defectId) return;
         ensureSyncMetaState();
+        if (!rec) rec = ((window.state.defects || {})[floorKey] || []).find((d) => d && d.id === defectId) || null;
         const set = new Set(window.state.deletedDefectIds[floorKey] || []);
         set.add(defectId);
         window.state.deletedDefectIds[floorKey] = Array.from(set);
         if (!window.state.deletedDefectAt[floorKey]) window.state.deletedDefectAt[floorKey] = {};
-        window.state.deletedDefectAt[floorKey][defectId] = Date.now();
+        window.state.deletedDefectAt[floorKey][defectId] = tombstoneValue(rec, 'pin', opts);
     }
 
     /**
@@ -3945,14 +3964,19 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    function trackNdtDeletion(floorKey, itemId) {
+    // 비파괴 항목·부동침하/부재처짐 구역 공용 (묘비 값은 trackDefectDeletion 설명 참고)
+    function trackNdtDeletion(floorKey, itemId, rec, opts) {
         if (!floorKey || !itemId) return;
         ensureSyncMetaState();
+        if (!rec) {
+            const find = (map) => ((map || {})[floorKey] || []).find((x) => x && x.id === itemId);
+            rec = find(window.state.ndtData) || find(window.state.ndtDisplacementGroups) || null;
+        }
         const set = new Set(window.state.deletedNdtIds[floorKey] || []);
         set.add(itemId);
         window.state.deletedNdtIds[floorKey] = Array.from(set);
         if (!window.state.deletedNdtAt[floorKey]) window.state.deletedNdtAt[floorKey] = {};
-        window.state.deletedNdtAt[floorKey][itemId] = Date.now();
+        window.state.deletedNdtAt[floorKey][itemId] = tombstoneValue(rec, 'ndt', opts);
     }
 
     /**
@@ -4101,6 +4125,7 @@ document.addEventListener('DOMContentLoaded', () => {
         );
         // 합친 층의 결함은 새 객체 — 칸 비교 기준을 합친 값으로 다시 잡는다(서버에서 온 값을 내 수정으로 오인하지 않게)
         seedDefectContentSnaps(result.defects, Object.keys(serverMap || {}));
+        handleRevivedRecords(result.revived, 'pin', result.defects);
         return result;
     }
 
@@ -4150,10 +4175,13 @@ document.addEventListener('DOMContentLoaded', () => {
         return window.purgeDeletedDefectCodes();
     };
 
+    // 비파괴 항목과 부동침하·부재처짐 구역 둘 다 이걸로 합친다(묘비 공용)
     function mergeNdtDataMaps(serverMap, localMap, serverDeleted, localDeleted, serverDeletedAt, localDeletedAt) {
-        return window.BSA.syncMerge.mergeNdtDataMaps(
+        const result = window.BSA.syncMerge.mergeNdtDataMaps(
             serverMap, localMap, serverDeleted, localDeleted, serverDeletedAt, localDeletedAt
         );
+        handleRevivedRecords(result.revived, 'ndt', result.ndtData);
+        return result;
     }
 
     // saveStateToLocalStorage에서 IndexedDB로 옮겨 저장한 도면/사진을 다시 불러와
@@ -7773,9 +7801,9 @@ document.addEventListener('DOMContentLoaded', () => {
         if (defects.length) {
             defects.slice().forEach((d) => {
                 if (!d || !d.id) return;
-                if (typeof trackDefectDeletion === 'function') trackDefectDeletion(floorKey, d.id);
+                if (typeof trackDefectDeletion === 'function') trackDefectDeletion(floorKey, d.id, d, { wallClock: true });
                 if (typeof deleteAllPhotosForDefect === 'function') {
-                    try { deleteAllPhotosForDefect(d); } catch (_e) { /* ignore */ }
+                    try { deleteAllPhotosForDefect(d, { deferCloudFloorKey: floorKey }); } catch (_e) { /* ignore */ }
                 }
             });
             delete window.state.defects[floorKey];
@@ -7785,22 +7813,22 @@ document.addEventListener('DOMContentLoaded', () => {
         if (ndtItems.length) {
             ndtItems.slice().forEach((item) => {
                 if (!item || !item.id) return;
-                if (typeof trackNdtDeletion === 'function') trackNdtDeletion(floorKey, item.id);
+                if (typeof trackNdtDeletion === 'function') trackNdtDeletion(floorKey, item.id, item, { wallClock: true });
             });
             delete window.state.ndtData[floorKey];
             // 층 삭제 전 자동 백업으로 되살릴 수 있으니 이 기기 사본은 남기고 클라우드만 정리
-            releaseStrengthPhotosOfItems(bldg.id, ndtItems.slice(), { keepLocal: true });
+            releaseStrengthPhotosOfItems(bldg.id, ndtItems.slice(), { keepLocal: true, deferCloudFloorKey: floorKey });
         }
         if (window.state.ndtDisplacementGroups && window.state.ndtDisplacementGroups[floorKey]) {
             // 부동침하·부재처짐 구역도 묘비를 남긴다 — 안 남기면 서버에 있던 구역이 다음 동기화에서
             // 되살아난다(2026-09-21 감사). 구역 묘비는 비파괴 핀과 같은 deletedNdtIds를 쓴다.
             const removedGroups = (window.state.ndtDisplacementGroups[floorKey] || []).slice();
             removedGroups.forEach((g) => {
-                if (g && g.id && typeof trackNdtDeletion === 'function') trackNdtDeletion(floorKey, g.id);
+                if (g && g.id && typeof trackNdtDeletion === 'function') trackNdtDeletion(floorKey, g.id, g, { wallClock: true });
             });
             delete window.state.ndtDisplacementGroups[floorKey];
             // 구역 현장 사진 — 비파괴 항목과 같이 이 기기 사본은 남기고 클라우드만 정리
-            releaseStrengthPhotosOfItems(bldg.id, removedGroups, { keepLocal: true });
+            releaseStrengthPhotosOfItems(bldg.id, removedGroups, { keepLocal: true, deferCloudFloorKey: floorKey });
         }
 
         if (bldg.floorsList) {
@@ -9949,7 +9977,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         // 이미 동기화된 구역일 수 있다 — 지우면 묘비, 지점만 빼면 시각을 올려야 서버의 옛 구역이 이기지 않는다
         const removeGroup = () => {
             groups.splice(gi, 1);
-            trackNdtDeletion(entry.key, entry.groupId);
+            trackNdtDeletion(entry.key, entry.groupId, group);
             if (getActiveNdtDispGroup() && getActiveNdtDispGroup().id === entry.groupId) {
                 setActiveNdtDispGroup(null);
             }
@@ -10144,7 +10172,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 setActiveNdtDispGroup(null);
             }
         }
-        releaseStrengthPhotosOfItems(state.currentBuildingId, removedRecs, { keepLocal: true });
+        releaseStrengthPhotosOfItems(state.currentBuildingId, removedRecs, { keepLocal: true, deferCloudFloorKey: key });
         if (typeof markFloorKeyDirty === 'function') markFloorKeyDirty(key);
         selectedNdtIds.clear();
         updateNdtSelectionBar();
@@ -14753,7 +14781,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const removedNdt = (state.ndtData[key] || []).filter(x => x.id === id);
         state.ndtData[key] = (state.ndtData[key] || []).filter(x => x.id !== id);
         // 측정지 사진 클라우드 사본 정리 — 되돌리기·일괄 복원 대비로 이 기기 사본은 남긴다
-        releaseStrengthPhotosOfItems(state.currentBuildingId, removedNdt, { keepLocal: true });
+        releaseStrengthPhotosOfItems(state.currentBuildingId, removedNdt, { keepLocal: true, deferCloudFloorKey: key });
         if (typeof markFloorKeyDirty === 'function') markFloorKeyDirty(key);
         saveStateToLocalStorage();
         drawNdtCanvas();
@@ -18221,8 +18249,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (group.points.length === 0) {
             state.ndtDisplacementGroups[key] = groups.filter(g => g.id !== groupId);
             // 마지막 지점을 지워 구역까지 사라지는 경우도 묘비가 필요하다
-            trackNdtDeletion(key, groupId);
-            releaseStrengthPhotosOfItems(state.currentBuildingId, [group], { keepLocal: true });
+            trackNdtDeletion(key, groupId, group);
+            releaseStrengthPhotosOfItems(state.currentBuildingId, [group], { keepLocal: true, deferCloudFloorKey: key });
             closeNdtDisplacementGroupEditModal();
         } else {
             group.updatedAt = Date.now();
@@ -18241,9 +18269,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const removedGroups = (state.ndtDisplacementGroups[key] || []).filter(g => g.id === groupId);
         state.ndtDisplacementGroups[key] = (state.ndtDisplacementGroups[key] || []).filter(g => g.id !== groupId);
         // 묘비를 남기지 않으면 병합 때 서버에 남아있던 구역이 그대로 되살아난다
-        trackNdtDeletion(key, groupId);
+        trackNdtDeletion(key, groupId, removedGroups[0]);
         // 구역 현장 사진 클라우드 정리 — 되돌리기 대비로 이 기기 사본은 남긴다
-        releaseStrengthPhotosOfItems(state.currentBuildingId, removedGroups, { keepLocal: true });
+        releaseStrengthPhotosOfItems(state.currentBuildingId, removedGroups, { keepLocal: true, deferCloudFloorKey: key });
         if (window._activeNdtDispGroupId === groupId) setActiveNdtDispGroup(null);
         if (typeof markFloorKeyDirty === 'function') markFloorKeyDirty(key);
         saveStateToLocalStorage();
@@ -21563,7 +21591,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             // 두 층에 동시에 존재하고, 외부(EXT)는 도면이 여러 개라도 조사표를
             // 하나로 합치므로 같은 결함이 표에 두 번 나온다.
             // (2026-09-20: 외부 조사표가 다시 생기던 원인)
-            trackDefectDeletion(srcKey, defect.id);
+            // 옮김은 자리 치우기 — 원래 층 옛 사본을 고친 게 있어도 되살리면 두 층에 겹친다(지운 시각 규칙)
+            trackDefectDeletion(srcKey, defect.id, defect, { wallClock: true });
             // 반대로 도착 층에 옛 묘비가 남아 있으면 되돌려 찍을 때 사라진다.
             // 사용자가 방금 여기에 찍었으므로 묘비를 풀고, 서버가 들고 있는
             // 묘비보다 나중임을 알 수 있게 내용 시각도 올린다.
@@ -21907,8 +21936,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         });
         beforeById.forEach((d, id) => {
             if (afterById.has(id)) return;
-            trackDefectDeletion(key, id);
-            deleteAllPhotosForDefect(d).catch(() => {});
+            trackDefectDeletion(key, id, d);
+            deleteAllPhotosForDefect(d, { deferCloudFloorKey: key }).catch(() => {});
         });
         if (typeof markFloorKeyDirty === 'function') markFloorKeyDirty(key);
         if (photosNotRestored > 0) {
@@ -33915,7 +33944,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             formatNo: (n) => formatDefectNoSeq(n),
             removeExtra: (e) => {
                 removeIds.add(e.id);
-                trackDefectDeletion(key, e.id);
+                trackDefectDeletion(key, e.id, e);
             },
             touch: touchMergedDefect
         });
@@ -36421,8 +36450,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 // deleteSelectedDefects/removeSingleDefectRecord와 동일하게 tombstone을 남겨야
                 // 몇 초 뒤 동기화 merge 때 서버에 남아있던(아직 삭제 전파 안 된) 결함이 되살아나지
                 // 않는다. 이게 빠져서 "전체 초기화"만 삭제 후 잠시 뒤 다시 나타나는 버그가 있었다.
-                trackDefectDeletion(key, d.id);
-                deleteAllPhotosForDefect(d);
+                trackDefectDeletion(key, d.id, d);
+                deleteAllPhotosForDefect(d, { deferCloudFloorKey: key });
             });
             state.defects[key] = [];
             selectedDefectIds.clear();
@@ -47994,8 +48023,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             ? new Set(state.defects[key].filter((d) => d && d.groupId === affectedGroupId && d.id !== id).map((d) => d.id))
             : null;
         if (target) {
-            trackDefectDeletion(key, id);
-            deleteAllPhotosForDefect(target).then(failCount => {
+            trackDefectDeletion(key, id, target);
+            deleteAllPhotosForDefect(target, { deferCloudFloorKey: key }).then(failCount => {
                 if (failCount > 0) {
                     window.showToast(`사진 ${failCount}건 삭제에 실패했습니다. 네트워크 상태를 확인해 주세요.`, 'warning', 5000);
                 }
@@ -48007,8 +48036,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             ? state.defects[key].filter((e) => e && e.surveyExtra && e.mergeSourceId === id && e.groupId === target.groupId)
             : [];
         linkedMergeExtras.forEach((e) => {
-            trackDefectDeletion(key, e.id);
-            deleteAllPhotosForDefect(e).catch(() => {});
+            trackDefectDeletion(key, e.id, e);
+            deleteAllPhotosForDefect(e, { deferCloudFloorKey: key }).catch(() => {});
         });
         const linkedMergeExtraIds = new Set(linkedMergeExtras.map((e) => e.id));
         state.defects[key] = state.defects[key].filter(d => d.id !== id && !linkedMergeExtraIds.has(d.id));
@@ -50208,6 +50237,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
      * - opts.keepLocal: 되살릴 수 있는 삭제(항목·층 삭제 → 되돌리기·일괄 복원)는 이 기기 사본을 남겨,
      *   항목이 살아나면 동기화가 다시 올린다. 건물 영구 삭제는 사본까지 지운다.
      * - 남은 다른 항목(층 섞임으로 복제된 항목 등)이 같은 사진을 쓰면 지우지 않는다.
+     * - opts.deferCloudFloorKey: 클라우드 사본을 바로 지우지 않고 미룬 삭제 대기열에 넣는다(2026-09-30,
+     *   다른 사람 수정으로 항목이 되살아날 수 있어서 — processDeferredPhotoDeletes).
      * 실수로 지워도 Storage 삭제 파일 보관(30일)으로 콘솔에서 되살릴 수 있다.
      */
     function releaseStrengthPhotosOfItems(bldgId, removedItems, opts) {
@@ -50216,6 +50247,26 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         removedItems.forEach((it) => strengthPhotoIdsOfItem(it).forEach((p) => pids.add(p)));
         if (!pids.size) return 0;
         const stillUsed = collectStrengthPhotoIdsInBuilding(bldgId);
+        const deferFloorKey = opts && opts.deferCloudFloorKey;
+        if (deferFloorKey) {
+            // 되살아날 수 있는 삭제 — 클라우드 사본은 미룬 삭제 대기열로(deletePhotosForDefect와 같은 이유)
+            const free = Array.from(pids).filter((pid) => !stillUsed.has(pid));
+            if (!(opts && opts.keepLocal)) {
+                free.forEach((pid) => {
+                    const key = getStrengthPhotoDocId(bldgId, pid);
+                    if (window._photoCache) delete window._photoCache[key];
+                    idbDelete('photos', key).catch(() => {});
+                });
+            }
+            enqueueDeferredPhotoDelete({
+                kind: 'ndt',
+                floorKey: deferFloorKey,
+                bldgId,
+                recIds: removedItems.map((it) => it && it.id).filter(Boolean),
+                pids: free
+            });
+            return free.length;
+        }
         let released = 0;
         pids.forEach((pid) => {
             if (stillUsed.has(pid)) return;
@@ -53860,7 +53911,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const purge = (map, list) => {
             if (!map || !list.length) return 0;
             const ids = new Set(list.map((t) => t.id));
-            ids.forEach((recId) => trackNdtDeletion(floorKey, recId));
+            // 중복 정리는 자리 치우기 — 되살리면 중복이 다시 생긴다(지운 시각 규칙)
+            ids.forEach((recId) => trackNdtDeletion(floorKey, recId, null, { wallClock: true }));
             const rest = (map[floorKey] || []).filter((it) => !(it && ids.has(it.id)));
             if (rest.length) {
                 map[floorKey] = rest;
@@ -54749,8 +54801,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     // 반환값: 삭제 실패 건수. 실패해도 예외를 던지지 않지만, 호출부에서 사용자에게 알릴 수 있도록 건수를 반환한다.
     // ids: 결함의 사진 ID 목록. 옛 자리 번호 0..count도 같이 지운다 — 목록이 덜 내려온 기기에서도
     // 남는 사진이 없게.
-    async function deletePhotosForDefect(defectId, count, kind, ids, keepIds) {
+    // opts.deferCloudFloorKey: 클라우드 사본은 지우지 않고 대기열에 넣는다(enqueueDeferredPhotoDelete).
+    async function deletePhotosForDefect(defectId, count, kind, ids, keepIds, opts) {
         if (!count) return 0;
+        const deferFloorKey = opts && opts.deferCloudFloorKey;
         const companyPhotos = (db && window.state.companyId)
             ? db.collection('safety_app').doc(getCompanyDocId()).collection('photos')
             : null;
@@ -54771,11 +54825,16 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         }
         for (const photoDocId of targets) {
             _idbPersistedPhotoKeys.delete(photoDocId);
-            if (window._cloudSyncedPhotoIds) window._cloudSyncedPhotoIds.delete(photoDocId);
+            // 미룬 삭제는 클라우드에 그대로 있다 — "올라가 있음" 표시를 남겨야 되살렸을 때 다시 올리지 않는다
+            if (!deferFloorKey && window._cloudSyncedPhotoIds) window._cloudSyncedPhotoIds.delete(photoDocId);
             localJobs.push(idbDelete('photos', photoDocId));
-            if (companyPhotos) cloudIds.push(photoDocId);
+            if (companyPhotos || deferFloorKey) cloudIds.push(photoDocId);
         }
         await Promise.all(localJobs);
+        if (deferFloorKey) {
+            enqueueDeferredPhotoDelete({ kind: 'pin', floorKey: deferFloorKey, recIds: [defectId], photoDocIds: cloudIds });
+            return 0;
+        }
         // 클라우드 삭제는 직렬 소배치 — Write stream exhausted 방지
         for (let i = 0; i < cloudIds.length; i++) {
             const photoDocId = cloudIds[i];
@@ -54796,11 +54855,13 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     }
 
     // 진행 중인 결함 사진 삭제 — 되돌리기로 되살린 사진은 삭제가 끝난 뒤 다시 올린다(restoreDefectPhotosAfterUndo)
-    function deleteAllPhotosForDefect(d) {
+    // opts.deferCloudFloorKey: 되살아날 수 있는 삭제(결함 삭제·층 삭제·되돌리기) — 이 기기 사본만 바로 지우고
+    // 클라우드 사본은 대기열로(processDeferredPhotoDeletes). 건물 영구 삭제는 옵션 없이 바로 지운다.
+    function deleteAllPhotosForDefect(d, opts) {
         if (!d) return Promise.resolve(0);
         const jobs = window._defectPhotoDeleteJobs || (window._defectPhotoDeleteJobs = new Map());
         const prevJob = jobs.get(d.id) || Promise.resolve();
-        const job = Promise.resolve(prevJob).catch(() => {}).then(() => runDeleteAllPhotosForDefect(d));
+        const job = Promise.resolve(prevJob).catch(() => {}).then(() => runDeleteAllPhotosForDefect(d, opts));
         jobs.set(d.id, job);
         const clear = () => { if (jobs.get(d.id) === job) jobs.delete(d.id); };
         job.then(clear, clear);
@@ -54823,14 +54884,270 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         return used;
     }
 
-    async function runDeleteAllPhotosForDefect(d) {
+    async function runDeleteAllPhotosForDefect(d, opts) {
         let fail = 0;
         const keepIds = photoIdsUsedByOtherDefects(d);
         const curCount = (d.photos && d.photos.length) || (d.photoIds && d.photoIds.length) || 0;
         const prevCount = (d.prevRoundPhotos && d.prevRoundPhotos.length) || (d.prevRoundPhotoIds && d.prevRoundPhotoIds.length) || 0;
-        if (curCount > 0) fail += await deletePhotosForDefect(d.id, curCount, undefined, d.photoIds, keepIds);
-        if (prevCount > 0) fail += await deletePhotosForDefect(d.id, prevCount, 'prev', d.prevRoundPhotoIds, keepIds);
+        if (curCount > 0) fail += await deletePhotosForDefect(d.id, curCount, undefined, d.photoIds, keepIds, opts);
+        if (prevCount > 0) fail += await deletePhotosForDefect(d.id, prevCount, 'prev', d.prevRoundPhotoIds, keepIds, opts);
         return fail;
+    }
+
+    /**
+     * 미룬 클라우드 사진 삭제 (2026-09-30 — 삭제 vs 수정 = 수정 우선).
+     * 지운 결함·비파괴 기록은 며칠 뒤 다른 사람의 오프라인 수정으로 되살아날 수 있다. 그때 사진이 이미
+     * 클라우드에서 지워졌으면 되살아난 기록의 사진이 다른 기기에서 깨진다. 또 오프라인에서 지우면 클라우드
+     * 삭제가 실패하고 다시 시도하지 않아 고아 사진이 남았다. 그래서 지울 때는 이 기기 사본만 지우고, 클라우드
+     * 사본은 이 대기열에 넣었다가 HOLD가 지난 뒤 **서버 층 문서에도 그 기록이 없을 때만** 지운다.
+     * 실패하면 대기열에 남아 다음 동기화가 다시 시도한다.
+     * 항목: { kind: 'pin'|'ndt', floorKey, recIds, photoDocIds(pin) | pids(ndt, 건물별 측정지·현장 사진 번호), at }
+     */
+    const DEFERRED_PHOTO_DELETE_HOLD_MS = 7 * 24 * 60 * 60 * 1000;
+    const DEFERRED_PHOTO_DELETE_MIN_INTERVAL_MS = 30 * 60 * 1000;
+    let _deferredPhotoDeleteRunning = false;
+    let _deferredPhotoDeleteLastRun = 0;
+
+    function deferredPhotoDeleteKey() {
+        const cid = (typeof getCompanyDocId === 'function' && getCompanyDocId()) || window.state.companyId || '';
+        return 'bsaDeferredPhotoDeletes:' + cid;
+    }
+
+    function loadDeferredPhotoDeletes() {
+        try {
+            const arr = JSON.parse(localStorage.getItem(deferredPhotoDeleteKey()) || '[]');
+            return Array.isArray(arr) ? arr.filter((e) => e && e.floorKey) : [];
+        } catch (_e) {
+            return [];
+        }
+    }
+
+    function saveDeferredPhotoDeletes(list) {
+        try {
+            if (list.length) localStorage.setItem(deferredPhotoDeleteKey(), JSON.stringify(list));
+            else localStorage.removeItem(deferredPhotoDeleteKey());
+        } catch (e) {
+            console.warn('[사진] 미룬 삭제 목록 저장 실패:', e);
+        }
+    }
+
+    function enqueueDeferredPhotoDelete(entry) {
+        if (!entry || !entry.floorKey) return;
+        const photos = entry.kind === 'ndt' ? entry.pids : entry.photoDocIds;
+        if (!Array.isArray(photos) || !photos.length) return;
+        const list = loadDeferredPhotoDeletes();
+        list.push(Object.assign({ at: Date.now() }, entry));
+        saveDeferredPhotoDeletes(list);
+    }
+
+    function findBuildingOfFloorKey(floorKey) {
+        const list = window.state.buildings || [];
+        let best = null;
+        list.forEach((b) => {
+            if (!b || !b.id || !String(floorKey).startsWith(b.id + '_')) return;
+            if (!best || b.id.length > best.id.length) best = b;
+        });
+        return best;
+    }
+
+    function recordIdsOfFloorBundle(bundle) {
+        const ids = new Set();
+        const add = (arr) => (arr || []).forEach((r) => { if (r && r.id) ids.add(r.id); });
+        if (bundle) {
+            add(bundle.markings && bundle.markings.items);
+            add(bundle.ndt && bundle.ndt.items);
+            add(bundle.ndt && bundle.ndt.displacementGroups);
+        }
+        return ids;
+    }
+
+    // 결함 목록이 쓰는 사진 ID 전부(photoIdsUsedByOtherDefects와 같은 셈법) — 미룬 삭제가 지우기 직전 다시 확인
+    function defectPhotoIdsOfList(list, into) {
+        (list || []).forEach((e) => {
+            if (!e) return;
+            const nCur = Math.max((e.photoIds || []).length, (e.photos || []).length);
+            const nPrev = Math.max((e.prevRoundPhotoIds || []).length, (e.prevRoundPhotos || []).length);
+            defectPhotoIdList(e, nCur).forEach((pid) => { if (pid) into.add(pid); });
+            defectPhotoIdList(e, nPrev, 'prev').forEach((pid) => { if (pid) into.add(pid); });
+        });
+        return into;
+    }
+
+    function strengthPhotoIdsOfFloorBundle(bundle) {
+        const used = new Set();
+        if (!bundle || !bundle.ndt) return used;
+        [bundle.ndt.items, bundle.ndt.displacementGroups].forEach((arr) => {
+            (arr || []).forEach((it) => strengthPhotoIdsOfItem(it).forEach((p) => used.add(p)));
+        });
+        return used;
+    }
+
+    async function processDeferredPhotoDeletes(options) {
+        const force = !!(options && options.force);
+        if (_deferredPhotoDeleteRunning) return;
+        if (!force && Date.now() - _deferredPhotoDeleteLastRun < DEFERRED_PHOTO_DELETE_MIN_INTERVAL_MS) return;
+        if (!db || !window.state.companyId || navigator.onLine === false) return;
+        const queue = loadDeferredPhotoDeletes();
+        if (!queue.length) return;
+        const now = Date.now();
+        const due = queue.filter((e) => now - (Number(e.at) || 0) >= DEFERRED_PHOTO_DELETE_HOLD_MS);
+        if (!due.length) return;
+        if (await isCloudPhotoWriteBlocked()) return;
+        _deferredPhotoDeleteRunning = true;
+        _deferredPhotoDeleteLastRun = now;
+        const done = new Set();
+        let deleted = 0;
+        let keptRevived = 0;
+        try {
+            const byFloor = new Map();
+            due.forEach((e) => {
+                if (!byFloor.has(e.floorKey)) byFloor.set(e.floorKey, []);
+                byFloor.get(e.floorKey).push(e);
+            });
+            for (const [floorKey, entries] of byFloor) {
+                const bldg = findBuildingOfFloorKey(floorKey);
+                // 건물 목록에 없으면 영구 삭제된 건물 — 서버 확인 없이 지운다
+                let serverIds = new Set();
+                let serverStrength = new Set();
+                // 다른 결함이 같은 사진 번호를 쓰면 지우지 않는다(photoIdsUsedByOtherDefects — 영일연립 사고).
+                // 7일 사이에 복제·가져오기로 새로 생긴 사용처도 있으니 지우기 직전에 다시 센다.
+                const usedPinPhotos = photoIdsUsedByOtherDefects(null);
+                if (bldg) {
+                    let bundle = null;
+                    try {
+                        bundle = await readFloorSyncBundle(bldg, floorKey.slice(bldg.id.length + 1));
+                    } catch (e) {
+                        console.warn('[사진] 미룬 삭제: 층 문서 조회 실패 — 다음에 다시:', floorKey, e);
+                        continue;
+                    }
+                    serverIds = recordIdsOfFloorBundle(bundle);
+                    serverStrength = strengthPhotoIdsOfFloorBundle(bundle);
+                    defectPhotoIdsOfList(bundle && bundle.markings && bundle.markings.items, usedPinPhotos);
+                }
+                const localIds = new Set();
+                [window.state.defects, window.state.ndtData, window.state.ndtDisplacementGroups].forEach((map) => {
+                    Object.keys(map || {}).forEach((k) => {
+                        if (bldg && !k.startsWith(bldg.id + '_')) return;
+                        (map[k] || []).forEach((r) => { if (r && r.id) localIds.add(r.id); });
+                    });
+                });
+                const localStrength = bldg ? collectStrengthPhotoIdsInBuilding(bldg.id) : new Set();
+                for (const e of entries) {
+                    const recIds = Array.isArray(e.recIds) ? e.recIds : [];
+                    let docIds;
+                    if (e.kind === 'ndt') {
+                        const bid = e.bldgId || (bldg && bldg.id);
+                        docIds = (e.pids || [])
+                            .filter((p) => !serverStrength.has(p) && !localStrength.has(p))
+                            .map((p) => getStrengthPhotoDocId(bid, p));
+                    } else {
+                        // 되살아난 결함(서버나 이 기기에 다시 있음)의 사진은 지우지 않는다
+                        docIds = recIds.some((id) => serverIds.has(id) || localIds.has(id))
+                            ? []
+                            : (e.photoDocIds || []).filter((pid) => {
+                                if (!usedPinPhotos.has(pid)) return true;
+                                console.warn('[사진] 미룬 삭제: 다른 결함이 쓰는 사진이라 지우지 않음:', pid);
+                                return false;
+                            });
+                    }
+                    if (!docIds.length) {
+                        keptRevived++;
+                        done.add(e);
+                        continue;
+                    }
+                    let failed = false;
+                    for (const docId of docIds) {
+                        try {
+                            await deleteCloudPhoto(docId);
+                            deleted++;
+                        } catch (err) {
+                            failed = true;
+                            console.warn('[사진] 미룬 삭제 실패 — 다음 동기화에 다시:', docId, err);
+                        }
+                    }
+                    if (!failed) done.add(e);
+                }
+            }
+        } finally {
+            _deferredPhotoDeleteRunning = false;
+            // 도는 동안 새로 들어온 항목을 잃지 않게 다시 읽어서 끝난 것만 뺀다
+            const doneKeys = new Set(Array.from(done).map((e) => JSON.stringify(e)));
+            saveDeferredPhotoDeletes(loadDeferredPhotoDeletes().filter((e) => !doneKeys.has(JSON.stringify(e))));
+        }
+        if (deleted || keptRevived) {
+            console.info(`[사진] 미룬 클라우드 삭제: ${deleted}장 지움, 되살아난 기록 ${keptRevived}건은 사진 유지`);
+        }
+    }
+
+    /**
+     * 병합에서 묘비를 이기고 되살아난 기록 처리(sync-merge collectRevived).
+     * - 이 기기의 수정이 살렸으면: 사진이 그새 클라우드에서 지워졌을 수 있어 이 기기 사본으로 다시 올린다
+     *   (클라우드에 있으면 문서만 읽고 끝).
+     * - 이 기기가 지운 게 다른 사람 수정으로 돌아왔으면: 알린다.
+     */
+    const _revivalHandled = new Set();
+    const _revivalNotice = { pin: [], ndt: [], timer: null };
+
+    function handleRevivedRecords(revived, kind, stateMap) {
+        if (!revived) return;
+        Object.keys(revived).forEach((floorKey) => {
+            (revived[floorKey] || []).forEach((r) => {
+                const tag = `${kind}:${floorKey}:${r.id}`;
+                if (_revivalHandled.has(tag)) return;
+                _revivalHandled.add(tag);
+                const rec = ((stateMap || {})[floorKey] || []).find((x) => x && x.id === r.id);
+                if (!rec) return;
+                if (r.keptLocal) {
+                    reuploadRevivedRecordPhotos(floorKey, rec, kind).catch((e) => {
+                        console.warn('[사진] 되살아난 기록 사진 다시 올리기 실패:', r.id, e);
+                    });
+                } else if (r.deletedHere) {
+                    _revivalNotice[kind].push(rec);
+                }
+            });
+        });
+        if ((_revivalNotice.pin.length || _revivalNotice.ndt.length) && !_revivalNotice.timer) {
+            _revivalNotice.timer = setTimeout(showRevivalNotice, 400);
+        }
+    }
+
+    function showRevivalNotice() {
+        const pins = _revivalNotice.pin.splice(0);
+        const ndts = _revivalNotice.ndt.splice(0);
+        _revivalNotice.timer = null;
+        const parts = [];
+        if (pins.length) {
+            const nos = pins.map((d) => String(d.groupNo || d.no || '').trim()).filter(Boolean);
+            const shown = nos.slice(0, 5).join(', ') + (nos.length > 5 ? ` 외 ${nos.length - 5}건` : '');
+            parts.push(`결함 ${pins.length}건${shown ? ` (${shown})` : ''}`);
+        }
+        if (ndts.length) parts.push(`비파괴 항목 ${ndts.length}건`);
+        if (!parts.length) return;
+        const msg = `삭제한 ${parts.join(', ')}이 다른 사람의 수정으로 복원되었습니다. 필요 없으면 다시 삭제하세요.`;
+        console.info('[동기화] ' + msg);
+        if (typeof window.showToast === 'function') window.showToast(msg, 'warning', 7000);
+    }
+
+    async function reuploadRevivedRecordPhotos(floorKey, rec, kind) {
+        if (!db || !window.state.companyId || navigator.onLine === false) return;
+        let docIds = [];
+        if (kind === 'ndt') {
+            const bldg = findBuildingOfFloorKey(floorKey);
+            if (!bldg) return;
+            docIds = strengthPhotoIdsOfItem(rec).map((p) => getStrengthPhotoDocId(bldg.id, p));
+        } else {
+            docIds = [].concat(rec.photoIds || [], rec.prevRoundPhotoIds || []).filter(Boolean);
+        }
+        for (const docId of docIds) {
+            const url = await resolveLocalPhotoUrl(docId);
+            if (typeof url !== 'string' || url.indexOf('data:') !== 0) continue; // 이 기기에 바이트가 없으면 할 수 있는 게 없다
+            const snap = await fetchPhotosDocIfAllowed(docId).catch(() => null);
+            if (!snap) continue; // 읽기 일시정지 등 — 모르면 건드리지 않는다
+            const data = snap.exists ? (snap.data() || {}) : {};
+            if (hasFirebaseStorageMeta(data)) continue; // 클라우드에 그대로 있다
+            unmarkPhotoOnStorage(docId);
+            await persistPhotoToCloud(docId, url, data);
+        }
     }
 
     async function deleteFloorDrawingsForBuilding(bldg, opts) {
@@ -55846,6 +56163,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 await ensureRasterTiersForSync(window.state.buildings);
             }
             await uploadFloorDrawingsForSync(window.state.buildings);
+            // 지운 기록의 클라우드 사진 — 보류 기간이 지났고 서버에서도 안 되살아난 것만(읽기만 하므로 기다리지 않는다)
+            processDeferredPhotoDeletes().catch((e) => console.warn('[사진] 미룬 삭제 처리 실패:', e));
             await hydrateLocalImagesFromIndexedDb();
             refreshCurrentBuildingFromState();
 

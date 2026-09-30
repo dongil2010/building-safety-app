@@ -261,7 +261,7 @@ testAppJsMoveWritesTombstone();
     const at = app.indexOf('function undoLastNdtDisplacementMark()');
     assert.ok(at > 0);
     const body = app.slice(at, app.indexOf('window.undoLastNdtDisplacementMark', at));
-    assert.ok(/trackNdtDeletion\(entry\.key, entry\.groupId\)/.test(body), '되돌리기로 구역을 지울 때 묘비가 없다 — 서버 구역이 되살아난다');
+    assert.ok(/trackNdtDeletion\(entry\.key, entry\.groupId, group\)/.test(body), '되돌리기로 구역을 지울 때 묘비가 없다 — 서버 구역이 되살아난다');
     assert.ok(/group\.updatedAt = Date\.now\(\)/.test(body), '되돌리기로 지점을 뺄 때 시각을 안 올린다');
 })();
 

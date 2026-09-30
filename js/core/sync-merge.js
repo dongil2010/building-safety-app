@@ -179,12 +179,39 @@
         return out;
     }
 
+    /**
+     * 삭제 vs 수정 — 2026-09-30: 삭제한 사람이 **못 본 수정**이 있으면 수정이 이긴다.
+     * 묘비 값(deletedAt)은 "지운 시각"이 아니라 tombstoneStampFor로 구한 "지울 때 본 수정 시각"이다.
+     * 그보다 나중 수정 시각을 가진 사본 = 지운 사람이 모르는 수정 → 살린다. 비교 규칙은 예전과 같아
+     * 옛 기기(지운 시각을 넣는 코드)와도 섞여 돌아간다.
+     */
     function recordSurvivesDelete(rec, deletedAt, kind) {
         if (!rec || !rec.id) return false;
         var ts = Number(deletedAt) || 0;
         if (ts <= 0) return false;
         if (kind === 'ndt') return getRecordUpdatedAt(rec, 'ndt') > ts;
         return getDefectContentUpdatedAt(rec) > ts;
+    }
+
+    /** 지울 때 묘비에 적을 값 — 이 기기가 본 마지막 수정 시각(0이면 1: 0은 "묘비 시각 없음"으로 읽힌다) */
+    function tombstoneStampFor(rec, kind) {
+        var t = kind === 'ndt' ? getRecordUpdatedAt(rec, 'ndt') : getDefectContentUpdatedAt(rec);
+        return Math.max(1, Number(t) || 0);
+    }
+
+    /**
+     * 병합에서 묘비를 이기고 살아난 기록. { 층키: [{ id, keptLocal, deletedHere }] }
+     * - keptLocal: 이 기기에 사본이 있었다(이 기기의 수정이 살렸다)
+     * - deletedHere: 이 기기가 지운 것(다른 사람 수정으로 되살아났다 — 알릴 대상)
+     */
+    function collectRevived(revived, key, deletedSet, activeIds, localById, localDeletedList) {
+        var localDel = new Set(localDeletedList || []);
+        var list = [];
+        deletedSet.forEach(function (id) {
+            if (!activeIds.has(id)) return;
+            list.push({ id: id, keptLocal: localById.has(id), deletedHere: localDel.has(id) });
+        });
+        if (list.length) revived[key] = list;
     }
 
     function mergePhotoArrays(primaryArr, secondaryArr) {
@@ -773,6 +800,7 @@
             Object.keys(mergedDeleted || {})
         ));
         var defects = {};
+        var revived = {};
 
         keys.forEach(function (key) {
             var delAt = mergedDeletedAt[key] || {};
@@ -811,6 +839,7 @@
             defects[key] = ordered;
 
             var activeIds = new Set(ordered.map(function (d) { return d.id; }));
+            collectRevived(revived, key, deletedSet, activeIds, localById, localDeleted && localDeleted[key]);
             var stillDeleted = [];
             var stillDeletedAt = {};
             deletedSet.forEach(function (id) {
@@ -824,7 +853,7 @@
             else delete mergedDeletedAt[key];
         });
 
-        return { defects: defects, deletedDefectIds: mergedDeleted, deletedDefectAt: mergedDeletedAt };
+        return { defects: defects, deletedDefectIds: mergedDeleted, deletedDefectAt: mergedDeletedAt, revived: revived };
     }
 
     function mergeNdtDataMaps(serverMap, localMap, serverDeleted, localDeleted, serverDeletedAt, localDeletedAt) {
@@ -844,6 +873,7 @@
             Object.keys(mergedDeleted || {})
         ));
         var ndtData = {};
+        var revived = {};
         keys.forEach(function (key) {
             ndtData[key] = mergeIdRecordArrays(
                 serverMap && serverMap[key],
@@ -853,6 +883,10 @@
                 mergedDeletedAt[key]
             );
             var activeIds = new Set((ndtData[key] || []).map(function (d) { return d && d.id; }).filter(Boolean));
+            var localById = new Map(((localMap && localMap[key]) || []).filter(function (r) { return r && r.id; })
+                .map(function (r) { return [r.id, r]; }));
+            collectRevived(revived, key, new Set(mergedDeleted[key] || []), activeIds, localById,
+                localDeleted && localDeleted[key]);
             var stillDeleted = (mergedDeleted[key] || []).filter(function (id) { return !activeIds.has(id); });
             if (stillDeleted.length) {
                 mergedDeleted[key] = stillDeleted;
@@ -866,7 +900,7 @@
                 delete mergedDeletedAt[key];
             }
         });
-        return { ndtData: ndtData, deletedNdtIds: mergedDeleted, deletedNdtAt: mergedDeletedAt };
+        return { ndtData: ndtData, deletedNdtIds: mergedDeleted, deletedNdtAt: mergedDeletedAt, revived: revived };
     }
 
     var api = {
@@ -889,6 +923,7 @@
         isOutdatedBuild: isOutdatedBuild,
         countKeptExistingOnImport: countKeptExistingOnImport,
         recordSurvivesDelete: recordSurvivesDelete,
+        tombstoneStampFor: tombstoneStampFor,
         mergePhotoArrays: mergePhotoArrays,
         collectPhotoSrcById: collectPhotoSrcById,
         alignPhotoSrcArrayToIds: alignPhotoSrcArrayToIds,

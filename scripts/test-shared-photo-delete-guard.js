@@ -9,7 +9,7 @@ const path = require('path');
 const app = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8');
 const run = app.slice(app.indexOf('async function runDeleteAllPhotosForDefect('), app.indexOf('async function deleteFloorDrawingsForBuilding('));
 assert.ok(run.includes('const keepIds = photoIdsUsedByOtherDefects(d);'), '결함 삭제: 다른 결함이 쓰는 사진 모음');
-assert.ok(run.includes("deletePhotosForDefect(d.id, curCount, undefined, d.photoIds, keepIds)") && run.includes("deletePhotosForDefect(d.id, prevCount, 'prev', d.prevRoundPhotoIds, keepIds)"));
+assert.ok(run.includes("deletePhotosForDefect(d.id, curCount, undefined, d.photoIds, keepIds, opts)") && run.includes("deletePhotosForDefect(d.id, prevCount, 'prev', d.prevRoundPhotoIds, keepIds, opts)"));
 const del = app.slice(app.indexOf('async function deletePhotosForDefect('), app.indexOf('function deleteAllPhotosForDefect('));
 const guardAt = del.indexOf('if (keepIds && keepIds.size)');
 assert.ok(guardAt > 0 && guardAt < del.indexOf('for (const photoDocId of targets)'), '지우기 전에 뺌');
