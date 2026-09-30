@@ -5,6 +5,8 @@
  *   await window.appConfirm(message, { title, okText, cancelText, danger })  → true(확인) / false(취소)
  *   await window.appAlert(message, { title })                                → (닫힐 때)
  *   await window.appPrompt(message, defaultValue, { title, okText })         → 문자열 / null(취소)
+ *   await window.appChoose(message, choices, { title, okText, defaultIndex }) → 고른 번호(0부터) / null(취소)
+ *       choices: [{ label, detail }] 또는 문자열 — 라디오 목록(2026-09-30)
  *   window.appDialog.isOpen() / .cancel()  — 안드로이드 뒤로가기 = 취소
  *
  * 키: Enter = 확인, Esc = 취소 (PC). 창이 떠 있는 동안 앱의 다른 키 단축키로는 안 흘러간다.
@@ -30,13 +32,28 @@
         return {
             kind: kind,
             message: msg,
-            title: opts.title || (kind === 'alert' ? '알림' : (kind === 'prompt' ? '입력' : (danger ? '주의' : '확인'))),
+            title: opts.title || (kind === 'alert' ? '알림' : (kind === 'prompt' ? '입력' : (kind === 'choose' ? '선택' : (danger ? '주의' : '확인')))),
             okText: opts.okText || '확인',
             cancelText: opts.cancelText || '취소',
             danger: !!danger,
             defaultValue: opts.defaultValue == null ? '' : String(opts.defaultValue),
-            placeholder: opts.placeholder || ''
+            placeholder: opts.placeholder || '',
+            choices: kind === 'choose' ? normalizeChoices(opts.choices) : [],
+            defaultIndex: kind === 'choose' ? clampIndex(opts.defaultIndex, opts.choices) : 0
         };
+    }
+
+    function normalizeChoices(list) {
+        return (Array.isArray(list) ? list : []).map(function (c) {
+            if (c && typeof c === 'object') return { label: String(c.label == null ? '' : c.label), detail: String(c.detail == null ? '' : c.detail) };
+            return { label: String(c == null ? '' : c), detail: '' };
+        });
+    }
+
+    function clampIndex(i, list) {
+        var n = Array.isArray(list) ? list.length : 0;
+        var v = parseInt(i, 10);
+        return (v >= 0 && v < n) ? v : 0;
     }
 
     var api = { normalizeOptions: normalizeOptions, DANGER_RE: DANGER_RE };
@@ -84,6 +101,15 @@
             body += '<input type="text" class="form-control bsa-dialog-input" autocomplete="off"' +
                 ' value="' + escapeHtml(o.defaultValue) + '" placeholder="' + escapeHtml(o.placeholder) + '">';
         }
+        if (o.kind === 'choose') {
+            body += '<div class="bsa-dialog-choices" role="radiogroup">' + o.choices.map(function (c, i) {
+                return '<label class="bsa-dialog-choice">' +
+                    '<input type="radio" name="bsaDialogChoice" value="' + i + '"' + (i === o.defaultIndex ? ' checked' : '') + '>' +
+                    '<span class="bsa-dialog-choice-text"><span class="bsa-dialog-choice-label">' + escapeHtml(c.label) + '</span>' +
+                    (c.detail ? '<span class="bsa-dialog-choice-detail">' + escapeHtml(c.detail) + '</span>' : '') +
+                    '</span></label>';
+            }).join('') + '</div>';
+        }
         var icon = o.danger ? 'fa-triangle-exclamation' : (o.kind === 'alert' ? 'fa-circle-info' : (o.kind === 'prompt' ? 'fa-pen' : 'fa-circle-question'));
         el.innerHTML =
             '<div class="modal-card bsa-dialog-card' + (o.danger ? ' is-danger' : '') + '" role="' + (o.kind === 'alert' ? 'alertdialog' : 'dialog') + '"' +
@@ -98,7 +124,8 @@
         el.classList.add('open');
         el.setAttribute('aria-hidden', 'false');
         document.documentElement.classList.add('bsa-dialog-open');
-        var focusEl = o.kind === 'prompt' ? el.querySelector('.bsa-dialog-input') : el.querySelector('[data-bsa-dialog="ok"]');
+        var focusEl = o.kind === 'prompt' ? el.querySelector('.bsa-dialog-input')
+            : (o.kind === 'choose' ? el.querySelector('input[name="bsaDialogChoice"]:checked') : el.querySelector('[data-bsa-dialog="ok"]'));
         setTimeout(function () {
             try { focusEl && focusEl.focus(); if (o.kind === 'prompt' && focusEl.select) focusEl.select(); } catch (_e) { /* ignore */ }
         }, 30);
@@ -122,9 +149,15 @@
         try {
             if (o.kind === 'confirm') return window.confirm(o.message);
             if (o.kind === 'prompt') return window.prompt(o.message, o.defaultValue);
+            if (o.kind === 'choose') {
+                var lines = o.choices.map(function (c, i) { return (i + 1) + ' = ' + c.label + (c.detail ? ' (' + c.detail + ')' : ''); });
+                var r = window.prompt(o.message + '\n\n' + lines.join('\n'), String(o.defaultIndex + 1));
+                var k = r == null ? -1 : parseInt(r, 10) - 1;
+                return (k >= 0 && k < o.choices.length) ? k : null;
+            }
             if (nativeAlert) nativeAlert(o.message);
         } catch (_e) { /* ignore */ }
-        return o.kind === 'confirm' ? false : (o.kind === 'prompt' ? null : undefined);
+        return o.kind === 'confirm' ? false : ((o.kind === 'prompt' || o.kind === 'choose') ? null : undefined);
     }
 
     function finish(ok) {
@@ -136,6 +169,9 @@
         else if (item.o.kind === 'prompt') {
             var inp = el && el.querySelector('.bsa-dialog-input');
             value = ok ? (inp ? inp.value : '') : null;
+        } else if (item.o.kind === 'choose') {
+            var picked = el && el.querySelector('input[name="bsaDialogChoice"]:checked');
+            value = (ok && picked) ? parseInt(picked.value, 10) : null;
         } else value = undefined;
         current = null;
         if (el) {
@@ -200,6 +236,11 @@
             if (o.defaultValue == null) o.defaultValue = defaultValue;
             return open('prompt', message, o);
         },
+        choose: function (message, choices, opts) {
+            var o = Object.assign({}, opts || {});
+            o.choices = choices;
+            return open('choose', message, o);
+        },
         isOpen: function () { return !!current; },
         /** 안드로이드 뒤로가기 등: 떠 있는 창을 취소로 닫는다 */
         cancel: function () { if (current) finish(current.o.kind === 'alert'); },
@@ -208,6 +249,7 @@
     window.appConfirm = window.appDialog.confirm;
     window.appAlert = window.appDialog.alert;
     window.appPrompt = window.appDialog.prompt;
+    window.appChoose = window.appDialog.choose;
     // alert: 돌려주는 값이 없으니 그대로 앱 창으로 바꾼다(기다리지 않음)
     window.alert = function (message) { window.appDialog.alert(message); };
 })(typeof window !== 'undefined' ? window : globalThis);

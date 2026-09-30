@@ -117,7 +117,31 @@ const ap = app.slice(app.indexOf('function appendCurrentRoundPhotosToDefect('), 
 assert.ok(ap.includes('t.photoIds = beforeIds.concat(newIds);'), '기존 사진 ID 유지 + 뒤에 붙임');
 assert.ok(ap.includes('recordDefectPhotoState(t, beforeIds, t.photoIds);') && ap.includes('stampDefectPhotosChangedIfSafe(t);'), '사진 병합 기록');
 assert.ok(ap.includes('t.copiedPhotoSrcIds = done;'), '옮긴 원본 사진 기록');
-assert.ok(app.includes('전차 사진 → 현차로 옮기기') && app.includes('btnPrevRoundPhotoImportPrevSlot'), '버튼 이름·전차 칸 보조 버튼');
+assert.ok(app.includes('전차 사진 → 현차로 옮기기') && !app.includes('btnPrevRoundPhotoImportPrevSlot'), '버튼 하나(전차 칸 보조 버튼 없음)');
+// 회차는 항상 고름(하나뿐이어도), 앱 창 라디오 목록, 앞선 회차 중 가장 가까운 것이 기본
+const pickAt = fn.indexOf('await window.appChoose(');
+assert.ok(pickAt > 0 && pickAt < fn.indexOf('refreshBuildingFloorsFromServer'), '회차 고르기 먼저');
+assert.ok(!/candidates\.length > 1/.test(fn), '하나뿐이어도 고르게 함');
+assert.ok(fn.includes("candidates.findIndex((c) => c.rel === 'earlier')"), '기본 = 바로 전 회차');
+const cand = app.slice(app.indexOf('function getPrevRoundPhotoSourceCandidates('), app.indexOf('function prevRoundPhotoLocalCounts('));
+assert.ok(cand.includes('b.id !== bldg.id') && !/rank < curRank\)?;?\s*$/m.test(cand.split('.filter(')[1].split('.map(')[0]), '다른 회차 전부(앞선 회차만으로 거르지 않음)');
+// 떨어져 나간 결함 객체에 쓰지 않음(2026-09-30 실데이터: 사진이 금회차에 안 들어감)
+assert.ok(fn.includes("const liveTarget = (m) => (state.defects[`${bldg.id}_${m.floor}`] || []).find((d) => d && d.id === m.tgt.id) || null;"), 'id로 지금 목록의 결함을 다시 찾음');
+const loadAt = fn.indexOf('await loadPrevRoundSourcePhotos(m.src, indexes);');
+const reAt = fn.indexOf('t = liveTarget(m);', loadAt);
+assert.ok(loadAt > 0 && reAt > loadAt, '사진을 불러온 뒤(기다린 뒤) 다시 찾음');
+const writeAt = fn.indexOf('ids = appendCurrentRoundPhotosToDefect(t, urls, keys);');
+assert.ok(writeAt > reAt && !/await /.test(fn.slice(reAt, writeAt)), '다시 찾은 뒤 쓰기까지 기다림 없음');
+assert.ok(fn.includes('const notLanded = written.filter(') && fn.includes('넣지 못한 결함'), '끝나고 목록에 들어갔는지 확인·보고');
+assert.ok(!fn.includes('const t = m.tgt;'), '계획 때 잡은 옛 객체를 그대로 쓰지 않음');
+// app-dialog: 고르기 창
+const dlg = fs.readFileSync(path.join(root, 'js/shared/app-dialog.js'), 'utf8');
+const AD = require(path.join(root, 'js/shared/app-dialog.js'));
+const o = AD.normalizeOptions('choose', 'm', { choices: ['a', { label: 'b', detail: 'x' }], defaultIndex: 1 });
+assert.deepStrictEqual(o.choices, [{ label: 'a', detail: '' }, { label: 'b', detail: 'x' }]);
+assert.strictEqual(o.defaultIndex, 1);
+assert.strictEqual(AD.normalizeOptions('choose', 'm', { choices: ['a'], defaultIndex: 5 }).defaultIndex, 0);
+assert.ok(dlg.includes('window.appChoose = window.appDialog.choose;') && dlg.includes('name="bsaDialogChoice"'), 'appChoose 라디오 목록');
 assert.ok(app.includes('if (typeof ensurePrevRoundPhotoImportSection === \'function\') ensurePrevRoundPhotoImportSection();'), '건물 수정 창에 버튼');
 const iMatch = html.indexOf('js/core/prev-round-photo-match.js');
 assert.ok(iMatch > 0 && iMatch < html.indexOf('<script src="app.js'), 'app.js 앞에서 읽음');

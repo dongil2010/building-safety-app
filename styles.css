@@ -16358,6 +16358,18 @@ html.bsa-touch-ui button#mobileBtnGridLines#mobileBtnGridLines {
     color: #1f2937;
 }
 .bsa-dialog-input { margin-top: 0.75rem; width: 100%; box-sizing: border-box; }
+.bsa-dialog-choices { margin-top: 0.75rem; display: flex; flex-direction: column; gap: 0.4rem; max-height: 50vh; overflow-y: auto; }
+.bsa-dialog-choice {
+    display: flex; align-items: flex-start; gap: 0.6rem; padding: 0.6rem 0.75rem;
+    border: 1px solid #d1d5db; border-radius: 8px; cursor: pointer; background: #fff;
+}
+.bsa-dialog-choice:hover { border-color: #93c5fd; background: #f8fbff; }
+.bsa-dialog-choice:has(input:checked) { border-color: #2563eb; background: #eff6ff; box-shadow: 0 0 0 1px #2563eb inset; }
+.bsa-dialog-choice input { margin-top: 0.2rem; flex: 0 0 auto; width: 1.05rem; height: 1.05rem; accent-color: #2563eb; }
+.bsa-dialog-choice-text { display: flex; flex-direction: column; gap: 0.15rem; min-width: 0; }
+.bsa-dialog-choice-label { font-weight: 600; color: #111827; }
+.bsa-dialog-choice-detail { font-size: 0.82rem; color: #6b7280; }
+@media (max-width: 480px) { .bsa-dialog-choice { min-height: 44px; } }
 .bsa-dialog-footer { display: flex; justify-content: flex-end; gap: 0.5rem; }
 .bsa-dialog-footer .btn { min-width: 5.2rem; justify-content: center; }
 .bsa-dialog-danger {
@@ -16394,13 +16406,28 @@ html #tab-map .defect-list-section-scroll > .defect-list-item.is-important {
     padding-top: 11px !important;
 }
 
-/* 「전차 사진 → 현차로 옮기기」 보조 버튼(전차 사진 칸으로) — 2026-09-30 */
-#editBuildingModal .edit-prev-photo-alt {
-    display: flex;
-    justify-content: flex-end;
-    margin-top: 6px;
+/* 「전차 사진 → 현차로 옮기기」 칸: 바로 위 「다음 회차 점검 시작」과 헷갈리지 않게 색·간격·버튼 모양을 달리한다 (2026-09-30) */
+#editBuildingModal .edit-next-round-section.edit-prev-photo-section {
+    margin-top: 1.4rem;
+    background: linear-gradient(180deg, #ecfdf5 0%, #ffffff 60%);
+    border: 1px dashed #6ee7b7;
+    position: relative;
 }
-#editBuildingModal .edit-prev-photo-alt .btn {
-    font-size: 12px;
-    padding: 3px 10px;
+#editBuildingModal .edit-next-round-section.edit-prev-photo-section::before {
+    content: "";
+    position: absolute;
+    left: 0; right: 0; top: calc(-0.7rem - 1px);
+    border-top: 1px solid #e5e7eb;
+}
+#editBuildingModal .edit-prev-photo-section .edit-next-round-title { color: #047857; }
+#editBuildingModal .edit-prev-photo-section .edit-next-round-btn.btn-prev-photo {
+    background: #fff !important;
+    color: #047857;
+    border: 1.5px solid #10b981 !important;
+    box-shadow: none;
+}
+#editBuildingModal .edit-prev-photo-section .edit-next-round-btn.btn-prev-photo:hover,
+#editBuildingModal .edit-prev-photo-section .edit-next-round-btn.btn-prev-photo:focus-visible {
+    background: #ecfdf5 !important;
+    color: #065f46;
 }
