@@ -50816,6 +50816,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     }
 
     function storageScopeForPhotoId(photoId) {
+        // 관리자 사진 되살리기: 같은 번호를 두 점검이 쓸 때 원래 점검 폴더로
+        if (typeof _photoRestoreScopeOverride !== 'undefined' && _photoRestoreScopeOverride.has(photoId)) {
+            return _photoRestoreScopeOverride.get(photoId);
+        }
         return storageScopeForBuildingId(resolveBuildingIdFromPhotoId(photoId));
     }
 
@@ -56732,6 +56736,19 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             host.insertBefore(btn, approval.nextSibling);
         }
         btn.style.display = show ? 'inline-flex' : 'none';
+        // 관리자 전용 「사진 되살리기」 — 누르기 전에는 아무것도 안 한다(2026-09-30)
+        let rbtn = document.getElementById('btnAdminPhotoRestore');
+        if (!rbtn && btn.parentNode) {
+            rbtn = document.createElement('button');
+            rbtn.type = 'button';
+            rbtn.id = 'btnAdminPhotoRestore';
+            rbtn.className = 'btn btn-sm btn-outline hero-btn-photo-restore';
+            rbtn.title = '복구 묶음으로 지워진 사진 되살리기 (관리자)';
+            rbtn.innerHTML = '<i class="fa-solid fa-images"></i> 사진 되살리기';
+            rbtn.addEventListener('click', () => { window.openAdminPhotoRestore(); });
+            btn.parentNode.insertBefore(rbtn, btn.nextSibling);
+        }
+        if (rbtn) rbtn.style.display = show ? 'inline-flex' : 'none';
     }
 
     /**
@@ -56740,6 +56757,198 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
      * 로그인 때 applyCompanyNameFromCompanyDoc가 새 이름으로 맞춘다.
      * 가입 코드(joinCodes)의 이름은 보안 규칙상 앱에서 못 바꾼다(Firebase 콘솔에서 수정).
      */
+    /**
+     * 관리자 전용 1회용 「사진 되살리기」 (2026-09-30 영일연립 전차 사진 복구)
+     * 복구 묶음(zip, 사진 이름 = {층}_NO{번호}_{사진번호}.jpg)을 고르면 먼저 미리보기만 한다
+     * (서버는 읽기만). 「되살리기 시작」을 누르고 확인해야 올린다.
+     * 올리는 것: 이 기기의 결함이 아직 가리키는데 서버에 사진이 없는 사진번호만 — 같은 번호로 다시 올린다.
+     * 결함 기록은 바꾸지 않는다. 서버에 이미 있는 사진은 건드리지 않는다.
+     */
+    function findDefectRefsForPhotoId(photoId) {
+        const refs = [];
+        const defects = (window.state && window.state.defects) || {};
+        const buildings = (window.state && window.state.buildings) || [];
+        Object.keys(defects).forEach((k) => {
+            (defects[k] || []).forEach((e) => {
+                if (!e) return;
+                const nCur = Math.max((e.photoIds || []).length, (e.photos || []).length);
+                const nPrev = Math.max((e.prevRoundPhotoIds || []).length, (e.prevRoundPhotos || []).length);
+                const hit = defectPhotoIdList(e, nCur).indexOf(photoId) >= 0 || defectPhotoIdList(e, nPrev, 'prev').indexOf(photoId) >= 0;
+                if (!hit) return;
+                const b = buildings.find((x) => x && x.id && k.startsWith(x.id + '_')) || null;
+                refs.push({
+                    floorKey: k,
+                    bldg: b,
+                    round: b ? getBuildingSurveyRoundKey(b) : '',
+                    floor: b ? k.slice(b.id.length + 1) : k
+                });
+            });
+        });
+        // 가장 이른 회차(원래 주인)를 앞에
+        refs.sort((a, b) => String(a.round).localeCompare(String(b.round)));
+        return refs;
+    }
+
+    var _photoRestoreScopeOverride = new Map(); // var: 위쪽 storageScopeForPhotoId가 먼저 불려도 안전
+
+    function parseRestorePhotoName(name) {
+        const base = String(name || '').split('/').pop();
+        const m = base.match(/^(.+?)_NO(\d+)_(.+)\.jpe?g$/i);
+        if (!m) return null;
+        return { floor: m[1], no: m[2], photoId: m[3] };
+    }
+
+    async function readRestorePhotoFiles(files) {
+        const out = [];
+        const toDataUrl = (b64) => 'data:image/jpeg;base64,' + b64;
+        for (const f of files) {
+            if (/\.zip$/i.test(f.name)) {
+                if (typeof JSZip === 'undefined') throw new Error('JSZip 라이브러리를 불러오지 못했습니다.');
+                const zip = await JSZip.loadAsync(f);
+                const names = Object.keys(zip.files).filter((n) => !zip.files[n].dir && parseRestorePhotoName(n));
+                for (const n of names) {
+                    const info = parseRestorePhotoName(n);
+                    info.dataUrl = toDataUrl(await zip.files[n].async('base64'));
+                    out.push(info);
+                }
+            } else {
+                const info = parseRestorePhotoName(f.name);
+                if (!info) continue;
+                info.dataUrl = await new Promise((res, rej) => {
+                    const r = new FileReader();
+                    r.onload = () => res(String(r.result || ''));
+                    r.onerror = () => rej(r.error);
+                    r.readAsDataURL(f);
+                });
+                out.push(info);
+            }
+        }
+        const seen = new Set();
+        return out.filter((x) => (x.dataUrl.length > 1000 && !seen.has(x.photoId) && seen.add(x.photoId)));
+    }
+
+    /** 미리보기: 서버는 읽기만 */
+    async function buildPhotoRestorePreview(items) {
+        const companyPhotos = getCompanyPhotosCollection();
+        const rows = [];
+        for (const it of items) {
+            const refs = findDefectRefsForPhotoId(it.photoId);
+            const row = Object.assign({}, it, { refs, action: 'skip', reason: '' });
+            if (!refs.length) {
+                row.reason = '이 기기의 결함이 이 사진을 안 씀';
+            } else if (!companyPhotos) {
+                row.reason = '로그인·회사 연결 안 됨';
+            } else {
+                try {
+                    const snap = await companyPhotos.doc(it.photoId).get({ source: 'server' });
+                    const data = snap.exists ? (snap.data() || {}) : null;
+                    if (data && (hasFirebaseStorageMeta(data) || data.dataUrl)) row.reason = '서버에 이미 있음';
+                    else { row.action = 'restore'; row.reason = '서버에 없음 → 되살림'; }
+                } catch (e) {
+                    row.reason = '서버 확인 실패(건너뜀)';
+                }
+            }
+            rows.push(row);
+        }
+        return rows;
+    }
+
+    async function runPhotoRestore(rows, onProgress) {
+        let ok = 0; let fail = 0;
+        const targets = rows.filter((r) => r.action === 'restore');
+        for (let i = 0; i < targets.length; i++) {
+            const r = targets[i];
+            const owner = r.refs[0] && r.refs[0].bldg;
+            if (owner) _photoRestoreScopeOverride.set(r.photoId, storageScopeFromBuilding(owner));
+            try {
+                unmarkPhotoOnStorage(r.photoId);
+                const done = await persistPhotoToCloud(r.photoId, r.dataUrl, {});
+                if (done) {
+                    ok++;
+                    r.result = '되살림';
+                    try { await persistPhotoUrlToIdb(r.photoId, r.dataUrl); } catch (_e) { /* 서버엔 올라감 */ }
+                } else { fail++; r.result = '실패'; }
+            } catch (e) {
+                fail++; r.result = '실패';
+                console.warn('[사진 되살리기] 실패:', r.photoId, e);
+            } finally {
+                _photoRestoreScopeOverride.delete(r.photoId);
+            }
+            if (onProgress) onProgress(i + 1, targets.length);
+        }
+        return { ok, fail, total: targets.length };
+    }
+
+    window.openAdminPhotoRestore = function () {
+        if (window.state.role !== 'admin' || !db || !window.state.companyId) {
+            window.showToast('사진 되살리기는 관리자만 쓸 수 있습니다.', 'warning');
+            return;
+        }
+        const old = document.getElementById('adminPhotoRestoreOverlay');
+        if (old) old.remove();
+        const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+        const ov = document.createElement('div');
+        ov.id = 'adminPhotoRestoreOverlay';
+        ov.style.cssText = 'position:fixed;inset:0;z-index:100000;background:rgba(15,23,42,.55);display:flex;align-items:center;justify-content:center;padding:12px;';
+        ov.innerHTML = '<div style="background:#fff;border-radius:12px;max-width:760px;width:100%;max-height:92vh;display:flex;flex-direction:column;box-shadow:0 10px 40px rgba(0,0,0,.3);">'
+            + '<div style="padding:14px 16px;border-bottom:1px solid #e2e8f0;font-weight:700;font-size:16px;">사진 되살리기 (관리자·1회용)</div>'
+            + '<div style="padding:12px 16px;font-size:13px;color:#334155;line-height:1.55;">복구 묶음(zip)이나 사진 파일을 고르세요. 먼저 <b>미리보기만</b> 합니다(서버는 읽기만).<br>'
+            + '결함이 아직 가리키는데 <b>서버에 없는 사진만</b> 같은 사진번호로 다시 올립니다. 결함 기록·서버에 있는 사진은 바꾸지 않습니다.</div>'
+            + '<div style="padding:0 16px 10px;"><input type="file" id="adminPhotoRestoreFile" accept=".zip,.jpg,.jpeg" multiple></div>'
+            + '<div id="adminPhotoRestoreSummary" style="padding:0 16px 8px;font-size:13px;font-weight:600;"></div>'
+            + '<div id="adminPhotoRestoreList" style="flex:1;overflow:auto;padding:0 16px;font-size:12px;"></div>'
+            + '<div style="padding:12px 16px;border-top:1px solid #e2e8f0;display:flex;gap:8px;justify-content:flex-end;">'
+            + '<button type="button" class="btn btn-outline" id="adminPhotoRestoreClose">닫기</button>'
+            + '<button type="button" class="btn btn-primary" id="adminPhotoRestoreGo" disabled>되살리기 시작</button></div></div>';
+        document.body.appendChild(ov);
+        const $ = (id) => document.getElementById(id);
+        let rows = [];
+        let busy = false;
+        const render = () => {
+            const n = rows.filter((r) => r.action === 'restore').length;
+            $('adminPhotoRestoreSummary').textContent = rows.length
+                ? `사진 ${rows.length}장 중 되살릴 사진 ${n}장 · 건너뜀 ${rows.length - n}장` : '';
+            $('adminPhotoRestoreList').innerHTML = rows.length ? ('<table style="width:100%;border-collapse:collapse;">'
+                + '<tr style="background:#f1f5f9;"><th style="text-align:left;padding:4px;">층·NO</th><th style="text-align:left;padding:4px;">사진번호</th><th style="text-align:left;padding:4px;">쓰는 점검</th><th style="text-align:left;padding:4px;">할 일</th></tr>'
+                + rows.map((r) => {
+                    const where = r.refs.map((x) => esc((x.bldg && x.bldg.name) || '') + ' ' + esc(x.round) + ' ' + esc(x.floor)).join('<br>') || '-';
+                    const color = r.result === '실패' ? '#dc2626' : (r.action === 'restore' ? '#15803d' : '#64748b');
+                    return `<tr style="border-top:1px solid #e2e8f0;"><td style="padding:4px;">${esc(r.floor)} NO.${esc(r.no)}</td><td style="padding:4px;">${esc(r.photoId)}</td><td style="padding:4px;">${where}</td><td style="padding:4px;color:${color};">${esc(r.result || r.reason)}</td></tr>`;
+                }).join('') + '</table>') : '';
+            $('adminPhotoRestoreGo').disabled = busy || !n;
+        };
+        $('adminPhotoRestoreClose').onclick = () => { if (!busy) ov.remove(); };
+        $('adminPhotoRestoreFile').onchange = async (ev) => {
+            const files = Array.from((ev.target && ev.target.files) || []);
+            if (!files.length) return;
+            busy = true; rows = []; render();
+            $('adminPhotoRestoreSummary').textContent = '미리보기 만드는 중… (서버는 읽기만)';
+            try {
+                const items = await readRestorePhotoFiles(files);
+                rows = await buildPhotoRestorePreview(items);
+                if (!rows.length) $('adminPhotoRestoreSummary').textContent = '알맞은 사진 파일이 없습니다({층}_NO{번호}_{사진번호}.jpg).';
+            } catch (e) {
+                console.warn('[사진 되살리기] 미리보기 실패:', e);
+                window.showToast('미리보기 실패: ' + (e && e.message ? e.message : e), 'error');
+            }
+            busy = false;
+            if (rows.length) render();
+        };
+        $('adminPhotoRestoreGo').onclick = async () => {
+            const n = rows.filter((r) => r.action === 'restore').length;
+            if (!n || busy) return;
+            const yes = await window.appConfirm(`서버에 없는 사진 ${n}장을 원래 사진번호로 다시 올립니다.\n결함 기록은 바꾸지 않습니다. 진행할까요?`, { title: '사진 되살리기', okText: '되살리기' });
+            if (!yes) return;
+            busy = true; render();
+            const res = await runPhotoRestore(rows, (i, t) => { $('adminPhotoRestoreSummary').textContent = `올리는 중… ${i}/${t}`; });
+            busy = false;
+            rows.forEach((r) => { if (r.result === '되살림') r.action = 'done'; });
+            render();
+            $('adminPhotoRestoreSummary').textContent = `끝: 되살림 ${res.ok}장 · 실패 ${res.fail}장`;
+            window.showToast(`사진 되살리기: ${res.ok}장 완료${res.fail ? `, ${res.fail}장 실패` : ''}`, res.fail ? 'warning' : 'success', 6000);
+        };
+    };
+
     window.renameCompanyAsAdmin = async function () {
         if (window.state.role !== 'admin' || !db || !window.state.companyId || !window.state.uid) {
             window.showToast('회사 이름은 관리자만 바꿀 수 있습니다.', 'warning');
