@@ -12133,7 +12133,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         });
         const activeBtn = document.getElementById(`btnNdtCat${catMap[cat]}`);
         if (activeBtn) activeBtn.classList.add('active');
-        document.querySelectorAll('#tab-ndt .ndt-cat-rail-btn[data-ndt-cat]').forEach(btn => {
+        document.querySelectorAll('#tab-ndt .ndt-cat-rail-btn[data-ndt-cat], #tab-ndt .ndt-touch-cat-btn[data-ndt-cat]').forEach(btn => {
             btn.classList.toggle('active', btn.getAttribute('data-ndt-cat') === cat);
         });
         if (typeof renderNdtSummaryTable === 'function') renderNdtSummaryTable();

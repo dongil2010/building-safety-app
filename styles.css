@@ -621,6 +621,54 @@ html.layout-desktop #tab-ndt .ndt-top-canvas-tools {
     display: none;
 }
 
+/* 폰·태블릿 전용. PC는 우측 레일 버튼을 그대로 쓴다 */
+#tab-ndt .ndt-touch-cat-bar {
+    display: none;
+    position: absolute;
+    top: 0.35rem;
+    left: 0.35rem;
+    right: 3.6rem;
+    z-index: 46;
+    flex-direction: row;
+    flex-wrap: nowrap;
+    align-items: center;
+    gap: 0.28rem;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    padding: 0.22rem;
+    background: rgba(255, 255, 255, 0.96);
+    border: 1px solid #d4d4d4;
+    border-radius: 10px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+    pointer-events: auto;
+}
+
+#tab-ndt .ndt-touch-cat-btn {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.15rem;
+    min-height: 2rem;
+    padding: 0.22rem 0.5rem;
+    border-radius: 8px;
+    border: 1.5px solid #e5e7eb;
+    background: #f9fafb;
+    color: #404040;
+    font-size: 0.72rem;
+    font-weight: 800;
+    line-height: 1.1;
+    white-space: nowrap;
+    cursor: pointer;
+}
+
+#tab-ndt .ndt-touch-cat-btn.active {
+    border: 2px solid #2563eb;
+    background: #eff6ff;
+    color: #1d4ed8;
+    box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.18);
+}
+
 #tab-ndt .ndt-unified-rail {
     flex-direction: column;
     gap: 0.1rem;
@@ -13269,6 +13317,19 @@ html.layout-tablet #tab-ndt .mobile-canvas-dock {
     display: none !important;
 }
 
+/* 태블릿: 조사 항목(실측~균열)은 도면 위 가로 줄. 마킹·더보기는 우측 유지 */
+html.layout-tablet #tab-ndt .ndt-touch-cat-bar {
+    display: flex;
+}
+
+html.layout-tablet #tab-ndt .ndt-unified-rail > button.ndt-cat-rail-btn {
+    display: none !important;
+}
+
+html.layout-tablet #tab-ndt .ndt-unified-rail > .ndt-rail-sep:first-of-type {
+    display: none !important;
+}
+
 /* 폰 모바일: 태블릿과 동일 — 상단 조사항목 칩 숨기고 도면 우측 레일로 (도면 세로 공간 확보) */
 @media (max-width: 1024px) {
     html:not(.layout-desktop):not(.layout-tablet) #tab-ndt .ndt-top-bar {
@@ -13338,6 +13399,18 @@ html.layout-tablet #tab-ndt .mobile-canvas-dock {
     }
 
     html:not(.layout-desktop):not(.layout-tablet) #tab-ndt .mobile-canvas-dock {
+        display: none !important;
+    }
+
+    html:not(.layout-desktop):not(.layout-tablet) #tab-ndt .ndt-touch-cat-bar {
+        display: flex;
+    }
+
+    html:not(.layout-desktop):not(.layout-tablet) #tab-ndt .ndt-unified-rail > button.ndt-cat-rail-btn {
+        display: none !important;
+    }
+
+    html:not(.layout-desktop):not(.layout-tablet) #tab-ndt .ndt-unified-rail > .ndt-rail-sep:first-of-type {
         display: none !important;
     }
 
