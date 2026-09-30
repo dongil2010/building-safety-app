@@ -16393,3 +16393,14 @@ html #tab-map .defect-list-section-scroll > .defect-list-item .defect-badge-no {
 html #tab-map .defect-list-section-scroll > .defect-list-item.is-important {
     padding-top: 11px !important;
 }
+
+/* 「전차 사진 → 현차로 옮기기」 보조 버튼(전차 사진 칸으로) — 2026-09-30 */
+#editBuildingModal .edit-prev-photo-alt {
+    display: flex;
+    justify-content: flex-end;
+    margin-top: 6px;
+}
+#editBuildingModal .edit-prev-photo-alt .btn {
+    font-size: 12px;
+    padding: 3px 10px;
+}

@@ -1,7 +1,8 @@
 /**
- * 전차 사진 가져오기 (2026-09-30)
- * - js/core/prev-round-photo-match.js 맞추기 규칙(번호 → 위치, 덮어쓰지 않음, 한 결함에 하나)
- * - app.js 연결: 미리보기 → 확인(앱 창) 뒤에만 바꿈, 전차 사진 칸에만 넣음, 새 ID 복사, 못 불러온 사진 보고
+ * 전차 사진 → 현차로 옮기기 (2026-09-30)
+ * - js/core/prev-round-photo-match.js 맞추기 규칙(번호 → 위치, 한 결함에 하나)
+ *   기본 'cur': 현차 사진 뒤에 붙임, 이미 옮긴 원본 사진은 다시 안 넣음 / 'prev': 전차 사진 칸, 덮어쓰지 않음
+ * - app.js 연결: 미리보기 → 확인(앱 창) 뒤에만 바꿈, 새 ID 복사, 못 불러온 사진 보고
  */
 'use strict';
 const assert = require('assert');
@@ -38,7 +39,7 @@ assert.strictEqual(M.photoCount({ prevRoundPhotoIds: ['a'] }, 'prev'), 1);
             D('t6', 6, 900, 100)
         ]
     };
-    const plan = M.plan(src, tgt, { maxDist: 120 });
+    const plan = M.plan(src, tgt, { maxDist: 120, mode: 'prev' });
     assert.deepStrictEqual(plan.matches.map((m) => [m.src.id, m.tgt.id, m.by]), [['s1', 't1', 'no'], ['s3', 't3', 'pos']]);
     assert.strictEqual(plan.photoTotal, 3);
     assert.deepStrictEqual(plan.skippedHasPrev.map((m) => m.tgt.id), ['t2'], '이미 전차 사진 → 건너뜀');
@@ -75,6 +76,27 @@ assert.strictEqual(M.photoCount({ prevRoundPhotoIds: ['a'] }, 'prev'), 1);
     assert.strictEqual(M.plan({ '1F': [D('s', 1, 105, 100, { photos: P })] }, { '1F': close }).matches.length, 0);
 }
 
+{
+    // 기본 'cur': 현차 사진이 있어도 뒤에 붙임, 전차 사진 칸 유무는 상관없음
+    const src = { '1F': [D('s1', 1, 100, 100, { photoIds: ['s1_ua', 's1_ub'], photos: P.concat(P) }), D('s2', 2, 300, 100, { photos: P })] };
+    const tgt = { '1F': [D('t1', 1, 100, 100, { photoIds: ['t1_x'] }), D('t2', 2, 300, 100, { prevRoundPhotoIds: ['keep'] })] };
+    const plan = M.plan(src, tgt);
+    assert.strictEqual(plan.mode, 'cur');
+    assert.deepStrictEqual(plan.matches.map((m) => [m.tgt.id, m.photos, m.existing]), [['t1', 2, 1], ['t2', 1, 0]]);
+    assert.strictEqual(plan.withExisting, 1);
+    assert.strictEqual(plan.photoTotal, 3);
+    assert.deepStrictEqual(M.srcPhotoKeys(src['1F'][1]), ['s2_0'], 'ID 없으면 자리 번호');
+    // 이미 옮긴 사진은 빼고, 다 옮겼으면 건너뜀 → 두 번 눌러도 안 겹침
+    tgt['1F'][0].copiedPhotoSrcIds = ['s1_ua'];
+    tgt['1F'][1].copiedPhotoSrcIds = ['s2_0'];
+    const again = M.plan(src, tgt);
+    assert.deepStrictEqual(again.matches.map((m) => [m.tgt.id, m.indexes]), [['t1', [1]]]);
+    assert.deepStrictEqual(again.skipped.map((m) => m.tgt.id), ['t2']);
+    tgt['1F'][0].copiedPhotoSrcIds = ['s1_ua', 's1_ub'];
+    assert.strictEqual(M.plan(src, tgt).matches.length, 0);
+    assert.strictEqual(M.plan(src, tgt).photoTotal, 0);
+}
+
 // app.js 연결
 const app = fs.readFileSync(path.join(root, 'app.js'), 'utf8');
 const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
@@ -83,13 +105,19 @@ assert.ok(at > 0);
 const fn = app.slice(at, app.indexOf('function ensurePrevRoundPhotoImportSection(', at));
 const confirmAt = fn.indexOf('if (!await window.appConfirm(msg,');
 assert.ok(confirmAt > 0, '미리보기 확인(앱 창)');
-assert.ok(fn.indexOf('t.prevRoundPhotos = got.urls.slice();') > confirmAt, '확인 뒤에만 바꿈');
-assert.ok(fn.indexOf('assignDefectPhotoIds(t.id, got.urls, null, \'prev\')') > confirmAt, '새 전차 사진 ID');
-assert.ok(fn.indexOf("uploadDefectPhotos(t.id, got.urls, 'prev', ids)") > confirmAt, 'Storage 새로 복사');
-assert.ok(!/t\.photos\s*=|t\.photoIds\s*=/.test(fn), '현차 사진 칸은 건드리지 않음');
-assert.ok((fn.match(/if \(api\.photoCount\(t, 'prev'\) > 0\) continue;/g) || []).length === 2, '복사 직전에도 덮어쓰기 확인');
+assert.ok(fn.includes("const mode = modeArg === 'prev' ? 'prev' : 'cur';"), '기본은 현차 사진');
+assert.ok(fn.indexOf('ids = appendCurrentRoundPhotosToDefect(t, urls, keys);') > confirmAt, '확인 뒤에만 현차 사진에 붙임');
+assert.ok(fn.indexOf('t.prevRoundPhotos = got.urls.slice();') > confirmAt, '전차 칸 모드도 확인 뒤');
+assert.ok(fn.indexOf("uploadDefectPhotos(t.id, got.urls, mode === 'prev' ? 'prev' : undefined, ids)") > confirmAt, 'Storage 새로 복사');
+assert.ok(fn.includes('indexes = api.pendingPhotoIndexes(m.src, t);'), '복사 직전에 이미 옮긴 사진 다시 확인');
+assert.ok(fn.includes('기존 사진 뒤에 붙임'), '미리보기에 기존 사진 있는 결함 수');
 assert.ok(fn.includes('loadFailed.push(') && fn.includes('불러오지 못한 사진'), '못 불러온 사진 보고');
 assert.ok(fn.includes('markFloorKeyDirty(key)') && fn.includes('touchDefectUpdatedAt(t)'), '동기화 표시');
+const ap = app.slice(app.indexOf('function appendCurrentRoundPhotosToDefect('), at);
+assert.ok(ap.includes('t.photoIds = beforeIds.concat(newIds);'), '기존 사진 ID 유지 + 뒤에 붙임');
+assert.ok(ap.includes('recordDefectPhotoState(t, beforeIds, t.photoIds);') && ap.includes('stampDefectPhotosChangedIfSafe(t);'), '사진 병합 기록');
+assert.ok(ap.includes('t.copiedPhotoSrcIds = done;'), '옮긴 원본 사진 기록');
+assert.ok(app.includes('전차 사진 → 현차로 옮기기') && app.includes('btnPrevRoundPhotoImportPrevSlot'), '버튼 이름·전차 칸 보조 버튼');
 assert.ok(app.includes('if (typeof ensurePrevRoundPhotoImportSection === \'function\') ensurePrevRoundPhotoImportSection();'), '건물 수정 창에 버튼');
 const iMatch = html.indexOf('js/core/prev-round-photo-match.js');
 assert.ok(iMatch > 0 && iMatch < html.indexOf('<script src="app.js'), 'app.js 앞에서 읽음');

@@ -20452,12 +20452,18 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     window.promotePreviousRoundToCurrentBulk = promotePreviousRoundToCurrentBulk;
 
     // --- 전차 사진 가져오기 (2026-09-30) ---
-    // 같은 현장의 이전 회차 점검(별도 점검)에 있던 결함 사진을, 이 점검에서 맞는 결함의 「전차 사진」 칸으로 복사한다.
+    // 「전차 사진 → 현차로 옮기기」 (2026-09-30, 같은 날 고침: 기본은 현차 사진 칸)
+    // 같은 현장의 이전 회차 점검(별도 점검)에 있던 결함 사진을, 이 점검에서 맞는 결함의 사진으로 복사한다.
     // 맞추기: js/core/prev-round-photo-match.js (같은 층 + 같은 번호, 없으면 마킹 위치). 미리보기 → 확인 뒤에만 바꾼다.
-    // - 이미 전차 사진이 있는 결함은 덮어쓰지 않는다.
+    // - 기본(mode 'cur'): 현차 사진(photos/photoIds — 출력되는 사진) 맨 뒤에 붙인다. 기존 사진은 그대로.
+    //   옮긴 원본 사진 ID를 결함의 copiedPhotoSrcIds 에 적어 두어, 다시 눌러도 같은 사진을 또 넣지 않는다
+    //   (옮긴 사진을 지운 뒤 다시 눌러도 되살리지 않음).
+    // - 보조(mode 'prev'): 「전차 사진」 칸. 이미 전차 사진이 있는 결함은 덮어쓰지 않는다.
     // - 사진은 새 ID로 복사하고 Storage에도 새로 올린다(회차 추가하기와 같은 방식) — 전차 점검을 지워도 남는다.
     // - 서버 읽기: 두 점검의 층 문서(층마다 1회, 최근에 받았으면 생략) + 복사할 사진마다 사진 문서 1회(기기에 있으면 생략).
     //   미리보기는 사진 ID 개수만 세므로 사진을 읽지 않는다.
+    const PREV_ROUND_PHOTO_TITLE = { cur: '전차 사진 → 현차로 옮기기', prev: '전차 사진 → 전차 사진 칸으로' };
+
     function prevRoundPhotoMatchApi() {
         return (window.BSA && window.BSA.prevRoundPhotoMatch) || null;
     }
@@ -20512,25 +20518,57 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         return map;
     }
 
-    async function loadPrevRoundSourcePhotos(src) {
+    /** 전차 결함 사진 중 indexes 자리만 불러온다. keys: 성공한 사진의 원본 ID(옮김 기록용) */
+    async function loadPrevRoundSourcePhotos(src, indexes) {
         const api = prevRoundPhotoMatchApi();
         const count = api ? api.photoCount(src) : 0;
         const inline = Array.isArray(src.photos) ? src.photos : [];
         const ids = defectPhotoIdList(src, count);
+        const keys = api ? api.srcPhotoKeys(src) : ids;
+        const want = Array.isArray(indexes) ? indexes : ids.map((_x, i) => i);
         const urls = [];
+        const okKeys = [];
         let failed = 0;
-        for (let i = 0; i < count; i++) {
+        for (const i of want) {
             let url = inline[i] || null;
             if (!url && ids[i]) {
                 try { url = await loadPhotoBlobForClone(ids[i]); } catch (_e) { url = null; }
             }
-            if (url) urls.push(url);
-            else failed++;
+            if (url) { urls.push(url); okKeys.push(keys[i]); } else failed++;
         }
-        return { urls, failed };
+        return { urls, keys: okKeys, failed };
     }
 
-    window.openPrevRoundPhotoImport = async function(bldgId) {
+    /**
+     * 현차 결함 t의 사진(출력되는 사진) 맨 뒤에 붙인다. 기존 사진 ID·순서는 그대로.
+     * 사진 ID 단위 병합(photoState)·사진 변경 시각을 결함 수정 창과 같은 방식으로 남긴다.
+     */
+    function appendCurrentRoundPhotosToDefect(t, urls, srcKeys) {
+        const api = prevRoundPhotoMatchApi();
+        const n = api.photoCount(t);
+        const beforeIds = defectPhotoIdList(t, n);
+        const cache = window._photoCache || {};
+        const inline = Array.isArray(t.photos) ? t.photos : [];
+        const newIds = assignDefectPhotoIds(t.id, urls, null);
+        const photos = beforeIds.map((pid, i) => inline[i] || cache[pid] || null).concat(urls);
+        t.photoIds = beforeIds.concat(newIds);
+        t.photos = photos;
+        if (Array.isArray(t.photoUrls)) {
+            const u = t.photoUrls.slice(0, n);
+            while (u.length < n) u.push('');
+            t.photoUrls = u.concat(urls.map(() => ''));
+        }
+        recordDefectPhotoState(t, beforeIds, t.photoIds);
+        stampDefectPhotosChangedIfSafe(t);
+        const done = Array.isArray(t.copiedPhotoSrcIds) ? t.copiedPhotoSrcIds.slice() : [];
+        (srcKeys || []).forEach((k) => { if (k && !done.includes(k)) done.push(k); });
+        t.copiedPhotoSrcIds = done;
+        return newIds;
+    }
+
+    window.openPrevRoundPhotoImport = async function(bldgId, modeArg) {
+        const mode = modeArg === 'prev' ? 'prev' : 'cur';
+        const TITLE = PREV_ROUND_PHOTO_TITLE[mode];
         const api = prevRoundPhotoMatchApi();
         const bldg = (window.state.buildings || []).find((b) => b && b.id === bldgId)
             || window.currentEditingBuilding || state.currentBuilding;
@@ -20543,8 +20581,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (!candidates.length) {
             await window.appAlert(
                 `같은 현장(${getBuildingSiteName(bldg)} · ${formatDongRowLabel(bldg)})에 ${formatSurveyRoundLabel(curKey)}보다 앞선 회차 점검이 없습니다.\n\n` +
-                '전차 점검이 따로 등록되어 있어야 사진을 가져올 수 있습니다.',
-                { title: '전차 사진 가져오기' }
+                '전차 점검이 따로 등록되어 있어야 사진을 옮길 수 있습니다.',
+                { title: TITLE }
             );
             return;
         }
@@ -20553,9 +20591,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             const shown = candidates.slice(0, 9);
             const lines = shown.map((b, i) => `${i + 1} = ${formatSurveyRoundLabel(getBuildingSurveyRoundKey(b))} · ${b.inspectionType || '점검'}${i === 0 ? ' (바로 전 회차)' : ''}`);
             const pick = await window.appPrompt(
-                `어느 회차 사진을 가져올까요?\n\n${lines.join('\n')}\n\n번호를 입력하세요.`,
+                `어느 회차 사진을 옮길까요?\n\n${lines.join('\n')}\n\n번호를 입력하세요.`,
                 '1',
-                { title: '전차 사진 가져오기 · 회차 선택', okText: '다음' }
+                { title: `${TITLE} · 회차 선택`, okText: '다음' }
             );
             if (pick == null) return;
             const idx = parseInt(String(pick).trim(), 10) - 1;
@@ -20599,10 +20637,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         buildingFloorCodesForBackup(bldg).forEach((code) => {
             tgtByFloor[code] = state.defects[`${bldg.id}_${code}`] || [];
         });
-        const plan = api.plan(srcByFloor, tgtByFloor, { maxDist: 120 });
-        const srcPhotoDefects = plan.matches.length + plan.skippedHasPrev.length + plan.unmatched.length;
+        const plan = api.plan(srcByFloor, tgtByFloor, { maxDist: 120, mode });
+        const srcPhotoDefects = plan.matches.length + plan.skipped.length + plan.unmatched.length;
         if (!srcPhotoDefects) {
-            await window.appAlert(`${srcLabel} 점검에 사진이 있는 결함이 없습니다.${freshNote}`, { title: '전차 사진 가져오기' });
+            await window.appAlert(`${srcLabel} 점검에 사진이 있는 결함이 없습니다.${freshNote}`, { title: TITLE });
             return;
         }
         const byNo = plan.matches.filter((m) => m.by === 'no').length;
@@ -20614,33 +20652,51 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             if (arr.length > LIST_MAX) lines.push(`  … 외 ${arr.length - LIST_MAX}건`);
             return lines.join('\n');
         };
+        const slot = mode === 'prev' ? '「전차 사진」 칸' : '현차 사진(출력되는 사진)';
         let msg = `${srcLabel} → ${curLabel} (${formatDongRowLabel(bldg)})\n\n` +
-            `· 사진을 넣을 결함 ${plan.matches.length}건 · 사진 ${plan.photoTotal}장` +
-            (plan.matches.length ? ` (번호로 ${byNo}건${byPos ? `, 위치로 ${byPos}건` : ''})` : '') + '\n' +
-            `· 이미 전차 사진이 있어 건너뜀 ${plan.skippedHasPrev.length}건\n` +
-            `· 맞는 결함을 못 찾음 ${plan.unmatched.length}건 · 사진 ${unmatchedPhotos}장`;
+            `· ${slot}에 넣을 결함 ${plan.matches.length}건 · 사진 ${plan.photoTotal}장` +
+            (plan.matches.length ? ` (번호로 ${byNo}건${byPos ? `, 위치로 ${byPos}건` : ''})` : '') + '\n';
+        if (mode === 'cur') {
+            msg += `· 그중 현차 사진이 이미 있는 결함 ${plan.withExisting}건 — 기존 사진 뒤에 붙임\n` +
+                `· 이미 옮긴 사진이라 건너뜀 ${plan.skipped.length}건\n`;
+        } else {
+            msg += `· 이미 전차 사진이 있어 건너뜀 ${plan.skipped.length}건\n`;
+        }
+        msg += `· 맞는 결함을 못 찾음 ${plan.unmatched.length}건 · 사진 ${unmatchedPhotos}장`;
         if (byPos) {
             msg += `\n\n[위치로 맞춘 결함 — 번호가 다름, 확인해 주세요]\n` + listLines(
                 plan.matches.filter((m) => m.by === 'pos'),
                 (m) => `  ${prevRoundPhotoDefectLabel(m.src, m.floor, bldg)} → 현차 NO.${api.noKey(m.tgt)}`
             );
         }
+        if (mode === 'cur' && plan.withExisting) {
+            msg += `\n\n[현차 사진이 있는 결함 — 뒤에 붙음]\n` + listLines(
+                plan.matches.filter((m) => m.existing > 0),
+                (m) => `  현차 NO.${api.noKey(m.tgt)} (${prevRoundPhotoFloorLabel(m.floor, bldg)}) · 기존 ${m.existing}장 + ${m.photos}장`
+            );
+        }
         if (plan.unmatched.length) {
-            msg += `\n\n[못 찾음 — 가져오지 않음]\n` + listLines(
+            msg += `\n\n[못 찾음 — 옮기지 않음]\n` + listLines(
                 plan.unmatched,
                 (u) => `  ${prevRoundPhotoDefectLabel(u.src, u.floor, bldg)} · ${u.photos}장 — ${u.reason}`
             );
         }
-        msg += `\n\n사진은 현차 결함의 「전차 사진」 칸에 복사됩니다(현차 출력에는 안 나옴, 전·금회차 비교사진에 쓰임).` +
-            `\n기존 전차 사진은 덮어쓰지 않습니다. 사진을 새로 복사하므로 서버 저장공간을 씁니다.` +
+        if (mode === 'cur') {
+            msg += `\n\n사진은 현차 결함의 사진(보고서에 출력되는 사진) 맨 뒤에 복사됩니다. 기존 사진은 그대로 둡니다.` +
+                `\n이미 옮긴 사진은 다시 넣지 않습니다(두 번 눌러도 겹치지 않음).`;
+        } else {
+            msg += `\n\n사진은 현차 결함의 「전차 사진」 칸에 복사됩니다(현차 출력에는 안 나옴, 전·금회차 비교사진에 쓰임).` +
+                `\n기존 전차 사진은 덮어쓰지 않습니다.`;
+        }
+        msg += `\n사진을 새로 복사하므로 서버 저장공간을 씁니다.` +
             `\n되돌리기로는 취소되지 않습니다 — 잘못 들어간 사진은 결함 수정에서 지워 주세요.` + freshNote;
         if (!plan.matches.length) {
-            await window.appAlert(msg, { title: '전차 사진 가져오기 · 가져올 사진 없음' });
+            await window.appAlert(msg, { title: `${TITLE} · 옮길 사진 없음` });
             return;
         }
-        if (!await window.appConfirm(msg, { title: '전차 사진 가져오기 · 미리보기', okText: `${plan.photoTotal}장 가져오기`, danger: false })) return;
+        if (!await window.appConfirm(msg, { title: `${TITLE} · 미리보기`, okText: `${plan.photoTotal}장 옮기기`, danger: false })) return;
 
-        window.showLoading('전차 사진 복사 중…');
+        window.showLoading('사진 복사 중…');
         let doneDefects = 0;
         let donePhotos = 0;
         let uploadFailed = 0;
@@ -20651,18 +20707,36 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 const m = plan.matches[i];
                 const t = m.tgt;
                 if (typeof window.updateLoadingText === 'function') {
-                    window.updateLoadingText(`전차 사진 복사 ${i + 1}/${plan.matches.length}…`);
+                    window.updateLoadingText(`사진 복사 ${i + 1}/${plan.matches.length}…`);
                 }
-                // 기다리는 사이 다른 창에서 전차 사진이 들어왔으면 덮어쓰지 않는다
-                if (api.photoCount(t, 'prev') > 0) continue;
-                const got = await loadPrevRoundSourcePhotos(m.src);
-                if (got.failed) loadFailed.push({ m, failed: got.failed, total: m.photos });
+                // 기다리는 사이 다른 창에서 바뀌었을 수 있어 복사 직전에 다시 본다
+                let indexes = m.indexes;
+                if (mode === 'prev') {
+                    if (api.photoCount(t, 'prev') > 0) continue;
+                } else {
+                    indexes = api.pendingPhotoIndexes(m.src, t);
+                    if (!indexes.length) continue;
+                }
+                const got = await loadPrevRoundSourcePhotos(m.src, indexes);
+                if (got.failed) loadFailed.push({ m, failed: got.failed, total: indexes.length });
                 if (!got.urls.length) continue;
-                if (api.photoCount(t, 'prev') > 0) continue;
-                const ids = assignDefectPhotoIds(t.id, got.urls, null, 'prev');
-                t.prevRoundPhotos = got.urls.slice();
-                t.prevRoundPhotoIds = ids;
-                if (!t.prevSurveyRound) t.prevSurveyRound = srcKey;
+                let ids;
+                if (mode === 'prev') {
+                    if (api.photoCount(t, 'prev') > 0) continue;
+                    ids = assignDefectPhotoIds(t.id, got.urls, null, 'prev');
+                    t.prevRoundPhotos = got.urls.slice();
+                    t.prevRoundPhotoIds = ids;
+                    if (!t.prevSurveyRound) t.prevSurveyRound = srcKey;
+                } else {
+                    // 불러오는 사이 같은 사진이 들어왔으면 그 사진만 뺀다
+                    const again = new Set(api.pendingPhotoIndexes(m.src, t).map((x) => api.srcPhotoKeys(m.src)[x]));
+                    const urls = [];
+                    const keys = [];
+                    got.keys.forEach((k, gi) => { if (again.has(k)) { urls.push(got.urls[gi]); keys.push(k); } });
+                    if (!urls.length) continue;
+                    got.urls = urls;
+                    ids = appendCurrentRoundPhotosToDefect(t, urls, keys);
+                }
                 if (!window._photoCache) window._photoCache = {};
                 got.urls.forEach((url, pi) => {
                     window._photoCache[ids[pi]] = url;
@@ -20675,10 +20749,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 doneDefects++;
                 donePhotos += got.urls.length;
                 try {
-                    await uploadDefectPhotos(t.id, got.urls, 'prev', ids);
+                    await uploadDefectPhotos(t.id, got.urls, mode === 'prev' ? 'prev' : undefined, ids);
                 } catch (e) {
                     uploadFailed += got.urls.length;
-                    console.warn('[전차 사진 가져오기] 업로드 실패(동기화 때 다시 올림):', t.id, e);
+                    console.warn(`[${TITLE}] 업로드 실패(동기화 때 다시 올림):`, t.id, e);
                 }
                 if (doneDefects % 10 === 0) saveStateToLocalStorage();
             }
@@ -20692,18 +20766,18 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             try { syncStateToFirebase(); } catch (_e) { /* 다음 동기화 때 */ }
         }
         const failedPhotos = loadFailed.reduce((n, f) => n + f.failed, 0);
-        let result = `결함 ${doneDefects}건에 전차 사진 ${donePhotos}장을 넣었습니다.`;
+        let result = `결함 ${doneDefects}건의 ${mode === 'prev' ? '전차 사진 칸' : '현차 사진'}에 사진 ${donePhotos}장을 넣었습니다.`;
         if (failedPhotos) {
-            result += `\n\n[불러오지 못한 사진 ${failedPhotos}장 — 전차 점검에서 사진이 열리는지 확인해 주세요]\n` + listLines(
+            result += `\n\n[불러오지 못한 사진 ${failedPhotos}장 — 전차 점검에서 사진이 열리는지 확인해 주세요${mode === 'cur' ? '. 다시 누르면 이 사진만 다시 시도합니다' : ''}]\n` + listLines(
                 loadFailed,
                 (f) => `  ${prevRoundPhotoDefectLabel(f.m.src, f.m.floor, bldg)} · ${f.failed}/${f.total}장`
             );
         }
         if (uploadFailed) result += `\n\n※ 서버에 아직 못 올린 사진 ${uploadFailed}장 — 다음 동기화 때 다시 올립니다.`;
-        await window.appAlert(result, { title: '전차 사진 가져오기 완료' });
+        await window.appAlert(result, { title: `${TITLE} 완료` });
     };
 
-    /** 건물 수정 창(정보 모드)에 「전차 사진 가져오기」 칸 — index.html 은 그대로 두고 JS 로 만든다 */
+    /** 건물 수정 창(정보 모드)에 「전차 사진 → 현차로 옮기기」 칸 — index.html 은 그대로 두고 JS 로 만든다 */
     function ensurePrevRoundPhotoImportSection() {
         const modal = document.getElementById('editBuildingModal');
         if (!modal || document.getElementById('btnPrevRoundPhotoImport')) return;
@@ -20714,18 +20788,26 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         box.innerHTML = `
             <div class="edit-next-round-head">
                 <div>
-                    <h4 class="edit-next-round-title"><i class="fa-solid fa-images"></i> 전차 사진 가져오기</h4>
-                    <p class="edit-next-round-desc">같은 현장의 이전 회차 점검 사진을, 이 점검에서 같은 층·같은 번호(없으면 마킹 위치)인 결함의 「전차 사진」으로 복사합니다. 먼저 미리보기를 보여 주고, 이미 전차 사진이 있는 결함은 건너뜁니다.</p>
+                    <h4 class="edit-next-round-title"><i class="fa-solid fa-images"></i> 전차 사진 → 현차로 옮기기</h4>
+                    <p class="edit-next-round-desc">같은 현장의 이전 회차 점검 사진을, 이 점검에서 같은 층·같은 번호(없으면 마킹 위치)인 결함의 사진(보고서에 출력되는 사진) 뒤에 복사합니다. 먼저 미리보기를 보여 주고, 이미 옮긴 사진은 다시 넣지 않습니다.</p>
                 </div>
                 <button type="button" class="btn btn-primary btn-sm edit-next-round-btn" id="btnPrevRoundPhotoImport">
-                    <i class="fa-solid fa-clock-rotate-left"></i> 전차 사진 가져오기
+                    <i class="fa-solid fa-clock-rotate-left"></i> 전차 사진 → 현차로 옮기기
+                </button>
+            </div>
+            <div class="edit-prev-photo-alt">
+                <button type="button" class="btn btn-secondary btn-sm" id="btnPrevRoundPhotoImportPrevSlot" title="출력 사진이 아니라 결함의 「전차 사진」 칸(전·금회차 비교용)에 넣습니다">
+                    전차 사진 칸으로 넣기
                 </button>
             </div>`;
         anchorEl.parentNode.insertBefore(box, anchorEl.nextSibling);
+        const curId = () => document.getElementById('inputEditBuildingId')?.value
+            || (window.currentEditingBuilding && window.currentEditingBuilding.id);
         box.querySelector('#btnPrevRoundPhotoImport').addEventListener('click', () => {
-            const id = document.getElementById('inputEditBuildingId')?.value
-                || (window.currentEditingBuilding && window.currentEditingBuilding.id);
-            window.openPrevRoundPhotoImport(id);
+            window.openPrevRoundPhotoImport(curId(), 'cur');
+        });
+        box.querySelector('#btnPrevRoundPhotoImportPrevSlot').addEventListener('click', () => {
+            window.openPrevRoundPhotoImport(curId(), 'prev');
         });
     }
     window.ensurePrevRoundPhotoImportSection = ensurePrevRoundPhotoImportSection;
