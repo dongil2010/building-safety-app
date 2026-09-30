@@ -30817,6 +30817,15 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (isDraggingPin || isDraggingPinGroup) {
             rebindActiveDragPinFromState();
             if (activeDragPin) touchDefectPositionUpdatedAt(activeDragPin);
+            // 박스를 직접 끌어 옮김 → 「박스 자동 정리(겹친 박스만)」가 건드리지 않게 표시(묶음은 박스를 함께 씀)
+            if (activeDragPin && !isDraggingPinGroup && (activeDragPart === 'BOX' || !activeDragPart)) {
+                activeDragPin.boxManual = true;
+                if (activeDragPin.groupId) {
+                    getCurrentFloorDefects().forEach((d) => {
+                        if (d && d !== activeDragPin && d.groupId === activeDragPin.groupId) d.boxManual = true;
+                    });
+                }
+            }
             // 공유 NO.박스를 옮겼으면 묶음 모두의 x·y가 바뀌었다 → 모두 위치 시각을 올려야
             // 다른 기기와 칸 단위 병합할 때 옛 박스 자리로 되돌아가지 않는다
             if (activeDragPin && activeDragPin.groupId && !isDraggingPinGroup) {
@@ -35305,6 +35314,179 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     ['btnGridLines', 'mobileBtnGridLines'].forEach((id) => {
         const b = document.getElementById(id);
         if (b) b.addEventListener('click', () => setGridEditActive(!gridEditState().active));
+    });
+
+    // ---- NO. 박스 자동 정리 (2026-09-30) ----
+    // 계산은 js/shared/box-auto-layout.js(window.BSA.boxAutoLayout). 마킹 점·영역은 그대로, 박스 x·y만 바꾼다.
+    // 한글·PDF·이미지 출력은 저장된 박스 자리를 그대로 쓰므로 따로 손댈 것 없음.
+    function boxAutoLayoutLib() {
+        return (window.BSA && window.BSA.boxAutoLayout) || null;
+    }
+
+    function defectAreaAabb(d) {
+        if (!d || d.shapeType !== 'area' || d.areaX1 === undefined) return null;
+        let x1 = Math.min(d.areaX1, d.areaX2); let x2 = Math.max(d.areaX1, d.areaX2);
+        let y1 = Math.min(d.areaY1, d.areaY2); let y2 = Math.max(d.areaY1, d.areaY2);
+        if (Array.isArray(d.areaPoints) && d.areaPoints.length >= 3) {
+            const xs = d.areaPoints.map((p) => Number(p && p.x)).filter(Number.isFinite);
+            const ys = d.areaPoints.map((p) => Number(p && p.y)).filter(Number.isFinite);
+            if (xs.length && ys.length) { x1 = Math.min(...xs); x2 = Math.max(...xs); y1 = Math.min(...ys); y2 = Math.max(...ys); }
+        }
+        return [x1, y1, x2, y2].every(Number.isFinite) ? { x1, y1, x2, y2 } : null;
+    }
+
+    /** 도면에 그리는 것과 같은 묶음(통합 X-1/X-2는 박스 하나)으로 계산 입력을 만든다 */
+    function buildBoxAutoLayoutItems(defects, mode) {
+        const L = boxAutoLayoutLib();
+        const rot = state.rotationAngle || 0;
+        const items = [];
+        const membersById = {};
+        const seenGroup = new Set();
+        (defects || []).forEach((d) => {
+            if (!d || !d.id) return;
+            let members = [d];
+            let rep = d;
+            if (d.groupId) {
+                if (seenGroup.has(d.groupId)) return;
+                const gm = defects.filter((x) => x && x.groupId === d.groupId);
+                if (gm.length > 1) {
+                    seenGroup.add(d.groupId);
+                    members = gm;
+                    rep = pickDefectGroupRepresentative(gm) || d;
+                }
+            }
+            const bx = Number(rep.x); const by = Number(rep.y);
+            if (!Number.isFinite(bx) || !Number.isFinite(by)) return;
+            const styleKey = getDefectStyleKey(rep.category, rep.defectType);
+            const scale = getStyleSize(styleKey).pin;
+            const label = formatDefectPinLabel(rep, styleKey);
+            const dims = measurePinBoxDimensions(state.ctx, label, scale, 1.0);
+            let badge = null;
+            if (defectHasCornerMark(rep)) {
+                const gh = getBookmarkChromeGlyphHeight(scale);
+                badge = { w: gh * 2.2, h: gh };
+            }
+            const targets = [];
+            members.filter((m) => m && !m.surveyExtra).forEach((m) => {
+                const area = defectAreaAabb(m);
+                if (area) targets.push({ rect: area });
+                else if (m.targetX !== undefined && m.targetY !== undefined
+                    && Number.isFinite(Number(m.targetX)) && Number.isFinite(Number(m.targetY))) {
+                    targets.push({ x: Number(m.targetX), y: Number(m.targetY) });
+                }
+            });
+            const manual = members.some((m) => m && m.boxManual === true);
+            items.push({
+                id: rep.id,
+                cx: bx,
+                cy: by,
+                ext: L.boxExtent(dims.w, dims.h, rot, badge),
+                targets,
+                movable: mode === 'all' ? true : !manual,
+                manual
+            });
+            membersById[rep.id] = members;
+        });
+        return { items, membersById };
+    }
+
+    /** 범례 박스(이미지 좌표 AABB) — 박스가 범례를 가리지 않게 */
+    function boxAutoLayoutObstacles() {
+        const out = [];
+        try {
+            const b = (typeof lastLegendBoxBounds !== 'undefined') ? lastLegendBoxBounds : null;
+            if (b && [b.x, b.y, b.w, b.h].every((v) => Number.isFinite(Number(v)))) {
+                const rad = -((state.rotationAngle || 0) * Math.PI) / 180;
+                const c = Math.cos(rad); const s = Math.sin(rad);
+                const pts = [[0, 0], [b.w, 0], [b.w, b.h], [0, b.h]].map(([x, y]) => ({ x: b.x + x * c - y * s, y: b.y + x * s + y * c }));
+                out.push({
+                    x1: Math.min(...pts.map((p) => p.x)), y1: Math.min(...pts.map((p) => p.y)),
+                    x2: Math.max(...pts.map((p) => p.x)), y2: Math.max(...pts.map((p) => p.y))
+                });
+            }
+        } catch (_e) { /* 범례 없음 */ }
+        return out;
+    }
+
+    /**
+     * 이 층 박스 계산(저장 안 함). mode: 'overlap'(겹친 박스만, 직접 옮긴 박스 제외) | 'all'
+     * 결과: { moves: { 대표id: {x,y} }, membersById, before, after, movableCount }
+     */
+    function planMarkingBoxAutoLayout(mode) {
+        const L = boxAutoLayoutLib();
+        if (!L) return null;
+        const defects = filterMapPlacedDefects(getCurrentFloorDefects());
+        const { items, membersById } = buildBoxAutoLayoutItems(defects, mode);
+        const dims = getFloorPlanDisplayDims();
+        const opts = { bounds: { w: dims.w, h: dims.h }, obstacles: boxAutoLayoutObstacles() };
+        if (mode !== 'all') {
+            const conf = L.conflictsAtCurrent(items, opts);
+            items.forEach((it) => { if (!conf[it.id]) it.movable = false; });
+        }
+        const movableCount = items.filter((it) => it.movable).length;
+        const manualSkipped = mode !== 'all' ? items.filter((it) => it.manual).length : 0;
+        const res = movableCount ? L.layoutBoxes(items, opts) : { moves: {}, before: 0, after: 0 };
+        return Object.assign({ membersById, movableCount, manualSkipped, total: items.length }, res);
+    }
+
+    function applyMarkingBoxAutoLayout(plan, mode) {
+        const ids = Object.keys((plan && plan.moves) || {});
+        if (!ids.length) return 0;
+        if (typeof pushDefectHistory === 'function') pushDefectHistory(); // 되돌리기 한 번으로 전체 취소
+        ids.forEach((id) => {
+            const mv = plan.moves[id];
+            (plan.membersById[id] || []).forEach((m) => {
+                m.x = mv.x;
+                m.y = mv.y;
+                if (mode === 'all' && m.boxManual) m.boxManual = false; // 다시 자동 자리
+                touchDefectPositionUpdatedAt(m);
+            });
+        });
+        saveStateToLocalStorage();
+        drawCanvas();
+        return ids.length;
+    }
+
+    async function runMarkingBoxAutoLayout() {
+        if (!boxAutoLayoutLib()) {
+            window.showToast?.('박스 정리 모듈을 불러오지 못했습니다. 새로고침해 주세요.', 'error', 3000);
+            return;
+        }
+        if (!state.currentBuildingId || !state.currentFloor || !state.bgImage) {
+            window.showToast?.('도면이 있는 층에서 쓸 수 있습니다.', 'info', 2000);
+            return;
+        }
+        if (!filterMapPlacedDefects(getCurrentFloorDefects()).length) {
+            window.showToast?.('이 층에 마킹이 없습니다.', 'info', 2000);
+            return;
+        }
+        const pick = await window.appChoose('NO. 박스를 마킹 점·다른 박스·지시선과 겹치지 않는 자리로 옮깁니다.\n마킹 점(화살표 끝)·영역은 움직이지 않습니다.', [
+            { label: '겹친 박스만', detail: '직접 끌어 옮긴 박스는 그대로 둡니다' },
+            { label: '모든 박스', detail: '직접 옮긴 박스도 포함해 이 층 박스를 모두 다시 놓습니다' }
+        ], { title: '박스 자동 정리', okText: '정리', defaultIndex: 0 });
+        if (pick == null) return;
+        const mode = pick === 1 ? 'all' : 'overlap';
+        const plan = planMarkingBoxAutoLayout(mode);
+        if (!plan) return;
+        if (!plan.movableCount) {
+            window.showToast?.(plan.manualSkipped
+                ? `겹친 박스가 없습니다(직접 옮긴 박스 ${plan.manualSkipped}개는 건너뜀 — 「모든 박스」로 포함).`
+                : '겹친 박스가 없습니다.', 'info', 3500);
+            return;
+        }
+        const n = applyMarkingBoxAutoLayout(plan, mode);
+        if (!n) {
+            window.showToast?.('더 나은 자리를 찾지 못했습니다.', 'info', 2500);
+            return;
+        }
+        window.showToast?.(`박스 ${n}개를 옮겼습니다(겹침 ${plan.before} → ${plan.after}). 되돌리기로 한 번에 취소할 수 있습니다.`, 'success', 5000);
+    }
+    window.runMarkingBoxAutoLayout = runMarkingBoxAutoLayout;
+    window.planMarkingBoxAutoLayout = planMarkingBoxAutoLayout;
+
+    ['btnBoxAutoLayout', 'mobileBtnBoxAutoLayout'].forEach((id) => {
+        const b = document.getElementById(id);
+        if (b) b.addEventListener('click', () => { runMarkingBoxAutoLayout(); });
     });
 
     // 행·열 편집 중: Delete=선택한 선(꺾인 점) 삭제, Esc=꺾기 취소 → 선택 해제 → 편집 끝 (다른 단축키보다 먼저)

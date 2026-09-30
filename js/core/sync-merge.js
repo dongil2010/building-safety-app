@@ -14,7 +14,8 @@
         'x', 'y', 'targetX', 'targetY', 'mapMarkedAt', 'mapUnregistered',
         'vertices', 'points', 'areaAngle', 'width', 'height', 'rotation',
         'shapeType', 'areaX1', 'areaY1', 'areaX2', 'areaY2', 'areaShape',
-        'areaPoints', 'areaDrawings', 'areaFillStyle', 'areaBorderStyle'
+        'areaPoints', 'areaDrawings', 'areaFillStyle', 'areaBorderStyle',
+        'boxManual' // 박스를 직접 옮김(2026-09-30 박스 자동 정리) — 박스 자리와 함께 따라감
     ];
 
     /**
