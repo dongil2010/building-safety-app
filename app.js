@@ -738,6 +738,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // --- 4. PERSISTENCE ENGINE (LOCAL STORAGE + INDEXEDDB) ---
     let _localStorageSaveFailedNotified = false;
+    let _localStorageSaveFailedAt = 0;
     let _suppressSyncOnSave = false;
     const LOCAL_STATE_KEY_LEGACY = 'building_safety_app_state_v2';
     const LOCAL_STATE_KEY_COMPANY_PREFIX = 'building_safety_app_state_v2_c_';
@@ -2245,15 +2246,34 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!_suppressSyncOnSave && window.state.uid) scheduleSyncUserDefectPinPresets();
         } catch (e) {
             console.warn('LocalStorage save warning:', e);
-            if (!_localStorageSaveFailedNotified) {
+            const isQuotaError = !!(e && (e.name === 'QuotaExceededError' || e.code === 22 || e.code === 1014));
+            // 2026-09-30 사고: 기기 저장 공간(localStorage 약 5백만 자)이 차면 setItem이 실패하는데, 서버 올리기
+            // 예약이 setItem 뒤에 있어 **같이 건너뛰었다** → CAD 핀·엑셀 가져오기처럼 한 번에 많이 늘어나는 저장이
+            // 기기에도 서버에도 안 남고, 새로고침하면 사라졌다. 기기 저장이 실패해도 메모리의 최신 상태는
+            // 서버로 올린다(층 dirty 표시 + 예약). 서버에 올라가면 다시 들어올 때 병합으로 돌아온다.
+            let cloudQueued = false;
+            if (!_suppressSyncOnSave && typeof scheduleSyncToFirebase === 'function') {
+                try {
+                    scheduleSyncToFirebase();
+                    cloudQueued = !!(db && window.state.companyId && navigator.onLine !== false);
+                } catch (syncErr) {
+                    console.warn('기기 저장 실패 뒤 서버 올리기 예약도 실패:', syncErr);
+                }
+            }
+            const nowMs = Date.now();
+            // 한 번만 알리면 계속 실패하는 줄 모른다 — 2분마다 다시 알린다
+            if (!_localStorageSaveFailedNotified || (nowMs - (_localStorageSaveFailedAt || 0)) > 120000) {
                 _localStorageSaveFailedNotified = true;
-                const isQuotaError = e && (e.name === 'QuotaExceededError' || e.code === 22);
+                _localStorageSaveFailedAt = nowMs;
+                const tail = cloudQueued
+                    ? ' 변경사항은 서버에 올리는 중입니다 — 동기화가 끝나기 전에 새로고침하거나 앱을 닫지 마세요.'
+                    : ' 지금 오프라인이라 서버에도 못 올렸습니다 — 인터넷에 연결될 때까지 새로고침하거나 앱을 닫지 마세요.';
                 window.showToast(
-                    isQuotaError
-                        ? '저장 공간이 가득 차서 최근 변경사항이 저장되지 못했습니다. 오래된 도면/사진을 정리해 주세요.'
-                        : '변경사항을 기기에 저장하지 못했습니다. 앱을 다시 시작하거나 관리자에게 문의해 주세요.',
+                    (isQuotaError
+                        ? '이 기기 저장 공간이 가득 차서 기기에는 저장하지 못했습니다.'
+                        : '변경사항을 기기에 저장하지 못했습니다.') + tail,
                     'error',
-                    6000
+                    10000
                 );
             }
         }
@@ -49554,6 +49574,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             });
 
             if (importedThisFloor > 0 || matchedThisFloor > 0) {
+                // 지금 보고 있지 않은 층에 넣은 것도 서버에 올라가게 — 저장은 현재 층만 dirty로 표시한다
+                if (typeof markFloorKeyDirty === 'function') markFloorKeyDirty(key);
                 totalImported += importedThisFloor;
                 totalMatched += matchedThisFloor;
                 floorsTouched++;
