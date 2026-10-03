@@ -29511,6 +29511,23 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     let pendingAreaPoly = null; // 다각형 영역 생성 중 점들
     // 터치 다각형: 손가락을 뗄 때 점을 찍는다(두 손가락 확대·한 손가락 끌어 이동과 안 겹치게) — { clientX, clientY, x, y }
     let touchPolyTap = null;
+    /**
+     * 도면 터치 제스처 규칙 (2026-10-03 실기기: 확대·이동 중에 다각형 점이 찍힘)
+     * - 점은 「깨끗한 한 손가락 탭」만: 누르고 뗄 때까지 8px 미만·500ms 미만, 그동안 두 번째 손가락 없음
+     * - 두 손가락이 한 번이라도 닿으면 모든 손가락이 떨어질 때까지 터치를 무시하고, 그 뒤 250ms 더 무시
+     *   (확대 끝에 남은 손가락을 떼거나 다시 대는 것이 탭/그리기로 잡히지 않게)
+     */
+    const TOUCH_TAP_MAX_MOVE_PX = 8;
+    const TOUCH_TAP_MAX_MS = 500;
+    const TOUCH_MULTI_COOLDOWN_MS = 250;
+    let touchMultiActive = false;
+    let touchCooldownUntil = 0;
+    function isCleanTouchTap(tap, now) {
+        if (!tap || tap.multi) return false;
+        if ((tap.maxMove || 0) >= TOUCH_TAP_MAX_MOVE_PX) return false;
+        return (now - (tap.downAt || 0)) < TOUCH_TAP_MAX_MS;
+    }
+    window.__bsaTouchTapRule = { isCleanTouchTap, TOUCH_TAP_MAX_MOVE_PX, TOUCH_TAP_MAX_MS, TOUCH_MULTI_COOLDOWN_MS };
     let pendingAreaPolyRedraw = null; // { defectId } 기존 영역 외곽 다시그리기
     let isAreaInkDrag = false;
     let areaInkStroke = null;
@@ -30457,7 +30474,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             const areaCoords = clientToImgCoords(clientX, clientY);
             if (createShape === 'polygon' && isTouch) {
                 // 터치: 점은 손을 뗄 때(handleDragEnd → commitTouchPolygonTap). 끌면 도면 이동.
-                touchPolyTap = { clientX, clientY, x: areaCoords.x, y: areaCoords.y };
+                touchPolyTap = { clientX, clientY, x: areaCoords.x, y: areaCoords.y, downAt: Date.now(), maxMove: 0, multi: false };
                 startMouseX = clientX;
                 startMouseY = clientY;
                 initialOffsetX = state.view.offsetX;
@@ -30844,7 +30861,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             const moved = (clientX == null || clientY == null)
                 ? 0
                 : Math.hypot(clientX - tap.clientX, clientY - tap.clientY);
-            if (moved < 10) {
+            tap.maxMove = Math.max(tap.maxMove || 0, moved);
+            if (isCleanTouchTap(tap, Date.now())) {
                 isDragging = false;
                 if (elements.planCanvas) elements.planCanvas.style.cursor = getMapCanvasCursor();
                 commitTouchPolygonTap(tap);
@@ -31545,8 +31563,12 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             if (window.BSA_gridEdit && window.BSA_gridEdit.drag && e.touches.length >= 2) window.BSA_gridEdit.cancelDrag();
             if (e.touches.length === 1 && !isPinching) {
                 if (e.cancelable) e.preventDefault();
+                // 두 손가락 제스처 뒤: 모두 떼고 잠깐(250ms) 지날 때까지는 점·그리기 시작 안 함
+                if (touchMultiActive || Date.now() < touchCooldownUntil) return;
                 handleDragStart(e.touches[0].clientX, e.touches[0].clientY, true);
             } else if (e.touches.length >= 2) {
+                touchMultiActive = true;
+                if (touchPolyTap) touchPolyTap.multi = true;
                 // Multi-touch detected: cancel active 1-finger mark or drag operations safely
                 clearPendingDragLongPress();
                 hideTouchLoupe(MAP_LOUPE_ID);
@@ -31607,6 +31629,11 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     if (shouldUseViewportTilesForCurrentFloor()) scheduleViewportHiPatchSync();
                 }
             } else if (!isPinching && e.touches.length === 1) {
+                if (touchPolyTap) {
+                    const t0 = e.touches[0];
+                    touchPolyTap.maxMove = Math.max(touchPolyTap.maxMove || 0,
+                        Math.hypot(t0.clientX - touchPolyTap.clientX, t0.clientY - touchPolyTap.clientY));
+                }
                 if (isDragging || isMarkingDrag || isAreaDrag || isAreaInkDrag || isDraggingPin || isDraggingPinGroup || pendingDragHit || isDraggingLegend || isResizingLegend || isMarqueeSelecting) {
                     // 브라우저가 스크롤/제스처로 터치 드래그를 가로채 끊지 않게
                     if (e.cancelable) e.preventDefault();
@@ -31617,6 +31644,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
         window.addEventListener('touchend', (e) => {
             if (e.touches.length === 0) mapTouchStartedOnCanvas = false;
+            if (touchMultiActive && e.touches.length === 0) {
+                touchMultiActive = false;
+                touchCooldownUntil = Date.now() + TOUCH_MULTI_COOLDOWN_MS;
+            }
             mapSuppressMouseUntil = Date.now() + 700;
             if (isPinching) {
                 if (e.touches.length < 2) {
@@ -31661,6 +31692,12 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
         window.addEventListener('touchcancel', (e) => {
             isPinching = false;
+            // 취소된 터치는 탭이 아니다(점을 찍지 않는다)
+            if (touchPolyTap) touchPolyTap.multi = true;
+            if (!e.touches || e.touches.length === 0) {
+                if (touchMultiActive) touchCooldownUntil = Date.now() + TOUCH_MULTI_COOLDOWN_MS;
+                touchMultiActive = false;
+            }
             const t = e.changedTouches && e.changedTouches[0];
             if (isDragging || isMarkingDrag || isAreaDrag || isAreaInkDrag || isDraggingPin || isDraggingPinGroup || pendingDragHit || isDraggingLegend || isResizingLegend || isMarqueeSelecting) {
                 handleDragEnd(t ? t.clientX : undefined, t ? t.clientY : undefined);

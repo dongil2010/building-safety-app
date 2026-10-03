@@ -51,4 +51,18 @@ assert.ok(app.includes("localStorage.getItem('bsa_area_shape_pref") || /readArea
 for (const id of ['areaPolyTouchBar', 'btnAreaPolyTouchDone', 'btnAreaPolyTouchUndo', 'btnAreaPolyTouchCancel']) {
     assert.ok(html.includes(`id="${id}"`), id);
 }
+
+// 깨끗한 탭 규칙(2026-10-03 실기기 버그): 8px·500ms 미만, 두 번째 손가락 없음
+{
+    const src = app.slice(app.indexOf('const TOUCH_TAP_MAX_MOVE_PX'), app.indexOf('window.__bsaTouchTapRule'));
+    const rule = new Function(src + '; return isCleanTouchTap;')();
+    const now = 10000;
+    assert.strictEqual(rule({ downAt: now - 100, maxMove: 3 }, now), true, '짧고 가만히 = 탭');
+    assert.strictEqual(rule({ downAt: now - 100, maxMove: 8 }, now), false, '8px 이상 움직이면 이동');
+    assert.strictEqual(rule({ downAt: now - 600, maxMove: 0 }, now), false, '500ms 넘게 누르면 탭 아님');
+    assert.strictEqual(rule({ downAt: now - 50, maxMove: 0, multi: true }, now), false, '두 손가락이 닿았으면 탭 아님');
+    assert.ok(/touchMultiActive \|\| Date\.now\(\) < touchCooldownUntil\) return;/.test(app), '두 손가락 뒤 모두 뗄 때까지 + 250ms 무시');
+    assert.ok(/touchMultiActive && e\.touches\.length === 0[\s\S]{0,120}TOUCH_MULTI_COOLDOWN_MS/.test(app));
+    assert.ok(/touchPolyTap\.maxMove = Math\.max/.test(app), '움직인 최대 거리로 판단(되돌아와도 이동)');
+}
 console.log('test-area-shape-touch: ok');
