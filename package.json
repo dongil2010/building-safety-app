@@ -2,6 +2,7 @@
   "name": "building-safety-app",
   "version": "1.0.0",
   "private": true,
+  "main": "electron/main.js",
   "description": "스마트 건축물 안전점검 현장점검 — PWA + Android(Capacitor)",
   "scripts": {
     "test": "node scripts/run-node-tests.js",
@@ -13,7 +14,7 @@
     "android:setup": "powershell -ExecutionPolicy Bypass -File ./scripts/android-setup.ps1",
     "android:build:debug": "npm run android:setup && npm run cap:sync && cd android && .\\gradlew.bat assembleDebug",
     "electron": "electron electron/main.js",
-    "electron:dist": "electron-builder --win portable"
+    "electron:dist": "electron-builder --win nsis"
   },
   "dependencies": {
     "@capacitor/android": "^6.2.1",
@@ -39,8 +40,15 @@
       "package.json"
     ],
     "win": {
-      "target": "portable",
+      "target": "nsis",
       "signAndEditExecutable": false
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "perMachine": false,
+      "createDesktopShortcut": true,
+      "shortcutName": "스마트 안전점검"
     }
   }
 }
