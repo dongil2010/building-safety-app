@@ -16504,3 +16504,58 @@ html #tab-map .defect-list-section-scroll > .defect-list-item.is-important {
     background: #ecfdf5 !important;
     color: #065f46;
 }
+
+/* 폰·태블릿 영역 마킹 모양 고르기 (2026-10-03) */
+.area-shape-picker {
+    position: fixed;
+    z-index: 10050;
+    width: 232px;
+    padding: 0.45rem;
+    background: #fff;
+    border: 1px solid #e2e8f0;
+    border-radius: 14px;
+    box-shadow: 0 12px 32px rgba(15, 23, 42, 0.22);
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+}
+.area-shape-picker-title {
+    font-size: 0.74rem;
+    font-weight: 800;
+    color: #64748b;
+    padding: 0.15rem 0.4rem 0.1rem;
+}
+.area-shape-picker-item {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    width: 100%;
+    min-height: 48px;
+    padding: 0.45rem 0.6rem;
+    border: 1px solid #e2e8f0;
+    border-radius: 10px;
+    background: #fff;
+    color: #1e293b;
+    text-align: left;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+}
+.area-shape-picker-item i {
+    width: 1.6rem;
+    font-size: 1.15rem;
+    text-align: center;
+    color: #ea580c;
+}
+.area-shape-picker-text { display: flex; flex-direction: column; line-height: 1.2; }
+.area-shape-picker-text b { font-size: 0.9rem; font-weight: 800; }
+.area-shape-picker-text small { font-size: 0.7rem; color: #64748b; font-weight: 600; }
+.area-shape-picker-item.active {
+    border-color: #fb923c;
+    background: #fff7ed;
+    box-shadow: inset 0 0 0 1px #fb923c;
+}
+.area-poly-touch-bar .area-polygon-redraw-btn {
+    min-height: 36px;
+    padding: 0.35rem 0.85rem;
+    font-size: 0.82rem;
+}

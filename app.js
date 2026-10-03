@@ -29508,6 +29508,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     let areaMoveLastImgX = 0;
     let areaMoveLastImgY = 0;
     let pendingAreaPoly = null; // 다각형 영역 생성 중 점들
+    // 터치 다각형: 손가락을 뗄 때 점을 찍는다(두 손가락 확대·한 손가락 끌어 이동과 안 겹치게) — { clientX, clientY, x, y }
+    let touchPolyTap = null;
     let pendingAreaPolyRedraw = null; // { defectId } 기존 영역 외곽 다시그리기
     let isAreaInkDrag = false;
     let areaInkStroke = null;
@@ -30452,6 +30454,16 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         } else if (state.mode === 'AREA') {
             const createShape = state.areaCreateShape || 'rect';
             const areaCoords = clientToImgCoords(clientX, clientY);
+            if (createShape === 'polygon' && isTouch) {
+                // 터치: 점은 손을 뗄 때(handleDragEnd → commitTouchPolygonTap). 끌면 도면 이동.
+                touchPolyTap = { clientX, clientY, x: areaCoords.x, y: areaCoords.y };
+                startMouseX = clientX;
+                startMouseY = clientY;
+                initialOffsetX = state.view.offsetX;
+                initialOffsetY = state.view.offsetY;
+                isDragging = true;
+                return;
+            }
             if (createShape === 'polygon') {
                 if (!pendingAreaPoly) pendingAreaPoly = [];
                 if (pendingAreaPoly.length >= 3
@@ -30824,6 +30836,21 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         activePointerIsTouch = false;
         document.body.classList.remove('dragging-pin');
         document.body.style.touchAction = '';
+
+        if (touchPolyTap) {
+            const tap = touchPolyTap;
+            touchPolyTap = null;
+            const moved = (clientX == null || clientY == null)
+                ? 0
+                : Math.hypot(clientX - tap.clientX, clientY - tap.clientY);
+            if (moved < 10) {
+                isDragging = false;
+                if (elements.planCanvas) elements.planCanvas.style.cursor = getMapCanvasCursor();
+                commitTouchPolygonTap(tap);
+                return;
+            }
+            // 끌었다 → 도면 이동으로 끝(아래 isDragging 처리)
+        }
 
         if (isResizingLegend) {
             isResizingLegend = false;
@@ -31529,6 +31556,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 isDraggingPin = false;
                 isDraggingPinGroup = false;
                 isAreaDrag = false;
+                touchPolyTap = null;
                 isAreaInkDrag = false;
                 areaInkStroke = null;
                 isMarqueeSelecting = false;
@@ -34252,7 +34280,146 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 ? `점 ${n}개 · 완료: 첫 점 근처 클릭 · 더블클릭 · Enter`
                 : '다각형 꼭짓점을 찍으세요. 완료: 첫 점 근처 클릭 · 더블클릭 · Enter';
         }
+        syncAreaPolyTouchBar();
     }
+
+    // --- 폰·태블릿 영역 마킹: 모양 고르기(다각형·타원·사각형) + 터치 다각형 (2026-10-03) ---
+    // 그리기·저장은 PC와 같은 길(handleDragStart/End → openAddDefectModal, areaShape·areaPoints 그대로).
+    function readAreaShapePref() {
+        try {
+            const v = localStorage.getItem('bsa_area_create_shape_v1');
+            return (v === 'rect' || v === 'ellipse' || v === 'polygon') ? v : null;
+        } catch (_e) { return null; }
+    }
+    function writeAreaShapePref(shape) {
+        try { localStorage.setItem('bsa_area_create_shape_v1', shape); } catch (_e) { /* 기기 저장 실패해도 그리기는 됨 */ }
+    }
+
+    /** 터치 다각형 탭 — 첫 점 근처(화면 28px)를 다시 탭하면 닫는다 */
+    function commitTouchPolygonTap(tap) {
+        if (!tap || state.mode !== 'AREA' || (state.areaCreateShape || 'rect') !== 'polygon') return;
+        if (!pendingAreaPoly) pendingAreaPoly = [];
+        if (pendingAreaPoly.length >= 3) {
+            const first = pendingAreaPoly[0];
+            const scale = Math.max(0.0001, Number(state.view && state.view.scale) || 1);
+            const screenDist = Math.hypot(tap.x - first.x, tap.y - first.y) * scale;
+            if (screenDist < 28) {
+                finishPendingAreaPolygon();
+                return;
+            }
+        }
+        pendingAreaPoly.push({ x: tap.x, y: tap.y });
+        syncAreaPolygonRedrawBanner();
+        drawCanvas();
+    }
+
+    function undoTouchPolygonPoint() {
+        if (!pendingAreaPoly || !pendingAreaPoly.length) return;
+        pendingAreaPoly.pop();
+        syncAreaPolygonRedrawBanner();
+        drawCanvas();
+    }
+
+    /** 터치로 새 다각형을 그리는 중이면 아래 막대(점 수 · 점 취소 · 완료 · 취소) */
+    function syncAreaPolyTouchBar() {
+        const bar = document.getElementById('areaPolyTouchBar');
+        if (!bar) return;
+        const on = isTouchToolbarUi() && state.mode === 'AREA'
+            && (state.areaCreateShape || 'rect') === 'polygon'
+            && !isAreaPolygonRedrawActive();
+        bar.hidden = !on;
+        if (!on) return;
+        const n = (pendingAreaPoly && pendingAreaPoly.length) || 0;
+        const text = document.getElementById('areaPolyTouchText');
+        if (text) {
+            text.textContent = n === 0
+                ? '다각형: 꼭짓점을 탭하세요'
+                : (n < 3 ? `점 ${n}개 · ${3 - n}개 더` : `점 ${n}개 · 완료 또는 첫 점 탭`);
+        }
+        const done = document.getElementById('btnAreaPolyTouchDone');
+        if (done) done.disabled = n < 3;
+        const undo = document.getElementById('btnAreaPolyTouchUndo');
+        if (undo) undo.disabled = n === 0;
+    }
+
+    // 함수로 둔다 — 초기화 중 syncAreaToolPanelUi가 먼저 불려도 TDZ 오류가 안 나게
+    function areaShapeChoices() { return [
+        { shape: 'polygon', label: '다각형', hint: '꼭짓점을 차례로 탭 → 완료', icon: 'fa-draw-polygon' },
+        { shape: 'ellipse', label: '타원', hint: '도면을 끌어서 그리기', icon: 'fa-circle' },
+        { shape: 'rect', label: '사각형', hint: '도면을 끌어서 그리기 (PC 「박스」)', icon: 'fa-vector-square' }
+    ]; }
+
+    function syncMobileAreaRailIcon() {
+        const btn = document.getElementById('mobileBtnModeArea');
+        if (!btn) return;
+        const shape = state.areaCreateShape || 'rect';
+        const c = areaShapeChoices().find((x) => x.shape === shape) || areaShapeChoices()[2];
+        const icon = btn.querySelector('i');
+        if (icon) icon.className = (c.shape === 'ellipse' ? 'fa-regular ' : 'fa-solid ') + c.icon;
+        btn.setAttribute('title', `영역 마킹 — ${c.label} (눌러서 모양 바꾸기)`);
+    }
+
+    function closeAreaShapePicker() {
+        const el = document.getElementById('areaShapePicker');
+        if (el) el.remove();
+        document.removeEventListener('pointerdown', onAreaShapePickerOutside, true);
+    }
+    function onAreaShapePickerOutside(e) {
+        const el = document.getElementById('areaShapePicker');
+        if (!el) return;
+        if (el.contains(e.target)) return;
+        const btn = document.getElementById('mobileBtnModeArea');
+        if (btn && btn.contains(e.target)) return; // 버튼 클릭이 닫고 다시 연다
+        closeAreaShapePicker();
+    }
+
+    /** 폰·태블릿: 영역 버튼을 누르면 모양 고르기. 고르면 그 모양으로 영역 모드, 다음에도 기억 */
+    function openAreaShapePicker(anchor) {
+        if (document.getElementById('areaShapePicker')) { closeAreaShapePicker(); return; }
+        const cur = state.areaCreateShape || readAreaShapePref() || 'rect';
+        const el = document.createElement('div');
+        el.id = 'areaShapePicker';
+        el.className = 'area-shape-picker';
+        el.setAttribute('role', 'menu');
+        el.innerHTML = '<div class="area-shape-picker-title">영역 모양</div>'
+            + areaShapeChoices().map((c) => `
+                <button type="button" class="area-shape-picker-item${c.shape === cur ? ' active' : ''}" role="menuitemradio"
+                    aria-checked="${c.shape === cur}" data-area-shape-pick="${c.shape}">
+                    <i class="${c.shape === 'ellipse' ? 'fa-regular' : 'fa-solid'} ${c.icon}" aria-hidden="true"></i>
+                    <span class="area-shape-picker-text"><b>${c.label}</b><small>${c.hint}</small></span>
+                </button>`).join('');
+        document.body.appendChild(el);
+        // 버튼 옆(오른쪽 레일이면 왼쪽으로) — 화면 안에 들어오게
+        const r = anchor ? anchor.getBoundingClientRect() : { left: window.innerWidth - 60, right: window.innerWidth - 10, top: 120, bottom: 160 };
+        const w = el.offsetWidth || 220;
+        const h = el.offsetHeight || 180;
+        let left = r.left - w - 8;
+        if (left < 8) left = Math.min(window.innerWidth - w - 8, r.right + 8);
+        let top = Math.max(8, Math.min(window.innerHeight - h - 8, r.top + (r.bottom - r.top) / 2 - h / 2));
+        el.style.left = Math.round(left) + 'px';
+        el.style.top = Math.round(top) + 'px';
+        el.querySelectorAll('[data-area-shape-pick]').forEach((b) => {
+            b.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const shape = b.getAttribute('data-area-shape-pick');
+                closeAreaShapePicker();
+                pickAreaShapeFromTouch(shape);
+            });
+        });
+        setTimeout(() => document.addEventListener('pointerdown', onAreaShapePickerOutside, true), 0);
+    }
+
+    function pickAreaShapeFromTouch(shape) {
+        const next = (shape === 'ellipse' || shape === 'polygon') ? shape : 'rect';
+        writeAreaShapePref(next);
+        setAreaCreateShape(next);
+        syncMobileAreaRailIcon();
+        const c = areaShapeChoices().find((x) => x.shape === next);
+        window.showToast?.(next === 'polygon'
+            ? '다각형: 꼭짓점을 차례로 탭하고 「완료」 또는 첫 점을 다시 탭하세요. 끌면 도면 이동'
+            : `${c ? c.label : '영역'}: 도면을 손가락으로 끌어서 그리세요`, 'info', 3200);
+    }
+    window.openAreaShapePicker = openAreaShapePicker;
 
     function discardIncompleteAreaPolygon(options) {
         const silent = !!(options && options.silent);
@@ -34398,6 +34565,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         });
         const mobInk = document.getElementById('mobileBtnAreaInk');
         if (mobInk) mobInk.classList.toggle('active', !!state.areaInkTool);
+        syncAreaPolyTouchBar();
+        syncMobileAreaRailIcon();
     }
 
     function setAreaCreateShape(shape) {
@@ -36604,7 +36773,29 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     const mobileBtnModeArea = document.getElementById('mobileBtnModeArea');
     if (mobileBtnModePan) mobileBtnModePan.addEventListener('click', () => setDrawMode('PAN'));
     if (mobileBtnModeMark) mobileBtnModeMark.addEventListener('click', () => setDrawMode('MARK'));
-    if (mobileBtnModeArea) mobileBtnModeArea.addEventListener('click', () => setDrawMode('AREA'));
+    if (mobileBtnModeArea) {
+        // 폰·태블릿: 모양 고르기(다각형·타원·사각형). 마지막 고른 모양을 기억한다.
+        const pref = readAreaShapePref();
+        if (pref && isTouchToolbarUi()) state.areaCreateShape = pref;
+        syncMobileAreaRailIcon();
+        mobileBtnModeArea.addEventListener('click', () => openAreaShapePicker(mobileBtnModeArea));
+    }
+    const btnAreaPolyTouchDone = document.getElementById('btnAreaPolyTouchDone');
+    if (btnAreaPolyTouchDone) btnAreaPolyTouchDone.addEventListener('click', () => {
+        if (!pendingAreaPoly || pendingAreaPoly.length < 3) {
+            window.showToast?.('다각형은 점 3개 이상일 때 저장됩니다. 점을 더 찍어 주세요.', 'info', 2500);
+            return;
+        }
+        finishPendingAreaPolygon();
+    });
+    const btnAreaPolyTouchUndo = document.getElementById('btnAreaPolyTouchUndo');
+    if (btnAreaPolyTouchUndo) btnAreaPolyTouchUndo.addEventListener('click', undoTouchPolygonPoint);
+    const btnAreaPolyTouchCancel = document.getElementById('btnAreaPolyTouchCancel');
+    if (btnAreaPolyTouchCancel) btnAreaPolyTouchCancel.addEventListener('click', () => {
+        pendingAreaPoly = null;
+        setDrawMode('PAN');
+        drawCanvas();
+    });
     const mobileBtnZoomFit = document.getElementById('mobileBtnZoomFit');
     if (mobileBtnZoomFit) {
         mobileBtnZoomFit.addEventListener('click', () => {
