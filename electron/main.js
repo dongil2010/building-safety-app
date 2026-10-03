@@ -6,9 +6,10 @@
  * 실행: npm run electron
  * 설치 파일: npm run electron:dist
  */
-const { app, BrowserWindow, shell } = require('electron');
+const { app, BrowserWindow, dialog, shell } = require('electron');
 
 const START_URL = process.env.BSA_START_URL || 'https://dongil2010.github.io/building-safety-app/';
+let quitConfirmed = false;
 
 function createWindow() {
     const win = new BrowserWindow({
@@ -22,6 +23,25 @@ function createWindow() {
             nodeIntegration: false,
             contextIsolation: true,
             sandbox: true
+        }
+    });
+
+    win.on('close', function (event) {
+        if (quitConfirmed) return;
+        event.preventDefault();
+        const choice = dialog.showMessageBoxSync(win, {
+            type: 'warning',
+            buttons: ['종료', '취소'],
+            defaultId: 1,
+            cancelId: 1,
+            noLink: true,
+            title: '스마트 안전점검',
+            message: '프로그램을 종료할까요?',
+            detail: '저장이 끝나지 않았으면 취소를 누르고 잠시 기다리세요.'
+        });
+        if (choice === 0) {
+            quitConfirmed = true;
+            win.close();
         }
     });
 
