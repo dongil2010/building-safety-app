@@ -7,9 +7,25 @@
  * 설치 파일: npm run electron:dist
  */
 const { app, BrowserWindow, dialog, shell } = require('electron');
+const { execFileSync } = require('child_process');
 
 const START_URL = process.env.BSA_START_URL || 'https://dongil2010.github.io/building-safety-app/';
 let quitConfirmed = false;
+
+/** 설치 파일이 돌고 있으면 종료 질문을 띄우지 않고 바로 닫는다. */
+function installerIsRunning() {
+    if (process.platform !== 'win32') return false;
+    try {
+        const out = execFileSync('tasklist', ['/FO', 'CSV', '/NH'], {
+            windowsHide: true,
+            timeout: 4000
+        });
+        const text = Buffer.isBuffer(out) ? out.toString('latin1') : String(out);
+        return /Setup \d+\.\d+/.test(text);
+    } catch (err) {
+        return false;
+    }
+}
 
 function createWindow() {
     const win = new BrowserWindow({
@@ -28,6 +44,10 @@ function createWindow() {
 
     win.on('close', function (event) {
         if (quitConfirmed) return;
+        if (installerIsRunning()) {
+            quitConfirmed = true;
+            return;
+        }
         event.preventDefault();
         const choice = dialog.showMessageBoxSync(win, {
             type: 'warning',
