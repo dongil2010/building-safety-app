@@ -1807,4 +1807,7 @@
 ### ⚡ [Cursor] - 2026-10-03 15:44:54
 `[COMPLETED]` PC 설치 파일 업데이트 질문. 실행 중인 앱이 종료 확인을 붙잡고 있어 설치가 "cannot be closed"에서 멈추던 것을, 이미 설치된 경우 `업데이트 하시겠습니까?` 한 번만 묻고 예를 누르면 앱을 닫고 설치가 이어지도록 고침. Setup 1.0.2. 동기화·Firebase 규칙 변경 없음.
 
+### ⚡ [Cursor] - 2026-10-03 16:16:00
+`[COMPLETED]` 현장 Android 화면을 APK 안 `www`로 넣음. `capacitor.config.json`에서 `server.url`(GitHub Pages)을 뺐고 `androidScheme` https와 Firebase·Google `allowNavigation`은 유지. 디버그 APK `android/app/build/outputs/apk/debug/app-debug.apk`. 로그인·점검 데이터·사진·도면만 서버. Electron 설치 파일은 건드리지 않음.
+
 

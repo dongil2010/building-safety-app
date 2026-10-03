@@ -13,9 +13,9 @@
 4. 변경 파일을 지정해서 `git add` (예: `app.js index.html styles.css js/`, `-A` 금지)
 5. 의미 있는 메시지로 `git commit`
 6. **`git push` 직전에 다시 `git pull origin main`으로 확인**한 뒤 `git push origin main`
-7. **배포는 GitHub Pages** — 현장 Android 앱은 Capacitor WebView로
-   `https://dongil2010.github.io/building-safety-app/` 를 연다. push 후 Pages가
-   갱신되면 앱 재실행 또는 홈 **새로고침**으로 최신 웹을 받는다. **APK OTA는 하지 않는다.**
+7. **브라우저 배포는 GitHub Pages** — push 후 Actions가 사이트를 갱신한다.
+   현장 Android 앱 화면은 APK 안 `www`이다 (`capacitor.config.json`에 `server.url` 없음).
+   화면을 바꾸려면 APK를 다시 빌드한다. APK 갱신은 Firebase Storage `releases/latest.json`.
    (2026-09-16부터: Pages Source가 "Deploy from a branch"가 아니라 **GitHub Actions**로
    바뀜 — `.github/workflows/deploy-web.yml`이 `scripts/prepare-pages.py`로 `_site/`를
    만들어 배포한다. push하면 자동으로 이 워크플로가 돌아가는 건 그대로 동일하다.)

@@ -3,11 +3,9 @@
   "appName": "스마트 안전점검",
   "webDir": "www",
   "server": {
-    "url": "https://dongil2010.github.io/building-safety-app/",
     "androidScheme": "https",
     "cleartext": false,
     "allowNavigation": [
-      "dongil2010.github.io",
       "*.googleapis.com",
       "*.gstatic.com",
       "*.firebaseapp.com",
