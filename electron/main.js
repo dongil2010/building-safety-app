@@ -73,7 +73,19 @@ function startLocalServer(rootDir) {
     });
 }
 
-/** 설치 파일이 돌고 있으면 종료 질문을 띄우지 않고 바로 닫는다. */
+function decodeTasklistOutput(out) {
+    const buf = Buffer.isBuffer(out) ? out : Buffer.from(String(out), 'latin1');
+    if (buf.length >= 2 && buf[0] === 0xFF && buf[1] === 0xFE) return buf.toString('utf16le');
+    let zeros = 0;
+    const sample = Math.min(buf.length, 80);
+    for (let i = 1; i < sample; i += 2) {
+        if (buf[i] === 0) zeros += 1;
+    }
+    if (sample > 8 && zeros > sample / 4) return buf.toString('utf16le');
+    return buf.toString('latin1');
+}
+
+/** 설치/제거 프로세스가 있으면 종료 질문을 띄우지 않고 바로 닫는다. */
 function installerIsRunning() {
     if (process.platform !== 'win32') return false;
     try {
@@ -81,8 +93,10 @@ function installerIsRunning() {
             windowsHide: true,
             timeout: 4000
         });
-        const text = Buffer.isBuffer(out) ? out.toString('latin1') : String(out);
-        return /Setup \d+\.\d+/.test(text);
+        const text = decodeTasklistOutput(out);
+        return /Setup\s*\d+\.\d+/.test(text)
+            || /old-uninstaller\.exe/i.test(text)
+            || /Uninstall\s/.test(text);
     } catch (err) {
         return false;
     }
@@ -107,6 +121,7 @@ function createWindow(startUrl) {
         if (quitConfirmed) return;
         if (installerIsRunning()) {
             quitConfirmed = true;
+            app.exit(0);
             return;
         }
         event.preventDefault();
