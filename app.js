@@ -9831,7 +9831,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 ctx.moveTo(p1.x, p1.y - r * 1.5);
                 ctx.lineTo(p1.x, p1.y + r * 1.5);
                 ctx.stroke();
-                ctx.font = `bold ${Math.round(16 / Math.max(state.view.scale || 1, 0.01))}px sans-serif`;
+                ctx.font = `bold ${Math.round(16 / Math.max(state.view.scale || 1, 0.01))}px "Malgun Gothic", "맑은 고딕", sans-serif`;
                 ctx.fillStyle = '#ef4444';
                 ctx.fillText('📍 기준점 1', p1.x + r + 4, p1.y - 4);
                 ctx.restore();
@@ -10917,7 +10917,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         opts = opts || {};
         const label = String(text || '');
         if (!label) return;
-        ctx.font = fontCss;
+        const fontStr = String(fontCss || '');
+        ctx.font = fontStr.includes('맑은 고딕') ? fontStr : (fontStr.includes('Malgun Gothic') ? fontStr.replace(/"Malgun Gothic"/g, '"Malgun Gothic", "맑은 고딕"') : fontStr.replace(/sans-serif/g, '"Malgun Gothic", "맑은 고딕", sans-serif'));
         ctx.textAlign = opts.textAlign || 'center';
         ctx.textBaseline = opts.textBaseline || 'middle';
         ctx.lineJoin = 'round';
@@ -10945,7 +10946,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             0,
             0,
             fillColor,
-            `bold ${getPinBoxFontSizeWithMul(scale, fontMul)}px sans-serif`,
+            `bold ${getPinBoxFontSizeWithMul(scale, fontMul)}px "Malgun Gothic", "맑은 고딕", sans-serif`,
             outline
         );
     }
@@ -10970,7 +10971,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             x,
             y,
             lineColor,
-            `bold ${fontSize}px sans-serif`,
+            `bold ${fontSize}px "Malgun Gothic", "맑은 고딕", sans-serif`,
             '#ffffff',
             { outlineWidth: 2 }
         );
@@ -11117,7 +11118,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         let textWidth = text.length * fontSize * 0.58;
         if (ctx) {
             ctx.save();
-            ctx.font = `bold ${fontSize}px sans-serif`;
+            ctx.font = `bold ${fontSize}px "Malgun Gothic", "맑은 고딕", sans-serif`;
             textWidth = ctx.measureText(text).width;
             ctx.restore();
         }
@@ -12576,9 +12577,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         let typeW = String(typeLabel || '').length * fontType * 0.62;
         if (ctx) {
             ctx.save();
-            ctx.font = `bold ${fontNo}px sans-serif`;
+            ctx.font = `bold ${fontNo}px "Malgun Gothic", "맑은 고딕", sans-serif`;
             noW = ctx.measureText(noStr || 'NO.01').width;
-            ctx.font = `bold ${fontType}px sans-serif`;
+            ctx.font = `bold ${fontType}px "Malgun Gothic", "맑은 고딕", sans-serif`;
             typeW = ctx.measureText(typeLabel || '').width;
             ctx.restore();
         }
@@ -12727,14 +12728,14 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
         // 흰 배경 위에서는 외곽선 없이 본문색만 써도 잘 읽힘
         const textOpts = { outlineWidth: 0 };
-        drawOutlinedPinText(ctx, noStr, -boxW / 2 + col1W / 2, 0, color, `bold ${Math.round(15 * pinScale)}px sans-serif`, '#ffffff', textOpts);
+        drawOutlinedPinText(ctx, noStr, -boxW / 2 + col1W / 2, 0, color, `bold ${Math.round(15 * pinScale)}px "Malgun Gothic", "맑은 고딕", sans-serif`, '#ffffff', textOpts);
 
         const midX = -boxW / 2 + col1W + col2W / 2;
         const rightX = -boxW / 2 + col1W + col2W + col3W / 2;
-        drawOutlinedPinText(ctx, amountLabel, midX, -boxH / 4, color, `bold ${Math.round(10.5 * pinScale)}px sans-serif`, '#ffffff', textOpts);
-        drawOutlinedPinText(ctx, '변위방향', midX, boxH / 4, color, `bold ${Math.round(10.5 * pinScale)}px sans-serif`, '#ffffff', textOpts);
-        drawOutlinedPinText(ctx, tiltVal, rightX, -boxH / 4, color, `bold ${Math.round(12.5 * pinScale)}px sans-serif`, '#ffffff', textOpts);
-        drawOutlinedPinText(ctx, dispDir, rightX, boxH / 4, color, `bold ${Math.round(18 * pinScale)}px sans-serif`, '#ffffff', textOpts);
+        drawOutlinedPinText(ctx, amountLabel, midX, -boxH / 4, color, `bold ${Math.round(10.5 * pinScale)}px "Malgun Gothic", "맑은 고딕", sans-serif`, '#ffffff', textOpts);
+        drawOutlinedPinText(ctx, '변위방향', midX, boxH / 4, color, `bold ${Math.round(10.5 * pinScale)}px "Malgun Gothic", "맑은 고딕", sans-serif`, '#ffffff', textOpts);
+        drawOutlinedPinText(ctx, tiltVal, rightX, -boxH / 4, color, `bold ${Math.round(12.5 * pinScale)}px "Malgun Gothic", "맑은 고딕", sans-serif`, '#ffffff', textOpts);
+        drawOutlinedPinText(ctx, dispDir, rightX, boxH / 4, color, `bold ${Math.round(18 * pinScale)}px "Malgun Gothic", "맑은 고딕", sans-serif`, '#ffffff', textOpts);
 
         ctx.restore();
     }
@@ -12837,8 +12838,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             ctx.fillStyle = color;
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
-            drawOutlinedPinText(ctx, noStr, -boxW / 2 + col1W / 2, 0, color, `bold ${fontNo}px sans-serif`, '#ffffff');
-            drawOutlinedPinText(ctx, typeLabel, -boxW / 2 + col1W + (boxW - col1W) / 2, 0, color, `bold ${fontType}px sans-serif`, '#ffffff');
+            drawOutlinedPinText(ctx, noStr, -boxW / 2 + col1W / 2, 0, color, `bold ${fontNo}px "Malgun Gothic", "맑은 고딕", sans-serif`, '#ffffff');
+            drawOutlinedPinText(ctx, typeLabel, -boxW / 2 + col1W + (boxW - col1W) / 2, 0, color, `bold ${fontType}px "Malgun Gothic", "맑은 고딕", sans-serif`, '#ffffff');
             ctx.restore();
             return;
         }
@@ -12944,7 +12945,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 0,
                 r + 2 * pinScale,
                 ptColor,
-                `bold ${fontSize}px sans-serif`,
+                `bold ${fontSize}px "Malgun Gothic", "맑은 고딕", sans-serif`,
                 '#ffffff',
                 { textBaseline: 'top' }
             );
@@ -13040,11 +13041,11 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         ctx.fillStyle = chartColor;
         ctx.fillRect(0, yOffset + 18, 6, 30);
         ctx.fillStyle = '#0f172a';
-        ctx.font = 'bold 22px sans-serif';
+        ctx.font = 'bold 22px "Malgun Gothic", "맑은 고딕", sans-serif';
         ctx.fillText(`${floorLabel} ${group.locationType} ${catLabel} (${group.groupNo})`, 18, yOffset + 40);
 
         if (calc.grade) {
-            ctx.font = 'bold 15px sans-serif';
+            ctx.font = 'bold 15px "Malgun Gothic", "맑은 고딕", sans-serif';
             const badgeText = `${calc.grade}  ${calc.tiltRatio || ''}`.trim();
             const badgeW = ctx.measureText(badgeText).width + 26;
             const badgeX = cw - 20 - badgeW, badgeY = yOffset + 14;
@@ -13067,7 +13068,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
         if (points.length === 0) {
             ctx.textAlign = 'center';
-            ctx.font = '16px sans-serif';
+            ctx.font = '16px "Malgun Gothic", "맑은 고딕", sans-serif';
             ctx.fillStyle = '#a3a3a3';
             ctx.fillText('측정 지점이 없습니다.', cw / 2, yOffset + ch / 2);
             return;
@@ -13075,7 +13076,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
         if (!ndtDispGroupLevelsComplete(group)) {
             ctx.textAlign = 'center';
-            ctx.font = '16px sans-serif';
+            ctx.font = '16px "Malgun Gothic", "맑은 고딕", sans-serif';
             ctx.fillStyle = '#a3a3a3';
             ctx.fillText('레벨이 미입력된 지점이 있습니다.', cw / 2, yOffset + ch / 2);
             return;
@@ -13109,7 +13110,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         ctx.stroke();
 
         const gridSteps = 4;
-        ctx.font = '12px sans-serif';
+        ctx.font = '12px "Malgun Gothic", "맑은 고딕", sans-serif';
         ctx.textAlign = 'right';
         for (let i = 0; i <= gridSteps; i++) {
             const gy = yOffset + marginT + (plotH * i) / gridSteps;
@@ -13197,7 +13198,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
             // 값 라벨은 흰 배경 칩 위에 올려 그래프 선과 겹쳐도 읽기 쉽게 한다.
             const labelText = `${p.level}cm`;
-            ctx.font = 'bold 13px sans-serif';
+            ctx.font = 'bold 13px "Malgun Gothic", "맑은 고딕", sans-serif';
             ctx.textAlign = 'center';
             const labelW = ctx.measureText(labelText).width + 12;
             const labelY = y - 15;
@@ -13208,15 +13209,15 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             ctx.fillText(labelText, x, labelY);
 
             ctx.fillStyle = '#64748b';
-            ctx.font = '12px sans-serif';
+            ctx.font = '12px "Malgun Gothic", "맑은 고딕", sans-serif';
             ctx.fillText(`${idx + 1}`, x, yOffset + marginT + plotH + 20);
         });
 
         ctx.textAlign = 'left';
         ctx.fillStyle = '#334155';
-        ctx.font = 'bold 14px sans-serif';
+        ctx.font = 'bold 14px "Malgun Gothic", "맑은 고딕", sans-serif';
         ctx.fillText('측정값', marginL, yOffset + marginT + plotH + 55);
-        ctx.font = '13px sans-serif';
+        ctx.font = '13px "Malgun Gothic", "맑은 고딕", sans-serif';
         ctx.fillStyle = '#475569';
         const listText = points.map((p, idx) => `${formatNdtDisplacementPointLabel(idx + 1)}: ${p.level}cm`).join('    ');
         wrapCanvasText(ctx, listText, marginL, yOffset + marginT + plotH + 78, plotW + marginR - 10, 20);
@@ -13314,12 +13315,12 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 }
                 const cx = x + w / 2;
                 ctx.fillStyle = '#555555';
-                ctx.font = '15px sans-serif';
+                ctx.font = '15px "Malgun Gothic", "맑은 고딕", sans-serif';
                 String(col.label).split('\n').forEach((line, li) => {
                     ctx.fillText(line, cx, 22 + li * 18);
                 });
                 ctx.fillStyle = '#111111';
-                ctx.font = 'bold 24px sans-serif';
+                ctx.font = 'bold 24px "Malgun Gothic", "맑은 고딕", sans-serif';
                 ctx.fillText(col.value, cx, BOX_H - 26);
                 x += w;
             });
@@ -15191,10 +15192,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         ctx.textBaseline = 'middle';
         ctx.textAlign = 'center';
         ctx.fillStyle = '#111111';
-        ctx.font = 'bold 34px sans-serif';
+        ctx.font = 'bold 34px "Malgun Gothic", "맑은 고딕", sans-serif';
         ctx.fillText(`NO.${String(seq).padStart(2, '0')}`, (colX[0] + colX[1]) / 2, 75);
         // 2026-09-04 사용자 요청: 위치 글씨가 너무 작아 안 보인다고 해서 NO.와 같은 글꼴/크기로 맞춤.
-        ctx.font = 'bold 34px sans-serif';
+        ctx.font = 'bold 34px "Malgun Gothic", "맑은 고딕", sans-serif';
         [slot.location || item.location || '', memberNameOut(item.component) || ''].filter(Boolean).forEach((line, i) => {
             ctx.fillText(line, (colX[0] + colX[1]) / 2, 150 + i * 42);
         });
@@ -15204,7 +15205,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const gridX0 = colX[1] + 25, gridX1 = colX[2] - 25;
         const gridCols = 4, gridRows = 5, cellH = 80, gridY0 = 45;
         const cellW = (gridX1 - gridX0) / gridCols;
-        ctx.font = '48px sans-serif';
+        ctx.font = '48px "Malgun Gothic", "맑은 고딕", sans-serif';
         readings.forEach((v, idx) => {
             if (idx >= gridCols * gridRows) return;
             const r = Math.floor(idx / gridCols), c = idx % gridCols;
@@ -15213,57 +15214,57 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         });
         ctx.fillStyle = '#555555';
         // 2026-09-04 사용자 요청: 작은 글씨들이 안 보인다고 해서 Ro값(32px)만큼 전부 키움.
-        ctx.font = '32px sans-serif';
+        ctx.font = '32px "Malgun Gothic", "맑은 고딕", sans-serif';
         ctx.textAlign = 'left';
         ctx.fillText(`(총 ${calc.totalCount}개 · ±20% 제외 ${calc.excludedCount}개)`, gridX0, gridY0 + gridRows * cellH + 30);
 
         // 3) 평균경도(R) · 각도보정 · Ro
         ctx.textAlign = 'center';
         const c3x = (colX[2] + colX[3]) / 2;
-        ctx.font = '32px sans-serif'; ctx.fillStyle = '#555555';
+        ctx.font = '32px "Malgun Gothic", "맑은 고딕", sans-serif'; ctx.fillStyle = '#555555';
         ctx.fillText('평균경도(R)', c3x, 45);
-        ctx.font = 'bold 42px sans-serif'; ctx.fillStyle = '#111111';
+        ctx.font = 'bold 42px "Malgun Gothic", "맑은 고딕", sans-serif'; ctx.fillStyle = '#111111';
         ctx.fillText(fmtExcel(calc.finalAvg, 1), c3x, 105);
-        ctx.font = '32px sans-serif'; ctx.fillStyle = '#555555';
+        ctx.font = '32px "Malgun Gothic", "맑은 고딕", sans-serif'; ctx.fillStyle = '#555555';
         ctx.fillText(`각도보정 ${calc.correction >= 0 ? '+' : ''}${calc.correction.toFixed(2)}`, c3x, 165);
-        ctx.font = 'bold 32px sans-serif'; ctx.fillStyle = '#0369a1';
+        ctx.font = 'bold 32px "Malgun Gothic", "맑은 고딕", sans-serif'; ctx.fillStyle = '#0369a1';
         // Ro는 엑셀처럼 소수 1자리로 반올림된 값이다(2026-09-22)
         ctx.fillText(`Ro = ${calc.ro.toFixed(1)}`, c3x, 225);
         if (calc.anvilFactor && calc.anvilFactor !== 1) {
             // 앤빌 보정(엑셀 "Anvil기준 82 / 장비평균 = 보정" 칸)은 1.00이 아닐 때만 적는다
-            ctx.font = '28px sans-serif'; ctx.fillStyle = '#555555';
+            ctx.font = '28px "Malgun Gothic", "맑은 고딕", sans-serif'; ctx.fillStyle = '#555555';
             ctx.fillText(`앤빌 82/${calc.anvilAvg} = ${calc.anvilFactor.toFixed(3)}`, c3x, 285);
         }
 
         // 4) 재령 · α(재령보정계수)
         const c4x = (colX[3] + colX[4]) / 2;
-        ctx.font = '32px sans-serif'; ctx.fillStyle = '#555555';
+        ctx.font = '32px "Malgun Gothic", "맑은 고딕", sans-serif'; ctx.fillStyle = '#555555';
         ctx.fillText('재령(일)', c4x, 45);
-        ctx.font = 'bold 34px sans-serif'; ctx.fillStyle = '#111111';
+        ctx.font = 'bold 34px "Malgun Gothic", "맑은 고딕", sans-serif'; ctx.fillStyle = '#111111';
         ctx.fillText(calc.ageDays != null ? String(calc.ageDays) : '-', c4x, 110);
-        ctx.font = '32px sans-serif'; ctx.fillStyle = '#555555';
+        ctx.font = '32px "Malgun Gothic", "맑은 고딕", sans-serif'; ctx.fillStyle = '#555555';
         ctx.fillText('α(재령보정)', c4x, 180);
-        ctx.font = 'bold 32px sans-serif'; ctx.fillStyle = '#111111';
+        ctx.font = 'bold 32px "Malgun Gothic", "맑은 고딕", sans-serif'; ctx.fillStyle = '#111111';
         ctx.fillText(calc.alpha != null ? calc.alpha.toFixed(2) : '-', c4x, 235);
 
         // 5) 압축강도(Fc): 활성화된 추정식만 1식/2식/3식 순서로, 맨 아래 최종 강도(굵게)
         const c5x0 = colX[4] + 20, c5x1 = colX[5] - 20;
-        ctx.textAlign = 'left'; ctx.font = 'bold 32px sans-serif'; ctx.fillStyle = '#555555';
+        ctx.textAlign = 'left'; ctx.font = 'bold 32px "Malgun Gothic", "맑은 고딕", sans-serif'; ctx.fillStyle = '#555555';
         ctx.fillText('압축강도(Fc, MPa)', c5x0, 40);
         let fy = 90;
         calc.results.forEach((r, i) => {
             if (!r.enabled) return;
-            ctx.font = '32px sans-serif'; ctx.fillStyle = '#333333'; ctx.textAlign = 'left';
+            ctx.font = '32px "Malgun Gothic", "맑은 고딕", sans-serif'; ctx.fillStyle = '#333333'; ctx.textAlign = 'left';
             ctx.fillText(`${i + 1}식`, c5x0, fy);
-            ctx.font = 'bold 32px sans-serif'; ctx.fillStyle = '#111111'; ctx.textAlign = 'right';
+            ctx.font = 'bold 32px "Malgun Gothic", "맑은 고딕", sans-serif'; ctx.fillStyle = '#111111'; ctx.textAlign = 'right';
             ctx.fillText(fmtExcel(r.value, 1), c5x1, fy);
             fy += 54;
         });
         ctx.strokeStyle = '#94a3b8'; ctx.lineWidth = 1.5;
         ctx.beginPath(); ctx.moveTo(c5x0, fy - 15); ctx.lineTo(c5x1, fy - 15); ctx.stroke();
-        ctx.font = 'bold 32px sans-serif'; ctx.fillStyle = '#333333'; ctx.textAlign = 'left';
+        ctx.font = 'bold 32px "Malgun Gothic", "맑은 고딕", sans-serif'; ctx.fillStyle = '#333333'; ctx.textAlign = 'left';
         ctx.fillText('강도', c5x0, fy + 28);
-        ctx.font = 'bold 40px sans-serif'; ctx.fillStyle = '#b91c1c'; ctx.textAlign = 'right';
+        ctx.font = 'bold 40px "Malgun Gothic", "맑은 고딕", sans-serif'; ctx.fillStyle = '#b91c1c'; ctx.textAlign = 'right';
         ctx.fillText(calc.finalStrength.toFixed(1), c5x1, fy + 28);
 
         // 6) 막대그래프 — ±20% 제외값은 옅은 빨강, 점선은 평균경도(R) 위치
@@ -15371,7 +15372,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
         let y = lineH / 2 + 10;
         ctx.textAlign = 'center';
-        ctx.font = `bold ${fontTitle}px sans-serif`;
+        ctx.font = `bold ${fontTitle}px "Malgun Gothic", "맑은 고딕", sans-serif`;
         ctx.fillStyle = '#111111';
         ctx.fillText('R VALUE', W / 2, y);
         y += lineH;
@@ -15392,11 +15393,11 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         ctx.lineTo(W - padX, y - lineH * 0.3);
         ctx.stroke();
 
-        ctx.font = `bold ${fontRow}px sans-serif`;
+        ctx.font = `bold ${fontRow}px "Malgun Gothic", "맑은 고딕", sans-serif`;
         ctx.fillStyle = '#111111';
         ctx.fillText(`AVERAGE ${avg.toFixed(1)}`, padX, y);
         y += lineH;
-        ctx.font = `${fontRow}px sans-serif`;
+        ctx.font = `${fontRow}px "Malgun Gothic", "맑은 고딕", sans-serif`;
         ctx.fillText(`ANGLE ${Number.isFinite(pt.angle) ? pt.angle : 0}°`, padX, y);
 
         return canvas;
@@ -23649,7 +23650,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     }
     function drawBookmarkChrome(ctx, w, h, scale) {
         const glyphH = getBookmarkChromeGlyphHeight(scale);
-        const family = '"Malgun Gothic", "Apple SD Gothic Neo", "Noto Sans KR", sans-serif';
+        const family = '"Malgun Gothic", "맑은 고딕", "Apple SD Gothic Neo", "Noto Sans KR", sans-serif';
         ctx.save();
         // 글꼴마다 한글 글자 높이가 달라 실제 글자 높이를 재서 맞춘다
         let fontPx = glyphH;
@@ -34843,7 +34844,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 }
                 // 이름 풍선 — 양 끝(도면 안쪽), 글자는 화면 기준으로 똑바로
                 const fontPx = 11 / s;
-                ctx.font = `700 ${fontPx}px "Malgun Gothic", sans-serif`;
+                ctx.font = `700 ${fontPx}px "Malgun Gothic", "맑은 고딕", sans-serif`;
                 const tw = ctx.measureText(it.name).width;
                 const r = Math.max(10 / s, tw / 2 + 4 / s);
                 const ends = [[pts[0], pts[1]], [pts[pts.length - 1], pts[pts.length - 2]]];
@@ -36174,7 +36175,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 ctx.translate(r.x1, r.y1);
                 ctx.rotate(-rotRad);
                 const fontPx = 12 / s;
-                ctx.font = `700 ${fontPx}px "Malgun Gothic", sans-serif`;
+                ctx.font = `700 ${fontPx}px "Malgun Gothic", "맑은 고딕", sans-serif`;
                 const tw = ctx.measureText(name).width;
                 const pad = 4 / s;
                 ctx.fillStyle = sel ? '#7c3aed' : 'rgba(124, 58, 237, 0.85)';
@@ -40531,7 +40532,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const headerRowH = rowH;
         const headers = ['구분', '내 용'];
         ctx.save();
-        ctx.font = `bold ${fontSize}px sans-serif`;
+        ctx.font = `bold ${fontSize}px "Malgun Gothic", "맑은 고딕", sans-serif`;
         let col1Max = ctx.measureText(headers[0]).width;
         let col2Max = ctx.measureText(headers[1]).width;
         items.forEach(item => {
@@ -40618,7 +40619,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             ctx.stroke();
         }
 
-        ctx.font = `bold ${fontSize}px sans-serif`;
+        ctx.font = `bold ${fontSize}px "Malgun Gothic", "맑은 고딕", sans-serif`;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
 
@@ -40651,7 +40652,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 ctx.fillStyle = 'rgba(100,116,139,0.9)';
                 ctx.fillRect(boxW - badge - cellPadX, cellPadY, badge, badge);
                 ctx.fillStyle = '#ffffff';
-                ctx.font = `bold ${Math.max(7, badge * 0.65)}px sans-serif`;
+                ctx.font = `bold ${Math.max(7, badge * 0.65)}px "Malgun Gothic", "맑은 고딕", sans-serif`;
                 ctx.textAlign = 'center';
                 ctx.textBaseline = 'middle';
                 ctx.fillText('🔒', boxW - badge / 2 - cellPadX, cellPadY + badge / 2);
@@ -48905,7 +48906,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 if (text) {
                     const color = document.getElementById('annotationColorPicker')?.value || '#ef4444';
                     const fontSize = parseInt(document.getElementById('annotationLineWidth')?.value || '4') * 3 + 12;
-                    annotationCtx.font = `bold ${fontSize}px sans-serif`;
+                    annotationCtx.font = `bold ${fontSize}px "Malgun Gothic", "맑은 고딕", sans-serif`;
                     annotationCtx.fillStyle = color;
                     annotationCtx.strokeStyle = '#000000';
                     annotationCtx.lineWidth = 3;

@@ -1768,3 +1768,20 @@
 > 저장·목록/통계 재계산·한글 성과표 모두 반영. 성과표 그림에 1.00이 아닐 때 "앤빌 82/x = 계수" 표시, Ro 표시는 소수 1자리로.
 > **검증**: `test-strength-photo-release-anvil.js` 신규, `test-strength-excel-match.js`에 앤빌 사례 추가(38.7·장비80 → Ro 39.7, 강도 22.7,
 > +90°는 보정 전 R 39행 -3.98 → 35.7). 엑셀 파일 채워진 8블록 재대조 불일치 0. `npm test` 42개 통과, 로컬 앱에서 입력칸 생성 확인.
+
+---
+
+## 2026-10-03 Antigravity — 캔버스 및 UI 한글 폰트 폴백(Malgun Gothic, 맑은 고딕) 일괄 적용
+
+> **HTML5 Canvas 2D 컨텍스트 한글 폰트 누락 방지**:
+> Windows/브라우저 환경에서 generic `sans-serif`만 지정 시 발생하는 한글 글꼴 폴백 불일치 및 렌더링 깨짐 방지.
+> - **캔버스 전 영역 `"Malgun Gothic", "맑은 고딕", sans-serif` 일괄 적용**:
+>   1. 비파괴(NDT) 변위 차트/카드 캔버스 (축 라벨, 범례, 수직변위 측정값 카드)
+>   2. 반발경도(슈미트 해머) 성과표 및 데이터 행 캔버스 (측정 위치, 타격값 그리드, 통계/평균, 재령/각도/α 보정 계수 및 압축강도 추정식)
+>   3. 도면 범례표 캔버스 (`measureLocationMapLegendTable`, `drawLocationMapLegend`)
+>   4. 사진 주석(Annotation) 캔버스 및 풍선 라벨 (`drawOutlinedPinText`, `drawBookmarkChrome` 등)
+>   *(타격값 R01, R02 등 숫자 고정폭 정렬이 필요한 monospace는 유지)*
+> - **CSS 및 HTML 기본 폰트 패밀리 보완**: `styles.css`와 `photo-capture.html`의 기본 폰트 스택 최우선 순위에 `'Malgun Gothic', '맑은 고딕'` 추가.
+>
+> **검증**: `npm test` 97개 테스트 통과, `node -c app.js` 통과.
+
