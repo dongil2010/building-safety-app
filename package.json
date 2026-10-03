@@ -11,7 +11,9 @@
     "android:sync": "npm run cap:sync",
     "android:open": "npm run cap:open",
     "android:setup": "powershell -ExecutionPolicy Bypass -File ./scripts/android-setup.ps1",
-    "android:build:debug": "npm run android:setup && npm run cap:sync && cd android && .\\gradlew.bat assembleDebug"
+    "android:build:debug": "npm run android:setup && npm run cap:sync && cd android && .\\gradlew.bat assembleDebug",
+    "electron": "electron electron/main.js",
+    "electron:dist": "electron-builder --win portable"
   },
   "dependencies": {
     "@capacitor/android": "^6.2.1",
@@ -22,6 +24,23 @@
     "@capacitor/status-bar": "^6.0.2"
   },
   "devDependencies": {
-    "@capacitor/cli": "^6.2.1"
+    "@capacitor/cli": "^6.2.1",
+    "electron": "^33.4.11",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "kr.buildingsafety.inspection.desktop",
+    "productName": "스마트 안전점검",
+    "directories": {
+      "output": "dist-electron"
+    },
+    "files": [
+      "electron/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": "portable",
+      "signAndEditExecutable": false
+    }
   }
 }

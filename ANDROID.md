@@ -4,8 +4,8 @@
 
 - 주소: `https://dongil2010.github.io/building-safety-app/`
 - 설정: `capacitor.config.json` → `server.url`
-- **웹 수정은 `git push origin main`이면 충분**합니다. APK OTA는 쓰지 않습니다.
-- 현장에서는 앱을 다시 열거나 홈 **새로고침**으로 최신 화면을 받습니다.
+- **화면(웹) 수정은 `git push origin main`이면 충분**합니다. 앱을 다시 열거나 홈 **새로고침**으로 최신 화면을 받습니다.
+- **설치 파일(APK) 업데이트**는 Firebase Storage `releases/latest.json` 을 본다. `versionCode`가 설치된 앱보다 크면 받아서 설치 화면을 연다. 예시는 `scripts/mobile-release.example.json`. APK와 json은 Storage `releases/`에 둔다 (읽기는 공개, 쓰기는 `users/{uid}.otaPublisher == true`).
 
 카메라 등 네이티브 플러그인을 바꿀 때만 아래처럼 APK를 다시 빌드·설치하면 됩니다.
 

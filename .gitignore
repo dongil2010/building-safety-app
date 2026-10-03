@@ -1,6 +1,7 @@
 # Android / Capacitor
 node_modules/
 www/
+dist-electron/
 .capacitor/
 
 # Android Studio / Gradle
