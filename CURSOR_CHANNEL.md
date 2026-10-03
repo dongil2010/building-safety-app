@@ -1785,3 +1785,21 @@
 >
 > **검증**: `npm test` 97개 테스트 통과, `node -c app.js` 통과.
 
+---
+
+## 2026-10-03 Antigravity — UI 및 도면 캔버스 Pretendard 우선 적용 (한글 HWPX 본문 굴림 유지)
+
+> **전체 웹/앱 UI 및 도면 캔버스 기본 폰트를 Pretendard로 전환**:
+> - **CSS (`styles.css`, `photo-capture.html`)**:
+>   `--font-sans` 및 기본 폰트 스택을 `'Pretendard'` 우선으로 변경 (`Pretendard -> 시스템 폰트 -> Malgun Gothic, 맑은 고딕 -> sans-serif`).
+> - **도면 캔버스(Canvas 2D) 전 영역 Pretendard 적용**:
+>   - 도면 핀 라벨 박스 (`drawPinBoxLabel`), 도면 화살표 인덱스 (`drawArrowMapIndexLabel`)
+>   - NDT 수직변위 측정 핀/차트/카드 및 반발경도(슈미트 해머) 성과표·데이터 행 캔버스
+>   - 도면 범례표(`measureLocationMapLegendTable`, `drawLocationMapLegend`) 및 사진 주석(Annotation)
+>   - 한글(HWPX) 출력 시 삽입되는 도면 이미지 내부 네모박스 글자도 화면과 동일하게 Pretendard 우선 유지.
+> - **아래아한글(HWPX) 보고서 출력**:
+>   - HWPX 표 및 본문 텍스트는 표준 서식 규칙에 따라 '굴림'(`gulimFontId`, `mainFaceToId['굴림']`) 유지.
+>
+> **검증**: `npm test` 97개 테스트 통과, `node -c app.js` 통과.
+
+
