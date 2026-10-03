@@ -8,7 +8,6 @@
 - **설치 파일(APK) 업데이트**는 Firebase Storage `releases/latest.json` 을 본다 (`js/core/mobile-app-update.js`). `versionCode`가 설치된 앱보다 크면 받아서 설치 화면을 연다. 예시는 `scripts/mobile-release.example.json`. APK와 json은 Storage `releases/`에 둔다 (읽기는 공개, 쓰기는 `users/{uid}.otaPublisher == true`).
 
 화면·네이티브 플러그인을 반영할 때는 아래처럼 APK를 다시 빌드·설치합니다.
-
 ## 필요 환경
 
 - Node.js 18+

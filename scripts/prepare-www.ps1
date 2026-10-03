@@ -1,4 +1,4 @@
-﻿# 웹 앱 정적 파일을 Capacitor www/ 로 복사
+# 웹 앱 정적 파일을 Capacitor www/ 로 복사
 $ErrorActionPreference = 'Stop'
 $Root = Split-Path -Parent $PSScriptRoot
 $Www = Join-Path $Root 'www'
@@ -23,5 +23,9 @@ foreach ($file in $files) {
 
 Copy-Item (Join-Path $Root 'js') (Join-Path $Www 'js') -Recurse -Force
 Copy-Item (Join-Path $Root 'templates') (Join-Path $Www 'templates') -Recurse -Force
+
+if (Test-Path (Join-Path $Root 'branding')) {
+    Copy-Item (Join-Path $Root 'branding') (Join-Path $Www 'branding') -Recurse -Force
+}
 
 Write-Host "www/ 준비 완료: $Www"

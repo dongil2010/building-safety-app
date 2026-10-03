@@ -1,6 +1,6 @@
 {
   "name": "building-safety-app",
-  "version": "1.0.2",
+  "version": "1.0.4",
   "private": true,
   "main": "electron/main.js",
   "description": "스마트 건축물 안전점검 현장점검 — PWA + Android(Capacitor)",
@@ -37,7 +37,17 @@
     },
     "files": [
       "electron/**/*",
-      "package.json"
+      "package.json",
+      "index.html",
+      "app.js",
+      "styles.css",
+      "sw.js",
+      "manifest.json",
+      "photo-capture.html",
+      "web-version.json",
+      "js/**/*",
+      "templates/**/*",
+      "branding/**/*"
     ],
     "win": {
       "target": "nsis",

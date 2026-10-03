@@ -1810,4 +1810,12 @@
 ### ⚡ [Cursor] - 2026-10-03 16:16:00
 `[COMPLETED]` 현장 Android 화면을 APK 안 `www`로 넣음. `capacitor.config.json`에서 `server.url`(GitHub Pages)을 뺐고 `androidScheme` https와 Firebase·Google `allowNavigation`은 유지. 디버그 APK `android/app/build/outputs/apk/debug/app-debug.apk`. 로그인·점검 데이터·사진·도면만 서버. Electron 설치 파일은 건드리지 않음.
 
+### ⚡ [Antigravity] - 2026-10-03 16:21:00
+`[COMPLETED]` PC Electron 앱 및 Android APK 로컬 리소스 완전 내장 및 설치 파일 빌드 완료.
+- **PC Electron**: `package.json` `build.files`에 웹 앱 전체 정적 에셋(`index.html`, `app.js`, `styles.css`, `js/`, `templates/`, `branding/` 등)을 패키징 대상에 추가하고, `electron/main.js` 내부에 가벼운 로컬 HTTP 서버(127.0.0.1)를 구동하여 GitHub Pages 의존 없이 오프라인에서도 완전 자립 구동되도록 전환.
+- **설치 파일 빌드**:
+  1. PC Windows 설치 파일: `dist-electron/스마트 안전점검 Setup 1.0.4.exe` (NSIS 패키징 완료)
+  2. 안드로이드 APK: `android/app/build/outputs/apk/debug/app-debug.apk` (Gradle debug 빌드 완료)
+- 서버(Firestore DB, Storage 사진 등) 통신 외의 모든 화면·스크립트·템플릿 리소스가 어플 패키지 내부에 완전 내장됨.
+
 
