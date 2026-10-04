@@ -15734,11 +15734,14 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 <div class="form-group" style="margin:0;">
                     <label class="form-label">📷 R값 측정지 사진 스캔 (사진에서 숫자 자동 인식)</label>
                     <div style="display:flex; gap:0.5rem;">
-                        <button type="button" class="btn ndt-strength-slot-scan-btn" data-slot="${idx}" style="flex:1; background: linear-gradient(135deg, #2a2a2a, #1f1f1f); color:white; font-size:0.85rem;">
-                            <i class="fa-solid fa-camera"></i> 📷 측정지 사진으로 자동 인식
+                        <button type="button" class="btn ndt-strength-slot-scan-btn" data-slot="${idx}" data-mode="camera" style="flex:1; background: linear-gradient(135deg, #2a2a2a, #1f1f1f); color:white; font-size:0.85rem;">
+                            <i class="fa-solid fa-camera"></i> 측정지 촬영
                         </button>
-                        <input type="file" id="ndtStrengthSlotFile-${idx}" accept="image/*" style="display:none;">
+                        <button type="button" class="btn ndt-strength-slot-scan-btn" data-slot="${idx}" data-mode="gallery" style="flex:1; background: linear-gradient(135deg, #2a2a2a, #1f1f1f); color:white; font-size:0.85rem;">
+                            <i class="fa-solid fa-image"></i> 갤러리에서
+                        </button>
                     </div>
+                    <div style="font-size:0.72rem; color:var(--text-muted); margin-top:0.25rem;">찍은 뒤 측정지 부분만 잘라서 인식·저장합니다.</div>
                     <div id="rScanStatus-${idx}" style="font-size:0.78rem; color:var(--text-muted); margin-top:0.3rem;"></div>
                     <div id="ndtStrengthPhotoPreview-${idx}" style="margin-top:0.4rem;"></div>
                 </div>
@@ -15796,7 +15799,13 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         container.querySelectorAll('.ndt-strength-slot-scan-btn').forEach(el => {
             el.addEventListener('click', async (e) => {
                 const idx = parseInt(e.currentTarget.dataset.slot, 10);
-                const file = await pickImageFromDevice('gallery');
+                const mode = e.currentTarget.dataset.mode === 'camera' ? 'camera' : 'gallery';
+                const picked = await pickImageFromDevice(mode);
+                if (!picked) return;
+                // 측정지 부분만 잘라서 인식·저장한다(2026-10-04). 취소하면 아무것도 안 바뀐다.
+                const file = (window.BsaPhotoCrop && typeof window.BsaPhotoCrop.open === 'function')
+                    ? await window.BsaPhotoCrop.open(picked)
+                    : picked;
                 if (file) scanRValuesFromImage(file, idx);
             });
         });
