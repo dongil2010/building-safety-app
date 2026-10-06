@@ -25791,6 +25791,25 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         return '';
     }
 
+    /**
+     * 「규모 및 상태」 글자가 측정값 표기(폭/길이/개수)뿐인가 — 그렇다면 폭·길이·개수 행을 고칠 때 같이 따라 바뀐다.
+     * 2026-10-06: 저장된 규모가 지금 조립 글자와 한 글자라도 다르면(0.3mm/2.0m, 개수가 itemCount에만 있던 0.3/2.0 등)
+     * 손으로 쓴 글자로 보고 안 바꿨다. 그래서 결함 수정창에서 폭을 고쳐도 규모(조사표에 보이는 값)는 옛 폭 그대로였다.
+     * 조사표 크기 팝업은 늘 다시 조립해서 거기서는 됐다. 측정 표기가 아닌 글자(예: "W=0.2mm, 누수 흔적")는 그대로 둔다.
+     */
+    function isMeasureOnlySizeText(raw) {
+        const t = String(raw == null ? '' : raw)
+            .replace(/㎜/g, 'mm')
+            .replace(/\u00d7/g, 'x')
+            .replace(/\s+/g, '')
+            .toLowerCase();
+        if (!t || t === '-') return true;
+        const num = '\\d+(?:\\.\\d+)?';
+        const ea = '(?:-?\\d+ea)?';
+        const item = `(?:(?:cw[:=])?${num}(?:mm)?(?:[/x*]${num}m?)?${ea}|${num}m${ea}|\\d+ea)`;
+        return new RegExp(`^${item}(?:[,;·]?${item})*$`).test(t);
+    }
+
     /** 폭·길이·개수 행 목록 — 기본은 결함 수정창, 조사표 크기 팝업은 자기 목록을 넘긴다 */
     function crackMeasureListEl(listEl) {
         return listEl || document.getElementById('defectCrackMeasureList');
@@ -32241,7 +32260,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             setCrackMeasuresToUi(existingPin);
             if (sizeEl) {
                 const composed = composeDefectSizeFromMeasures();
-                sizeEl.dataset.autoSize = (composed && (existingPin.size || '') === composed) ? '1' : '';
+                // 저장된 규모가 측정값 표기뿐이면(조립 글자와 모양만 달라도) 폭·길이·개수를 고칠 때 같이 바뀐다
+                sizeEl.dataset.autoSize = (composed && ((existingPin.size || '') === composed
+                    || isMeasureOnlySizeText(existingPin.size))) ? '1' : '';
             }
             if (progCheckEl) progCheckEl.checked = !!existingPin.isProgress;
             if (leakCheckEl) leakCheckEl.checked = !!existingPin.isLeak;
@@ -33516,6 +33537,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 return acc;
             }, {})
             : null;
+        const crackSnapBefore = storedForGuard ? crackMeasureSig(storedForGuard) : null;
         const guardField = (field) => {
             const uiVal = uiFields[field];
             if (!baseline || !syncMergeApi || typeof syncMergeApi.keepStoredIfUntouched !== 'function') return uiVal;
@@ -33614,6 +33636,12 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     state.defects[key][idx].inspectorName = window.state.userName || '';
                 }
                 touchDefectUpdatedAt(state.defects[key][idx]);
+                // 묶음 마킹(41-1·41-2…)은 조사표에 한 행이고 그 행은 첫 마킹 값을 보여 준다. 2026-10-06: 결함 수정창에서
+                // 41-2의 균열폭을 고치면 41-2만 바뀌어 조사표·한글 출력은 옛 폭 그대로였다(조사표 크기 팝업은 묶음 전체를 고쳐서 됐다).
+                // 이 저장에서 폭·길이·개수·규모가 바뀌었으면 조사표 칸과 같은 규칙으로 같은 행의 다른 마킹에도 쓴다.
+                if (storedForGuard && storedForGuard.groupId) {
+                    propagateMeasureEditToSurveyRow(state.defects[key], state.defects[key][idx], crackSnapBefore);
+                }
                 if (historyBefore) {
                     const changed = editHistoryApi.diffTracked(historyBefore, state.defects[key][idx]);
                     if (changed) {
@@ -38701,13 +38729,39 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         window.updateSurveyInlineField(defectId, field, next);
     };
 
-    window.updateSurveyInlineField = function(defectId, field, rawValue) {
-        if (window.event) window.event.stopPropagation();
-        const located = findDefectAcrossBuildingFloors(defectId);
-        const key = located
-            ? located.floorKey
-            : `${state.currentBuildingId}_${state.currentFloor}`;
-        const list = state.defects[key] || [];
+    /**
+     * 조사표 한 행을 고칠 때 같이 바뀌는 결함 id 목록 (조사표 칸·크기 팝업·결함 수정창 공용).
+     * 묶음 마킹(groupId)은 조사표에 한 행이라 모두 같이(위치만 자기만). 결함 통합: X-k 행(원래 마킹)은
+     * 자기만 고치고, X-1 행 수정은 X-k 쪽(통합 화살표·결함표 행)에 번지지 않게.
+     */
+    function crackMeasureSig(d) {
+        return JSON.stringify([d.crackMeasures || [], d.crackWidth || '', d.crackLength || '', d.itemCount || '', d.size || '']);
+    }
+
+    /** 결함 수정창 저장: 폭·길이·개수·규모가 바뀌었으면 같은 조사표 행(묶음 마킹)의 다른 마킹에도 같은 값 */
+    function propagateMeasureEditToSurveyRow(list, defect, sigBefore) {
+        if (!defect || !defect.groupId || !Array.isArray(list)) return 0;
+        if (sigBefore == null || crackMeasureSig(defect) === sigBefore) return 0;
+        const ids = surveyRowEditTargetIds(list, defect.id, 'crackMeasures').filter((id) => id !== defect.id);
+        let n = 0;
+        ids.forEach((id) => {
+            const m = list.find((d) => d && d.id === id);
+            if (!m) return;
+            const before = crackMeasureSig(m);
+            m.crackMeasures = JSON.parse(JSON.stringify(defect.crackMeasures || []));
+            m.crackWidth = defect.crackWidth || '';
+            m.crackLength = defect.crackLength || '';
+            m.itemCount = defect.itemCount || '';
+            m.size = defect.size || '';
+            if (crackMeasureSig(m) !== before) {
+                touchDefectUpdatedAt(m);
+                n++;
+            }
+        });
+        return n;
+    }
+
+    function surveyRowEditTargetIds(list, defectId, field) {
         const consolidated = consolidateDefectGroups(list).find(d =>
             d.id === defectId || (d._groupMemberIds && d._groupMemberIds.indexOf(defectId) !== -1)
         );
@@ -38716,7 +38770,6 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             : [defectId];
         const isGroup = memberIds.length > 1;
         let targetIds = (field === 'location' && isGroup) ? [defectId] : memberIds;
-        // 결함 통합: X-k 행(원래 마킹)은 자기만 고치고, X-1 행 수정은 X-k 쪽(통합 화살표·결함표 행)에 번지지 않게
         const mergeApiInline = defectMergeApi();
         if (mergeApiInline) {
             const self = list.find((d) => d && d.id === defectId);
@@ -38732,6 +38785,17 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 if (!targetIds.length) targetIds = [defectId];
             }
         }
+        return targetIds;
+    }
+
+    window.updateSurveyInlineField = function(defectId, field, rawValue) {
+        if (window.event) window.event.stopPropagation();
+        const located = findDefectAcrossBuildingFloors(defectId);
+        const key = located
+            ? located.floorKey
+            : `${state.currentBuildingId}_${state.currentFloor}`;
+        const list = state.defects[key] || [];
+        const targetIds = surveyRowEditTargetIds(list, defectId, field);
         const value = (rawValue == null) ? '' : String(rawValue).replace(/\s*\n+\s*/g, ' ').trim();
 
         // 조사표에서 고친 값도 수정 시각을 올려야 동기화에서 이긴다 — 병합은 시각이 같으면 서버를 따른다

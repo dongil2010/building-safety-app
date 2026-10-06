@@ -89,4 +89,41 @@ const kp = require(path.join(ROOT, 'js/shared/measure-keypad.js'));
 assert.ok(/input\[data-crack-w\]/.test(kp.TARGET_SELECTOR));
 assert.ok(/\.survey-size-open:empty::before/.test(css));
 
+
+// ---- 2026-10-06: 결함 수정창에서 폭을 고쳐도 규모(조사표 값)가 옛 폭이던 문제
+{
+    const isMeasureOnly = new Function(extractFunction('isMeasureOnlySizeText') + '; return isMeasureOnlySizeText;')();
+    ['', '-', 'Cw:0.3', 'Cw:0.3 -2EA', '0.3/2.0', '0.3/2.0 -2EA', '0.3mm/2.0m', '0.3㎜/2.0m', '0.3 / 2.0',
+        '0.3x2.0', '0.3×2.0', '2.0m', '2.0m -3EA', '3EA', '0.3/2.0 -3EA, Cw:0.2', '0.3/3.00.2/3.0'].forEach((t) => {
+        assert.strictEqual(isMeasureOnly(t), true, '측정 표기 → 행을 따라 바뀜: ' + t);
+    });
+    ['W=0.2mm, L=1.5m', '누수 흔적', '0.3/2.0 누수', '균열 0.3'].forEach((t) => {
+        assert.strictEqual(isMeasureOnly(t), false, '손으로 쓴 글자는 그대로: ' + t);
+    });
+    assert.ok(/sizeEl\.dataset\.autoSize = \(composed && \(\(existingPin\.size \|\| ''\) === composed\s*\|\| isMeasureOnlySizeText\(existingPin\.size\)\)\)/.test(app),
+        '결함 수정창을 열 때 측정 표기 규모면 자동 따라가기');
+}
+
+// ---- 2026-10-06: 묶음 마킹(41-1·41-2)에서 41-2 폭을 결함 수정창으로 고쳐도 조사표(첫 마킹 값)는 옛 폭이던 문제
+{
+    const src = extractFunction('crackMeasureSig') + '\n' + extractFunction('propagateMeasureEditToSurveyRow');
+    const touched = [];
+    const make = new Function('surveyRowEditTargetIds', 'touchDefectUpdatedAt', src + '; return propagateMeasureEditToSurveyRow;');
+    const prop = make((list, id) => list.filter((d) => d.groupId === 'g1' && !d.mergeLinked).map((d) => d.id), (d) => touched.push(d.id));
+    const A = { id: 'A', groupId: 'g1', crackMeasures: [{ width: '0.3', length: '2.0', count: '', join: '/' }], crackWidth: '0.3', crackLength: '2.0', itemCount: '', size: '0.3/2.0' };
+    const B = JSON.parse(JSON.stringify(A)); B.id = 'B';
+    const C = JSON.parse(JSON.stringify(A)); C.id = 'C'; C.mergeLinked = true;
+    const list = [A, B, C];
+    const sigB = new Function(extractFunction('crackMeasureSig') + '; return crackMeasureSig;')()(B);
+    // 안 바뀐 저장은 번지지 않는다
+    assert.strictEqual(prop(list, B, sigB), 0);
+    B.crackMeasures = [{ width: '0.5', length: '2.0', count: '', join: '/' }]; B.crackWidth = '0.5'; B.size = '0.5/2.0';
+    assert.strictEqual(prop(list, B, sigB), 1);
+    assert.strictEqual(A.crackWidth, '0.5'); assert.strictEqual(A.size, '0.5/2.0');
+    assert.deepStrictEqual(A.crackMeasures, B.crackMeasures); assert.notStrictEqual(A.crackMeasures, B.crackMeasures, '복사본');
+    assert.strictEqual(C.crackWidth, '0.3', '통합 연결 행 규칙(대상 밖)은 건드리지 않음');
+    assert.deepStrictEqual(touched, ['A'], '바뀐 마킹만 수정 시각(동기화)');
+    assert.ok(/const targetIds = surveyRowEditTargetIds\(list, defectId, field\);/.test(app), '조사표 칸과 같은 대상 규칙');
+    assert.ok(/propagateMeasureEditToSurveyRow\(state\.defects\[key\], state\.defects\[key\]\[idx\], crackSnapBefore\)/.test(app), '결함 수정창 저장에서 부름');
+}
 console.log('test-survey-size-popup: ok');
