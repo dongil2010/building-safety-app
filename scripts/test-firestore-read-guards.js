@@ -16,7 +16,8 @@ assert.match(app, /const PHOTO_FETCH_MAX_CONCURRENT = 4;/);
 assert.match(app, /const PHOTO_FETCH_MAX_PER_HYDRATE = 24;/);
 assert.match(app, /function fetchPhotosDocIfAllowed/);
 assert.match(app, /function loadPhotoIdsWithCloudCap/);
-assert.match(app, /await loadPhotoIdsWithCloudCap\(d\.photoIds\)/);
+// ensureDefectPhotosLoaded: 빈 칸만 골라(need) 받되 상한 걸린 함수를 거친다 (2026-10-07)
+assert.match(app, /await loadPhotoIdsWithCloudCap\(need\)/);
 assert.match(app, /await fetchPhotosDocIfAllowed\(pid\)/);
 assert.match(app, /await fetchPhotosDocIfAllowed\(key\)/);
 assert.match(app, /await fetchPhotosDocIfAllowed\(photoId\)/);

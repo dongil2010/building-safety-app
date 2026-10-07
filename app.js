@@ -20255,6 +20255,48 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         return (Array.isArray(defect.photos) ? defect.photos : []).filter(Boolean);
     }
 
+    /**
+     * 한글 사진첩용 — 조사표 한 줄에 딸린 현차 사진을 전부 { src, pid }로 모은다.
+     * 묶음(한 번호에 마킹 여러 개) 줄은 대표만 보면 다른 마킹에 넣은 사진이 통째로 빠지므로
+     * (2026-10-07 광주교회 지하층 NO.11: 사진 2장이 대표 아닌 마킹에 있어 출력 0장) 구성원 전체를 본다.
+     * 사진은 서버에서 받아 온 뒤 읽어야 하므로 async. 같은 사진 ID는 한 번만 넣는다.
+     */
+    async function loadHwpxRowPhotoEntries(row) {
+        if (!row) return [];
+        const members = (Array.isArray(row._groupMembers) && row._groupMembers.length) ? row._groupMembers.slice() : [];
+        const rep = row._representative || null;
+        // 대표 사진이 먼저 오게. 묶음이 아니면 줄 자신(= 실제 결함)만 본다.
+        const sources = members.length
+            ? (rep && members.indexOf(rep) > 0 ? [rep].concat(members.filter((m) => m !== rep)) : members)
+            : [row];
+        await Promise.all(sources.map((m) => ensureDefectPhotosLoaded(m)));
+        const seen = new Set();
+        const out = [];
+        sources.forEach((m) => {
+            const photos = Array.isArray(m.photos) ? m.photos : [];
+            const ids = Array.isArray(m.photoIds) ? m.photoIds : [];
+            photos.forEach((src, i) => {
+                if (!src) return;
+                const pid = ids[i] || null;
+                const key = pid || src;
+                if (seen.has(key)) return;
+                seen.add(key);
+                out.push({ src, pid });
+            });
+        });
+        return out;
+    }
+
+    /**
+     * 조사표 비고 칸의 사진 번호: 1장 "사진5", 여러 장 "사진5~6".
+     * "사진5, 사진6"으로 쓰면 좁은 비고 칸에서 두 줄로 꺾여 줄 높이가 달라진다 — 한 줄에 들어가는 범위 표기로.
+     */
+    function formatHwpxPhotoRemark(firstNo, count) {
+        if (!count) return '';
+        if (count === 1) return `사진${firstNo}`;
+        return `사진${firstNo}~${firstNo + count - 1}`;
+    }
+
     /** 한글·보고서 전·금회차 비교사진(전차) — defect.prevRoundPhotos만 */
     function getDefectPrevOutputPhotos(defect) {
         if (!defect) return [];
@@ -20353,16 +20395,24 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     async function ensureDefectPhotosLoaded(d) {
         if (!d) return;
         seedPhotoCacheFromDefect(d);
-        const curVisible = Array.isArray(d.photos) && d.photos.some(Boolean);
-        if (!curVisible && d.photoIds && d.photoIds.length > 0) {
-            const filled = await loadPhotoIdsWithCloudCap(d.photoIds);
-            if (filled.some(Boolean)) d.photos = filled;
-        }
-        const prevVisible = Array.isArray(d.prevRoundPhotos) && d.prevRoundPhotos.some(Boolean);
-        if (!prevVisible && d.prevRoundPhotoIds && d.prevRoundPhotoIds.length > 0) {
-            const filled = await loadPhotoIdsWithCloudCap(d.prevRoundPhotoIds);
-            if (filled.some(Boolean)) d.prevRoundPhotos = filled;
-        }
+        // 한 장이라도 있으면 "다 있다"고 넘어가던 것을 빈 칸만 골라 채우게 고침 — 여러 장 중 일부만
+        // 받아진 결함은 나머지가 끝까지 안 채워져 출력에서 빠졌다.
+        const fillMissing = async (ids, cur) => {
+            if (!ids || !ids.length) return null;
+            const have = Array.isArray(cur) ? cur : [];
+            const need = ids.map((pid, i) => (have[i] ? null : pid));
+            if (!need.some(Boolean)) return null;
+            const filled = await loadPhotoIdsWithCloudCap(need);
+            if (!filled.some(Boolean)) return null;
+            const n = Math.max(ids.length, have.length);
+            // 옛 데이터는 photos가 빈 칸 없이 당겨져 있어 photoIds와 자리가 어긋날 수 있다 — 이미 있는 사진은 다시 넣지 않는다.
+            const haveSet = new Set(have.filter(Boolean));
+            return Array.from({ length: n }, (_, i) => have[i] || (haveSet.has(filled[i]) ? null : filled[i]) || null);
+        };
+        const cur = await fillMissing(d.photoIds, d.photos);
+        if (cur) d.photos = cur;
+        const prev = await fillMissing(d.prevRoundPhotoIds, d.prevRoundPhotos);
+        if (prev) d.prevRoundPhotos = prev;
     }
 
     // 사진 문서 id는 `${결함id}_${순번}` 형식으로 정해져 있다(getPhotoDocId) — mergeDefectRecord의
@@ -38383,6 +38433,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     isPriorityManage: members.some((m) => m.isPriorityManage),
                     isBookmark: members.some((m) => m.isBookmark),
                     _groupMemberIds: members.map((m) => m.id),
+                    _groupMembers: members,
                     _groupHasSurveyExtras: extrasInGroup.length > 0,
                     _representative: rep
                 });
@@ -44420,9 +44471,19 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 await Promise.all(preDefects.map(async (d) => {
                     await ensureDefectPhotosLoaded(d);
                 }));
-                preDefects.filter(d => getDefectOutputPhotos(d).length > 0).forEach((d) => {
-                    globalPhotoEntries.push({ d, floorCode: preFloorCode });
-                    globalPhotoLabelByDefect.set(d, `사진${globalPhotoEntries.length}`);
+                // 결함 한 줄에 사진이 여러 장이면 전부 넣는다(묶음은 구성원 전체) — 사진마다 번호 하나.
+                const prePhotoLists = await Promise.all(preDefects.map((d) => loadHwpxRowPhotoEntries(d)));
+                preDefects.forEach((d, dIdx) => {
+                    const photoList = prePhotoLists[dIdx];
+                    if (!photoList.length) return;
+                    const firstNo = globalPhotoEntries.length + 1;
+                    photoList.forEach((p) => {
+                        globalPhotoEntries.push({
+                            d, floorCode: preFloorCode, src: p.src, pid: p.pid,
+                            label: `사진${globalPhotoEntries.length + 1}`
+                        });
+                    });
+                    globalPhotoLabelByDefect.set(d, formatHwpxPhotoRemark(firstNo, photoList.length));
                 });
             }
 
@@ -44680,14 +44741,13 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     const decoded = (await mapLimit(globalPhotoEntries, 6, async (entry) => {
                         const d = entry.d;
                         const floorCode = entry.floorCode;
-                        const outPhotos = getDefectOutputPhotos(d);
-                        const src0 = outPhotos[0];
+                        const src0 = entry.src;
                         if (!src0) return null;
                         try {
-                            const src = await resolveSrcForHwpxEmbed(src0, d.photoIds && d.photoIds[0]);
+                            const src = await resolveSrcForHwpxEmbed(src0, entry.pid);
                             const { bytes, mime, ext } = await dataUrlToBytes(src);
                             const size = await loadImageNaturalSizeFromBytes(bytes, mime);
-                            return { d, floorCode, bytes, mime, ext, w: size.w, h: size.h };
+                            return { d, floorCode, label: entry.label, bytes, mime, ext, w: size.w, h: size.h };
                         } catch (onePhotoErr) {
                             console.warn('사진 1장 임베드 실패(해당 컷만 생략):', d && d.id, onePhotoErr);
                             return null;
@@ -44765,7 +44825,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                                 entry.d
                             );
                             if (slot.labelTc) {
-                                setTcText(slot.labelTc, globalPhotoLabelByDefect.get(entry.d));
+                                setTcText(slot.labelTc, entry.label);
                                 centerCellContent(slot.labelTc);
                             }
                             // 위치 칸에는 절대 쓰지 않는다(신규 템플릿에는 없음). 구형 스탬프 샘플 위치 문구만 비운다.
@@ -47074,13 +47134,19 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     await ensureDefectPhotosLoaded(d);
                 }));
                 const priorityCompareDefects = [];
-                const regularPhotoDefects = pageDefects.filter(d => {
-                    if (!getDefectOutputPhotos(d).length) return false;
-                    return true;
-                });
-                const photoDefects = regularPhotoDefects;
+                // 결함 한 줄에 사진이 여러 장이면 전부 넣는다(묶음은 구성원 전체) — 사진마다 번호 하나.
+                const pagePhotoLists = await Promise.all(pageDefects.map((d) => loadHwpxRowPhotoEntries(d)));
+                const photoItems = []; // { d, src, pid, label } — 사진첩 한 칸
                 const photoLabelByDefect = new Map();
-                photoDefects.forEach((d, i) => photoLabelByDefect.set(d, `사진${i + 1}`));
+                pageDefects.forEach((d, dIdx) => {
+                    const photoList = pagePhotoLists[dIdx];
+                    if (!photoList.length) return;
+                    const firstNo = photoItems.length + 1;
+                    photoList.forEach((p) => {
+                        photoItems.push({ d, src: p.src, pid: p.pid, label: `사진${photoItems.length + 1}` });
+                    });
+                    photoLabelByDefect.set(d, formatHwpxPhotoRemark(firstNo, photoList.length));
+                });
 
                 surveyPages.forEach((pageItems, pageIdx) => {
                     const destTbl = pageTbls[pageIdx];
@@ -47142,7 +47208,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 // ---- 결함 사진 갤러리 ----
                 // 템플릿에는 사진 2장씩 짝지은 표가 같은 hp:run 안에 여러 개 나란히 들어있다. 이걸 전부
                 // 지우고, 사진이 있는 결함 개수만큼 이 표를 복제해 다시 채운다. 이 표본 표 제거는 사진이
-                // 있을 때만 하면 안 된다 — 사진을 한 장도 안 찍은 층은 photoDefects.length가 0이라 이
+                // 있을 때만 하면 안 된다 — 사진을 한 장도 안 찍은 층은 photoItems.length가 0이라 이
                 // 블록 자체가 통째로 안 돌아서, 표본 건물의 원래 사진이 그대로 남아 나오는 문제가
                 // 있었다(우리 결함 사진이 아니라 템플릿 표본 사진이 나옴). 그래서 표본 표 제거는 사진
                 // 개수와 무관하게 항상 먼저 하고, 새 표로 채우는 부분만 사진이 있을 때로 한정한다.
@@ -47153,8 +47219,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     const existingPhotoTables = Array.from(photoRun.children).filter(c => c.localName === 'tbl');
                     existingPhotoTables.forEach(t => photoRun.removeChild(t));
 
-                    if (photoDefects.length > 0) {
-                    const items = photoDefects;
+                    if (photoItems.length > 0) {
+                    const items = photoItems;
                     const PHOTOS_PER_PAGE = 6;
 
                     const tplPics = photoTblStamp.getElementsByTagNameNS(HP_NS, 'pic');
@@ -47162,15 +47228,15 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     const maxW = parseInt(tplPics[0].getElementsByTagNameNS(HP_NS, 'curSz')[0].getAttribute('width'), 10);
                     const maxH = parseInt(tplPics[0].getElementsByTagNameNS(HP_NS, 'curSz')[0].getAttribute('height'), 10);
 
-                    const decoded = (await mapLimit(items, 6, async (d) => {
-                        const outPhotos = getDefectOutputPhotos(d);
-                        const src0 = outPhotos[0];
+                    const decoded = (await mapLimit(items, 6, async (item) => {
+                        const d = item.d;
+                        const src0 = item.src;
                         if (!src0) return null;
                         try {
-                            const src = await resolveSrcForHwpxEmbed(src0, d.photoIds && d.photoIds[0]);
+                            const src = await resolveSrcForHwpxEmbed(src0, item.pid);
                             const { bytes, mime, ext } = await dataUrlToBytes(src);
                             const size = await loadImageNaturalSizeFromBytes(bytes, mime);
-                            return { d, bytes, mime, ext, w: size.w, h: size.h };
+                            return { d, label: item.label, bytes, mime, ext, w: size.w, h: size.h };
                         } catch (onePhotoErr) {
                             console.warn('사진 1장 임베드 실패(해당 컷만 생략):', d && d.id, onePhotoErr);
                             return null;
@@ -47232,7 +47298,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                         zip.file(`BinData/${imgId1}.${slot1.ext}`, slot1.bytes);
                         manifestAdds.push(`<opf:item id="${imgId1}" href="BinData/${imgId1}.${slot1.ext}" media-type="${slot1.mime}" isEmbeded="1"/>`);
                         setPicImage(pics[0], imgId1, slot1.w, slot1.h, maxW, maxH);
-                        setTcText(capTcs[0], photoLabelByDefect.get(slot1.d));
+                        setTcText(capTcs[0], slot1.label);
                         setHwpxPhotoLocText(capTcs[2], slot1.d, floorCode);
                         setTcText(descTcs[1], [getSurveyCellText('component', slot1.d), getSurveyCellText('defectType', slot1.d)].map(t => (t || '').trim()).filter(t => t && t !== '-').join(' ') || '-');
 
@@ -47242,7 +47308,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                             zip.file(`BinData/${imgId2}.${slot2.ext}`, slot2.bytes);
                             manifestAdds.push(`<opf:item id="${imgId2}" href="BinData/${imgId2}.${slot2.ext}" media-type="${slot2.mime}" isEmbeded="1"/>`);
                             setPicImage(pics[1], imgId2, slot2.w, slot2.h, maxW, maxH);
-                            setTcText(capTcs[4], photoLabelByDefect.get(slot2.d));
+                            setTcText(capTcs[4], slot2.label);
                             setHwpxPhotoLocText(capTcs[6], slot2.d, floorCode);
                             setTcText(descTcs[3], [getSurveyCellText('component', slot2.d), getSurveyCellText('defectType', slot2.d)].map(t => (t || '').trim()).filter(t => t && t !== '-').join(' ') || '-');
                         } else {
