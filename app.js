@@ -2229,6 +2229,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 floorMapStyleSettings: window.state.floorMapStyleSettings || null,
                 floorDrawingRotations: window.state.floorDrawingRotations || null,
                 floorGridLines: window.state.floorGridLines || null,
+                floorPrintCrops: window.state.floorPrintCrops || null,
                 styleShapes: window.state.styleShapes || null,
                 surveyColumns: window.state.surveyColumns || null,
                 surveyColumnsGrade3: window.state.surveyColumnsGrade3 || null,
@@ -2447,6 +2448,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
                 if (parsed.floorGridLines) {
                     window.state.floorGridLines = parsed.floorGridLines;
+                }
+                if (parsed.floorPrintCrops) {
+                    window.state.floorPrintCrops = parsed.floorPrintCrops;
                 }
                 if (parsed.styleShapes) {
                     window.state.styleShapes = parsed.styleShapes;
@@ -40829,14 +40833,15 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
     // 결함위치도에 색상 범례를 그린다. 위치(x,y)는 도면 원본 픽셀 좌표(좌상단)이며,
     // counterRotateDeg로 도면 회전과 반대로 돌려 글자·표가 항상 수평으로 보이게 한다.
-    function drawLocationMapLegend(ctx, imgW, imgH, interactive, counterRotateDeg) {
+    function drawLocationMapLegend(ctx, imgW, imgH, interactive, counterRotateDeg, legendOpts) {
         const items = getActiveLocationMapLegend().map(enrichLocationMapLegendItem);
         if (!items.length) {
             if (interactive) lastLegendBoxBounds = null;
             return;
         }
 
-        const box = state.locationMapLegendBox || {};
+        // legendOpts.box: 출력 범위 안에 범례를 다시 놓을 때 쓰는 임시 박스(저장된 박스는 건드리지 않는다)
+        const box = (legendOpts && legendOpts.box) || state.locationMapLegendBox || {};
         const scale = resolveLocationMapLegendDrawScale(box, imgW, imgH);
         const dims = measureLocationMapLegendTable(ctx, items, scale);
         const { col1W, col2W, boxW, boxH, rowH, headerRowH, fontSize, cellPadX, cellPadY } = dims;
@@ -40849,7 +40854,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             };
         const boxX = origin.x;
         const boxY = origin.y;
-        if (state.locationMapLegendBox && (state.locationMapLegendBox.nx == null || state.locationMapLegendBox.ny == null)
+        if (!(legendOpts && legendOpts.box)
+            && state.locationMapLegendBox && (state.locationMapLegendBox.nx == null || state.locationMapLegendBox.ny == null)
             && _legendLayout && typeof _legendLayout.stampNormalized === 'function') {
             state.locationMapLegendBox.x = boxX;
             state.locationMapLegendBox.y = boxY;
@@ -41007,9 +41013,16 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             // 2. If image exists, render onto A4 PORTRAIT (세로 규격: 900 x 1270) canvas with defect pins!
             if (loadedImg || floorDrawingSrc) {
                 const drawImageOnPureWhiteCanvas = (imgObj) => {
-                    const canvas = document.createElement('canvas');
                     const imgW = imgObj.naturalWidth || imgObj.width || 1400;
                     const imgH = imgObj.naturalHeight || imgObj.height || 900;
+
+                    // 이 층에 출력 범위가 정해져 있으면 그 부분만 종이에 꽉 차게(없으면 아래 기본: 도면 전체)
+                    const printCrop = getFloorPrintCrop(currentBldgId, floorCode, imgW, imgH);
+                    if (printCrop) {
+                        return renderFloorPrintCropCanvas(imgObj, imgW, imgH, printCrop, defects, currentBldgId, floorCode)
+                            .toDataURL('image/png');
+                    }
+                    const canvas = document.createElement('canvas');
 
                     // Set canvas to A4 PORTRAIT dimensions, 2x for sharper print/PDF text&lines (cw = 1800, ch = 2540)
                     const cw = 1800;
@@ -41078,6 +41091,437 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             return null;
         }
     }
+
+    // --- 위치도 출력 범위 (2026-10-07) ---
+    // 도면에 여백이 많으면 한글·PDF 위치도에서 결함 박스가 작게 나온다. 층마다 출력 범위를 정해 두면
+    // 그 부분만 종이에 꽉 차게 넣는다. 범위가 없는 층은 예전 그대로(도면 전체). 계산은 js/shared/print-crop.js.
+    // 저장: state.floorPrintCrops[건물_층] = { nx, ny, nw, nh }(도면 크기에 대한 비율) 또는 null(기본으로 되돌림).
+    // 지울 때 키를 delete 하지 않고 null 을 넣는다 — 루트 문서는 merge 로 올려서, 지운 키는 서버에 그대로 남는다.
+    function printCropApi() {
+        return (window.BSA && window.BSA.printCrop) || null;
+    }
+
+    function getStoredFloorPrintCrop(buildingId, floorCode) {
+        const map = state.floorPrintCrops;
+        if (!map || typeof map !== 'object') return null;
+        return map[getFloorMapStyleKey(buildingId, floorCode)] || null;
+    }
+
+    /** 이 층의 출력 범위(도면 이미지 좌표 { x, y, w, h }). 없거나 쓸 수 없으면 null. */
+    function getFloorPrintCrop(buildingId, floorCode, imgW, imgH) {
+        const api = printCropApi();
+        if (!api) return null;
+        return api.fromStored(getStoredFloorPrintCrop(buildingId, floorCode), imgW, imgH);
+    }
+
+    function setFloorPrintCrop(buildingId, floorCode, crop, imgW, imgH) {
+        const api = printCropApi();
+        if (!api || !buildingId || !floorCode) return null;
+        if (!state.floorPrintCrops || typeof state.floorPrintCrops !== 'object') state.floorPrintCrops = {};
+        const stored = crop ? api.toStored(crop, imgW, imgH) : null;
+        state.floorPrintCrops[getFloorMapStyleKey(buildingId, floorCode)] = stored;
+        if (typeof saveStateToLocalStorage === 'function') saveStateToLocalStorage();
+        if (typeof scheduleSyncToFirebase === 'function') scheduleSyncToFirebase();
+        return stored;
+    }
+
+    /** 범위 안에 그릴 범례의 크기(범위 좌표). 범례 항목이 없으면 null. */
+    function measureLegendForPrintCrop(crop) {
+        const items = getActiveLocationMapLegend().map(enrichLocationMapLegendItem);
+        if (!items.length || !crop) return null;
+        const scale = resolveLocationMapLegendDrawScale(state.locationMapLegendBox || {}, crop.w, crop.h);
+        const dims = measureLocationMapLegendTable(document.createElement('canvas').getContext('2d'), items, scale);
+        return { boxW: dims.boxW, boxH: dims.boxH, margin: 16 * scale };
+    }
+
+    /**
+     * 범위 안에 범례를 다시 놓기 위한 임시 박스(저장된 범례 박스는 건드리지 않는다).
+     * crop.lc(구석)가 있으면 그 구석에, 없으면 도면 전체에서의 상대 위치를 범위 안에서도 그대로.
+     */
+    function legendBoxForPrintCrop(imgW, imgH, crop) {
+        const box = Object.assign({}, state.locationMapLegendBox || {});
+        if (box.nx == null && box.x !== undefined && imgW > 0) box.nx = box.x / imgW;
+        if (box.ny == null && box.y !== undefined && imgH > 0) box.ny = box.y / imgH;
+        if (crop && crop.lc) {
+            const d = measureLegendForPrintCrop(crop);
+            if (d) {
+                const o = printCropApi().cornerOrigin(crop.lc, crop.w, crop.h, d.boxW, d.boxH, d.margin);
+                box.nx = o.x / crop.w;
+                box.ny = o.y / crop.h;
+            }
+        }
+        return box;
+    }
+
+    /**
+     * 범례가 도면 내용을 가리지 않는 구석을 고른다(지금 범례가 있던 쪽 구석부터 본다).
+     * 네 구석이 다 막혀 있으면 범위를 위나 아래로 조금 늘려 범례 자리를 만든다. crop 을 고쳐서 돌려준다.
+     * small: 범례 없이 도면+마킹만 그린 작은 그림의 픽셀(data, w, h).
+     */
+    function placeLegendInPrintCrop(crop, imgW, imgH, small) {
+        const api = printCropApi();
+        const d = measureLegendForPrintCrop(crop);
+        if (!api || !d) return crop;
+        const sx = small.w / imgW;
+        const sy = small.h / imgH;
+        const base = legendBoxForPrintCrop(imgW, imgH, null);
+        const wantRight = Number(base.nx) > 0.5;
+        const wantBottom = Number(base.ny) > 0.5;
+        const order = api.CORNERS.slice().sort((a, b) => {
+            const miss = (c) => ((c[1] === 'r') !== wantRight ? 1 : 0) + ((c[0] === 'b') !== wantBottom ? 1 : 0);
+            return miss(a) - miss(b);
+        });
+        const inkAt = (corner) => {
+            const o = api.cornerOrigin(corner, crop.w, crop.h, d.boxW, d.boxH, d.margin);
+            return api.inkCount(small.data, small.w, small.h, {
+                x: (crop.x + o.x) * sx, y: (crop.y + o.y) * sy, w: d.boxW * sx, h: d.boxH * sy
+            });
+        };
+        const free = order.find((c) => inkAt(c) === 0);
+        if (free) return Object.assign({}, crop, { lc: free });
+        // 빈 구석이 없다 — 가장 원하던 구석 쪽으로 범례 높이만큼 범위를 늘린다(늘린 띠는 내용 바깥이라 비어 있다)
+        const corner = order[0];
+        const grow = d.boxH + d.margin * 2;
+        const top = corner[0] === 't';
+        const y1 = top ? Math.max(0, crop.y - grow) : crop.y;
+        const y2 = top ? crop.y + crop.h : Math.min(imgH, crop.y + crop.h + grow);
+        return { x: crop.x, y: y1, w: crop.w, h: y2 - y1, lc: corner };
+    }
+
+    function drawFloorDefectsForReport(ctx, defects, buildingId, floorCode) {
+        const prevStyleCtx = _mapStyleRenderContext;
+        _mapStyleRenderContext = { buildingId, floorCode };
+        try {
+            renderDefectsGrouped(ctx, defects, drawPinSafe);
+        } finally {
+            _mapStyleRenderContext = prevStyleCtx;
+        }
+    }
+
+    /** 출력 범위만 그린 그림(여백 없이 범위 비율 그대로, 가로로 긴 범위는 왼쪽으로 90° 돌려 세움) */
+    function renderFloorPrintCropCanvas(imgObj, imgW, imgH, crop, defects, buildingId, floorCode) {
+        const fit = printCropApi().fitCrop(crop.w, crop.h, 1800, 2540);
+        const canvas = document.createElement('canvas');
+        canvas.width = fit.canvasW;
+        canvas.height = fit.canvasH;
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.save();
+        if (fit.rotate) {
+            ctx.translate(canvas.width / 2, canvas.height / 2);
+            ctx.rotate(-Math.PI / 2);
+            ctx.scale(fit.scale, fit.scale);
+            ctx.translate(-crop.w / 2, -crop.h / 2);
+        } else {
+            ctx.scale(fit.scale, fit.scale);
+        }
+        ctx.translate(-crop.x, -crop.y);
+        ctx.beginPath();
+        ctx.rect(crop.x, crop.y, crop.w, crop.h);
+        ctx.clip();
+        ctx.drawImage(imgObj, 0, 0, imgW, imgH);
+        drawFloorDefectsForReport(ctx, defects, buildingId, floorCode);
+        // 범례는 범위 안의 같은 구석에 — 도면 구석에 그대로 두면 범위 밖이라 잘려 나간다
+        ctx.translate(crop.x, crop.y);
+        drawLocationMapLegend(ctx, crop.w, crop.h, false, 0, { box: legendBoxForPrintCrop(imgW, imgH, crop) });
+        ctx.restore();
+        return canvas;
+    }
+
+    /** 지금 보고 있는 층의 도면 그림(다 불러온 것). 없으면 null. */
+    function getCurrentFloorDrawingImage() {
+        const bId = state.currentBuildingId;
+        const fc = state.currentFloor;
+        if (!bId || !fc) return null;
+        const usable = (img) => !!(img && img.complete && img.naturalWidth > 0);
+        const cached = state.floorImageCache ? state.floorImageCache[`${bId}_${fc}`] : null;
+        if (usable(cached)) return cached;
+        if (usable(state.bgImage)) return state.bgImage;
+        return null;
+    }
+
+    /** 도면 + 결함 마킹을 도면 방향 그대로 작게 그린다(범위 정하기 미리보기·자동 맞춤 계산용). 범례는 안 그린다. */
+    function renderFloorPreviewCanvas(imgObj, maxSide) {
+        const imgW = imgObj.naturalWidth;
+        const imgH = imgObj.naturalHeight;
+        const k = Math.min(1, maxSide / Math.max(imgW, imgH));
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.max(1, Math.round(imgW * k));
+        canvas.height = Math.max(1, Math.round(imgH * k));
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.save();
+        ctx.scale(canvas.width / imgW, canvas.height / imgH);
+        ctx.drawImage(imgObj, 0, 0, imgW, imgH);
+        const key = `${state.currentBuildingId}_${state.currentFloor}`;
+        const defects = filterMapPlacedDefects(state.defects[key] || getCurrentFloorDefects() || []);
+        drawFloorDefectsForReport(ctx, defects, state.currentBuildingId, state.currentFloor);
+        ctx.restore();
+        return canvas;
+    }
+
+    /**
+     * 자동 맞춤 — 도면 내용(제목·치수선 포함)과 결함 마킹이 모두 들어가는 가장 작은 범위에 여유를 둔다.
+     * 도면 가장자리의 테두리선은 내용으로 치지 않는다. 계산할 수 없으면 null.
+     */
+    function computeAutoPrintCrop(imgObj) {
+        const api = printCropApi();
+        if (!api || !imgObj) return null;
+        const imgW = imgObj.naturalWidth;
+        const imgH = imgObj.naturalHeight;
+        const small = renderFloorPreviewCanvas(imgObj, 900);
+        let data;
+        try {
+            data = small.getContext('2d').getImageData(0, 0, small.width, small.height).data;
+        } catch (e) {
+            console.warn('[출력 범위] 도면 픽셀을 읽을 수 없어 자동 맞춤을 못 함:', e);
+            return null;
+        }
+        const ink = api.inkBounds(data, small.width, small.height);
+        if (!ink) return null;
+        const rect = api.scaleRect(ink, imgW / small.width, imgH / small.height);
+        const padded = api.padRect(rect, Math.max(imgW, imgH) * 0.012, imgW, imgH);
+        const crop = api.normalizeCrop(padded, imgW, imgH);
+        if (!crop) return null;
+        // 여백을 자르면 범례가 도면 내용 위에 올라갈 수 있다 — 안 가리는 구석으로
+        return api.normalizeCrop(placeLegendInPrintCrop(crop, imgW, imgH, { data, w: small.width, h: small.height }), imgW, imgH) || crop;
+    }
+
+    /** 범위를 정했을 때 종이에서 몇 배로 커지는가(도면 전체를 넣을 때 대비) */
+    function printCropMagnification(crop, imgW, imgH) {
+        const api = printCropApi();
+        if (!api || !crop) return 1;
+        // 도면 전체는 가로형이면 무조건 돌려 세운다(renderFloorPlanCanvasDataUrl 기본 경로와 같은 식)
+        const full = imgW > imgH ? Math.min(1800 / imgH, 2540 / imgW) : Math.min(1800 / imgW, 2540 / imgH);
+        const cropped = api.fitCrop(crop.w, crop.h, 1800, 2540).scale;
+        return full > 0 ? cropped / full : 1;
+    }
+
+    /** 「출력 범위」 창 — 미리보기에서 사각형을 끌어 정한다. 화면의 도면 조작 코드와 따로 돈다. */
+    function openPrintCropModal() {
+        const api = printCropApi();
+        const imgObj = getCurrentFloorDrawingImage();
+        if (!api || !state.currentBuildingId || !state.currentFloor) {
+            window.showToast('건축물과 층을 먼저 선택해 주세요.', 'warning');
+            return;
+        }
+        if (!imgObj) {
+            window.showToast('이 층에 등록된 도면이 없습니다.', 'warning');
+            return;
+        }
+        const bId = state.currentBuildingId;
+        const fc = state.currentFloor;
+        const imgW = imgObj.naturalWidth;
+        const imgH = imgObj.naturalHeight;
+
+        const old = document.getElementById('printCropModal');
+        if (old) old.remove();
+        const overlay = document.createElement('div');
+        overlay.id = 'printCropModal';
+        overlay.style.cssText = 'position:fixed;inset:0;z-index:10050;background:rgba(15,23,42,0.55);display:flex;align-items:center;justify-content:center;padding:12px;';
+        overlay.innerHTML = `
+            <div style="background:#fff;color:#0f172a;border-radius:12px;max-width:96vw;max-height:96vh;display:flex;flex-direction:column;box-shadow:0 20px 50px rgba(0,0,0,0.3);overflow:hidden;">
+                <div style="padding:12px 16px;border-bottom:1px solid #e2e8f0;display:flex;align-items:center;gap:10px;">
+                    <strong style="font-size:1rem;"><i class="fa-solid fa-crop-simple"></i> 위치도 출력 범위</strong>
+                    <span data-role="info" style="font-size:0.82rem;color:#475569;"></span>
+                </div>
+                <div style="padding:10px 16px 0;font-size:0.8rem;color:#64748b;line-height:1.5;">
+                    한글·PDF 위치도에 넣을 부분을 정합니다. 모서리를 끌어 크기를 바꾸고, 안쪽을 끌어 옮기고, 바깥에서 끌면 새로 그립니다.
+                    범위를 정하지 않으면 지금처럼 도면 전체가 나옵니다.
+                </div>
+                <div style="padding:10px 16px;overflow:auto;display:flex;justify-content:center;">
+                    <canvas data-role="canvas" style="border:1px solid #cbd5e1;touch-action:none;cursor:crosshair;max-width:100%;"></canvas>
+                </div>
+                <div style="padding:10px 16px 14px;border-top:1px solid #e2e8f0;display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-end;">
+                    <button type="button" class="btn btn-sm" data-role="auto"><i class="fa-solid fa-wand-magic-sparkles"></i> 자동 맞춤</button>
+                    <button type="button" class="btn btn-sm" data-role="legend" title="범위 안에서 범례를 놓을 구석을 바꿉니다"><i class="fa-solid fa-list"></i> 범례 자리 바꾸기</button>
+                    <button type="button" class="btn btn-sm" data-role="reset">도면 전체(기본)</button>
+                    <span style="flex:1;"></span>
+                    <button type="button" class="btn btn-sm" data-role="cancel">취소</button>
+                    <button type="button" class="btn btn-sm btn-primary" data-role="save">저장</button>
+                </div>
+            </div>`;
+        document.body.appendChild(overlay);
+
+        const canvas = overlay.querySelector('[data-role="canvas"]');
+        const infoEl = overlay.querySelector('[data-role="info"]');
+        const maxW = Math.max(240, Math.min(window.innerWidth - 80, 1100));
+        const maxH = Math.max(200, window.innerHeight - 260);
+        const base = renderFloorPreviewCanvas(imgObj, 1400);
+        const view = Math.min(maxW / imgW, maxH / imgH);          // 도면 좌표 → 미리보기 좌표
+        canvas.width = Math.max(1, Math.round(imgW * view));
+        canvas.height = Math.max(1, Math.round(imgH * view));
+        const ctx = canvas.getContext('2d');
+
+        let crop = getFloorPrintCrop(bId, fc, imgW, imgH);        // 도면 좌표. null = 도면 전체
+        let drag = null;
+
+        const paint = () => {
+            ctx.setTransform(1, 0, 0, 1, 0, 0);
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.drawImage(base, 0, 0, canvas.width, canvas.height);
+            ctx.save();
+            ctx.scale(view, view);
+            if (crop) {
+                // 범위 밖을 어둡게
+                ctx.fillStyle = 'rgba(15,23,42,0.45)';
+                ctx.beginPath();
+                ctx.rect(0, 0, imgW, imgH);
+                ctx.rect(crop.x, crop.y, crop.w, crop.h);
+                ctx.fill('evenodd');
+                ctx.save();
+                ctx.translate(crop.x, crop.y);
+                drawLocationMapLegend(ctx, crop.w, crop.h, false, 0, { box: legendBoxForPrintCrop(imgW, imgH, crop) });
+                ctx.restore();
+                ctx.strokeStyle = '#2563eb';
+                ctx.lineWidth = 2 / view;
+                ctx.setLineDash([8 / view, 5 / view]);
+                ctx.strokeRect(crop.x, crop.y, crop.w, crop.h);
+                ctx.setLineDash([]);
+                const hs = 6 / view;
+                ctx.fillStyle = '#2563eb';
+                [[crop.x, crop.y], [crop.x + crop.w, crop.y], [crop.x, crop.y + crop.h], [crop.x + crop.w, crop.y + crop.h]]
+                    .forEach(([hx, hy]) => ctx.fillRect(hx - hs, hy - hs, hs * 2, hs * 2));
+            } else {
+                drawLocationMapLegend(ctx, imgW, imgH, false, 0, { box: legendBoxForPrintCrop(imgW, imgH, null) });
+            }
+            ctx.restore();
+            if (crop) {
+                const mag = printCropMagnification(crop, imgW, imgH);
+                infoEl.textContent = `범위 지정됨 — 종이에서 약 ${mag.toFixed(mag >= 1.95 ? 1 : 2)}배 크게 나옵니다`;
+            } else {
+                infoEl.textContent = '도면 전체(기본)';
+            }
+        };
+
+        const toImg = (e) => {
+            const r = canvas.getBoundingClientRect();
+            const sx = canvas.width / (r.width || canvas.width);
+            const sy = canvas.height / (r.height || canvas.height);
+            return {
+                x: Math.max(0, Math.min(imgW, ((e.clientX - r.left) * sx) / view)),
+                y: Math.max(0, Math.min(imgH, ((e.clientY - r.top) * sy) / view))
+            };
+        };
+        const hitCorner = (p) => {
+            if (!crop) return null;
+            const tol = 12 / view;
+            const corners = {
+                nw: [crop.x, crop.y], ne: [crop.x + crop.w, crop.y],
+                sw: [crop.x, crop.y + crop.h], se: [crop.x + crop.w, crop.y + crop.h]
+            };
+            return Object.keys(corners).find((k) => Math.abs(p.x - corners[k][0]) <= tol && Math.abs(p.y - corners[k][1]) <= tol) || null;
+        };
+        const inside = (p) => !!crop && p.x >= crop.x && p.x <= crop.x + crop.w && p.y >= crop.y && p.y <= crop.y + crop.h;
+
+        canvas.addEventListener('pointerdown', (e) => {
+            e.preventDefault();
+            const p = toImg(e);
+            const corner = hitCorner(p);
+            if (corner) {
+                // 잡은 모서리의 맞은편을 고정점으로
+                const ax = corner.indexOf('w') >= 0 ? crop.x + crop.w : crop.x;
+                const ay = corner.indexOf('n') >= 0 ? crop.y + crop.h : crop.y;
+                drag = { mode: 'resize', ax, ay };
+            } else if (inside(p)) {
+                drag = { mode: 'move', dx: p.x - crop.x, dy: p.y - crop.y };
+            } else {
+                drag = { mode: 'resize', ax: p.x, ay: p.y };
+            }
+            try { canvas.setPointerCapture(e.pointerId); } catch (_e) { /* ignore */ }
+        });
+        canvas.addEventListener('pointermove', (e) => {
+            const p = toImg(e);
+            if (!drag) {
+                canvas.style.cursor = hitCorner(p) ? 'nwse-resize' : (inside(p) ? 'move' : 'crosshair');
+                return;
+            }
+            const lc = crop && crop.lc;   // 범례 구석은 범위를 고쳐도 그대로
+            if (drag.mode === 'move') {
+                crop = {
+                    x: Math.max(0, Math.min(imgW - crop.w, p.x - drag.dx)),
+                    y: Math.max(0, Math.min(imgH - crop.h, p.y - drag.dy)),
+                    w: crop.w,
+                    h: crop.h
+                };
+            } else {
+                crop = {
+                    x: Math.min(drag.ax, p.x), y: Math.min(drag.ay, p.y),
+                    w: Math.abs(p.x - drag.ax), h: Math.abs(p.y - drag.ay)
+                };
+            }
+            if (lc) crop.lc = lc;
+            paint();
+        });
+        const endDrag = () => {
+            if (!drag) return;
+            drag = null;
+            // 너무 작게 그렸거나 도면 전체와 같으면 기본으로
+            crop = api.normalizeCrop(crop, imgW, imgH);
+            paint();
+        };
+        canvas.addEventListener('pointerup', endDrag);
+        canvas.addEventListener('pointercancel', endDrag);
+
+        const close = () => {
+            document.removeEventListener('keydown', onKey, true);
+            overlay.remove();
+        };
+        const onKey = (e) => {
+            if (e.key !== 'Escape') return;
+            e.preventDefault();
+            e.stopPropagation();
+            close();
+        };
+        document.addEventListener('keydown', onKey, true);
+        // 이 창 안의 클릭이 뒤의 도면·결함 창 닫기 처리로 새지 않게
+        ['pointerdown', 'mousedown', 'click', 'touchstart'].forEach((type) => {
+            overlay.addEventListener(type, (e) => e.stopPropagation());
+        });
+
+        overlay.querySelector('[data-role="auto"]').addEventListener('click', () => {
+            const auto = computeAutoPrintCrop(imgObj);
+            if (!auto) {
+                window.showToast('이 도면은 자를 여백을 찾지 못했습니다. 사각형을 직접 그려 주세요.', 'info', 4000);
+                return;
+            }
+            crop = auto;
+            paint();
+        });
+        overlay.querySelector('[data-role="legend"]').addEventListener('click', () => {
+            if (!crop) {
+                window.showToast('범위를 먼저 정해 주세요. 도면 전체일 때 범례는 도면 화면에서 끌어 옮깁니다.', 'info', 4000);
+                return;
+            }
+            const order = api.CORNERS;
+            crop.lc = order[(order.indexOf(crop.lc) + 1) % order.length];
+            paint();
+        });
+        overlay.querySelector('[data-role="reset"]').addEventListener('click', () => {
+            crop = null;
+            paint();
+        });
+        overlay.querySelector('[data-role="cancel"]').addEventListener('click', close);
+        overlay.querySelector('[data-role="save"]').addEventListener('click', () => {
+            const norm = crop ? api.normalizeCrop(crop, imgW, imgH) : null;
+            setFloorPrintCrop(bId, fc, norm, imgW, imgH);
+            close();
+            if (typeof drawCanvas === 'function') drawCanvas();
+            window.showToast(norm
+                ? `${stripFloorCodeSuffix(window.getFloorLabelFromCode(fc))} 위치도 출력 범위를 저장했습니다.`
+                : `${stripFloorCodeSuffix(window.getFloorLabelFromCode(fc))} 위치도는 도면 전체로 출력합니다.`, 'success', 3500);
+        });
+
+        paint();
+    }
+    window.openPrintCropModal = openPrintCropModal;
+
+    ['btnOpenPrintCropModal', 'mobileBtnPrintCrop'].forEach((btnId) => {
+        const btn = document.getElementById(btnId);
+        if (btn) btn.addEventListener('click', openPrintCropModal);
+    });
 
     /**
      * PDF 보고서용 균열 게이지·팁 페이지. 도면에 찍은 게이지 마킹과 예전 균열 결함 연결 기록을
@@ -57180,6 +57624,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             window.state.floorGridLines = data.floorGridLines;
             isChanged = true;
         }
+        if (data.floorPrintCrops) {
+            window.state.floorPrintCrops = data.floorPrintCrops;
+            isChanged = true;
+        }
         if (data.styleShapes) {
             window.state.styleShapes = data.styleShapes;
             isChanged = true;
@@ -57733,6 +58181,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 floorMapStyleSettings: window.state.floorMapStyleSettings || null,
                 floorDrawingRotations: window.state.floorDrawingRotations || null,
                 floorGridLines: window.state.floorGridLines || null,
+                // 아직 못 받은 기기가 null 로 덮어 다른 기기가 정한 출력 범위를 지우지 않게 — 있을 때만 올린다
+                ...(window.state.floorPrintCrops ? { floorPrintCrops: window.state.floorPrintCrops } : {}),
                 styleShapes: window.state.styleShapes || null,
                 locationMapLegend: window.state.locationMapLegend || null,
                 locationMapLegendBox: window.state.locationMapLegendBox || null,
