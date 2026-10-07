@@ -33055,26 +33055,118 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         return pickImageFileViaInput(mode);
     }
 
+    /**
+     * 사진을 고르는 순간 열려 있던 결함 — 사진은 줄이는 작업(압축)이 끝나야 붙는데, 그 사이 창이 닫히거나
+     * 다른 결함 창으로 바뀌면 사진이 갈 곳을 잃고 조용히 버려졌다(2026-10-07 광주교회: 금회 추가 결함의
+     * 사진이 서버·백업 어디에도 없었고 오류 기록도 0건. 샘플건축물에서 재현).
+     */
+    function captureDefectPhotoTarget() {
+        return {
+            open: isDefectModalOpen(),
+            pinId: document.getElementById('defectPinId')?.value || '',
+            seq: window._defectModalOpenSeq || 0,
+            floorKey: state.currentBuildingId ? `${state.currentBuildingId}_${state.currentFloor}` : ''
+        };
+    }
+
+    /** 지금 열린 창이 사진을 고를 때의 그 결함 창인가 */
+    function isDefectPhotoTargetStillOpen(target) {
+        if (!target || !target.open || !isDefectModalOpen()) return false;
+        const pinNow = document.getElementById('defectPinId')?.value || '';
+        // 새 결함은 첫 저장 때 id가 생긴다 — 같은 창(seq)이면 같은 결함
+        if (!target.pinId) return (window._defectModalOpenSeq || 0) === target.seq;
+        return pinNow === target.pinId;
+    }
+
+    /** 창이 이미 닫혔거나 바뀐 뒤 — 고를 때의 그 결함에 사진을 바로 붙여 저장한다. 못 붙이면 false. */
+    async function attachPhotoToDefectDirect(target, url) {
+        if (!target || !target.pinId || !target.floorKey || !url) return false;
+        const d = (state.defects[target.floorKey] || []).find((x) => x && x.id === target.pinId);
+        if (!d) return false;
+        const before = captureDefectPhotoIdsBefore(d);
+        // 사진 배열과 ID 목록의 자리를 맞춘다(아직 안 내려온 사진은 빈 칸으로 두고 ID는 지킨다)
+        const ids = Array.isArray(d.photoIds) ? d.photoIds.slice() : [];
+        const photos = Array.isArray(d.photos) ? d.photos.slice() : [];
+        while (photos.length < ids.length) photos.push(null);
+        for (let i = ids.length; i < photos.length; i++) ids[i] = defectPhotoIdAt(d, i);
+        // 새 사진 한 장만 새 ID(기존 사진은 위에서 ID를 그대로 지켰다)
+        let newId = assignDefectPhotoIds(d.id, [url], null)[0];
+        while (ids.indexOf(newId) !== -1) newId = assignDefectPhotoIds(d.id, [url], null)[0];
+        photos.push(url);
+        ids.push(newId);
+        d.photos = photos;
+        d.photoIds = ids;
+        recordDefectPhotoState(d, before.cur.visibleIds, d.photoIds);
+        if (!d.inspectorName) d.inspectorName = window.state.userName || '';
+        touchDefectUpdatedAt(d);
+        if (!window._photoCache) window._photoCache = {};
+        window._photoCache[newId] = url;
+        markFloorKeyDirty(target.floorKey);
+        saveStateToLocalStorage();
+        await persistPhotoUrlToIdb(newId, url);
+        uploadDefectPhotos(d.id, [url], undefined, [newId]).catch((e) => console.warn('사진 업로드 실패:', e));
+        scheduleSyncToFirebase({ skipMarkCurrent: true });
+        if (typeof renderSurveyTable === 'function' && window.state.currentTab === 'tab-survey') renderSurveyTable();
+        if (typeof renderDefectListPanel === 'function') renderDefectListPanel();
+        return d;
+    }
+
+    function reportDefectPhotoLost(why, err) {
+        console.warn('[사진] 결함 사진을 저장하지 못함:', why, err || '');
+        window.showToast('사진을 저장하지 못했습니다. 결함을 다시 열어 사진을 넣어 주세요.', 'error', 8000);
+        try {
+            const log = window.BSA && window.BSA.errorLog;
+            if (log && typeof log.record === 'function') {
+                log.record({ kind: 'photo-lost', message: `결함 사진 저장 실패: ${why}`, stack: err && err.stack, source: 'handleSelectedPhotoFile' });
+            }
+        } catch (_e) { /* 기록 실패는 무시 */ }
+    }
+
     async function triggerDefectPhotoPick(mode, target = 'curr') {
+        // 파일 창을 띄우기 전에 어느 결함용인지 잡아 둔다
+        const photoTarget = captureDefectPhotoTarget();
         const file = await pickImageFromDevice(mode);
-        if (file) handleSelectedPhotoFile(file, target);
+        if (file) handleSelectedPhotoFile(file, target, photoTarget);
     }
     window.triggerDefectPhotoPick = triggerDefectPhotoPick;
 
     const btnTriggerCamera = document.getElementById('btnTriggerCamera');
     const btnTriggerGallery = document.getElementById('btnTriggerGallery');
 
-    function handleSelectedPhotoFile(file, target = 'curr') {
+    function handleSelectedPhotoFile(file, target = 'curr', photoTarget) {
         if (!file) return;
         if (target === 'prev') return;
-        window.compressDefectPhoto43(file).then(compressedUrl => {
-            if (!window._pendingPhotos) window._pendingPhotos = [];
-            window._pendingPhotos.push(compressedUrl);
-            window._defectPhotosDirty = true;
-            renderDefectPhotoSection();
-            void persistOpenDefectPhotosNow();
-            scheduleDefectAutoApply();
+        const pickedFor = photoTarget || captureDefectPhotoTarget();
+        // 저장이 끝날 때까지 "사진 저장 중"으로 표시 — 그동안은 자동 새로고침을 미룬다(isAutoReloadUnsafeNow)
+        if (!window._defectPhotoSaves) window._defectPhotoSaves = new Set();
+        const job = window.compressDefectPhoto43(file).then(async (compressedUrl) => {
+            if (!compressedUrl) {
+                reportDefectPhotoLost('사진을 읽지 못함');
+                return;
+            }
+            if (isDefectPhotoTargetStillOpen(pickedFor)) {
+                if (!window._pendingPhotos) window._pendingPhotos = [];
+                window._pendingPhotos.push(compressedUrl);
+                window._defectPhotosDirty = true;
+                renderDefectPhotoSection();
+                void persistOpenDefectPhotosNow();
+                scheduleDefectAutoApply();
+                return;
+            }
+            // 사진을 줄이는 사이 창이 닫혔거나 다른 결함으로 바뀌었다 — 고를 때의 그 결함에 붙인다
+            const saved = await attachPhotoToDefectDirect(pickedFor, compressedUrl);
+            if (saved) {
+                window.showToast(`창이 닫힌 뒤 사진을 ${saved.no || '그 결함'}에 저장했습니다.`, 'info', 5000);
+            } else {
+                reportDefectPhotoLost(pickedFor.pinId ? '결함을 찾지 못함' : '저장 전인 새 결함의 창이 닫힘');
+            }
+        }).catch((err) => {
+            reportDefectPhotoLost('사진 처리 중 오류', err);
+        }).then(() => {
+            window._defectPhotoSaves.delete(job);
         });
+        window._defectPhotoSaves.add(job);
+        return job;
     }
 
     if (btnTriggerCamera) {
@@ -50518,14 +50610,33 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             url.searchParams.set('_r', String(Date.now()));
             window.location.replace(url.toString());
         };
-        const flush = (typeof flushLocalPhotoPersistBeforeUnload === 'function')
-            ? flushLocalPhotoPersistBeforeUnload()
-            : Promise.resolve();
+        // 고른 사진이 아직 줄여지는 중이면 그것부터 끝낸 뒤 저장한다(안 기다리면 그 사진은 새로고침과 함께 사라진다)
+        const pendingPhotoSaves = Array.from(window._defectPhotoSaves || []);
+        const flush = Promise.all(pendingPhotoSaves.map((p) => Promise.resolve(p).catch(() => {}))).then(() => (
+            (typeof flushLocalPhotoPersistBeforeUnload === 'function')
+                ? flushLocalPhotoPersistBeforeUnload()
+                : null
+        ));
         Promise.race([
             flush,
-            new Promise((resolve) => window.setTimeout(resolve, 2500))
+            new Promise((resolve) => window.setTimeout(resolve, pendingPhotoSaves.length ? 6000 : 2500))
         ]).then(go, go);
     };
+
+    /**
+     * 지금 자동 새로고침을 하면 입력 중인 것이 날아가는 상태인가.
+     * 2026-10-07: 다른 직원이 배포한 직후, 사진 파일 창을 닫고 앱 창으로 돌아오는 순간(focus)에 자동 새로고침이
+     * 걸려 방금 고른 사진이 줄여지기도 전에 화면이 다시 떴다(광주교회 B1F NO.44 — 17:14 배포, 17:15~17:17 작성).
+     * 입력 창이 열려 있거나 사진을 저장하는 중이면 자동으로는 새로고침하지 않는다. 안내 띠는 그대로 뜬다.
+     */
+    function isAutoReloadUnsafeNow() {
+        if (window._defectPhotoSaves && window._defectPhotoSaves.size > 0) return true;
+        if (typeof isDefectModalOpen === 'function' && isDefectModalOpen()) return true;
+        if (typeof isOverviewPhotosModalOpen === 'function' && isOverviewPhotosModalOpen()) return true;
+        const ndtModalEl = document.getElementById('ndtModal');
+        if (ndtModalEl && ndtModalEl.classList.contains('open')) return true;
+        return false;
+    }
 
     function isLoginOverlayOpen() {
         if (document.body && document.body.classList.contains('auth-gate-active')) return true;
@@ -50565,6 +50676,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 if (!sha || sha === 'local') return;
                 const prev = sessionStorage.getItem(KEY);
                 if (prev && prev !== sha) {
+                    // 입력 중이면 미룬다 — 기록(KEY)을 안 바꿔 두므로 다음에 창으로 돌아올 때 다시 판단한다
+                    if (isAutoReloadUnsafeNow()) return;
                     sessionStorage.setItem(KEY, sha);
                     window.reloadWebAppFromServer();
                     return;
