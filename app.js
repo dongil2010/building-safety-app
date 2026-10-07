@@ -4982,6 +4982,14 @@ document.addEventListener('DOMContentLoaded', () => {
                     if (id && typeof window.openOverviewPhotosModal === 'function') window.openOverviewPhotosModal(id);
                 });
             });
+            grid.querySelectorAll('[data-action="offline-prep"]').forEach((el) => {
+                el.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    const id = el.getAttribute('data-bldg-id');
+                    const b = id && (window.state.buildings || []).find((x) => x && x.id === id);
+                    if (b && typeof window.openOfflinePrepModal === 'function') window.openOfflinePrepModal(b);
+                });
+            });
             grid.querySelectorAll('[data-action="delete-round"]').forEach((el) => {
                 ['click', 'pointerdown', 'touchstart'].forEach((ev) => el.addEventListener(ev, (e) => e.stopPropagation()));
                 el.addEventListener('click', (e) => {
@@ -5017,6 +5025,10 @@ document.addEventListener('DOMContentLoaded', () => {
                         <button type="button" class="icon-btn icon-btn-overview" title="전경사진" data-action="overview" data-bldg-id="${safeId}" aria-label="전경">
                             <i class="fa-solid fa-panorama"></i>
                             <span class="icon-btn-label">전경</span>
+                        </button>
+                        <button type="button" class="icon-btn icon-btn-offline" title="오프라인 준비 — 모든 층·도면·사진을 이 기기에 받기" data-action="offline-prep" data-bldg-id="${safeId}" aria-label="오프라인 준비">
+                            <i class="fa-solid fa-cloud-arrow-down"></i>
+                            <span class="icon-btn-label">오프라인</span>
                         </button>
                     </div>
                 </div>
@@ -5152,6 +5164,10 @@ document.addEventListener('DOMContentLoaded', () => {
                             <button type="button" class="icon-btn icon-btn-overview" title="전경사진" data-action="overview" data-bldg-id="${safeId}" aria-label="전경">
                                 <i class="fa-solid fa-panorama"></i>
                                 <span class="icon-btn-label">전경</span>
+                            </button>
+                            <button type="button" class="icon-btn icon-btn-offline" title="오프라인 준비 — 모든 층·도면·사진을 이 기기에 받기" data-action="offline-prep" data-bldg-id="${safeId}" aria-label="오프라인 준비">
+                                <i class="fa-solid fa-cloud-arrow-down"></i>
+                                <span class="icon-btn-label">오프라인</span>
                             </button>
                             <button type="button" class="icon-btn icon-btn-trash" title="이 회차 삭제(휴지통)" data-action="delete-round" data-site-key="${safeSite}" data-round-key="${safeRound}" aria-label="회차 삭제">
                                 <i class="fa-solid fa-trash"></i>
@@ -8282,6 +8298,13 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     if (btnOpenBuildingBackup) {
         btnOpenBuildingBackup.addEventListener('click', () => {
             if (window.currentEditingBuilding) window.openBuildingBackupModal(window.currentEditingBuilding);
+        });
+    }
+
+    const btnOpenOfflinePrep = document.getElementById('btnOpenOfflinePrep');
+    if (btnOpenOfflinePrep) {
+        btnOpenOfflinePrep.addEventListener('click', () => {
+            if (window.currentEditingBuilding) window.openOfflinePrepModal(window.currentEditingBuilding);
         });
     }
 
@@ -54396,6 +54419,386 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     window.refreshBuildingFloorsFromServer = refreshBuildingFloorsFromServer;
 
     /**
+     * 오프라인 준비(2026-10-07) — 이 건물의 모든 층을 미리 받아 IndexedDB에 둔다.
+     * 인터넷이 끊겨도 층 전환·도면·사진이 열리게. 서버에는 아무것도 쓰지 않는다(읽기만).
+     *  1) 층 데이터: 층마다 묶음 1회 읽기 → 동기화와 같은 합치기(안 올라간 내 수정은 그대로)
+     *  2) 도면: 기본 해상도(4000) — 기기에 있으면 안 읽음. 옵션으로 확대용 8000
+     *  3) 사진: Storage 주소에서 받기(Firestore 읽기 아님). 주소를 모르는 사진만 사진 문서 1회 읽기
+     * opts: { hiRes, onProgress({phase, done, total, bytes, label}), isCancelled() }
+     */
+    let _offlinePrepRunning = false;
+    async function runOfflinePrep(bldg, opts) {
+        const o = opts || {};
+        const prep = window.BSA && window.BSA.offlinePrep;
+        if (!prep) throw new Error('오프라인 준비 모듈을 불러오지 못했습니다.');
+        if (!bldg || !bldg.id) throw new Error('건물을 먼저 골라 주세요.');
+        if (!db || !window.state.companyId) throw new Error('로그인한 뒤에 쓸 수 있습니다.');
+        if (typeof navigator !== 'undefined' && navigator.onLine === false) throw new Error('인터넷에 연결된 상태에서 준비해 주세요.');
+        if (_offlinePrepRunning) throw new Error('이미 준비 중입니다.');
+        _offlinePrepRunning = true;
+        const cancelled = () => (typeof o.isCancelled === 'function' && o.isCancelled());
+        let bytes = 0;
+        const report = (phase, done, total, label) => {
+            if (typeof o.onProgress === 'function') {
+                try { o.onProgress({ phase, done, total, bytes, label: label || '' }); } catch (_e) { /* ignore */ }
+            }
+        };
+        const prevRec = await prep.getStatus(bldg.id);
+        const downloadedPhotoKeys = new Set((prevRec && prevRec.downloadedPhotoKeys) || []);
+        const rec = {
+            buildingId: bldg.id,
+            name: bldg.name || '',
+            at: Date.now(),
+            complete: false,
+            hiRes: !!o.hiRes,
+            floors: { ok: 0, total: 0, failed: [] },
+            drawings: { ok: 0, total: 0, failed: [] },
+            photos: { ok: 0, total: 0, failed: 0, reads: 0 },
+            bytes: 0,
+            downloadedPhotoKeys: []
+        };
+        try {
+            if (navigator.storage && typeof navigator.storage.persist === 'function') {
+                try { await navigator.storage.persist(); } catch (_e) { /* 브라우저가 거절해도 계속 */ }
+            }
+            // 동기화가 도는 중이면 잠깐 기다린다 — 같은 층을 동시에 합치지 않게
+            for (let i = 0; i < 10 && (_syncInFlight || isRemoteSyncing); i++) {
+                await new Promise((r) => setTimeout(r, 500));
+            }
+            // 1) 층 데이터
+            const floorCodes = prep.uniqueFloorCodes(
+                buildingFloorCodesForBackup(bldg).concat(((bldg.floorsList) || []).map((f) => f && f.floorCode))
+            );
+            rec.floors.total = floorCodes.length;
+            const urlsById = {};
+            let merged = 0;
+            for (let i = 0; i < floorCodes.length; i++) {
+                if (cancelled()) throw new Error('취소했습니다.');
+                const code = floorCodes[i];
+                report('floors', i, floorCodes.length, code);
+                try {
+                    const bundle = await readFloorBundleStrict(bldg, code);
+                    if (bundle) {
+                        mergeFloorBundleIntoState(bldg, code, bundle);
+                        merged++;
+                        const map = bundle.photos && bundle.photos.urlsById;
+                        if (map && typeof map === 'object') Object.assign(urlsById, map);
+                    }
+                    rec.floors.ok++;
+                } catch (e) {
+                    console.warn('[오프라인 준비] 층 받기 실패:', code, e);
+                    rec.floors.failed.push(code);
+                }
+            }
+            report('floors', floorCodes.length, floorCodes.length);
+            if (merged && typeof saveStateToLocalStorage === 'function') saveStateToLocalStorage();
+            // 방금 전 층을 받았으니 보고서 직전 전 층 받기가 같은 문서를 또 읽지 않게
+            if (!rec.floors.failed.length) _buildingFloorsFreshAt.set(bldg.id, Date.now());
+
+            // 2) 도면
+            // 도면이 있다고 알려진 층 + 서버에 있을 수 있는 층. 시도해 보고 원래 도면이 없던 층은 실패로 세지 않는다.
+            const drawFloors = floorCodes.filter((fc) => !isDeletedDrawingFloor(bldg, fc)
+                && (floorHasDrawingData(bldg, fc) || floorMayExistOnCloud(bldg, fc)));
+            for (let i = 0; i < drawFloors.length; i++) {
+                if (cancelled()) throw new Error('취소했습니다.');
+                const fc = drawFloors[i];
+                const knownDrawing = floorHasDrawingData(bldg, fc);
+                report('drawings', i, drawFloors.length, fc);
+                try {
+                    await withTimeout(hydrateFloorDrawingFromCloud(bldg, fc, { skipHiTiers: true, needPdf: false }), 90000, '도면 받기 시간 초과');
+                    let base = bldg.floorDrawings && bldg.floorDrawings[fc];
+                    if (!isUsableRasterDrawingUrl(base)) base = await idbGetFloorDrawingTier(bldg.id, fc, 4000);
+                    if (!isUsableRasterDrawingUrl(base)) base = await idbGet('floorDrawings', `${bldg.id}_${fc}`);
+                    if (isUsableRasterDrawingUrl(base) && String(base).indexOf('data:') === 0) {
+                        // 기기 저장소에 확실히 남긴다(메모리에만 있던 경우)
+                        const idbKey = `${bldg.id}_${fc}`;
+                        const stored = await idbGet('floorDrawings', idbKey);
+                        if (!isUsableRasterDrawingUrl(stored)) {
+                            await idbSet('floorDrawings', idbKey, base);
+                            _idbPersistedDrawingKeys.add(idbKey);
+                        }
+                        bytes += prep.dataUrlBytes(base);
+                        rec.drawings.ok++;
+                        rec.drawings.total++;
+                    } else if (knownDrawing) {
+                        rec.drawings.failed.push(fc);
+                        rec.drawings.total++;
+                    }
+                    if (o.hiRes) {
+                        let hi = await idbGetFloorDrawingTier(bldg.id, fc, 8000);
+                        if (!isUsableRasterDrawingUrl(hi)) hi = await fetchAndCacheCloudFloorDrawingTier(bldg, fc, 8000);
+                        if (isUsableRasterDrawingUrl(hi)) bytes += prep.dataUrlBytes(hi);
+                    }
+                } catch (e) {
+                    console.warn('[오프라인 준비] 도면 받기 실패:', fc, e);
+                    rec.drawings.failed.push(fc);
+                    rec.drawings.total++;
+                }
+            }
+            report('drawings', drawFloors.length, drawFloors.length);
+
+            // 3) 사진(결함 현재·이전 회차 + 비파괴 측정지·비교사진)
+            const refs = prep.collectDefectPhotoRefs(window.state.defects, bldg.id, urlsById, window._photoCache);
+            const strengthKeys = Array.from(collectStrengthPhotoIdsInBuilding(bldg.id) || [])
+                .map((pid) => ({ key: getStrengthPhotoDocId(bldg.id, pid), url: null, kind: 'ndt' }));
+            const jobs = refs.concat(strengthKeys);
+            rec.photos.total = jobs.length;
+            let doneCount = 0;
+            const companyReady = !!(db && window.state.companyId);
+            const fetchOne = async (job) => {
+                if (cancelled()) return;
+                if (!window._photoCache) window._photoCache = {};
+                const local = await idbGet('photos', job.key);
+                if (prep.isDataUrl(local)) {
+                    bytes += prep.dataUrlBytes(local);
+                    rec.photos.ok++;
+                    if (downloadedPhotoKeys.has(job.key)) rec.downloadedPhotoKeys.push(job.key);
+                    return;
+                }
+                const mem = window._photoCache[job.key];
+                if (prep.isDataUrl(mem)) {
+                    await idbSet('photos', job.key, mem);
+                    bytes += prep.dataUrlBytes(mem);
+                    rec.photos.ok++;
+                    return;
+                }
+                let dataUrl = null;
+                let url = job.url || (prep.isHttpUrl(local) ? local : null) || (prep.isHttpUrl(mem) ? mem : null);
+                if (!url && companyReady && !_nonExistentPhotoIds.has(job.key) && !isFirestoreReadPaused()) {
+                    const snap = await fetchPhotosDocIfAllowed(job.key);
+                    rec.photos.reads++;
+                    if (snap && snap.exists) {
+                        const data = snap.data() || {};
+                        if (hasFirebaseStorageMeta(data)) markPhotoOnStorage(job.key);
+                        const resolved = await resolvePhotoUrlFromSnapData(data);
+                        if (prep.isDataUrl(resolved)) dataUrl = resolved;
+                        else if (prep.isHttpUrl(resolved)) url = resolved;
+                    } else if (snap && !snap.exists) {
+                        _nonExistentPhotoIds.add(job.key);
+                    }
+                }
+                if (!dataUrl && url) {
+                    const sa = window.BSA && window.BSA.storageAssets;
+                    try {
+                        if (sa && typeof sa.materializeCloudAssetPayload === 'function') {
+                            dataUrl = await sa.materializeCloudAssetPayload(url, {});
+                        }
+                    } catch (_e) { dataUrl = null; }
+                    if (!prep.isDataUrl(dataUrl)) {
+                        try { dataUrl = await fetchStorageImageViaProxy(url); } catch (_e) { dataUrl = null; }
+                    }
+                }
+                if (prep.isDataUrl(dataUrl)) {
+                    await idbSet('photos', job.key, dataUrl);
+                    window._photoCache[job.key] = dataUrl;
+                    bytes += prep.dataUrlBytes(dataUrl);
+                    rec.photos.ok++;
+                    rec.downloadedPhotoKeys.push(job.key);
+                    markPhotoOnStorage(job.key);   // 서버(Storage)에서 받은 사진 — 다시 올릴 필요 없음
+                } else {
+                    rec.photos.failed++;
+                }
+            };
+            const queue = jobs.slice();
+            const worker = async () => {
+                while (queue.length && !cancelled()) {
+                    const job = queue.shift();
+                    try { await fetchOne(job); } catch (e) {
+                        rec.photos.failed++;
+                        console.warn('[오프라인 준비] 사진 받기 실패:', job && job.key, e);
+                    }
+                    doneCount++;
+                    report('photos', doneCount, jobs.length);
+                }
+            };
+            report('photos', 0, jobs.length);
+            await Promise.all([0, 1, 2, 3].map(() => worker()));
+            if (cancelled()) throw new Error('취소했습니다.');
+            // 이번 화면 층 사진도 기기 사본으로 다시 붙인다
+            try { await hydrateCurrentBuildingDefectPhotosIntoState(); } catch (_e) { /* ignore */ }
+
+            rec.bytes = bytes;
+            rec.complete = !rec.floors.failed.length && !rec.drawings.failed.length && !rec.photos.failed;
+            rec.at = Date.now();
+            await prep.putStatus(rec);
+            report('done', 1, 1);
+            return rec;
+        } catch (e) {
+            rec.bytes = bytes;
+            rec.complete = false;
+            rec.error = String((e && e.message) || e);
+            rec.at = Date.now();
+            // 받은 사진 기록은 남겨 비우기 때 지울 수 있게
+            rec.downloadedPhotoKeys = Array.from(new Set(rec.downloadedPhotoKeys.concat(Array.from(downloadedPhotoKeys))));
+            await prep.putStatus(rec);
+            throw e;
+        } finally {
+            _offlinePrepRunning = false;
+        }
+    }
+    window.runOfflinePrep = runOfflinePrep;
+
+    /**
+     * 오프라인 준비 비우기 — 이 기능이 서버에서 받아 온 사진 사본과 확대용 8000 도면만 지운다.
+     * 이 기기에서 찍었거나 아직 안 올라간 사진은 기록에 없으므로 건드리지 않는다. 기본 도면은 점검에 꼭 필요해 둔다.
+     */
+    async function clearOfflinePrep(bldg) {
+        const prep = window.BSA && window.BSA.offlinePrep;
+        if (!prep || !bldg || !bldg.id) return 0;
+        const rec = await prep.getStatus(bldg.id);
+        let removed = 0;
+        if (rec) {
+            for (const key of (rec.downloadedPhotoKeys || [])) {
+                if (!isPhotoMarkedOnStorage(key)) continue;   // 서버 사본이 확인된 사진만
+                try {
+                    await idbDelete('photos', key);
+                    if (window._photoCache && prep.isDataUrl(window._photoCache[key])) delete window._photoCache[key];
+                    _idbPersistedPhotoKeys.delete(key);
+                    removed++;
+                } catch (_e) { /* ignore */ }
+            }
+            if (rec.hiRes) {
+                for (const fc of buildingFloorCodesForBackup(bldg)) {
+                    try { await idbDelete('floorDrawingTiers', floorDrawingTierIdbKey(bldg.id, fc, 8000)); } catch (_e) { /* ignore */ }
+                }
+            }
+        }
+        await prep.deleteStatus(bldg.id);
+        return removed;
+    }
+    window.clearOfflinePrep = clearOfflinePrep;
+
+    function ensureOfflinePrepModal() {
+        let wrap = document.getElementById('offlinePrepModal');
+        if (wrap) return wrap;
+        wrap = document.createElement('div');
+        wrap.id = 'offlinePrepModal';
+        wrap.className = 'modal-overlay';
+        wrap.innerHTML = `
+            <div class="modal-card bulk-restore-card offline-prep-card">
+                <div class="modal-header">
+                    <h3 id="offlinePrepTitle">오프라인 준비</h3>
+                    <button type="button" class="modal-close" data-op-close title="닫기">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <p class="bulk-restore-meta">이 건물의 모든 층(결함·비파괴), 도면, 사진을 이 기기에 받아 둡니다. 인터넷이 끊겨도 층을 바꾸고 도면·사진을 볼 수 있습니다. 서버 데이터는 바꾸지 않습니다.</p>
+                    <p class="offline-prep-status" id="offlinePrepStatus"></p>
+                    <label class="offline-prep-opt"><input type="checkbox" id="offlinePrepHiRes"> 확대용 고해상도 도면도 받기 (용량 큼)</label>
+                    <div class="offline-prep-progress" id="offlinePrepProgressWrap" hidden>
+                        <div class="offline-prep-bar"><div class="offline-prep-bar-fill" id="offlinePrepBar"></div></div>
+                        <p class="bulk-restore-meta" id="offlinePrepProgressText"></p>
+                    </div>
+                    <p class="bulk-restore-meta" id="offlinePrepStorage"></p>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline" id="btnOfflinePrepClear">비우기</button>
+                    <button type="button" class="btn btn-outline" id="btnOfflinePrepCancel" style="display:none">멈추기</button>
+                    <button type="button" class="btn btn-outline" data-op-close>닫기</button>
+                    <button type="button" class="btn btn-primary" id="btnOfflinePrepStart"><i class="fa-solid fa-download"></i> <span id="btnOfflinePrepStartLabel">받기</span></button>
+                </div>
+            </div>`;
+        document.body.appendChild(wrap);
+        wrap.addEventListener('click', (e) => {
+            if (_offlinePrepRunning) return;   // 받는 중엔 닫지 않음(멈추기 버튼 사용)
+            if (e.target === wrap || e.target.closest('[data-op-close]')) wrap.classList.remove('open');
+        });
+        return wrap;
+    }
+
+    async function renderOfflinePrepStatus(bldg) {
+        const prep = window.BSA && window.BSA.offlinePrep;
+        const wrap = ensureOfflinePrepModal();
+        const rec = prep ? await prep.getStatus(bldg.id) : null;
+        const fmt = (ts) => { try { return formatBulkSnapTime(ts); } catch (_e) { return new Date(ts).toLocaleString(); } };
+        const st = wrap.querySelector('#offlinePrepStatus');
+        st.textContent = prep ? prep.describeStatus(rec, fmt) : '';
+        if (rec && rec.error) st.textContent += ` (${rec.error})`;
+        else if (rec && !rec.complete) {
+            const miss = [];
+            if (rec.floors.failed.length) miss.push(`층 ${rec.floors.failed.length}개`);
+            if (rec.drawings.failed.length) miss.push(`도면 ${rec.drawings.failed.length}개`);
+            if (rec.photos.failed) miss.push(`사진 ${rec.photos.failed}장`);
+            if (miss.length) st.textContent += ` — 못 받음: ${miss.join(', ')}`;
+        }
+        st.classList.toggle('is-done', !!(rec && rec.complete));
+        wrap.querySelector('#btnOfflinePrepStartLabel').textContent = rec ? '새로 받기' : '받기';
+        wrap.querySelector('#btnOfflinePrepClear').disabled = !rec;
+        const stor = wrap.querySelector('#offlinePrepStorage');
+        stor.textContent = '';
+        if (navigator.storage && typeof navigator.storage.estimate === 'function') {
+            try {
+                const est = await navigator.storage.estimate();
+                let persisted = false;
+                try { persisted = navigator.storage.persisted ? await navigator.storage.persisted() : false; } catch (_e) { /* ignore */ }
+                stor.textContent = `이 기기 앱 저장 공간: ${prep.formatBytes(est.usage)} 사용 / 약 ${prep.formatBytes(est.quota)} 가능`
+                    + (persisted ? ' · 자동 삭제 방지 켜짐' : '');
+            } catch (_e) { /* ignore */ }
+        }
+    }
+
+    window.openOfflinePrepModal = function (bldgArg) {
+        const bldg = bldgArg || window.state.currentBuilding
+            || (window.state.buildings || []).find((b) => b && b.id === window.state.currentBuildingId);
+        if (!bldg || !bldg.id) {
+            window.showToast('건물을 먼저 골라 주세요.', 'warning');
+            return;
+        }
+        const wrap = ensureOfflinePrepModal();
+        wrap.dataset.buildingId = bldg.id;
+        wrap.querySelector('#offlinePrepTitle').textContent = `오프라인 준비 · ${bldg.name || ''}`;
+        wrap.querySelector('#offlinePrepProgressWrap').hidden = true;
+        wrap.classList.add('open');
+        renderOfflinePrepStatus(bldg);
+        const startBtn = wrap.querySelector('#btnOfflinePrepStart');
+        const clearBtn = wrap.querySelector('#btnOfflinePrepClear');
+        const cancelBtn = wrap.querySelector('#btnOfflinePrepCancel');
+        let cancelFlag = false;
+        const phaseLabel = { floors: '층 데이터', drawings: '도면', photos: '사진', done: '마무리' };
+        startBtn.onclick = async () => {
+            if (_offlinePrepRunning) return;
+            cancelFlag = false;
+            const prep = window.BSA.offlinePrep;
+            const pw = wrap.querySelector('#offlinePrepProgressWrap');
+            const bar = wrap.querySelector('#offlinePrepBar');
+            const txt = wrap.querySelector('#offlinePrepProgressText');
+            pw.hidden = false;
+            startBtn.disabled = true;
+            clearBtn.disabled = true;
+            cancelBtn.style.display = '';
+            try {
+                const rec = await runOfflinePrep(bldg, {
+                    hiRes: !!wrap.querySelector('#offlinePrepHiRes').checked,
+                    isCancelled: () => cancelFlag,
+                    onProgress: (p) => {
+                        const pct = p.total ? Math.round((p.done / p.total) * 100) : 0;
+                        bar.style.width = `${p.phase === 'done' ? 100 : pct}%`;
+                        txt.textContent = `${phaseLabel[p.phase] || ''} ${p.done}/${p.total}`
+                            + `${p.label ? ' · ' + p.label : ''} · ${prep.formatBytes(p.bytes)}`;
+                    }
+                });
+                window.showToast(rec.complete ? '오프라인 준비 완료' : '일부만 받았습니다. 인터넷 확인 후 새로 받기를 눌러 주세요.',
+                    rec.complete ? 'success' : 'warning', 5000);
+                if (state.currentTab === 'tab-map' && typeof drawCanvas === 'function') drawCanvas();
+            } catch (e) {
+                window.showToast(`오프라인 준비: ${(e && e.message) || e}`, 'warning', 5000);
+            } finally {
+                startBtn.disabled = false;
+                cancelBtn.style.display = 'none';
+                renderOfflinePrepStatus(bldg);
+            }
+        };
+        cancelBtn.onclick = () => { cancelFlag = true; };
+        clearBtn.onclick = async () => {
+            if (_offlinePrepRunning) return;
+            const ok = await window.appConfirm('이 건물을 위해 받아 둔 사진 사본을 이 기기에서 지울까요?\n(서버 데이터와 이 기기에서 찍은 사진은 그대로입니다. 도면과 결함 데이터는 남겨 둡니다.)');
+            if (!ok) return;
+            const n = await clearOfflinePrep(bldg);
+            window.showToast(`오프라인 준비를 비웠습니다 (사진 ${n}장)`, 'success');
+            renderOfflinePrepStatus(bldg);
+        };
+    };
+
+    /**
      * 보고서(한글·PDF)를 만들기 전에 모든 층을 최신으로. 못 받으면 이 기기 데이터로 만들지 묻는다.
      * 반환: true = 계속, false = 사용자가 취소
      */
@@ -56164,10 +56567,15 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     // 1) 캐시·IDB 먼저 (읽기 과금 없음)
                     const localResolved = await Promise.all(ids.map(async pid => {
                         if (!pid) return { pid, url: null, needCloud: false };
-                        if (window._photoCache[pid]) {
-                            return { pid, url: window._photoCache[pid], needCloud: false };
+                        const memUrl = window._photoCache[pid];
+                        if (memUrl && !/^https?:\/\//i.test(String(memUrl))) {
+                            return { pid, url: memUrl, needCloud: false };
                         }
+                        // 메모리에 Storage 주소(https)만 있으면 기기 사본(오프라인 준비 등)을 먼저 본다 — 끊겨도 보이게
                         const fromIdb = await idbGet('photos', pid);
+                        if (!fromIdb && memUrl) {
+                            return { pid, url: memUrl, needCloud: false };
+                        }
                         if (fromIdb) {
                             window._photoCache[pid] = fromIdb;
                             return { pid, url: fromIdb, needCloud: false };

@@ -16567,3 +16567,11 @@ html #tab-map .defect-list-section-scroll > .defect-list-item.is-important {
     padding: 0.35rem 0.85rem;
     font-size: 0.82rem;
 }
+
+/* 오프라인 준비 (2026-10-07) */
+.offline-prep-card { max-width: 560px; }
+.offline-prep-status { font-weight: 600; margin: 8px 0; }
+.offline-prep-status.is-done { color: #15803d; }
+.offline-prep-opt { display: flex; gap: 6px; align-items: center; margin: 8px 0; font-size: 0.92em; }
+.offline-prep-bar { height: 10px; border-radius: 5px; background: #e5e7eb; overflow: hidden; margin-top: 8px; }
+.offline-prep-bar-fill { height: 100%; width: 0; background: #2563eb; transition: width 0.2s; }
