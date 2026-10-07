@@ -38599,7 +38599,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 closedMultiple = target;
                 continue;
             }
-            const take = Math.min(count, MAX);
+            let take = Math.min(count, MAX);
+            // 마지막에 1~2행만 남아 새 쪽으로 넘어가면 그 쪽에 붙인다(최대 17행). 예) 17 → 1쪽, 32 → 15+17
+            const rest = list.length - (i + take);
+            if (rest > 0 && rest <= MAX - BASE && take + rest <= MAX) take += rest;
             pages.push(list.slice(i, i + take));
             i += take;
             closedMultiple = target;
