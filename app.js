@@ -38701,7 +38701,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const th = (text, extra) => `<th style="padding:0.28rem 0.18rem; border:1px solid #64748b; background:#f8fafc; color:#1e293b; font-weight:700;${extra || ''}">${text}</th>`;
         const head = isGrade3
             ? `<tr>${th('No.', 'rowspan="2"')}${th('구분', 'rowspan="2"')}${th('부재 분류', 'colspan="2"')}${th('점검내용', 'rowspan="2"')}${th('발생원인', 'rowspan="2"')}${th('비고', 'rowspan="2"')}</tr><tr>${th('구조부재')}${th('비구조부재')}</tr>`
-            : `<tr>${th('구분(NO.)', 'rowspan="2"')}${th('위치', 'rowspan="2"')}${th('조사내용', 'rowspan="2"')}${th('크기(mm/m)(m*m)', 'rowspan="2"')}${th('부재 분류', 'colspan="2"')}${th('진행여부', 'rowspan="2"')}${th('누수여부', 'rowspan="2"')}${th('원인추정', 'rowspan="2"')}${th('비고', 'rowspan="2"')}</tr><tr>${th('구조부재')}${th('비구조부재')}</tr>`;
+            : `<tr>${th('구분(NO.)', 'rowspan="2"')}${th('위치', 'rowspan="2"')}${th('조사내용', 'rowspan="2"')}${th('크기(mm/m)(m*m)', 'rowspan="2"')}${th('구조체 여부', 'colspan="2"')}${th('진행여부', 'rowspan="2"')}${th('누수여부', 'rowspan="2"')}${th('원인추정', 'rowspan="2"')}${th('비고', 'rowspan="2"')}</tr><tr>${th('구조부재')}${th('비구조부재')}</tr>`;
         const colSpan = isGrade3 ? 7 : 10;
         const body = sDefects.length > 0
             ? sDefects.map((d, dSubIdx) => {
@@ -42292,14 +42292,23 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     //  그때그때 매기면 뒤엉킨다. 반드시 마지막에 한 번에 매겨야 한다.)
     const HWPX_FIG_MARK = '␟';
 
-    /** 표시가 붙은 위치도 캡션에 문서 순서대로 [도면 7-1], [도면 7-2] … 를 매긴다. */
-    function numberHwpxFigureCaptions(xmlDoc) {
+    /**
+     * 도면 번호의 앞자리(보고서 장 번호) — 정기안전점검은 6, 정밀안전점검(그 밖의 점검 포함)은 7.
+     * 정기점검 보고서는 비파괴 장이 없어 위치도가 한 장 앞에 온다(2026-10-07 사용자 지정).
+     */
+    function hwpxFigureChapterNo(inspectionType) {
+        return (inspectionType || '정밀안전점검') === '정기안전점검' ? 6 : 7;
+    }
+
+    /** 표시가 붙은 위치도 캡션에 문서 순서대로 [도면 7-1], [도면 7-2] … 를 매긴다(정기점검은 [도면 6-N]). */
+    function numberHwpxFigureCaptions(xmlDoc, inspectionType) {
+        const chapterNo = hwpxFigureChapterNo(inspectionType);
         let figNo = 0;
         Array.from(xmlDoc.getElementsByTagNameNS(HWPX_HP_NS, 't')).forEach((t) => {
             const txt = t.textContent || '';
             if (txt.indexOf(HWPX_FIG_MARK) !== 0) return;
             figNo++;
-            t.textContent = `[도면 7-${figNo}] ${txt.slice(HWPX_FIG_MARK.length)}`;
+            t.textContent = `[도면 ${chapterNo}-${figNo}] ${txt.slice(HWPX_FIG_MARK.length)}`;
         });
         return figNo;
     }
@@ -46397,7 +46406,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
             // 결함위치도·비파괴 장비조사 위치도 캡션에 [도면 7-N]을 하나로 이어서 매긴다.
             // 문서가 완성된 뒤라야 최종 배치 순서대로 번호가 맞는다.
-            numberHwpxFigureCaptions(xmlDoc);
+            numberHwpxFigureCaptions(xmlDoc, bldg.inspectionType);
 
             if (hwpxHeaderDirty && hwpxHeaderText) {
                 zip.file('Contents/header.xml', hwpxHeaderText);
@@ -48664,7 +48673,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
             // 결함위치도·비파괴 장비조사 위치도 캡션에 [도면 7-N]을 하나로 이어서 매긴다.
             // 문서가 완성된 뒤라야 최종 배치 순서대로 번호가 맞는다.
-            numberHwpxFigureCaptions(xmlDoc);
+            numberHwpxFigureCaptions(xmlDoc, bldg.inspectionType);
 
             if (hwpxHeaderDirty && hwpxHeaderText) {
                 zip.file('Contents/header.xml', hwpxHeaderText);
