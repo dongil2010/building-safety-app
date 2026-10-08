@@ -12,7 +12,7 @@
     하면 그날 작업이 막히는 문제라 고쳤다.)
    ========================================================================== */
 
-const CACHE_NAME = 'building-safety-v20261007_174428';
+const CACHE_NAME = 'building-safety-v20261008_160459';
 
 /**
  * 오프라인 부팅용 앱 셸 캐시.
@@ -70,6 +70,16 @@ function isMutableAppAsset(url) {
         return /\/(app\.js|styles\.css|sw\.js)$/.test(path) || /\/js\//.test(path);
     } catch (e) {
         return false;
+    }
+}
+
+/** 앱 화면 주소인가: 폴더 주소(/) 또는 index.html */
+function isAppShellPage(url) {
+    try {
+        const path = new URL(url).pathname;
+        return /\/$/.test(path) || /\/index\.html$/.test(path);
+    } catch (e) {
+        return true;
     }
 }
 
@@ -277,6 +287,11 @@ self.addEventListener('fetch', (event) => {
     const isHtml = event.request.destination === 'document'
         || event.request.mode === 'navigate'
         || /(?:\/|\.html)(?:\?|$)/.test(url.split('?')[0]);
+
+    // 2026-10-08: 앱 화면(index.html)이 아닌 별도 페이지(photo-capture.html, report-summary.html)는
+    // 가로채지 않는다. 가로채면 shellNetworkFirst가 그 HTML을 오프라인 셸(./index.html) 자리에
+    // 덮어써서, 오프라인으로 앱을 열 때 엉뚱한 페이지가 뜬다.
+    if (isHtml && !isAppShellPage(url)) return;
 
     if (isHtml || isMutableAppAsset(url)) {
         event.respondWith(shellNetworkFirst(event.request, isHtml, event));

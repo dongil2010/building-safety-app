@@ -367,6 +367,23 @@ function testCacheNameStillRewritable() {
 }
 
 /* ------------------------------------------------------------------ */
+/* 9. 별도 페이지는 오프라인 셸을 덮어쓰지 않는다                          */
+/* ------------------------------------------------------------------ */
+
+function testOtherPagesNotShell() {
+    // photo-capture.html / report-summary.html 을 SW가 가로채면 그 HTML이 셸(./index.html) 자리에
+    // 저장돼, 오프라인으로 앱을 열 때 엉뚱한 페이지가 뜬다.
+    const sw = loadServiceWorker(onlineServer('V1'));
+    ['photo-capture.html?s=abc', 'report-summary.html'].forEach((page) => {
+        const hit = fireFetch(sw, request(SCOPE + page, { mode: 'navigate', destination: 'document' }));
+        assert.ok(!hit.called, page + ' 요청을 SW가 가로챘다 — 오프라인 셸이 이 페이지로 덮어써진다');
+    });
+    const app = fireFetch(sw, request(SCOPE + 'index.html', { mode: 'navigate', destination: 'document' }));
+    assert.ok(app.called, 'index.html 요청은 SW가 처리해야 한다');
+    console.log('  별도 페이지: 가로채지 않음 (셸 보호)');
+}
+
+/* ------------------------------------------------------------------ */
 
 (async function main() {
     testCdnListMatchesIndex();
@@ -377,6 +394,7 @@ function testCacheNameStillRewritable() {
     testForeignRequestsUntouched();
     await testShellSurvivesActivate();
     testCacheNameStillRewritable();
+    testOtherPagesNotShell();
     console.log('test-sw-offline-shell: ok');
 })().catch((err) => {
     console.error(err && err.message ? err.message : err);

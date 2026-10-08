@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>보고서 본문 요약 - 스마트 안전점검</title>
+<!-- 본 앱(index.html)과 따로 도는 사무실용 페이지. 앱 데이터에 접속하지 않고, 앱이 내보낸 상태조사표 파일만 읽는다. -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<style>
+    * { box-sizing: border-box; }
+    body {
+        margin: 0;
+        background: #f1f5f9;
+        color: #0f172a;
+        font-family: 'Pretendard', 'Malgun Gothic', '맑은 고딕', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        font-size: 14px;
+        line-height: 1.5;
+    }
+    button, input, select, textarea { font-family: inherit; font-size: inherit; }
+    header.top {
+        background: #0f172a;
+        color: #f8fafc;
+        padding: 0.9rem 1.25rem;
+        display: flex;
+        align-items: baseline;
+        gap: 1rem;
+        flex-wrap: wrap;
+    }
+    header.top h1 { font-size: 1.1rem; margin: 0; }
+    header.top span { color: #94a3b8; font-size: 0.85rem; }
+    main { max-width: 1180px; margin: 0 auto; padding: 1rem 1.25rem 4rem; }
+    section.card {
+        background: #ffffff;
+        border: 1px solid #e2e8f0;
+        border-radius: 10px;
+        padding: 1rem 1.1rem;
+        margin-bottom: 1rem;
+    }
+    section.card > h2 { font-size: 1rem; margin: 0 0 0.6rem; }
+    .muted { color: #64748b; font-size: 0.85rem; }
+    .row { display: flex; gap: 0.75rem; flex-wrap: wrap; align-items: center; }
+    .field { display: flex; flex-direction: column; gap: 0.2rem; }
+    .field label { font-size: 0.78rem; color: #475569; font-weight: 600; }
+    .field input { padding: 0.4rem 0.55rem; border: 1px solid #cbd5e1; border-radius: 6px; min-width: 260px; }
+    .btn {
+        padding: 0.45rem 0.9rem;
+        border: 1px solid #0369a1;
+        background: #0284c7;
+        color: #ffffff;
+        border-radius: 7px;
+        font-weight: 700;
+        cursor: pointer;
+    }
+    .btn.ghost { background: #ffffff; color: #0369a1; }
+    .btn.small { padding: 0.2rem 0.55rem; font-size: 0.8rem; font-weight: 600; }
+    #status { margin-top: 0.6rem; }
+    #status.err { color: #b91c1c; font-weight: 600; }
+    #status.ok { color: #15803d; }
+    .hidden { display: none !important; }
+
+    .cat { border-top: 1px solid #e2e8f0; padding: 0.8rem 0 0.4rem; }
+    .cat:first-of-type { border-top: none; }
+    .cat h3 { font-size: 0.95rem; margin: 0 0 0.4rem; display: flex; gap: 0.6rem; align-items: baseline; }
+    .cat h3 small { font-weight: 500; color: #64748b; }
+    .cat h3 small.over { color: #b45309; font-weight: 700; }
+    .item { display: flex; gap: 0.5rem; align-items: center; padding: 0.18rem 0; }
+    .item input[type="text"] { flex: 1; min-width: 200px; padding: 0.3rem 0.5rem; border: 1px solid #cbd5e1; border-radius: 6px; }
+    .item input[type="text"]:disabled { background: #f8fafc; color: #64748b; border-color: #e2e8f0; }
+    .item select { padding: 0.25rem; border: 1px solid #cbd5e1; border-radius: 6px; max-width: 150px; }
+    .item .src { width: 118px; flex: none; color: #475569; font-size: 0.8rem; }
+    .item img.thumb { width: 44px; height: 33px; object-fit: cover; border-radius: 4px; border: 1px solid #cbd5e1; flex: none; }
+    .item .nothumb { width: 44px; flex: none; }
+    .badge { font-size: 0.72rem; padding: 0.05rem 0.4rem; border-radius: 999px; background: #e2e8f0; color: #334155; white-space: nowrap; }
+    .badge.warn { background: #fee2e2; color: #b91c1c; font-weight: 700; }
+    .badge.must { background: #fef3c7; color: #92400e; font-weight: 700; }
+    .badge.photo { background: #dbeafe; color: #1d4ed8; }
+    details { margin: 0.3rem 0 0.2rem; }
+    details summary { cursor: pointer; color: #0369a1; font-size: 0.85rem; }
+    textarea { width: 100%; padding: 0.45rem 0.55rem; border: 1px solid #cbd5e1; border-radius: 6px; resize: vertical; }
+    ul.check { margin: 0.2rem 0 0; padding-left: 1.1rem; }
+
+    .out { margin-top: 1.1rem; }
+    .out-head { display: flex; align-items: center; gap: 0.6rem; margin-bottom: 0.35rem; }
+    .out-head h3 { font-size: 0.95rem; margin: 0; }
+    table.rep { border-collapse: collapse; width: 100%; background: #ffffff; }
+    table.rep th, table.rep td { border: 1px solid #334155; padding: 0.3rem 0.45rem; vertical-align: middle; white-space: pre-wrap; }
+    table.rep th { background: #e2e8f0; text-align: center; font-weight: 700; }
+    table.rep td.c { text-align: center; }
+    table.rep td[contenteditable="true"]:focus { outline: 2px solid #38bdf8; background: #f0f9ff; }
+    table.rep td.empty { background: #fef9c3; }
+    table.rep td.photo { text-align: center; width: 37%; }
+    table.rep td.photo img { width: 100%; max-width: 260px; aspect-ratio: 4 / 3; object-fit: cover; display: block; margin: 0 auto; }
+    .copied { color: #15803d; font-size: 0.8rem; }
+
+    /* 전회차 · 금회차 나란히 */
+    .cmp { display: grid; grid-template-columns: minmax(240px, 34%) 1fr; gap: 0.9rem; align-items: start; }
+    .colhead { font-size: 0.75rem; font-weight: 700; color: #475569; border-bottom: 1px solid #e2e8f0; padding-bottom: 0.15rem; margin-bottom: 0.3rem; }
+    .prevbox { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 0.5rem 0.6rem; }
+    .previtem { display: flex; gap: 0.4rem; align-items: center; flex-wrap: wrap; padding: 0.2rem 0; }
+    .previtem .ptext { flex: 1; min-width: 150px; white-space: pre-wrap; }
+    .previtem.missing .ptext { color: #b45309; }
+    .prevop { white-space: pre-wrap; font-size: 0.85rem; color: #334155; margin: 0.3rem 0; }
+    .badge.chg { background: #dbeafe; color: #0000ff; font-weight: 700; }
+    .badge.miss { background: #ffedd5; color: #b45309; font-weight: 700; }
+    .item input[type="text"].chg, textarea.chg { color: #0000ff; }
+    .legend { font-size: 0.82rem; color: #475569; }
+    .legend b { color: #0000ff; }
+    @media (max-width: 860px) { .cmp { grid-template-columns: 1fr; } }
+
+    /* 작성안 A / B */
+    .tabs { display: flex; gap: 0.4rem; margin-bottom: 0.4rem; }
+    .tab { padding: 0.45rem 1rem; border: 1px solid #cbd5e1; background: #f8fafc; color: #334155; border-radius: 7px; font-weight: 700; cursor: pointer; }
+    .tab.on { background: #0f172a; color: #ffffff; border-color: #0f172a; }
+    .badge.imp-hi { background: #fee2e2; color: #b91c1c; font-weight: 700; }
+    .badge.imp-mid { background: #fef3c7; color: #92400e; }
+    .badge.imp-lo { background: #e2e8f0; color: #475569; }
+</style>
+</head>
+<body>
+<header class="top">
+    <h1>보고서 본문 요약</h1>
+    <span>앱에서 내보낸 상태조사표(부록)로 보고서 본문의 요약 표를 만듭니다</span>
+</header>
+<main>
+    <section class="card">
+        <h2>1. 상태조사표 파일</h2>
+        <div class="row">
+            <input type="file" id="fileInput" accept=".hwpx">
+            <span class="muted">앱 &gt; 상태조사표 한글 출력(전체층)으로 받은 .hwpx 파일 (1·2종 서식)</span>
+        </div>
+        <div class="row" style="margin-top:0.6rem;">
+            <input type="file" id="prevInput" accept=".hwp">
+            <span class="muted">(선택) 전회차 보고서 .hwp — 분류마다 전회차와 나란히 놓고 달라진 항목을 파란색으로 표시합니다</span>
+        </div>
+        <p id="prevStatus" class="muted" style="margin:0.3rem 0 0;"></p>
+        <div class="row" style="margin-top:0.7rem;">
+            <div class="field"><label for="metaName">건물명</label><input type="text" id="metaName" placeholder="예: 대한예수교 침례회 광주교회"></div>
+            <div class="field"><label for="metaRound">점검 회차</label><input type="text" id="metaRound" placeholder="예: 2026년 하반기" style="min-width:160px;"></div>
+        </div>
+        <p id="status" class="muted">파일을 고르면 이 컴퓨터 안에서만 읽습니다. 서버로 보내지 않습니다.</p>
+    </section>
+
+    <section class="card hidden" id="checkCard">
+        <h2>확인이 필요한 균열폭</h2>
+        <p class="muted">구조체 균열·이격인데 폭이 5mm 이상으로 적힌 항목입니다. 입력 실수일 수 있어 「0.5mm 이상 자동 포함」과 균열폭 표기에 쓰지 않았습니다. 맞는 값이면 아래 목록에서 직접 고르고 문구에 적어 주세요.</p>
+        <ul class="check" id="checkList"></ul>
+    </section>
+
+    <section class="card hidden" id="pickCard">
+        <h2>2. 주요 점검결과 고르기</h2>
+        <div class="tabs">
+            <button type="button" class="tab on" id="tabA">작성안 A · 우리 보고서 스타일</button>
+            <button type="button" class="tab" id="tabB">작성안 B · 중요도 중심 제안</button>
+        </div>
+        <p class="muted" id="variantNote"></p>
+        <p class="muted">분류마다 추천 항목이 골라져 있습니다. 체크를 바꾸거나 문구를 고치면 아래 표에 바로 반영됩니다. 분류가 틀린 항목은 오른쪽 목록에서 옮길 수 있습니다.</p>
+        <p class="legend">전회차 보고서를 읽으면 왼쪽에 전회차 항목이 나옵니다. <b>파란 글자</b>는 전회차와 달라졌거나 새로 들어간 항목이고, 「금회 없음」은 전회차에만 있는 항목입니다.</p>
+        <div class="row" style="margin-bottom:0.3rem;">
+            <button type="button" class="btn ghost small" id="btnReset">추천으로 되돌리기</button>
+            <button type="button" class="btn ghost small hidden" id="btnAlignPrev">전회차 항목 기준으로 다시 고르기</button>
+        </div>
+        <div id="pickBody"></div>
+    </section>
+
+    <section class="card hidden" id="outCard">
+        <h2>3. 보고서에 넣을 표</h2>
+        <p class="muted">「복사」를 누르고 한글 문서에 붙여넣으면 표로 들어갑니다. 노란 칸은 앱이 채우지 못한 칸이니 직접 적어 주세요. 표 안의 글자는 눌러서 고칠 수 있습니다.</p>
+        <label class="row hidden" id="blueWrap" style="gap:0.4rem;"><input type="checkbox" id="markBlue" checked> 전회차와 달라진 항목을 파란색으로 표시 (복사할 때도 그대로)</label>
+        <div id="outBody"></div>
+    </section>
+</main>
+<script src="js/report/hwp-read.js"></script>
+<script src="js/report/summary-core.js"></script>
+<script src="js/report/summary-alt.js"></script>
+<script src="js/report/summary-page.js"></script>
+</body>
+</html>

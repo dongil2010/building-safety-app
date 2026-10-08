@@ -21,6 +21,7 @@ FILES = [
     "sw.js",
     "manifest.json",
     "photo-capture.html",
+    "report-summary.html",
     "web-version.json",
 ]
 DIRS = ["js", "templates"]
