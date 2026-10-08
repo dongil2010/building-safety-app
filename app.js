@@ -51030,9 +51030,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     let auth = null;
     window._justRegistering = false;
 
-    // ==========================================================================
-    // 웹뷰 원격 로드 — GitHub Pages 웹이 곧 앱 화면 (APK OTA 없음)
-    // ==========================================================================
+    // 앱 번호. 포팅하면 이 번호가 1 오르고, 같은 번호가 Storage releases/latest.json 에 올라간다.
     window.BSA_APP_BUILD = { versionCode: 10, versionName: '1.3.2' };
 
     function isNativeAndroidApp() {

@@ -5,7 +5,8 @@
 - 화면: Capacitor가 묶은 로컬 자산 (`capacitor.config.json`에 `server.url` 없음, `androidScheme`은 `https`)
 - 서버에서 받는 것: **로그인, Firestore 점검 데이터, 사진, 올린 도면**
 - **화면을 바꾸려면 APK를 다시 빌드해 설치**해야 합니다. 브라우저용 사이트만 GitHub Pages로 배포됩니다.
-- **설치 파일(APK) 업데이트**는 Firebase Storage `releases/latest.json` 을 본다 (`js/core/mobile-app-update.js`). `versionCode`가 설치된 앱보다 크면 받아서 설치 화면을 연다. 예시는 `scripts/mobile-release.example.json`. APK와 json은 Storage `releases/`에 둔다 (읽기는 공개, 쓰기는 `users/{uid}.otaPublisher == true`).
+- **설치 파일(APK) 업데이트**는 Firebase Storage `releases/latest.json` 을 본다 (`js/core/mobile-app-update.js`). `versionCode`가 설치된 앱보다 크면 받아서 설치 화면을 연다.
+- `npm run android:build:debug` 가 끝나면 APK와 `releases/latest.json` 을 Storage에 올린다. 앱 번호(`app.js`의 `BSA_APP_BUILD`)를 1 올린 뒤 그 번호로 올린다. 이 PC에서 한 번 `npx firebase-tools login` 이 되어 있어야 한다. APK만 다시 올리려면 `npm run android:upload`.
 
 화면·네이티브 플러그인을 반영할 때는 아래처럼 APK를 다시 빌드·설치합니다.
 ## 필요 환경
