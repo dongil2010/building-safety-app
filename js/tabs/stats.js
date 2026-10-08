@@ -1082,6 +1082,8 @@
     var statsCategory = 'defect';
     var statsBound = false;
     var selectedComponentGroup = null;
+    /** 부재별 표에서 볼 것: 'crack'(최대 균열폭) | 'kinds'(결함 종류별 건수) */
+    var selectedComponentMode = 'crack';
     var ndtStats = (window.BSA && window.BSA.ndtStats) || {};
 
     function esc(s) {
@@ -1332,6 +1334,7 @@
             })).map(function (f) { return f.floorCode; });
         }
 
+        var componentCrackCounts = {};
         // 입력 확인 목록(core/defect-lint.js): 「상태양호 제외」와 무관하게 전부 본다
         var lintApi = (window.BSA && window.BSA.defectLint) || null;
         var lintRows = [];
@@ -1363,6 +1366,7 @@
             });
             var floorComponentCounts = {};
             var floorComponentCrackMax = {};
+            var floorComponentCrackCounts = {};
             var floorComponentKinds = {};
             rows.forEach(function (d) {
                 var cat = d.category || '구조체';
@@ -1373,6 +1377,11 @@
                 var compGroup = classifyComponentGroup(d.component, cat);
                 componentCounts[compGroup] = (componentCounts[compGroup] || 0) + 1;
                 floorComponentCounts[compGroup] = (floorComponentCounts[compGroup] || 0) + 1;
+                // 균열·이격 결함 수(최대 균열폭 보기의 건수). getCrackWidthNumbers와 같은 기준이다.
+                if (/균열|이격/.test(String(d.defectType != null ? d.defectType : ''))) {
+                    componentCrackCounts[compGroup] = (componentCrackCounts[compGroup] || 0) + 1;
+                    floorComponentCrackCounts[compGroup] = (floorComponentCrackCounts[compGroup] || 0) + 1;
+                }
                 var kinds = classifyDefectKinds(d);
                 var kindBucket = floorComponentKinds[compGroup] || (floorComponentKinds[compGroup] = {});
                 DEFECT_KIND_COLUMNS.forEach(function (k) {
@@ -1393,6 +1402,7 @@
                 typeCounts: typeCounts,
                 componentCounts: floorComponentCounts,
                 componentCrackMax: floorComponentCrackMax,
+                componentCrackCounts: floorComponentCrackCounts,
                 componentKinds: floorComponentKinds,
                 coarseGroup: getCoarseFloorGroup(floorCode),
                 zoneInfo: classifyFloorGroup(floorCode)
@@ -1432,6 +1442,7 @@
             totalRows: totalRows,
             categoryCounts: categoryCounts,
             componentCounts: componentCounts,
+            componentCrackCounts: componentCrackCounts,
             lintRows: lintRows,
             currentFloor: window.state.currentFloor
         };
@@ -1531,13 +1542,27 @@
         }).join('');
     }
 
+    /**
+     * 구조 부재별 층별 표. 「최대 균열폭」과 「결함 종류별 건수」를 눌러서 따로 본다(2026-10-08).
+     *  - 최대 균열폭: 균열·이격 결함만 대상. 건수도 균열·이격 건수만 센다.
+     *  - 결함 종류별 건수: 누수·백태 / 박리·박락·들뜸 / 철근노출 / 전체
+     */
     function renderComponentCrackPanel(payload, root) {
         if (!root || !payload) return;
-        var counts = payload.componentCounts || {};
+        var crackMode = selectedComponentMode !== 'kinds';
+        var counts = (crackMode ? payload.componentCrackCounts : payload.componentCounts) || {};
         var groups = COMPONENT_GROUP_ORDER;
         if (!selectedComponentGroup || !groups.some(function (g) { return g.key === selectedComponentGroup; })) {
             selectedComponentGroup = groups[0].key;
         }
+
+        var modeHtml = '<div class="chips-container stats-component-mode">' + [
+            { key: 'crack', label: '최대 균열폭' },
+            { key: 'kinds', label: '결함 종류별 건수' }
+        ].map(function (m) {
+            var on = (m.key === 'crack') === crackMode;
+            return '<button type="button" class="chip' + (on ? ' active' : '') + '" data-component-mode="' + m.key + '" aria-pressed="' + (on ? 'true' : 'false') + '">' + esc(m.label) + '</button>';
+        }).join('') + '</div>';
 
         var chipsHtml = '<div class="chips-container stats-component-chips">' + groups.map(function (g) {
             var active = g.key === selectedComponentGroup ? ' active' : '';
@@ -1545,37 +1570,51 @@
         }).join('') + '</div>';
 
         var activeLabel = groups.filter(function (g) { return g.key === selectedComponentGroup; }).map(function (g) { return g.label; })[0] || '';
-        var floorsWithData = payload.floorRows.filter(function (fr) {
-            return (fr.componentCounts[selectedComponentGroup] || 0) > 0;
-        });
+        var floorCount = function (fr) {
+            var map = crackMode ? fr.componentCrackCounts : fr.componentCounts;
+            return (map && map[selectedComponentGroup]) || 0;
+        };
+        var floorsWithData = payload.floorRows.filter(function (fr) { return floorCount(fr) > 0; });
 
         var tableHtml;
         if (!floorsWithData.length) {
-            tableHtml = '<p class="stats-empty">' + esc(activeLabel) + ' 결함 데이터가 없습니다.</p>';
-        } else {
-            var kindHead = DEFECT_KIND_COLUMNS.map(function (k) { return '<th class="stats-kind-col">' + esc(k.label) + '</th>'; }).join('');
-            tableHtml = '<div class="table-responsive stats-table-wrap"><table class="data-table stats-component-crack-table"><thead><tr><th>층</th><th>최대 균열폭(mm)</th><th>결함 번호</th>' + kindHead + '<th>전체 건수</th></tr></thead><tbody>' +
+            tableHtml = '<p class="stats-empty">' + esc(activeLabel) + (crackMode ? ' 균열·이격 결함이 없습니다.' : ' 결함 데이터가 없습니다.') + '</p>';
+        } else if (crackMode) {
+            tableHtml = '<div class="table-responsive stats-table-wrap"><table class="data-table stats-component-crack-table"><thead><tr><th>층</th><th>최대 균열폭(mm)</th><th>결함 번호</th><th>균열·이격 건수</th></tr></thead><tbody>' +
                 floorsWithData.map(function (fr) {
                     var info = fr.componentCrackMax[selectedComponentGroup];
-                    var isCurrent = fr.floorCode === payload.currentFloor;
-                    var trCls = isCurrent ? ' class="stats-row-current"' : '';
-                    // 결함은 있는데 균열이 없는 층: 값이 빠진 것이 아니라 균열 결함이 없는 것이다
-                    var widthCell = (info && info.value != null) ? info.value : '<span class="stats-cell-zero">균열 없음</span>';
+                    var trCls = fr.floorCode === payload.currentFloor ? ' class="stats-row-current"' : '';
+                    // 균열은 있는데 폭이 없는 층: 폭을 적지 않았거나 면적으로만 적은 균열(망상균열 등)
+                    var widthCell = (info && info.value != null) ? info.value : '<span class="stats-cell-zero">폭 없음</span>';
                     var noCell = '-';
                     if (info && info.id) {
                         var noLabel = info.no ? String(info.no) : '보기';
                         noCell = '<button type="button" class="stats-defect-no-link" data-defect-id="' + esc(info.id) + '" data-floor-code="' + esc(fr.floorCode) + '">' + esc(noLabel) + '</button>';
                     }
+                    return '<tr' + trCls + '><th scope="row">' + esc(fr.floorLabel) + '</th><td class="stats-cell-sum">' + widthCell + '</td><td>' + noCell + '</td><td class="stats-cell-hit">' + floorCount(fr) + '</td></tr>';
+                }).join('') + '</tbody></table></div>';
+        } else {
+            var kindHead = DEFECT_KIND_COLUMNS.map(function (k) { return '<th class="stats-kind-col">' + esc(k.label) + '</th>'; }).join('');
+            tableHtml = '<div class="table-responsive stats-table-wrap"><table class="data-table stats-component-crack-table"><thead><tr><th>층</th>' + kindHead + '<th>전체 건수</th></tr></thead><tbody>' +
+                floorsWithData.map(function (fr) {
+                    var trCls = fr.floorCode === payload.currentFloor ? ' class="stats-row-current"' : '';
                     var kindBucket = (fr.componentKinds && fr.componentKinds[selectedComponentGroup]) || {};
                     var kindCells = DEFECT_KIND_COLUMNS.map(function (k) {
                         var n = kindBucket[k.key] || 0;
                         return '<td class="stats-kind-col ' + (n ? 'stats-cell-hit' : 'stats-cell-zero') + '">' + n + '</td>';
                     }).join('');
-                    return '<tr' + trCls + '><th scope="row">' + esc(fr.floorLabel) + '</th><td class="stats-cell-sum">' + widthCell + '</td><td>' + noCell + '</td>' + kindCells + '<td class="' + (fr.componentCounts[selectedComponentGroup] ? 'stats-cell-hit' : 'stats-cell-zero') + '">' + (fr.componentCounts[selectedComponentGroup] || 0) + '</td></tr>';
+                    return '<tr' + trCls + '><th scope="row">' + esc(fr.floorLabel) + '</th>' + kindCells + '<td class="stats-cell-hit">' + floorCount(fr) + '</td></tr>';
                 }).join('') + '</tbody></table></div>';
         }
 
-        root.innerHTML = '<h4 class="stats-bar-title">구조 부재별 층별 최대 균열폭 · 결함 종류별 건수</h4>' + chipsHtml + tableHtml;
+        root.innerHTML = '<h4 class="stats-bar-title">구조 부재별 층별 ' + (crackMode ? '최대 균열폭' : '결함 종류별 건수') + '</h4>' + modeHtml + chipsHtml + tableHtml;
+
+        root.querySelectorAll('[data-component-mode]').forEach(function (btn) {
+            btn.addEventListener('click', function () {
+                selectedComponentMode = btn.getAttribute('data-component-mode');
+                if (typeof window.renderDefectStatsTab === 'function') window.renderDefectStatsTab();
+            });
+        });
 
         root.querySelectorAll('[data-component-group]').forEach(function (btn) {
             btn.addEventListener('click', function () {

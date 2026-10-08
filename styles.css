@@ -9130,6 +9130,11 @@ body:not(.bsa-tab-home) .home-fab-add-building {
     font-size: 0.95rem;
 }
 
+/* 부재별 표: 최대 균열폭 / 결함 종류별 건수 전환 */
+.stats-component-mode {
+    margin-bottom: 0.5rem;
+}
+
 /* 결함 종류별 건수 열(누수·백태 / 박리·박락·들뜸 / 철근노출): 열 사이를 넉넉하게 */
 .stats-component-crack-table th.stats-kind-col,
 .stats-component-crack-table td.stats-kind-col {
