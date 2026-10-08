@@ -1306,9 +1306,31 @@
             })).map(function (f) { return f.floorCode; });
         }
 
+        // 입력 확인 목록(core/defect-lint.js): 「상태양호 제외」와 무관하게 전부 본다
+        var lintApi = (window.BSA && window.BSA.defectLint) || null;
+        var lintRows = [];
+
         floorCodes.forEach(function (floorCode) {
             var raw = window.state.defects[prefix + floorCode] || [];
             var rows = getSurveyRows(raw).filter(function (d) { return shouldIncludeDefect(d, opts); });
+            if (lintApi) {
+                var lintTargets = getSurveyRows(raw).filter(function (d) {
+                    return shouldIncludeDefect(d, { excludeGood: false, currentRoundOnly: opts.currentRoundOnly });
+                });
+                lintApi.lintDefects(lintTargets).forEach(function (hit) {
+                    var d = hit.defect;
+                    lintRows.push({
+                        floorCode: floorCode,
+                        floorLabel: getFloorLabel(floorCode, bldg),
+                        id: d.id || '',
+                        no: d.no || d.groupNo || '',
+                        title: [d.component, d.defectType].filter(Boolean).join(' '),
+                        size: d.size || '',
+                        category: d.category || '구조체',
+                        issues: hit.issues
+                    });
+                });
+            }
             var typeCounts = collectTypeCounts(rows);
             Object.keys(typeCounts).forEach(function (t) {
                 overallCounts[t] = (overallCounts[t] || 0) + typeCounts[t];
@@ -1377,8 +1399,41 @@
             totalRows: totalRows,
             categoryCounts: categoryCounts,
             componentCounts: componentCounts,
+            lintRows: lintRows,
             currentFloor: window.state.currentFloor
         };
+    }
+
+    /**
+     * 입력 확인이 필요한 결함 목록. 체크 오류(블록벽체가 구조체)나 이상한 균열폭처럼, 값은 들어 있는데
+     * 잘못 들어간 것으로 보이는 결함을 층·번호와 함께 보여준다. 번호를 누르면 그 결함으로 간다.
+     */
+    function renderLintPanel(payload, root) {
+        if (!root) return;
+        var rows = payload.lintRows || [];
+        if (!rows.length) {
+            root.innerHTML = '<h4 class="stats-bar-title">입력 확인이 필요한 결함</h4>'
+                + '<p class="stats-empty">확인이 필요한 입력이 없습니다.</p>';
+            return;
+        }
+        var body = rows.map(function (r) {
+            var noLabel = r.no ? String(r.no) : '보기';
+            var noCell = r.id
+                ? '<button type="button" class="stats-defect-no-link" data-defect-id="' + esc(r.id) + '" data-floor-code="' + esc(r.floorCode) + '">' + esc(noLabel) + '</button>'
+                : esc(noLabel);
+            var why = r.issues.map(function (i) { return esc(i.message); }).join('<br>');
+            return '<tr><th scope="row">' + esc(r.floorLabel) + '</th><td>' + noCell + '</td><td>' + esc(r.title) + '</td><td>'
+                + esc(r.size || '-') + '</td><td>' + esc(r.category) + '</td><td class="stats-lint-why">' + why + '</td></tr>';
+        }).join('');
+        root.innerHTML = '<h4 class="stats-bar-title">입력 확인이 필요한 결함 <span class="stats-lint-count">' + rows.length + '건</span></h4>'
+            + '<p class="stats-hint">값은 들어 있지만 잘못 들어간 것으로 보이는 결함입니다. 통계는 걸러서 세지만 조사표와 한글 출력에는 입력한 그대로 나갑니다. 번호를 누르면 그 결함으로 이동합니다.</p>'
+            + '<div class="table-responsive stats-table-wrap"><table class="data-table stats-lint-table"><thead><tr>'
+            + '<th>층</th><th>번호</th><th>부재·결함</th><th>규모</th><th>구분</th><th>확인할 내용</th></tr></thead><tbody>' + body + '</tbody></table></div>';
+        root.querySelectorAll('[data-defect-id]').forEach(function (btn) {
+            btn.addEventListener('click', function () {
+                goToDefectOnMap(btn.getAttribute('data-floor-code'), btn.getAttribute('data-defect-id'));
+            });
+        });
     }
 
     function renderSummaryCards(payload, root) {
@@ -1589,6 +1644,7 @@
         var toggles = [
             [document.getElementById('statsSummaryCards'), vis.summaryCards],
             [document.getElementById('statsComponentSection'), vis.componentCrack],
+            [document.getElementById('statsLintSection'), vis.summaryCards],
             [defectPanel, vis.defectMatrix],
             [document.querySelector('#tab-stats .stats-filter-row'), vis.defectFilters],
             [viewChips, vis.viewChips],
@@ -2014,6 +2070,7 @@
         var payload = buildStatsPayload(bldg, getStatsOptions());
         renderSummaryCards(payload, document.getElementById('statsSummaryCards'));
         renderComponentCrackPanel(payload, document.getElementById('statsComponentSection'));
+        renderLintPanel(payload, document.getElementById('statsLintSection'));
         renderMatrixTable(payload, statsView);
         renderNdtStatsPanels(bldg);
         updateHint(statsView, bldg);

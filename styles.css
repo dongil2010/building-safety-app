@@ -9141,6 +9141,20 @@ body:not(.bsa-tab-home) .home-fab-add-building {
     cursor: pointer;
 }
 
+/* 통계: 입력 확인이 필요한 결함 목록 */
+.stats-lint-count {
+    display: inline-block;
+    margin-left: 0.4rem;
+    padding: 0.05rem 0.5rem;
+    border-radius: 999px;
+    background: #fee2e2;
+    color: #b91c1c;
+    font-size: 0.8rem;
+    font-weight: 700;
+}
+.stats-lint-table td, .stats-lint-table th { text-align: left; vertical-align: top; }
+.stats-lint-table .stats-lint-why { color: #b45309; min-width: 16rem; }
+
 .stats-defect-no-link:hover {
     background: rgba(37, 99, 235, 0.16);
 }
