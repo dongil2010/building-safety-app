@@ -36,6 +36,8 @@ vm.runInContext([
     extractFunction(statsSrc, 'function extractWidthFromSegment('),
     extractFunction(statsSrc, 'function isAreaSizeSegment('),
     extractFunction(statsSrc, 'function getCrackWidthNumbers('),
+    extractFunction(statsSrc, 'function classifyCrackWidthBin('),
+    'this.binOf = function (ws) { return classifyCrackWidthBin(ws); };',
     'this.widthsJson = function (d) { return JSON.stringify(getCrackWidthNumbers(d)); };'
 ].join('\n'), sandbox);
 // vm 안에서 만든 배열은 바깥 배열과 원형이 달라 값이 같아도 다르다고 나온다 — 글자로 받아 다시 읽는다
@@ -82,5 +84,26 @@ assert.deepStrictEqual(widths({ defectType: '', size: '0.3/1.5', crackWidth: '0.
 assert.deepStrictEqual(widths({ defectType: '수직·경사균열', size: '0.3/0.4', crackWidth: '0.3' }), [0.3]);
 assert.deepStrictEqual(widths({ defectType: '균열 및 백태', size: '0.2/2.0', crackWidth: '0.2' }), [0.2], '균열이 다른 결함과 함께 적혀도 센다');
 assert.deepStrictEqual(widths({ defectType: '수직이격', size: '5.0/0.8', crackWidth: '5.0' }), [5], '이격도 폭을 센다');
+
+// ── 균열폭에 따른 분류: 결함 한 건은 가장 큰 폭의 구간 하나에만 든다 ──
+const bin = (ws) => sandbox.binOf(ws);
+assert.strictEqual(bin([0.1]), 'lt02');
+assert.strictEqual(bin([0.19]), 'lt02');
+assert.strictEqual(bin([0.2]), 'lt03', '0.2는 「0.2 ~ 0.3 미만」');
+assert.strictEqual(bin([0.25]), 'lt03');
+assert.strictEqual(bin([0.3]), 'lt05', '0.3은 「0.3 ~ 0.5 미만」');
+assert.strictEqual(bin([0.45]), 'lt05');
+assert.strictEqual(bin([0.5]), 'ge05', '0.5는 「0.5 이상」');
+assert.strictEqual(bin([5]), 'ge05');
+assert.strictEqual(bin([0.1, 0.4, 0.2]), 'lt05', '여러 폭이면 가장 큰 폭');
+assert.strictEqual(bin([]), 'none', '폭이 없는 균열');
+assert.strictEqual(bin(widths({ defectType: '망상균열', size: '2.0x2.0', crackMeasures: [{ width: '2.0', length: '2.0', join: 'x' }] })), 'none', '면적으로만 적은 균열');
+assert.strictEqual(bin(widths({ defectType: '균열', size: '0.3~0.45/6.0', crackWidth: '0.3~0.45' })), 'lt05');
+
+// 폭을 범위로 적으면 큰 값을 쓴다
+assert.deepStrictEqual(widths({ size: '0.3~0.45/6.0', crackWidth: '0.3~0.45' }), [0.45]);
+assert.deepStrictEqual(widths({ size: '0.2~0.5/4.0', crackMeasures: [{ width: '0.2~0.5', length: '4.0', join: '/' }] }), [0.5]);
+assert.strictEqual(bin(widths({ size: '0.2~0.5/4.0', crackWidth: '0.2~0.5' })), 'ge05', '범위의 큰 값으로 구간을 정한다');
+assert.deepStrictEqual(widths({ size: '0.3mm', crackWidth: '0.3mm' }), [0.3], '단위가 붙어 있어도 읽는다');
 
 console.log('test-stats-crack-width-area: ok');

@@ -1082,7 +1082,7 @@
     var statsCategory = 'defect';
     var statsBound = false;
     var selectedComponentGroup = null;
-    /** 부재별 표에서 볼 것: 'crack'(최대 균열폭) | 'kinds'(결함 종류별 건수) */
+    /** 부재별 표에서 볼 것: 'crack'(최대 균열폭) | 'bins'(균열폭에 따른 분류) | 'kinds'(결함 종류별 건수) */
     var selectedComponentMode = 'crack';
     var ndtStats = (window.BSA && window.BSA.ndtStats) || {};
 
@@ -1187,6 +1187,27 @@
         };
     }
 
+    /**
+     * 2026-10-08: 균열·이격 결함을 균열폭으로 나눈 구간. 결함 한 건은 그 결함의 가장 큰 폭으로 한 구간에만 든다.
+     * 폭을 적지 않았거나 면적으로만 적은 균열(망상균열 등)은 'none'.
+     */
+    var CRACK_WIDTH_BINS = [
+        { key: 'lt02', label: '0.2mm 미만' },
+        { key: 'lt03', label: '0.2 ~ 0.3mm 미만' },
+        { key: 'lt05', label: '0.3 ~ 0.5mm 미만' },
+        { key: 'ge05', label: '0.5mm 이상' },
+        { key: 'none', label: '폭 없음' }
+    ];
+    function classifyCrackWidthBin(widths) {
+        var list = (widths || []).filter(function (w) { return typeof w === 'number' && !isNaN(w); });
+        if (!list.length) return 'none';
+        var max = Math.max.apply(null, list);
+        if (max < 0.2) return 'lt02';
+        if (max < 0.3) return 'lt03';
+        if (max < 0.5) return 'lt05';
+        return 'ge05';
+    }
+
     /** 규모 글자 한 조각이 면적(가로×세로)인가: "2.0x2.0", "2.0*2.0", "2.0×2.0" */
     function isAreaSizeSegment(seg) {
         return /\d\s*[x×*]\s*\d/i.test(String(seg || ''));
@@ -1202,9 +1223,10 @@
         // 2026-10-08: 균열·이격 결함만 균열폭으로 센다. 폭 칸은 결함 종류와 무관하게 채워지므로
         // 철근노출 "0.05/0.8"의 0.05나 재료분리 "2.5/2.0"의 2.5까지 그 부재의 균열폭으로 잡혔다.
         if (!/균열|이격/.test(String(d && d.defectType != null ? d.defectType : ''))) return [];
+        // 폭을 범위로 적은 경우("0.3~0.45")는 큰 값을 쓴다. 예전에는 글자를 이어 붙여 읽어 앞 값(0.3)만 잡혔다.
         var toNum = function (part) {
-            var n = parseFloat(String(part).replace(/[^\d.\-]/g, ''));
-            return isNaN(n) ? null : n;
+            var nums = (String(part).match(/\d+(?:\.\d+)?/g) || []).map(Number).filter(function (n) { return !isNaN(n); });
+            return nums.length ? Math.max.apply(null, nums) : null;
         };
         var sizeSegs = String(d && d.size != null ? d.size : '').split(/\s*,\s*/).filter(Boolean);
         var measures = d && Array.isArray(d.crackMeasures) ? d.crackMeasures : null;
@@ -1367,6 +1389,7 @@
             var floorComponentCounts = {};
             var floorComponentCrackMax = {};
             var floorComponentCrackCounts = {};
+            var floorComponentCrackBins = {};
             var floorComponentKinds = {};
             rows.forEach(function (d) {
                 var cat = d.category || '구조체';
@@ -1381,6 +1404,9 @@
                 if (/균열|이격/.test(String(d.defectType != null ? d.defectType : ''))) {
                     componentCrackCounts[compGroup] = (componentCrackCounts[compGroup] || 0) + 1;
                     floorComponentCrackCounts[compGroup] = (floorComponentCrackCounts[compGroup] || 0) + 1;
+                    var bin = classifyCrackWidthBin(getCrackWidthNumbers(d));
+                    var binBucket = floorComponentCrackBins[compGroup] || (floorComponentCrackBins[compGroup] = {});
+                    binBucket[bin] = (binBucket[bin] || 0) + 1;
                 }
                 var kinds = classifyDefectKinds(d);
                 var kindBucket = floorComponentKinds[compGroup] || (floorComponentKinds[compGroup] = {});
@@ -1403,6 +1429,7 @@
                 componentCounts: floorComponentCounts,
                 componentCrackMax: floorComponentCrackMax,
                 componentCrackCounts: floorComponentCrackCounts,
+                componentCrackBins: floorComponentCrackBins,
                 componentKinds: floorComponentKinds,
                 coarseGroup: getCoarseFloorGroup(floorCode),
                 zoneInfo: classifyFloorGroup(floorCode)
@@ -1543,24 +1570,29 @@
     }
 
     /**
-     * 구조 부재별 층별 표. 「최대 균열폭」과 「결함 종류별 건수」를 눌러서 따로 본다(2026-10-08).
+     * 구조 부재별 층별 표. 세 가지를 눌러서 따로 본다(2026-10-08).
      *  - 최대 균열폭: 균열·이격 결함만 대상. 건수도 균열·이격 건수만 센다.
-     *  - 결함 종류별 건수: 누수·백태 / 박리·박락·들뜸 / 철근노출 / 전체
+     *  - 균열폭에 따른 분류: 균열·이격 결함을 폭 구간별로 센다(결함 한 건 = 가장 큰 폭의 구간 하나).
+     *  - 결함 종류별 건수: 누수·백태 / 박리·박락·들뜸 / 철근노출 / 전체 (균열·이격은 위 두 보기에서 본다)
      */
     function renderComponentCrackPanel(payload, root) {
         if (!root || !payload) return;
-        var crackMode = selectedComponentMode !== 'kinds';
+        var mode = selectedComponentMode === 'kinds' || selectedComponentMode === 'bins' ? selectedComponentMode : 'crack';
+        // 최대 균열폭·균열폭 분류는 균열·이격 결함만 대상이다
+        var crackMode = mode !== 'kinds';
         var counts = (crackMode ? payload.componentCrackCounts : payload.componentCounts) || {};
         var groups = COMPONENT_GROUP_ORDER;
         if (!selectedComponentGroup || !groups.some(function (g) { return g.key === selectedComponentGroup; })) {
             selectedComponentGroup = groups[0].key;
         }
 
-        var modeHtml = '<div class="chips-container stats-component-mode">' + [
+        var modeDefs = [
             { key: 'crack', label: '최대 균열폭' },
+            { key: 'bins', label: '균열폭에 따른 분류' },
             { key: 'kinds', label: '결함 종류별 건수' }
-        ].map(function (m) {
-            var on = (m.key === 'crack') === crackMode;
+        ];
+        var modeHtml = '<div class="chips-container stats-component-mode">' + modeDefs.map(function (m) {
+            var on = m.key === mode;
             return '<button type="button" class="chip' + (on ? ' active' : '') + '" data-component-mode="' + m.key + '" aria-pressed="' + (on ? 'true' : 'false') + '">' + esc(m.label) + '</button>';
         }).join('') + '</div>';
 
@@ -1579,6 +1611,25 @@
         var tableHtml;
         if (!floorsWithData.length) {
             tableHtml = '<p class="stats-empty">' + esc(activeLabel) + (crackMode ? ' 균열·이격 결함이 없습니다.' : ' 결함 데이터가 없습니다.') + '</p>';
+        } else if (mode === 'bins') {
+            var binHead = CRACK_WIDTH_BINS.map(function (b) { return '<th class="stats-kind-col">' + esc(b.label) + '</th>'; }).join('');
+            var binTotals = {};
+            var binBody = floorsWithData.map(function (fr) {
+                var trCls = fr.floorCode === payload.currentFloor ? ' class="stats-row-current"' : '';
+                var bucket = (fr.componentCrackBins && fr.componentCrackBins[selectedComponentGroup]) || {};
+                var cells = CRACK_WIDTH_BINS.map(function (b) {
+                    var n = bucket[b.key] || 0;
+                    binTotals[b.key] = (binTotals[b.key] || 0) + n;
+                    return '<td class="stats-kind-col ' + (n ? 'stats-cell-hit' : 'stats-cell-zero') + '">' + n + '</td>';
+                }).join('');
+                return '<tr' + trCls + '><th scope="row">' + esc(fr.floorLabel) + '</th>' + cells + '<td class="stats-cell-hit">' + floorCount(fr) + '</td></tr>';
+            }).join('');
+            var totalCells = CRACK_WIDTH_BINS.map(function (b) {
+                return '<td class="stats-kind-col stats-cell-sum">' + (binTotals[b.key] || 0) + '</td>';
+            }).join('');
+            var grand = floorsWithData.reduce(function (a, fr) { return a + floorCount(fr); }, 0);
+            tableHtml = '<div class="table-responsive stats-table-wrap"><table class="data-table stats-component-crack-table"><thead><tr><th>층</th>' + binHead + '<th>균열·이격 건수</th></tr></thead><tbody>'
+                + binBody + '<tr><th scope="row">합계</th>' + totalCells + '<td class="stats-cell-sum">' + grand + '</td></tr></tbody></table></div>';
         } else if (crackMode) {
             tableHtml = '<div class="table-responsive stats-table-wrap"><table class="data-table stats-component-crack-table"><thead><tr><th>층</th><th>최대 균열폭(mm)</th><th>결함 번호</th><th>균열·이격 건수</th></tr></thead><tbody>' +
                 floorsWithData.map(function (fr) {
@@ -1594,9 +1645,7 @@
                     return '<tr' + trCls + '><th scope="row">' + esc(fr.floorLabel) + '</th><td class="stats-cell-sum">' + widthCell + '</td><td>' + noCell + '</td><td class="stats-cell-hit">' + floorCount(fr) + '</td></tr>';
                 }).join('') + '</tbody></table></div>';
         } else {
-            // 균열·이격 건수도 종류별 건수에 함께 싣는다(폭은 「최대 균열폭」에서 본다)
-            var kindHead = '<th class="stats-kind-col">균열·이격</th>'
-                + DEFECT_KIND_COLUMNS.map(function (k) { return '<th class="stats-kind-col">' + esc(k.label) + '</th>'; }).join('');
+            var kindHead = DEFECT_KIND_COLUMNS.map(function (k) { return '<th class="stats-kind-col">' + esc(k.label) + '</th>'; }).join('');
             tableHtml = '<div class="table-responsive stats-table-wrap"><table class="data-table stats-component-crack-table"><thead><tr><th>층</th>' + kindHead + '<th>전체 건수</th></tr></thead><tbody>' +
                 floorsWithData.map(function (fr) {
                     var trCls = fr.floorCode === payload.currentFloor ? ' class="stats-row-current"' : '';
@@ -1604,13 +1653,13 @@
                     var kindCell = function (n) {
                         return '<td class="stats-kind-col ' + (n ? 'stats-cell-hit' : 'stats-cell-zero') + '">' + n + '</td>';
                     };
-                    var crackN = (fr.componentCrackCounts && fr.componentCrackCounts[selectedComponentGroup]) || 0;
-                    var kindCells = kindCell(crackN) + DEFECT_KIND_COLUMNS.map(function (k) { return kindCell(kindBucket[k.key] || 0); }).join('');
+                    var kindCells = DEFECT_KIND_COLUMNS.map(function (k) { return kindCell(kindBucket[k.key] || 0); }).join('');
                     return '<tr' + trCls + '><th scope="row">' + esc(fr.floorLabel) + '</th>' + kindCells + '<td class="stats-cell-hit">' + floorCount(fr) + '</td></tr>';
                 }).join('') + '</tbody></table></div>';
         }
 
-        root.innerHTML = '<h4 class="stats-bar-title">구조 부재별 층별 ' + (crackMode ? '최대 균열폭' : '결함 종류별 건수') + '</h4>' + modeHtml + chipsHtml + tableHtml;
+        var modeLabel = modeDefs.filter(function (m) { return m.key === mode; })[0].label;
+        root.innerHTML = '<h4 class="stats-bar-title">구조 부재별 층별 ' + esc(modeLabel) + '</h4>' + modeHtml + chipsHtml + tableHtml;
 
         root.querySelectorAll('[data-component-mode]').forEach(function (btn) {
             btn.addEventListener('click', function () {
