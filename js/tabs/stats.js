@@ -1553,7 +1553,7 @@
         if (!floorsWithData.length) {
             tableHtml = '<p class="stats-empty">' + esc(activeLabel) + ' 결함 데이터가 없습니다.</p>';
         } else {
-            var kindHead = DEFECT_KIND_COLUMNS.map(function (k) { return '<th>' + esc(k.label) + '</th>'; }).join('');
+            var kindHead = DEFECT_KIND_COLUMNS.map(function (k) { return '<th class="stats-kind-col">' + esc(k.label) + '</th>'; }).join('');
             tableHtml = '<div class="table-responsive stats-table-wrap"><table class="data-table stats-component-crack-table"><thead><tr><th>층</th><th>최대 균열폭(mm)</th><th>결함 번호</th>' + kindHead + '<th>전체 건수</th></tr></thead><tbody>' +
                 floorsWithData.map(function (fr) {
                     var info = fr.componentCrackMax[selectedComponentGroup];
@@ -1569,7 +1569,7 @@
                     var kindBucket = (fr.componentKinds && fr.componentKinds[selectedComponentGroup]) || {};
                     var kindCells = DEFECT_KIND_COLUMNS.map(function (k) {
                         var n = kindBucket[k.key] || 0;
-                        return '<td class="' + (n ? 'stats-cell-hit' : 'stats-cell-zero') + '">' + n + '</td>';
+                        return '<td class="stats-kind-col ' + (n ? 'stats-cell-hit' : 'stats-cell-zero') + '">' + n + '</td>';
                     }).join('');
                     return '<tr' + trCls + '><th scope="row">' + esc(fr.floorLabel) + '</th><td class="stats-cell-sum">' + widthCell + '</td><td>' + noCell + '</td>' + kindCells + '<td class="' + (fr.componentCounts[selectedComponentGroup] ? 'stats-cell-hit' : 'stats-cell-zero') + '">' + (fr.componentCounts[selectedComponentGroup] || 0) + '</td></tr>';
                 }).join('') + '</tbody></table></div>';

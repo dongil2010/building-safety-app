@@ -9130,6 +9130,16 @@ body:not(.bsa-tab-home) .home-fab-add-building {
     font-size: 0.95rem;
 }
 
+/* 결함 종류별 건수 열(누수·백태 / 박리·박락·들뜸 / 철근노출): 열 사이를 넉넉하게 */
+.stats-component-crack-table th.stats-kind-col,
+.stats-component-crack-table td.stats-kind-col {
+    min-width: 8.5rem;
+    padding-left: 1.5rem;
+    padding-right: 1.5rem;
+    text-align: center;
+    white-space: nowrap;
+}
+
 .stats-defect-no-link {
     border: 1px solid var(--accent-blue, #2563eb);
     background: rgba(37, 99, 235, 0.08);
