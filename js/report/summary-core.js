@@ -58,19 +58,27 @@
      *  - "0.3/1.6", "0.3~0.45/6.0" : 폭/길이 → 폭(범위면 큰 값)
      *  - "Cw:0.2~0.32"             : 폭
      *  - "0.2x0.5", "1.0*0.4"      : 면적 → 폭 아님
+     * 폭을 「Cw:」로 따로 적은 칸에서는 그것만 폭으로 본다. 망상균열은 "Cw:0.2, 2.0/2.0"처럼 범위(가로/세로)를
+     * 함께 적는데, 그 앞 숫자를 폭으로 읽으면 2mm 균열이 된다.
      */
     function parseSize(raw) {
         const text = String(raw == null ? '' : raw).trim();
-        const widths = [];
-        if (!text || text === '-') return { maxWidth: null, widths: widths };
+        const cw = [];
+        const slash = [];
+        if (!text || text === '-') return { maxWidth: null, widths: [] };
         text.split(',').forEach(function (tok) {
             const t = tok.replace(/\(.*?\)/g, '').trim();
+            let into = cw;
             let m = t.match(/^Cw\s*[:：]\s*(\d+(?:\.\d+)?)(?:\s*~\s*(\d+(?:\.\d+)?))?/i);
-            if (!m) m = t.match(/^(\d+(?:\.\d+)?)(?:\s*~\s*(\d+(?:\.\d+)?))?\s*\/\s*\d/);
+            if (!m) {
+                into = slash;
+                m = t.match(/^(\d+(?:\.\d+)?)(?:\s*~\s*(\d+(?:\.\d+)?))?\s*\/\s*\d/);
+            }
             if (!m) return;
-            widths.push(parseFloat(m[1]));
-            if (m[2] != null) widths.push(parseFloat(m[2]));
+            into.push(parseFloat(m[1]));
+            if (m[2] != null) into.push(parseFloat(m[2]));
         });
+        const widths = cw.length ? cw : slash;
         return { maxWidth: widths.length ? Math.max.apply(null, widths) : null, widths: widths };
     }
 

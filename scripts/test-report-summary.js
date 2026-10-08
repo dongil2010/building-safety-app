@@ -13,7 +13,9 @@ assert.strictEqual(api.parseSize('0.2/0.6 -2EA, 0.15/0.6').maxWidth, 0.2);
 assert.strictEqual(api.parseSize('0.2x0.5').maxWidth, null, '면적은 균열폭이 아니다');
 assert.strictEqual(api.parseSize('1.0*0.4').maxWidth, null);
 assert.strictEqual(api.parseSize('-').maxWidth, null);
-assert.strictEqual(api.parseSize('32.5/2.0, Cw:0.2~0.32').maxWidth, 32.5, '이상값은 그대로 읽고 따로 표시한다');
+assert.strictEqual(api.parseSize('32.5/2.0, Cw:0.2~0.32').maxWidth, 0.32, '폭을 Cw로 따로 적었으면 그것만 폭이다');
+assert.strictEqual(api.parseSize('Cw:0.2, 2.0/2.0').maxWidth, 0.2, '망상균열의 범위(가로/세로)를 폭으로 읽지 않는다');
+assert.strictEqual(api.parseSize('50.1/3.5').maxWidth, 50.1, '이상값은 그대로 읽고 따로 표시한다');
 
 // 결함 유형
 assert.strictEqual(api.typeKeyOf('보(G) 누수 및 백태 (우천시 누수)'), '누수');
@@ -38,7 +40,7 @@ const floors = [
             row(1, '보(G) 누수 및 백태 (우천시 누수)', '', true, { leak: true, cause: '상부 방수층 파손', remark: '사진1' }),
             row(2, '슬래브 균열', '0.3~0.45/6.0', true, { cause: '건조수축 및 재료적 특성', remark: '사진4' }),
             row(3, '슬래브 균열', '0.6/2.0', true, { cause: '건조수축 및 재료적 특성' }),
-            row(4, '슬래브 망상균열', '32.5/2.0, Cw:0.2~0.32', true),
+            row(4, '슬래브 망상균열', '32.5/2.0', true),
             row(5, '블록벽체 수직균열', '1.2/1.8', false, { cause: '건조수축 및 재료적 특성' }),
             row(6, '보 뿜칠 상태양호', '', true),
             row(7, '벽체 타일 마감재 파손', 'Cw:1.0', false, { cause: '시공미흡 외' }),

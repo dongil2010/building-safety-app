@@ -1152,12 +1152,41 @@
     /** 균열폭 값 추출. crackWidth("0.15 / 0.20"처럼 여러 측정점의 폭을 슬래시로 이어붙인 값)가
      * 있으면 그대로 쓰고, 비어 있으면 균열폭/길이 분리 입력 이전 구버전 데이터(자유텍스트 size:
      * "Cw:0.4", "0.4mm", "1.0/4.5"(앞이 폭·뒤가 길이) 등)에서 폭만 뽑아본다. */
+    /** 규모 글자 한 조각이 면적(가로×세로)인가: "2.0x2.0", "2.0*2.0", "2.0×2.0" */
+    function isAreaSizeSegment(seg) {
+        return /\d\s*[x×*]\s*\d/i.test(String(seg || ''));
+    }
+
+    /**
+     * 2026-10-08: 면적으로 적은 측정값(가로×세로, m)은 균열폭이 아니다. 망상균열·박락을 "2.0×2.0"으로
+     * 적으면 crackWidth에 앞 숫자(2.0)가 그대로 들어가 최대 균열폭이 2.0mm로 찍혔다.
+     * 측정 행(crackMeasures)의 구분(join 'x')으로 가르고, 구분이 없는 옛 데이터는 규모 글자의
+     * 같은 자리 조각을 본다.
+     */
     function getCrackWidthNumbers(d) {
+        var toNum = function (part) {
+            var n = parseFloat(String(part).replace(/[^\d.\-]/g, ''));
+            return isNaN(n) ? null : n;
+        };
+        var sizeSegs = String(d && d.size != null ? d.size : '').split(/\s*,\s*/).filter(Boolean);
+        var measures = d && Array.isArray(d.crackMeasures) ? d.crackMeasures : null;
+        if (measures && measures.length) {
+            return measures.map(function (m, i) {
+                if (!m) return null;
+                var area = m.join === 'x'
+                    || (m.join !== '/' && isAreaSizeSegment(sizeSegs.length === measures.length ? sizeSegs[i] : sizeSegs.join(',')));
+                if (area) return null;
+                return toNum(m.width);
+            }).filter(function (n) { return n != null; });
+        }
         var raw = String(d && d.crackWidth != null ? d.crackWidth : '').trim();
         if (raw) {
-            return raw.split(/\s*[\/,]\s*/).map(function (part) {
-                var n = parseFloat(String(part).replace(/[^\d.\-]/g, ''));
-                return isNaN(n) ? null : n;
+            var parts = raw.split(/\s*[\/,]\s*/);
+            return parts.map(function (part, i) {
+                // 측정 행 없이 폭만 남은 옛 데이터: 규모 글자가 같은 개수로 나뉘면 면적 조각 자리는 뺀다
+                if (sizeSegs.length === parts.length && isAreaSizeSegment(sizeSegs[i])) return null;
+                if (parts.length === 1 && sizeSegs.length === 1 && isAreaSizeSegment(sizeSegs[0])) return null;
+                return toNum(part);
             }).filter(function (n) { return n != null; });
         }
         var sizeRaw = String(d && d.size != null ? d.size : '').trim();

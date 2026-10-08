@@ -11,6 +11,8 @@
 
     const core = window.BSA.reportSummary;
     const alt = window.BSA.reportSummaryAlt;
+    const hwpxOut = window.BSA.reportSummaryHwpx;
+    const TEMPLATE_PATH = 'templates/hwpx_report_summary.hwpx';
     const hwpRead = window.BSA.hwpRead;
     const HP_NS = 'http://www.hancom.co.kr/hwpml/2011/paragraph';
     const STORE_PREFIX = 'bsaReportSummary.v1:';
@@ -211,6 +213,21 @@
                 return tag;
             });
         }
+        // 한글 파일로 내보낼 때 쓸 그림 원본: 그림 XML(이미 한글에서 잘 열리는 모양)과 파일 위치
+        const picXmlById = {};
+        const used = new Set();
+        withRows.forEach((fl) => Object.keys(fl.photos).forEach((no) => used.add(fl.photos[no])));
+        for (const secPath of secPaths) {
+            const xml = await zip.file(secPath).async('string');
+            used.forEach((id) => {
+                if (picXmlById[id]) return;
+                const at = xml.indexOf('binaryItemIDRef="' + id + '"');
+                if (at < 0) return;
+                const a = xml.lastIndexOf('<hp:pic ', at);
+                const b = xml.indexOf('</hp:pic>', at);
+                if (a >= 0 && b > a) picXmlById[id] = xml.slice(a, b + 9);
+            });
+        }
         const photoUrl = {};
         for (const fl of withRows) {
             for (const no of Object.keys(fl.photos)) {
@@ -220,7 +237,7 @@
                 photoUrl[id] = URL.createObjectURL(blob);
             }
         }
-        return { floors: withRows, photoUrl: photoUrl };
+        return { floors: withRows, photoUrl: photoUrl, photoSrc: { zip: zip, hrefById: hrefById, picXmlById: picXmlById } };
     }
 
     /* ───────── 전회차 보고서(.hwp) 읽기 ───────── */
@@ -735,6 +752,113 @@
         state.opinion[catKey] = (head ? head + '\n' : '') + op;
     }
 
+    /* ───────── 한글 파일로 저장 ───────── */
+
+    let photoSrc = null;
+
+    /** 화면에 보이는 내용 그대로(고친 칸·파란색 포함) 한글 출력용 내용으로 옮긴다 */
+    function hwpxModel() {
+        const groups = groupsNow();
+        const edited = (r) => r.cells.map((c, i) => (state.cellEdit[r.key + '|' + i] != null ? state.cellEdit[r.key + '|' + i] : c));
+        const cats = {};
+        core.CATEGORIES.forEach((cat) => {
+            const entries = entriesOf(cat.key);
+            const cmp = compareOf(cat.key, entries);
+            const opinion = opinionOf(cat.key, groups);
+            const majorKey = 'major|' + cat.key;
+            cats[cat.key] = {
+                lines: entries.map((e, i) => ({ text: e.text, blue: !!(cmp && state.markBlue && cmp.cur[i].kind !== 'same') })),
+                opinion: opinion,
+                body: opinion.split('\n').filter((l) => !/^․/.test(l.trim())).join('\n'),
+                major: state.cellEdit[majorKey] != null ? state.cellEdit[majorKey] : '해당사항 없음',
+                photos: entries.filter((e) => e.d && e.d.photoIds.length).map((e) => ({
+                    key: e.d.photoIds[0],
+                    caption: e.text.replace(/\s*\(균열폭:[^)]*\)\s*$/, '')
+                }))
+            };
+        });
+        const repairBlue = !!(state.prev && state.markBlue
+            && core.compareLines([state.prev.repairNote], [state.repairNote]).cur[0].kind !== 'same');
+        return {
+            title: '보고서 본문 요약 — ' + [state.meta.buildingName, state.meta.roundLabel].filter(Boolean).join(' ') + ' (작성안 ' + state.variant + ')',
+            cats: cats,
+            repair: { text: state.repairNote, blue: repairBlue },
+            summaryRows: core.buildSummaryRows(groups).map((r) => ({ cells: edited(r) })),
+            partRows: withImportance(core.buildPartRows(groups), groups).map((r, i) => ({ cat: groups[i].category, cells: edited(r) })),
+            causeRows: withImportance(core.buildCauseRows(groups), groups).map((r, i) => ({ cat: groups[i].category, cells: edited(r) }))
+        };
+    }
+
+    /** 템플릿을 채워 한글 파일(blob)을 만든다 */
+    async function buildHwpxBlob() {
+        const res = await fetch(TEMPLATE_PATH, { cache: 'no-store' });
+        if (!res.ok) throw new Error('한글 템플릿을 불러오지 못했습니다 (' + res.status + ')');
+        const tplZip = await JSZip.loadAsync(await res.arrayBuffer());
+        const tplFiles = {};
+        for (const name of Object.keys(tplZip.files)) {
+            if (tplZip.files[name].dir) continue;
+            tplFiles[name] = await tplZip.file(name).async(/\.(xml|hpf|rdf|txt)$/.test(name) || name === 'mimetype' ? 'string' : 'uint8array');
+        }
+        const model = hwpxModel();
+        const photos = {};
+        for (const key of Object.keys(model.cats)) {
+            for (const ph of model.cats[key].photos) {
+                const href = photoSrc && photoSrc.hrefById[ph.key];
+                if (photos[ph.key] || !href || !photoSrc.picXmlById[ph.key] || !photoSrc.zip.file(href)) continue;
+                photos[ph.key] = {
+                    picXml: photoSrc.picXmlById[ph.key],
+                    bytes: await photoSrc.zip.file(href).async('uint8array'),
+                    ext: (href.match(/\.([A-Za-z0-9]+)$/) || [null, 'jpg'])[1]
+                };
+            }
+        }
+        const files = hwpxOut.buildFiles(tplFiles, model, photos);
+
+        // 내보내기 전에 구조를 한 번 본다(태그 짝, 표 칸 주소, 목록에 적힌 파일)
+        const V = window.BSA && window.BSA.hwpxValidate;
+        if (V && typeof V.validateSection === 'function') {
+            const rep = V.validateSection(String(files['Contents/section0.xml']));
+            const missing = V.checkManifest(String(files['Contents/content.hpf']), Object.keys(files));
+            if (!rep.ok || missing.length) {
+                throw new Error('만든 한글 파일의 구조가 맞지 않아 저장하지 않았습니다: '
+                    + (rep.problems || []).slice(0, 3).map((p) => p.message || p.code).join(' / ') + (missing.length ? ' / 빠진 파일 ' + missing.join(', ') : ''));
+            }
+        }
+
+        const zip = new JSZip();
+        // 한글 파일은 mimetype·version.xml을 맨 앞에 무압축으로 둔다
+        ['mimetype', 'version.xml'].forEach((name) => zip.file(name, files[name], { compression: 'STORE' }));
+        Object.keys(files).forEach((name) => {
+            if (name !== 'mimetype' && name !== 'version.xml') zip.file(name, files[name]);
+        });
+        Object.keys(zip.files).forEach((name) => { if (zip.files[name].dir) delete zip.files[name]; });
+        return zip.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 1 }, mimeType: 'application/hwp+zip' });
+    }
+
+    async function exportHwpx() {
+        const note = $('hwpxNote');
+        note.className = 'muted';
+        note.textContent = '한글 파일을 만드는 중...';
+        try {
+            const blob = await buildHwpxBlob();
+            const name = (state.meta.buildingName || '건축물').replace(/[^a-zA-Z0-9가-힣_-]/g, '_')
+                + '_보고서본문요약_' + state.variant + '안_' + new Date().toISOString().slice(0, 10).replace(/-/g, '') + '.hwpx';
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = name;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            setTimeout(() => URL.revokeObjectURL(url), 5000);
+            note.className = 'ok';
+            note.textContent = '저장했습니다: ' + name;
+        } catch (e) {
+            note.className = 'err';
+            note.textContent = e.message || String(e);
+        }
+    }
+
     /* ───────── 복사 ───────── */
 
     function copyBlock(id) {
@@ -802,6 +926,7 @@
         Object.keys(state.photoUrl).forEach((k) => URL.revokeObjectURL(state.photoUrl[k]));
         state.fileName = fileName || '';
         state.photoUrl = parsed.photoUrl;
+        photoSrc = parsed.photoSrc;
         state.defects = core.buildDefects(parsed.floors);
         state.byId = {};
         state.defects.forEach((d) => { state.byId[d.id] = d; });
@@ -865,6 +990,8 @@
             renderAll();
         });
     });
+
+    $('btnExportHwpx').addEventListener('click', () => { if (state.defects.length) exportHwpx(); });
 
     $('markBlue').addEventListener('change', (ev) => {
         state.markBlue = ev.target.checked;
@@ -984,5 +1111,8 @@
         }
     });
 
-    window.BSA.reportSummaryPage = { loadBuffer: loadBuffer, loadPrevBuffer: loadPrevBuffer, alignToPrev: alignToPrev, state: state };
+    window.BSA.reportSummaryPage = {
+        loadBuffer: loadBuffer, loadPrevBuffer: loadPrevBuffer, alignToPrev: alignToPrev,
+        hwpxModel: hwpxModel, buildHwpxBlob: buildHwpxBlob, state: state
+    };
 })();

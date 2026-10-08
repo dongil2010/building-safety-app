@@ -54,8 +54,8 @@
     .btn.ghost { background: #ffffff; color: #0369a1; }
     .btn.small { padding: 0.2rem 0.55rem; font-size: 0.8rem; font-weight: 600; }
     #status { margin-top: 0.6rem; }
-    #status.err { color: #b91c1c; font-weight: 600; }
-    #status.ok { color: #15803d; }
+    #status.err, #hwpxNote.err, #prevStatus.err { color: #b91c1c; font-weight: 600; }
+    #status.ok, #hwpxNote.ok, #prevStatus.ok { color: #15803d; }
     .hidden { display: none !important; }
 
     .cat { border-top: 1px solid #e2e8f0; padding: 0.8rem 0 0.4rem; }
@@ -164,7 +164,11 @@
 
     <section class="card hidden" id="outCard">
         <h2>3. 보고서에 넣을 표</h2>
-        <p class="muted">「복사」를 누르고 한글 문서에 붙여넣으면 표로 들어갑니다. 노란 칸은 앱이 채우지 못한 칸이니 직접 적어 주세요. 표 안의 글자는 눌러서 고칠 수 있습니다.</p>
+        <div class="row" style="margin-bottom:0.5rem;">
+            <button type="button" class="btn" id="btnExportHwpx">한글 파일로 저장 (.hwpx)</button>
+            <span class="muted" id="hwpxNote">아래 표 6종을 보고서 서식 그대로, 사진까지 넣어 한 파일로 저장합니다 (1·2종 정기안전점검 서식).</span>
+        </div>
+        <p class="muted">표를 하나씩 옮기려면 「복사」를 누르고 한글 문서에 붙여넣으면 됩니다. 노란 칸은 앱이 채우지 못한 칸이니 직접 적어 주세요. 표 안의 글자는 눌러서 고칠 수 있습니다.</p>
         <label class="row hidden" id="blueWrap" style="gap:0.4rem;"><input type="checkbox" id="markBlue" checked> 전회차와 달라진 항목을 파란색으로 표시 (복사할 때도 그대로)</label>
         <div id="outBody"></div>
     </section>
@@ -172,6 +176,8 @@
 <script src="js/report/hwp-read.js"></script>
 <script src="js/report/summary-core.js"></script>
 <script src="js/report/summary-alt.js"></script>
+<script src="js/report/summary-hwpx.js"></script>
+<script src="js/shared/hwpx-validate.js"></script>
 <script src="js/report/summary-page.js"></script>
 </body>
 </html>
