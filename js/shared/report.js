@@ -16,5 +16,19 @@ window.BSA.shared.report = {
         '한글 규모 칸: 측정값 다음 줄에 -nEA 갯수 (문단 분리)',
         '전경사진·설명은 HWPX 문서 맨 마지막에 출력'
     ],
-    ownerHint: 'app.js REPORT PREVIEW / PDF EXPORT / HWPX'
+    ownerHint: 'app.js REPORT PREVIEW / PDF EXPORT / HWPX',
+
+    /**
+     * 보고서 본문 요약 페이지(report-summary.html)를 새 창으로 연다.
+     * 본 앱과 따로 도는 페이지라 코드를 불러오지 않고 주소만 연다. 현장 앱(APK)에는 이 페이지가
+     * 들어 있지 않으므로 배포 주소로 연다.
+     */
+    openSummaryPage: function () {
+        const native = !!(window.Capacitor && typeof window.Capacitor.isNativePlatform === 'function'
+            && window.Capacitor.isNativePlatform());
+        const url = native
+            ? 'https://dongil2010.github.io/building-safety-app/report-summary.html'
+            : new URL('report-summary.html', window.location.href).href;
+        window.open(url, '_blank', 'noopener');
+    }
 };
