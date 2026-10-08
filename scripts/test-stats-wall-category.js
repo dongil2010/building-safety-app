@@ -49,6 +49,16 @@ function testWallCategoryRules() {
     assert.strictEqual(classify('내력벽', '비구조체'), 'rcWall', '내력벽 표기는 카테고리와 무관하게 RC벽체');
     assert.strictEqual(classify('조적벽체', '비구조체'), 'masonryWall', '조적벽체는 카테고리와 무관하게 조적벽체');
 
+    // 2026-10-08: 이름에 '벽체'가 들어가고 구조체로 체크된 것은 RC벽체
+    ['천장 상부 벽체', '내림벽체', '콘크리트 벽체', '유수검지 장치실 벽체', '계단실 벽체', '외부 벽체'].forEach((name) => {
+        assert.strictEqual(classify(name, '구조체'), 'rcWall', name + ' (구조체) 은(는) RC벽체');
+        assert.strictEqual(classify(name, undefined), 'rcWall', name + ' (미기재=구조체) 은(는) RC벽체');
+        assert.strictEqual(classify(name, '비구조체'), 'other', name + ' (비구조체) 은(는) 기타 부재');
+    });
+    assert.strictEqual(classify('벽체 타일', '구조체'), 'other', '벽체에 붙은 마감은 벽체가 아니다');
+    assert.strictEqual(classify('벽체 마감재', '구조체'), 'other');
+    assert.strictEqual(classify('기둥', '구조체'), 'column', '다른 부재는 그대로');
+
     // 2026-10-08: ALC·블록·벽돌 벽체도 조적벽체로 집계한다
     ['ALC벽체', 'ALC 블록', 'alc블록벽체', '블록벽체', '블럭벽체', '시멘트벽돌', '벽돌벽체', '문 상부 조적벽체'].forEach((name) => {
         assert.strictEqual(classify(name, '비구조체'), 'masonryWall', name + ' 은(는) 조적벽체');
