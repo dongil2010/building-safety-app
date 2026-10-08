@@ -51031,7 +51031,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     window._justRegistering = false;
 
     // 앱 번호. 포팅하면 이 번호가 1 오르고, 같은 번호가 Storage releases/latest.json 에 올라간다.
-    window.BSA_APP_BUILD = { versionCode: 11, versionName: '1.3.3' };
+    window.BSA_APP_BUILD = { versionCode: 12, versionName: '1.3.4' };
 
     function isNativeAndroidApp() {
         try {
@@ -51188,6 +51188,47 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         });
     }
 
+    const AUTO_LOGIN_KEY = 'bsa_auto_login';
+
+    function isAutoLoginOn() {
+        try { return localStorage.getItem(AUTO_LOGIN_KEY) === '1'; } catch (_e) { return false; }
+    }
+
+    function syncAutoLoginButtons() {
+        const on = isAutoLoginOn();
+        document.querySelectorAll('.auto-login-toggle').forEach((btn) => {
+            btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+            const icon = btn.querySelector('i');
+            if (icon) {
+                icon.classList.toggle('fa-toggle-on', on);
+                icon.classList.toggle('fa-toggle-off', !on);
+            }
+        });
+    }
+
+    async function applyAuthPersistence() {
+        if (!auth || !firebase.auth || !firebase.auth.Auth || !firebase.auth.Auth.Persistence) return;
+        const mode = isAutoLoginOn()
+            ? firebase.auth.Auth.Persistence.LOCAL
+            : firebase.auth.Auth.Persistence.NONE;
+        try { await auth.setPersistence(mode); } catch (err) {
+            console.warn('로그인 유지 설정 실패:', err);
+        }
+    }
+
+    async function setAutoLoginOn(on) {
+        try { localStorage.setItem(AUTO_LOGIN_KEY, on ? '1' : '0'); } catch (_e) { /* ignore */ }
+        syncAutoLoginButtons();
+        await applyAuthPersistence();
+        if (typeof window.showToast === 'function') {
+            window.showToast(
+                on ? '자동 로그인을 켰습니다. 다음에 이 계정으로 들어갑니다.' : '자동 로그인을 껐습니다. 다음에 열면 로그인 화면이 나옵니다.',
+                'info',
+                3500
+            );
+        }
+    }
+
     function initFirebaseSync() {
         try {
             if (typeof firebase !== 'undefined') {
@@ -51209,7 +51250,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 startSingleTabHeartbeat();
                 if (firebase.auth) {
                     auth = firebase.auth();
-                    auth.onAuthStateChanged(handleAuthStateChange);
+                    applyAuthPersistence().finally(() => {
+                        auth.onAuthStateChanged(handleAuthStateChange);
+                    });
                 } else {
                     console.warn('Firebase Auth SDK가 로드되지 않았습니다.');
                 }
@@ -58760,6 +58803,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         setHeroAccountBarVisible(false);
         clearAuthError();
         clearCompanyJoinError();
+        syncAutoLoginButtons();
     }
 
     function clearCompanyJoinError() {
@@ -59332,6 +59376,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     async function handleAuthStateChange(user) {
         if (!user) {
             if (window._deletingAccount) return;
+            window._explicitAuth = false;
             if (typeof stopRealtimeListeners === 'function') stopRealtimeListeners({ clearCache: true });
             window.state.uid = null;
             window.state.userName = null;
@@ -59346,6 +59391,14 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         }
 
         if (window._justRegistering) return; // 가입 절차가 직접 화면 전환을 처리함
+
+        if (!isAutoLoginOn() && !window._explicitAuth) {
+            if (window._droppingRestoredSession) return;
+            window._droppingRestoredSession = true;
+            try { await auth.signOut(); } catch (_e) { /* ignore */ }
+            window._droppingRestoredSession = false;
+            return;
+        }
 
         try {
             const ctx = await getUserMembershipContext(user.uid);
@@ -59484,11 +59537,14 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             showAuthError({ message: '인증 서버에 연결할 수 없습니다. 인터넷 연결 후 새로고침해 주세요.' });
             return;
         }
+        window._explicitAuth = true;
         window._authSubmitInFlight = true;
         window.showLoading('로그인 중입니다...');
         try {
+            await applyAuthPersistence();
             await authClient.signInWithEmailAndPassword(email, password);
         } catch (err) {
+            window._explicitAuth = false;
             showAuthError(err);
         } finally {
             window._authSubmitInFlight = false;
@@ -59506,10 +59562,12 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             showAuthError({ message: '이름, 회사명, 이메일, 비밀번호를 모두 입력해 주세요.' });
             return;
         }
+        window._explicitAuth = true;
         window._justRegistering = true;
         window.showLoading('회사 계정을 생성하는 중입니다...');
         let cred = null;
         try {
+            await applyAuthPersistence();
             cred = await auth.createUserWithEmailAndPassword(email, password);
             const uid = cred.user.uid;
             const joinCode = await generateUniqueJoinCode();
@@ -59556,10 +59614,12 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             showAuthError({ message: '이름, 이메일, 비밀번호를 모두 입력해 주세요.' });
             return;
         }
+        window._explicitAuth = true;
         window._justRegistering = true;
         window.showLoading('계정을 생성하는 중입니다...');
         let cred = null;
         try {
+            await applyAuthPersistence();
             cred = await auth.createUserWithEmailAndPassword(email, password);
             const uid = cred.user.uid;
 
@@ -59707,6 +59767,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
     window.logout = async function() {
         if (!await window.appConfirm('🔒 정말 로그아웃 하시겠습니까?')) return;
+        window._explicitAuth = false;
         try { if (auth) await auth.signOut(); } catch (e) {}
         showLoginOverlay();
     };
@@ -60103,6 +60164,11 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             });
         }
         if (btnSubmit) btnSubmit.addEventListener('click', (e) => handleSubmit(e));
+
+        document.querySelectorAll('.auto-login-toggle').forEach((btn) => {
+            btn.addEventListener('click', () => { setAutoLoginOn(!isAutoLoginOn()); });
+        });
+        syncAutoLoginButtons();
 
         if (btnLogout) btnLogout.addEventListener('click', window.logout);
 
