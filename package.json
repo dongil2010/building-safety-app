@@ -12,7 +12,7 @@
     "android:sync": "npm run cap:sync",
     "android:open": "npm run cap:open",
     "android:setup": "powershell -ExecutionPolicy Bypass -File ./scripts/android-setup.ps1",
-    "android:build:debug": "node scripts/bump-mobile-version.js && npm run android:setup && npm run cap:sync && cd android && .\\gradlew.bat assembleDebug && node scripts/upload-mobile-release.js",
+    "android:build:debug": "node scripts/bump-mobile-version.js && npm run android:setup && npm run cap:sync && cd android && .\\gradlew.bat assembleDebug && cd .. && node scripts/upload-mobile-release.js",
     "android:upload": "node scripts/upload-mobile-release.js",
     "electron": "electron electron/main.js",
     "electron:dist": "node scripts/bump-desktop-version.js && electron-builder --win nsis"

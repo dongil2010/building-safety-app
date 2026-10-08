@@ -95,6 +95,18 @@ async function tokenFromServiceAccount(keyPath) {
     return json.access_token;
 }
 
+function readStoredAccessToken() {
+    const storePath = path.join(os.homedir(), '.config', 'configstore', 'firebase-tools.json');
+    if (!fs.existsSync(storePath)) return '';
+    try {
+        const store = JSON.parse(fs.readFileSync(storePath, 'utf8'));
+        const tokens = store.tokens || null;
+        if (!tokens || !tokens.access_token) return '';
+        if (Number(tokens.expires_at) > Date.now() + 60000) return String(tokens.access_token);
+    } catch (_e) { /* 빈 설정 */ }
+    return '';
+}
+
 async function accessToken() {
     const keyPath = process.env.GOOGLE_APPLICATION_CREDENTIALS
         || path.join(ROOT, 'scripts', 'ota-publisher.json');
@@ -104,6 +116,8 @@ async function accessToken() {
             if (raw.indexOf('private_key') > 0) return await tokenFromServiceAccount(keyPath);
         } catch (_e) { /* 다른 종류의 인증 파일 */ }
     }
+    const cached = readStoredAccessToken();
+    if (cached) return cached;
     const refresh = readRefreshToken();
     if (!refresh) {
         fail([
