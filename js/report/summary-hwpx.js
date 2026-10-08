@@ -35,6 +35,12 @@
     const WRAP_SAFETY = 0.95;
     /** 문단의 둘째 줄부터 붙는 줄 표시값(샘플 보고서의 여러 줄 문단에서 가져옴) */
     const SEG_FLAGS_NEXT_LINE = '1441792';
+    /**
+     * 템플릿에서 건물명·점검 회차가 들어갈 문단의 자리 글자.
+     * 맨 위 큰 제목(27pt)은 「보고서 본문 요약」으로 고정하고, 길이가 제각각인 건물명은 그 아래 작은 글자
+     * 문단에 넣는다 — 큰 제목 줄에 긴 글을 넣었더니 한 줄 자리에 겹쳐 찍혔다(2026-10-08).
+     */
+    const SUBTITLE_PLACEHOLDER = '(건물명 · 점검 회차)';
 
     function escXml(s) {
         return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -676,6 +682,22 @@
 
     /* ───────── 문서 조립 ───────── */
 
+    /** 표 밖의 한 줄짜리 문단 글자를 바꾼다. 쪽 폭을 넘으면 줄을 나눠 적는다. */
+    function setPlainParaText(paraXml, text) {
+        const seg = /<hp:lineseg\b[^>]*\/>/.exec(paraXml);
+        let px = paraXml.replace(/<hp:t>[^<]*<\/hp:t>/, '<hp:t>' + escXml(text) + '</hp:t>');
+        if (!seg) return px;
+        const fontH = intAttr(seg[0], 'textheight') || intAttr(seg[0], 'vertsize') || 1000;
+        const step = intAttr(seg[0], 'vertsize') + intAttr(seg[0], 'spacing');
+        const base = intAttr(seg[0], 'vertpos');
+        const segs = wrapStarts(text, (intAttr(seg[0], 'horzsize') / fontH) * WRAP_SAFETY).map(function (pos, k) {
+            let s = setAttr(setAttr(seg[0], 'textpos', pos), 'vertpos', base + k * step);
+            if (k > 0) s = setAttr(s, 'flags', SEG_FLAGS_NEXT_LINE);
+            return s;
+        }).join('');
+        return px.replace(/<hp:linesegarray>[\s\S]*?<\/hp:linesegarray>/, '<hp:linesegarray>' + segs + '</hp:linesegarray>');
+    }
+
     function setParaTableHeight(paraXml, tableH) {
         // 표를 담은 문단의 줄 높이(표 높이 + 바깥 여백)를 맞춘다
         const cut = paraXml.lastIndexOf('</hp:tbl>');
@@ -712,15 +734,13 @@
         const closeStart = sectionXml.lastIndexOf('</hs:sec>');
         const bodyXml = sectionXml.slice(rootEnd, closeStart);
         const paras = topElements(bodyXml, 'hp:p');
-        let titleDone = false;
         let surveySeen = 0;
         const out = paras.map(function (p) {
             let px = bodyXml.slice(p.start, p.end);
             const tbls = topElements(px, 'hp:tbl');
             if (!tbls.length) {
-                if (!titleDone && model.title && /<hp:t>[^<]*<\/hp:t>/.test(px)) {
-                    titleDone = true;
-                    px = px.replace(/<hp:t>[^<]*<\/hp:t>/, '<hp:t>' + escXml(model.title) + '</hp:t>');
+                if (model.title && px.indexOf('<hp:t>' + escXml(SUBTITLE_PLACEHOLDER) + '</hp:t>') >= 0) {
+                    px = setPlainParaText(px, model.title);
                 }
                 return px;
             }
@@ -841,6 +861,8 @@
         fillSurveyTable: fillSurveyTable,
         fillRowsTable: fillRowsTable,
         fitPicture: fitPicture,
+        SUBTITLE_PLACEHOLDER: SUBTITLE_PLACEHOLDER,
+        setPlainParaText: setPlainParaText,
         fillSection: fillSection,
         makeCharRegistry: makeCharRegistry,
         buildFiles: buildFiles,

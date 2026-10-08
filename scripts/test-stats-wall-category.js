@@ -48,6 +48,24 @@ function testWallCategoryRules() {
     assert.strictEqual(classify('RC벽체', '비구조체'), 'rcWall', 'RC벽체 표기는 카테고리와 무관하게 RC벽체');
     assert.strictEqual(classify('내력벽', '비구조체'), 'rcWall', '내력벽 표기는 카테고리와 무관하게 RC벽체');
     assert.strictEqual(classify('조적벽체', '비구조체'), 'masonryWall', '조적벽체는 카테고리와 무관하게 조적벽체');
+
+    // 2026-10-08: ALC·블록·벽돌 벽체도 조적벽체로 집계한다
+    ['ALC벽체', 'ALC 블록', 'alc블록벽체', '블록벽체', '블럭벽체', '시멘트벽돌', '벽돌벽체', '문 상부 조적벽체'].forEach((name) => {
+        assert.strictEqual(classify(name, '비구조체'), 'masonryWall', name + ' 은(는) 조적벽체');
+    });
+    assert.strictEqual(classify('블록벽체', '구조체'), 'masonryWall', '카테고리가 구조체로 적혀 있어도 조적벽체');
+    ['보도블록', '점자블록', '경계블록', '바닥 블록포장'].forEach((name) => {
+        assert.strictEqual(classify(name, '마감재'), 'other', name + ' 은(는) 벽체가 아니다');
+    });
+
+    // 2026-10-08: 골조와 벽체가 만나는 접합부(이격 등)는 조적벽체로 집계한다
+    ['기둥-벽체 접합부', '보-벽체 접합부', '슬래브-벽체 접합부', '천장 상부 벽체 접합부', '조적벽체 접합부', 'ALC블록 접합부'].forEach((name) => {
+        assert.strictEqual(classify(name, '비구조체'), 'masonryWall', name + ' 은(는) 조적벽체');
+        assert.strictEqual(classify(name, '구조체'), 'masonryWall', name + ' 은(는) 카테고리와 무관하게 조적벽체');
+    });
+    ['기둥-보 접합부', '보 접합부', '철골 보 볼트 접합부', 'RC벽체 접합부', '내력벽 접합부', '기둥-RC벽체 접합부'].forEach((name) => {
+        assert.strictEqual(classify(name, '구조체'), 'other', name + ' 은(는) 그대로 기타 부재');
+    });
     assert.strictEqual(classify('기둥', '구조체'), 'column', '기둥 분류는 그대로');
 }
 

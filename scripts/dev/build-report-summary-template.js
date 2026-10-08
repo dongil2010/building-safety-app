@@ -117,6 +117,8 @@ firstPara = firstPara
 
 const body = [
     firstPara,
+    // 건물명·점검 회차 자리(작은 글자). 큰 제목 줄은 글자가 커서 긴 글을 넣으면 겹친다.
+    heading(H.SUBTITLE_PLACEHOLDER, false),
     heading('① 점검 주요결과 (결과표 · 5.1 현장조사 결과)', false),
     wrapTable(byKind.main[0], false),
     wrapTable(byKind.main[1], false),
@@ -137,7 +139,7 @@ let section = first.rootOpen + body.join('') + '</hs:sec>';
 // 원본 보고서의 글자·그림을 지운다: 빈 내용으로 한 번 채운다(줄 수가 바뀌는 표는 본문 두 줄 = 가운데 줄 + 마지막 줄 서식)
 const blankRow = (n) => ({ cat: null, cells: new Array(n).fill('-') });
 const emptyModel = {
-    title: '보고서 본문 요약',
+    title: null,
     cats: {},
     repair: null,
     summaryRows: [blankRow(4), blankRow(4)],

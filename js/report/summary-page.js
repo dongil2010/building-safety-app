@@ -780,7 +780,7 @@
         const repairBlue = !!(state.prev && state.markBlue
             && core.compareLines([state.prev.repairNote], [state.repairNote]).cur[0].kind !== 'same');
         return {
-            title: '보고서 본문 요약 — ' + [state.meta.buildingName, state.meta.roundLabel].filter(Boolean).join(' ') + ' (작성안 ' + state.variant + ')',
+            title: [state.meta.buildingName, state.meta.roundLabel].filter(Boolean).join(' ') + ' (작성안 ' + state.variant + ')',
             cats: cats,
             repair: { text: state.repairNote, blue: repairBlue },
             summaryRows: core.buildSummaryRows(groups).map((r) => ({ cells: edited(r) })),

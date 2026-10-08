@@ -1119,8 +1119,15 @@
     function classifyComponentGroup(component, category) {
         var key = String(component || '').replace(/\s+/g, '');
         if (!key) return 'other';
-        if (key.indexOf('접합') >= 0) return 'other';
-        if (key.indexOf('조적') >= 0) return 'masonryWall';
+        // 2026-10-08: ALC·블록(블럭)·벽돌 벽체도 조적벽체로 묶는다. 바닥에 까는 블록(보도·점자·경계)은 벽체가 아니다.
+        var isMasonry = /조적|ALC|블록|블럭|벽돌/i.test(key) && !/보도|점자|경계|포장|바닥/.test(key);
+        if (key.indexOf('접합') >= 0) {
+            // 골조와 벽체가 만나는 접합부(기둥-벽체, 보-벽체 접합부 이격 등)는 채움벽 쪽 결함이라 조적벽체로 센다.
+            // RC벽체·내력벽·옹벽 접합부와 골조끼리의 접합부(기둥-보)는 그대로 기타 부재.
+            var wallJoint = key.indexOf('벽체') >= 0 && !/RC벽체|내력벽|옹벽|전단벽/i.test(key);
+            return isMasonry || wallJoint ? 'masonryWall' : 'other';
+        }
+        if (isMasonry) return 'masonryWall';
         // 철골보(G)/(B)는 예전 철골거더·철골빔처럼 기타 부재로 둔다
         var isSteel = key.indexOf('철골') >= 0;
         if (key.indexOf('큰보') >= 0 || (!isSteel && key.indexOf('보(G)') >= 0)) return 'bigBeam';

@@ -59,7 +59,7 @@ const many = (n, catKey, width) => Array.from({ length: n }, (_, i) => ({
     cat: catKey, cells: [catKey, '유형' + i].concat(new Array(width - 2).fill('값' + i))
 }));
 const model = {
-    title: '보고서 본문 요약 — 시험건물',
+    title: '시험건물 2026년 하반기 (작성안 A)',
     cats: {
         structure: cat([line('지하1층 슬래브 균열 (균열폭:0.45mm)', true), line('지상2층 보 누수')], [{ key: 'p1', caption: '지하1층 슬래브 균열' }]),
         nonStructure: cat([line('지하1층 블록벽체 수직균열')]),
@@ -83,7 +83,13 @@ assert.ok(V.checkWellFormed(files['Contents/header.xml']).ok);
 assert.deepStrictEqual(V.checkManifest(files['Contents/content.hpf'], Object.keys(files)), []);
 
 // 글자
-assert.ok(sec.includes('<hp:t>보고서 본문 요약 — 시험건물</hp:t>'), '제목');
+// 큰 제목은 고정 글자, 건물명은 그 아래 작은 글자 문단(큰 제목 줄에 긴 글을 넣으면 한 줄 자리에 겹친다)
+assert.ok(sec.includes('<hp:t>보고서 본문 요약</hp:t>'), '큰 제목');
+assert.ok(sec.includes('<hp:t>시험건물 2026년 하반기 (작성안 A)</hp:t>'), '건물명·회차');
+assert.ok(!sec.includes(H.SUBTITLE_PLACEHOLDER), '자리 글자가 남으면 안 된다');
+assert.ok(tplSec.includes('<hp:t>' + H.SUBTITLE_PLACEHOLDER + '</hp:t>'), '템플릿에는 자리 글자가 있어야 한다');
+const longTitle = H.setPlainParaText('<hp:p id="0"><hp:run charPrIDRef="1"><hp:t>x</hp:t></hp:run><hp:linesegarray><hp:lineseg textpos="0" vertpos="0" vertsize="900" textheight="900" baseline="765" spacing="992" horzpos="0" horzsize="9000" flags="393216"/></hp:linesegarray></hp:p>', '아주 긴 건물 이름이 들어가는 경우의 제목 문단');
+assert.ok((longTitle.match(/<hp:lineseg /g) || []).length >= 2 && /vertpos="1892"/.test(longTitle), '쪽 폭을 넘는 건물명은 줄을 나눈다');
 assert.ok(sec.includes('<hp:t>1. 지하1층 슬래브 균열 (균열폭:0.45mm)</hp:t>'));
 assert.ok(sec.includes('- 의견 &amp; &lt;특수문자&gt;'), '특수문자는 XML로 바꿔 적는다');
 assert.ok(sec.includes('<hp:t>1. 일부 보수 실시</hp:t>'), '보수상태');
