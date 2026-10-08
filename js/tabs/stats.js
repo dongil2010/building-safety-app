@@ -1573,7 +1573,7 @@
      * 구조 부재별 층별 표. 세 가지를 눌러서 따로 본다(2026-10-08).
      *  - 최대 균열폭: 균열·이격 결함만 대상. 건수도 균열·이격 건수만 센다.
      *  - 균열폭에 따른 분류: 균열·이격 결함을 폭 구간별로 센다(결함 한 건 = 가장 큰 폭의 구간 하나).
-     *  - 결함 종류별 건수: 누수·백태 / 박리·박락·들뜸 / 철근노출 / 전체 (균열·이격은 위 두 보기에서 본다)
+     *  - 결함 종류별 건수: 균열·이격 / 누수·백태 / 박리·박락·들뜸 / 철근노출 / 전체
      */
     function renderComponentCrackPanel(payload, root) {
         if (!root || !payload) return;
@@ -1645,7 +1645,9 @@
                     return '<tr' + trCls + '><th scope="row">' + esc(fr.floorLabel) + '</th><td class="stats-cell-sum">' + widthCell + '</td><td>' + noCell + '</td><td class="stats-cell-hit">' + floorCount(fr) + '</td></tr>';
                 }).join('') + '</tbody></table></div>';
         } else {
-            var kindHead = DEFECT_KIND_COLUMNS.map(function (k) { return '<th class="stats-kind-col">' + esc(k.label) + '</th>'; }).join('');
+            // 균열·이격은 건수만 함께 싣는다(폭과 구간은 앞의 두 보기에서 본다)
+            var kindHead = '<th class="stats-kind-col">균열·이격</th>'
+                + DEFECT_KIND_COLUMNS.map(function (k) { return '<th class="stats-kind-col">' + esc(k.label) + '</th>'; }).join('');
             tableHtml = '<div class="table-responsive stats-table-wrap"><table class="data-table stats-component-crack-table"><thead><tr><th>층</th>' + kindHead + '<th>전체 건수</th></tr></thead><tbody>' +
                 floorsWithData.map(function (fr) {
                     var trCls = fr.floorCode === payload.currentFloor ? ' class="stats-row-current"' : '';
@@ -1653,7 +1655,8 @@
                     var kindCell = function (n) {
                         return '<td class="stats-kind-col ' + (n ? 'stats-cell-hit' : 'stats-cell-zero') + '">' + n + '</td>';
                     };
-                    var kindCells = DEFECT_KIND_COLUMNS.map(function (k) { return kindCell(kindBucket[k.key] || 0); }).join('');
+                    var crackN = (fr.componentCrackCounts && fr.componentCrackCounts[selectedComponentGroup]) || 0;
+                    var kindCells = kindCell(crackN) + DEFECT_KIND_COLUMNS.map(function (k) { return kindCell(kindBucket[k.key] || 0); }).join('');
                     return '<tr' + trCls + '><th scope="row">' + esc(fr.floorLabel) + '</th>' + kindCells + '<td class="stats-cell-hit">' + floorCount(fr) + '</td></tr>';
                 }).join('') + '</tbody></table></div>';
         }
