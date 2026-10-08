@@ -39,7 +39,8 @@ vm.runInContext([
     'this.widthsJson = function (d) { return JSON.stringify(getCrackWidthNumbers(d)); };'
 ].join('\n'), sandbox);
 // vm 안에서 만든 배열은 바깥 배열과 원형이 달라 값이 같아도 다르다고 나온다 — 글자로 받아 다시 읽는다
-const widths = (d) => JSON.parse(sandbox.widthsJson(d));
+// 균열 결함으로 넣어 본다(결함 종류를 따로 적은 경우는 그대로 둔다)
+const widths = (d) => JSON.parse(sandbox.widthsJson(Object.assign({ defectType: '균열' }, d)));
 
 // 측정 행에 구분이 있는 지금 데이터
 assert.deepStrictEqual(widths({
@@ -72,5 +73,14 @@ assert.deepStrictEqual(widths({ size: '', crackWidth: '0.15 / 0.20' }), [0.15, 0
 assert.deepStrictEqual(widths({ size: 'Cw:0.4' }), [0.4]);
 assert.deepStrictEqual(widths({ size: '1.0/4.5' }), [1]);
 assert.deepStrictEqual(widths({ size: '2.0*2.0' }), []);
+
+// 균열·이격이 아닌 결함은 폭 칸에 값이 있어도 균열폭으로 세지 않는다
+assert.deepStrictEqual(widths({ defectType: '철근노출', size: '0.05/0.8', crackWidth: '0.05', crackMeasures: [{ width: '0.05', length: '0.8', join: '/' }] }), []);
+assert.deepStrictEqual(widths({ defectType: '재료분리 및 철근노출', size: '2.5/2.0', crackWidth: '2.5' }), []);
+assert.deepStrictEqual(widths({ defectType: '누수 및 백태', size: '', crackWidth: '' }), []);
+assert.deepStrictEqual(widths({ defectType: '', size: '0.3/1.5', crackWidth: '0.3' }), [], '결함 종류가 비어 있으면 세지 않는다');
+assert.deepStrictEqual(widths({ defectType: '수직·경사균열', size: '0.3/0.4', crackWidth: '0.3' }), [0.3]);
+assert.deepStrictEqual(widths({ defectType: '균열 및 백태', size: '0.2/2.0', crackWidth: '0.2' }), [0.2], '균열이 다른 결함과 함께 적혀도 센다');
+assert.deepStrictEqual(widths({ defectType: '수직이격', size: '5.0/0.8', crackWidth: '5.0' }), [5], '이격도 폭을 센다');
 
 console.log('test-stats-crack-width-area: ok');
