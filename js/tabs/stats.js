@@ -1594,15 +1594,18 @@
                     return '<tr' + trCls + '><th scope="row">' + esc(fr.floorLabel) + '</th><td class="stats-cell-sum">' + widthCell + '</td><td>' + noCell + '</td><td class="stats-cell-hit">' + floorCount(fr) + '</td></tr>';
                 }).join('') + '</tbody></table></div>';
         } else {
-            var kindHead = DEFECT_KIND_COLUMNS.map(function (k) { return '<th class="stats-kind-col">' + esc(k.label) + '</th>'; }).join('');
+            // 균열·이격 건수도 종류별 건수에 함께 싣는다(폭은 「최대 균열폭」에서 본다)
+            var kindHead = '<th class="stats-kind-col">균열·이격</th>'
+                + DEFECT_KIND_COLUMNS.map(function (k) { return '<th class="stats-kind-col">' + esc(k.label) + '</th>'; }).join('');
             tableHtml = '<div class="table-responsive stats-table-wrap"><table class="data-table stats-component-crack-table"><thead><tr><th>층</th>' + kindHead + '<th>전체 건수</th></tr></thead><tbody>' +
                 floorsWithData.map(function (fr) {
                     var trCls = fr.floorCode === payload.currentFloor ? ' class="stats-row-current"' : '';
                     var kindBucket = (fr.componentKinds && fr.componentKinds[selectedComponentGroup]) || {};
-                    var kindCells = DEFECT_KIND_COLUMNS.map(function (k) {
-                        var n = kindBucket[k.key] || 0;
+                    var kindCell = function (n) {
                         return '<td class="stats-kind-col ' + (n ? 'stats-cell-hit' : 'stats-cell-zero') + '">' + n + '</td>';
-                    }).join('');
+                    };
+                    var crackN = (fr.componentCrackCounts && fr.componentCrackCounts[selectedComponentGroup]) || 0;
+                    var kindCells = kindCell(crackN) + DEFECT_KIND_COLUMNS.map(function (k) { return kindCell(kindBucket[k.key] || 0); }).join('');
                     return '<tr' + trCls + '><th scope="row">' + esc(fr.floorLabel) + '</th>' + kindCells + '<td class="stats-cell-hit">' + floorCount(fr) + '</td></tr>';
                 }).join('') + '</tbody></table></div>';
         }
