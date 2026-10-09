@@ -39,4 +39,23 @@ const body = app.slice(app.indexOf('async function runOfflinePrep('), app.indexO
 assert.ok(!/writeFloorSyncBundle|syncStateToFirebase|scheduleSyncToFirebase|persistPhotoToCloud|\.set\(\{|\.update\(|\.delete\(\)/.test(body), '읽기만');
 // 메모리에 https 주소만 있으면 기기 사본을 먼저 본다
 assert.ok(/메모리에 Storage 주소\(https\)만 있으면/.test(app));
+// 회차별(2026-10-09): 비우기는 다른 회차가 쓰는 사진을 남긴다
+assert.deepStrictEqual(prep.photoKeysSafeToDelete(['s1', 'b1', 'b1', 'b2'], new Set(['s1'])), ['b1', 'b2']);
+assert.deepStrictEqual(prep.photoKeysSafeToDelete(['s1'], []), ['s1']);
+const rec = (id, ok, extra) => Object.assign({ buildingId: id, at: 100, complete: ok, floors: { ok: 2, total: 2, failed: [] },
+    drawings: { ok: 2, total: 2, failed: [] }, photos: { ok: 3, total: 3, failed: 0 }, bytes: 1000 }, extra || {});
+assert.strictEqual(prep.aggregateRoundStatus([undefined, undefined], 2), null, '아직 안 받은 회차');
+const half = prep.aggregateRoundStatus([rec('a', true), undefined], 2);
+assert.strictEqual(half.complete, false, '동 하나만 받으면 미완료');
+assert.ok(/동 1\/2/.test(prep.describeStatus(half, () => 't')));
+const full = prep.aggregateRoundStatus([rec('a', true), rec('b', true, { at: 50 })], 2);
+assert.strictEqual(full.complete, true);
+assert.strictEqual(full.floors.total, 4);
+assert.strictEqual(full.photos.ok, 6);
+assert.strictEqual(full.bytes, 2000);
+assert.strictEqual(full.at, 50, '가장 오래된 받은 시각');
+assert.ok(/function offlinePrepRoundsOfSite\(/.test(app), '회차 목록');
+assert.ok(/data-op-clear=/.test(app) && /data-op-get=/.test(app) && /data-op-check=/.test(app), '회차별 받기·비우기·선택');
+const clr = app.slice(app.indexOf('async function clearOfflinePrep('), app.indexOf('window.clearOfflinePrep = clearOfflinePrep'));
+assert.ok(/photoKeysSafeToDelete/.test(clr) && /isPhotoMarkedOnStorage/.test(clr), '공유 사진 보호 + 서버 사본 확인');
 console.log('test-offline-prep ok');

@@ -55054,7 +55054,12 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             }
         };
         const prevRec = await prep.getStatus(bldg.id);
-        const downloadedPhotoKeys = new Set((prevRec && prevRec.downloadedPhotoKeys) || []);
+        const ownPrevPhotoKeys = (prevRec && prevRec.downloadedPhotoKeys) || [];
+        const downloadedPhotoKeys = new Set(ownPrevPhotoKeys);
+        // 다른 회차가 받아 둔 같은 사진(회차 복사로 ID 공유)도 이 회차 몫으로 기록 — 그래야 나중에 이 회차만 남았을 때 비울 수 있다
+        (await prep.listStatuses()).forEach((r) => {
+            if (r && r.buildingId !== bldg.id) (r.downloadedPhotoKeys || []).forEach((k) => downloadedPhotoKeys.add(k));
+        });
         const rec = {
             buildingId: bldg.id,
             name: bldg.name || '',
@@ -55153,6 +55158,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 .map((pid) => ({ key: getStrengthPhotoDocId(bldg.id, pid), url: null, kind: 'ndt' }));
             const jobs = refs.concat(strengthKeys);
             rec.photos.total = jobs.length;
+            rec.photoKeys = jobs.map((j) => j.key);
             let doneCount = 0;
             const companyReady = !!(db && window.state.companyId);
             const fetchOne = async (job) => {
@@ -55239,7 +55245,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             rec.error = String((e && e.message) || e);
             rec.at = Date.now();
             // 받은 사진 기록은 남겨 비우기 때 지울 수 있게
-            rec.downloadedPhotoKeys = Array.from(new Set(rec.downloadedPhotoKeys.concat(Array.from(downloadedPhotoKeys))));
+            rec.downloadedPhotoKeys = Array.from(new Set(rec.downloadedPhotoKeys.concat(ownPrevPhotoKeys)));
             await prep.putStatus(rec);
             throw e;
         } finally {
@@ -55252,31 +55258,94 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
      * 오프라인 준비 비우기 — 이 기능이 서버에서 받아 온 사진 사본과 확대용 8000 도면만 지운다.
      * 이 기기에서 찍었거나 아직 안 올라간 사진은 기록에 없으므로 건드리지 않는다. 기본 도면은 점검에 꼭 필요해 둔다.
      */
-    async function clearOfflinePrep(bldg) {
+    /** 이 건물(동)의 데이터가 쓰는 사진 키 전부 — 결함 현재·이전 회차 + 비파괴 측정지·비교사진 */
+    function offlinePrepPhotoKeysOfBuilding(bldgId) {
         const prep = window.BSA && window.BSA.offlinePrep;
-        if (!prep || !bldg || !bldg.id) return 0;
-        const rec = await prep.getStatus(bldg.id);
+        const keys = new Set();
+        if (!prep || !bldgId) return keys;
+        prep.collectDefectPhotoRefs(window.state.defects, bldgId, null, null).forEach((r) => keys.add(r.key));
+        Array.from(collectStrengthPhotoIdsInBuilding(bldgId) || []).forEach((pid) => keys.add(getStrengthPhotoDocId(bldgId, pid)));
+        return keys;
+    }
+
+    /**
+     * 오프라인 준비 비우기(2026-10-09 회차별) — bldgs: 비울 회차의 동 목록(건물 하나만 넘겨도 됨).
+     * 이 기능이 서버에서 받아 온 사진 사본만 지우고, **다른 회차(동)가 쓰거나 받아 둔 사진은 남긴다**
+     * (회차를 복사하면 사진 ID가 이어져 같은 사진을 함께 쓴다). 기기에서 찍은 사진·기본 도면·결함 데이터는 그대로.
+     */
+    async function clearOfflinePrep(bldgsArg) {
+        const prep = window.BSA && window.BSA.offlinePrep;
+        const bldgs = (Array.isArray(bldgsArg) ? bldgsArg : [bldgsArg]).filter((b) => b && b.id);
+        if (!prep || !bldgs.length) return { removed: 0, kept: 0 };
+        const clearIds = new Set(bldgs.map((b) => b.id));
+        const all = await prep.listStatuses();
+        const mine = all.filter((r) => r && clearIds.has(r.buildingId));
+        const candidates = [];
+        mine.forEach((r) => (r.downloadedPhotoKeys || []).forEach((k) => candidates.push(k)));
+        // 남기는 사진: 오프라인 준비해 둔 다른 회차(동)가 쓰는 사진(지금 기기 데이터 + 준비 기록) + 지금 열어 둔 건물 사진.
+        // 준비하지 않은 회차는 어차피 인터넷으로 다시 받으므로 막지 않는다(서버 사본이 있는 사진만 지움).
+        const protectedKeys = new Set();
+        const keepBldgIds = new Set(all.filter((r) => r && !clearIds.has(r.buildingId)).map((r) => r.buildingId));
+        if (window.state.currentBuildingId && !clearIds.has(window.state.currentBuildingId)) keepBldgIds.add(window.state.currentBuildingId);
+        keepBldgIds.forEach((id) => offlinePrepPhotoKeysOfBuilding(id).forEach((k) => protectedKeys.add(k)));
+        all.forEach((r) => {
+            if (!r || clearIds.has(r.buildingId)) return;
+            (r.photoKeys || []).forEach((k) => protectedKeys.add(k));
+            (r.downloadedPhotoKeys || []).forEach((k) => protectedKeys.add(k));
+        });
+        const safe = prep.photoKeysSafeToDelete(candidates, protectedKeys);
         let removed = 0;
-        if (rec) {
-            for (const key of (rec.downloadedPhotoKeys || [])) {
-                if (!isPhotoMarkedOnStorage(key)) continue;   // 서버 사본이 확인된 사진만
-                try {
-                    await idbDelete('photos', key);
-                    if (window._photoCache && prep.isDataUrl(window._photoCache[key])) delete window._photoCache[key];
-                    _idbPersistedPhotoKeys.delete(key);
-                    removed++;
-                } catch (_e) { /* ignore */ }
-            }
-            if (rec.hiRes) {
-                for (const fc of buildingFloorCodesForBackup(bldg)) {
-                    try { await idbDelete('floorDrawingTiers', floorDrawingTierIdbKey(bldg.id, fc, 8000)); } catch (_e) { /* ignore */ }
+        for (const key of safe) {
+            if (!isPhotoMarkedOnStorage(key)) continue;   // 서버 사본이 확인된 사진만
+            try {
+                await idbDelete('photos', key);
+                if (window._photoCache && prep.isDataUrl(window._photoCache[key])) delete window._photoCache[key];
+                _idbPersistedPhotoKeys.delete(key);
+                removed++;
+            } catch (_e) { /* ignore */ }
+        }
+        const kept = new Set(candidates).size - safe.length;
+        for (const b of bldgs) {
+            const rec = mine.find((r) => r.buildingId === b.id);
+            if (rec && rec.hiRes) {
+                for (const fc of buildingFloorCodesForBackup(b)) {
+                    try { await idbDelete('floorDrawingTiers', floorDrawingTierIdbKey(b.id, fc, 8000)); } catch (_e) { /* ignore */ }
                 }
             }
+            await prep.deleteStatus(b.id);
         }
-        await prep.deleteStatus(bldg.id);
-        return removed;
+        return { removed, kept };
     }
     window.clearOfflinePrep = clearOfflinePrep;
+
+    /** 이 건물과 같은 현장의 회차 목록(최근 회차 먼저). 회차마다 동 여러 개일 수 있다. */
+    function offlinePrepRoundsOfSite(bldg) {
+        const site = getBuildingSiteName(bldg);
+        const byRound = new Map();
+        (window.state.buildings || []).forEach((b) => {
+            if (!b || !b.id || getBuildingSiteName(b) !== site) return;
+            if (b.deletedAt || b.trashedAt) return;
+            const rk = getBuildingSurveyRoundKey(b) || '_none';
+            if (!byRound.has(rk)) byRound.set(rk, []);
+            byRound.get(rk).push(b);
+        });
+        const keys = Array.from(byRound.keys()).sort((a, b) => {
+            const ra = getSurveyRoundOrderRank(a);
+            const rb = getSurveyRoundOrderRank(b);
+            if (ra != null && rb != null && ra !== rb) return rb - ra;
+            if (ra != null && rb == null) return -1;
+            if (ra == null && rb != null) return 1;
+            return String(b).localeCompare(String(a), 'ko');
+        });
+        return {
+            site,
+            rounds: keys.map((rk) => ({
+                key: rk,
+                label: rk === '_none' ? '회차 미지정' : formatSurveyRoundLabel(rk),
+                buildings: byRound.get(rk)
+            }))
+        };
+    }
 
     function ensureOfflinePrepModal() {
         let wrap = document.getElementById('offlinePrepModal');
@@ -55291,8 +55360,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     <button type="button" class="modal-close" data-op-close title="닫기">&times;</button>
                 </div>
                 <div class="modal-body">
-                    <p class="bulk-restore-meta">이 건물의 모든 층(결함·비파괴), 도면, 사진을 이 기기에 받아 둡니다. 인터넷이 끊겨도 층을 바꾸고 도면·사진을 볼 수 있습니다. 서버 데이터는 바꾸지 않습니다.</p>
-                    <p class="offline-prep-status" id="offlinePrepStatus"></p>
+                    <p class="bulk-restore-meta">받을 회차를 고르세요. 고른 회차의 모든 층(결함·비파괴), 도면, 사진을 이 기기에 받아 둡니다. 인터넷이 끊겨도 그 회차는 층을 바꾸고 도면·사진을 볼 수 있습니다. 서버 데이터는 바꾸지 않습니다. 전차 비교사진은 이번 회차를 받을 때 함께 받습니다.</p>
+                    <div class="offline-prep-rounds" id="offlinePrepRounds"></div>
                     <label class="offline-prep-opt"><input type="checkbox" id="offlinePrepHiRes"> 확대용 고해상도 도면도 받기 (용량 큼)</label>
                     <div class="offline-prep-progress" id="offlinePrepProgressWrap" hidden>
                         <div class="offline-prep-bar"><div class="offline-prep-bar-fill" id="offlinePrepBar"></div></div>
@@ -55301,10 +55370,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     <p class="bulk-restore-meta" id="offlinePrepStorage"></p>
                 </div>
                 <div class="modal-footer">
-                    <button type="button" class="btn btn-outline" id="btnOfflinePrepClear">비우기</button>
                     <button type="button" class="btn btn-outline" id="btnOfflinePrepCancel" style="display:none">멈추기</button>
                     <button type="button" class="btn btn-outline" data-op-close>닫기</button>
-                    <button type="button" class="btn btn-primary" id="btnOfflinePrepStart"><i class="fa-solid fa-download"></i> <span id="btnOfflinePrepStartLabel">받기</span></button>
+                    <button type="button" class="btn btn-primary" id="btnOfflinePrepStart"><i class="fa-solid fa-download"></i> 고른 회차 받기</button>
                 </div>
             </div>`;
         document.body.appendChild(wrap);
@@ -55315,24 +55383,34 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         return wrap;
     }
 
-    async function renderOfflinePrepStatus(bldg) {
+    async function renderOfflinePrepRounds(wrap, info, checked) {
         const prep = window.BSA && window.BSA.offlinePrep;
-        const wrap = ensureOfflinePrepModal();
-        const rec = prep ? await prep.getStatus(bldg.id) : null;
+        const all = prep ? await prep.listStatuses() : [];
+        const byId = new Map(all.map((r) => [r.buildingId, r]));
         const fmt = (ts) => { try { return formatBulkSnapTime(ts); } catch (_e) { return new Date(ts).toLocaleString(); } };
-        const st = wrap.querySelector('#offlinePrepStatus');
-        st.textContent = prep ? prep.describeStatus(rec, fmt) : '';
-        if (rec && rec.error) st.textContent += ` (${rec.error})`;
-        else if (rec && !rec.complete) {
-            const miss = [];
-            if (rec.floors.failed.length) miss.push(`층 ${rec.floors.failed.length}개`);
-            if (rec.drawings.failed.length) miss.push(`도면 ${rec.drawings.failed.length}개`);
-            if (rec.photos.failed) miss.push(`사진 ${rec.photos.failed}장`);
-            if (miss.length) st.textContent += ` — 못 받음: ${miss.join(', ')}`;
-        }
-        st.classList.toggle('is-done', !!(rec && rec.complete));
-        wrap.querySelector('#btnOfflinePrepStartLabel').textContent = rec ? '새로 받기' : '받기';
-        wrap.querySelector('#btnOfflinePrepClear').disabled = !rec;
+        const box = wrap.querySelector('#offlinePrepRounds');
+        box.innerHTML = info.rounds.map((r) => {
+            const agg = prep.aggregateRoundStatus(r.buildings.map((b) => byId.get(b.id)), r.buildings.length);
+            let line = prep.describeStatus(agg, fmt);
+            if (agg && !agg.complete) {
+                const miss = [];
+                if (agg.floors.failed.length) miss.push(`층 ${agg.floors.failed.length}개`);
+                if (agg.drawings.failed.length) miss.push(`도면 ${agg.drawings.failed.length}개`);
+                if (agg.photos.failed) miss.push(`사진 ${agg.photos.failed}장`);
+                if (miss.length) line += ` — 못 받음: ${miss.join(', ')}`;
+                else if (agg.error) line += ` (${agg.error})`;
+            }
+            const dongs = r.buildings.length > 1 ? ` · 동 ${r.buildings.length}개` : '';
+            const k = escapeHtml(r.key);
+            return `<div class="offline-prep-round${agg && agg.complete ? ' is-done' : ''}" data-op-round="${k}">
+                    <label class="offline-prep-round-name"><input type="checkbox" data-op-check="${k}"${checked.has(r.key) ? ' checked' : ''}> ${escapeHtml(r.label)}${dongs}</label>
+                    <div class="offline-prep-round-status">${escapeHtml(line)}</div>
+                    <div class="offline-prep-round-actions">
+                        <button type="button" class="btn btn-outline btn-sm" data-op-get="${k}">${agg ? '새로 받기' : '받기'}</button>
+                        <button type="button" class="btn btn-outline btn-sm" data-op-clear="${k}"${agg ? '' : ' disabled'}>비우기</button>
+                    </div>
+                </div>`;
+        }).join('') || '<p class="bulk-restore-meta">이 현장에 회차가 없습니다.</p>';
         const stor = wrap.querySelector('#offlinePrepStorage');
         stor.textContent = '';
         if (navigator.storage && typeof navigator.storage.estimate === 'function') {
@@ -55354,57 +55432,98 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             return;
         }
         const wrap = ensureOfflinePrepModal();
-        wrap.dataset.buildingId = bldg.id;
-        wrap.querySelector('#offlinePrepTitle').textContent = `오프라인 준비 · ${bldg.name || ''}`;
+        const info = offlinePrepRoundsOfSite(bldg);
+        // 기본: 이 건물의 회차
+        const checked = new Set([getBuildingSurveyRoundKey(bldg) || '_none']);
+        wrap.querySelector('#offlinePrepTitle').textContent = `오프라인 준비 · ${info.site || bldg.name || ''}`;
         wrap.querySelector('#offlinePrepProgressWrap').hidden = true;
         wrap.classList.add('open');
-        renderOfflinePrepStatus(bldg);
+        const refresh = () => renderOfflinePrepRounds(wrap, info, checked);
+        refresh();
         const startBtn = wrap.querySelector('#btnOfflinePrepStart');
-        const clearBtn = wrap.querySelector('#btnOfflinePrepClear');
         const cancelBtn = wrap.querySelector('#btnOfflinePrepCancel');
         let cancelFlag = false;
         const phaseLabel = { floors: '층 데이터', drawings: '도면', photos: '사진', done: '마무리' };
-        startBtn.onclick = async () => {
+        const setBusy = (busy) => {
+            startBtn.disabled = busy;
+            cancelBtn.style.display = busy ? '' : 'none';
+            wrap.querySelectorAll('[data-op-get],[data-op-clear],[data-op-check]').forEach((el) => { el.disabled = busy; });
+        };
+        const runRounds = async (roundKeys) => {
             if (_offlinePrepRunning) return;
+            const rounds = info.rounds.filter((r) => roundKeys.includes(r.key));
+            if (!rounds.length) {
+                window.showToast('받을 회차를 골라 주세요.', 'warning');
+                return;
+            }
             cancelFlag = false;
             const prep = window.BSA.offlinePrep;
             const pw = wrap.querySelector('#offlinePrepProgressWrap');
             const bar = wrap.querySelector('#offlinePrepBar');
             const txt = wrap.querySelector('#offlinePrepProgressText');
             pw.hidden = false;
-            startBtn.disabled = true;
-            clearBtn.disabled = true;
-            cancelBtn.style.display = '';
+            setBusy(true);
+            const jobs = [];
+            rounds.forEach((r) => r.buildings.forEach((b) => jobs.push({ round: r, bldg: b })));
+            let allOk = true;
+            let errMsg = '';
             try {
-                const rec = await runOfflinePrep(bldg, {
-                    hiRes: !!wrap.querySelector('#offlinePrepHiRes').checked,
-                    isCancelled: () => cancelFlag,
-                    onProgress: (p) => {
-                        const pct = p.total ? Math.round((p.done / p.total) * 100) : 0;
-                        bar.style.width = `${p.phase === 'done' ? 100 : pct}%`;
-                        txt.textContent = `${phaseLabel[p.phase] || ''} ${p.done}/${p.total}`
-                            + `${p.label ? ' · ' + p.label : ''} · ${prep.formatBytes(p.bytes)}`;
+                for (let j = 0; j < jobs.length; j++) {
+                    if (cancelFlag) { errMsg = '취소했습니다.'; allOk = false; break; }
+                    const { round, bldg: b } = jobs[j];
+                    const who = round.buildings.length > 1 ? `${round.label} ${formatDongRowLabel(b)}` : round.label;
+                    try {
+                        const rec = await runOfflinePrep(b, {
+                            hiRes: !!wrap.querySelector('#offlinePrepHiRes').checked,
+                            isCancelled: () => cancelFlag,
+                            onProgress: (p) => {
+                                const pct = p.total ? (p.done / p.total) : 0;
+                                const overall = Math.round(((j + (p.phase === 'done' ? 1 : pct * 0.99)) / jobs.length) * 100);
+                                bar.style.width = `${overall}%`;
+                                txt.textContent = `${who} (${j + 1}/${jobs.length}) · ${phaseLabel[p.phase] || ''} ${p.done}/${p.total}`
+                                    + `${p.label ? ' · ' + p.label : ''} · ${prep.formatBytes(p.bytes)}`;
+                            }
+                        });
+                        if (!rec.complete) allOk = false;
+                    } catch (e) {
+                        allOk = false;
+                        errMsg = (e && e.message) || String(e);
+                        if (cancelFlag || /인터넷|로그인|이미 준비/.test(errMsg)) break;
                     }
-                });
-                window.showToast(rec.complete ? '오프라인 준비 완료' : '일부만 받았습니다. 인터넷 확인 후 새로 받기를 눌러 주세요.',
-                    rec.complete ? 'success' : 'warning', 5000);
+                }
+                window.showToast(allOk ? '오프라인 준비 완료'
+                    : `일부만 받았습니다${errMsg ? ` (${errMsg})` : ''}. 인터넷 확인 후 새로 받기를 눌러 주세요.`,
+                allOk ? 'success' : 'warning', 5000);
                 if (state.currentTab === 'tab-map' && typeof drawCanvas === 'function') drawCanvas();
-            } catch (e) {
-                window.showToast(`오프라인 준비: ${(e && e.message) || e}`, 'warning', 5000);
             } finally {
-                startBtn.disabled = false;
-                cancelBtn.style.display = 'none';
-                renderOfflinePrepStatus(bldg);
+                setBusy(false);
+                refresh();
             }
         };
+        startBtn.onclick = () => {
+            const keys = Array.from(wrap.querySelectorAll('[data-op-check]:checked')).map((el) => el.getAttribute('data-op-check'));
+            runRounds(keys);
+        };
         cancelBtn.onclick = () => { cancelFlag = true; };
-        clearBtn.onclick = async () => {
-            if (_offlinePrepRunning) return;
-            const ok = await window.appConfirm('이 건물을 위해 받아 둔 사진 사본을 이 기기에서 지울까요?\n(서버 데이터와 이 기기에서 찍은 사진은 그대로입니다. 도면과 결함 데이터는 남겨 둡니다.)');
-            if (!ok) return;
-            const n = await clearOfflinePrep(bldg);
-            window.showToast(`오프라인 준비를 비웠습니다 (사진 ${n}장)`, 'success');
-            renderOfflinePrepStatus(bldg);
+        wrap.querySelector('#offlinePrepRounds').onclick = async (e) => {
+            const chk = e.target.closest('[data-op-check]');
+            if (chk) {
+                const k = chk.getAttribute('data-op-check');
+                if (chk.checked) checked.add(k); else checked.delete(k);
+                return;
+            }
+            const get = e.target.closest('[data-op-get]');
+            if (get) { runRounds([get.getAttribute('data-op-get')]); return; }
+            const clr = e.target.closest('[data-op-clear]');
+            if (clr && !_offlinePrepRunning) {
+                const r = info.rounds.find((x) => x.key === clr.getAttribute('data-op-clear'));
+                if (!r) return;
+                const ok = await window.appConfirm(`${r.label} 회차를 위해 받아 둔 사진 사본을 이 기기에서 지울까요?\n(다른 회차와 함께 쓰는 사진, 이 기기에서 찍은 사진, 서버 데이터는 그대로입니다. 도면과 결함 데이터는 남겨 둡니다.)`);
+                if (!ok) return;
+                const res = await clearOfflinePrep(r.buildings);
+                window.showToast(`${r.label} 오프라인 준비를 비웠습니다 (사진 ${res.removed}장${res.kept ? `, 다른 회차와 함께 쓰는 ${res.kept}장은 남김` : ''})`, 'success', 5000);
+                refresh();
+            }
         };
     };
 

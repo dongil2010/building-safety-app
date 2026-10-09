@@ -120,6 +120,46 @@
         return tx('readwrite', (s) => s.delete(String(buildingId))).then(() => true).catch(() => false);
     }
 
+    function listStatuses() {
+        return tx('readonly', (s) => s.getAll()).then((v) => v || []).catch(() => []);
+    }
+
+    /**
+     * 회차 비우기 때 지워도 되는 사진만 고른다(2026-10-09).
+     * 회차를 복사하면 사진 ID가 그대로 이어지므로, 비우지 않는 다른 회차(동)가 쓰거나 받아 둔 사진은 남긴다.
+     * candidates: 비우는 회차가 받아 온 사진 키, protectedKeys: 다른 회차가 쓰는 사진 키
+     */
+    function photoKeysSafeToDelete(candidates, protectedKeys) {
+        const keep = protectedKeys instanceof Set ? protectedKeys : new Set(protectedKeys || []);
+        const out = [];
+        const seen = new Set();
+        (candidates || []).forEach((k) => {
+            if (!k || seen.has(k)) return;
+            seen.add(k);
+            if (!keep.has(k)) out.push(k);
+        });
+        return out;
+    }
+
+    /** 한 회차(동 여러 개일 수 있음)의 기록을 합친다. 한 동이라도 안 받았으면 null 아님 + complete false */
+    function aggregateRoundStatus(records, buildingCount) {
+        const recs = (records || []).filter(Boolean);
+        if (!recs.length) return null;
+        const sum = (f) => recs.reduce((a, r) => a + (Number(f(r)) || 0), 0);
+        const failedLen = (r, k) => ((r[k] && r[k].failed && r[k].failed.length) || 0);
+        return {
+            at: Math.min.apply(null, recs.map((r) => Number(r.at) || 0)),
+            complete: recs.length >= (buildingCount || recs.length) && recs.every((r) => r.complete),
+            prepared: recs.length,
+            buildingCount: buildingCount || recs.length,
+            floors: { ok: sum((r) => r.floors && r.floors.ok), total: sum((r) => r.floors && r.floors.total), failed: new Array(sum((r) => failedLen(r, 'floors'))) },
+            drawings: { ok: sum((r) => r.drawings && r.drawings.ok), total: sum((r) => r.drawings && r.drawings.total), failed: new Array(sum((r) => failedLen(r, 'drawings'))) },
+            photos: { ok: sum((r) => r.photos && r.photos.ok), total: sum((r) => r.photos && r.photos.total), failed: sum((r) => r.photos && r.photos.failed) },
+            bytes: sum((r) => r.bytes),
+            error: (recs.find((r) => r.error) || {}).error || ''
+        };
+    }
+
     /** 완료 기록 요약 한 줄 */
     function describeStatus(rec, fmtTime) {
         if (!rec) return '아직 준비하지 않았습니다.';
@@ -127,7 +167,8 @@
         const d = rec.drawings || {};
         const p = rec.photos || {};
         const f = rec.floors || {};
-        const done = rec.complete ? '완료' : '일부만 받음';
+        let done = rec.complete ? '완료' : '일부만 받음';
+        if (rec.buildingCount > 1) done += ` (동 ${rec.prepared || 0}/${rec.buildingCount})`;
         return `${done} · ${t} · 층 ${f.ok || 0}/${f.total || 0} · 도면 ${d.ok || 0}/${d.total || 0} · 사진 ${p.ok || 0}/${p.total || 0} · ${formatBytes(rec.bytes)}`;
     }
 
@@ -142,6 +183,9 @@
         getStatus: getStatus,
         putStatus: putStatus,
         deleteStatus: deleteStatus,
+        listStatuses: listStatuses,
+        photoKeysSafeToDelete: photoKeysSafeToDelete,
+        aggregateRoundStatus: aggregateRoundStatus,
         describeStatus: describeStatus
     };
     if (typeof module !== 'undefined' && module.exports) module.exports = api;
