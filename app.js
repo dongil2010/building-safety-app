@@ -769,6 +769,9 @@ document.addEventListener('DOMContentLoaded', () => {
         window.state.deletedDefectAt = {};
         window.state.deletedNdtIds = {};
         window.state.deletedNdtAt = {};
+        window.state.drawingMemos = {};
+        window.state.deletedMemoIds = {};
+        window.state.deletedMemoAt = {};
         window.state.deletedBuildingIds = [];
         window.state.confirmedDeletedIds = {};
         window.state.currentBuildingId = null;
@@ -2202,6 +2205,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 confirmedDeletedIds: window.state.confirmedDeletedIds || {},
                 deletedNdtIds: window.state.deletedNdtIds || {},
                 deletedNdtAt: window.state.deletedNdtAt || {},
+                // 도면 메모(결함 아님) + 지운 메모 묘비
+                drawingMemos: window.state.drawingMemos || {},
+                deletedMemoIds: window.state.deletedMemoIds || {},
+                deletedMemoAt: window.state.deletedMemoAt || {},
                 deletedBuildingIds: window.state.deletedBuildingIds || [],
                 buildings: sanitizedBuildings,
                 lastUsedBuildingId: window.state.currentBuildingId || null,
@@ -2380,6 +2387,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (parsed.deletedNdtIds) {
                     window.state.deletedNdtIds = parsed.deletedNdtIds;
                 }
+                if (parsed.drawingMemos && typeof parsed.drawingMemos === 'object') window.state.drawingMemos = parsed.drawingMemos;
+                if (parsed.deletedMemoIds && typeof parsed.deletedMemoIds === 'object') window.state.deletedMemoIds = parsed.deletedMemoIds;
+                if (parsed.deletedMemoAt && typeof parsed.deletedMemoAt === 'object') window.state.deletedMemoAt = parsed.deletedMemoAt;
                 if (parsed.deletedNdtAt) {
                     window.state.deletedNdtAt = parsed.deletedNdtAt;
                 }
@@ -9872,6 +9882,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         scheduleFloorSnapshotCapture();
         syncMemberGbOverlay(window._bsaMemberGbEntries || []);
         window._bsaMemberGbEntries = null;
+        syncDrawingMemoOverlay();
 
         // 결함 목록 DOM은 drawCanvas마다 재생성하지 않음 (선택 스크롤·하이라이트가 즉시 undo됨).
         // 목록 갱신은 updateMapSelectionBar / 필터 / 저장 등 명시적 호출에서만.
@@ -24215,6 +24226,291 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         return ov;
     }
 
+    // ---- 도면 메모 (2026-10-12, js/core/drawing-memo.js) ----
+    // 화면 전용 DOM 겹층(보고서 캡처·인쇄에 안 나옴). 출력은 「메모 출력」을 켰을 때만 drawMemosForReport로 그린다.
+    const MEMO_SHOW_PREF_KEY = 'bsa_memo_show_v1';
+    const MEMO_PRINT_PREF_KEY = 'bsa_memo_print_v1';
+    function readMemoShowPref() {
+        try { return localStorage.getItem(MEMO_SHOW_PREF_KEY) !== '0'; } catch (_e) { return true; }
+    }
+    function readMemoPrintPref() {
+        try { return localStorage.getItem(MEMO_PRINT_PREF_KEY) === '1'; } catch (_e) { return false; }
+    }
+    function writeMemoPref(key, on) {
+        try { localStorage.setItem(key, on ? '1' : '0'); } catch (_e) { /* 기기 저장 실패해도 화면은 바뀜 */ }
+    }
+    window.isDrawingMemoPrintOn = readMemoPrintPref;
+    function memoApi() { return window.BSA && window.BSA.drawingMemo; }
+    function currentMemoFloorKey() {
+        return (state.currentBuildingId && state.currentFloor) ? `${state.currentBuildingId}_${state.currentFloor}` : '';
+    }
+    function memoImgToScreen(m) {
+        const v = imgToViewCoords(m.x, m.y);
+        return { sx: state.view.offsetX + v.x * state.view.scale, sy: state.view.offsetY + v.y * state.view.scale };
+    }
+    function memoScreenToImg(sx, sy) {
+        const vx = (sx - state.view.offsetX) / state.view.scale;
+        const vy = (sy - state.view.offsetY) / state.view.scale;
+        return viewToImgCoords(vx, vy);
+    }
+    function commitMemoChange(floorKey) {
+        if (floorKey && typeof markFloorKeyDirty === 'function') markFloorKeyDirty(floorKey);
+        if (typeof saveStateToLocalStorage === 'function') saveStateToLocalStorage();
+        if (typeof scheduleSyncToFirebase === 'function') scheduleSyncToFirebase();
+        syncDrawingMemoOverlay();
+    }
+    function memoAuthorName() {
+        try {
+            const u = (typeof firebase !== 'undefined' && firebase.auth && firebase.auth().currentUser) || null;
+            return (window.state.userName || (u && (u.displayName || u.email)) || '').toString().slice(0, 40);
+        } catch (_e) { return ''; }
+    }
+
+    async function createDrawingMemoAt(imgX, imgY) {
+        const api = memoApi();
+        const floorKey = currentMemoFloorKey();
+        if (!api || !floorKey || !state.bgImage) return null;
+        const text = await window.appPrompt('도면에 남길 메모를 적어 주세요. (결함이 아니며 조사표·번호에 들어가지 않습니다)', '', {
+            title: '도면 메모', okText: '저장', placeholder: '예) 천장 점검구 열림, 다음에 다시 확인'
+        });
+        if (text == null || !api.cleanText(text)) return null;
+        const memo = api.createMemo({ x: imgX, y: imgY, text, by: memoAuthorName() });
+        if (!memo) return null;
+        api.addMemo(window.state, floorKey, memo);
+        if (!readMemoShowPref()) setMemoShow(true);
+        commitMemoChange(floorKey);
+        return memo;
+    }
+    window.createDrawingMemoAt = createDrawingMemoAt;
+
+    async function openDrawingMemoMenu(memoId) {
+        const api = memoApi();
+        const floorKey = currentMemoFloorKey();
+        const memo = api && api.listFor(window.state, floorKey).find((m) => m.id === memoId);
+        if (!memo) return;
+        const pick = await window.appChoose(memo.text, [
+            { label: '내용 고치기' },
+            { label: '지우기', detail: '다른 기기에서도 지워집니다' }
+        ], { title: '도면 메모', okText: '확인' });
+        if (pick === 0) {
+            const text = await window.appPrompt('메모 내용', memo.text, { title: '도면 메모 고치기', okText: '저장' });
+            if (text == null) return;
+            if (!api.cleanText(text)) {
+                window.showToast?.('빈 메모는 저장하지 않습니다. 지우려면 「지우기」를 고르세요.', 'info', 2500);
+                return;
+            }
+            if (api.updateMemo(window.state, floorKey, memoId, { text })) commitMemoChange(floorKey);
+        } else if (pick === 1) {
+            const ok = await window.appConfirm('이 메모를 지울까요?', { title: '도면 메모' });
+            if (ok && api.deleteMemo(window.state, floorKey, memoId)) commitMemoChange(floorKey);
+        }
+    }
+    window.openDrawingMemoMenu = openDrawingMemoMenu;
+
+    function getDrawingMemoOverlay() {
+        const canvas = state.canvas || document.getElementById('planCanvas');
+        const host = canvas && canvas.parentElement;
+        if (!host) return null;
+        let ov = document.getElementById('mapMemoOverlay');
+        if (!ov) {
+            ov = document.createElement('div');
+            ov.id = 'mapMemoOverlay';
+            ov.className = 'map-memo-overlay';
+            ov.setAttribute('aria-label', '도면 메모');
+            ensureMemoPointerTracking();
+            bindDrawingMemoOverlayEvents(ov);
+            host.appendChild(ov);
+        } else if (ov.parentElement !== host) {
+            host.appendChild(ov);
+        }
+        ov.style.left = `${canvas.offsetLeft}px`;
+        ov.style.top = `${canvas.offsetTop}px`;
+        ov.style.width = `${canvas.clientWidth}px`;
+        ov.style.height = `${canvas.clientHeight}px`;
+        return ov;
+    }
+
+    let memoChipDrag = null; // { id, pointerId, x0, y0, downAt, moved, sx, sy, multi }
+    const memoActivePointers = new Set();
+    // 화면 어디든 손가락 수를 센다(두 번째 손가락이 도면에 닿아도 메모 끌기를 멈추게) — 겹층을 처음 만들 때 한 번 건다
+    let memoPointerTrackingOn = false;
+    function ensureMemoPointerTracking() {
+        if (memoPointerTrackingOn) return;
+        memoPointerTrackingOn = true;
+        window.addEventListener('pointerdown', (e) => {
+            memoActivePointers.add(e.pointerId);
+            if (memoActivePointers.size > 1 && memoChipDrag && !memoChipDrag.multi) {
+                memoChipDrag.multi = true;
+                syncDrawingMemoOverlay();
+            }
+        }, true);
+        ['pointerup', 'pointercancel'].forEach((t) => window.addEventListener(t, (e) => {
+            setTimeout(() => memoActivePointers.delete(e.pointerId), 0);
+        }, true));
+    }
+    function bindDrawingMemoOverlayEvents(ov) {
+        ov.addEventListener('pointerdown', (e) => {
+            const chip = e.target && e.target.closest ? e.target.closest('.map-memo-chip') : null;
+            if (memoActivePointers.size > 1) {   // 두 손가락 — 메모 끌기·누르기 취소
+                if (memoChipDrag) { memoChipDrag.multi = true; syncDrawingMemoOverlay(); }
+                return;
+            }
+            if (!chip) return;
+            e.preventDefault();
+            e.stopPropagation();
+            const st = memoImgToScreen(memoApi().listFor(window.state, currentMemoFloorKey()).find((m) => m.id === chip.dataset.id) || { x: 0, y: 0 });
+            memoChipDrag = { id: chip.dataset.id, pointerId: e.pointerId, x0: e.clientX, y0: e.clientY, downAt: Date.now(), moved: 0, sx: st.sx, sy: st.sy, multi: false };
+            try { chip.setPointerCapture(e.pointerId); } catch (_e) { /* ignore */ }
+        });
+        ov.addEventListener('pointermove', (e) => {
+            const d = memoChipDrag;
+            if (!d || d.pointerId !== e.pointerId || d.multi) return;
+            e.preventDefault();
+            d.moved = Math.max(d.moved, Math.hypot(e.clientX - d.x0, e.clientY - d.y0));
+            if (d.moved < TOUCH_TAP_MAX_MOVE_PX) return;
+            const chip = ov.querySelector(`.map-memo-chip[data-id="${CSS.escape(d.id)}"]`);
+            if (chip) {
+                chip.classList.add('is-dragging');
+                chip.style.transform = `translate(${Math.round(d.sx + e.clientX - d.x0)}px, ${Math.round(d.sy + e.clientY - d.y0)}px)`;
+            }
+        });
+        const end = (e, cancelled) => {
+            const d = memoChipDrag;
+            if (!d || d.pointerId !== e.pointerId) return;
+            memoChipDrag = null;
+            e.stopPropagation();
+            if (cancelled || d.multi) { syncDrawingMemoOverlay(); return; }
+            const floorKey = currentMemoFloorKey();
+            if (d.moved >= TOUCH_TAP_MAX_MOVE_PX) {
+                const p = memoScreenToImg(d.sx + e.clientX - d.x0, d.sy + e.clientY - d.y0);
+                if (memoApi().updateMemo(window.state, floorKey, d.id, { x: p.x, y: p.y })) commitMemoChange(floorKey);
+                else syncDrawingMemoOverlay();
+                return;
+            }
+            if (isCleanTouchTap({ downAt: d.downAt, maxMove: d.moved, multi: false }, Date.now())) {
+                openDrawingMemoMenu(d.id);
+            }
+        };
+        ov.addEventListener('pointerup', (e) => end(e, false));
+        ov.addEventListener('pointercancel', (e) => end(e, true));
+        ['mousedown', 'touchstart', 'click', 'dblclick'].forEach((t) => {
+            ov.addEventListener(t, (e) => {
+                if (e.target && e.target.closest && e.target.closest('.map-memo-chip')) e.stopPropagation();
+            }, t === 'touchstart' ? { passive: true } : false);
+        });
+    }
+
+    function syncDrawingMemoOverlay() {
+        const api = memoApi();
+        const floorKey = currentMemoFloorKey();
+        const list = (api && floorKey && state.bgImage && readMemoShowPref()) ? api.listFor(window.state, floorKey) : [];
+        let ov = document.getElementById('mapMemoOverlay');
+        if (!list.length) {
+            if (ov) ov.replaceChildren();
+            return;
+        }
+        ov = getDrawingMemoOverlay();
+        if (!ov) return;
+        const vw = ov.clientWidth || 0;
+        const vh = ov.clientHeight || 0;
+        const existing = new Map();
+        Array.from(ov.children).forEach((el) => existing.set(el.dataset.id, el));
+        const keep = new Set();
+        list.forEach((m) => {
+            const p = memoImgToScreen(m);
+            if (p.sx < -200 || p.sy < -80 || (vw && p.sx > vw + 40) || (vh && p.sy > vh + 40)) return;
+            let el = existing.get(m.id);
+            if (!el) {
+                el = document.createElement('div');
+                el.className = 'map-memo-chip';
+                el.dataset.id = m.id;
+                el.setAttribute('role', 'button');
+                ov.appendChild(el);
+            }
+            const label = api.shortLabel(m.text, 22);
+            if (el.dataset.text !== m.text) {
+                el.dataset.text = m.text;
+                el.textContent = `📝 ${label}`;
+                el.title = m.text + (m.by ? `\n— ${m.by}` : '');
+                el.setAttribute('aria-label', `도면 메모: ${m.text}`);
+            }
+            keep.add(m.id);
+            if (memoChipDrag && memoChipDrag.id === m.id && !memoChipDrag.multi) return;   // 끄는 중엔 손가락을 따라감
+            el.classList.remove('is-dragging');
+            el.style.transform = `translate(${Math.round(p.sx)}px, ${Math.round(p.sy)}px)`;
+        });
+        existing.forEach((el, id) => { if (!keep.has(id)) el.remove(); });
+    }
+    window.syncDrawingMemoOverlay = syncDrawingMemoOverlay;
+
+    /** 한글·PDF 위치도: 「메모 출력」을 켰을 때만. ctx는 도면 원본 픽셀 좌표계 */
+    function drawMemosForReport(ctx, buildingId, floorCode, imgW, imgH) {
+        if (!readMemoPrintPref()) return 0;
+        const api = memoApi();
+        if (!api || !ctx || !buildingId || !floorCode) return 0;
+        const list = api.listFor(window.state, `${buildingId}_${floorCode}`);
+        if (!list.length) return 0;
+        const base = Math.max(imgW || 0, imgH || 0) || 2000;
+        const fs = Math.max(12, Math.round(base / 95));
+        const pad = Math.round(fs * 0.35);
+        ctx.save();
+        ctx.font = `${fs}px "Pretendard", "Malgun Gothic", "맑은 고딕", sans-serif`;
+        ctx.textBaseline = 'top';
+        list.forEach((m) => {
+            const text = api.shortLabel(m.text, 40);
+            const w = ctx.measureText(text).width + pad * 2;
+            const h = fs + pad * 2;
+            ctx.fillStyle = 'rgba(254, 240, 138, 0.92)';
+            ctx.strokeStyle = '#a16207';
+            ctx.lineWidth = Math.max(1, fs / 12);
+            ctx.fillRect(m.x, m.y, w, h);
+            ctx.strokeRect(m.x, m.y, w, h);
+            ctx.fillStyle = '#422006';
+            ctx.fillText(text, m.x + pad, m.y + pad);
+        });
+        ctx.restore();
+        return list.length;
+    }
+    window.drawMemosForReport = drawMemosForReport;
+
+    function setMemoShow(on) {
+        writeMemoPref(MEMO_SHOW_PREF_KEY, !!on);
+        document.querySelectorAll('[data-memo-show]').forEach((el) => { el.checked = !!on; });
+        syncDrawingMemoOverlay();
+    }
+    function setMemoPrint(on) {
+        writeMemoPref(MEMO_PRINT_PREF_KEY, !!on);
+        document.querySelectorAll('[data-memo-print]').forEach((el) => { el.checked = !!on; });
+    }
+    function syncDrawingMemoBar() {
+        const bar = document.getElementById('drawingMemoBar');
+        if (!bar) return;
+        bar.hidden = state.mode !== 'MEMO';
+        document.querySelectorAll('[data-memo-show]').forEach((el) => { el.checked = readMemoShowPref(); });
+        document.querySelectorAll('[data-memo-print]').forEach((el) => { el.checked = readMemoPrintPref(); });
+    }
+
+    // 메모 모드: 도면 위 깨끗한 한 손가락 탭(또는 클릭)만 메모를 만든다. 끌면 도면 이동, 두 손가락이면 확대·축소.
+    let memoTap = null;   // { clientX, clientY, downAt, maxMove, multi }
+    function memoTapStart(clientX, clientY) {
+        memoTap = { clientX, clientY, downAt: Date.now(), maxMove: 0, multi: false };
+    }
+    function memoTapMove(clientX, clientY) {
+        if (!memoTap) return;
+        memoTap.maxMove = Math.max(memoTap.maxMove, Math.hypot(clientX - memoTap.clientX, clientY - memoTap.clientY));
+    }
+    function memoTapEnd() {
+        const tap = memoTap;
+        memoTap = null;
+        if (!tap || state.mode !== 'MEMO' || !state.bgImage) return false;
+        if (!isCleanTouchTap(tap, Date.now())) return false;
+        const rect = elements.planCanvas.getBoundingClientRect();
+        const p = memoScreenToImg(tap.clientX - rect.left, tap.clientY - rect.top);
+        createDrawingMemoAt(p.x, p.y);
+        return true;
+    }
+    window.__bsaMemoTap = { start: memoTapStart, move: memoTapMove, end: memoTapEnd, cancel: () => { if (memoTap) memoTap.multi = true; } };
+
     function syncMemberGbOverlay(entries) {
         const list = Array.isArray(entries) ? entries : [];
         let ov = document.getElementById('mapMemberGbOverlay');
@@ -31556,6 +31852,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
     function getMapCanvasCursor() {
         if (state.mode === 'MARK' || state.mode === 'AREA' || state.areaInkTool) return 'crosshair';
+        if (state.mode === 'MEMO') return 'copy';
         return 'default';
     }
 
@@ -31584,6 +31881,12 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 handleDragStart(e.clientX, e.clientY, false, true);
                 return;
             }
+            if (e.button === 0 && state.mode === 'MEMO') {
+                // 메모 모드: 끌면 도면 이동, 제자리 클릭이면 메모(놓을 때 판단)
+                memoTapStart(e.clientX, e.clientY);
+                handleDragStart(e.clientX, e.clientY, false, true);
+                return;
+            }
             if (e.button === 0) {
                 handleDragStart(e.clientX, e.clientY, false, false, {
                     ctrlKey: e.ctrlKey,
@@ -31598,6 +31901,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
         window.addEventListener('mousemove', (e) => {
             if (activePointerIsTouch || Date.now() < mapSuppressMouseUntil) return;
+            if (memoTap) memoTapMove(e.clientX, e.clientY);
             if (isDragging || isMarkingDrag || isAreaDrag || isAreaInkDrag || isDraggingPin || isDraggingPinGroup || pendingDragHit || isDraggingLegend || isResizingLegend || isMarqueeSelecting) {
                 handleDragMove(e.clientX, e.clientY);
             }
@@ -31617,6 +31921,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         window.addEventListener('mouseup', (e) => {
             if (activePointerIsTouch || Date.now() < mapSuppressMouseUntil) return;
             if (isDragging || isMarkingDrag || isAreaDrag || isAreaInkDrag || isDraggingPin || isDraggingPinGroup || pendingDragHit || isDraggingLegend || isResizingLegend || isMarqueeSelecting) handleDragEnd(e.clientX, e.clientY);
+            if (memoTap && e.button === 0) memoTapEnd();
         });
 
         elements.planCanvas.addEventListener('dblclick', (e) => {
@@ -31670,10 +31975,16 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 if (e.cancelable) e.preventDefault();
                 // 두 손가락 제스처 뒤: 모두 떼고 잠깐(250ms) 지날 때까지는 점·그리기 시작 안 함
                 if (touchMultiActive || Date.now() < touchCooldownUntil) return;
+                if (state.mode === 'MEMO') {
+                    memoTapStart(e.touches[0].clientX, e.touches[0].clientY);
+                    handleDragStart(e.touches[0].clientX, e.touches[0].clientY, true, true);
+                    return;
+                }
                 handleDragStart(e.touches[0].clientX, e.touches[0].clientY, true);
             } else if (e.touches.length >= 2) {
                 touchMultiActive = true;
                 if (touchPolyTap) touchPolyTap.multi = true;
+                if (memoTap) memoTap.multi = true;
                 // Multi-touch detected: cancel active 1-finger mark or drag operations safely
                 clearPendingDragLongPress();
                 hideTouchLoupe(MAP_LOUPE_ID);
@@ -31734,6 +32045,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     if (shouldUseViewportTilesForCurrentFloor()) scheduleViewportHiPatchSync();
                 }
             } else if (!isPinching && e.touches.length === 1) {
+                if (memoTap) memoTapMove(e.touches[0].clientX, e.touches[0].clientY);
                 if (touchPolyTap) {
                     const t0 = e.touches[0];
                     touchPolyTap.maxMove = Math.max(touchPolyTap.maxMove || 0,
@@ -31770,6 +32082,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     flushViewportHiPatchSync();
                 }
             }
+            if (memoTap && e.touches.length === 0) memoTapEnd();
         });
 
         // 도면 밖 터치 시작 → 스크롤 잠금 해제 (결함목록·툴바 등)
@@ -31799,6 +32112,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             isPinching = false;
             // 취소된 터치는 탭이 아니다(점을 찍지 않는다)
             if (touchPolyTap) touchPolyTap.multi = true;
+            memoTap = null;
             if (!e.touches || e.touches.length === 0) {
                 if (touchMultiActive) touchCooldownUntil = Date.now() + TOUCH_MULTI_COOLDOWN_MS;
                 touchMultiActive = false;
@@ -34492,6 +34806,11 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (pan) pan.classList.toggle('active', mode === 'PAN');
         if (mark) mark.classList.toggle('active', mode === 'MARK');
         if (area) area.classList.toggle('active', mode === 'AREA');
+        const memoBtn = document.getElementById('btnModeMemo');
+        if (memoBtn) memoBtn.classList.toggle('active', mode === 'MEMO');
+        if (mode === 'MEMO' && !readMemoShowPref()) setMemoShow(true);
+        if (mode !== 'MEMO') memoTap = null;
+        syncDrawingMemoBar();
         document.querySelectorAll('#mobileMapSideRail .mobile-rail-btn[data-mode]').forEach(btn => {
             btn.classList.toggle('active', btn.dataset.mode === mode);
         });
@@ -34908,6 +35227,16 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         btnModeMark.addEventListener('click', () => setDrawMode('MARK'));
         if (btnModeArea) btnModeArea.addEventListener('click', () => setDrawMode('AREA'));
     }
+    // 도면 메모 도구·보이기·출력 설정
+    const btnModeMemo = document.getElementById('btnModeMemo');
+    if (btnModeMemo) btnModeMemo.addEventListener('click', () => setDrawMode(state.mode === 'MEMO' ? 'PAN' : 'MEMO'));
+    const mobileBtnModeMemo = document.getElementById('mobileBtnModeMemo');
+    if (mobileBtnModeMemo) mobileBtnModeMemo.addEventListener('click', () => setDrawMode(state.mode === 'MEMO' ? 'PAN' : 'MEMO'));
+    const btnMemoBarDone = document.getElementById('btnMemoBarDone');
+    if (btnMemoBarDone) btnMemoBarDone.addEventListener('click', () => setDrawMode('PAN'));
+    document.querySelectorAll('[data-memo-show]').forEach((el) => el.addEventListener('change', () => setMemoShow(el.checked)));
+    document.querySelectorAll('[data-memo-print]').forEach((el) => el.addEventListener('change', () => setMemoPrint(el.checked)));
+    syncDrawingMemoBar();
     setupAreaToolPanelEvents();
 
     const btnSnapToCad = document.getElementById('btnSnapToCad');
@@ -41070,6 +41399,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     } finally {
                         _mapStyleRenderContext = prevStyleCtx;
                     }
+                    drawMemosForReport(ctx, currentBldgId, floorCode, imgW, imgH);   // 「메모 출력」 켰을 때만
                     drawLocationMapLegend(ctx, imgW, imgH);
                     ctx.restore();
 
@@ -41225,6 +41555,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         ctx.clip();
         ctx.drawImage(imgObj, 0, 0, imgW, imgH);
         drawFloorDefectsForReport(ctx, defects, buildingId, floorCode);
+        drawMemosForReport(ctx, buildingId, floorCode, imgW, imgH);   // 「메모 출력」 켰을 때만
         // 범례는 범위 안의 같은 구석에 — 도면 구석에 그대로 두면 범위 밖이라 잘려 나간다
         ctx.translate(crop.x, crop.y);
         drawLocationMapLegend(ctx, crop.w, crop.h, false, 0, { box: legendBoxForPrintCrop(imgW, imgH, crop) });
@@ -53982,7 +54313,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             markings: { items: [], deletedIds: [], deletedAt: {} },
             photos: { urlsById: {} },
             ndt: { items: [], deletedIds: [], deletedAt: {}, displacementGroups: [] },
-            drawing: emptyFloorDrawingPayload()
+            drawing: emptyFloorDrawingPayload(),
+            memos: null   // 도면 메모 — 옛 버전이 쓴 층엔 없다(없으면 기기 메모를 그대로 둠)
         };
     }
 
@@ -54001,6 +54333,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (photos.urlsById && typeof photos.urlsById === 'object'
             && Object.keys(photos.urlsById).some((k) => photos.urlsById[k])) return true;
         if (drawing.rasterUrl || drawing.pdfUrl) return true;
+        if (window.BSA && window.BSA.drawingMemo && window.BSA.drawingMemo.packHasContent(bundle.memos)) return true;
         if (drawing.tiers && typeof drawing.tiers === 'object'
             && Object.keys(drawing.tiers).some((k) => drawing.tiers[k])) return true;
         return false;
@@ -54013,7 +54346,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             markings: obj.markings || empty.markings,
             photos: obj.photos || empty.photos,
             ndt: obj.ndt || empty.ndt,
-            drawing: obj.drawing || empty.drawing
+            drawing: obj.drawing || empty.drawing,
+            memos: (obj.memos && typeof obj.memos === 'object') ? obj.memos : null
         };
     }
 
@@ -54133,7 +54467,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 // NDT 전용 도면 참조 { id, at } — 그림은 photos(클라우드)에 있다
                 customDrawing: ndtDrawingRefFor(floorKey)
             },
-            drawing: collectFloorDrawingUrlPayload(bldg, floorCode)
+            drawing: collectFloorDrawingUrlPayload(bldg, floorCode),
+            // 도면 메모(결함 아님) — 결함처럼 updatedAt·묘비로 합친다
+            memos: (window.BSA && window.BSA.drawingMemo) ? window.BSA.drawingMemo.packFor(window.state, floorKey) : undefined
         };
         if (!floorBundleHasContent(pack)) {
             console.warn('빈 층 묶음은 클라우드에 올리지 않음:', floorKey);
@@ -54200,6 +54536,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         );
         window.state.ndtDisplacementGroups = dispMerge.ndtData;
         mergeNdtDrawingRef(floorKey, ndt.customDrawing);
+        if (bundle.memos && window.BSA && window.BSA.drawingMemo) {
+            window.BSA.drawingMemo.mergePackIntoState(window.state, floorKey, bundle.memos, window.BSA.syncMerge.mergeNdtDataMaps);
+        }
         resolveOfflineNoConflicts(bldg, floorCode, markings, ndt);
     }
 

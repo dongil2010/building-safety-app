@@ -16639,3 +16639,67 @@ html #tab-map .defect-list-section-scroll > .defect-list-item.is-important {
 .offline-prep-round-status { grid-column: 1 / 2; font-size: 0.86em; color: #4b5563; }
 .offline-prep-round.is-done .offline-prep-round-status { color: #15803d; }
 .offline-prep-round-actions { grid-column: 2 / 3; grid-row: 1 / 3; display: flex; gap: 6px; }
+
+/* 도면 메모 (2026-10-12) — 화면 전용 DOM 겹층(캔버스에 안 그려 캡처·인쇄에 안 나옴) */
+.map-memo-overlay {
+    position: absolute;
+    left: 0;
+    top: 0;
+    z-index: 12;
+    pointer-events: none;
+    overflow: hidden;
+}
+.map-memo-chip {
+    position: absolute;
+    left: 0;
+    top: 0;
+    max-width: 220px;
+    padding: 3px 8px;
+    border-radius: 6px 6px 6px 0;
+    background: #fef08a;
+    border: 1px solid #ca8a04;
+    color: #422006;
+    font-size: 0.8rem;
+    line-height: 1.3;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
+    pointer-events: auto;
+    touch-action: none;
+    user-select: none;
+    -webkit-user-select: none;
+    cursor: grab;
+    will-change: transform;
+}
+.map-memo-chip.is-dragging { cursor: grabbing; opacity: 0.85; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35); }
+html.layout-mobile .map-memo-chip,
+html.layout-tablet .map-memo-chip { font-size: 0.86rem; padding: 6px 10px; max-width: 180px; }
+.drawing-memo-bar {
+    position: absolute;
+    left: 50%;
+    top: 4.4rem;
+    transform: translateX(-50%);
+    z-index: 22;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    max-width: calc(100% - 1.2rem);
+    padding: 0.4rem 0.7rem;
+    background: rgba(28, 28, 28, 0.94);
+    border: 1px solid rgba(250, 204, 21, 0.6);
+    border-radius: 999px;
+    color: #fff;
+    font-size: 0.82rem;
+}
+.drawing-memo-bar[hidden] { display: none !important; }
+.drawing-memo-opt { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+html.layout-mobile .drawing-memo-bar,
+html.layout-tablet .drawing-memo-bar { top: auto; bottom: 5.8rem; border-radius: 16px; max-width: calc(100% - 4.5rem); }
+.btn-memo-mode.active { background: #ca8a04; color: #fff; border-color: #ca8a04; }
+.mobile-fab-memo.active { background: #ca8a04 !important; color: #fff !important; }
+@media print {
+    .map-memo-overlay, .drawing-memo-bar { display: none !important; }
+}
