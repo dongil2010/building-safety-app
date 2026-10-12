@@ -24,6 +24,7 @@
         overlay: null,
         autoLift: 0,
         dragLift: 0,
+        keepLift: false,        // 같은 창에서 칸만 바꿀 때 창 위치 유지
         keyboardH: 0,
         dragging: false,
         dragStartY: 0,
@@ -147,10 +148,41 @@
         return !!(panel && panel.classList.contains('ndt-drawer-card'));
     }
 
+    /** 지금 창에 걸려 있는 들어올림(px) — 칸 위치를 잴 때 빼야 한다 */
+    function appliedPanelLift() {
+        if (!state.panel) return 0;
+        // 움직이는 중(transition)에도 맞게: 지금 실제로 걸린 transform의 세로 이동을 읽는다
+        try {
+            var tf = window.getComputedStyle(state.panel).transform;
+            if (tf && tf !== 'none') {
+                var m = tf.match(/matrix(3d)?\(([^)]+)\)/);
+                if (m) {
+                    var parts = m[2].split(',').map(parseFloat);
+                    var ty = m[1] ? parts[13] : parts[5];
+                    if (isFinite(ty)) return -ty;
+                }
+            }
+        } catch (_e) { /* 아래로 */ }
+        if (!state.panel.classList.contains('bsa-kb-lifted')) return 0;
+        var v = parseFloat(state.panel.style.getPropertyValue('--bsa-kb-lift'));
+        return isFinite(v) ? v : 0;
+    }
+
+    /** 칸이 지금 보이는 화면 안에 있는지(키보드 위) */
+    function fieldVisibleNow(field) {
+        var box = getVisualViewportBox();
+        var r = field.getBoundingClientRect();
+        return r.top >= box.top + 8 && r.bottom <= box.top + box.height - 12;
+    }
+
     function computeAutoLift(field) {
         if (!field) return 0;
         var box = getVisualViewportBox();
-        var rect = field.getBoundingClientRect();
+        // 2026-10-12: 이미 올린 만큼 올라간 위치로 재면, 다음 계산에서 덜 올리고 → 내려가면 다시 올리고…
+        // 입력 창이 혼자 위아래로 왔다 갔다 했다. 들어올리기 전(원래) 위치로 잰다.
+        var raw = field.getBoundingClientRect();
+        var shift = appliedPanelLift();
+        var rect = { top: raw.top + shift, bottom: raw.bottom + shift };
         var padTop = 12;
         var padBottom = 28;
         var visibleTop = box.top + padTop;
@@ -165,7 +197,9 @@
         }
 
         if (state.panel && isBottomSheetPanel(state.panel)) {
-            if (isNdtDrawerPanel(state.panel)) {
+            if (isNdtDrawerPanel(state.panel) && state.keyboardH <= 72) {
+                // 화면 키보드가 없으면(태블릿 외장 키보드·PC) 칸이 가려질 때만 올린다 — 칸을 맨 위 메뉴 밑으로 밀어 넣지 않게
+            } else if (isNdtDrawerPanel(state.panel)) {
                 // NDT 측정 입력: 키보드 올릴 때 도면이 가려져도 되도록 드로어를 크게 올림
                 lift = Math.max(lift, Math.round(state.keyboardH * 1.12));
                 var ndtTargetTop = box.top + Math.min(36, Math.max(12, box.height * 0.06));
@@ -227,6 +261,7 @@
     }
 
     function clearLift() {
+        state.keepLift = false;
         state.autoLift = 0;
         state.dragLift = 0;
         state.keyboardH = 0;
@@ -314,17 +349,41 @@
             clearLift();
             return;
         }
+        // 손잡이를 끄는 중·손가락으로 목록을 미는 중에는 창을 건드리지 않는다(같이 움직이면 덜컹거림)
+        if (state.dragging || (state.pointerDown && !forceScroll)) return;
 
+        var prevKb = state.keyboardH;
         state.keyboardH = measureKeyboardHeight();
-        state.autoLift = computeAutoLift(state.activeField);
-        applyLift();
+        var nextLift = computeAutoLift(state.activeField);
+        // 키보드 높이가 거의 그대로면(주소창·스크롤로 생긴 몇 px) 창을 다시 옮기지 않는다
+        var kbChanged = Math.abs(state.keyboardH - prevKb) > 40;
+        // 창 안 목록을 스크롤해 칸 위치가 바뀌어도 창은 그대로 둔다(칸 따라 창이 오르내리면 덜컹거림)
+        // 같은 창에서 다음 칸으로 옮겨 갈 때: 창은 그 자리에 두고(사용자가 끌어 둔 위치 포함) 창 안 목록만 스크롤.
+        // 그래도 칸이 안 보일 때만 창 높이를 다시 잡는다. (칸마다 창이 오르내리던 문제)
+        if (forceScroll && state.keepLift && !kbChanged) {
+            scrollFieldIntoView(state.activeField);
+            if (fieldVisibleNow(state.activeField)) {
+                updateHandle();
+                return;
+            }
+            state.keepLift = false;
+        }
+        if (forceScroll || kbChanged) {
+            state.autoLift = nextLift;
+            applyLift();
+        }
 
-        if (forceScroll || state.keyboardH > 72) {
+        // 칸을 화면 안으로 끌어오는 스크롤은 포커스했을 때·키보드가 막 뜨거나 바뀌었을 때만(스크롤할 때마다 하면 목록이 튄다)
+        if (forceScroll || (kbChanged && state.keyboardH > 72)) {
             scrollFieldIntoView(state.activeField);
             state.autoLift = computeAutoLift(state.activeField);
             applyLift();
         }
 
+        updateHandle();
+    }
+
+    function updateHandle() {
         if (state.panel) {
             var handle = ensureDragHandle(state.panel);
             if (handle) {
@@ -342,13 +401,18 @@
             state.blurTimer = null;
         }
 
-        if (state.panel && state.activeField !== el) {
-            state.dragLift = 0;
-        }
+        var prevPanel = state.panel;
+        var prevField = state.activeField;
+        var ctx = findPanelForField(el);
+        var nextPanel = ctx ? ctx.panel : null;
+        var samePanel = !!(prevPanel && nextPanel === prevPanel && prevField && prevField !== el
+            && document.body.contains(prevField) && totalLift() > 0);
+        // 같은 창 안에서 칸만 바뀌면 창 위치(끌어 둔 위치 포함)를 그대로 둔다
+        state.keepLift = samePanel;
+        if (!samePanel && prevField !== el) state.dragLift = 0;
 
         state.activeField = el;
-        var ctx = findPanelForField(el);
-        state.panel = ctx ? ctx.panel : null;
+        state.panel = nextPanel;
         state.overlay = ctx ? ctx.overlay : null;
 
         scheduleLayoutUpdate();

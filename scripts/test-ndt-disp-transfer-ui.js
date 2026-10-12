@@ -21,27 +21,28 @@ function extract(name) {
     return app.slice(start, i + 1);
 }
 
-const src = [extract('isNdtDispLevelFilled'), extract('computeNdtDispStationDelta'),
+const xferApi = require(path.join(root, 'js', 'core', 'ndt-disp-transfer.js'));
+const src = [extract('isNdtDispLevelFilled'), extract('ndtDispTransferApi'), extract('computeNdtDispStationDelta'),
     extract('applyNdtDispStationTransfer'), extract('syncNdtDispEditListInputsToGroup')].join('\n');
 
 function run(inputs) {
     const group = { id: 'g', points: [1, 2, 3, 4].map((n) => ({ id: 'p' + n, level: null })) };
     const els = inputs.map((v, i) => ({ value: v, dataset: { pointId: 'p' + (i + 1) } }));
     const document = { querySelectorAll: () => els };
-    const window = { BSA: { ndtGrade: { isLevelFilled: (v) => v !== null && v !== undefined && v !== '' && Number.isFinite(Number(v)) } } };
+    const window = { BSA: { ndtDispTransfer: xferApi, ndtGrade: { isLevelFilled: (v) => v !== null && v !== undefined && v !== '' && Number.isFinite(Number(v)) } } };
     const f = new Function('document', 'window', src + '; return { applyNdtDispStationTransfer, syncNdtDispEditListInputsToGroup };')(document, window);
     return { group, f };
 }
 
-// 목록에 10,12,20,23을 적고 (03)에서 Va=14, Vb=20 → Δ=6, (03)=14, (04)=17, 앞 지점 그대로
+// 목록에 10,12,20,23을 적고 (03)에서 Va=14, Vb=20 → 적은 값은 그대로, 계산만 [10,12,14,17]
 {
     const { group, f } = run(['10', '12', '20', '23']);
     assert.strictEqual(f.syncNdtDispEditListInputsToGroup(group), 4);
-    group.points[2].level = 20; // 행 「적용」이 Vb를 그 지점에 넣는 것과 같다
     const r = f.applyNdtDispStationTransfer(group, 2, '14', '20');
     assert.ok(r.ok, JSON.stringify(r));
-    assert.deepStrictEqual(group.points.map((p) => p.level), [10, 12, 14, 17]);
-    assert.strictEqual(r.adjustedCount, 2);
+    assert.deepStrictEqual(group.points.map((p) => p.level), [10, 12, 20, 23], '적은 값 그대로');
+    assert.deepStrictEqual(xferApi.correctedLevels(group), [10, 12, 14, 17]);
+    assert.ok(!f.applyNdtDispStationTransfer(group, 2, '', '20').ok, '빈 Va 거부');
 }
 // 형식이 틀린 칸은 건드리지 않고, 빈 칸은 비운다
 {
@@ -56,7 +57,9 @@ const rowSrc = extract('toggleNdtDispEditRowTransferForm');
 assert.ok(rowSrc.indexOf('syncNdtDispEditListInputsToGroup(group)') > 0
     && rowSrc.indexOf('syncNdtDispEditListInputsToGroup(group)') < rowSrc.indexOf('runNdtDispStationTransferApply('),
 '적용 전에 목록 값 반영');
-assert.ok(/ndt-disp-xfer-apply/.test(rowSrc) && /revealNdtDispTransferApply/.test(rowSrc), '적용 버튼 줄바꿈·보이게');
+assert.ok(/ndtDispTransferFormHtml/.test(rowSrc) && /revealNdtDispTransferApply/.test(rowSrc), '적용 버튼 줄바꿈·보이게');
+assert.ok(/ndt-disp-xfer-apply/.test(extract('ndtDispTransferFormHtml')), '적용 버튼 스타일');
+assert.ok(!/\.level\s*=/.test(rowSrc) && !/\.level\s*=/.test(extract('ensureNdtDispPointModalTransferUi')), '보정이 적은 레벨을 바꾸지 않음');
 
 // 2) 터치 키보드: 손가락이 닿아 있으면 들어올림을 풀지 않고, 뗀 뒤 정리
 const kb = fs.readFileSync(path.join(root, 'js/core/mobile-keyboard.js'), 'utf8');

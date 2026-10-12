@@ -19,9 +19,17 @@
         return Number.isFinite(Number(level));
     }
 
-    function groupLevelsComplete(group) {
+    /** 측기 이동 보정을 계산에 넣은 레벨(적은 값은 그대로 두고 계산만). 모듈이 없으면 적은 값 */
+    function calcLevels(group) {
         var pts = (group && group.points) || [];
-        return pts.length > 0 && pts.every(function (p) { return isLevelFilled(p && p.level); });
+        var t = root.BSA && root.BSA.ndtDispTransfer;
+        if (t && typeof t.correctedLevels === 'function') return t.correctedLevels(group);
+        return pts.map(function (p) { return isLevelFilled(p && p.level) ? Number(p.level) : null; });
+    }
+
+    function groupLevelsComplete(group) {
+        var lv = calcLevels(group);
+        return lv.length > 0 && lv.every(function (v) { return isLevelFilled(v); });
     }
 
     /** 기울기: 높이 대비 변위. 1/750 이상이 a. */
@@ -73,7 +81,8 @@
 
         var isMemberDisp = group.category === '부재변위';
         var lengthMm = (group.measureLength || 0) * 1000;
-        var lv = function (p) { return Number(p.level); };
+        var levels = calcLevels(group);
+        var lv = function (p) { return Number(levels[points.indexOf(p)]); };
         var delta;
 
         if (isMemberDisp) {
@@ -169,6 +178,8 @@
     var api = {
         isLevelFilled: isLevelFilled,
         groupLevelsComplete: groupLevelsComplete,
+        calcLevels: calcLevels,
+        calcLevels: calcLevels,
         calcTiltGrade: calcTiltGrade,
         calcMemberDispGrade: calcMemberDispGrade,
         calcGroupDisplacement: calcGroupDisplacement,

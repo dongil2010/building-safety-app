@@ -11904,6 +11904,45 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         return window.BSA.ndtGrade.calcGroupDisplacement(group);
     }
 
+    // ---- 측기 이동 보정(2026-10-12 재설계, js/core/ndt-disp-transfer.js) ----
+    // 적은 레벨은 그대로 두고, 계산·그래프·보고서 값만 보정한다.
+    function ndtDispTransferApi() { return window.BSA && window.BSA.ndtDispTransfer; }
+    /** 계산에 쓰는(보정한) 레벨 배열 */
+    function ndtDispCalcLevels(group) {
+        return window.BSA.ndtGrade.calcLevels(group);
+    }
+    /** 표시: 적은 값이 먼저, 보정으로 달라졌으면 「→ 보정값」 */
+    function formatNdtDispLevelText(group, idx, unit) {
+        const u = unit == null ? 'cm' : unit;
+        const p = (group.points || [])[idx];
+        const c = ndtDispCalcLevels(group)[idx];
+        const raw = p && isNdtDispLevelFilled(p.level) ? Number(p.level) : null;
+        const fmt = (v) => `${Math.round(v * 1000) / 1000}`;
+        if (raw == null && c == null) return '-';
+        if (raw == null) return `(보정 ${fmt(c)}${u})`;
+        if (c == null || Math.abs(c - raw) < 1e-9) return `${fmt(raw)}${u}`;
+        return `${fmt(raw)}${u} → ${fmt(c)}${u}`;
+    }
+    /** 옛 「적용」이 고쳐 둔 값을 원래 적은 값으로 되돌리고 보정 기록(Va/Vb)만 남긴다. 바꾼 구역 수 */
+    function migrateNdtDispTransfersForFloor(key) {
+        const api = ndtDispTransferApi();
+        const groups = ((state.ndtDisplacementGroups || {})[key]) || [];
+        if (!api || !groups.length) return 0;
+        let n = 0;
+        groups.forEach((g) => {
+            if (api.migrateLegacyGroup(g)) {
+                n += 1;
+                if (typeof touchNdtDispGroup === 'function') touchNdtDispGroup(g);
+            }
+        });
+        if (n) {
+            console.info('[부동침하] 옛 이동 보정 기록을 계산 방식으로 옮김:', key, n + '구역');
+            saveStateToLocalStorage();
+            if (typeof markFloorKeyDirty === 'function') markFloorKeyDirty(key);
+        }
+        return n;
+    }
+
     function formatDispCalcForExport(calc) {
         if (!calc || calc.incomplete) {
             return { delta: '-', deltaCm: '-', tiltRatio: '-', grade: '미입력' };
@@ -13120,7 +13159,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             return;
         }
 
-        const levels = points.map(p => Number(p.level));
+        const calcLv = ndtDispCalcLevels(group);
+        const levels = calcLv.map(Number);
         let minL = Math.min(...levels, 0);
         let maxL = Math.max(...levels, 0);
         if (minL === maxL) { minL -= 1; maxL += 1; }
@@ -13187,7 +13227,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         areaGrad.addColorStop(1, hexColorWithAlpha(chartColor, 0.02));
         ctx.beginPath();
         points.forEach((p, idx) => {
-            const x = xFor(idx), y = yFor(p.level);
+            const x = xFor(idx), y = yFor(calcLv[idx]);
             if (idx === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
         });
         ctx.lineTo(xFor(points.length - 1), fillEdge);
@@ -13208,7 +13248,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         ctx.beginPath();
         points.forEach((p, idx) => {
             const x = xFor(idx);
-            const y = yFor(p.level);
+            const y = yFor(calcLv[idx]);
             if (idx === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
         });
         ctx.stroke();
@@ -13216,7 +13256,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
         points.forEach((p, idx) => {
             const x = xFor(idx);
-            const y = yFor(p.level);
+            const y = yFor(calcLv[idx]);
 
             ctx.save();
             ctx.shadowColor = 'rgba(15,23,42,0.25)';
@@ -13235,7 +13275,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             ctx.stroke();
 
             // 값 라벨은 흰 배경 칩 위에 올려 그래프 선과 겹쳐도 읽기 쉽게 한다.
-            const labelText = `${p.level}cm`;
+            const labelText = formatNdtDispLevelText(group, idx);
             ctx.font = 'bold 13px "Pretendard", "Malgun Gothic", "맑은 고딕", sans-serif';
             ctx.textAlign = 'center';
             const labelW = ctx.measureText(labelText).width + 12;
@@ -13257,7 +13297,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         ctx.fillText('측정값', marginL, yOffset + marginT + plotH + 55);
         ctx.font = '13px "Pretendard", "Malgun Gothic", "맑은 고딕", sans-serif';
         ctx.fillStyle = '#475569';
-        const listText = points.map((p, idx) => `${formatNdtDisplacementPointLabel(idx + 1)}: ${p.level}cm`).join('    ');
+        const listText = points.map((p, idx) => `${formatNdtDisplacementPointLabel(idx + 1)}: ${formatNdtDispLevelText(group, idx)}`).join('    ');
         wrapCanvasText(ctx, listText, marginL, yOffset + marginT + plotH + 78, plotW + marginR - 10, 20);
     }
 
@@ -13314,13 +13354,13 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             // 라벨은 동그라미 숫자만(값부/중앙부 같은 수식어 없이) — 사용자 요청.
             const cols = [{ label: `NO.${seqNo}`, value: group.locationType || '-', wide: true }];
             if (isMemberDisp) {
-                cols.push({ label: firstLabel, value: first ? `${first.level}cm` : '-' });
-                cols.push({ label: midLabel, value: mid ? `${mid.level}cm` : '-' });
-                cols.push({ label: lastLabel, value: last ? `${last.level}cm` : '-' });
+                cols.push({ label: firstLabel, value: first ? formatNdtDispLevelText(group, 0) : '-' });
+                cols.push({ label: midLabel, value: mid ? formatNdtDispLevelText(group, midIdx) : '-' });
+                cols.push({ label: lastLabel, value: last ? formatNdtDispLevelText(group, points.length - 1) : '-' });
                 cols.push({ label: `처짐량총합\n((${firstLabel}+${lastLabel})/2-${midLabel})`, value: `${arrow}${deltaAbs.toFixed(1)}cm` });
             } else {
-                cols.push({ label: firstLabel, value: first ? `${first.level}cm` : '-' });
-                cols.push({ label: lastLabel, value: last ? `${last.level}cm` : '-' });
+                cols.push({ label: firstLabel, value: first ? formatNdtDispLevelText(group, 0) : '-' });
+                cols.push({ label: lastLabel, value: last ? formatNdtDispLevelText(group, points.length - 1) : '-' });
                 cols.push({ label: '변위량총합', value: `${arrow}${deltaAbs.toFixed(1)}cm` });
             }
             cols.push({ label: `변위평가\n(L=${lengthMmText})`, value: calc.tiltRatio || '-' });
@@ -14534,6 +14574,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     }
 
     function renderNdtSummaryTable() {
+        if (state.currentBuildingId) migrateNdtDispTransfersForFloor(`${state.currentBuildingId}_${state.currentFloor}`);
         const tbody = document.getElementById('ndtTableBody');
         const thead = document.querySelector('#ndtSummaryTable thead tr');
         if (!tbody) return;
@@ -17904,9 +17945,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         return { group, point };
     }
 
-    // --- 측정점 이동 보정(다중 hop A→B→C…): 중복지점 Va/Vb로 새 측기 구간을 이전 기준으로 맞춤 ---
-    // delta = Vb - Va; 이번 구간(중복지점~끝, 이전 hop 제외) adjusted = raw - delta
-    // 여러 번 적용하면 누적되어 모든 점이 첫 측기(A) 데이텀에 맞춰짐
+    // --- 측기 이동 보정(2026-10-12 재설계) ---
+    // 적은 레벨은 절대 고치지 않는다. 이동한 지점마다 Va(이전 측기)·Vb(이후 측기)만 따로 적어 두고,
+    // 계산할 때 그 뒤 번호에서 누적 차이(Vb−Va)를 빼서 첫 측기 기준으로 맞춘다(js/core/ndt-disp-transfer.js).
+    // 그래서 나중에 적는 값도, 순서 없이 적은 보정도 바로 반영된다.
     function getNdtDispGroupById(groupId) {
         const key = `${state.currentBuildingId}_${state.currentFloor}`;
         return ((state.ndtDisplacementGroups || {})[key] || []).find((g) => g && g.id === groupId) || null;
@@ -17915,11 +17957,13 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     function computeNdtDispStationDelta(va, vb) {
         const a = Number(va);
         const b = Number(vb);
+        if (va === '' || vb === '' || va == null || vb == null) return null;
         if (!Number.isFinite(a) || !Number.isFinite(b)) return null;
         return b - a;
     }
 
-    function applyNdtDispStationTransfer(group, overlapIndex, va, vb, options) {
+    /** 이동 보정 기록만 저장(레벨은 그대로) */
+    function applyNdtDispStationTransfer(group, overlapIndex, va, vb) {
         if (!group || !Array.isArray(group.points) || !group.points.length) {
             return { ok: false, reason: 'no-points' };
         }
@@ -17929,78 +17973,13 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         }
         const delta = computeNdtDispStationDelta(va, vb);
         if (delta == null) return { ok: false, reason: 'bad-levels' };
-        if (Math.abs(delta) < 1e-9) return { ok: false, reason: 'zero-delta' };
-
-        // 다중 이동(A→B→C…): 이전 hop에서 이미 보정된 구간은 다시 빼지 않음.
-        // - 중복지점(i===from): 새 측기에서 다시 잰 Vb이면 보정(이미 Va면 skip)
-        // - from 이후: 직전 transfer의 toIndex 이후 점만 보정(같은 측기에서 이어서 잰 점 포함)
-        const prevTo = (Array.isArray(group.stationTransfers) && group.stationTransfers.length)
-            ? Number(group.stationTransfers[group.stationTransfers.length - 1].toIndex)
-            : -1;
-        const fromIndex = idx;
-        const toIndex = group.points.length - 1;
-        const before = group.points.map((pt) => ({
-            id: pt.id,
-            level: pt.level,
-            levelRaw: pt.levelRaw
-        }));
-        let adjustedCount = 0;
-        for (let i = fromIndex; i <= toIndex; i++) {
-            const pt = group.points[i];
-            if (!pt || !isNdtDispLevelFilled(pt.level)) continue;
-            const alreadyAtVa = Math.abs(Number(pt.level) - Number(va)) < 1e-9;
-            if (i === fromIndex) {
-                if (alreadyAtVa) continue; // 이미 기준 측기 값
-            } else if (i <= prevTo) {
-                continue; // 이전 hop에서 처리됨
-            }
-            if (pt.levelRaw == null || pt.levelRaw === '') {
-                pt.levelRaw = pt.level;
-            }
-            pt.level = Number(pt.level) - delta;
-            adjustedCount += 1;
-        }
-        if (adjustedCount === 0) return { ok: false, reason: 'nothing-to-adjust' };
-        if (!Array.isArray(group.stationTransfers)) group.stationTransfers = [];
-        const hop = group.stationTransfers.length + 1;
-        group.stationTransfers.push({
-            hop,
-            overlapPointId: group.points[idx].id,
-            overlapIndex: idx,
-            fromIndex,
-            toIndex,
-            va: Number(va),
-            vb: Number(vb),
-            delta,
-            appliedAt: Date.now(),
-            before
-        });
-        // 다음 이동을 위해 중복지점 표시는 해제(새 이동점은 사용자가 다시 표시)
-        group.transferOverlapPointId = null;
-        if (group.points[idx]) {
-            group.points[idx].levelAtA = Number(va);
-            delete group.points[idx].stationMark;
-        }
-        // 누적 보정: 각 hop의 delta를 빼면 모든 점이 첫 측기(A) 기준으로 맞춰짐
-        group.stationDatumLabel = group.stationDatumLabel || '첫 측기(A) 기준';
-        return { ok: true, delta, fromIndex, toIndex, overlapIndex: idx, hop, adjustedCount };
+        ndtDispTransferApi().setTransfer(group, idx, Number(va), Number(vb));
+        return { ok: true, delta, overlapIndex: idx };
     }
 
-    function undoLastNdtDispStationTransfer(group) {
-        if (!group || !Array.isArray(group.stationTransfers) || !group.stationTransfers.length) {
-            return { ok: false, reason: 'none' };
-        }
-        const last = group.stationTransfers.pop();
-        const byId = {};
-        (last.before || []).forEach((row) => { byId[row.id] = row; });
-        (group.points || []).forEach((pt) => {
-            const prev = byId[pt.id];
-            if (!prev) return;
-            pt.level = prev.level;
-            if (prev.levelRaw == null || prev.levelRaw === '') delete pt.levelRaw;
-            else pt.levelRaw = prev.levelRaw;
-        });
-        return { ok: true, undone: last };
+    function clearNdtDispStationTransfer(group, idx) {
+        const api = ndtDispTransferApi();
+        return !!(api && api.clearTransfer(group, idx));
     }
 
     function removeNdtDispStationTransferPanel() {
@@ -18008,58 +17987,50 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (panel) panel.remove();
     }
 
-    /** 복잡한 「측정점 이동 보정」 패널 제거 — 개별 마킹 「이동 보정」으로 대체 */
+    /** 목록 아래: 보정이 들어간 지점 요약(지우기는 각 지점 「이동 보정」에서) */
     function ensureNdtDispStationTransferUi(group) {
         removeNdtDispStationTransferPanel();
         const host = document.getElementById('ndtDispEditPointList');
         if (!host || !host.parentElement) return;
-        let undoBar = document.getElementById('ndtDispStationTransferUndoBar');
-        const hasXfer = !!(group && Array.isArray(group.stationTransfers) && group.stationTransfers.length);
-        if (!hasXfer) {
-            if (undoBar) undoBar.remove();
+        let bar = document.getElementById('ndtDispStationTransferUndoBar');
+        const api = ndtDispTransferApi();
+        const pts = (group && group.points) || [];
+        const list = [];
+        pts.forEach((p, i) => {
+            const x = api && api.xferOf(p);
+            if (x) list.push(`${formatNdtDisplacementPointLabel(i + 1)} Va ${x.va} / Vb ${x.vb} (Δ ${(x.vb - x.va).toFixed(3)})`);
+        });
+        if (!list.length) {
+            if (bar) bar.remove();
             return;
         }
-        if (!undoBar) {
-            undoBar = document.createElement('div');
-            undoBar.id = 'ndtDispStationTransferUndoBar';
-            undoBar.style.cssText = 'margin-top:0.5rem;display:flex;align-items:center;justify-content:space-between;gap:0.5rem;flex-wrap:wrap;';
-            host.parentElement.appendChild(undoBar);
+        if (!bar) {
+            bar = document.createElement('div');
+            bar.id = 'ndtDispStationTransferUndoBar';
+            bar.style.cssText = 'margin-top:0.5rem;font-size:0.75rem;color:#64748b;line-height:1.4;';
+            host.parentElement.appendChild(bar);
         }
-        const hist = (group.stationTransfers || []).map((x, i) =>
-            `${i + 1}회 Δ=${Number(x.delta).toFixed(3)}`
-        ).join(' · ');
-        undoBar.innerHTML = `
-            <span style="font-size:0.75rem;color:#64748b;line-height:1.35;">이동 보정 ${group.stationTransfers.length}회 · ${hist}</span>
-            <button type="button" class="btn btn-outline" id="btnUndoNdtDispStationTransferSimple" style="font-size:0.75rem;padding:0.2rem 0.45rem;">
-                <i class="fa-solid fa-rotate-left"></i> 마지막 보정 취소
-            </button>`;
-        const btnUndo = document.getElementById('btnUndoNdtDispStationTransferSimple');
-        if (btnUndo) {
-            btnUndo.onclick = () => {
-                const result = undoLastNdtDispStationTransfer(group);
-                if (!result.ok) {
-                    window.showToast('취소할 보정이 없습니다.', 'info', 2400);
-                    return;
-                }
-                touchNdtDispGroup(group);
-                saveStateToLocalStorage();
-                renderNdtDispGroupPointList(group);
-                ensureNdtDispStationTransferUi(group);
-                if (typeof drawNdtCanvas === 'function') drawNdtCanvas();
-                if (typeof renderNdtSummaryTable === 'function') renderNdtSummaryTable();
-                window.showToast('마지막 측기 이동 보정을 취소했습니다.', 'success', 2800);
-            };
-        }
+        bar.textContent = `측기 이동 보정 ${list.length}곳 · ${list.join(' · ')} — 적은 값은 그대로, 계산만 보정`;
     }
 
     function ndtDispStationTransferErrorMessage(reason) {
         return ({
             'no-points': '측정 지점이 없습니다.',
-            'bad-overlap': '중복지점을 확인하세요.',
-            'bad-levels': '이전값(Va)·이후값(Vb)을 숫자로 입력하세요.',
-            'zero-delta': '이전값과 이후값이 같아 보정할 차이가 없습니다.',
-            'nothing-to-adjust': '이미 보정된 구간입니다. 새 측기에서 점을 더 잰 뒤 다시 적용하세요.'
+            'bad-overlap': '지점을 확인하세요.',
+            'bad-levels': '이전값(Va)·이후값(Vb)을 숫자로 입력하세요.'
         })[reason] || '보정에 실패했습니다.';
+    }
+
+    function refreshNdtDispAfterTransferChange(group, opts) {
+        touchNdtDispGroup(group);
+        saveStateToLocalStorage();
+        const key = `${state.currentBuildingId}_${state.currentFloor}`;
+        if (typeof markFloorKeyDirty === 'function') markFloorKeyDirty(key);
+        if (opts.refreshEditList !== false && document.getElementById('ndtDispEditPointList')) {
+            renderNdtDispGroupPointList(group);
+        }
+        if (typeof drawNdtCanvas === 'function') drawNdtCanvas();
+        if (typeof renderNdtSummaryTable === 'function') renderNdtSummaryTable();
     }
 
     function runNdtDispStationTransferApply(group, overlapIndex, va, vb, options) {
@@ -18069,26 +18040,48 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             window.showToast(ndtDispStationTransferErrorMessage(result.reason), 'warning', 3000);
             return result;
         }
-        touchNdtDispGroup(group);
-        saveStateToLocalStorage();
-        if (opts.refreshEditList !== false && document.getElementById('ndtDispEditPointList')) {
-            renderNdtDispGroupPointList(group);
-            ensureNdtDispStationTransferUi(group);
-        }
-        if (typeof drawNdtCanvas === 'function') drawNdtCanvas();
-        if (typeof renderNdtSummaryTable === 'function') renderNdtSummaryTable();
-        if (opts.syncPointModal) {
-            const pt = group.points[overlapIndex];
-            const levelEl = document.getElementById('ndtDispLevel');
-            if (pt && levelEl && isNdtDispLevelFilled(pt.level)) levelEl.value = pt.level;
-            ensureNdtDispPointModalTransferUi(group, pt);
-        }
+        refreshNdtDispAfterTransferChange(group, opts);
+        if (opts.syncPointModal) ensureNdtDispPointModalTransferUi(group, group.points[overlapIndex]);
         window.showToast(
-            `이동 보정 ${result.hop || ''}회 · Δ=${result.delta.toFixed(3)} · ${formatNdtDisplacementPointLabel(result.fromIndex + 1)}~${formatNdtDisplacementPointLabel(result.toIndex + 1)} (${result.adjustedCount}점) · 다음 번호는 그대로 마킹하세요`,
+            `${formatNdtDisplacementPointLabel(overlapIndex + 1)} 이동 보정 저장 · Δ=${result.delta.toFixed(3)} · 적은 값은 그대로, 이후 번호 계산에 반영`,
             'success',
-            5200
+            4200
         );
         return result;
+    }
+
+    function runNdtDispStationTransferClear(group, idx, options) {
+        const opts = options || {};
+        if (!clearNdtDispStationTransfer(group, idx)) {
+            window.showToast('지울 보정이 없습니다.', 'info', 2200);
+            return false;
+        }
+        refreshNdtDispAfterTransferChange(group, opts);
+        if (opts.syncPointModal) ensureNdtDispPointModalTransferUi(group, group.points[idx]);
+        window.showToast(`${formatNdtDisplacementPointLabel(idx + 1)} 이동 보정을 지웠습니다.`, 'success', 2600);
+        return true;
+    }
+
+    function ndtDispTransferFormHtml(lab, x, cls) {
+        const va = x ? x.va : '';
+        const vb = x ? x.vb : '';
+        return `
+                <p class="ndt-disp-xfer-help">
+                    이 지점에서 이전 측기 값(Va)과 이후 측기 값(Vb)을 적으면 ${lab} 뒤 번호는 계산할 때만 Δ=Vb−Va 만큼 맞춰집니다.
+                    적은 레벨은 바뀌지 않고, 나중에 적는 값도 자동 반영됩니다.
+                </p>
+                <div class="ndt-disp-xfer-grid">
+                    <div class="form-group" style="margin:0;">
+                        <label class="form-label" style="font-size:0.75rem;">이전 측기 (Va)</label>
+                        <input type="number" class="form-control ${cls}-va" step="0.1" inputmode="decimal" value="${va}" placeholder="이전">
+                    </div>
+                    <div class="form-group" style="margin:0;">
+                        <label class="form-label" style="font-size:0.75rem;">이후 측기 (Vb)</label>
+                        <input type="number" class="form-control ${cls}-vb" step="0.1" inputmode="decimal" value="${vb}" placeholder="이후">
+                    </div>
+                </div>
+                <button type="button" class="btn btn-primary ndt-disp-xfer-apply ${cls}-apply"><i class="fa-solid fa-calculator"></i> ${x ? '보정 고치기' : '보정 저장'}</button>
+                ${x ? `<button type="button" class="btn btn-outline ndt-disp-xfer-apply ${cls}-clear" style="margin-top:0.35rem;"><i class="fa-solid fa-eraser"></i> 보정 지우기</button>` : ''}`;
     }
 
     /** 개별 지점 마킹 모달: 「이동 보정」 버튼 + Va/Vb 입력 */
@@ -18107,12 +18100,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 levelEl.parentElement.appendChild(wrap);
             }
         }
-        if (!group || !point) {
-            wrap.style.display = 'none';
-            wrap.innerHTML = '';
-            return;
-        }
-        const idx = group.points.indexOf(point);
+        const idx = group && point ? group.points.indexOf(point) : -1;
         if (idx < 0) {
             wrap.style.display = 'none';
             wrap.innerHTML = '';
@@ -18120,33 +18108,19 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         }
         wrap.style.display = '';
         const lab = formatNdtDisplacementPointLabel(idx + 1);
-        const vaDefault = (point.levelAtA != null && point.levelAtA !== '') ? point.levelAtA : '';
+        const x = ndtDispTransferApi().xferOf(point);
         const open = wrap.dataset.open === '1';
+        const calcText = formatNdtDispLevelText(group, idx);
         wrap.innerHTML = `
             <div style="display:flex;align-items:center;justify-content:space-between;gap:0.4rem;flex-wrap:wrap;">
-                <span class="ndt-disp-xfer-title"><i class="fa-solid fa-arrows-left-right"></i> ${lab} 측기 이동</span>
+                <span class="ndt-disp-xfer-title"><i class="fa-solid fa-arrows-left-right"></i> ${lab} 측기 이동${x ? ' · 보정 있음' : ''}</span>
                 <button type="button" class="btn btn-outline ndt-disp-xfer-toggle" id="btnToggleNdtDispPointTransfer">
                     ${open ? '닫기' : '이동 보정'}
                 </button>
             </div>
+            ${calcText.includes('→') || calcText.includes('보정') ? `<div class="ndt-disp-xfer-help" style="margin-top:0.3rem;">계산값: ${calcText}</div>` : ''}
             <div id="ndtDispPointTransferBody" style="display:${open ? 'block' : 'none'};margin-top:0.55rem;">
-                <p class="ndt-disp-xfer-help">
-                    이 지점(중복)에서 이전 측기 측정값(Va)과 이후 측기 측정값(Vb)을 넣고 적용하면
-                    Δ=Vb−Va 가 ${lab}부터 이후 번호에 자동 반영됩니다. 다음 번호 마킹은 그대로 이어가세요.
-                </p>
-                <div class="ndt-disp-xfer-grid">
-                    <div class="form-group" style="margin:0;">
-                        <label class="form-label" style="font-size:0.75rem;">이전 지점 측정값 (Va)</label>
-                        <input type="number" id="ndtDispPointTransferVa" class="form-control" step="0.1" inputmode="decimal" value="${vaDefault}" placeholder="이전">
-                    </div>
-                    <div class="form-group" style="margin:0;">
-                        <label class="form-label" style="font-size:0.75rem;">이후 지점 측정값 (Vb)</label>
-                        <input type="number" id="ndtDispPointTransferVb" class="form-control" step="0.1" inputmode="decimal" value="" placeholder="이후">
-                    </div>
-                </div>
-                <button type="button" class="btn btn-primary ndt-disp-xfer-apply" id="btnApplyNdtDispPointTransfer">
-                    <i class="fa-solid fa-calculator"></i> 적용 (이후 번호 자동 보정)
-                </button>
+                ${ndtDispTransferFormHtml(lab, x, 'ndt-disp-pt-xfer')}
             </div>`;
         const btnToggle = document.getElementById('btnToggleNdtDispPointTransfer');
         if (btnToggle) {
@@ -18154,25 +18128,28 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 e.preventDefault();
                 wrap.dataset.open = wrap.dataset.open === '1' ? '0' : '1';
                 ensureNdtDispPointModalTransferUi(group, point);
-                // 펼치면 「적용」까지 보이게(창 아래 버튼줄·화면 밖에 가려지지 않게)
-                if (wrap.dataset.open === '1') revealNdtDispTransferApply(document.getElementById('btnApplyNdtDispPointTransfer'));
+                if (wrap.dataset.open === '1') revealNdtDispTransferApply(wrap.querySelector('.ndt-disp-pt-xfer-apply'));
             };
         }
-        const btnApply = document.getElementById('btnApplyNdtDispPointTransfer');
+        const vaInput = wrap.querySelector('.ndt-disp-pt-xfer-va');
+        const vbInput = wrap.querySelector('.ndt-disp-pt-xfer-vb');
+        if (vaInput) vaInput.id = 'ndtDispPointTransferVa';
+        if (vbInput) vbInput.id = 'ndtDispPointTransferVb';
+        const btnApply = wrap.querySelector('.ndt-disp-pt-xfer-apply');
         if (btnApply) {
+            btnApply.id = 'btnApplyNdtDispPointTransfer';
             btnApply.onclick = (e) => {
                 e.preventDefault();
-                const va = document.getElementById('ndtDispPointTransferVa')?.value;
-                const vb = document.getElementById('ndtDispPointTransferVb')?.value;
-                const levelElNow = document.getElementById('ndtDispLevel');
-                if (levelElNow && vb !== '' && vb != null) {
-                    const vbn = parseFloat(vb);
-                    if (!isNaN(vbn)) {
-                        point.level = vbn;
-                        levelElNow.value = vbn;
-                    }
-                }
+                const va = wrap.querySelector('.ndt-disp-pt-xfer-va')?.value;
+                const vb = wrap.querySelector('.ndt-disp-pt-xfer-vb')?.value;
                 runNdtDispStationTransferApply(group, idx, va, vb, { syncPointModal: true, refreshEditList: true });
+            };
+        }
+        const btnClear = wrap.querySelector('.ndt-disp-pt-xfer-clear');
+        if (btnClear) {
+            btnClear.onclick = (e) => {
+                e.preventDefault();
+                runNdtDispStationTransferClear(group, idx, { syncPointModal: true, refreshEditList: true });
             };
         }
     }
@@ -18201,9 +18178,14 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
     /** 이동 보정 「적용」 버튼이 창 스크롤 안에서 보이게 */
     function revealNdtDispTransferApply(btn) {
-        if (!btn || typeof btn.scrollIntoView !== 'function') return;
+        // 창 안 스크롤만 조금 내린다(페이지·창 자체는 안 움직임). 이미 보이면 그대로.
+        if (!btn) return;
         requestAnimationFrame(() => {
-            try { btn.scrollIntoView({ block: 'nearest', inline: 'nearest' }); } catch (_e) { /* ignore */ }
+            const host = btn.closest('.modal-body, .defect-drawer-body');
+            if (!host) return;
+            const hr = host.getBoundingClientRect();
+            const br = btn.getBoundingClientRect();
+            if (br.bottom > hr.bottom - 8) host.scrollTop += Math.ceil(br.bottom - hr.bottom + 12);
         });
     }
 
@@ -18221,24 +18203,12 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (idx < 0) return;
         const pt = group.points[idx];
         const lab = formatNdtDisplacementPointLabel(idx + 1);
-        const vaDefault = (pt.levelAtA != null && pt.levelAtA !== '') ? pt.levelAtA : '';
+        const x = ndtDispTransferApi().xferOf(pt);
         form = document.createElement('div');
-        form.className = 'ndt-disp-row-transfer-form';
+        form.className = 'ndt-disp-row-transfer-form ndt-disp-xfer-box';
         form.dataset.pointId = pointId;
-        form.classList.add('ndt-disp-xfer-box');
-        form.innerHTML = `
-            <div class="ndt-disp-xfer-title" style="margin-bottom:0.35rem;"><b>${lab}</b> 이동 보정 · 이전값(Va) / 이후값(Vb)</div>
-            <div class="ndt-disp-xfer-grid">
-                <div class="form-group" style="margin:0;">
-                    <label class="form-label" style="font-size:0.72rem;">이전 지점 (Va)</label>
-                    <input type="number" class="form-control ndt-disp-row-va" step="0.1" inputmode="decimal" value="${vaDefault}" placeholder="이전">
-                </div>
-                <div class="form-group" style="margin:0;">
-                    <label class="form-label" style="font-size:0.72rem;">이후 지점 (Vb)</label>
-                    <input type="number" class="form-control ndt-disp-row-vb" step="0.1" inputmode="decimal" value="" placeholder="이후">
-                </div>
-            </div>
-            <button type="button" class="btn btn-primary ndt-disp-row-apply ndt-disp-xfer-apply"><i class="fa-solid fa-calculator"></i> 적용 (이후 번호 자동 보정)</button>`;
+        form.innerHTML = `<div class="ndt-disp-xfer-title" style="margin-bottom:0.35rem;"><b>${lab}</b> 측기 이동 보정</div>`
+            + ndtDispTransferFormHtml(lab, x, 'ndt-disp-row');
         row.after(form);
         revealNdtDispTransferApply(form.querySelector('.ndt-disp-row-apply'));
         form.querySelector('.ndt-disp-row-apply').onclick = (e) => {
@@ -18247,19 +18217,25 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             const va = form.querySelector('.ndt-disp-row-va')?.value;
             const vb = form.querySelector('.ndt-disp-row-vb')?.value;
             syncNdtDispEditListInputsToGroup(group);
-            const inp = document.querySelector(`#ndtDispEditPointList .ndt-disp-edit-level-input[data-point-id="${pointId}"]`);
-            if (inp && vb !== '' && vb != null) {
-                const vbn = parseFloat(vb);
-                if (!isNaN(vbn)) {
-                    pt.level = vbn;
-                    inp.value = vbn;
-                }
-            }
             runNdtDispStationTransferApply(group, idx, va, vb, { refreshEditList: true });
         };
+        const clr = form.querySelector('.ndt-disp-row-clear');
+        if (clr) {
+            clr.onclick = (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                syncNdtDispEditListInputsToGroup(group);
+                runNdtDispStationTransferClear(group, idx, { refreshEditList: true });
+            };
+        }
     }
 
     function openNdtDisplacementGroupEditModal(group) {
+        if (ndtDispTransferApi() && ndtDispTransferApi().migrateLegacyGroup(group)) {
+            touchNdtDispGroup(group);
+            saveStateToLocalStorage();
+            if (typeof markFloorKeyDirty === 'function') markFloorKeyDirty(`${state.currentBuildingId}_${state.currentFloor}`);
+        }
         document.getElementById('ndtDispEditGroupId').value = group.id;
         document.getElementById('ndtDispGroupEditTitle').textContent = `${group.groupNo} 측정 구역 정보`;
         document.getElementById('ndtDispEditLocationType').value = group.locationType || '보';
@@ -18329,12 +18305,17 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 ? (idx === 0 ? ' 단부1' : (idx === group.points.length - 1 ? ' 단부2' : ' 중앙'))
                 : '';
             const val = isNdtDispLevelFilled(p.level) ? p.level : '';
+            const hasX = !!(ndtDispTransferApi() && ndtDispTransferApi().xferOf(p));
+            const calcText = formatNdtDispLevelText(group, idx);
+            const calcHint = (calcText.includes('→') || calcText.startsWith('(보정'))
+                ? `<span class="ndt-disp-calc-hint" style="font-size:0.68rem;color:#b45309;white-space:nowrap;">계산 ${calcText.split('→').pop().replace(/[()보정]/g, '').trim()}</span>` : '';
             return `
             <div class="option-manager-item ndt-disp-edit-point-row" data-point-id="${p.id}">
                 <span class="ndt-disp-edit-point-label">${formatNdtDisplacementPointLabel(idx + 1)}${role}</span>
                 <input type="number" class="form-control ndt-disp-edit-level-input" data-point-id="${p.id}"
                     step="0.1" placeholder="레벨" value="${val}" inputmode="decimal" aria-label="${formatNdtDisplacementPointLabel(idx + 1)} 레벨">
-                <button type="button" class="btn btn-outline ndt-disp-mark-station-btn" title="이 지점에서 측기 이동 보정(이전값·이후값)"
+                ${calcHint}
+                <button type="button" class="btn ${hasX ? 'btn-primary' : 'btn-outline'} ndt-disp-mark-station-btn" title="이 지점에서 측기 이동 보정(이전값·이후값)"
                     data-group-id="${group.id}" data-point-id="${p.id}" style="font-size:0.7rem;padding:0.2rem 0.35rem;">이동 보정</button>
                 <button type="button" class="option-manager-item-delete" title="지점 삭제"
                     onclick="window.deleteNdtDisplacementPoint('${group.id}','${p.id}')"><i class="fa-solid fa-trash"></i></button>
