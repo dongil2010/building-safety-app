@@ -16736,3 +16736,42 @@ html.layout-tablet .drawing-memo-bar { top: auto; bottom: 5.8rem; border-radius:
 .app-update-dot[hidden] { display: none; }
 html.layout-mobile .home-update-label { display: none; }
 html.layout-mobile .home-update-btn { width: 2.5rem; padding: 0; justify-content: center; }
+
+/* 부동침하 측기 이동 보정(2026-10-12): 밝은 창에서도 잘 보이게, 칸·「적용」이 창 밖으로 넘치지 않게 */
+.ndt-disp-xfer-box {
+    margin: 0.4rem 0 0.6rem;
+    padding: 0.6rem 0.65rem;
+    border: 1.5px solid #f59e0b;
+    border-radius: 10px;
+    background: #fffbeb;
+    color: #1f2937;
+    box-sizing: border-box;
+    max-width: 100%;
+    flex-shrink: 0;
+}
+.ndt-disp-xfer-title { font-size: 0.84rem; font-weight: 700; color: #92400e; }
+.ndt-disp-xfer-help { margin: 0 0 0.45rem; font-size: 0.76rem; color: #57534e; line-height: 1.45; }
+.ndt-disp-xfer-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 0.4rem;
+}
+.ndt-disp-xfer-grid .form-control { width: 100%; min-width: 0; box-sizing: border-box; }
+.ndt-disp-xfer-grid .form-label { color: #44403c; }
+.ndt-disp-xfer-apply {
+    margin-top: 0.5rem;
+    width: 100%;
+    min-height: 2.6rem;
+    font-weight: 700;
+    scroll-margin-bottom: 5rem;   /* 창 아래 버튼줄에 가리지 않게 */
+}
+.ndt-disp-xfer-toggle,
+#ndtDispEditPointList .ndt-disp-mark-station-btn {
+    border-color: #f59e0b !important;
+    color: #b45309 !important;
+    background: #fff !important;
+    font-weight: 700;
+    white-space: nowrap;
+    min-height: 2rem;
+}
+#ndtDispEditPointList .ndt-disp-row-transfer-form { width: 100%; }

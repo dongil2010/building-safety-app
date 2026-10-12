@@ -29,8 +29,14 @@
         dragStartY: 0,
         dragStartLift: 0,
         rafPending: false,
-        blurTimer: null
+        blurTimer: null,
+        pointerDown: false,     // 손가락이 화면에 닿아 있는 동안
+        clearAfterTap: false    // 그동안 칸을 벗어났으면, 손을 뗀 뒤(클릭이 끝난 뒤) 내린다
     };
+    // 2026-10-12: 칸에 입력한 뒤 같은 창의 버튼(부동침하 「이동 보정 → 적용」 등)을 누르면 칸이 포커스를 잃어
+    // 140ms 뒤 끌기 손잡이를 떼고 들어올림을 풀었다 → 버튼이 손가락 밑에서 위로 튀어 손을 뗄 때의 클릭이 엉뚱한 곳(목록)에 떨어졌다.
+    // 손가락이 닿아 있는 동안은 화면을 움직이지 않고, 뗀 뒤 클릭이 처리된 다음에 정리한다.
+    var CLEAR_AFTER_TAP_MS = 350;
 
     function isCoarsePointer() {
         try {
@@ -350,15 +356,38 @@
         setTimeout(function () { updateLayout(true); }, 520);
     }
 
+    function clearIfNoField() {
+        var ae = document.activeElement;
+        if (isTextField(ae)) return;
+        state.activeField = null;
+        clearLift();
+    }
+
     function onFocusOut() {
         if (state.blurTimer) clearTimeout(state.blurTimer);
         state.blurTimer = setTimeout(function () {
             state.blurTimer = null;
-            var ae = document.activeElement;
-            if (isTextField(ae)) return;
-            state.activeField = null;
-            clearLift();
+            if (state.pointerDown) { state.clearAfterTap = true; return; }
+            clearIfNoField();
         }, 140);
+    }
+
+    function onPointerDownCapture(e) {
+        if (e && e.pointerType === 'mouse') return;
+        state.pointerDown = true;
+    }
+
+    function onPointerUpCapture(e) {
+        if (e && e.pointerType === 'mouse') return;
+        state.pointerDown = false;
+        if (!state.clearAfterTap) return;
+        state.clearAfterTap = false;
+        if (state.blurTimer) clearTimeout(state.blurTimer);
+        state.blurTimer = setTimeout(function () {
+            state.blurTimer = null;
+            if (state.pointerDown) { state.clearAfterTap = true; return; }
+            clearIfNoField();
+        }, CLEAR_AFTER_TAP_MS);
     }
 
     function bindBodyScrollDrag(gripEl, scrollEl) {
@@ -408,6 +437,9 @@
 
         document.addEventListener('focusin', onFocusIn, true);
         document.addEventListener('focusout', onFocusOut, true);
+        document.addEventListener('pointerdown', onPointerDownCapture, true);
+        document.addEventListener('pointerup', onPointerUpCapture, true);
+        document.addEventListener('pointercancel', onPointerUpCapture, true);
 
         if (window.visualViewport) {
             window.visualViewport.addEventListener('resize', scheduleLayoutUpdate);

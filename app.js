@@ -18099,7 +18099,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (!wrap) {
             wrap = document.createElement('div');
             wrap.id = 'ndtDispPointStationTransfer';
-            wrap.style.cssText = 'margin-top:0.65rem;padding:0.65rem;border:1px dashed #475569;border-radius:8px;background:rgba(15,23,42,0.4);';
+            wrap.className = 'ndt-disp-xfer-box';
             const anchor = levelEl.closest('.form-group') || levelEl.parentElement;
             if (anchor && anchor.parentElement) {
                 anchor.parentElement.insertBefore(wrap, anchor.nextSibling);
@@ -18124,17 +18124,17 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const open = wrap.dataset.open === '1';
         wrap.innerHTML = `
             <div style="display:flex;align-items:center;justify-content:space-between;gap:0.4rem;flex-wrap:wrap;">
-                <span style="font-size:0.82rem;color:#cbd5e1;"><i class="fa-solid fa-arrows-left-right"></i> ${lab} 측기 이동</span>
-                <button type="button" class="btn btn-outline" id="btnToggleNdtDispPointTransfer" style="font-size:0.78rem;padding:0.25rem 0.55rem;">
+                <span class="ndt-disp-xfer-title"><i class="fa-solid fa-arrows-left-right"></i> ${lab} 측기 이동</span>
+                <button type="button" class="btn btn-outline ndt-disp-xfer-toggle" id="btnToggleNdtDispPointTransfer">
                     ${open ? '닫기' : '이동 보정'}
                 </button>
             </div>
             <div id="ndtDispPointTransferBody" style="display:${open ? 'block' : 'none'};margin-top:0.55rem;">
-                <p style="margin:0 0 0.45rem;font-size:0.75rem;color:#94a3b8;line-height:1.4;">
+                <p class="ndt-disp-xfer-help">
                     이 지점(중복)에서 이전 측기 측정값(Va)과 이후 측기 측정값(Vb)을 넣고 적용하면
                     Δ=Vb−Va 가 ${lab}부터 이후 번호에 자동 반영됩니다. 다음 번호 마킹은 그대로 이어가세요.
                 </p>
-                <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.4rem;">
+                <div class="ndt-disp-xfer-grid">
                     <div class="form-group" style="margin:0;">
                         <label class="form-label" style="font-size:0.75rem;">이전 지점 측정값 (Va)</label>
                         <input type="number" id="ndtDispPointTransferVa" class="form-control" step="0.1" inputmode="decimal" value="${vaDefault}" placeholder="이전">
@@ -18144,7 +18144,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                         <input type="number" id="ndtDispPointTransferVb" class="form-control" step="0.1" inputmode="decimal" value="" placeholder="이후">
                     </div>
                 </div>
-                <button type="button" class="btn btn-primary" id="btnApplyNdtDispPointTransfer" style="margin-top:0.5rem;width:100%;">
+                <button type="button" class="btn btn-primary ndt-disp-xfer-apply" id="btnApplyNdtDispPointTransfer">
                     <i class="fa-solid fa-calculator"></i> 적용 (이후 번호 자동 보정)
                 </button>
             </div>`;
@@ -18154,6 +18154,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 e.preventDefault();
                 wrap.dataset.open = wrap.dataset.open === '1' ? '0' : '1';
                 ensureNdtDispPointModalTransferUi(group, point);
+                // 펼치면 「적용」까지 보이게(창 아래 버튼줄·화면 밖에 가려지지 않게)
+                if (wrap.dataset.open === '1') revealNdtDispTransferApply(document.getElementById('btnApplyNdtDispPointTransfer'));
             };
         }
         const btnApply = document.getElementById('btnApplyNdtDispPointTransfer');
@@ -18175,6 +18177,36 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         }
     }
 
+    /**
+     * 구역 편집 목록 칸에 적어 둔(아직 「저장」 안 누른) 레벨을 지점에 넣는다.
+     * 2026-10-12: 목록에 레벨을 다 적고 바로 「이동 보정 → 적용」을 누르면 보정이 저장된 값(빈 값)으로만 계산되고,
+     * 목록을 다시 그리면서 적어 둔 값까지 지워졌다. 보정 전에 먼저 옮긴다. 형식이 틀린 칸은 건드리지 않는다.
+     */
+    function syncNdtDispEditListInputsToGroup(group) {
+        if (!group || !Array.isArray(group.points)) return 0;
+        let changed = 0;
+        document.querySelectorAll('#ndtDispEditPointList .ndt-disp-edit-level-input').forEach((inp) => {
+            const pt = group.points.find((p) => p.id === inp.dataset.pointId);
+            if (!pt) return;
+            const raw = inp.value;
+            const next = (raw === '' || raw == null) ? null : parseFloat(raw);
+            if (next != null && isNaN(next)) return;
+            const cur = isNdtDispLevelFilled(pt.level) ? Number(pt.level) : null;
+            if (cur === next) return;
+            pt.level = next;
+            changed += 1;
+        });
+        return changed;
+    }
+
+    /** 이동 보정 「적용」 버튼이 창 스크롤 안에서 보이게 */
+    function revealNdtDispTransferApply(btn) {
+        if (!btn || typeof btn.scrollIntoView !== 'function') return;
+        requestAnimationFrame(() => {
+            try { btn.scrollIntoView({ block: 'nearest', inline: 'nearest' }); } catch (_e) { /* ignore */ }
+        });
+    }
+
     /** 구역 편집 목록 행: 인라인 Va/Vb 「이동 보정」 */
     function toggleNdtDispEditRowTransferForm(group, pointId) {
         const row = document.querySelector(`#ndtDispEditPointList .ndt-disp-edit-point-row[data-point-id="${pointId}"]`);
@@ -18193,10 +18225,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         form = document.createElement('div');
         form.className = 'ndt-disp-row-transfer-form';
         form.dataset.pointId = pointId;
-        form.style.cssText = 'margin:0.15rem 0 0.55rem;padding:0.55rem;border:1px solid #334155;border-radius:8px;background:rgba(15,23,42,0.55);';
+        form.classList.add('ndt-disp-xfer-box');
         form.innerHTML = `
-            <div style="font-size:0.78rem;color:#cbd5e1;margin-bottom:0.35rem;"><b>${lab}</b> 이동 보정 · 이전값(Va) / 이후값(Vb)</div>
-            <div style="display:grid;grid-template-columns:1fr 1fr auto;gap:0.35rem;align-items:end;">
+            <div class="ndt-disp-xfer-title" style="margin-bottom:0.35rem;"><b>${lab}</b> 이동 보정 · 이전값(Va) / 이후값(Vb)</div>
+            <div class="ndt-disp-xfer-grid">
                 <div class="form-group" style="margin:0;">
                     <label class="form-label" style="font-size:0.72rem;">이전 지점 (Va)</label>
                     <input type="number" class="form-control ndt-disp-row-va" step="0.1" inputmode="decimal" value="${vaDefault}" placeholder="이전">
@@ -18205,14 +18237,16 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     <label class="form-label" style="font-size:0.72rem;">이후 지점 (Vb)</label>
                     <input type="number" class="form-control ndt-disp-row-vb" step="0.1" inputmode="decimal" value="" placeholder="이후">
                 </div>
-                <button type="button" class="btn btn-primary ndt-disp-row-apply" style="font-size:0.75rem;padding:0.35rem 0.55rem;white-space:nowrap;">적용</button>
-            </div>`;
+            </div>
+            <button type="button" class="btn btn-primary ndt-disp-row-apply ndt-disp-xfer-apply"><i class="fa-solid fa-calculator"></i> 적용 (이후 번호 자동 보정)</button>`;
         row.after(form);
+        revealNdtDispTransferApply(form.querySelector('.ndt-disp-row-apply'));
         form.querySelector('.ndt-disp-row-apply').onclick = (e) => {
             e.preventDefault();
             e.stopPropagation();
             const va = form.querySelector('.ndt-disp-row-va')?.value;
             const vb = form.querySelector('.ndt-disp-row-vb')?.value;
+            syncNdtDispEditListInputsToGroup(group);
             const inp = document.querySelector(`#ndtDispEditPointList .ndt-disp-edit-level-input[data-point-id="${pointId}"]`);
             if (inp && vb !== '' && vb != null) {
                 const vbn = parseFloat(vb);
