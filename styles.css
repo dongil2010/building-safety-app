@@ -16703,3 +16703,36 @@ html.layout-tablet .drawing-memo-bar { top: auto; bottom: 5.8rem; border-radius:
 @media print {
     .map-memo-overlay, .drawing-memo-bar { display: none !important; }
 }
+
+/* 「업데이트 받기」 (2026-10-12) */
+.home-update-btn {
+    position: relative;
+    height: 2.5rem;
+    padding: 0 0.9rem;
+    border-radius: 999px;
+    border: 1px solid rgba(255, 255, 255, 0.28);
+    background: rgba(255, 255, 255, 0.12);
+    color: #ffffff;
+    font-size: 0.88rem;
+    font-weight: 600;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    white-space: nowrap;
+}
+.home-update-btn:hover { background: rgba(255, 255, 255, 0.22); }
+.home-update-btn.has-update { border-color: #facc15; background: rgba(250, 204, 21, 0.18); }
+.app-update-dot {
+    position: absolute;
+    top: -3px;
+    right: -3px;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: #ef4444;
+    border: 2px solid #fff;
+}
+.app-update-dot[hidden] { display: none; }
+html.layout-mobile .home-update-label { display: none; }
+html.layout-mobile .home-update-btn { width: 2.5rem; padding: 0; justify-content: center; }

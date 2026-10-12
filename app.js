@@ -53935,6 +53935,21 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const cid = (window.state && window.state.companyId) || '';
         return cid ? (`bsa_offline_pending_flush_v1_${cid}`) : 'bsa_offline_pending_flush_v1';
     }
+    // 「업데이트 받기」(js/shared/app-update-button.js)가 새로고침 전에 부른다 — 기기 저장 마무리·못 올린 변경 수
+    window.BSA_appUpdateHooks = {
+        pendingCount() {
+            return _dirtyFloorKeys.size + ((window._defectPhotoSaves && window._defectPhotoSaves.size) || 0);
+        },
+        async flushLocal() {
+            const saves = Array.from(window._defectPhotoSaves || []);
+            await Promise.all(saves.map((p) => Promise.resolve(p).catch(() => {})));
+            if (typeof flushLocalPhotoPersistBeforeUnload === 'function') {
+                try { await flushLocalPhotoPersistBeforeUnload(); } catch (_e) { /* ignore */ }
+            }
+            try { if (typeof saveStateToLocalStorage === 'function') saveStateToLocalStorage(); } catch (_e) { /* ignore */ }
+            try { persistDirtyFloorKeys(); } catch (_e) { /* ignore */ }
+        }
+    };
     function persistDirtyFloorKeys() {
         try {
             localStorage.setItem(dirtyFloorsStorageKey(), JSON.stringify(Array.from(_dirtyFloorKeys)));
@@ -58481,6 +58496,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 }
             }
             renderOutdatedAppBanner(_appOutdatedForSync);
+            if (window.BSA && window.BSA.appUpdateButton) window.BSA.appUpdateButton.setBadge('web', outdated);
         } catch (_e) { /* 오프라인·시간 초과 — 이전 판단 유지 */ }
         return _appOutdatedForSync;
     }
