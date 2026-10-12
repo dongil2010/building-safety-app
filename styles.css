@@ -16360,6 +16360,8 @@ html:not(.layout-desktop) .crack-monitor-photo-slots {
 .bsa-mkp-short .bsa-mkp-sym:not(.bsa-mkp-ok) { font-size: 22px; }
 .bsa-mkp-ok { background: #2563eb; border-color: #2563eb; color: #fff; font-size: 16px; }
 .bsa-mkp-ok:active { background: #1d4ed8; }
+.bsa-mkp-numonly .bsa-mkp-key[data-mkp-key="NEXT"] { background: #0f766e; border-color: #0f766e; }
+.bsa-mkp-numonly .bsa-mkp-key[data-mkp-key="C"] { font-size: 18px; }
 input.bsa-mkp-active, textarea.bsa-mkp-active {
     outline: 2px solid #2563eb !important;
     outline-offset: 0;

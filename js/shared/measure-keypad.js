@@ -28,6 +28,36 @@
     ];
     var LAYOUT_LANDSCAPE = LAYOUT_PORTRAIT; // 예전 이름 호환 — 같은 4×4
 
+    /**
+     * 숫자만 적는 칸(2026-10-12): 부동침하 레벨·이동 보정 Va/Vb·측정 길이, 그 밖의 비파괴(NDT) 창 숫자 칸.
+     * '-' = 부호 바꾸기(음수 레벨), 'C' = 칸 비우기, 'NEXT' = 다음 숫자 칸
+     */
+    var NUM_DRAWERS = ['#ndtModal', '#ndtCrackMonitorModal', '#ndtDisplacementModal', '#ndtDisplacementGroupEditModal'];
+    var NUM_SELECTOR = NUM_DRAWERS.map(function (d) {
+        return d + ' input[type="number"], ' + d + ' input[inputmode="decimal"], ' + d + ' input[inputmode="numeric"], ' +
+            d + ' input[data-mkp-orig-type="number"]';
+    }).join(', ') + ', input[data-num-keypad]';
+    var LAYOUT_NUM = [
+        ['7', '8', '9', 'BS'],
+        ['4', '5', '6', '-'],
+        ['1', '2', '3', 'NEXT'],
+        ['C', '0', '.', 'OK']
+    ];
+
+    /** '-' 키: 맨 앞 부호만 바꾼다(커서 위치 상관없이) → { value, caret } */
+    function toggleSign(value) {
+        value = String(value == null ? '' : value);
+        var next = value.charAt(0) === '-' ? value.slice(1) : '-' + value;
+        return { value: next, caret: next.length };
+    }
+
+    /** 숫자 칸에 넣어도 되는 글자인가(점은 하나만) */
+    function numAccepts(value, key) {
+        if (/^[0-9]$/.test(key)) return true;
+        if (key === '.') return String(value == null ? '' : value).indexOf('.') < 0;
+        return false;
+    }
+
     function allKeys() {
         var out = [];
         LAYOUT_PORTRAIT.forEach(function (r) { r.forEach(function (k) { out.push(k); }); });
@@ -111,11 +141,21 @@
         try { return !!(w.localStorage && w.localStorage.getItem('bsaMeasureKeypad') === 'off'); } catch (_e) { return false; }
     }
 
+    function isNumTarget(el) {
+        if (!el || el.nodeType !== 1 || !el.matches || el.tagName !== 'INPUT') return false;
+        if (el.disabled || el.readOnly) return false;
+        var t = (el.getAttribute('type') || 'text').toLowerCase();
+        if (t !== 'text' && t !== 'number' && t !== 'tel') return false;
+        if (el.matches(TARGET_SELECTOR)) return false; // 폭·길이 칸은 원래 키패드
+        return el.matches(NUM_SELECTOR);
+    }
+
     function isTarget(el) {
         if (!el || el.nodeType !== 1 || !el.matches) return false;
         if (el.disabled || el.readOnly) return false;
         var tag = el.tagName;
         if (tag !== 'INPUT' && tag !== 'TEXTAREA') return false;
+        if (isNumTarget(el)) return true;
         if (tag === 'INPUT') {
             var t = (el.getAttribute('type') || 'text').toLowerCase();
             if (t !== 'text' && t !== 'search' && t !== 'tel') return false;
@@ -127,6 +167,8 @@
         if (k === 'BS') return '⌫';
         if (k === 'OK') return '완료';
         if (k === ' ') return '␣';
+        if (k === 'NEXT') return '다음';
+        if (k === '-') return '±';
         return k;
     }
 
@@ -134,11 +176,19 @@
         if (k === 'BS') return '지우기';
         if (k === 'OK') return '완료';
         if (k === ' ') return '띄어쓰기';
+        if (k === 'NEXT') return '다음 칸';
+        if (k === '-') return '부호 바꾸기';
+        if (k === 'C') return '칸 비우기';
         return k;
     }
 
     var api = {
         TARGET_SELECTOR: TARGET_SELECTOR,
+        NUM_SELECTOR: NUM_SELECTOR,
+        LAYOUT_NUM: LAYOUT_NUM,
+        toggleSign: toggleSign,
+        numAccepts: numAccepts,
+        isNumTarget: isNumTarget,
         LAYOUT_PORTRAIT: LAYOUT_PORTRAIT,
         LAYOUT_LANDSCAPE: LAYOUT_LANDSCAPE,
         allKeys: allKeys,
@@ -174,6 +224,11 @@
         el.dataset.mkpPrepared = '1';
         el.dataset.mkpOrigInputmode = el.hasAttribute('inputmode') ? el.getAttribute('inputmode') : '__none__';
         el.setAttribute('inputmode', 'none');
+        // type=number 칸은 '-'·'1.' 같은 쓰다 만 값을 못 담아서(값이 비어 버림) 키패드 동안 text로 둔다
+        if (isNumTarget(el) && (el.getAttribute('type') || '').toLowerCase() === 'number') {
+            el.setAttribute('data-mkp-orig-type', 'number');
+            el.setAttribute('type', 'text');
+        }
         // mobile-keyboard.js(소프트 키보드 들어올림)는 이 칸을 건너뛴다 — 키보드가 안 뜨므로
         el.setAttribute('data-bsa-kb-skip', '');
         el.setAttribute('autocomplete', 'off');
@@ -185,6 +240,10 @@
         if (orig === '__none__') el.removeAttribute('inputmode');
         else if (orig != null) el.setAttribute('inputmode', orig);
         el.removeAttribute('data-bsa-kb-skip');
+        if (el.getAttribute('data-mkp-orig-type') === 'number') {
+            el.setAttribute('type', 'number');
+            el.removeAttribute('data-mkp-orig-type');
+        }
         delete el.dataset.mkpPrepared;
         delete el.dataset.mkpOrigInputmode;
     }
@@ -192,9 +251,10 @@
     function prepAll(scope) {
         if (!isCoarseDevice()) return;
         var list = [];
-        if (scope.matches && scope.matches(TARGET_SELECTOR)) list.push(scope);
+        var sel = TARGET_SELECTOR + ', ' + NUM_SELECTOR;
+        if (scope.matches && scope.matches(sel)) list.push(scope);
         if (scope.querySelectorAll) {
-            var found = scope.querySelectorAll(TARGET_SELECTOR);
+            var found = scope.querySelectorAll(sel);
             for (var i = 0; i < found.length; i++) list.push(found[i]);
         }
         list.forEach(function (el) { if (isTarget(el)) prepField(el); });
@@ -254,16 +314,17 @@
     function renderKeys() {
         var pad = buildPad();
         // 배열은 늘 4×4. 폰 가로(키 높이가 모자람)만 키를 낮춘다(bsa-mkp-short)
-        var orient = isLandscape() ? 'short' : 'grid';
+        var numMode = !!(state.field && isNumTarget(state.field));
+        var orient = (isLandscape() ? 'short' : 'grid') + (numMode ? ':num' : '');
         if (state.orientation === orient && pad.firstChild) return;
         state.orientation = orient;
-        var layout = LAYOUT_PORTRAIT;
-        pad.className = 'bsa-mkp bsa-measure-keypad bsa-mkp-grid' + (orient === 'short' ? ' bsa-mkp-short' : '');
+        var layout = numMode ? LAYOUT_NUM : LAYOUT_PORTRAIT;
+        pad.className = 'bsa-mkp bsa-measure-keypad bsa-mkp-grid' + (orient.indexOf('short') === 0 ? ' bsa-mkp-short' : '') + (numMode ? ' bsa-mkp-numonly' : '');
         pad.style.setProperty('--mkp-cols', String(layout[0].length));
         var html = '';
         layout.forEach(function (row) {
             row.forEach(function (k) {
-                var cls = 'bsa-mkp-key' + (k === 'BS' ? ' bsa-mkp-bs' : '') + (k === 'OK' ? ' bsa-mkp-ok' : '') +
+                var cls = 'bsa-mkp-key' + (k === 'BS' || k === 'C' ? ' bsa-mkp-bs' : '') + (k === 'OK' || k === 'NEXT' ? ' bsa-mkp-ok' : '') +
                     (/^[0-9]$/.test(k) ? ' bsa-mkp-num' : ' bsa-mkp-sym');
                 html += '<button type="button" tabindex="-1" class="' + cls + '" data-mkp-key="' +
                     (k === ' ' ? ' ' : k) + '" aria-label="' + keyAria(k) + '">' + keyLabel(k) + '</button>';
@@ -284,9 +345,16 @@
         var el = state.field;
         if (!el || !el.isConnected) { close(false); return; }
         if (k === 'OK') { close(true, true); return; }
+        if (k === 'NEXT') { focusNextNum(el); return; }
         var s = null, e = null;
         try { s = el.selectionStart; e = el.selectionEnd; } catch (_e) { /* 선택 미지원 */ }
-        var res = k === 'BS' ? backspaceAtCaret(el.value, s, e) : insertAtCaret(el.value, s, e, k);
+        var res;
+        if (k === 'BS') res = backspaceAtCaret(el.value, s, e);
+        else if (k === 'C') res = { value: '', caret: 0 };
+        else if (k === '-' && isNumTarget(el)) res = toggleSign(el.value);
+        else if (isNumTarget(el) && !numAccepts(el.value, k)) return;
+        else res = insertAtCaret(el.value, s, e, k);
+        if (res.value === el.value) return;
         if (res.value === el.value && k === 'BS') return;
         el.value = res.value;
         try { el.setSelectionRange(res.caret, res.caret); } catch (_e) { /* ignore */ }
@@ -295,6 +363,22 @@
         // input 핸들러가 칸을 다시 그렸으면(분리) 닫는다
         if (!el.isConnected) { close(false); return; }
         schedulePosition();
+    }
+
+    /** 「다음」: 같은 창의 다음 숫자 칸(보이는 것)으로. 없으면 완료 */
+    function focusNextNum(el) {
+        var scope = el.closest('.modal-overlay, .modal-card, form') || document.body;
+        var list = Array.prototype.slice.call(scope.querySelectorAll('input')).filter(function (x) {
+            return isNumTarget(x) && x.offsetParent !== null;
+        });
+        var i = list.indexOf(el);
+        var next = i >= 0 ? list[i + 1] : null;
+        if (!next) { close(true, true); return; }
+        prepField(next); // 포커스 전에 → OS 키보드 안 뜸
+        state.lastPointerType = 'touch';
+        state.lastPointerAt = Date.now();
+        try { next.focus({ preventScroll: true }); } catch (_e) { next.focus(); }
+        if (state.field !== next && wantsKeypadFor(next)) open(next);
     }
 
     function startRepeat() {
