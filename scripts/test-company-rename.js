@@ -50,9 +50,11 @@ function testAdminRename() {
     const fn = slice('window.renameCompanyAsAdmin = async function', 2600);
     assert.ok(fn.indexOf("window.state.role !== 'admin'") > 0, '관리자만 바꿀 수 있어야 한다');
     assert.ok(fn.indexOf('if (!next)') > 0, '빈 이름은 막아야 한다');
-    assert.ok(fn.indexOf("db.collection('companies').doc(window.state.companyId).update({ name: next })") > 0,
-        '기준인 회사 정보의 이름을 바꿔야 한다');
-    assert.ok(fn.indexOf("db.collection('users').doc(window.state.uid).update({ companyName: next })") > 0);
+    assert.ok(fn.indexOf('renameCompanyEverywhere(window.state.companyId, next)') > 0, '이름이 복사된 곳을 모두 고쳐야 한다');
+    const ev = slice('async function renameCompanyEverywhere(companyId, next)', 2600);
+    assert.ok(ev.indexOf('companyRef.update({ name: next') > 0, '기준인 회사 정보의 이름을 바꿔야 한다');
+    assert.ok(ev.indexOf("db.collection('users').doc(window.state.uid).update({ companyName: next })") > 0);
+    assert.ok(ev.indexOf("db.collection('joinCodes').doc(joinCode).update({ companyName: next, companyNameLower") > 0, '가입 검색 이름도 새 이름으로');
     assert.ok(fn.indexOf('applyCompanyNameLocally(next)') > 0, '바꾼 즉시 화면·보고서 값도 맞춰야 한다');
     assert.ok(fn.indexOf('await window.appConfirm(') > 0, '바꾸기 전에 확인해야 한다(앱 확인 창)');
 }

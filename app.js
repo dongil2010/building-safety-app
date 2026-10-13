@@ -60300,8 +60300,19 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         return {
             joinCode: docSnap.id,
             companyId: data.companyId || '',
-            companyName: data.companyName || ''
+            companyName: data.companyName || '',
+            disabled: data.disabled === true
         };
+    }
+
+    /** 검색에 내보일 회사인지 — 지운(비활성) 회사·이름 없는 코드는 숨긴다 */
+    function isJoinableCompanyRow(row) {
+        return !!(row && row.companyId && row.companyName && !row.disabled);
+    }
+
+    /** 검색용 소문자 이름(영문 대소문자 무시). 가입 코드 문서에 companyNameLower로 같이 둔다 */
+    function companyNameSearchKey(name) {
+        return String(name || '').trim().toLowerCase();
     }
 
     function sortCompanyRowsByName(rows) {
@@ -60323,7 +60334,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const snap = await db.collection('joinCodes').limit(JOIN_CODES_DIRECTORY_MAX).get();
         _joinCodesDirectoryCache = snap.docs
             .map(joinCodeRowFromSnap)
-            .filter((row) => row.companyId && row.companyName);
+            .filter(isJoinableCompanyRow);
         // 상한만큼 꽉 찼다면 뒤에 더 있을 수 있다 = 이 목록만으로 검색하면 누락된다
         _joinCodesDirectoryComplete = snap.size < JOIN_CODES_DIRECTORY_MAX;
         _joinCodesDirectoryCacheAt = Date.now();
@@ -60347,29 +60358,47 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const snap = await db.collection('joinCodes').doc(code).get();
         if (!snap.exists) return [];
         const row = joinCodeRowFromSnap(snap);
-        return (row.companyId && row.companyName) ? [row] : [];
+        return isJoinableCompanyRow(row) ? [row] : [];
     }
 
-    /** 회사명 앞부분 일치 — 서버에서 20건만 받는다. companyName 단일 필드 자동 색인 사용. */
+    /** 회사명 앞부분 일치 — 서버에서 20건씩만 받는다(단일 필드 자동 색인, 복합 색인 불필요).
+     *  ① companyNameLower(소문자) — 대소문자 무시 ② companyName 원문 — 소문자 칸이 없는 예전 코드
+     *  ③ 식별코드 앞부분 — 문서 id(대문자) 범위 */
     async function searchCompaniesByNamePrefix(query) {
         if (!isJoinDirectoryReadable()) return [];
-        const snap = await db.collection('joinCodes')
-            .orderBy('companyName')
-            .startAt(query)
-            .endAt(query + '')
-            .limit(20)
-            .get();
-        return snap.docs
-            .map(joinCodeRowFromSnap)
-            .filter((row) => row.companyId && row.companyName);
+        const col = db.collection('joinCodes');
+        const lower = companyNameSearchKey(query);
+        const upper = String(query || '').trim().toUpperCase();
+        const runs = [
+            col.orderBy('companyNameLower').startAt(lower).endAt(lower + '\uf8ff').limit(20).get(),
+            col.orderBy('companyName').startAt(query).endAt(query + '\uf8ff').limit(20).get()
+        ];
+        if (/^[A-Z0-9]{1,8}$/.test(upper)) {
+            const docId = firebase.firestore.FieldPath.documentId();
+            runs.push(col.orderBy(docId).startAt(upper).endAt(upper + '\uf8ff').limit(20).get());
+        }
+        const snaps = await Promise.allSettled(runs);
+        const seen = new Set();
+        const out = [];
+        snaps.forEach((r) => {
+            if (r.status !== 'fulfilled') return;
+            r.value.docs.forEach((d) => {
+                const row = joinCodeRowFromSnap(d);
+                if (!isJoinableCompanyRow(row) || seen.has(row.joinCode)) return;
+                seen.add(row.joinCode);
+                out.push(row);
+            });
+        });
+        return out;
     }
 
     async function searchCompaniesForJoin(query) {
         const raw = String(query || '').trim();
         if (!raw || !db) return [];
 
-        const upper = raw.toUpperCase();
-        if (JOIN_CODE_PATTERN.test(upper)) {
+        // 식별코드: 대소문자·띄어쓰기·하이픈 무시(abc-23x → ABC23X). 6자리 외 예전 긴 코드도 문서 1건으로 먼저 본다.
+        const upper = raw.toUpperCase().replace(/[\s-]+/g, '');
+        if (JOIN_CODE_PATTERN.test(upper) || /^[A-Z0-9]{6,10}$/.test(upper)) {
             try {
                 const hit = await lookupCompanyByJoinCode(upper);
                 if (hit.length) return hit;
@@ -60381,6 +60410,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         // 5분 캐시된 목록. 회사가 상한보다 적으면 이것만으로 부분일치가 완전하다.
         const directory = await fetchJoinCodesDirectory(false);
         const local = searchCompaniesInDirectory(raw, directory);
+        if (upper && upper !== raw.toUpperCase()) {
+            const seenLocal = new Set(local.map((row) => row.joinCode));
+            searchCompaniesInDirectory(upper, directory).forEach((row) => { if (!seenLocal.has(row.joinCode)) local.push(row); });
+        }
         if (_joinCodesDirectoryComplete) return local;
 
         // 목록이 잘렸다 = 회사가 많다. 이때만 서버 prefix 쿼리를 더 던진다.
@@ -60782,6 +60815,26 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             btn.parentNode.insertBefore(rbtn, btn.nextSibling);
         }
         if (rbtn) rbtn.style.display = show ? 'inline-flex' : 'none';
+        // 관리자 전용 「회사 삭제」(비활성) / 비활성일 때 「회사 복구」
+        let dbtn = document.getElementById('btnDisableCompany');
+        if (!dbtn && btn.parentNode) {
+            dbtn = document.createElement('button');
+            dbtn.type = 'button';
+            dbtn.id = 'btnDisableCompany';
+            dbtn.className = 'btn btn-sm btn-outline hero-btn-disable-company';
+            dbtn.addEventListener('click', () => {
+                if (window.state.companyDisabled) window.restoreCompanyAsAdmin(); else window.disableCompanyAsAdmin();
+            });
+            btn.parentNode.insertBefore(dbtn, btn.nextSibling);
+        }
+        if (dbtn) {
+            const off = !!window.state.companyDisabled;
+            dbtn.innerHTML = off ? '<i class="fa-solid fa-rotate-left"></i> 회사 복구' : '<i class="fa-solid fa-trash"></i> 회사 삭제';
+            dbtn.title = off ? '삭제(비활성)한 회사를 되살리기 (관리자)' : '회사 삭제 — 가입 검색에서 숨김, 데이터는 보존 (관리자)';
+            dbtn.style.borderColor = off ? '#059669' : '#ef4444';
+            dbtn.style.color = off ? '#059669' : '#ef4444';
+            dbtn.style.display = show ? 'inline-flex' : 'none';
+        }
     }
 
     /**
@@ -60982,6 +61035,143 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         };
     };
 
+    /**
+     * 회사 이름 바꾸기 — 고유 번호(companyId)·식별코드는 그대로, 이름이 복사된 곳을 모두 고친다.
+     *  companies/{id}.name · joinCodes/{code}.companyName(+Lower, 가입 검색) · 직원 users.companyName ·
+     *  가입 대기자 users.pendingCompanyName · 내 users.companyName
+     * 가입 코드 고치기는 firestore.rules(2026-10-14) 배포가 필요 — 안 됐으면 알려 준다.
+     */
+    async function renameCompanyEverywhere(companyId, next) {
+        const companyRef = db.collection('companies').doc(companyId);
+        const companyDoc = await companyRef.get();
+        const joinCode = (companyDoc.exists && companyDoc.data().joinCode) || window.state.companyJoinCode || '';
+        let joinCodeFailed = false;
+        await companyRef.update({ name: next, nameLower: companyNameSearchKey(next), renamedAt: firebase.firestore.FieldValue.serverTimestamp() });
+        await db.collection('users').doc(window.state.uid).update({ companyName: next });
+        if (joinCode) {
+            try {
+                await db.collection('joinCodes').doc(joinCode).update({ companyName: next, companyNameLower: companyNameSearchKey(next) });
+            } catch (e) {
+                // 보안 규칙(2026-10-14 joinCodes 수정 허용)이 아직 게시 안 됐으면 여기서 막힌다 — 회사 이름은 이미 바뀜
+                console.error('가입 코드 이름 변경 실패:', e);
+                joinCodeFailed = true;
+            }
+        }
+        _joinCodesDirectoryCache = null;
+        _joinCodesDirectoryComplete = false;
+        let failed = 0;
+        const myUid = window.state.uid;
+        const [members, pending] = await Promise.all([
+            companyRef.collection('members').get().catch(() => null),
+            companyRef.collection('pendingRequests').get().catch(() => null)
+        ]);
+        const jobs = [];
+        (members ? members.docs : []).forEach((d) => {
+            if (d.id === myUid) return;
+            jobs.push(db.collection('users').doc(d.id).update({ companyName: next }).catch(() => { failed++; }));
+        });
+        (pending ? pending.docs : []).forEach((d) => {
+            jobs.push(db.collection('users').doc(d.id).update({ pendingCompanyName: next }).catch(() => { failed++; }));
+        });
+        await Promise.all(jobs);
+        return { failed, joinCodeFailed };
+    }
+
+    /**
+     * 회사 지우기(관리자) — 되돌릴 수 있는 「비활성」으로 처리한다. 점검 데이터(safety_app)·직원 정보는 지우지 않는다.
+     * 가입 검색에서 숨기고 새 가입 신청을 막는다(규칙). 직원 로그인은 막지 않고 안내만 띄운다.
+     * 확인: 회사 이름을 그대로 쳐야 한다.
+     */
+    window.disableCompanyAsAdmin = async function () {
+        if (window.state.role !== 'admin' || !db || !window.state.companyId) {
+            window.showToast('회사 삭제는 관리자만 할 수 있습니다.', 'warning');
+            return;
+        }
+        const cur = String(window.state.companyName || '').trim();
+        const typed = await window.appPrompt(`회사를 삭제(비활성)합니다.\n\n· 가입 검색에서 사라지고 새 가입 신청을 받지 않습니다.\n· 점검 데이터와 직원은 지우지 않습니다(관리자가 「회사 복구」로 되돌릴 수 있음).\n\n확인을 위해 회사 이름「${cur}」을 똑같이 입력하세요.`, '');
+        if (typed == null) return;
+        if (typed.trim() !== cur || !cur) {
+            window.showToast('회사 이름이 맞지 않아 삭제하지 않았습니다.', 'warning');
+            return;
+        }
+        if (!await window.appConfirm(`정말「${cur}」을(를) 삭제(비활성)할까요?`, { title: '회사 삭제', okText: '삭제' })) return;
+        window.showLoading('회사를 비활성으로 바꾸는 중입니다...');
+        try {
+            await setCompanyDisabled(window.state.companyId, true);
+            window.state.companyDisabled = true;
+            setCompanyRenameButtonVisible(true);
+            window.showToast(`「${cur}」을(를) 삭제(비활성)했습니다. 가입 검색에서 보이지 않습니다.`, 'success', 7000);
+        } catch (e) {
+            console.error('회사 비활성 실패:', e);
+            window.showToast('회사를 삭제하지 못했습니다: ' + (e && e.message ? e.message : e), 'error', 7000);
+        } finally {
+            window.hideLoading();
+        }
+    };
+
+    window.restoreCompanyAsAdmin = async function () {
+        if (window.state.role !== 'admin' || !db || !window.state.companyId) return;
+        if (!await window.appConfirm('회사를 다시 살립니다. 가입 검색에 다시 보이고 가입 신청을 받습니다.', { title: '회사 복구', okText: '복구' })) return;
+        try {
+            await setCompanyDisabled(window.state.companyId, false);
+            window.state.companyDisabled = false;
+            setCompanyRenameButtonVisible(true);
+            window.showToast('회사를 복구했습니다.', 'success');
+        } catch (e) {
+            window.showToast('복구하지 못했습니다: ' + (e && e.message ? e.message : e), 'error', 7000);
+        }
+    };
+
+    async function setCompanyDisabled(companyId, disabled) {
+        const companyRef = db.collection('companies').doc(companyId);
+        const doc = await companyRef.get();
+        const joinCode = (doc.exists && doc.data().joinCode) || window.state.companyJoinCode || '';
+        const stamp = disabled ? firebase.firestore.FieldValue.serverTimestamp() : null;
+        // 가입 코드부터 — 규칙이 아직 옛것이라 여기서 막히면 회사 문서도 안 바꾼다(반쯤 지워진 상태 방지)
+        if (joinCode) {
+            try { await db.collection('joinCodes').doc(joinCode).update({ disabled: !!disabled, disabledAt: stamp }); }
+            catch (e) {
+                console.error('가입 코드 비활성 표시 실패:', e);
+                throw new Error('가입 검색에서 숨기지 못해 아무것도 바꾸지 않았습니다(서버 보안 규칙 게시 필요).');
+            }
+        }
+        await companyRef.update({ disabled: !!disabled, disabledAt: stamp, disabledBy: disabled ? window.state.uid : null });
+        _joinCodesDirectoryCache = null;
+        _joinCodesDirectoryComplete = false;
+    }
+
+    /** 관리자 지정/해제. 마지막 관리자는 해제 못 함(앱 + 규칙: 본인 해제 금지). */
+    window.setMemberRole = async function (uid, role) {
+        if (!db || !window.state.companyId || window.state.role !== 'admin') return;
+        if (role !== 'admin' && role !== 'member') return;
+        try {
+            const companyRef = db.collection('companies').doc(window.state.companyId);
+            const membersSnap = await companyRef.collection('members').get();
+            const target = membersSnap.docs.find((d) => d.id === uid);
+            if (!target) { window.showToast('이미 나간 팀원입니다.', 'warning'); await renderMemberApprovalLists(); return; }
+            const d = target.data() || {};
+            if ((d.role || 'member') === role) { await renderMemberApprovalLists(); return; }
+            if (role === 'member') {
+                const admins = membersSnap.docs.filter((x) => (x.data() || {}).role === 'admin');
+                if (admins.length <= 1) { window.showToast('마지막 관리자는 해제할 수 없습니다. 먼저 다른 관리자를 지정하세요.', 'warning', 6000); return; }
+                if (uid === window.state.uid) { window.showToast('내 관리자 권한은 다른 관리자가 해제해야 합니다.', 'warning', 6000); return; }
+            }
+            const nm = d.name || '팀원';
+            const ok = await window.appConfirm(role === 'admin'
+                ? `'${nm}'님을 관리자로 지정할까요?\n관리자는 가입 승인·팀원 관리·회사 이름/삭제를 할 수 있습니다.`
+                : `'${nm}'님의 관리자 권한을 해제할까요?`, { title: role === 'admin' ? '관리자 지정' : '관리자 해제', okText: role === 'admin' ? '지정' : '해제' });
+            if (!ok) return;
+            await companyRef.collection('members').doc(uid).update({ role, roleChangedAt: firebase.firestore.FieldValue.serverTimestamp(), roleChangedBy: window.state.uid });
+            // 사용자 정보의 role도 맞춘다(권한 토큰은 members 쓰기 트리거가 바꾼다)
+            await db.collection('users').doc(uid).update({ role }).catch((e) => console.warn('사용자 정보 role 갱신 실패(다음 로그인 때 맞춰짐):', e));
+            await renderMemberApprovalLists();
+            window.showToast(role === 'admin' ? `'${nm}'님을 관리자로 지정했습니다.` : `'${nm}'님의 관리자 권한을 해제했습니다.`, 'success');
+        } catch (e) {
+            console.error('관리자 지정/해제 오류:', e);
+            window.showToast('처리 중 오류가 발생했습니다: ' + (e && e.message ? e.message : e), 'error', 6000);
+        }
+    };
+
     window.renameCompanyAsAdmin = async function () {
         if (window.state.role !== 'admin' || !db || !window.state.companyId || !window.state.uid) {
             window.showToast('회사 이름은 관리자만 바꿀 수 있습니다.', 'warning');
@@ -61003,10 +61193,12 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (!await window.appConfirm(`회사 이름을 바꿉니다.\n\n${cur || '(없음)'}  →  ${next}\n\n다른 직원은 다음 로그인 때 새 이름으로 보입니다. 계속할까요?`)) return;
         window.showLoading('회사 이름을 바꾸는 중입니다...');
         try {
-            await db.collection('companies').doc(window.state.companyId).update({ name: next });
-            await db.collection('users').doc(window.state.uid).update({ companyName: next });
+            const res = await renameCompanyEverywhere(window.state.companyId, next);
             applyCompanyNameLocally(next);
-            window.showToast(`회사 이름을 '${next}'(으)로 바꿨습니다. 회사 검색 화면의 이름은 Firebase 콘솔의 가입 코드(joinCodes)에서 따로 바꿔야 합니다.`, 'success', 9000);
+            window.showToast(res.joinCodeFailed
+                ? `회사 이름을 '${next}'(으)로 바꿨지만 가입 검색용 이름은 못 바꿨습니다(서버 보안 규칙 게시 필요). 검색은 당분간 옛 이름·식별코드로 됩니다.`
+                : `회사 이름을 '${next}'(으)로 바꿨습니다. 가입 검색에서도 새 이름으로 찾습니다.`
+                + (res.failed ? ` (직원 ${res.failed}명은 다음 로그인 때 맞춰집니다)` : ''), res.joinCodeFailed ? 'warning' : 'success', 9000);
         } catch (e) {
             console.error('회사 이름 변경 실패:', e);
             window.showToast('회사 이름을 바꾸지 못했습니다: ' + (e && e.message ? e.message : e), 'error', 6000);
@@ -61059,6 +61251,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 if (companyDoc.exists) {
                     companyDocData = companyDoc.data() || {};
                     window.state.companyJoinCode = companyDocData.joinCode || null;
+                    window.state.companyDisabled = companyDocData.disabled === true;
+                    setCompanyRenameButtonVisible(true);
                 }
             } catch (e) { console.warn('회사 코드 조회 실패:', e); }
         }
@@ -61067,7 +61261,11 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         } else if (db && profile.companyId) {
             // 직원은 로그인을 늦추지 않게 뒤에서 읽는다(못 읽으면 사용자 정보의 이름을 그대로 씀)
             db.collection('companies').doc(profile.companyId).get()
-                .then((doc) => { if (doc.exists) applyCompanyNameFromCompanyDoc(profile, (doc.data() || {}).name); })
+                .then((doc) => {
+                    if (!doc.exists) return;
+                    applyCompanyNameFromCompanyDoc(profile, (doc.data() || {}).name);
+                    if ((doc.data() || {}).disabled === true) window.showToast('이 회사는 관리자가 삭제(비활성)했습니다. 데이터는 남아 있습니다 — 관리자에게 문의하세요.', 'warning', 8000);
+                })
                 .catch((e) => console.warn('회사 이름 조회 실패(사용자 정보의 이름을 씁니다):', e));
         }
 
@@ -61309,7 +61507,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 createdAt: firebase.firestore.FieldValue.serverTimestamp()
             });
             await db.collection('joinCodes').doc(joinCode).set({
-                companyId: companyRef.id, companyName
+                companyId: companyRef.id, companyName, companyNameLower: companyNameSearchKey(companyName)
             });
             _joinCodesDirectoryCache = null;
             _joinCodesDirectoryComplete = false;
@@ -61694,11 +61892,18 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     const removeBtn = canRemove
                         ? `<button type="button" class="btn btn-sm btn-outline" style="border-color:#ef4444; color:#ef4444;" onclick="window.removeMember('${docSnap.id}')"><i class="fa-solid fa-user-minus"></i>보내기</button>`
                         : '';
+                    const adminCount = membersSnap.docs.filter(x => x.data().role === 'admin').length;
+                    const roleBtn = d.role === 'admin'
+                        ? ((!isSelf && adminCount > 1)
+                            ? `<button type="button" class="btn btn-sm btn-outline member-role-btn" data-role-action="revoke" onclick="window.setMemberRole('${docSnap.id}','member')" title="관리자 권한 해제"><i class="fa-solid fa-user-shield"></i> 관리자 해제</button>`
+                            : '')
+                        : `<button type="button" class="btn btn-sm btn-outline member-role-btn" data-role-action="grant" style="border-color:#2563eb; color:#2563eb;" onclick="window.setMemberRole('${docSnap.id}','admin')" title="관리자로 지정"><i class="fa-solid fa-user-shield"></i> 관리자 지정</button>`;
                     return `
                         <div style="display:flex; justify-content:space-between; align-items:center; background:#f8fafc; border:1px solid #e2e8f0; padding:0.5rem 0.9rem; border-radius:8px; gap:0.6rem; flex-wrap:wrap;">
                             <span style="font-size:0.85rem;"><strong>${d.name || '이름없음'}</strong> <span style="color:#64748b; font-size:0.78rem;">(${d.email || ''})</span>${isSelf ? ' <span style="color:#94a3b8; font-size:0.75rem;">(나)</span>' : ''}</span>
                             <div style="display:flex; gap:0.4rem; align-items:center;">
                                 <span class="badge badge-info">${roleLabel}</span>
+                                ${roleBtn}
                                 ${removeBtn}
                             </div>
                         </div>`;
