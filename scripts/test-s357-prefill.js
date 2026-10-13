@@ -145,4 +145,7 @@ assert.ok(app.includes('function openMcDotMenu') && app.includes('function mcOff
 assert.ok(fs.readFileSync(path.join(root, 'js', 'core', 'building-meta-merge.js'), 'utf8').includes("'evalSafetyman'"));
 assert.ok(!fs.existsSync(path.join(root, 'vendor', 'safety357', 'templates')));
 assert.ok(fs.readFileSync(path.join(root, 'vendor', 'safety357', 'safety357.js'), 'utf8').includes('vendor/eval/templates/eval-template.xlsx'));
+// GitHub Pages 배포 목록에 vendor(번들·양식)가 있어야 함 — 빠지면 평가 탭 「SAFETY357 화면을 불러오지 못했습니다」
+assert.ok(/DIRS\s*=\s*\[[^\]]*"vendor"/.test(fs.readFileSync(path.join(root, 'scripts', 'prepare-pages.py'), 'utf8')));
+assert.ok(app.includes('if (window.__bsaEvalMapOn !== true) return; // 결함위치도 탭'));
 console.log('test-s357-prefill: ok');

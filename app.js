@@ -24713,12 +24713,13 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
     /** 마킹을 흐리게 할지(바에서 다른 단위를 골랐을 때) */
     function evalUnitDimFor(defect) {
-        if (!evalUnitHighlight) return false;
+        if (!evalUnitHighlight || window.__bsaEvalMapOn !== true) return false;
         const api = evalUnitApi();
         return !!(api && !api.matchesFilter(state, currentEvalUnitFloorKey(), defect, evalUnitHighlight));
     }
     /** 번호칸 위에 단위 꼬리표(박스 기준 좌표계에서 부른다) */
     function drawEvalUnitTag(ctx, defect, w, h, scale) {
+        if (window.__bsaEvalMapOn !== true) return; // 결함위치도 탭(과 그 출력)에는 평가단위 꼬리표 없음 — 평가 탭 도면에서만
         const api = evalUnitApi();
         const floorKey = currentEvalUnitFloorKey();
         if (!api || !floorKey) return;
