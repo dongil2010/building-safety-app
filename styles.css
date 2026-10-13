@@ -16867,3 +16867,21 @@ html.layout-mobile .home-update-btn { width: 2.5rem; padding: 0; justify-content
 .eval-in.is-auto { color: #64748b; background: #f1f5f9; }
 .eval-in.is-input { color: #0f172a; font-weight: 700; background: #fefce8; }
 .eval-grade-placeholder { margin-top: 1.2rem; padding: 0.8rem; border: 1px dashed #cbd5e1; border-radius: 8px; color: #94a3b8; }
+
+/* 부재 수 세기 (2026-10-13) — 화면 전용 점 */
+.map-count-overlay { position: absolute; pointer-events: none; overflow: hidden; z-index: 6; }
+.map-count-overlay:not(.is-active) .map-count-dot { opacity: 0.75; }
+.map-count-dot { position: absolute; left: 0; top: 0; min-width: 18px; height: 18px; padding: 0 4px; border-radius: 9px;
+  background: var(--mc-color, #334155); color: #fff; font: 800 10px/18px "Pretendard", "Malgun Gothic", sans-serif;
+  text-align: center; box-shadow: 0 0 0 2px #fff, 0 1px 3px rgba(0,0,0,.35); white-space: nowrap; }
+.map-count-bar { position: absolute; left: 8px; top: 8px; right: 8px; z-index: 12; display: flex; flex-wrap: wrap; gap: 4px; align-items: center;
+  background: rgba(255,255,255,.96); border: 1px solid #cbd5e1; border-radius: 10px; padding: 6px; box-shadow: 0 2px 10px rgba(0,0,0,.12); }
+.map-count-bar[hidden] { display: none; }
+.map-count-bar button { border: 1px solid #cbd5e1; background: #fff; border-radius: 8px; padding: 6px 10px; font-weight: 700; font-size: 0.85rem; cursor: pointer; min-height: 36px; }
+.map-count-bar button.active { background: #0f172a; color: #fff; border-color: #0f172a; }
+.map-count-bar .map-count-type { border-left: 5px solid var(--mc-color); }
+.map-count-bar .map-count-type.active { background: var(--mc-color); border-color: var(--mc-color); }
+.map-count-key { margin-left: 4px; font-size: 0.7rem; opacity: .6; }
+.map-count-title, .map-count-sep { font-weight: 800; font-size: 0.85rem; color: #334155; padding: 0 4px; }
+.map-count-hint { font-size: 0.75rem; color: #64748b; }
+@media (max-width: 700px) { .map-count-hint { display: none; } .map-count-bar button { padding: 6px 8px; } }

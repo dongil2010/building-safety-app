@@ -193,7 +193,7 @@
     ];
 
     /** 도면 결함·비파괴값에서 나온 기본값: { unitId: { 부재: { crackW, leakN, effN, rebarN, spall, strength, carb, cover, defects } } } */
-    function unitComputed(bldg, st, floors, E, memberName) {
+    function unitComputed(bldg, st, floors, E, memberName, MC) {
         var nm = function (v) { return typeof memberName === 'function' ? (memberName(v) || v) : v; };
         var out = {};
         var samples = buildSamples(bldg, st, floors, E);
@@ -201,7 +201,7 @@
         samples.forEach(function (s) {
             if (!s.unitId) return;
             var u = out[s.unitId] = out[s.unitId] || {};
-            var row = function (t) { return u[t] = u[t] || { crackW: null, leakN: 0, effN: 0, rebarN: 0, spall: null, strength: null, carb: null, cover: null, defects: 0 }; };
+            var row = function (t) { return u[t] = u[t] || { count: null, crackW: null, leakN: 0, effN: 0, rebarN: 0, spall: null, strength: null, carb: null, cover: null, defects: 0 }; };
             s.defects.forEach(function (d) {
                 var r = row(memberType(nm(d.component)));
                 r.defects++;
@@ -226,6 +226,18 @@
                 }
             });
         });
+        // 도면에서 센 부재 수(부재 수 세기 점)
+        if (MC && typeof MC.unitCounts === 'function') {
+            var uc = MC.unitCounts(bldg, st, floors, E).byUnit;
+            Object.keys(uc).forEach(function (uid) {
+                var u = out[uid] = out[uid] || {};
+                Object.keys(uc[uid]).forEach(function (t) {
+                    if (!uc[uid][t]) return;
+                    var r = u[t] = u[t] || { count: null, crackW: null, leakN: 0, effN: 0, rebarN: 0, spall: null, strength: null, carb: null, cover: null, defects: 0 };
+                    r.count = uc[uid][t];
+                });
+            });
+        }
         return out;
     }
 
@@ -235,6 +247,7 @@
         if (ov && ov[key] != null && ov[key] !== '') return { value: ov[key], source: 'input', hint: '' };
         var c = ((comp || {})[unitId] || {})[member];
         if (!c) return { value: '', source: '', hint: '' };
+        if (key === 'count' && c.count != null) return { value: c.count, source: 'auto', hint: '' };
         if (key === 'crackW' && c.crackW != null) return { value: c.crackW, source: 'auto', hint: '' };
         if (key === 'spall' && c.spall != null) return { value: c.spall, source: 'auto', hint: '' };
         if (key === 'strength' && c.strength != null) return { value: c.strength, source: 'auto', hint: '' };
@@ -276,7 +289,7 @@
         var bldg = o.bldg || {};
         var samples = buildSamples(bldg, st, o.floors || [], E);
         var inputs = bldg.evalInputs || {};
-        var comp = unitComputed(bldg, st, o.floors || [], E, o.memberName);
+        var comp = unitComputed(bldg, st, o.floors || [], E, o.memberName, o.memberCount);
         var used = {};
         var sheetName = function (n) {
             var c = String(n).replace(/[:\\/?*\[\]]/g, '').trim().slice(0, 31) || '시트';
@@ -349,6 +362,7 @@
         '7. 박리 깊이는 규모에 「깊이 3」「D=3」처럼 적은 경우만 읽습니다(앱에 깊이 칸이 없음). 없으면 「(직접 입력)」. 구간: 2.5mm 미만은 0.5/1.0/2.5mm, 2.5mm 이상은 15/20/25mm 기준(「2.5mm이상의 박리발생」은 쓰지 않음 — SafetyMan에서 확인).',
         '8. 백태·철근노출 면적율(%)은 앱에 부재면적이 없어 계산하지 않습니다. 해당 결함이 있으면 「(직접 입력)」 칸을 채우세요.',
         '9. 비파괴 시험값(강도·중성화)은 층 단위로 저장돼 있어, 구역 표본층에는 그 층 값이 공통으로 들어갑니다. 염화물은 앱에 입력 칸이 없어 빈칸입니다.',
+        '9-1. 부재 수: 도면 「부재 수 세기」로 찍은 점 개수(층 전체 층은 그 층 단위, 번호로 나눈 층은 점의 구역 번호). 평가 탭에 직접 적은 값이 우선입니다.',
         '10. 부재변형·기울기·부동침하는 이 파일에 넣지 않았습니다(건물 전체 항목). 등급 계산은 하지 않습니다 — SafetyMan에서 계산하세요.'
     ];
 

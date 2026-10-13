@@ -775,6 +775,9 @@ document.addEventListener('DOMContentLoaded', () => {
         window.state.evalUnits = {};
         window.state.deletedEvalUnitIds = {};
         window.state.deletedEvalUnitAt = {};
+        window.state.memberCounts = {};
+        window.state.deletedMemberCountIds = {};
+        window.state.deletedMemberCountAt = {};
         window.state.deletedBuildingIds = [];
         window.state.confirmedDeletedIds = {};
         window.state.currentBuildingId = null;
@@ -2216,6 +2219,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 evalUnits: window.state.evalUnits || {},
                 deletedEvalUnitIds: window.state.deletedEvalUnitIds || {},
                 deletedEvalUnitAt: window.state.deletedEvalUnitAt || {},
+                memberCounts: window.state.memberCounts || {},
+                deletedMemberCountIds: window.state.deletedMemberCountIds || {},
+                deletedMemberCountAt: window.state.deletedMemberCountAt || {},
                 deletedBuildingIds: window.state.deletedBuildingIds || [],
                 buildings: sanitizedBuildings,
                 lastUsedBuildingId: window.state.currentBuildingId || null,
@@ -2400,6 +2406,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (parsed.evalUnits && typeof parsed.evalUnits === 'object') window.state.evalUnits = parsed.evalUnits;
                 if (parsed.deletedEvalUnitIds && typeof parsed.deletedEvalUnitIds === 'object') window.state.deletedEvalUnitIds = parsed.deletedEvalUnitIds;
                 if (parsed.deletedEvalUnitAt && typeof parsed.deletedEvalUnitAt === 'object') window.state.deletedEvalUnitAt = parsed.deletedEvalUnitAt;
+                if (parsed.memberCounts && typeof parsed.memberCounts === 'object') window.state.memberCounts = parsed.memberCounts;
+                if (parsed.deletedMemberCountIds && typeof parsed.deletedMemberCountIds === 'object') window.state.deletedMemberCountIds = parsed.deletedMemberCountIds;
+                if (parsed.deletedMemberCountAt && typeof parsed.deletedMemberCountAt === 'object') window.state.deletedMemberCountAt = parsed.deletedMemberCountAt;
                 if (parsed.deletedNdtAt) {
                     window.state.deletedNdtAt = parsed.deletedNdtAt;
                 }
@@ -9893,6 +9902,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         syncMemberGbOverlay(window._bsaMemberGbEntries || []);
         window._bsaMemberGbEntries = null;
         syncDrawingMemoOverlay();
+        syncMemberCountOverlay();
         if (typeof syncEvalUnitBar === 'function') syncEvalUnitBar();
 
         // 결함 목록 DOM은 drawCanvas마다 재생성하지 않음 (선택 스크롤·하이라이트가 즉시 undo됨).
@@ -24493,7 +24503,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (sum.unsetFloors.length && units.length) warn.push(`설정 안 한 층: ${sum.unsetFloors.map((f) => esc(f.floorLabel)).join(', ')}`);
         if (sum.unassigned.length) warn.push(`번호 없는 결함: ${sum.unassigned.map((f) => `${esc(f.floorLabel)} ${f.count}건`).join(', ')}`);
         // 3) 입력표(평가단위 × 부재)
-        const comp = sm.unitComputed(bldg, state, floors, api, memberNameOut);
+        const comp = sm.unitComputed(bldg, state, floors, api, memberNameOut, window.BSA && window.BSA.memberCount);
         const inputs = bldg.evalInputs || {};
         const items = sm.INPUT_ITEMS;
         const inputHtml = units.map((u) => {
@@ -24518,7 +24528,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             ${units.length ? `<h3>층 × 구역 번호 <span class="eval-plan-sub">같은 번호 = 같은 평가단위. 나눈 층은 있는 번호에 체크 → 도면에서 결함을 골라 「평가단위」 버튼으로 번호를 넣습니다.</span></h3>
             <div class="eval-plan-scroll"><table class="eval-plan-table eval-plan-matrix"><thead>${head}</thead><tbody>${rows}</tbody></table></div>
             <h3>평가단위별 목록</h3><ul class="eval-plan-sum">${listHtml}</ul>${warn.length ? `<div class="eval-plan-warn">${warn.join('<br>')}</div>` : ''}
-            <h3>입력표 <span class="eval-plan-sub">회색 값은 도면 결함·비파괴값에서 자동(부재별 최악값). 고치면 직접 입력으로 저장, 지우면 자동으로 돌아갑니다. 누수·백태·철근노출은 건수가 흐리게 보이고 면적율(%)을 적습니다.</span></h3>
+            <h3>입력표 <span class="eval-plan-sub">회색 값은 자동 — 부재 수는 도면 「부재 수」로 찍은 점 개수, 나머지는 도면 결함·비파괴값(부재별 최악값). 고치면 직접 입력으로 저장, 지우면 자동으로 돌아갑니다. 누수·백태·철근노출은 건수가 흐리게 보이고 면적율(%)을 적습니다.</span></h3>
             ${inputHtml}
             <div class="eval-grade-placeholder">상태평가 등급 계산 — 준비 중 (지금은 SafetyMan에서 계산)</div>` : '<div class="eval-tab-empty">평가단위 개수를 정하면 시작합니다. 0이면 지금처럼 층마다 평가.</div>'}
         </div>`;
@@ -24632,7 +24642,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const pad = (n) => String(n).padStart(2, '0');
         const dateText = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
         try {
-            const sheets = sm.buildSheets({ bldg, state, floors, evalUnits: api, memberName: memberNameOut, dateText });
+            const sheets = sm.buildSheets({ bldg, state, floors, evalUnits: api, memberName: memberNameOut, dateText, memberCount: window.BSA && window.BSA.memberCount });
             const wb = XLSX.utils.book_new();
             sheets.forEach((sh) => {
                 const ws = XLSX.utils.aoa_to_sheet(sh.aoa);
@@ -24977,14 +24987,192 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     function memoTapEnd() {
         const tap = memoTap;
         memoTap = null;
-        if (!tap || state.mode !== 'MEMO' || !state.bgImage) return false;
+        if (!tap || (state.mode !== 'MEMO' && state.mode !== 'COUNT') || !state.bgImage) return false;
         if (!isCleanTouchTap(tap, Date.now())) return false;
         const rect = elements.planCanvas.getBoundingClientRect();
+        if (state.mode === 'COUNT') { countTapAt(tap.clientX - rect.left, tap.clientY - rect.top); return true; }
         const p = memoScreenToImg(tap.clientX - rect.left, tap.clientY - rect.top);
         createDrawingMemoAt(p.x, p.y);
         return true;
     }
     window.__bsaMemoTap = { start: memoTapStart, move: memoTapMove, end: memoTapEnd, cancel: () => { if (memoTap) memoTap.multi = true; } };
+
+    /* ---------------- 부재 수 세기(2026-10-13) — 결함 아님, 화면 전용 점 ---------------- */
+    function mcApi() { return window.BSA && window.BSA.memberCount; }
+    const MC_TYPE_KEY = 'bsa_member_count_type';
+    const MC_SHOW_KEY = 'bsa_member_count_show';
+    let mcUndo = [];   // [{ op:'add'|'remove', floorKey, rec }]
+    let mcZoneNo = 0;
+    function mcType() {
+        const api = mcApi();
+        let t = '';
+        try { t = localStorage.getItem(MC_TYPE_KEY) || ''; } catch (_e) { /* ignore */ }
+        return api && api.TYPES.includes(t) ? t : '기둥';
+    }
+    function setMcType(t) {
+        try { localStorage.setItem(MC_TYPE_KEY, t); } catch (_e) { /* ignore */ }
+        syncMemberCountBar();
+    }
+    function readMcShowPref() {
+        try { return localStorage.getItem(MC_SHOW_KEY) !== '0'; } catch (_e) { return true; }
+    }
+    function setMcShow(on) {
+        try { localStorage.setItem(MC_SHOW_KEY, on ? '1' : '0'); } catch (_e) { /* ignore */ }
+        syncMemberCountOverlay();
+        syncMemberCountBar();
+    }
+    /** 이 층이 번호로 나눈 층이면 고를 수 있는 번호들 */
+    function mcZoneChoices() {
+        const api = evalUnitApi();
+        const bldg = currentEvalBuilding();
+        if (!api || !bldg) return [];
+        const fm = api.floorMode(bldg, state.currentFloor);
+        if (!fm || fm.mode !== 'split') return [];
+        return api.planOf(bldg).units.map((u) => Number(u.no));
+    }
+    function commitMemberCountChange(floorKey) {
+        if (floorKey && typeof markFloorKeyDirty === 'function') markFloorKeyDirty(floorKey);
+        if (typeof saveStateToLocalStorage === 'function') saveStateToLocalStorage();
+        if (typeof scheduleSyncToFirebase === 'function') scheduleSyncToFirebase();
+        syncMemberCountOverlay();
+        syncMemberCountBar();
+    }
+    /** 도면 탭: 점 근처면 지우기, 아니면 지금 종류로 점 찍기 */
+    function countTapAt(sx, sy) {
+        const api = mcApi();
+        const floorKey = currentMemoFloorKey();
+        if (!api || !floorKey || !state.bgImage) return;
+        const hit = api.hitTest(api.listFor(state, floorKey), sx, sy, 14, memoImgToScreen);
+        if (hit) {
+            const rec = api.remove(state, floorKey, hit.id);
+            if (rec) mcUndo.push({ op: 'remove', floorKey, rec });
+        } else {
+            const zones = mcZoneChoices();
+            if (zones.length && !zones.includes(mcZoneNo)) mcZoneNo = zones[0];
+            const p = memoScreenToImg(sx, sy);
+            const rec = api.add(state, floorKey, mcType(), p.x, p.y, { zoneNo: zones.length ? mcZoneNo : 0 });
+            if (rec) mcUndo.push({ op: 'add', floorKey, rec });
+        }
+        if (mcUndo.length > 200) mcUndo = mcUndo.slice(-200);
+        commitMemberCountChange(floorKey);
+    }
+    function undoMemberCount() {
+        const api = mcApi();
+        const last = mcUndo.pop();
+        if (!api || !last) { window.showToast('되돌릴 것이 없습니다.', 'info', 1600); return; }
+        if (last.op === 'add') api.remove(state, last.floorKey, last.rec.id);
+        else api.add(state, last.floorKey, last.rec.type, last.rec.x, last.rec.y, { id: last.rec.id, zoneNo: last.rec.zoneNo });
+        commitMemberCountChange(last.floorKey);
+    }
+    window.undoMemberCount = undoMemberCount;
+    function getMemberCountOverlay() {
+        const canvas = state.canvas || document.getElementById('planCanvas');
+        const host = canvas && canvas.parentElement;
+        if (!host) return null;
+        let ov = document.getElementById('mapCountOverlay');
+        if (!ov) {
+            ov = document.createElement('div');
+            ov.id = 'mapCountOverlay';
+            ov.className = 'map-count-overlay';
+            ov.setAttribute('aria-hidden', 'true');
+            host.appendChild(ov);
+        } else if (ov.parentElement !== host) host.appendChild(ov);
+        ov.style.left = `${canvas.offsetLeft}px`;
+        ov.style.top = `${canvas.offsetTop}px`;
+        ov.style.width = `${canvas.clientWidth}px`;
+        ov.style.height = `${canvas.clientHeight}px`;
+        return ov;
+    }
+    /** 점 그리기(DOM, 화면 전용 — 한글·PDF 출력 그림에는 안 들어감) */
+    function syncMemberCountOverlay() {
+        const api = mcApi();
+        const floorKey = currentMemoFloorKey();
+        const on = state.mode === 'COUNT' || readMcShowPref();
+        const list = (api && floorKey && state.bgImage && on && state.currentTab !== 'tab-ndt') ? api.listFor(state, floorKey) : [];
+        let ov = document.getElementById('mapCountOverlay');
+        if (!list.length) { if (ov) ov.replaceChildren(); return; }
+        ov = getMemberCountOverlay();
+        if (!ov) return;
+        ov.classList.toggle('is-active', state.mode === 'COUNT');
+        const seq = api.seqNumbers(list);
+        const vw = ov.clientWidth || 0;
+        const vh = ov.clientHeight || 0;
+        const existing = new Map();
+        Array.from(ov.children).forEach((el) => existing.set(el.dataset.id, el));
+        const keep = new Set();
+        list.forEach((d) => {
+            const p = memoImgToScreen(d);
+            if (p.sx < -20 || p.sy < -20 || (vw && p.sx > vw + 20) || (vh && p.sy > vh + 20)) return;
+            let el = existing.get(d.id);
+            if (!el) {
+                el = document.createElement('div');
+                el.className = 'map-count-dot';
+                el.dataset.id = d.id;
+                ov.appendChild(el);
+            }
+            const label = `${api.SHORT[d.type] || ''}${seq[d.id] || ''}${d.zoneNo ? '·' + d.zoneNo : ''}`;
+            if (el.textContent !== label) el.textContent = label;
+            el.style.setProperty('--mc-color', api.COLORS[d.type] || '#334155');
+            el.style.transform = `translate(${Math.round(p.sx)}px, ${Math.round(p.sy)}px) translate(-50%, -50%)`;
+            keep.add(d.id);
+        });
+        existing.forEach((el, id) => { if (!keep.has(id)) el.remove(); });
+    }
+    window.syncMemberCountOverlay = syncMemberCountOverlay;
+    /** 부재 수 세기 막대: 종류 5개(개수) · 구역 번호 · 되돌리기 · 점 보이기 · 닫기 */
+    function syncMemberCountBar() {
+        const api = mcApi();
+        const canvas = state.canvas || document.getElementById('planCanvas');
+        const host = canvas && canvas.parentElement;
+        let bar = document.getElementById('mapCountBar');
+        if (state.mode !== 'COUNT' || !api || !host) { if (bar) bar.hidden = true; return; }
+        if (!bar) {
+            bar = document.createElement('div');
+            bar.id = 'mapCountBar';
+            bar.className = 'map-count-bar';
+            bar.addEventListener('click', (e) => {
+                const b = e.target.closest('button');
+                if (!b) return;
+                e.preventDefault();
+                if (b.dataset.mcType) setMcType(b.dataset.mcType);
+                else if (b.dataset.mcZone) { mcZoneNo = Number(b.dataset.mcZone); syncMemberCountBar(); }
+                else if (b.dataset.mcAct === 'undo') undoMemberCount();
+                else if (b.dataset.mcAct === 'show') setMcShow(!readMcShowPref());
+                else if (b.dataset.mcAct === 'close') setDrawMode('PAN');
+            });
+            ['mousedown', 'touchstart', 'pointerdown'].forEach((t) => bar.addEventListener(t, (e) => e.stopPropagation(), { passive: true }));
+        }
+        if (bar.parentElement !== host) host.appendChild(bar);
+        bar.hidden = false;
+        const floorKey = currentMemoFloorKey();
+        const counts = api.countsByType(api.listFor(state, floorKey));
+        const cur = mcType();
+        const zones = mcZoneChoices();
+        if (zones.length && !zones.includes(mcZoneNo)) mcZoneNo = zones[0];
+        const keyOf = {};
+        Object.keys(api.KEYS).forEach((k) => { keyOf[api.KEYS[k]] = k.toUpperCase(); });
+        const html = `<span class="map-count-title">부재 수</span>`
+            + api.TYPES.map((t) => `<button type="button" class="map-count-type${t === cur ? ' active' : ''}" data-mc-type="${t}" style="--mc-color:${api.COLORS[t]}" title="단축키 ${keyOf[t]}">${t} <b>${counts[t] || 0}</b><span class="map-count-key">${keyOf[t]}</span></button>`).join('')
+            + (zones.length ? `<span class="map-count-sep">구역</span>` + zones.map((n) => `<button type="button" class="map-count-zone${n === mcZoneNo ? ' active' : ''}" data-mc-zone="${n}">${n}</button>`).join('') : '')
+            + `<button type="button" data-mc-act="undo" title="되돌리기 (Ctrl+Z)">↶ 되돌리기</button>`
+            + `<button type="button" data-mc-act="show" class="${readMcShowPref() ? 'active' : ''}" title="세기 모드가 아닐 때도 점 보이기">점 보이기</button>`
+            + `<button type="button" data-mc-act="close">닫기</button>`
+            + `<span class="map-count-hint">도면을 누르면 점, 점을 다시 누르면 지움 · 끌면 도면 이동</span>`;
+        if (bar._h !== html) { bar._h = html; bar.innerHTML = html; }
+    }
+    window.syncMemberCountBar = syncMemberCountBar;
+    if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') document.addEventListener('keydown', (e) => {
+        if (state.mode !== 'COUNT' || state.currentTab !== 'tab-map') return;
+        const t = e.target;
+        if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return;
+        const api = mcApi();
+        if (!api) return;
+        const k = String(e.key || '').toLowerCase();
+        if ((e.ctrlKey || e.metaKey) && k === 'z') { e.preventDefault(); e.stopPropagation(); undoMemberCount(); return; }
+        if (e.ctrlKey || e.metaKey || e.altKey) return;
+        if (k === 'escape') { e.preventDefault(); setDrawMode('PAN'); return; }
+        if (api.KEYS[k]) { e.preventDefault(); e.stopPropagation(); setMcType(api.KEYS[k]); }
+    }, true);
 
     function syncMemberGbOverlay(entries) {
         const list = Array.isArray(entries) ? entries : [];
@@ -32384,6 +32572,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     function getMapCanvasCursor() {
         if (state.mode === 'MARK' || state.mode === 'AREA' || state.areaInkTool) return 'crosshair';
         if (state.mode === 'MEMO') return 'copy';
+        if (state.mode === 'COUNT') return 'cell';
         return 'default';
     }
 
@@ -32412,7 +32601,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 handleDragStart(e.clientX, e.clientY, false, true);
                 return;
             }
-            if (e.button === 0 && state.mode === 'MEMO') {
+            if (e.button === 0 && (state.mode === 'MEMO' || state.mode === 'COUNT')) {
                 // 메모 모드: 끌면 도면 이동, 제자리 클릭이면 메모(놓을 때 판단)
                 memoTapStart(e.clientX, e.clientY);
                 handleDragStart(e.clientX, e.clientY, false, true);
@@ -32506,7 +32695,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 if (e.cancelable) e.preventDefault();
                 // 두 손가락 제스처 뒤: 모두 떼고 잠깐(250ms) 지날 때까지는 점·그리기 시작 안 함
                 if (touchMultiActive || Date.now() < touchCooldownUntil) return;
-                if (state.mode === 'MEMO') {
+                if (state.mode === 'MEMO' || state.mode === 'COUNT') {
                     memoTapStart(e.touches[0].clientX, e.touches[0].clientY);
                     handleDragStart(e.touches[0].clientX, e.touches[0].clientY, true, true);
                     return;
@@ -35340,7 +35529,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const memoBtn = document.getElementById('btnModeMemo');
         if (memoBtn) memoBtn.classList.toggle('active', mode === 'MEMO');
         if (mode === 'MEMO' && !readMemoShowPref()) setMemoShow(true);
-        if (mode !== 'MEMO') memoTap = null;
+        if (mode !== 'MEMO' && mode !== 'COUNT') memoTap = null;
+        ['btnModeCount', 'mobileBtnModeCount'].forEach((id) => { const b = document.getElementById(id); if (b) b.classList.toggle('active', mode === 'COUNT'); });
+        syncMemberCountBar();
+        syncMemberCountOverlay();
         syncDrawingMemoBar();
         document.querySelectorAll('#mobileMapSideRail .mobile-rail-btn[data-mode]').forEach(btn => {
             btn.classList.toggle('active', btn.dataset.mode === mode);
@@ -35779,6 +35971,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     if (btnModeMemo) btnModeMemo.addEventListener('click', () => setDrawMode(state.mode === 'MEMO' ? 'PAN' : 'MEMO'));
     const mobileBtnModeMemo = document.getElementById('mobileBtnModeMemo');
     if (mobileBtnModeMemo) mobileBtnModeMemo.addEventListener('click', () => setDrawMode(state.mode === 'MEMO' ? 'PAN' : 'MEMO'));
+    ['btnModeCount', 'mobileBtnModeCount'].forEach((id) => {
+        const b = document.getElementById(id);
+        if (b) b.addEventListener('click', (e) => { e.preventDefault(); setDrawMode(state.mode === 'COUNT' ? 'PAN' : 'COUNT'); });
+    });
     const btnMemoBarDone = document.getElementById('btnMemoBarDone');
     if (btnMemoBarDone) btnMemoBarDone.addEventListener('click', () => setDrawMode('PAN'));
     document.querySelectorAll('[data-memo-show]').forEach((el) => el.addEventListener('change', () => setMemoShow(el.checked)));
@@ -54899,6 +55095,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (drawing.rasterUrl || drawing.pdfUrl) return true;
         if (window.BSA && window.BSA.drawingMemo && window.BSA.drawingMemo.packHasContent(bundle.memos)) return true;
         if (window.BSA && window.BSA.evalUnits && window.BSA.evalUnits.packHasContent(bundle.evalUnits)) return true;
+        if (window.BSA && window.BSA.memberCount && window.BSA.memberCount.packHasContent(bundle.memberCounts)) return true;
         if (drawing.tiers && typeof drawing.tiers === 'object'
             && Object.keys(drawing.tiers).some((k) => drawing.tiers[k])) return true;
         return false;
@@ -55036,7 +55233,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             // 도면 메모(결함 아님) — 결함처럼 updatedAt·묘비로 합친다
             memos: (window.BSA && window.BSA.drawingMemo) ? window.BSA.drawingMemo.packFor(window.state, floorKey) : undefined,
             // 평가단위 정의(결함 쪽은 defect.evalUnitId로 markings에 실림)
-            evalUnits: (window.BSA && window.BSA.evalUnits) ? window.BSA.evalUnits.packFor(window.state, floorKey) : undefined
+            evalUnits: (window.BSA && window.BSA.evalUnits) ? window.BSA.evalUnits.packFor(window.state, floorKey) : undefined,
+            // 부재 수 세기 점(결함 아님)
+            memberCounts: (window.BSA && window.BSA.memberCount) ? window.BSA.memberCount.packFor(window.state, floorKey) : undefined
         };
         if (!floorBundleHasContent(pack)) {
             console.warn('빈 층 묶음은 클라우드에 올리지 않음:', floorKey);
@@ -55109,6 +55308,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (bundle.evalUnits && window.BSA && window.BSA.evalUnits) {
             window.BSA.evalUnits.mergePackIntoState(window.state, floorKey, bundle.evalUnits, window.BSA.syncMerge.mergeNdtDataMaps);
             if (floorKey === currentEvalUnitFloorKey()) syncEvalUnitBar();
+        }
+        if (bundle.memberCounts && window.BSA && window.BSA.memberCount) {
+            window.BSA.memberCount.mergePackIntoState(window.state, floorKey, bundle.memberCounts, window.BSA.syncMerge.mergeNdtDataMaps);
+            if (floorKey === currentMemoFloorKey()) { syncMemberCountOverlay(); syncMemberCountBar(); }
         }
         resolveOfflineNoConflicts(bldg, floorCode, markings, ndt);
     }
