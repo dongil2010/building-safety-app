@@ -16940,3 +16940,17 @@ html body:not(.bsa-eval-map-on) #mapCountBar#mapCountBar,
 html body:not(.bsa-eval-map-on) #mapCountOverlay#mapCountOverlay,
 html body:not(.bsa-eval-map-on) #mapCountDotMenu#mapCountDotMenu,
 html body:not(.bsa-eval-map-on) #mapEvalMemberBar#mapEvalMemberBar { display: none !important; }
+
+/* 2026-10-13 평가 점수(평가단위 = 층 기록) */
+.eval-score-box { margin: 12px 0; padding: 12px; border: 1px solid #e2e8f0; border-radius: 12px; background: #fff; }
+.eval-score-box[hidden] { display: none; }
+.eval-score-box h3 { margin: 0 0 8px; font-size: 1rem; }
+.eval-score-total { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 12px; border-radius: 10px; background: #f1f5f9; margin-bottom: 8px; }
+.eval-score-total > b { font-size: 1.5rem; }
+.eval-score-sub { color: #475569; font-size: 0.85rem; }
+.eval-score-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+.eval-score-table th, .eval-score-table td { border-bottom: 1px solid #e2e8f0; padding: 6px; text-align: left; vertical-align: middle; }
+.eval-sf-select { min-width: 72px; padding: 4px 6px; }
+.eval-grade { display: inline-block; min-width: 22px; text-align: center; border-radius: 6px; padding: 1px 6px; font-weight: 800; color: #fff; background: #64748b; }
+.eval-grade-A { background: #3da36e; } .eval-grade-B { background: #6aad4a; } .eval-grade-C { background: #d4a017; } .eval-grade-D { background: #d9763a; } .eval-grade-E { background: #c43d30; }
+.eval-score-note { margin: 8px 0 0; color: #64748b; font-size: 0.78rem; }

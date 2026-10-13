@@ -56,7 +56,9 @@ const st = { defects: { b_1F: [
 MC.add(st, 'b_1F', '기둥', 1, 1); MC.add(st, 'b_1F', '기둥', 2, 1); MC.add(st, 'b_1F', '벽', 3, 1);
 const floors = [{ floorCode: '1F', floorLabel: '1층', floorKey: 'b_1F' }];
 const calc = P.computeAuto({ bldg, state: st, floors, E, S, MC, EM });
-const B = P.bid(u.id), F = P.fid(u.id, 'b_1F');
+const B = P.bid(bldg.id), F = P.fid(u.id);
+assert.deepStrictEqual(calc.units.map((x) => [x.id, x.nos]), [[F, [1]]]);
+assert.strictEqual(calc.building.id, B);
 assert.strictEqual(calc.auto[`${B}|${F}|기둥|memberTotalCount`], 2);
 assert.strictEqual(calc.auto[`${B}|${F}|내력벽|memberTotalCount`], 1);
 assert.strictEqual(calc.auto[`${B}|${F}|기둥|crackGrades|C`], 1);

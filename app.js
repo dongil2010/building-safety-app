@@ -24518,11 +24518,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             if (calc && P && F && typeof P.check === 'function') {
                 const saved = bldg.evalSafetyman || {};
                 const pj = P.merge(saved.project, saved.auto, calc, F).project;
-                P.check(pj, calc.units.map((x) => x.id)).forEach((w) => {
-                    const b = (pj.buildings || []).find((x) => x.id === w.buildingId);
-                    const sf = b && (b.sampleFloors || []).find((x) => x.id === w.floorId);
-                    const fl = (calc.units.find((x) => x.id === w.buildingId) || { floors: [] }).floors.find((x) => x.id === w.floorId);
-                    warn.push(`${esc(b ? b.name : '')} ${esc(fl ? fl.label : (sf ? sf.sampleFloor + '층' : ''))} ${esc(w.member)} ${esc(w.label)}: ${P.WARN_TEXT} (확인부재 ${w.total} · 결함 ${w.defects})`);
+                P.check(pj, [calc.building && calc.building.id]).forEach((w) => {
+                    const rec = calc.units.find((x) => x.id === w.floorId);
+                    warn.push(`${esc(rec ? rec.name : '')} ${esc(w.member)} ${esc(w.label)}: ${P.WARN_TEXT} (확인부재 ${w.total} · 결함 ${w.defects})`);
                 });
             }
         } catch (e) { console.warn('평가 확인', e); }
@@ -24556,7 +24554,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             ${units.length ? `<h3>층 × 구역 번호 <span class="eval-plan-sub">같은 번호 = 같은 평가단위. 나눈 층은 있는 번호에 체크 → 도면에서 결함을 골라 「평가단위」 버튼으로 번호를 넣습니다.</span></h3>
             <div class="eval-plan-scroll"><table class="eval-plan-table eval-plan-matrix"><thead>${head}</thead><tbody>${rows}</tbody></table></div>
             <h3>평가단위별 목록</h3><ul class="eval-plan-sum">${listHtml}</ul>${warn.length ? `<div class="eval-plan-warn">${warn.join('<br>')}</div>` : ''}
-            <h3>SAFETY357 입력 <span class="eval-plan-sub">평가단위 = 건물, 층 = 표본층. 확인부재 수(도면 점)·결함 등급별 부재 수(평가 부재 지정한 결함)는 자동 — 고친 칸은 그대로 둡니다. 엑셀은 SAFETY357 「보고서」에서.</span></h3>` : '<div class="eval-tab-empty">평가단위 개수를 정하면 시작합니다. 0이면 지금처럼 층마다 평가.</div>'}
+            <h3>SAFETY357 입력 <span class="eval-plan-sub">건물 = 이 건물 하나, 평가단위 = 층 기록 하나(시작층~끝층·표본층). 확인부재 수(도면 점)·결함 등급별 부재 수(평가 부재 지정한 결함)는 자동 — 고친 칸은 그대로 둡니다. 엑셀은 SAFETY357 「보고서」에서.</span></h3>` : '<div class="eval-tab-empty">평가단위 개수를 정하면 시작합니다. 0이면 지금처럼 층마다 평가.</div>'}
         </div>`;
         const rerender = () => renderEvalTab();
         try { syncEvalMapHead(); } catch (_e) { /* ignore */ }
@@ -25603,6 +25601,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const persist = (project) => {
             const b = currentEvalBuilding();
             if (!b || b.id !== bid) return;
+            try { renderEvalScoreBox(b, project); } catch (e) { console.warn('평가 점수', e); }
             const strip = s357Strip(project, bid);
             const prev = b.evalSafetyman || {};
             if (JSON.stringify(strip) === JSON.stringify(prev.project || null) && JSON.stringify(r.auto) === JSON.stringify(prev.auto || null)) return;
@@ -25614,10 +25613,59 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 if (typeof scheduleSyncToFirebase === 'function') scheduleSyncToFirebase();
             }, 800);
         };
+        renderEvalScoreBox(bldg, r.project);
         s357Seq += 1;
         window.BSA.s357.mount(host, { key: bid + ':' + s357Seq, start: s357Route, bridge: { load: () => r.project, save: persist, onRoute: (p) => { s357Route = p; } } });
     }
     window.mountS357 = mountS357;
+    /**
+     * 평가 점수: 평가단위 = SafetyMan 층 기록 하나(시작층~끝층·표본층). 표본층 하나로 층위치 가중치(EXE 0x40d34d),
+     * 건물 상태 = Choquet(단위 점수, 가중치), 종합 = SAFETY357 evaluateBuilding 그대로.
+     */
+    function renderEvalScoreBox(bldg, project) {
+        const host = document.getElementById('evalS357Host');
+        const P = window.BSA && window.BSA.s357Prefill;
+        const X = window.BSA && window.BSA.s357 && window.BSA.s357.score;
+        if (!host || !host.parentElement) return;
+        let box = document.getElementById('evalScoreBox');
+        if (!box) {
+            box = document.createElement('div');
+            box.id = 'evalScoreBox';
+            box.className = 'eval-score-box';
+            host.parentElement.insertBefore(box, host);
+            box.addEventListener('change', (e) => {
+                const sel = e.target.closest('select[data-sf-rec]');
+                if (!sel) return;
+                const b = currentEvalBuilding();
+                const sv = b && b.evalSafetyman;
+                if (!sv || !sv.project || !P.setSampleFloor(sv.project, sel.dataset.sfRec, Number(sel.value))) return;
+                b.evalSafetyman = { project: sv.project, auto: sv.auto, updatedAt: Date.now() };
+                if (typeof markBuildingMetaDirty === 'function') markBuildingMetaDirty(b);
+                if (typeof saveStateToLocalStorage === 'function') saveStateToLocalStorage();
+                if (typeof scheduleSyncToFirebase === 'function') scheduleSyncToFirebase();
+                mountS357();
+            });
+        }
+        if (!P || !X || typeof P.scoreSummary !== 'function' || !bldg || !project) { box.hidden = true; return; }
+        const sum = P.scoreSummary(project, s357Calc(bldg), X);
+        if (!sum || !sum.units.length) { box.hidden = true; return; }
+        box.hidden = false;
+        const esc = (t) => String(t == null ? '' : t).replace(/[&<>"]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[ch]);
+        const f2 = (v) => (v == null || v === '' || !Number.isFinite(Number(v)) ? '—' : Number(v).toFixed(2));
+        const g = (x) => (x ? `<span class="eval-grade eval-grade-${esc(x)}">${esc(x)}</span>` : '');
+        const fl = (n) => (Number(n) < 0 ? `B${-Number(n)}` : `${n}F`);
+        const rows = sum.units.map((u) => {
+            const opts = (u.nos.length ? u.nos : [u.sampleFloor]).map((n) => `<option value="${n}"${Number(n) === Number(u.sampleFloor) ? ' selected' : ''}>${fl(n)}</option>`).join('');
+            return `<tr><th>${esc(u.name)}</th><td>${fl(u.startFloor)}~${fl(u.endFloor)}</td>`
+                + `<td><select class="form-control eval-sf-select" data-sf-rec="${esc(u.id)}" aria-label="표본층">${opts}</select></td>`
+                + `<td>${u.weight}</td><td>${f2(u.score)} ${g(u.grade)}</td></tr>`;
+        }).join('');
+        box.innerHTML = `<h3>평가 점수</h3>`
+            + `<div class="eval-score-total"><span>건물 종합</span><b>${f2(sum.overallScore)}</b>${g(sum.overallGrade)}<span class="eval-score-sub">상태 ${f2(sum.statusScore)} ${g(sum.statusGrade)}${sum.safetyScore != null ? ` · 안전성 ${f2(sum.safetyScore)} ${g(sum.safetyGrade)}` : ''} · 지상 ${sum.floorsAbove} / 지하 ${sum.floorsBelow}</span></div>`
+            + `<table class="eval-score-table"><thead><tr><th>평가단위</th><th>층</th><th>표본층</th><th>층위치 가중치</th><th>상태</th></tr></thead><tbody>${rows}</tbody></table>`
+            + `<p class="eval-score-note">평가단위 하나 = SafetyMan 층 기록 하나(시작층~끝층). 부재·결함은 단위의 모든 층을 더하고, 가중치는 고른 표본층으로 정합니다.</p>`;
+    }
+    window.renderEvalScoreBox = renderEvalScoreBox;
 
     function syncMemberGbOverlay(entries) {
         const list = Array.isArray(entries) ? entries : [];

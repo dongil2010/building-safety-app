@@ -54,10 +54,14 @@
         return idx + 1;
     }
 
-    function bid(unitId) { return 'bsa-unit-' + unitId; }
-    function fid(unitId, floorKey) { return 'bsa-' + unitId + '-' + floorKey; }
+    /** SAFETY357 건물 = 이 건물 1개, 표본층 기록 = 평가단위 1개(시작층~끝층, 표본층) — SafetyMan sfm 층 기록과 같음 */
+    function bid(bldgId) { return 'bsa-bldg-' + bldgId; }
+    function fid(unitId) { return 'bsa-unit-' + unitId; }
 
-    /** 도면 값 → { auto: {path: n}, units: [{ id, name, floors:[{id, no, label}] }], issues: {unitId: {noMember, noWidth, assumed}} } */
+    /**
+     * 도면 값 → { auto: {path: n}, building: {id, name}, units: [{ id(기록), unitId, name, floors:[{floorKey, no, label}], nos }], issues: {unitId: …}, floorsAbove, floorsBelow }
+     * 부재 수·결함 수는 평가단위의 모든 층을 더한다(평가단위 하나 = 층 기록 하나).
+     */
     function computeAuto(o) {
         var bldg = o.bldg, st = o.state, floors = o.floors || [], E = o.E, S = o.S, MC = o.MC, EM = o.EM;
         var auto = {}, units = [], issues = {};
@@ -65,18 +69,21 @@
         var samples = S.buildSamples(bldg, st, floors, E);
         var idxOf = {};
         floors.forEach(function (f, i) { idxOf[f.floorKey] = i; });
+        var B = bid(bldg && bldg.id);
+        var building = { id: B, name: txt(bldg && (bldg.name || bldg.siteName)) || '건물' };
         plan.units.forEach(function (u) {
-            var B = bid(u.id);
-            var uinfo = { id: B, unitId: u.id, name: txt(bldg && (bldg.name || bldg.siteName)) + ' ' + E.unitTitle(u), floors: [] };
+            var F = fid(u.id);
+            var uinfo = { id: F, unitId: u.id, name: E.unitTitle(u), floors: [], nos: [] };
             var iss = issues[u.id] = { noMember: 0, noWidth: 0, assumed: 0, defects: 0 };
             var seen = {};
             samples.forEach(function (s) {
                 if (s.unitId !== u.id) return;
-                var F = fid(u.id, s.floorKey);
-                if (!seen[F]) {
-                    seen[F] = true;
-                    uinfo.floors.push({ id: F, floorKey: s.floorKey, no: floorNumber(s.floorCode, idxOf[s.floorKey] || 0), label: s.floorLabel });
-                    // 확인부재 수: 이 층(이 단위) 점
+                if (!seen[s.floorKey]) {
+                    seen[s.floorKey] = true;
+                    var no = floorNumber(s.floorCode, idxOf[s.floorKey] || 0);
+                    uinfo.floors.push({ floorKey: s.floorKey, no: no, label: s.floorLabel });
+                    if (uinfo.nos.indexOf(no) < 0) uinfo.nos.push(no);
+                    // 확인부재 수: 이 층(이 단위) 점 — 단위의 층을 모두 더함
                     if (MC && typeof MC.unitCounts === 'function') {
                         var f1 = floors.filter(function (f) { return f.floorKey === s.floorKey; });
                         var uc = (MC.unitCounts(bldg, st, f1, E).byUnit || {})[u.id] || {};
@@ -100,7 +107,8 @@
                     auto[p] = (auto[p] || 0) + 1;
                 });
             });
-            units.push(uinfo);
+            uinfo.nos.sort(function (x, y) { return x - y; });
+            if (uinfo.nos.length) units.push(uinfo);
         });
         // 건물 전체 지상·지하 층수(층 이름에 숫자가 있는 층만: B1/지하1 → 지하, 1F → 지상) — 층위치 가중치 r 용
         var above = 0, below = 0;
@@ -109,7 +117,7 @@
             if (/^(B|지하)\s*\d+/.test(c)) below++;
             else if (/\d/.test(c)) above++;
         });
-        return { auto: auto, units: units, issues: issues, floorsAbove: above, floorsBelow: below };
+        return { auto: auto, building: building, units: units, issues: issues, floorsAbove: above, floorsBelow: below };
     }
 
     function detailOf(sf, mt, F) {
@@ -135,22 +143,35 @@
     /** 저장된 SAFETY357 프로젝트 + 새 자동값 → { project, auto } (고친 칸 유지) */
     function merge(saved, prevAuto, calc, F) {
         var project = saved && saved.buildings ? JSON.parse(JSON.stringify(saved)) : F.createEmptyProject('평가');
-        prevAuto = prevAuto || {};
-        calc.units.forEach(function (u) {
-            var b = project.buildings.find(function (x) { return x.id === u.id; });
-            if (!b) { b = F.createEmptyBuilding(u.name); b.id = u.id; project.buildings.push(b); }
-            // 지상·지하 층수: 비어 있을 때만 건물 전체 층수로(사용자가 넣은 값은 그대로)
-            if ((b.floorsAbove === '' || b.floorsAbove == null) && calc.floorsAbove > 0) b.floorsAbove = calc.floorsAbove;
-            if ((b.floorsBelow === '' || b.floorsBelow == null) && (calc.floorsAbove > 0 || calc.floorsBelow > 0)) b.floorsBelow = calc.floorsBelow || 0;
-            b.sampleFloors = b.sampleFloors || [];
-            u.floors.forEach(function (f) {
-                if (b.sampleFloors.some(function (x) { return x.id === f.id; })) return;
-                var sf = F.createSampleFloor({ sampleFloor: f.no, startFloor: f.no, endFloor: f.no });
-                sf.id = f.id;
-                b.sampleFloors.push(sf);
-            });
-            b.sampleFloors.forEach(function (sf) { S357_MEMBERS.forEach(function (mt) { detailOf(sf, mt, F); }); });
+        prevAuto = Object.assign({}, prevAuto || {});
+        // 지난 판(평가단위마다 건물 하나)은 버린다 — 이제 건물 하나에 평가단위 = 층 기록
+        project.buildings = project.buildings.filter(function (x) { return !(x && /^bsa-unit-/.test(String(x.id))); });
+        Object.keys(prevAuto).forEach(function (k) { if (/^bsa-unit-/.test(k)) delete prevAuto[k]; });
+        var CB = calc.building || { id: bid(''), name: '건물' };
+        var b = project.buildings.find(function (x) { return x.id === CB.id; });
+        if (!b) { b = F.createEmptyBuilding(CB.name); b.id = CB.id; project.buildings.push(b); }
+        // 지상·지하 층수: 비어 있을 때만 건물 전체 층수로(사용자가 넣은 값은 그대로)
+        if ((b.floorsAbove === '' || b.floorsAbove == null) && calc.floorsAbove > 0) b.floorsAbove = calc.floorsAbove;
+        if ((b.floorsBelow === '' || b.floorsBelow == null) && (calc.floorsAbove > 0 || calc.floorsBelow > 0)) b.floorsBelow = calc.floorsBelow || 0;
+        b.sampleFloors = (b.sampleFloors || []).filter(function (sf) {
+            return !(sf && /^bsa-unit-/.test(String(sf.id))) || calc.units.some(function (u) { return u.id === sf.id; });
         });
+        calc.units.forEach(function (u) {
+            var lo = u.nos[0], hi = u.nos[u.nos.length - 1];
+            var sf = b.sampleFloors.find(function (x) { return x.id === u.id; });
+            if (!sf) {
+                // 표본층 기본 = 가장 낮은 층(사용자가 평가 탭에서 고름)
+                sf = F.createSampleFloor({ sampleFloor: lo, startFloor: lo, endFloor: hi });
+                sf.id = u.id;
+                b.sampleFloors.push(sf);
+            }
+            sf.startFloor = lo;
+            sf.endFloor = hi;
+            if (u.nos.indexOf(Number(sf.sampleFloor)) < 0) sf.sampleFloor = lo;
+            sf.bsaUnitName = u.name;
+        });
+        b.sampleFloors.sort(function (x, y) { return (Number(x.startFloor) || 0) - (Number(y.startFloor) || 0) || (Number(x.endFloor) || 0) - (Number(y.endFloor) || 0); });
+        b.sampleFloors.forEach(function (sf) { S357_MEMBERS.forEach(function (mt) { detailOf(sf, mt, F); }); });
         var paths = {};
         Object.keys(prevAuto).forEach(function (k) { paths[k] = 1; });
         Object.keys(calc.auto).forEach(function (k) { paths[k] = 1; });
@@ -165,7 +186,7 @@
             if (next) nextAuto[path] = next;
             else if (!untouched) nextAuto[path] = prevAuto[path];
         });
-        syncGradeA(project, calc.units.map(function (u) { return u.id; }));
+        syncGradeA(project, [CB.id]);
         return { project: project, auto: nextAuto };
     }
 
@@ -206,10 +227,44 @@
         });
         return out;
     }
+
+    /** 평가단위(층 기록)의 표본층 바꾸기 — 단위의 층 중 하나만. 바뀌면 true */
+    function setSampleFloor(project, recordId, no) {
+        var n = Number(no);
+        var ok = false;
+        (project && project.buildings || []).forEach(function (b) {
+            (b.sampleFloors || []).forEach(function (sf) {
+                if (sf.id !== recordId || !Number.isFinite(n)) return;
+                if (n < Number(sf.startFloor) || n > Number(sf.endFloor) || n === 0) return;
+                if (Number(sf.sampleFloor) !== n) { sf.sampleFloor = n; ok = true; }
+            });
+        });
+        return ok;
+    }
+    /**
+     * 점수 요약(SAFETY357 evaluateBuilding 그대로 — SafetyMan 0x40d34d: 층 기록마다 표본층 s 하나로 층위치 가중치,
+     * 상태 = Choquet(기록 점수, 가중치), 종합 = Choquet([안전성, 상태, 기울기·침하], [0.9, 0.7, 0.7]))
+     */
+    function scoreSummary(project, calc, X) {
+        var CB = calc && calc.building;
+        var b = CB && (project && project.buildings || []).find(function (x) { return x.id === CB.id; });
+        if (!b || !X || typeof X.evaluateBuilding !== 'function') return null;
+        var ev = X.evaluateBuilding(b, project.gradeRules);
+        var A = Number(b.floorsAbove) || 0, Bl = Number(b.floorsBelow) || 0;
+        var units = (b.sampleFloors || []).map(function (sf) {
+            var fs = (ev.floorScores || []).find(function (x) { return x.floorId === sf.id; }) || {};
+            var u = (calc.units || []).find(function (x) { return x.id === sf.id; });
+            return { id: sf.id, name: sf.bsaUnitName || (u && u.name) || ('층 ' + sf.startFloor + '~' + sf.endFloor), startFloor: sf.startFloor, endFloor: sf.endFloor,
+                sampleFloor: sf.sampleFloor, nos: u ? u.nos.slice() : [], score: fs.score, grade: fs.grade,
+                weight: typeof X.floorPositionDensity === 'function' ? X.floorPositionDensity(Number(sf.sampleFloor), A, Bl) : fs.bandWeight };
+        });
+        return { units: units, floorsAbove: A, floorsBelow: Bl, statusScore: ev.statusScore, statusGrade: ev.statusGrade,
+            safetyScore: ev.safetyScore, safetyGrade: ev.safetyGrade, overallScore: ev.averageScore, overallGrade: ev.overallGrade };
+    }
     var WARN_TEXT = '부재 수가 결함 수보다 적어요';
 
     var api = { MEMBER_MAP: MEMBER_MAP, S357_MEMBERS: S357_MEMBERS, GRADE_FIELDS: GRADE_FIELDS, classify: classify, floorNumber: floorNumber,
-        computeAuto: computeAuto, merge: merge, syncGradeA: syncGradeA, check: check, WARN_TEXT: WARN_TEXT, bid: bid, fid: fid };
+        computeAuto: computeAuto, merge: merge, syncGradeA: syncGradeA, check: check, WARN_TEXT: WARN_TEXT, setSampleFloor: setSampleFloor, scoreSummary: scoreSummary, bid: bid, fid: fid };
     if (typeof module !== 'undefined' && module.exports) module.exports = api;
     if (root) { root.BSA = root.BSA || {}; root.BSA.s357Prefill = api; }
 })(typeof window !== 'undefined' ? window : (typeof globalThis !== 'undefined' ? globalThis : null));

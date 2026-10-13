@@ -35,11 +35,11 @@ const Fac = {
 };
 const table = {};
 golden.forEach((g) => {
-    const B = 'bsa-unit-u1', F = 'bsa-u1-f1';
+    const B = P.bid('b1'), F = P.fid('u1');
     const auto = {};
     auto[`${B}|${F}|${g.memberType}|memberTotalCount`] = g.total;
     Object.keys(g.defects).forEach((k) => { auto[`${B}|${F}|${g.memberType}|crackGrades|${k}`] = g.defects[k]; });
-    const calc = { auto, units: [{ id: B, name: 't', floors: [{ id: F, no: 1, label: '1층' }] }], issues: {} };
+    const calc = { auto, building: { id: B, name: 't' }, units: [{ id: F, unitId: 'u1', name: '평가단위 1', nos: [1], floors: [{ floorKey: 'f1', no: 1, label: '1층' }] }], issues: {} };
     const pj = P.merge(null, null, calc, Fac).project;
     const d = pj.buildings[0].sampleFloors[0].details.find((x) => x.memberType === g.memberType);
     assert.strictEqual(d.crackGrades.find((r) => r.grade === 'A').count, g.nA, 'A = 확인부재 − 결함');
