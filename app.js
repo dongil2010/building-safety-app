@@ -31841,7 +31841,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             }
             selectedDefectIds = new Set([d.id]);
             updateMapSelectionBar({ scrollToSelection: true });
-            openAddDefectModal(d.x, d.y, d.targetX, d.targetY, d, null, { revealMarkingAboveDrawer: true, fromCanvas: true });
+            // 2026-10-13 PC ???? ??? ?? ???? ?? ??? ? ? ?? ?? ?? ? ?(??? ???)
+            const pcMouseClick = !endedFromTouch && !!(window.matchMedia && window.matchMedia('(pointer: fine)').matches);
+            openAddDefectModal(d.x, d.y, d.targetX, d.targetY, d, null, { revealMarkingAboveDrawer: true, fromCanvas: true, noCanvasReveal: pcMouseClick });
             if (d.groupId && getDefectMarkingGroupMembers(d.groupId).length > 1) {
                 window.showToast?.(
                     `마킹 ${formatDefectMemberChipLabel(d)} 선택 · NO.박스를 다시 누르면 다음 화살표`,
@@ -33395,7 +33397,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     || (typeof layoutIsMobileWidth === 'function' && layoutIsMobileWidth())
                     || !layoutIsPcLike();
                 // 모바일·하단 드로어: 수정창이 뜨면 해당 마킹이 보이게 도면 이동 (사진 hydrate 전에 먼저)
-                if (targetPinEarly && wantReveal && (isCompact || isBottom || options.fromCanvas)) {
+                if (targetPinEarly && wantReveal && !options.noCanvasReveal && (isCompact || isBottom || options.fromCanvas)) {
                     scheduleRevealMarkingAboveDrawer(targetPinEarly, { animate: true });
                 }
 
@@ -33420,7 +33422,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 if (wantReveal) scheduleRevealDefectListAboveDrawer();
 
                 const targetPin = existingPin || createdPin || targetPinEarly;
-                if (targetPin && wantReveal && (isCompact || isBottom || options.fromCanvas
+                if (targetPin && wantReveal && !options.noCanvasReveal && (isCompact || isBottom || options.fromCanvas
                     || (typeof isDefectMarkingCoveredByDrawer === 'function' && isDefectMarkingCoveredByDrawer(targetPin)))) {
                     scheduleRevealMarkingAboveDrawer(targetPin, { animate: false });
                 }
