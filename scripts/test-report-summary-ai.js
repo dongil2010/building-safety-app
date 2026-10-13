@@ -40,12 +40,19 @@ const keys = ['structure', 'public'];
 const got = ai.parseResponse('```json\n{"structure": {"lines": ["- 첫 줄", "둘째 줄\\n이어짐", "", "-셋째 줄"], "note": " 반복 균열은  추적 관찰 필요. "}, "public": {"lines": ["난간은 양호함."], "note": ""}, "extra": {"lines": ["버림"]}}\n```', keys);
 assert.deepStrictEqual(got, {
     opinion: { structure: '- 첫 줄\n- 둘째 줄 이어짐\n- 셋째 줄', public: '- 난간은 양호함.' },
-    note: { structure: '반복 균열은 추적 관찰 필요.' }
+    note: { structure: '반복 균열은 추적 관찰 필요.' },
+    repair: {}
 });
+// 보수방안: 항목 순서대로의 배열(빈 줄도 자리를 지킨다 — 줄 수가 항목 수와 맞아야 짝을 짓는다)
+assert.ok(prompt.includes('repairs: 항목마다 정확히 한 줄'));
+assert.deepStrictEqual(
+    ai.parseResponse('{"structure": {"lines": ["가", "나"], "repairs": ["- 방수층  보수 후\\n주입", ""], "note": ""}, "public": {"lines": ["다"], "repairs": [""]}}', keys).repair,
+    { structure: ['방수층 보수 후 주입', ''] }
+);
 // 예전 모양(글자·배열)으로 답해도 받는다
 assert.deepStrictEqual(ai.parseResponse('{"structure": "- 가\\n나", "public": ["다"]}', keys),
-    { opinion: { structure: '- 가\n- 나', public: '- 다' }, note: {} });
-assert.deepStrictEqual(ai.parseResponse('{"structure": {"lines": [], "note": ""}, "public": null}', keys), { opinion: {}, note: {} }, '빈 의견은 넣지 않는다');
+    { opinion: { structure: '- 가\n- 나', public: '- 다' }, note: {}, repair: {} });
+assert.deepStrictEqual(ai.parseResponse('{"structure": {"lines": [], "note": ""}, "public": null}', keys), { opinion: {}, note: {}, repair: {} }, '빈 의견은 넣지 않는다');
 assert.throws(() => ai.parseResponse('죄송합니다', keys), /찾지 못했습니다/);
 assert.throws(() => ai.parseResponse('{"structure": }', keys), /읽지 못했습니다/);
 // 조사표에 없는 숫자 찾기

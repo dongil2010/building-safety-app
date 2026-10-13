@@ -35,6 +35,7 @@
         catOverride: {},
         opinion: {},
         opLine: {},
+        repLine: {},
         cellEdit: {},
         loadLines: '',
         repairNote: '',
@@ -51,8 +52,8 @@
         ai: null
     };
 
-    // opLine: 결함 id별 의견 한 줄(최종안에 담을 때 B안·AI안에서 따라온 것)
-    const VARIANT_KEYS = ['sel', 'text', 'custom', 'opinion', 'cellEdit', 'opLine'];
+    // opLine·repLine: 결함 id별 의견 한 줄·보수방안(최종안에 담을 때 B안·AI안에서 따라온 것)
+    const VARIANT_KEYS = ['sel', 'text', 'custom', 'opinion', 'cellEdit', 'opLine', 'repLine'];
     const VARIANTS = ['A', 'B', 'F'];
     const isB = () => state.variant === 'B';
     const isFinal = () => state.variant === 'F';
@@ -76,6 +77,7 @@
         state.opinion = o.opinion || {};
         state.cellEdit = o.cellEdit || {};
         state.opLine = o.opLine || {};
+        state.repLine = o.repLine || {};
         core.CATEGORIES.forEach((c) => {
             state.sel[c.key] = (state.sel[c.key] || []).filter((id) => state.byId[id]);
         });
@@ -379,7 +381,16 @@
 
     function groupsNow() {
         if (isB()) return alt.applyToGroups(core.buildGroups(state.defects, selectedIds(), alt.typeOf));
-        return core.buildGroups(state.defects, selectedIds());
+        const groups = core.buildGroups(state.defects, selectedIds());
+        if (isFinal()) {
+            // 최종안: 담을 때 B안·AI안에서 따라온 보수방안이 있으면 그 묶음의 보수방안으로 쓴다
+            const picked = selectedIds();
+            groups.forEach((g) => {
+                const d = g.items.filter((x) => picked.indexOf(x.id) >= 0 && state.repLine[x.id])[0];
+                if (d) g.repair = { short: state.repLine[d.id], long: state.repLine[d.id] };
+            });
+        }
+        return groups;
     }
 
     function opinionOf(catKey, groups) {
@@ -872,7 +883,7 @@
         try {
             setAiNote('AI가 주요 점검결과를 고르는 중... (1/2)', 'muted');
             const chosen = aiSelFromPicks(await ai.requestPicks(key, pick.input), pick.byN);
-            state.ai = { sel: chosen.sel, why: chosen.why, opinion: {}, note: {}, odd: {} };
+            state.ai = { sel: chosen.sel, why: chosen.why, opinion: {}, note: {}, repair: {}, odd: {} };
             save();
             renderCompare();
             setAiNote('AI가 의견을 쓰는 중... (2/2)', 'muted');
@@ -890,6 +901,7 @@
             });
             state.ai.opinion = got.opinion;
             state.ai.note = got.note;
+            state.ai.repair = got.repair;
             state.ai.odd = odd;
             save();
             renderCompare();
@@ -919,7 +931,7 @@
         core.CATEGORIES.forEach((cat) => {
             const entries = entriesOf(cat.key);
             out[cat.key] = {
-                entries: entries.map((e) => ({ text: e.text, id: e.d ? e.d.id : null })),
+                entries: entries.map((e) => ({ text: e.text, id: e.d ? e.d.id : null, rep: e.d ? repairTextOf(e.d) : '' })),
                 opinion: opinionBody(opinionOf(cat.key, groups))
             };
         });
@@ -931,6 +943,19 @@
     function aiLineOf(catKey, i) {
         const lines = String((state.ai && state.ai.opinion && state.ai.opinion[catKey]) || '').split('\n').filter(Boolean);
         return lines.length === aiDefects(catKey).length ? lines[i] : '';
+    }
+
+    /** AI안이 i번째 항목에 적은 보수방안. 줄 수가 항목 수와 다르면 짝을 알 수 없어 쓰지 않는다. */
+    function aiRepairOf(catKey, i) {
+        const list = (state.ai && state.ai.repair && state.ai.repair[catKey]) || [];
+        return list.length === aiDefects(catKey).length ? (list[i] || '') : '';
+    }
+
+    /** 지금 보는 작성안이 결함 한 건에 적는 보수방안(A안은 우리 보고서의 짝 문구, 짝이 없으면 빈칸) */
+    function repairTextOf(d) {
+        if (d.good) return '';
+        if (isB()) return alt.repairOf(d);
+        return (isFinal() && state.repLine[d.id]) || core.repairOf(d.category, d.typeKey).long;
     }
 
     /** B안 말투의 의견 한 줄(결함 한 건 기준) */
@@ -953,7 +978,7 @@
     function sourceItem(src, catKey, idx, snaps) {
         if (src === 'AI') {
             const d = aiDefects(catKey)[idx];
-            return d ? { text: core.itemText(d), d: d, line: aiLineOf(catKey, idx) } : null;
+            return d ? { text: core.itemText(d), d: d, line: aiLineOf(catKey, idx), repair: aiRepairOf(catKey, idx) } : null;
         }
         if (src === 'prev') {
             const text = prevLines(catKey)[idx];
@@ -966,7 +991,8 @@
         const e = (snaps || { [src]: snapshotOf(src) })[src][catKey].entries[idx];
         if (!e) return null;
         const d = e.id ? state.byId[e.id] : null;
-        return { text: e.text, d: d, line: d && src === 'B' && !d.good ? bLineOf(d) : '' };
+        const fromB = d && src === 'B' && !d.good;
+        return { text: e.text, d: d, line: fromB ? bLineOf(d) : '', repair: fromB ? alt.repairOf(d) : '' };
     }
 
     /** 최종안을 화면에 올린다(담기·빼기는 최종안을 보면서 한다. 아래 표와 한글 파일도 최종안으로 바뀐다) */
@@ -994,6 +1020,7 @@
         if (isNew) sel.push(id);
         if (item.text && item.text !== baseText(item.d)) state.text[id] = item.text; else delete state.text[id];
         if (item.line) state.opLine[id] = item.line; else delete state.opLine[id];
+        if (item.repair) state.repLine[id] = item.repair; else delete state.repLine[id];
         // 의견을 손으로 고쳐 둔 분류는 자동으로 다시 쓰지 않으므로, 새 항목의 줄만 끝에 붙인다
         if (isNew && state.opinion[catKey] != null) {
             const line = item.line || (item.d.good ? '' : core.opinionLine(item.d.content, item.d.cause));
@@ -1007,6 +1034,7 @@
         if (e.d) {
             state.sel[catKey] = (state.sel[catKey] || []).filter((id) => id !== e.d.id);
             delete state.opLine[e.d.id];
+            delete state.repLine[e.d.id];
             delete state.text[e.d.id];
         } else if (e.customIdx != null) {
             state.custom[catKey].splice(e.customIdx, 1);
@@ -1073,7 +1101,15 @@
                 + '<span>' + esc((i + 1) + '. ' + e.text) + '</span></div>').join('')
                 : '<span class="muted">' + (k === 'load' ? '-' : '왼쪽 항목의 +를 눌러 담으세요') + '</span>';
 
-            h += '<tr><td class="c" rowspan="2">' + esc(cat.label) + '</td><td class="c">주요<br>결과</td>'
+            const repList = (list) => {
+                const rows = list.filter((x) => x.rep);
+                return rows.length ? esc(rows.map((x) => x.no + '. ' + x.rep).join('\n')) : '-';
+            };
+            const repCell = (v) => '<td' + (v === cur ? ' class="cur"' : '') + '>'
+                + repList(snaps[v][k].entries.map((e, i) => ({ no: i + 1, rep: e.rep }))) + '</td>';
+            const aiRepCell = repList(aiList.map((d, i) => ({ no: i + 1, rep: aiRepairOf(k, i) })));
+
+            h += '<tr><td class="c" rowspan="3">' + esc(cat.label) + '</td><td class="c">주요<br>결과</td>'
                 + '<td class="items">' + prevCell + '</td>' + lineCell('A') + lineCell('B')
                 + '<td class="items">' + aiCell + '</td>'
                 + '<td class="items final">' + finalCell + '</td></tr>'
@@ -1084,7 +1120,10 @@
                 + (odd.length ? '<div><span class="badge must" title="AI가 든 기준값(예: 0.3mm)일 수 있습니다. 층·치수가 조사표와 맞는지만 확인하세요.">조사표에 없는 숫자: ' + esc(odd.join(', ')) + '</span></div>' : '')
                 + opBtn('AI', k, !!aiOp[k])
                 + (aiNote[k] ? '<div class="ainote"><b>AI 검토 메모</b> ' + esc(aiNote[k]) + '</div>' : '') + '</td>'
-                + '<td class="final">' + (esc(snaps.F[k].opinion) || '-') + '</td></tr>';
+                + '<td class="final">' + (esc(snaps.F[k].opinion) || '-') + '</td></tr>'
+                + '<tr><td class="c">보수<br>방안</td><td>-</td>' + repCell('A') + repCell('B')
+                + '<td>' + (aiList.length ? aiRepCell : aiEmpty) + '</td>'
+                + '<td class="final">' + repList(snaps.F[k].entries.map((e, i) => ({ no: i + 1, rep: e.rep }))) + '</td></tr>';
         });
         return h + '</table>';
     }

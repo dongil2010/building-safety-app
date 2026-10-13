@@ -2,7 +2,7 @@
  * 보고서 본문 요약 — AI 의견 초안 (report-summary.html 전용)
  *
  * Gemini에 두 가지를 맡긴다: ① 결함 전체에서 분류별 주요 점검결과 고르기 ② 고른 항목으로
- * 「결함원인 및 책임기술자 의견」 쓰기. ①은 결함 번호로만 답을 받고 문구·균열폭은 조사표에서
+ * 「결함원인 및 책임기술자 의견」과 보수방안 쓰기. ①은 결함 번호로만 답을 받고 문구·균열폭은 조사표에서
  * 다시 채운다(없는 결함을 만들 수 없게). ②는 받은 글에 조사표에 없는 숫자가 있으면 알려 준다.
  * 받은 것은 A·B안을 덮어쓰지 않고 「AI안」으로 따로 두어 비교표에서 골라 쓰게 한다.
  *
@@ -38,12 +38,15 @@
             '  조사표와 다르면 줄 끝에 "(조사표 원인추정: ○○ — 재검토 필요)"처럼 밝힌다.',
             '- 원인을 가르려면 확인이 더 필요한 경우 무엇을 확인해야 하는지 적는다(예: 균열 위치가 중앙부인지 단부인지, 진행 여부 계측, 상부 방수층 상태).',
             '- 상태양호 항목은 양호하다는 내용으로 짧게 적는다.',
+            '- repairs: 항목마다 정확히 한 줄, 항목 순서대로(줄 수 = 항목 수). 그 결함의 보수·보강 방안을 네 판단으로 구체적으로 적는다:',
+            '  먼저 끊어야 할 원인(누수 경로 등), 공법과 순서, 균열폭 등에 따른 공법 구분, 급한 정도, 보수 뒤 추적 관찰.',
+            '  이 줄은 보고서 문체가 아니어도 된다. 상태양호 항목은 "해당 없음"으로 적는다.',
             '- note: 그 분류에서 점검팀이 놓치기 쉬운 점을 한두 문장으로 적는다(결함들 사이의 연관, 같은 유형의 반복이 뜻하는 것,',
             '  추가 조사나 추적 관찰이 필요한 것 등). 덧붙일 것이 없으면 빈 문자열로 둔다.',
             '- 판단과 해석은 자유롭게 하되, 아래에 적혀 있지 않은 층·위치·치수·건수 같은 사실은 지어내지 않는다.',
             '- 머리말, 맺음말, 분류 이름은 쓰지 않는다.',
             '',
-            '출력은 JSON 하나만: {"분류키": {"lines": ["첫 항목 의견", "둘째 항목 의견"], "note": "놓치기 쉬운 점"}, ...}. 아래에 나온 분류키만 쓴다.',
+            '출력은 JSON 하나만: {"분류키": {"lines": ["첫 항목 의견", "둘째 항목 의견"], "repairs": ["첫 항목 보수방안", "둘째 항목 보수방안"], "note": "놓치기 쉬운 점"}, ...}. 아래에 나온 분류키만 쓴다.',
             '',
             '건물: ' + (input.buildingName || '(이름 없음)') + (input.roundLabel ? ' / ' + input.roundLabel + ' 점검' : '')
         ];
@@ -67,7 +70,8 @@
     /**
      * AI 답에서 분류별 의견(항목마다 한 줄)과 메모를 꺼낸다. 요청하지 않은 분류와 빈 글은 버린다.
      * 줄 안의 줄바꿈은 한 칸으로 잇는다(줄 수가 항목 수와 맞아야 항목별로 짝을 지을 수 있다).
-     * @returns {{opinion: Object<string, string>, note: Object<string, string>}}
+     * 보수방안(repair)은 항목 순서대로의 배열로 둔다.
+     * @returns {{opinion: Object<string, string>, note: Object<string, string>, repair: Object<string, string[]>}}
      */
     function parseResponse(text, catKeys) {
         const m = String(text || '').match(/\{[\s\S]*\}/);
@@ -78,12 +82,15 @@
         } catch (e) {
             throw new Error('AI 답을 읽지 못했습니다: ' + e.message);
         }
-        const out = { opinion: {}, note: {} };
+        const out = { opinion: {}, note: {}, repair: {} };
         (catKeys || []).forEach(function (k) {
             let v = obj[k];
             let note = '';
             if (v && typeof v === 'object' && !Array.isArray(v)) {
                 note = String(v.note == null ? '' : v.note).replace(/\s+/g, ' ').trim();
+                const reps = (Array.isArray(v.repairs) ? v.repairs : [])
+                    .map(function (r) { return String(r == null ? '' : r).replace(/\s+/g, ' ').replace(/^-\s*/, '').trim(); });
+                if (reps.some(Boolean)) out.repair[k] = reps;
                 v = v.lines;
             }
             const list = Array.isArray(v)
