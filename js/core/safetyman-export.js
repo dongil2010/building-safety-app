@@ -29,6 +29,30 @@
         return '기타';
     }
 
+    /** 결함의 평가 부재: 확정(d.evalMember) 우선, 없으면 부재 글로 추정 */
+    function evalMemberOf(d, memberName) {
+        var v = str(d && d.evalMember);
+        if (BASE_MEMBERS.indexOf(v) >= 0) return v;
+        var c = d && d.component;
+        return memberType(typeof memberName === 'function' ? (memberName(c) || c) : c);
+    }
+
+    /** 평가단위별 평가 부재 상태: { unitId: { total, confirmed, guessed, none } } */
+    function unitMemberStatus(bldg, st, floors, E, memberName) {
+        var out = {};
+        buildSamples(bldg, st, floors, E).forEach(function (s) {
+            if (!s.unitId) return;
+            var u = out[s.unitId] = out[s.unitId] || { total: 0, confirmed: 0, guessed: 0, none: 0 };
+            s.defects.forEach(function (d) {
+                u.total++;
+                if (BASE_MEMBERS.indexOf(str(d && d.evalMember)) >= 0) u.confirmed++;
+                else if (evalMemberOf(d, memberName) === '기타') u.none++;
+                else u.guessed++;
+            });
+        });
+        return out;
+    }
+
     /** 결함 종류 → 'crack' | 'spall' | 'leak' | 'rebar' | 'other' */
     function defectKind(d) {
         var t = str(d && d.defectType);
@@ -133,7 +157,7 @@
         var nm = function (v) { return typeof memberName === 'function' ? (memberName(v) || v) : v; };
         var groups = {};
         s.defects.forEach(function (d) {
-            var t = memberType(nm(d.component));
+            var t = evalMemberOf(d, memberName);
             (groups[t] = groups[t] || []).push(d);
         });
         var order = BASE_MEMBERS.slice();
@@ -203,7 +227,7 @@
             var u = out[s.unitId] = out[s.unitId] || {};
             var row = function (t) { return u[t] = u[t] || { count: null, crackW: null, leakN: 0, effN: 0, rebarN: 0, spall: null, strength: null, carb: null, cover: null, defects: 0 }; };
             s.defects.forEach(function (d) {
-                var r = row(memberType(nm(d.component)));
+                var r = row(evalMemberOf(d, memberName));
                 r.defects++;
                 var k = defectKind(d);
                 if (k === 'crack') { var w = crackWidthOf(d); if (w != null && (r.crackW == null || w > r.crackW)) r.crackW = w; }
@@ -342,7 +366,7 @@
                 var k = defectKind(d);
                 var w = k === 'crack' ? crackWidthOf(d) : null;
                 var dep = k === 'spall' ? spallDepthOf(d) : null;
-                ev.push([s.sheet, sampleName(s), s.floorLabel, s.subName, str(d.no), str(nmv), memberType(nmv), str(d.defectType), str(d.location), str(d.size),
+                ev.push([s.sheet, sampleName(s), s.floorLabel, s.subName, str(d.no), str(nmv), evalMemberOf(d, o.memberName) + (BASE_MEMBERS.indexOf(str(d.evalMember)) >= 0 ? '' : ' (추정)'), str(d.defectType), str(d.location), str(d.size),
                     w == null ? '' : w, k === 'crack' ? crackBand(w) : (k === 'spall' ? spallBand(dep) : '')]);
             });
         });
@@ -363,11 +387,12 @@
         '8. 백태·철근노출 면적율(%)은 앱에 부재면적이 없어 계산하지 않습니다. 해당 결함이 있으면 「(직접 입력)」 칸을 채우세요.',
         '9. 비파괴 시험값(강도·중성화)은 층 단위로 저장돼 있어, 구역 표본층에는 그 층 값이 공통으로 들어갑니다. 염화물은 앱에 입력 칸이 없어 빈칸입니다.',
         '9-1. 부재 수: 도면 「부재 수 세기」로 찍은 점 개수(층 전체 층은 그 층 단위, 번호로 나눈 층은 점의 구역 번호). 평가 탭에 직접 적은 값이 우선입니다.',
+        '9-2. 결함의 평가부재는 도면에서 지정한 값(평가 부재 바)을 쓰고, 지정 안 한 결함은 부재 글로 추정합니다(근거_결함목록에 「(추정)」). 추정도 안 되는 결함은 「기타」.',
         '10. 부재변형·기울기·부동침하는 이 파일에 넣지 않았습니다(건물 전체 항목). 등급 계산은 하지 않습니다 — SafetyMan에서 계산하세요.'
     ];
 
     var api = { INPUT_ITEMS: INPUT_ITEMS, BASE_MEMBERS: BASE_MEMBERS, unitComputed: unitComputed, cellValue: cellValue, unitMembers: unitMembers,
-        buildSheets: buildSheets, buildSamples: buildSamples, memberType: memberType, defectKind: defectKind,
+        buildSheets: buildSheets, buildSamples: buildSamples, memberType: memberType, evalMemberOf: evalMemberOf, unitMemberStatus: unitMemberStatus, defectKind: defectKind,
         crackWidthOf: crackWidthOf, crackBand: crackBand, spallDepthOf: spallDepthOf, spallBand: spallBand, NOTES: NOTES };
     if (typeof module !== 'undefined' && module.exports) module.exports = api;
     if (root) { root.BSA = root.BSA || {}; root.BSA.safetymanExport = api; }

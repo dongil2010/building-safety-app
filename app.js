@@ -1598,7 +1598,7 @@ document.addEventListener('DOMContentLoaded', () => {
     function updateFloorDrawingEmptyOverlay(message) {
         const el = elements.mapDrawingEmpty || document.getElementById('mapDrawingEmpty');
         if (!el) return;
-        const onMap = state.currentTab === 'tab-map';
+        const onMap = (state.currentTab === 'tab-map' || window.__bsaEvalMapOn === true);
         const show = onMap && !!state.currentBuilding && !!state.currentFloor && !state.bgImage;
         if (!show) {
             el.style.display = 'none';
@@ -1721,7 +1721,7 @@ document.addEventListener('DOMContentLoaded', () => {
     async function syncViewportHiPatch() {
         const bldg = state.currentBuilding;
         const fc = state.currentFloor;
-        if (!bldg || !fc || state.currentTab !== 'tab-map' || !state.bgImage) return;
+        if (!bldg || !fc || (state.currentTab !== 'tab-map' && window.__bsaEvalMapOn !== true) || !state.bgImage) return;
 
         const token = ++viewportHiPatchToken;
         viewportHiPatchInFlight = token;
@@ -2152,7 +2152,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function saveStateToLocalStorage() {
         try {
-            if (state.currentTab === 'tab-map' && typeof captureFloorSnapshotNow === 'function') {
+            if ((state.currentTab === 'tab-map' || window.__bsaEvalMapOn === true) && typeof captureFloorSnapshotNow === 'function') {
                 captureFloorSnapshotNow();
             }
             const rawBuildings = window.state.buildings || [];
@@ -2718,7 +2718,7 @@ document.addEventListener('DOMContentLoaded', () => {
         'floorsOrderManual',
         'siteName', 'dong', 'multiDong', 'name', 'address', 'inspector', 'contactPhone',
         'floors', 'date', 'structureType', 'facilityGrade', 'completionDate', 'notes',
-        'enabledStrengthFormulas', 'strengthAnvilAvg', 'floorPdfRemovedAt', 'floorPdfUpdatedAt', 'evalUnitPlan', 'evalInputs'
+        'enabledStrengthFormulas', 'strengthAnvilAvg', 'floorPdfRemovedAt', 'floorPdfUpdatedAt', 'evalUnitPlan', 'evalInputs', 'evalSafetyman'
     ];
 
     function buildingMetaUpdatedAt(bldg) {
@@ -4512,7 +4512,7 @@ document.addEventListener('DOMContentLoaded', () => {
             reportProgress(floorCode);
             if (window.state.currentBuildingId === bldg.id
                 && window.state.currentFloor === floorCode
-                && window.state.currentTab === 'tab-map'
+                && (window.state.currentTab === 'tab-map' || window.__bsaEvalMapOn === true)
                 && !window.state.bgImage
                 && typeof loadFloorDrawing === 'function') {
                 loadFloorDrawing(floorCode);
@@ -8498,7 +8498,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     function updateMapZoomOverlay() {
         const el = elements.mapZoomOverlay || document.getElementById('mapZoomOverlay');
         if (!el) return;
-        const onMap = state.currentTab === 'tab-map';
+        const onMap = (state.currentTab === 'tab-map' || window.__bsaEvalMapOn === true);
         const mobile = isMobileDrawingContext();
         if (!onMap || !mobile) {
             el.style.display = 'none';
@@ -9066,7 +9066,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     async function syncFloorDrawingTierForView() {
         const bldg = refreshCurrentBuildingFromState() || state.currentBuilding;
         const fc = state.currentFloor;
-        if (!bldg || !fc || state.currentTab !== 'tab-map' || !state.bgImage) return;
+        if (!bldg || !fc || (state.currentTab !== 'tab-map' && window.__bsaEvalMapOn !== true) || !state.bgImage) return;
 
         if (hasActiveFloorHiPatch()) {
             applyFloorDrawingTarget(undefined, null, { immediate: true });
@@ -24501,6 +24501,18 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         }).join('');
         const warn = [];
         if (sum.unsetFloors.length && units.length) warn.push(`설정 안 한 층: ${sum.unsetFloors.map((f) => esc(f.floorLabel)).join(', ')}`);
+        try {
+            const calc = s357Calc(bldg);
+            if (calc) units.forEach((u) => {
+                const i = calc.issues[u.id];
+                if (!i) return;
+                const parts = [];
+                if (i.noMember) parts.push(`평가 부재 미지정 ${i.noMember}건`);
+                if (i.noWidth) parts.push(`균열폭 없음 ${i.noWidth}건`);
+                if (i.assumed) parts.push(`등급 b로 가정(면적율·깊이 없음) ${i.assumed}건`);
+                if (parts.length) warn.push(`${esc(api.unitTitle(u))}: ${parts.join(' · ')}`);
+            });
+        } catch (e) { console.warn('평가 확인', e); }
         if (sum.unassigned.length) warn.push(`번호 없는 결함: ${sum.unassigned.map((f) => `${esc(f.floorLabel)} ${f.count}건`).join(', ')}`);
         // 3) 입력표(평가단위 × 부재)
         const comp = sm.unitComputed(bldg, state, floors, api, memberNameOut, window.BSA && window.BSA.memberCount);
@@ -24523,15 +24535,15 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             <div class="section-header"><h2>📐 평가 <span class="eval-plan-sub">상태평가용 묶음 · 조사표·번호·도면 출력은 층 그대로</span></h2>
                 <div class="eval-plan-count">평가단위(구역 번호) 개수 <input type="text" inputmode="numeric" data-num-keypad class="form-control eval-plan-n" value="${units.length}">
                     <button type="button" class="btn btn-sm btn-primary eval-plan-apply-n">적용</button>
-                    ${units.length ? '<button type="button" class="btn btn-sm btn-outline eval-plan-safetyman" title="KISTEC SafetyMan 입력 순서로 정리한 엑셀(등급 계산 없음)">SafetyMan용 엑셀</button>' : ''}</div></div>
+                    </div></div>
             ${units.length ? `<h3>층 × 구역 번호 <span class="eval-plan-sub">같은 번호 = 같은 평가단위. 나눈 층은 있는 번호에 체크 → 도면에서 결함을 골라 「평가단위」 버튼으로 번호를 넣습니다.</span></h3>
             <div class="eval-plan-scroll"><table class="eval-plan-table eval-plan-matrix"><thead>${head}</thead><tbody>${rows}</tbody></table></div>
             <h3>평가단위별 목록</h3><ul class="eval-plan-sum">${listHtml}</ul>${warn.length ? `<div class="eval-plan-warn">${warn.join('<br>')}</div>` : ''}
-            <h3>입력표 <span class="eval-plan-sub">회색 값은 자동 — 부재 수는 도면 「부재 수」로 찍은 점 개수, 나머지는 도면 결함·비파괴값(부재별 최악값). 고치면 직접 입력으로 저장, 지우면 자동으로 돌아갑니다. 누수·백태·철근노출은 건수가 흐리게 보이고 면적율(%)을 적습니다.</span></h3>
-            ${inputHtml}
-            <div class="eval-grade-placeholder">상태평가 등급 계산 — 준비 중 (지금은 SafetyMan에서 계산)</div>` : '<div class="eval-tab-empty">평가단위 개수를 정하면 시작합니다. 0이면 지금처럼 층마다 평가.</div>'}
+            <h3>SAFETY357 입력 <span class="eval-plan-sub">평가단위 = 건물, 층 = 표본층. 확인부재 수(도면 점)·결함 등급별 부재 수(평가 부재 지정한 결함)는 자동 — 고친 칸은 그대로 둡니다. 엑셀은 SAFETY357 「보고서」에서.</span></h3>` : '<div class="eval-tab-empty">평가단위 개수를 정하면 시작합니다. 0이면 지금처럼 층마다 평가.</div>'}
         </div>`;
         const rerender = () => renderEvalTab();
+        try { syncEvalMapHead(); } catch (_e) { /* ignore */ }
+        mountS357();
         const smBtn = root.querySelector('.eval-plan-safetyman');
         if (smBtn) smBtn.onclick = () => downloadSafetyManExcel(bldg);
         root.querySelector('.eval-plan-apply-n').onclick = async () => {
@@ -24617,7 +24629,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     window.renderEvalTab = renderEvalTab;
     window.BSA = window.BSA || {};
     window.BSA.tabs = window.BSA.tabs || {};
-    window.BSA.tabs['tab-eval'] = { id: 'tab-eval', enter: () => { try { renderEvalTab(); } catch (e) { console.error('평가 탭', e); } } };
+    window.BSA.tabs['tab-eval'] = { id: 'tab-eval', enter: () => { try { enterEvalTabWithMap(); renderEvalTab(); } catch (e) { console.error('평가 탭', e); } } };
 
     /** 평가단위 → SafetyMan 입력용 엑셀(표본층 시트 + 근거 + 참고). 등급 계산은 하지 않는다 */
     function downloadSafetyManExcel(bldg) {
@@ -25027,6 +25039,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (typeof scheduleSyncToFirebase === 'function') scheduleSyncToFirebase();
         syncMemberCountOverlay();
         syncMemberCountBar();
+        if (typeof scheduleEvalTabRefresh === 'function') scheduleEvalTabRefresh();
     }
     /** 도면 탭: 점 근처면 지우기, 아니면 지금 종류로 점 찍기 */
     function countTapAt(sx, sy) {
@@ -25153,7 +25166,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     }
     window.syncMemberCountBar = syncMemberCountBar;
     if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') document.addEventListener('keydown', (e) => {
-        if (state.mode !== 'COUNT' || state.currentTab !== 'tab-map') return;
+        if (state.mode !== 'COUNT' || (state.currentTab !== 'tab-map' && window.__bsaEvalMapOn !== true)) return;
         const t = e.target;
         if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return;
         const api = mcApi();
@@ -25164,6 +25177,278 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (k === 'escape') { e.preventDefault(); setDrawMode('PAN'); return; }
         if (api.KEYS[k]) { e.preventDefault(); e.stopPropagation(); setMcType(api.KEYS[k]); }
     }, true);
+
+    // ===== 2026-10-13 평가 부재 지정(도면) · 평가 탭 안 도면 =====
+    function emApi() { return (window.BSA && window.BSA.evalMember) || null; }
+    function emPlanReady(bldg) {
+        const api = evalUnitApi();
+        return !!(api && bldg && api.planOf(bldg).units.length);
+    }
+    /** 결함이 평가단위에 들어 있나(층 전체 → 예, 나눈 층 → 구역 번호가 있어야) */
+    function emDefectHasUnit(bldg, floorKey, d) {
+        const api = evalUnitApi();
+        if (!api || !bldg) return false;
+        const fm = api.floorMode(bldg, state.currentFloor);
+        if (fm && fm.mode === 'whole') return !!fm.unitId;
+        if (fm && fm.mode === 'split') return !!api.unitOf(state, floorKey, d);
+        return false;
+    }
+    async function assignEvalMemberToSelection(type) {
+        const em = emApi();
+        const floorKey = currentEvalUnitFloorKey();
+        const bldg = currentEvalBuilding();
+        if (!em || !floorKey || !bldg) return;
+        const targets = selectedDefectsForEvalUnit(floorKey);
+        if (!targets.length) { window.showToast('도면에서 결함을 먼저 선택하세요(끌어서 여러 개 선택).', 'info', 2400); return; }
+        if (!emPlanReady(bldg)) {
+            const ok = await window.appConfirm('평가단위를 먼저 정해야 합니다.\n평가 탭에서 평가단위 개수와 층 설정을 할까요?');
+            if (ok && typeof window.switchTab === 'function') window.switchTab('tab-eval');
+            return;
+        }
+        const noUnit = targets.filter((d) => !emDefectHasUnit(bldg, floorKey, d));
+        if (noUnit.length) {
+            const fm = evalUnitApi().floorMode(bldg, state.currentFloor);
+            const ok = await window.appConfirm(`평가단위가 없는 결함 ${noUnit.length}건이 있습니다.\n평가단위부터 정할까요?`);
+            if (!ok) return;
+            if (fm && fm.mode === 'split') await assignSelectedDefectsToEvalUnit();
+            else if (typeof window.switchTab === 'function') window.switchTab('tab-eval');
+            return;
+        }
+        const n = em.assign(targets, type, Date.now());
+        commitEvalUnitChange(floorKey);
+        syncEvalMemberBar();
+        scheduleEvalTabRefresh();
+        window.showToast(type ? `${targets.length}건 → 평가 부재 「${type}」${n ? '' : ' (이미 같음)'}` : `${n}건 평가 부재 지정 해제(부재 글로 추정)`, 'success', 2000);
+    }
+    window.assignEvalMemberToSelection = assignEvalMemberToSelection;
+    function syncEvalMemberBar() {
+        const em = emApi();
+        const canvas = state.canvas || document.getElementById('planCanvas');
+        const host = canvas && canvas.parentElement;
+        let bar = document.getElementById('mapEvalMemberBar');
+        const floorKey = currentEvalUnitFloorKey();
+        const bldg = currentEvalBuilding();
+        const sel = (typeof selectedDefectIds !== 'undefined' && selectedDefectIds) ? selectedDefectIds.size : 0;
+        const live = (state.currentTab === 'tab-map' || window.__bsaEvalMapOn === true) || window.__bsaEvalMapOn === true;
+        if (!em || !host || !live || !sel || state.mode === 'COUNT' || !floorKey || !bldg || !emPlanReady(bldg)) { if (bar) bar.hidden = true; return; }
+        if (!bar) {
+            bar = document.createElement('div');
+            bar.id = 'mapEvalMemberBar';
+            bar.className = 'map-eval-member-bar';
+            bar.setAttribute('role', 'toolbar');
+            bar.setAttribute('aria-label', '평가 부재');
+            bar.addEventListener('click', (e) => {
+                const b = e.target.closest('button');
+                if (!b) return;
+                e.preventDefault();
+                if (b.dataset.emType != null) assignEvalMemberToSelection(b.dataset.emType);
+            });
+            ['mousedown', 'touchstart', 'pointerdown'].forEach((t) => bar.addEventListener(t, (e) => e.stopPropagation(), { passive: true }));
+        }
+        if (bar.parentElement !== host) host.appendChild(bar);
+        const targets = selectedDefectsForEvalUnit(floorKey);
+        const s = em.summarize(targets, memberNameOut);
+        const esc = (t) => String(t).replace(/[&<>"]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[ch]);
+        const noUnit = targets.filter((d) => !emDefectHasUnit(bldg, floorKey, d)).length;
+        const html = `<span class="map-eval-member-title">평가 부재 <b>${targets.length}</b>건</span>`
+            + em.TYPES.map((t) => {
+                const b = s.byType[t] || { confirmed: 0, guessed: 0 };
+                const all = b.confirmed === targets.length && targets.length > 0;
+                return `<button type="button" class="map-eval-member-btn${all ? ' active' : ''}${!b.confirmed && b.guessed ? ' is-guess' : ''}" data-em-type="${esc(t)}" style="--em-color:${em.COLORS[t]}" title="${esc(t)} (${em.SHORT[t]})">${esc(t)} <small>${em.SHORT[t]}</small>${b.confirmed ? ` <b>${b.confirmed}</b>` : ''}${b.guessed ? ` <i>${b.guessed}?</i>` : ''}</button>`;
+            }).join('')
+            + `<button type="button" class="map-eval-member-btn map-eval-member-clear" data-em-type="" title="지정 해제 → 부재 글로 추정">해제</button>`
+            + (s.none ? `<span class="map-eval-member-warn">부재 모름 ${s.none}</span>` : '')
+            + (noUnit ? `<span class="map-eval-member-warn">평가단위 없음 ${noUnit}</span>` : '')
+            + `<span class="map-eval-member-hint">흐린 숫자?는 부재 글로 추정 — 눌러서 확정</span>`;
+        if (bar._h !== html) { bar._h = html; bar.innerHTML = html; }
+        bar.hidden = false;
+    }
+    window.syncEvalMemberBar = syncEvalMemberBar;
+    if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') document.addEventListener('keydown', (e) => {
+        if (e.ctrlKey || e.altKey || e.metaKey || e.repeat || e.isComposing) return;
+        if (state.mode === 'COUNT') return;
+        const bar = document.getElementById('mapEvalMemberBar');
+        if (!bar || bar.hidden) return;
+        const t = e.target;
+        if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName || ''))) return;
+        if (document.querySelector('.app-dialog-backdrop:not([hidden]), dialog[open]')) return;
+        const em = emApi();
+        const map = { c: 'c', 'ㅊ': 'c', w: 'w', 'ㅈ': 'w', g: 'g', 'ㅎ': 'g', b: 'b', 'ㅠ': 'b', s: 's', 'ㄴ': 's' };
+        const k = map[String(e.key || '').toLowerCase()] || (/^Key[CWGBS]$/.test(e.code || '') ? e.code.slice(3).toLowerCase() : '');
+        if (!em || !k || !em.KEYS[k]) return;
+        // G/B: 부재 글 거더/빔 고르기 칸이 떠 있으면 그쪽이 먼저
+        if (k === 'g' || k === 'b') {
+            const ov = document.getElementById('mapMemberGbOverlay');
+            if (ov && ov.offsetParent && ov.querySelector('.map-member-gb-pick')) return;
+        }
+        e.preventDefault();
+        e.stopPropagation();
+        assignEvalMemberToSelection(em.KEYS[k]);
+    }, true);
+
+    // --- 평가 탭 안 도면: 결함위치도 화면(#tab-map)을 그대로 옮겨 쓴다(복사 아님) ---
+    let evalMapHome = null;
+    function evalMapSection() { return document.getElementById('tab-map'); }
+    function refreshEmbeddedMap() {
+        try {
+            if (!state.bgImage && state.currentFloor && typeof loadFloorDrawing === 'function') loadFloorDrawing(state.currentFloor, { preserveView: true });
+        } catch (e) { console.warn('평가 탭 도면', e); }
+        const run = (fit) => {
+            if (typeof resizeCanvas === 'function') resizeCanvas();
+            if (fit && typeof fitToScreen === 'function' && (typeof shouldAutoFitMapView !== 'function' || shouldAutoFitMapView())) fitToScreen();
+            else if (typeof drawCanvas === 'function') drawCanvas({ immediate: true });
+        };
+        setTimeout(() => run(true), 50);
+        setTimeout(() => run(false), 240);
+    }
+    function embedEvalMap() {
+        const slot = document.getElementById('evalMapSlot');
+        const sec = evalMapSection();
+        if (!slot || !sec) return;
+        if (!evalMapHome) {
+            evalMapHome = document.createComment('tab-map-home');
+            sec.parentNode.insertBefore(evalMapHome, sec);
+        }
+        if (sec.parentNode !== slot) slot.appendChild(sec);
+        sec.style.display = 'flex';
+        sec.classList.add('is-eval-embedded');
+        window.__bsaEvalMapOn = true;
+        document.body.classList.add('bsa-eval-map-on');
+        syncEvalMapHead();
+        refreshEmbeddedMap();
+    }
+    function restoreEvalMap() {
+        const sec = evalMapSection();
+        window.__bsaEvalMapOn = false;
+        document.body.classList.remove('bsa-eval-map-on');
+        if (!sec || !evalMapHome || !evalMapHome.parentNode) return;
+        sec.classList.remove('is-eval-embedded');
+        if (sec.previousSibling !== evalMapHome) evalMapHome.parentNode.insertBefore(sec, evalMapHome.nextSibling);
+        sec.style.display = (state.currentTab === 'tab-map' || window.__bsaEvalMapOn === true) ? 'flex' : 'none';
+    }
+    function evalMapPrefOn() { try { return localStorage.getItem('bsa.evalMapOpen') !== '0'; } catch (_e) { return true; } }
+    function syncEvalMapHead() {
+        const head = document.getElementById('evalMapHead');
+        const bldg = currentEvalBuilding();
+        if (!head) return;
+        if (!bldg) { head.innerHTML = ''; return; }
+        const esc = (t) => String(t == null ? '' : t).replace(/[&<>"]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[ch]);
+        const on = evalMapPrefOn();
+        const floors = (bldg.floorsList || []).filter((f) => f && f.floorCode);
+        const html = `<b>도면</b>
+            <select class="form-control eval-map-floor" aria-label="층">${floors.map((f) => `<option value="${esc(f.floorCode)}"${f.floorCode === state.currentFloor ? ' selected' : ''}>${esc(f.floorLabel || f.floorCode)}</option>`).join('')}</select>
+            <button type="button" class="btn btn-sm${state.mode === 'COUNT' ? ' btn-primary' : ' btn-outline'} eval-map-count">🔢 부재 수 찍기</button>
+            <button type="button" class="btn btn-sm btn-outline eval-map-toggle">${on ? '도면 접기' : '도면 펴기'}</button>
+            <span class="eval-plan-sub">결함을 끌어 고르면 「평가 부재」 바(C·W·G·B·S) · 확인한 부재는 「부재 수 찍기」로 점</span>`;
+        if (head._h !== html) {
+            head._h = html;
+            head.innerHTML = html;
+            head.querySelector('.eval-map-floor').onchange = (e) => {
+                const fs = document.getElementById('floorSelect');
+                if (fs) { fs.value = e.target.value; fs.dispatchEvent(new Event('change', { bubbles: true })); }
+                setTimeout(() => { refreshEmbeddedMap(); scheduleEvalTabRefresh(); }, 80);
+            };
+            head.querySelector('.eval-map-count').onclick = () => { if (typeof setDrawMode === 'function') setDrawMode(state.mode === 'COUNT' ? 'PAN' : 'COUNT'); syncEvalMapHead(); };
+            head.querySelector('.eval-map-toggle').onclick = () => {
+                try { localStorage.setItem('bsa.evalMapOpen', on ? '0' : '1'); } catch (_e) { /* ignore */ }
+                if (on) restoreEvalMap(); else embedEvalMap();
+                const slot = document.getElementById('evalMapSlot');
+                if (slot) slot.hidden = on;
+                syncEvalMapHead();
+            };
+        }
+    }
+    let evalTabRefreshTimer = 0;
+    function scheduleEvalTabRefresh() {
+        if (state.currentTab !== 'tab-eval') return;
+        clearTimeout(evalTabRefreshTimer);
+        evalTabRefreshTimer = setTimeout(() => { try { renderEvalTab(); } catch (e) { console.error(e); } }, 500);
+    }
+    window.scheduleEvalTabRefresh = scheduleEvalTabRefresh;
+    (function wrapSwitchTabForEvalMap() {
+        const orig = window.switchTab;
+        if (typeof orig !== 'function' || orig.__evalMapWrapped) return;
+        const w = function (id) {
+            if (id !== 'tab-eval') restoreEvalMap();
+            return orig.apply(this, arguments);
+        };
+        w.__evalMapWrapped = true;
+        window.switchTab = w;
+    })();
+    function enterEvalTabWithMap() {
+        const slot = document.getElementById('evalMapSlot');
+        const on = evalMapPrefOn() && !!currentEvalBuilding();
+        if (slot) slot.hidden = !on;
+        if (on) embedEvalMap(); else { restoreEvalMap(); syncEvalMapHead(); }
+    }
+
+    // --- 평가 탭: SAFETY357 화면(번들 그대로, 점수는 번들 안 safetymanExe 한 곳) ---
+    let s357Route = '/';
+    let s357Seq = 0;
+    let s357SaveTimer = 0;
+    function s357Ready() { return !!(window.BSA && window.BSA.s357 && typeof window.BSA.s357.mount === 'function'); }
+    function loadS357() {
+        if (s357Ready()) return Promise.resolve();
+        if (loadS357._p) return loadS357._p;
+        loadS357._p = new Promise((res, rej) => {
+            const s = document.createElement('script');
+            s.src = 'vendor/safety357/safety357.js?v=' + encodeURIComponent(window.BSA_APP_VERSION || '');
+            s.onload = () => res();
+            s.onerror = () => { loadS357._p = null; rej(new Error('SAFETY357 불러오기 실패')); };
+            document.head.appendChild(s);
+        });
+        return loadS357._p;
+    }
+    function s357Calc(bldg) {
+        const P = window.BSA && window.BSA.s357Prefill;
+        if (!P) return null;
+        return P.computeAuto({ bldg, state, floors: evalPlanFloors(bldg), E: evalUnitApi(), S: window.BSA.safetymanExport, MC: window.BSA.memberCount, EM: emApi(), memberName: memberNameOut });
+    }
+    window.s357Calc = s357Calc;
+    function s357Strip(project, bid) {
+        const strip = JSON.parse(JSON.stringify(project || {}));
+        (strip.buildings || []).forEach((x) => {
+            if (x && x.imageDataUrl) {
+                try { localStorage.setItem('bsa.s357img.' + bid + '.' + x.id, x.imageDataUrl); } catch (_e) { /* 용량 */ }
+                delete x.imageDataUrl;
+            }
+        });
+        return strip;
+    }
+    async function mountS357() {
+        const host = document.getElementById('evalS357Host');
+        const bldg = currentEvalBuilding();
+        const P = window.BSA && window.BSA.s357Prefill;
+        if (!host) return;
+        if (!bldg || !emPlanReady(bldg) || !P) { host.hidden = true; return; }
+        host.hidden = false;
+        try { await loadS357(); } catch (_e) { host.textContent = 'SAFETY357 화면을 불러오지 못했습니다. 인터넷 연결 후 평가 탭을 다시 여세요.'; return; }
+        if (currentEvalBuilding() !== bldg) return;
+        const F = window.BSA.s357.factory;
+        const saved = bldg.evalSafetyman || {};
+        const r = P.merge(saved.project, saved.auto, s357Calc(bldg), F);
+        const bid = bldg.id;
+        (r.project.buildings || []).forEach((x) => {
+            if (x && !x.imageDataUrl) { try { const im = localStorage.getItem('bsa.s357img.' + bid + '.' + x.id); if (im) x.imageDataUrl = im; } catch (_e) { /* ignore */ } }
+        });
+        const persist = (project) => {
+            const b = currentEvalBuilding();
+            if (!b || b.id !== bid) return;
+            const strip = s357Strip(project, bid);
+            const prev = b.evalSafetyman || {};
+            if (JSON.stringify(strip) === JSON.stringify(prev.project || null) && JSON.stringify(r.auto) === JSON.stringify(prev.auto || null)) return;
+            b.evalSafetyman = { project: strip, auto: r.auto, updatedAt: Date.now() };
+            clearTimeout(s357SaveTimer);
+            s357SaveTimer = setTimeout(() => {
+                if (typeof markBuildingMetaDirty === 'function') markBuildingMetaDirty(b);
+                if (typeof saveStateToLocalStorage === 'function') saveStateToLocalStorage();
+                if (typeof scheduleSyncToFirebase === 'function') scheduleSyncToFirebase();
+            }, 800);
+        };
+        s357Seq += 1;
+        window.BSA.s357.mount(host, { key: bid + ':' + s357Seq, start: s357Route, bridge: { load: () => r.project, save: persist, onRoute: (p) => { s357Route = p; } } });
+    }
+    window.mountS357 = mountS357;
 
     function syncMemberGbOverlay(entries) {
         const list = Array.isArray(entries) ? entries : [];
@@ -29933,7 +30218,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
     function refreshCanvasAfterStylePanelToggle() {
         requestAnimationFrame(() => {
-            if (state.currentTab === 'tab-map' && typeof resizeCanvas === 'function') {
+            if ((state.currentTab === 'tab-map' || window.__bsaEvalMapOn === true) && typeof resizeCanvas === 'function') {
                 resizeCanvas();
                 if (typeof drawCanvas === 'function') drawCanvas();
             }
@@ -30696,6 +30981,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             if (el) el.textContent = euLabel;
         });
         syncDefectMergeButtons();
+        if (typeof syncEvalMemberBar === 'function') syncEvalMemberBar();
         // 결함목록: 선택됨은 바깥 고정 칸 — 본 목록 scrollTop은 선택 변경으로 움직이지 않음
         // scrollToSelection 플래그는 호환용(렌더러가 목록 점프에 쓰지 않음)
         if (typeof renderDefectListPanel === 'function') {
@@ -32729,7 +33015,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
         window.addEventListener('touchmove', (e) => {
             // 결함위치도가 아니거나, 도면 밖에서 시작한 터치 → 스크롤 잠금 금지
-            if (window.state && window.state.currentTab !== 'tab-map') return;
+            if (window.state && (window.state.currentTab !== 'tab-map' && window.__bsaEvalMapOn !== true)) return;
             if (!mapTouchStartedOnCanvas) return;
             if (isPinching && e.touches.length >= 2) {
                 if (e.cancelable) e.preventDefault();
@@ -32800,7 +33086,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (!document._mapOutsideScrollUnlockBound) {
             document._mapOutsideScrollUnlockBound = true;
             document.addEventListener('touchstart', (e) => {
-                if (window.state && window.state.currentTab !== 'tab-map') return;
+                if (window.state && (window.state.currentTab !== 'tab-map' && window.__bsaEvalMapOn !== true)) return;
                 const t = e.target;
                 if (t && typeof t.closest === 'function' && t.closest('#canvasContainer, #planCanvas')) return;
                 mapTouchStartedOnCanvas = false;
@@ -32869,7 +33155,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         }
 
         const canvasArea = document.getElementById('canvasContainer');
-        const onMapTab = window.state.currentTab === 'tab-map';
+        const onMapTab = (window.state.currentTab === 'tab-map' || window.__bsaEvalMapOn === true);
         if (onMapTab && canvasArea) {
             const rect = canvasArea.getBoundingClientRect();
             if (rect.width >= 40 && rect.height >= 40) {
@@ -35522,6 +35808,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (mode === 'MEMO' && !readMemoShowPref()) setMemoShow(true);
         if (mode !== 'MEMO' && mode !== 'COUNT') memoTap = null;
         ['btnModeCount', 'mobileBtnModeCount'].forEach((id) => { const b = document.getElementById(id); if (b) b.classList.toggle('active', mode === 'COUNT'); });
+        if (typeof syncEvalMemberBar === 'function') syncEvalMemberBar();
+        if (window.__bsaEvalMapOn === true && typeof syncEvalMapHead === 'function') syncEvalMapHead();
         syncMemberCountBar();
         syncMemberCountOverlay();
         syncDrawingMemoBar();
@@ -37844,7 +38132,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             }
             return;
         }
-        if (window.state.currentTab !== 'tab-map') return;
+        if ((window.state.currentTab !== 'tab-map' && window.__bsaEvalMapOn !== true)) return;
         // Delete/Backspace: 핀 클릭→수정창이 열린 상태에서도 삭제 (기존엔 모달 열리면 무시됨)
         if ((e.key === 'Delete' || e.key === 'Backspace') && !typing) {
             e.preventDefault();
@@ -50468,7 +50756,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             const next = window.BSA.performance.cycleMode();
             const label = window.BSA.performance.getModeLabel(next);
             window.showToast?.('성능 모드: ' + label, 'info');
-            if (state.currentTab === 'tab-map') {
+            if ((state.currentTab === 'tab-map' || window.__bsaEvalMapOn === true)) {
                 if (typeof resizeCanvas === 'function') resizeCanvas();
                 drawCanvas({ immediate: true });
             } else if (state.currentTab === 'tab-ndt') {
@@ -50496,7 +50784,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     n > 0 ? `PDF 캐시 ${n}건을 지웠습니다.` : '지울 PDF 캐시가 없습니다.',
                     n > 0 ? 'success' : 'info'
                 );
-                if (window.state.currentTab === 'tab-map' && window.state.currentFloor && typeof loadFloorDrawing === 'function') {
+                if ((window.state.currentTab === 'tab-map' || window.__bsaEvalMapOn === true) && window.state.currentFloor && typeof loadFloorDrawing === 'function') {
                     loadFloorDrawing(window.state.currentFloor, { preserveView: true });
                 }
             } catch (e) {
@@ -56598,7 +56886,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 window.showToast(allOk ? '오프라인 준비 완료'
                     : `일부만 받았습니다${errMsg ? ` (${errMsg})` : ''}. 인터넷 확인 후 새로 받기를 눌러 주세요.`,
                 allOk ? 'success' : 'warning', 5000);
-                if (state.currentTab === 'tab-map' && typeof drawCanvas === 'function') drawCanvas();
+                if ((state.currentTab === 'tab-map' || window.__bsaEvalMapOn === true) && typeof drawCanvas === 'function') drawCanvas();
             } finally {
                 setBusy(false);
                 refresh();
@@ -59478,7 +59766,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 saveStateToLocalStorage();
                 _suppressSyncOnSave = false;
             }
-            if (state.currentTab === 'tab-map' && state.currentBuildingId && state.currentFloor) {
+            if ((state.currentTab === 'tab-map' || window.__bsaEvalMapOn === true) && state.currentBuildingId && state.currentFloor) {
                 refreshCurrentBuildingFromState();
                 if (typeof applyBuildingLocationMapLegend === 'function' && state.currentBuilding) {
                     applyBuildingLocationMapLegend(state.currentBuilding);
@@ -61622,7 +61910,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const mapBox = document.getElementById('canvasContainer');
         if (mapBox) {
             const ro = new ResizeObserver(() => {
-                if (window.state && window.state.currentTab === 'tab-map') resizeCanvas();
+                if (window.state && (window.state.currentTab === 'tab-map' || window.__bsaEvalMapOn === true)) resizeCanvas();
             });
             ro.observe(mapBox);
         }
@@ -61646,7 +61934,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             if (typeof window.closeAllMobileCanvasSheets === 'function') window.closeAllMobileCanvasSheets();
             resizeCanvas();
             if (typeof resizeNdtCanvas === 'function') resizeNdtCanvas();
-            if (window.state.currentTab === 'tab-map' && typeof shouldAutoFitMapView === 'function' && shouldAutoFitMapView()) {
+            if ((window.state.currentTab === 'tab-map' || window.__bsaEvalMapOn === true) && typeof shouldAutoFitMapView === 'function' && shouldAutoFitMapView()) {
                 fitToScreen();
             } else if (window.state.currentTab === 'tab-ndt' && typeof shouldAutoFitNdtView === 'function' && shouldAutoFitNdtView()) {
                 window.fitNdtCanvas();

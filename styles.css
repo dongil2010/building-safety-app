@@ -16885,3 +16885,29 @@ html.layout-mobile .home-update-btn { width: 2.5rem; padding: 0; justify-content
 .map-count-title, .map-count-sep { font-weight: 800; font-size: 0.85rem; color: #334155; padding: 0 4px; }
 .map-count-hint { font-size: 0.75rem; color: #64748b; }
 @media (max-width: 700px) { .map-count-hint { display: none; } .map-count-bar button { padding: 6px 8px; } }
+
+/* 2026-10-13 평가 부재 바(도면) — G/B 고르기와 같은 무지개 테두리 */
+.map-eval-member-bar { position: absolute; left: 8px; right: 8px; bottom: 56px; z-index: 12; display: flex; flex-wrap: wrap; gap: 4px; align-items: center;
+    background: rgba(255,255,255,0.96); border-radius: 10px; padding: 6px 8px; box-shadow: 0 2px 10px rgba(15,23,42,0.25); font-size: 0.85rem; }
+.map-eval-member-bar[hidden] { display: none; }
+.map-eval-member-title { font-weight: 800; margin-right: 4px; }
+.map-eval-member-btn { border: 2px solid transparent; border-radius: 8px; padding: 5px 9px; min-height: 36px; font-weight: 800; cursor: pointer; color: #0f172a;
+    background: linear-gradient(#fff, #fff) padding-box, linear-gradient(90deg, #ff0000, #ffff00, #00ff00, #00ffff, #0040ff, #ff00ff) border-box; }
+.map-eval-member-btn small { opacity: 0.55; font-weight: 700; }
+.map-eval-member-btn i { opacity: 0.5; font-style: normal; font-weight: 700; }
+.map-eval-member-btn.is-guess { opacity: 0.6; }
+.map-eval-member-btn.active { background: linear-gradient(var(--em-color, #0f172a), var(--em-color, #0f172a)) padding-box, linear-gradient(90deg, #ff0000, #ffff00, #00ff00, #00ffff, #0040ff, #ff00ff) border-box; color: #fff; opacity: 1; }
+.map-eval-member-clear { background: #f1f5f9; border-color: #cbd5e1; }
+.map-eval-member-warn { color: #b45309; font-weight: 800; }
+.map-eval-member-hint { color: #64748b; font-size: 0.75rem; }
+/* 평가 탭 안 도면(결함위치도 화면을 옮겨 씀) */
+#tab-eval { flex-direction: column; overflow: auto; }
+.eval-map-head { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 0.6rem 1rem 0; }
+.eval-map-head .eval-map-floor { width: auto; min-width: 7rem; }
+.eval-map-slot { position: relative; display: flex; height: min(72vh, 760px); min-height: 380px; margin: 6px 1rem 0; flex: 0 0 auto; }
+.eval-map-slot[hidden] { display: none; }
+.eval-map-slot > #tab-map { display: flex !important; content-visibility: visible !important; flex: 1 1 auto; min-height: 0; height: 100%; width: 100%; }
+.eval-map-slot > #tab-map .inspect-layout { height: 100%; min-height: 0; flex: 1 1 auto; }
+@media (max-width: 900px) { .eval-map-slot > #tab-map .inspect-sidebar-left { display: none; } }
+.eval-s357-host { display: block; margin: 0 1rem 3rem; max-width: 1400px; }
+.eval-s357-host[hidden] { display: none; }

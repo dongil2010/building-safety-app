@@ -25,7 +25,9 @@
         // 상태평가용 평가단위 설정(단위 개수·층별 통째/나누기) — 2026-10-13
         'evalUnitPlan',
         // 평가 탭 입력표(평가단위 × 부재 값, 기울기) — 2026-10-13
-        'evalInputs'
+        'evalInputs',
+        // 평가 탭 SAFETY357 입력(평가단위 = 건물) — 2026-10-13
+        'evalSafetyman'
     ];
 
     function metaUpdatedAt(bldg) {
