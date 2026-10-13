@@ -24483,11 +24483,14 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 <button type="button" class="btn btn-sm btn-outline eval-plan-close">닫기</button></div>
             <div class="eval-plan-count">평가단위 개수 <input type="number" min="0" max="50" step="1" class="form-control eval-plan-n" value="${plan.units.length}" data-num-keypad>
                 <button type="button" class="btn btn-sm btn-primary eval-plan-apply-n">적용</button>
-                <span class="eval-plan-sub">0이면 지금처럼(층마다 평가)</span></div>
+                <span class="eval-plan-sub">0이면 지금처럼(층마다 평가)</span>
+                ${plan.units.length ? '<button type="button" class="btn btn-sm btn-outline eval-plan-safetyman" title="KISTEC SafetyMan 입력 순서로 정리한 엑셀(등급 계산 없음)">SafetyMan용 엑셀</button>' : ''}</div>
             ${plan.units.length ? `<table class="eval-plan-table"><thead><tr><th>층</th><th>평가단위</th><th>내용</th></tr></thead><tbody>${rows}</tbody></table>
             <div class="eval-plan-sum"><b>묶음 요약</b><ul>${sumHtml}</ul>${warn.length ? `<div class="eval-plan-warn">${warn.join('<br>')}</div>` : ''}</div>` : ''}
         </div>`;
         ov.querySelector('.eval-plan-close').onclick = () => { ov.hidden = true; };
+        const smBtn = ov.querySelector('.eval-plan-safetyman');
+        if (smBtn) smBtn.onclick = () => downloadSafetyManExcel(bldg);
         ov.querySelector('.eval-plan-apply-n').onclick = async () => {
             const n = parseInt(ov.querySelector('.eval-plan-n').value, 10) || 0;
             if (n < plan.units.length) {
@@ -24510,6 +24513,38 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             };
         });
     }
+
+    /** 평가단위 → SafetyMan 입력용 엑셀(표본층 시트 + 근거 + 참고). 등급 계산은 하지 않는다 */
+    function downloadSafetyManExcel(bldg) {
+        const api = evalUnitApi();
+        const sm = window.BSA && window.BSA.safetymanExport;
+        if (typeof XLSX === 'undefined' || !sm || !api) {
+            window.showToast('엑셀 라이브러리를 불러오지 못했습니다. 인터넷 연결을 확인 후 다시 시도해주세요.', 'error', 5000);
+            return;
+        }
+        const floors = (bldg.floorsList || []).filter((f) => f && f.floorCode).map((f) => ({
+            floorCode: f.floorCode, floorLabel: f.floorLabel || f.floorCode, floorKey: `${bldg.id}_${f.floorCode}`
+        }));
+        const d = new Date();
+        const pad = (n) => String(n).padStart(2, '0');
+        const dateText = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+        try {
+            const sheets = sm.buildSheets({ bldg, state, floors, evalUnits: api, memberName: memberNameOut, dateText });
+            const wb = XLSX.utils.book_new();
+            sheets.forEach((sh) => {
+                const ws = XLSX.utils.aoa_to_sheet(sh.aoa);
+                if (sh.cols) ws['!cols'] = sh.cols.map((w) => ({ wch: w }));
+                XLSX.utils.book_append_sheet(wb, ws, sh.name);
+            });
+            const name = String(bldg.name || bldg.buildingName || '건물').replace(/[\\/:*?"<>|]/g, '_');
+            XLSX.writeFile(wb, `${name}_SafetyMan용_${dateText}.xlsx`);
+            window.showToast(`SafetyMan용 엑셀을 만들었습니다 (표본층 ${sheets.length - 3}개).`, 'success', 2800);
+        } catch (e) {
+            console.error('SafetyMan 엑셀 실패', e);
+            window.showToast('SafetyMan용 엑셀을 만들지 못했습니다: ' + (e && e.message ? e.message : e), 'error', 5000);
+        }
+    }
+    window.downloadSafetyManExcel = downloadSafetyManExcel;
 
     /** 도면 위 바: 단위별 건수(누르면 그 단위만 진하게 — 확인용) */
     function syncEvalUnitBar() {
