@@ -115,6 +115,21 @@ assert.deepStrictEqual(P.check(r3.project), []);
     assert.strictEqual(P.WARN_TEXT, '부재 수가 결함 수보다 적어요');
 }
 
+// 지상·지하 층수: 건물 전체 층 목록에서, 비어 있을 때만
+assert.strictEqual(calc.floorsAbove, 1); assert.strictEqual(calc.floorsBelow, 0);
+assert.strictEqual(r.project.buildings[0].floorsAbove, 1);
+assert.strictEqual(r.project.buildings[0].floorsBelow, 0);
+{
+    const fl5 = ['B1', '1F', '2F', '3F', '4F', 'RF'].map((c) => ({ floorCode: c, floorLabel: c, floorKey: 'b_' + c }));
+    const c5 = P.computeAuto({ bldg, state: st, floors: fl5, E, S, MC, EM });
+    assert.deepStrictEqual([c5.floorsAbove, c5.floorsBelow], [4, 1], 'RF(숫자 없음)는 세지 않음');
+    const pj = JSON.parse(JSON.stringify(r.project));
+    pj.buildings[0].floorsAbove = 7; pj.buildings[0].floorsBelow = '';
+    const m5 = P.merge(pj, r.auto, c5, Fac).project.buildings[0];
+    assert.strictEqual(m5.floorsAbove, 7, '사용자 값 유지');
+    assert.strictEqual(m5.floorsBelow, 1, '빈칸만 채움');
+}
+
 // 화면 연결: 스크립트 순서, 번들, 템플릿
 const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
 const at = (s) => html.indexOf(s);
@@ -124,6 +139,7 @@ assert.ok(fs.existsSync(path.join(root, 'vendor', 'safety357', 'safety357.js')))
 assert.ok(fs.existsSync(path.join(root, 'vendor', 'eval', 'templates', 'eval-template.xlsx')));
 const app = fs.readFileSync(path.join(root, 'app.js'), 'utf8');
 assert.ok(app.includes("'evalSafetyman'"));
+assert.ok(app.includes('function openMcDotMenu') && app.includes('function mcOffZoneDots') && app.includes('map-count-zone-badge'));
 assert.ok(fs.readFileSync(path.join(root, 'js', 'core', 'building-meta-merge.js'), 'utf8').includes("'evalSafetyman'"));
 assert.ok(!fs.existsSync(path.join(root, 'vendor', 'safety357', 'templates')));
 assert.ok(fs.readFileSync(path.join(root, 'vendor', 'safety357', 'safety357.js'), 'utf8').includes('vendor/eval/templates/eval-template.xlsx'));

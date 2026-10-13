@@ -102,7 +102,14 @@
             });
             units.push(uinfo);
         });
-        return { auto: auto, units: units, issues: issues };
+        // 건물 전체 지상·지하 층수(층 이름에 숫자가 있는 층만: B1/지하1 → 지하, 1F → 지상) — 층위치 가중치 r 용
+        var above = 0, below = 0;
+        floors.forEach(function (f) {
+            var c = txt(f.floorCode).toUpperCase();
+            if (/^(B|지하)\s*\d+/.test(c)) below++;
+            else if (/\d/.test(c)) above++;
+        });
+        return { auto: auto, units: units, issues: issues, floorsAbove: above, floorsBelow: below };
     }
 
     function detailOf(sf, mt, F) {
@@ -132,6 +139,9 @@
         calc.units.forEach(function (u) {
             var b = project.buildings.find(function (x) { return x.id === u.id; });
             if (!b) { b = F.createEmptyBuilding(u.name); b.id = u.id; project.buildings.push(b); }
+            // 지상·지하 층수: 비어 있을 때만 건물 전체 층수로(사용자가 넣은 값은 그대로)
+            if ((b.floorsAbove === '' || b.floorsAbove == null) && calc.floorsAbove > 0) b.floorsAbove = calc.floorsAbove;
+            if ((b.floorsBelow === '' || b.floorsBelow == null) && (calc.floorsAbove > 0 || calc.floorsBelow > 0)) b.floorsBelow = calc.floorsBelow || 0;
             b.sampleFloors = b.sampleFloors || [];
             u.floors.forEach(function (f) {
                 if (b.sampleFloors.some(function (x) { return x.id === f.id; })) return;

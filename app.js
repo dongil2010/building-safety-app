@@ -24525,6 +24525,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 });
             }
         } catch (e) { console.warn('평가 확인', e); }
+        try {
+            const offs = floors.map((f) => ({ f, off: mcOffZoneDots(bldg, f.floorCode, f.floorKey) })).filter((x) => Object.keys(x.off).length);
+            offs.forEach((x) => warn.push(`${esc(x.f.floorLabel)} 부재 수 점: ${Object.keys(x.off).map((n) => `${Number(n) ? '구역 ' + n : '구역 없음'} ${x.off[n]}개`).join(', ')} — 이 층에 그 구역이 없어 집계 안 됨`));
+        } catch (e) { console.warn('부재 수 구역 확인', e); }
         if (sum.unassigned.length) warn.push(`번호 없는 결함: ${sum.unassigned.map((f) => `${esc(f.floorLabel)} ${f.count}건`).join(', ')}`);
         // 3) 입력표(평가단위 × 부재)
         const comp = sm.unitComputed(bldg, state, floors, api, memberNameOut, window.BSA && window.BSA.memberCount);
@@ -25036,14 +25040,50 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         syncMemberCountOverlay();
         syncMemberCountBar();
     }
-    /** 이 층이 번호로 나눈 층이면 고를 수 있는 번호들 */
+    const MC_ZONE_COLORS = ['#2563eb', '#dc2626', '#16a34a', '#d97706', '#7c3aed', '#0891b2', '#db2777', '#4b5563', '#0d9488'];
+    function mcZoneColor(n) { return MC_ZONE_COLORS[(Math.max(1, Number(n) || 1) - 1) % MC_ZONE_COLORS.length]; }
+    /** 나눈 층에 실제로 있는 구역 번호(그 층 구역 목록 → 평가단위 번호). 층 전체·설정 안 함이면 []. */
+    function mcFloorZones(bldg, floorCode, floorKey) {
+        const api = evalUnitApi();
+        if (!api || !bldg) return [];
+        const fm = api.floorMode(bldg, floorCode);
+        if (!fm || fm.mode !== 'split') return [];
+        const units = api.planOf(bldg).units;
+        const noOf = {};
+        units.forEach((u) => { noOf[u.id] = Number(u.no); });
+        const set = new Set();
+        (api.listFor(state, floorKey) || []).forEach((z) => { const n = noOf[api.zoneUnitId(bldg, z)]; if (n) set.add(n); });
+        return Array.from(set).sort((a, b) => a - b);
+    }
+    /** 이 층이 번호로 나눈 층이면 고를 수 있는 번호들(그 층에 있는 구역만; 하나도 없으면 전체 번호) */
     function mcZoneChoices() {
         const api = evalUnitApi();
         const bldg = currentEvalBuilding();
         if (!api || !bldg) return [];
         const fm = api.floorMode(bldg, state.currentFloor);
         if (!fm || fm.mode !== 'split') return [];
-        return api.planOf(bldg).units.map((u) => Number(u.no));
+        const here = mcFloorZones(bldg, state.currentFloor, currentMemoFloorKey());
+        return here.length ? here : api.planOf(bldg).units.map((u) => Number(u.no));
+    }
+    /** 나눈 층에서 그 층에 없는 구역(또는 구역 없음)으로 찍힌 점 → { no: 개수 } (집계 안 됨) */
+    function mcOffZoneDots(bldg, floorCode, floorKey) {
+        const api = evalUnitApi();
+        const mc = mcApi();
+        if (!api || !mc || !bldg) return {};
+        const fm = api.floorMode(bldg, floorCode);
+        if (!fm || fm.mode !== 'split') return {};
+        const here = mcFloorZones(bldg, floorCode, floorKey);
+        const out = {};
+        mc.listFor(state, floorKey).forEach((d) => {
+            const n = Number(d.zoneNo) || 0;
+            if (!n || !here.includes(n)) out[n] = (out[n] || 0) + 1;
+        });
+        return out;
+    }
+    window.mcOffZoneDots = mcOffZoneDots;
+    function setMcZone(n) {
+        mcZoneNo = Number(n) || 0;
+        syncMemberCountBar();
     }
     function commitMemberCountChange(floorKey) {
         if (floorKey && typeof markFloorKeyDirty === 'function') markFloorKeyDirty(floorKey);
@@ -25060,9 +25100,11 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (!api || !floorKey || !state.bgImage) return;
         const hit = api.hitTest(api.listFor(state, floorKey), sx, sy, 14, memoImgToScreen);
         if (hit) {
-            const rec = api.remove(state, floorKey, hit.id);
-            if (rec) mcUndo.push({ op: 'remove', floorKey, rec });
+            // 점을 누르면 바로 지우지 않고 작은 메뉴(지우기 / 구역 바꾸기)
+            openMcDotMenu(floorKey, hit.id);
+            return;
         } else {
+            closeMcDotMenu();
             const zones = mcZoneChoices();
             if (zones.length && !zones.includes(mcZoneNo)) mcZoneNo = zones[0];
             const p = memoScreenToImg(sx, sy);
@@ -25077,10 +25119,70 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const last = mcUndo.pop();
         if (!api || !last) { window.showToast('되돌릴 것이 없습니다.', 'info', 1600); return; }
         if (last.op === 'add') api.remove(state, last.floorKey, last.rec.id);
-        else api.add(state, last.floorKey, last.rec.type, last.rec.x, last.rec.y, { id: last.rec.id, zoneNo: last.rec.zoneNo });
+        else if (last.op === 'zone') {
+            const d = api.listFor(state, last.floorKey).find((x) => x.id === last.id);
+            if (d) { if (last.prev) d.zoneNo = last.prev; else delete d.zoneNo; d.updatedAt = Date.now(); }
+        } else api.add(state, last.floorKey, last.rec.type, last.rec.x, last.rec.y, { id: last.rec.id, zoneNo: last.rec.zoneNo });
         commitMemberCountChange(last.floorKey);
     }
     window.undoMemberCount = undoMemberCount;
+    function closeMcDotMenu() {
+        const m = document.getElementById('mapCountDotMenu');
+        if (m) m.remove();
+    }
+    /** 점 메뉴: 지우기 · 구역 바꾸기(그 층에 있는 구역 번호) */
+    function openMcDotMenu(floorKey, id) {
+        const api = mcApi();
+        const canvas = state.canvas || document.getElementById('planCanvas');
+        const host = canvas && canvas.parentElement;
+        if (!api || !host) return;
+        const d = api.listFor(state, floorKey).find((x) => x.id === id);
+        if (!d) return;
+        closeMcDotMenu();
+        const esc = (t) => String(t == null ? '' : t).replace(/[&<>"]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[ch]);
+        const zones = mcZoneChoices();
+        const p = memoImgToScreen(d);
+        const m = document.createElement('div');
+        m.id = 'mapCountDotMenu';
+        m.className = 'map-count-dot-menu';
+        m.innerHTML = `<span class="map-count-dot-menu-title">${esc(d.type)}${d.zoneNo ? ' · 구역 ' + d.zoneNo : ''}</span>`
+            + `<button type="button" data-mc-menu="del" class="is-danger">지우기</button>`
+            + (zones.length ? `<span class="map-count-dot-menu-sep">구역 바꾸기</span>` + zones.map((n) => `<button type="button" data-mc-menu-zone="${n}" class="map-count-zone${n === Number(d.zoneNo) ? ' active' : ''}" style="--zone-color:${mcZoneColor(n)}">${n}</button>`).join('') : '')
+            + `<button type="button" data-mc-menu="close" aria-label="닫기">✕</button>`;
+        ['mousedown', 'touchstart', 'pointerdown'].forEach((t) => m.addEventListener(t, (e) => e.stopPropagation(), { passive: true }));
+        m.addEventListener('click', (e) => {
+            const b = e.target.closest('button');
+            if (!b) return;
+            e.preventDefault();
+            e.stopPropagation();
+            if (b.dataset.mcMenu === 'del') {
+                const rec = api.remove(state, floorKey, id);
+                if (rec) mcUndo.push({ op: 'remove', floorKey, rec });
+                closeMcDotMenu();
+                commitMemberCountChange(floorKey);
+            } else if (b.dataset.mcMenuZone) {
+                const n = Number(b.dataset.mcMenuZone);
+                const prev = Number(d.zoneNo) || 0;
+                if (n !== prev) {
+                    d.zoneNo = n;
+                    d.updatedAt = Date.now();
+                    mcUndo.push({ op: 'zone', floorKey, id, prev });
+                }
+                closeMcDotMenu();
+                commitMemberCountChange(floorKey);
+            } else closeMcDotMenu();
+        });
+        host.appendChild(m);
+        const hw = host.clientWidth || 0;
+        const left = Math.max(4, Math.min(canvas.offsetLeft + p.sx + 12, hw - m.offsetWidth - 4));
+        const hh = host.clientHeight || 0;
+        let top = canvas.offsetTop + p.sy + 12;
+        if (hh && top + m.offsetHeight > hh - 72) top = canvas.offsetTop + p.sy - m.offsetHeight - 12;
+        top = Math.max(4, top);
+        m.style.left = `${Math.round(left)}px`;
+        m.style.top = `${Math.round(top)}px`;
+    }
+    window.openMcDotMenu = openMcDotMenu;
     function getMemberCountOverlay() {
         const canvas = state.canvas || document.getElementById('planCanvas');
         const host = canvas && canvas.parentElement;
@@ -25129,6 +25231,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             const label = `${api.SHORT[d.type] || ''}${seq[d.id] || ''}${d.zoneNo ? '·' + d.zoneNo : ''}`;
             if (el.textContent !== label) el.textContent = label;
             el.style.setProperty('--mc-color', api.COLORS[d.type] || '#334155');
+            if (d.zoneNo) { el.classList.add('has-zone'); el.style.setProperty('--zone-color', mcZoneColor(d.zoneNo)); } else el.classList.remove('has-zone');
             el.style.transform = `translate(${Math.round(p.sx)}px, ${Math.round(p.sy)}px) translate(-50%, -50%)`;
             keep.add(d.id);
         });
@@ -25141,7 +25244,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const canvas = state.canvas || document.getElementById('planCanvas');
         const host = canvas && canvas.parentElement;
         let bar = document.getElementById('mapCountBar');
-        if (state.mode !== 'COUNT' || !api || !host) { if (bar) bar.hidden = true; return; }
+        if (state.mode !== 'COUNT' || !api || !host) { if (bar) bar.hidden = true; closeMcDotMenu(); return; }
         if (!bar) {
             bar = document.createElement('div');
             bar.id = 'mapCountBar';
@@ -25151,7 +25254,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 if (!b) return;
                 e.preventDefault();
                 if (b.dataset.mcType) setMcType(b.dataset.mcType);
-                else if (b.dataset.mcZone) { mcZoneNo = Number(b.dataset.mcZone); syncMemberCountBar(); }
+                else if (b.dataset.mcZone) setMcZone(b.dataset.mcZone);
                 else if (b.dataset.mcAct === 'undo') undoMemberCount();
                 else if (b.dataset.mcAct === 'show') setMcShow(!readMcShowPref());
                 else if (b.dataset.mcAct === 'close') setDrawMode('PAN');
@@ -25161,19 +25264,25 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (bar.parentElement !== host) host.appendChild(bar);
         bar.hidden = false;
         const floorKey = currentMemoFloorKey();
-        const counts = api.countsByType(api.listFor(state, floorKey));
+        const all = api.listFor(state, floorKey);
+        const counts = api.countsByType(all);
         const cur = mcType();
         const zones = mcZoneChoices();
         if (zones.length && !zones.includes(mcZoneNo)) mcZoneNo = zones[0];
+        const zc = zones.length ? api.countsByType(all.filter((d) => Number(d.zoneNo) === mcZoneNo)) : null;
         const keyOf = {};
         Object.keys(api.KEYS).forEach((k) => { keyOf[api.KEYS[k]] = k.toUpperCase(); });
-        const html = `<span class="map-count-title">부재 수</span>`
-            + api.TYPES.map((t) => `<button type="button" class="map-count-type${t === cur ? ' active' : ''}" data-mc-type="${t}" style="--mc-color:${api.COLORS[t]}" title="단축키 ${keyOf[t]}">${t} <b>${counts[t] || 0}</b><span class="map-count-key">${keyOf[t]}</span></button>`).join('')
-            + (zones.length ? `<span class="map-count-sep">구역</span>` + zones.map((n) => `<button type="button" class="map-count-zone${n === mcZoneNo ? ' active' : ''}" data-mc-zone="${n}">${n}</button>`).join('') : '')
+        const off = mcOffZoneDots(currentEvalBuilding(), state.currentFloor, floorKey);
+        const offTxt = Object.keys(off).map((n) => `${Number(n) ? '구역 ' + n : '구역 없음'} ${off[n]}개`).join(', ');
+        const html = (zones.length ? `<span class="map-count-zone-badge" style="--zone-color:${mcZoneColor(mcZoneNo)}" title="숫자키 1~9로 바꾸기">구역 <b>${mcZoneNo}</b></span>` : '')
+            + `<span class="map-count-title">부재 수</span>`
+            + api.TYPES.map((t) => `<button type="button" class="map-count-type${t === cur ? ' active' : ''}" data-mc-type="${t}" style="--mc-color:${api.COLORS[t]}" title="단축키 ${keyOf[t]}${zc ? ' · 지금 구역 / 층 전체' : ''}">${t} <b>${zc ? `${zc[t] || 0}<small>/${counts[t] || 0}</small>` : (counts[t] || 0)}</b><span class="map-count-key">${keyOf[t]}</span></button>`).join('')
+            + (zones.length > 1 ? `<span class="map-count-sep">구역</span>` + zones.map((n) => `<button type="button" class="map-count-zone${n === mcZoneNo ? ' active' : ''}" data-mc-zone="${n}" style="--zone-color:${mcZoneColor(n)}" title="숫자키 ${n}">${n}</button>`).join('') : '')
+            + (offTxt ? `<span class="map-count-warn">⚠ 이 층에 없는 구역의 점: ${offTxt} — 집계 안 됨(점을 눌러 구역 바꾸기)</span>` : '')
             + `<button type="button" data-mc-act="undo" title="되돌리기 (Ctrl+Z)">↶ 되돌리기</button>`
             + `<button type="button" data-mc-act="show" class="${readMcShowPref() ? 'active' : ''}" title="세기 모드가 아닐 때도 점 보이기">점 보이기</button>`
             + `<button type="button" data-mc-act="close">닫기</button>`
-            + `<span class="map-count-hint">도면을 누르면 점, 점을 다시 누르면 지움 · 끌면 도면 이동</span>`;
+            + `<span class="map-count-hint">도면을 누르면 점 · 점을 누르면 지우기/구역 바꾸기 · 숫자키로 구역 · 끌면 도면 이동</span>`;
         if (bar._h !== html) { bar._h = html; bar.innerHTML = html; }
         placeMemberCountBar(bar, host);
     }
@@ -25215,7 +25324,12 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const k = String(e.key || '').toLowerCase();
         if ((e.ctrlKey || e.metaKey) && k === 'z') { e.preventDefault(); e.stopPropagation(); undoMemberCount(); return; }
         if (e.ctrlKey || e.metaKey || e.altKey) return;
-        if (k === 'escape') { e.preventDefault(); setDrawMode('PAN'); return; }
+        if (k === 'escape') { e.preventDefault(); if (document.getElementById('mapCountDotMenu')) closeMcDotMenu(); else setDrawMode('PAN'); return; }
+        if (/^[1-9]$/.test(k)) {
+            const zs = mcZoneChoices();
+            if (zs.includes(Number(k))) { e.preventDefault(); e.stopPropagation(); setMcZone(Number(k)); }
+            return;
+        }
         if (api.KEYS[k]) { e.preventDefault(); e.stopPropagation(); setMcType(api.KEYS[k]); }
     }, true);
 

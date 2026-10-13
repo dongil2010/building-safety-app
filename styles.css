@@ -16911,3 +16911,19 @@ html.layout-mobile .home-update-btn { width: 2.5rem; padding: 0; justify-content
 @media (max-width: 900px) { .eval-map-slot > #tab-map .inspect-sidebar-left { display: none; } }
 .eval-s357-host { display: block; margin: 0 1rem 3rem; max-width: 1400px; }
 .eval-s357-host[hidden] { display: none; }
+
+/* 2026-10-13 부재 수: 구역 배지 · 구역 테두리 · 점 메뉴 */
+.map-count-zone-badge { display: inline-flex; align-items: center; gap: 4px; padding: 4px 12px; border-radius: 10px; background: var(--zone-color, #2563eb); color: #fff; font-weight: 800; font-size: 1rem; min-height: 36px; box-shadow: 0 0 0 2px #fff inset; }
+.map-count-zone-badge b { font-size: 1.35rem; line-height: 1; }
+.map-count-bar .map-count-zone { border: 2px solid var(--zone-color, #cbd5e1); min-width: 36px; }
+.map-count-bar .map-count-zone.active { background: var(--zone-color, #0f172a); border-color: var(--zone-color, #0f172a); color: #fff; }
+.map-count-bar .map-count-type b small { font-weight: 600; opacity: 0.7; font-size: 0.75em; }
+.map-count-warn { flex-basis: 100%; color: #b45309; background: #fffbeb; border: 1px solid #fcd34d; border-radius: 8px; padding: 4px 8px; font-weight: 700; font-size: 0.8rem; }
+.map-count-dot.has-zone { box-shadow: 0 0 0 3px var(--zone-color), 0 0 0 4px #fff; }
+.map-count-dot-menu { position: absolute; z-index: 40; display: flex; flex-wrap: wrap; gap: 4px; align-items: center; max-width: 280px; padding: 6px; background: #fff; border: 1px solid #cbd5e1; border-radius: 10px; box-shadow: 0 8px 24px rgba(15,23,42,.18); }
+.map-count-dot-menu button { border: 1px solid #cbd5e1; background: #fff; border-radius: 8px; padding: 6px 10px; font-weight: 700; font-size: 0.85rem; min-height: 36px; cursor: pointer; }
+.map-count-dot-menu button.is-danger { color: #b91c1c; border-color: #fca5a5; }
+.map-count-dot-menu .map-count-zone { border: 2px solid var(--zone-color); min-width: 36px; }
+.map-count-dot-menu .map-count-zone.active { background: var(--zone-color); color: #fff; }
+.map-count-dot-menu-title, .map-count-dot-menu-sep { font-weight: 800; font-size: 0.8rem; color: #334155; padding: 0 4px; }
+.map-count-dot-menu-sep { flex-basis: 100%; }
