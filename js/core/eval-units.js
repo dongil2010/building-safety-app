@@ -46,7 +46,10 @@
 
     function findUnit(st, floorKey, id) {
         if (!id) return null;
-        return listFor(st, floorKey).find(function (u) { return u.id === id; }) || null;
+        var list = listFor(st, floorKey);
+        // 합쳐진(겹친) 구역의 옛 id는 남은 구역의 aliases로 찾는다(2026-10-13: 다른 기기 결함은 옛 id를 들고 있음)
+        return list.find(function (u) { return u.id === id; })
+            || list.find(function (u) { return Array.isArray(u.aliases) && u.aliases.indexOf(id) >= 0; }) || null;
     }
 
     function nextDefaultName(st, floorKey) {
@@ -121,25 +124,62 @@
         return moved;
     }
 
-    function assignOne(d, unitId, now) {
+    /**
+     * 결함 칸 수정 시각 찍기(app touchDefectUpdatedAt와 같은 뜻) — updatedAt만 올리면 sync-merge의
+     * 칸별 병합(fieldAt/contentUpdatedAt)에서 서버의 옛 값이 이겨 지정이 사라졌다(2026-10-13).
+     */
+    function touchFields(d, fields, now) {
+        var t = Number(now) || Date.now();
+        var prevContent = Number(d.contentUpdatedAt) || Number(d.updatedAt) || 0;
+        var c = Math.max(t, (Number(d.contentUpdatedAt) || 0) + 1);
+        if (!d.fieldAt || typeof d.fieldAt !== 'object') {
+            d.fieldAt = {};
+            if (d.contentBaseAt == null) d.contentBaseAt = prevContent;
+        }
+        (fields || []).forEach(function (k) { d.fieldAt[k] = c; });
+        d.fieldAtThrough = c;
+        d.contentUpdatedAt = c;
+        d.updatedAt = Math.max(t, (Number(d.updatedAt) || 0) + 1);
+    }
+
+    function partNoOf(partId) {
+        var m = /^z(\d+)$/.exec(String(partId || ''));
+        return m ? Number(m[1]) : 0;
+    }
+
+    function assignOne(d, unitId, now, partNo) {
         var cur = d.evalUnitId || null;
         var next = unitId || null;
-        if (cur === next) return 0;
+        var pn = next ? (Number(partNo) || 0) : 0;
+        var curPn = Number(d.evalPart) || 0;
+        if (cur === next && curPn === pn) return 0;
         if (next) d.evalUnitId = next; else delete d.evalUnitId;
-        d.updatedAt = Math.max(Number(now) || Date.now(), (Number(d.updatedAt) || 0) + 1);
+        if (pn) d.evalPart = pn; else delete d.evalPart;
+        touchFields(d, ['evalUnitId', 'evalPart'], now);
         return 1;
     }
 
-    /** 결함들을 단위로(unitId null = 미지정). 바뀐 수 */
-    function assign(defects, unitId, now) {
+    /** 결함들을 단위로(unitId null = 미지정). opts.partId = 구역의 부분 id(z3 → evalPart 3). 바뀐 수 */
+    function assign(defects, unitId, now, opts) {
         var n = 0;
-        (defects || []).forEach(function (d) { if (d) n += assignOne(d, unitId, now); });
+        var pn = partNoOf(opts && opts.partId);
+        (defects || []).forEach(function (d) { if (d) n += assignOne(d, unitId, now, pn); });
         return n;
     }
 
     /** 결함의 단위(없거나 지워진 단위면 null = 미지정) */
     function unitOf(st, floorKey, defect) {
-        return defect ? findUnit(st, floorKey, defect.evalUnitId) : null;
+        if (!defect) return null;
+        var u = findUnit(st, floorKey, defect.evalUnitId);
+        if (u) return u;
+        // id로 못 찾으면(다른 기기가 만든 구역 id) 구역 번호로
+        var pn = Number(defect.evalPart) || 0;
+        return pn ? zoneForPart(st, floorKey, 'z' + pn) : null;
+    }
+    /** 결함이 들어 있는 구역 id('' = 미지정) — 출력·평가는 이걸로 */
+    function resolveZoneId(st, floorKey, defect) {
+        var u = unitOf(st, floorKey, defect);
+        return u ? u.id : '';
     }
 
     /** filter: '' 전체 | '__none__' 미지정 | 단위 id */
@@ -174,6 +214,8 @@
             items: listFor(st, floorKey).map(function (u) {
                 var o = { id: u.id, name: u.name, color: u.color, order: Number(u.order) || 0, createdAt: u.createdAt || 0, updatedAt: u.updatedAt || 0 };
                 if (u.parentUnitId) o.parentUnitId = u.parentUnitId;
+                if (u.partId) o.partId = u.partId;
+                if (Array.isArray(u.aliases) && u.aliases.length) o.aliases = u.aliases.slice();
                 return o;
             }),
             deletedIds: ((st && st.deletedEvalUnitIds) || {})[floorKey] || [],
@@ -407,8 +449,14 @@
             pl.items.forEach(function (it) {
                 var want = zoneId(it.n);
                 if (keepBy[it.n]) {
-                    assign((st.defects && st.defects[fk] || []).filter(function (d) { return d && d.evalUnitId === it.z.id; }), keepBy[it.n].id, t);
-                    deleteUnit(st, fk, it.z.id, [], t);
+                    // 같은 번호 구역이 둘(기기마다 만든 것) → 정해진 id(ez_z<n>)를 남기고 다른 쪽 id는 aliases로
+                    var keep = keepBy[it.n], drop = it.z;
+                    if (drop.id === canonicalZoneId(want) && keep.id !== drop.id) { keep = it.z; drop = keepBy[it.n]; keepBy[it.n] = keep; }
+                    keep.aliases = Array.from(new Set((keep.aliases || []).concat([drop.id], drop.aliases || []))).filter(function (x) { return x !== keep.id; });
+                    keep.updatedAt = Math.max(t, (Number(keep.updatedAt) || 0) + 1);
+                    if (!keep.partId) keep.partId = want;
+                    // 결함은 고치지 않는다(옛 id는 aliases로 찾음 — 다른 기기 결함도 같이)
+                    deleteUnit(st, fk, drop.id, [], t);
                     changed = true;
                     return;
                 }
@@ -515,6 +563,8 @@
         return listFor(st, floorKey).find(function (z) { return z.partId === partId; }) || null;
     }
 
+    function canonicalZoneId(partId) { return 'ez_' + partId; }
+
     /** 층에 고른 부분마다 구역이 있게 만든다(새로 만든 구역 수) */
     function ensureZones(st, floorKey, bldg, floorCode, now) {
         var made = 0;
@@ -525,7 +575,10 @@
             var name = part.name;
             var k = 2;
             while (listFor(st, floorKey).some(function (z) { return z.name === name; })) name = part.name + '(' + (k++) + ')';
-            var z = createUnit(st, floorKey, { name: name, now: (Number(now) || Date.now()) + i,
+            // id는 부분마다 정해진 값 — 기기마다 따로 만들어도 같은 구역(2026-10-13)
+            var cid = canonicalZoneId(pid);
+            var dead = ((st.deletedEvalUnitIds || {})[floorKey] || []).indexOf(cid) >= 0;
+            var z = createUnit(st, floorKey, { id: dead ? null : cid, name: name, now: (Number(now) || Date.now()) + i,
                 color: PALETTE[((Number(part.no) || 1) - 1) % PALETTE.length] });
             if (z) { z.partId = pid; made++; }
         });
@@ -600,7 +653,7 @@
     }
 
     var api = {
-        partOf: partOf, addPart: addPart, updatePart: updatePart, removePart: removePart, floorParts: floorParts,
+        partOf: partOf, resolveZoneId: resolveZoneId, canonicalZoneId: canonicalZoneId, touchFields: touchFields, addPart: addPart, updatePart: updatePart, removePart: removePart, floorParts: floorParts,
         setFloorParts: setFloorParts, zoneForPart: zoneForPart, ensureZones: ensureZones, zoneUnitId: zoneUnitId, zoneLabel: zoneLabel,
         migrateLegacy: normalize, normalize: normalize, setUnitLabel: setUnitLabel, unitTitle: unitTitle, zoneId: zoneId, matrix: matrix,
         planOf: planOf,

@@ -31,7 +31,15 @@
         var cur = TYPES.indexOf(d.evalMember) >= 0 ? d.evalMember : '';
         if (cur === next) return 0;
         if (next) d.evalMember = next; else delete d.evalMember;
-        d.updatedAt = Math.max(Number(now) || Date.now(), (Number(d.updatedAt) || 0) + 1);
+        // 칸별 병합에서 이기도록 contentUpdatedAt·fieldAt도(eval-units touchFields와 같음)
+        var t = Number(now) || Date.now();
+        var prevContent = Number(d.contentUpdatedAt) || Number(d.updatedAt) || 0;
+        var c = Math.max(t, (Number(d.contentUpdatedAt) || 0) + 1);
+        if (!d.fieldAt || typeof d.fieldAt !== 'object') { d.fieldAt = {}; if (d.contentBaseAt == null) d.contentBaseAt = prevContent; }
+        d.fieldAt.evalMember = c;
+        d.fieldAtThrough = c;
+        d.contentUpdatedAt = c;
+        d.updatedAt = Math.max(t, (Number(d.updatedAt) || 0) + 1);
         return 1;
     }
     /** type 빈 값 = 확정 해제(추정으로) */

@@ -115,6 +115,8 @@
     function buildSamples(bldg, st, floors, E) {
         var plan = E.planOf(bldg);
         var defectsOf = function (k) { return (((st && st.defects) || {})[k] || []).filter(Boolean); };
+        // 결함의 구역: id → 합쳐진 옛 id(aliases) → 구역 번호(evalPart) 순으로 찾는다
+        var zoneOf = function (k, d) { return typeof E.resolveZoneId === 'function' ? E.resolveZoneId(st, k, d) : (d.evalUnitId || ''); };
         var samples = [];
         var unitIds = {};
         plan.units.forEach(function (u) { unitIds[u.id] = true; });
@@ -130,7 +132,7 @@
                         var part = z.partId ? E.partOf(bldg, z.partId) : null;
                         samples.push({ unitId: u.id, unitLabel: u.name, floorCode: f.floorCode, floorLabel: f.floorLabel, floorKey: f.floorKey,
                             subName: E.zoneLabel(bldg, z), partNote: part ? str(part.note) : '', status: '층 나누기 구역',
-                            defects: defectsOf(f.floorKey).filter(function (d) { return d.evalUnitId === z.id; }) });
+                            defects: defectsOf(f.floorKey).filter(function (d) { return zoneOf(f.floorKey, d) === z.id; }) });
                     });
                 }
             });
@@ -140,7 +142,7 @@
             if (m && m.mode === 'split') {
                 var ok = {};
                 E.listFor(st, f.floorKey).forEach(function (z) { if (unitIds[E.zoneUnitId(bldg, z)]) ok[z.id] = true; });
-                var rest = defectsOf(f.floorKey).filter(function (d) { return !ok[d.evalUnitId]; });
+                var rest = defectsOf(f.floorKey).filter(function (d) { return !ok[zoneOf(f.floorKey, d)]; });
                 if (rest.length) samples.push({ unitId: '', unitLabel: '미설정', floorCode: f.floorCode, floorLabel: f.floorLabel, floorKey: f.floorKey,
                     subName: '미지정', partNote: '', status: '미설정(구역 미지정·단위 없는 구역 결함)', defects: rest });
             } else if (!(m && m.mode === 'whole' && unitIds[m.unitId])) {

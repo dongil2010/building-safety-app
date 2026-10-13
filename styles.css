@@ -16927,3 +16927,16 @@ html.layout-mobile .home-update-btn { width: 2.5rem; padding: 0; justify-content
 .map-count-dot-menu .map-count-zone.active { background: var(--zone-color); color: #fff; }
 .map-count-dot-menu-title, .map-count-dot-menu-sep { font-weight: 800; font-size: 0.8rem; color: #334155; padding: 0 4px; }
 .map-count-dot-menu-sep { flex-basis: 100%; }
+
+/* 2026-10-13 부재 수 찍기·평가단위·평가 부재 UI는 평가 탭 안 도면에서만 (#id#id: 모바일 레일 !important보다 우선) */
+html body:not(.bsa-eval-map-on) #btnModeCount#btnModeCount,
+html body:not(.bsa-eval-map-on) #mobileBtnModeCount#mobileBtnModeCount,
+html body:not(.bsa-eval-map-on) #btnEvalUnits#btnEvalUnits,
+html body:not(.bsa-eval-map-on) #mobileBtnEvalUnits#mobileBtnEvalUnits,
+html body:not(.bsa-eval-map-on) #evalUnitBar#evalUnitBar,
+html body:not(.bsa-eval-map-on) #btnEvalUnitSelectedDefects#btnEvalUnitSelectedDefects,
+html body:not(.bsa-eval-map-on) #mobileBtnEvalUnitSelected#mobileBtnEvalUnitSelected,
+html body:not(.bsa-eval-map-on) #mapCountBar#mapCountBar,
+html body:not(.bsa-eval-map-on) #mapCountOverlay#mapCountOverlay,
+html body:not(.bsa-eval-map-on) #mapCountDotMenu#mapCountDotMenu,
+html body:not(.bsa-eval-map-on) #mapEvalMemberBar#mapEvalMemberBar { display: none !important; }
