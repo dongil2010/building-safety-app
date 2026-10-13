@@ -24511,8 +24511,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             const body = members.map((m) => `<tr><th>${esc(m)}</th>${items.map((it) => {
                 const c = sm.cellValue(inputs, comp, u.id, m, it.key);
                 const cls = c.source === 'input' ? ' is-input' : (c.source === 'auto' ? ' is-auto' : '');
-                const cnt = it.key === 'count' ? `<button type="button" class="btn btn-sm eval-in-plus" data-unit="${esc(u.id)}" data-member="${esc(m)}">+1</button>` : '';
-                return `<td><div class="eval-in-cell">${cnt}<input type="text" inputmode="decimal" data-num-keypad class="form-control eval-in${cls}" data-unit="${esc(u.id)}" data-member="${esc(m)}" data-key="${it.key}" value="${esc(c.value)}" placeholder="${esc(c.hint)}" title="${c.source === 'auto' ? '도면 결함·비파괴값에서 자동(고치면 직접 입력)' : ''}"></div></td>`;
+                return `<td><div class="eval-in-cell"><input type="text" inputmode="decimal" data-num-keypad class="form-control eval-in${cls}" data-unit="${esc(u.id)}" data-member="${esc(m)}" data-key="${it.key}" value="${esc(c.value)}" placeholder="${esc(c.hint)}" title="${c.source === 'auto' ? '도면 결함·비파괴값에서 자동(고치면 직접 입력)' : ''}"></div></td>`;
             }).join('')}</tr>`).join('');
             const tilt = (inputs[u.id] || {}).tilt;
             return `<div class="eval-in-unit"><div class="eval-in-head"><b>${esc(api.unitTitle(u))}</b>
@@ -24598,14 +24597,6 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         };
         root.querySelectorAll('.eval-in').forEach((inp) => {
             inp.onchange = () => { saveInput(inp.dataset.unit, inp.dataset.member, inp.dataset.key, inp.value); rerender(); };
-        });
-        root.querySelectorAll('.eval-in-plus').forEach((b) => {
-            b.onclick = () => {
-                const inp = b.parentElement.querySelector('.eval-in');
-                const n = (parseInt(inp.value, 10) || 0) + 1;
-                saveInput(b.dataset.unit, b.dataset.member, 'count', String(n));
-                rerender();
-            };
         });
         root.querySelectorAll('.eval-in-tilt').forEach((inp) => {
             inp.onchange = () => {
