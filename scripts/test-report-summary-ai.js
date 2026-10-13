@@ -24,21 +24,30 @@ const input = {
 
 // 보내는 글: 분류키·항목·근거가 들어가고, 없는 원인추정은 「없음」으로 적는다
 const prompt = ai.buildPrompt(input);
-assert.ok(prompt.includes('[분류키 structure] 구조체'));
-assert.ok(prompt.includes('1. 지하1층 보(G) 균열 (균열폭:0.5mm) | 위치 X1/Y1 | 크기 0.5/2.0 | 진행 중 | 같은 유형 3건 | 원인추정 건조수축'));
-assert.ok(prompt.includes('2. 지상2층 슬래브 누수 | 위치 X2/Y3 | 누수 중 | 원인추정 없음'));
-assert.ok(prompt.includes('1. 옥상 난간 상태양호 | 상태양호 | 원인추정 없음'));
-assert.ok(prompt.includes('전회차 의견(말투 참고):\n- 슬래브 균열은 건조수축에 의한 것으로 판단됨.'));
+assert.ok(prompt.includes('[분류키 structure] 구조체 (2항목)'));
+assert.ok(prompt.includes('1. 지하1층 보(G) 균열 (균열폭:0.5mm) | 위치 X1/Y1 | 크기 0.5/2.0 | 진행 중 | 같은 유형 3건 | 조사표 원인추정 건조수축'));
+assert.ok(prompt.includes('2. 지상2층 슬래브 누수 | 위치 X2/Y3 | 누수 중 | 조사표 원인추정 없음'));
+assert.ok(prompt.includes('1. 옥상 난간 상태양호 | 상태양호 | 조사표 원인추정 없음'));
 assert.ok(prompt.includes('건물: 시험건물 / 2026년 하반기 점검'));
+// 2026-10-13: AI 의견은 우리 보고서와 달라도 된다 — 조사표 원인·전회 의견에 맞추라고 하지 않는다
+assert.ok(prompt.includes('조사표의 원인추정은 참고만 한다'));
+assert.ok(prompt.includes('놓치기 쉬운 점'));
+assert.ok(!prompt.includes('전회차 의견'), '전회 의견은 보내지 않는다');
+assert.ok(!prompt.includes('건조수축에 의한 것으로 판단됨'), '전회 의견 글자가 섞이지 않는다');
 
-// 받은 글: 요청한 분류만, 줄 앞 표시를 맞춘다
+// 받은 글: 요청한 분류만, 항목마다 한 줄(줄 안의 줄바꿈은 잇는다), 메모는 따로
 const keys = ['structure', 'public'];
-const got = ai.parseResponse('```json\n{"structure": "- 첫 줄\\n둘째 줄\\n\\n-셋째 줄", "public": ["난간은 양호함."], "extra": "버림"}\n```', keys);
-assert.deepStrictEqual(got, { structure: '- 첫 줄\n- 둘째 줄\n- 셋째 줄', public: '- 난간은 양호함.' });
-assert.deepStrictEqual(ai.parseResponse('{"structure": "", "public": null}', keys), {}, '빈 의견은 넣지 않는다');
+const got = ai.parseResponse('```json\n{"structure": {"lines": ["- 첫 줄", "둘째 줄\\n이어짐", "", "-셋째 줄"], "note": " 반복 균열은  추적 관찰 필요. "}, "public": {"lines": ["난간은 양호함."], "note": ""}, "extra": {"lines": ["버림"]}}\n```', keys);
+assert.deepStrictEqual(got, {
+    opinion: { structure: '- 첫 줄\n- 둘째 줄 이어짐\n- 셋째 줄', public: '- 난간은 양호함.' },
+    note: { structure: '반복 균열은 추적 관찰 필요.' }
+});
+// 예전 모양(글자·배열)으로 답해도 받는다
+assert.deepStrictEqual(ai.parseResponse('{"structure": "- 가\\n나", "public": ["다"]}', keys),
+    { opinion: { structure: '- 가\n- 나', public: '- 다' }, note: {} });
+assert.deepStrictEqual(ai.parseResponse('{"structure": {"lines": [], "note": ""}, "public": null}', keys), { opinion: {}, note: {} }, '빈 의견은 넣지 않는다');
 assert.throws(() => ai.parseResponse('죄송합니다', keys), /찾지 못했습니다/);
 assert.throws(() => ai.parseResponse('{"structure": }', keys), /읽지 못했습니다/);
-
 // 조사표에 없는 숫자 찾기
 const src = ai.sourceTextOf(input.cats[0]);
 assert.deepStrictEqual(ai.unknownNumbers('- 지하1층 보 균열(0.5mm)은 건조수축으로 판단됨.', src), []);

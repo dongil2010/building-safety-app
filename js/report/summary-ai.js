@@ -16,32 +16,39 @@
     const MODEL = 'gemini-3.5-flash-lite';
 
     /**
+     * 의견을 쓰게 하는 글. 2026-10-13 사용자 뜻: AI 의견은 우리 보고서와 달라도 된다(우리가 놓치는
+     * 부분을 짚어 주는 쪽이 쓸모 있다). 그래서 조사표의 원인추정과 전회차 의견에 맞추라고 하지 않고
+     * AI 자신의 판단을 적게 하며, 항목별 줄과 별도로 분류마다 「놓치기 쉬운 점」 메모를 받는다.
+     * 층·위치·치수 같은 사실만은 지어내지 못하게 한다.
      * @param {{buildingName: string, roundLabel: string,
-     *   cats: Array<{key: string, label: string, prevOpinion?: string,
+     *   cats: Array<{key: string, label: string,
      *     items: Array<{text: string, location?: string, size?: string, cause?: string,
      *       progress?: boolean, leak?: boolean, good?: boolean, sameTypeCount?: number}>}>}} input
      */
     function buildPrompt(input) {
         const lines = [
-            '너는 건축물 정기안전점검 보고서를 쓰는 책임기술자다.',
-            '아래는 분류별로 보고서에 싣기로 고른 주요 점검결과다. 분류마다 「결함원인 및 책임기술자 의견」을 써라.',
+            '너는 건축물 안전점검 경험이 많은 구조기술사다. 다른 점검팀이 만든 상태조사표를 독립적으로 검토한다.',
+            '아래는 분류별로 보고서에 싣기로 고른 주요 점검결과다. 분류마다 「결함원인 및 책임기술자 의견」을 네 판단으로 써라.',
             '',
             '규칙',
-            '- 항목마다 한 줄, 줄 앞에 "- "를 붙인다. 항목 순서를 지킨다.',
+            '- lines: 항목마다 정확히 한 줄, 항목 순서대로. 줄 수는 항목 수와 같아야 한다.',
             '- 보고서 문체로 쓴다: "~으로 판단됨.", "~이 필요함.", "~한 것으로 조사됨."처럼 명사형으로 끝낸다.',
-            '- 한 줄에 결함의 원인과, 필요하면 조치 방향을 함께 적는다. 한 줄은 120자를 넘기지 않는다.',
-            '- 아래에 적힌 사실만 쓴다. 적혀 있지 않은 숫자·층·위치·부재를 지어내지 않는다.',
-            '- 원인추정이 적혀 있으면 그것을 따르고, 비어 있으면 결함 유형에서 일반적으로 볼 수 있는 원인을 "~으로 추정됨"으로 적는다.',
+            '- 한 줄에 원인 → 구조 안전·내구성에 미치는 영향 → 조치 방향을 담는다. 두 문장, 200자까지 써도 된다.',
+            '- 조사표의 원인추정은 참고만 한다. 결함 유형·부재·위치·크기로 볼 때 다른 원인이 더 그럴듯하면 네 판단을 적고,',
+            '  조사표와 다르면 줄 끝에 "(조사표 원인추정: ○○ — 재검토 필요)"처럼 밝힌다.',
+            '- 원인을 가르려면 확인이 더 필요한 경우 무엇을 확인해야 하는지 적는다(예: 균열 위치가 중앙부인지 단부인지, 진행 여부 계측, 상부 방수층 상태).',
             '- 상태양호 항목은 양호하다는 내용으로 짧게 적는다.',
-            '- 전회차 의견이 주어지면 그 말투와 길이를 따른다. 내용은 금회 항목에 맞춘다.',
+            '- note: 그 분류에서 점검팀이 놓치기 쉬운 점을 한두 문장으로 적는다(결함들 사이의 연관, 같은 유형의 반복이 뜻하는 것,',
+            '  추가 조사나 추적 관찰이 필요한 것 등). 덧붙일 것이 없으면 빈 문자열로 둔다.',
+            '- 판단과 해석은 자유롭게 하되, 아래에 적혀 있지 않은 층·위치·치수·건수 같은 사실은 지어내지 않는다.',
             '- 머리말, 맺음말, 분류 이름은 쓰지 않는다.',
             '',
-            '출력은 JSON 하나만: {"분류키": "- 첫 줄\\n- 둘째 줄", ...}. 아래에 나온 분류키만 쓴다.',
+            '출력은 JSON 하나만: {"분류키": {"lines": ["첫 항목 의견", "둘째 항목 의견"], "note": "놓치기 쉬운 점"}, ...}. 아래에 나온 분류키만 쓴다.',
             '',
             '건물: ' + (input.buildingName || '(이름 없음)') + (input.roundLabel ? ' / ' + input.roundLabel + ' 점검' : '')
         ];
         (input.cats || []).forEach(function (cat) {
-            lines.push('', '[분류키 ' + cat.key + '] ' + cat.label);
+            lines.push('', '[분류키 ' + cat.key + '] ' + cat.label + ' (' + cat.items.length + '항목)');
             cat.items.forEach(function (it, i) {
                 const extra = [];
                 if (it.good) extra.push('상태양호');
@@ -50,17 +57,17 @@
                 if (it.progress) extra.push('진행 중');
                 if (it.leak) extra.push('누수 중');
                 if (it.sameTypeCount > 1) extra.push('같은 유형 ' + it.sameTypeCount + '건');
-                extra.push('원인추정 ' + (it.cause || '없음'));
+                extra.push('조사표 원인추정 ' + (it.cause || '없음'));
                 lines.push((i + 1) + '. ' + it.text + ' | ' + extra.join(' | '));
             });
-            if (cat.prevOpinion) lines.push('전회차 의견(말투 참고):', cat.prevOpinion);
         });
         return lines.join('\n');
     }
 
     /**
-     * AI 답에서 분류별 의견을 꺼낸다. 요청하지 않은 분류와 빈 글은 버린다.
-     * @returns {Object<string, string>}
+     * AI 답에서 분류별 의견(항목마다 한 줄)과 메모를 꺼낸다. 요청하지 않은 분류와 빈 글은 버린다.
+     * 줄 안의 줄바꿈은 한 칸으로 잇는다(줄 수가 항목 수와 맞아야 항목별로 짝을 지을 수 있다).
+     * @returns {{opinion: Object<string, string>, note: Object<string, string>}}
      */
     function parseResponse(text, catKeys) {
         const m = String(text || '').match(/\{[\s\S]*\}/);
@@ -71,18 +78,25 @@
         } catch (e) {
             throw new Error('AI 답을 읽지 못했습니다: ' + e.message);
         }
-        const out = {};
+        const out = { opinion: {}, note: {} };
         (catKeys || []).forEach(function (k) {
-            const v = obj[k];
-            const body = (Array.isArray(v) ? v.join('\n') : String(v == null ? '' : v))
-                .split('\n').map(function (l) { return l.trim(); }).filter(Boolean)
+            let v = obj[k];
+            let note = '';
+            if (v && typeof v === 'object' && !Array.isArray(v)) {
+                note = String(v.note == null ? '' : v.note).replace(/\s+/g, ' ').trim();
+                v = v.lines;
+            }
+            const list = Array.isArray(v)
+                ? v.map(function (l) { return String(l == null ? '' : l).replace(/\s+/g, ' '); })
+                : String(v == null ? '' : v).split('\n');
+            const body = list.map(function (l) { return l.trim(); }).filter(Boolean)
                 .map(function (l) { return /^-/.test(l) ? l.replace(/^-\s*/, '- ') : '- ' + l; })
                 .join('\n');
-            if (body) out[k] = body;
+            if (body) out.opinion[k] = body;
+            if (note) out.note[k] = note;
         });
         return out;
     }
-
     /**
      * 의견에 나온 숫자 가운데 보낸 내용에 없는 것(지어냈을 수 있는 숫자).
      * 층은 따로 견준다. 숫자만 보면 위치의 열번호(X2/Y3) 때문에 없는 「지상3층」이 있는 것으로 넘어간다.

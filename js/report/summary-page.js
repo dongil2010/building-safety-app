@@ -843,7 +843,6 @@
             cats.push({
                 key: cat.key,
                 label: cat.label,
-                prevOpinion: (state.prev && state.prev.opinion[cat.key]) || '',
                 items: list.map((d) => ({
                     text: core.itemText(d), location: d.location, size: d.size, cause: d.cause,
                     progress: d.progress, leak: d.leak, good: d.good,
@@ -873,7 +872,7 @@
         try {
             setAiNote('AI가 주요 점검결과를 고르는 중... (1/2)', 'muted');
             const chosen = aiSelFromPicks(await ai.requestPicks(key, pick.input), pick.byN);
-            state.ai = { sel: chosen.sel, why: chosen.why, opinion: {}, odd: {} };
+            state.ai = { sel: chosen.sel, why: chosen.why, opinion: {}, note: {}, odd: {} };
             save();
             renderCompare();
             setAiNote('AI가 의견을 쓰는 중... (2/2)', 'muted');
@@ -886,15 +885,17 @@
             }
             const odd = {};
             input.cats.forEach((c) => {
-                const nums = got[c.key] ? ai.unknownNumbers(got[c.key], ai.sourceTextOf(c)) : [];
+                const nums = got.opinion[c.key] ? ai.unknownNumbers(got.opinion[c.key], ai.sourceTextOf(c)) : [];
                 if (nums.length) odd[c.key] = nums;
             });
-            state.ai.opinion = got;
+            state.ai.opinion = got.opinion;
+            state.ai.note = got.note;
             state.ai.odd = odd;
             save();
             renderCompare();
             const nOdd = Object.keys(odd).length;
-            if (nOdd) setAiNote('AI안을 받았습니다. ' + nOdd + '개 분류의 의견에 조사표에 없는 숫자가 있어 비교표에 표시했습니다.', 'err');
+            if (!Object.keys(got.opinion).length) throw new Error('주요 점검결과는 골랐지만 AI가 쓴 의견이 없습니다. 다시 눌러 주세요.');
+            if (nOdd) setAiNote('AI안을 받았습니다. ' + nOdd + '개 분류의 의견에 조사표에 없는 숫자가 있어 비교표에 표시했습니다(AI가 든 기준값일 수 있으니 층·치수만 확인하세요).', 'ok');
             else setAiNote('AI안을 받았습니다. 비교표에서 읽어 보고 쓸 항목과 의견을 고르세요.', 'ok');
         } catch (e) {
             setAiNote(e.message || String(e), 'err');
@@ -1021,6 +1022,7 @@
         const snaps = { A: snapshotOf('A'), B: snapshotOf('B'), F: snapshotOf('F') };
         const aiOp = (state.ai && state.ai.opinion) || {};
         const aiWhy = (state.ai && state.ai.why) || {};
+        const aiNote = (state.ai && state.ai.note) || {};
         const hasAi = !!(state.ai && state.ai.sel);
         const th = (v, label) => '<th' + (v === cur ? ' class="cur"' : '') + '>' + label + (v === cur ? ' <small>아래 표에 나오는 안</small>' : '') + '</th>';
         const plus = (src, k, i, inFinal) => '<button type="button" class="plus' + (inFinal ? ' in' : '') + '" data-add="' + src + '" data-cat="' + k + '" data-idx="' + i + '" title="'
@@ -1079,8 +1081,9 @@
                 + '<td>' + (esc(prevOp) || '-') + opBtn('prev', k, !!prevOp) + '</td>'
                 + opCell('A') + opCell('B')
                 + '<td>' + (aiOp[k] ? esc(aiOp[k]) : aiEmpty)
-                + (odd.length ? '<div><span class="badge warn">조사표에 없는 숫자: ' + esc(odd.join(', ')) + '</span></div>' : '')
-                + opBtn('AI', k, !!aiOp[k]) + '</td>'
+                + (odd.length ? '<div><span class="badge must" title="AI가 든 기준값(예: 0.3mm)일 수 있습니다. 층·치수가 조사표와 맞는지만 확인하세요.">조사표에 없는 숫자: ' + esc(odd.join(', ')) + '</span></div>' : '')
+                + opBtn('AI', k, !!aiOp[k])
+                + (aiNote[k] ? '<div class="ainote"><b>AI 검토 메모</b> ' + esc(aiNote[k]) + '</div>' : '') + '</td>'
                 + '<td class="final">' + (esc(snaps.F[k].opinion) || '-') + '</td></tr>';
         });
         return h + '</table>';
