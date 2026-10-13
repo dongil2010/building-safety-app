@@ -34,6 +34,7 @@
         custom: {},
         catOverride: {},
         opinion: {},
+        opLine: {},
         cellEdit: {},
         loadLines: '',
         repairNote: '',
@@ -41,15 +42,22 @@
         markBlue: true,
         meta: { buildingName: '', roundLabel: '' },
         // 작성안: A = 우리 보고서 문구·조사표 원인 그대로 / B = 중요도·원인·보수방안을 따로 판단한 제안
+        //         F = 최종안(비교표에서 사람이 담은 항목만. 표 만드는 방식은 A안과 같다)
         // sel·text·custom·opinion·cellEdit는 지금 보고 있는 작성안의 것이고, 안마다 따로 보관한다.
         variant: 'A',
         vars: { A: null, B: null },
-        // AI안: 의견만 따로 받아 둔다(항목은 받을 때 보던 작성안 base의 것). 비교표에서 골라 쓴다.
+        // AI안: { sel: 분류별 고른 결함 id, why: 결함 id별 고른 이유, opinion: 분류별 의견 본문, odd: 의견의 낯선 숫자 }
+        // A·B안과 따로 두고 비교표에서 골라 쓴다.
         ai: null
     };
 
-    const VARIANT_KEYS = ['sel', 'text', 'custom', 'opinion', 'cellEdit'];
+    // opLine: 결함 id별 의견 한 줄(최종안에 담을 때 B안·AI안에서 따라온 것)
+    const VARIANT_KEYS = ['sel', 'text', 'custom', 'opinion', 'cellEdit', 'opLine'];
+    const VARIANTS = ['A', 'B', 'F'];
     const isB = () => state.variant === 'B';
+    const isFinal = () => state.variant === 'F';
+    /** 화면·파일 이름에 적는 작성안 이름 */
+    const variantLabel = (v) => (v === 'F' ? '최종안' : v + '안');
 
     /** 지금 화면의 고르기·문구를 그 작성안 보관함에 옮겨 둔다 */
     function stashVariant() {
@@ -58,15 +66,16 @@
         state.vars[state.variant] = o;
     }
 
-    /** 작성안을 화면에 올린다. 처음 여는 안이면 그 안의 추천으로 채운다. */
+    /** 작성안을 화면에 올린다. 처음 여는 안이면 그 안의 추천으로 채운다(최종안은 비워 두고 사람이 담는다). */
     function bindVariant(v) {
         state.variant = v;
         const o = state.vars[v] || {};
-        state.sel = o.sel || (v === 'B' ? alt.pickDefaults(state.defects) : core.pickDefaults(state.defects));
+        state.sel = o.sel || (v === 'F' ? {} : (v === 'B' ? alt.pickDefaults(state.defects) : core.pickDefaults(state.defects)));
         state.text = o.text || {};
         state.custom = o.custom || {};
         state.opinion = o.opinion || {};
         state.cellEdit = o.cellEdit || {};
+        state.opLine = o.opLine || {};
         core.CATEGORIES.forEach((c) => {
             state.sel[c.key] = (state.sel[c.key] || []).filter((id) => state.byId[id]);
         });
@@ -376,6 +385,7 @@
     function opinionOf(catKey, groups) {
         if (state.opinion[catKey] != null) return state.opinion[catKey];
         if (catKey === 'load') return '';
+        if (isFinal()) return finalOpinion(catKey);
         return isB() ? alt.buildOpinion(catKey, groups, state.meta) : core.buildOpinion(catKey, groups, state.meta);
     }
 
@@ -662,8 +672,10 @@
     }
 
     function renderVariantTabs() {
-        ['A', 'B'].forEach((v) => $('tab' + v).classList.toggle('on', state.variant === v));
-        $('variantNote').textContent = isB()
+        VARIANTS.forEach((v) => $('tab' + v).classList.toggle('on', state.variant === v));
+        $('variantNote').textContent = isFinal()
+            ? '최종안: 위 비교표에서 +로 담은 항목만 들어갑니다. 의견은 담은 항목 순서대로 한 줄씩 자동으로 써지고(B안·AI안에서 담으면 그 안의 줄, 그 밖에는 A안 말투), 아래에서 항목을 더 고르거나 문구를 고칠 수 있습니다. 보수방안 등 나머지 표는 A안 방식입니다.'
+            : isB()
             ? 'B안: 결함 유형·부재·균열폭으로 중요도를 매겨 중요한 것부터 고르고, 원인과 보수방안도 조사표와 별개로 판단해 적습니다. 현장을 보지 않고 조사표 글자만으로 만든 초안이므로 책임기술자 검토가 필요합니다.'
             : 'A안: 우리 보고서의 문구를 따릅니다. 원인은 조사표의 원인추정 그대로, 보수방안은 기존 보고서의 짝을 씁니다.';
     }
@@ -764,72 +776,133 @@
         el.className = cls || 'muted';
     }
 
-    /** AI에 보낼 내용: 분류마다 지금 실려 있는 주요 점검결과와 그 근거(위치·크기·원인추정) */
-    function aiInput() {
+    /** AI안이 분류에 고른 결함(분류를 옮겼거나 조사표에서 사라진 것은 뺀다) */
+    function aiDefects(catKey) {
+        return ((state.ai && state.ai.sel && state.ai.sel[catKey]) || [])
+            .map((id) => state.byId[id]).filter((d) => d && d.category === catKey);
+    }
+
+    /** 1단계에 보낼 내용: 분류별 결함 전체. 번호(n)로 답을 받아 byN으로 결함을 되찾는다. */
+    function aiPickInput() {
         const cats = [];
+        const byN = {};
+        let n = 0;
         core.CATEGORIES.forEach((cat) => {
             if (cat.key === 'load') return;
-            const entries = entriesOf(cat.key);
-            if (!entries.length) return;
+            const bad = state.defects.filter((d) => d.category === cat.key && !d.good);
+            if (!bad.length) return;
+            cats.push({
+                key: cat.key,
+                label: cat.label,
+                defects: bad.map((d) => {
+                    n += 1;
+                    byN[n] = d;
+                    return {
+                        n: n, floor: d.floor, location: d.location, content: d.content, size: d.size, cause: d.cause,
+                        progress: d.progress, leak: d.leak, photo: d.photoNos.length > 0, forced: core.isForced(d)
+                    };
+                })
+            });
+        });
+        return { input: { buildingName: state.meta.buildingName, roundLabel: state.meta.roundLabel, maxItems: core.MAX_ITEMS, cats: cats }, byN: byN, count: n };
+    }
+
+    /**
+     * AI가 고른 번호를 분류별 결함 id로 옮긴다. 구조체 균열 0.5mm 이상은 AI가 빠뜨려도 넣고,
+     * 결함이 없는 분류는 A안처럼 상태양호 항목 하나로 채운다.
+     */
+    function aiSelFromPicks(picks, byN) {
+        const sel = {};
+        const why = {};
+        core.CATEGORIES.forEach((cat) => {
+            if (cat.key === 'load') { sel[cat.key] = []; return; }
+            const inCat = state.defects.filter((d) => d.category === cat.key);
+            const forced = core.byScore(inCat.filter(core.isForced));
+            const list = forced.slice();
+            (picks[cat.key] || []).forEach((p) => {
+                const d = byN[p.n];
+                if (!d) return;
+                if (p.why) why[d.id] = p.why;
+                if (list.indexOf(d) < 0 && list.length < Math.max(core.MAX_ITEMS, forced.length)) list.push(d);
+            });
+            if (!list.length) {
+                const good = core.byScore(inCat.filter((d) => d.good))[0];
+                if (good) list.push(good);
+            }
+            sel[cat.key] = list.map((d) => d.id);
+        });
+        return { sel: sel, why: why };
+    }
+
+    /** 2단계에 보낼 내용: AI안이 고른 항목과 그 근거(위치·크기·원인추정) */
+    function aiOpinionInput() {
+        const cats = [];
+        core.CATEGORIES.forEach((cat) => {
+            const list = aiDefects(cat.key);
+            if (!list.length) return;
             cats.push({
                 key: cat.key,
                 label: cat.label,
                 prevOpinion: (state.prev && state.prev.opinion[cat.key]) || '',
-                items: entries.map((e) => {
-                    const d = e.d;
-                    if (!d) return { text: e.text };
-                    return {
-                        text: e.text, location: d.location, size: d.size, cause: d.cause,
-                        progress: d.progress, leak: d.leak, good: d.good,
-                        sameTypeCount: d.good ? 0 : state.defects.filter((x) => !x.good && x.category === d.category && x.typeKey === d.typeKey).length
-                    };
-                })
+                items: list.map((d) => ({
+                    text: core.itemText(d), location: d.location, size: d.size, cause: d.cause,
+                    progress: d.progress, leak: d.leak, good: d.good,
+                    sameTypeCount: d.good ? 0 : state.defects.filter((x) => !x.good && x.category === d.category && x.typeKey === d.typeKey).length
+                }))
             });
         });
         return { buildingName: state.meta.buildingName, roundLabel: state.meta.roundLabel, cats: cats };
     }
 
-    async function runAiOpinion() {
+    /** AI안 만들기: ① 결함 전체에서 주요 점검결과를 고르게 하고 ② 고른 항목으로 의견을 쓰게 한다 */
+    async function runAi() {
         const key = window.GEMINI_DIRECT_API_KEY || '';
         if (!key) {
             setAiNote('이 화면에는 AI 키가 없습니다. 배포된 사이트(GitHub Pages)에서 열어야 쓸 수 있습니다.', 'err');
             return;
         }
-        const input = aiInput();
-        if (!input.cats.length) {
-            setAiNote('고른 주요 점검결과가 없습니다.', 'err');
+        const pick = aiPickInput();
+        if (!pick.count) {
+            setAiNote('조사표에 결함이 없습니다.', 'err');
             return;
         }
-        const count = input.cats.reduce((n, c) => n + c.items.length, 0);
-        if (!window.confirm(state.variant + '안에서 고른 주요 점검결과 ' + count + '건의 글자(건물명·위치·결함 내용·원인추정)를 Google Gemini로 보내 '
-            + 'AI안 의견을 받습니다. 사진은 보내지 않습니다.\n받은 의견은 비교표의 AI안 칸에만 들어가고, 지금 적혀 있는 의견은 바뀌지 않습니다. 계속할까요?')) return;
+        if (!window.confirm('조사표의 결함 ' + pick.count + '건의 글자(건물명·층·위치·결함 내용·크기·원인추정)를 Google Gemini로 보내 '
+            + 'AI안(주요 점검결과 고르기 + 의견)을 받습니다. 사진은 보내지 않습니다.\n받은 내용은 비교표의 AI안 칸에만 들어가고, A안·B안은 바뀌지 않습니다. 계속할까요?')) return;
         const btn = $('btnAiOpinion');
         btn.disabled = true;
-        setAiNote('AI가 의견을 쓰는 중...', 'muted');
         try {
-            const base = state.variant;
-            const got = await ai.requestOpinions(key, input);
-            const done = Object.keys(got);
-            if (!done.length) throw new Error('AI가 쓴 의견이 없습니다.');
+            setAiNote('AI가 주요 점검결과를 고르는 중... (1/2)', 'muted');
+            const chosen = aiSelFromPicks(await ai.requestPicks(key, pick.input), pick.byN);
+            state.ai = { sel: chosen.sel, why: chosen.why, opinion: {}, odd: {} };
+            save();
+            renderCompare();
+            setAiNote('AI가 의견을 쓰는 중... (2/2)', 'muted');
+            const input = aiOpinionInput();
+            let got;
+            try {
+                got = await ai.requestOpinions(key, input);
+            } catch (e) {
+                throw new Error('주요 점검결과는 골랐지만 의견을 받지 못했습니다. 다시 눌러 주세요. (' + (e.message || e) + ')');
+            }
             const odd = {};
             input.cats.forEach((c) => {
                 const nums = got[c.key] ? ai.unknownNumbers(got[c.key], ai.sourceTextOf(c)) : [];
                 if (nums.length) odd[c.key] = nums;
             });
-            state.ai = { base: base, opinion: got, odd: odd };
+            state.ai.opinion = got;
+            state.ai.odd = odd;
             save();
             renderCompare();
             const nOdd = Object.keys(odd).length;
-            if (nOdd) setAiNote('AI안을 받았습니다(' + done.length + '개 분류). ' + nOdd + '개 분류에 조사표에 없는 숫자가 있어 비교표에 표시했습니다.', 'err');
-            else setAiNote('AI안을 받았습니다(' + done.length + '개 분류). 비교표에서 읽어 보고 쓸 의견을 고르세요.', 'ok');
+            if (nOdd) setAiNote('AI안을 받았습니다. ' + nOdd + '개 분류의 의견에 조사표에 없는 숫자가 있어 비교표에 표시했습니다.', 'err');
+            else setAiNote('AI안을 받았습니다. 비교표에서 읽어 보고 쓸 항목과 의견을 고르세요.', 'ok');
         } catch (e) {
             setAiNote(e.message || String(e), 'err');
         } finally {
             btn.disabled = false;
         }
     }
-
-    /* ───────── 한눈에 비교: 전회차 · A안 · B안 · AI안 ───────── */
+    /* ───────── 한눈에 비교: 전회차 · A안 · B안 · AI안 → 최종안 ───────── */
 
     /** 의견에서 첫 줄(머리말)을 뺀 본문 */
     function opinionBody(op) {
@@ -843,62 +916,186 @@
         const groups = groupsNow();
         const out = {};
         core.CATEGORIES.forEach((cat) => {
-            out[cat.key] = { lines: entriesOf(cat.key).map((e) => e.text), opinion: opinionBody(opinionOf(cat.key, groups)) };
+            const entries = entriesOf(cat.key);
+            out[cat.key] = {
+                entries: entries.map((e) => ({ text: e.text, id: e.d ? e.d.id : null })),
+                opinion: opinionBody(opinionOf(cat.key, groups))
+            };
         });
         if (v !== cur) { stashVariant(); bindVariant(cur); }
         return out;
     }
 
+    /** AI안 의견에서 i번째 항목의 줄. 줄 수가 항목 수와 다르면 짝을 알 수 없어 쓰지 않는다. */
+    function aiLineOf(catKey, i) {
+        const lines = String((state.ai && state.ai.opinion && state.ai.opinion[catKey]) || '').split('\n').filter(Boolean);
+        return lines.length === aiDefects(catKey).length ? lines[i] : '';
+    }
+
+    /** B안 말투의 의견 한 줄(결함 한 건 기준) */
+    function bLineOf(d) {
+        return '- [중요도 ' + alt.importanceOf(d).grade + '] ' + d.content + ' (' + d.floor + '): ' + alt.causeOf(d) + '. → ' + alt.repairOf(d) + '.';
+    }
+
+    /** 최종안 의견: 담은 항목 순서대로 한 줄씩. 담을 때 따라온 줄(B안·AI안)이 있으면 그것, 없으면 A안 말투. */
+    function finalOpinion(catKey) {
+        const lines = (state.sel[catKey] || []).map((id) => {
+            const d = state.byId[id];
+            if (!d) return '';
+            return state.opLine[id] || (d.good ? '' : core.opinionLine(d.content, d.cause));
+        }).filter(Boolean);
+        const empty = core.buildOpinion(catKey, [], state.meta);
+        return lines.length ? empty.split('\n')[0] + '\n' + lines.join('\n') : empty;
+    }
+
+    /** 비교표의 한 줄이 가리키는 항목: { text, d(없으면 글자만), line(따라갈 의견 줄) } */
+    function sourceItem(src, catKey, idx, snaps) {
+        if (src === 'AI') {
+            const d = aiDefects(catKey)[idx];
+            return d ? { text: core.itemText(d), d: d, line: aiLineOf(catKey, idx) } : null;
+        }
+        if (src === 'prev') {
+            const text = prevLines(catKey)[idx];
+            if (!text) return null;
+            if (catKey === 'load') return { text: text, d: null, line: '' };
+            // 금회 조사표에서 같은 결함을 찾으면 그것을(문구·균열폭은 금회 값), 없으면 전회 문구만 담는다
+            const d = core.findDefectForPrev(text, state.defects, catKey, []);
+            return d && d.category === catKey ? { text: core.itemText(d), d: d, line: '' } : { text: text, d: null, line: '' };
+        }
+        const e = (snaps || { [src]: snapshotOf(src) })[src][catKey].entries[idx];
+        if (!e) return null;
+        const d = e.id ? state.byId[e.id] : null;
+        return { text: e.text, d: d, line: d && src === 'B' && !d.good ? bLineOf(d) : '' };
+    }
+
+    /** 최종안을 화면에 올린다(담기·빼기는 최종안을 보면서 한다. 아래 표와 한글 파일도 최종안으로 바뀐다) */
+    function showFinal() {
+        if (state.variant === 'F') return;
+        stashVariant();
+        bindVariant('F');
+    }
+
+    /** 항목을 최종안에 담는다. 이미 담긴 결함이면 따라온 의견 줄만 그 안의 것으로 바꾼다. */
+    function addToFinal(item, catKey) {
+        if (!item) return;
+        if (catKey === 'load') {
+            if (loadLineList().indexOf(item.text) < 0) state.loadLines = loadLineList().concat([item.text]).join('\n');
+            return;
+        }
+        if (!item.d) {
+            const list = state.custom[catKey] || (state.custom[catKey] = []);
+            if (list.indexOf(item.text) < 0) list.push(item.text);
+            return;
+        }
+        const id = item.d.id;
+        const sel = state.sel[catKey] || (state.sel[catKey] = []);
+        const isNew = sel.indexOf(id) < 0;
+        if (isNew) sel.push(id);
+        if (item.text && item.text !== baseText(item.d)) state.text[id] = item.text; else delete state.text[id];
+        if (item.line) state.opLine[id] = item.line; else delete state.opLine[id];
+        // 의견을 손으로 고쳐 둔 분류는 자동으로 다시 쓰지 않으므로, 새 항목의 줄만 끝에 붙인다
+        if (isNew && state.opinion[catKey] != null) {
+            const line = item.line || (item.d.good ? '' : core.opinionLine(item.d.content, item.d.cause));
+            if (line) state.opinion[catKey] = state.opinion[catKey].replace(/\s+$/, '') + '\n' + line;
+        }
+    }
+
+    function removeFromFinal(catKey, idx) {
+        const e = entriesOf(catKey)[idx];
+        if (!e) return;
+        if (e.d) {
+            state.sel[catKey] = (state.sel[catKey] || []).filter((id) => id !== e.d.id);
+            delete state.opLine[e.d.id];
+            delete state.text[e.d.id];
+        } else if (e.customIdx != null) {
+            state.custom[catKey].splice(e.customIdx, 1);
+        } else if (e.lineIdx != null) {
+            const lines = loadLineList();
+            lines.splice(e.lineIdx, 1);
+            state.loadLines = lines.join('\n');
+        }
+    }
+
     function compareHtml() {
         const cur = state.variant;
-        const snaps = { A: snapshotOf('A'), B: snapshotOf('B') };
+        const snaps = { A: snapshotOf('A'), B: snapshotOf('B'), F: snapshotOf('F') };
         const aiOp = (state.ai && state.ai.opinion) || {};
-        const numbered = (lines, blueAt) => (lines.length
-            ? lines.map((t, i) => blueIf(blueAt && blueAt(i), esc((i + 1) + '. ' + t))).join('\n') : '-');
-        const useBtn = (src, catKey, has) => (has && src !== cur
-            ? '<div><button type="button" class="btn ghost small" data-use="' + src + '" data-cat="' + catKey + '">이 의견을 ' + cur + '안에 쓰기</button></div>' : '');
-        const th = (v, label) => '<th' + (v === cur ? ' class="cur"' : '') + '>' + label + (v === cur ? ' <small>지금 보는 안</small>' : '') + '</th>';
-        const hasAi = Object.keys(aiOp).length > 0;
+        const aiWhy = (state.ai && state.ai.why) || {};
+        const hasAi = !!(state.ai && state.ai.sel);
+        const th = (v, label) => '<th' + (v === cur ? ' class="cur"' : '') + '>' + label + (v === cur ? ' <small>아래 표에 나오는 안</small>' : '') + '</th>';
+        const plus = (src, k, i, inFinal) => '<button type="button" class="plus' + (inFinal ? ' in' : '') + '" data-add="' + src + '" data-cat="' + k + '" data-idx="' + i + '" title="'
+            + (inFinal ? '최종안에 담겨 있음 — 누르면 의견 줄을 이 안의 것으로 바꿉니다' : '최종안에 담기') + '">' + (inFinal ? '✓' : '+') + '</button>';
+        const allBtn = (src, k, n) => (n > 1 ? '<div><button type="button" class="btn ghost small" data-add-all="' + src + '" data-cat="' + k + '">모두 담기</button></div>' : '');
+        const opBtn = (src, k, has) => (has
+            ? '<div><button type="button" class="btn ghost small" data-use="' + src + '" data-cat="' + k + '">이 의견을 최종안에 쓰기</button></div>' : '');
 
-        let h = '<table class="cmp4"><tr><th style="width:9%">구분</th><th style="width:5%"></th>'
+        let h = '<table class="cmp4"><tr><th style="width:8%">구분</th><th style="width:4%"></th>'
             + '<th>전회차 보고서</th>' + th('A', 'A안 · 우리 보고서 스타일') + th('B', 'B안 · 중요도 중심')
-            + '<th>AI안 (Gemini)' + (hasAi ? ' <small>' + esc(state.ai.base) + '안 항목 기준</small>' : '') + '</th></tr>';
+            + '<th>AI안 (Gemini)</th>' + th('F', '최종안') + '</tr>';
         core.CATEGORIES.forEach((cat) => {
             const k = cat.key;
+            const finalIds = snaps.F[k].entries.map((e) => e.id).filter(Boolean);
+            const finalTexts = snaps.F[k].entries.map((e) => e.text);
             const prevOp = (state.prev && state.prev.opinion[k]) || '';
+            const prevList = prevLines(k);
+
             const lineCell = (v) => {
-                const lines = snaps[v][k].lines;
-                const cmp = state.prev ? core.compareLines(prevLines(k), lines) : null;
-                return '<td' + (v === cur ? ' class="cur"' : '') + '>' + numbered(lines, cmp && ((i) => cmp.cur[i].kind !== 'same')) + '</td>';
+                const entries = snaps[v][k].entries;
+                const cmp = state.prev ? core.compareLines(prevList, entries.map((e) => e.text)) : null;
+                return '<td class="items' + (v === cur ? ' cur' : '') + '">' + (entries.length ? entries.map((e, i) => '<div class="it">'
+                    + plus(v, k, i, e.id ? finalIds.indexOf(e.id) >= 0 : finalTexts.indexOf(e.text) >= 0)
+                    + '<span>' + blueIf(cmp && cmp.cur[i].kind !== 'same', esc((i + 1) + '. ' + e.text)) + '</span></div>').join('') + allBtn(v, k, entries.length) : '-') + '</td>';
             };
-            const opCell = (v) => '<td' + (v === cur ? ' class="cur"' : '') + '>' + (esc(snaps[v][k].opinion) || '-')
-                + useBtn(v, k, !!snaps[v][k].opinion) + '</td>';
+            const opCell = (v) => '<td' + (v === cur ? ' class="cur"' : '') + '>' + (esc(snaps[v][k].opinion) || '-') + opBtn(v, k, !!snaps[v][k].opinion) + '</td>';
+
+            // AI안 항목: A안·B안 어디에도 없는 것은 「AI만」, 고른 이유는 줄 아래에 작게
+            const aiList = aiDefects(k);
+            const aiLines = aiList.map((d) => core.itemText(d));
+            const aiCmp = state.prev ? core.compareLines(prevList, aiLines) : null;
+            const inAB = (id) => ['A', 'B'].some((v) => snaps[v][k].entries.some((e) => e.id === id));
+            const aiEmpty = k === 'load' || hasAi ? '-' : '<span class="muted">위 「AI안 만들기」를 누르면 나옵니다</span>';
+            const aiCell = aiList.length ? aiList.map((d, i) => '<div class="it">' + plus('AI', k, i, finalIds.indexOf(d.id) >= 0) + '<span>'
+                + blueIf(aiCmp && aiCmp.cur[i].kind !== 'same', esc((i + 1) + '. ' + aiLines[i]))
+                + (inAB(d.id) ? '' : ' <span class="badge chg">AI만</span>')
+                + (core.isForced(d) ? ' <span class="badge must">0.5mm 이상</span>' : '')
+                + (aiWhy[d.id] ? '<span class="why">' + esc(aiWhy[d.id]) + '</span>' : '') + '</span></div>').join('') + allBtn('AI', k, aiList.length) : aiEmpty;
             const odd = (state.ai && state.ai.odd && state.ai.odd[k]) || [];
+
+            const prevCell = !state.prev ? '<span class="muted">전회차 보고서(.hwp)를 읽으면 나옵니다</span>'
+                : (prevList.length ? prevList.map((t, i) => '<div class="it">' + plus('prev', k, i, finalTexts.indexOf(t) >= 0)
+                    + '<span>' + esc((i + 1) + '. ' + t) + '</span></div>').join('') + allBtn('prev', k, prevList.length) : '-');
+
+            const finalEntries = snaps.F[k].entries;
+            const finalCell = finalEntries.length ? finalEntries.map((e, i) => '<div class="it">'
+                + '<button type="button" class="plus minus" data-fdel="' + i + '" data-cat="' + k + '" title="최종안에서 빼기">−</button>'
+                + '<span>' + esc((i + 1) + '. ' + e.text) + '</span></div>').join('')
+                : '<span class="muted">' + (k === 'load' ? '-' : '왼쪽 항목의 +를 눌러 담으세요') + '</span>';
+
             h += '<tr><td class="c" rowspan="2">' + esc(cat.label) + '</td><td class="c">주요<br>결과</td>'
-                + '<td>' + (state.prev ? numbered(prevLines(k)) : '<span class="muted">전회차 보고서(.hwp)를 읽으면 나옵니다</span>') + '</td>'
-                + lineCell('A') + lineCell('B')
-                + '<td class="muted">' + (aiOp[k] ? esc(state.ai.base) + '안과 같은 항목' : '-') + '</td></tr>'
+                + '<td class="items">' + prevCell + '</td>' + lineCell('A') + lineCell('B')
+                + '<td class="items">' + aiCell + '</td>'
+                + '<td class="items final">' + finalCell + '</td></tr>'
                 + '<tr><td class="c">의견</td>'
-                + '<td>' + (esc(prevOp) || '-') + useBtn('prev', k, !!prevOp) + '</td>'
+                + '<td>' + (esc(prevOp) || '-') + opBtn('prev', k, !!prevOp) + '</td>'
                 + opCell('A') + opCell('B')
-                + '<td>' + (aiOp[k] ? esc(aiOp[k]) : (k === 'load' || hasAi ? '-' : '<span class="muted">위 「AI안 만들기」를 누르면 나옵니다</span>'))
+                + '<td>' + (aiOp[k] ? esc(aiOp[k]) : aiEmpty)
                 + (odd.length ? '<div><span class="badge warn">조사표에 없는 숫자: ' + esc(odd.join(', ')) + '</span></div>' : '')
-                + useBtn('AI', k, !!aiOp[k]) + '</td></tr>';
+                + opBtn('AI', k, !!aiOp[k]) + '</td>'
+                + '<td class="final">' + (esc(snaps.F[k].opinion) || '-') + '</td></tr>';
         });
         return h + '</table>';
     }
 
     function renderCompare() {
         $('compareBody').innerHTML = compareHtml();
-        $('btnAiUseAll').classList.toggle('hidden', !(state.ai && Object.keys(state.ai.opinion || {}).length));
-        $('btnAiUseAll').textContent = 'AI안 의견을 모두 ' + state.variant + '안에 쓰기';
     }
 
-    /** 비교표의 의견 하나를 지금 보는 작성안의 의견으로 쓴다. 첫 줄(머리말)은 금회 것으로 둔다. */
+    /** 비교표의 의견 하나를 최종안의 그 분류 의견으로 쓴다(통째로 바꾼다). 첫 줄(머리말)은 금회 것으로 둔다. */
     function useOpinion(src, catKey) {
-        if (src === 'prev') { usePrevOpinion(catKey); return; }
-        const body = src === 'AI' ? ((state.ai && state.ai.opinion[catKey]) || '') : snapshotOf(src)[catKey].opinion;
+        const body = src === 'prev' ? ((state.prev && state.prev.opinion[catKey]) || '')
+            : (src === 'AI' ? ((state.ai && state.ai.opinion[catKey]) || '') : snapshotOf(src)[catKey].opinion);
         if (!body) return;
+        showFinal();
         const head = catKey === 'load' ? '' : core.buildOpinion(catKey, [], state.meta).split('\n')[0];
         state.opinion[catKey] = (head ? head + '\n' : '') + body;
     }
@@ -930,7 +1127,7 @@
         const repairBlue = !!(state.prev && state.markBlue
             && core.compareLines([state.prev.repairNote], [state.repairNote]).cur[0].kind !== 'same');
         return {
-            title: [state.meta.buildingName, state.meta.roundLabel].filter(Boolean).join(' ') + ' (작성안 ' + state.variant + ')',
+            title: [state.meta.buildingName, state.meta.roundLabel].filter(Boolean).join(' ') + ' (' + (isFinal() ? '최종안' : '작성안 ' + state.variant) + ')',
             cats: cats,
             repair: { text: state.repairNote, blue: repairBlue },
             summaryRows: core.buildSummaryRows(groups).map((r) => ({ cells: edited(r) })),
@@ -992,7 +1189,7 @@
         try {
             const blob = await buildHwpxBlob();
             const name = (state.meta.buildingName || '건축물').replace(/[^a-zA-Z0-9가-힣_-]/g, '_')
-                + '_보고서본문요약_' + state.variant + '안_' + new Date().toISOString().slice(0, 10).replace(/-/g, '') + '.hwpx';
+                + '_보고서본문요약_' + variantLabel(state.variant) + '_' + new Date().toISOString().slice(0, 10).replace(/-/g, '') + '.hwpx';
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url;
@@ -1092,7 +1289,8 @@
         // 이번에 전회차 파일을 먼저 골랐으면 그것을, 아니면 지난번에 읽어 둔 것을 쓴다
         state.prev = prevLoadedNow || (saved && saved.prev) || null;
         applyOverrides();
-        state.ai = (saved && saved.ai) || null;
+        // 항목을 고르기 전(의견만 받던 때)의 AI안은 잇지 않는다
+        state.ai = (saved && saved.ai && saved.ai.sel) ? saved.ai : null;
         state.vars = (saved && saved.vars) || { A: null, B: null };
         // 작성안을 나누기 전(2026-10-08 오전)에 저장한 내용은 A안으로 잇는다
         if (saved && !saved.vars && saved.sel) {
@@ -1132,7 +1330,7 @@
         });
     });
 
-    ['A', 'B'].forEach((v) => {
+    VARIANTS.forEach((v) => {
         $('tab' + v).addEventListener('click', () => {
             if (state.variant === v || !state.defects.length) return;
             stashVariant();
@@ -1143,26 +1341,41 @@
     });
 
     $('btnExportHwpx').addEventListener('click', () => { if (state.defects.length) exportHwpx(); });
-    $('btnAiOpinion').addEventListener('click', () => { if (state.defects.length) runAiOpinion(); });
-    $('btnAiUseAll').addEventListener('click', () => {
-        if (!state.ai) return;
-        if (!window.confirm('AI안 의견을 ' + state.variant + '안의 모든 분류에 넣을까요? 지금 ' + state.variant + '안에 적힌 의견은 바뀝니다.')) return;
-        Object.keys(state.ai.opinion).forEach((k) => useOpinion('AI', k));
-        save();
-        renderOut();
-        setAiNote('AI안 의견을 ' + state.variant + '안에 넣었습니다. 아래 ③·⑤ 표에서 고칠 수 있습니다.', 'ok');
-    });
-
+    $('btnAiOpinion').addEventListener('click', () => { if (state.defects.length) runAi(); });
+    // 비교표: + 담기 / 모두 담기 / − 빼기 / 의견 쓰기. 모두 최종안에 하는 일이라 최종안을 화면에 올린다.
     $('compareBody').addEventListener('click', (ev) => {
         const t = ev.target;
-        const src = t.getAttribute && t.getAttribute('data-use');
-        if (!src) return;
-        useOpinion(src, t.getAttribute('data-cat'));
+        if (!t.getAttribute || t.tagName !== 'BUTTON') return;
+        const catKey = t.getAttribute('data-cat');
+        const src = t.getAttribute('data-add') || t.getAttribute('data-add-all');
+        const wasFinal = state.variant === 'F';
+        let note = '';
+        if (t.getAttribute('data-add-all')) {
+            const n = src === 'AI' ? aiDefects(catKey).length : (src === 'prev' ? prevLines(catKey).length : snapshotOf(src)[catKey].entries.length);
+            const items = [];
+            for (let i = 0; i < n; i++) items.push(sourceItem(src, catKey, i));
+            showFinal();
+            items.forEach((it) => addToFinal(it, catKey));
+            note = '최종안에 ' + items.filter(Boolean).length + '건을 담았습니다.';
+        } else if (src) {
+            const item = sourceItem(src, catKey, parseInt(t.getAttribute('data-idx'), 10));
+            showFinal();
+            addToFinal(item, catKey);
+            note = '최종안에 담았습니다.' + (item && !item.d && src === 'prev' && catKey !== 'load' ? ' 금회 조사표에 같은 항목이 없어 전회 문구만 넣었습니다.' : '');
+        } else if (t.getAttribute('data-fdel') != null) {
+            showFinal();
+            removeFromFinal(catKey, parseInt(t.getAttribute('data-fdel'), 10));
+            note = '최종안에서 뺐습니다.';
+        } else if (t.getAttribute('data-use')) {
+            useOpinion(t.getAttribute('data-use'), catKey);
+            note = '최종안의 의견을 바꿨습니다.';
+        } else {
+            return;
+        }
         save();
-        renderOut();
-        setAiNote((src === 'prev' ? '전회차' : src + '안') + ' 의견을 ' + state.variant + '안에 넣었습니다. 아래 ③·⑤ 표에서 고칠 수 있습니다.', 'ok');
+        renderAll();
+        setAiNote(note + (wasFinal ? '' : ' 아래 표와 한글 파일도 최종안으로 바뀌었습니다.'), 'ok');
     });
-
     $('markBlue').addEventListener('change', (ev) => {
         state.markBlue = ev.target.checked;
         save();
@@ -1170,7 +1383,7 @@
     });
 
     $('btnReset').addEventListener('click', () => {
-        if (!window.confirm('지금 보고 있는 ' + state.variant + '안에서 고른 항목과 고친 문구를 지우고 추천 상태로 되돌릴까요?\n(다른 작성안과 읽어 둔 전회차 보고서는 그대로 둡니다)')) return;
+        if (!window.confirm('지금 보고 있는 ' + variantLabel(state.variant) + '에서 고른 항목과 고친 문구를 지우고 ' + (isFinal() ? '빈 상태로' : '추천 상태로') + ' 되돌릴까요?\n(다른 작성안과 읽어 둔 전회차 보고서는 그대로 둡니다)')) return;
         state.catOverride = {};
         state.defects.forEach((d) => { d.category = core.classify(d); });
         state.vars[state.variant] = null;

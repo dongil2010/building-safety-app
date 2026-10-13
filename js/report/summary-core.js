@@ -420,15 +420,14 @@
             lines.push('- ' + cat.short + ' 상태는 전반적으로 양호한 것으로 조사됨.');
             return lines.join('\n');
         }
-        mine.forEach(function (g) {
-            const subject = g.rep.content;
-            if (g.cause) {
-                lines.push('- ' + subject + josaEunNeun(subject) + ' ' + g.cause + ' 등에 의한 결함으로 판단됨.');
-            } else {
-                lines.push('- ' + subject + josaEunNeun(subject) + ' ');
-            }
-        });
+        mine.forEach(function (g) { lines.push(opinionLine(g.rep.content, g.cause)); });
         return lines.join('\n');
+    }
+
+    /** 의견 한 줄. 원인추정이 없으면 뒷말을 비워 사람이 적게 한다. */
+    function opinionLine(subject, cause) {
+        if (cause) return '- ' + subject + josaEunNeun(subject) + ' ' + cause + ' 등에 의한 결함으로 판단됨.';
+        return '- ' + subject + josaEunNeun(subject) + ' ';
     }
 
     /** 구조체 균열·이격 가운데 폭 값이 이상해 자동 규칙에서 뺀 것 */
@@ -621,6 +620,7 @@
         buildPartRows: buildPartRows,
         buildCauseRows: buildCauseRows,
         buildOpinion: buildOpinion,
+        opinionLine: opinionLine,
         listWidthChecks: listWidthChecks,
         categoryLabel: categoryLabel
     };

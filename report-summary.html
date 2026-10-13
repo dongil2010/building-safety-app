@@ -28,7 +28,7 @@
     }
     header.top h1 { font-size: 1.1rem; margin: 0; }
     header.top span { color: #94a3b8; font-size: 0.85rem; }
-    main { max-width: 1180px; margin: 0 auto; padding: 1rem 1.25rem 4rem; }
+    main { max-width: 1400px; margin: 0 auto; padding: 1rem 1.25rem 4rem; }
     section.card {
         background: #ffffff;
         border: 1px solid #e2e8f0;
@@ -78,6 +78,7 @@
     .badge.photo { background: #dbeafe; color: #1d4ed8; }
     details { margin: 0.3rem 0 0.2rem; }
     details summary { cursor: pointer; color: #0369a1; font-size: 0.85rem; }
+    #pickDetails > summary { font-size: 0.9rem; font-weight: 600; padding: 0.2rem 0; }
     textarea { width: 100%; padding: 0.45rem 0.55rem; border: 1px solid #cbd5e1; border-radius: 6px; resize: vertical; }
     ul.check { margin: 0.2rem 0 0; padding-left: 1.1rem; }
 
@@ -110,7 +111,7 @@
     @media (max-width: 860px) { .cmp { grid-template-columns: 1fr; } }
 
     /* 한눈에 비교 */
-    table.cmp4 { border-collapse: collapse; width: 100%; min-width: 900px; table-layout: fixed; font-size: 0.82rem; }
+    table.cmp4 { border-collapse: collapse; width: 100%; min-width: 1080px; table-layout: fixed; font-size: 0.82rem; }
     table.cmp4 th, table.cmp4 td { border: 1px solid #cbd5e1; padding: 0.3rem 0.4rem; vertical-align: top; white-space: pre-wrap; word-break: keep-all; overflow-wrap: anywhere; }
     table.cmp4 th { background: #e2e8f0; text-align: center; }
     table.cmp4 th small { display: block; font-weight: 500; color: #475569; }
@@ -119,6 +120,17 @@
     table.cmp4 td.cur { background: #f0f9ff; }
     table.cmp4 td.c { text-align: center; vertical-align: middle; font-weight: 600; background: #f8fafc; }
     table.cmp4 td .btn { margin-top: 0.3rem; }
+    table.cmp4 td.items { white-space: normal; }
+    table.cmp4 .it { display: flex; gap: 0.3rem; align-items: flex-start; margin-bottom: 0.2rem; }
+    table.cmp4 .it > span { flex: 1; min-width: 0; }
+    table.cmp4 .plus { flex: none; width: 1.35rem; height: 1.35rem; padding: 0; line-height: 1; border: 1px solid #0369a1; background: #ffffff; color: #0369a1; border-radius: 5px; font-weight: 700; cursor: pointer; }
+    table.cmp4 .plus:hover { background: #e0f2fe; }
+    table.cmp4 .plus.in { border-color: #15803d; background: #dcfce7; color: #15803d; }
+    table.cmp4 .plus.minus { border-color: #b91c1c; color: #b91c1c; }
+    table.cmp4 .plus.minus:hover { background: #fee2e2; }
+    table.cmp4 td.final { background: #fefce8; }
+    table.cmp4 td.final.cur, table.cmp4 td.cur.final { background: #fef9c3; }
+    table.cmp4 .why { display: block; color: #64748b; font-size: 0.78rem; }
 
     /* 작성안 A / B */
     .tabs { display: flex; gap: 0.4rem; margin-bottom: 0.4rem; }
@@ -160,30 +172,34 @@
     </section>
 
     <section class="card hidden" id="compareCard">
-        <h2>한눈에 비교 · 전회차 / A안 / B안 / AI안</h2>
+        <h2>한눈에 비교 · 전회차 / A안 / B안 / AI안 → 최종안</h2>
         <div class="row" style="margin-bottom:0.5rem;">
             <button type="button" class="btn ghost" id="btnAiOpinion">AI안 만들기 (Gemini)</button>
-            <button type="button" class="btn ghost small hidden" id="btnAiUseAll"></button>
-            <span class="muted" id="aiNote">AI안은 지금 보는 작성안의 항목으로 책임기술자 의견만 새로 씁니다. 누를 때만 고른 항목의 글자가 Google로 전송됩니다(사진 제외).</span>
+            <span class="muted" id="aiNote">AI안은 조사표의 결함 전체를 읽고 주요 점검결과를 직접 고른 뒤 의견을 씁니다. 누를 때만 결함 목록의 글자가 Google로 전송됩니다(사진 제외).</span>
         </div>
-        <p class="muted">분류마다 주요 점검결과와 의견을 나란히 놓았습니다. 색칠된 칸이 지금 보는 작성안이고, 아래 2·3번에서 고치면 여기에 바로 반영됩니다. 다른 칸의 의견이 더 나으면 「이 의견을 …안에 쓰기」로 가져오세요. 전회차를 읽었으면 전회차와 달라진 항목은 <b style="color:#0000ff">파란 글자</b>입니다.</p>
+        <p class="muted">항목 앞의 <b>+</b>를 누르면 맨 오른쪽 <b>최종안</b>에 담기고, 그 항목의 의견도 바로 한 줄 써집니다(B안·AI안에서 담으면 그 안의 의견 줄, 전회차·A안에서 담으면 A안 말투). 이미 담긴 항목은 ✓로 바뀌며, 다른 안의 ✓를 누르면 의견 줄만 그 안의 것으로 바뀝니다. 최종안에서 <b>−</b>를 누르면 빠집니다. 담으면 아래 2·3번 표와 한글 파일도 최종안으로 바뀝니다.</p>
+        <p class="muted">AI안의 「AI만」은 A안·B안이 고르지 않은 항목이고, 회색 글씨는 AI가 적은 고른 이유입니다. 전회차를 읽었으면 전회차와 달라진 항목은 <b style="color:#0000ff">파란 글자</b>입니다.</p>
         <div id="compareBody" style="overflow-x:auto;"></div>
     </section>
 
     <section class="card hidden" id="pickCard">
-        <h2>2. 주요 점검결과 고르기</h2>
+        <h2>2. 아래 표에 쓸 작성안</h2>
         <div class="tabs">
             <button type="button" class="tab on" id="tabA">작성안 A · 우리 보고서 스타일</button>
             <button type="button" class="tab" id="tabB">작성안 B · 중요도 중심 제안</button>
+            <button type="button" class="tab" id="tabF">최종안 · 비교표에서 담은 것</button>
         </div>
         <p class="muted" id="variantNote"></p>
-        <p class="muted">분류마다 추천 항목이 골라져 있습니다. 체크를 바꾸거나 문구를 고치면 아래 표에 바로 반영됩니다. 분류가 틀린 항목은 오른쪽 목록에서 옮길 수 있습니다.</p>
-        <p class="legend">전회차 보고서를 읽으면 왼쪽에 전회차 항목이 나옵니다. <b>파란 글자</b>는 전회차와 달라졌거나 새로 들어간 항목이고, 「금회 없음」은 전회차에만 있는 항목입니다.</p>
-        <div class="row" style="margin-bottom:0.3rem;">
-            <button type="button" class="btn ghost small" id="btnReset">추천으로 되돌리기</button>
-            <button type="button" class="btn ghost small hidden" id="btnAlignPrev">전회차 항목 기준으로 다시 고르기</button>
-        </div>
-        <div id="pickBody"></div>
+        <details id="pickDetails">
+            <summary>세부 고치기 — 조사표 전체에서 직접 고르기 · 문구 고치기 · 분류 옮기기 · 하중조사/보수상태 적기</summary>
+            <p class="muted">위 비교표로 충분하면 열지 않아도 됩니다. 지금 고른 작성안의 항목이 분류마다 체크되어 있고, 체크를 바꾸거나 문구를 고치면 표에 바로 반영됩니다. 분류가 틀린 항목은 오른쪽 목록에서 옮길 수 있습니다.</p>
+            <p class="legend">전회차 보고서를 읽으면 왼쪽에 전회차 항목이 나옵니다. <b>파란 글자</b>는 전회차와 달라졌거나 새로 들어간 항목이고, 「금회 없음」은 전회차에만 있는 항목입니다.</p>
+            <div class="row" style="margin-bottom:0.3rem;">
+                <button type="button" class="btn ghost small" id="btnReset">추천으로 되돌리기</button>
+                <button type="button" class="btn ghost small hidden" id="btnAlignPrev">전회차 항목 기준으로 다시 고르기</button>
+            </div>
+            <div id="pickBody"></div>
+        </details>
     </section>
 
     <section class="card hidden" id="outCard">
