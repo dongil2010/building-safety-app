@@ -1,0 +1,872 @@
+[
+ {
+  "case": "col4",
+  "memberType": "기둥",
+  "defects": {
+   "B": 2,
+   "C": 1,
+   "D": 1
+  },
+  "under": 0,
+  "over": 0,
+  "total": 5,
+  "nA": 1,
+  "crack": 7,
+  "member": 7
+ },
+ {
+  "case": "col4",
+  "memberType": "기둥",
+  "defects": {
+   "B": 2,
+   "C": 1,
+   "D": 1
+  },
+  "under": 0,
+  "over": 0,
+  "total": 6,
+  "nA": 2,
+  "crack": 6,
+  "member": 7
+ },
+ {
+  "case": "col4",
+  "memberType": "기둥",
+  "defects": {
+   "B": 2,
+   "C": 1,
+   "D": 1
+  },
+  "under": 0,
+  "over": 0,
+  "total": 8,
+  "nA": 4,
+  "crack": 6,
+  "member": 7
+ },
+ {
+  "case": "col4",
+  "memberType": "기둥",
+  "defects": {
+   "B": 2,
+   "C": 1,
+   "D": 1
+  },
+  "under": 0,
+  "over": 0,
+  "total": 10,
+  "nA": 6,
+  "crack": 6,
+  "member": 7
+ },
+ {
+  "case": "col4",
+  "memberType": "기둥",
+  "defects": {
+   "B": 2,
+   "C": 1,
+   "D": 1
+  },
+  "under": 0,
+  "over": 0,
+  "total": 15,
+  "nA": 11,
+  "crack": 5,
+  "member": 5
+ },
+ {
+  "case": "col4",
+  "memberType": "기둥",
+  "defects": {
+   "B": 2,
+   "C": 1,
+   "D": 1
+  },
+  "under": 0,
+  "over": 0,
+  "total": 20,
+  "nA": 16,
+  "crack": 4.5,
+  "member": 5
+ },
+ {
+  "case": "col4",
+  "memberType": "기둥",
+  "defects": {
+   "B": 2,
+   "C": 1,
+   "D": 1
+  },
+  "under": 0,
+  "over": 0,
+  "total": 21,
+  "nA": 17,
+  "crack": 3.8,
+  "member": 3
+ },
+ {
+  "case": "col4",
+  "memberType": "기둥",
+  "defects": {
+   "B": 2,
+   "C": 1,
+   "D": 1
+  },
+  "under": 0,
+  "over": 0,
+  "total": 25,
+  "nA": 21,
+  "crack": 3.8,
+  "member": 3
+ },
+ {
+  "case": "col4",
+  "memberType": "기둥",
+  "defects": {
+   "B": 2,
+   "C": 1,
+   "D": 1
+  },
+  "under": 0,
+  "over": 0,
+  "total": 30,
+  "nA": 26,
+  "crack": 3.33,
+  "member": 3
+ },
+ {
+  "case": "col4",
+  "memberType": "기둥",
+  "defects": {
+   "B": 2,
+   "C": 1,
+   "D": 1
+  },
+  "under": 0,
+  "over": 0,
+  "total": 40,
+  "nA": 36,
+  "crack": 2.75,
+  "member": 3
+ },
+ {
+  "case": "col4",
+  "memberType": "기둥",
+  "defects": {
+   "B": 2,
+   "C": 1,
+   "D": 1
+  },
+  "under": 0,
+  "over": 0,
+  "total": 50,
+  "nA": 46,
+  "crack": 2.4,
+  "member": 3
+ },
+ {
+  "case": "col4",
+  "memberType": "기둥",
+  "defects": {
+   "B": 2,
+   "C": 1,
+   "D": 1
+  },
+  "under": 0,
+  "over": 0,
+  "total": 75,
+  "nA": 71,
+  "crack": 1.93,
+  "member": 1
+ },
+ {
+  "case": "col4",
+  "memberType": "기둥",
+  "defects": {
+   "B": 2,
+   "C": 1,
+   "D": 1
+  },
+  "under": 0,
+  "over": 0,
+  "total": 100,
+  "nA": 96,
+  "crack": 1.7,
+  "member": 1
+ },
+ {
+  "case": "col4",
+  "memberType": "기둥",
+  "defects": {
+   "B": 2,
+   "C": 1,
+   "D": 1
+  },
+  "under": 0,
+  "over": 0,
+  "total": 150,
+  "nA": 146,
+  "crack": 1.47,
+  "member": 1
+ },
+ {
+  "case": "col4",
+  "memberType": "기둥",
+  "defects": {
+   "B": 2,
+   "C": 1,
+   "D": 1
+  },
+  "under": 0,
+  "over": 0,
+  "total": 200,
+  "nA": 196,
+  "crack": 1.35,
+  "member": 1
+ },
+ {
+  "case": "col4area",
+  "memberType": "기둥",
+  "defects": {
+   "B": 2,
+   "C": 1,
+   "D": 1
+  },
+  "under": 3,
+  "over": 1,
+  "total": 5,
+  "nA": 1,
+  "crack": 7.17,
+  "member": 7
+ },
+ {
+  "case": "col4area",
+  "memberType": "기둥",
+  "defects": {
+   "B": 2,
+   "C": 1,
+   "D": 1
+  },
+  "under": 3,
+  "over": 1,
+  "total": 6,
+  "nA": 2,
+  "crack": 6.15,
+  "member": 7
+ },
+ {
+  "case": "col4area",
+  "memberType": "기둥",
+  "defects": {
+   "B": 2,
+   "C": 1,
+   "D": 1
+  },
+  "under": 3,
+  "over": 1,
+  "total": 8,
+  "nA": 4,
+  "crack": 6.15,
+  "member": 7
+ },
+ {
+  "case": "col4area",
+  "memberType": "기둥",
+  "defects": {
+   "B": 2,
+   "C": 1,
+   "D": 1
+  },
+  "under": 3,
+  "over": 1,
+  "total": 10,
+  "nA": 6,
+  "crack": 6.15,
+  "member": 7
+ },
+ {
+  "case": "col4area",
+  "memberType": "기둥",
+  "defects": {
+   "B": 2,
+   "C": 1,
+   "D": 1
+  },
+  "under": 3,
+  "over": 1,
+  "total": 15,
+  "nA": 11,
+  "crack": 5.13,
+  "member": 5
+ },
+ {
+  "case": "col4area",
+  "memberType": "기둥",
+  "defects": {
+   "B": 2,
+   "C": 1,
+   "D": 1
+  },
+  "under": 3,
+  "over": 1,
+  "total": 20,
+  "nA": 16,
+  "crack": 4.61,
+  "member": 5
+ },
+ {
+  "case": "col4area",
+  "memberType": "기둥",
+  "defects": {
+   "B": 2,
+   "C": 1,
+   "D": 1
+  },
+  "under": 3,
+  "over": 1,
+  "total": 21,
+  "nA": 17,
+  "crack": 3.89,
+  "member": 3
+ },
+ {
+  "case": "col4area",
+  "memberType": "기둥",
+  "defects": {
+   "B": 2,
+   "C": 1,
+   "D": 1
+  },
+  "under": 3,
+  "over": 1,
+  "total": 25,
+  "nA": 21,
+  "crack": 3.89,
+  "member": 3
+ },
+ {
+  "case": "col4area",
+  "memberType": "기둥",
+  "defects": {
+   "B": 2,
+   "C": 1,
+   "D": 1
+  },
+  "under": 3,
+  "over": 1,
+  "total": 30,
+  "nA": 26,
+  "crack": 3.41,
+  "member": 3
+ },
+ {
+  "case": "col4area",
+  "memberType": "기둥",
+  "defects": {
+   "B": 2,
+   "C": 1,
+   "D": 1
+  },
+  "under": 3,
+  "over": 1,
+  "total": 40,
+  "nA": 36,
+  "crack": 2.82,
+  "member": 3
+ },
+ {
+  "case": "col4area",
+  "memberType": "기둥",
+  "defects": {
+   "B": 2,
+   "C": 1,
+   "D": 1
+  },
+  "under": 3,
+  "over": 1,
+  "total": 50,
+  "nA": 46,
+  "crack": 2.46,
+  "member": 3
+ },
+ {
+  "case": "col4area",
+  "memberType": "기둥",
+  "defects": {
+   "B": 2,
+   "C": 1,
+   "D": 1
+  },
+  "under": 3,
+  "over": 1,
+  "total": 75,
+  "nA": 71,
+  "crack": 1.98,
+  "member": 1
+ },
+ {
+  "case": "col4area",
+  "memberType": "기둥",
+  "defects": {
+   "B": 2,
+   "C": 1,
+   "D": 1
+  },
+  "under": 3,
+  "over": 1,
+  "total": 100,
+  "nA": 96,
+  "crack": 1.74,
+  "member": 1
+ },
+ {
+  "case": "col4area",
+  "memberType": "기둥",
+  "defects": {
+   "B": 2,
+   "C": 1,
+   "D": 1
+  },
+  "under": 3,
+  "over": 1,
+  "total": 150,
+  "nA": 146,
+  "crack": 1.51,
+  "member": 1
+ },
+ {
+  "case": "col4area",
+  "memberType": "기둥",
+  "defects": {
+   "B": 2,
+   "C": 1,
+   "D": 1
+  },
+  "under": 3,
+  "over": 1,
+  "total": 200,
+  "nA": 196,
+  "crack": 1.38,
+  "member": 1
+ },
+ {
+  "case": "beam4",
+  "memberType": "큰보",
+  "defects": {
+   "B": 2,
+   "C": 1,
+   "D": 1
+  },
+  "under": 0,
+  "over": 0,
+  "total": 5,
+  "nA": 1,
+  "crack": 6,
+  "member": 7
+ },
+ {
+  "case": "beam4",
+  "memberType": "큰보",
+  "defects": {
+   "B": 2,
+   "C": 1,
+   "D": 1
+  },
+  "under": 0,
+  "over": 0,
+  "total": 6,
+  "nA": 2,
+  "crack": 6,
+  "member": 7
+ },
+ {
+  "case": "beam4",
+  "memberType": "큰보",
+  "defects": {
+   "B": 2,
+   "C": 1,
+   "D": 1
+  },
+  "under": 0,
+  "over": 0,
+  "total": 8,
+  "nA": 4,
+  "crack": 5,
+  "member": 5
+ },
+ {
+  "case": "beam4",
+  "memberType": "큰보",
+  "defects": {
+   "B": 2,
+   "C": 1,
+   "D": 1
+  },
+  "under": 0,
+  "over": 0,
+  "total": 10,
+  "nA": 6,
+  "crack": 5,
+  "member": 5
+ },
+ {
+  "case": "beam4",
+  "memberType": "큰보",
+  "defects": {
+   "B": 2,
+   "C": 1,
+   "D": 1
+  },
+  "under": 0,
+  "over": 0,
+  "total": 15,
+  "nA": 11,
+  "crack": 3.8,
+  "member": 3
+ },
+ {
+  "case": "beam4",
+  "memberType": "큰보",
+  "defects": {
+   "B": 2,
+   "C": 1,
+   "D": 1
+  },
+  "under": 0,
+  "over": 0,
+  "total": 20,
+  "nA": 16,
+  "crack": 3.33,
+  "member": 3
+ },
+ {
+  "case": "beam4",
+  "memberType": "큰보",
+  "defects": {
+   "B": 2,
+   "C": 1,
+   "D": 1
+  },
+  "under": 0,
+  "over": 0,
+  "total": 21,
+  "nA": 17,
+  "crack": 3,
+  "member": 3
+ },
+ {
+  "case": "beam4",
+  "memberType": "큰보",
+  "defects": {
+   "B": 2,
+   "C": 1,
+   "D": 1
+  },
+  "under": 0,
+  "over": 0,
+  "total": 25,
+  "nA": 21,
+  "crack": 2.75,
+  "member": 3
+ },
+ {
+  "case": "beam4",
+  "memberType": "큰보",
+  "defects": {
+   "B": 2,
+   "C": 1,
+   "D": 1
+  },
+  "under": 0,
+  "over": 0,
+  "total": 30,
+  "nA": 26,
+  "crack": 2.56,
+  "member": 3
+ },
+ {
+  "case": "beam4",
+  "memberType": "큰보",
+  "defects": {
+   "B": 2,
+   "C": 1,
+   "D": 1
+  },
+  "under": 0,
+  "over": 0,
+  "total": 40,
+  "nA": 36,
+  "crack": 2.17,
+  "member": 3
+ },
+ {
+  "case": "beam4",
+  "memberType": "큰보",
+  "defects": {
+   "B": 2,
+   "C": 1,
+   "D": 1
+  },
+  "under": 0,
+  "over": 0,
+  "total": 50,
+  "nA": 46,
+  "crack": 1.93,
+  "member": 1
+ },
+ {
+  "case": "beam4",
+  "memberType": "큰보",
+  "defects": {
+   "B": 2,
+   "C": 1,
+   "D": 1
+  },
+  "under": 0,
+  "over": 0,
+  "total": 75,
+  "nA": 71,
+  "crack": 1.61,
+  "member": 1
+ },
+ {
+  "case": "beam4",
+  "memberType": "큰보",
+  "defects": {
+   "B": 2,
+   "C": 1,
+   "D": 1
+  },
+  "under": 0,
+  "over": 0,
+  "total": 100,
+  "nA": 96,
+  "crack": 1.47,
+  "member": 1
+ },
+ {
+  "case": "beam4",
+  "memberType": "큰보",
+  "defects": {
+   "B": 2,
+   "C": 1,
+   "D": 1
+  },
+  "under": 0,
+  "over": 0,
+  "total": 150,
+  "nA": 146,
+  "crack": 1.31,
+  "member": 1
+ },
+ {
+  "case": "beam4",
+  "memberType": "큰보",
+  "defects": {
+   "B": 2,
+   "C": 1,
+   "D": 1
+  },
+  "under": 0,
+  "over": 0,
+  "total": 200,
+  "nA": 196,
+  "crack": 1.23,
+  "member": 1
+ },
+ {
+  "case": "slab1E",
+  "memberType": "슬래브",
+  "defects": {
+   "E": 1
+  },
+  "under": 0,
+  "over": 1,
+  "total": 5,
+  "nA": 4,
+  "crack": 5.5,
+  "member": 5
+ },
+ {
+  "case": "slab1E",
+  "memberType": "슬래브",
+  "defects": {
+   "E": 1
+  },
+  "under": 0,
+  "over": 1,
+  "total": 6,
+  "nA": 5,
+  "crack": 5.5,
+  "member": 5
+ },
+ {
+  "case": "slab1E",
+  "memberType": "슬래브",
+  "defects": {
+   "E": 1
+  },
+  "under": 0,
+  "over": 1,
+  "total": 8,
+  "nA": 7,
+  "crack": 4.04,
+  "member": 5
+ },
+ {
+  "case": "slab1E",
+  "memberType": "슬래브",
+  "defects": {
+   "E": 1
+  },
+  "under": 0,
+  "over": 1,
+  "total": 10,
+  "nA": 9,
+  "crack": 4.04,
+  "member": 5
+ },
+ {
+  "case": "slab1E",
+  "memberType": "슬래브",
+  "defects": {
+   "E": 1
+  },
+  "under": 0,
+  "over": 1,
+  "total": 15,
+  "nA": 14,
+  "crack": 2.86,
+  "member": 3
+ },
+ {
+  "case": "slab1E",
+  "memberType": "슬래브",
+  "defects": {
+   "E": 1
+  },
+  "under": 0,
+  "over": 1,
+  "total": 20,
+  "nA": 19,
+  "crack": 2.56,
+  "member": 3
+ },
+ {
+  "case": "slab1E",
+  "memberType": "슬래브",
+  "defects": {
+   "E": 1
+  },
+  "under": 0,
+  "over": 1,
+  "total": 21,
+  "nA": 20,
+  "crack": 2.35,
+  "member": 3
+ },
+ {
+  "case": "slab1E",
+  "memberType": "슬래브",
+  "defects": {
+   "E": 1
+  },
+  "under": 0,
+  "over": 1,
+  "total": 25,
+  "nA": 24,
+  "crack": 2.2,
+  "member": 3
+ },
+ {
+  "case": "slab1E",
+  "memberType": "슬래브",
+  "defects": {
+   "E": 1
+  },
+  "under": 0,
+  "over": 1,
+  "total": 30,
+  "nA": 29,
+  "crack": 2.08,
+  "member": 3
+ },
+ {
+  "case": "slab1E",
+  "memberType": "슬래브",
+  "defects": {
+   "E": 1
+  },
+  "under": 0,
+  "over": 1,
+  "total": 40,
+  "nA": 39,
+  "crack": 1.84,
+  "member": 1
+ },
+ {
+  "case": "slab1E",
+  "memberType": "슬래브",
+  "defects": {
+   "E": 1
+  },
+  "under": 0,
+  "over": 1,
+  "total": 50,
+  "nA": 49,
+  "crack": 1.68,
+  "member": 1
+ },
+ {
+  "case": "slab1E",
+  "memberType": "슬래브",
+  "defects": {
+   "E": 1
+  },
+  "under": 0,
+  "over": 1,
+  "total": 75,
+  "nA": 74,
+  "crack": 1.49,
+  "member": 1
+ },
+ {
+  "case": "slab1E",
+  "memberType": "슬래브",
+  "defects": {
+   "E": 1
+  },
+  "under": 0,
+  "over": 1,
+  "total": 100,
+  "nA": 99,
+  "crack": 1.4,
+  "member": 1
+ },
+ {
+  "case": "slab1E",
+  "memberType": "슬래브",
+  "defects": {
+   "E": 1
+  },
+  "under": 0,
+  "over": 1,
+  "total": 150,
+  "nA": 149,
+  "crack": 1.3,
+  "member": 1
+ },
+ {
+  "case": "slab1E",
+  "memberType": "슬래브",
+  "defects": {
+   "E": 1
+  },
+  "under": 0,
+  "over": 1,
+  "total": 200,
+  "nA": 199,
+  "crack": 1.24,
+  "member": 1
+ }
+]

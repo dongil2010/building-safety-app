@@ -92,6 +92,29 @@ const r3 = P.merge(r2.project, r2.auto, P.computeAuto({ bldg, state: st, floors,
 assert.strictEqual(det(r3.project, '기둥').crackGrades.find((x) => x.grade === 'C').count, 0);
 assert.strictEqual(det(r3.project, '기둥').memberTotalCount, 10);
 
+// 확인부재는 점/입력만 — 결함으로 늘리지 않음. 양호(A) = 총수 − 결함(B~E), 최소 0
+const gA = (d, f) => d[f].find((x) => x.grade === 'A').count;
+assert.strictEqual(gA(det(r3.project, '기둥'), 'crackGrades'), 10 - 1);
+assert.strictEqual(gA(det(r3.project, '기둥'), 'leakGrades'), 10);
+assert.strictEqual(gA(det(r3.project, '내력벽'), 'leakGrades'), 2 - 1);
+assert.deepStrictEqual(P.check(r3.project), []);
+{
+    const pj = JSON.parse(JSON.stringify(r3.project));
+    const dw = det(pj, '내력벽');
+    dw.crackGrades.find((x) => x.grade === 'B').count = 5; // 총 2 < 결함 5
+    P.syncGradeA(pj);
+    assert.strictEqual(dw.memberTotalCount, 2, '총수 자동으로 올리지 않음');
+    assert.strictEqual(gA(dw, 'crackGrades'), 0);
+    const w = P.check(pj);
+    assert.strictEqual(w.length, 1);
+    assert.deepStrictEqual([w[0].member, w[0].field, w[0].total, w[0].defects], ['내력벽', 'crackGrades', 2, 5]);
+    // 총수 0인데 결함 있음 → 경고, A 손대지 않음
+    const ds = det(pj, '슬래브');
+    ds.rebarGrades.find((x) => x.grade === 'B').count = 1;
+    assert.ok(P.check(pj).some((x) => x.member === '슬래브' && x.total === 0));
+    assert.strictEqual(P.WARN_TEXT, '부재 수가 결함 수보다 적어요');
+}
+
 // 화면 연결: 스크립트 순서, 번들, 템플릿
 const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
 const at = (s) => html.indexOf(s);

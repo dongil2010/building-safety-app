@@ -24512,6 +24512,18 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 if (i.assumed) parts.push(`등급 b로 가정(면적율·깊이 없음) ${i.assumed}건`);
                 if (parts.length) warn.push(`${esc(api.unitTitle(u))}: ${parts.join(' · ')}`);
             });
+            const P = window.BSA && window.BSA.s357Prefill;
+            const F = window.BSA && window.BSA.s357 && window.BSA.s357.factory;
+            if (calc && P && F && typeof P.check === 'function') {
+                const saved = bldg.evalSafetyman || {};
+                const pj = P.merge(saved.project, saved.auto, calc, F).project;
+                P.check(pj, calc.units.map((x) => x.id)).forEach((w) => {
+                    const b = (pj.buildings || []).find((x) => x.id === w.buildingId);
+                    const sf = b && (b.sampleFloors || []).find((x) => x.id === w.floorId);
+                    const fl = (calc.units.find((x) => x.id === w.buildingId) || { floors: [] }).floors.find((x) => x.id === w.floorId);
+                    warn.push(`${esc(b ? b.name : '')} ${esc(fl ? fl.label : (sf ? sf.sampleFloor + '층' : ''))} ${esc(w.member)} ${esc(w.label)}: ${P.WARN_TEXT} (확인부재 ${w.total} · 결함 ${w.defects})`);
+                });
+            }
         } catch (e) { console.warn('평가 확인', e); }
         if (sum.unassigned.length) warn.push(`번호 없는 결함: ${sum.unassigned.map((f) => `${esc(f.floorLabel)} ${f.count}건`).join(', ')}`);
         // 3) 입력표(평가단위 × 부재)

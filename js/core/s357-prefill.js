@@ -1,7 +1,8 @@
 /**
  * SAFETY357(평가 탭) 자동 채움(2026-10-13).
  * 평가단위 = SAFETY357 건물 1개, 그 단위의 층 = 표본층 1개, 부재 = 기둥·내력벽·큰보·작은보·슬래브.
- * 도면에서 나오는 값만 채운다: 확인부재 수(부재 수 점) · 결함 등급별 부재 수(B~E; A는 SAFETY357이 총수 − 나머지).
+ * 도면에서 나오는 값만 채운다: 확인부재 수(부재 수 점·직접 입력만 — 양호 부재도 있으니 결함으로 늘리지 않음) · 결함 등급별 부재 수(B~E).
+ * 양호(A) = 확인부재 − 결함 부재(최소 0). 결함이 확인부재보다 많으면 경고만 하고 총수는 올리지 않는다.
  * 사용자가 고친 칸은 건드리지 않는다(지난번 자동값과 같을 때만 새 자동값으로 바꿈).
  * 점수·가중치·등급 계산은 여기 없음 — SAFETY357 번들(grades/safetymanWeights/conditionAggregate) 한 곳에만 있다.
  */
@@ -154,11 +155,51 @@
             if (next) nextAuto[path] = next;
             else if (!untouched) nextAuto[path] = prevAuto[path];
         });
+        syncGradeA(project, calc.units.map(function (u) { return u.id; }));
         return { project: project, auto: nextAuto };
     }
 
+    var DEFECT_GRADES = ['B', 'C', 'D', 'E'];
+    function defectSum(rows) {
+        return (rows || []).reduce(function (s, r) { return s + (r && DEFECT_GRADES.indexOf(r.grade) >= 0 ? (Number(r.count) || 0) : 0); }, 0);
+    }
+    function eachDetail(project, ids, fn) {
+        (project && project.buildings || []).forEach(function (b) {
+            if (ids && ids.indexOf(b.id) < 0) return;
+            (b.sampleFloors || []).forEach(function (sf) { (sf.details || []).forEach(function (d) { if (d) fn(b, sf, d); }); });
+        });
+    }
+    /** 양호(A) = 확인부재 − 결함(B~E) 부재, 최소 0. 확인부재 0이면 손대지 않음. */
+    function syncGradeA(project, ids) {
+        eachDetail(project, ids, function (b, sf, d) {
+            var total = Number(d.memberTotalCount) || 0;
+            if (total <= 0) return;
+            GRADE_FIELDS.forEach(function (f) {
+                var rows = d[f];
+                if (!Array.isArray(rows)) return;
+                var a = rows.find(function (r) { return r && r.grade === 'A'; });
+                if (a) a.count = Math.max(0, total - defectSum(rows));
+            });
+        });
+        return project;
+    }
+    var FIELD_LABEL = { crackGrades: '균열', leakGrades: '누수·백태', rebarGrades: '철근노출', spallingGrades: '박리', scalingGrades: '박락·층분리' };
+    /** 결함 부재가 확인부재보다 많은 칸 → [{ buildingId, floorId, member, field, label, total, defects }] */
+    function check(project, ids) {
+        var out = [];
+        eachDetail(project, ids, function (b, sf, d) {
+            var total = Number(d.memberTotalCount) || 0;
+            GRADE_FIELDS.forEach(function (f) {
+                var n = defectSum(d[f]);
+                if (n > total) out.push({ buildingId: b.id, floorId: sf.id, member: d.memberType, field: f, label: FIELD_LABEL[f] || f, total: total, defects: n });
+            });
+        });
+        return out;
+    }
+    var WARN_TEXT = '부재 수가 결함 수보다 적어요';
+
     var api = { MEMBER_MAP: MEMBER_MAP, S357_MEMBERS: S357_MEMBERS, GRADE_FIELDS: GRADE_FIELDS, classify: classify, floorNumber: floorNumber,
-        computeAuto: computeAuto, merge: merge, bid: bid, fid: fid };
+        computeAuto: computeAuto, merge: merge, syncGradeA: syncGradeA, check: check, WARN_TEXT: WARN_TEXT, bid: bid, fid: fid };
     if (typeof module !== 'undefined' && module.exports) module.exports = api;
     if (root) { root.BSA = root.BSA || {}; root.BSA.s357Prefill = api; }
 })(typeof window !== 'undefined' ? window : (typeof globalThis !== 'undefined' ? globalThis : null));
