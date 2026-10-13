@@ -24318,26 +24318,38 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         syncEvalUnitBar();
         if (typeof drawCanvas === 'function') drawCanvas();
     }
-    async function pickParentUnit(bldg, message) {
-        const api = evalUnitApi();
-        const units = api.planOf(bldg).units;
-        if (!units.length) return null;
-        if (units.length === 1) return units[0];
-        const pick = await window.appChoose(message, units.map((u) => ({ label: u.name })), { title: '평가단위 고르기' });
-        return pick == null ? null : units[pick];
+    function evalPlanFloors(bldg) {
+        return (bldg.floorsList || []).filter((f) => f && f.floorCode).map((f) => ({
+            floorCode: f.floorCode, floorLabel: f.floorLabel || f.floorCode, floorKey: `${bldg.id}_${f.floorCode}`
+        }));
     }
-    /** 나눈 층에 세부단위(예: 1-1) 추가 */
-    async function promptNewEvalSubUnit(floorKey) {
+    /** 옛 세부단위(1-1 …)를 건물 부분으로 옮기고 바뀐 층을 저장 대상으로 */
+    function migrateEvalUnitsLegacy(bldg) {
         const api = evalUnitApi();
-        const bldg = currentEvalBuilding();
-        const pu = await pickParentUnit(bldg, '이 세부단위가 들어갈 평가단위');
-        if (!pu) return null;
-        const u = api.createSubUnit(state, floorKey, bldg, pu.id, Date.now());
-        if (!u) return null;
-        commitEvalUnitChange(floorKey);
-        return u;
+        if (!api || !bldg || typeof api.migrateLegacy !== 'function') return false;
+        const r = api.migrateLegacy(bldg, state, evalPlanFloors(bldg), Date.now());
+        if (!r.planChanged) return false;
+        r.floorKeys.forEach((k) => { if (typeof markFloorKeyDirty === 'function') markFloorKeyDirty(k); });
+        commitEvalPlanChange(bldg);
+        return true;
     }
-    /** 이 층을 「층 나누기」로(아니면 묻기). 나눌 수 있으면 true */
+    /** 층 구역을 부분 목록에 맞춰 만들고(새로 생기면 층 저장) */
+    function ensureEvalZones(bldg, floorCode) {
+        const api = evalUnitApi();
+        const floorKey = `${bldg.id}_${floorCode}`;
+        if (api.ensureZones(state, floorKey, bldg, floorCode, Date.now()) > 0) commitEvalUnitChange(floorKey);
+    }
+    /** 새 나누기 부분(기존부/증축부 …) 만들기 */
+    async function promptNewEvalPart(bldg) {
+        const api = evalUnitApi();
+        const name = await window.appPrompt('부분 이름 (예: 기존부, 증축부)', '', { title: '나누기 부분 추가', okText: '추가' });
+        if (name == null) return null;
+        const part = api.addPart(bldg, { name }, Date.now());
+        if (!part) { window.showToast('이름이 이미 있습니다.', 'warning', 2400); return null; }
+        commitEvalPlanChange(bldg);
+        return part;
+    }
+    /** 이 층을 나누기로(아니면 묻기). 나눌 수 있으면 true */
     async function ensureFloorSplitForAssign(bldg) {
         const api = evalUnitApi();
         if (!api.hasPlan(bldg)) {
@@ -24348,10 +24360,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const fm = api.floorMode(bldg, state.currentFloor);
         if (fm && fm.mode === 'split') return true;
         const msg = fm && fm.mode === 'whole'
-            ? `이 층은 지금 통째로 「${(api.planUnit(bldg, fm.unitId) || {}).name || '평가단위'}」입니다.\n층 나누기(1-1, 1-2 …)로 바꿀까요?`
-            : '이 층을 나눠서(1-1, 1-2 …) 결함을 세부단위로 넣을까요?';
+            ? `이 층은 지금 통째로 「${(api.planUnit(bldg, fm.unitId) || {}).name || '평가단위'}」입니다.\n층 나누기(기존부·증축부 …)로 바꿀까요?`
+            : '이 층을 나눠서(기존부·증축부 …) 결함을 구역으로 넣을까요?';
         if (!await window.appConfirm(msg)) return false;
-        api.setFloorMode(bldg, state.currentFloor, 'split', null, Date.now());
+        api.setFloorParts(bldg, state.currentFloor, [], Date.now());
         commitEvalPlanChange(bldg);
         return true;
     }
@@ -24363,29 +24375,41 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const targets = selectedDefectsForEvalUnit(floorKey);
         if (!targets.length) { window.showToast('도면에서 결함을 먼저 선택하세요(끌어서 여러 개 선택).', 'info', 2600); return; }
         if (!await ensureFloorSplitForAssign(bldg)) return;
-        const subs = api.listFor(state, floorKey);
+        migrateEvalUnitsLegacy(bldg);
+        const parts = api.planOf(bldg).parts;
+        const onFloor = api.floorParts(bldg, state.currentFloor);
         const counts = api.counts(state, floorKey, state.defects[floorKey] || []);
-        const parentName = (su) => ((api.planUnit(bldg, su.parentUnitId) || {}).name || '없는 평가단위');
-        const choices = subs.map((u) => ({ label: u.name, detail: `${parentName(u)} · 지금 ${counts.byId[u.id] || 0}건` }));
-        choices.push({ label: '+ 새 세부단위 만들고 넣기' });
-        if (subs.length) choices.push({ label: '세부단위에서 빼기', detail: '미지정으로' });
-        const pick = await window.appChoose(`선택한 결함 ${targets.length}건을 넣을 세부단위`, choices, { title: '평가단위로 분류' });
+        const unitName = (id) => ((api.planUnit(bldg, id) || {}).name || '평가단위 없음');
+        const choices = parts.map((p) => {
+            const z = api.zoneForPart(state, floorKey, p.id);
+            return { label: p.name, detail: `${unitName(p.unitId)} · ${onFloor.includes(p.id) ? `이 층 ${z ? (counts.byId[z.id] || 0) : 0}건` : '이 층에 추가'}` };
+        });
+        choices.push({ label: '+ 새 부분 만들고 넣기' });
+        choices.push({ label: '구역에서 빼기', detail: '미지정으로' });
+        const pick = await window.appChoose(`선택한 결함 ${targets.length}건을 넣을 부분`, choices, { title: '평가단위로 분류' });
         if (pick == null) return;
-        let unitId = null;
-        if (pick < subs.length) unitId = subs[pick].id;
-        else if (pick === subs.length) {
-            const u = await promptNewEvalSubUnit(floorKey);
-            if (!u) return;
-            unitId = u.id;
+        let zoneId = null;
+        let label = '미지정';
+        if (pick <= parts.length) {
+            const part = pick < parts.length ? parts[pick] : await promptNewEvalPart(bldg);
+            if (!part) return;
+            if (!api.floorParts(bldg, state.currentFloor).includes(part.id)) {
+                api.setFloorParts(bldg, state.currentFloor, api.floorParts(bldg, state.currentFloor).concat([part.id]), Date.now());
+                commitEvalPlanChange(bldg);
+            }
+            ensureEvalZones(bldg, state.currentFloor);
+            const z = api.zoneForPart(state, floorKey, part.id);
+            if (!z) return;
+            zoneId = z.id;
+            label = part.name;
         }
-        const n = api.assign(targets, unitId, Date.now());
+        const n = api.assign(targets, zoneId, Date.now());
         commitEvalUnitChange(floorKey);
-        const label = unitId ? api.findUnit(state, floorKey, unitId).name : '미지정';
         window.showToast(`${n}건을 「${label}」(으)로 분류했습니다.`, 'success', 2600);
     }
     window.assignSelectedDefectsToEvalUnit = assignSelectedDefectsToEvalUnit;
 
-    /** 도면 바 「관리」: 이 층 세부단위 고치기·지우기, 건물 설정 열기 */
+    /** 도면 바 「관리」: 이 층 구역 색·빼기, 건물 설정 열기 */
     async function openEvalUnitManager() {
         const api = evalUnitApi();
         const floorKey = currentEvalUnitFloorKey();
@@ -24393,31 +24417,31 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (!api || !floorKey || !bldg) { window.showToast('건물·층을 먼저 고르세요.', 'info', 2200); return; }
         const fm = api.floorMode(bldg, state.currentFloor);
         if (!fm || fm.mode !== 'split') { openEvalUnitPlanModal(); return; }
+        migrateEvalUnitsLegacy(bldg);
+        ensureEvalZones(bldg, state.currentFloor);
         const subs = api.listFor(state, floorKey);
         const counts = api.counts(state, floorKey, state.defects[floorKey] || []);
-        const choices = subs.map((u) => ({ label: `${u.name} 고치기·지우기`, detail: `${counts.byId[u.id] || 0}건` }));
-        choices.push({ label: '+ 세부단위 추가' });
-        choices.push({ label: '건물 평가단위 설정 열기' });
-        const pick = await window.appChoose(`${evalUnitDisplayFloor()} 세부단위 · 미지정 ${counts.none}건\n결함을 끌어 선택한 뒤 「평가단위」 버튼으로 넣습니다.`, choices, { title: '평가단위(상태평가용)' });
+        const choices = subs.map((u) => ({ label: `${api.zoneLabel(bldg, u)} 색·빼기`, detail: `${(api.planUnit(bldg, api.zoneUnitId(bldg, u)) || {}).name || '평가단위 없음'} · ${counts.byId[u.id] || 0}건` }));
+        choices.push({ label: '건물 평가단위 설정 열기', detail: '부분 이름·평가단위 바꾸기' });
+        const pick = await window.appChoose(`${evalUnitDisplayFloor()} 구역 · 미지정 ${counts.none}건\n결함을 끌어 선택한 뒤 「평가단위」 버튼으로 넣습니다.`, choices, { title: '평가단위(상태평가용)' });
         if (pick == null) return;
-        if (pick === subs.length) { await promptNewEvalSubUnit(floorKey); return; }
-        if (pick === subs.length + 1) { openEvalUnitPlanModal(); return; }
+        if (pick === subs.length) { openEvalUnitPlanModal(); return; }
         const u = subs[pick];
-        const act = await window.appChoose(`${u.name} (${counts.byId[u.id] || 0}건)`, [
-            { label: '이름 바꾸기' }, { label: '색 바꾸기' }, { label: '지우기', detail: '결함은 지우지 않고 미지정으로 돌아감' }
-        ], { title: '세부단위' });
+        const nm = api.zoneLabel(bldg, u);
+        const act = await window.appChoose(`${evalUnitDisplayFloor()} ${nm} (${counts.byId[u.id] || 0}건)`, [
+            { label: '색 바꾸기' }, { label: '이 층에서 빼기', detail: '결함은 지우지 않고 미지정으로 돌아감' }
+        ], { title: '구역' });
         if (act === 0) {
-            const name = await window.appPrompt('새 이름', u.name, { title: '세부단위 이름', okText: '저장' });
-            if (name == null) return;
-            if (api.updateUnit(state, floorKey, u.id, { name })) commitEvalUnitChange(floorKey);
-            else window.showToast('이름이 비었거나 이미 있습니다.', 'warning', 2400);
-        } else if (act === 1) {
             const names = ['파랑', '빨강', '초록', '주황', '보라', '청록', '분홍', '회색'];
-            const c = await window.appChoose('색', api.PALETTE.map((hex, i) => ({ label: names[i] || hex, detail: hex })), { title: '세부단위 색' });
+            const c = await window.appChoose('색', api.PALETTE.map((hex, i) => ({ label: names[i] || hex, detail: hex })), { title: '구역 색' });
             if (c == null) return;
             if (api.updateUnit(state, floorKey, u.id, { color: api.PALETTE[c] })) commitEvalUnitChange(floorKey);
-        } else if (act === 2) {
-            if (!await window.appConfirm(`세부단위 「${u.name}」을 지울까요?\n결함 ${counts.byId[u.id] || 0}건은 미지정으로 돌아갑니다.`)) return;
+        } else if (act === 1) {
+            if (!await window.appConfirm(`${evalUnitDisplayFloor()}에서 「${nm}」을 뺄까요?\n결함 ${counts.byId[u.id] || 0}건은 미지정으로 돌아갑니다.`)) return;
+            if (u.partId) {
+                api.setFloorParts(bldg, state.currentFloor, api.floorParts(bldg, state.currentFloor).filter((id) => id !== u.partId), Date.now());
+                commitEvalPlanChange(bldg);
+            }
             api.deleteUnit(state, floorKey, u.id, state.defects[floorKey] || [], Date.now());
             if (evalUnitHighlight === u.id) evalUnitHighlight = '';
             commitEvalUnitChange(floorKey);
@@ -24425,7 +24449,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     }
     window.openEvalUnitManager = openEvalUnitManager;
 
-    /** 건물(회차) 「평가단위 설정」: 단위 개수 + 층마다 통째/나누기 + 요약 */
+    /** 건물(회차) 「평가단위 설정」: 단위 개수 + 나누기 부분 + 층 × 부분 표 */
     function openEvalUnitPlanModal() {
         const api = evalUnitApi();
         const bldg = currentEvalBuilding();
@@ -24438,6 +24462,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             ov.addEventListener('click', (e) => { if (e.target === ov) ov.hidden = true; });
             document.body.appendChild(ov);
         }
+        migrateEvalUnitsLegacy(bldg);
         renderEvalUnitPlanModal(ov, bldg);
         ov.hidden = false;
     }
@@ -24447,37 +24472,42 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const api = evalUnitApi();
         const esc = (t) => String(t == null ? '' : t).replace(/[&<>"]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[ch]);
         const plan = api.planOf(bldg);
-        const floors = (bldg.floorsList || []).filter((f) => f && f.floorCode).map((f) => ({
-            floorCode: f.floorCode, floorLabel: f.floorLabel || f.floorCode, floorKey: `${bldg.id}_${f.floorCode}`
-        }));
+        const floors = evalPlanFloors(bldg);
+        const mx = api.matrix(bldg, state, floors);
         const sum = api.summarize(bldg, state, floors);
         const opt = (v, label, sel) => `<option value="${esc(v)}"${sel ? ' selected' : ''}>${esc(label)}</option>`;
-        const rows = floors.map((f) => {
-            const m = plan.floors[f.floorCode];
-            const cur = m ? (m.mode === 'split' ? 'split' : 'whole:' + m.unitId) : '';
-            const subs = api.listFor(state, f.floorKey);
-            let detail = '';
-            if (m && m.mode === 'split') {
-                const c = api.counts(state, f.floorKey, state.defects[f.floorKey] || []);
-                detail = subs.map((s) => `${esc(s.name)} ${c.byId[s.id] || 0}건`).join(' · ') || '세부단위 없음 — 도면에서 결함을 골라 넣으세요';
-                if (c.none) detail += ` · <b class="eval-plan-warn">미지정 ${c.none}건</b>`;
-            } else {
-                detail = `결함 ${(state.defects[f.floorKey] || []).length}건`;
-            }
-            return `<tr><td>${esc(f.floorLabel)}</td><td><select class="form-control eval-plan-floor" data-floor="${esc(f.floorCode)}">`
+        const unitOpts = (cur) => opt('', '평가단위 없음', !cur) + plan.units.map((u) => opt(u.id, u.name, cur === u.id)).join('');
+        const partsHtml = plan.parts.map((p) => `<tr data-part="${esc(p.id)}">
+                <td><input type="text" class="form-control eval-part-name" value="${esc(p.name)}" maxlength="20"></td>
+                <td><input type="text" class="form-control eval-part-note" value="${esc(p.note || '')}" maxlength="80" placeholder="구조형식·부재 (예: RC 라멘, 철골)"></td>
+                <td><select class="form-control eval-part-unit">${unitOpts(p.unitId)}</select></td>
+                <td><button type="button" class="btn btn-sm btn-danger-outline eval-part-del">지우기</button></td></tr>`).join('');
+        const head = `<tr><th>층</th><th>설정</th>${plan.parts.map((p) => `<th>${esc(p.name)}<div class="eval-plan-sub">${esc((api.planUnit(bldg, p.unitId) || {}).name || '단위 없음')}</div></th>`).join('')}<th>미지정</th></tr>`;
+        const rows = mx.map((r) => {
+            const cur = r.mode === 'split' ? 'split' : (r.mode === 'whole' ? 'whole:' + r.unitId : '');
+            const sel = `<select class="form-control eval-plan-floor" data-floor="${esc(r.floorCode)}">`
                 + opt('', '설정 안 함', !cur)
-                + plan.units.map((u) => opt('whole:' + u.id, `${u.name} (층 전체)`, cur === 'whole:' + u.id)).join('')
-                + (plan.units.length ? opt('split', '층 나누기 (1-1, 1-2 …)', cur === 'split') : '')
-                + `</select></td><td class="eval-plan-detail">${detail}</td></tr>`;
+                + plan.units.map((u) => opt('whole:' + u.id, `통째로 → ${u.name}`, cur === 'whole:' + u.id)).join('')
+                + opt('split', '나누기', cur === 'split') + '</select>';
+            let cells;
+            if (r.mode === 'split') {
+                cells = plan.parts.map((p) => {
+                    const c = r.cells[p.id] || {};
+                    return `<td class="eval-plan-cell"><label><input type="checkbox" class="eval-plan-part-on" data-floor="${esc(r.floorCode)}" data-part="${esc(p.id)}"${c.on ? ' checked' : ''}> ${c.on ? `${c.count}건` : ''}</label></td>`;
+                }).join('') + `<td>${r.none ? `<b class="eval-plan-warn">${r.none}건</b>` : '0'}</td>`;
+            } else {
+                cells = `<td colspan="${plan.parts.length + 1}" class="eval-plan-detail">${r.mode === 'whole' ? `층 전체 ${r.total}건` : `결함 ${r.total}건 (평가 안 함)`}</td>`;
+            }
+            return `<tr><td>${esc(r.floorLabel)}</td><td>${sel}</td>${cells}</tr>`;
         }).join('');
         const sumHtml = sum.units.map((r) => {
             const parts = r.wholeFloors.map((w) => `${esc(w.floorLabel)} 전체(${w.count}건)`)
-                .concat(r.subUnits.map((s) => `${esc(s.floorLabel)} ${esc(s.sub.name)}(${s.count}건)`));
+                .concat(r.subUnits.map((s) => `${esc(s.floorLabel)}-${esc(s.label)}(${s.count}건)`));
             return `<li><b>${esc(r.unit.name)}</b>: ${parts.length ? parts.join(', ') : '<span class="eval-plan-warn">비어 있음</span>'}</li>`;
         }).join('');
         const warn = [];
         if (sum.unsetFloors.length && plan.units.length) warn.push(`설정 안 한 층: ${sum.unsetFloors.map((f) => esc(f.floorLabel)).join(', ')}`);
-        if (sum.unassigned.length) warn.push(`세부단위에 안 넣은 결함: ${sum.unassigned.map((f) => `${esc(f.floorLabel)} ${f.count}건`).join(', ')}`);
+        if (sum.unassigned.length) warn.push(`평가단위에 안 들어간 결함(구역 미지정 등): ${sum.unassigned.map((f) => `${esc(f.floorLabel)} ${f.count}건`).join(', ')}`);
         ov.innerHTML = `<div class="eval-plan-card" role="dialog" aria-label="평가단위 설정">
             <div class="eval-plan-head"><b>평가단위 설정</b> <span class="eval-plan-sub">상태평가용 묶음 · 조사표·번호·도면 출력은 층 그대로</span>
                 <button type="button" class="btn btn-sm btn-outline eval-plan-close">닫기</button></div>
@@ -24485,31 +24515,78 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 <button type="button" class="btn btn-sm btn-primary eval-plan-apply-n">적용</button>
                 <span class="eval-plan-sub">0이면 지금처럼(층마다 평가)</span>
                 ${plan.units.length ? '<button type="button" class="btn btn-sm btn-outline eval-plan-safetyman" title="KISTEC SafetyMan 입력 순서로 정리한 엑셀(등급 계산 없음)">SafetyMan용 엑셀</button>' : ''}</div>
-            ${plan.units.length ? `<table class="eval-plan-table"><thead><tr><th>층</th><th>평가단위</th><th>내용</th></tr></thead><tbody>${rows}</tbody></table>
+            ${plan.units.length ? `<div class="eval-plan-parts"><b>나누기 부분</b> <span class="eval-plan-sub">수평증축 등으로 한 층을 나눌 때 쓰는 이름. 부분마다 평가단위를 정하면 모든 층의 그 부분이 같은 단위로 묶입니다.</span>
+                ${plan.parts.length ? `<table class="eval-plan-table"><thead><tr><th>이름</th><th>비고(구조형식·부재)</th><th>평가단위</th><th></th></tr></thead><tbody>${partsHtml}</tbody></table>` : ''}
+                <button type="button" class="btn btn-sm btn-outline eval-part-add">+ 부분 추가</button></div>
+            <div class="eval-plan-scroll"><table class="eval-plan-table eval-plan-matrix"><thead>${head}</thead><tbody>${rows}</tbody></table></div>
+            <div class="eval-plan-sub">나누기 층: 있는 부분에 체크 → 도면에서 결함을 끌어 선택하고 「평가단위」 버튼으로 부분에 넣습니다.</div>
             <div class="eval-plan-sum"><b>묶음 요약</b><ul>${sumHtml}</ul>${warn.length ? `<div class="eval-plan-warn">${warn.join('<br>')}</div>` : ''}</div>` : ''}
         </div>`;
+        const rerender = () => renderEvalUnitPlanModal(ov, bldg);
         ov.querySelector('.eval-plan-close').onclick = () => { ov.hidden = true; };
         const smBtn = ov.querySelector('.eval-plan-safetyman');
         if (smBtn) smBtn.onclick = () => downloadSafetyManExcel(bldg);
         ov.querySelector('.eval-plan-apply-n').onclick = async () => {
             const n = parseInt(ov.querySelector('.eval-plan-n').value, 10) || 0;
             if (n < plan.units.length) {
-                const ok = await window.appConfirm(`평가단위를 ${plan.units.length}개 → ${n}개로 줄입니다.\n뒤 번호 단위에 통째로 넣은 층은 「설정 안 함」이 됩니다.`);
+                const ok = await window.appConfirm(`평가단위를 ${plan.units.length}개 → ${n}개로 줄입니다.\n뒤 번호 단위에 통째로 넣은 층은 「설정 안 함」, 그 단위였던 부분은 「평가단위 없음」이 됩니다.`);
                 if (!ok) return;
             }
             const dropped = api.setUnitCount(bldg, n, Date.now());
             commitEvalPlanChange(bldg);
             if (dropped > 0) window.showToast(`층 ${dropped}개가 「설정 안 함」이 됐습니다.`, 'info', 2600);
-            renderEvalUnitPlanModal(ov, bldg);
+            rerender();
         };
+        const addBtn = ov.querySelector('.eval-part-add');
+        if (addBtn) addBtn.onclick = async () => { if (await promptNewEvalPart(bldg)) rerender(); };
+        ov.querySelectorAll('tr[data-part]').forEach((tr) => {
+            const pid = tr.dataset.part;
+            const save = (patch) => {
+                if (api.updatePart(bldg, pid, patch, Date.now())) { commitEvalPlanChange(bldg); rerender(); }
+                else { window.showToast('이름이 비었거나 이미 있습니다.', 'warning', 2400); rerender(); }
+            };
+            tr.querySelector('.eval-part-name').onchange = (e) => save({ name: e.target.value });
+            tr.querySelector('.eval-part-note').onchange = (e) => save({ note: e.target.value });
+            tr.querySelector('.eval-part-unit').onchange = (e) => save({ unitId: e.target.value });
+            tr.querySelector('.eval-part-del').onclick = async () => {
+                const p = api.partOf(bldg, pid);
+                if (!await window.appConfirm(`부분 「${p ? p.name : ''}」을 지울까요?\n모든 층에서 빠지고, 그 구역의 결함은 평가단위 없음(미설정)으로 보입니다.`)) return;
+                api.removePart(bldg, pid, Date.now());
+                commitEvalPlanChange(bldg);
+                rerender();
+            };
+        });
         ov.querySelectorAll('.eval-plan-floor').forEach((sel) => {
             sel.onchange = () => {
                 const v = sel.value;
-                if (v === 'split') api.setFloorMode(bldg, sel.dataset.floor, 'split', null, Date.now());
-                else if (v.startsWith('whole:')) api.setFloorMode(bldg, sel.dataset.floor, 'whole', v.slice(6), Date.now());
-                else api.setFloorMode(bldg, sel.dataset.floor, '', null, Date.now());
+                const fc = sel.dataset.floor;
+                if (v === 'split') api.setFloorMode(bldg, fc, 'split', null, Date.now());
+                else if (v.startsWith('whole:')) api.setFloorMode(bldg, fc, 'whole', v.slice(6), Date.now());
+                else api.setFloorMode(bldg, fc, '', null, Date.now());
                 commitEvalPlanChange(bldg);
-                renderEvalUnitPlanModal(ov, bldg);
+                if (v === 'split') ensureEvalZones(bldg, fc);
+                rerender();
+            };
+        });
+        ov.querySelectorAll('.eval-plan-part-on').forEach((cb) => {
+            cb.onchange = async () => {
+                const fc = cb.dataset.floor;
+                const pid = cb.dataset.part;
+                const cur = api.floorParts(bldg, fc);
+                if (cb.checked) {
+                    api.setFloorParts(bldg, fc, cur.concat([pid]), Date.now());
+                    commitEvalPlanChange(bldg);
+                    ensureEvalZones(bldg, fc);
+                } else {
+                    const floorKey = `${bldg.id}_${fc}`;
+                    const z = api.zoneForPart(state, floorKey, pid);
+                    const n = z ? (api.counts(state, floorKey, state.defects[floorKey] || []).byId[z.id] || 0) : 0;
+                    if (n && !await window.appConfirm(`이 층에서 이 부분을 빼면 결함 ${n}건이 미지정으로 돌아갑니다. 뺄까요?`)) { cb.checked = true; return; }
+                    api.setFloorParts(bldg, fc, cur.filter((id) => id !== pid), Date.now());
+                    commitEvalPlanChange(bldg);
+                    if (z) { api.deleteUnit(state, floorKey, z.id, state.defects[floorKey] || [], Date.now()); commitEvalUnitChange(floorKey); }
+                }
+                rerender();
             };
         });
     }
@@ -24522,9 +24599,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             window.showToast('엑셀 라이브러리를 불러오지 못했습니다. 인터넷 연결을 확인 후 다시 시도해주세요.', 'error', 5000);
             return;
         }
-        const floors = (bldg.floorsList || []).filter((f) => f && f.floorCode).map((f) => ({
-            floorCode: f.floorCode, floorLabel: f.floorLabel || f.floorCode, floorKey: `${bldg.id}_${f.floorCode}`
-        }));
+        migrateEvalUnitsLegacy(bldg);
+        const floors = evalPlanFloors(bldg);
         const d = new Date();
         const pad = (n) => String(n).padStart(2, '0');
         const dateText = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
@@ -24538,7 +24614,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             });
             const name = String(bldg.name || bldg.buildingName || '건물').replace(/[\\/:*?"<>|]/g, '_');
             XLSX.writeFile(wb, `${name}_SafetyMan용_${dateText}.xlsx`);
-            window.showToast(`SafetyMan용 엑셀을 만들었습니다 (표본층 ${sheets.length - 3}개).`, 'success', 2800);
+            window.showToast(`SafetyMan용 엑셀을 만들었습니다 (평가단위 시트 ${sheets.length - 3}장).`, 'success', 2800);
         } catch (e) {
             console.error('SafetyMan 엑셀 실패', e);
             window.showToast('SafetyMan용 엑셀을 만들지 못했습니다: ' + (e && e.message ? e.message : e), 'error', 5000);
@@ -24573,7 +24649,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const c = api.counts(state, floorKey, state.defects[floorKey] || []);
         const esc = (t) => String(t).replace(/[&<>"]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[ch]);
         const chip = (id, label, n, color) => `<button type="button" class="eval-unit-chip${evalUnitHighlight === id ? ' active' : ''}" data-eu="${esc(id)}"${color ? ` style="--eu-color:${esc(color)}"` : ''}>${esc(label)} <b>${n}</b></button>`;
-        setHtml(units.map((u) => chip(u.id, u.name, c.byId[u.id] || 0, u.color)).join('')
+        setHtml(units.map((u) => chip(u.id, api.zoneLabel(bldg, u), c.byId[u.id] || 0, u.color)).join('')
             + chip('__none__', '미지정', c.none, '#94a3b8'));
         setHidden(false);
     }
@@ -24594,11 +24670,12 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (!fm || fm.mode !== 'split') return;
         const u = api.unitOf(state, floorKey, defect);
         if (!u) return;
+        const tagText = api.zoneLabel(currentEvalBuilding(), u) || u.name;
         const s = Math.max(0.6, Number(scale) || 1);
         const fs = 11 * s;
         ctx.save();
         ctx.font = `800 ${fs}px "Pretendard", "Malgun Gothic", sans-serif`;
-        const tw = ctx.measureText(u.name).width + 8 * s;
+        const tw = ctx.measureText(tagText).width + 8 * s;
         const th = fs + 5 * s;
         const x = -w / 2;
         const y = -h / 2 - th - 2 * s;
@@ -24607,7 +24684,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         ctx.fillStyle = '#ffffff';
         ctx.textAlign = 'left';
         ctx.textBaseline = 'middle';
-        ctx.fillText(u.name, x + 4 * s, y + th / 2 + 0.5);
+        ctx.fillText(tagText, x + 4 * s, y + th / 2 + 0.5);
         ctx.restore();
     }
 

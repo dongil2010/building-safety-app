@@ -16815,3 +16815,11 @@ html.layout-mobile .home-update-btn { width: 2.5rem; padding: 0; justify-content
 .eval-plan-sum { margin-top: 0.7rem; font-size: 0.82rem; }
 .eval-plan-sum ul { margin: 0.3rem 0 0.3rem 1.1rem; padding: 0; }
 .eval-plan-warn { color: #b45309; font-weight: 700; }
+
+/* 평가단위 부분·층×부분 표 (2026-10-13) */
+.eval-plan-parts { margin: 0.6rem 0; }
+.eval-plan-parts .form-control { min-width: 6rem; }
+.eval-plan-scroll { overflow-x: auto; max-width: 100%; }
+.eval-plan-matrix th, .eval-plan-matrix td { white-space: nowrap; text-align: center; }
+.eval-plan-matrix td:first-child { text-align: left; font-weight: 700; }
+.eval-plan-cell label { display: inline-flex; align-items: center; gap: 0.25rem; cursor: pointer; }

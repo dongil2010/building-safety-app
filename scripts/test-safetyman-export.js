@@ -24,35 +24,43 @@ assert.strictEqual(S.spallBand(18), '20mm미만의 박리발생');
 const bldg = { id: 'b', name: '테스트' };
 const st = { defects: {}, evalUnits: {}, ndtData: {} };
 E.setUnitCount(bldg, 2, 1);
-E.setFloorMode(bldg, '1F', 'whole', 'unit1', 2);
-E.setFloorMode(bldg, '2F', 'split', null, 3);
-const s1 = E.createSubUnit(st, 'b_2F', bldg, 'unit2', 4);
-const s2 = E.createSubUnit(st, 'b_2F', bldg, 'unit2', 5);
-st.defects.b_1F = [{ id: 'a', no: '1', component: '기둥', defectType: '균열', crackWidth: '0.15' },
-    { id: 'b', no: '2', component: '기둥', defectType: '균열', size: 'Cw:0.35' },
-    { id: 'c', no: '3', component: '슬래브', defectType: '백태' }];
-st.defects.b_2F = [{ id: 'd', no: '1', component: '보', defectType: '균열', crackWidth: '0.6', evalUnitId: s1.id },
-    { id: 'e', no: '2', component: '벽', defectType: '박락', evalUnitId: s2.id },
-    { id: 'f', no: '3', component: '기둥', defectType: '균열' }];
+const old = E.addPart(bldg, { name: '기존부', note: 'RC 라멘' }, 2);
+const ext = E.addPart(bldg, { name: '증축부', note: '철골' }, 3);
+assert.strictEqual(old.unitId, 'unit1'); assert.strictEqual(ext.unitId, 'unit2');
+E.setFloorMode(bldg, 'B1', 'whole', 'unit1', 4);
+E.setFloorParts(bldg, '1F', [old.id, ext.id], 5);
+E.setFloorParts(bldg, '2F', [old.id, ext.id], 6);
+['1F', '2F'].forEach((f) => E.ensureZones(st, 'b_' + f, bldg, f, 7));
+const z = (f, p) => E.zoneForPart(st, 'b_' + f, p.id).id;
+st.defects.b_B1 = [{ id: 'x', no: '1', component: '슬래브', defectType: '백태' }];
+st.defects.b_1F = [{ id: 'a', no: '1', component: '기둥', defectType: '균열', crackWidth: '0.15', evalUnitId: z('1F', old) },
+    { id: 'b', no: '2', component: '기둥', defectType: '균열', size: 'Cw:0.35', evalUnitId: z('1F', old) },
+    { id: 'c', no: '3', component: '보', defectType: '균열', crackWidth: '0.6', evalUnitId: z('1F', ext) },
+    { id: 'n', no: '4', component: '벽', defectType: '균열' }];
+st.defects.b_2F = [{ id: 'd', no: '1', component: '벽', defectType: '박락', evalUnitId: z('2F', ext) }];
 st.defects.b_3F = [{ id: 'g', no: '1', component: '기둥', defectType: '균열', crackWidth: '0.1' }];
 st.ndtData.b_1F = [{ category: '강도', component: '기둥', location: 'C1', strengthFinal: 24.5, designStrength: 24 }];
-const floors = ['1F', '2F', '3F'].map((c) => ({ floorCode: c, floorLabel: c, floorKey: 'b_' + c }));
+const floors = ['B1', '1F', '2F', '3F'].map((c) => ({ floorCode: c, floorLabel: c, floorKey: 'b_' + c }));
 const sheets = S.buildSheets({ bldg, state: st, floors, evalUnits: E });
-const names = sheets.map((s) => s.name);
-assert.deepStrictEqual(names, ['요약', '1_평가단위 1_1F', '2_2-1_2F', '3_2-2_2F', '4_미설정_2F', '5_미설정_3F', '근거_결함목록', '참고']);
-const sh1 = sheets[1].aoa;
-const col = sh1.find((r) => r[0] === '기둥');
-assert.strictEqual(col[3], 0.35);
+assert.deepStrictEqual(sheets.map((s) => s.name), ['요약', '평가단위 1', '평가단위 2', '미설정', '근거_결함목록', '참고']);
+const u1 = sheets[1].aoa;
+assert.deepStrictEqual(u1.filter((r) => /^표본층 \d/.test(r[0])).map((r) => r[1]), ['B1', '1F-기존부', '2F-기존부']);
+assert.ok(u1.some((r) => r[1] === '1F-기존부' && r[5] === 'RC 라멘'));
+const col = u1.find((r) => r[0] === '기둥' && r[3] === 0.35);
 assert.strictEqual(col[4], '0.5mm미만');
-const slab = sh1.find((r) => r[0] === '슬래브');
-assert.strictEqual(slab[9], '(직접 입력)');
-assert.ok(sh1.some((r) => r[0] === '콘크리트 강도' && r[4] === 24.5));
-assert.strictEqual(sheets[2].aoa.find((r) => r[0] === '보')[4], '0.5mm이상');
-assert.strictEqual(sheets[3].aoa.find((r) => r[0] === '벽')[7], '(직접 입력)');
-assert.ok(String(sheets[4].aoa[1][0]).indexOf('미설정') >= 0);
-assert.strictEqual(sheets[6].aoa.length, 1 + 7);
-// 원본 데이터는 그대로
-assert.strictEqual(st.defects.b_2F[2].evalUnitId, undefined);
+assert.ok(u1.some((r) => r[0] === '콘크리트 강도' && r[4] === 24.5));
+const u2 = sheets[2].aoa;
+assert.deepStrictEqual(u2.filter((r) => /^표본층 \d/.test(r[0])).map((r) => r[1]), ['1F-증축부', '2F-증축부']);
+assert.ok(u2.some((r) => r[0] === '보' && r[4] === '0.5mm이상'));
+assert.ok(u2.some((r) => r[0] === '벽' && r[7] === '(직접 입력)'));
+const un = sheets[3].aoa;
+assert.ok(String(un[1][0]).indexOf('미설정') >= 0);
+assert.deepStrictEqual(un.filter((r) => /^표본층 \d/.test(r[0])).map((r) => r[1]), ['1F-미지정', '3F']);
+assert.strictEqual(sheets[4].aoa.length, 1 + 7);
+// 부분의 단위를 바꾸면 다른 층 구역도 같이 옮겨진다
+E.updatePart(bldg, ext.id, { unitId: 'unit1' }, 9);
+const again = S.buildSheets({ bldg, state: st, floors, evalUnits: E });
+assert.deepStrictEqual(again.map((s) => s.name), ['요약', '평가단위 1', '미설정', '근거_결함목록', '참고']);
 
 const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
 assert.ok(html.indexOf('js/core/safetyman-export.js') > 0 && html.indexOf('js/core/safetyman-export.js') < html.indexOf('src="app.js'));

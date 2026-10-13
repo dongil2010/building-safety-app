@@ -7,6 +7,10 @@
  * 2) 층 나누기한 층의 세부단위: state.evalUnits[층키] = [{ id, name:'1-1', parentUnitId, color, order, … }]
  *    - 결함: defect.evalUnitId = 세부단위 id. 세부단위는 그 층 안에서만(층 결함만 들어감).
  *    - 층 묶음(pack.evalUnits)에 실려 메모와 같은 규칙(updatedAt·묘비)으로 합친다.
+ * 3) (2026-10-13 개편) 나누기 부분: bldg.evalUnitPlan.parts = [{id,no,name,note,unitId}] — 건물에서 한 번 정의(기존부/증축부 …),
+ *    층 나누기는 floors[층] = {mode:'split', parts:[partId…]}. 층의 구역(state.evalUnits[층키]의 항목)은 partId를 가진다.
+ *    구역의 평가단위 = 부분의 unitId(옛 구역은 parentUnitId). 다른 층 구역끼리 같은 평가단위가 될 수 있다.
+ *    옛 1-1/1-2 세부단위는 migrateLegacy로 같은 이름의 부분으로 옮긴다(결함 evalUnitId는 그대로).
  * 설정을 안 하면 아무것도 안 바뀐다.
  */
 (function (root) {
@@ -195,8 +199,9 @@
 
     function planOf(bldg) {
         var p = bldg && bldg.evalUnitPlan;
-        if (!p || typeof p !== 'object') return { units: [], floors: {}, updatedAt: 0 };
-        return { units: Array.isArray(p.units) ? p.units : [], floors: (p.floors && typeof p.floors === 'object') ? p.floors : {}, updatedAt: Number(p.updatedAt) || 0 };
+        if (!p || typeof p !== 'object') return { units: [], parts: [], floors: {}, updatedAt: 0 };
+        return { units: Array.isArray(p.units) ? p.units : [], parts: Array.isArray(p.parts) ? p.parts : [],
+            floors: (p.floors && typeof p.floors === 'object') ? p.floors : {}, updatedAt: Number(p.updatedAt) || 0 };
     }
 
     function hasPlan(bldg) { return planOf(bldg).units.length > 0; }
@@ -210,8 +215,12 @@
     function clonePlan(bldg) {
         var p = planOf(bldg);
         var floors = {};
-        Object.keys(p.floors).forEach(function (k) { floors[k] = Object.assign({}, p.floors[k]); });
-        return { units: p.units.map(function (u) { return Object.assign({}, u); }), floors: floors, updatedAt: p.updatedAt };
+        Object.keys(p.floors).forEach(function (k) {
+            floors[k] = Object.assign({}, p.floors[k]);
+            if (Array.isArray(floors[k].parts)) floors[k].parts = floors[k].parts.slice();
+        });
+        return { units: p.units.map(function (u) { return Object.assign({}, u); }), parts: p.parts.map(function (x) { return Object.assign({}, x); }),
+            floors: floors, updatedAt: p.updatedAt };
     }
 
     /** 평가단위 개수 정하기. 줄이면 뒤 번호부터 빠지고, 그 단위를 쓰던 층 설정도 빠진다(반환: 빠진 층 수) */
@@ -231,6 +240,7 @@
             var f = p.floors[fc];
             if (f && f.mode === 'whole' && !keep[f.unitId]) { delete p.floors[fc]; dropped++; }
         });
+        p.parts.forEach(function (x) { if (x.unitId && !keep[x.unitId]) x.unitId = ''; });
         p.units = units;
         writePlan(bldg, p, now);
         return dropped;
@@ -248,7 +258,8 @@
             if (!planUnit(bldg, unitId)) return false;
             p.floors[floorCode] = { mode: 'whole', unitId: unitId };
         } else if (mode === 'split') {
-            p.floors[floorCode] = { mode: 'split' };
+            var prev = p.floors[floorCode];
+            p.floors[floorCode] = { mode: 'split', parts: (prev && prev.mode === 'split' && Array.isArray(prev.parts)) ? prev.parts : [] };
         } else {
             delete p.floors[floorCode];
         }
@@ -289,11 +300,13 @@
                 byId[m.unitId].wholeFloors.push({ floorCode: f.floorCode, floorLabel: f.floorLabel, count: defects.length });
             } else if (m && m.mode === 'split') {
                 var c = counts(st, f.floorKey, defects);
+                var lost = c.none;
                 listFor(st, f.floorKey).forEach(function (su) {
-                    var r = byId[su.parentUnitId];
-                    if (r) r.subUnits.push({ floorCode: f.floorCode, floorLabel: f.floorLabel, sub: su, count: c.byId[su.id] || 0 });
+                    var r = byId[zoneUnitId(bldg, su)];
+                    if (r) r.subUnits.push({ floorCode: f.floorCode, floorLabel: f.floorLabel, sub: su, label: zoneLabel(bldg, su), count: c.byId[su.id] || 0 });
+                    else lost += c.byId[su.id] || 0;
                 });
-                if (c.none) out.unassigned.push({ floorCode: f.floorCode, floorLabel: f.floorLabel, count: c.none });
+                if (lost) out.unassigned.push({ floorCode: f.floorCode, floorLabel: f.floorLabel, count: lost });
             } else {
                 out.unsetFloors.push({ floorCode: f.floorCode, floorLabel: f.floorLabel, count: defects.length });
             }
@@ -301,7 +314,173 @@
         return out;
     }
 
+
+    /* ---------------- 나누기 부분(기존부/증축부 …) — 건물에서 한 번 정의 ---------------- */
+
+    function partOf(bldg, partId) {
+        if (!partId) return null;
+        return planOf(bldg).parts.find(function (x) { return x.id === partId; }) || null;
+    }
+
+    /** 부분 추가: 기본 평가단위 = 부분 번호와 같은 번호의 단위(없으면 첫 단위) */
+    function addPart(bldg, opts, now) {
+        if (!bldg) return null;
+        var o = opts || {};
+        var p = clonePlan(bldg);
+        var name = cleanName(o.name);
+        var no = p.parts.reduce(function (m, x) { return Math.max(m, Number(x.no) || 0); }, 0) + 1;
+        if (!name) name = '부분 ' + no;
+        if (p.parts.some(function (x) { return x.name === name; })) return null;
+        var unit = (o.unitId && p.units.find(function (u) { return u.id === o.unitId; }))
+            || p.units.find(function (u) { return Number(u.no) === no; }) || p.units[0] || null;
+        var part = { id: o.id || ('part_' + (Number(now) || Date.now()) + '_' + Math.random().toString(36).slice(2, 6)), no: no, name: name,
+            note: String(o.note == null ? '' : o.note).slice(0, 80), unitId: unit ? unit.id : '' };
+        p.parts.push(part);
+        writePlan(bldg, p, now);
+        return part;
+    }
+
+    /** patch: { name?, note?, unitId? } */
+    function updatePart(bldg, partId, patch, now) {
+        var p = clonePlan(bldg);
+        var x = p.parts.find(function (q) { return q.id === partId; });
+        if (!x || !patch) return null;
+        if (patch.name != null) {
+            var n = cleanName(patch.name);
+            if (!n || p.parts.some(function (q) { return q.id !== partId && q.name === n; })) return null;
+            x.name = n;
+        }
+        if (patch.note != null) x.note = String(patch.note).slice(0, 80);
+        if (patch.unitId != null) {
+            if (patch.unitId && !p.units.some(function (u) { return u.id === patch.unitId; })) return null;
+            x.unitId = patch.unitId;
+        }
+        writePlan(bldg, p, now);
+        return x;
+    }
+
+    /** 부분 지우기: 층 목록에서도 뺀다. 그 부분 구역의 결함은 평가단위 없음(미설정)으로 보인다 */
+    function removePart(bldg, partId, now) {
+        var p = clonePlan(bldg);
+        if (!p.parts.some(function (q) { return q.id === partId; })) return false;
+        p.parts = p.parts.filter(function (q) { return q.id !== partId; });
+        Object.keys(p.floors).forEach(function (fc) {
+            var f = p.floors[fc];
+            if (f && Array.isArray(f.parts)) f.parts = f.parts.filter(function (id) { return id !== partId; });
+        });
+        writePlan(bldg, p, now);
+        return true;
+    }
+
+    function floorParts(bldg, floorCode) {
+        var f = floorMode(bldg, floorCode);
+        return (f && f.mode === 'split' && Array.isArray(f.parts)) ? f.parts.slice() : [];
+    }
+
+    /** 층에 있는 부분 정하기(층은 「나누기」가 된다) */
+    function setFloorParts(bldg, floorCode, partIds, now) {
+        if (!bldg || !floorCode) return false;
+        var p = clonePlan(bldg);
+        var ok = {};
+        p.parts.forEach(function (x) { ok[x.id] = true; });
+        var ids = [];
+        (partIds || []).forEach(function (id) { if (ok[id] && ids.indexOf(id) < 0) ids.push(id); });
+        p.floors[floorCode] = { mode: 'split', parts: ids };
+        writePlan(bldg, p, now);
+        return true;
+    }
+
+    function zoneForPart(st, floorKey, partId) {
+        return listFor(st, floorKey).find(function (z) { return z.partId === partId; }) || null;
+    }
+
+    /** 층에 고른 부분마다 구역이 있게 만든다(새로 만든 구역 수) */
+    function ensureZones(st, floorKey, bldg, floorCode, now) {
+        var made = 0;
+        floorParts(bldg, floorCode).forEach(function (pid, i) {
+            if (zoneForPart(st, floorKey, pid)) return;
+            var part = partOf(bldg, pid);
+            if (!part) return;
+            var name = part.name;
+            var k = 2;
+            while (listFor(st, floorKey).some(function (z) { return z.name === name; })) name = part.name + '(' + (k++) + ')';
+            var z = createUnit(st, floorKey, { name: name, now: (Number(now) || Date.now()) + i,
+                color: PALETTE[((Number(part.no) || 1) - 1) % PALETTE.length] });
+            if (z) { z.partId = pid; made++; }
+        });
+        return made;
+    }
+
+    /** 구역의 평가단위 id: 부분의 단위 → 옛 구역은 parentUnitId */
+    function zoneUnitId(bldg, zone) {
+        if (!zone) return '';
+        if (zone.partId) { var part = partOf(bldg, zone.partId); return part ? (part.unitId || '') : ''; }
+        return zone.parentUnitId || '';
+    }
+
+    /** 화면 이름: 부분 이름(바꾸면 바로 따라감) */
+    function zoneLabel(bldg, zone) {
+        if (!zone) return '';
+        var part = zone.partId ? partOf(bldg, zone.partId) : null;
+        return part ? part.name : zone.name;
+    }
+
+    /**
+     * 옛 세부단위(1-1, 1-2 … partId 없음) → 같은 이름의 부분으로. 결함 evalUnitId는 그대로.
+     * floors: [{floorCode, floorKey}] → { planChanged, floorKeys:[바뀐 층키] }
+     */
+    function migrateLegacy(bldg, st, floors, now) {
+        var out = { planChanged: false, floorKeys: [] };
+        if (!bldg || !st) return out;
+        var t = Number(now) || Date.now();
+        (floors || []).forEach(function (f) {
+            var legacy = listFor(st, f.floorKey).filter(function (z) { return !z.partId; });
+            if (!legacy.length) return;
+            var ids = floorParts(bldg, f.floorCode);
+            legacy.forEach(function (z) {
+                var part = planOf(bldg).parts.find(function (x) { return x.name === z.name; });
+                if (!part) part = addPart(bldg, { name: z.name, unitId: z.parentUnitId || '' }, t);
+                if (!part) return;
+                if (z.parentUnitId && !part.unitId && planUnit(bldg, z.parentUnitId)) updatePart(bldg, part.id, { unitId: z.parentUnitId }, t);
+                z.partId = part.id;
+                z.updatedAt = Math.max(t, (Number(z.updatedAt) || 0) + 1);
+                if (ids.indexOf(part.id) < 0) ids.push(part.id);
+            });
+            setFloorParts(bldg, f.floorCode, ids, t);
+            out.planChanged = true;
+            out.floorKeys.push(f.floorKey);
+        });
+        return out;
+    }
+
+    /**
+     * 설정 화면 표: 층 × 부분 → 평가단위, 건수.
+     * [{ floorCode, floorLabel, floorKey, mode, unitId, total, none, cells:{ partId: { on, zoneId, count, unitId } } }]
+     */
+    function matrix(bldg, st, floors) {
+        var p = planOf(bldg);
+        return (floors || []).map(function (f) {
+            var defects = ((st && st.defects) || {})[f.floorKey] || [];
+            var m = p.floors[f.floorCode];
+            var row = { floorCode: f.floorCode, floorLabel: f.floorLabel, floorKey: f.floorKey, mode: m ? m.mode : '', unitId: m && m.mode === 'whole' ? m.unitId : '',
+                total: defects.length, none: 0, cells: {} };
+            if (m && m.mode === 'split') {
+                var c = counts(st, f.floorKey, defects);
+                row.none = c.none;
+                var on = floorParts(bldg, f.floorCode);
+                p.parts.forEach(function (x) {
+                    var z = zoneForPart(st, f.floorKey, x.id);
+                    row.cells[x.id] = { on: on.indexOf(x.id) >= 0, zoneId: z ? z.id : '', count: z ? (c.byId[z.id] || 0) : 0, unitId: x.unitId || '' };
+                });
+            }
+            return row;
+        });
+    }
+
     var api = {
+        partOf: partOf, addPart: addPart, updatePart: updatePart, removePart: removePart, floorParts: floorParts,
+        setFloorParts: setFloorParts, zoneForPart: zoneForPart, ensureZones: ensureZones, zoneUnitId: zoneUnitId, zoneLabel: zoneLabel,
+        migrateLegacy: migrateLegacy, matrix: matrix,
         planOf: planOf,
         hasPlan: hasPlan,
         setUnitCount: setUnitCount,

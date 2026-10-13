@@ -84,51 +84,47 @@
         return v;
     }
 
-    /** 표본층 목록: [{ id, unitLabel, floorCode, floorLabel, floorKey, subName, status, defects }] */
+    /** 표본층 목록: [{ unitId, unitLabel, floorCode, floorLabel, floorKey, subName, partNote, status, defects }] — 평가단위 순서, 그 안에서 층 순서 */
     function buildSamples(bldg, st, floors, E) {
         var plan = E.planOf(bldg);
         var defectsOf = function (k) { return (((st && st.defects) || {})[k] || []).filter(Boolean); };
         var samples = [];
-        var unitByNo = {};
-        plan.units.forEach(function (u) { unitByNo[u.id] = u; });
-        // 평가단위 순서대로
+        var unitIds = {};
+        plan.units.forEach(function (u) { unitIds[u.id] = true; });
         plan.units.forEach(function (u) {
             (floors || []).forEach(function (f) {
                 var m = plan.floors[f.floorCode];
                 if (m && m.mode === 'whole' && m.unitId === u.id) {
-                    samples.push({ unitLabel: u.name, unitNo: u.no, floorCode: f.floorCode, floorLabel: f.floorLabel, floorKey: f.floorKey,
-                        subName: '', status: '층 전체', defects: defectsOf(f.floorKey) });
+                    samples.push({ unitId: u.id, unitLabel: u.name, floorCode: f.floorCode, floorLabel: f.floorLabel, floorKey: f.floorKey,
+                        subName: '', partNote: '', status: '층 전체', defects: defectsOf(f.floorKey) });
                 } else if (m && m.mode === 'split') {
-                    E.listFor(st, f.floorKey).forEach(function (su) {
-                        if (su.parentUnitId !== u.id) return;
-                        samples.push({ unitLabel: u.name, unitNo: u.no, floorCode: f.floorCode, floorLabel: f.floorLabel, floorKey: f.floorKey,
-                            subName: su.name, status: '세부단위', defects: defectsOf(f.floorKey).filter(function (d) { return d.evalUnitId === su.id; }) });
+                    E.listFor(st, f.floorKey).forEach(function (z) {
+                        if (E.zoneUnitId(bldg, z) !== u.id) return;
+                        var part = z.partId ? E.partOf(bldg, z.partId) : null;
+                        samples.push({ unitId: u.id, unitLabel: u.name, floorCode: f.floorCode, floorLabel: f.floorLabel, floorKey: f.floorKey,
+                            subName: E.zoneLabel(bldg, z), partNote: part ? str(part.note) : '', status: '층 나누기 구역',
+                            defects: defectsOf(f.floorKey).filter(function (d) { return d.evalUnitId === z.id; }) });
                     });
                 }
             });
         });
-        // 나눈 층에서 세부단위에 안 넣은 결함, 설정 안 한 층 → 따로(미설정) 표시
         (floors || []).forEach(function (f) {
             var m = plan.floors[f.floorCode];
-            var validWhole = m && m.mode === 'whole' && unitByNo[m.unitId];
             if (m && m.mode === 'split') {
-                var subs = E.listFor(st, f.floorKey);
                 var ok = {};
-                subs.forEach(function (s) { if (unitByNo[s.parentUnitId]) ok[s.id] = true; });
+                E.listFor(st, f.floorKey).forEach(function (z) { if (unitIds[E.zoneUnitId(bldg, z)]) ok[z.id] = true; });
                 var rest = defectsOf(f.floorKey).filter(function (d) { return !ok[d.evalUnitId]; });
-                if (rest.length) samples.push({ unitLabel: '미설정', floorCode: f.floorCode, floorLabel: f.floorLabel, floorKey: f.floorKey,
-                    subName: '미지정', status: '미설정(세부단위 미지정 결함)', defects: rest });
-            } else if (!validWhole) {
-                samples.push({ unitLabel: '미설정', floorCode: f.floorCode, floorLabel: f.floorLabel, floorKey: f.floorKey,
-                    subName: '', status: '미설정(평가단위 설정 안 한 층)', defects: defectsOf(f.floorKey) });
+                if (rest.length) samples.push({ unitId: '', unitLabel: '미설정', floorCode: f.floorCode, floorLabel: f.floorLabel, floorKey: f.floorKey,
+                    subName: '미지정', partNote: '', status: '미설정(구역 미지정·단위 없는 구역 결함)', defects: rest });
+            } else if (!(m && m.mode === 'whole' && unitIds[m.unitId])) {
+                samples.push({ unitId: '', unitLabel: '미설정', floorCode: f.floorCode, floorLabel: f.floorLabel, floorKey: f.floorKey,
+                    subName: '', partNote: '', status: '미설정(평가단위 설정 안 한 층)', defects: defectsOf(f.floorKey) });
             }
         });
         return samples;
     }
 
-    function sampleTitle(s) {
-        return s.subName && s.subName !== '미지정' ? s.subName : (s.unitLabel === '미설정' ? '미설정' : s.unitLabel);
-    }
+    function sampleName(s) { return s.floorLabel + (s.subName ? '-' + s.subName : ''); }
 
     function memberRows(s, memberName) {
         var nm = function (v) { return typeof memberName === 'function' ? (memberName(v) || v) : v; };
@@ -182,13 +178,23 @@
         '박리·박락 건수', '박리 깊이(mm)', 'SafetyMan 박리 구간', '누수·백태 건수', '백태 면적율(%)', '누수·백태 비고',
         '철근노출 건수', '노출 면적율(%)', '철근노출 비고', '근거 결함 No.'];
 
+    function sampleBlock(st, s, memberName, idx) {
+        var aoa = [
+            ['표본층 ' + idx, sampleName(s), '구분', s.status, '부분 비고(구조형식·부재)', s.partNote || ''],
+            ['[부재별 최악값 — 균열 · 표면노후(박리·박락, 누수·백태, 철근노출)]'],
+            MEMBER_HEAD
+        ].concat(memberRows(s, memberName));
+        aoa.push(['[비파괴 시험값' + (s.subName ? ' — 층 공통(구역으로 나누지 않음)' : '') + ']']);
+        aoa.push(['항목', '부재', '위치', '값1 항목', '값1', '값2 항목', '값2']);
+        return aoa.concat(ndtRows(st, s, memberName));
+    }
+
     function buildSheets(opts) {
         var o = opts || {};
         var E = o.evalUnits;
         var st = o.state || {};
         var bldg = o.bldg || {};
         var samples = buildSamples(bldg, st, o.floors || [], E);
-        var sheets = [];
         var used = {};
         var sheetName = function (n) {
             var c = String(n).replace(/[:\\/?*\[\]]/g, '').trim().slice(0, 31) || '시트';
@@ -197,56 +203,57 @@
             used[f] = true;
             return f;
         };
-        // 요약
-        var sum = [['SafetyMan용 상태평가 입력 자료', ''], ['건물', str(bldg.name || bldg.buildingName)], ['만든 날', o.dateText || ''], [],
-            ['No', '표본층(시트)', '평가단위', '층', '세부단위', '구분', '결함 수']];
-        var plan = [];
-        samples.forEach(function (s, i) {
-            s.sheet = sheetName((i + 1) + '_' + (s.unitLabel === '미설정' ? '미설정' : sampleTitle(s)) + '_' + s.floorLabel);
-            sum.push([i + 1, s.sheet, s.unitLabel, s.floorLabel, s.subName, s.status, s.defects.length]);
-            var aoa = [
-                ['표본층', s.floorLabel + (s.subName ? ' · ' + s.subName : ''), '평가단위', s.unitLabel, '구분', s.status],
-                s.unitLabel === '미설정' ? ['※ 미설정: 평가단위가 정해지지 않은 자료입니다. SafetyMan에 넣기 전에 단위를 정하세요.'] : [],
-                [],
-                ['[부재별 최악값 — 균열 · 표면노후(박리·박락, 누수·백태, 철근노출)]'],
-                MEMBER_HEAD
-            ].concat(memberRows(s, o.memberName));
-            aoa.push([]);
-            aoa.push(['[비파괴 시험값' + (s.subName ? ' — 층 공통(세부단위로 나누지 않음)' : '') + ']']);
-            aoa.push(['항목', '부재', '위치', '값1 항목', '값1', '값2 항목', '값2']);
-            aoa = aoa.concat(ndtRows(st, s, o.memberName));
-            plan.push({ name: s.sheet, aoa: aoa, cols: [12, 8, 9, 13, 18, 11, 12, 22, 12, 13, 20, 11, 13, 14, 30] });
+        used['요약'] = used['근거_결함목록'] = used['참고'] = true;
+        // 평가단위마다 시트 1장(그 안에 표본층 = 층 전체 / 층 구역)
+        var groups = [];
+        var byKey = {};
+        samples.forEach(function (s) {
+            var k = s.unitId || '__unset__';
+            if (!byKey[k]) { byKey[k] = { label: s.unitLabel, unset: !s.unitId, list: [] }; groups.push(byKey[k]); }
+            byKey[k].list.push(s);
         });
-        sheets.push({ name: sheetName('요약'), aoa: sum, cols: [6, 28, 14, 10, 10, 26, 8] });
-        sheets = sheets.concat(plan);
-        // 근거
-        var ev = [['표본층(시트)', '평가단위', '층', '세부단위', '결함 No.', '부재(원문)', '평가부재', '결함종류', '위치', '규모', '균열폭(mm)', '반영 구간']];
+        var sum = [['SafetyMan용 상태평가 입력 자료', ''], ['건물', str(bldg.name || bldg.buildingName)], ['만든 날', o.dateText || ''], [],
+            ['평가단위(시트)', '표본층', '층', '구역', '부분 비고', '구분', '결함 수']];
+        var unitSheets = [];
+        groups.forEach(function (g) {
+            g.sheet = sheetName(g.unset ? '미설정' : g.label);
+            var aoa = [['평가단위', g.label, '표본층 수', g.list.length]];
+            if (g.unset) aoa.push(['※ 미설정: 평가단위가 정해지지 않은 자료입니다. SafetyMan에 넣기 전에 단위를 정하세요.']);
+            g.list.forEach(function (s, i) {
+                s.sheet = g.sheet;
+                sum.push([g.sheet, sampleName(s), s.floorLabel, s.subName, s.partNote, s.status, s.defects.length]);
+                aoa.push([]);
+                aoa = aoa.concat(sampleBlock(st, s, o.memberName, i + 1));
+            });
+            unitSheets.push({ name: g.sheet, aoa: aoa, cols: [12, 14, 9, 13, 18, 11, 12, 22, 12, 13, 20, 11, 13, 14, 30] });
+        });
+        var ev = [['평가단위(시트)', '표본층', '층', '구역', '결함 No.', '부재(원문)', '평가부재', '결함종류', '위치', '규모', '균열폭(mm)', '반영 구간']];
         samples.forEach(function (s) {
             s.defects.forEach(function (d) {
                 var nmv = typeof o.memberName === 'function' ? (o.memberName(d.component) || d.component) : d.component;
                 var k = defectKind(d);
                 var w = k === 'crack' ? crackWidthOf(d) : null;
                 var dep = k === 'spall' ? spallDepthOf(d) : null;
-                ev.push([s.sheet, s.unitLabel, s.floorLabel, s.subName, str(d.no), str(nmv), memberType(nmv), str(d.defectType), str(d.location), str(d.size),
+                ev.push([s.sheet, sampleName(s), s.floorLabel, s.subName, str(d.no), str(nmv), memberType(nmv), str(d.defectType), str(d.location), str(d.size),
                     w == null ? '' : w, k === 'crack' ? crackBand(w) : (k === 'spall' ? spallBand(dep) : '')]);
             });
         });
-        sheets.push({ name: sheetName('근거_결함목록'), aoa: ev, cols: [24, 12, 8, 8, 10, 14, 10, 16, 26, 18, 10, 20] });
-        sheets.push({ name: sheetName('참고'), aoa: NOTES.map(function (t) { return [t]; }), cols: [110] });
-        return sheets;
+        return [{ name: '요약', aoa: sum, cols: [16, 18, 8, 12, 24, 30, 8] }].concat(unitSheets).concat([
+            { name: '근거_결함목록', aoa: ev, cols: [16, 18, 8, 12, 10, 14, 10, 16, 26, 18, 10, 20] },
+            { name: '참고', aoa: NOTES.map(function (t) { return [t]; }), cols: [110] }]);
     }
 
     var NOTES = [
         'SafetyMan용 엑셀 — 정리 기준(가정). SafetyMan에 바로 불러오는 파일이 아니라, 입력 화면 순서대로 옮겨 적는 자료입니다.',
-        '1. 표본층: 「층 전체」 평가단위는 층마다 한 표본층(시트). 층 나누기 세부단위(1-1, 1-2 …)는 세부단위마다 한 표본층.',
-        '2. 평가단위를 정하지 않은 층, 나눈 층에서 세부단위에 안 넣은 결함은 「미설정」 시트로 따로 둡니다(요약에 표시).',
+        '1. 시트 = 평가단위(SafetyMan 프로젝트·평가 단위 1개). 그 안의 「표본층 n」 = 층 전체 또는 층 구역(예: 2F-증축부). SafetyMan에서는 평가단위마다 표본층을 이 순서로 입력하세요.',
+        '2. 평가단위를 정하지 않은 층, 나눈 층에서 구역에 안 넣은 결함, 평가단위가 없는 부분의 결함은 「미설정」 시트로 따로 둡니다(요약에 표시).',
         '3. 평가부재: 부재 명칭에 「기둥」→기둥, 「테두리보」→테두리보, 「보·거더」→보, 「슬래브」→슬래브, 「벽」→벽, 「지판」→지판, 그 밖은 기타. 기둥·보·슬래브·벽은 결함이 없어도 줄을 둡니다.',
         '4. 결함 종류: 「균열」→균열, 「박리·박락·층분리·들뜸」→박리·박락, 「누수·백태·백화」→누수·백태, 「철근노출」→철근노출. 그 밖의 결함은 결함 수에만 들어갑니다.',
         '5. 균열 구간은 부재별 최대 균열폭: 0.1 미만→0.1mm미만, 0.1~0.2 미만→0.2mm미만, 0.2~0.3 미만→0.3mm미만, 0.3~0.5 미만→0.5mm미만, 0.5 이상→0.5mm이상 (경계값은 위 구간).',
         '6. 균열폭은 결함의 균열폭 칸, 없으면 규모의 「Cw:0.3」「0.3mm」에서 읽습니다. 못 읽으면 「(직접 입력)」.',
         '7. 박리 깊이는 규모에 「깊이 3」「D=3」처럼 적은 경우만 읽습니다(앱에 깊이 칸이 없음). 없으면 「(직접 입력)」. 구간: 2.5mm 미만은 0.5/1.0/2.5mm, 2.5mm 이상은 15/20/25mm 기준(「2.5mm이상의 박리발생」은 쓰지 않음 — SafetyMan에서 확인).',
         '8. 백태·철근노출 면적율(%)은 앱에 부재면적이 없어 계산하지 않습니다. 해당 결함이 있으면 「(직접 입력)」 칸을 채우세요.',
-        '9. 비파괴 시험값(강도·중성화)은 층 단위로 저장돼 있어, 세부단위 시트에는 그 층 값이 공통으로 들어갑니다. 염화물은 앱에 입력 칸이 없어 빈칸입니다.',
+        '9. 비파괴 시험값(강도·중성화)은 층 단위로 저장돼 있어, 구역 표본층에는 그 층 값이 공통으로 들어갑니다. 염화물은 앱에 입력 칸이 없어 빈칸입니다.',
         '10. 부재변형·기울기·부동침하는 이 파일에 넣지 않았습니다(건물 전체 항목). 등급 계산은 하지 않습니다 — SafetyMan에서 계산하세요.'
     ];
 
