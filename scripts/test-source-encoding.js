@@ -38,6 +38,9 @@ const TEXT_EXT = /\.(html|htm|js|mjs|cjs|css|json|md|rules|ya?ml|txt|py|ps1|svg)
  */
 const BOM_ALLOWED_EXT = /\.ps1$/i;
 
+/** 밖에서 만든 번들 폴더. 우리가 손으로 쓰는 한글 파일이 아니라 글자 검사에서 뺀다. */
+const VENDOR_DIR = /^vendor\//;
+
 /**
  * U+00C0~U+024F(라틴 확장) 구간에서 예외로 허용하는 문자.
  * 이 저장소에서 이 구간에 정상적으로 쓰이는 건 곱셈·나눗셈 기호뿐이다.
@@ -136,6 +139,12 @@ listTrackedFiles().forEach(function (rel) {
     }
 
     const text = buf.toString('utf8');
+
+    // 2026-10-13: vendor/ 는 밖에서 만든 번들이라 글자 검사(아래 1·2)는 하지 않는다.
+    // SAFETY357 번들에 든 문자 변환 라이브러리(iconv-lite)의 외국어 문자표에는 U+FFFD와
+    // 라틴 확장 문자가 원래 들어 있어서, 한글이 멀쩡한데도 깨짐으로 잡혀 배포가 막혔다.
+    // UTF-8 여부와 BOM은 위에서 그대로 본다.
+    if (VENDOR_DIR.test(rel.replace(/\\/g, '/'))) return;
 
     // (2) 깨진 자리에 박히는 U+FFFD
     const fffd = text.indexOf(REPLACEMENT_CHAR);
