@@ -39,7 +39,7 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <meta name="apple-mobile-web-app-title" content="스마트 안전점검">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css">
-    <link rel="stylesheet" href="styles.css?v=20261012_183751">
+    <link rel="stylesheet" href="styles.css?v=20261013_104012">
 
     <!-- FontAwesome icons for clean engineering UI -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
@@ -293,6 +293,9 @@
                                 <button type="button" id="btnModeMemo" class="mode-btn btn-memo-mode" title="도면 메모 — 도면을 클릭해 메모를 붙입니다(결함 아님, 조사표·번호에 안 들어감)">
                                     <i class="fa-solid fa-note-sticky"></i> 📝 메모
                                 </button>
+                                <button type="button" id="btnEvalUnits" class="mode-btn btn-eval-units" title="평가단위 — 한 층을 구역(A·B…)으로 나눠 결함을 따로 평가(정밀점검)">
+                                    <i class="fa-solid fa-layer-group"></i> 평가단위
+                                </button>
                                 <button type="button" id="btnSnapToCad" class="mode-btn btn-snap-toggle active" title="CAD 벡터 스냅 — 핀 마킹 시 근처 CAD 선/끝점/교차점에 자동으로 붙습니다 (PDF 벡터 도면에서만 동작)">
                                     <i class="fa-solid fa-magnet"></i> 스냅
                                 </button>
@@ -364,6 +367,11 @@
 
                         <div id="mapZoomOverlay" class="map-zoom-overlay" aria-hidden="true"></div>
                         <div id="mapSelectedDefectPopup" class="map-selected-defect-popup" hidden></div>
+                        <div class="eval-unit-bar" id="evalUnitBar" hidden role="toolbar" aria-label="평가단위">
+                            <span class="eval-unit-bar-title">평가단위</span>
+                            <div class="eval-unit-bar-chips" id="evalUnitBarChips"></div>
+                            <button type="button" class="btn btn-sm btn-outline" id="btnEvalUnitBarManage">관리</button>
+                        </div>
                         <div class="drawing-memo-bar" id="drawingMemoBar" hidden role="toolbar" aria-label="도면 메모">
                         <span class="drawing-memo-bar-text">📝 도면을 눌러 메모 추가 · 메모를 끌어 옮기기 · 눌러서 고치기/지우기</span>
                         <label class="drawing-memo-opt"><input type="checkbox" data-memo-show checked> 메모 표시</label>
@@ -409,6 +417,10 @@
                             <button type="button" class="mobile-rail-btn mobile-fab-memo" id="mobileBtnModeMemo" data-mode="MEMO" title="도면 메모">
                                 <i class="fa-solid fa-note-sticky"></i>
                                 <span>메모</span>
+                            </button>
+                            <button type="button" class="mobile-rail-btn mobile-fab-eval-units" id="mobileBtnEvalUnits" title="평가단위">
+                                <i class="fa-solid fa-layer-group"></i>
+                                <span>평가단위</span>
                             </button>
                             <button type="button" class="mobile-rail-btn mobile-rail-more-toggle" id="mobileBtnRailMore" title="추가 도구 보이기/숨기기" aria-expanded="false" aria-controls="mobileMapRailSecondary">
                                 <i class="fa-solid fa-ellipsis"></i>
@@ -472,6 +484,10 @@
                                 <i class="fa-solid fa-object-ungroup"></i>
                                 <span>통합 해제</span>
                             </button>
+                            <button type="button" id="btnEvalUnitSelectedDefects" class="icon-pill-btn map-toolbar-eval-unit" title="선택한 결함을 평가단위로 분류" hidden disabled>
+                                <i class="fa-solid fa-layer-group"></i>
+                                <span id="mapEvalUnitToolbarLabel">평가단위</span>
+                            </button>
                             <button type="button" id="btnDeleteSelectedDefects" class="icon-pill-btn icon-pill-danger map-toolbar-delete-selected" title="선택한 결함 삭제" hidden disabled>
                                 <i class="fa-solid fa-trash-can"></i>
                                 <span id="mapSelectionToolbarLabel">선택 삭제</span>
@@ -505,6 +521,10 @@
                             <button type="button" class="mobile-fab-btn mobile-fab-merge" id="mobileBtnUnmergeSelected" title="통합한 마킹을 원래 번호·위치로 되돌림" hidden disabled>
                                 <i class="fa-solid fa-object-ungroup"></i>
                                 <span>통합해제</span>
+                            </button>
+                            <button type="button" class="mobile-fab-btn" id="mobileBtnEvalUnitSelected" title="선택한 결함을 평가단위로 분류" hidden disabled>
+                                <i class="fa-solid fa-layer-group"></i>
+                                <span id="mobileMapEvalUnitLabel">평가단위</span>
                             </button>
                             <button type="button" class="mobile-fab-btn mobile-fab-danger" id="mobileBtnDeleteSelected" title="선택한 결함 삭제" hidden disabled>
                                 <i class="fa-solid fa-trash-can"></i>
@@ -3375,60 +3395,61 @@
 
     <!-- Core → 탭 분류 → 기존 엔진(app.js) -->
     <!-- 오류 기록은 맨 먼저 — 아래 스크립트들이 읽히다 터져도 잡아야 한다 -->
-    <script src="js/core/error-log.js?v=20261012_183751"></script>
-    <script src="js/core/floor-identity.js?v=20261012_183751"></script>
-    <script src="js/core/state.js?v=20261012_183751"></script>
-    <script src="js/core/ndt-disp-transfer.js?v=20261012_183751"></script>
-    <script src="js/core/ndt-grade.js?v=20261012_183751"></script>
-    <script src="js/tabs/registry.js?v=20261012_183751"></script>
-    <script src="js/pdf-vector-bridge.js?v=20261012_183751"></script>
-    <script src="js/pdf-vector-snap.js?v=20261012_183751"></script>
-    <script src="js/core/layout-mode.js?v=20261012_183751"></script>
-    <script src="js/core/performance.js?v=20261012_183751"></script>
-    <script src="js/shared/app-dialog.js?v=20261012_183751"></script>
-    <script src="js/core/mobile-app-update.js?v=20261012_183751"></script>
-    <script src="js/shared/app-update-button.js?v=20261012_183751"></script>
-    <script src="js/shared/measure-keypad.js?v=20261012_183751"></script>
-    <script src="js/shared/photo-crop.js?v=20261012_183751"></script>
-    <script src="js/core/mobile-keyboard.js?v=20261012_183751"></script>
-    <script src="js/tabs/home.js?v=20261012_183751"></script>
-    <script src="js/tabs/map.js?v=20261012_183751"></script>
-    <script src="js/tabs/survey.js?v=20261012_183751"></script>
-    <script src="js/tabs/stats.js?v=20261012_183751"></script>
-    <script src="js/tabs/ndt.js?v=20261012_183751"></script>
-    <script src="js/shared/report.js?v=20261012_183751"></script>
-    <script src="js/shared/hwpx-survey-slots.js?v=20261012_183751"></script>
-    <script src="js/shared/hwpx-ndt-maps.js?v=20261012_183751"></script>
-    <script src="js/shared/cad-unmarked-place.js?v=20261012_183751"></script>
-    <script src="js/shared/arrow-survey-number.js?v=20261012_183751"></script>
-    <script src="js/shared/defect-merge.js?v=20261012_183751"></script>
-    <script src="js/shared/korean-text-wrap.js?v=20261012_183751"></script>
-    <script src="js/shared/hwpx-import.js?v=20261012_183751"></script>
-    <script src="js/shared/hwpx-validate.js?v=20261012_183751"></script>
-    <script src="js/shared/hwpx-crack-monitor.js?v=20261012_183751"></script>
-    <script src="js/shared/auth.js?v=20261012_183751"></script>
-    <script src="js/core/firebase-storage-assets.js?v=20261012_183751"></script>
-    <script src="js/core/drawing-floor-tombstone.js?v=20261012_183751"></script>
-    <script src="js/core/data-health.js?v=20261012_183751"></script>
-    <script src="js/core/defect-lint.js?v=20261012_183751"></script>
-    <script src="js/core/building-meta-merge.js?v=20261012_183751"></script>
-    <script src="js/core/edit-history.js?v=20261012_183751"></script>
-    <script src="js/core/no-conflict.js?v=20261012_183751"></script>
-    <script src="js/core/sync-merge.js?v=20261012_183751"></script>
-    <script src="js/core/gauge-photo-store.js?v=20261012_183751"></script>
-    <script src="js/core/offline-prep.js?v=20261012_183751"></script>
-    <script src="js/core/drawing-memo.js?v=20261012_183751"></script>
-    <script src="js/core/prev-round-photo-match.js?v=20261012_183751"></script>
-    <script src="js/shared/defect-quick-presets.js?v=20261012_183751"></script>
-    <script src="js/shared/grid-lines.js?v=20261012_183751"></script>
-    <script src="js/shared/box-auto-layout.js?v=20261012_183751"></script>
-    <script src="js/shared/print-crop.js?v=20261012_183751"></script>
-    <script src="js/core/legend-layout.js?v=20261012_183751"></script>
-    <script src="js/core/error-log-view.js?v=20261012_183751"></script>
-    <script src="app.js?v=20261012_183751"></script>
+    <script src="js/core/error-log.js?v=20261013_104012"></script>
+    <script src="js/core/floor-identity.js?v=20261013_104012"></script>
+    <script src="js/core/state.js?v=20261013_104012"></script>
+    <script src="js/core/ndt-disp-transfer.js?v=20261013_104012"></script>
+    <script src="js/core/ndt-grade.js?v=20261013_104012"></script>
+    <script src="js/tabs/registry.js?v=20261013_104012"></script>
+    <script src="js/pdf-vector-bridge.js?v=20261013_104012"></script>
+    <script src="js/pdf-vector-snap.js?v=20261013_104012"></script>
+    <script src="js/core/layout-mode.js?v=20261013_104012"></script>
+    <script src="js/core/performance.js?v=20261013_104012"></script>
+    <script src="js/shared/app-dialog.js?v=20261013_104012"></script>
+    <script src="js/core/mobile-app-update.js?v=20261013_104012"></script>
+    <script src="js/shared/app-update-button.js?v=20261013_104012"></script>
+    <script src="js/shared/measure-keypad.js?v=20261013_104012"></script>
+    <script src="js/shared/photo-crop.js?v=20261013_104012"></script>
+    <script src="js/core/mobile-keyboard.js?v=20261013_104012"></script>
+    <script src="js/tabs/home.js?v=20261013_104012"></script>
+    <script src="js/tabs/map.js?v=20261013_104012"></script>
+    <script src="js/tabs/survey.js?v=20261013_104012"></script>
+    <script src="js/tabs/stats.js?v=20261013_104012"></script>
+    <script src="js/tabs/ndt.js?v=20261013_104012"></script>
+    <script src="js/shared/report.js?v=20261013_104012"></script>
+    <script src="js/shared/hwpx-survey-slots.js?v=20261013_104012"></script>
+    <script src="js/shared/hwpx-ndt-maps.js?v=20261013_104012"></script>
+    <script src="js/shared/cad-unmarked-place.js?v=20261013_104012"></script>
+    <script src="js/shared/arrow-survey-number.js?v=20261013_104012"></script>
+    <script src="js/shared/defect-merge.js?v=20261013_104012"></script>
+    <script src="js/shared/korean-text-wrap.js?v=20261013_104012"></script>
+    <script src="js/shared/hwpx-import.js?v=20261013_104012"></script>
+    <script src="js/shared/hwpx-validate.js?v=20261013_104012"></script>
+    <script src="js/shared/hwpx-crack-monitor.js?v=20261013_104012"></script>
+    <script src="js/shared/auth.js?v=20261013_104012"></script>
+    <script src="js/core/firebase-storage-assets.js?v=20261013_104012"></script>
+    <script src="js/core/drawing-floor-tombstone.js?v=20261013_104012"></script>
+    <script src="js/core/data-health.js?v=20261013_104012"></script>
+    <script src="js/core/defect-lint.js?v=20261013_104012"></script>
+    <script src="js/core/building-meta-merge.js?v=20261013_104012"></script>
+    <script src="js/core/edit-history.js?v=20261013_104012"></script>
+    <script src="js/core/no-conflict.js?v=20261013_104012"></script>
+    <script src="js/core/sync-merge.js?v=20261013_104012"></script>
+    <script src="js/core/gauge-photo-store.js?v=20261013_104012"></script>
+    <script src="js/core/offline-prep.js?v=20261013_104012"></script>
+    <script src="js/core/drawing-memo.js?v=20261013_104012"></script>
+    <script src="js/core/eval-units.js?v=20261013_104012"></script>
+    <script src="js/core/prev-round-photo-match.js?v=20261013_104012"></script>
+    <script src="js/shared/defect-quick-presets.js?v=20261013_104012"></script>
+    <script src="js/shared/grid-lines.js?v=20261013_104012"></script>
+    <script src="js/shared/box-auto-layout.js?v=20261013_104012"></script>
+    <script src="js/shared/print-crop.js?v=20261013_104012"></script>
+    <script src="js/core/legend-layout.js?v=20261013_104012"></script>
+    <script src="js/core/error-log-view.js?v=20261013_104012"></script>
+    <script src="app.js?v=20261013_104012"></script>
 
     <script>
-        window.BSA_APP_VERSION = '20261012_183751';
+        window.BSA_APP_VERSION = '20261013_104012';
 
         (function () {
             var el = document.getElementById('appVersionText');
@@ -3461,7 +3482,7 @@
                     if (window.caches && caches.keys) caches.keys().then(function(ks) { ks.forEach(function(k) { caches.delete(k); }); }).catch(function() {});
                     return;
                 }
-                navigator.serviceWorker.register('./sw.js?v=20261012_183751')
+                navigator.serviceWorker.register('./sw.js?v=20261013_104012')
 
                     .then(function(registration) {
                         console.log('✅ ServiceWorker Registered Successfully with scope:', registration.scope);

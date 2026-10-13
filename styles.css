@@ -16777,3 +16777,41 @@ html.layout-mobile .home-update-btn { width: 2.5rem; padding: 0; justify-content
     min-height: 2rem;
 }
 #ndtDispEditPointList .ndt-disp-row-transfer-form { width: 100%; }
+
+/* ---- 평가단위(2026-10-13): 도면 위 작은 바 + 건물 설정 창 ---- */
+.eval-unit-bar {
+    position: absolute; right: 0.6rem; bottom: 0.6rem; z-index: 21;
+    display: flex; flex-wrap: wrap; align-items: center; gap: 0.35rem;
+    max-width: calc(100% - 1.2rem); padding: 0.3rem 0.5rem;
+    background: rgba(255, 255, 255, 0.95); border: 1px solid #cbd5e1; border-radius: 10px;
+    color: #0f172a; font-size: 0.78rem; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+}
+.eval-unit-bar[hidden] { display: none !important; }
+.eval-unit-bar-title { font-weight: 800; }
+.eval-unit-bar-chips { display: flex; flex-wrap: wrap; gap: 0.25rem; }
+.eval-unit-chip {
+    border: 2px solid var(--eu-color, #64748b); background: #fff; color: #0f172a;
+    border-radius: 999px; padding: 0.1rem 0.5rem; font-size: 0.76rem; font-weight: 700; cursor: pointer;
+}
+.eval-unit-chip.active { background: var(--eu-color, #64748b); color: #fff; }
+.eval-plan-overlay {
+    position: fixed; inset: 0; z-index: 10050; background: rgba(15, 23, 42, 0.45);
+    display: flex; align-items: center; justify-content: center; padding: 0.8rem;
+}
+.eval-plan-overlay[hidden] { display: none !important; }
+.eval-plan-card {
+    background: #fff; color: #0f172a; border-radius: 12px; width: min(720px, 100%);
+    max-height: 90vh; overflow: auto; padding: 0.9rem 1rem; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
+}
+.eval-plan-head { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 0.6rem; }
+.eval-plan-head .eval-plan-close { margin-left: auto; }
+.eval-plan-sub { font-size: 0.75rem; color: #64748b; }
+.eval-plan-count { display: flex; align-items: center; gap: 0.45rem; flex-wrap: wrap; margin-bottom: 0.6rem; font-weight: 700; }
+.eval-plan-count .eval-plan-n { width: 5rem; }
+.eval-plan-table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+.eval-plan-table th, .eval-plan-table td { border-bottom: 1px solid #e2e8f0; padding: 0.35rem 0.3rem; text-align: left; vertical-align: middle; }
+.eval-plan-table select { min-width: 9rem; max-width: 100%; }
+.eval-plan-detail { color: #475569; font-size: 0.76rem; }
+.eval-plan-sum { margin-top: 0.7rem; font-size: 0.82rem; }
+.eval-plan-sum ul { margin: 0.3rem 0 0.3rem 1.1rem; padding: 0; }
+.eval-plan-warn { color: #b45309; font-weight: 700; }

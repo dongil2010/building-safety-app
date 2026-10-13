@@ -21,7 +21,9 @@
         // 층별 "PDF를 뺀 시각" — 도면을 그림으로 바꾼 층의 옛 PDF를 다른 기기도 버리게(감사 O-05, 2026-09-28)
         'floorPdfRemovedAt',
         // 층별 "도면을 다시 넣은 시각" — 다른 기기가 받아 둔 옛 PDF를 버리고 새 파일을 받게
-        'floorPdfUpdatedAt'
+        'floorPdfUpdatedAt',
+        // 상태평가용 평가단위 설정(단위 개수·층별 통째/나누기) — 2026-10-13
+        'evalUnitPlan'
     ];
 
     function metaUpdatedAt(bldg) {
