@@ -25175,6 +25175,35 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             + `<button type="button" data-mc-act="close">닫기</button>`
             + `<span class="map-count-hint">도면을 누르면 점, 점을 다시 누르면 지움 · 끌면 도면 이동</span>`;
         if (bar._h !== html) { bar._h = html; bar.innerHTML = html; }
+        placeMemberCountBar(bar, host);
+    }
+    /** 부재 수 막대를 도면 위 도구 막대(상단)·세로 도구(모바일 오른쪽) 밖에 둔다 — 2026-10-13 */
+    function placeMemberCountBar(bar, host) {
+        if (!bar || !host || bar.hidden) return;
+        const hr = host.getBoundingClientRect();
+        let top = 8;
+        let right = 8;
+        const vis = (el) => el && el.offsetParent !== null && getComputedStyle(el).visibility !== 'hidden' && el.getBoundingClientRect().height > 0;
+        host.querySelectorAll('.canvas-top-toolbar').forEach((tb) => {
+            if (!vis(tb)) return;
+            const r = tb.getBoundingClientRect();
+            if (r.top - hr.top < hr.height / 2) top = Math.max(top, Math.round(r.bottom - hr.top + 6));
+        });
+        bar.style.top = top + 'px';
+        bar.style.right = right + 'px';
+        const rail = document.getElementById('mobileBtnModeCount');
+        const railBox = rail && rail.parentElement;
+        if (vis(railBox)) {
+            const r = railBox.getBoundingClientRect();
+            const br = bar.getBoundingClientRect();
+            const sideRail = r.left > hr.left + hr.width / 2 && r.right <= hr.right + 2;
+            if (sideRail && br.right > r.left && br.bottom > r.top && br.top < r.bottom) bar.style.right = Math.round(hr.right - r.left + 6) + 'px';
+        }
+        if (!bar._ro && typeof ResizeObserver === 'function') {
+            bar._ro = new ResizeObserver(() => placeMemberCountBar(bar, bar.parentElement));
+            host.querySelectorAll('.canvas-top-toolbar').forEach((tb) => bar._ro.observe(tb));
+            bar._ro.observe(host);
+        }
     }
     window.syncMemberCountBar = syncMemberCountBar;
     if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') document.addEventListener('keydown', (e) => {
