@@ -16970,3 +16970,20 @@ html body:not(.bsa-eval-map-on) #mapEvalMemberBar#mapEvalMemberBar { display: no
 .eval-grade { display: inline-block; min-width: 22px; text-align: center; border-radius: 6px; padding: 1px 6px; font-weight: 800; color: #fff; background: #64748b; }
 .eval-grade-A { background: #3da36e; } .eval-grade-B { background: #6aad4a; } .eval-grade-C { background: #d4a017; } .eval-grade-D { background: #d9763a; } .eval-grade-E { background: #c43d30; }
 .eval-score-note { margin: 8px 0 0; color: #64748b; font-size: 0.78rem; }
+
+/* 고급 필터: 열면 떠 있는 창(머리를 끌어 옮김, 화면 안에 붙잡음) */
+.advanced-filter-panel .adv-filter-grip { color: var(--text-secondary); opacity: .55; margin-right: .2rem; }
+.advanced-filter-panel .adv-filter-close { display: none; float: right; border: 0; background: transparent; font-size: .95rem; cursor: pointer; color: var(--text-secondary); padding: 0 .2rem; }
+.advanced-filter-panel.adv-floating {
+    position: fixed !important; z-index: 2600; margin: 0 !important;
+    width: min(300px, calc(100vw - 16px)); max-height: calc(100vh - 16px); max-height: calc(100dvh - 16px);
+    overflow: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch;
+    box-shadow: 0 12px 32px rgba(0,0,0,.22); background: var(--bg-secondary, #fff);
+}
+.advanced-filter-panel.adv-floating > summary.adv-filter-handle {
+    position: sticky; top: -0.6rem; z-index: 1; background: inherit; cursor: grab;
+    touch-action: none; user-select: none; -webkit-user-select: none; padding: .35rem 0; margin-top: -.35rem;
+}
+.advanced-filter-panel.adv-floating.adv-dragging > summary.adv-filter-handle { cursor: grabbing; }
+.advanced-filter-panel.adv-floating .adv-filter-close { display: inline-block; }
+.adv-filter-placeholder { display: none; }

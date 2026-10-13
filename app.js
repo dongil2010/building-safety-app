@@ -62160,3 +62160,82 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         }, 280);
     });
 });
+
+/* 고급 필터 떠 있는 창 — 옆 패널 아래에서 잘리거나 가려지던 문제. 열면 body로 옮겨 띄우고, 머리(summary)를 마우스·터치로 끌어 옮김.
+   위치는 이번 세션 동안 기억(sessionStorage). 닫으면 원래 자리로 돌려놓아 기존 DOM·id·이벤트는 그대로. */
+(function () {
+    'use strict';
+    var KEY = 'bsa.advFilterPos';
+    function init() {
+        var d = document.querySelector('.advanced-filter-panel');
+        if (!d || d.__advFloat) return;
+        d.__advFloat = true;
+        var sum = d.querySelector('summary');
+        var ph = document.createElement('span');
+        ph.className = 'adv-filter-placeholder';
+        d.parentNode.insertBefore(ph, d);
+        var origin = null;
+        function readPos() { try { var v = JSON.parse(sessionStorage.getItem(KEY) || 'null'); return v && isFinite(v.x) && isFinite(v.y) ? v : null; } catch (e) { return null; } }
+        function savePos(x, y) { try { sessionStorage.setItem(KEY, JSON.stringify({ x: Math.round(x), y: Math.round(y) })); } catch (e) { /* 무시 */ } }
+        function clamp(x, y) {
+            var w = d.offsetWidth || 300, h = d.offsetHeight || 200, m = 8;
+            var vw = window.innerWidth, vh = window.innerHeight;
+            x = Math.min(Math.max(m, x), Math.max(m, vw - w - m));
+            y = Math.min(Math.max(m, y), Math.max(m, vh - Math.min(h, vh - 2 * m) - m));
+            return { x: x, y: y };
+        }
+        function place(x, y) { var c = clamp(x, y); d.style.left = c.x + 'px'; d.style.top = c.y + 'px'; return c; }
+        function float() {
+            if (d.classList.contains('adv-floating')) return;
+            var r = d.getBoundingClientRect();
+            var visible = r.width > 0 && r.height > 0;
+            origin = visible ? { x: r.left, y: r.top } : null;
+            document.body.appendChild(d);
+            d.classList.add('adv-floating');
+            var p = readPos() || origin || { x: window.innerWidth - (d.offsetWidth || 300) - 12, y: 72 };
+            place(p.x, p.y);
+        }
+        function dock() {
+            if (!d.classList.contains('adv-floating')) return;
+            d.classList.remove('adv-floating', 'adv-dragging');
+            d.style.left = ''; d.style.top = '';
+            if (ph.parentNode) ph.parentNode.insertBefore(d, ph);
+        }
+        d.addEventListener('toggle', function () { if (d.open) float(); else dock(); });
+        var closeBtn = d.querySelector('.adv-filter-close');
+        if (closeBtn) closeBtn.addEventListener('click', function (e) { e.preventDefault(); e.stopPropagation(); d.open = false; });
+        // 끌기
+        var drag = null, suppressClick = false;
+        sum.addEventListener('pointerdown', function (e) {
+            if (!d.classList.contains('adv-floating') || e.button > 0) return;
+            if (e.target.closest && e.target.closest('.adv-filter-close')) return;
+            var r = d.getBoundingClientRect();
+            drag = { id: e.pointerId, sx: e.clientX, sy: e.clientY, ox: r.left, oy: r.top, moved: false };
+        });
+        window.addEventListener('pointermove', function (e) {
+            if (!drag || e.pointerId !== drag.id) return;
+            var dx = e.clientX - drag.sx, dy = e.clientY - drag.sy;
+            if (!drag.moved && Math.abs(dx) + Math.abs(dy) < 5) return;
+            if (!drag.moved) { drag.moved = true; d.classList.add('adv-dragging'); try { sum.setPointerCapture(e.pointerId); } catch (x) { /* 무시 */ } }
+            e.preventDefault();
+            place(drag.ox + dx, drag.oy + dy);
+        });
+        function end(e) {
+            if (!drag || (e && e.pointerId !== drag.id)) return;
+            if (drag.moved) { suppressClick = true; setTimeout(function () { suppressClick = false; }, 350); var r = d.getBoundingClientRect(); savePos(r.left, r.top); }
+            d.classList.remove('adv-dragging');
+            drag = null;
+        }
+        window.addEventListener('pointerup', end);
+        window.addEventListener('pointercancel', end);
+        sum.addEventListener('click', function (e) { if (suppressClick) { e.preventDefault(); suppressClick = false; } }, true);
+        window.addEventListener('resize', function () { if (d.classList.contains('adv-floating')) { var r = d.getBoundingClientRect(); place(r.left, r.top); } });
+        // 다른 탭으로 가면 접어서 원래 자리로
+        document.addEventListener('click', function (e) {
+            var t = e.target && e.target.closest && e.target.closest('[data-tab], .tab-btn, .nav-tab');
+            if (t && d.open && !d.contains(t)) d.open = false;
+        }, true);
+        if (d.open) float();
+    }
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
+})();
