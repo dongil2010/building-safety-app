@@ -16851,3 +16851,19 @@ html.layout-mobile .home-update-btn { width: 2.5rem; padding: 0; justify-content
 .eval-plan-matrix th, .eval-plan-matrix td { white-space: nowrap; text-align: center; }
 .eval-plan-matrix td:first-child { text-align: left; font-weight: 700; }
 .eval-plan-cell label { display: inline-flex; align-items: center; gap: 0.25rem; cursor: pointer; }
+
+/* 평가 탭 (2026-10-13) */
+.eval-tab { padding: 0.8rem 1rem 3rem; max-width: 1400px; }
+.eval-tab h3 { margin: 1.1rem 0 0.4rem; font-size: 1.02rem; }
+.eval-tab-empty { padding: 2rem; color: #64748b; }
+.eval-tab .eval-plan-count .form-control { width: 4.5rem; display: inline-block; }
+.eval-in-unit { border: 1px solid #e2e8f0; border-radius: 10px; padding: 0.6rem; margin: 0.6rem 0; background: #fff; }
+.eval-in-head { display: flex; flex-wrap: wrap; gap: 0.8rem; align-items: center; margin-bottom: 0.4rem; }
+.eval-in-head .form-control { width: 8rem; display: inline-block; }
+.eval-in-head .eval-in-tilt { width: 5rem; }
+.eval-in-table th, .eval-in-table td { text-align: center; padding: 0.25rem; }
+.eval-in-table .form-control.eval-in { width: 4.6rem; min-width: 3.6rem; padding: 0.25rem; text-align: center; }
+.eval-in-cell { display: flex; gap: 0.2rem; align-items: center; justify-content: center; }
+.eval-in.is-auto { color: #64748b; background: #f1f5f9; }
+.eval-in.is-input { color: #0f172a; font-weight: 700; background: #fefce8; }
+.eval-grade-placeholder { margin-top: 1.2rem; padding: 0.8rem; border: 1px dashed #cbd5e1; border-radius: 8px; color: #94a3b8; }

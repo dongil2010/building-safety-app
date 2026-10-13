@@ -74,49 +74,55 @@ assert.ok(/drawEvalUnitTag\(ctx, defect, w, h, scale\); \/\/ 화면 전용/.test
 const safe = app.slice(app.indexOf('function drawPinSafe('), app.indexOf('function drawPinSafe(') + 6000);
 assert.ok(!/drawEvalUnitTag/.test(safe), '보고서 그림엔 안 넣음');
 
-// 2026-10-13 개편: 건물 부분(기존부/증축부) + 층 × 부분 → 평가단위, 옛 세부단위 옮기기
+// 2026-10-13 단순화: 구역 = 번호 1,2,3…(같은 번호 = 같은 평가단위), 옛 1-1/1-2·이름 부분 → 번호
 (function () {
     const b = { id: 'b2' };
     E.setUnitCount(b, 2, 1);
+    assert.deepStrictEqual(E.planOf(b).parts.map((p) => p.id + ':' + p.unitId), ['z1:unit1', 'z2:unit2']);
     E.setFloorMode(b, '3F', 'split', null, 2);
     const s = { defects: { b2_3F: [{ id: 'd' }, { id: 'e' }] } };
     const z11 = E.createSubUnit(s, 'b2_3F', b, 'unit1', 3);
-    const z21 = E.createSubUnit(s, 'b2_3F', b, 'unit2', 4);
+    const z12 = E.createSubUnit(s, 'b2_3F', b, 'unit1', 4);
     E.assign([s.defects.b2_3F[0]], z11.id, 5);
-    E.assign([s.defects.b2_3F[1]], z21.id, 5);
-    const fl = [{ floorCode: '1F', floorLabel: '1F', floorKey: 'b2_1F' }, { floorCode: '2F', floorLabel: '2F', floorKey: 'b2_2F' }, { floorCode: '3F', floorLabel: '3F', floorKey: 'b2_3F' }];
-    const before = E.summarize(b, s, fl);
-    const r = E.migrateLegacy(b, s, fl, 6);
-    assert.ok(r.planChanged && r.floorKeys[0] === 'b2_3F');
-    assert.deepStrictEqual(E.planOf(b).parts.map((p) => p.name + ':' + p.unitId), ['1-1:unit1', '2-1:unit2']);
-    assert.strictEqual(E.floorParts(b, '3F').length, 2);
+    E.assign([s.defects.b2_3F[1]], z12.id, 5);
+    const fl = ['1F', '2F', '3F'].map((c) => ({ floorCode: c, floorLabel: c, floorKey: 'b2_' + c }));
+    const r = E.normalize(b, s, fl, 6);
+    assert.deepStrictEqual(r.floorKeys, ['b2_3F']);
+    assert.deepStrictEqual(E.listFor(s, 'b2_3F').map((z) => z.name + ':' + z.partId), ['1:z1', '2:z2'], '1-1→1, 1-2→2');
+    assert.deepStrictEqual(E.floorParts(b, '3F'), ['z1', 'z2']);
     assert.strictEqual(s.defects.b2_3F[0].evalUnitId, z11.id, '결함 그대로');
-    const after = E.summarize(b, s, fl);
-    assert.deepStrictEqual(after.units.map((u) => u.subUnits.map((x) => x.label + x.count)), before.units.map((u) => u.subUnits.map((x) => x.sub.name + x.count)));
-    assert.ok(!E.migrateLegacy(b, s, fl, 7).planChanged, '두 번째는 할 일 없음');
-    // 부분 추가: 기본 단위 = 같은 번호
-    const ext = E.addPart(b, { name: '증축부', note: '철골' }, 8);
-    assert.strictEqual(ext.unitId, 'unit1'); // 3번째 부분 → 단위 3 없음 → 첫 단위
-    assert.ok(!E.addPart(b, { name: '증축부' }, 9), '이름 겹침');
-    E.setFloorParts(b, '1F', [ext.id], 10);
-    E.setFloorParts(b, '2F', [ext.id], 11);
-    assert.strictEqual(E.ensureZones(s, 'b2_1F', b, '1F', 12), 1);
-    assert.strictEqual(E.ensureZones(s, 'b2_1F', b, '1F', 13), 0);
-    E.ensureZones(s, 'b2_2F', b, '2F', 14);
-    // 다른 층 구역끼리 같은 단위, 부분의 단위를 바꾸면 같이 움직임
-    E.updatePart(b, ext.id, { unitId: 'unit2' }, 15);
+    assert.strictEqual(E.zoneUnitId(b, z12), 'unit2');
+    const again = E.normalize(b, s, fl, 7);
+    assert.ok(!again.planChanged && !again.floorKeys.length, '두 번째는 할 일 없음');
+    // 다른 층도 같은 번호 → 같은 평가단위
+    E.setFloorParts(b, '1F', ['z2'], 8);
+    E.ensureZones(s, 'b2_1F', b, '1F', 9);
+    assert.strictEqual(E.zoneForPart(s, 'b2_1F', 'z2').name, '2');
     const u2 = E.summarize(b, s, fl).units[1].subUnits.map((x) => x.floorLabel + '-' + x.label);
-    assert.deepStrictEqual(u2, ['1F-증축부', '2F-증축부', '3F-2-1']);
-    const m = E.matrix(b, s, fl);
-    assert.ok(m[0].cells[ext.id].on && m[0].cells[ext.id].unitId === 'unit2');
-    // 부분 지우기 → 층 목록에서 빠지고, 그 구역 결함은 단위 없음(unassigned)
-    s.defects.b2_1F = [{ id: 'q', evalUnitId: E.zoneForPart(s, 'b2_1F', ext.id).id }];
-    E.removePart(b, ext.id, 16);
-    assert.deepStrictEqual(E.floorParts(b, '1F'), []);
-    assert.ok(E.summarize(b, s, fl).unassigned.some((x) => x.floorCode === '1F' && x.count === 1));
-    // 단위 줄이면 그 단위 부분은 단위 없음
-    E.setUnitCount(b, 1, 17);
-    assert.strictEqual(E.planOf(b).parts.find((p) => p.name === '2-1').unitId, '');
+    assert.deepStrictEqual(u2, ['1F-2', '3F-2']);
+    assert.ok(E.matrix(b, s, fl)[0].cells.z2.on);
+    // 이름(선택)
+    assert.ok(E.setUnitLabel(b, 'unit1', '기존부', 10));
+    assert.strictEqual(E.unitTitle(E.planUnit(b, 'unit1')), '평가단위 1 기존부');
+    assert.strictEqual(E.zoneLabel(b, z11), '1');
+    // 지난 판(이름 부분 기존부/증축부) → 번호, 이름은 단위 label
+    const b3 = { id: 'b3', evalUnitPlan: { units: [{ id: 'unit1', no: 1, name: '평가단위 1' }, { id: 'unit2', no: 2, name: '평가단위 2' }],
+        parts: [{ id: 'part_a', no: 1, name: '기존부', unitId: 'unit1' }, { id: 'part_b', no: 2, name: '증축부', unitId: 'unit2' }],
+        floors: { '1F': { mode: 'split', parts: ['part_a', 'part_b'] } }, updatedAt: 1 } };
+    const s3 = { evalUnits: { b3_1F: [{ id: 'q1', name: '기존부', partId: 'part_a' }, { id: 'q2', name: '증축부', partId: 'part_b' }] }, defects: { b3_1F: [{ id: 'k', evalUnitId: 'q2' }] } };
+    E.normalize(b3, s3, [{ floorCode: '1F', floorLabel: '1F', floorKey: 'b3_1F' }], 20);
+    assert.deepStrictEqual(E.floorParts(b3, '1F'), ['z1', 'z2']);
+    assert.deepStrictEqual(s3.evalUnits.b3_1F.map((z) => z.partId), ['z1', 'z2']);
+    assert.strictEqual(E.planUnit(b3, 'unit2').label, '증축부');
+    assert.strictEqual(E.zoneUnitId(b3, s3.evalUnits.b3_1F[1]), 'unit2');
+    // 번호 늘리기: 옛 번호가 단위보다 크면 단위 개수를 늘린다
+    const b4 = { id: 'b4' };
+    E.setUnitCount(b4, 1, 1);
+    E.setFloorMode(b4, '1F', 'split', null, 2);
+    const s4 = { evalUnits: { b4_1F: [{ id: 'w', name: '1-3', parentUnitId: 'unit1' }] }, defects: {} };
+    E.normalize(b4, s4, [{ floorCode: '1F', floorLabel: '1F', floorKey: 'b4_1F' }], 3);
+    assert.strictEqual(E.planOf(b4).units.length, 3);
+    assert.strictEqual(s4.evalUnits.b4_1F[0].partId, 'z3');
 })();
 
 const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');

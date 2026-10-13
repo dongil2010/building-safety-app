@@ -8,8 +8,9 @@
 (function (root) {
     'use strict';
 
-    var MEMBER_ORDER = ['기둥', '보', '슬래브', '벽', '테두리보', '지판'];
-    var BASE_MEMBERS = ['기둥', '보', '슬래브', '벽'];
+    // 2026-10-13: 평가 부재는 기둥·벽·거더·빔·슬래브 5종(+있으면 테두리보·지판·기타)
+    var BASE_MEMBERS = ['기둥', '벽', '거더', '빔', '슬래브'];
+    var MEMBER_ORDER = BASE_MEMBERS.concat(['테두리보', '지판']);
     var FILL = '(직접 입력)';
 
     function str(v) { return v == null ? '' : String(v).trim(); }
@@ -22,7 +23,8 @@
         if (/지판|드롭패널/i.test(s)) return '지판';
         if (/기둥|column|^c\d/i.test(s)) return '기둥';
         if (/슬래브|slab|바닥판|^s\d/i.test(s)) return '슬래브';
-        if (/보|거더|girder|beam|^[gb]\d/i.test(s)) return '보';
+        if (/빔|\(b\)|beam|^b\d/i.test(s)) return '빔';
+        if (/보|거더|girder|\(g\)|^g\d/i.test(s)) return '거더';
         if (/벽|wall|^w\d/i.test(s)) return '벽';
         return '기타';
     }
@@ -32,7 +34,8 @@
         var t = str(d && d.defectType);
         if (/철근\s*노출/.test(t)) return 'rebar';
         if (/박리|박락|층분리|들뜸/.test(t)) return 'spall';
-        if (/누수|백태|백화|에플로/.test(t)) return 'leak';
+        if (/백태|백화|에플로/.test(t)) return 'eff';
+        if (/누수/.test(t)) return 'leak';
         if (/균열/.test(t)) return 'crack';
         return 'other';
     }
@@ -139,7 +142,7 @@
             var ds = groups[t] || [];
             var cracks = ds.filter(function (d) { return defectKind(d) === 'crack'; });
             var spalls = ds.filter(function (d) { return defectKind(d) === 'spall'; });
-            var leaks = ds.filter(function (d) { return defectKind(d) === 'leak'; });
+            var leaks = ds.filter(function (d) { var k = defectKind(d); return k === 'leak' || k === 'eff'; });
             var rebars = ds.filter(function (d) { return defectKind(d) === 'rebar'; });
             var w = maxOf(cracks.map(crackWidthOf));
             var dep = maxOf(spalls.map(spallDepthOf));
@@ -174,6 +177,83 @@
         return rows;
     }
 
+    /* ---------- 평가 탭 입력표(평가단위 × 부재) ---------- */
+    // key, 머리글, 단위
+    var INPUT_ITEMS = [
+        { key: 'count', label: '부재 수', unit: '개' },
+        { key: 'crackW', label: '균열폭', unit: 'mm' },
+        { key: 'leak', label: '누수', unit: '건/면적%' },
+        { key: 'eff', label: '백태 면적율', unit: '%' },
+        { key: 'rebar', label: '철근노출 면적율', unit: '%' },
+        { key: 'spall', label: '박리·박락 깊이', unit: 'mm' },
+        { key: 'strength', label: '강도', unit: 'MPa' },
+        { key: 'carb', label: '탄산화 깊이', unit: 'mm' },
+        { key: 'cover', label: '피복', unit: 'mm' },
+        { key: 'chloride', label: '염화물', unit: 'kg/㎥' }
+    ];
+
+    /** 도면 결함·비파괴값에서 나온 기본값: { unitId: { 부재: { crackW, leakN, effN, rebarN, spall, strength, carb, cover, defects } } } */
+    function unitComputed(bldg, st, floors, E, memberName) {
+        var nm = function (v) { return typeof memberName === 'function' ? (memberName(v) || v) : v; };
+        var out = {};
+        var samples = buildSamples(bldg, st, floors, E);
+        var ndtDone = {};
+        samples.forEach(function (s) {
+            if (!s.unitId) return;
+            var u = out[s.unitId] = out[s.unitId] || {};
+            var row = function (t) { return u[t] = u[t] || { crackW: null, leakN: 0, effN: 0, rebarN: 0, spall: null, strength: null, carb: null, cover: null, defects: 0 }; };
+            s.defects.forEach(function (d) {
+                var r = row(memberType(nm(d.component)));
+                r.defects++;
+                var k = defectKind(d);
+                if (k === 'crack') { var w = crackWidthOf(d); if (w != null && (r.crackW == null || w > r.crackW)) r.crackW = w; }
+                else if (k === 'leak') r.leakN++;
+                else if (k === 'eff') r.effN++;
+                else if (k === 'rebar') r.rebarN++;
+                else if (k === 'spall') { var dp = spallDepthOf(d); if (dp != null && (r.spall == null || dp > r.spall)) r.spall = dp; }
+            });
+            var nk = s.unitId + '|' + s.floorKey;
+            if (ndtDone[nk]) return;
+            ndtDone[nk] = true;
+            (((st && st.ndtData) || {})[s.floorKey] || []).forEach(function (it) {
+                if (!it) return;
+                var r = row(memberType(nm(it.component)));
+                var v;
+                if (it.category === '강도') { v = parseFloat(it.strengthFinal); if (Number.isFinite(v) && (r.strength == null || v < r.strength)) r.strength = Math.round(v * 10) / 10; }
+                if (it.category === '탄산화') {
+                    v = parseFloat(it.carbDepth); if (Number.isFinite(v) && (r.carb == null || v > r.carb)) r.carb = v;
+                    v = parseFloat(it.carbCover); if (Number.isFinite(v) && (r.cover == null || v < r.cover)) r.cover = v;
+                }
+            });
+        });
+        return out;
+    }
+
+    /** 입력표 한 칸: 직접 입력이 있으면 그것, 없으면 기본값. { value, source:'input'|'auto'|'' , hint } */
+    function cellValue(inputs, comp, unitId, member, key) {
+        var ov = (((inputs || {})[unitId] || {}).members || {})[member];
+        if (ov && ov[key] != null && ov[key] !== '') return { value: ov[key], source: 'input', hint: '' };
+        var c = ((comp || {})[unitId] || {})[member];
+        if (!c) return { value: '', source: '', hint: '' };
+        if (key === 'crackW' && c.crackW != null) return { value: c.crackW, source: 'auto', hint: '' };
+        if (key === 'spall' && c.spall != null) return { value: c.spall, source: 'auto', hint: '' };
+        if (key === 'strength' && c.strength != null) return { value: c.strength, source: 'auto', hint: '' };
+        if (key === 'carb' && c.carb != null) return { value: c.carb, source: 'auto', hint: '' };
+        if (key === 'cover' && c.cover != null) return { value: c.cover, source: 'auto', hint: '' };
+        if (key === 'leak' && c.leakN) return { value: '', source: '', hint: c.leakN + '건' };
+        if (key === 'eff' && c.effN) return { value: '', source: '', hint: c.effN + '건' };
+        if (key === 'rebar' && c.rebarN) return { value: '', source: '', hint: c.rebarN + '건' };
+        return { value: '', source: '', hint: '' };
+    }
+
+    /** 단위 입력표에 보일 부재 줄: 5종 + 결함·입력이 있는 그 밖의 부재 */
+    function unitMembers(inputs, comp, unitId) {
+        var list = BASE_MEMBERS.slice();
+        var extra = Object.keys(((comp || {})[unitId]) || {}).concat(Object.keys((((inputs || {})[unitId] || {}).members) || {}));
+        MEMBER_ORDER.concat(['기타']).forEach(function (t) { if (extra.indexOf(t) >= 0 && list.indexOf(t) < 0) list.push(t); });
+        return list;
+    }
+
     var MEMBER_HEAD = ['평가부재', '결함 수', '균열 건수', '최대 균열폭(mm)', 'SafetyMan 균열 구간',
         '박리·박락 건수', '박리 깊이(mm)', 'SafetyMan 박리 구간', '누수·백태 건수', '백태 면적율(%)', '누수·백태 비고',
         '철근노출 건수', '노출 면적율(%)', '철근노출 비고', '근거 결함 No.'];
@@ -195,6 +275,8 @@
         var st = o.state || {};
         var bldg = o.bldg || {};
         var samples = buildSamples(bldg, st, o.floors || [], E);
+        var inputs = bldg.evalInputs || {};
+        var comp = unitComputed(bldg, st, o.floors || [], E, o.memberName);
         var used = {};
         var sheetName = function (n) {
             var c = String(n).replace(/[:\\/?*\[\]]/g, '').trim().slice(0, 31) || '시트';
@@ -219,6 +301,19 @@
             g.sheet = sheetName(g.unset ? '미설정' : g.label);
             var aoa = [['평가단위', g.label, '표본층 수', g.list.length]];
             if (g.unset) aoa.push(['※ 미설정: 평가단위가 정해지지 않은 자료입니다. SafetyMan에 넣기 전에 단위를 정하세요.']);
+            else {
+                var uid = g.list[0].unitId;
+                aoa.push([]);
+                aoa.push(['[평가 탭 입력표 — 부재별 값(직접 입력 우선, 빈칸은 도면 결함·비파괴값)]']);
+                aoa.push(['평가부재'].concat(INPUT_ITEMS.map(function (it) { return it.label + '(' + it.unit + ')'; })).concat(['SafetyMan 균열 구간']));
+                unitMembers(inputs, comp, uid).forEach(function (m) {
+                    var vals = INPUT_ITEMS.map(function (it) { var c = cellValue(inputs, comp, uid, m, it.key); return c.value !== '' ? c.value : (c.hint || ''); });
+                    var w = parseFloat(cellValue(inputs, comp, uid, m, 'crackW').value);
+                    aoa.push([m].concat(vals).concat([Number.isFinite(w) ? crackBand(w) : '']));
+                });
+                var tilt = ((inputs || {})[uid] || {}).tilt;
+                aoa.push(['건물 기울기', tilt ? '1/' + tilt : '(직접 입력)']);
+            }
             g.list.forEach(function (s, i) {
                 s.sheet = g.sheet;
                 sum.push([g.sheet, sampleName(s), s.floorLabel, s.subName, s.partNote, s.status, s.defects.length]);
@@ -247,7 +342,7 @@
         'SafetyMan용 엑셀 — 정리 기준(가정). SafetyMan에 바로 불러오는 파일이 아니라, 입력 화면 순서대로 옮겨 적는 자료입니다.',
         '1. 시트 = 평가단위(SafetyMan 프로젝트·평가 단위 1개). 그 안의 「표본층 n」 = 층 전체 또는 층 구역(예: 2F-증축부). SafetyMan에서는 평가단위마다 표본층을 이 순서로 입력하세요.',
         '2. 평가단위를 정하지 않은 층, 나눈 층에서 구역에 안 넣은 결함, 평가단위가 없는 부분의 결함은 「미설정」 시트로 따로 둡니다(요약에 표시).',
-        '3. 평가부재: 부재 명칭에 「기둥」→기둥, 「테두리보」→테두리보, 「보·거더」→보, 「슬래브」→슬래브, 「벽」→벽, 「지판」→지판, 그 밖은 기타. 기둥·보·슬래브·벽은 결함이 없어도 줄을 둡니다.',
+        '3. 평가부재: 기둥·벽·거더·빔·슬래브 5종(결함이 없어도 줄을 둠). 「빔·보(B)」→빔, 「거더·보(G)·G/B 안 정한 보」→거더, 「테두리보」「지판」은 있으면 따로, 그 밖은 기타.',
         '4. 결함 종류: 「균열」→균열, 「박리·박락·층분리·들뜸」→박리·박락, 「누수·백태·백화」→누수·백태, 「철근노출」→철근노출. 그 밖의 결함은 결함 수에만 들어갑니다.',
         '5. 균열 구간은 부재별 최대 균열폭: 0.1 미만→0.1mm미만, 0.1~0.2 미만→0.2mm미만, 0.2~0.3 미만→0.3mm미만, 0.3~0.5 미만→0.5mm미만, 0.5 이상→0.5mm이상 (경계값은 위 구간).',
         '6. 균열폭은 결함의 균열폭 칸, 없으면 규모의 「Cw:0.3」「0.3mm」에서 읽습니다. 못 읽으면 「(직접 입력)」.',
@@ -257,7 +352,8 @@
         '10. 부재변형·기울기·부동침하는 이 파일에 넣지 않았습니다(건물 전체 항목). 등급 계산은 하지 않습니다 — SafetyMan에서 계산하세요.'
     ];
 
-    var api = { buildSheets: buildSheets, buildSamples: buildSamples, memberType: memberType, defectKind: defectKind,
+    var api = { INPUT_ITEMS: INPUT_ITEMS, BASE_MEMBERS: BASE_MEMBERS, unitComputed: unitComputed, cellValue: cellValue, unitMembers: unitMembers,
+        buildSheets: buildSheets, buildSamples: buildSamples, memberType: memberType, defectKind: defectKind,
         crackWidthOf: crackWidthOf, crackBand: crackBand, spallDepthOf: spallDepthOf, spallBand: spallBand, NOTES: NOTES };
     if (typeof module !== 'undefined' && module.exports) module.exports = api;
     if (root) { root.BSA = root.BSA || {}; root.BSA.safetymanExport = api; }

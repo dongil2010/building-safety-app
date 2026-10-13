@@ -11,6 +11,9 @@
  *    층 나누기는 floors[층] = {mode:'split', parts:[partId…]}. 층의 구역(state.evalUnits[층키]의 항목)은 partId를 가진다.
  *    구역의 평가단위 = 부분의 unitId(옛 구역은 parentUnitId). 다른 층 구역끼리 같은 평가단위가 될 수 있다.
  *    옛 1-1/1-2 세부단위는 migrateLegacy로 같은 이름의 부분으로 옮긴다(결함 evalUnitId는 그대로).
+ * 4) (2026-10-13 단순화) 구역은 번호 1,2,3… 뿐. 층 구역 번호 n = 평가단위 n(층이 달라도 같은 번호면 같은 단위).
+ *    plan.parts는 단위에서 자동으로 만든다: { id:'z'+n, no:n, name:String(n), unitId:단위 n }. 이름(선택)은 단위의 label.
+ *    옛 1-1/1-2 세부단위와 이름 부분(기존부 …)은 normalize(=migrateLegacy)로 번호 구역으로 옮긴다.
  * 설정을 안 하면 아무것도 안 바뀐다.
  */
 (function (root) {
@@ -240,8 +243,8 @@
             var f = p.floors[fc];
             if (f && f.mode === 'whole' && !keep[f.unitId]) { delete p.floors[fc]; dropped++; }
         });
-        p.parts.forEach(function (x) { if (x.unitId && !keep[x.unitId]) x.unitId = ''; });
         p.units = units;
+        canonicalize(p);
         writePlan(bldg, p, now);
         return dropped;
     }
@@ -315,7 +318,125 @@
     }
 
 
-    /* ---------------- 나누기 부분(기존부/증축부 …) — 건물에서 한 번 정의 ---------------- */
+    /* ---------------- 번호 구역(2026-10-13 단순화) ---------------- */
+
+    /** 단위마다 번호 구역 z{n}. 층 목록에서 없는 번호는 뺀다 */
+    function canonicalize(p) {
+        p.parts = p.units.map(function (u) { return { id: 'z' + u.no, no: Number(u.no), name: String(u.no), unitId: u.id }; });
+        var ok = {};
+        p.parts.forEach(function (x) { ok[x.id] = true; });
+        Object.keys(p.floors).forEach(function (fc) {
+            var f = p.floors[fc];
+            if (f && f.mode === 'split') f.parts = (Array.isArray(f.parts) ? f.parts : []).filter(function (id) { return ok[id]; });
+        });
+        return p;
+    }
+
+    function isCanonical(p) {
+        if (p.parts.length !== p.units.length) return false;
+        return p.units.every(function (u, i) {
+            var x = p.parts[i];
+            return x && x.id === 'z' + u.no && x.name === String(u.no) && x.unitId === u.id && Object.keys(x).length === 4;
+        });
+    }
+
+    /** 단위 이름(선택). 빈칸이면 번호만 */
+    function setUnitLabel(bldg, unitId, label, now) {
+        var p = clonePlan(bldg);
+        var u = p.units.find(function (x) { return x.id === unitId; });
+        if (!u) return false;
+        var l = cleanName(label);
+        if ((u.label || '') === l) return false;
+        if (l) u.label = l; else delete u.label;
+        writePlan(bldg, p, now);
+        return true;
+    }
+
+    function unitTitle(u) { return u ? ('평가단위 ' + u.no + (u.label ? ' ' + u.label : '')) : ''; }
+
+    /** 번호 n 구역 id */
+    function zoneId(n) { return 'z' + n; }
+
+    /**
+     * 옛 자료 → 번호 구역. 옛 세부단위 「k-j」 → j번, 이름 부분(기존부 …) → 그 부분 번호(이름은 단위 label로).
+     * 같은 층에서 같은 번호가 둘이면 하나로 합친다(결함은 남는 구역으로).
+     * floors: [{floorCode, floorKey}] → { planChanged, floorKeys }
+     */
+    function normalize(bldg, st, floors, now) {
+        var out = { planChanged: false, floorKeys: [] };
+        if (!bldg || !st || !hasPlan(bldg)) return out;
+        var t = Number(now) || Date.now();
+        var p0 = planOf(bldg);
+        var oldParts = {};
+        p0.parts.forEach(function (x) { oldParts[x.id] = x; });
+        var labels = {};
+        p0.parts.forEach(function (x) {
+            if (!/^z\d+$/.test(x.id) && x.name && !/^\d+(-\d+)?$/.test(x.name)) labels[Number(x.no)] = labels[Number(x.no)] || x.name;
+        });
+        var plans = [];
+        var maxN = 0;
+        (floors || []).forEach(function (f) {
+            var zs = listFor(st, f.floorKey);
+            if (!zs.length) return;
+            var items = zs.map(function (z, i) {
+                var n = 0;
+                var m;
+                if (z.partId && /^z(\d+)$/.test(z.partId)) n = Number(z.partId.slice(1));
+                else if (z.partId && oldParts[z.partId]) {
+                    var op = oldParts[z.partId];
+                    m = String(op.name || '').match(/^\d+-(\d+)$/);
+                    n = m ? Number(m[1]) : (Number(op.no) || 0);
+                } else {
+                    m = String(z.name || '').match(/^\d+-(\d+)$/);
+                    if (m) n = Number(m[1]);
+                    else { var pu = planUnit(bldg, z.parentUnitId); n = pu ? Number(pu.no) : 0; }
+                }
+                if (!n) n = i + 1;
+                if (n > maxN) maxN = n;
+                return { z: z, n: n };
+            });
+            plans.push({ f: f, items: items });
+        });
+        if (maxN > p0.units.length) { setUnitCount(bldg, maxN, t); out.planChanged = true; }
+        var p = clonePlan(bldg);
+        p.units.forEach(function (u) { if (!u.label && labels[u.no]) { u.label = labels[u.no]; out.planChanged = true; } });
+        plans.forEach(function (pl) {
+            var fk = pl.f.floorKey;
+            var keepBy = {};
+            var changed = false;
+            pl.items.forEach(function (it) {
+                var want = zoneId(it.n);
+                if (keepBy[it.n]) {
+                    assign((st.defects && st.defects[fk] || []).filter(function (d) { return d && d.evalUnitId === it.z.id; }), keepBy[it.n].id, t);
+                    deleteUnit(st, fk, it.z.id, [], t);
+                    changed = true;
+                    return;
+                }
+                keepBy[it.n] = it.z;
+                if (it.z.partId !== want || it.z.name !== String(it.n) || it.z.parentUnitId) {
+                    it.z.partId = want;
+                    it.z.name = String(it.n);
+                    delete it.z.parentUnitId;
+                    it.z.updatedAt = Math.max(t, (Number(it.z.updatedAt) || 0) + 1);
+                    changed = true;
+                }
+            });
+            var fm = p.floors[pl.f.floorCode];
+            if (fm && fm.mode === 'split') {
+                var ids = Object.keys(keepBy).map(Number).sort(function (a, b) { return a - b; }).map(zoneId);
+                var cur = (fm.parts || []).filter(function (id) { return /^z\d+$/.test(id); });
+                ids.forEach(function (id) { if (cur.indexOf(id) < 0) cur.push(id); });
+                cur.sort(function (a, b) { return Number(a.slice(1)) - Number(b.slice(1)); });
+                if (JSON.stringify(cur) !== JSON.stringify(fm.parts || [])) { fm.parts = cur; out.planChanged = true; }
+            }
+            if (changed) out.floorKeys.push(fk);
+        });
+        if (!isCanonical(p)) { canonicalize(p); out.planChanged = true; }
+        if (out.planChanged) writePlan(bldg, p, t);
+        return out;
+    }
+
+    /* ---------------- (옛) 이름 부분 — 단순화 뒤에도 옛 자료 읽기용으로 남김 ---------------- */
 
     function partOf(bldg, partId) {
         if (!partId) return null;
@@ -421,6 +542,7 @@
     /** 화면 이름: 부분 이름(바꾸면 바로 따라감) */
     function zoneLabel(bldg, zone) {
         if (!zone) return '';
+        if (zone.partId && /^z\d+$/.test(zone.partId)) return zone.partId.slice(1);
         var part = zone.partId ? partOf(bldg, zone.partId) : null;
         return part ? part.name : zone.name;
     }
@@ -429,7 +551,7 @@
      * 옛 세부단위(1-1, 1-2 … partId 없음) → 같은 이름의 부분으로. 결함 evalUnitId는 그대로.
      * floors: [{floorCode, floorKey}] → { planChanged, floorKeys:[바뀐 층키] }
      */
-    function migrateLegacy(bldg, st, floors, now) {
+    function migrateLegacyNamed(bldg, st, floors, now) {
         var out = { planChanged: false, floorKeys: [] };
         if (!bldg || !st) return out;
         var t = Number(now) || Date.now();
@@ -480,7 +602,7 @@
     var api = {
         partOf: partOf, addPart: addPart, updatePart: updatePart, removePart: removePart, floorParts: floorParts,
         setFloorParts: setFloorParts, zoneForPart: zoneForPart, ensureZones: ensureZones, zoneUnitId: zoneUnitId, zoneLabel: zoneLabel,
-        migrateLegacy: migrateLegacy, matrix: matrix,
+        migrateLegacy: normalize, normalize: normalize, setUnitLabel: setUnitLabel, unitTitle: unitTitle, zoneId: zoneId, matrix: matrix,
         planOf: planOf,
         hasPlan: hasPlan,
         setUnitCount: setUnitCount,

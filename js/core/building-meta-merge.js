@@ -23,7 +23,9 @@
         // 층별 "도면을 다시 넣은 시각" — 다른 기기가 받아 둔 옛 PDF를 버리고 새 파일을 받게
         'floorPdfUpdatedAt',
         // 상태평가용 평가단위 설정(단위 개수·층별 통째/나누기) — 2026-10-13
-        'evalUnitPlan'
+        'evalUnitPlan',
+        // 평가 탭 입력표(평가단위 × 부재 값, 기울기) — 2026-10-13
+        'evalInputs'
     ];
 
     function metaUpdatedAt(bldg) {
