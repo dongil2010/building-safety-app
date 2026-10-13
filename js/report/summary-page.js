@@ -11,6 +11,7 @@
 
     const core = window.BSA.reportSummary;
     const alt = window.BSA.reportSummaryAlt;
+    const ai = window.BSA.reportSummaryAi;
     const hwpxOut = window.BSA.reportSummaryHwpx;
     const TEMPLATE_PATH = 'templates/hwpx_report_summary.hwpx';
     const hwpRead = window.BSA.hwpRead;
@@ -57,6 +58,10 @@
 
     /** 작성안을 화면에 올린다. 처음 여는 안이면 그 안의 추천으로 채운다. */
     function bindVariant(v) {
+        if (aiUndo && aiUndo.variant !== v) {
+            aiUndo = null;
+            $('btnAiUndo').classList.add('hidden');
+        }
         state.variant = v;
         const o = state.vars[v] || {};
         state.sel = o.sel || (v === 'B' ? alt.pickDefaults(state.defects) : core.pickDefaults(state.defects));
@@ -752,6 +757,96 @@
         state.opinion[catKey] = (head ? head + '\n' : '') + op;
     }
 
+    /* ───────── AI 의견 초안 (Gemini) ───────── */
+
+    /** AI 의견을 넣기 직전의 의견(되돌리기용). 작성안을 바꾸면 버린다. */
+    let aiUndo = null;
+
+    function setAiNote(msg, cls) {
+        const el = $('aiNote');
+        el.textContent = msg;
+        el.className = cls || 'muted';
+    }
+
+    /** AI에 보낼 내용: 분류마다 지금 실려 있는 주요 점검결과와 그 근거(위치·크기·원인추정) */
+    function aiInput() {
+        const cats = [];
+        core.CATEGORIES.forEach((cat) => {
+            if (cat.key === 'load') return;
+            const entries = entriesOf(cat.key);
+            if (!entries.length) return;
+            cats.push({
+                key: cat.key,
+                label: cat.label,
+                prevOpinion: (state.prev && state.prev.opinion[cat.key]) || '',
+                items: entries.map((e) => {
+                    const d = e.d;
+                    if (!d) return { text: e.text };
+                    return {
+                        text: e.text, location: d.location, size: d.size, cause: d.cause,
+                        progress: d.progress, leak: d.leak, good: d.good,
+                        sameTypeCount: d.good ? 0 : state.defects.filter((x) => !x.good && x.category === d.category && x.typeKey === d.typeKey).length
+                    };
+                })
+            });
+        });
+        return { buildingName: state.meta.buildingName, roundLabel: state.meta.roundLabel, cats: cats };
+    }
+
+    async function runAiOpinion() {
+        const key = window.GEMINI_DIRECT_API_KEY || '';
+        if (!key) {
+            setAiNote('이 화면에는 AI 키가 없습니다. 배포된 사이트(GitHub Pages)에서 열어야 쓸 수 있습니다.', 'err');
+            return;
+        }
+        const input = aiInput();
+        if (!input.cats.length) {
+            setAiNote('고른 주요 점검결과가 없습니다.', 'err');
+            return;
+        }
+        const count = input.cats.reduce((n, c) => n + c.items.length, 0);
+        if (!window.confirm('고른 주요 점검결과 ' + count + '건의 글자(건물명·위치·결함 내용·원인추정)를 Google Gemini로 보내 '
+            + state.variant + '안의 의견 초안을 받습니다. 사진은 보내지 않습니다.\n지금 적혀 있는 의견은 AI 초안으로 바뀝니다(되돌릴 수 있음). 계속할까요?')) return;
+        const btn = $('btnAiOpinion');
+        btn.disabled = true;
+        setAiNote('AI가 의견을 쓰는 중...', 'muted');
+        try {
+            const variant = state.variant;
+            const got = await ai.requestOpinions(key, input);
+            if (state.variant !== variant) throw new Error('기다리는 동안 작성안이 바뀌어 넣지 않았습니다. 다시 눌러 주세요.');
+            const done = Object.keys(got);
+            if (!done.length) throw new Error('AI가 쓴 의견이 없습니다.');
+            aiUndo = { variant: variant, opinion: Object.assign({}, state.opinion) };
+            const odd = [];
+            input.cats.forEach((c) => {
+                if (!got[c.key]) return;
+                // 첫 줄(머리말)은 지금 문구 그대로 두고 본문만 AI 초안으로 바꾼다
+                state.opinion[c.key] = core.buildOpinion(c.key, [], state.meta).split('\n')[0] + '\n' + got[c.key];
+                const nums = ai.unknownNumbers(got[c.key], ai.sourceTextOf(c));
+                if (nums.length) odd.push(c.label + ': ' + nums.join(', '));
+            });
+            save();
+            renderOut();
+            $('btnAiUndo').classList.remove('hidden');
+            if (odd.length) setAiNote('AI 초안을 넣었습니다(' + done.length + '개 분류). 조사표에 없는 숫자가 있으니 확인해 주세요 → ' + odd.join(' / '), 'err');
+            else setAiNote('AI 초안을 넣었습니다(' + done.length + '개 분류). ③·⑤ 표에서 읽어 보고 고쳐 주세요.', 'ok');
+        } catch (e) {
+            setAiNote(e.message || String(e), 'err');
+        } finally {
+            btn.disabled = false;
+        }
+    }
+
+    function undoAiOpinion() {
+        if (!aiUndo || aiUndo.variant !== state.variant) return;
+        state.opinion = aiUndo.opinion;
+        aiUndo = null;
+        $('btnAiUndo').classList.add('hidden');
+        save();
+        renderOut();
+        setAiNote('AI 초안을 넣기 전 의견으로 되돌렸습니다.', 'ok');
+    }
+
     /* ───────── 한글 파일로 저장 ───────── */
 
     let photoSrc = null;
@@ -992,6 +1087,8 @@
     });
 
     $('btnExportHwpx').addEventListener('click', () => { if (state.defects.length) exportHwpx(); });
+    $('btnAiOpinion').addEventListener('click', () => { if (state.defects.length) runAiOpinion(); });
+    $('btnAiUndo').addEventListener('click', undoAiOpinion);
 
     $('markBlue').addEventListener('change', (ev) => {
         state.markBlue = ev.target.checked;

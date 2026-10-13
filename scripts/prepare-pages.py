@@ -94,6 +94,14 @@ def main() -> None:
 
     index.write_text(html, encoding="utf-8")
 
+    # 2026-10-13: 보고서 본문 요약 페이지의 「AI로 의견 초안 쓰기」도 같은 키를 쓴다.
+    summary = OUT / "report-summary.html"
+    if gemini_key and summary.exists():
+        text = summary.read_text(encoding="utf-8")
+        if "</head>" not in text:
+            raise SystemExit("[prepare-pages] report-summary.html에 </head>가 없어 Gemini 키를 넣지 못했다.")
+        summary.write_text(text.replace("</head>", inject + "</head>"), encoding="utf-8")
+
     sw = OUT / "sw.js"
     if sw.exists():
         text = sw.read_text(encoding="utf-8")
