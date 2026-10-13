@@ -109,6 +109,7 @@ function createWindow(startUrl) {
         minWidth: 1024,
         minHeight: 700,
         title: '스마트 안전점검',
+        icon: path.join(__dirname, '..', 'branding', 'icon.png'),
         autoHideMenuBar: true,
         webPreferences: {
             nodeIntegration: false,

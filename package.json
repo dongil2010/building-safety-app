@@ -1,6 +1,6 @@
 {
   "name": "building-safety-app",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "private": true,
   "main": "electron/main.js",
   "description": "스마트 건축물 안전점검 현장점검 — PWA + Android(Capacitor)",
@@ -52,6 +52,7 @@
       "branding/**/*"
     ],
     "win": {
+      "icon": "branding/icon.ico",
       "target": "nsis",
       "signAndEditExecutable": false
     },
@@ -61,6 +62,8 @@
       "perMachine": false,
       "createDesktopShortcut": true,
       "shortcutName": "스마트 안전점검",
+      "installerIcon": "branding/icon.ico",
+      "uninstallerIcon": "branding/icon.ico",
       "include": "electron/installer.nsh"
     }
   }
