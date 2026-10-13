@@ -36,6 +36,7 @@
         opinion: {},
         opLine: {},
         repLine: {},
+        order: {},
         cellEdit: {},
         loadLines: '',
         repairNote: '',
@@ -53,7 +54,8 @@
     };
 
     // opLine·repLine: 결함 id별 의견 한 줄·보수방안(최종안에 담을 때 B안·AI안에서 따라온 것)
-    const VARIANT_KEYS = ['sel', 'text', 'custom', 'opinion', 'cellEdit', 'opLine', 'repLine'];
+    // order: 분류별 항목 순서(끌어서 바꾼 것). 'd:결함id' 또는 'c:직접 적은 글'의 목록
+    const VARIANT_KEYS = ['sel', 'text', 'custom', 'opinion', 'cellEdit', 'opLine', 'repLine', 'order'];
     const VARIANTS = ['A', 'B', 'F'];
     const isB = () => state.variant === 'B';
     const isFinal = () => state.variant === 'F';
@@ -78,6 +80,7 @@
         state.cellEdit = o.cellEdit || {};
         state.opLine = o.opLine || {};
         state.repLine = o.repLine || {};
+        state.order = o.order || {};
         core.CATEGORIES.forEach((c) => {
             state.sel[c.key] = (state.sel[c.key] || []).filter((id) => state.byId[id]);
         });
@@ -366,7 +369,32 @@
         const custom = (state.custom[catKey] || [])
             .map((t, i) => ({ text: String(t || '').trim(), customIdx: i }))
             .filter((e) => e.text);
-        return picked.concat(custom);
+        const list = picked.concat(custom);
+        // 끌어서 순서를 바꿔 둔 분류는 그 순서대로, 그 뒤에 담은 것은 끝에 둔다
+        const ord = state.order[catKey];
+        if (!ord || !ord.length) return list;
+        const pos = (e) => { const i = ord.indexOf(orderToken(e)); return i < 0 ? ord.length : i; };
+        return list.map((e, i) => ({ e: e, i: i, p: pos(e) })).sort((a, b) => a.p - b.p || a.i - b.i).map((x) => x.e);
+    }
+
+    function orderToken(e) {
+        return e.d ? 'd:' + e.d.id : 'c:' + e.text;
+    }
+
+    /** 분류 안에서 from번째 항목을 to번째 자리로 옮긴다 */
+    function moveEntry(catKey, from, to) {
+        const entries = entriesOf(catKey);
+        if (from === to || from < 0 || to < 0 || from >= entries.length || to >= entries.length) return false;
+        if (catKey === 'load') {
+            const lines = loadLineList();
+            lines.splice(to, 0, lines.splice(from, 1)[0]);
+            state.loadLines = lines.join('\n');
+            return true;
+        }
+        const tokens = entries.map(orderToken);
+        tokens.splice(to, 0, tokens.splice(from, 1)[0]);
+        state.order[catKey] = tokens;
+        return true;
     }
 
     function prevLines(catKey) {
@@ -931,7 +959,12 @@
         core.CATEGORIES.forEach((cat) => {
             const entries = entriesOf(cat.key);
             out[cat.key] = {
-                entries: entries.map((e) => ({ text: e.text, id: e.d ? e.d.id : null, rep: e.d ? repairTextOf(e.d) : '' })),
+                entries: entries.map((e) => ({
+                    text: e.text, id: e.d ? e.d.id : null,
+                    op: e.d ? opLineTextOf(e.d) : '', rep: e.d ? repairTextOf(e.d) : ''
+                })),
+                // 의견을 손으로 고친 분류는 항목별 줄이 실제 의견과 다르므로 비교표에 고친 글 그대로 보여 준다
+                edited: state.opinion[cat.key] != null,
                 opinion: opinionBody(opinionOf(cat.key, groups))
             };
         });
@@ -963,13 +996,16 @@
         return '- [중요도 ' + alt.importanceOf(d).grade + '] ' + d.content + ' (' + d.floor + '): ' + alt.causeOf(d) + '. → ' + alt.repairOf(d) + '.';
     }
 
+    /** 지금 보는 작성안이 결함 한 건에 적는 의견 한 줄(A안 말투가 기본, 최종안은 따라온 줄이 있으면 그것) */
+    function opLineTextOf(d) {
+        if (isFinal() && state.opLine[d.id]) return state.opLine[d.id];
+        if (d.good) return '';
+        return isB() ? bLineOf(d) : core.opinionLine(d.content, d.cause);
+    }
+
     /** 최종안 의견: 담은 항목 순서대로 한 줄씩. 담을 때 따라온 줄(B안·AI안)이 있으면 그것, 없으면 A안 말투. */
     function finalOpinion(catKey) {
-        const lines = (state.sel[catKey] || []).map((id) => {
-            const d = state.byId[id];
-            if (!d) return '';
-            return state.opLine[id] || (d.good ? '' : core.opinionLine(d.content, d.cause));
-        }).filter(Boolean);
+        const lines = entriesOf(catKey).map((e) => (e.d ? opLineTextOf(e.d) : '')).filter(Boolean);
         const empty = core.buildOpinion(catKey, [], state.meta);
         return lines.length ? empty.split('\n')[0] + '\n' + lines.join('\n') : empty;
     }
@@ -1028,6 +1064,31 @@
         }
     }
 
+    /**
+     * 의견 줄만(part 'op') 또는 보수방안만(part 'rep') 그 안의 것으로 바꾼다. 항목이 아직 최종안에 없으면
+     * 항목을 담되 고른 쪽만 그 안의 것으로 하고 나머지는 기본(A안)으로 둔다.
+     */
+    function applyPart(item, catKey, part) {
+        if (!item || !item.d) return;
+        const d = item.d;
+        if ((state.sel[catKey] || []).indexOf(d.id) < 0) {
+            addToFinal({ text: item.text, d: d, line: part === 'op' ? item.line : '', repair: part === 'rep' ? item.repair : '' }, catKey);
+            return;
+        }
+        if (part === 'rep') {
+            if (item.repair) state.repLine[d.id] = item.repair; else delete state.repLine[d.id];
+            return;
+        }
+        const before = opLineTextOf(d);
+        if (item.line) state.opLine[d.id] = item.line; else delete state.opLine[d.id];
+        const after = opLineTextOf(d);
+        // 의견을 손으로 고쳐 둔 분류는 자동으로 다시 쓰지 않으므로, 그 글 안에서 이 항목의 줄만 바꾼다(못 찾으면 끝에 붙인다)
+        if (state.opinion[catKey] != null && after && after !== before) {
+            const cur = state.opinion[catKey];
+            state.opinion[catKey] = before && cur.indexOf(before) >= 0 ? cur.replace(before, after) : cur.replace(/\s+$/, '') + '\n' + after;
+        }
+    }
+
     function removeFromFinal(catKey, idx) {
         const e = entriesOf(catKey)[idx];
         if (!e) return;
@@ -1054,7 +1115,20 @@
         const hasAi = !!(state.ai && state.ai.sel);
         const th = (v, label) => '<th' + (v === cur ? ' class="cur"' : '') + '>' + label + (v === cur ? ' <small>아래 표에 나오는 안</small>' : '') + '</th>';
         const plus = (src, k, i, inFinal) => '<button type="button" class="plus' + (inFinal ? ' in' : '') + '" data-add="' + src + '" data-cat="' + k + '" data-idx="' + i + '" title="'
-            + (inFinal ? '최종안에 담겨 있음 — 누르면 의견 줄을 이 안의 것으로 바꿉니다' : '최종안에 담기') + '">' + (inFinal ? '✓' : '+') + '</button>';
+            + (inFinal ? '최종안에 담겨 있음 — 누르면 문구·의견·보수방안을 모두 이 안의 것으로 바꿉니다' : '최종안에 담기 (의견·보수방안도 이 안의 것으로)') + '">' + (inFinal ? '✓' : '+') + '</button>';
+        // 의견 줄·보수방안 줄만 따로 고르는 버튼
+        const partBtn = (part, src, k, i, on) => '<button type="button" class="plus' + (on ? ' in' : '') + '" data-part="' + part + '" data-add="' + src + '" data-cat="' + k + '" data-idx="' + i + '" title="'
+            + (on ? '최종안이 지금 쓰고 있는 ' : '최종안의 이 항목 ') + (part === 'op' ? '의견' : '보수방안') + (on ? '' : '만 이것으로 바꾸기 (항목이 없으면 담습니다)') + '">' + (on ? '✓' : '+') + '</button>';
+        const partList = (part, src, k, rows) => {
+            const list = rows.filter((x) => x.text);
+            if (!list.length) return '-';
+            const fin = snaps.F[k].entries;
+            return list.map((x) => {
+                const f = fin.filter((e) => e.id && e.id === x.id)[0];
+                return '<div class="it">' + partBtn(part, src, k, x.i, !!f && (part === 'op' ? f.op : f.rep) === x.text)
+                    + '<span>' + esc((x.i + 1) + '. ' + x.text.replace(/^-\s*/, '')) + '</span></div>';
+            }).join('');
+        };
         const allBtn = (src, k, n) => (n > 1 ? '<div><button type="button" class="btn ghost small" data-add-all="' + src + '" data-cat="' + k + '">모두 담기</button></div>' : '');
         const opBtn = (src, k, has) => (has
             ? '<div><button type="button" class="btn ghost small" data-use="' + src + '" data-cat="' + k + '">이 의견을 최종안에 쓰기</button></div>' : '');
@@ -1076,7 +1150,15 @@
                     + plus(v, k, i, e.id ? finalIds.indexOf(e.id) >= 0 : finalTexts.indexOf(e.text) >= 0)
                     + '<span>' + blueIf(cmp && cmp.cur[i].kind !== 'same', esc((i + 1) + '. ' + e.text)) + '</span></div>').join('') + allBtn(v, k, entries.length) : '-') + '</td>';
             };
-            const opCell = (v) => '<td' + (v === cur ? ' class="cur"' : '') + '>' + (esc(snaps[v][k].opinion) || '-') + opBtn(v, k, !!snaps[v][k].opinion) + '</td>';
+            const opCell = (v) => {
+                const s = snaps[v][k];
+                if (s.edited) {
+                    return '<td' + (v === cur ? ' class="cur"' : '') + '>' + (esc(s.opinion) || '-')
+                        + '<div class="muted">(직접 고친 의견이라 줄별로 고를 수 없습니다)</div>' + opBtn(v, k, !!s.opinion) + '</td>';
+                }
+                return '<td class="items' + (v === cur ? ' cur' : '') + '">'
+                    + partList('op', v, k, s.entries.map((e, i) => ({ i: i, id: e.id, text: e.op }))) + '</td>';
+            };
 
             // AI안 항목: A안·B안 어디에도 없는 것은 「AI만」, 고른 이유는 줄 아래에 작게
             const aiList = aiDefects(k);
@@ -1096,7 +1178,8 @@
                     + '<span>' + esc((i + 1) + '. ' + t) + '</span></div>').join('') + allBtn('prev', k, prevList.length) : '-');
 
             const finalEntries = snaps.F[k].entries;
-            const finalCell = finalEntries.length ? finalEntries.map((e, i) => '<div class="it">'
+            const finalCell = finalEntries.length ? finalEntries.map((e, i) => '<div class="it drag" draggable="true" data-fidx="' + i + '" data-cat="' + k + '" title="끌어서 순서 바꾸기">'
+                + '<span class="grip" aria-hidden="true">⠿</span>'
                 + '<button type="button" class="plus minus" data-fdel="' + i + '" data-cat="' + k + '" title="최종안에서 빼기">−</button>'
                 + '<span>' + esc((i + 1) + '. ' + e.text) + '</span></div>').join('')
                 : '<span class="muted">' + (k === 'load' ? '-' : '왼쪽 항목의 +를 눌러 담으세요') + '</span>';
@@ -1105,9 +1188,13 @@
                 const rows = list.filter((x) => x.rep);
                 return rows.length ? esc(rows.map((x) => x.no + '. ' + x.rep).join('\n')) : '-';
             };
-            const repCell = (v) => '<td' + (v === cur ? ' class="cur"' : '') + '>'
-                + repList(snaps[v][k].entries.map((e, i) => ({ no: i + 1, rep: e.rep }))) + '</td>';
-            const aiRepCell = repList(aiList.map((d, i) => ({ no: i + 1, rep: aiRepairOf(k, i) })));
+            const repCell = (v) => '<td class="items' + (v === cur ? ' cur' : '') + '">'
+                + partList('rep', v, k, snaps[v][k].entries.map((e, i) => ({ i: i, id: e.id, text: e.rep }))) + '</td>';
+            const aiRepCell = partList('rep', 'AI', k, aiList.map((d, i) => ({ i: i, id: d.id, text: aiRepairOf(k, i) })));
+            // AI 의견: 줄 수가 항목 수와 맞으면 줄별로 고르게 하고, 안 맞으면 통째로만 쓸 수 있다
+            const aiOpRows = aiList.map((d, i) => ({ i: i, id: d.id, text: aiLineOf(k, i) }));
+            const aiOpByLine = aiOpRows.some((x) => x.text);
+            const aiOpCell = !aiOp[k] ? aiEmpty : (aiOpByLine ? partList('op', 'AI', k, aiOpRows) : esc(aiOp[k]) + opBtn('AI', k, true));
 
             h += '<tr><td class="c" rowspan="3">' + esc(cat.label) + '</td><td class="c">주요<br>결과</td>'
                 + '<td class="items">' + prevCell + '</td>' + lineCell('A') + lineCell('B')
@@ -1116,13 +1203,12 @@
                 + '<tr><td class="c">의견</td>'
                 + '<td>' + (esc(prevOp) || '-') + opBtn('prev', k, !!prevOp) + '</td>'
                 + opCell('A') + opCell('B')
-                + '<td>' + (aiOp[k] ? esc(aiOp[k]) : aiEmpty)
+                + '<td class="items">' + aiOpCell
                 + (odd.length ? '<div><span class="badge must" title="AI가 든 기준값(예: 0.3mm)일 수 있습니다. 층·치수가 조사표와 맞는지만 확인하세요.">조사표에 없는 숫자: ' + esc(odd.join(', ')) + '</span></div>' : '')
-                + opBtn('AI', k, !!aiOp[k])
                 + (aiNote[k] ? '<div class="ainote"><b>AI 검토 메모</b> ' + esc(aiNote[k]) + '</div>' : '') + '</td>'
                 + '<td class="final">' + (esc(snaps.F[k].opinion) || '-') + '</td></tr>'
                 + '<tr><td class="c">보수<br>방안</td><td>-</td>' + repCell('A') + repCell('B')
-                + '<td>' + (aiList.length ? aiRepCell : aiEmpty) + '</td>'
+                + '<td class="items">' + (aiList.length ? aiRepCell : aiEmpty) + '</td>'
                 + '<td class="final">' + repList(snaps.F[k].entries.map((e, i) => ({ no: i + 1, rep: e.rep }))) + '</td></tr>';
         });
         return h + '</table>';
@@ -1384,6 +1470,52 @@
 
     $('btnExportHwpx').addEventListener('click', () => { if (state.defects.length) exportHwpx(); });
     $('btnAiOpinion').addEventListener('click', () => { if (state.defects.length) runAi(); });
+    // 최종안 항목을 끌어서 위아래 순서 바꾸기(같은 분류 안에서만)
+    let dragFrom = null;
+    const dragRow = (ev) => {
+        const row = ev.target && ev.target.closest ? ev.target.closest('#compareBody .it.drag') : null;
+        return row && dragFrom && row.getAttribute('data-cat') === dragFrom.cat ? row : null;
+    };
+    const clearDropMarks = () => {
+        $('compareBody').querySelectorAll('.drop-before, .drop-after, .dragging').forEach((el) => el.classList.remove('drop-before', 'drop-after', 'dragging'));
+    };
+    $('compareBody').addEventListener('dragstart', (ev) => {
+        const row = ev.target && ev.target.closest ? ev.target.closest('.it.drag') : null;
+        if (!row) return;
+        dragFrom = { cat: row.getAttribute('data-cat'), idx: parseInt(row.getAttribute('data-fidx'), 10) };
+        row.classList.add('dragging');
+        ev.dataTransfer.effectAllowed = 'move';
+        ev.dataTransfer.setData('text/plain', String(dragFrom.idx));
+    });
+    $('compareBody').addEventListener('dragover', (ev) => {
+        const row = dragRow(ev);
+        if (!row) return;
+        ev.preventDefault();
+        ev.dataTransfer.dropEffect = 'move';
+        const r = row.getBoundingClientRect();
+        const after = ev.clientY > r.top + r.height / 2;
+        $('compareBody').querySelectorAll('.drop-before, .drop-after').forEach((el) => el.classList.remove('drop-before', 'drop-after'));
+        row.classList.add(after ? 'drop-after' : 'drop-before');
+    });
+    $('compareBody').addEventListener('drop', (ev) => {
+        const row = dragRow(ev);
+        if (!row) return;
+        ev.preventDefault();
+        const from = dragFrom;
+        const target = parseInt(row.getAttribute('data-fidx'), 10);
+        const after = row.classList.contains('drop-after');
+        dragFrom = null;
+        // 끌어온 줄을 빼고 난 뒤의 자리로 바꾼다
+        let to = after ? target + 1 : target;
+        if (from.idx < to) to -= 1;
+        showFinal();
+        if (!moveEntry(from.cat, from.idx, to)) { clearDropMarks(); return; }
+        save();
+        renderAll();
+        setAiNote('최종안의 순서를 바꿨습니다. 의견·보수방안과 아래 표도 같은 순서로 바뀝니다.', 'ok');
+    });
+    $('compareBody').addEventListener('dragend', () => { dragFrom = null; clearDropMarks(); });
+
     // 비교표: + 담기 / 모두 담기 / − 빼기 / 의견 쓰기. 모두 최종안에 하는 일이라 최종안을 화면에 올린다.
     $('compareBody').addEventListener('click', (ev) => {
         const t = ev.target;
@@ -1399,6 +1531,12 @@
             showFinal();
             items.forEach((it) => addToFinal(it, catKey));
             note = '최종안에 ' + items.filter(Boolean).length + '건을 담았습니다.';
+        } else if (src && t.getAttribute('data-part')) {
+            const part = t.getAttribute('data-part');
+            const item = sourceItem(src, catKey, parseInt(t.getAttribute('data-idx'), 10));
+            showFinal();
+            applyPart(item, catKey, part);
+            note = '최종안의 ' + (part === 'op' ? '의견 줄' : '보수방안') + '을 바꿨습니다.';
         } else if (src) {
             const item = sourceItem(src, catKey, parseInt(t.getAttribute('data-idx'), 10));
             showFinal();
