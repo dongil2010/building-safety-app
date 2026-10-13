@@ -15054,10 +15054,18 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     // kgf/cm² → MPa 환산은 회사 엑셀(정밀점검 평가 통합 — 출력 시트 P열)과 같이 ×0.1.
     // 예전엔 ×0.098이라 식마다 약 0.7MPa, 최종 강도가 0.5MPa 가량 낮게 나왔다(2026-09-22).
     const CONCRETE_STRENGTH_FORMULAS = [
-        { name: '일본재료학회식', calc: (ro) => (13 * ro - 184) * 0.1 },
-        { name: '일본건축학회 제안식', calc: (ro) => (7.3 * ro + 100) * 0.1 },
-        { name: '과학기술부식', calc: (ro) => (15.2 * ro - 112.8) * 0.1 }
+        { name: '일본재료학회식', expr: 'Fc = (13Ro - 184) × 0.1', calc: (ro) => (13 * ro - 184) * 0.1 },
+        { name: '일본건축학회 제안식', expr: 'Fc = (7.3Ro + 100) × 0.1', calc: (ro) => (7.3 * ro + 100) * 0.1 },
+        { name: '과학기술부식', expr: 'Fc = (15.2Ro - 112.8) × 0.1', calc: (ro) => (15.2 * ro - 112.8) * 0.1 }
     ];
+
+    // 성과표 맨 밑에 적는 적용 추정식 줄. 번호(1식/2식/3식)는 성과표 압축강도 칸과 같이 전체 식 순서 기준.
+    function getStrengthFormulaLegendLines(enabledNames) {
+        return CONCRETE_STRENGTH_FORMULAS
+            .map((f, i) => ({ f, i }))
+            .filter(x => !enabledNames || enabledNames.includes(x.f.name))
+            .map(x => `${x.i + 1}식  ${x.f.name} : ${x.f.expr} (MPa)`);
+    }
 
     // 엑셀 ROUND와 같은 반올림(0.5는 0에서 먼 쪽). 37.65×10이 376.4999…로 떨어져 내려 반올림되는
     // 부동소수 오차를 엑셀처럼 15자리에서 한 번 정리한 뒤 반올림한다.
@@ -15385,6 +15393,26 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         ctx.beginPath(); ctx.moveTo(chX0, avgY); ctx.lineTo(chX1, avgY); ctx.stroke();
         ctx.setLineDash([]);
 
+        return canvas;
+    }
+
+    // 성과표 맨 밑(마지막 NO. 아래)에 붙이는 적용 추정식 줄 — NO. 그림과 같은 폭·글꼴(2026-10-14 사용자 요청)
+    function renderStrengthPerfLegendCanvas(enabledNames) {
+        const lines = getStrengthFormulaLegendLines(enabledNames);
+        const W = 2200, lineH = 52, padY = 14;
+        const canvas = document.createElement('canvas');
+        canvas.width = W;
+        canvas.height = padY * 2 + lineH * Math.max(1, lines.length);
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, W, canvas.height);
+        ctx.textBaseline = 'middle';
+        ctx.textAlign = 'left';
+        ctx.fillStyle = '#111111';
+        ctx.font = '34px "Pretendard", "Malgun Gothic", "맑은 고딕", sans-serif';
+        lines.forEach((line, i) => {
+            ctx.fillText(line, 20, padY + lineH * i + lineH / 2);
+        });
         return canvas;
     }
 
@@ -47661,9 +47689,14 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                                     ? getStrengthPerfPerPage(bodyH, PERF_IMG_W, perfCanvases[0].width, perfCanvases[0].height, PERF_GAP_PX)
                                     : 1;
                                 let perfAnchor = perfHeadingPara;
+                                // 마지막 쪽 그림 맨 밑에 적용 추정식(1식/2식…)을 붙인다. 그 쪽이 꽉 차 있으면 넘치지
+                                // 않게 본문 높이에 맞춰 그 장만 조금 줄어든다(2026-10-14 사용자 요청).
                                 for (let i = 0; i < perfCanvases.length; i += perPage) {
-                                    const pageCanvas = stackCanvasesVertically(perfCanvases.slice(i, i + perPage), PERF_GAP_PX);
-                                    perfAnchor = await insertImageParaAfter(perfAnchor, pageCanvas.toDataURL('image/png'), 'strengthPerfAuto', PERF_IMG_W, 999999999);
+                                    const isLastPage = i + perPage >= perfCanvases.length;
+                                    const pageParts = perfCanvases.slice(i, i + perPage);
+                                    if (isLastPage) pageParts.push(renderStrengthPerfLegendCanvas(perfEnabledNames));
+                                    const pageCanvas = stackCanvasesVertically(pageParts, PERF_GAP_PX);
+                                    perfAnchor = await insertImageParaAfter(perfAnchor, pageCanvas.toDataURL('image/png'), 'strengthPerfAuto', PERF_IMG_W, isLastPage ? bodyH - 1500 : 999999999);
                                 }
                             }
                         }
@@ -50160,9 +50193,14 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                                     ? getStrengthPerfPerPage(bodyH, PERF_IMG_W, perfCanvases[0].width, perfCanvases[0].height, PERF_GAP_PX)
                                     : 1;
                                 let perfAnchor = perfHeadingPara;
+                                // 마지막 쪽 그림 맨 밑에 적용 추정식(1식/2식…)을 붙인다. 그 쪽이 꽉 차 있으면 넘치지
+                                // 않게 본문 높이에 맞춰 그 장만 조금 줄어든다(2026-10-14 사용자 요청).
                                 for (let i = 0; i < perfCanvases.length; i += perPage) {
-                                    const pageCanvas = stackCanvasesVertically(perfCanvases.slice(i, i + perPage), PERF_GAP_PX);
-                                    perfAnchor = await insertImageParaAfter(perfAnchor, pageCanvas.toDataURL('image/png'), 'strengthPerfAuto', PERF_IMG_W, 999999999);
+                                    const isLastPage = i + perPage >= perfCanvases.length;
+                                    const pageParts = perfCanvases.slice(i, i + perPage);
+                                    if (isLastPage) pageParts.push(renderStrengthPerfLegendCanvas(perfEnabledNames));
+                                    const pageCanvas = stackCanvasesVertically(pageParts, PERF_GAP_PX);
+                                    perfAnchor = await insertImageParaAfter(perfAnchor, pageCanvas.toDataURL('image/png'), 'strengthPerfAuto', PERF_IMG_W, isLastPage ? bodyH - 1500 : 999999999);
                                 }
                             }
                         }

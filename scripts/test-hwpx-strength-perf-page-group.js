@@ -40,8 +40,38 @@ assert.strictEqual(ctx.f(20000, 42520, 2200, 620, 24), 1, '한 개도 안 들어
 assert.strictEqual(ctx.f(0, 42520, 2200, 620, 24), 1);
 
 // 두 출력 경로: NO.별 그림을 모아서 쪽 단위로 이어 붙이고, 글자처럼 취급 그림 문단으로 넣는다
-const perfCalls = app.match(/perfAnchor = await insertImageParaAfter\(perfAnchor, pageCanvas\.toDataURL\('image\/png'\), 'strengthPerfAuto', PERF_IMG_W, 999999999\);/g) || [];
+// 마지막 쪽은 밑에 적용 추정식 줄이 붙으므로 본문 높이를 넘지 않게 높이를 제한한다(2026-10-14)
+const perfCalls = app.match(/perfAnchor = await insertImageParaAfter\(perfAnchor, pageCanvas\.toDataURL\('image\/png'\), 'strengthPerfAuto', PERF_IMG_W, isLastPage \? bodyH - 1500 : 999999999\);/g) || [];
 assert.strictEqual(perfCalls.length, 2, '두 출력 경로 모두 쪽 단위 한 장');
+assert.strictEqual((app.match(/if \(isLastPage\) pageParts\.push\(renderStrengthPerfLegendCanvas\(perfEnabledNames\)\);/g) || []).length, 2, '두 출력 경로 모두 마지막 쪽 밑에 적용 추정식');
+
+// 적용 추정식 줄 — 고른 식만, 번호는 전체 식 순서(성과표 압축강도 칸의 1식/2식/3식과 같다)
+const legendCtx = {};
+vm.createContext(legendCtx);
+const formulasAt = app.indexOf('const CONCRETE_STRENGTH_FORMULAS = [');
+vm.runInContext(app.slice(formulasAt, app.indexOf('];', formulasAt) + 2)
+    + '\n' + extractFunction('function getStrengthFormulaLegendLines(')
+    + '\nthis.lines = getStrengthFormulaLegendLines;', legendCtx);
+assert.deepStrictEqual(Array.from(legendCtx.lines(['일본재료학회식', '일본건축학회 제안식'])), [
+    '1식  일본재료학회식 : Fc = (13Ro - 184) × 0.1 (MPa)',
+    '2식  일본건축학회 제안식 : Fc = (7.3Ro + 100) × 0.1 (MPa)'
+]);
+// 적어 둔 식 문구(expr)를 그대로 계산하면 실제 계산(calc)과 같아야 한다 — 문구만 따로 틀리는 것 방지
+vm.runInContext('this.formulas = CONCRETE_STRENGTH_FORMULAS;', legendCtx);
+assert.strictEqual(legendCtx.formulas.length, 3);
+Array.from(legendCtx.formulas).forEach((f) => {
+    assert.ok(/^Fc = [0-9Ro .()+\-×]+$/.test(f.expr), f.name + ' 식 문구 형식');
+    const js = f.expr.replace(/^Fc = /, '').replace(/([0-9.]+)Ro/g, '$1 * ro').replace(/×/g, '*');
+    const fromText = new Function('ro', 'return ' + js + ';');
+    for (let ro = 10; ro <= 80; ro += 0.1) {
+        assert.ok(Math.abs(fromText(ro) - f.calc(ro)) < 1e-9, f.name + ' 문구와 계산이 다르다 (Ro=' + ro.toFixed(1) + ')');
+    }
+});
+
+assert.deepStrictEqual(Array.from(legendCtx.lines(['일본재료학회식', '과학기술부식'])), [
+    '1식  일본재료학회식 : Fc = (13Ro - 184) × 0.1 (MPa)',
+    '3식  과학기술부식 : Fc = (15.2Ro - 112.8) × 0.1 (MPa)'
+]);
 assert.strictEqual((app.match(/perfCanvases\.push\(renderStrengthPerfPointCanvas\(/g) || []).length, 2);
 assert.ok(!app.includes('const picParaTemplate = picParas[0].cloneNode(true);'), 'NO.마다 템플릿 그림 문단을 복제하던 방식은 없어야 한다');
 // insertImageParaAfter가 쓰는 그림은 글자처럼 취급
