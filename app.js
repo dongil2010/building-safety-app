@@ -24994,8 +24994,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             }
             keep.add(ringKey);
             if (en.ringW > 0 && en.ringH > 0) {
-                ring.style.width = `${Math.round(en.ringW + 4)}px`;
-                ring.style.height = `${Math.round(en.ringH + 4)}px`;
+                ring.style.width = `${Math.round(en.ringW + 8)}px`;
+                ring.style.height = `${Math.round(en.ringH + 8)}px`;
                 ring.style.transform = `translate(${Math.round(en.cx)}px, ${Math.round(en.cy)}px) translate(-50%, -50%) rotate(${(en.angle || 0).toFixed(2)}deg)`;
             }
             if (!el || el.dataset.sig !== sig) {
