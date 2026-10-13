@@ -43,7 +43,9 @@
         // 작성안: A = 우리 보고서 문구·조사표 원인 그대로 / B = 중요도·원인·보수방안을 따로 판단한 제안
         // sel·text·custom·opinion·cellEdit는 지금 보고 있는 작성안의 것이고, 안마다 따로 보관한다.
         variant: 'A',
-        vars: { A: null, B: null }
+        vars: { A: null, B: null },
+        // AI안: 의견만 따로 받아 둔다(항목은 받을 때 보던 작성안 base의 것). 비교표에서 골라 쓴다.
+        ai: null
     };
 
     const VARIANT_KEYS = ['sel', 'text', 'custom', 'opinion', 'cellEdit'];
@@ -58,10 +60,6 @@
 
     /** 작성안을 화면에 올린다. 처음 여는 안이면 그 안의 추천으로 채운다. */
     function bindVariant(v) {
-        if (aiUndo && aiUndo.variant !== v) {
-            aiUndo = null;
-            $('btnAiUndo').classList.add('hidden');
-        }
         state.variant = v;
         const o = state.vars[v] || {};
         state.sel = o.sel || (v === 'B' ? alt.pickDefaults(state.defects) : core.pickDefaults(state.defects));
@@ -302,7 +300,7 @@
         try {
             localStorage.setItem(storeKey(), JSON.stringify({
                 variant: state.variant, vars: state.vars, catOverride: state.catOverride, loadLines: state.loadLines,
-                repairNote: state.repairNote, prev: state.prev, markBlue: state.markBlue, meta: state.meta
+                repairNote: state.repairNote, prev: state.prev, markBlue: state.markBlue, meta: state.meta, ai: state.ai
             }));
         } catch (e) {
             /* 저장 실패는 화면 동작과 무관하다 */
@@ -660,6 +658,7 @@
             blocks.push(outBlock('review', '⑧ 조사표 원인추정 재검토 (B안 전용, A안을 쓸 때도 확인 권장)', causeReviewHtml()));
         }
         $('outBody').innerHTML = blocks.join('');
+        renderCompare();
     }
 
     function renderVariantTabs() {
@@ -759,9 +758,6 @@
 
     /* ───────── AI 의견 초안 (Gemini) ───────── */
 
-    /** AI 의견을 넣기 직전의 의견(되돌리기용). 작성안을 바꾸면 버린다. */
-    let aiUndo = null;
-
     function setAiNote(msg, cls) {
         const el = $('aiNote');
         el.textContent = msg;
@@ -805,31 +801,27 @@
             return;
         }
         const count = input.cats.reduce((n, c) => n + c.items.length, 0);
-        if (!window.confirm('고른 주요 점검결과 ' + count + '건의 글자(건물명·위치·결함 내용·원인추정)를 Google Gemini로 보내 '
-            + state.variant + '안의 의견 초안을 받습니다. 사진은 보내지 않습니다.\n지금 적혀 있는 의견은 AI 초안으로 바뀝니다(되돌릴 수 있음). 계속할까요?')) return;
+        if (!window.confirm(state.variant + '안에서 고른 주요 점검결과 ' + count + '건의 글자(건물명·위치·결함 내용·원인추정)를 Google Gemini로 보내 '
+            + 'AI안 의견을 받습니다. 사진은 보내지 않습니다.\n받은 의견은 비교표의 AI안 칸에만 들어가고, 지금 적혀 있는 의견은 바뀌지 않습니다. 계속할까요?')) return;
         const btn = $('btnAiOpinion');
         btn.disabled = true;
         setAiNote('AI가 의견을 쓰는 중...', 'muted');
         try {
-            const variant = state.variant;
+            const base = state.variant;
             const got = await ai.requestOpinions(key, input);
-            if (state.variant !== variant) throw new Error('기다리는 동안 작성안이 바뀌어 넣지 않았습니다. 다시 눌러 주세요.');
             const done = Object.keys(got);
             if (!done.length) throw new Error('AI가 쓴 의견이 없습니다.');
-            aiUndo = { variant: variant, opinion: Object.assign({}, state.opinion) };
-            const odd = [];
+            const odd = {};
             input.cats.forEach((c) => {
-                if (!got[c.key]) return;
-                // 첫 줄(머리말)은 지금 문구 그대로 두고 본문만 AI 초안으로 바꾼다
-                state.opinion[c.key] = core.buildOpinion(c.key, [], state.meta).split('\n')[0] + '\n' + got[c.key];
-                const nums = ai.unknownNumbers(got[c.key], ai.sourceTextOf(c));
-                if (nums.length) odd.push(c.label + ': ' + nums.join(', '));
+                const nums = got[c.key] ? ai.unknownNumbers(got[c.key], ai.sourceTextOf(c)) : [];
+                if (nums.length) odd[c.key] = nums;
             });
+            state.ai = { base: base, opinion: got, odd: odd };
             save();
-            renderOut();
-            $('btnAiUndo').classList.remove('hidden');
-            if (odd.length) setAiNote('AI 초안을 넣었습니다(' + done.length + '개 분류). 조사표에 없는 숫자가 있으니 확인해 주세요 → ' + odd.join(' / '), 'err');
-            else setAiNote('AI 초안을 넣었습니다(' + done.length + '개 분류). ③·⑤ 표에서 읽어 보고 고쳐 주세요.', 'ok');
+            renderCompare();
+            const nOdd = Object.keys(odd).length;
+            if (nOdd) setAiNote('AI안을 받았습니다(' + done.length + '개 분류). ' + nOdd + '개 분류에 조사표에 없는 숫자가 있어 비교표에 표시했습니다.', 'err');
+            else setAiNote('AI안을 받았습니다(' + done.length + '개 분류). 비교표에서 읽어 보고 쓸 의견을 고르세요.', 'ok');
         } catch (e) {
             setAiNote(e.message || String(e), 'err');
         } finally {
@@ -837,16 +829,79 @@
         }
     }
 
-    function undoAiOpinion() {
-        if (!aiUndo || aiUndo.variant !== state.variant) return;
-        state.opinion = aiUndo.opinion;
-        aiUndo = null;
-        $('btnAiUndo').classList.add('hidden');
-        save();
-        renderOut();
-        setAiNote('AI 초안을 넣기 전 의견으로 되돌렸습니다.', 'ok');
+    /* ───────── 한눈에 비교: 전회차 · A안 · B안 · AI안 ───────── */
+
+    /** 의견에서 첫 줄(머리말)을 뺀 본문 */
+    function opinionBody(op) {
+        return String(op || '').split('\n').filter((l) => !/^․/.test(l.trim())).join('\n');
     }
 
+    /** 작성안 v의 분류별 항목과 의견. 보고 있지 않은 안은 잠깐 올려서 읽고 되돌린다. */
+    function snapshotOf(v) {
+        const cur = state.variant;
+        if (v !== cur) { stashVariant(); bindVariant(v); }
+        const groups = groupsNow();
+        const out = {};
+        core.CATEGORIES.forEach((cat) => {
+            out[cat.key] = { lines: entriesOf(cat.key).map((e) => e.text), opinion: opinionBody(opinionOf(cat.key, groups)) };
+        });
+        if (v !== cur) { stashVariant(); bindVariant(cur); }
+        return out;
+    }
+
+    function compareHtml() {
+        const cur = state.variant;
+        const snaps = { A: snapshotOf('A'), B: snapshotOf('B') };
+        const aiOp = (state.ai && state.ai.opinion) || {};
+        const numbered = (lines, blueAt) => (lines.length
+            ? lines.map((t, i) => blueIf(blueAt && blueAt(i), esc((i + 1) + '. ' + t))).join('\n') : '-');
+        const useBtn = (src, catKey, has) => (has && src !== cur
+            ? '<div><button type="button" class="btn ghost small" data-use="' + src + '" data-cat="' + catKey + '">이 의견을 ' + cur + '안에 쓰기</button></div>' : '');
+        const th = (v, label) => '<th' + (v === cur ? ' class="cur"' : '') + '>' + label + (v === cur ? ' <small>지금 보는 안</small>' : '') + '</th>';
+        const hasAi = Object.keys(aiOp).length > 0;
+
+        let h = '<table class="cmp4"><tr><th style="width:9%">구분</th><th style="width:5%"></th>'
+            + '<th>전회차 보고서</th>' + th('A', 'A안 · 우리 보고서 스타일') + th('B', 'B안 · 중요도 중심')
+            + '<th>AI안 (Gemini)' + (hasAi ? ' <small>' + esc(state.ai.base) + '안 항목 기준</small>' : '') + '</th></tr>';
+        core.CATEGORIES.forEach((cat) => {
+            const k = cat.key;
+            const prevOp = (state.prev && state.prev.opinion[k]) || '';
+            const lineCell = (v) => {
+                const lines = snaps[v][k].lines;
+                const cmp = state.prev ? core.compareLines(prevLines(k), lines) : null;
+                return '<td' + (v === cur ? ' class="cur"' : '') + '>' + numbered(lines, cmp && ((i) => cmp.cur[i].kind !== 'same')) + '</td>';
+            };
+            const opCell = (v) => '<td' + (v === cur ? ' class="cur"' : '') + '>' + (esc(snaps[v][k].opinion) || '-')
+                + useBtn(v, k, !!snaps[v][k].opinion) + '</td>';
+            const odd = (state.ai && state.ai.odd && state.ai.odd[k]) || [];
+            h += '<tr><td class="c" rowspan="2">' + esc(cat.label) + '</td><td class="c">주요<br>결과</td>'
+                + '<td>' + (state.prev ? numbered(prevLines(k)) : '<span class="muted">전회차 보고서(.hwp)를 읽으면 나옵니다</span>') + '</td>'
+                + lineCell('A') + lineCell('B')
+                + '<td class="muted">' + (aiOp[k] ? esc(state.ai.base) + '안과 같은 항목' : '-') + '</td></tr>'
+                + '<tr><td class="c">의견</td>'
+                + '<td>' + (esc(prevOp) || '-') + useBtn('prev', k, !!prevOp) + '</td>'
+                + opCell('A') + opCell('B')
+                + '<td>' + (aiOp[k] ? esc(aiOp[k]) : (k === 'load' || hasAi ? '-' : '<span class="muted">위 「AI안 만들기」를 누르면 나옵니다</span>'))
+                + (odd.length ? '<div><span class="badge warn">조사표에 없는 숫자: ' + esc(odd.join(', ')) + '</span></div>' : '')
+                + useBtn('AI', k, !!aiOp[k]) + '</td></tr>';
+        });
+        return h + '</table>';
+    }
+
+    function renderCompare() {
+        $('compareBody').innerHTML = compareHtml();
+        $('btnAiUseAll').classList.toggle('hidden', !(state.ai && Object.keys(state.ai.opinion || {}).length));
+        $('btnAiUseAll').textContent = 'AI안 의견을 모두 ' + state.variant + '안에 쓰기';
+    }
+
+    /** 비교표의 의견 하나를 지금 보는 작성안의 의견으로 쓴다. 첫 줄(머리말)은 금회 것으로 둔다. */
+    function useOpinion(src, catKey) {
+        if (src === 'prev') { usePrevOpinion(catKey); return; }
+        const body = src === 'AI' ? ((state.ai && state.ai.opinion[catKey]) || '') : snapshotOf(src)[catKey].opinion;
+        if (!body) return;
+        const head = catKey === 'load' ? '' : core.buildOpinion(catKey, [], state.meta).split('\n')[0];
+        state.opinion[catKey] = (head ? head + '\n' : '') + body;
+    }
     /* ───────── 한글 파일로 저장 ───────── */
 
     let photoSrc = null;
@@ -1037,6 +1092,7 @@
         // 이번에 전회차 파일을 먼저 골랐으면 그것을, 아니면 지난번에 읽어 둔 것을 쓴다
         state.prev = prevLoadedNow || (saved && saved.prev) || null;
         applyOverrides();
+        state.ai = (saved && saved.ai) || null;
         state.vars = (saved && saved.vars) || { A: null, B: null };
         // 작성안을 나누기 전(2026-10-08 오전)에 저장한 내용은 A안으로 잇는다
         if (saved && !saved.vars && saved.sel) {
@@ -1046,7 +1102,7 @@
 
         $('metaName').value = state.meta.buildingName;
         $('metaRound').value = state.meta.roundLabel;
-        ['pickCard', 'outCard'].forEach((id) => $(id).classList.remove('hidden'));
+        ['compareCard', 'pickCard', 'outCard'].forEach((id) => $(id).classList.remove('hidden'));
         showPrevStatus();
         renderAll();
         save();
@@ -1088,7 +1144,24 @@
 
     $('btnExportHwpx').addEventListener('click', () => { if (state.defects.length) exportHwpx(); });
     $('btnAiOpinion').addEventListener('click', () => { if (state.defects.length) runAiOpinion(); });
-    $('btnAiUndo').addEventListener('click', undoAiOpinion);
+    $('btnAiUseAll').addEventListener('click', () => {
+        if (!state.ai) return;
+        if (!window.confirm('AI안 의견을 ' + state.variant + '안의 모든 분류에 넣을까요? 지금 ' + state.variant + '안에 적힌 의견은 바뀝니다.')) return;
+        Object.keys(state.ai.opinion).forEach((k) => useOpinion('AI', k));
+        save();
+        renderOut();
+        setAiNote('AI안 의견을 ' + state.variant + '안에 넣었습니다. 아래 ③·⑤ 표에서 고칠 수 있습니다.', 'ok');
+    });
+
+    $('compareBody').addEventListener('click', (ev) => {
+        const t = ev.target;
+        const src = t.getAttribute && t.getAttribute('data-use');
+        if (!src) return;
+        useOpinion(src, t.getAttribute('data-cat'));
+        save();
+        renderOut();
+        setAiNote((src === 'prev' ? '전회차' : src + '안') + ' 의견을 ' + state.variant + '안에 넣었습니다. 아래 ③·⑤ 표에서 고칠 수 있습니다.', 'ok');
+    });
 
     $('markBlue').addEventListener('change', (ev) => {
         state.markBlue = ev.target.checked;
