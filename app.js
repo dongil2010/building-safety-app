@@ -24203,11 +24203,12 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             ctx.translate(boxX, boxY);
             const rot = state.rotationAngle || 0;
             if (rot) ctx.rotate((-rot * Math.PI) / 180);
-            ctx.strokeStyle = MEMBER_GB_COLOR;
-            ctx.lineWidth = Math.max(2, 2.2 * scale);
-            ctx.setLineDash([6 * scale, 4 * scale]);
-            ctx.strokeRect(-w / 2 - 7 * scale, -h / 2 - 7 * scale, w + 14 * scale, h + 14 * scale);
-            ctx.setLineDash([]);
+            // 2026-10-13 강조 테두리는 DOM 레인보우 링(syncMemberGbOverlay)으로 — 캔버스엔 드래그 중에만 가는 선
+            if (dragging) {
+                ctx.strokeStyle = MEMBER_GB_COLOR;
+                ctx.lineWidth = Math.max(1, 1.2 * scale);
+                ctx.strokeRect(-w / 2 - 3 * scale, -h / 2 - 3 * scale, w + 6 * scale, h + 6 * scale);
+            }
             let m = null;
             try { m = ctx.getTransform(); } catch (_e) { m = null; }
             ctx.restore();
@@ -24219,7 +24220,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 choices,
                 cx: m.e / dpr,
                 cy: m.f / dpr,
-                halfH: (h / 2 + 7 * scale) * zoom
+                halfH: (h / 2 + 7 * scale) * zoom,
+                ringW: (w + 6 * scale) * zoom,
+                ringH: (h + 6 * scale) * zoom,
+                angle: Math.atan2(m.b, m.a) * 180 / Math.PI
             });
         });
         return entries;
@@ -24979,6 +24983,21 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             if (en.cx < -60 || en.cy < -60 || (vw && en.cx > vw + 60) || (vh && en.cy > vh + 60)) return;
             let el = existing.get(en.key);
             const sig = en.choices.join('|');
+            // 레인보우 강조 링(화면 전용 DOM, CSS 애니메이션 — 지정 필요한 보만)
+            const ringKey = `ring|${en.key}`;
+            let ring = existing.get(ringKey);
+            if (!ring) {
+                ring = document.createElement('div');
+                ring.className = 'map-member-gb-ring';
+                ring.dataset.key = ringKey;
+                ov.insertBefore(ring, ov.firstChild);
+            }
+            keep.add(ringKey);
+            if (en.ringW > 0 && en.ringH > 0) {
+                ring.style.width = `${Math.round(en.ringW + 4)}px`;
+                ring.style.height = `${Math.round(en.ringH + 4)}px`;
+                ring.style.transform = `translate(${Math.round(en.cx)}px, ${Math.round(en.cy)}px) translate(-50%, -50%) rotate(${(en.angle || 0).toFixed(2)}deg)`;
+            }
             if (!el || el.dataset.sig !== sig) {
                 if (el) el.remove();
                 el = document.createElement('div');
@@ -25006,6 +25025,34 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         });
         existing.forEach((el, key) => { if (!keep.has(key)) el.remove(); });
     }
+
+    // 2026-10-13 PC 키보드 G=거더, B=빔 — 선택한 마킹(없으면 화면에 하나뿐인 G/B 지정 대상)에 적용
+    if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') document.addEventListener('keydown', (e) => {
+        if (e.ctrlKey || e.altKey || e.metaKey || e.repeat || e.isComposing) return;
+        const k = String(e.key || '').toLowerCase();
+        const code = e.code || '';
+        const isG = k === 'g' || k === 'ㅎ' || code === 'KeyG';
+        const isB = k === 'b' || k === 'ㅠ' || code === 'KeyB';
+        if (!isG && !isB) return;
+        const t = e.target;
+        if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName || ''))) return;
+        if (document.querySelector('.app-dialog-backdrop:not([hidden]), dialog[open]')) return;
+        const ov = document.getElementById('mapMemberGbOverlay');
+        if (!ov || !ov.offsetParent) return;
+        const picks = Array.from(ov.querySelectorAll('.map-member-gb-pick'));
+        if (!picks.length) return;
+        const sel = new Set((typeof selectedDefectIds !== 'undefined' && selectedDefectIds) ? Array.from(selectedDefectIds) : []);
+        let targets = picks.filter((p) => String(p.dataset.ids || '').split('|').some((id) => sel.has(id)));
+        if (!targets.length && picks.length === 1) targets = picks;
+        if (!targets.length) return;
+        let n = 0;
+        targets.forEach((p) => {
+            const btn = Array.from(p.querySelectorAll('.map-member-gb-btn')).find((b) => b.textContent === (isG ? 'G' : 'B'));
+            if (!btn) return;
+            n += applyMemberGbChoice(String(p.dataset.ids || '').split('|').filter(Boolean), btn.dataset.value || '') || 0;
+        });
+        if (n || targets.length) e.preventDefault();
+    });
 
     /** 도면 「G」「B」 버튼: 부재 명칭만 바꿔 저장 (원인·종류는 그대로, 수정창은 안 연다) */
     function applyMemberGbChoice(defectIds, value) {

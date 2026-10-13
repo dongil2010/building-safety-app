@@ -16143,6 +16143,34 @@ html:not(.layout-desktop) .crack-monitor-photo-slots {
     background: #c026d3;
     color: #ffffff;
 }
+/* 2026-10-13 G/B 지정 필요 보 강조 — 얇은 레인보우 링(화면 전용 DOM, 색이 돌아감) */
+.map-member-gb-ring {
+    position: absolute;
+    left: 0;
+    top: 0;
+    box-sizing: border-box;
+    padding: 2px;
+    border-radius: 4px;
+    pointer-events: none;
+    background: linear-gradient(90deg, #ff0000, #ff8000, #ffff00, #00ff00, #00ffff, #0040ff, #ff00ff, #ff0000);
+    background-size: 300% 100%;
+    -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    mask-composite: exclude;
+    animation: bsaGbRainbow 1.2s linear infinite;
+    will-change: background-position;
+}
+@keyframes bsaGbRainbow {
+    from { background-position: 0% 50%; }
+    to { background-position: 150% 50%; }
+}
+@media (prefers-reduced-motion: reduce) {
+    .map-member-gb-ring { animation: none; }
+}
+.map-member-gb-btn {
+    border-color: transparent;
+    background: linear-gradient(#fff, #fff) padding-box, linear-gradient(90deg, #ff0000, #ffff00, #00ff00, #00ffff, #0040ff, #ff00ff) border-box;
+}
 /* 모바일(터치): 도면을 덜 가리게 보이는 버튼은 작게(24px), 누르는 칸은 ::after로 넓힘(약 28×34px).
    2026-09-28 「모바일에서 거더 빔 고르는 버튼 너무 커」 — 예전 32×32px·0.86rem */
 @media (pointer: coarse) {
