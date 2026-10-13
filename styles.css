@@ -363,6 +363,22 @@ label.header-ndt-draw-btn.btn-primary {
     box-shadow: var(--shadow-sm);
 }
 
+/* 보고서 요약: 탭 줄에 있지만 새 창으로 여는 버튼. 현장 앱(APK)에는 그 페이지가 없어 PC 화면에서만 보인다. */
+.tab-btn-external-mark {
+    font-size: 0.65em;
+    opacity: 0.6;
+}
+
+html.layout-tablet .tab-btn-report-summary {
+    display: none !important;
+}
+
+@media (max-width: 900px) {
+    .tab-btn-report-summary {
+        display: none !important;
+    }
+}
+
 /* App Content Area */
 .app-content {
     flex: 1;
