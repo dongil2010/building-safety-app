@@ -309,14 +309,91 @@
         return best;
     }
 
-    function locationLabel(group) {
+    /** 이 비율 이상의 층에서 나오면 「각 층」으로 적는다 (2026-10-13 사용자 기준: 4/5 이상) */
+    const EVERY_FLOOR_RATIO = 0.8;
+
+    /** 겹치지 않는 층 이름. 「외부」는 층이 아니므로 뺀다. */
+    function floorsOf(list) {
+        const floors = [];
+        (list || []).forEach(function (d) {
+            const f = floorText(d.floor);
+            if (f && f !== '외부' && floors.indexOf(f) < 0) floors.push(f);
+        });
+        return floors;
+    }
+
+    /** 조사표 전체 층 가운데 4/5 이상(두 층 이상)에서 나왔는가 */
+    function isEveryFloor(items, totalFloors) {
+        const n = floorsOf(items).length;
+        return n >= 2 && totalFloors > 0 && n / totalFloors >= EVERY_FLOOR_RATIO;
+    }
+
+    /** totalFloors: 조사표 전체 층 수. 주지 않으면 예전 기준(5개 층 이상이면 각 층)으로 본다. */
+    function locationLabel(group, totalFloors) {
         const floors = [];
         group.forEach(function (d) {
             const f = floorText(d.floor);
             if (floors.indexOf(f) < 0) floors.push(f);
         });
-        if (floors.length >= 5) return '각 층';
+        if (totalFloors ? isEveryFloor(group, totalFloors) : floors.length >= 5) return '각 층';
         return floors.length > 1 ? floors[0] + ' 외' : (floors[0] || '');
+    }
+
+    const MEMBER_RULES = [
+        [/슬래브|스라브|슬라브/, '슬래브'],
+        [/기둥/, '기둥'],
+        [/(^|[\s\-])보(\(|\s|-|$)|테두리보|철골보|거더/, '보'],
+        [/계단/, '계단'],
+        [/옹벽/, '옹벽'],
+        [/조적|블록|벽돌|ALC/, '조적벽체'],
+        [/벽체|내력벽|전단벽/, '벽체']
+    ];
+
+    /** 조사내용이 가리키는 부재(「보수부위」의 '보'는 뺀다). 모르면 '' */
+    function memberOf(content) {
+        const t = String(content || '').replace(/보수/g, '');
+        for (let i = 0; i < MEMBER_RULES.length; i++) {
+            if (MEMBER_RULES[i][0].test(t)) return MEMBER_RULES[i][1];
+        }
+        return '';
+    }
+
+    /**
+     * 묶어 쓰기 후보: 같은 분류·부재·유형의 결함을 한 줄로 합친 문구.
+     *   「각 층 슬래브 균열 (최대 균열폭:0.45mm/지하1층)」「일부 슬래브 백태」「지상1층 보 균열 (최대 균열폭:0.3mm)」
+     * 같은 결함이 현저하게 많을 때 사람이 골라 쓰는 것이라 두 건 이상인 묶음만 내놓는다.
+     * 범위 말: 전체 층의 4/5 이상 → 각 층 / 두 층 이상 → 일부 / 한 층 → 층 이름.
+     * @returns {Array<{key, category, text, rep, count, floorCount, floorTotal}>} 건수 많은 순
+     */
+    function buildAggregates(defects) {
+        const total = floorsOf(defects).length;
+        const groups = [];
+        const index = {};
+        (defects || []).forEach(function (d) {
+            if (d.good) return;
+            const member = memberOf(d.content);
+            const phrase = member && d.typeKey !== '기타' ? member + ' ' + d.typeKey : d.content;
+            const key = d.category + '|' + phrase;
+            if (index[key] == null) {
+                index[key] = groups.length;
+                groups.push({ key: key, category: d.category, phrase: phrase, items: [] });
+            }
+            groups[index[key]].items.push(d);
+        });
+        return groups.filter(function (g) { return g.items.length >= 2; }).map(function (g) {
+            const floors = floorsOf(g.items);
+            const scope = isEveryFloor(g.items, total) ? '각 층' : (floors.length >= 2 ? '일부' : floorText(g.items[0].floor));
+            const measured = g.items.filter(function (d) { return d.width != null && !d.widthSuspicious; });
+            const widest = measured.slice().sort(function (a, b) { return b.width - a.width; })[0];
+            let text = scope + ' ' + g.phrase;
+            if (widest && g.category === 'structure') {
+                text += ' (최대 균열폭:' + fmtNum(widest.width) + 'mm' + (floors.length >= 2 ? '/' + floorText(widest.floor) : '') + ')';
+            }
+            return {
+                key: g.key, category: g.category, text: text, rep: widest || byScore(g.items)[0],
+                count: g.items.length, floorCount: floors.length, floorTotal: total
+            };
+        }).sort(function (a, b) { return b.count - a.count; });
     }
 
     /**
@@ -338,11 +415,13 @@
             }
             groups[index[key]].items.push(d);
         });
+        const floorTotal = floorsOf(defects).length;
         groups.forEach(function (g) {
+            g.floorTotal = floorTotal;
             const chosen = g.items.filter(function (d) { return picked[d.id]; });
             g.rep = chosen[0] || byScore(g.items)[0];
             g.selected = chosen.length > 0;
-            g.location = locationLabel(g.items);
+            g.location = locationLabel(g.items, floorTotal);
             g.cause = mostCommon(g.items.map(function (d) { return d.cause; }));
             g.repair = repairOf(g.category, g.baseType);
             g.part = partLabelOf(g.category, g.baseType);
@@ -360,7 +439,7 @@
             const key = g.part + '|' + g.repair.long;
             if (index[key] == null) {
                 index[key] = rows.length;
-                rows.push({ key: 'sum|' + key, items: [], part: g.part, types: [], repair: g.repair.long });
+                rows.push({ key: 'sum|' + key, items: [], part: g.part, types: [], repair: g.repair.long, floorTotal: g.floorTotal });
             }
             const r = rows[index[key]];
             r.items = r.items.concat(g.items);
@@ -369,7 +448,7 @@
         return rows.map(function (r) {
             return {
                 key: r.key,
-                cells: [locationLabel(r.items), r.part, r.types.join(', '), '․ 보수실시\n(' + r.repair + ')']
+                cells: [locationLabel(r.items, r.floorTotal), r.part, r.types.join(', '), '․ 보수실시\n(' + r.repair + ')']
             };
         });
     }
@@ -616,6 +695,8 @@
         itemText: itemText,
         repairOf: repairOf,
         buildGroups: buildGroups,
+        memberOf: memberOf,
+        buildAggregates: buildAggregates,
         buildSummaryRows: buildSummaryRows,
         buildPartRows: buildPartRows,
         buildCauseRows: buildCauseRows,

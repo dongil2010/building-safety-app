@@ -232,4 +232,37 @@ const gA = api.buildGroups(dB, []);
 assert.ok(gA.some((g) => g.key === 'structure|균열' && g.items.length === 5));
 assert.strictEqual(gA.filter((g) => g.key === 'structure|균열')[0].repair.short, '표면처리 및 주입공법');
 
+// 묶어 쓰기 후보: 같은 부재·유형을 한 줄로. 전체 층의 4/5 이상이면 「각 층」, 두 층 이상이면 「일부」, 한 층이면 층 이름
+assert.strictEqual(api.memberOf('보(G) 균열'), '보');
+assert.strictEqual(api.memberOf('슬래브 보수부위 균열'), '슬래브', '「보수」의 보는 부재가 아니다');
+assert.strictEqual(api.memberOf('조적벽체 균열'), '조적벽체');
+assert.strictEqual(api.memberOf('천장 마감재 오염'), '');
+const aggFloors = ['지하1층', '지상1층', '지상2층', '지상3층', '지상4층'].map((name, i) => ({
+    floorLabel: name,
+    rows: [
+        // 슬래브 균열: 5개 층 가운데 4개 층(4/5) → 각 층. 가장 큰 폭은 지하1층 0.45
+        i < 4 ? row(1, '슬래브 균열', i === 0 ? '0.45/2.0' : '0.2/1.0', true) : row(1, '슬래브 상태양호', '', true),
+        // 슬래브 백태: 2개 층 → 일부
+        i < 2 ? row(2, '슬래브 균열 및 백태', '', true) : row(2, '벽체 상태양호', '', true),
+        // 보 균열: 지상1층에만 2건 → 층 이름
+        i === 1 ? row(3, '보(G) 균열', '0.3/1.0', true) : row(3, '기둥 상태양호', '', true),
+        i === 1 ? row(4, '보(B) 균열', '0.2/1.0', true) : row(4, '기둥 상태양호', '', true),
+        // 기둥 철근노출: 한 건뿐 → 후보 아님
+        i === 3 ? row(5, '기둥 철근노출', '', true) : row(5, '기둥 상태양호', '', true)
+    ]
+}));
+const aggs = api.buildAggregates(api.buildDefects(aggFloors));
+assert.deepStrictEqual(aggs.map((a) => a.text), [
+    '각 층 슬래브 균열 (최대 균열폭:0.45mm/지하1층)',
+    '일부 슬래브 백태',
+    '지상1층 보 균열 (최대 균열폭:0.3mm)'
+]);
+assert.deepStrictEqual([aggs[0].count, aggs[0].floorCount, aggs[0].floorTotal], [4, 4, 5]);
+assert.strictEqual(aggs[0].rep.floor, '지하1층', '대표 결함은 폭이 가장 큰 것');
+// 3개 층(3/5)이면 아직 「일부」
+const agg3 = api.buildAggregates(api.buildDefects(aggFloors).filter((d) => !(d.floor === '지상3층' && d.content === '슬래브 균열')));
+assert.strictEqual(agg3[0].text, '일부 슬래브 균열 (최대 균열폭:0.45mm/지하1층)');
+// 표의 위치 칸도 같은 기준(4/5 이상이면 각 층)
+assert.strictEqual(api.buildGroups(api.buildDefects(aggFloors), []).filter((g) => g.key === 'structure|균열')[0].location, '각 층');
+
 console.log('report-summary ok');

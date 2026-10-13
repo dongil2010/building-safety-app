@@ -133,6 +133,9 @@
     table.cmp4 .it.dragging { opacity: 0.4; }
     table.cmp4 .it.drop-before { border-top-color: #0284c7; }
     table.cmp4 .it.drop-after { border-bottom-color: #0284c7; }
+    table.cmp4 .agg { margin-top: 0.45rem; padding-top: 0.35rem; border-top: 1px dashed #cbd5e1; }
+    table.cmp4 .agghead { font-weight: 700; color: #475569; margin-bottom: 0.2rem; }
+    table.cmp4 .agghead small { font-weight: 500; color: #94a3b8; }
     table.cmp4 td.final { background: #fefce8; }
     table.cmp4 td.final.cur, table.cmp4 td.cur.final { background: #fef9c3; }
     table.cmp4 .why { display: block; color: #64748b; font-size: 0.78rem; }
@@ -183,7 +186,7 @@
             <button type="button" class="btn ghost" id="btnAiOpinion">AI안 만들기 (Gemini)</button>
             <span class="muted" id="aiNote">AI안은 조사표의 결함 전체를 읽고 주요 점검결과를 직접 고른 뒤, 조사표의 원인추정에 얽매이지 않고 자기 판단으로 의견과 「검토 메모」(놓치기 쉬운 점)를 씁니다. 누를 때만 결함 목록의 글자가 Google로 전송됩니다(사진 제외).</span>
         </div>
-        <p class="muted">항목 앞의 <b>+</b>를 누르면 맨 오른쪽 <b>최종안</b>에 담기고, 그 항목의 의견도 바로 한 줄 써집니다(B안·AI안에서 담으면 그 안의 의견 줄, 전회차·A안에서 담으면 A안 말투). <b>의견·보수방안 줄에도 +가 있어 따로 고를 수 있습니다</b>(예: 의견은 A안, 보수방안은 AI안). ✓는 최종안이 지금 쓰고 있는 것입니다. 최종안에서 <b>−</b>를 누르면 빠지고, 항목을 <b>끌어서 위아래로 옮기면</b> 순서가 바뀝니다(의견·보수방안·아래 표도 같은 순서). <b>보수방안</b>도 항목을 따라갑니다: B안·AI안에서 담으면 그 안의 보수방안이, 그 밖에는 A안(우리 보고서의 짝 문구)이 최종안과 아래 ②·⑥ 표에 들어갑니다. 담으면 아래 2·3번 표와 한글 파일도 최종안으로 바뀝니다.</p>
+        <p class="muted">항목 앞의 <b>+</b>를 누르면 맨 오른쪽 <b>최종안</b>에 담기고, 그 항목의 의견도 바로 한 줄 써집니다(B안·AI안에서 담으면 그 안의 의견 줄, 전회차·A안에서 담으면 A안 말투). A안 칸 아래 <b>「묶어 쓰기」</b>는 같은 부재·유형의 결함이 여러 건일 때 한 줄로 쓰는 문구입니다(예: 각 층 슬래브 균열 (최대 균열폭:0.45mm/지하1층)). 전체 층의 4/5 이상에서 나오면 「각 층」, 두 층 이상이면 「일부」, 한 층이면 층 이름으로 적습니다. <b>의견·보수방안 줄에도 +가 있어 따로 고를 수 있습니다</b>(예: 의견은 A안, 보수방안은 AI안). ✓는 최종안이 지금 쓰고 있는 것입니다. 최종안에서 <b>−</b>를 누르면 빠지고, 항목을 <b>끌어서 위아래로 옮기면</b> 순서가 바뀝니다(의견·보수방안·아래 표도 같은 순서). <b>보수방안</b>도 항목을 따라갑니다: B안·AI안에서 담으면 그 안의 보수방안이, 그 밖에는 A안(우리 보고서의 짝 문구)이 최종안과 아래 ②·⑥ 표에 들어갑니다. 담으면 아래 2·3번 표와 한글 파일도 최종안으로 바뀝니다.</p>
         <p class="muted">AI안의 「AI만」은 A안·B안이 고르지 않은 항목이고, 회색 글씨는 AI가 적은 고른 이유입니다. 전회차를 읽었으면 전회차와 달라진 항목은 <b style="color:#0000ff">파란 글자</b>입니다.</p>
         <div id="compareBody" style="overflow-x:auto;"></div>
     </section>

@@ -627,7 +627,7 @@
         return entriesOf(catKey).filter((e) => e.d).map((e) => ({
             url: e.d.photoIds.length ? state.photoUrl[e.d.photoIds[0]] : '',
             ref: e.d.photoNos.length ? e.d.floor + ' 사진' + e.d.photoNos[0] : '',
-            caption: e.text.replace(/\s*\(균열폭:[^)]*\)\s*$/, '')
+            caption: e.text.replace(/\s*\((?:최대 )?균열폭:[^)]*\)\s*$/, '')
         }));
     }
 
@@ -1106,6 +1106,13 @@
         }
     }
 
+    /** 분류마다 보여 줄 묶어 쓰기 후보 수(건수 많은 순) */
+    const MAX_AGG_PER_CAT = 5;
+
+    function aggregatesNow() {
+        return core.buildAggregates(state.defects);
+    }
+
     function compareHtml() {
         const cur = state.variant;
         const snaps = { A: snapshotOf('A'), B: snapshotOf('B'), F: snapshotOf('F') };
@@ -1113,6 +1120,7 @@
         const aiWhy = (state.ai && state.ai.why) || {};
         const aiNote = (state.ai && state.ai.note) || {};
         const hasAi = !!(state.ai && state.ai.sel);
+        const aggs = aggregatesNow();
         const th = (v, label) => '<th' + (v === cur ? ' class="cur"' : '') + '>' + label + (v === cur ? ' <small>아래 표에 나오는 안</small>' : '') + '</th>';
         const plus = (src, k, i, inFinal) => '<button type="button" class="plus' + (inFinal ? ' in' : '') + '" data-add="' + src + '" data-cat="' + k + '" data-idx="' + i + '" title="'
             + (inFinal ? '최종안에 담겨 있음 — 누르면 문구·의견·보수방안을 모두 이 안의 것으로 바꿉니다' : '최종안에 담기 (의견·보수방안도 이 안의 것으로)') + '">' + (inFinal ? '✓' : '+') + '</button>';
@@ -1148,8 +1156,18 @@
                 const cmp = state.prev ? core.compareLines(prevList, entries.map((e) => e.text)) : null;
                 return '<td class="items' + (v === cur ? ' cur' : '') + '">' + (entries.length ? entries.map((e, i) => '<div class="it">'
                     + plus(v, k, i, e.id ? finalIds.indexOf(e.id) >= 0 : finalTexts.indexOf(e.text) >= 0)
-                    + '<span>' + blueIf(cmp && cmp.cur[i].kind !== 'same', esc((i + 1) + '. ' + e.text)) + '</span></div>').join('') + allBtn(v, k, entries.length) : '-') + '</td>';
+                    + '<span>' + blueIf(cmp && cmp.cur[i].kind !== 'same', esc((i + 1) + '. ' + e.text)) + '</span></div>').join('') + allBtn(v, k, entries.length) : '-')
+                    + (v === 'A' ? aggBlock : '') + '</td>';
             };
+            // 묶어 쓰기 후보(A안 칸 아래): 같은 부재·유형이 여러 건일 때 한 줄로 쓰는 문구. 쓸지는 사람이 정한다.
+            const aggList = aggs.filter((a) => a.category === k).slice(0, MAX_AGG_PER_CAT);
+            const aggBlock = aggList.length ? '<div class="agg"><div class="agghead">묶어 쓰기 <small>같은 결함이 많을 때</small></div>'
+                + aggList.map((a) => {
+                    const on = snaps.F[k].entries.some((e) => e.id === a.rep.id && e.text === a.text);
+                    return '<div class="it"><button type="button" class="plus' + (on ? ' in' : '') + '" data-agg="' + esc(a.key) + '" data-cat="' + k + '" title="'
+                        + (on ? '최종안에 담겨 있음' : '이 문구로 최종안에 담기 (대표 사진·의견은 ' + esc(a.rep.floor) + ' #' + esc(a.rep.no) + ' 결함 기준)') + '">' + (on ? '✓' : '+') + '</button>'
+                        + '<span>' + esc(a.text) + '<span class="why">' + a.count + '건 · ' + (a.floorCount ? a.floorCount + '/' + a.floorTotal + '개 층' : '외부') + '</span></span></div>';
+                }).join('') + '</div>' : '';
             const opCell = (v) => {
                 const s = snaps[v][k];
                 if (s.edited) {
@@ -1248,7 +1266,7 @@
                 major: state.cellEdit[majorKey] != null ? state.cellEdit[majorKey] : '해당사항 없음',
                 photos: entries.filter((e) => e.d && e.d.photoIds.length).map((e) => ({
                     key: e.d.photoIds[0],
-                    caption: e.text.replace(/\s*\(균열폭:[^)]*\)\s*$/, '')
+                    caption: e.text.replace(/\s*\((?:최대 )?균열폭:[^)]*\)\s*$/, '')
                 }))
             };
         });
@@ -1531,6 +1549,12 @@
             showFinal();
             items.forEach((it) => addToFinal(it, catKey));
             note = '최종안에 ' + items.filter(Boolean).length + '건을 담았습니다.';
+        } else if (t.getAttribute('data-agg')) {
+            const agg = aggregatesNow().filter((a) => a.key === t.getAttribute('data-agg'))[0];
+            if (!agg) return;
+            showFinal();
+            addToFinal({ text: agg.text, d: agg.rep, line: '', repair: '' }, catKey);
+            note = '묶은 문구로 최종안에 담았습니다(' + agg.count + '건, 대표 ' + agg.rep.floor + ' #' + agg.rep.no + '). 같은 결함을 낱개로도 담아 두었다면 −로 빼 주세요.';
         } else if (src && t.getAttribute('data-part')) {
             const part = t.getAttribute('data-part');
             const item = sourceItem(src, catKey, parseInt(t.getAttribute('data-idx'), 10));
