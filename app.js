@@ -781,6 +781,9 @@ document.addEventListener('DOMContentLoaded', () => {
         window.state.guideShapes = {};
         window.state.deletedGuideShapeIds = {};
         window.state.deletedGuideShapeAt = {};
+        window.state.structMembers = {};
+        window.state.deletedStructMemberIds = {};
+        window.state.deletedStructMemberAt = {};
         window.state.deletedBuildingIds = [];
         window.state.confirmedDeletedIds = {};
         window.state.currentBuildingId = null;
@@ -2290,6 +2293,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 guideShapes: window.state.guideShapes || {},
                 deletedGuideShapeIds: window.state.deletedGuideShapeIds || {},
                 deletedGuideShapeAt: window.state.deletedGuideShapeAt || {},
+                structMembers: window.state.structMembers || {},
+                deletedStructMemberIds: window.state.deletedStructMemberIds || {},
+                deletedStructMemberAt: window.state.deletedStructMemberAt || {},
                 deletedBuildingIds: window.state.deletedBuildingIds || [],
                 buildings: sanitizedBuildings,
                 lastUsedBuildingId: window.state.currentBuildingId || null,
@@ -2481,6 +2487,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (parsed.guideShapes && typeof parsed.guideShapes === 'object') window.state.guideShapes = parsed.guideShapes;
                 if (parsed.deletedGuideShapeIds && typeof parsed.deletedGuideShapeIds === 'object') window.state.deletedGuideShapeIds = parsed.deletedGuideShapeIds;
                 if (parsed.deletedGuideShapeAt && typeof parsed.deletedGuideShapeAt === 'object') window.state.deletedGuideShapeAt = parsed.deletedGuideShapeAt;
+                if (parsed.structMembers && typeof parsed.structMembers === 'object') window.state.structMembers = parsed.structMembers;
+                if (parsed.deletedStructMemberIds && typeof parsed.deletedStructMemberIds === 'object') window.state.deletedStructMemberIds = parsed.deletedStructMemberIds;
+                if (parsed.deletedStructMemberAt && typeof parsed.deletedStructMemberAt === 'object') window.state.deletedStructMemberAt = parsed.deletedStructMemberAt;
                 if (parsed.deletedNdtAt) {
                     window.state.deletedNdtAt = parsed.deletedNdtAt;
                 }
@@ -9979,6 +9988,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         syncDrawingMemoOverlay();
         syncMemberCountOverlay();
         syncGuideOverlay();
+        syncStructLayer();
         if (typeof syncEvalUnitBar === 'function') syncEvalUnitBar();
 
         // 결함 목록 DOM은 drawCanvas마다 재생성하지 않음 (선택 스크롤·하이라이트가 즉시 undo됨).
@@ -25125,6 +25135,56 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         return true;
     }
     window.__bsaMemoTap = { start: memoTapStart, move: memoTapMove, end: memoTapEnd, cancel: () => { if (memoTap) memoTap.multi = true; } };
+
+    /* ---------------- 구조 부재 레이어(2026-10-14) — 구조도에서 가져온 부재 기호, 화면 전용(출력 제외) ----------------
+     * 부재 수 점·가이드와는 따로 둔 자료(pack.structMembers). 자료·합치기는 js/core/struct-members.js(늘 실림),
+     * 화면(겹쳐 보기·옮기기·가져오기)은 js/tabs/struct-layer.js — 이 층에 부재가 있거나 단추를 눌렀을 때만 불러온다
+     * (앱 시작과 평소 그리기를 무겁게 하지 않게). */
+    let _structLayerLoading = null;
+    function loadStructLayer() {
+        if (window.BSA && window.BSA.structLayer) return Promise.resolve(window.BSA.structLayer);
+        if (_structLayerLoading) return _structLayerLoading;
+        _structLayerLoading = new Promise((resolve, reject) => {
+            const s = document.createElement('script');
+            s.src = 'js/tabs/struct-layer.js?v=' + encodeURIComponent(window.BSA_APP_VERSION || '');
+            s.onload = () => resolve(window.BSA && window.BSA.structLayer);
+            s.onerror = () => { _structLayerLoading = null; reject(new Error('구조 부재 화면을 불러오지 못했습니다.')); };
+            document.head.appendChild(s);
+        });
+        return _structLayerLoading;
+    }
+    window.__bsaStructBridge = {
+        imgToScreen: memoImgToScreen,
+        screenToImg: memoScreenToImg,
+        floorKey: currentMemoFloorKey,
+        canvas: () => elements.planCanvas,
+        hasDrawing: () => !!state.bgImage,
+        onMapTab: () => state.currentTab !== 'tab-ndt',
+        placeBar: (bar, host) => { if (typeof placeMemberCountBar === 'function') placeMemberCountBar(bar, host); },
+        commit: (floorKey) => {
+            if (floorKey && typeof markFloorKeyDirty === 'function') markFloorKeyDirty(floorKey);
+            if (typeof saveStateToLocalStorage === 'function') saveStateToLocalStorage();
+            if (typeof scheduleSyncToFirebase === 'function') scheduleSyncToFirebase();
+        }
+    };
+    /** drawCanvas마다 불린다. 화면 코드가 아직 없으면, 이 층에 보여 줄 부재가 있을 때만 불러온다. */
+    function syncStructLayer() {
+        const layer = window.BSA && window.BSA.structLayer;
+        if (layer) { layer.sync(); return; }
+        const api = window.BSA && window.BSA.structMembers;
+        if (!api || !state.bgImage || !api.hasAny(state, currentMemoFloorKey())) return;
+        let show = true;
+        try { show = localStorage.getItem('bsa_struct_layer_show') !== '0'; } catch (_e) { /* ignore */ }
+        if (show) loadStructLayer().catch(() => { /* 다음 그리기 때 다시 */ });
+    }
+    (function bindStructLayerButton() {
+        const btn = document.getElementById('btnStructLayer');
+        if (!btn) return;
+        btn.addEventListener('click', () => {
+            loadStructLayer().then((layer) => { if (layer) layer.toggleBar(); })
+                .catch((err) => window.showToast?.(err.message, 'error', 3000));
+        });
+    })();
 
     /* ---------------- 도면 가이드(2026-10-14) — 사각형·직선, 화면 전용(출력 제외) ----------------
      * 기둥·거더·빔 자리를 표시하려는 보조선. 결함 아님 — 한글·PDF·그림·엑셀 출력은 캔버스에서 그리므로
@@ -55984,6 +56044,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (window.BSA && window.BSA.evalUnits && window.BSA.evalUnits.packHasContent(bundle.evalUnits)) return true;
         if (window.BSA && window.BSA.memberCount && window.BSA.memberCount.packHasContent(bundle.memberCounts)) return true;
         if (window.BSA && window.BSA.guideShapes && window.BSA.guideShapes.packHasContent(bundle.guideShapes)) return true;
+        if (window.BSA && window.BSA.structMembers && window.BSA.structMembers.packHasContent(bundle.structMembers)) return true;
         if (drawing.tiers && typeof drawing.tiers === 'object'
             && Object.keys(drawing.tiers).some((k) => drawing.tiers[k])) return true;
         return false;
@@ -56125,7 +56186,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             // 부재 수 세기 점(결함 아님)
             memberCounts: (window.BSA && window.BSA.memberCount) ? window.BSA.memberCount.packFor(window.state, floorKey) : undefined,
             // 도면 가이드(사각형·직선, 화면 전용)
-            guideShapes: (window.BSA && window.BSA.guideShapes) ? window.BSA.guideShapes.packFor(window.state, floorKey) : undefined
+            guideShapes: (window.BSA && window.BSA.guideShapes) ? window.BSA.guideShapes.packFor(window.state, floorKey) : undefined,
+            // 구조 부재 레이어(구조도에서 가져온 부재 기호, 화면 전용)
+            structMembers: (window.BSA && window.BSA.structMembers) ? window.BSA.structMembers.packFor(window.state, floorKey) : undefined
         };
         if (!floorBundleHasContent(pack)) {
             console.warn('빈 층 묶음은 클라우드에 올리지 않음:', floorKey);
@@ -56206,6 +56269,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (bundle.guideShapes && window.BSA && window.BSA.guideShapes) {
             window.BSA.guideShapes.mergePackIntoState(window.state, floorKey, bundle.guideShapes, window.BSA.syncMerge.mergeNdtDataMaps);
             if (floorKey === currentMemoFloorKey()) { syncGuideOverlay(); syncGuideBar(); }
+        }
+        if (bundle.structMembers && window.BSA && window.BSA.structMembers) {
+            window.BSA.structMembers.mergePackIntoState(window.state, floorKey, bundle.structMembers, window.BSA.syncMerge.mergeNdtDataMaps);
+            if (floorKey === currentMemoFloorKey()) syncStructLayer();
         }
         resolveOfflineNoConflicts(bldg, floorCode, markings, ndt);
     }

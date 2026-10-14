@@ -1,0 +1,125 @@
+#!/usr/bin/env node
+'use strict';
+
+/**
+ * 2026-10-14 구조 부재 레이어 — 구조도에서 찾은 부재 기호를 층 도면 위에 반투명하게 겹쳐 보고 옮기기·지우기·추가.
+ * 부재 수 점·가이드와는 따로 둔 자료(state.structMembers, pack.structMembers). 화면 전용(출력 제외).
+ * 화면 코드(js/tabs/struct-layer.js)는 쓸 때만 불러온다.
+ */
+
+const assert = require('assert');
+const fs = require('fs');
+const path = require('path');
+
+const root = path.join(__dirname, '..');
+const S = require(path.join(root, 'js', 'core', 'struct-members.js'));
+const syncMerge = require(path.join(root, 'js', 'core', 'sync-merge.js'));
+const mergeFn = syncMerge.mergeNdtDataMaps || (syncMerge.default && syncMerge.default.mergeNdtDataMaps);
+assert.strictEqual(typeof mergeFn, 'function', 'sync-merge.mergeNdtDataMaps');
+
+// ---- 넣기·고치기·지우기 ----
+const st = {};
+const FK = 'b1_1F';
+const a = S.add(st, FK, { type: '거더', label: 'fG1', x: 100.04, y: 50, w: 40, h: 12 }, { now: 1000 });
+assert.ok(a && a.id && a.x === 100 && a.updatedAt === 1000);
+assert.strictEqual(S.add(st, FK, { type: '모름', x: 1, y: 1, w: 1, h: 1 }), null, '모르는 종류는 안 넣는다');
+assert.strictEqual(S.add(st, FK, { type: '빔', x: 1, y: 1, w: 0, h: 1 }), null, '크기 없는 것은 안 넣는다');
+const b = S.add(st, FK, { type: '기둥', label: 'C1', x: 10, y: 10, w: 12, h: 12 }, { now: 1000 });
+assert.notStrictEqual(a.id, b.id, '같은 시각에 넣어도 id가 다르다');
+assert.strictEqual(S.listFor(st, FK).length, 2);
+assert.strictEqual(S.listFor(st, 'b1_2F').length, 0, '층마다 따로');
+assert.ok(S.hasAny(st, FK) && !S.hasAny(st, 'b1_2F'));
+
+const moved = S.update(st, FK, a.id, { x: 120, y: 60 }, 1000);
+assert.ok(moved.x === 120 && moved.y === 60 && moved.updatedAt === 1001, '고칠 때마다 시각이 앞으로 간다');
+assert.strictEqual(S.update(st, FK, a.id, { type: '빔' }, 2000).type, '빔');
+assert.strictEqual(S.update(st, FK, a.id, { type: '엉뚱' }, 2001).type, '빔', '모르는 종류로는 안 바뀐다');
+assert.deepStrictEqual(Object.assign({}, S.countsByType(S.listFor(st, FK))), { '기둥': 1, '벽': 0, '거더': 0, '빔': 1, '슬래브': 0 });
+
+// 고르기: 겹치면 작은 것
+assert.strictEqual(S.hitTest(S.listFor(st, FK), 10, 10, 0).id, b.id);
+assert.strictEqual(S.hitTest(S.listFor(st, FK), 500, 500, 2), null);
+
+const gone = S.remove(st, FK, b.id);
+assert.ok(gone && gone.id === b.id);
+assert.strictEqual(S.listFor(st, FK).length, 1);
+assert.ok(st.deletedStructMemberIds[FK].includes(b.id) && st.deletedStructMemberAt[FK][b.id] === 1000, '묘비 = 마지막 수정 시각');
+// 되살리기(같은 id로 다시 넣기)는 묘비를 걷고 더 늦은 시각을 받는다
+const back = S.add(st, FK, gone, { id: gone.id, now: 500 });
+assert.ok(back.updatedAt > 1000 && !st.deletedStructMemberIds[FK].includes(b.id));
+
+// ---- 기준점 2개 맞춤 ----
+// 구조도 (0,0)-(100,0) 을 도면 (1000,2000)-(1200,2000) 에: 2배, 회전 없음
+let fit = S.fitTwoPoints({ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 1000, y: 2000 }, { x: 1200, y: 2000 });
+assert.ok(Math.abs(fit.scale - 2) < 1e-9 && Math.abs(fit.angle) < 1e-9);
+let p = S.applyFit(fit, { x: 50, y: 10, w: 20, h: 6 });
+assert.ok(Math.abs(p.x - 1100) < 1e-6 && Math.abs(p.y - 2020) < 1e-6 && Math.abs(p.w - 40) < 1e-6 && Math.abs(p.h - 12) < 1e-6);
+// 90° 돌아간 도면: 가로·세로 크기가 바뀐다
+fit = S.fitTwoPoints({ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 500, y: 500 }, { x: 500, y: 600 });
+assert.ok(Math.abs(fit.scale - 1) < 1e-9 && Math.abs(fit.angle - 90) < 1e-9);
+p = S.applyFit(fit, { x: 100, y: 0, w: 20, h: 6 });
+assert.ok(Math.abs(p.x - 500) < 1e-6 && Math.abs(p.y - 600) < 1e-6 && Math.abs(p.w - 6) < 1e-6 && Math.abs(p.h - 20) < 1e-6);
+// 기준점 두 개가 같은 곳이면 맞출 수 없다
+assert.strictEqual(S.fitTwoPoints({ x: 1, y: 1 }, { x: 1, y: 1 }, { x: 0, y: 0 }, { x: 9, y: 9 }), null);
+assert.strictEqual(S.fitTwoPoints({ x: 0, y: 0 }, { x: 9, y: 9 }, { x: 5, y: 5 }, { x: 5, y: 5 }), null);
+
+// ---- 가져오기: 있던 부재는 지우고(묘비) 새로 넣는다 ----
+fit = S.fitTwoPoints({ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 1000, y: 2000 }, { x: 1200, y: 2000 });
+const before = S.listFor(st, FK).map((d) => d.id);
+const n = S.importMembers(st, FK, [
+    { type: '기둥', label: 'C1', x: 0, y: 0, w: 6, h: 6 },
+    { type: '거더', label: '1G1', x: 50, y: 0, w: 12, h: 5 },
+    { type: '엉뚱', label: '?', x: 1, y: 1, w: 1, h: 1 }
+], fit, 5000);
+assert.strictEqual(n, 2, '모르는 종류는 건너뛴다');
+const now = S.listFor(st, FK);
+assert.deepStrictEqual(now.map((d) => d.label).sort(), ['1G1', 'C1']);
+assert.ok(now.every((d) => !before.includes(d.id)), '새 id');
+assert.ok(before.every((id) => st.deletedStructMemberIds[FK].includes(id)), '있던 부재는 묘비로');
+assert.ok(now.find((d) => d.label === '1G1').x === 1100 && now.find((d) => d.label === '1G1').w === 24);
+assert.strictEqual(S.importMembers(st, FK, [{ type: '기둥', x: 0, y: 0, w: 1, h: 1 }], null), 0, '맞춤이 없으면 아무것도 안 한다');
+assert.strictEqual(S.listFor(st, FK).length, 2, '맞춤 없이 부르면 있던 것도 그대로');
+
+// ---- 층 묶음으로 다른 기기와 합치기 ----
+const other = {};
+S.mergePackIntoState(other, FK, S.packFor(st, FK), mergeFn);
+assert.deepStrictEqual(S.listFor(other, FK).map((d) => d.label).sort(), ['1G1', 'C1'], '받은 기기에 그대로');
+// 다른 기기가 하나를 옮기고 하나를 지움 → 이 기기에 반영
+const g1 = S.listFor(other, FK).find((d) => d.label === '1G1');
+const c1 = S.listFor(other, FK).find((d) => d.label === 'C1');
+S.update(other, FK, g1.id, { x: 1500 }, 9000);
+S.remove(other, FK, c1.id);
+S.mergePackIntoState(st, FK, S.packFor(other, FK), mergeFn);
+assert.deepStrictEqual(S.listFor(st, FK).map((d) => d.label), ['1G1']);
+assert.strictEqual(S.listFor(st, FK)[0].x, 1500, '늦게 고친 쪽이 이긴다');
+assert.ok(S.packHasContent(S.packFor(st, FK)) && !S.packHasContent(S.packFor({}, FK)));
+// 깨진 항목은 받지 않는다
+S.mergePackIntoState(st, FK, { items: [{ id: 'bad', type: '거더', x: 'x', y: 1, w: 1, h: 1 }], deletedIds: [], deletedAt: {} }, mergeFn);
+assert.ok(!S.listFor(st, FK).some((d) => d.id === 'bad'));
+
+// ---- 앱 배선 ----
+const app = fs.readFileSync(path.join(root, 'app.js'), 'utf8').replace(/\r\n/g, '\n');
+const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
+assert.ok(app.includes('structMembers: (window.BSA && window.BSA.structMembers) ? window.BSA.structMembers.packFor(window.state, floorKey)'), '층 묶음에 싣기');
+assert.ok(app.includes('window.BSA.structMembers.mergePackIntoState(window.state, floorKey, bundle.structMembers'), '층 묶음에서 받기');
+assert.ok(app.includes('window.BSA.structMembers.packHasContent(bundle.structMembers)'), '부재만 있는 층도 올린다');
+assert.ok(app.includes('structMembers: window.state.structMembers || {}'), '기기 저장');
+assert.ok(app.includes("if (parsed.structMembers && typeof parsed.structMembers === 'object') window.state.structMembers = parsed.structMembers;"), '기기에서 불러오기');
+assert.ok(app.includes('window.state.structMembers = {};'), '건물 바꿀 때 비우기');
+assert.ok(html.indexOf('js/core/struct-members.js') > 0 && html.indexOf('js/core/struct-members.js') < html.indexOf('src="app.js'), '자료 모듈은 app.js 앞에');
+assert.ok(/id="btnStructLayer"/.test(html), '도구 패널 단추');
+// 화면 코드는 쓸 때만 불러온다(index.html에 스크립트 태그가 없다)
+assert.ok(!/struct-layer\.js/.test(html), '화면 코드는 index.html에 싣지 않는다');
+assert.ok(app.includes("s.src = 'js/tabs/struct-layer.js?v=' + encodeURIComponent(window.BSA_APP_VERSION || '');"), '쓸 때 불러오기');
+assert.ok(fs.existsSync(path.join(root, 'js', 'tabs', 'struct-layer.js')));
+// 화면 전용: 캔버스 그리기·출력 함수에서 structMembers를 읽지 않는다
+const uses = app.split('\n').filter((ln) => /structMembers/.test(ln) && /ctx\.|hwp|Hwp|pdf|Pdf|xlsx|Excel/.test(ln));
+assert.deepStrictEqual(uses, [], '출력·캔버스에서 구조 부재를 읽지 않는다');
+// 화면 코드는 DOM(SVG)으로만 그린다
+const layer = fs.readFileSync(path.join(root, 'js', 'tabs', 'struct-layer.js'), 'utf8');
+assert.ok(!/getContext\(/.test(layer) && /data-html2canvas-ignore/.test(layer), 'SVG로만 그리고 화면 캡처에서도 뺀다');
+// 구조도 페이지 → 앱 넘기기 열쇠가 양쪽에서 같다
+const pageJs = fs.readFileSync(path.join(root, 'js', 'struct-plan-page.js'), 'utf8');
+assert.ok(pageJs.includes("localStorage.setItem('bsa_struct_handoff'") && layer.includes("var HANDOFF_KEY = 'bsa_struct_handoff';"));
+
+console.log('test-struct-members: ok');

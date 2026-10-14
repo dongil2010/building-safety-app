@@ -46,6 +46,7 @@
       "manifest.json",
       "photo-capture.html",
       "report-summary.html",
+      "struct-plan.html",
       "web-version.json",
       "js/**/*",
       "templates/**/*",

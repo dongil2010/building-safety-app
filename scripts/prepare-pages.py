@@ -22,6 +22,7 @@ FILES = [
     "manifest.json",
     "photo-capture.html",
     "report-summary.html",
+    "struct-plan.html",
     "web-version.json",
 ]
 DIRS = ["js", "templates", "vendor"]  # vendor: SAFETY357 번들·평가 엑셀 양식(2026-10-13 빠져서 평가 탭 404)
