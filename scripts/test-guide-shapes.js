@@ -14,7 +14,8 @@ const a = { };
 const r = G.add(a, FK, 'rect', 10, 20, 110, 220, { now: 1000 });
 const l = G.add(a, FK, 'line', 0, 0, 50, 50, { now: 1001 });
 assert.strictEqual(G.listFor(a, FK).length, 2);
-assert.strictEqual(G.add(a, FK, 'circle', 0, 0, 1, 1), null, '사각형·직선만');
+assert.strictEqual(G.add(a, FK, 'tri', 0, 0, 1, 1), null, '원·직선·(예전)사각형만');
+{ const c0 = {}; const c = G.add(c0, FK, 'circle', 100, 100, 110, 100); assert.ok(c && c.type === 'column' && G.radiusOf(c) === 10, '원 = 기둥, 반지름'); const id = (p) => ({ sx: p.x, sy: p.y }); assert.ok(G.hitTest(G.listFor(c0, FK), 103, 100, id, 9), '원 안쪽 고르기'); assert.strictEqual(G.hitTest(G.listFor(c0, FK), 140, 100, id, 9), null, '원 밖'); }
 G.update(a, FK, r.id, { x1: 15 }, 900); // 시계가 뒤로 가도 updatedAt은 늘어난다
 assert.ok(r.updatedAt > 1000 && r.x1 === 15);
 
