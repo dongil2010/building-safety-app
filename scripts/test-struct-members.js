@@ -242,4 +242,15 @@ assert.ok(layer.includes('return { w: Math.max(len, thick * 3), h: thick };'));
     assert.strictEqual((page.match(/st\.members = unifyBeams\(st\.members\);/g) || []).length, 2, '페이지: 종류 바꾸면 다시 통일');
 }
 
+// ---- 거더·빔은 시작→끝 두 번 눌러 추가(기둥에 붙어 면에서 면까지), 추가 중엔 기둥을 눌러도 고르지 않음 ----
+assert.ok(layer.includes('if (isLineType(ui.addType)) { addLinePoint(p, pad); return; }'));
+assert.ok(layer.includes("if (hit.type === '기둥') return { id: hit.id, x: hit.x, y: hit.y, hx: hit.w / 2, hy: hit.h / 2, on: '기둥' };"), '기둥 중심에 붙는다');
+assert.ok(layer.includes('var from = horiz ? lo.x + lo.hx : lo.y + lo.hy, to = horiz ? hi.x - hi.hx : hi.y - hi.hy;'), '기둥 면에서 면까지');
+assert.ok(layer.includes("if (ui.pend) { ui.pend = null; ui.builtSig = ''; sync(); }"), 'Esc로 시작 점 취소');
+// ---- 고른 거더·빔은 끝 손잡이를 끌어 늘이고 줄인다(반대 끝 고정, 기둥·거더 면에 붙음, 뒤집히지 않음) ----
+assert.ok(layer.includes('var endGrab = grabEnd(p, pad);'));
+assert.ok(layer.includes("if (dr.mode === 'end') Object.assign(d, stretchTo(dr, dr.horiz ? p.x : p.y));"));
+assert.ok(layer.includes("var sp = snapPoint(pe, padE, d.type, d.id);"), '놓을 때 기둥·거더 면에 붙임(자기 자신 빼고)');
+assert.ok(layer.includes("var lo = dr.which === 'e' ? dr.fixed : Math.min(at, dr.fixed - dr.minLen);"), '반대 끝을 넘어가도 뒤집히지 않음');
+
 console.log('test-struct-members: ok');

@@ -47,6 +47,7 @@
         s.textContent = '.map-struct-overlay{position:absolute;pointer-events:none;overflow:hidden;z-index:6}'
             + '.map-struct-overlay.is-active{pointer-events:auto;cursor:crosshair}'
             + '.map-struct-overlay rect{vector-effect:non-scaling-stroke;stroke-width:2;fill-opacity:.5}'
+            + '.map-struct-overlay rect.map-struct-handle{fill:#fff;fill-opacity:1;stroke-width:2.5;cursor:ew-resize}'
             + '.map-struct-overlay rect.is-selected{stroke-width:4;fill-opacity:.75;stroke-dasharray:6 3}'
             + '.map-struct-overlay text{font-weight:700;text-anchor:middle;dominant-baseline:central;pointer-events:none;paint-order:stroke;stroke:#fff;stroke-width:.18em}'
             + '.map-struct-bar .map-struct-hint{flex-basis:100%;font-size:.82rem;font-weight:700;color:#0369a1}';
@@ -100,7 +101,7 @@
         if (ui.selId && !items.some(function (d) { return d.id === ui.selId; })) ui.selId = '';
         // 자료가 바뀌었을 때만 도형을 다시 만든다
         var sig = B.floorKey() + '|' + items.length + '|' + items.reduce(function (m, d) { return Math.max(m, d.updatedAt || 0); }, 0) + '|' + ui.selId
-            + '|' + (over ? over.url + '@' + over.updatedAt : '') + '|' + showLabels;
+            + '|' + (over ? over.url + '@' + over.updatedAt : '') + '|' + showLabels + '|' + (ui.pend ? ui.pend.x + ',' + ui.pend.y : '');
         if (sig !== ui.builtSig) {
             ui.builtSig = sig;
             var frag = document.createDocumentFragment();
@@ -137,6 +138,29 @@
                     frag.appendChild(t);
                 }
             });
+            var selD = ui.editing && ui.selId && items.find(function (d) { return d.id === ui.selId; });
+            if (selD && isLineType(selD.type)) {
+                // 고른 거더·빔 양 끝 손잡이(잡고 끌면 그 끝만 늘이고 줄임)
+                var px10 = Math.hypot(B.screenToImg(10, 0).x - B.screenToImg(0, 0).x, B.screenToImg(10, 0).y - B.screenToImg(0, 0).y);
+                var hz = selD.w >= selD.h, th2 = hz ? selD.h : selD.w, hs = Math.max(th2 * 1.8, px10);   // 화면에서 적어도 10px
+                [hz ? [selD.x - selD.w / 2, selD.y] : [selD.x, selD.y - selD.h / 2], hz ? [selD.x + selD.w / 2, selD.y] : [selD.x, selD.y + selD.h / 2]].forEach(function (q) {
+                    var hr = document.createElementNS(NS, 'rect');
+                    hr.setAttribute('x', q[0] - hs / 2); hr.setAttribute('y', q[1] - hs / 2);
+                    hr.setAttribute('width', hs); hr.setAttribute('height', hs);
+                    hr.setAttribute('class', 'map-struct-handle');
+                    hr.setAttribute('stroke', api.COLORS[selD.type]);
+                    frag.appendChild(hr);
+                });
+            }
+            if (ui.pend) {
+                // 거더·빔 시작 점 표시
+                var pr = Math.max(lineThickness(ui.pend.type) * 1.6, ui.pend.hx, ui.pend.hy);
+                var ci = document.createElementNS(NS, 'circle');
+                ci.setAttribute('cx', ui.pend.x); ci.setAttribute('cy', ui.pend.y); ci.setAttribute('r', pr);
+                ci.setAttribute('fill', 'none'); ci.setAttribute('stroke', api.COLORS[ui.pend.type] || '#111');
+                ci.setAttribute('stroke-width', '3'); ci.setAttribute('vector-effect', 'non-scaling-stroke'); ci.setAttribute('stroke-dasharray', '5 3');
+                frag.appendChild(ci);
+            }
             g.replaceChildren(frag);
         }
         // 도면 좌표 → 화면 좌표 행렬(회전·확대·이동 모두 여기 담긴다)
@@ -208,6 +232,66 @@
         if (th) { if (d.w >= d.h) patch.h = th; else patch.w = th; }
         return patch;
     }
+    // ---------- 거더·빔 두 점 찍기(2026-10-14): 시작 → 끝. 기둥(빔은 거더·빔도)에 붙고, 막대는 면에서 면까지 ----
+    function isLineType(t) { return t === '거더' || t === '빔'; }
+    /** 누른 점을 기둥 중심(또는 빔이면 거더·빔 중심선)에 붙인다 → { x, y, hx, hy } (hx·hy = 막대를 자를 반폭) */
+    function snapPoint(p, pad, type, excludeId) {
+        var targets = list().filter(function (d) { return d.id !== excludeId && (d.type === '기둥' || (type === '빔' && isLineType(d.type))); });
+        var hit = api.hitTest(targets, p.x, p.y, pad);
+        if (!hit) return { x: p.x, y: p.y, hx: 0, hy: 0, on: '' };
+        if (hit.type === '기둥') return { id: hit.id, x: hit.x, y: hit.y, hx: hit.w / 2, hy: hit.h / 2, on: '기둥' };
+        return hit.w >= hit.h ? { id: hit.id, x: p.x, y: hit.y, hx: 0, hy: hit.h / 2, on: hit.type }   // 가로 보: 그 중심선에
+            : { id: hit.id, x: hit.x, y: p.y, hx: hit.w / 2, hy: 0, on: hit.type };
+    }
+    // ---------- 거더·빔 끝 잡고 늘이기(2026-10-14) ----------
+    /** 고른 거더·빔의 끝 근처를 눌렀으면 → { mode:'end', id, which:'s'|'e', horiz, fixed(반대 끝), orig } */
+    function grabEnd(p, pad) {
+        if (!ui.selId) return null;
+        var d = list().find(function (x) { return x.id === ui.selId; });
+        if (!d || !isLineType(d.type)) return null;
+        var horiz = d.w >= d.h;
+        var along = horiz ? p.x : p.y, perp = horiz ? p.y : p.x;
+        var c = horiz ? d.y : d.x, half = (horiz ? d.h : d.w) / 2;
+        var s = horiz ? d.x - d.w / 2 : d.y - d.h / 2, e = horiz ? d.x + d.w / 2 : d.y + d.h / 2;
+        var reach = Math.max(pad * 1.5, half * 1.5);
+        if (Math.abs(perp - c) > half + reach) return null;
+        var which = Math.abs(along - e) <= reach ? 'e' : (Math.abs(along - s) <= reach ? 's' : '');
+        if (!which) return null;
+        return { mode: 'end', id: d.id, which: which, horiz: horiz, fixed: which === 'e' ? s : e, minLen: half * 2,
+            orig: { x: d.x, y: d.y, w: d.w, h: d.h } };
+    }
+    /** 끝을 at 으로 옮긴 모습 → { x, y, w, h } (반대 끝·두께·중심선은 그대로, 너무 짧아지거나 뒤집히지 않게) */
+    function stretchTo(dr, at) {
+        var lo = dr.which === 'e' ? dr.fixed : Math.min(at, dr.fixed - dr.minLen);
+        var hi = dr.which === 'e' ? Math.max(at, dr.fixed + dr.minLen) : dr.fixed;
+        return dr.horiz ? { x: (lo + hi) / 2, y: dr.orig.y, w: hi - lo, h: dr.orig.h }
+            : { x: dr.orig.x, y: (lo + hi) / 2, w: dr.orig.w, h: hi - lo };
+    }
+    /** 그 종류 통일 두께. 이 층에 그 종류가 아직 없으면 다른 보 종류(거더↔빔) 두께, 그것도 없으면 기본 */
+    function lineThickness(type) {
+        var th = api.beamThickness ? api.beamThickness(list()) : {};
+        return th[type] || th[type === '거더' ? '빔' : '거더'] || defaultSize(type).h;
+    }
+    function addLinePoint(p, pad) {
+        var type = ui.addType;
+        var a = snapPoint(p, pad, type);
+        if (!ui.pend || ui.pend.type !== type) { ui.pend = Object.assign({ type: type }, a); ui.builtSig = ''; sync(); return; }
+        var s = ui.pend;
+        ui.pend = null;
+        ui.builtSig = '';
+        var dx = a.x - s.x, dy = a.y - s.y, th = lineThickness(type);
+        var horiz = Math.abs(dx) >= Math.abs(dy);
+        // 가로·세로 중 가까운 쪽으로 곧게. 기둥에 붙은 끝은 기둥 면까지만
+        var lo = horiz ? (s.x <= a.x ? s : a) : (s.y <= a.y ? s : a), hi = lo === s ? a : s;
+        var from = horiz ? lo.x + lo.hx : lo.y + lo.hy, to = horiz ? hi.x - hi.hx : hi.y - hi.hy;
+        if (!(to - from > th)) { toast('두 점이 너무 가깝습니다. 다시 시작 점부터 눌러 주세요.', 'warning', 2500); sync(); return; }
+        var perp = horiz ? (s.y + a.y) / 2 : (s.x + a.x) / 2;
+        var r = horiz ? { x: (from + to) / 2, y: perp, w: to - from, h: th } : { x: perp, y: (from + to) / 2, w: th, h: to - from };
+        var rec = api.add(state(), B.floorKey(), { type: type, label: '', x: r.x, y: r.y, w: r.w, h: r.h });
+        // 고르지는 않는다(이어서 다른 종류 단추를 누르면 방금 그린 것이 바뀌지 않고 추가 종류만 바뀌게)
+        if (rec) { pushHist(B.floorKey(), [{ id: rec.id, before: null, after: snap(rec) }]); ui.selId = ''; commit(); return; }
+        sync();
+    }
     function bindOverlay(ov) {
         // 휠 확대·축소는 도면으로 넘긴다
         ov.addEventListener('wheel', function (e) {
@@ -219,6 +303,15 @@
             e.preventDefault(); e.stopPropagation();
             var p = local(e);
             var pad = Math.hypot(B.screenToImg(6, 0).x - B.screenToImg(0, 0).x, B.screenToImg(6, 0).y - B.screenToImg(0, 0).y);
+            // 거더·빔 추가 중에는 기둥을 눌러도 고르지 않고 시작·끝 점으로 쓴다
+            if (isLineType(ui.addType)) { addLinePoint(p, pad); return; }
+            // 고른 거더·빔의 끝 손잡이를 잡으면 그 끝만 늘이고 줄인다(반대쪽 끝은 그대로)
+            var endGrab = grabEnd(p, pad);
+            if (endGrab) {
+                ui.drag = Object.assign(endGrab, { start: p, pointerId: e.pointerId, moved: false });
+                try { ov.setPointerCapture(e.pointerId); } catch (_e) { /* ignore */ }
+                return;
+            }
             var hit = api.hitTest(list(), p.x, p.y, pad);
             if (hit) {
                 ui.selId = hit.id;
@@ -238,7 +331,8 @@
             var p = local(e);
             var d = list().find(function (x) { return x.id === dr.id; });
             if (!d) return;
-            d.x = dr.orig.x + (p.x - dr.start.x); d.y = dr.orig.y + (p.y - dr.start.y);
+            if (dr.mode === 'end') Object.assign(d, stretchTo(dr, dr.horiz ? p.x : p.y));
+            else { d.x = dr.orig.x + (p.x - dr.start.x); d.y = dr.orig.y + (p.y - dr.start.y); }
             dr.moved = true;
             ui.builtSig = '';
             sync();
@@ -250,7 +344,16 @@
             var d = list().find(function (x) { return x.id === dr.id; });
             if (!d || !dr.moved) { sync(); return; }
             var now = { x: d.x, y: d.y };
+            if (dr.mode === 'end') {
+                // 놓은 곳이 기둥(빔이면 거더·빔도)이면 그 면에 딱 붙인다
+                var pe = local(e), padE = Math.hypot(B.screenToImg(6, 0).x - B.screenToImg(0, 0).x, B.screenToImg(6, 0).y - B.screenToImg(0, 0).y);
+                var sp = snapPoint(pe, padE, d.type, d.id);
+                var at = dr.horiz ? pe.x : pe.y;
+                if (sp.on && sp.id !== d.id) at = dr.which === 'e' ? (dr.horiz ? sp.x - sp.hx : sp.y - sp.hy) : (dr.horiz ? sp.x + sp.hx : sp.y + sp.hy);
+                now = stretchTo(dr, at);
+            }
             d.x = dr.orig.x; d.y = dr.orig.y;
+            if (dr.orig.w != null) { d.w = dr.orig.w; d.h = dr.orig.h; }
             if (e.type !== 'pointercancel') {
                 var before = snap(d);
                 var after = api.update(state(), B.floorKey(), d.id, now);
@@ -280,11 +383,15 @@
             if (isZ && !e.shiftKey) undo(); else redo();
         }
         else if ((e.key === 'Delete' || e.key === 'Backspace') && ui.selId) { e.preventDefault(); e.stopPropagation(); deleteSelected(); }
-        else if (e.key === 'Escape') { e.stopPropagation(); if (ui.selId) { ui.selId = ''; sync(); } else setEditing(false); }
+        else if (e.key === 'Escape') {
+            e.stopPropagation();
+            if (ui.pend) { ui.pend = null; ui.builtSig = ''; sync(); }          // 거더·빔 시작 점 취소
+            else if (ui.selId) { ui.selId = ''; sync(); } else setEditing(false);
+        }
     }, true);
     function setEditing(on) {
         ui.editing = !!on;
-        if (!on) { ui.selId = ''; ui.addType = ''; ui.drag = null; }
+        if (!on) { ui.selId = ''; ui.addType = ''; ui.drag = null; ui.pend = null; ui.builtSig = ''; }
         sync();
     }
 
@@ -404,7 +511,7 @@
                 + '<button type="button" data-act="edit" class="' + (ui.editing ? 'active' : '') + '" title="옮기기·지우기·추가">편집</button>';
             if (ui.editing) {
                 html += ACTIVE.map(function (t) {
-                    return '<button type="button" data-act="type" data-type="' + t + '" class="map-count-type' + (ui.addType === t ? ' active' : '') + '" style="--mc-color:' + api.COLORS[t] + '" title="' + (ui.selId ? '고른 부재를 ' + t + '(으)로' : '빈 곳을 눌러 ' + t + ' 추가') + '">' + t + ' <b><small>' + c[t] + '</small></b></button>';
+                    return '<button type="button" data-act="type" data-type="' + t + '" class="map-count-type' + (ui.addType === t ? ' active' : '') + '" style="--mc-color:' + api.COLORS[t] + '" title="' + (ui.selId ? '고른 부재를 ' + t + '(으)로' : (isLineType(t) ? '시작·끝 두 곳을 눌러 ' + t + ' 추가' : '빈 곳을 눌러 ' + t + ' 추가')) + '">' + t + ' <b><small>' + c[t] + '</small></b></button>';
                 }).join('')
                     + '<button type="button" data-act="del" ' + (ui.selId ? '' : 'disabled') + ' title="고른 부재 지우기 (Delete)">지우기</button>'
                     + '<button type="button" data-act="undo" ' + (hist(B.floorKey()).undo.length ? '' : 'disabled') + ' title="되돌리기 (Ctrl+Z)">↶ 되돌리기</button>'
@@ -415,8 +522,14 @@
                 + '<button type="button" data-act="marks" class="' + (marksOn() ? 'active' : '') + '" title="부재 이름표(C1·1G2…) 보이기">이름</button>'
                 + '<button type="button" data-act="show" class="' + (showOn() ? 'active' : '') + '">보이기</button>'
                 + '<button type="button" data-act="close">닫기</button>';
+            if (ui.editing && isLineType(ui.addType)) {
+                var fromWhat = ui.addType === '거더' ? '기둥' : '거더·기둥';
+                html += '<span class="map-struct-hint">' + ui.addType + ' 추가: '
+                    + (ui.pend ? '끝 ' + fromWhat + '을 누르세요 (Esc 취소)' : '시작 ' + fromWhat + '을 누르세요 → 끝 ' + fromWhat + ' (가로·세로로 곧게, 면에서 면까지)')
+                    + ' · 다 하면 「' + ui.addType + '」 단추를 다시 눌러 끄기</span>';
+            }
             html += '<span class="map-count-hint">' + (ui.editing
-                ? '눌러 고르고 끌어 옮기기 · 종류 단추로 바꾸기/추가 · Ctrl+Z 되돌리기 · 화면 전용(출력 안 됨)'
+                ? '눌러 고르고 끌어 옮기기 · 고른 거더·빔은 끝 네모를 끌어 늘이기 · 기둥은 한 번, 거더·빔은 시작→끝 두 번 눌러 추가 · Ctrl+Z 되돌리기 · 화면 전용(출력 안 됨)'
                 : ACTIVE.map(function (t) { return t + ' ' + c[t]; }).join(' · ')) + '</span>';
         }
         if (bar._h !== html) { bar._h = html; bar.innerHTML = html; }
@@ -439,7 +552,7 @@
                 if (after) pushHist(B.floorKey(), [{ id: after.id, before: before, after: snap(after) }]);
                 ui.builtSig = ''; commit();
             }
-            else { ui.addType = ui.addType === t ? '' : t; syncBar(); }
+            else { ui.addType = ui.addType === t ? '' : t; ui.pend = null; ui.builtSig = ''; sync(); }
         } else if (a === 'del') deleteSelected();
         else if (a === 'undo') undo();
         else if (a === 'redo') redo();
