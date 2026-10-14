@@ -39770,6 +39770,36 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         }
     });
 
+    // 2026-10-14 마우스 옆 단추: 뒤(3) = 되돌리기(Ctrl+Z), 앞(4) = 다시 실행(Ctrl+Y).
+    // 지금 화면의 Ctrl+Z/Ctrl+Y 처리(가이드·부재 수·결함·평가 탭 잠금 등)를 그대로 타도록 키 입력을 흉내 낸다.
+    // 브라우저·앱의 뒤로/앞으로 가기는 막는다. 입력칸에 글을 쓰는 중이면 아무것도 안 한다.
+    (function bindMouseSideButtonsUndoRedo() {
+        if (typeof window === 'undefined' || window._bsaMouseSideBound) return;
+        window._bsaMouseSideBound = true;
+        const isSide = (e) => e && (e.button === 3 || e.button === 4);
+        const block = (e) => { if (isSide(e)) { e.preventDefault(); e.stopPropagation(); } };
+        window.addEventListener('mousedown', block, true);
+        window.addEventListener('pointerdown', (e) => { if (e.pointerType === 'mouse') block(e); }, true);
+        window.addEventListener('auxclick', block, true);
+        let lastAt = 0;
+        window.addEventListener('mouseup', (e) => {
+            if (!isSide(e)) return;
+            e.preventDefault();
+            e.stopPropagation();
+            const now = Date.now();
+            if (now - lastAt < 120) return;   // pointerup·mouseup 겹침 방지
+            lastAt = now;
+            const ae = document.activeElement;
+            const tag = (ae && ae.tagName || '').toUpperCase();
+            if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || (ae && ae.isContentEditable)) return;
+            const redo = e.button === 4;
+            const ev = new KeyboardEvent('keydown', {
+                key: redo ? 'y' : 'z', code: redo ? 'KeyY' : 'KeyZ', ctrlKey: true, bubbles: true, cancelable: true
+            });
+            (document.body || document.documentElement).dispatchEvent(ev);
+        }, true);
+    })();
+
     // Zoom Buttons
     const btnZoomIn = document.getElementById('btnZoomIn');
     if (btnZoomIn) btnZoomIn.addEventListener('click', () => {
