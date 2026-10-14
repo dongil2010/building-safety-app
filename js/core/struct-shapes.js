@@ -287,60 +287,38 @@
             if (d) { pc.type = d.type; pc.label = d.label; pc.guess = false; }
             else { pc.type = pc.atS && pc.atE ? '거더' : '빔'; pc.label = ''; pc.guess = true; }
         });
-        // 이름 없는 점선 보는 기둥·벽·이름 있는 보에 한쪽 끝이라도 닿아야 보로 친다
-        // (건축 평면도의 숨은선·가구선 같은 나란한 점선을 보로 세지 않게)
-        var named = pieces.filter(function (pc) { return !pc.guess; }).map(function (pc) { return rectOfPiece(pc.o, pc.c0, pc.c1, pc.s, pc.e); });
-        var anchors = supports.concat(named);
-        var touches = function (x, y) {
-            var t = 1.5 * u;
-            return anchors.some(function (r) { return x >= r.x0 - t && x <= r.x1 + t && y >= r.y0 - t && y <= r.y1 + t; });
-        };
-        var anchored = function (pc) {
-            if (!pc.guess || pc.atS || pc.atE) return true;
-            var mid = (pc.c0 + pc.c1) / 2;
-            return pc.o === 'H' ? (touches(pc.s, mid) || touches(pc.e, mid)) : (touches(mid, pc.s) || touches(mid, pc.e));
-        };
-        // 빔은 아래 5)에서 이은 뒤에 거른다(점선이 잠깐 빈 뒤쪽 조각이 이어지기 전에 버려지지 않게)
-        pieces = pieces.filter(function (pc) { return pc.type === '빔' || anchored(pc); });
-
-        // 5) 빔은 중간에 안 끊기게(2026-10-14 사용자 요청): 같은 줄 위의 빔 조각을 하나로 잇는다.
-        //    가로지르는 거더·기둥·칠한 띠 폭이나 점선이 잠깐 빈 곳(틈 8u 이하)은 건너뛴다. 거더는 기둥마다 끊긴 채로 둔다.
-        var beams = pieces.filter(function (pc) { return pc.type !== '빔'; });
-        var bp = pieces.filter(function (pc) { return pc.type === '빔'; })
-            .map(function (pc) { return Object.assign({}, pc, { mid: (pc.c0 + pc.c1) / 2 }); })
-            .sort(function (p, q) { return (p.o < q.o ? -1 : p.o > q.o ? 1 : 0) || (p.mid - q.mid) || (p.s - q.s); });
-        var lines = [];   // 같은 방향·같은 중심선(0.8u 안) 묶음
-        bp.forEach(function (pc) {
-            var ln = lines.find(function (L) { return L.o === pc.o && Math.abs(L.mid - pc.mid) <= 0.8 * u; });
-            if (!ln) { ln = { o: pc.o, mid: pc.mid, list: [] }; lines.push(ln); }
-            ln.list.push(pc);
+        // 5) 단계별로 그린다(2026-10-15 사용자 요청): 기둥 → 거더 → 빔.
+        //    조각을 같은 줄(같은 방향·같은 중심선)로 모은 뒤, 그 줄을 가로지르는 받침 사이를 한 칸으로 채운다.
+        //      거더: 기둥·벽 면에서 면까지 / 빔: 기둥·벽·(먼저 만든) 거더 면에서 면까지.
+        //    점선이 중간에 비어도 칸은 끊기지 않는다. 다만 조각이 칸 길이의 40% 이상 덮은 칸만 그린다(없는 보를 지어내지 않게).
+        var runs = makeRuns(pieces, u);
+        runs.forEach(function (R) {
+            var d = decide(R.labels);
+            if (d) { R.type = d.type; R.label = d.label; R.guess = false; }
+            else {
+                // 이름이 없으면: 양 끝이 받침에 닿은 조각이 있으면 거더, 아니면 빔으로 짐작
+                R.type = R.pieces.some(function (pc) { return pc.atS && pc.atE; }) ? '거더' : '빔';
+                R.label = ''; R.guess = true;
+            }
         });
-        lines.forEach(function (L) {
-            L.list.sort(function (p, q) { return p.s - q.s; });
-            var cur = null;
-            var flush = function () {
-                if (!cur) return;
-                var d = decide(cur.labels);
-                var bm = { kind: cur.kind, o: cur.o, c0: cur.c0, c1: cur.c1, s: cur.s, e: cur.e, type: '빔', atS: cur.atS, atE: cur.atE,
-                    label: d ? d.label : '', guess: !d && cur.guess, labels: cur.labels };
-                if (anchored(bm)) beams.push(bm);
-            };
-            L.list.forEach(function (pc) {
-                if (cur && pc.s - cur.e <= 8 * u) {
-                    if (pc.e >= cur.e) { cur.e = pc.e; cur.atE = pc.atE; }
-                    cur.c0 = Math.min(cur.c0, pc.c0); cur.c1 = Math.max(cur.c1, pc.c1);
-                    cur.labels = cur.labels.concat(pc.labels);
-                    cur.guess = cur.guess && pc.guess;
-                    if (pc.kind === 'fill') cur.kind = 'fill';
-                } else {
-                    flush();
-                    cur = { kind: pc.kind, o: pc.o, c0: pc.c0, c1: pc.c1, s: pc.s, e: pc.e, atS: pc.atS, atE: pc.atE, labels: pc.labels.slice(), guess: pc.guess };
-                }
+        var spanMembers = function (R, sup) {
+            return spansOf(R, sup, u).map(function (sp) {
+                var mine = R.labels.filter(function (l) { return l.along >= sp[0] - u && l.along <= sp[1] + u; });
+                var dd = decide(mine);
+                return { kind: R.kind, o: R.o, c0: R.mid - R.half, c1: R.mid + R.half, s: sp[0], e: sp[1], type: R.type,
+                    label: dd ? dd.label : R.label, guess: R.guess };
             });
-            flush();
-        });
+        };
+        var base = cols.concat(walls);
+        var girders = [];
+        runs.filter(function (R) { return R.type === '거더'; }).forEach(function (R) { girders = girders.concat(spanMembers(R, base)); });
+        girders = dedupeSpans(girders);
+        var girderRects = girders.map(function (g) { return rectOfPiece(g.o, g.c0, g.c1, g.s, g.e); });
+        var beamsOnly = [];
+        runs.filter(function (R) { return R.type === '빔'; }).forEach(function (R) { beamsOnly = beamsOnly.concat(spanMembers(R, base.concat(girderRects))); });
+        var beams = dedupeSpans(girders).concat(dedupeSpans(beamsOnly));
 
-        // 6) 부재로
+        // 6) 부재로 — 그리는 차례도 기둥 → 거더 → 빔
         var out = [];
         cols.forEach(function (r) { out.push(toMember(r, '기둥', nearestLabel(r, marks, '기둥', 12 * u), 'column')); });
         walls.forEach(function (r) { out.push(toMember(r, '벽', nearestLabel(r, marks, '벽', 12 * u), 'wall')); });
@@ -350,14 +328,109 @@
         marks.forEach(function (m) {
             if (m.type === '슬래브') out.push({ type: m.type, label: m.label || '', shape: m.shape || 'mark', x: m.x, y: m.y, w: m.w, h: m.h });
         });
-        out.sort(function (a, b) { return (a.y - b.y) || (a.x - b.x); });
         out.forEach(function (m, i) { m.id = 'ss_' + (i + 1); });
         return {
             members: out,
-            stats: { columns: cols.length, walls: walls.length, beams: beams.length,
+            stats: { columns: cols.length, walls: walls.length, beams: beams.length, girders: girders.length,
                 filledBeams: beams.filter(function (b) { return b.kind === 'fill'; }).length,
                 guessed: beams.filter(function (b) { return b.guess; }).length, unusedBeamLabels: unusedBeamLabels, bands: bands.length }
         };
+    }
+
+    /**
+     * 겹친 칸 하나만: 같은 방향 칸이 두께 쪽으로 겹치고 길이 쪽으로 짧은 쪽의 절반 넘게 겹치면
+     * (점선 셋이 나란해 옆 줄이 하나 더 생긴 것) 이름 있는 것 → 긴 것을 남긴다.
+     */
+    function dedupeSpans(list) {
+        var sorted = list.slice().sort(function (p, q) { return ((q.label ? 1 : 0) - (p.label ? 1 : 0)) || ((q.e - q.s) - (p.e - p.s)); });
+        var kept = [];
+        sorted.forEach(function (c) {
+            var dup = kept.some(function (k) {
+                if (k.o !== c.o) return false;
+                if (Math.min(k.c1, c.c1) - Math.max(k.c0, c.c0) <= 0) return false;
+                return Math.min(k.e, c.e) - Math.max(k.s, c.s) > 0.5 * Math.min(k.e - k.s, c.e - c.s);
+            });
+            if (!dup) kept.push(c);
+        });
+        return list.filter(function (c) { return kept.indexOf(c) >= 0; });
+    }
+
+    /**
+     * 조각 → 줄: 같은 방향·같은 중심선(0.8u 안)이고 서로 30u 안으로 이어지는 조각 묶음.
+     * → [{ o, mid, half(두께 반), s, e, kind, pieces, labels, iv(조각이 덮은 구간들) }]
+     */
+    function makeRuns(pieces, u) {
+        var groups = [];
+        pieces.slice().sort(function (p, q) { return (p.o < q.o ? -1 : p.o > q.o ? 1 : 0) || ((p.c0 + p.c1) - (q.c0 + q.c1)); }).forEach(function (pc) {
+            var mid = (pc.c0 + pc.c1) / 2;
+            var g = groups.find(function (G) { return G.o === pc.o && Math.abs(G.mid - mid) <= 0.8 * u; });
+            if (!g) { g = { o: pc.o, mid: mid, list: [] }; groups.push(g); }
+            g.list.push(pc);
+        });
+        var med = function (a) { a = a.slice().sort(function (x, y) { return x - y; }); return a[Math.floor(a.length / 2)]; };
+        var runs = [];
+        groups.forEach(function (G) {
+            G.list.sort(function (p, q) { return p.s - q.s; });
+            var cur = null;
+            var flush = function () {
+                if (!cur) return;
+                var L = cur.pieces;
+                cur.mid = med(L.map(function (pc) { return (pc.c0 + pc.c1) / 2; }));
+                cur.half = med(L.map(function (pc) { return (pc.c1 - pc.c0) / 2; }));
+                cur.kind = L.some(function (pc) { return pc.kind === 'fill'; }) ? 'fill' : 'dash';
+                cur.labels = [].concat.apply([], L.map(function (pc) { return pc.labels; }));
+                // 덮은 구간(겹친 조각은 합침)
+                cur.iv = [];
+                L.forEach(function (pc) {
+                    var last = cur.iv[cur.iv.length - 1];
+                    if (last && pc.s <= last[1]) last[1] = Math.max(last[1], pc.e); else cur.iv.push([pc.s, pc.e]);
+                });
+                runs.push(cur);
+            };
+            G.list.forEach(function (pc) {
+                if (cur && pc.s - cur.e <= 30 * u) { cur.e = Math.max(cur.e, pc.e); cur.pieces.push(pc); }
+                else { flush(); cur = { o: G.o, s: pc.s, e: pc.e, pieces: [pc] }; }
+            });
+            flush();
+        });
+        return runs;
+    }
+
+    /**
+     * 한 줄을 받침(가로지르는 네모들) 사이 칸으로 → [[s, e], …] (받침 면에서 면까지).
+     * 줄과 나란히 길게 누운 받침(같은 줄 위의 다른 보 등)은 받침이 아니다. 받침이 하나도 없으면 이름 있는 줄만 통째로.
+     */
+    function spansOf(R, supports, u) {
+        var tol = R.half + 0.5 * u;
+        var iv = [];
+        supports.forEach(function (r) {
+            var p0 = R.o === 'H' ? r.y0 : r.x0, p1 = R.o === 'H' ? r.y1 : r.x1;
+            var a0 = R.o === 'H' ? r.x0 : r.y0, a1 = R.o === 'H' ? r.x1 : r.y1;
+            if (p0 > R.mid + tol || p1 < R.mid - tol) return;            // 줄을 안 지난다
+            if ((a1 - a0) > 1.5 * (p1 - p0)) return;                      // 줄과 나란히 누운 것
+            if (a1 < R.s - 15 * u || a0 > R.e + 15 * u) return;           // 줄 끝에서 멀다(점선이 기둥 조금 앞에서 멈춘 것은 기둥까지 잇는다)
+            iv.push([a0, a1]);
+        });
+        iv.sort(function (p, q) { return p[0] - q[0]; });
+        var sup = [];
+        iv.forEach(function (c) { var l = sup[sup.length - 1]; if (l && c[0] <= l[1]) l[1] = Math.max(l[1], c[1]); else sup.push([c[0], c[1]]); });
+        var covered = function (lo, hi) {
+            var n = 0;
+            R.iv.forEach(function (c) { n += Math.max(0, Math.min(hi, c[1]) - Math.max(lo, c[0])); });
+            return n;
+        };
+        var minLen = Math.max(2 * u, 2 * R.half);
+        var out = [];
+        if (!sup.length) { if (R.labels.length && R.e - R.s >= minLen) out.push([R.s, R.e]); return out; }
+        // 첫 받침 앞으로 내민 부분, 받침 사이 칸, 마지막 받침 뒤로 내민 부분
+        if (sup[0][0] - R.s >= minLen) out.push([R.s, sup[0][0]]);
+        for (var i = 0; i + 1 < sup.length; i++) {
+            var lo = sup[i][1], hi = sup[i + 1][0];
+            if (hi - lo >= minLen && covered(lo, hi) >= 0.4 * (hi - lo)) out.push([lo, hi]);
+        }
+        var lastSup = sup[sup.length - 1];
+        if (R.e - lastSup[1] >= minLen) out.push([lastSup[1], R.e]);
+        return out;
     }
 
     var api = { TYPE_OF_LETTER: TYPE_OF_LETTER, fillRects: fillRects, mergeWalls: mergeWalls, dashedLines: dashedLines, pairBands: pairBands,

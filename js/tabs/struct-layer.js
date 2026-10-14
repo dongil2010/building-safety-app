@@ -272,6 +272,20 @@
         var th = api.beamThickness ? api.beamThickness(list()) : {};
         return th[type] || th[type === '거더' ? '빔' : '거더'] || defaultSize(type).h;
     }
+    /**
+     * 줄 맞춤(2026-10-15): 같은 종류·같은 방향으로 이미 그린 보의 중심선이 가까우면(화면 약 12px 또는 두께 2배 안) 그 줄에 맞춘다.
+     * 한 열에 이어 그리는 빔(거더)이 들쭉날쭉하지 않고 한 줄로 반듯하게 선다. → 맞춘 중심 좌표
+     */
+    function alignPerp(type, horiz, perp, th, pad) {
+        var reach = Math.max(pad * 2, th * 2), best = perp, bd = reach;
+        list().forEach(function (d) {
+            if (d.type !== type || (d.w >= d.h) !== horiz) return;
+            var c = horiz ? d.y : d.x;
+            var dist = Math.abs(c - perp);
+            if (dist < bd) { bd = dist; best = c; }
+        });
+        return best;
+    }
     function addLinePoint(p, pad) {
         var type = ui.addType;
         var a = snapPoint(p, pad, type);
@@ -285,7 +299,7 @@
         var lo = horiz ? (s.x <= a.x ? s : a) : (s.y <= a.y ? s : a), hi = lo === s ? a : s;
         var from = horiz ? lo.x + lo.hx : lo.y + lo.hy, to = horiz ? hi.x - hi.hx : hi.y - hi.hy;
         if (!(to - from > th)) { toast('두 점이 너무 가깝습니다. 다시 시작 점부터 눌러 주세요.', 'warning', 2500); sync(); return; }
-        var perp = horiz ? (s.y + a.y) / 2 : (s.x + a.x) / 2;
+        var perp = alignPerp(type, horiz, horiz ? (s.y + a.y) / 2 : (s.x + a.x) / 2, th, pad);
         var r = horiz ? { x: (from + to) / 2, y: perp, w: to - from, h: th } : { x: perp, y: (from + to) / 2, w: th, h: to - from };
         var rec = api.add(state(), B.floorKey(), { type: type, label: '', x: r.x, y: r.y, w: r.w, h: r.h });
         // 고르지는 않는다(이어서 다른 종류 단추를 누르면 방금 그린 것이 바뀌지 않고 추가 종류만 바뀌게)

@@ -252,5 +252,8 @@ assert.ok(layer.includes('var endGrab = grabEnd(p, pad);'));
 assert.ok(layer.includes("if (dr.mode === 'end') Object.assign(d, stretchTo(dr, dr.horiz ? p.x : p.y));"));
 assert.ok(layer.includes("var sp = snapPoint(pe, padE, d.type, d.id);"), '놓을 때 기둥·거더 면에 붙임(자기 자신 빼고)');
 assert.ok(layer.includes("var lo = dr.which === 'e' ? dr.fixed : Math.min(at, dr.fixed - dr.minLen);"), '반대 끝을 넘어가도 뒤집히지 않음');
+// ---- 직접 그릴 때 줄 맞춤: 같은 종류·같은 방향 보의 중심선이 가까우면 그 줄에 ----
+assert.ok(layer.includes('var perp = alignPerp(type, horiz, horiz ? (s.y + a.y) / 2 : (s.x + a.x) / 2, th, pad);'));
+assert.ok(layer.includes("if (d.type !== type || (d.w >= d.h) !== horiz) return;"), '같은 종류·같은 방향끼리만');
 
 console.log('test-struct-members: ok');

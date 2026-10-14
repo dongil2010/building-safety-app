@@ -85,39 +85,71 @@ const byShape = (ms, shape) => ms.filter((m) => m.shape === shape);
     assert.strictEqual(r.stats.unusedBeamLabels, 0);
 }
 
-// ---- 빔은 중간에 안 끊긴다: 가로지르는 거더를 지나도 한 줄(거더도 빔에서 안 끊긴다) ----
+// ---- 빔은 거더 면에서 거더 면까지 한 칸씩(2026-10-15): 가로지르는 거더에서 두 칸, 칸 안은 안 끊김. 거더는 빔에서 안 끊긴다 ----
 {
     let paths = [];
     [[100, 100], [300, 100]].forEach(([x, y]) => { paths = paths.concat(solid(x - 2, y - 2, x + 2, y + 2)); });
-    paths = paths.concat(beam('V', 100, 2.9, 98, 202), beam('V', 300, 2.9, 98, 202));   // 기둥에서 아래로 내려온 거더(끝은 자유)
+    paths = paths.concat(beam('V', 100, 2.9, 98, 202), beam('V', 300, 2.9, 98, 202));   // 기둥에서 아래로 내려온 보(끝은 자유)
     paths = paths.concat(beam('H', 100, 2.9, 102, 298));                                   // 기둥 사이 거더
     paths = paths.concat(beam('V', 200, 2.9, 101.5, 202));                                 // 가운데 거더(1G9, 기호로)
     paths = paths.concat(beam('H', 150, 1.4, 101.5, 298.5));                              // 빔: 가운데 거더를 가로지름
     const marks = [mark('1G9', 194, 175, false), mark('1B3', 150, 146, true)];
     const r = SS.extractShapes({ paths, page: PAGE, marks });
-    const beams = byShape(r.members, 'beam').filter((b) => b.type === '빔' && b.w > b.h);
-    assert.strictEqual(beams.length, 1, '빔은 거더를 지나도 하나: ' + JSON.stringify(beams));
-    assert.ok(beams[0].label === '1B3' && beams[0].w > 190, '양쪽 칸을 이은 한 줄, 이름은 기호에서');
+    const beams = byShape(r.members, 'beam').filter((b) => b.type === '빔' && b.w > b.h).sort((p, q) => p.x - q.x);
+    assert.strictEqual(beams.length, 2, '빔은 거더 양쪽 두 칸: ' + JSON.stringify(beams));
+    assert.ok(beams.every((b) => b.label === '1B3'), '기호 없는 칸도 같은 줄 이름을 이어받는다');
+    assert.ok(Math.abs(beams[0].x + beams[0].w / 2 - 198.55) < 0.01 && Math.abs(beams[1].x - beams[1].w / 2 - 201.45) < 0.01, '거더 면에서 끊김');
     // 기둥에서 내려와 끝이 비는 이름 없는 보는 빔으로 짐작
     assert.strictEqual(byShape(r.members, 'beam').filter((b) => b.guess && b.type === '빔' && b.h > b.w).length, 2);
     const g9 = byShape(r.members, 'beam').filter((b) => b.label === '1G9');
     assert.strictEqual(g9.length, 1, '거더는 빔에서 안 끊긴다');
+    // 그리는 차례: 기둥 → 거더 → 빔
+    const order = r.members.filter((m) => m.shape !== 'mark').map((m) => m.type);
+    const firstBeam = order.indexOf('빔'), lastGirder = order.lastIndexOf('거더'), lastCol = order.lastIndexOf('기둥');
+    assert.ok(lastCol < order.indexOf('거더') && lastGirder < firstBeam, '기둥 → 거더 → 빔 차례: ' + order.join(','));
 }
 
-// ---- 칠한 거더에 끊기고 점선이 잠깐 빈 빔도 한 줄로 잇는다. 멀리 떨어진 같은 줄 빔은 따로 ----
+// ---- 칸 안에서 점선이 비어도 끊기지 않는다(받침 사이를 한 칸으로 채움). 멀리 떨어진 같은 줄 빔은 따로 ----
 {
     let paths = [];
     paths = paths.concat(solid(98, 80, 102, 220));                                     // 칠한 세로 거더(fG1, 기호로)
-    paths = paths.concat(beam('H', 150, 1.4, 40, 98), beam('H', 150, 1.4, 102, 140));  // 거더 양쪽 빔
-    paths = paths.concat(beam('H', 150, 1.4, 145, 180));                               // 점선이 5 쯤 빈 뒤 이어짐
+    paths = paths.concat(beam('H', 150, 1.4, 40, 70), beam('H', 150, 1.4, 76, 98));    // 기둥~거더 칸: 점선이 70~76에서 빔
+    paths = paths.concat(beam('H', 150, 1.4, 102, 140), beam('H', 150, 1.4, 145, 180)); // 거더 뒤로 내민 빔(점선이 5 쯤 빔)
     paths = paths.concat(beam('H', 150, 1.4, 260, 300));                               // 80 떨어진 다른 빔
     paths = paths.concat(solid(300, 148, 304, 152), solid(36, 148, 40, 152));          // 끝을 받치는 기둥
-    const marks = [mark('fG1', 94, 120, false), mark('1B5', 70, 146, true)];
+    const marks = [mark('fG1', 94, 120, false), mark('1B5', 60, 146, true)];
     const r = SS.extractShapes({ paths, page: PAGE, marks });
     const bms = byShape(r.members, 'beam').filter((b) => b.type === '빔').sort((p, q) => p.x - q.x);
-    assert.strictEqual(bms.length, 2, '이어진 빔 하나 + 떨어진 빔 하나: ' + JSON.stringify(bms));
-    assert.ok(bms[0].label === '1B5' && bms[0].x - bms[0].w / 2 < 42 && bms[0].x + bms[0].w / 2 > 176, '40~178 한 줄');
+    const ends = (b) => [b.x - b.w / 2, b.x + b.w / 2];
+    assert.strictEqual(bms.length, 3, JSON.stringify(bms));
+    assert.ok(bms[0].label === '1B5' && Math.abs(ends(bms[0])[0] - 40) < 0.01 && Math.abs(ends(bms[0])[1] - 98) < 0.01, '기둥 면~거더 면 한 칸(점선 빈 곳도 채움)');
+    assert.ok(bms[1].label === '1B5' && Math.abs(ends(bms[1])[0] - 102) < 0.01 && ends(bms[1])[1] > 176, '거더 뒤 내민 칸(점선 빈 곳도 이음)');
+    assert.ok(bms[2].guess && Math.abs(ends(bms[2])[1] - 300) < 0.01, '떨어진 빔은 따로, 기둥 면까지');
     assert.ok(byShape(r.members, 'beam').some((b) => b.label === 'fG1' && b.type === '거더'), '칠한 거더는 그대로');
+}
+
+// ---- 거더: 기둥 사이 점선이 일부만 있어도 기둥 면~면 한 칸, 거의 없으면 안 그림 ----
+{
+    let paths = [];
+    [[100, 100], [200, 100], [300, 100]].forEach(([x, y]) => { paths = paths.concat(solid(x - 2, y - 2, x + 2, y + 2)); });
+    paths = paths.concat(beam('H', 100, 2.9, 102, 150), beam('H', 100, 2.9, 165, 198));   // 100~200 칸: 점선이 150~165에서 빔
+    paths = paths.concat(beam('H', 100, 2.9, 285, 298));                                   // 200~300 칸: 13/96만 → 안 그림
+    const r = SS.extractShapes({ paths, page: PAGE, marks: [mark('1G1', 150, 94, true)] });
+    const g = byShape(r.members, 'beam').filter((b) => b.type === '거더').sort((p, q) => p.x - q.x);
+    assert.strictEqual(g.length, 1, JSON.stringify(g));
+    assert.ok(Math.abs(g[0].x - g[0].w / 2 - 102) < 0.01 && Math.abs(g[0].x + g[0].w / 2 - 198) < 0.01, '기둥 면 102~198 한 칸');
+}
+
+// ---- 점선 셋(가운데 줄이 짝을 둘 만듦)으로 옆에 겹친 칸이 생기면 하나만 ----
+{
+    let paths = [];
+    [[100, 100], [100, 300]].forEach(([x, y]) => { paths = paths.concat(solid(x - 2, y - 2, x + 2, y + 2)); });
+    paths = paths.concat(dashed('V', 98.6, 102, 298), dashed('V', 101.4, 102, 298));   // 거더 두 모서리
+    paths = paths.concat(dashed('V', 102.9, 150, 298));                                // 옆에 붙은 다른 점선(뒤쪽 절반)
+    const r = SS.extractShapes({ paths, page: PAGE, marks: [mark('1G7', 94, 200, false)] });
+    const g = byShape(r.members, 'beam');
+    assert.strictEqual(g.length, 1, '겹친 칸은 하나만: ' + JSON.stringify(g));
+    assert.ok(g[0].label === '1G7' && Math.abs(g[0].x - 100) < 0.01, '이름 있는 기둥 사이 거더가 남는다');
 }
 
 // ---- 칠한 긴 띠: G·B 기호가 붙으면 칠해 그린 보, 아니면 벽. 기둥에서 끊는다 ----
