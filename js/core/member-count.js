@@ -184,9 +184,18 @@
         });
         return out;
     }
+    /** 2026-10-14 자동 집계 켜기/끄기(이 기기 설정, 기본 켜짐). 끄면 자동 점이 화면·집계·내보내기에서 빠진다 */
+    var AUTO_PREF_KEY = 'bsa_member_count_auto';
+    function autoEnabled() {
+        try { return !root || !root.localStorage || root.localStorage.getItem(AUTO_PREF_KEY) !== '0'; } catch (_e) { return true; }
+    }
+    function setAutoEnabled(on) {
+        try { if (root && root.localStorage) root.localStorage.setItem(AUTO_PREF_KEY, on ? '1' : '0'); } catch (_e) { /* ignore */ }
+    }
     /** 손 점 + 자동 점 */
     function listWithAuto(st, floorKey, opts) {
         var manual = listFor(st, floorKey);
+        if ((opts && opts.auto === false) || (!(opts && opts.auto === true) && !autoEnabled())) return manual;
         var ex = excludedSrcIds(st, floorKey);
         var defects = (((st && st.defects) || {})[floorKey] || []).filter(function (d) { return d && !ex[d.id]; });
         return manual.concat(autoDots(defects, manual, opts));
@@ -256,7 +265,7 @@
     }
 
     var api = { TYPES: TYPES, KEYS: KEYS, COLORS: COLORS, SHORT: SHORT, ensureMaps: ensureMaps, listFor: listFor, rawFor: rawFor, excludesFor: excludesFor, excludedSrcIds: excludedSrcIds, addExclude: addExclude, add: add, remove: remove,
-        hitTest: hitTest, seqNumbers: seqNumbers, autoDots: autoDots, listWithAuto: listWithAuto, autoTypeOfDefect: autoTypeOfDefect, memberTypeOfComponent: memberTypeOfComponent, isStructuralDefectType: isStructuralDefectType, STRUCT_DEFECT_WORDS: STRUCT_DEFECT_WORDS, countsByType: countsByType, unitCounts: unitCounts,
+        hitTest: hitTest, seqNumbers: seqNumbers, autoDots: autoDots, listWithAuto: listWithAuto, autoEnabled: autoEnabled, setAutoEnabled: setAutoEnabled, autoTypeOfDefect: autoTypeOfDefect, memberTypeOfComponent: memberTypeOfComponent, isStructuralDefectType: isStructuralDefectType, STRUCT_DEFECT_WORDS: STRUCT_DEFECT_WORDS, countsByType: countsByType, unitCounts: unitCounts,
         packFor: packFor, packHasContent: packHasContent, mergePackIntoState: mergePackIntoState };
     if (typeof module !== 'undefined' && module.exports) module.exports = api;
     if (root) { root.BSA = root.BSA || {}; root.BSA.memberCount = api; }

@@ -17022,3 +17022,5 @@ html body.bsa-eval-map-on #mobileBtnDeleteSelected, html body.bsa-eval-map-on #m
 /* 2026-10-14 부재 수 지우개 */
 .map-count-erase-layer { position: absolute; z-index: 7; cursor: crosshair; touch-action: none; }
 .map-count-erase-box { position: absolute; border: 2px dashed #dc2626; background: rgba(220, 38, 38, 0.08); pointer-events: none; }
+
+.map-count-auto { display: inline-flex; align-items: center; gap: .25rem; font-size: .78rem; font-weight: 600; white-space: nowrap; cursor: pointer; }

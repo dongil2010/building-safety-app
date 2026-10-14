@@ -26132,6 +26132,14 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             bar.id = 'mapCountBar';
             bar.className = 'map-count-bar';
             bar.addEventListener('click', (e) => {
+                const cb = e.target.closest('input[data-mc-auto]');
+                if (cb) {
+                    if (api.setAutoEnabled) api.setAutoEnabled(cb.checked);
+                    syncMemberCountOverlay();
+                    syncMemberCountBar();
+                    if (typeof scheduleEvalTabRefresh === 'function') scheduleEvalTabRefresh();
+                    return;
+                }
                 const b = e.target.closest('button');
                 if (!b) return;
                 e.preventDefault();
@@ -26163,6 +26171,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             + api.TYPES.map((t) => `<button type="button" class="map-count-type${t === cur ? ' active' : ''}" data-mc-type="${t}" style="--mc-color:${api.COLORS[t]}" title="단축키 ${keyOf[t]}${zc ? ' · 지금 구역 / 층 전체' : ''}">${t} <b>${zc ? `${zc[t] || 0}<small>/${counts[t] || 0}</small>` : (counts[t] || 0)}</b><span class="map-count-key">${keyOf[t]}</span></button>`).join('')
             + (zones.length > 1 ? `<span class="map-count-sep">구역</span>` + zones.map((n) => `<button type="button" class="map-count-zone${n === mcZoneNo ? ' active' : ''}" data-mc-zone="${n}" style="--zone-color:${mcZoneColor(n)}" title="숫자키 ${n}">${n}</button>`).join('') : '')
             + (offTxt ? `<span class="map-count-warn">⚠ 이 층에 없는 구역의 점: ${offTxt} — 집계 안 됨(점을 눌러 구역 바꾸기)</span>` : '')
+            + `<label class="map-count-auto" title="양호·구조 결함 마킹을 부재 수에 자동으로 넣기(이 기기 설정)"><input type="checkbox" data-mc-auto ${api.autoEnabled && !api.autoEnabled() ? '' : 'checked'}> 자동 집계</label>`
             + `<button type="button" data-mc-act="erase" class="${mcEraser ? 'active' : ''}" title="지우개 (E) — 끌어서 네모 안 점 지우기, 짧게 누르면 점 하나">🧽 지우개${mcEraser ? ' 켜짐' : ''}</button>`
             + `<button type="button" data-mc-act="undo" title="되돌리기 (Ctrl+Z)">↶ 되돌리기</button>`
             + `<button type="button" data-mc-act="show" class="${readMcShowPref() ? 'active' : ''}" title="세기 모드가 아닐 때도 점 보이기">점 보이기</button>`
