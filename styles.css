@@ -17014,3 +17014,7 @@ line.map-guide-shape { fill: none; stroke-width: 2.5; }
 }
 /* 2026-10-14 부재 수 자동 점(양호·구조 결함 마킹에서) — 점선 테두리·옅게 */
 .map-count-dot.is-auto { background: #fff; color: var(--mc-color); border: 2px dashed var(--mc-color); opacity: .85; }
+
+/* 2026-10-14 평가 탭 도면: 상태조사 마킹 지우기·일괄수정 단추 숨김(잠금) */
+html body.bsa-eval-map-on #btnDeleteSelectedDefects, html body.bsa-eval-map-on #btnBulkEditSelectedDefects,
+html body.bsa-eval-map-on #mobileBtnDeleteSelected, html body.bsa-eval-map-on #mobileBtnBulkEditSelected { display: none !important; }

@@ -22455,6 +22455,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     }
 
     function undoDefectChange() {
+        if (window.__bsaEvalMapOn === true) { window.showToast?.('평가 탭에서는 상태조사 마킹 되돌리기를 하지 않습니다.', 'info', 2500); return; }
         const key = getDefectHistoryKey();
         const h = defectHistory[key];
         if (!h || h.undo.length === 0) return;
@@ -22470,6 +22471,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     }
 
     function redoDefectChange() {
+        if (window.__bsaEvalMapOn === true) return;
         const key = getDefectHistoryKey();
         const h = defectHistory[key];
         if (!h || h.redo.length === 0) return;
@@ -26541,6 +26543,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
     /** 도면 「G」「B」 버튼: 부재 명칭만 바꿔 저장 (원인·종류는 그대로, 수정창은 안 연다) */
     function applyMemberGbChoice(defectIds, value) {
+        if (window.__bsaEvalMapOn === true) { window.showToast?.('평가 탭에서는 상태조사 마킹을 고칠 수 없습니다.', 'info', 2500); return 0; }
         const ids = (defectIds || []).filter(Boolean);
         if (!ids.length || !value) return 0;
         const editHistoryApi = window.BSA && window.BSA.editHistory;
@@ -32202,6 +32205,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     }
 
     async function deleteSelectedDefects() {
+        if (isEvalMarkingLock()) { notifyEvalMarkingLock(); return; }
         const ids = [...selectedDefectIds];
         if (!ids.length || !state.currentBuildingId) return;
         if (!await window.confirmDelete(`선택한 결함 ${ids.length}건을 삭제할까요? (되돌리기로 복원 가능)`)) return;
@@ -32706,6 +32710,17 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         updateTouchLoupe(canvas, document.getElementById('ndtCanvasContainer'), clientX, clientY, NDT_LOUPE_ID);
     }
 
+
+    /** 2026-10-14 평가 탭 도면: 상태조사 마킹 잠금(보기·고르기만 — 옮기기·크기·지우기·수정·새 마킹·되돌리기 없음) */
+    function isEvalMarkingLock() { return window.__bsaEvalMapOn === true; }
+    function notifyEvalMarkingLock() {
+        const now = Date.now();
+        if (now - (window._bsaEvalLockToastAt || 0) < 2500) return;
+        window._bsaEvalLockToastAt = now;
+        window.showToast?.('평가 탭에서는 상태조사 마킹을 고칠 수 없습니다(보기·고르기만). 결함위치도 탭에서 고쳐 주세요.', 'info', 3000);
+    }
+    window.isEvalMarkingLock = isEvalMarkingLock;
+
     function handleDragStart(clientX, clientY, isTouch = false, forcePan = false, mods = {}) {
         if (!elements.planCanvas) return;
         const additive = !!(mods.ctrlKey || mods.metaKey);
@@ -32727,6 +32742,35 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             isAreaDrag = false;
             pendingDragHit = null;
             if (elements.planCanvas) elements.planCanvas.style.cursor = 'grabbing';
+            return;
+        }
+
+        if (isEvalMarkingLock()) {
+            // 평가 탭: 마킹을 누르면 고르기만(평가 부재·평가단위 지정용), 끌면 도면 이동. 범례·새 마킹·옮기기 없음
+            const r0 = elements.planCanvas.getBoundingClientRect();
+            const c0 = viewToImgCoords((clientX - r0.left - state.view.offsetX) / state.view.scale, (clientY - r0.top - state.view.offsetY) / state.view.scale);
+            const hit0 = findHitPinPart(c0.x, c0.y);
+            if (hit0 && hit0.defect && hit0.defect.id) {
+                const id0 = hit0.defect.id;
+                if (additive || mobileAddSelectEnabled) {
+                    if (selectedDefectIds.has(id0)) selectedDefectIds.delete(id0); else selectedDefectIds.add(id0);
+                } else selectedDefectIds = new Set([id0]);
+                updateMapSelectionBar();
+            } else if (!additive && !mobileAddSelectEnabled && selectedDefectIds.size) {
+                selectedDefectIds.clear();
+                updateMapSelectionBar();
+            }
+            startMouseX = clientX;
+            startMouseY = clientY;
+            initialOffsetX = state.view.offsetX;
+            initialOffsetY = state.view.offsetY;
+            isDragging = true;
+            isMarkingDrag = false;
+            markingHasMoved = false;
+            isAreaDrag = false;
+            pendingDragHit = null;
+            elements.planCanvas.style.cursor = 'grabbing';
+            drawCanvas();
             return;
         }
 
@@ -34608,6 +34652,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     }
 
     function openAddDefectModal(boxX, boxY, targetX, targetY, existingPin = null, areaRect = null, options = {}) {
+        if (window.__bsaEvalMapOn === true) { notifyEvalMarkingLock(); return; }
         clearDefectBulkEditState();
         syncDefectBulkEditChrome(false);
         if (typeof bindDefectHandwriteTabOrder === 'function') bindDefectHandwriteTabOrder();
@@ -39153,6 +39198,12 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             return;
         }
         if ((window.state.currentTab !== 'tab-map' && window.__bsaEvalMapOn !== true)) return;
+        // 평가 탭: 상태조사 마킹 단축키(지우기·되돌리기·모드·G/B 등) 막음 — Esc는 고르기 해제만
+        if (window.__bsaEvalMapOn === true) {
+            if (k === 'escape' && selectedDefectIds.size) { selectedDefectIds.clear(); updateMapSelectionBar(); drawCanvas(); }
+            else if ((e.key === 'Delete' || e.key === 'Backspace') && !typing && selectedDefectIds.size) { e.preventDefault(); notifyEvalMarkingLock(); }
+            return;
+        }
         // Delete/Backspace: 핀 클릭→수정창이 열린 상태에서도 삭제 (기존엔 모달 열리면 무시됨)
         if ((e.key === 'Delete' || e.key === 'Backspace') && !typing) {
             e.preventDefault();
@@ -51770,6 +51821,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     }
 
     window.deleteDefectById = async function(id, options) {
+        if (window.__bsaEvalMapOn === true) { notifyEvalMarkingLock(); return false; }
         if (!options?.skipConfirm && !await window.confirmDelete('이 결함을 삭제할까요?')) return false;
         if (!id || !state.currentBuildingId) return false;
         const located = (typeof findDefectFloorKeyById === 'function') ? findDefectFloorKeyById(id) : null;
