@@ -129,7 +129,70 @@
         setTimeout(function () {
             try { focusEl && focusEl.focus(); if (o.kind === 'prompt' && focusEl.select) focusEl.select(); } catch (_e) { /* ignore */ }
         }, 30);
+        armPromptFocusGuard(el, o, focusEl);
         return el;
+    }
+
+    // 2026-10-14 입력 창(도면 메모 등) 키보드 안 먹힘 대책:
+    //  · 창이 떠 있는 동안 포커스가 창 밖(도면·body)으로 빠지면 입력칸으로 되돌린다
+    //  · 입력칸을 누르면 확실히 포커스(안드로이드 WebView에서 자동 포커스로 키보드가 안 뜬 경우)
+    //  · 키보드가 올라오면 창을 보이는 화면(visualViewport) 높이에 맞추고 입력칸을 화면 안으로
+    var promptGuard = null;
+    function armPromptFocusGuard(el, o, focusEl) {
+        disarmPromptFocusGuard();
+        if (o.kind !== 'prompt' || !focusEl) return;
+        var g = { el: el, input: focusEl };
+        g.onFocusOut = function (e) {
+            var to = e.relatedTarget;
+            if (to && el.contains(to)) return;
+            setTimeout(function () {
+                if (promptGuard !== g || !current) return;
+                var ae = document.activeElement;
+                if (ae && ae !== document.body && ae !== document.documentElement && !el.contains(ae)) return;
+                try { g.input.focus({ preventScroll: true }); } catch (_e) { /* ignore */ }
+            }, 0);
+        };
+        g.onTapInput = function (e) {
+            if (e.target !== g.input) return;
+            if (document.activeElement !== g.input) { try { g.input.focus(); } catch (_e) { /* ignore */ } }
+        };
+        g.fit = function () {
+            var vv = window.visualViewport;
+            if (!vv) return;
+            var kb = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
+            el.style.top = vv.offsetTop + 'px';
+            el.style.height = vv.height + 'px';
+            el.style.bottom = 'auto';
+            el.style.overflowY = 'auto';
+            el.style.alignItems = kb > 80 ? 'flex-start' : '';
+            if (document.activeElement === g.input) {
+                try { g.input.scrollIntoView({ block: 'center' }); } catch (_e) { /* ignore */ }
+            }
+        };
+        g.onFocusIn = function () { setTimeout(g.fit, 150); setTimeout(g.fit, 450); };
+        el.addEventListener('focusout', g.onFocusOut);
+        el.addEventListener('focusin', g.onFocusIn);
+        el.addEventListener('pointerup', g.onTapInput);
+        el.addEventListener('touchend', g.onTapInput);
+        if (window.visualViewport) {
+            window.visualViewport.addEventListener('resize', g.fit);
+            window.visualViewport.addEventListener('scroll', g.fit);
+        }
+        promptGuard = g;
+    }
+    function disarmPromptFocusGuard() {
+        var g = promptGuard;
+        if (!g) return;
+        promptGuard = null;
+        g.el.removeEventListener('focusout', g.onFocusOut);
+        g.el.removeEventListener('focusin', g.onFocusIn);
+        g.el.removeEventListener('pointerup', g.onTapInput);
+        g.el.removeEventListener('touchend', g.onTapInput);
+        if (window.visualViewport) {
+            window.visualViewport.removeEventListener('resize', g.fit);
+            window.visualViewport.removeEventListener('scroll', g.fit);
+        }
+        ['top', 'height', 'bottom', 'overflowY', 'alignItems'].forEach(function (k) { g.el.style[k] = ''; });
     }
 
     function showNext() {
@@ -174,6 +237,7 @@
             value = (ok && picked) ? parseInt(picked.value, 10) : null;
         } else value = undefined;
         current = null;
+        disarmPromptFocusGuard();
         if (el) {
             el.classList.remove('open');
             el.hidden = true;

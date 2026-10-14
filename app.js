@@ -25575,10 +25575,12 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             else { el.setAttribute('x1', pts[0].sx); el.setAttribute('y1', pts[0].sy); el.setAttribute('x2', pts[1].sx); el.setAttribute('y2', pts[1].sy); }
             const gType = api.typeOf(d);
             el.setAttribute('class', `map-guide-shape map-guide-${d.kind} map-guide-type-${gType}${sel ? ' is-selected' : ''}`);
-            if (!sel) {
+            // 2026-10-14 고른(방금 그린) 가이드도 종류 색 그대로 — 예전엔 주황으로 칠해 그릴 때마다 색이 바뀌어 보였다.
+            // 고름 표시는 굵은 점선·모서리 손잡이로만.
+            {
                 const c = getGuideTypeColor(gType);
                 el.style.stroke = c;
-                el.style.strokeOpacity = String(guideOp);
+                el.style.strokeOpacity = String(sel ? Math.max(guideOp, 0.85) : guideOp);
                 el.style.fill = d.kind === 'rect' ? c : 'none';
                 el.style.fillOpacity = String(Math.round(guideOp * 0.22 * 1000) / 1000);
             }
