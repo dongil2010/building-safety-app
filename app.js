@@ -25476,7 +25476,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         return GUIDE_TYPE_STYLE_KEYS[t] ? t : '';
     }
     /** 새로 그릴 종류: 고른 종류가 없으면 사각형=기둥, 직선=빔 */
-    function gsTypeForNew(kind) { return gsType() || gsApi().defaultType(kind); }
+    function gsTypeForNew() { return gsType() || 'column'; }
     /** 종류 버튼: 고른 가이드가 있으면 그 가이드 종류를 바꾸고(되돌리기 가능), 다음에 그릴 종류로도 기억 */
     function setGsType(t) {
         if (!GUIDE_TYPE_STYLE_KEYS[t]) return;
@@ -25498,6 +25498,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     let gsSelectedId = '';
     let gsDrag = null;      // { mode:'new'|'move'|'h0'..'h3', id, start:{x,y}, orig, pointerId, moved }
     function gsKind() { let k = ''; try { k = localStorage.getItem(GS_KIND_KEY) || ''; } catch (_e) { /* ignore */ } return k === 'line' ? 'line' : 'circle'; }
+    /** 2026-10-14 도형은 종류로 정한다: 기둥=원, 거더·빔=직선 (도형 고르기 단추 없앰) */
+    function gsKindForType(t) { return t === 'column' ? 'circle' : 'line'; }
     function setGsKind(k) { try { localStorage.setItem(GS_KIND_KEY, k); } catch (_e) { /* ignore */ } syncGuideBar(); }
     function readGsShowPref() { try { return localStorage.getItem(GS_SHOW_KEY) !== '0'; } catch (_e) { return true; } }
     function setGsShow(on) { try { localStorage.setItem(GS_SHOW_KEY, on ? '1' : '0'); } catch (_e) { /* ignore */ } syncGuideOverlay(); syncGuideBar(); }
@@ -25640,7 +25642,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 gsDrag = { mode: hit.part === 'body' ? 'move' : hit.part, id: hit.shape.id, start: img, orig: Object.assign({}, hit.shape), pointerId: e.pointerId, moved: false };
             } else {
                 gsSelectedId = '';
-                gsDrag = { mode: 'new', kind: gsKind(), type: gsTypeForNew(gsKind()), start: img, cur: img, s0: p, pointerId: e.pointerId, moved: false };
+                gsDrag = { mode: 'new', kind: gsKindForType(gsTypeForNew()), type: gsTypeForNew(), start: img, cur: img, s0: p, pointerId: e.pointerId, moved: false };
             }
             try { ov.setPointerCapture(e.pointerId); } catch (_e) { /* ignore */ }
             syncGuideOverlay();
@@ -25747,21 +25749,18 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         }
         if (bar.parentElement !== host) host.appendChild(bar);
         bar.hidden = false;
-        const k = gsKind();
         const gsList = api.listFor(state, currentMemoFloorKey());
         const n = gsList.length;
         const selShape = gsSelectedId ? gsList.find((d) => d.id === gsSelectedId) : null;
-        const curType = selShape ? api.typeOf(selShape) : gsTypeForNew(k);
-        const typeBtns = api.TYPES.map((t) => `<button type="button" data-gs-type="${t}" class="map-guide-type-btn${curType === t ? ' active' : ''}" style="--gs-c:${getGuideTypeColor(t)}" title="${selShape ? '고른 가이드를 ' + api.TYPE_LABELS[t] + '(으)로' : '새 가이드 종류: ' + api.TYPE_LABELS[t]}"><i></i>${api.TYPE_LABELS[t]}</button>`).join('');
+        const curType = selShape ? api.typeOf(selShape) : gsTypeForNew();
+        const typeBtns = api.TYPES.map((t) => `<button type="button" data-gs-type="${t}" class="map-guide-type-btn${curType === t ? ' active' : ''}" style="--gs-c:${getGuideTypeColor(t)}" title="${selShape ? '고른 가이드를 ' + api.TYPE_LABELS[t] + '(으)로' : '새 가이드: ' + api.TYPE_LABELS[t] + (t === 'column' ? ' (원)' : ' (직선)')} (${api.TYPES.indexOf(t) + 1})"><i></i>${api.TYPE_LABELS[t]}</button>`).join('');
         const html = `<span class="map-count-title">가이드 <small>${n}</small></span>`
-            + `<button type="button" data-gs-act="circle" class="${k === 'circle' ? 'active' : ''}" title="원 (C) — 가운데에서 끌어 크기">◯ 원</button>`
-            + `<button type="button" data-gs-act="line" class="${k === 'line' ? 'active' : ''}" title="직선 (L)">╱ 직선</button>`
             + typeBtns
             + `<button type="button" data-gs-act="del" ${gsSelectedId ? '' : 'disabled'} title="고른 가이드 지우기 (Delete)">🗑 지우기</button>`
             + `<button type="button" data-gs-act="undo" title="되돌리기 (Ctrl+Z)">↶ 되돌리기</button>`
             + `<button type="button" data-gs-act="show" class="${readGsShowPref() ? 'active' : ''}" title="가이드 모드가 아닐 때도 보이기">가이드 보이기</button>`
             + `<button type="button" data-gs-act="close">닫기</button>`
-            + `<span class="map-count-hint">원은 가운데에서 바깥으로 끌어 그리기 · 눌러 고르고 끌어 옮기기 · 모서리 □로 크기 · 화면 전용(출력 안 됨)</span>`;
+            + `<span class="map-count-hint">기둥=원(가운데에서 끌어 크기) · 거더·빔=직선 · 눌러 고르고 끌어 옮기기 · 모서리 □로 크기 · 화면 전용(출력 안 됨)</span>`;
         if (bar._h !== html) { bar._h = html; bar.innerHTML = html; }
         if (typeof placeMemberCountBar === 'function') placeMemberCountBar(bar, host);
     }
@@ -25772,8 +25771,6 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
         if ((e.key === 'Delete' || e.key === 'Backspace') && gsSelectedId) { e.preventDefault(); e.stopPropagation(); deleteSelectedGuide(); }
         else if ((e.ctrlKey || e.metaKey) && !e.shiftKey && (e.key === 'z' || e.key === 'Z')) { e.preventDefault(); e.stopPropagation(); undoGuide(); }
-        else if (!e.ctrlKey && !e.metaKey && !e.altKey && (e.key === 'c' || e.key === 'C' || e.key === 'r' || e.key === 'R')) { e.preventDefault(); e.stopPropagation(); setGsKind('circle'); }
-        else if (!e.ctrlKey && !e.metaKey && !e.altKey && (e.key === 'l' || e.key === 'L')) { e.preventDefault(); e.stopPropagation(); setGsKind('line'); }
         else if (!e.ctrlKey && !e.metaKey && !e.altKey && ['1', '2', '3'].includes(e.key)) { e.preventDefault(); e.stopPropagation(); setGsType(['column', 'girder', 'beam'][Number(e.key) - 1]); }
         else if (e.key === 'Escape') { if (gsSelectedId) { gsSelectedId = ''; syncGuideOverlay(); syncGuideBar(); } else setDrawMode('PAN'); e.stopPropagation(); }
     }, true);
