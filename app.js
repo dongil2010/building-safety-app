@@ -10709,6 +10709,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         defectGoodGrade3: '#000000',
         priorityManage: '#00ff00',
         drawingMemo: '#000000',
+        guideColumn: '#e11d48',
+        guideGirder: '#7c3aed',
+        guideBeam: '#0d9488',
         ndtMeasure: '#000000',
         ndtStrength: '#ff0000',
         ndtCarbonation: '#0000ff',
@@ -25241,6 +25244,49 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
      * 기둥·거더·빔 자리를 표시하려는 보조선. 결함 아님 — 한글·PDF·그림·엑셀 출력은 캔버스에서 그리므로
      * 이 SVG(DOM)는 들어가지 않는다. 층마다 저장·동기화(pack.guideShapes). */
     function gsApi() { return window.BSA && window.BSA.guideShapes; }
+    /* 2026-10-14 가이드 종류(기둥·거더·빔)별 색 + 진하기. 색은 스타일 설정(styleColors.guideColumn/Girder/Beam),
+     * 진하기는 styleColors.guideOpacity(0.15~1, 기본 0.55)에 함께 둔다 → 색과 똑같이 저장·층별·동기화된다. */
+    const GUIDE_TYPE_STYLE_KEYS = { column: 'guideColumn', girder: 'guideGirder', beam: 'guideBeam' };
+    const GUIDE_OPACITY_DEFAULT = 0.55;
+    function clampGuideOpacity(v) {
+        const n = parseFloat(v);
+        return Number.isFinite(n) ? Math.min(1, Math.max(0.15, Math.round(n * 100) / 100)) : GUIDE_OPACITY_DEFAULT;
+    }
+    function getGuideOpacity() {
+        const raw = state.styleColors && state.styleColors.guideOpacity;
+        return raw == null || raw === '' ? GUIDE_OPACITY_DEFAULT : clampGuideOpacity(raw);
+    }
+    function getGuideTypeColor(type) { return getStyleColor(GUIDE_TYPE_STYLE_KEYS[type] || 'guideColumn'); }
+    function syncGuideOpacityUi() {
+        const op = getGuideOpacity();
+        const input = document.getElementById('styleGuideOpacity');
+        const label = document.getElementById('styleGuideOpacityLabel');
+        if (input) input.value = op;
+        if (label) label.textContent = `${Math.round(op * 100)}%`;
+    }
+    const GS_TYPE_KEY = 'bsa_guide_type';
+    function gsType() {
+        let t = '';
+        try { t = localStorage.getItem(GS_TYPE_KEY) || ''; } catch (_e) { /* ignore */ }
+        return GUIDE_TYPE_STYLE_KEYS[t] ? t : '';
+    }
+    /** 새로 그릴 종류: 고른 종류가 없으면 사각형=기둥, 직선=빔 */
+    function gsTypeForNew(kind) { return gsType() || gsApi().defaultType(kind); }
+    /** 종류 버튼: 고른 가이드가 있으면 그 가이드 종류를 바꾸고(되돌리기 가능), 다음에 그릴 종류로도 기억 */
+    function setGsType(t) {
+        if (!GUIDE_TYPE_STYLE_KEYS[t]) return;
+        try { localStorage.setItem(GS_TYPE_KEY, t); } catch (_e) { /* ignore */ }
+        const api = gsApi();
+        const floorKey = currentMemoFloorKey();
+        const d = api && gsSelectedId ? api.listFor(state, floorKey).find((x) => x.id === gsSelectedId) : null;
+        if (d && api.typeOf(d) !== t) {
+            gsPushUndo({ op: 'edit', floorKey, rec: Object.assign({}, d, { type: api.typeOf(d) }) });
+            api.update(state, floorKey, d.id, { type: t });
+            commitGuideChange(floorKey);
+            return;
+        }
+        syncGuideBar();
+    }
     const GS_KIND_KEY = 'bsa_guide_kind';
     const GS_SHOW_KEY = 'bsa_guide_show';
     let gsUndo = [];        // [{ op:'add'|'remove'|'edit', floorKey, rec(이전 상태) }]
@@ -25263,7 +25309,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const last = gsUndo.pop();
         if (!api || !last) { window.showToast('되돌릴 것이 없습니다.', 'info', 1600); return; }
         if (last.op === 'add') api.remove(state, last.floorKey, last.rec.id);
-        else if (last.op === 'remove') api.add(state, last.floorKey, last.rec.kind, last.rec.x1, last.rec.y1, last.rec.x2, last.rec.y2, { id: last.rec.id, createdAt: last.rec.createdAt });
+        else if (last.op === 'remove') api.add(state, last.floorKey, last.rec.kind, last.rec.x1, last.rec.y1, last.rec.x2, last.rec.y2, { id: last.rec.id, createdAt: last.rec.createdAt, type: last.rec.type });
         else if (last.op === 'edit') api.update(state, last.floorKey, last.rec.id, last.rec);
         if (gsSelectedId && !api.listFor(state, last.floorKey).some((d) => d.id === gsSelectedId)) gsSelectedId = '';
         commitGuideChange(last.floorKey);
@@ -25315,13 +25361,22 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (gsSelectedId && !list.some((d) => d.id === gsSelectedId)) gsSelectedId = '';
         const ns = 'http://www.w3.org/2000/svg';
         const frag = document.createDocumentFragment();
+        const guideOp = getGuideOpacity();
         list.forEach((d) => {
             const pts = api.screenPoints(d, memoImgToScreen);
             const sel = d.id === gsSelectedId && state.mode === 'GUIDE';
             const el = document.createElementNS(ns, d.kind === 'rect' ? 'polygon' : 'line');
             if (d.kind === 'rect') el.setAttribute('points', pts.map((p) => `${p.sx.toFixed(1)},${p.sy.toFixed(1)}`).join(' '));
             else { el.setAttribute('x1', pts[0].sx); el.setAttribute('y1', pts[0].sy); el.setAttribute('x2', pts[1].sx); el.setAttribute('y2', pts[1].sy); }
-            el.setAttribute('class', `map-guide-shape map-guide-${d.kind}${sel ? ' is-selected' : ''}`);
+            const gType = api.typeOf(d);
+            el.setAttribute('class', `map-guide-shape map-guide-${d.kind} map-guide-type-${gType}${sel ? ' is-selected' : ''}`);
+            if (!sel) {
+                const c = getGuideTypeColor(gType);
+                el.style.stroke = c;
+                el.style.strokeOpacity = String(guideOp);
+                el.style.fill = d.kind === 'rect' ? c : 'none';
+                el.style.fillOpacity = String(Math.round(guideOp * 0.22 * 1000) / 1000);
+            }
             el.dataset.id = d.id;
             frag.appendChild(el);
             if (sel) pts.forEach((p, i) => {
@@ -25371,7 +25426,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 gsDrag = { mode: hit.part === 'body' ? 'move' : hit.part, id: hit.shape.id, start: img, orig: Object.assign({}, hit.shape), pointerId: e.pointerId, moved: false };
             } else {
                 gsSelectedId = '';
-                gsDrag = { mode: 'new', kind: gsKind(), start: img, cur: img, s0: p, pointerId: e.pointerId, moved: false };
+                gsDrag = { mode: 'new', kind: gsKind(), type: gsTypeForNew(gsKind()), start: img, cur: img, s0: p, pointerId: e.pointerId, moved: false };
             }
             try { ov.setPointerCapture(e.pointerId); } catch (_e) { /* ignore */ }
             syncGuideOverlay();
@@ -25409,7 +25464,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             if (drag.mode === 'new') {
                 if (drag.moved && e.type !== 'pointercancel') {
                     const s = drag.start, c = drag.cur;
-                    const rec = api.add(state, floorKey, drag.kind, s.x, s.y, c.x, c.y);
+                    const rec = api.add(state, floorKey, drag.kind, s.x, s.y, c.x, c.y, { type: drag.type });
                     if (rec) { gsSelectedId = rec.id; gsPushUndo({ op: 'add', floorKey, rec: Object.assign({}, rec) }); commitGuideChange(floorKey); return; }
                 }
                 syncGuideOverlay(); syncGuideBar();
@@ -25435,7 +25490,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (!ov) return;
         let r = ov.querySelector('.map-guide-rubber');
         const ns = 'http://www.w3.org/2000/svg';
-        const tmp = { kind: drag.kind, x1: drag.start.x, y1: drag.start.y, x2: drag.cur.x, y2: drag.cur.y };
+        const tmp = { kind: drag.kind, type: drag.type, x1: drag.start.x, y1: drag.start.y, x2: drag.cur.x, y2: drag.cur.y };
         const pts = gsApi().screenPoints(tmp, memoImgToScreen);
         if (!r || r.tagName.toLowerCase() !== (drag.kind === 'rect' ? 'polygon' : 'line')) {
             if (r) r.remove();
@@ -25443,6 +25498,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             r.setAttribute('class', `map-guide-shape map-guide-${drag.kind} map-guide-rubber`);
             ov.appendChild(r);
         }
+        r.style.stroke = getGuideTypeColor(drag.type || gsApi().defaultType(drag.kind));
+        r.style.fill = drag.kind === 'rect' ? r.style.stroke : 'none';
+        r.style.fillOpacity = '0.12';
         if (drag.kind === 'rect') r.setAttribute('points', pts.map((p) => `${p.sx.toFixed(1)},${p.sy.toFixed(1)}`).join(' '));
         else { r.setAttribute('x1', pts[0].sx); r.setAttribute('y1', pts[0].sy); r.setAttribute('x2', pts[1].sx); r.setAttribute('y2', pts[1].sy); }
     }
@@ -25464,6 +25522,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 e.preventDefault();
                 const a = b.dataset.gsAct;
                 if (a === 'rect' || a === 'line') setGsKind(a);
+                else if (b.dataset.gsType) setGsType(b.dataset.gsType);
                 else if (a === 'del') deleteSelectedGuide();
                 else if (a === 'undo') undoGuide();
                 else if (a === 'show') setGsShow(!readGsShowPref());
@@ -25474,10 +25533,15 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (bar.parentElement !== host) host.appendChild(bar);
         bar.hidden = false;
         const k = gsKind();
-        const n = api.listFor(state, currentMemoFloorKey()).length;
+        const gsList = api.listFor(state, currentMemoFloorKey());
+        const n = gsList.length;
+        const selShape = gsSelectedId ? gsList.find((d) => d.id === gsSelectedId) : null;
+        const curType = selShape ? api.typeOf(selShape) : gsTypeForNew(k);
+        const typeBtns = api.TYPES.map((t) => `<button type="button" data-gs-type="${t}" class="map-guide-type-btn${curType === t ? ' active' : ''}" style="--gs-c:${getGuideTypeColor(t)}" title="${selShape ? '고른 가이드를 ' + api.TYPE_LABELS[t] + '(으)로' : '새 가이드 종류: ' + api.TYPE_LABELS[t]}"><i></i>${api.TYPE_LABELS[t]}</button>`).join('');
         const html = `<span class="map-count-title">가이드 <small>${n}</small></span>`
             + `<button type="button" data-gs-act="rect" class="${k === 'rect' ? 'active' : ''}" title="사각형 (R)">▭ 사각형</button>`
             + `<button type="button" data-gs-act="line" class="${k === 'line' ? 'active' : ''}" title="직선 (L)">╱ 직선</button>`
+            + typeBtns
             + `<button type="button" data-gs-act="del" ${gsSelectedId ? '' : 'disabled'} title="고른 가이드 지우기 (Delete)">🗑 지우기</button>`
             + `<button type="button" data-gs-act="undo" title="되돌리기 (Ctrl+Z)">↶ 되돌리기</button>`
             + `<button type="button" data-gs-act="show" class="${readGsShowPref() ? 'active' : ''}" title="가이드 모드가 아닐 때도 보이기">가이드 보이기</button>`
@@ -25495,6 +25559,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         else if ((e.ctrlKey || e.metaKey) && !e.shiftKey && (e.key === 'z' || e.key === 'Z')) { e.preventDefault(); e.stopPropagation(); undoGuide(); }
         else if (!e.ctrlKey && !e.metaKey && !e.altKey && (e.key === 'r' || e.key === 'R')) { e.preventDefault(); e.stopPropagation(); setGsKind('rect'); }
         else if (!e.ctrlKey && !e.metaKey && !e.altKey && (e.key === 'l' || e.key === 'L')) { e.preventDefault(); e.stopPropagation(); setGsKind('line'); }
+        else if (!e.ctrlKey && !e.metaKey && !e.altKey && ['1', '2', '3'].includes(e.key)) { e.preventDefault(); e.stopPropagation(); setGsType(['column', 'girder', 'beam'][Number(e.key) - 1]); }
         else if (e.key === 'Escape') { if (gsSelectedId) { gsSelectedId = ''; syncGuideOverlay(); syncGuideBar(); } else setDrawMode('PAN'); e.stopPropagation(); }
     }, true);
 
@@ -30706,6 +30771,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         ['styleColorDefectGoodGrade3', 'defectGoodGrade3'],
         ['styleColorPriorityManage', 'priorityManage'],
         ['styleColorDrawingMemo', 'drawingMemo'],
+        ['styleColorGuideColumn', 'guideColumn'],
+        ['styleColorGuideGirder', 'guideGirder'],
+        ['styleColorGuideBeam', 'guideBeam'],
         ['styleColorNdtMeasure', 'ndtMeasure'],
         ['styleColorNdtStrength', 'ndtStrength'],
         ['styleColorNdtCarbonation', 'ndtCarbonation'],
@@ -30764,6 +30832,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
     function populateStyleColorModalControls() {
         migrateStyleColorsToPureDefaults();
+        syncGuideOpacityUi();
         STYLE_COLOR_FIELDS.forEach(([inputId, key]) => {
             const input = document.getElementById(inputId);
             if (input) input.value = getStyleColor(key);
@@ -31046,6 +31115,14 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 if (e.target === styleModalEl) closeStyleColorModal();
             });
         }
+
+        const guideOpInput = document.getElementById('styleGuideOpacity');
+        if (guideOpInput) guideOpInput.addEventListener('input', () => {
+            if (!state.styleColors) state.styleColors = {};
+            state.styleColors.guideOpacity = String(clampGuideOpacity(guideOpInput.value));
+            syncGuideOpacityUi();
+            refreshAllStyleColoredCanvases();
+        });
 
         STYLE_COLOR_FIELDS.forEach(([inputId, key]) => {
             const input = document.getElementById(inputId);

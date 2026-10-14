@@ -2,7 +2,8 @@
  * 도면 가이드(2026-10-14) — 기둥·거더·빔 위치를 표시하려고 그리는 사각형·직선.
  * 결함이 아니다: 화면 전용. 한글·PDF·그림 내보내기·엑셀에 안 들어간다(DOM 위에만 그림).
  *
- * state.guideShapes[층키] = [{ id, kind:'rect'|'line', x1, y1, x2, y2, createdAt, updatedAt }]
+ * state.guideShapes[층키] = [{ id, kind:'rect'|'line', type:'column'|'girder'|'beam', x1, y1, x2, y2, createdAt, updatedAt }]
+ *   - type(2026-10-14): 기둥·거더·빔. 예전 가이드엔 없음 → 사각형=기둥, 직선=빔으로 본다(typeOf).
  *   - 좌표: 도면 원본 픽셀. rect는 (x1,y1)-(x2,y2) 맞모서리.
  *   - 층 묶음(pack.guideShapes)에 실어 부재 수 점과 같은 규칙(updatedAt·묘비)으로 합친다.
  *   - 고칠 때마다 updatedAt = max(now, 이전+1) — 늦게 고친 기기가 이긴다.
@@ -11,6 +12,10 @@
     'use strict';
 
     var KINDS = ['rect', 'line'];
+    var TYPES = ['column', 'girder', 'beam'];
+    var TYPE_LABELS = { column: '기둥', girder: '거더', beam: '빔' };
+    function defaultType(kind) { return kind === 'line' ? 'beam' : 'column'; }
+    function typeOf(d) { return (d && TYPES.indexOf(d.type) >= 0) ? d.type : defaultType(d && d.kind); }
 
     function ensureMaps(st) {
         if (!st.guideShapes || typeof st.guideShapes !== 'object') st.guideShapes = {};
@@ -33,6 +38,7 @@
         var o = opts || {};
         var now = Number(o.now) || Date.now();
         var d = { id: o.id || ('gs_' + now + '_' + Math.random().toString(36).slice(2, 8)), kind: kind,
+            type: TYPES.indexOf(o.type) >= 0 ? o.type : defaultType(kind),
             x1: num(x1), y1: num(y1), x2: num(x2), y2: num(y2), createdAt: Number(o.createdAt) || now, updatedAt: now };
         if (!valid(d)) return null;
         ensureMaps(st);
@@ -54,6 +60,7 @@
         var d = listFor(st, floorKey).find(function (x) { return x.id === id; });
         if (!d || !patch) return null;
         ['x1', 'y1', 'x2', 'y2'].forEach(function (k) { if (patch[k] != null && Number.isFinite(Number(patch[k]))) d[k] = num(patch[k]); });
+        if (TYPES.indexOf(patch.type) >= 0) d.type = patch.type;
         d.updatedAt = nextStamp(d.updatedAt, now);
         return d;
     }
@@ -148,7 +155,7 @@
         return true;
     }
 
-    var api = { KINDS: KINDS, ensureMaps: ensureMaps, listFor: listFor, add: add, update: update, remove: remove,
+    var api = { KINDS: KINDS, TYPES: TYPES, TYPE_LABELS: TYPE_LABELS, defaultType: defaultType, typeOf: typeOf, ensureMaps: ensureMaps, listFor: listFor, add: add, update: update, remove: remove,
         screenPoints: screenPoints, hitTest: hitTest, packFor: packFor, packHasContent: packHasContent, mergePackIntoState: mergePackIntoState };
     if (typeof module !== 'undefined' && module.exports) module.exports = api;
     if (root) { root.BSA = root.BSA || {}; root.BSA.guideShapes = api; }
