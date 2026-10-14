@@ -35,7 +35,10 @@
     function alpha() { var a = parseFloat(pref(ALPHA_KEY, '0.55')); return Number.isFinite(a) ? Math.min(1, Math.max(0.2, a)) : 0.55; }
     function toast(msg, kind, ms) { if (typeof window.showToast === 'function') window.showToast(msg, kind || 'info', ms || 2500); }
     function state() { return window.state; }
-    function list() { return api.listFor(state(), B.floorKey()); }
+    // 지금은 기둥·거더·빔만 보이고 다룬다(예전에 넣은 벽·슬래브는 자료에 남겨 두고 화면에서만 뺀다, 2026-10-14)
+    var ACTIVE = api.ACTIVE_TYPES || api.TYPES;
+    function active(d) { return ACTIVE.indexOf(d.type) >= 0; }
+    function list() { return api.listFor(state(), B.floorKey()).filter(active); }
 
     (function injectStyle() {
         if (document.getElementById('structLayerStyle')) return;
@@ -326,7 +329,7 @@
         var had = api.listFor(state(), floorKey).length;
         var hadOverlay = api.overlayFor(state(), floorKey);
         if ((had || hadOverlay) && !window.confirm('이 층에 있던 구조도' + (had ? '(부재 ' + had + '개)' : '') + '를 지우고 새로 넣습니다. 계속할까요?')) { syncBar(); return; }
-        var n = api.importMembers(state(), floorKey, d.members || [], fit);
+        var n = api.importMembers(state(), floorKey, (d.members || []).filter(active), fit);
         // 통째로 바꿨으니 이 층의 되돌리기 기록은 버린다(되돌리면 새로 넣은 것과 섞인다)
         if (ui.hist) delete ui.hist[floorKey];
         setPref(SHOW_KEY, '1');
@@ -381,7 +384,7 @@
             html += '<button type="button" data-act="import" title="「구조도 부재」 페이지에서 보낸 부재를 이 층에 넣습니다">가져오기</button>'
                 + '<button type="button" data-act="edit" class="' + (ui.editing ? 'active' : '') + '" title="옮기기·지우기·추가">편집</button>';
             if (ui.editing) {
-                html += api.TYPES.map(function (t) {
+                html += ACTIVE.map(function (t) {
                     return '<button type="button" data-act="type" data-type="' + t + '" class="map-count-type' + (ui.addType === t ? ' active' : '') + '" style="--mc-color:' + api.COLORS[t] + '" title="' + (ui.selId ? '고른 부재를 ' + t + '(으)로' : '빈 곳을 눌러 ' + t + ' 추가') + '">' + t + ' <b><small>' + c[t] + '</small></b></button>';
                 }).join('')
                     + '<button type="button" data-act="del" ' + (ui.selId ? '' : 'disabled') + ' title="고른 부재 지우기 (Delete)">지우기</button>'
@@ -395,7 +398,7 @@
                 + '<button type="button" data-act="close">닫기</button>';
             html += '<span class="map-count-hint">' + (ui.editing
                 ? '눌러 고르고 끌어 옮기기 · 종류 단추로 바꾸기/추가 · Ctrl+Z 되돌리기 · 화면 전용(출력 안 됨)'
-                : api.TYPES.map(function (t) { return t + ' ' + c[t]; }).join(' · ')) + '</span>';
+                : ACTIVE.map(function (t) { return t + ' ' + c[t]; }).join(' · ')) + '</span>';
         }
         if (bar._h !== html) { bar._h = html; bar.innerHTML = html; }
         if (typeof B.placeBar === 'function') B.placeBar(bar, host);

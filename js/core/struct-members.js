@@ -18,8 +18,9 @@
 (function (root) {
     'use strict';
 
-    var TYPES = ['기둥', '벽', '거더', '빔', '슬래브'];
-    var COLORS = { '기둥': '#dc2626', '벽': '#7c3aed', '거더': '#2563eb', '빔': '#d97706', '슬래브': '#16a34a' };
+    var TYPES = ['기둥', '벽', '거더', '빔', '슬래브'];          // 저장된 자료가 가질 수 있는 종류(옛 벽·슬래브 자료도 깨지지 않게 그대로)
+    var ACTIVE_TYPES = ['기둥', '거더', '빔'];                   // 지금 화면에서 다루는 종류(벽·슬래브는 우선 뺌, 2026-10-14)
+    var COLORS = { '기둥': '#dc2626', '벽': '#7c3aed', '거더': '#2563eb', '빔': '#b7791f', '슬래브': '#16a34a' };   // 기둥 빨강 · 거더 파랑 · 빔 황토
 
     function ensureMaps(st) {
         if (!st.structMembers || typeof st.structMembers !== 'object') st.structMembers = {};
@@ -249,7 +250,7 @@
     function saveHandoff(data) { return handoffTx('readwrite', function (s) { return s.put(data, 'latest'); }); }
     function loadHandoff() { return handoffTx('readonly', function (s) { return s.get('latest'); }); }
 
-    var api = { TYPES: TYPES, COLORS: COLORS, ensureMaps: ensureMaps, listFor: listFor, hasAny: hasAny, add: add, update: update, remove: remove,
+    var api = { TYPES: TYPES, ACTIVE_TYPES: ACTIVE_TYPES, COLORS: COLORS, ensureMaps: ensureMaps, listFor: listFor, hasAny: hasAny, add: add, update: update, remove: remove,
         applyRecord: applyRecord, clear: clear, countsByType: countsByType, fitTwoPoints: fitTwoPoints, applyFit: applyFit, importMembers: importMembers,
         hitTest: hitTest, overlayFor: overlayFor, setOverlay: setOverlay, removeOverlay: removeOverlay,
         saveHandoff: saveHandoff, loadHandoff: loadHandoff, packFor: packFor, packHasContent: packHasContent, mergePackIntoState: mergePackIntoState };

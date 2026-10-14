@@ -196,4 +196,20 @@ assert.ok(layer.includes("if (isZ && !e.shiftKey) undo(); else redo();"));
 assert.ok(layer.includes("e.code === 'KeyZ'"), '한글 입력 상태에서도 Ctrl+Z');
 assert.ok(layer.includes('if (ui.hist) delete ui.hist[floorKey];'));
 
+// ---- 지금은 기둥·거더·빔만(벽·슬래브는 우선 뺌), 색: 기둥 빨강 · 거더 파랑 · 빔 황토 ----
+assert.deepStrictEqual(S.ACTIVE_TYPES, ['기둥', '거더', '빔']);
+assert.ok(S.TYPES.includes('벽') && S.TYPES.includes('슬래브'), '예전 벽·슬래브 자료도 깨지지 않게 저장 종류는 그대로');
+assert.strictEqual(S.COLORS['기둥'], '#dc2626');
+assert.strictEqual(S.COLORS['거더'], '#2563eb');
+assert.strictEqual(S.COLORS['빔'], '#b7791f');
+assert.ok(layer.includes('function list() { return api.listFor(state(), B.floorKey()).filter(active); }'), '화면은 세 종류만');
+assert.ok(layer.includes('(d.members || []).filter(active)'), '가져올 때도 세 종류만');
+{
+    const page = fs.readFileSync(path.join(root, 'js', 'struct-plan-page.js'), 'utf8');
+    const html = fs.readFileSync(path.join(root, 'struct-plan.html'), 'utf8');
+    assert.ok(page.includes("var USE_TYPES = ['기둥', '거더', '빔'];"));
+    assert.ok(page.includes("'빔': '#b7791f'"), '페이지와 앱 색이 같다');
+    assert.ok(!/<option value="(벽|슬래브)">/.test(html), '종류 바꾸기에 벽·슬래브 없음');
+}
+
 console.log('test-struct-members: ok');

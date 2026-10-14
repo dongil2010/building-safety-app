@@ -8,7 +8,9 @@
 
     var SM = window.BSA.structMarks;
     var SS = window.BSA.structShapes || null;   // 옛 HTML(스크립트 태그 없음)이면 없다 — 그때는 기호 방식만
-    var COLORS = { '기둥': '#dc2626', '벽': '#7c3aed', '거더': '#2563eb', '빔': '#f59e0b', '슬래브': '#16a34a' };
+    // 기둥 빨강 · 거더 파랑 · 빔 황토 (앱 레이어 js/core/struct-members.js COLORS와 같게)
+    var COLORS = { '기둥': '#dc2626', '벽': '#7c3aed', '거더': '#2563eb', '빔': '#b7791f', '슬래브': '#16a34a' };
+    var USE_TYPES = ['기둥', '거더', '빔'];   // 지금 세는 종류(벽·슬래브는 우선 뺌)
     var PDF_WORKER = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
     var $ = function (id) { return document.getElementById(id); };
     var ZOOM_MAX = 8;
@@ -145,7 +147,9 @@
         var el = $('readMode');
         return el && el.value === 'shapes' && SS ? 'shapes' : 'marks';
     }
-    function clone(list) { return (list || []).map(function (m) { return Object.assign({}, m); }); }
+    /** 지금은 기둥·거더·빔만 센다(벽·슬래브는 나중에, 2026-10-14) */
+    function useType(m) { return USE_TYPES.indexOf(m.type) >= 0; }
+    function clone(list) { return (list || []).filter(useType).map(function (m) { return Object.assign({}, m); }); }
     /** 읽어 둔 결과에서 화면 목록을 다시 만든다(바꾼 종류·뺀 것은 처음으로 돌아간다) */
     function applyMode() {
         if (!st.marks) { redraw(); renderSide(); return; }
@@ -156,19 +160,19 @@
             st.unread = [];
             redraw(); renderSide();
             setStatus(st.members.length
-                ? '실제 도형: 기둥 ' + s.columns + ' · 벽 ' + s.walls + ' · 보 ' + s.beams + '칸'
+                ? '실제 도형: 기둥 ' + s.columns + ' · 보 ' + s.beams + '칸'
                     + (s.guessed ? ' (이름 없는 보 ' + s.guessed + '칸은 점선 — 양 끝이 기둥·벽이면 거더, 아니면 빔으로 짐작)' : '')
-                    + ' · 슬래브는 기호. 초안이니 도면에서 확인하고 고쳐 주세요.'
-                : '부재 모양을 찾지 못했습니다. 기둥·벽을 칠하지 않았거나 보를 점선 두 줄로 그리지 않은 도면일 수 있습니다 — 「기호」 방식을 쓰세요.',
+                    + '. 초안이니 도면에서 확인하고 고쳐 주세요.'
+                : '부재 모양을 찾지 못했습니다. 기둥을 칠하지 않았거나 보를 점선 두 줄로 그리지 않은 도면일 수 있습니다 — 「기호」 방식을 쓰세요.',
                 st.members.length ? 'ok' : 'warn');
             return;
         }
         st.members = clone(res.members);
-        st.unread = clone(res.unread);
+        st.unread = (res.unread || []).map(function (m) { return Object.assign({}, m); });
         redraw(); renderSide();
-        setStatus(res.members.length
-            ? '부재 기호 ' + res.members.length + '개를 찾았습니다 (' + st.ms + 'ms). 초안이니 도면에서 확인하고 고쳐 주세요.'
-            : '부재 기호를 찾지 못했습니다. 기호가 테두리(네모·알약·타원) 없이 그려진 도면일 수 있습니다.', res.members.length ? 'ok' : 'warn');
+        setStatus(st.members.length
+            ? '부재 기호 ' + st.members.length + '개를 찾았습니다 (' + st.ms + 'ms). 초안이니 도면에서 확인하고 고쳐 주세요.'
+            : '부재 기호를 찾지 못했습니다. 기호가 테두리(네모·알약·타원) 없이 그려진 도면일 수 있습니다.', st.members.length ? 'ok' : 'warn');
     }
 
     /**
@@ -206,7 +210,7 @@
         var r = st.region;
         return !r || (m.x >= r.x0 && m.x <= r.x1 && m.y >= r.y0 && m.y <= r.y1);
     }
-    function counted() { return st.members.filter(function (m) { return !m.excluded && inRegion(m); }); }
+    function counted() { return st.members.filter(function (m) { return !m.excluded && useType(m) && inRegion(m); }); }
 
     function redraw() {
         var cv = $('view');
@@ -255,7 +259,7 @@
     function renderSide() {
         var list = counted();
         var c = SM.countsByType(list);
-        $('counts').innerHTML = SM.TYPES.map(function (t) {
+        $('counts').innerHTML = USE_TYPES.map(function (t) {
             return '<div class="count"><span class="dot" style="background:' + COLORS[t] + '"></span><span>' + t + '</span><b>' + c[t] + '</b></div>';
         }).join('') + '<div class="count total"><span></span><span>합계</span><b>' + list.length + '</b></div>';
         var out = st.members.length - list.length;
@@ -263,7 +267,7 @@
         var groups = SM.labelGroups(list);
         $('groups').innerHTML = groups.length ? groups.map(function (g) {
             return '<tr><td><b>' + (g.label ? esc(g.label) : '<span class="muted">(이름 없음)</span>') + '</b></td><td class="num">' + g.count + '</td><td><select data-label="' + esc(g.label) + '">'
-                + SM.TYPES.map(function (t) { return '<option' + (t === g.type ? ' selected' : '') + '>' + t + '</option>'; }).join('')
+                + USE_TYPES.map(function (t) { return '<option' + (t === g.type ? ' selected' : '') + '>' + t + '</option>'; }).join('')
                 + '<option value="">빼기</option></select></td></tr>';
         }).join('') : '<tr><td colspan="3" class="muted">아직 찾은 기호가 없습니다.</td></tr>';
         $('btnCopy').disabled = !list.length;
@@ -437,7 +441,7 @@
         });
         $('btnCopy').addEventListener('click', function () {
             var c = SM.countsByType(counted());
-            var text = (st.fileName ? st.fileName + '\n' : '') + SM.TYPES.map(function (t) { return t + '\t' + c[t]; }).join('\n');
+            var text = (st.fileName ? st.fileName + '\n' : '') + USE_TYPES.map(function (t) { return t + '\t' + c[t]; }).join('\n');
             navigator.clipboard.writeText(text).then(function () { setStatus('부재 수를 복사했습니다(엑셀에 붙여 넣을 수 있습니다).', 'ok'); },
                 function () { setStatus('복사하지 못했습니다.', 'warn'); });
         });
