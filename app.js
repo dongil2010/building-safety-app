@@ -25497,7 +25497,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     let gsUndo = [];        // [{ op:'add'|'remove'|'edit', floorKey, rec(이전 상태) }]
     let gsSelectedId = '';
     let gsDrag = null;      // { mode:'new'|'move'|'h0'..'h3', id, start:{x,y}, orig, pointerId, moved }
-    function gsKind() { let k = ''; try { k = localStorage.getItem(GS_KIND_KEY) || ''; } catch (_e) { /* ignore */ } return k === 'line' ? 'line' : 'rect'; }
+    function gsKind() { let k = ''; try { k = localStorage.getItem(GS_KIND_KEY) || ''; } catch (_e) { /* ignore */ } return k === 'line' ? 'line' : 'circle'; }
     function setGsKind(k) { try { localStorage.setItem(GS_KIND_KEY, k); } catch (_e) { /* ignore */ } syncGuideBar(); }
     function readGsShowPref() { try { return localStorage.getItem(GS_SHOW_KEY) !== '0'; } catch (_e) { return true; } }
     function setGsShow(on) { try { localStorage.setItem(GS_SHOW_KEY, on ? '1' : '0'); } catch (_e) { /* ignore */ } syncGuideOverlay(); syncGuideBar(); }
@@ -25570,18 +25570,17 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         list.forEach((d) => {
             const pts = api.screenPoints(d, memoImgToScreen);
             const sel = d.id === gsSelectedId && state.mode === 'GUIDE';
-            const el = document.createElementNS(ns, d.kind === 'rect' ? 'polygon' : 'line');
-            if (d.kind === 'rect') el.setAttribute('points', pts.map((p) => `${p.sx.toFixed(1)},${p.sy.toFixed(1)}`).join(' '));
+            const el = document.createElementNS(ns, gsSvgTag(d.kind));
+            if (d.kind === 'circle') gsSetCircleAttrs(el, pts);
+            else if (d.kind === 'rect') el.setAttribute('points', pts.map((p) => `${p.sx.toFixed(1)},${p.sy.toFixed(1)}`).join(' '));
             else { el.setAttribute('x1', pts[0].sx); el.setAttribute('y1', pts[0].sy); el.setAttribute('x2', pts[1].sx); el.setAttribute('y2', pts[1].sy); }
             const gType = api.typeOf(d);
             el.setAttribute('class', `map-guide-shape map-guide-${d.kind} map-guide-type-${gType}${sel ? ' is-selected' : ''}`);
-            // 2026-10-14 고른(방금 그린) 가이드도 종류 색 그대로 — 예전엔 주황으로 칠해 그릴 때마다 색이 바뀌어 보였다.
-            // 고름 표시는 굵은 점선·모서리 손잡이로만.
-            {
+            if (!sel) {
                 const c = getGuideTypeColor(gType);
                 el.style.stroke = c;
-                el.style.strokeOpacity = String(sel ? Math.max(guideOp, 0.85) : guideOp);
-                el.style.fill = d.kind === 'rect' ? c : 'none';
+                el.style.strokeOpacity = String(guideOp);
+                el.style.fill = d.kind !== 'line' ? c : 'none';
                 el.style.fillOpacity = String(Math.round(guideOp * 0.22 * 1000) / 1000);
             }
             el.dataset.id = d.id;
@@ -25602,7 +25601,15 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         return { sx: e.clientX - r.left, sy: e.clientY - r.top };
     }
     /** 꼭짓점 i를 화면 좌표 p로 옮긴 좌표 묶음 */
+    function gsSvgTag(kind) { return kind === 'rect' ? 'polygon' : (kind === 'circle' ? 'circle' : 'line'); }
+    function gsSetCircleAttrs(el, pts) {
+        el.setAttribute('cx', pts[0].sx.toFixed(1));
+        el.setAttribute('cy', pts[0].sy.toFixed(1));
+        el.setAttribute('r', Math.hypot(pts[1].sx - pts[0].sx, pts[1].sy - pts[0].sy).toFixed(1));
+    }
     function gsCornerPatch(d, i, img) {
+        // 원: 0=중심(통째로 옮김), 1=테두리(반지름)
+        if (d.kind === 'circle') return i === 0 ? { x1: img.x, y1: img.y, x2: img.x + (d.x2 - d.x1), y2: img.y + (d.y2 - d.y1) } : { x2: img.x, y2: img.y };
         if (d.kind === 'line') return i === 0 ? { x1: img.x, y1: img.y } : { x2: img.x, y2: img.y };
         return [{ x1: img.x, y1: img.y }, { x2: img.x, y1: img.y }, { x2: img.x, y2: img.y }, { x1: img.x, y2: img.y }][i] || {};
     }
@@ -25699,16 +25706,17 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const ns = 'http://www.w3.org/2000/svg';
         const tmp = { kind: drag.kind, type: drag.type, x1: drag.start.x, y1: drag.start.y, x2: drag.cur.x, y2: drag.cur.y };
         const pts = gsApi().screenPoints(tmp, memoImgToScreen);
-        if (!r || r.tagName.toLowerCase() !== (drag.kind === 'rect' ? 'polygon' : 'line')) {
+        if (!r || r.tagName.toLowerCase() !== gsSvgTag(drag.kind)) {
             if (r) r.remove();
-            r = document.createElementNS(ns, drag.kind === 'rect' ? 'polygon' : 'line');
+            r = document.createElementNS(ns, gsSvgTag(drag.kind));
             r.setAttribute('class', `map-guide-shape map-guide-${drag.kind} map-guide-rubber`);
             ov.appendChild(r);
         }
         r.style.stroke = getGuideTypeColor(drag.type || gsApi().defaultType(drag.kind));
-        r.style.fill = drag.kind === 'rect' ? r.style.stroke : 'none';
+        r.style.fill = drag.kind !== 'line' ? r.style.stroke : 'none';
         r.style.fillOpacity = '0.12';
-        if (drag.kind === 'rect') r.setAttribute('points', pts.map((p) => `${p.sx.toFixed(1)},${p.sy.toFixed(1)}`).join(' '));
+        if (drag.kind === 'circle') gsSetCircleAttrs(r, pts);
+        else if (drag.kind === 'rect') r.setAttribute('points', pts.map((p) => `${p.sx.toFixed(1)},${p.sy.toFixed(1)}`).join(' '));
         else { r.setAttribute('x1', pts[0].sx); r.setAttribute('y1', pts[0].sy); r.setAttribute('x2', pts[1].sx); r.setAttribute('y2', pts[1].sy); }
     }
     /** 가이드 막대: 사각형 · 직선 · 지우기 · 되돌리기 · 보이기 · 닫기 */
@@ -25728,7 +25736,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 if (!b) return;
                 e.preventDefault();
                 const a = b.dataset.gsAct;
-                if (a === 'rect' || a === 'line') setGsKind(a);
+                if (a === 'circle' || a === 'line') setGsKind(a);
                 else if (b.dataset.gsType) setGsType(b.dataset.gsType);
                 else if (a === 'del') deleteSelectedGuide();
                 else if (a === 'undo') undoGuide();
@@ -25746,14 +25754,14 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const curType = selShape ? api.typeOf(selShape) : gsTypeForNew(k);
         const typeBtns = api.TYPES.map((t) => `<button type="button" data-gs-type="${t}" class="map-guide-type-btn${curType === t ? ' active' : ''}" style="--gs-c:${getGuideTypeColor(t)}" title="${selShape ? '고른 가이드를 ' + api.TYPE_LABELS[t] + '(으)로' : '새 가이드 종류: ' + api.TYPE_LABELS[t]}"><i></i>${api.TYPE_LABELS[t]}</button>`).join('');
         const html = `<span class="map-count-title">가이드 <small>${n}</small></span>`
-            + `<button type="button" data-gs-act="rect" class="${k === 'rect' ? 'active' : ''}" title="사각형 (R)">▭ 사각형</button>`
+            + `<button type="button" data-gs-act="circle" class="${k === 'circle' ? 'active' : ''}" title="원 (C) — 가운데에서 끌어 크기">◯ 원</button>`
             + `<button type="button" data-gs-act="line" class="${k === 'line' ? 'active' : ''}" title="직선 (L)">╱ 직선</button>`
             + typeBtns
             + `<button type="button" data-gs-act="del" ${gsSelectedId ? '' : 'disabled'} title="고른 가이드 지우기 (Delete)">🗑 지우기</button>`
             + `<button type="button" data-gs-act="undo" title="되돌리기 (Ctrl+Z)">↶ 되돌리기</button>`
             + `<button type="button" data-gs-act="show" class="${readGsShowPref() ? 'active' : ''}" title="가이드 모드가 아닐 때도 보이기">가이드 보이기</button>`
             + `<button type="button" data-gs-act="close">닫기</button>`
-            + `<span class="map-count-hint">끌어서 그리기 · 눌러 고르고 끌어 옮기기 · 모서리 □로 크기 · 화면 전용(출력 안 됨)</span>`;
+            + `<span class="map-count-hint">원은 가운데에서 바깥으로 끌어 그리기 · 눌러 고르고 끌어 옮기기 · 모서리 □로 크기 · 화면 전용(출력 안 됨)</span>`;
         if (bar._h !== html) { bar._h = html; bar.innerHTML = html; }
         if (typeof placeMemberCountBar === 'function') placeMemberCountBar(bar, host);
     }
@@ -25764,7 +25772,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
         if ((e.key === 'Delete' || e.key === 'Backspace') && gsSelectedId) { e.preventDefault(); e.stopPropagation(); deleteSelectedGuide(); }
         else if ((e.ctrlKey || e.metaKey) && !e.shiftKey && (e.key === 'z' || e.key === 'Z')) { e.preventDefault(); e.stopPropagation(); undoGuide(); }
-        else if (!e.ctrlKey && !e.metaKey && !e.altKey && (e.key === 'r' || e.key === 'R')) { e.preventDefault(); e.stopPropagation(); setGsKind('rect'); }
+        else if (!e.ctrlKey && !e.metaKey && !e.altKey && (e.key === 'c' || e.key === 'C' || e.key === 'r' || e.key === 'R')) { e.preventDefault(); e.stopPropagation(); setGsKind('circle'); }
         else if (!e.ctrlKey && !e.metaKey && !e.altKey && (e.key === 'l' || e.key === 'L')) { e.preventDefault(); e.stopPropagation(); setGsKind('line'); }
         else if (!e.ctrlKey && !e.metaKey && !e.altKey && ['1', '2', '3'].includes(e.key)) { e.preventDefault(); e.stopPropagation(); setGsType(['column', 'girder', 'beam'][Number(e.key) - 1]); }
         else if (e.key === 'Escape') { if (gsSelectedId) { gsSelectedId = ''; syncGuideOverlay(); syncGuideBar(); } else setDrawMode('PAN'); e.stopPropagation(); }

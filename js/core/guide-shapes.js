@@ -11,7 +11,8 @@
 (function (root) {
     'use strict';
 
-    var KINDS = ['rect', 'line'];
+    // circle(2026-10-14): (x1,y1)=중심, (x2,y2)=테두리 한 점. 새로 그리는 기본 도형. rect는 예전 가이드 표시·편집용으로 남김
+    var KINDS = ['rect', 'line', 'circle'];
     var TYPES = ['column', 'girder', 'beam'];
     var TYPE_LABELS = { column: '기둥', girder: '거더', beam: '빔' };
     function defaultType(kind) { return kind === 'line' ? 'beam' : 'column'; }
@@ -89,6 +90,7 @@
         return Math.hypot(px - (ax + t * dx), py - (ay + t * dy));
     }
     /** 화면 꼭짓점: rect → 4개(0:x1y1 1:x2y1 2:x2y2 3:x1y2), line → 2개. toScreen({x,y}) → {sx,sy} */
+    function radiusOf(d) { return Math.hypot(d.x2 - d.x1, d.y2 - d.y1); }
     function screenPoints(d, toScreen) {
         var pts = d.kind === 'rect'
             ? [[d.x1, d.y1], [d.x2, d.y1], [d.x2, d.y2], [d.x1, d.y2]]
@@ -117,6 +119,15 @@
         var best = null, bestScore = Infinity;
         (list || []).forEach(function (d) {
             var p = screenPoints(d, toScreen);
+            if (d.kind === 'circle') {
+                var rs = Math.hypot(p[1].sx - p[0].sx, p[1].sy - p[0].sy);
+                var dc = Math.hypot(sx - p[0].sx, sy - p[0].sy);
+                var sc = Infinity;
+                if (Math.abs(dc - rs) <= tol) sc = Math.abs(dc - rs);
+                else if (dc < rs) sc = tol + 1 + (Math.PI * rs * rs) / 1e6;
+                if (sc < bestScore) { bestScore = sc; best = d; }
+                return;
+            }
             var edge = Infinity;
             for (var i = 0; i < p.length - (d.kind === 'line' ? 1 : 0); i++) {
                 var a = p[i], b = p[(i + 1) % p.length];
@@ -155,7 +166,7 @@
         return true;
     }
 
-    var api = { KINDS: KINDS, TYPES: TYPES, TYPE_LABELS: TYPE_LABELS, defaultType: defaultType, typeOf: typeOf, ensureMaps: ensureMaps, listFor: listFor, add: add, update: update, remove: remove,
+    var api = { KINDS: KINDS, TYPES: TYPES, TYPE_LABELS: TYPE_LABELS, defaultType: defaultType, typeOf: typeOf, radiusOf: radiusOf, ensureMaps: ensureMaps, listFor: listFor, add: add, update: update, remove: remove,
         screenPoints: screenPoints, hitTest: hitTest, packFor: packFor, packHasContent: packHasContent, mergePackIntoState: mergePackIntoState };
     if (typeof module !== 'undefined' && module.exports) module.exports = api;
     if (root) { root.BSA = root.BSA || {}; root.BSA.guideShapes = api; }

@@ -16990,7 +16990,7 @@ html body:not(.bsa-eval-map-on) #mapEvalMemberBar#mapEvalMemberBar { display: no
 .map-guide-shape { fill: rgba(225, 29, 72, 0.12); stroke: #e11d48; stroke-opacity: .55; stroke-width: 2; vector-effect: non-scaling-stroke; } /* 색·진하기는 app.js가 종류별로 넣음 */
 line.map-guide-shape { fill: none; stroke-width: 2.5; }
 .map-guide-overlay.is-active .map-guide-shape { cursor: move; }
-.map-guide-shape.is-selected { stroke-width: 3.5; stroke-dasharray: 7 4; } /* 고른 가이드도 종류 색 유지(app.js) — 굵은 점선으로만 표시 */
+.map-guide-shape.is-selected { stroke: #f97316; stroke-width: 3; stroke-dasharray: none; fill: rgba(249, 115, 22, 0.08); }
 .map-guide-rubber { stroke-opacity: .8; stroke-dasharray: 4 3; }
 .map-guide-handle { fill: #fff; stroke: #f97316; stroke-width: 2; cursor: nwse-resize; }
 .map-guide-bar button[disabled] { opacity: .45; cursor: default; }
