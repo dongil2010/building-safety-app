@@ -147,6 +147,8 @@ assert.ok(/js\/core\/struct-glyphs\.js/.test(html) && /js\/core\/struct-marks\.j
 const index = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
 assert.ok(!/struct-marks\.js|struct-glyphs\.js|struct-plan-page\.js/.test(index), '앱 화면(index.html)은 구조도 스크립트를 싣지 않는다');
 assert.ok(/struct-plan\.html/.test(index), '앱에서 여는 버튼');
+// onclick 속성 안에서 URL 은 document.URL(글자)이라 new URL(...)이 "URL is not a constructor"로 죽는다(눌러도 반응 없음, 2026-10-14)
+assert.ok(!/onclick="[^"]*new URL\(/.test(index), 'onclick 속성에서 new URL 금지');
 assert.ok(/"struct-plan\.html"/.test(fs.readFileSync(path.join(root, 'scripts', 'prepare-pages.py'), 'utf8')), '배포 목록');
 assert.ok(/struct-plan\.html/.test(fs.readFileSync(path.join(root, 'scripts', 'git-sync.ps1'), 'utf8')), '동기화 목록');
 assert.ok(/"struct-plan\.html"/.test(fs.readFileSync(path.join(root, 'package.json'), 'utf8')), 'PC 설치본 목록');
