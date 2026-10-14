@@ -39,7 +39,7 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <meta name="apple-mobile-web-app-title" content="스마트 안전점검">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css">
-    <link rel="stylesheet" href="styles.css?v=20261014_155829">
+    <link rel="stylesheet" href="styles.css?v=20261014_160324">
 
     <!-- FontAwesome icons for clean engineering UI -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
@@ -2567,7 +2567,7 @@
             </div>
             <div class="modal-body" style="display:flex; flex-direction:column; gap:0.75rem;">
                 <p style="font-size:0.8rem; color:#64748b; margin:0;">
-                    같은 현장·같은 회차에 다른 동을 추가합니다. 기준 동의 도면·기본정보를 복사할 수 있습니다.
+                    같은 현장·같은 회차에 동을 추가합니다. 새 동은 도면 없이 만들어집니다.
                 </p>
                 <div>
                     <div class="form-label">현장</div>
@@ -2581,14 +2581,14 @@
                     <label class="form-label" for="addDongNameInput">동 명칭 <span class="req-mark">*</span></label>
                     <input type="text" id="addDongNameInput" class="form-control" placeholder="예: 101동, 102동, A동" autocomplete="off">
                 </div>
-                <div class="form-group" style="margin:0;">
-                    <label class="form-label" for="addDongCloneSource">기준 동 (도면·정보 복사)</label>
+                <label style="display:flex; align-items:center; gap:0.45rem; font-size:0.82rem; font-weight:600; color:#334155;">
+                    <input type="checkbox" id="addDongCloneDrawings">
+                    기준 동의 도면을 이 동에 복사
+                </label>
+                <div class="form-group" id="addDongCloneSourceWrap" style="margin:0;" hidden>
+                    <label class="form-label" for="addDongCloneSource">어느 동에서 가져올까요</label>
                     <select id="addDongCloneSource" class="form-control"></select>
                 </div>
-                <label style="display:flex; align-items:center; gap:0.45rem; font-size:0.82rem; font-weight:600; color:#334155;">
-                    <input type="checkbox" id="addDongCloneDrawings" checked>
-                    기준 동의 도면·층 구성 복사
-                </label>
             </div>
             <div class="modal-footer">
                 <button type="button" class="btn btn-outline" id="btnCancelAddDong">취소</button>
@@ -3457,67 +3457,67 @@
 
     <!-- Core → 탭 분류 → 기존 엔진(app.js) -->
     <!-- 오류 기록은 맨 먼저 — 아래 스크립트들이 읽히다 터져도 잡아야 한다 -->
-    <script src="js/core/error-log.js?v=20261014_155829"></script>
-    <script src="js/core/floor-identity.js?v=20261014_155829"></script>
-    <script src="js/core/state.js?v=20261014_155829"></script>
-    <script src="js/core/ndt-disp-transfer.js?v=20261014_155829"></script>
-    <script src="js/core/ndt-grade.js?v=20261014_155829"></script>
-    <script src="js/tabs/registry.js?v=20261014_155829"></script>
-    <script src="js/pdf-vector-bridge.js?v=20261014_155829"></script>
-    <script src="js/pdf-vector-snap.js?v=20261014_155829"></script>
-    <script src="js/core/layout-mode.js?v=20261014_155829"></script>
-    <script src="js/core/performance.js?v=20261014_155829"></script>
-    <script src="js/shared/app-dialog.js?v=20261014_155829"></script>
-    <script src="js/core/mobile-app-update.js?v=20261014_155829"></script>
-    <script src="js/shared/app-update-button.js?v=20261014_155829"></script>
-    <script src="js/shared/measure-keypad.js?v=20261014_155829"></script>
-    <script src="js/shared/photo-crop.js?v=20261014_155829"></script>
-    <script src="js/core/mobile-keyboard.js?v=20261014_155829"></script>
-    <script src="js/tabs/home.js?v=20261014_155829"></script>
-    <script src="js/tabs/map.js?v=20261014_155829"></script>
-    <script src="js/tabs/survey.js?v=20261014_155829"></script>
-    <script src="js/tabs/stats.js?v=20261014_155829"></script>
-    <script src="js/tabs/ndt.js?v=20261014_155829"></script>
-    <script src="js/shared/report.js?v=20261014_155829"></script>
-    <script src="js/shared/hwpx-survey-slots.js?v=20261014_155829"></script>
-    <script src="js/shared/hwpx-ndt-maps.js?v=20261014_155829"></script>
-    <script src="js/shared/cad-unmarked-place.js?v=20261014_155829"></script>
-    <script src="js/shared/arrow-survey-number.js?v=20261014_155829"></script>
-    <script src="js/shared/defect-merge.js?v=20261014_155829"></script>
-    <script src="js/shared/korean-text-wrap.js?v=20261014_155829"></script>
-    <script src="js/shared/hwpx-import.js?v=20261014_155829"></script>
-    <script src="js/shared/hwpx-validate.js?v=20261014_155829"></script>
-    <script src="js/shared/hwpx-crack-monitor.js?v=20261014_155829"></script>
-    <script src="js/shared/auth.js?v=20261014_155829"></script>
-    <script src="js/core/firebase-storage-assets.js?v=20261014_155829"></script>
-    <script src="js/core/drawing-floor-tombstone.js?v=20261014_155829"></script>
-    <script src="js/core/data-health.js?v=20261014_155829"></script>
-    <script src="js/core/defect-lint.js?v=20261014_155829"></script>
-    <script src="js/core/building-meta-merge.js?v=20261014_155829"></script>
-    <script src="js/core/edit-history.js?v=20261014_155829"></script>
-    <script src="js/core/no-conflict.js?v=20261014_155829"></script>
-    <script src="js/core/sync-merge.js?v=20261014_155829"></script>
-    <script src="js/core/gauge-photo-store.js?v=20261014_155829"></script>
-    <script src="js/core/offline-prep.js?v=20261014_155829"></script>
-    <script src="js/core/drawing-memo.js?v=20261014_155829"></script>
-    <script src="js/core/eval-units.js?v=20261014_155829"></script>
-    <script src="js/core/member-count.js?v=20261014_155829"></script>
-    <script src="js/core/guide-shapes.js?v=20261014_155829"></script>
-    <script src="js/core/struct-members.js?v=20261014_155829"></script>
-    <script src="js/core/safetyman-export.js?v=20261014_155829"></script>
-    <script src="js/core/eval-member.js?v=20261014_155829"></script>
-    <script src="js/core/s357-prefill.js?v=20261014_155829"></script>
-    <script src="js/core/prev-round-photo-match.js?v=20261014_155829"></script>
-    <script src="js/shared/defect-quick-presets.js?v=20261014_155829"></script>
-    <script src="js/shared/grid-lines.js?v=20261014_155829"></script>
-    <script src="js/shared/box-auto-layout.js?v=20261014_155829"></script>
-    <script src="js/shared/print-crop.js?v=20261014_155829"></script>
-    <script src="js/core/legend-layout.js?v=20261014_155829"></script>
-    <script src="js/core/error-log-view.js?v=20261014_155829"></script>
-    <script src="app.js?v=20261014_155829"></script>
+    <script src="js/core/error-log.js?v=20261014_160324"></script>
+    <script src="js/core/floor-identity.js?v=20261014_160324"></script>
+    <script src="js/core/state.js?v=20261014_160324"></script>
+    <script src="js/core/ndt-disp-transfer.js?v=20261014_160324"></script>
+    <script src="js/core/ndt-grade.js?v=20261014_160324"></script>
+    <script src="js/tabs/registry.js?v=20261014_160324"></script>
+    <script src="js/pdf-vector-bridge.js?v=20261014_160324"></script>
+    <script src="js/pdf-vector-snap.js?v=20261014_160324"></script>
+    <script src="js/core/layout-mode.js?v=20261014_160324"></script>
+    <script src="js/core/performance.js?v=20261014_160324"></script>
+    <script src="js/shared/app-dialog.js?v=20261014_160324"></script>
+    <script src="js/core/mobile-app-update.js?v=20261014_160324"></script>
+    <script src="js/shared/app-update-button.js?v=20261014_160324"></script>
+    <script src="js/shared/measure-keypad.js?v=20261014_160324"></script>
+    <script src="js/shared/photo-crop.js?v=20261014_160324"></script>
+    <script src="js/core/mobile-keyboard.js?v=20261014_160324"></script>
+    <script src="js/tabs/home.js?v=20261014_160324"></script>
+    <script src="js/tabs/map.js?v=20261014_160324"></script>
+    <script src="js/tabs/survey.js?v=20261014_160324"></script>
+    <script src="js/tabs/stats.js?v=20261014_160324"></script>
+    <script src="js/tabs/ndt.js?v=20261014_160324"></script>
+    <script src="js/shared/report.js?v=20261014_160324"></script>
+    <script src="js/shared/hwpx-survey-slots.js?v=20261014_160324"></script>
+    <script src="js/shared/hwpx-ndt-maps.js?v=20261014_160324"></script>
+    <script src="js/shared/cad-unmarked-place.js?v=20261014_160324"></script>
+    <script src="js/shared/arrow-survey-number.js?v=20261014_160324"></script>
+    <script src="js/shared/defect-merge.js?v=20261014_160324"></script>
+    <script src="js/shared/korean-text-wrap.js?v=20261014_160324"></script>
+    <script src="js/shared/hwpx-import.js?v=20261014_160324"></script>
+    <script src="js/shared/hwpx-validate.js?v=20261014_160324"></script>
+    <script src="js/shared/hwpx-crack-monitor.js?v=20261014_160324"></script>
+    <script src="js/shared/auth.js?v=20261014_160324"></script>
+    <script src="js/core/firebase-storage-assets.js?v=20261014_160324"></script>
+    <script src="js/core/drawing-floor-tombstone.js?v=20261014_160324"></script>
+    <script src="js/core/data-health.js?v=20261014_160324"></script>
+    <script src="js/core/defect-lint.js?v=20261014_160324"></script>
+    <script src="js/core/building-meta-merge.js?v=20261014_160324"></script>
+    <script src="js/core/edit-history.js?v=20261014_160324"></script>
+    <script src="js/core/no-conflict.js?v=20261014_160324"></script>
+    <script src="js/core/sync-merge.js?v=20261014_160324"></script>
+    <script src="js/core/gauge-photo-store.js?v=20261014_160324"></script>
+    <script src="js/core/offline-prep.js?v=20261014_160324"></script>
+    <script src="js/core/drawing-memo.js?v=20261014_160324"></script>
+    <script src="js/core/eval-units.js?v=20261014_160324"></script>
+    <script src="js/core/member-count.js?v=20261014_160324"></script>
+    <script src="js/core/guide-shapes.js?v=20261014_160324"></script>
+    <script src="js/core/struct-members.js?v=20261014_160324"></script>
+    <script src="js/core/safetyman-export.js?v=20261014_160324"></script>
+    <script src="js/core/eval-member.js?v=20261014_160324"></script>
+    <script src="js/core/s357-prefill.js?v=20261014_160324"></script>
+    <script src="js/core/prev-round-photo-match.js?v=20261014_160324"></script>
+    <script src="js/shared/defect-quick-presets.js?v=20261014_160324"></script>
+    <script src="js/shared/grid-lines.js?v=20261014_160324"></script>
+    <script src="js/shared/box-auto-layout.js?v=20261014_160324"></script>
+    <script src="js/shared/print-crop.js?v=20261014_160324"></script>
+    <script src="js/core/legend-layout.js?v=20261014_160324"></script>
+    <script src="js/core/error-log-view.js?v=20261014_160324"></script>
+    <script src="app.js?v=20261014_160324"></script>
 
     <script>
-        window.BSA_APP_VERSION = '20261014_155829';
+        window.BSA_APP_VERSION = '20261014_160324';
 
         (function () {
             var el = document.getElementById('appVersionText');
@@ -3550,7 +3550,7 @@
                     if (window.caches && caches.keys) caches.keys().then(function(ks) { ks.forEach(function(k) { caches.delete(k); }); }).catch(function() {});
                     return;
                 }
-                navigator.serviceWorker.register('./sw.js?v=20261014_155829')
+                navigator.serviceWorker.register('./sw.js?v=20261014_160324')
 
                     .then(function(registration) {
                         console.log('✅ ServiceWorker Registered Successfully with scope:', registration.scope);

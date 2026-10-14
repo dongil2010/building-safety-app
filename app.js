@@ -7231,6 +7231,14 @@ document.addEventListener('DOMContentLoaded', () => {
         if (el) el.addEventListener('click', () => window.closeAddDongModal());
     });
     document.getElementById('btnConfirmAddDong')?.addEventListener('click', () => window.confirmAddDongFromHome());
+    window.syncAddDongCloneSourceVisibility = function() {
+        const on = !!document.getElementById('addDongCloneDrawings')?.checked;
+        const wrap = document.getElementById('addDongCloneSourceWrap');
+        if (wrap) wrap.hidden = !on;
+    };
+    document.getElementById('addDongCloneDrawings')?.addEventListener('change', () => {
+        window.syncAddDongCloneSourceVisibility();
+    });
     const addDongModal = document.getElementById('addDongModal');
     if (addDongModal) {
         addDongModal.addEventListener('click', (e) => {
@@ -19961,6 +19969,11 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 `<option value="${escapeHtml(b.id)}">${escapeHtml(formatDongRowLabel(b))}</option>`
             ).join('');
         }
+        const cloneEl = document.getElementById('addDongCloneDrawings');
+        if (cloneEl) cloneEl.checked = false;
+        if (typeof window.syncAddDongCloneSourceVisibility === 'function') {
+            window.syncAddDongCloneSourceVisibility();
+        }
         const modal = document.getElementById('addDongModal');
         if (modal) modal.classList.add('open');
         setTimeout(() => nameEl?.focus(), 80);
@@ -20017,7 +20030,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 inspector: sourceBldg.inspector || window.state.userName || '점검자',
                 contactPhone: sourceBldg.contactPhone || '',
                 date: new Date().toISOString().split('T')[0],
-                floors: sourceBldg.floors || '',
+                floors: cloneDrawings ? (sourceBldg.floors || '') : '',
                 inspectionType: sourceBldg.inspectionType || '정밀안전점검',
                 inspectionYear: year,
                 inspectionPeriod: period,
