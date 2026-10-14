@@ -5152,10 +5152,6 @@ document.addEventListener('DOMContentLoaded', () => {
                             <i class="fa-solid fa-images"></i>
                             <span class="icon-btn-label">도면</span>
                         </button>
-                        <button type="button" class="icon-btn icon-btn-overview" title="전경사진" data-action="overview" data-bldg-id="${safeId}" aria-label="전경">
-                            <i class="fa-solid fa-panorama"></i>
-                            <span class="icon-btn-label">전경</span>
-                        </button>
                         <button type="button" class="icon-btn icon-btn-offline" title="오프라인 준비 — 모든 층·도면·사진을 이 기기에 받기" data-action="offline-prep" data-bldg-id="${safeId}" aria-label="오프라인 준비">
                             <i class="fa-solid fa-cloud-arrow-down"></i>
                             <span class="icon-btn-label">오프라인</span>
@@ -5290,10 +5286,6 @@ document.addEventListener('DOMContentLoaded', () => {
                             <button type="button" class="icon-btn icon-btn-drawing" title="도면 추가/교체" data-action="drawing" data-bldg-id="${safeId}" aria-label="도면">
                                 <i class="fa-solid fa-images"></i>
                                 <span class="icon-btn-label">도면</span>
-                            </button>
-                            <button type="button" class="icon-btn icon-btn-overview" title="전경사진" data-action="overview" data-bldg-id="${safeId}" aria-label="전경">
-                                <i class="fa-solid fa-panorama"></i>
-                                <span class="icon-btn-label">전경</span>
                             </button>
                             <button type="button" class="icon-btn icon-btn-offline" title="오프라인 준비 — 모든 층·도면·사진을 이 기기에 받기" data-action="offline-prep" data-bldg-id="${safeId}" aria-label="오프라인 준비">
                                 <i class="fa-solid fa-cloud-arrow-down"></i>
