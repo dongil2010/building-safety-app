@@ -91,6 +91,18 @@
         return Object.assign({}, rec);
     }
 
+    /**
+     * 되돌리기·다시 하기(2026-10-14): 부재 하나를 기록해 둔 모습(rec)으로 맞춘다. rec = null 이면 없앤다.
+     * 바뀐 부재만 건드리므로 그 사이 다른 기기에서 들어온 부재는 그대로 둔다. → 바뀌었으면 true
+     */
+    function applyRecord(st, floorKey, id, rec, now) {
+        if (!st || !floorKey || !id) return false;
+        var cur = listFor(st, floorKey).find(function (d) { return d.id === id; });
+        if (!rec) return !!(cur && remove(st, floorKey, id));
+        if (cur) return !!update(st, floorKey, id, { x: rec.x, y: rec.y, w: rec.w, h: rec.h, type: rec.type, label: rec.label }, now);
+        return !!add(st, floorKey, rec, { id: id, createdAt: rec.createdAt, now: now });
+    }
+
     /** 이 층 부재를 모두 지운다(묘비를 남겨 다른 기기에도 지워진다) → 지운 개수 */
     function clear(st, floorKey) {
         var list = listFor(st, floorKey).slice();
@@ -238,7 +250,7 @@
     function loadHandoff() { return handoffTx('readonly', function (s) { return s.get('latest'); }); }
 
     var api = { TYPES: TYPES, COLORS: COLORS, ensureMaps: ensureMaps, listFor: listFor, hasAny: hasAny, add: add, update: update, remove: remove,
-        clear: clear, countsByType: countsByType, fitTwoPoints: fitTwoPoints, applyFit: applyFit, importMembers: importMembers,
+        applyRecord: applyRecord, clear: clear, countsByType: countsByType, fitTwoPoints: fitTwoPoints, applyFit: applyFit, importMembers: importMembers,
         hitTest: hitTest, overlayFor: overlayFor, setOverlay: setOverlay, removeOverlay: removeOverlay,
         saveHandoff: saveHandoff, loadHandoff: loadHandoff, packFor: packFor, packHasContent: packHasContent, mergePackIntoState: mergePackIntoState };
     if (typeof module !== 'undefined' && module.exports) module.exports = api;

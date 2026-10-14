@@ -158,4 +158,42 @@ assert.strictEqual(S.overlayFor(so2, 'b1_9F'), null);
 assert.ok(layer.includes("function marksOn() { var v = pref(MARKS_KEY, ''); return v === '' ? !overlayNow() : v === '1'; }"));
 assert.ok(layer.includes("'matrix(' + [over.fit.a, over.fit.b, -over.fit.b, over.fit.a, over.fit.tx, over.fit.ty].join(' ') + ')'"));
 
+// ---- 되돌리기·다시 하기(applyRecord): 바뀐 부재만 기록한 모습으로 맞춘다 ----
+{
+    const su = {};
+    const su2 = {};
+    const p = S.add(su, FK, { type: '기둥', label: 'C1', x: 10, y: 10, w: 12, h: 12 }, { now: 100 });
+    const before = Object.assign({}, p);
+    S.update(su, FK, p.id, { x: 50, type: '벽' }, 200);
+    const after = Object.assign({}, S.listFor(su, FK)[0]);
+    // 옮기기·종류 바꾸기 되돌리기 → 다시 하기
+    assert.ok(S.applyRecord(su, FK, p.id, before, 300));
+    let cur = S.listFor(su, FK)[0];
+    assert.ok(cur.x === 10 && cur.type === '기둥' && cur.label === 'C1' && cur.updatedAt === 300, '되돌린 것도 새 시각(다른 기기에 퍼진다)');
+    assert.ok(S.applyRecord(su, FK, p.id, after, 400));
+    assert.ok(S.listFor(su, FK)[0].x === 50 && S.listFor(su, FK)[0].type === '벽');
+    // 지우기 되돌리기: 같은 id로 되살아나고 묘비가 걷힌다 → 합쳐도 살아 있다
+    const rm = S.remove(su, FK, p.id);
+    assert.strictEqual(S.listFor(su, FK).length, 0);
+    S.mergePackIntoState(su2, FK, S.packFor(su, FK), mergeFn);
+    assert.ok(S.applyRecord(su, FK, p.id, rm, 500));
+    cur = S.listFor(su, FK);
+    assert.ok(cur.length === 1 && cur[0].id === p.id && cur[0].createdAt === 100, '같은 id·처음 만든 시각으로 되살린다');
+    assert.ok(!(su.deletedStructMemberIds[FK] || []).includes(p.id), '묘비가 걷힌다');
+    S.mergePackIntoState(su2, FK, S.packFor(su, FK), mergeFn);
+    assert.strictEqual(S.listFor(su2, FK).length, 1, '되살린 부재가 지운 것을 받은 기기에서도 살아난다');
+    // 추가 되돌리기(rec=null) = 지우기, 없는 것을 지우면 false
+    assert.ok(S.applyRecord(su, FK, p.id, null, 600));
+    assert.strictEqual(S.listFor(su, FK).length, 0);
+    assert.strictEqual(S.applyRecord(su, FK, p.id, null, 700), false);
+    // 그 사이 다른 기기에서 들어온 부재는 건드리지 않는다
+    const other = S.add(su, FK, { type: '빔', x: 1, y: 1, w: 4, h: 2 }, { now: 800 });
+    S.applyRecord(su, FK, p.id, before, 900);
+    assert.ok(S.listFor(su, FK).some((d) => d.id === other.id), '다른 부재는 그대로');
+}
+// 화면: 편집 중 Ctrl+Z/Y는 구조 부재가 받고(결함 되돌리기로 안 넘김), 가져오기는 그 층 기록을 버린다
+assert.ok(layer.includes("if (isZ && !e.shiftKey) undo(); else redo();"));
+assert.ok(layer.includes("e.code === 'KeyZ'"), '한글 입력 상태에서도 Ctrl+Z');
+assert.ok(layer.includes('if (ui.hist) delete ui.hist[floorKey];'));
+
 console.log('test-struct-members: ok');

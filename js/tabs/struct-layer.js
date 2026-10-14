@@ -147,6 +147,39 @@
         sync();
     }
 
+    // ---------- 되돌리기·다시 하기(층마다, 바뀐 부재만 기록) ----------
+    // ui.hist[층키] = { undo: [묶음], redo: [묶음] }, 묶음 = [{ id, before, after }] (before/after = 부재 사본, 없으면 null)
+    var HIST_MAX = 100;
+    function hist(fk) {
+        if (!ui.hist) ui.hist = {};
+        if (!ui.hist[fk]) ui.hist[fk] = { undo: [], redo: [] };
+        return ui.hist[fk];
+    }
+    function snap(d) { return d ? Object.assign({}, d) : null; }
+    function pushHist(fk, changes) {
+        var ch = (changes || []).filter(function (c) { return c && c.id; });
+        if (!fk || !ch.length) return;
+        var h = hist(fk);
+        h.undo.push(ch);
+        if (h.undo.length > HIST_MAX) h.undo.shift();
+        h.redo = [];
+    }
+    function stepHist(back) {
+        var fk = B.floorKey();
+        var h = hist(fk);
+        var from = back ? h.undo : h.redo;
+        var ch = from.pop();
+        if (!ch) { toast(back ? '되돌릴 것이 없습니다.' : '다시 할 것이 없습니다.', 'info', 1600); syncBar(); return; }
+        // 되돌리기는 거꾸로, 다시 하기는 차례대로
+        (back ? ch.slice().reverse() : ch).forEach(function (c) { api.applyRecord(state(), fk, c.id, back ? c.before : c.after); });
+        (back ? h.redo : h.undo).push(ch);
+        if (ui.selId && !list().some(function (d) { return d.id === ui.selId; })) ui.selId = '';
+        ui.builtSig = '';
+        commit();
+    }
+    function undo() { stepHist(true); }
+    function redo() { stepHist(false); }
+
     // ---------- 옮기기·고르기·추가 ----------
     function local(e) {
         var r = B.canvas().getBoundingClientRect();
@@ -178,7 +211,7 @@
             } else if (ui.addType) {
                 var sz = defaultSize(ui.addType);
                 var rec = api.add(state(), B.floorKey(), { type: ui.addType, label: '', x: p.x, y: p.y, w: sz.w, h: sz.h });
-                if (rec) { ui.selId = rec.id; commit(); return; }
+                if (rec) { pushHist(B.floorKey(), [{ id: rec.id, before: null, after: snap(rec) }]); ui.selId = rec.id; commit(); return; }
             } else ui.selId = '';
             sync();
         });
@@ -202,7 +235,11 @@
             if (!d || !dr.moved) { sync(); return; }
             var now = { x: d.x, y: d.y };
             d.x = dr.orig.x; d.y = dr.orig.y;
-            if (e.type !== 'pointercancel') api.update(state(), B.floorKey(), d.id, now);
+            if (e.type !== 'pointercancel') {
+                var before = snap(d);
+                var after = api.update(state(), B.floorKey(), d.id, now);
+                if (after) pushHist(B.floorKey(), [{ id: d.id, before: before, after: snap(after) }]);
+            }
             ui.builtSig = '';
             commit();
         };
@@ -211,7 +248,8 @@
     }
     function deleteSelected() {
         if (!ui.selId) return;
-        api.remove(state(), B.floorKey(), ui.selId);
+        var rec = api.remove(state(), B.floorKey(), ui.selId);
+        if (rec) pushHist(B.floorKey(), [{ id: rec.id, before: rec, after: null }]);
         ui.selId = '';
         commit();
     }
@@ -219,7 +257,13 @@
         if (!ui.editing) return;
         var t = e.target;
         if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
-        if ((e.key === 'Delete' || e.key === 'Backspace') && ui.selId) { e.preventDefault(); e.stopPropagation(); deleteSelected(); }
+        // Ctrl+Z 되돌리기 · Ctrl+Y / Ctrl+Shift+Z 다시 하기 — 편집 중에는 결함 되돌리기로 넘기지 않는다(한글 입력 상태도 e.code로 잡는다)
+        var isZ = e.code === 'KeyZ' || e.key === 'z' || e.key === 'Z', isY = e.code === 'KeyY' || e.key === 'y' || e.key === 'Y';
+        if ((e.ctrlKey || e.metaKey) && !e.altKey && (isZ || isY)) {
+            e.preventDefault(); e.stopPropagation();
+            if (isZ && !e.shiftKey) undo(); else redo();
+        }
+        else if ((e.key === 'Delete' || e.key === 'Backspace') && ui.selId) { e.preventDefault(); e.stopPropagation(); deleteSelected(); }
         else if (e.key === 'Escape') { e.stopPropagation(); if (ui.selId) { ui.selId = ''; sync(); } else setEditing(false); }
     }, true);
     function setEditing(on) {
@@ -283,6 +327,8 @@
         var hadOverlay = api.overlayFor(state(), floorKey);
         if ((had || hadOverlay) && !window.confirm('이 층에 있던 구조도' + (had ? '(부재 ' + had + '개)' : '') + '를 지우고 새로 넣습니다. 계속할까요?')) { syncBar(); return; }
         var n = api.importMembers(state(), floorKey, d.members || [], fit);
+        // 통째로 바꿨으니 이 층의 되돌리기 기록은 버린다(되돌리면 새로 넣은 것과 섞인다)
+        if (ui.hist) delete ui.hist[floorKey];
         setPref(SHOW_KEY, '1');
         ui.builtSig = '';
         commit();
@@ -338,7 +384,9 @@
                 html += api.TYPES.map(function (t) {
                     return '<button type="button" data-act="type" data-type="' + t + '" class="map-count-type' + (ui.addType === t ? ' active' : '') + '" style="--mc-color:' + api.COLORS[t] + '" title="' + (ui.selId ? '고른 부재를 ' + t + '(으)로' : '빈 곳을 눌러 ' + t + ' 추가') + '">' + t + ' <b><small>' + c[t] + '</small></b></button>';
                 }).join('')
-                    + '<button type="button" data-act="del" ' + (ui.selId ? '' : 'disabled') + ' title="고른 부재 지우기 (Delete)">지우기</button>';
+                    + '<button type="button" data-act="del" ' + (ui.selId ? '' : 'disabled') + ' title="고른 부재 지우기 (Delete)">지우기</button>'
+                    + '<button type="button" data-act="undo" ' + (hist(B.floorKey()).undo.length ? '' : 'disabled') + ' title="되돌리기 (Ctrl+Z)">↶ 되돌리기</button>'
+                    + '<button type="button" data-act="redo" ' + (hist(B.floorKey()).redo.length ? '' : 'disabled') + ' title="다시 하기 (Ctrl+Y)">↷ 다시</button>';
             }
             html += '<button type="button" data-act="dim" title="더 흐리게">흐리게</button>'
                 + '<button type="button" data-act="bold" title="더 진하게">진하게</button>'
@@ -346,7 +394,7 @@
                 + '<button type="button" data-act="show" class="' + (showOn() ? 'active' : '') + '">보이기</button>'
                 + '<button type="button" data-act="close">닫기</button>';
             html += '<span class="map-count-hint">' + (ui.editing
-                ? '눌러 고르고 끌어 옮기기 · 종류 단추로 바꾸기/추가 · 화면 전용(출력 안 됨)'
+                ? '눌러 고르고 끌어 옮기기 · 종류 단추로 바꾸기/추가 · Ctrl+Z 되돌리기 · 화면 전용(출력 안 됨)'
                 : api.TYPES.map(function (t) { return t + ' ' + c[t]; }).join(' · ')) + '</span>';
         }
         if (bar._h !== html) { bar._h = html; bar.innerHTML = html; }
@@ -362,9 +410,17 @@
         else if (a === 'edit') setEditing(!ui.editing);
         else if (a === 'type') {
             var t = b.dataset.type;
-            if (ui.selId) { api.update(state(), B.floorKey(), ui.selId, { type: t }); ui.builtSig = ''; commit(); }
+            if (ui.selId) {
+                var cur = list().find(function (d) { return d.id === ui.selId; });
+                var before = snap(cur);
+                var after = cur && cur.type !== t ? api.update(state(), B.floorKey(), ui.selId, { type: t }) : null;
+                if (after) pushHist(B.floorKey(), [{ id: after.id, before: before, after: snap(after) }]);
+                ui.builtSig = ''; commit();
+            }
             else { ui.addType = ui.addType === t ? '' : t; syncBar(); }
         } else if (a === 'del') deleteSelected();
+        else if (a === 'undo') undo();
+        else if (a === 'redo') redo();
         else if (a === 'dim' || a === 'bold') { setPref(ALPHA_KEY, Math.min(1, Math.max(0.2, alpha() + (a === 'bold' ? 0.15 : -0.15))).toFixed(2)); sync(); }
         else if (a === 'show') { setPref(SHOW_KEY, showOn() ? '0' : '1'); sync(); }
         else if (a === 'marks') { setPref(MARKS_KEY, marksOn() ? '0' : '1'); ui.builtSig = ''; sync(); }
@@ -374,6 +430,6 @@
     function closeBar() { stopCalib(); ui.barOpen = false; setEditing(false); }
     function toggleBar() { if (ui.barOpen) closeBar(); else openBar(); }
 
-    window.BSA.structLayer = { sync: sync, openBar: openBar, closeBar: closeBar, toggleBar: toggleBar, startImport: startImport, _ui: ui };
+    window.BSA.structLayer = { sync: sync, openBar: openBar, closeBar: closeBar, toggleBar: toggleBar, startImport: startImport, undo: undo, redo: redo, _ui: ui };
     sync();
 })();
