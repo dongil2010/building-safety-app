@@ -21353,16 +21353,27 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         return false;
     }
 
-    /** 외부 도면에 있을 때: 모든 외부(입면·평면도)의 전차 미등록을 한 목록으로.
-     *  1F/2F 등 내부 층 키·내부 시트로 가져온 항목은 넣지 않는다(위치 칸 '외부'만으로 외부 풀에 넣지 않음). */
-    function getExteriorMapUnregisteredDefects(bldgId) {
+    /** 지금 보고 있는 외부 입면 묶음(같은 동·같은 이름)의 전차 미등록.
+     *  같은 번호가 그 묶음의 다른 면에 이미 마킹돼 있으면 목록에 넣지 않는다.
+     *  본관/신관처럼 이름이 다르거나 다른 동은 묶지 않는다. */
+    function getExteriorMapUnregisteredDefects(bldgId, floorCode) {
         const id = bldgId || state.currentBuildingId;
-        if (!id || typeof listExteriorFloorCodesForBuilding !== 'function') return [];
+        const focus = floorCode || state.currentFloor;
+        if (!id || !focus) return [];
+        const codes = elevationSiblingFloorCodes(id, focus);
+        const placed = new Set();
+        codes.forEach((fc) => {
+            ((state.defects && state.defects[String(id) + '_' + fc]) || []).forEach((d) => {
+                if (!d || d.mapUnregistered) return;
+                if (d.x === undefined || d.y === undefined) return;
+                const noKey = defectNoKey(d.cadNo || d.groupNo || d.no);
+                if (noKey) placed.add(noKey);
+            });
+        });
         const out = [];
         const seen = new Set();
-        listExteriorFloorCodesForBuilding(id).forEach((fc) => {
+        codes.forEach((fc) => {
             if (isInteriorFloorDrawingCode(fc)) return;
-            if (typeof isExteriorFloorCode === 'function' && !isExteriorFloorCode(fc)) return;
             const key = String(id) + '_' + fc;
             const list = (state.defects && state.defects[key]) || [];
             const forList = (typeof getDefectsForListPanel === 'function')
@@ -21373,6 +21384,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 if (!isPreviousRoundDefect(d) || !isDefectMapUnregistered(d)) return;
                 const srcFloor = d._importFloorCode || d.importFloorCode;
                 if (srcFloor && isInteriorFloorDrawingCode(srcFloor)) return;
+                const noKey = defectNoKey(d.cadNo || d.groupNo || d.no);
+                if (noKey && placed.has(noKey)) return;
                 if (seen.has(d.id)) return;
                 seen.add(d.id);
                 d._exteriorFloorCode = fc;
@@ -22446,9 +22459,11 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
         const allFloorDefects = getCurrentFloorDefects();
         const allForList = getDefectsForListPanel(allFloorDefects, allFloorDefects);
-        const exteriorList = typeof isExteriorFloorCode === 'function' && isExteriorFloorCode(state.currentFloor);
-        const unregisteredItems = exteriorList
-            ? getExteriorMapUnregisteredDefects(state.currentBuildingId)
+        const elevationSiblings = elevationSiblingFloorCodes(state.currentBuildingId, state.currentFloor);
+        const elevationList = elevationSiblings.length > 1
+            || (typeof isExteriorFloorCode === 'function' && isExteriorFloorCode(state.currentFloor));
+        const unregisteredItems = elevationList
+            ? getExteriorMapUnregisteredDefects(state.currentBuildingId, state.currentFloor)
             : allForList.filter(d => isPreviousRoundDefect(d) && isDefectMapUnregistered(d));
         const defects = getDefectsForListPanel(getCurrentFloorFilteredDefects(), allFloorDefects);
 
@@ -40248,6 +40263,97 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         return (availableFloors || []).filter((fc) => isExteriorFloorCode(fc));
     }
 
+    function buildingFloorRecords(bldgId) {
+        const id = bldgId || state.currentBuildingId;
+        const map = {};
+        const bldg = (state.buildings || []).find((b) => b && b.id === id) || state.currentBuilding;
+        const floors = (typeof window.getBuildingAvailableFloors === 'function' && bldg)
+            ? window.getBuildingAvailableFloors(bldg)
+            : ((bldg && bldg.floorsList) || []);
+        (floors || []).forEach((f) => {
+            const code = f && (f.floorCode || f);
+            if (!code) return;
+            const label = (f && f.floorLabel) || (typeof window.getFloorLabelFromCode === 'function'
+                ? window.getFloorLabelFromCode(code)
+                : code);
+            map[String(code)] = { floorCode: String(code), floorLabel: String(label || code) };
+        });
+        const prefix = String(id || '') + '_';
+        Object.keys(state.defects || {}).forEach((k) => {
+            if (!id || !String(k).startsWith(prefix)) return;
+            const code = String(k).slice(prefix.length);
+            if (!code || map[code]) return;
+            const label = (typeof window.getFloorLabelFromCode === 'function')
+                ? (window.getFloorLabelFromCode(code) || code)
+                : code;
+            map[code] = { floorCode: code, floorLabel: String(label) };
+        });
+        return Object.keys(map).map((code) => map[code]);
+    }
+
+    /** 같은 건물 안에서, 지금 외부 입면과 이름(본관/신관)이 같은 면만 */
+    function elevationSiblingFloorCodes(bldgId, floorCode) {
+        const fi = window.BSA && window.BSA.floorIdentity;
+        const focus = String(floorCode || '');
+        if (!fi || typeof fi.groupElevationFloors !== 'function' || !focus) return focus ? [focus] : [];
+        return fi.groupElevationFloors(buildingFloorRecords(bldgId), focus);
+    }
+
+    function defectNoKey(no) {
+        const api = window.BSA && window.BSA.shared && window.BSA.shared.cadUnmarkedPlace;
+        if (api && typeof api.normalizeCadNoKey === 'function') return api.normalizeCadNoKey(no);
+        return String(no || '').trim();
+    }
+
+    function findDefectByNoAcrossFloors(bldgId, floorCodes, noRaw) {
+        const api = window.BSA && window.BSA.shared && window.BSA.shared.cadUnmarkedPlace;
+        const pool = [];
+        (floorCodes || []).forEach((fc) => {
+            const list = (state.defects && state.defects[String(bldgId) + '_' + fc]) || [];
+            list.forEach((d) => { if (d) pool.push(d); });
+        });
+        if (api && typeof api.findDefectByNormalizedNo === 'function') {
+            return api.findDefectByNormalizedNo(pool, noRaw);
+        }
+        const raw = String(noRaw || '').trim();
+        return pool.find((d) => d && String(d.no || '').trim() === raw) || null;
+    }
+
+    /** 같은 외부 묶음에 좌표 있는 핀이 있으면, 같은 번호의 전차 미등록은 지운다 */
+    function pruneElevationUnregisteredTwins(bldgId, floorCode) {
+        const id = bldgId || state.currentBuildingId;
+        if (!id || !floorCode) return 0;
+        const codes = elevationSiblingFloorCodes(id, floorCode);
+        if (!codes || codes.length < 1) return 0;
+        const placed = new Set();
+        codes.forEach((fc) => {
+            ((state.defects && state.defects[String(id) + '_' + fc]) || []).forEach((d) => {
+                if (!d || d.mapUnregistered) return;
+                if (d.x === undefined || d.y === undefined) return;
+                const key = defectNoKey(d.cadNo || d.groupNo || d.no);
+                if (key) placed.add(key);
+            });
+        });
+        if (!placed.size) return 0;
+        let removed = 0;
+        codes.forEach((fc) => {
+            const floorKey = String(id) + '_' + fc;
+            const list = state.defects && state.defects[floorKey];
+            if (!list) return;
+            for (let i = list.length - 1; i >= 0; i--) {
+                const d = list[i];
+                if (!d || !d.mapUnregistered) continue;
+                const key = defectNoKey(d.cadNo || d.groupNo || d.no);
+                if (!key || !placed.has(key)) continue;
+                if (typeof trackDefectDeletion === 'function') trackDefectDeletion(floorKey, d.id, d);
+                list.splice(i, 1);
+                removed += 1;
+                if (typeof markFloorKeyDirty === 'function') markFloorKeyDirty(floorKey);
+            }
+        });
+        return removed;
+    }
+
     /** 현재 건물의 외부 도면 코드 목록(floorsList + defects 키 합집합) */
     function listExteriorFloorCodesForBuilding(bldgId) {
         const id = bldgId || state.currentBuildingId;
@@ -52472,13 +52578,22 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 }
 
                 const noRawTrimmed = (noRaw || '').trim();
-                // 번호가 같은 기존 핀(예: CAD 자동배치로 만든 위치 있는 핀)이 있으면
-                // 위치는 그대로 두고 내용만 채워넣는다 (병합 옵션이 켜져 있을 때만)
+                // 번호가 같은 기존 핀이 있으면 위치는 그대로 두고 내용만 채운다.
+                // 외부 입면(정·배·좌·우 또는 정배/좌우)은 같은 동·같은 이름 면들 전체를 본다.
+                // 본관/신관처럼 이름이 다르거나 다른 동은 섞지 않는다.
+                const elevationCodes = elevationSiblingFloorCodes(importBuildingAtClick, floorCode);
+                const matchPool = elevationCodes.length > 1
+                    ? elevationCodes.reduce((acc, fc) => {
+                        const list = state.defects[`${importBuildingAtClick}_${fc}`];
+                        if (list) acc.push.apply(acc, list);
+                        return acc;
+                    }, [])
+                    : state.defects[key];
                 const existing = (mergeByNo && noRawTrimmed)
                     ? ((window.BSA && window.BSA.shared && window.BSA.shared.cadUnmarkedPlace
                         && typeof window.BSA.shared.cadUnmarkedPlace.findDefectByNormalizedNo === 'function')
-                        ? window.BSA.shared.cadUnmarkedPlace.findDefectByNormalizedNo(state.defects[key], noRawTrimmed)
-                        : state.defects[key].find(d => (d.no || '').trim() === noRawTrimmed))
+                        ? window.BSA.shared.cadUnmarkedPlace.findDefectByNormalizedNo(matchPool, noRawTrimmed)
+                        : (matchPool || []).find(d => (d.no || '').trim() === noRawTrimmed))
                     : null;
 
                 if (existing) {
@@ -52541,6 +52656,13 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     }
                     // 가져온 내용이 동기화에서 이기도록 수정 시각을 올린다 — 병합은 시각이 같으면 서버를 따른다
                     touchDefectUpdatedAt(existing);
+                    if (elevationCodes.length > 1 && typeof markFloorKeyDirty === 'function') {
+                        elevationCodes.forEach((fc) => {
+                            const ownerKey = `${importBuildingAtClick}_${fc}`;
+                            const ownerList = state.defects[ownerKey];
+                            if (ownerList && ownerList.indexOf(existing) >= 0) markFloorKeyDirty(ownerKey);
+                        });
+                    }
                     matchedThisFloor++;
                     return;
                 }
@@ -52610,6 +52732,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 totalImported += importedThisFloor;
                 totalMatched += matchedThisFloor;
                 floorsTouched++;
+            }
+            if (elevationSiblingFloorCodes(importBuildingAtClick, floorCode).length > 1) {
+                pruneElevationUnregisteredTwins(importBuildingAtClick, floorCode);
             }
         });
 

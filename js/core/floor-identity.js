@@ -329,6 +329,91 @@
      * hasDefects: (code) => boolean — 그 코드에 결함(핀)이 있는지
      * 결함이 있는 코드가 하나도 없으면 후보를 그대로 돌려준다(도면만 있어도 넣게).
      */
+    var ELEVATION_DIR_WORDS = [
+        '정배좌우면도', '정배좌우면', '정배좌우', '좌우측면도', '좌우측면', '정면배면',
+        '정배면도', '좌우면도', '정배면', '좌우면',
+        '정면도', '배면도', '후면도',
+        '정면', '배면', '후면', '좌측면', '우측면', '좌측', '우측',
+        '정배', '좌우',
+        '북측면', '남측면', '동측면', '서측면',
+        '북측', '남측', '동측', '서측', '북면', '남면', '동면', '서면',
+        '입면도', '입면', '파사드', '외벽', '건축물외부', '건축물 외부', '외부'
+    ];
+
+    function textHasElevationDirection(text) {
+        const raw = asText(text);
+        if (!raw) return false;
+        for (var i = 0; i < ELEVATION_DIR_WORDS.length; i++) {
+            const w = ELEVATION_DIR_WORDS[i];
+            if (w === '외부' || w === '건축물 외부' || w === '건축물외부' || w === '외벽' || w === '파사드' || w === '입면' || w === '입면도') continue;
+            if (raw.indexOf(w) >= 0) return true;
+        }
+        return false;
+    }
+
+    /** 정·배·좌·우(4면) 또는 정배/좌우(2면)처럼 입면으로 나뉜 외부 도면인지 */
+    function isElevationFamilyFloor(code, label) {
+        const rawCode = asText(code);
+        const rawLabel = asText(label);
+        if (textHasElevationDirection(rawCode + ' ' + rawLabel)) return true;
+        if (isExteriorLikeCode(rawCode) || isExteriorLikeCode(rawLabel)) return true;
+        return false;
+    }
+
+    /**
+     * 같은 외부 묶음 이름. 정면·배면·좌우 같은 방향 말은 빼고, 본관동/신관동 같은 이름만 남긴다.
+     * 이름 없이 외부1·정면만 있으면 빈 문자열(그 동의 기본 외부 묶음).
+     */
+    function elevationGroupStem(code, label) {
+        var text = asText(label) || asText(code);
+        text = text.replace(/\([^)]*\)/g, ' ');
+        text = text.replace(/EXT[_\s-]?(FRONT|BACK|LEFT|RIGHT|N|E|S|W|\d+)/gi, ' ');
+        text = text.replace(/\bEXT\b/gi, ' ');
+        const words = ELEVATION_DIR_WORDS.slice().sort(function (a, b) { return b.length - a.length; });
+        words.forEach(function (w) {
+            text = text.split(w).join(' ');
+        });
+        text = text.replace(/[_\-·./,]+/g, ' ').replace(/\s+/g, ' ').trim();
+        if (/^\d+$/.test(text)) return '';
+        return text;
+    }
+
+    function isExteriorPlanFloor(code, label) {
+        const c = asText(code).toUpperCase();
+        if (c !== 'EXT') return false;
+        return !textHasElevationDirection(asText(label) + ' ' + asText(code));
+    }
+
+    /**
+     * 지금 도면과 같은 동의 같은 이름 외부 입면만 돌려준다.
+     * 다른 동은 호출하는 쪽이 건물 id로 이미 갈라 둔다.
+     * 평면도 한 장(EXT)은 정·배·좌·우 묶음에 넣지 않는다.
+     */
+    function groupElevationFloors(floors, floorCode) {
+        const focus = asText(floorCode);
+        const list = floors || [];
+        var self = null;
+        list.forEach(function (f) {
+            if (f && asText(f.floorCode) === focus) self = f;
+        });
+        const selfLabel = self ? asText(self.floorLabel) : focus;
+        if (!isElevationFamilyFloor(focus, selfLabel)) return focus ? [focus] : [];
+        const stem = elevationGroupStem(focus, selfLabel);
+        const focusIsPlan = isExteriorPlanFloor(focus, selfLabel);
+        const out = [];
+        list.forEach(function (f) {
+            if (!f || !asText(f.floorCode)) return;
+            const code = asText(f.floorCode);
+            const label = asText(f.floorLabel) || code;
+            if (!isElevationFamilyFloor(code, label)) return;
+            if (isExteriorPlanFloor(code, label) !== focusIsPlan) return;
+            if (elevationGroupStem(code, label) !== stem) return;
+            if (out.indexOf(code) < 0) out.push(code);
+        });
+        if (!out.length && focus) out.push(focus);
+        return out;
+    }
+
     function exteriorLocationMapCodes(baseCode, exteriorCodes, hasDefects) {
         const codes = [];
         const push = function (c) {
@@ -433,6 +518,9 @@
         unmatchedFloorFromFilename: unmatchedFloorFromFilename,
         uniquifyCustomFloorCode: uniquifyCustomFloorCode,
         isExteriorLikeCode: isExteriorLikeCode,
+        isElevationFamilyFloor: isElevationFamilyFloor,
+        elevationGroupStem: elevationGroupStem,
+        groupElevationFloors: groupElevationFloors,
         exteriorLocationMapCodes: exteriorLocationMapCodes,
         allocateNextExteriorSerial: allocateNextExteriorSerial,
         parseExteriorSerialNumber: parseExteriorSerialNumber,
