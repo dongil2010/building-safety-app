@@ -103,6 +103,14 @@ def main() -> None:
             raise SystemExit("[prepare-pages] report-summary.html에 </head>가 없어 Gemini 키를 넣지 못했다.")
         summary.write_text(text.replace("</head>", inject + "</head>"), encoding="utf-8")
 
+    # 2026-10-14: 구조도 부재 페이지 스크립트에도 배포 버전을 붙인다(새 HTML이 옛 스크립트 캐시를 쓰지 않게).
+    # 반대로 옛 HTML + 새 스크립트가 섞이는 경우는 스크립트 쪽에서 없는 칸을 건너뛰게 해 두었다(struct-plan-page.js).
+    struct_page = OUT / "struct-plan.html"
+    if struct_page.exists():
+        text = struct_page.read_text(encoding="utf-8")
+        text = retoken(text, r'(src="js/[^"]+\.js)\?v=[^"]+"', r'\g<1>?v=' + SHORT + '"', "struct-plan.html 스크립트")
+        struct_page.write_text(text, encoding="utf-8")
+
     sw = OUT / "sw.js"
     if sw.exists():
         text = sw.read_text(encoding="utf-8")

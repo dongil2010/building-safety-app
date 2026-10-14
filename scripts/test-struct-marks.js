@@ -149,7 +149,14 @@ assert.ok(!/struct-marks\.js|struct-glyphs\.js|struct-plan-page\.js/.test(index)
 assert.ok(/struct-plan\.html/.test(index), '앱에서 여는 버튼');
 // onclick 속성 안에서 URL 은 document.URL(글자)이라 new URL(...)이 "URL is not a constructor"로 죽는다(눌러도 반응 없음, 2026-10-14)
 assert.ok(!/onclick="[^"]*new URL\(/.test(index), 'onclick 속성에서 new URL 금지');
-assert.ok(/"struct-plan\.html"/.test(fs.readFileSync(path.join(root, 'scripts', 'prepare-pages.py'), 'utf8')), '배포 목록');
+const prep = fs.readFileSync(path.join(root, 'scripts', 'prepare-pages.py'), 'utf8');
+assert.ok(/"struct-plan\.html"/.test(prep), '배포 목록');
+// 2026-10-14: 옛 HTML(캐시) + 새 스크립트가 섞여 PDF를 못 열었다 — 스크립트에 배포 버전, 스크립트는 없는 칸을 건너뛴다
+const pageScripts = html.match(/<script src="js\/[^"]+"/g) || [];
+assert.ok(pageScripts.length >= 4 && pageScripts.every((t) => /\?v=[^"]+"$/.test(t)), '구조도 페이지 스크립트마다 ?v=');
+assert.ok(prep.includes(`retoken(text, r'(src="js/[^"]+\\.js)\\?v=[^"]+"', r'\\g<1>?v=' + SHORT + '"', "struct-plan.html 스크립트")`), '배포 때 버전 붙이기');
+const pageJsSrc = fs.readFileSync(path.join(root, 'js', 'struct-plan-page.js'), 'utf8');
+assert.ok(!/\$\('zoomLabel'\)\.textContent/.test(pageJsSrc), '배율 칸은 있을 때만 쓴다');
 assert.ok(/struct-plan\.html/.test(fs.readFileSync(path.join(root, 'scripts', 'git-sync.ps1'), 'utf8')), '동기화 목록');
 assert.ok(/"struct-plan\.html"/.test(fs.readFileSync(path.join(root, 'package.json'), 'utf8')), 'PC 설치본 목록');
 

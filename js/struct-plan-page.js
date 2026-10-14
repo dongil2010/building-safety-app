@@ -14,6 +14,12 @@
 
     var st = { doc: null, pageNo: 1, base: null, scale: 1, members: [], unread: [], region: null, zoom: 1, picking: false, drag: null, fileName: '', refs: [], refPicking: false };
 
+    /** 배율 표시. 배포 직후 브라우저에 남은 옛 HTML에는 이 칸이 없을 수 있다 — 없으면 건너뛴다(2026-10-14 PDF 열기 실패). */
+    function showZoom() {
+        var el = $('zoomLabel');
+        if (el) el.textContent = Math.round(st.zoom * 100) + '%';
+    }
+
     function setStatus(msg, kind) {
         var el = $('status');
         el.textContent = msg || '';
@@ -337,7 +343,7 @@
             var r1 = cv.getBoundingClientRect();
             stage.scrollLeft += r1.left - (ax - px * next);
             stage.scrollTop += r1.top - (ay - py * next);
-            $('zoomLabel').textContent = Math.round(next * 100) + '%';
+            showZoom();
         };
         $('btnZoomIn').addEventListener('click', function () { zoomAt(1.25); });
         $('btnZoomOut').addEventListener('click', function () { zoomAt(1 / 1.25); });
@@ -403,7 +409,7 @@
                     var v = pg.getViewport({ scale: 1 });
                     var s = Math.min(6, 4000 / Math.max(v.width, v.height));
                     st.zoom = Math.min(1, ($('stage').clientWidth - 24) / (v.width * s));
-                    $('zoomLabel').textContent = Math.round(st.zoom * 100) + '%';
+                    showZoom();
                     return analyzePage();
                 });
             }).catch(fail);
