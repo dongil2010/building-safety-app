@@ -21,9 +21,32 @@
         return st;
     }
 
-    function listFor(st, floorKey) {
+    /** 저장된 것 전부(손 점 + 자동 점 빼기 기록 exclude:true) — 묶음·동기화용 */
+    function rawFor(st, floorKey) {
         if (!st || !floorKey) return [];
         return ((st.memberCounts || {})[floorKey] || []).filter(function (d) { return d && d.id && TYPES.indexOf(d.type) >= 0; });
+    }
+    /** 손 점(세는 점)만 */
+    function listFor(st, floorKey) {
+        return rawFor(st, floorKey).filter(function (d) { return !d.exclude; });
+    }
+    /** 2026-10-14 지우개로 지운 자동 점 = 빼기 기록 { id:'mcx_…', exclude:true, srcIds:[결함 id…], type, x, y } */
+    function excludesFor(st, floorKey) {
+        return rawFor(st, floorKey).filter(function (d) { return d.exclude; });
+    }
+    function excludedSrcIds(st, floorKey) {
+        var set = {};
+        excludesFor(st, floorKey).forEach(function (d) { (d.srcIds || []).forEach(function (k) { set[k] = true; }); });
+        return set;
+    }
+    function addExclude(st, floorKey, dot, opts) {
+        if (!st || !floorKey || !dot || !dot.srcIds || !dot.srcIds.length) return null;
+        var o = opts || {};
+        var rec = add(st, floorKey, dot.type, dot.x, dot.y, { id: o.id || ('mcx_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8)), now: o.now });
+        if (!rec) return null;
+        rec.exclude = true;
+        rec.srcIds = dot.srcIds.slice();
+        return rec;
     }
 
     /** 점 하나 추가 → 점 */
@@ -164,7 +187,8 @@
     /** 손 점 + 자동 점 */
     function listWithAuto(st, floorKey, opts) {
         var manual = listFor(st, floorKey);
-        var defects = ((st && st.defects) || {})[floorKey] || [];
+        var ex = excludedSrcIds(st, floorKey);
+        var defects = (((st && st.defects) || {})[floorKey] || []).filter(function (d) { return d && !ex[d.id]; });
         return manual.concat(autoDots(defects, manual, opts));
     }
 
@@ -209,7 +233,7 @@
 
     function packFor(st, floorKey) {
         return {
-            items: listFor(st, floorKey).map(function (d) { return Object.assign({}, d); }),
+            items: rawFor(st, floorKey).map(function (d) { return Object.assign({}, d); }),
             deletedIds: ((st && st.deletedMemberCountIds) || {})[floorKey] || [],
             deletedAt: ((st && st.deletedMemberCountAt) || {})[floorKey] || {}
         };
@@ -231,7 +255,7 @@
         return true;
     }
 
-    var api = { TYPES: TYPES, KEYS: KEYS, COLORS: COLORS, SHORT: SHORT, ensureMaps: ensureMaps, listFor: listFor, add: add, remove: remove,
+    var api = { TYPES: TYPES, KEYS: KEYS, COLORS: COLORS, SHORT: SHORT, ensureMaps: ensureMaps, listFor: listFor, rawFor: rawFor, excludesFor: excludesFor, excludedSrcIds: excludedSrcIds, addExclude: addExclude, add: add, remove: remove,
         hitTest: hitTest, seqNumbers: seqNumbers, autoDots: autoDots, listWithAuto: listWithAuto, autoTypeOfDefect: autoTypeOfDefect, memberTypeOfComponent: memberTypeOfComponent, isStructuralDefectType: isStructuralDefectType, STRUCT_DEFECT_WORDS: STRUCT_DEFECT_WORDS, countsByType: countsByType, unitCounts: unitCounts,
         packFor: packFor, packHasContent: packHasContent, mergePackIntoState: mergePackIntoState };
     if (typeof module !== 'undefined' && module.exports) module.exports = api;

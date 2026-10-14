@@ -25898,7 +25898,12 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const api = mcApi();
         const last = mcUndo.pop();
         if (!api || !last) { window.showToast('되돌릴 것이 없습니다.', 'info', 1600); return; }
-        if (last.op === 'add') api.remove(state, last.floorKey, last.rec.id);
+        if (last.op === 'batch') {
+            last.ops.slice().reverse().forEach((o) => {
+                if (o.op === 'add') api.remove(state, last.floorKey, o.rec.id);
+                else api.add(state, last.floorKey, o.rec.type, o.rec.x, o.rec.y, { id: o.rec.id, zoneNo: o.rec.zoneNo });
+            });
+        } else if (last.op === 'add') api.remove(state, last.floorKey, last.rec.id);
         else if (last.op === 'zone') {
             const d = api.listFor(state, last.floorKey).find((x) => x.id === last.id);
             if (d) { if (last.prev) d.zoneNo = last.prev; else delete d.zoneNo; d.updatedAt = Date.now(); }
@@ -25906,6 +25911,99 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         commitMemberCountChange(last.floorKey);
     }
     window.undoMemberCount = undoMemberCount;
+
+    /* 2026-10-14 부재 수 지우개: 켜면 끌어서 네모 안 점을 한꺼번에 지움(짧게 누르면 그 점 하나).
+     * 손 점은 지우고, 자동 점(마킹에서 센 것)은 「빼기 기록」을 남겨 다시 안 셈. 되돌리기(Ctrl+Z·단추)로 한 번에 복구.
+     * 지우개가 켜진 동안은 도면 이동·점 찍기 대신 지우기만 한다(끄면 원래대로). */
+    var mcEraser = false;
+    var mcEraseDrag = null;
+    function setMcEraser(on) {
+        mcEraser = !!on;
+        mcEraseDrag = null;
+        closeMcDotMenu();
+        syncMcEraseLayer();
+        syncMemberCountBar();
+    }
+    function syncMcEraseLayer() {
+        const canvas = state.canvas || document.getElementById('planCanvas');
+        const host = canvas && canvas.parentElement;
+        let layer = document.getElementById('mapCountEraseLayer');
+        const on = mcEraser && state.mode === 'COUNT' && window.__bsaEvalMapOn === true && !!host;
+        if (!on) { if (layer) layer.remove(); if (state.mode !== 'COUNT') mcEraser = false; return; }
+        if (!layer) {
+            layer = document.createElement('div');
+            layer.id = 'mapCountEraseLayer';
+            layer.className = 'map-count-erase-layer';
+            layer.setAttribute('data-html2canvas-ignore', 'true');
+            const box = document.createElement('div');
+            box.className = 'map-count-erase-box';
+            box.hidden = true;
+            layer.appendChild(box);
+            const local = (e) => { const r = layer.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; };
+            layer.addEventListener('pointerdown', (e) => {
+                if (e.button > 0) return;
+                if (mcEraseDrag && mcEraseDrag.pointerId !== e.pointerId) { mcEraseDrag = null; box.hidden = true; return; } // 두 손가락 → 취소
+                e.preventDefault(); e.stopPropagation();
+                const p = local(e);
+                mcEraseDrag = { pointerId: e.pointerId, x0: p.x, y0: p.y, x1: p.x, y1: p.y };
+                try { layer.setPointerCapture(e.pointerId); } catch (_e) { /* ignore */ }
+            });
+            layer.addEventListener('pointermove', (e) => {
+                if (!mcEraseDrag || e.pointerId !== mcEraseDrag.pointerId) return;
+                e.preventDefault();
+                const p = local(e);
+                mcEraseDrag.x1 = p.x; mcEraseDrag.y1 = p.y;
+                const d = mcEraseDrag;
+                box.hidden = false;
+                box.style.left = Math.min(d.x0, d.x1) + 'px'; box.style.top = Math.min(d.y0, d.y1) + 'px';
+                box.style.width = Math.abs(d.x1 - d.x0) + 'px'; box.style.height = Math.abs(d.y1 - d.y0) + 'px';
+            });
+            const end = (e) => {
+                if (!mcEraseDrag || e.pointerId !== mcEraseDrag.pointerId) return;
+                const d = mcEraseDrag;
+                mcEraseDrag = null;
+                box.hidden = true;
+                if (e.type !== 'pointercancel') mcEraseInRect(d.x0, d.y0, d.x1, d.y1);
+            };
+            layer.addEventListener('pointerup', end);
+            layer.addEventListener('pointercancel', end);
+            layer.addEventListener('wheel', (e) => { e.preventDefault(); canvas.dispatchEvent(new WheelEvent('wheel', e)); }, { passive: false });
+            host.appendChild(layer);
+        } else if (layer.parentElement !== host) host.appendChild(layer);
+        layer.style.left = `${canvas.offsetLeft}px`;
+        layer.style.top = `${canvas.offsetTop}px`;
+        layer.style.width = `${canvas.clientWidth}px`;
+        layer.style.height = `${canvas.clientHeight}px`;
+    }
+    /** 화면 좌표 네모(또는 짧게 누른 점) 안의 부재 수 점 지우기 → 지운 개수 */
+    function mcEraseInRect(x0, y0, x1, y1) {
+        const api = mcApi();
+        const floorKey = currentMemoFloorKey();
+        if (!api || !floorKey || !state.bgImage) return 0;
+        const all = mcListAll(floorKey);
+        const tap = Math.abs(x1 - x0) < 8 && Math.abs(y1 - y0) < 8;
+        let targets;
+        if (tap) {
+            const hit = api.hitTest(all, x1, y1, 16, memoImgToScreen);
+            targets = hit ? [hit] : [];
+        } else {
+            const L = Math.min(x0, x1), R = Math.max(x0, x1), T = Math.min(y0, y1), B = Math.max(y0, y1);
+            targets = all.filter((d) => { const p = memoImgToScreen(d); return p.sx >= L && p.sx <= R && p.sy >= T && p.sy <= B; });
+        }
+        if (!targets.length) return 0;
+        const ops = [];
+        targets.forEach((d) => {
+            if (d.auto) { const rec = api.addExclude(state, floorKey, d); if (rec) ops.push({ op: 'add', rec: Object.assign({}, rec) }); }
+            else { const rec = api.remove(state, floorKey, d.id); if (rec) ops.push({ op: 'remove', rec: Object.assign({}, rec) }); }
+        });
+        if (!ops.length) return 0;
+        mcUndo.push({ op: 'batch', floorKey, ops });
+        commitMemberCountChange(floorKey);
+        const nAuto = targets.filter((d) => d.auto).length;
+        window.showToast?.(`부재 수 점 ${ops.length}개 지움${nAuto ? ` (자동 ${nAuto}개는 다시 안 셈)` : ''} · 되돌리기 Ctrl+Z`, 'success', 2200);
+        return ops.length;
+    }
+    window.mcEraseInRect = mcEraseInRect;
     function closeMcDotMenu() {
         const m = document.getElementById('mapCountDotMenu');
         if (m) m.remove();
@@ -25983,6 +26081,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     }
     /** 점 그리기(DOM, 화면 전용 — 한글·PDF 출력 그림에는 안 들어감) */
     function syncMemberCountOverlay() {
+        if (mcEraser) syncMcEraseLayer();
         const api = mcApi();
         const floorKey = currentMemoFloorKey();
         const on = state.mode === 'COUNT' || readMcShowPref();
@@ -26026,6 +26125,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const canvas = state.canvas || document.getElementById('planCanvas');
         const host = canvas && canvas.parentElement;
         let bar = document.getElementById('mapCountBar');
+        syncMcEraseLayer();
         if (state.mode !== 'COUNT' || !api || !host || window.__bsaEvalMapOn !== true) { if (bar) bar.hidden = true; closeMcDotMenu(); return; }
         if (!bar) {
             bar = document.createElement('div');
@@ -26038,6 +26138,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 if (b.dataset.mcType) setMcType(b.dataset.mcType);
                 else if (b.dataset.mcZone) setMcZone(b.dataset.mcZone);
                 else if (b.dataset.mcAct === 'undo') undoMemberCount();
+                else if (b.dataset.mcAct === 'erase') setMcEraser(!mcEraser);
                 else if (b.dataset.mcAct === 'show') setMcShow(!readMcShowPref());
                 else if (b.dataset.mcAct === 'close') setDrawMode('PAN');
             });
@@ -26062,6 +26163,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             + api.TYPES.map((t) => `<button type="button" class="map-count-type${t === cur ? ' active' : ''}" data-mc-type="${t}" style="--mc-color:${api.COLORS[t]}" title="단축키 ${keyOf[t]}${zc ? ' · 지금 구역 / 층 전체' : ''}">${t} <b>${zc ? `${zc[t] || 0}<small>/${counts[t] || 0}</small>` : (counts[t] || 0)}</b><span class="map-count-key">${keyOf[t]}</span></button>`).join('')
             + (zones.length > 1 ? `<span class="map-count-sep">구역</span>` + zones.map((n) => `<button type="button" class="map-count-zone${n === mcZoneNo ? ' active' : ''}" data-mc-zone="${n}" style="--zone-color:${mcZoneColor(n)}" title="숫자키 ${n}">${n}</button>`).join('') : '')
             + (offTxt ? `<span class="map-count-warn">⚠ 이 층에 없는 구역의 점: ${offTxt} — 집계 안 됨(점을 눌러 구역 바꾸기)</span>` : '')
+            + `<button type="button" data-mc-act="erase" class="${mcEraser ? 'active' : ''}" title="지우개 (E) — 끌어서 네모 안 점 지우기, 짧게 누르면 점 하나">🧽 지우개${mcEraser ? ' 켜짐' : ''}</button>`
             + `<button type="button" data-mc-act="undo" title="되돌리기 (Ctrl+Z)">↶ 되돌리기</button>`
             + `<button type="button" data-mc-act="show" class="${readMcShowPref() ? 'active' : ''}" title="세기 모드가 아닐 때도 점 보이기">점 보이기</button>`
             + `<button type="button" data-mc-act="close">닫기</button>`
@@ -26107,7 +26209,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const k = String(e.key || '').toLowerCase();
         if ((e.ctrlKey || e.metaKey) && k === 'z') { e.preventDefault(); e.stopPropagation(); undoMemberCount(); return; }
         if (e.ctrlKey || e.metaKey || e.altKey) return;
-        if (k === 'escape') { e.preventDefault(); if (document.getElementById('mapCountDotMenu')) closeMcDotMenu(); else setDrawMode('PAN'); return; }
+        if (k === 'escape') { e.preventDefault(); if (document.getElementById('mapCountDotMenu')) closeMcDotMenu(); else if (mcEraser) setMcEraser(false); else setDrawMode('PAN'); return; }
+        if (k === 'e' || k === 'ㄷ') { e.preventDefault(); e.stopPropagation(); setMcEraser(!mcEraser); return; }
         if (/^[1-9]$/.test(k)) {
             const zs = mcZoneChoices();
             if (zs.includes(Number(k))) { e.preventDefault(); e.stopPropagation(); setMcZone(Number(k)); }

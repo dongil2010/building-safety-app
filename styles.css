@@ -17018,3 +17018,7 @@ line.map-guide-shape { fill: none; stroke-width: 2.5; }
 /* 2026-10-14 평가 탭 도면: 상태조사 마킹 지우기·일괄수정 단추 숨김(잠금) */
 html body.bsa-eval-map-on #btnDeleteSelectedDefects, html body.bsa-eval-map-on #btnBulkEditSelectedDefects,
 html body.bsa-eval-map-on #mobileBtnDeleteSelected, html body.bsa-eval-map-on #mobileBtnBulkEditSelected { display: none !important; }
+
+/* 2026-10-14 부재 수 지우개 */
+.map-count-erase-layer { position: absolute; z-index: 7; cursor: crosshair; touch-action: none; }
+.map-count-erase-box { position: absolute; border: 2px dashed #dc2626; background: rgba(220, 38, 38, 0.08); pointer-events: none; }
