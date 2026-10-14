@@ -16996,3 +16996,19 @@ line.map-guide-shape { fill: none; stroke-width: 2.5; }
 .map-guide-bar button[disabled] { opacity: .45; cursor: default; }
 .map-guide-type-btn i { display: inline-block; width: .7em; height: .7em; margin-right: .3em; border-radius: 2px; background: var(--gs-c); opacity: .75; vertical-align: -.05em; }
 .mode-btn.btn-guide-mode.active, .mobile-rail-btn.mobile-fab-guide.active { background: #0ea5e9 !important; color: #fff !important; border-color: #0284c7 !important; }
+
+/* 2026-10-14 로그인 화면: 키보드가 올라와도 입력칸이 보이도록 스크롤 가능하게 */
+#loginOverlay {
+    height: 100vh;
+    height: 100dvh;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+    align-items: safe center;
+    padding-bottom: calc(1rem + var(--bsa-kb-inset, 0px));
+}
+#loginOverlay > .modal-card {
+    margin: auto 0;
+    max-height: none;
+    flex-shrink: 0;
+}

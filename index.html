@@ -3574,5 +3574,30 @@
             });
         }
     </script>
-</body>
+<script>
+/* 2026-10-14 로그인 입력칸 키보드 가림 방지: visualViewport 로 키보드 높이만큼 아래 여백 + 포커스 칸을 화면 안으로 */
+(function () {
+    var ov = document.getElementById('loginOverlay');
+    if (!ov) return;
+    var vv = window.visualViewport;
+    function inset() {
+        if (!vv) return 0;
+        return Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop));
+    }
+    function reveal() {
+        var el = document.activeElement;
+        if (!el || !ov.contains(el) || !/^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName)) return;
+        try { el.scrollIntoView({ block: 'center', behavior: 'smooth' }); } catch (_) { el.scrollIntoView(); }
+    }
+    function update() {
+        ov.style.setProperty('--bsa-kb-inset', inset() + 'px');
+        if (vv) ov.style.height = vv.height + 'px';
+        reveal();
+    }
+    if (vv) { vv.addEventListener('resize', update); vv.addEventListener('scroll', update); }
+    window.addEventListener('resize', update);
+    ov.addEventListener('focusin', function () { setTimeout(reveal, 120); setTimeout(reveal, 450); });
+    ov.addEventListener('focusout', function () { setTimeout(update, 200); });
+})();
+</script></body>
 </html>
