@@ -1598,23 +1598,20 @@ document.addEventListener('DOMContentLoaded', () => {
         Object.keys(bldg.floorDrawingSources || {}).forEach((c) => codes.add(c));
         Object.keys(bldg.floorDrawingTiers || {}).forEach((c) => codes.add(c));
         const prefix = `${bldg.id}_`;
-        Object.keys(window.state.defects || {}).forEach((k) => {
-            if (k.startsWith(prefix)) codes.add(k.slice(prefix.length));
+        // 2026-10-14: 층을 한 번 열기만 해도 defects[층] = [] 가 생겨 도면 없는 층이 계속 되살아났다 → 실제 항목이 있을 때만
+        const takeNonEmpty = (map) => Object.keys(map || {}).forEach((k) => {
+            if (k.startsWith(prefix) && floorMarkingValueHasContent(map[k])) codes.add(k.slice(prefix.length));
         });
-        Object.keys(window.state.ndtData || {}).forEach((k) => {
-            if (k.startsWith(prefix)) codes.add(k.slice(prefix.length));
-        });
-        Object.keys(window.state.ndtDisplacementGroups || {}).forEach((k) => {
-            if (k.startsWith(prefix)) codes.add(k.slice(prefix.length));
-        });
-        Object.keys(window.state.ndtImages || {}).forEach((k) => {
-            if (k.startsWith(prefix)) codes.add(k.slice(prefix.length));
-        });
+        takeNonEmpty(window.state.defects);
+        takeNonEmpty(window.state.ndtData);
+        takeNonEmpty(window.state.ndtDisplacementGroups);
+        takeNonEmpty(window.state.ndtImages);
         Object.keys(window.state.ndtDrawingRefs || {}).forEach((k) => {
             const ref = window.state.ndtDrawingRefs[k];
             if (k.startsWith(prefix) && ref && ref.id) codes.add(k.slice(prefix.length));
         });
-        if (window.state.currentBuildingId === bldg.id && window.state.currentFloor) {
+        // 지금 보는 층은 층 목록이 아예 비었을 때만(드롭다운이 비지 않게) — 도면 없는 층을 붙잡지 않는다
+        if (window.state.currentBuildingId === bldg.id && window.state.currentFloor && codes.size === 0) {
             codes.add(window.state.currentFloor);
         }
         Array.from(codes).forEach((fc) => {
@@ -1622,6 +1619,21 @@ document.addEventListener('DOMContentLoaded', () => {
         });
         return codes;
     }
+
+    function floorMarkingValueHasContent(v) {
+        if (Array.isArray(v)) return v.length > 0;
+        if (v && typeof v === 'object') return Object.keys(v).length > 0;
+        return !!v;
+    }
+
+    /** 이 층 마킹·비파괴 수 — 도면 없는 층 정리 때 마킹 있는 층은 지우지 않는다 */
+    function countFloorMarkings(bldgId, floorCode) {
+        const key = `${bldgId}_${floorCode}`;
+        const st = window.state || {};
+        const n = (m) => (Array.isArray(m && m[key]) ? m[key].length : 0);
+        return { defects: n(st.defects), ndt: n(st.ndtData) + n(st.ndtDisplacementGroups) };
+    }
+    window.countFloorMarkings = countFloorMarkings;
 
     function mergeDiscoveredFloorsIntoBuilding(bldg, floorCodes) {
         if (!bldg || !floorCodes || floorCodes.size === 0) return;
@@ -7848,6 +7860,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             });
         });
+        if (existingFloors.length) markDrawinglessFloorsInEditPreview(bldg, existingFloors);
         preview.querySelectorAll('.edit-floor-drawing-delete').forEach((btn) => {
             btn.addEventListener('click', (e) => {
                 e.stopPropagation();
@@ -7911,6 +7924,108 @@ document.addEventListener('DOMContentLoaded', () => {
                 arr.push(item); // 배열 맨 뒤로 보내면 저장 루프에서 이 파일이 마지막으로 처리되어 실제로 저장됨
                 renderEditDrawingPreview();
             });
+        });
+    }
+
+    /** 도면도 마킹도 없는 층을 건물 층 목록에서 뺀다(묘비 남김 — 동기화로 되살아나지 않게) */
+    function removeDrawinglessFloorFromBuilding(bldg, floorCode) {
+        if (!bldg || !floorCode) return;
+        rememberDeletedDrawingFloor(bldg, floorCode);
+        if (bldg.floorsList) bldg.floorsList = bldg.floorsList.filter((f) => f && f.floorCode !== floorCode);
+        if (Array.isArray(bldg.drawingFloorCodes)) bldg.drawingFloorCodes = bldg.drawingFloorCodes.filter((c) => c !== floorCode);
+        const fk = `${bldg.id}_${floorCode}`;
+        ['defects', 'ndtData', 'ndtDisplacementGroups'].forEach((m) => {
+            const map = window.state[m];
+            if (map && Array.isArray(map[fk]) && map[fk].length === 0) delete map[fk];
+        });
+        stripDeletedDrawingFloorsFromBuilding(bldg);
+        bldg._pendingCloudSync = true;
+        if (typeof markBuildingMetaDirty === 'function') markBuildingMetaDirty(bldg);
+    }
+
+    /** 클라우드 도면 확인: true(있음) / false(확실히 없음) / null(모름 — 오프라인·오류). 모르면 지우지 않는다 */
+    async function probeFloorDrawingOnCloud(bldg, floorCode) {
+        if (!db || !window.state.companyId || !bldg || !bldg.id) return null;
+        if (typeof navigator !== 'undefined' && navigator.onLine === false) return null;
+        const docId = `${bldg.id}_${floorCode}`;
+        try {
+            const company = db.collection('safety_app').doc(getCompanyDocId());
+            const [r, p] = await Promise.all([
+                company.collection('floorDrawings').doc(docId).get(),
+                company.collection('floorDrawingPdfs').doc(docId).get()
+            ]);
+            return !!(r.exists || p.exists);
+        } catch (e) {
+            console.warn('도면 없는 층 확인 실패:', docId, e);
+            return null;
+        }
+    }
+
+    /** 수정창 기존 층 중 도면이 확실히 없는 층 → [{floorCode, label, defects, ndt}] */
+    async function findDrawinglessFloors(bldg, floors) {
+        const out = [];
+        for (const f of (floors || [])) {
+            if (!f || !f.floorCode || floorHasDrawingData(bldg, f.floorCode)) continue;
+            const idbKey = `${bldg.id}_${f.floorCode}`;
+            let local = null;
+            try {
+                const [t4000, raster] = await Promise.all([
+                    idbGetFloorDrawingTier(bldg.id, f.floorCode, 4000),
+                    idbGet('floorDrawings', idbKey)
+                ]);
+                local = isUsableRasterDrawingUrl(t4000) || isUsableRasterDrawingUrl(raster);
+            } catch (_e) { local = null; }
+            if (local) continue;
+            const cloud = await probeFloorDrawingOnCloud(bldg, f.floorCode);
+            if (cloud !== false) continue;
+            const mk = countFloorMarkings(bldg.id, f.floorCode);
+            out.push({ floorCode: f.floorCode, label: f.floorLabel || f.floorCode, defects: mk.defects, ndt: mk.ndt });
+        }
+        return out;
+    }
+    window.findDrawinglessFloors = findDrawinglessFloors;
+
+    let _drawinglessCheckToken = 0;
+    async function markDrawinglessFloorsInEditPreview(bldg, floors) {
+        const token = ++_drawinglessCheckToken;
+        const empty = await findDrawinglessFloors(bldg, floors);
+        if (token !== _drawinglessCheckToken || window.currentEditingBuilding !== bldg) return;
+        const preview = document.getElementById('editDrawingSortPreview');
+        if (!preview) return;
+        empty.forEach((e) => {
+            const row = preview.querySelector(`.edit-floor-drawing-row[data-floor-code="${CSS.escape(e.floorCode)}"] .edit-floor-drawing-badge`);
+            if (row) {
+                row.textContent = (e.defects || e.ndt) ? `⚠️ 도면 없음 · 마킹 ${e.defects + e.ndt}건 — 도면을 다시 넣거나 삭제` : '⚠️ 도면 없음';
+                row.style.color = '#dc2626';
+            }
+        });
+        const removable = empty.filter((e) => !e.defects && !e.ndt);
+        let bar = preview.querySelector('.edit-drawingless-floor-bar');
+        if (!empty.length) { if (bar) bar.remove(); return; }
+        if (!bar) {
+            bar = document.createElement('div');
+            bar.className = 'edit-drawingless-floor-bar';
+            bar.style.cssText = 'font-size:0.78rem; color:#b91c1c; background:rgba(220,38,38,0.08); border:1px solid #ef4444; border-radius:6px; padding:0.45rem 0.6rem; margin:0.35rem 0; display:flex; gap:0.5rem; align-items:center; flex-wrap:wrap;';
+            const list = preview.querySelector('.edit-drawing-existing-list');
+            if (list) list.parentElement.insertBefore(bar, list); else preview.appendChild(bar);
+        }
+        const withMarks = empty.length - removable.length;
+        bar.innerHTML = `<span>도면 없는 층 ${empty.length}개${withMarks ? ` (마킹 있는 ${withMarks}개는 자동으로 안 지움)` : ''}</span>`
+            + (removable.length ? `<button type="button" class="btn btn-sm btn-outline" style="border-color:#ef4444; color:#ef4444; font-size:0.72rem; padding:0.1rem 0.5rem;">빈 층 ${removable.length}개 정리</button>` : '');
+        const btn = bar.querySelector('button');
+        if (btn) btn.addEventListener('click', async () => {
+            const names = removable.map((e) => e.label).join(', ');
+            if (!await window.appConfirm(`도면도 마킹도 없는 층을 목록에서 뺄까요?\n${names}`)) return;
+            removable.forEach((e) => removeDrawinglessFloorFromBuilding(bldg, e.floorCode));
+            if (state.currentBuildingId === bldg.id && removable.some((e) => e.floorCode === state.currentFloor)) {
+                const avail = window.getBuildingAvailableFloors(bldg);
+                if (avail[0] && typeof loadFloorDrawing === 'function') loadFloorDrawing(avail[0].floorCode);
+            }
+            if (typeof populateFloorSelectDropdown === 'function') populateFloorSelectDropdown(bldg);
+            saveStateToLocalStorage();
+            if (typeof scheduleSyncToFirebase === 'function') scheduleSyncToFirebase();
+            renderEditDrawingPreview();
+            window.showToast?.(`빈 층 ${removable.length}개를 정리했습니다.`, 'success', 2600);
         });
     }
 
@@ -8169,6 +8284,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         forgetDeletedDrawingFloor(bldg, item.floorCode, { force: true });
                         // Check if floor already exists in floorsList, if not add it
                         const existingIdx = bldg.floorsList.findIndex(f => f.floorCode === item.floorCode);
+                        const floorAddedNow = existingIdx < 0 && !floorHasDrawingData(bldg, item.floorCode);
                         if (existingIdx < 0) {
                             bldg.floorsList.push({
                                 floorCode: item.floorCode,
@@ -8231,6 +8347,12 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                                 saveStateToLocalStorage();
                             } catch (err) {
                                 console.error('Edit drawing compression error:', err);
+                                // 2026-10-14 도면 없는 층을 남기지 않는다: 이번에 새로 만든 층이고 도면·마킹이 없으면 뺀다
+                                const mk = countFloorMarkings(bldg.id, item.floorCode);
+                                if (floorAddedNow && !floorHasDrawingData(bldg, item.floorCode) && !mk.defects && !mk.ndt) {
+                                    removeDrawinglessFloorFromBuilding(bldg, item.floorCode);
+                                    saveStateToLocalStorage();
+                                }
                                 window.showToast(`도면 ${item.floorCode || (i + 1)} 변환 실패 — 다음 도면으로 진행합니다`, 'warning');
                             }
                         }
@@ -54535,7 +54657,11 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             previousPath = storagePathFromDownloadURL(sourceUrl);
         }
         const targetPath = String(storagePath || '').replace(/^\/+/, '');
-        const sameObject = previousPath && targetPath && previousPath === targetPath;
+        // 같은 객체 = 이미 Storage에 있는 그 파일(https 주소)을 다시 적을 때만. 2026-10-14: 예전엔 경로만 같으면
+        // (층 도면 교체처럼 경로가 층마다 고정) 새 data: 파일을 올리지 않고 옛 파일을 그대로 두었다
+        // → 다른 층 갔다 오거나 다른 기기에서 옛 도면/깨진 주소를 받아 「도면이 다시 사라짐」.
+        const sameObject = !!(previousPath && targetPath && previousPath === targetPath
+            && isFirebaseStorageHttpUrl(sourceUrl));
         let uploaded;
         if (sameObject) {
             uploaded = {
