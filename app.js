@@ -5574,6 +5574,9 @@ document.addEventListener('DOMContentLoaded', () => {
             console.warn('진입 전 층·tombstone 보강 실패:', e);
         }
 
+        // 도면 없는 층(다른 건물에서 새어 들어온 층 포함)은 기본 층으로 고르기 전에 뺀다
+        try { await autoRemoveDrawinglessFloors(bldg); } catch (e) { console.warn('도면 없는 층 정리 실패:', e); }
+
         populateFloorSelectDropdown(bldg);
         warnIfBuildingDataLooksHollow(bldg);
 
@@ -7524,6 +7527,15 @@ document.addEventListener('DOMContentLoaded', () => {
         window.selectedEditUploadedDrawings = [];
         window.editDrawingPreviewManualOrder = false;
         window._editBuildingMode = mode;
+        // 수정창 층 목록도 점검 층 목록과 같은 기준 — 도면 없는 층은 열 때 정리하고 다시 그린다
+        autoRemoveDrawinglessFloors(bldg).then((removed) => {
+            if (!removed.length) return;
+            if (window.currentEditingBuilding === bldg) renderEditDrawingPreview();
+            if (state.currentBuildingId === bldg.id) {
+                populateFloorSelectDropdown(bldg);
+                if (state.currentFloor && typeof loadFloorDrawing === 'function') loadFloorDrawing(state.currentFloor);
+            }
+        }).catch(() => {});
 
         modal.dataset.editMode = mode;
         modal.classList.remove('edit-mode-drawing', 'edit-mode-info');
@@ -7940,11 +7952,12 @@ document.addEventListener('DOMContentLoaded', () => {
         const docId = `${bldg.id}_${floorCode}`;
         try {
             const company = db.collection('safety_app').doc(getCompanyDocId());
-            const [r, p] = await Promise.all([
+            const [r, p, t] = await Promise.all([
                 company.collection('floorDrawings').doc(docId).get(),
-                company.collection('floorDrawingPdfs').doc(docId).get()
+                company.collection('floorDrawingPdfs').doc(docId).get(),
+                company.collection('floorDrawingTiers').doc(floorDrawingTierCloudDocId(bldg.id, floorCode, 4000)).get()
             ]);
-            return !!(r.exists || p.exists);
+            return !!(r.exists || p.exists || t.exists);
         } catch (e) {
             console.warn('도면 없는 층 확인 실패:', docId, e);
             return null;
@@ -7974,6 +7987,42 @@ document.addEventListener('DOMContentLoaded', () => {
         return out;
     }
     window.findDrawinglessFloors = findDrawinglessFloors;
+
+    /**
+     * 2026-10-14 도면 없는 층 자동 정리(건물 진입·수정창 열 때). 「도면 없으면 층도 없다」.
+     * 지우는 층 = 이 기기(메모리·IDB)에도 클라우드(그림·PDF·4000 티어)에도 도면이 확실히 없고 마킹·비파괴도 없는 층.
+     * 오프라인·조회 실패·시간 초과면 아무것도 안 지운다. 마킹 있는 층은 수정창에 「도면 없음」으로만 보인다.
+     */
+    async function autoRemoveDrawinglessFloors(bldg, opts) {
+        const o = opts || {};
+        if (!bldg || !bldg.id) return [];
+        if (typeof navigator !== 'undefined' && navigator.onLine === false) return [];
+        if (!db || !window.state.companyId) return [];
+        const floors = window.getBuildingAvailableFloors(bldg) || [];
+        if (!floors.length) return [];
+        let empty = null;
+        try {
+            empty = await Promise.race([
+                findDrawinglessFloors(bldg, floors),
+                new Promise((res) => setTimeout(() => res(null), o.timeoutMs || 8000))
+            ]);
+        } catch (_e) { empty = null; }
+        if (!Array.isArray(empty)) return [];
+        const removable = empty.filter((e) => !e.defects && !e.ndt);
+        if (!removable.length) return [];
+        removable.forEach((e) => removeDrawinglessFloorFromBuilding(bldg, e.floorCode));
+        if (state.currentBuildingId === bldg.id && removable.some((e) => e.floorCode === state.currentFloor)) {
+            state.currentFloor = '';
+        }
+        if (typeof saveStateToLocalStorage === 'function') saveStateToLocalStorage();
+        if (typeof scheduleSyncToFirebase === 'function') scheduleSyncToFirebase();
+        console.info('[floor] 도면 없는 층 자동 정리:', bldg.id, removable.map((e) => e.floorCode));
+        if (!o.silent && typeof window.showToast === 'function') {
+            window.showToast(`도면 없는 층을 목록에서 뺐습니다: ${removable.map((e) => e.label).join(', ')}`, 'info', 4000);
+        }
+        return removable.map((e) => e.floorCode);
+    }
+    window.autoRemoveDrawinglessFloors = autoRemoveDrawinglessFloors;
 
     let _drawinglessCheckToken = 0;
     async function markDrawinglessFloorsInEditPreview(bldg, floors) {
