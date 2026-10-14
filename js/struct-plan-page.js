@@ -10,6 +10,7 @@
     var COLORS = { '기둥': '#dc2626', '벽': '#7c3aed', '거더': '#2563eb', '빔': '#f59e0b', '슬래브': '#16a34a' };
     var PDF_WORKER = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
     var $ = function (id) { return document.getElementById(id); };
+    var ZOOM_MAX = 8;
 
     var st = { doc: null, pageNo: 1, base: null, scale: 1, members: [], unread: [], region: null, zoom: 1, picking: false, drag: null, fileName: '', refs: [], refPicking: false };
 
@@ -85,7 +86,8 @@
         var ex = await extractPage(page);
         // 화면에 보여 줄 그림(긴 쪽 3000 픽셀까지)
         var vp1 = page.getViewport({ scale: 1 });
-        st.scale = Math.min(4, 3000 / Math.max(vp1.width, vp1.height));
+        // 화면용 그림은 긴 쪽 4000 픽셀까지(기준점을 찍을 때 크게 확대해도 선이 덜 뭉개지게)
+        st.scale = Math.min(6, 4000 / Math.max(vp1.width, vp1.height));
         var vp = page.getViewport({ scale: st.scale });
         var base = document.createElement('canvas');
         base.width = Math.round(vp.width); base.height = Math.round(vp.height);
@@ -297,7 +299,7 @@
         $('btnRefs').addEventListener('click', function () {
             if (!st.base) return;
             st.refPicking = !st.refPicking;
-            if (st.refPicking) { st.refs = []; setStatus('앱 도면에서도 찾을 수 있는 곳을 첫 번째 기준점으로 누르세요(예: 모서리 기둥 중심). 크게 확대하고 찍으면 정확합니다.'); }
+            if (st.refPicking) { st.refs = []; setStatus('앱 도면에서도 찾을 수 있는 곳을 첫 번째 기준점으로 누르세요(예: 모서리 기둥 중심). 마우스 휠로 크게 확대하고(끌어서 이동) 찍으면 정확합니다.'); }
             this.classList.toggle('on', st.refPicking);
             cv.style.cursor = st.refPicking ? 'crosshair' : '';
             redraw(); renderSide();
@@ -318,8 +320,52 @@
             }).catch(function (err) { setStatus('보내지 못했습니다: ' + (err && err.message ? err.message : err), 'warn'); })
                 .then(function () { renderSide(); });
         });
-        $('btnZoomIn').addEventListener('click', function () { st.zoom = Math.min(3, st.zoom * 1.25); redraw(); });
-        $('btnZoomOut').addEventListener('click', function () { st.zoom = Math.max(0.15, st.zoom / 1.25); redraw(); });
+        // 확대·축소: 단추는 보이는 가운데를, 휠은 마우스 자리를 기준으로(그 자리가 그대로 손 밑에 남는다)
+        var stage = $('stage');
+        var zoomAt = function (factor, clientX, clientY) {
+            if (!st.base) return;
+            var sr = stage.getBoundingClientRect();
+            var ax = clientX == null ? sr.left + sr.width / 2 : clientX;
+            var ay = clientY == null ? sr.top + sr.height / 2 : clientY;
+            var old = st.zoom;
+            var next = Math.min(ZOOM_MAX, Math.max(0.15, old * factor));
+            if (next === old) return;
+            var r0 = cv.getBoundingClientRect();
+            var px = (ax - r0.left) / old, py = (ay - r0.top) / old;   // 손 밑 지점(배율 1 기준)
+            st.zoom = next;
+            redraw();
+            var r1 = cv.getBoundingClientRect();
+            stage.scrollLeft += r1.left - (ax - px * next);
+            stage.scrollTop += r1.top - (ay - py * next);
+            $('zoomLabel').textContent = Math.round(next * 100) + '%';
+        };
+        $('btnZoomIn').addEventListener('click', function () { zoomAt(1.25); });
+        $('btnZoomOut').addEventListener('click', function () { zoomAt(1 / 1.25); });
+        stage.addEventListener('wheel', function (ev) {
+            if (!st.base) return;
+            ev.preventDefault();
+            zoomAt(ev.deltaY < 0 ? 1.2 : 1 / 1.2, ev.clientX, ev.clientY);
+        }, { passive: false });
+        // 끌어서 옮기기(범위 지정 중이 아닐 때). 조금이라도 끌었으면 그 뒤 클릭(기호 누르기·기준점 찍기)은 무시한다.
+        var pan = null;
+        cv.addEventListener('mousedown', function (ev) {
+            if (!st.base || st.picking || ev.button !== 0) return;
+            pan = { x: ev.clientX, y: ev.clientY, sl: stage.scrollLeft, st: stage.scrollTop, moved: false };
+        });
+        window.addEventListener('mousemove', function (ev) {
+            if (!pan) return;
+            var dx = ev.clientX - pan.x, dy = ev.clientY - pan.y;
+            if (!pan.moved && Math.hypot(dx, dy) < 4) return;
+            pan.moved = true;
+            cv.style.cursor = 'grabbing';
+            stage.scrollLeft = pan.sl - dx;
+            stage.scrollTop = pan.st - dy;
+        });
+        window.addEventListener('mouseup', function () {
+            if (!pan) return;
+            if (pan.moved) { st._justDragged = true; cv.style.cursor = st.refPicking ? 'crosshair' : ''; }
+            pan = null;
+        });
         $('groups').addEventListener('change', function (ev) {
             var sel = ev.target.closest('select');
             if (!sel) return;
@@ -355,8 +401,9 @@
                 // 화면 폭에 맞춰 처음 배율을 잡는다
                 return doc.getPage(1).then(function (pg) {
                     var v = pg.getViewport({ scale: 1 });
-                    var s = Math.min(4, 3000 / Math.max(v.width, v.height));
+                    var s = Math.min(6, 4000 / Math.max(v.width, v.height));
                     st.zoom = Math.min(1, ($('stage').clientWidth - 24) / (v.width * s));
+                    $('zoomLabel').textContent = Math.round(st.zoom * 100) + '%';
                     return analyzePage();
                 });
             }).catch(fail);
