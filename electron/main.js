@@ -6,7 +6,24 @@
  * 실행: npm run electron
  * 설치 파일: npm run electron:dist
  */
-const { app, BrowserWindow, dialog, shell } = require('electron');
+const { app, BrowserWindow, dialog, shell, net, session } = require('electron');
+
+const REMOTE_URL = 'https://dongil2010.github.io/building-safety-app/';
+
+/** 배포된 웹 최신판에 닿는지 확인(오프라인이면 내장 파일로 실행). */
+function remoteReachable(timeoutMs) {
+    return new Promise(function (resolve) {
+        let done = false;
+        const finish = function (ok) { if (!done) { done = true; resolve(ok); } };
+        try {
+            const req = net.request({ url: REMOTE_URL + 'web-version.json?t=' + Date.now(), cache: 'no-store' });
+            req.on('response', function (res) { finish(res.statusCode >= 200 && res.statusCode < 400); res.on('data', function () {}); });
+            req.on('error', function () { finish(false); });
+            req.end();
+        } catch (_) { finish(false); }
+        setTimeout(function () { finish(false); }, timeoutMs);
+    });
+}
 const { execFileSync } = require('child_process');
 const http = require('http');
 const fs = require('fs');
@@ -142,6 +159,14 @@ function createWindow(startUrl) {
         }
     });
 
+    win.webContents.on('did-fail-load', function (e, code, desc, url, isMainFrame) {
+        if (!isMainFrame || startUrl !== REMOTE_URL || code === -3) return;
+        startLocalServer(path.resolve(__dirname, '..')).then(function (res) {
+            localServer = res.server;
+            appStartUrl = res.url;
+            win.loadURL(res.url);
+        }).catch(function () {});
+    });
     win.loadURL(startUrl);
     win.webContents.setWindowOpenHandler(function (details) {
         shell.openExternal(details.url);
@@ -153,6 +178,11 @@ let appStartUrl = null;
 
 app.whenReady().then(async function () {
     let startUrl = process.env.BSA_START_URL;
+    if (!startUrl && process.env.BSA_OFFLINE !== '1') {
+        // 설치본 내장 파일은 설치 시점에 고정되므로, 온라인이면 배포된 최신 웹을 연다.
+        try { await session.defaultSession.clearCache(); } catch (_) {}
+        if (await remoteReachable(5000)) startUrl = REMOTE_URL;
+    }
     if (!startUrl) {
         try {
             const rootDir = path.resolve(__dirname, '..');
