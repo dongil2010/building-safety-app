@@ -295,31 +295,49 @@
             var t = 1.5 * u;
             return anchors.some(function (r) { return x >= r.x0 - t && x <= r.x1 + t && y >= r.y0 - t && y <= r.y1 + t; });
         };
-        pieces = pieces.filter(function (pc) {
+        var anchored = function (pc) {
             if (!pc.guess || pc.atS || pc.atE) return true;
             var mid = (pc.c0 + pc.c1) / 2;
             return pc.o === 'H' ? (touches(pc.s, mid) || touches(pc.e, mid)) : (touches(mid, pc.s) || touches(mid, pc.e));
-        });
+        };
+        // 빔은 아래 5)에서 이은 뒤에 거른다(점선이 잠깐 빈 뒤쪽 조각이 이어지기 전에 버려지지 않게)
+        pieces = pieces.filter(function (pc) { return pc.type === '빔' || anchored(pc); });
 
-        // 5) 빔은 가로지르는 거더에서 끊는다
-        var girders = pieces.filter(function (pc) { return pc.type === '거더'; })
-            .map(function (pc) { return rectOfPiece(pc.o, pc.c0, pc.c1, pc.s, pc.e); });
-        var beams = [];
-        pieces.forEach(function (pc) {
-            if (pc.type !== '빔') { beams.push(pc); return; }
-            var cross = girders.filter(function (r) {
-                // 가로지르는 거더만(나란한 것은 빼고): 거더가 이 빔의 중심선을 덮고, 빔 안쪽에 걸친다
-                var mid = (pc.c0 + pc.c1) / 2;
-                return pc.o === 'H' ? (r.y1 - r.y0 > r.x1 - r.x0 && r.y0 <= mid && r.y1 >= mid && r.x1 > pc.s + u && r.x0 < pc.e - u)
-                    : (r.x1 - r.x0 > r.y1 - r.y0 && r.x0 <= mid && r.x1 >= mid && r.y1 > pc.s + u && r.y0 < pc.e - u);
+        // 5) 빔은 중간에 안 끊기게(2026-10-14 사용자 요청): 같은 줄 위의 빔 조각을 하나로 잇는다.
+        //    가로지르는 거더·기둥·칠한 띠 폭이나 점선이 잠깐 빈 곳(틈 8u 이하)은 건너뛴다. 거더는 기둥마다 끊긴 채로 둔다.
+        var beams = pieces.filter(function (pc) { return pc.type !== '빔'; });
+        var bp = pieces.filter(function (pc) { return pc.type === '빔'; })
+            .map(function (pc) { return Object.assign({}, pc, { mid: (pc.c0 + pc.c1) / 2 }); })
+            .sort(function (p, q) { return (p.o < q.o ? -1 : p.o > q.o ? 1 : 0) || (p.mid - q.mid) || (p.s - q.s); });
+        var lines = [];   // 같은 방향·같은 중심선(0.8u 안) 묶음
+        bp.forEach(function (pc) {
+            var ln = lines.find(function (L) { return L.o === pc.o && Math.abs(L.mid - pc.mid) <= 0.8 * u; });
+            if (!ln) { ln = { o: pc.o, mid: pc.mid, list: [] }; lines.push(ln); }
+            ln.list.push(pc);
+        });
+        lines.forEach(function (L) {
+            L.list.sort(function (p, q) { return p.s - q.s; });
+            var cur = null;
+            var flush = function () {
+                if (!cur) return;
+                var d = decide(cur.labels);
+                var bm = { kind: cur.kind, o: cur.o, c0: cur.c0, c1: cur.c1, s: cur.s, e: cur.e, type: '빔', atS: cur.atS, atE: cur.atE,
+                    label: d ? d.label : '', guess: !d && cur.guess, labels: cur.labels };
+                if (anchored(bm)) beams.push(bm);
+            };
+            L.list.forEach(function (pc) {
+                if (cur && pc.s - cur.e <= 8 * u) {
+                    if (pc.e >= cur.e) { cur.e = pc.e; cur.atE = pc.atE; }
+                    cur.c0 = Math.min(cur.c0, pc.c0); cur.c1 = Math.max(cur.c1, pc.c1);
+                    cur.labels = cur.labels.concat(pc.labels);
+                    cur.guess = cur.guess && pc.guess;
+                    if (pc.kind === 'fill') cur.kind = 'fill';
+                } else {
+                    flush();
+                    cur = { kind: pc.kind, o: pc.o, c0: pc.c0, c1: pc.c1, s: pc.s, e: pc.e, atS: pc.atS, atE: pc.atE, labels: pc.labels.slice(), guess: pc.guess };
+                }
             });
-            if (!cross.length) { beams.push(pc); return; }
-            cutBand({ o: pc.o, c0: pc.c0, c1: pc.c1, s: pc.s, e: pc.e }, cross, u, Math.max(2 * u, pc.c1 - pc.c0)).forEach(function (sp) {
-                var mine = pc.labels.filter(function (l) { return l.along >= sp.s - u && l.along <= sp.e + u; });
-                var d = decide(mine);
-                beams.push({ kind: pc.kind, o: pc.o, c0: pc.c0, c1: pc.c1, s: sp.s, e: sp.e, type: '빔',
-                    label: d ? d.label : pc.label, guess: d ? false : pc.guess, labels: mine });
-            });
+            flush();
         });
 
         // 6) 부재로

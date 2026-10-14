@@ -155,7 +155,12 @@ assert.strictEqual(S.overlayFor(so2, FK), null, '뺀 그림은 다른 기기에�
 S.mergePackIntoState(so2, 'b1_9F', { items: [], deletedIds: [], deletedAt: {}, overlay: { url: 'u', x0: 'a', updatedAt: 9 } }, mergeFn);
 assert.strictEqual(S.overlayFor(so2, 'b1_9F'), null);
 // 그림 레이어: 번호표는 그림이 있으면 기본으로 숨기고, 그림은 기준점 맞춤 행렬로 얹는다
-assert.ok(layer.includes("function marksOn() { var v = pref(MARKS_KEY, ''); return v === '' ? !overlayNow() : v === '1'; }"));
+// 기둥·거더·빔 도형은 늘 그리고(그림이 있어도), 「이름」 단추는 이름표 글자만 켜고 끈다(기본 숨김)
+assert.ok(layer.includes("function marksOn() { return pref(MARKS_KEY, '') === '1'; }"));
+assert.ok(layer.includes('            items.forEach(function (d) {') && layer.includes('if (showLabels && d.label) {'));
+assert.ok(!layer.includes('if (showMarks) items.forEach'), '그림이 있다고 도형을 숨기지 않는다');
+// 도형만 가져오면 예전 그림은 뺀다
+assert.ok(layer.includes('if (hadOverlay && api.removeOverlay(state(), floorKey) && hadOverlay.storagePath) B.deleteStoragePath(hadOverlay.storagePath);'));
 assert.ok(layer.includes("'matrix(' + [over.fit.a, over.fit.b, -over.fit.b, over.fit.a, over.fit.tx, over.fit.ty].join(' ') + ')'"));
 
 // ---- 되돌리기·다시 하기(applyRecord): 바뀐 부재만 기록한 모습으로 맞춘다 ----
@@ -210,6 +215,31 @@ assert.ok(layer.includes('(d.members || []).filter(active)'), '가져올 때도 
     assert.ok(page.includes("var USE_TYPES = ['기둥', '거더', '빔'];"));
     assert.ok(page.includes("'빔': '#b7791f'"), '페이지와 앱 색이 같다');
     assert.ok(!/<option value="(벽|슬래브)">/.test(html), '종류 바꾸기에 벽·슬래브 없음');
+}
+
+// ---- 거더·빔 두께 통일: 종류마다 중간값 두께, 길이·중심·방향은 그대로, 기둥은 그대로 ----
+{
+    const ms = [
+        { type: '거더', x: 50, y: 10, w: 100, h: 2.9 }, { type: '거더', x: 50, y: 60, w: 100, h: 3.6 }, { type: '거더', x: 10, y: 50, w: 2.9, h: 80 },
+        { type: '빔', x: 30, y: 30, w: 60, h: 1.4 }, { type: '빔', x: 70, y: 40, w: 2.2, h: 50 }, { type: '빔', x: 80, y: 40, w: 1.4, h: 50 },
+        { type: '기둥', x: 0, y: 0, w: 4, h: 3.5 }
+    ];
+    assert.deepStrictEqual(Object.assign({}, S.beamThickness(ms)), { '거더': 2.9, '빔': 1.4 });
+    const u = S.unifyThickness(ms);
+    assert.ok(u.filter((d) => d.type === '거더').every((d) => Math.min(d.w, d.h) === 2.9), '거더는 모두 2.9');
+    assert.ok(u.filter((d) => d.type === '빔').every((d) => Math.min(d.w, d.h) === 1.4), '빔은 모두 1.4');
+    assert.ok(u[1].w === 100 && u[1].x === 50 && u[1].y === 60, '길이·중심 그대로(가로)');
+    assert.ok(u[4].h === 50 && u[4].w === 1.4, '세로 보는 폭만 바뀐다');
+    assert.deepStrictEqual(u[6], ms[6], '기둥은 그대로');
+    assert.strictEqual(ms[1].h, 3.6, '원본은 안 바꾼다(사본)');
+}
+// 화면: 종류 바꾸면 그 종류 두께, 새로 넣는 보는 가로 막대(통일 두께)
+assert.ok(layer.includes('api.update(state(), B.floorKey(), ui.selId, patchForType(cur, t))'));
+assert.ok(layer.includes('return { w: Math.max(len, thick * 3), h: thick };'));
+{
+    const page = fs.readFileSync(path.join(root, 'js', 'struct-plan-page.js'), 'utf8');
+    assert.ok(page.includes('st.members = unifyBeams(clone(st.shapes.members));'), '페이지: 읽은 보 두께 통일');
+    assert.strictEqual((page.match(/st\.members = unifyBeams\(st\.members\);/g) || []).length, 2, '페이지: 종류 바꾸면 다시 통일');
 }
 
 console.log('test-struct-members: ok');

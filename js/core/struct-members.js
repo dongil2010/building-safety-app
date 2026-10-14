@@ -111,6 +111,31 @@
         return list.length;
     }
 
+    /**
+     * 거더·빔 두께 통일(2026-10-14): 종류마다 두께(짧은 변)를 그 종류의 중간값으로 맞춘다. 길이·중심선은 그대로.
+     * list 의 사본을 돌려준다. 다른 종류(기둥 등)는 그대로.
+     */
+    var BEAM_TYPES = ['거더', '빔'];
+    function median(a) { var s = a.slice().sort(function (x, y) { return x - y; }); return s.length ? s[Math.floor(s.length / 2)] : 0; }
+    function beamThickness(list) {
+        var out = {};
+        BEAM_TYPES.forEach(function (t) {
+            var v = (list || []).filter(function (d) { return d && d.type === t; }).map(function (d) { return Math.min(d.w, d.h); });
+            if (v.length) out[t] = median(v);
+        });
+        return out;
+    }
+    function unifyThickness(list) {
+        var th = beamThickness(list);
+        return (list || []).map(function (d) {
+            var t = d && th[d.type];
+            if (!t) return d;
+            var c = Object.assign({}, d);
+            if (c.w >= c.h) c.h = t; else c.w = t;
+            return c;
+        });
+    }
+
     function countsByType(list) {
         var out = {};
         TYPES.forEach(function (t) { out[t] = 0; });
@@ -251,7 +276,7 @@
     function loadHandoff() { return handoffTx('readonly', function (s) { return s.get('latest'); }); }
 
     var api = { TYPES: TYPES, ACTIVE_TYPES: ACTIVE_TYPES, COLORS: COLORS, ensureMaps: ensureMaps, listFor: listFor, hasAny: hasAny, add: add, update: update, remove: remove,
-        applyRecord: applyRecord, clear: clear, countsByType: countsByType, fitTwoPoints: fitTwoPoints, applyFit: applyFit, importMembers: importMembers,
+        applyRecord: applyRecord, clear: clear, beamThickness: beamThickness, unifyThickness: unifyThickness, countsByType: countsByType, fitTwoPoints: fitTwoPoints, applyFit: applyFit, importMembers: importMembers,
         hitTest: hitTest, overlayFor: overlayFor, setOverlay: setOverlay, removeOverlay: removeOverlay,
         saveHandoff: saveHandoff, loadHandoff: loadHandoff, packFor: packFor, packHasContent: packHasContent, mergePackIntoState: mergePackIntoState };
     if (typeof module !== 'undefined' && module.exports) module.exports = api;

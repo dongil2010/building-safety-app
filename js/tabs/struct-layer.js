@@ -30,8 +30,8 @@
         if (ui.tempOverlay && ui.tempOverlay.floorKey === fk) return ui.tempOverlay;
         return api.overlayFor(state(), fk);
     }
-    /** 번호표 보이기 — 정한 적 없으면 구조도 그림이 있을 때는 숨긴다(그림에 이미 번호가 있다) */
-    function marksOn() { var v = pref(MARKS_KEY, ''); return v === '' ? !overlayNow() : v === '1'; }
+    /** 이름표(C1·1G2…) 보이기 — 기본은 숨김. 기둥·거더·빔 도형은 늘 보인다(2026-10-14). */
+    function marksOn() { return pref(MARKS_KEY, '') === '1'; }
     function alpha() { var a = parseFloat(pref(ALPHA_KEY, '0.55')); return Number.isFinite(a) ? Math.min(1, Math.max(0.2, a)) : 0.55; }
     function toast(msg, kind, ms) { if (typeof window.showToast === 'function') window.showToast(msg, kind || 'info', ms || 2500); }
     function state() { return window.state; }
@@ -46,8 +46,8 @@
         s.id = 'structLayerStyle';
         s.textContent = '.map-struct-overlay{position:absolute;pointer-events:none;overflow:hidden;z-index:6}'
             + '.map-struct-overlay.is-active{pointer-events:auto;cursor:crosshair}'
-            + '.map-struct-overlay rect{vector-effect:non-scaling-stroke;stroke-width:2;fill-opacity:.18}'
-            + '.map-struct-overlay rect.is-selected{stroke-width:4;fill-opacity:.4;stroke-dasharray:6 3}'
+            + '.map-struct-overlay rect{vector-effect:non-scaling-stroke;stroke-width:2;fill-opacity:.5}'
+            + '.map-struct-overlay rect.is-selected{stroke-width:4;fill-opacity:.75;stroke-dasharray:6 3}'
             + '.map-struct-overlay text{font-weight:700;text-anchor:middle;dominant-baseline:central;pointer-events:none;paint-order:stroke;stroke:#fff;stroke-width:.18em}'
             + '.map-struct-bar .map-struct-hint{flex-basis:100%;font-size:.82rem;font-weight:700;color:#0369a1}';
         document.head.appendChild(s);
@@ -96,11 +96,11 @@
         var g = ov.firstChild;
         var items = list();
         var over = overlayNow();
-        var showMarks = marksOn() || ui.editing;
+        var showLabels = marksOn();
         if (ui.selId && !items.some(function (d) { return d.id === ui.selId; })) ui.selId = '';
         // 자료가 바뀌었을 때만 도형을 다시 만든다
         var sig = B.floorKey() + '|' + items.length + '|' + items.reduce(function (m, d) { return Math.max(m, d.updatedAt || 0); }, 0) + '|' + ui.selId
-            + '|' + (over ? over.url + '@' + over.updatedAt : '') + '|' + showMarks;
+            + '|' + (over ? over.url + '@' + over.updatedAt : '') + '|' + showLabels;
         if (sig !== ui.builtSig) {
             ui.builtSig = sig;
             var frag = document.createDocumentFragment();
@@ -116,7 +116,7 @@
                 gi.appendChild(im);
                 frag.appendChild(gi);
             }
-            if (showMarks) items.forEach(function (d) {
+            items.forEach(function (d) {
                 var c = api.COLORS[d.type] || '#111';
                 var r = document.createElementNS(NS, 'rect');
                 r.setAttribute('x', d.x - d.w / 2); r.setAttribute('y', d.y - d.h / 2);
@@ -125,7 +125,7 @@
                 r.setAttribute('stroke', c); r.setAttribute('fill', c);
                 if (d.id === ui.selId) r.setAttribute('class', 'is-selected');
                 frag.appendChild(r);
-                if (d.label) {
+                if (showLabels && d.label) {
                     var t = document.createElementNS(NS, 'text');
                     var wide = d.w >= d.h;
                     var fs = Math.min((wide ? d.h : d.w) * 0.62, (wide ? d.w : d.h) / Math.max(2, d.label.length) * 1.5);
@@ -192,8 +192,21 @@
         var same = list().filter(function (d) { return d.type === type; });
         var src = same.length ? same : list();
         if (!src.length) { var c = B.canvas(); var p0 = B.screenToImg(0, 0), p1 = B.screenToImg(60, 0); var s = Math.hypot(p1.x - p0.x, p1.y - p0.y) || 60; return { w: s, h: s * 0.5 }; }
-        var med = function (k) { var a = src.map(function (d) { return d[k]; }).sort(function (x, y) { return x - y; }); return a[Math.floor(a.length / 2)]; };
-        return { w: med('w'), h: med('h') };
+        var med = function (a) { a = a.slice().sort(function (x, y) { return x - y; }); return a[Math.floor(a.length / 2)]; };
+        if (type === '거더' || type === '빔') {
+            // 보는 가로 막대로: 두께 = 그 종류 두께(통일값), 길이 = 그 종류 길이의 중간값
+            var thick = (api.beamThickness ? api.beamThickness(list())[type] : 0) || med(src.map(function (d) { return Math.min(d.w, d.h); }));
+            var len = med(src.map(function (d) { return Math.max(d.w, d.h); }));
+            return { w: Math.max(len, thick * 3), h: thick };
+        }
+        return { w: med(src.map(function (d) { return d.w; })), h: med(src.map(function (d) { return d.h; })) };
+    }
+    /** 종류를 바꾸면 보 두께도 그 종류 두께로(길이·방향·중심은 그대로) */
+    function patchForType(d, t) {
+        var patch = { type: t };
+        var th = (t === '거더' || t === '빔') && api.beamThickness ? api.beamThickness(list().filter(function (x) { return x.id !== d.id; }))[t] : 0;
+        if (th) { if (d.w >= d.h) patch.h = th; else patch.w = th; }
+        return patch;
     }
     function bindOverlay(ov) {
         // 휠 확대·축소는 도면으로 넘긴다
@@ -333,13 +346,19 @@
         // 통째로 바꿨으니 이 층의 되돌리기 기록은 버린다(되돌리면 새로 넣은 것과 섞인다)
         if (ui.hist) delete ui.hist[floorKey];
         setPref(SHOW_KEY, '1');
-        ui.builtSig = '';
-        commit();
         var ov = d.overlay;
         if (!ov || !ov.blob) {
-            toast('구조 부재 ' + n + '개를 이 층에 넣었습니다.', 'success', 4000);
+            // 도형만 가져오면 예전 구조도 그림은 뺀다(새 도형과 어긋난 채 남지 않게, 다른 기기에서도 빠짐)
+            if (ui.tempOverlay && ui.tempOverlay.floorKey === floorKey) ui.tempOverlay = null;
+            if (hadOverlay && api.removeOverlay(state(), floorKey) && hadOverlay.storagePath) B.deleteStoragePath(hadOverlay.storagePath);
+            ui.builtSig = '';
+            commit();
+            var cnt = api.countsByType(list());
+            toast('구조 부재를 넣었습니다: ' + ACTIVE.map(function (t) { return t + ' ' + cnt[t]; }).join(' · '), 'success', 4500);
             return;
         }
+        ui.builtSig = '';
+        commit();
         // 구조도 그림: 먼저 이 화면에 바로 보이고, 클라우드에 올라가면 다른 기기에도 보인다
         var rec = { floorKey: floorKey, url: URL.createObjectURL(ov.blob), x0: ov.x0, y0: ov.y0, x1: ov.x1, y1: ov.y1, fit: fit, color: ov.color, updatedAt: Date.now() };
         ui.tempOverlay = rec;
@@ -393,7 +412,7 @@
             }
             html += '<button type="button" data-act="dim" title="더 흐리게">흐리게</button>'
                 + '<button type="button" data-act="bold" title="더 진하게">진하게</button>'
-                + '<button type="button" data-act="marks" class="' + (marksOn() ? 'active' : '') + '" title="부재 번호표 보이기">번호</button>'
+                + '<button type="button" data-act="marks" class="' + (marksOn() ? 'active' : '') + '" title="부재 이름표(C1·1G2…) 보이기">이름</button>'
                 + '<button type="button" data-act="show" class="' + (showOn() ? 'active' : '') + '">보이기</button>'
                 + '<button type="button" data-act="close">닫기</button>';
             html += '<span class="map-count-hint">' + (ui.editing
@@ -416,7 +435,7 @@
             if (ui.selId) {
                 var cur = list().find(function (d) { return d.id === ui.selId; });
                 var before = snap(cur);
-                var after = cur && cur.type !== t ? api.update(state(), B.floorKey(), ui.selId, { type: t }) : null;
+                var after = cur && cur.type !== t ? api.update(state(), B.floorKey(), ui.selId, patchForType(cur, t)) : null;
                 if (after) pushHist(B.floorKey(), [{ id: after.id, before: before, after: snap(after) }]);
                 ui.builtSig = ''; commit();
             }

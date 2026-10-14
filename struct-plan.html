@@ -82,8 +82,8 @@
                 <button type="button" class="btn" id="btnRefs" title="앱 도면과 맞출 기준점 2개를 찍습니다(예: 서로 먼 두 기둥 중심)">기준점 지정</button>
                 <label class="muted" for="readMode">읽는 방식</label>
                 <select id="readMode" title="기호: 부재 이름 테두리(C1·1G2…)를 셉니다. 실제 도형: 칠한 기둥과 점선 두 줄 보를 찾아 칸(경간)마다 셉니다.">
+                    <option value="shapes" selected>실제 도형(기둥·보 모양)</option>
                     <option value="marks">기호(이름 테두리)</option>
-                    <option value="shapes">실제 도형(기둥·보 모양)</option>
                 </select>
                 <label class="muted" for="clickAction">기호를 누르면</label>
                 <select id="clickAction">
@@ -104,9 +104,10 @@
             <div class="muted" id="countNote"></div>
             <div class="bar" style="margin: 0.7rem 0 0;">
                 <button type="button" class="btn" id="btnCopy" disabled>부재 수 복사</button>
+                <label class="muted" title="기둥·거더·빔 도형과 함께 구조도 그림(선 전체)도 반투명하게 겹칩니다"><input type="checkbox" id="sendOverlay"> 구조도 그림도 같이</label>
                 <label class="muted" for="overlayColor" title="앱 도면에 겹칠 구조도 선 색">선 색</label>
                 <input type="color" id="overlayColor" value="#2563eb" title="앱 도면에 겹칠 구조도 선 색" style="width:2.4rem;height:2rem;padding:0;border:1px solid #cbd5e1;border-radius:6px;">
-                <button type="button" class="btn primary" id="btnSend" disabled title="구조도 그림(범위를 정했으면 그 부분)과 찾은 부재를 앱의 결함위치도에 겹쳐 볼 수 있게 넘깁니다(이 컴퓨터의 같은 브라우저 안에서만)">앱으로 보내기</button>
+                <button type="button" class="btn primary" id="btnSend" disabled title="찾은 기둥·거더·빔 도형을 앱의 결함위치도로 넘깁니다(이 컴퓨터의 같은 브라우저 안에서만)">앱으로 보내기</button>
             </div>
             <div class="muted" id="sendNote" style="margin-top:0.4rem;"></div>
         </div>

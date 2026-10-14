@@ -85,7 +85,7 @@ const byShape = (ms, shape) => ms.filter((m) => m.shape === shape);
     assert.strictEqual(r.stats.unusedBeamLabels, 0);
 }
 
-// ---- 이름 없는 빔은 가로지르는 거더에서 끊는다(거더는 빔에서 안 끊는다) ----
+// ---- 빔은 중간에 안 끊긴다: 가로지르는 거더를 지나도 한 줄(거더도 빔에서 안 끊긴다) ----
 {
     let paths = [];
     [[100, 100], [300, 100]].forEach(([x, y]) => { paths = paths.concat(solid(x - 2, y - 2, x + 2, y + 2)); });
@@ -96,13 +96,28 @@ const byShape = (ms, shape) => ms.filter((m) => m.shape === shape);
     const marks = [mark('1G9', 194, 175, false), mark('1B3', 150, 146, true)];
     const r = SS.extractShapes({ paths, page: PAGE, marks });
     const beams = byShape(r.members, 'beam').filter((b) => b.type === '빔' && b.w > b.h);
-    assert.strictEqual(beams.length, 2, '빔이 거더에서 둘로: ' + JSON.stringify(beams));
+    assert.strictEqual(beams.length, 1, '빔은 거더를 지나도 하나: ' + JSON.stringify(beams));
+    assert.ok(beams[0].label === '1B3' && beams[0].w > 190, '양쪽 칸을 이은 한 줄, 이름은 기호에서');
     // 기둥에서 내려와 끝이 비는 이름 없는 보는 빔으로 짐작
     assert.strictEqual(byShape(r.members, 'beam').filter((b) => b.guess && b.type === '빔' && b.h > b.w).length, 2);
-    assert.ok(beams.some((b) => b.label === '1B3' && b.x < 200), '기호 쪽 칸은 기호 이름');
-    assert.ok(beams.some((b) => b.label === '1B3' && b.x > 200), '기호 없는 칸은 같은 빔 이름을 이어받는다');
     const g9 = byShape(r.members, 'beam').filter((b) => b.label === '1G9');
     assert.strictEqual(g9.length, 1, '거더는 빔에서 안 끊긴다');
+}
+
+// ---- 칠한 거더에 끊기고 점선이 잠깐 빈 빔도 한 줄로 잇는다. 멀리 떨어진 같은 줄 빔은 따로 ----
+{
+    let paths = [];
+    paths = paths.concat(solid(98, 80, 102, 220));                                     // 칠한 세로 거더(fG1, 기호로)
+    paths = paths.concat(beam('H', 150, 1.4, 40, 98), beam('H', 150, 1.4, 102, 140));  // 거더 양쪽 빔
+    paths = paths.concat(beam('H', 150, 1.4, 145, 180));                               // 점선이 5 쯤 빈 뒤 이어짐
+    paths = paths.concat(beam('H', 150, 1.4, 260, 300));                               // 80 떨어진 다른 빔
+    paths = paths.concat(solid(300, 148, 304, 152), solid(36, 148, 40, 152));          // 끝을 받치는 기둥
+    const marks = [mark('fG1', 94, 120, false), mark('1B5', 70, 146, true)];
+    const r = SS.extractShapes({ paths, page: PAGE, marks });
+    const bms = byShape(r.members, 'beam').filter((b) => b.type === '빔').sort((p, q) => p.x - q.x);
+    assert.strictEqual(bms.length, 2, '이어진 빔 하나 + 떨어진 빔 하나: ' + JSON.stringify(bms));
+    assert.ok(bms[0].label === '1B5' && bms[0].x - bms[0].w / 2 < 42 && bms[0].x + bms[0].w / 2 > 176, '40~178 한 줄');
+    assert.ok(byShape(r.members, 'beam').some((b) => b.label === 'fG1' && b.type === '거더'), '칠한 거더는 그대로');
 }
 
 // ---- 칠한 긴 띠: G·B 기호가 붙으면 칠해 그린 보, 아니면 벽. 기둥에서 끊는다 ----
@@ -159,6 +174,9 @@ const byShape = (ms, shape) => ms.filter((m) => m.shape === shape);
     assert.ok(page.includes('if (FILL_OPS.indexOf(fn) >= 0)'), '칠한 경로 표시');
     assert.ok(/<script src="js\/core\/struct-shapes\.js\?v=[^"]+"><\/script>\s*<script src="js\/struct-plan-page\.js/.test(html), '페이지 스크립트보다 먼저 싣는다');
     assert.ok(html.includes('id="readMode"'));
+    assert.ok(html.includes('<option value="shapes" selected>'), '기본은 실제 도형');
+    assert.ok(/<input type="checkbox" id="sendOverlay">/.test(html), '구조도 그림은 고를 때만(기본 꺼짐)');
+    assert.ok(page.includes('var withPic = chk ? chk.checked : true;'));
 }
 
 console.log('test-struct-shapes: ok');

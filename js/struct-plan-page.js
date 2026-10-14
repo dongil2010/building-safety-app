@@ -150,13 +150,27 @@
     /** 지금은 기둥·거더·빔만 센다(벽·슬래브는 나중에, 2026-10-14) */
     function useType(m) { return USE_TYPES.indexOf(m.type) >= 0; }
     function clone(list) { return (list || []).filter(useType).map(function (m) { return Object.assign({}, m); }); }
+    /**
+     * 실제 도형 보(거더·빔)의 두께를 종류마다 하나로(그 종류의 중간값, js/core/struct-members.js unifyThickness).
+     * 종류를 바꾸면 다시 부른다 — 빔을 거더로 바꾸면 거더 두께가 된다. 기호 방식의 이름 테두리는 건드리지 않는다.
+     */
+    function unifyBeams(list) {
+        var MS = window.BSA.structMembers;
+        if (!MS || !MS.unifyThickness) return list;
+        var idx = [], beams = [];
+        list.forEach(function (m, i) { if (m.shape === 'beam' && !m.excluded) { idx.push(i); beams.push(m); } });
+        var u = MS.unifyThickness(beams);
+        var out = list.slice();
+        idx.forEach(function (i, k) { out[i] = u[k]; });
+        return out;
+    }
     /** 읽어 둔 결과에서 화면 목록을 다시 만든다(바꾼 종류·뺀 것은 처음으로 돌아간다) */
     function applyMode() {
         if (!st.marks) { redraw(); renderSide(); return; }
         var res = st.marks;
         if (readMode() === 'shapes' && st.shapes) {
             var s = st.shapes.stats;
-            st.members = clone(st.shapes.members);
+            st.members = unifyBeams(clone(st.shapes.members));
             st.unread = [];
             redraw(); renderSide();
             setStatus(st.members.length
@@ -306,6 +320,7 @@
             st.unread = st.unread.filter(function (q) { return q !== u; });
             st.members.push({ id: 'sm_u' + Date.now(), shape: u.shape, x: u.x, y: u.y, w: u.w, h: u.h, type: action, label: '(직접)', letter: '', score: 0 });
         }
+        st.members = unifyBeams(st.members);   // 종류가 바뀌었으면 그 종류 두께로
         redraw(); renderSide();
     }
 
@@ -371,14 +386,21 @@
             var btn = this;
             var list = counted();
             if (!st.base || st.refs.length !== 2) return;
+            // 기본은 기둥·거더·빔 도형만 보낸다. 「구조도 그림도 같이」를 켰을 때만 그림을 만든다(칸이 없는 옛 HTML이면 예전처럼 그림도).
+            var chk = $('sendOverlay');
+            var withPic = chk ? chk.checked : true;
+            if (!list.length && !withPic) { setStatus('보낼 부재가 없습니다.', 'warn'); return; }
             btn.disabled = true;
-            setStatus('구조도 그림을 만드는 중…');
-            makeOverlayImage($('overlayColor').value).then(function (overlay) {
+            setStatus(withPic ? '구조도 그림을 만드는 중…' : '보내는 중…');
+            (withPic ? makeOverlayImage($('overlayColor').value) : Promise.resolve(null)).then(function (overlay) {
                 var data = { at: Date.now(), fileName: st.fileName, refs: st.refs.map(function (p) { return { x: p.x, y: p.y }; }),
                     members: list.map(function (m) { return { type: m.type, label: m.label === '(직접)' ? '' : m.label, x: m.x, y: m.y, w: m.w, h: m.h }; }),
                     overlay: overlay };
                 return window.BSA.structMembers.saveHandoff(data).then(function () {
-                    setStatus('구조도 그림(' + Math.round(overlay.blob.size / 1024) + 'KB)과 부재 ' + list.length + '개를 보낼 준비가 됐습니다. 앱의 그 층 결함위치도에서 「구조 부재」 → 「가져오기」를 누르고, 같은 두 기준점을 같은 순서로 누르세요.', 'ok');
+                    var c = SM.countsByType(list);
+                    setStatus((overlay ? '구조도 그림(' + Math.round(overlay.blob.size / 1024) + 'KB)과 ' : '')
+                        + USE_TYPES.map(function (t) { return t + ' ' + c[t]; }).join(' · ')
+                        + '개를 보낼 준비가 됐습니다. 앱의 그 층 결함위치도에서 「구조 부재」 → 「가져오기」를 누르고, 같은 두 기준점을 같은 순서로 누르세요.', 'ok');
                 });
             }).catch(function (err) { setStatus('보내지 못했습니다: ' + (err && err.message ? err.message : err), 'warn'); })
                 .then(function () { renderSide(); });
@@ -437,6 +459,7 @@
                 if (m.label !== label || m.excluded || !inRegion(m)) return;
                 if (v) m.type = v; else m.excluded = true;
             });
+            st.members = unifyBeams(st.members);
             redraw(); renderSide();
         });
         $('btnCopy').addEventListener('click', function () {
@@ -448,7 +471,9 @@
         var modeSel = $('readMode');
         if (modeSel) {
             if (!SS) modeSel.disabled = true;
-            try { if (SS && localStorage.getItem(MODE_KEY) === 'shapes') modeSel.value = 'shapes'; } catch (_e) { /* ignore */ }
+            // 기본은 실제 도형, 사람이 고른 적 있으면 그것
+            try { var saved = localStorage.getItem(MODE_KEY); if (saved === 'marks' || saved === 'shapes') modeSel.value = saved; } catch (_e) { /* ignore */ }
+            if (!SS) modeSel.value = 'marks';
             modeSel.addEventListener('change', function () {
                 try { localStorage.setItem(MODE_KEY, this.value); } catch (_e) { /* ignore */ }
                 applyMode();
