@@ -3,7 +3,7 @@ window.BSA = window.BSA || { tabs: {}, shared: {} };
 
 window.BSA.tabs['tab-map'] = {
     id: 'tab-map',
-    title: '결함위치도 작성',
+    title: '상태조사',
     features: [
         '도면 PAN/ZOOM/회전',
         'PC: 선택·핀/영역 마킹·목록·크기·회전·줌 도구는 도면 안 오버레이 (상단 여백 확보)',

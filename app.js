@@ -46977,7 +46977,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
                         const captionTc = locationMapTbl.getElementsByTagNameNS(HP_NS, 'tc')[1];
                         const captionT = captionTc.getElementsByTagNameNS(HP_NS, 't')[0];
-                        if (captionT) captionT.textContent = `${HWPX_FIG_MARK}${getFloorLabel(floorCode)} 결함위치도`;
+                        if (captionT) captionT.textContent = `${HWPX_FIG_MARK}${getFloorLabel(floorCode)} 상태조사위치도`;
                         return true;
                     }
                     if (!(opts && opts.silent)) {
@@ -49567,7 +49567,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
                         const captionTc = locationMapTbl.getElementsByTagNameNS(HP_NS, 'tc')[1];
                         const captionT = captionTc.getElementsByTagNameNS(HP_NS, 't')[0];
-                        if (captionT) captionT.textContent = `${HWPX_FIG_MARK}${getFloorLabel(floorCode)} 결함위치도`;
+                        if (captionT) captionT.textContent = `${HWPX_FIG_MARK}${getFloorLabel(floorCode)} 상태조사위치도`;
                         return true;
                     }
                     if (!(opts && opts.silent)) {
