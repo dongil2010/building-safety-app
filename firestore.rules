@@ -107,7 +107,12 @@ service cloud.firestore {
       allow create: if request.auth != null &&
         exists(/databases/$(database)/documents/companies/$(request.resource.data.companyId)) &&
         get(/databases/$(database)/documents/companies/$(request.resource.data.companyId)).data.adminUid == request.auth.uid;
-      allow update, delete: if false;
+      // 회사 관리자만: 이름 바꾸기(검색용 이름)·삭제(비활성) 표시. 회사 연결(companyId)은 못 바꾼다(2026-10-14)
+      allow update: if request.auth != null &&
+        isCompanyAdmin(resource.data.companyId) &&
+        request.resource.data.companyId == resource.data.companyId &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['companyName', 'companyNameLower', 'disabled', 'disabledAt']);
+      allow delete: if false;
     }
 
     // --- companies/{companyId}: 회사 메타 문서 ---
@@ -124,7 +129,10 @@ service cloud.firestore {
         // 회사 최초 생성 시 admin 본인 문서 생성 + 이후 admin이 팀원을 승인 등록
         allow create: if request.auth != null &&
           (request.auth.uid == uid || isCompanyAdmin(companyId));
-        allow update: if isCompanyAdmin(companyId);
+        // 관리자만 바꾼다. 본인 관리자 권한 해제는 금지 — 바꾸는 사람이 늘 관리자로 남아 「마지막 관리자 없음」이 생기지 않는다(2026-10-14)
+        allow update: if isCompanyAdmin(companyId) &&
+          !(request.auth.uid == uid && resource.data.get('role', 'member') == 'admin' &&
+            request.resource.data.get('role', 'member') != 'admin');
         // 팀원 탈퇴(본인) 또는 관리자가 멤버 제거
         allow delete: if request.auth != null &&
           (request.auth.uid == uid || isCompanyAdmin(companyId));
@@ -134,7 +142,9 @@ service cloud.firestore {
       match /pendingRequests/{uid} {
         allow get: if request.auth != null && (request.auth.uid == uid || isCompanyAdmin(companyId));
         allow list: if isCompanyAdmin(companyId);
-        allow create: if request.auth != null && request.auth.uid == uid;
+        // 삭제(비활성)된 회사에는 새 가입 신청을 못 낸다(2026-10-14)
+        allow create: if request.auth != null && request.auth.uid == uid &&
+          get(/databases/$(database)/documents/companies/$(companyId)).data.get('disabled', false) != true;
         allow update: if false;
         // 가입 대기 취소(본인) 또는 관리자 거절 처리
         allow delete: if request.auth != null &&
