@@ -43,7 +43,7 @@ function sliceFn(name) {
     assert.ok(codes.has('1F') && codes.has('5F'), '도면 층·마킹 있는 층은 남김');
     assert.ok(!codes.has('EMPTY') && !codes.has('N'), '열어 보기만 한 빈 층은 안 되살림');
     const only = collect({ state: { currentBuildingId: 'b1', currentFloor: '2F' } }, () => false, has)({ id: 'b1' });
-    assert.ok(only.has('2F'), '층 목록이 아예 비면 지금 층은 유지(드롭다운 보호)');
+    assert.ok(!only.has('2F'), '지금 보는 층(이전 건물 층일 수 있음)만으로 층을 만들지 않는다');
 
     // 3) 연결
     assert.ok(app.includes('removeDrawinglessFloorFromBuilding(bldg, item.floorCode);'), '변환 실패한 새 층은 뺀다');

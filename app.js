@@ -1610,10 +1610,8 @@ document.addEventListener('DOMContentLoaded', () => {
             const ref = window.state.ndtDrawingRefs[k];
             if (k.startsWith(prefix) && ref && ref.id) codes.add(k.slice(prefix.length));
         });
-        // 지금 보는 층은 층 목록이 아예 비었을 때만(드롭다운이 비지 않게) — 도면 없는 층을 붙잡지 않는다
-        if (window.state.currentBuildingId === bldg.id && window.state.currentFloor && codes.size === 0) {
-            codes.add(window.state.currentFloor);
-        }
+        // 2026-10-14: 「지금 보는 층」은 층 증거가 아니다. 건물을 바꾼 직후 state.currentFloor는 이전 건물의 층이라
+        // 도면을 넣은 적 없는 건물에 다른 건물의 층(예: 본관 지하 1층)이 생겨 저장·동기화됐다 → 넣지 않는다.
         Array.from(codes).forEach((fc) => {
             if (isDeletedDrawingFloor(bldg, fc)) codes.delete(fc);
         });
