@@ -6888,8 +6888,19 @@ document.addEventListener('DOMContentLoaded', () => {
                 e.stopPropagation();
 
                 const rowRect = row.getBoundingClientRect();
-                const listRect = listEl.getBoundingClientRect();
+                let listRect = listEl.getBoundingClientRect();
                 const offsetY = e.clientY - rowRect.top;
+                // 2026-10-14 목록이 길어 창이 스크롤되면 위·아래 끝 근처에서 자동으로 스크롤
+                const findScroller = (el) => {
+                    for (let n = el; n && n !== document.body; n = n.parentElement) {
+                        const oy = getComputedStyle(n).overflowY;
+                        if ((oy === 'auto' || oy === 'scroll') && n.scrollHeight > n.clientHeight + 2) return n;
+                    }
+                    return document.scrollingElement || document.documentElement;
+                };
+                const scroller = findScroller(listEl.parentElement);
+                let lastY = e.clientY;
+                let scrollRaf = 0;
                 const placeholder = document.createElement('div');
                 placeholder.className = 'add-drawing-preview-placeholder';
                 placeholder.style.height = `${rowRect.height}px`;
@@ -6909,6 +6920,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 handle.setPointerCapture(e.pointerId);
 
                 const moveRowToY = (clientY) => {
+                    listRect = listEl.getBoundingClientRect();
                     const top = clientY - offsetY;
                     const minTop = listRect.top - rowRect.height * 0.35;
                     const maxTop = listRect.bottom - rowRect.height * 0.65;
@@ -6932,8 +6944,27 @@ document.addEventListener('DOMContentLoaded', () => {
                 };
                 moveRowToY(e.clientY);
 
-                const onMove = (ev) => moveRowToY(ev.clientY);
+                const autoScrollTick = () => {
+                    scrollRaf = 0;
+                    const isDoc = scroller === document.scrollingElement || scroller === document.documentElement;
+                    const r = isDoc ? { top: 0, bottom: window.innerHeight } : scroller.getBoundingClientRect();
+                    const edge = 56;
+                    let dy = 0;
+                    if (lastY < r.top + edge) dy = -Math.ceil((r.top + edge - lastY) / 4);
+                    else if (lastY > r.bottom - edge) dy = Math.ceil((lastY - (r.bottom - edge)) / 4);
+                    if (!dy) return;
+                    const before = scroller.scrollTop;
+                    scroller.scrollTop = before + dy;
+                    if (scroller.scrollTop !== before) moveRowToY(lastY);
+                    scrollRaf = requestAnimationFrame(autoScrollTick);
+                };
+                const onMove = (ev) => {
+                    lastY = ev.clientY;
+                    moveRowToY(ev.clientY);
+                    if (!scrollRaf) scrollRaf = requestAnimationFrame(autoScrollTick);
+                };
                 const onUp = () => {
+                    if (scrollRaf) { cancelAnimationFrame(scrollRaf); scrollRaf = 0; }
                     try { handle.releasePointerCapture(e.pointerId); } catch (_) {}
                     handle.removeEventListener('pointermove', onMove);
                     handle.removeEventListener('pointerup', onUp);
@@ -7816,7 +7847,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
             if (existingFloors.length > 0) {
                 html += `<div class="add-drawing-preview-title" style="margin-top:0.35rem;">기존 도면 ${existingFloors.length}개</div>`;
-                html += `<div class="add-drawing-preview-list edit-drawing-existing-list" style="max-height:220px; overflow-y:auto;">`;
+                html += `<div class="add-drawing-preview-list edit-drawing-existing-list">`;
                 existingFloors.forEach((f, idx) => {
                     const hasImg = bldg.floorDrawings && bldg.floorDrawings[f.floorCode];
                     const safeCode = escapeHtml(f.floorCode);
