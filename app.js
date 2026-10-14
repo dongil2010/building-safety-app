@@ -1257,12 +1257,73 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    // --- 도면 진하게 (2026-10-14) ---
+    // 연한 회색 선으로 올라온 도면은 화면·출력(한글·PDF 위치도)에서 잘 안 보인다. 층마다 단계를 정해 두면
+    // 도면 그림을 "곱하기"로 덧그려 선만 진하게 한다 — 흰 바탕은 그대로 희고, 핀·범례 색은 건드리지 않는다.
+    // 저장: state.floorDrawingDarken[건물_층] = 0~3. 되돌릴 때도 키를 지우지 않고 0 을 넣는다(루트 문서는 merge 로 올린다).
+    const FLOOR_DRAWING_DARKEN_LABELS = ['보통', '진하게', '더 진하게', '가장 진하게'];
+    const FLOOR_DRAWING_DARKEN_PASSES = [0, 1, 2, 4];
+
+    function getFloorDrawingDarken(buildingId, floorCode) {
+        const map = state.floorDrawingDarken;
+        if (!map || typeof map !== 'object') return 0;
+        const v = parseInt(map[getFloorMapStyleKey(buildingId, floorCode)], 10);
+        return Number.isFinite(v) ? Math.min(Math.max(v, 0), FLOOR_DRAWING_DARKEN_LABELS.length - 1) : 0;
+    }
+
+    function setFloorDrawingDarken(buildingId, floorCode, level) {
+        if (!state.floorDrawingDarken || typeof state.floorDrawingDarken !== 'object') state.floorDrawingDarken = {};
+        state.floorDrawingDarken[getFloorMapStyleKey(buildingId, floorCode)] = level;
+        if (typeof saveStateToLocalStorage === 'function') saveStateToLocalStorage();
+        if (typeof scheduleSyncToFirebase === 'function') scheduleSyncToFirebase();
+    }
+
+    /** 방금 그린 도면 위에 같은 그림을 곱하기로 덧그린다. draw()는 도면을 한 번 그리는 함수. */
+    function applyFloorDrawingDarken(ctx, level, draw) {
+        const passes = FLOOR_DRAWING_DARKEN_PASSES[level] || 0;
+        if (!passes) return;
+        ctx.save();
+        ctx.globalCompositeOperation = 'multiply';
+        for (let i = 0; i < passes; i++) draw();
+        ctx.restore();
+    }
+
+    /** 도면을 (0,0)에 w×h 로 그리고 진하게 단계를 입힌다 — 출력용 그림들이 쓴다. */
+    function drawFloorDrawingImage(ctx, img, w, h, level) {
+        ctx.drawImage(img, 0, 0, w, h);
+        applyFloorDrawingDarken(ctx, level, () => ctx.drawImage(img, 0, 0, w, h));
+    }
+
+    function syncFloorDrawingDarkenButton(level) {
+        const btn = document.getElementById('btnFloorDrawingDarken');
+        if (!btn || btn.dataset.level === String(level)) return;
+        btn.dataset.level = String(level);
+        btn.classList.toggle('active', level > 0);
+        btn.innerHTML = `<i class="fa-solid fa-circle-half-stroke"></i> 도면 ${FLOOR_DRAWING_DARKEN_LABELS[level]}`;
+    }
+
+    (function bindFloorDrawingDarkenButton() {
+        const btn = document.getElementById('btnFloorDrawingDarken');
+        if (!btn) return;
+        btn.addEventListener('click', () => {
+            if (!state.currentBuildingId || !state.currentFloor) return;
+            const next = (getFloorDrawingDarken(state.currentBuildingId, state.currentFloor) + 1) % FLOOR_DRAWING_DARKEN_LABELS.length;
+            setFloorDrawingDarken(state.currentBuildingId, state.currentFloor, next);
+            drawCanvas();
+            syncNdtBackgroundWithMapDrawing();
+            window.showToast?.(`이 층 도면: ${FLOOR_DRAWING_DARKEN_LABELS[next]} — 한글·PDF 위치도에도 적용됩니다.`, 'info', 2500);
+        });
+    })();
+
     function drawFloorPlanLayers(ctx, imgW, imgH) {
+        const darken = getFloorDrawingDarken(state.currentBuildingId, state.currentFloor);
+        syncFloorDrawingDarkenButton(darken);
         const drawBg = (img, alpha) => {
             if (!img || alpha <= 0.001) return;
             ctx.save();
             ctx.globalAlpha = alpha;
             ctx.drawImage(img, 0, 0, imgW, imgH);
+            applyFloorDrawingDarken(ctx, darken, () => ctx.drawImage(img, 0, 0, imgW, imgH));
             ctx.restore();
         };
         const drawPatch = (patch, alpha) => {
@@ -1271,6 +1332,7 @@ document.addEventListener('DOMContentLoaded', () => {
             ctx.imageSmoothingEnabled = false;
             ctx.globalAlpha = alpha;
             ctx.drawImage(patch.canvas, patch.x, patch.y, patch.w, patch.h);
+            applyFloorDrawingDarken(ctx, darken, () => ctx.drawImage(patch.canvas, patch.x, patch.y, patch.w, patch.h));
             ctx.restore();
         };
 
@@ -2256,6 +2318,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 floorDrawingRotations: window.state.floorDrawingRotations || null,
                 floorGridLines: window.state.floorGridLines || null,
                 floorPrintCrops: window.state.floorPrintCrops || null,
+                floorDrawingDarken: window.state.floorDrawingDarken || null,
                 styleShapes: window.state.styleShapes || null,
                 surveyColumns: window.state.surveyColumns || null,
                 surveyColumnsGrade3: window.state.surveyColumnsGrade3 || null,
@@ -2489,6 +2552,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
                 if (parsed.floorPrintCrops) {
                     window.state.floorPrintCrops = parsed.floorPrintCrops;
+                }
+                if (parsed.floorDrawingDarken) {
+                    window.state.floorDrawingDarken = parsed.floorDrawingDarken;
                 }
                 if (parsed.styleShapes) {
                     window.state.styleShapes = parsed.styleShapes;
@@ -12363,6 +12429,11 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
         if (ndtBgImage) {
             ctx.drawImage(ndtBgImage, 0, 0);
+            const ndtKey = `${state.currentBuildingId}_${state.currentFloor}`;
+            if (!currentNdtCustomDrawingSrc(ndtKey)) {
+                applyFloorDrawingDarken(ctx, getFloorDrawingDarken(state.currentBuildingId, state.currentFloor),
+                    () => ctx.drawImage(ndtBgImage, 0, 0));
+            }
         }
 
         // Filter NDT pins by current active category tab
@@ -42940,7 +43011,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                         ctx.translate(drawX, drawY);
                         ctx.scale(scale, scale);
                     }
-                    ctx.drawImage(imgObj, 0, 0, imgW, imgH);
+                    drawFloorDrawingImage(ctx, imgObj, imgW, imgH, getFloorDrawingDarken(currentBldgId, floorCode));
                     const prevStyleCtx = _mapStyleRenderContext;
                     _mapStyleRenderContext = { buildingId: currentBldgId, floorCode };
                     try {
@@ -43102,7 +43173,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         ctx.beginPath();
         ctx.rect(crop.x, crop.y, crop.w, crop.h);
         ctx.clip();
-        ctx.drawImage(imgObj, 0, 0, imgW, imgH);
+        drawFloorDrawingImage(ctx, imgObj, imgW, imgH, getFloorDrawingDarken(buildingId, floorCode));
         drawFloorDefectsForReport(ctx, defects, buildingId, floorCode);
         drawMemosForReport(ctx, buildingId, floorCode, imgW, imgH);   // 「메모 출력」 켰을 때만
         // 범례는 범위 안의 같은 구석에 — 도면 구석에 그대로 두면 범위 밖이라 잘려 나간다
@@ -43137,7 +43208,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         ctx.fillRect(0, 0, canvas.width, canvas.height);
         ctx.save();
         ctx.scale(canvas.width / imgW, canvas.height / imgH);
-        ctx.drawImage(imgObj, 0, 0, imgW, imgH);
+        drawFloorDrawingImage(ctx, imgObj, imgW, imgH, getFloorDrawingDarken(state.currentBuildingId, state.currentFloor));
         const key = `${state.currentBuildingId}_${state.currentFloor}`;
         const defects = filterMapPlacedDefects(state.defects[key] || getCurrentFloorDefects() || []);
         drawFloorDefectsForReport(ctx, defects, state.currentBuildingId, state.currentFloor);
@@ -43560,6 +43631,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 ? ((customEntry && customEntry.src === customSrc) ? customEntry.img : null)
                 : (state.floorImageCache ? state.floorImageCache[`${currentBldgId}_${floorCode}`] : null);
             let floorDrawingSrc = getNdtFloorDrawingSrc(bldg, floorCode);
+            // 도면 진하게는 층 도면에만 — 비파괴 전용 도면은 따로 올린 그림이라 그대로 둔다
+            const ndtDarken = customSrc ? 0 : getFloorDrawingDarken(currentBldgId, floorCode);
 
             if (loadedImg || floorDrawingSrc) {
                 const drawImageOnPureWhiteCanvas = (imgObj) => {
@@ -43586,7 +43659,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                         ctx.scale(scale, scale);
                         ctx.translate(-imgW / 2, -imgH / 2);
 
-                        ctx.drawImage(imgObj, 0, 0, imgW, imgH);
+                        drawFloorDrawingImage(ctx, imgObj, imgW, imgH, ndtDarken);
                         ndtItems.forEach(item => drawNdtPin(ctx, item, ndtItems));
                         displacementGroups.forEach(g => drawNdtDisplacementGroup(ctx, g));
                     } else {
@@ -43597,7 +43670,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                         ctx.translate(drawX, drawY);
                         ctx.scale(scale, scale);
 
-                        ctx.drawImage(imgObj, 0, 0, imgW, imgH);
+                        drawFloorDrawingImage(ctx, imgObj, imgW, imgH, ndtDarken);
                         ndtItems.forEach(item => drawNdtPin(ctx, item, ndtItems));
                         displacementGroups.forEach(g => drawNdtDisplacementGroup(ctx, g));
                     }
@@ -59725,6 +59798,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             window.state.floorPrintCrops = data.floorPrintCrops;
             isChanged = true;
         }
+        if (data.floorDrawingDarken) {
+            window.state.floorDrawingDarken = data.floorDrawingDarken;
+            isChanged = true;
+        }
         if (data.styleShapes) {
             window.state.styleShapes = data.styleShapes;
             isChanged = true;
@@ -60281,6 +60358,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 floorGridLines: window.state.floorGridLines || null,
                 // 아직 못 받은 기기가 null 로 덮어 다른 기기가 정한 출력 범위를 지우지 않게 — 있을 때만 올린다
                 ...(window.state.floorPrintCrops ? { floorPrintCrops: window.state.floorPrintCrops } : {}),
+                ...(window.state.floorDrawingDarken ? { floorDrawingDarken: window.state.floorDrawingDarken } : {}),
                 styleShapes: window.state.styleShapes || null,
                 locationMapLegend: window.state.locationMapLegend || null,
                 locationMapLegendBox: window.state.locationMapLegendBox || null,
