@@ -24353,7 +24353,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     // --- Dynamic Defect Component(부재 명칭) — 분류별 플랫 프리셋 ---
     // 2026-09-28 접합부는 거더/빔 구분이 필요 없음 — 큰보·작은보 → 보, 철골거더·철골빔 → 철골보
     const DEFECT_JOINT_LEFT = ['기둥', 'RC기둥', '철골기둥', 'SRC기둥', '보', '벽체', 'RC벽체', '내력벽', '슬래브', '기초'];
-    const DEFECT_JOINT_RIGHT = ['보', '철골보', '기둥', '슬래브', '데크슬래브', '벽체', '기초'];
+    const DEFECT_JOINT_RIGHT = ['보', '철골보', '기둥', '슬래브', '데크슬래브', '벽체', '조적벽체', '기초']; // 조적벽체(2026-10-14): 예) 기둥-조적벽체 접합부 — 부재 수에는 안 셈
     const DEFECT_JOINT_COMPONENT_PRESET = [
         '기둥-보 접합부',
         '기둥-슬래브 접합부',
@@ -25777,6 +25777,25 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
     /* ---------------- 부재 수 세기(2026-10-13) — 결함 아님, 화면 전용 점 ---------------- */
     function mcApi() { return window.BSA && window.BSA.memberCount; }
+    /** 2026-10-14 손 점 + 양호·구조 결함 마킹에서 나온 자동 점(저장 안 함, 그때그때 계산) */
+    function mcListAll(floorKey) {
+        const api = mcApi();
+        if (!api || !floorKey) return [];
+        if (typeof api.listWithAuto !== 'function') return api.listFor(state, floorKey);
+        const E = evalUnitApi();
+        const bldg = currentEvalBuilding();
+        let zoneNoOf = null;
+        if (E && bldg && typeof E.unitOf === 'function') {
+            const units = E.planOf(bldg).units;
+            zoneNoOf = (d) => {
+                const z = E.unitOf(state, floorKey, d);
+                const uid = z ? E.zoneUnitId(bldg, z) : '';
+                const u = uid && units.find((x) => x.id === uid);
+                return u ? Number(u.no) : 0;
+            };
+        }
+        return api.listWithAuto(state, floorKey, { zoneNoOf });
+    }
     const MC_TYPE_KEY = 'bsa_member_count_type';
     const MC_SHOW_KEY = 'bsa_member_count_show';
     let mcUndo = [];   // [{ op:'add'|'remove', floorKey, rec }]
@@ -25833,7 +25852,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (!fm || fm.mode !== 'split') return {};
         const here = mcFloorZones(bldg, floorCode, floorKey);
         const out = {};
-        mc.listFor(state, floorKey).forEach((d) => {
+        mcListAll(floorKey).forEach((d) => {
             const n = Number(d.zoneNo) || 0;
             if (!n || !here.includes(n)) out[n] = (out[n] || 0) + 1;
         });
@@ -25857,7 +25876,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const api = mcApi();
         const floorKey = currentMemoFloorKey();
         if (!api || !floorKey || !state.bgImage) return;
-        const hit = api.hitTest(api.listFor(state, floorKey), sx, sy, 14, memoImgToScreen);
+        const hit = api.hitTest(api.listFor(state, floorKey), sx, sy, 14, memoImgToScreen);   // 손 점만(자동 점은 마킹을 지우면 사라짐)
         if (hit) {
             // 점을 누르면 바로 지우지 않고 작은 메뉴(지우기 / 구역 바꾸기)
             openMcDotMenu(floorKey, hit.id);
@@ -25965,7 +25984,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const api = mcApi();
         const floorKey = currentMemoFloorKey();
         const on = state.mode === 'COUNT' || readMcShowPref();
-        const list = (api && floorKey && state.bgImage && on && state.currentTab !== 'tab-ndt' && window.__bsaEvalMapOn === true) ? api.listFor(state, floorKey) : [];
+        const list = (api && floorKey && state.bgImage && on && state.currentTab !== 'tab-ndt' && window.__bsaEvalMapOn === true) ? mcListAll(floorKey) : [];
         let ov = document.getElementById('mapCountOverlay');
         if (!list.length) { if (ov) ov.replaceChildren(); return; }
         ov = getMemberCountOverlay();
@@ -25990,6 +26009,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             const label = `${api.SHORT[d.type] || ''}${seq[d.id] || ''}${d.zoneNo ? '·' + d.zoneNo : ''}`;
             if (el.textContent !== label) el.textContent = label;
             el.style.setProperty('--mc-color', api.COLORS[d.type] || '#334155');
+            el.classList.toggle('is-auto', !!d.auto);
+            el.title = d.auto ? '양호·결함 마킹에서 자동으로 센 부재(마킹을 지우면 빠짐)' : '';
             if (d.zoneNo) { el.classList.add('has-zone'); el.style.setProperty('--zone-color', mcZoneColor(d.zoneNo)); } else el.classList.remove('has-zone');
             el.style.transform = `translate(${Math.round(p.sx)}px, ${Math.round(p.sy)}px) translate(-50%, -50%)`;
             keep.add(d.id);
@@ -26023,8 +26044,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (bar.parentElement !== host) host.appendChild(bar);
         bar.hidden = false;
         const floorKey = currentMemoFloorKey();
-        const all = api.listFor(state, floorKey);
+        const all = mcListAll(floorKey);
         const counts = api.countsByType(all);
+        const autoN = all.filter((d) => d.auto).length;
         const cur = mcType();
         const zones = mcZoneChoices();
         if (zones.length && !zones.includes(mcZoneNo)) mcZoneNo = zones[0];
@@ -26034,7 +26056,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const off = mcOffZoneDots(currentEvalBuilding(), state.currentFloor, floorKey);
         const offTxt = Object.keys(off).map((n) => `${Number(n) ? '구역 ' + n : '구역 없음'} ${off[n]}개`).join(', ');
         const html = (zones.length ? `<span class="map-count-zone-badge" style="--zone-color:${mcZoneColor(mcZoneNo)}" title="숫자키 1~9로 바꾸기">구역 <b>${mcZoneNo}</b></span>` : '')
-            + `<span class="map-count-title">부재 수</span>`
+            + `<span class="map-count-title" title="손 점 + 양호·구조 결함 마킹 자동(점선 점)">부재 수${autoN ? ` <small>자동 ${autoN}</small>` : ""}</span>`
             + api.TYPES.map((t) => `<button type="button" class="map-count-type${t === cur ? ' active' : ''}" data-mc-type="${t}" style="--mc-color:${api.COLORS[t]}" title="단축키 ${keyOf[t]}${zc ? ' · 지금 구역 / 층 전체' : ''}">${t} <b>${zc ? `${zc[t] || 0}<small>/${counts[t] || 0}</small>` : (counts[t] || 0)}</b><span class="map-count-key">${keyOf[t]}</span></button>`).join('')
             + (zones.length > 1 ? `<span class="map-count-sep">구역</span>` + zones.map((n) => `<button type="button" class="map-count-zone${n === mcZoneNo ? ' active' : ''}" data-mc-zone="${n}" style="--zone-color:${mcZoneColor(n)}" title="숫자키 ${n}">${n}</button>`).join('') : '')
             + (offTxt ? `<span class="map-count-warn">⚠ 이 층에 없는 구역의 점: ${offTxt} — 집계 안 됨(점을 눌러 구역 바꾸기)</span>` : '')
