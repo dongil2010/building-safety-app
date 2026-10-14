@@ -7,6 +7,7 @@
     'use strict';
 
     var SM = window.BSA.structMarks;
+    var SS = window.BSA.structShapes || null;   // 옛 HTML(스크립트 태그 없음)이면 없다 — 그때는 기호 방식만
     var COLORS = { '기둥': '#dc2626', '벽': '#7c3aed', '거더': '#2563eb', '빔': '#f59e0b', '슬래브': '#16a34a' };
     var PDF_WORKER = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
     var $ = function (id) { return document.getElementById(id); };
@@ -43,9 +44,17 @@
                 a[0] * b[4] + a[2] * b[5] + a[4], a[1] * b[4] + a[3] * b[5] + a[5]];
         };
         var ctm = vp.transform.slice(), stack = [], paths = [], images = 0;
+        // 칠하는 명령 — 그 앞에 만든 경로에 fill 표시(기둥·벽 칠 찾기, js/core/struct-shapes.js)
+        var FILL_OPS = [OPS.fill, OPS.eoFill, OPS.fillStroke, OPS.eoFillStroke, OPS.closeFillStroke, OPS.closeEOFillStroke];
+        var PAINT_OPS = FILL_OPS.concat([OPS.stroke, OPS.closeStroke, OPS.endPath]);
+        var painted = 0;
         for (var i = 0; i < ol.fnArray.length; i++) {
             var fn = ol.fnArray[i], a = ol.argsArray[i];
-            if (fn === OPS.save) stack.push(ctm.slice());
+            if (PAINT_OPS.indexOf(fn) >= 0) {
+                if (FILL_OPS.indexOf(fn) >= 0) for (var pi = painted; pi < paths.length; pi++) paths[pi].fill = true;
+                painted = paths.length;
+            }
+            else if (fn === OPS.save) stack.push(ctm.slice());
             else if (fn === OPS.restore) ctm = stack.pop() || ctm;
             else if (fn === OPS.transform) ctm = mul(ctm, a);
             else if (fn === OPS.paintImageXObject || fn === OPS.paintJpegXObject) images++;
@@ -107,7 +116,7 @@
         st.refPicking = false;
 
         if (ex.paths.length < 200) {
-            st.members = []; st.unread = [];
+            st.members = []; st.unread = []; st.marks = null; st.shapes = null;
             redraw(); renderSide();
             setStatus(ex.images > 0
                 ? '이 PDF는 스캔한 그림이라 선 데이터가 없습니다. 스캔본은 아직 읽지 못합니다(캐드에서 뽑은 PDF만 됩니다).'
@@ -118,11 +127,47 @@
         await new Promise(function (r) { setTimeout(r, 20); });
         var t0 = performance.now();
         var res = SM.detect({ paths: ex.paths, texts: ex.texts, page: ex.page, templates: buildTemplates(), debug: !!window.__structDebug });
-        st.members = res.members;
-        st.unread = res.unread;
+        st.marks = res;
+        st.shapes = null;
+        if (window.__structDebug) st.ex = ex;   // 확인용: 꺼낸 선·글자
+        if (SS) {
+            try { st.shapes = SS.extractShapes({ paths: ex.paths, page: ex.page, marks: res.members }); }
+            catch (err) { console.error(err); }
+        }
+        st.ms = Math.round(performance.now() - t0);
+        applyMode();
+    }
+
+    // ---------- 읽는 방식: 기호(글자 테두리) / 실제 도형(기둥·벽 칠, 보 점선) ----------
+    var MODE_KEY = 'bsa_struct_plan_mode';
+    /** 배포 직후 옛 HTML에는 이 칸이 없을 수 있다 — 없으면 기호 방식 */
+    function readMode() {
+        var el = $('readMode');
+        return el && el.value === 'shapes' && SS ? 'shapes' : 'marks';
+    }
+    function clone(list) { return (list || []).map(function (m) { return Object.assign({}, m); }); }
+    /** 읽어 둔 결과에서 화면 목록을 다시 만든다(바꾼 종류·뺀 것은 처음으로 돌아간다) */
+    function applyMode() {
+        if (!st.marks) { redraw(); renderSide(); return; }
+        var res = st.marks;
+        if (readMode() === 'shapes' && st.shapes) {
+            var s = st.shapes.stats;
+            st.members = clone(st.shapes.members);
+            st.unread = [];
+            redraw(); renderSide();
+            setStatus(st.members.length
+                ? '실제 도형: 기둥 ' + s.columns + ' · 벽 ' + s.walls + ' · 보 ' + s.beams + '칸'
+                    + (s.guessed ? ' (이름 없는 보 ' + s.guessed + '칸은 점선 — 양 끝이 기둥·벽이면 거더, 아니면 빔으로 짐작)' : '')
+                    + ' · 슬래브는 기호. 초안이니 도면에서 확인하고 고쳐 주세요.'
+                : '부재 모양을 찾지 못했습니다. 기둥·벽을 칠하지 않았거나 보를 점선 두 줄로 그리지 않은 도면일 수 있습니다 — 「기호」 방식을 쓰세요.',
+                st.members.length ? 'ok' : 'warn');
+            return;
+        }
+        st.members = clone(res.members);
+        st.unread = clone(res.unread);
         redraw(); renderSide();
         setStatus(res.members.length
-            ? '부재 기호 ' + res.members.length + '개를 찾았습니다 (' + Math.round(performance.now() - t0) + 'ms). 초안이니 도면에서 확인하고 고쳐 주세요.'
+            ? '부재 기호 ' + res.members.length + '개를 찾았습니다 (' + st.ms + 'ms). 초안이니 도면에서 확인하고 고쳐 주세요.'
             : '부재 기호를 찾지 못했습니다. 기호가 테두리(네모·알약·타원) 없이 그려진 도면일 수 있습니다.', res.members.length ? 'ok' : 'warn');
     }
 
@@ -176,11 +221,19 @@
         x.setLineDash([]);
         st.members.forEach(function (m) {
             var on = !m.excluded && inRegion(m);
+            // 실제 도형(기둥·벽·보)은 제 크기 그대로 진하게 칠하고, 기호는 테두리 밖으로 조금 넓혀 그린다
+            var real = m.shape === 'column' || m.shape === 'wall' || m.shape === 'beam';
+            var pad = real ? 0 : 3;
             x.globalAlpha = on ? 1 : 0.35;
-            x.lineWidth = on ? 4 : 2;
+            x.lineWidth = on ? (real ? 2 : 4) : 2;
             x.strokeStyle = on ? (COLORS[m.type] || '#111') : '#94a3b8';
-            if (on) { x.fillStyle = COLORS[m.type] || '#111'; x.globalAlpha = 0.12; x.fillRect((m.x - m.w / 2) * s - 3, (m.y - m.h / 2) * s - 3, m.w * s + 6, m.h * s + 6); x.globalAlpha = 1; }
-            box(m, 3);
+            if (on) {
+                x.fillStyle = COLORS[m.type] || '#111'; x.globalAlpha = real ? (m.guess ? 0.2 : 0.4) : 0.12;
+                x.fillRect((m.x - m.w / 2) * s - pad, (m.y - m.h / 2) * s - pad, m.w * s + pad * 2, m.h * s + pad * 2); x.globalAlpha = 1;
+            }
+            if (m.guess) x.setLineDash([8, 5]);   // 이름 없이 짐작한 보
+            box(m, pad);
+            x.setLineDash([]);
         });
         x.globalAlpha = 1;
         var r = st.drag || st.region;
@@ -209,7 +262,7 @@
         $('countNote').textContent = (out ? '뺀 기호 ' + out + '개 · ' : '') + (st.unread.length ? '못 읽은 기호 ' + st.unread.length + '개(회색 점선)' : '');
         var groups = SM.labelGroups(list);
         $('groups').innerHTML = groups.length ? groups.map(function (g) {
-            return '<tr><td><b>' + esc(g.label) + '</b></td><td class="num">' + g.count + '</td><td><select data-label="' + esc(g.label) + '">'
+            return '<tr><td><b>' + (g.label ? esc(g.label) : '<span class="muted">(이름 없음)</span>') + '</b></td><td class="num">' + g.count + '</td><td><select data-label="' + esc(g.label) + '">'
                 + SM.TYPES.map(function (t) { return '<option' + (t === g.type ? ' selected' : '') + '>' + t + '</option>'; }).join('')
                 + '<option value="">빼기</option></select></td></tr>';
         }).join('') : '<tr><td colspan="3" class="muted">아직 찾은 기호가 없습니다.</td></tr>';
@@ -388,6 +441,15 @@
             navigator.clipboard.writeText(text).then(function () { setStatus('부재 수를 복사했습니다(엑셀에 붙여 넣을 수 있습니다).', 'ok'); },
                 function () { setStatus('복사하지 못했습니다.', 'warn'); });
         });
+        var modeSel = $('readMode');
+        if (modeSel) {
+            if (!SS) modeSel.disabled = true;
+            try { if (SS && localStorage.getItem(MODE_KEY) === 'shapes') modeSel.value = 'shapes'; } catch (_e) { /* ignore */ }
+            modeSel.addEventListener('change', function () {
+                try { localStorage.setItem(MODE_KEY, this.value); } catch (_e) { /* ignore */ }
+                applyMode();
+            });
+        }
         $('pageNo').addEventListener('change', function () {
             st.pageNo = Math.min(Math.max(1, parseInt(this.value, 10) || 1), st.doc ? st.doc.numPages : 1);
             this.value = st.pageNo;

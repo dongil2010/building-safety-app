@@ -80,6 +80,11 @@
                 <button type="button" class="btn" id="btnRegion" title="셀 범위를 끌어서 정합니다(일람표·범례를 빼는 데 씁니다)">범위 지정</button>
                 <button type="button" class="btn" id="btnRegionClear">범위 해제</button>
                 <button type="button" class="btn" id="btnRefs" title="앱 도면과 맞출 기준점 2개를 찍습니다(예: 서로 먼 두 기둥 중심)">기준점 지정</button>
+                <label class="muted" for="readMode">읽는 방식</label>
+                <select id="readMode" title="기호: 부재 이름 테두리(C1·1G2…)를 셉니다. 실제 도형: 칠한 기둥·벽과 점선 두 줄 보를 찾아 칸(경간)마다 셉니다.">
+                    <option value="marks">기호(이름 테두리)</option>
+                    <option value="shapes">실제 도형(기둥·벽·보 모양)</option>
+                </select>
                 <label class="muted" for="clickAction">기호를 누르면</label>
                 <select id="clickAction">
                     <option value="toggle">빼기 / 되살리기</option>
@@ -134,6 +139,7 @@
 <script src="js/core/struct-members.js?v=dev"></script>
 <script src="js/core/struct-glyphs.js?v=dev"></script>
 <script src="js/core/struct-marks.js?v=dev"></script>
+<script src="js/core/struct-shapes.js?v=dev"></script>
 <script src="js/struct-plan-page.js?v=dev"></script>
 </body>
 </html>
