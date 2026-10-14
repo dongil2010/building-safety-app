@@ -55537,6 +55537,15 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         return hit;
     }
 
+    /** 지운 층을 서버 문서 증거로 되살려도 되나: 삭제 시각이 없는 옛 묘비(오탐)는 예전처럼 살리고,
+     *  사용자가 지운 층은 그 뒤에 올라온 문서(docAt > 삭제 시각)일 때만 */
+    function evidenceCanReviveDeletedFloor(bldg, floorCode, docAt) {
+        const fn = _drawingFloorTombstone && _drawingFloorTombstone.getDeletedDrawingFloorAt;
+        const deletedAt = typeof fn === 'function' ? fn(bldg, floorCode) : 0;
+        if (!deletedAt) return true;
+        return Number(docAt) > deletedAt;
+    }
+
     async function discoverCloudDrawingFloorCodes(bldg) {
         const codes = new Set();
         if (!bldg || !bldg.id) return codes;
@@ -55563,6 +55572,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             Array.from(codes).forEach((fc) => {
                 if (!fc) return;
                 if (!isDeletedDrawingFloor(bldg, fc)) return;
+                if (!evidenceCanReviveDeletedFloor(bldg, fc, 0)) { codes.delete(fc); return; }
                 if (forgetDeletedDrawingFloor(bldg, fc, { fromEvidence: true })) {
                     cachedHealed += 1;
                 }
@@ -55579,12 +55589,23 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         }
         const companyRef = db.collection('safety_app').doc(getCompanyDocId());
         const docPrefix = `${bldg.id}_`;
+        // 층별 서버 문서의 마지막 수정 시각 — 사용자가 지운 뒤에 다시 올린 문서만 묘비를 푼다(2026-10-14)
+        const docAtByCode = new Map();
+        const noteDocAt = (fc, doc) => {
+            let at = 0;
+            try {
+                const d = doc.data ? (doc.data() || {}) : {};
+                const u = d.updatedAt;
+                at = u && typeof u.toMillis === 'function' ? u.toMillis() : (Number(u) || Number(d.uploadedAt) || 0);
+            } catch (_e) { at = 0; }
+            docAtByCode.set(fc, Math.max(docAtByCode.get(fc) || 0, at));
+        };
         const parseDocFloors = (snap) => {
             if (!snap) return;
             snap.forEach((doc) => {
                 if (!doc.id.startsWith(docPrefix)) return;
                 const fc = doc.id.slice(docPrefix.length);
-                if (fc) codes.add(fc);
+                if (fc) { codes.add(fc); noteDocAt(fc, doc); }
             });
         };
         const parseTierDocFloors = (snap) => {
@@ -55594,7 +55615,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 if (!doc.id.startsWith(prefix)) return;
                 const rest = doc.id.slice(prefix.length);
                 const m = rest.match(/^(.+)_(\d+)$/);
-                if (m && m[1]) codes.add(m[1]);
+                if (m && m[1]) { codes.add(m[1]); noteDocAt(m[1], doc); }
             });
         };
         try {
@@ -55628,7 +55649,15 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         let healed = 0;
         Array.from(codes).forEach((fc) => {
             if (!fc) return;
-            if (!isDeletedDrawingFloor(bldg, fc)) return;
+            if (!isDeletedDrawingFloor(bldg, fc)) {
+                return;
+            }
+            // 사용자가 지운 층(삭제 시각 있음)은 그보다 나중에 올라온 서버 문서가 있을 때만 되살린다.
+            // 2026-10-14: 지워도 남은 서버 문서(파일은 없는 옛 기록) 때문에 「도면 없음」 층이 다시 생겨 지울 수 없었다.
+            if (!evidenceCanReviveDeletedFloor(bldg, fc, docAtByCode.get(fc) || 0)) {
+                codes.delete(fc);
+                return;
+            }
             if (forgetDeletedDrawingFloor(bldg, fc, { fromEvidence: true })) {
                 healed += 1;
             }

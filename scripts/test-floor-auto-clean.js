@@ -65,5 +65,15 @@ function makeEnv({ cloud, idb, online = true, failCloud = false, markings = {} }
     const enter = app.indexOf('try { await autoRemoveDrawinglessFloors(bldg); }');
     assert.ok(enter > 0 && enter < app.indexOf('populateFloorSelectDropdown(bldg);\n        warnIfBuildingDataLooksHollow(bldg);'));
     assert.ok(app.includes('autoRemoveDrawinglessFloors(bldg).then((removed) => {'), '수정창 열 때도 정리');
+    // 지운 층이 서버의 옛 문서 때문에 되살아나지 않는다(삭제 시각보다 나중 문서만 되살림)
+    const revive = new Function('_drawingFloorTombstone', sliceFn('evidenceCanReviveDeletedFloor') + '; return evidenceCanReviveDeletedFloor;')(
+        { getDeletedDrawingFloorAt: (b, fc) => (b.deletedDrawingFloorAt || {})[fc] || 0 });
+    const del = { deletedDrawingFloorAt: { '본관 지하 1층': 5000 } };
+    assert.strictEqual(revive(del, '본관 지하 1층', 4000), false, '삭제 전 문서로는 안 되살림');
+    assert.strictEqual(revive(del, '본관 지하 1층', 0), false, '시각 모르는 문서로도 안 되살림');
+    assert.strictEqual(revive(del, '본관 지하 1층', 6000), true, '지운 뒤 다시 올린 문서면 되살림');
+    assert.strictEqual(revive({}, '1F', 0), true, '삭제 시각 없는 옛 오탐 묘비는 예전처럼 해제');
+    assert.ok(app.includes('if (!evidenceCanReviveDeletedFloor(bldg, fc, docAtByCode.get(fc) || 0)) {'));
+    assert.ok(app.includes('if (!evidenceCanReviveDeletedFloor(bldg, fc, 0)) { codes.delete(fc); return; }'));
     console.log('test-floor-auto-clean: ok');
 })().catch((e) => { console.error(e); process.exit(1); });
