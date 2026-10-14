@@ -61478,16 +61478,44 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         }
     }
 
+    /* 2026-10-14 아이디 가입(이메일 없이): 아이디 → 가짜 주소 <아이디>@bsa-id.local 로 Firebase 계정을 만든다.
+     * '@'가 있으면 예전처럼 이메일 계정(기존 계정은 그대로). 가짜 주소로는 메일이 가지 않는다(.local = 배달 안 되는 주소). */
+    const BSA_ID_EMAIL_DOMAIN = 'bsa-id.local';
+    const BSA_LOGIN_ID_RE = /^[a-z][a-z0-9]{3,19}$/;
+    function bsaLoginIdFromEmail(email) {
+        const e = String(email || '').trim().toLowerCase();
+        const suf = '@' + BSA_ID_EMAIL_DOMAIN;
+        return e.endsWith(suf) ? e.slice(0, -suf.length) : '';
+    }
+    /** 로그인·가입 칸 → { email, loginId } 또는 { error } */
+    function bsaParseLoginInput(raw) {
+        const v = String(raw || '').trim();
+        if (!v) return { error: '아이디(또는 이메일)를 입력해 주세요.' };
+        if (v.includes('@')) return { email: v, loginId: bsaLoginIdFromEmail(v) };
+        const id = v.toLowerCase();
+        if (!BSA_LOGIN_ID_RE.test(id)) return { error: '아이디는 영문으로 시작하는 영문·숫자 4~20자로 입력해 주세요. (예: hong1234)' };
+        return { email: id + '@' + BSA_ID_EMAIL_DOMAIN, loginId: id };
+    }
+    /** 화면 표시용: 아이디 계정은 아이디, 이메일 계정은 이메일 그대로 */
+    function bsaAccountLabel(email, loginId) {
+        return loginId || bsaLoginIdFromEmail(email) || email || '';
+    }
+    window.BSA_ID_EMAIL_DOMAIN = BSA_ID_EMAIL_DOMAIN;
+    window.bsaParseLoginInput = bsaParseLoginInput;
+    window.bsaAccountLabel = bsaAccountLabel;
+    let _bsaAuthAttemptIsId = false;
+
     function showAuthError(err) {
         const box = document.getElementById('authErrorMsg');
         if (!box) return;
         const map = {
-            'auth/email-already-in-use': '이미 가입된 이메일입니다. 로그인을 이용해 주세요.',
+            'auth/email-already-in-use': _bsaAuthAttemptIsId ? '이미 사용 중인 아이디입니다. 다른 아이디를 입력해 주세요.' : '이미 가입된 이메일입니다. 로그인을 이용해 주세요.',
             'auth/invalid-email': '이메일 형식이 올바르지 않습니다.',
             'auth/weak-password': '비밀번호는 6자 이상이어야 합니다.',
             'auth/wrong-password': '비밀번호가 올바르지 않습니다.',
-            'auth/user-not-found': '가입되지 않은 이메일입니다.',
-            'auth/invalid-credential': '이메일 또는 비밀번호가 올바르지 않습니다.',
+            'auth/user-not-found': _bsaAuthAttemptIsId ? '가입되지 않은 아이디입니다.' : '가입되지 않은 이메일입니다.',
+            'auth/invalid-credential': _bsaAuthAttemptIsId ? '아이디 또는 비밀번호가 올바르지 않습니다.' : '이메일 또는 비밀번호가 올바르지 않습니다.',
+            'auth/invalid-login-credentials': '아이디(이메일) 또는 비밀번호가 올바르지 않습니다.',
             'auth/too-many-requests': '시도 횟수가 많습니다. 잠시 후 다시 시도해 주세요.'
         };
         const code = err && err.code;
@@ -62182,7 +62210,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (lblCompany) lblCompany.textContent = profile.companyName || '';
         if (lblUser) lblUser.textContent = profile.name || '';
         if (lblEmail) {
-            const email = (auth && auth.currentUser && auth.currentUser.email) || '';
+            const email = bsaAccountLabel((auth && auth.currentUser && auth.currentUser.email) || '', '');
             lblEmail.textContent = email ? email : '';
             lblEmail.style.display = email ? 'block' : 'none';
         }
@@ -62411,9 +62439,13 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
     window.submitLogin = async function() {
         clearAuthError();
-        const email = (document.getElementById('authEmail')?.value || '').trim();
+        const rawLogin = (document.getElementById('authEmail')?.value || '').trim();
         const password = document.getElementById('authPassword')?.value || '';
-        if (!email || !password) { showAuthError({ message: '이메일과 비밀번호를 입력해 주세요.' }); return; }
+        if (!rawLogin || !password) { showAuthError({ message: '아이디(또는 이메일)와 비밀번호를 입력해 주세요.' }); return; }
+        const parsedLogin = bsaParseLoginInput(rawLogin);
+        if (parsedLogin.error) { showAuthError({ message: parsedLogin.error }); return; }
+        const email = parsedLogin.email;
+        _bsaAuthAttemptIsId = !!parsedLogin.loginId;
         const authClient = ensureFirebaseAuthReady();
         if (!authClient) {
             showAuthError({ message: '인증 서버에 연결할 수 없습니다. 인터넷 연결 후 새로고침해 주세요.' });
@@ -62438,12 +62470,19 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         clearAuthError();
         const name = (document.getElementById('authUserName')?.value || '').trim();
         const companyName = (document.getElementById('authCompanyName')?.value || '').trim();
-        const email = (document.getElementById('authEmail')?.value || '').trim();
+        const rawLogin = (document.getElementById('authEmail')?.value || '').trim();
         const password = document.getElementById('authPassword')?.value || '';
-        if (!name || !companyName || !email || !password) {
-            showAuthError({ message: '이름, 회사명, 이메일, 비밀번호를 모두 입력해 주세요.' });
+        if (!name || !companyName || !rawLogin || !password) {
+            showAuthError({ message: '이름, 회사명, 아이디, 비밀번호를 모두 입력해 주세요.' });
             return;
         }
+        const parsedReg = bsaParseLoginInput(rawLogin);
+        if (parsedReg.error) { showAuthError({ message: parsedReg.error }); return; }
+        if (password.length < 6) { showAuthError({ message: '비밀번호는 6자 이상이어야 합니다.' }); return; }
+        const email = parsedReg.email;
+        const loginId = parsedReg.loginId || '';
+        const idField = loginId ? { loginId } : {};
+        _bsaAuthAttemptIsId = !!loginId;
         window._explicitAuth = true;
         window._justRegistering = true;
         window.showLoading('회사 계정을 생성하는 중입니다...');
@@ -62468,15 +62507,15 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             // members 문서가 생기면 onCompanyMemberWrite 트리거가 admin 클레임을 심는다.
             // 아래 enterAppAsUser 안의 ensureCompanyAuthClaims 가 토큰을 새로 받아간다.
             await companyRef.collection('members').doc(uid).set({
-                name, email, role: 'admin',
+                name, email, ...idField, role: 'admin',
                 approvedAt: firebase.firestore.FieldValue.serverTimestamp()
             });
             await db.collection('users').doc(uid).set({
-                name, email, companyId: companyRef.id, companyName, role: 'admin'
+                name, email, ...idField, companyId: companyRef.id, companyName, role: 'admin'
             });
             await enterAppAsUser({
                 uid, name, companyId: companyRef.id, companyName, role: 'admin',
-                userDocData: { name, email, companyId: companyRef.id, companyName, role: 'admin' }
+                userDocData: { name, email, ...idField, companyId: companyRef.id, companyName, role: 'admin' }
             });
         } catch (err) {
             showAuthError(err);
@@ -62490,12 +62529,19 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     window.submitRegisterMember = async function() {
         clearAuthError();
         const name = (document.getElementById('authUserName')?.value || '').trim();
-        const email = (document.getElementById('authEmail')?.value || '').trim();
+        const rawLogin = (document.getElementById('authEmail')?.value || '').trim();
         const password = document.getElementById('authPassword')?.value || '';
-        if (!name || !email || !password) {
-            showAuthError({ message: '이름, 이메일, 비밀번호를 모두 입력해 주세요.' });
+        if (!name || !rawLogin || !password) {
+            showAuthError({ message: '이름, 아이디, 비밀번호를 모두 입력해 주세요.' });
             return;
         }
+        const parsedReg = bsaParseLoginInput(rawLogin);
+        if (parsedReg.error) { showAuthError({ message: parsedReg.error }); return; }
+        if (password.length < 6) { showAuthError({ message: '비밀번호는 6자 이상이어야 합니다.' }); return; }
+        const email = parsedReg.email;
+        const loginId = parsedReg.loginId || '';
+        const idField = loginId ? { loginId } : {};
+        _bsaAuthAttemptIsId = !!loginId;
         window._explicitAuth = true;
         window._justRegistering = true;
         window.showLoading('계정을 생성하는 중입니다...');
@@ -62506,7 +62552,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             const uid = cred.user.uid;
 
             await db.collection('users').doc(uid).set({
-                name, email, role: 'none'
+                name, email, ...idField, role: 'none'
             });
             window.state.uid = uid;
             window.state.userName = name;
@@ -62565,9 +62611,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             const userDoc = await db.collection('users').doc(uid).get();
             const name = (userDoc.exists && userDoc.data().name) || window.state.userName || '';
             const email = user.email || (userDoc.exists ? userDoc.data().email : '');
+            const loginId = (userDoc.exists && userDoc.data().loginId) || bsaLoginIdFromEmail(email);
 
             await db.collection('companies').doc(companyId).collection('pendingRequests').doc(uid).set({
-                name, email, requestedAt: firebase.firestore.FieldValue.serverTimestamp()
+                name, email, ...(loginId ? { loginId } : {}), requestedAt: firebase.firestore.FieldValue.serverTimestamp()
             });
             await db.collection('users').doc(uid).update({
                 pendingCompanyId: companyId,
@@ -62817,7 +62864,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                         const d = docSnap.data();
                         return `
                             <div style="display:flex; justify-content:space-between; align-items:center; background:#f8fafc; border:1px solid #cbd5e1; padding:0.6rem 0.9rem; border-radius:8px; gap:0.6rem; flex-wrap:wrap;">
-                                <span style="font-size:0.85rem;"><strong>${d.name || '이름없음'}</strong> <span style="color:#64748b; font-size:0.78rem;">(${d.email || ''})</span></span>
+                                <span style="font-size:0.85rem;"><strong>${d.name || '이름없음'}</strong> <span style="color:#64748b; font-size:0.78rem;">(${bsaAccountLabel(d.email, d.loginId)})</span></span>
                                 <div style="display:flex; gap:0.4rem;">
                                     <button type="button" class="btn btn-sm btn-outline" style="border-color:#059669; color:#059669;" onclick="window.approveMember('${docSnap.id}')"><i class="fa-solid fa-check"></i> 승인</button>
                                     <button type="button" class="btn btn-sm btn-outline" style="border-color:#ef4444; color:#ef4444;" onclick="window.rejectMember('${docSnap.id}')"><i class="fa-solid fa-xmark"></i> 거절</button>
@@ -62854,7 +62901,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                         : `<button type="button" class="btn btn-sm btn-outline member-role-btn" data-role-action="grant" style="border-color:#2563eb; color:#2563eb;" onclick="window.setMemberRole('${docSnap.id}','admin')" title="관리자로 지정"><i class="fa-solid fa-user-shield"></i> 관리자 지정</button>`;
                     return `
                         <div style="display:flex; justify-content:space-between; align-items:center; background:#f8fafc; border:1px solid #e2e8f0; padding:0.5rem 0.9rem; border-radius:8px; gap:0.6rem; flex-wrap:wrap;">
-                            <span style="font-size:0.85rem;"><strong>${d.name || '이름없음'}</strong> <span style="color:#64748b; font-size:0.78rem;">(${d.email || ''})</span>${isSelf ? ' <span style="color:#94a3b8; font-size:0.75rem;">(나)</span>' : ''}</span>
+                            <span style="font-size:0.85rem;"><strong>${d.name || '이름없음'}</strong> <span style="color:#64748b; font-size:0.78rem;">(${bsaAccountLabel(d.email, d.loginId)})</span>${isSelf ? ' <span style="color:#94a3b8; font-size:0.75rem;">(나)</span>' : ''}</span>
                             <div style="display:flex; gap:0.4rem; align-items:center;">
                                 <span class="badge badge-info">${roleLabel}</span>
                                 ${roleBtn}
@@ -62879,7 +62926,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             if (!pendingDoc.exists) { window.showToast('이미 처리된 신청입니다.', 'warning'); await renderMemberApprovalLists(); return; }
             const d = pendingDoc.data();
             await companyRef.collection('members').doc(uid).set({
-                name: d.name, email: d.email, role: 'member',
+                name: d.name, email: d.email, ...(d.loginId ? { loginId: d.loginId } : {}), role: 'member',
                 approvedAt: firebase.firestore.FieldValue.serverTimestamp()
             });
             await companyRef.collection('pendingRequests').doc(uid).delete();
@@ -63183,6 +63230,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 const email = (document.getElementById('resetUserEmail')?.value || '').trim();
                 if (!email) {
                     window.showToast('이메일 주소를 입력해 주세요.', 'warning');
+                    return;
+                }
+                if (!email.includes('@') || bsaLoginIdFromEmail(email)) {
+                    window.showToast('아이디로 가입한 계정은 메일로 비밀번호를 찾을 수 없습니다. 회사 관리자에게 비밀번호 초기화를 요청해 주세요.', 'warning', 6000);
                     return;
                 }
 
