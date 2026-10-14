@@ -8,6 +8,12 @@
  *   - 층 묶음(pack.structMembers)에 실어 가이드와 같은 규칙(updatedAt·묘비)으로 합친다.
  *   - 고칠 때마다 updatedAt = max(now, 이전+1) — 늦게 고친 기기가 이긴다.
  * 화면(겹쳐 보기·옮기기·가져오기)은 js/tabs/struct-layer.js — 쓸 때만 불러온다.
+ *
+ * 구조도 그림(2026-10-14): state.structOverlays[층키] = { url, storagePath, x0, y0, x1, y1, fit:{a,b,tx,ty}, color, updatedAt }
+ *   - 구조도 PDF의 한 부분(x0~y1, 구조도 쪽 좌표)을 색 입힌 반투명 그림(PNG)으로 만들어 클라우드(Storage)에 올리고,
+ *     층 도면에는 fit(기준점 2개 맞춤)으로 겹친다. 층 묶음에는 주소·위치만 싣는다(그림 본문은 Storage).
+ *   - 뺄 때는 { removed:true, updatedAt } 을 남겨 다른 기기에서도 빠진다. 합칠 때는 updatedAt 나중 것이 이긴다.
+ * 구조도 페이지 → 앱 넘기기: 같은 브라우저의 IndexedDB(bsa_struct_handoff) — 그림이 커서 localStorage에는 못 담는다.
  */
 (function (root) {
     'use strict';
@@ -19,6 +25,7 @@
         if (!st.structMembers || typeof st.structMembers !== 'object') st.structMembers = {};
         if (!st.deletedStructMemberIds || typeof st.deletedStructMemberIds !== 'object') st.deletedStructMemberIds = {};
         if (!st.deletedStructMemberAt || typeof st.deletedStructMemberAt !== 'object') st.deletedStructMemberAt = {};
+        if (!st.structOverlays || typeof st.structOverlays !== 'object') st.structOverlays = {};
         return st;
     }
     function num(v) { return Math.round(Number(v) * 10) / 10; }
@@ -145,15 +152,47 @@
         return best;
     }
 
+    // ---------- 구조도 그림 ----------
+    function validOverlay(o) {
+        return !!(o && !o.removed && typeof o.url === 'string' && o.url && o.fit
+            && [o.x0, o.y0, o.x1, o.y1, o.fit.a, o.fit.b, o.fit.tx, o.fit.ty].every(function (v) { return Number.isFinite(Number(v)); })
+            && o.x1 > o.x0 && o.y1 > o.y0);
+    }
+    /** 이 층 구조도 그림(없거나 뺐으면 null) */
+    function overlayFor(st, floorKey) {
+        var o = ((st && st.structOverlays) || {})[floorKey];
+        return validOverlay(o) ? o : null;
+    }
+    /** 구조도 그림 두기 → 둔 것(시각은 앞으로만 간다) */
+    function setOverlay(st, floorKey, rec, now) {
+        if (!st || !floorKey || !rec) return null;
+        ensureMaps(st);
+        var prev = st.structOverlays[floorKey];
+        var o = { url: rec.url, storagePath: rec.storagePath || '', x0: num(rec.x0), y0: num(rec.y0), x1: num(rec.x1), y1: num(rec.y1),
+            fit: { a: Number(rec.fit && rec.fit.a), b: Number(rec.fit && rec.fit.b), tx: Number(rec.fit && rec.fit.tx), ty: Number(rec.fit && rec.fit.ty) },
+            color: rec.color || '', updatedAt: nextStamp(prev && prev.updatedAt, now) };
+        if (!validOverlay(o)) return null;
+        st.structOverlays[floorKey] = o;
+        return o;
+    }
+    /** 구조도 그림 빼기(다른 기기에도 빠지게 표시를 남긴다) → 뺀 그림 또는 null */
+    function removeOverlay(st, floorKey, now) {
+        var o = overlayFor(st, floorKey);
+        if (!o) return null;
+        st.structOverlays[floorKey] = { removed: true, updatedAt: nextStamp(o.updatedAt, now) };
+        return o;
+    }
+
     function packFor(st, floorKey) {
         return {
             items: listFor(st, floorKey).map(function (d) { return Object.assign({}, d); }),
             deletedIds: ((st && st.deletedStructMemberIds) || {})[floorKey] || [],
-            deletedAt: ((st && st.deletedStructMemberAt) || {})[floorKey] || {}
+            deletedAt: ((st && st.deletedStructMemberAt) || {})[floorKey] || {},
+            overlay: ((st && st.structOverlays) || {})[floorKey] || null
         };
     }
     function packHasContent(pack) {
-        return !!(pack && ((pack.items && pack.items.length) || (pack.deletedIds && pack.deletedIds.length)));
+        return !!(pack && ((pack.items && pack.items.length) || (pack.deletedIds && pack.deletedIds.length) || pack.overlay));
     }
     function mergePackIntoState(st, floorKey, pack, mergeFn) {
         if (!st || !floorKey || !pack || typeof mergeFn !== 'function') return false;
@@ -164,12 +203,44 @@
         st.structMembers = r.ndtData;
         st.deletedStructMemberIds = r.deletedNdtIds;
         st.deletedStructMemberAt = r.deletedNdtAt || {};
+        // 구조도 그림: 늦게 바꾼 쪽이 이긴다
+        var inc = pack.overlay;
+        if (inc && (inc.removed || validOverlay(inc)) && Number.isFinite(Number(inc.updatedAt))) {
+            var cur = st.structOverlays[floorKey];
+            if (!cur || Number(inc.updatedAt) > (Number(cur.updatedAt) || 0)) st.structOverlays[floorKey] = Object.assign({}, inc);
+        }
         return true;
     }
 
+    // ---------- 구조도 페이지 → 앱 넘기기(같은 브라우저 IndexedDB) ----------
+    var HANDOFF_DB = 'bsa_struct_handoff', HANDOFF_STORE = 'h';
+    function handoffDb() {
+        return new Promise(function (resolve, reject) {
+            if (typeof indexedDB === 'undefined') { reject(new Error('이 브라우저는 IndexedDB를 쓸 수 없습니다.')); return; }
+            var req = indexedDB.open(HANDOFF_DB, 1);
+            req.onupgradeneeded = function () { req.result.createObjectStore(HANDOFF_STORE); };
+            req.onsuccess = function () { resolve(req.result); };
+            req.onerror = function () { reject(req.error); };
+        });
+    }
+    function handoffTx(mode, fn) {
+        return handoffDb().then(function (db) {
+            return new Promise(function (resolve, reject) {
+                var tx = db.transaction(HANDOFF_STORE, mode);
+                var out = fn(tx.objectStore(HANDOFF_STORE));
+                tx.oncomplete = function () { db.close(); resolve(out && 'result' in out ? out.result : undefined); };
+                tx.onerror = function () { db.close(); reject(tx.error); };
+            });
+        });
+    }
+    /** data: { at, fileName, refs:[{x,y},{x,y}], members:[…], overlay?:{ blob, x0,y0,x1,y1, color } } */
+    function saveHandoff(data) { return handoffTx('readwrite', function (s) { return s.put(data, 'latest'); }); }
+    function loadHandoff() { return handoffTx('readonly', function (s) { return s.get('latest'); }); }
+
     var api = { TYPES: TYPES, COLORS: COLORS, ensureMaps: ensureMaps, listFor: listFor, hasAny: hasAny, add: add, update: update, remove: remove,
         clear: clear, countsByType: countsByType, fitTwoPoints: fitTwoPoints, applyFit: applyFit, importMembers: importMembers,
-        hitTest: hitTest, packFor: packFor, packHasContent: packHasContent, mergePackIntoState: mergePackIntoState };
+        hitTest: hitTest, overlayFor: overlayFor, setOverlay: setOverlay, removeOverlay: removeOverlay,
+        saveHandoff: saveHandoff, loadHandoff: loadHandoff, packFor: packFor, packHasContent: packHasContent, mergePackIntoState: mergePackIntoState };
     if (typeof module !== 'undefined' && module.exports) module.exports = api;
     if (root) { root.BSA = root.BSA || {}; root.BSA.structMembers = api; }
 })(typeof window !== 'undefined' ? window : null);

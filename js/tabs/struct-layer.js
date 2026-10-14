@@ -4,7 +4,8 @@
  * 화면 전용: SVG(DOM)로만 그려서 한글·PDF·그림·엑셀 출력에는 들어가지 않는다.
  *
  * 그리기: 부재는 도면 좌표로 한 번만 만들고, 확대·이동 때는 묶음(g)의 변환 행렬만 바꾼다(부재가 수백 개여도 가볍다).
- * 가져오기: 「구조도 부재」 페이지(struct-plan.html)가 localStorage 'bsa_struct_handoff' 에 넣어 둔 것을,
+ * 구조도 그림: 구조도 PDF를 색 입힌 반투명 그림으로 깔고(번호표는 기본으로 숨김), 그림은 클라우드(Storage)에 올려 다른 기기와 나눈다.
+ * 가져오기: 「구조도 부재」 페이지(struct-plan.html)가 IndexedDB(bsa_struct_handoff)에 넣어 둔 것을,
  *   층 도면에서 기준점 2개를 눌러 맞춘 뒤 이 층에 들인다(캐드 핀 가져오기와 같은 흐름).
  */
 (function () {
@@ -17,12 +18,20 @@
     var NS = 'http://www.w3.org/2000/svg';
     var SHOW_KEY = 'bsa_struct_layer_show';
     var ALPHA_KEY = 'bsa_struct_layer_alpha';
-    var HANDOFF_KEY = 'bsa_struct_handoff';
+    var MARKS_KEY = 'bsa_struct_marks_show';
     var ui = { barOpen: false, editing: false, selId: '', addType: '', drag: null, calib: null, builtSig: '' };
 
     function pref(key, dflt) { try { var v = localStorage.getItem(key); return v == null ? dflt : v; } catch (_e) { return dflt; } }
     function setPref(key, v) { try { localStorage.setItem(key, String(v)); } catch (_e) { /* ignore */ } }
     function showOn() { return pref(SHOW_KEY, '1') !== '0'; }
+    /** 이 층의 구조도 그림(클라우드에 못 올려 이번 화면에서만 쓰는 것 포함) */
+    function overlayNow() {
+        var fk = B.floorKey();
+        if (ui.tempOverlay && ui.tempOverlay.floorKey === fk) return ui.tempOverlay;
+        return api.overlayFor(state(), fk);
+    }
+    /** 번호표 보이기 — 정한 적 없으면 구조도 그림이 있을 때는 숨긴다(그림에 이미 번호가 있다) */
+    function marksOn() { var v = pref(MARKS_KEY, ''); return v === '' ? !overlayNow() : v === '1'; }
     function alpha() { var a = parseFloat(pref(ALPHA_KEY, '0.55')); return Number.isFinite(a) ? Math.min(1, Math.max(0.2, a)) : 0.55; }
     function toast(msg, kind, ms) { if (typeof window.showToast === 'function') window.showToast(msg, kind || 'info', ms || 2500); }
     function state() { return window.state; }
@@ -83,13 +92,28 @@
         ov.classList.toggle('is-active', ui.editing);
         var g = ov.firstChild;
         var items = list();
+        var over = overlayNow();
+        var showMarks = marksOn() || ui.editing;
         if (ui.selId && !items.some(function (d) { return d.id === ui.selId; })) ui.selId = '';
         // 자료가 바뀌었을 때만 도형을 다시 만든다
-        var sig = B.floorKey() + '|' + items.length + '|' + items.reduce(function (m, d) { return Math.max(m, d.updatedAt || 0); }, 0) + '|' + ui.selId;
+        var sig = B.floorKey() + '|' + items.length + '|' + items.reduce(function (m, d) { return Math.max(m, d.updatedAt || 0); }, 0) + '|' + ui.selId
+            + '|' + (over ? over.url + '@' + over.updatedAt : '') + '|' + showMarks;
         if (sig !== ui.builtSig) {
             ui.builtSig = sig;
             var frag = document.createDocumentFragment();
-            items.forEach(function (d) {
+            if (over) {
+                // 구조도 그림: 구조도 쪽 좌표로 놓고, 기준점 맞춤(fit)으로 층 도면 좌표에 얹는다
+                var gi = document.createElementNS(NS, 'g');
+                gi.setAttribute('transform', 'matrix(' + [over.fit.a, over.fit.b, -over.fit.b, over.fit.a, over.fit.tx, over.fit.ty].join(' ') + ')');
+                var im = document.createElementNS(NS, 'image');
+                im.setAttribute('href', over.url);
+                im.setAttribute('x', over.x0); im.setAttribute('y', over.y0);
+                im.setAttribute('width', over.x1 - over.x0); im.setAttribute('height', over.y1 - over.y0);
+                im.setAttribute('preserveAspectRatio', 'none');
+                gi.appendChild(im);
+                frag.appendChild(gi);
+            }
+            if (showMarks) items.forEach(function (d) {
                 var c = api.COLORS[d.type] || '#111';
                 var r = document.createElementNS(NS, 'rect');
                 r.setAttribute('x', d.x - d.w / 2); r.setAttribute('y', d.y - d.h / 2);
@@ -206,18 +230,21 @@
 
     // ---------- 가져오기(기준점 2개 맞춤) ----------
     function readHandoff() {
-        try {
-            var d = JSON.parse(localStorage.getItem(HANDOFF_KEY) || 'null');
-            if (d && Array.isArray(d.members) && d.members.length && Array.isArray(d.refs) && d.refs.length === 2) return d;
-        } catch (_e) { /* ignore */ }
-        return null;
+        return api.loadHandoff().then(function (d) {
+            if (d && Array.isArray(d.refs) && d.refs.length === 2 && ((d.members && d.members.length) || (d.overlay && d.overlay.blob))) return d;
+            return null;
+        }).catch(function () { return null; });
     }
     function startImport() {
-        var d = readHandoff();
-        if (!d) {
-            toast('가져올 구조 부재가 없습니다. 「구조도 부재」 페이지에서 기준점 2개를 찍고 「앱으로 보내기」를 먼저 눌러 주세요.', 'warning', 6000);
-            return;
-        }
+        readHandoff().then(function (d) {
+            if (!d) {
+                toast('가져올 구조도가 없습니다. 「구조도 부재」 페이지에서 기준점 2개를 찍고 「앱으로 보내기」를 먼저 눌러 주세요(같은 컴퓨터·같은 브라우저).', 'warning', 6000);
+                return;
+            }
+            beginCalib(d);
+        });
+    }
+    function beginCalib(d) {
         if (!B.hasDrawing()) { toast('이 층에 도면이 없습니다.', 'warning'); return; }
         setEditing(false);
         ui.calib = { data: d, pts: [], down: null };
@@ -253,12 +280,34 @@
         if (!fit) { toast('두 기준점이 너무 가깝습니다. 다시 가져오기를 눌러 주세요.', 'warning', 4000); syncBar(); return; }
         var floorKey = B.floorKey();
         var had = api.listFor(state(), floorKey).length;
-        if (had && !window.confirm('이 층에 있던 구조 부재 ' + had + '개를 지우고, 새로 ' + d.members.length + '개를 넣습니다. 계속할까요?')) { syncBar(); return; }
-        var n = api.importMembers(state(), floorKey, d.members, fit);
+        var hadOverlay = api.overlayFor(state(), floorKey);
+        if ((had || hadOverlay) && !window.confirm('이 층에 있던 구조도' + (had ? '(부재 ' + had + '개)' : '') + '를 지우고 새로 넣습니다. 계속할까요?')) { syncBar(); return; }
+        var n = api.importMembers(state(), floorKey, d.members || [], fit);
         setPref(SHOW_KEY, '1');
         ui.builtSig = '';
         commit();
-        toast('구조 부재 ' + n + '개를 이 층에 넣었습니다. 어긋난 것은 「편집」에서 옮기세요.', 'success', 4500);
+        var ov = d.overlay;
+        if (!ov || !ov.blob) {
+            toast('구조 부재 ' + n + '개를 이 층에 넣었습니다.', 'success', 4000);
+            return;
+        }
+        // 구조도 그림: 먼저 이 화면에 바로 보이고, 클라우드에 올라가면 다른 기기에도 보인다
+        var rec = { floorKey: floorKey, url: URL.createObjectURL(ov.blob), x0: ov.x0, y0: ov.y0, x1: ov.x1, y1: ov.y1, fit: fit, color: ov.color, updatedAt: Date.now() };
+        ui.tempOverlay = rec;
+        ui.builtSig = '';
+        sync();
+        toast('구조도 그림을 올리는 중입니다…', 'info', 2500);
+        B.uploadOverlay(ov.blob).then(function (up) {
+            var saved = api.setOverlay(state(), floorKey, { url: up.downloadURL, storagePath: up.storagePath, x0: ov.x0, y0: ov.y0, x1: ov.x1, y1: ov.y1, fit: fit, color: ov.color });
+            if (!saved) throw new Error('그림 정보를 저장하지 못했습니다.');
+            if (ui.tempOverlay === rec) ui.tempOverlay = null;
+            if (hadOverlay && hadOverlay.storagePath && hadOverlay.storagePath !== up.storagePath) B.deleteStoragePath(hadOverlay.storagePath);
+            ui.builtSig = '';
+            commit();
+            toast('구조도를 이 층에 겹쳤습니다' + (n ? '(부재 ' + n + '개)' : '') + '. 「흐리게·진하게」로 농도를 맞추세요.', 'success', 4500);
+        }).catch(function (err) {
+            toast('구조도 그림을 클라우드에 올리지 못해 이 화면에서만 보입니다: ' + (err && err.message ? err.message : err), 'warning', 6000);
+        });
     }
 
     // ---------- 막대 ----------
@@ -293,6 +342,7 @@
             }
             html += '<button type="button" data-act="dim" title="더 흐리게">흐리게</button>'
                 + '<button type="button" data-act="bold" title="더 진하게">진하게</button>'
+                + '<button type="button" data-act="marks" class="' + (marksOn() ? 'active' : '') + '" title="부재 번호표 보이기">번호</button>'
                 + '<button type="button" data-act="show" class="' + (showOn() ? 'active' : '') + '">보이기</button>'
                 + '<button type="button" data-act="close">닫기</button>';
             html += '<span class="map-count-hint">' + (ui.editing
@@ -317,6 +367,7 @@
         } else if (a === 'del') deleteSelected();
         else if (a === 'dim' || a === 'bold') { setPref(ALPHA_KEY, Math.min(1, Math.max(0.2, alpha() + (a === 'bold' ? 0.15 : -0.15))).toFixed(2)); sync(); }
         else if (a === 'show') { setPref(SHOW_KEY, showOn() ? '0' : '1'); sync(); }
+        else if (a === 'marks') { setPref(MARKS_KEY, marksOn() ? '0' : '1'); ui.builtSig = ''; sync(); }
         else if (a === 'close') closeBar();
     }
     function openBar() { ui.barOpen = true; sync(); }

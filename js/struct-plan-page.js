@@ -118,6 +118,36 @@
             : '부재 기호를 찾지 못했습니다. 기호가 테두리(네모·알약·타원) 없이 그려진 도면일 수 있습니다.', res.members.length ? 'ok' : 'warn');
     }
 
+    /**
+     * 앱 도면에 겹칠 구조도 그림 — 범위(없으면 쪽 전체)를 크게 그린 뒤, 흰 바탕은 투명하게, 선·칠한 부분은 고른 색으로.
+     * 연한 회색 선(기둥 칠, 점선 보)도 잘 보이게 진하기를 올린다. → { blob(PNG), x0, y0, x1, y1(쪽 좌표), color }
+     */
+    async function makeOverlayImage(color) {
+        var page = await st.doc.getPage(st.pageNo);
+        var v1 = page.getViewport({ scale: 1 });
+        var r = st.region || { x0: 0, y0: 0, x1: v1.width, y1: v1.height };
+        var rw = r.x1 - r.x0, rh = r.y1 - r.y0;
+        var S = Math.min(8, 3600 / Math.max(rw, rh));
+        var vp = page.getViewport({ scale: S, offsetX: -r.x0 * S, offsetY: -r.y0 * S });
+        var cv = document.createElement('canvas');
+        cv.width = Math.max(1, Math.round(rw * S)); cv.height = Math.max(1, Math.round(rh * S));
+        var cx = cv.getContext('2d', { willReadFrequently: true });
+        cx.fillStyle = '#fff'; cx.fillRect(0, 0, cv.width, cv.height);
+        await page.render({ canvasContext: cx, viewport: vp, intent: 'print' }).promise;
+        var img = cx.getImageData(0, 0, cv.width, cv.height), d = img.data;
+        var hex = /^#?([0-9a-f]{6})$/i.exec(color || '') ? color.replace('#', '') : '2563eb';
+        var cr = parseInt(hex.slice(0, 2), 16), cg = parseInt(hex.slice(2, 4), 16), cb = parseInt(hex.slice(4, 6), 16);
+        for (var i = 0; i < d.length; i += 4) {
+            var lum = (d[i] * 0.3 + d[i + 1] * 0.59 + d[i + 2] * 0.11);
+            var a = Math.min(255, Math.round((255 - lum) * 1.9));
+            d[i] = cr; d[i + 1] = cg; d[i + 2] = cb; d[i + 3] = a < 12 ? 0 : a;
+        }
+        cx.putImageData(img, 0, 0);
+        var blob = await new Promise(function (res) { cv.toBlob(res, 'image/png'); });
+        if (!blob) throw new Error('그림을 만들지 못했습니다.');
+        return { blob: blob, x0: r.x0, y0: r.y0, x1: r.x1, y1: r.y1, color: '#' + hex };
+    }
+
     // ---------- 그리기 ----------
     function inRegion(m) {
         var r = st.region;
@@ -176,7 +206,7 @@
                 + '<option value="">빼기</option></select></td></tr>';
         }).join('') : '<tr><td colspan="3" class="muted">아직 찾은 기호가 없습니다.</td></tr>';
         $('btnCopy').disabled = !list.length;
-        $('btnSend').disabled = !(list.length && st.refs.length === 2);
+        $('btnSend').disabled = !(st.base && st.refs.length === 2);
         $('sendNote').textContent = st.refs.length === 2 ? '기준점 2개 정함' : '기준점 ' + st.refs.length + '/2 — 「기준점 지정」으로 두 곳을 찍으세요';
     }
 
@@ -273,14 +303,20 @@
             redraw(); renderSide();
         });
         $('btnSend').addEventListener('click', function () {
+            var btn = this;
             var list = counted();
-            if (!list.length || st.refs.length !== 2) return;
-            var data = { at: Date.now(), fileName: st.fileName, refs: st.refs.map(function (p) { return { x: p.x, y: p.y }; }),
-                members: list.map(function (m) { return { type: m.type, label: m.label === '(직접)' ? '' : m.label, x: m.x, y: m.y, w: m.w, h: m.h }; }) };
-            try {
-                localStorage.setItem('bsa_struct_handoff', JSON.stringify(data));
-                setStatus('부재 ' + list.length + '개를 보낼 준비가 됐습니다. 앱의 그 층 결함위치도에서 「구조 부재」 → 「가져오기」를 누르고, 같은 두 기준점을 같은 순서로 누르세요.', 'ok');
-            } catch (err) { setStatus('보내지 못했습니다: ' + err.message, 'warn'); }
+            if (!st.base || st.refs.length !== 2) return;
+            btn.disabled = true;
+            setStatus('구조도 그림을 만드는 중…');
+            makeOverlayImage($('overlayColor').value).then(function (overlay) {
+                var data = { at: Date.now(), fileName: st.fileName, refs: st.refs.map(function (p) { return { x: p.x, y: p.y }; }),
+                    members: list.map(function (m) { return { type: m.type, label: m.label === '(직접)' ? '' : m.label, x: m.x, y: m.y, w: m.w, h: m.h }; }),
+                    overlay: overlay };
+                return window.BSA.structMembers.saveHandoff(data).then(function () {
+                    setStatus('구조도 그림(' + Math.round(overlay.blob.size / 1024) + 'KB)과 부재 ' + list.length + '개를 보낼 준비가 됐습니다. 앱의 그 층 결함위치도에서 「구조 부재」 → 「가져오기」를 누르고, 같은 두 기준점을 같은 순서로 누르세요.', 'ok');
+                });
+            }).catch(function (err) { setStatus('보내지 못했습니다: ' + (err && err.message ? err.message : err), 'warn'); })
+                .then(function () { renderSide(); });
         });
         $('btnZoomIn').addEventListener('click', function () { st.zoom = Math.min(3, st.zoom * 1.25); redraw(); });
         $('btnZoomOut').addEventListener('click', function () { st.zoom = Math.max(0.15, st.zoom / 1.25); redraw(); });

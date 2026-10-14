@@ -120,6 +120,42 @@ const layer = fs.readFileSync(path.join(root, 'js', 'tabs', 'struct-layer.js'), 
 assert.ok(!/getContext\(/.test(layer) && /data-html2canvas-ignore/.test(layer), 'SVG로만 그리고 화면 캡처에서도 뺀다');
 // 구조도 페이지 → 앱 넘기기 열쇠가 양쪽에서 같다
 const pageJs = fs.readFileSync(path.join(root, 'js', 'struct-plan-page.js'), 'utf8');
-assert.ok(pageJs.includes("localStorage.setItem('bsa_struct_handoff'") && layer.includes("var HANDOFF_KEY = 'bsa_struct_handoff';"));
+// 구조도 그림이 커서 localStorage가 아니라 IndexedDB로 넘긴다(같은 모듈의 saveHandoff/loadHandoff)
+assert.ok(pageJs.includes('window.BSA.structMembers.saveHandoff(data)') && layer.includes('api.loadHandoff()'));
+assert.ok(!/localStorage\.setItem\('bsa_struct_handoff'/.test(pageJs), '그림을 localStorage에 넣지 않는다');
+assert.ok(/js\/core\/struct-members\.js/.test(fs.readFileSync(path.join(root, 'struct-plan.html'), 'utf8')), '구조도 페이지도 넘기기 모듈을 싣는다');
+// 구조도 그림은 이 건물 회차 폴더의 floorDrawings 로 올린다(저장소 규칙을 바꾸지 않는다)
+assert.ok(app.includes("SA.companyScopedAssetPath(companyId, 'floorDrawings', `struct_${bId}_${fc}_${Date.now()}`, 'png', storageScopeForBuildingId(bId))"));
+assert.ok(app.includes('structOverlays: window.state.structOverlays || {}') && app.includes('window.state.structOverlays = {};'));
+
+// ---- 구조도 그림 ----
+const so = {};
+const FIT = { a: 2, b: 0, tx: 10, ty: 20 };
+assert.strictEqual(S.overlayFor(so, FK), null);
+assert.strictEqual(S.setOverlay(so, FK, { url: '', x0: 0, y0: 0, x1: 10, y1: 10, fit: FIT }), null, '주소 없으면 안 둔다');
+assert.strictEqual(S.setOverlay(so, FK, { url: 'https://x/a.png', x0: 5, y0: 0, x1: 5, y1: 10, fit: FIT }), null, '넓이 없으면 안 둔다');
+const o1 = S.setOverlay(so, FK, { url: 'https://x/a.png', storagePath: 'p/a.png', x0: 0, y0: 0, x1: 300, y1: 200, fit: FIT, color: '#2563eb' }, 100);
+assert.ok(o1 && S.overlayFor(so, FK).url === 'https://x/a.png' && o1.updatedAt === 100);
+const o2 = S.setOverlay(so, FK, { url: 'https://x/b.png', x0: 0, y0: 0, x1: 300, y1: 200, fit: FIT }, 50);
+assert.strictEqual(o2.updatedAt, 101, '시각은 앞으로만 간다');
+// 층 묶음: 그림만 있는 층도 올린다
+const opack = S.packFor(so, FK);
+assert.ok(S.packHasContent(opack) && opack.overlay.url === 'https://x/b.png');
+const so2 = {};
+S.mergePackIntoState(so2, FK, opack, mergeFn);
+assert.strictEqual(S.overlayFor(so2, FK).url, 'https://x/b.png', '다른 기기에 그림 주소가 간다');
+// 늦게 바꾼 쪽이 이긴다 · 뺀 것도 다른 기기에 간다
+S.mergePackIntoState(so2, FK, { items: [], deletedIds: [], deletedAt: {}, overlay: Object.assign({}, opack.overlay, { url: 'https://x/old.png', updatedAt: 1 }) }, mergeFn);
+assert.strictEqual(S.overlayFor(so2, FK).url, 'https://x/b.png', '옛 그림이 새 그림을 덮지 않는다');
+assert.ok(S.removeOverlay(so, FK, 200));
+assert.strictEqual(S.overlayFor(so, FK), null);
+S.mergePackIntoState(so2, FK, S.packFor(so, FK), mergeFn);
+assert.strictEqual(S.overlayFor(so2, FK), null, '뺀 그림은 다른 기기에서도 빠진다');
+// 깨진 그림 정보는 받지 않는다
+S.mergePackIntoState(so2, 'b1_9F', { items: [], deletedIds: [], deletedAt: {}, overlay: { url: 'u', x0: 'a', updatedAt: 9 } }, mergeFn);
+assert.strictEqual(S.overlayFor(so2, 'b1_9F'), null);
+// 그림 레이어: 번호표는 그림이 있으면 기본으로 숨기고, 그림은 기준점 맞춤 행렬로 얹는다
+assert.ok(layer.includes("function marksOn() { var v = pref(MARKS_KEY, ''); return v === '' ? !overlayNow() : v === '1'; }"));
+assert.ok(layer.includes("'matrix(' + [over.fit.a, over.fit.b, -over.fit.b, over.fit.a, over.fit.tx, over.fit.ty].join(' ') + ')'"));
 
 console.log('test-struct-members: ok');

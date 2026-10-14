@@ -784,6 +784,7 @@ document.addEventListener('DOMContentLoaded', () => {
         window.state.structMembers = {};
         window.state.deletedStructMemberIds = {};
         window.state.deletedStructMemberAt = {};
+        window.state.structOverlays = {};
         window.state.deletedBuildingIds = [];
         window.state.confirmedDeletedIds = {};
         window.state.currentBuildingId = null;
@@ -2296,6 +2297,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 structMembers: window.state.structMembers || {},
                 deletedStructMemberIds: window.state.deletedStructMemberIds || {},
                 deletedStructMemberAt: window.state.deletedStructMemberAt || {},
+                structOverlays: window.state.structOverlays || {},
                 deletedBuildingIds: window.state.deletedBuildingIds || [],
                 buildings: sanitizedBuildings,
                 lastUsedBuildingId: window.state.currentBuildingId || null,
@@ -2490,6 +2492,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (parsed.structMembers && typeof parsed.structMembers === 'object') window.state.structMembers = parsed.structMembers;
                 if (parsed.deletedStructMemberIds && typeof parsed.deletedStructMemberIds === 'object') window.state.deletedStructMemberIds = parsed.deletedStructMemberIds;
                 if (parsed.deletedStructMemberAt && typeof parsed.deletedStructMemberAt === 'object') window.state.deletedStructMemberAt = parsed.deletedStructMemberAt;
+                if (parsed.structOverlays && typeof parsed.structOverlays === 'object') window.state.structOverlays = parsed.structOverlays;
                 if (parsed.deletedNdtAt) {
                     window.state.deletedNdtAt = parsed.deletedNdtAt;
                 }
@@ -25198,6 +25201,20 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             if (floorKey && typeof markFloorKeyDirty === 'function') markFloorKeyDirty(floorKey);
             if (typeof saveStateToLocalStorage === 'function') saveStateToLocalStorage();
             if (typeof scheduleSyncToFirebase === 'function') scheduleSyncToFirebase();
+        },
+        /** 구조도 그림(PNG)을 이 건물 회차 폴더의 floorDrawings 에 올린다 → { downloadURL, storagePath } */
+        uploadOverlay: async (blob) => {
+            const SA = window.BSA && window.BSA.storageAssets;
+            const companyId = typeof getCompanyDocId === 'function' ? getCompanyDocId() : null;
+            if (!SA || !companyId) throw new Error('로그인한 회사 계정에서만 클라우드에 올릴 수 있습니다.');
+            const bId = state.currentBuildingId, fc = state.currentFloor;
+            const path = SA.companyScopedAssetPath(companyId, 'floorDrawings', `struct_${bId}_${fc}_${Date.now()}`, 'png', storageScopeForBuildingId(bId));
+            return SA.uploadBlobToFirebaseStorage(path, blob, 'image/png');
+        },
+        deleteStoragePath: (path) => {
+            const SA = window.BSA && window.BSA.storageAssets;
+            if (SA && path) return SA.deleteFirebaseStoragePath(path).catch(() => {});
+            return Promise.resolve();
         }
     };
     /** drawCanvas마다 불린다. 화면 코드가 아직 없으면, 이 층에 보여 줄 부재가 있을 때만 불러온다. */
@@ -25205,7 +25222,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const layer = window.BSA && window.BSA.structLayer;
         if (layer) { layer.sync(); return; }
         const api = window.BSA && window.BSA.structMembers;
-        if (!api || !state.bgImage || !api.hasAny(state, currentMemoFloorKey())) return;
+        const fk = currentMemoFloorKey();
+        if (!api || !state.bgImage || !(api.hasAny(state, fk) || api.overlayFor(state, fk))) return;
         let show = true;
         try { show = localStorage.getItem('bsa_struct_layer_show') !== '0'; } catch (_e) { /* ignore */ }
         if (show) loadStructLayer().catch(() => { /* 다음 그리기 때 다시 */ });

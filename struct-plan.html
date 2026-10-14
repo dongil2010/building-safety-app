@@ -100,7 +100,9 @@
             <div class="muted" id="countNote"></div>
             <div class="bar" style="margin: 0.7rem 0 0;">
                 <button type="button" class="btn" id="btnCopy" disabled>부재 수 복사</button>
-                <button type="button" class="btn primary" id="btnSend" disabled title="찾은 부재를 앱의 결함위치도에 겹쳐 볼 수 있게 넘깁니다(이 컴퓨터의 같은 브라우저 안에서만)">앱으로 보내기</button>
+                <label class="muted" for="overlayColor" title="앱 도면에 겹칠 구조도 선 색">선 색</label>
+                <input type="color" id="overlayColor" value="#2563eb" title="앱 도면에 겹칠 구조도 선 색" style="width:2.4rem;height:2rem;padding:0;border:1px solid #cbd5e1;border-radius:6px;">
+                <button type="button" class="btn primary" id="btnSend" disabled title="구조도 그림(범위를 정했으면 그 부분)과 찾은 부재를 앱의 결함위치도에 겹쳐 볼 수 있게 넘깁니다(이 컴퓨터의 같은 브라우저 안에서만)">앱으로 보내기</button>
             </div>
             <div class="muted" id="sendNote" style="margin-top:0.4rem;"></div>
         </div>
@@ -121,12 +123,13 @@
                 <li>일람표·범례에도 기호가 있으면 「범위 지정」으로 평면만 끌어 잡습니다.</li>
                 <li>색 테두리가 찾은 기호입니다. 틀린 것은 눌러서 빼거나 종류를 바꿉니다.</li>
                 <li>회색 점선은 못 읽은 기호입니다. 종류를 고른 뒤 누르면 들어갑니다.</li>
-                <li>앱 도면에 겹쳐 보려면 「기준점 지정」으로 두 곳(예: 서로 먼 두 기둥 중심)을 찍고 「앱으로 보내기」. 앱의 그 층에서 「구조 부재」 → 「가져오기」 후 같은 두 곳을 누릅니다.</li>
+                <li>앱 도면에 겹쳐 보려면 「기준점 지정」으로 두 곳(예: 서로 먼 두 기둥 중심)을 찍고 「앱으로 보내기」. 구조도 그림이 고른 선 색으로 반투명하게 겹칩니다(범위를 정했으면 그 부분만). 앱의 그 층에서 「구조 부재」 → 「가져오기」 후 같은 두 곳을 누릅니다.</li>
             </ol>
             <div class="muted" style="margin-top:0.5rem;">번호 바로 앞 글자로 종류를 정합니다: C 기둥 · W 벽 · G 거더 · B 빔 · S 슬래브.</div>
         </div>
     </aside>
 </main>
+<script src="js/core/struct-members.js"></script>
 <script src="js/core/struct-glyphs.js"></script>
 <script src="js/core/struct-marks.js"></script>
 <script src="js/struct-plan-page.js"></script>
