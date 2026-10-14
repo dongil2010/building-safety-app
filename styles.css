@@ -16987,3 +16987,15 @@ html body:not(.bsa-eval-map-on) #mapEvalMemberBar#mapEvalMemberBar { display: no
 .advanced-filter-panel.adv-floating.adv-dragging > summary.adv-filter-handle { cursor: grabbing; }
 .advanced-filter-panel.adv-floating .adv-filter-close { display: inline-block; }
 .adv-filter-placeholder { display: none; }
+
+/* 도면 가이드(사각형·직선) — 화면 전용 SVG. 가이드 모드에서만 포인터를 받는다 */
+.map-guide-overlay { position: absolute; z-index: 6; pointer-events: none; overflow: visible; touch-action: none; }
+.map-guide-overlay.is-active { pointer-events: auto; cursor: crosshair; }
+.map-guide-shape { fill: rgba(14, 165, 233, 0.07); stroke: #0ea5e9; stroke-width: 2; stroke-dasharray: 7 4; vector-effect: non-scaling-stroke; }
+line.map-guide-shape { fill: none; stroke-width: 2.5; }
+.map-guide-overlay.is-active .map-guide-shape { cursor: move; }
+.map-guide-shape.is-selected { stroke: #f97316; stroke-width: 3; stroke-dasharray: none; fill: rgba(249, 115, 22, 0.08); }
+.map-guide-rubber { stroke: #0284c7; stroke-dasharray: 4 3; }
+.map-guide-handle { fill: #fff; stroke: #f97316; stroke-width: 2; cursor: nwse-resize; }
+.map-guide-bar button[disabled] { opacity: .45; cursor: default; }
+.mode-btn.btn-guide-mode.active, .mobile-rail-btn.mobile-fab-guide.active { background: #0ea5e9 !important; color: #fff !important; border-color: #0284c7 !important; }

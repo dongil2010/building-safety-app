@@ -778,6 +778,9 @@ document.addEventListener('DOMContentLoaded', () => {
         window.state.memberCounts = {};
         window.state.deletedMemberCountIds = {};
         window.state.deletedMemberCountAt = {};
+        window.state.guideShapes = {};
+        window.state.deletedGuideShapeIds = {};
+        window.state.deletedGuideShapeAt = {};
         window.state.deletedBuildingIds = [];
         window.state.confirmedDeletedIds = {};
         window.state.currentBuildingId = null;
@@ -2222,6 +2225,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 memberCounts: window.state.memberCounts || {},
                 deletedMemberCountIds: window.state.deletedMemberCountIds || {},
                 deletedMemberCountAt: window.state.deletedMemberCountAt || {},
+                guideShapes: window.state.guideShapes || {},
+                deletedGuideShapeIds: window.state.deletedGuideShapeIds || {},
+                deletedGuideShapeAt: window.state.deletedGuideShapeAt || {},
                 deletedBuildingIds: window.state.deletedBuildingIds || [],
                 buildings: sanitizedBuildings,
                 lastUsedBuildingId: window.state.currentBuildingId || null,
@@ -2409,6 +2415,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (parsed.memberCounts && typeof parsed.memberCounts === 'object') window.state.memberCounts = parsed.memberCounts;
                 if (parsed.deletedMemberCountIds && typeof parsed.deletedMemberCountIds === 'object') window.state.deletedMemberCountIds = parsed.deletedMemberCountIds;
                 if (parsed.deletedMemberCountAt && typeof parsed.deletedMemberCountAt === 'object') window.state.deletedMemberCountAt = parsed.deletedMemberCountAt;
+                if (parsed.guideShapes && typeof parsed.guideShapes === 'object') window.state.guideShapes = parsed.guideShapes;
+                if (parsed.deletedGuideShapeIds && typeof parsed.deletedGuideShapeIds === 'object') window.state.deletedGuideShapeIds = parsed.deletedGuideShapeIds;
+                if (parsed.deletedGuideShapeAt && typeof parsed.deletedGuideShapeAt === 'object') window.state.deletedGuideShapeAt = parsed.deletedGuideShapeAt;
                 if (parsed.deletedNdtAt) {
                     window.state.deletedNdtAt = parsed.deletedNdtAt;
                 }
@@ -9903,6 +9912,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         window._bsaMemberGbEntries = null;
         syncDrawingMemoOverlay();
         syncMemberCountOverlay();
+        syncGuideOverlay();
         if (typeof syncEvalUnitBar === 'function') syncEvalUnitBar();
 
         // 결함 목록 DOM은 drawCanvas마다 재생성하지 않음 (선택 스크롤·하이라이트가 즉시 undo됨).
@@ -25045,6 +25055,267 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     }
     window.__bsaMemoTap = { start: memoTapStart, move: memoTapMove, end: memoTapEnd, cancel: () => { if (memoTap) memoTap.multi = true; } };
 
+    /* ---------------- 도면 가이드(2026-10-14) — 사각형·직선, 화면 전용(출력 제외) ----------------
+     * 기둥·거더·빔 자리를 표시하려는 보조선. 결함 아님 — 한글·PDF·그림·엑셀 출력은 캔버스에서 그리므로
+     * 이 SVG(DOM)는 들어가지 않는다. 층마다 저장·동기화(pack.guideShapes). */
+    function gsApi() { return window.BSA && window.BSA.guideShapes; }
+    const GS_KIND_KEY = 'bsa_guide_kind';
+    const GS_SHOW_KEY = 'bsa_guide_show';
+    let gsUndo = [];        // [{ op:'add'|'remove'|'edit', floorKey, rec(이전 상태) }]
+    let gsSelectedId = '';
+    let gsDrag = null;      // { mode:'new'|'move'|'h0'..'h3', id, start:{x,y}, orig, pointerId, moved }
+    function gsKind() { let k = ''; try { k = localStorage.getItem(GS_KIND_KEY) || ''; } catch (_e) { /* ignore */ } return k === 'line' ? 'line' : 'rect'; }
+    function setGsKind(k) { try { localStorage.setItem(GS_KIND_KEY, k); } catch (_e) { /* ignore */ } syncGuideBar(); }
+    function readGsShowPref() { try { return localStorage.getItem(GS_SHOW_KEY) !== '0'; } catch (_e) { return true; } }
+    function setGsShow(on) { try { localStorage.setItem(GS_SHOW_KEY, on ? '1' : '0'); } catch (_e) { /* ignore */ } syncGuideOverlay(); syncGuideBar(); }
+    function commitGuideChange(floorKey) {
+        if (floorKey && typeof markFloorKeyDirty === 'function') markFloorKeyDirty(floorKey);
+        if (typeof saveStateToLocalStorage === 'function') saveStateToLocalStorage();
+        if (typeof scheduleSyncToFirebase === 'function') scheduleSyncToFirebase();
+        syncGuideOverlay();
+        syncGuideBar();
+    }
+    function gsPushUndo(entry) { gsUndo.push(entry); if (gsUndo.length > 200) gsUndo = gsUndo.slice(-200); }
+    function undoGuide() {
+        const api = gsApi();
+        const last = gsUndo.pop();
+        if (!api || !last) { window.showToast('되돌릴 것이 없습니다.', 'info', 1600); return; }
+        if (last.op === 'add') api.remove(state, last.floorKey, last.rec.id);
+        else if (last.op === 'remove') api.add(state, last.floorKey, last.rec.kind, last.rec.x1, last.rec.y1, last.rec.x2, last.rec.y2, { id: last.rec.id, createdAt: last.rec.createdAt });
+        else if (last.op === 'edit') api.update(state, last.floorKey, last.rec.id, last.rec);
+        if (gsSelectedId && !api.listFor(state, last.floorKey).some((d) => d.id === gsSelectedId)) gsSelectedId = '';
+        commitGuideChange(last.floorKey);
+    }
+    window.undoGuide = undoGuide;
+    function deleteSelectedGuide() {
+        const api = gsApi();
+        const floorKey = currentMemoFloorKey();
+        if (!api || !gsSelectedId) return;
+        const rec = api.remove(state, floorKey, gsSelectedId);
+        gsSelectedId = '';
+        if (rec) gsPushUndo({ op: 'remove', floorKey, rec });
+        commitGuideChange(floorKey);
+    }
+    function gsVisible() {
+        return !!(state.bgImage && state.currentTab !== 'tab-ndt' && (state.mode === 'GUIDE' || readGsShowPref()));
+    }
+    function getGuideOverlay() {
+        const canvas = state.canvas || document.getElementById('planCanvas');
+        const host = canvas && canvas.parentElement;
+        if (!host) return null;
+        let ov = document.getElementById('mapGuideOverlay');
+        if (!ov) {
+            ov = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+            ov.id = 'mapGuideOverlay';
+            ov.setAttribute('class', 'map-guide-overlay');
+            ov.setAttribute('data-html2canvas-ignore', 'true');
+            ov.setAttribute('aria-hidden', 'true');
+            bindGuideOverlay(ov);
+        }
+        if (ov.parentElement !== host) host.appendChild(ov);
+        ov.style.left = `${canvas.offsetLeft}px`;
+        ov.style.top = `${canvas.offsetTop}px`;
+        ov.style.width = `${canvas.clientWidth}px`;
+        ov.style.height = `${canvas.clientHeight}px`;
+        return ov;
+    }
+    /** 가이드 그리기(SVG) — pan/zoom 때마다 drawCanvas가 부른다 */
+    function syncGuideOverlay() {
+        const api = gsApi();
+        const floorKey = currentMemoFloorKey();
+        const vis = !!(api && floorKey && gsVisible());
+        let ov = document.getElementById('mapGuideOverlay');
+        if (!vis && state.mode !== 'GUIDE') { if (ov) { ov.replaceChildren(); ov.classList.remove('is-active'); } return; }
+        ov = getGuideOverlay();
+        if (!ov) return;
+        ov.classList.toggle('is-active', state.mode === 'GUIDE');
+        const list = vis ? api.listFor(state, floorKey) : [];
+        if (gsSelectedId && !list.some((d) => d.id === gsSelectedId)) gsSelectedId = '';
+        const ns = 'http://www.w3.org/2000/svg';
+        const frag = document.createDocumentFragment();
+        list.forEach((d) => {
+            const pts = api.screenPoints(d, memoImgToScreen);
+            const sel = d.id === gsSelectedId && state.mode === 'GUIDE';
+            const el = document.createElementNS(ns, d.kind === 'rect' ? 'polygon' : 'line');
+            if (d.kind === 'rect') el.setAttribute('points', pts.map((p) => `${p.sx.toFixed(1)},${p.sy.toFixed(1)}`).join(' '));
+            else { el.setAttribute('x1', pts[0].sx); el.setAttribute('y1', pts[0].sy); el.setAttribute('x2', pts[1].sx); el.setAttribute('y2', pts[1].sy); }
+            el.setAttribute('class', `map-guide-shape map-guide-${d.kind}${sel ? ' is-selected' : ''}`);
+            el.dataset.id = d.id;
+            frag.appendChild(el);
+            if (sel) pts.forEach((p, i) => {
+                const h = document.createElementNS(ns, 'rect');
+                h.setAttribute('x', p.sx - 6); h.setAttribute('y', p.sy - 6); h.setAttribute('width', 12); h.setAttribute('height', 12);
+                h.setAttribute('class', 'map-guide-handle');
+                h.dataset.h = String(i);
+                frag.appendChild(h);
+            });
+        });
+        ov.replaceChildren(frag);
+    }
+    window.syncGuideOverlay = syncGuideOverlay;
+    function gsLocal(e) {
+        const r = elements.planCanvas.getBoundingClientRect();
+        return { sx: e.clientX - r.left, sy: e.clientY - r.top };
+    }
+    /** 꼭짓점 i를 화면 좌표 p로 옮긴 좌표 묶음 */
+    function gsCornerPatch(d, i, img) {
+        if (d.kind === 'line') return i === 0 ? { x1: img.x, y1: img.y } : { x2: img.x, y2: img.y };
+        return [{ x1: img.x, y1: img.y }, { x2: img.x, y1: img.y }, { x2: img.x, y2: img.y }, { x1: img.x, y2: img.y }][i] || {};
+    }
+    function bindGuideOverlay(ov) {
+        // 휠 확대·축소는 도면으로 넘긴다
+        ov.addEventListener('wheel', (e) => {
+            if (!elements.planCanvas) return;
+            e.preventDefault();
+            elements.planCanvas.dispatchEvent(new WheelEvent('wheel', e));
+        }, { passive: false });
+        ov.addEventListener('pointerdown', (e) => {
+            const api = gsApi();
+            const floorKey = currentMemoFloorKey();
+            if (state.mode !== 'GUIDE' || !api || !floorKey || !state.bgImage) return;
+            if (e.button > 0) return;
+            if (gsDrag && gsDrag.pointerId !== e.pointerId) { gsDrag = null; syncGuideOverlay(); return; } // 두 손가락 → 취소
+            e.preventDefault();
+            e.stopPropagation();
+            const p = gsLocal(e);
+            const img = memoScreenToImg(p.sx, p.sy);
+            const hTarget = e.target && e.target.dataset && e.target.dataset.h;
+            const list = api.listFor(state, floorKey);
+            let hit = null;
+            if (hTarget != null && gsSelectedId) hit = { shape: list.find((d) => d.id === gsSelectedId), part: 'h' + hTarget };
+            else hit = api.hitTest(list, p.sx, p.sy, memoImgToScreen, e.pointerType === 'touch' ? 16 : 9, gsSelectedId);
+            if (hit && hit.shape) {
+                gsSelectedId = hit.shape.id;
+                gsDrag = { mode: hit.part === 'body' ? 'move' : hit.part, id: hit.shape.id, start: img, orig: Object.assign({}, hit.shape), pointerId: e.pointerId, moved: false };
+            } else {
+                gsSelectedId = '';
+                gsDrag = { mode: 'new', kind: gsKind(), start: img, cur: img, s0: p, pointerId: e.pointerId, moved: false };
+            }
+            try { ov.setPointerCapture(e.pointerId); } catch (_e) { /* ignore */ }
+            syncGuideOverlay();
+            syncGuideBar();
+        });
+        ov.addEventListener('pointermove', (e) => {
+            const api = gsApi();
+            if (!gsDrag || e.pointerId !== gsDrag.pointerId || !api) return;
+            e.preventDefault();
+            const floorKey = currentMemoFloorKey();
+            const p = gsLocal(e);
+            const img = memoScreenToImg(p.sx, p.sy);
+            if (gsDrag.mode === 'new') {
+                gsDrag.cur = img;
+                gsDrag.moved = gsDrag.moved || Math.hypot(p.sx - gsDrag.s0.sx, p.sy - gsDrag.s0.sy) > 6;
+                drawGuideRubber(gsDrag);
+                return;
+            }
+            const o = gsDrag.orig;
+            let patch;
+            if (gsDrag.mode === 'move') {
+                const dx = img.x - gsDrag.start.x, dy = img.y - gsDrag.start.y;
+                patch = { x1: o.x1 + dx, y1: o.y1 + dy, x2: o.x2 + dx, y2: o.y2 + dy };
+            } else patch = Object.assign({ x1: o.x1, y1: o.y1, x2: o.x2, y2: o.y2 }, gsCornerPatch(o, Number(gsDrag.mode.slice(1)), img));
+            const d = api.listFor(state, floorKey).find((x) => x.id === gsDrag.id);
+            if (d) { Object.assign(d, patch); gsDrag.moved = true; }
+            syncGuideOverlay();
+        });
+        const end = (e) => {
+            const api = gsApi();
+            if (!gsDrag || (e && e.pointerId !== gsDrag.pointerId) || !api) return;
+            const drag = gsDrag;
+            gsDrag = null;
+            const floorKey = currentMemoFloorKey();
+            if (drag.mode === 'new') {
+                if (drag.moved && e.type !== 'pointercancel') {
+                    const s = drag.start, c = drag.cur;
+                    const rec = api.add(state, floorKey, drag.kind, s.x, s.y, c.x, c.y);
+                    if (rec) { gsSelectedId = rec.id; gsPushUndo({ op: 'add', floorKey, rec: Object.assign({}, rec) }); commitGuideChange(floorKey); return; }
+                }
+                syncGuideOverlay(); syncGuideBar();
+                return;
+            }
+            if (drag.moved) {
+                const d = api.listFor(state, floorKey).find((x) => x.id === drag.id);
+                if (d) {
+                    const now = { x1: d.x1, y1: d.y1, x2: d.x2, y2: d.y2 };
+                    Object.assign(d, { x1: drag.orig.x1, y1: drag.orig.y1, x2: drag.orig.x2, y2: drag.orig.y2 });
+                    if (e.type !== 'pointercancel') { api.update(state, floorKey, d.id, now); gsPushUndo({ op: 'edit', floorKey, rec: drag.orig }); }
+                }
+                commitGuideChange(floorKey);
+                return;
+            }
+            syncGuideOverlay(); syncGuideBar();
+        };
+        ov.addEventListener('pointerup', end);
+        ov.addEventListener('pointercancel', end);
+    }
+    function drawGuideRubber(drag) {
+        const ov = document.getElementById('mapGuideOverlay');
+        if (!ov) return;
+        let r = ov.querySelector('.map-guide-rubber');
+        const ns = 'http://www.w3.org/2000/svg';
+        const tmp = { kind: drag.kind, x1: drag.start.x, y1: drag.start.y, x2: drag.cur.x, y2: drag.cur.y };
+        const pts = gsApi().screenPoints(tmp, memoImgToScreen);
+        if (!r || r.tagName.toLowerCase() !== (drag.kind === 'rect' ? 'polygon' : 'line')) {
+            if (r) r.remove();
+            r = document.createElementNS(ns, drag.kind === 'rect' ? 'polygon' : 'line');
+            r.setAttribute('class', `map-guide-shape map-guide-${drag.kind} map-guide-rubber`);
+            ov.appendChild(r);
+        }
+        if (drag.kind === 'rect') r.setAttribute('points', pts.map((p) => `${p.sx.toFixed(1)},${p.sy.toFixed(1)}`).join(' '));
+        else { r.setAttribute('x1', pts[0].sx); r.setAttribute('y1', pts[0].sy); r.setAttribute('x2', pts[1].sx); r.setAttribute('y2', pts[1].sy); }
+    }
+    /** 가이드 막대: 사각형 · 직선 · 지우기 · 되돌리기 · 보이기 · 닫기 */
+    function syncGuideBar() {
+        const api = gsApi();
+        const canvas = state.canvas || document.getElementById('planCanvas');
+        const host = canvas && canvas.parentElement;
+        let bar = document.getElementById('mapGuideBar');
+        if (state.mode !== 'GUIDE' || !api || !host) { if (bar) bar.hidden = true; return; }
+        if (!bar) {
+            bar = document.createElement('div');
+            bar.id = 'mapGuideBar';
+            bar.className = 'map-count-bar map-guide-bar';
+            bar.setAttribute('data-html2canvas-ignore', 'true');
+            bar.addEventListener('click', (e) => {
+                const b = e.target.closest('button');
+                if (!b) return;
+                e.preventDefault();
+                const a = b.dataset.gsAct;
+                if (a === 'rect' || a === 'line') setGsKind(a);
+                else if (a === 'del') deleteSelectedGuide();
+                else if (a === 'undo') undoGuide();
+                else if (a === 'show') setGsShow(!readGsShowPref());
+                else if (a === 'close') setDrawMode('PAN');
+            });
+            ['mousedown', 'touchstart', 'pointerdown'].forEach((t) => bar.addEventListener(t, (e) => e.stopPropagation(), { passive: true }));
+        }
+        if (bar.parentElement !== host) host.appendChild(bar);
+        bar.hidden = false;
+        const k = gsKind();
+        const n = api.listFor(state, currentMemoFloorKey()).length;
+        const html = `<span class="map-count-title">가이드 <small>${n}</small></span>`
+            + `<button type="button" data-gs-act="rect" class="${k === 'rect' ? 'active' : ''}" title="사각형 (R)">▭ 사각형</button>`
+            + `<button type="button" data-gs-act="line" class="${k === 'line' ? 'active' : ''}" title="직선 (L)">╱ 직선</button>`
+            + `<button type="button" data-gs-act="del" ${gsSelectedId ? '' : 'disabled'} title="고른 가이드 지우기 (Delete)">🗑 지우기</button>`
+            + `<button type="button" data-gs-act="undo" title="되돌리기 (Ctrl+Z)">↶ 되돌리기</button>`
+            + `<button type="button" data-gs-act="show" class="${readGsShowPref() ? 'active' : ''}" title="가이드 모드가 아닐 때도 보이기">가이드 보이기</button>`
+            + `<button type="button" data-gs-act="close">닫기</button>`
+            + `<span class="map-count-hint">끌어서 그리기 · 눌러 고르고 끌어 옮기기 · 모서리 □로 크기 · 화면 전용(출력 안 됨)</span>`;
+        if (bar._h !== html) { bar._h = html; bar.innerHTML = html; }
+        if (typeof placeMemberCountBar === 'function') placeMemberCountBar(bar, host);
+    }
+    window.syncGuideBar = syncGuideBar;
+    if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') document.addEventListener('keydown', (e) => {
+        if (state.mode !== 'GUIDE') return;
+        const t = e.target;
+        if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+        if ((e.key === 'Delete' || e.key === 'Backspace') && gsSelectedId) { e.preventDefault(); e.stopPropagation(); deleteSelectedGuide(); }
+        else if ((e.ctrlKey || e.metaKey) && !e.shiftKey && (e.key === 'z' || e.key === 'Z')) { e.preventDefault(); e.stopPropagation(); undoGuide(); }
+        else if (!e.ctrlKey && !e.metaKey && !e.altKey && (e.key === 'r' || e.key === 'R')) { e.preventDefault(); e.stopPropagation(); setGsKind('rect'); }
+        else if (!e.ctrlKey && !e.metaKey && !e.altKey && (e.key === 'l' || e.key === 'L')) { e.preventDefault(); e.stopPropagation(); setGsKind('line'); }
+        else if (e.key === 'Escape') { if (gsSelectedId) { gsSelectedId = ''; syncGuideOverlay(); syncGuideBar(); } else setDrawMode('PAN'); e.stopPropagation(); }
+    }, true);
+
     /* ---------------- 부재 수 세기(2026-10-13) — 결함 아님, 화면 전용 점 ---------------- */
     function mcApi() { return window.BSA && window.BSA.memberCount; }
     const MC_TYPE_KEY = 'bsa_member_count_type';
@@ -36054,6 +36325,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (mode === 'MEMO' && !readMemoShowPref()) setMemoShow(true);
         if (mode !== 'MEMO' && mode !== 'COUNT') memoTap = null;
         ['btnModeCount', 'mobileBtnModeCount'].forEach((id) => { const b = document.getElementById(id); if (b) b.classList.toggle('active', mode === 'COUNT'); });
+        ['btnModeGuide', 'mobileBtnModeGuide'].forEach((id) => { const b = document.getElementById(id); if (b) b.classList.toggle('active', mode === 'GUIDE'); });
+        if (mode !== 'GUIDE') gsDrag = null;
+        syncGuideBar();
+        syncGuideOverlay();
         if (typeof syncEvalMemberBar === 'function') syncEvalMemberBar();
         if (window.__bsaEvalMapOn === true && typeof syncEvalMapHead === 'function') syncEvalMapHead();
         syncMemberCountBar();
@@ -36499,6 +36774,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     ['btnModeCount', 'mobileBtnModeCount'].forEach((id) => {
         const b = document.getElementById(id);
         if (b) b.addEventListener('click', (e) => { e.preventDefault(); setDrawMode(state.mode === 'COUNT' ? 'PAN' : 'COUNT'); });
+    });
+    ['btnModeGuide', 'mobileBtnModeGuide'].forEach((id) => {
+        const b = document.getElementById(id);
+        if (b) b.addEventListener('click', (e) => { e.preventDefault(); setDrawMode(state.mode === 'GUIDE' ? 'PAN' : 'GUIDE'); });
     });
     const btnMemoBarDone = document.getElementById('btnMemoBarDone');
     if (btnMemoBarDone) btnMemoBarDone.addEventListener('click', () => setDrawMode('PAN'));
@@ -55631,6 +55910,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (window.BSA && window.BSA.drawingMemo && window.BSA.drawingMemo.packHasContent(bundle.memos)) return true;
         if (window.BSA && window.BSA.evalUnits && window.BSA.evalUnits.packHasContent(bundle.evalUnits)) return true;
         if (window.BSA && window.BSA.memberCount && window.BSA.memberCount.packHasContent(bundle.memberCounts)) return true;
+        if (window.BSA && window.BSA.guideShapes && window.BSA.guideShapes.packHasContent(bundle.guideShapes)) return true;
         if (drawing.tiers && typeof drawing.tiers === 'object'
             && Object.keys(drawing.tiers).some((k) => drawing.tiers[k])) return true;
         return false;
@@ -55770,7 +56050,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             // 평가단위 정의(결함 쪽은 defect.evalUnitId로 markings에 실림)
             evalUnits: (window.BSA && window.BSA.evalUnits) ? window.BSA.evalUnits.packFor(window.state, floorKey) : undefined,
             // 부재 수 세기 점(결함 아님)
-            memberCounts: (window.BSA && window.BSA.memberCount) ? window.BSA.memberCount.packFor(window.state, floorKey) : undefined
+            memberCounts: (window.BSA && window.BSA.memberCount) ? window.BSA.memberCount.packFor(window.state, floorKey) : undefined,
+            // 도면 가이드(사각형·직선, 화면 전용)
+            guideShapes: (window.BSA && window.BSA.guideShapes) ? window.BSA.guideShapes.packFor(window.state, floorKey) : undefined
         };
         if (!floorBundleHasContent(pack)) {
             console.warn('빈 층 묶음은 클라우드에 올리지 않음:', floorKey);
@@ -55847,6 +56129,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (bundle.memberCounts && window.BSA && window.BSA.memberCount) {
             window.BSA.memberCount.mergePackIntoState(window.state, floorKey, bundle.memberCounts, window.BSA.syncMerge.mergeNdtDataMaps);
             if (floorKey === currentMemoFloorKey()) { syncMemberCountOverlay(); syncMemberCountBar(); }
+        }
+        if (bundle.guideShapes && window.BSA && window.BSA.guideShapes) {
+            window.BSA.guideShapes.mergePackIntoState(window.state, floorKey, bundle.guideShapes, window.BSA.syncMerge.mergeNdtDataMaps);
+            if (floorKey === currentMemoFloorKey()) { syncGuideOverlay(); syncGuideBar(); }
         }
         resolveOfflineNoConflicts(bldg, floorCode, markings, ndt);
     }
