@@ -10705,6 +10705,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         defectExistingGrade3: '#ff0000',
         defectGoodGrade3: '#000000',
         priorityManage: '#00ff00',
+        drawingMemo: '#000000',
         ndtMeasure: '#000000',
         ndtStrength: '#ff0000',
         ndtCarbonation: '#0000ff',
@@ -25039,6 +25040,22 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         });
     }
 
+    /**
+     * 2026-10-14 메모 글자 = 마킹 번호 네모박스 글자와 같은 크기·글꼴(도면 좌표 기준).
+     * 예전엔 화면 rem 고정이라 확대·축소(드래그)할 때 도면과 따로 놀았다.
+     */
+    const DRAWING_MEMO_FONT_FAMILY = '"Pretendard", "Malgun Gothic", "맑은 고딕", sans-serif';
+    function getDrawingMemoFontSizeImg() {
+        const sz = getStyleSize('defectStructural');
+        return getPinBoxFontSize((sz && sz.pin) || 1);
+    }
+    function getDrawingMemoTextColor() {
+        return getStyleColor('drawingMemo') || '#000000';
+    }
+    function drawingMemoOutlineWidth(fontPx) {
+        return Math.max(1.1, Math.min(2.8, fontPx * 0.2));   // drawOutlinedPinText와 같은 식
+    }
+
     function syncDrawingMemoOverlay() {
         const api = memoApi();
         const floorKey = currentMemoFloorKey();
@@ -25052,6 +25069,13 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (!ov) return;
         const vw = ov.clientWidth || 0;
         const vh = ov.clientHeight || 0;
+        const viewScale = (state.view && state.view.scale) || 1;
+        const memoFontPx = Math.max(1, getDrawingMemoFontSizeImg() * viewScale);
+        const memoOutlinePx = Math.max(0.5, drawingMemoOutlineWidth(getDrawingMemoFontSizeImg()) * viewScale / 2);
+        const memoColor = getDrawingMemoTextColor();
+        const o = Math.round(memoOutlinePx * 10) / 10;
+        const memoShadow = [[o, 0], [-o, 0], [0, o], [0, -o], [o, o], [-o, -o], [o, -o], [-o, o]]
+            .map(([dx, dy]) => `${dx}px ${dy}px 0 #ffffff`).join(', ');
         const existing = new Map();
         Array.from(ov.children).forEach((el) => existing.set(el.dataset.id, el));
         const keep = new Set();
@@ -25069,10 +25093,13 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             const label = api.shortLabel(m.text, 22);
             if (el.dataset.text !== m.text) {
                 el.dataset.text = m.text;
-                el.textContent = `📝 ${label}`;
+                el.textContent = label;
                 el.title = m.text + (m.by ? `\n— ${m.by}` : '');
                 el.setAttribute('aria-label', `도면 메모: ${m.text}`);
             }
+            el.style.fontSize = `${memoFontPx.toFixed(2)}px`;
+            el.style.color = memoColor;
+            el.style.textShadow = memoShadow;
             keep.add(m.id);
             if (memoChipDrag && memoChipDrag.id === m.id && !memoChipDrag.multi) return;   // 끄는 중엔 손가락을 따라감
             el.classList.remove('is-dragging');
@@ -25089,23 +25116,14 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (!api || !ctx || !buildingId || !floorCode) return 0;
         const list = api.listFor(window.state, `${buildingId}_${floorCode}`);
         if (!list.length) return 0;
-        const base = Math.max(imgW || 0, imgH || 0) || 2000;
-        const fs = Math.max(12, Math.round(base / 95));
-        const pad = Math.round(fs * 0.35);
+        // 마킹 번호 글자와 같은 크기·글꼴·흰 외곽선, 배경 없음. 색은 스타일 설정 「도면 메모 글자」
+        const fs = getDrawingMemoFontSizeImg();
+        const color = getDrawingMemoTextColor();
         ctx.save();
-        ctx.font = `${fs}px "Pretendard", "Malgun Gothic", "맑은 고딕", sans-serif`;
-        ctx.textBaseline = 'top';
         list.forEach((m) => {
             const text = api.shortLabel(m.text, 40);
-            const w = ctx.measureText(text).width + pad * 2;
-            const h = fs + pad * 2;
-            ctx.fillStyle = 'rgba(254, 240, 138, 0.92)';
-            ctx.strokeStyle = '#a16207';
-            ctx.lineWidth = Math.max(1, fs / 12);
-            ctx.fillRect(m.x, m.y, w, h);
-            ctx.strokeRect(m.x, m.y, w, h);
-            ctx.fillStyle = '#422006';
-            ctx.fillText(text, m.x + pad, m.y + pad);
+            drawOutlinedPinText(ctx, text, m.x, m.y, color, `bold ${fs}px ${DRAWING_MEMO_FONT_FAMILY}`, '#ffffff',
+                { textAlign: 'left', textBaseline: 'top' });
         });
         ctx.restore();
         return list.length;
@@ -30669,6 +30687,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         ['styleColorDefectExistingGrade3', 'defectExistingGrade3'],
         ['styleColorDefectGoodGrade3', 'defectGoodGrade3'],
         ['styleColorPriorityManage', 'priorityManage'],
+        ['styleColorDrawingMemo', 'drawingMemo'],
         ['styleColorNdtMeasure', 'ndtMeasure'],
         ['styleColorNdtStrength', 'ndtStrength'],
         ['styleColorNdtCarbonation', 'ndtCarbonation'],
@@ -30766,6 +30785,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (typeof drawNdtCanvas === 'function') drawNdtCanvas();
         if (typeof renderNdtSummaryTable === 'function') renderNdtSummaryTable();
         if (typeof renderDefectListPanel === 'function') renderDefectListPanel();
+        if (typeof window.syncDrawingMemoOverlay === 'function') window.syncDrawingMemoOverlay();
     }
 
     function saveFloorMapStyleSettings(floorCode, buildingId) {

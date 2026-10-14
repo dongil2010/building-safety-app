@@ -98,11 +98,14 @@ assert.ok(html.includes('js/core/drawing-memo.js'), '모듈 불러오기');
 // 10) 출력 그리기: 끔이면 아무것도 안 그림, 켬이면 메모 수만큼
 const fnSrc = app.slice(app.indexOf('    function drawMemosForReport('), app.indexOf('    window.drawMemosForReport'));
 const calls = [];
+const drawn = [];
 const fakeCtx = new Proxy({}, { get: (t, k) => (k in t ? t[k] : (typeof k === 'string' ? (...a) => { calls.push(k); return k === 'measureText' ? { width: 50 } : undefined; } : undefined)), set: (t, k, v) => { t[k] = v; return true; } });
 const runDraw = (printOn) => {
     const st = { drawingMemos: { b1_2F: [{ id: 'x', x: 1, y: 2, text: '메모' }] } };
-    const f = new Function('readMemoPrintPref', 'memoApi', 'window', fnSrc + '; return drawMemosForReport;')(
-        () => printOn, () => memo, { state: st });
+    const f = new Function('readMemoPrintPref', 'memoApi', 'window', 'getDrawingMemoFontSizeImg', 'getDrawingMemoTextColor', 'drawOutlinedPinText', 'DRAWING_MEMO_FONT_FAMILY',
+        fnSrc + '; return drawMemosForReport;')(
+        () => printOn, () => memo, { state: st }, () => 11, () => '#123456',
+        (ctx, text, x, y, color, font) => { drawn.push({ text, x, y, color, font }); ctx.fillText(text, x, y); }, 'sans-serif');
     calls.length = 0;
     return f(fakeCtx, 'b1', '2F', 4000, 3000);
 };
@@ -110,5 +113,19 @@ assert.strictEqual(runDraw(false), 0);
 assert.ok(!calls.includes('fillText'), '「메모 출력」 끔이면 한글·PDF에 메모 없음');
 assert.strictEqual(runDraw(true), 1);
 assert.ok(calls.includes('fillText'), '켜면 메모 글을 그린다');
+assert.strictEqual(drawn[drawn.length - 1].color, '#123456', '출력 글자색 = 스타일 설정 「도면 메모 글자」');
+assert.ok(/^bold 11px /.test(drawn[drawn.length - 1].font), '출력 글자 = 마킹 번호 글자 크기·굵기');
+assert.ok(!calls.includes('fillRect'), '출력에 노란 배경 박스 없음');
+
+// 11) 2026-10-14 메모 글자: 마킹 네모박스 글자 크기·글꼴 따라감, 색은 스타일 설정
+assert.ok(app.includes("drawingMemo: '#000000'"), '메모 글자색 기본값');
+assert.ok(app.includes("['styleColorDrawingMemo', 'drawingMemo']"), '스타일 설정 색 필드');
+assert.ok(html.includes('id="styleColorDrawingMemo"'), '스타일 설정 창에 메모 글자색');
+assert.ok(/return getPinBoxFontSize\(\(sz && sz\.pin\) \|\| 1\);/.test(app), '메모 글자 = 번호 박스 글자 크기');
+assert.ok(app.includes('getDrawingMemoFontSizeImg() * viewScale'), '화면 메모 글자가 도면 배율을 따라감');
+const css = fs.readFileSync(path.join(__dirname, '..', 'styles.css'), 'utf8');
+const chipCss = css.slice(css.indexOf('.map-memo-chip {'), css.indexOf('}', css.indexOf('.map-memo-chip {')));
+assert.ok(chipCss.includes('background: transparent') && !/font-size:\s*[\d.]+rem/.test(chipCss), '메모 칩: 배경 없음, rem 고정 크기 없음');
+assert.ok(!/layout-(mobile|tablet) \.map-memo-chip/.test(css), '모바일 rem 크기 덮어쓰기 없음');
 
 console.log('test-drawing-memo: OK');
