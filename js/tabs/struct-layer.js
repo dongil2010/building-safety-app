@@ -286,6 +286,19 @@
         });
         return best;
     }
+    /**
+     * 기둥 줄 맞춤(2026-10-15): 다른 기둥과 세로줄(x)·가로줄(y)이 가까우면(화면 약 12px 또는 기둥 크기 3/4 안) 따로따로 그 줄에 맞춘다.
+     * → { x, y }
+     */
+    function alignColumn(x, y, size, pad, excludeId) {
+        var reach = Math.max(pad * 2, size * 0.75), bx = x, by = y, dx = reach, dy = reach;
+        list().forEach(function (d) {
+            if (d.type !== '기둥' || d.id === excludeId) return;
+            if (Math.abs(d.x - x) < dx) { dx = Math.abs(d.x - x); bx = d.x; }
+            if (Math.abs(d.y - y) < dy) { dy = Math.abs(d.y - y); by = d.y; }
+        });
+        return { x: bx, y: by };
+    }
     function addLinePoint(p, pad) {
         var type = ui.addType;
         var a = snapPoint(p, pad, type);
@@ -333,7 +346,8 @@
                 try { ov.setPointerCapture(e.pointerId); } catch (_e) { /* ignore */ }
             } else if (ui.addType) {
                 var sz = defaultSize(ui.addType);
-                var rec = api.add(state(), B.floorKey(), { type: ui.addType, label: '', x: p.x, y: p.y, w: sz.w, h: sz.h });
+                var at = ui.addType === '기둥' ? alignColumn(p.x, p.y, Math.max(sz.w, sz.h), pad) : p;   // 기둥은 다른 기둥 줄에 맞춤
+                var rec = api.add(state(), B.floorKey(), { type: ui.addType, label: '', x: at.x, y: at.y, w: sz.w, h: sz.h });
                 if (rec) { pushHist(B.floorKey(), [{ id: rec.id, before: null, after: snap(rec) }]); ui.selId = rec.id; commit(); return; }
             } else ui.selId = '';
             sync();
@@ -365,6 +379,10 @@
                 var at = dr.horiz ? pe.x : pe.y;
                 if (sp.on && sp.id !== d.id) at = dr.which === 'e' ? (dr.horiz ? sp.x - sp.hx : sp.y - sp.hy) : (dr.horiz ? sp.x + sp.hx : sp.y + sp.hy);
                 now = stretchTo(dr, at);
+            } else if (d.type === '기둥') {
+                // 기둥을 옮겨 놓으면 다른 기둥 줄에 맞춘다
+                var padM = Math.hypot(B.screenToImg(6, 0).x - B.screenToImg(0, 0).x, B.screenToImg(6, 0).y - B.screenToImg(0, 0).y);
+                now = alignColumn(d.x, d.y, Math.max(d.w, d.h), padM, d.id);
             }
             d.x = dr.orig.x; d.y = dr.orig.y;
             if (dr.orig.w != null) { d.w = dr.orig.w; d.h = dr.orig.h; }

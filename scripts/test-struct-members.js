@@ -255,5 +255,8 @@ assert.ok(layer.includes("var lo = dr.which === 'e' ? dr.fixed : Math.min(at, dr
 // ---- 직접 그릴 때 줄 맞춤: 같은 종류·같은 방향 보의 중심선이 가까우면 그 줄에 ----
 assert.ok(layer.includes('var perp = alignPerp(type, horiz, horiz ? (s.y + a.y) / 2 : (s.x + a.x) / 2, th, pad);'));
 assert.ok(layer.includes("if (d.type !== type || (d.w >= d.h) !== horiz) return;"), '같은 종류·같은 방향끼리만');
+// 기둥도 다른 기둥의 세로줄·가로줄에 따로 맞춤(넣을 때·옮겨 놓을 때)
+assert.ok(layer.includes("var at = ui.addType === '기둥' ? alignColumn(p.x, p.y, Math.max(sz.w, sz.h), pad) : p;"));
+assert.ok(layer.includes('now = alignColumn(d.x, d.y, Math.max(d.w, d.h), padM, d.id);'));
 
 console.log('test-struct-members: ok');
