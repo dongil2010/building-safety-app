@@ -17024,3 +17024,52 @@ html body.bsa-eval-map-on #mobileBtnDeleteSelected, html body.bsa-eval-map-on #m
 .map-count-erase-box { position: absolute; border: 2px dashed #dc2626; background: rgba(220, 38, 38, 0.08); pointer-events: none; }
 
 .map-count-auto { display: inline-flex; align-items: center; gap: .25rem; font-size: .78rem; font-weight: 600; white-space: nowrap; cursor: pointer; }
+
+/* 2026-10-15 폰 세로: 상태조사 하단 도구줄을 화면 전체 폭으로, 왼쪽 목록·도면은 그 위에서 끝나게 */
+@media (max-width: 600px) and (orientation: portrait) {
+    html:not(.layout-desktop):not(.layout-tablet) body:not(.bsa-eval-map-on) #tab-map .inspect-layout {
+        padding-bottom: calc(var(--bsa-mdock-h, 52px) + env(safe-area-inset-bottom, 0px)) !important;
+        box-sizing: border-box;
+    }
+    html:not(.layout-desktop):not(.layout-tablet) body:not(.bsa-eval-map-on) #tab-map .mobile-canvas-dock {
+        position: fixed !important;
+        left: 0 !important;
+        right: 0 !important;
+        bottom: 0 !important;
+        top: auto !important;
+        width: auto !important;
+        max-width: none !important;
+        transform: none !important;
+        margin: 0 !important;
+        padding: 4px max(6px, env(safe-area-inset-right, 0px)) calc(4px + env(safe-area-inset-bottom, 0px)) max(6px, env(safe-area-inset-left, 0px)) !important;
+        border-radius: 0 !important;
+        background: var(--bg-card, #fff) !important;
+        border-top: 1px solid rgba(0, 0, 0, .1) !important;
+        box-shadow: 0 -2px 8px rgba(0, 0, 0, .06) !important;
+        z-index: 60 !important;
+        box-sizing: border-box;
+    }
+    html:not(.layout-desktop):not(.layout-tablet) body:not(.bsa-eval-map-on) #tab-map .mobile-canvas-dock .mobile-map-fab {
+        width: 100% !important;
+        max-width: none !important;
+        display: flex !important;
+        justify-content: space-between !important;
+        gap: 2px !important;
+        background: transparent !important;
+        border: 0 !important;
+        box-shadow: none !important;
+        padding: 0 !important;
+        border-radius: 0 !important;
+    }
+    html:not(.layout-desktop):not(.layout-tablet) body:not(.bsa-eval-map-on) #tab-map .mobile-canvas-dock .mobile-fab-btn {
+        flex: 1 1 0 !important;
+        min-width: 0 !important;
+    }
+    html:not(.layout-desktop):not(.layout-tablet) body:not(.bsa-eval-map-on) #tab-map .mobile-canvas-dock .mobile-fab-btn span {
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: clip;
+        font-size: 10px;
+        letter-spacing: -0.04em;
+    }
+}
