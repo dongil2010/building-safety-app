@@ -35103,15 +35103,18 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const extra = document.getElementById(isPrev ? 'defectPrevExtraRow' : 'defectCurrExtraRow');
         if (!frame) return;
 
+        // 2026-10-15 중점관리 마킹은 전회차 사진도 직접 넣고 뺄 수 있다(그 밖에는 가져오기·차수 전환으로만)
+        const prevEditable = isPrev && isPrevPhotoEditableNow();
         const openFn = isPrev ? 'previewPrevRoundPhoto' : 'annotatePendingPhoto';
-        const removeFn = isPrev ? null : 'removePendingPhoto';
-        const addKind = isPrev ? null : 'curr';
+        const removeFn = isPrev ? (prevEditable ? 'removePendingPrevPhoto' : null) : 'removePendingPhoto';
+        const addKind = isPrev ? (prevEditable ? 'prev' : null) : 'curr';
         const label = isPrev ? '전차' : '현차';
         const list = (photos || []).filter(Boolean);
 
+        syncPrevPhotoAddBar(isPrev, prevEditable, list.length);
         if (list.length === 0) {
             frame.classList.remove('has-photo');
-            if (isPrev) {
+            if (isPrev && !prevEditable) {
                 frame.innerHTML = `
                     <div class="defect-photo-empty-readonly">
                         <i class="fa-solid fa-clock-rotate-left"></i>
@@ -35142,7 +35145,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         }
 
         frame.classList.add('has-photo');
-        const removeMainBtn = isPrev ? '' : `<button type="button" class="defect-photo-frame-remove" onclick="window.${removeFn}(0)" title="${label} 대표 삭제">×</button>`;
+        const removeMainBtn = !removeFn ? '' : `<button type="button" class="defect-photo-frame-remove" onclick="window.${removeFn}(0)" title="${label} 대표 삭제">×</button>`;
         const rotateMainBtns = isPrev ? '' : buildPhotoRotateButtonsHtml('onclick="window.rotatePendingPhoto(0, -1)"', 'onclick="window.rotatePendingPhoto(0, 1)"');
         frame.innerHTML = `
             <button type="button" class="defect-photo-thumb-btn" onclick="window.${openFn}(0)" title="${label} 대표 — 탭하여 확대">
@@ -35162,7 +35165,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         extra.style.display = 'grid';
         extra.innerHTML = list.slice(1).map((src, i) => {
             const idx = i + 1;
-            const removeExtraBtn = isPrev ? '' : `<button type="button" class="defect-photo-frame-remove" onclick="window.${removeFn}(${idx})" title="${label} ${idx + 1} 삭제">×</button>`;
+            const removeExtraBtn = !removeFn ? '' : `<button type="button" class="defect-photo-frame-remove" onclick="window.${removeFn}(${idx})" title="${label} ${idx + 1} 삭제">×</button>`;
             return `
                 <div class="defect-photo-extra-item">
                     <button type="button" class="defect-photo-extra-open" onclick="window.${openFn}(${idx})" title="${label} ${idx + 1}">
@@ -35174,6 +35177,55 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             `;
         }).join('');
     }
+
+    function isPrevPhotoEditableNow() {
+        const cb = document.getElementById('defectPriorityManage');
+        if (!cb || !cb.checked) return false;
+        if (typeof isDefectBulkEditMode === 'function' && isDefectBulkEditMode()) return false;
+        return true;
+    }
+
+    /** 중점관리일 때 전차 칸 아래 「사진 추가 · 촬영」 줄 */
+    function syncPrevPhotoAddBar(isPrev, editable, count) {
+        if (!isPrev) return;
+        const frame = document.getElementById('defectPrevMainFrame');
+        if (!frame || !frame.parentNode) return;
+        let bar = document.getElementById('defectPrevAddBar');
+        const hint = document.querySelector('.defect-photo-slot-prev .defect-photo-slot-readonly-hint');
+        if (hint) hint.textContent = editable ? '중점관리 · 직접 추가' : '보기 전용';
+        if (!editable) { if (bar) bar.hidden = true; return; }
+        if (!bar) {
+            bar = document.createElement('div');
+            bar.id = 'defectPrevAddBar';
+            bar.className = 'defect-prev-add-bar';
+            bar.style.cssText = 'display:flex;gap:.35rem;margin-top:.35rem;';
+            bar.innerHTML = '<button type="button" class="btn btn-sm btn-outline" data-prev-pick="gallery" style="flex:1"><i class="fa-solid fa-image"></i> 전회차 사진</button>'
+                + '<button type="button" class="btn btn-sm btn-outline" data-prev-pick="camera" title="촬영"><i class="fa-solid fa-camera"></i></button>';
+            bar.addEventListener('click', (e) => {
+                const b = e.target.closest('[data-prev-pick]');
+                if (!b) return;
+                e.preventDefault();
+                e.stopPropagation();
+                triggerDefectPhotoPick(b.getAttribute('data-prev-pick'), 'prev');
+            });
+            const extra = document.getElementById('defectPrevExtraRow');
+            (extra || frame).insertAdjacentElement('afterend', bar);
+        }
+        bar.hidden = false;
+        void count;
+    }
+
+    window.removePendingPrevPhoto = async function(idx) {
+        if (!isPrevPhotoEditableNow()) return;
+        if (!await window.confirmDelete('이 전회차 사진을 뺄까요?')) return;
+        if (Array.isArray(window._pendingPrevRoundPhotos)) {
+            window._pendingPrevRoundPhotos.splice(idx, 1);
+            window._defectPhotosDirty = true;
+            renderDefectPhotoSection();
+            void persistOpenDefectPhotosNow();
+            scheduleDefectAutoApply();
+        }
+    };
 
     function renderDefectPhotoSection(opts) {
         const loading = !!(opts && opts.loading);
@@ -35621,19 +35673,33 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (file) handleSelectedPhotoFile(file, target, photoTarget);
     }
     window.triggerDefectPhotoPick = triggerDefectPhotoPick;
+    (function bindPriorityPrevPhoto() {
+        const cb = document.getElementById('defectPriorityManage');
+        if (cb) cb.addEventListener('change', () => { try { renderDefectPhotoSection(); } catch (_e) { /* ignore */ } });
+    })();
 
     const btnTriggerCamera = document.getElementById('btnTriggerCamera');
     const btnTriggerGallery = document.getElementById('btnTriggerGallery');
 
     function handleSelectedPhotoFile(file, target = 'curr', photoTarget) {
         if (!file) return;
-        if (target === 'prev') return;
+        if (target === 'prev' && !isPrevPhotoEditableNow()) return;
         const pickedFor = photoTarget || captureDefectPhotoTarget();
         // 저장이 끝날 때까지 "사진 저장 중"으로 표시 — 그동안은 자동 새로고침을 미룬다(isAutoReloadUnsafeNow)
         if (!window._defectPhotoSaves) window._defectPhotoSaves = new Set();
         const job = window.compressDefectPhoto43(file).then(async (compressedUrl) => {
             if (!compressedUrl) {
                 reportDefectPhotoLost('사진을 읽지 못함');
+                return;
+            }
+            if (target === 'prev') {
+                if (!isDefectPhotoTargetStillOpen(pickedFor)) { reportDefectPhotoLost('전회차 사진: 창이 닫힘'); return; }
+                if (!Array.isArray(window._pendingPrevRoundPhotos)) window._pendingPrevRoundPhotos = [];
+                window._pendingPrevRoundPhotos.push(compressedUrl);
+                window._defectPhotosDirty = true;
+                renderDefectPhotoSection();
+                void persistOpenDefectPhotosNow();
+                scheduleDefectAutoApply();
                 return;
             }
             if (isDefectPhotoTargetStillOpen(pickedFor)) {
