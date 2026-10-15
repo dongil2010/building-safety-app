@@ -124,7 +124,8 @@
     var STRUCT_DEFECT_WORDS = ['균열', '누수', '백태', '철근노출', '철근 노출', '노출', '공극', '파손', '결손', '박리', '박락', '층분리', '들뜸',
         '처짐', '녹', '부식', '재료분리', '단면손실', '단면 손실', '변형', '좌굴', '침하', '탈락', '곰보', '콜드조인트', '재료 분리'];
     var AUTO_MERGE_PX = 40;
-    function isGoodType(t) { return String(t || '').indexOf('상태양호') >= 0; }
+    // 2026-10-15 보수완료(보수 완료) 마킹도 양호로 본다
+    function isGoodType(t) { var s = String(t || '').replace(/\s+/g, ''); return s.indexOf('상태양호') >= 0 || s.indexOf('보수완료') >= 0; }
     function isStructuralDefectType(t) {
         var s = String(t || '');
         if (!s || isGoodType(s)) return false;

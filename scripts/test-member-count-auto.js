@@ -35,4 +35,7 @@ assert.strictEqual(MC.countsByType(MC.listWithAuto(st, FK))['기둥'], 2);
 // 구역 번호
 const z = MC.autoDots([D('z1', '기둥', '균열', 0, 0)], [], { zoneNoOf: () => 2 });
 assert.strictEqual(z[0].zoneNo, 2);
+// 보수완료 = 양호로 셈(구조 결함 낱말 없어도)
+{ const s2 = { memberCounts: {}, defects: { [FK]: [D('r1', '기둥', '보수완료', 10, 10), D('r2', '보(G)', '보수 완료', 900, 10), D('r3', '슬래브', '도장 오염', 2000, 10)] } };
+  const c2 = MC.countsByType(MC.listWithAuto(s2, FK)); assert.strictEqual(c2['기둥'], 1); assert.strictEqual(c2['거더'], 1); assert.strictEqual(c2['슬래브'], 0); }
 console.log('test-member-count-auto: ok');
