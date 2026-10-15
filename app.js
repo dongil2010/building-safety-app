@@ -53796,7 +53796,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     window._justRegistering = false;
 
     // 앱 번호. 포팅하면 이 번호가 1 오르고, 같은 번호가 Storage releases/latest.json 에 올라간다.
-    window.BSA_APP_BUILD = { versionCode: 18, versionName: '1.3.10' };
+    window.BSA_APP_BUILD = { versionCode: 19, versionName: '1.3.11' };
 
     function isNativeAndroidApp() {
         try {
@@ -53823,7 +53823,17 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
     window.reloadWebAppFromServer = function () {
         if (window._authSubmitInFlight || window._justRegistering) return;
-        const go = () => {
+        // 2026-10-16 오프라인·불안정 망에서 새로고침하면 앱이 안 열린다 — 서버에 닿는 게 확인될 때만 새로고침
+        if (navigator.onLine === false) return;
+        const go = async () => {
+            try {
+                const ctl = typeof AbortController === 'function' ? new AbortController() : null;
+                const tm = ctl ? setTimeout(() => ctl.abort(), 6000) : null;
+                const r = await fetch('index.html?ping=' + Date.now(), { cache: 'no-store', signal: ctl ? ctl.signal : undefined });
+                if (tm) clearTimeout(tm);
+                if (!r || !r.ok) return;
+            } catch (_) { return; }
+            if (navigator.onLine === false) return;
             try { sessionStorage.removeItem('bsa_web_sha'); } catch (_) { /* ignore */ }
             const url = new URL(window.location.href);
             url.searchParams.set('_r', String(Date.now()));
@@ -53885,6 +53895,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         }
         async function checkRemoteWebVersion() {
             if (window._authSubmitInFlight || window._justRegistering || isLoginOverlayOpen()) return;
+            if (navigator.onLine === false) return;
             // 창에 돌아올 때 옛 버전인지 먼저 판단해 안내 띠를 띄운다(동기화 차단과 같은 기준)
             if (typeof window.refreshAppVersionGate === 'function') {
                 try { await window.refreshAppVersionGate(true); } catch (_e) { /* ignore */ }
