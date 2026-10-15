@@ -28175,9 +28175,17 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             rest = l.after.replace(/^\s*m\b(?![m])/i, '');
             let count = '';
             const ea = rest.match(/^\s*-\s*(\d+)\s*EA(?![A-Za-z])/i);
+            // 2026-10-15 엑셀 등 「폭*길이*개수」·「폭x길이x개수」: 세 번째 정수는 개수 (0.3*2.0*3 → 폭 0.3, 길이 2.0, 개수 3)
+            // 구분자는 그대로: '/'로 쓴 값은 0.3/2.0/3, '*'·'x'로 쓴 값은 0.3x2.0x3 처럼 같은 구분자의 세 번째 정수만 개수로 본다
+            const third = ea ? null : (join === 'x'
+                ? rest.match(/^\s*[x*]\s*(\d+)\s*(?:EA|개)?(?![\d.])/i)
+                : rest.match(/^\s*\/\s*(\d+)\s*(?:EA|개)?(?![\d.])/i));
             if (ea) {
                 count = ea[1];
                 rest = rest.slice(ea[0].length);
+            } else if (third) {
+                count = third[1];
+                rest = rest.slice(third[0].length);
             }
             out.push({
                 width: normalizeCrackDecimalText(w.num),

@@ -1,0 +1,21 @@
+'use strict';
+// 2026-10-15 규모(폭/길이/개수) 구분자: '/'는 '/', '*'·'x'·'×'·'X'는 'x' — 세 번째 정수 = 개수
+const fs = require('fs');
+const path = require('path');
+const assert = require('assert');
+const src = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8');
+const cut = (start, end) => { const i = src.indexOf(start); const j = src.indexOf(end, i); assert.ok(i >= 0 && j > i, start); return src.slice(i, j); };
+const block = (start) => { const i = src.indexOf(start); assert.ok(i >= 0, start); const j = src.indexOf('\n    }\n', i); return src.slice(i, j + 6); };
+const code = cut('    function normalizeMeasureJoin', '    function isMeasureOnlySizeText') + block('    function normalizeEaSpacingInText');
+const api = new Function(code + '\nreturn { parseSizeTextToCrackMeasures, formatCrackMeasurePair };')();
+const F = (s) => api.parseSizeTextToCrackMeasures(s).map(api.formatCrackMeasurePair).join(', ');
+assert.strictEqual(F('0.3*2.0*3'), '0.3x2.0 -3EA');
+assert.strictEqual(F('0.3x2.0x3'), '0.3x2.0 -3EA');
+assert.strictEqual(F('0.3×2.0×2'), '0.3x2.0 -2EA');
+assert.strictEqual(F('0.3X2.0'), '0.3x2.0');
+assert.strictEqual(F('0.3/2.0'), '0.3/2.0');
+assert.strictEqual(F('0.3/2.0/3'), '0.3/2.0 -3EA');
+assert.strictEqual(F('0.3/3.00.2/3.0'), '0.3/3.0, 0.2/3.0');
+assert.strictEqual(F('0.3/2/0.2/1.5'), '0.3/2.0, 0.2/1.5');
+assert.strictEqual(F('0.3/2.00.3*0.3'), '0.3/2.0, 0.3x0.3');
+console.log('test-size-separator: ok');
