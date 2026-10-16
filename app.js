@@ -25267,8 +25267,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const api = memoApi();
         const floorKey = currentMemoFloorKey();
         if (!api || !floorKey || !state.bgImage) return null;
-        const text = await window.appPrompt('도면에 남길 메모를 적어 주세요. (결함이 아니며 조사표·번호에 들어가지 않습니다)', '', {
-            title: '도면 메모', okText: '저장', placeholder: '예) 천장 점검구 열림, 다음에 다시 확인'
+        const text = await window.appPrompt('도면에 남길 주석을 적어 주세요. (결함이 아니며 조사표·번호에 들어가지 않습니다)', '', {
+            title: '도면 주석', okText: '저장', placeholder: '예) 천장 점검구 열림, 다음에 다시 확인'
         });
         if (text == null || !api.cleanText(text)) return null;
         const memo = api.createMemo({ x: imgX, y: imgY, text, by: memoAuthorName() });
@@ -25299,11 +25299,12 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         ov.className = 'drawing-memo-view-overlay';
         ov.setAttribute('style', 'position:fixed;inset:0;z-index:10050;background:rgba(15,23,42,0.45);display:flex;align-items:center;justify-content:center;padding:12px;');
         ov.innerHTML = `
-            <div class="drawing-memo-view-card" role="dialog" aria-modal="true" aria-label="도면 메모 보기·고치기"
+            <div class="drawing-memo-view-card" role="dialog" aria-modal="true" aria-label="도면 주석 보기·고치기"
                 style="background:#fff;color:#111827;border-radius:14px;box-shadow:0 12px 40px rgba(0,0,0,0.3);width:min(560px,100%);max-height:calc(100% - 24px);display:flex;flex-direction:column;overflow:hidden;">
                 <div style="display:flex;align-items:center;gap:8px;padding:12px 14px;border-bottom:1px solid #e5e7eb;">
-                    <strong style="font-size:1.05rem;">📝 도면 메모</strong>
+                    <strong style="font-size:1.05rem;">📝 도면 주석</strong>
                     <span style="flex:1;color:#6b7280;font-size:0.8rem;">${esc(memo.by ? memo.by + ' · ' : '')}${esc(when)}</span>
+                    <button type="button" data-mv="del" aria-label="주석 지우기" title="주석 지우기" style="border:1px solid #fca5a5;background:#fff;color:#dc2626;border-radius:8px;padding:4px 8px;cursor:pointer;"><i class="fa-solid fa-trash"></i> 지우기</button>
                     <button type="button" data-mv="close" aria-label="닫기" style="border:none;background:none;font-size:1.4rem;line-height:1;cursor:pointer;color:#6b7280;">&times;</button>
                 </div>
                 <div style="padding:12px 14px;flex:1;overflow:auto;">
@@ -25312,8 +25313,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     <div style="color:#6b7280;font-size:0.78rem;margin-top:4px;">고친 뒤 「저장」 · 다른 기기에도 반영됩니다</div>
                 </div>
                 <div style="display:flex;gap:8px;padding:10px 14px;border-top:1px solid #e5e7eb;">
-                    <button type="button" class="btn btn-outline btn-sm" data-mv="del" style="color:#dc2626;border-color:#fca5a5;">지우기</button>
-                    <span style="flex:1"></span>
+                    <span data-mv-delmsg style="flex:1;color:#dc2626;font-size:0.85rem;align-self:center;"></span>
                     <button type="button" class="btn btn-outline btn-sm" data-mv="close">닫기</button>
                     <button type="button" class="btn btn-primary btn-sm" data-mv="save">저장</button>
                 </div>
@@ -25332,21 +25332,32 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             const save = () => {
                 const text = ta.value;
                 if (!api.cleanText(text)) {
-                    window.showToast?.('빈 메모는 저장하지 않습니다. 지우려면 「지우기」를 누르세요.', 'info', 2500);
+                    window.showToast?.('빈 주석은 저장하지 않습니다. 지우려면 「지우기」를 누르세요.', 'info', 2500);
                     return;
                 }
                 if (api.updateMemo(window.state, floorKey, memoId, { text })) {
                     commitMemoChange(floorKey);
-                    window.showToast?.('메모를 저장했습니다', 'success', 1500);
+                    window.showToast?.('주석을 저장했습니다', 'success', 1500);
                 }
                 finish('saved');
             };
-            const del = async () => {
-                const ok = await window.appConfirm('이 메모를 지울까요?\n다른 기기에서도 지워집니다.', { title: '도면 메모' });
-                if (ok && api.deleteMemo(window.state, floorKey, memoId)) {
-                    commitMemoChange(floorKey);
-                    finish('deleted');
+            // 2026-10-16 「주석은 지우는 기능이 사라짐」: 지우기를 맨 위(✕ 옆)로 — 폰에서 입력칸에 키보드가 올라오면
+            // 아래 줄 버튼이 키보드에 가려 눌리지 않았다. 확인은 창 안에서(두 번 누르기) — 창 위에 창을 또 띄우지 않음.
+            let delArmedUntil = 0;
+            const del = () => {
+                const btns = ov.querySelectorAll('[data-mv="del"]');
+                const msg = ov.querySelector('[data-mv-delmsg]');
+                if (Date.now() > delArmedUntil) {
+                    delArmedUntil = Date.now() + 5000;
+                    btns.forEach((b) => { b.style.background = '#dc2626'; b.style.color = '#fff'; b.innerHTML = '<i class="fa-solid fa-trash"></i> 한 번 더 누르면 지움'; });
+                    if (msg) msg.textContent = '다른 기기에서도 지워집니다';
+                    return;
                 }
+                if (api.deleteMemo(window.state, floorKey, memoId)) {
+                    commitMemoChange(floorKey);
+                    window.showToast?.('주석을 지웠습니다', 'info', 1500);
+                }
+                finish('deleted');
             };
             const onKey = (e) => {
                 if (!document.body.contains(ov)) return;
@@ -25360,11 +25371,13 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 if (!b) return;
                 if (b.dataset.mv === 'close') finish(null);
                 else if (b.dataset.mv === 'save') save();
-                else if (b.dataset.mv === 'del') void del();
+                else if (b.dataset.mv === 'del') del();
             });
             // 도면 쪽으로 손가락·마우스가 새지 않게
             ['pointerdown', 'mousedown', 'touchstart', 'wheel'].forEach((t) => ov.addEventListener(t, (e) => e.stopPropagation(), { passive: true }));
-            requestAnimationFrame(() => { try { ta.focus(); } catch (_e) { /* ignore */ } });
+            // 폰·태블릿은 자동 포커스 안 함(키보드가 창을 가림) — 입력칸을 누르면 그때 키보드
+            const coarse = !!(window.matchMedia && window.matchMedia('(pointer: coarse)').matches);
+            if (!coarse) requestAnimationFrame(() => { try { ta.focus(); } catch (_e) { /* ignore */ } });
         });
     }
     window.openDrawingMemoMenu = openDrawingMemoMenu;
@@ -25378,7 +25391,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             ov = document.createElement('div');
             ov.id = 'mapMemoOverlay';
             ov.className = 'map-memo-overlay';
-            ov.setAttribute('aria-label', '도면 메모');
+            ov.setAttribute('aria-label', '도면 주석');
             ensureMemoPointerTracking();
             bindDrawingMemoOverlayEvents(ov);
             host.appendChild(ov);
@@ -25517,7 +25530,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 el.dataset.text = m.text;
                 el.textContent = label;
                 el.title = m.text + (m.by ? `\n— ${m.by}` : '');
-                el.setAttribute('aria-label', `도면 메모: ${m.text}`);
+                el.setAttribute('aria-label', `도면 주석: ${m.text}`);
             }
             el.style.fontSize = `${memoFontPx.toFixed(2)}px`;
             el.style.color = memoColor;
@@ -25599,7 +25612,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         el.innerHTML = `
             <div class="sk-card" role="dialog" aria-label="손글씨 메모">
                 <div class="sk-head">
-                    <strong>✍ 메모</strong>
+                    <strong>✍ 손글씨 메모</strong>
                     <select class="sk-sheets" data-sk-sheets aria-label="메모 보기"></select>
                     <button type="button" class="sk-btn" data-sk="new" title="새 메모">＋ 새 메모</button>
                     <span class="sk-spacer"></span>
@@ -25633,12 +25646,14 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 el.querySelectorAll('.sk-color').forEach((x) => x.classList.toggle('active', x === b));
                 el.querySelectorAll('.sk-tool').forEach((x) => x.classList.toggle('active', x.dataset.skTool === 'pen')); return; }
             const a = b.dataset.sk;
-            if (sketchUi.readOnly && (a === 'undo' || a === 'redo' || a === 'clear' || a === 'save')) return;
             if (a === 'close') void sketchClose();
             else if (a === 'save') sketchSave(true);
             else if (a === 'undo') sketchUndo();
             else if (a === 'redo') sketchRedo();
-            else if (a === 'clear') { if (sketchUi.strokes.length) { sketchUi.undo.push(sketchUi.strokes.slice()); sketchUi.redo = []; sketchUi.strokes = []; sketchUi.dirty = true; sketchRedraw(); } }
+            else if (a === 'clear') {
+                const base = sketchUi.baseCount || 0;   // 열었을 때 있던 획(남의 것 포함)은 안 지움
+                if (sketchUi.strokes.length > base) { sketchUi.undo.push(sketchUi.strokes.slice()); sketchUi.redo = []; sketchUi.strokes = sketchUi.strokes.slice(0, base); sketchUi.dirty = true; sketchRedraw(); }
+            }
             else if (a === 'new') { sketchSave(false); sketchOpenSheet(null); }
         });
         el.querySelector('[data-sk-width]').addEventListener('input', (e) => { sketchUi.width = Number(e.target.value) || 3; });
@@ -25721,7 +25736,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         try { sketchUi.canvas.setPointerCapture(e.pointerId); } catch (_e) { /* ignore */ }
         // 펜 옆 버튼·펜 뒤 지우개(buttons 32)도 지우개
         const eraser = sketchUi.tool === 'eraser' || (e.buttons & 32) === 32 || e.button === 5;
-        sketchUi.drawing = { c: sketchUi.color, w: sketchUi.width, e: eraser ? 1 : 0, p: sketchPaperPoint(e), _pid: e.pointerId };
+        sketchUi.drawing = { c: sketchUi.color, w: sketchUi.width, e: eraser ? 1 : 0, p: sketchPaperPoint(e), _pid: e.pointerId,
+            i: 's' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7) };
         sketchRedraw();
     }
     function sketchPointerMove(e) {
@@ -25790,11 +25806,13 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         sketchUi.undo = [];
         sketchUi.redo = [];
         sketchUi.dirty = false;
-        sketchUi.readOnly = !!rec;   // 저장된 메모는 덮어쓰지 않는다
-        sketchUi.el.classList.toggle('sk-readonly', sketchUi.readOnly);
+        // 2026-10-16 「골라서 볼 수 있고 작성도 가능」: 고른 메모(남의 것 포함)에 이어 쓰기. 지우는 건 이번에 쓴 획만
+        // (전체 지우기·되돌리기는 열었을 때 있던 획까지 안 감) — 여러 사람 획은 병합에서 합집합(sketch-memo unionStrokes).
+        sketchUi.readOnly = false;
+        sketchUi.baseCount = sketchUi.strokes.length;
         const hint = sketchUi.el.querySelector('[data-sk-hint]');
-        if (hint) hint.textContent = sketchUi.readOnly
-            ? '저장된 메모는 보기만 합니다. 새로 쓰려면 「＋ 새 메모」'
+        if (hint) hint.textContent = rec
+            ? '이 메모에 이어 쓰기 · 이번에 쓴 획만 지울 수 있음 · 닫으면 저장'
             : '펜이 닿으면 그때부터 펜으로만 그립니다(손바닥 무시) · 닫으면 저장';
         sketchFillSheetSelect();
         sketchLayout();
@@ -25806,7 +25824,6 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (!api || !sketchUi.sheet || !sketchUi.floorKey) return null;
         if (!sketchUi.dirty) { if (notify) window.showToast('바뀐 내용이 없습니다', 'info', 1500); return null; }
         if (!sketchUi.sheet.id && !sketchUi.strokes.length) return null;
-        if (sketchUi.readOnly || sketchUi.sheet.id) return null;   // 2026-10-16 저장된 메모는 덮어쓰지 않음
         if (api.pointCount(sketchUi.strokes) > api.MAX_POINTS) {
             window.showToast('이 장은 너무 많이 그려 저장할 수 없습니다. 새 장에 이어서 그려 주세요.', 'warning', 6000);
             return null;
@@ -25819,8 +25836,6 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (!rec) return null;
         sketchUi.sheet.id = rec.id;
         sketchUi.dirty = false;
-        sketchUi.readOnly = true;
-        sketchUi.el.classList.add('sk-readonly');
         commitMemoChange(sketchUi.floorKey);
         sketchFillSheetSelect();
         if (notify) window.showToast('손글씨 메모를 저장했습니다', 'success', 1800);
@@ -25867,8 +25882,13 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
     // 2026-10-16 사용자 요청: 손글씨 메모는 도면 위 자리가 아니라 상단 「전경사진」 버튼 옆 「손글씨 메모」 버튼으로만 열고 관리.
     // 팝업 안 장 고르기(손글씨 메모-1, -2 …)로 다시 열어 고친다. 메모 막대 「손글씨로 추가」·도면 위 항목은 없앰.
-    // 2026-10-16 사용자 지시 「손글씨를 지우고 도면에 글자 입력하는건 살려」: 손글씨 메모 화면(버튼·팝업 진입)은 없앰.
-    // 이미 저장된 손글씨 데이터(state.sketchMemos)는 지우지 않고 층 묶음 동기화·병합에 그대로 실어 보존한다.
+    // 2026-10-16 사용자 지시 「도면에 찍어서 남기는 메모를 주석이라고 명칭을 바꾸고 손글씨 메모는 살려」:
+    // 상단 「전경사진」 바로 오른쪽 「메모」 버튼 → 바로 새 흰 종이, ✕로 닫으면 저장. 작성자별 메모-1, 메모-2 …로 쌓임.
+    // (도면에 찍는 글은 「주석」 — 저장 키 drawingMemos 등은 동기화 호환 때문에 그대로)
+    (function bindSketchMemoButtons() {
+        const b = document.getElementById('btnOpenSketchMemo');
+        if (b) b.addEventListener('click', (e) => { e.preventDefault(); window.openSketchMemo({ fresh: true }); });
+    })();
 
 
     // 메모 모드: 도면 위 깨끗한 한 손가락 탭(또는 클릭)만 메모를 만든다. 끌면 도면 이동, 두 손가락이면 확대·축소.

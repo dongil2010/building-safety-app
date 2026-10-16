@@ -113,8 +113,13 @@ const m = (s, l, sd = {}, ld = {}, sa = {}, la = {}) => sm.mergeDefectsMaps({ F:
     sk.mergePackIntoState(B, 'F', sk.packFor(A, 'F'), merge);
     assert.strictEqual(sk.listFor(B, 'F').length, 4);
     // app.js 연결
-    // 2026-10-16 손글씨 화면은 없앰(데이터만 보존·동기화) — 도면 글 메모는 그대로
-    assert.ok(!/getElementById\('btnOpenSketchMemo'\)/.test(app), '손글씨 버튼 연결 없음');
+    // 2026-10-16 손글씨 메모 다시 살림(전경사진 옆 「메모」 → 바로 새 종이), 도면 글은 「주석」
+    assert.ok(/getElementById\('btnOpenSketchMemo'\)[\s\S]{0,120}openSketchMemo\(\{ fresh: true \}\)/.test(app), '메모 버튼 → 바로 새 종이');
+    // 「골라서 볼 수 있고 작성도 가능」: 읽기전용 없음, 기존 획 위에 이어 쓰기, 획마다 id, 지우기는 이번에 그린 것만
+    assert.ok(!/if \(sketchUi\.readOnly \|\| sketchUi\.sheet\.id\) return null;/.test(app), '저장된 메모에도 이어 쓰기 가능');
+    assert.ok(/baseCount/.test(app), '이번에 그린 획만 지움(baseCount)');
+    const smLib = fs.readFileSync(path.join(__dirname, '..', 'js', 'core', 'sketch-memo.js'), 'utf8');
+    assert.ok(/function unionStrokes/.test(smLib), '여러 사람 획 합치기(unionStrokes)');
     assert.ok(/sketches: \(window\.BSA && window\.BSA\.sketchMemo\) \? window\.BSA\.sketchMemo\.packFor/.test(app), '손글씨 데이터는 계속 동기화(보존)');
     assert.ok(/createDrawingMemoAt\(p\.x, p\.y\);/.test(app), '메모 모드 도면 탭 → 글 메모');
     assert.ok(/mobileBtnModeMemo\.addEventListener\('click', \(\) => setDrawMode\(state\.mode === 'MEMO' \? 'PAN' : 'MEMO'\)\)/.test(app), '폰·태블릿 메모 버튼 = 글 메모 모드');
@@ -122,7 +127,18 @@ const m = (s, l, sd = {}, ld = {}, sa = {}, la = {}) => sm.mergeDefectsMaps({ F:
     assert.ok(!/memoAddKind/.test(app), '메모 모드 「손글씨로 추가」 없음');
     assert.ok(!/id: 'sk:' \+ r\.id/.test(app), '도면 위 손글씨 항목 없음');
     const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
-    assert.ok(!html.includes('id="btnOpenSketchMemo"'), '전경사진 옆 손글씨 메모 버튼 없음');
-    assert.ok(html.includes('id="btnModeMemo"') && html.includes('id="mobileBtnModeMemo"'), '도면 글 메모 버튼 유지');
+    const ov = html.indexOf('id="btnOpenOverviewPhotos"');
+    const memoBtn = html.indexOf('id="btnOpenSketchMemo"');
+    assert.ok(ov > 0 && memoBtn > ov && memoBtn - ov < 600, '전경사진 바로 옆 「메모」');
+    assert.ok(html.includes('id="btnModeMemo"') && html.includes('id="mobileBtnModeMemo"'), '도면 주석 버튼 유지');
+    // 이름: 도면 글 = 「주석」, 손글씨 = 「메모」
+    const modeBtn = html.slice(html.indexOf('id="btnModeMemo"'), html.indexOf('</button>', html.indexOf('id="btnModeMemo"')));
+    assert.ok(/📝 주석/.test(modeBtn) && !/메모/.test(modeBtn), 'PC 주석 버튼');
+    const rail = html.slice(html.indexOf('id="mobileBtnModeMemo"'), html.indexOf('</button>', html.indexOf('id="mobileBtnModeMemo"')));
+    assert.ok(/<span>주석<\/span>/.test(rail), '폰·태블릿 주석 버튼');
+    const bar = html.slice(html.indexOf('id="drawingMemoBar"'), html.indexOf('</div>', html.indexOf('id="drawingMemoBar"')));
+    assert.ok(/주석 표시/.test(bar) && /주석 출력/.test(bar) && !/메모/.test(bar), '주석 막대 문구');
+    assert.ok(html.includes('📝 도면 주석 글자'), '스타일 설정 이름');
+    assert.ok(/<strong>✍ 손글씨 메모<\/strong>/.test(app), '손글씨 팝업 제목');
 }
 console.log('test-sync-branch-conflicts OK');

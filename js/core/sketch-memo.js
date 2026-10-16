@@ -32,7 +32,9 @@
             p.push(x, y, pr);
         }
         if (!p.length) return null;
-        return { c: String(s.c || COLORS[0]).slice(0, 16), w: Math.max(1, Math.min(60, Math.round(Number(s.w) || 3))), e: s.e ? 1 : 0, p: p };
+        var out = { c: String(s.c || COLORS[0]).slice(0, 16), w: Math.max(1, Math.min(60, Math.round(Number(s.w) || 3))), e: s.e ? 1 : 0, p: p };
+        if (s.i) out.i = String(s.i).slice(0, 40);   // 2026-10-16 획 ID — 여러 사람이 같은 메모에 이어 쓴 획을 합칠 때 씀
+        return out;
     }
 
     function pointCount(strokes) {
@@ -136,11 +138,46 @@
         return !!((pack.items && pack.items.length) || (pack.deletedIds && pack.deletedIds.length));
     }
 
-    /** 서버 층 묶음의 손글씨를 이 기기 것과 합친다(mergeNdtDataMaps 그대로). pack이 없으면 아무것도 안 한다. */
+    /** 획 하나의 같음 판정 키: 획 ID, 없으면(옛 획) 내용 그대로 */
+    function strokeKey(s) {
+        if (!s) return '';
+        if (s.i) return 'i:' + s.i;
+        return 'h:' + s.c + '|' + s.w + '|' + (s.e ? 1 : 0) + '|' + (s.p || []).join(',');
+    }
+
+    /**
+     * 2026-10-16 같은 메모(같은 id)를 여러 사람·기기가 이어 쓰면 획을 합친다(합집합) — 나중 저장이 통째로 이겨
+     * 남의 획이 사라지지 않게. 순서: 한쪽(a) 순서 + 다른 쪽에만 있는 획을 뒤에. 지우는 기능이 없으므로 묘비 없음.
+     */
+    function unionStrokes(a, b) {
+        var seen = new Set();
+        var out = [];
+        (a || []).concat(b || []).forEach(function (s) {
+            var k = strokeKey(s);
+            if (!k || seen.has(k)) return;
+            seen.add(k);
+            out.push(s);
+        });
+        return out;
+    }
+
+    /** 서버 층 묶음의 손글씨를 이 기기 것과 합친다. 같은 메모는 획 합집합, 나머지는 mergeNdtDataMaps 그대로. pack이 없으면 아무것도 안 한다. */
     function mergePackIntoState(st, floorKey, pack, mergeFn) {
         if (!st || !floorKey || !pack || typeof mergeFn !== 'function') return false;
         ensureMaps(st);
-        var o1 = {}; o1[floorKey] = pack.items || [];
+        var localList = st.sketchMemos[floorKey] || [];
+        var localById = {};
+        localList.forEach(function (r) { if (r && r.id) localById[r.id] = r; });
+        var serverItems = (pack.items || []).map(function (sv) {
+            var lc = sv && sv.id ? localById[sv.id] : null;
+            if (!lc) return sv;
+            var merged = unionStrokes(sv.strokes, lc.strokes);
+            var at = Math.max(Number(sv.updatedAt) || 0, Number(lc.updatedAt) || 0);
+            lc.strokes = merged;
+            lc.updatedAt = at;
+            return Object.assign({}, sv, { strokes: merged, updatedAt: at });
+        });
+        var o1 = {}; o1[floorKey] = serverItems;
         var o2 = {}; o2[floorKey] = pack.deletedIds || [];
         var o3 = {}; o3[floorKey] = pack.deletedAt || {};
         var r = mergeFn(o1, st.sketchMemos, o2, st.deletedSketchIds, o3, st.deletedSketchAt);
@@ -188,6 +225,8 @@
         saveSheet: saveSheet,
         deleteSheet: deleteSheet,
         labelFor: labelFor,
+        unionStrokes: unionStrokes,
+        strokeKey: strokeKey,
         placedPoint: placedPoint,
         packFor: packFor,
         packHasContent: packHasContent,

@@ -39,7 +39,7 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <meta name="apple-mobile-web-app-title" content="스마트 안전점검">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css">
-    <link rel="stylesheet" href="styles.css?v=20261016_154505">
+    <link rel="stylesheet" href="styles.css?v=20261016_155057">
 
     <!-- FontAwesome icons for clean engineering UI -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
@@ -130,6 +130,9 @@
             </div>
             <button type="button" class="btn btn-sm btn-outline header-overview-btn" id="btnOpenOverviewPhotos" title="건축물 전경사진 (결함 조사와 별도)">
                 <i class="fa-solid fa-panorama"></i> <span class="header-overview-btn-label">전경사진</span>
+            </button>
+            <button type="button" class="btn btn-sm btn-outline header-overview-btn header-sketch-btn" id="btnOpenSketchMemo" title="손글씨 메모 — 흰 종이에 손글씨·그림(✕로 닫으면 저장, 이 층에 작성자별 메모-1, 메모-2 …로 쌓임). 도면에 찍는 글은 「주석」">
+                <i class="fa-solid fa-pen-nib"></i> <span class="header-overview-btn-label">메모</span>
             </button>
         </div>
 
@@ -310,8 +313,8 @@
                                 <button type="button" id="btnModeArea" class="mode-btn btn-area-mode" title="결함 영역(면적) 마킹 모드 (A)">
                                     <i class="fa-solid fa-draw-square"></i> 🟧 영역 마킹 <span class="mode-shortcut">A</span>
                                 </button>
-                                <button type="button" id="btnModeMemo" class="mode-btn btn-memo-mode" title="도면 메모 — 도면을 클릭해 메모를 붙입니다(결함 아님, 조사표·번호에 안 들어감)">
-                                    <i class="fa-solid fa-note-sticky"></i> 📝 메모
+                                <button type="button" id="btnModeMemo" class="mode-btn btn-memo-mode" title="도면 주석 — 도면을 클릭해 주석을 붙입니다(결함 아님, 조사표·번호에 안 들어감)">
+                                    <i class="fa-solid fa-note-sticky"></i> 📝 주석
                                 </button>
                                 <button type="button" id="btnModeCount" class="mode-btn btn-count-mode" title="부재 수 세기 — 도면을 눌러 기둥·벽·거더·빔·슬래브 점을 찍습니다(결함 아님, 출력 안 됨). 단축키 C·W·G·B·S">
                                     <i class="fa-solid fa-hashtag"></i> 🔢 부재 수
@@ -398,10 +401,10 @@
                             <div class="eval-unit-bar-chips" id="evalUnitBarChips"></div>
                             <button type="button" class="btn btn-sm btn-outline" id="btnEvalUnitBarManage">관리</button>
                         </div>
-                        <div class="drawing-memo-bar" id="drawingMemoBar" hidden role="toolbar" aria-label="도면 메모">
-                        <span class="drawing-memo-bar-text">📝 도면을 눌러 메모 추가 · 메모를 끌어 옮기기 · 눌러서 고치기/지우기</span>
-                        <label class="drawing-memo-opt"><input type="checkbox" data-memo-show checked> 메모 표시</label>
-                        <label class="drawing-memo-opt" title="한글·PDF 위치도에 메모를 함께 넣습니다(기본 끔)"><input type="checkbox" data-memo-print> 메모 출력(한글·PDF)</label>
+                        <div class="drawing-memo-bar" id="drawingMemoBar" hidden role="toolbar" aria-label="도면 주석">
+                        <span class="drawing-memo-bar-text">📝 도면을 눌러 주석 추가 · 주석을 끌어 옮기기 · 눌러서 고치기/지우기</span>
+                        <label class="drawing-memo-opt"><input type="checkbox" data-memo-show checked> 주석 표시</label>
+                        <label class="drawing-memo-opt" title="한글·PDF 위치도에 주석을 함께 넣습니다(기본 끔)"><input type="checkbox" data-memo-print> 주석 출력(한글·PDF)</label>
                         <button type="button" class="btn btn-sm btn-outline" id="btnMemoBarDone">끝내기</button>
                     </div>
                     <div id="areaPolyTouchBar" class="area-polygon-redraw-banner area-poly-touch-bar" hidden>
@@ -440,9 +443,9 @@
                                 <i class="fa-solid fa-vector-square"></i>
                                 <span>영역</span>
                             </button>
-                            <button type="button" class="mobile-rail-btn mobile-fab-memo" id="mobileBtnModeMemo" data-mode="MEMO" title="도면 메모">
+                            <button type="button" class="mobile-rail-btn mobile-fab-memo" id="mobileBtnModeMemo" data-mode="MEMO" title="도면 주석">
                                 <i class="fa-solid fa-note-sticky"></i>
-                                <span>메모</span>
+                                <span>주석</span>
                             </button>
                             <button type="button" class="mobile-rail-btn mobile-fab-count" id="mobileBtnModeCount" data-mode="COUNT" title="부재 수 세기">
                                 <i class="fa-solid fa-hashtag"></i>
@@ -672,9 +675,9 @@
 
                         <!-- 도면 메모 (결함 아님) -->
                         <div class="filter-group">
-                            <span class="filter-label">도면 메모:</span>
-                            <label class="checkbox-chip"><input type="checkbox" data-memo-show checked> 📝 메모 표시</label>
-                            <label class="checkbox-chip" title="한글·PDF 위치도에 메모를 함께 넣습니다(기본 끔)"><input type="checkbox" data-memo-print> 메모 출력(한글·PDF)</label>
+                            <span class="filter-label">도면 주석:</span>
+                            <label class="checkbox-chip"><input type="checkbox" data-memo-show checked> 📝 주석 표시</label>
+                            <label class="checkbox-chip" title="한글·PDF 위치도에 주석을 함께 넣습니다(기본 끔)"><input type="checkbox" data-memo-print> 주석 출력(한글·PDF)</label>
                         </div>
 
                         <!-- Damage Type Filter -->
@@ -1469,7 +1472,7 @@
                         <input type="color" id="styleColorPriorityManage">
                     </div>
                     <div class="style-color-row">
-                        <span>📝 도면 메모 글자</span>
+                        <span>📝 도면 주석 글자</span>
                         <input type="color" id="styleColorDrawingMemo">
                     </div>
                 </div>
@@ -3458,70 +3461,70 @@
 
     <!-- Core → 탭 분류 → 기존 엔진(app.js) -->
     <!-- 오류 기록은 맨 먼저 — 아래 스크립트들이 읽히다 터져도 잡아야 한다 -->
-    <script src="js/core/error-log.js?v=20261016_154505"></script>
-    <script src="js/core/floor-identity.js?v=20261016_154505"></script>
-    <script src="js/core/state.js?v=20261016_154505"></script>
-    <script src="js/core/ndt-disp-transfer.js?v=20261016_154505"></script>
-    <script src="js/core/ndt-grade.js?v=20261016_154505"></script>
-    <script src="js/tabs/registry.js?v=20261016_154505"></script>
-    <script src="js/pdf-vector-bridge.js?v=20261016_154505"></script>
-    <script src="js/pdf-vector-snap.js?v=20261016_154505"></script>
-    <script src="js/core/layout-mode.js?v=20261016_154505"></script>
-    <script src="js/core/performance.js?v=20261016_154505"></script>
-    <script src="js/shared/app-dialog.js?v=20261016_154505"></script>
-    <script src="js/core/mobile-app-update.js?v=20261016_154505"></script>
-    <script src="js/shared/app-update-button.js?v=20261016_154505"></script>
-    <script src="js/shared/measure-keypad.js?v=20261016_154505"></script>
-    <script src="js/shared/photo-crop.js?v=20261016_154505"></script>
-    <script src="js/core/mobile-keyboard.js?v=20261016_154505"></script>
-    <script src="js/tabs/home.js?v=20261016_154505"></script>
-    <script src="js/tabs/map.js?v=20261016_154505"></script>
-    <script src="js/tabs/survey.js?v=20261016_154505"></script>
-    <script src="js/core/good-type.js?v=20261016_154505"></script>
-    <script src="js/tabs/stats.js?v=20261016_154505"></script>
-    <script src="js/tabs/ndt.js?v=20261016_154505"></script>
-    <script src="js/shared/report.js?v=20261016_154505"></script>
-    <script src="js/shared/hwpx-survey-slots.js?v=20261016_154505"></script>
-    <script src="js/shared/hwpx-ndt-maps.js?v=20261016_154505"></script>
-    <script src="js/shared/cad-unmarked-place.js?v=20261016_154505"></script>
-    <script src="js/shared/arrow-survey-number.js?v=20261016_154505"></script>
-    <script src="js/shared/defect-merge.js?v=20261016_154505"></script>
-    <script src="js/shared/korean-text-wrap.js?v=20261016_154505"></script>
-    <script src="js/shared/hwpx-import.js?v=20261016_154505"></script>
-    <script src="js/shared/hwpx-validate.js?v=20261016_154505"></script>
-    <script src="js/shared/hwpx-crack-monitor.js?v=20261016_154505"></script>
-    <script src="js/shared/auth.js?v=20261016_154505"></script>
-    <script src="js/core/firebase-storage-assets.js?v=20261016_154505"></script>
-    <script src="js/core/drawing-floor-tombstone.js?v=20261016_154505"></script>
-    <script src="js/core/data-health.js?v=20261016_154505"></script>
-    <script src="js/core/defect-lint.js?v=20261016_154505"></script>
-    <script src="js/core/building-meta-merge.js?v=20261016_154505"></script>
-    <script src="js/core/edit-history.js?v=20261016_154505"></script>
-    <script src="js/core/no-conflict.js?v=20261016_154505"></script>
-    <script src="js/core/sync-merge.js?v=20261016_154505"></script>
-    <script src="js/core/floor-sync-guard.js?v=20261016_154505"></script>
-    <script src="js/core/gauge-photo-store.js?v=20261016_154505"></script>
-    <script src="js/core/offline-prep.js?v=20261016_154505"></script>
-    <script src="js/core/drawing-memo.js?v=20261016_154505"></script>
-    <script src="js/core/sketch-memo.js?v=20261016_154505"></script>
-    <script src="js/core/eval-units.js?v=20261016_154505"></script>
-    <script src="js/core/member-count.js?v=20261016_154505"></script>
-    <script src="js/core/guide-shapes.js?v=20261016_154505"></script>
-    <script src="js/core/struct-members.js?v=20261016_154505"></script>
-    <script src="js/core/safetyman-export.js?v=20261016_154505"></script>
-    <script src="js/core/eval-member.js?v=20261016_154505"></script>
-    <script src="js/core/s357-prefill.js?v=20261016_154505"></script>
-    <script src="js/core/prev-round-photo-match.js?v=20261016_154505"></script>
-    <script src="js/shared/defect-quick-presets.js?v=20261016_154505"></script>
-    <script src="js/shared/grid-lines.js?v=20261016_154505"></script>
-    <script src="js/shared/box-auto-layout.js?v=20261016_154505"></script>
-    <script src="js/shared/print-crop.js?v=20261016_154505"></script>
-    <script src="js/core/legend-layout.js?v=20261016_154505"></script>
-    <script src="js/core/error-log-view.js?v=20261016_154505"></script>
-    <script src="app.js?v=20261016_154505"></script>
+    <script src="js/core/error-log.js?v=20261016_155057"></script>
+    <script src="js/core/floor-identity.js?v=20261016_155057"></script>
+    <script src="js/core/state.js?v=20261016_155057"></script>
+    <script src="js/core/ndt-disp-transfer.js?v=20261016_155057"></script>
+    <script src="js/core/ndt-grade.js?v=20261016_155057"></script>
+    <script src="js/tabs/registry.js?v=20261016_155057"></script>
+    <script src="js/pdf-vector-bridge.js?v=20261016_155057"></script>
+    <script src="js/pdf-vector-snap.js?v=20261016_155057"></script>
+    <script src="js/core/layout-mode.js?v=20261016_155057"></script>
+    <script src="js/core/performance.js?v=20261016_155057"></script>
+    <script src="js/shared/app-dialog.js?v=20261016_155057"></script>
+    <script src="js/core/mobile-app-update.js?v=20261016_155057"></script>
+    <script src="js/shared/app-update-button.js?v=20261016_155057"></script>
+    <script src="js/shared/measure-keypad.js?v=20261016_155057"></script>
+    <script src="js/shared/photo-crop.js?v=20261016_155057"></script>
+    <script src="js/core/mobile-keyboard.js?v=20261016_155057"></script>
+    <script src="js/tabs/home.js?v=20261016_155057"></script>
+    <script src="js/tabs/map.js?v=20261016_155057"></script>
+    <script src="js/tabs/survey.js?v=20261016_155057"></script>
+    <script src="js/core/good-type.js?v=20261016_155057"></script>
+    <script src="js/tabs/stats.js?v=20261016_155057"></script>
+    <script src="js/tabs/ndt.js?v=20261016_155057"></script>
+    <script src="js/shared/report.js?v=20261016_155057"></script>
+    <script src="js/shared/hwpx-survey-slots.js?v=20261016_155057"></script>
+    <script src="js/shared/hwpx-ndt-maps.js?v=20261016_155057"></script>
+    <script src="js/shared/cad-unmarked-place.js?v=20261016_155057"></script>
+    <script src="js/shared/arrow-survey-number.js?v=20261016_155057"></script>
+    <script src="js/shared/defect-merge.js?v=20261016_155057"></script>
+    <script src="js/shared/korean-text-wrap.js?v=20261016_155057"></script>
+    <script src="js/shared/hwpx-import.js?v=20261016_155057"></script>
+    <script src="js/shared/hwpx-validate.js?v=20261016_155057"></script>
+    <script src="js/shared/hwpx-crack-monitor.js?v=20261016_155057"></script>
+    <script src="js/shared/auth.js?v=20261016_155057"></script>
+    <script src="js/core/firebase-storage-assets.js?v=20261016_155057"></script>
+    <script src="js/core/drawing-floor-tombstone.js?v=20261016_155057"></script>
+    <script src="js/core/data-health.js?v=20261016_155057"></script>
+    <script src="js/core/defect-lint.js?v=20261016_155057"></script>
+    <script src="js/core/building-meta-merge.js?v=20261016_155057"></script>
+    <script src="js/core/edit-history.js?v=20261016_155057"></script>
+    <script src="js/core/no-conflict.js?v=20261016_155057"></script>
+    <script src="js/core/sync-merge.js?v=20261016_155057"></script>
+    <script src="js/core/floor-sync-guard.js?v=20261016_155057"></script>
+    <script src="js/core/gauge-photo-store.js?v=20261016_155057"></script>
+    <script src="js/core/offline-prep.js?v=20261016_155057"></script>
+    <script src="js/core/drawing-memo.js?v=20261016_155057"></script>
+    <script src="js/core/sketch-memo.js?v=20261016_155057"></script>
+    <script src="js/core/eval-units.js?v=20261016_155057"></script>
+    <script src="js/core/member-count.js?v=20261016_155057"></script>
+    <script src="js/core/guide-shapes.js?v=20261016_155057"></script>
+    <script src="js/core/struct-members.js?v=20261016_155057"></script>
+    <script src="js/core/safetyman-export.js?v=20261016_155057"></script>
+    <script src="js/core/eval-member.js?v=20261016_155057"></script>
+    <script src="js/core/s357-prefill.js?v=20261016_155057"></script>
+    <script src="js/core/prev-round-photo-match.js?v=20261016_155057"></script>
+    <script src="js/shared/defect-quick-presets.js?v=20261016_155057"></script>
+    <script src="js/shared/grid-lines.js?v=20261016_155057"></script>
+    <script src="js/shared/box-auto-layout.js?v=20261016_155057"></script>
+    <script src="js/shared/print-crop.js?v=20261016_155057"></script>
+    <script src="js/core/legend-layout.js?v=20261016_155057"></script>
+    <script src="js/core/error-log-view.js?v=20261016_155057"></script>
+    <script src="app.js?v=20261016_155057"></script>
 
     <script>
-        window.BSA_APP_VERSION = '20261016_154505';
+        window.BSA_APP_VERSION = '20261016_155057';
 
         (function () {
             var el = document.getElementById('appVersionText');
@@ -3554,7 +3557,7 @@
                     if (window.caches && caches.keys) caches.keys().then(function(ks) { ks.forEach(function(k) { caches.delete(k); }); }).catch(function() {});
                     return;
                 }
-                navigator.serviceWorker.register('./sw.js?v=20261016_154505')
+                navigator.serviceWorker.register('./sw.js?v=20261016_155057')
 
                     .then(function(registration) {
                         console.log('✅ ServiceWorker Registered Successfully with scope:', registration.scope);

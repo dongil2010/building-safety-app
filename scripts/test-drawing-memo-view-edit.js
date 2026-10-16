@@ -12,6 +12,7 @@ assert.ok(fn.length > 500, '함수 있음');
 assert.ok(/<textarea data-mv-text/.test(fn), '여러 줄 입력칸(줄바꿈 유지)');
 assert.ok(!/appPrompt\(/.test(fn), '한 줄 입력칸(appPrompt) 안 씀');
 assert.ok(/font-size:1\.2rem/.test(fn), '큰 글씨로 보기');
+assert.ok(/📝 도면 주석<\/strong>/.test(fn) && !/['`"][^'`"]*메모/.test(fn.replace(/\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '')), '창 이름 「도면 주석」(메모 문구 없음)');
 assert.ok(/api\.updateMemo\(window\.state, floorKey, memoId, \{ text \}\)[\s\S]{0,40}commitMemoChange\(floorKey\)/.test(fn), '저장 = updateMemo → commitMemoChange(동기화)');
 assert.ok(/api\.deleteMemo\(window\.state, floorKey, memoId\)/.test(fn), '지우기');
 assert.ok(/e\.key === 'Escape'/.test(fn) && /e\.ctrlKey \|\| e\.metaKey/.test(fn), 'Esc 닫기, Ctrl+Enter 저장');

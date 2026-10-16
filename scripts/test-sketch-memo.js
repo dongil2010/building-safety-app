@@ -46,4 +46,15 @@ assert.ok(/sketches: \(obj\.sketches && typeof obj\.sketches === 'object'\)/.tes
 assert.ok(/evalUnits: \(obj\.evalUnits && typeof obj\.evalUnits === 'object'\)/.test(src));
 assert.ok(/window\.BSA\.sketchMemo\.mergePackIntoState\(window\.state, floorKey, bundle\.sketches/.test(src));
 assert.ok(/touch-action: none/.test(fs.readFileSync(path.join(__dirname, '..', 'styles.css'), 'utf8')) || true);
+// 2026-10-16 두 사람이 같은 메모에 이어 쓰면 두 사람 획이 모두 남음(획 합집합)
+{
+    const base = { i: 'k0', c: '#000', w: 2, p: [1, 1, 2, 2] };
+    const mine = { i: 'kA', c: '#f00', w: 2, p: [3, 3, 4, 4] };
+    const theirs = { i: 'kB', c: '#00f', w: 2, p: [5, 5, 6, 6] };
+    const st = { sketchMemos: { F: [{ id: 'm1', strokes: [base, mine], updatedAt: 200 }] } };
+    S.mergePackIntoState(st, 'F', { items: [{ id: 'm1', strokes: [base, theirs], updatedAt: 300 }], deletedIds: [], deletedAt: {} }, SM.mergeNdtDataMaps);
+    const ids = st.sketchMemos.F[0].strokes.map((x) => x.i).sort();
+    assert.deepStrictEqual(ids, ['k0', 'kA', 'kB'], '두 사람 획 모두 남음');
+    assert.strictEqual(S.unionStrokes([base], [base]).length, 1, '같은 획 중복 없음');
+}
 console.log('test-sketch-memo: ok');
