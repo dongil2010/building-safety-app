@@ -779,6 +779,9 @@ document.addEventListener('DOMContentLoaded', () => {
         window.state.drawingMemos = {};
         window.state.deletedMemoIds = {};
         window.state.deletedMemoAt = {};
+        window.state.sketchMemos = {};
+        window.state.deletedSketchIds = {};
+        window.state.deletedSketchAt = {};
         window.state.evalUnits = {};
         window.state.deletedEvalUnitIds = {};
         window.state.deletedEvalUnitAt = {};
@@ -2301,6 +2304,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 drawingMemos: window.state.drawingMemos || {},
                 deletedMemoIds: window.state.deletedMemoIds || {},
                 deletedMemoAt: window.state.deletedMemoAt || {},
+                sketchMemos: window.state.sketchMemos || {},
+                deletedSketchIds: window.state.deletedSketchIds || {},
+                deletedSketchAt: window.state.deletedSketchAt || {},
                 // 평가단위(상태평가용 층 나누기) + 묘비
                 evalUnits: window.state.evalUnits || {},
                 deletedEvalUnitIds: window.state.deletedEvalUnitIds || {},
@@ -2497,6 +2503,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (parsed.drawingMemos && typeof parsed.drawingMemos === 'object') window.state.drawingMemos = parsed.drawingMemos;
                 if (parsed.deletedMemoIds && typeof parsed.deletedMemoIds === 'object') window.state.deletedMemoIds = parsed.deletedMemoIds;
                 if (parsed.deletedMemoAt && typeof parsed.deletedMemoAt === 'object') window.state.deletedMemoAt = parsed.deletedMemoAt;
+                if (parsed.sketchMemos && typeof parsed.sketchMemos === 'object') window.state.sketchMemos = parsed.sketchMemos;
+                if (parsed.deletedSketchIds && typeof parsed.deletedSketchIds === 'object') window.state.deletedSketchIds = parsed.deletedSketchIds;
+                if (parsed.deletedSketchAt && typeof parsed.deletedSketchAt === 'object') window.state.deletedSketchAt = parsed.deletedSketchAt;
                 if (parsed.evalUnits && typeof parsed.evalUnits === 'object') window.state.evalUnits = parsed.evalUnits;
                 if (parsed.deletedEvalUnitIds && typeof parsed.deletedEvalUnitIds === 'object') window.state.deletedEvalUnitIds = parsed.deletedEvalUnitIds;
                 if (parsed.deletedEvalUnitAt && typeof parsed.deletedEvalUnitAt === 'object') window.state.deletedEvalUnitAt = parsed.deletedEvalUnitAt;
@@ -25389,6 +25398,292 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         document.querySelectorAll('[data-memo-print]').forEach((el) => { el.checked = readMemoPrintPref(); });
     }
 
+    // ---- 2026-10-16 손글씨 메모(흰 종이 팝업, js/core/sketch-memo.js) ----
+    // 폰·태블릿: 오른쪽 메모 버튼 → 이 팝업(「텍스트 메모」로 예전 도면 메모 모드 전환). PC·메모 막대: 「✍ 손글씨」 버튼.
+    function sketchApi() { return window.BSA && window.BSA.sketchMemo; }
+    const sketchUi = { el: null, canvas: null, ctx: null, layer: null, lctx: null, sheet: null, strokes: [], redo: [], undo: [],
+        tool: 'pen', color: '#111827', width: 3, penSeen: false, drawing: null, floorKey: '', dirty: false, scale: 1 };
+    window._bsaSketchUi = sketchUi;
+
+    function sketchBuildDom() {
+        if (sketchUi.el) return sketchUi.el;
+        const api = sketchApi();
+        const el = document.createElement('div');
+        el.id = 'sketchMemoOverlay';
+        el.className = 'sketch-memo-overlay';
+        el.hidden = true;
+        const colors = (api ? api.COLORS : ['#111827']).map((c, i) =>
+            `<button type="button" class="sk-color${i === 0 ? ' active' : ''}" data-sk-color="${c}" style="background:${c}" aria-label="색 ${i + 1}"></button>`).join('');
+        el.innerHTML = `
+            <div class="sk-card" role="dialog" aria-label="손글씨 메모">
+                <div class="sk-head">
+                    <strong>✍ 손글씨 메모</strong>
+                    <select class="sk-sheets" data-sk-sheets aria-label="장 선택"></select>
+                    <button type="button" class="sk-btn" data-sk="new" title="새 장">＋ 새 장</button>
+                    <button type="button" class="sk-btn" data-sk="del" title="이 장 지우기"><i class="fa-solid fa-trash"></i></button>
+                    <span class="sk-spacer"></span>
+                    <button type="button" class="sk-btn" data-sk="text" title="예전 텍스트 메모(도면에 글 붙이기)">텍스트 메모</button>
+                    <button type="button" class="sk-btn" data-sk="close" title="닫기">✕</button>
+                </div>
+                <div class="sk-tools">
+                    <button type="button" class="sk-btn sk-tool active" data-sk-tool="pen" title="펜"><i class="fa-solid fa-pen"></i></button>
+                    <button type="button" class="sk-btn sk-tool" data-sk-tool="eraser" title="지우개"><i class="fa-solid fa-eraser"></i></button>
+                    ${colors}
+                    <input type="range" min="1" max="20" value="3" data-sk-width aria-label="굵기">
+                    <button type="button" class="sk-btn" data-sk="undo" title="되돌리기"><i class="fa-solid fa-rotate-left"></i></button>
+                    <button type="button" class="sk-btn" data-sk="redo" title="다시실행"><i class="fa-solid fa-rotate-right"></i></button>
+                    <button type="button" class="sk-btn" data-sk="clear" title="전체 지우기">전체 지우기</button>
+                    <span class="sk-spacer"></span>
+                    <button type="button" class="sk-btn primary" data-sk="save">저장</button>
+                </div>
+                <div class="sk-paper-wrap"><canvas class="sk-paper" data-sk-canvas></canvas></div>
+                <div class="sk-hint" data-sk-hint>펜이 닿으면 그때부터 펜으로만 그립니다(손바닥 무시)</div>
+            </div>`;
+        document.body.appendChild(el);
+        sketchUi.el = el;
+        sketchUi.canvas = el.querySelector('[data-sk-canvas]');
+        sketchUi.ctx = sketchUi.canvas.getContext('2d');
+        sketchUi.layer = document.createElement('canvas');
+        sketchUi.lctx = sketchUi.layer.getContext('2d');
+        el.addEventListener('click', (e) => {
+            const b = e.target.closest('[data-sk],[data-sk-tool],[data-sk-color]');
+            if (!b) return;
+            if (b.dataset.skTool) { sketchUi.tool = b.dataset.skTool; el.querySelectorAll('.sk-tool').forEach((x) => x.classList.toggle('active', x === b)); return; }
+            if (b.dataset.skColor) { sketchUi.color = b.dataset.skColor; sketchUi.tool = 'pen';
+                el.querySelectorAll('.sk-color').forEach((x) => x.classList.toggle('active', x === b));
+                el.querySelectorAll('.sk-tool').forEach((x) => x.classList.toggle('active', x.dataset.skTool === 'pen')); return; }
+            const a = b.dataset.sk;
+            if (a === 'close') void sketchClose();
+            else if (a === 'save') sketchSave(true);
+            else if (a === 'undo') sketchUndo();
+            else if (a === 'redo') sketchRedo();
+            else if (a === 'clear') { if (sketchUi.strokes.length) { sketchUi.undo.push(sketchUi.strokes.slice()); sketchUi.redo = []; sketchUi.strokes = []; sketchUi.dirty = true; sketchRedraw(); } }
+            else if (a === 'new') { sketchSave(false); sketchOpenSheet(null); }
+            else if (a === 'del') void sketchDeleteSheet();
+            else if (a === 'text') { void sketchClose().then(() => { if (typeof setDrawMode === 'function') setDrawMode('MEMO'); }); }
+        });
+        el.querySelector('[data-sk-width]').addEventListener('input', (e) => { sketchUi.width = Number(e.target.value) || 3; });
+        el.querySelector('[data-sk-sheets]').addEventListener('change', (e) => {
+            sketchSave(false);
+            const api2 = sketchApi();
+            const rec = api2.listFor(window.state, sketchUi.floorKey).find((r) => r.id === e.target.value);
+            sketchOpenSheet(rec || null);
+        });
+        const cv = sketchUi.canvas;
+        cv.addEventListener('pointerdown', sketchPointerDown);
+        cv.addEventListener('pointermove', sketchPointerMove);
+        cv.addEventListener('pointerup', sketchPointerUp);
+        cv.addEventListener('pointercancel', sketchPointerUp);
+        // 그리는 동안 스크롤·확대·길게 눌러 메뉴 막기
+        ['touchstart', 'touchmove', 'gesturestart'].forEach((t) => cv.addEventListener(t, (e) => e.preventDefault(), { passive: false }));
+        cv.addEventListener('contextmenu', (e) => e.preventDefault());
+        window.addEventListener('resize', () => { if (!el.hidden) sketchLayout(); });
+        window.addEventListener('keydown', (e) => {
+            if (el.hidden) return;
+            const k = String(e.key || '').toLowerCase();
+            if ((e.ctrlKey || e.metaKey) && k === 'z') { e.preventDefault(); e.stopPropagation(); if (e.shiftKey) sketchRedo(); else sketchUndo(); }
+            else if ((e.ctrlKey || e.metaKey) && k === 'y') { e.preventDefault(); e.stopPropagation(); sketchRedo(); }
+            else if (k === 'escape') { e.preventDefault(); e.stopPropagation(); void sketchClose(); }
+        }, true);
+        return el;
+    }
+
+    /** 종이(w×h)를 화면 칸에 비율 유지로 맞춘다(고해상도: devicePixelRatio) */
+    function sketchLayout() {
+        const wrap = sketchUi.el.querySelector('.sk-paper-wrap');
+        const sh = sketchUi.sheet;
+        if (!wrap || !sh) return;
+        const r = wrap.getBoundingClientRect();
+        const s = Math.max(0.05, Math.min((r.width - 4) / sh.w, (r.height - 4) / sh.h));
+        const cssW = Math.floor(sh.w * s);
+        const cssH = Math.floor(sh.h * s);
+        const dpr = Math.min(3, window.devicePixelRatio || 1);
+        const cv = sketchUi.canvas;
+        cv.style.width = cssW + 'px';
+        cv.style.height = cssH + 'px';
+        cv.width = Math.max(1, Math.round(cssW * dpr));
+        cv.height = Math.max(1, Math.round(cssH * dpr));
+        sketchUi.layer.width = cv.width;
+        sketchUi.layer.height = cv.height;
+        sketchUi.scale = cv.width / sh.w;   // 종이 좌표 → 캔버스 픽셀
+        sketchRedraw();
+    }
+
+    function sketchRedraw() {
+        const api = sketchApi();
+        const { ctx, lctx, layer, canvas } = sketchUi;
+        if (!api || !ctx) return;
+        lctx.clearRect(0, 0, layer.width, layer.height);
+        sketchUi.strokes.forEach((s) => api.drawStroke(lctx, s, sketchUi.scale));
+        if (sketchUi.drawing) api.drawStroke(lctx, sketchUi.drawing, sketchUi.scale);
+        ctx.save();
+        ctx.fillStyle = '#fff';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(layer, 0, 0);
+        ctx.restore();
+    }
+
+    function sketchPaperPoint(e) {
+        const r = sketchUi.canvas.getBoundingClientRect();
+        const sh = sketchUi.sheet;
+        const x = (e.clientX - r.left) / Math.max(1, r.width) * sh.w;
+        const y = (e.clientY - r.top) / Math.max(1, r.height) * sh.h;
+        const pr = e.pointerType === 'pen' ? (e.pressure > 0 ? e.pressure : 0.5) : 0.5;
+        return [Math.round(x), Math.round(y), Math.round(pr * 100)];
+    }
+
+    function sketchPointerDown(e) {
+        if (e.pointerType === 'pen') sketchUi.penSeen = true;
+        // 펜이 한 번이라도 닿았으면 손가락·손바닥은 무시(오입력 방지)
+        if (sketchUi.penSeen && e.pointerType === 'touch') return;
+        if (sketchUi.drawing) return;
+        e.preventDefault();
+        try { sketchUi.canvas.setPointerCapture(e.pointerId); } catch (_e) { /* ignore */ }
+        // 펜 옆 버튼·펜 뒤 지우개(buttons 32)도 지우개
+        const eraser = sketchUi.tool === 'eraser' || (e.buttons & 32) === 32 || e.button === 5;
+        sketchUi.drawing = { c: sketchUi.color, w: sketchUi.width, e: eraser ? 1 : 0, p: sketchPaperPoint(e), _pid: e.pointerId };
+        sketchRedraw();
+    }
+    function sketchPointerMove(e) {
+        const d = sketchUi.drawing;
+        if (!d || e.pointerId !== d._pid) return;
+        e.preventDefault();
+        const evs = (typeof e.getCoalescedEvents === 'function' && e.getCoalescedEvents().length) ? e.getCoalescedEvents() : [e];
+        evs.forEach((ev) => {
+            const pt = sketchPaperPoint(ev);
+            const n = d.p.length;
+            if (Math.abs(pt[0] - d.p[n - 3]) + Math.abs(pt[1] - d.p[n - 2]) < 1) return;
+            d.p.push(pt[0], pt[1], pt[2]);
+        });
+        sketchRedraw();
+    }
+    function sketchPointerUp(e) {
+        const d = sketchUi.drawing;
+        if (!d || e.pointerId !== d._pid) return;
+        delete d._pid;
+        sketchUi.drawing = null;
+        sketchUi.undo.push(sketchUi.strokes.slice());
+        sketchUi.redo = [];
+        sketchUi.strokes = sketchUi.strokes.concat([d]);
+        sketchUi.dirty = true;
+        sketchRedraw();
+    }
+    function sketchUndo() {
+        if (!sketchUi.undo.length) return;
+        sketchUi.redo.push(sketchUi.strokes);
+        sketchUi.strokes = sketchUi.undo.pop();
+        sketchUi.dirty = true;
+        sketchRedraw();
+    }
+    function sketchRedo() {
+        if (!sketchUi.redo.length) return;
+        sketchUi.undo.push(sketchUi.strokes);
+        sketchUi.strokes = sketchUi.redo.pop();
+        sketchUi.dirty = true;
+        sketchRedraw();
+    }
+
+    function sketchFillSheetSelect() {
+        const api = sketchApi();
+        const sel = sketchUi.el.querySelector('[data-sk-sheets]');
+        const list = api.listFor(window.state, sketchUi.floorKey);
+        const curId = sketchUi.sheet && sketchUi.sheet.id;
+        const opts = list.map((r, i) => `<option value="${r.id}">${i + 1}장${r.title ? ' · ' + String(r.title).replace(/[<>&"]/g, '') : ''}</option>`);
+        if (!curId || !list.some((r) => r.id === curId)) opts.push(`<option value="" selected>새 장(${list.length + 1})</option>`);
+        sel.innerHTML = opts.join('');
+        if (curId) sel.value = curId;
+    }
+
+    function sketchOpenSheet(rec) {
+        const wrap = sketchUi.el.querySelector('.sk-paper-wrap');
+        const r = wrap ? wrap.getBoundingClientRect() : { width: 900, height: 1200 };
+        // 새 장 종이 크기 = 지금 화면 칸 비율(가로·세로 그대로), 긴 변 1600 기준
+        const ratio = (r.width > 10 && r.height > 10) ? r.width / r.height : 0.75;
+        const w = ratio >= 1 ? 1600 : Math.round(1600 * ratio);
+        const h = ratio >= 1 ? Math.round(1600 / ratio) : 1600;
+        sketchUi.sheet = rec ? { id: rec.id, title: rec.title || '', w: rec.w, h: rec.h, createdAt: rec.createdAt } : { id: '', title: '', w, h };
+        sketchUi.strokes = rec ? (rec.strokes || []).map((s) => ({ c: s.c, w: s.w, e: s.e, p: s.p.slice() })) : [];
+        sketchUi.undo = [];
+        sketchUi.redo = [];
+        sketchUi.dirty = false;
+        sketchFillSheetSelect();
+        sketchLayout();
+    }
+
+    /** 저장 — 텍스트 메모와 같은 길(층 묶음 dirty → 로컬 저장 → 동기화 예약). 빈 새 장은 저장 안 함 */
+    function sketchSave(notify) {
+        const api = sketchApi();
+        if (!api || !sketchUi.sheet || !sketchUi.floorKey) return null;
+        if (!sketchUi.dirty) { if (notify) window.showToast('바뀐 내용이 없습니다', 'info', 1500); return null; }
+        if (!sketchUi.sheet.id && !sketchUi.strokes.length) return null;
+        if (api.pointCount(sketchUi.strokes) > api.MAX_POINTS) {
+            window.showToast('이 장은 너무 많이 그려 저장할 수 없습니다. 새 장에 이어서 그려 주세요.', 'warning', 6000);
+            return null;
+        }
+        const rec = api.saveSheet(window.state, sketchUi.floorKey, {
+            id: sketchUi.sheet.id, title: sketchUi.sheet.title, w: sketchUi.sheet.w, h: sketchUi.sheet.h,
+            strokes: sketchUi.strokes, by: (typeof memoAuthorName === 'function') ? memoAuthorName() : ''
+        });
+        if (!rec) return null;
+        sketchUi.sheet.id = rec.id;
+        sketchUi.dirty = false;
+        commitMemoChange(sketchUi.floorKey);
+        sketchFillSheetSelect();
+        if (notify) window.showToast('손글씨 메모를 저장했습니다', 'success', 1800);
+        return rec;
+    }
+
+    async function sketchDeleteSheet() {
+        const api = sketchApi();
+        if (!sketchUi.sheet) return;
+        if (!sketchUi.sheet.id) { sketchOpenSheet(null); return; }
+        const ok = await window.confirmDelete('이 손글씨 메모 장을 지울까요?');
+        if (!ok) return;
+        api.deleteSheet(window.state, sketchUi.floorKey, sketchUi.sheet.id);
+        commitMemoChange(sketchUi.floorKey);
+        const list = api.listFor(window.state, sketchUi.floorKey);
+        sketchOpenSheet(list.length ? list[list.length - 1] : null);
+    }
+
+    async function sketchClose() {
+        if (!sketchUi.el || sketchUi.el.hidden) return;
+        if (sketchUi.dirty && (sketchUi.sheet.id || sketchUi.strokes.length)) sketchSave(false);   // 닫으면 자동 저장
+        sketchUi.el.hidden = true;
+        document.documentElement.classList.remove('bsa-sketch-open');
+    }
+
+    /** 이 층 손글씨 메모 열기(가장 최근 장, 없으면 새 장) */
+    window.openSketchMemo = function(opts) {
+        const api = sketchApi();
+        const floorKey = currentMemoFloorKey();
+        if (!api || !floorKey) { window.showToast('층(도면)을 먼저 고르세요', 'info', 2000); return false; }
+        sketchBuildDom();
+        sketchUi.floorKey = floorKey;
+        sketchUi.penSeen = false;
+        sketchUi.el.hidden = false;
+        document.documentElement.classList.add('bsa-sketch-open');
+        const list = api.listFor(window.state, floorKey);
+        const want = opts && opts.id ? list.find((r) => r.id === opts.id) : null;
+        requestAnimationFrame(() => sketchOpenSheet(want || (opts && opts.fresh ? null : list[list.length - 1]) || null));
+        return true;
+    };
+    window.closeSketchMemo = sketchClose;
+
+    (function bindSketchMemoButtons() {
+        const bar = document.getElementById('drawingMemoBar');
+        if (bar && !bar.querySelector('[data-sketch-open]')) {
+            const b = document.createElement('button');
+            b.type = 'button';
+            b.className = 'btn btn-sm btn-outline drawing-memo-sketch-btn';
+            b.setAttribute('data-sketch-open', '1');
+            b.innerHTML = '✍ 손글씨';
+            b.title = '흰 종이에 손글씨·그림 메모(층별 여러 장)';
+            b.addEventListener('click', (e) => { e.preventDefault(); window.openSketchMemo(); });
+            bar.appendChild(b);
+        }
+    })();
+
+
     // 메모 모드: 도면 위 깨끗한 한 손가락 탭(또는 클릭)만 메모를 만든다. 끌면 도면 이동, 두 손가락이면 확대·축소.
     let memoTap = null;   // { clientX, clientY, downAt, maxMove, multi }
     function memoTapStart(clientX, clientY) {
@@ -37708,7 +38003,12 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     const btnModeMemo = document.getElementById('btnModeMemo');
     if (btnModeMemo) btnModeMemo.addEventListener('click', () => setDrawMode(state.mode === 'MEMO' ? 'PAN' : 'MEMO'));
     const mobileBtnModeMemo = document.getElementById('mobileBtnModeMemo');
-    if (mobileBtnModeMemo) mobileBtnModeMemo.addEventListener('click', () => setDrawMode(state.mode === 'MEMO' ? 'PAN' : 'MEMO'));
+    // 2026-10-16 폰·태블릿 오른쪽 메모 버튼: 손글씨 팝업(팝업 안 「텍스트 메모」로 예전 메모 모드). 메모 모드 중이면 예전처럼 끈다.
+    if (mobileBtnModeMemo) mobileBtnModeMemo.addEventListener('click', () => {
+        if (state.mode === 'MEMO') { setDrawMode('PAN'); return; }
+        if (typeof window.openSketchMemo === 'function' && window.openSketchMemo()) return;
+        setDrawMode('MEMO');
+    });
     ['btnModeCount', 'mobileBtnModeCount'].forEach((id) => {
         const b = document.getElementById(id);
         if (b) b.addEventListener('click', (e) => { e.preventDefault(); setDrawMode(state.mode === 'COUNT' ? 'PAN' : 'COUNT'); });
@@ -57020,7 +57320,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             photos: { urlsById: {} },
             ndt: { items: [], deletedIds: [], deletedAt: {}, displacementGroups: [] },
             drawing: emptyFloorDrawingPayload(),
-            memos: null   // 도면 메모 — 옛 버전이 쓴 층엔 없다(없으면 기기 메모를 그대로 둠)
+            memos: null,   // 도면 메모 — 옛 버전이 쓴 층엔 없다(없으면 기기 메모를 그대로 둠)
+            sketches: null
         };
     }
 
@@ -57040,6 +57341,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             && Object.keys(photos.urlsById).some((k) => photos.urlsById[k])) return true;
         if (drawing.rasterUrl || drawing.pdfUrl) return true;
         if (window.BSA && window.BSA.drawingMemo && window.BSA.drawingMemo.packHasContent(bundle.memos)) return true;
+        if (window.BSA && window.BSA.sketchMemo && window.BSA.sketchMemo.packHasContent(bundle.sketches)) return true;
         if (window.BSA && window.BSA.evalUnits && window.BSA.evalUnits.packHasContent(bundle.evalUnits)) return true;
         if (window.BSA && window.BSA.memberCount && window.BSA.memberCount.packHasContent(bundle.memberCounts)) return true;
         if (window.BSA && window.BSA.guideShapes && window.BSA.guideShapes.packHasContent(bundle.guideShapes)) return true;
@@ -57057,7 +57359,13 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             photos: obj.photos || empty.photos,
             ndt: obj.ndt || empty.ndt,
             drawing: obj.drawing || empty.drawing,
-            memos: (obj.memos && typeof obj.memos === 'object') ? obj.memos : null
+            memos: (obj.memos && typeof obj.memos === 'object') ? obj.memos : null,
+            // 2026-10-16 손글씨 메모 + (예전엔 여기서 빠져 서버 값이 병합되지 않던) 평가단위·부재 수·가이드·구조 부재도 넘긴다
+            sketches: (obj.sketches && typeof obj.sketches === 'object') ? obj.sketches : null,
+            evalUnits: (obj.evalUnits && typeof obj.evalUnits === 'object') ? obj.evalUnits : undefined,
+            memberCounts: (obj.memberCounts && typeof obj.memberCounts === 'object') ? obj.memberCounts : undefined,
+            guideShapes: (obj.guideShapes && typeof obj.guideShapes === 'object') ? obj.guideShapes : undefined,
+            structMembers: (obj.structMembers && typeof obj.structMembers === 'object') ? obj.structMembers : undefined
         };
     }
 
@@ -57227,6 +57535,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             drawing: collectFloorDrawingUrlPayload(bldg, floorCode),
             // 도면 메모(결함 아님) — 결함처럼 updatedAt·묘비로 합친다
             memos: (window.BSA && window.BSA.drawingMemo) ? window.BSA.drawingMemo.packFor(window.state, floorKey) : undefined,
+            // 손글씨 메모(벡터 선) — 텍스트 메모와 같은 규칙
+            sketches: (window.BSA && window.BSA.sketchMemo) ? window.BSA.sketchMemo.packFor(window.state, floorKey) : undefined,
             // 평가단위 정의(결함 쪽은 defect.evalUnitId로 markings에 실림)
             evalUnits: (window.BSA && window.BSA.evalUnits) ? window.BSA.evalUnits.packFor(window.state, floorKey) : undefined,
             // 부재 수 세기 점(결함 아님)
@@ -57305,6 +57615,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         mergeNdtDrawingRef(floorKey, ndt.customDrawing);
         if (bundle.memos && window.BSA && window.BSA.drawingMemo) {
             window.BSA.drawingMemo.mergePackIntoState(window.state, floorKey, bundle.memos, window.BSA.syncMerge.mergeNdtDataMaps);
+        }
+        if (bundle.sketches && window.BSA && window.BSA.sketchMemo) {
+            window.BSA.sketchMemo.mergePackIntoState(window.state, floorKey, bundle.sketches, window.BSA.syncMerge.mergeNdtDataMaps);
         }
         if (bundle.evalUnits && window.BSA && window.BSA.evalUnits) {
             window.BSA.evalUnits.mergePackIntoState(window.state, floorKey, bundle.evalUnits, window.BSA.syncMerge.mergeNdtDataMaps);
