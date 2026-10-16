@@ -28,41 +28,44 @@ const MS = require(path.join(root, 'js', 'core', 'struct-members.js'));
     assert.throws(() => AI.parseResponse('부재가 없습니다'), /찾지 못했습니다/);
 }
 
-// ---- 도면 좌표 + 보 끊기 ----
+// ---- 단계별: ① 기둥 → ② 거더(기둥 면에 붙고 사이 기둥에서 끊김) → ③ 빔(거더 면에 붙고 사이 거더에서 끊김) ----
 {
-    // 범위 (100,200) 크기 1000x1000 → 0~1000 상자 그대로 +오프셋
-    // 기둥 3개(가로줄 y=100), 거더 하나가 셋을 모두 지나 길게, 세로 빔 하나가 가로 거더 2줄을 가로지름
-    const items = [
-        { type: '기둥', label: 'C1', box: [90, 90, 110, 110] },
-        { type: '기둥', label: 'C1', box: [90, 490, 110, 510] },
-        { type: '기둥', label: 'C1', box: [90, 890, 110, 910] },
-        { type: '거더', label: 'G1', box: [96, 110, 104, 890] },          // 가로, 가운데 기둥에서 끊겨야 함
-        { type: '거더', label: 'G2', box: [496, 110, 504, 890] },         // 가로(기둥 없는 줄)
-        { type: '빔', label: 'B1', box: [104, 297, 900, 303] }            // 세로, G2(y=500)에서 끊겨야 함
-    ];
-    const ms = AI.toMembers(items, { x0: 100, y0: 200, w: 1000, h: 1000 }, { splitRun: MS.splitRun, now: 1 });
-    const cols = ms.filter((m) => m.type === '기둥');
-    const g = ms.filter((m) => m.type === '거더');
-    const b = ms.filter((m) => m.type === '빔');
-    assert.strictEqual(cols.length, 3);
-    assert.ok(cols.every((c) => c.shape === 'column' && c.w === 20 && c.y === 300), '기둥 좌표 = 범위 오프셋 + 상자');
-    assert.strictEqual(g.length, 3, 'G1은 가운데 기둥에서 두 칸, G2는 한 칸');
+    const crop = { x0: 100, y0: 200, w: 1000, h: 1000 };   // 범위 오프셋 (100,200), 0~1000 상자 = 쪽 좌표 1:1
+    // ① 기둥: 가로줄 y=100에 3개, y=500에 3개
+    const colItems = [];
+    [100, 500].forEach((y) => [100, 500, 900].forEach((x) => colItems.push({ type: '기둥', label: 'C1', box: [y - 10, x - 10, y + 10, x + 10] })));
+    colItems.push({ type: '거더', label: 'G9', box: [0, 0, 5, 500] });   // 다른 종류는 이 단계에서 버린다
+    const cols = AI.stepMembers('기둥', colItems, crop, [], { now: 1 });
+    assert.strictEqual(cols.length, 6, '기둥 단계는 기둥만');
+    assert.ok(cols.every((c) => c.shape === 'column' && c.w === 20), '기둥 크기 그대로');
+    assert.ok(cols.some((c) => c.x === 200 && c.y === 300), '쪽 좌표 = 범위 오프셋 + 상자');
+
+    // ② 거더 묻는 글에는 확인한 기둥이 0~1000 상자로 들어간다
+    const pG = AI.buildPrompt('거더', cols, crop);
+    assert.ok(pG.includes('[90,90,110,110]') && pG.includes('거더(큰보)만'), '거더 단계: 기둥 위치를 알려 준다');
+    assert.ok(AI.buildPrompt('빔', cols, crop).includes('이미 찾은 거더 [ymin,xmin,ymax,xmax]: (없음)'));
+    // 거더: AI가 기둥 안쪽까지 조금 넘치거나 모자라게, 중심선도 살짝 어긋나게 줌 → 기둥 면에 붙고 기둥 중심선에, 가운데 기둥에서 두 칸
+    const g = AI.stepMembers('거더', [
+        { type: '거더', label: 'G1', box: [97, 104, 107, 885] },     // y 중심 102, 끝 104(기둥 속)·885(모자람)
+        { type: '거더', label: 'G2', box: [110, 85, 490, 95] }       // 세로: x=90 중심(기둥 x=100에서 어긋남), y 110~490
+    ], crop, cols, { splitRun: MS.splitRun, now: 2 });
     const g1 = g.filter((m) => m.label === 'G1').sort((p, q) => p.x - q.x);
-    assert.deepStrictEqual(g1.map((m) => [m.x - m.w / 2, m.x + m.w / 2]), [[210, 590], [610, 990]], '기둥 면에서 끊김');
-    assert.strictEqual(b.length, 2, '빔은 가로지르는 거더에서 두 칸');
-    assert.ok(b.every((m) => m.shape === 'beam' && m.w === 6), '세로 빔 두께 그대로');
-    const bs = b.sort((p, q) => p.y - q.y).map((m) => [m.y - m.h / 2, m.y + m.h / 2]);
-    assert.deepStrictEqual(bs, [[304, 696], [704, 1100]], '거더 면(696·704)에서 끊김');
-    assert.ok(new Set(ms.map((m) => m.id)).size === ms.length, 'id가 겹치지 않는다');
-}
-// 두께 통일: 같은 종류 보는 짧은 변 중간값으로 막대가 된다
-{
-    const ms = AI.toMembers([
-        { type: '거더', label: '', box: [100, 0, 110, 400] },
-        { type: '거더', label: '', box: [200, 0, 240, 400] },
-        { type: '거더', label: '', box: [300, 0, 312, 400] }
-    ], { x0: 0, y0: 0, w: 1000, h: 1000 }, { splitRun: MS.splitRun });
-    assert.ok(ms.every((m) => m.h === 12), '거더 두께 = 중간값 12');
+    assert.deepStrictEqual(g1.map((m) => [m.x - m.w / 2, m.x + m.w / 2]), [[210, 590], [610, 990]], '기둥 면에서 면까지, 사이 기둥에서 끊김');
+    assert.ok(g1.every((m) => m.y === 300), '기둥 중심선(y=300)에 맞춘다');
+    const g2 = g.filter((m) => m.label === 'G2');
+    assert.strictEqual(g2.length, 1);
+    assert.strictEqual(g2[0].x, 200, '세로 거더도 기둥 중심선(x=200)에');
+    assert.deepStrictEqual([g2[0].y - g2[0].h / 2, g2[0].y + g2[0].h / 2], [310, 690], '위·아래 기둥 면에 붙음');
+    assert.ok(g.every((m) => m.h === 10 || m.w === 10), '거더 두께 = 중간값');
+
+    // ③ 빔: 세로로 위 거더(G1, y=300)에서 아래 가로 거더까지, 중간에 가로 거더(y=500 줄 → 쪽 y=700)를 지나감
+    const g3 = AI.stepMembers('거더', [{ type: '거더', label: 'G3', box: [495, 110, 505, 490] }], crop, cols, { splitRun: MS.splitRun, now: 3 });
+    const known = cols.concat(g, g3, [{ type: '거더', label: 'G4', x: 400, y: 1000, w: 600, h: 10 }]);   // 맨 아래 가로 거더(y=1000)
+    const b = AI.stepMembers('빔', [{ type: '빔', label: 'B1', box: [100, 297, 803, 303] }], crop, known, { splitRun: MS.splitRun, now: 4 });
+    // 빔 x=400: 위 G1(y 295~305)에서 시작 → 가운데 G3(y 695~705)에서 끊김 → 아래 G4(995~1005) 면까지
+    assert.deepStrictEqual(b.map((m) => [m.y - m.h / 2, m.y + m.h / 2]).sort((p, q) => p[0] - q[0]), [[305, 695], [705, 995]], '빔: 거더 면에 붙고 사이 거더에서 끊김');
+    assert.ok(b.every((m) => m.type === '빔' && m.shape === 'beam' && m.x === 400 && m.w === 6));
+    assert.ok(new Set(cols.concat(g, b).map((m) => m.id)).size === cols.length + g.length + b.length, 'id가 겹치지 않는다');
 }
 
 // ---- 페이지 연결 ----
@@ -71,9 +74,11 @@ const html = fs.readFileSync(path.join(root, 'struct-plan.html'), 'utf8');
 const prep = fs.readFileSync(path.join(root, 'scripts', 'prepare-pages.py'), 'utf8');
 assert.ok(html.includes('<script src="js/core/struct-ai.js?v=dev"></script>'), 'AI 스크립트를 싣는다');
 assert.ok(html.indexOf('struct-members.js') < html.indexOf('struct-ai.js'), 'splitRun이 있는 struct-members.js가 먼저');
-assert.ok(html.includes('id="btnAi"') && html.includes('<option value="ai">'), 'AI 단추·읽는 방식');
+assert.ok(['btnAiCol', 'btnAiGir', 'btnAiBeam'].every((id) => html.includes('id="' + id + '"')) && html.includes('<option value="ai">'), 'AI 단계 단추 ①②③·읽는 방식');
 assert.ok(html.includes('accept="application/pdf,.pdf,image/*"'), '그림 파일도 연다');
-assert.ok(page.includes("var aiBtn = $('btnAi');") && page.includes('if (aiBtn) {'), '옛 HTML(단추 없음)이어도 멈추지 않는다');
+assert.ok(page.includes('if (b) b.addEventListener(\'click\', function () { runAiStep(t); });'), '옛 HTML(단추 없음)이어도 멈추지 않는다');
+assert.ok(page.includes("var keep = cur.filter(function (m) { return m.type !== step; });"), '그 단계 종류만 새로 바꾸고 앞 단계(고친 것)는 그대로');
+assert.ok(page.includes("if (readMode() === 'ai') st.aiMembers = st.members;"), 'AI 결과를 고친 것이 다음 단계로 이어진다');
 assert.ok(page.includes("if (!aiKey()) {"), '키 없으면 안내만');
 assert.ok(prep.includes('# 2026-10-16: 스캔 구조도 「AI로 읽기」도 같은 키를 쓴다'), '배포 때 구조도 페이지에도 키 주입');
 

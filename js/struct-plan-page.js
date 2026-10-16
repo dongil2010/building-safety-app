@@ -121,7 +121,7 @@
             st.members = []; st.unread = []; st.marks = null; st.shapes = null;
             redraw(); renderSide();
             setStatus(ex.images > 0
-                ? '이 PDF는 스캔한 그림이라 선 데이터가 없습니다. 「AI로 읽기」를 누르면 AI가 그림을 보고 기둥·거더·빔을 찾습니다(평면만 「범위 지정」하면 더 정확).'
+                ? '이 PDF는 스캔한 그림이라 선 데이터가 없습니다. 「AI ① 기둥」부터 누르면 AI가 기둥 → 거더 → 빔 순서로 찾습니다(평면만 「범위 지정」하면 더 정확).'
                 : '이 쪽에는 읽을 선이 거의 없습니다.', 'warn');
             return;
         }
@@ -169,14 +169,11 @@
     function applyMode() {
         if (readMode() === 'ai') {
             // AI로 읽은 결과(스캔본) — 바꾼 종류·뺀 것은 처음으로 돌아간다
-            st.members = st.aiMembers ? unifyBeams(clone(st.aiMembers)) : [];
+            // AI 결과는 단계마다 고친 것을 이어 쓴다(st.members와 같은 목록)
+            st.members = st.aiMembers = st.aiMembers || [];
             st.unread = [];
             redraw(); renderSide();
-            if (st.aiMembers) {
-                var ca = SM.countsByType(st.members);
-                setStatus('AI가 찾은 부재: ' + USE_TYPES.map(function (t) { return t + ' ' + ca[t]; }).join(' · ')
-                    + '. AI 초안이라 빠지거나 틀린 것이 있습니다 — 도면에서 확인하고 고쳐 주세요(앱으로 보낸 뒤 「편집」으로도 고칠 수 있습니다).', st.members.length ? 'ok' : 'warn');
-            } else setStatus('「AI로 읽기」를 누르면 AI가 그림을 보고 기둥·거더·빔을 찾습니다.');
+            if (!st.aiMembers.length) setStatus('「AI ① 기둥」부터 누르세요. 기둥 → 거더 → 빔 순서로, 단계마다 확인하고 고친 뒤 다음 단계로 갑니다.');
             return;
         }
         if (!st.marks) { redraw(); renderSide(); return; }
@@ -253,31 +250,58 @@
         return cv;
     }
 
-    // ---------- AI로 읽기(스캔본, 2026-10-16): 그림을 Gemini에 보여 기둥·거더·빔 위치를 받는다(js/core/struct-ai.js) ----------
+    // ---------- AI 읽기(스캔본, 2026-10-16): 그림을 Gemini에 보여 기둥·거더·빔 위치를 받는다(js/core/struct-ai.js) ----------
     var AI = window.BSA.structAi || null;
     function aiKey() { return window.GEMINI_DIRECT_API_KEY || ''; }
-    async function runAi() {
+    var AI_STEPS = ['기둥', '거더', '빔'];
+    var AI_BTN = { '기둥': 'btnAiCol', '거더': 'btnAiGir', '빔': 'btnAiBeam' };
+    var AI_NEXT = { '기둥': '거더', '거더': '빔', '빔': '' };
+    /** 손으로 그릴 때와 같은 순서: ① 기둥 → 확인 → ② 거더(기둥 알려 줌) → 확인 → ③ 빔(기둥·거더 알려 줌). 그 종류만 새로 바꾼다 */
+    async function runAiStep(step) {
         if (!st.base || !AI) return;
         if (!aiKey()) { setStatus('AI 키가 없습니다. 배포된 사이트(github.io)에서만 AI로 읽을 수 있습니다.', 'warn'); return; }
+        var sel = $('readMode');
+        var cur = readMode() === 'ai' ? st.members : (st.aiMembers || []);
+        var keep = cur.filter(function (m) { return m.type !== step; });   // 이 종류는 새로 받은 것으로 바꾼다
+        var known = keep.filter(function (m) { return !m.excluded; });
+        if (step === '거더' && !known.some(function (m) { return m.type === '기둥'; })) { setStatus('기둥이 없습니다. 먼저 「AI ① 기둥」을 누르세요.', 'warn'); return; }
+        if (step === '빔' && !known.some(function (m) { return m.type === '거더'; })) { setStatus('거더가 없습니다. 먼저 「AI ② 거더」를 누르세요.', 'warn'); return; }
         var r = st.region || { x0: 0, y0: 0, x1: st.base.width / st.scale, y1: st.base.height / st.scale };
-        var btn = $('btnAi');
-        if (btn) btn.disabled = true;
-        setStatus('AI가 도면을 읽는 중입니다… (큰 도면은 1분 가까이 걸릴 수 있습니다)');
+        var crop = { x0: r.x0, y0: r.y0, w: r.x1 - r.x0, h: r.y1 - r.y0 };
+        st.aiBusy = true; syncAiButtons();
+        setStatus('AI가 ' + step + '을(를) 찾는 중입니다… (큰 도면은 1분 가까이 걸릴 수 있습니다)');
         try {
             var cv = cropBase(r, 3072);
             var dataUrl = cv.toDataURL('image/jpeg', 0.92);
-            var text = await AI.callGemini(aiKey(), { mimeType: 'image/jpeg', base64: dataUrl.slice(dataUrl.indexOf(',') + 1) });
-            var items = AI.parseResponse(text);
-            st.aiMembers = AI.toMembers(items, { x0: r.x0, y0: r.y0, w: r.x1 - r.x0, h: r.y1 - r.y0 });
-            var sel = $('readMode');
+            var text = await AI.callGemini(aiKey(), { mimeType: 'image/jpeg', base64: dataUrl.slice(dataUrl.indexOf(',') + 1) }, AI.buildPrompt(step, known, crop));
+            var got = AI.stepMembers(step, AI.parseResponse(text), crop, known);
+            st.aiMembers = unifyBeams(keep.concat(got));
             if (sel) sel.value = 'ai';
             applyMode();
+            var next = AI_NEXT[step];
+            setStatus(step + ' ' + got.length + '개를 찾았습니다. 틀린 것은 눌러서 빼거나 종류를 바꾸고'
+                + (step === '기둥' ? '(빠진 기둥은 「기호를 누르면: 기둥으로」로 고른 뒤 그 자리를 누르면 추가)' : '')
+                + (next ? ', 다 확인했으면 「AI ' + (AI_STEPS.indexOf(next) + 1) + ' ' + next + '」를 누르세요.' : ', 다 됐으면 기준점을 찍고 「앱으로 보내기」를 누르세요.')
+                + ' (AI 초안이라 빠지거나 틀린 것이 있습니다)', got.length ? 'ok' : 'warn');
         } catch (err) {
             console.error(err);
             setStatus('AI로 읽지 못했습니다: ' + (err && err.message ? err.message : err), 'warn');
         } finally {
-            if (btn) btn.disabled = false;
+            st.aiBusy = false; syncAiButtons();
         }
+    }
+    /** 단계 단추: 앞 단계 결과가 있어야 다음 단계를 누를 수 있고, 다음에 누를 단추를 파랗게 */
+    function syncAiButtons() {
+        var list = readMode() === 'ai' ? st.members : (st.aiMembers || []);
+        var has = function (t) { return list.some(function (m) { return m.type === t && !m.excluded; }); };
+        var ready = { '기둥': true, '거더': has('기둥'), '빔': has('거더') };
+        var nextStep = !has('기둥') ? '기둥' : (!has('거더') ? '거더' : (!has('빔') ? '빔' : ''));
+        AI_STEPS.forEach(function (t) {
+            var b = $(AI_BTN[t]);
+            if (!b) return;
+            b.disabled = !AI || !st.base || !!st.aiBusy || !ready[t];
+            b.classList.toggle('primary', !!st.base && t === nextStep);
+        });
     }
 
     // ---------- 그리기 ----------
@@ -347,6 +371,7 @@
         }).join('') : '<tr><td colspan="3" class="muted">아직 찾은 기호가 없습니다.</td></tr>';
         $('btnCopy').disabled = !list.length;
         $('btnSend').disabled = !(st.base && st.refs.length === 2);
+        syncAiButtons();
         $('sendNote').textContent = st.refs.length === 2 ? '기준점 2개 정함' : '기준점 ' + st.refs.length + '/2 — 「기준점 지정」으로 두 곳을 찍으세요';
     }
 
@@ -377,11 +402,22 @@
             else { m.type = action; m.excluded = false; }
         } else {
             var u = hit(st.unread, p);
+            if (!u && action === '기둥' && readMode() === 'ai') {
+                // AI가 빠뜨린 기둥: 누른 자리에 다른 기둥 크기(중간값)로 넣는다
+                var cs = st.members.filter(function (q) { return q.type === '기둥'; });
+                var mid = function (a) { a = a.slice().sort(function (x, y) { return x - y; }); return a[Math.floor(a.length / 2)]; };
+                var cw = cs.length ? mid(cs.map(function (q) { return q.w; })) : 10, ch = cs.length ? mid(cs.map(function (q) { return q.h; })) : 10;
+                st.members.push({ id: 'sm_ai_u' + Date.now(), shape: 'column', type: '기둥', label: '(직접)', x: p.x, y: p.y, w: cw, h: ch, ai: true });
+                st.aiMembers = st.members;
+                redraw(); renderSide();
+                return;
+            }
             if (!u || action === 'toggle') return;
             st.unread = st.unread.filter(function (q) { return q !== u; });
             st.members.push({ id: 'sm_u' + Date.now(), shape: u.shape, x: u.x, y: u.y, w: u.w, h: u.h, type: action, label: '(직접)', letter: '', score: 0 });
         }
         st.members = unifyBeams(st.members);   // 종류가 바뀌었으면 그 종류 두께로
+        if (readMode() === 'ai') st.aiMembers = st.members;
         redraw(); renderSide();
     }
 
@@ -521,6 +557,7 @@
                 if (v) m.type = v; else m.excluded = true;
             });
             st.members = unifyBeams(st.members);
+            if (readMode() === 'ai') st.aiMembers = st.members;
             redraw(); renderSide();
         });
         $('btnCopy').addEventListener('click', function () {
@@ -545,11 +582,10 @@
             this.value = st.pageNo;
             if (st.doc) analyzePage().catch(fail);
         });
-        var aiBtn = $('btnAi');
-        if (aiBtn) {
-            if (!AI) aiBtn.disabled = true;
-            aiBtn.addEventListener('click', function () { runAi(); });
-        }
+        AI_STEPS.forEach(function (t) {
+            var b = $(AI_BTN[t]);
+            if (b) b.addEventListener('click', function () { runAiStep(t); });
+        });
         var openFile = function (file) {
             if (!file) return;
             st.fileName = file.name;
@@ -574,7 +610,7 @@
                 });
             }).catch(fail);
         };
-        // 스캔 사진(JPG·PNG): 선 데이터가 없으니 그림만 깔고 「AI로 읽기」로 찾는다. 쪽 좌표 = 화면용 그림 픽셀(배율 1)
+        // 스캔 사진(JPG·PNG): 선 데이터가 없으니 그림만 깔고 「AI ①②③」으로 찾는다. 쪽 좌표 = 화면용 그림 픽셀(배율 1)
         var openImage = function (file) {
             setStatus('그림을 여는 중…');
             var url = URL.createObjectURL(file);
@@ -594,7 +630,7 @@
                 st.zoom = Math.min(1, ($('stage').clientWidth - 24) / base.width);
                 showZoom();
                 redraw(); renderSide();
-                setStatus('그림을 열었습니다. 「AI로 읽기」를 누르면 AI가 기둥·거더·빔을 찾습니다(평면만 「범위 지정」하면 더 정확).', 'ok');
+                setStatus('그림을 열었습니다. 「AI ① 기둥」부터 누르면 AI가 기둥 → 거더 → 빔 순서로 찾습니다(평면만 「범위 지정」하면 더 정확).', 'ok');
             };
             im.onerror = function () { URL.revokeObjectURL(url); setStatus('그림을 열지 못했습니다.', 'warn'); };
             im.src = url;
