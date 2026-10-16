@@ -56948,6 +56948,53 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         return Object.assign({ fromLegacy: false }, emptyFloorBundle());
     }
 
+    /**
+     * 2026-10-16 동기화용 층 읽기(덮어쓰기 방지). 서버에서만 읽는다(Firestore 캐시의 옛 사본 금지).
+     * 읽기 실패·다른 기기가 쓰는 중(chunkStatus uploading/failed)·조각 해독 실패는 **빈 층이 아니라 오류**로 던진다.
+     * 호출부는 그 층을 이번에 쓰지 않고 '올릴 것'으로 남겨 다음 동기화에서 다시 한다.
+     * 문서가 아예 없을 때만 예전 경로(분할 문서·옛 bulk 이전)를 탄다.
+     * 반환: { bundle, rev, exists }
+     */
+    async function readFloorBundleForSync(bldg, floorCode, preloadedData) {
+        const guard = window.BSA && window.BSA.floorSyncGuard;
+        const ref = getFloorScopeRef(bldg, floorCode);
+        if (!ref || !guard) throw new Error('floor-read: no ref');
+        let exists;
+        let data;
+        if (preloadedData && Object.keys(preloadedData).length) {
+            exists = true;
+            data = preloadedData;
+        } else {
+            const snap = await ref.get({ source: 'server' });
+            exists = !!snap.exists;
+            data = exists ? (snap.data() || {}) : null;
+        }
+        const kind = guard.classifyFloorSnap(exists, data);
+        if (kind === 'missing') {
+            const b = await readFloorSyncBundle(bldg, floorCode, { knownMissing: {} });
+            return { bundle: b, rev: 0, exists: false };
+        }
+        if (kind === 'busy') throw new Error('floor-read: busy (' + data.chunkStatus + ')');
+        const json = await decodeChunkedPayloadFromData(data, ref);
+        if (!json) throw new Error('floor-read: decode failed');
+        const obj = JSON.parse(json);
+        if (!packHasFloorData(obj)) {
+            const b = await readFloorSyncBundle(bldg, floorCode, { knownMissing: {} });
+            return { bundle: b, rev: guard.revOf(data), exists: true };
+        }
+        return { bundle: Object.assign({ fromLegacy: false }, bundleFromPackObject(obj)), rev: guard.revOf(data), exists: true };
+    }
+
+    /** 쓰기 직전 서버 층 버전만 확인(서버에서만) */
+    async function checkFloorRevOnServer(bldg, floorCode) {
+        const guard = window.BSA && window.BSA.floorSyncGuard;
+        const ref = getFloorScopeRef(bldg, floorCode);
+        const snap = await ref.get({ source: 'server' });
+        if (!snap.exists) return { rev: 0, busy: false };
+        const data = snap.data() || {};
+        return { rev: guard.revOf(data), busy: guard.classifyFloorSnap(true, data) === 'busy' };
+    }
+
     async function writeFloorSyncBundle(bldg, floorCode) {
         if (!bldg || !bldg.id || !floorCode) return;
         const floorRef = getFloorScopeRef(bldg, floorCode);
@@ -56990,7 +57037,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             return;
         }
         await writeChunkedPdfToDocRef(floorRef, JSON.stringify(pack), {
-            syncLease: firebase.firestore.FieldValue.delete()
+            syncLease: firebase.firestore.FieldValue.delete(),
+            // 2026-10-16 층 버전 — 쓸 때마다 서버가 1 올림(읽은 뒤 바뀌었는지 비교용). updatedAt은 서버 시각으로 이미 기록됨
+            syncRev: firebase.firestore.FieldValue.increment(1)
         });
         _dirtyFloorKeys.delete(floorKey);
         persistDirtyFloorKeys();
@@ -61204,6 +61253,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
             // 배치 상한: 한 번에 전 dirty를 읽지 않되, 미선택 층은 dirty에 남겨 원격 적용을 계속 차단
             const floorsToSync = pickDirtyFloorsForSyncBatch(SYNC_DIRTY_FLOOR_BATCH_MAX);
+            const floorsSkipWrite = new Set();
+            const floorReadRev = new Map();
+            const floorServerItems = new Map();
             const currentKey = currentInspectionFloorKey();
             if (currentKey) floorsToSync.add(currentKey);
             for (const floorKey of floorsToSync) {
@@ -61227,8 +61279,18 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 const preloaded = (floorKey === currentKey && cacheBelongsToThisFloor)
                     ? _lastFloorSnapData
                     : null;
-                const bundle = await readFloorSyncBundle(floorBldg, code, preloaded);
-                mergeFloorBundleIntoState(floorBldg, code, bundle);
+                // 2026-10-16 읽기 실패·쓰는 중이면 빈 층으로 보지 않는다 — 이 층은 이번에 쓰지 않고 다음에 다시
+                let readRes;
+                try {
+                    readRes = await readFloorBundleForSync(floorBldg, code, preloaded);
+                } catch (e) {
+                    console.warn('[동기화] 층을 서버에서 읽지 못해 이번에는 쓰지 않습니다(다음에 다시):', floorKey, e && e.message);
+                    floorsSkipWrite.add(floorKey);
+                    continue;
+                }
+                floorReadRev.set(floorKey, readRes.rev);
+                floorServerItems.set(floorKey, ((readRes.bundle && readRes.bundle.markings && readRes.bundle.markings.items) || []).slice());
+                mergeFloorBundleIntoState(floorBldg, code, readRes.bundle);
             }
 
             // 사진/도면 업로드 (잠금 유지 + heartbeat)
@@ -61287,7 +61349,35 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 const floorBldg = findBuildingForFloorKey(floorKey);
                 const code = floorCodeFromFloorKey(floorKey, floorBldg);
                 if (!floorBldg || !code) continue;
+                if (floorsSkipWrite.has(floorKey) || !floorReadRev.has(floorKey)) continue;   // 못 읽은 층은 쓰지 않음(올릴 것 표시 유지)
+                // 2026-10-16 쓰기 직전 서버 버전 재확인 — 읽은 뒤 다른 기기가 썼으면 다시 읽어 합친 뒤 쓴다(최대 3회)
+                const guard = window.BSA && window.BSA.floorSyncGuard;
+                const conf = await guard.confirmRevBeforeWrite(
+                    floorReadRev.get(floorKey),
+                    () => checkFloorRevOnServer(floorBldg, code),
+                    async () => {
+                        await new Promise((r) => setTimeout(r, 700));
+                        const again = await readFloorBundleForSync(floorBldg, code, null);
+                        floorServerItems.set(floorKey, ((again.bundle && again.bundle.markings && again.bundle.markings.items) || []).slice());
+                        mergeFloorBundleIntoState(floorBldg, code, again.bundle);
+                        return again.rev;
+                    },
+                    3
+                );
+                if (!conf.ok) {
+                    console.warn('[동기화] 서버 층이 계속 바뀌거나 확인되지 않아 이번에는 쓰지 않습니다(다음에 다시):', floorKey, conf.reason);
+                    continue;
+                }
+                const lost = guard.lostServerIds(
+                    floorServerItems.get(floorKey),
+                    window.state.defects[floorKey] || [],
+                    (window.state.deletedDefectIds || {})[floorKey] || []
+                );
                 await writeFloorSyncBundle(floorBldg, code);
+                if (lost.length) {
+                    console.warn('[동기화] 서버에 있던 마킹이 삭제 기록 없이 빠졌습니다:', floorKey, lost);
+                    window.showToast(`주의: ${floorKey.split('_').slice(1).join('_')} 층에서 서버에 있던 마킹 ${lost.length}개가 빠졌습니다. 다른 기기 작업을 확인해 주세요.`, 'warning', 9000);
+                }
             }
             // 층 쓰기가 "올릴 것 있음"을 지웠다 — 사진을 못 올린 층은 다시 남겨 다음 동기화가 재시도하게 한다
             if (photoFailedFloors && photoFailedFloors.size) {
