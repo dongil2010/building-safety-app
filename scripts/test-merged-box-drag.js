@@ -59,7 +59,7 @@ assert.ok(/asnDrag\.pinDragMode\(pendingDragHit\.hitInfo, selectedDefectIds, get
 assert.ok(/tipDragMovesSharedBox\(getCurrentFloorDefects\(\), activeDragPin\)/.test(move), '화살표 끝 규칙');
 assert.ok(/activeDragPin\.targetX = newTipX;\s*activeDragPin\.targetY = newTipY;/.test(move), '묶음 화살표 끝은 target만');
 assert.ok(/activeDragPin\.x = newX;\s*activeDragPin\.y = newY;\s*syncSharedMarkingGroupBox\(activeDragPin\);/.test(move), 'NO.박스는 공유 박스만(target 그대로)');
-const end = app.slice(app.indexOf('function handleDragEnd('), app.indexOf('function handleDragEnd(') + 6000);
+const end = app.slice(app.indexOf('function handleDragEnd('), app.indexOf('function handleDragEnd(') + 8000);
 assert.ok(/d\.groupId === gidMoved[\s\S]{0,120}touchDefectPositionUpdatedAt\(d\)/.test(end), '박스를 옮긴 묶음 전원 위치 시각 갱신(동기화)');
 assert.ok(/pushDefectHistory\(\);\s*const hitDefect = pendingDragHit\.hitInfo\.defect;/.test(move), '끌기 전에 되돌리기 기록');
 

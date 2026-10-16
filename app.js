@@ -32210,7 +32210,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     const TOUCH_DRAG_THRESHOLD = 10; // 터치 클릭 vs 드래그 구분 (너무 크면 돋보기만 움직이는 구간이 김)
     const MOUSE_DRAG_THRESHOLD = 14;
     const TOUCH_QUICK_DRAG_THRESHOLD = 14; // 터치: 길게 누르지 않고 바로 끌 때 이만큼 움직여야 이동 시작
-    const TOUCH_LONG_PRESS_MS = 500; // 모바일·태블릿: 0.5초 홀딩 후 핀 이동
+    const TOUCH_LONG_PRESS_MS = 500; // (레거시 상수)
+    // 2026-10-16 PC·터치 공통: 이미 선택된 마킹을 0.3초 꾹 누른 뒤에야 끌어서 이동
+    const MARKING_HOLD_TO_DRAG_MS = 300;
     const MAP_LOUPE_ID = 'mapTouchLoupe';
     const NDT_LOUPE_ID = 'ndtTouchLoupe';
     const TOUCH_LOUPE_SIZE = 168;
@@ -33272,7 +33274,19 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         let hitInfo = hitInfoRaw;
         // 공유 NO.박스 클릭: 처음 41-1(대표), 다시 누르면 41-2 … 순환.
         // 영역 안쪽(AREA_MOVE)은 그 영역의 마킹 자체를 고른다(통합 마킹은 영역이 원래 자리에 따로 있다)
-        if (hitInfo && hitInfo.part === 'BOX' && hitInfo.defect && hitInfo.defect.groupId) {
+        // 2026-10-16 새 규칙: 선택된 통합 마킹을 다시 누르면 수정창. 순환은 수정창이 이미 열려 있을 때만
+        // (= 기존처럼 수정창 연 채로 NO.박스를 다시 누르면 다음 화살표로 넘어감).
+        let groupSelectedMember = null;
+        let groupCycledInOpenModal = false;
+        if (hitInfo && hitInfo.defect && hitInfo.defect.groupId && !additive && !(isTouch && mobileAddSelectEnabled)) {
+            const gid0 = hitInfo.defect.groupId;
+            groupSelectedMember = getCurrentFloorMapPlacedDefects().find((m) => m && m.groupId === gid0 && selectedDefectIds.has(m.id)) || null;
+        }
+        if (groupSelectedMember && !isDefectModalOpen() && (hitInfo.part === 'BOX' || hitInfo.defect.id === groupSelectedMember.id || selectedDefectIds.size > 1)) {
+            if (hitInfo.part === 'BOX') hitInfo = { ...hitInfo, defect: groupSelectedMember };
+            window._groupBoxCycle = { groupId: groupSelectedMember.groupId, lastId: hitInfo.defect.id };
+        } else if (hitInfo && hitInfo.part === 'BOX' && hitInfo.defect && hitInfo.defect.groupId) {
+            groupCycledInOpenModal = !!(groupSelectedMember && isDefectModalOpen());
             const cycled = cycleMarkingGroupMemberOnBoxClick(hitInfo.defect);
             if (cycled) {
                 hitInfo = { ...hitInfo, defect: cycled };
@@ -33314,11 +33328,13 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             pendingDragHit = { hitInfo, imgX, imgY, additive: useAdditive };
             pendingDragIsTouch = isTouch;
             pendingDragHitStartTime = Date.now();
-            // 마우스는 즉시, 터치(모바일·태블릿)는 0.5초 홀딩 후에만 이동
-            pendingDragArmed = !isTouch;
+            // 2026-10-16 PC·터치 공통: 선택 안 된 마킹은 누르면 선택만, 끌면 도면 이동.
+            // 이미 선택된 마킹은 0.3초 꾹 누른 뒤에만 끌어서 이동, 그냥 떼면 수정창.
+            pendingDragArmed = false;
             if (hitInfo.defect && hitInfo.defect.id) {
                 const id = hitInfo.defect.id;
                 const wasInSelection = selectedDefectIds.has(id);
+                pendingDragHit.wasSelectedBefore = wasInSelection || groupCycledInOpenModal;
                 if (useAdditive) {
                     if (isTouch) {
                         pendingDragHit.wasInSelection = wasInSelection;
@@ -33335,26 +33351,19 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 // PC: mousedown에서 center 스크롤하지 않음(드래그 시작 시 덜컥 방지). mouseup/드래그종료 시 1회.
                 updateMapSelectionBar({ scrollToSelection: !!isTouch });
                 drawCanvas();
-                // PC 마우스: 클릭 한 번에 선택+수정창 (미세 떨림이 드래그로 바뀌어도 모달이 이미 열림)
-                // 다중 선택(size>1)은 mouseup에서 일괄 수정창 — 터치 경로는 변경 없음
-                if (!isTouch && !useAdditive && selectedDefectIds.size <= 1) {
-                    const d = hitInfo.defect;
-                    // 드래그 가능하므로 열 때 reveal/pan 하지 않음 — 클릭(비드래그) mouseup에서만 1회(드래그 종료는 재팬 안 함)
-                    openAddDefectModal(d.x, d.y, d.targetX, d.targetY, d, null, {
-                        revealMarkingAboveDrawer: false,
-                        fromCanvas: true
-                    });
-                    pendingDragOpenedModal = true;
-                }
             }
-            if (isTouch) {
+            if (pendingDragHit.wasSelectedBefore) {
                 pendingDragLongPressTimer = setTimeout(() => {
-                    if (!pendingDragHit || !pendingDragIsTouch) return;
+                    pendingDragLongPressTimer = null;
+                    if (!pendingDragHit || isDraggingPin || isDragging) return;
+                    const hd = pendingDragHit.hitInfo && pendingDragHit.hitInfo.defect;
+                    if (!hd || !selectedDefectIds.has(hd.id)) return;
                     pendingDragArmed = true;
-                    try { if (navigator.vibrate) navigator.vibrate(12); } catch (_e) { /* ignore */ }
+                    try { if (navigator.vibrate) navigator.vibrate(20); } catch (_e) { /* ignore */ }
+                    if (elements.planCanvas) elements.planCanvas.style.cursor = 'grabbing';
                     drawCanvas();
-                    refreshMapLoupe(startMouseX, startMouseY);
-                }, TOUCH_LONG_PRESS_MS);
+                    if (pendingDragIsTouch) refreshMapLoupe(startMouseX, startMouseY);
+                }, MARKING_HOLD_TO_DRAG_MS);
             }
             return;
         }
@@ -33484,10 +33493,14 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             // 모바일: 홀딩 전에 손가락이 많이 움직이면 핀/화살표 고정 해제 → 도면 팬으로 전환
             // 2026-10-16 한 번 누른 채 끌면 바로 이동(길게 누를 필요 없음). 단순 탭(문턱값 이하)은 기존처럼 선택·수정창,
             // 마킹 없는 곳에서 끌면 도면 이동. 스크롤하다 실수로 옮기지 않게 문턱값은 클릭 구분보다 조금 크게.
-            if (pendingDragIsTouch && !pendingDragArmed) {
-                if (dist <= TOUCH_QUICK_DRAG_THRESHOLD) return;
+            // 2026-10-16 꾹 누름(0.3초) 완료 전에 움직이면 마킹은 그대로, 도면 이동으로 전환 (PC·터치 공통)
+            if (!pendingDragArmed) {
+                if (dist <= threshold) return;
                 clearPendingDragLongPress();
-                pendingDragArmed = true;
+                pendingDragHit = null;
+                isDragging = true;
+                if (elements.planCanvas) elements.planCanvas.style.cursor = 'grabbing';
+                return;
             }
 
             // 임계값 이하: 클릭 대기. 홀딩 완료 후 터치면 돋보기만 갱신(핀은 아직 고정)
@@ -33804,6 +33817,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             const d = pendingDragHit.hitInfo.defect;
             const wasAdditive = !!pendingDragHit.additive;
             const wasInSelection = !!pendingDragHit.wasInSelection;
+            const pendingDragWasSelectedBefore = !!pendingDragHit.wasSelectedBefore;
             pendingDragHit = null;
             if (wasAdditive && endedFromTouch && d?.id && wasInSelection) {
                 selectedDefectIds.delete(d.id);
@@ -33828,6 +33842,20 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                         `마킹 ${formatDefectMemberChipLabel(d)} 선택 · NO.박스를 다시 누르면 다음 화살표`,
                         'info',
                         2200
+                    );
+                }
+                return;
+            }
+            // 2026-10-16 선택 안 돼 있던 마킹을 한 번 누름 → 선택만(수정창 열지 않음)
+            if (!pendingDragWasSelectedBefore) {
+                if (isDefectModalOpen() && !isDefectMarkingGroupPending()) closeDefectModal();
+                updateMapSelectionBar({ scrollToSelection: true });
+                drawCanvas();
+                if (d?.groupId && getDefectMarkingGroupMembers(d.groupId).length > 1) {
+                    window.showToast?.(
+                        `마킹 ${formatDefectMemberChipLabel(d)} 선택 · 한 번 더 누르면 수정창, 수정창에서 NO.박스를 다시 누르면 다음 화살표`,
+                        'info',
+                        2400
                     );
                 }
                 return;
