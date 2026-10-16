@@ -121,7 +121,7 @@
             st.members = []; st.unread = []; st.marks = null; st.shapes = null;
             redraw(); renderSide();
             setStatus(ex.images > 0
-                ? '이 PDF는 스캔한 그림이라 선 데이터가 없습니다. 스캔본은 아직 읽지 못합니다(캐드에서 뽑은 PDF만 됩니다).'
+                ? '이 PDF는 스캔한 그림이라 선 데이터가 없습니다. 「AI로 읽기」를 누르면 AI가 그림을 보고 기둥·거더·빔을 찾습니다(평면만 「범위 지정」하면 더 정확).'
                 : '이 쪽에는 읽을 선이 거의 없습니다.', 'warn');
             return;
         }
@@ -145,6 +145,7 @@
     /** 배포 직후 옛 HTML에는 이 칸이 없을 수 있다 — 없으면 기호 방식 */
     function readMode() {
         var el = $('readMode');
+        if (el && el.value === 'ai') return 'ai';
         return el && el.value === 'shapes' && SS ? 'shapes' : 'marks';
     }
     /** 지금은 기둥·거더·빔만 센다(벽·슬래브는 나중에, 2026-10-14) */
@@ -166,6 +167,18 @@
     }
     /** 읽어 둔 결과에서 화면 목록을 다시 만든다(바꾼 종류·뺀 것은 처음으로 돌아간다) */
     function applyMode() {
+        if (readMode() === 'ai') {
+            // AI로 읽은 결과(스캔본) — 바꾼 종류·뺀 것은 처음으로 돌아간다
+            st.members = st.aiMembers ? unifyBeams(clone(st.aiMembers)) : [];
+            st.unread = [];
+            redraw(); renderSide();
+            if (st.aiMembers) {
+                var ca = SM.countsByType(st.members);
+                setStatus('AI가 찾은 부재: ' + USE_TYPES.map(function (t) { return t + ' ' + ca[t]; }).join(' · ')
+                    + '. AI 초안이라 빠지거나 틀린 것이 있습니다 — 도면에서 확인하고 고쳐 주세요(앱으로 보낸 뒤 「편집」으로도 고칠 수 있습니다).', st.members.length ? 'ok' : 'warn');
+            } else setStatus('「AI로 읽기」를 누르면 AI가 그림을 보고 기둥·거더·빔을 찾습니다.');
+            return;
+        }
         if (!st.marks) { redraw(); renderSide(); return; }
         var res = st.marks;
         if (readMode() === 'shapes' && st.shapes) {
@@ -194,17 +207,25 @@
      * 연한 회색 선(기둥 칠, 점선 보)도 잘 보이게 진하기를 올린다. → { blob(PNG), x0, y0, x1, y1(쪽 좌표), color }
      */
     async function makeOverlayImage(color) {
-        var page = await st.doc.getPage(st.pageNo);
-        var v1 = page.getViewport({ scale: 1 });
-        var r = st.region || { x0: 0, y0: 0, x1: v1.width, y1: v1.height };
-        var rw = r.x1 - r.x0, rh = r.y1 - r.y0;
-        var S = Math.min(8, 3600 / Math.max(rw, rh));
-        var vp = page.getViewport({ scale: S, offsetX: -r.x0 * S, offsetY: -r.y0 * S });
-        var cv = document.createElement('canvas');
-        cv.width = Math.max(1, Math.round(rw * S)); cv.height = Math.max(1, Math.round(rh * S));
-        var cx = cv.getContext('2d', { willReadFrequently: true });
-        cx.fillStyle = '#fff'; cx.fillRect(0, 0, cv.width, cv.height);
-        await page.render({ canvasContext: cx, viewport: vp, intent: 'print' }).promise;
+        var r, cv, cx;
+        if (st.doc) {
+            var page = await st.doc.getPage(st.pageNo);
+            var v1 = page.getViewport({ scale: 1 });
+            r = st.region || { x0: 0, y0: 0, x1: v1.width, y1: v1.height };
+            var rw = r.x1 - r.x0, rh = r.y1 - r.y0;
+            var S = Math.min(8, 3600 / Math.max(rw, rh));
+            var vp = page.getViewport({ scale: S, offsetX: -r.x0 * S, offsetY: -r.y0 * S });
+            cv = document.createElement('canvas');
+            cv.width = Math.max(1, Math.round(rw * S)); cv.height = Math.max(1, Math.round(rh * S));
+            cx = cv.getContext('2d', { willReadFrequently: true });
+            cx.fillStyle = '#fff'; cx.fillRect(0, 0, cv.width, cv.height);
+            await page.render({ canvasContext: cx, viewport: vp, intent: 'print' }).promise;
+        } else {
+            // 그림 파일(스캔 사진): 화면용 그림에서 범위만 잘라 쓴다
+            r = st.region || { x0: 0, y0: 0, x1: st.base.width / st.scale, y1: st.base.height / st.scale };
+            cv = cropBase(r, 3600);
+            cx = cv.getContext('2d', { willReadFrequently: true });
+        }
         var img = cx.getImageData(0, 0, cv.width, cv.height), d = img.data;
         var hex = /^#?([0-9a-f]{6})$/i.exec(color || '') ? color.replace('#', '') : '2563eb';
         var cr = parseInt(hex.slice(0, 2), 16), cg = parseInt(hex.slice(2, 4), 16), cb = parseInt(hex.slice(4, 6), 16);
@@ -217,6 +238,46 @@
         var blob = await new Promise(function (res) { cv.toBlob(res, 'image/png'); });
         if (!blob) throw new Error('그림을 만들지 못했습니다.');
         return { blob: blob, x0: r.x0, y0: r.y0, x1: r.x1, y1: r.y1, color: '#' + hex };
+    }
+
+    /** 화면용 그림(st.base)에서 쪽 좌표 범위 r을 잘라, 긴 쪽 maxPx 이하 캔버스로 */
+    function cropBase(r, maxPx) {
+        var s = st.scale;
+        var sw = Math.max(1, Math.round((r.x1 - r.x0) * s)), sh = Math.max(1, Math.round((r.y1 - r.y0) * s));
+        var k = Math.min(1, maxPx / Math.max(sw, sh));
+        var cv = document.createElement('canvas');
+        cv.width = Math.max(1, Math.round(sw * k)); cv.height = Math.max(1, Math.round(sh * k));
+        var cx = cv.getContext('2d');
+        cx.fillStyle = '#fff'; cx.fillRect(0, 0, cv.width, cv.height);
+        cx.drawImage(st.base, Math.round(r.x0 * s), Math.round(r.y0 * s), sw, sh, 0, 0, cv.width, cv.height);
+        return cv;
+    }
+
+    // ---------- AI로 읽기(스캔본, 2026-10-16): 그림을 Gemini에 보여 기둥·거더·빔 위치를 받는다(js/core/struct-ai.js) ----------
+    var AI = window.BSA.structAi || null;
+    function aiKey() { return window.GEMINI_DIRECT_API_KEY || ''; }
+    async function runAi() {
+        if (!st.base || !AI) return;
+        if (!aiKey()) { setStatus('AI 키가 없습니다. 배포된 사이트(github.io)에서만 AI로 읽을 수 있습니다.', 'warn'); return; }
+        var r = st.region || { x0: 0, y0: 0, x1: st.base.width / st.scale, y1: st.base.height / st.scale };
+        var btn = $('btnAi');
+        if (btn) btn.disabled = true;
+        setStatus('AI가 도면을 읽는 중입니다… (큰 도면은 1분 가까이 걸릴 수 있습니다)');
+        try {
+            var cv = cropBase(r, 3072);
+            var dataUrl = cv.toDataURL('image/jpeg', 0.92);
+            var text = await AI.callGemini(aiKey(), { mimeType: 'image/jpeg', base64: dataUrl.slice(dataUrl.indexOf(',') + 1) });
+            var items = AI.parseResponse(text);
+            st.aiMembers = AI.toMembers(items, { x0: r.x0, y0: r.y0, w: r.x1 - r.x0, h: r.y1 - r.y0 });
+            var sel = $('readMode');
+            if (sel) sel.value = 'ai';
+            applyMode();
+        } catch (err) {
+            console.error(err);
+            setStatus('AI로 읽지 못했습니다: ' + (err && err.message ? err.message : err), 'warn');
+        } finally {
+            if (btn) btn.disabled = false;
+        }
     }
 
     // ---------- 그리기 ----------
@@ -475,7 +536,7 @@
             try { var saved = localStorage.getItem(MODE_KEY); if (saved === 'marks' || saved === 'shapes') modeSel.value = saved; } catch (_e) { /* ignore */ }
             if (!SS) modeSel.value = 'marks';
             modeSel.addEventListener('change', function () {
-                try { localStorage.setItem(MODE_KEY, this.value); } catch (_e) { /* ignore */ }
+                if (this.value !== 'ai') { try { localStorage.setItem(MODE_KEY, this.value); } catch (_e) { /* ignore */ } }
                 applyMode();
             });
         }
@@ -484,9 +545,17 @@
             this.value = st.pageNo;
             if (st.doc) analyzePage().catch(fail);
         });
+        var aiBtn = $('btnAi');
+        if (aiBtn) {
+            if (!AI) aiBtn.disabled = true;
+            aiBtn.addEventListener('click', function () { runAi(); });
+        }
         var openFile = function (file) {
             if (!file) return;
             st.fileName = file.name;
+            st.aiMembers = null;
+            if (modeSel && modeSel.value === 'ai') modeSel.value = (SS ? 'shapes' : 'marks');
+            if (/^image\//.test(file.type || '') || /\.(jpe?g|png|webp|bmp|gif)$/i.test(file.name || '')) { openImage(file); return; }
             setStatus('파일을 여는 중…');
             file.arrayBuffer().then(function (buf) {
                 pdfjsLib.GlobalWorkerOptions.workerSrc = PDF_WORKER;
@@ -504,6 +573,31 @@
                     return analyzePage();
                 });
             }).catch(fail);
+        };
+        // 스캔 사진(JPG·PNG): 선 데이터가 없으니 그림만 깔고 「AI로 읽기」로 찾는다. 쪽 좌표 = 화면용 그림 픽셀(배율 1)
+        var openImage = function (file) {
+            setStatus('그림을 여는 중…');
+            var url = URL.createObjectURL(file);
+            var im = new Image();
+            im.onload = function () {
+                URL.revokeObjectURL(url);
+                var k = Math.min(1, 4000 / Math.max(im.naturalWidth, im.naturalHeight));
+                var base = document.createElement('canvas');
+                base.width = Math.max(1, Math.round(im.naturalWidth * k)); base.height = Math.max(1, Math.round(im.naturalHeight * k));
+                var bx = base.getContext('2d');
+                bx.fillStyle = '#fff'; bx.fillRect(0, 0, base.width, base.height);
+                bx.drawImage(im, 0, 0, base.width, base.height);
+                st.doc = null; st.pageNo = 1; st.base = base; st.scale = 1;
+                st.region = null; st.refs = []; st.refPicking = false;
+                st.members = []; st.unread = []; st.marks = null; st.shapes = null;
+                $('pageNo').value = 1; $('pageTotal').textContent = '(그림)';
+                st.zoom = Math.min(1, ($('stage').clientWidth - 24) / base.width);
+                showZoom();
+                redraw(); renderSide();
+                setStatus('그림을 열었습니다. 「AI로 읽기」를 누르면 AI가 기둥·거더·빔을 찾습니다(평면만 「범위 지정」하면 더 정확).', 'ok');
+            };
+            im.onerror = function () { URL.revokeObjectURL(url); setStatus('그림을 열지 못했습니다.', 'warn'); };
+            im.src = url;
         };
         $('file').addEventListener('change', function () { openFile(this.files[0]); });
         var stage = $('stage');
