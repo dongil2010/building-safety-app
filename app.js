@@ -22214,7 +22214,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
      */
     function cycleMarkingGroupMemberOnBoxClick(defect) {
         if (!defect || !defect.groupId) return defect;
-        const members = getDefectMarkingGroupMembers(defect.groupId);
+        // 숨긴 구성원은 차례에서 뺀다
+        const visibleIds = new Set(getCurrentFloorMapPlacedDefects().map((d) => d && d.id));
+        const members = getDefectMarkingGroupMembers(defect.groupId).filter((m) => m && visibleIds.has(m.id));
+        if (!members.length) return defect;
         const asnApi = arrowSurveyNumberApi();
         if (asnApi && typeof asnApi.nextGroupMemberOnBoxClick === 'function') {
             const picked = asnApi.nextGroupMemberOnBoxClick(
@@ -22344,6 +22347,23 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         return 'other';
     }
 
+    /** 2026-10-16 지금 필터로 보이는(목록에 나오는) 마킹 id */
+    function getVisibleDefectIdSet() {
+        return new Set((getCurrentFloorFilteredDefects() || []).map((d) => d && d.id).filter(Boolean));
+    }
+    /** 필터를 바꿔 숨겨진 마킹은 선택에서 뺀다. 뺀 개수를 돌려준다 */
+    function pruneHiddenDefectSelection() {
+        if (typeof selectedDefectIds === 'undefined' || !selectedDefectIds || !selectedDefectIds.size) return 0;
+        const vis = getVisibleDefectIdSet();
+        let n = 0;
+        [...selectedDefectIds].forEach((id) => { if (!vis.has(id)) { selectedDefectIds.delete(id); n += 1; } });
+        if (n && typeof updateMapSelectionBar === 'function') {
+            try { updateMapSelectionBar({ scrollToSelection: false }); } catch (_e) { /* ignore */ }
+        }
+        return n;
+    }
+    window.pruneHiddenDefectSelection = pruneHiddenDefectSelection;
+
     function isCategoryFilterOn(catKey) {
         const f = window.state.categoryFilter || {};
         if (catKey === 'columnWall') return f.columnWall !== false;
@@ -22358,6 +22378,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             window.state.categoryFilter = { columnWall: true, beamSlab: true, nonStructural: true, finishing: true };
         }
         window.state.categoryFilter[catKey] = !!on;
+        if (typeof window.pruneHiddenDefectSelection === "function") window.pruneHiddenDefectSelection();
         const checkboxIdMap = {
             columnWall: 'filterCatColumnWall',
             beamSlab: 'filterCatBeamSlab',
@@ -22742,7 +22763,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             });
             summaryEl.querySelectorAll('[data-opening-crack-filter]').forEach(btn => {
                 btn.addEventListener('click', () => {
-                    window.state.showOpeningCracks = !(window.state.showOpeningCracks !== false);
+                    window.state.showOpeningCracks = !(window.state.showOpeningCracks !== false); if (typeof window.pruneHiddenDefectSelection === "function") window.pruneHiddenDefectSelection();
                     if (typeof drawCanvas === 'function') drawCanvas();
                     renderDefectListPanel();
                 });
@@ -32322,7 +32343,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
     function collectMarqueeHits(x1, y1, x2, y2) {
         const hits = [];
-        filterMapPlacedDefects(getCurrentFloorDefects()).forEach(d => {
+        getCurrentFloorMapPlacedDefects().forEach(d => {   // 숨긴 마킹은 박스 선택 안 됨
             const anchor = getDefectMarqueeAnchor(d);
             if (!anchor) return;
             if (anchor.x >= x1 && anchor.x <= x2 && anchor.y >= y1 && anchor.y <= y2) {
@@ -32334,6 +32355,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
     async function deleteSelectedDefects() {
         if (isEvalMarkingLock()) { notifyEvalMarkingLock(); return; }
+        pruneHiddenDefectSelection();   // 숨긴 마킹은 지우지 않는다
         const ids = [...selectedDefectIds];
         if (!ids.length || !state.currentBuildingId) return;
         if (!await window.confirmDelete(`선택한 결함 ${ids.length}건을 삭제할까요? (되돌리기로 복원 가능)`)) return;
@@ -32522,7 +32544,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
 
     function findHitPinPart(imgX, imgY) {
-        const defects = filterMapPlacedDefects(getCurrentFloorDefects());
+        // 2026-10-16 숨긴(부재 종류·필터로 끈) 마킹은 터치·클릭·커서·균열모니터 판정에서 빠진다 — 그리는 목록과 같게
+        const defects = getCurrentFloorMapPlacedDefects();
         // 터치/조밀 배치: 화살표(TIP)가 박스 안·근처에 있어도 TIP을 잡을 수 있게
         // 박스 즉시 return 하지 않고, TIP·BOX 후보를 모은 뒤 TIP을 우선한다.
         let bestTip = null; // { defect, dist, tipR }
@@ -33249,7 +33272,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             const dx = coords.x - groupDragLastImgX;
             const dy = coords.y - groupDragLastImgY;
             if (dx || dy) {
-                filterMapPlacedDefects(getCurrentFloorDefects()).forEach(d => {
+                getCurrentFloorMapPlacedDefects().forEach(d => {   // 숨긴 마킹은 같이 끌려가지 않음
                     if (selectedDefectIds.has(d.id)) translateDefectBy(d, dx, dy);
                 });
                 groupDragLastImgX = coords.x;
@@ -33551,14 +33574,14 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 });
             }
             if (isDraggingPinGroup) {
-                filterMapPlacedDefects(getCurrentFloorDefects()).forEach(d => {
+                getCurrentFloorMapPlacedDefects().forEach(d => {
                     if (selectedDefectIds.has(d.id)) touchDefectPositionUpdatedAt(d);
                 });
             }
             // 행·열 선이 있으면 옮긴 마킹 위치를 칸 이름으로 (비었거나 자동으로 넣은 위치만 — 직접 쓴 글은 그대로)
             try {
                 const movedForGrid = isDraggingPinGroup
-                    ? filterMapPlacedDefects(getCurrentFloorDefects()).filter(d => selectedDefectIds.has(d.id))
+                    ? getCurrentFloorMapPlacedDefects().filter(d => selectedDefectIds.has(d.id))
                     : (activeDragPin ? [activeDragPin] : []);
                 if (typeof applyGridAutoLocationAfterDrag === 'function') applyGridAutoLocationAfterDrag(movedForGrid);
             } catch (gridErr) {
@@ -34649,6 +34672,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     }
 
     function openBulkDefectEditModal() {
+        pruneHiddenDefectSelection();   // 숨긴 마킹은 일괄 수정에서 빠진다
         const ids = [...selectedDefectIds];
         if (ids.length < 2 || !state.currentBuildingId) return;
         const key = `${state.currentBuildingId}_${state.currentFloor}`;
@@ -52342,7 +52366,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     const filterDamageTypeSel = document.getElementById('filterDamageType');
     if (filterDamageTypeSel) {
         filterDamageTypeSel.addEventListener('change', (e) => {
-            window.state.damageTypeFilter = e.target.value;
+            window.state.damageTypeFilter = e.target.value; if (typeof window.pruneHiddenDefectSelection === "function") window.pruneHiddenDefectSelection();
             if (typeof drawCanvas === 'function') drawCanvas();
         });
     }
@@ -52351,7 +52375,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     const filterOnlyBookmarkEl = document.getElementById('filterOnlyBookmark');
     if (filterOnlyBookmarkEl) {
         filterOnlyBookmarkEl.addEventListener('change', (e) => {
-            window.state.bookmarkOnlyFilter = e.target.checked;
+            window.state.bookmarkOnlyFilter = e.target.checked; if (typeof window.pruneHiddenDefectSelection === "function") window.pruneHiddenDefectSelection();
             if (typeof drawCanvas === 'function') drawCanvas();
             if (typeof renderDefectListPanel === 'function') renderDefectListPanel();
         });
@@ -52371,6 +52395,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (!el) return;
         el.addEventListener('change', (e) => {
             window.state.categoryFilter[stateKey] = e.target.checked;
+            if (typeof window.pruneHiddenDefectSelection === "function") window.pruneHiddenDefectSelection();
             if (typeof drawCanvas === 'function') drawCanvas();
             if (typeof renderDefectListPanel === 'function') renderDefectListPanel();
         });
@@ -52388,7 +52413,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (!el) return;
         window.state.periodFilter[roundKey] = el.checked;
         el.addEventListener('change', (e) => {
-            window.state.periodFilter[roundKey] = e.target.checked;
+            window.state.periodFilter[roundKey] = e.target.checked; if (typeof window.pruneHiddenDefectSelection === "function") window.pruneHiddenDefectSelection();
             if (typeof drawCanvas === 'function') drawCanvas();
             if (typeof renderDefectListPanel === 'function') renderDefectListPanel();
         });
@@ -52398,7 +52423,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     const filterOnlyPriorityManageEl = document.getElementById('filterOnlyPriorityManage');
     if (filterOnlyPriorityManageEl) {
         filterOnlyPriorityManageEl.addEventListener('change', (e) => {
-            window.state.priorityManageOnlyFilter = e.target.checked;
+            window.state.priorityManageOnlyFilter = e.target.checked; if (typeof window.pruneHiddenDefectSelection === "function") window.pruneHiddenDefectSelection();
             if (typeof drawCanvas === 'function') drawCanvas();
             if (typeof renderDefectListPanel === 'function') renderDefectListPanel();
         });
