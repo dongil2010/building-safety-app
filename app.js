@@ -9707,12 +9707,25 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     }
 
     let _panAnimRafId = 0;
+    let _panAnimTarget = null;
 
     function cancelCanvasPanAnimation() {
         if (_panAnimRafId) {
             cancelAnimationFrame(_panAnimRafId);
             _panAnimRafId = 0;
         }
+        _panAnimTarget = null;
+    }
+
+    function prefersReducedMotion() {
+        try { return !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches); } catch (_e) { return false; }
+    }
+
+    // 사용자가 도면을 조작하면 진행 중인 이동 애니메이션·예약된 보정 즉시 중단
+    function stopMapAutoPanOnUserInput() {
+        if (!_panAnimRafId) return;
+        if (typeof cancelScheduledRevealMarkingAboveDrawer === 'function') cancelScheduledRevealMarkingAboveDrawer();
+        else cancelCanvasPanAnimation();
     }
 
     // 결함 수정창이 하단 바텀시트로 올라오는 레이아웃인지 판별 (모바일 세로, 태블릿 세로 등)
@@ -9859,15 +9872,17 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const targetOffsetX = focus.x - v.x * targetScale;
         const targetOffsetY = focus.y - v.y * targetScale;
 
-        if (options.animate && typeof requestAnimationFrame === 'function') {
+        // 2026-10-16 순간이동 대신 부드러운 이동(easeOut, rAF). 애니메이션 진행 중 후속 보정 호출은 목표만 갱신.
+        if (_panAnimRafId && !options.forceJump) {
+            _panAnimTarget = { x: targetOffsetX, y: targetOffsetY, s: targetScale };
+            return true;
+        }
+        if (options.animate && typeof requestAnimationFrame === 'function' && !prefersReducedMotion()) {
             cancelCanvasPanAnimation();
             const startX = state.view.offsetX;
             const startY = state.view.offsetY;
             const startScale = state.view.scale || 1;
-            const deltaX = targetOffsetX - startX;
-            const deltaY = targetOffsetY - startY;
-            const deltaScale = targetScale - startScale;
-            if (Math.hypot(deltaX, deltaY) < 3 && Math.abs(deltaScale) < 0.005) {
+            if (Math.hypot(targetOffsetX - startX, targetOffsetY - startY) < 3 && Math.abs(targetScale - startScale) < 0.005) {
                 state.view.scale = targetScale;
                 state.view.offsetX = targetOffsetX;
                 state.view.offsetY = targetOffsetY;
@@ -9875,25 +9890,23 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 if (typeof drawCanvas === 'function') drawCanvas({ immediate: true });
                 return true;
             }
-            const duration = Number.isFinite(options.duration) ? options.duration : 260;
+            _panAnimTarget = { x: targetOffsetX, y: targetOffsetY, s: targetScale };
+            const duration = Number.isFinite(options.duration) ? options.duration : 320;
             const startTime = performance.now();
             function step(now) {
-                const elapsed = now - startTime;
-                const progress = Math.min(1, elapsed / duration);
+                const t = _panAnimTarget;
+                const progress = Math.min(1, (now - startTime) / duration);
                 const ease = 1 - Math.pow(1 - progress, 3);
-                state.view.offsetX = startX + deltaX * ease;
-                state.view.offsetY = startY + deltaY * ease;
-                state.view.scale = startScale + deltaScale * ease;
+                state.view.offsetX = startX + (t.x - startX) * ease;
+                state.view.offsetY = startY + (t.y - startY) * ease;
+                state.view.scale = startScale + (t.s - startScale) * ease;
                 if (elements.zoomScaleText) elements.zoomScaleText.textContent = `${Math.round(state.view.scale * 100)}%`;
                 drawCanvas({ immediate: true });
                 if (progress < 1) {
                     _panAnimRafId = requestAnimationFrame(step);
                 } else {
                     _panAnimRafId = 0;
-                    state.view.offsetX = targetOffsetX;
-                    state.view.offsetY = targetOffsetY;
-                    state.view.scale = targetScale;
-                    drawCanvas({ immediate: true });
+                    _panAnimTarget = null;
                 }
             }
             _panAnimRafId = requestAnimationFrame(step);
@@ -9959,7 +9972,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             return;
         }
 
-        panCanvasToDefectMarking(defect, options);
+        panCanvasToDefectMarking(defect, Object.assign({ animate: true }, options));
 
         activeDragPin = defect;
         drawCanvas();
@@ -32196,6 +32209,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     let _mapLoupePending = null;
     const TOUCH_DRAG_THRESHOLD = 10; // 터치 클릭 vs 드래그 구분 (너무 크면 돋보기만 움직이는 구간이 김)
     const MOUSE_DRAG_THRESHOLD = 14;
+    const TOUCH_QUICK_DRAG_THRESHOLD = 14; // 터치: 길게 누르지 않고 바로 끌 때 이만큼 움직여야 이동 시작
     const TOUCH_LONG_PRESS_MS = 500; // 모바일·태블릿: 0.5초 홀딩 후 핀 이동
     const MAP_LOUPE_ID = 'mapTouchLoupe';
     const NDT_LOUPE_ID = 'ndtTouchLoupe';
@@ -33468,14 +33482,12 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             const threshold = pendingDragIsTouch ? TOUCH_DRAG_THRESHOLD : MOUSE_DRAG_THRESHOLD;
 
             // 모바일: 홀딩 전에 손가락이 많이 움직이면 핀/화살표 고정 해제 → 도면 팬으로 전환
+            // 2026-10-16 한 번 누른 채 끌면 바로 이동(길게 누를 필요 없음). 단순 탭(문턱값 이하)은 기존처럼 선택·수정창,
+            // 마킹 없는 곳에서 끌면 도면 이동. 스크롤하다 실수로 옮기지 않게 문턱값은 클릭 구분보다 조금 크게.
             if (pendingDragIsTouch && !pendingDragArmed) {
-                if (dist > threshold) {
-                    clearPendingDragLongPress();
-                    pendingDragHit = null;
-                    isDragging = true;
-                    if (elements.planCanvas) elements.planCanvas.style.cursor = 'grabbing';
-                }
-                return;
+                if (dist <= TOUCH_QUICK_DRAG_THRESHOLD) return;
+                clearPendingDragLongPress();
+                pendingDragArmed = true;
             }
 
             // 임계값 이하: 클릭 대기. 홀딩 완료 후 터치면 돋보기만 갱신(핀은 아직 고정)
@@ -34624,6 +34636,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
 
         // Wheel Zoom (마우스 커서 위치 기준)
+        ['pointerdown', 'touchstart', 'mousedown', 'wheel'].forEach((evName) => {
+            elements.planCanvas.addEventListener(evName, stopMapAutoPanOnUserInput, { capture: true, passive: true });
+        });
         elements.planCanvas.addEventListener('wheel', (e) => {
             if (typeof cancelCanvasPanAnimation === 'function') cancelCanvasPanAnimation();
             e.preventDefault();
