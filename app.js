@@ -32213,6 +32213,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     const TOUCH_LONG_PRESS_MS = 500; // (레거시 상수)
     // 2026-10-16 PC·터치 공통: 이미 선택된 마킹을 0.3초 꾹 누른 뒤에야 끌어서 이동
     const MARKING_HOLD_TO_DRAG_MS = 300;
+    const MARKING_TAP_MAX_MS = 500; // 이보다 오래 누르고 떼면 탭(선택·수정창)으로 보지 않음
     const MAP_LOUPE_ID = 'mapTouchLoupe';
     const NDT_LOUPE_ID = 'ndtTouchLoupe';
     const TOUCH_LOUPE_SIZE = 168;
@@ -33278,6 +33279,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         // (= 기존처럼 수정창 연 채로 NO.박스를 다시 누르면 다음 화살표로 넘어감).
         let groupSelectedMember = null;
         let groupCycledInOpenModal = false;
+        const groupCyclePrev = window._groupBoxCycle ? { ...window._groupBoxCycle } : window._groupBoxCycle;
         if (hitInfo && hitInfo.defect && hitInfo.defect.groupId && !additive && !(isTouch && mobileAddSelectEnabled)) {
             const gid0 = hitInfo.defect.groupId;
             groupSelectedMember = getCurrentFloorMapPlacedDefects().find((m) => m && m.groupId === gid0 && selectedDefectIds.has(m.id)) || null;
@@ -33335,22 +33337,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 const id = hitInfo.defect.id;
                 const wasInSelection = selectedDefectIds.has(id);
                 pendingDragHit.wasSelectedBefore = wasInSelection || groupCycledInOpenModal;
-                if (useAdditive) {
-                    if (isTouch) {
-                        pendingDragHit.wasInSelection = wasInSelection;
-                        if (!wasInSelection) selectedDefectIds.add(id);
-                    } else if (selectedDefectIds.has(id)) {
-                        selectedDefectIds.delete(id);
-                    } else {
-                        selectedDefectIds.add(id);
-                    }
-                } else if (!wasInSelection || selectedDefectIds.size <= 1) {
-                    selectedDefectIds = new Set([id]);
-                }
-                // 이미 다중 선택된 핀을 다시 누르면 선택 유지 → 그룹 드래그용
-                // PC: mousedown에서 center 스크롤하지 않음(드래그 시작 시 덜컥 방지). mouseup/드래그종료 시 1회.
-                updateMapSelectionBar({ scrollToSelection: !!isTouch });
-                drawCanvas();
+                // 2026-10-16 선택은 누를 때가 아니라 「움직이지 않은 짧은 탭」으로 뗄 때 확정(handleDragEnd).
+                // 마킹 위에서 시작해 도면을 끌거나 핀치하면 선택이 바뀌지 않는다.
+                pendingDragHit.wasInSelection = wasInSelection;
+                pendingDragHit.groupCyclePrev = groupCyclePrev;
             }
             if (pendingDragHit.wasSelectedBefore) {
                 pendingDragLongPressTimer = setTimeout(() => {
@@ -33497,6 +33487,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             if (!pendingDragArmed) {
                 if (dist <= threshold) return;
                 clearPendingDragLongPress();
+                // 도면 이동으로 바뀜 → 선택 없음, 통합 마킹 순환 차례도 되돌림
+                if (pendingDragHit && 'groupCyclePrev' in pendingDragHit) window._groupBoxCycle = pendingDragHit.groupCyclePrev;
                 pendingDragHit = null;
                 isDragging = true;
                 if (elements.planCanvas) elements.planCanvas.style.cursor = 'grabbing';
@@ -33768,6 +33760,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     function handleDragEnd(clientX, clientY) {
         let hadPinDragSave = false;
         try {
+        const pendingDragArmedAtEnd = pendingDragArmed;
         clearPendingDragLongPress();
         hideTouchLoupe(MAP_LOUPE_ID);
         // 터치 제스처 종료 여부 — 아래에서 클리어되기 전에 보관 (PC 전용 동작 분기)
@@ -33818,9 +33811,24 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             const wasAdditive = !!pendingDragHit.additive;
             const wasInSelection = !!pendingDragHit.wasInSelection;
             const pendingDragWasSelectedBefore = !!pendingDragHit.wasSelectedBefore;
+            const tapHit = pendingDragHit;
+            const holdArmed = pendingDragArmedAtEnd;
             pendingDragHit = null;
-            if (wasAdditive && endedFromTouch && d?.id && wasInSelection) {
-                selectedDefectIds.delete(d.id);
+            // 2026-10-16 움직이지 않은 짧은 탭만 선택·수정창. 길게 눌렀다 뗀 것(꾹 눌러 이동 대기 포함)은 아무것도 안 함.
+            const tapMoved = (clientX == null || clientY == null) ? 0 : Math.hypot(clientX - startMouseX, clientY - startMouseY);
+            const tapMs = Date.now() - (pendingDragHitStartTime || 0);
+            const tapThreshold = endedFromTouch ? TOUCH_DRAG_THRESHOLD : MOUSE_DRAG_THRESHOLD;
+            if (holdArmed || tapMoved > tapThreshold || tapMs > MARKING_TAP_MAX_MS || !d?.id) {
+                if ('groupCyclePrev' in tapHit) window._groupBoxCycle = tapHit.groupCyclePrev;
+                pendingDragOpenedModal = false;
+                drawCanvas();
+                return;
+            }
+            // 선택 확정
+            if (wasAdditive) {
+                if (wasInSelection) selectedDefectIds.delete(d.id); else selectedDefectIds.add(d.id);
+            } else if (!wasInSelection || selectedDefectIds.size <= 1) {
+                selectedDefectIds = new Set([d.id]);
             }
             // Ctrl 토글 클릭이면 내용 수정 모달 열지 않음
             if (wasAdditive) {
