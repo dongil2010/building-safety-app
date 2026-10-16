@@ -24,6 +24,7 @@ public class MainActivity extends BridgeActivity {
     @Override
     public void onCreate(Bundle savedInstanceState) {
         registerPlugin(AppUpdatePlugin.class);
+        registerPlugin(GallerySaverPlugin.class);
         super.onCreate(savedInstanceState);
         try {
             if (getBridge() != null) getBridge().setWebViewClient(new OfflineAwareWebViewClient(getBridge(), this));

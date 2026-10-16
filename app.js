@@ -35160,6 +35160,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 <img src="${list[0]}" alt="${label} 대표">
             </button>
             <span class="defect-photo-rep-badge">대표</span>
+            <button type="button" class="defect-photo-save-btn" onclick="window.bsaDownloadDefectPhoto(event, '${isPrev ? 'prev' : 'curr'}', 0)" title="${label} 사진 저장(갤러리·다운로드)"><i class="fa-solid fa-download"></i></button>
             ${removeMainBtn}
             ${rotateMainBtns}
         `;
@@ -35179,6 +35180,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     <button type="button" class="defect-photo-extra-open" onclick="window.${openFn}(${idx})" title="${label} ${idx + 1}">
                         <img src="${src}" alt="${label} ${idx + 1}">
                     </button>
+                    <button type="button" class="defect-photo-save-btn sm" onclick="window.bsaDownloadDefectPhoto(event, '${isPrev ? 'prev' : 'curr'}', ${idx})" title="${label} ${idx + 1} 저장"><i class="fa-solid fa-download"></i></button>
                     ${removeExtraBtn}
                     ${isPrev ? '' : buildPhotoRotateButtonsHtml(`onclick="window.rotatePendingPhoto(${idx}, -1)"`, `onclick="window.rotatePendingPhoto(${idx}, 1)"`, 'photo-rotate-group-sm')}
                 </div>
@@ -35592,7 +35594,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     resultType: 'dataUrl',
                     source: wantCamera ? 'CAMERA' : 'PHOTOS',
                     correctOrientation: true,
-                    saveToGallery: false
+                    // 2026-10-16 앱에서 「촬영」한 사진은 휴대폰 갤러리에도 남긴다(갤러리에서 고른 사진은 다시 저장 안 함).
+                    // 갤러리 저장이 실패해도 플러그인은 사진을 그대로 돌려주므로 첨부는 된다.
+                    saveToGallery: wantCamera
                 });
                 if (result?.dataUrl) {
                     return dataUrlToJpegFile(result.dataUrl, `photo_${Date.now()}.jpg`);
@@ -35604,8 +35608,119 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 console.warn('Camera.getPhoto fallback to file input:', err);
             }
         }
-        return pickImageFileViaInput(mode);
+        const picked = await pickImageFileViaInput(mode);
+        // 웹·PWA에서 카메라(capture)로 찍은 사진: 휴대폰이면 파일로 내려받아 갤러리(다운로드 폴더)에도 남긴다
+        if (picked && wantCamera && !(window.Capacitor?.isNativePlatform?.())
+            && /Android|iPhone|iPad|Mobile/i.test(navigator.userAgent || '')) {
+            try { void window.bsaSaveImageToDevice(picked, bsaPhotoFileName('촬영')); } catch (_e) { /* 첨부는 그대로 */ }
+        }
+        return picked;
     }
+
+    /** 2026-10-16 사진 파일명: 건물_층_위치_결함_번호_시각 (파일명에 못 쓰는 글자는 _) */
+    function bsaPhotoFileName(kind, extra) {
+        const v = (id) => String(document.getElementById(id)?.value || '').trim();
+        let bName = '';
+        let floor = '';
+        try {
+            const b = (state.buildings || []).find((x) => x && x.id === state.currentBuildingId);
+            bName = b ? (b.name || '') : '';
+            floor = String(state.currentFloor || '');
+            if (typeof formatFloorDisplay === 'function') floor = formatFloorDisplay(floor) || floor;
+        } catch (_e) { /* ignore */ }
+        const d = new Date();
+        const ts = d.getFullYear() + String(d.getMonth() + 1).padStart(2, '0') + String(d.getDate()).padStart(2, '0')
+            + '_' + String(d.getHours()).padStart(2, '0') + String(d.getMinutes()).padStart(2, '0') + String(d.getSeconds()).padStart(2, '0');
+        const parts = [bName, floor, v('defectLocation'), v('defectComponentInput'), v('defectTypeInput') || v('defectType'), v('defectNo'), kind, extra, ts]
+            .map((x) => String(x || '').replace(/[\\/:*?"<>|\s]+/g, '_').replace(/_+/g, '_').replace(/^_|_$/g, ''))
+            .filter(Boolean);
+        return (parts.join('_') || ('사진_' + ts)).slice(0, 120) + '.jpg';
+    }
+    window.bsaPhotoFileName = bsaPhotoFileName;
+
+    async function bsaBlobToDataUrl(blob) {
+        return await new Promise((res, rej) => {
+            const fr = new FileReader();
+            fr.onload = () => res(String(fr.result || ''));
+            fr.onerror = () => rej(fr.error);
+            fr.readAsDataURL(blob);
+        });
+    }
+
+    /** 사진 원본 가져오기: data URL → 그대로, 주소 → 네트워크 → 캐시(SW) → 화면에 떠 있는 그림(오프라인) 순 */
+    async function bsaResolvePhotoBlob(src, imgEl) {
+        if (src instanceof Blob) return src;
+        const s = String(src || '');
+        if (!s) return null;
+        if (s.startsWith('data:') || s.startsWith('blob:')) return await (await fetch(s)).blob();
+        if (navigator.onLine !== false) {
+            try {
+                const r = await fetch(s, { mode: 'cors', cache: 'force-cache' });
+                if (r.ok) return await r.blob();
+            } catch (_e) { /* 캐시로 */ }
+        }
+        try {
+            if (window.caches) {
+                const hit = await caches.match(s, { ignoreSearch: false });
+                if (hit) return await hit.blob();
+            }
+        } catch (_e) { /* 그림으로 */ }
+        try {
+            const img = imgEl || Array.from(document.images).find((im) => im.currentSrc === s || im.src === s);
+            if (img && img.naturalWidth) {
+                const c = document.createElement('canvas');
+                c.width = img.naturalWidth; c.height = img.naturalHeight;
+                c.getContext('2d').drawImage(img, 0, 0);
+                return await new Promise((res) => c.toBlob(res, 'image/jpeg', 0.95));
+            }
+        } catch (_e) { /* 교차 출처 그림 등 */ }
+        return null;
+    }
+
+    /**
+     * 2026-10-16 사진을 기기에 저장: Android 앱(1.3.12+) → 갤러리(Pictures/스마트안전점검, MediaStore),
+     * 웹·PC → 파일 다운로드. 성공 여부를 돌려준다(실패해도 다른 동작에는 영향 없음).
+     */
+    window.bsaSaveImageToDevice = async function(src, fileName, opts) {
+        const quiet = !!(opts && opts.quiet);
+        const name = fileName || bsaPhotoFileName('사진');
+        try {
+            const blob = await bsaResolvePhotoBlob(src, opts && opts.img);
+            if (!blob) throw new Error('사진을 읽지 못했습니다');
+            const native = window.Capacitor?.isNativePlatform?.();
+            const G = window.Capacitor?.Plugins?.BsaGallery;
+            if (native && G && typeof G.saveImage === 'function') {
+                await G.saveImage({ data: await bsaBlobToDataUrl(blob), fileName: name });
+                if (!quiet) window.showToast('갤러리에 저장했습니다 (사진 › 스마트안전점검)', 'success', 2500);
+                return true;
+            }
+            if (native) {
+                if (!quiet) window.showToast('갤러리 저장은 앱을 최신 버전(1.3.12 이상)으로 업데이트하면 됩니다', 'warning', 5000);
+                return false;
+            }
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url; a.download = name; a.style.display = 'none';
+            document.body.appendChild(a); a.click();
+            setTimeout(() => { try { a.remove(); URL.revokeObjectURL(url); } catch (_e) { /* ignore */ } }, 4000);
+            if (!quiet) window.showToast('사진을 내려받았습니다', 'success', 2000);
+            return true;
+        } catch (e) {
+            console.warn('[사진 저장] 실패:', e);
+            if (!quiet) window.showToast('사진 저장 실패: ' + (e && e.message ? e.message : e), 'error', 4000);
+            return false;
+        }
+    };
+
+    /** 결함 창 전차/현차 사진의 저장 버튼 */
+    window.bsaDownloadDefectPhoto = function(ev, which, idx) {
+        if (ev) { ev.preventDefault(); ev.stopPropagation(); }
+        const list = which === 'prev' ? window._pendingPrevRoundPhotos : window._pendingPhotos;
+        const src = list && list[idx];
+        if (!src) return;
+        const n = (list.length > 1) ? String(idx + 1) : '';
+        void window.bsaSaveImageToDevice(src, bsaPhotoFileName(which === 'prev' ? '전차' : '현차', n));
+    };
 
     /**
      * 사진을 고르는 순간 열려 있던 결함 — 사진은 줄이는 작업(압축)이 끝나야 붙는데, 그 사이 창이 닫히거나
@@ -53804,7 +53919,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     window._justRegistering = false;
 
     // 앱 번호. 포팅하면 이 번호가 1 오르고, 같은 번호가 Storage releases/latest.json 에 올라간다.
-    window.BSA_APP_BUILD = { versionCode: 19, versionName: '1.3.11' };
+    window.BSA_APP_BUILD = { versionCode: 20, versionName: '1.3.12' };
 
     function isNativeAndroidApp() {
         try {

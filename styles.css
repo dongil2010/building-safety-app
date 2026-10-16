@@ -17073,3 +17073,26 @@ html body.bsa-eval-map-on #mobileBtnDeleteSelected, html body.bsa-eval-map-on #m
         letter-spacing: -0.04em;
     }
 }
+
+/* 2026-10-16 결함 핀 창: 상세 위치 입력칸이 전차 칸 폭을 넘어 현차 「촬영·추가」 버튼 밑으로 파고들던 문제.
+   전역 input 최소 폭이 1fr 칸보다 커서 넘쳤다 → 칸 안에 가두고, 현차 버튼은 사진 바로 아래 제자리에 둔다. */
+.defect-photo-pair > .defect-photo-slot,
+.defect-photo-slot-main,
+.defect-photo-location-under-prev { min-width: 0; max-width: 100%; }
+.defect-photo-location-under-prev .form-control,
+#defectLocation {
+    width: 100% !important;
+    min-width: 0 !important;
+    max-width: 100% !important;
+    box-sizing: border-box !important;
+}
+.defect-photo-slot-actions { margin-top: 0; position: relative; }
+/* 2026-10-16 결함 사진 저장(갤러리·다운로드) 버튼 */
+.defect-photo-save-btn {
+    position: absolute; left: 6px; bottom: 6px; z-index: 3;
+    width: 30px; height: 30px; border-radius: 50%; border: 0;
+    background: rgba(15, 23, 42, .72); color: #fff; font-size: .8rem;
+    display: flex; align-items: center; justify-content: center; cursor: pointer;
+}
+.defect-photo-save-btn.sm { width: 24px; height: 24px; font-size: .66rem; left: 3px; bottom: 3px; }
+.defect-photo-extra-item { position: relative; }
