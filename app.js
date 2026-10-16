@@ -10977,7 +10977,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     // 결함 종류 텍스트에 "상태양호"가 들어있으면 양호로 인식한다
     // (예: "접합부 상태양호", "단열재 상태양호"처럼 부재명과 붙여 쓴 경우도 포함)
     function isGoodDefectType(defectType) {
-        return String(defectType || '').includes('상태양호');
+        // 2026-10-16 보수완료·보수됨·보수함 등도 상태양호와 똑같이(core/good-type.js)
+        return (window.BsaGoodType ? window.BsaGoodType.isGoodDefectText(defectType) : String(defectType || '').includes('상태양호'));
     }
 
     // 결함(구조체/비구조체/마감재) 카테고리 → 스타일 설정 키 매핑 (색상/크기 공용)
@@ -27366,7 +27367,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             document.getElementById('defectType'),
             document.getElementById('defectTypeInput')
         ) || '';
-        if (!dType || dType === '상태양호') {
+        if (!dType || (typeof isGoodDefectType === 'function' ? isGoodDefectType(dType) : dType === '상태양호')) {
             if (typeof window.showToast === 'function') {
                 window.showToast('결함 종류를 먼저 선택하세요.', 'info', 2000);
             }
@@ -27701,7 +27702,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const parts = parseDefectTypeList(raw);
         if (!parts.length) return '개구부 주위 균열';
         return joinDefectTypeList(parts.map((t) => {
-            if (!t || t === '상태양호') return t;
+            if (!t || (typeof isGoodDefectType === 'function' ? isGoodDefectType(t) : t === '상태양호')) return t;
             if (/^개구부\s*주위/.test(t)) return t;
             return `개구부 주위 ${t}`;
         }));
@@ -30144,7 +30145,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     }
 
     function hasActionableDefectType(defectTypeStr) {
-        return parseDefectTypeList(defectTypeStr).some(t => t && t !== '상태양호');
+        return parseDefectTypeList(defectTypeStr).some(t => t && !(typeof isGoodDefectType === 'function' ? isGoodDefectType(t) : t === '상태양호'));
     }
 
     function getCauseKey(defectType) {
@@ -30168,13 +30169,13 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
     /** 복수 결함 종류 → 원인 프리셋 그룹(RC 균열 계열만 하나로 합침) */
     function getCauseDisplayGroups(defectTypeStr) {
-        const parts = parseDefectTypeList(defectTypeStr).filter(t => t && t !== '상태양호');
+        const parts = parseDefectTypeList(defectTypeStr).filter(t => t && !(typeof isGoodDefectType === 'function' ? isGoodDefectType(t) : t === '상태양호'));
         if (!parts.length) return [];
         const groups = [];
         let crackGroup = null;
         parts.forEach((part) => {
             const t = String(part || '').trim();
-            if (!t || t === '상태양호') return;
+            if (!t || (typeof isGoodDefectType === 'function' ? isGoodDefectType(t) : t === '상태양호')) return;
             if (isRcStructuralCrackKind(t)) {
                 if (!crackGroup) {
                     crackGroup = { key: '균열', label: '균열', types: [t], isCrackGroup: true };
@@ -30353,7 +30354,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             });
         });
         if (groupWrap) {
-            groupWrap.style.display = defectTypeStr && defectTypeStr !== '상태양호' ? '' : 'none';
+            groupWrap.style.display = defectTypeStr && !(typeof isGoodDefectType === 'function' ? isGoodDefectType(defectTypeStr) : defectTypeStr === '상태양호') ? '' : 'none';
         }
     }
 
@@ -31016,7 +31017,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 document.getElementById('defectComponentInput')
             );
             const presetList = getDefectTypePresetFor(cat, component) || categoryDefectPreset[cat] || [];
-            const defType = presetList.find(t => t !== '상태양호') || presetList[0] || '';
+            const defType = presetList.find(t => !(typeof isGoodDefectType === 'function' ? isGoodDefectType(t) : t === '상태양호')) || presetList[0] || '';
             updateDefectTypeDropdown(cat, defType);
             if (defType) {
                 const defCause = getDefaultFirstCauseFor(defType);
@@ -31082,7 +31083,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             document.getElementById('defectComponentInput')
         ) || '';
         const presetList = getDefectTypePresetFor(cat, component) || categoryDefectPreset[cat] || [];
-        const defType = presetList.find(t => t !== '상태양호') || presetList[0] || '';
+        const defType = presetList.find(t => !(typeof isGoodDefectType === 'function' ? isGoodDefectType(t) : t === '상태양호')) || presetList[0] || '';
         updateDefectTypeDropdown(cat, defType);
 
         if (defType) {

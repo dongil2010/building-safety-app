@@ -1278,7 +1278,8 @@
         if (opts.excludeGood) {
             var types = parseDefectTypeList(d.defectType);
             // "접합부 상태양호"처럼 부재명과 붙여 쓴 경우도 상태양호로 인식해 제외한다
-            if (!types.length || (types.length === 1 && String(types[0] || '').indexOf('상태양호') !== -1)) return false;
+            // 2026-10-16 보수완료·보수됨 등도 상태양호와 같이 제외(core/good-type.js)
+            if (!types.length || (types.length === 1 && (window.BsaGoodType ? window.BsaGoodType.isGoodDefectText(types[0]) : String(types[0] || '').indexOf('상태양호') !== -1))) return false;
         }
         if (opts.currentRoundOnly && typeof window.isPreviousRoundDefect === 'function') {
             if (window.isPreviousRoundDefect(d)) return false;

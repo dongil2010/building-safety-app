@@ -46,6 +46,8 @@
     }
 
     function isGoodContent(text) {
+        const G = root.BsaGoodType || (typeof require === 'function' ? (function () { try { return require('../core/good-type.js'); } catch (_e) { return null; } })() : null);
+        if (G) return G.isGoodDefectText(text);
         return /상태\s*양호/.test(String(text || ''));
     }
 

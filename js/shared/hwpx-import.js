@@ -131,7 +131,7 @@
         let category = '구조체';
         if (isMarkOn(nonStructMk) && !isMarkOn(structMk)) category = '비구조체';
         const parsed = splitInspectionContent(inspection);
-        const good = parsed.defectType === '상태양호';
+        const good = parsed.defectType === '상태양호' || !!(window.BsaGoodType && window.BsaGoodType.isGoodDefectText(parsed.defectType));
         return {
             no,
             location: floorLbl,
@@ -189,7 +189,7 @@
             cause = (cells[8] || '').trim();
         }
 
-        const good = defectType === '상태양호';
+        const good = defectType === '상태양호' || !!(window.BsaGoodType && window.BsaGoodType.isGoodDefectText(defectType));
         return {
             no,
             location,

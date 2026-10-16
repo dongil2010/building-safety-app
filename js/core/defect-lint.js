@@ -43,6 +43,8 @@
     }
 
     function isGood(d) {
+        const G = root.BsaGoodType || (typeof require === 'function' ? (function () { try { return require('./good-type.js'); } catch (_e) { return null; } })() : null);
+        if (G) return G.isGoodDefectText(textOf(d && d.defectType));
         return /상태\s*양호/.test(textOf(d && d.defectType));
     }
 
