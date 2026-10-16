@@ -204,7 +204,8 @@ const byShape = (ms, shape) => ms.filter((m) => m.shape === shape);
     assert.ok(page.includes("var SS = window.BSA.structShapes || null;"));
     assert.ok(page.includes("return el && el.value === 'shapes' && SS ? 'shapes' : 'marks';"), '칸이 없으면 기호 방식');
     assert.ok(page.includes('if (FILL_OPS.indexOf(fn) >= 0)'), '칠한 경로 표시');
-    assert.ok(/<script src="js\/core\/struct-shapes\.js\?v=[^"]+"><\/script>\s*<script src="js\/struct-plan-page\.js/.test(html), '페이지 스크립트보다 먼저 싣는다');
+    // 사이에 다른 core 스크립트(struct-ai.js, 2026-10-16)가 끼어도 된다
+    assert.ok(/<script src="js\/core\/struct-shapes\.js\?v=[^"]+"><\/script>\s*(<script src="js\/core\/[^"]+"><\/script>\s*)*<script src="js\/struct-plan-page\.js/.test(html), '페이지 스크립트보다 먼저 싣는다');
     assert.ok(html.includes('id="readMode"'));
     assert.ok(html.includes('<option value="shapes" selected>'), '기본은 실제 도형');
     assert.ok(/<input type="checkbox" id="sendOverlay">/.test(html), '구조도 그림은 고를 때만(기본 꺼짐)');

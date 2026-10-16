@@ -109,6 +109,11 @@ def main() -> None:
     if struct_page.exists():
         text = struct_page.read_text(encoding="utf-8")
         text = retoken(text, r'(src="js/[^"]+\.js)\?v=[^"]+"', r'\g<1>?v=' + SHORT + '"', "struct-plan.html 스크립트")
+        # 2026-10-16: 스캔 구조도 「AI로 읽기」도 같은 키를 쓴다
+        if gemini_key:
+            if "</head>" not in text:
+                raise SystemExit("[prepare-pages] struct-plan.html에 </head>가 없어 Gemini 키를 넣지 못했다.")
+            text = text.replace("</head>", inject + "</head>")
         struct_page.write_text(text, encoding="utf-8")
 
     sw = OUT / "sw.js"
