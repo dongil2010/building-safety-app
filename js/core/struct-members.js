@@ -135,6 +135,16 @@
             return c;
         });
     }
+    /** 기둥 크기(2026-10-16): 모든 기둥을 같은 크기의 정사각형으로 — 한 변 = 기둥 (가로+세로)/2 의 중간값. 가운데는 그대로 */
+    function columnSize(list) {
+        var v = (list || []).filter(function (d) { return d && d.type === '기둥'; }).map(function (d) { return (d.w + d.h) / 2; });
+        return v.length ? median(v) : 0;
+    }
+    function unifyColumns(list) {
+        var side = columnSize(list);
+        if (!side) return (list || []).slice();
+        return (list || []).map(function (d) { return d && d.type === '기둥' ? Object.assign({}, d, { w: side, h: side }) : d; });
+    }
 
     function countsByType(list) {
         var out = {};
@@ -305,7 +315,7 @@
 
     var api = { TYPES: TYPES, ACTIVE_TYPES: ACTIVE_TYPES, COLORS: COLORS, ensureMaps: ensureMaps, listFor: listFor, hasAny: hasAny, add: add, update: update, remove: remove,
         applyRecord: applyRecord, clear: clear, beamThickness: beamThickness, unifyThickness: unifyThickness, countsByType: countsByType, fitTwoPoints: fitTwoPoints, applyFit: applyFit, importMembers: importMembers,
-        hitTest: hitTest, splitRun: splitRun, overlayFor: overlayFor, setOverlay: setOverlay, removeOverlay: removeOverlay,
+        hitTest: hitTest, splitRun: splitRun, columnSize: columnSize, unifyColumns: unifyColumns, overlayFor: overlayFor, setOverlay: setOverlay, removeOverlay: removeOverlay,
         saveHandoff: saveHandoff, loadHandoff: loadHandoff, packFor: packFor, packHasContent: packHasContent, mergePackIntoState: mergePackIntoState };
     if (typeof module !== 'undefined' && module.exports) module.exports = api;
     if (root) { root.BSA = root.BSA || {}; root.BSA.structMembers = api; }

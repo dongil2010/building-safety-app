@@ -163,6 +163,13 @@
         var u = MS.unifyThickness(beams);
         var out = list.slice();
         idx.forEach(function (i, k) { out[i] = u[k]; });
+        // 기둥도 모두 같은 크기 정사각형으로(2026-10-16, 기호 방식의 이름 테두리는 빼고)
+        if (MS.unifyColumns) {
+            var ci = [], cs = [];
+            out.forEach(function (m, i) { if (m.shape === 'column' && !m.excluded) { ci.push(i); cs.push(m); } });
+            var uc = MS.unifyColumns(cs);
+            ci.forEach(function (i, k) { out[i] = uc[k]; });
+        }
         return out;
     }
     /** 읽어 둔 결과에서 화면 목록을 다시 만든다(바꾼 종류·뺀 것은 처음으로 돌아간다) */
@@ -257,16 +264,51 @@
     var AI_BTN = { '기둥': 'btnAiCol', '거더': 'btnAiGir', '빔': 'btnAiBeam' };
     var AI_NEXT = { '기둥': '거더', '거더': '빔', '빔': '' };
     /** 손으로 그릴 때와 같은 순서: ① 기둥 → 확인 → ② 거더(기둥 알려 줌) → 확인 → ③ 빔(기둥·거더 알려 줌). 그 종류만 새로 바꾼다 */
+    /**
+     * ① 예시로 기둥 찾기(2026-10-16, js/core/struct-raster.js) — 사람이 기둥 하나를 네모로 감싸면 그림 전체에서
+     * 똑같이 생긴 곳을 모두 기둥으로. 도면마다 기둥이 칠한 네모·빈 네모·동그라미로 달라 규칙·AI보다 정확하다.
+     * 찾은 기둥은 모두 예시와 같은 크기. 범위를 정했으면 그 안만.
+     */
+    function strictness() { var el = $('colStrict'); var v = el ? parseFloat(el.value) : 0.6; return Number.isFinite(v) ? v : 0.6; }
+    function runColumnMatch() {
+        var RS = window.BSA.structRaster, smp = st.colSample;
+        if (!RS || !st.base || !smp) return;
+        setStatus('예시와 같은 기둥을 찾는 중…');
+        setTimeout(function () {
+            try {
+                if (!st.baseImg || st.baseImg.src !== st.base) {
+                    st.baseImg = { src: st.base, img: st.base.getContext('2d').getImageData(0, 0, st.base.width, st.base.height) };
+                }
+                var s = st.scale, t0 = performance.now();
+                var hits = RS.matchColumns(st.baseImg.img, { x: smp.x0 * s, y: smp.y0 * s, w: (smp.x1 - smp.x0) * s, h: (smp.y1 - smp.y0) * s }, { threshold: strictness() });
+                var stamp = Date.now();
+                var found = hits.map(function (b, i) {
+                    return { id: 'sm_px' + stamp + '_' + (i + 1), shape: 'column', type: '기둥', label: '', ai: true, x: b.x / s, y: b.y / s, w: b.w / s, h: b.h / s };
+                }).filter(inRegion);
+                var cur = readMode() === 'ai' ? st.members : (st.aiMembers || []);
+                st.aiMembers = unifyBeams(cur.filter(function (m) { return m.type !== '기둥'; }).concat(found));
+                var sel = $('readMode');
+                if (sel) sel.value = 'ai';
+                applyMode();
+                syncAiButtons();
+                setStatus('기둥 ' + found.length + '개를 찾았습니다(예시와 같은 크기, ' + Math.round(performance.now() - t0) + 'ms). '
+                    + '너무 많이 잡혔으면 「엄격」, 빠졌으면 「느슨」으로 바꾸세요. 틀린 것은 눌러서 빼고, 다 확인했으면 「AI ② 거더」를 누르세요.', found.length ? 'ok' : 'warn');
+            } catch (err) {
+                console.error(err);
+                setStatus('기둥을 찾지 못했습니다: ' + (err && err.message ? err.message : err), 'warn');
+            }
+        }, 20);
+    }
     async function runAiStep(step) {
         if (!st.base || !AI) return;
-        if (!aiKey()) { setStatus('AI 키가 없습니다. 배포된 사이트(github.io)에서만 AI로 읽을 수 있습니다.', 'warn'); return; }
         var sel = $('readMode');
         var cur = readMode() === 'ai' ? st.members : (st.aiMembers || []);
         var keep = cur.filter(function (m) { return m.type !== step; });   // 이 종류는 새로 받은 것으로 바꾼다
         var known = keep.filter(function (m) { return !m.excluded; });
+        var r = st.region || { x0: 0, y0: 0, x1: st.base.width / st.scale, y1: st.base.height / st.scale };
+        if (!aiKey()) { setStatus('AI 키가 없습니다. 배포된 사이트(github.io)에서만 AI로 읽을 수 있습니다.', 'warn'); return; }
         if (step === '거더' && !known.some(function (m) { return m.type === '기둥'; })) { setStatus('기둥이 없습니다. 먼저 「AI ① 기둥」을 누르세요.', 'warn'); return; }
         if (step === '빔' && !known.some(function (m) { return m.type === '거더'; })) { setStatus('거더가 없습니다. 먼저 「AI ② 거더」를 누르세요.', 'warn'); return; }
-        var r = st.region || { x0: 0, y0: 0, x1: st.base.width / st.scale, y1: st.base.height / st.scale };
         var crop = { x0: r.x0, y0: r.y0, w: r.x1 - r.x0, h: r.y1 - r.y0 };
         st.aiBusy = true; syncAiButtons();
         setStatus('AI가 ' + step + '을(를) 찾는 중입니다… (큰 도면은 1분 가까이 걸릴 수 있습니다)');
@@ -302,6 +344,14 @@
             b.disabled = !AI || !st.base || !!st.aiBusy || !ready[t];
             b.classList.toggle('primary', !!st.base && t === nextStep);
         });
+        // ① 기둥은 예시로 찾기를 먼저 권한다(AI ① 기둥은 파랗게 하지 않음)
+        var sb = $('btnColSample');
+        if (sb) {
+            sb.disabled = !st.base || !window.BSA.structRaster;
+            sb.classList.toggle('primary', !!st.base && nextStep === '기둥');
+            var ac = $(AI_BTN['기둥']);
+            if (ac) ac.classList.remove('primary');
+        }
     }
 
     // ---------- 그리기 ----------
@@ -343,6 +393,13 @@
         if (r) {
             x.lineWidth = 3; x.setLineDash([12, 8]); x.strokeStyle = '#0f172a';
             x.strokeRect(Math.min(r.x0, r.x1) * s, Math.min(r.y0, r.y1) * s, Math.abs(r.x1 - r.x0) * s, Math.abs(r.y1 - r.y0) * s);
+            x.setLineDash([]);
+        }
+        if (st.colSample && readMode() === 'ai') {
+            // ① 기둥 예시(이것과 닮은 것을 찾았다)
+            var cs = st.colSample;
+            x.lineWidth = 3; x.setLineDash([6, 4]); x.strokeStyle = '#db2777';
+            x.strokeRect(cs.x0 * s - 4, cs.y0 * s - 4, (cs.x1 - cs.x0) * s + 8, (cs.y1 - cs.y0) * s + 8);
             x.setLineDash([]);
         }
         // 앱으로 보낼 때 쓰는 기준점 2개
@@ -424,7 +481,7 @@
     function bind() {
         var cv = $('view');
         cv.addEventListener('mousedown', function (ev) {
-            if (!st.base || !st.picking) return;
+            if (!st.base || !(st.picking || st.samplePicking)) return;
             var p = pagePoint(ev);
             st.drag = { x0: p.x, y0: p.y, x1: p.x, y1: p.y };
             ev.preventDefault();
@@ -439,9 +496,22 @@
             if (!st.drag) return;
             var d = st.drag;
             st.drag = null;
+            cv.style.cursor = '';
+            if (st.samplePicking) {
+                // ① 예시 기둥: 감싼 네모로 같은 모양 찾기
+                st.samplePicking = false;
+                var sb = $('btnColSample');
+                if (sb) sb.classList.remove('on');
+                st._justDragged = true;
+                if (Math.abs(d.x1 - d.x0) > 0.5 && Math.abs(d.y1 - d.y0) > 0.5) {
+                    st.colSample = { x0: Math.min(d.x0, d.x1), y0: Math.min(d.y0, d.y1), x1: Math.max(d.x0, d.x1), y1: Math.max(d.y0, d.y1) };
+                    runColumnMatch();
+                } else setStatus('기둥을 끌어서 네모로 감싸 주세요(누르기만 하면 안 됩니다).', 'warn');
+                redraw();
+                return;
+            }
             st.picking = false;
             $('btnRegion').classList.remove('on');
-            cv.style.cursor = '';
             if (Math.abs(d.x1 - d.x0) > 5 && Math.abs(d.y1 - d.y0) > 5) {
                 st.region = { x0: Math.min(d.x0, d.x1), y0: Math.min(d.y0, d.y1), x1: Math.max(d.x0, d.x1), y1: Math.max(d.y0, d.y1) };
             }
@@ -450,7 +520,7 @@
         });
         cv.addEventListener('click', function (ev) {
             if (st._justDragged) { st._justDragged = false; return; }
-            if (!st.base || st.picking) return;
+            if (!st.base || st.picking || st.samplePicking) return;
             if (st.refPicking) {
                 st.refs.push(pagePoint(ev));
                 if (st.refs.length >= 2) {
@@ -531,7 +601,7 @@
         // 끌어서 옮기기(범위 지정 중이 아닐 때). 조금이라도 끌었으면 그 뒤 클릭(기호 누르기·기준점 찍기)은 무시한다.
         var pan = null;
         cv.addEventListener('mousedown', function (ev) {
-            if (!st.base || st.picking || ev.button !== 0) return;
+            if (!st.base || st.picking || st.samplePicking || ev.button !== 0) return;
             pan = { x: ev.clientX, y: ev.clientY, sl: stage.scrollLeft, st: stage.scrollTop, moved: false };
         });
         window.addEventListener('mousemove', function (ev) {
@@ -586,6 +656,17 @@
             var b = $(AI_BTN[t]);
             if (b) b.addEventListener('click', function () { runAiStep(t); });
         });
+        // ① 예시로 기둥 찾기: 누르고 → 기둥 하나를 끌어서 감싸기. 닮은 정도를 바꾸면 같은 예시로 다시 찾는다
+        var smpBtn = $('btnColSample');
+        if (smpBtn) smpBtn.addEventListener('click', function () {
+            if (!st.base) return;
+            st.samplePicking = !st.samplePicking;
+            this.classList.toggle('on', st.samplePicking);
+            cv.style.cursor = st.samplePicking ? 'crosshair' : '';
+            if (st.samplePicking) setStatus('기둥 하나를 끌어서 네모로 감싸세요(기둥보다 조금 여유 있게). 크게 확대해서 감싸면 정확합니다.');
+        });
+        var strictSel = $('colStrict');
+        if (strictSel) strictSel.addEventListener('change', function () { if (st.colSample) runColumnMatch(); });
         var openFile = function (file) {
             if (!file) return;
             st.fileName = file.name;
