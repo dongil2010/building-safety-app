@@ -25267,9 +25267,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const api = memoApi();
         const floorKey = currentMemoFloorKey();
         if (!api || !floorKey || !state.bgImage) return null;
-        const text = await window.appPrompt('도면에 남길 주석을 적어 주세요. (결함이 아니며 조사표·번호에 들어가지 않습니다)', '', {
-            title: '도면 주석', okText: '저장', placeholder: '예) 천장 점검구 열림, 다음에 다시 확인'
-        });
+        const text = await promptDrawingMemoText();
         if (text == null || !api.cleanText(text)) return null;
         const memo = api.createMemo({ x: imgX, y: imgY, text, by: memoAuthorName() });
         if (!memo) return null;
@@ -25279,6 +25277,82 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         return memo;
     }
     window.createDrawingMemoAt = createDrawingMemoAt;
+
+    /**
+     * 2026-10-16 「줄바꿈 해서 저장하면 두줄 세줄로」: 새 주석 입력도 여러 줄(Enter = 줄바꿈, Ctrl+Enter = 저장).
+     * 예전 appPrompt는 한 줄 입력칸이라 줄을 바꿀 수 없었다. 저장 형식(text 문자열, \n 포함)은 그대로.
+     */
+    /**
+     * 2026-10-16 폰·태블릿: 키보드가 올라오면 주석 창을 「보이는 화면(visualViewport)」 안으로 줄여
+     * 입력칸·저장 버튼이 키보드에 가리지 않게. 끝나면 리스너 해제.
+     */
+    function bindMemoDialogToVisualViewport(ov) {
+        const vv = window.visualViewport;
+        if (!vv || !ov) return () => {};
+        const fit = () => {
+            ov.style.inset = 'auto';
+            ov.style.left = `${Math.round(vv.offsetLeft)}px`;
+            ov.style.top = `${Math.round(vv.offsetTop)}px`;
+            ov.style.width = `${Math.round(vv.width)}px`;
+            ov.style.height = `${Math.round(vv.height)}px`;
+        };
+        fit();
+        vv.addEventListener('resize', fit);
+        vv.addEventListener('scroll', fit);
+        return () => { vv.removeEventListener('resize', fit); vv.removeEventListener('scroll', fit); };
+    }
+
+    function promptDrawingMemoText(initial) {
+        return new Promise((resolve) => {
+            const old = document.getElementById('drawingMemoNewOverlay');
+            if (old) old.remove();
+            const ov = document.createElement('div');
+            ov.id = 'drawingMemoNewOverlay';
+            ov.className = 'drawing-memo-view-overlay';
+            ov.setAttribute('style', 'position:fixed;inset:0;z-index:10050;background:rgba(15,23,42,0.45);display:flex;align-items:center;justify-content:center;padding:12px;');
+            ov.innerHTML = `
+                <div role="dialog" aria-modal="true" aria-label="도면 주석" class="dm-card" style="background:#fff;color:#111827;border-radius:14px;box-shadow:0 12px 40px rgba(0,0,0,0.3);width:min(560px,100%);max-height:calc(100% - 24px);display:flex;flex-direction:column;overflow:hidden;">
+                    <div style="display:flex;align-items:center;gap:8px;padding:12px 14px;border-bottom:1px solid #e5e7eb;">
+                        <strong style="flex:1;font-size:1.05rem;">📝 도면 주석</strong>
+                        <button type="button" data-mn="cancel" aria-label="닫기" style="border:none;background:none;font-size:1.4rem;line-height:1;cursor:pointer;color:#6b7280;">&times;</button>
+                    </div>
+                    <div style="padding:12px 14px;flex:1;overflow:auto;">
+                        <div style="font-size:0.85rem;color:#6b7280;margin-bottom:6px;">도면에 남길 주석을 적어 주세요. 줄을 바꾸면 도면에도 여러 줄로 보입니다. (결함이 아니며 조사표·번호에 들어가지 않습니다)</div>
+                        <textarea data-mn-text rows="5" maxlength="300" placeholder="예) 천장 점검구 열림&#10;다음에 다시 확인" style="width:100%;box-sizing:border-box;font-size:1.2rem;line-height:1.5;padding:10px;border:1px solid #cbd5e1;border-radius:10px;resize:vertical;min-height:7em;font-family:inherit;"></textarea>
+                    </div>
+                    <div class="dm-foot" style="display:flex;gap:8px;justify-content:flex-end;padding:10px 14px;border-top:1px solid #e5e7eb;">
+                        <button type="button" class="btn btn-outline btn-sm" data-mn="cancel">취소</button>
+                        <button type="button" class="btn btn-primary btn-sm" data-mn="ok">저장</button>
+                    </div>
+                </div>`;
+            document.body.appendChild(ov);
+            const ta = ov.querySelector('[data-mn-text]');
+            ta.value = initial ? String(initial) : '';
+            const unbindVv = bindMemoDialogToVisualViewport(ov);
+            let done = false;
+            const finish = (v) => {
+                if (done) return;
+                done = true;
+                unbindVv();
+                document.removeEventListener('keydown', onKey, true);
+                ov.remove();
+                resolve(v);
+            };
+            const onKey = (e) => {
+                if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); finish(null); }
+                else if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); e.stopPropagation(); finish(ta.value); }
+            };
+            document.addEventListener('keydown', onKey, true);
+            ov.addEventListener('click', (e) => {
+                if (e.target === ov) { finish(null); return; }
+                const b = e.target.closest && e.target.closest('[data-mn]');
+                if (!b) return;
+                finish(b.dataset.mn === 'ok' ? ta.value : null);
+            });
+            requestAnimationFrame(() => { try { ta.focus(); } catch (_e) { /* ignore */ } });
+        });
+    }
+    window.promptDrawingMemoText = promptDrawingMemoText;
 
     /**
      * 2026-10-16 「메모는 볼 수도 있고 수정도 가능하게」: 도면 메모를 누르면 보기 겸 고치기 창 하나.
@@ -25300,7 +25374,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         ov.setAttribute('style', 'position:fixed;inset:0;z-index:10050;background:rgba(15,23,42,0.45);display:flex;align-items:center;justify-content:center;padding:12px;');
         ov.innerHTML = `
             <div class="drawing-memo-view-card" role="dialog" aria-modal="true" aria-label="도면 주석 보기·고치기"
-                style="background:#fff;color:#111827;border-radius:14px;box-shadow:0 12px 40px rgba(0,0,0,0.3);width:min(560px,100%);max-height:calc(100% - 24px);display:flex;flex-direction:column;overflow:hidden;">
+                class="dm-card" style="background:#fff;color:#111827;border-radius:14px;box-shadow:0 12px 40px rgba(0,0,0,0.3);width:min(560px,100%);max-height:calc(100% - 24px);display:flex;flex-direction:column;overflow:hidden;">
                 <div style="display:flex;align-items:center;gap:8px;padding:12px 14px;border-bottom:1px solid #e5e7eb;">
                     <strong style="font-size:1.05rem;">📝 도면 주석</strong>
                     <span style="flex:1;color:#6b7280;font-size:0.8rem;">${esc(memo.by ? memo.by + ' · ' : '')}${esc(when)}</span>
@@ -25312,7 +25386,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                         style="width:100%;box-sizing:border-box;font-size:1.2rem;line-height:1.5;padding:10px;border:1px solid #cbd5e1;border-radius:10px;resize:vertical;min-height:9em;font-family:inherit;">${esc(memo.text)}</textarea>
                     <div style="color:#6b7280;font-size:0.78rem;margin-top:4px;">고친 뒤 「저장」 · 다른 기기에도 반영됩니다</div>
                 </div>
-                <div style="display:flex;gap:8px;padding:10px 14px;border-top:1px solid #e5e7eb;">
+                <div class="dm-foot" style="display:flex;gap:8px;padding:10px 14px;border-top:1px solid #e5e7eb;">
                     <span data-mv-delmsg style="flex:1;color:#dc2626;font-size:0.85rem;align-self:center;"></span>
                     <button type="button" class="btn btn-outline btn-sm" data-mv="close">닫기</button>
                     <button type="button" class="btn btn-primary btn-sm" data-mv="save">저장</button>
@@ -25320,11 +25394,13 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             </div>`;
         document.body.appendChild(ov);
         const ta = ov.querySelector('[data-mv-text]');
+        const unbindVv = bindMemoDialogToVisualViewport(ov);
         return new Promise((resolve) => {
             let done = false;
             const finish = (r) => {
                 if (done) return;
                 done = true;
+                unbindVv();
                 document.removeEventListener('keydown', onKey, true);
                 ov.remove();
                 resolve(r);
@@ -25525,10 +25601,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 el.setAttribute('role', 'button');
                 ov.appendChild(el);
             }
-            const label = api.shortLabel(m.text, 22);
+            // 2026-10-16 「...으로 자르지 말고 다 보여주라」: 전체 내용, 저장된 줄바꿈 그대로(CSS white-space: pre)
             if (el.dataset.text !== m.text) {
                 el.dataset.text = m.text;
-                el.textContent = label;
+                el.textContent = String(m.text || '').replace(/\r\n?/g, '\n');
                 el.title = m.text + (m.by ? `\n— ${m.by}` : '');
                 el.setAttribute('aria-label', `도면 주석: ${m.text}`);
             }
@@ -25544,6 +25620,13 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     }
     window.syncDrawingMemoOverlay = syncDrawingMemoOverlay;
 
+    const DRAWING_MEMO_LINE_HEIGHT = 1.15;
+    /** 주석 글자를 줄 단위로(자르지 않음). 저장 형식은 \n 포함 문자열 그대로 */
+    function drawingMemoLines(text) {
+        return String(text == null ? '' : text).replace(/\r\n?/g, '\n').split('\n');
+    }
+    window.drawingMemoLines = drawingMemoLines;
+
     /** 한글·PDF 위치도: 「메모 출력」을 켰을 때만. ctx는 도면 원본 픽셀 좌표계 */
     function drawMemosForReport(ctx, buildingId, floorCode, imgW, imgH) {
         if (!readMemoPrintPref()) return 0;
@@ -25555,10 +25638,13 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const fs = getDrawingMemoFontSizeImg();
         const color = getDrawingMemoTextColor();
         ctx.save();
+        // 2026-10-16 자르지 않고 전체, 줄바꿈은 여러 줄(줄 간격 = 글자 크기 × 1.15, 화면 CSS line-height와 같음)
         list.forEach((m) => {
-            const text = api.shortLabel(m.text, 40);
-            drawOutlinedPinText(ctx, text, m.x, m.y, color, `bold ${fs}px ${DRAWING_MEMO_FONT_FAMILY}`, '#ffffff',
-                { textAlign: 'left', textBaseline: 'top' });
+            String(m.text == null ? '' : m.text).replace(/\r\n?/g, '\n').split('\n').forEach((line, i) => {
+                if (!line) return;
+                drawOutlinedPinText(ctx, line, m.x, m.y + i * fs * 1.15, color, `bold ${fs}px ${DRAWING_MEMO_FONT_FAMILY}`, '#ffffff',
+                    { textAlign: 'left', textBaseline: 'top' });
+            });
         });
         ctx.restore();
         return list.length;

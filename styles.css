@@ -16708,7 +16708,8 @@ html #tab-map .defect-list-section-scroll > .defect-list-item.is-important {
     font-weight: bold;
     font-size: 11px;
     line-height: 1.15;
-    white-space: nowrap;
+    /* 2026-10-16 주석 전체 + 저장된 줄바꿈 그대로 여러 줄(자동 줄바꿈은 안 함). 누르는·끄는 범위 = 이 상자 크기 */
+    white-space: pre;
     pointer-events: auto;
     touch-action: none;
     user-select: none;
@@ -16740,6 +16741,65 @@ html #tab-map .defect-list-section-scroll > .defect-list-item.is-important {
 .drawing-memo-opt { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
 html.layout-mobile .drawing-memo-bar,
 html.layout-tablet .drawing-memo-bar { top: auto; bottom: 5.8rem; border-radius: 16px; max-width: calc(100% - 4.5rem); }
+/* 2026-10-16 「모바일 버전은 디자인이 개떡같음」: 폰·태블릿 주석 바 = 어두운 카드 2줄(안내 / 옵션·끝내기), 줄바꿈·잘림 없이 */
+.drawing-memo-bar-text-short { display: none; }
+html.layout-mobile .drawing-memo-bar,
+html.layout-tablet .drawing-memo-bar {
+    display: grid;
+    grid-template-columns: auto auto 1fr;
+    align-items: center;
+    column-gap: 0.75rem;
+    row-gap: 0.45rem;
+    width: min(520px, calc(100% - 1.5rem));
+    max-width: none;
+    box-sizing: border-box;
+    padding: 0.6rem 0.75rem;
+    border-radius: 14px;
+    font-size: 0.9rem;
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
+}
+html.layout-mobile .drawing-memo-bar .drawing-memo-bar-text,
+html.layout-tablet .drawing-memo-bar .drawing-memo-bar-text { display: none; }
+html.layout-mobile .drawing-memo-bar .drawing-memo-bar-text-short,
+html.layout-tablet .drawing-memo-bar .drawing-memo-bar-text-short {
+    display: block;
+    grid-column: 1 / -1;
+    line-height: 1.35;
+    white-space: normal;
+    word-break: keep-all;
+}
+html.layout-mobile .drawing-memo-bar .drawing-memo-opt,
+html.layout-tablet .drawing-memo-bar .drawing-memo-opt { min-height: 36px; gap: 6px; }
+html.layout-mobile .drawing-memo-bar .drawing-memo-opt input,
+html.layout-tablet .drawing-memo-bar .drawing-memo-opt input { width: 20px; height: 20px; margin: 0; }
+html.layout-mobile .drawing-memo-bar #btnMemoBarDone,
+html.layout-tablet .drawing-memo-bar #btnMemoBarDone {
+    justify-self: end;
+    min-height: 38px;
+    padding: 0 1rem;
+    border-radius: 10px;
+    font-weight: 700;
+}
+/* 주석 입력·보기 창(공통 .dm-card): 폰·태블릿은 큰 버튼, 화면 폭에 맞는 가운데 카드 */
+html.layout-mobile .drawing-memo-view-overlay .dm-card,
+html.layout-tablet .drawing-memo-view-overlay .dm-card { width: min(560px, 100%) !important; border-radius: 16px !important; }
+html.layout-mobile .drawing-memo-view-overlay .dm-foot .btn,
+html.layout-tablet .drawing-memo-view-overlay .dm-foot .btn {
+    flex: 1 1 0;
+    min-height: 48px;
+    font-size: 1.05rem;
+    border-radius: 12px;
+    display: inline-flex !important;
+    align-items: center;
+    justify-content: center !important;
+    text-align: center;
+}
+html.layout-mobile .drawing-memo-view-overlay .dm-foot [data-mv-delmsg]:empty { display: none; }
+html.layout-mobile .drawing-memo-view-overlay textarea,
+html.layout-tablet .drawing-memo-view-overlay textarea { font-size: 16px; min-height: 6.5em !important; } /* 16px 이상 = iOS 확대 방지 */
+html.layout-mobile .drawing-memo-view-overlay [data-mv="del"],
+html.layout-mobile .drawing-memo-view-overlay [data-mv="close"],
+html.layout-mobile .drawing-memo-view-overlay [data-mn="cancel"] { min-height: 40px; min-width: 40px; }
 .btn-memo-mode.active { background: #ca8a04; color: #fff; border-color: #ca8a04; }
 .mobile-fab-memo.active { background: #ca8a04 !important; color: #fff !important; }
 @media print {
