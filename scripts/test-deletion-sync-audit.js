@@ -113,7 +113,9 @@ function testFloorDeleteTombstonesDispGroups() {
 async function testUndoRedoReconcile() {
     const src = extractFunction('function restoreDefectPhotosAfterUndo(') + '\n' + extractFunction('function reconcileDefectHistoryJump(')
         // 사진 ID는 결함 목록에서 읽는다(사진 고유 ID 전환 1단계) — app.js의 진짜 함수를 같이 싣는다
-        + '\n' + extractFunction('function defectPhotoIdAt(') + '\n' + extractFunction('function defectPhotoIdList(');
+        + '\n' + extractFunction('function defectPhotoIdAt(') + '\n' + extractFunction('function defectPhotoIdList(')
+        // 2026-10-16 되돌리기는 바뀐 갈래만 시각을 올린다
+        + '\n' + extractFunction('function defectHistoryBranchDiff(') + '\n' + extractFunction('function bsaSyncNow(') + '\n' + extractFunction('function bsaStampAfter(');
     const log = [];
     const dataOf = (ch) => 'data:image/jpeg;base64,' + ch.repeat(40);
     let releaseDelete;
@@ -126,7 +128,7 @@ async function testUndoRedoReconcile() {
     };
     const fn = new Function('window', 'untrackDefectDeletion', 'trackDefectDeletion', 'touchDefectUpdatedAt',
         'touchDefectPositionUpdatedAt', 'uploadDefectPhotos', 'deleteAllPhotosForDefect', 'markFloorKeyDirty',
-        'getPhotoDocId', 'persistPhotoUrlToIdb',
+        'getPhotoDocId', 'persistPhotoUrlToIdb', 'recordDefectPhotoState', 'stampDefectPhotosChangedIfSafe',
         src + '\nreturn reconcileDefectHistoryJump;')(
         window,
         (k, id) => log.push(['untrack', k, id]),
@@ -137,7 +139,9 @@ async function testUndoRedoReconcile() {
         (d) => { log.push(['delPhotos', d.id]); return Promise.resolve(); },
         (k) => log.push(['dirty', k]),
         (id, i, kind) => (kind === 'prev' ? `${id}_prev_${i}` : `${id}_${i}`),
-        (key) => { log.push(['idb', key]); return Promise.resolve(true); }
+        (key) => { log.push(['idb', key]); return Promise.resolve(true); },
+        () => {},
+        () => true
     );
     const tick = () => new Promise((r) => setTimeout(r, 0));
 

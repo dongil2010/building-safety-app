@@ -49,6 +49,8 @@ function makeCtx() {
         extractFunction('function assignDefectPhotoIds('),
         extractFunction('function defectPhotoIdAt('),
         extractFunction('function defectPhotoIdList('),
+        extractFunction('function bsaSyncNow('),
+        extractFunction('function bsaStampAfter('),
         extractFunction('function recordDefectPhotoState('),
         extractFunction('function syncDefectPhotoRefs('),
         extractFunction('async function pruneRemovedDefectPhotos('),

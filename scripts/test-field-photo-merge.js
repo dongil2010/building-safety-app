@@ -36,6 +36,8 @@ vm.createContext(ctx);
 vm.runInContext([
     extractFunction('function defectContentSnap('),
     extractFunction('function seedDefectContentSnaps('),
+    extractFunction('function bsaSyncNow('),
+    extractFunction('function bsaStampAfter('),
     extractFunction('function touchDefectUpdatedAt('),
     extractFunction('function recordDefectPhotoState('),
     'this.seed = seedDefectContentSnaps; this.touch = touchDefectUpdatedAt; this.photoState = recordDefectPhotoState;'

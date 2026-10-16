@@ -91,7 +91,7 @@
      */
     function applyMerge(list, plan, ops) {
         const o = ops || {};
-        const now = typeof o.now === 'function' ? o.now() : Date.now();
+        const now = typeof o.now === 'function' ? o.now() : ((typeof window !== 'undefined' && typeof window.bsaSyncNow === 'function') ? window.bsaSyncNow() : Date.now());
         const box = o.boxOf(plan.base);
         const arrows = [];
         const extras = [];
@@ -116,7 +116,7 @@
             d.groupNo = box.groupNo;
             d.no = box.groupNo;
             d.surveyNumbered = true;
-            d.groupUpdatedAt = now; // 동기화: 소속은 나중에 바꾼 쪽(sync-merge)
+            d.groupUpdatedAt = Math.max(now, (Number(d.groupUpdatedAt) || 0) + 1); // 동기화: 소속은 나중에 바꾼 쪽(sync-merge)
             d.x = box.x;
             d.y = box.y;
             d.targetX = tipX;
@@ -192,7 +192,7 @@
     function applyUnmerge(list, plan, ops) {
         const o = ops || {};
         const fmt = typeof o.formatNo === 'function' ? o.formatNo : (n) => `NO.${String(n).padStart(2, '0')}`;
-        const now = typeof o.now === 'function' ? o.now() : Date.now();
+        const now = typeof o.now === 'function' ? o.now() : ((typeof window !== 'undefined' && typeof window.bsaSyncNow === 'function') ? window.bsaSyncNow() : Date.now());
         const exclude = new Set(plan.pairs.map((p) => p.arrow.id));
         const used = usedMainNumbers(list, exclude);
         const out = [];
@@ -223,7 +223,7 @@
             // delete 대신 null: 동기화 병합(Object.assign 옛값+새값)에서 옛 mergedFrom이 되살아나지 않게
             a.mergedFrom = null;
             // 동기화: 서버에 남은 옛 groupId(통합 상태)가 이기지 않게 소속 변경 시각을 찍는다
-            a.groupUpdatedAt = now;
+            a.groupUpdatedAt = Math.max(now, (Number(a.groupUpdatedAt) || 0) + 1);
             if (typeof o.touch === 'function') o.touch(a);
             out.push({ id: a.id, no: a.no });
         });
@@ -257,7 +257,7 @@
         const arr = list || [];
         const o = ops || {};
         const fmt = typeof o.formatNo === 'function' ? o.formatNo : (n) => `NO.${String(n).padStart(2, '0')}`;
-        const now = typeof o.now === 'function' ? o.now() : Date.now();
+        const now = typeof o.now === 'function' ? o.now() : ((typeof window !== 'undefined' && typeof window.bsaSyncNow === 'function') ? window.bsaSyncNow() : Date.now());
         const stale = arr.filter((d) => d && !d.surveyExtra && d.mergedFrom === null
             && d.groupId && d.groupId !== d.id && !(Number(d.groupUpdatedAt) > 0));
         if (!stale.length) return [];
@@ -274,7 +274,7 @@
             delete d.groupNo;
             delete d.surveyNumbered;
             d.no = fmt(n);
-            d.groupUpdatedAt = now;
+            d.groupUpdatedAt = Math.max(now, (Number(d.groupUpdatedAt) || 0) + 1);
             d.updatedAt = Math.max(Number(d.updatedAt) || 0, now);
             out.push(d.id);
         });
@@ -286,7 +286,7 @@
             delete only.groupId;
             delete only.groupNo;
             if (only.surveyNumbered === false) delete only.surveyNumbered;
-            only.groupUpdatedAt = now;
+            only.groupUpdatedAt = Math.max(now, (Number(only.groupUpdatedAt) || 0) + 1);
             only.updatedAt = Math.max(Number(only.updatedAt) || 0, now);
             out.push(only.id);
         });

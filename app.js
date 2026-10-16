@@ -3610,7 +3610,7 @@ document.addEventListener('DOMContentLoaded', () => {
             defect.groupId = defect.id;
             defect.groupNo = stripDefectNoSuffix(defect.no || formatDefectNoSeq(1));
             // 동기화: 묶기·풀기는 groupUpdatedAt이 나중인 쪽을 따른다(sync-merge DEFECT_GROUP_FIELDS)
-            defect.groupUpdatedAt = Date.now();
+            defect.groupUpdatedAt = bsaStampAfter(defect.groupUpdatedAt);
             // 멤버가 1개일 때는 접미사 없음. 2개 이상일 때만 -1,-2 (normalizeDefectGroupNos)
             defect.no = defect.groupNo;
         } else if (!defect.groupNo) {
@@ -3739,10 +3739,10 @@ document.addEventListener('DOMContentLoaded', () => {
     /** 사용자 작업으로 묶음이 풀린 결함에 소속 변경 시각(동기화에서 서버의 옛 groupId가 되살아나지 않게) */
     function stampDefectsLeftGroup(defects, groupId, idsBefore) {
         if (!Array.isArray(defects) || !groupId || !idsBefore) return;
-        const now = Date.now();
+        const now = bsaSyncNow();
         defects.forEach((d) => {
             if (d && idsBefore.has(d.id) && d.groupId !== groupId) {
-                d.groupUpdatedAt = now;
+                d.groupUpdatedAt = Math.max(now, (Number(d.groupUpdatedAt) || 0) + 1);
                 d.updatedAt = Math.max(Number(d.updatedAt) || 0, now);
             }
         });
@@ -4001,9 +4001,48 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    // ---- 2026-10-16 동기화 시각: 서버 시계 보정(offset) + 늘 앞으로만(Math.max(지금, 이전+1)) ----
+    // 시계가 늦은 기기가 나중에 고쳐도 시각이 작게 찍혀 병합에서 지던 문제(위치·칸·사진·소속 시각).
+    try { window.__bsaClockOffsetMs = Number(localStorage.getItem('bsaClockOffsetMs')) || 0; } catch (_e) { window.__bsaClockOffsetMs = 0; }
+    function bsaSyncNow() {
+        return Date.now() + (Number(window.__bsaClockOffsetMs) || 0);
+    }
+    function bsaStampAfter(prev) {
+        return Math.max(bsaSyncNow(), (Number(prev) || 0) + 1);
+    }
+    window.bsaSyncNow = bsaSyncNow;
+    window.bsaStampAfter = bsaStampAfter;
+    let _bsaClockMeasuredAt = 0;
+    /** 서버(배포 호스트) 응답 Date 머리말로 이 기기 시계 차이를 잰다. 10분에 한 번, 실패·느린 응답은 무시 */
+    async function measureServerClockOffset(force) {
+        if (!force && Date.now() - _bsaClockMeasuredAt < 10 * 60 * 1000) return null;
+        if (typeof navigator !== 'undefined' && navigator.onLine === false) return null;
+        if (typeof fetch !== 'function' || !/^https?:$/.test(location.protocol)) return null;
+        _bsaClockMeasuredAt = Date.now();
+        try {
+            const t0 = Date.now();
+            const r = await fetch('web-version.json?clock=' + t0, { method: 'HEAD', cache: 'no-store' });
+            const t1 = Date.now();
+            const hd = r && r.headers && r.headers.get('Date');
+            if (!hd || t1 - t0 > 3000) return null;
+            const srv = Date.parse(hd);
+            if (!Number.isFinite(srv)) return null;
+            let off = (srv + 500) - (t0 + t1) / 2;   // Date 머리말은 초 단위 → 가운데 값
+            if (Math.abs(off) < 2000) off = 0;       // 2초 안쪽은 보정 안 함(흔들림)
+            if (Math.abs(off) > 7 * 24 * 3600 * 1000) return null;
+            window.__bsaClockOffsetMs = Math.round(off);
+            try { localStorage.setItem('bsaClockOffsetMs', String(window.__bsaClockOffsetMs)); } catch (_e) { /* ignore */ }
+            if (off) console.info('[시계] 서버와 차이 보정', Math.round(off), 'ms');
+            return off;
+        } catch (_e) {
+            return null;
+        }
+    }
+    window.measureServerClockOffset = measureServerClockOffset;
+
     function touchDefectUpdatedAt(defect) {
         if (!defect) return;
-        const now = Date.now();
+        const now = bsaStampAfter(Math.max(Number(defect.updatedAt) || 0, Number(defect.fieldAtThrough) || 0));
         const sm = window.BSA && window.BSA.syncMerge;
         if (sm && typeof sm.changedContentFields === 'function' && defect.id) {
             const prevContentTs = Number(defect.contentUpdatedAt) || Number(defect.updatedAt) || 0;
@@ -4016,7 +4055,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         // 칸별 기록 시작 전 모든 칸의 시각 = 지금까지의 내용 수정 시각
                         if (defect.contentBaseAt == null) defect.contentBaseAt = prevContentTs;
                     }
-                    diff.changed.forEach((k) => { defect.fieldAt[k] = now; });
+                    diff.changed.forEach((k) => { defect.fieldAt[k] = Math.max(now, (Number(defect.fieldAt[k]) || 0) + 1); });
                 }
             } else {
                 // 무엇이 바뀌었는지 모름 — 모든 칸을 지금 바뀐 것으로(예전 통째 병합과 같은 결과)
@@ -4035,12 +4074,35 @@ document.addEventListener('DOMContentLoaded', () => {
     /** 도면 위 마킹 위치/꼭짓점만 옮김 — 삭제보다 늦어도 부활시키지 않음 */
     function touchDefectPositionUpdatedAt(defect) {
         if (!defect) return;
-        defect.positionUpdatedAt = Date.now();
+        defect.positionUpdatedAt = bsaStampAfter(defect.positionUpdatedAt);
+    }
+
+    /**
+     * 2026-10-16 행·열 칸 이름(gridLoc)을 「자동으로」 바꿨을 때 — 위치 갈래처럼 다룬다.
+     * 칸 시각(fieldAt.gridLoc)만 찍고 내용 시각(contentUpdatedAt)은 그대로: 옮기기만 한 마킹이
+     * 「수정」으로 잡혀 다른 기기에서 지운 마킹을 되살리던 문제. 손으로 고친 gridLoc은 touchDefectUpdatedAt(내용).
+     */
+    function touchDefectGridLocAuto(defect) {
+        if (!defect) return;
+        const prevContent = Number(defect.contentUpdatedAt) || Number(defect.updatedAt) || 0;
+        if (!defect.fieldAt || typeof defect.fieldAt !== 'object') {
+            defect.fieldAt = {};
+            if (defect.contentBaseAt == null) defect.contentBaseAt = prevContent;
+        }
+        defect.fieldAt.gridLoc = bsaStampAfter(Math.max(Number(defect.fieldAt.gridLoc) || 0, prevContent));
+        // 칸 기록이 이 시각까지 맞다(다른 칸은 contentBaseAt/fieldAt 그대로)
+        defect.fieldAtThrough = Math.max(Number(defect.fieldAtThrough) || 0, prevContent);
+        const sm = window.BSA && window.BSA.syncMerge;
+        if (sm && typeof sm.defectContentHashes === 'function' && defect.id) {
+            const snap = defectContentSnap().get(defect.id);
+            if (snap) snap.gridLoc = sm.defectContentHashes({ gridLoc: defect.gridLoc }).gridLoc;
+            else defectContentSnap().set(defect.id, sm.defectContentHashes(defect));
+        }
     }
 
     // 늘 앞으로만 — touchDefectUpdatedAt의 contentUpdatedAt과 같은 이유(삭제 vs 수정 판정)
     function nextRecordStamp(rec) {
-        return Math.max(Date.now(), (Number(rec && rec.updatedAt) || 0) + 1);
+        return bsaStampAfter(rec && rec.updatedAt);
     }
 
     function touchNdtUpdatedAt(item) {
@@ -22473,6 +22535,31 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         return count - usable;
     }
 
+    /** 되돌리기 전후 결함 한 건 — 어느 갈래(내용·위치·사진·소속)가 바뀌었나 */
+    function defectHistoryBranchDiff(a, b) {
+        const sm = window.BSA && window.BSA.syncMerge;
+        const posFields = (sm && sm.DEFECT_POSITION_FIELDS) || ['x', 'y', 'targetX', 'targetY', 'vertices', 'points', 'areaX1', 'areaY1', 'areaX2', 'areaY2', 'areaAngle', 'width', 'height', 'rotation'];
+        const groupFields = ['groupId', 'groupNo', 'mergedFrom', 'surveyNumbered'];
+        const photoFields = ['photoIds', 'prevRoundPhotoIds', 'photos', 'prevRoundPhotos', 'photoUrls', 'prevRoundPhotoUrls'];
+        const pick = (o, fs) => JSON.stringify(fs.map((f) => (o && o[f] !== undefined) ? o[f] : null));
+        let content = false;
+        if (sm && typeof sm.defectContentHashes === 'function') {
+            const ha = sm.defectContentHashes(a || {});
+            const hb = sm.defectContentHashes(b || {});
+            const ks = new Set(Object.keys(ha).concat(Object.keys(hb)));
+            ks.forEach((k) => { if (k !== 'gridLoc' && ha[k] !== hb[k]) content = true; });
+        } else {
+            content = true;
+        }
+        return {
+            content,
+            position: pick(a, posFields) !== pick(b, posFields) || (a && a.gridLoc) !== (b && b.gridLoc),
+            photos: pick(a, photoFields) !== pick(b, photoFields),
+            group: pick(a, groupFields) !== pick(b, groupFields)
+        };
+    }
+    window.__bsaDefectHistoryBranchDiff = defectHistoryBranchDiff;
+
     function reconcileDefectHistoryJump(key, beforeList, afterList) {
         const beforeById = new Map((beforeList || []).filter((d) => d && d.id).map((d) => [d.id, d]));
         const afterById = new Map((afterList || []).filter((d) => d && d.id).map((d) => [d.id, d]));
@@ -22483,15 +22570,21 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 if (typeof untrackDefectDeletion === 'function') untrackDefectDeletion(key, id);
                 touchDefectUpdatedAt(d);
                 touchDefectPositionUpdatedAt(d);
-                if (d.groupId) d.groupUpdatedAt = Date.now();
+                if (d.groupId) d.groupUpdatedAt = bsaStampAfter(d.groupUpdatedAt);
                 photosNotRestored += restoreDefectPhotosAfterUndo(d, '');
                 photosNotRestored += restoreDefectPhotosAfterUndo(d, 'prev');
             } else if (JSON.stringify(prev) !== JSON.stringify(d)) {
-                touchDefectUpdatedAt(d);
-                touchDefectPositionUpdatedAt(d);
-                // 통합·통합 해제·묶음을 되돌린 경우 소속도 이 기기 것이 이기게
-                const groupSig = (x) => JSON.stringify([x.groupId || null, x.groupNo || null, x.mergedFrom || null, x.surveyNumbered]);
-                if (groupSig(prev) !== groupSig(d)) d.groupUpdatedAt = Date.now();
+                // 2026-10-16 실제로 바뀐 갈래의 시각만 올린다 — 예전엔 내용만 되돌려도 위치 시각까지 찍혀
+                // 다른 기기에서 그 사이 옮긴 위치를 덮었고, 이동만 되돌려도 내용 시각이 올라 삭제를 이겼다.
+                const br = defectHistoryBranchDiff(prev, d);
+                if (br.content) touchDefectUpdatedAt(d);
+                if (br.position) touchDefectPositionUpdatedAt(d);
+                if (br.photos) {
+                    recordDefectPhotoState(d, prev.photoIds, d.photoIds);
+                    stampDefectPhotosChangedIfSafe(d);
+                }
+                if (br.group) d.groupUpdatedAt = bsaStampAfter(Math.max(Number(d.groupUpdatedAt) || 0, Number(prev.groupUpdatedAt) || 0));
+                if (!br.content && (br.position || br.photos || br.group)) d.updatedAt = bsaStampAfter(d.updatedAt);
             }
         });
         beforeById.forEach((d, id) => {
@@ -25262,7 +25355,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             if (!chip) return;
             e.preventDefault();
             e.stopPropagation();
-            const st = memoImgToScreen(memoApi().listFor(window.state, currentMemoFloorKey()).find((m) => m.id === chip.dataset.id) || { x: 0, y: 0 });
+            const skId = chip.dataset.sketchId || '';
+            const st = skId
+                ? memoImgToScreen(sketchMemoPoint(skId) || { x: 0, y: 0 })
+                : memoImgToScreen(memoApi().listFor(window.state, currentMemoFloorKey()).find((m) => m.id === chip.dataset.id) || { x: 0, y: 0 });
             memoChipDrag = { id: chip.dataset.id, pointerId: e.pointerId, x0: e.clientX, y0: e.clientY, downAt: Date.now(), moved: 0, sx: st.sx, sy: st.sy, multi: false };
             try { chip.setPointerCapture(e.pointerId); } catch (_e) { /* ignore */ }
         });
@@ -25285,6 +25381,19 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             e.stopPropagation();
             if (cancelled || d.multi) { syncDrawingMemoOverlay(); return; }
             const floorKey = currentMemoFloorKey();
+            // 2026-10-16 손글씨 메모 항목(data-id = sk:…): 끌면 자리 옮김, 누르면 손글씨 팝업
+            if (String(d.id).indexOf('sk:') === 0) {
+                const skId = String(d.id).slice(3);
+                if (d.moved >= TOUCH_TAP_MAX_MOVE_PX) {
+                    const p = memoScreenToImg(d.sx + e.clientX - d.x0, d.sy + e.clientY - d.y0);
+                    const rec = sketchApi() && sketchApi().listFor(window.state, floorKey).find((r) => r.id === skId);
+                    if (rec && sketchApi().saveSheet(window.state, floorKey, Object.assign({}, rec, { x: p.x, y: p.y }))) commitMemoChange(floorKey);
+                    else syncDrawingMemoOverlay();
+                    return;
+                }
+                if (isCleanTouchTap({ downAt: d.downAt, maxMove: d.moved, multi: false }, Date.now())) window.openSketchMemo({ id: skId });
+                return;
+            }
             if (d.moved >= TOUCH_TAP_MAX_MOVE_PX) {
                 const p = memoScreenToImg(d.sx + e.clientX - d.x0, d.sy + e.clientY - d.y0);
                 if (memoApi().updateMemo(window.state, floorKey, d.id, { x: p.x, y: p.y })) commitMemoChange(floorKey);
@@ -25323,7 +25432,15 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     function syncDrawingMemoOverlay() {
         const api = memoApi();
         const floorKey = currentMemoFloorKey();
-        const list = (api && floorKey && state.bgImage && readMemoShowPref()) ? api.listFor(window.state, floorKey) : [];
+        const textList = (api && floorKey && state.bgImage && readMemoShowPref()) ? api.listFor(window.state, floorKey) : [];
+        // 2026-10-16 손글씨 메모도 도면 메모 목록 항목으로(「✍ 손글씨 메모-1, -2 …」). 누르면 팝업, 끌면 자리 옮김
+        const skApi = sketchApi();
+        const skList = (skApi && floorKey && state.bgImage && readMemoShowPref()) ? skApi.listFor(window.state, floorKey) : [];
+        const list = textList.concat(skList.map((r) => {
+            const pt = sketchMemoPoint(r.id) || { x: 0, y: 0 };
+            const label = '✍ ' + skApi.labelFor(window.state, floorKey, r.id) + (r.title ? ` · ${r.title}` : '');
+            return { id: 'sk:' + r.id, sketchId: r.id, x: pt.x, y: pt.y, text: label, by: r.by || '' };
+        }));
         let ov = document.getElementById('mapMemoOverlay');
         if (!list.length) {
             if (ov) ov.replaceChildren();
@@ -25349,12 +25466,13 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             let el = existing.get(m.id);
             if (!el) {
                 el = document.createElement('div');
-                el.className = 'map-memo-chip';
+                el.className = 'map-memo-chip' + (m.sketchId ? ' map-memo-sketch' : '');
                 el.dataset.id = m.id;
+                if (m.sketchId) el.dataset.sketchId = m.sketchId;
                 el.setAttribute('role', 'button');
                 ov.appendChild(el);
             }
-            const label = api.shortLabel(m.text, 22);
+            const label = m.sketchId ? m.text : api.shortLabel(m.text, 22);
             if (el.dataset.text !== m.text) {
                 el.dataset.text = m.text;
                 el.textContent = label;
@@ -25414,6 +25532,18 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     // ---- 2026-10-16 손글씨 메모(흰 종이 팝업, js/core/sketch-memo.js) ----
     // 폰·태블릿: 오른쪽 메모 버튼 → 이 팝업(「텍스트 메모」로 예전 도면 메모 모드 전환). PC·메모 막대: 「✍ 손글씨」 버튼.
     function sketchApi() { return window.BSA && window.BSA.sketchMemo; }
+    /** 손글씨 메모의 도면 자리(원본 픽셀). 옛 장(자리 없음)은 도면 왼쪽 위부터 차례로 */
+    function sketchMemoPoint(id) {
+        const api = sketchApi();
+        const floorKey = currentMemoFloorKey();
+        if (!api || !floorKey) return null;
+        const rec = api.listFor(window.state, floorKey).find((r) => r.id === id);
+        if (!rec) return null;
+        const img = state.bgImage;
+        return api.placedPoint(window.state, floorKey, rec, img ? (img.naturalWidth || img.width) : 1200, img ? (img.naturalHeight || img.height) : 800);
+    }
+    // 메모 모드에서 도면을 누르면 만들 메모 종류: 'text' | 'sketch'
+    let memoAddKind = 'text';
     const sketchUi = { el: null, canvas: null, ctx: null, layer: null, lctx: null, sheet: null, strokes: [], redo: [], undo: [],
         tool: 'pen', color: '#111827', width: 3, penSeen: false, drawing: null, floorKey: '', dirty: false, scale: 1 };
     window._bsaSketchUi = sketchUi;
@@ -25601,8 +25731,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const sel = sketchUi.el.querySelector('[data-sk-sheets]');
         const list = api.listFor(window.state, sketchUi.floorKey);
         const curId = sketchUi.sheet && sketchUi.sheet.id;
-        const opts = list.map((r, i) => `<option value="${r.id}">${i + 1}장${r.title ? ' · ' + String(r.title).replace(/[<>&"]/g, '') : ''}</option>`);
-        if (!curId || !list.some((r) => r.id === curId)) opts.push(`<option value="" selected>새 장(${list.length + 1})</option>`);
+        const opts = list.map((r, i) => `<option value="${r.id}">손글씨 메모-${i + 1}${r.title ? ' · ' + String(r.title).replace(/[<>&"]/g, '') : ''}</option>`);
+        if (!curId || !list.some((r) => r.id === curId)) opts.push(`<option value="" selected>새 손글씨 메모-${list.length + 1}</option>`);
         sel.innerHTML = opts.join('');
         if (curId) sel.value = curId;
     }
@@ -25614,7 +25744,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const ratio = (r.width > 10 && r.height > 10) ? r.width / r.height : 0.75;
         const w = ratio >= 1 ? 1600 : Math.round(1600 * ratio);
         const h = ratio >= 1 ? Math.round(1600 / ratio) : 1600;
-        sketchUi.sheet = rec ? { id: rec.id, title: rec.title || '', w: rec.w, h: rec.h, createdAt: rec.createdAt } : { id: '', title: '', w, h };
+        sketchUi.sheet = rec ? { id: rec.id, title: rec.title || '', w: rec.w, h: rec.h, createdAt: rec.createdAt, x: rec.x, y: rec.y }
+            : { id: '', title: '', w, h, x: sketchUi.newAt ? sketchUi.newAt.x : undefined, y: sketchUi.newAt ? sketchUi.newAt.y : undefined };
         sketchUi.strokes = rec ? (rec.strokes || []).map((s) => ({ c: s.c, w: s.w, e: s.e, p: s.p.slice() })) : [];
         sketchUi.undo = [];
         sketchUi.redo = [];
@@ -25635,6 +25766,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         }
         const rec = api.saveSheet(window.state, sketchUi.floorKey, {
             id: sketchUi.sheet.id, title: sketchUi.sheet.title, w: sketchUi.sheet.w, h: sketchUi.sheet.h,
+            x: sketchUi.sheet.x, y: sketchUi.sheet.y,
             strokes: sketchUi.strokes, by: (typeof memoAuthorName === 'function') ? memoAuthorName() : ''
         });
         if (!rec) return null;
@@ -25677,6 +25809,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         document.documentElement.classList.add('bsa-sketch-open');
         const list = api.listFor(window.state, floorKey);
         const want = opts && opts.id ? list.find((r) => r.id === opts.id) : null;
+        sketchUi.newAt = (opts && opts.at) ? { x: Math.round(opts.at.x), y: Math.round(opts.at.y) } : null;
         requestAnimationFrame(() => sketchOpenSheet(want || (opts && opts.fresh ? null : list[list.length - 1]) || null));
         return true;
     };
@@ -25689,9 +25822,19 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             b.type = 'button';
             b.className = 'btn btn-sm btn-outline drawing-memo-sketch-btn';
             b.setAttribute('data-sketch-open', '1');
-            b.innerHTML = '✍ 손글씨';
-            b.title = '흰 종이에 손글씨·그림 메모(층별 여러 장)';
-            b.addEventListener('click', (e) => { e.preventDefault(); window.openSketchMemo(); });
+            b.innerHTML = '✍ 손글씨로 추가';
+            b.title = '켜면 도면을 누른 자리에 손글씨 메모(손글씨 메모-1, -2 …)를 추가합니다. 끄면 글 메모';
+            b.setAttribute('aria-pressed', 'false');
+            b.addEventListener('click', (e) => {
+                e.preventDefault();
+                memoAddKind = memoAddKind === 'sketch' ? 'text' : 'sketch';
+                b.classList.toggle('active', memoAddKind === 'sketch');
+                b.setAttribute('aria-pressed', memoAddKind === 'sketch' ? 'true' : 'false');
+                const t = bar.querySelector('.drawing-memo-bar-text');
+                if (t) t.textContent = memoAddKind === 'sketch'
+                    ? '✍ 도면을 눌러 손글씨 메모 추가 · 메모를 끌어 옮기기 · 눌러서 열기'
+                    : '📝 도면을 눌러 메모 추가 · 메모를 끌어 옮기기 · 눌러서 고치기/지우기';
+            });
             bar.appendChild(b);
         }
     })();
@@ -25714,6 +25857,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const rect = elements.planCanvas.getBoundingClientRect();
         if (state.mode === 'COUNT') { countTapAt(tap.clientX - rect.left, tap.clientY - rect.top); return true; }
         const p = memoScreenToImg(tap.clientX - rect.left, tap.clientY - rect.top);
+        if (memoAddKind === 'sketch' && typeof window.openSketchMemo === 'function') {
+            window.openSketchMemo({ fresh: true, at: p });
+            return true;
+        }
         createDrawingMemoAt(p.x, p.y);
         return true;
     }
@@ -35707,6 +35854,11 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     };
 
     window.removePendingPhoto = async function(idx) {
+        // 2026-10-16 사진을 다 받기 전엔 지움 기록을 남길 수 없다 → 지운 사진이 다른 기기 것으로 되살아남. 받은 뒤에 지우게.
+        if (window._defectPhotosComplete === false) {
+            window.showToast?.('사진을 아직 다 받지 못했습니다. 사진을 다 받은 뒤(온라인에서 잠시 후) 다시 지워 주세요.', 'warning', 4500);
+            return;
+        }
         if (!await window.confirmDelete('이 사진을 삭제할까요?')) return;
         if (window._pendingPhotos) {
             window._pendingPhotos.splice(idx, 1);
@@ -36565,7 +36717,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             console.warn('[사진] 사진을 다 받지 못한 상태라 사진 변경 시각을 찍지 않습니다(병합은 합집합 유지):', defect.id);
             return false;
         }
-        defect.photosUpdatedAt = Date.now();
+        defect.photosUpdatedAt = bsaStampAfter(defect.photosUpdatedAt);
         return true;
     }
 
@@ -36578,7 +36730,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     function recordDefectPhotoState(defect, beforeIds, afterIds) {
         if (!defect) return;
         const state = (defect.photoState && typeof defect.photoState === 'object') ? defect.photoState : {};
-        const now = Date.now();
+        let maxAbs = 0;
+        Object.keys(state).forEach((k) => { maxAbs = Math.max(maxAbs, Math.abs(Number(state[k]) || 0)); });
+        const now = bsaStampAfter(maxAbs);
         const after = new Set((Array.isArray(afterIds) ? afterIds : []).filter(Boolean));
         after.forEach((pid) => {
             if (Number(state[pid]) > 0) state[pid] = -now;   // 지웠던 사진을 다시 넣음
@@ -36588,10 +36742,19 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 if (pid && !after.has(pid)) state[pid] = now;
             });
         }
-        // 오래 쌓이지 않게: 지금 목록에 없는 기록은 최근 60개만
+        // 2026-10-16 순서(대표 사진)가 바뀌었으면 순서 시각 — 병합에서 순서만 따로 고른다(sync-merge photoOrderAt)
+        const bArr = (Array.isArray(beforeIds) ? beforeIds : []).filter((pid) => pid && after.has(pid));
+        const bSet = new Set(bArr);
+        const aArr = Array.from(after).filter((pid) => bSet.has(pid));
+        if (bArr.length > 1 && bArr.join('|') !== aArr.join('|')) defect.photoOrderAt = bsaStampAfter(defect.photoOrderAt);
+        // 2026-10-16 지움 기록 정리: 개수(60개)가 아니라 기간 — 90일 지난 것만 지움(오래 오프라인이던 기기의 옛 사진이
+        // 기록이 잘려 되살아나지 않게). 아주 많이 쌓이면(1000개 넘게) 오래된 것부터.
+        const cutoff = bsaSyncNow() - 90 * 24 * 3600 * 1000;
         const gone = Object.keys(state).filter((pid) => !after.has(pid))
             .sort((a, b) => Math.abs(Number(state[b])) - Math.abs(Number(state[a])));
-        gone.slice(60).forEach((pid) => { delete state[pid]; });
+        gone.forEach((pid, i) => {
+            if (Math.abs(Number(state[pid]) || 0) < cutoff || i >= 1000) delete state[pid];
+        });
         defect.photoState = state;
     }
 
@@ -38055,11 +38218,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     if (btnModeMemo) btnModeMemo.addEventListener('click', () => setDrawMode(state.mode === 'MEMO' ? 'PAN' : 'MEMO'));
     const mobileBtnModeMemo = document.getElementById('mobileBtnModeMemo');
     // 2026-10-16 폰·태블릿 오른쪽 메모 버튼: 손글씨 팝업(팝업 안 「텍스트 메모」로 예전 메모 모드). 메모 모드 중이면 예전처럼 끈다.
-    if (mobileBtnModeMemo) mobileBtnModeMemo.addEventListener('click', () => {
-        if (state.mode === 'MEMO') { setDrawMode('PAN'); return; }
-        if (typeof window.openSketchMemo === 'function' && window.openSketchMemo()) return;
-        setDrawMode('MEMO');
-    });
+    // 2026-10-16 사용자 요청: 손글씨도 메모 모드(메모 목록)에서 추가 — 버튼은 예전처럼 메모 모드 켜기/끄기
+    if (mobileBtnModeMemo) mobileBtnModeMemo.addEventListener('click', () => setDrawMode(state.mode === 'MEMO' ? 'PAN' : 'MEMO'));
     ['btnModeCount', 'mobileBtnModeCount'].forEach((id) => {
         const b = document.getElementById(id);
         if (b) b.addEventListener('click', (e) => { e.preventDefault(); setDrawMode(state.mode === 'COUNT' ? 'PAN' : 'COUNT'); });
@@ -39356,6 +39516,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const G = gridLib();
         if (!G || !d) return false;
         const fc = floorCode || state.currentFloor;
+        const locBefore = d.location;
         let changed = migrateLegacyGridLocation(d, fc);
         const next = computeGridAutoLocationForPoints(getDefectGridPoints(d), d.component);
         if (next == null) {
@@ -39374,7 +39535,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             changed = true;
         }
         if (changed) {
-            touchDefectUpdatedAt(d);
+            // 위치칸(내용)까지 바뀐 옛 데이터 정리는 내용 수정, 칸 이름만 바뀐 건 위치 갈래(2026-10-16)
+            if (d.location !== locBefore) touchDefectUpdatedAt(d);
+            else touchDefectGridLocAuto(d);
             const openId = document.getElementById('defectPinId')?.value;
             if (openId && openId === d.id && elements.defectModal && elements.defectModal.classList.contains('open')) {
                 refreshGridLocHintInModal(d.gridLoc || '');
@@ -61751,6 +61914,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     }
 
     async function syncStateToFirebase() {
+        // 2026-10-16 서버 시계 차이 측정(10분에 한 번, 기다리지 않음) — 이후 찍는 동기화 시각에 반영
+        try { void measureServerClockOffset(false); } catch (_e) { /* ignore */ }
         if (!db || !window.state.companyId || !navigator.onLine) return;
         // 옛 버전 코드로는 클라우드에 쓰지 않는다. (확인은 await 뒤에 하고, 아래 in-flight
         // 확인·설정은 동기로 붙여 둬야 동시 호출이 둘 다 통과하지 않는다)

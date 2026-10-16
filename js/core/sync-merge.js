@@ -371,7 +371,7 @@
     // -----------------------------------------------------------------------------------------
     var NON_CONTENT_FIELDS = new Set([
         'id', 'no', 'groupNo', 'cadNo', 'isCadImported', 'groupId', 'surveyExtra', 'surveyNumbered', 'mergedFrom',
-        'updatedAt', 'contentUpdatedAt', 'positionUpdatedAt', 'groupUpdatedAt', 'photosUpdatedAt',
+        'updatedAt', 'contentUpdatedAt', 'positionUpdatedAt', 'groupUpdatedAt', 'photosUpdatedAt', 'photoOrderAt',
         'fieldAt', 'contentBaseAt', 'fieldAtThrough', 'photoState',
         'photos', 'photoIds', 'photoUrls', 'prevRoundPhotos', 'prevRoundPhotoIds', 'prevRoundPhotoUrls'
     ].concat(DEFECT_POSITION_FIELDS, DEFECT_GROUP_FIELDS));
@@ -523,6 +523,18 @@
         }
         newerIds.forEach(keep);
         olderIds.forEach(keep);
+        // 2026-10-16 순서(대표 사진)는 따로: 순서를 나중에 바꾼 쪽(photoOrderAt) 순서 → 그쪽이 모르는(상대가 추가한) 사진은 뒤에
+        var so = Number(serverRec.photoOrderAt) || 0;
+        var lo = Number(localRec.photoOrderAt) || 0;
+        if (so || lo) {
+            var orderIds = lo > so ? lIds : sIds;
+            var kept = new Set(out);
+            var re = [];
+            var reSeen = new Set();
+            orderIds.forEach(function (pid) { if (kept.has(pid) && !reSeen.has(pid)) { reSeen.add(pid); re.push(pid); } });
+            out.forEach(function (pid) { if (!reSeen.has(pid)) { reSeen.add(pid); re.push(pid); } });
+            out = re;
+        }
         return { ids: out, state: state };
     }
 
@@ -586,6 +598,11 @@
                 merged.no = groupSide.no;
             }
             merged.groupUpdatedAt = Math.max(serverGroupTs, localGroupTs);
+            // 2026-10-16 소속이 갈렸으면 NO.박스 자리(x, y)도 소속을 정한 쪽 것 — 풀린 마킹이 옛 공유 박스 자리에
+            // 겹쳐 남거나, 묶인 마킹이 혼자 옛 자리에 남지 않게. 화살표 끝·영역은 위치 시각 규칙 그대로.
+            if (String(serverRec.groupId || '') !== String(localRec.groupId || '')) {
+                ['x', 'y'].forEach(function (f) { if (groupSide[f] !== undefined) merged[f] = groupSide[f]; });
+            }
         }
 
         var serverPhotoIds = Array.isArray(serverRec.photoIds) ? serverRec.photoIds : [];
@@ -595,6 +612,9 @@
             // 사진 ID 단위(2026-09-29) — 고유 ID라 양쪽 이미지·URL을 섞어 써도 된다
             idMerged = mergePhotoIdLists(serverRec, localRec);
             merged.photoState = idMerged.state;
+            if (serverRec.photoOrderAt || localRec.photoOrderAt) {
+                merged.photoOrderAt = Math.max(Number(serverRec.photoOrderAt) || 0, Number(localRec.photoOrderAt) || 0);
+            }
             merged.photosUpdatedAt = Math.max(Number(serverRec.photosUpdatedAt) || 0, Number(localRec.photosUpdatedAt) || 0);
             if (idMerged.ids.length) {
                 merged.photoIds = idMerged.ids;
@@ -909,6 +929,7 @@
         getDefectContentUpdatedAt: getDefectContentUpdatedAt,
         getDefectPositionUpdatedAt: getDefectPositionUpdatedAt,
         getDefectGroupUpdatedAt: getDefectGroupUpdatedAt,
+        DEFECT_POSITION_FIELDS: DEFECT_POSITION_FIELDS,
         mergeDeletedIdsMaps: mergeDeletedIdsMaps,
         mergeDeletedAtMaps: mergeDeletedAtMaps,
         pickImportedText: pickImportedText,

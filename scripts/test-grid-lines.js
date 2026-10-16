@@ -431,6 +431,8 @@ if (fs.existsSync(appPath)) {
         extractDefectLocationDetail: (loc) => String(loc || '').replace(/^1F\s*/, ''),
         composeDefectLocation: (room) => `1F ${room}`.trim(),
         touchDefectUpdatedAt: (d) => { d.updatedAt = (d.updatedAt || 0) + 1; },
+        // 2026-10-16 자동 칸 이름은 위치 갈래(칸 시각만)
+        touchDefectGridLocAuto: (d) => { d.fieldAt = d.fieldAt || {}; d.fieldAt.gridLoc = (d.fieldAt.gridLoc || 0) + 1; },
         filterMapPlacedDefects: (list) => list,
         getCurrentFloorDefects: () => floorDefects,
         saveStateToLocalStorage: () => { saves.n += 1; },

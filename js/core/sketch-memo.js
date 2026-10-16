@@ -59,13 +59,40 @@
             w: Math.max(100, Math.round(Number(sheet.w) || (cur && cur.w) || 1200)),
             h: Math.max(100, Math.round(Number(sheet.h) || (cur && cur.h) || 1600)),
             strokes: strokes,
+            // 2026-10-16 도면 메모 목록 항목: 도면 위 자리(원본 픽셀). 없으면 화면에서 차례대로 자리를 정해 보여 준다
+            x: pickNum(sheet.x, cur && cur.x),
+            y: pickNum(sheet.y, cur && cur.y),
             by: sheet.by || (cur && cur.by) || '',
             createdAt: (cur && cur.createdAt) || Number(sheet.createdAt) || t,
             updatedAt: Math.max(t, ((cur && cur.updatedAt) || 0) + 1)
         };
+        if (rec.x == null) delete rec.x;
+        if (rec.y == null) delete rec.y;
         if (cur) list[list.indexOf(cur)] = rec; else list.push(rec);
         // 같은 id 묘비가 있으면(지운 뒤 되돌리기 등) 새 저장이 더 나중이라 병합에서 살아남는다
         return rec;
+    }
+
+    function pickNum(a, b) {
+        if (a != null && isFinite(Number(a))) return Math.round(Number(a));
+        if (b != null && isFinite(Number(b))) return Math.round(Number(b));
+        return null;
+    }
+
+    /** 메모 목록 이름: 손글씨 메모-1, -2 … (만든 순서) */
+    function labelFor(st, floorKey, id) {
+        var list = listFor(st, floorKey);
+        var i = list.findIndex(function (r) { return r.id === id; });
+        return '손글씨 메모-' + (i >= 0 ? i + 1 : list.length + 1);
+    }
+
+    /** 자리가 없는 옛 장(팝업 전용 시절) → 도면 왼쪽 위부터 차례로(모든 기기에서 같은 자리, 저장은 안 함) */
+    function placedPoint(st, floorKey, rec, imgW, imgH) {
+        if (rec && rec.x != null && rec.y != null) return { x: Number(rec.x), y: Number(rec.y), legacy: false };
+        var list = listFor(st, floorKey).filter(function (r) { return r.x == null || r.y == null; });
+        var i = Math.max(0, list.findIndex(function (r) { return r.id === (rec && rec.id); }));
+        var W = Number(imgW) || 1200, H = Number(imgH) || 800;
+        return { x: Math.round(W * 0.04), y: Math.round(H * 0.06 + i * H * 0.06), legacy: true };
     }
 
     function deleteSheet(st, floorKey, id) {
@@ -86,7 +113,9 @@
     function packFor(st, floorKey) {
         return {
             items: listFor(st, floorKey).map(function (m) {
-                return { id: m.id, title: m.title || '', w: m.w, h: m.h, strokes: m.strokes || [], by: m.by || '', createdAt: m.createdAt || 0, updatedAt: m.updatedAt || 0 };
+                var o = { id: m.id, title: m.title || '', w: m.w, h: m.h, strokes: m.strokes || [], by: m.by || '', createdAt: m.createdAt || 0, updatedAt: m.updatedAt || 0 };
+                if (m.x != null && m.y != null) { o.x = m.x; o.y = m.y; }
+                return o;
             }),
             deletedIds: ((st && st.deletedSketchIds) || {})[floorKey] || [],
             deletedAt: ((st && st.deletedSketchAt) || {})[floorKey] || {}
@@ -149,6 +178,8 @@
         listFor: listFor,
         saveSheet: saveSheet,
         deleteSheet: deleteSheet,
+        labelFor: labelFor,
+        placedPoint: placedPoint,
         packFor: packFor,
         packHasContent: packHasContent,
         mergePackIntoState: mergePackIntoState,

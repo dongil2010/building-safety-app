@@ -17128,3 +17128,7 @@ html.bsa-sketch-open, html.bsa-sketch-open body { overscroll-behavior: none; }
     touch-action: pan-x pan-y;
     overscroll-behavior-y: auto;
 }
+
+/* 2026-10-16 손글씨 메모 = 도면 메모 목록 항목 */
+.drawing-memo-sketch-btn.active { background: #2563eb; color: #fff; border-color: #2563eb; }
+.map-memo-chip.map-memo-sketch { font-style: italic; }
