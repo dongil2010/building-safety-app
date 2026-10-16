@@ -25280,27 +25280,92 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     }
     window.createDrawingMemoAt = createDrawingMemoAt;
 
-    async function openDrawingMemoMenu(memoId) {
+    /**
+     * 2026-10-16 「메모는 볼 수도 있고 수정도 가능하게」: 도면 메모를 누르면 보기 겸 고치기 창 하나.
+     * 큰 글씨 여러 줄 입력칸(줄바꿈 유지 — 예전 한 줄 입력칸은 줄바꿈이 사라졌다) + 저장·지우기·닫기.
+     * 저장은 updateMemo(updatedAt 늘 앞으로) → commitMemoChange(층 묶음 dirty·저장·동기화) — 예전과 같은 길.
+     */
+    function openDrawingMemoMenu(memoId) {
         const api = memoApi();
         const floorKey = currentMemoFloorKey();
         const memo = api && api.listFor(window.state, floorKey).find((m) => m.id === memoId);
-        if (!memo) return;
-        const pick = await window.appChoose(memo.text, [
-            { label: '내용 고치기' },
-            { label: '지우기', detail: '다른 기기에서도 지워집니다' }
-        ], { title: '도면 메모', okText: '확인' });
-        if (pick === 0) {
-            const text = await window.appPrompt('메모 내용', memo.text, { title: '도면 메모 고치기', okText: '저장' });
-            if (text == null) return;
-            if (!api.cleanText(text)) {
-                window.showToast?.('빈 메모는 저장하지 않습니다. 지우려면 「지우기」를 고르세요.', 'info', 2500);
-                return;
-            }
-            if (api.updateMemo(window.state, floorKey, memoId, { text })) commitMemoChange(floorKey);
-        } else if (pick === 1) {
-            const ok = await window.appConfirm('이 메모를 지울까요?', { title: '도면 메모' });
-            if (ok && api.deleteMemo(window.state, floorKey, memoId)) commitMemoChange(floorKey);
-        }
+        if (!memo) return Promise.resolve(false);
+        const old = document.getElementById('drawingMemoViewOverlay');
+        if (old) old.remove();
+        const esc = (t) => String(t == null ? '' : t).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+        const when = memo.updatedAt ? new Date(Number(memo.updatedAt)).toLocaleString('ko-KR', { hour12: false }) : '';
+        const ov = document.createElement('div');
+        ov.id = 'drawingMemoViewOverlay';
+        ov.className = 'drawing-memo-view-overlay';
+        ov.setAttribute('style', 'position:fixed;inset:0;z-index:10050;background:rgba(15,23,42,0.45);display:flex;align-items:center;justify-content:center;padding:12px;');
+        ov.innerHTML = `
+            <div class="drawing-memo-view-card" role="dialog" aria-modal="true" aria-label="도면 메모 보기·고치기"
+                style="background:#fff;color:#111827;border-radius:14px;box-shadow:0 12px 40px rgba(0,0,0,0.3);width:min(560px,100%);max-height:calc(100% - 24px);display:flex;flex-direction:column;overflow:hidden;">
+                <div style="display:flex;align-items:center;gap:8px;padding:12px 14px;border-bottom:1px solid #e5e7eb;">
+                    <strong style="font-size:1.05rem;">📝 도면 메모</strong>
+                    <span style="flex:1;color:#6b7280;font-size:0.8rem;">${esc(memo.by ? memo.by + ' · ' : '')}${esc(when)}</span>
+                    <button type="button" data-mv="close" aria-label="닫기" style="border:none;background:none;font-size:1.4rem;line-height:1;cursor:pointer;color:#6b7280;">&times;</button>
+                </div>
+                <div style="padding:12px 14px;flex:1;overflow:auto;">
+                    <textarea data-mv-text maxlength="${api.MAX_TEXT || 300}" rows="6"
+                        style="width:100%;box-sizing:border-box;font-size:1.2rem;line-height:1.5;padding:10px;border:1px solid #cbd5e1;border-radius:10px;resize:vertical;min-height:9em;font-family:inherit;">${esc(memo.text)}</textarea>
+                    <div style="color:#6b7280;font-size:0.78rem;margin-top:4px;">고친 뒤 「저장」 · 다른 기기에도 반영됩니다</div>
+                </div>
+                <div style="display:flex;gap:8px;padding:10px 14px;border-top:1px solid #e5e7eb;">
+                    <button type="button" class="btn btn-outline btn-sm" data-mv="del" style="color:#dc2626;border-color:#fca5a5;">지우기</button>
+                    <span style="flex:1"></span>
+                    <button type="button" class="btn btn-outline btn-sm" data-mv="close">닫기</button>
+                    <button type="button" class="btn btn-primary btn-sm" data-mv="save">저장</button>
+                </div>
+            </div>`;
+        document.body.appendChild(ov);
+        const ta = ov.querySelector('[data-mv-text]');
+        return new Promise((resolve) => {
+            let done = false;
+            const finish = (r) => {
+                if (done) return;
+                done = true;
+                document.removeEventListener('keydown', onKey, true);
+                ov.remove();
+                resolve(r);
+            };
+            const save = () => {
+                const text = ta.value;
+                if (!api.cleanText(text)) {
+                    window.showToast?.('빈 메모는 저장하지 않습니다. 지우려면 「지우기」를 누르세요.', 'info', 2500);
+                    return;
+                }
+                if (api.updateMemo(window.state, floorKey, memoId, { text })) {
+                    commitMemoChange(floorKey);
+                    window.showToast?.('메모를 저장했습니다', 'success', 1500);
+                }
+                finish('saved');
+            };
+            const del = async () => {
+                const ok = await window.appConfirm('이 메모를 지울까요?\n다른 기기에서도 지워집니다.', { title: '도면 메모' });
+                if (ok && api.deleteMemo(window.state, floorKey, memoId)) {
+                    commitMemoChange(floorKey);
+                    finish('deleted');
+                }
+            };
+            const onKey = (e) => {
+                if (!document.body.contains(ov)) return;
+                if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); finish(null); }
+                else if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); e.stopPropagation(); save(); }
+            };
+            document.addEventListener('keydown', onKey, true);
+            ov.addEventListener('click', (e) => {
+                if (e.target === ov) { finish(null); return; }
+                const b = e.target.closest('[data-mv]');
+                if (!b) return;
+                if (b.dataset.mv === 'close') finish(null);
+                else if (b.dataset.mv === 'save') save();
+                else if (b.dataset.mv === 'del') void del();
+            });
+            // 도면 쪽으로 손가락·마우스가 새지 않게
+            ['pointerdown', 'mousedown', 'touchstart', 'wheel'].forEach((t) => ov.addEventListener(t, (e) => e.stopPropagation(), { passive: true }));
+            requestAnimationFrame(() => { try { ta.focus(); } catch (_e) { /* ignore */ } });
+        });
     }
     window.openDrawingMemoMenu = openDrawingMemoMenu;
 
