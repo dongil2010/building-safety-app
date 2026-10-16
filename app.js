@@ -713,11 +713,18 @@ document.addEventListener('DOMContentLoaded', () => {
         if (typeof updateOnlineBadge === 'function') updateOnlineBadge(true);
         window.showToast('온라인 상태로 전환되었습니다. 서버 데이터와 병합 후 동기화합니다.', 'success');
         if (typeof reconnectFirestoreSync === 'function') reconnectFirestoreSync('online');
+        // 2026-10-16 오프라인 작업 자동 올리기 + 확인 + 비울지 묻기
+        setTimeout(() => { if (typeof window.runOfflineReturnSync === 'function') window.runOfflineReturnSync('online'); }, 4000);
         if (typeof pruneStaleIndexedDbInspectionData === 'function') {
             pruneStaleIndexedDbInspectionData().catch(() => {});
         }
     });
+    // 2026-10-16 오프라인을 겪었다는 표시 — 인터넷 복귀 후 올리기·확인·「비울까요?」를 이때만 한다
+    const markOfflineWorked = () => { try { localStorage.setItem('bsa_offline_worked_v1', '1'); } catch (_e) { /* ignore */ } };
+    if (navigator.onLine === false) markOfflineWorked();
+    else setTimeout(() => { if (typeof window.runOfflineReturnSync === 'function') window.runOfflineReturnSync('boot'); }, 20000);
     window.addEventListener('offline', () => {
+        markOfflineWorked();
         updateOfflineBadge();
         if (typeof updateOnlineBadge === 'function') updateOnlineBadge(false);
         window.showToast('오프라인 상태입니다. 변경사항은 이 기기에 저장되며, 인터넷 연결 시 자동 동기화됩니다.', 'warning', 5000);
@@ -58142,7 +58149,15 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const all = await prep.listStatuses();
         const mine = all.filter((r) => r && clearIds.has(r.buildingId));
         const candidates = [];
-        mine.forEach((r) => (r.downloadedPhotoKeys || []).forEach((k) => candidates.push(k)));
+        // 2026-10-16 비우기 고침: 예전에는 「준비 때 서버에서 새로 받은 사진」만 지울 후보였다. 이미 이 기기에 있던 사진,
+        // 현장에서 찍어 나중에 올라간 사진은 후보가 아니었고, 여러 회차를 준비하면 겹치는 사진 ID가 서로를 보호해
+        // 실제로는 거의 아무것도 안 지워졌다(「사진 0장」). 이제는 그 회차(동)의 사진 전부가 후보이고,
+        // 서버(Storage)에 있는 것이 확인된 사본만 지운다.
+        mine.forEach((r) => {
+            (r.downloadedPhotoKeys || []).forEach((k) => candidates.push(k));
+            (r.photoKeys || []).forEach((k) => candidates.push(k));
+        });
+        bldgs.forEach((b) => offlinePrepPhotoKeysOfBuilding(b.id).forEach((k) => candidates.push(k)));
         // 남기는 사진: 오프라인 준비해 둔 다른 회차(동)가 쓰는 사진(지금 기기 데이터 + 준비 기록) + 지금 열어 둔 건물 사진.
         // 준비하지 않은 회차는 어차피 인터넷으로 다시 받으므로 막지 않는다(서버 사본이 있는 사진만 지움).
         const protectedKeys = new Set();
@@ -58152,7 +58167,6 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         all.forEach((r) => {
             if (!r || clearIds.has(r.buildingId)) return;
             (r.photoKeys || []).forEach((k) => protectedKeys.add(k));
-            (r.downloadedPhotoKeys || []).forEach((k) => protectedKeys.add(k));
         });
         const safe = prep.photoKeysSafeToDelete(candidates, protectedKeys);
         let removed = 0;
@@ -58165,19 +58179,115 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 removed++;
             } catch (_e) { /* ignore */ }
         }
+        let notOnServer = 0;
+        for (const key of safe) if (!isPhotoMarkedOnStorage(key)) notOnServer++;
         const kept = new Set(candidates).size - safe.length;
         for (const b of bldgs) {
             const rec = mine.find((r) => r.buildingId === b.id);
-            if (rec && rec.hiRes) {
+            if (rec) {
                 for (const fc of buildingFloorCodesForBackup(b)) {
                     try { await idbDelete('floorDrawingTiers', floorDrawingTierIdbKey(b.id, fc, 8000)); } catch (_e) { /* ignore */ }
                 }
             }
             await prep.deleteStatus(b.id);
         }
-        return { removed, kept };
+        return { removed, kept, notOnServer };
     }
     window.clearOfflinePrep = clearOfflinePrep;
+
+    // ---- 2026-10-16 인터넷이 돌아오면: 오프라인 작업 자동 올리기 → 서버에서 다시 읽어 확인 → 「오프라인 데이터 비울까요?」 ----
+    // 올리기 자체는 평소 동기화(syncStateToFirebase: 층 묶음 + 사진 Storage 업로드)를 그대로 쓴다. 여기서는
+    //  ① 남은 것이 없을 때까지 동기화를 돌리고 ② 오프라인 준비한 동마다 서버 층 묶음을 다시 읽어 이 기기의 마킹이 다 있는지,
+    //  이 기기에 있는 사진이 서버에 올라간 것으로 표시됐는지 확인한 뒤 ③ 전부 맞을 때만 비울지 묻는다.
+    //  하나라도 안 맞으면 묻지 않고 무엇이 안 올라갔는지 보여 준다(아무것도 지우지 않음).
+    let _offlineReturnRunning = false;
+    function collectMarkingIdsDeep(v, out, depth) {
+        if (!v || depth > 4) return;
+        if (Array.isArray(v)) { v.forEach((x) => collectMarkingIdsDeep(x, out, depth + 1)); return; }
+        if (typeof v === 'object') {
+            if (typeof v.id === 'string' && (v.defectType !== undefined || v.no !== undefined || v.x !== undefined)) out.add(v.id);
+            Object.keys(v).forEach((k) => { const c = v[k]; if (c && typeof c === 'object') collectMarkingIdsDeep(c, out, depth + 1); });
+        }
+    }
+    async function verifyBuildingOnServer(bldg) {
+        const problems = [];
+        const prefix = `${bldg.id}_`;
+        if (Array.from(_dirtyFloorKeys).some((k) => String(k).startsWith(prefix))) problems.push('아직 안 올라간 층 변경');
+        for (const fc of buildingFloorCodesForBackup(bldg)) {
+            const local = (window.state.defects && window.state.defects[`${bldg.id}_${fc}`]) || [];
+            if (!local.length) continue;
+            let bundle = null;
+            try { bundle = await readFloorBundleStrict(bldg, fc); } catch (e) { problems.push(`${fc} 서버 읽기 실패`); continue; }
+            const ids = new Set();
+            collectMarkingIdsDeep(bundle && bundle.markings, ids, 0);
+            const missing = local.filter((d) => d && d.id && !ids.has(d.id)).length;
+            if (missing) problems.push(`${fc} 마킹 ${missing}개 서버에 없음`);
+        }
+        let photoMissing = 0;
+        for (const key of offlinePrepPhotoKeysOfBuilding(bldg.id)) {
+            if (isPhotoMarkedOnStorage(key)) continue;
+            let local = null;
+            try { local = await idbGet('photos', key); } catch (_e) { local = null; }
+            const prep = window.BSA && window.BSA.offlinePrep;
+            if (local && prep && prep.isDataUrl(local)) photoMissing++;   // 이 기기에만 있는 사진
+        }
+        if (photoMissing) problems.push(`사진 ${photoMissing}장 아직 안 올라감`);
+        return problems;
+    }
+    async function runOfflineReturnSync(reason) {
+        if (_offlineReturnRunning) return;
+        if (!db || !window.state.companyId || navigator.onLine === false) return;
+        const prep = window.BSA && window.BSA.offlinePrep;
+        if (!prep) return;
+        _offlineReturnRunning = true;
+        try {
+            let offlineWorked = false;
+            try { offlineWorked = localStorage.getItem('bsa_offline_worked_v1') === '1'; } catch (_e) { /* ignore */ }
+            // 오프라인을 겪은 적이 없으면(준비만 해 둔 상태) 비울지 묻지 않는다 — 현장 가기 전 준비가 지워지면 안 된다
+            const statuses = offlineWorked ? (await prep.listStatuses()).filter(Boolean) : [];
+            const hadPending = _dirtyFloorKeys.size > 0 || ((window._defectPhotoSaves && window._defectPhotoSaves.size) || 0) > 0;
+            if (!statuses.length && !hadPending) return;
+            // ① 올리기
+            for (let i = 0; i < 15; i++) {
+                if (navigator.onLine === false) return;
+                const saves = Array.from(window._defectPhotoSaves || []);
+                if (saves.length) await Promise.all(saves.map((p) => Promise.resolve(p).catch(() => {})));
+                if (!_dirtyFloorKeys.size) break;
+                if (_syncInFlight || isRemoteSyncing) { await new Promise((r) => setTimeout(r, 800)); continue; }
+                try { await syncStateToFirebase(); } catch (e) { console.warn('[오프라인 복귀] 올리기 실패', e); }
+                await new Promise((r) => setTimeout(r, 400));
+            }
+            if (hadPending && !_dirtyFloorKeys.size) window.showToast('오프라인에서 작업한 내용을 서버에 올렸습니다.', 'success', 3500);
+            if (!statuses.length) {
+                if (_dirtyFloorKeys.size) window.showToast(`아직 서버에 못 올린 층이 ${_dirtyFloorKeys.size}개 있습니다. 인터넷을 확인해 주세요.`, 'warning', 6000);
+                return;
+            }
+            // ② 서버에서 다시 읽어 확인(오프라인 준비한 동만)
+            const bldgs = statuses.map((r) => (window.state.buildings || []).find((b) => b && b.id === r.buildingId)).filter(Boolean);
+            const failed = [];
+            for (const b of bldgs) {
+                const probs = await verifyBuildingOnServer(b);
+                if (probs.length) failed.push(`${b.name || b.id}: ${probs.join(', ')}`);
+            }
+            if (failed.length) {
+                window.showToast('서버에 아직 다 올라가지 않아 오프라인 데이터를 그대로 둡니다.', 'warning', 6000);
+                await window.appAlert(`서버 확인 결과 아직 안 올라간 것이 있습니다. 오프라인 데이터는 지우지 않았습니다.\n\n${failed.join('\n')}\n\n인터넷이 다시 연결되거나 앱을 다시 열면 자동으로 다시 확인합니다.`, { title: '오프라인 데이터' });
+                return;
+            }
+            // ③ 비울지 묻기(한 번 복귀에 한 번)
+            const names = bldgs.map((b) => b.name || b.id).join(', ');
+            try { localStorage.removeItem('bsa_offline_worked_v1'); } catch (_e) { /* ignore */ }
+            const ok = await window.appConfirm(`오프라인에서 작업한 내용이 모두 서버에 올라간 것을 확인했습니다.\n\n오프라인 데이터 비울까요?\n(${names} — 이 기기에 받아 둔 사진·확대 도면 사본만 지웁니다. 서버 데이터는 그대로입니다.)`, { title: '오프라인 데이터', okText: '비우기', cancelText: '나중에', danger: false });
+            if (!ok) return;
+            const res = await clearOfflinePrep(bldgs);
+            window.showToast(`오프라인 데이터를 비웠습니다 (사진 ${res.removed}장${res.notOnServer ? `, 서버 확인 안 된 ${res.notOnServer}장은 남김` : ''})`, 'success', 5000);
+        } catch (e) {
+            console.warn('[오프라인 복귀] 실패', e);
+        } finally {
+            _offlineReturnRunning = false;
+        }
+    }
+    window.runOfflineReturnSync = runOfflineReturnSync;
 
     /** 이 건물과 같은 현장의 회차 목록(최근 회차 먼저). 회차마다 동 여러 개일 수 있다. */
     function offlinePrepRoundsOfSite(bldg) {
@@ -58382,7 +58492,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 const ok = await window.appConfirm(`${r.label} 회차를 위해 받아 둔 사진 사본을 이 기기에서 지울까요?\n(다른 회차와 함께 쓰는 사진, 이 기기에서 찍은 사진, 서버 데이터는 그대로입니다. 도면과 결함 데이터는 남겨 둡니다.)`);
                 if (!ok) return;
                 const res = await clearOfflinePrep(r.buildings);
-                window.showToast(`${r.label} 오프라인 준비를 비웠습니다 (사진 ${res.removed}장${res.kept ? `, 다른 회차와 함께 쓰는 ${res.kept}장은 남김` : ''})`, 'success', 5000);
+                window.showToast(`${r.label} 오프라인 준비를 비웠습니다 (사진 ${res.removed}장${res.kept ? `, 다른 회차와 함께 쓰는 ${res.kept}장은 남김` : ''}${res.notOnServer ? `, 아직 서버에 없는 ${res.notOnServer}장은 지키려고 남김` : ''})`, res.notOnServer ? 'warning' : 'success', 6000);
                 refresh();
             }
         };
