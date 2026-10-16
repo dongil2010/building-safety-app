@@ -17096,3 +17096,6 @@ html body.bsa-eval-map-on #mobileBtnDeleteSelected, html body.bsa-eval-map-on #m
 }
 .defect-photo-save-btn.sm { width: 24px; height: 24px; font-size: .66rem; left: 3px; bottom: 3px; }
 .defect-photo-extra-item { position: relative; }
+
+/* 2026-10-16 결함 사진 모두 저장 버튼 */
+.defect-save-all-photos-btn { width: 100%; margin-top: 0.4rem; justify-content: center; gap: 0.35rem; }

@@ -35278,6 +35278,25 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
         renderDefectPhotoSlot('prev', prev);
         renderDefectPhotoSlot('curr', curr);
+        syncDefectSaveAllPhotosButton(prev.length + curr.length);
+    }
+
+    /** 2026-10-16 사진이 있으면 사진 칸 아래 「사진 모두 갤러리에 저장」(웹: 내려받기) */
+    function syncDefectSaveAllPhotosButton(count) {
+        const pair = document.querySelector('#defectModal .defect-photo-pair') || document.querySelector('.defect-photo-pair');
+        if (!pair) return;
+        let btn = document.getElementById('btnSaveAllDefectPhotos');
+        if (!btn) {
+            btn = document.createElement('button');
+            btn.type = 'button';
+            btn.id = 'btnSaveAllDefectPhotos';
+            btn.className = 'btn btn-sm btn-outline defect-save-all-photos-btn';
+            btn.addEventListener('click', (e) => { void window.bsaSaveAllDefectPhotos(e); });
+            pair.insertAdjacentElement('afterend', btn);
+        }
+        const native = !!(window.Capacitor?.isNativePlatform?.());
+        btn.innerHTML = `<i class="fa-solid fa-download"></i> 사진 ${count}장 모두 ${native ? '갤러리에 저장' : '내려받기'}`;
+        btn.style.display = count > 0 ? '' : 'none';
     }
 
     function renderPhotoPreviewList() {
@@ -35677,6 +35696,15 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const s = String(src || '');
         if (!s) return null;
         if (s.startsWith('data:') || s.startsWith('blob:')) return await (await fetch(s)).blob();
+        // Storage 주소: 로그인 토큰·REST·프록시 순으로 받는 기존 로더(버킷 CORS가 없어도 됨)
+        const SA = window.BSA && window.BSA.storageAssets;
+        if (navigator.onLine !== false && SA && typeof SA.isFirebaseStorageHttpUrl === 'function'
+            && SA.isFirebaseStorageHttpUrl(s) && typeof SA.fetchUrlAsDataUrl === 'function') {
+            try {
+                const du = await SA.fetchUrlAsDataUrl(s);
+                if (du && String(du).startsWith('data:')) return await (await fetch(du)).blob();
+            } catch (_e) { /* 아래로 */ }
+        }
         if (navigator.onLine !== false) {
             try {
                 const r = await fetch(s, { mode: 'cors', cache: 'force-cache' });
@@ -35734,6 +35762,43 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             if (!quiet) window.showToast('사진 저장 실패: ' + (e && e.message ? e.message : e), 'error', 4000);
             return false;
         }
+    };
+
+    /**
+     * 2026-10-16 여러 장을 한 번에: 앱(1.3.12+)은 공유창 없이 갤러리 「스마트안전점검」 앨범에 바로, 웹·PC는 파일로.
+     * items: [{ src, name }]. 하나씩 차례로 저장하고 끝에 한 번만 알린다. 반환 { ok, fail }
+     */
+    window.bsaSavePhotosToDevice = async function(items) {
+        const list = (items || []).filter((x) => x && x.src);
+        if (!list.length) { window.showToast('저장할 사진이 없습니다', 'info', 2000); return { ok: 0, fail: 0 }; }
+        const native = !!(window.Capacitor?.isNativePlatform?.());
+        if (native && !(window.Capacitor?.Plugins?.BsaGallery)) {
+            window.showToast('갤러리 바로 저장은 앱을 최신 버전(1.3.12 이상)으로 업데이트하면 됩니다', 'warning', 5000);
+            return { ok: 0, fail: list.length };
+        }
+        let ok = 0;
+        let fail = 0;
+        for (let i = 0; i < list.length; i++) {
+            const r = await window.bsaSaveImageToDevice(list[i].src, list[i].name, { quiet: true });
+            if (r) ok += 1; else fail += 1;
+            if (!native && i < list.length - 1) await new Promise((res) => setTimeout(res, 350));   // 브라우저 연속 다운로드 차단 완화
+        }
+        const where = native ? '갤러리(스마트안전점검)에' : '파일로';
+        window.showToast(fail ? `${ok}장 ${where} 저장, ${fail}장 실패` : `${ok}장 ${where} 저장했습니다`, fail ? 'warning' : 'success', 3500);
+        return { ok, fail };
+    };
+
+    /** 결함 창의 전차·현차 사진 전부 */
+    window.bsaSaveAllDefectPhotos = function(ev) {
+        if (ev) { ev.preventDefault(); ev.stopPropagation(); }
+        const items = [];
+        const add = (arr, kind) => {
+            const a = (arr || []).filter(Boolean);
+            a.forEach((src, i) => items.push({ src, name: bsaPhotoFileName(kind, a.length > 1 ? String(i + 1) : '') }));
+        };
+        add(window._pendingPrevRoundPhotos, '전차');
+        add(window._pendingPhotos, '현차');
+        return window.bsaSavePhotosToDevice(items);
     };
 
     /** 결함 창 전차/현차 사진의 저장 버튼 */
