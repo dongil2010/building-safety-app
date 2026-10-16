@@ -32397,6 +32397,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     let pendingDragOpenedModal = false; // PC 마우스: mousedown에서 이미 수정창을 연 경우 mouseup 중복 오픈 방지
     let pendingDragLongPressTimer = null;
     let activePointerIsTouch = false; // 현재 제스처가 터치인지 (합성 마우스 무시·돋보기용)
+    // 2026-10-16 마지막으로 도면을 누른 포인터 종류(mouse/pen/touch). 펜은 마우스 이벤트로도 들어오므로 따로 기억.
+    let mapLastPointerType = 'mouse';
     let mapTouchStartedOnCanvas = false; // 도면에서 시작한 터치만 스크롤 잠금
     let mapSuppressMouseUntil = 0; // 터치 후 합성 mouseup/move가 드래그를 끊지 않게
     let _mapLoupeRaf = 0;
@@ -33549,6 +33551,13 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     if (pendingDragIsTouch) refreshMapLoupe(startMouseX, startMouseY);
                 }, MARKING_HOLD_TO_DRAG_MS);
             }
+            // 2026-10-16 「pc는 드래그도 바로 해도됨. 어차피 중앙 휠로 도면 이동」: 마우스 왼쪽 버튼은
+            // 선택 여부·0.3초 대기 없이 끌면 바로 이동(도면 이동은 가운데 휠 드래그). 터치·펜은 그대로.
+            if (!isTouch && mapLastPointerType === 'mouse' && hitInfo.defect && hitInfo.defect.id) {
+                clearPendingDragLongPress();
+                pendingDragArmed = true;
+                pendingDragHit.pcMouseInstantDrag = true;
+            }
             return;
         }
 
@@ -33699,6 +33708,11 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             if (dist > threshold) {
                 pushDefectHistory();
                 const hitDefect = pendingDragHit.hitInfo.defect;
+                // PC 즉시 끌기: 선택 안 된 마킹을 끌면 그 마킹만 골라서 옮김(다른 선택 묶음이 같이 끌려가지 않게)
+                if (pendingDragHit.pcMouseInstantDrag && hitDefect && hitDefect.id && !selectedDefectIds.has(hitDefect.id)) {
+                    selectedDefectIds = new Set([hitDefect.id]);
+                    updateMapSelectionBar();
+                }
                 const hitPart = pendingDragHit.hitInfo.part;
                 // 여러 마킹 통째 이동은 「서로 다른 마킹」을 골랐을 때만.
                 // 결함 통합·화살표 추가 묶음 하나만 선택된 상태(통합 직후 등)에서 NO.박스를 끌면 박스만 움직인다.
@@ -34006,7 +34020,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             const wasInSelection = !!pendingDragHit.wasInSelection;
             const pendingDragWasSelectedBefore = !!pendingDragHit.wasSelectedBefore;
             const tapHit = pendingDragHit;
-            const holdArmed = pendingDragArmedAtEnd;
+            // PC 즉시 끌기 대기(pcMouseInstantDrag)는 「꾹 누름」이 아님 — 안 움직이고 떼면 클릭(수정창)
+            const holdArmed = pendingDragArmedAtEnd && !tapHit.pcMouseInstantDrag;
             pendingDragHit = null;
             // 2026-10-16 움직이지 않은 짧은 탭만 선택·수정창. 길게 눌렀다 뗀 것(꾹 눌러 이동 대기 포함)은 아무것도 안 함.
             const tapMoved = (clientX == null || clientY == null) ? 0 : Math.hypot(clientX - startMouseX, clientY - startMouseY);
@@ -34048,8 +34063,11 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 }
                 return;
             }
+            // 2026-10-16 「pc에서는 원클릭으로 결함 수정창 까지 켜도 됨」: 마우스는 짧은 클릭 한 번에 선택+수정창.
+            // 터치·펜은 그대로(한 번 탭 선택, 다시 탭 수정창).
+            const pcMouseOneClick = !endedFromTouch && mapLastPointerType === 'mouse';
             // 2026-10-16 선택 안 돼 있던 마킹을 한 번 누름 → 선택만(수정창 열지 않음)
-            if (!pendingDragWasSelectedBefore) {
+            if (!pendingDragWasSelectedBefore && !pcMouseOneClick) {
                 if (isDefectModalOpen() && !isDefectMarkingGroupPending()) closeDefectModal();
                 updateMapSelectionBar({ scrollToSelection: true });
                 drawCanvas();
@@ -34598,6 +34616,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     }
 
     if (elements.planCanvas) {
+        elements.planCanvas.addEventListener('pointerdown', (e) => {
+            mapLastPointerType = e.pointerType || 'mouse';
+        }, true);
         // Mouse Events
         elements.planCanvas.addEventListener('mousedown', (e) => {
             // 터치 제스처 중·직후 합성 마우스 이벤트는 무시 (드래그 중 끊김 방지)

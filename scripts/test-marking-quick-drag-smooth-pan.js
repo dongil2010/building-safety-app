@@ -10,7 +10,7 @@ const must = [
   'navigator.vibrate(20)',
   'if (!hd || !selectedDefectIds.has(hd.id)) return;',
   'if (!pendingDragArmed) {\n                if (dist <= threshold) return;\n                clearPendingDragLongPress();',
-  'if (!pendingDragWasSelectedBefore) {',
+  'if (!pendingDragWasSelectedBefore && !pcMouseOneClick) {',
   'const MARKING_TAP_MAX_MS = 500;',
   'if (holdArmed || tapMoved > tapThreshold || tapMs > MARKING_TAP_MAX_MS || !d?.id) {',
   "if (pendingDragHit && 'groupCyclePrev' in pendingDragHit) window._groupBoxCycle = pendingDragHit.groupCyclePrev;",
