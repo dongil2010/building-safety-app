@@ -113,14 +113,16 @@ const m = (s, l, sd = {}, ld = {}, sa = {}, la = {}) => sm.mergeDefectsMaps({ F:
     sk.mergePackIntoState(B, 'F', sk.packFor(A, 'F'), merge);
     assert.strictEqual(sk.listFor(B, 'F').length, 4);
     // app.js 연결
-    assert.ok(/getElementById\('btnOpenSketchMemo'\)[\s\S]{0,120}openSketchMemo\(\{ fresh: true \}\)/.test(app), '메모 버튼 → 바로 새 종이');
-    assert.ok(/if \(sketchUi\.readOnly \|\| sketchUi\.sheet\.id\) return null;/.test(app), '저장된 메모는 덮어쓰지 않음');
+    // 2026-10-16 손글씨 화면은 없앰(데이터만 보존·동기화) — 도면 글 메모는 그대로
+    assert.ok(!/getElementById\('btnOpenSketchMemo'\)/.test(app), '손글씨 버튼 연결 없음');
+    assert.ok(/sketches: \(window\.BSA && window\.BSA\.sketchMemo\) \? window\.BSA\.sketchMemo\.packFor/.test(app), '손글씨 데이터는 계속 동기화(보존)');
+    assert.ok(/createDrawingMemoAt\(p\.x, p\.y\);/.test(app), '메모 모드 도면 탭 → 글 메모');
+    assert.ok(/mobileBtnModeMemo\.addEventListener\('click', \(\) => setDrawMode\(state\.mode === 'MEMO' \? 'PAN' : 'MEMO'\)\)/.test(app), '폰·태블릿 메모 버튼 = 글 메모 모드');
     assert.ok(!/data-sk="del"/.test(app), '메모 지우기 버튼 없음');
     assert.ok(!/memoAddKind/.test(app), '메모 모드 「손글씨로 추가」 없음');
     assert.ok(!/id: 'sk:' \+ r\.id/.test(app), '도면 위 손글씨 항목 없음');
     const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
-    const ov = html.indexOf('id="btnOpenOverviewPhotos"');
-    const memo = html.indexOf('id="btnOpenSketchMemo"');
-    assert.ok(ov > 0 && memo > ov && memo - ov < 600, '전경사진 버튼 바로 옆');
+    assert.ok(!html.includes('id="btnOpenSketchMemo"'), '전경사진 옆 손글씨 메모 버튼 없음');
+    assert.ok(html.includes('id="btnModeMemo"') && html.includes('id="mobileBtnModeMemo"'), '도면 글 메모 버튼 유지');
 }
 console.log('test-sync-branch-conflicts OK');

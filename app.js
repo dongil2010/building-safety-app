@@ -25802,10 +25802,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
     // 2026-10-16 사용자 요청: 손글씨 메모는 도면 위 자리가 아니라 상단 「전경사진」 버튼 옆 「손글씨 메모」 버튼으로만 열고 관리.
     // 팝업 안 장 고르기(손글씨 메모-1, -2 …)로 다시 열어 고친다. 메모 막대 「손글씨로 추가」·도면 위 항목은 없앰.
-    (function bindSketchMemoButtons() {
-        const b = document.getElementById('btnOpenSketchMemo');
-        if (b) b.addEventListener('click', (e) => { e.preventDefault(); window.openSketchMemo({ fresh: true }); });
-    })();
+    // 2026-10-16 사용자 지시 「손글씨를 지우고 도면에 글자 입력하는건 살려」: 손글씨 메모 화면(버튼·팝업 진입)은 없앰.
+    // 이미 저장된 손글씨 데이터(state.sketchMemos)는 지우지 않고 층 묶음 동기화·병합에 그대로 실어 보존한다.
 
 
     // 메모 모드: 도면 위 깨끗한 한 손가락 탭(또는 클릭)만 메모를 만든다. 끌면 도면 이동, 두 손가락이면 확대·축소.
