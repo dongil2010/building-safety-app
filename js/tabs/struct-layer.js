@@ -313,10 +313,23 @@
         var from = horiz ? lo.x + lo.hx : lo.y + lo.hy, to = horiz ? hi.x - hi.hx : hi.y - hi.hy;
         if (!(to - from > th)) { toast('두 점이 너무 가깝습니다. 다시 시작 점부터 눌러 주세요.', 'warning', 2500); sync(); return; }
         var perp = alignPerp(type, horiz, horiz ? (s.y + a.y) / 2 : (s.x + a.x) / 2, th, pad);
-        var r = horiz ? { x: (from + to) / 2, y: perp, w: to - from, h: th } : { x: perp, y: (from + to) / 2, w: th, h: to - from };
-        var rec = api.add(state(), B.floorKey(), { type: type, label: '', x: r.x, y: r.y, w: r.w, h: r.h });
-        // 고르지는 않는다(이어서 다른 종류 단추를 누르면 방금 그린 것이 바뀌지 않고 추가 종류만 바뀌게)
-        if (rec) { pushHist(B.floorKey(), [{ id: rec.id, before: null, after: snap(rec) }]); ui.selId = ''; commit(); return; }
+        // 중간에서 끊기(2026-10-16): 거더는 사이 기둥마다, 빔은 사이 거더(가로지르는 보)·기둥마다 끊고 다시 시작
+        var cutters = list().filter(function (d) {
+            return d.type === '기둥' || (type === '빔' && isLineType(d.type) && (d.w >= d.h) !== horiz);
+        });
+        var segs = api.splitRun({ horiz: horiz, from: from, to: to, perp: perp, minLen: th * 0.5 }, cutters);
+        var fk = B.floorKey(), changes = [];
+        segs.forEach(function (sg) {
+            var r = horiz ? { x: (sg.from + sg.to) / 2, y: perp, w: sg.to - sg.from, h: th } : { x: perp, y: (sg.from + sg.to) / 2, w: th, h: sg.to - sg.from };
+            var rec = api.add(state(), fk, { type: type, label: '', x: r.x, y: r.y, w: r.w, h: r.h });
+            if (rec) changes.push({ id: rec.id, before: null, after: snap(rec) });
+        });
+        // 고르지는 않는다(이어서 다른 종류 단추를 누르면 방금 그린 것이 바뀌지 않고 추가 종류만 바뀌게). 한 번에 그린 칸들은 되돌리기 한 번에 같이 빠진다
+        if (changes.length) {
+            pushHist(fk, changes); ui.selId = ''; commit();
+            if (changes.length > 1) toast(type + ' ' + changes.length + '칸으로 나눠 그렸습니다.', 'success', 1800);
+            return;
+        }
         sync();
     }
     function bindOverlay(ov) {
@@ -557,7 +570,7 @@
             if (ui.editing && isLineType(ui.addType)) {
                 var fromWhat = ui.addType === '거더' ? '기둥' : '거더·기둥';
                 html += '<span class="map-struct-hint">' + ui.addType + ' 추가: '
-                    + (ui.pend ? '끝 ' + fromWhat + '을 누르세요 (Esc 취소)' : '시작 ' + fromWhat + '을 누르세요 → 끝 ' + fromWhat + ' (가로·세로로 곧게, 면에서 면까지)')
+                    + (ui.pend ? '끝 ' + fromWhat + '을 누르세요 (Esc 취소)' : '시작 ' + fromWhat + '을 누르세요 → 끝 ' + fromWhat + ' (가로·세로로 곧게, 면에서 면까지, 사이 ' + (ui.addType === '거더' ? '기둥' : '거더') + '에서 끊김)')
                     + ' · 다 하면 「' + ui.addType + '」 단추를 다시 눌러 끄기</span>';
             }
             html += '<span class="map-count-hint">' + (ui.editing

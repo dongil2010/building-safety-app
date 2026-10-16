@@ -259,4 +259,24 @@ assert.ok(layer.includes("if (d.type !== type || (d.w >= d.h) !== horiz) return;
 assert.ok(layer.includes("var at = ui.addType === '기둥' ? alignColumn(p.x, p.y, Math.max(sz.w, sz.h), pad) : p;"));
 assert.ok(layer.includes('now = alignColumn(d.x, d.y, Math.max(d.w, d.h), padM, d.id);'));
 
+// ---- 이어 그리기 끊기: 거더는 사이 기둥에서, 빔은 사이 거더에서 끊고 다시 시작 ----
+{
+    // 기둥 3개(x=0, 100, 200, 10x10) — 거더를 첫 기둥 면(5)~끝 기둥 면(195)으로
+    const cols = [0, 100, 200].map((x) => ({ type: '기둥', x, y: 0, w: 10, h: 10 }));
+    assert.deepStrictEqual(S.splitRun({ horiz: true, from: 5, to: 195, perp: 0, minLen: 2 }, cols),
+        [{ from: 5, to: 95 }, { from: 105, to: 195 }], '거더: 가운데 기둥에서 두 칸');
+    assert.deepStrictEqual(S.splitRun({ horiz: true, from: 5, to: 195, perp: 30, minLen: 2 }, cols),
+        [{ from: 5, to: 195 }], '중심선이 안 지나가는 기둥에서는 안 끊는다');
+    // 빔(세로): 가로 거더 3줄(y=0, 50, 100, 두께 4)을 가로지른다 → 거더 면에서 끊김
+    const girders = [0, 50, 100].map((y) => ({ type: '거더', x: 40, y, w: 80, h: 4 }));
+    assert.deepStrictEqual(S.splitRun({ horiz: false, from: 2, to: 98, perp: 40, minLen: 1 }, girders),
+        [{ from: 2, to: 48 }, { from: 52, to: 98 }], '빔: 가운데 거더에서 두 칸');
+    // 겹친 자르개는 한 덩어리, 너무 짧은 조각은 뺀다
+    assert.deepStrictEqual(S.splitRun({ horiz: true, from: 0, to: 100, perp: 0, minLen: 3 },
+        [{ x: 50, y: 0, w: 10, h: 10 }, { x: 56, y: 0, w: 10, h: 10 }, { x: 98, y: 0, w: 2, h: 10 }]),
+        [{ from: 0, to: 45 }, { from: 61, to: 97 }]);
+}
+assert.ok(layer.includes("return d.type === '기둥' || (type === '빔' && isLineType(d.type) && (d.w >= d.h) !== horiz);"), '거더는 기둥, 빔은 가로지르는 보·기둥에서 끊김');
+assert.ok(layer.includes('pushHist(fk, changes);'), '나눠 그린 칸은 되돌리기 한 번에');
+
 console.log('test-struct-members: ok');

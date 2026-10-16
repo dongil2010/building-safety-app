@@ -190,6 +190,34 @@
         return best;
     }
 
+    /**
+     * 이어 그리기 끊기(2026-10-16): 시작→끝 사이를 가로지르는 부재(cutters)에서 보를 끊어 여러 칸으로 나눈다.
+     * 거더는 중간 기둥에서, 빔은 중간 거더(·기둥)에서 끊고 그 다음부터 다시 시작한다.
+     * run: { horiz, from, to, perp, minLen } (from·to = 보가 지나는 방향 좌표, perp = 중심선)
+     * 중심선이 그 부재를 지나고, 부재가 from~to 안쪽에 걸쳐 있을 때만 끊는다. → [{ from, to }, …] (짧은 조각은 뺀다)
+     */
+    function splitRun(run, cutters) {
+        var horiz = !!run.horiz, from = Number(run.from), to = Number(run.to), perp = Number(run.perp);
+        var minLen = Math.max(0, Number(run.minLen) || 0);
+        var cuts = [];
+        (cutters || []).forEach(function (d) {
+            if (!d) return;
+            var a0 = horiz ? d.x - d.w / 2 : d.y - d.h / 2, a1 = horiz ? d.x + d.w / 2 : d.y + d.h / 2;
+            var p0 = horiz ? d.y - d.h / 2 : d.x - d.w / 2, p1 = horiz ? d.y + d.h / 2 : d.x + d.w / 2;
+            if (perp < p0 || perp > p1) return;            // 중심선이 안 지나감
+            if (a1 <= from || a0 >= to) return;            // 구간 밖(양 끝 기둥 면 바깥)
+            cuts.push([Math.max(a0, from), Math.min(a1, to)]);
+        });
+        cuts.sort(function (p, q) { return p[0] - q[0]; });
+        var out = [], cur = from;
+        cuts.forEach(function (c) {
+            if (c[0] > cur) out.push({ from: cur, to: c[0] });
+            cur = Math.max(cur, c[1]);
+        });
+        if (to > cur) out.push({ from: cur, to: to });
+        return out.filter(function (s) { return s.to - s.from > minLen; });
+    }
+
     // ---------- 구조도 그림 ----------
     function validOverlay(o) {
         return !!(o && !o.removed && typeof o.url === 'string' && o.url && o.fit
@@ -277,7 +305,7 @@
 
     var api = { TYPES: TYPES, ACTIVE_TYPES: ACTIVE_TYPES, COLORS: COLORS, ensureMaps: ensureMaps, listFor: listFor, hasAny: hasAny, add: add, update: update, remove: remove,
         applyRecord: applyRecord, clear: clear, beamThickness: beamThickness, unifyThickness: unifyThickness, countsByType: countsByType, fitTwoPoints: fitTwoPoints, applyFit: applyFit, importMembers: importMembers,
-        hitTest: hitTest, overlayFor: overlayFor, setOverlay: setOverlay, removeOverlay: removeOverlay,
+        hitTest: hitTest, splitRun: splitRun, overlayFor: overlayFor, setOverlay: setOverlay, removeOverlay: removeOverlay,
         saveHandoff: saveHandoff, loadHandoff: loadHandoff, packFor: packFor, packHasContent: packHasContent, mergePackIntoState: mergePackIntoState };
     if (typeof module !== 'undefined' && module.exports) module.exports = api;
     if (root) { root.BSA = root.BSA || {}; root.BSA.structMembers = api; }
