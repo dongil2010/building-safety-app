@@ -62353,6 +62353,22 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             if (serverData && serverData.syncLease) {
                 dataToSync.syncLease = firebase.firestore.FieldValue.delete();
             }
+            // 2026-10-16 사고 방지: 쓰기 직전에 서버를 다시(캐시 말고 서버에서) 읽어, 서버에 있던 건물이
+            // 이번 쓰기에서 하나라도 빠지면 쓰지 않는다. 빈(기본) 상태 기기가 건물 목록·회사 설정을 통째로 덮어쓴 사고 재발 막기.
+            // 서버를 못 읽으면(오프라인 등) 이번에는 쓰지 않는다 — 다음 동기화가 다시 한다.
+            {
+                const guardApi = window.BSA && window.BSA.floorSyncGuard;
+                const guardSnap = await docRef.get({ source: 'server' });
+                const guardData = (guardSnap && guardSnap.exists && guardSnap.data()) || {};
+                const lostBldgs = guardApi && typeof guardApi.lostServerBuildings === 'function'
+                    ? guardApi.lostServerBuildings(guardData.buildings, sanitizedBuildings, mergedDeletedBuildings)
+                    : [];
+                if (lostBldgs.length) {
+                    console.error('[동기화 중단] 서버에 있는 건물이 이 기기 목록에 없어 쓰지 않습니다:', lostBldgs);
+                    window.showToast(`동기화를 멈췄습니다: 이 기기의 건물 목록에 서버 건물 ${lostBldgs.length}개가 없습니다. 새로고침(F5) 해 주세요.`, 'error', 12000);
+                    throw new Error('BUILDING_LIST_GUARD: 서버 건물 ' + lostBldgs.length + '개가 빠짐');
+                }
+            }
             await docRef.set(dataToSync, { merge: true });
             clearSyncErrorRetryTimer();
             _syncRetryFailCount = 0;

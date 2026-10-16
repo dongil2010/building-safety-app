@@ -54,11 +54,27 @@
         return { ok: false, reason: 'changed-repeatedly' };
     }
 
+    /**
+     * 2026-10-16 사고: 어떤 기기가 빈(기본) 상태로 회사 문서를 덮어써 건물 21개가 예시 1개로, 회사 설정이 기본값으로 바뀌었다.
+     * 쓰기 직전에 서버를 다시 읽어, 서버에 있던 건물(삭제기록 없는 것) 중 이번 쓰기에서 빠지는 것을 돌려준다.
+     * 하나라도 있으면 쓰지 않는다(건물은 삭제기록으로만 지운다 — 목록에서 그냥 빠지는 일은 없어야 한다).
+     * → 빠지는 건물 [{ id, name }]
+     */
+    function lostServerBuildings(serverBuildings, writeBuildings, deletedIds) {
+        var del = {}, keep = {};
+        (deletedIds || []).forEach(function (id) { if (id) del[id] = true; });
+        (writeBuildings || []).forEach(function (b) { if (b && b.id) keep[b.id] = true; });
+        return (serverBuildings || []).filter(function (b) {
+            return b && b.id && !del[b.id] && !keep[b.id];
+        }).map(function (b) { return { id: b.id, name: b.name || '' }; });
+    }
+
     var api = {
         classifyFloorSnap: classifyFloorSnap,
         revOf: revOf,
         lostServerIds: lostServerIds,
-        confirmRevBeforeWrite: confirmRevBeforeWrite
+        confirmRevBeforeWrite: confirmRevBeforeWrite,
+        lostServerBuildings: lostServerBuildings
     };
     if (root) {
         root.BSA = root.BSA || {};

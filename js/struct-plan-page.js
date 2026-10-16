@@ -299,6 +299,40 @@
             }
         }, 20);
     }
+    /**
+     * ① 통심선 교차점 기둥(2026-10-16, js/core/struct-raster.js gridColumns) — X·Y 통심선이 만나는 곳의 네모·동그라미만 기둥으로.
+     * 이름표 네모(C1)는 교차점에서 비켜나 있어 잡히지 않는다. 범위를 정했으면 그 안만(제목칸·치수선 빼기).
+     */
+    function runGridColumns() {
+        var RS = window.BSA.structRaster;
+        if (!RS || !RS.gridColumns || !st.base) return;
+        setStatus('통심선과 교차점의 기둥을 찾는 중…');
+        setTimeout(function () {
+            try {
+                var r = st.region || { x0: 0, y0: 0, x1: st.base.width / st.scale, y1: st.base.height / st.scale };
+                var cv = cropBase(r, Infinity), s = cv.width / (r.x1 - r.x0), t0 = performance.now();
+                var res = RS.gridColumns(cv.getContext('2d').getImageData(0, 0, cv.width, cv.height));
+                var stamp = Date.now();
+                var found = res.columns.map(function (b, i) {
+                    return { id: 'sm_gx' + stamp + '_' + (i + 1), shape: 'column', type: '기둥', label: '', ai: true,
+                        x: r.x0 + b.x / s, y: r.y0 + b.y / s, w: b.w / s, h: b.h / s };
+                });
+                var cur = readMode() === 'ai' ? st.members : (st.aiMembers || []);
+                st.aiMembers = unifyBeams(cur.filter(function (m) { return m.type !== '기둥'; }).concat(found));
+                st.colSample = null;
+                var sel = $('readMode');
+                if (sel) sel.value = 'ai';
+                applyMode();
+                syncAiButtons();
+                setStatus('통심선 가로 ' + res.ys.length + '줄 · 세로 ' + res.xs.length + '줄, 교차점 기둥 ' + found.length + '개를 찾았습니다('
+                    + Math.round(performance.now() - t0) + 'ms, 모두 같은 크기). 도면 밖 제목칸·치수선까지 잡히면 「범위 지정」으로 평면만 감싼 뒤 다시 누르세요. '
+                    + '틀린 것은 눌러서 빼고, 빠진 기둥은 「기호를 누르면: 기둥으로」로 그 자리를 누르면 추가. 다 확인했으면 「AI ② 거더」.', found.length ? 'ok' : 'warn');
+            } catch (err) {
+                console.error(err);
+                setStatus('기둥을 찾지 못했습니다: ' + (err && err.message ? err.message : err), 'warn');
+            }
+        }, 20);
+    }
     async function runAiStep(step) {
         if (!st.base || !AI) return;
         var sel = $('readMode');
@@ -345,10 +379,15 @@
             b.classList.toggle('primary', !!st.base && t === nextStep);
         });
         // ① 기둥은 예시로 찾기를 먼저 권한다(AI ① 기둥은 파랗게 하지 않음)
+        var gb = $('btnColGrid');
+        if (gb) {
+            gb.disabled = !st.base || !window.BSA.structRaster;
+            gb.classList.toggle('primary', !!st.base && nextStep === '기둥');
+        }
         var sb = $('btnColSample');
         if (sb) {
             sb.disabled = !st.base || !window.BSA.structRaster;
-            sb.classList.toggle('primary', !!st.base && nextStep === '기둥');
+            sb.classList.toggle('primary', !gb && !!st.base && nextStep === '기둥');
             var ac = $(AI_BTN['기둥']);
             if (ac) ac.classList.remove('primary');
         }
@@ -657,6 +696,8 @@
             if (b) b.addEventListener('click', function () { runAiStep(t); });
         });
         // ① 예시로 기둥 찾기: 누르고 → 기둥 하나를 끌어서 감싸기. 닮은 정도를 바꾸면 같은 예시로 다시 찾는다
+        var gridBtn = $('btnColGrid');
+        if (gridBtn) gridBtn.addEventListener('click', runGridColumns);
         var smpBtn = $('btnColSample');
         if (smpBtn) smpBtn.addEventListener('click', function () {
             if (!st.base) return;

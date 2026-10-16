@@ -67,6 +67,39 @@ const near = (list, x, y, tol = 3) => list.some((m) => Math.abs(m.x - x) <= tol 
     assert.strictEqual(got.length, 2, JSON.stringify(got));
 }
 
+// ---- 통심선 교차점에서 기둥 찾기: 교차점의 네모·동그라미만, 옆 이름표 네모는 안 봄 ----
+{
+    const img = paper(520, 420);
+    const XS = [80, 220, 360, 480], YS = [70, 200, 330];
+    // 통심선(일점쇄선, 연한 회색): 긴 선 12 + 틈 3 + 점 1 + 틈 3
+    const dashDot = (fn, len) => { for (let k = 0; k < len; k++) { const m = k % 19; if (m < 12 || m === 15) fn(k); } };
+    XS.forEach((x) => dashDot((k) => img.dot(x, k + 10, 175), 400));
+    YS.forEach((y) => dashDot((k) => img.dot(k + 10, y, 175), 500));
+    // 거더(점선 두 줄) — 교차점을 지나간다
+    YS.forEach((y) => { for (let x = 20; x < 500; x += 4) { img.fill(x, y - 3, x + 1, y - 3, 90); img.fill(x, y + 3, x + 1, y + 3, 90); } });
+    // 기둥: 칠한 네모 / 빈 네모 / 동그라미, 교차점 하나(480,330)는 비움
+    const cols = [];
+    XS.forEach((x, i) => YS.forEach((y, j) => {
+        if (x === 480 && y === 330) return;
+        const kind = (i + j) % 3;
+        if (kind === 0) img.fill(x - 6, y - 6, x + 6, y + 6, 40);
+        else if (kind === 1) img.box(x - 6, y - 6, x + 6, y + 6, 40, 2);
+        else { img.ring(x, y, 6, 40); img.ring(x, y, 5, 40); }
+        cols.push([x, y]);
+    }));
+    // 이름표 네모(C1 흉내)는 교차점 옆에
+    XS.forEach((x) => YS.forEach((y) => { img.box(x + 14, y - 22, x + 28, y - 9, 40, 1); img.fill(x + 18, y - 19, x + 19, y - 12, 40); }));
+    // 길게 그은 치수선 하나(통심선 아님, 기둥 없음)
+    for (let x = 30; x < 500; x++) img.dot(x, 395, 120);
+    const r = R.gridColumns(img);
+    assert.ok(XS.every((x) => r.xs.some((v) => Math.abs(v - x) <= 1)), '세로 통심선: ' + r.xs);
+    assert.ok(YS.every((y) => r.ys.some((v) => Math.abs(v - y) <= 4)), '가로 통심선: ' + r.ys);
+    assert.strictEqual(r.columns.length, cols.length, '교차점 기둥 ' + cols.length + '개(빈 교차점·이름표·치수선 제외): ' + JSON.stringify(r.columns));
+    cols.forEach(([x, y]) => assert.ok(near(r.columns, x, y, 3), '기둥 ' + x + ',' + y));
+    assert.ok(!near(r.columns, 480, 330, 8), '기둥 없는 교차점은 빈 채로');
+    assert.ok(r.columns.every((c) => c.w === r.columns[0].w && c.w >= 11 && c.w <= 15), '모두 같은 크기: ' + r.columns.map((c) => c.w));
+}
+
 // ---- 페이지 연결 ----
 {
     const page = fs.readFileSync(path.join(root, 'js', 'struct-plan-page.js'), 'utf8');

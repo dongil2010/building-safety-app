@@ -67,5 +67,16 @@ const SM = require(path.join(__dirname, '..', 'js', 'core', 'sync-merge.js'));
     // 확인 자체 실패 → 안 씀
     r = await G.confirmRevBeforeWrite(1, async () => { throw new Error('net'); }, async () => 1, 3);
     assert.deepStrictEqual(r, { ok: false, reason: 'check-failed' });
+
+    // 2026-10-16 사고: 빈(기본) 상태 기기가 회사 문서를 덮어써 건물 21개 → 예시 1개. 쓰기 직전 서버와 견줘 막는다.
+    const srvB = [{ id: 'b1', name: '장성문화예술회관' }, { id: 'b2', name: '영광종합병원' }, { id: 'b3', name: '지운 건물' }];
+    const demoOnly = [{ id: 'bldg-cheomdan-hospital', name: '🏢 첨단병원' }];
+    assert.deepStrictEqual(G.lostServerBuildings(srvB, demoOnly, ['b3']).map((b) => b.id), ['b1', 'b2'], '예시만 있는 기기는 서버 건물을 지운다 → 막음');
+    assert.deepStrictEqual(G.lostServerBuildings(srvB, [{ id: 'b1' }, { id: 'b2' }, { id: 'b9' }], ['b3']), [], '삭제기록 있는 건물·새 건물은 괜찮다');
+    assert.deepStrictEqual(G.lostServerBuildings(srvB, [{ id: 'b1' }, { id: 'b2' }], []).map((b) => b.id), ['b3'], '삭제기록 없이 빠지면 막음');
+    assert.deepStrictEqual(G.lostServerBuildings(undefined, demoOnly, []), [], '서버가 비었으면 막을 것 없음');
+    const appSrc = require('fs').readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8');
+    assert.ok(appSrc.includes("const guardSnap = await docRef.get({ source: 'server' });"), '쓰기 직전 서버에서 다시 읽음');
+    assert.ok(/guardApi\.lostServerBuildings\(guardData\.buildings, sanitizedBuildings, mergedDeletedBuildings\)[\s\S]{0,700}throw new Error\('BUILDING_LIST_GUARD[\s\S]{0,200}await docRef\.set\(dataToSync, \{ merge: true \}\);/.test(appSrc), '빠지면 쓰기 전에 멈춤');
     console.log('test-floor-sync-guard: ok');
 })().catch((e) => { console.error(e); process.exit(1); });
