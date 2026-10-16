@@ -79,11 +79,20 @@
         return null;
     }
 
-    /** 메모 목록 이름: 손글씨 메모-1, -2 … (만든 순서) */
-    function labelFor(st, floorKey, id) {
+    /**
+     * 2026-10-16 메모 이름: 작성자(개인)별 「메모-1, 메모-2 …」(그 사람이 만든 순서). 다른 사람 이름이면 앞에 이름.
+     * me: 지금 사용자 이름(같으면 이름 생략). 메모는 고치거나 지우지 않고 늘 새 항목으로 쌓인다.
+     */
+    function authorKey(rec) { return String((rec && rec.by) || '').trim(); }
+    function labelFor(st, floorKey, id, me) {
         var list = listFor(st, floorKey);
-        var i = list.findIndex(function (r) { return r.id === id; });
-        return '손글씨 메모-' + (i >= 0 ? i + 1 : list.length + 1);
+        var rec = list.find(function (r) { return r.id === id; });
+        var who = rec ? authorKey(rec) : String(me || '').trim();
+        var mine = list.filter(function (r) { return authorKey(r) === who; });
+        var i = rec ? mine.indexOf(rec) : -1;
+        var n = i >= 0 ? i + 1 : mine.length + 1;
+        var meKey = String(me || '').trim();
+        return (who && who !== meKey ? who + ' ' : '') + '메모-' + n;
     }
 
     /** 자리가 없는 옛 장(팝업 전용 시절) → 도면 왼쪽 위부터 차례로(모든 기기에서 같은 자리, 저장은 안 함) */

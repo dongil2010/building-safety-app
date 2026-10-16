@@ -90,22 +90,37 @@ const m = (s, l, sd = {}, ld = {}, sa = {}, la = {}) => sm.mergeDefectsMaps({ F:
     assert.ok(!/gone\.slice\(60\)/.test(rs), 'S5 60개 자르기 제거');
     assert.ok(/defect\.photoOrderAt = bsaStampAfter/.test(rs), 'S4 순서 시각 기록');
 }
-// 메모: 손글씨 메모 = 도면 메모 목록 항목(손글씨 메모-1, -2 …), 자리 저장·옛 장은 차례대로
+// 메모(2026-10-16 사용자 확정): 상단 「전경사진」 옆 「메모」 버튼 → 바로 새 흰 종이, 닫으면 저장.
+// 작성자별 「메모-1, 메모-2 …」로 계속 쌓이고(덮어쓰기·지우기 없음), 다른 사람 메모와 병합해도 둘 다 남는다.
 {
     const sk = require(path.join(__dirname, '..', 'js', 'core', 'sketch-memo.js'));
-    const st = {};
-    const r1 = sk.saveSheet(st, 'F', { strokes: [{ c: '#000', w: 3, p: [1, 1, 50, 5, 5, 50] }], x: 100, y: 200 }, 1000);
-    const r0 = { id: 'old', w: 1200, h: 1600, strokes: [], createdAt: 500, updatedAt: 500 };
-    st.sketchMemos.F.push(r0);
-    assert.strictEqual(r1.x, 100); assert.strictEqual(r1.y, 200);
-    assert.strictEqual(sk.packFor(st, 'F').items.find((i) => i.id === r1.id).x, 100, '자리도 동기화');
-    assert.strictEqual(sk.labelFor(st, 'F', 'old'), '손글씨 메모-1');
-    assert.strictEqual(sk.labelFor(st, 'F', r1.id), '손글씨 메모-2');
-    const pt = sk.placedPoint(st, 'F', r0, 1000, 1000);
-    assert.ok(pt.legacy && pt.x === 40 && pt.y === 60, '옛 장은 왼쪽 위부터');
-    const again = sk.saveSheet(st, 'F', { id: r1.id, strokes: [] }, 2000);
-    assert.strictEqual(again.x, 100, '다시 저장해도 자리 유지');
-    assert.ok(/memoAddKind === 'sketch' && typeof window\.openSketchMemo === 'function'/.test(app), '메모 모드에서 손글씨로 추가');
-    assert.ok(/id: 'sk:' \+ r\.id, sketchId: r\.id/.test(app), '도면 메모 겹층에 손글씨 항목');
+    const merge = sm.mergeNdtDataMaps;
+    const line = { c: '#000', w: 3, p: [1, 1, 50, 5, 5, 50] };
+    const A = {}; const B = {};
+    const a1 = sk.saveSheet(A, 'F', { strokes: [line], by: '김' }, 1000);
+    const a2 = sk.saveSheet(A, 'F', { strokes: [line], by: '김' }, 1100);
+    const b1 = sk.saveSheet(B, 'F', { strokes: [line], by: '이' }, 1050);
+    const old = { id: 'old', w: 1200, h: 1600, strokes: [line], createdAt: 500, updatedAt: 500 };   // 예전(작성자 없음) 장
+    A.sketchMemos.F.unshift(old);
+    sk.mergePackIntoState(A, 'F', sk.packFor(B, 'F'), merge);
+    const ids = sk.listFor(A, 'F').map((r) => r.id);
+    assert.deepStrictEqual(ids.sort(), [a1.id, a2.id, b1.id, 'old'].sort(), '다른 사람 메모와 합쳐도 모두 남음(예전 메모 보존)');
+    assert.strictEqual(sk.labelFor(A, 'F', a1.id, '김'), '메모-1');
+    assert.strictEqual(sk.labelFor(A, 'F', a2.id, '김'), '메모-2');
+    assert.strictEqual(sk.labelFor(A, 'F', b1.id, '김'), '이 메모-1', '다른 사람 메모는 이름을 붙임');
+    assert.strictEqual(sk.labelFor(A, 'F', '', '김'), '메모-3', '새 메모 번호');
+    // 반대 방향 병합도 둘 다
+    sk.mergePackIntoState(B, 'F', sk.packFor(A, 'F'), merge);
+    assert.strictEqual(sk.listFor(B, 'F').length, 4);
+    // app.js 연결
+    assert.ok(/getElementById\('btnOpenSketchMemo'\)[\s\S]{0,120}openSketchMemo\(\{ fresh: true \}\)/.test(app), '메모 버튼 → 바로 새 종이');
+    assert.ok(/if \(sketchUi\.readOnly \|\| sketchUi\.sheet\.id\) return null;/.test(app), '저장된 메모는 덮어쓰지 않음');
+    assert.ok(!/data-sk="del"/.test(app), '메모 지우기 버튼 없음');
+    assert.ok(!/memoAddKind/.test(app), '메모 모드 「손글씨로 추가」 없음');
+    assert.ok(!/id: 'sk:' \+ r\.id/.test(app), '도면 위 손글씨 항목 없음');
+    const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+    const ov = html.indexOf('id="btnOpenOverviewPhotos"');
+    const memo = html.indexOf('id="btnOpenSketchMemo"');
+    assert.ok(ov > 0 && memo > ov && memo - ov < 600, '전경사진 버튼 바로 옆');
 }
 console.log('test-sync-branch-conflicts OK');

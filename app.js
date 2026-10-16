@@ -25355,10 +25355,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             if (!chip) return;
             e.preventDefault();
             e.stopPropagation();
-            const skId = chip.dataset.sketchId || '';
-            const st = skId
-                ? memoImgToScreen(sketchMemoPoint(skId) || { x: 0, y: 0 })
-                : memoImgToScreen(memoApi().listFor(window.state, currentMemoFloorKey()).find((m) => m.id === chip.dataset.id) || { x: 0, y: 0 });
+            const st = memoImgToScreen(memoApi().listFor(window.state, currentMemoFloorKey()).find((m) => m.id === chip.dataset.id) || { x: 0, y: 0 });
             memoChipDrag = { id: chip.dataset.id, pointerId: e.pointerId, x0: e.clientX, y0: e.clientY, downAt: Date.now(), moved: 0, sx: st.sx, sy: st.sy, multi: false };
             try { chip.setPointerCapture(e.pointerId); } catch (_e) { /* ignore */ }
         });
@@ -25381,19 +25378,6 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             e.stopPropagation();
             if (cancelled || d.multi) { syncDrawingMemoOverlay(); return; }
             const floorKey = currentMemoFloorKey();
-            // 2026-10-16 손글씨 메모 항목(data-id = sk:…): 끌면 자리 옮김, 누르면 손글씨 팝업
-            if (String(d.id).indexOf('sk:') === 0) {
-                const skId = String(d.id).slice(3);
-                if (d.moved >= TOUCH_TAP_MAX_MOVE_PX) {
-                    const p = memoScreenToImg(d.sx + e.clientX - d.x0, d.sy + e.clientY - d.y0);
-                    const rec = sketchApi() && sketchApi().listFor(window.state, floorKey).find((r) => r.id === skId);
-                    if (rec && sketchApi().saveSheet(window.state, floorKey, Object.assign({}, rec, { x: p.x, y: p.y }))) commitMemoChange(floorKey);
-                    else syncDrawingMemoOverlay();
-                    return;
-                }
-                if (isCleanTouchTap({ downAt: d.downAt, maxMove: d.moved, multi: false }, Date.now())) window.openSketchMemo({ id: skId });
-                return;
-            }
             if (d.moved >= TOUCH_TAP_MAX_MOVE_PX) {
                 const p = memoScreenToImg(d.sx + e.clientX - d.x0, d.sy + e.clientY - d.y0);
                 if (memoApi().updateMemo(window.state, floorKey, d.id, { x: p.x, y: p.y })) commitMemoChange(floorKey);
@@ -25432,15 +25416,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     function syncDrawingMemoOverlay() {
         const api = memoApi();
         const floorKey = currentMemoFloorKey();
-        const textList = (api && floorKey && state.bgImage && readMemoShowPref()) ? api.listFor(window.state, floorKey) : [];
-        // 2026-10-16 손글씨 메모도 도면 메모 목록 항목으로(「✍ 손글씨 메모-1, -2 …」). 누르면 팝업, 끌면 자리 옮김
-        const skApi = sketchApi();
-        const skList = (skApi && floorKey && state.bgImage && readMemoShowPref()) ? skApi.listFor(window.state, floorKey) : [];
-        const list = textList.concat(skList.map((r) => {
-            const pt = sketchMemoPoint(r.id) || { x: 0, y: 0 };
-            const label = '✍ ' + skApi.labelFor(window.state, floorKey, r.id) + (r.title ? ` · ${r.title}` : '');
-            return { id: 'sk:' + r.id, sketchId: r.id, x: pt.x, y: pt.y, text: label, by: r.by || '' };
-        }));
+        const list = (api && floorKey && state.bgImage && readMemoShowPref()) ? api.listFor(window.state, floorKey) : [];
         let ov = document.getElementById('mapMemoOverlay');
         if (!list.length) {
             if (ov) ov.replaceChildren();
@@ -25466,13 +25442,12 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             let el = existing.get(m.id);
             if (!el) {
                 el = document.createElement('div');
-                el.className = 'map-memo-chip' + (m.sketchId ? ' map-memo-sketch' : '');
+                el.className = 'map-memo-chip';
                 el.dataset.id = m.id;
-                if (m.sketchId) el.dataset.sketchId = m.sketchId;
                 el.setAttribute('role', 'button');
                 ov.appendChild(el);
             }
-            const label = m.sketchId ? m.text : api.shortLabel(m.text, 22);
+            const label = api.shortLabel(m.text, 22);
             if (el.dataset.text !== m.text) {
                 el.dataset.text = m.text;
                 el.textContent = label;
@@ -25542,8 +25517,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const img = state.bgImage;
         return api.placedPoint(window.state, floorKey, rec, img ? (img.naturalWidth || img.width) : 1200, img ? (img.naturalHeight || img.height) : 800);
     }
-    // 메모 모드에서 도면을 누르면 만들 메모 종류: 'text' | 'sketch'
-    let memoAddKind = 'text';
+
     const sketchUi = { el: null, canvas: null, ctx: null, layer: null, lctx: null, sheet: null, strokes: [], redo: [], undo: [],
         tool: 'pen', color: '#111827', width: 3, penSeen: false, drawing: null, floorKey: '', dirty: false, scale: 1 };
     window._bsaSketchUi = sketchUi;
@@ -25560,13 +25534,11 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         el.innerHTML = `
             <div class="sk-card" role="dialog" aria-label="손글씨 메모">
                 <div class="sk-head">
-                    <strong>✍ 손글씨 메모</strong>
-                    <select class="sk-sheets" data-sk-sheets aria-label="장 선택"></select>
-                    <button type="button" class="sk-btn" data-sk="new" title="새 장">＋ 새 장</button>
-                    <button type="button" class="sk-btn" data-sk="del" title="이 장 지우기"><i class="fa-solid fa-trash"></i></button>
+                    <strong>✍ 메모</strong>
+                    <select class="sk-sheets" data-sk-sheets aria-label="메모 보기"></select>
+                    <button type="button" class="sk-btn" data-sk="new" title="새 메모">＋ 새 메모</button>
                     <span class="sk-spacer"></span>
-                    <button type="button" class="sk-btn" data-sk="text" title="예전 텍스트 메모(도면에 글 붙이기)">텍스트 메모</button>
-                    <button type="button" class="sk-btn" data-sk="close" title="닫기">✕</button>
+                    <button type="button" class="sk-btn" data-sk="close" title="닫기(저장)">✕</button>
                 </div>
                 <div class="sk-tools">
                     <button type="button" class="sk-btn sk-tool active" data-sk-tool="pen" title="펜"><i class="fa-solid fa-pen"></i></button>
@@ -25596,14 +25568,13 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 el.querySelectorAll('.sk-color').forEach((x) => x.classList.toggle('active', x === b));
                 el.querySelectorAll('.sk-tool').forEach((x) => x.classList.toggle('active', x.dataset.skTool === 'pen')); return; }
             const a = b.dataset.sk;
+            if (sketchUi.readOnly && (a === 'undo' || a === 'redo' || a === 'clear' || a === 'save')) return;
             if (a === 'close') void sketchClose();
             else if (a === 'save') sketchSave(true);
             else if (a === 'undo') sketchUndo();
             else if (a === 'redo') sketchRedo();
             else if (a === 'clear') { if (sketchUi.strokes.length) { sketchUi.undo.push(sketchUi.strokes.slice()); sketchUi.redo = []; sketchUi.strokes = []; sketchUi.dirty = true; sketchRedraw(); } }
             else if (a === 'new') { sketchSave(false); sketchOpenSheet(null); }
-            else if (a === 'del') void sketchDeleteSheet();
-            else if (a === 'text') { void sketchClose().then(() => { if (typeof setDrawMode === 'function') setDrawMode('MEMO'); }); }
         });
         el.querySelector('[data-sk-width]').addEventListener('input', (e) => { sketchUi.width = Number(e.target.value) || 3; });
         el.querySelector('[data-sk-sheets]').addEventListener('change', (e) => {
@@ -25676,6 +25647,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     }
 
     function sketchPointerDown(e) {
+        if (sketchUi.readOnly) return;
         if (e.pointerType === 'pen') sketchUi.penSeen = true;
         // 펜이 한 번이라도 닿았으면 손가락·손바닥은 무시(오입력 방지)
         if (sketchUi.penSeen && e.pointerType === 'touch') return;
@@ -25731,8 +25703,11 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const sel = sketchUi.el.querySelector('[data-sk-sheets]');
         const list = api.listFor(window.state, sketchUi.floorKey);
         const curId = sketchUi.sheet && sketchUi.sheet.id;
-        const opts = list.map((r, i) => `<option value="${r.id}">손글씨 메모-${i + 1}${r.title ? ' · ' + String(r.title).replace(/[<>&"]/g, '') : ''}</option>`);
-        if (!curId || !list.some((r) => r.id === curId)) opts.push(`<option value="" selected>새 손글씨 메모-${list.length + 1}</option>`);
+        // 2026-10-16 작성자별 「메모-1, 메모-2 …」. 저장된 메모는 보기만(고치기·지우기 없음 — 늘 새 항목으로 쌓임)
+        const me = (typeof memoAuthorName === 'function') ? memoAuthorName() : '';
+        const esc = (t) => String(t).replace(/[<>&"]/g, '');
+        const opts = list.map((r) => `<option value="${r.id}">${esc(api.labelFor(window.state, sketchUi.floorKey, r.id, me))}${r.title ? ' · ' + esc(r.title) : ''}</option>`);
+        if (!curId || !list.some((r) => r.id === curId)) opts.push(`<option value="" selected>새 ${esc(api.labelFor(window.state, sketchUi.floorKey, '', me))}</option>`);
         sel.innerHTML = opts.join('');
         if (curId) sel.value = curId;
     }
@@ -25750,6 +25725,12 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         sketchUi.undo = [];
         sketchUi.redo = [];
         sketchUi.dirty = false;
+        sketchUi.readOnly = !!rec;   // 저장된 메모는 덮어쓰지 않는다
+        sketchUi.el.classList.toggle('sk-readonly', sketchUi.readOnly);
+        const hint = sketchUi.el.querySelector('[data-sk-hint]');
+        if (hint) hint.textContent = sketchUi.readOnly
+            ? '저장된 메모는 보기만 합니다. 새로 쓰려면 「＋ 새 메모」'
+            : '펜이 닿으면 그때부터 펜으로만 그립니다(손바닥 무시) · 닫으면 저장';
         sketchFillSheetSelect();
         sketchLayout();
     }
@@ -25760,6 +25741,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (!api || !sketchUi.sheet || !sketchUi.floorKey) return null;
         if (!sketchUi.dirty) { if (notify) window.showToast('바뀐 내용이 없습니다', 'info', 1500); return null; }
         if (!sketchUi.sheet.id && !sketchUi.strokes.length) return null;
+        if (sketchUi.readOnly || sketchUi.sheet.id) return null;   // 2026-10-16 저장된 메모는 덮어쓰지 않음
         if (api.pointCount(sketchUi.strokes) > api.MAX_POINTS) {
             window.showToast('이 장은 너무 많이 그려 저장할 수 없습니다. 새 장에 이어서 그려 주세요.', 'warning', 6000);
             return null;
@@ -25772,6 +25754,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (!rec) return null;
         sketchUi.sheet.id = rec.id;
         sketchUi.dirty = false;
+        sketchUi.readOnly = true;
+        sketchUi.el.classList.add('sk-readonly');
         commitMemoChange(sketchUi.floorKey);
         sketchFillSheetSelect();
         if (notify) window.showToast('손글씨 메모를 저장했습니다', 'success', 1800);
@@ -25810,33 +25794,17 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const list = api.listFor(window.state, floorKey);
         const want = opts && opts.id ? list.find((r) => r.id === opts.id) : null;
         sketchUi.newAt = (opts && opts.at) ? { x: Math.round(opts.at.x), y: Math.round(opts.at.y) } : null;
-        requestAnimationFrame(() => sketchOpenSheet(want || (opts && opts.fresh ? null : list[list.length - 1]) || null));
+        // 2026-10-16 「메모」 버튼 = 바로 새 흰 종이(이전 메모는 위 목록에서 골라 보기)
+        requestAnimationFrame(() => sketchOpenSheet(want || null));
         return true;
     };
     window.closeSketchMemo = sketchClose;
 
+    // 2026-10-16 사용자 요청: 손글씨 메모는 도면 위 자리가 아니라 상단 「전경사진」 버튼 옆 「손글씨 메모」 버튼으로만 열고 관리.
+    // 팝업 안 장 고르기(손글씨 메모-1, -2 …)로 다시 열어 고친다. 메모 막대 「손글씨로 추가」·도면 위 항목은 없앰.
     (function bindSketchMemoButtons() {
-        const bar = document.getElementById('drawingMemoBar');
-        if (bar && !bar.querySelector('[data-sketch-open]')) {
-            const b = document.createElement('button');
-            b.type = 'button';
-            b.className = 'btn btn-sm btn-outline drawing-memo-sketch-btn';
-            b.setAttribute('data-sketch-open', '1');
-            b.innerHTML = '✍ 손글씨로 추가';
-            b.title = '켜면 도면을 누른 자리에 손글씨 메모(손글씨 메모-1, -2 …)를 추가합니다. 끄면 글 메모';
-            b.setAttribute('aria-pressed', 'false');
-            b.addEventListener('click', (e) => {
-                e.preventDefault();
-                memoAddKind = memoAddKind === 'sketch' ? 'text' : 'sketch';
-                b.classList.toggle('active', memoAddKind === 'sketch');
-                b.setAttribute('aria-pressed', memoAddKind === 'sketch' ? 'true' : 'false');
-                const t = bar.querySelector('.drawing-memo-bar-text');
-                if (t) t.textContent = memoAddKind === 'sketch'
-                    ? '✍ 도면을 눌러 손글씨 메모 추가 · 메모를 끌어 옮기기 · 눌러서 열기'
-                    : '📝 도면을 눌러 메모 추가 · 메모를 끌어 옮기기 · 눌러서 고치기/지우기';
-            });
-            bar.appendChild(b);
-        }
+        const b = document.getElementById('btnOpenSketchMemo');
+        if (b) b.addEventListener('click', (e) => { e.preventDefault(); window.openSketchMemo({ fresh: true }); });
     })();
 
 
@@ -25857,10 +25825,6 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const rect = elements.planCanvas.getBoundingClientRect();
         if (state.mode === 'COUNT') { countTapAt(tap.clientX - rect.left, tap.clientY - rect.top); return true; }
         const p = memoScreenToImg(tap.clientX - rect.left, tap.clientY - rect.top);
-        if (memoAddKind === 'sketch' && typeof window.openSketchMemo === 'function') {
-            window.openSketchMemo({ fresh: true, at: p });
-            return true;
-        }
         createDrawingMemoAt(p.x, p.y);
         return true;
     }
