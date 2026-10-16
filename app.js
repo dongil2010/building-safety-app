@@ -5817,7 +5817,12 @@ document.addEventListener('DOMContentLoaded', () => {
         if (c === 'EXT' || String(code).trim() === '외부') return '건축물 외부 (EXT)';
         if (String(code).includes('외부')) return String(code).trim();
         const roofInfo = typeof window.resolveRoofFloorFromText === 'function' ? window.resolveRoofFloorFromText(code) : null;
-        if (roofInfo) return roofInfo.label;
+        if (roofInfo) {
+            // 2026-10-16 옥탑1층·PH2처럼 번호가 있으면 번호를 살린 이름(둘 다 「옥탑층 (PH)」로 보이지 않게)
+            const ri = roofInfo.code === 'PH' && typeof window.parseRooftopIndex === 'function' ? window.parseRooftopIndex(code) : null;
+            if (ri) return String(code).includes('옥탑') ? String(code).trim() : `옥탑${ri}층 (${String(code).trim()})`;
+            return roofInfo.label;
+        }
         const bMatch = c.match(/^B\s*([0-9]+)\s*F?$/);
         if (bMatch) return `지하 ${bMatch[1]}층 (${c})`;
         const fMatch = c.match(/^([0-9]+)\s*F$/);
@@ -53619,6 +53624,26 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         let match = floors.find(f => norm(f.floorLabel) === n || norm(f.floorCode) === n);
         if (match) return match.floorCode;
 
+        // 2026-10-16 「옥탑층, 옥탑1층 이런 층들도 있다」: 옥상·옥탑·지붕 시트는 옥상·옥탑 층끼리만 맞춘다.
+        // 예전엔 「옥탑1층」이 숫자 1 때문에 1F로, 없는 「12층」이 아무 층(B1F)으로 갔다.
+        const roofOf = (t) => (typeof window.resolveRoofFloorFromText === 'function' ? window.resolveRoofFloorFromText(String(t || '')) : null);
+        const roofIdx = (t) => (typeof window.parseRooftopIndex === 'function' ? window.parseRooftopIndex(String(t || '')) : null);
+        const floorRoof = (f) => roofOf(f.floorCode) || roofOf(f.floorLabel);
+        const floorRoofIdx = (f) => roofIdx(f.floorCode) || roofIdx(f.floorLabel);
+        const sheetRoof = roofOf(sheetName);
+        if (sheetRoof) {
+            const same = floors.filter((f) => f && f.floorCode && floorRoof(f) && floorRoof(f).code === sheetRoof.code);
+            const si = sheetRoof.code === 'PH' ? roofIdx(sheetName) : null;
+            const byIdx = same.find((f) => floorRoofIdx(f) === si);   // 번호까지 같음(옥탑2층 ↔ PH2)
+            if (byIdx) return byIdx.floorCode;
+            // 번호 없는 옥탑층 하나뿐이면 옥탑1층·PH1은 거기로. 옥탑2층 이상은 맞는 층이 없으면 직접 선택
+            if (si === 1 || si == null) {
+                const plain = same.find((f) => floorRoofIdx(f) == null);
+                if (plain) return plain.floorCode;
+            }
+            return null;
+        }
+
         const sheetStory = parseSheetFloorStoryHint(sheetName);
         const sheetExt = sheetNameLooksExterior(sheetName);
         let best = null;
@@ -53626,6 +53651,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
         floors.forEach((f) => {
             if (!f || !f.floorCode) return;
+            if (floorRoof(f)) return;   // 「1층」 시트가 「옥탑1층」으로 가지 않게
             const fc = norm(f.floorCode);
             const fl = norm(f.floorLabel);
             const floorExt = (typeof isExteriorFloorCode === 'function' && isExteriorFloorCode(f.floorCode))
@@ -53651,7 +53677,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             if (sheetStory && !sheetExt && floorExt) score -= 60;
             if (sheetExt && floorExt) score += 45;
             if (sheetExt && !floorExt) score -= 25;
-            if (sheetStory && !sheetExt && isInteriorFloorDrawingCode(f.floorCode)) score += 20;
+            // 내부 층 가산점은 이름·번호가 이미 맞을 때만 (없는 층 「12층」이 첫 층으로 가던 것)
+            if (score > 0 && sheetStory && !sheetExt && isInteriorFloorDrawingCode(f.floorCode)) score += 20;
 
             if (score > bestScore) {
                 bestScore = score;
@@ -53762,12 +53789,15 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 sheetMapBody.innerHTML = `<div style="font-size:0.82rem; color:var(--text-muted);">선택된 건축물의 층 정보를 찾지 못해 모든 시트를 현재 층(${state.currentFloor || ''})으로 가져옵니다.</div>`;
             } else {
                 sheetMapBody.innerHTML = sheets.map(s => {
+                    // 2026-10-16 앱에 맞는 층이 없으면 조용히 「가져오지 않음」이 아니라 눈에 띄게 알린다
+                    const noMatch = !s.guessedFloorCode;
                     const options = ['<option value="">(가져오지 않음)</option>']
                         .concat(floors.map(f => `<option value="${escapeHtml(f.floorCode)}" ${f.floorCode === s.guessedFloorCode ? 'selected' : ''}>${escapeHtml(f.floorLabel)}</option>`));
                     return `
                         <div style="display:flex; align-items:center; gap:0.6rem;">
                             <span style="flex:1; min-width:0; font-size:0.82rem; font-weight:700; color:var(--text-secondary); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${escapeHtml(s.sheetName)}">
                                 ${escapeHtml(s.sheetName)} <span style="color:var(--text-muted); font-weight:400;">(${s.rows.length}행)</span>
+                                ${noMatch ? '<span class="import-floor-nomatch" style="display:block; color:#b45309; font-weight:600; font-size:0.75rem; white-space:normal;">⚠ 앱에 맞는 층이 없음 — 층을 직접 고르거나 건축물 정보에서 층을 먼저 추가하세요</span>' : ''}
                             </span>
                             <select class="form-select import-defect-sheet-floor-map" data-sheet="${escapeHtml(s.sheetName)}" style="width:200px; flex-shrink:0;">${options.join('')}</select>
                         </div>

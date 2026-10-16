@@ -698,6 +698,20 @@ window.ROOF_FLOOR_DEFS = [
     { code: 'ROOF', label: '옥상층 (ROOF)', rank: 9990 }
 ];
 
+/**
+ * 2026-10-16 「옥탑층, 옥탑1층 이런 층들도 있다」: 옥탑 몇 번째 층인지(옥탑1층·옥탑 2층·PH1·RF2). 번호 없으면 null.
+ * 「옥탑 지붕층」은 번호 없음으로 본다.
+ */
+window.parseRooftopIndex = function(rawText) {
+    const raw = String(rawText || '').trim();
+    const c = raw.toUpperCase();
+    let m = raw.match(/옥탑\s*[_\-]?\s*([0-9]{1,2})(?![0-9])/);
+    if (!m) m = c.match(/(?:^|[^A-Z0-9])(?:PH|RF)[\s_\-]*([0-9]{1,2})(?![0-9])/);
+    if (!m) return null;
+    const n = parseInt(m[1], 10);
+    return n >= 1 && n <= 99 ? n : null;
+};
+
 window.resolveRoofFloorFromText = function(rawText) {
     const raw = String(rawText || '');
     const c = raw.toUpperCase().trim();
@@ -716,12 +730,16 @@ window.resolveRoofFloorFromText = function(rawText) {
         c === 'PH' ||
         raw.includes('옥탑') ||
         c.includes('PENTHOUSE') ||
-        /(^|[^A-Z0-9])PH([^A-Z0-9]|$)/.test(c)
+        /(^|[^A-Z0-9])PH([^A-Z0-9]|$)/.test(c) ||
+        // PH1·PH2·RF1·RF2 = 옥탑 1·2층 (예전엔 PH1은 0순위, RF1은 「F1」로 읽혀 1층이 됐다)
+        /(^|[^A-Z0-9])(?:PH|RF)[\s_-]*[0-9]{1,2}(?![0-9])/.test(c)
     ) {
         return window.ROOF_FLOOR_DEFS[1];
     }
     // 3) 옥상층
-    if (c === 'ROOF' || raw.includes('옥상') || c.includes('ROOF')) {
+    // RF(번호 없음)·지붕층(옥탑 없이) = 옥상층
+    if (c === 'ROOF' || raw.includes('옥상') || c.includes('ROOF')
+        || /(^|[^A-Z0-9])RF([^A-Z0-9]|$)/.test(c) || /^지붕\s*층?$/.test(raw.trim())) {
         return window.ROOF_FLOOR_DEFS[2];
     }
     return null;

@@ -64,7 +64,11 @@
         if (c.indexOf('EXT') >= 0 || raw.indexOf('외부') >= 0) return 10000;
         if (typeof root.resolveRoofFloorFromText === 'function') {
             const roof = root.resolveRoofFloorFromText(raw);
-            if (roof) return roof.rank;
+            if (roof) {
+                // 2026-10-16 옥탑1층 < 옥탑2층 (둘 다 옥탑층 순위였음). 옥탑 지붕층(9992)보다는 아래
+                const idx = (roof.code === 'PH' && typeof root.parseRooftopIndex === 'function') ? root.parseRooftopIndex(raw) : null;
+                return idx ? roof.rank + idx / 100 : roof.rank;
+            }
         }
         const b = parseBasementNumber(raw);
         if (b != null) return -b;
@@ -91,7 +95,11 @@
         if (raw.indexOf('외부') >= 0) return raw;
         if (typeof root.resolveRoofFloorFromText === 'function') {
             const roof = root.resolveRoofFloorFromText(raw);
-            if (roof) return roof.label;
+            if (roof) {
+                const ri = roof.code === 'PH' && typeof root.parseRooftopIndex === 'function' ? root.parseRooftopIndex(raw) : null;
+                if (ri) return raw.indexOf('옥탑') >= 0 ? raw : '옥탑' + ri + '층 (' + raw + ')';
+                return roof.label;
+            }
         }
         const b = parseBasementNumber(raw);
         if (b != null) {
@@ -141,6 +149,10 @@
     /**
      * 표준 층(B2F·1F 등)끼리만 저층→고층. 직접 입력 이름은 원래 순서 유지.
      */
+    function isRoofFamilyText(code) {
+        return typeof root.resolveRoofFloorFromText === 'function' && !!root.resolveRoofFloorFromText(asText(code));
+    }
+
     function sortFloorsLowToHigh(floorsList) {
         if (!Array.isArray(floorsList)) return [];
         const items = floorsList.map(function (f, i) {
@@ -149,8 +161,9 @@
         items.sort(function (a, b) {
             const aCode = a.f && (a.f.floorCode || a.f);
             const bCode = b.f && (b.f.floorCode || b.f);
-            const aStd = isStandardFloorCode(aCode);
-            const bStd = isStandardFloorCode(bCode);
+            // 2026-10-16 직접 입력한 옥탑1층·옥탑2층·RF도 지하 < 지상 < 옥상·옥탑 순서에 끼운다
+            const aStd = isStandardFloorCode(aCode) || isRoofFamilyText(aCode);
+            const bStd = isStandardFloorCode(bCode) || isRoofFamilyText(bCode);
             if (aStd && bStd) return rankFromCode(aCode) - rankFromCode(bCode);
             return a.i - b.i;
         });
