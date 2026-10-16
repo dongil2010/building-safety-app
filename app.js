@@ -62010,6 +62010,27 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         return await docRef.get();
     }
 
+    /**
+     * 동기화 쓰기 전용(2026-10-16 사고 방지): 반드시 서버에서 읽는다. 서버를 못 읽으면 기기 캐시로 넘어가지 않고 실패한다
+     * — 빈·옛 캐시를 서버 자료로 알고 합친 뒤 회사 문서를 통째로 덮어쓰는 일을 막는다(그때는 이번에 쓰지 않고 다음에 다시).
+     */
+    async function fetchCompanyDocSnapForWrite(docRef) {
+        try {
+            return await docRef.get({ source: 'server' });
+        } catch (e) {
+            if (isFirestoreQuotaError(e)) pauseFirestoreReads(SYNC_QUOTA_COOLDOWN_MS);
+            throw new Error('SERVER_READ_FOR_WRITE: 서버 문서를 읽지 못해 이번에는 쓰지 않습니다(다음에 다시) — ' + (e && e.message ? e.message : e));
+        }
+    }
+    /** 동기화 쓰기에 쓸 서버 기준 루트 문서: 리스너가 서버에서 받은 것이 있으면 그것, 없으면 서버에서 직접 */
+    async function serverRootDataForWrite(docRef) {
+        if (_lastRootSnapshotFromServer && _lastRootSnapshotData && Object.keys(_lastRootSnapshotData).length) {
+            return Object.assign({}, _lastRootSnapshotData);
+        }
+        const snap = await fetchCompanyDocSnapForWrite(docRef);
+        return snap.exists ? snap.data() : {};
+    }
+
     // --- 옛 버전 앱의 동기화 차단 (2026-09-21) ---
     // 지운 층이 되살아나고 옛 데이터가 새 데이터를 덮은 사고는 모두 업데이트 안 된 기기가
     // 옛 코드로 동기화하면서 생겼다. 지금 돌고 있는 코드가 배포된 최신본과 다르면 클라우드에
@@ -62153,14 +62174,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             // 잠금 대기 중 사용자가 드래그를 시작했을 수 있음 — 상태 교체 전 다시 확인
             await waitForUiGestureIdle();
 
-            // 잠금 문서는 더 이상 회사/층 페이로드가 아니다. 리스너 캐시 → 없으면 루트 get.
-            let serverData;
-            if (_lastRootSnapshotData && Object.keys(_lastRootSnapshotData).length) {
-                serverData = Object.assign({}, _lastRootSnapshotData);
-            } else {
-                const snap = await fetchCompanyDocSnap(docRef);
-                serverData = snap.exists ? snap.data() : {};
-            }
+            // 잠금 문서는 더 이상 회사/층 페이로드가 아니다. 서버에서 받은 리스너 문서 → 없으면 서버에서 직접(캐시로 넘어가지 않음)
+            let serverData = await serverRootDataForWrite(docRef);
 
             let mergedDeletedBuildings = mergeDeletedBuildingIds(
                 serverData.deletedBuildingIds,
@@ -62244,12 +62259,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             // source:'server'로 다시 읽는 2차 조회·재병합은 생략한다.
             // (로컬 변경은 window.state에 있고, 다시 합치면 업로드 중 편집을 되돌릴 수 있다)
             if (!leaseInfo) {
-                if (_lastRootSnapshotData && Object.keys(_lastRootSnapshotData).length) {
-                    serverData = Object.assign({}, _lastRootSnapshotData);
-                } else {
-                    const snapFresh = await fetchCompanyDocSnap(docRef);
-                    serverData = snapFresh.exists ? snapFresh.data() : {};
-                }
+                serverData = await serverRootDataForWrite(docRef);
                 mergedDeletedBuildings = mergeDeletedBuildingIds(
                     serverData.deletedBuildingIds,
                     window.state.deletedBuildingIds
@@ -62492,6 +62502,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     let _listenerNeedsResubscribe = false;
     let _listeningCompanyId = null;
     let _lastRootSnapshotData = {};
+    // 2026-10-16 사고 방지: 위 루트 문서가 서버에서 온 것인지(기기 캐시·내 미전송 쓰기가 아님). 동기화 쓰기는 서버 것만 믿는다
+    let _lastRootSnapshotFromServer = false;
     let _lastBulkSnapshotData = {};
     let _bulkHydratedOnce = false;
 
@@ -62515,6 +62527,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         _listeningCompanyId = null;
         if (opts && opts.clearCache) {
             _lastRootSnapshotData = {};
+            _lastRootSnapshotFromServer = false;
             _lastBulkSnapshotData = {};
             _bulkHydratedOnce = false;
             _lastBulkPayloadIdentity = '';
@@ -62601,6 +62614,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         _listeningCompanyId = docId;
         if (companyChanged) {
             _lastRootSnapshotData = {};
+            _lastRootSnapshotFromServer = false;
             _lastBulkSnapshotData = {};
             _bulkHydratedOnce = false;
             _lastBulkPayloadIdentity = '';
@@ -62631,10 +62645,12 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             const next = (doc && doc.exists && doc.data()) || {};
             if (doc && doc.metadata && doc.metadata.hasPendingWrites) {
                 _lastRootSnapshotData = next;
+                _lastRootSnapshotFromServer = false;   // 내 미전송 쓰기가 섞인 모습 — 서버 기준 아님
                 return;
             }
             const leaseOnly = isOnlySyncLeaseChange(_lastRootSnapshotData, next);
             _lastRootSnapshotData = next;
+            _lastRootSnapshotFromServer = !(doc && doc.metadata && doc.metadata.fromCache);
             if (leaseOnly) return;
             await applyCombinedSnapshot();
         }, onListenerErr);
