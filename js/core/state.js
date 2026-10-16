@@ -712,6 +712,18 @@ window.parseRooftopIndex = function(rawText) {
     return n >= 1 && n <= 99 ? n : null;
 };
 
+/** 2026-10-16 「지붕층」(옥탑 없이) — 옥상층과 다른 독립 층. 옥탑 지붕층(PH_ROOF)과도 구분 */
+window.isStandaloneRoofDeckText = function(rawText) {
+    const raw = String(rawText || '').trim();
+    return /^지붕\s*층?(?:\s*\(.*\))?$/.test(raw) && raw.indexOf('옥탑') < 0;
+};
+
+/** 2026-10-16 「옥상지붕층이랑 옥탑지붕층도 다른거」: 옥상지붕층 — 옥상층·옥탑 지붕층·지붕층과 다른 독립 층 */
+window.isRoofTopDeckText = function(rawText) {
+    const raw = String(rawText || '').trim();
+    return raw.indexOf('옥상') >= 0 && raw.indexOf('지붕') >= 0 && raw.indexOf('옥탑') < 0;
+};
+
 window.resolveRoofFloorFromText = function(rawText) {
     const raw = String(rawText || '');
     const c = raw.toUpperCase().trim();
@@ -737,9 +749,10 @@ window.resolveRoofFloorFromText = function(rawText) {
         return window.ROOF_FLOOR_DEFS[1];
     }
     // 3) 옥상층
-    // RF(번호 없음)·지붕층(옥탑 없이) = 옥상층
-    if (c === 'ROOF' || raw.includes('옥상') || c.includes('ROOF')
-        || /(^|[^A-Z0-9])RF([^A-Z0-9]|$)/.test(c) || /^지붕\s*층?$/.test(raw.trim())) {
+    // 2026-10-16 「지붕층하고 옥상층은 다른 거」: 지붕층·RF(번호 없음)는 옥상층으로 보지 않는다
+    // (지붕층은 따로 — window.isStandaloneRoofDeckText. RF는 앱에 같은 이름 층이 있을 때만 그대로 맞춤)
+    if (window.isRoofTopDeckText(raw)) return null;   // 옥상지붕층은 옥상층이 아님
+    if (c === 'ROOF' || raw.includes('옥상') || c.includes('ROOF')) {
         return window.ROOF_FLOOR_DEFS[2];
     }
     return null;

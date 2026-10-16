@@ -53630,6 +53630,18 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const roofIdx = (t) => (typeof window.parseRooftopIndex === 'function' ? window.parseRooftopIndex(String(t || '')) : null);
         const floorRoof = (f) => roofOf(f.floorCode) || roofOf(f.floorLabel);
         const floorRoofIdx = (f) => roofIdx(f.floorCode) || roofIdx(f.floorLabel);
+        // 2026-10-16 「지붕층하고 옥상층은 다른 거」: 지붕층은 앱의 지붕층에만(옥상층·옥탑 지붕층으로 안 감)
+        const deckOf = (t) => (typeof window.isStandaloneRoofDeckText === 'function' && window.isStandaloneRoofDeckText(String(t || '')));
+        if (deckOf(sheetName)) {
+            const deck = floors.find((f) => f && f.floorCode && (deckOf(f.floorCode) || deckOf(f.floorLabel)));
+            return deck ? deck.floorCode : null;
+        }
+        // 「옥상지붕층이랑 옥탑지붕층도 다른거」: 옥상지붕층은 앱의 옥상지붕층에만
+        const topDeckOf = (t) => (typeof window.isRoofTopDeckText === 'function' && window.isRoofTopDeckText(String(t || '')));
+        if (topDeckOf(sheetName)) {
+            const td = floors.find((f) => f && f.floorCode && (topDeckOf(f.floorCode) || topDeckOf(f.floorLabel)));
+            return td ? td.floorCode : null;
+        }
         const sheetRoof = roofOf(sheetName);
         if (sheetRoof) {
             const same = floors.filter((f) => f && f.floorCode && floorRoof(f) && floorRoof(f).code === sheetRoof.code);
@@ -53651,7 +53663,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
         floors.forEach((f) => {
             if (!f || !f.floorCode) return;
-            if (floorRoof(f)) return;   // 「1층」 시트가 「옥탑1층」으로 가지 않게
+            if (floorRoof(f) || deckOf(f.floorCode) || deckOf(f.floorLabel)
+                || (typeof window.isRoofTopDeckText === 'function' && (window.isRoofTopDeckText(f.floorCode) || window.isRoofTopDeckText(f.floorLabel)))) return;   // 「1층」 시트가 「옥탑1층」으로 가지 않게
             const fc = norm(f.floorCode);
             const fl = norm(f.floorLabel);
             const floorExt = (typeof isExteriorFloorCode === 'function' && isExteriorFloorCode(f.floorCode))

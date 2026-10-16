@@ -62,6 +62,10 @@
         const extSerialRank = c.match(/^EXT_(\d+)$/) || raw.match(/^외부\s*(\d+)$/);
         if (extSerialRank) return 10000 + parseInt(extSerialRank[1], 10);
         if (c.indexOf('EXT') >= 0 || raw.indexOf('외부') >= 0) return 10000;
+        // 2026-10-16 지붕층(옥상과 다른 층)은 옥상·옥탑·옥탑 지붕 위, 맨 위
+        if (typeof root.isStandaloneRoofDeckText === 'function' && root.isStandaloneRoofDeckText(raw)) return 9993;
+        // 옥상지붕층: 옥상(9990) 위, 옥탑(9991) 아래
+        if (typeof root.isRoofTopDeckText === 'function' && root.isRoofTopDeckText(raw)) return 9990.5;
         if (typeof root.resolveRoofFloorFromText === 'function') {
             const roof = root.resolveRoofFloorFromText(raw);
             if (roof) {
@@ -150,6 +154,8 @@
      * 표준 층(B2F·1F 등)끼리만 저층→고층. 직접 입력 이름은 원래 순서 유지.
      */
     function isRoofFamilyText(code) {
+        if (typeof root.isStandaloneRoofDeckText === 'function' && root.isStandaloneRoofDeckText(asText(code))) return true;
+        if (typeof root.isRoofTopDeckText === 'function' && root.isRoofTopDeckText(asText(code))) return true;
         return typeof root.resolveRoofFloorFromText === 'function' && !!root.resolveRoofFloorFromText(asText(code));
     }
 
