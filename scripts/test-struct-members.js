@@ -250,6 +250,14 @@ assert.ok(layer.includes('return { w: Math.max(len, thick * 3), h: thick };'));
     assert.ok(!/action === '기둥' && readMode\(\) === 'ai'/.test(page), '페이지: 빈 곳 기둥 추가는 모든 방식에서');
 }
 
+// ---- 기둥 크기(2026-10-17): 고른 기둥 모서리를 끌어 크기 바꾸기, 새 기둥은 이 층에서 마지막으로 고친 크기로 ----
+assert.ok(layer.includes('var cornerGrab = grabCorner(p, pad);'), '고른 기둥 모서리 잡기');
+assert.ok(layer.includes("else if (dr.mode === 'size') Object.assign(d, sizeTo(dr, p));"), '끄는 동안 크기');
+assert.ok(layer.includes("if (e.type !== 'pointercancel') rememberColumnSize(now.w, now.h);"), '고친 크기를 기억');
+assert.ok(layer.includes("if (type === '기둥') { var cs = savedColumnSize(); if (cs) return cs; }"), '새 기둥은 기억한 크기로');
+assert.ok(layer.includes("var COL_SIZE_KEY = 'bsa_struct_col_size:';") && layer.includes('COL_SIZE_KEY + B.floorKey()'), '층마다 따로 기억');
+assert.ok(layer.includes("return type === '기둥' ? { w: s * 0.4, h: s * 0.4 } : { w: s, h: s * 0.5 };"), '구조도 없는 층 첫 기둥은 정사각형');
+
 // ---- 거더·빔은 시작→끝 두 번 눌러 추가(기둥에 붙어 면에서 면까지), 추가 중엔 기둥을 눌러도 고르지 않음 ----
 assert.ok(layer.includes('if (isLineType(ui.addType)) { addLinePoint(p, pad); return; }'));
 assert.ok(layer.includes("if (hit.type === '기둥') return { id: hit.id, x: hit.x, y: hit.y, hx: hit.w / 2, hy: hit.h / 2, on: '기둥' };"), '기둥 중심에 붙는다');

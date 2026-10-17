@@ -48,6 +48,7 @@
             + '.map-struct-overlay.is-active{pointer-events:auto;cursor:crosshair}'
             + '.map-struct-overlay rect{vector-effect:non-scaling-stroke;stroke-width:2;fill-opacity:.5}'
             + '.map-struct-overlay rect.map-struct-handle{fill:#fff;fill-opacity:1;stroke-width:2.5;cursor:ew-resize}'
+            + '.map-struct-overlay rect.map-struct-handle.is-corner{cursor:nwse-resize}'
             + '.map-struct-overlay rect.is-selected{stroke-width:4;fill-opacity:.75;stroke-dasharray:6 3}'
             + '.map-struct-overlay text{font-weight:700;text-anchor:middle;dominant-baseline:central;pointer-events:none;paint-order:stroke;stroke:#fff;stroke-width:.18em}'
             + '.map-struct-bar .map-struct-hint{flex-basis:100%;font-size:.82rem;font-weight:700;color:#0369a1}';
@@ -139,6 +140,19 @@
                 }
             });
             var selD = ui.editing && ui.selId && items.find(function (d) { return d.id === ui.selId; });
+            if (selD && selD.type === '기둥') {
+                // 고른 기둥 네 모서리 손잡이(끌면 가운데는 그대로, 가로·세로 크기만 — 2026-10-17)
+                var px10c = Math.hypot(B.screenToImg(10, 0).x - B.screenToImg(0, 0).x, B.screenToImg(10, 0).y - B.screenToImg(0, 0).y);
+                var hc = Math.max(Math.min(selD.w, selD.h) * 0.35, px10c);
+                [[-1, -1], [1, -1], [1, 1], [-1, 1]].forEach(function (k) {
+                    var hr = document.createElementNS(NS, 'rect');
+                    hr.setAttribute('x', selD.x + k[0] * selD.w / 2 - hc / 2); hr.setAttribute('y', selD.y + k[1] * selD.h / 2 - hc / 2);
+                    hr.setAttribute('width', hc); hr.setAttribute('height', hc);
+                    hr.setAttribute('class', 'map-struct-handle is-corner');
+                    hr.setAttribute('stroke', api.COLORS['기둥']);
+                    frag.appendChild(hr);
+                });
+            }
             if (selD && isLineType(selD.type)) {
                 // 고른 거더·빔 양 끝 손잡이(잡고 끌면 그 끝만 늘이고 줄임)
                 var px10 = Math.hypot(B.screenToImg(10, 0).x - B.screenToImg(0, 0).x, B.screenToImg(10, 0).y - B.screenToImg(0, 0).y);
@@ -212,10 +226,39 @@
         var r = B.canvas().getBoundingClientRect();
         return B.screenToImg(e.clientX - r.left, e.clientY - r.top);
     }
+    // ---------- 기둥 크기(2026-10-17): 구조도 없는 층에서 평면도 위에 바로 그릴 때 — 마지막으로 고친 크기로 새 기둥을 찍는다 ----------
+    var COL_SIZE_KEY = 'bsa_struct_col_size:';
+    function savedColumnSize() {
+        try {
+            var v = JSON.parse(pref(COL_SIZE_KEY + B.floorKey(), 'null'));
+            if (v && v.w > 0 && v.h > 0) return { w: Number(v.w), h: Number(v.h) };
+        } catch (_e) { /* ignore */ }
+        return null;
+    }
+    function rememberColumnSize(w, h) { if (w > 0 && h > 0) setPref(COL_SIZE_KEY + B.floorKey(), JSON.stringify({ w: w, h: h })); }
+    /** 고른 기둥 모서리 근처를 눌렀으면 → { mode:'size', id, orig } */
+    function grabCorner(p, pad) {
+        if (!ui.selId) return null;
+        var d = list().find(function (x) { return x.id === ui.selId; });
+        if (!d || d.type !== '기둥') return null;
+        var reach = Math.max(pad * 1.5, Math.min(d.w, d.h) * 0.35);
+        var near = [[-1, -1], [1, -1], [1, 1], [-1, 1]].some(function (k) {
+            return Math.abs(p.x - (d.x + k[0] * d.w / 2)) <= reach && Math.abs(p.y - (d.y + k[1] * d.h / 2)) <= reach;
+        });
+        return near ? { mode: 'size', id: d.id, minSize: pad, orig: { x: d.x, y: d.y, w: d.w, h: d.h } } : null;
+    }
+    /** 모서리를 p로 끈 크기(가운데는 그대로, 너무 작아지지 않게) */
+    function sizeTo(dr, p) {
+        return { w: Math.max(dr.minSize, Math.abs(p.x - dr.orig.x) * 2), h: Math.max(dr.minSize, Math.abs(p.y - dr.orig.y) * 2) };
+    }
     function defaultSize(type) {
+        if (type === '기둥') { var cs = savedColumnSize(); if (cs) return cs; }
         var same = list().filter(function (d) { return d.type === type; });
         var src = same.length ? same : list();
-        if (!src.length) { var c = B.canvas(); var p0 = B.screenToImg(0, 0), p1 = B.screenToImg(60, 0); var s = Math.hypot(p1.x - p0.x, p1.y - p0.y) || 60; return { w: s, h: s * 0.5 }; }
+        if (!src.length) {
+            var p0 = B.screenToImg(0, 0), p1 = B.screenToImg(60, 0); var s = Math.hypot(p1.x - p0.x, p1.y - p0.y) || 60;
+            return type === '기둥' ? { w: s * 0.4, h: s * 0.4 } : { w: s, h: s * 0.5 };   // 첫 기둥은 정사각형
+        }
         var med = function (a) { a = a.slice().sort(function (x, y) { return x - y; }); return a[Math.floor(a.length / 2)]; };
         if (type === '거더' || type === '빔') {
             // 보는 가로 막대로: 두께 = 그 종류 두께(통일값), 길이 = 그 종류 길이의 중간값
@@ -345,6 +388,13 @@
             var pad = Math.hypot(B.screenToImg(6, 0).x - B.screenToImg(0, 0).x, B.screenToImg(6, 0).y - B.screenToImg(0, 0).y);
             // 거더·빔 추가 중에는 기둥을 눌러도 고르지 않고 시작·끝 점으로 쓴다
             if (isLineType(ui.addType)) { addLinePoint(p, pad); return; }
+            // 고른 기둥의 모서리 손잡이를 잡으면 크기를 바꾼다(가운데는 그대로)
+            var cornerGrab = grabCorner(p, pad);
+            if (cornerGrab) {
+                ui.drag = Object.assign(cornerGrab, { start: p, pointerId: e.pointerId, moved: false });
+                try { ov.setPointerCapture(e.pointerId); } catch (_e) { /* ignore */ }
+                return;
+            }
             // 고른 거더·빔의 끝 손잡이를 잡으면 그 끝만 늘이고 줄인다(반대쪽 끝은 그대로)
             var endGrab = grabEnd(p, pad);
             if (endGrab) {
@@ -373,6 +423,7 @@
             var d = list().find(function (x) { return x.id === dr.id; });
             if (!d) return;
             if (dr.mode === 'end') Object.assign(d, stretchTo(dr, dr.horiz ? p.x : p.y));
+            else if (dr.mode === 'size') Object.assign(d, sizeTo(dr, p));
             else { d.x = dr.orig.x + (p.x - dr.start.x); d.y = dr.orig.y + (p.y - dr.start.y); }
             dr.moved = true;
             ui.builtSig = '';
@@ -385,7 +436,11 @@
             var d = list().find(function (x) { return x.id === dr.id; });
             if (!d || !dr.moved) { sync(); return; }
             var now = { x: d.x, y: d.y };
-            if (dr.mode === 'end') {
+            if (dr.mode === 'size') {
+                // 기둥 크기 — 이 층에서 새로 찍는 기둥은 이 크기로
+                now = sizeTo(dr, local(e));
+                if (e.type !== 'pointercancel') rememberColumnSize(now.w, now.h);
+            } else if (dr.mode === 'end') {
                 // 놓은 곳이 기둥(빔이면 거더·빔도)이면 그 면에 딱 붙인다
                 var pe = local(e), padE = Math.hypot(B.screenToImg(6, 0).x - B.screenToImg(0, 0).x, B.screenToImg(6, 0).y - B.screenToImg(0, 0).y);
                 var sp = snapPoint(pe, padE, d.type, d.id);
@@ -574,7 +629,7 @@
                     + ' · 다 하면 「' + ui.addType + '」 단추를 다시 눌러 끄기</span>';
             }
             html += '<span class="map-count-hint">' + (ui.editing
-                ? '눌러 고르고 끌어 옮기기 · 고른 거더·빔은 끝 네모를 끌어 늘이기 · 기둥은 한 번, 거더·빔은 시작→끝 두 번 눌러 추가 · Ctrl+Z 되돌리기 · 화면 전용(출력 안 됨)'
+                ? '눌러 고르고 끌어 옮기기 · 고른 기둥은 모서리 네모를 끌어 크기 바꾸기(새 기둥도 그 크기로) · 고른 거더·빔은 끝 네모를 끌어 늘이기 · 기둥은 한 번, 거더·빔은 시작→끝 두 번 눌러 추가 · Ctrl+Z 되돌리기 · 화면 전용(출력 안 됨)'
                 : ACTIVE.map(function (t) { return t + ' ' + c[t]; }).join(' · ')) + '</span>';
         }
         if (bar._h !== html) { bar._h = html; bar.innerHTML = html; }
