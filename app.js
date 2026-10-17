@@ -26047,6 +26047,11 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         floorKey: currentMemoFloorKey,
         canvas: () => elements.planCanvas,
         hasDrawing: () => !!state.bgImage,
+        // 도면 원본 크기(통심선을 도면 끝에서 끝까지 긋는 데 씀, 2026-10-17)
+        imgSize: () => {
+            const im = state.bgImage;
+            return im ? { w: im.naturalWidth || im.width || 0, h: im.naturalHeight || im.height || 0 } : { w: 0, h: 0 };
+        },
         onMapTab: () => state.currentTab !== 'tab-ndt',
         placeBar: (bar, host) => { if (typeof placeMemberCountBar === 'function') placeMemberCountBar(bar, host); },
         commit: (floorKey) => {

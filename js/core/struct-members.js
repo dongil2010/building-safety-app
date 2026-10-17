@@ -18,9 +18,13 @@
 (function (root) {
     'use strict';
 
-    var TYPES = ['기둥', '벽', '거더', '빔', '슬래브'];          // 저장된 자료가 가질 수 있는 종류(옛 벽·슬래브 자료도 깨지지 않게 그대로)
+    // 저장된 자료가 가질 수 있는 종류(옛 벽·슬래브 자료도 깨지지 않게 그대로).
+    // 통심선(2026-10-17): 구조도 없는 층에서 평면도 위에 먼저 긋는 그리드 선 — 세로선은 w<h, 가로선은 w>h 인 가는 막대로 둔다.
+    //   부재가 아니라 개수·평가에 안 들어가고(ACTIVE 밖), 기둥을 찍거나 옮길 때 교차점에 붙는 기준이 된다.
+    var TYPES = ['기둥', '벽', '거더', '빔', '슬래브', '통심선'];
     var ACTIVE_TYPES = ['기둥', '거더', '빔'];                   // 지금 화면에서 다루는 종류(벽·슬래브는 우선 뺌, 2026-10-14)
-    var COLORS = { '기둥': '#dc2626', '벽': '#7c3aed', '거더': '#2563eb', '빔': '#b7791f', '슬래브': '#16a34a' };   // 기둥 빨강 · 거더 파랑 · 빔 황토
+    var GRID_TYPE = '통심선';
+    var COLORS = { '기둥': '#dc2626', '벽': '#7c3aed', '거더': '#2563eb', '빔': '#b7791f', '슬래브': '#16a34a', '통심선': '#0d9488' };   // 기둥 빨강 · 거더 파랑 · 빔 황토 · 통심선 청록
 
     function ensureMaps(st) {
         if (!st.structMembers || typeof st.structMembers !== 'object') st.structMembers = {};
@@ -50,6 +54,9 @@
         var now = Number(o.now) || Date.now();
         var d = { id: o.id || rec.id || newId(now), type: rec.type, label: String(rec.label == null ? '' : rec.label).slice(0, 12),
             x: num(rec.x), y: num(rec.y), w: num(rec.w), h: num(rec.h), createdAt: Number(o.createdAt) || now, updatedAt: now };
+        // 비스듬한 거더·빔(2026-10-17): ang = 기운 각도(도, 화면 시계 방향 +). 이때 w = 길이, h = 두께, 가운데를 축으로 돌린 막대
+        var ang = Number(rec.ang);
+        if (Number.isFinite(ang) && Math.abs(ang) > 0.01) d.ang = Math.round(ang * 100) / 100;
         if (!valid(d)) return null;
         ensureMaps(st);
         if (!st.structMembers[floorKey]) st.structMembers[floorKey] = [];
@@ -72,6 +79,10 @@
         ['x', 'y', 'w', 'h'].forEach(function (k) { if (patch[k] != null && Number.isFinite(Number(patch[k]))) d[k] = num(patch[k]); });
         if (patch.type != null && TYPES.indexOf(patch.type) >= 0) d.type = patch.type;
         if (patch.label != null) d.label = String(patch.label).slice(0, 12);
+        if (patch.ang != null) {
+            var a = Number(patch.ang);
+            if (Number.isFinite(a) && Math.abs(a) > 0.01) d.ang = Math.round(a * 100) / 100; else delete d.ang;
+        }
         d.updatedAt = nextStamp(d.updatedAt, now);
         return d;
     }
@@ -100,7 +111,7 @@
         if (!st || !floorKey || !id) return false;
         var cur = listFor(st, floorKey).find(function (d) { return d.id === id; });
         if (!rec) return !!(cur && remove(st, floorKey, id));
-        if (cur) return !!update(st, floorKey, id, { x: rec.x, y: rec.y, w: rec.w, h: rec.h, type: rec.type, label: rec.label }, now);
+        if (cur) return !!update(st, floorKey, id, { x: rec.x, y: rec.y, w: rec.w, h: rec.h, type: rec.type, label: rec.label, ang: rec.ang || 0 }, now);
         return !!add(st, floorKey, rec, { id: id, createdAt: rec.createdAt, now: now });
     }
 
@@ -148,7 +159,7 @@
 
     function countsByType(list) {
         var out = {};
-        TYPES.forEach(function (t) { out[t] = 0; });
+        TYPES.forEach(function (t) { if (t !== GRID_TYPE) out[t] = 0; });   // 통심선은 부재가 아니라 세지 않는다
         (list || []).forEach(function (d) { if (out[d.type] != null) out[d.type]++; });
         return out;
     }
@@ -240,17 +251,114 @@
         });
         return out;
     }
+    // ---------- 통심선(2026-10-17) ----------
+    /** 통심선 방향: 세로선 'v'(x 위치) · 가로선 'h'(y 위치) */
+    function gridAxis(d) { return d.h >= d.w ? 'v' : 'h'; }
+    function gridPos(d) { return gridAxis(d) === 'v' ? d.x : d.y; }
+    /** 통심선 이름: 세로선은 왼쪽부터 X1, X2…, 가로선은 위부터 Y1, Y2… → { id: 'X1' } */
+    function gridLabels(grids) {
+        var out = {};
+        ['v', 'h'].forEach(function (ax) {
+            (grids || []).filter(function (g) { return gridAxis(g) === ax; })
+                .sort(function (a, b) { return gridPos(a) - gridPos(b); })
+                .forEach(function (g, i) { out[g.id] = (ax === 'v' ? 'X' : 'Y') + (i + 1); });
+        });
+        return out;
+    }
+    /** 통심선 한 줄(전체 길이 W 또는 H에 걸침)의 저장 모습. axis 'v'|'h', pos = x 또는 y */
+    function gridRecord(axis, pos, imgW, imgH) {
+        return axis === 'v' ? { type: GRID_TYPE, label: '', x: pos, y: imgH / 2, w: 1, h: imgH }
+            : { type: GRID_TYPE, label: '', x: imgW / 2, y: pos, w: imgW, h: 1 };
+    }
+    /**
+     * 기둥 자리를 통심선에 붙인다: x는 세로선, y는 가로선 중 reach 안에서 가장 가까운 것(따로따로 — 둘 다 붙으면 교차점).
+     * → { x, y, onX(붙은 세로선 x|null), onY }
+     */
+    function snapToGrid(x, y, grids, reach) {
+        var bx = x, by = y, dx = reach, dy = reach, onX = null, onY = null;
+        (grids || []).forEach(function (g) {
+            var v = gridPos(g);
+            if (gridAxis(g) === 'v') { if (Math.abs(v - x) <= dx) { dx = Math.abs(v - x); bx = v; onX = v; } }
+            else if (Math.abs(v - y) <= dy) { dy = Math.abs(v - y); by = v; onY = v; }
+        });
+        return { x: bx, y: by, onX: onX, onY: onY };
+    }
+
     /** 점 p를 중심 c로 ang(라디안) 돌린 점 */
     function rotateAbout(p, c, ang) {
         var cs = Math.cos(ang), sn = Math.sin(ang), dx = p.x - c.x, dy = p.y - c.y;
         return { x: c.x + dx * cs - dy * sn, y: c.y + dx * sn + dy * cs };
     }
 
+    /** 점 (x,y)를 부재 d 기준 좌표로: u = 막대 방향(가로 w 쪽), v = 가로지르는 방향(세로 h 쪽). 각도 없으면 그냥 가운데 기준 */
+    function toLocal(d, x, y) {
+        var dx = x - d.x, dy = y - d.y, a = (Number(d.ang) || 0) * Math.PI / 180;
+        if (!a) return { u: dx, v: dy };
+        var c = Math.cos(a), s = Math.sin(a);
+        return { u: dx * c + dy * s, v: -dx * s + dy * c };
+    }
+    /** 막대 d의 양 끝 점(비스듬한 것 포함) — [시작, 끝] */
+    function barEnds(d) {
+        var a = (Number(d.ang) || 0) * Math.PI / 180;
+        if (!a) return d.w >= d.h ? [{ x: d.x - d.w / 2, y: d.y }, { x: d.x + d.w / 2, y: d.y }] : [{ x: d.x, y: d.y - d.h / 2 }, { x: d.x, y: d.y + d.h / 2 }];
+        var c = Math.cos(a) * d.w / 2, s = Math.sin(a) * d.w / 2;
+        return [{ x: d.x - c, y: d.y - s }, { x: d.x + c, y: d.y + s }];
+    }
+    /** 가운데에서 방향 (ux,uy)로 나가 네모(반폭 hx·hy) 면에 닿는 거리 */
+    function faceDist(hx, hy, ux, uy) {
+        var a = Math.abs(ux) > 1e-9 ? hx / Math.abs(ux) : Infinity, b = Math.abs(uy) > 1e-9 ? hy / Math.abs(uy) : Infinity;
+        var t = Math.min(a, b);
+        return Number.isFinite(t) ? t : 0;
+    }
+    /**
+     * 비스듬한 보 그리기(2026-10-17): 중심 s→a 사이에 비스듬한 막대를 놓고, 길 위의 받침(cutters)에서 끊는다.
+     * s·a = { x, y, hx, hy }(hx·hy = 그 끝이 붙은 기둥 반폭, 없으면 0), th = 두께.
+     * 받침: 기둥은 가운데가 길에서 (반폭) 안이면, 보는 그 보의 중심선과 길이 만나면 그 자리에서 끊는다.
+     * → [{ x, y, w(길이), h(두께), ang(도) }]
+     */
+    function slantedRun(s, a, th, cutters) {
+        var dx = a.x - s.x, dy = a.y - s.y, L = Math.hypot(dx, dy);
+        if (!(L > 0)) return [];
+        var ux = dx / L, uy = dy / L;
+        var from = faceDist(s.hx || 0, s.hy || 0, ux, uy), to = L - faceDist(a.hx || 0, a.hy || 0, ux, uy);
+        var cuts = [];
+        (cutters || []).forEach(function (d) {
+            if (!d) return;
+            if (d.type === '기둥') {
+                var px = d.x - s.x, py = d.y - s.y, t = px * ux + py * uy, perp = Math.abs(-px * uy + py * ux);
+                if (perp > Math.max(d.w, d.h) / 2) return;
+                var f = faceDist(d.w / 2, d.h / 2, ux, uy);
+                if (t + f <= from || t - f >= to) return;
+                cuts.push([Math.max(from, t - f), Math.min(to, t + f)]);
+            } else {
+                // 보: 중심선끼리 만나는 곳
+                var e = barEnds(d), ex = e[1].x - e[0].x, ey = e[1].y - e[0].y;
+                var den = ux * ey - uy * ex;
+                if (Math.abs(den) < 1e-9) return;   // 나란함
+                var wx = e[0].x - s.x, wy = e[0].y - s.y;
+                var tt = (wx * ey - wy * ex) / den, k = (wx * uy - wy * ux) / den;
+                if (k < 0 || k > 1 || tt <= from || tt >= to) return;
+                var sinA = Math.abs(den) / Math.hypot(ex, ey), half = Math.min(d.w, d.h) / 2 / Math.max(sinA, 0.2);
+                cuts.push([Math.max(from, tt - half), Math.min(to, tt + half)]);
+            }
+        });
+        cuts.sort(function (p, q) { return p[0] - q[0]; });
+        var segs = [], cur = from;
+        cuts.forEach(function (c) { if (c[0] > cur) segs.push([cur, c[0]]); cur = Math.max(cur, c[1]); });
+        if (to > cur) segs.push([cur, to]);
+        var deg = Math.atan2(uy, ux) * 180 / Math.PI;
+        return segs.filter(function (g) { return g[1] - g[0] > th * 0.5; }).map(function (g) {
+            var m = (g[0] + g[1]) / 2;
+            return { x: s.x + ux * m, y: s.y + uy * m, w: g[1] - g[0], h: th, ang: Math.round(deg * 100) / 100 };
+        });
+    }
+
     /** 도면 좌표 점에 걸린 부재(작은 것 우선). pad = 여유(도면 픽셀) */
     function hitTest(list, x, y, pad) {
         var best = null, bestArea = Infinity;
         (list || []).forEach(function (d) {
-            if (Math.abs(x - d.x) > d.w / 2 + (pad || 0) || Math.abs(y - d.y) > d.h / 2 + (pad || 0)) return;
+            var q = toLocal(d, x, y);   // 비스듬한 보는 막대 방향으로 돌려 본다
+            if (Math.abs(q.u) > d.w / 2 + (pad || 0) || Math.abs(q.v) > d.h / 2 + (pad || 0)) return;
             var area = d.w * d.h;
             if (area < bestArea) { bestArea = area; best = d; }
         });
@@ -372,7 +480,9 @@
 
     var api = { TYPES: TYPES, ACTIVE_TYPES: ACTIVE_TYPES, COLORS: COLORS, ensureMaps: ensureMaps, listFor: listFor, hasAny: hasAny, add: add, update: update, remove: remove,
         applyRecord: applyRecord, clear: clear, beamThickness: beamThickness, unifyThickness: unifyThickness, countsByType: countsByType, fitTwoPoints: fitTwoPoints, applyFit: applyFit, importMembers: importMembers,
-        hitTest: hitTest, splitRun: splitRun, columnLines: columnLines, rotateAbout: rotateAbout, columnSize: columnSize, unifyColumns: unifyColumns, overlayFor: overlayFor, setOverlay: setOverlay, removeOverlay: removeOverlay,
+        hitTest: hitTest, splitRun: splitRun, columnLines: columnLines, rotateAbout: rotateAbout,
+        toLocal: toLocal, barEnds: barEnds, faceDist: faceDist, slantedRun: slantedRun,
+        GRID_TYPE: GRID_TYPE, gridAxis: gridAxis, gridPos: gridPos, gridLabels: gridLabels, gridRecord: gridRecord, snapToGrid: snapToGrid, columnSize: columnSize, unifyColumns: unifyColumns, overlayFor: overlayFor, setOverlay: setOverlay, removeOverlay: removeOverlay,
         saveHandoff: saveHandoff, loadHandoff: loadHandoff, packFor: packFor, packHasContent: packHasContent, mergePackIntoState: mergePackIntoState };
     if (typeof module !== 'undefined' && module.exports) module.exports = api;
     if (root) { root.BSA = root.BSA || {}; root.BSA.structMembers = api; }

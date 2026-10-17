@@ -287,12 +287,12 @@ assert.ok(layer.includes('var from = horiz ? lo.x + lo.hx : lo.y + lo.hy, to = h
 assert.ok(layer.includes("if (ui.pend) { ui.pend = null; ui.builtSig = ''; sync(); }"), 'Esc로 시작 점 취소');
 // ---- 고른 거더·빔은 끝 손잡이를 끌어 늘이고 줄인다(반대 끝 고정, 기둥·거더 면에 붙음, 뒤집히지 않음) ----
 assert.ok(layer.includes('var endGrab = grabEnd(p, pad);'));
-assert.ok(layer.includes("if (dr.mode === 'end') Object.assign(d, stretchTo(dr, dr.horiz ? p.x : p.y));"));
+assert.ok(layer.includes("if (dr.mode === 'end') Object.assign(d, dr.slant ? stretchSlant(dr, p) : stretchTo(dr, dr.horiz ? p.x : p.y));"));
 assert.ok(layer.includes("var sp = snapPoint(pe, padE, d.type, d.id);"), '놓을 때 기둥·거더 면에 붙임(자기 자신 빼고)');
 assert.ok(layer.includes("var lo = dr.which === 'e' ? dr.fixed : Math.min(at, dr.fixed - dr.minLen);"), '반대 끝을 넘어가도 뒤집히지 않음');
 // ---- 직접 그릴 때 줄 맞춤: 같은 종류·같은 방향 보의 중심선이 가까우면 그 줄에 ----
 assert.ok(layer.includes('var perp = alignPerp(type, horiz, horiz ? (s.y + a.y) / 2 : (s.x + a.x) / 2, th, pad);'));
-assert.ok(layer.includes("if (d.type !== type || (d.w >= d.h) !== horiz) return;"), '같은 종류·같은 방향끼리만');
+assert.ok(layer.includes("if (d.type !== type || d.ang || (d.w >= d.h) !== horiz) return;"), '같은 종류·같은 방향끼리만');
 // 기둥도 다른 기둥의 세로줄·가로줄에 따로 맞춤 — 새로 찍을 때만. 찍은 뒤 끌어 옮기면 놓은 자리 그대로(2026-10-17)
 assert.ok(layer.includes("var at = ui.addType === '기둥' ? alignColumn(p.x, p.y, Math.max(sz.w, sz.h), pad) : p;"));
 assert.ok(!layer.includes('now = alignColumn(d.x, d.y'), '옮길 때는 찍을 때 줄 맞춤을 안 씀');
@@ -302,12 +302,39 @@ assert.ok(layer.includes('var al = alignColumnMove(d.x, d.y, Math.max(d.w, d.h),
     // alignColumnMove를 떼어 내 실제로 돌려 본다
     const src = layer.slice(layer.indexOf('function alignColumnMove('), layer.indexOf('function addLinePoint('));
     const cols = [{ id: 'a', type: '기둥', x: 100, y: 0 }, { id: 'b', type: '기둥', x: 100, y: 50 }, { id: 'm', type: '기둥', x: 130, y: 100 }];
-    const f = new Function('list', src + '; return alignColumnMove;')(() => cols);
+    let grids = [];
+    const f = new Function('list', 'gridList', 'api', src + '; return alignColumnMove;')(() => cols, () => grids, S);
     const orig = { x: 100, y: 100 };   // 옮기는 기둥(c)은 원래 x=100 줄, m은 먼저 옮겨 x=130 새 줄
     assert.deepStrictEqual(f(108, 100, 10, 2, 'c', orig), { x: 108, y: 100 }, '원래 줄(100)에서 8 떨어지면 안 붙음(약하게)');
     assert.deepStrictEqual(f(101, 140, 10, 2, 'c', orig), { x: 100, y: 140 }, '원래 줄에 아주 가까우면 붙음(세로로만 옮길 때)');
     assert.deepStrictEqual(f(127, 100, 10, 2, 'c', orig), { x: 130, y: 100 }, '먼저 옮긴 기둥의 새 줄(130)에 붙음');
     assert.deepStrictEqual(f(118, 77, 10, 2, 'c', orig), { x: 118, y: 77 }, '어느 줄에서도 멀면 그대로');
+    // 통심선(2026-10-17)도 다른 줄처럼 붙음
+    grids = [{ id: 'X9', type: '통심선', ...S.gridRecord('v', 160, 1000, 800) }, { id: 'Y9', type: '통심선', ...S.gridRecord('h', 80, 1000, 800) }];
+    assert.deepStrictEqual(f(157, 76, 10, 2, 'c', orig), { x: 160, y: 80 }, '통심선 교차점에 붙음');
+}
+// ---- 통심선(2026-10-17): 세로선 x · 가로선 y, 이름 X1·Y1, 기둥은 교차점에 붙음, 개수엔 안 셈 ----
+{
+    const v1 = S.gridRecord('v', 300, 1000, 800), h1 = S.gridRecord('h', 120, 1000, 800);
+    assert.deepStrictEqual([v1.x, v1.y, v1.w, v1.h], [300, 400, 1, 800], '세로선은 도면 위아래 끝까지');
+    assert.deepStrictEqual([h1.x, h1.y, h1.w, h1.h], [500, 120, 1000, 1], '가로선은 도면 좌우 끝까지');
+    const st = {};
+    const a = S.add(st, 'F', v1), b = S.add(st, 'F', S.gridRecord('v', 100, 1000, 800)), c = S.add(st, 'F', h1);
+    assert.ok(a && b && c, '통심선도 저장됨(동기화·되돌리기 같은 길)');
+    assert.strictEqual(S.gridAxis(a), 'v'); assert.strictEqual(S.gridPos(a), 300);
+    assert.strictEqual(S.gridAxis(c), 'h'); assert.strictEqual(S.gridPos(c), 120);
+    const lb = S.gridLabels([a, b, c]);
+    assert.deepStrictEqual([lb[b.id], lb[a.id], lb[c.id]], ['X1', 'X2', 'Y1'], '왼쪽부터 X1·X2, 위부터 Y1');
+    assert.deepStrictEqual(S.snapToGrid(296, 126, [a, b, c], 10), { x: 300, y: 120, onX: 300, onY: 120 }, '교차점에 붙음');
+    assert.deepStrictEqual(S.snapToGrid(250, 126, [a, b, c], 10), { x: 250, y: 120, onX: null, onY: 120 }, '가까운 선에만');
+    assert.ok(!('통심선' in S.countsByType(S.listFor(st, 'F'))), '부재 개수에 안 셈');
+    assert.ok(!S.ACTIVE_TYPES.includes('통심선'), '부재 목록(ACTIVE)엔 안 들어감');
+}
+assert.ok(layer.includes("data-act=\"grid\""), '「통심선」 단추');
+assert.ok(layer.includes('ui.drag = startGridDrag(p, pad, e.pointerId);'), '통심선 긋기·옮기기');
+assert.ok(layer.includes("var g = api.snapToGrid ? api.snapToGrid(x, y, gridList(), Math.max(pad * 3, size)) : null;"), '기둥 찍을 때 통심선 교차점에 붙음');
+assert.ok(layer.includes("if (ui.selId && !list().some(function (d) { return d.id === ui.selId; })) ui.selId = '';"), '통심선 고른 채 종류 단추를 눌러도 선이 기둥으로 안 바뀜');
+{
 }
 
 // ---- 이어 그리기 끊기: 거더는 사이 기둥에서, 빔은 사이 거더에서 끊고 다시 시작 ----
@@ -327,7 +354,43 @@ assert.ok(layer.includes('var al = alignColumnMove(d.x, d.y, Math.max(d.w, d.h),
         [{ x: 50, y: 0, w: 10, h: 10 }, { x: 56, y: 0, w: 10, h: 10 }, { x: 98, y: 0, w: 2, h: 10 }]),
         [{ from: 0, to: 45 }, { from: 61, to: 97 }]);
 }
-assert.ok(layer.includes("return d.type === '기둥' || (type === '빔' && isLineType(d.type) && (d.w >= d.h) !== horiz);"), '거더는 기둥, 빔은 가로지르는 보·기둥에서 끊김');
+assert.ok(layer.includes("return d.type === '기둥' || (type === '빔' && isLineType(d.type) && !d.ang && (d.w >= d.h) !== horiz);"), '거더는 기둥, 빔은 가로지르는 보·기둥에서 끊김');
 assert.ok(layer.includes('pushHist(fk, changes);'), '나눠 그린 칸은 되돌리기 한 번에');
 
+// ---- 비스듬한 거더·빔(2026-10-17): ang(도)·w=길이·h=두께, 면에서 면까지, 사이 기둥·거더에서 끊음, 누르기·끝 늘이기 ----
+{
+    const C = (id, x, y) => ({ id, type: '기둥', x, y, w: 20, h: 20 });
+    const near = (a, b, msg) => assert.ok(Math.abs(a - b) < 1e-6, msg + ': ' + a + ' ≠ ' + b);
+    // (0,0) → (300,300) 45° 길, 가운데 (150,150) 기둥
+    const segs = S.slantedRun({ x: 0, y: 0, hx: 10, hy: 10 }, { x: 300, y: 300, hx: 10, hy: 10 }, 6, [C('a', 0, 0), C('m', 150, 150), C('z', 300, 300), C('off', 150, 40)]);
+    assert.strictEqual(segs.length, 2, '가운데 기둥에서 두 칸: ' + JSON.stringify(segs));
+    segs.forEach((g) => assert.ok(Math.abs(g.ang - 45) < 0.01 && g.h === 6));
+    const f = 10 * Math.SQRT2;   // 45°로 20×20 기둥 면까지 거리
+    near(segs[0].w, 150 * Math.SQRT2 - 2 * f, '첫 칸 길이 = 면에서 면까지');
+    near(segs[0].x, (f + (150 * Math.SQRT2 - f)) / 2 / Math.SQRT2, '첫 칸 가운데');
+    // 빔: 가로지르는 거더(가로 막대)에서 끊김
+    const gir = { id: 'G', type: '거더', x: 150, y: 100, w: 400, h: 8 };
+    const bs = S.slantedRun({ x: 100, y: 0, hx: 0, hy: 0 }, { x: 200, y: 200, hx: 0, hy: 0 }, 4, [gir]);
+    assert.strictEqual(bs.length, 2, '빔은 거더에서 끊김: ' + JSON.stringify(bs));
+    // 누르기: 돌린 막대 안쪽만
+    const bar = { id: 'B', type: '거더', x: 100, y: 100, w: 200, h: 10, ang: 45 };
+    assert.ok(S.hitTest([bar], 150, 150, 0), '막대 위');
+    assert.ok(!S.hitTest([bar], 190, 100, 0), '돌리기 전 네모 안이지만 막대 밖');
+    const e = S.barEnds(bar);
+    near(e[1].x, 100 + 100 * Math.SQRT1_2, '끝 점 x'); near(e[1].y, 100 + 100 * Math.SQRT1_2, '끝 점 y');
+    // 저장·되돌리기: ang 유지, 0이면 지움
+    const st = {};
+    const r = S.add(st, 'F', { type: '빔', x: 1, y: 2, w: 50, h: 4, ang: 30 });
+    assert.strictEqual(r.ang, 30);
+    assert.strictEqual(S.add(st, 'F', { type: '빔', x: 1, y: 2, w: 50, h: 4 }).ang, undefined, '각도 없으면 칸도 없음(옛 자료 그대로)');
+    S.update(st, 'F', r.id, { ang: 0 });
+    assert.strictEqual(S.listFor(st, 'F').find((d) => d.id === r.id).ang, undefined, '0이면 지움');
+    S.applyRecord(st, 'F', r.id, Object.assign({}, r, { ang: 30 }));
+    assert.strictEqual(S.listFor(st, 'F').find((d) => d.id === r.id).ang, 30, '되돌리기로 각도 돌아옴');
+}
+assert.ok(layer.includes('if (Math.min(dev, 90 - dev) > SLANT_MIN_DEG && api.slantedRun) {'), '8° 넘게 기울면 비스듬한 보');
+assert.ok(layer.includes("if (d.ang) r.setAttribute('transform', 'rotate(' + d.ang + ' ' + d.x + ' ' + d.y + ')');"), '돌려 그림');
+assert.ok(layer.includes('api.barEnds(selD).map('), '비스듬한 보 끝 손잡이');
+
 console.log('test-struct-members: ok');
+

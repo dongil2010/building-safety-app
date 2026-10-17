@@ -39,6 +39,9 @@
     var ACTIVE = api.ACTIVE_TYPES || api.TYPES;
     function active(d) { return ACTIVE.indexOf(d.type) >= 0; }
     function list() { return api.listFor(state(), B.floorKey()).filter(active); }
+    /** 이 층 통심선(2026-10-17) — 부재와 따로 다룬다 */
+    var GRID = api.GRID_TYPE || '통심선';
+    function gridList() { return api.listFor(state(), B.floorKey()).filter(function (d) { return d.type === GRID; }); }
 
     (function injectStyle() {
         if (document.getElementById('structLayerStyle')) return;
@@ -101,9 +104,11 @@
         var items = list();
         var over = overlayNow();
         var showLabels = marksOn();
-        if (ui.selId && !items.some(function (d) { return d.id === ui.selId; })) ui.selId = '';
+        var grids = gridList();
+        if (ui.selId && !items.some(function (d) { return d.id === ui.selId; }) && !grids.some(function (d) { return d.id === ui.selId; })) ui.selId = '';
         // 자료가 바뀌었을 때만 도형을 다시 만든다
         var sig = B.floorKey() + '|' + items.length + '|' + items.reduce(function (m, d) { return Math.max(m, d.updatedAt || 0); }, 0) + '|' + ui.selId
+            + '|' + grids.length + '|' + grids.reduce(function (m, d) { return Math.max(m, d.updatedAt || 0); }, 0) + '|' + (ui.gridMode ? 'G' : '')
             + '|' + (over ? over.url + '@' + over.updatedAt : '') + '|' + showLabels + '|' + (ui.pend ? ui.pend.x + ',' + ui.pend.y : '') + '|' + (ui.editing && ui.lineMode ? 'L' : '');
         if (sig !== ui.builtSig) {
             ui.builtSig = sig;
@@ -120,12 +125,50 @@
                 gi.appendChild(im);
                 frag.appendChild(gi);
             }
+            // 통심선(2026-10-17): 일점쇄선 + 끝에 X1·Y1 이름 동그라미. 「통심선」 편집 중엔 진하게
+            var gLabels = api.gridLabels ? api.gridLabels(grids) : {};
+            var px1g = Math.hypot(B.screenToImg(1, 0).x - B.screenToImg(0, 0).x, B.screenToImg(1, 0).y - B.screenToImg(0, 0).y) || 1;
+            var drawGrid = function (axis, pos, len, mid, id, preview) {
+                var gl = document.createElementNS(NS, 'line');
+                var a = axis === 'v' ? [pos, mid - len / 2, pos, mid + len / 2] : [mid - len / 2, pos, mid + len / 2, pos];
+                gl.setAttribute('x1', a[0]); gl.setAttribute('y1', a[1]); gl.setAttribute('x2', a[2]); gl.setAttribute('y2', a[3]);
+                var sel = id && id === ui.selId;
+                gl.setAttribute('stroke', api.COLORS[GRID] || '#0d9488');
+                gl.setAttribute('stroke-width', sel ? '3' : (ui.gridMode ? '1.8' : '1.2'));
+                gl.setAttribute('stroke-dasharray', preview ? '6 4' : '14 4 2 4');
+                gl.setAttribute('vector-effect', 'non-scaling-stroke');
+                gl.setAttribute('opacity', ui.gridMode || sel || preview ? '1' : '0.7');
+                frag.appendChild(gl);
+                if (id && gLabels[id]) {
+                    // 이름표: 세로선은 위 끝, 가로선은 왼쪽 끝 바깥쪽에(화면 12px 동그라미)
+                    var r = px1g * 12, cx = axis === 'v' ? pos : mid - len / 2 + r * 1.2, cy = axis === 'v' ? mid - len / 2 + r * 1.2 : pos;
+                    var gc = document.createElementNS(NS, 'circle');
+                    gc.setAttribute('cx', cx); gc.setAttribute('cy', cy); gc.setAttribute('r', r);
+                    gc.setAttribute('fill', '#fff'); gc.setAttribute('stroke', api.COLORS[GRID] || '#0d9488');
+                    gc.setAttribute('stroke-width', '1.5'); gc.setAttribute('vector-effect', 'non-scaling-stroke');
+                    frag.appendChild(gc);
+                    var gt = document.createElementNS(NS, 'text');
+                    gt.setAttribute('x', cx); gt.setAttribute('y', cy); gt.setAttribute('font-size', (r * 1.05).toFixed(1));
+                    gt.setAttribute('fill', api.COLORS[GRID] || '#0d9488');
+                    gt.textContent = gLabels[id];
+                    frag.appendChild(gt);
+                }
+            };
+            grids.forEach(function (g) {
+                var ax = api.gridAxis(g);
+                drawGrid(ax, api.gridPos(g), ax === 'v' ? g.h : g.w, ax === 'v' ? g.y : g.x, g.id, false);
+            });
+            if (ui.drag && ui.drag.mode === 'gridNew' && ui.drag.cur) {
+                var gn = gridFromDrag(ui.drag);
+                if (gn) drawGrid(gn.axis, gn.pos, gn.axis === 'v' ? gn.rec.h : gn.rec.w, gn.axis === 'v' ? gn.rec.y : gn.rec.x, '', true);
+            }
             items.forEach(function (d) {
                 var c = api.COLORS[d.type] || '#111';
                 var r = document.createElementNS(NS, 'rect');
                 r.setAttribute('x', d.x - d.w / 2); r.setAttribute('y', d.y - d.h / 2);
                 r.setAttribute('width', d.w); r.setAttribute('height', d.h);
                 r.setAttribute('rx', Math.min(d.w, d.h) * 0.2);
+                if (d.ang) r.setAttribute('transform', 'rotate(' + d.ang + ' ' + d.x + ' ' + d.y + ')');   // 비스듬한 보(2026-10-17)
                 r.setAttribute('stroke', c); r.setAttribute('fill', c);
                 if (d.id === ui.selId) r.setAttribute('class', 'is-selected');
                 frag.appendChild(r);
@@ -158,8 +201,8 @@
             if (selD && isLineType(selD.type)) {
                 // 고른 거더·빔 양 끝 손잡이(잡고 끌면 그 끝만 늘이고 줄임)
                 var px10 = Math.hypot(B.screenToImg(10, 0).x - B.screenToImg(0, 0).x, B.screenToImg(10, 0).y - B.screenToImg(0, 0).y);
-                var hz = selD.w >= selD.h, th2 = hz ? selD.h : selD.w, hs = Math.max(th2 * 1.8, px10);   // 화면에서 적어도 10px
-                [hz ? [selD.x - selD.w / 2, selD.y] : [selD.x, selD.y - selD.h / 2], hz ? [selD.x + selD.w / 2, selD.y] : [selD.x, selD.y + selD.h / 2]].forEach(function (q) {
+                var th2 = Math.min(selD.w, selD.h), hs = Math.max(th2 * 1.8, px10);   // 화면에서 적어도 10px
+                api.barEnds(selD).map(function (q) { return [q.x, q.y]; }).forEach(function (q) {   // 비스듬한 보도 양 끝
                     var hr = document.createElementNS(NS, 'rect');
                     hr.setAttribute('x', q[0] - hs / 2); hr.setAttribute('y', q[1] - hs / 2);
                     hr.setAttribute('width', hs); hr.setAttribute('height', hs);
@@ -311,12 +354,18 @@
     }
     // ---------- 거더·빔 두 점 찍기(2026-10-14): 시작 → 끝. 기둥(빔은 거더·빔도)에 붙고, 막대는 면에서 면까지 ----
     function isLineType(t) { return t === '거더' || t === '빔'; }
+    var SLANT_MIN_DEG = 8;   // 이보다 덜 기울면 가로·세로로 곧게(손떨림), 더 기울면 비스듬한 보
     /** 누른 점을 기둥 중심(또는 빔이면 거더·빔 중심선)에 붙인다 → { x, y, hx, hy } (hx·hy = 막대를 자를 반폭) */
     function snapPoint(p, pad, type, excludeId) {
         var targets = list().filter(function (d) { return d.id !== excludeId && (d.type === '기둥' || (type === '빔' && isLineType(d.type))); });
         var hit = api.hitTest(targets, p.x, p.y, pad);
         if (!hit) return { x: p.x, y: p.y, hx: 0, hy: 0, on: '' };
         if (hit.type === '기둥') return { id: hit.id, x: hit.x, y: hit.y, hx: hit.w / 2, hy: hit.h / 2, on: '기둥' };
+        if (hit.ang) {
+            // 비스듬한 보: 그 중심선 위로 내린 점
+            var a = hit.ang * Math.PI / 180, q = api.toLocal(hit, p.x, p.y), t2 = Math.min(hit.w, hit.h) / 2;
+            return { id: hit.id, x: hit.x + Math.cos(a) * q.u, y: hit.y + Math.sin(a) * q.u, hx: t2, hy: t2, on: hit.type };
+        }
         return hit.w >= hit.h ? { id: hit.id, x: p.x, y: hit.y, hx: 0, hy: hit.h / 2, on: hit.type }   // 가로 보: 그 중심선에
             : { id: hit.id, x: hit.x, y: p.y, hx: hit.w / 2, hy: 0, on: hit.type };
     }
@@ -326,6 +375,16 @@
         if (!ui.selId) return null;
         var d = list().find(function (x) { return x.id === ui.selId; });
         if (!d || !isLineType(d.type)) return null;
+        if (d.ang) {
+            // 비스듬한 보: 막대 방향 좌표로 보고, 반대쪽 끝(점)을 고정
+            var q = api.toLocal(d, p.x, p.y), hf = d.h / 2, rc = Math.max(pad * 1.5, hf * 1.5);
+            if (Math.abs(q.v) > hf + rc) return null;
+            var wh = Math.abs(q.u - d.w / 2) <= rc ? 'e' : (Math.abs(q.u + d.w / 2) <= rc ? 's' : '');
+            if (!wh) return null;
+            var ends = api.barEnds(d), ar = d.ang * Math.PI / 180;
+            return { mode: 'end', slant: true, id: d.id, which: wh, fixedPt: wh === 'e' ? ends[0] : ends[1], u: { x: Math.cos(ar), y: Math.sin(ar) },
+                minLen: hf * 2, orig: { x: d.x, y: d.y, w: d.w, h: d.h } };
+        }
         var horiz = d.w >= d.h;
         var along = horiz ? p.x : p.y, perp = horiz ? p.y : p.x;
         var c = horiz ? d.y : d.x, half = (horiz ? d.h : d.w) / 2;
@@ -344,6 +403,12 @@
         return dr.horiz ? { x: (lo + hi) / 2, y: dr.orig.y, w: hi - lo, h: dr.orig.h }
             : { x: dr.orig.x, y: (lo + hi) / 2, w: dr.orig.w, h: hi - lo };
     }
+    /** 비스듬한 보 끝을 p 쪽으로 늘이고 줄인 모습(반대쪽 끝·방향·두께는 그대로) */
+    function stretchSlant(dr, p) {
+        var f = dr.fixedPt, u = dr.u, sg = dr.which === 'e' ? 1 : -1;
+        var L = Math.max(dr.minLen, sg * ((p.x - f.x) * u.x + (p.y - f.y) * u.y));
+        return { x: f.x + sg * u.x * L / 2, y: f.y + sg * u.y * L / 2, w: L, h: dr.orig.h };
+    }
     /** 그 종류 통일 두께. 이 층에 그 종류가 아직 없으면 다른 보 종류(거더↔빔) 두께, 그것도 없으면 기본 */
     function lineThickness(type) {
         var th = api.beamThickness ? api.beamThickness(list()) : {};
@@ -356,7 +421,7 @@
     function alignPerp(type, horiz, perp, th, pad) {
         var reach = Math.max(pad * 2, th * 2), best = perp, bd = reach;
         list().forEach(function (d) {
-            if (d.type !== type || (d.w >= d.h) !== horiz) return;
+            if (d.type !== type || d.ang || (d.w >= d.h) !== horiz) return;   // 비스듬한 보는 줄 맞춤 기준에서 뺌
             var c = horiz ? d.y : d.x;
             var dist = Math.abs(c - perp);
             if (dist < bd) { bd = dist; best = c; }
@@ -374,6 +439,10 @@
             if (Math.abs(d.x - x) < dx) { dx = Math.abs(d.x - x); bx = d.x; }
             if (Math.abs(d.y - y) < dy) { dy = Math.abs(d.y - y); by = d.y; }
         });
+        // 통심선이 있으면 그 선이 먼저(2026-10-17) — 찍은 곳 가까운 세로선·가로선에 붙어 교차점에 선다
+        var g = api.snapToGrid ? api.snapToGrid(x, y, gridList(), Math.max(pad * 3, size)) : null;
+        if (g && g.onX != null) bx = g.onX;
+        if (g && g.onY != null) by = g.onY;
         return { x: bx, y: by };
     }
     /**
@@ -389,8 +458,82 @@
             if (d.type !== '기둥' || d.id === excludeId) return;
             tryX(d.x); tryY(d.y);
         });
+        // 통심선도 다른 줄처럼 붙는다(원래 서 있던 통심선은 약하게)
+        gridList().forEach(function (g) { if (api.gridAxis(g) === 'v') tryX(api.gridPos(g)); else tryY(api.gridPos(g)); });
         return { x: bx, y: by };
     }
+    // ---------- 통심선 긋기·옮기기(2026-10-17): 「통심선」 켜고 빈 곳을 끌면 끈 방향(세로·가로)으로 도면 끝까지 한 줄,
+    //            있는 선을 잡고 끌면 그 선과 그 위 기둥이 같이 옮겨진다. 눌러 고른 뒤 Delete·「지우기」로 지운다 ----------
+    function gridFromDrag(dr) {
+        var dx = dr.cur.x - dr.start.x, dy = dr.cur.y - dr.start.y;
+        var sz = B.imgSize ? B.imgSize() : { w: 0, h: 0 };
+        if (!(sz.w > 0 && sz.h > 0)) return null;
+        var axis = Math.abs(dy) >= Math.abs(dx) ? 'v' : 'h';
+        var pos = axis === 'v' ? (dr.start.x + dr.cur.x) / 2 : (dr.start.y + dr.cur.y) / 2;
+        return { axis: axis, pos: pos, rec: api.gridRecord(axis, pos, sz.w, sz.h) };
+    }
+    /** 누른 점 가까이(화면 약 9px)에 있는 통심선 */
+    function hitGrid(p, pad) {
+        var best = null, bd = pad * 1.5;
+        gridList().forEach(function (g) {
+            var dd = Math.abs((api.gridAxis(g) === 'v' ? p.x : p.y) - api.gridPos(g));
+            if (dd <= bd) { bd = dd; best = g; }
+        });
+        return best;
+    }
+    function startGridDrag(p, pad, pointerId) {
+        var g = hitGrid(p, pad);
+        if (g) {
+            ui.selId = g.id;
+            var ax = api.gridAxis(g), pos = api.gridPos(g), origs = {};
+            // 그 선 위(기둥 크기 절반 안)에 선 기둥도 같이 옮긴다
+            list().forEach(function (d) {
+                if (d.type === '기둥' && Math.abs((ax === 'v' ? d.x : d.y) - pos) <= Math.max(pad, Math.min(d.w, d.h) / 2)) origs[d.id] = { x: d.x, y: d.y };
+            });
+            return { mode: 'gridMove', id: g.id, axis: ax, orig: { x: g.x, y: g.y }, origs: origs, start: p, pointerId: pointerId, moved: false };
+        }
+        ui.selId = '';
+        return { mode: 'gridNew', start: p, cur: p, pointerId: pointerId, moved: false };
+    }
+    function moveGridDrag(dr, p) {
+        if (dr.mode === 'gridNew') { dr.cur = p; return; }
+        var dv = dr.axis === 'v' ? p.x - dr.start.x : p.y - dr.start.y;
+        var g = gridList().find(function (x) { return x.id === dr.id; });
+        if (g) { if (dr.axis === 'v') g.x = dr.orig.x + dv; else g.y = dr.orig.y + dv; }
+        list().forEach(function (d) {
+            var o = dr.origs[d.id];
+            if (!o) return;
+            if (dr.axis === 'v') d.x = o.x + dv; else d.y = o.y + dv;
+        });
+    }
+    function finishGridDrag(dr, cancel) {
+        var fk = B.floorKey(), changes = [];
+        if (dr.mode === 'gridNew') {
+            var sp = Math.hypot(B.imgToScreen(dr.cur).sx - B.imgToScreen(dr.start).sx, B.imgToScreen(dr.cur).sy - B.imgToScreen(dr.start).sy);
+            var gn = !cancel && sp >= 12 ? gridFromDrag(dr) : null;
+            if (gn) {
+                var rec = api.add(state(), fk, gn.rec);
+                if (rec) { pushHist(fk, [{ id: rec.id, before: null, after: snap(rec) }]); ui.selId = rec.id; ui.builtSig = ''; commit(); return; }
+            }
+            ui.builtSig = ''; sync();
+            return;
+        }
+        // 선·기둥을 원래 자리로 돌린 뒤 한꺼번에 저장(되돌리기 한 번에)
+        var save = function (d, o, now) {
+            var before = snap(Object.assign({}, d, o));
+            d.x = o.x; d.y = o.y;
+            if (cancel || !dr.moved || (Math.abs(now.x - o.x) < 1e-9 && Math.abs(now.y - o.y) < 1e-9)) return;
+            var after = api.update(state(), fk, d.id, now);
+            if (after) changes.push({ id: d.id, before: before, after: snap(after) });
+        };
+        var g = gridList().find(function (x) { return x.id === dr.id; });
+        if (g) save(g, dr.orig, { x: g.x, y: g.y });
+        list().forEach(function (d) { var o = dr.origs[d.id]; if (o) save(d, o, { x: d.x, y: d.y }); });
+        if (changes.length) pushHist(fk, changes);
+        ui.builtSig = '';
+        if (changes.length) commit(); else sync();
+    }
+
     // ---------- 기둥 줄 끌기(2026-10-17): 끝 = 반대쪽 끝을 축으로 줄과 그 기둥들을 돌림, 가운데 = 줄의 기둥들을 같이 옮김 ----------
     /** 줄 손잡이를 눌렀으면 → { lineIdx, mode:'lineRot'|'lineMove', ids, origs, pivot, a0, line } */
     function grabLine(p) {
@@ -454,6 +597,23 @@
         ui.pend = null;
         ui.builtSig = '';
         var dx = a.x - s.x, dy = a.y - s.y, th = lineThickness(type);
+        var fk0 = B.floorKey();
+        // 비스듬한 보(2026-10-17): 두 점이 가로·세로에서 8° 넘게 기울면 그 각도 그대로(면에서 면까지, 사이 기둥·거더에서 끊음)
+        var dev = Math.atan2(Math.abs(dy), Math.abs(dx)) * 180 / Math.PI;
+        if (Math.min(dev, 90 - dev) > SLANT_MIN_DEG && api.slantedRun) {
+            var cutS = list().filter(function (d) { return d.type === '기둥' || (type === '빔' && isLineType(d.type)); });
+            var segS = api.slantedRun(s, a, th, cutS), chS = [];
+            segS.forEach(function (r) {
+                var rec = api.add(state(), fk0, { type: type, label: '', x: r.x, y: r.y, w: r.w, h: r.h, ang: r.ang });
+                if (rec) chS.push({ id: rec.id, before: null, after: snap(rec) });
+            });
+            if (chS.length) {
+                pushHist(fk0, chS); ui.selId = ''; commit();
+                toast('비스듬한 ' + type + (chS.length > 1 ? ' ' + chS.length + '칸으로 나눠' : '') + ' 그렸습니다(' + Math.round(segS[0].ang) + '°).', 'success', 1800);
+                return;
+            }
+            toast('두 점이 너무 가깝습니다. 다시 시작 점부터 눌러 주세요.', 'warning', 2500); sync(); return;
+        }
         var horiz = Math.abs(dx) >= Math.abs(dy);
         // 가로·세로 중 가까운 쪽으로 곧게. 기둥에 붙은 끝은 기둥 면까지만
         var lo = horiz ? (s.x <= a.x ? s : a) : (s.y <= a.y ? s : a), hi = lo === s ? a : s;
@@ -462,7 +622,7 @@
         var perp = alignPerp(type, horiz, horiz ? (s.y + a.y) / 2 : (s.x + a.x) / 2, th, pad);
         // 중간에서 끊기(2026-10-16): 거더는 사이 기둥마다, 빔은 사이 거더(가로지르는 보)·기둥마다 끊고 다시 시작
         var cutters = list().filter(function (d) {
-            return d.type === '기둥' || (type === '빔' && isLineType(d.type) && (d.w >= d.h) !== horiz);
+            return d.type === '기둥' || (type === '빔' && isLineType(d.type) && !d.ang && (d.w >= d.h) !== horiz);
         });
         var segs = api.splitRun({ horiz: horiz, from: from, to: to, perp: perp, minLen: th * 0.5 }, cutters);
         var fk = B.floorKey(), changes = [];
@@ -490,6 +650,13 @@
             e.preventDefault(); e.stopPropagation();
             var p = local(e);
             var pad = Math.hypot(B.screenToImg(6, 0).x - B.screenToImg(0, 0).x, B.screenToImg(6, 0).y - B.screenToImg(0, 0).y);
+            // 「통심선」 켜짐: 빈 곳을 끌면 새 통심선, 선을 잡고 끌면 선과 그 위 기둥을 같이 옮김
+            if (ui.gridMode) {
+                ui.drag = startGridDrag(p, pad, e.pointerId);
+                try { ov.setPointerCapture(e.pointerId); } catch (_e) { /* ignore */ }
+                ui.builtSig = ''; sync();
+                return;
+            }
             // 「줄」 켜짐: 줄 손잡이만 다룬다(끝 = 반대쪽 끝을 축으로 기울이기, 가운데 = 줄째 옮기기). 다른 곳은 아무것도 안 함
             if (ui.lineMode) {
                 var lg = grabLine(p);
@@ -534,9 +701,10 @@
             e.preventDefault();
             var p = local(e);
             if (dr.lineIdx != null) { dragLineTo(dr, p); dr.moved = true; ui.builtSig = ''; sync(); return; }
+            if (dr.mode === 'gridNew' || dr.mode === 'gridMove') { moveGridDrag(dr, p); dr.moved = true; ui.builtSig = ''; sync(); return; }
             var d = list().find(function (x) { return x.id === dr.id; });
             if (!d) return;
-            if (dr.mode === 'end') Object.assign(d, stretchTo(dr, dr.horiz ? p.x : p.y));
+            if (dr.mode === 'end') Object.assign(d, dr.slant ? stretchSlant(dr, p) : stretchTo(dr, dr.horiz ? p.x : p.y));
             else if (dr.mode === 'size') Object.assign(d, sizeTo(dr, p));
             else {
                 d.x = dr.orig.x + (p.x - dr.start.x); d.y = dr.orig.y + (p.y - dr.start.y);
@@ -556,6 +724,7 @@
             if (!dr || e.pointerId !== dr.pointerId) return;
             ui.drag = null;
             if (dr.lineIdx != null) { finishLineDrag(dr, e.type === 'pointercancel'); return; }
+            if (dr.mode === 'gridNew' || dr.mode === 'gridMove') { finishGridDrag(dr, e.type === 'pointercancel'); return; }
             var d = list().find(function (x) { return x.id === dr.id; });
             if (!d || !dr.moved) { sync(); return; }
             var now = { x: d.x, y: d.y };
@@ -567,9 +736,18 @@
                 // 놓은 곳이 기둥(빔이면 거더·빔도)이면 그 면에 딱 붙인다
                 var pe = local(e), padE = Math.hypot(B.screenToImg(6, 0).x - B.screenToImg(0, 0).x, B.screenToImg(6, 0).y - B.screenToImg(0, 0).y);
                 var sp = snapPoint(pe, padE, d.type, d.id);
+                if (dr.slant) {
+                    // 비스듬한 보: 놓은 곳이 기둥(빔은 거더도)이면 그 면까지
+                    var tgt = pe;
+                    if (sp.on && sp.id !== d.id) {
+                        var sgn = dr.which === 'e' ? 1 : -1, L2 = sgn * ((sp.x - dr.fixedPt.x) * dr.u.x + (sp.y - dr.fixedPt.y) * dr.u.y) - api.faceDist(sp.hx, sp.hy, dr.u.x, dr.u.y);
+                        tgt = { x: dr.fixedPt.x + sgn * dr.u.x * L2, y: dr.fixedPt.y + sgn * dr.u.y * L2 };
+                    }
+                    now = stretchSlant(dr, tgt);
+                }
                 var at = dr.horiz ? pe.x : pe.y;
                 if (sp.on && sp.id !== d.id) at = dr.which === 'e' ? (dr.horiz ? sp.x - sp.hx : sp.y - sp.hy) : (dr.horiz ? sp.x + sp.hx : sp.y + sp.hy);
-                now = stretchTo(dr, at);
+                if (!dr.slant) now = stretchTo(dr, at);
             }
             // 기둥을 끌어 옮기면 끄는 동안 맞춘 자리 그대로(alignColumnMove — 원래 줄엔 약하게, 다른 줄엔 붙음)
             d.x = dr.orig.x; d.y = dr.orig.y;
@@ -607,12 +785,13 @@
             e.stopPropagation();
             if (ui.pend) { ui.pend = null; ui.builtSig = ''; sync(); }          // 거더·빔 시작 점 취소
             else if (ui.lineMode) { ui.lineMode = false; ui.drag = null; ui.builtSig = ''; sync(); }   // 「줄」 끄기
+            else if (ui.gridMode && !ui.selId) { ui.gridMode = false; ui.drag = null; ui.builtSig = ''; sync(); }   // 「통심선」 끄기
             else if (ui.selId) { ui.selId = ''; sync(); } else setEditing(false);
         }
     }, true);
     function setEditing(on) {
         ui.editing = !!on;
-        if (!on) { ui.selId = ''; ui.addType = ''; ui.drag = null; ui.pend = null; ui.lineMode = false; ui.builtSig = ''; }
+        if (!on) { ui.selId = ''; ui.addType = ''; ui.drag = null; ui.pend = null; ui.lineMode = false; ui.gridMode = false; ui.builtSig = ''; }
         sync();
     }
 
@@ -734,6 +913,7 @@
                 html += ACTIVE.map(function (t) {
                     return '<button type="button" data-act="type" data-type="' + t + '" class="map-count-type' + (ui.addType === t ? ' active' : '') + '" style="--mc-color:' + api.COLORS[t] + '" title="' + (ui.selId ? '고른 부재를 ' + t + '(으)로' : (isLineType(t) ? '시작·끝 두 곳을 눌러 ' + t + ' 추가' : '빈 곳을 눌러 ' + t + ' 추가')) + '">' + t + ' <b><small>' + c[t] + '</small></b></button>';
                 }).join('')
+                    + '<button type="button" data-act="grid" class="' + (ui.gridMode ? 'active' : '') + '" title="통심선 긋기 — 빈 곳을 세로·가로로 끌면 도면 끝까지 한 줄. 기둥을 찍으면 교차점에 붙습니다">통심선 <b><small>' + gridList().length + '</small></b></button>'
                     + '<button type="button" data-act="lines" class="' + (ui.lineMode ? 'active' : '') + '" title="기둥 줄 보이기 — 끝 동그라미를 끌면 줄을 기울이고, 가운데 네모를 끌면 그 줄 기둥을 통째로 옮깁니다">줄</button>'
                     + '<button type="button" data-act="del" ' + (ui.selId ? '' : 'disabled') + ' title="고른 부재 지우기 (Delete)">지우기</button>'
                     + '<button type="button" data-act="undo" ' + (hist(B.floorKey()).undo.length ? '' : 'disabled') + ' title="되돌리기 (Ctrl+Z)">↶ 되돌리기</button>'
@@ -744,6 +924,9 @@
                 + '<button type="button" data-act="marks" class="' + (marksOn() ? 'active' : '') + '" title="부재 이름표(C1·1G2…) 보이기">이름</button>'
                 + '<button type="button" data-act="show" class="' + (showOn() ? 'active' : '') + '">보이기</button>'
                 + '<button type="button" data-act="close">닫기</button>';
+            if (ui.editing && ui.gridMode) {
+                html += '<span class="map-struct-hint">통심선: 빈 곳을 세로로 끌면 세로선, 가로로 끌면 가로선(도면 끝까지) · 선을 잡고 끌면 선과 그 위 기둥이 같이 옮겨짐 · 선을 눌러 고르고 Delete·「지우기」 · 다 하면 「기둥」을 켜고 교차점을 누르세요</span>';
+            }
             if (ui.editing && ui.lineMode) {
                 html += '<span class="map-struct-hint">기둥 줄 ' + (ui.lines || []).length + '개: 끝 동그라미를 끌면 반대쪽 끝을 축으로 줄과 그 기둥들이 기울고, 가운데 네모를 끌면 그 줄 기둥이 통째로 옮겨집니다 · 다 하면 「줄」을 다시 눌러 끄기</span>';
             }
@@ -770,6 +953,7 @@
         else if (a === 'edit') setEditing(!ui.editing);
         else if (a === 'type') {
             var t = b.dataset.type;
+            if (ui.selId && !list().some(function (d) { return d.id === ui.selId; })) ui.selId = '';   // 고른 것이 통심선이면 종류 바꾸기 대신 추가 모드로
             if (ui.selId) {
                 var cur = list().find(function (d) { return d.id === ui.selId; });
                 var before = snap(cur);
@@ -777,9 +961,11 @@
                 if (after) pushHist(B.floorKey(), [{ id: after.id, before: before, after: snap(after) }]);
                 ui.builtSig = ''; commit();
             }
-            else { ui.addType = ui.addType === t ? '' : t; ui.pend = null; ui.lineMode = false; ui.builtSig = ''; sync(); }
+            else { ui.addType = ui.addType === t ? '' : t; ui.pend = null; ui.lineMode = false; ui.gridMode = false; ui.builtSig = ''; sync(); }
         } else if (a === 'lines') {
-            ui.lineMode = !ui.lineMode; ui.addType = ''; ui.pend = null; ui.selId = ''; ui.drag = null; ui.builtSig = ''; sync();
+            ui.lineMode = !ui.lineMode; ui.gridMode = false; ui.addType = ''; ui.pend = null; ui.selId = ''; ui.drag = null; ui.builtSig = ''; sync();
+        } else if (a === 'grid') {
+            ui.gridMode = !ui.gridMode; ui.lineMode = false; ui.addType = ''; ui.pend = null; ui.selId = ''; ui.drag = null; ui.builtSig = ''; sync();
         } else if (a === 'del') deleteSelected();
         else if (a === 'undo') undo();
         else if (a === 'redo') redo();
