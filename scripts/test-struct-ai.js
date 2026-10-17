@@ -82,4 +82,34 @@ assert.ok(page.includes("if (readMode() === 'ai') st.aiMembers = st.members;"), 
 assert.ok(page.includes("if (!aiKey()) {"), '키 없으면 안내만');
 assert.ok(prep.includes('# 2026-10-16: 스캔 구조도 「AI로 읽기」도 같은 키를 쓴다'), '배포 때 구조도 페이지에도 키 주입');
 
+// ---- 기둥 조각 읽기(2026-10-17): 통째로 보내면 기둥이 몇 픽셀이라 AI가 거의 못 찾음 → 겹치게 잘라 묻고 합친다 ----
+{
+    const tiles = AI.tileGrid({ x0: 0, y0: 0, x1: 1000, y1: 500 }, 300, 20);
+    assert.strictEqual(tiles.length, 4 * 2, '가로 4 · 세로 2 조각');
+    assert.ok(tiles.every((t) => t.w <= 300 + 1e-9 && t.h <= 300 + 1e-9), '조각 한 변은 tile 이하');
+    assert.ok(Math.abs(tiles[3].x0 + tiles[3].w - 1000) < 1e-9 && Math.abs(tiles[7].y0 + tiles[7].h - 500) < 1e-9, '범위 끝까지 덮음');
+    assert.ok(Math.abs((tiles[0].x0 + tiles[0].w) - tiles[1].x0 - 20) < 1e-9, '이웃과 overlap만큼 겹침');
+    assert.deepStrictEqual(tiles[0].edge, { l: true, t: true, r: false, b: false });
+    assert.deepStrictEqual(AI.tileGrid({ x0: 5, y0: 5, x1: 100, y1: 80 }, 300, 20).map((t) => [t.x0, t.y0, t.w, t.h]), [[5, 5, 95, 75]], '작은 범위는 한 조각');
+    assert.deepStrictEqual(AI.tileGrid({ x0: 0, y0: 0, x1: 0, y1: 10 }, 300, 20), []);
+
+    // 두 조각(0~520, 480~1000)이 겹치는 곳의 기둥 하나를 양쪽이 다 찾음 + 왼 조각 오른쪽 경계에 잘린 기둥 + 범위 바깥 경계의 기둥
+    const [L, R] = AI.tileGrid({ x0: 0, y0: 0, x1: 1000, y1: 400 }, 520, 40);
+    const merged = AI.mergeTileColumns([
+        { tile: L, rects: [{ x: 500, y: 200, w: 10, h: 10, label: '' }, { x: 516, y: 100, w: 8, h: 10, label: 'C1' }, { x: 3, y: 50, w: 6, h: 6 }] },
+        { tile: R, rects: [{ x: 502, y: 202, w: 12, h: 10, label: 'C2' }, { x: 520, y: 100, w: 10, h: 10, label: 'C1' }] }
+    ], 2);
+    merged.sort((a, b) => a.x - b.x || a.y - b.y);
+    assert.strictEqual(merged.length, 3, '겹친 같은 기둥은 하나로, 잘린 조각은 버림: ' + JSON.stringify(merged));
+    assert.deepStrictEqual([merged[0].x, merged[0].y], [3, 50], '범위 바깥 경계에 붙은 기둥은 그대로');
+    assert.deepStrictEqual([merged[1].x, merged[1].y, merged[1].w, merged[1].label], [501, 201, 11, 'C2'], '두 조각 답의 평균 자리');
+    assert.deepStrictEqual([merged[2].x, merged[2].label], [520, 'C1'], '왼 조각 경계에서 잘린 것 대신 오른 조각의 온전한 것');
+
+    assert.ok(AI.buildPrompt('기둥', [], null, { tile: true }).includes('한 조각'), '조각이면 조각이라고 알림');
+    assert.ok(!AI.buildPrompt('기둥', [], null).includes('한 조각'));
+    assert.ok(page.includes("if (step === '기둥' && AI.tileGrid) { runAiColumnsTiled(r, keep); return; }"), '페이지: AI ① 기둥은 조각으로');
+    assert.ok(/var TILE_PX = 900, TILE_OVERLAP_PX = 80, TILE_PARALLEL = 3;/.test(page), '페이지: 조각 900px · 겹침 80px · 3개씩');
+    assert.ok(page.includes('/\\(429\\)/.test(String(err && err.message))'), '페이지: 429면 기다렸다 다시');
+}
+
 console.log('test-struct-ai: ok');

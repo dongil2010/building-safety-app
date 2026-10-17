@@ -351,6 +351,7 @@
         if (step === '거더' && !known.some(function (m) { return m.type === '기둥'; })) { setStatus('기둥이 없습니다. 먼저 「AI ① 기둥」을 누르세요.', 'warn'); return; }
         if (step === '빔' && !known.some(function (m) { return m.type === '거더'; })) { setStatus('거더가 없습니다. 먼저 「AI ② 거더」를 누르세요.', 'warn'); return; }
         var crop = { x0: r.x0, y0: r.y0, w: r.x1 - r.x0, h: r.y1 - r.y0 };
+        if (step === '기둥' && AI.tileGrid) { runAiColumnsTiled(r, keep); return; }
         st.aiBusy = true; syncAiButtons();
         setStatus('AI가 ' + step + '을(를) 찾는 중입니다… (큰 도면은 1분 가까이 걸릴 수 있습니다)');
         try {
@@ -366,6 +367,68 @@
                 + (step === '기둥' ? '(빠진 기둥은 「누르면: 기둥으로」로 고른 뒤 그 자리를 누르면 추가)' : '')
                 + (next ? ', 다 확인했으면 「AI ' + (AI_STEPS.indexOf(next) + 1) + ' ' + next + '」를 누르세요.' : ', 다 됐으면 기준점을 찍고 「앱으로 보내기」를 누르세요.')
                 + ' (AI 초안이라 빠지거나 틀린 것이 있습니다)', got.length ? 'ok' : 'warn');
+        } catch (err) {
+            console.error(err);
+            setStatus('AI로 읽지 못했습니다: ' + (err && err.message ? err.message : err), 'warn');
+        } finally {
+            st.aiBusy = false; syncAiButtons();
+        }
+    }
+    /**
+     * AI ① 기둥 — 조각으로 나눠 묻기(2026-10-17). 통째로 보내면 기둥이 몇 픽셀이라 AI가 거의 못 찾는다.
+     * 화면용 그림 기준 한 변 900px 조각(이웃과 80px 겹침, 기둥보다 넉넉히)으로 잘라 3개씩 동시에 묻고,
+     * 잘린 기둥은 버리고 겹친 것은 하나로 합친다(js/core/struct-ai.js tileGrid·mergeTileColumns).
+     */
+    var TILE_PX = 900, TILE_OVERLAP_PX = 80, TILE_PARALLEL = 3;
+    async function runAiColumnsTiled(r, keep) {
+        var s = st.scale;
+        var tiles = AI.tileGrid(r, TILE_PX / s, TILE_OVERLAP_PX / s);
+        if (!tiles.length) return;
+        st.aiBusy = true; syncAiButtons();
+        var done = 0, failed = 0, lastErr = null, perTile = [];
+        var show = function () { setStatus('AI가 기둥을 찾는 중입니다… 조각 ' + done + '/' + tiles.length + (failed ? ' (실패 ' + failed + ')' : '') + ' — 도면을 ' + tiles.length + '조각으로 나눠 크게 보여 줍니다.'); };
+        var wait = function (ms) { return new Promise(function (res) { setTimeout(res, ms); }); };
+        var ask = async function (t) {
+            var cv = cropBase({ x0: t.x0, y0: t.y0, x1: t.x0 + t.w, y1: t.y0 + t.h }, 1536);
+            var dataUrl = cv.toDataURL('image/jpeg', 0.92);
+            var crop = { x0: t.x0, y0: t.y0, w: t.w, h: t.h };
+            for (var attempt = 0; ; attempt++) {
+                try {
+                    var text = await AI.callGemini(aiKey(), { mimeType: 'image/jpeg', base64: dataUrl.slice(dataUrl.indexOf(',') + 1) }, AI.buildPrompt('기둥', [], crop, { tile: true }));
+                    return AI.stepMembers('기둥', AI.parseResponse(text), crop, []);
+                } catch (err) {
+                    // 한꺼번에 많이 물어 429가 나면 조금 기다렸다 다시(두 번까지)
+                    if (attempt < 2 && /\(429\)/.test(String(err && err.message))) { await wait(15000 * (attempt + 1)); continue; }
+                    throw err;
+                }
+            }
+        };
+        show();
+        var next = 0;
+        var worker = async function () {
+            while (next < tiles.length) {
+                var t = tiles[next++];
+                try { perTile.push({ tile: t, rects: await ask(t) }); }
+                catch (err) { console.error(err); failed++; lastErr = err; }
+                done++; show();
+            }
+        };
+        try {
+            var workers = [];
+            for (var w = 0; w < Math.min(TILE_PARALLEL, tiles.length); w++) workers.push(worker());
+            await Promise.all(workers);
+            if (!perTile.length) throw lastErr || new Error('답을 받은 조각이 없습니다.');
+            var stamp = Date.now();
+            var got = AI.mergeTileColumns(perTile, 4 / s).map(function (c, i) {
+                return { id: 'sm_ai' + stamp + '_기둥_' + (i + 1), shape: 'column', type: '기둥', label: c.label, ai: true, x: c.x, y: c.y, w: c.w, h: c.h };
+            }).filter(inRegion);
+            st.aiMembers = unifyBeams(keep.concat(got));
+            var sel = $('readMode');
+            if (sel) sel.value = 'ai';
+            applyMode();
+            setStatus('기둥 ' + got.length + '개를 찾았습니다(' + tiles.length + '조각' + (failed ? ', 실패 ' + failed + '조각 — 그 부분은 빠졌을 수 있음' : '') + '). '
+                + '틀린 것은 눌러서 빼고, 빠진 기둥은 「누르면: 기둥으로」로 그 자리를 누르면 추가. 다 확인했으면 「AI ② 거더」를 누르세요. (AI 초안이라 빠지거나 틀린 것이 있습니다)',
+                got.length && !failed ? 'ok' : 'warn');
         } catch (err) {
             console.error(err);
             setStatus('AI로 읽지 못했습니다: ' + (err && err.message ? err.message : err), 'warn');

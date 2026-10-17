@@ -32,8 +32,10 @@
     /**
      * 단계별 묻는 글. step = '기둥' | '거더' | '빔', known = 이미 확인한 부재(쪽 좌표), crop = 보낸 범위 { x0, y0, w, h }
      */
-    function buildPrompt(step, known, crop) {
-        var L = ['이 그림은 건물 구조평면도(스캔본)다.', ''];
+    function buildPrompt(step, known, crop, opts) {
+        var L = [(opts && opts.tile)
+            ? '이 그림은 건물 구조평면도(스캔본)를 여러 조각으로 나눈 것 중 한 조각이다. 이 조각 안에 보이는 것만 답한다.'
+            : '이 그림은 건물 구조평면도(스캔본)다.', ''];
         var cols = crop ? knownLines(known, '기둥', crop) : [], girders = crop ? knownLines(known, '거더', crop) : [];
         if (step === '기둥') {
             L.push('기둥만 모두 찾아라.',
@@ -178,6 +180,63 @@
         return out;
     }
 
+    // ---------- 기둥 조각 읽기(2026-10-17) ----------
+    // 도면 한 장을 통째로 보내면 기둥(쪽 너비의 0.5% 남짓)이 AI 눈에 몇 픽셀밖에 안 돼 거의 못 찾는다(2층 스캔본: 기둥 한 변 ≈ 18/4000px).
+    // 겹치게 여러 조각으로 잘라 따로 묻고, 조각 안쪽 경계에 걸려 잘린 기둥은 버린 뒤(겹친 옆 조각에 온전히 있다) 같은 기둥을 하나로 합친다.
+
+    /**
+     * 범위 r { x0, y0, x1, y1 }(쪽 좌표)을 한 변 tile 이하 조각으로, 이웃과 overlap만큼 겹치게 나눈다.
+     * → [{ x0, y0, w, h, edge: { l, t, r, b } }]  edge = 그 변이 범위 바깥 경계인지(그쪽은 잘린 기둥도 버리지 않는다)
+     */
+    function tileGrid(r, tile, overlap) {
+        var W = r.x1 - r.x0, H = r.y1 - r.y0, ov = Math.max(0, overlap || 0);
+        if (!(W > 0) || !(H > 0) || !(tile > ov)) return [];
+        var nx = Math.max(1, Math.ceil((W - ov) / (tile - ov))), ny = Math.max(1, Math.ceil((H - ov) / (tile - ov)));
+        // 조각 크기를 고르게(마지막 조각만 가늘어지지 않게)
+        var tw = nx === 1 ? W : (W + ov * (nx - 1)) / nx, th = ny === 1 ? H : (H + ov * (ny - 1)) / ny;
+        var out = [];
+        for (var j = 0; j < ny; j++) {
+            for (var i = 0; i < nx; i++) {
+                out.push({ x0: r.x0 + i * (tw - ov), y0: r.y0 + j * (th - ov), w: tw, h: th,
+                    edge: { l: i === 0, t: j === 0, r: i === nx - 1, b: j === ny - 1 } });
+            }
+        }
+        return out;
+    }
+
+    /**
+     * 조각마다 받은 기둥(쪽 좌표 사각형) → 하나로 합친 기둥 목록.
+     * perTile = [{ tile(tileGrid 한 칸), rects:[{ x, y, w, h, label }] }], margin = 조각 안쪽 경계에서 이만큼 안에 닿으면 잘린 것으로 본다.
+     * 같은 기둥(가운데끼리 두 기둥 중 큰 변의 절반 안)은 평균 자리로 하나만 남긴다. → [{ x, y, w, h, label }]
+     */
+    function mergeTileColumns(perTile, margin) {
+        var m = Math.max(0, margin || 0), kept = [];
+        (perTile || []).forEach(function (pt) {
+            var t = pt.tile;
+            (pt.rects || []).forEach(function (r) {
+                if (!(r.w > 0) || !(r.h > 0)) return;
+                var l = r.x - r.w / 2, rr = r.x + r.w / 2, tp = r.y - r.h / 2, bt = r.y + r.h / 2;
+                if ((!t.edge.l && l <= t.x0 + m) || (!t.edge.r && rr >= t.x0 + t.w - m)
+                    || (!t.edge.t && tp <= t.y0 + m) || (!t.edge.b && bt >= t.y0 + t.h - m)) return;   // 조각 경계에서 잘림
+                kept.push(r);
+            });
+        });
+        var groups = [];
+        kept.forEach(function (r) {
+            var g = null;
+            for (var i = 0; i < groups.length && !g; i++) {
+                var c = groups[i];
+                var reach = Math.max(r.w, r.h, c.w, c.h) * 0.5;
+                if (Math.abs(c.x - r.x) <= reach && Math.abs(c.y - r.y) <= reach) g = c;
+            }
+            if (!g) { groups.push({ x: r.x, y: r.y, w: r.w, h: r.h, label: r.label || '', n: 1, sx: r.x, sy: r.y, sw: r.w, sh: r.h }); return; }
+            g.n++; g.sx += r.x; g.sy += r.y; g.sw += r.w; g.sh += r.h;
+            g.x = g.sx / g.n; g.y = g.sy / g.n; g.w = g.sw / g.n; g.h = g.sh / g.n;
+            if (!g.label && r.label) g.label = r.label;
+        });
+        return groups.map(function (g) { return { x: g.x, y: g.y, w: g.w, h: g.h, label: g.label }; });
+    }
+
     /** Gemini 부르기 → 답 글. image = { mimeType, base64 } */
     async function callGemini(key, image, prompt, opts) {
         var o = opts || {};
@@ -200,7 +259,8 @@
         return parts.map(function (p) { return p.text || ''; }).join('');
     }
 
-    var api = { MODEL: MODEL, TYPES: TYPES, buildPrompt: buildPrompt, parseResponse: parseResponse, stepMembers: stepMembers, callGemini: callGemini };
+    var api = { MODEL: MODEL, TYPES: TYPES, buildPrompt: buildPrompt, parseResponse: parseResponse, stepMembers: stepMembers, callGemini: callGemini,
+        tileGrid: tileGrid, mergeTileColumns: mergeTileColumns };
     if (typeof module !== 'undefined' && module.exports) module.exports = api;
     if (root) { root.BSA = root.BSA || {}; root.BSA.structAi = api; }
 })(typeof window !== 'undefined' ? window : null);
