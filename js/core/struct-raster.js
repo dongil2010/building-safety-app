@@ -115,130 +115,105 @@
         });
     }
 
-    // ---------- 통심선 교차점에서 기둥 찾기(2026-10-16) ----------
-    // 기둥은 X·Y 통심선이 만나는 곳에 놓인다. 이름표 네모(C1)는 교차점에서 비켜나 있어 애초에 보지 않는다.
-    //  1) 통심선: 그림을 길게 가로지르는 가로·세로 선(일점쇄선의 틈은 이어 봄). 열·행마다 가장 긴 잉크 줄을 재서
-    //     가장 긴 것의 35% 넘는 곳(이웃 중 가장 긴 곳 하나)만.
-    //  2) 교차점마다(두 선이 실제로 지나는 곳만) 둘레를 한 바퀴씩 넓혀 가며 "닫힌 도형"을 찾는다:
-    //     네모 테두리(네 변 모두 잉크) 또는 동그라미(여덟 방향 모두 잉크), 바로 바깥은 비어 있음(따로 떨어진 작은 도형).
-    //     교차점을 지나는 보 선은 둘레에 2~4점만 닿아 닫힌 도형이 아니다.
+    // ---------- 기둥 줄 찍기(2026-10-17): 예시 + 사람이 누른 기둥들로 기둥 줄(X·Y)을 알아내 교차점마다 찾기 ----------
+    // 통째로 예시와 닮은 곳만 찾으면 스캔 얼룩·보 선이 겹친 기둥이 빠진다. 기둥은 줄(통심선)에 놓이니,
+    // 맨 윗줄·왼쪽 줄 기둥을 눌러 주면 그 X 위치들 × Y 위치들의 교차점을 하나씩 보고, 거기서는 덜 닮아도(낮은 기준) 기둥으로 친다.
+    // 기둥이 없는 교차점은 빈 종이·보 선뿐이라 닮은 정도가 낮아 걸러진다.
 
-    function lumOf(img) {
-        var N = img.width * img.height, L = new Uint8Array(N), d = img.data;
-        for (var i = 0, p = 0; i < N; i++, p += 4) L[i] = d[p + 3] < 128 ? 255 : (d[p] * 299 + d[p + 1] * 587 + d[p + 2] * 114) / 1000;
-        return L;
-    }
-    /** 한 줄(열 또는 행) 잉크의 가장 긴 구간(틈 gap 이하는 이어 봄) → { len, s, e } */
-    function longestRun(L, start, step, count, thr, gap) {
-        var best = { len: 0, s: 0, e: 0 }, s = -1, last = -1;
-        for (var k = 0; k < count; k++) {
-            if (L[start + k * step] < thr) {
-                if (s < 0 || k - last > gap + 1) s = k;
-                last = k;
-                if (last - s + 1 > best.len) best = { len: last - s + 1, s: s, e: last };
+    /** 예시 T(줄인 좌표)를 I의 왼쪽 위 (px, py)에 놓았을 때 닮은 정도(−1~1). 잉크가 너무 적거나 많으면 −1 */
+    function scoreAt(I, T, Tz, tn, tSum, px, py) {
+        var tw = T.w, th = T.h;
+        if (px < 0 || py < 0 || px + tw > I.w || py + th > I.h) return -1;
+        var sum = 0, sum2 = 0, cross = 0;
+        for (var j = 0; j < th; j++) {
+            var row = (py + j) * I.w + px, trow = j * tw;
+            for (var i = 0; i < tw; i++) {
+                var v = I.d[row + i];
+                sum += v; sum2 += v * v; cross += v * Tz[trow + i];
             }
         }
-        return best;
+        if (sum < tSum * 0.5 || sum > tSum * 1.8) return -1;
+        var vr = sum2 - sum * sum / (tw * th);
+        return vr > 1e-6 ? cross / (Math.sqrt(vr) * tn) : -1;
     }
-    /** 통심선 찾기 → { xs:[{ at, s, e }], ys:[…] } */
-    function gridLines(L, W, H, o) {
-        var thr = o.lineInk || 215, gap = Math.max(4, Math.round(Math.max(W, H) * 0.006));
-        var col = [], row = [], x, y;
-        for (x = 0; x < W; x++) col.push(longestRun(L, x, W, H, thr, gap));
-        for (y = 0; y < H; y++) row.push(longestRun(L, y * W, 1, W, thr, gap));
-        var pick = function (runs, sep) {
-            var mx = 0;
-            runs.forEach(function (r) { if (r.len > mx) mx = r.len; });
-            var cand = [];
-            runs.forEach(function (r, i) { if (r.len >= mx * (o.lineFrac || 0.35)) cand.push({ at: i, s: r.s, e: r.e, len: r.len }); });
-            // 붙어 있는 열(굵은 선·겹선)은 가장 긴 하나만
-            cand.sort(function (a, b) { return b.len - a.len; });
-            var kept = [];
-            cand.forEach(function (c) { if (!kept.some(function (k) { return Math.abs(k.at - c.at) < sep; })) kept.push(c); });
-            return kept.sort(function (a, b) { return a.at - b.at; });
-        };
-        var sep = Math.max(3, Math.round(Math.max(W, H) * 0.004));
-        return { xs: pick(col, sep), ys: pick(row, sep) };
+    function prepT(T) {
+        var n = T.w * T.h, mean = 0, k;
+        for (k = 0; k < n; k++) mean += T.d[k];
+        var tSum = mean; mean /= n;
+        var Tz = new Float32Array(n), tn = 0;
+        for (k = 0; k < n; k++) { Tz[k] = T.d[k] - mean; tn += Tz[k] * Tz[k]; }
+        return { T: T, Tz: Tz, tn: Math.sqrt(tn), tSum: tSum };
     }
-    /** (cx,cy) 둘레 반지름 r의 닫힌 정도 → { sq: 네 변 중 가장 덜 찬 변의 잉크 비율, ci: 여덟 방향 중 가장 덜 찬 방향, all: 둘레 전체 } */
-    function ringAt(L, W, H, cx, cy, r, thr) {
-        var side = [0, 0, 0, 0], sideN = 0, oct = [0, 0, 0, 0, 0, 0, 0, 0], octN = [0, 0, 0, 0, 0, 0, 0, 0], ink = 0, n = 0, t, x, y;
-        var at = function (x, y) { return x >= 0 && y >= 0 && x < W && y < H && L[y * W + x] < thr; };
-        for (t = -r; t <= r; t++) {
-            if (at(cx + t, cy - r)) side[0]++;
-            if (at(cx + t, cy + r)) side[1]++;
-            if (at(cx - r, cy + t)) side[2]++;
-            if (at(cx + r, cy + t)) side[3]++;
-            sideN++;
-        }
-        for (y = -r - 1; y <= r + 1; y++) {
-            for (x = -r - 1; x <= r + 1; x++) {
-                var d = Math.sqrt(x * x + y * y);
-                if (d < r - 0.5 || d >= r + 0.5) continue;
-                var k = (Math.round(Math.atan2(y, x) / (Math.PI / 4)) + 8) % 8;
-                octN[k]++; n++;
-                if (at(cx + x, cy + y)) { oct[k]++; ink++; }
-            }
-        }
-        var sq = Math.min.apply(null, side) / sideN;
-        var ci = Math.min.apply(null, oct.map(function (v, i) { return octN[i] ? v / octN[i] : 0; }));
-        var sqAll = (side[0] + side[1] + side[2] + side[3]) / (4 * sideN);
-        return { sq: sq, ci: ci, all: Math.max(sqAll, n ? ink / n : 0) };
-    }
-    /** 교차점 한 곳의 기둥 → { r, score } 또는 null */
-    function columnAt(L, W, H, cx, cy, rMax, thr) {
+    /** 가운데 (cx, cy)(줄인 좌표) 둘레 r칸 안에서 가장 닮은 자리 → { x, y(가운데), s, t } */
+    function bestNear(I, shapes, cx, cy, r) {
         var best = null;
-        for (var r = 2; r <= rMax; r++) {
-            var a = ringAt(L, W, H, cx, cy, r, thr);
-            var closed = Math.max(a.sq >= 0.5 ? a.sq : 0, a.ci >= 0.4 ? a.ci : 0);
-            if (!closed) continue;
-            // 바로 바깥(r+2, r+3)은 비어야 따로 떨어진 기둥(벽·보 덩어리 속이 아님)
-            var o1 = ringAt(L, W, H, cx, cy, r + 2, thr).all, o2 = ringAt(L, W, H, cx, cy, r + 3, thr).all;
-            var out = Math.max(o1, o2);
-            if (out > 0.35 || out > a.all * 0.6) continue;
-            // 바깥이 빈 닫힌 둘레 중 가장 큰 것 = 기둥 겉모서리
-            best = { r: r, score: closed - out };
-        }
+        shapes.forEach(function (P) {
+            if (P.tn < 1) return;
+            var x0 = Math.round(cx - P.T.w / 2), y0 = Math.round(cy - P.T.h / 2);
+            for (var dy = -r; dy <= r; dy++) {
+                for (var dx = -r; dx <= r; dx++) {
+                    var s = scoreAt(I, P.T, P.Tz, P.tn, P.tSum, x0 + dx, y0 + dy);
+                    if (!best || s > best.s) best = { x: x0 + dx + P.T.w / 2, y: y0 + dy + P.T.h / 2, s: s, t: P.T };
+                }
+            }
+        });
         return best;
+    }
+    /** 값들을 tol 안끼리 묶어 평균 → 오름차순 */
+    function clusterAxis(vals, tol) {
+        var out = [];
+        vals.slice().sort(function (a, b) { return a - b; }).forEach(function (v) {
+            var g = out[out.length - 1];
+            if (g && v - g.sum / g.n <= tol) { g.sum += v; g.n++; } else out.push({ sum: v, n: 1 });
+        });
+        return out.map(function (g) { return g.sum / g.n; });
     }
     /**
-     * 통심선 교차점의 기둥 → { columns:[{ x, y, w, h, score }], xs, ys } (그림 픽셀). 기둥 크기는 찾은 것의 중간값으로 같게.
+     * 기둥 줄로 찾기. rect = 예시 상자(그림 픽셀), points = 사람이 누른 기둥 [{ x, y }](그림 픽셀, 대충 눌러도 됨).
+     * 누른 점은 둘레에서 예시와 가장 닮은 자리로 옮겨 붙인 뒤(그 기둥은 기둥으로 친다), X·Y 위치를 줄로 묶고
+     * 모든 교차점에서 둘레를 찾아 threshold(기본 0.4) 넘으면 기둥. → { columns:[{ x, y, w, h, score, picked? }], xs, ys }
      */
-    function gridColumns(img, opts) {
+    function matchOnLines(img, rect, points, opts) {
         var o = opts || {};
-        var W = img.width, H = img.height, L = lumOf(img);
-        var thr = o.colInk || 170;
-        var g = gridLines(L, W, H, o);
-        var rMax = o.rMax || Math.max(6, Math.round(Math.min(W, H) * 0.015));
-        var found = [];
-        g.xs.forEach(function (vx) {
-            g.ys.forEach(function (hy) {
-                // 모든 교차점을 본다(선이 그 자리를 지나는지는 따지지 않음 — 가장 긴 구간이 다른 데 있을 수 있다).
-                // 선 두께·기둥 짝수 크기·스캔 기울기만큼 둘레 3칸 안에서 가장 잘 맞는 가운데
-                var best = null;
-                for (var dy = -3; dy <= 3; dy++) for (var dx = -3; dx <= 3; dx++) {
-                    var c = columnAt(L, W, H, vx.at + dx, hy.at + dy, rMax, thr);
-                    if (c && (!best || c.score > best.score)) best = { x: vx.at + dx, y: hy.at + dy, r: c.r, score: c.score };
-                }
-                if (best) found.push(best);
+        var thr = o.threshold != null ? o.threshold : 0.4;
+        var rw = Math.round(rect.w), rh = Math.round(rect.h);
+        if (rw < 3 || rh < 3 || !(points && points.length)) return { columns: [], xs: [], ys: [] };
+        var f = o.scale || Math.max(1, Math.floor(Math.max(rw, rh) / 10));
+        var I = inkOf(img, 0, 0, img.width, img.height, f);
+        var T = inkOf(img, Math.round(rect.x), Math.round(rect.y), rw, rh, f);
+        var shapes = [prepT(T)];
+        if (Math.max(T.w, T.h) / Math.min(T.w, T.h) >= 1.25) shapes.push(prepT(transpose(T)));
+        var size = Math.max(T.w, T.h);
+        // 1) 누른 점 → 가까운 기둥 가운데(예시 한 개 크기 안에서)
+        var picked = points.map(function (p) {
+            var b = bestNear(I, shapes, p.x / f, p.y / f, size);
+            return b && b.s > 0 ? b : { x: p.x / f, y: p.y / f, s: 0, t: T };
+        });
+        // 2) 기둥 줄: 누른 기둥들의 X·Y(예시 크기의 60% 안이면 같은 줄)
+        var xs = clusterAxis(picked.map(function (b) { return b.x; }), size * 0.6);
+        var ys = clusterAxis(picked.map(function (b) { return b.y; }), size * 0.6);
+        // 3) 교차점마다 둘레(예시 절반 크기 안 — 스캔 기울기·그림 오차)에서 가장 닮은 자리
+        var found = picked.map(function (b) { return { x: b.x, y: b.y, s: b.s, t: b.t, picked: true }; });
+        var r = Math.max(2, Math.round(size * 0.5));
+        xs.forEach(function (x) {
+            ys.forEach(function (y) {
+                var b = bestNear(I, shapes, x, y, r);
+                if (!b || b.s < thr) return;
+                var dup = found.some(function (k) { return Math.abs(k.x - b.x) < size * 0.6 && Math.abs(k.y - b.y) < size * 0.6; });
+                if (!dup) found.push(b);
             });
         });
-        // 통심선 옆 보 선·겹선도 긴 선으로 잡혀 한 기둥이 이웃 교차점에서 여러 번 나온다 → 가장 잘 맞는 하나만
-        found.sort(function (a, b) { return b.score - a.score; });
-        var uniq = [];
-        found.forEach(function (f) {
-            if (!uniq.some(function (k) { return Math.abs(k.x - f.x) <= Math.max(k.r, f.r) + 2 && Math.abs(k.y - f.y) <= Math.max(k.r, f.r) + 2; })) uniq.push(f);
-        });
-        found = uniq;
-        var rs = found.map(function (f) { return f.r; }).sort(function (a, b) { return a - b; });
-        var rm = rs.length ? rs[Math.floor(rs.length / 2)] : 0, side = 2 * rm + 1;
         return {
-            columns: found.map(function (f) { return { x: f.x + 0.5, y: f.y + 0.5, w: side, h: side, score: Math.round(f.score * 1000) / 1000 }; }),
-            xs: g.xs.map(function (l) { return l.at; }), ys: g.ys.map(function (l) { return l.at; })
+            columns: found.map(function (c) {
+                var out = { x: c.x * f, y: c.y * f, w: c.t.w * f, h: c.t.h * f, score: Math.round(c.s * 1000) / 1000 };
+                if (c.picked) out.picked = true;
+                return out;
+            }),
+            xs: xs.map(function (v) { return v * f; }), ys: ys.map(function (v) { return v * f; })
         };
     }
 
-    var api = { matchColumns: matchColumns, inkOf: inkOf, gridColumns: gridColumns, gridLines: gridLines };
+    var api = { matchColumns: matchColumns, inkOf: inkOf, matchOnLines: matchOnLines };
     if (typeof module !== 'undefined' && module.exports) module.exports = api;
     if (root) { root.BSA = root.BSA || {}; root.BSA.structRaster = api; }
 })(typeof window !== 'undefined' ? window : null);

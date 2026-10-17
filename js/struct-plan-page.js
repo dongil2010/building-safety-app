@@ -277,6 +277,12 @@
      * 찾은 기둥은 모두 예시와 같은 크기. 범위를 정했으면 그 안만.
      */
     function strictness() { var el = $('colStrict'); var v = el ? parseFloat(el.value) : 0.6; return Number.isFinite(v) ? v : 0.6; }
+    /**
+     * 예시 + 기둥 줄(2026-10-17, js/core/struct-raster.js matchOnLines): 「① 기둥 줄 찍기」로 누른 기둥들의 X·Y 줄 교차점은
+     * 예시와 덜 닮아도(기준 −0.2) 기둥으로 친다 — 스캔 얼룩·보 선이 겹쳐 통째 찾기에서 빠지던 기둥을 잡는다.
+     * 누른 기둥 자체는 늘 기둥. 둘을 합쳐 겹치는 것은 하나만.
+     */
+    function lineThreshold() { return Math.max(0.3, strictness() - 0.2); }
     function runColumnMatch() {
         var RS = window.BSA.structRaster, smp = st.colSample;
         if (!RS || !st.base || !smp) return;
@@ -287,58 +293,52 @@
                     st.baseImg = { src: st.base, img: st.base.getContext('2d').getImageData(0, 0, st.base.width, st.base.height) };
                 }
                 var s = st.scale, t0 = performance.now();
-                var hits = RS.matchColumns(st.baseImg.img, { x: smp.x0 * s, y: smp.y0 * s, w: (smp.x1 - smp.x0) * s, h: (smp.y1 - smp.y0) * s }, { threshold: strictness() });
+                var rect = { x: smp.x0 * s, y: smp.y0 * s, w: (smp.x1 - smp.x0) * s, h: (smp.y1 - smp.y0) * s };
+                var hits = RS.matchColumns(st.baseImg.img, rect, { threshold: strictness() });
+                var pts = st.linePts || [], onLines = null;
+                if (pts.length && RS.matchOnLines) {
+                    onLines = RS.matchOnLines(st.baseImg.img, rect, pts.map(function (p) { return { x: p.x * s, y: p.y * s }; }), { threshold: lineThreshold() });
+                    st.lineGrid = { xs: onLines.xs.map(function (v) { return v / s; }), ys: onLines.ys.map(function (v) { return v / s; }) };
+                    // 줄에서 찾은 것을 먼저(누른 기둥 포함), 통째 찾기 결과는 겹치지 않는 것만 보탠다
+                    var size = Math.max(rect.w, rect.h) * 0.6;
+                    hits = onLines.columns.concat(hits.filter(function (h) {
+                        return !onLines.columns.some(function (c) { return Math.abs(c.x - h.x) < size && Math.abs(c.y - h.y) < size; });
+                    }));
+                } else st.lineGrid = null;
                 var stamp = Date.now();
                 var found = hits.map(function (b, i) {
                     return { id: 'sm_px' + stamp + '_' + (i + 1), shape: 'column', type: '기둥', label: '', ai: true, x: b.x / s, y: b.y / s, w: b.w / s, h: b.h / s };
-                }).filter(inRegion);
+                }).filter(function (m) { return inRegion(m); });
                 var cur = readMode() === 'ai' ? st.members : (st.aiMembers || []);
                 st.aiMembers = unifyBeams(cur.filter(function (m) { return m.type !== '기둥'; }).concat(found));
                 var sel = $('readMode');
                 if (sel) sel.value = 'ai';
                 applyMode();
                 syncAiButtons();
-                setStatus('기둥 ' + found.length + '개를 찾았습니다(예시와 같은 크기, ' + Math.round(performance.now() - t0) + 'ms). '
-                    + '너무 많이 잡혔으면 「엄격」, 빠졌으면 「느슨」으로 바꾸세요. 틀린 것은 눌러서 빼고, 다 확인했으면 「AI ② 거더」를 누르세요.', found.length ? 'ok' : 'warn');
+                var ms = Math.round(performance.now() - t0);
+                if (onLines) {
+                    setStatus('기둥 ' + found.length + '개(기둥 줄 가로 ' + onLines.ys.length + ' · 세로 ' + onLines.xs.length + '줄 교차점 ' + onLines.columns.length + '개 포함, ' + ms + 'ms). '
+                        + (st.linePicking ? '줄이 빠졌으면 그 줄의 기둥을 하나 더 누르세요(잘못 누른 점은 다시 누르면 빠짐). 다 되면 「① 기둥 줄 찍기」를 다시 눌러 끝냅니다.'
+                            : '틀린 것은 눌러서 빼고, 다 확인했으면 「AI ② 거더」를 누르세요.'), found.length ? 'ok' : 'warn');
+                } else {
+                    setStatus('기둥 ' + found.length + '개를 찾았습니다(예시와 같은 크기, ' + ms + 'ms). '
+                        + '빠진 기둥이 많으면 「① 기둥 줄 찍기」로 맨 윗줄·왼쪽 줄 기둥을 눌러 주세요. 너무 많이 잡혔으면 「엄격」. 다 확인했으면 「AI ② 거더」.', found.length ? 'ok' : 'warn');
+                }
             } catch (err) {
                 console.error(err);
                 setStatus('기둥을 찾지 못했습니다: ' + (err && err.message ? err.message : err), 'warn');
             }
         }, 20);
     }
-    /**
-     * ① 통심선 교차점 기둥(2026-10-16, js/core/struct-raster.js gridColumns) — X·Y 통심선이 만나는 곳의 네모·동그라미만 기둥으로.
-     * 이름표 네모(C1)는 교차점에서 비켜나 있어 잡히지 않는다. 범위를 정했으면 그 안만(제목칸·치수선 빼기).
-     */
-    function runGridColumns() {
-        var RS = window.BSA.structRaster;
-        if (!RS || !RS.gridColumns || !st.base) return;
-        setStatus('통심선과 교차점의 기둥을 찾는 중…');
-        setTimeout(function () {
-            try {
-                var r = st.region || { x0: 0, y0: 0, x1: st.base.width / st.scale, y1: st.base.height / st.scale };
-                var cv = cropBase(r, Infinity), s = cv.width / (r.x1 - r.x0), t0 = performance.now();
-                var res = RS.gridColumns(cv.getContext('2d').getImageData(0, 0, cv.width, cv.height));
-                var stamp = Date.now();
-                var found = res.columns.map(function (b, i) {
-                    return { id: 'sm_gx' + stamp + '_' + (i + 1), shape: 'column', type: '기둥', label: '', ai: true,
-                        x: r.x0 + b.x / s, y: r.y0 + b.y / s, w: b.w / s, h: b.h / s };
-                });
-                var cur = readMode() === 'ai' ? st.members : (st.aiMembers || []);
-                st.aiMembers = unifyBeams(cur.filter(function (m) { return m.type !== '기둥'; }).concat(found));
-                st.colSample = null;
-                var sel = $('readMode');
-                if (sel) sel.value = 'ai';
-                applyMode();
-                syncAiButtons();
-                setStatus('통심선 가로 ' + res.ys.length + '줄 · 세로 ' + res.xs.length + '줄, 교차점 기둥 ' + found.length + '개를 찾았습니다('
-                    + Math.round(performance.now() - t0) + 'ms, 모두 같은 크기). 도면 밖 제목칸·치수선까지 잡히면 「범위 지정」으로 평면만 감싼 뒤 다시 누르세요. '
-                    + '틀린 것은 눌러서 빼고, 빠진 기둥은 「누르면: 기둥으로」로 그 자리를 누르면 추가. 다 확인했으면 「AI ② 거더」.', found.length ? 'ok' : 'warn');
-            } catch (err) {
-                console.error(err);
-                setStatus('기둥을 찾지 못했습니다: ' + (err && err.message ? err.message : err), 'warn');
-            }
-        }, 20);
+    /** 「① 기둥 줄 찍기」 중 누른 점: 이미 찍은 점(예시 크기 안)을 누르면 빼고, 아니면 보탠 뒤 바로 다시 찾는다 */
+    function toggleLinePoint(p) {
+        var smp = st.colSample;
+        var reach = smp ? Math.max(smp.x1 - smp.x0, smp.y1 - smp.y0) : screenPad(12);
+        st.linePts = st.linePts || [];
+        var i = st.linePts.findIndex(function (q) { return Math.abs(q.x - p.x) <= reach && Math.abs(q.y - p.y) <= reach; });
+        if (i >= 0) st.linePts.splice(i, 1); else st.linePts.push(p);
+        redraw();
+        runColumnMatch();
     }
     async function runAiStep(step) {
         if (!st.base || !AI) return;
@@ -449,17 +449,20 @@
             b.classList.toggle('primary', !!st.base && t === nextStep);
         });
         // ① 기둥은 예시로 찾기를 먼저 권한다(AI ① 기둥은 파랗게 하지 않음)
-        var gb = $('btnColGrid');
-        if (gb) {
-            gb.disabled = !st.base || !window.BSA.structRaster;
-            gb.classList.toggle('primary', !!st.base && nextStep === '기둥');
-        }
         var sb = $('btnColSample');
         if (sb) {
             sb.disabled = !st.base || !window.BSA.structRaster;
-            sb.classList.toggle('primary', !gb && !!st.base && nextStep === '기둥');
+            sb.classList.toggle('primary', !!st.base && !st.colSample && nextStep === '기둥');
             var ac = $(AI_BTN['기둥']);
             if (ac) ac.classList.remove('primary');
+        }
+        // ① 기둥 줄 찍기: 예시를 감싼 뒤에 쓴다
+        var lb = $('btnColLines');
+        if (lb) {
+            lb.disabled = !st.base || !st.colSample || !(window.BSA.structRaster && window.BSA.structRaster.matchOnLines);
+            if (lb.disabled && st.linePicking) st.linePicking = false;
+            lb.classList.toggle('on', !!st.linePicking);
+            lb.classList.toggle('primary', !st.linePicking && !!st.colSample && !(st.linePts && st.linePts.length));
         }
     }
 
@@ -534,6 +537,24 @@
             x.lineWidth = 3; x.setLineDash([6, 4]); x.strokeStyle = '#db2777';
             x.strokeRect(cs.x0 * s - 4, cs.y0 * s - 4, (cs.x1 - cs.x0) * s + 8, (cs.y1 - cs.y0) * s + 8);
             x.setLineDash([]);
+        }
+        if (readMode() === 'ai' && st.lineGrid) {
+            // 기둥 줄(누른 기둥들로 알아낸 X·Y) — 연한 분홍 선
+            x.save();
+            x.globalAlpha = 0.45; x.strokeStyle = '#db2777'; x.lineWidth = 1.5 * px1; x.setLineDash([10 * px1, 6 * px1]);
+            st.lineGrid.xs.forEach(function (v) { x.beginPath(); x.moveTo(v * s, 0); x.lineTo(v * s, st.base.height); x.stroke(); });
+            st.lineGrid.ys.forEach(function (v) { x.beginPath(); x.moveTo(0, v * s); x.lineTo(st.base.width, v * s); x.stroke(); });
+            x.restore();
+        }
+        if (readMode() === 'ai' && st.linePts && st.linePts.length) {
+            // 「① 기둥 줄 찍기」로 누른 점
+            x.strokeStyle = '#db2777'; x.lineWidth = 2.5 * px1;
+            st.linePts.forEach(function (p) {
+                var r0 = 9 * px1;
+                x.beginPath(); x.arc(p.x * s, p.y * s, r0, 0, Math.PI * 2); x.stroke();
+                x.beginPath(); x.moveTo(p.x * s - r0 * 1.5, p.y * s); x.lineTo(p.x * s + r0 * 1.5, p.y * s);
+                x.moveTo(p.x * s, p.y * s - r0 * 1.5); x.lineTo(p.x * s, p.y * s + r0 * 1.5); x.stroke();
+            });
         }
         // 앱으로 보낼 때 쓰는 기준점 2개
         st.refs.forEach(function (p, i) {
@@ -840,8 +861,9 @@
             } else if ((e.key === 'Delete' || e.key === 'Backspace') && selected()) {
                 e.preventDefault();
                 deleteSelected();
-            } else if (e.key === 'Escape' && (st.pend || st.selId)) {
+            } else if (e.key === 'Escape' && (st.pend || st.selId || st.linePicking)) {
                 st.pend = null; st.selId = '';
+                if (st.linePicking) { st.linePicking = false; $('view').style.cursor = ''; syncAiButtons(); }
                 redraw(); renderSide();
                 setStatus('취소했습니다.');
             }
@@ -881,6 +903,7 @@
         cv.addEventListener('click', function (ev) {
             if (st._justDragged) { st._justDragged = false; return; }
             if (!st.base || st.picking || st.samplePicking) return;
+            if (st.linePicking) { toggleLinePoint(pagePoint(ev)); return; }
             if (st.refPicking) {
                 st.refs.push(pagePoint(ev));
                 if (st.refs.length >= 2) {
@@ -1017,8 +1040,19 @@
             if (b) b.addEventListener('click', function () { runAiStep(t); });
         });
         // ① 예시로 기둥 찾기: 누르고 → 기둥 하나를 끌어서 감싸기. 닮은 정도를 바꾸면 같은 예시로 다시 찾는다
-        var gridBtn = $('btnColGrid');
-        if (gridBtn) gridBtn.addEventListener('click', runGridColumns);
+        // ① 기둥 줄 찍기: 켜고 맨 윗줄·왼쪽 줄 기둥을 누른다(누를 때마다 다시 찾음). 다시 누르면 끝
+        var linesBtn = $('btnColLines');
+        if (linesBtn) linesBtn.addEventListener('click', function () {
+            if (!st.base || !st.colSample) return;
+            st.linePicking = !st.linePicking;
+            st.refPicking = false;
+            var rb = $('btnRefs');
+            if (rb) rb.classList.remove('on');
+            cv.style.cursor = st.linePicking ? 'crosshair' : '';
+            syncAiButtons();
+            if (st.linePicking) setStatus('맨 윗줄 기둥을 왼쪽부터 끝까지, 왼쪽 줄 기둥을 위부터 끝까지 누르세요(대충 눌러도 기둥에 붙음). 다른 동에 줄이 따로 있으면 그 줄 기둥도 하나씩. 누를 때마다 다시 찾습니다.');
+            else { redraw(); setStatus('기둥 줄 찍기를 끝냈습니다(누른 점 ' + (st.linePts || []).length + '개). 틀린 것은 눌러서 빼고, 다 확인했으면 「AI ② 거더」를 누르세요.', 'ok'); }
+        });
         var smpBtn = $('btnColSample');
         if (smpBtn) smpBtn.addEventListener('click', function () {
             if (!st.base) return;
@@ -1033,6 +1067,7 @@
             if (!file) return;
             st.fileName = file.name;
             st.aiMembers = null;
+            st.colSample = null; st.linePts = []; st.lineGrid = null; st.linePicking = false;
             if (modeSel && modeSel.value === 'ai') modeSel.value = (SS ? 'shapes' : 'marks');
             if (/^image\//.test(file.type || '') || /\.(jpe?g|png|webp|bmp|gif)$/i.test(file.name || '')) { openImage(file); return; }
             setStatus('파일을 여는 중…');

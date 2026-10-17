@@ -67,37 +67,43 @@ const near = (list, x, y, tol = 3) => list.some((m) => Math.abs(m.x - x) <= tol 
     assert.strictEqual(got.length, 2, JSON.stringify(got));
 }
 
-// ---- 통심선 교차점에서 기둥 찾기: 교차점의 네모·동그라미만, 옆 이름표 네모는 안 봄 ----
+// ---- 기둥 줄 찍기(2026-10-17): 예시 + 맨 윗줄·왼쪽 줄 기둥을 누르면 그 X·Y 교차점마다 덜 닮아도 기둥으로 ----
 {
-    const img = paper(520, 420);
-    const XS = [80, 220, 360, 480], YS = [70, 200, 330];
-    // 통심선(일점쇄선, 연한 회색): 긴 선 12 + 틈 3 + 점 1 + 틈 3
-    const dashDot = (fn, len) => { for (let k = 0; k < len; k++) { const m = k % 19; if (m < 12 || m === 15) fn(k); } };
-    XS.forEach((x) => dashDot((k) => img.dot(x, k + 10, 175), 400));
-    YS.forEach((y) => dashDot((k) => img.dot(k + 10, y, 175), 500));
-    // 거더(점선 두 줄) — 교차점을 지나간다
-    YS.forEach((y) => { for (let x = 20; x < 500; x += 4) { img.fill(x, y - 3, x + 1, y - 3, 90); img.fill(x, y + 3, x + 1, y + 3, 90); } });
-    // 기둥: 칠한 네모 / 빈 네모 / 동그라미, 교차점 하나(480,330)는 비움
-    const cols = [];
-    XS.forEach((x, i) => YS.forEach((y, j) => {
-        if (x === 480 && y === 330) return;
-        const kind = (i + j) % 3;
-        if (kind === 0) img.fill(x - 6, y - 6, x + 6, y + 6, 40);
-        else if (kind === 1) img.box(x - 6, y - 6, x + 6, y + 6, 40, 2);
-        else { img.ring(x, y, 6, 40); img.ring(x, y, 5, 40); }
-        cols.push([x, y]);
+    const img = paper(560, 420);
+    const XS = [80, 200, 330, 470], YS = [70, 190, 320];
+    // 보 선(점선 두 줄)이 교차점을 지나간다
+    YS.forEach((y) => { for (let x = 20; x < 540; x += 4) { img.fill(x, y - 4, x + 1, y - 4, 90); img.fill(x, y + 4, x + 1, y + 4, 90); } });
+    const weak = [[200, 190], [470, 320]], empty = [330, 190];
+    XS.forEach((x) => YS.forEach((y) => {
+        if (x === empty[0] && y === empty[1]) return;                         // 기둥 없는 교차점
+        if (weak.some(([a, b]) => a === x && b === y)) {
+            // 스캔으로 뭉개져 작아진 기둥 + 바로 옆 얼룩 선(예시와 닮은 정도 0.5 남짓)
+            img.fill(x - 4, y - 4, x + 4, y + 4, 40);
+            img.fill(x - 14, y - 9, x - 10, y + 9, 80);
+        } else img.fill(x - 6, y - 6, x + 6, y + 6, 40);
     }));
-    // 이름표 네모(C1 흉내)는 교차점 옆에
-    XS.forEach((x) => YS.forEach((y) => { img.box(x + 14, y - 22, x + 28, y - 9, 40, 1); img.fill(x + 18, y - 19, x + 19, y - 12, 40); }));
-    // 길게 그은 치수선 하나(통심선 아님, 기둥 없음)
-    for (let x = 30; x < 500; x++) img.dot(x, 395, 120);
-    const r = R.gridColumns(img);
-    assert.ok(XS.every((x) => r.xs.some((v) => Math.abs(v - x) <= 1)), '세로 통심선: ' + r.xs);
-    assert.ok(YS.every((y) => r.ys.some((v) => Math.abs(v - y) <= 4)), '가로 통심선: ' + r.ys);
-    assert.strictEqual(r.columns.length, cols.length, '교차점 기둥 ' + cols.length + '개(빈 교차점·이름표·치수선 제외): ' + JSON.stringify(r.columns));
-    cols.forEach(([x, y]) => assert.ok(near(r.columns, x, y, 3), '기둥 ' + x + ',' + y));
-    assert.ok(!near(r.columns, 480, 330, 8), '기둥 없는 교차점은 빈 채로');
-    assert.ok(r.columns.every((c) => c.w === r.columns[0].w && c.w >= 11 && c.w <= 15), '모두 같은 크기: ' + r.columns.map((c) => c.w));
+    // 이름표 네모(C1 흉내)는 교차점 옆
+    XS.forEach((x) => YS.forEach((y) => { img.box(x + 14, y - 24, x + 27, y - 11, 40, 1); img.fill(x + 18, y - 21, x + 19, y - 14, 40); }));
+    const sample = { x: 72, y: 62, w: 17, h: 17 };
+    const plain = R.matchColumns(img, sample, { threshold: 0.6 });
+    weak.forEach(([x, y]) => assert.ok(!near(plain, x, y, 4), '통째 찾기는 바랜 기둥을 놓친다(시험 그림 확인) ' + x + ',' + y));
+
+    // 맨 윗줄을 왼쪽부터, 왼쪽 줄을 위부터(조금씩 빗나가게) 누름
+    const clicks = XS.map((x, i) => ({ x: x + (i % 2 ? 4 : -3), y: 70 + 3 })).concat(YS.slice(1).map((y) => ({ x: 80 - 4, y: y + 3 })));
+    const r = R.matchOnLines(img, sample, clicks, { threshold: 0.4 });
+    assert.strictEqual(r.xs.length, 4, '세로 줄 4: ' + r.xs);
+    assert.strictEqual(r.ys.length, 3, '가로 줄 3: ' + r.ys);
+    XS.forEach((x) => assert.ok(r.xs.some((v) => Math.abs(v - x) <= 2), '세로 줄 ' + x + ': ' + r.xs));
+    YS.forEach((y) => assert.ok(r.ys.some((v) => Math.abs(v - y) <= 2), '가로 줄 ' + y + ': ' + r.ys));
+    assert.strictEqual(r.columns.length, XS.length * YS.length - 1, '기둥 ' + (XS.length * YS.length - 1) + '개(빈 교차점 빼고): ' + JSON.stringify(r.columns));
+    XS.forEach((x) => YS.forEach((y) => {
+        if (x === empty[0] && y === empty[1]) return;
+        assert.ok(near(r.columns, x, y, 3), '기둥 ' + x + ',' + y);
+    }));
+    assert.ok(!near(r.columns, empty[0], empty[1], 8), '기둥 없는 교차점(보 선만)은 빈 채로');
+    assert.ok(r.columns.filter((c) => c.picked).length === clicks.length, '누른 기둥은 늘 기둥');
+    assert.ok(near(r.columns.filter((c) => c.picked), 80, 70, 2), '대충 누른 점은 기둥 가운데로 붙음');
+    assert.deepStrictEqual(R.matchOnLines(img, sample, [], {}), { columns: [], xs: [], ys: [] }, '누른 점 없으면 빈 결과');
 }
 
 // ---- 페이지 연결 ----
@@ -107,6 +113,9 @@ const near = (list, x, y, tol = 3) => list.some((m) => Math.abs(m.x - x) <= tol 
     assert.ok(/<script src="js\/core\/struct-raster\.js\?v=[^"]+"><\/script>/.test(html));
     assert.ok(html.includes('id="btnColSample"') && html.includes('id="colStrict"'));
     assert.ok(page.includes('RS.matchColumns('), '예시 기둥으로 찾기');
+    assert.ok(html.includes('id="btnColLines"') && page.includes('RS.matchOnLines(st.baseImg.img, rect,'), '기둥 줄 찍기');
+    assert.ok(page.includes('if (st.linePicking) { toggleLinePoint(pagePoint(ev)); return; }'), '줄 찍기 중 누르면 점 보태기·빼기');
+    assert.ok(!html.includes('btnColGrid') && !page.includes('gridColumns') && !R.gridColumns, '통심선 교차점 기능은 없앰(2026-10-17)');
 }
 
 console.log('test-struct-raster: ok');
