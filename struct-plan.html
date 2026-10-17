@@ -97,13 +97,18 @@
                 <button type="button" class="btn" id="btnAiCol" disabled title="① 기둥을 AI에 묻습니다(예시로 찾기가 안 될 때)">AI ① 기둥</button>
                 <button type="button" class="btn" id="btnAiGir" disabled title="② 확인한 기둥을 알려 주고 거더만 찾습니다(끝은 기둥 면에, 사이 기둥에서 끊음)">AI ② 거더</button>
                 <button type="button" class="btn" id="btnAiBeam" disabled title="③ 확인한 기둥·거더를 알려 주고 빔만 찾습니다(끝은 거더 면에, 사이 거더에서 끊음)">AI ③ 빔</button>
-                <label class="muted" for="clickAction">기호를 누르면</label>
-                <select id="clickAction">
+                <label class="muted" for="clickAction">누르면</label>
+                <select id="clickAction" title="도면을 눌렀을 때 할 일 — 편집: 부재를 눌러 고르고 끌어 옮기기, 고른 거더·빔은 끝 네모를 끌어 늘이기">
                     <option value="toggle">빼기 / 되살리기</option>
-                    <option value="기둥">기둥으로</option>
+                    <option value="edit">편집: 고르기·옮기기·늘이기</option>
+                    <option value="기둥">기둥으로 (빈 곳은 기둥 추가)</option>
                     <option value="거더">거더로</option>
                     <option value="빔">빔으로</option>
+                    <option value="draw:거더">거더 그리기 (시작→끝 두 번)</option>
+                    <option value="draw:빔">빔 그리기 (시작→끝 두 번)</option>
                 </select>
+                <button type="button" class="btn" id="btnUndo" disabled title="방금 고친 것 되돌리기 (Ctrl+Z, 다시 하기 Ctrl+Y)">되돌리기</button>
+                <button type="button" class="btn" id="btnDel" disabled title="고른 부재 지우기 (Delete)">지우기</button>
             </div>
             <div class="status" id="status">구조도 PDF를 열거나 아래 칸에 끌어다 놓으세요.</div>
             <div id="stage"><canvas id="view" width="0" height="0"></canvas></div>
@@ -141,6 +146,7 @@
                 <li>일람표·범례에도 기호가 있으면 「범위 지정」으로 평면만 끌어 잡습니다.</li>
                 <li>색 테두리가 찾은 기호입니다. 틀린 것은 눌러서 빼거나 종류를 바꿉니다.</li>
                 <li>회색 점선은 못 읽은 기호입니다. 종류를 고른 뒤 누르면 들어갑니다.</li>
+                <li>「누르면: 편집」이면 부재를 눌러 고르고 끌어서 옮깁니다. 고른 거더·빔은 양 끝 네모를 끌어 늘이고 줄입니다(기둥 면에 붙음). 빠진 기둥은 「기둥으로」로 빈 곳을 누르고, 거더·빔은 「그리기」로 시작·끝 두 곳을 누릅니다(사이 기둥·거더에서 칸마다 끊음). Delete 지우기, Ctrl+Z 되돌리기, Esc 취소.</li>
                 <li>앱 도면에 겹쳐 보려면 「기준점 지정」으로 두 곳(예: 서로 먼 두 기둥 중심)을 찍고 「앱으로 보내기」. 구조도 그림이 고른 선 색으로 반투명하게 겹칩니다(범위를 정했으면 그 부분만). 앱의 그 층에서 「구조 부재」 → 「가져오기」 후 같은 두 곳을 누릅니다.</li>
             </ol>
             <div class="muted" style="margin-top:0.5rem;">번호 바로 앞 글자로 종류를 정합니다: C 기둥 · G 거더 · B 빔 (벽·슬래브는 지금은 세지 않습니다).</div>

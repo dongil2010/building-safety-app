@@ -15,7 +15,8 @@
     var $ = function (id) { return document.getElementById(id); };
     var ZOOM_MAX = 8;
 
-    var st = { doc: null, pageNo: 1, base: null, scale: 1, members: [], unread: [], region: null, zoom: 1, picking: false, drag: null, fileName: '', refs: [], refPicking: false };
+    var st = { doc: null, pageNo: 1, base: null, scale: 1, members: [], unread: [], region: null, zoom: 1, picking: false, drag: null, fileName: '', refs: [], refPicking: false,
+        selId: '', pend: null, mdrag: null, hist: [], redo: [] };   // 편집(2026-10-17): 고른 부재·그리기 시작 점·끌기·되돌리기
 
     /** 배율 표시. 배포 직후 브라우저에 남은 옛 HTML에는 이 칸이 없을 수 있다 — 없으면 건너뛴다(2026-10-14 PDF 열기 실패). */
     function showZoom() {
@@ -119,6 +120,7 @@
 
         if (ex.paths.length < 200) {
             st.members = []; st.unread = []; st.marks = null; st.shapes = null;
+            resetEdit();
             redraw(); renderSide();
             setStatus(ex.images > 0
                 ? '이 PDF는 스캔한 그림이라 선 데이터가 없습니다. 「AI ① 기둥」부터 누르면 AI가 기둥 → 거더 → 빔 순서로 찾습니다(평면만 「범위 지정」하면 더 정확).'
@@ -174,6 +176,11 @@
     }
     /** 읽어 둔 결과에서 화면 목록을 다시 만든다(바꾼 종류·뺀 것은 처음으로 돌아간다) */
     function applyMode() {
+        resetEdit();
+        applyModeInner();
+        st.members.forEach(function (m, i) { if (!m.id) m.id = 'sm_k' + Date.now() + '_' + i; });   // 편집은 id로 고른다
+    }
+    function applyModeInner() {
         if (readMode() === 'ai') {
             // AI로 읽은 결과(스캔본) — 바꾼 종류·뺀 것은 처음으로 돌아간다
             // AI 결과는 단계마다 고친 것을 이어 쓴다(st.members와 같은 목록)
@@ -326,7 +333,7 @@
                 syncAiButtons();
                 setStatus('통심선 가로 ' + res.ys.length + '줄 · 세로 ' + res.xs.length + '줄, 교차점 기둥 ' + found.length + '개를 찾았습니다('
                     + Math.round(performance.now() - t0) + 'ms, 모두 같은 크기). 도면 밖 제목칸·치수선까지 잡히면 「범위 지정」으로 평면만 감싼 뒤 다시 누르세요. '
-                    + '틀린 것은 눌러서 빼고, 빠진 기둥은 「기호를 누르면: 기둥으로」로 그 자리를 누르면 추가. 다 확인했으면 「AI ② 거더」.', found.length ? 'ok' : 'warn');
+                    + '틀린 것은 눌러서 빼고, 빠진 기둥은 「누르면: 기둥으로」로 그 자리를 누르면 추가. 다 확인했으면 「AI ② 거더」.', found.length ? 'ok' : 'warn');
             } catch (err) {
                 console.error(err);
                 setStatus('기둥을 찾지 못했습니다: ' + (err && err.message ? err.message : err), 'warn');
@@ -356,7 +363,7 @@
             applyMode();
             var next = AI_NEXT[step];
             setStatus(step + ' ' + got.length + '개를 찾았습니다. 틀린 것은 눌러서 빼거나 종류를 바꾸고'
-                + (step === '기둥' ? '(빠진 기둥은 「기호를 누르면: 기둥으로」로 고른 뒤 그 자리를 누르면 추가)' : '')
+                + (step === '기둥' ? '(빠진 기둥은 「누르면: 기둥으로」로 고른 뒤 그 자리를 누르면 추가)' : '')
                 + (next ? ', 다 확인했으면 「AI ' + (AI_STEPS.indexOf(next) + 1) + ' ' + next + '」를 누르세요.' : ', 다 됐으면 기준점을 찍고 「앱으로 보내기」를 누르세요.')
                 + ' (AI 초안이라 빠지거나 틀린 것이 있습니다)', got.length ? 'ok' : 'warn');
         } catch (err) {
@@ -428,6 +435,30 @@
             x.setLineDash([]);
         });
         x.globalAlpha = 1;
+        // 편집: 고른 부재(검은 점선) · 거더·빔은 양 끝 손잡이 · 그리기 시작 점
+        var px1 = screenPad(1) * s;   // 화면 1픽셀 = 캔버스 몇 픽셀
+        var sm = selected();
+        if (sm) {
+            var g = 3 * px1;
+            x.lineWidth = 2 * px1; x.setLineDash([6 * px1, 4 * px1]); x.strokeStyle = '#0f172a';
+            x.strokeRect((sm.x - sm.w / 2) * s - g, (sm.y - sm.h / 2) * s - g, sm.w * s + g * 2, sm.h * s + g * 2);
+            x.setLineDash([]);
+            if (isLine(sm.type)) {
+                var hz = sm.w >= sm.h, hs = 5 * px1;
+                [[-1], [1]].forEach(function (k) {
+                    var ex = hz ? sm.x + k[0] * sm.w / 2 : sm.x, ey = hz ? sm.y : sm.y + k[0] * sm.h / 2;
+                    x.fillStyle = '#ffffff'; x.fillRect(ex * s - hs, ey * s - hs, hs * 2, hs * 2);
+                    x.lineWidth = 2 * px1; x.strokeStyle = '#0f172a'; x.strokeRect(ex * s - hs, ey * s - hs, hs * 2, hs * 2);
+                });
+            }
+        }
+        if (st.pend) {
+            var pp = st.pend, pr = 7 * px1;
+            x.strokeStyle = COLORS[pp.type] || '#111'; x.lineWidth = 2.5 * px1;
+            x.beginPath(); x.arc(pp.x * s, pp.y * s, pr, 0, Math.PI * 2); x.stroke();
+            x.beginPath(); x.moveTo(pp.x * s - pr * 1.6, pp.y * s); x.lineTo(pp.x * s + pr * 1.6, pp.y * s);
+            x.moveTo(pp.x * s, pp.y * s - pr * 1.6); x.lineTo(pp.x * s, pp.y * s + pr * 1.6); x.stroke();
+        }
         var r = st.drag || st.region;
         if (r) {
             x.lineWidth = 3; x.setLineDash([12, 8]); x.strokeStyle = '#0f172a';
@@ -459,18 +490,30 @@
         }).join('') + '<div class="count total"><span></span><span>합계</span><b>' + list.length + '</b></div>';
         var out = st.members.length - list.length;
         $('countNote').textContent = (out ? '뺀 기호 ' + out + '개 · ' : '') + (st.unread.length ? '못 읽은 기호 ' + st.unread.length + '개(회색 점선)' : '');
-        var groups = SM.labelGroups(list);
+        // 이름 없는 것((직접)·AI·빈 이름)은 종류마다 따로 한 줄 — 한데 묶으면 거더까지 기둥으로 바뀐다(2026-10-17)
+        var groups = [];
+        SM.labelGroups(list.filter(function (m) { return !unnamed(m.label); })).forEach(function (g) { groups.push(g); });
+        USE_TYPES.forEach(function (t) {
+            var byLabel = {};
+            list.forEach(function (m) { if (unnamed(m.label) && m.type === t) byLabel[m.label || ''] = (byLabel[m.label || ''] || 0) + 1; });
+            Object.keys(byLabel).forEach(function (l) { groups.push({ label: l, type: t, count: byLabel[l], byType: true }); });
+        });
         $('groups').innerHTML = groups.length ? groups.map(function (g) {
-            return '<tr><td><b>' + (g.label ? esc(g.label) : '<span class="muted">(이름 없음)</span>') + '</b></td><td class="num">' + g.count + '</td><td><select data-label="' + esc(g.label) + '">'
+            var name = g.label && !g.byType ? esc(g.label) : '<span class="muted">' + (g.label ? esc(g.label) + ' ' : '(이름 없음) ') + g.type + '</span>';
+            return '<tr><td><b>' + name + '</b></td><td class="num">' + g.count + '</td><td><select data-label="' + esc(g.label) + '"' + (g.byType ? ' data-type="' + g.type + '"' : '') + '>'
                 + USE_TYPES.map(function (t) { return '<option' + (t === g.type ? ' selected' : '') + '>' + t + '</option>'; }).join('')
                 + '<option value="">빼기</option></select></td></tr>';
         }).join('') : '<tr><td colspan="3" class="muted">아직 찾은 기호가 없습니다.</td></tr>';
         $('btnCopy').disabled = !list.length;
+        var bu = $('btnUndo'), bd = $('btnDel');
+        if (bu) bu.disabled = !st.hist.length;
+        if (bd) bd.disabled = !selected();
         $('btnSend').disabled = !(st.base && st.refs.length === 2);
         syncAiButtons();
         $('sendNote').textContent = st.refs.length === 2 ? '기준점 2개 정함' : '기준점 ' + st.refs.length + '/2 — 「기준점 지정」으로 두 곳을 찍으세요';
     }
 
+    function unnamed(label) { return !label || label === '(직접)'; }
     function esc(s) { return String(s).replace(/[&<>"]/g, function (ch) { return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[ch]; }); }
 
     // ---------- 조작 ----------
@@ -490,31 +533,173 @@
         return best;
     }
 
+    // ---------- 편집(2026-10-17): 앱 「구조 부재」 레이어(js/tabs/struct-layer.js)와 같은 손놀림 ----------
+    // 고르기·끌어 옮기기, 고른 거더·빔 끝 늘이기, 기둥 추가(한 번)·거더·빔 그리기(두 번), 지우기, 되돌리기
+    var MS = window.BSA.structMembers || null;
+    function clickAction() { var el = $('clickAction'); return el ? el.value : 'toggle'; }
+    function isLine(t) { return t === '거더' || t === '빔'; }
+    function med(a) { a = a.slice().sort(function (x, y) { return x - y; }); return a.length ? a[Math.floor(a.length / 2)] : 0; }
+    function live() { return st.members.filter(function (m) { return !m.excluded && useType(m); }); }
+    function selected() { return st.selId ? st.members.find(function (m) { return m.id === st.selId; }) || null : null; }
+    function newId(tag) { return 'sm_e' + tag + Date.now() + '_' + Math.floor(Math.random() * 1e6); }
+    /** 화면 n픽셀 = 쪽 좌표 얼마(누르는 여유·손잡이 크기) */
+    function screenPad(n) {
+        var cv = $('view'), r = cv.getBoundingClientRect();
+        return n * cv.width / (r.width || cv.width || 1) / (st.scale || 1);
+    }
+    function hitAt(list, p) { return MS && MS.hitTest ? MS.hitTest(list, p.x, p.y, screenPad(6)) : hit(list, p); }
+    function resetEdit() { st.selId = ''; st.pend = null; st.mdrag = null; st.hist = []; st.redo = []; }
+    function snapshot() { return { members: st.members.map(function (m) { return Object.assign({}, m); }), unread: st.unread.slice() }; }
+    /** 고치기 직전 모습을 되돌리기 목록에 */
+    function remember(before) { st.hist.push(before); if (st.hist.length > 60) st.hist.shift(); st.redo = []; }
+    function changed() {
+        if (readMode() === 'ai') st.aiMembers = st.members;
+        if (st.selId && !selected()) st.selId = '';
+        redraw(); renderSide();
+    }
+    function stepHist(back) {
+        var from = back ? st.hist : st.redo, to = back ? st.redo : st.hist;
+        var s = from.pop();
+        if (!s) { setStatus(back ? '되돌릴 것이 없습니다.' : '다시 할 것이 없습니다.'); return; }
+        to.push(snapshot());
+        st.members = s.members; st.unread = s.unread; st.pend = null;
+        changed();
+        setStatus(back ? '되돌렸습니다.' : '다시 했습니다.');
+    }
+    function deleteSelected() {
+        var m = selected();
+        if (!m) return;
+        remember(snapshot());
+        st.members = st.members.filter(function (q) { return q !== m; });
+        st.selId = '';
+        changed();
+        setStatus(m.type + ' 하나를 지웠습니다(Ctrl+Z 되돌리기).', 'ok');
+    }
+    /** 기둥 크기 = 다른 기둥 중간값(없으면 화면 약 20px) */
+    function columnBox() {
+        var cs = live().filter(function (q) { return q.type === '기둥'; });
+        var d = screenPad(20);
+        return { w: cs.length ? med(cs.map(function (q) { return q.w; })) : d, h: cs.length ? med(cs.map(function (q) { return q.h; })) : d };
+    }
+    /** 그 종류 통일 두께. 없으면 다른 보 종류, 그것도 없으면 기둥의 절반쯤 */
+    function lineThickness(type) {
+        var th = MS && MS.beamThickness ? MS.beamThickness(live()) : {};
+        if (th[type] || th[type === '거더' ? '빔' : '거더']) return th[type] || th[type === '거더' ? '빔' : '거더'];
+        var c = columnBox();
+        return Math.max(screenPad(4), Math.min(c.w, c.h) * 0.5);
+    }
+    /** 누른 점을 기둥 중심(빔이면 거더·빔 중심선도)에 붙인다 → { x, y, hx, hy, on } */
+    function snapPoint(p, pad, type, exclude) {
+        var targets = live().filter(function (d) { return d !== exclude && (d.type === '기둥' || (type === '빔' && isLine(d.type))); });
+        var h = MS && MS.hitTest ? MS.hitTest(targets, p.x, p.y, pad) : null;
+        if (!h) return { x: p.x, y: p.y, hx: 0, hy: 0, on: null };
+        if (h.type === '기둥') return { x: h.x, y: h.y, hx: h.w / 2, hy: h.h / 2, on: h };
+        return h.w >= h.h ? { x: p.x, y: h.y, hx: 0, hy: h.h / 2, on: h } : { x: h.x, y: p.y, hx: h.w / 2, hy: 0, on: h };
+    }
+    /** 같은 종류·같은 방향 보의 중심선이 가까우면 그 줄에 맞춘다 */
+    function alignPerp(type, horiz, perp, th, pad) {
+        var reach = Math.max(pad * 2, th * 2), best = perp, bd = reach;
+        live().forEach(function (d) {
+            if (d.type !== type || (d.w >= d.h) !== horiz) return;
+            var dist = Math.abs((horiz ? d.y : d.x) - perp);
+            if (dist < bd) { bd = dist; best = horiz ? d.y : d.x; }
+        });
+        return best;
+    }
+    /** 기둥은 다른 기둥의 세로줄·가로줄이 가까우면 따로따로 그 줄에 맞춘다 */
+    function alignColumn(x, y, size, pad, exclude) {
+        var reach = Math.max(pad * 2, size * 0.75), bx = x, by = y, dx = reach, dy = reach;
+        live().forEach(function (d) {
+            if (d.type !== '기둥' || d === exclude) return;
+            if (Math.abs(d.x - x) < dx) { dx = Math.abs(d.x - x); bx = d.x; }
+            if (Math.abs(d.y - y) < dy) { dy = Math.abs(d.y - y); by = d.y; }
+        });
+        return { x: bx, y: by };
+    }
+    /** 거더·빔 그리기: 첫 번째 누름 = 시작, 두 번째 = 끝. 가로·세로 중 가까운 쪽으로 곧게, 기둥 면에서 면까지, 사이 기둥(빔은 거더도)에서 끊음 */
+    function addLinePoint(p, type) {
+        var pad = screenPad(6);
+        var a = snapPoint(p, pad, type);
+        if (!st.pend || st.pend.type !== type) {
+            st.pend = Object.assign({ type: type }, a);
+            redraw();
+            setStatus(type + ' 시작 점을 찍었습니다' + (a.on ? '(' + a.on.type + '에 붙음)' : '') + '. 끝 점을 누르세요(Esc 취소).');
+            return;
+        }
+        var s = st.pend;
+        st.pend = null;
+        var dx = a.x - s.x, dy = a.y - s.y, th = lineThickness(type);
+        var horiz = Math.abs(dx) >= Math.abs(dy);
+        var lo = horiz ? (s.x <= a.x ? s : a) : (s.y <= a.y ? s : a), hi = lo === s ? a : s;
+        var from = horiz ? lo.x + lo.hx : lo.y + lo.hy, to = horiz ? hi.x - hi.hx : hi.y - hi.hy;
+        if (!(to - from > th)) { redraw(); setStatus('두 점이 너무 가깝습니다. 시작 점부터 다시 눌러 주세요.', 'warn'); return; }
+        var perp = alignPerp(type, horiz, horiz ? (s.y + a.y) / 2 : (s.x + a.x) / 2, th, pad);
+        var cutters = live().filter(function (d) { return d.type === '기둥' || (type === '빔' && isLine(d.type) && (d.w >= d.h) !== horiz); });
+        var segs = MS && MS.splitRun ? MS.splitRun({ horiz: horiz, from: from, to: to, perp: perp, minLen: th * 0.5 }, cutters) : [{ from: from, to: to }];
+        if (!segs.length) { redraw(); setStatus('그릴 칸이 없습니다(기둥 사이가 너무 좁음).', 'warn'); return; }
+        remember(snapshot());
+        segs.forEach(function (sg, i) {
+            var r = horiz ? { x: (sg.from + sg.to) / 2, y: perp, w: sg.to - sg.from, h: th } : { x: perp, y: (sg.from + sg.to) / 2, w: th, h: sg.to - sg.from };
+            st.members.push({ id: newId('l' + i), shape: 'beam', type: type, label: '(직접)', x: r.x, y: r.y, w: r.w, h: r.h });
+        });
+        st.members = unifyBeams(st.members);
+        changed();
+        setStatus(type + ' ' + segs.length + '칸을 그렸습니다' + (segs.length > 1 ? '(사이 ' + (type === '빔' ? '거더·기둥' : '기둥') + '에서 끊음)' : '') + '. 이어서 다음 시작 점을 누르세요.', 'ok');
+    }
+    /** 고른 거더·빔의 끝 근처를 눌렀으면 → 끝 잡기 정보 */
+    function grabEnd(p, pad) {
+        var d = selected();
+        if (!d || !isLine(d.type)) return null;
+        var horiz = d.w >= d.h;
+        var along = horiz ? p.x : p.y, perp = horiz ? p.y : p.x;
+        var c = horiz ? d.y : d.x, half = (horiz ? d.h : d.w) / 2;
+        var s = horiz ? d.x - d.w / 2 : d.y - d.h / 2, e = horiz ? d.x + d.w / 2 : d.y + d.h / 2;
+        var reach = Math.max(pad * 1.5, half * 1.5);
+        if (Math.abs(perp - c) > half + reach) return null;
+        var which = Math.abs(along - e) <= reach ? 'e' : (Math.abs(along - s) <= reach ? 's' : '');
+        if (!which) return null;
+        return { mode: 'end', which: which, horiz: horiz, fixed: which === 'e' ? s : e, minLen: half * 2 };
+    }
+    /** 끝을 at으로 옮긴 모습(반대 끝·두께·중심선은 그대로, 뒤집히지 않게) */
+    function stretchTo(dr, at) {
+        var lo = dr.which === 'e' ? dr.fixed : Math.min(at, dr.fixed - dr.minLen);
+        var hi = dr.which === 'e' ? Math.max(at, dr.fixed + dr.minLen) : dr.fixed;
+        return dr.horiz ? { x: (lo + hi) / 2, y: dr.orig.y, w: hi - lo, h: dr.orig.h } : { x: dr.orig.x, y: (lo + hi) / 2, w: dr.orig.w, h: hi - lo };
+    }
+
     function onClickMark(p) {
-        var action = $('clickAction').value;
-        var m = hit(st.members, p);
+        var action = clickAction();
+        if (action === 'edit') {
+            var g = hitAt(st.members, p);
+            st.selId = g ? g.id : '';
+            redraw(); renderSide();
+            if (g) setStatus(g.type + (g.label && g.label !== '(직접)' ? ' ' + g.label : '') + ' 고름 — 끌어서 옮기기' + (isLine(g.type) ? ', 끝 네모를 끌어 늘이기' : '') + ', Delete 지우기.');
+            return;
+        }
+        if (action.indexOf('draw:') === 0) { addLinePoint(p, action.slice(5)); return; }
+        var before = snapshot();
+        var m = hitAt(st.members, p);
         if (m) {
             if (action === 'toggle') m.excluded = !m.excluded;
             else { m.type = action; m.excluded = false; }
         } else {
             var u = hit(st.unread, p);
-            if (!u && action === '기둥' && readMode() === 'ai') {
-                // AI가 빠뜨린 기둥: 누른 자리에 다른 기둥 크기(중간값)로 넣는다
-                var cs = st.members.filter(function (q) { return q.type === '기둥'; });
-                var mid = function (a) { a = a.slice().sort(function (x, y) { return x - y; }); return a[Math.floor(a.length / 2)]; };
-                var cw = cs.length ? mid(cs.map(function (q) { return q.w; })) : 10, ch = cs.length ? mid(cs.map(function (q) { return q.h; })) : 10;
-                st.members.push({ id: 'sm_ai_u' + Date.now(), shape: 'column', type: '기둥', label: '(직접)', x: p.x, y: p.y, w: cw, h: ch, ai: true });
-                st.aiMembers = st.members;
-                redraw(); renderSide();
+            if (!u && action === '기둥') {
+                // 빠진 기둥: 누른 자리(다른 기둥 줄에 맞춤)에 다른 기둥 크기(중간값)로 넣는다
+                var b = columnBox();
+                var at = alignColumn(p.x, p.y, Math.max(b.w, b.h), screenPad(6));
+                st.members.push({ id: newId('c'), shape: 'column', type: '기둥', label: '(직접)', x: at.x, y: at.y, w: b.w, h: b.h, ai: readMode() === 'ai' });
+                remember(before);
+                changed();
                 return;
             }
             if (!u || action === 'toggle') return;
             st.unread = st.unread.filter(function (q) { return q !== u; });
-            st.members.push({ id: 'sm_u' + Date.now(), shape: u.shape, x: u.x, y: u.y, w: u.w, h: u.h, type: action, label: '(직접)', letter: '', score: 0 });
+            st.members.push({ id: newId('u'), shape: u.shape, x: u.x, y: u.y, w: u.w, h: u.h, type: action, label: '(직접)', letter: '', score: 0 });
         }
+        remember(before);
         st.members = unifyBeams(st.members);   // 종류가 바뀌었으면 그 종류 두께로
-        if (readMode() === 'ai') st.aiMembers = st.members;
-        redraw(); renderSide();
+        changed();
     }
 
     function bind() {
@@ -524,6 +709,79 @@
             var p = pagePoint(ev);
             st.drag = { x0: p.x, y0: p.y, x1: p.x, y1: p.y };
             ev.preventDefault();
+        });
+        // 편집: 부재를 잡으면 옮기고, 고른 거더·빔의 끝 네모를 잡으면 늘인다. 빈 곳을 잡으면 아래 「끌어서 이동」으로 넘어간다
+        cv.addEventListener('mousedown', function (ev) {
+            if (!st.base || st.picking || st.samplePicking || st.refPicking || ev.button !== 0 || clickAction() !== 'edit') return;
+            var p = pagePoint(ev), pad = screenPad(6);
+            var g = grabEnd(p, pad);
+            var m = g ? selected() : hitAt(st.members, p);
+            if (!m) return;
+            st.selId = m.id;
+            st.mdrag = Object.assign(g || { mode: 'move' }, { m: m, start: p, cx: ev.clientX, cy: ev.clientY,
+                orig: { x: m.x, y: m.y, w: m.w, h: m.h }, before: snapshot(), moved: false });
+            ev.preventDefault();
+            redraw(); renderSide();
+        });
+        window.addEventListener('mousemove', function (ev) {
+            var dr = st.mdrag;
+            if (!dr) return;
+            if (!dr.moved && Math.hypot(ev.clientX - dr.cx, ev.clientY - dr.cy) < 3) return;
+            dr.moved = true;
+            var p = pagePoint(ev);
+            if (dr.mode === 'end') Object.assign(dr.m, stretchTo(dr, dr.horiz ? p.x : p.y));
+            else { dr.m.x = dr.orig.x + (p.x - dr.start.x); dr.m.y = dr.orig.y + (p.y - dr.start.y); }
+            redraw();
+        });
+        window.addEventListener('mouseup', function (ev) {
+            var dr = st.mdrag;
+            if (!dr) return;
+            st.mdrag = null;
+            if (!dr.moved) return;   // 누르기만 했으면 click이 고른다
+            st._justDragged = true;
+            var m = dr.m, pad = screenPad(6);
+            if (dr.mode === 'end') {
+                // 놓은 곳이 기둥(빔이면 거더·빔도)이면 그 면에 딱 붙인다
+                var pe = pagePoint(ev), sp = snapPoint(pe, pad, m.type, m);
+                var at = dr.horiz ? pe.x : pe.y;
+                if (sp.on) at = dr.which === 'e' ? (dr.horiz ? sp.x - sp.hx : sp.y - sp.hy) : (dr.horiz ? sp.x + sp.hx : sp.y + sp.hy);
+                Object.assign(m, stretchTo(dr, at));
+            } else if (m.type === '기둥') {
+                var a = alignColumn(m.x, m.y, Math.max(m.w, m.h), pad, m);   // 다른 기둥 줄에 맞춤
+                m.x = a.x; m.y = a.y;
+            }
+            remember(dr.before);
+            changed();
+        });
+        var undoBtn = $('btnUndo');
+        if (undoBtn) undoBtn.addEventListener('click', function () { stepHist(true); });
+        var delBtn = $('btnDel');
+        if (delBtn) delBtn.addEventListener('click', deleteSelected);
+        var actSel = $('clickAction');
+        if (actSel) actSel.addEventListener('change', function () {
+            st.pend = null;
+            if (this.value !== 'edit') st.selId = '';
+            redraw(); renderSide();
+            if (this.value === 'edit') setStatus('부재를 눌러 고르고 끌어서 옮기세요. 고른 거더·빔은 양 끝 네모를 끌어 늘입니다. Delete 지우기 · Ctrl+Z 되돌리기.');
+            else if (this.value.indexOf('draw:') === 0) setStatus(this.value.slice(5) + ' 그리기: 시작 점(기둥)과 끝 점(기둥)을 차례로 누르세요. 사이 ' + (this.value === 'draw:빔' ? '거더·기둥' : '기둥') + '에서 칸마다 끊습니다.');
+        });
+        document.addEventListener('keydown', function (e) {
+            var t = e.target;
+            if (t && (/^(INPUT|SELECT|TEXTAREA)$/.test(t.tagName) || t.isContentEditable)) return;
+            if (!st.base) return;
+            // 한글 입력 상태에서도 잡히게 e.code도 본다
+            var isZ = e.code === 'KeyZ' || e.key === 'z' || e.key === 'Z', isY = e.code === 'KeyY' || e.key === 'y' || e.key === 'Y';
+            if ((e.ctrlKey || e.metaKey) && !e.altKey && (isZ || isY)) {
+                e.preventDefault();
+                stepHist(isZ && !e.shiftKey);
+            } else if ((e.key === 'Delete' || e.key === 'Backspace') && selected()) {
+                e.preventDefault();
+                deleteSelected();
+            } else if (e.key === 'Escape' && (st.pend || st.selId)) {
+                st.pend = null; st.selId = '';
+                redraw(); renderSide();
+                setStatus('취소했습니다.');
+            }
         });
         window.addEventListener('mousemove', function (ev) {
             if (!st.drag) return;
@@ -640,7 +898,7 @@
         // 끌어서 옮기기(범위 지정 중이 아닐 때). 조금이라도 끌었으면 그 뒤 클릭(기호 누르기·기준점 찍기)은 무시한다.
         var pan = null;
         cv.addEventListener('mousedown', function (ev) {
-            if (!st.base || st.picking || st.samplePicking || ev.button !== 0) return;
+            if (!st.base || st.picking || st.samplePicking || st.mdrag || ev.button !== 0) return;
             pan = { x: ev.clientX, y: ev.clientY, sl: stage.scrollLeft, st: stage.scrollTop, moved: false };
         });
         window.addEventListener('mousemove', function (ev) {
@@ -660,14 +918,14 @@
         $('groups').addEventListener('change', function (ev) {
             var sel = ev.target.closest('select');
             if (!sel) return;
-            var label = sel.getAttribute('data-label'), v = sel.value;
+            var label = sel.getAttribute('data-label'), only = sel.getAttribute('data-type'), v = sel.value;
+            remember(snapshot());
             st.members.forEach(function (m) {
-                if (m.label !== label || m.excluded || !inRegion(m)) return;
+                if ((m.label || '') !== label || (only && m.type !== only) || m.excluded || !inRegion(m)) return;
                 if (v) m.type = v; else m.excluded = true;
             });
             st.members = unifyBeams(st.members);
-            if (readMode() === 'ai') st.aiMembers = st.members;
-            redraw(); renderSide();
+            changed();
         });
         $('btnCopy').addEventListener('click', function () {
             var c = SM.countsByType(counted());
@@ -748,6 +1006,7 @@
                 st.doc = null; st.pageNo = 1; st.base = base; st.scale = 1;
                 st.region = null; st.refs = []; st.refPicking = false;
                 st.members = []; st.unread = []; st.marks = null; st.shapes = null;
+                resetEdit();
                 $('pageNo').value = 1; $('pageTotal').textContent = '(그림)';
                 st.zoom = Math.min(1, ($('stage').clientWidth - 24) / base.width);
                 showZoom();

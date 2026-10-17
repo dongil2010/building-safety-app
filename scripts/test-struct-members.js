@@ -239,7 +239,15 @@ assert.ok(layer.includes('return { w: Math.max(len, thick * 3), h: thick };'));
 {
     const page = fs.readFileSync(path.join(root, 'js', 'struct-plan-page.js'), 'utf8');
     assert.ok(page.includes('st.members = unifyBeams(clone(st.shapes.members));'), '페이지: 읽은 보 두께 통일');
-    assert.strictEqual((page.match(/st\.members = unifyBeams\(st\.members\);/g) || []).length, 2, '페이지: 종류 바꾸면 다시 통일');
+    assert.ok((page.match(/st\.members = unifyBeams\(st\.members\);/g) || []).length >= 2, '페이지: 종류 바꾸면 다시 통일');
+    // 페이지 편집(2026-10-17): 앱 레이어처럼 고르기·옮기기·끝 늘이기·그리기·지우기·되돌리기
+    const html = fs.readFileSync(path.join(root, 'struct-plan.html'), 'utf8');
+    ['value="edit"', 'value="draw:거더"', 'value="draw:빔"', 'id="btnUndo"', 'id="btnDel"'].forEach((s) => assert.ok(html.includes(s), '페이지 편집 칸: ' + s));
+    assert.ok(page.includes("if (action.indexOf('draw:') === 0) { addLinePoint(p, action.slice(5)); return; }"), '페이지: 거더·빔 두 점 그리기');
+    assert.ok(page.includes('MS.splitRun({ horiz: horiz, from: from, to: to, perp: perp, minLen: th * 0.5 }, cutters)'), '페이지: 사이 기둥·거더에서 끊음');
+    assert.ok(page.includes('var g = grabEnd(p, pad);'), '페이지: 고른 보 끝 잡고 늘이기');
+    assert.ok(page.includes('st.mdrag ||'), '페이지: 부재를 끌 때는 화면 이동 안 함');
+    assert.ok(!/action === '기둥' && readMode\(\) === 'ai'/.test(page), '페이지: 빈 곳 기둥 추가는 모든 방식에서');
 }
 
 // ---- 거더·빔은 시작→끝 두 번 눌러 추가(기둥에 붙어 면에서 면까지), 추가 중엔 기둥을 눌러도 고르지 않음 ----
