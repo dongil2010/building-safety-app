@@ -4,6 +4,7 @@
  * 어디에: 장비조사 → 강도 측정 위치 카드의 「촬영」/「갤러리」 버튼 (scanRValuesFromImage 직전)
  * 어떻게: 전체 화면에 사진을 띄우고, 네 모서리·네 변을 끌어 범위를 맞춘다. 범위 안을 끌면 통째로 이동.
  *         90° 회전(옆으로 찍은 사진), 「원본 그대로」(자르지 않음), 「취소」, 「잘라서 적용」.
+ *         「∠ 기울기」(2026-10-17): 비뚤게 찍힌 측정지 — 가장자리를 따라 두 점을 끌면 그 선이 수평·수직이 되게 사진을 미세하게 돌린다.
  * 결과:   open(file) → Promise<File|null>
  *           - 잘라서 적용: 자른 JPEG File
  *           - 원본 그대로: 넘겨받은 file 그대로
@@ -44,6 +45,31 @@
         return { x: 1 - (r.y + r.h), y: r.x, w: r.h, h: r.w };
     }
 
+    /** 각도(도)를 (-180, 180] 으로 */
+    function normDeg(d) {
+        var a = ((Number(d) || 0) % 360 + 360) % 360;
+        return a > 180 ? a - 360 : a;
+    }
+
+    /**
+     * 기울기 맞추기(2026-10-17): 화면에서 끈 선 (x0,y0)→(x1,y1) 이 수평(가로에 가까우면) 또는 수직(세로에 가까우면)이
+     * 되도록 사진을 더 돌릴 각도(도, 화면 기준 시계 방향 +). 결과는 (-45, 45]. 선이 너무 짧으면 0.
+     */
+    function straightenDelta(x0, y0, x1, y1) {
+        var dx = x1 - x0, dy = y1 - y0;
+        if (Math.hypot(dx, dy) < 1e-6) return 0;
+        var a = Math.atan2(dy, dx) * 180 / Math.PI;     // 화면은 y가 아래로 → 시계 방향 +
+        var r = ((a % 90) + 90) % 90;                   // 가장 가까운 가로·세로 줄과의 차이 [0, 90)
+        var d = r > 45 ? 90 - r : -r;
+        return d === 0 ? 0 : d;                         // -0 방지
+    }
+
+    /** w×h 그림을 deg도 돌렸을 때 다 들어가는 크기 */
+    function rotatedSize(w, h, deg) {
+        var t = deg * Math.PI / 180, c = Math.abs(Math.cos(t)), s = Math.abs(Math.sin(t));
+        return { w: Math.max(1, Math.round(w * c + h * s)), h: Math.max(1, Math.round(w * s + h * c)) };
+    }
+
     /** 비율 범위 → 실제 픽셀 범위(정수, 사진 안으로 잘림) */
     function rectToPixels(r, imgW, imgH) {
         var sx = Math.round(clamp(r.x, 0, 1) * imgW);
@@ -73,16 +99,22 @@
         });
     }
 
-    /** 원본(EXIF 방향은 브라우저가 반영) → 작업 캔버스, quarter번 시계 방향 회전 */
-    function drawWorkCanvas(img, quarter) {
+    /**
+     * 원본(EXIF 방향은 브라우저가 반영) → 작업 캔버스, quarter번 시계 방향 90° 회전 + fine도 미세 회전(2026-10-17).
+     * 미세 회전하면 캔버스를 돌린 사진이 다 들어가게 키우고, 빈 귀퉁이는 흰색(R값 글자 읽기에 방해 안 되게).
+     */
+    function drawWorkCanvas(img, quarter, fine) {
         var base = fitWithin(img.naturalWidth || img.width, img.naturalHeight || img.height, MAX_WORK_EDGE);
-        var q = ((quarter % 4) + 4) % 4;
+        var q = ((quarter % 4) + 4) % 4, f = Number(fine) || 0;
+        var qw = (q % 2) ? base.h : base.w, qh = (q % 2) ? base.w : base.h;
+        var size = f ? rotatedSize(qw, qh, f) : { w: qw, h: qh };
         var c = document.createElement('canvas');
-        c.width = (q % 2) ? base.h : base.w;
-        c.height = (q % 2) ? base.w : base.h;
+        c.width = size.w;
+        c.height = size.h;
         var ctx = c.getContext('2d');
+        if (f) { ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height); }
         ctx.translate(c.width / 2, c.height / 2);
-        ctx.rotate(q * Math.PI / 2);
+        ctx.rotate(q * Math.PI / 2 + f * Math.PI / 180);
         ctx.drawImage(img, -base.w / 2, -base.h / 2, base.w, base.h);
         return c;
     }
@@ -107,7 +139,15 @@
             '#bsaPhotoCrop .bpc-h.edge::after{width:14px;height:14px;margin:-7px 0 0 -7px;border-radius:3px;}',
             '#bsaPhotoCrop .bpc-bar{display:flex;gap:8px;padding:10px 12px calc(env(safe-area-inset-bottom,0px) + 12px);flex-wrap:wrap;justify-content:center;}',
             '#bsaPhotoCrop .bpc-bar button{flex:1 1 0;min-width:72px;min-height:46px;border-radius:10px;border:1px solid #444;background:#262626;color:#fff;font-size:0.9rem;font-weight:600;cursor:pointer;}',
-            '#bsaPhotoCrop .bpc-bar button.bpc-ok{background:#0284c7;border-color:#0284c7;flex:1.6 1 0;}'
+            '#bsaPhotoCrop .bpc-bar button.bpc-ok{background:#0284c7;border-color:#0284c7;flex:1.6 1 0;}',
+            '#bsaPhotoCrop .bpc-bar button.on{background:#f59e0b;border-color:#f59e0b;color:#111;}',
+            '#bsaPhotoCrop .bpc-bar button[hidden]{display:none;}',
+            // 기울기 맞추기: 끄는 동안 보이는 선(가운데 축 기준 회전)
+            '#bsaPhotoCrop.bpc-leveling .bpc-stage{cursor:crosshair;}',
+            '#bsaPhotoCrop .bpc-line{position:absolute;height:0;border-top:3px solid #f59e0b;transform-origin:0 50%;pointer-events:none;z-index:3;box-shadow:0 0 0 1px rgba(0,0,0,0.5);}',
+            '#bsaPhotoCrop .bpc-line::before,#bsaPhotoCrop .bpc-line::after{content:"";position:absolute;top:-8px;width:13px;height:13px;border-radius:50%;background:#f59e0b;}',
+            '#bsaPhotoCrop .bpc-line::before{left:-7px;}',
+            '#bsaPhotoCrop .bpc-line::after{right:-7px;}'
         ].join('\n');
         document.head.appendChild(st);
     }
@@ -125,7 +165,10 @@
                 if (old) old.remove();
 
                 var quarter = 0;
-                var work = drawWorkCanvas(loaded.img, quarter);
+                var fine = 0;          // 미세 회전(도) — 「∠ 기울기」로 두 점을 끌어 맞춘다
+                var leveling = false;  // 기울기 맞추기 중(끌면 선을 긋는다)
+                var titleText = opts.title || '측정지 부분만 남도록 모서리를 끌어 맞추세요';
+                var work = drawWorkCanvas(loaded.img, quarter, fine);
                 var rect = { x: INITIAL_INSET, y: INITIAL_INSET, w: 1 - 2 * INITIAL_INSET, h: 1 - 2 * INITIAL_INSET };
                 var view = { left: 0, top: 0, w: 1, h: 1 }; // 화면 위 사진 위치(px, stage 기준)
 
@@ -134,7 +177,7 @@
                 wrap.setAttribute('role', 'dialog');
                 wrap.setAttribute('aria-label', '사진 자르기');
                 wrap.innerHTML =
-                    '<div class="bpc-top">' + (opts.title || '측정지 부분만 남도록 모서리를 끌어 맞추세요') + '</div>' +
+                    '<div class="bpc-top">' + titleText + '</div>' +
                     '<div class="bpc-stage">' +
                     '<canvas class="bpc-img"></canvas>' +
                     '<div class="bpc-shade" data-s="t"></div><div class="bpc-shade" data-s="b"></div>' +
@@ -143,10 +186,13 @@
                     HANDLES.map(function (h) {
                         return '<div class="bpc-h' + (h.length === 1 ? ' edge' : '') + '" data-h="' + h + '"></div>';
                     }).join('') +
+                    '<div class="bpc-line" hidden></div>' +
                     '</div>' +
                     '<div class="bpc-bar">' +
                     '<button type="button" data-act="cancel">취소</button>' +
                     '<button type="button" data-act="rotate">↻ 회전</button>' +
+                    '<button type="button" data-act="level" title="반듯해야 할 선(측정지 가장자리)을 따라 끌면 사진을 그만큼 돌립니다">∠ 기울기</button>' +
+                    '<button type="button" data-act="unlevel" hidden>기울기 취소</button>' +
                     '<button type="button" data-act="original">원본 그대로</button>' +
                     '<button type="button" class="bpc-ok" data-act="ok">✂ 잘라서 적용</button>' +
                     '</div>';
@@ -159,6 +205,30 @@
                 wrap.querySelectorAll('.bpc-shade').forEach(function (el) { shades[el.getAttribute('data-s')] = el; });
                 var handleEls = {};
                 wrap.querySelectorAll('.bpc-h').forEach(function (el) { handleEls[el.getAttribute('data-h')] = el; });
+                var topEl = wrap.querySelector('.bpc-top');
+                var lineEl = wrap.querySelector('.bpc-line');
+                var levelBtn = wrap.querySelector('button[data-act="level"]');
+                var unlevelBtn = wrap.querySelector('button[data-act="unlevel"]');
+
+                /** 기울기 단추·안내 글 갱신 */
+                function syncLevel() {
+                    wrap.classList.toggle('bpc-leveling', leveling);
+                    levelBtn.classList.toggle('on', leveling);
+                    var deg = Math.round(fine * 10) / 10;
+                    levelBtn.textContent = leveling ? '∠ 선 긋는 중' : (deg ? '∠ 기울기 ' + (deg > 0 ? '+' : '') + deg + '°' : '∠ 기울기');
+                    unlevelBtn.hidden = !fine;
+                    topEl.textContent = leveling
+                        ? '반듯해야 할 선(측정지 가장자리·표 줄)을 따라 한쪽 끝에서 다른 쪽 끝까지 끌어 주세요. 놓으면 그 선이 수평(세로 선이면 수직)이 되게 돌립니다.'
+                        : titleText;
+                }
+                /** 미세 회전을 바꾸고 작업 그림을 다시 만든다(자르기 범위는 비율 그대로) */
+                function setFine(next) {
+                    fine = normDeg(next);
+                    if (Math.abs(fine) < 0.05) fine = 0;
+                    work = drawWorkCanvas(loaded.img, quarter, fine);
+                    layout();
+                    syncLevel();
+                }
 
                 function layout() {
                     var sw = stage.clientWidth || 1, sh = stage.clientHeight || 1;
@@ -203,7 +273,29 @@
                 }
 
                 var drag = null;
+                var level = null;   // 기울기 선: { id, x0, y0, x1, y1 } (stage 기준 px)
+                function stagePoint(e) {
+                    var r = stage.getBoundingClientRect();
+                    return { x: e.clientX - r.left, y: e.clientY - r.top };
+                }
+                function drawLine() {
+                    var dx = level.x1 - level.x0, dy = level.y1 - level.y0;
+                    lineEl.hidden = false;
+                    lineEl.style.left = level.x0 + 'px';
+                    lineEl.style.top = level.y0 + 'px';
+                    lineEl.style.width = Math.hypot(dx, dy) + 'px';
+                    lineEl.style.transform = 'rotate(' + Math.atan2(dy, dx) + 'rad)';
+                }
                 function onDown(e) {
+                    if (leveling) {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        var p = stagePoint(e);
+                        level = { id: e.pointerId, x0: p.x, y0: p.y, x1: p.x, y1: p.y };
+                        try { stage.setPointerCapture(e.pointerId); } catch (_e) { /* ignore */ }
+                        drawLine();
+                        return;
+                    }
                     var t = e.target;
                     var h = t.getAttribute && t.getAttribute('data-h');
                     var handle = h || (t === rectEl ? 'move' : null);
@@ -214,12 +306,33 @@
                     try { t.setPointerCapture(e.pointerId); } catch (_e) { /* ignore */ }
                 }
                 function onMove(e) {
+                    if (level && e.pointerId === level.id) {
+                        e.preventDefault();
+                        var p = stagePoint(e);
+                        level.x1 = p.x; level.y1 = p.y;
+                        drawLine();
+                        return;
+                    }
                     if (!drag || e.pointerId !== drag.id) return;
                     e.preventDefault();
                     rect = dragRect(drag.start, drag.handle, (e.clientX - drag.x0) / view.w, (e.clientY - drag.y0) / view.h);
                     paint();
                 }
                 function onUp(e) {
+                    if (level && e.pointerId === level.id) {
+                        var L = level;
+                        level = null;
+                        lineEl.hidden = true;
+                        if (e.type === 'pointercancel') return;
+                        // 너무 짧은 선은 손떨림 — 각도가 부정확하니 무시하고 다시 긋게
+                        if (Math.hypot(L.x1 - L.x0, L.y1 - L.y0) < 30) {
+                            topEl.textContent = '선이 너무 짧습니다. 가장자리를 따라 길게 끌어 주세요.';
+                            return;
+                        }
+                        leveling = false;
+                        setFine(fine + straightenDelta(L.x0, L.y0, L.x1, L.y1));
+                        return;
+                    }
                     if (drag && e.pointerId === drag.id) drag = null;
                 }
                 stage.addEventListener('pointerdown', onDown);
@@ -264,15 +377,25 @@
                     else if (act === 'ok') exportCrop();
                     else if (act === 'rotate') {
                         quarter = (quarter + 1) % 4;
-                        work = drawWorkCanvas(loaded.img, quarter);
+                        work = drawWorkCanvas(loaded.img, quarter, fine);
                         rect = rotateRectCW(rect);
                         layout();
+                    } else if (act === 'level') {
+                        leveling = !leveling;
+                        syncLevel();
+                    } else if (act === 'unlevel') {
+                        leveling = false;
+                        setFine(0);
                     }
                 });
 
                 // 안드로이드 뒤로가기·ESC = 취소
                 wrap.tabIndex = -1;
-                wrap.addEventListener('keydown', function (e) { if (e.key === 'Escape') finish(null); });
+                wrap.addEventListener('keydown', function (e) {
+                    if (e.key !== 'Escape') return;
+                    if (leveling) { leveling = false; level = null; lineEl.hidden = true; syncLevel(); return; }   // 선 긋기만 그만
+                    finish(null);
+                });
                 layout(); // clientWidth를 읽으면 브라우저가 바로 배치를 계산한다 — 화면이 가려져도(rAF 멈춤) 그려지게
                 try { wrap.focus(); } catch (_e) { /* ignore */ }
             });
@@ -285,7 +408,8 @@
 
     var api = {
         open: open,
-        _pure: { dragRect: dragRect, rotateRectCW: rotateRectCW, rectToPixels: rectToPixels, fitWithin: fitWithin }
+        _pure: { dragRect: dragRect, rotateRectCW: rotateRectCW, rectToPixels: rectToPixels, fitWithin: fitWithin,
+            straightenDelta: straightenDelta, rotatedSize: rotatedSize, normDeg: normDeg }
     };
     root.BsaPhotoCrop = api;
     if (typeof module !== 'undefined' && module.exports) module.exports = api;
