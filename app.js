@@ -16944,12 +16944,15 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const base64Data = dataUrl.slice(commaIdx + 1);
         const mimeType = (meta.match(/^data:(.*?);base64$/) || [])[1] || 'image/jpeg';
 
+        // 2026-10-17: 도트 글씨 0↔8 오인식 — 각 줄 옆 막대그래프 길이도 받아 js/core/r-bar-check.js로 한 번 더 확인한다
         const prompt = `이 이미지는 콘크리트 비파괴 강도 측정지(반발경도/슈미트해머 측정 기록지)이다.
-표에는 R01~R20까지 번호가 매겨진 항목이 있고, 각 항목 옆에 10~80 사이의 정수 측정값이 있다.
-길이 20인 JSON 배열을 출력해라. 배열의 i번째(0-based) 값은 R(i+1)의 측정값이다.
-해당 번호의 측정값을 읽을 수 없거나 표에 아예 없으면 그 자리에 null을 넣어라.
+표에는 R01~R20까지 번호가 매겨진 항목이 있고, 각 항목 옆에 10~80 사이의 정수 측정값과 그 값만큼 긴 막대그래프가 있다.
+길이 20인 JSON 배열을 출력해라. 배열의 i번째(0-based) 원소는 R(i+1)의 [측정값, 막대길이] 이다.
+- 막대길이: 그 줄 막대의 왼쪽 끝부터 오른쪽 끝까지 길이를, 그림 너비를 1000으로 본 정수로. 막대가 없거나 안 보이면 null.
+- 도트 글씨라 0과 8이 헷갈리기 쉽다(예: 40과 48, 30과 38). 헷갈리면 다른 줄의 값·막대 길이와 견주어 막대 길이에 맞는 쪽으로 읽어라.
+해당 번호의 측정값을 읽을 수 없거나 표에 아예 없으면 그 원소를 null로 넣어라.
 오직 JSON 배열만 출력하고, 설명·코드블록·다른 텍스트는 절대 붙이지 마라.
-예: [44,null,42,40,47,44,40,39,39,48,42,39,42,43,49,42,43,41,40,40]`;
+예: [[44,352],null,[42,336],[40,320],[47,376],[44,352],[40,320],[39,312],[39,312],[48,384],[42,336],[39,312],[42,336],[43,344],[49,392],[42,336],[43,344],[41,328],[40,320],[40,320]]`;
 
         const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent?key=${GEMINI_DIRECT_API_KEY}`;
         const res = await fetch(geminiUrl, {
@@ -16962,7 +16965,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                         { inline_data: { mime_type: mimeType, data: base64Data } },
                     ],
                 }],
-                generationConfig: { temperature: 0, maxOutputTokens: 512 },
+                generationConfig: { temperature: 0, maxOutputTokens: 1024 },
             }),
         });
         if (!res.ok) {
@@ -16982,9 +16985,22 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (!Array.isArray(arr)) throw new Error('Gemini 응답이 배열이 아님');
 
         const slots = new Array(MAX_R_VALUES_PER_SLOT).fill(null);
+        const bars = new Array(MAX_R_VALUES_PER_SLOT).fill(null);
         for (let i = 0; i < MAX_R_VALUES_PER_SLOT; i++) {
-            const n = typeof arr[i] === 'number' ? arr[i] : parseInt(arr[i], 10);
+            // 원소는 [값, 막대길이] — 옛 답처럼 숫자만 와도 읽는다
+            const it = arr[i];
+            const rawV = Array.isArray(it) ? it[0] : (it && typeof it === 'object' ? it.v : it);
+            const rawBar = Array.isArray(it) ? it[1] : (it && typeof it === 'object' ? it.bar : null);
+            const n = typeof rawV === 'number' ? rawV : parseInt(rawV, 10);
             slots[i] = (Number.isFinite(n) && n >= 10 && n <= 80) ? n : null;
+            const b = typeof rawBar === 'number' ? rawBar : parseFloat(rawBar);
+            bars[i] = Number.isFinite(b) && b > 0 ? b : null;
+        }
+        // 막대 길이로 0↔8 바로잡기(줄이 5개 미만이거나 막대가 값과 안 맞으면 그대로)
+        const check = window.BsaRBarCheck ? window.BsaRBarCheck.correctZeroEight(slots, bars) : null;
+        if (check && check.fixes.length) {
+            slots.splice(0, slots.length, ...check.values);
+            slots.barFixes = check.fixes;
         }
         return slots;
     }
@@ -17107,6 +17123,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     applyScannedReadings(geminiScanned, slotIdx, statusEl, '✨ Gemini 인식');
                     if (geminiFoundCount < MAX_R_VALUES_PER_SLOT && statusEl) {
                         statusEl.textContent += ` — 총 ${MAX_R_VALUES_PER_SLOT}개 중 ${geminiFoundCount}개만 인식됐어요. 나머지는 사진 보고 직접 입력해주세요.`;
+                    }
+                    if (geminiScanned.barFixes && geminiScanned.barFixes.length && statusEl) {
+                        statusEl.textContent += ` 📏 막대 길이로 고친 값: ${geminiScanned.barFixes.map(f => `R${String(f.idx + 1).padStart(2, '0')} ${f.from}→${f.to}`).join(', ')} (사진으로 확인해주세요)`;
                     }
                     return;
                 }
@@ -17296,7 +17315,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             if (v3El) v3El.value = existingItem.v3 || '';
             if (avgEl) avgEl.value = existingItem.avgValue || '';
             if (statusEl) statusEl.value = existingItem.status || '';
-            if (damageStatusEl) damageStatusEl.value = existingItem.damageStatus || '';
+            // 손상 여부 기본 = 상태양호(2026-10-17) — 빈 값이면 선택칸이 비어 보였다(판정은 '균열발생'만 손상으로 봐서 같음)
+            if (damageStatusEl) damageStatusEl.value = existingItem.damageStatus || '상태양호';
             // strengthSlots(위치별 묶음)가 있으면 그대로, 없으면(구버전 항목) location/strengthReadings
             // 하나로 슬롯 1개를 만들어서 예전과 동일하게 보이게 한다.
             if (existingItem.category === '강도') {
@@ -17399,7 +17419,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             if (v3El) v3El.value = '';
             if (avgEl) avgEl.value = '';
             if (statusEl) statusEl.value = '';
-            if (damageStatusEl) damageStatusEl.value = '';
+            if (damageStatusEl) damageStatusEl.value = '상태양호';   // 새 강도 항목은 상태양호로 시작
             ndtStrengthSlots = [{ location: '', readings: [] }];
             const angleElNew = document.getElementById('ndtAngle');
             // 새 항목은 이 기기에서 마지막에 쓴 각도로 시작한다(없으면 0°)
