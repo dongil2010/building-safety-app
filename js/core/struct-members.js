@@ -284,6 +284,27 @@
         return { x: bx, y: by, onX: onX, onY: onY };
     }
 
+    /**
+     * 통심선 교차점 중 기둥이 아직 없는 곳(2026-10-17, 「교차점 기둥」 한 번에 넣기).
+     * 이미 기둥 가운데가 교차점에서 (그 기둥 반폭) 안이면 있는 것으로 본다. → [{ x, y }]
+     */
+    function emptyGridCrossings(grids, members) {
+        var xs = [], ys = [];
+        (grids || []).forEach(function (g) {
+            var arr = gridAxis(g) === 'v' ? xs : ys, v = gridPos(g);
+            if (!arr.some(function (q) { return Math.abs(q - v) < 0.5; })) arr.push(v);
+        });
+        var cols = (members || []).filter(function (d) { return d && d.type === '기둥'; });
+        var out = [];
+        xs.sort(function (a, b) { return a - b; }).forEach(function (x) {
+            ys.slice().sort(function (a, b) { return a - b; }).forEach(function (y) {
+                var taken = cols.some(function (d) { return Math.abs(d.x - x) <= Math.max(d.w / 2, 1) && Math.abs(d.y - y) <= Math.max(d.h / 2, 1); });
+                if (!taken) out.push({ x: x, y: y });
+            });
+        });
+        return out;
+    }
+
     /** 점 p를 중심 c로 ang(라디안) 돌린 점 */
     function rotateAbout(p, c, ang) {
         var cs = Math.cos(ang), sn = Math.sin(ang), dx = p.x - c.x, dy = p.y - c.y;
@@ -482,7 +503,7 @@
         applyRecord: applyRecord, clear: clear, beamThickness: beamThickness, unifyThickness: unifyThickness, countsByType: countsByType, fitTwoPoints: fitTwoPoints, applyFit: applyFit, importMembers: importMembers,
         hitTest: hitTest, splitRun: splitRun, columnLines: columnLines, rotateAbout: rotateAbout,
         toLocal: toLocal, barEnds: barEnds, faceDist: faceDist, slantedRun: slantedRun,
-        GRID_TYPE: GRID_TYPE, gridAxis: gridAxis, gridPos: gridPos, gridLabels: gridLabels, gridRecord: gridRecord, snapToGrid: snapToGrid, columnSize: columnSize, unifyColumns: unifyColumns, overlayFor: overlayFor, setOverlay: setOverlay, removeOverlay: removeOverlay,
+        GRID_TYPE: GRID_TYPE, gridAxis: gridAxis, gridPos: gridPos, gridLabels: gridLabels, gridRecord: gridRecord, snapToGrid: snapToGrid, emptyGridCrossings: emptyGridCrossings, columnSize: columnSize, unifyColumns: unifyColumns, overlayFor: overlayFor, setOverlay: setOverlay, removeOverlay: removeOverlay,
         saveHandoff: saveHandoff, loadHandoff: loadHandoff, packFor: packFor, packHasContent: packHasContent, mergePackIntoState: mergePackIntoState };
     if (typeof module !== 'undefined' && module.exports) module.exports = api;
     if (root) { root.BSA = root.BSA || {}; root.BSA.structMembers = api; }

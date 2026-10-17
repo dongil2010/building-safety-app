@@ -331,6 +331,17 @@ assert.ok(layer.includes('var al = alignColumnMove(d.x, d.y, Math.max(d.w, d.h),
     assert.ok(!S.ACTIVE_TYPES.includes('통심선'), '부재 목록(ACTIVE)엔 안 들어감');
 }
 assert.ok(layer.includes("data-act=\"grid\""), '「통심선」 단추');
+// 교차점 기둥 한 번에(2026-10-17): 빈 교차점만, 이미 기둥이 있는 곳은 건너뜀
+{
+    const G = (ax, pos, id) => Object.assign({ id, type: '통심선' }, S.gridRecord(ax, pos, 1000, 800));
+    const grids = [G('v', 100, 'x1'), G('v', 300, 'x2'), G('v', 300.2, 'x2b'), G('h', 50, 'y1'), G('h', 250, 'y2')];
+    const cols = [{ id: 'c', type: '기둥', x: 302, y: 49, w: 20, h: 20 }, { id: 'g', type: '거더', x: 100, y: 250, w: 40, h: 6 }];
+    assert.deepStrictEqual(S.emptyGridCrossings(grids, cols), [{ x: 100, y: 50 }, { x: 100, y: 250 }, { x: 300, y: 250 }],
+        '세로 2 × 가로 2 = 4곳 중 기둥 있는 1곳 뺌(겹친 선은 하나로, 거더는 기둥 아님)');
+    assert.deepStrictEqual(S.emptyGridCrossings([G('v', 100, 'a')], []), [], '가로선이 없으면 교차점 없음');
+}
+assert.ok(layer.includes('data-act="fillcross"') && layer.includes('function fillGridCrossings()'), '「교차점 기둥 넣기」 단추');
+assert.ok(layer.includes("var fk = B.floorKey(), sz = defaultSize('기둥'), changes = [];"), '마지막으로 고친 기둥 크기로');
 assert.ok(layer.includes('ui.drag = startGridDrag(p, pad, e.pointerId);'), '통심선 긋기·옮기기');
 assert.ok(layer.includes("var g = api.snapToGrid ? api.snapToGrid(x, y, gridList(), Math.max(pad * 3, size)) : null;"), '기둥 찍을 때 통심선 교차점에 붙음');
 assert.ok(layer.includes("if (ui.selId && !list().some(function (d) { return d.id === ui.selId; })) ui.selId = '';"), '통심선 고른 채 종류 단추를 눌러도 선이 기둥으로 안 바뀜');

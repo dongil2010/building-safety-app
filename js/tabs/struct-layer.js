@@ -506,6 +506,22 @@
             if (dr.axis === 'v') d.x = o.x + dv; else d.y = o.y + dv;
         });
     }
+    /** 통심선 교차점 중 빈 곳마다 기둥(마지막으로 고친 크기)을 한 번에 — 되돌리기 한 번에 같이 빠진다 */
+    function fillGridCrossings() {
+        var pts = api.emptyGridCrossings ? api.emptyGridCrossings(gridList(), list()) : [];
+        if (!pts.length) { toast('기둥을 넣을 빈 교차점이 없습니다. 세로·가로 통심선을 하나 이상씩 그어 주세요.', 'info', 3000); return; }
+        var fk = B.floorKey(), sz = defaultSize('기둥'), changes = [];
+        pts.forEach(function (q) {
+            var rec = api.add(state(), fk, { type: '기둥', label: '', x: q.x, y: q.y, w: sz.w, h: sz.h });
+            if (rec) changes.push({ id: rec.id, before: null, after: snap(rec) });
+        });
+        if (!changes.length) return;
+        pushHist(fk, changes);
+        ui.selId = ''; ui.builtSig = '';
+        ui.gridMode = false;   // 바로 기둥을 눌러 고르고 지울 수 있게 통심선 모드는 끈다
+        commit();
+        toast('교차점에 기둥 ' + changes.length + '개를 넣었습니다. 기둥이 없는 자리는 눌러 고른 뒤 Delete로 지우세요(Ctrl+Z로 한 번에 되돌리기).', 'success', 4000);
+    }
     function finishGridDrag(dr, cancel) {
         var fk = B.floorKey(), changes = [];
         if (dr.mode === 'gridNew') {
@@ -925,6 +941,8 @@
                 + '<button type="button" data-act="show" class="' + (showOn() ? 'active' : '') + '">보이기</button>'
                 + '<button type="button" data-act="close">닫기</button>';
             if (ui.editing && ui.gridMode) {
+                var nEmpty = api.emptyGridCrossings ? api.emptyGridCrossings(gridList(), list()).length : 0;
+                html += '<button type="button" data-act="fillcross" ' + (nEmpty ? '' : 'disabled') + ' title="세로·가로 통심선이 만나는 곳 중 기둥이 없는 곳마다 기둥을 넣습니다(마지막으로 고친 기둥 크기, 되돌리기 한 번에 빠짐)">교차점 기둥 넣기 <b><small>' + nEmpty + '</small></b></button>';
                 html += '<span class="map-struct-hint">통심선: 빈 곳을 세로로 끌면 세로선, 가로로 끌면 가로선(도면 끝까지) · 선을 잡고 끌면 선과 그 위 기둥이 같이 옮겨짐 · 선을 눌러 고르고 Delete·「지우기」 · 다 하면 「기둥」을 켜고 교차점을 누르세요</span>';
             }
             if (ui.editing && ui.lineMode) {
@@ -964,6 +982,8 @@
             else { ui.addType = ui.addType === t ? '' : t; ui.pend = null; ui.lineMode = false; ui.gridMode = false; ui.builtSig = ''; sync(); }
         } else if (a === 'lines') {
             ui.lineMode = !ui.lineMode; ui.gridMode = false; ui.addType = ''; ui.pend = null; ui.selId = ''; ui.drag = null; ui.builtSig = ''; sync();
+        } else if (a === 'fillcross') {
+            fillGridCrossings();
         } else if (a === 'grid') {
             ui.gridMode = !ui.gridMode; ui.lineMode = false; ui.addType = ''; ui.pend = null; ui.selId = ''; ui.drag = null; ui.builtSig = ''; sync();
         } else if (a === 'del') deleteSelected();
