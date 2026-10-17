@@ -189,6 +189,63 @@
         return n;
     }
 
+    /**
+     * 기둥 줄(2026-10-17): 기둥 2개 이상이 가로(h)·세로(v)로, 또는 조금 기울어(maxDeg 안) 늘어선 줄을 찾는다.
+     * 기둥은 세로줄 하나·가로줄 하나에만 든다(많이 늘어선 줄부터). tol = 줄에서 벗어나도 되는 거리(도면 픽셀).
+     * → [{ dir:'v'|'h', ids:[…], p0:{x,y}, p1:{x,y} }]  p0·p1 = 줄 양 끝(맨 끝 기둥 가운데를 줄에 내린 점)
+     */
+    function columnLines(list, tol, maxDeg) {
+        var cols = (list || []).filter(function (d) { return d && d.type === '기둥' && Number.isFinite(d.x) && Number.isFinite(d.y); });
+        var lim = Math.tan(((maxDeg == null ? 30 : maxDeg) * Math.PI) / 180), t = Math.max(1e-6, Number(tol) || 0);
+        var out = [];
+        ['v', 'h'].forEach(function (dir) {
+            // 세로줄은 x = a + b·y, 가로줄은 y = a + b·x 로 본다(u = 줄을 따라가는 좌표, w = 가로지르는 좌표)
+            var U = function (d) { return dir === 'v' ? d.y : d.x; }, W = function (d) { return dir === 'v' ? d.x : d.y; };
+            var cands = [], seen = {};
+            for (var i = 0; i < cols.length; i++) {
+                for (var j = i + 1; j < cols.length; j++) {
+                    var du = U(cols[j]) - U(cols[i]);
+                    if (Math.abs(du) < 1e-9) continue;
+                    var b = (W(cols[j]) - W(cols[i])) / du;
+                    if (Math.abs(b) > lim) continue;
+                    var a = W(cols[i]) - b * U(cols[i]);
+                    var k = Math.sqrt(1 + b * b);
+                    var mem = cols.filter(function (d) { return Math.abs(W(d) - (a + b * U(d))) / k <= t; });
+                    if (mem.length < 2) continue;
+                    var key = mem.map(function (d) { return d.id; }).sort().join('|');
+                    if (seen[key]) continue;
+                    seen[key] = true;
+                    cands.push(mem);
+                }
+            }
+            // 많이 늘어선 줄부터, 같으면 덜 기운 줄부터
+            var slope = function (mem) {
+                var n = mem.length, su = 0, sw = 0, suu = 0, suw = 0;
+                mem.forEach(function (d) { su += U(d); sw += W(d); suu += U(d) * U(d); suw += U(d) * W(d); });
+                var den = n * suu - su * su;
+                var b = Math.abs(den) < 1e-9 ? 0 : (n * suw - su * sw) / den;
+                return { a: (sw - b * su) / n, b: b };
+            };
+            cands.sort(function (p, q) { return q.length - p.length || Math.abs(slope(p).b) - Math.abs(slope(q).b); });
+            var used = {};
+            cands.forEach(function (mem) {
+                var free = mem.filter(function (d) { return !used[d.id]; });
+                if (free.length < 2 || free.length < mem.length) return;   // 이미 다른 줄에 든 기둥이 섞이면 버림
+                free.forEach(function (d) { used[d.id] = true; });
+                var f = slope(free);
+                var us = free.map(U), u0 = Math.min.apply(null, us), u1 = Math.max.apply(null, us);
+                var P = function (u) { var w = f.a + f.b * u; return dir === 'v' ? { x: w, y: u } : { x: u, y: w }; };
+                out.push({ dir: dir, ids: free.map(function (d) { return d.id; }), p0: P(u0), p1: P(u1) });
+            });
+        });
+        return out;
+    }
+    /** 점 p를 중심 c로 ang(라디안) 돌린 점 */
+    function rotateAbout(p, c, ang) {
+        var cs = Math.cos(ang), sn = Math.sin(ang), dx = p.x - c.x, dy = p.y - c.y;
+        return { x: c.x + dx * cs - dy * sn, y: c.y + dx * sn + dy * cs };
+    }
+
     /** 도면 좌표 점에 걸린 부재(작은 것 우선). pad = 여유(도면 픽셀) */
     function hitTest(list, x, y, pad) {
         var best = null, bestArea = Infinity;
@@ -315,7 +372,7 @@
 
     var api = { TYPES: TYPES, ACTIVE_TYPES: ACTIVE_TYPES, COLORS: COLORS, ensureMaps: ensureMaps, listFor: listFor, hasAny: hasAny, add: add, update: update, remove: remove,
         applyRecord: applyRecord, clear: clear, beamThickness: beamThickness, unifyThickness: unifyThickness, countsByType: countsByType, fitTwoPoints: fitTwoPoints, applyFit: applyFit, importMembers: importMembers,
-        hitTest: hitTest, splitRun: splitRun, columnSize: columnSize, unifyColumns: unifyColumns, overlayFor: overlayFor, setOverlay: setOverlay, removeOverlay: removeOverlay,
+        hitTest: hitTest, splitRun: splitRun, columnLines: columnLines, rotateAbout: rotateAbout, columnSize: columnSize, unifyColumns: unifyColumns, overlayFor: overlayFor, setOverlay: setOverlay, removeOverlay: removeOverlay,
         saveHandoff: saveHandoff, loadHandoff: loadHandoff, packFor: packFor, packHasContent: packHasContent, mergePackIntoState: mergePackIntoState };
     if (typeof module !== 'undefined' && module.exports) module.exports = api;
     if (root) { root.BSA = root.BSA || {}; root.BSA.structMembers = api; }

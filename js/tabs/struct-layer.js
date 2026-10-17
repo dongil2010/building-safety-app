@@ -49,6 +49,8 @@
             + '.map-struct-overlay rect{vector-effect:non-scaling-stroke;stroke-width:2;fill-opacity:.5}'
             + '.map-struct-overlay rect.map-struct-handle{fill:#fff;fill-opacity:1;stroke-width:2.5;cursor:ew-resize}'
             + '.map-struct-overlay rect.map-struct-handle.is-corner{cursor:nwse-resize}'
+            + '.map-struct-overlay .map-struct-line-h{fill:#fff;fill-opacity:1;stroke:#db2777;stroke-width:2.5;vector-effect:non-scaling-stroke;cursor:grab}'
+            + '.map-struct-overlay rect.map-struct-line-h.is-mid{fill:#db2777;cursor:move}'
             + '.map-struct-overlay rect.is-selected{stroke-width:4;fill-opacity:.75;stroke-dasharray:6 3}'
             + '.map-struct-overlay text{font-weight:700;text-anchor:middle;dominant-baseline:central;pointer-events:none;paint-order:stroke;stroke:#fff;stroke-width:.18em}'
             + '.map-struct-bar .map-struct-hint{flex-basis:100%;font-size:.82rem;font-weight:700;color:#0369a1}';
@@ -102,7 +104,7 @@
         if (ui.selId && !items.some(function (d) { return d.id === ui.selId; })) ui.selId = '';
         // 자료가 바뀌었을 때만 도형을 다시 만든다
         var sig = B.floorKey() + '|' + items.length + '|' + items.reduce(function (m, d) { return Math.max(m, d.updatedAt || 0); }, 0) + '|' + ui.selId
-            + '|' + (over ? over.url + '@' + over.updatedAt : '') + '|' + showLabels + '|' + (ui.pend ? ui.pend.x + ',' + ui.pend.y : '');
+            + '|' + (over ? over.url + '@' + over.updatedAt : '') + '|' + showLabels + '|' + (ui.pend ? ui.pend.x + ',' + ui.pend.y : '') + '|' + (ui.editing && ui.lineMode ? 'L' : '');
         if (sig !== ui.builtSig) {
             ui.builtSig = sig;
             var frag = document.createDocumentFragment();
@@ -164,6 +166,38 @@
                     hr.setAttribute('class', 'map-struct-handle');
                     hr.setAttribute('stroke', api.COLORS[selD.type]);
                     frag.appendChild(hr);
+                });
+            }
+            if (ui.editing && ui.lineMode) {
+                // 기둥 줄(2026-10-17): 점선 + 양 끝 동그라미(끌면 기울이기) + 가운데 네모(끌면 줄째 옮기기)
+                if (!(ui.drag && ui.drag.lineIdx != null)) {   // 줄을 끄는 동안엔 찾은 줄을 그대로 쓴다
+                    var cs0 = items.filter(function (d) { return d.type === '기둥'; }).map(function (d) { return Math.max(d.w, d.h); }).sort(function (a, b) { return a - b; });
+                    var colSz = cs0.length ? cs0[Math.floor(cs0.length / 2)] : 0;
+                    var px4 = Math.hypot(B.screenToImg(4, 0).x - B.screenToImg(0, 0).x, B.screenToImg(4, 0).y - B.screenToImg(0, 0).y);
+                    ui.lines = api.columnLines(items, Math.max(colSz * 0.35, px4), 30);
+                }
+                var px9 = Math.hypot(B.screenToImg(9, 0).x - B.screenToImg(0, 0).x, B.screenToImg(9, 0).y - B.screenToImg(0, 0).y);
+                (ui.lines || []).forEach(function (ln, li) {
+                    var cur = ui.drag && ui.drag.lineIdx === li && ui.drag.cur ? ui.drag.cur : ln;
+                    var ext = function (a, b) { var L = Math.hypot(a.x - b.x, a.y - b.y) || 1; return { x: a.x + (a.x - b.x) / L * px9 * 2.2, y: a.y + (a.y - b.y) / L * px9 * 2.2 }; };
+                    var e0 = ext(cur.p0, cur.p1), e1 = ext(cur.p1, cur.p0);
+                    var el = document.createElementNS(NS, 'line');
+                    el.setAttribute('x1', e0.x); el.setAttribute('y1', e0.y); el.setAttribute('x2', e1.x); el.setAttribute('y2', e1.y);
+                    el.setAttribute('stroke', '#db2777'); el.setAttribute('stroke-width', '2'); el.setAttribute('stroke-dasharray', '8 5');
+                    el.setAttribute('vector-effect', 'non-scaling-stroke');
+                    frag.appendChild(el);
+                    [e0, e1].forEach(function (q) {
+                        var hc = document.createElementNS(NS, 'circle');
+                        hc.setAttribute('cx', q.x); hc.setAttribute('cy', q.y); hc.setAttribute('r', px9);
+                        hc.setAttribute('class', 'map-struct-line-h');
+                        frag.appendChild(hc);
+                    });
+                    var mq = { x: (cur.p0.x + cur.p1.x) / 2, y: (cur.p0.y + cur.p1.y) / 2 };
+                    var hm = document.createElementNS(NS, 'rect');
+                    hm.setAttribute('x', mq.x - px9); hm.setAttribute('y', mq.y - px9); hm.setAttribute('width', px9 * 2); hm.setAttribute('height', px9 * 2);
+                    hm.setAttribute('class', 'map-struct-line-h is-mid');
+                    frag.appendChild(hm);
+                    ln._h = { e0: e0, e1: e1, mid: mq, r: px9 * 1.6 };
                 });
             }
             if (ui.pend) {
@@ -342,6 +376,76 @@
         });
         return { x: bx, y: by };
     }
+    /**
+     * 기둥 옮길 때 줄 맞춤(2026-10-17): 원래 있던 줄(옮기기 전 x·y)에는 아주 가까울 때(화면 약 6px)만 붙어 조금만 끌어도 빠져나오고,
+     * 다른 줄(먼저 옮긴 기둥이 만든 새 줄 포함)에는 화면 약 12px·기둥 절반 안이면 붙는다 — 옮긴 기둥들이 들쭉날쭉하지 않고 새 줄에 같이 선다.
+     */
+    function alignColumnMove(x, y, size, pad, excludeId, orig) {
+        var far = Math.max(pad * 2, size * 0.5), bx = x, by = y, sx = Infinity, sy = Infinity;
+        var tryX = function (v) { var dd = Math.abs(v - x), lim = Math.abs(v - orig.x) < 1e-6 ? pad : far; if (dd < lim && dd < sx) { sx = dd; bx = v; } };
+        var tryY = function (v) { var dd = Math.abs(v - y), lim = Math.abs(v - orig.y) < 1e-6 ? pad : far; if (dd < lim && dd < sy) { sy = dd; by = v; } };
+        tryX(orig.x); tryY(orig.y);   // 원래 줄(옆 기둥이 없어도) — 세로로만 옮길 때 가로가 손떨림으로 틀어지지 않게
+        list().forEach(function (d) {
+            if (d.type !== '기둥' || d.id === excludeId) return;
+            tryX(d.x); tryY(d.y);
+        });
+        return { x: bx, y: by };
+    }
+    // ---------- 기둥 줄 끌기(2026-10-17): 끝 = 반대쪽 끝을 축으로 줄과 그 기둥들을 돌림, 가운데 = 줄의 기둥들을 같이 옮김 ----------
+    /** 줄 손잡이를 눌렀으면 → { lineIdx, mode:'lineRot'|'lineMove', ids, origs, pivot, a0, line } */
+    function grabLine(p) {
+        var best = null, bd = Infinity;
+        (ui.lines || []).forEach(function (ln, li) {
+            var h = ln._h;
+            if (!h) return;
+            [['e0', 'lineRot'], ['e1', 'lineRot'], ['mid', 'lineMove']].forEach(function (k) {
+                var q = h[k[0]], dd = Math.hypot(p.x - q.x, p.y - q.y);
+                if (dd <= h.r && dd < bd) { bd = dd; best = { li: li, which: k[0], mode: k[1] }; }
+            });
+        });
+        if (!best) return null;
+        var ln = ui.lines[best.li], origs = {};
+        list().forEach(function (d) { if (ln.ids.indexOf(d.id) >= 0) origs[d.id] = { x: d.x, y: d.y }; });
+        // 끝을 잡으면 반대쪽 끝이 축
+        var grab = best.which === 'e1' ? ln.p1 : ln.p0, pivot = best.which === 'e1' ? ln.p0 : ln.p1;
+        return { lineIdx: best.li, mode: best.mode, ids: ln.ids.slice(), origs: origs, line: { p0: ln.p0, p1: ln.p1 },
+            pivot: pivot, a0: Math.atan2(grab.y - pivot.y, grab.x - pivot.x), cur: { p0: ln.p0, p1: ln.p1 } };
+    }
+    /** 끄는 동안: 줄의 기둥들을 옮기고(자료는 놓을 때 저장) 그리는 줄 위치(cur)도 같이 */
+    function dragLineTo(dr, p) {
+        var tf;
+        if (dr.mode === 'lineMove') {
+            var dx = p.x - dr.start.x, dy = p.y - dr.start.y;
+            tf = function (q) { return { x: q.x + dx, y: q.y + dy }; };
+        } else {
+            var ang = Math.atan2(p.y - dr.pivot.y, p.x - dr.pivot.x) - dr.a0;
+            tf = function (q) { return api.rotateAbout(q, dr.pivot, ang); };
+        }
+        list().forEach(function (d) {
+            var o = dr.origs[d.id];
+            if (!o) return;
+            var q = tf(o);
+            d.x = q.x; d.y = q.y;
+        });
+        dr.cur = { p0: tf(dr.line.p0), p1: tf(dr.line.p1) };
+    }
+    /** 놓으면 줄의 기둥들을 한꺼번에 저장(되돌리기 한 번에 같이) */
+    function finishLineDrag(dr, cancel) {
+        var fk = B.floorKey(), changes = [];
+        list().forEach(function (d) {
+            var o = dr.origs[d.id];
+            if (!o) return;
+            var now = { x: d.x, y: d.y };
+            d.x = o.x; d.y = o.y;
+            if (cancel || !dr.moved || (Math.abs(now.x - o.x) < 1e-9 && Math.abs(now.y - o.y) < 1e-9)) return;
+            var before = snap(d);
+            var after = api.update(state(), fk, d.id, now);
+            if (after) changes.push({ id: d.id, before: before, after: snap(after) });
+        });
+        if (changes.length) pushHist(fk, changes);
+        ui.builtSig = '';
+        if (changes.length) commit(); else sync();
+    }
     function addLinePoint(p, pad) {
         var type = ui.addType;
         var a = snapPoint(p, pad, type);
@@ -386,6 +490,15 @@
             e.preventDefault(); e.stopPropagation();
             var p = local(e);
             var pad = Math.hypot(B.screenToImg(6, 0).x - B.screenToImg(0, 0).x, B.screenToImg(6, 0).y - B.screenToImg(0, 0).y);
+            // 「줄」 켜짐: 줄 손잡이만 다룬다(끝 = 반대쪽 끝을 축으로 기울이기, 가운데 = 줄째 옮기기). 다른 곳은 아무것도 안 함
+            if (ui.lineMode) {
+                var lg = grabLine(p);
+                if (lg) {
+                    ui.drag = Object.assign(lg, { start: p, pointerId: e.pointerId, moved: false });
+                    try { ov.setPointerCapture(e.pointerId); } catch (_e) { /* ignore */ }
+                }
+                return;
+            }
             // 거더·빔 추가 중에는 기둥을 눌러도 고르지 않고 시작·끝 점으로 쓴다
             if (isLineType(ui.addType)) { addLinePoint(p, pad); return; }
             // 고른 기둥의 모서리 손잡이를 잡으면 크기를 바꾼다(가운데는 그대로)
@@ -420,11 +533,20 @@
             if (!dr || e.pointerId !== dr.pointerId) return;
             e.preventDefault();
             var p = local(e);
+            if (dr.lineIdx != null) { dragLineTo(dr, p); dr.moved = true; ui.builtSig = ''; sync(); return; }
             var d = list().find(function (x) { return x.id === dr.id; });
             if (!d) return;
             if (dr.mode === 'end') Object.assign(d, stretchTo(dr, dr.horiz ? p.x : p.y));
             else if (dr.mode === 'size') Object.assign(d, sizeTo(dr, p));
-            else { d.x = dr.orig.x + (p.x - dr.start.x); d.y = dr.orig.y + (p.y - dr.start.y); }
+            else {
+                d.x = dr.orig.x + (p.x - dr.start.x); d.y = dr.orig.y + (p.y - dr.start.y);
+                if (d.type === '기둥') {
+                    // 끄는 동안에도 줄에 붙는 모습이 보이게(놓을 때 그 자리 그대로 저장)
+                    var padM = Math.hypot(B.screenToImg(6, 0).x - B.screenToImg(0, 0).x, B.screenToImg(6, 0).y - B.screenToImg(0, 0).y);
+                    var al = alignColumnMove(d.x, d.y, Math.max(d.w, d.h), padM, d.id, dr.orig);
+                    d.x = al.x; d.y = al.y;
+                }
+            }
             dr.moved = true;
             ui.builtSig = '';
             sync();
@@ -433,6 +555,7 @@
             var dr = ui.drag;
             if (!dr || e.pointerId !== dr.pointerId) return;
             ui.drag = null;
+            if (dr.lineIdx != null) { finishLineDrag(dr, e.type === 'pointercancel'); return; }
             var d = list().find(function (x) { return x.id === dr.id; });
             if (!d || !dr.moved) { sync(); return; }
             var now = { x: d.x, y: d.y };
@@ -447,11 +570,8 @@
                 var at = dr.horiz ? pe.x : pe.y;
                 if (sp.on && sp.id !== d.id) at = dr.which === 'e' ? (dr.horiz ? sp.x - sp.hx : sp.y - sp.hy) : (dr.horiz ? sp.x + sp.hx : sp.y + sp.hy);
                 now = stretchTo(dr, at);
-            } else if (d.type === '기둥') {
-                // 기둥을 옮겨 놓으면 다른 기둥 줄에 맞춘다
-                var padM = Math.hypot(B.screenToImg(6, 0).x - B.screenToImg(0, 0).x, B.screenToImg(6, 0).y - B.screenToImg(0, 0).y);
-                now = alignColumn(d.x, d.y, Math.max(d.w, d.h), padM, d.id);
             }
+            // 기둥을 끌어 옮기면 끄는 동안 맞춘 자리 그대로(alignColumnMove — 원래 줄엔 약하게, 다른 줄엔 붙음)
             d.x = dr.orig.x; d.y = dr.orig.y;
             if (dr.orig.w != null) { d.w = dr.orig.w; d.h = dr.orig.h; }
             if (e.type !== 'pointercancel') {
@@ -486,12 +606,13 @@
         else if (e.key === 'Escape') {
             e.stopPropagation();
             if (ui.pend) { ui.pend = null; ui.builtSig = ''; sync(); }          // 거더·빔 시작 점 취소
+            else if (ui.lineMode) { ui.lineMode = false; ui.drag = null; ui.builtSig = ''; sync(); }   // 「줄」 끄기
             else if (ui.selId) { ui.selId = ''; sync(); } else setEditing(false);
         }
     }, true);
     function setEditing(on) {
         ui.editing = !!on;
-        if (!on) { ui.selId = ''; ui.addType = ''; ui.drag = null; ui.pend = null; ui.builtSig = ''; }
+        if (!on) { ui.selId = ''; ui.addType = ''; ui.drag = null; ui.pend = null; ui.lineMode = false; ui.builtSig = ''; }
         sync();
     }
 
@@ -613,6 +734,7 @@
                 html += ACTIVE.map(function (t) {
                     return '<button type="button" data-act="type" data-type="' + t + '" class="map-count-type' + (ui.addType === t ? ' active' : '') + '" style="--mc-color:' + api.COLORS[t] + '" title="' + (ui.selId ? '고른 부재를 ' + t + '(으)로' : (isLineType(t) ? '시작·끝 두 곳을 눌러 ' + t + ' 추가' : '빈 곳을 눌러 ' + t + ' 추가')) + '">' + t + ' <b><small>' + c[t] + '</small></b></button>';
                 }).join('')
+                    + '<button type="button" data-act="lines" class="' + (ui.lineMode ? 'active' : '') + '" title="기둥 줄 보이기 — 끝 동그라미를 끌면 줄을 기울이고, 가운데 네모를 끌면 그 줄 기둥을 통째로 옮깁니다">줄</button>'
                     + '<button type="button" data-act="del" ' + (ui.selId ? '' : 'disabled') + ' title="고른 부재 지우기 (Delete)">지우기</button>'
                     + '<button type="button" data-act="undo" ' + (hist(B.floorKey()).undo.length ? '' : 'disabled') + ' title="되돌리기 (Ctrl+Z)">↶ 되돌리기</button>'
                     + '<button type="button" data-act="redo" ' + (hist(B.floorKey()).redo.length ? '' : 'disabled') + ' title="다시 하기 (Ctrl+Y)">↷ 다시</button>';
@@ -622,6 +744,9 @@
                 + '<button type="button" data-act="marks" class="' + (marksOn() ? 'active' : '') + '" title="부재 이름표(C1·1G2…) 보이기">이름</button>'
                 + '<button type="button" data-act="show" class="' + (showOn() ? 'active' : '') + '">보이기</button>'
                 + '<button type="button" data-act="close">닫기</button>';
+            if (ui.editing && ui.lineMode) {
+                html += '<span class="map-struct-hint">기둥 줄 ' + (ui.lines || []).length + '개: 끝 동그라미를 끌면 반대쪽 끝을 축으로 줄과 그 기둥들이 기울고, 가운데 네모를 끌면 그 줄 기둥이 통째로 옮겨집니다 · 다 하면 「줄」을 다시 눌러 끄기</span>';
+            }
             if (ui.editing && isLineType(ui.addType)) {
                 var fromWhat = ui.addType === '거더' ? '기둥' : '거더·기둥';
                 html += '<span class="map-struct-hint">' + ui.addType + ' 추가: '
@@ -652,7 +777,9 @@
                 if (after) pushHist(B.floorKey(), [{ id: after.id, before: before, after: snap(after) }]);
                 ui.builtSig = ''; commit();
             }
-            else { ui.addType = ui.addType === t ? '' : t; ui.pend = null; ui.builtSig = ''; sync(); }
+            else { ui.addType = ui.addType === t ? '' : t; ui.pend = null; ui.lineMode = false; ui.builtSig = ''; sync(); }
+        } else if (a === 'lines') {
+            ui.lineMode = !ui.lineMode; ui.addType = ''; ui.pend = null; ui.selId = ''; ui.drag = null; ui.builtSig = ''; sync();
         } else if (a === 'del') deleteSelected();
         else if (a === 'undo') undo();
         else if (a === 'redo') redo();

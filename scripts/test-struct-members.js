@@ -258,6 +258,28 @@ assert.ok(layer.includes("if (type === '기둥') { var cs = savedColumnSize(); i
 assert.ok(layer.includes("var COL_SIZE_KEY = 'bsa_struct_col_size:';") && layer.includes('COL_SIZE_KEY + B.floorKey()'), '층마다 따로 기억');
 assert.ok(layer.includes("return type === '기둥' ? { w: s * 0.4, h: s * 0.4 } : { w: s, h: s * 0.5 };"), '구조도 없는 층 첫 기둥은 정사각형');
 
+// ---- 기둥 줄(2026-10-17): 줄 찾기 · 끝 끌면 기울이기 · 가운데 끌면 줄째 옮기기 ----
+{
+    const C = (id, x, y) => ({ id, type: '기둥', x, y, w: 10, h: 10 });
+    const cols = [C('a', 0, 0), C('b', 100, 0), C('c', 200, 0), C('d', 0, 100), C('e', 103, 100), C('f', 200, 100),
+        C('g', 0, 200), C('h', 106, 200), C('i', 200, 200), C('z', 50, 350), { id: 'G1', type: '거더', x: 50, y: 0, w: 80, h: 6 }];
+    const L = S.columnLines(cols, 4, 30);
+    const got = L.map((l) => l.dir + ':' + l.ids.slice().sort().join('')).sort();
+    assert.deepStrictEqual(got, ['h:abc', 'h:def', 'h:ghi', 'v:adg', 'v:beh', 'v:cfi'], '세로 3·가로 3줄(살짝 기운 줄 포함, 홀로 떨어진 기둥·거더 제외): ' + got);
+    const beh = L.find((l) => l.ids.includes('e') && l.dir === 'v');
+    assert.ok(Math.abs(beh.p0.y - 0) < 1e-6 && Math.abs(beh.p1.y - 200) < 1e-6 && beh.p1.x > beh.p0.x, '기운 줄 양 끝');
+    assert.deepStrictEqual(S.columnLines(cols, 4, 1).filter((l) => l.dir === 'v').map((l) => l.ids.slice().sort().join('')).sort(), ['adg', 'cfi'], '허용 각도 밖이면 줄 아님');
+    assert.deepStrictEqual(S.columnLines([C('a', 0, 0)], 4), [], '기둥 하나는 줄 아님');
+    const r = S.rotateAbout({ x: 10, y: 0 }, { x: 0, y: 0 }, Math.PI / 2);
+    assert.ok(Math.abs(r.x) < 1e-9 && Math.abs(r.y - 10) < 1e-9, '점 돌리기');
+}
+assert.ok(layer.includes('ui.lines = api.columnLines(items,'), '편집 「줄」에서 줄 찾기');
+assert.ok(layer.includes('data-act="lines"'), '「줄」 단추');
+assert.ok(layer.includes('var lg = grabLine(p);'), '줄 손잡이 잡기');
+assert.ok(layer.includes("tf = function (q) { return api.rotateAbout(q, dr.pivot, ang); };"), '끝 = 반대쪽 끝을 축으로 기울이기');
+assert.ok(layer.includes("tf = function (q) { return { x: q.x + dx, y: q.y + dy }; };"), '가운데 = 줄째 옮기기');
+assert.ok(layer.includes('if (changes.length) pushHist(fk, changes);'), '줄 끌기는 되돌리기 한 번에');
+
 // ---- 거더·빔은 시작→끝 두 번 눌러 추가(기둥에 붙어 면에서 면까지), 추가 중엔 기둥을 눌러도 고르지 않음 ----
 assert.ok(layer.includes('if (isLineType(ui.addType)) { addLinePoint(p, pad); return; }'));
 assert.ok(layer.includes("if (hit.type === '기둥') return { id: hit.id, x: hit.x, y: hit.y, hx: hit.w / 2, hy: hit.h / 2, on: '기둥' };"), '기둥 중심에 붙는다');
@@ -271,9 +293,22 @@ assert.ok(layer.includes("var lo = dr.which === 'e' ? dr.fixed : Math.min(at, dr
 // ---- 직접 그릴 때 줄 맞춤: 같은 종류·같은 방향 보의 중심선이 가까우면 그 줄에 ----
 assert.ok(layer.includes('var perp = alignPerp(type, horiz, horiz ? (s.y + a.y) / 2 : (s.x + a.x) / 2, th, pad);'));
 assert.ok(layer.includes("if (d.type !== type || (d.w >= d.h) !== horiz) return;"), '같은 종류·같은 방향끼리만');
-// 기둥도 다른 기둥의 세로줄·가로줄에 따로 맞춤(넣을 때·옮겨 놓을 때)
+// 기둥도 다른 기둥의 세로줄·가로줄에 따로 맞춤 — 새로 찍을 때만. 찍은 뒤 끌어 옮기면 놓은 자리 그대로(2026-10-17)
 assert.ok(layer.includes("var at = ui.addType === '기둥' ? alignColumn(p.x, p.y, Math.max(sz.w, sz.h), pad) : p;"));
-assert.ok(layer.includes('now = alignColumn(d.x, d.y, Math.max(d.w, d.h), padM, d.id);'));
+assert.ok(!layer.includes('now = alignColumn(d.x, d.y'), '옮길 때는 찍을 때 줄 맞춤을 안 씀');
+// 옮길 때: 원래 줄엔 약하게(화면 6px), 다른 줄(먼저 옮긴 기둥의 새 줄 포함)엔 붙음 — 끄는 동안 바로 보임
+assert.ok(layer.includes('var al = alignColumnMove(d.x, d.y, Math.max(d.w, d.h), padM, d.id, dr.orig);'), '끄는 동안 줄 맞춤');
+{
+    // alignColumnMove를 떼어 내 실제로 돌려 본다
+    const src = layer.slice(layer.indexOf('function alignColumnMove('), layer.indexOf('function addLinePoint('));
+    const cols = [{ id: 'a', type: '기둥', x: 100, y: 0 }, { id: 'b', type: '기둥', x: 100, y: 50 }, { id: 'm', type: '기둥', x: 130, y: 100 }];
+    const f = new Function('list', src + '; return alignColumnMove;')(() => cols);
+    const orig = { x: 100, y: 100 };   // 옮기는 기둥(c)은 원래 x=100 줄, m은 먼저 옮겨 x=130 새 줄
+    assert.deepStrictEqual(f(108, 100, 10, 2, 'c', orig), { x: 108, y: 100 }, '원래 줄(100)에서 8 떨어지면 안 붙음(약하게)');
+    assert.deepStrictEqual(f(101, 140, 10, 2, 'c', orig), { x: 100, y: 140 }, '원래 줄에 아주 가까우면 붙음(세로로만 옮길 때)');
+    assert.deepStrictEqual(f(127, 100, 10, 2, 'c', orig), { x: 130, y: 100 }, '먼저 옮긴 기둥의 새 줄(130)에 붙음');
+    assert.deepStrictEqual(f(118, 77, 10, 2, 'c', orig), { x: 118, y: 77 }, '어느 줄에서도 멀면 그대로');
+}
 
 // ---- 이어 그리기 끊기: 거더는 사이 기둥에서, 빔은 사이 거더에서 끊고 다시 시작 ----
 {
