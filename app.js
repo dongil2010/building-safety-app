@@ -39889,6 +39889,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     <div class="grid-panel-row">
                         <button type="button" data-act="fillExisting" title="행·열 위치가 없는 마킹만 채움(상세 위치·실 이름은 그대로)">이 층 마킹에 위치 채우기</button>
                         <button type="button" data-act="resetFill" class="danger" title="이 층 마킹 전부의 위치칸(상세 위치·실 이름·예전 글자)을 비우고 행·열 위치를 지금 선 기준으로 다시 씀. 3종은 위치칸에 층만 남김. 되돌리기 한 번으로 취소">위치칸 비우고 행·열 다시 채우기</button>
+                        <button type="button" data-act="clearDetail" class="danger" title="이 층 마킹 전부의 상세 위치를 비움(다시 적을 수 있게). 행·열 위치는 그대로. 3종은 위치칸에 층만 남김. 되돌리기 한 번으로 취소">상세위치 전부 지우기</button>
                         <button type="button" data-act="clearAll" class="danger">이 층 선 모두 지우기</button>
                     </div>
                 </div>
@@ -40004,6 +40005,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         }
         if (act === 'resetFill') {
             resetGridLocationForCurrentFloor();
+        }
+        if (act === 'clearDetail') {
+            clearDetailLocationForCurrentFloor();
         }
     }
 
@@ -40697,6 +40701,53 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             console.warn('[grid-lines] commit', e);
         }
     }
+    /**
+     * 2026-10-19 「상세위치 전부 지우기」 — 이 층 마킹 전부의 상세 위치(location)를 비워 다시 적게 한다.
+     * 대상은 「위치칸 비우고 행·열 다시 채우기」와 같은 목록(이 층 도면에 놓인 마킹, filterMapPlacedDefects).
+     * 행·열 위치(gridLoc)는 그대로 둔다. 3종은 위치칸 층 규칙대로 층만 남김(composeDefectLocation('')).
+     * 예전 실험 데이터(gridLocAuto)는 먼저 gridLoc으로 옮겨 행·열 위치를 잃지 않게 한다.
+     * 칸 시각은 touchDefectUpdatedAt이 location 칸에 찍는다 → 다른 기기의 옛 상세 위치보다 이 지우기가 이긴다.
+     * 되돌리기 한 번으로 전체 취소.
+     */
+    function clearDefectDetailLocation(d, fc) {
+        if (!d) return false;
+        let changed = false;
+        if (d.gridLocAuto && migrateLegacyGridLocation(d, fc)) changed = true;
+        const emptyLoc = composeDefectLocation('', fc);
+        if (String(d.location || '') !== emptyLoc) {
+            d.location = emptyLoc;
+            changed = true;
+        }
+        return changed;
+    }
+
+    async function clearDetailLocationForCurrentFloor() {
+        const fc = state.currentFloor;
+        const emptyLoc = composeDefectLocation('', fc); // 1·2종 '' · 3종 층 이름
+        const list = filterMapPlacedDefects(getCurrentFloorDefects());
+        if (!list.length) {
+            window.showToast?.('이 층에 마킹이 없습니다.', 'info', 2000);
+            return;
+        }
+        const targets = list.filter((d) => String(d.location || '') !== emptyLoc || d.gridLocAuto);
+        if (!targets.length) {
+            window.showToast?.('지울 상세 위치가 없습니다.', 'info', 2000);
+            return;
+        }
+        const floorNote = emptyLoc ? `(3종 시설물: 위치칸에는 층 「${emptyLoc}」만 남깁니다)\n` : '';
+        if (!await window.appConfirm(`이 층 마킹 ${list.length}개 중 상세 위치가 적힌 ${targets.length}개의 상세 위치를 모두 지웁니다.\n`
+            + `행·열 위치는 그대로 둡니다.\n${floorNote}(되돌리기로 한 번에 취소할 수 있습니다)`)) return;
+        if (typeof pushDefectHistory === 'function') pushDefectHistory();
+        let done = 0;
+        targets.forEach((d) => {
+            if (clearDefectDetailLocation(d, fc)) {
+                touchDefectUpdatedAt(d);
+                done += 1;
+            }
+        });
+        afterGridBulkChange(`마킹 ${done}개의 상세 위치를 지웠습니다.`);
+    }
+
     // ---- 구역(한 도면에 여러 층, 2026-09-28) ----
     // 사각형 구역마다 그룹(zoneId)을 따로 두어 번호가 구역마다 새로 시작한다. 계산은 grid-lines.js(restrictGridToZone).
     function gridHasContent(grid) {
