@@ -188,13 +188,30 @@
         return Number.isFinite(n) ? Math.round(n * 100) / 100 : '';
     }
 
-    function ndtRows(st, s, memberName) {
+    /**
+     * 2026-10-19 강도는 저장해 둔 값이 아니라 지금 건물(준공일·점검일)·계산식으로 다시 계산한 최종 강도.
+     * 저장값은 입력할 때의 재령으로 굳어 있어(준공일이 없으면 α 없이), 준공일을 나중에 넣거나 고쳐도
+     * 평가 탭·SafetyMan 엑셀에 반영되지 않았다. 목록·통계·한글 출력과 같은 refreshStrengthItemResults를 쓴다.
+     * 저장 데이터는 바꾸지 않는다. 계산기가 없으면(노드 테스트 등) 저장값.
+     */
+    function strengthFinalOf(it, bldg) {
+        var f = root && typeof root.refreshStrengthItemResults === 'function' ? root.refreshStrengthItemResults : null;
+        if (f) {
+            try {
+                var r = f(it, bldg || undefined);
+                if (r && r.strengthFinal != null && r.strengthFinal !== '') return r.strengthFinal;
+            } catch (e) { /* 저장값으로 */ }
+        }
+        return it.strengthFinal;
+    }
+
+    function ndtRows(st, s, memberName, bldg) {
         var nm = function (v) { return typeof memberName === 'function' ? (memberName(v) || v) : v; };
         var items = (((st && st.ndtData) || {})[s.floorKey] || []).filter(Boolean);
         var rows = [];
         items.forEach(function (it) {
             if (it.category === '강도') {
-                rows.push(['콘크리트 강도', nm(it.component) || '', str(it.location), '측정강도(MPa)', num(it.strengthFinal), '설계강도(MPa)', num(it.designStrength)]);
+                rows.push(['콘크리트 강도', nm(it.component) || '', str(it.location), '측정강도(MPa)', num(strengthFinalOf(it, bldg)), '설계강도(MPa)', num(it.designStrength)]);
             } else if (it.category === '탄산화') {
                 rows.push(['콘크리트 중성화', nm(it.component) || '', str(it.location), '중성화깊이(mm)', num(it.carbDepth), '피복두께(mm)', num(it.carbCover)]);
             }
@@ -245,7 +262,7 @@
                 if (!it) return;
                 var r = row(memberType(nm(it.component)));
                 var v;
-                if (it.category === '강도') { v = parseFloat(it.strengthFinal); if (Number.isFinite(v) && (r.strength == null || v < r.strength)) r.strength = Math.round(v * 10) / 10; }
+                if (it.category === '강도') { v = parseFloat(strengthFinalOf(it, bldg)); if (Number.isFinite(v) && (r.strength == null || v < r.strength)) r.strength = Math.round(v * 10) / 10; }
                 if (it.category === '탄산화') {
                     v = parseFloat(it.carbDepth); if (Number.isFinite(v) && (r.carb == null || v > r.carb)) r.carb = v;
                     v = parseFloat(it.carbCover); if (Number.isFinite(v) && (r.cover == null || v < r.cover)) r.cover = v;
@@ -297,7 +314,7 @@
         '박리·박락 건수', '박리 깊이(mm)', 'SafetyMan 박리 구간', '누수·백태 건수', '백태 면적율(%)', '누수·백태 비고',
         '철근노출 건수', '노출 면적율(%)', '철근노출 비고', '근거 결함 No.'];
 
-    function sampleBlock(st, s, memberName, idx) {
+    function sampleBlock(st, s, memberName, idx, bldg) {
         var aoa = [
             ['표본층 ' + idx, sampleName(s), '구분', s.status, '부분 비고(구조형식·부재)', s.partNote || ''],
             ['[부재별 최악값 — 균열 · 표면노후(박리·박락, 누수·백태, 철근노출)]'],
@@ -305,7 +322,7 @@
         ].concat(memberRows(s, memberName));
         aoa.push(['[비파괴 시험값' + (s.subName ? ' — 층 공통(구역으로 나누지 않음)' : '') + ']']);
         aoa.push(['항목', '부재', '위치', '값1 항목', '값1', '값2 항목', '값2']);
-        return aoa.concat(ndtRows(st, s, memberName));
+        return aoa.concat(ndtRows(st, s, memberName, bldg));
     }
 
     function buildSheets(opts) {
@@ -357,7 +374,7 @@
                 s.sheet = g.sheet;
                 sum.push([g.sheet, sampleName(s), s.floorLabel, s.subName, s.partNote, s.status, s.defects.length]);
                 aoa.push([]);
-                aoa = aoa.concat(sampleBlock(st, s, o.memberName, i + 1));
+                aoa = aoa.concat(sampleBlock(st, s, o.memberName, i + 1, o.bldg));
             });
             unitSheets.push({ name: g.sheet, aoa: aoa, cols: [12, 14, 9, 13, 18, 11, 12, 22, 12, 13, 20, 11, 13, 14, 30] });
         });
@@ -393,7 +410,7 @@
         '10. 부재변형·기울기·부동침하는 이 파일에 넣지 않았습니다(건물 전체 항목). 등급 계산은 하지 않습니다 — SafetyMan에서 계산하세요.'
     ];
 
-    var api = { INPUT_ITEMS: INPUT_ITEMS, BASE_MEMBERS: BASE_MEMBERS, unitComputed: unitComputed, cellValue: cellValue, unitMembers: unitMembers,
+    var api = { strengthFinalOf: strengthFinalOf, INPUT_ITEMS: INPUT_ITEMS, BASE_MEMBERS: BASE_MEMBERS, unitComputed: unitComputed, cellValue: cellValue, unitMembers: unitMembers,
         buildSheets: buildSheets, buildSamples: buildSamples, memberType: memberType, evalMemberOf: evalMemberOf, unitMemberStatus: unitMemberStatus, defectKind: defectKind,
         crackWidthOf: crackWidthOf, crackBand: crackBand, spallDepthOf: spallDepthOf, spallBand: spallBand, NOTES: NOTES };
     if (typeof module !== 'undefined' && module.exports) module.exports = api;

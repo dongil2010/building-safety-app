@@ -8650,6 +8650,11 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             }
             saveStateToLocalStorage();
             if (typeof refreshCurrentBuildingFromState === 'function') refreshCurrentBuildingFromState();
+            // 2026-10-19 준공일을 고친 뒤 열려 있는 비파괴 입력창의 재령·α·수명 안내도 바로 다시 계산
+            try {
+                if (typeof recalcAllStrengthSlots === 'function') recalcAllStrengthSlots();
+                if (typeof recalcNdtCarbonation === 'function') recalcNdtCarbonation();
+            } catch (_e) { /* 입력창이 없으면 무시 */ }
             applyInspectionSelectsFromBuilding(
                 (window.state.buildings || []).find((item) => item && item.id === bldg.id) || bldg
             );
@@ -15196,7 +15201,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             `;
             }).join('');
         } else if (currentCat === '탄산화') {
-            tbody.innerHTML = items.map((item, idx) => `
+            // 2026-10-19 저장값이 아니라 지금 준공일로 다시 계산해 보여 준다
+            tbody.innerHTML = items.map((rawCarb) => refreshCarbItemResults(rawCarb)).map((item, idx) => `
                 <tr>
                     <td style="font-weight:700; color:#6b6b6b;">${item.no || (idx + 1)}</td>
                     <td style="font-weight:700;">${item.location || '-'}</td>
@@ -15662,6 +15668,27 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         });
     }
     window.refreshStrengthItemResults = refreshStrengthItemResults;
+
+    /**
+     * 2026-10-19 「준공일 데이터를 나중에 입력하면 재령일 적용이 안되는 버그」: 탄산화도 저장할 때의 재령으로
+     * 수명·잔존수명이 굳어 있었다. 강도와 같이 보여 줄 때·내보낼 때 지금 준공일로 다시 계산한 사본을 쓴다
+     * (저장 데이터는 안 바꾼다). 깊이·피복이 없어 계산이 안 되면 저장값 그대로.
+     */
+    function refreshCarbItemResults(item, bldg) {
+        if (!item || item.category !== '탄산화') return item;
+        const calcBldg = (bldg && typeof bldg === 'object') ? bldg : window.state.currentBuilding;
+        const ageDays = getConcreteAgeInDays(calcBldg);
+        const calc = calcCarbonation(parseFloat(item.carbDepth), parseFloat(item.carbCover), ageDays !== null ? ageDays / 365 : null);
+        if (!calc) return item;
+        return Object.assign({}, item, {
+            carbAgeDays: ageDays,
+            carbRemainMm: calc.remainMm,
+            carbRate: calc.rate,
+            carbLifeYears: calc.lifeYears,
+            carbRemainingLifeYears: calc.remainingLifeYears
+        });
+    }
+    window.refreshCarbItemResults = refreshCarbItemResults;
 
     // 콘크리트 반발경도 성과표(hwpx 내보내기 전용) — NO. 하나(위치 슬롯 하나)의 반발치 원시값
     // 5행×4열 그리드, 평균경도(R)·각도보정·Ro, 재령·α, 압축강도(식별 1식/2식/3식)+최종강도,
@@ -16585,8 +16612,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     }
 
     // 준공일(건축물 개요) ~ 점검일 사이 재령일수를 구한다. null이면 계산 불가(준공일 미입력 등).
-    function getConcreteAgeInDays() {
-        const bldg = window.state.currentBuilding;
+    function getConcreteAgeInDays(bldgArg) {
+        const bldg = bldgArg || window.state.currentBuilding;
         if (!bldg || !bldg.completionDate) return null;
         const completion = new Date(bldg.completionDate);
         const inspection = bldg.date ? new Date(bldg.date) : new Date();
@@ -49159,7 +49186,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 const fireproofItemsHwpx = allNdtItemsForHwpx.filter(item => item.category === '내화피복');
                 const strengthItemsHwpx = allNdtItemsForHwpx.filter(item => item.category === '강도')
                     .map(item => refreshStrengthItemResults(item, bldg));
-                const carbItemsHwpx = allNdtItemsForHwpx.filter(item => item.category === '탄산화');
+                const carbItemsHwpx = allNdtItemsForHwpx.filter(item => item.category === '탄산화')
+                    .map(item => refreshCarbItemResults(item, bldg));
                 const tiltItemsHwpx = allNdtItemsForHwpx.filter(item => item.category === '기울기');
                 const settlementGroupsHwpx = allDispGroupsForHwpx.filter(g => !g.category || g.category === '변위');
                 const memberDispGroupsHwpx = allDispGroupsForHwpx.filter(g => g.category === '부재변위');
@@ -51663,7 +51691,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 const fireproofItemsHwpx = allNdtItemsForHwpx.filter(item => item.category === '내화피복');
                 const strengthItemsHwpx = allNdtItemsForHwpx.filter(item => item.category === '강도')
                     .map(item => refreshStrengthItemResults(item, bldg));
-                const carbItemsHwpx = allNdtItemsForHwpx.filter(item => item.category === '탄산화');
+                const carbItemsHwpx = allNdtItemsForHwpx.filter(item => item.category === '탄산화')
+                    .map(item => refreshCarbItemResults(item, bldg));
                 const tiltItemsHwpx = allNdtItemsForHwpx.filter(item => item.category === '기울기');
                 const settlementGroupsHwpx = allDispGroupsForHwpx.filter(g => !g.category || g.category === '변위');
                 const memberDispGroupsHwpx = allDispGroupsForHwpx.filter(g => g.category === '부재변위');
