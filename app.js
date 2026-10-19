@@ -37061,10 +37061,14 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
     function updatePhoneRelayButtonLabel() {
         const waiting = (window._phoneRelayInbox || []).length;
+        // 2026-10-19 앱의 「오프라인 직접 받기」가 켜져 있어도 연동 중으로 보여 준다
+        const nativeReceiving = !!(window.BsaPhotoRelayUI && window.BsaPhotoRelayUI.isReceiving());
+        const linked = !!phoneRelayUnsubscribe || nativeReceiving;
         const btn = document.getElementById('btnTriggerPhoneRelay');
         if (btn) {
-            if (phoneRelayUnsubscribe) {
-                btn.innerHTML = `<i class="fa-solid fa-mobile-screen-button"></i> 📱 휴대폰 연동됨${waiting ? ` (대기중 사진 ${waiting}장)` : ''}`;
+            if (linked) {
+                const label = phoneRelayUnsubscribe ? '휴대폰 연동됨' : '오프라인 직접 받는 중';
+                btn.innerHTML = `<i class="fa-solid fa-mobile-screen-button"></i> 📱 ${label}${waiting ? ` (대기중 사진 ${waiting}장)` : ''}`;
             } else {
                 btn.innerHTML = '<i class="fa-solid fa-mobile-screen-button"></i> 📱 휴대폰으로 촬영해서 바로 받기';
             }
@@ -37074,9 +37078,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const badge = document.getElementById('phoneRelayStatusBadge');
         const badgeText = document.getElementById('phoneRelayStatusText');
         if (badge) {
-            badge.style.display = phoneRelayUnsubscribe ? 'flex' : 'none';
+            badge.style.display = linked ? 'flex' : 'none';
         }
-        if (badgeText && phoneRelayUnsubscribe) {
+        if (badgeText && linked) {
             badgeText.textContent = waiting
                 ? `휴대폰 연동됨 — 대기중인 사진 ${waiting}장이 자동으로 추가됩니다`
                 : '휴대폰 연동됨 — 휴대폰에서 촬영하면 자동으로 여기에 추가됩니다';
@@ -37209,6 +37213,21 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     }
 
     function openPhoneRelayModal() {
+        // 2026-10-19 앱(APK)이면 인터넷이 없어도 창을 열고 「오프라인 직접 받기」로 — 예전엔 경고만 뜨고 창이 안 열렸음
+        const nativeRelayUi = (window.BsaPhotoRelayUI && window.BsaPhotoRelayUI.available()) ? window.BsaPhotoRelayUI : null;
+        if (nativeRelayUi && (!db || typeof QRCode === 'undefined')) {
+            if (elements.mobileQrModal) {
+                elements.mobileQrModal.style.display = 'flex';
+                elements.mobileQrModal.classList.add('open');
+            }
+            const offStatus = document.getElementById('mobileQrStatus');
+            if (offStatus) {
+                offStatus.textContent = '인터넷(서버)에 연결되지 않아 이 방식은 지금 쓸 수 없습니다. 「오프라인 직접 받기」를 쓰세요.';
+                offStatus.style.color = '';
+            }
+            nativeRelayUi.onModalOpen({ onlineUnavailable: true });
+            return;
+        }
         if (!db) {
             window.showToast('네트워크(Firebase) 연결이 필요한 기능입니다. 오프라인 상태에서는 사용할 수 없습니다.', 'warning');
             return;
@@ -37222,6 +37241,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             elements.mobileQrModal.style.display = 'flex';
             elements.mobileQrModal.classList.add('open');
         }
+        if (nativeRelayUi) nativeRelayUi.onModalOpen({ onlineUnavailable: false });
 
         if (phoneRelayUnsubscribe) {
             // 이미 연동되어 있으면 QR을 새로 만들지 않고 연결 상태만 보여줌
@@ -37244,6 +37264,15 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             e.preventDefault();
             openPhoneRelayModal();
         };
+    }
+
+    // 2026-10-19 오프라인 직접 사진 전송(앱 전용, js/core/photo-relay-native.js): 받은 사진은 위 receivePhoneRelayPhoto 로
+    if (window.BsaPhotoRelayUI && typeof window.BsaPhotoRelayUI.init === 'function') {
+        window.BsaPhotoRelayUI.init({
+            receive: (dataUrl) => receivePhoneRelayPhoto(dataUrl),
+            toast: (msg, type) => { if (typeof window.showToast === 'function') window.showToast(msg, type || 'info'); },
+            onReceiverChange: () => updatePhoneRelayButtonLabel()
+        });
     }
 
     const btnCloseQrModal = document.getElementById('btnCloseQrModal');
@@ -55166,7 +55195,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     window._justRegistering = false;
 
     // 앱 번호. 포팅하면 이 번호가 1 오르고, 같은 번호가 Storage releases/latest.json 에 올라간다.
-    window.BSA_APP_BUILD = { versionCode: 20, versionName: '1.3.12' };
+    window.BSA_APP_BUILD = { versionCode: 21, versionName: '1.3.13' };
 
     function isNativeAndroidApp() {
         try {

@@ -1,0 +1,388 @@
+package kr.buildingsafety.inspection;
+
+import android.Manifest;
+import android.app.Activity;
+import android.content.ClipData;
+import android.content.Context;
+import android.content.Intent;
+import android.content.SharedPreferences;
+import android.content.pm.PackageManager;
+import android.content.pm.ResolveInfo;
+import android.location.LocationManager;
+import android.net.Uri;
+import android.os.Build;
+import android.provider.MediaStore;
+import android.provider.Settings;
+import androidx.activity.result.ActivityResult;
+import androidx.core.content.FileProvider;
+import com.getcapacitor.JSArray;
+import com.getcapacitor.JSObject;
+import com.getcapacitor.PermissionState;
+import com.getcapacitor.Plugin;
+import com.getcapacitor.PluginCall;
+import com.getcapacitor.PluginMethod;
+import com.getcapacitor.annotation.ActivityCallback;
+import com.getcapacitor.annotation.CapacitorPlugin;
+import com.getcapacitor.annotation.Permission;
+import com.getcapacitor.annotation.PermissionCallback;
+import java.io.File;
+import java.text.SimpleDateFormat;
+import java.util.ArrayList;
+import java.util.Date;
+import java.util.List;
+import java.util.Locale;
+import kr.buildingsafety.inspection.relay.QrScanActivity;
+import kr.buildingsafety.inspection.relay.ReceiverHub;
+import kr.buildingsafety.inspection.relay.RelayEvents;
+import kr.buildingsafety.inspection.relay.SenderHub;
+import kr.buildingsafety.inspection.relay.SnapProtocol;
+
+/**
+ * 2026-10-19 인터넷 없이 기기끼리 현장 사진을 주고받는다(SnapSync 규격 호환).
+ * 받는 기기: receiverStart → 전용 Wi-Fi + QR, 사진이 오면 'photoReceived' {id, name, dataUrl} → 웹이 ackInbox({ids}).
+ * 보내는 기기: senderScan(QR 읽고 그 Wi-Fi 에 연결) → capture(순정 카메라로 찍고 자동 보내기).
+ * JS: Capacitor.Plugins.BsaPhotoRelay
+ */
+@CapacitorPlugin(
+    name = "BsaPhotoRelay",
+    permissions = {
+        @Permission(strings = { Manifest.permission.CAMERA }, alias = "camera"),
+        @Permission(strings = { Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION }, alias = "location"),
+        @Permission(strings = { "android.permission.NEARBY_WIFI_DEVICES" }, alias = "nearby"),
+        @Permission(strings = { "android.permission.POST_NOTIFICATIONS" }, alias = "notify")
+    }
+)
+public class PhotoRelayPlugin extends Plugin implements RelayEvents {
+    private static final String PREFS = "bsa_photo_relay";
+    private static final String KEY_PENDING = "pendingCapture";
+
+    @Override
+    public void load() {
+        ReceiverHub.get().setListener(this);
+        SenderHub.get().setListener(this);
+        recoverPendingCapture();
+    }
+
+    @Override
+    protected void handleOnDestroy() {
+        ReceiverHub.get().clearListener(this);
+        SenderHub.get().clearListener(this);
+        super.handleOnDestroy();
+    }
+
+    @Override
+    public void onRelayEvent(String type, JSObject data) {
+        notifyListeners(type, data);
+    }
+
+    private Context ctx() { return getContext().getApplicationContext(); }
+
+    private SharedPreferences prefs() { return ctx().getSharedPreferences(PREFS, Context.MODE_PRIVATE); }
+
+    /** 순정 카메라가 떠 있는 사이 앱 화면이 정리돼도, 찍힌 사진은 다시 켤 때 보낼함으로 들어간다. */
+    private void recoverPendingCapture() {
+        String path = prefs().getString(KEY_PENDING, null);
+        if (path == null) return;
+        prefs().edit().remove(KEY_PENDING).apply();
+        File f = new File(path);
+        if (f.exists() && f.length() > 0) {
+            SenderHub.get().enqueue(ctx(), f);
+            SenderHub.get().start(ctx());
+        } else if (f.exists()) {
+            f.delete();
+        }
+    }
+
+    @PluginMethod
+    public void isSupported(PluginCall call) {
+        JSObject o = new JSObject();
+        o.put("receiver", Build.VERSION.SDK_INT >= Build.VERSION_CODES.O);
+        o.put("sender", true);
+        o.put("autoConnect", Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q);
+        o.put("sdk", Build.VERSION.SDK_INT);
+        o.put("model", Build.MODEL);
+        call.resolve(o);
+    }
+
+    // ───────── 받기 ─────────
+
+    private String[] receiverAliases() {
+        List<String> a = new ArrayList<>();
+        if (Build.VERSION.SDK_INT >= 33) { a.add("nearby"); a.add("notify"); }
+        else a.add("location");
+        return a.toArray(new String[0]);
+    }
+
+    private boolean receiverPermsOk() {
+        if (Build.VERSION.SDK_INT >= 33) return getPermissionState("nearby") == PermissionState.GRANTED;
+        return getPermissionState("location") == PermissionState.GRANTED;
+    }
+
+    @PluginMethod
+    public void receiverStart(PluginCall call) {
+        if (!receiverPermsOk() || (Build.VERSION.SDK_INT >= 33 && getPermissionState("notify") == PermissionState.PROMPT)) {
+            requestPermissionForAliases(receiverAliases(), call, "receiverPermCallback");
+            return;
+        }
+        doReceiverStart(call);
+    }
+
+    @PermissionCallback
+    private void receiverPermCallback(PluginCall call) {
+        if (!receiverPermsOk()) {
+            call.reject(Build.VERSION.SDK_INT >= 33
+                ? "「근처 기기」 권한이 있어야 전용 Wi-Fi를 켤 수 있습니다. 앱 설정 > 권한에서 허용해 주세요."
+                : "「위치」 권한이 있어야 전용 Wi-Fi를 켤 수 있습니다. 앱 설정 > 권한에서 허용해 주세요.", "PERMISSION");
+            return;
+        }
+        doReceiverStart(call);
+    }
+
+    private boolean locationOn() {
+        try {
+            LocationManager lm = (LocationManager) ctx().getSystemService(Context.LOCATION_SERVICE);
+            if (lm == null) return true;
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) return lm.isLocationEnabled();
+            return lm.isProviderEnabled(LocationManager.GPS_PROVIDER) || lm.isProviderEnabled(LocationManager.NETWORK_PROVIDER);
+        } catch (Exception e) {
+            return true;
+        }
+    }
+
+    private void doReceiverStart(PluginCall call) {
+        if (Build.VERSION.SDK_INT < 33 && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && !locationOn()) {
+            call.reject("이 기기는 위치(GPS)가 켜져 있어야 전용 Wi-Fi를 켤 수 있습니다. 위치를 켠 뒤 다시 눌러 주세요.", "LOCATION_OFF");
+            return;
+        }
+        getActivity().runOnUiThread(() -> ReceiverHub.get().start(ctx(), (ok, code, message) -> {
+            kr.buildingsafety.inspection.relay.PhotoRelayService.refresh(ctx());
+            JSObject s = ReceiverHub.get().status(ctx());
+            if (ok) {
+                if (message != null) s.put("warning", message);
+                call.resolve(s);
+            } else {
+                call.reject(message, code);
+            }
+        }));
+    }
+
+    @PluginMethod
+    public void receiverStop(PluginCall call) {
+        ReceiverHub.get().stop();
+        call.resolve(ReceiverHub.get().status(ctx()));
+    }
+
+    @PluginMethod
+    public void receiverStatus(PluginCall call) {
+        call.resolve(ReceiverHub.get().status(ctx()));
+    }
+
+    @PluginMethod
+    public void pendingInbox(PluginCall call) {
+        int limit = call.getInt("limit", 5);
+        if (limit < 1) limit = 1;
+        if (limit > 20) limit = 20;
+        final int lim = limit;
+        new Thread(() -> {
+            JSObject o = new JSObject();
+            o.put("items", ReceiverHub.get().pending(ctx(), lim));
+            o.put("total", ReceiverHub.get().pendingCount(ctx()));
+            call.resolve(o);
+        }, "bsa-relay-pending").start();
+    }
+
+    @PluginMethod
+    public void ackInbox(PluginCall call) {
+        JSArray ids = call.getArray("ids");
+        List<String> list = new ArrayList<>();
+        if (ids != null) {
+            for (int i = 0; i < ids.length(); i++) {
+                String id = ids.optString(i, null);
+                if (id != null) list.add(id);
+            }
+        }
+        JSObject o = new JSObject();
+        o.put("removed", ReceiverHub.get().ack(ctx(), list));
+        call.resolve(o);
+    }
+
+    // ───────── 보내기 ─────────
+
+    @PluginMethod
+    public void senderScan(PluginCall call) {
+        if (getPermissionState("camera") != PermissionState.GRANTED) {
+            requestPermissionForAlias("camera", call, "scanPermCallback");
+            return;
+        }
+        launchScan(call);
+    }
+
+    @PermissionCallback
+    private void scanPermCallback(PluginCall call) {
+        if (getPermissionState("camera") != PermissionState.GRANTED) {
+            call.reject("카메라 권한이 있어야 QR을 읽을 수 있습니다.", "PERMISSION");
+            return;
+        }
+        launchScan(call);
+    }
+
+    private void launchScan(PluginCall call) {
+        requestNotifyOnce();
+        startActivityForResult(call, new Intent(getContext(), QrScanActivity.class), "scanResult");
+    }
+
+    @ActivityCallback
+    private void scanResult(PluginCall call, ActivityResult result) {
+        if (call == null) return;
+        if (result.getResultCode() != Activity.RESULT_OK || result.getData() == null) {
+            JSObject o = new JSObject();
+            o.put("cancelled", true);
+            String err = result.getData() == null ? null : result.getData().getStringExtra("error");
+            if (err != null) o.put("message", err);
+            call.resolve(o);
+            return;
+        }
+        String text = result.getData().getStringExtra(QrScanActivity.EXTRA_TEXT);
+        String[] wifi = SnapProtocol.parseWifiQr(text);
+        if (wifi == null) {
+            call.reject("Wi-Fi QR이 아닙니다. 받는 기기의 「오프라인 직접 받기」 화면 QR을 비춰 주세요.", "NOT_WIFI_QR");
+            return;
+        }
+        boolean auto = SenderHub.get().connect(ctx(), wifi[0], wifi[1], wifi[2]);
+        JSObject o = new JSObject();
+        o.put("ssid", wifi[0]);
+        o.put("autoConnect", auto);
+        o.put("status", SenderHub.get().status(ctx()));
+        call.resolve(o);
+    }
+
+    private void requestNotifyOnce() {
+        if (Build.VERSION.SDK_INT >= 33 && getPermissionState("notify") == PermissionState.PROMPT) {
+            try {
+                getActivity().requestPermissions(new String[] { "android.permission.POST_NOTIFICATIONS" }, 7302);
+            } catch (Exception ignored) { }
+        }
+    }
+
+    /** QR 없이(이미 그 Wi-Fi 에 직접 붙어 있을 때) 찾기·보내기만 켠다. */
+    @PluginMethod
+    public void senderStart(PluginCall call) {
+        SenderHub.get().start(ctx());
+        call.resolve(SenderHub.get().status(ctx()));
+    }
+
+    @PluginMethod
+    public void senderStop(PluginCall call) {
+        SenderHub.get().stop();
+        call.resolve(SenderHub.get().status(ctx()));
+    }
+
+    @PluginMethod
+    public void senderStatus(PluginCall call) {
+        call.resolve(SenderHub.get().status(ctx()));
+    }
+
+    @PluginMethod
+    public void clearOutbox(PluginCall call) {
+        JSObject o = new JSObject();
+        o.put("removed", SenderHub.get().clearOutbox(ctx()));
+        call.resolve(o);
+    }
+
+    @PluginMethod
+    public void capture(PluginCall call) {
+        if (getPermissionState("camera") != PermissionState.GRANTED) {
+            requestPermissionForAlias("camera", call, "capturePermCallback");
+            return;
+        }
+        launchCamera(call);
+    }
+
+    @PermissionCallback
+    private void capturePermCallback(PluginCall call) {
+        if (getPermissionState("camera") != PermissionState.GRANTED) {
+            call.reject("카메라 권한이 있어야 촬영할 수 있습니다.", "PERMISSION");
+            return;
+        }
+        launchCamera(call);
+    }
+
+    /** 순정 카메라(ACTION_IMAGE_CAPTURE)로 찍는다. 결과 파일은 앱 캐시 → 찍고 「확인」을 누르면 보낼함으로. */
+    private void launchCamera(PluginCall call) {
+        try {
+            File dir = new File(getContext().getCacheDir(), "relay-capture");
+            if (!dir.exists()) dir.mkdirs();
+            String stamp = new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(new Date());
+            File file = new File(dir, "SNAP_" + stamp + ".jpg");
+            if (!file.exists()) file.createNewFile();
+            Uri uri = FileProvider.getUriForFile(getContext(), getContext().getPackageName() + ".fileprovider", file);
+            Intent intent = new Intent(MediaStore.ACTION_IMAGE_CAPTURE);
+            intent.putExtra(MediaStore.EXTRA_OUTPUT, uri);
+            intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
+            intent.setClipData(ClipData.newUri(getContext().getContentResolver(), "photo", uri));
+            List<ResolveInfo> apps = getContext().getPackageManager().queryIntentActivities(intent, PackageManager.MATCH_DEFAULT_ONLY);
+            if (apps == null || apps.isEmpty()) {
+                file.delete();
+                call.reject("이 폰에서 카메라 앱을 찾지 못했습니다.", "NO_CAMERA_APP");
+                return;
+            }
+            for (ResolveInfo ri : apps) {
+                getContext().grantUriPermission(ri.activityInfo.packageName, uri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
+            }
+            prefs().edit().putString(KEY_PENDING, file.getAbsolutePath()).commit();
+            SenderHub.get().start(ctx());
+            startActivityForResult(call, intent, "captureResult");
+        } catch (Exception e) {
+            call.reject("카메라를 열지 못했습니다: " + e.getMessage(), "CAMERA_ERROR");
+        }
+    }
+
+    @ActivityCallback
+    private void captureResult(PluginCall call, ActivityResult result) {
+        String path = prefs().getString(KEY_PENDING, null);
+        prefs().edit().remove(KEY_PENDING).apply();
+        String id = null;
+        if (path != null) {
+            File f = new File(path);
+            if (result.getResultCode() == Activity.RESULT_OK && f.exists() && f.length() > 0) {
+                id = SenderHub.get().enqueue(ctx(), f);
+            } else if (f.exists()) {
+                f.delete();
+            }
+        }
+        if (call == null) return;
+        JSObject o = new JSObject();
+        o.put("captured", id != null);
+        if (id != null) o.put("id", id);
+        o.put("status", SenderHub.get().status(ctx()));
+        call.resolve(o);
+    }
+
+    // ───────── 설정 화면 ─────────
+
+    @PluginMethod
+    public void openWifiSettings(PluginCall call) {
+        openSettings(new Intent(Settings.ACTION_WIFI_SETTINGS));
+        call.resolve();
+    }
+
+    @PluginMethod
+    public void openLocationSettings(PluginCall call) {
+        openSettings(new Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS));
+        call.resolve();
+    }
+
+    @PluginMethod
+    public void openAppSettings(PluginCall call) {
+        openSettings(new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:" + getContext().getPackageName())));
+        call.resolve();
+    }
+
+    private void openSettings(Intent i) {
+        try {
+            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            getContext().startActivity(i);
+        } catch (Exception ignored) { }
+    }
+}
