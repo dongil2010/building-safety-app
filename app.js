@@ -23846,7 +23846,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             row.classList.add('map-unregistered');
             if (window._pendingMapRegisterDefectId === d.id) row.classList.add('is-pending-map-register');
         }
-        if (d.isBookmark || d.isPriorityManage) row.classList.add('is-important');
+        if (d.isBookmark) row.classList.add('is-important'); // 「중요」 고른 것만(중점관리만으로는 아님) — 도면과 같게
         const badge = document.createElement('span');
         badge.className = 'defect-badge-no';
         if (isUnregistered) badge.classList.add('badge-unregistered');
@@ -24917,11 +24917,13 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     }
 
     // arrows: "마킹 추가"로 묶인 그룹을 하나의 박스+여러 화살표로 그릴 때 전달하는 {targetX,targetY}[] (없으면 defect 자신의 화살표 1개만 그림, 기존과 동일)
+    // 2026-10-19 도면의 「중요」는 사용자가 「중요」를 고른 마킹(isBookmark)에만 — 중점관리만으로는 붙이지 않는다
+    // (중점관리 표시는 핀 색(녹색)·중점관리 표·비교사진으로 그대로).
     function defectHasCornerMark(defect) {
         if (!defect) return false;
-        if (defect.isBookmark || defect.isPriorityManage) return true;
+        if (defect.isBookmark) return true;
         if (!defect.groupId || typeof getDefectMarkingGroupMembers !== 'function') return false;
-        return getDefectMarkingGroupMembers(defect.groupId).some((m) => m && (m.isBookmark || m.isPriorityManage));
+        return getDefectMarkingGroupMembers(defect.groupId).some((m) => m && m.isBookmark);
     }
 
     /**
