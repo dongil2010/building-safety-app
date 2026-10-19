@@ -65,6 +65,10 @@ public final class SenderHub {
     private volatile int receiverPort = SnapProtocol.DEFAULT_PORT;
     private volatile String receiverName;
     private final Map<String, Long> beaconIps = Collections.synchronizedMap(new LinkedHashMap<>());
+    private final Map<String, Integer> beaconPorts = Collections.synchronizedMap(new LinkedHashMap<>());
+    /** 「같은 Wi-Fi」 QR 로 받은 받는 기기 주소(핫스팟 없이 공유기로). 있으면 Wi-Fi 를 바꾸지 않고 여기로 보낸다. */
+    private volatile String directIp;
+    private volatile int directPort = SnapProtocol.DEFAULT_PORT;
     private volatile String state = "idle";
     private volatile String message;
     private volatile int sent;
@@ -127,6 +131,7 @@ public final class SenderHub {
      */
     private synchronized boolean connect(Context context, String wifiSsid, String pass, String auth, boolean retry) {
         app = context.getApplicationContext();
+        directIp = null;
         start(context);
         ssid = wifiSsid;
         releaseRequest();
@@ -193,6 +198,21 @@ public final class SenderHub {
         }
     }
 
+    /** 「같은 Wi-Fi」 QR: 지금 붙어 있는 Wi-Fi 그대로, 받는 기기 주소로 바로 보낸다. */
+    public synchronized void connectLan(Context context, String ip, int port, String receiverLabel, String wifiName) {
+        app = context.getApplicationContext();
+        releaseRequest();
+        directIp = ip;
+        directPort = port;
+        receiverIp = null;
+        receiverName = receiverLabel == null || receiverLabel.isEmpty() ? null : receiverLabel;
+        ssid = wifiName == null || wifiName.isEmpty() ? null : wifiName;
+        message = null;
+        start(context);
+        wake();
+        emitStatus();
+    }
+
     private void releaseRequest() {
         ConnectivityManager.NetworkCallback cb = requestCb;
         requestCb = null;
@@ -238,6 +258,7 @@ public final class SenderHub {
         receiverIp = null;
         receiverName = null;
         ssid = null;
+        directIp = null;
         state = "idle";
         message = null;
         if (app != null) PhotoRelayService.refresh(app);
@@ -304,13 +325,25 @@ public final class SenderHub {
             long now = System.currentTimeMillis();
             for (String ip : recent) if (now - beaconIps.get(ip) < 15000) candidates.add(ip);
         }
+        String direct = directIp;
+        if (direct != null) {
+            // 같은 Wi-Fi QR: 그 주소부터(포트도 QR 그대로)
+            if (reachable(net, direct, directPort)) {
+                receiverIp = direct;
+                receiverPort = directPort;
+                return true;
+            }
+            message = "받는 기기(" + direct + ")에 닿지 않습니다. 두 기기가 같은 Wi-Fi(공유기)에 연결돼 있는지 보세요. 게스트 Wi-Fi·기기 간 차단(AP 격리)이 켜진 공유기는 안 됩니다.";
+        }
         candidates.addAll(gatewayIps(net));
         candidates.add(FALLBACK_IP);
         for (String ip : candidates) {
             if (!active) return false;
-            if (reachable(net, ip, SnapProtocol.DEFAULT_PORT)) {
+            Integer bp = beaconPorts.get(ip);
+            int port = bp == null ? SnapProtocol.DEFAULT_PORT : bp;
+            if (reachable(net, ip, port)) {
                 receiverIp = ip;
-                receiverPort = SnapProtocol.DEFAULT_PORT;
+                receiverPort = port;
                 return true;
             }
         }
@@ -325,6 +358,9 @@ public final class SenderHub {
             if (net == null) {
                 state = connecting ? "connecting" : "no_wifi";
                 receiverIp = null;
+                if (directIp != null && !connecting) {
+                    message = "이 폰이 Wi-Fi에 연결돼 있지 않습니다. 받는 기기와 같은 Wi-Fi" + (ssid != null ? "(「" + ssid + "」)" : "") + "에 연결해 주세요.";
+                }
             } else if (receiverIp == null) {
                 state = "searching";
                 emitStatus();
@@ -473,6 +509,7 @@ public final class SenderHub {
                     if (b == null) continue;
                     beaconIps.remove(b[1]);
                     beaconIps.put(b[1], System.currentTimeMillis());
+                    try { beaconPorts.put(b[1], Integer.parseInt(b[2])); } catch (Exception ignored) { }
                     if (b[1].equals(receiverIp)) receiverName = b[0];
                     if (receiverIp == null) { receiverName = b[0]; wake(); }
                 }
@@ -505,6 +542,8 @@ public final class SenderHub {
         o.put("sending", sendingName);
         o.put("lastSent", lastSentName);
         o.put("message", message);
+        o.put("mode", directIp != null ? "lan" : (ssid != null ? "wifi" : null));
+        o.put("directIp", directIp);
         return o;
     }
 

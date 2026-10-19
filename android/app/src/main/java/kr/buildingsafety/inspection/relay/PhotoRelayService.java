@@ -23,7 +23,8 @@ public class PhotoRelayService extends Service {
     private static final String ACTION_STOP = "kr.buildingsafety.inspection.relay.STOP";
     private static volatile boolean running;
 
-    /** 받기·보내기 중 하나라도 켜져 있으면 서비스를 띄우고 알림 글을 고친다. 둘 다 꺼졌으면 내린다. */
+    /** 받기·보내기 중 하나라도 켜져 있으면 서비스를 띄우고 알림 글을 고친다. 둘 다 꺼졌으면 내린다.
+     * 서비스가 못 떠도 받기·보내기 자체는 그대로 돈다(화면이 켜져 있는 동안). 실패는 진단 줄에 남긴다. */
     public static void refresh(Context context) {
         if (context == null) return;
         Context c = context.getApplicationContext();
@@ -36,32 +37,56 @@ public class PhotoRelayService extends Service {
             } else if (running) {
                 c.stopService(new Intent(c, PhotoRelayService.class));
             }
-        } catch (Exception ignored) {
+        } catch (Throwable e) {
             // Android 12+ 는 앱이 뒤에 있을 때 전경 서비스를 새로 못 띄운다 — 이미 떠 있으면 문제없음
+            RelayDiag.error(c, "FGS_START", e.getClass().getSimpleName() + ": " + e.getMessage());
         }
     }
 
-    @Override
-    public int onStartCommand(Intent intent, int flags, int startId) {
-        if (intent != null && ACTION_STOP.equals(intent.getAction())) {
-            ReceiverHub.get().stop();
-            SenderHub.get().stop();
-            stopForegroundCompat();
-            stopSelf();
-            running = false;
-            return START_NOT_STICKY;
+    /**
+     * startForegroundService 로 띄웠으면 무슨 일이 있어도 startForeground 를 먼저 불러야 한다.
+     * 예전엔 실패하면 바로 stopSelf 했는데, 그러면 Android 가 「startForeground 를 안 불렀다」며 앱을 죽인다
+     * (켜는 중 → 앱이 다시 떠서 「꺼져 있음」). 종류(dataSync)를 붙여 실패하면 종류 없이 한 번 더.
+     */
+    private boolean goForeground() {
+        Notification n;
+        try {
+            n = build();
+        } catch (Throwable e) {
+            RelayDiag.error(this, "FGS_NOTIFY", e.getClass().getSimpleName() + ": " + e.getMessage());
+            n = new NotificationCompat.Builder(this, CHANNEL).setSmallIcon(android.R.drawable.stat_sys_download)
+                .setContentTitle("현장 사진 직접 전송").setOngoing(true).build();
         }
-        Notification n = build();
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 startForeground(NOTIFICATION_ID, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC);
             } else {
                 startForeground(NOTIFICATION_ID, n);
             }
-            running = true;
-        } catch (Exception e) {
-            running = false;
+            return true;
+        } catch (Throwable e) {
+            RelayDiag.error(this, "FGS_TYPE", e.getClass().getSimpleName() + ": " + e.getMessage());
+        }
+        try {
+            startForeground(NOTIFICATION_ID, n);
+            return true;
+        } catch (Throwable e) {
+            RelayDiag.error(this, "FGS_FAILED", e.getClass().getSimpleName() + ": " + e.getMessage());
+            return false;
+        }
+    }
+
+    @Override
+    public int onStartCommand(Intent intent, int flags, int startId) {
+        RelayDiag.step(this, "fgs");
+        boolean fg = goForeground();
+        running = fg;
+        if (intent != null && ACTION_STOP.equals(intent.getAction())) {
+            ReceiverHub.get().stop();
+            SenderHub.get().stop();
+            stopForegroundCompat();
             stopSelf();
+            running = false;
             return START_NOT_STICKY;
         }
         if (!ReceiverHub.get().isActive() && !SenderHub.get().isActive()) {

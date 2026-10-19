@@ -33,6 +33,7 @@ import java.util.List;
 import java.util.Locale;
 import kr.buildingsafety.inspection.relay.QrScanActivity;
 import kr.buildingsafety.inspection.relay.ReceiverHub;
+import kr.buildingsafety.inspection.relay.RelayDiag;
 import kr.buildingsafety.inspection.relay.RelayEvents;
 import kr.buildingsafety.inspection.relay.SenderHub;
 import kr.buildingsafety.inspection.relay.SnapProtocol;
@@ -58,6 +59,7 @@ public class PhotoRelayPlugin extends Plugin implements RelayEvents {
 
     @Override
     public void load() {
+        RelayDiag.installCrashHook(ctx());
         ReceiverHub.get().setListener(this);
         SenderHub.get().setListener(this);
         recoverPendingCapture();
@@ -101,6 +103,7 @@ public class PhotoRelayPlugin extends Plugin implements RelayEvents {
         o.put("autoConnect", Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q);
         o.put("sdk", Build.VERSION.SDK_INT);
         o.put("model", Build.MODEL);
+        o.put("diag", RelayDiag.snapshot(ctx()));
         call.resolve(o);
     }
 
@@ -120,15 +123,36 @@ public class PhotoRelayPlugin extends Plugin implements RelayEvents {
 
     @PluginMethod
     public void receiverStart(PluginCall call) {
-        if (!receiverPermsOk() || (Build.VERSION.SDK_INT >= 33 && getPermissionState("notify") == PermissionState.PROMPT)) {
-            requestPermissionForAliases(receiverAliases(), call, "receiverPermCallback");
-            return;
+        RelayDiag.step(ctx(), "start");
+        try {
+            if (!receiverPermsOk() || (Build.VERSION.SDK_INT >= 33 && getPermissionState("notify") == PermissionState.PROMPT)) {
+                RelayDiag.step(ctx(), "permission_ask");
+                requestPermissionForAliases(receiverAliases(), call, "receiverPermCallback");
+                return;
+            }
+            doReceiverStart(call);
+        } catch (Throwable e) {
+            failSoft(call, "START_ERROR", e);
         }
-        doReceiverStart(call);
+    }
+
+    /** 어떤 예외가 나도 화면이 「켜는 중」에 멈추거나 그냥 「꺼져 있음」이 되지 않게: 받기 서버는 열고 이유를 남겨 답한다. */
+    private void failSoft(PluginCall call, String code, Throwable e) {
+        String msg = "받기를 켜다 오류가 났습니다: " + e.getClass().getSimpleName() + (e.getMessage() == null ? "" : " " + e.getMessage());
+        RelayDiag.error(ctx(), code, msg);
+        try { ReceiverHub.get().startServerOnly(ctx(), code, msg + " — 아래 「같은 Wi-Fi로 받기」나 휴대폰 핫스팟을 쓰세요."); } catch (Throwable ignored) { }
+        try {
+            JSObject s = ReceiverHub.get().status(ctx());
+            s.put("hotspotOk", false);
+            call.resolve(s);
+        } catch (Throwable t) {
+            call.reject(msg, code);
+        }
     }
 
     @PermissionCallback
     private void receiverPermCallback(PluginCall call) {
+        RelayDiag.step(ctx(), "permission_done");
         if (!receiverPermsOk()) {
             // 전용 Wi-Fi 는 못 켜도 받기 서버는 연다 — 휴대폰 핫스팟(이름·암호 입력)이나 같은 Wi-Fi 로 받을 수 있게
             ReceiverHub.get().startServerOnly(ctx(), "PERMISSION", Build.VERSION.SDK_INT >= 33
@@ -137,7 +161,11 @@ public class PhotoRelayPlugin extends Plugin implements RelayEvents {
             call.resolve(ReceiverHub.get().status(ctx()));
             return;
         }
-        doReceiverStart(call);
+        try {
+            doReceiverStart(call);
+        } catch (Throwable e) {
+            failSoft(call, "START_ERROR", e);
+        }
     }
 
     private boolean locationOn() {
@@ -158,13 +186,26 @@ public class PhotoRelayPlugin extends Plugin implements RelayEvents {
             call.resolve(ReceiverHub.get().status(ctx()));
             return;
         }
-        // 실패해도 reject 하지 않는다: 받기 서버는 열려 있고, 화면이 이유와 대안(휴대폰 핫스팟)을 보여 준다
-        getActivity().runOnUiThread(() -> ReceiverHub.get().start(ctx(), (ok, code, message) -> {
-            kr.buildingsafety.inspection.relay.PhotoRelayService.refresh(ctx());
-            JSObject s = ReceiverHub.get().status(ctx());
-            s.put("hotspotOk", ok);
-            call.resolve(s);
-        }));
+        // 실패해도 reject 하지 않는다: 받기 서버는 열려 있고, 화면이 이유와 대안(같은 Wi-Fi·휴대폰 핫스팟)을 보여 준다
+        final boolean[] done = { false };
+        getActivity().runOnUiThread(() -> {
+            try {
+                ReceiverHub.get().start(ctx(), (ok, code, message) -> {
+                    if (done[0]) return;
+                    done[0] = true;
+                    try {
+                        kr.buildingsafety.inspection.relay.PhotoRelayService.refresh(ctx());
+                        JSObject s = ReceiverHub.get().status(ctx());
+                        s.put("hotspotOk", ok);
+                        call.resolve(s);
+                    } catch (Throwable e) {
+                        failSoft(call, "STATUS_ERROR", e);
+                    }
+                });
+            } catch (Throwable e) {
+                if (!done[0]) { done[0] = true; failSoft(call, "START_ERROR", e); }
+            }
+        });
     }
 
     @PluginMethod
@@ -191,6 +232,18 @@ public class PhotoRelayPlugin extends Plugin implements RelayEvents {
         ReceiverHub.get().setManualHotspot(ssid, pass, sec);
         ReceiverHub.get().startServerOnly(ctx(), null, null);
         call.resolve(ReceiverHub.get().status(ctx()));
+    }
+
+    /** 핫스팟 없이 받기: 받기 서버만 열고, 이 기기가 붙어 있는 Wi-Fi(공유기) 주소 QR(lanQrDataUrl)을 준다. 권한 필요 없음. */
+    @PluginMethod
+    public void receiverStartLan(PluginCall call) {
+        RelayDiag.step(ctx(), "lan_start");
+        try {
+            ReceiverHub.get().startServerOnly(ctx(), null, null);
+            call.resolve(ReceiverHub.get().status(ctx()));
+        } catch (Throwable e) {
+            failSoft(call, "LAN_ERROR", e);
+        }
     }
 
     @PluginMethod
@@ -283,9 +336,22 @@ public class PhotoRelayPlugin extends Plugin implements RelayEvents {
             return;
         }
         String text = result.getData().getStringExtra(QrScanActivity.EXTRA_TEXT);
+        String[] lan = SnapProtocol.parseLanQr(text);
+        if (lan != null) {
+            // 같은 Wi-Fi QR: Wi-Fi 를 바꾸지 않고 그 주소로 바로
+            SenderHub.get().connectLan(ctx(), lan[0], Integer.parseInt(lan[1]), lan[2], lan[3]);
+            JSObject o = new JSObject();
+            o.put("mode", "lan");
+            o.put("receiverIp", lan[0]);
+            if (!lan[3].isEmpty()) o.put("ssid", lan[3]);
+            o.put("autoConnect", false);
+            o.put("status", SenderHub.get().status(ctx()));
+            call.resolve(o);
+            return;
+        }
         String[] wifi = SnapProtocol.parseWifiQr(text);
         if (wifi == null) {
-            call.reject("Wi-Fi QR이 아닙니다. 받는 기기의 「오프라인 직접 받기」 화면 QR을 비춰 주세요.", "NOT_WIFI_QR");
+            call.reject("받기용 QR이 아닙니다. 받는 기기의 「오프라인 직접 받기」 화면 QR(Wi-Fi 또는 같은 Wi-Fi)을 비춰 주세요.", "NOT_WIFI_QR");
             return;
         }
         boolean auto = SenderHub.get().connect(ctx(), wifi[0], wifi[1], wifi[2]);

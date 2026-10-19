@@ -3,7 +3,13 @@ package kr.buildingsafety.inspection.relay;
 import android.content.ContentResolver;
 import android.content.ContentValues;
 import android.content.Context;
+import android.net.ConnectivityManager;
+import android.net.LinkAddress;
+import android.net.LinkProperties;
+import android.net.Network;
+import android.net.NetworkCapabilities;
 import android.net.Uri;
+import android.net.wifi.WifiInfo;
 import android.net.wifi.WifiConfiguration;
 import android.net.wifi.WifiManager;
 import android.os.Build;
@@ -81,6 +87,15 @@ public final class ReceiverHub {
     private final AtomicInteger seq = new AtomicInteger();
     private volatile String lastName;
     private volatile String lastError;
+    /** 실제로 연 받기 포트(8888 이 막히면 8890…). 알림·같은 Wi-Fi QR 에 실린다. */
+    private volatile int serverPort = SnapProtocol.DEFAULT_PORT;
+    private volatile String serverError;
+    private volatile String serverErrorCode;
+    private int generation;
+    private long hotspotStartedAt;
+    private boolean earlyStopRetried;
+    private int hotspotReq;
+    private volatile int lohsReason = -1;
 
     public interface StartCallback { void done(boolean ok, String code, String message); }
 
@@ -133,8 +148,15 @@ public final class ReceiverHub {
 
     /** 핫스팟을 켜고 서버를 연다. 이미 켜져 있으면 그대로 성공. 메인 스레드에서 부른다. */
     public void start(Context context, StartCallback cb) {
+        earlyStopRetried = false;
+        startInternal(context, cb);
+    }
+
+    private void startInternal(Context context, StartCallback cb) {
         app = context.getApplicationContext();
+        RelayDiag.step(app, "server");
         startServer();
+        RelayDiag.step(app, "lohs_request");
         if (reservation != null) { cb.done(true, null, null); emitStatus(); return; }
         if (hotspotStarting) { cb.done(true, null, null); emitStatus(); return; }
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
@@ -145,17 +167,26 @@ public final class ReceiverHub {
             return;
         }
         WifiManager wm = (WifiManager) app.getSystemService(Context.WIFI_SERVICE);
-        if (wm == null) { cb.done(false, "NO_WIFI", "Wi-Fi 기능을 쓸 수 없는 기기입니다."); return; }
+        if (wm == null) {
+            hotspotError = "이 기기는 Wi-Fi 기능을 앱에서 쓸 수 없습니다. 「같은 Wi-Fi로 받기」나 휴대폰 핫스팟을 쓰세요.";
+            hotspotErrorCode = "NO_WIFI";
+            RelayDiag.error(app, hotspotErrorCode, hotspotError);
+            cb.done(false, "NO_WIFI", hotspotError);
+            emitStatus();
+            return;
+        }
         hotspotStarting = true;
         hotspotError = null;
         hotspotErrorCode = null;
         final boolean[] answered = { false };
+        final int req = ++hotspotReq;
         // 일부 기기(삼성 포함)는 이미 요청 중이거나 Wi-Fi 상태가 꼬이면 콜백이 안 온다 — 15초 뒤 실패로 정리
         main.postDelayed(() -> {
-            if (hotspotStarting && reservation == null) {
+            if (req == hotspotReq && hotspotStarting && reservation == null) {
                 hotspotStarting = false;
                 hotspotError = "전용 Wi-Fi가 응답하지 않습니다. Wi-Fi를 껐다 켠 뒤 「핫스팟 다시 켜기」를 누르거나, 휴대폰 핫스팟을 쓰세요.";
                 hotspotErrorCode = "HOTSPOT_TIMEOUT";
+                RelayDiag.error(app, hotspotErrorCode, hotspotError);
                 if (!answered[0]) { answered[0] = true; cb.done(false, "HOTSPOT_TIMEOUT", hotspotError); }
                 emitStatus();
             }
@@ -165,8 +196,18 @@ public final class ReceiverHub {
                 @Override
                 public void onStarted(WifiManager.LocalOnlyHotspotReservation r) {
                     hotspotStarting = false;
+                    // 싱글턴이 끝까지 잡고 있는다(놓치면 GC 가 reservation 을 닫아 전용 Wi-Fi 가 바로 꺼진다)
                     reservation = r;
+                    hotspotStartedAt = System.currentTimeMillis();
+                    RelayDiag.step(app, "lohs_started");
                     readConfig(r);
+                    if (ssid == null) {
+                        hotspotError = "전용 Wi-Fi는 켜졌는데 이름·암호를 못 읽었습니다(기기 제한). 「같은 Wi-Fi로 받기」나 휴대폰 핫스팟을 쓰세요.";
+                        hotspotErrorCode = "HOTSPOT_NO_CONFIG";
+                        RelayDiag.error(app, hotspotErrorCode, hotspotError);
+                    } else {
+                        RelayDiag.clearError(app);
+                    }
                     PhotoRelayService.refresh(app);
                     if (!answered[0]) { answered[0] = true; cb.done(true, null, null); }
                     emitStatus();
@@ -178,8 +219,24 @@ public final class ReceiverHub {
                     reservation = null;
                     ssid = null;
                     password = null;
-                    hotspotError = "전용 Wi-Fi가 꺼졌습니다. 「핫스팟 다시 켜기」를 눌러 주세요.";
-                    hotspotErrorCode = "HOTSPOT_STOPPED";
+                    boolean early = System.currentTimeMillis() - hotspotStartedAt < 10000;
+                    if (early && !earlyStopRetried) {
+                        // 켜지자마자 꺼지는 기기(Lenovo 등) — 한 번은 알아서 다시 켜 본다
+                        earlyStopRetried = true;
+                        hotspotStarting = true;
+                        hotspotError = null;
+                        hotspotErrorCode = null;
+                        RelayDiag.step(app, "lohs_stopped_early_retry");
+                        emitStatus();
+                        main.postDelayed(() -> { hotspotStarting = false; startInternal(app, (a, b, c) -> { }); }, 1500);
+                        return;
+                    }
+                    hotspotError = early
+                        ? "전용 Wi-Fi가 켜지자마자 기기가 꺼 버립니다. 아래 「같은 Wi-Fi로 받기」 QR이나 휴대폰 핫스팟을 쓰세요."
+                        : "전용 Wi-Fi가 꺼졌습니다. 「핫스팟 다시 켜기」를 눌러 주세요.";
+                    hotspotErrorCode = early ? "HOTSPOT_STOPPED_EARLY" : "HOTSPOT_STOPPED";
+                    RelayDiag.error(app, hotspotErrorCode, hotspotError);
+                    PhotoRelayService.refresh(app);
                     emitStatus();
                 }
 
@@ -187,8 +244,10 @@ public final class ReceiverHub {
                 public void onFailed(int reason) {
                     hotspotStarting = false;
                     reservation = null;
+                    lohsReason = reason;
                     hotspotError = failReason(reason);
                     hotspotErrorCode = reason == 3 ? "MOBILE_HOTSPOT_ON" : "HOTSPOT_FAILED_" + reason;
+                    RelayDiag.error(app, hotspotErrorCode, hotspotError);
                     if (!answered[0]) { answered[0] = true; cb.done(false, "HOTSPOT_FAILED_" + reason, hotspotError); }
                     emitStatus();
                 }
@@ -197,7 +256,9 @@ public final class ReceiverHub {
             hotspotStarting = false;
             hotspotError = "권한이 없어 전용 Wi-Fi를 못 켰습니다. 위치·근처 기기 권한과 위치(GPS)를 켜 주세요.";
             hotspotErrorCode = "PERMISSION";
+            RelayDiag.error(app, hotspotErrorCode, hotspotError + " " + e.getMessage());
             cb.done(false, "PERMISSION", hotspotError);
+            emitStatus();
         } catch (IllegalStateException e) {
             // 이미 요청 중(다른 화면에서 켠 직후 등) — 콜백이 곧 오거나 위 15초 정리가 처리
             if (!answered[0]) { answered[0] = true; cb.done(true, null, null); }
@@ -205,13 +266,16 @@ public final class ReceiverHub {
             hotspotStarting = false;
             hotspotError = "전용 Wi-Fi를 켜지 못했습니다: " + e.getMessage();
             hotspotErrorCode = "HOTSPOT_ERROR";
+            RelayDiag.error(app, hotspotErrorCode, e.getClass().getSimpleName() + ": " + e.getMessage());
             cb.done(false, "HOTSPOT_ERROR", hotspotError);
+            emitStatus();
         }
     }
 
     private static String failReason(int reason) {
         switch (reason) {
-            case 1: return "Wi-Fi 채널을 잡지 못했습니다. 잠시 뒤 다시 눌러 주세요.";
+            case 1: return "Wi-Fi 채널을 잡지 못했습니다(이 기기는 Wi-Fi 연결 중엔 전용 Wi-Fi를 못 켤 수 있음). 아래 「같은 Wi-Fi로 받기」 QR을 쓰거나, Wi-Fi를 끊고 다시 눌러 주세요.";
+            case 2: return "기기가 전용 Wi-Fi를 거절했습니다(일반 오류). 아래 「같은 Wi-Fi로 받기」 QR이나 휴대폰 핫스팟을 쓰세요.";
             case 3: return "「모바일 핫스팟」이 켜져 있어 전용 Wi-Fi를 못 켭니다. 핫스팟을 끄고 다시 켜거나, 켜 둔 핫스팟 이름·암호를 아래에 넣어 그걸로 받으세요.";
             case 4: return "이 기기 설정(관리 정책)이 전용 Wi-Fi를 막고 있습니다. 휴대폰 핫스팟을 켜고 아래에 이름·암호를 넣어 주세요.";
             default: return "전용 Wi-Fi를 켜지 못했습니다(코드 " + reason + "). Wi-Fi를 켠 뒤 다시 누르거나, 휴대폰 핫스팟을 쓰세요.";
@@ -253,6 +317,9 @@ public final class ReceiverHub {
 
     public synchronized void stop() {
         running = false;
+        generation++;
+        serverError = null;
+        serverErrorCode = null;
         try { if (serverSocket != null) serverSocket.close(); } catch (Exception ignored) { }
         serverSocket = null;
         try { if (probeSocket != null) probeSocket.close(); } catch (Exception ignored) { }
@@ -279,12 +346,56 @@ public final class ReceiverHub {
         emitStatus();
     }
 
+    /**
+     * 받기 서버를 연다. 포트는 이 자리에서 바로 열어 본다(예전엔 스레드 안에서 열다 실패하면 아무 말 없이 「꺼져 있음」이 됐다).
+     * 8888 을 다른 앱이 쓰고 있으면 8890… 을 쓴다.
+     */
     private synchronized void startServer() {
         if (running) return;
-        running = true;
+        final int gen = ++generation;
         lastError = null;
+        final ServerSocket[] holder = new ServerSocket[1];
+        final String[] err = new String[1];
+        final java.util.concurrent.atomic.AtomicBoolean late = new java.util.concurrent.atomic.AtomicBoolean();
+        Thread binder = new Thread(() -> {
+            for (int port : SnapProtocol.SERVER_PORTS) {
+                ServerSocket ss = null;
+                try {
+                    ss = new ServerSocket();
+                    ss.setReuseAddress(true);
+                    ss.bind(new InetSocketAddress(port));
+                    synchronized (holder) {
+                        if (late.get()) { ss.close(); return; }
+                        holder[0] = ss;
+                    }
+                    return;
+                } catch (Exception e) {
+                    err[0] = e.getClass().getSimpleName() + ": " + e.getMessage();
+                    if (ss != null) try { ss.close(); } catch (Exception ignored) { }
+                }
+            }
+        }, "bsa-relay-bind");
+        binder.start();
+        try { binder.join(4000); } catch (InterruptedException ignored) { }
+        ServerSocket ss;
+        synchronized (holder) {
+            late.set(true);
+            ss = holder[0];
+        }
+        if (ss == null) {
+            serverError = "사진 받기 통로(포트 8888)를 열지 못했습니다. 앱을 완전히 닫았다 다시 열어 주세요. (" + (err[0] == null ? "시간 초과" : err[0]) + ")";
+            serverErrorCode = "SERVER_PORT";
+            if (app != null) RelayDiag.error(app, serverErrorCode, serverError);
+            return;
+        }
+        serverError = null;
+        serverErrorCode = null;
+        serverSocket = ss;
+        serverPort = ss.getLocalPort();
+        running = true;
         clientPool = Executors.newFixedThreadPool(3);
-        acceptThread = new Thread(this::acceptLoop, "bsa-relay-accept");
+        final ServerSocket bound = ss;
+        acceptThread = new Thread(() -> acceptLoop(gen, bound), "bsa-relay-accept");
         acceptThread.start();
         beaconThread = new Thread(this::beaconLoop, "bsa-relay-beacon");
         beaconThread.start();
@@ -292,29 +403,39 @@ public final class ReceiverHub {
         probeThread.start();
     }
 
-    private void acceptLoop() {
-        try {
-            ServerSocket ss = new ServerSocket();
-            ss.setReuseAddress(true);
-            ss.bind(new InetSocketAddress(SnapProtocol.DEFAULT_PORT));
-            synchronized (this) { serverSocket = ss; }
-            while (running) {
-                Socket s;
-                try {
-                    s = ss.accept();
-                } catch (Exception e) {
-                    if (!running) break;
-                    continue;
+    private boolean current(int gen) {
+        synchronized (this) { return running && gen == generation; }
+    }
+
+    private void acceptLoop(int gen, ServerSocket ss) {
+        int errors = 0;
+        while (current(gen)) {
+            Socket s;
+            try {
+                s = ss.accept();
+                errors = 0;
+            } catch (Exception e) {
+                if (!current(gen)) break;
+                if (ss.isClosed() || ++errors > 20) {
+                    synchronized (this) {
+                        if (gen == generation) {
+                            running = false;
+                            serverError = "사진 받기 통로가 닫혔습니다: " + e.getMessage() + " 「핫스팟 다시 켜기」를 눌러 주세요.";
+                            serverErrorCode = "SERVER_CLOSED";
+                        }
+                    }
+                    if (app != null) RelayDiag.error(app, "SERVER_CLOSED", e.getMessage());
+                    emitStatus();
+                    break;
                 }
-                ExecutorService pool = clientPool;
-                if (pool == null) { closeQuietly(s); break; }
-                pool.execute(() -> handleClient(s));
+                try { Thread.sleep(200); } catch (InterruptedException ie) { break; }
+                continue;
             }
-        } catch (Exception e) {
-            lastError = "받기 서버를 열지 못했습니다: " + e.getMessage();
-            running = false;
-            emitStatus();
+            ExecutorService pool = clientPool;
+            if (pool == null) { closeQuietly(s); break; }
+            pool.execute(() -> handleClient(s));
         }
+        try { ss.close(); } catch (Exception ignored) { }
     }
 
     private void handleClient(Socket socket) {
@@ -486,7 +607,12 @@ public final class ReceiverHub {
         o.put("lastError", lastError);
         o.put("received", receivedCount.get());
         o.put("lastName", lastName);
-        o.put("port", SnapProtocol.DEFAULT_PORT);
+        o.put("port", serverPort);
+        o.put("serverError", serverError);
+        o.put("serverErrorCode", serverErrorCode);
+        if (lohsReason >= 0) o.put("lohsReason", lohsReason);
+        String code = serverErrorCode != null ? serverErrorCode : (local ? null : hotspotErrorCode);
+        o.put("errorCode", code);
         List<String> ips = new ArrayList<>();
         for (InterfaceAddress a : lanAddresses()) ips.add(a.getAddress().getHostAddress());
         o.put("ips", new JSArray(ips));
@@ -497,6 +623,21 @@ public final class ReceiverHub {
             String qr = QrImage.dataUrl(text, 720);
             if (qr != null) o.put("qrDataUrl", qr);
         }
+        // 핫스팟 없이: 이 기기가 지금 붙어 있는 Wi-Fi(공유기) 주소로 바로 받는 QR
+        String[] lan = app == null ? null : wifiLan(app);
+        if (lan != null) {
+            o.put("lanIp", lan[0]);
+            o.put("lanSsid", lan[1]);
+            if (running) {
+                String lt = SnapProtocol.lanQr(lan[0], serverPort, Build.MODEL, lan[1]);
+                o.put("lanQrText", lt);
+                String lq = QrImage.dataUrl(lt, 720);
+                if (lq != null) o.put("lanQrDataUrl", lq);
+            }
+        }
+        JSObject diag = RelayDiag.snapshot(app);
+        o.put("diag", diag);
+        o.put("diagLine", RelayDiag.line(diag, code));
         return o;
     }
 
@@ -532,12 +673,43 @@ public final class ReceiverHub {
         return out;
     }
 
+    /** 이 기기가 붙어 있는 Wi-Fi(공유기)의 {IPv4, Wi-Fi 이름(모르면 null)}. 전용 Wi-Fi(핫스팟) 주소는 아님. Wi-Fi 에 안 붙어 있으면 null. */
+    @SuppressWarnings("deprecation")
+    static String[] wifiLan(Context c) {
+        String ip = null;
+        try {
+            ConnectivityManager cm = (ConnectivityManager) c.getSystemService(Context.CONNECTIVITY_SERVICE);
+            if (cm != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                for (Network n : cm.getAllNetworks()) {
+                    NetworkCapabilities caps = cm.getNetworkCapabilities(n);
+                    if (caps == null || !caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) continue;
+                    LinkProperties lp = cm.getLinkProperties(n);
+                    if (lp == null) continue;
+                    for (LinkAddress la : lp.getLinkAddresses()) {
+                        InetAddress a = la.getAddress();
+                        if (a instanceof Inet4Address && a.isSiteLocalAddress()) { ip = a.getHostAddress(); break; }
+                    }
+                    if (ip != null) break;
+                }
+            }
+        } catch (Exception ignored) { }
+        if (ip == null) return null;
+        String name = null;
+        try {
+            WifiManager wm = (WifiManager) c.getApplicationContext().getSystemService(Context.WIFI_SERVICE);
+            WifiInfo wi = wm == null ? null : wm.getConnectionInfo();
+            if (wi != null) name = unquote(wi.getSSID());
+            if (name != null && (name.isEmpty() || name.contains("unknown ssid"))) name = null;
+        } catch (Exception ignored) { }
+        return new String[] { ip, name };
+    }
+
     private void beaconLoop() {
         String device = Build.MODEL == null ? "Android" : Build.MODEL;
         while (running) {
             for (InterfaceAddress a : lanAddresses()) {
                 String ip = a.getAddress().getHostAddress();
-                byte[] data = SnapProtocol.beacon(device, ip, SnapProtocol.DEFAULT_PORT).getBytes(StandardCharsets.UTF_8);
+                byte[] data = SnapProtocol.beacon(device, ip, serverPort).getBytes(StandardCharsets.UTF_8);
                 try (DatagramSocket ds = new DatagramSocket(new InetSocketAddress(a.getAddress(), 0))) {
                     ds.setBroadcast(true);
                     InetAddress bc = a.getBroadcast();
@@ -573,7 +745,7 @@ public final class ReceiverHub {
                 InetAddress from = p.getAddress();
                 for (InterfaceAddress a : lanAddresses()) {
                     if (!sameSubnet(a, from)) continue;
-                    byte[] data = SnapProtocol.beacon(device, a.getAddress().getHostAddress(), SnapProtocol.DEFAULT_PORT).getBytes(StandardCharsets.UTF_8);
+                    byte[] data = SnapProtocol.beacon(device, a.getAddress().getHostAddress(), serverPort).getBytes(StandardCharsets.UTF_8);
                     try { ds.send(new DatagramPacket(data, data.length, from, SnapProtocol.DISCOVERY_PORT)); } catch (Exception ignored) { }
                 }
             }

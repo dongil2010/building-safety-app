@@ -152,4 +152,22 @@ public class SnapProtocolTest {
         assertTrue(SnapProtocol.checkHotspotInput("Galaxy", "short") != null);
         assertTrue(SnapProtocol.checkHotspotInput(new String(new char[11]).replace('\0', '가'), "abcd1234") != null);
     }
+
+    @Test
+    public void lanQrRoundTrip() {
+        String t = SnapProtocol.lanQr("192.168.0.23", 8890, "TB-J616F", "Office;5G");
+        assertEquals("BSARELAY:H:192.168.0.23;P:8890;N:TB-J616F;S:Office\\;5G;;", t);
+        String[] r = SnapProtocol.parseLanQr(t);
+        assertEquals("192.168.0.23", r[0]);
+        assertEquals("8890", r[1]);
+        assertEquals("TB-J616F", r[2]);
+        assertEquals("Office;5G", r[3]);
+        assertEquals("8888", SnapProtocol.parseLanQr("bsarelay:H:10.0.0.5;;")[1]);
+        assertNull(SnapProtocol.parseLanQr("BSARELAY:H:999.1.1.1;P:8888;;"));
+        assertNull(SnapProtocol.parseLanQr("BSARELAY:H:10.0.0.5;P:abc;;"));
+        assertNull(SnapProtocol.parseLanQr("WIFI:S:A;T:WPA;P:abcd1234;;"));
+        assertNull(SnapProtocol.parseWifiQr(t));
+        assertEquals(8888, SnapProtocol.SERVER_PORTS[0]);
+        for (int p : SnapProtocol.SERVER_PORTS) assertTrue(p != SnapProtocol.DISCOVERY_PORT);
+    }
 }

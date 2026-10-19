@@ -20,6 +20,10 @@ import java.util.regex.Pattern;
 public final class SnapProtocol {
     public static final int DEFAULT_PORT = 8888;
     public static final int DISCOVERY_PORT = 8889;
+    /** 8888 을 다른 앱이 쓰고 있으면 차례로 시도(알림·같은 Wi-Fi QR 에 실제 포트를 실어 보낸다). 8889 는 알림용이라 뺀다. */
+    public static final int[] SERVER_PORTS = { 8888, 8890, 8891, 8892, 8893, 8894 };
+    /** 핫스팟 없이 같은 Wi-Fi(공유기)로 받을 때의 QR: BSARELAY:H:192.168.0.12;P:8888;N:기기이름;S:와이파이이름;; */
+    public static final String LAN_QR_PREFIX = "BSARELAY:";
     public static final byte[] MAGIC = { 'S', 'N', 'A', 'P' };
     public static final int ACK_SUCCESS = 0x01;
     public static final int ACK_FAILURE = 0x00;
@@ -162,10 +166,53 @@ public final class SnapProtocol {
         if (content == null) return null;
         String c = content.trim();
         if (!c.regionMatches(true, 0, "WIFI:", 0, 5)) return null;
-        String body = c.substring(5);
         String ssid = null, pass = "", type = "";
-        StringBuilder cur = new StringBuilder();
+        for (String f : splitFields(c.substring(5))) {
+            if (f.length() < 2 || f.charAt(1) != ':') continue;
+            char k = Character.toUpperCase(f.charAt(0));
+            String v = f.substring(2);
+            if (k == 'S') ssid = v;
+            else if (k == 'P') pass = v;
+            else if (k == 'T') type = v;
+        }
+        if (ssid == null || ssid.isEmpty()) return null;
+        if (ssid.length() >= 2 && ssid.startsWith("\"") && ssid.endsWith("\"")) ssid = ssid.substring(1, ssid.length() - 1);
+        return new String[] { ssid, pass, type };
+    }
+
+    /** 「같은 Wi-Fi」 QR. name·wifiSsid 는 화면 안내용(없어도 됨). */
+    public static String lanQr(String ip, int port, String name, String wifiSsid) {
+        StringBuilder b = new StringBuilder(LAN_QR_PREFIX);
+        b.append("H:").append(escape(ip)).append(";P:").append(port).append(';');
+        if (name != null && !name.isEmpty()) b.append("N:").append(escape(name)).append(';');
+        if (wifiSsid != null && !wifiSsid.isEmpty()) b.append("S:").append(escape(wifiSsid)).append(';');
+        return b.append(';').toString();
+    }
+
+    /** {ip, port, name, ssid} 또는 null(우리 QR 이 아니거나 주소가 이상함). */
+    public static String[] parseLanQr(String content) {
+        if (content == null) return null;
+        String c = content.trim();
+        if (!c.regionMatches(true, 0, LAN_QR_PREFIX, 0, LAN_QR_PREFIX.length())) return null;
+        String ip = null, name = "", ssid = "";
+        int port = DEFAULT_PORT;
+        for (String f : splitFields(c.substring(LAN_QR_PREFIX.length()))) {
+            if (f.length() < 2 || f.charAt(1) != ':') continue;
+            char k = Character.toUpperCase(f.charAt(0));
+            String v = f.substring(2);
+            if (k == 'H') ip = v.trim();
+            else if (k == 'P') {
+                try { port = Integer.parseInt(v.trim()); } catch (NumberFormatException e) { return null; }
+            } else if (k == 'N') name = v;
+            else if (k == 'S') ssid = v;
+        }
+        if (!isIpv4(ip) || port < 1 || port > 65535) return null;
+        return new String[] { ip, String.valueOf(port), name, ssid };
+    }
+
+    private static java.util.List<String> splitFields(String body) {
         java.util.List<String> fields = new java.util.ArrayList<>();
+        StringBuilder cur = new StringBuilder();
         for (int i = 0; i < body.length(); i++) {
             char ch = body.charAt(i);
             if (ch == '\\' && i + 1 < body.length()) {
@@ -178,17 +225,7 @@ public final class SnapProtocol {
             }
         }
         if (cur.length() > 0) fields.add(cur.toString());
-        for (String f : fields) {
-            if (f.length() < 2 || f.charAt(1) != ':') continue;
-            char k = Character.toUpperCase(f.charAt(0));
-            String v = f.substring(2);
-            if (k == 'S') ssid = v;
-            else if (k == 'P') pass = v;
-            else if (k == 'T') type = v;
-        }
-        if (ssid == null || ssid.isEmpty()) return null;
-        if (ssid.length() >= 2 && ssid.startsWith("\"") && ssid.endsWith("\"")) ssid = ssid.substring(1, ssid.length() - 1);
-        return new String[] { ssid, pass, type };
+        return fields;
     }
 
     private static String escape(String s) {

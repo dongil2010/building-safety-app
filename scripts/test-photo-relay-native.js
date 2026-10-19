@@ -201,5 +201,56 @@ function mockPlugin(inbox) {
         assert.ok(/receiverUseManualHotspot\(saved\)/.test(mod), '전용 Wi-Fi 실패 시 기억한 휴대폰 핫스팟으로 QR');
     }
 
+
+    // 9) 2026-10-19 Lenovo Idea Tab 11 「핫스팟이 안켜지고 qr도 못봐」 — 「켜는 중 → 꺼져 있음」 대신 이유 + 같은 Wi-Fi QR
+    {
+        const lanS = { receiving: true, hotspotMode: null, hotspotError: '기기가 전용 Wi-Fi를 거절했습니다', hotspotErrorCode: 'HOTSPOT_FAILED_2', lanIp: '192.168.0.23', lanSsid: 'Office', port: 8888, lanQrDataUrl: 'data:image/png;base64,LAN', lanQrText: 'BSARELAY:H:192.168.0.23;P:8888;;' };
+        assert.strictEqual(relay.pickQr(lanS).kind, 'lan', '전용 Wi-Fi 실패하면 같은 Wi-Fi QR 자동');
+        const both = { ...lanS, hotspotMode: 'local', ssid: 'AndroidShare_1', qrDataUrl: 'data:image/png;base64,WIFI' };
+        assert.strictEqual(relay.pickQr(both).kind, 'wifi');
+        assert.strictEqual(relay.pickQr(both, 'lan').kind, 'lan');
+        assert.strictEqual(relay.pickQr({ receiving: false, lanQrDataUrl: 'x' }).src, null, '받기가 꺼져 있으면 QR 없음');
+        const d = relay.describeReceiver(lanS);
+        assert.strictEqual(d.tone, 'ok');
+        assert.ok(/같은 Wi-Fi/.test(d.title) && /Office/.test(d.detail) && /192\.168\.0\.23:8888/.test(d.detail));
+        const off = relay.describeReceiver({ receiving: false, serverError: '사진 받기 통로(포트 8888)를 열지 못했습니다.', serverErrorCode: 'SERVER_PORT' });
+        assert.notStrictEqual(off.title, '꺼져 있음', '서버를 못 열었으면 그냥 「꺼져 있음」이 아니라 이유');
+        assert.strictEqual(off.tone, 'warn');
+        assert.ok(/포트 8888/.test(off.detail));
+        assert.strictEqual(relay.describeReceiver({ receiving: false }).title, '꺼져 있음');
+        assert.strictEqual(relay.needsManual(lanS), false, '같은 Wi-Fi QR 이 있으면 입력 칸을 억지로 펼치지 않음');
+        assert.strictEqual(relay.fixActionFor('HOTSPOT_FAILED_1').action, 'wifiSettings');
+        assert.strictEqual(relay.fixActionFor('SERVER_PORT').action, 'appSettings');
+        const line = relay.diagLine({ ...lanS, errorCode: 'HOTSPOT_FAILED_2', lohsReason: 2,
+            diag: { sdk: 35, release: '15', manufacturer: 'LENOVO', model: 'TB-J616F', app: '1.3.15', appCode: 23, step: 'lohs_request', crash: 'ForegroundServiceDidNotStartInTimeException: x' } }, { web: '20261019_160000' });
+        ['코드 HOTSPOT_FAILED_2', 'Android 15 (SDK 35)', 'LENOVO TB-J616F', '앱 1.3.15(23)', 'LOHS 2', '단계 lohs_request', '앱 멈춤: ForegroundService'].forEach((t) => assert.ok(line.includes(t), '진단 줄: ' + t + ' / ' + line));
+        assert.ok(relay.diagLine({}, { native: { sdk: 34, model: 'X' } }).includes('SDK 34'), '네이티브 상태가 없어도 기기 정보');
+
+        const recv3 = read(J + 'relay/ReceiverHub.java');
+        const plugin3 = read(J + 'PhotoRelayPlugin.java');
+        const send3 = read(J + 'relay/SenderHub.java');
+        const svc3 = read(J + 'relay/PhotoRelayService.java');
+        const diag3 = read(J + 'relay/RelayDiag.java');
+        assert.ok(/for \(int port : SnapProtocol\.SERVER_PORTS\)/.test(recv3), '8888 이 막히면 다른 포트');
+        assert.ok(/serverErrorCode = "SERVER_PORT"/.test(recv3) && /o\.put\("serverError", serverError\)/.test(recv3), '서버 실패 이유를 화면으로');
+        assert.ok(/HOTSPOT_STOPPED_EARLY/.test(recv3) && /earlyStopRetried = true/.test(recv3), '켜지자마자 꺼지면 한 번 다시');
+        assert.ok(/HOTSPOT_NO_CONFIG/.test(recv3), '켜졌는데 이름을 못 읽음');
+        assert.ok(/o\.put\("lanQrDataUrl", lq\)/.test(recv3) && /SnapProtocol\.lanQr\(lan\[0\], serverPort/.test(recv3), '같은 Wi-Fi QR');
+        assert.ok(/SnapProtocol\.beacon\(device, ip, serverPort\)/.test(recv3), '알림에 실제 포트');
+        assert.ok(/private void acceptLoop\(int gen, ServerSocket ss\)/.test(recv3), '예전 서버 스레드가 새 서버를 끄지 않음');
+        assert.ok(/public void receiverStartLan\(PluginCall call\)/.test(plugin3) && /SnapProtocol\.parseLanQr\(text\)/.test(plugin3) && /connectLan\(/.test(plugin3));
+        assert.ok(/RelayDiag\.installCrashHook\(ctx\(\)\)/.test(plugin3) && /private void failSoft\(/.test(plugin3), '어떤 예외도 화면에 이유로');
+        assert.ok(/public synchronized void connectLan\(/.test(send3) && /beaconPorts\.get\(ip\)/.test(send3));
+        const osc = svc3.slice(svc3.indexOf('public int onStartCommand'));
+        assert.ok(osc.indexOf('goForeground()') > 0 && osc.indexOf('goForeground()') < osc.indexOf('stopSelf()'), 'startForeground 를 부른 뒤에만 stopSelf (안 그러면 Android 가 앱을 죽임)');
+        assert.ok(/FOREGROUND_SERVICE_TYPE_DATA_SYNC/.test(svc3) && /FGS_FAILED/.test(svc3));
+        assert.ok(/setDefaultUncaughtExceptionHandler/.test(diag3) && /prev\.uncaughtException\(t, e\)/.test(diag3), '앱 멈춤 기록 후 원래 처리');
+        const mod3 = read('js/core/photo-relay-native.js');
+        assert.ok(/relay-diag/.test(mod3) && /'진단: ' \+ diagText\(\)/.test(mod3), '화면 진단 줄');
+        assert.ok(/receiverStartLan/.test(mod3) && /OLD_APP/.test(mod3), '옛 앱이면 업데이트 안내');
+        const css3 = read('styles.css');
+        assert.ok(/\.relay-diag \{/.test(css3));
+    }
+
     console.log('test-photo-relay-native: ok');
 })().catch((e) => { console.error(e); process.exit(1); });

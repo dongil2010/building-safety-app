@@ -17589,3 +17589,21 @@ input.ndt-mo-locked { background: var(--bg-secondary, #f2f2f2); color: var(--tex
 .ndt-mo-group { display: inline-flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .ndt-mo-label { font-size: 12px; font-weight: 600; color: var(--text-secondary, #555); margin-right: 2px; }
 @media (max-width: 600px) { .ndt-mo-group[data-role="slab"] { flex: 1 1 100%; } }
+
+/* 2026-10-19 받기 화면 진단 줄(캡처해서 보내기용) · 같은 Wi-Fi로 받기 */
+.relay-diag {
+    margin: 0.6rem 0 0;
+    padding: 0.4rem 0.55rem;
+    border: 1px dashed #cbd5e1;
+    border-radius: 8px;
+    background: #f8fafc;
+    color: #64748b;
+    font: 11px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    word-break: break-all;
+    -webkit-user-select: text;
+    user-select: text;
+    text-align: left;
+}
+.relay-off-lan { white-space: normal; }
+/* 큰 QR 화면에서 hidden 버튼이 .psm-btn(display:flex) 때문에 다 보이던 것 */
+.rqv-screen [hidden] { display: none !important; }
