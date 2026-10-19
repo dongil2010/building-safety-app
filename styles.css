@@ -17483,3 +17483,76 @@ html.psm-lock, html.psm-lock body { overflow: hidden !important; }
     .rqv-qr img { width: min(46vw, 72vh, 560px); }
     .rqv-body > :not(.rqv-qr) { grid-column: 2; }
 }
+
+/* 2026-10-19 「pc에서 이따구임」 상태조사표 사진 앨범 썸네일이 가는 가로 띠로 찌그러짐.
+   원인: PC split(769px~)에서 앨범 그리드가 높이 고정 flex 칸(min-height:0)이고, 카드·사진칸이 overflow:hidden이라
+   그리드 행이 「내용 최소 높이 0」으로 계산돼 칸 높이에 맞춰 행이 눌렸다(비교사진·균열 게이지 표가 보이면 그리드가 2px까지).
+   행은 언제나 카드 본래 높이(max-content), 앨범 칸 전체가 스크롤. 사진은 4:3 contain 그대로(위아래 잘림 방지 결정 유지). */
+.survey-album-grid {
+    grid-auto-rows: max-content;
+}
+.survey-album-photo-wrap {
+    flex-shrink: 0;
+}
+@media (min-width: 769px) {
+    #tab-survey .survey-album-panel {
+        overflow-x: hidden;
+        overflow-y: auto;
+        overscroll-behavior: contain;
+        -webkit-overflow-scrolling: touch;
+        touch-action: pan-x pan-y;
+    }
+    #tab-survey .survey-album-panel > * {
+        flex-shrink: 0;
+    }
+    #tab-survey .survey-album-grid {
+        flex: 0 0 auto;
+        min-height: auto;
+        overflow: visible;
+    }
+    /* 앨범 안 균열 게이지 표는 본문 표(.table-container) 높이 규칙을 받지 않게 */
+    #tab-survey .survey-album-panel .table-container {
+        flex: 0 0 auto;
+        min-height: 0;
+        max-height: none;
+    }
+    html.layout-tablet #tab-survey .survey-album-panel {
+        overscroll-behavior-y: auto;
+    }
+}
+
+/* 2026-10-19 「통계탭에서 칸 넘어가면 잘려서 드래그도 안되고 안보이는 부분이 있음」
+   「잘리면 같으면 드래그 사용해서 볼 수 있게 해주고 억지로 찌그러트리지는 말고」
+   원인: 통계 표가 화면 폭에 맞춰 눌려(글자 줄바꿈, 폰에서 「조적벽」이 한 글자씩 세로로) 칸이 찌그러지고,
+   표마다 52vh 높이 상자 안에 갇혀 아래쪽이 잘려 보였다. 표는 본래 크기 그대로 두고 넘치면 상자 안에서 가로·세로로 끌어 본다.
+   손가락: 끌기, PC: 휠·스크롤바·휠 클릭 끌기(js/core/middle-drag-pan.js). 왼쪽 클릭은 선택 그대로. */
+#tab-stats .stats-table-wrap {
+    overflow: auto;
+    touch-action: pan-x pan-y;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-x: contain;
+    overscroll-behavior-y: auto;
+}
+#tab-stats .stats-table-wrap > table {
+    width: max-content;
+    min-width: 100%;
+}
+#tab-stats .stats-table-wrap th,
+#tab-stats .stats-table-wrap td,
+#tab-stats .stats-matrix-table th[scope="row"],
+#tab-stats .stats-lint-table .stats-lint-why {
+    white-space: nowrap;
+    max-width: none;
+}
+@media (max-width: 768px) {
+    /* 폰: 표 안 세로 상자 대신 페이지가 세로로 내려가고, 표는 가로로만 끌기 */
+    #tab-stats .stats-table-wrap {
+        max-height: none;
+    }
+}
+html.bsa-middle-panning,
+html.bsa-middle-panning * {
+    cursor: grabbing !important;
+    -webkit-user-select: none !important;
+    user-select: none !important;
+}
