@@ -34888,7 +34888,11 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             if (e.touches.length === 1 && !isPinching) {
                 if (e.cancelable) e.preventDefault();
                 // 두 손가락 제스처 뒤: 모두 떼고 잠깐(250ms) 지날 때까지는 점·그리기 시작 안 함
-                if (touchMultiActive || Date.now() < touchCooldownUntil) return;
+                // 2026-10-19 「확대 축소하고 드래그 하려면 처음 드래그는 씹히고」: 이 동안에도 도면 이동(팬)만은 바로 된다
+                if (touchMultiActive || Date.now() < touchCooldownUntil) {
+                    handleDragStart(e.touches[0].clientX, e.touches[0].clientY, true, true);
+                    return;
+                }
                 if (state.mode === 'MEMO' || state.mode === 'COUNT') {
                     memoTapStart(e.touches[0].clientX, e.touches[0].clientY);
                     handleDragStart(e.touches[0].clientX, e.touches[0].clientY, true, true);
@@ -34984,6 +34988,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             if (isPinching) {
                 if (e.touches.length < 2) {
                     isPinching = false;
+                    // 2026-10-19 남은 한 손가락은 바로 도면 이동(예전엔 손을 다 떼고 다시 대야 움직였음)
+                    if (e.touches.length === 1) handleDragStart(e.touches[0].clientX, e.touches[0].clientY, true, true);
                     flushViewportHiPatchSync();
                     scheduleFloorDrawingTierSync();
                     if (typeof scheduleFlushPendingRemoteSync === 'function') scheduleFlushPendingRemoteSync();

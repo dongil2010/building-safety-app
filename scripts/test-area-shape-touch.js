@@ -61,7 +61,7 @@ for (const id of ['areaPolyTouchBar', 'btnAreaPolyTouchDone', 'btnAreaPolyTouchU
     assert.strictEqual(rule({ downAt: now - 100, maxMove: 8 }, now), false, '8px 이상 움직이면 이동');
     assert.strictEqual(rule({ downAt: now - 600, maxMove: 0 }, now), false, '500ms 넘게 누르면 탭 아님');
     assert.strictEqual(rule({ downAt: now - 50, maxMove: 0, multi: true }, now), false, '두 손가락이 닿았으면 탭 아님');
-    assert.ok(/touchMultiActive \|\| Date\.now\(\) < touchCooldownUntil\) return;/.test(app), '두 손가락 뒤 모두 뗄 때까지 + 250ms 무시');
+    assert.ok(/touchMultiActive \|\| Date\.now\(\) < touchCooldownUntil\) \{\s*handleDragStart\(e\.touches\[0\]\.clientX, e\.touches\[0\]\.clientY, true, true\);\s*return;/.test(app), '두 손가락 뒤 모두 뗄 때까지 + 250ms 무시');
     assert.ok(/touchMultiActive && e\.touches\.length === 0[\s\S]{0,120}TOUCH_MULTI_COOLDOWN_MS/.test(app));
     assert.ok(/touchPolyTap\.maxMove = Math\.max/.test(app), '움직인 최대 거리로 판단(되돌아와도 이동)');
 }
