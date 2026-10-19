@@ -136,4 +136,20 @@ public class SnapProtocolTest {
         assertNull(SnapProtocol.parseWifiQr("https://example.com"));
         assertEquals("", SnapProtocol.parseWifiQr("WIFI:S:open;T:nopass;P:;;")[1]);
     }
+    @Test
+    public void samsungHotspotQrAndSecurity() {
+        // 삼성 「모바일 핫스팟」 화면 QR 순서(T 먼저, H 붙음)
+        String[] w = SnapProtocol.parseWifiQr("WIFI:T:WPA;S:Galaxy Tab S9 1234;P:abcd1234;H:false;;");
+        assertEquals("Galaxy Tab S9 1234", w[0]);
+        assertEquals("abcd1234", w[1]);
+        assertEquals("WIFI:S:A;T:SAE;P:abcd1234;;", SnapProtocol.wifiQr("A", "abcd1234", "SAE"));
+        assertEquals("WIFI:S:A;T:WPA;P:abcd1234;;", SnapProtocol.wifiQr("A", "abcd1234", "WPA"));
+        assertEquals("WIFI:S:A;T:nopass;P:;;", SnapProtocol.wifiQr("A", "", "SAE"));
+        assertEquals("SAE", SnapProtocol.parseWifiQr(SnapProtocol.wifiQr("A", "abcd1234", "SAE"))[2]);
+        assertNull(SnapProtocol.checkHotspotInput("Galaxy", "abcd1234"));
+        assertNull(SnapProtocol.checkHotspotInput("Galaxy", ""));
+        assertTrue(SnapProtocol.checkHotspotInput("", "abcd1234") != null);
+        assertTrue(SnapProtocol.checkHotspotInput("Galaxy", "short") != null);
+        assertTrue(SnapProtocol.checkHotspotInput(new String(new char[11]).replace('\0', '가'), "abcd1234") != null);
+    }
 }

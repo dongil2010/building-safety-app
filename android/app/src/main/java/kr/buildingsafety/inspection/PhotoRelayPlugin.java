@@ -130,9 +130,11 @@ public class PhotoRelayPlugin extends Plugin implements RelayEvents {
     @PermissionCallback
     private void receiverPermCallback(PluginCall call) {
         if (!receiverPermsOk()) {
-            call.reject(Build.VERSION.SDK_INT >= 33
-                ? "「근처 기기」 권한이 있어야 전용 Wi-Fi를 켤 수 있습니다. 앱 설정 > 권한에서 허용해 주세요."
-                : "「위치」 권한이 있어야 전용 Wi-Fi를 켤 수 있습니다. 앱 설정 > 권한에서 허용해 주세요.", "PERMISSION");
+            // 전용 Wi-Fi 는 못 켜도 받기 서버는 연다 — 휴대폰 핫스팟(이름·암호 입력)이나 같은 Wi-Fi 로 받을 수 있게
+            ReceiverHub.get().startServerOnly(ctx(), "PERMISSION", Build.VERSION.SDK_INT >= 33
+                ? "「근처 기기」 권한이 없어 전용 Wi-Fi를 못 켭니다. 「앱 권한 설정 열기」에서 허용하거나, 휴대폰 핫스팟을 쓰세요."
+                : "「위치」 권한이 없어 전용 Wi-Fi를 못 켭니다. 「앱 권한 설정 열기」에서 허용하거나, 휴대폰 핫스팟을 쓰세요.");
+            call.resolve(ReceiverHub.get().status(ctx()));
             return;
         }
         doReceiverStart(call);
@@ -151,18 +153,17 @@ public class PhotoRelayPlugin extends Plugin implements RelayEvents {
 
     private void doReceiverStart(PluginCall call) {
         if (Build.VERSION.SDK_INT < 33 && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && !locationOn()) {
-            call.reject("이 기기는 위치(GPS)가 켜져 있어야 전용 Wi-Fi를 켤 수 있습니다. 위치를 켠 뒤 다시 눌러 주세요.", "LOCATION_OFF");
+            ReceiverHub.get().startServerOnly(ctx(), "LOCATION_OFF",
+                "이 기기는 위치(GPS)가 켜져 있어야 전용 Wi-Fi를 켤 수 있습니다. 위치를 켜고 「핫스팟 다시 켜기」를 누르거나, 휴대폰 핫스팟을 쓰세요.");
+            call.resolve(ReceiverHub.get().status(ctx()));
             return;
         }
+        // 실패해도 reject 하지 않는다: 받기 서버는 열려 있고, 화면이 이유와 대안(휴대폰 핫스팟)을 보여 준다
         getActivity().runOnUiThread(() -> ReceiverHub.get().start(ctx(), (ok, code, message) -> {
             kr.buildingsafety.inspection.relay.PhotoRelayService.refresh(ctx());
             JSObject s = ReceiverHub.get().status(ctx());
-            if (ok) {
-                if (message != null) s.put("warning", message);
-                call.resolve(s);
-            } else {
-                call.reject(message, code);
-            }
+            s.put("hotspotOk", ok);
+            call.resolve(s);
         }));
     }
 
@@ -175,6 +176,33 @@ public class PhotoRelayPlugin extends Plugin implements RelayEvents {
     @PluginMethod
     public void receiverStatus(PluginCall call) {
         call.resolve(ReceiverHub.get().status(ctx()));
+    }
+
+    /** 전용 Wi-Fi 대신 쓸 휴대폰 핫스팟 이름·암호(설정에서 직접 켠 것). 빈 이름이면 지운다. 받기 서버도 연다. */
+    @PluginMethod
+    public void receiverUseManualHotspot(PluginCall call) {
+        String ssid = call.getString("ssid", "");
+        String pass = call.getString("password", "");
+        String sec = call.getString("security", "WPA");
+        if (ssid != null && !ssid.trim().isEmpty()) {
+            String bad = SnapProtocol.checkHotspotInput(ssid, pass);
+            if (bad != null) { call.reject(bad, "BAD_INPUT"); return; }
+        }
+        ReceiverHub.get().setManualHotspot(ssid, pass, sec);
+        ReceiverHub.get().startServerOnly(ctx(), null, null);
+        call.resolve(ReceiverHub.get().status(ctx()));
+    }
+
+    @PluginMethod
+    public void openHotspotSettings(PluginCall call) {
+        Intent tether = new Intent("android.settings.TETHER_SETTINGS");
+        tether.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        try {
+            getContext().startActivity(tether);
+        } catch (Exception e) {
+            openSettings(new Intent(Settings.ACTION_WIRELESS_SETTINGS));
+        }
+        call.resolve();
     }
 
     @PluginMethod
@@ -208,10 +236,22 @@ public class PhotoRelayPlugin extends Plugin implements RelayEvents {
 
     // ───────── 보내기 ─────────
 
+    private String wifiAlias() {
+        if (Build.VERSION.SDK_INT >= 33) return "nearby";
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) return "location";
+        return null;
+    }
+
     @PluginMethod
     public void senderScan(PluginCall call) {
-        if (getPermissionState("camera") != PermissionState.GRANTED) {
-            requestPermissionForAlias("camera", call, "scanPermCallback");
+        String w = wifiAlias();
+        boolean needCam = getPermissionState("camera") != PermissionState.GRANTED;
+        boolean askWifi = w != null && getPermissionState(w) == PermissionState.PROMPT;
+        if (needCam || askWifi) {
+            List<String> a = new ArrayList<>();
+            if (needCam) a.add("camera");
+            if (askWifi) a.add(w);
+            requestPermissionForAliases(a.toArray(new String[0]), call, "scanPermCallback");
             return;
         }
         launchScan(call);
@@ -252,6 +292,8 @@ public class PhotoRelayPlugin extends Plugin implements RelayEvents {
         JSObject o = new JSObject();
         o.put("ssid", wifi[0]);
         o.put("autoConnect", auto);
+        // Android 10~12 일부 기기(삼성 포함)는 위치가 꺼져 있으면 연결 창이 Wi-Fi 를 못 찾는다
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && Build.VERSION.SDK_INT < 33 && !locationOn()) o.put("locationOff", true);
         o.put("status", SenderHub.get().status(ctx()));
         call.resolve(o);
     }

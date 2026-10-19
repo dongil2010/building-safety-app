@@ -61,7 +61,14 @@ public final class ReceiverHub {
     private boolean hotspotStarting;
     private String ssid;
     private String password;
+    /** QR 의 T: 값. WPA(WPA2·WPA2/3 겸용) / SAE(WPA3 전용) / nopass */
+    private String security = "WPA";
     private String hotspotError;
+    private String hotspotErrorCode;
+    /** 전용 Wi-Fi 를 못 켤 때 쓰는 「휴대폰 핫스팟」(사용자가 설정에서 켜고 이름·암호를 입력). */
+    private String manualSsid;
+    private String manualPassword;
+    private String manualSecurity = "WPA";
 
     private volatile boolean running;
     private ServerSocket serverSocket;
@@ -98,14 +105,42 @@ public final class ReceiverHub {
         return d;
     }
 
+    /** 전용 Wi-Fi 없이 받기 서버만 연다(권한·위치가 막혀 휴대폰 핫스팟이나 같은 Wi-Fi 로 받을 때). */
+    public void startServerOnly(Context context, String code, String reason) {
+        app = context.getApplicationContext();
+        startServer();
+        if (reservation == null && code != null) {
+            hotspotError = reason;
+            hotspotErrorCode = code;
+        }
+        PhotoRelayService.refresh(app);
+        emitStatus();
+    }
+
+    /** 휴대폰 핫스팟 이름·암호를 QR 로 쓴다. ssid 가 비면 지운다. */
+    public synchronized void setManualHotspot(String s, String p, String sec) {
+        if (s == null || s.trim().isEmpty()) {
+            manualSsid = null;
+            manualPassword = null;
+            manualSecurity = "WPA";
+        } else {
+            manualSsid = s.trim();
+            manualPassword = p == null ? "" : p;
+            manualSecurity = manualPassword.isEmpty() ? "nopass" : ("SAE".equalsIgnoreCase(sec) ? "SAE" : "WPA");
+        }
+        emitStatus();
+    }
+
     /** 핫스팟을 켜고 서버를 연다. 이미 켜져 있으면 그대로 성공. 메인 스레드에서 부른다. */
     public void start(Context context, StartCallback cb) {
         app = context.getApplicationContext();
         startServer();
         if (reservation != null) { cb.done(true, null, null); emitStatus(); return; }
+        if (hotspotStarting) { cb.done(true, null, null); emitStatus(); return; }
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
-            hotspotError = "Android 8 이상에서만 이 기기가 직접 Wi-Fi를 켤 수 있습니다. 같은 Wi-Fi에 두 기기를 연결해 쓰세요.";
-            cb.done(true, "NO_HOTSPOT", hotspotError);
+            hotspotError = "이 기기(Android 7 이하)는 전용 Wi-Fi를 못 켭니다. 휴대폰 핫스팟을 켜고 아래에 이름·암호를 넣어 주세요.";
+            hotspotErrorCode = "UNSUPPORTED";
+            cb.done(false, "UNSUPPORTED", hotspotError);
             emitStatus();
             return;
         }
@@ -113,7 +148,18 @@ public final class ReceiverHub {
         if (wm == null) { cb.done(false, "NO_WIFI", "Wi-Fi 기능을 쓸 수 없는 기기입니다."); return; }
         hotspotStarting = true;
         hotspotError = null;
+        hotspotErrorCode = null;
         final boolean[] answered = { false };
+        // 일부 기기(삼성 포함)는 이미 요청 중이거나 Wi-Fi 상태가 꼬이면 콜백이 안 온다 — 15초 뒤 실패로 정리
+        main.postDelayed(() -> {
+            if (hotspotStarting && reservation == null) {
+                hotspotStarting = false;
+                hotspotError = "전용 Wi-Fi가 응답하지 않습니다. Wi-Fi를 껐다 켠 뒤 「핫스팟 다시 켜기」를 누르거나, 휴대폰 핫스팟을 쓰세요.";
+                hotspotErrorCode = "HOTSPOT_TIMEOUT";
+                if (!answered[0]) { answered[0] = true; cb.done(false, "HOTSPOT_TIMEOUT", hotspotError); }
+                emitStatus();
+            }
+        }, 15000);
         try {
             wm.startLocalOnlyHotspot(new WifiManager.LocalOnlyHotspotCallback() {
                 @Override
@@ -132,7 +178,8 @@ public final class ReceiverHub {
                     reservation = null;
                     ssid = null;
                     password = null;
-                    hotspotError = "전용 Wi-Fi가 꺼졌습니다. 「받기 시작」을 다시 눌러 주세요.";
+                    hotspotError = "전용 Wi-Fi가 꺼졌습니다. 「핫스팟 다시 켜기」를 눌러 주세요.";
+                    hotspotErrorCode = "HOTSPOT_STOPPED";
                     emitStatus();
                 }
 
@@ -141,6 +188,7 @@ public final class ReceiverHub {
                     hotspotStarting = false;
                     reservation = null;
                     hotspotError = failReason(reason);
+                    hotspotErrorCode = reason == 3 ? "MOBILE_HOTSPOT_ON" : "HOTSPOT_FAILED_" + reason;
                     if (!answered[0]) { answered[0] = true; cb.done(false, "HOTSPOT_FAILED_" + reason, hotspotError); }
                     emitStatus();
                 }
@@ -148,13 +196,15 @@ public final class ReceiverHub {
         } catch (SecurityException e) {
             hotspotStarting = false;
             hotspotError = "권한이 없어 전용 Wi-Fi를 못 켰습니다. 위치·근처 기기 권한과 위치(GPS)를 켜 주세요.";
+            hotspotErrorCode = "PERMISSION";
             cb.done(false, "PERMISSION", hotspotError);
         } catch (IllegalStateException e) {
-            // 이미 요청 중(다른 화면에서 켠 직후 등) — 콜백이 곧 온다
+            // 이미 요청 중(다른 화면에서 켠 직후 등) — 콜백이 곧 오거나 위 15초 정리가 처리
             if (!answered[0]) { answered[0] = true; cb.done(true, null, null); }
         } catch (Exception e) {
             hotspotStarting = false;
             hotspotError = "전용 Wi-Fi를 켜지 못했습니다: " + e.getMessage();
+            hotspotErrorCode = "HOTSPOT_ERROR";
             cb.done(false, "HOTSPOT_ERROR", hotspotError);
         }
     }
@@ -162,9 +212,9 @@ public final class ReceiverHub {
     private static String failReason(int reason) {
         switch (reason) {
             case 1: return "Wi-Fi 채널을 잡지 못했습니다. 잠시 뒤 다시 눌러 주세요.";
-            case 3: return "휴대폰 「모바일 핫스팟」이 켜져 있으면 못 켭니다. 핫스팟을 끄고 다시 눌러 주세요.";
-            case 4: return "이 기기 설정(관리 정책)이 핫스팟을 막고 있습니다.";
-            default: return "전용 Wi-Fi를 켜지 못했습니다(코드 " + reason + "). Wi-Fi를 켠 뒤 다시 눌러 주세요.";
+            case 3: return "「모바일 핫스팟」이 켜져 있어 전용 Wi-Fi를 못 켭니다. 핫스팟을 끄고 다시 켜거나, 켜 둔 핫스팟 이름·암호를 아래에 넣어 그걸로 받으세요.";
+            case 4: return "이 기기 설정(관리 정책)이 전용 Wi-Fi를 막고 있습니다. 휴대폰 핫스팟을 켜고 아래에 이름·암호를 넣어 주세요.";
+            default: return "전용 Wi-Fi를 켜지 못했습니다(코드 " + reason + "). Wi-Fi를 켠 뒤 다시 누르거나, 휴대폰 핫스팟을 쓰세요.";
         }
     }
 
@@ -176,6 +226,8 @@ public final class ReceiverHub {
                 android.net.wifi.SoftApConfiguration c = r.getSoftApConfiguration();
                 s = c.getSsid();
                 p = c.getPassphrase();
+                // 삼성 등 Android 13+ 일부는 전용 Wi-Fi 를 WPA3 전용으로 만든다 — QR 에 SAE 라고 써야 보내는 폰이 WPA3 로 붙는다
+                security = securityName(c.getSecurityType());
             } else {
                 WifiConfiguration c = r.getWifiConfiguration();
                 if (c != null) { s = c.SSID; p = c.preSharedKey; }
@@ -183,6 +235,14 @@ public final class ReceiverHub {
         } catch (Exception ignored) { }
         ssid = unquote(s);
         password = unquote(p);
+        if (password == null || password.isEmpty()) security = "nopass";
+    }
+
+    /** SoftApConfiguration.SECURITY_TYPE_*: 0 열림, 1 WPA2, 2 WPA3, 3 WPA2/3 겸용, 4+ 기타(OWE 등) */
+    static String securityName(int type) {
+        if (type == 0) return "nopass";
+        if (type == 2) return "SAE";
+        return "WPA";
     }
 
     private static String unquote(String s) {
@@ -212,7 +272,9 @@ public final class ReceiverHub {
         hotspotStarting = false;
         ssid = null;
         password = null;
+        security = "WPA";
         hotspotError = null;
+        hotspotErrorCode = null;
         if (app != null) PhotoRelayService.refresh(app);
         emitStatus();
     }
@@ -407,12 +469,20 @@ public final class ReceiverHub {
     public JSObject status(Context context) {
         if (app == null && context != null) app = context.getApplicationContext();
         JSObject o = new JSObject();
+        boolean local = reservation != null && ssid != null;
+        String showSsid = local ? ssid : manualSsid;
+        String showPass = local ? password : manualPassword;
+        String showSec = local ? security : manualSecurity;
         o.put("receiving", running);
         o.put("hotspot", reservation != null);
         o.put("hotspotStarting", hotspotStarting);
-        o.put("ssid", ssid);
-        o.put("password", password);
+        o.put("hotspotMode", local ? "local" : (manualSsid != null ? "manual" : null));
+        o.put("ssid", running ? showSsid : null);
+        o.put("password", running ? showPass : null);
+        o.put("security", showSec);
+        o.put("manualSsid", manualSsid);
         o.put("hotspotError", hotspotError);
+        o.put("hotspotErrorCode", hotspotErrorCode);
         o.put("lastError", lastError);
         o.put("received", receivedCount.get());
         o.put("lastName", lastName);
@@ -421,9 +491,10 @@ public final class ReceiverHub {
         for (InterfaceAddress a : lanAddresses()) ips.add(a.getAddress().getHostAddress());
         o.put("ips", new JSArray(ips));
         if (app != null) o.put("pending", pendingCount(app));
-        if (ssid != null) {
-            o.put("qrText", SnapProtocol.wifiQr(ssid, password));
-            String qr = QrImage.dataUrl(SnapProtocol.wifiQr(ssid, password), 560);
+        if (running && showSsid != null) {
+            String text = SnapProtocol.wifiQr(showSsid, showPass, showSec);
+            o.put("qrText", text);
+            String qr = QrImage.dataUrl(text, 720);
             if (qr != null) o.put("qrDataUrl", qr);
         }
         return o;
@@ -432,7 +503,8 @@ public final class ReceiverHub {
     public String notificationText() {
         int n = receivedCount.get();
         if (!running) return null;
-        if (ssid != null) return "사진 받는 중 · Wi-Fi " + ssid + (n > 0 ? " · 받은 사진 " + n + "장" : "");
+        String shown = reservation != null && ssid != null ? ssid : manualSsid;
+        if (shown != null) return "사진 받는 중 · Wi-Fi " + shown + (n > 0 ? " · 받은 사진 " + n + "장" : "");
         return "사진 받는 중" + (n > 0 ? " · 받은 사진 " + n + "장" : "");
     }
 

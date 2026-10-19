@@ -152,5 +152,54 @@ function mockPlugin(inbox) {
     assert.ok(/onModalOpen\(\{ onlineUnavailable: true \}\)/.test(app), '인터넷이 없으면 오프라인 탭으로 열림(예전엔 경고만 뜨고 안 열림)');
     assert.ok(/db\.collection\('photoRelay'\)/.test(app), '기존 인터넷 방식 유지');
 
+
+    // 8) 2026-10-19 「받는쪽 핫스팟 켜주는 기능이랑 핫스팟 qr도 보여주는 기능」 — 전용 Wi-Fi 실패 시 휴대폰 핫스팟으로
+    {
+        assert.strictEqual(relay.validateHotspotInput('', 'abcdefgh'), '핫스팟 이름을 넣어 주세요.');
+        assert.ok(relay.validateHotspotInput('Galaxy', 'short'));
+        assert.strictEqual(relay.validateHotspotInput('Galaxy Tab S9', 'abcd1234'), null);
+        assert.strictEqual(relay.validateHotspotInput('열린핫스팟', ''), null, '암호 없는 핫스팟 허용');
+        assert.ok(relay.validateHotspotInput('가'.repeat(11), 'abcd1234'), '33바이트 이상 이름 거부');
+        const mem = { v: {}, getItem(k) { return this.v[k] || null; }, setItem(k, x) { this.v[k] = x; } };
+        assert.strictEqual(relay.loadManualHotspot(mem), null);
+        relay.saveManualHotspot(mem, { ssid: 'Galaxy Tab S9', password: 'abcd1234', security: 'SAE' });
+        assert.deepStrictEqual(relay.loadManualHotspot(mem), { ssid: 'Galaxy Tab S9', password: 'abcd1234', security: 'SAE' }, '한 번 넣으면 기억');
+        mem.v.bsaRelayManualHotspot = '{broken';
+        assert.strictEqual(relay.loadManualHotspot(mem), null);
+        assert.strictEqual(relay.fixActionFor('LOCATION_OFF').action, 'location');
+        assert.strictEqual(relay.fixActionFor('PERMISSION').action, 'appSettings');
+        assert.strictEqual(relay.fixActionFor('MOBILE_HOTSPOT_ON').action, 'hotspotSettings');
+        assert.strictEqual(relay.fixActionFor('HOTSPOT_TIMEOUT').action, 'hotspotSettings');
+        assert.strictEqual(relay.fixActionFor(null), null);
+        const failed = { receiving: true, hotspot: false, hotspotError: '모바일 핫스팟이 켜져 있어…', hotspotErrorCode: 'MOBILE_HOTSPOT_ON' };
+        assert.strictEqual(relay.needsManual(failed), true, '실패하면 휴대폰 핫스팟 입력을 펼침');
+        assert.strictEqual(relay.needsManual({ ...failed, manualSsid: 'Galaxy' }), false);
+        assert.strictEqual(relay.needsManual({ receiving: true, hotspotMode: 'local', ssid: 'AndroidShare_1' }), false);
+        const d1 = relay.describeReceiver(failed);
+        assert.strictEqual(d1.tone, 'warn');
+        assert.ok(/받기는 켜져 있음/.test(d1.title), '서버는 열려 있음을 알림');
+        const d2 = relay.describeReceiver({ receiving: true, hotspotMode: 'manual', ssid: 'Galaxy', received: 2 });
+        assert.strictEqual(d2.tone, 'ok');
+        assert.ok(/휴대폰 핫스팟/.test(d2.title) && /2장/.test(d2.title) && /Galaxy/.test(d2.detail));
+        assert.strictEqual(relay.describeReceiver({ receiving: true, hotspotMode: 'local', ssid: 'A', received: 0 }).title, '받을 준비 완료');
+    }
+    {
+        const plugin2 = read(J + 'PhotoRelayPlugin.java');
+        const recv2 = read(J + 'relay/ReceiverHub.java');
+        const send2 = read(J + 'relay/SenderHub.java');
+        assert.ok(/public void receiverUseManualHotspot\(PluginCall call\)/.test(plugin2) && /checkHotspotInput/.test(plugin2));
+        assert.ok(/android\.settings\.TETHER_SETTINGS/.test(plugin2), '핫스팟 설정 화면 열기');
+        assert.ok(!/call\.reject\([^;]*"LOCATION_OFF"\)/.test(plugin2) && /startServerOnly\(ctx\(\), "LOCATION_OFF"/.test(plugin2), '위치가 꺼져도 받기 서버는 열고 대안 안내');
+        assert.ok(/startServerOnly\(ctx\(\), "PERMISSION"/.test(plugin2), '권한 거부여도 받기 서버는 연다');
+        assert.ok(/getSecurityType\(\)/.test(recv2) && /if \(type == 2\) return "SAE"/.test(recv2), 'WPA3 전용 전용Wi-Fi는 QR에 SAE');
+        assert.ok(/postDelayed\([\s\S]*HOTSPOT_TIMEOUT[\s\S]*15000\)/.test(recv2), '콜백이 안 오면 15초 뒤 실패 처리');
+        assert.ok(/String other = "SAE"\.equalsIgnoreCase\(usedAuth\) \? "WPA" : "SAE"/.test(send2), 'WPA2/WPA3 바꿔 한 번 더');
+        assert.ok(/requestNetwork\(req, cb, 60000\)/.test(send2), '연결 요청 시간 제한');
+        assert.ok(/id="btnShowRelayQr"/.test(html), '홈: 받기용 핫스팟 켜기 · QR 보기');
+        const mod = read('js/core/photo-relay-native.js');
+        assert.ok(/getElementById\('btnShowRelayQr'\)[\s\S]*openQrScreen\(\{ autoStart: true \}\)/.test(mod), '한 번 누르면 켜고 QR 크게');
+        assert.ok(/receiverUseManualHotspot\(saved\)/.test(mod), '전용 Wi-Fi 실패 시 기억한 휴대폰 핫스팟으로 QR');
+    }
+
     console.log('test-photo-relay-native: ok');
 })().catch((e) => { console.error(e); process.exit(1); });

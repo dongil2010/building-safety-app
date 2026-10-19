@@ -139,8 +139,22 @@ public final class SnapProtocol {
 
     /** 표준 Wi-Fi QR: WIFI:S:<ssid>;T:<WPA|SAE|WEP|nopass>;P:<암호>;; (\ ; , : " 는 \ 로 이스케이프) */
     public static String wifiQr(String ssid, String password) {
-        boolean open = password == null || password.isEmpty();
-        return "WIFI:S:" + escape(ssid) + ";T:" + (open ? "nopass" : "WPA") + ";P:" + (open ? "" : escape(password)) + ";;";
+        return wifiQr(ssid, password, "WPA");
+    }
+
+    /** security: WPA / SAE(WPA3 전용) / nopass. 암호가 없으면 nopass. */
+    public static String wifiQr(String ssid, String password, String security) {
+        boolean open = password == null || password.isEmpty() || "nopass".equalsIgnoreCase(security);
+        String t = open ? "nopass" : ("SAE".equalsIgnoreCase(security) ? "SAE" : "WPA");
+        return "WIFI:S:" + escape(ssid) + ";T:" + t + ";P:" + (open ? "" : escape(password)) + ";;";
+    }
+
+    /** 휴대폰 핫스팟 이름·암호 검사. 문제 없으면 null, 있으면 고칠 말. */
+    public static String checkHotspotInput(String ssid, String password) {
+        if (ssid == null || ssid.trim().isEmpty()) return "핫스팟 이름을 넣어 주세요.";
+        if (ssid.trim().getBytes(StandardCharsets.UTF_8).length > 32) return "핫스팟 이름이 너무 깁니다(영문 32자까지).";
+        if (password != null && !password.isEmpty() && (password.length() < 8 || password.length() > 63)) return "암호는 8~63자입니다.";
+        return null;
     }
 
     /** {ssid, 암호(없으면 ""), 방식} 또는 null. 기존 SnapSync 처럼 이스케이프 없는 QR 도 읽는다. */

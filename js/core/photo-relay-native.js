@@ -81,22 +81,26 @@
     function describeReceiver(s) {
         s = s || {};
         if (!s.receiving) {
-            return { tone: 'off', title: '꺼져 있음', detail: '「받기 시작」을 누르면 이 기기가 전용 Wi-Fi를 켜고 QR을 보여 줍니다. 인터넷이 없어도 됩니다.' };
+            return { tone: 'off', title: '꺼져 있음', detail: '「📶 핫스팟 켜고 받기」를 누르면 이 기기가 전용 Wi-Fi를 켜고 QR을 보여 줍니다. 인터넷이 없어도 됩니다.' };
         }
         if (s.hotspotStarting) return { tone: 'wait', title: '전용 Wi-Fi 켜는 중…', detail: '잠시만 기다려 주세요.' };
-        if (s.hotspot && s.ssid) {
-            const n = Number(s.received) || 0;
+        const n = Number(s.received) || 0;
+        const got = n ? ` · ${n}장 받음` : '';
+        if (s.hotspotMode === 'local' && s.ssid) {
+            return { tone: 'ok', title: (n ? '받는 중' : '받을 준비 완료') + got, detail: '보내는 폰에서 아래 QR을 스캔하면 바로 연결됩니다.' };
+        }
+        if (s.hotspotMode === 'manual' && s.ssid) {
             return {
                 tone: 'ok',
-                title: n ? `받는 중 · ${n}장 받음` : '받을 준비 완료',
-                detail: '보내는 폰에서 아래 QR을 스캔하면 바로 연결됩니다.'
+                title: '휴대폰 핫스팟으로 받는 중' + got,
+                detail: `이 기기의 「모바일 핫스팟」(${s.ssid})이 켜져 있어야 합니다. 보내는 폰이 아래 QR을 스캔하면 연결됩니다.`
             };
         }
-        if (s.hotspotError) return { tone: 'warn', title: '전용 Wi-Fi를 못 켰습니다', detail: s.hotspotError };
+        if (s.hotspotError) return { tone: 'warn', title: '전용 Wi-Fi를 못 켰습니다 (받기는 켜져 있음)', detail: s.hotspotError };
         const ip = (s.ips && s.ips[0]) || '';
         return {
             tone: 'ok',
-            title: '받는 중 (같은 Wi-Fi)',
+            title: '받는 중 (같은 Wi-Fi)' + got,
             detail: ip ? `보내는 폰을 이 기기와 같은 Wi-Fi에 연결하세요. 이 기기 주소 ${ip}` : '보내는 폰을 이 기기와 같은 Wi-Fi에 연결하세요.'
         };
     }
@@ -164,6 +168,52 @@
         return { shoot, onSendResult, get busy() { return busy; }, get shots() { return shots; } };
     }
 
+
+    /** 휴대폰 핫스팟 입력 검사(네이티브 SnapProtocol.checkHotspotInput 과 같은 규칙). 문제 없으면 null. */
+    function validateHotspotInput(ssid, password) {
+        const name = String(ssid == null ? '' : ssid).trim();
+        const pw = String(password == null ? '' : password);
+        if (!name) return '핫스팟 이름을 넣어 주세요.';
+        const bytes = (typeof TextEncoder !== 'undefined') ? new TextEncoder().encode(name).length : unescape(encodeURIComponent(name)).length;
+        if (bytes > 32) return '핫스팟 이름이 너무 깁니다(영문 32자까지).';
+        if (pw && (pw.length < 8 || pw.length > 63)) return '암호는 8~63자입니다.';
+        return null;
+    }
+
+    const MANUAL_KEY = 'bsaRelayManualHotspot';
+    function loadManualHotspot(storage) {
+        try {
+            const raw = storage && storage.getItem(MANUAL_KEY);
+            if (!raw) return null;
+            const o = JSON.parse(raw);
+            if (!o || validateHotspotInput(o.ssid, o.password)) return null;
+            return { ssid: String(o.ssid).trim(), password: String(o.password || ''), security: o.security === 'SAE' ? 'SAE' : 'WPA' };
+        } catch (_e) {
+            return null;
+        }
+    }
+    function saveManualHotspot(storage, v) {
+        try { if (storage) storage.setItem(MANUAL_KEY, JSON.stringify({ ssid: v.ssid, password: v.password || '', security: v.security === 'SAE' ? 'SAE' : 'WPA' })); } catch (_e) { /* ignore */ }
+    }
+    function safeStorage() {
+        try { return typeof localStorage !== 'undefined' ? localStorage : null; } catch (_e) { return null; }
+    }
+
+    /** 전용 Wi-Fi 를 못 켰을 때 이유 코드별로 고칠 설정 화면. */
+    function fixActionFor(code) {
+        if (!code) return null;
+        if (code === 'LOCATION_OFF') return { action: 'location', label: '위치(GPS) 설정 열기' };
+        if (code === 'PERMISSION') return { action: 'appSettings', label: '앱 권한 설정 열기' };
+        if (code === 'MOBILE_HOTSPOT_ON') return { action: 'hotspotSettings', label: '모바일 핫스팟 설정 열기' };
+        return { action: 'hotspotSettings', label: '핫스팟 설정 열기' };
+    }
+
+    /** 받기는 켜져 있는데 QR 로 줄 Wi-Fi 가 없을 때(전용 Wi-Fi 실패, 휴대폰 핫스팟 정보도 없음) → 입력 칸을 펼친다. */
+    function needsManual(s) {
+        s = s || {};
+        return !!(s.receiving && !s.hotspotStarting && s.hotspotMode !== 'local' && !s.manualSsid && s.hotspotError);
+    }
+
     // ───────────────────────── 화면 ─────────────────────────
 
     function el(tag, cls, text) {
@@ -209,12 +259,19 @@
             const homeBtn = document.getElementById('btnOpenPhotoSendMode');
             if (!plugin || typeof receive !== 'function') {
                 if (homeBtn) homeBtn.hidden = true;
+                const qb = document.getElementById('btnShowRelayQr');
+                if (qb) qb.hidden = true;
                 return;
             }
             inited = true;
             if (homeBtn) {
                 homeBtn.hidden = false;
                 homeBtn.addEventListener('click', (e) => { e.preventDefault(); openSendMode(); });
+            }
+            const qrBtn = document.getElementById('btnShowRelayQr');
+            if (qrBtn) {
+                qrBtn.hidden = false;
+                qrBtn.addEventListener('click', (e) => { e.preventDefault(); void openQrScreen({ autoStart: true }); });
             }
             pump = createInboxPump({
                 plugin,
@@ -228,7 +285,7 @@
                 isOpen: () => !!(sendScreen && sendScreen.classList.contains('open'))
             });
             listen(plugin, 'photoReceived', (item) => { void pump.handle(item); });
-            listen(plugin, 'receiverStatus', (s) => { receiverState = s || {}; renderOffline(); onReceiverChange(); });
+            listen(plugin, 'receiverStatus', (s) => { receiverState = s || {}; renderAllReceiver(); onReceiverChange(); });
             listen(plugin, 'senderStatus', (s) => { senderState = s || {}; renderSend(); });
             listen(plugin, 'sendResult', (r) => {
                 shooter.onSendResult(r);
@@ -238,7 +295,7 @@
             const refresh = () => {
                 Promise.resolve(plugin.receiverStatus()).then((s) => {
                     receiverState = s || {};
-                    renderOffline();
+                    renderAllReceiver();
                     onReceiverChange();
                 }).catch(() => {});
                 Promise.resolve(plugin.senderStatus()).then((s) => { senderState = s || {}; renderSend(); }).catch(() => {});
@@ -295,6 +352,78 @@
         }
 
         let offEls = null;
+        let manualOpen = false;
+        let lastError = null;
+
+        function btn(cls, text) {
+            const b = el('button', cls, text);
+            b.type = 'button';
+            return b;
+        }
+
+        function buildManualForm(onDone) {
+            const box = el('div', 'relay-manual');
+            box.appendChild(el('strong', 'relay-manual-title', '휴대폰 핫스팟으로 받기'));
+            const steps = el('ol', 'relay-manual-steps');
+            ['아래 「핫스팟 설정 열기」 → 「모바일 핫스팟」을 켜기',
+                '그 화면의 핫스팟 이름·암호를 아래에 넣기 (한 번 넣으면 기억)',
+                '「이 핫스팟으로 QR 만들기」 → 보내는 폰이 그 QR을 스캔'].forEach((t) => steps.appendChild(el('li', null, t)));
+            const open = btn('btn btn-outline relay-manual-open', '핫스팟 설정 열기');
+            const nameL = el('label', 'relay-field');
+            nameL.appendChild(el('span', null, '핫스팟 이름'));
+            const name = el('input');
+            name.type = 'text';
+            name.autocomplete = 'off';
+            name.spellcheck = false;
+            name.setAttribute('autocapitalize', 'off');
+            name.placeholder = '예: Galaxy Tab S9 1234';
+            nameL.appendChild(name);
+            const passL = el('label', 'relay-field');
+            passL.appendChild(el('span', null, '암호'));
+            const passRow = el('div', 'relay-pass-row');
+            const pass = el('input');
+            pass.type = 'password';
+            pass.autocomplete = 'off';
+            pass.spellcheck = false;
+            pass.setAttribute('autocapitalize', 'off');
+            pass.placeholder = '8자 이상 (암호 없으면 비움)';
+            const eye = btn('relay-eye', '보기');
+            passRow.appendChild(pass);
+            passRow.appendChild(eye);
+            passL.appendChild(passRow);
+            const wpa3L = el('label', 'relay-check');
+            const wpa3 = el('input');
+            wpa3.type = 'checkbox';
+            wpa3L.appendChild(wpa3);
+            wpa3L.appendChild(el('span', null, '보안이 「WPA3」로만 돼 있음 (잘 모르면 그대로)'));
+            const err = el('p', 'relay-manual-err');
+            err.hidden = true;
+            const make = btn('btn btn-primary relay-manual-make', '이 핫스팟으로 QR 만들기');
+            const saved = loadManualHotspot(safeStorage());
+            if (saved) { name.value = saved.ssid; pass.value = saved.password; wpa3.checked = saved.security === 'SAE'; }
+            eye.addEventListener('click', () => { pass.type = pass.type === 'password' ? 'text' : 'password'; eye.textContent = pass.type === 'password' ? '보기' : '숨김'; });
+            open.addEventListener('click', () => { try { plugin.openHotspotSettings(); } catch (_e) { /* ignore */ } });
+            make.addEventListener('click', async () => {
+                const v = validateHotspotInput(name.value, pass.value);
+                if (v) { err.textContent = v; err.hidden = false; return; }
+                err.hidden = true;
+                const input = { ssid: name.value.trim(), password: pass.value, security: wpa3.checked ? 'SAE' : 'WPA' };
+                try {
+                    receiverState = (await plugin.receiverUseManualHotspot(input)) || {};
+                    saveManualHotspot(safeStorage(), input);
+                    toast(`휴대폰 핫스팟 「${input.ssid}」 QR을 만들었습니다. 핫스팟이 켜져 있어야 연결됩니다.`, 'success');
+                    if (onDone) onDone();
+                } catch (e) {
+                    err.textContent = errText(e, 'QR을 만들지 못했습니다.');
+                    err.hidden = false;
+                }
+                renderAllReceiver();
+                onReceiverChange();
+            });
+            [steps, open, nameL, passL, wpa3L, err, make].forEach((x) => box.appendChild(x));
+            return box;
+        }
+
         function buildOfflinePane() {
             offlinePane.innerHTML = '';
             const status = el('div', 'relay-off-status');
@@ -307,118 +436,238 @@
             status.appendChild(dot);
             status.appendChild(txt);
 
-            const qrWrap = el('div', 'relay-off-qr');
-            const qrImg = el('img');
-            qrImg.alt = '전용 Wi-Fi QR 코드';
-            qrWrap.appendChild(qrImg);
+            const fixBtn = btn('btn btn-outline relay-off-fix', '설정 열기');
+            fixBtn.hidden = true;
 
+            const qrWrap = el('button', 'relay-off-qr');
+            qrWrap.type = 'button';
+            qrWrap.title = '누르면 크게 보기';
+            const qrImg = el('img');
+            qrImg.alt = '받기용 Wi-Fi QR 코드';
+            qrWrap.appendChild(qrImg);
             const wifi = el('div', 'relay-off-wifi');
             const count = el('div', 'relay-off-count');
 
+            const actions = el('div', 'relay-off-actions');
+            const startBtn = btn('btn btn-primary relay-off-start', '📶 핫스팟 켜고 받기');
+            const bigBtn = btn('btn btn-primary relay-off-big', 'QR 크게 보기');
+            const retryBtn = btn('btn btn-outline relay-off-retry', '핫스팟 다시 켜기');
+            const stopBtn = btn('btn btn-outline relay-off-stop', '받기 중지');
+            [startBtn, bigBtn, retryBtn, stopBtn].forEach((b) => actions.appendChild(b));
+
             const steps = el('ol', 'relay-off-steps');
             ['보내는 폰에서 스마트안전점검 앱 → 홈의 「📷 사진 보내기 모드」',
-                '「QR 스캔해서 연결」로 위 QR을 비추기',
-                '「촬영해서 보내기」 → 찍고 확인 → 이 기기로 바로 들어옵니다'].forEach((s) => steps.appendChild(el('li', null, s)));
+                '「QR 스캔해서 연결」로 이 QR을 비추기',
+                '「촬영해서 보내기」 → 찍고 확인 → 이 기기로 바로 들어옵니다'].forEach((t) => steps.appendChild(el('li', null, t)));
 
-            const actions = el('div', 'relay-off-actions');
-            const startBtn = el('button', 'btn btn-primary relay-off-start', '받기 시작');
-            startBtn.type = 'button';
-            const stopBtn = el('button', 'btn btn-outline relay-off-stop', '받기 중지');
-            stopBtn.type = 'button';
-            const fixBtn = el('button', 'btn btn-outline relay-off-fix', '설정 열기');
-            fixBtn.type = 'button';
-            fixBtn.hidden = true;
-            actions.appendChild(startBtn);
-            actions.appendChild(stopBtn);
-            actions.appendChild(fixBtn);
+            const manualToggle = btn('relay-off-link relay-manual-toggle', '전용 Wi-Fi가 안 켜지면: 휴대폰 핫스팟으로 받기 ▾');
+            const manual = buildManualForm(() => { manualOpen = false; });
 
             const note = el('p', 'relay-off-note', '인터넷·서버 없이 기기끼리 바로 주고받습니다(안드로이드 앱끼리만). 받은 원본은 이 기기 갤러리 「스마트안전점검/현장전송」에도 남습니다.');
-            const toSend = el('button', 'relay-off-link', '이 기기로 찍어서 보내기 (사진 보내기 모드) →');
-            toSend.type = 'button';
+            const toSend = btn('relay-off-link', '이 기기로 찍어서 보내기 (사진 보내기 모드) →');
 
-            offlinePane.appendChild(status);
-            offlinePane.appendChild(qrWrap);
-            offlinePane.appendChild(wifi);
-            offlinePane.appendChild(count);
-            offlinePane.appendChild(steps);
-            offlinePane.appendChild(actions);
-            offlinePane.appendChild(note);
-            offlinePane.appendChild(toSend);
+            [status, fixBtn, qrWrap, wifi, count, actions, steps, manualToggle, manual, note, toSend].forEach((x) => offlinePane.appendChild(x));
 
-            startBtn.addEventListener('click', startReceiver);
-            stopBtn.addEventListener('click', async () => {
-                try { receiverState = await plugin.receiverStop(); } catch (_e) { /* ignore */ }
-                renderOffline();
-                onReceiverChange();
-            });
-            fixBtn.addEventListener('click', () => {
-                const code = fixBtn.getAttribute('data-code');
-                if (code === 'LOCATION_OFF') plugin.openLocationSettings();
-                else plugin.openAppSettings();
-            });
+            startBtn.addEventListener('click', () => { void startReceiver(); });
+            retryBtn.addEventListener('click', () => { void startReceiver(); });
+            bigBtn.addEventListener('click', () => openQrScreen({ autoStart: false }));
+            qrWrap.addEventListener('click', () => openQrScreen({ autoStart: false }));
+            stopBtn.addEventListener('click', stopReceiver);
+            fixBtn.addEventListener('click', () => runFix(fixBtn.getAttribute('data-code')));
+            manualToggle.addEventListener('click', () => { manualOpen = !manualOpen; renderOffline(); });
             toSend.addEventListener('click', () => {
                 const modal = document.getElementById('mobileQrModal');
                 if (modal) { modal.style.display = 'none'; modal.classList.remove('open'); }
                 openSendMode();
             });
-            offEls = { status, title, detail, qrWrap, qrImg, wifi, count, steps, startBtn, stopBtn, fixBtn };
+            offEls = { status, title, detail, qrWrap, qrImg, wifi, count, steps, startBtn, bigBtn, retryBtn, stopBtn, fixBtn, manualToggle, manual };
             renderOffline();
         }
 
-        let lastError = null;
+        function runFix(code) {
+            const f = fixActionFor(code);
+            if (!f) return;
+            try {
+                if (f.action === 'location') plugin.openLocationSettings();
+                else if (f.action === 'appSettings') plugin.openAppSettings();
+                else plugin.openHotspotSettings();
+            } catch (_e) { /* ignore */ }
+        }
+
+        async function stopReceiver() {
+            try { receiverState = (await plugin.receiverStop()) || {}; } catch (_e) { /* ignore */ }
+            renderAllReceiver();
+            onReceiverChange();
+        }
+
         async function startReceiver() {
-            if (startingReceiver) return;
+            if (startingReceiver) return receiverState;
             startingReceiver = true;
             lastError = null;
-            renderOffline();
+            renderAllReceiver();
             try {
-                const s = await plugin.receiverStart();
-                receiverState = s || {};
-                if (s && s.warning) toast(s.warning, 'warning');
+                receiverState = (await plugin.receiverStart()) || {};
             } catch (e) {
                 lastError = { message: errText(e, '받기를 시작하지 못했습니다.'), code: e && e.code };
-                try { receiverState = await plugin.receiverStatus(); } catch (_e) { /* ignore */ }
+                try { receiverState = (await plugin.receiverStatus()) || {}; } catch (_e) { /* ignore */ }
             } finally {
                 startingReceiver = false;
             }
-            renderOffline();
+            // 전용 Wi-Fi 를 못 켰는데 예전에 넣은 휴대폰 핫스팟이 있으면 그걸로 QR (핫스팟을 켜 두기만 하면 됨)
+            const saved = loadManualHotspot(safeStorage());
+            if (receiverState.receiving && receiverState.hotspotMode !== 'local' && !receiverState.hotspotStarting
+                && saved && !receiverState.manualSsid) {
+                try { receiverState = (await plugin.receiverUseManualHotspot(saved)) || receiverState; } catch (_e) { /* ignore */ }
+            }
+            if (needsManual(receiverState)) manualOpen = true;
+            renderAllReceiver();
             onReceiverChange();
             void pump.drain();
+            return receiverState;
         }
 
-        function renderOffline() {
-            if (!offEls) return;
+        function renderAllReceiver() {
+            renderOffline();
+            renderQrScreen();
+        }
+
+        function receiverView() {
             const s = receiverState || {};
             let d = describeReceiver(s);
             if (startingReceiver) d = { tone: 'wait', title: '전용 Wi-Fi 켜는 중…', detail: '권한을 묻는 창이 뜨면 「허용」을 눌러 주세요.' };
             else if (lastError && !s.receiving) d = { tone: 'warn', title: '받기를 시작하지 못했습니다', detail: lastError.message };
+            const code = s.receiving ? (s.hotspotMode === 'local' ? null : s.hotspotErrorCode) : (lastError && lastError.code);
+            return { s, d, code, fix: fixActionFor(code), hasQr: !!(s.receiving && s.qrDataUrl) };
+        }
+
+        function fillWifi(node, s) {
+            node.innerHTML = '';
+            if (!s.ssid) return;
+            node.appendChild(el('span', 'relay-wifi-k', 'Wi-Fi'));
+            node.appendChild(el('b', 'relay-wifi-v', s.ssid));
+            if (s.password) {
+                node.appendChild(el('span', 'relay-wifi-k', '암호'));
+                node.appendChild(el('b', 'relay-wifi-v relay-mono', s.password));
+            }
+        }
+
+        function renderOffline() {
+            if (!offEls) return;
+            const { s, d, code, fix, hasQr } = receiverView();
             offEls.status.className = 'relay-off-status tone-' + d.tone;
             offEls.title.textContent = d.title;
             offEls.detail.textContent = d.detail;
-            const hasQr = !!(s.receiving && s.qrDataUrl);
             offEls.qrWrap.hidden = !hasQr;
             if (hasQr && offEls.qrImg.getAttribute('src') !== s.qrDataUrl) offEls.qrImg.src = s.qrDataUrl;
             offEls.wifi.hidden = !(s.receiving && s.ssid);
-            if (s.ssid) {
-                offEls.wifi.innerHTML = '';
-                offEls.wifi.appendChild(el('span', null, 'Wi-Fi '));
-                offEls.wifi.appendChild(el('b', null, s.ssid));
-                if (s.password) {
-                    offEls.wifi.appendChild(el('span', null, ' · 암호 '));
-                    offEls.wifi.appendChild(el('b', 'relay-mono', s.password));
-                }
-            }
+            fillWifi(offEls.wifi, s);
             const waitingIn = Number(s.pending) || 0;
             offEls.count.hidden = !(s.receiving && waitingIn > 0);
             offEls.count.textContent = waitingIn ? `받은 사진 ${waitingIn}장을 앱에 넣는 중…` : '';
-            offEls.steps.hidden = !(s.receiving);
+            offEls.steps.hidden = !hasQr;
             offEls.startBtn.hidden = !!s.receiving;
             offEls.startBtn.disabled = startingReceiver;
+            offEls.bigBtn.hidden = !hasQr;
+            offEls.retryBtn.hidden = !(s.receiving && s.hotspotMode !== 'local' && !s.hotspotStarting);
+            offEls.retryBtn.disabled = startingReceiver;
             offEls.stopBtn.hidden = !s.receiving;
-            const code = lastError && !s.receiving ? lastError.code : null;
-            offEls.fixBtn.hidden = !(code === 'LOCATION_OFF' || code === 'PERMISSION');
-            offEls.fixBtn.textContent = code === 'LOCATION_OFF' ? '위치 설정 열기' : '앱 권한 설정 열기';
-            if (code) offEls.fixBtn.setAttribute('data-code', code);
+            offEls.fixBtn.hidden = !fix;
+            if (fix) { offEls.fixBtn.textContent = fix.label; offEls.fixBtn.setAttribute('data-code', code); }
+            const showManual = manualOpen || needsManual(s);
+            offEls.manual.hidden = !showManual;
+            offEls.manualToggle.hidden = needsManual(s);
+            offEls.manualToggle.textContent = manualOpen ? '휴대폰 핫스팟 입력 닫기 ▴' : '전용 Wi-Fi가 안 켜지면: 휴대폰 핫스팟으로 받기 ▾';
+        }
+
+        // ── 받기용 QR 크게 보기(전체 화면) ──
+        let qrScreen = null;
+        let qrEls = null;
+        function buildQrScreen() {
+            qrScreen = el('div', 'rqv-screen');
+            qrScreen.id = 'relayQrScreen';
+            qrScreen.setAttribute('role', 'dialog');
+            qrScreen.setAttribute('aria-label', '받기용 Wi-Fi QR');
+            const head = el('header', 'psm-head');
+            const close = btn('psm-close', '✕');
+            close.setAttribute('aria-label', '닫기');
+            head.appendChild(close);
+            head.appendChild(el('h2', null, '받기용 Wi-Fi QR'));
+            const body = el('div', 'rqv-body');
+            const status = el('div', 'relay-off-status');
+            const dot = el('span', 'relay-dot');
+            const txt = el('div', 'relay-off-status-text');
+            const title = el('strong');
+            const detail = el('small');
+            txt.appendChild(title);
+            txt.appendChild(detail);
+            status.appendChild(dot);
+            status.appendChild(txt);
+            const qr = el('div', 'rqv-qr');
+            const img = el('img');
+            img.alt = '받기용 Wi-Fi QR 코드';
+            qr.appendChild(img);
+            const wifi = el('div', 'rqv-wifi');
+            const hint = el('p', 'rqv-hint', '보내는 폰: 스마트안전점검 앱 → 「📷 사진 보내기 모드」 → 「QR 스캔해서 연결」로 이 화면을 비추세요. (폰 기본 카메라로 비춰 Wi-Fi에 붙여도 됩니다)');
+            const actions = el('div', 'rqv-actions');
+            const startBtn = btn('psm-btn rqv-start', '📶 핫스팟 켜고 받기');
+            const retryBtn = btn('psm-btn rqv-retry', '핫스팟 다시 켜기');
+            const fixBtn = btn('psm-btn rqv-fix', '설정 열기');
+            const manualBtn = btn('psm-btn rqv-manual', '휴대폰 핫스팟 정보 넣기');
+            [startBtn, retryBtn, fixBtn, manualBtn].forEach((b) => actions.appendChild(b));
+            const manualWrap = el('div', 'rqv-manual');
+            manualWrap.appendChild(buildManualForm(() => { qrManualOpen = false; renderQrScreen(); }));
+            [status, qr, wifi, hint, actions, manualWrap].forEach((x) => body.appendChild(x));
+            qrScreen.appendChild(head);
+            qrScreen.appendChild(body);
+            document.body.appendChild(qrScreen);
+            close.addEventListener('click', closeQrScreen);
+            startBtn.addEventListener('click', () => { void startReceiver(); });
+            retryBtn.addEventListener('click', () => { void startReceiver(); });
+            fixBtn.addEventListener('click', () => runFix(fixBtn.getAttribute('data-code')));
+            manualBtn.addEventListener('click', () => { qrManualOpen = !qrManualOpen; renderQrScreen(); });
+            qrEls = { status, title, detail, qr, img, wifi, hint, startBtn, retryBtn, fixBtn, manualBtn, manualWrap };
+        }
+
+        let qrManualOpen = false;
+        function renderQrScreen() {
+            if (!qrEls) return;
+            const { s, d, code, fix, hasQr } = receiverView();
+            qrEls.status.className = 'relay-off-status tone-' + d.tone;
+            qrEls.title.textContent = d.title;
+            qrEls.detail.textContent = d.detail;
+            qrEls.qr.hidden = !hasQr;
+            if (hasQr && qrEls.img.getAttribute('src') !== s.qrDataUrl) qrEls.img.src = s.qrDataUrl;
+            qrEls.wifi.hidden = !(s.receiving && s.ssid);
+            fillWifi(qrEls.wifi, s);
+            qrEls.hint.hidden = !hasQr;
+            qrEls.startBtn.hidden = !!s.receiving;
+            qrEls.startBtn.disabled = startingReceiver;
+            qrEls.retryBtn.hidden = !(s.receiving && s.hotspotMode !== 'local' && !s.hotspotStarting);
+            qrEls.retryBtn.disabled = startingReceiver;
+            qrEls.fixBtn.hidden = !fix;
+            if (fix) { qrEls.fixBtn.textContent = fix.label; qrEls.fixBtn.setAttribute('data-code', code); }
+            const manualNeeded = needsManual(s);
+            qrEls.manualBtn.hidden = !s.receiving || s.hotspotMode === 'local';
+            qrEls.manualBtn.textContent = qrManualOpen ? '입력 닫기' : (s.hotspotMode === 'manual' ? '휴대폰 핫스팟 정보 바꾸기' : '휴대폰 핫스팟 정보 넣기');
+            qrEls.manualWrap.hidden = !(qrManualOpen || (manualNeeded && !hasQr));
+        }
+
+        /** 받기용 QR 을 크게. autoStart 면 꺼져 있을 때 핫스팟을 켜고 받기부터 시작. */
+        async function openQrScreen(opts) {
+            if (!plugin) return;
+            if (!qrScreen) buildQrScreen();
+            qrScreen.classList.add('open');
+            document.documentElement.classList.add('psm-lock');
+            renderQrScreen();
+            try { receiverState = (await plugin.receiverStatus()) || receiverState; } catch (_e) { /* ignore */ }
+            renderQrScreen();
+            if ((!opts || opts.autoStart !== false) && !(receiverState && receiverState.receiving)) await startReceiver();
+        }
+
+        function closeQrScreen() {
+            if (!qrScreen) return;
+            qrScreen.classList.remove('open');
+            if (!(sendScreen && sendScreen.classList.contains('open'))) document.documentElement.classList.remove('psm-lock');
         }
 
         // ── 보내기: 전체 화면 ──
@@ -508,6 +757,7 @@
                     const r = await plugin.senderScan();
                     if (r && r.cancelled) { if (r.message) toast(r.message, 'warning'); return; }
                     if (r && r.status) senderState = r.status;
+                    if (r && r.locationOff) toast('이 폰은 위치(GPS)가 꺼져 있으면 Wi-Fi 연결 창이 받는 기기를 못 찾을 수 있습니다. 안 붙으면 위치를 켜 주세요.', 'warning');
                     if (r && r.autoConnect === false) toast(`Wi-Fi 설정에서 「${r.ssid}」에 직접 연결해 주세요.`, 'warning');
                     else toast(`「${r.ssid}」에 연결합니다. 확인 창이 뜨면 「연결」을 눌러 주세요.`, 'info');
                 } catch (e) {
@@ -564,13 +814,13 @@
         function closeSendMode() {
             if (!sendScreen) return;
             sendScreen.classList.remove('open');
-            document.documentElement.classList.remove('psm-lock');
+            if (!(qrScreen && qrScreen.classList.contains('open'))) document.documentElement.classList.remove('psm-lock');
         }
 
-        return { available, init, isReceiving, onModalOpen, openSendMode, closeSendMode, setMode };
+        return { available, init, isReceiving, onModalOpen, openSendMode, closeSendMode, openQrScreen, closeQrScreen, setMode };
     }
 
-    const api = { getPlugin, createInboxPump, describeReceiver, describeSender, createShooter, createUi };
+    const api = { getPlugin, createInboxPump, describeReceiver, describeSender, createShooter, validateHotspotInput, loadManualHotspot, saveManualHotspot, fixActionFor, needsManual, createUi };
     if (typeof module === 'object' && module.exports) module.exports = api;
     if (root && typeof root.document !== 'undefined') {
         root.BsaPhotoRelayLib = api;

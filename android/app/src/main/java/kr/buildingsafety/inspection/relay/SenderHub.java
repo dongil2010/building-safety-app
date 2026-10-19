@@ -118,10 +118,21 @@ public final class SenderHub {
 
     /** QR 에서 읽은 Wi-Fi 로 붙는다(Android 10+). 그 아래 버전은 Wi-Fi 설정에서 직접 붙인 뒤 start 만 부른다. */
     public synchronized boolean connect(Context context, String wifiSsid, String pass, String auth) {
+        return connect(context, wifiSsid, pass, auth, false);
+    }
+
+    /**
+     * retry=true 는 WPA2↔WPA3 을 바꿔 한 번 더 붙어 보는 것. QR 에 WPA 라고 써 있어도
+     * 삼성 휴대폰 핫스팟·전용 Wi-Fi 가 WPA3 전용이면 WPA2 암호로는 안 붙는다(반대도).
+     */
+    private synchronized boolean connect(Context context, String wifiSsid, String pass, String auth, boolean retry) {
         app = context.getApplicationContext();
         start(context);
         ssid = wifiSsid;
         releaseRequest();
+        final String wantSsid = wifiSsid;
+        final String wantPass = pass;
+        final String usedAuth = auth;
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
             message = "이 폰(Android 9 이하)은 자동 연결이 안 됩니다. Wi-Fi 설정에서 「" + wifiSsid + "」에 직접 연결해 주세요.";
             emitStatus();
@@ -157,14 +168,21 @@ public final class SenderHub {
                 }
                 @Override public void onUnavailable() {
                     connecting = false;
-                    message = "Wi-Fi 연결이 취소됐거나 받는 기기를 못 찾았습니다. QR을 다시 스캔해 주세요.";
+                    if (!retry && wantPass != null && !wantPass.isEmpty() && active && wantSsid.equals(ssid)) {
+                        String other = "SAE".equalsIgnoreCase(usedAuth) ? "WPA" : "SAE";
+                        message = "다른 보안 방식(" + ("SAE".equals(other) ? "WPA3" : "WPA2") + ")으로 한 번 더 연결해 봅니다…";
+                        emitStatus();
+                        connect(app, wantSsid, wantPass, other, true);
+                        return;
+                    }
+                    message = "Wi-Fi 연결이 취소됐거나 받는 기기 Wi-Fi를 못 찾았습니다. 받는 기기 화면에 QR이 떠 있는지 보고 다시 스캔해 주세요.";
                     emitStatus();
                 }
             };
             requestCb = cb;
             connecting = true;
             message = null;
-            cm.requestNetwork(req, cb);
+            cm.requestNetwork(req, cb, 60000);
             emitStatus();
             return true;
         } catch (Exception e) {
