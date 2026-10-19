@@ -36796,7 +36796,15 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     function startPhoneRelaySession() {
         stopPhoneRelayListener();
         const sessionId = `rel_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-        const captureUrl = new URL('photo-capture.html', window.location.href);
+        // 태블릿 앱(APK)이 앱 안 화면(https://localhost/…)을 열고 있으면 QR이 휴대폰에서 못 여는 주소가 된다.
+        // 그때는 배포 주소로 만든다(photo-capture.html은 GitHub Pages에 있음).
+        const loc = window.location;
+        const servedFromPages = /^https?:$/.test(loc.protocol) && loc.hostname === 'dongil2010.github.io';
+        const native = !!(window.Capacitor && typeof window.Capacitor.isNativePlatform === 'function'
+            && window.Capacitor.isNativePlatform());
+        const captureUrl = (native && !servedFromPages)
+            ? new URL('https://dongil2010.github.io/building-safety-app/photo-capture.html')
+            : new URL('photo-capture.html', loc.href);
         captureUrl.searchParams.set('s', sessionId);
 
         const qrContainer = document.getElementById('mobileQrCanvas');
