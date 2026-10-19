@@ -232,7 +232,7 @@ const g = (no, log, name) => ({ no, kind: 'gauge', name: name || ('G' + no), gau
     });
     assert.ok(pageNums >= 4, '본문 양식의 쪽 번호를 못 찾았다');
     const app = fs.readFileSync(path.join(ROOT, 'app.js'), 'utf8');
-    const forced = (app.match(/newXml = forceHwpxArabicPageNumbers\(newXml\);\r?\n\s*zip\.file\(sectionPath, newXml\);/g) || []).length;
+    const forced = (app.match(/newXml = forceHwpxArabicPageNumbers\(newXml\);(?:(?!zip\.file\()[\s\S]){0,900}zip\.file\(sectionPath, newXml\);/g) || []).length;
     assert.strictEqual(forced, 2, '두 한글 내보내기 모두 쪽 번호를 아라비아 숫자로 바로잡아야 한다');
 })();
 

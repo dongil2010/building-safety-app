@@ -1306,6 +1306,9 @@
             }
         }
         const files = hwpxOut.buildFiles(tplFiles, model, photos);
+        // 2026-10-19 8.5pt로 들어가던 글자는 전부 8pt(js/shared/hwpx-font-8pt.js)
+        const font8pt = window.BSA && window.BSA.shared && window.BSA.shared.hwpxFont8pt;
+        if (font8pt) font8pt.applyToFiles(files);
 
         // 내보내기 전에 구조를 한 번 본다(태그 짝, 표 칸 주소, 목록에 적힌 파일)
         const V = window.BSA && window.BSA.hwpxValidate;
