@@ -12130,6 +12130,15 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         return { x: img.x, y: img.y, octant: screen.octant };
     }
 
+    /**
+     * 2026-10-19 지시선 끝: 기본(동그라미)이어도 그 지시선에 「화살표 방향 지정」을 했으면 화살표로.
+     * 화살표를 고른 기기(state.tipShape === 'arrow')는 원래대로 모두 화살표. 화면·PDF·한글·벡터 PDF 공용.
+     */
+    function leaderTipIsCircle(forcedDir) {
+        if (state.tipShape !== 'circle') return false;
+        return !(forcedDir && forcedDir.enabled);
+    }
+
     function resolveForcedArrowDirection(arrowItem, defect, rotationDeg) {
         const forceFlag = (arrowItem && arrowItem.forceArrowDir !== undefined)
             ? !!arrowItem.forceArrowDir
@@ -25053,10 +25062,11 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             const leaderAnchorOpts = { shape: shapeCfg.shape, scale };
             const anchor = getPinLeaderBoxAnchor(boxX, boxY, targetX, targetY, w, h, state.rotationAngle || 0, leaderAnchorOpts);
             const headLen = 10 * arrowScale;
-            const stemInset = useCircleTip
+            const forcedDir = tipIsArea ? { enabled: false } : resolveForcedArrowDirection(t, defect, state.rotationAngle || 0);
+            const tipCircle = useCircleTip && leaderTipIsCircle(forcedDir);
+            const stemInset = tipCircle
                 ? 4.5 * arrowScale
                 : headLen * Math.cos(Math.PI / 6);
-            const forcedDir = tipIsArea ? { enabled: false } : resolveForcedArrowDirection(t, defect, state.rotationAngle || 0);
             const leader = forcedDir.enabled
                 ? buildForcedLeaderRoute(
                     { x: targetX, y: targetY },
@@ -25096,7 +25106,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             // 영역 마킹은 화살표 머리 없이 테두리에 선만 꽂음
             if (!tipIsArea) {
                 ctx.fillStyle = lineColor;
-                if (useCircleTip) {
+                if (tipCircle) {
                     ctx.beginPath();
                     ctx.arc(targetX, targetY, 4.5 * arrowScale, 0, Math.PI * 2);
                     ctx.fill();
@@ -44522,7 +44532,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 const anchor = getPinLeaderBoxAnchor(boxX, boxY, tipX, tipY, safeBoxW, safeBoxH, 0, leaderAnchorOpts);
                 const safeHeadLen = 11 * safeArrowScale;
                 const forcedDir = tipIsArea ? { enabled: false } : resolveForcedArrowDirection(t, defect, floorRotSafe);
-                const stemInset = useCircleTipSafe
+                const tipCircleSafe = useCircleTipSafe && leaderTipIsCircle(forcedDir);
+                const stemInset = tipCircleSafe
                     ? 4.5 * safeArrowScale
                     : safeHeadLen * Math.cos(Math.PI / 6);
                 const leader = forcedDir.enabled
@@ -44546,7 +44557,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                         // 영역은 테두리까지 직선 (L자 꺾임 없음)
                         const tipBack = tipIsArea
                             ? 0
-                            : (useCircleTipSafe ? stemInset : safeHeadLen * Math.cos(Math.PI / 6));
+                            : (tipCircleSafe ? stemInset : safeHeadLen * Math.cos(Math.PI / 6));
                         const stemEnd = tipBack <= 0
                             ? { x: tipX, y: tipY }
                             : getArrowStemEndPoint(tipX, tipY, ux, uy, tipBack);
@@ -44564,7 +44575,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
                 if (!tipIsArea) {
                     ctx.fillStyle = color;
-                    if (useCircleTipSafe) {
+                    if (tipCircleSafe) {
                         ctx.beginPath();
                         ctx.arc(tipX, tipY, 4.5 * safeArrowScale, 0, Math.PI * 2);
                         ctx.fill();
@@ -44674,7 +44685,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             const anchor = getPinLeaderBoxAnchor(boxX, boxY, tipX, tipY, boxDim.w, boxDim.h, floorRot, leaderAnchorOpts);
             const headLen = 11 * arrowScale;
             const forcedDir = tipIsArea ? { enabled: false } : resolveForcedArrowDirection(t, defect, floorRot);
-            const stemInset = useCircleTip
+            const tipCircle = useCircleTip && leaderTipIsCircle(forcedDir);
+            const stemInset = tipCircle
                 ? 4.5 * arrowScale
                 : headLen * Math.cos(Math.PI / 6);
             const leader = forcedDir.enabled
@@ -44691,7 +44703,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     // 영역은 테두리까지 직선 (L자 꺾임 없음)
                     const tipBack = tipIsArea
                         ? 0
-                        : (useCircleTip ? stemInset : headLen * Math.cos(Math.PI / 6));
+                        : (tipCircle ? stemInset : headLen * Math.cos(Math.PI / 6));
                     const stemEnd = tipBack <= 0
                         ? { x: tipX, y: tipY }
                         : getArrowStemEndPoint(tipX, tipY, ux, uy, tipBack);
@@ -44705,7 +44717,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 ux: leader.ux,
                 uy: leader.uy,
                 headLen,
-                useCircleTip,
+                useCircleTip: tipCircle,
                 skipArrowHead: tipIsArea
             });
         });
@@ -44983,18 +44995,60 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
     function getDefaultLocationMapLegend(bldg) {
         bldg = bldg || state.currentBuilding;
+        // styleKey: 마킹 색 설정과 이어 둔다 — 마킹 색을 바꾸면 범례 색도 같이(예전엔 처음 색이 굳어 어긋났다)
         if (isGrade3Building(bldg)) {
             return [
-                { colorName: '흑색', label: '상태양호', color: getStyleColor('defectGoodGrade3') },
-                { colorName: '적색', label: '기존조사', color: getStyleColor('defectExistingGrade3') },
-                { colorName: '청색', label: '신규조사', color: getStyleColor('defectNewGrade3') },
-                { colorName: '녹색', label: '중점관리', color: getStyleColor('priorityManage') }
+                { colorName: '흑색', label: '상태양호', color: getStyleColor('defectGoodGrade3'), styleKey: 'defectGoodGrade3' },
+                { colorName: '적색', label: '기존조사', color: getStyleColor('defectExistingGrade3'), styleKey: 'defectExistingGrade3' },
+                { colorName: '청색', label: '신규조사', color: getStyleColor('defectNewGrade3'), styleKey: 'defectNewGrade3' },
+                { colorName: '녹색', label: '중점관리', color: getStyleColor('priorityManage'), styleKey: 'priorityManage' }
             ];
         }
         return [
-            { colorName: '적색', label: '결함발생', color: getStyleColor('defectBad') },
-            { colorName: '청색', label: '상태양호', color: getStyleColor('defectGood') }
+            { colorName: '적색', label: '결함발생', color: getStyleColor('defectBad'), styleKey: 'defectBad' },
+            { colorName: '청색', label: '상태양호', color: getStyleColor('defectGood'), styleKey: 'defectGood' }
         ];
+    }
+
+    // 2026-10-19 범례 점검: 예전에 저장된 기본 항목(styleKey 없음)도 이름으로 마킹 색 설정에 잇는다.
+    // 범례에서 색을 직접 고른 항목(colorCustom)은 그 색 그대로.
+    function legendStyleKeyByLabel(bldg) {
+        return isGrade3Building(bldg || state.currentBuilding)
+            ? { 상태양호: 'defectGoodGrade3', 기존조사: 'defectExistingGrade3', 신규조사: 'defectNewGrade3', 중점관리: 'priorityManage' }
+            : { 결함발생: 'defectBad', 상태양호: 'defectGood', 중점관리: 'priorityManage' };
+    }
+    function normalizeLegendLabelKey(label) {
+        return String(label || '').replace(/\s+/g, '');
+    }
+    function resolveLegendItemStyleKey(item, bldg) {
+        if (!item || item.colorCustom) return '';
+        const map = legendStyleKeyByLabel(bldg);
+        const byLabel = map[normalizeLegendLabelKey(item.label)] || '';
+        if (item.styleKey && Object.values(map).includes(item.styleKey)) return item.styleKey;
+        return byLabel;
+    }
+    /** 이 건물에 도면에 놓인 중점관리 마킹이 있나(1·2종 범례에 중점관리 줄을 붙일지) */
+    function buildingHasPriorityManageMarking(bldgId) {
+        const id = bldgId || state.currentBuildingId;
+        if (!id || !state.defects) return false;
+        const prefix = `${id}_`;
+        return Object.keys(state.defects).some((k) => k.indexOf(prefix) === 0
+            && (state.defects[k] || []).some((d) => d && d.isPriorityManage && !d.mapUnregistered));
+    }
+    /**
+     * 도면에 그릴 범례 줄(화면·보고서/PDF·한글 그림·벡터 PDF·범위 맞춤 공용).
+     * 1·2종도 중점관리 마킹은 녹색으로 그려지는데 기본 범례엔 그 줄이 없었다 → 중점관리 마킹이 있으면 줄을 붙인다.
+     */
+    function getLocationMapLegendDrawItems() {
+        const items = getActiveLocationMapLegend().map(enrichLocationMapLegendItem);
+        if (!isGrade3Building()) {
+            const hasRow = items.some((it) => resolveLegendItemStyleKey(it) === 'priorityManage'
+                || normalizeLegendLabelKey(it.label) === '중점관리');
+            if (!hasRow && buildingHasPriorityManageMarking()) {
+                items.push(enrichLocationMapLegendItem({ label: '중점관리', color: getStyleColor('priorityManage'), styleKey: 'priorityManage', auto: true }));
+            }
+        }
+        return items;
     }
 
     function saveBuildingLocationMapLegend(bldg) {
@@ -45165,16 +45219,20 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const listEl = document.getElementById('locationMapLegendListBody');
         if (!listEl) return;
         const items = ensureLocationMapLegendInitialized();
-        listEl.innerHTML = items.map((item, idx) => `
+        const legendAttr = (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+        listEl.innerHTML = items.map((item, idx) => {
+            const shown = enrichLocationMapLegendItem(item); // 마킹 색 설정을 따르는 항목은 지금 색으로
+            return `
             <div class="style-cat-card legend-modal-row" data-legend-idx="${idx}" style="display:flex; align-items:center; gap:0.45rem; margin-bottom:0.35rem;">
                 <button type="button" class="legend-drag-handle" draggable="true" title="드래그하여 순서 변경" aria-label="순서 변경" style="border:none;background:transparent;padding:0.2rem 0.15rem;color:#a3a3a3;cursor:grab;flex-shrink:0;line-height:1;">
                     <i class="fa-solid fa-grip-vertical"></i>
                 </button>
-                <input type="color" value="${item.color}" onchange="window.recolorLocationMapLegendItem(${idx}, this.value)">
-                <input type="text" class="form-control" value="${item.label}" style="flex:1;" onchange="window.renameLocationMapLegendItem(${idx}, this.value)">
+                <input type="color" value="${legendAttr(normalizeHexColor(shown.color) || '#64748b')}" onchange="window.recolorLocationMapLegendItem(${idx}, this.value)">
+                <input type="text" class="form-control" value="${legendAttr(item.label)}" style="flex:1;" onchange="window.renameLocationMapLegendItem(${idx}, this.value)">
                 <button type="button" class="btn btn-sm btn-danger-outline" onclick="window.removeLocationMapLegendItem(${idx})"><i class="fa-solid fa-trash"></i></button>
             </div>
-        `).join('');
+        `;
+        }).join('');
         setupLocationMapLegendListDragDrop(listEl);
     }
 
@@ -45201,6 +45259,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (items[idx]) {
             items[idx].color = color;
             items[idx].colorName = resolveLegendColorName({ color });
+            items[idx].colorCustom = true; // 범례에서 직접 고른 색 — 마킹 색 설정을 따르지 않는다
         }
         saveStateToLocalStorage();
         if (typeof drawCanvas === 'function') drawCanvas();
@@ -45213,6 +45272,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (!trimmed) { renderLocationMapLegendModalList(); return; }
         if (items[idx]) items[idx].label = trimmed;
         saveStateToLocalStorage();
+        if (typeof drawCanvas === 'function') drawCanvas(); // 이름 바꾸면 도면 범례도 바로(예전엔 다음 그리기까지 옛 이름)
         persistCurrentBuildingLocationMapLegend();
     };
 
@@ -45345,7 +45405,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     }
 
     function enrichLocationMapLegendItem(item) {
-        return { ...item, colorName: resolveLegendColorName(item) };
+        const key = resolveLegendItemStyleKey(item);
+        const color = (key && getStyleColor(key)) || (item && item.color);
+        const out = { ...item, color };
+        return { ...out, colorName: resolveLegendColorName(out) };
     }
 
     function measureLocationMapLegendTable(ctx, items, scale) {
@@ -45378,7 +45441,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     // 결함위치도에 색상 범례를 그린다. 위치(x,y)는 도면 원본 픽셀 좌표(좌상단)이며,
     // counterRotateDeg로 도면 회전과 반대로 돌려 글자·표가 항상 수평으로 보이게 한다.
     function drawLocationMapLegend(ctx, imgW, imgH, interactive, counterRotateDeg, legendOpts) {
-        const items = getActiveLocationMapLegend().map(enrichLocationMapLegendItem);
+        const items = getLocationMapLegendDrawItems();
         if (!items.length) {
             if (interactive) lastLegendBoxBounds = null;
             return;
@@ -45494,7 +45557,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
     /** 결함위치도 범례 표 → 벡터 PDF용 (화면 drawLocationMapLegend와 동일 치수) */
     window.buildVectorLegendDrawPlan = function(measureCtx, imgW, imgH) {
-        const items = getActiveLocationMapLegend().map(enrichLocationMapLegendItem);
+        const items = getLocationMapLegendDrawItems();
         if (!items.length) return null;
         const box = state.locationMapLegendBox || {};
         const scale = resolveLocationMapLegendDrawScale(box, imgW, imgH);
@@ -45711,7 +45774,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
     /** 범위 안에 그릴 범례의 크기(범위 좌표). 범례 항목이 없으면 null. */
     function measureLegendForPrintCrop(crop) {
-        const items = getActiveLocationMapLegend().map(enrichLocationMapLegendItem);
+        const items = getLocationMapLegendDrawItems();
         if (!items.length || !crop) return null;
         const scale = resolveLocationMapLegendDrawScale(state.locationMapLegendBox || {}, crop.w, crop.h);
         const dims = measureLocationMapLegendTable(document.createElement('canvas').getContext('2d'), items, scale);
