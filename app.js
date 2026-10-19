@@ -47406,16 +47406,18 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     const HWPX_FIG_MARK = '␟';
 
     /**
-     * 도면 번호의 앞자리(보고서 장 번호) — 정기안전점검은 6, 정밀안전점검(그 밖의 점검 포함)은 7.
+     * 도면 번호의 앞자리(보고서 장 번호) — 1·2종: 정기안전점검은 6, 정밀안전점검(그 밖의 점검 포함)은 7.
      * 정기점검 보고서는 비파괴 장이 없어 위치도가 한 장 앞에 온다(2026-10-07 사용자 지정).
+     * 3종시설물은 점검 종류와 상관없이 5(2026-10-19 사용자 지정 「3종은 도면 번호가 5- 이렇게」).
      */
-    function hwpxFigureChapterNo(inspectionType) {
+    function hwpxFigureChapterNo(inspectionType, opts) {
+        if (opts && opts.grade3) return 5;
         return (inspectionType || '정밀안전점검') === '정기안전점검' ? 6 : 7;
     }
 
-    /** 표시가 붙은 위치도 캡션에 문서 순서대로 [도면 7-1], [도면 7-2] … 를 매긴다(정기점검은 [도면 6-N]). */
-    function numberHwpxFigureCaptions(xmlDoc, inspectionType) {
-        const chapterNo = hwpxFigureChapterNo(inspectionType);
+    /** 표시가 붙은 위치도 캡션에 문서 순서대로 [도면 7-1], [도면 7-2] … 를 매긴다(정기점검 [도면 6-N], 3종 [도면 5-N]). */
+    function numberHwpxFigureCaptions(xmlDoc, inspectionType, opts) {
+        const chapterNo = hwpxFigureChapterNo(inspectionType, opts);
         let figNo = 0;
         Array.from(xmlDoc.getElementsByTagNameNS(HWPX_HP_NS, 't')).forEach((t) => {
             const txt = t.textContent || '';
@@ -51619,9 +51621,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
             Array.from(xmlDoc.getElementsByTagNameNS(HP_NS, 'tbl')).forEach(ensureTblTreatAsChar);
 
-            // 결함위치도·비파괴 장비조사 위치도 캡션에 [도면 7-N]을 하나로 이어서 매긴다.
+            // 결함위치도·비파괴 장비조사 위치도 캡션에 [도면 5-N](3종)을 하나로 이어서 매긴다.
             // 문서가 완성된 뒤라야 최종 배치 순서대로 번호가 맞는다.
-            numberHwpxFigureCaptions(xmlDoc, bldg.inspectionType);
+            numberHwpxFigureCaptions(xmlDoc, bldg.inspectionType, { grade3: true });
 
             if (hwpxHeaderDirty && hwpxHeaderText) {
                 zip.file('Contents/header.xml', hwpxHeaderText);
