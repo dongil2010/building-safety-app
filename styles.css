@@ -17283,3 +17283,35 @@ html.bsa-sketch-open, html.bsa-sketch-open body { overscroll-behavior: none; }
 @media (max-width: 600px) {
     .sketch-memo-overlay .sk-tab { min-height: 44px; }
 }
+
+/* 2026-10-19 오프라인 준비 창: 건물마다 서버 동기화 진행률 · 최신으로 다시 받기 */
+.offline-prep-sync { margin: 0 0 12px; scroll-margin-top: 8px; border-radius: 12px; }
+.offline-prep-sync:empty { display: none; }
+.offline-prep-sync.op-sync-flash { animation: opSyncFlash 1.4s ease-out 1; }
+@keyframes opSyncFlash { 0% { box-shadow: 0 0 0 0 rgba(37, 99, 235, 0.55); } 100% { box-shadow: 0 0 0 12px rgba(37, 99, 235, 0); } }
+.op-sync-title { display: flex; align-items: center; gap: 8px; font-weight: 800; font-size: 0.95rem; color: #0f172a; margin: 2px 0 8px; }
+.op-sync-title i { color: #2563eb; }
+.op-sync-bldg { border: 1px solid #e2e8f0; border-radius: 12px; padding: 10px 12px; margin-bottom: 8px; background: #fff; }
+.op-sync-bldg.tone-ok { border-left: 4px solid #22c55e; }
+.op-sync-bldg.tone-run { border-left: 4px solid #2563eb; }
+.op-sync-bldg.tone-warn { border-left: 4px solid #f97316; }
+.op-sync-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; margin-bottom: 6px; }
+.op-sync-head strong { font-size: 0.92rem; color: #0f172a; }
+.op-sync-line { font-size: 0.84rem; color: #475569; font-variant-numeric: tabular-nums; }
+.op-sync-bldg.tone-ok .op-sync-line { color: #166534; font-weight: 700; }
+.op-sync-bldg.tone-run .op-sync-line { color: #1d4ed8; font-weight: 700; }
+.op-sync-bldg.tone-warn .op-sync-line { color: #9a3412; }
+.op-sync-dl { margin: 0 0 8px; height: 8px; }
+.op-sync-body .bsp-state { margin-bottom: 8px; padding: 6px 9px; font-size: 0.86rem; }
+.op-sync-body .bsp-total { margin-bottom: 8px; }
+.op-sync-body .bsp-total-num b { font-size: 1.1rem; }
+.op-sync-body .bsp-row { padding: 6px 9px; }
+.op-sync-body .bsp-note { margin-top: 6px; font-size: 0.74rem; }
+.op-sync-actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; margin-top: 8px; }
+.op-sync-actions .btn { min-height: 38px; }
+.op-sync-actions .btn[disabled] { opacity: 0.5; cursor: default; }
+@media (max-width: 600px) {
+    .op-sync-bldg { padding: 9px 10px; }
+    .op-sync-actions { justify-content: stretch; }
+    .op-sync-actions .btn { flex: 1 1 0; min-height: 44px; }
+}

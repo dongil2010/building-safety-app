@@ -1,6 +1,12 @@
 /**
- * 건물 점검 메타(종류·연도·상/하반기 등) 로컬 우선 병합.
+ * 건물 점검 메타(종류·연도·상/하반기 등) 병합.
  * Firebase 동기화가 원격 건물을 베이스로 덮어 현장 목록 수정이 되돌아가는 것을 막는다.
+ *
+ * 2026-10-19 칸별 시각 비교: 예전에는 「업로드 대기(_pendingCloudSync)」면 시각을 보지 않고 로컬 메타가 통째로 이겼다.
+ *  오프라인에서 준공일 하나만 고친 기기가 다시 연결되면, 그동안 다른 기기가 고친 건물명·점검자 같은 다른 칸까지 옛 값으로 되돌렸다.
+ *  이제는 칸마다 고친 시각(metaFieldAt[칸])을 찍고, 칸마다 더 나중에 고친 쪽을 남긴다.
+ *  - 이 기기에서 바뀐 칸은 _metaFieldHash(이 기기가 마지막으로 본 값, 기기에만 저장)와 비교해서 안다.
+ *  - 칸 시각이 없는 옛 데이터는 예전처럼 metaUpdatedAt(건물 전체 시각)으로 비교한다.
  */
 (function (root) {
     'use strict';
@@ -35,18 +41,70 @@
         return Number.isFinite(n) && n > 0 ? n : 0;
     }
 
+    function hashOf(v) {
+        if (v === undefined) return 'u';
+        var s;
+        try { s = JSON.stringify(v); } catch (_e) { s = String(v); }
+        if (s === undefined) return 'u';
+        var h = 5381;
+        for (var i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) | 0;
+        return s.length.toString(36) + ':' + (h >>> 0).toString(36);
+    }
+
+    /** 칸마다 지금 값의 지문 — 이 기기가 「본 값」으로 기억해 두고, 나중에 바뀐 칸을 찾는다 */
+    function fieldHashes(bldg) {
+        var o = {};
+        KEYS.forEach(function (k) { o[k] = hashOf(bldg ? bldg[k] : undefined); });
+        return o;
+    }
+
+    function fieldStamps(bldg) {
+        var m = bldg && bldg.metaFieldAt;
+        return (m && typeof m === 'object' && !Array.isArray(m)) ? m : null;
+    }
+
+    /**
+     * 본 값(_metaFieldHash)과 달라진 칸에 시각을 찍는다. 반환: 찍은 칸 수.
+     * 본 값 기록이 없으면(이 기기에서 아직 병합 전) 어떤 칸이 바뀌었는지 모른다 →
+     *  allIfUnknown이면 모든 칸에 찍고(예전 「통째로 로컬」과 같지만 시각으로 비교됨), 아니면 아무것도 안 찍는다.
+     */
+    function stampChangedFields(bldg, ts, allIfUnknown) {
+        if (!bldg) return 0;
+        var t = Number(ts);
+        if (!Number.isFinite(t) || t <= 0) t = Date.now();
+        var base = bldg._metaFieldHash;
+        var known = base && typeof base === 'object';
+        if (!known && !allIfUnknown) return 0;
+        var at = fieldStamps(bldg) ? bldg.metaFieldAt : {};
+        var n = 0;
+        var nextBase = known ? base : {};
+        KEYS.forEach(function (k) {
+            var h = hashOf(bldg[k]);
+            if (known && nextBase[k] === h) return;
+            if (!known && bldg[k] === undefined) { nextBase[k] = h; return; }
+            // 이 기기가 본 시각보다 늘 뒤(시계가 늦은 기기도 「본 뒤에 고친 것」이 이기게)
+            at[k] = Math.max(t, (Number(at[k]) || 0) + 1);
+            nextBase[k] = h;
+            n++;
+        });
+        if (n) bldg.metaFieldAt = at;
+        bldg._metaFieldHash = nextBase;
+        return n;
+    }
+
     function markDirty(bldg, now) {
         if (!bldg) return bldg;
         var ts = Number(now);
         bldg.metaUpdatedAt = Number.isFinite(ts) && ts > 0 ? ts : Date.now();
         bldg._pendingCloudSync = true;
+        stampChangedFields(bldg, bldg.metaUpdatedAt, true);
         return bldg;
     }
 
     /**
-     * 로컬 현장 정보 수정이 원격(기본값 정밀/하반기)에 먹히지 않게.
-     * - 업로드 대기면 무조건 로컬
-     * - 로컬 metaUpdatedAt 이 원격보다 같거나 더 최근이면 로컬 (동점이면 방금 저장한 기기)
+     * (예전 함수 — 건물 전체 기준) 로컬 메타를 통째로 쓸지.
+     * - 업로드 대기면 로컬 / 로컬 metaUpdatedAt 이 원격보다 같거나 더 최근이면 로컬
+     * overlay는 이제 칸별 비교(fieldWinner)를 쓴다.
      */
     function shouldKeepLocal(localMatch, remote) {
         if (!localMatch) return false;
@@ -67,6 +125,27 @@
         return merged;
     }
 
+    /** 칸 하나의 시각: 칸 시각 기록이 있으면 그것(없는 칸은 0), 기록 자체가 없는 옛 데이터면 건물 전체 시각 */
+    function fieldAt(bldg, key) {
+        var m = fieldStamps(bldg);
+        if (m) return Number(m[key]) || 0;
+        return metaUpdatedAt(bldg);
+    }
+
+    /** 이 칸은 로컬 값을 남길지 — 로컬 칸 시각이 있고 원격보다 같거나 나중일 때(동점은 방금 저장한 이 기기) */
+    function localFieldWins(localMatch, remote, key) {
+        var la = fieldAt(localMatch, key);
+        if (!la) return false;
+        if (la < fieldAt(remote, key)) return false;
+        var v = localMatch[key];
+        // 빈 값: 그 칸을 이 기기에서 일부러 비운 것(칸 시각 있음)일 때만 이긴다 — 옛 데이터의 빈칸이 서버 값을 지우지 않게
+        if (v == null || v === '') {
+            var m = fieldStamps(localMatch);
+            return !!(m && Number(m[key]) > 0) && v !== undefined;
+        }
+        return true;
+    }
+
     /** 층별 시각 맵. 키가 겹치면 더 나중 시각. 한쪽 메타가 통째로 이겨도 다른 층의 새 시각은 남긴다. */
     function mergeFloorStampMaps(localMap, remoteMap) {
         var out = {};
@@ -82,9 +161,26 @@
         return out;
     }
 
+    /**
+     * merged(원격 기준 건물)에 로컬 메타를 칸별로 얹는다.
+     * 반환: merged — metaFieldAt(칸 시각, 양쪽 중 나중)·metaUpdatedAt(나중)·_metaFieldHash(이 기기가 본 값) 갱신
+     */
     function overlay(merged, localMatch, remote) {
-        if (shouldKeepLocal(localMatch, remote)) applyLocal(merged, localMatch);
-        if (localMatch && localMatch._pendingCloudSync) merged._pendingCloudSync = true;
+        if (!merged) return merged;
+        if (localMatch) {
+            // 수정 표시 없이 바뀐 칸도 놓치지 않게(본 값 기록이 있을 때만) — 그 기기의 마지막 수정 시각으로
+            stampChangedFields(localMatch, metaUpdatedAt(localMatch) || Date.now(), false);
+            KEYS.forEach(function (key) {
+                if (localFieldWins(localMatch, remote, key)) merged[key] = localMatch[key];
+            });
+            var lm = fieldStamps(localMatch);
+            var rm = fieldStamps(remote);
+            if (lm || rm) merged.metaFieldAt = mergeFloorStampMaps(lm, rm);
+            var at = Math.max(metaUpdatedAt(localMatch), metaUpdatedAt(remote));
+            if (at) merged.metaUpdatedAt = at;
+            if (localMatch._pendingCloudSync) merged._pendingCloudSync = true;
+        }
+        merged._metaFieldHash = fieldHashes(merged);
         return merged;
     }
 
@@ -95,7 +191,11 @@
         mergeFloorStampMaps: mergeFloorStampMaps,
         shouldKeepLocal: shouldKeepLocal,
         applyLocal: applyLocal,
-        overlay: overlay
+        overlay: overlay,
+        fieldHashes: fieldHashes,
+        stampChangedFields: stampChangedFields,
+        localFieldWins: localFieldWins,
+        hashOf: hashOf
     };
 
     root.BSA = root.BSA || {};

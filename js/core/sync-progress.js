@@ -74,6 +74,14 @@
             try { if (storage) storage.setItem(loadedKey || keyFn(), JSON.stringify(data)); } catch (_e) { /* 용량 부족 무시 */ }
             listeners.slice().forEach(function (fn) { try { fn(); } catch (_e) { /* ignore */ } });
         }
+        /** 2026-10-19 건물별 진행률: 이번 회차에 층(fk)마다 올라간 수 */
+        function sessionDoneFk(fk, kind) {
+            var s = data.session;
+            if (!s || s.finishedAt || !fk) return;
+            if (!s.doneFk) s.doneFk = {};
+            if (!s.doneFk[fk]) s.doneFk[fk] = {};
+            s.doneFk[fk][kind] = (s.doneFk[fk][kind] || 0) + 1;
+        }
         function sessionAdd(kind, n) {
             var s = data.session;
             if (!s || s.finishedAt) return;
@@ -140,6 +148,7 @@
                     delete data.entries[k];
                     confirmed++;
                     if (data.session && !data.session.finishedAt) data.session.done[e.k] = (data.session.done[e.k] || 0) + 1;
+                    sessionDoneFk(e.fk || fk, e.k);
                 } else {
                     remaining++;
                 }
@@ -147,6 +156,7 @@
             if (data.session && !data.session.finishedAt && data.session.otherFk && data.session.otherFk[fk] === 0) {
                 data.session.otherFk[fk] = 1;
                 data.session.done.other = (data.session.done.other || 0) + 1;
+                sessionDoneFk(fk, 'other');
             }
             delete data.failures[fk];
             save();
@@ -158,9 +168,11 @@
             load();
             var k = entryKey('photo', id);
             if (!data.entries[k]) return false;
+            var pfk = data.entries[k].fk || '';
             delete data.entries[k];
             delete data.failures['photo:' + id];
             if (data.session && !data.session.finishedAt) data.session.done.photo = (data.session.done.photo || 0) + 1;
+            sessionDoneFk(pfk, 'photo');
             save();
             return true;
         }
@@ -228,6 +240,7 @@
                         delete data.entries[k];
                         delete data.failures['photo:' + e.id];
                         if (sess) sess.done.photo = (sess.done.photo || 0) + 1;
+                        sessionDoneFk(e.fk || '', 'photo');
                         changed = true;
                     } else if (ps === 'gone' && tNow - (e.at || 0) > 60000) {
                         delete data.entries[k];
@@ -308,6 +321,56 @@
             };
         }
 
+        /**
+         * 2026-10-19 건물 하나(층 키 앞부분 「건물id_」)만의 진행률 — 오프라인 준비 창에 건물마다 보여 줄 때.
+         * 모양은 summary()와 같다(renderPanelHtml에 그대로 넘긴다). 전체 summary로 먼저 정리한 뒤 센다.
+         */
+        function summaryFor(ctx, prefix) {
+            var g = summary(ctx);
+            var pre = String(prefix || '');
+            var inB = function (fk) { return !!fk && String(fk).indexOf(pre) === 0; };
+            var dirty = ((ctx && ctx.dirtyFloorKeys) || []).map(String);
+            var pending = emptyCounts();
+            var oldestAt = 0;
+            Object.keys(data.entries).forEach(function (k) {
+                var e = data.entries[k];
+                if (!e || !inB(e.fk)) return;
+                pending[e.k] = (pending[e.k] || 0) + 1;
+                if (!oldestAt || (e.at && e.at < oldestAt)) oldestAt = e.at || 0;
+            });
+            pending.other = dirty.filter(function (fk) { return inB(fk) && !hasFloorEntries(fk); }).length;
+            var s = data.session || null;
+            var done = emptyCounts();
+            if (s && s.doneFk) {
+                Object.keys(s.doneFk).forEach(function (fk) {
+                    if (!inB(fk)) return;
+                    Object.keys(s.doneFk[fk]).forEach(function (kind) { done[kind] = (done[kind] || 0) + (s.doneFk[fk][kind] || 0); });
+                });
+            }
+            var rows = [];
+            var tot = 0; var dn = 0; var pd = 0;
+            KINDS.forEach(function (kind) {
+                var p = pending[kind] || 0;
+                var d = done[kind] || 0;
+                if (!p && !d) return;
+                rows.push({ kind: kind, label: LABELS[kind], icon: ICONS[kind], total: p + d, done: d, pending: p });
+                tot += p + d; dn += d; pd += p;
+            });
+            var failures = g.failures.filter(function (f) {
+                var w = String(f.where || '');
+                if (w === 'sync') return true;
+                if (w.indexOf('photo:') === 0) return !!(ctx && typeof ctx.photoInBuilding === 'function' && ctx.photoInBuilding(w.slice(6)));
+                return inB(w);
+            });
+            return {
+                rows: rows, total: tot, done: dn, pending: pd,
+                percent: tot ? Math.round((dn / tot) * 100) : 100,
+                allDone: pd === 0, finishedNow: false,
+                finishedAt: g.finishedAt, sessionActive: g.sessionActive, sessionTotal: tot,
+                oldestAt: oldestAt, failures: failures, online: g.online, syncing: g.syncing
+            };
+        }
+
         function pendingEntries() {
             load();
             return Object.keys(data.entries).map(function (k) { return Object.assign({}, data.entries[k]); });
@@ -318,7 +381,7 @@
         return {
             record: record, mark: mark, confirmFloor: confirmFloor, confirmPhoto: confirmPhoto, drop: drop,
             noteFailure: noteFailure, clearFailure: clearFailure, startSession: startSession,
-            summary: summary, pendingEntries: pendingEntries, onChange: onChange, reset: reset,
+            summary: summary, summaryFor: summaryFor, pendingEntries: pendingEntries, onChange: onChange, reset: reset,
             _data: function () { return load(); }
         };
     }
@@ -375,9 +438,34 @@
         return head + bar + '<ul class="bsp-rows">' + rows + '</ul>' + fails + note;
     }
 
+    /**
+     * 2026-10-19 「최신으로 다시 받기」 상태 글자. st: { running, phase, done, total, at, ok, failed, error, kind } · fmt(ts)
+     * prepRec: 오프라인 준비 기록(있으면) — 다시 받은 적 없을 때 준비 완료 시각을 보여 준다
+     */
+    function refreshStatusText(st, prepRec, fmt) {
+        var f = typeof fmt === 'function' ? fmt : function (t) { return new Date(t).toLocaleString(); };
+        if (st && st.running) {
+            if (st.phase === 'drawings') return '다시 받는 중 · 도면 ' + (st.done || 0) + '/' + (st.total || 0);
+            if (st.phase === 'photos') return '다시 받는 중 · 사진 ' + (st.done || 0) + '/' + (st.total || 0);
+            if (st.phase === 'done') return '다시 받는 중 · 마무리';
+            if (st.phase === 'upload') return '먼저 서버에 올리는 중';
+            return '다시 받는 중 ' + (st.done || 0) + '/' + (st.total || 0) + '층';
+        }
+        if (st && st.error) return '다시 받기 실패 — ' + st.error;
+        if (st && st.at) {
+            if (st.ok === false) {
+                var n = (st.failed && st.failed.length) || 0;
+                return '일부만 받음' + (n ? ' (층 ' + n + '개 못 받음)' : '') + ' · ' + f(st.at) + ' — 「최신으로 다시 받기」를 눌러 주세요';
+            }
+            return st.kind === 'floors' ? '최신 층 데이터 받음 (' + f(st.at) + ')' : '오프라인 준비 완료 (' + f(st.at) + ')';
+        }
+        if (prepRec && prepRec.at) return prepRec.complete ? '오프라인 준비 완료 (' + f(prepRec.at) + ')' : '오프라인 준비 일부만 됨 (' + f(prepRec.at) + ')';
+        return '오프라인 준비 안 함';
+    }
+
     var api = {
         KINDS: KINDS, LABELS: LABELS, createTracker: createTracker, pillText: pillText,
-        renderPanelHtml: renderPanelHtml, emptyCounts: emptyCounts
+        renderPanelHtml: renderPanelHtml, emptyCounts: emptyCounts, refreshStatusText: refreshStatusText
     };
     if (root) {
         root.BSA = root.BSA || {};

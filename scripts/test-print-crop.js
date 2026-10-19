@@ -133,8 +133,15 @@ assert.ok(/id="btnOpenPrintCropModal"/.test(index) && /id="mobileBtnPrintCrop"/.
 assert.ok(/floorPrintCrops: window\.state\.floorPrintCrops \|\| null,/.test(app), '기기 저장');
 assert.ok(/if \(parsed\.floorPrintCrops\)/.test(app), '기기에서 불러오기');
 assert.ok(/if \(data\.floorPrintCrops\)/.test(app), '서버에서 받기');
-assert.ok(/\.\.\.\(window\.state\.floorPrintCrops \? \{ floorPrintCrops: window\.state\.floorPrintCrops \} : \{\}\)/.test(app),
-    '서버에 올릴 때는 있을 때만 — null 로 올리면 아직 못 받은 기기가 남의 범위를 지운다');
+// 2026-10-19 서버 쓰기는 회사 설정 칸별 병합(이 기기에서 바뀐 층 칸만) — 아직 못 받은 기기는 바뀐 칸이 없어 남의 범위를 지우지 않는다
+{
+    const csm = require(path.join(__dirname, '..', 'js', 'core', 'company-settings-merge.js'));
+    assert.ok(csm.KEYS.includes('floorPrintCrops'), '출력 범위도 칸별 병합 대상');
+    const store = csm.initStore(csm.flatten({}));
+    csm.applyIncoming(store, {}, { floorPrintCrops: { 'b1_1F': { nx: 0.1 } } }, 10);
+    assert.deepStrictEqual(csm.planWrite(store, csm.flatten({ floorPrintCrops: { 'b1_1F': { nx: 0.1 } } }), {}).writes, [], '받기만 한 기기는 쓸 것이 없다');
+    assert.ok(/if \(csPerKey\) companySettingsApi\(\)\.KEYS\.forEach\(\(k\) => \{ delete dataToSync\[k\]; \}\);/.test(app), '통째 쓰기에서 빼기');
+}
 // 지울 때는 키를 delete 하지 않는다(merge 로 올려 서버에 남는다)
 assert.ok(!/delete state\.floorPrintCrops\[/.test(app), '기본으로 되돌릴 때는 null 을 넣는다');
 // 범위가 없으면 예전 경로 그대로

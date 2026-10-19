@@ -801,6 +801,22 @@ document.addEventListener('DOMContentLoaded', () => {
     function syncProgressSummary() {
         const j = syncJournal();
         if (!j) return null;
+        return j.summary(syncProgressCtx());
+    }
+    /** 2026-10-19 건물 하나만의 진행률(오프라인 준비 창) */
+    function syncProgressSummaryForBuilding(bldgId) {
+        const j = syncJournal();
+        if (!j || !bldgId || typeof j.summaryFor !== 'function') return null;
+        let keys = null;
+        const ctx = Object.assign(syncProgressCtx(), {
+            photoInBuilding: (pid) => {
+                if (!keys) { try { keys = offlinePrepPhotoKeysOfBuilding(bldgId); } catch (_e) { keys = new Set(); } }
+                return keys.has(pid);
+            }
+        });
+        return j.summaryFor(ctx, `${bldgId}_`);
+    }
+    function syncProgressCtx() {
         let dirty = [];
         let syncing = false;
         try { dirty = Array.from(_dirtyFloorKeys); } catch (_e) { /* 아직 준비 전 */ }
@@ -817,7 +833,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }));
             return used;
         };
-        return j.summary({
+        return ({
             dirtyFloorKeys: dirty,
             online: navigator.onLine !== false,
             syncing,
@@ -921,10 +937,35 @@ document.addEventListener('DOMContentLoaded', () => {
             const retry = sheet.querySelector('[data-bsp="retry"]');
             if (retry) retry.disabled = !sum.pending || !sum.online;
         }
+        // 2026-10-19 오프라인 준비 창(건물마다 진행률·다시 받기)
+        const opModal = document.getElementById('offlinePrepModal');
+        const opOpen = !!(opModal && opModal.classList.contains('open'));
+        if (opOpen && typeof renderOfflinePrepSyncSection === 'function') renderOfflinePrepSyncSection(opModal).catch(() => {});
         // 올리는 중에는 자주 다시 그린다(사진 표시·실패 등 일지 밖 변화)
-        if ((sum.syncing || (sheet && !sheet.hidden)) && !_syncProgressRenderTimer) setTimeout(scheduleSyncProgressRender, 1500);
+        if ((sum.syncing || opOpen || (sheet && !sheet.hidden)) && !_syncProgressRenderTimer) setTimeout(scheduleSyncProgressRender, 1500);
+    }
+    /** 진행률을 보여 줄 건물: 지금 건물 → 안 올라간 변경이 있는 건물 */
+    function syncProgressTargetBuilding() {
+        const list = (window.state && window.state.buildings) || [];
+        const cur = window.state && window.state.currentBuildingId;
+        const byId = (id) => list.find((b) => b && b.id === id) || null;
+        if (cur && byId(cur)) return byId(cur);
+        const keys = [];
+        try { Array.from(_dirtyFloorKeys).forEach((k) => keys.push(String(k))); } catch (_e) { /* 준비 전 */ }
+        try { const j = syncJournal(); if (j) j.pendingEntries().forEach((e) => { if (e.fk) keys.push(String(e.fk)); }); } catch (_e) { /* ignore */ }
+        for (const k of keys) {
+            const b = list.find((x) => x && x.id && k.indexOf(`${x.id}_`) === 0);
+            if (b) return b;
+        }
+        return null;
     }
     function openSyncProgressPanel() {
+        // 2026-10-19 「오프라인 준비탭에서 보이게」: 진행률은 오프라인 준비 창에서 건물마다 본다. 배지·알약은 그 칸으로 바로 간다.
+        const target = syncProgressTargetBuilding();
+        if (target && typeof window.openOfflinePrepModal === 'function') {
+            window.openOfflinePrepModal(target, { focusSync: true });
+            return;
+        }
         let el = document.getElementById('bsaSyncProgressSheet');
         if (!el) {
             el = document.createElement('div');
@@ -974,10 +1015,9 @@ document.addEventListener('DOMContentLoaded', () => {
         window.showToast('온라인 상태로 전환되었습니다. 서버 데이터와 병합 후 동기화합니다.', 'success');
         if (typeof reconnectFirestoreSync === 'function') reconnectFirestoreSync('online');
         // 2026-10-16 오프라인 작업 자동 올리기 + 확인 + 비울지 묻기
+        // 2026-10-19 오래된 캐시 정리는 여기서 하지 않는다 — 연결 순간 정리가 올리기보다 먼저 돌아 안 올라간 사진 사본을 지울 수 있었다.
+        // 올리기·서버 확인이 끝난 뒤 runOfflineReturnSync가 정리한다(정리 쪽에도 보호 규칙: js/core/cache-purge-guard.js).
         setTimeout(() => { if (typeof window.runOfflineReturnSync === 'function') window.runOfflineReturnSync('online'); }, 4000);
-        if (typeof pruneStaleIndexedDbInspectionData === 'function') {
-            pruneStaleIndexedDbInspectionData().catch(() => {});
-        }
     });
     // 2026-10-16 오프라인을 겪었다는 표시 — 인터넷 복귀 후 올리기·확인·「비울까요?」를 이때만 한다
     const markOfflineWorked = () => { try { localStorage.setItem('bsa_offline_worked_v1', '1'); } catch (_e) { /* ignore */ } };
@@ -2625,6 +2665,8 @@ document.addEventListener('DOMContentLoaded', () => {
             if (window.state.companyId) {
                 try { localStorage.setItem('bsa_last_active_company_id', window.state.companyId); } catch (_e) { /* ignore */ }
             }
+            // 2026-10-19 회사 공통 설정: 이 기기에서 바뀐 칸만 「올릴 칸」으로(js/core/company-settings-merge.js)
+            try { if (typeof trackCompanySettingsLocal === 'function') trackCompanySettingsLocal(); } catch (_e) { /* ignore */ }
             _localStorageSaveFailedNotified = false;
             if (gaugeSaveStats.inlineLeft > 0 && typeof scheduleGaugePhotoMigrate === 'function') scheduleGaugePhotoMigrate();
             if (window.state.uid) persistUserDefectPinPresetsLocal(window.state.uid);
@@ -3439,7 +3481,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!b) return b;
         const {
             floorDrawings, floorDrawingPdfs, floorDrawingTiers, floorDrawingSources,
-            _pendingCloudSync, _trashRestoredAt, ...rest
+            _pendingCloudSync, _trashRestoredAt, _metaFieldHash, ...rest
         } = b;
         if (Array.isArray(rest.overviewPhotos)) {
             rest.overviewPhotos = rest.overviewPhotos.map((p) => ({
@@ -59281,7 +59323,11 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         }
         const failed = [];
         let merged = 0;
-        for (const code of buildingFloorCodesForBackup(bldg)) {
+        const codesAll = buildingFloorCodesForBackup(bldg);
+        let codeIdx = 0;
+        const tellProgress = (n) => { if (typeof o.onProgress === 'function') { try { o.onProgress(n, codesAll.length); } catch (_e) { /* ignore */ } } };
+        for (const code of codesAll) {
+            tellProgress(codeIdx++);
             try {
                 const bundle = await readFloorBundleStrict(bldg, code);
                 if (bundle) {
@@ -59293,6 +59339,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 failed.push(code);
             }
         }
+        tellProgress(codesAll.length);
         if (merged && typeof saveStateToLocalStorage === 'function') saveStateToLocalStorage();
         if (!failed.length) _buildingFloorsFreshAt.set(bldg.id, Date.now());
         return { ok: !failed.length, skipped: null, failed };
@@ -59670,6 +59717,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             if (hadPending && !_dirtyFloorKeys.size) window.showToast('오프라인에서 작업한 내용을 서버에 올렸습니다.', 'success', 3500);
             if (!statuses.length) {
                 if (_dirtyFloorKeys.size) window.showToast(`아직 서버에 못 올린 층이 ${_dirtyFloorKeys.size}개 있습니다. 인터넷을 확인해 주세요.`, 'warning', 6000);
+                // 2026-10-19 다 올렸으면 최근 연 건물의 모든 층을 서버 최신으로(읽기만) — 안 연 층도 다음 오프라인 때 최신에서 시작
+                else if (hadPending) await refreshRecentBuildingsAfterReturn(new Set());
                 return;
             }
             // ② 서버에서 다시 읽어 확인(오프라인 준비한 동만)
@@ -59684,18 +59733,146 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 await window.appAlert(`서버 확인 결과 아직 안 올라간 것이 있습니다. 오프라인 데이터는 지우지 않았습니다.\n\n${failed.join('\n')}\n\n인터넷이 다시 연결되거나 앱을 다시 열면 자동으로 다시 확인합니다.`, { title: '오프라인 데이터' });
                 return;
             }
-            // ③ 비울지 묻기(한 번 복귀에 한 번)
-            const names = bldgs.map((b) => b.name || b.id).join(', ');
+            // ③ 2026-10-19 다 올라간 것을 확인했다 → 서버의 최신(다른 사람이 고친 층 포함)으로 모든 층·도면·새 사진을 다시 받아
+            //    오프라인 준비 상태로 둔다(읽기만). 진행: 오프라인 준비 창 「다시 받는 중 n/m층」 → 「오프라인 준비 완료 (시각)」.
+            //    (예전에는 여기서 「오프라인 데이터 비울까요?」를 물었다 — 비우기는 오프라인 준비 창의 「비우기」 버튼으로 한다)
             try { localStorage.removeItem('bsa_offline_worked_v1'); } catch (_e) { /* ignore */ }
-            const ok = await window.appConfirm(`오프라인에서 작업한 내용이 모두 서버에 올라간 것을 확인했습니다.\n\n오프라인 데이터 비울까요?\n(${names} — 이 기기에 받아 둔 사진·확대 도면 사본만 지웁니다. 서버 데이터는 그대로입니다.)`, { title: '오프라인 데이터', okText: '비우기', cancelText: '나중에', danger: false });
-            if (!ok) return;
-            const res = await clearOfflinePrep(bldgs);
-            window.showToast(`오프라인 데이터를 비웠습니다 (사진 ${res.removed}장${res.notOnServer ? `, 서버 확인 안 된 ${res.notOnServer}장은 남김` : ''})`, 'success', 5000);
+            window.showToast('모두 서버에 올라간 것을 확인했습니다. 최신 데이터를 다시 받아 오프라인 준비를 새로 합니다…', 'info', 4000);
+            const rr = await refreshOfflineBuildingsAfterReturn(bldgs);
+            if (rr.failed.length) {
+                window.showToast(`최신으로 다시 받기가 일부 실패했습니다 (${rr.failed.map((b) => b.name || b.id).join(', ')}). 오프라인 준비 창에서 「최신으로 다시 받기」를 눌러 주세요.`, 'warning', 7000);
+            } else {
+                window.showToast(`오프라인 준비 완료 — 서버 최신으로 다시 받았습니다 (${bldgs.map((b) => b.name || b.id).join(', ')})`, 'success', 5000);
+            }
         } catch (e) {
             console.warn('[오프라인 복귀] 실패', e);
         } finally {
             _offlineReturnRunning = false;
+            // 2026-10-19 올리기·확인·다시 받기가 끝난 뒤에만 오래된 캐시 정리(보호 규칙은 정리 함수 안에서 다시 확인)
+            setTimeout(() => {
+                if (typeof pruneStaleIndexedDbInspectionData === 'function') pruneStaleIndexedDbInspectionData().catch(() => {});
+            }, 1500);
         }
+    }
+
+    // ---- 2026-10-19 최신으로 다시 받기(오프라인 준비 상태 새로) ----
+    // 「온라인 연결될 때마다 오프라인 상태에서 업데이트되어서 그게 다시 오프라인이 되어야」 — 올리고 확인한 뒤 서버의 합쳐진 최신을
+    // 모든 층(안 연 층·다른 사람이 고친 층 포함) 다시 받아 기기(IndexedDB·localStorage)에 저장한다. 서버에는 쓰지 않는다(읽기만).
+    let _offlineRefreshState = null;
+    let _offlineRefreshStateKey = '';
+    function offlineRefreshStorageKey() {
+        return `bsa_offline_refresh_v1_${(window.state && window.state.companyId) || ''}`;
+    }
+    function offlineRefreshState() {
+        const key = offlineRefreshStorageKey();
+        if (_offlineRefreshState && _offlineRefreshStateKey === key) return _offlineRefreshState;
+        let o = {};
+        try { o = JSON.parse(localStorage.getItem(key) || '{}') || {}; } catch (_e) { o = {}; }
+        Object.keys(o).forEach((id) => { if (o[id]) o[id].running = false; });
+        _offlineRefreshState = o;
+        _offlineRefreshStateKey = key;
+        return o;
+    }
+    function saveOfflineRefreshState() {
+        const st = offlineRefreshState();
+        const out = {};
+        Object.keys(st).forEach((id) => {
+            const v = st[id];
+            if (v) out[id] = { at: v.at || 0, ok: v.ok, failed: (v.failed || []).slice(0, 50), error: v.error || '', kind: v.kind || '' };
+        });
+        try { localStorage.setItem(_offlineRefreshStateKey || offlineRefreshStorageKey(), JSON.stringify(out)); } catch (_e) { /* 용량 부족 무시 */ }
+    }
+    window.bsaOfflineRefreshState = (id) => (offlineRefreshState()[id] || null);
+
+    /**
+     * 건물 하나를 서버 최신으로 다시 받는다. opts.prepared: 오프라인 준비한 건물(층+도면+새 사진, runOfflinePrep)
+     *  / 아니면 층 데이터만(refreshBuildingFloorsFromServer). opts.manual: 버튼 — 이 건물에 안 올린 수정이 있으면 먼저 올린다.
+     * 합치기는 동기화와 같은 합치기라 아직 안 올라간 이 기기 수정은 그대로 남는다.
+     */
+    async function refreshOfflineBuildingNow(bldg, opts) {
+        const o = opts || {};
+        if (!bldg || !bldg.id) return { ok: false, skipped: 'nobuilding' };
+        if (typeof navigator !== 'undefined' && navigator.onLine === false) return { ok: false, skipped: 'offline' };
+        const st = offlineRefreshState();
+        const id = bldg.id;
+        const prev = st[id] || {};
+        if (prev.running) return { ok: false, skipped: 'running' };
+        const kind = o.prepared ? 'prep' : 'floors';
+        st[id] = Object.assign({}, prev, { running: true, phase: o.manual ? 'upload' : 'floors', done: 0, total: 0, error: '', kind });
+        scheduleSyncProgressRender();
+        try {
+            if (o.manual && Array.from(_dirtyFloorKeys).some((k) => String(k).startsWith(`${id}_`))) {
+                await flushBuildingEditsToServer(bldg);
+            }
+            st[id].phase = 'floors';
+            const onProgress = (p) => {
+                const cur = st[id];
+                if (!cur || !cur.running) return;
+                cur.phase = p.phase;
+                cur.done = p.done;
+                cur.total = p.total;
+                scheduleSyncProgressRender();
+            };
+            let ok = false;
+            let failed = [];
+            if (o.prepared) {
+                // 손으로 받는 중이면 끝날 때까지 기다린다(같은 층을 동시에 합치지 않게)
+                for (let i = 0; i < 240 && _offlinePrepRunning; i++) await new Promise((r) => setTimeout(r, 500));
+                const prep = window.BSA && window.BSA.offlinePrep;
+                const prevRec = prep ? await prep.getStatus(id) : null;
+                const rec = await runOfflinePrep(bldg, { hiRes: !!(prevRec && prevRec.hiRes), onProgress });
+                ok = !!(rec && rec.complete);
+                failed = (rec && rec.floors && rec.floors.failed) || [];
+            } else {
+                const res = await refreshBuildingFloorsFromServer(bldg, {
+                    force: true,
+                    onProgress: (done, total) => onProgress({ phase: 'floors', done, total })
+                });
+                ok = !!res.ok;
+                failed = res.failed || [];
+            }
+            st[id] = { running: false, at: Date.now(), ok, failed, error: '', kind };
+            return { ok, failed };
+        } catch (e) {
+            st[id] = { running: false, at: prev.at || 0, ok: prev.ok, failed: prev.failed || [], error: String((e && e.message) || e).slice(0, 140), kind };
+            return { ok: false, error: e };
+        } finally {
+            saveOfflineRefreshState();
+            scheduleSyncProgressRender();
+        }
+    }
+    window.refreshOfflineBuildingNow = refreshOfflineBuildingNow;
+
+    /** 최근 연 건물(오프라인 준비 안 한 것) — 최대 3개 */
+    function recentlyOpenedBuildingsForRefresh(excludeIds) {
+        let map = {};
+        try { map = readBuildingAccessMap() || {}; } catch (_e) { map = {}; }
+        const now = Date.now();
+        const list = (window.state && window.state.buildings) || [];
+        return Object.keys(map)
+            .filter((id) => !(excludeIds && excludeIds.has(id)) && now - (Number(map[id]) || 0) < BUILDING_ACCESS_TTL_MS)
+            .sort((a, b) => (Number(map[b]) || 0) - (Number(map[a]) || 0))
+            .map((id) => list.find((b) => b && b.id === id))
+            .filter((b) => b && !b.deletedAt && !b.trashedAt)
+            .slice(0, 3);
+    }
+    async function refreshRecentBuildingsAfterReturn(excludeIds) {
+        for (const b of recentlyOpenedBuildingsForRefresh(excludeIds)) {
+            if (navigator.onLine === false) return;
+            await refreshOfflineBuildingNow(b, { prepared: false });
+        }
+    }
+    /** 복귀 뒤: 오프라인 준비한 건물은 모두(층·도면·새 사진) → 최근 연 다른 건물은 층 데이터만 */
+    async function refreshOfflineBuildingsAfterReturn(preparedBldgs) {
+        const done = [];
+        const failed = [];
+        for (const b of (preparedBldgs || [])) {
+            if (navigator.onLine === false) { failed.push(b); continue; }
+            const r = await refreshOfflineBuildingNow(b, { prepared: true });
+            (r.ok ? done : failed).push(b);
+        }
+        await refreshRecentBuildingsAfterReturn(new Set((preparedBldgs || []).map((b) => b.id)));
+        return { done, failed };
     }
     window.runOfflineReturnSync = runOfflineReturnSync;
 
@@ -59741,6 +59918,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     <button type="button" class="modal-close" data-op-close title="닫기">&times;</button>
                 </div>
                 <div class="modal-body">
+                    <div class="offline-prep-sync" id="offlinePrepSync" aria-live="polite"></div>
                     <p class="bulk-restore-meta">받을 회차를 고르세요. 고른 회차의 모든 층(결함·비파괴), 도면, 사진을 이 기기에 받아 둡니다. 인터넷이 끊겨도 그 회차는 층을 바꾸고 도면·사진을 볼 수 있습니다. 서버 데이터는 바꾸지 않습니다. 전차 비교사진은 이번 회차를 받을 때 함께 받습니다.</p>
                     <div class="offline-prep-rounds" id="offlinePrepRounds"></div>
                     <label class="offline-prep-opt"><input type="checkbox" id="offlinePrepHiRes"> 확대용 고해상도 도면도 받기 (용량 큼)</label>
@@ -59757,11 +59935,81 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 </div>
             </div>`;
         document.body.appendChild(wrap);
+        // 2026-10-19 건물마다: 지금 다시 올리기 / 최신으로 다시 받기
+        wrap.querySelector('#offlinePrepSync').addEventListener('click', async (e) => {
+            const retry = e.target.closest('[data-op-sync-retry]');
+            if (retry) { retrySyncProgress(); return; }
+            const again = e.target.closest('[data-op-sync-refresh]');
+            if (!again) return;
+            const id = again.getAttribute('data-op-sync-refresh');
+            const b = (window.state.buildings || []).find((x) => x && x.id === id);
+            if (!b) return;
+            if (navigator.onLine === false) { window.showToast('오프라인입니다. 인터넷이 연결되면 다시 받을 수 있습니다.', 'warning', 3000); return; }
+            const prep = window.BSA && window.BSA.offlinePrep;
+            let prepared = false;
+            try { prepared = !!(prep && await prep.getStatus(id)); } catch (_e) { prepared = false; }
+            again.disabled = true;
+            const r = await refreshOfflineBuildingNow(b, { prepared, manual: true });
+            if (r && r.skipped === 'running') return;
+            window.showToast(r && r.ok ? (prepared ? '오프라인 준비 완료 — 서버 최신으로 다시 받았습니다.' : '서버 최신 층 데이터를 받았습니다.')
+                : `다시 받기가 끝나지 않았습니다${r && r.error ? ` (${(r.error && r.error.message) || r.error})` : ''}.`, r && r.ok ? 'success' : 'warning', 5000);
+            if (wrap._opRefreshRounds) wrap._opRefreshRounds();
+            if ((state.currentTab === 'tab-map' || window.__bsaEvalMapOn === true) && typeof drawCanvas === 'function') drawCanvas();
+        });
         wrap.addEventListener('click', (e) => {
             if (_offlinePrepRunning) return;   // 받는 중엔 닫지 않음(멈추기 버튼 사용)
             if (e.target === wrap || e.target.closest('[data-op-close]')) wrap.classList.remove('open');
         });
         return wrap;
+    }
+
+    /** 2026-10-19 오프라인 준비 창 맨 위: 건물(회차·동)마다 서버 동기화 진행률 + 다시 받기 상태 + 버튼 */
+    async function renderOfflinePrepSyncSection(wrap) {
+        const box = wrap && wrap.querySelector('#offlinePrepSync');
+        const info = wrap && wrap._opInfo;
+        const sp = window.BSA && window.BSA.syncProgress;
+        if (!box || !info || !sp) return;
+        const prep = window.BSA && window.BSA.offlinePrep;
+        if (!wrap._opPrepRecs || Date.now() - (wrap._opPrepRecsAt || 0) > 4000) {
+            let recs = new Map();
+            try { (prep ? await prep.listStatuses() : []).forEach((r) => { if (r && r.buildingId) recs.set(r.buildingId, r); }); } catch (_e) { recs = new Map(); }
+            wrap._opPrepRecs = recs;
+            wrap._opPrepRecsAt = Date.now();
+        }
+        const recs = wrap._opPrepRecs;
+        const fmt = (ts) => { try { return formatBulkSnapTime(ts); } catch (_e) { return new Date(ts).toLocaleString(); } };
+        const st = offlineRefreshState();
+        const online = navigator.onLine !== false;
+        const blocks = [];
+        info.rounds.forEach((r) => r.buildings.forEach((b) => {
+            const rec = recs.get(b.id) || null;
+            const bsum = syncProgressSummaryForBuilding(b.id);
+            const rs = st[b.id] || null;
+            const isCurrent = b.id === window.state.currentBuildingId;
+            if (!rec && !(bsum && bsum.total) && !rs && !isCurrent) return;
+            const who = r.buildings.length > 1 ? `${r.label} ${formatDongRowLabel(b)}` : r.label;
+            const line = sp.refreshStatusText(rs, rec, fmt);
+            const running = !!(rs && rs.running);
+            const pct = running && rs.total ? Math.round((rs.done / rs.total) * 100) : 0;
+            const tone = running ? 'run' : ((rs && (rs.error || rs.ok === false)) || (!rs && rec && !rec.complete) ? 'warn' : ((rs && rs.at) || (rec && rec.complete) ? 'ok' : 'none'));
+            const idq = escapeHtml(b.id);
+            blocks.push(`<section class="op-sync-bldg tone-${tone}" data-op-sync-b="${idq}">
+                    <div class="op-sync-head"><strong>${escapeHtml(who)}</strong><span class="op-sync-line">${running ? '<i class="fa-solid fa-arrows-rotate fa-spin"></i> ' : ''}${escapeHtml(line)}</span></div>
+                    ${running ? `<div class="bsp-bar op-sync-dl" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${pct}"><span style="width:${pct}%"></span></div>` : ''}
+                    <div class="op-sync-body">${bsum ? sp.renderPanelHtml(bsum, syncProgressFloorLabel) : ''}</div>
+                    <div class="op-sync-actions">
+                        <button type="button" class="btn btn-outline btn-sm" data-op-sync-retry="${idq}"${(bsum && bsum.pending && online) ? '' : ' disabled'}><i class="fa-solid fa-cloud-arrow-up"></i> 지금 다시 올리기</button>
+                        <button type="button" class="btn btn-primary btn-sm" data-op-sync-refresh="${idq}"${(!running && online) ? '' : ' disabled'}><i class="fa-solid fa-cloud-arrow-down"></i> 최신으로 다시 받기</button>
+                    </div>
+                </section>`);
+        }));
+        const html = `<div class="op-sync-title"><i class="fa-solid fa-cloud-arrow-up"></i> 서버 동기화 · 최신 상태</div>`
+            + (blocks.join('') || '<p class="bulk-restore-meta">이 현장에 올릴 변경이나 오프라인 준비한 회차가 없습니다.</p>');
+        // 바뀐 것이 있을 때만 다시 그린다(누르는 중인 버튼이 사라지지 않게)
+        if (box._opHtml !== html) {
+            box._opHtml = html;
+            box.innerHTML = html;
+        }
     }
 
     async function renderOfflinePrepRounds(wrap, info, checked) {
@@ -59805,7 +60053,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         }
     }
 
-    window.openOfflinePrepModal = function (bldgArg) {
+    window.openOfflinePrepModal = function (bldgArg, openOpts) {
         const bldg = bldgArg || window.state.currentBuilding
             || (window.state.buildings || []).find((b) => b && b.id === window.state.currentBuildingId);
         if (!bldg || !bldg.id) {
@@ -59819,8 +60067,25 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         wrap.querySelector('#offlinePrepTitle').textContent = `오프라인 준비 · ${info.site || bldg.name || ''}`;
         wrap.querySelector('#offlinePrepProgressWrap').hidden = true;
         wrap.classList.add('open');
-        const refresh = () => renderOfflinePrepRounds(wrap, info, checked);
+        wrap._opInfo = info;
+        wrap._opPrepRecs = null;
+        const refresh = () => {
+            wrap._opPrepRecs = null;
+            renderOfflinePrepSyncSection(wrap).catch(() => {});
+            return renderOfflinePrepRounds(wrap, info, checked);
+        };
+        wrap._opRefreshRounds = refresh;
         refresh();
+        if (openOpts && openOpts.focusSync) {
+            setTimeout(() => {
+                const sec = wrap.querySelector('#offlinePrepSync');
+                if (!sec) return;
+                try { sec.scrollIntoView({ block: 'start', behavior: 'smooth' }); } catch (_e) { sec.scrollIntoView(); }
+                sec.classList.remove('op-sync-flash');
+                void sec.offsetWidth;
+                sec.classList.add('op-sync-flash');
+            }, 80);
+        }
         const startBtn = wrap.querySelector('#btnOfflinePrepStart');
         const cancelBtn = wrap.querySelector('#btnOfflinePrepCancel');
         let cancelFlag = false;
@@ -60742,8 +61007,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         return removed;
     }
 
-    async function purgeBuildingIndexedDbAssets(buildingId) {
+    async function purgeBuildingIndexedDbAssets(buildingId, purgeOpts) {
         if (!buildingId) return 0;
+        const keepUnuploaded = !!(purgeOpts && purgeOpts.keepUnuploaded);
         const prefix = `${buildingId}_`;
         let removed = 0;
         removed += await deleteIdbKeysWithBuildingPrefix('floorDrawings', buildingId);
@@ -60777,6 +61043,12 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             });
         });
         for (const pid of photoKeysToDelete) {
+            // 2026-10-19 오래된 캐시 정리에서는 서버에 안 올라간 이 기기 사진(data URL)은 절대 지우지 않는다
+            if (keepUnuploaded && !isPhotoMarkedOnStorage(pid)) {
+                let localPhoto = null;
+                try { localPhoto = await idbGet('photos', pid); } catch (_e) { localPhoto = 'data:'; }
+                if (typeof localPhoto === 'string' && localPhoto.indexOf('data:') === 0) continue;
+            }
             if (await idbDelete('photos', pid)) removed++;
             if (_idbPersistedPhotoKeys) _idbPersistedPhotoKeys.delete(pid);
             if (window._photoCache && window._photoCache[pid]) delete window._photoCache[pid];
@@ -60817,10 +61089,68 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
      * - 지금 들어가 있는 점검은 유지
      * - 저장/진입할 때마다 접근 시각이 갱신되므로 장시간 오프라인 작업도 안전
      */
+    /** 2026-10-19 이 건물에 서버에 안 올라간 이 기기 사진(data URL)이 있나 */
+    async function buildingHasUnuploadedPhotos(bldgId) {
+        const guard = window.BSA && window.BSA.cachePurgeGuard;
+        let keys = new Set();
+        try { keys = new Set(offlinePrepPhotoKeysOfBuilding(bldgId)); } catch (_e) { keys = new Set(); }
+        Object.entries(window.state.defects || {}).forEach(([k, arr]) => {
+            if (!String(k).startsWith(`${bldgId}_`)) return;
+            (arr || []).forEach((d) => {
+                if (!d) return;
+                (d.photoIds || []).forEach((p) => { if (p) keys.add(p); });
+                (d.prevRoundPhotoIds || []).forEach((p) => { if (p) keys.add(p); });
+            });
+        });
+        for (const key of keys) {
+            if (isPhotoMarkedOnStorage(key)) continue;
+            let local = window._photoCache && window._photoCache[key];
+            if (!(typeof local === 'string' && local.indexOf('data:') === 0)) {
+                try { local = await idbGet('photos', key); } catch (_e) { return true; }   // 못 읽으면 지킨다
+            }
+            if (guard ? guard.isUnuploadedLocalPhoto(false, local) : (typeof local === 'string' && local.indexOf('data:') === 0)) return true;
+        }
+        return false;
+    }
+    /** 정리 후보마다 지킬 이유 모으기 — 못 읽으면 지키는 쪽으로 */
+    async function collectPurgeProtection(ids) {
+        const prep = window.BSA && window.BSA.offlinePrep;
+        const out = { dirtyFloorKeys: Array.from(_dirtyFloorKeys), preparedIds: [], unuploadedPhotoBuildingIds: [], pendingJournalBuildingIds: [] };
+        try {
+            if (prep) out.preparedIds = (await prep.listStatuses()).filter(Boolean).map((r) => String(r.buildingId));
+        } catch (_e) { out.preparedIds = ids.slice(); }
+        try {
+            const j = syncJournal();
+            if (j) j.pendingEntries().forEach((e) => {
+                const fk = String(e.fk || '');
+                ids.forEach((id) => { if (fk.indexOf(`${id}_`) === 0) out.pendingJournalBuildingIds.push(id); });
+            });
+        } catch (_e) { /* ignore */ }
+        for (const id of ids) {
+            try { if (await buildingHasUnuploadedPhotos(id)) out.unuploadedPhotoBuildingIds.push(id); } catch (_e) { out.unuploadedPhotoBuildingIds.push(id); }
+        }
+        return out;
+    }
+
     async function pruneStaleIndexedDbInspectionData(opts) {
         const options = opts || {};
         if (typeof navigator !== 'undefined' && navigator.onLine === false) {
             return { skipped: 'offline', removedBuildings: 0 };
+        }
+        // 2026-10-19 다시 연결된 뒤 올리기·서버 확인이 끝나기 전에는 정리하지 않는다(js/core/cache-purge-guard.js)
+        const purgeGuard = window.BSA && window.BSA.cachePurgeGuard;
+        if (purgeGuard) {
+            let why = '';
+            try {
+                why = purgeGuard.pruneBlockReason({
+                    offlineReturnPending: localStorage.getItem('bsa_offline_worked_v1') === '1',
+                    offlineReturnRunning: !!_offlineReturnRunning,
+                    syncing: !!_syncInFlight,
+                    dirtyCount: _dirtyFloorKeys.size,
+                    photoSavesPending: (window._defectPhotoSaves && window._defectPhotoSaves.size) || 0
+                });
+            } catch (_e) { why = 'unknown'; }
+            if (why) return { skipped: why, removedBuildings: 0 };
         }
         if (_idbInspectionPruneInFlight) return _idbInspectionPruneInFlight;
         _idbInspectionPruneInFlight = (async () => {
@@ -60838,9 +61168,16 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             });
             let removedBuildings = 0;
             let removedKeys = 0;
-            for (let i = 0; i < staleIds.length; i++) {
-                const id = staleIds[i];
-                removedKeys += await purgeBuildingIndexedDbAssets(id);
+            // 2026-10-19 올릴 층·안 올라간 사진·서버 확인 안 된 변경·오프라인 준비한 건물은 빼고 남긴다(다음에 다시 본다)
+            let targets = staleIds;
+            if (purgeGuard && staleIds.length) {
+                const sel = purgeGuard.selectPurgeable(staleIds, await collectPurgeProtection(staleIds));
+                targets = sel.purge;
+                if (sel.kept.length) console.info('[캐시 정리] 지키려고 남긴 건물:', sel.kept);
+            }
+            for (let i = 0; i < targets.length; i++) {
+                const id = targets[i];
+                removedKeys += await purgeBuildingIndexedDbAssets(id, { keepUnuploaded: true });
                 delete map[id];
                 removedBuildings++;
             }
@@ -61914,6 +62251,12 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     return;
                 }
                 // dirty 없음: 전 현장/전 층 pull·업로드 하지 않음
+                // 2026-10-19 오프라인에서 바꾼 회사 설정 칸만 남았으면 그것만 올린다(칸별 — 남의 설정은 안 덮음)
+                try {
+                    if (typeof window.bsaCompanySettingsPending === 'function' && window.bsaCompanySettingsPending().length) {
+                        scheduleSyncToFirebase({ skipMarkCurrent: true });
+                    }
+                } catch (_e) { /* ignore */ }
                 return;
             }
             if (isFirestoreReadPaused()) return;
@@ -62036,6 +62379,75 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         releaseHeavyDrawingMemory(bldg, { keepFloor, keepDim: 4000 });
     }
 
+    // ---- 2026-10-19 회사 공통 설정 칸별 병합(js/core/company-settings-merge.js) ----
+    // 예전: 설정 맵을 통째로 쓰고(나중에 쓴 기기가 이김) 받을 때도 통째로 바꿈 → 오프라인 기기가 다시 연결되면 남의 새 설정을 옛 값으로 덮었다.
+    // 지금: 바뀐 칸만 시각과 함께 적어 두고(기기 저장), 그 칸만 경로 지정으로 쓰고, 받을 때는 안 올린 칸만 내 값을 남긴다.
+    let _companySettingsStore = null;
+    let _companySettingsStoreKey = '';
+    function companySettingsApi() {
+        return (window.BSA && window.BSA.companySettingsMerge) || null;
+    }
+    function companySettingsStore() {
+        const api = companySettingsApi();
+        const cid = (window.state && window.state.companyId) || '';
+        if (!api || !cid) return null;
+        const key = `bsa_settings_sync_v1_${cid}`;
+        if (_companySettingsStore && _companySettingsStoreKey === key) return _companySettingsStore;
+        let s = null;
+        try { s = api.normalizeStore(JSON.parse(localStorage.getItem(key) || 'null')); } catch (_e) { s = null; }
+        // 처음: 지금 기기 값을 기준으로(바뀐 칸 없음) — 서버를 받으면 서버 값을 따른다
+        if (!s) s = api.initStore(api.flatten(window.state));
+        _companySettingsStore = s;
+        _companySettingsStoreKey = key;
+        saveCompanySettingsStore();
+        return s;
+    }
+    function saveCompanySettingsStore() {
+        if (!_companySettingsStore || !_companySettingsStoreKey) return;
+        try { localStorage.setItem(_companySettingsStoreKey, JSON.stringify(_companySettingsStore)); } catch (_e) { /* 용량 부족 무시 */ }
+    }
+    function trackCompanySettingsLocal() {
+        const api = companySettingsApi();
+        const s = companySettingsStore();
+        if (!api || !s) return false;
+        const changed = api.trackLocal(s, api.flatten(window.state), bsaSyncNow());
+        if (changed) saveCompanySettingsStore();
+        return changed;
+    }
+    window.bsaCompanySettingsPending = () => {
+        const s = companySettingsStore();
+        return s ? Object.keys(s.dirty) : [];
+    };
+    /** 쓰기: 이 기기에서 바뀐 칸만. serverData = 쓰기 직전에 서버에서 읽은 루트 문서(칸 시각 비교용) */
+    async function writeCompanySettingsPerKey(docRef, serverData) {
+        const api = companySettingsApi();
+        const store = companySettingsStore();
+        if (!api || !store || !docRef) return { writes: 0, adopted: 0 };
+        trackCompanySettingsLocal();
+        const plan = api.planWrite(store, api.flatten(window.state), serverData || {});
+        if (plan.adopt.length) {
+            // 다른 기기가 같은 칸을 더 나중에 바꿨다 — 내 값은 버리고 서버 값을 따른다
+            plan.adopt.forEach((a) => api.setPath(window.state, a.key, a.sub, a.value));
+            api.afterAdopt(store, plan.adopt);
+            saveCompanySettingsStore();
+            console.info('[설정 병합] 다른 기기가 더 나중에 바꾼 칸은 서버 값을 따름:', plan.adopt.map((a) => a.path));
+            _suppressSyncOnSave = true;
+            if (typeof saveStateToLocalStorage === 'function') saveStateToLocalStorage();
+            _suppressSyncOnSave = false;
+        }
+        if (!plan.writes.length) return { writes: 0, adopted: plan.adopt.length };
+        const FP = firebase.firestore.FieldPath;
+        const args = api.buildUpdateArgs(
+            plan.writes,
+            (a, b) => (b === undefined ? new FP(a) : new FP(a, b)),
+            () => firebase.firestore.FieldValue.delete()
+        );
+        await docRef.update(...args);
+        api.afterWrite(store, plan.writes);
+        saveCompanySettingsStore();
+        return { writes: plan.writes.length, adopted: plan.adopt.length };
+    }
+
     async function applyMergedRemoteData(data) {
         if (!data) return false;
         if (typeof flushOverviewCaptionsFromDom === 'function') flushOverviewCaptionsFromDom();
@@ -62120,6 +62532,24 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             window.state.ndtDisplacementGroups = dispMerge.ndtData;
             isChanged = true;
         }
+        const csApi = companySettingsApi();
+        const csStore = csApi ? companySettingsStore() : null;
+        if (csApi && csStore) {
+            // 2026-10-19 칸별: 아직 안 올린 이 기기 칸만 남기고 나머지는 서버 값
+            const inc = csApi.applyIncoming(csStore, window.state, data, bsaSyncNow());
+            Object.keys(inc.values).forEach((k) => {
+                if (inc.values[k] === undefined) delete window.state[k];
+                else window.state[k] = inc.values[k];
+            });
+            if (Object.prototype.hasOwnProperty.call(inc.values, 'defectLeaderLineScale') && inc.values.defectLeaderLineScale !== undefined) {
+                window.state._globalDefectLeaderLineScaleFallback = inc.values.defectLeaderLineScale;
+            }
+            if (Object.prototype.hasOwnProperty.call(inc.values, 'styleSizeBarLockedMap')) window.state.styleSizeBarLockedMap = !!window.state.styleSizeBarLockedMap;
+            if (Object.prototype.hasOwnProperty.call(inc.values, 'styleSizeBarLockedNdt')) window.state.styleSizeBarLockedNdt = !!window.state.styleSizeBarLockedNdt;
+            saveCompanySettingsStore();
+            if (Object.keys(inc.values).length) isChanged = true;
+        } else {
+        // (예전 방식 — 모듈을 못 불렀을 때만) 서버 값으로 통째로
         if (data.grids) {
             window.state.grids = data.grids;
             isChanged = true;
@@ -62187,6 +62617,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (data.locationMapLegendBox) {
             window.state.locationMapLegendBox = data.locationMapLegendBox;
             isChanged = true;
+        }
         }
         // 회사 문서의 공용 범례 박스가 건물별 배치를 덮지 않게, 현재 건물 값을 다시 적용
         if (typeof refreshCurrentBuildingFromState === 'function') refreshCurrentBuildingFromState();
@@ -62761,6 +63192,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 if (typeof syncProgressFail === 'function') photoFailedFloors.forEach((k) => syncProgressFail(k, '사진 업로드 실패 — 다시 시도'));
                 console.warn('[사진] 업로드 실패가 있어 다음 동기화에서 다시 올립니다:', Array.from(photoFailedFloors));
             }
+            let rootGuardData = null;
             const dataToSync = {
                 // 예전 버전에서 루트 문서에 직접 쓰던 필드들 — bulkData로 이전했으니 루트에서는 제거
                 // (merge:true는 필드를 지우지 않으므로 FieldValue.delete()로 명시적으로 삭제해야
@@ -62799,6 +63231,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             if (serverData && serverData.syncLease) {
                 dataToSync.syncLease = firebase.firestore.FieldValue.delete();
             }
+            // 2026-10-19 회사 공통 설정은 통째로 쓰지 않는다 — 이 기기에서 바뀐 칸만 아래 writeCompanySettingsPerKey가 경로 지정으로 쓴다
+            const csPerKey = !!(companySettingsApi() && companySettingsStore());
+            if (csPerKey) companySettingsApi().KEYS.forEach((k) => { delete dataToSync[k]; });
             // 2026-10-16 사고 방지: 쓰기 직전에 서버를 다시(캐시 말고 서버에서) 읽어, 서버에 있던 건물이
             // 이번 쓰기에서 하나라도 빠지면 쓰지 않는다. 빈(기본) 상태 기기가 건물 목록·회사 설정을 통째로 덮어쓴 사고 재발 막기.
             // 서버를 못 읽으면(오프라인 등) 이번에는 쓰지 않는다 — 다음 동기화가 다시 한다.
@@ -62806,6 +63241,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 const guardApi = window.BSA && window.BSA.floorSyncGuard;
                 const guardSnap = await docRef.get({ source: 'server' });
                 const guardData = (guardSnap && guardSnap.exists && guardSnap.data()) || {};
+                rootGuardData = guardData;
                 const lostBldgs = guardApi && typeof guardApi.lostServerBuildings === 'function'
                     ? guardApi.lostServerBuildings(guardData.buildings, sanitizedBuildings, mergedDeletedBuildings)
                     : [];
@@ -62816,6 +63252,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 }
             }
             await docRef.set(dataToSync, { merge: true });
+            if (csPerKey) await writeCompanySettingsPerKey(docRef, rootGuardData);
             clearSyncErrorRetryTimer();
             _syncRetryFailCount = 0;
             let clearedPendingCloudSync = false;
