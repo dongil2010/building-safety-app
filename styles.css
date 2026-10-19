@@ -17556,3 +17556,36 @@ html.bsa-middle-panning * {
     -webkit-user-select: none !important;
     user-select: none !important;
 }
+
+/* ===== 2026-10-19 강도 재령일 직접 입력 ===== */
+.ndt-strength-age-row { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: flex-end; }
+.ndt-strength-age-row > .form-group { flex: 1 1 180px; min-width: 0; margin-bottom: 0; }
+.ndt-strength-age-row input { width: 100%; box-sizing: border-box; }
+.ndt-strength-age-row .ndt-strength-age-hint { flex: 1 1 100%; font-size: 12px; color: var(--text-muted, #888); line-height: 1.45; }
+
+/* ===== 2026-10-19 부재실측 이쪽만 측정 · 슬래브 합산 ===== */
+.ndt-measure-opts { display: flex; flex-wrap: wrap; gap: 6px 8px; align-items: center; margin: 6px 0 8px; }
+.ndt-measure-opts[hidden], .ndt-measure-opts [hidden] { display: none !important; }
+.ndt-mo-chip { border: 1px solid var(--border-color, #ccc); background: var(--bg-card, #fff); color: var(--text-primary, #222); border-radius: 999px; padding: 5px 12px; font-size: 12.5px; line-height: 1.2; cursor: pointer; white-space: nowrap; }
+.ndt-mo-chip.active, .ndt-mo-chip[aria-pressed="true"] { background: var(--text-primary, #222); color: var(--bg-card, #fff); border-color: var(--text-primary, #222); }
+.ndt-mo-sep { width: 1px; height: 18px; background: var(--border-color, #ddd); margin: 0 2px; }
+.ndt-measure-opts .ndt-mo-slab-input { width: 150px; max-width: 100%; box-sizing: border-box; }
+.ndt-mo-hint { flex: 1 1 100%; font-size: 12px; color: var(--text-muted, #888); line-height: 1.45; }
+input.ndt-mo-locked { background: var(--bg-secondary, #f2f2f2); color: var(--text-muted, #999); }
+
+/* ===== 2026-10-19 비파괴 위치도 출력 범위 단추 — 정해진 층 표시 ===== */
+#btnOpenNdtPrintCropModal.is-set, #ndtRailBtnPrintCrop.is-set, #mobileNdtBtnPrintCrop.is-set { box-shadow: inset 0 0 0 2px var(--accent-color, #2f80ed); }
+
+/* ===== 2026-10-19 결함 수정창 사진 끌어다 놓기 ===== */
+#defectModal .defect-photo-block { position: relative; }
+#defectModal .defect-photo-block.defect-photo-drop-hot { outline: 2px dashed var(--accent-color, #2f80ed); outline-offset: 3px; background: rgba(47, 128, 237, 0.06); border-radius: 10px; }
+#defectModal .defect-photo-block.defect-photo-drop-hot::after { content: '여기에 놓으면 사진 추가'; position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); padding: 6px 12px; border-radius: 999px; background: var(--accent-color, #2f80ed); color: #fff; font-size: 13px; font-weight: 600; pointer-events: none; white-space: nowrap; z-index: 5; }
+
+@media (max-width: 600px) {
+    .ndt-strength-age-row > .form-group { flex: 1 1 100%; }
+    .ndt-measure-opts .ndt-mo-slab-input { width: 100%; }
+    .ndt-mo-chip { padding: 6px 11px; }
+}
+.ndt-mo-group { display: inline-flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.ndt-mo-label { font-size: 12px; font-weight: 600; color: var(--text-secondary, #555); margin-right: 2px; }
+@media (max-width: 600px) { .ndt-mo-group[data-role="slab"] { flex: 1 1 100%; } }

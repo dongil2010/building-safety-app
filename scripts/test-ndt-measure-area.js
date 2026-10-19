@@ -34,7 +34,7 @@ vm.createContext(ctx);
 vm.runInContext([
     'getNdtMeasureDimKind', 'calcSteelSectionArea', 'resolveNdtSteelMeasuredDims', 'resolveNdtSteelMeasuredFromItem',
     'formatNdtSteelDimText', 'formatNdtMeasureDimText', 'calcNdtMeasureSectionArea', 'formatNdtMeasureAreaText',
-    'formatNdtMeasureDimWithArea'
+    'formatNdtMeasureNotes', 'formatNdtMeasureDimWithArea'
 ].map((n) => extractFunction('function ' + n + '(')).join('\n') + '\nthis.f = formatNdtMeasureDimWithArea; this.area = calcNdtMeasureSectionArea;', ctx);
 
 // 사각 기둥·보: 폭×춤
@@ -59,8 +59,10 @@ assert.strictEqual(ctx.f({ component: '보' }, 'design', '×'), '-', '값이 없
 // 옛 항목: 실측 폭이 avgValue에만 있다
 assert.strictEqual(ctx.f({ component: '보', avgValue: '300', measuredDepth: 600 }, 'measured', '×'), '300×600\n(180,000mm²)');
 
-// 한글(1·2종·3종)·화면 표·보고서 미리보기가 단면적 붙은 글자를 쓴다 (CSV는 칸 모양을 안 바꾸려고 그대로)
-assert.strictEqual((app.match(/formatNdtMeasureDimWithArea\(item, 'design', '×'\)/g) || []).length, 2);
-assert.strictEqual((app.match(/formatNdtMeasureDimWithArea\(item, 'measured', ' × ', '<br>'\)/g) || []).length, 2);
+// 2026-10-19 단면적(mm²)은 앱 화면(비파괴 결과표)에서만 — 한글(2곳)·보고서 미리보기는 규격만(formatNdtMeasureDimForOutput)
+assert.strictEqual((app.match(/formatNdtMeasureDimWithArea\(item, 'design', '×'\)/g) || []).length, 0);
+assert.strictEqual((app.match(/formatNdtMeasureDimForOutput\(item, 'design', '×'\)/g) || []).length, 2);
+assert.strictEqual((app.match(/formatNdtMeasureDimWithArea\(item, 'measured', ' × ', '<br>'\)/g) || []).length, 1, '화면 결과표만');
+assert.strictEqual((app.match(/formatNdtMeasureDimForOutput\(item, 'measured', ' × ', '<br>'\)/g) || []).length, 1, '보고서 미리보기');
 
 console.log('test-ndt-measure-area: ok');

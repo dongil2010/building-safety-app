@@ -91,7 +91,8 @@ assert.ok(/\.\.\.\(window\.state\.floorDrawingDarken \? \{ floorDrawingDarken: w
 assert.ok(!/delete state\.floorDrawingDarken\[/.test(app), '되돌릴 때는 0 을 넣는다');
 
 // 출력 그림 네 군데(위치도 전체·출력 범위·미리보기·비파괴 위치도 2) 모두 진하게를 거친다
-assert.strictEqual((app.match(/drawFloorDrawingImage\(ctx, imgObj, imgW, imgH, /g) || []).length, 5);
+// 2026-10-19 비파괴 위치도 출력 범위(범위 출력·범위 고르기 미리보기) 2곳 추가
+assert.strictEqual((app.match(/drawFloorDrawingImage\(ctx, imgObj, imgW, imgH, /g) || []).length, 7);
 assert.ok(/const ndtDarken = customSrc \? 0 : getFloorDrawingDarken\(currentBldgId, floorCode\);/.test(app), '비파괴 전용 도면은 그대로');
 
 console.log('test-floor-drawing-darken: ok');

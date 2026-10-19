@@ -39,6 +39,8 @@ ${fn('getAgeCorrectionFactor')}
 ${fn('parseYmdParts')}
 ${fn('excelDays360')}
 ${fn('getConcreteStrengthAgeDays')}
+${fn('strengthAgeApi')}
+${fn('resolveStrengthAgeInfo')}
 ${fn('getConcreteAgeInDays')}
 ${fn('calcConcreteStrength')}
 ${fn('strengthSlotHasReadings')}

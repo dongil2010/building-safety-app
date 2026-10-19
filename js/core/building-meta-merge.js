@@ -24,6 +24,8 @@
         'enabledStrengthFormulas',
         // 반발경도 장비 앤빌 평균(기준 82) — 같은 이유로 로컬 수정이 서버 옛 값에 덮이지 않게
         'strengthAnvilAvg',
+        // 강도 재령일 건물 공통 직접 입력(비우면 준공일 기준 자동) — 2026-10-19
+        'strengthAgeOverride',
         // 층별 "PDF를 뺀 시각" — 도면을 그림으로 바꾼 층의 옛 PDF를 다른 기기도 버리게(감사 O-05, 2026-09-28)
         'floorPdfRemovedAt',
         // 층별 "도면을 다시 넣은 시각" — 다른 기기가 받아 둔 옛 PDF를 버리고 새 파일을 받게

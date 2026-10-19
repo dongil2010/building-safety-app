@@ -15,7 +15,7 @@ if (!window.state) {
         view: { offsetX: 0, offsetY: 0, scale: 1.0 },
         mode: 'PAN', // 'PAN' | 'MARK' | 'AREA'
         rotationAngle: 0,
-        tipShape: 'arrow',  // 'arrow' | 'circle'
+        tipShape: 'circle',  // 'arrow' | 'circle' — 2026-10-19 기본 동그라미(직접 고르면 tipShapeChosen)
         areaFillStyle: 'solid',   // 'solid' | 'hatch' | 'none' — 영역 마킹 채우기
         areaBorderStyle: 'solid', // 'solid' | 'dashed' — 영역 마킹 테두리
         areaCreateShape: 'rect',  // 'rect' | 'ellipse' | 'polygon'

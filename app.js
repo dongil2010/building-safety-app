@@ -2656,7 +2656,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 locationMapLegend: window.state.locationMapLegend || null,
                 locationMapLegendBox: window.state.locationMapLegendBox || null,
                 defectSizeMode: window.state.defectSizeMode || 'combined',
-                tipShape: window.state.tipShape || 'arrow',
+                // 2026-10-19 지시선 끝 기본 = 동그라미. 직접 고른 기기만 tipShapeChosen 으로 그 값을 지킨다
+            tipShape: window.state.tipShape || 'circle',
+            tipShapeChosen: !!window.state.tipShapeChosen,
                 areaFillStyle: window.state.areaFillStyle || 'solid',
                 areaBorderStyle: window.state.areaBorderStyle || 'solid',
                 snapToCad: window.state.snapToCad !== false
@@ -2914,8 +2916,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (parsed.defectSizeMode) {
                     window.state.defectSizeMode = parsed.defectSizeMode;
                 }
-                if (parsed.tipShape) {
-                    window.state.tipShape = parsed.tipShape;
+                // 2026-10-19 예전에는 고르지 않아도 'arrow'가 저장됐다 — 직접 고른 표시(tipShapeChosen)가 있을 때만 저장값,
+                // 아니면 새 기본 동그라미
+                if (parsed.tipShape && parsed.tipShapeChosen) {
+                    window.state.tipShape = parsed.tipShape === 'arrow' ? 'arrow' : 'circle';
+                    window.state.tipShapeChosen = true;
+                } else {
+                    window.state.tipShape = 'circle';
                 }
                 if (parsed.areaFillStyle) {
                     window.state.areaFillStyle = parsed.areaFillStyle;
@@ -3133,7 +3140,7 @@ document.addEventListener('DOMContentLoaded', () => {
         'floorsOrderManual',
         'siteName', 'dong', 'multiDong', 'name', 'address', 'inspector', 'contactPhone',
         'floors', 'date', 'structureType', 'facilityGrade', 'completionDate', 'notes',
-        'enabledStrengthFormulas', 'strengthAnvilAvg', 'floorPdfRemovedAt', 'floorPdfUpdatedAt', 'evalUnitPlan', 'evalInputs', 'evalSafetyman'
+        'enabledStrengthFormulas', 'strengthAnvilAvg', 'strengthAgeOverride', 'floorPdfRemovedAt', 'floorPdfUpdatedAt', 'evalUnitPlan', 'evalInputs', 'evalSafetyman'
     ];
 
     function buildingMetaUpdatedAt(bldg) {
@@ -12453,6 +12460,131 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             }
         });
         if (!isSteel) applyNdtDimLabels(kind);
+        refreshNdtMeasureOptsUi(kind);
+    }
+
+    // --- 2026-10-19 부재실측 「이쪽만 측정」(보·기둥)·「슬래브 두께 합산」(보) ---
+    // 계산은 js/core/ndt-measure-opts.js. 입력창 안 상태는 #ndtMeasureOptsRow의 data-oneside / data-slab.
+    function ndtMeasureOptsApi() {
+        return (window.BSA && window.BSA.ndtMeasureOpts) || null;
+    }
+
+    function ensureNdtMeasureOptsRow() {
+        let row = document.getElementById('ndtMeasureOptsRow');
+        if (row) return row;
+        const anchor = document.getElementById('ndtMeasureRcMeasuredRow');
+        if (!anchor || !anchor.parentNode) return null;
+        row = document.createElement('div');
+        row.id = 'ndtMeasureOptsRow';
+        row.className = 'ndt-measure-opts';
+        row.innerHTML = '<div class="ndt-mo-group" data-role="oneside">'
+            + '<span class="ndt-mo-label">이쪽만 측정</span>'
+            + '<button type="button" class="ndt-mo-chip" data-oneside="primary" aria-pressed="false">폭만</button>'
+            + '<button type="button" class="ndt-mo-chip" data-oneside="secondary" aria-pressed="false">춤만</button>'
+            + '</div>'
+            + '<div class="ndt-mo-group" data-role="slab">'
+            + '<button type="button" class="ndt-mo-chip" data-role="slab-toggle" aria-pressed="false">슬래브 두께 합산</button>'
+            + '<input type="text" inputmode="decimal" id="ndtSlabThickness" class="form-control ndt-mo-slab-input" placeholder="슬래브 두께 (mm)" autocomplete="off" hidden>'
+            + '</div>'
+            + '<div class="ndt-mo-hint" data-role="hint" hidden></div>';
+        anchor.parentNode.insertBefore(row, anchor.nextSibling);
+        row.addEventListener('click', (e) => {
+            const chip = e.target.closest('.ndt-mo-chip');
+            if (!chip || !row.contains(chip)) return;
+            e.preventDefault();
+            if (chip.dataset.oneside) {
+                row.dataset.oneside = row.dataset.oneside === chip.dataset.oneside ? '' : chip.dataset.oneside;
+            } else if (chip.dataset.role === 'slab-toggle') {
+                row.dataset.slab = row.dataset.slab === '1' ? '' : '1';
+            }
+            refreshNdtMeasureOptsUi();
+            if (typeof window.recalcNdtSectionAuto === 'function') window.recalcNdtSectionAuto();
+            if (typeof scheduleNdtAutoApply === 'function') scheduleNdtAutoApply();
+            if (chip.dataset.role === 'slab-toggle' && row.dataset.slab === '1') {
+                const inp = document.getElementById('ndtSlabThickness');
+                if (inp) { try { inp.focus(); } catch (_e) { /* ignore */ } }
+            }
+        });
+        row.querySelector('#ndtSlabThickness').addEventListener('input', () => {
+            if (typeof window.recalcNdtSectionAuto === 'function') window.recalcNdtSectionAuto();
+        });
+        return row;
+    }
+
+    function setNdtMeasureOptsUi(o) {
+        const row = ensureNdtMeasureOptsRow();
+        if (!row) return;
+        row.dataset.oneside = (o && (o.oneSide === 'primary' || o.oneSide === 'secondary')) ? o.oneSide : '';
+        row.dataset.slab = (o && o.slabOn) ? '1' : '';
+        const inp = row.querySelector('#ndtSlabThickness');
+        if (inp) inp.value = (o && o.slab != null && o.slab !== '') ? String(o.slab) : '';
+        refreshNdtMeasureOptsUi();
+    }
+
+    function readNdtMeasureOptsUi() {
+        const row = document.getElementById('ndtMeasureOptsRow');
+        if (!row) return { oneSide: null, slabOn: false, slab: null };
+        const inp = row.querySelector('#ndtSlabThickness');
+        return { oneSide: row.dataset.oneside || null, slabOn: row.dataset.slab === '1', slab: inp ? inp.value : null };
+    }
+
+    function resolveNdtMeasureOptsFromForm(kind, designW, designD, rawW, rawD) {
+        const api = ndtMeasureOptsApi();
+        if (!api) return null;
+        const ui = readNdtMeasureOptsUi();
+        return api.resolveRc({ kind, designW, designD, rawW, rawD, oneSide: ui.oneSide, slabOn: ui.slabOn, slab: ui.slab });
+    }
+
+    function refreshNdtMeasureOptsUi(kindArg) {
+        const row = ensureNdtMeasureOptsRow();
+        const api = ndtMeasureOptsApi();
+        if (!row || !api) return;
+        const kind = kindArg || getNdtMeasureDimKind(getNdtCurrentComponentName());
+        const showOne = api.supportsOneSide(kind);
+        const showSlab = api.supportsSlab(kind);
+        row.hidden = !(showOne || showSlab);
+        if (kind !== 'steel') applyNdtDimLabels(kind);   // 칸 이름·안내를 기본으로 되돌린 뒤 아래에서 고친다
+        const names = api.sideNames(kind);
+        const os = showOne ? (row.dataset.oneside || '') : '';
+        row.querySelectorAll('[data-oneside]').forEach((b) => {
+            b.textContent = `${names[b.dataset.oneside]}만`;
+            const on = os === b.dataset.oneside;
+            b.classList.toggle('active', on);
+            b.setAttribute('aria-pressed', on ? 'true' : 'false');
+        });
+        const oneGroup = row.querySelector('[data-role="oneside"]');
+        if (oneGroup) oneGroup.hidden = !showOne;
+        const slabOn = showSlab && row.dataset.slab === '1' && os !== 'primary';
+        const slabGroup = row.querySelector('[data-role="slab"]');
+        if (slabGroup) slabGroup.hidden = !showSlab || os === 'primary';
+        const slabBtn = row.querySelector('[data-role="slab-toggle"]');
+        if (slabBtn) {
+            slabBtn.classList.toggle('active', slabOn);
+            slabBtn.setAttribute('aria-pressed', slabOn ? 'true' : 'false');
+        }
+        const slabInput = row.querySelector('#ndtSlabThickness');
+        if (slabInput) slabInput.hidden = !slabOn;
+        // 안 잰 쪽 칸은 잠근다(값은 지우지 않음 — 다시 끄면 그대로)
+        const lock = (el, locked) => {
+            if (!el) return;
+            el.disabled = !!locked;
+            el.classList.toggle('ndt-mo-locked', !!locked);
+            if (locked) el.placeholder = '미측정(설계치)';
+        };
+        lock(document.getElementById('ndtMeasuredWidth'), os === 'secondary');
+        lock(document.getElementById('ndtMeasuredDepth'), os === 'primary');
+        const lbl = document.getElementById('lblNdtMeasuredSecondary');
+        if (lbl && kind === 'beam' && slabOn) lbl.textContent = '📐 실측 춤 — 슬래브 아래 (mm)';
+    }
+
+    function updateNdtMeasureOptsHint(mo, rawD) {
+        const hint = document.querySelector('#ndtMeasureOptsRow [data-role="hint"]');
+        if (!hint) return;
+        const parts = [];
+        if (mo && mo.slab != null && rawD > 0) parts.push(`실측 춤 = ${rawD} + 슬래브 ${mo.slab} = ${Math.round((rawD + mo.slab) * 100) / 100} mm`);
+        if (mo && mo.oneSide) parts.push('안 잰 쪽은 설계치수로 보고 단면적 비율을 냅니다');
+        hint.textContent = parts.join(' · ');
+        hint.hidden = parts.length === 0;
     }
 
     // H형강 단면적 ≈ 2·B·tf + tw·(H − 2·tf)
@@ -12535,6 +12667,14 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             const measuredW = (item.measuredWidth !== undefined && item.measuredWidth !== null) ? item.measuredWidth : item.avgValue;
             return measuredW != null && measuredW !== '' ? `Φ${measuredW}` : '-';
         }
+        // 2026-10-19 「이쪽만 측정」 — 안 잰 쪽은 '-'
+        const oneSide = (dimMode === 'beam' || dimMode === 'column')
+            && (item.measureOneSide === 'primary' || item.measureOneSide === 'secondary') ? item.measureOneSide : null;
+        if (kind !== 'design' && oneSide) {
+            const has = (v) => v !== undefined && v !== null && v !== '';
+            if (oneSide === 'primary') return has(item.measuredWidth) ? `${item.measuredWidth}${joiner}-` : '-';
+            return has(item.measuredDepth) ? `-${joiner}${item.measuredDepth}` : '-';
+        }
         if (kind === 'design') {
             return item.designWidth ? `${item.designWidth}${item.designDepth ? joiner + item.designDepth : ''}` : '-';
         }
@@ -12564,12 +12704,15 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             const a = calcSteelSectionArea(num(d.web), num(d.flange), num(d.webWidth), num(d.flangeWidth));
             return a > 0 ? a : null;
         }
-        const w = kind === 'design'
+        // 「이쪽만 측정」이면 안 잰 쪽은 설계치수(단면적 비율 계산과 같은 식)
+        const oneSide = kind !== 'design' && (dimMode === 'beam' || dimMode === 'column')
+            && (item.measureOneSide === 'primary' || item.measureOneSide === 'secondary') ? item.measureOneSide : null;
+        const w = (kind === 'design' || oneSide === 'secondary')
             ? num(item.designWidth)
             : num((item.measuredWidth !== undefined && item.measuredWidth !== null) ? item.measuredWidth : item.avgValue);
         if (!w) return null;
         if (dimMode === 'circle') return Math.PI * (w / 2) ** 2;
-        const dep = num(kind === 'design' ? item.designDepth : item.measuredDepth);
+        const dep = num((kind === 'design' || oneSide === 'primary') ? item.designDepth : item.measuredDepth);
         return dep ? w * dep : null;
     }
 
@@ -12583,7 +12726,29 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     function formatNdtMeasureDimWithArea(item, kind, joiner, lineBreak = '\n') {
         const dim = formatNdtMeasureDimText(item, kind, joiner);
         const area = dim && dim !== '-' ? formatNdtMeasureAreaText(item, kind) : '';
-        return area ? `${dim}${lineBreak}${area}` : dim;
+        const note = kind === 'design' ? '' : formatNdtMeasureNotes(item, true);
+        const out = area ? `${dim}${lineBreak}${area}` : dim;
+        return note && dim !== '-' ? `${out}${lineBreak}(${note})` : out;
+    }
+
+    /** 실측치 옆 표시 — 「폭만 측정」, 화면이면 「슬래브 150 포함」까지 (2026-10-19) */
+    function formatNdtMeasureNotes(item, withSlab) {
+        const api = (typeof window !== 'undefined' && window.BSA && window.BSA.ndtMeasureOpts) || null;
+        if (!api || !item) return '';
+        const dimMode = (item.measureDimMode === 'rc' || !item.measureDimMode)
+            ? getNdtMeasureDimKind(item.component)
+            : item.measureDimMode;
+        return [api.oneSideNote(item, dimMode), withSlab ? api.slabNote(item, dimMode) : ''].filter(Boolean).join(' · ');
+    }
+
+    /**
+     * 한글·보고서용 규격 — 단면적(mm²) 괄호는 앱 화면에서만 보이고 출력하지 않는다(2026-10-19 요청).
+     * 「이쪽만 측정」 표시는 출력에도 남긴다(안 잰 쪽이 '-'인 이유).
+     */
+    function formatNdtMeasureDimForOutput(item, kind, joiner, lineBreak = '\n') {
+        const dim = formatNdtMeasureDimText(item, kind, joiner);
+        const note = kind === 'design' ? '' : formatNdtMeasureNotes(item, false);
+        return note && dim !== '-' ? `${dim}${lineBreak}(${note})` : dim;
     }
 
     // 콘크리트 부재단면의 규격: 시설물의 안전 및 유지관리 실시 세부지침(건축물편) [표 6.24]
@@ -13028,6 +13193,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     function paintNdtCanvas() {
         const canvas = document.getElementById('ndtCanvas');
         if (!canvas) return;
+        try { updateNdtPrintCropButtons(); } catch (_e) { /* 초기화 전 */ }
         const ctx = canvas.getContext('2d');
         const dpr = window._ndtCanvasDpr || 1;
         const cw = window._ndtCanvasCssW || Math.round(canvas.width / dpr);
@@ -15956,7 +16122,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const ds = parseFloat(item.designStrength);
         const opts = {
             angle: parseFloat(item.strengthAngle),
-            ageDays: getConcreteStrengthAgeDays(bldg),
+            // 2026-10-19 재령일 직접 입력(이 항목 > 건물 공통 > 준공일 자동)
+            ageDays: resolveStrengthAgeInfo(item, bldg).days,
             enabledNames: getEnabledStrengthFormulaNames(bldg),
             anvilAvg: getStrengthAnvilAvg(bldg),
             designStrength: Number.isFinite(ds) ? ds : NaN,
@@ -16992,12 +17159,35 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         return alpha;
     }
 
-    function getConcreteAgeInDaysText() {
-        const days = getConcreteStrengthAgeDays();
+    function strengthAgeApi() {
+        return (window.BSA && window.BSA.strengthAge) || null;
+    }
+
+    /**
+     * 2026-10-19 강도 재령일 — 이 항목 직접 입력 > 건물 공통 직접 입력 > 준공일~점검일 자동(DAYS360).
+     * 직접 입력을 비우면 자동으로 돌아간다. 목록·통계·평가 탭·SafetyMan 엑셀·성능평가·한글 출력이 모두 이 값을 쓴다.
+     * 반환 { days, source: 'item'|'building'|'auto', autoDays }
+     */
+    function resolveStrengthAgeInfo(item, bldg) {
+        const b = (bldg && typeof bldg === 'object') ? bldg : window.state.currentBuilding;
+        const autoDays = getConcreteStrengthAgeDays(b);
+        const api = strengthAgeApi();
+        return api ? api.resolve(item, b, autoDays) : { days: autoDays, source: 'auto', autoDays };
+    }
+    window.resolveStrengthAgeInfo = resolveStrengthAgeInfo;
+
+    function getConcreteAgeInDaysText(infoArg) {
+        const info = infoArg || resolveStrengthAgeInfo(null);
+        const days = info ? info.days : null;
         const bldg = window.state.currentBuilding;
-        if (days === null || !bldg) return '';
+        if (days === null || days === undefined || !bldg) return '';
         const alpha = getAgeCorrectionFactor(days);
-        return `📅 재령일수: 준공일(${bldg.completionDate}) ~ 점검일(${bldg.date || '오늘'}) = <b>${days}일</b>(1년 360일 기준) → α(재령보정계수) = <b>${alpha !== null ? alpha.toFixed(2) : '-'}</b>`;
+        const alphaText = `α(재령보정계수) = <b>${alpha !== null ? alpha.toFixed(2) : '-'}</b>`;
+        if (info.source === 'item' || info.source === 'building') {
+            const autoText = info.autoDays != null ? ` · 자동이면 ${info.autoDays}일` : '';
+            return `📅 재령일수: <b>${days}일</b>(${info.source === 'item' ? '이 항목' : '건물 공통'} 직접 입력${autoText}) → ${alphaText}`;
+        }
+        return `📅 재령일수: 준공일(${bldg.completionDate}) ~ 점검일(${bldg.date || '오늘'}) = <b>${days}일</b>(1년 360일 기준) → ${alphaText}`;
     }
 
     // 측정 각도 선택지(index.html #ndtAngle)에 있는 값만 쓴다. 그 밖(빈 값 포함)은 0°.
@@ -17069,8 +17259,85 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         recalcAllStrengthSlots();
     }
 
+    // 2026-10-19 강도 재령일 직접 입력 칸 — 건물 공통(건물 정보로 동기화) + 이 항목만(항목에 저장). 비우면 자동.
+    // index.html은 손으로 고치지 않는 규칙이라 앤빌 칸 아래에 JS로 한 번 만들어 넣는다.
+    function ensureStrengthAgeRow() {
+        const existing = document.getElementById('ndtStrengthAgeBldg');
+        if (existing) return existing;
+        const anvil = ensureAnvilInputRow();
+        const anchorRow = anvil && anvil.closest('.form-row');
+        if (!anchorRow || !anchorRow.parentNode) return null;
+        const row = document.createElement('div');
+        row.className = 'form-row ndt-strength-age-row';
+        row.innerHTML = '<div class="form-group">'
+            + '<label class="form-label" for="ndtStrengthAgeBldg">📅 재령일 직접 입력 (건물 공통, 일)</label>'
+            + '<input type="text" inputmode="numeric" id="ndtStrengthAgeBldg" class="form-control" placeholder="비우면 자동 (준공일 기준)" autocomplete="off">'
+            + '</div>'
+            + '<div class="form-group">'
+            + '<label class="form-label" for="ndtStrengthAgeItem">📅 이 항목만 재령일 (일)</label>'
+            + '<input type="text" inputmode="numeric" id="ndtStrengthAgeItem" class="form-control" placeholder="비우면 건물 값" autocomplete="off">'
+            + '</div>'
+            + '<div class="ndt-strength-age-hint" id="ndtStrengthAgeHint"></div>';
+        anchorRow.parentNode.insertBefore(row, anchorRow.nextSibling);
+        row.querySelector('#ndtStrengthAgeBldg').addEventListener('change', applyStrengthAgeInputToBuilding);
+        row.querySelector('#ndtStrengthAgeItem').addEventListener('input', () => recalcAllStrengthSlots());
+        return row.querySelector('#ndtStrengthAgeBldg');
+    }
+
+    /** 입력창의 「이 항목만 재령일」 → { strengthAgeOverride } (비었으면 null) */
+    function readNdtStrengthAgeFormItem() {
+        const el = document.getElementById('ndtStrengthAgeItem');
+        const api = strengthAgeApi();
+        const v = (el && api) ? api.parseOverride(el.value) : null;
+        return v !== null ? { strengthAgeOverride: v } : null;
+    }
+
+    function setNdtStrengthAgeItemInput(item) {
+        ensureStrengthAgeRow();
+        const el = document.getElementById('ndtStrengthAgeItem');
+        const api = strengthAgeApi();
+        if (!el) return;
+        const v = (api && item) ? api.parseOverride(item.strengthAgeOverride) : null;
+        el.value = v !== null ? String(v) : '';
+    }
+
+    function syncStrengthAgeInputs() {
+        const el = ensureStrengthAgeRow();
+        const api = strengthAgeApi();
+        const bldg = window.state.currentBuilding;
+        const bv = (api && bldg) ? api.parseOverride(bldg.strengthAgeOverride) : null;
+        if (el && document.activeElement !== el) el.value = bv !== null ? String(bv) : '';
+        const hint = document.getElementById('ndtStrengthAgeHint');
+        if (hint && api) {
+            const info = resolveStrengthAgeInfo(readNdtStrengthAgeFormItem(), bldg);
+            const autoText = info.autoDays != null ? `자동(준공일~점검일) ${info.autoDays}일` : '자동 계산 불가(준공일 없음)';
+            hint.textContent = info.source === 'auto'
+                ? `지금 쓰는 재령일: ${autoText}`
+                : `지금 쓰는 재령일: ${info.days}일 (${api.sourceLabel(info.source)}) · ${autoText}`;
+        }
+    }
+
+    function applyStrengthAgeInputToBuilding() {
+        const bldg = window.state.currentBuilding;
+        const el = document.getElementById('ndtStrengthAgeBldg');
+        const api = strengthAgeApi();
+        if (!bldg || !el || !api) return;
+        const next = api.parseOverride(el.value);
+        if (el.value.trim() !== '' && next === null) {
+            window.showToast('재령일은 0 이상 숫자(일)로 넣어 주세요.', 'warning');
+        }
+        const prev = api.parseOverride(bldg.strengthAgeOverride);
+        if (next === prev) { syncStrengthAgeInputs(); return; }
+        // 지울 때도 null로 남긴다 — 칸별 시각 병합에서 "지움"이 다른 기기의 옛 값에 지지 않게
+        bldg.strengthAgeOverride = next;
+        markBuildingMetaDirty(bldg);
+        saveStateToLocalStorage();
+        recalcAllStrengthSlots();
+    }
+
     function recalcAllStrengthSlots() {
         syncAnvilInputFromBuilding();
+        syncStrengthAgeInputs();
         ndtStrengthSlots.forEach((_, idx) => recalcStrengthSlot(idx));
     }
 
@@ -17082,7 +17349,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (!summaryEl || !resultsEl) return;
 
         const angle = angleEl ? parseFloat(angleEl.value) : 0;
-        const ageDays = getConcreteStrengthAgeDays();
+        const strengthAgeInfo = resolveStrengthAgeInfo(readNdtStrengthAgeFormItem());
+        const ageDays = strengthAgeInfo.days;
         const enabledNames = getEnabledStrengthFormulaNames(window.state.currentBuilding);
         const readings = ndtStrengthSlots[slotIdx] ? ndtStrengthSlots[slotIdx].readings : [];
         const calc = calcConcreteStrength(readings, angle, ageDays, enabledNames, getStrengthAnvilAvg(window.state.currentBuilding));
@@ -17098,8 +17366,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             return;
         }
 
-        const ageInfo = getConcreteAgeInDaysText();
-        summaryEl.innerHTML = (ageInfo ? `${ageInfo}<br>` : '준공일을 입력하지 않아 α 없이(=1) 계산됩니다.<br>') +
+        const ageInfo = getConcreteAgeInDaysText(strengthAgeInfo);
+        summaryEl.innerHTML = (ageInfo ? `${ageInfo}<br>` : '준공일·재령일을 입력하지 않아 α 없이(=1) 계산됩니다.<br>') +
             `측정 ${calc.totalCount}개 중 ${calc.excludedCount}개 제외(±20% 초과) → 평균 R = <b>${fmtExcel(calc.finalAvg, 1)}</b>${calc.anvilFactor !== 1 ? ` → 앤빌 ×${calc.anvilFactor.toFixed(3)}` : ''} → 각도보정(${angle > 0 ? '+' : ''}${angle}°) ${calc.correction >= 0 ? '+' : ''}${calc.correction.toFixed(2)} → <b>Ro = ${calc.ro.toFixed(1)}</b>`;
         resultsEl.innerHTML = calc.results.map(r => `
             <tr>
@@ -17655,6 +17923,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             if (statusEl) statusEl.value = existingItem.status || '';
             // 손상 여부 기본 = 상태양호(2026-10-17) — 빈 값이면 선택칸이 비어 보였다(판정은 '균열발생'만 손상으로 봐서 같음)
             if (damageStatusEl) damageStatusEl.value = existingItem.damageStatus || '상태양호';
+            setNdtStrengthAgeItemInput(existingItem.category === '강도' ? existingItem : null);
             // strengthSlots(위치별 묶음)가 있으면 그대로, 없으면(구버전 항목) location/strengthReadings
             // 하나로 슬롯 1개를 만들어서 예전과 동일하게 보이게 한다.
             if (existingItem.category === '강도') {
@@ -17689,6 +17958,15 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     const legacyW = parseFloat((existingItem.avgValue || '').toString().replace(/[^0-9.-]/g, ''));
                     measuredWidthElExisting.value = isNaN(legacyW) ? '' : legacyW;
                 }
+            }
+            // 2026-10-19 이쪽만 측정·슬래브 합산 — 슬래브 합산이면 춤 칸에는 슬래브 아래 춤을 보여 준다
+            {
+                const moApi = ndtMeasureOptsApi();
+                const slabV = (existingItem.category === '실측') ? (parseFloat(existingItem.slabThickness) || null) : null;
+                setNdtMeasureOptsUi(existingItem.category === '실측'
+                    ? { oneSide: existingItem.measureOneSide || null, slabOn: !!slabV, slab: slabV }
+                    : null);
+                if (moApi && slabV && measuredDepthElExisting) measuredDepthElExisting.value = moApi.depthInputValue(existingItem);
             }
             [
                 ['ndtDesignWeb', 'designWeb'],
@@ -17758,6 +18036,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             if (avgEl) avgEl.value = '';
             if (statusEl) statusEl.value = '';
             if (damageStatusEl) damageStatusEl.value = '상태양호';   // 새 강도 항목은 상태양호로 시작
+            setNdtStrengthAgeItemInput(null);
             ndtStrengthSlots = [{ location: '', readings: [] }];
             const angleElNew = document.getElementById('ndtAngle');
             // 새 항목은 이 기기에서 마지막에 쓴 각도로 시작한다(없으면 0°)
@@ -17776,6 +18055,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             if (measuredDepthElNew) measuredDepthElNew.value = '';
             const measuredWidthElNew = document.getElementById('ndtMeasuredWidth');
             if (measuredWidthElNew) measuredWidthElNew.value = '';
+            setNdtMeasureOptsUi(null);
             [
                 'ndtDesignWeb', 'ndtDesignFlange', 'ndtDesignWebWidth', 'ndtDesignFlangeWidth',
                 'ndtMeasuredWeb', 'ndtMeasuredFlange', 'ndtMeasuredWebWidth', 'ndtMeasuredFlangeWidth'
@@ -17971,6 +18251,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         let measuredWeb = null, measuredFlange = null, measuredWebWidth = null, measuredFlangeWidth = null;
         let sectionRatio = null;
         let sectionGrade = null;
+        let measureOneSide = null, slabThickness = null, measuredDepthBelowSlab = null;
         if (cat === '실측') {
             if (dimKind === 'steel') {
                 const designSteel = readNdtSteelDims('ndtDesign');
@@ -18014,10 +18295,16 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 );
                 designWidth = designParsed.w;
                 designDepth = noSecondary ? null : designParsed.d;
-                measuredWidth = measuredParsed.w;
-                measuredDepth = noSecondary ? null : measuredParsed.d;
+                // 2026-10-19 「이쪽만 측정」·「슬래브 두께 합산」(보) — 안 잰 쪽은 설계치수로 계산, 실측 춤 = 입력 춤 + 슬래브
+                const mo = resolveNdtMeasureOptsFromForm(dimKind, designWidth, designDepth, measuredParsed.w, noSecondary ? null : measuredParsed.d);
+                measuredWidth = mo ? mo.storeW : measuredParsed.w;
+                measuredDepth = noSecondary ? null : (mo ? mo.storeD : measuredParsed.d);
+                measureOneSide = mo ? mo.oneSide : null;
+                slabThickness = mo ? mo.slab : null;
+                measuredDepthBelowSlab = mo ? mo.depthBelowSlab : null;
                 if (measuredWidth !== null) avg = String(measuredWidth);
-                const sectionCalc = calcSectionGrade(designWidth, designDepth, measuredWidth, measuredDepth);
+                const sectionCalc = calcSectionGrade(designWidth, designDepth,
+                    mo ? mo.calcW : measuredWidth, noSecondary ? null : (mo ? mo.calcD : measuredDepth));
                 if (sectionCalc) {
                     sectionRatio = sectionCalc.ratio;
                     sectionGrade = sectionCalc.code;
@@ -18030,7 +18317,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         // 콘크리트 강도(반발경도)는 위치 슬롯별로(최대 3개) R값 목록 + 각도보정 + 추정식 3개
         // 결과를 각각 저장한다. 최상위 strength* 필드들은 하위호환용으로 첫 슬롯 결과만 담는다.
         const strengthAngle = document.getElementById('ndtAngle')?.value;
-        const strengthAgeDays = (cat === '강도') ? getConcreteStrengthAgeDays() : null;
+        // 2026-10-19 재령일 직접 입력(이 항목 > 건물 공통 > 준공일 자동)
+        const strengthAgeFormItem = (cat === '강도') ? readNdtStrengthAgeFormItem() : null;
+        const strengthAgeDays = (cat === '강도') ? resolveStrengthAgeInfo(strengthAgeFormItem).days : null;
         if (cat === '강도') rememberLastStrengthAngle(strengthAngle);
         const enabledFormulaNames = getEnabledStrengthFormulaNames(window.state.currentBuilding);
         const designStrengthVal = (cat === '강도') ? parseFloat(document.getElementById('ndtDesignStrength')?.value) : NaN;
@@ -18079,8 +18368,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             designStrength: !isNaN(designStrengthVal) ? designStrengthVal : null,
             strengthRatio: firstSlotResult ? firstSlotResult.ratio : null,
             strengthGrade: firstSlotResult ? firstSlotResult.grade : null,
-            damageStatus: damageStatus
-        } : { strengthSlots: [], strengthReadings: [], strengthAngle: null, strengthResults: [], strengthRo: null, strengthAgeDays: null, strengthAlpha: null, strengthFormulaAvg: null, strengthFinal: null, designStrength: null, strengthRatio: null, strengthGrade: null, damageStatus: null };
+            damageStatus: damageStatus,
+            strengthAgeOverride: strengthAgeFormItem ? strengthAgeFormItem.strengthAgeOverride : null
+        } : { strengthSlots: [], strengthReadings: [], strengthAngle: null, strengthResults: [], strengthRo: null, strengthAgeDays: null, strengthAlpha: null, strengthFormulaAvg: null, strengthFinal: null, designStrength: null, strengthRatio: null, strengthGrade: null, damageStatus: null, strengthAgeOverride: null };
 
         const carbExtra = (cat === '탄산화') ? {
             carbDepth: !isNaN(carbDepthVal) ? carbDepthVal : null,
@@ -18099,14 +18389,16 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 designWidth, designDepth, measuredWidth, measuredDepth,
                 designWeb, designFlange, designWebWidth, designFlangeWidth,
                 measuredWeb, measuredFlange, measuredWebWidth, measuredFlangeWidth,
-                sectionRatio, sectionGrade
+                sectionRatio, sectionGrade,
+                measureOneSide, slabThickness, measuredDepthBelowSlab
             }
             : {
                 finishState: null, measureDimMode: null,
                 designWidth: null, designDepth: null, measuredWidth: null, measuredDepth: null,
                 designWeb: null, designFlange: null, designWebWidth: null, designFlangeWidth: null,
                 measuredWeb: null, measuredFlange: null, measuredWebWidth: null, measuredFlangeWidth: null,
-                sectionRatio: null, sectionGrade: null
+                sectionRatio: null, sectionGrade: null,
+                measureOneSide: null, slabThickness: null, measuredDepthBelowSlab: null
             };
 
         // 내화피복 두께: 플렌지/웨브 실측값을 모으고, 평균은 한 부재(최대 6개소) 기준으로 저장.
@@ -18344,7 +18636,12 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     document.getElementById('ndtMeasuredWidth')?.value,
                     dimKind === 'thickness' ? '' : document.getElementById('ndtMeasuredDepth')?.value
                 );
-                calc = calcSectionGrade(design.w, design.d, measured.w, measured.d);
+                const mo = resolveNdtMeasureOptsFromForm(dimKind, design.w, dimKind === 'thickness' ? null : design.d,
+                    measured.w, dimKind === 'thickness' ? null : measured.d);
+                calc = mo
+                    ? calcSectionGrade(design.w, design.d, mo.calcW, mo.calcD)
+                    : calcSectionGrade(design.w, design.d, measured.w, measured.d);
+                updateNdtMeasureOptsHint(mo, measured.d);
             }
             if (calc) {
                 if (ratioEl) ratioEl.value = `${calc.ratio.toFixed(1)}%`;
@@ -18354,6 +18651,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 if (gradeEl) gradeEl.value = '';
             }
         }
+
+        window.recalcNdtSectionAuto = calcSectionAuto;
 
         // --- 내화피복 두께: 플렌지+웨브 유효 개소(최대 6)를 한 부재 평균으로 ---
         function calcFireproofAuto() {
@@ -18456,6 +18755,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const ndtAngleEl = document.getElementById('ndtAngle');
         if (ndtAngleEl) ndtAngleEl.addEventListener('change', recalcAllStrengthSlots);
         ensureAnvilInputRow();
+        ensureStrengthAgeRow();
 
         const ndtDesignStrengthEl = document.getElementById('ndtDesignStrength');
         if (ndtDesignStrengthEl) ndtDesignStrengthEl.addEventListener('input', recalcAllStrengthSlots);
@@ -32775,6 +33075,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
         const applyTipShape = (shape) => {
             state.tipShape = shape;
+            state.tipShapeChosen = true;   // 직접 고름 — 기본(동그라미)이 바뀌어도 이 값을 지킨다
             if (btnArrow) btnArrow.classList.toggle('active', shape === 'arrow');
             if (btnCircle) btnCircle.classList.toggle('active', shape === 'circle');
             refreshAllStyleColoredCanvases();
@@ -37047,6 +37348,59 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             triggerDefectPhotoPick('gallery', 'curr');
         };
     }
+
+    // 2026-10-19 결함 수정창 사진 칸에 끌어다 놓기 — PC 탐색기 그림 파일(여러 장)·앱 안 그림(끌면 data:/blob: 주소).
+    // 처리는 「추가」 단추와 같은 handleSelectedPhotoFile(줄이기·IndexedDB·동기화). 놓은 순서대로 한 장씩.
+    (function bindDefectPhotoDrop() {
+        const zone = document.querySelector('#defectModal .defect-photo-block');
+        const api = window.BSA && window.BSA.shared && window.BSA.shared.photoDrop;
+        if (!zone || !api || zone.dataset.photoDropBound) return;
+        zone.dataset.photoDropBound = '1';
+        let depth = 0;
+        const setHot = (on) => zone.classList.toggle('defect-photo-drop-hot', !!on);
+        zone.addEventListener('dragenter', (e) => {
+            if (!api.looksLikeImageDrag(e.dataTransfer)) return;
+            e.preventDefault();
+            depth++;
+            setHot(true);
+        });
+        zone.addEventListener('dragover', (e) => {
+            if (!api.looksLikeImageDrag(e.dataTransfer)) return;
+            e.preventDefault();
+            try { e.dataTransfer.dropEffect = 'copy'; } catch (_e) { /* ignore */ }
+            setHot(true);
+        });
+        zone.addEventListener('dragleave', () => {
+            depth = Math.max(0, depth - 1);
+            if (!depth) setHot(false);
+        });
+        zone.addEventListener('drop', async (e) => {
+            if (!api.looksLikeImageDrag(e.dataTransfer)) return;
+            e.preventDefault();
+            e.stopPropagation();
+            depth = 0;
+            setHot(false);
+            const photoTarget = captureDefectPhotoTarget();
+            const sources = api.pickImageFiles(e.dataTransfer);
+            if (!sources.length) {
+                const url = api.extractImageUrl(e.dataTransfer);
+                if (url) {
+                    try {
+                        const blob = await (await fetch(url)).blob();
+                        if (/^image\//i.test(blob.type || '')) sources.push(blob);
+                    } catch (_e) { /* 못 읽은 주소 */ }
+                }
+            }
+            if (!sources.length) {
+                window.showToast('그림 파일만 넣을 수 있습니다.', 'warning');
+                return;
+            }
+            window.showToast(`사진 ${sources.length}장을 넣는 중…`, 'info', 2200);
+            for (const f of sources) {
+                try { await handleSelectedPhotoFile(f, 'curr', photoTarget); } catch (_e) { /* 안에서 알림 */ }
+            }
+        });
+    })();
 
     // --- 📱 휴대폰 카메라 연동 (QR 스캔 → 로그인 없이 촬영)
     // QR 창을 닫아도(「닫기 (연동 유지)」) 계속 받는다. 「연동 해제」를 누르거나 30분이 지나면 구독을 끊는다.
@@ -42466,6 +42820,20 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         return loc;
     }
 
+    /**
+     * 2026-10-19 3종 「구분」 칸 — 상세 위치를 적었으면 「지상1층 기둥 C1 하부」(층 + 상세 위치), 비었으면 예전처럼 층만.
+     * 화면 표·한글·엑셀이 모두 getSurveyCellText('floorGroup')을 거친다.
+     */
+    function grade3DivisionText(d, ctx, floorLabel) {
+        const label = String(floorLabel || '');
+        const loc = String((d && d.location) || '').trim();
+        if (!loc || loc === label) return label;
+        if (label && (loc.startsWith(`${label} `) || loc.startsWith(`${label}(`))) return loc;
+        const detail = extractDefectLocationDetail(loc, (ctx && ctx.floorCode) || state.currentFloor);
+        if (!detail || detail === label) return label;
+        return label ? `${label} ${detail}` : detail;
+    }
+
     function getActiveSurveyColumns() {
         const grade3 = isGrade3Building();
         const defaults = grade3 ? GRADE3_SURVEY_COLUMNS : DEFAULT_SURVEY_COLUMNS;
@@ -42497,7 +42865,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const isGood = isGoodDefectType(d.defectType);
         switch (colKey) {
             case 'no': return ctx.gradeNo || ctx.surveyReportNo || (d.no || '').replace(/^NO\.?\s*/i, '');
-            case 'floorGroup': return ctx.floorDisplayLabel || ctx.floorCode || state.currentFloor || '';
+            case 'floorGroup': return grade3DivisionText(d, ctx, ctx.floorDisplayLabel || ctx.floorCode || state.currentFloor || '');
             case 'inspectionContent': {
                 // 부재 + 조사내용 + 크기를 한 줄로 출력 (화면/HWPX/엑셀 공통)
                 const headParts = [getSurveyCellText('component', d, ctx), getSurveyCellText('defectType', d, ctx)]
@@ -42741,7 +43109,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             if (colCount === 6) {
                 return [
                     no,
-                    ctx.floorDisplayLabel || getSurveyCellText('floorGroup', d, ctx),
+                    getSurveyCellText('floorGroup', d, ctx),
                     getSurveyCellText('category', d, ctx),
                     content,
                     getSurveyCellText('cause', d, ctx),
@@ -42750,7 +43118,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             }
             return [
                 no,
-                ctx.floorDisplayLabel || getSurveyCellText('floorGroup', d, ctx),
+                getSurveyCellText('floorGroup', d, ctx),
                 marks.struct,
                 marks.nonstruct,
                 content,
@@ -45218,6 +45586,45 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         return stored;
     }
 
+    // --- 2026-10-19 비파괴 위치도 출력 범위 ---
+    // 결함 위치도와 따로 정한다. 같은 저장소(state.floorPrintCrops)에 '건물_층#ndt' 키로 넣어 회사 설정 칸별 병합·동기화
+    // 길을 그대로 탄다(새 서버 칸·규칙 변경 없음). 비율은 비파괴 탭 도면(전용 도면이 있으면 그 도면) 크기 기준.
+    const NDT_PRINT_CROP_SUFFIX = '#ndt';
+    function ndtPrintCropKey(buildingId, floorCode) {
+        return getFloorMapStyleKey(buildingId, floorCode) + NDT_PRINT_CROP_SUFFIX;
+    }
+
+    function getNdtPrintCrop(buildingId, floorCode, imgW, imgH) {
+        const api = printCropApi();
+        const map = state.floorPrintCrops;
+        if (!api || !map || typeof map !== 'object') return null;
+        return api.fromStored(map[ndtPrintCropKey(buildingId, floorCode)] || null, imgW, imgH);
+    }
+
+    function setNdtPrintCrop(buildingId, floorCode, crop, imgW, imgH) {
+        const api = printCropApi();
+        if (!api || !buildingId || !floorCode) return null;
+        if (!state.floorPrintCrops || typeof state.floorPrintCrops !== 'object') state.floorPrintCrops = {};
+        const stored = crop ? api.toStored(crop, imgW, imgH) : null;
+        state.floorPrintCrops[ndtPrintCropKey(buildingId, floorCode)] = stored;
+        if (typeof saveStateToLocalStorage === 'function') saveStateToLocalStorage();
+        if (typeof scheduleSyncToFirebase === 'function') scheduleSyncToFirebase();
+        return stored;
+    }
+
+    /** 이 층에 비파괴 출력 범위가 정해져 있으면 버튼에 표시 */
+    let _ndtPrintCropBtnState = null;
+    function updateNdtPrintCropButtons() {
+        const map = state.floorPrintCrops;
+        const on = !!(map && typeof map === 'object' && map[ndtPrintCropKey(state.currentBuildingId, state.currentFloor)]);
+        if (_ndtPrintCropBtnState === on) return;
+        _ndtPrintCropBtnState = on;
+        ['btnOpenNdtPrintCropModal', 'ndtRailBtnPrintCrop', 'mobileNdtBtnPrintCrop'].forEach((id) => {
+            const b = document.getElementById(id);
+            if (b) b.classList.toggle('is-set', on);
+        });
+    }
+
     /** 범위 안에 그릴 범례의 크기(범위 좌표). 범례 항목이 없으면 null. */
     function measureLegendForPrintCrop(crop) {
         const items = getActiveLocationMapLegend().map(enrichLocationMapLegendItem);
@@ -45394,9 +45801,11 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     }
 
     /** 「출력 범위」 창 — 미리보기에서 사각형을 끌어 정한다. 화면의 도면 조작 코드와 따로 돈다. */
-    function openPrintCropModal() {
+    function openPrintCropModal(modeArg) {
+        // 'ndt' = 비파괴 위치도(2026-10-19). 버튼 click 은 Event 를 넘기므로 문자열일 때만.
+        const isNdt = modeArg === 'ndt';
         const api = printCropApi();
-        const imgObj = getCurrentFloorDrawingImage();
+        const imgObj = isNdt ? getCurrentNdtDrawingImage() : getCurrentFloorDrawingImage();
         if (!api || !state.currentBuildingId || !state.currentFloor) {
             window.showToast('건축물과 층을 먼저 선택해 주세요.', 'warning');
             return;
@@ -45418,11 +45827,11 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         overlay.innerHTML = `
             <div style="background:#fff;color:#0f172a;border-radius:12px;max-width:96vw;max-height:96vh;display:flex;flex-direction:column;box-shadow:0 20px 50px rgba(0,0,0,0.3);overflow:hidden;">
                 <div style="padding:12px 16px;border-bottom:1px solid #e2e8f0;display:flex;align-items:center;gap:10px;">
-                    <strong style="font-size:1rem;"><i class="fa-solid fa-crop-simple"></i> 위치도 출력 범위</strong>
+                    <strong style="font-size:1rem;"><i class="fa-solid fa-crop-simple"></i> ${isNdt ? '비파괴 조사 위치도 출력 범위' : '위치도 출력 범위'}</strong>
                     <span data-role="info" style="font-size:0.82rem;color:#475569;"></span>
                 </div>
                 <div style="padding:10px 16px 0;font-size:0.8rem;color:#64748b;line-height:1.5;">
-                    한글·PDF 위치도에 넣을 부분을 정합니다. 모서리를 끌어 크기를 바꾸고, 안쪽을 끌어 옮기고, 바깥에서 끌면 새로 그립니다.
+                    한글·PDF ${isNdt ? '비파괴 조사 ' : ''}위치도에 넣을 부분을 정합니다. 모서리를 끌어 크기를 바꾸고, 안쪽을 끌어 옮기고, 바깥에서 끌면 새로 그립니다.
                     범위를 정하지 않으면 지금처럼 도면 전체가 나옵니다.
                 </div>
                 <div style="padding:10px 16px;overflow:auto;display:flex;justify-content:center;">
@@ -45430,7 +45839,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 </div>
                 <div style="padding:10px 16px 14px;border-top:1px solid #e2e8f0;display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-end;">
                     <button type="button" class="btn btn-sm" data-role="auto"><i class="fa-solid fa-wand-magic-sparkles"></i> 자동 맞춤</button>
-                    <button type="button" class="btn btn-sm" data-role="legend" title="범위 안에서 범례를 놓을 구석을 바꿉니다"><i class="fa-solid fa-list"></i> 범례 자리 바꾸기</button>
+                    <button type="button" class="btn btn-sm" data-role="legend" ${isNdt ? 'hidden' : ''} title="범위 안에서 범례를 놓을 구석을 바꿉니다"><i class="fa-solid fa-list"></i> 범례 자리 바꾸기</button>
                     <button type="button" class="btn btn-sm" data-role="reset">도면 전체(기본)</button>
                     <span style="flex:1;"></span>
                     <button type="button" class="btn btn-sm" data-role="cancel">취소</button>
@@ -45443,13 +45852,13 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const infoEl = overlay.querySelector('[data-role="info"]');
         const maxW = Math.max(240, Math.min(window.innerWidth - 80, 1100));
         const maxH = Math.max(200, window.innerHeight - 260);
-        const base = renderFloorPreviewCanvas(imgObj, 1400);
+        const base = isNdt ? renderNdtPreviewCanvas(imgObj, 1400) : renderFloorPreviewCanvas(imgObj, 1400);
         const view = Math.min(maxW / imgW, maxH / imgH);          // 도면 좌표 → 미리보기 좌표
         canvas.width = Math.max(1, Math.round(imgW * view));
         canvas.height = Math.max(1, Math.round(imgH * view));
         const ctx = canvas.getContext('2d');
 
-        let crop = getFloorPrintCrop(bId, fc, imgW, imgH);        // 도면 좌표. null = 도면 전체
+        let crop = isNdt ? getNdtPrintCrop(bId, fc, imgW, imgH) : getFloorPrintCrop(bId, fc, imgW, imgH);        // 도면 좌표. null = 도면 전체
         let drag = null;
 
         const paint = () => {
@@ -45465,10 +45874,12 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 ctx.rect(0, 0, imgW, imgH);
                 ctx.rect(crop.x, crop.y, crop.w, crop.h);
                 ctx.fill('evenodd');
-                ctx.save();
-                ctx.translate(crop.x, crop.y);
-                drawLocationMapLegend(ctx, crop.w, crop.h, false, 0, { box: legendBoxForPrintCrop(imgW, imgH, crop) });
-                ctx.restore();
+                if (!isNdt) {   // 비파괴 위치도에는 범례가 없다
+                    ctx.save();
+                    ctx.translate(crop.x, crop.y);
+                    drawLocationMapLegend(ctx, crop.w, crop.h, false, 0, { box: legendBoxForPrintCrop(imgW, imgH, crop) });
+                    ctx.restore();
+                }
                 ctx.strokeStyle = '#2563eb';
                 ctx.lineWidth = 2 / view;
                 ctx.setLineDash([8 / view, 5 / view]);
@@ -45478,7 +45889,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 ctx.fillStyle = '#2563eb';
                 [[crop.x, crop.y], [crop.x + crop.w, crop.y], [crop.x, crop.y + crop.h], [crop.x + crop.w, crop.y + crop.h]]
                     .forEach(([hx, hy]) => ctx.fillRect(hx - hs, hy - hs, hs * 2, hs * 2));
-            } else {
+            } else if (!isNdt) {
                 drawLocationMapLegend(ctx, imgW, imgH, false, 0, { box: legendBoxForPrintCrop(imgW, imgH, null) });
             }
             ctx.restore();
@@ -45576,7 +45987,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         });
 
         overlay.querySelector('[data-role="auto"]').addEventListener('click', () => {
-            const auto = computeAutoPrintCrop(imgObj);
+            const auto = isNdt ? computeAutoNdtPrintCrop(imgObj) : computeAutoPrintCrop(imgObj);
             if (!auto) {
                 window.showToast('이 도면은 자를 여백을 찾지 못했습니다. 사각형을 직접 그려 주세요.', 'info', 4000);
                 return;
@@ -45600,12 +46011,17 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         overlay.querySelector('[data-role="cancel"]').addEventListener('click', close);
         overlay.querySelector('[data-role="save"]').addEventListener('click', () => {
             const norm = crop ? api.normalizeCrop(crop, imgW, imgH) : null;
-            setFloorPrintCrop(bId, fc, norm, imgW, imgH);
+            if (isNdt) setNdtPrintCrop(bId, fc, norm, imgW, imgH);
+            else setFloorPrintCrop(bId, fc, norm, imgW, imgH);
             close();
-            if (typeof drawCanvas === 'function') drawCanvas();
+            if (isNdt) {
+                updateNdtPrintCropButtons();
+                if (typeof drawNdtCanvas === 'function') drawNdtCanvas();
+            } else if (typeof drawCanvas === 'function') drawCanvas();
+            const what = isNdt ? '비파괴 조사 위치도' : '위치도';
             window.showToast(norm
-                ? `${stripFloorCodeSuffix(window.getFloorLabelFromCode(fc))} 위치도 출력 범위를 저장했습니다.`
-                : `${stripFloorCodeSuffix(window.getFloorLabelFromCode(fc))} 위치도는 도면 전체로 출력합니다.`, 'success', 3500);
+                ? `${stripFloorCodeSuffix(window.getFloorLabelFromCode(fc))} ${what} 출력 범위를 저장했습니다.`
+                : `${stripFloorCodeSuffix(window.getFloorLabelFromCode(fc))} ${what}는 도면 전체로 출력합니다.`, 'success', 3500);
         });
 
         paint();
@@ -45616,6 +46032,46 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const btn = document.getElementById(btnId);
         if (btn) btn.addEventListener('click', openPrintCropModal);
     });
+
+    // 2026-10-19 비파괴 탭 「출력 범위」 단추 — PC 도구줄·PC 오른쪽 레일·모바일 아래 단추줄(index.html은 손으로 안 고친다)
+    function openNdtPrintCropModal() { openPrintCropModal('ndt'); }
+    window.openNdtPrintCropModal = openNdtPrintCropModal;
+    (function installNdtPrintCropButtons() {
+        const title = '비파괴 조사 위치도 출력 범위 — 한글·PDF 비파괴 위치도에 넣을 부분을 정합니다(정하지 않으면 도면 전체)';
+        const pdfChip = document.querySelector('#tab-ndt .ndt-top-canvas-tools .filter-group [onclick*="exportCurrentFloorNdtVectorPdf"]');
+        if (pdfChip && !document.getElementById('btnOpenNdtPrintCropModal')) {
+            const chip = document.createElement('button');
+            chip.type = 'button';
+            chip.id = 'btnOpenNdtPrintCropModal';
+            chip.className = 'chip';
+            chip.title = title;
+            chip.innerHTML = '<i class="fa-solid fa-crop-simple"></i> 출력 범위';
+            pdfChip.parentNode.insertBefore(chip, pdfChip.nextSibling);
+            chip.addEventListener('click', openNdtPrintCropModal);
+        }
+        const railPdf = document.getElementById('ndtRailBtnVectorPdf');
+        if (railPdf && !document.getElementById('ndtRailBtnPrintCrop')) {
+            const b = document.createElement('button');
+            b.type = 'button';
+            b.id = 'ndtRailBtnPrintCrop';
+            b.className = railPdf.className;
+            b.title = title;
+            b.innerHTML = '<i class="fa-solid fa-crop-simple"></i><span>출력범위</span>';
+            railPdf.parentNode.insertBefore(b, railPdf.nextSibling);
+            b.addEventListener('click', openNdtPrintCropModal);
+        }
+        const fit = document.getElementById('mobileNdtBtnZoomFit');
+        if (fit && !document.getElementById('mobileNdtBtnPrintCrop')) {
+            const b = document.createElement('button');
+            b.type = 'button';
+            b.id = 'mobileNdtBtnPrintCrop';
+            b.className = 'mobile-fab-btn';
+            b.title = title;
+            b.innerHTML = '<i class="fa-solid fa-crop-simple"></i><span>출력범위</span>';
+            fit.parentNode.insertBefore(b, fit);
+            b.addEventListener('click', openNdtPrintCropModal);
+        }
+    })();
 
     /**
      * PDF 보고서용 균열 게이지·팁 페이지. 도면에 찍은 게이지 마킹과 예전 균열 결함 연결 기록을
@@ -45780,6 +46236,13 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     const imgW = imgObj.naturalWidth || imgObj.width || 1400;
                     const imgH = imgObj.naturalHeight || imgObj.height || 900;
 
+                    // 2026-10-19 비파괴 위치도 출력 범위가 정해진 층은 그 부분만 종이에 꽉 차게(없으면 아래 기본: 도면 전체)
+                    const ndtCrop = getNdtPrintCrop(currentBldgId, floorCode, imgW, imgH);
+                    if (ndtCrop) {
+                        return renderNdtPrintCropCanvas(imgObj, imgW, imgH, ndtCrop, ndtItems, displacementGroups, ndtDarken)
+                            .toDataURL('image/png');
+                    }
+
                     const cw = 1800;
                     const ch = 2540;
                     canvas.width = cw;
@@ -45850,6 +46313,85 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             console.error('Error rendering NDT floor plan data URL:', err);
             return null;
         }
+    }
+
+    /** 비파괴 위치도 — 출력 범위만 그린 그림(결함 위치도 renderFloorPrintCropCanvas와 같은 맞춤·회전, 범례 없음) */
+    function renderNdtPrintCropCanvas(imgObj, imgW, imgH, crop, ndtItems, displacementGroups, darken) {
+        const fit = printCropApi().fitCrop(crop.w, crop.h, 1800, 2540);
+        const canvas = document.createElement('canvas');
+        canvas.width = fit.canvasW;
+        canvas.height = fit.canvasH;
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.save();
+        if (fit.rotate) {
+            ctx.translate(canvas.width / 2, canvas.height / 2);
+            ctx.rotate(-Math.PI / 2);
+            ctx.scale(fit.scale, fit.scale);
+            ctx.translate(-crop.w / 2, -crop.h / 2);
+        } else {
+            ctx.scale(fit.scale, fit.scale);
+        }
+        ctx.translate(-crop.x, -crop.y);
+        ctx.beginPath();
+        ctx.rect(crop.x, crop.y, crop.w, crop.h);
+        ctx.clip();
+        drawFloorDrawingImage(ctx, imgObj, imgW, imgH, darken);
+        (ndtItems || []).forEach(item => drawNdtPin(ctx, item, ndtItems));
+        (displacementGroups || []).forEach(g => drawNdtDisplacementGroup(ctx, g));
+        ctx.restore();
+        return canvas;
+    }
+
+    /** 지금 비파괴 탭에 띄운 도면(다 불러온 것). 없으면 null. */
+    function getCurrentNdtDrawingImage() {
+        const ok = (img) => !!(img && img.complete && img.naturalWidth > 0);
+        return ok(ndtBgImage) ? ndtBgImage : null;
+    }
+
+    /** 비파괴 도면 + 이 층 비파괴 마킹 전부(항목 구분 없이)를 도면 방향 그대로 작게 — 범위 미리보기·자동 맞춤용 */
+    function renderNdtPreviewCanvas(imgObj, maxSide) {
+        const imgW = imgObj.naturalWidth;
+        const imgH = imgObj.naturalHeight;
+        const k = Math.min(1, maxSide / Math.max(imgW, imgH));
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.max(1, Math.round(imgW * k));
+        canvas.height = Math.max(1, Math.round(imgH * k));
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        const key = `${state.currentBuildingId}_${state.currentFloor}`;
+        const darken = currentNdtCustomDrawingSrc(key) ? 0 : getFloorDrawingDarken(state.currentBuildingId, state.currentFloor);
+        ctx.save();
+        ctx.scale(canvas.width / imgW, canvas.height / imgH);
+        drawFloorDrawingImage(ctx, imgObj, imgW, imgH, darken);
+        const items = ((state.ndtData && state.ndtData[key]) || []).filter((it) => it && !isCrackGaugeNdtItem(it));
+        items.forEach((it) => drawNdtPin(ctx, it, items));
+        ((state.ndtDisplacementGroups && state.ndtDisplacementGroups[key]) || []).forEach((g) => drawNdtDisplacementGroup(ctx, g));
+        ctx.restore();
+        return canvas;
+    }
+
+    /** 비파괴 자동 맞춤 — 도면 내용과 비파괴 마킹이 다 들어가는 가장 작은 범위 + 여유 */
+    function computeAutoNdtPrintCrop(imgObj) {
+        const api = printCropApi();
+        if (!api || !imgObj) return null;
+        const imgW = imgObj.naturalWidth;
+        const imgH = imgObj.naturalHeight;
+        const small = renderNdtPreviewCanvas(imgObj, 900);
+        let data;
+        try {
+            data = small.getContext('2d').getImageData(0, 0, small.width, small.height).data;
+        } catch (e) {
+            console.warn('[비파괴 출력 범위] 도면 픽셀을 읽을 수 없어 자동 맞춤을 못 함:', e);
+            return null;
+        }
+        const ink = api.inkBounds(data, small.width, small.height);
+        if (!ink) return null;
+        const rect = api.scaleRect(ink, imgW / small.width, imgH / small.height);
+        const padded = api.padRect(rect, Math.max(imgW, imgH) * 0.012, imgW, imgH);
+        return api.normalizeCrop(padded, imgW, imgH);
     }
 
     async function loadImageElementFromSrc(src) {
@@ -46251,8 +46793,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                                 </thead>
                                 <tbody>
                                     ${pageItems.length > 0 ? pageItems.map(item => {
-                                        const designText = formatNdtMeasureDimWithArea(item, 'design', ' × ', '<br>');
-                                        const measuredText = formatNdtMeasureDimWithArea(item, 'measured', ' × ', '<br>');
+                                        const designText = formatNdtMeasureDimForOutput(item, 'design', ' × ', '<br>');
+                                        const measuredText = formatNdtMeasureDimForOutput(item, 'measured', ' × ', '<br>');
                                         const ratioText = (item.sectionRatio !== undefined && item.sectionRatio !== null) ? `${item.sectionRatio.toFixed(1)}%` : '-';
                                         return `
                                         <tr>
@@ -49950,8 +50492,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     if (measureItemsHwpx.length > 0) {
                         const tbl = findTblById(MEASURE_TBL_ID, ['마감상태', '설계', '실측']);
                         if (tbl) fillNdtTable(tbl, MEASURE_HEADER_ROWS, measureItemsHwpx.map((item, i) => {
-                            const designText = formatNdtMeasureDimWithArea(item, 'design', '×');
-                            const measuredText = formatNdtMeasureDimWithArea(item, 'measured', '×');
+                            const designText = formatNdtMeasureDimForOutput(item, 'design', '×');
+                            const measuredText = formatNdtMeasureDimForOutput(item, 'measured', '×');
                             const ratioText = (item.sectionRatio !== undefined && item.sectionRatio !== null) ? item.sectionRatio.toFixed(1) + '%' : '-';
                             return [
                                 item.no || (i + 1),
@@ -50155,14 +50697,14 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                                     slots.forEach(slot => perfPoints.push({ item, slot }));
                                 });
 
-                                const perfAgeDays = getConcreteStrengthAgeDays(bldg);
+                                // 재령일은 항목마다(이 항목 직접 입력 > 건물 공통 > 준공일 자동) — resolveStrengthAgeInfo
                                 const perfCanvases = [];
                                 const perfEnabledNames = getEnabledStrengthFormulaNames(bldg);
                                 for (let seq = 0; seq < perfPoints.length; seq++) {
                                     const pt = perfPoints[seq];
                                     const readings = (pt.slot.readings || []).filter(v => v !== '' && v !== null && v !== undefined);
                                     if (readings.length === 0) continue;
-                                    const calc = calcConcreteStrength(readings, parseFloat(pt.item.strengthAngle), perfAgeDays, perfEnabledNames, getStrengthAnvilAvg(bldg));
+                                    const calc = calcConcreteStrength(readings, parseFloat(pt.item.strengthAngle), resolveStrengthAgeInfo(pt.item, bldg).days, perfEnabledNames, getStrengthAnvilAvg(bldg));
                                     if (!calc) continue;
                                     perfCanvases.push(renderStrengthPerfPointCanvas(seq + 1, pt.item, pt.slot, readings, calc));
                                 }
@@ -52455,8 +52997,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                     if (measureItemsHwpx.length > 0) {
                         const tbl = findTblById(MEASURE_TBL_ID, ['마감상태', '설계', '실측']);
                         if (tbl) fillNdtTable(tbl, MEASURE_HEADER_ROWS, measureItemsHwpx.map((item, i) => {
-                            const designText = formatNdtMeasureDimWithArea(item, 'design', '×');
-                            const measuredText = formatNdtMeasureDimWithArea(item, 'measured', '×');
+                            const designText = formatNdtMeasureDimForOutput(item, 'design', '×');
+                            const measuredText = formatNdtMeasureDimForOutput(item, 'measured', '×');
                             const ratioText = (item.sectionRatio !== undefined && item.sectionRatio !== null) ? item.sectionRatio.toFixed(1) + '%' : '-';
                             return [
                                 item.no || (i + 1),
@@ -52660,14 +53202,14 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                                     slots.forEach(slot => perfPoints.push({ item, slot }));
                                 });
 
-                                const perfAgeDays = getConcreteStrengthAgeDays(bldg);
+                                // 재령일은 항목마다(이 항목 직접 입력 > 건물 공통 > 준공일 자동) — resolveStrengthAgeInfo
                                 const perfCanvases = [];
                                 const perfEnabledNames = getEnabledStrengthFormulaNames(bldg);
                                 for (let seq = 0; seq < perfPoints.length; seq++) {
                                     const pt = perfPoints[seq];
                                     const readings = (pt.slot.readings || []).filter(v => v !== '' && v !== null && v !== undefined);
                                     if (readings.length === 0) continue;
-                                    const calc = calcConcreteStrength(readings, parseFloat(pt.item.strengthAngle), perfAgeDays, perfEnabledNames, getStrengthAnvilAvg(bldg));
+                                    const calc = calcConcreteStrength(readings, parseFloat(pt.item.strengthAngle), resolveStrengthAgeInfo(pt.item, bldg).days, perfEnabledNames, getStrengthAnvilAvg(bldg));
                                     if (!calc) continue;
                                     perfCanvases.push(renderStrengthPerfPointCanvas(seq + 1, pt.item, pt.slot, readings, calc));
                                 }
