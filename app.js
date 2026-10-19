@@ -36683,7 +36683,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     }
 
     // --- 📱 휴대폰 카메라 연동 (QR 스캔 → 로그인 없이 촬영)
-    // QR 창을 닫거나 30분이 지나면 구독을 끊어 읽기를 막는다. 다시 받으려면 QR을 연다.
+    // QR 창을 닫아도(「닫기 (연동 유지)」) 계속 받는다. 「연동 해제」를 누르거나 30분이 지나면 구독을 끊는다.
     let phoneRelayUnsubscribe = null;
     let phoneRelayTimeout = null;
     const PHONE_RELAY_MAX_MS = 30 * 60 * 1000;
@@ -36783,7 +36783,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             elements.mobileQrModal.style.display = 'none';
             elements.mobileQrModal.classList.remove('open');
         }
-        stopPhoneRelayListener();
+        updatePhoneRelayButtonLabel();
     }
 
     function disconnectPhoneRelay() {
@@ -36806,7 +36806,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             new QRCode(qrContainer, { text: captureUrl.href, width: 200, height: 200 });
         }
         if (statusEl) {
-            statusEl.textContent = '휴대폰으로 QR을 스캔해 주세요. 창을 닫으면 수신이 멈춥니다.';
+            statusEl.textContent = '휴대폰으로 QR을 스캔해 주세요. 창을 닫아도 30분 동안 계속 받습니다.';
             statusEl.style.color = '';
         }
 
@@ -36818,7 +36818,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                         if (data && data.dataUrl) {
                             receivePhoneRelayPhoto(data.dataUrl);
                             if (statusEl) {
-                                statusEl.textContent = '휴대폰과 연결되어 있습니다. 창을 닫으면 수신이 멈춥니다.';
+                                statusEl.textContent = '휴대폰과 연결되어 있습니다. 창을 닫아도 계속 받습니다.';
                                 statusEl.style.color = '#4ade80';
                             }
                         }
