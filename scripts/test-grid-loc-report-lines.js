@@ -119,6 +119,6 @@ assert.ok(!t12.includes("setTcText(capTcs[2], getSurveyCellText('location'"), '�
 const t3 = app.slice(app.indexOf('async function exportHwpxSurveyTable3('), app.indexOf('async function exportHwpxSurveyTable12('));
 assert.ok(t3.includes("if (slot.locationTc) setTcText(slot.locationTc, '');"), '3종 사진표 위치 칸은 예전 그대로');
 // PDF 상태조사표 위치 칸
-assert.ok(app.includes('(ci === 1 && gridCell && v === gridCell) ? tdGridLoc(v) : td(v)'), 'PDF 1·2종 위치 칸');
+assert.ok(app.includes('if (ci === 1 && gridCell && v === gridCell && G && typeof G.cellTextUnits === \'function\')') && app.includes('getDefectGridRoomForReport(d, ctx.floorCode, units) || v'), 'PDF 1·2종 위치 칸');
 
 console.log('test-grid-loc-report-lines: ok');

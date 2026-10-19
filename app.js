@@ -43274,30 +43274,154 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             .replace(/>/g, '&gt;');
     }
 
-    function buildReportSurveyTableHtml(sDefects, cellCtxFactory, isGrade3) {
-        const td = (text) => `<td style="padding:0.28rem 0.18rem; border:1px solid #94a3b8; white-space:pre-line;">${escapeReportHtml(text)}</td>`;
-        const tdGridLoc = (text) => {
-            const G = gridLib();
-            const lines = String(text || '').split('\n');
-            if (!G || typeof G.gridLocBreakableHtml !== 'function') return td(text);
-            const rest = lines.slice(1).map(escapeReportHtml).join('\n');
-            return `<td style="padding:0.28rem 0.18rem; border:1px solid #94a3b8; white-space:pre-line;">${G.gridLocBreakableHtml(lines[0], escapeReportHtml)}${rest ? '\n' + rest : ''}</td>`;
+    /**
+     * 2026-10-20 PDF 미리보기를 한글(HWPX) 출력과 같게 — 값은 한글 양식(templates/hwpx_survey_template*.hwpx)에서
+     * 읽어 온 그대로(HWPUNIT, 1/7200 inch). 한글 출력 코드는 이 값을 쓰지 않는다(한글 출력은 그대로).
+     */
+    const REPORT_HWPX_LAYOUT = Object.freeze({
+        // 쪽: A4(59528×83340), 여백 위 5669·머리말 4331·아래 4252·꼬리말 4252·좌우 8504
+        page: Object.freeze({ width: 59528, height: 83340, left: 8504, right: 8504, top: 5669, bottom: 4252, header: 4331, footer: 4252 }),
+        titleH: 3000,          // 표 위 「N) 층」 제목 문단(한글 행 맞춤 계산과 같은 값)
+        tableMarginV: 280,     // 표 바깥 여백 위·아래 140
+        border: Object.freeze({ thin: 0.12, thick: 0.5 }),   // mm
+        grade12: Object.freeze({
+            cols: Object.freeze([2170, 4695, 8761, 3847, 2489, 2490, 1894, 1894, 10779, 3139]),
+            headRows: Object.freeze([1409, 2541]), headH: 3950, rowH: 3809,
+            fontPt: 8, lineHeight: 1.3, vertsize: 800
+        }),
+        grade3: Object.freeze({
+            cols: Object.freeze([3169, 4779, 2939, 2939, 12556, 12923, 2813]),
+            headRows: Object.freeze([2149, 2149]), headH: 4298, rowH: 3535,
+            fontPt: 8, lineHeight: 1.3, vertsize: 850
+        }),
+        // 위치도 표: 그림 칸 41821×60813 + 캡션 칸 3274(10pt 굵게)
+        map: Object.freeze({ width: 41821, imageH: 60813, captionH: 3274, captionPt: 10 })
+    });
+    const hwpxUnitToMm = (u) => Math.round((Number(u) || 0) * 25.4 / 7200 * 1000) / 1000;
+
+    /** 한글 출력과 같은 층 이름(「지하 1층」→「지하1층」) — 한글 쪽 getFloorLabel과 같은 규칙 */
+    function reportHwpxFloorLabel(bldg, floorCode) {
+        const fromList = ((bldg && bldg.floorsList) || []).find(f => f.floorCode === floorCode);
+        const raw = fromList
+            ? fromList.floorLabel
+            : (typeof window.getFloorLabelFromCode === 'function' ? window.getFloorLabelFromCode(floorCode, bldg) : floorCode);
+        return stripFloorCodeSuffix(raw || floorCode).replace(/\s+(?=\d)/g, '');
+    }
+
+    /** 한글 본문 높이(쪽 − 위·아래·머리말·꼬리말) */
+    function reportHwpxBodyHeight() {
+        const p = REPORT_HWPX_LAYOUT.page;
+        return p.height - p.top - p.bottom - p.header - p.footer;
+    }
+
+    /**
+     * PDF 상태조사표 데이터 행 높이(HWPUNIT) — 한글과 같은 규칙.
+     *  3종: 한글 행 맞춤(hwpx-survey-row-fit: 15행 + 1행 여유, 16·17행이면 그 쪽에 맞게 줄임)
+     *  1·2종: 양식 행 높이 3809 그대로(한 쪽을 넘으면 PDF는 잘리므로 그 쪽에 맞게 줄임)
+     */
+    function reportHwpxSurveyRowHeight(isGrade3, rowCount, hasTitle) {
+        const L = REPORT_HWPX_LAYOUT;
+        const spec = isGrade3 ? L.grade3 : L.grade12;
+        const n = Math.max(1, Number(rowCount) || 0);
+        const reserveH = hasTitle ? L.titleH : 0;
+        const fit = window.BSA && window.BSA.shared && window.BSA.shared.hwpxSurveyRowFit;
+        if (isGrade3 && fit && typeof fit.planRows === 'function') {
+            return fit.planRows({
+                bodyH: reportHwpxBodyHeight(), reserveH, headerH: spec.headH,
+                tableMarginV: L.tableMarginV, needs: new Array(n).fill(0)
+            }).rowH;
+        }
+        const area = reportHwpxBodyHeight() - reserveH - spec.headH - L.tableMarginV - 400;
+        return Math.min(spec.rowH, Math.floor(area / n));
+    }
+
+    /** 한글 칸과 같은 줄나눔(칸 폭 ÷ 글자 폭, 어절·금칙 — js/shared/korean-text-wrap.js) */
+    function reportHwpxWrapCell(raw, cellW, vertsize) {
+        const charW = Math.max(700, Math.round((vertsize || 800) * 0.95));
+        const maxChars = Math.max(4, Math.floor(Math.max(charW, cellW) / charW));
+        const prepared = insertHwpxEaCountLineBreaks(String(normalizeEaSpacingInText(raw == null ? '' : raw)).replace(/\r\n|\r/g, '\n'));
+        const api = window.BSA && window.BSA.koreanTextWrap;
+        if (api && typeof api.wrapHwpxCellText === 'function') {
+            const cw = typeof api.defaultCharWidthUnits === 'function' ? api.defaultCharWidthUnits : undefined;
+            return api.wrapHwpxCellText(prepared, maxChars, cw);
+        }
+        return prepared;
+    }
+
+    /** 한글 쪽과 같은 크기·여백의 PDF 쪽(머리말·본문·꼬리말) */
+    function reportHwpxPageOpen(attrs, headerTitle) {
+        const P = REPORT_HWPX_LAYOUT.page;
+        const mm = hwpxUnitToMm;
+        return `<div class="report-page-block report-page-hwpx"${attrs ? ' ' + attrs : ''} style="background:#ffffff; color:#000000; padding:${mm(P.top)}mm ${mm(P.right)}mm ${mm(P.bottom)}mm ${mm(P.left)}mm; margin-bottom: 2rem; font-family:'굴림', Gulim, 'Malgun Gothic', sans-serif; letter-spacing:0; border-radius:4px; box-shadow: 0 4px 20px rgba(0,0,0,0.1); page-break-after: always; break-after: page; page-break-inside: avoid !important; break-inside: avoid !important; box-sizing: border-box; width:${mm(P.width)}mm; height:${mm(P.height)}mm; max-height:${mm(P.height)}mm; overflow: hidden; display: flex; flex-direction: column; position: relative;">`
+            + `<div class="report-hwpx-header" style="height:${mm(P.header)}mm; flex:0 0 auto; display:flex; align-items:flex-start; justify-content:center; font-size:8pt; color:#000;">${escapeReportHtml(headerTitle || '')}</div>`
+            + `<div class="report-hwpx-body" style="height:${mm(reportHwpxBodyHeight())}mm; flex:0 0 auto; overflow:hidden; display:flex; flex-direction:column;">`;
+    }
+    function reportHwpxPageClose(compName) {
+        const P = REPORT_HWPX_LAYOUT.page;
+        return `</div><div class="report-hwpx-footer" style="height:${hwpxUnitToMm(P.footer)}mm; flex:0 0 auto; display:flex; align-items:flex-end; justify-content:space-between; font-size:8pt; color:#475569;"><span>점검수행기관: ${escapeReportHtml(compName || '')}</span><span>스마트 건축물 안전점검 시스템</span></div></div>`;
+    }
+
+    /** PDF 위치도 — 한글 위치도 표(그림 칸 + 캡션 칸, [도면 N-M])와 같은 크기 */
+    function buildReportHwpxMapHtml(drawingDataUrl, captionText, emptyHtml) {
+        const M = REPORT_HWPX_LAYOUT.map;
+        const mm = hwpxUnitToMm;
+        const b = `${REPORT_HWPX_LAYOUT.border.thin}mm solid #000`;
+        const img = drawingDataUrl
+            ? `<img src="${drawingDataUrl}" style="max-width:100%; max-height:100%; object-fit:contain; display:block; margin:0 auto;">`
+            : (emptyHtml || '');
+        return `<table class="report-hwpx-map" style="width:${mm(M.width)}mm; table-layout:fixed; border-collapse:collapse; margin:0 auto;"><tbody>`
+            + `<tr><td style="height:${mm(M.imageH)}mm; border:${b}; padding:0.5mm; text-align:center; vertical-align:middle;"><div style="width:100%; height:${mm(M.imageH - 282)}mm; display:flex; align-items:center; justify-content:center; overflow:hidden;">${img}</div></td></tr>`
+            + `<tr><td style="height:${mm(M.captionH)}mm; border:${b}; padding:0; text-align:center; vertical-align:middle; font-size:${M.captionPt}pt; font-weight:700; line-height:1.6;">${escapeReportHtml(captionText)}</td></tr>`
+            + `</tbody></table>`;
+    }
+
+    function buildReportSurveyTableHtml(sDefects, cellCtxFactory, isGrade3, layoutOpts) {
+        layoutOpts = layoutOpts || {};
+        const L = REPORT_HWPX_LAYOUT;
+        const spec = isGrade3 ? L.grade3 : L.grade12;
+        const mm = hwpxUnitToMm;
+        const thin = `${L.border.thin}mm solid #000`;
+        const thick = `${L.border.thick}mm solid #000`;
+        const dbl = `${L.border.thick * 3}px double #000`;
+        const rowH = reportHwpxSurveyRowHeight(isGrade3, (sDefects || []).length, !!layoutOpts.hasTitle);
+        const colN = spec.cols.length;
+        // 한글 양식 선: 바깥 좌우 없음, 머리 위 굵게·머리 아래 이중선, 안쪽 0.12mm
+        const sideCss = (ci, span) => `border-left:${ci === 0 ? 'none' : thin}; border-right:${ci + (span || 1) >= colN ? 'none' : thin};`;
+        const cellBase = `padding:0 0.2mm; vertical-align:middle; text-align:center; overflow:hidden; word-break:keep-all; overflow-wrap:anywhere;`;
+        const th = (text, ci, o) => {
+            o = o || {};
+            const span = o.colspan || 1;
+            const attrs = `${o.rowspan ? ` rowspan="${o.rowspan}"` : ''}${o.colspan ? ` colspan="${o.colspan}"` : ''}`;
+            const top = o.second ? `border-top:${thin};` : `border-top:${thick};`;
+            const bottom = (o.rowspan || o.second) ? `border-bottom:${dbl};` : `border-bottom:${thin};`;
+            return `<th${attrs} style="${cellBase} ${sideCss(ci, span)} ${top} ${bottom} font-weight:700; white-space:pre-line;">${text}</th>`;
         };
-        const th = (text, extra) => `<th style="padding:0.28rem 0.18rem; border:1px solid #64748b; background:#f8fafc; color:#1e293b; font-weight:700;${extra || ''}">${text}</th>`;
+        const td = (text, ci) => `<td style="${cellBase} ${sideCss(ci)} border-top:${thin}; border-bottom:${thin}; white-space:pre-line;">${escapeReportHtml(text)}</td>`;
+        const hr = spec.headRows;
         const head = isGrade3
-            ? `<tr>${th('No.', 'rowspan="2"')}${th('구분', 'rowspan="2"')}${th('부재 분류', 'colspan="2"')}${th('점검내용', 'rowspan="2"')}${th('발생원인', 'rowspan="2"')}${th('비고', 'rowspan="2"')}</tr><tr>${th('구조부재')}${th('비구조부재')}</tr>`
-            : `<tr>${th('구분(NO.)', 'rowspan="2"')}${th('위치', 'rowspan="2"')}${th('조사내용', 'rowspan="2"')}${th('크기(mm/m)(m*m)', 'rowspan="2"')}${th('구조체 여부', 'colspan="2"')}${th('진행여부', 'rowspan="2"')}${th('누수여부', 'rowspan="2"')}${th('원인추정', 'rowspan="2"')}${th('비고', 'rowspan="2"')}</tr><tr>${th('구조부재')}${th('비구조부재')}</tr>`;
-        const colSpan = isGrade3 ? 7 : 10;
+            ? `<tr style="height:${mm(hr[0])}mm;">${th('No.', 0, { rowspan: 2 })}${th('구분', 1, { rowspan: 2 })}${th('부재 분류', 2, { colspan: 2 })}${th('점검내용', 4, { rowspan: 2 })}${th('발생원인', 5, { rowspan: 2 })}${th('비고', 6, { rowspan: 2 })}</tr><tr style="height:${mm(hr[1])}mm;">${th('구조\n부재', 2, { second: true })}${th('비구조부재', 3, { second: true })}</tr>`
+            : `<tr style="height:${mm(hr[0])}mm;">${th('구분\n(NO.)', 0, { rowspan: 2 })}${th('위치', 1, { rowspan: 2 })}${th('조사내용', 2, { rowspan: 2 })}${th('크기\n(mm/m)\n(m*m)', 3, { rowspan: 2 })}${th('구조체 여부', 4, { colspan: 2 })}${th('진행\n여부', 6, { rowspan: 2 })}${th('누수\n여부', 7, { rowspan: 2 })}${th('원인추정', 8, { rowspan: 2 })}${th('비고', 9, { rowspan: 2 })}</tr><tr style="height:${mm(hr[1])}mm;">${th('구조\n부재', 4, { second: true })}${th('비구조부재', 5, { second: true })}</tr>`;
+        const G = gridLib();
         const body = sDefects.length > 0
             ? sDefects.map((d, dSubIdx) => {
                 const ctx = cellCtxFactory(d, dSubIdx);
-                // 1·2종 위치 칸(행·열): 쌍 뒤·'/' 뒤에서만 줄바꿈되게, 실 이름은 다음 줄
                 const gridCell = !isGrade3 && typeof getDefectGridRoomForReport === 'function'
                     ? getDefectGridRoomForReport(d, ctx.floorCode) : '';
-                return `<tr>${getReportSurveyRowValues(d, ctx, isGrade3).map((v, ci) => ((ci === 1 && gridCell && v === gridCell) ? tdGridLoc(v) : td(v))).join('')}</tr>`;
+                const vals = getReportSurveyRowValues(d, ctx, isGrade3, colN).map((v, ci) => {
+                    const w = spec.cols[ci] || spec.cols[colN - 1];
+                    // 1·2종 위치 칸(행·열): 한글과 같이 칸 폭에 맞춰 '/' 뒤에서 줄바꿈 → 다음 줄 실 이름
+                    if (ci === 1 && gridCell && v === gridCell && G && typeof G.cellTextUnits === 'function') {
+                        const units = G.cellTextUnits({ cellWidth: w, marginLeft: 0, marginRight: 0, fontHeight: spec.vertsize });
+                        if (units > 0) return getDefectGridRoomForReport(d, ctx.floorCode, units) || v;
+                    }
+                    return reportHwpxWrapCell(v, w, spec.vertsize);
+                });
+                return `<tr style="height:${mm(rowH)}mm;">${vals.map((v, ci) => td(v, ci)).join('')}</tr>`;
             }).join('')
-            : `<tr><td colspan="${colSpan}" style="padding:2rem; color:#a3a3a3;">등록된 결함이 없습니다.</td></tr>`;
-        return `<table style="width:100%; border-collapse:collapse; font-size:0.72rem; text-align:center; margin-bottom:0.4rem;"><thead>${head}</thead><tbody>${body}</tbody></table>`;
+            : `<tr style="height:${mm(L.grade12.rowH)}mm;"><td colspan="${colN}" style="${cellBase} border-top:${thin}; border-bottom:${thin}; color:#a3a3a3;">등록된 결함이 없습니다.</td></tr>`;
+        const tableW = spec.cols.reduce((s, w) => s + w, 0);
+        const colgroup = `<colgroup>${spec.cols.map((w) => `<col style="width:${mm(w)}mm;">`).join('')}</colgroup>`;
+        return `<table class="report-hwpx-survey" style="width:${mm(tableW)}mm; table-layout:fixed; border-collapse:collapse; font-family:'굴림', Gulim, 'Malgun Gothic', sans-serif; font-size:${spec.fontPt}pt; letter-spacing:0; line-height:${spec.lineHeight}; color:#000; text-align:center; margin:${mm(L.tableMarginV / 2)}mm auto; border-bottom:${thick};">${colgroup}<thead>${head}</thead><tbody>${body}</tbody></table>`;
     }
 
     // 화면(스크린) 상태조사표 한 셀의 스타일 있는 HTML을 만든다 (읽기 전용 표시용)
@@ -46719,6 +46843,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             const settlementGroupsCombined = ndtCombinedForReport.allDispGroups.filter(g => !g.category || g.category === '변위');
             const memberDispGroupsCombined = ndtCombinedForReport.allDispGroups.filter(g => g.category === '부재변위');
             const ndtTableEmitted = { measure: false, 강도: false, 탄산화: false, tilt: false, settlement: false, memberDisp: false };
+            // 2026-10-20 한글과 같은 「N) 층」 제목 번호·[도면 N-M] 번호
+            let hwpxSurveyTitleNo = 0;
+            let hwpxFigNo = 0;
+            const hwpxFigChapter = hwpxFigureChapterNo(bldg.inspectionType, { grade3: isGrade3Building(bldg) });
 
             for (let floorIdx = 0; floorIdx < availableFloors.length; floorIdx++) {
                 const floorCode = availableFloors[floorIdx];
@@ -46800,33 +46928,24 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
 
                 if (surveyDefects) {
                     const surveyPages = paginateSurveyDefects(surveyDefects);
+                    hwpxSurveyTitleNo++;
+                    const hwpxTitleFloor = isExtFloor ? '건축물 외부' : reportHwpxFloorLabel(bldg, floorCode);
+                    // 한글 상태조사표 쪽과 같게: 첫 쪽만 「N) 층」 제목(3종은 「N) 층 상태조사표」), 다음 쪽은 표만
+                    const hwpxTitleText = grade3Report
+                        ? `${hwpxSurveyTitleNo}) ${hwpxTitleFloor} 상태조사표`
+                        : `${hwpxSurveyTitleNo}) ${hwpxTitleFloor}`;
                     surveyPages.forEach((sDefects, sPageIdx) => {
+                        const hasTitle = sPageIdx === 0;
                         const surveyTableHtml = buildReportSurveyTableHtml(sDefects, (d, dSubIdx) => {
                             const memberIds = d._groupMemberIds || [d.id || ('idx_' + dSubIdx)];
                             const labels = memberIds.flatMap(mid => surveyPhotoLabels[mid] || []);
                             const pRemark = labels.length > 0 ? labels.join(' ') : '-';
                             return { floorCode: surveyFloorCode, photoRemark: pRemark, floorDisplayLabel: surveyFloorLabel };
-                        }, grade3Report);
-                        reportPagesHtml += `
-                        <div class="report-page-block" data-role="survey-page" data-floor="${surveyFloorCode}" style="background:#ffffff; color:#0f172a; padding: 10mm 14mm 10mm 14mm; margin-bottom: 2rem; font-family: sans-serif; font-size:0.9rem; border-radius:4px; box-shadow: 0 4px 20px rgba(0,0,0,0.1); page-break-after: always; break-after: page; page-break-inside: avoid !important; break-inside: avoid !important; box-sizing: border-box; width: 210mm; height: 295mm; max-height: 295mm; overflow: hidden; display: flex; flex-direction: column; position: relative;">
-                            <div style="text-align:center; border-bottom: 1px solid #cbd5e1; padding-bottom: 0.3rem; margin-bottom: 0.6rem;">
-                                <h1 style="font-size:0.75rem; font-weight:700; color:#000000; margin:0;">${reportTitleHeader}</h1>
-                            </div>
-
-                            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.6rem;">
-                                <h2 style="font-size:1.02rem; font-weight:800; color:#0f172a; border-left: 4px solid #2a2a2a; padding-left: 0.5rem; margin:0;">
-                                    1. ${surveyFloorLabel} 상태조사표
-                                </h2>
-                            </div>
-
-                            ${surveyTableHtml}
-
-                            <div style="margin-top: auto; padding-top: 0.6rem; border-top: 1px solid #e2e8f0; display: flex; justify-content: space-between; align-items: center; font-size: 0.8rem; color: #475569;">
-                                <span>🏢 점검수행기관: <strong style="color: #1f1f1f; font-weight: 800;">${compName}</strong></span>
-                                <span>📄 스마트 건축물 안전점검 시스템</span>
-                            </div>
-                        </div>
-                    `;
+                        }, grade3Report, { hasTitle });
+                        reportPagesHtml += reportHwpxPageOpen(`data-role="survey-page" data-floor="${escapeReportHtml(surveyFloorCode)}"`, reportTitleHeader)
+                            + (hasTitle ? `<div class="report-hwpx-title" style="height:${hwpxUnitToMm(REPORT_HWPX_LAYOUT.titleH)}mm; flex:0 0 auto; display:flex; align-items:center; font-size:10pt; font-weight:700; color:#000;">${escapeReportHtml(hwpxTitleText)}</div>` : '')
+                            + surveyTableHtml
+                            + reportHwpxPageClose(compName);
                     });
                 }
 
@@ -46889,36 +47008,12 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 // --- 3. 결함 위치도 (A4 세로 222mm 딱 맞게 렌더링) ---
                 const drawingDataUrl = renderFloorPlanCanvasDataUrl(floorCode);
 
-                reportPagesHtml += `
-                    <div class="report-page-block" style="background:#ffffff; color:#0f172a; padding: 10mm 14mm 10mm 14mm; margin-bottom: 2rem; font-family: sans-serif; font-size:0.9rem; border-radius:4px; box-shadow: 0 4px 20px rgba(0,0,0,0.1); page-break-after: always; break-after: page; page-break-inside: avoid !important; break-inside: avoid !important; box-sizing: border-box; width: 210mm; height: 295mm; max-height: 295mm; overflow: hidden; display: flex; flex-direction: column; position: relative;">
-                        <div style="text-align:center; border-bottom: 1px solid #cbd5e1; padding-bottom: 0.3rem; margin-bottom: 0.6rem;">
-                            <h1 style="font-size:0.75rem; font-weight:700; color:#000000; margin:0;">${reportTitleHeader}</h1>
-                        </div>
-
-                        <h2 style="font-size:1.02rem; font-weight:800; color:#0f172a; border-left: 4px solid #2a2a2a; padding-left: 0.5rem; margin-bottom: 0.5rem;">
-                            3. ${floorDisplayLabel} 결함 위치도 (도면 마킹 평면도)
-                        </h2>
-
-                        ${drawingDataUrl ? `
-                            <div style="width: 100%; height: 222mm; max-height: 222mm; border: 2px solid #2a2a2a; border-radius: 6px; overflow: hidden; background: #ffffff; text-align: center; padding: 2px; box-sizing: border-box; display: flex; align-items: center; justify-content: center;">
-                                <img src="${drawingDataUrl}" style="width: 100%; height: 100%; object-fit: contain; border-radius: 4px; display: block; margin: 0 auto;">
-                            </div>
-                        ` : `
-                            <div style="width: 100%; height: 222mm; max-height: 222mm; border: 2px dashed #cbd5e1; border-radius: 8px; padding: 4rem 2rem; background: #f8fafc; text-align: center; color: #64748b; font-weight: 700; font-size: 1.05rem; display: flex; flex-direction: column; align-items: center; justify-content: center;">
-                                <i class="fa-solid fa-map-location-dot" style="font-size: 2.8rem; color: #a3a3a3; margin-bottom: 0.8rem; display: block;"></i>
-                                📍 ${floorDisplayLabel} 등록된 평면도 도면이 없습니다.<br>
-                                <span style="font-size: 0.88rem; color: #a3a3a3; font-weight: 500; margin-top: 0.4rem; display: inline-block;">
-                                    (층별 도면 점검 탭에서 평면도 이미지를 등록하시면 결함 위치도가 자동으로 완성됩니다)
-                                </span>
-                            </div>
-                        `}
-
-                        <div style="margin-top: auto; padding-top: 0.6rem; border-top: 1px solid #e2e8f0; display: flex; justify-content: space-between; align-items: center; font-size: 0.8rem; color: #475569;">
-                            <span>🏢 점검수행기관: <strong style="color: #1f1f1f; font-weight: 800;">${compName}</strong></span>
-                            <span>📄 스마트 건축물 안전점검 시스템</span>
-                        </div>
-                    </div>
-                `;
+                // 한글 위치도와 같게: 그림 칸 + 캡션 칸 「[도면 N-M] 층 상태조사위치도」(번호는 위치도 쪽 순서)
+                hwpxFigNo++;
+                const mapEmptyHtml = `<div style="color:#64748b; font-weight:700; font-size:10pt; text-align:center;">📍 ${escapeReportHtml(floorDisplayLabel)} 등록된 평면도 도면이 없습니다.<br><span style="font-size:8pt; font-weight:500;">(층별 도면 점검 탭에서 평면도 이미지를 등록하시면 결함 위치도가 자동으로 완성됩니다)</span></div>`;
+                reportPagesHtml += reportHwpxPageOpen(`data-role="location-map-page" data-floor="${escapeReportHtml(floorCode)}"`, reportTitleHeader)
+                    + buildReportHwpxMapHtml(drawingDataUrl, `[도면 ${hwpxFigChapter}-${hwpxFigNo}] ${reportHwpxFloorLabel(bldg, floorCode)} 상태조사위치도`, mapEmptyHtml)
+                    + reportHwpxPageClose(compName);
 
                 // --- 비파괴 및 변위/기울기 보고서 섹션 번호 관리 ---
                 const ndtKey = `${currentBldgId}_${floorCode}`;
