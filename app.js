@@ -27691,6 +27691,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (!presetHas && !window.state.customDefectComponents['구조체'].includes(name)) {
             window.state.customDefectComponents['구조체'].push(name);
         }
+        // 2026-10-19 적용했으면 접합부 고르기 끝 — 다시 고르려면 「접합부」 단추를 다시 누른다
+        window._defectComponentJointMode = false;
         populateDefectComponentDropdown('구조체', name);
         syncDefectComboFields(componentSelect, componentInput, name);
         updateDefectTypeDropdown('구조체', getDefectComboValue(
@@ -27778,6 +27780,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             if (isDefectBulkEditMode()) markDefectBulkFieldChanged('component');
             if (value && value !== currentComponent) recordDefectPickUsage('component', currentCategory, value);
             syncDefectComboFields(componentSelect, componentInput, value);
+            // 2026-10-19 접합부 모드에서 접합부를 골랐으면(=적용) 모드 끝
+            if (jointMode && isJointComponentName(value)) window._defectComponentJointMode = false;
             refreshDefectTypeAfterComponentChange(currentCategory);
             if (typeof scheduleDefectAutoApply === 'function') scheduleDefectAutoApply();
             refreshDefectQuickPickBar();
@@ -32506,6 +32510,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     // Canvas Mouse & Touch Event Handlers with Threshold-Based Pin & Arrow Dragging & Multi-Touch Pinch Zoom
     let isDragging = false;
     let isMarkingDrag = false;
+    // 2026-10-19 터치로 빈 곳을 눌렀을 때 선택 해제·수정창 닫기를 뗄 때까지 미룸(끌어서 도면 이동하면 그대로 둠)
+    let emptyTapPending = null;
     let pendingDragHit = null; // 눌렀지만 아직 이동임계값을 넘지 않아 드래그 시작을 보류 중인 히트 정보
     let pendingDragIsTouch = false; // pendingDragHit이 터치로 시작됐는지 (임계값/유예시간을 마우스와 다르게 적용)
     let pendingDragHitStartTime = 0; // 터치로 핀을 짚은 시각(ms)
@@ -33302,7 +33308,11 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             }
         }
 
-        // 화살표 반경 안이면 박스보다 TIP 우선 (근처 박스에 드래그가 뺏기던 문제 해결)
+        // 2026-10-19 「마킹이랑 네모박스랑 너무 가까우면 … 네모 박스가 먼저 드래그로 옮길 수 있게」:
+        // 누른 곳이 NO.박스 안이면 박스가 먼저(화살표 끝은 박스 밖으로 나온 부분으로 잡는다).
+        // 영역 안쪽(AREA_MOVE)·외곽선 근처에서는 예전처럼 화살표 끝(TIP)이 우선.
+        if (bestBox && bestBox.part === 'BOX') return { defect: bestBox.defect, part: 'BOX' };
+        // 화살표 반경 안이면 영역 이동보다 TIP 우선 (근처 영역에 드래그가 뺏기던 문제 해결)
         if (bestTip) return { defect: bestTip.defect, part: 'TIP' };
         if (bestBox) return { defect: bestBox.defect, part: bestBox.part || 'BOX' };
         return null;
@@ -33500,6 +33510,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (!elements.planCanvas) return;
         const additive = !!(mods.ctrlKey || mods.metaKey);
         activePointerIsTouch = !!isTouch;
+        emptyTapPending = null;
         clearPendingDragLongPress();
         pendingDragOpenedModal = false;
         hideTouchLoupe(MAP_LOUPE_ID);
@@ -33678,10 +33689,16 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         }
 
         // 도면 빈곳 터치/클릭 → 입력창 닫기 + (선택 모드면) 선택 해제
-        if (isDefectModalOpen() && !isDefectMarkingGroupPending()) {
+        // 2026-10-19 「도면 드래그하면 마킹이 1회 클릭 했던게 사라져서」: 터치(마킹·영역 그리기 모드 아님)는
+        // 누를 때가 아니라 움직이지 않고 뗄 때(탭)만 닫기·해제. 끌어서 도면 이동하면 선택·수정창 그대로.
+        if (isTouch && state.mode !== 'MARK' && state.mode !== 'AREA') {
+            const closeOnTap = isDefectModalOpen() && !isDefectMarkingGroupPending();
+            const clearOnTap = state.mode === 'PAN' && !additive && !mobileAddSelectEnabled && selectedDefectIds.size > 0;
+            if (closeOnTap || clearOnTap) emptyTapPending = { closeModal: closeOnTap, clearSel: clearOnTap, moved: false };
+        } else if (isDefectModalOpen() && !isDefectMarkingGroupPending()) {
             closeDefectModal();
         }
-        if (state.mode === 'PAN' && !additive && !mobileAddSelectEnabled && selectedDefectIds.size > 0) {
+        if (!isTouch && state.mode === 'PAN' && !additive && !mobileAddSelectEnabled && selectedDefectIds.size > 0) {
             selectedDefectIds.clear();
             updateMapSelectionBar();
             drawCanvas();
@@ -33760,6 +33777,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     function handleDragMove(clientX, clientY) {
         if (!elements.planCanvas) return;
         const rect = elements.planCanvas.getBoundingClientRect();
+        if (emptyTapPending && !emptyTapPending.moved
+            && Math.hypot(clientX - startMouseX, clientY - startMouseY) > TOUCH_DRAG_THRESHOLD) {
+            emptyTapPending.moved = true;
+        }
 
         if (isResizingLegend || isDraggingLegend) {
             const mouseX = clientX - rect.left;
@@ -34349,6 +34370,21 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             }
         }
 
+        if (emptyTapPending) {
+            const tap = emptyTapPending;
+            emptyTapPending = null;
+            const movedAtEnd = (clientX == null || clientY == null)
+                ? 0 : Math.hypot(clientX - startMouseX, clientY - startMouseY);
+            if (!tap.moved && movedAtEnd <= TOUCH_DRAG_THRESHOLD) {
+                if (tap.closeModal && isDefectModalOpen() && !isDefectMarkingGroupPending()) closeDefectModal();
+                if (tap.clearSel && selectedDefectIds.size > 0) {
+                    selectedDefectIds.clear();
+                    updateMapSelectionBar();
+                    drawCanvas();
+                }
+            }
+        }
+
         if (isMarqueeSelecting) {
             isMarqueeSelecting = false;
             const x1 = Math.min(marqueeStartImgX, marqueeCurImgX);
@@ -34864,6 +34900,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 if (touchPolyTap) touchPolyTap.multi = true;
                 if (memoTap) memoTap.multi = true;
                 // Multi-touch detected: cancel active 1-finger mark or drag operations safely
+                emptyTapPending = null;
                 clearPendingDragLongPress();
                 hideTouchLoupe(MAP_LOUPE_ID);
                 pendingDragHit = null;
@@ -35457,6 +35494,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         if (isMeasureKeypadTarget(target)) return true;
         // 앱 확인 창(삭제 확인 등)도 body에 붙는다 — 확인/취소 누를 때 결함 창이 닫히지 않게
         if (target.closest('#bsaAppDialog')) return true;
+        // 2026-10-19 접합부 부재(기둥·보…) 고르는 선택 목록 시트도 body에 붙는다 — 고를 때 수정창이 사라지던 문제
+        if (target.closest('#bsaSelectSheet')) return true;
         if (target.closest('#defectMarkingMemberFloat')) return true;
         if (target.closest('#mobileMapDock')) return true;
         if (target.closest('.defect-list-item')) return true; // 목록에서 다른 결함 열기
