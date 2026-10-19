@@ -97,6 +97,50 @@
         return (who && who !== meKey ? who + ' ' : '') + '메모-' + n;
     }
 
+    /**
+     * 2026-10-19 「손글씨 기능에서 기존에 작성한거 부터 보여줘야지 계속 새 손글씨 보이면 안됨」:
+     * 메모 버튼으로 열 때 처음 보일 장 — 내가 마지막으로 고친 메모, 내 것이 없으면 이 층에서 마지막으로 고친 메모.
+     * 메모가 하나도 없을 때만 null(새 종이). 새 메모는 「＋ 새 메모」로만 만든다.
+     */
+    function pickInitialSheet(st, floorKey, me) {
+        var list = listFor(st, floorKey);
+        if (!list.length) return null;
+        var meKey = String(me || '').trim();
+        var newest = function (arr) {
+            return arr.slice().sort(function (a, b) {
+                return ((b.updatedAt || b.createdAt || 0) - (a.updatedAt || a.createdAt || 0)) || ((b.createdAt || 0) - (a.createdAt || 0));
+            })[0] || null;
+        };
+        var mine = meKey ? list.filter(function (r) { return authorKey(r) === meKey; }) : [];
+        return newest(mine.length ? mine : list);
+    }
+
+    /** 창 위 메모 탭(만든 순서) — { id, label, by, mine, updatedAt, strokes } */
+    function sheetTabs(st, floorKey, me) {
+        var meKey = String(me || '').trim();
+        return listFor(st, floorKey).map(function (r) {
+            return {
+                id: r.id,
+                label: labelFor(st, floorKey, r.id, me),
+                title: r.title || '',
+                by: authorKey(r),
+                mine: !!meKey && authorKey(r) === meKey,
+                updatedAt: r.updatedAt || r.createdAt || 0,
+                strokes: (r.strokes || []).length
+            };
+        });
+    }
+
+    /**
+     * 저장할 획 = 창의 획 + 저장소에만 있는 획(창을 연 뒤 다른 기기·사람이 같은 메모에 이어 쓴 것).
+     * 이번에 창에서 그렸다가 되돌리기·전체 지우기로 뺀 획(sessionKeys)만 되살리지 않는다. 획 ID로 합친다(덮어쓰기 없음).
+     */
+    function mergeEditorStrokes(editorStrokes, storedStrokes, sessionKeys) {
+        var drop = sessionKeys instanceof Set ? sessionKeys : new Set(sessionKeys || []);
+        var keepStored = (storedStrokes || []).filter(function (x) { return x && !drop.has(strokeKey(x)); });
+        return unionStrokes(editorStrokes || [], keepStored);
+    }
+
     /** 자리가 없는 옛 장(팝업 전용 시절) → 도면 왼쪽 위부터 차례로(모든 기기에서 같은 자리, 저장은 안 함) */
     function placedPoint(st, floorKey, rec, imgW, imgH) {
         if (rec && rec.x != null && rec.y != null) return { x: Number(rec.x), y: Number(rec.y), legacy: false };
@@ -225,6 +269,9 @@
         saveSheet: saveSheet,
         deleteSheet: deleteSheet,
         labelFor: labelFor,
+        pickInitialSheet: pickInitialSheet,
+        sheetTabs: sheetTabs,
+        mergeEditorStrokes: mergeEditorStrokes,
         unionStrokes: unionStrokes,
         strokeKey: strokeKey,
         placedPoint: placedPoint,

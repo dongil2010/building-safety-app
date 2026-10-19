@@ -114,7 +114,8 @@ const m = (s, l, sd = {}, ld = {}, sa = {}, la = {}) => sm.mergeDefectsMaps({ F:
     assert.strictEqual(sk.listFor(B, 'F').length, 4);
     // app.js 연결
     // 2026-10-16 손글씨 메모 다시 살림(전경사진 옆 「메모」 → 바로 새 종이), 도면 글은 「주석」
-    assert.ok(/getElementById\('btnOpenSketchMemo'\)[\s\S]{0,120}openSketchMemo\(\{ fresh: true \}\)/.test(app), '메모 버튼 → 바로 새 종이');
+    // 2026-10-19 「기존에 작성한거 부터 보여줘야지」: 메모 버튼 → 최근 메모부터(새 종이는 「＋ 새 메모」)
+    assert.ok(/getElementById\('btnOpenSketchMemo'\)[\s\S]{0,120}openSketchMemo\(\{ latest: true \}\)/.test(app), '메모 버튼 → 최근 메모부터');
     // 「골라서 볼 수 있고 작성도 가능」: 읽기전용 없음, 기존 획 위에 이어 쓰기, 획마다 id, 지우기는 이번에 그린 것만
     assert.ok(!/if \(sketchUi\.readOnly \|\| sketchUi\.sheet\.id\) return null;/.test(app), '저장된 메모에도 이어 쓰기 가능');
     assert.ok(/baseCount/.test(app), '이번에 그린 획만 지움(baseCount)');

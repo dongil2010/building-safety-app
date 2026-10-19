@@ -695,8 +695,11 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!badge) {
             badge = document.createElement('div');
             badge.id = 'offlineBadge';
-            badge.className = 'offline-badge';
+            badge.className = 'offline-badge bsp-clickable';
+            badge.setAttribute('role', 'button');
+            badge.title = '눌러서 아직 서버에 안 올라간 변경 보기';
             badge.innerHTML = '<i class="fa-solid fa-wifi-slash"></i> <span>오프라인 상태 · 기기에 저장 중</span>';
+            badge.addEventListener('click', () => openSyncProgressPanel());
             document.body.appendChild(badge);
         }
         return badge;
@@ -705,6 +708,263 @@ document.addEventListener('DOMContentLoaded', () => {
     function updateOfflineBadge() {
         const badge = ensureOfflineBadge();
         badge.style.display = navigator.onLine ? 'none' : 'flex';
+        if (typeof scheduleSyncProgressRender === 'function') scheduleSyncProgressRender();
+    }
+
+    // ---- 2026-10-19 동기화 진행률(js/core/sync-progress.js) ----
+    // 「오프라인 작업에서 사진넣고 마킹 움직이고 결함내용 고치고 했던거 얼마나 서버에 올라갔는지」.
+    // 이 기기에서 한 변경만 일지에 적고(기기 저장소), 서버가 저장을 확인했을 때만 「올라감」으로 센다
+    //  - 층 변경: writeFloorSyncBundle의 층 묶음 쓰기가 끝난 뒤 / 사진: markPhotoOnStorage(서버 Storage 확인)
+    // 서버 데이터·규칙은 건드리지 않는다. 여러 기기 합치기는 기존 칸별 병합·묘비·syncRev·floor-sync-guard 그대로.
+    let _syncJournal = null;
+    function syncJournal() {
+        if (_syncJournal) return _syncJournal;
+        const sp = window.BSA && window.BSA.syncProgress;
+        if (!sp) return null;
+        _syncJournal = sp.createTracker({
+            storage: (typeof localStorage !== 'undefined') ? localStorage : null,
+            storageKey: () => {
+                const cid = (window.state && window.state.companyId) || '';
+                return cid ? `bsa_sync_journal_v1_${cid}` : 'bsa_sync_journal_v1';
+            }
+        });
+        _syncJournal.onChange(() => scheduleSyncProgressRender());
+        return _syncJournal;
+    }
+    window.bsaSyncJournal = syncJournal;
+    /** 층마다 서버에 있다고 확인된 마킹 id — 「새 마킹」과 「수정」을 가른다(서버에서 읽거나 올린 뒤에만 앎) */
+    const _serverDefectIdsByFloor = new Map();
+    function noteServerDefectIds(floorKey, items) {
+        if (!floorKey) return;
+        _serverDefectIdsByFloor.set(floorKey, new Set((items || []).filter((d) => d && d.id).map((d) => String(d.id))));
+    }
+    let _jFkCache = new Map();
+    let _jFkCacheAt = 0;
+    function journalFloorKeyOfDefect(id) {
+        const st = window.state || {};
+        const defs = st.defects || {};
+        const cur = (st.currentBuildingId && st.currentFloor) ? `${st.currentBuildingId}_${st.currentFloor}` : '';
+        if (cur && (defs[cur] || []).some((d) => d && d.id === id)) return cur;
+        const hit = _jFkCache.get(id);
+        if (hit && (defs[hit] || []).some((d) => d && d.id === id)) return hit;
+        if (Date.now() - _jFkCacheAt > 1500) {
+            _jFkCache = new Map();
+            Object.keys(defs).forEach((k) => (defs[k] || []).forEach((d) => { if (d && d.id) _jFkCache.set(d.id, k); }));
+            _jFkCacheAt = Date.now();
+            return _jFkCache.get(id) || '';
+        }
+        return '';
+    }
+    function journalDefectChange(kind, defect, fk) {
+        try {
+            const j = syncJournal();
+            if (!j || !defect || !defect.id) return;
+            const floorKey = fk || journalFloorKeyOfDefect(defect.id);
+            let k = kind;
+            if ((k === 'edit' || k === 'move') && floorKey && _serverDefectIdsByFloor.has(floorKey)
+                && !_serverDefectIdsByFloor.get(floorKey).has(String(defect.id))) k = 'add';
+            j.record(k, defect.id, floorKey);
+        } catch (_e) { /* 진행률 기록 실패는 작업에 영향 없음 */ }
+    }
+    function journalRecord(kind, id, fk) {
+        try { const j = syncJournal(); if (j && id) j.record(kind, id, fk || ''); } catch (_e) { /* ignore */ }
+    }
+    function journalCurrentFloorKey() {
+        const st = window.state || {};
+        return (st.currentBuildingId && st.currentFloor) ? `${st.currentBuildingId}_${st.currentFloor}` : '';
+    }
+
+    let _syncProgressRenderTimer = null;
+    let _syncPillSeenSession = false;
+    let _syncPillDoneUntil = 0;
+    let _syncPillDoneFor = 0;
+    function scheduleSyncProgressRender() {
+        if (_syncProgressRenderTimer) return;
+        _syncProgressRenderTimer = setTimeout(() => {
+            _syncProgressRenderTimer = null;
+            try { renderSyncProgressUi(); } catch (e) { console.warn('[진행률] 표시 실패', e); }
+        }, 250);
+    }
+    window.scheduleSyncProgressRender = scheduleSyncProgressRender;
+    function syncProgressBegin() {
+        try {
+            const j = syncJournal();
+            let dirty = [];
+            try { dirty = Array.from(_dirtyFloorKeys); } catch (_e) { /* 아직 준비 전 */ }
+            if (j && (dirty.length || j.pendingEntries().length)) j.startSession(dirty);
+        } catch (_e) { /* ignore */ }
+        if (typeof scheduleSyncProgressRender === 'function') scheduleSyncProgressRender();
+    }
+    function syncProgressFail(where, reason) {
+        try { const j = syncJournal(); if (j) j.noteFailure(where, reason); } catch (_e) { /* ignore */ }
+    }
+    function syncProgressSummary() {
+        const j = syncJournal();
+        if (!j) return null;
+        let dirty = [];
+        let syncing = false;
+        try { dirty = Array.from(_dirtyFloorKeys); } catch (_e) { /* 아직 준비 전 */ }
+        try { syncing = !!(_syncInFlight || _offlineReturnRunning); } catch (_e) { /* ignore */ }
+        let used = null;
+        const usedPhotoIds = () => {
+            if (used) return used;
+            used = new Set();
+            const defs = (window.state && window.state.defects) || {};
+            Object.keys(defs).forEach((k) => (defs[k] || []).forEach((d) => {
+                if (!d) return;
+                (d.photoIds || []).forEach((x) => used.add(x));
+                (d.prevRoundPhotoIds || []).forEach((x) => used.add(x));
+            }));
+            return used;
+        };
+        return j.summary({
+            dirtyFloorKeys: dirty,
+            online: navigator.onLine !== false,
+            syncing,
+            photoState: (id) => {
+                if (isPhotoMarkedOnStorage(id)) return 'uploaded';
+                const c = window._photoCache && window._photoCache[id];
+                if (typeof c === 'string' && /^https?:/i.test(c)) return 'uploaded';   // 서버 주소로 받은 사진
+                return usedPhotoIds().has(id) ? 'pending' : 'gone';
+            }
+        });
+    }
+    window.bsaSyncProgressSummary = syncProgressSummary;
+    function syncProgressFloorLabel(fk) {
+        if (fk === 'sync') return '동기화';
+        try {
+            const b = findBuildingForFloorKey(fk);
+            const code = floorCodeFromFloorKey(fk, b);
+            let fl = code;
+            try { fl = stripFloorCodeSuffix(window.getFloorLabelFromCode(code)) || code; } catch (_e) { /* 코드 그대로 */ }
+            return `${b && b.name ? b.name + ' ' : ''}${fl || fk}`;
+        } catch (_e) {
+            return fk;
+        }
+    }
+    function ensureSyncProgressPill() {
+        let pill = document.getElementById('bsaSyncPill');
+        if (!pill) {
+            pill = document.createElement('button');
+            pill.type = 'button';
+            pill.id = 'bsaSyncPill';
+            pill.className = 'sync-progress-pill';
+            pill.title = '눌러서 동기화 진행률 보기';
+            pill.innerHTML = '<i class="fa-solid fa-cloud-arrow-up" data-bsp-ic></i><span data-bsp-txt></span><span class="bsp-pill-bar"><span data-bsp-bar></span></span>';
+            pill.addEventListener('click', () => openSyncProgressPanel());
+            document.body.appendChild(pill);
+        }
+        return pill;
+    }
+    function renderSyncProgressUi() {
+        const sp = window.BSA && window.BSA.syncProgress;
+        const sum = syncProgressSummary();
+        if (!sp || !sum || !document.body) return;
+        const now = Date.now();
+        // 오프라인 배지: 안 올라간 수
+        const ob = document.getElementById('offlineBadge');
+        if (ob) {
+            const span = ob.querySelector('span');
+            if (span) span.textContent = sum.pending ? `오프라인 · 안 올라간 변경 ${sum.pending}건` : '오프라인 상태 · 기기에 저장 중';
+        }
+        // 위쪽 「온라인」 배지도 누르면 진행률(남은 수를 옆에)
+        const hb = document.getElementById('onlineStatusBadge');
+        if (hb) {
+            if (hb.dataset.bspBound !== '1') {
+                hb.dataset.bspBound = '1';
+                hb.classList.add('bsp-clickable');
+                hb.setAttribute('role', 'button');
+                hb.title = '눌러서 동기화 진행률 보기';
+                hb.addEventListener('click', () => openSyncProgressPanel());
+            }
+            let c = hb.querySelector('.bsp-badge-count');
+            if (sum.pending) {
+                if (!c) { c = document.createElement('span'); c.className = 'bsp-badge-count'; hb.appendChild(c); }
+                c.textContent = ` · 안 올라간 ${sum.pending}`;
+            } else if (c) {
+                c.remove();
+            }
+        }
+        // 온라인 알약: 평소 한두 건은 몇 초 안에 올라가므로 띄우지 않는다.
+        // 띄우는 때 — 많이 올리는 중(3건 이상) · 8초 넘게 안 올라간 것 · 실패 / 끝나면 「모두 서버에 올라감」 6초
+        const pill = ensureSyncProgressPill();
+        let mode = '';
+        if (sum.online && sum.pending) {
+            const stale = sum.oldestAt && now - sum.oldestAt > 8000;
+            if (sum.failures.length || stale || sum.total >= 3 || _syncPillSeenSession) mode = sum.failures.length && !sum.syncing ? 'fail' : 'run';
+        } else if (sum.online && !sum.pending && sum.finishedAt) {
+            if (_syncPillSeenSession && _syncPillDoneFor !== sum.finishedAt) {
+                _syncPillDoneFor = sum.finishedAt;
+                _syncPillDoneUntil = now + 6000;
+                setTimeout(scheduleSyncProgressRender, 6100);
+            }
+            _syncPillSeenSession = false;
+            if (now < _syncPillDoneUntil) mode = 'done';
+        }
+        if (mode === 'run' || mode === 'fail') _syncPillSeenSession = true;
+        pill.classList.toggle('show', !!mode);
+        pill.classList.toggle('done', mode === 'done');
+        pill.classList.toggle('fail', mode === 'fail');
+        if (mode) {
+            const txt = pill.querySelector('[data-bsp-txt]');
+            const bar = pill.querySelector('[data-bsp-bar]');
+            const ic = pill.querySelector('[data-bsp-ic]');
+            if (txt) txt.textContent = mode === 'fail' ? `올리기 실패 · 남음 ${sum.pending}건` : sp.pillText(sum);
+            if (bar) bar.style.width = sum.percent + '%';
+            if (ic) ic.className = 'fa-solid ' + (mode === 'done' ? 'fa-circle-check' : (mode === 'fail' ? 'fa-triangle-exclamation' : (sum.syncing ? 'fa-arrows-rotate fa-spin' : 'fa-cloud-arrow-up')));
+        }
+        // 열려 있는 창
+        const sheet = document.getElementById('bsaSyncProgressSheet');
+        if (sheet && !sheet.hidden) {
+            const body = sheet.querySelector('[data-bsp-body]');
+            if (body) body.innerHTML = sp.renderPanelHtml(sum, syncProgressFloorLabel);
+            const retry = sheet.querySelector('[data-bsp="retry"]');
+            if (retry) retry.disabled = !sum.pending || !sum.online;
+        }
+        // 올리는 중에는 자주 다시 그린다(사진 표시·실패 등 일지 밖 변화)
+        if ((sum.syncing || (sheet && !sheet.hidden)) && !_syncProgressRenderTimer) setTimeout(scheduleSyncProgressRender, 1500);
+    }
+    function openSyncProgressPanel() {
+        let el = document.getElementById('bsaSyncProgressSheet');
+        if (!el) {
+            el = document.createElement('div');
+            el.id = 'bsaSyncProgressSheet';
+            el.className = 'bsp-overlay';
+            el.hidden = true;
+            el.innerHTML = `<div class="bsp-card" role="dialog" aria-modal="true" aria-label="서버 동기화 진행률">
+                <div class="bsp-head"><strong><i class="fa-solid fa-cloud-arrow-up"></i> 서버 동기화 진행률</strong>
+                    <button type="button" class="bsp-x" data-bsp="close" aria-label="닫기">✕</button></div>
+                <div class="bsp-body" data-bsp-body></div>
+                <div class="bsp-foot">
+                    <button type="button" class="btn btn-outline btn-sm" data-bsp="retry"><i class="fa-solid fa-arrows-rotate"></i> 지금 다시 올리기</button>
+                    <button type="button" class="btn btn-primary btn-sm" data-bsp="close">닫기</button>
+                </div></div>`;
+            el.addEventListener('click', (e) => {
+                if (e.target === el) { el.hidden = true; return; }
+                const b = e.target.closest('[data-bsp]');
+                if (!b) return;
+                if (b.dataset.bsp === 'close') el.hidden = true;
+                else if (b.dataset.bsp === 'retry') retrySyncProgress();
+            });
+            document.addEventListener('keydown', (e) => {
+                if (!el.hidden && String(e.key || '') === 'Escape') { e.preventDefault(); el.hidden = true; }
+            });
+            document.body.appendChild(el);
+        }
+        el.hidden = false;
+        try { renderSyncProgressUi(); } catch (e) { console.warn('[진행률] 표시 실패', e); }
+    }
+    window.openSyncProgressPanel = openSyncProgressPanel;
+    function retrySyncProgress() {
+        if (navigator.onLine === false) {
+            window.showToast('오프라인입니다. 인터넷이 연결되면 자동으로 올립니다.', 'warning', 3000);
+            return;
+        }
+        syncProgressBegin();
+        // 올리기 → 서버 확인 → (오프라인 준비한 동이면) 「비울까요?」 — 기존 흐름 그대로
+        if (typeof window.runOfflineReturnSync === 'function') window.runOfflineReturnSync('manual');
+        else if (typeof syncStateToFirebase === 'function') syncStateToFirebase().catch(() => {});
+        window.showToast('서버에 다시 올리는 중입니다…', 'info', 2000);
     }
 
     updateOfflineBadge();
@@ -4043,11 +4303,14 @@ document.addEventListener('DOMContentLoaded', () => {
     function touchDefectUpdatedAt(defect) {
         if (!defect) return;
         const now = bsaStampAfter(Math.max(Number(defect.updatedAt) || 0, Number(defect.fieldAtThrough) || 0));
+        // 2026-10-19 진행률: 내용 칸이 실제로 바뀐 것만 「결함 내용 수정」(사진만 넣은 것은 사진으로 따로 셈)
+        let journalContentChanged = true;
         const sm = window.BSA && window.BSA.syncMerge;
         if (sm && typeof sm.changedContentFields === 'function' && defect.id) {
             const prevContentTs = Number(defect.contentUpdatedAt) || Number(defect.updatedAt) || 0;
             const snap = defectContentSnap().get(defect.id);
             const diff = sm.changedContentFields(snap || {}, defect);
+            journalContentChanged = !snap || diff.changed.length > 0;
             if (snap) {
                 if (diff.changed.length) {
                     if (!defect.fieldAt || typeof defect.fieldAt !== 'object') {
@@ -4069,12 +4332,14 @@ document.addEventListener('DOMContentLoaded', () => {
         // 내용·사진 변경 시각 — 삭제 부활 판정에 사용 (위치만 옮긴 경우는 제외).
         // 늘 앞으로만 간다: 시계가 빠른 기기가 찍은 값보다 작으면, 이 수정을 본 뒤 지운 것으로 오판된다.
         defect.contentUpdatedAt = Math.max(now, (Number(defect.contentUpdatedAt) || 0) + 1);
+        if (journalContentChanged && typeof journalDefectChange === 'function') journalDefectChange('edit', defect);
     }
 
     /** 도면 위 마킹 위치/꼭짓점만 옮김 — 삭제보다 늦어도 부활시키지 않음 */
     function touchDefectPositionUpdatedAt(defect) {
         if (!defect) return;
         defect.positionUpdatedAt = bsaStampAfter(defect.positionUpdatedAt);
+        if (typeof journalDefectChange === 'function') journalDefectChange('move', defect);
     }
 
     /**
@@ -4107,6 +4372,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function touchNdtUpdatedAt(item) {
         if (item) item.updatedAt = nextRecordStamp(item);
+        if (item && item.id && typeof journalRecord === 'function') journalRecord('ndt', item.id, journalCurrentFloorKey());
     }
 
     /**
@@ -4142,6 +4408,7 @@ document.addEventListener('DOMContentLoaded', () => {
     function touchNdtDispGroup(group) {
         if (!group) return;
         group.updatedAt = nextRecordStamp(group);
+        if (group.id && typeof journalRecord === 'function') journalRecord('ndt', group.id, journalCurrentFloorKey());
         const key = (state.currentBuildingId && state.currentFloor)
             ? `${state.currentBuildingId}_${state.currentFloor}`
             : '';
@@ -4181,6 +4448,7 @@ document.addEventListener('DOMContentLoaded', () => {
         window.state.deletedDefectIds[floorKey] = Array.from(set);
         if (!window.state.deletedDefectAt[floorKey]) window.state.deletedDefectAt[floorKey] = {};
         window.state.deletedDefectAt[floorKey][defectId] = tombstoneValue(rec, 'pin', opts);
+        if (typeof journalRecord === 'function') journalRecord('del', defectId, floorKey);
     }
 
     /**
@@ -4216,6 +4484,7 @@ document.addEventListener('DOMContentLoaded', () => {
         window.state.deletedNdtIds[floorKey] = Array.from(set);
         if (!window.state.deletedNdtAt[floorKey]) window.state.deletedNdtAt[floorKey] = {};
         window.state.deletedNdtAt[floorKey][itemId] = tombstoneValue(rec, 'ndt', opts);
+        if (typeof journalRecord === 'function') journalRecord('ndt', itemId, floorKey);
     }
 
     /**
@@ -25751,11 +26020,12 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             <div class="sk-card" role="dialog" aria-label="손글씨 메모">
                 <div class="sk-head">
                     <strong>✍ 손글씨 메모</strong>
-                    <select class="sk-sheets" data-sk-sheets aria-label="메모 보기"></select>
-                    <button type="button" class="sk-btn" data-sk="new" title="새 메모">＋ 새 메모</button>
+                    <span class="sk-count" data-sk-count></span>
                     <span class="sk-spacer"></span>
+                    <button type="button" class="sk-btn sk-new" data-sk="new" title="새 메모 만들기">＋ 새 메모</button>
                     <button type="button" class="sk-btn" data-sk="close" title="닫기(저장)">✕</button>
                 </div>
+                <div class="sk-tabs" data-sk-tabs role="tablist" aria-label="이 층 손글씨 메모"></div>
                 <div class="sk-tools">
                     <button type="button" class="sk-btn sk-tool active" data-sk-tool="pen" title="펜"><i class="fa-solid fa-pen"></i></button>
                     <button type="button" class="sk-btn sk-tool" data-sk-tool="eraser" title="지우개"><i class="fa-solid fa-eraser"></i></button>
@@ -25777,8 +26047,17 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         sketchUi.layer = document.createElement('canvas');
         sketchUi.lctx = sketchUi.layer.getContext('2d');
         el.addEventListener('click', (e) => {
-            const b = e.target.closest('[data-sk],[data-sk-tool],[data-sk-color]');
+            const b = e.target.closest('[data-sk],[data-sk-tool],[data-sk-color],[data-sk-tab]');
             if (!b) return;
+            // 2026-10-19 메모 탭 — 고른 메모 열기(지금 장은 저장)
+            if (b.dataset.skTab !== undefined) {
+                const id = b.dataset.skTab;
+                if (sketchUi.sheet && id === (sketchUi.sheet.id || '')) return;
+                sketchSave(false);
+                const rec = sketchApi().listFor(window.state, sketchUi.floorKey).find((r) => r.id === id);
+                sketchOpenSheet(rec || null);
+                return;
+            }
             if (b.dataset.skTool) { sketchUi.tool = b.dataset.skTool; el.querySelectorAll('.sk-tool').forEach((x) => x.classList.toggle('active', x === b)); return; }
             if (b.dataset.skColor) { sketchUi.color = b.dataset.skColor; sketchUi.tool = 'pen';
                 el.querySelectorAll('.sk-color').forEach((x) => x.classList.toggle('active', x === b));
@@ -25795,12 +26074,6 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             else if (a === 'new') { sketchSave(false); sketchOpenSheet(null); }
         });
         el.querySelector('[data-sk-width]').addEventListener('input', (e) => { sketchUi.width = Number(e.target.value) || 3; });
-        el.querySelector('[data-sk-sheets]').addEventListener('change', (e) => {
-            sketchSave(false);
-            const api2 = sketchApi();
-            const rec = api2.listFor(window.state, sketchUi.floorKey).find((r) => r.id === e.target.value);
-            sketchOpenSheet(rec || null);
-        });
         const cv = sketchUi.canvas;
         cv.addEventListener('pointerdown', sketchPointerDown);
         cv.addEventListener('pointermove', sketchPointerMove);
@@ -25899,6 +26172,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         sketchUi.undo.push(sketchUi.strokes.slice());
         sketchUi.redo = [];
         sketchUi.strokes = sketchUi.strokes.concat([d]);
+        if (sketchUi.sessionKeys && typeof sketchApi === 'function' && sketchApi()) sketchUi.sessionKeys.add(sketchApi().strokeKey(d));
         sketchUi.dirty = true;
         sketchRedraw();
     }
@@ -25917,18 +26191,35 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         sketchRedraw();
     }
 
+    /** 2026-10-19 창 위 메모 탭 — 이 층 모든 메모(모든 작성자)를 만든 순서로. 지금 보는 장은 강조 */
     function sketchFillSheetSelect() {
         const api = sketchApi();
-        const sel = sketchUi.el.querySelector('[data-sk-sheets]');
-        const list = api.listFor(window.state, sketchUi.floorKey);
-        const curId = sketchUi.sheet && sketchUi.sheet.id;
-        // 2026-10-16 작성자별 「메모-1, 메모-2 …」. 저장된 메모는 보기만(고치기·지우기 없음 — 늘 새 항목으로 쌓임)
+        const box = sketchUi.el && sketchUi.el.querySelector('[data-sk-tabs]');
+        if (!api || !box) return;
         const me = (typeof memoAuthorName === 'function') ? memoAuthorName() : '';
         const esc = (t) => String(t).replace(/[<>&"]/g, '');
-        const opts = list.map((r) => `<option value="${r.id}">${esc(api.labelFor(window.state, sketchUi.floorKey, r.id, me))}${r.title ? ' · ' + esc(r.title) : ''}</option>`);
-        if (!curId || !list.some((r) => r.id === curId)) opts.push(`<option value="" selected>새 ${esc(api.labelFor(window.state, sketchUi.floorKey, '', me))}</option>`);
-        sel.innerHTML = opts.join('');
-        if (curId) sel.value = curId;
+        const curId = (sketchUi.sheet && sketchUi.sheet.id) || '';
+        const tabs = api.sheetTabs(window.state, sketchUi.floorKey, me);
+        const html = tabs.map((t) => `<button type="button" role="tab" class="sk-tab${t.id === curId ? ' active' : ''}${t.mine ? ' mine' : ''}" data-sk-tab="${esc(t.id)}" aria-selected="${t.id === curId}" title="${esc((t.by || '작성자 없음') + (t.title ? ' · ' + t.title : ''))}">`
+            + `<span class="sk-tab-name">${esc(t.label)}</span>${t.title ? `<span class="sk-tab-sub">${esc(t.title)}</span>` : ''}</button>`);
+        if (!curId || !tabs.some((t) => t.id === curId)) {
+            html.push(`<button type="button" role="tab" class="sk-tab sk-tab-new active" data-sk-tab="" aria-selected="true"><span class="sk-tab-name">새 ${esc(api.labelFor(window.state, sketchUi.floorKey, '', me))}</span><span class="sk-tab-sub">작성 중</span></button>`);
+        }
+        box.innerHTML = html.join('');
+        const cnt = sketchUi.el.querySelector('[data-sk-count]');
+        if (cnt) cnt.textContent = tabs.length ? `이 층 메모 ${tabs.length}개` : '';
+        const act = box.querySelector('.sk-tab.active');
+        if (act && typeof act.scrollIntoView === 'function') {
+            try { act.scrollIntoView({ block: 'nearest', inline: 'nearest' }); } catch (_e) { /* ignore */ }
+        }
+    }
+
+    /** 저장할 획 — 창의 획 + 창을 연 뒤 다른 기기·사람이 같은 메모에 더한 획(획 ID로 합침, 덮어쓰기 없음) */
+    function sketchStrokesToSave() {
+        const api = sketchApi();
+        if (!api || typeof api.mergeEditorStrokes !== 'function' || !sketchUi.sheet || !sketchUi.sheet.id) return sketchUi.strokes;
+        const cur = api.listFor(window.state, sketchUi.floorKey).find((r) => r.id === sketchUi.sheet.id);
+        return api.mergeEditorStrokes(sketchUi.strokes, cur ? cur.strokes : [], sketchUi.sessionKeys);
     }
 
     function sketchOpenSheet(rec) {
@@ -25940,7 +26231,9 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const h = ratio >= 1 ? Math.round(1600 / ratio) : 1600;
         sketchUi.sheet = rec ? { id: rec.id, title: rec.title || '', w: rec.w, h: rec.h, createdAt: rec.createdAt, x: rec.x, y: rec.y }
             : { id: '', title: '', w, h, x: sketchUi.newAt ? sketchUi.newAt.x : undefined, y: sketchUi.newAt ? sketchUi.newAt.y : undefined };
-        sketchUi.strokes = rec ? (rec.strokes || []).map((s) => ({ c: s.c, w: s.w, e: s.e, p: s.p.slice() })) : [];
+        // 획 ID(i)를 지킨다 — 빠지면 같은 메모를 다시 저장할 때 획이 두 번 합쳐졌다(획 ID로 합치기)
+        sketchUi.strokes = rec ? (rec.strokes || []).map((s) => Object.assign({ c: s.c, w: s.w, e: s.e, p: s.p.slice() }, s.i ? { i: s.i } : {})) : [];
+        sketchUi.sessionKeys = new Set();
         sketchUi.undo = [];
         sketchUi.redo = [];
         sketchUi.dirty = false;
@@ -25969,7 +26262,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const rec = api.saveSheet(window.state, sketchUi.floorKey, {
             id: sketchUi.sheet.id, title: sketchUi.sheet.title, w: sketchUi.sheet.w, h: sketchUi.sheet.h,
             x: sketchUi.sheet.x, y: sketchUi.sheet.y,
-            strokes: sketchUi.strokes, by: (typeof memoAuthorName === 'function') ? memoAuthorName() : ''
+            strokes: (typeof sketchStrokesToSave === 'function') ? sketchStrokesToSave() : sketchUi.strokes, by: (typeof memoAuthorName === 'function') ? memoAuthorName() : ''
         });
         if (!rec) return null;
         sketchUi.sheet.id = rec.id;
@@ -26012,8 +26305,12 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const list = api.listFor(window.state, floorKey);
         const want = opts && opts.id ? list.find((r) => r.id === opts.id) : null;
         sketchUi.newAt = (opts && opts.at) ? { x: Math.round(opts.at.x), y: Math.round(opts.at.y) } : null;
-        // 2026-10-16 「메모」 버튼 = 바로 새 흰 종이(이전 메모는 위 목록에서 골라 보기)
-        requestAnimationFrame(() => sketchOpenSheet(want || null));
+        // 2026-10-19 「기존에 작성한거 부터 보여줘야지 계속 새 손글씨 보이면 안됨」: 내가 마지막으로 고친 메모
+        // (내 것이 없으면 이 층 최근 메모)부터 연다. 새 종이는 「＋ 새 메모」(또는 opts.fresh)로만.
+        const me = (typeof memoAuthorName === 'function') ? memoAuthorName() : '';
+        const first = want || ((opts && opts.fresh) ? null
+            : (typeof api.pickInitialSheet === 'function' ? api.pickInitialSheet(window.state, floorKey, me) : (list[list.length - 1] || null)));
+        requestAnimationFrame(() => sketchOpenSheet(first || null));
         return true;
     };
     window.closeSketchMemo = sketchClose;
@@ -26025,7 +26322,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
     // (도면에 찍는 글은 「주석」 — 저장 키 drawingMemos 등은 동기화 호환 때문에 그대로)
     (function bindSketchMemoButtons() {
         const b = document.getElementById('btnOpenSketchMemo');
-        if (b) b.addEventListener('click', (e) => { e.preventDefault(); window.openSketchMemo({ fresh: true }); });
+        if (b) b.addEventListener('click', (e) => { e.preventDefault(); window.openSketchMemo({ latest: true }); });
     })();
 
 
@@ -55089,6 +55386,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 badge.innerHTML = '<i class="fa-solid fa-wifi"></i> 오프라인 (로컬 보관중)';
             }
         }
+        if (typeof scheduleSyncProgressRender === 'function') scheduleSyncProgressRender();
     }
 
     // --- 무거운 이미지(도면/사진) 개별 문서 저장 헬퍼 ---
@@ -55108,7 +55406,10 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
      */
     function createDefectPhotoId(defectId, kind) {
         const tail = 'u' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
-        return kind === 'prev' ? `${defectId}_prev_${tail}` : `${defectId}_${tail}`;
+        const photoId = kind === 'prev' ? `${defectId}_prev_${tail}` : `${defectId}_${tail}`;
+        // 2026-10-19 진행률: 이 기기에서 새로 넣은 사진 — 서버(Storage) 확인 때 「올라감」
+        if (typeof journalRecord === 'function') journalRecord('photo', photoId, journalFloorKeyOfDefect(defectId));
+        return photoId;
     }
 
     /** 저장 전 결함의 사진 목록을 [{ id, url }]로 받아 둔다. visibleIds는 지울 후보(예전과 같은 개수 규칙). */
@@ -56205,6 +56506,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             set.add(photoId);
             localStorage.setItem(key, JSON.stringify(Array.from(set)));
         } catch (_e) { /* quota / private mode */ }
+        try { const j = typeof syncJournal === 'function' ? syncJournal() : null; if (j) j.confirmPhoto(photoId); } catch (_e) { /* ignore */ }
     }
     function unmarkPhotoOnStorage(photoId) {
         if (!photoId) return;
@@ -58031,6 +58333,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const floorRef = getFloorScopeRef(bldg, floorCode);
         if (!floorRef) return;
         const floorKey = `${bldg.id}_${floorCode}`;
+        // 2026-10-19 진행률: 이 순번까지의 변경이 이번 묶음에 실린다(이후 고친 것은 다음에)
+        const journalSeq = (typeof syncJournal === 'function' && syncJournal()) ? syncJournal().mark() : 0;
         const sanitizedMap = sanitizeDefectsForFirestore({
             [floorKey]: window.state.defects[floorKey] || []
         });
@@ -58076,6 +58380,19 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         });
         _dirtyFloorKeys.delete(floorKey);
         persistDirtyFloorKeys();
+        // 2026-10-19 서버가 층 묶음 저장을 확인했다 → 실린 변경만 「올라감」. 묶음을 만든 뒤 또 고친 것은 남겨 다시 올린다
+        if (typeof noteServerDefectIds === 'function') noteServerDefectIds(floorKey, items);
+        try {
+            const j = typeof syncJournal === 'function' ? syncJournal() : null;
+            if (j) {
+                const ids = items.map((d) => d && d.id).filter(Boolean)
+                    .concat(pack.markings.deletedIds || [])
+                    .concat(((pack.ndt && pack.ndt.items) || []).map((x) => x && x.id).filter(Boolean))
+                    .concat((pack.ndt && pack.ndt.deletedIds) || []);
+                const res = j.confirmFloor(floorKey, journalSeq, ids);
+                if (res && res.remaining) markFloorKeyDirty(floorKey);
+            }
+        } catch (_e) { /* 진행률 실패는 동기화에 영향 없음 */ }
     }
 
     function seedPhotoCacheFromUrlMap(urlsById) {
@@ -58094,6 +58411,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const empty = emptyFloorBundle();
         const markings = bundle.markings || empty.markings;
         const ndt = bundle.ndt || empty.ndt;
+        if (typeof noteServerDefectIds === 'function') noteServerDefectIds(floorKey, markings.items || []);
         seedPhotoCacheFromUrlMap(bundle.photos && bundle.photos.urlsById);
         applyFloorDrawingPayload(bldg, floorCode, bundle.drawing || empty.drawing);
         const defectMerge = mergeDefectsMaps(
@@ -59298,6 +59616,12 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         const problems = [];
         const prefix = `${bldg.id}_`;
         if (Array.from(_dirtyFloorKeys).some((k) => String(k).startsWith(prefix))) problems.push('아직 안 올라간 층 변경');
+        // 2026-10-19 진행률 일지: 서버 확인이 안 된 이 기기 변경이 남았으면 비우지 않는다
+        try {
+            const j = typeof syncJournal === 'function' ? syncJournal() : null;
+            const n = j ? j.pendingEntries().filter((e) => e.fk && String(e.fk).startsWith(prefix)).length : 0;
+            if (n) problems.push(`이 기기 변경 ${n}건 서버 확인 안 됨`);
+        } catch (_e) { /* ignore */ }
         for (const fc of buildingFloorCodesForBackup(bldg)) {
             const local = (window.state.defects && window.state.defects[`${bldg.id}_${fc}`]) || [];
             if (!local.length) continue;
@@ -59332,6 +59656,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             const statuses = offlineWorked ? (await prep.listStatuses()).filter(Boolean) : [];
             const hadPending = _dirtyFloorKeys.size > 0 || ((window._defectPhotoSaves && window._defectPhotoSaves.size) || 0) > 0;
             if (!statuses.length && !hadPending) return;
+            if (typeof syncProgressBegin === 'function') syncProgressBegin();
             // ① 올리기
             for (let i = 0; i < 15; i++) {
                 if (navigator.onLine === false) return;
@@ -62254,6 +62579,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
         }
         if (typeof flushOverviewCaptionsFromDom === 'function') flushOverviewCaptionsFromDom();
         _syncInFlight = true;
+        if (typeof syncProgressBegin === 'function') syncProgressBegin();
         ensureSyncMetaState();
         let leaseInfo = null;
         let leaseHeartbeatTimer = null;
@@ -62339,6 +62665,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 } catch (e) {
                     console.warn('[동기화] 층을 서버에서 읽지 못해 이번에는 쓰지 않습니다(다음에 다시):', floorKey, e && e.message);
                     floorsSkipWrite.add(floorKey);
+                    if (typeof syncProgressFail === 'function') syncProgressFail(floorKey, '서버에서 층을 읽지 못함 — 다음 동기화에서 다시');
                     continue;
                 }
                 floorReadRev.set(floorKey, readRes.rev);
@@ -62414,6 +62741,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 );
                 if (!conf.ok) {
                     console.warn('[동기화] 서버 층이 계속 바뀌거나 확인되지 않아 이번에는 쓰지 않습니다(다음에 다시):', floorKey, conf.reason);
+                    if (typeof syncProgressFail === 'function') syncProgressFail(floorKey, '다른 기기가 같은 층을 올리는 중 — 합친 뒤 다시');
                     continue;
                 }
                 const lost = guard.lostServerIds(
@@ -62430,6 +62758,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             // 층 쓰기가 "올릴 것 있음"을 지웠다 — 사진을 못 올린 층은 다시 남겨 다음 동기화가 재시도하게 한다
             if (photoFailedFloors && photoFailedFloors.size) {
                 photoFailedFloors.forEach((k) => markFloorKeyDirty(k));
+                if (typeof syncProgressFail === 'function') photoFailedFloors.forEach((k) => syncProgressFail(k, '사진 업로드 실패 — 다시 시도'));
                 console.warn('[사진] 업로드 실패가 있어 다음 동기화에서 다시 올립니다:', Array.from(photoFailedFloors));
             }
             const dataToSync = {
@@ -62523,6 +62852,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             if (typeof window.purgeExpiredBuildingTrash === 'function') {
                 window.purgeExpiredBuildingTrash().catch(() => {});
             }
+            try { const j = typeof syncJournal === 'function' ? syncJournal() : null; if (j) j.clearFailure('sync'); } catch (_e) { /* ignore */ }
         } catch (e) {
             // 다른 기기가 올리는 중이라 양보한 것은 실패가 아니다. 경고 토스트를 띄우거나
             // 지수 백오프를 키우면 안 된다 — finally가 다음 회차를 예약한다.
@@ -62532,6 +62862,8 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
                 return;   // finally는 그대로 실행된다 — 잠금 해제·다음 회차 예약
             }
             console.warn('Firebase Sync Error:', e);
+            if (typeof syncProgressFail === 'function') syncProgressFail('sync', isFirestorePermissionError(e) ? '서버 접근 권한 없음 — 관리자 확인 필요'
+                : (isFirestoreQuotaError(e) ? '서버 사용 한도 — 잠시 뒤 자동 재시도' : '서버 동기화 실패 — 잠시 뒤 자동 재시도'));
             _syncPending = false;
             if (isFirestoreQuotaError(e)) pauseFirestoreWrites(SYNC_QUOTA_COOLDOWN_MS);
             const now = Date.now();
@@ -62573,6 +62905,7 @@ await persistFloorDrawingAssetsForFloor(bldg, item.floorCode);
             }
             setTimeout(() => { isRemoteSyncing = false; }, 400);
             _syncInFlight = false;
+            if (typeof scheduleSyncProgressRender === 'function') scheduleSyncProgressRender();
             // 온라인 복귀 flush 시도가 끝나면 원격 적용 재개 (실패해도 무한 차단하지 않음.
             // dirty 층은 applyFloorBundleToState 가드가 계속 보호)
             if (_blockRemoteApplyUntilLocalFlush) {

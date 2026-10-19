@@ -17192,3 +17192,94 @@ html.bsa-sketch-open, html.bsa-sketch-open body { overscroll-behavior: none; }
 /* 2026-10-16 손글씨 메모 = 도면 메모 목록 항목 */
 .drawing-memo-sketch-btn.active { background: #2563eb; color: #fff; border-color: #2563eb; }
 .map-memo-chip.map-memo-sketch { font-style: italic; }
+
+/* 2026-10-19 동기화 진행률 — 오프라인 배지·위쪽 온라인 배지를 누르면 열림. 알약은 많이 올리거나 오래 걸릴 때만 */
+.bsp-clickable { cursor: pointer; }
+.offline-badge.bsp-clickable::after { content: '\203A'; font-weight: 800; margin-left: 2px; }
+.bsp-badge-count { font-weight: 800; }
+.sync-progress-pill {
+    display: none; align-items: center; gap: 0.45rem;
+    position: fixed; top: 0.9rem; right: 1rem; z-index: 99998;
+    padding: 0.42rem 0.85rem; border-radius: 999px;
+    border: 1px solid rgba(37, 99, 235, 0.35); background: #ffffff; color: #1e3a8a;
+    font: inherit; font-size: 0.8rem; font-weight: 700; line-height: 1.2;
+    box-shadow: 0 6px 18px rgba(20, 20, 20, 0.18); cursor: pointer;
+}
+.sync-progress-pill.show { display: inline-flex; }
+.sync-progress-pill .bsp-pill-bar { width: 56px; height: 6px; border-radius: 99px; background: #e2e8f0; overflow: hidden; flex: 0 0 auto; }
+.sync-progress-pill .bsp-pill-bar span { display: block; height: 100%; width: 0; background: #2563eb; transition: width 0.3s ease; }
+.sync-progress-pill.done { color: #166534; border-color: rgba(22, 163, 74, 0.45); }
+.sync-progress-pill.done .bsp-pill-bar { display: none; }
+.sync-progress-pill.fail { color: #9a3412; border-color: rgba(234, 88, 12, 0.5); }
+.sync-progress-pill.fail .bsp-pill-bar span { background: #ea580c; }
+@media (max-width: 480px) {
+    .sync-progress-pill { top: auto; bottom: 0.8rem; left: 0.7rem; right: 0.7rem; justify-content: center; padding: 0.6rem 0.9rem; font-size: 0.85rem; }
+}
+.bsp-overlay { position: fixed; inset: 0; z-index: 100000; background: rgba(15, 23, 42, 0.5); display: flex; align-items: center; justify-content: center; padding: 16px; }
+.bsp-overlay[hidden] { display: none !important; }
+.bsp-card {
+    width: min(460px, 100%); max-height: min(86vh, 720px); display: flex; flex-direction: column;
+    background: #ffffff; color: #0f172a; border-radius: 16px; box-shadow: 0 20px 50px rgba(0, 0, 0, 0.3); overflow: hidden;
+}
+.bsp-head { display: flex; align-items: center; gap: 8px; padding: 14px 16px 10px; border-bottom: 1px solid #e2e8f0; font-size: 1rem; }
+.bsp-head strong { flex: 1 1 auto; display: flex; align-items: center; gap: 8px; }
+.bsp-head strong i { color: #2563eb; }
+.bsp-x { width: 36px; height: 36px; border-radius: 10px; border: 1px solid #e2e8f0; background: #fff; color: #334155; font-size: 15px; cursor: pointer; }
+.bsp-body { padding: 12px 16px; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+.bsp-state { display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 0.92rem; padding: 8px 10px; border-radius: 10px; margin-bottom: 10px; }
+.bsp-state.bsp-ok { background: #f0fdf4; color: #166534; }
+.bsp-state.bsp-off { background: #fff7ed; color: #9a3412; }
+.bsp-state.bsp-run { background: #eff6ff; color: #1d4ed8; }
+.bsp-state.bsp-wait { background: #f8fafc; color: #475569; }
+.bsp-total { margin-bottom: 10px; }
+.bsp-total-num { display: flex; align-items: baseline; gap: 6px; font-size: 0.9rem; color: #334155; margin-bottom: 6px; }
+.bsp-total-num b { font-size: 1.35rem; color: #0f172a; }
+.bsp-left { margin-left: auto; font-weight: 700; color: #b45309; font-size: 0.82rem; }
+.bsp-bar { height: 10px; border-radius: 99px; background: #e2e8f0; overflow: hidden; }
+.bsp-bar span { display: block; height: 100%; background: linear-gradient(90deg, #2563eb, #22c55e); transition: width 0.3s ease; }
+.bsp-rows { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.bsp-row { display: grid; grid-template-columns: 22px 1fr auto; grid-template-rows: auto auto; align-items: center; column-gap: 8px; row-gap: 4px; padding: 8px 10px; border: 1px solid #e2e8f0; border-radius: 10px; }
+.bsp-row .bsp-ic { color: #2563eb; text-align: center; }
+.bsp-row .bsp-name { font-weight: 600; font-size: 0.9rem; }
+.bsp-row .bsp-cnt { font-size: 0.85rem; color: #334155; font-variant-numeric: tabular-nums; display: flex; align-items: center; gap: 6px; }
+.bsp-row .bsp-cnt .bsp-left { margin-left: 0; }
+.bsp-row .bsp-mini { grid-column: 2 / 4; height: 5px; border-radius: 99px; background: #eef2f7; overflow: hidden; }
+.bsp-row .bsp-mini span { display: block; height: 100%; background: #3b82f6; }
+.bsp-row.bsp-row-done .bsp-ic, .bsp-row.bsp-row-done .bsp-cnt { color: #16a34a; }
+.bsp-row.bsp-row-done .bsp-mini span { background: #22c55e; }
+.bsp-empty { color: #64748b; font-size: 0.88rem; padding: 6px 2px; }
+.bsp-fail { margin-top: 10px; padding: 8px 10px; border-radius: 10px; background: #fff7ed; border: 1px solid #fed7aa; color: #9a3412; font-size: 0.84rem; }
+.bsp-fail-title { font-weight: 700; margin-bottom: 4px; }
+.bsp-fail ul { margin: 0; padding-left: 18px; }
+.bsp-note { margin: 10px 0 0; font-size: 0.78rem; color: #64748b; line-height: 1.45; }
+.bsp-foot { display: flex; gap: 8px; justify-content: flex-end; padding: 10px 16px 14px; border-top: 1px solid #e2e8f0; }
+.bsp-foot .btn { min-height: 40px; }
+.bsp-foot .btn[disabled] { opacity: 0.5; cursor: default; }
+@media (max-width: 600px) {
+    .bsp-overlay { align-items: flex-end; padding: 0; }
+    .bsp-card { width: 100%; border-radius: 18px 18px 0 0; max-height: 84vh; padding-bottom: env(safe-area-inset-bottom, 0); }
+    .bsp-foot .btn { flex: 1 1 0; justify-content: center; }
+}
+
+/* 2026-10-19 손글씨 메모 — 이 층 모든 메모를 탭으로(가로 스크롤), 열면 최근 메모부터 */
+.sketch-memo-overlay .sk-count { font-size: 12px; color: #64748b; white-space: nowrap; }
+.sketch-memo-overlay .sk-btn.sk-new { font-weight: 700; color: #1d4ed8; border-color: #93c5fd; background: #eff6ff; }
+.sketch-memo-overlay .sk-tabs {
+    display: flex; flex-wrap: nowrap; gap: 6px; padding: 6px 8px; background: #fff; border-bottom: 1px solid #e2e8f0;
+    overflow-x: auto; overflow-y: hidden; -webkit-overflow-scrolling: touch; scrollbar-width: thin; min-height: 52px;
+}
+.sketch-memo-overlay .sk-tab {
+    flex: 0 0 auto; display: inline-flex; flex-direction: column; align-items: flex-start; justify-content: center;
+    min-height: 40px; max-width: 220px; padding: 4px 12px; border-radius: 10px; border: 1px solid #cbd5e1;
+    background: #f8fafc; color: #0f172a; font: inherit; font-size: 13px; font-weight: 600; line-height: 1.25; cursor: pointer;
+}
+.sketch-memo-overlay .sk-tab .sk-tab-name,
+.sketch-memo-overlay .sk-tab .sk-tab-sub { max-width: 196px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sketch-memo-overlay .sk-tab .sk-tab-sub { font-size: 11px; font-weight: 500; color: #64748b; }
+.sketch-memo-overlay .sk-tab.mine { border-color: #93c5fd; }
+.sketch-memo-overlay .sk-tab.active { background: #1d4ed8; border-color: #1d4ed8; color: #fff; }
+.sketch-memo-overlay .sk-tab.active .sk-tab-sub { color: #dbeafe; }
+.sketch-memo-overlay .sk-tab-new { border-style: dashed; }
+@media (max-width: 600px) {
+    .sketch-memo-overlay .sk-tab { min-height: 44px; }
+}
